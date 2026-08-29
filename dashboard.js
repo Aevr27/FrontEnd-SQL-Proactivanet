@@ -462,8 +462,15 @@ const TableroSla = (function () {
   }
 
   // ---------------------------------------------------------- filtros al servidor
-  function hoyISO() { return new Date().toISOString().slice(0, 10); }
-  function formatoFecha(d) { return d.toISOString().slice(0, 10); }
+function formatoFecha(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+function hoyISO() {
+  return formatoFecha(new Date());
+}
 
   function aplicarRangoRapido(tipo) {
     const hoy = new Date();
@@ -486,7 +493,10 @@ const TableroSla = (function () {
     if (fi) p.set('fecha_inicio', fi);
     if (ff) p.set('fecha_fin', ff);
     if (grupos.length) p.set('grupos', grupos.join(','));
-    if (tecnicos.length) p.set('tecnicos', tecnicos.join(','));
+    // Los nombres de tecnico vienen como "Apellidos, Nombre": la coma es parte
+    // del nombre, asi que la lista se separa con | y el SP la parte con | (ver
+    // dbo.fn_Dash_SplitListPipe). Grupos sigue con coma: ninguno la contiene.
+    if (tecnicos.length) p.set('tecnicos', tecnicos.join('|'));
     return p;
   }
 

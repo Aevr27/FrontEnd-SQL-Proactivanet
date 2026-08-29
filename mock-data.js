@@ -256,9 +256,11 @@ const MOCK_SLA_CACHE = new Map();
 // sobre el detalle mock, para que el tablero reaccione al filtro de Grupos.
 function mockSla(ruta) {
   const qs = new URLSearchParams(String(ruta).split('?')[1] || '');
-  const lista = k => (qs.get(k) || '').split(',').map(s => s.trim()).filter(Boolean);
-  const grupos = lista('grupos');
-  const tecnicos = lista('tecnicos');
+  const lista = (k, sep) => (qs.get(k) || '').split(sep).map(s => s.trim()).filter(Boolean);
+  const grupos = lista('grupos', ',');
+  // Mismo separador que usa el SP: los nombres de tecnico llevan coma dentro
+  // ("Apellidos, Nombre"), asi que la lista se parte con | (fn_Dash_SplitListPipe).
+  const tecnicos = lista('tecnicos', '|');
   const fi = qs.get('fecha_inicio') || '';
   const ff = qs.get('fecha_fin') || '';
   const clave = JSON.stringify([fi, ff, grupos, tecnicos]);
