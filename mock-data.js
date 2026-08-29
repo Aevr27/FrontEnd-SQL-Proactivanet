@@ -34,10 +34,15 @@ function mockFechaISO(d) {
 function crearMockSla() {
   const rnd = mockRand(240824);
   const grupos = ['Soporte Aplicaciones','Infraestructura','Operaciones TI','Retail','Mesa de Ayuda'];
+  // Mismo formato que Tickets.TecnicoSegundaLinea en la base real:
+  // "Apellidos, Nombre", con coma dentro del nombre. Es justo lo que rompia el
+  // filtro cuando la lista viajaba separada por comas.
   const tecnicos = [
-    'Ana Lopez','Bruno Garcia','Carla Martinez','Diego Hernandez','Elena Torres',
-    'Fernando Ruiz','Gabriela Flores','Hugo Morales','Isabel Navarro','Jorge Castillo',
-    'Karen Mendoza','Luis Ramirez','Monica Vargas','Nicolas Reyes','Paola Cruz'
+    'Lopez Vera, Ana','Garcia Soto, Bruno','Martinez Diaz, Carla',
+    'Hernandez Rojas, Diego','Torres Pena, Elena','Ruiz Molina, Fernando',
+    'Flores Aguirre, Gabriela','Morales Castro, Hugo','Navarro Leon, Isabel',
+    'Castillo Ortiz, Jorge','Mendoza Silva, Karen','Ramirez Pardo, Luis',
+    'Vargas Nunez, Monica','Reyes Campos, Nicolas','Cruz Herrera, Paola'
   ];
   // Cada persona pertenece a un solo grupo (como en la base real), asi el filtro
   // de Grupos parte el ranking de forma verificable.
@@ -234,7 +239,7 @@ function crearMockBacklog() {
       DiasBacklog:dias, Lider:lider, Grupo:grupo,
       Prioridad:prioridades[i%prioridades.length],
       Subestado:['Pendiente','En análisis','Esperando usuario'][i%3],
-      TecnicoSegundaLinea:['Ana Lopez','Bruno Garcia','Carla Martinez'][i%3]
+      TecnicoSegundaLinea:['Lopez Vera, Ana','Garcia Soto, Bruno','Martinez Diaz, Carla'][i%3]
     });
   }
 
