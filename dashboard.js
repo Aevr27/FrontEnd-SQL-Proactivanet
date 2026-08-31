@@ -110,7 +110,7 @@ function htmlTarjetasKpi(tarjetas) {
 
 /* -----------------------------------------------------------------------
    Ruteo de los handlers .ashx.
-   Los .ashx viven en la MISMA carpeta que este HTML (catalogos.ashx,
+   Los .ashx viven en handlers/, junto a este HTML (catalogos.ashx,
    kpis.ashx, tendencia.ashx, productividad.ashx, distribucion.ashx,
    detalle.ashx, backlog_catalogos.ashx, backlog_resumen.ashx,
    backlog_historico.ashx). Una ruta relativa suelta se resuelve contra la
@@ -120,7 +120,7 @@ function htmlTarjetasKpi(tarjetas) {
    llamadas apuntando siempre a los archivos de al lado.
    BASE_ASHX permite mover los handlers a otra carpeta sin tocar el resto.
    ----------------------------------------------------------------------- */
-const BASE_ASHX = '';
+const BASE_ASHX = 'handlers/';
 
 function urlHandler(ruta) {
   if (/^(https?:)?\/\//i.test(ruta) || ruta.startsWith('/')) return ruta;

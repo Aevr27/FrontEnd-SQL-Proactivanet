@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<!--
+  qa_test.html - Prototipo standalone del tablero de QA.
+
+  Consume unicamente qa.ashx (nunca qa_data.json ni los XLSX). Se sirve por
+  HTTP desde el mismo sitio que el handler, asi que las rutas son relativas.
+
+  Carga inicial: una sola peticion, qa.ashx?action=summary (~10 KB).
+  El detalle y los catalogos solo se piden cuando el usuario los pide.
+
+  Chart.js 4.4.4 local, en assets/vendor/ (no depende del CDN).
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QA - Categorizacion de tickets</title>
+  <script src="assets/vendor/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="qa_test.css">
+</head>
+<body>
+
+<header class="encabezado">
+  <div class="encabezado-txt">
+    <h1>QA &middot; Categorizacion de tickets</h1>
+    <p class="sub" id="sub-fuente">Cargando origen de datos&hellip;</p>
+  </div>
+  <div class="encabezado-acciones">
+    <span class="chip" id="chip-fecha">Datos QA: &mdash;</span>
+    <button type="button" class="btn" id="btn-recargar">Recargar</button>
+  </div>
+</header>
+
+<main class="contenido">
+
+  <!-- Estados globales de la carga del resumen -->
+  <div id="cargando" class="estado">
+    <span class="spinner" aria-hidden="true"></span>
+    <span>Cargando datos de QA&hellip;</span>
+  </div>
+
+  <div id="error-global" class="estado estado-error" hidden>
+    <strong>No se pudieron cargar los datos de QA.</strong>
+    <span id="error-global-msg"></span>
+    <button type="button" class="btn btn-sec" id="btn-reintentar">Reintentar</button>
+  </div>
+
+  <div id="tablero" hidden>
+
+    <section class="kpis" id="kpis"></section>
+
+    <section class="grid2">
+      <div class="card">
+        <h3>
+          Tickets mal categorizados por grupo
+          <span class="hint" id="hint-grupo"></span>
+        </h3>
+        <p class="nota-card">Solo tickets con <code>Validacion = Incorrecto</code>. Clic en una barra para ver su detalle.</p>
+        <div class="lienzo" id="lienzo-grupo"><canvas id="chart-grupo"></canvas></div>
+      </div>
+
+      <div class="card">
+        <h3>
+          Tickets mal categorizados por tecnico resolutor
+          <span class="hint" id="hint-tecnico"></span>
+        </h3>
+        <p class="nota-card">
+          Solo tickets con <code>Validacion = Incorrecto</code>. Clic en una barra para ver su detalle.
+          <button type="button" class="enlace" id="btn-tecnicos-todos"></button>
+        </p>
+        <div class="lienzo" id="lienzo-tecnico"><canvas id="chart-tecnico"></canvas></div>
+      </div>
+    </section>
+
+    <section class="grid-sec">
+      <div class="card">
+        <h3>Distribucion de validacion<span class="hint" id="hint-validacion"></span></h3>
+        <div class="lienzo lienzo-dona"><canvas id="chart-validacion"></canvas></div>
+        <div class="leyenda" id="leyenda-validacion"></div>
+      </div>
+
+      <div class="card">
+        <h3>Recategorizacion<span class="hint" id="hint-recat"></span></h3>
+        <p class="nota-card">Pares <code>Grupo</code> &rarr; <code>Grupo Correcto</code> de los tickets incorrectos.</p>
+        <div class="tabla-scroll tabla-recat">
+          <table class="tabla">
+            <thead>
+              <tr>
+                <th>Grupo actual</th>
+                <th>Grupo correcto</th>
+                <th class="num">Tickets</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-recat"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>QARE<span class="hint">datos en crudo</span></h3>
+      <p class="nota-card" id="nota-qare"></p>
+      <div class="tabla-scroll">
+        <table class="tabla">
+          <thead>
+            <tr>
+              <th>Campo</th>
+              <th class="num">Respondidos</th>
+              <th class="num">Sin respuesta</th>
+              <th class="num">Valores distintos</th>
+              <th>Distribucion</th>
+            </tr>
+          </thead>
+          <tbody id="tbody-qare"></tbody>
+        </table>
+      </div>
+      <p class="nota-pie" id="pie-qare"></p>
+    </section>
+
+    <section class="card">
+      <h3>Detalle de tickets<span class="hint" id="hint-detalle">bajo demanda</span></h3>
+      <p class="nota-card">
+        El detalle no se carga con la pagina: se pide al servidor ya filtrado y paginado.
+      </p>
+
+      <div class="barra-detalle">
+        <button type="button" class="btn" id="btn-detalle">Ver detalle de incorrectos</button>
+
+        <label class="campo">
+          <span>Filas por pagina</span>
+          <select id="sel-tam">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="250">250</option>
+          </select>
+        </label>
+
+        <div class="filtros" id="filtros-activos"></div>
+      </div>
+
+      <div id="detalle-cargando" class="estado estado-mini" hidden>
+        <span class="spinner" aria-hidden="true"></span><span>Consultando detalle&hellip;</span>
+      </div>
+
+      <div id="detalle-error" class="estado estado-error estado-mini" hidden>
+        <strong>No se pudo cargar el detalle.</strong> <span id="detalle-error-msg"></span>
+      </div>
+
+      <div id="detalle-panel" hidden>
+        <div class="paginador">
+          <button type="button" class="btn btn-sec" id="btn-prev">&larr; Anterior</button>
+          <span id="paginacion-txt" class="paginacion-txt"></span>
+          <button type="button" class="btn btn-sec" id="btn-next">Siguiente &rarr;</button>
+        </div>
+
+        <div class="tabla-scroll tabla-detalle">
+          <table class="tabla">
+            <thead>
+              <tr>
+                <th>Codigo</th>
+                <th>Fecha de registro</th>
+                <th>Titulo</th>
+                <th>Grupo</th>
+                <th>Tecnico de 2&ordf; linea</th>
+                <th>Categoria</th>
+                <th>Grupo Correcto</th>
+                <th>Validacion</th>
+              </tr>
+            </thead>
+            <tbody id="tbody-detalle"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer class="pie" id="pie-fuente"></footer>
+  </div>
+</main>
+
+<script src="qa_test.js"></script>
+</body>
+</html>

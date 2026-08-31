@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Plantilla de configuracion del sitio. Copiala como Web.config en la raiz
+  y sustituye SOLO los dos placeholders de credenciales:
+
+      YOUR_SQL_USER       usuario de SQL Server
+      YOUR_SQL_PASSWORD   su contrasena
+
+  Web.config NO se sube al repositorio (ya esta en .gitignore). Este
+  Web.config.ejemplo si, y por eso nunca debe llevar credenciales reales.
+
+  Alternativa sin contrasena: reemplaza
+      User ID=...;Password=...
+  por
+      Integrated Security=True
+  y deja que el App Pool corra con una cuenta de dominio que tenga
+  GRANT EXECUTE sobre los procedimientos.
+
+  Para cifrar la seccion en un servidor real:
+      %windir%\Microsoft.NET\Framework64\v4.0.30319\aspnet_regiis.exe -pef "connectionStrings" "C:\ruta\del\sitio"
+-->
+<configuration>
+
+  <!-- Unica fuente de la conexion. La leen App_Code/DashboardDb.cs y
+       App_Code/QaDb.cs con ConfigurationManager. El HTML/JS nunca la ve:
+       el navegador solo habla con los .ashx de handlers/. -->
+  <connectionStrings>
+    <add name="TicketsProactivanet"
+         connectionString="Server=AZVMBDCENTRALQA;Database=Tickets_Proactivanet;User ID=YOUR_SQL_USER;Password=YOUR_SQL_PASSWORD;Encrypt=True;TrustServerCertificate=True;Connection Timeout=60"
+         providerName="System.Data.SqlClient" />
+  </connectionStrings>
+
+  <system.web>
+    <!-- App_Code/ se compila sola en el primer request: sin Visual Studio
+         y sin paso de build. -->
+    <compilation debug="true" targetFramework="4.8" />
+    <httpRuntime targetFramework="4.8" />
+    <!-- Los handlers ya devuelven sus errores como JSON; esto solo evita
+         que un fallo fuera de ellos exponga el stack trace en remoto. -->
+    <customErrors mode="RemoteOnly" />
+  </system.web>
+
+  <system.webServer>
+    <defaultDocument>
+      <files>
+        <add value="dashboard.html" />
+      </files>
+    </defaultDocument>
+
+    <security>
+      <requestFiltering>
+        <!-- El SQL fuente y los snapshots del modo offline no se sirven por
+             HTTP: solo se llega a los datos a traves de los handlers. -->
+        <fileExtensions>
+          <add fileExtension=".json" allowed="false" />
+          <add fileExtension=".sql" allowed="false" />
+        </fileExtensions>
+        <hiddenSegments>
+          <add segment="sql" />
+          <add segment="tools" />
+        </hiddenSegments>
+      </requestFiltering>
+    </security>
+  </system.webServer>
+
+</configuration>
