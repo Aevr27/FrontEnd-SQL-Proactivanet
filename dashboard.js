@@ -429,10 +429,18 @@ const TableroSla = (function () {
   const ETIQUETA_DIM = { estado: 'Estado', prioridad: 'Prioridad',
                          aging: 'Antiguedad', sla: 'SLA' };
 
+  // Etiqueta de respaldo cuando el campo viene vacio. Son exactamente las
+  // mismas que emite distribucion.ashx (ISNULL(NULLIF(...))), asi que una
+  // rebanada agregada por el servidor y la misma rebanada recalculada sobre
+  // `detalle` se llaman igual y el cross-filter por clic casa en los dos casos.
+  const SIN_VALOR = { estado: 'Sin estado', prioridad: 'Sin prioridad', aging: 'Sin fecha' };
+
+  const txt = v => String(v ?? '').trim();
+
   const VALOR_DIM = {
-    estado:    r => r.Estado,
-    prioridad: r => r.Prioridad,
-    aging:     r => r.AgingBucket,
+    estado:    r => txt(r.Estado) || SIN_VALOR.estado,
+    prioridad: r => txt(r.Prioridad) || SIN_VALOR.prioridad,
+    aging:     r => txt(r.AgingBucket) || SIN_VALOR.aging,
     sla:       r => (r.SlaVencido === true || r.SlaVencido === 1) ? 'Vencido'
                   : (r.DentroSla === true || r.DentroSla === 1) ? 'Dentro' : 'N/D',
   };
@@ -453,6 +461,42 @@ const TableroSla = (function () {
       }
       return true;
     });
+  }
+
+  // distribucion.ashx agrega sobre TODOS los tickets del rango; `detalle`
+  // viene topeado en TOPE_DETALLE. Mientras la unica dimension activa sea la
+  // propia grafica (o no haya ninguna), su poblacion es el rango completo y
+  // debe salir del servidor. Solo cuando otra dimension filtra hay que
+  // recalcular sobre las filas cargadas.
+  function usarAgregadoServidor(dim) {
+    return dimensionesActivas(filtro).every(([d]) => d === dim);
+  }
+
+  function entradasServidor(dim, ordenCanonico) {
+    const crudo = (datos && datos.distribucion && datos.distribucion[dim]) || [];
+    const m = new Map();
+    for (const x of crudo) {
+      const k = txt(x.Valor) || SIN_VALOR[dim];
+      const n = Number(x.Tickets) || 0;
+      if (n <= 0) continue;
+      m.set(k, (m.get(k) ?? 0) + n);
+    }
+    const ent = [...m.entries()];
+    if (ordenCanonico) {
+      const pos = v => { const i = ordenCanonico.indexOf(v); return i < 0 ? 999 : i; };
+      ent.sort((a, b) => pos(a[0]) - pos(b[0]));
+    } else {
+      ent.sort((a, b) => b[1] - a[1]);
+    }
+    return ent;
+  }
+
+  // Rebanadas de una grafica de dimension: exactas si se pueden pedir al
+  // servidor, recalculadas sobre lo cargado si no.
+  function entradasDim(dim, ordenCanonico) {
+    return usarAgregadoServidor(dim)
+      ? entradasServidor(dim, ordenCanonico)
+      : contarPor(filas(dim), VALOR_DIM[dim], ordenCanonico);
   }
 
   function alternarFiltro(dim, valor) {
@@ -693,7 +737,7 @@ function hoyISO() {
   // seleccionar un estado sigan viendose los demas.
   function renderEstado() {
     destruir('estado');
-    const ent = contarPor(filas('estado'), r => r.Estado || '(sin estado)');
+    const ent = entradasDim('estado', null);
     const etiquetas = ent.map(e => e[0]);
     const valores = ent.map(e => e[1]);
     const colores = etiquetas.map((_, i) => PALETA_CAT[i % PALETA_CAT.length]);
@@ -724,9 +768,9 @@ function hoyISO() {
     });
   }
 
-  function renderBarraDim(idCanvas, idGrafico, dim, clave, orden, colorFn, mensajeVacio) {
+  function renderBarraDim(idCanvas, idGrafico, dim, orden, colorFn, mensajeVacio) {
     destruir(idGrafico);
-    const ent = contarPor(filas(dim), clave, orden);
+    const ent = entradasDim(dim, orden);
     const etiquetas = ent.map(e => e[0]);
     const valores = ent.map(e => e[1]);
     const colores = etiquetas.map((l, i) => colorFn(l, i));
@@ -815,19 +859,20 @@ function hoyISO() {
 
   function resetFiltros() { limpiarFiltro(filtro, renderTodo); }
 
-  // Aviso de tope: el SP corta el detalle, asi que las graficas de abajo
-  // cubren solo lo cargado. El total exacto del rango sale de
-  // distribucion.ashx, que si agrega sobre todos los tickets.
+  // Aviso de tope: el SP corta el detalle. Estado, prioridad y antiguedad se
+  // pintan con los agregados de distribucion.ashx mientras no haya otra
+  // dimension filtrando, asi que el tope solo se nota al cruzar filtros.
   function renderAvisoTope() {
     const cont = document.getElementById('aviso-tope');
     const cargadas = (datos.detalle || []).length;
     const totalReal = (datos.distribucion?.estado ?? []).reduce((a, x) => a + (x.Tickets ?? 0), 0);
     if (!totalReal || cargadas >= totalReal) { cont.innerHTML = ''; return; }
     cont.innerHTML = `<div class="aviso">El rango tiene <b>${FMT(totalReal)}</b> tickets y el detalle
-      se corta en <b>${FMT(cargadas)}</b> (tope del procedimiento). Las tarjetas de KPI sin filtro son
-      exactas sobre todo el rango; las graficas de estado/prioridad/antiguedad trabajan sobre los
-      ${FMT(cargadas)} mas recientes. El ranking de tickets cerrados viene agregado del servidor, asi
-      que no lo afecta este tope. Acorta el rango de fechas para verlo completo.</div>`;
+      se corta en <b>${FMT(cargadas)}</b> (tope del procedimiento). KPIs, tendencia, productividad,
+      estado, prioridad y antiguedad vienen agregados del servidor y son exactos sobre todo el rango;
+      la tabla de detalle muestra los ${FMT(cargadas)} mas recientes. Al cruzar filtros por clic, las
+      graficas se recalculan sobre esos ${FMT(cargadas)} tickets. Acorta el rango de fechas para
+      cruzar filtros sobre el total.</div>`;
   }
 
   function renderTodo() {
@@ -836,9 +881,9 @@ function hoyISO() {
     renderTendencia();
     renderProductividad();
     renderEstado();
-    renderBarraDim('chart-prioridad', 'prioridad', 'prioridad', r => r.Prioridad || '(sin prioridad)',
+    renderBarraDim('chart-prioridad', 'prioridad', 'prioridad',
       null, l => COLOR_PRIORIDAD[l] ?? GRIS, 'Ningun ticket pasa los filtros activos.');
-    renderBarraDim('chart-aging', 'aging', 'aging', r => r.AgingBucket || 'Sin fecha',
+    renderBarraDim('chart-aging', 'aging', 'aging',
       ORDEN_AGING, () => MORADO, 'Ningun ticket pasa los filtros activos.');
     renderTopCerrados();
     renderChips();
