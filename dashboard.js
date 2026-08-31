@@ -859,24 +859,7 @@ function hoyISO() {
 
   function resetFiltros() { limpiarFiltro(filtro, renderTodo); }
 
-  // Aviso de tope: el SP corta el detalle. Estado, prioridad y antiguedad se
-  // pintan con los agregados de distribucion.ashx mientras no haya otra
-  // dimension filtrando, asi que el tope solo se nota al cruzar filtros.
-  function renderAvisoTope() {
-    const cont = document.getElementById('aviso-tope');
-    const cargadas = (datos.detalle || []).length;
-    const totalReal = (datos.distribucion?.estado ?? []).reduce((a, x) => a + (x.Tickets ?? 0), 0);
-    if (!totalReal || cargadas >= totalReal) { cont.innerHTML = ''; return; }
-    cont.innerHTML = `<div class="aviso">El rango tiene <b>${FMT(totalReal)}</b> tickets y el detalle
-      se corta en <b>${FMT(cargadas)}</b> (tope del procedimiento). KPIs, tendencia, productividad,
-      estado, prioridad y antiguedad vienen agregados del servidor y son exactos sobre todo el rango;
-      la tabla de detalle muestra los ${FMT(cargadas)} mas recientes. Al cruzar filtros por clic, las
-      graficas se recalculan sobre esos ${FMT(cargadas)} tickets. Acorta el rango de fechas para
-      cruzar filtros sobre el total.</div>`;
-  }
-
   function renderTodo() {
-    renderAvisoTope();
     renderKpis();
     renderTendencia();
     renderProductividad();
