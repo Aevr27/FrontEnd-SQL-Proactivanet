@@ -29,7 +29,17 @@ if not exist "%~dp0Web.config" (
   exit /b 1
 )
 
-echo Sirviendo "%~dp0" en http://localhost:%PUERTO%/
-"%IISEXPRESS%" /path:"%~dp0." /port:%PUERTO% /clr:v4.0
+REM  %~dp0 termina en "\". Pasarlo tal cual a /path: haria que esa barra
+REM  final escapase la comilla de cierre. Y "%~dp0." hacia que IIS buscase
+REM  el web.config bajo una ruta extendida con un componente "." intermedio.
+REM  El prefijo de ruta extendida desactiva la normalizacion, asi que ese
+REM  "." no se resuelve, el archivo no existe, y de ahi salia el
+REM  HTTP 500.19 con HRESULT 0x80070003. Se quita la barra final y se pasa
+REM  la raiz limpia.
+set "RAIZ=%~dp0"
+if "%RAIZ:~-1%"=="\" set "RAIZ=%RAIZ:~0,-1%"
+
+echo Sirviendo "%RAIZ%" en http://localhost:%PUERTO%/
+"%IISEXPRESS%" /path:"%RAIZ%" /port:%PUERTO% /clr:v4.0
 
 endlocal
