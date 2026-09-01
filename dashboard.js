@@ -569,6 +569,30 @@ function hoyISO() {
     return p;
   }
 
+  // Ventana fija del ranking de personas: los ultimos 7 dias COMPLETOS, sin
+  // contar hoy. Hoy va a medias (el dia sigue corriendo), asi que incluirlo
+  // hunde el conteo de cerrados y el orden del ranking cambia segun la hora a
+  // la que se abra el tablero.
+  const DIAS_RANKING = 7;
+
+  function rangoRanking() {
+    const fin = new Date();
+    fin.setDate(fin.getDate() - 1);          // ayer: ultimo dia completo
+    const inicio = new Date(fin);
+    inicio.setDate(inicio.getDate() - (DIAS_RANKING - 1));
+    return { inicio: formatoFecha(inicio), fin: formatoFecha(fin) };
+  }
+
+  // El ranking NO sigue el rango de fechas del tablero: usa su propia ventana
+  // (rangoRanking) y solo hereda el filtro de Grupos.
+  function paramsRankingCerrados() {
+    const p = paramsSoloGrupos();
+    const r = rangoRanking();
+    p.set('fecha_inicio', r.inicio);
+    p.set('fecha_fin', r.fin);
+    return p;
+  }
+
   async function cargarCatalogos() {
     const cat = await obtenerJSON('catalogos.ashx');
     const opciones = v => v.map(x => `<option value="${escapeAttr(x)}">${escapeHtml(x)}</option>`).join('');
@@ -815,13 +839,29 @@ function hoyISO() {
   // Tecnicos ni los filtros por clic del tablero lo mueven.
   const TOPE_CERRADOS = 10;
 
+  // 'YYYY-MM-DD' -> 'DD/MM/YYYY' (solo para mostrar; no se reinterpreta como
+  // fecha para no arrastrar la zona horaria del navegador).
+  function fechaLarga(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || '');
+  }
+
+  // Periodo activo del ranking, visible junto a la tabla: deja claro que esta
+  // tabla no responde al rango de fechas de los filtros de arriba.
+  function periodoRanking() {
+    const r = rangoRanking();
+    return `Periodo: últimos ${DIAS_RANKING} días completos`
+      + ` · ${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}`;
+  }
+
   function descripcionTopCerrados(totalCerrados, personas, mostradas) {
     const g = seleccionados('f-grupos');
     const txt = g.length ? `Grupos: ${escapeHtml(g.join(' · '))}` : 'todos los grupos';
-    if (!personas) return `0 tickets cerrados <span class="suave">· ${txt}</span>`;
+    const per = `<span class="suave">${escapeHtml(periodoRanking())}</span><br>`;
+    if (!personas) return `${per}0 tickets cerrados <span class="suave">· ${txt}</span>`;
     const corte = mostradas < personas
       ? ` · top ${mostradas} de ${FMT(personas)} personas` : '';
-    return `${FMT(totalCerrados)} tickets cerrados <span class="suave">· ${txt}${corte}</span>`;
+    return `${per}${FMT(totalCerrados)} tickets cerrados <span class="suave">· ${txt}${corte}</span>`;
   }
 
   function renderTopCerrados() {
@@ -838,7 +878,7 @@ function hoyISO() {
       .sort((a, b) => b.cerrados - a.cerrados);
 
     if (!ranking.length) {
-      cont.innerHTML = '<div class="vacio">Sin tickets cerrados para este rango y grupos.</div>';
+      cont.innerHTML = '<div class="vacio">Sin tickets cerrados en los ultimos 7 dias completos para estos grupos.</div>';
       cap.innerHTML = descripcionTopCerrados(0, 0, 0);
       return;
     }
@@ -893,7 +933,7 @@ function hoyISO() {
     estadoCargando('estado-carga');
     try {
       const qs = paramsFiltros().toString();
-      const qsGrupos = paramsSoloGrupos().toString();
+      const qsGrupos = paramsRankingCerrados().toString();
       const [kpis, tendencia, productividad, distribucion, detalle, topCerrados] = await Promise.all([
         obtenerJSON(`kpis.ashx?${qs}`),
         obtenerJSON(`tendencia.ashx?${qs}`),

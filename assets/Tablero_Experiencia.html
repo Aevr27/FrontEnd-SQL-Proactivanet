@@ -45,6 +45,25 @@ background:#1e293b;color:#fff;font-size:13px;min-width:220px}
 .selrow button{padding:8px 14px;border-radius:8px;border:none;background:#334155;color:#fff;
 cursor:pointer;font-size:12px;font-weight:600}
 .selrow button:hover{background:#475569}
+/* Selector multiple de SLOT (solo visible con Ver por = SLOT). */
+.slotbox{display:flex;gap:6px;flex-wrap:wrap;max-width:520px}
+.slotopt{position:relative;display:flex;align-items:center;gap:6px;cursor:pointer;
+  padding:6px 10px;border-radius:8px;border:1px solid #334155;background:#1e293b;
+  color:#e2e8f0;font-size:11px;font-weight:600;white-space:nowrap;user-select:none}
+.slotopt:hover{border-color:#64748b}
+.slotopt.sel{background:#2563eb;border-color:#2563eb;color:#fff}
+.slotopt input{margin:0;cursor:pointer}
+/* Rango de fechas calculado: oculto hasta el hover, la etiqueta corta siempre visible. */
+.slottip{display:none;position:absolute;left:0;bottom:calc(100% + 6px);z-index:20;
+  padding:5px 8px;border-radius:6px;background:#0f172a;border:1px solid #475569;
+  color:#e2e8f0;font-size:10px;font-weight:500;white-space:nowrap;
+  box-shadow:0 4px 12px rgba(0,0,0,.45)}
+.slotopt:hover .slottip{display:block}
+.slotfoot{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}
+.slotsum{font-size:11px;font-weight:700;color:#93c5fd}
+.selrow button.slotmini{padding:3px 8px;font-size:10px;background:#1e293b;
+  border:1px solid #334155;font-weight:600}
+.selrow button.slotmini:hover{background:#334155}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:14px;margin-bottom:16px}
 .kpi{background:var(--card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07);
 border-left:5px solid var(--accent)}
@@ -141,6 +160,13 @@ footer{text-align:center;color:var(--muted);font-size:11px;margin-top:20px;paddi
         <select id="selSO"><option value="">— Todos —</option></select></div>
       <div class="grp"><label>Ver por</label>
         <select id="selModo"><option value="slot">SLOT (30 días)</option><option value="mes">Mes calendario</option></select></div>
+      <div class="grp" id="grpSlots"><label>SLOTs a graficar</label>
+        <div class="slotbox" id="slotBox"></div>
+        <div class="slotfoot">
+          <span class="slotsum" id="slotSum"></span>
+          <button type="button" class="slotmini" id="btnSlotsTodos">Seleccionar todos</button>
+          <button type="button" class="slotmini" id="btnSlotsLimpiar">Limpiar</button>
+        </div></div>
       <button id="btnReset">Ver resumen general</button>
       <button id="btnDescargaTickets" style="display:none;background:#059669">⬇ Descargar Tickets</button>
       <button id="btnAyuda" style="background:#0891b2">❓ Ayuda / Glosario</button>
@@ -561,6 +587,74 @@ const filtroGraf = {
 };
 let modoTiempo='slot';   // 'slot' | 'mes' -- [NAV]
 
+// ---- Seleccion multiple de SLOT (solo afecta a la grafica de evolucion) ----
+// Arranca con todos los SLOT marcados: asi la grafica se ve igual que antes de
+// que existiera el selector. Deseleccionar solo quita periodos del eje X; los
+// KPIs, la dona y las tablas siguen leyendo SLOT 0 / mes actual como siempre.
+const slotsSel=new Set(P.slot_nums);
+
+const DIA_MS=86400000;
+
+// Fecha de corte de los datos (P.fecha_actualizacion, 'DD/MM/YYYY') en UTC. Se
+// usa como referencia de los SLOT en vez de la fecha del navegador: los datos
+// son una foto de ese corte, no de hoy.
+function corteUTC(){
+  const m=/^(\d{2})\/(\d{2})\/(\d{4})$/.exec(String(P.fecha_actualizacion||''));
+  return m ? Date.UTC(+m[3], +m[2]-1, +m[1]) : null;
+}
+function fechaDDMMYYYY(ms){
+  const d=new Date(ms);
+  return String(d.getUTCDate()).padStart(2,'0')+'/'
+    +String(d.getUTCMonth()+1).padStart(2,'0')+'/'+d.getUTCFullYear();
+}
+// Rango de calendario del SLOT s, con la misma convencion que las etiquetas de
+// la grafica ('0-30d', '31-60', ...): dias 1..30 antes del corte para el SLOT 0,
+// 31..60 para el SLOT 1, etc. Ambos extremos entran y el dia del corte NO entra,
+// porque ese dia todavia esta incompleto.
+function slotRango(s){
+  const ref=corteUTC();
+  if(ref===null) return null;
+  return fechaDDMMYYYY(ref-((s+1)*30)*DIA_MS)+' → '+fechaDDMMYYYY(ref-(s*30+1)*DIA_MS);
+}
+// 'SLOT 0 · 30 días', 'SLOT 1 · 31-60 días', ... (mismo corte de 30 dias que
+// volSlotOMes; no se recalcula ningun volumen aqui).
+function slotEtiqueta(s){
+  return 'SLOT '+s+' · '+(s===0 ? '30 días' : (s*30+1)+'–'+((s+1)*30)+' días');
+}
+// SLOT marcados, de antiguo a reciente (SLOT alto -> 0), igual que la grafica.
+function slotsSeleccionados(){
+  return [...P.slot_nums].filter(s=>slotsSel.has(s)).sort((a,b)=>b-a);
+}
+
+function renderSlotBox(){
+  const grp=document.getElementById('grpSlots');
+  if(!grp) return;
+  // El selector solo tiene sentido en modo SLOT; Mes calendario no lo usa.
+  grp.style.display = modoTiempo==='mes' ? 'none' : 'flex';
+  if(modoTiempo==='mes') return;
+  const caja=document.getElementById('slotBox');
+  caja.innerHTML=[...P.slot_nums].sort((a,b)=>a-b).map(s=>{
+    const rango=slotRango(s);
+    return '<label class="slotopt'+(slotsSel.has(s)?' sel':'')+'" data-slot="'+s+'">'
+      +'<input type="checkbox" '+(slotsSel.has(s)?'checked':'')+'>'
+      +slotEtiqueta(s)
+      +(rango?'<span class="slottip">'+slotEtiqueta(s)+'<br>'+rango+'</span>':'')
+      +'</label>';
+  }).join('');
+  caja.querySelectorAll('.slotopt input').forEach(inp=>{
+    inp.onchange=()=>{
+      const s=+inp.closest('.slotopt').dataset.slot;
+      if(inp.checked) slotsSel.add(s); else slotsSel.delete(s);
+      renderSlotBox(); renderEvol(aggCats());
+    };
+  });
+  const n=slotsSel.size;
+  document.getElementById('slotSum').textContent = n===0
+    ? 'Ningún SLOT seleccionado'
+    : (n===1 ? 'SLOT '+slotsSeleccionados()[0]+' · 30 días'
+             : n+' SLOTs · '+(n*30)+' días');
+}
+
 // Helpers que abstraen el modo SLOT/MES sobre una categoria serializada.
 function volActualDe(c){ return modoTiempo==='mes' ? c.vol_actual_mes : c.vol_actual; }
 function volAnteriorDe(c){ return modoTiempo==='mes' ? c.vol_anterior_mes : c.vol_anterior; }
@@ -680,7 +774,9 @@ function renderEvol(cats){
     }
   } else {
     // Etiquetas de SLOT: solo el rango de dias (0-30d, 31-60d, ...), sin mes.
-    const nums=[...P.slot_nums].sort((a,b)=>b-a); // antiguo->reciente (SLOT alto -> 0)
+    // Solo los SLOT marcados en el selector, ya en orden antiguo->reciente
+    // (SLOT alto -> 0). Cada SLOT marcado es un punto propio del eje X.
+    const nums=slotsSeleccionados();
     labels=nums.map(s=>s===0?'0-30d':((s*30+1)+'-'+((s+1)*30)));
     vals=nums.map(s=>cats.reduce((t,c)=>t+volSlotOMes(c,s),0));
   }
@@ -1513,6 +1609,7 @@ function renderAll(){
     : 'Composición del Volumen Actual (SLOT 0)';
   const foot=document.getElementById('footModo');
   if(foot) foot.textContent = esMes ? 'Cálculo por Mes calendario.' : 'Cálculo por SLOT.';
+  renderSlotBox();
   renderKPIs(agg, cats); renderEvol(agg); renderDona(agg);
   renderDet(cats); renderSin(cats); renderVen(cats); renderAct(cats);
   renderHeadHist(); renderHist();
@@ -1949,6 +2046,14 @@ const btnDescargaTickets=document.getElementById('btnDescargaTickets');
 if(btnDescargaTickets) btnDescargaTickets.onclick=descargarTickets;
 const selModo=document.getElementById('selModo');
 if(selModo) selModo.onchange=()=>{modoTiempo=selModo.value;renderAll();};
+document.getElementById('btnSlotsTodos').onclick=()=>{
+  P.slot_nums.forEach(s=>slotsSel.add(s));
+  renderSlotBox(); renderEvol(aggCats());
+};
+document.getElementById('btnSlotsLimpiar').onclick=()=>{
+  slotsSel.clear();
+  renderSlotBox(); renderEvol(aggCats());
+};
 
 // tabs
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
