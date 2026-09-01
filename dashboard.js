@@ -540,6 +540,9 @@ function hoyISO() {
     // mes calendario, el dia 1 de cada mes el rango colapsaba a un solo dia.
     else if (tipo === 'mes') { inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 29); }
     else if (tipo === 'anio') inicio = new Date(hoy.getFullYear(), 0, 1);
+    // El rango rapido manda sobre los SLOT: dejarlos marcados agruparia estos
+    // dias en bloques de 30 que ya no son los que el usuario acaba de pedir.
+    slotsSel.clear();
     document.getElementById('f-inicio').value = formatoFecha(inicio);
     document.getElementById('f-fin').value = formatoFecha(fin);
     cargarTodo();
@@ -646,16 +649,11 @@ function hoyISO() {
   function slotEtiquetaEje(s) {
     return s === 0 ? '0-30d' : `${s * DIAS_SLOT + 1}-${(s + 1) * DIAS_SLOT}`;
   }
-  // Solo se ofrecen los SLOT que el rango de fechas cargado alcanza a cubrir:
-  // con "7 dias" no tiene sentido ofrecer diez bloques vacios.
+  // Los SLOT que se ofrecen no dependen del rango cargado: marcarlos ES la forma
+  // de fijar el rango (ver alCambiarSlots), asi que la lista es siempre la misma.
+  const SLOTS_OFRECIDOS = 6;         // SLOT 0..5, unos 180 dias
   function slotsDisponibles() {
-    const fechas = (datos.tendencia || []).map(x => x.Fecha).filter(Boolean);
-    const vistos = new Set();
-    for (const f of fechas) {
-      const s = slotDeISO(f);
-      if (s !== null) vistos.add(s);
-    }
-    return [...vistos].sort((a, b) => a - b);
+    return Array.from({ length: SLOTS_OFRECIDOS }, (_, i) => i);
   }
   // SLOT marcados, de antiguo a reciente (SLOT alto -> 0), como en la grafica.
   function slotsSeleccionados() {
@@ -727,12 +725,17 @@ function hoyISO() {
     document.getElementById('btn-slots').classList.toggle('sel', n > 0);
   }
 
-  // Cambiar la seleccion solo repinta: la tendencia se reagrupa en el navegador
-  // y el ranking se vuelve a pedir porque su periodo depende de los SLOT.
+  // Marcar SLOT es la forma de fijar el rango: se escribe su periodo completo en
+  // las fechas y se recarga todo, igual que el boton de rango rapido "Slot". Asi
+  // los KPIs, la tendencia y el ranking hablan siempre del mismo periodo. Al
+  // desmarcar todos el rango se queda como quedo y el eje vuelve a ser diario.
   function alCambiarSlots() {
-    renderSlotBox();
-    renderTendencia();
-    recargarRanking();
+    if (enModoSlot()) {
+      const nums = [...slotsSel].sort((a, b) => a - b);
+      document.getElementById('f-inicio').value = slotRango(nums[nums.length - 1]).inicio;
+      document.getElementById('f-fin').value = slotRango(nums[0]).fin;
+    }
+    cargarTodo();                    // renderTodo() ya repinta el popover
   }
 
   async function cargarCatalogos() {
@@ -854,17 +857,23 @@ function hoyISO() {
         : 'Sin tickets registrados en el rango de fechas.');
     }
 
+    // En modo SLOT la grafica va en barras: con un solo SLOT marcado el eje X
+    // tiene un unico punto y una linea no dibuja nada, solo tres puntos sueltos.
+    const barras = enModoSlot();
+    const serie = (label, data, color, rellenar) => barras
+      ? { label, data, backgroundColor: color, borderWidth: 0, borderRadius: 4, maxBarThickness: 56 }
+      : { label, data, borderColor: color,
+          backgroundColor: rellenar ? 'rgba(37,99,235,.12)' : color,
+          fill: !!rellenar, tension: .3, borderWidth: 2, pointRadius: 3 };
+
     graficos.tendencia = new Chart(document.getElementById('chart-tendencia'), {
-      type: 'line',
+      type: barras ? 'bar' : 'line',
       data: {
         labels: etiquetas,
         datasets: [
-          { label: 'Creados', data: creados, borderColor: AZUL,
-            backgroundColor: 'rgba(37,99,235,.12)', fill: true, tension: .3, borderWidth: 2, pointRadius: 3 },
-          { label: 'Cerrados', data: cerrados, borderColor: VERDE, backgroundColor: VERDE,
-            tension: .3, borderWidth: 2, pointRadius: 3 },
-          { label: 'Vencidos SLA', data: vencidos, borderColor: ROJO, backgroundColor: ROJO,
-            tension: .3, borderWidth: 2, pointRadius: 3 },
+          serie('Creados', creados, AZUL, true),
+          serie('Cerrados', cerrados, VERDE),
+          serie('Vencidos SLA', vencidos, ROJO),
         ]
       },
       options: {
@@ -1016,18 +1025,6 @@ function hoyISO() {
     return `${per}${FMT(totalCerrados)} tickets cerrados <span class="suave">· ${txt}${corte}</span>`;
   }
 
-  // El ranking se pide aparte, asi que cambiar de SLOT no obliga a recargar
-  // todo el tablero: solo se vuelve a pedir esta tabla.
-  async function recargarRanking() {
-    try {
-      datos.topCerrados = await obtenerJSON(`productividad.ashx?${paramsRankingCerrados().toString()}`);
-    } catch (err) {
-      datos.topCerrados = [];
-      console.error(err);
-    }
-    renderTopCerrados();
-  }
-
   function renderTopCerrados() {
     const cont = document.getElementById('tabla-top-cerrados');
     const cap = document.getElementById('cap-top-cerrados');
@@ -1128,6 +1125,7 @@ function hoyISO() {
       document.getElementById('f-tecnicos').selectedIndex = -1;
       // "Limpiar" tambien devuelve el rango a hoy (24 hrs): es la unica via a
       // ese rango desde que se quito el boton "24 hrs" del rango rapido.
+      slotsSel.clear();
       document.getElementById('f-inicio').value = hoyISO();
       document.getElementById('f-fin').value = hoyISO();
       cargarTodo();
