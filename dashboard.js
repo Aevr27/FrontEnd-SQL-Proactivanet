@@ -220,8 +220,23 @@ function seleccionados(id) {
 }
 
 function estadoCargando(id) { document.getElementById(id).textContent = 'Cargando...'; }
-function estadoOk(id) {
-  document.getElementById(id).textContent = `Actualizado ${new Date().toLocaleTimeString('es-MX')}`;
+
+// Sello del ultimo ETL (kpis.ashx -> UltimaActualizacionEtl), que ya llega en
+// hora local de Mexico como 'yyyy-MM-ddTHH:mm:ss'. Se parte el texto en vez de
+// usar new Date(): el navegador interpretaria la cadena sin zona como local y
+// la recorreria si la maquina no esta en la zona de Mexico.
+function formatoSelloEtl(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(iso || ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : null;
+}
+
+// Sin sello del ETL (pestana de backlog, o EtiLog sin filas) se mantiene la
+// hora del navegador como antes.
+function estadoOk(id, selloEtl) {
+  const sello = formatoSelloEtl(selloEtl);
+  document.getElementById(id).textContent = sello
+    ? `Última actualización: ${sello}`
+    : `Actualizado ${new Date().toLocaleTimeString('es-MX')}`;
 }
 function estadoError(id, err) {
   const el = document.getElementById(id);
@@ -891,7 +906,7 @@ function hoyISO() {
       // Cambiar el rango invalida cualquier seleccion previa del tablero.
       Object.keys(filtro).forEach(k => { filtro[k] = null; });
       renderTodo();
-      estadoOk('estado-carga');
+      estadoOk('estado-carga', kpis && kpis.UltimaActualizacionEtl);
     } catch (err) {
       estadoError('estado-carga', err);
     }

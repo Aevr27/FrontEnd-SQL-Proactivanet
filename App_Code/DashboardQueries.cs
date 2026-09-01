@@ -216,7 +216,17 @@ SELECT
     HorasResolucionPromedio = CAST(AVG(HorasResolucion) AS DECIMAL(18,2)),
     HorasCicloPromedio = CAST(AVG(HorasCiclo) AS DECIMAL(18,2)),
     ReasignacionesPromedio = CAST(AVG(CAST(ReasignacionesGrupo AS DECIMAL(18,2))) AS DECIMAL(18,2)),
-    TicketsAltaPrioridad = SUM(CASE WHEN Prioridad IN (N'Alta', N'Crítica', N'Critica', N'Urgente') THEN 1 ELSE 0 END)
+    TicketsAltaPrioridad = SUM(CASE WHEN Prioridad IN (N'Alta', N'Crítica', N'Critica', N'Urgente') THEN 1 ELSE 0 END),
+    -- Fin del ultimo ETL de tickets, para el sello del encabezado. dbo.EtiLog
+    -- guarda la hora en UTC; se convierte a hora local de Mexico aqui para que
+    -- el navegador solo tenga que formatearla (AT TIME ZONE: SQL Server 2016+).
+    UltimaActualizacionEtl = (
+        SELECT CAST(
+            MAX(l.Fin) AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
+            AS DATETIME2(0))
+        FROM dbo.EtiLog l
+        WHERE l.Proceso = N'Proactivanet tickets'
+    )
 FROM base;";
 
         var filas = Unico(sql, f, null);
