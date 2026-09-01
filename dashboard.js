@@ -230,7 +230,7 @@ function formatoSelloEtl(iso) {
   return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : null;
 }
 
-// Sin sello del ETL (pestana de backlog, o EtiLog sin filas) se mantiene la
+// Sin sello del ETL (pestana de backlog, o EtlLog sin filas) se mantiene la
 // hora del navegador como antes.
 function estadoOk(id, selloEtl) {
   const sello = formatoSelloEtl(selloEtl);
