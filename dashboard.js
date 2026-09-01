@@ -576,6 +576,17 @@ function hoyISO() {
   const DIAS_RANKING = 7;
 
   function rangoRanking() {
+    // Con SLOT marcados el ranking usa ese mismo periodo, para que la seleccion
+    // signifique lo mismo en la grafica y en la tabla. Se toma del inicio del
+    // SLOT mas antiguo al fin del mas reciente: con SLOT 0 + 1 son 60 dias.
+    if (modoEje === 'slot' && slotsSel.size) {
+      const nums = [...slotsSel].sort((a, b) => a - b);
+      return {
+        inicio: slotRango(nums[nums.length - 1]).inicio,
+        fin: slotRango(nums[0]).fin,
+        slots: nums,
+      };
+    }
     const fin = new Date();
     fin.setDate(fin.getDate() - 1);          // ayer: ultimo dia completo
     const inicio = new Date(fin);
@@ -591,6 +602,128 @@ function hoyISO() {
     p.set('fecha_inicio', r.inicio);
     p.set('fecha_fin', r.fin);
     return p;
+  }
+
+  // ------------------------------------------------------------------- SLOT
+  // Un SLOT es un bloque rodante de 30 dias, con el mismo criterio que el boton
+  // de rango rapido "Slot": el SLOT 0 son los ultimos 30 dias CONTANDO hoy, el
+  // SLOT 1 los 30 anteriores, y asi. Aqui no hay una serie por SLOT como tal:
+  // se agrupan los dias que ya devuelve tendencia.ashx, sin pedir nada mas al
+  // servidor ni tocar ningun calculo del SP.
+  const DIAS_SLOT = 30;
+  let modoEje = 'dia';               // 'dia' | 'slot'
+  const slotsSel = new Set();
+
+  function medianoche(d) {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    return x;
+  }
+  // Dias completos entre dos fechas, ignorando la hora.
+  function diasEntre(desde, hasta) {
+    return Math.round((medianoche(hasta) - medianoche(desde)) / 86400000);
+  }
+  // SLOT al que cae un dia 'YYYY-MM-DD'. null si es futuro (no cae en ninguno).
+  function slotDeISO(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    if (!m) return null;
+    const dias = diasEntre(new Date(+m[1], +m[2] - 1, +m[3]), new Date());
+    return dias < 0 ? null : Math.floor(dias / DIAS_SLOT);
+  }
+  // Rango de calendario del SLOT s. Ambos extremos entran; el SLOT 0 termina
+  // hoy, igual que el boton "Slot".
+  function slotRango(s) {
+    const fin = new Date();
+    fin.setDate(fin.getDate() - s * DIAS_SLOT);
+    const inicio = new Date(fin);
+    inicio.setDate(inicio.getDate() - (DIAS_SLOT - 1));
+    return { inicio: formatoFecha(inicio), fin: formatoFecha(fin) };
+  }
+  // 'SLOT 0 · 30 dias', 'SLOT 1 · 31-60 dias', ...
+  function slotEtiqueta(s) {
+    return `SLOT ${s} · ${s === 0 ? '30 dias' : `${s * DIAS_SLOT + 1}–${(s + 1) * DIAS_SLOT} dias`}`;
+  }
+  // Etiqueta corta del eje X, como en el tablero de Experiencia.
+  function slotEtiquetaEje(s) {
+    return s === 0 ? '0-30d' : `${s * DIAS_SLOT + 1}-${(s + 1) * DIAS_SLOT}`;
+  }
+  // Solo se ofrecen los SLOT que el rango de fechas cargado alcanza a cubrir:
+  // con "7 dias" no tiene sentido ofrecer diez bloques vacios.
+  function slotsDisponibles() {
+    const fechas = (datos.tendencia || []).map(x => x.Fecha).filter(Boolean);
+    const vistos = new Set();
+    for (const f of fechas) {
+      const s = slotDeISO(f);
+      if (s !== null) vistos.add(s);
+    }
+    return [...vistos].sort((a, b) => a - b);
+  }
+  // SLOT marcados, de antiguo a reciente (SLOT alto -> 0), como en la grafica.
+  function slotsSeleccionados() {
+    return [...slotsSel].sort((a, b) => b - a);
+  }
+
+  // Agrupa las series diarias en los SLOT marcados. Cada SLOT es un punto del
+  // eje X: en modo SLOT no se dibuja ni una sola fecha suelta.
+  function agruparPorSlot(etiquetas, creados, cerrados, vencidos) {
+    const acc = new Map();
+    etiquetas.forEach((iso, i) => {
+      const s = slotDeISO(iso);
+      if (s === null || !slotsSel.has(s)) return;
+      if (!acc.has(s)) acc.set(s, { c: 0, cer: 0, ven: 0 });
+      const a = acc.get(s);
+      a.c += Number(creados[i]) || 0;
+      a.cer += Number(cerrados[i]) || 0;
+      a.ven += Number(vencidos[i]) || 0;
+    });
+    const nums = [...acc.keys()].sort((a, b) => b - a);
+    return {
+      etiquetas: nums.map(slotEtiquetaEje),
+      creados: nums.map(s => acc.get(s).c),
+      cerrados: nums.map(s => acc.get(s).cer),
+      vencidos: nums.map(s => acc.get(s).ven),
+    };
+  }
+
+  function renderSlotBox() {
+    const campo = document.getElementById('campo-slots');
+    campo.hidden = modoEje !== 'slot';
+    if (campo.hidden) return;
+
+    const disponibles = slotsDisponibles();
+    // Si el rango cargado ya no cubre un SLOT marcado, se descarta solo.
+    [...slotsSel].forEach(s => { if (!disponibles.includes(s)) slotsSel.delete(s); });
+
+    const caja = document.getElementById('slot-box');
+    caja.innerHTML = disponibles.map(s => {
+      const r = slotRango(s);
+      return `<label class="slotopt${slotsSel.has(s) ? ' sel' : ''}" data-slot="${s}">
+          <input type="checkbox"${slotsSel.has(s) ? ' checked' : ''}>${escapeHtml(slotEtiqueta(s))}
+          <span class="slottip">${escapeHtml(slotEtiqueta(s))}<br>${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}</span>
+        </label>`;
+    }).join('') || '<span class="slotsum">El rango cargado no cubre ningun SLOT completo.</span>';
+
+    caja.querySelectorAll('.slotopt input').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const s = Number(inp.closest('.slotopt').dataset.slot);
+        if (inp.checked) slotsSel.add(s); else slotsSel.delete(s);
+        alCambiarSlots();
+      });
+    });
+
+    const n = slotsSel.size;
+    document.getElementById('slot-sum').textContent = n === 0
+      ? 'Ningun SLOT seleccionado'
+      : (n === 1 ? `SLOT ${slotsSeleccionados()[0]} · ${DIAS_SLOT} dias`
+                 : `${n} SLOTs · ${n * DIAS_SLOT} dias`);
+  }
+
+  // Cambiar la seleccion solo repinta: la tendencia se reagrupa en el navegador
+  // y el ranking se vuelve a pedir porque su periodo depende de los SLOT.
+  function alCambiarSlots() {
+    renderSlotBox();
+    renderTendencia();
+    recargarRanking();
   }
 
   async function cargarCatalogos() {
@@ -698,10 +831,20 @@ function hoyISO() {
       hint.textContent = 'recalculada sobre lo filtrado';
     }
 
+    // En modo SLOT los dias sueltos se agrupan en bloques de 30: el eje X pasa a
+    // ser la lista de SLOT marcados y ya no muestra ninguna fecha diaria.
+    if (modoEje === 'slot') {
+      const g = agruparPorSlot(etiquetas, creados, cerrados, vencidos);
+      etiquetas = g.etiquetas; creados = g.creados; cerrados = g.cerrados; vencidos = g.vencidos;
+      hint.textContent = `por SLOT de ${DIAS_SLOT} dias · ${hint.textContent}`;
+    }
+
     if (!etiquetas.length) {
-      return renderEmptyChart('chart-tendencia', hayFiltro()
-        ? 'Ningun ticket con fecha de registro pasa los filtros activos.'
-        : 'Sin tickets registrados en el rango de fechas.');
+      return renderEmptyChart('chart-tendencia', modoEje === 'slot' && !slotsSel.size
+        ? 'Selecciona al menos un SLOT para ver la tendencia.'
+        : (hayFiltro()
+          ? 'Ningun ticket con fecha de registro pasa los filtros activos.'
+          : 'Sin tickets registrados en el rango de fechas.'));
     }
 
     graficos.tendencia = new Chart(document.getElementById('chart-tendencia'), {
@@ -850,8 +993,10 @@ function hoyISO() {
   // tabla no responde al rango de fechas de los filtros de arriba.
   function periodoRanking() {
     const r = rangoRanking();
-    return `Periodo: últimos ${DIAS_RANKING} días completos`
-      + ` · ${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}`;
+    const cab = r.slots
+      ? `Periodo: ${r.slots.map(s => `SLOT ${s}`).join(' + ')} · ${r.slots.length * DIAS_SLOT} dias`
+      : `Periodo: últimos ${DIAS_RANKING} días completos`;
+    return `${cab} · ${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}`;
   }
 
   function descripcionTopCerrados(totalCerrados, personas, mostradas) {
@@ -862,6 +1007,18 @@ function hoyISO() {
     const corte = mostradas < personas
       ? ` · top ${mostradas} de ${FMT(personas)} personas` : '';
     return `${per}${FMT(totalCerrados)} tickets cerrados <span class="suave">· ${txt}${corte}</span>`;
+  }
+
+  // El ranking se pide aparte, asi que cambiar de SLOT no obliga a recargar
+  // todo el tablero: solo se vuelve a pedir esta tabla.
+  async function recargarRanking() {
+    try {
+      datos.topCerrados = await obtenerJSON(`productividad.ashx?${paramsRankingCerrados().toString()}`);
+    } catch (err) {
+      datos.topCerrados = [];
+      console.error(err);
+    }
+    renderTopCerrados();
   }
 
   function renderTopCerrados() {
@@ -878,7 +1035,8 @@ function hoyISO() {
       .sort((a, b) => b.cerrados - a.cerrados);
 
     if (!ranking.length) {
-      cont.innerHTML = '<div class="vacio">Sin tickets cerrados en los ultimos 7 dias completos para estos grupos.</div>';
+      cont.innerHTML = `<div class="vacio">Sin tickets cerrados en ${
+        rangoRanking().slots ? 'los SLOT seleccionados' : 'los ultimos 7 dias completos'} para estos grupos.</div>`;
       cap.innerHTML = descripcionTopCerrados(0, 0, 0);
       return;
     }
@@ -925,6 +1083,7 @@ function hoyISO() {
       null, l => COLOR_PRIORIDAD[l] ?? GRIS, 'Ningun ticket pasa los filtros activos.');
     renderBarraDim('chart-aging', 'aging', 'aging',
       ORDEN_AGING, () => MORADO, 'Ningun ticket pasa los filtros activos.');
+    renderSlotBox();
     renderTopCerrados();
     renderChips();
   }
@@ -967,6 +1126,22 @@ function hoyISO() {
       cargarTodo();
     });
     document.getElementById('btn-reset-filtros').addEventListener('click', resetFiltros);
+
+    // "Ver por": al pasar a SLOT se marcan todos los disponibles, asi la
+    // grafica cubre el mismo periodo que ya se veia por dia.
+    document.getElementById('f-modo-eje').addEventListener('change', e => {
+      modoEje = e.target.value;
+      if (modoEje === 'slot' && !slotsSel.size) slotsDisponibles().forEach(s => slotsSel.add(s));
+      alCambiarSlots();
+    });
+    document.getElementById('btn-slots-todos').addEventListener('click', () => {
+      slotsDisponibles().forEach(s => slotsSel.add(s));
+      alCambiarSlots();
+    });
+    document.getElementById('btn-slots-limpiar').addEventListener('click', () => {
+      slotsSel.clear();
+      alCambiarSlots();
+    });
 
     const inicioMes = new Date();
     inicioMes.setDate(1);

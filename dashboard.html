@@ -45,6 +45,13 @@
         </div>
       </div>
       <div class="campo">
+        <label for="f-modo-eje">Ver por</label>
+        <select id="f-modo-eje">
+          <option value="dia">Dia</option>
+          <option value="slot">SLOT (30 dias)</option>
+        </select>
+      </div>
+      <div class="campo">
         <label for="f-grupos">Grupos</label>
         <select id="f-grupos" multiple></select>
       </div>
@@ -55,6 +62,15 @@
       <div class="campo acciones">
         <button class="btn" id="btn-aplicar" type="button">Aplicar filtros</button>
         <button class="btn gris" id="btn-limpiar" type="button">Limpiar</button>
+      </div>
+      <div class="campo campo-slots" id="campo-slots" hidden>
+        <label>SLOTs a graficar</label>
+        <div class="slotbox" id="slot-box"></div>
+        <div class="slotfoot">
+          <span class="slotsum" id="slot-sum"></span>
+          <button class="btn linea chico" type="button" id="btn-slots-todos">Seleccionar todos</button>
+          <button class="btn linea chico" type="button" id="btn-slots-limpiar">Limpiar</button>
+        </div>
       </div>
     </section>
 

@@ -382,6 +382,39 @@
 
   /* Rango rapido: grupo segmentado que ocupa el alto de una barra. */
   .filtros .rango-rapido { display: flex; gap: 6px; flex-wrap: wrap; height: 40px; }
+
+  /* Selector multiple de SLOT: solo visible con "Ver por = SLOT". Ocupa toda
+     la fila del grid de filtros para que quepan las 30 dias de cada bloque. */
+  .filtros .campo-slots { grid-column: 1 / -1; }
+  .filtros .campo-slots[hidden] { display: none; }
+  .filtros .slotbox { display: flex; gap: 6px; flex-wrap: wrap; }
+  .filtros .slotopt {
+    position: relative; display: inline-flex; align-items: center; gap: 6px;
+    cursor: pointer; user-select: none; white-space: nowrap;
+    padding: 7px 11px; border-radius: var(--radius-xs);
+    border: 1px solid var(--ctrl-line); background: var(--grad-btn);
+    color: var(--ctrl-ink); font-size: 12px; font-weight: 600;
+    transition: border-color .15s ease, background .15s ease, color .15s ease;
+  }
+  .filtros .slotopt:hover { border-color: #475569; background: var(--ctrl-bg-2); }
+  /* Toda la opcion se pinta al seleccionarla, no solo la casilla. */
+  .filtros .slotopt.sel {
+    background: var(--accent); border-color: var(--accent); color: #fff;
+  }
+  .filtros .slotopt input { margin: 0; cursor: pointer; accent-color: #fff; }
+  /* Rango de fechas real del SLOT: oculto hasta el hover, la etiqueta corta
+     se queda visible siempre. */
+  .filtros .slottip {
+    display: none; position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 30;
+    padding: 6px 9px; border-radius: var(--radius-xs);
+    background: #0f172a; border: 1px solid #475569; color: #e2e8f0;
+    font-size: 11px; font-weight: 500; line-height: 1.45; white-space: nowrap;
+    box-shadow: 0 6px 16px -4px rgba(0, 0, 0, .55);
+  }
+  .filtros .slotopt:hover .slottip { display: block; }
+  .filtros .slotfoot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
+  .filtros .slotsum { font-size: 12px; font-weight: 700; color: var(--accent); }
+
   .filtros .rango-rapido .btn {
     flex: 1 1 0; min-width: 0; height: 40px; padding: 0 10px;
     display: inline-flex; align-items: center; justify-content: center;
