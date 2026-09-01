@@ -219,7 +219,7 @@ function bloquePie(t) {
   var e = estados[t.id];
   var puedeAvanzar = (e.fase === 'listo' || e.fase === 'revision');
   return '<div class="job-pie">' +
-      '<button class="btn" type="button" data-accion="preparar"' +
+      '<button class="btn job-preparar" type="button" data-accion="preparar"' +
         (e.fase === 'cargando' ? ' disabled' : '') + '>' +
         (e.fase === 'listo' ? 'Volver a obtener datos' : 'Obtener datos') +
       '</button>' +

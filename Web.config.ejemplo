@@ -33,14 +33,15 @@
   <!--
     Consola de administracion (admin.html) -> handlers/admin_correos.ashx.
 
-    Cada clave es la CARPETA donde ya vive el script correspondiente. Los
-    scripts NO se copian al sitio web: se ejecutan desde su propia carpeta
-    para que sus archivos de configuracion sigan resolviendo igual que hoy.
-    El nombre del .ps1 esta fijo en el handler; aqui solo va la ruta.
+    AdminScriptsDir es la CARPETA donde ya viven los tres scripts, juntos.
+    Los scripts NO se copian al sitio web: se ejecutan desde su propia
+    carpeta para que sus archivos de configuracion sigan resolviendo igual
+    que hoy. Los nombres de los .ps1 estan fijos en el handler; aqui solo va
+    la ruta, y es lo unico que cambia al mover el sitio de maquina.
 
-      AdminScriptsQaDir         -> Enviar_CorreoQA.ps1
-      AdminScriptsBacklogDir    -> Enviar_CorreoBacklog_direccion.ps1
-      AdminScriptsServiciosDir  -> Enviar_CorreoServicio.ps1
+      Enviar_CorreoQA.ps1
+      Enviar_CorreoBacklog_direccion.ps1
+      Enviar_CorreoServicio.ps1
 
     AdminServiciosPermitidos es la lista blanca del parametro -Servicio,
     separada por comas. El handler solo pasa al script una cadena de esta
@@ -53,9 +54,7 @@
     se configura: siempre es el dia anterior segun el reloj del servidor.
   -->
   <appSettings>
-    <add key="AdminScriptsQaDir"        value="C:\RUTA\A\Envio_correos" />
-    <add key="AdminScriptsBacklogDir"   value="C:\RUTA\A\Envio_correos" />
-    <add key="AdminScriptsServiciosDir" value="C:\RUTA\A\Envio_correos" />
+    <add key="AdminScriptsDir"          value="C:\RUTA\A\Envio_correos" />
     <add key="AdminServiciosPermitidos" value="WMS" />
   </appSettings>
 

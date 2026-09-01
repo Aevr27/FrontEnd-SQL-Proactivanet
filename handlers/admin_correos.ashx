@@ -9,8 +9,9 @@
 //   - Los nombres de los .ps1 estan fijos en este archivo. El navegador solo
 //     manda un identificador de flujo (qa | backlog | servicios); no puede
 //     mandar una ruta, un ejecutable ni un comando.
-//   - La carpeta de cada script se lee de Web.config (appSettings), nunca del
-//     request. Los scripts viven fuera del sitio web y NO se copian aqui.
+//   - La carpeta de los scripts se lee de Web.config (appSettings, clave
+//     unica AdminScriptsDir), nunca del request. Los tres .ps1 viven juntos
+//     en esa carpeta, fuera del sitio web, y NO se copian aqui.
 //   - El unico parametro variable es -Servicio, y se valida contra la lista
 //     blanca de Web.config: al script se le pasa la cadena canonica de la
 //     configuracion, no la que escribio el navegador.
@@ -70,6 +71,11 @@ public class AdminCorreos : IHttpHandler
     // dejar un request colgado para siempre si el script se queda esperando.
     private const int TiempoLimiteSegundos = 600;
 
+    // Clave unica de Web.config con la carpeta donde estan los tres .ps1.
+    // Los tres scripts viven juntos, asi que no hay una clave por flujo: una
+    // sola ruta que cambiar al mover el sitio de maquina.
+    private const string ClaveDirScripts = "AdminScriptsDir";
+
     // Definicion fija de un flujo. Ni el nombre del script ni la clave de
     // configuracion salen nunca del request.
     private class Flujo
@@ -77,7 +83,6 @@ public class AdminCorreos : IHttpHandler
         public string Id;
         public string Titulo;
         public string Script;      // nombre del .ps1, fijo en el codigo
-        public string ClaveDir;    // appSettings con la carpeta del script
         public bool   PideServicio;
     }
 
@@ -86,19 +91,16 @@ public class AdminCorreos : IHttpHandler
         new Flujo {
             Id = "qa", Titulo = "Correo QA",
             Script = "Enviar_CorreoQA.ps1",
-            ClaveDir = "AdminScriptsQaDir",
             PideServicio = false
         },
         new Flujo {
             Id = "backlog", Titulo = "Correo Backlog",
             Script = "Enviar_CorreoBacklog_direccion.ps1",
-            ClaveDir = "AdminScriptsBacklogDir",
             PideServicio = false
         },
         new Flujo {
             Id = "servicios", Titulo = "Servicios",
             Script = "Enviar_CorreoServicio.ps1",
-            ClaveDir = "AdminScriptsServiciosDir",
             PideServicio = true
         },
     };
@@ -142,7 +144,7 @@ public class AdminCorreos : IHttpHandler
         var flujos = new Dictionary<string, object>();
         foreach (var f in FLUJOS)
         {
-            var carpeta = ConfigurationManager.AppSettings[f.ClaveDir];
+            var carpeta = ConfigurationManager.AppSettings[ClaveDirScripts];
             string ruta = null;
             string problema = null;
 
@@ -187,16 +189,16 @@ public class AdminCorreos : IHttpHandler
     // de powershell.exe.
     private static string RutaScript(Flujo flujo)
     {
-        var carpeta = ConfigurationManager.AppSettings[flujo.ClaveDir];
+        var carpeta = ConfigurationManager.AppSettings[ClaveDirScripts];
         if (string.IsNullOrWhiteSpace(carpeta))
             throw new ConfigurationErrorsException(
-                "Falta la clave <appSettings> \"" + flujo.ClaveDir + "\" en Web.config: " +
-                "es la carpeta donde vive " + flujo.Script + ".");
+                "Falta la clave <appSettings> \"" + ClaveDirScripts + "\" en Web.config: " +
+                "es la carpeta donde viven los tres .ps1 de correo.");
 
         carpeta = carpeta.Trim();
         if (!Directory.Exists(carpeta))
             throw new DirectoryNotFoundException(
-                "La carpeta configurada en \"" + flujo.ClaveDir + "\" no existe: " + carpeta);
+                "La carpeta configurada en \"" + ClaveDirScripts + "\" no existe: " + carpeta);
 
         var ruta = Path.Combine(carpeta, flujo.Script);
         if (!File.Exists(ruta))

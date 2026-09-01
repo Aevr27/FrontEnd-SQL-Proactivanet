@@ -131,7 +131,28 @@
 
 /* ---- Botonera ---- */
 .job-pie { display: flex; align-items: center; gap: 8px; }
-.job-pie .btn { flex: 1; }
+/* "Obtener datos" es un paso local y secundario: no compite con ENVIAR, que
+   es el unico boton que ejecuta algo. Por eso no se estira, va en contorno y
+   con tipografia mas pequena; ENVIAR sigue solido y a ancho completo. */
+.job-pie .btn { flex: none; }
+.job-pie .job-preparar {
+  padding: 4px 9px;
+  font-size: 11px; font-weight: 600;
+  letter-spacing: .1px;
+  text-transform: none;
+  /* Mismo lenguaje visual que .job-flecha: fondo plano y contorno fino.
+     El azul solido queda reservado para ENVIAR. */
+  background: #fff; color: var(--muted);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+.job-pie .job-preparar:hover:not(:disabled) {
+  background: var(--accent-soft); color: var(--accent-ink);
+  border-color: var(--accent-line);
+  box-shadow: none; filter: none;
+}
+.job-pie .job-preparar:disabled { opacity: .5; cursor: not-allowed; }
+.job-pie .job-flecha { margin-left: auto; }
 
 .job-flecha {
   flex: none;
