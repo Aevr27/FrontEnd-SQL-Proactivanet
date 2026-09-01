@@ -579,7 +579,7 @@ function hoyISO() {
     // Con SLOT marcados el ranking usa ese mismo periodo, para que la seleccion
     // signifique lo mismo en la grafica y en la tabla. Se toma del inicio del
     // SLOT mas antiguo al fin del mas reciente: con SLOT 0 + 1 son 60 dias.
-    if (modoEje === 'slot' && slotsSel.size) {
+    if (enModoSlot()) {
       const nums = [...slotsSel].sort((a, b) => a - b);
       return {
         inicio: slotRango(nums[nums.length - 1]).inicio,
@@ -611,7 +611,6 @@ function hoyISO() {
   // se agrupan los dias que ya devuelve tendencia.ashx, sin pedir nada mas al
   // servidor ni tocar ningun calculo del SP.
   const DIAS_SLOT = 30;
-  let modoEje = 'dia';               // 'dia' | 'slot'
   const slotsSel = new Set();
 
   function medianoche(d) {
@@ -663,6 +662,12 @@ function hoyISO() {
     return [...slotsSel].sort((a, b) => b - a);
   }
 
+  // Sin SLOT marcados el tablero se ve por dia; marcar uno o mas cambia el eje
+  // a SLOT. No hay un selector de modo aparte: la seleccion es el modo.
+  function enModoSlot() {
+    return slotsSel.size > 0;
+  }
+
   // Agrupa las series diarias en los SLOT marcados. Cada SLOT es un punto del
   // eje X: en modo SLOT no se dibuja ni una sola fecha suelta.
   function agruparPorSlot(etiquetas, creados, cerrados, vencidos) {
@@ -686,10 +691,6 @@ function hoyISO() {
   }
 
   function renderSlotBox() {
-    const campo = document.getElementById('campo-slots');
-    campo.hidden = modoEje !== 'slot';
-    if (campo.hidden) return;
-
     const disponibles = slotsDisponibles();
     // Si el rango cargado ya no cubre un SLOT marcado, se descarta solo.
     [...slotsSel].forEach(s => { if (!disponibles.includes(s)) slotsSel.delete(s); });
@@ -697,9 +698,12 @@ function hoyISO() {
     const caja = document.getElementById('slot-box');
     caja.innerHTML = disponibles.map(s => {
       const r = slotRango(s);
+      // Dentro del popover el rango va como texto: no hay sitio para el tooltip
+      // flotante que se usaba cuando los SLOT ocupaban toda la barra de filtros.
       return `<label class="slotopt${slotsSel.has(s) ? ' sel' : ''}" data-slot="${s}">
-          <input type="checkbox"${slotsSel.has(s) ? ' checked' : ''}>${escapeHtml(slotEtiqueta(s))}
-          <span class="slottip">${escapeHtml(slotEtiqueta(s))}<br>${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}</span>
+          <input type="checkbox"${slotsSel.has(s) ? ' checked' : ''}>
+          <span class="slotnom">${escapeHtml(slotEtiqueta(s))}</span>
+          <span class="slotran">${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}</span>
         </label>`;
     }).join('') || '<span class="slotsum">El rango cargado no cubre ningun SLOT completo.</span>';
 
@@ -716,6 +720,11 @@ function hoyISO() {
       ? 'Ningun SLOT seleccionado'
       : (n === 1 ? `SLOT ${slotsSeleccionados()[0]} · ${DIAS_SLOT} dias`
                  : `${n} SLOTs · ${n * DIAS_SLOT} dias`);
+
+    // El boton de la barra lleva la cuenta: con el popover cerrado es la unica
+    // pista de que la grafica esta agrupada por SLOT y no por dia.
+    document.getElementById('slot-btn-txt').textContent = n === 0 ? 'Slots' : `Slots (${n})`;
+    document.getElementById('btn-slots').classList.toggle('sel', n > 0);
   }
 
   // Cambiar la seleccion solo repinta: la tendencia se reagrupa en el navegador
@@ -833,18 +842,16 @@ function hoyISO() {
 
     // En modo SLOT los dias sueltos se agrupan en bloques de 30: el eje X pasa a
     // ser la lista de SLOT marcados y ya no muestra ninguna fecha diaria.
-    if (modoEje === 'slot') {
+    if (enModoSlot()) {
       const g = agruparPorSlot(etiquetas, creados, cerrados, vencidos);
       etiquetas = g.etiquetas; creados = g.creados; cerrados = g.cerrados; vencidos = g.vencidos;
       hint.textContent = `por SLOT de ${DIAS_SLOT} dias · ${hint.textContent}`;
     }
 
     if (!etiquetas.length) {
-      return renderEmptyChart('chart-tendencia', modoEje === 'slot' && !slotsSel.size
-        ? 'Selecciona al menos un SLOT para ver la tendencia.'
-        : (hayFiltro()
-          ? 'Ningun ticket con fecha de registro pasa los filtros activos.'
-          : 'Sin tickets registrados en el rango de fechas.'));
+      return renderEmptyChart('chart-tendencia', hayFiltro()
+        ? 'Ningun ticket con fecha de registro pasa los filtros activos.'
+        : 'Sin tickets registrados en el rango de fechas.');
     }
 
     graficos.tendencia = new Chart(document.getElementById('chart-tendencia'), {
@@ -1127,13 +1134,28 @@ function hoyISO() {
     });
     document.getElementById('btn-reset-filtros').addEventListener('click', resetFiltros);
 
-    // "Ver por": al pasar a SLOT se marcan todos los disponibles, asi la
-    // grafica cubre el mismo periodo que ya se veia por dia.
-    document.getElementById('f-modo-eje').addEventListener('change', e => {
-      modoEje = e.target.value;
-      if (modoEje === 'slot' && !slotsSel.size) slotsDisponibles().forEach(s => slotsSel.add(s));
-      alCambiarSlots();
+    // Popover de SLOTs: se abre desde el boton de la barra de filtros y se
+    // queda abierto mientras se marcan varios, que es el caso normal.
+    const btnSlots = document.getElementById('btn-slots');
+    const popSlots = document.getElementById('slot-pop');
+    function cerrarPopSlots() {
+      popSlots.hidden = true;
+      btnSlots.setAttribute('aria-expanded', 'false');
+    }
+    btnSlots.addEventListener('click', () => {
+      popSlots.hidden = !popSlots.hidden;
+      btnSlots.setAttribute('aria-expanded', String(!popSlots.hidden));
     });
+    document.addEventListener('click', e => {
+      if (!popSlots.hidden && !e.target.closest('.slotpop-wrap')) cerrarPopSlots();
+    });
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && !popSlots.hidden) {
+        cerrarPopSlots();
+        btnSlots.focus();
+      }
+    });
+
     document.getElementById('btn-slots-todos').addEventListener('click', () => {
       slotsDisponibles().forEach(s => slotsSel.add(s));
       alCambiarSlots();

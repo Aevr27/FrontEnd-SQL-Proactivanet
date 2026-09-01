@@ -45,11 +45,21 @@
         </div>
       </div>
       <div class="campo">
-        <label for="f-modo-eje">Ver por</label>
-        <select id="f-modo-eje">
-          <option value="dia">Dia</option>
-          <option value="slot">SLOT (30 dias)</option>
-        </select>
+        <label for="btn-slots">Slots</label>
+        <div class="slotpop-wrap">
+          <button class="btn linea" type="button" id="btn-slots"
+                  aria-expanded="false" aria-haspopup="true">
+            <span id="slot-btn-txt">Slots</span><span class="caret">▾</span>
+          </button>
+          <div class="slotpop" id="slot-pop" hidden>
+            <div class="slotbox" id="slot-box"></div>
+            <div class="slotfoot">
+              <span class="slotsum" id="slot-sum"></span>
+              <button class="btn linea chico" type="button" id="btn-slots-todos">Seleccionar todos</button>
+              <button class="btn linea chico" type="button" id="btn-slots-limpiar">Limpiar</button>
+            </div>
+          </div>
+        </div>
       </div>
       <div class="campo">
         <label for="f-grupos">Grupos</label>
@@ -62,15 +72,6 @@
       <div class="campo acciones">
         <button class="btn" id="btn-aplicar" type="button">Aplicar filtros</button>
         <button class="btn gris" id="btn-limpiar" type="button">Limpiar</button>
-      </div>
-      <div class="campo campo-slots" id="campo-slots" hidden>
-        <label>SLOTs a graficar</label>
-        <div class="slotbox" id="slot-box"></div>
-        <div class="slotfoot">
-          <span class="slotsum" id="slot-sum"></span>
-          <button class="btn linea chico" type="button" id="btn-slots-todos">Seleccionar todos</button>
-          <button class="btn linea chico" type="button" id="btn-slots-limpiar">Limpiar</button>
-        </div>
       </div>
     </section>
 
