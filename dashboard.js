@@ -1003,7 +1003,7 @@ const TableroBacklog = (function () {
   // ---------------------------------------------------------------------- KPIs
   function renderKpis() {
     const r = datos.resumen;
-    let total, criticos, altos, mayor30, reasignados, reabiertos, fuera, totalSla, exacto;
+    let total, criticos, altos, mayor30, reasignados, reabiertos, exacto;
 
     if (!hayFiltro()) {
       const k = r.kpis || {};
@@ -1028,12 +1028,6 @@ const TableroBacklog = (function () {
       exacto = true;
     }
 
-    const sla = porLiderGrupo(r.sla);
-    totalSla = sla.reduce((a, x) => a + (x.Tickets ?? 0), 0);
-    fuera = sla.filter(x => x.EstadoSLA === 'Fuera SLA').reduce((a, x) => a + (x.Tickets ?? 0), 0);
-    const pctFuera = totalSla > 0 ? Math.round(1000 * fuera / totalSla) / 10 : 0;
-    const claseSla = pctFuera <= 5 ? 'sv' : (pctFuera <= 15 ? 'sa' : 'sr');
-
     const corte = document.getElementById('f-corte-bl').value;
     const pie = hayFiltro() ? 'sobre lo filtrado' : (corte ? `corte ${corte}` : '');
 
@@ -1044,8 +1038,6 @@ const TableroBacklog = (function () {
       { l: '+30 dias', v: FMT(mayor30), f: `${PCT(mayor30, total)} del backlog` },
       { l: 'Reasignados', v: FMT(reasignados), f: 'cambiaron de grupo al menos una vez' },
       { l: 'Reabiertos', v: FMT(reabiertos), f: 'mas de un intento de solucion' },
-      { l: '% Fuera SLA', v: `${pctFuera}%`,
-        f: totalSla ? `${FMT(fuera)} de ${FMT(totalSla)} evaluados` : 'sin tickets evaluados', s: claseSla },
     ];
 
     document.getElementById('kpis-bl').innerHTML = htmlTarjetasKpi(tarjetas);
