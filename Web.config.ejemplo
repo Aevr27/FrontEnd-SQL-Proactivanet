@@ -86,10 +86,14 @@
         <fileExtensions>
           <add fileExtension=".json" allowed="false" />
           <add fileExtension=".sql" allowed="false" />
+          <add fileExtension=".ps1" allowed="false" />
         </fileExtensions>
         <hiddenSegments>
           <add segment="sql" />
           <add segment="tools" />
+          <!-- Los scripts de correo se ejecutan desde el servidor, nunca se
+               descargan: la carpeta queda fuera del alcance de HTTP. -->
+          <add segment="reenviacorreo" />
         </hiddenSegments>
       </requestFiltering>
     </security>
