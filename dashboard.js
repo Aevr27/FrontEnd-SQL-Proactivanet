@@ -696,12 +696,12 @@ function hoyISO() {
     const caja = document.getElementById('slot-box');
     caja.innerHTML = disponibles.map(s => {
       const r = slotRango(s);
-      // Dentro del popover el rango va como texto: no hay sitio para el tooltip
-      // flotante que se usaba cuando los SLOT ocupaban toda la barra de filtros.
+      // El rango real va en un tooltip al hover, fuera del popover: en linea
+      // ensanchaba cada opcion y obligaba a hacer scroll horizontal.
       return `<label class="slotopt${slotsSel.has(s) ? ' sel' : ''}" data-slot="${s}">
           <input type="checkbox"${slotsSel.has(s) ? ' checked' : ''}>
           <span class="slotnom">${escapeHtml(slotEtiqueta(s))}</span>
-          <span class="slotran">${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}</span>
+          <span class="slottip">${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}</span>
         </label>`;
     }).join('') || '<span class="slotsum">El rango cargado no cubre ningun SLOT completo.</span>';
 

@@ -397,14 +397,14 @@
   /* El menu desplegado va en claro, igual que el de Grupos/Tecnicos. */
   .filtros .slotpop {
     position: absolute; z-index: 40; top: calc(100% + 6px); left: 0;
-    min-width: 280px; max-height: 320px; overflow: auto;
-    padding: 8px; background: #ffffff; border: 1px solid #dbe3ef;
+    min-width: 230px; padding: 8px;
+    background: #ffffff; border: 1px solid #dbe3ef;
     border-radius: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, .14);
   }
   .filtros .slotpop[hidden] { display: none; }
   .filtros .slotbox { display: flex; flex-direction: column; gap: 4px; }
   .filtros .slotopt {
-    display: flex; align-items: center; gap: 8px;
+    position: relative; display: flex; align-items: center; gap: 8px;
     cursor: pointer; user-select: none;
     padding: 7px 9px; border-radius: var(--radius-xs);
     border: 1px solid transparent; background: transparent;
@@ -418,13 +418,18 @@
   }
   .filtros .slotopt input { margin: 0; flex: none; cursor: pointer; accent-color: var(--accent); }
   .filtros .slotopt.sel input { accent-color: #fff; }
-  .filtros .slotnom { flex: none; }
-  /* Rango real del SLOT: dentro del popover va como texto, no como tooltip. */
-  .filtros .slotran {
-    margin-left: auto; font-size: 11px; font-weight: 500; white-space: nowrap;
-    color: #64748b;
+  .filtros .slotnom { white-space: nowrap; }
+  /* Rango real del SLOT: al hover y hacia la derecha, fuera del popover. En
+     linea ensanchaba cada opcion y sacaba una barra de scroll horizontal. */
+  .filtros .slottip {
+    display: none; position: absolute; left: calc(100% + 10px); top: 50%;
+    transform: translateY(-50%); z-index: 50;
+    padding: 6px 9px; border-radius: var(--radius-xs);
+    background: #0f172a; border: 1px solid #475569; color: #e2e8f0;
+    font-size: 11px; font-weight: 500; line-height: 1.45; white-space: nowrap;
+    box-shadow: 0 6px 16px -4px rgba(0, 0, 0, .55);
   }
-  .filtros .slotopt.sel .slotran { color: rgba(255, 255, 255, .82); }
+  .filtros .slotopt:hover .slottip { display: block; }
   .filtros .slotfoot {
     display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
     margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;
