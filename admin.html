@@ -13,14 +13,16 @@
   unicamente escribiendo la URL /admin.html. No se agrego ninguna entrada a
   la navegacion principal (SLA / Backlog / Tablero) a proposito.
 
-  ESTADO ACTUAL: SOLO VISUAL.
-    - No ejecuta PowerShell.
-    - No abre SMTP ni manda correo.
-    - No consulta la base de datos ni llama a ningun handler .ashx.
-    - No muestra direcciones de correo reales.
-  Todas las transiciones de estado son simuladas en el navegador
-  (ver admin.js). Cuando exista la operacion real del lado del servidor,
-  solo hay que sustituir las funciones simuladas de admin.js.
+  ESTADO ACTUAL:
+    - Las TRES tarjetas de correo ejecutan de verdad al pulsar ENVIAR:
+      POST a handlers/admin_correos.ashx -> powershell.exe -> el .ps1
+      correspondiente, lanzado desde su propia carpeta (Web.config).
+      Eso incluye SQL, generacion de reportes y envio de correo, porque es
+      lo que hacen los scripts; la pagina no replica nada de esa logica.
+    - "Obtener datos" y la revision siguen siendo pasos locales de la
+      pantalla: no ejecutan nada.
+    - Las tarjetas de Herramientas siguen siendo solo visuales.
+    - No se muestran direcciones de correo reales.
 
   Reusa dashboard.css unicamente para heredar variables, tipografia y las
   clases base (.wrap, .card, .btn, .badge, .pill). dashboard.css NO se
@@ -39,16 +41,35 @@
       <div class="sub">Consola interna de operaciones · entorno de trabajo</div>
     </div>
     <div class="acciones-top">
-      <div class="estado">Modo demostracion — ninguna accion se ejecuta</div>
+      <div class="estado">ENVIAR ejecuta el script real</div>
     </div>
   </header>
 
   <div class="admin-aviso" role="note">
-    <b>Vista previa.</b> Esta consola todavia no esta conectada. Los botones
-    de las tarjetas solo cambian su estado visual: no se envia ningun correo y
-    no se toca la base de datos. La unica excepcion es la prueba de PowerShell
-    de mas abajo, que si llama al servidor.
+    <b>Atencion.</b> En las tres tarjetas de correo, el boton <b>ENVIAR</b>
+    ejecuta el script de PowerShell correspondiente en el servidor y, por
+    tanto, envia el correo de verdad. "Obtener datos" y la pantalla de
+    revision no ejecutan nada. Las tarjetas de <i>Herramientas</i> siguen sin
+    estar conectadas.
   </div>
+
+  <style>
+    /* Bloques nuevos de las tarjetas de correo (resultado de la ejecucion y
+       aviso de configuracion). Aparte, para no tocar admin.css. */
+    .job-ejecucion {
+      margin: 10px 0 0; padding: 8px 10px; border-radius: 8px;
+      background: rgba(127, 127, 127, .12); font-size: 13px;
+    }
+    .job-ejecucion.ok    { color: #1a7f37; }
+    .job-ejecucion.fallo { color: #b42318; }
+    .job-ejecucion-tit   { font-weight: 600; }
+    .job-ejecucion-salida {
+      margin: 8px 0 0; max-height: 200px; overflow: auto;
+      white-space: pre-wrap; word-break: break-word; color: inherit;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    .job-nota-fallo { color: #b42318; }
+  </style>
 
   <!-- ============================================ Correos programados -->
   <section class="admin-seccion">

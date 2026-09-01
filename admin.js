@@ -1,34 +1,36 @@
 /* =========================================================================
-   admin.js — consola de administracion (SOLO VISUAL)
+   admin.js — consola de administracion
+
+   Las tres tarjetas de correo (QA, Backlog, Servicios) SI ejecutan:
+   el boton ENVIAR hace POST a handlers/admin_correos.ashx, que lanza
+   powershell.exe sobre el .ps1 correspondiente desde su propia carpeta.
 
    Lo que este archivo NO hace, a proposito:
-     - no ejecuta PowerShell ni ningun proceso del sistema;
-     - no abre SMTP ni manda correo;
-     - no llama a ningun handler .ashx ni toca la base de datos;
-     - no hace fetch() a nada, ni de lectura;
-     - no muestra direcciones de correo reales (solo el conteo).
+     - no decide que script se ejecuta: solo manda el identificador del
+       flujo (qa | backlog | servicios); los nombres de los .ps1 y sus
+       carpetas viven en el handler y en Web.config;
+     - no calcula la fecha de corte: la trae del servidor, que es quien se
+       la pasa al script;
+     - no replica nada de la logica de los scripts (SQL, SMTP, reportes);
+     - no consulta la base de datos ni muestra direcciones de correo.
 
-   Todo lo que se ve en pantalla sale de las constantes de este archivo y de
-   estado guardado en memoria. Cada tarjeta lleva su propio objeto de estado,
-   asi que tocar una no altera a las otras.
-
-   Cuando exista la operacion real del lado del servidor, el unico punto a
-   cambiar es prepararTrabajo(): ahi entraria la llamada al endpoint
-   controlado que dispara el proceso y devuelve el resumen a revisar. El
-   boton ENVIAR quedaria como la confirmacion explicita de ese flujo.
+   "Obtener datos" sigue siendo un paso local de la pantalla: prepara la
+   revision. La ejecucion real ocurre unicamente al pulsar ENVIAR, y el
+   resultado que se muestra es el del proceso de PowerShell (codigo de
+   salida, stdout, stderr), no el del request HTTP.
    ========================================================================= */
 
 'use strict';
 
+/* Endpoint unico de la consola. Solo acepta los tres flujos de abajo. */
+var ENDPOINT = 'handlers/admin_correos.ashx';
+
 /* -------------------------------------------------------------------------
    Los tres flujos de correo.
 
-   `script` es el nombre del .ps1 correspondiente, cuando se conoce. El de
-   Servicios todavia no existe en este repositorio: se deja vacio a
-   proposito, sin inventar nombres.
-
-   Servicios lleva `destacado: true`: se pinta como tarjeta grande a lo ancho
-   de la seccion y con controles propios (seleccion de servicios y fecha).
+   `id` es lo unico que viaja al servidor. `script` es informativo: el
+   handler tiene el nombre fijo por su cuenta y no acepta rutas del
+   navegador.
    ------------------------------------------------------------------------- */
 var TRABAJOS_CORREO = [
   {
@@ -45,7 +47,7 @@ var TRABAJOS_CORREO = [
     icono: '📥',
     titulo: 'Correo Backlog',
     descripcion: 'Detalle diario de incidentes y requerimientos en backlog.',
-    script: 'Enviar_CorreoBacklog.ps1',
+    script: 'Enviar_CorreoBacklog_direccion.ps1',
     adjuntos: 2,
     destinatarios: 2
   },
@@ -53,23 +55,18 @@ var TRABAJOS_CORREO = [
     id: 'servicios',
     icono: '🧩',
     titulo: 'Servicios',
-    descripcion: 'Reporte por servicio para la fecha indicada, con sus adjuntos.',
-    script: '',
+    descripcion: 'Reporte por servicio para la fecha de corte, con sus adjuntos.',
+    script: 'Enviar_CorreoServicio.ps1',
     adjuntos: 0,
     destinatarios: 3,
     destacado: true
   }
 ];
 
-/* Servicios disponibles en el selector. Lista de marcador de posicion: el
-   script real de Servicios todavia no esta en este repositorio. Para agregar
-   uno nuevo basta con anadir una entrada aqui; la casilla se pinta sola. */
-var SERVICIOS_DISPONIBLES = [
-  { id: 'aws',   nombre: 'AWS',   pordefecto: true  },
-  { id: 'pu',    nombre: 'PU',    pordefecto: true  },
-  { id: 'fenix', nombre: 'Fenix', pordefecto: true  },
-  { id: 'otro',  nombre: 'Otro',  pordefecto: false }
-];
+/* Metadatos que manda el servidor (GET al endpoint): lista blanca de
+   servicios, fecha de corte calculada alli y disponibilidad de cada script.
+   Hasta que llegan, la tarjeta de Servicios se muestra cargando. */
+var META = { fechaCorte: '', servicios: [], flujos: {}, cargado: false, error: '' };
 
 /* Las cuatro utilidades. Ninguna esta conectada: todas abren el mismo aviso. */
 var HERRAMIENTAS = [
@@ -109,10 +106,11 @@ var HERRAMIENTAS = [
 
 /* Etiquetas de estado de una tarjeta de correo. */
 var ETIQUETA_ESTADO = {
-  inicial:  'Sin preparar',
-  cargando: 'Preparando datos...',
-  listo:    'Datos listos ✅',
-  revision: 'En revision ✅'
+  inicial:   'Sin preparar',
+  cargando:  'Preparando datos...',
+  listo:     'Datos listos ✅',
+  revision:  'En revision ✅',
+  ejecutando:'Ejecutando el script...'
 };
 
 /* Estado por tarjeta. Independiente: una clave por id de trabajo. */
@@ -132,24 +130,11 @@ function ddmmaaaa(d) {
   return p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear();
 }
 
-/* aaaa-mm-dd en hora local (el valor que entiende <input type="date">). */
-function isoLocal(d) {
-  var p = function (n) { return (n < 10 ? '0' : '') + n; };
-  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
-}
-
-/* Fecha automatica del reporte: el dia natural anterior al de hoy, tomado
-   del reloj local del navegador. Nada codificado a mano. */
-function fechaAutomatica() {
-  var hoy = new Date();
-  return new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 1);
-}
-
 /* Convierte aaaa-mm-dd a Date local sin pasar por UTC (evita el corrimiento
    de un dia que produce new Date('2026-08-30')). */
 function desdeIso(iso) {
   var t = String(iso || '').split('-');
-  if (t.length !== 3) { return fechaAutomatica(); }
+  if (t.length !== 3) { return null; }
   return new Date(Number(t[0]), Number(t[1]) - 1, Number(t[2]));
 }
 
@@ -161,20 +146,46 @@ function periodoTexto() {
   return ddmmaaaa(ini) + ' → ' + ddmmaaaa(fin);
 }
 
-/* ---- Estado de Servicios ---------------------------------------------- */
+/* ---- Metadatos del servidor ------------------------------------------- */
 
-function servSeleccionados(e) {
-  return SERVICIOS_DISPONIBLES.filter(function (s) {
-    return e.seleccion.indexOf(s.id) !== -1;
-  });
+/* GET al endpoint: no ejecuta nada, solo devuelve la lista blanca de
+   servicios, la fecha de corte del servidor y si cada script esta
+   localizable con la configuracion actual. */
+function cargarMetadatos() {
+  return fetch(ENDPOINT, { method: 'GET' })
+    .then(function (r) {
+      return r.json().catch(function () {
+        throw new Error('Respuesta HTTP ' + r.status + ' sin JSON.');
+      });
+    })
+    .then(function (d) {
+      if (d && d.error) { throw new Error(d.error); }
+      META.fechaCorte = d.fechaCorte || '';
+      META.servicios  = d.servicios || [];
+      META.flujos     = d.flujos || {};
+      META.cargado    = true;
+      META.error      = '';
+    })
+    .catch(function (e) {
+      META.cargado = true;
+      META.error = String(e && e.message ? e.message : e);
+    })
+    .then(function () {
+      TRABAJOS_CORREO.forEach(function (t) {
+        /* Si el servicio elegido ya no esta en la lista blanca, se descarta. */
+        var e = estados[t.id];
+        if (t.destacado && e.servicio && META.servicios.indexOf(e.servicio) === -1) {
+          e.servicio = '';
+        }
+        pintarTrabajo(t);
+      });
+    });
 }
 
-function servFechaIso(e) {
-  return e.modoFecha === 'manual' ? e.fechaManual : isoLocal(fechaAutomatica());
-}
-
-function servFechaTexto(e) {
-  return ddmmaaaa(desdeIso(servFechaIso(e)));
+/* Fecha de corte tal como la mostrara y usara el servidor. */
+function fechaCorteTexto() {
+  var d = desdeIso(META.fechaCorte);
+  return d ? ddmmaaaa(d) + ' (' + META.fechaCorte + ')' : '—';
 }
 
 /* ---- Pintado ---------------------------------------------------------- */
@@ -191,12 +202,16 @@ function bloqueCabecera(t) {
 
 function bloqueEstado(t) {
   var e = estados[t.id];
+  /* Servicios no tiene "Obtener datos": su estado inicial habla del
+     servicio, no de datos por preparar. */
+  var etiqueta = ETIQUETA_ESTADO[e.fase];
+  if (t.destacado && e.fase === 'inicial') {
+    etiqueta = e.servicio ? 'Servicio elegido ✅' : 'Sin servicio elegido';
+  }
   return '<div class="job-estado">' +
       '<span class="job-punto" aria-hidden="true"></span>' +
-      '<span data-rol="etiqueta">' + esc(ETIQUETA_ESTADO[e.fase]) + '</span>' +
-      '<span class="job-script" title="' + esc(t.script || 'script por definir') + '">' +
-        esc(t.script || 'script por definir') +
-      '</span>' +
+      '<span data-rol="etiqueta">' + esc(etiqueta) + '</span>' +
+      '<span class="job-script" title="' + esc(t.script) + '">' + esc(t.script) + '</span>' +
     '</div>';
 }
 
@@ -214,11 +229,62 @@ function bloquePie(t) {
     '</div>';
 }
 
-function bloqueRevisionPie() {
+/* Pie de Servicios: no tiene "Obtener datos". Se pasa a revision en cuanto
+   hay un servicio elegido y el script esta localizable. */
+function bloquePieServicios(t) {
+  var e = estados[t.id];
+  var listo = !!e.servicio && flujoDisponible(t.id);
+  return '<div class="job-pie">' +
+      '<button class="job-flecha" type="button" data-accion="abrir"' +
+        ' aria-label="Revisar ' + esc(t.titulo) + '"' +
+        (listo ? '' : ' disabled') + '>→</button>' +
+    '</div>';
+}
+
+function bloqueRevisionPie(t) {
+  var e = estados[t.id];
+  var enviando = !!e.enviando;
   return '<div class="job-revision-pie">' +
       '<button class="job-flecha" type="button" data-accion="cerrar"' +
-        ' aria-label="Regresar">←</button>' +
-      '<button class="btn enviar" type="button" data-accion="enviar">ENVIAR</button>' +
+        ' aria-label="Regresar"' + (enviando ? ' disabled' : '') + '>←</button>' +
+      '<button class="btn enviar" type="button" data-accion="enviar"' +
+        (enviando || !flujoDisponible(t.id) ? ' disabled' : '') + '>' +
+        (enviando ? 'Ejecutando...' : 'ENVIAR') +
+      '</button>' +
+    '</div>';
+}
+
+function flujoDisponible(id) {
+  var f = META.flujos[id];
+  return !META.cargado ? false : !!(f && f.disponible);
+}
+
+/* Aviso cuando el script no se puede localizar con la configuracion actual:
+   se dice antes de dejar pulsar ENVIAR, no despues de fallar. */
+function bloqueAvisoConfig(t) {
+  if (!META.cargado) {
+    return '<div class="job-nota">Comprobando la configuracion del servidor...</div>';
+  }
+  if (META.error) {
+    return '<div class="job-nota job-nota-fallo">No se pudo leer la configuracion: ' +
+      esc(META.error) + '</div>';
+  }
+  var f = META.flujos[t.id];
+  if (f && !f.disponible) {
+    return '<div class="job-nota job-nota-fallo">Script no disponible: ' +
+      esc(f.problema || 'revisar Web.config.') + '</div>';
+  }
+  return '';
+}
+
+/* Resultado de la ultima ejecucion de esta tarjeta. */
+function bloqueEjecucion(t) {
+  var e = estados[t.id];
+  if (!e.ejecucion) { return ''; }
+  var r = e.ejecucion;
+  return '<div class="job-ejecucion ' + esc(r.clase) + '">' +
+      '<div class="job-ejecucion-tit">' + esc(r.titulo) + '</div>' +
+      (r.detalle ? '<pre class="job-ejecucion-salida">' + esc(r.detalle) + '</pre>' : '') +
     '</div>';
 }
 
@@ -228,7 +294,7 @@ function plantillaTrabajo(t) {
   var e = estados[t.id];
 
   if (e.fase !== 'revision') {
-    return bloqueCabecera(t) + bloqueEstado(t) + bloquePie(t);
+    return bloqueCabecera(t) + bloqueEstado(t) + bloqueEjecucion(t) + bloquePie(t);
   }
 
   /* Estado desplegado: resumen de revision. Sin direcciones de correo. */
@@ -237,6 +303,7 @@ function plantillaTrabajo(t) {
       '<h4>Revisar ' + esc(t.titulo) + '</h4>' +
       '<dl class="job-datos">' +
         '<dt>Periodo</dt><dd>' + esc(e.periodo) + '</dd>' +
+        '<dt>Script</dt><dd>' + esc(t.script) + '</dd>' +
         '<dt>Datos</dt><dd class="job-ok">✅</dd>' +
         '<dt>Reportes</dt><dd class="job-ok">✅</dd>' +
         '<dt>Graficas</dt><dd class="job-ok">✅</dd>' +
@@ -246,63 +313,51 @@ function plantillaTrabajo(t) {
         '</dd>' +
         '<dt>Listo para enviar</dt><dd class="job-ok">✅</dd>' +
       '</dl>' +
-      '<div class="job-nota">Vista previa. El envio todavia no esta conectado.</div>' +
-      bloqueRevisionPie() +
+      bloqueAvisoConfig(t) +
+      bloqueEjecucion(t) +
+      bloqueRevisionPie(t) +
     '</div>';
 }
 
 /* ---- Tarjeta destacada (Servicios) ------------------------------------ */
 
-/* Selector de servicios + control de fecha. Todo vive en el navegador: la
-   seleccion no viaja a ningun lado y la fecha no consulta nada. */
+/* Seleccion de UN servicio (es lo que acepta -Servicio) mas la fecha de
+   corte, que llega calculada del servidor y no se puede editar aqui. */
 function bloqueControlesServicios(t) {
   var e = estados[t.id];
-  var manual = (e.modoFecha === 'manual');
 
-  var casillas = SERVICIOS_DISPONIBLES.map(function (s) {
-    var marcado = e.seleccion.indexOf(s.id) !== -1;
-    return '<label class="serv-casilla' + (marcado ? ' marcada' : '') + '">' +
-        '<input type="checkbox" data-campo="servicio" value="' + esc(s.id) + '"' +
-          (marcado ? ' checked' : '') + '>' +
-        '<span>' + esc(s.nombre) + '</span>' +
-      '</label>';
-  }).join('');
+  var opciones;
+  if (!META.cargado) {
+    opciones = '<div class="serv-nota-fecha">Cargando servicios...</div>';
+  } else if (!META.servicios.length) {
+    opciones = '<div class="serv-nota-fecha">Sin servicios configurados ' +
+      '(clave AdminServiciosPermitidos en Web.config).</div>';
+  } else {
+    opciones = META.servicios.map(function (nombre) {
+      var marcado = (e.servicio === nombre);
+      return '<label class="serv-casilla' + (marcado ? ' marcada' : '') + '">' +
+          '<input type="radio" name="serv-servicio" data-campo="servicio"' +
+            ' value="' + esc(nombre) + '"' + (marcado ? ' checked' : '') + '>' +
+          '<span>' + esc(nombre) + '</span>' +
+        '</label>';
+    }).join('');
+  }
 
   return '<div class="serv-controles">' +
       '<div class="serv-bloque">' +
-        '<h4>Servicios incluidos</h4>' +
-        '<div class="serv-lista">' + casillas + '</div>' +
-        '<div class="serv-conteo">Seleccionados: ' +
-          '<b data-rol="conteo">' + e.seleccion.length + '</b>' +
+        '<h4>Servicio</h4>' +
+        '<div class="serv-lista">' + opciones + '</div>' +
+        '<div class="serv-conteo">Seleccionado: ' +
+          '<b data-rol="servicio">' + esc(e.servicio || 'ninguno') + '</b>' +
         '</div>' +
       '</div>' +
       '<div class="serv-bloque">' +
-        '<h4>Fecha del reporte</h4>' +
-        '<div class="serv-modos">' +
-          '<label class="serv-radio' + (manual ? '' : ' marcada') + '">' +
-            '<input type="radio" name="serv-modo-fecha" data-campo="modo-fecha"' +
-              ' value="auto"' + (manual ? '' : ' checked') + '>' +
-            '<span>Automatica</span>' +
-          '</label>' +
-          '<label class="serv-radio' + (manual ? ' marcada' : '') + '">' +
-            '<input type="radio" name="serv-modo-fecha" data-campo="modo-fecha"' +
-              ' value="manual"' + (manual ? ' checked' : '') + '>' +
-            '<span>Manual</span>' +
-          '</label>' +
-        '</div>' +
-        (manual
-          ? '<div class="serv-fecha-manual">' +
-              '<input type="date" data-campo="fecha-manual" value="' + esc(e.fechaManual) + '">' +
-              '<button class="btn gris chico" type="button" data-accion="fecha-auto">' +
-                'Volver a automatica' +
-              '</button>' +
-            '</div>'
-          : '<div class="serv-nota-fecha">Se usa el dia anterior al actual.</div>') +
+        '<h4>Fecha de corte</h4>' +
+        '<div class="serv-nota-fecha">La calcula el servidor: el dia anterior ' +
+          'al actual. No se puede cambiar desde aqui.</div>' +
         '<div class="serv-fecha-resumen">' +
-          '<span class="serv-fecha-valor" data-rol="fecha">' + esc(servFechaTexto(e)) + '</span>' +
-          '<span class="serv-etiqueta-modo' + (manual ? ' manual' : '') + '">' +
-            (manual ? 'Fecha manual' : 'Fecha automatica') +
-          '</span>' +
+          '<span class="serv-fecha-valor" data-rol="fecha">' + esc(fechaCorteTexto()) + '</span>' +
+          '<span class="serv-etiqueta-modo">Fecha del servidor</span>' +
         '</div>' +
       '</div>' +
     '</div>';
@@ -312,30 +367,27 @@ function plantillaServicios(t) {
   var e = estados[t.id];
 
   if (e.fase !== 'revision') {
-    return bloqueCabecera(t) + bloqueEstado(t) +
-      bloqueControlesServicios(t) + bloquePie(t);
+    return bloqueCabecera(t) + bloqueEstado(t) + bloqueControlesServicios(t) +
+      bloqueAvisoConfig(t) + bloqueEjecucion(t) + bloquePieServicios(t);
   }
-
-  var elegidos = servSeleccionados(e);
-  var nombres = elegidos.map(function (s) { return s.nombre; }).join(' · ');
 
   return bloqueCabecera(t) + bloqueEstado(t) +
     '<div class="job-revision">' +
       '<h4>Servicios — revision</h4>' +
       '<dl class="job-datos">' +
-        '<dt>Servicios</dt><dd>' + esc(nombres || 'ninguno') + '</dd>' +
-        '<dt>Seleccionados</dt><dd>' + esc(elegidos.length) + '</dd>' +
-        '<dt>Fecha del reporte</dt><dd>' + esc(servFechaTexto(e)) + '</dd>' +
-        '<dt>Modo</dt><dd>' + (e.modoFecha === 'manual' ? 'Manual' : 'Automatica') + '</dd>' +
-        '<dt>Datos</dt><dd class="job-ok">✅</dd>' +
-        '<dt>Reporte</dt><dd class="job-ok">✅</dd>' +
-        '<dt>Archivos</dt><dd class="job-ok">✅</dd>' +
+        '<dt>Servicio</dt><dd>' + esc(e.servicio || 'ninguno') + '</dd>' +
+        '<dt>Fecha de corte</dt><dd>' + esc(META.fechaCorte || '—') + '</dd>' +
+        '<dt>Script</dt><dd>' + esc(t.script) + '</dd>' +
+        '<dt>Parametros</dt><dd>' +
+          esc('-Servicio "' + (e.servicio || '') + '" -FechaCorte "' + (META.fechaCorte || '') + '"') +
+        '</dd>' +
         '<dt>Destinatarios</dt><dd>' +
           (t.destinatarios > 0 ? 'configurados' : 'sin configurar') +
         '</dd>' +
       '</dl>' +
-      '<div class="job-nota">Vista previa. El envio todavia no esta conectado.</div>' +
-      bloqueRevisionPie() +
+      bloqueAvisoConfig(t) +
+      bloqueEjecucion(t) +
+      bloqueRevisionPie(t) +
     '</div>';
 }
 
@@ -376,16 +428,16 @@ function pintarTodo() {
   }).join('');
 }
 
-/* ---- Transiciones simuladas ------------------------------------------- */
+/* ---- Transiciones ------------------------------------------------------ */
 
-/* "Obtener datos". Aqui NO se ejecuta nada: solo se pasa por un estado
-   intermedio para que la espera se vea, y se marca la tarjeta como lista.
-   Este es el punto donde despues entraria la operacion del servidor. */
+/* "Obtener datos": paso local de la pantalla. No ejecuta nada; deja la
+   tarjeta lista para la revision. */
 function prepararTrabajo(t) {
   var e = estados[t.id];
-  if (e.fase === 'cargando') { return; }
+  if (e.fase === 'cargando' || e.enviando) { return; }
 
   e.fase = 'cargando';
+  e.ejecucion = null;
   pintarTrabajo(t);
 
   clearTimeout(e.temporizador);
@@ -398,16 +450,96 @@ function prepararTrabajo(t) {
 
 function abrirRevision(t) {
   var e = estados[t.id];
-  if (e.fase !== 'listo') { return; }
+  if (t.destacado) {
+    if (!e.servicio) { return; }
+  } else if (e.fase !== 'listo') {
+    return;
+  }
   e.fase = 'revision';
   pintarTrabajo(t);
 }
 
 function cerrarRevision(t) {
   var e = estados[t.id];
-  if (e.fase !== 'revision') { return; }
-  e.fase = 'listo';
+  if (e.fase !== 'revision' || e.enviando) { return; }
+  e.fase = t.destacado ? 'inicial' : 'listo';
   pintarTrabajo(t);
+}
+
+/* ---- Ejecucion real ---------------------------------------------------- */
+
+/* ENVIAR. Manda al servidor solo el identificador del flujo (y el servicio,
+   cuando aplica) y espera a que termine el proceso de PowerShell. El exito
+   se decide por el codigo de salida del proceso, NO por que el request HTTP
+   haya respondido. */
+function enviarTrabajo(t) {
+  var e = estados[t.id];
+  if (e.enviando) { return; }                 // sin ejecuciones duplicadas
+  if (!flujoDisponible(t.id)) { return; }
+  if (t.destacado && !e.servicio) { return; }
+
+  var cuerpo = 'flujo=' + encodeURIComponent(t.id);
+  if (t.destacado) { cuerpo += '&servicio=' + encodeURIComponent(e.servicio); }
+
+  e.enviando = true;
+  e.faseAnterior = e.fase;
+  e.fase = 'ejecutando';
+  e.ejecucion = { clase: 'en-curso', titulo: 'Ejecutando ' + t.script + '...', detalle: '' };
+  pintarTrabajo(t);
+
+  fetch(ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: cuerpo
+  })
+    .then(function (r) {
+      /* El handler devuelve JSON tanto en el caso bueno como en el error
+         (500 con { error, tipo }), asi que se lee el cuerpo siempre. */
+      return r.json().catch(function () {
+        throw new Error('Respuesta HTTP ' + r.status + ' sin JSON.');
+      });
+    })
+    .then(function (d) {
+      if (d.ok) {
+        e.ejecucion = {
+          clase: 'ok',
+          titulo: 'Correcto — el script termino con codigo 0 (' + d.duracionMs + ' ms)',
+          detalle: d.salida || 'Sin salida.'
+        };
+        return;
+      }
+      /* Excepcion del handler: no llego a haber proceso. */
+      if (d.codigoSalida === undefined) {
+        e.ejecucion = {
+          clase: 'fallo',
+          titulo: 'Fallo — ' + (d.tipo || 'error') + ' en el servidor',
+          detalle: d.error || 'Sin detalle.'
+        };
+        return;
+      }
+      /* Hubo proceso, pero termino mal. Backlog y Servicios documentan el
+         codigo 5 (configuracion, SQL, Excel o SMTP) y dejan el detalle en su
+         carpeta Logs\. QA no atrapa sus errores: sale con 1 y solo deja lo
+         que haya escrito en la salida de error. */
+      e.ejecucion = {
+        clase: 'fallo',
+        titulo: 'Fallo — codigo de salida ' + d.codigoSalida +
+          (d.codigoSalida === 5 ? ' (revisar la carpeta Logs\\ del script)' : ''),
+        detalle: [d.error, d.salida].filter(Boolean).join('\n') || 'Sin salida.'
+      };
+    })
+    .catch(function (err) {
+      e.ejecucion = {
+        clase: 'fallo',
+        titulo: 'Fallo — no se pudo contactar con el servidor',
+        detalle: String(err && err.message ? err.message : err)
+      };
+    })
+    .then(function () {
+      e.enviando = false;
+      e.fase = e.faseAnterior || 'revision';
+      pintarTrabajo(t);
+    });
 }
 
 /* ---- Modal ------------------------------------------------------------ */
@@ -437,16 +569,13 @@ function trabajoDeEvento(ev) {
 
 function iniciar() {
   TRABAJOS_CORREO.forEach(function (t) {
-    estados[t.id] = { fase: 'inicial', periodo: '', temporizador: null };
-    if (t.destacado) {
-      /* Estado extra solo de Servicios: seleccion y fecha. Arranca en modo
-         automatico, con la fecha del dia anterior calculada al vuelo. */
-      estados[t.id].seleccion = SERVICIOS_DISPONIBLES
-        .filter(function (s) { return s.pordefecto; })
-        .map(function (s) { return s.id; });
-      estados[t.id].modoFecha = 'auto';
-      estados[t.id].fechaManual = isoLocal(fechaAutomatica());
-    }
+    estados[t.id] = {
+      fase: 'inicial', periodo: '', temporizador: null,
+      enviando: false, ejecucion: null
+    };
+    /* Estado extra solo de Servicios: el servicio elegido. La fecha no se
+       guarda aqui: siempre es la que manda el servidor. */
+    if (t.destacado) { estados[t.id].servicio = ''; }
   });
 
   pintarTodo();
@@ -460,7 +589,7 @@ function iniciar() {
   /* Un solo escucha por rejilla: el HTML se regenera en cada transicion. */
   gridCorreos.addEventListener('click', function (ev) {
     var boton = ev.target.closest('[data-accion]');
-    if (!boton) { return; }
+    if (!boton || boton.disabled) { return; }
     var trabajo = trabajoDeEvento(ev);
     if (!trabajo) { return; }
 
@@ -468,53 +597,23 @@ function iniciar() {
       case 'preparar': prepararTrabajo(trabajo); break;
       case 'abrir':    abrirRevision(trabajo);   break;
       case 'cerrar':   cerrarRevision(trabajo);  break;
-      case 'fecha-auto':
-        estados[trabajo.id].modoFecha = 'auto';
-        pintarTrabajo(trabajo);
-        break;
-      case 'enviar':
-        abrirModal(
-          'Envio no habilitado',
-          'El envio de "' + trabajo.titulo + '" todavia no esta conectado. ' +
-          'Esta pantalla es una vista previa: no se ejecuto ningun script, no ' +
-          'se abrio ninguna conexion SMTP y no se envio ningun correo.'
-        );
-        break;
+      case 'enviar':   enviarTrabajo(trabajo);   break;
     }
   });
 
-  /* Controles de Servicios. La seleccion y la fecha se quedan en memoria: no
-     se manda nada a ningun lado. Para no perder el foco mientras se escribe,
-     la casilla y la fecha actualizan solo el texto que cambia; el cambio de
-     modo si vuelve a pintar la tarjeta, porque aparece o desaparece el campo
-     de fecha manual. */
+  /* Seleccion de servicio. Solo actualiza el texto que cambia para no
+     perder el foco, y repinta el pie porque la flecha se habilita. */
   gridCorreos.addEventListener('change', function (ev) {
-    var campo = ev.target.closest('[data-campo]');
+    var campo = ev.target.closest('[data-campo="servicio"]');
     if (!campo) { return; }
     var trabajo = trabajoDeEvento(ev);
     if (!trabajo) { return; }
     var e = estados[trabajo.id];
-    var tarjeta = ev.target.closest('.job[data-id]');
+    if (e.enviando) { return; }
 
-    switch (campo.dataset.campo) {
-      case 'servicio':
-        var i = e.seleccion.indexOf(campo.value);
-        if (campo.checked && i === -1) { e.seleccion.push(campo.value); }
-        if (!campo.checked && i !== -1) { e.seleccion.splice(i, 1); }
-        campo.closest('.serv-casilla').classList.toggle('marcada', campo.checked);
-        tarjeta.querySelector('[data-rol="conteo"]').textContent = e.seleccion.length;
-        break;
-
-      case 'modo-fecha':
-        e.modoFecha = (campo.value === 'manual') ? 'manual' : 'auto';
-        pintarTrabajo(trabajo);
-        break;
-
-      case 'fecha-manual':
-        e.fechaManual = campo.value || isoLocal(fechaAutomatica());
-        tarjeta.querySelector('[data-rol="fecha"]').textContent = servFechaTexto(e);
-        break;
-    }
+    e.servicio = campo.value;
+    e.ejecucion = null;
+    pintarTrabajo(trabajo);
   });
 
   document.getElementById('grid-herramientas').addEventListener('click', function (ev) {
@@ -525,8 +624,8 @@ function iniciar() {
     if (!h) { return; }
     abrirModal(
       h.titulo,
-      'Esta accion administrativa todavia no esta habilitada. La consola es ' +
-      'por ahora solo visual: no ejecuta procesos ni modifica datos.'
+      'Esta accion administrativa todavia no esta habilitada. Las herramientas ' +
+      'de esta seccion siguen siendo solo visuales.'
     );
   });
 
@@ -537,6 +636,8 @@ function iniciar() {
   document.addEventListener('keydown', function (ev) {
     if (ev.key === 'Escape' && !modalFondo.hidden) { cerrarModal(); }
   });
+
+  cargarMetadatos();
 }
 
 document.addEventListener('DOMContentLoaded', iniciar);

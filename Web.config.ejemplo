@@ -30,11 +30,43 @@
          providerName="System.Data.SqlClient" />
   </connectionStrings>
 
+  <!--
+    Consola de administracion (admin.html) -> handlers/admin_correos.ashx.
+
+    Cada clave es la CARPETA donde ya vive el script correspondiente. Los
+    scripts NO se copian al sitio web: se ejecutan desde su propia carpeta
+    para que sus archivos de configuracion sigan resolviendo igual que hoy.
+    El nombre del .ps1 esta fijo en el handler; aqui solo va la ruta.
+
+      AdminScriptsQaDir         -> Enviar_CorreoQA.ps1
+      AdminScriptsBacklogDir    -> Enviar_CorreoBacklog_direccion.ps1
+      AdminScriptsServiciosDir  -> Enviar_CorreoServicio.ps1
+
+    AdminServiciosPermitidos es la lista blanca del parametro -Servicio,
+    separada por comas. El handler solo pasa al script una cadena de esta
+    lista, nunca la que mando el navegador. Los servicios de verdad viven en
+    dbo.CatServicioCorreo; para ver cuales hay dados de alta:
+
+        .\Enviar_CorreoServicio.ps1 -Listar
+
+    Esta lista debe reflejar esos nombres tal cual. La fecha (-FechaCorte) no
+    se configura: siempre es el dia anterior segun el reloj del servidor.
+  -->
+  <appSettings>
+    <add key="AdminScriptsQaDir"        value="C:\RUTA\A\Envio_correos" />
+    <add key="AdminScriptsBacklogDir"   value="C:\RUTA\A\Envio_correos" />
+    <add key="AdminScriptsServiciosDir" value="C:\RUTA\A\Envio_correos" />
+    <add key="AdminServiciosPermitidos" value="WMS" />
+  </appSettings>
+
   <system.web>
     <!-- App_Code/ se compila sola en el primer request: sin Visual Studio
          y sin paso de build. -->
     <compilation debug="true" targetFramework="4.8" />
-    <httpRuntime targetFramework="4.8" />
+    <!-- executionTimeout: los correos reales (SQL + reporte + SMTP) tardan
+         mas que los 110 s por defecto. El handler tiene ademas su propio
+         limite de 600 s sobre el proceso de PowerShell. -->
+    <httpRuntime targetFramework="4.8" executionTimeout="900" />
     <!-- Los handlers ya devuelven sus errores como JSON; esto solo evita
          que un fallo fuera de ellos exponga el stack trace en remoto. -->
     <customErrors mode="RemoteOnly" />

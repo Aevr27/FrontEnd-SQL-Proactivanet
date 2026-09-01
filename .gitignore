@@ -30,3 +30,6 @@ correo_qa_temp/
 correo_backlog_temp/
 correo_backlog_direccion_temp/
 Envio_correos/
+# Copia local de los scripts de correo (se ejecutan desde su carpeta, no
+# se versionan ni se sirven por HTTP).
+reenviacorreo/
