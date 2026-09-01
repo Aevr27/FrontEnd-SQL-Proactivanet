@@ -9,13 +9,17 @@
 //
 //     { "kpis": { "BacklogTotal": 0, "Criticos": 0, "Altos": 0,
 //                 "Mayor30Dias": 0, "Reasignados": 0, "Reabiertos": 0 },
-//       "prioridad": [...], "aging": [...], "sla": [...],
-//       "reasignaciones": [...], "reabiertos": [...] }
+//       "prioridad": [...], "aging": [...],
+//       "reasignaciones": [...], "reabiertos": [...], "sla": [...] }
 //
-// dbo.usp_CorreoBacklog_Principal devuelve esos seis result sets en el mismo
-// orden en que mock-data.js arma el objeto (mockBacklog): kpis primero, con
-// una sola fila, y los cinco restantes como listas. Si alguno saliera vacio,
-// revisar el orden dentro del procedimiento: aqui se mapea por posicion.
+// dbo.usp_CorreoBacklog_Principal devuelve seis result sets y aqui se mapean
+// POR POSICION, en el orden en que el procedimiento los emite (ver los
+// comentarios "Result set N" de 07_correo_backlog.sql): kpis, prioridad,
+// aging, reasignaciones, reabiertos y SLA al final. El SLA es el ultimo, no
+// el cuarto: mapearlo en la posicion 3 le entrega a "sla" las filas de
+// reasignaciones, que no traen EstadoSLA, y la columna "% Fuera SLA" de la
+// tabla por lider sale en 0% para todos. Las claves de este diccionario van
+// en ese mismo orden a proposito, para que se lean contra el procedimiento.
 //
 // Los filtros y la fecha de corte se leen con BacklogUtil, que ya existia en
 // App_Code/DashboardDb.cs para estos handlers: lista vacia = NULL = sin
@@ -41,9 +45,9 @@ public class BacklogResumen : IHttpHandler
                 { "kpis",          PrimeraFila(sets, 0) },
                 { "prioridad",     Filas(sets, 1) },
                 { "aging",         Filas(sets, 2) },
-                { "sla",           Filas(sets, 3) },
-                { "reasignaciones", Filas(sets, 4) },
-                { "reabiertos",    Filas(sets, 5) },
+                { "reasignaciones", Filas(sets, 3) },
+                { "reabiertos",    Filas(sets, 4) },
+                { "sla",           Filas(sets, 5) },
             };
         });
     }
