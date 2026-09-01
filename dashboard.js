@@ -519,9 +519,11 @@ function hoyISO() {
   function aplicarRangoRapido(tipo) {
     const hoy = new Date();
     let inicio, fin = new Date(hoy);
-    if (tipo === 'hoy') inicio = new Date(hoy);
-    else if (tipo === '7d') { inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6); }
-    else if (tipo === 'mes') inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    if (tipo === '7d') { inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6); }
+    // "Slot": bloque rodante de 30 dias que termina hoy (mismo criterio que el
+    // SLOT 0 del Tablero de Experiencia), no el mes calendario en curso. Con el
+    // mes calendario, el dia 1 de cada mes el rango colapsaba a un solo dia.
+    else if (tipo === 'mes') { inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 29); }
     else if (tipo === 'anio') inicio = new Date(hoy.getFullYear(), 0, 1);
     document.getElementById('f-inicio').value = formatoFecha(inicio);
     document.getElementById('f-fin').value = formatoFecha(fin);
@@ -903,6 +905,10 @@ function hoyISO() {
     document.getElementById('btn-limpiar').addEventListener('click', () => {
       document.getElementById('f-grupos').selectedIndex = -1;
       document.getElementById('f-tecnicos').selectedIndex = -1;
+      // "Limpiar" tambien devuelve el rango a hoy (24 hrs): es la unica via a
+      // ese rango desde que se quito el boton "24 hrs" del rango rapido.
+      document.getElementById('f-inicio').value = hoyISO();
+      document.getElementById('f-fin').value = hoyISO();
       cargarTodo();
     });
     document.getElementById('btn-reset-filtros').addEventListener('click', resetFiltros);
