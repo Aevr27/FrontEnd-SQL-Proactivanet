@@ -383,58 +383,24 @@
   /* Rango rapido: grupo segmentado que ocupa el alto de una barra. */
   .filtros .rango-rapido { display: flex; gap: 6px; flex-wrap: wrap; height: 40px; }
 
-  /* Selector multiple de SLOT: un boton en la barra que abre un popover chico
-     anclado debajo. Sin SLOT marcado el tablero se ve por dia. */
-  .filtros .slotpop-wrap { position: relative; }
-  .filtros #btn-slots {
-    width: 100%; height: 40px; display: flex; align-items: center; gap: 8px;
-    justify-content: space-between;
+  /* Selector de SLOT: un stepper compacto - N +. Elegir N son "los ultimos N
+     SLOTs" (SLOT 0..N-1) y su unico efecto es fijar el rango de fechas, asi que
+     va a juego con Rango rapido, no con los desplegables. */
+  .filtros .slotstep {
+    display: flex; align-items: center; gap: 6px; height: 40px;
   }
-  .filtros #btn-slots.sel {
-    background: var(--accent); border-color: var(--accent); color: #fff;
+  .filtros .slotstep .btn { flex: none; width: 32px; padding: 0; }
+  .filtros .slotstep .btn:disabled { opacity: .45; cursor: default; }
+  .filtros .slotn {
+    min-width: 2.5ch; text-align: center;
+    font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
   }
-  .filtros #btn-slots .caret { flex: none; font-size: 11px; opacity: .8; }
-  /* El menu desplegado va en claro, igual que el de Grupos/Tecnicos. */
-  .filtros .slotpop {
-    position: absolute; z-index: 40; top: calc(100% + 6px); left: 0;
-    min-width: 230px; padding: 8px;
-    background: #ffffff; border: 1px solid #dbe3ef;
-    border-radius: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, .14);
-  }
-  .filtros .slotpop[hidden] { display: none; }
-  .filtros .slotbox { display: flex; flex-direction: column; gap: 4px; }
-  .filtros .slotopt {
-    position: relative; display: flex; align-items: center; gap: 8px;
-    cursor: pointer; user-select: none;
-    padding: 7px 9px; border-radius: var(--radius-xs);
-    border: 1px solid transparent; background: transparent;
-    color: #172554; font-size: 12px; font-weight: 600;
-    transition: border-color .15s ease, background .15s ease, color .15s ease;
-  }
-  .filtros .slotopt:hover { background: #f1f5f9; }
-  /* Toda la opcion se pinta al seleccionarla, no solo la casilla. */
-  .filtros .slotopt.sel {
-    background: var(--accent); border-color: var(--accent); color: #fff;
-  }
-  .filtros .slotopt input { margin: 0; flex: none; cursor: pointer; accent-color: var(--accent); }
-  .filtros .slotopt.sel input { accent-color: #fff; }
-  .filtros .slotnom { white-space: nowrap; }
-  /* Rango real del SLOT: al hover y hacia la derecha, fuera del popover. En
-     linea ensanchaba cada opcion y sacaba una barra de scroll horizontal. */
-  .filtros .slottip {
-    display: none; position: absolute; left: calc(100% + 10px); top: 50%;
-    transform: translateY(-50%); z-index: 50;
-    padding: 6px 9px; border-radius: var(--radius-xs);
-    background: #0f172a; border: 1px solid #475569; color: #e2e8f0;
-    font-size: 11px; font-weight: 500; line-height: 1.45; white-space: nowrap;
-    box-shadow: 0 6px 16px -4px rgba(0, 0, 0, .55);
-  }
-  .filtros .slotopt:hover .slottip { display: block; }
-  .filtros .slotfoot {
-    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-    margin-top: 8px; padding-top: 8px; border-top: 1px solid #e2e8f0;
-  }
-  .filtros .slotsum { width: 100%; font-size: 12px; font-weight: 700; color: var(--accent); }
+  /* El acento marca el SLOT ya aplicado, no el numero preparado. */
+  .filtros .slotstep.sel .slotn { color: var(--accent); }
+  /* En acento solo cuando el SLOT esta en vigor; inactivo o sin aplicar, apagado
+     para no anunciar un periodo que no es el de la grafica. */
+  .filtros .slotsum { width: 100%; font-size: 12px; font-weight: 700; color: var(--muted); }
+  .filtros .slotsum.sel { color: var(--accent); }
 
   .filtros .rango-rapido .btn {
     flex: 1 1 0; min-width: 0; height: 40px; padding: 0 10px;

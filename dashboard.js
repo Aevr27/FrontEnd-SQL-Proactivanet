@@ -535,14 +535,10 @@ function hoyISO() {
     const hoy = new Date();
     let inicio, fin = new Date(hoy);
     if (tipo === '7d') { inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6); }
-    // "Slot": bloque rodante de 30 dias que termina hoy (mismo criterio que el
-    // SLOT 0 del Tablero de Experiencia), no el mes calendario en curso. Con el
-    // mes calendario, el dia 1 de cada mes el rango colapsaba a un solo dia.
-    else if (tipo === 'mes') { inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 29); }
     else if (tipo === 'anio') inicio = new Date(hoy.getFullYear(), 0, 1);
-    // El rango rapido manda sobre los SLOT: dejarlos marcados agruparia estos
-    // dias en bloques de 30 que ya no son los que el usuario acaba de pedir.
-    slotsSel.clear();
+    // El rango rapido manda sobre el SLOT: acaba de fijar un periodo distinto,
+    // asi que dejar el SLOT en vigor contradiria lo que se acaba de pedir.
+    desactivarSlots();
     document.getElementById('f-inicio').value = formatoFecha(inicio);
     document.getElementById('f-fin').value = formatoFecha(fin);
     cargarTodo();
@@ -579,15 +575,13 @@ function hoyISO() {
   const DIAS_RANKING = 7;
 
   function rangoRanking() {
-    // Con SLOT marcados el ranking usa ese mismo periodo, para que la seleccion
-    // signifique lo mismo en la grafica y en la tabla. Se toma del inicio del
-    // SLOT mas antiguo al fin del mas reciente: con SLOT 0 + 1 son 60 dias.
+    // Con SLOT aplicado el ranking usa ese mismo periodo, para que el numero
+    // signifique lo mismo en la grafica y en la tabla: del inicio del SLOT mas
+    // antiguo (N - 1) a hoy. Con N = 2 son 60 dias.
     if (enModoSlot()) {
-      const nums = [...slotsSel].sort((a, b) => a - b);
       return {
-        inicio: slotRango(nums[nums.length - 1]).inicio,
-        fin: slotRango(nums[0]).fin,
-        slots: nums,
+        inicio: slotRango(slotsAplicados - 1).inicio,
+        fin: slotRango(0).fin,
       };
     }
     const fin = new Date();
@@ -608,32 +602,19 @@ function hoyISO() {
   }
 
   // ------------------------------------------------------------------- SLOT
-  // Un SLOT es un bloque rodante de 30 dias, con el mismo criterio que el boton
-  // de rango rapido "Slot": el SLOT 0 son los ultimos 30 dias CONTANDO hoy, el
-  // SLOT 1 los 30 anteriores, y asi. Aqui no hay una serie por SLOT como tal:
-  // se agrupan los dias que ya devuelve tendencia.ashx, sin pedir nada mas al
-  // servidor ni tocar ningun calculo del SP.
+  // Un SLOT es un bloque rodante de 30 dias: el SLOT 0 son los ultimos 30 dias
+  // CONTANDO hoy, el SLOT 1 los 30 anteriores, y asi. El selector pide "los
+  // ultimos N": N = 1 es el SLOT 0, N = 3 son los SLOT 0, 1 y 2. Su unico
+  // efecto es escribir el rango de fechas; la grafica se sigue viendo por dia.
   const DIAS_SLOT = 30;
-  const slotsSel = new Set();
+  const MAX_SLOTS = 12;              // hasta 360 dias hacia atras
+  // Preparado en el stepper vs. vigente en los datos que hay en pantalla. Son
+  // distintos mientras el usuario mueve el numero y todavia no aplica.
+  let slotsN = 0;                    // 0 = sin SLOT, manda el rango manual
+  let slotsAplicados = 0;
 
-  function medianoche(d) {
-    const x = new Date(d);
-    x.setHours(0, 0, 0, 0);
-    return x;
-  }
-  // Dias completos entre dos fechas, ignorando la hora.
-  function diasEntre(desde, hasta) {
-    return Math.round((medianoche(hasta) - medianoche(desde)) / 86400000);
-  }
-  // SLOT al que cae un dia 'YYYY-MM-DD'. null si es futuro (no cae en ninguno).
-  function slotDeISO(iso) {
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
-    if (!m) return null;
-    const dias = diasEntre(new Date(+m[1], +m[2] - 1, +m[3]), new Date());
-    return dias < 0 ? null : Math.floor(dias / DIAS_SLOT);
-  }
-  // Rango de calendario del SLOT s. Ambos extremos entran; el SLOT 0 termina
-  // hoy, igual que el boton "Slot".
+  // Rango de calendario del SLOT s. Ambos extremos entran y el SLOT 0 termina
+  // hoy, asi que "ultimos N SLOTs" va de slotRango(N - 1).inicio a hoy.
   function slotRango(s) {
     const fin = new Date();
     fin.setDate(fin.getDate() - s * DIAS_SLOT);
@@ -641,101 +622,61 @@ function hoyISO() {
     inicio.setDate(inicio.getDate() - (DIAS_SLOT - 1));
     return { inicio: formatoFecha(inicio), fin: formatoFecha(fin) };
   }
-  // 'SLOT 0 · 30 dias', 'SLOT 1 · 31-60 dias', ...
-  function slotEtiqueta(s) {
-    return `SLOT ${s} · ${s === 0 ? '30 dias' : `${s * DIAS_SLOT + 1}–${(s + 1) * DIAS_SLOT} dias`}`;
-  }
-  // Etiqueta corta del eje X, como en el tablero de Experiencia.
-  function slotEtiquetaEje(s) {
-    return s === 0 ? '0-30d' : `${s * DIAS_SLOT + 1}-${(s + 1) * DIAS_SLOT}`;
-  }
-  // Los SLOT que se ofrecen no dependen del rango cargado: marcarlos ES la forma
-  // de fijar el rango (ver alCambiarSlots), asi que la lista es siempre la misma.
-  const SLOTS_OFRECIDOS = 6;         // SLOT 0..5, unos 180 dias
-  function slotsDisponibles() {
-    return Array.from({ length: SLOTS_OFRECIDOS }, (_, i) => i);
-  }
-  // SLOT marcados, de antiguo a reciente (SLOT alto -> 0), como en la grafica.
-  function slotsSeleccionados() {
-    return [...slotsSel].sort((a, b) => b - a);
-  }
-
-  // Sin SLOT marcados el tablero se ve por dia; marcar uno o mas cambia el eje
-  // a SLOT. No hay un selector de modo aparte: la seleccion es el modo.
+  // Hay SLOT en vigor solo cuando el usuario aplico uno: el numero preparado en
+  // el stepper no cuenta hasta que se pulsa "Aplicar filtros".
   function enModoSlot() {
-    return slotsSel.size > 0;
+    return slotsAplicados > 0;
   }
 
-  // Agrupa las series diarias en los SLOT marcados. Cada SLOT es un punto del
-  // eje X: en modo SLOT no se dibuja ni una sola fecha suelta.
-  function agruparPorSlot(etiquetas, creados, cerrados, vencidos) {
-    const acc = new Map();
-    etiquetas.forEach((iso, i) => {
-      const s = slotDeISO(iso);
-      if (s === null || !slotsSel.has(s)) return;
-      if (!acc.has(s)) acc.set(s, { c: 0, cer: 0, ven: 0 });
-      const a = acc.get(s);
-      a.c += Number(creados[i]) || 0;
-      a.cer += Number(cerrados[i]) || 0;
-      a.ven += Number(vencidos[i]) || 0;
-    });
-    const nums = [...acc.keys()].sort((a, b) => b - a);
-    return {
-      etiquetas: nums.map(slotEtiquetaEje),
-      creados: nums.map(s => acc.get(s).c),
-      cerrados: nums.map(s => acc.get(s).cer),
-      vencidos: nums.map(s => acc.get(s).ven),
-    };
+  // Resumen del periodo que pide el numero: "Ultimos 3 SLOTs · 90 dias".
+  function resumenSlots(n) {
+    const cuantos = n === 1 ? 'Ultimo SLOT' : `Ultimos ${n} SLOTs`;
+    return `${cuantos} · ${n * DIAS_SLOT} dias`;
   }
 
-  function renderSlotBox() {
-    const disponibles = slotsDisponibles();
-    // Si el rango cargado ya no cubre un SLOT marcado, se descarta solo.
-    [...slotsSel].forEach(s => { if (!disponibles.includes(s)) slotsSel.delete(s); });
+  // Pinta el stepper. No recarga nada: se llama tanto desde renderTodo como
+  // desde los botones - / +, que solo mueven el numero.
+  function renderSlotStepper() {
+    const n = Math.max(slotsN, 1);   // el minimo visible es 1, aun estando inactivo
+    document.getElementById('slot-n').textContent = String(n);
+    document.getElementById('slot-menos').disabled = slotsN <= 1;
+    document.getElementById('slot-mas').disabled = slotsN >= MAX_SLOTS;
 
-    const caja = document.getElementById('slot-box');
-    caja.innerHTML = disponibles.map(s => {
-      const r = slotRango(s);
-      // El rango real va en un tooltip al hover, fuera del popover: en linea
-      // ensanchaba cada opcion y obligaba a hacer scroll horizontal.
-      return `<label class="slotopt${slotsSel.has(s) ? ' sel' : ''}" data-slot="${s}">
-          <input type="checkbox"${slotsSel.has(s) ? ' checked' : ''}>
-          <span class="slotnom">${escapeHtml(slotEtiqueta(s))}</span>
-          <span class="slottip">${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}</span>
-        </label>`;
-    }).join('') || '<span class="slotsum">El rango cargado no cubre ningun SLOT completo.</span>';
+    // Sin aplicar, el numero es una intencion: el aviso evita leerlo como si ya
+    // estuviera en la grafica.
+    const pendiente = slotsN !== slotsAplicados;
+    const sum = document.getElementById('slot-sum');
+    sum.textContent = slotsN === 0
+      ? 'Sin SLOT · rango manual'
+      : resumenSlots(slotsN) + (pendiente ? ' · sin aplicar' : '');
 
-    caja.querySelectorAll('.slotopt input').forEach(inp => {
-      inp.addEventListener('change', () => {
-        const s = Number(inp.closest('.slotopt').dataset.slot);
-        if (inp.checked) slotsSel.add(s); else slotsSel.delete(s);
-        alCambiarSlots();
-      });
-    });
-
-    const n = slotsSel.size;
-    document.getElementById('slot-sum').textContent = n === 0
-      ? 'Ningun SLOT seleccionado'
-      : (n === 1 ? `SLOT ${slotsSeleccionados()[0]} · ${DIAS_SLOT} dias`
-                 : `${n} SLOTs · ${n * DIAS_SLOT} dias`);
-
-    // El boton de la barra lleva la cuenta: con el popover cerrado es la unica
-    // pista de que la grafica esta agrupada por SLOT y no por dia.
-    document.getElementById('slot-btn-txt').textContent = n === 0 ? 'Slots' : `Slots (${n})`;
-    document.getElementById('btn-slots').classList.toggle('sel', n > 0);
+    // El acento marca lo que de verdad se esta viendo, no lo preparado.
+    const vigente = enModoSlot() && !pendiente;
+    document.getElementById('slot-step').classList.toggle('sel', vigente);
+    sum.classList.toggle('sel', vigente);
   }
 
-  // Marcar SLOT es la forma de fijar el rango: se escribe su periodo completo en
-  // las fechas y se recarga todo, igual que el boton de rango rapido "Slot". Asi
-  // los KPIs, la tendencia y el ranking hablan siempre del mismo periodo. Al
-  // desmarcar todos el rango se queda como quedo y el eje vuelve a ser diario.
-  function alCambiarSlots() {
-    if (enModoSlot()) {
-      const nums = [...slotsSel].sort((a, b) => a - b);
-      document.getElementById('f-inicio').value = slotRango(nums[nums.length - 1]).inicio;
-      document.getElementById('f-fin').value = slotRango(nums[0]).fin;
+  // Pone en vigor el SLOT preparado escribiendo su rango en las fechas. No
+  // recarga: la recarga la dispara "Aplicar filtros", el unico momento en que
+  // el SLOT entra en juego. Asi los KPIs, la tendencia y el ranking hablan
+  // siempre del mismo periodo que muestra el control.
+  function aplicarSlots() {
+    slotsAplicados = slotsN;
+    if (slotsN > 0) {
+      document.getElementById('f-inicio').value = slotRango(slotsN - 1).inicio;
+      document.getElementById('f-fin').value = slotRango(0).fin;
     }
-    cargarTodo();                    // renderTodo() ya repinta el popover
+    // Repintar aqui y no solo desde renderTodo: si la carga falla, el control
+    // no puede quedarse anunciando el periodo anterior.
+    renderSlotStepper();
+  }
+
+  // Vuelve al rango manual: lo usan los rangos rapidos y "Limpiar", que mandan
+  // sobre el SLOT porque acaban de fijar un periodo distinto a mano.
+  function desactivarSlots() {
+    slotsN = 0;
+    slotsAplicados = 0;
+    renderSlotStepper();
   }
 
   async function cargarCatalogos() {
@@ -843,12 +784,10 @@ function hoyISO() {
       hint.textContent = 'recalculada sobre lo filtrado';
     }
 
-    // En modo SLOT los dias sueltos se agrupan en bloques de 30: el eje X pasa a
-    // ser la lista de SLOT marcados y ya no muestra ninguna fecha diaria.
+    // El SLOT solo encuadra el periodo: la grafica sigue siendo diaria, asi que
+    // aqui no se agrupa nada y el eje X son siempre fechas.
     if (enModoSlot()) {
-      const g = agruparPorSlot(etiquetas, creados, cerrados, vencidos);
-      etiquetas = g.etiquetas; creados = g.creados; cerrados = g.cerrados; vencidos = g.vencidos;
-      hint.textContent = `por SLOT de ${DIAS_SLOT} dias · ${hint.textContent}`;
+      hint.textContent = `${resumenSlots(slotsAplicados)} · ${hint.textContent}`;
     }
 
     if (!etiquetas.length) {
@@ -857,17 +796,14 @@ function hoyISO() {
         : 'Sin tickets registrados en el rango de fechas.');
     }
 
-    // En modo SLOT la grafica va en barras: con un solo SLOT marcado el eje X
-    // tiene un unico punto y una linea no dibuja nada, solo tres puntos sueltos.
-    const barras = enModoSlot();
-    const serie = (label, data, color, rellenar) => barras
-      ? { label, data, backgroundColor: color, borderWidth: 0, borderRadius: 4, maxBarThickness: 56 }
-      : { label, data, borderColor: color,
-          backgroundColor: rellenar ? 'rgba(37,99,235,.12)' : color,
-          fill: !!rellenar, tension: .3, borderWidth: 2, pointRadius: 3 };
+    const serie = (label, data, color, rellenar) => ({
+      label, data, borderColor: color,
+      backgroundColor: rellenar ? 'rgba(37,99,235,.12)' : color,
+      fill: !!rellenar, tension: .3, borderWidth: 2, pointRadius: 3,
+    });
 
     graficos.tendencia = new Chart(document.getElementById('chart-tendencia'), {
-      type: barras ? 'bar' : 'line',
+      type: 'line',
       data: {
         labels: etiquetas,
         datasets: [
@@ -1087,7 +1023,7 @@ function hoyISO() {
       null, l => COLOR_PRIORIDAD[l] ?? GRIS, 'Ningun ticket pasa los filtros activos.');
     renderBarraDim('chart-aging', 'aging', 'aging',
       ORDEN_AGING, () => MORADO, 'Ningun ticket pasa los filtros activos.');
-    renderSlotBox();
+    renderSlotStepper();
     renderTopCerrados();
     renderChips();
   }
@@ -1119,49 +1055,42 @@ function hoyISO() {
     document.querySelectorAll('#tab-sla [data-rango]').forEach(btn => {
       btn.addEventListener('click', () => aplicarRangoRapido(btn.dataset.rango));
     });
-    document.getElementById('btn-aplicar').addEventListener('click', cargarTodo);
+    // Unico punto donde el SLOT entra en vigor: el stepper por si solo no
+    // recarga, se aplica junto al resto de filtros.
+    document.getElementById('btn-aplicar').addEventListener('click', () => {
+      aplicarSlots();
+      cargarTodo();
+    });
     document.getElementById('btn-limpiar').addEventListener('click', () => {
       document.getElementById('f-grupos').selectedIndex = -1;
       document.getElementById('f-tecnicos').selectedIndex = -1;
       // "Limpiar" tambien devuelve el rango a hoy (24 hrs): es la unica via a
       // ese rango desde que se quito el boton "24 hrs" del rango rapido.
-      slotsSel.clear();
+      desactivarSlots();
       document.getElementById('f-inicio').value = hoyISO();
       document.getElementById('f-fin').value = hoyISO();
       cargarTodo();
     });
     document.getElementById('btn-reset-filtros').addEventListener('click', resetFiltros);
 
-    // Popover de SLOTs: se abre desde el boton de la barra de filtros y se
-    // queda abierto mientras se marcan varios, que es el caso normal.
-    const btnSlots = document.getElementById('btn-slots');
-    const popSlots = document.getElementById('slot-pop');
-    function cerrarPopSlots() {
-      popSlots.hidden = true;
-      btnSlots.setAttribute('aria-expanded', 'false');
-    }
-    btnSlots.addEventListener('click', () => {
-      popSlots.hidden = !popSlots.hidden;
-      btnSlots.setAttribute('aria-expanded', String(!popSlots.hidden));
+    // Stepper de SLOTs: solo mueve el numero y repinta. Nada de red hasta que
+    // se pulsa "Aplicar filtros".
+    document.getElementById('slot-mas').addEventListener('click', () => {
+      slotsN = Math.min(slotsN + 1, MAX_SLOTS);
+      renderSlotStepper();
     });
-    document.addEventListener('click', e => {
-      if (!popSlots.hidden && !e.target.closest('.slotpop-wrap')) cerrarPopSlots();
+    document.getElementById('slot-menos').addEventListener('click', () => {
+      if (slotsN <= 1) return;       // el minimo visible es 1
+      slotsN--;
+      renderSlotStepper();
     });
-    document.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && !popSlots.hidden) {
-        cerrarPopSlots();
-        btnSlots.focus();
-      }
+    // Tocar una fecha a mano apaga el SLOT: si no, "Aplicar filtros" volveria a
+    // escribir el rango del SLOT encima y no habria forma de salir del stepper,
+    // que se queda en 1 como minimo.
+    ['f-inicio', 'f-fin'].forEach(id => {
+      document.getElementById(id).addEventListener('change', desactivarSlots);
     });
-
-    document.getElementById('btn-slots-todos').addEventListener('click', () => {
-      slotsDisponibles().forEach(s => slotsSel.add(s));
-      alCambiarSlots();
-    });
-    document.getElementById('btn-slots-limpiar').addEventListener('click', () => {
-      slotsSel.clear();
-      alCambiarSlots();
-    });
+    renderSlotStepper();             // estado inicial: sin SLOT, rango manual
 
     const inicioMes = new Date();
     inicioMes.setDate(1);

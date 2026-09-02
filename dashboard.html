@@ -40,26 +40,17 @@
         <label>Rango rapido</label>
         <div class="rango-rapido">
           <button class="btn linea chico" type="button" data-rango="7d">7 dias</button>
-          <button class="btn linea chico" type="button" data-rango="mes">Slot</button>
           <button class="btn linea chico" type="button" data-rango="anio">Año</button>
         </div>
       </div>
       <div class="campo">
-        <label for="btn-slots">Slots</label>
-        <div class="slotpop-wrap">
-          <button class="btn linea" type="button" id="btn-slots"
-                  aria-expanded="false" aria-haspopup="true">
-            <span id="slot-btn-txt">Slots</span><span class="caret">▾</span>
-          </button>
-          <div class="slotpop" id="slot-pop" hidden>
-            <div class="slotbox" id="slot-box"></div>
-            <div class="slotfoot">
-              <span class="slotsum" id="slot-sum"></span>
-              <button class="btn linea chico" type="button" id="btn-slots-todos">Seleccionar todos</button>
-              <button class="btn linea chico" type="button" id="btn-slots-limpiar">Limpiar</button>
-            </div>
-          </div>
+        <label for="slot-n">Ultimos SLOTs</label>
+        <div class="slotstep" id="slot-step">
+          <button class="btn linea chico" type="button" id="slot-menos" aria-label="Un SLOT menos">−</button>
+          <output class="slotn" id="slot-n" for="slot-menos slot-mas">1</output>
+          <button class="btn linea chico" type="button" id="slot-mas" aria-label="Un SLOT mas">+</button>
         </div>
+        <span class="slotsum" id="slot-sum"></span>
       </div>
       <div class="campo">
         <label for="f-grupos">Grupos</label>
