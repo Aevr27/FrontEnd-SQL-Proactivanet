@@ -15,6 +15,13 @@
 //   - El unico parametro variable es -Servicio, y se valida contra la lista
 //     blanca de Web.config: al script se le pasa la cadena canonica de la
 //     configuracion, no la que escribio el navegador.
+//   - Los destinatarios temporales (modo "personalizados" de la consola) NO
+//     se pasan por la linea de comandos ni tocan el .ps1: se escribe una
+//     copia temporal de config_correo_servicio.json con modo_prueba=true y
+//     destinatario_prueba = las direcciones validadas, y se le pasa al
+//     script con -RutaCorreo, que ya acepta. El archivo temporal vive en la
+//     carpeta de los scripts (fuera del sitio web) y se borra siempre al
+//     terminar. El navegador nunca ve el contenido de esa configuracion.
 //   - -FechaCorte se calcula SOLO en el servidor (dia anterior a hoy). El
 //     navegador no puede influir en ella.
 //   - Solo POST ejecuta. GET devuelve metadatos (servicios y fecha de corte)
@@ -62,7 +69,10 @@ using System.Configuration;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Text;
+using System.Text.RegularExpressions;
 using System.Web;
+using System.Web.Script.Serialization;
 
 public class AdminCorreos : IHttpHandler
 {
@@ -75,6 +85,14 @@ public class AdminCorreos : IHttpHandler
     // Los tres scripts viven juntos, asi que no hay una clave por flujo: una
     // sola ruta que cambiar al mover el sitio de maquina.
     private const string ClaveDirScripts = "AdminScriptsDir";
+
+    // Configuracion del flujo de servicios. Se usa como plantilla de la copia
+    // temporal cuando la consola pide destinatarios personalizados.
+    private const string ConfigServicio = "config_correo_servicio.json";
+
+    // Tope de direcciones temporales, para que el campo libre de la pantalla
+    // no se convierta en un envio masivo.
+    private const int MaxDestinatarios = 10;
 
     // Definicion fija de un flujo. Ni el nombre del script ni la clave de
     // configuracion salen nunca del request.
@@ -123,14 +141,36 @@ public class AdminCorreos : IHttpHandler
             // Argumentos del script. Para qa y backlog no hay ninguno: cada
             // script se basta con su propia configuracion.
             var argumentos = string.Empty;
+            string configTemporal = null;
+
             if (flujo.PideServicio)
             {
                 // Servicio canonico de la lista blanca + fecha del servidor.
                 var servicio = ValidarServicio(context.Request.Form["servicio"]);
                 argumentos = "-Servicio \"" + servicio + "\" -FechaCorte \"" + FechaCorte() + "\"";
+
+                // Destinatarios temporales: opcionales. Sin ellos, el script
+                // usa su distribucion normal (dbo.CatServicioCorreo).
+                var personalizados = ValidarDestinatarios(context.Request.Form["destinatarios"]);
+                if (personalizados.Count > 0)
+                {
+                    configTemporal = CrearConfigTemporal(Path.GetDirectoryName(script), personalizados);
+                    argumentos += " -RutaCorreo \"" + configTemporal + "\"";
+                }
             }
 
-            return Ejecutar(flujo, script, argumentos);
+            try
+            {
+                return Ejecutar(flujo, script, argumentos);
+            }
+            finally
+            {
+                // Nunca se deja atras una copia con la configuracion de SMTP.
+                if (configTemporal != null)
+                {
+                    try { File.Delete(configTemporal); } catch { }
+                }
+            }
         });
     }
 
@@ -242,6 +282,63 @@ public class AdminCorreos : IHttpHandler
         throw new ArgumentException(
             "Servicio no permitido: \"" + pedido + "\". Permitidos: " +
             string.Join(", ", permitidos.ToArray()) + ".");
+    }
+
+    // Direcciones temporales que llegan del navegador, separadas por ; o por
+    // coma. Solo se aceptan direcciones con forma de correo: lo que entra aqui
+    // acaba dentro de un JSON, nunca en la linea de comandos.
+    private static List<string> ValidarDestinatarios(string crudo)
+    {
+        var lista = new List<string>();
+        crudo = (crudo ?? string.Empty).Trim();
+        if (crudo.Length == 0) return lista;
+
+        var separadores = new char[] { ';', ',', '\n', '\r' };
+        foreach (var parte in crudo.Split(separadores))
+        {
+            var dir = parte.Trim();
+            if (dir.Length == 0) continue;
+
+            if (!Regex.IsMatch(dir, @"^[^@\s;,<>""]+@[^@\s;,<>""]+\.[^@\s;,<>""]+$"))
+                throw new ArgumentException("Destinatario no valido: \"" + dir + "\".");
+
+            if (!lista.Contains(dir)) lista.Add(dir);
+        }
+
+        if (lista.Count > MaxDestinatarios)
+            throw new ArgumentException(
+                "Demasiados destinatarios temporales: maximo " + MaxDestinatarios + ".");
+
+        return lista;
+    }
+
+    // Copia de config_correo_servicio.json con la distribucion sustituida por
+    // las direcciones temporales. Se apoya en el modo de prueba que el script
+    // YA tiene: modo_prueba=true ignora dbo.CatServicioCorreo y manda solo a
+    // destinatario_prueba. El resto de las claves (remitente, SMTP, topes) se
+    // conservan tal cual y no salen de la carpeta de los scripts.
+    private static string CrearConfigTemporal(string carpeta, List<string> destinatarios)
+    {
+        var plantilla = Path.Combine(carpeta, ConfigServicio);
+        if (!File.Exists(plantilla))
+            throw new FileNotFoundException(
+                "No se encontro " + ConfigServicio + " en la carpeta de los scripts: " +
+                "es la plantilla de los destinatarios temporales.", plantilla);
+
+        var serializador = new JavaScriptSerializer();
+        var config = serializador.Deserialize<Dictionary<string, object>>(
+            File.ReadAllText(plantilla));
+
+        config["modo_prueba"] = true;
+        config["destinatario_prueba"] = destinatarios.ToArray();
+
+        var destino = Path.Combine(
+            carpeta, "admin_correo_servicio_" + Guid.NewGuid().ToString("N") + ".json");
+
+        // Sin BOM: el script lo lee con -Encoding UTF8, y el serializador ya
+        // escapa cualquier caracter no ASCII.
+        File.WriteAllText(destino, serializador.Serialize(config), new UTF8Encoding(false));
+        return destino;
     }
 
     // Dia natural anterior al de hoy, segun el reloj local del servidor.

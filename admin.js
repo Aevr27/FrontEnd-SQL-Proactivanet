@@ -14,10 +14,14 @@
      - no replica nada de la logica de los scripts (SQL, SMTP, reportes);
      - no consulta la base de datos ni muestra direcciones de correo.
 
-   "Obtener datos" sigue siendo un paso local de la pantalla: prepara la
-   revision. La ejecucion real ocurre unicamente al pulsar ENVIAR, y el
-   resultado que se muestra es el del proceso de PowerShell (codigo de
-   salida, stdout, stderr), no el del request HTTP.
+   No hay ningun paso previo de "obtener datos": los .ps1 consultan SQL,
+   generan los reportes, arman el correo y lo mandan. La pantalla solo
+   valida lo que hace falta para lanzarlos y lo indica sola con el
+   semaforo (amarillo = falta algo, verde = listo para enviar).
+
+   La ejecucion real ocurre unicamente al pulsar ENVIAR, y el resultado que
+   se muestra es el del proceso de PowerShell (codigo de salida, stdout,
+   stderr), no el del request HTTP.
    ========================================================================= */
 
 'use strict';
@@ -104,14 +108,13 @@ var HERRAMIENTAS = [
   }
 ];
 
-/* Etiquetas de estado de una tarjeta de correo. */
-var ETIQUETA_ESTADO = {
-  inicial:   'Sin preparar',
-  cargando:  'Preparando datos...',
-  listo:     'Datos listos ✅',
-  revision:  'En revision ✅',
-  ejecutando:'Ejecutando el script...'
-};
+/* Tope de destinatarios temporales. Es el mismo que valida el handler; aqui
+   solo sirve para avisar antes de mandar. */
+var MAX_DESTINATARIOS = 10;
+
+/* Misma forma que valida el handler. Lo de aqui es cortesia: la validacion
+   que cuenta es la del servidor. */
+var CORREO = /^[^@\s;,<>"]+@[^@\s;,<>"]+\.[^@\s;,<>"]+$/;
 
 /* Estado por tarjeta. Independiente: una clave por id de trabajo. */
 var estados = {};
@@ -138,12 +141,11 @@ function desdeIso(iso) {
   return new Date(Number(t[0]), Number(t[1]) - 1, Number(t[2]));
 }
 
-/* Periodo mostrado en la revision: los ultimos 14 dias hasta hoy. Es solo
-   texto para la vista previa; no se consulta nada con estas fechas. */
-function periodoTexto() {
-  var fin = new Date();
-  var ini = new Date(fin.getTime() - 14 * 24 * 60 * 60 * 1000);
-  return ddmmaaaa(ini) + ' → ' + ddmmaaaa(fin);
+/* Direcciones escritas a mano: separadas por ; , o salto de linea. */
+function listaDestinatarios(texto) {
+  return String(texto || '').split(/[;,\r\n]+/)
+    .map(function (s) { return s.trim(); })
+    .filter(function (s) { return s.length > 0; });
 }
 
 /* ---- Metadatos del servidor ------------------------------------------- */
@@ -172,10 +174,13 @@ function cargarMetadatos() {
     })
     .then(function () {
       TRABAJOS_CORREO.forEach(function (t) {
-        /* Si el servicio elegido ya no esta en la lista blanca, se descarta. */
+        /* Los servicios elegidos que ya no esten en la lista blanca se
+           descartan. */
         var e = estados[t.id];
-        if (t.destacado && e.servicio && META.servicios.indexOf(e.servicio) === -1) {
-          e.servicio = '';
+        if (t.destacado && e.servicios.length) {
+          e.servicios = e.servicios.filter(function (s) {
+            return META.servicios.indexOf(s) !== -1;
+          });
         }
         pintarTrabajo(t);
       });
@@ -200,44 +205,75 @@ function bloqueCabecera(t) {
     '</div>';
 }
 
-function bloqueEstado(t) {
+/* ---- Semaforo automatico ----------------------------------------------
+   No hay ningun boton que "prepare" la tarjeta: la validez del envio se
+   deduce de lo que hay en pantalla y del estado del servidor, y se recalcula
+   en cada repintado y en cada cambio de los controles.
+
+   Devuelve '' cuando el flujo esta listo, o el motivo por el que no lo esta.
+   ---------------------------------------------------------------------- */
+function motivoNoListo(t) {
   var e = estados[t.id];
-  /* Servicios no tiene "Obtener datos": su estado inicial habla del
-     servicio, no de datos por preparar. */
-  var etiqueta = ETIQUETA_ESTADO[e.fase];
-  if (t.destacado && e.fase === 'inicial') {
-    etiqueta = e.servicio ? 'Servicio elegido ✅' : 'Sin servicio elegido';
+
+  if (!META.cargado) { return 'Comprobando la configuracion del servidor...'; }
+  if (META.error)    { return 'Sin configuracion del servidor'; }
+  if (!flujoDisponible(t.id)) { return 'Script no disponible'; }
+
+  if (t.destacado) {
+    if (!e.servicios.length) { return 'Sin servicios elegidos'; }
+    if (!META.fechaCorte)    { return 'Sin fecha de corte del servidor'; }
+
+    if (e.modoDestinatarios === 'personalizados') {
+      var dirs = listaDestinatarios(e.destinatarios);
+      if (!dirs.length) { return 'Faltan los destinatarios personalizados'; }
+      if (dirs.length > MAX_DESTINATARIOS) {
+        return 'Maximo ' + MAX_DESTINATARIOS + ' destinatarios personalizados';
+      }
+      for (var i = 0; i < dirs.length; i++) {
+        if (!CORREO.test(dirs[i])) {
+          return 'Destinatario no valido: ' + dirs[i];
+        }
+      }
+    }
   }
+
+  return '';
+}
+
+function esListo(t) { return motivoNoListo(t) === ''; }
+
+/* Texto del semaforo. Amarillo mientras falte algo, verde cuando el envio ya
+   es valido tal como esta la pantalla. */
+function textoEstado(t) {
+  if (estados[t.id].enviando) { return 'Ejecutando el script...'; }
+  var motivo = motivoNoListo(t);
+  return motivo ? '🟡 ' + motivo : '🟢 Listo para enviar';
+}
+
+/* Valor de data-estado, que es de donde salen el color de la franja y del
+   punto en admin.css. */
+function estadoVisual(t) {
+  var e = estados[t.id];
+  if (e.enviando)          { return 'ejecutando'; }
+  if (e.fase === 'revision') { return 'revision'; }
+  return esListo(t) ? 'listo' : 'pendiente';
+}
+
+function bloqueEstado(t) {
   return '<div class="job-estado">' +
       '<span class="job-punto" aria-hidden="true"></span>' +
-      '<span data-rol="etiqueta">' + esc(etiqueta) + '</span>' +
+      '<span data-rol="etiqueta">' + esc(textoEstado(t)) + '</span>' +
       '<span class="job-script" title="' + esc(t.script) + '">' + esc(t.script) + '</span>' +
     '</div>';
 }
 
+/* Pie unico: solo la flecha que abre la revision, habilitada cuando el
+   semaforo esta en verde. */
 function bloquePie(t) {
-  var e = estados[t.id];
-  var puedeAvanzar = (e.fase === 'listo' || e.fase === 'revision');
-  return '<div class="job-pie">' +
-      '<button class="btn job-preparar" type="button" data-accion="preparar"' +
-        (e.fase === 'cargando' ? ' disabled' : '') + '>' +
-        (e.fase === 'listo' ? 'Volver a obtener datos' : 'Obtener datos') +
-      '</button>' +
-      '<button class="job-flecha" type="button" data-accion="abrir"' +
-        ' aria-label="Revisar ' + esc(t.titulo) + '"' +
-        (puedeAvanzar ? '' : ' disabled') + '>→</button>' +
-    '</div>';
-}
-
-/* Pie de Servicios: no tiene "Obtener datos". Se pasa a revision en cuanto
-   hay un servicio elegido y el script esta localizable. */
-function bloquePieServicios(t) {
-  var e = estados[t.id];
-  var listo = !!e.servicio && flujoDisponible(t.id);
   return '<div class="job-pie">' +
       '<button class="job-flecha" type="button" data-accion="abrir"' +
         ' aria-label="Revisar ' + esc(t.titulo) + '"' +
-        (listo ? '' : ' disabled') + '>→</button>' +
+        (esListo(t) ? '' : ' disabled') + '>→</button>' +
     '</div>';
 }
 
@@ -248,7 +284,7 @@ function bloqueRevisionPie(t) {
       '<button class="job-flecha" type="button" data-accion="cerrar"' +
         ' aria-label="Regresar"' + (enviando ? ' disabled' : '') + '>←</button>' +
       '<button class="btn enviar" type="button" data-accion="enviar"' +
-        (enviando || !flujoDisponible(t.id) ? ' disabled' : '') + '>' +
+        (enviando || !esListo(t) ? ' disabled' : '') + '>' +
         (enviando ? 'Ejecutando...' : 'ENVIAR') +
       '</button>' +
     '</div>';
@@ -297,21 +333,19 @@ function plantillaTrabajo(t) {
     return bloqueCabecera(t) + bloqueEstado(t) + bloqueEjecucion(t) + bloquePie(t);
   }
 
-  /* Estado desplegado: resumen de revision. Sin direcciones de correo. */
+  /* Estado desplegado: lo que se va a ejecutar de verdad. Sin direcciones de
+     correo y sin pasos inventados: el script hace el resto. */
   return bloqueCabecera(t) + bloqueEstado(t) +
     '<div class="job-revision">' +
       '<h4>Revisar ' + esc(t.titulo) + '</h4>' +
       '<dl class="job-datos">' +
-        '<dt>Periodo</dt><dd>' + esc(e.periodo) + '</dd>' +
         '<dt>Script</dt><dd>' + esc(t.script) + '</dd>' +
-        '<dt>Datos</dt><dd class="job-ok">✅</dd>' +
-        '<dt>Reportes</dt><dd class="job-ok">✅</dd>' +
-        '<dt>Graficas</dt><dd class="job-ok">✅</dd>' +
+        '<dt>Parametros</dt><dd>ninguno (el script usa su configuracion)</dd>' +
+        '<dt>Envios</dt><dd>1</dd>' +
         '<dt>Adjuntos</dt><dd>' + esc(t.adjuntos) + '</dd>' +
-        '<dt>Destinatarios</dt><dd>' +
-          (t.destinatarios > 0 ? esc(t.destinatarios) + ' configurados' : 'sin configurar') +
+        '<dt>Destinatarios</dt><dd>Distribucion normal' +
+          (t.destinatarios > 0 ? ' (' + esc(t.destinatarios) + ' configurados)' : ' (sin configurar)') +
         '</dd>' +
-        '<dt>Listo para enviar</dt><dd class="job-ok">✅</dd>' +
       '</dl>' +
       bloqueAvisoConfig(t) +
       bloqueEjecucion(t) +
@@ -321,8 +355,10 @@ function plantillaTrabajo(t) {
 
 /* ---- Tarjeta destacada (Servicios) ------------------------------------ */
 
-/* Seleccion de UN servicio (es lo que acepta -Servicio) mas la fecha de
-   corte, que llega calculada del servidor y no se puede editar aqui. */
+/* Seleccion de UNO O VARIOS servicios (el script acepta uno por ejecucion,
+   asi que varios servicios son varias ejecuciones), la fecha de corte, que
+   llega calculada del servidor y no se puede editar aqui, y el modo de
+   destinatarios. */
 function bloqueControlesServicios(t) {
   var e = estados[t.id];
 
@@ -334,21 +370,35 @@ function bloqueControlesServicios(t) {
       '(clave AdminServiciosPermitidos en Web.config).</div>';
   } else {
     opciones = META.servicios.map(function (nombre) {
-      var marcado = (e.servicio === nombre);
+      var marcado = (e.servicios.indexOf(nombre) !== -1);
       return '<label class="serv-casilla' + (marcado ? ' marcada' : '') + '">' +
-          '<input type="radio" name="serv-servicio" data-campo="servicio"' +
+          '<input type="checkbox" data-campo="servicio"' +
             ' value="' + esc(nombre) + '"' + (marcado ? ' checked' : '') + '>' +
           '<span>' + esc(nombre) + '</span>' +
         '</label>';
     }).join('');
   }
 
+  var personalizados = (e.modoDestinatarios === 'personalizados');
+  var modos = [
+    { id: 'normal',         texto: 'Distribucion normal' },
+    { id: 'personalizados', texto: 'Personalizados' }
+  ].map(function (m) {
+    var marcado = (e.modoDestinatarios === m.id);
+    return '<label class="serv-radio' + (marcado ? ' marcada' : '') + '">' +
+        '<input type="radio" name="serv-modo-' + esc(t.id) + '" data-campo="modo"' +
+          ' value="' + esc(m.id) + '"' + (marcado ? ' checked' : '') + '>' +
+        '<span>' + esc(m.texto) + '</span>' +
+      '</label>';
+  }).join('');
+
   return '<div class="serv-controles">' +
       '<div class="serv-bloque">' +
-        '<h4>Servicio</h4>' +
+        '<h4>Servicios</h4>' +
         '<div class="serv-lista">' + opciones + '</div>' +
-        '<div class="serv-conteo">Seleccionado: ' +
-          '<b data-rol="servicio">' + esc(e.servicio || 'ninguno') + '</b>' +
+        '<div class="serv-conteo">Seleccionados: ' +
+          '<b data-rol="servicio">' + esc(e.servicios.join(', ') || 'ninguno') + '</b>' +
+          ' · Envios: <b>' + e.servicios.length + '</b>' +
         '</div>' +
       '</div>' +
       '<div class="serv-bloque">' +
@@ -360,6 +410,19 @@ function bloqueControlesServicios(t) {
           '<span class="serv-etiqueta-modo">Fecha del servidor</span>' +
         '</div>' +
       '</div>' +
+      '<div class="serv-bloque">' +
+        '<h4>Destinatarios</h4>' +
+        '<div class="serv-modos">' + modos + '</div>' +
+        (personalizados
+          ? '<textarea class="serv-destinatarios" data-campo="destinatarios" rows="2"' +
+              ' placeholder="correo@dominio.com; otro@dominio.com"' +
+              ' aria-label="Destinatarios temporales">' + esc(e.destinatarios) + '</textarea>' +
+            '<div class="serv-nota-fecha">Solo para este envio: sustituyen a la ' +
+              'distribucion configurada. Maximo ' + MAX_DESTINATARIOS + ', separados ' +
+              'por ; o por coma. No se guardan.</div>'
+          : '<div class="serv-nota-fecha">Se usa la distribucion configurada del ' +
+              'servicio. La pagina no la muestra.</div>') +
+      '</div>' +
     '</div>';
 }
 
@@ -368,21 +431,27 @@ function plantillaServicios(t) {
 
   if (e.fase !== 'revision') {
     return bloqueCabecera(t) + bloqueEstado(t) + bloqueControlesServicios(t) +
-      bloqueAvisoConfig(t) + bloqueEjecucion(t) + bloquePieServicios(t);
+      bloqueAvisoConfig(t) + bloqueEjecucion(t) + bloquePie(t);
   }
 
+  var personalizados = (e.modoDestinatarios === 'personalizados');
+  var dirs = listaDestinatarios(e.destinatarios);
+
+  /* Revision: exactamente lo que se va a ejecutar. Un envio por servicio,
+     porque el script recibe un -Servicio por ejecucion. */
   return bloqueCabecera(t) + bloqueEstado(t) +
     '<div class="job-revision">' +
       '<h4>Servicios — revision</h4>' +
       '<dl class="job-datos">' +
-        '<dt>Servicio</dt><dd>' + esc(e.servicio || 'ninguno') + '</dd>' +
+        '<dt>Servicios seleccionados</dt><dd>' +
+          esc(e.servicios.join(', ') || 'ninguno') + '</dd>' +
         '<dt>Fecha de corte</dt><dd>' + esc(META.fechaCorte || '—') + '</dd>' +
+        '<dt>Envios</dt><dd>' + e.servicios.length + '</dd>' +
         '<dt>Script</dt><dd>' + esc(t.script) + '</dd>' +
-        '<dt>Parametros</dt><dd>' +
-          esc('-Servicio "' + (e.servicio || '') + '" -FechaCorte "' + (META.fechaCorte || '') + '"') +
-        '</dd>' +
         '<dt>Destinatarios</dt><dd>' +
-          (t.destinatarios > 0 ? 'configurados' : 'sin configurar') +
+          (personalizados
+            ? 'Personalizados (' + dirs.length + '): ' + esc(dirs.join(', '))
+            : 'Distribucion normal') +
         '</dd>' +
       '</dl>' +
       bloqueAvisoConfig(t) +
@@ -394,7 +463,7 @@ function plantillaServicios(t) {
 function pintarTrabajo(t) {
   var el = document.getElementById('job-' + t.id);
   if (!el) { return; }
-  el.dataset.estado = estados[t.id].fase;
+  el.dataset.estado = estadoVisual(t);
   el.innerHTML = t.destacado ? plantillaServicios(t) : plantillaTrabajo(t);
 }
 
@@ -430,64 +499,49 @@ function pintarTodo() {
 
 /* ---- Transiciones ------------------------------------------------------ */
 
-/* "Obtener datos": paso local de la pantalla. No ejecuta nada; deja la
-   tarjeta lista para la revision. */
-function prepararTrabajo(t) {
-  var e = estados[t.id];
-  if (e.fase === 'cargando' || e.enviando) { return; }
+/* Refresco ligero: solo lo que depende del semaforo. Se usa mientras se
+   escribe en un campo, para no rehacer el HTML y perder el foco. */
+function refrescarEstado(t) {
+  var el = document.getElementById('job-' + t.id);
+  if (!el) { return; }
 
-  e.fase = 'cargando';
-  e.ejecucion = null;
-  pintarTrabajo(t);
+  el.dataset.estado = estadoVisual(t);
 
-  clearTimeout(e.temporizador);
-  e.temporizador = setTimeout(function () {
-    e.fase = 'listo';
-    e.periodo = periodoTexto();
-    pintarTrabajo(t);
-  }, 700);
+  var etiqueta = el.querySelector('[data-rol="etiqueta"]');
+  if (etiqueta) { etiqueta.textContent = textoEstado(t); }
+
+  var listo = esListo(t);
+  var flecha = el.querySelector('[data-accion="abrir"]');
+  if (flecha) { flecha.disabled = !listo; }
+  var enviar = el.querySelector('[data-accion="enviar"]');
+  if (enviar) { enviar.disabled = !listo || !!estados[t.id].enviando; }
 }
 
 function abrirRevision(t) {
-  var e = estados[t.id];
-  if (t.destacado) {
-    if (!e.servicio) { return; }
-  } else if (e.fase !== 'listo') {
-    return;
-  }
-  e.fase = 'revision';
+  if (!esListo(t)) { return; }
+  estados[t.id].fase = 'revision';
   pintarTrabajo(t);
 }
 
 function cerrarRevision(t) {
   var e = estados[t.id];
   if (e.fase !== 'revision' || e.enviando) { return; }
-  e.fase = t.destacado ? 'inicial' : 'listo';
+  e.fase = 'inicial';
   pintarTrabajo(t);
 }
 
 /* ---- Ejecucion real ---------------------------------------------------- */
 
-/* ENVIAR. Manda al servidor solo el identificador del flujo (y el servicio,
-   cuando aplica) y espera a que termine el proceso de PowerShell. El exito
-   se decide por el codigo de salida del proceso, NO por que el request HTTP
+/* Una ejecucion: manda al servidor el identificador del flujo, el servicio
+   (cuando aplica) y las direcciones temporales (cuando las hay). El exito se
+   decide por el codigo de salida del proceso, NO por que el request HTTP
    haya respondido. */
-function enviarTrabajo(t) {
-  var e = estados[t.id];
-  if (e.enviando) { return; }                 // sin ejecuciones duplicadas
-  if (!flujoDisponible(t.id)) { return; }
-  if (t.destacado && !e.servicio) { return; }
-
+function ejecutarUno(t, servicio, destinatarios) {
   var cuerpo = 'flujo=' + encodeURIComponent(t.id);
-  if (t.destacado) { cuerpo += '&servicio=' + encodeURIComponent(e.servicio); }
+  if (servicio)     { cuerpo += '&servicio=' + encodeURIComponent(servicio); }
+  if (destinatarios) { cuerpo += '&destinatarios=' + encodeURIComponent(destinatarios); }
 
-  e.enviando = true;
-  e.faseAnterior = e.fase;
-  e.fase = 'ejecutando';
-  e.ejecucion = { clase: 'en-curso', titulo: 'Ejecutando ' + t.script + '...', detalle: '' };
-  pintarTrabajo(t);
-
-  fetch(ENDPOINT, {
+  return fetch(ENDPOINT, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: cuerpo
@@ -501,45 +555,100 @@ function enviarTrabajo(t) {
     })
     .then(function (d) {
       if (d.ok) {
-        e.ejecucion = {
-          clase: 'ok',
+        return {
+          servicio: servicio, ok: true,
           titulo: 'Correcto — el script termino con codigo 0 (' + d.duracionMs + ' ms)',
           detalle: d.salida || 'Sin salida.'
         };
-        return;
       }
       /* Excepcion del handler: no llego a haber proceso. */
       if (d.codigoSalida === undefined) {
-        e.ejecucion = {
-          clase: 'fallo',
+        return {
+          servicio: servicio, ok: false,
           titulo: 'Fallo — ' + (d.tipo || 'error') + ' en el servidor',
           detalle: d.error || 'Sin detalle.'
         };
-        return;
       }
       /* Hubo proceso, pero termino mal. Backlog y Servicios documentan el
          codigo 5 (configuracion, SQL, Excel o SMTP) y dejan el detalle en su
          carpeta Logs\. QA no atrapa sus errores: sale con 1 y solo deja lo
          que haya escrito en la salida de error. */
-      e.ejecucion = {
-        clase: 'fallo',
+      return {
+        servicio: servicio, ok: false,
         titulo: 'Fallo — codigo de salida ' + d.codigoSalida +
           (d.codigoSalida === 5 ? ' (revisar la carpeta Logs\\ del script)' : ''),
         detalle: [d.error, d.salida].filter(Boolean).join('\n') || 'Sin salida.'
       };
     })
     .catch(function (err) {
-      e.ejecucion = {
-        clase: 'fallo',
+      return {
+        servicio: servicio, ok: false,
         titulo: 'Fallo — no se pudo contactar con el servidor',
         detalle: String(err && err.message ? err.message : err)
       };
-    })
-    .then(function () {
-      e.enviando = false;
-      e.fase = e.faseAnterior || 'revision';
-      pintarTrabajo(t);
     });
+}
+
+function resumenResultados(resultados) {
+  return resultados.map(function (r) {
+    return (r.servicio ? '[' + r.servicio + '] ' : '') + r.titulo +
+      '\n' + (r.detalle || 'Sin salida.');
+  }).join('\n\n');
+}
+
+/* ENVIAR. Es el unico paso que ejecuta algo. Con varios servicios son varias
+   ejecuciones, una detras de otra: el script recibe un -Servicio por
+   ejecucion y no conviene solaparlos, porque los tres comparten carpetas de
+   salida y de logs. */
+function enviarTrabajo(t) {
+  var e = estados[t.id];
+  if (e.enviando) { return; }                 // sin ejecuciones duplicadas
+  if (!esListo(t)) { return; }
+
+  var lote = t.destacado ? e.servicios.slice() : [''];
+  var destinatarios = (t.destacado && e.modoDestinatarios === 'personalizados')
+    ? listaDestinatarios(e.destinatarios).join(';')
+    : '';
+
+  e.enviando = true;
+  e.faseAnterior = e.fase;
+  e.fase = 'ejecutando';
+  pintarTrabajo(t);
+
+  var resultados = [];
+  var cadena = Promise.resolve();
+
+  lote.forEach(function (servicio) {
+    cadena = cadena.then(function () {
+      e.ejecucion = {
+        clase: 'en-curso',
+        titulo: 'Ejecutando ' + t.script + (servicio ? ' — ' + servicio : '') +
+          (lote.length > 1 ? ' (' + (resultados.length + 1) + ' de ' + lote.length + ')' : '') +
+          '...',
+        detalle: resumenResultados(resultados)
+      };
+      pintarTrabajo(t);
+      return ejecutarUno(t, servicio, destinatarios).then(function (r) {
+        resultados.push(r);
+      });
+    });
+  });
+
+  cadena.then(function () {
+    var fallos = resultados.filter(function (r) { return !r.ok; }).length;
+    e.ejecucion = {
+      clase: fallos ? 'fallo' : 'ok',
+      titulo: fallos
+        ? 'Fallo — ' + fallos + ' de ' + resultados.length + ' ejecuciones terminaron mal'
+        : (resultados.length > 1
+            ? 'Correcto — las ' + resultados.length + ' ejecuciones terminaron con codigo 0'
+            : resultados[0].titulo),
+      detalle: resumenResultados(resultados)
+    };
+    e.enviando = false;
+    e.fase = e.faseAnterior || 'revision';
+    pintarTrabajo(t);
+  });
 }
 
 /* ---- Modal ------------------------------------------------------------ */
@@ -569,13 +678,16 @@ function trabajoDeEvento(ev) {
 
 function iniciar() {
   TRABAJOS_CORREO.forEach(function (t) {
-    estados[t.id] = {
-      fase: 'inicial', periodo: '', temporizador: null,
-      enviando: false, ejecucion: null
-    };
-    /* Estado extra solo de Servicios: el servicio elegido. La fecha no se
-       guarda aqui: siempre es la que manda el servidor. */
-    if (t.destacado) { estados[t.id].servicio = ''; }
+    estados[t.id] = { fase: 'inicial', enviando: false, ejecucion: null };
+    /* Estado extra solo de Servicios: los servicios elegidos y el modo de
+       destinatarios. La fecha no se guarda aqui: siempre es la que manda el
+       servidor. Los destinatarios temporales tampoco se guardan en ningun
+       lado: viven en esta variable mientras la pagina este abierta. */
+    if (t.destacado) {
+      estados[t.id].servicios = [];
+      estados[t.id].modoDestinatarios = 'normal';
+      estados[t.id].destinatarios = '';
+    }
   });
 
   pintarTodo();
@@ -594,26 +706,53 @@ function iniciar() {
     if (!trabajo) { return; }
 
     switch (boton.dataset.accion) {
-      case 'preparar': prepararTrabajo(trabajo); break;
-      case 'abrir':    abrirRevision(trabajo);   break;
-      case 'cerrar':   cerrarRevision(trabajo);  break;
-      case 'enviar':   enviarTrabajo(trabajo);   break;
+      case 'abrir':  abrirRevision(trabajo);  break;
+      case 'cerrar': cerrarRevision(trabajo); break;
+      case 'enviar': enviarTrabajo(trabajo);  break;
     }
   });
 
-  /* Seleccion de servicio. Solo actualiza el texto que cambia para no
-     perder el foco, y repinta el pie porque la flecha se habilita. */
+  /* Seleccion de servicios y modo de destinatarios. Cambian el HTML de la
+     tarjeta (la casilla marcada, el campo de correos), asi que se repinta;
+     el semaforo se recalcula solo al pintar. */
   gridCorreos.addEventListener('change', function (ev) {
-    var campo = ev.target.closest('[data-campo="servicio"]');
+    var campo = ev.target.closest('[data-campo]');
     if (!campo) { return; }
     var trabajo = trabajoDeEvento(ev);
     if (!trabajo) { return; }
     var e = estados[trabajo.id];
     if (e.enviando) { return; }
 
-    e.servicio = campo.value;
+    if (campo.dataset.campo === 'servicio') {
+      var otros = e.servicios.filter(function (s) { return s !== campo.value; });
+      e.servicios = campo.checked ? otros.concat([campo.value]) : otros;
+      /* Se conserva el orden de la lista blanca, no el de los clics. */
+      e.servicios = META.servicios.filter(function (s) {
+        return e.servicios.indexOf(s) !== -1;
+      });
+    } else if (campo.dataset.campo === 'modo') {
+      e.modoDestinatarios = campo.value;
+    } else if (campo.dataset.campo !== 'destinatarios') {
+      return;
+    }
+
     e.ejecucion = null;
     pintarTrabajo(trabajo);
+  });
+
+  /* Mientras se escriben los destinatarios temporales no se repinta la
+     tarjeta: se perderia el foco en cada tecla. Solo se recalcula el
+     semaforo. */
+  gridCorreos.addEventListener('input', function (ev) {
+    var campo = ev.target.closest('[data-campo="destinatarios"]');
+    if (!campo) { return; }
+    var trabajo = trabajoDeEvento(ev);
+    if (!trabajo) { return; }
+    var e = estados[trabajo.id];
+    if (e.enviando) { return; }
+
+    e.destinatarios = campo.value;
+    refrescarEstado(trabajo);
   });
 
   document.getElementById('grid-herramientas').addEventListener('click', function (ev) {

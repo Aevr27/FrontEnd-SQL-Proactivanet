@@ -19,8 +19,10 @@
       correspondiente, lanzado desde su propia carpeta (Web.config).
       Eso incluye SQL, generacion de reportes y envio de correo, porque es
       lo que hacen los scripts; la pagina no replica nada de esa logica.
-    - "Obtener datos" y la revision siguen siendo pasos locales de la
-      pantalla: no ejecutan nada.
+    - No hay ningun paso previo de "obtener datos": los scripts ya
+      consultan SQL, generan los reportes, arman el correo y lo mandan.
+      La pantalla solo valida (semaforo automatico) y deja revisar antes
+      de ENVIAR; ni el semaforo ni la revision ejecutan nada.
     - Las tarjetas de Herramientas siguen siendo solo visuales.
     - No se muestran direcciones de correo reales.
 
@@ -48,9 +50,8 @@
   <div class="admin-aviso" role="note">
     <b>Atencion.</b> En las tres tarjetas de correo, el boton <b>ENVIAR</b>
     ejecuta el script de PowerShell correspondiente en el servidor y, por
-    tanto, envia el correo de verdad. "Obtener datos" y la pantalla de
-    revision no ejecutan nada. Las tarjetas de <i>Herramientas</i> siguen sin
-    estar conectadas.
+    tanto, envia el correo de verdad. La pantalla de revision no ejecuta
+    nada. Las tarjetas de <i>Herramientas</i> siguen sin estar conectadas.
   </div>
 
   <style>

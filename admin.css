@@ -71,9 +71,10 @@
 }
 .job:hover { box-shadow: var(--shadow-md); }
 
-.job[data-estado="listo"]    { border-left-color: var(--verde); }
-.job[data-estado="cargando"] { border-left-color: var(--ambr); }
-.job[data-estado="revision"] { border-left-color: var(--accent); }
+.job[data-estado="listo"]      { border-left-color: var(--verde); }
+.job[data-estado="pendiente"]  { border-left-color: var(--ambr); }
+.job[data-estado="ejecutando"] { border-left-color: var(--ambr); }
+.job[data-estado="revision"]   { border-left-color: var(--accent); }
 
 .job-cab { display: flex; align-items: flex-start; gap: 10px; }
 .job-icono {
@@ -108,7 +109,12 @@
   background: var(--muted-2); flex: none;
   box-shadow: 0 0 0 3px rgba(148, 163, 184, .18);
 }
-.job[data-estado="cargando"] .job-punto {
+/* Amarillo: al flujo le falta algo. El latido queda solo para la ejecucion,
+   que si es un proceso en curso. */
+.job[data-estado="pendiente"] .job-punto {
+  background: var(--ambr); box-shadow: 0 0 0 3px rgba(217, 119, 6, .18);
+}
+.job[data-estado="ejecutando"] .job-punto {
   background: var(--ambr); box-shadow: 0 0 0 3px rgba(217, 119, 6, .18);
   animation: job-latido 1s ease-in-out infinite;
 }
@@ -118,7 +124,7 @@
 }
 @keyframes job-latido { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) {
-  .job[data-estado="cargando"] .job-punto { animation: none; }
+  .job[data-estado="ejecutando"] .job-punto { animation: none; }
 }
 
 .job-script {
@@ -131,27 +137,9 @@
 
 /* ---- Botonera ---- */
 .job-pie { display: flex; align-items: center; gap: 8px; }
-/* "Obtener datos" es un paso local y secundario: no compite con ENVIAR, que
-   es el unico boton que ejecuta algo. Por eso no se estira, va en contorno y
-   con tipografia mas pequena; ENVIAR sigue solido y a ancho completo. */
+/* En el pie solo queda la flecha que abre la revision: el unico boton que
+   ejecuta algo es ENVIAR, dentro de la revision. */
 .job-pie .btn { flex: none; }
-.job-pie .job-preparar {
-  padding: 4px 9px;
-  font-size: 11px; font-weight: 600;
-  letter-spacing: .1px;
-  text-transform: none;
-  /* Mismo lenguaje visual que .job-flecha: fondo plano y contorno fino.
-     El azul solido queda reservado para ENVIAR. */
-  background: #fff; color: var(--muted);
-  border: 1px solid var(--line);
-  box-shadow: none;
-}
-.job-pie .job-preparar:hover:not(:disabled) {
-  background: var(--accent-soft); color: var(--accent-ink);
-  border-color: var(--accent-line);
-  box-shadow: none; filter: none;
-}
-.job-pie .job-preparar:disabled { opacity: .5; cursor: not-allowed; }
 .job-pie .job-flecha { margin-left: auto; }
 
 .job-flecha {
@@ -260,6 +248,17 @@
 .serv-conteo b { color: var(--ink); font-variant-numeric: tabular-nums; }
 
 .serv-modos { display: flex; flex-wrap: wrap; gap: 7px; }
+
+/* Destinatarios temporales: solo se usan en el envio en curso. */
+.serv-destinatarios {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-xs);
+  background: #fff; color: var(--ink);
+  font: inherit; font-size: 12px;
+  resize: vertical;
+}
 
 .serv-fecha-manual { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
 .serv-fecha-manual input[type="date"] {
