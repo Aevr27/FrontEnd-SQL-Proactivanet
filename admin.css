@@ -215,6 +215,17 @@
    bloque -Destinatarios-, asi que no hay dos columnas que repartir. */
 .job:not(.destacado) .serv-controles { grid-template-columns: 1fr; }
 
+/* La flecha que abre la revision en la tarjeta de Servicios: la de 34x32 se
+   quedaba diminuta al pie de una tarjeta que ocupa todo el ancho. Aqui mide
+   mas del doble (72x64) y da un area de clic comoda. Selector limitado a
+   .job.destacado .job-pie: las flechas de QA, Backlog y la de "regresar" de
+   cualquier revision no cambian. */
+.job.destacado .job-pie .job-flecha {
+  width: 72px; height: 64px;
+  border-radius: var(--radius-sm);
+  font-size: 26px;
+}
+
 .serv-bloque {
   background: #f8fafc;
   border: 1px solid var(--line-soft);
