@@ -56,6 +56,12 @@
   <appSettings>
     <add key="AdminScriptsDir"          value="C:\RUTA\A\Envio_correos" />
     <add key="AdminServiciosPermitidos" value="WMS" />
+
+    <!-- Tablero de Experiencia (experiencia/experiencia.html). Carpeta de
+         SharePoint con el detalle que hay detras del tablero; sale en el
+         boton "Ver detalle". La URL lleva token, por eso vive aqui y no en
+         el HTML ni en el JavaScript. Si se deja vacia, el boton no aparece. -->
+    <add key="ExperienciaLigaDetalle"    value="" />
   </appSettings>
 
   <system.web>

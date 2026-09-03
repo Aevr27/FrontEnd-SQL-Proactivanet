@@ -5,32 +5,67 @@
  * lineas del monolito, sin reescribir logica. Cambios minimos, solo los que
  * exige que el modulo cargue por si solo:
  *
- * - P ya no es un const con el JSON incrustado: se lee de data/experiencia.mock.json.
+ * - P ya no es un const con el JSON incrustado: se pide a
+ *   handlers/experiencia.ashx y, si ese endpoint no responde, se cae a
+ *   data/experiencia.mock.json (mismo contrato, ultimo corte manual).
  * - Se quitaron los bloques de Observabilidad y Orquestacion (ahora modulos
  *   aparte) y el manejador de la nav .mtab que alternaba entre las 3 pestanas.
  * Nota: fetch() no funciona sobre file://. Hay que servir la carpeta por HTTP.
  */
 (async function () {
 
+/* Origen de los datos.
+
+   API_URL es el handler de IIS, que arma exactamente la misma forma que el
+   mock (mismas llaves de primer nivel) leyendo de Tickets_Proactivanet. Si
+   no responde -- todavia no esta publicado, IIS caido, o la pagina se abrio
+   sin ASP.NET detras -- se cae a MOCK_URL para que el tablero siga pintando
+   con el ultimo corte generado a mano. El banner de arriba avisa cuando se
+   esta viendo el mock, para no confundirlo con datos frescos.
+
+   La pagina vive en /experiencia/, por eso las dos rutas van con ../ y sin
+   barra inicial: el sitio puede estar montado en un subdirectorio de IIS. */
+const API_URL  = '../handlers/experiencia.ashx';
 const MOCK_URL = 'data/experiencia.mock.json';
 
-let MOCK;
-try {
-  const resp = await fetch(MOCK_URL);
-  if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
-  MOCK = await resp.json();
-} catch (err) {
+function avisar(html, color){
   document.body.insertAdjacentHTML('afterbegin',
-    '<div style="background:#fee2e2;border:1px solid #dc2626;color:#7f1d1d;' +
-    'border-radius:10px;padding:14px 18px;margin-bottom:14px;font-size:13px">' +
-    '<b>No se pudo cargar ' + MOCK_URL + '.</b><br>' + String(err) +
-    '<br>Si abriste el archivo con doble clic (file://), el navegador bloquea ' +
-    'fetch(). Sirve la carpeta por HTTP.' +
-    '</div>');
-  throw err;
+    '<div style="background:' + color.bg + ';border:1px solid ' + color.bd + ';' +
+    'color:' + color.fg + ';border-radius:10px;padding:14px 18px;' +
+    'margin-bottom:14px;font-size:13px">' + html + '</div>');
 }
 
-const P = MOCK;
+async function traer(url){
+  const resp = await fetch(url, {headers: {'Accept': 'application/json'}});
+  if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
+  const datos = await resp.json();
+  /* El handler reporta sus errores con 200 + {error:...}; sin esto el
+     tablero pintaria vacio en lugar de decir que fallo la consulta. */
+  if (datos && datos.error) throw new Error(datos.error);
+  return datos;
+}
+
+let DATOS, errApi;
+try {
+  DATOS = await traer(API_URL);
+} catch (err) {
+  errApi = err;
+  try {
+    DATOS = await traer(MOCK_URL);
+    avisar('<b>Datos de respaldo.</b> El endpoint ' + API_URL + ' no respondio (' +
+           String(errApi) + '), se esta mostrando el corte guardado en ' + MOCK_URL + '.',
+           {bg:'#fef3c7', bd:'#d97706', fg:'#78350f'});
+  } catch (err2) {
+    avisar('<b>No se pudo cargar ' + API_URL + ' ni ' + MOCK_URL + '.</b><br>' +
+           'API: ' + String(errApi) + '<br>Mock: ' + String(err2) +
+           '<br>Si abriste el archivo con doble clic (file://), el navegador bloquea ' +
+           'fetch(). Sirve la carpeta por HTTP.',
+           {bg:'#fee2e2', bd:'#dc2626', fg:'#7f1d1d'});
+    throw err2;
+  }
+}
+
+const P = DATOS;
 
 const FMT = n => Math.round(n||0).toLocaleString('es-MX');
 const PCT = n => Math.round((n||0)*100)+'%';
