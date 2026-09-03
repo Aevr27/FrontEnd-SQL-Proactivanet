@@ -245,6 +245,27 @@ function estadoError(id, err) {
   console.error(err);
 }
 
+// Carga parcial: el tablero pinta lo que si llego y dice, sin esconderlo, que
+// datasets se quedaron fuera. `fallos` = [{ nombre, error }]. Sin fallos se
+// comporta exactamente como estadoOk().
+function estadoParcial(id, selloEtl, fallos) {
+  estadoOk(id, selloEtl);
+  if (!fallos || !fallos.length) return;
+  const el = document.getElementById(id);
+  const nombres = fallos.map(f => f.nombre).join(', ');
+  el.textContent += ` · ⚠ sin datos de: ${nombres}`;
+  el.title = fallos.map(f => `${f.nombre}: ${f.error && f.error.message}`).join('\n');
+  fallos.forEach(f => console.error(`[${f.nombre}]`, f.error));
+}
+
+/* Instrumentacion del ciclo de repintado. Apagada por omision: se enciende
+   desde la consola con `window.DEBUG_PERF = true` y se apaga igual, sin
+   recargar. Sirve para medir el coste real de un clic de cross-filter. */
+const perf = {
+  ini(nombre) { if (window.DEBUG_PERF) console.time(nombre); },
+  fin(nombre) { if (window.DEBUG_PERF) console.timeEnd(nombre); },
+};
+
 // Ordena el <tbody> al hacer clic en un <th>. Las columnas class="num" se
 // comparan como numero (si no, 9 quedaria despues de 100).
 function hacerOrdenable(tabla) {
@@ -326,6 +347,35 @@ function bordesSeleccion(etiquetas, seleccionada, grosorNormal) {
     borderColor: etiquetas.map(e => e === seleccionada ? '#0f172a' : '#fff'),
     borderWidth: etiquetas.map(e => e === seleccionada ? 3 : grosorNormal),
   };
+}
+
+/* Pinta una grafica reusando la instancia viva cuando solo cambiaron los datos.
+   Reconstruir (destroy + new Chart) es la parte cara del cross-filter: Chart.js
+   vuelve a medir el canvas, recrea escalas y anima desde cero en cada clic.
+   `construir()` devuelve la config completa (primera vez, o si el canvas quedo
+   con un mensaje de "sin datos"); `actualizar(grafico)` solo escribe labels y
+   datasets sobre la instancia existente.
+   `update('none')` salta la animacion SOLO en el repintado; la construccion
+   inicial conserva la animacion de siempre. */
+function dibujarGrafico(graficos, id, canvasId, construir, actualizar) {
+  const canvas = document.getElementById(canvasId);
+  if (!canvas) return null;
+
+  const vivo = graficos[id];
+  // renderEmptyChart() destruye la instancia y repinta el canvas a mano, asi
+  // que no basta con que `graficos[id]` exista: tiene que seguir siendo la
+  // grafica que Chart.js reconoce sobre ESE canvas.
+  const reusable = vivo && vivo.canvas === canvas && Chart.getChart(canvas) === vivo;
+
+  if (reusable) {
+    actualizar(vivo);
+    vivo.update('none');
+    return vivo;
+  }
+
+  if (vivo) { vivo.destroy(); delete graficos[id]; }
+  graficos[id] = new Chart(canvas, construir());
+  return graficos[id];
 }
 
 // Chart.js core no trae plugin de datalabels: este dibuja la cantidad dentro
@@ -455,6 +505,13 @@ const TableroSla = (function () {
 
   const graficos = {};
   let datos = null;
+  // false cuando detalle.ashx no pudo cargarse: los agregados del servidor
+  // siguen pintandose, pero el cross-filter por clic queda deshabilitado.
+  let detalleDisponible = false;
+  // Rangos del eje X cuando la tendencia va agrupada por SLOT (null = diaria).
+  // Vive fuera de renderTendencia() para que el callback del tooltip sea
+  // siempre el mismo objeto y la grafica se pueda actualizar sin reconstruirla.
+  let rangosSlotVigente = null;
   // Dimensiones de cross-filter. null = sin filtrar por esa dimension.
   const filtro = { estado: null, prioridad: null, aging: null, sla: null };
 
@@ -482,7 +539,7 @@ const TableroSla = (function () {
   // Filas que pasan todas las dimensiones activas. `omitir` deja fuera una
   // dimension: es lo que permite que la grafica sobre la que se hizo clic
   // siga mostrando todas sus rebanadas mientras las demas se recalculan.
-  function filas(omitir) {
+  function calcularFilas(omitir) {
     const todas = (datos && datos.detalle) || [];
     return todas.filter(r => {
       for (const dim of Object.keys(filtro)) {
@@ -493,6 +550,32 @@ const TableroSla = (function () {
       }
       return true;
     });
+  }
+
+  /* Cache de un ciclo de repintado. Un solo renderTodo() llama a filas() hasta
+     seis veces (KPIs, tendencia, productividad y las tres dimensiones) con el
+     mismo estado de filtro; solo cambia `omitir`. Se calcula una vez por clave
+     y se reusa. La firma del filtro invalida la cache sola en cuanto cambia
+     una dimension, y cargarTodo() la vacia al traer detalle nuevo. */
+  const cacheFilas = new Map();
+  let firmaCache = null;
+
+  function firmaFiltro() {
+    return Object.keys(filtro).map(k => `${k}=${filtro[k] ?? ''}`).join('|');
+  }
+
+  function invalidarFilas() { cacheFilas.clear(); firmaCache = null; }
+
+  function filas(omitir) {
+    const firma = firmaFiltro();
+    if (firma !== firmaCache) { cacheFilas.clear(); firmaCache = firma; }
+    const clave = omitir ?? '';
+    if (!cacheFilas.has(clave)) {
+      perf.ini(`filas(${clave || 'todas'})`);
+      cacheFilas.set(clave, calcularFilas(omitir));
+      perf.fin(`filas(${clave || 'todas'})`);
+    }
+    return cacheFilas.get(clave);
   }
 
   // distribucion.ashx agrega sobre TODOS los tickets del rango; `detalle`
@@ -533,8 +616,12 @@ const TableroSla = (function () {
 
   function alternarFiltro(dim, valor) {
     if (valor === null || valor === undefined) return;
+    // Sin detalle no hay con que recalcular las demas graficas: filtrar dejaria
+    // todo en cero y pareceria que no hay tickets. Se avisa en la barra de
+    // chips (renderChips) en vez de filtrar en falso.
+    if (!detalleDisponible) return;
     filtro[dim] = (filtro[dim] === valor) ? null : valor;
-    renderTodo();
+    renderTodo('filtro');
   }
 
   // ---------------------------------------------------------- filtros al servidor
@@ -819,7 +906,6 @@ const TableroSla = (function () {
   const EJE_CONTEO = { beginAtZero: true, ticks: { precision: 0, callback: v => FMT(v) } };
 
   function renderTendencia() {
-    destruir('tendencia');
     const hint = document.getElementById('hint-tendencia');
     let etiquetas, creados, cerrados, vencidos;
 
@@ -868,7 +954,13 @@ const TableroSla = (function () {
       }
     }
 
+    // El tooltip lee este valor a traves del closure, no de una copia dentro
+    // de la config: asi la grafica se puede actualizar en vez de reconstruirse
+    // cuando se pasa de vista diaria a agrupada por SLOT.
+    rangosSlotVigente = rangosSlot;
+
     if (!etiquetas.length) {
+      destruir('tendencia');
       return renderEmptyChart('chart-tendencia', hayFiltro()
         ? 'Ningun ticket con fecha de registro pasa los filtros activos.'
         : 'Sin tickets registrados en el rango de fechas.');
@@ -880,40 +972,46 @@ const TableroSla = (function () {
       fill: !!rellenar, tension: .3, borderWidth: 2, pointRadius: 3,
     });
 
-    graficos.tendencia = new Chart(document.getElementById('chart-tendencia'), {
-      type: 'line',
-      data: {
-        labels: etiquetas,
-        datasets: [
-          serie('Creados', creados, AZUL, true),
-          serie('Cerrados', cerrados, VERDE),
-          serie('Vencidos SLA', vencidos, ROJO),
-        ]
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
-          // Agrupado por SLOT la etiqueta sola no dice de que fechas habla:
-          // el rango del bloque va en el titulo del tooltip.
-          tooltip: rangosSlot ? {
-            callbacks: {
-              title: (items) => {
-                const i = items[0].dataIndex;
-                const r = rangosSlot[i];
-                return `${etiquetas[i]} · ${r.inicio} → ${r.fin}`;
+    dibujarGrafico(graficos, 'tendencia', 'chart-tendencia',
+      () => ({
+        type: 'line',
+        data: {
+          labels: etiquetas,
+          datasets: [
+            serie('Creados', creados, AZUL, true),
+            serie('Cerrados', cerrados, VERDE),
+            serie('Vencidos SLA', vencidos, ROJO),
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+            // Agrupado por SLOT la etiqueta sola no dice de que fechas habla:
+            // el rango del bloque va en el titulo del tooltip. Sin agrupar,
+            // el titulo es la etiqueta de siempre.
+            tooltip: {
+              callbacks: {
+                title: (items) => {
+                  const r = rangosSlotVigente && rangosSlotVigente[items[0].dataIndex];
+                  return r ? `${items[0].label} · ${r.inicio} → ${r.fin}` : items[0].label;
+                }
               }
             }
-          } : {}
-        },
-        scales: { y: EJE_CONTEO }
-      }
-    });
+          },
+          scales: { y: EJE_CONTEO }
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = creados;
+        gr.data.datasets[1].data = cerrados;
+        gr.data.datasets[2].data = vencidos;
+      });
   }
 
   function renderProductividad() {
-    destruir('productividad');
     let etiquetas, totales, cerrados;
 
     if (!hayFiltro()) {
@@ -938,32 +1036,38 @@ const TableroSla = (function () {
     }
 
     if (!etiquetas.length) {
+      destruir('productividad');
       return renderEmptyChart('chart-productividad', hayFiltro()
         ? 'Ningun tecnico tiene tickets con los filtros activos.'
         : 'Sin tickets asignados en el rango de fechas.');
     }
 
-    graficos.productividad = new Chart(document.getElementById('chart-productividad'), {
-      type: 'bar',
-      data: {
-        labels: etiquetas,
-        datasets: [
-          { label: 'Totales', data: totales, backgroundColor: AZUL, borderRadius: 5 },
-          { label: 'Cerrados', data: cerrados, backgroundColor: VERDE, borderRadius: 5 },
-        ]
-      },
-      options: {
-        indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
-        scales: { x: EJE_CONTEO }
-      }
-    });
+    dibujarGrafico(graficos, 'productividad', 'chart-productividad',
+      () => ({
+        type: 'bar',
+        data: {
+          labels: etiquetas,
+          datasets: [
+            { label: 'Totales', data: totales, backgroundColor: AZUL, borderRadius: 5 },
+            { label: 'Cerrados', data: cerrados, backgroundColor: VERDE, borderRadius: 5 },
+          ]
+        },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+          scales: { x: EJE_CONTEO }
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = totales;
+        gr.data.datasets[1].data = cerrados;
+      });
   }
 
   // Dona de estado. Se calcula omitiendo su propia dimension para que al
   // seleccionar un estado sigan viendose los demas.
   function renderEstado() {
-    destruir('estado');
     const ent = entradasDim('estado', null);
     const etiquetas = ent.map(e => e[0]);
     const valores = ent.map(e => e[1]);
@@ -971,21 +1075,31 @@ const TableroSla = (function () {
     const sel = bordesSeleccion(etiquetas, filtro.estado, 2);
 
     if (!etiquetas.length) {
+      destruir('estado');
       document.getElementById('legend-estado').innerHTML = '';
       return renderEmptyChart('chart-estado', 'Ningun ticket pasa los filtros activos.');
     }
 
-    graficos.estado = new Chart(document.getElementById('chart-estado'), {
-      type: 'doughnut',
-      data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
-        borderColor: sel.borderColor, borderWidth: sel.borderWidth }] },
-      options: {
-        responsive: true, maintainAspectRatio: false, cutout: '58%',
-        plugins: { legend: { display: false },
-          tooltip: { callbacks: { label: c => `${c.label}: ${FMT(c.raw)}` } } },
-        onClick: (evt, _els, gr) => alternarFiltro('estado', etiquetaDelClic(gr, evt)),
-      }
-    });
+    dibujarGrafico(graficos, 'estado', 'chart-estado',
+      () => ({
+        type: 'doughnut',
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
+          borderColor: sel.borderColor, borderWidth: sel.borderWidth }] },
+        options: {
+          responsive: true, maintainAspectRatio: false, cutout: '58%',
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: c => `${c.label}: ${FMT(c.raw)}` } } },
+          onClick: (evt, _els, gr) => alternarFiltro('estado', etiquetaDelClic(gr, evt)),
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        const ds = gr.data.datasets[0];
+        ds.data = valores;
+        ds.backgroundColor = colores;
+        ds.borderColor = sel.borderColor;
+        ds.borderWidth = sel.borderWidth;
+      });
 
     document.getElementById('legend-estado').innerHTML = etiquetas.map((l, i) =>
       `<span data-valor="${escapeAttr(l)}" class="${filtro.estado && filtro.estado !== l ? 'apagado' : ''}">
@@ -996,27 +1110,38 @@ const TableroSla = (function () {
   }
 
   function renderBarraDim(idCanvas, idGrafico, dim, orden, colorFn, mensajeVacio) {
-    destruir(idGrafico);
     const ent = entradasDim(dim, orden);
     const etiquetas = ent.map(e => e[0]);
     const valores = ent.map(e => e[1]);
     const colores = etiquetas.map((l, i) => colorFn(l, i));
     const sel = bordesSeleccion(etiquetas, filtro[dim], 0);
 
-    if (!etiquetas.length) return renderEmptyChart(idCanvas, mensajeVacio);
+    if (!etiquetas.length) {
+      destruir(idGrafico);
+      return renderEmptyChart(idCanvas, mensajeVacio);
+    }
 
-    graficos[idGrafico] = new Chart(document.getElementById(idCanvas), {
-      type: 'bar',
-      data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
-        borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false },
-          tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
-        scales: { y: EJE_CONTEO },
-        onClick: (evt, _els, gr) => alternarFiltro(dim, etiquetaDelClic(gr, evt)),
-      }
-    });
+    dibujarGrafico(graficos, idGrafico, idCanvas,
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
+          borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false },
+            tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
+          scales: { y: EJE_CONTEO },
+          onClick: (evt, _els, gr) => alternarFiltro(dim, etiquetaDelClic(gr, evt)),
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        const ds = gr.data.datasets[0];
+        ds.data = valores;
+        ds.backgroundColor = colores;
+        ds.borderColor = sel.borderColor;
+        ds.borderWidth = sel.borderWidth;
+      });
   }
 
   // ------------------------------------------- personas con mas tickets cerrados
@@ -1098,14 +1223,25 @@ const TableroSla = (function () {
   }
 
   // ------------------------------------------------------ barra de filtros activos
+  // Quitar un chip es un cambio de cross-filter, igual que un clic en una
+  // grafica: repintado local ('filtro'), sin tocar el ranking ni el stepper.
   function renderChips() {
-    pintarChipsFiltro('chips-filtro', filtro, ETIQUETA_DIM, renderTodo,
-      'ninguno · clic en una grafica para filtrar');
+    pintarChipsFiltro('chips-filtro', filtro, ETIQUETA_DIM, () => renderTodo('filtro'),
+      detalleDisponible
+        ? 'ninguno · clic en una grafica para filtrar'
+        : '⚠ sin detalle cargado · el filtro por clic esta deshabilitado');
   }
 
-  function resetFiltros() { limpiarFiltro(filtro, renderTodo); }
+  function resetFiltros() { limpiarFiltro(filtro, () => renderTodo('filtro')); }
 
-  function renderTodo() {
+  /* motivo === 'filtro' -> el repintado viene de un cambio de cross-filter.
+     El ranking de cerrados (topCerrados, que se pide aparte y a proposito
+     ignora el cross-filter) y el stepper de SLOT no dependen de `filtro`:
+     recalcularlos en cada clic reconstruia una tabla de 10 filas con sus
+     listeners de ordenacion para nada. Todo lo que SI depende del filtro se
+     sigue repintando en el mismo ciclo, asi que ninguna grafica queda vieja. */
+  function renderTodo(motivo) {
+    perf.ini('renderTodo');
     renderKpis();
     renderTendencia();
     renderProductividad();
@@ -1114,32 +1250,73 @@ const TableroSla = (function () {
       null, l => COLOR_PRIORIDAD[l] ?? GRIS, 'Ningun ticket pasa los filtros activos.');
     renderBarraDim('chart-aging', 'aging', 'aging',
       ORDEN_AGING, () => MORADO, 'Ningun ticket pasa los filtros activos.');
-    renderSlotStepper();
-    renderTopCerrados();
+    if (motivo !== 'filtro') {
+      renderSlotStepper();
+      renderTopCerrados();
+    }
     renderChips();
+    perf.fin('renderTodo');
   }
 
+  /* Valor neutro de cada dataset cuando su peticion falla: el render ya trata
+     estos casos como "sin datos" y pinta el estado vacio de siempre. */
+  const DATASET_VACIO = {
+    kpis: {}, tendencia: [], productividad: [],
+    distribucion: { estado: [], prioridad: [], aging: [] },
+    detalle: [], topCerrados: [],
+  };
+
+  /* Los seis datasets se resuelven POR SEPARADO (allSettled), no con
+     Promise.all. Con Promise.all el rechazo de uno solo -tipicamente
+     `detalle`, que en un rango de UN dia no se puede trocear y solo puede
+     bajar el tope de filas antes de rendirse- saltaba al catch y el tablero
+     entero se quedaba sin pintar, aunque kpis/tendencia/distribucion hubieran
+     respondido bien. Ahora cada dataset que llega se pinta; los que fallan
+     dejan su estado vacio y aparecen listados en la barra de estado. */
   async function cargarTodo() {
     estadoCargando('estado-carga');
-    try {
-      const qs = paramsFiltros().toString();
-      const qsGrupos = paramsRankingCerrados().toString();
-      const [kpis, tendencia, productividad, distribucion, detalle, topCerrados] = await Promise.all([
-        obtenerJSON(`kpis.ashx?${qs}`),
-        obtenerJSON(`tendencia.ashx?${qs}`),
-        obtenerJSON(`productividad.ashx?${qs}`),
-        obtenerJSON(`distribucion.ashx?${qs}`),
-        obtenerDetalle(paramsFiltros(), TOPE_DETALLE),
-        obtenerJSON(`productividad.ashx?${qsGrupos}`),
-      ]);
-      datos = { kpis, tendencia, productividad, distribucion, detalle, topCerrados };
-      // Cambiar el rango invalida cualquier seleccion previa del tablero.
-      Object.keys(filtro).forEach(k => { filtro[k] = null; });
-      renderTodo();
-      estadoOk('estado-carga', kpis && kpis.UltimaActualizacionEtl);
-    } catch (err) {
-      estadoError('estado-carga', err);
+    const qs = paramsFiltros().toString();
+    const qsGrupos = paramsRankingCerrados().toString();
+
+    const peticiones = [
+      ['kpis',          () => obtenerJSON(`kpis.ashx?${qs}`)],
+      ['tendencia',     () => obtenerJSON(`tendencia.ashx?${qs}`)],
+      ['productividad', () => obtenerJSON(`productividad.ashx?${qs}`)],
+      ['distribucion',  () => obtenerJSON(`distribucion.ashx?${qs}`)],
+      ['detalle',       () => obtenerDetalle(paramsFiltros(), TOPE_DETALLE)],
+      ['topCerrados',   () => obtenerJSON(`productividad.ashx?${qsGrupos}`)],
+    ];
+
+    const resueltos = await Promise.allSettled(peticiones.map(([, pedir]) => pedir()));
+
+    const nuevos = {};
+    const fallos = [];
+    resueltos.forEach((r, i) => {
+      const nombre = peticiones[i][0];
+      if (r.status === 'fulfilled') {
+        nuevos[nombre] = r.value;
+      } else {
+        nuevos[nombre] = DATASET_VACIO[nombre];
+        fallos.push({ nombre, error: r.reason });
+      }
+    });
+
+    // Si NO llego nada, el tablero no tiene que fingir un estado vacio: es un
+    // error de backend y se muestra como tal, igual que antes.
+    if (fallos.length === peticiones.length) {
+      datos = null;
+      detalleDisponible = false;
+      estadoError('estado-carga', fallos[0].error);
+      return;
     }
+
+    datos = nuevos;
+    detalleDisponible = !fallos.some(f => f.nombre === 'detalle');
+    // Cambiar el rango invalida cualquier seleccion previa del tablero.
+    Object.keys(filtro).forEach(k => { filtro[k] = null; });
+    invalidarFilas();
+    renderTodo();
+    estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.UltimaActualizacionEtl, fallos);
   }
 
   async function init() {
