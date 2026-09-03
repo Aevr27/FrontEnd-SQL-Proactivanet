@@ -205,6 +205,56 @@ function bloqueCabecera(t) {
     '</div>';
 }
 
+/* Modo de destinatarios. Lo usan las TRES tarjetas: los tres .ps1 aceptan
+   -RutaCorreo y su configuracion tiene modo_prueba/destinatario_prueba, asi
+   que el handler puede sustituir la distribucion por unas direcciones sueltas
+   en cualquiera de los tres flujos.
+
+   "Personalizados" no toca la configuracion de verdad: el handler escribe una
+   copia temporal y la borra al terminar. Las direcciones viven en el estado de
+   la pagina mientras este abierta; no se guardan en ningun sitio. */
+function bloqueDestinatarios(t) {
+  var e = estados[t.id];
+  var personalizados = (e.modoDestinatarios === 'personalizados');
+
+  var modos = [
+    { id: 'normal',         texto: 'Distribucion normal' },
+    { id: 'personalizados', texto: 'Personalizados' }
+  ].map(function (m) {
+    var marcado = (e.modoDestinatarios === m.id);
+    return '<label class="serv-radio' + (marcado ? ' marcada' : '') + '">' +
+        '<input type="radio" name="serv-modo-' + esc(t.id) + '" data-campo="modo"' +
+          ' value="' + esc(m.id) + '"' + (marcado ? ' checked' : '') + '>' +
+        '<span>' + esc(m.texto) + '</span>' +
+      '</label>';
+  }).join('');
+
+  return '<div class="serv-bloque">' +
+      '<h4>Destinatarios</h4>' +
+      '<div class="serv-modos">' + modos + '</div>' +
+      (personalizados
+        ? '<textarea class="serv-destinatarios" data-campo="destinatarios" rows="2"' +
+            ' placeholder="correo@dominio.com; otro@dominio.com"' +
+            ' aria-label="Destinatarios temporales">' + esc(e.destinatarios) + '</textarea>' +
+          '<div class="serv-nota-fecha">Solo para este envio: sustituyen a la ' +
+            'distribucion configurada. Maximo ' + MAX_DESTINATARIOS + ', separados ' +
+            'por ; o por coma. No se guardan.</div>'
+        : '<div class="serv-nota-fecha">Se usa la distribucion configurada' +
+            (t.destacado ? ' del servicio' : '') + '. La pagina no la muestra.</div>') +
+    '</div>';
+}
+
+/* Como se describe el modo en la pantalla de revision. */
+function resumenDestinatarios(t) {
+  var e = estados[t.id];
+  if (e.modoDestinatarios !== 'personalizados') {
+    return 'Distribucion normal' +
+      (t.destinatarios > 0 ? ' (' + t.destinatarios + ' configurados)' : '');
+  }
+  var dirs = listaDestinatarios(e.destinatarios);
+  return 'Personalizados (' + dirs.length + '): ' + dirs.join(', ');
+}
+
 /* ---- Semaforo automatico ----------------------------------------------
    No hay ningun boton que "prepare" la tarjeta: la validez del envio se
    deduce de lo que hay en pantalla y del estado del servidor, y se recalcula
@@ -222,17 +272,18 @@ function motivoNoListo(t) {
   if (t.destacado) {
     if (!e.servicios.length) { return 'Sin servicios elegidos'; }
     if (!META.fechaCorte)    { return 'Sin fecha de corte del servidor'; }
+  }
 
-    if (e.modoDestinatarios === 'personalizados') {
-      var dirs = listaDestinatarios(e.destinatarios);
-      if (!dirs.length) { return 'Faltan los destinatarios personalizados'; }
-      if (dirs.length > MAX_DESTINATARIOS) {
-        return 'Maximo ' + MAX_DESTINATARIOS + ' destinatarios personalizados';
-      }
-      for (var i = 0; i < dirs.length; i++) {
-        if (!CORREO.test(dirs[i])) {
-          return 'Destinatario no valido: ' + dirs[i];
-        }
+  /* Los destinatarios personalizados son de los tres flujos. */
+  if (e.modoDestinatarios === 'personalizados') {
+    var dirs = listaDestinatarios(e.destinatarios);
+    if (!dirs.length) { return 'Faltan los destinatarios personalizados'; }
+    if (dirs.length > MAX_DESTINATARIOS) {
+      return 'Maximo ' + MAX_DESTINATARIOS + ' destinatarios personalizados';
+    }
+    for (var i = 0; i < dirs.length; i++) {
+      if (!CORREO.test(dirs[i])) {
+        return 'Destinatario no valido: ' + dirs[i];
       }
     }
   }
@@ -329,22 +380,28 @@ function bloqueEjecucion(t) {
 function plantillaTrabajo(t) {
   var e = estados[t.id];
 
+  var personalizados = (e.modoDestinatarios === 'personalizados');
+
   if (e.fase !== 'revision') {
-    return bloqueCabecera(t) + bloqueEstado(t) + bloqueEjecucion(t) + bloquePie(t);
+    return bloqueCabecera(t) + bloqueEstado(t) +
+      '<div class="serv-controles">' + bloqueDestinatarios(t) + '</div>' +
+      bloqueEjecucion(t) + bloquePie(t);
   }
 
-  /* Estado desplegado: lo que se va a ejecutar de verdad. Sin direcciones de
-     correo y sin pasos inventados: el script hace el resto. */
+  /* Estado desplegado: lo que se va a ejecutar de verdad. Sin pasos
+     inventados: el script hace el resto. */
   return bloqueCabecera(t) + bloqueEstado(t) +
     '<div class="job-revision">' +
       '<h4>Revisar ' + esc(t.titulo) + '</h4>' +
       '<dl class="job-datos">' +
         '<dt>Script</dt><dd>' + esc(t.script) + '</dd>' +
-        '<dt>Parametros</dt><dd>ninguno (el script usa su configuracion)</dd>' +
-        '<dt>Adjuntos</dt><dd>' + esc(t.adjuntos) + '</dd>' +
-        '<dt>Destinatarios</dt><dd>Distribucion normal' +
-          (t.destinatarios > 0 ? ' (' + esc(t.destinatarios) + ' configurados)' : ' (sin configurar)') +
+        '<dt>Parametros</dt><dd>' +
+          (personalizados
+            ? '-RutaCorreo (configuracion temporal de este envio)'
+            : 'ninguno (el script usa su configuracion)') +
         '</dd>' +
+        '<dt>Adjuntos</dt><dd>' + esc(t.adjuntos) + '</dd>' +
+        '<dt>Destinatarios</dt><dd>' + esc(resumenDestinatarios(t)) + '</dd>' +
       '</dl>' +
       bloqueAvisoConfig(t) +
       bloqueEjecucion(t) +
@@ -402,19 +459,6 @@ function bloqueControlesServicios(t) {
     }).join('');
   }
 
-  var personalizados = (e.modoDestinatarios === 'personalizados');
-  var modos = [
-    { id: 'normal',         texto: 'Distribucion normal' },
-    { id: 'personalizados', texto: 'Personalizados' }
-  ].map(function (m) {
-    var marcado = (e.modoDestinatarios === m.id);
-    return '<label class="serv-radio' + (marcado ? ' marcada' : '') + '">' +
-        '<input type="radio" name="serv-modo-' + esc(t.id) + '" data-campo="modo"' +
-          ' value="' + esc(m.id) + '"' + (marcado ? ' checked' : '') + '>' +
-        '<span>' + esc(m.texto) + '</span>' +
-      '</label>';
-  }).join('');
-
   return '<div class="serv-controles">' +
       '<div class="serv-bloque">' +
         '<h4>Servicios</h4>' +
@@ -441,19 +485,7 @@ function bloqueControlesServicios(t) {
           '<span class="serv-etiqueta-modo">Fecha del servidor</span>' +
         '</div>' +
       '</div>' +
-      '<div class="serv-bloque">' +
-        '<h4>Destinatarios</h4>' +
-        '<div class="serv-modos">' + modos + '</div>' +
-        (personalizados
-          ? '<textarea class="serv-destinatarios" data-campo="destinatarios" rows="2"' +
-              ' placeholder="correo@dominio.com; otro@dominio.com"' +
-              ' aria-label="Destinatarios temporales">' + esc(e.destinatarios) + '</textarea>' +
-            '<div class="serv-nota-fecha">Solo para este envio: sustituyen a la ' +
-              'distribucion configurada. Maximo ' + MAX_DESTINATARIOS + ', separados ' +
-              'por ; o por coma. No se guardan.</div>'
-          : '<div class="serv-nota-fecha">Se usa la distribucion configurada del ' +
-              'servicio. La pagina no la muestra.</div>') +
-      '</div>' +
+      bloqueDestinatarios(t) +
     '</div>';
 }
 
@@ -464,9 +496,6 @@ function plantillaServicios(t) {
     return bloqueCabecera(t) + bloqueEstado(t) + bloqueControlesServicios(t) +
       bloqueAvisoConfig(t) + bloqueEjecucion(t) + bloquePie(t);
   }
-
-  var personalizados = (e.modoDestinatarios === 'personalizados');
-  var dirs = listaDestinatarios(e.destinatarios);
 
   /* Revision: exactamente lo que se va a ejecutar. Una sola ejecucion del
      script, que es quien reparte los servicios internamente. */
@@ -479,11 +508,7 @@ function plantillaServicios(t) {
         '<dt>Fecha de corte</dt><dd>' + esc(META.fechaCorte || '—') + '</dd>' +
         '<dt>Script</dt><dd>' + esc(t.script) + '</dd>' +
         '<dt>Parametros</dt><dd>' + esc(interfazServicios(e.servicios)) + '</dd>' +
-        '<dt>Destinatarios</dt><dd>' +
-          (personalizados
-            ? 'Personalizados (' + dirs.length + '): ' + esc(dirs.join(', '))
-            : 'Distribucion normal') +
-        '</dd>' +
+        '<dt>Destinatarios</dt><dd>' + esc(resumenDestinatarios(t)) + '</dd>' +
       '</dl>' +
       bloqueAvisoConfig(t) +
       bloqueEjecucion(t) +
@@ -663,7 +688,7 @@ function enviarTrabajo(t) {
   if (!esListo(t)) { return; }
 
   var servicios = t.destacado ? e.servicios.slice() : [];
-  var destinatarios = (t.destacado && e.modoDestinatarios === 'personalizados')
+  var destinatarios = (e.modoDestinatarios === 'personalizados')
     ? listaDestinatarios(e.destinatarios).join(';')
     : '';
 
@@ -719,15 +744,17 @@ function trabajoDeEvento(ev) {
 
 function iniciar() {
   TRABAJOS_CORREO.forEach(function (t) {
-    estados[t.id] = { fase: 'inicial', enviando: false, ejecucion: null };
-    /* Estado extra solo de Servicios: los servicios elegidos y el modo de
-       destinatarios. La fecha no se guarda aqui: siempre es la que manda el
-       servidor. Los destinatarios temporales tampoco se guardan en ningun
-       lado: viven en esta variable mientras la pagina este abierta. */
+    /* El modo de destinatarios es de las tres tarjetas. Los destinatarios
+       temporales no se guardan en ningun lado: viven en esta variable
+       mientras la pagina este abierta. */
+    estados[t.id] = {
+      fase: 'inicial', enviando: false, ejecucion: null,
+      modoDestinatarios: 'normal', destinatarios: ''
+    };
+    /* Estado extra solo de Servicios: los servicios elegidos. La fecha no se
+       guarda aqui, siempre es la que manda el servidor. */
     if (t.destacado) {
       estados[t.id].servicios = [];
-      estados[t.id].modoDestinatarios = 'normal';
-      estados[t.id].destinatarios = '';
     }
   });
 

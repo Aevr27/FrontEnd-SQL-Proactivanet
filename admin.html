@@ -23,8 +23,14 @@
       consultan SQL, generan los reportes, arman el correo y lo mandan.
       La pantalla solo valida (semaforo automatico) y deja revisar antes
       de ENVIAR; ni el semaforo ni la revision ejecutan nada.
+    - Las TRES tarjetas dejan elegir los destinatarios: la distribucion
+      configurada de cada flujo, o unas direcciones sueltas solo para ese
+      envio. Lo segundo no toca la configuracion de verdad: el handler
+      escribe una copia temporal, se la pasa al script con -RutaCorreo y la
+      borra al terminar.
     - Las tarjetas de Herramientas siguen siendo solo visuales.
-    - No se muestran direcciones de correo reales.
+    - No se muestran las direcciones de la distribucion configurada; las
+      personalizadas las escribe quien usa la pagina y no se guardan.
 
   Reusa dashboard.css unicamente para heredar variables, tipografia y las
   clases base (.wrap, .card, .btn, .badge, .pill). dashboard.css NO se
@@ -92,61 +98,6 @@
     <div class="admin-grid herramientas" id="grid-herramientas"></div>
   </section>
 
-  <!-- ============================================ Prueba de PowerShell -->
-  <!--
-    PRUEBA DE CONCEPTO AISLADA.
-
-    Es el unico elemento de esta pagina que llega al servidor. Todo su
-    HTML, su CSS y su JavaScript viven aqui dentro a proposito: no se
-    modificaron admin.js ni admin.css, y menos aun nada del tablero.
-
-    Cadena completa:
-      boton -> POST handlers/admin_prueba_powershell.ashx -> powershell.exe
-      -> tools/test.ps1 -> C:\Temp\admin-powershell-test.txt
-
-    El handler tiene la ruta del script fija en el codigo: no recibe ningun
-    parametro, no es un ejecutor generico de comandos. test.ps1 no manda
-    correo ni consulta la base de datos.
-  -->
-  <section class="admin-seccion" id="seccion-prueba-ps">
-    <div class="admin-seccion-cab">
-      <h2>Prueba de conexion con PowerShell</h2>
-      <span class="admin-seccion-hint">prueba de concepto</span>
-    </div>
-
-    <style>
-      /* Solo para este bloque; admin.css no se toco. */
-      #seccion-prueba-ps .prueba-ps { padding: 16px 18px; }
-      #seccion-prueba-ps .prueba-ps p { margin: 0 0 12px; }
-      #seccion-prueba-ps .prueba-ps-fila {
-        display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
-      }
-      #seccion-prueba-ps .prueba-ps-estado { font-size: 13px; opacity: .85; }
-      #seccion-prueba-ps .prueba-ps-estado.ok    { color: #1a7f37; opacity: 1; }
-      #seccion-prueba-ps .prueba-ps-estado.fallo { color: #b42318; opacity: 1; }
-      #seccion-prueba-ps .prueba-ps-salida {
-        display: none; margin: 12px 0 0; padding: 10px 12px;
-        max-height: 220px; overflow: auto;
-        white-space: pre-wrap; word-break: break-word;
-        font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
-        background: rgba(127, 127, 127, .12); border-radius: 8px;
-      }
-    </style>
-
-    <article class="card prueba-ps">
-      <p>
-        Ejecuta <code>tools/test.ps1</code>, que solo escribe una linea con la
-        fecha y la hora en <code>C:\Temp\admin-powershell-test.txt</code>.
-        No envia correo ni consulta la base de datos.
-      </p>
-      <div class="prueba-ps-fila">
-        <button class="btn" type="button" id="btn-prueba-ps">Probar PowerShell</button>
-        <span class="prueba-ps-estado" id="estado-prueba-ps" role="status" aria-live="polite">Sin ejecutar</span>
-      </div>
-      <pre class="prueba-ps-salida" id="salida-prueba-ps"></pre>
-    </article>
-  </section>
-
   <footer>
     Pagina interna sin enlace en la navegacion. Sin autenticacion todavia:
     no publicar esta ruta fuera de la red interna.
@@ -163,71 +114,6 @@
     </div>
   </div>
 </div>
-
-<!--
-  Logica de la prueba de PowerShell. Independiente de admin.js: no comparte
-  ninguna variable ni funcion con el, y se encierra en su propia IIFE para no
-  dejar nada en el ambito global.
--->
-<script>
-(function () {
-  var boton  = document.getElementById('btn-prueba-ps');
-  var estado = document.getElementById('estado-prueba-ps');
-  var salida = document.getElementById('salida-prueba-ps');
-
-  function mostrar(texto, clase) {
-    estado.textContent = texto;
-    estado.className = 'prueba-ps-estado' + (clase ? ' ' + clase : '');
-  }
-
-  function detalle(texto) {
-    salida.textContent = texto || '';
-    salida.style.display = texto ? 'block' : 'none';
-  }
-
-  boton.addEventListener('click', function () {
-    boton.disabled = true;
-    mostrar('Ejecutando...');
-    detalle('');
-
-    // POST: el handler rechaza GET a proposito.
-    fetch('handlers/admin_prueba_powershell.ashx', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: ''
-    })
-      .then(function (r) {
-        // El handler devuelve JSON tanto en el caso bueno como en el error
-        // (500 con { error, tipo }), asi que se lee el cuerpo siempre.
-        return r.json().catch(function () {
-          throw new Error('Respuesta HTTP ' + r.status + ' sin JSON.');
-        });
-      })
-      .then(function (d) {
-        if (d.ok) {
-          mostrar('Correcto — el script se ejecuto (' + d.duracionMs + ' ms)', 'ok');
-          detalle(d.salida);
-          return;
-        }
-        // Error del propio handler (excepcion) o codigo de salida != 0.
-        if (d.error && d.codigoSalida === undefined) {
-          mostrar('Fallo — ' + (d.tipo || 'error') + ' en el servidor', 'fallo');
-          detalle(d.error);
-          return;
-        }
-        mostrar('Fallo — codigo de salida ' + d.codigoSalida, 'fallo');
-        detalle([d.error, d.salida].filter(Boolean).join('\n') || 'Sin salida.');
-      })
-      .catch(function (e) {
-        mostrar('Fallo — no se pudo contactar con el servidor', 'fallo');
-        detalle(String(e && e.message ? e.message : e));
-      })
-      .then(function () {
-        boton.disabled = false;
-      });
-  });
-}());
-</script>
 
 <script src="admin.js"></script>
 </body>

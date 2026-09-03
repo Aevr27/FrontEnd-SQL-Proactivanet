@@ -1,8 +1,10 @@
 <%@ WebHandler Language="C#" Class="AdminCorreos" %>
 
 // Ejecucion REAL de los tres flujos de correo de la consola de
-// administracion (admin.html). Es el hermano "de verdad" de
-// admin_prueba_powershell.ashx, que se conserva como prueba de concepto.
+// administracion (admin.html). Es el UNICO punto de la aplicacion que lanza
+// powershell.exe: la prueba de concepto que hubo aqui al lado
+// (admin_prueba_powershell.ashx + tools/test.ps1) se retiro una vez que estos
+// tres flujos quedaron funcionando.
 //
 // NO es un ejecutor generico de comandos:
 //
@@ -21,13 +23,15 @@
 //     el reparto que el script ya implementa; aqui no se replica.
 //   - Los destinatarios temporales (modo "personalizados" de la consola) NO
 //     se pasan por la linea de comandos ni tocan el .ps1: se escribe una
-//     copia temporal de config_correo_servicio.json con modo_prueba=true y
-//     destinatario_prueba = las direcciones validadas, y se le pasa al
-//     script con -RutaCorreo, que ya acepta. El archivo temporal vive en la
-//     carpeta de los scripts (fuera del sitio web) y se borra siempre al
-//     terminar. El navegador nunca ve el contenido de esa configuracion.
-//   - -FechaCorte se calcula SOLO en el servidor (dia anterior a hoy). El
-//     navegador no puede influir en ella.
+//     copia temporal del .json de ESE flujo (config_correo_qa.json,
+//     config_correo_backlog_direccion.json o config_correo_servicio.json) con
+//     modo_prueba=true y destinatario_prueba = las direcciones validadas, y se
+//     le pasa al script con -RutaCorreo, que los tres aceptan. El archivo
+//     temporal vive en la carpeta de los scripts (fuera del sitio web) y se
+//     borra siempre al terminar. El navegador nunca ve el contenido de esa
+//     configuracion.
+//   - -FechaCorte se calcula SOLO en el servidor (dia anterior a hoy) y solo
+//     lo recibe el flujo de servicios. El navegador no puede influir en ella.
 //   - Solo POST ejecuta. GET devuelve metadatos (servicios y fecha de corte)
 //     para que la pantalla de revision muestre lo mismo que se va a ejecutar.
 //
@@ -99,21 +103,18 @@ public class AdminCorreos : IHttpHandler
     // sola ruta que cambiar al mover el sitio de maquina.
     private const string ClaveDirScripts = "AdminScriptsDir";
 
-    // Configuracion del flujo de servicios. Se usa como plantilla de la copia
-    // temporal cuando la consola pide destinatarios personalizados.
-    private const string ConfigServicio = "config_correo_servicio.json";
-
     // Tope de direcciones temporales, para que el campo libre de la pantalla
     // no se convierta en un envio masivo.
     private const int MaxDestinatarios = 10;
 
-    // Definicion fija de un flujo. Ni el nombre del script ni la clave de
+    // Definicion fija de un flujo. Ni el nombre del script ni el de su
     // configuracion salen nunca del request.
     private class Flujo
     {
         public string Id;
         public string Titulo;
-        public string Script;      // nombre del .ps1, fijo en el codigo
+        public string Script;        // nombre del .ps1, fijo en el codigo
+        public string ConfigCorreo;  // su .json, plantilla de la copia temporal
         public bool   PideServicio;
     }
 
@@ -122,16 +123,19 @@ public class AdminCorreos : IHttpHandler
         new Flujo {
             Id = "qa", Titulo = "Correo QA",
             Script = "Enviar_CorreoQA.ps1",
+            ConfigCorreo = "config_correo_qa.json",
             PideServicio = false
         },
         new Flujo {
             Id = "backlog", Titulo = "Correo Backlog",
             Script = "Enviar_CorreoBacklog_direccion.ps1",
+            ConfigCorreo = "config_correo_backlog_direccion.json",
             PideServicio = false
         },
         new Flujo {
             Id = "servicios", Titulo = "Servicios",
             Script = "Enviar_CorreoServicio.ps1",
+            ConfigCorreo = "config_correo_servicio.json",
             PideServicio = true
         },
     };
@@ -151,8 +155,9 @@ public class AdminCorreos : IHttpHandler
             var flujo = BuscarFlujo(context.Request.Form["flujo"]);
             var script = RutaScript(flujo);
 
-            // Argumentos del script. Para qa y backlog no hay ninguno: cada
-            // script se basta con su propia configuracion.
+            // Argumentos del script. Sin destinatarios temporales, qa y
+            // backlog no llevan ninguno: cada script se basta con su propia
+            // configuracion.
             var lanzamiento = new Lanzamiento();
             string configTemporal = null;
             var corridas = 1;                 // qa y backlog: siempre una
@@ -171,16 +176,19 @@ public class AdminCorreos : IHttpHandler
                 lanzamiento = ArgumentosServicios(elegidos);
                 lanzamiento.Argumentos += " -FechaCorte " +
                     Citar(FechaCorte(), lanzamiento.ViaComando);
+            }
 
-                // Destinatarios temporales: opcionales. Sin ellos, el script
-                // usa su distribucion normal (dbo.CatServicioCorreo).
-                var personalizados = ValidarDestinatarios(context.Request.Form["destinatarios"]);
-                if (personalizados.Count > 0)
-                {
-                    configTemporal = CrearConfigTemporal(Path.GetDirectoryName(script), personalizados);
-                    lanzamiento.Argumentos += " -RutaCorreo " +
-                        Citar(configTemporal, lanzamiento.ViaComando);
-                }
+            // Destinatarios temporales: opcionales y validos para los TRES
+            // flujos. Sin ellos, cada script usa su distribucion configurada.
+            // -FechaCorte, en cambio, sigue siendo exclusivo de servicios: qa
+            // y backlog no lo aceptan.
+            var personalizados = ValidarDestinatarios(context.Request.Form["destinatarios"]);
+            if (personalizados.Count > 0)
+            {
+                configTemporal = CrearConfigTemporal(
+                    Path.GetDirectoryName(script), flujo, personalizados);
+                lanzamiento.Argumentos += " -RutaCorreo " +
+                    Citar(configTemporal, lanzamiento.ViaComando);
             }
 
             try
@@ -460,17 +468,23 @@ public class AdminCorreos : IHttpHandler
         return lista;
     }
 
-    // Copia de config_correo_servicio.json con la distribucion sustituida por
-    // las direcciones temporales. Se apoya en el modo de prueba que el script
-    // YA tiene: modo_prueba=true ignora dbo.CatServicioCorreo y manda solo a
-    // destinatario_prueba. El resto de las claves (remitente, SMTP, topes) se
-    // conservan tal cual y no salen de la carpeta de los scripts.
-    private static string CrearConfigTemporal(string carpeta, List<string> destinatarios)
+    // Copia del .json del flujo con la distribucion sustituida por las
+    // direcciones temporales. Se apoya en el modo de prueba que los tres
+    // scripts YA tienen: modo_prueba=true ignora la distribucion configurada
+    // (dbo.CatServicioCorreo en servicios, la lista del .json en los otros dos)
+    // y manda solo a destinatario_prueba. El resto de las claves (remitente,
+    // SMTP, ventanas, topes) se conservan tal cual y no salen de la carpeta de
+    // los scripts.
+    //
+    // El nombre lleva el id del flujo: los tres pueden tener una copia viva a
+    // la vez sin pisarse.
+    private static string CrearConfigTemporal(
+        string carpeta, Flujo flujo, List<string> destinatarios)
     {
-        var plantilla = Path.Combine(carpeta, ConfigServicio);
+        var plantilla = Path.Combine(carpeta, flujo.ConfigCorreo);
         if (!File.Exists(plantilla))
             throw new FileNotFoundException(
-                "No se encontro " + ConfigServicio + " en la carpeta de los scripts: " +
+                "No se encontro " + flujo.ConfigCorreo + " en la carpeta de los scripts: " +
                 "es la plantilla de los destinatarios temporales.", plantilla);
 
         var serializador = new JavaScriptSerializer();
@@ -481,7 +495,7 @@ public class AdminCorreos : IHttpHandler
         config["destinatario_prueba"] = destinatarios.ToArray();
 
         var destino = Path.Combine(
-            carpeta, "admin_correo_servicio_" + Guid.NewGuid().ToString("N") + ".json");
+            carpeta, "admin_correo_" + flujo.Id + "_" + Guid.NewGuid().ToString("N") + ".json");
 
         // Sin BOM: el script lo lee con -Encoding UTF8, y el serializador ya
         // escapa cualquier caracter no ASCII.

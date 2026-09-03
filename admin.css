@@ -211,6 +211,9 @@
   gap: 12px;
 }
 @media (max-width: 720px) { .serv-controles { grid-template-columns: 1fr; } }
+/* En las tarjetas compactas (QA y Backlog) el contenedor lleva un solo
+   bloque -Destinatarios-, asi que no hay dos columnas que repartir. */
+.job:not(.destacado) .serv-controles { grid-template-columns: 1fr; }
 
 .serv-bloque {
   background: #f8fafc;
