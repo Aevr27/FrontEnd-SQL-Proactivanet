@@ -31,7 +31,7 @@
   </connectionStrings>
 
   <!--
-    Consola de administracion (admin.html) -> handlers/admin_correos.ashx.
+    Consola de administracion (admin/admin.html) -> handlers/admin_correos.ashx.
 
     AdminScriptsDir es la CARPETA donde ya viven los tres scripts, juntos.
     Los scripts NO se copian al sitio web: se ejecutan desde su propia

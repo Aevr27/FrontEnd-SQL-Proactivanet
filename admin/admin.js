@@ -27,7 +27,7 @@
 'use strict';
 
 /* Endpoint unico de la consola. Solo acepta los tres flujos de abajo. */
-var ENDPOINT = 'handlers/admin_correos.ashx';
+var ENDPOINT = '../handlers/admin_correos.ashx';
 
 /* -------------------------------------------------------------------------
    Los tres flujos de correo.

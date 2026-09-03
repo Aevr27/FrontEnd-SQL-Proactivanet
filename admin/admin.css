@@ -1,7 +1,7 @@
 /* =========================================================================
    admin.css
 
-   Estilos exclusivos de admin.html. dashboard.css se carga antes y aporta
+   Estilos exclusivos de admin/admin.html. dashboard.css se carga antes y aporta
    las variables (--card, --line, --radius, --shadow, ...), la tipografia y
    las clases base .wrap / .card / .btn / .badge. Aqui no se redefine nada
    de esas: solo se agrega lo propio de la consola, con prefijo .admin-

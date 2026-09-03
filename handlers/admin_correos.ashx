@@ -1,7 +1,7 @@
 <%@ WebHandler Language="C#" Class="AdminCorreos" %>
 
 // Ejecucion REAL de los tres flujos de correo de la consola de
-// administracion (admin.html). Es el UNICO punto de la aplicacion que lanza
+// administracion (admin/admin.html). Es el UNICO punto de la aplicacion que lanza
 // powershell.exe: la prueba de concepto que hubo aqui al lado
 // (admin_prueba_powershell.ashx + tools/test.ps1) se retiro una vez que estos
 // tres flujos quedaron funcionando.
