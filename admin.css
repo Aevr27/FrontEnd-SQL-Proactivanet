@@ -225,7 +225,21 @@
   letter-spacing: .6px; color: var(--muted);
 }
 
-.serv-lista { display: flex; flex-wrap: wrap; gap: 7px; }
+/* TODOS / LIMPIAR: atajos de la seleccion, arriba de las casillas. Van con
+   los botones de siempre (.btn / .btn.gris + .btn.chico), no con un estilo
+   propio. */
+.serv-acciones { display: flex; flex-wrap: wrap; gap: 7px; }
+.serv-acciones .btn { flex: none; letter-spacing: .4px; }
+
+/* Doce servicios en rejilla, no en una fila que se desborda: cuatro por
+   linea en el ancho normal de la tarjeta y menos si no caben. */
+.serv-lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  gap: 7px;
+}
+/* Los avisos ("Cargando servicios...") ocupan la rejilla entera. */
+.serv-lista > .serv-nota-fecha { grid-column: 1 / -1; }
 .serv-casilla, .serv-radio {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 9px;

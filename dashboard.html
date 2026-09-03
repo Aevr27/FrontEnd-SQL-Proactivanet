@@ -28,13 +28,33 @@
     </header>
 
     <section class="filtros">
-      <div class="campo">
+      <!-- Calendario nativo + entrada manual dd/mm/aaaa + "Hoy".
+           El <input type="date"> NO cambia: sigue siendo la fuente de la
+           verdad y sigue entregando aaaa-mm-dd a los filtros. La caja de
+           texto es solo un atajo para teclear la fecha; el popup del
+           navegador (con sus botones "Borrar"/"Hoy", que son suyos y no de
+           esta pagina) no se toca. Lo cablea FechaManual en dashboard.js. -->
+      <div class="campo campo-fecha">
         <label for="f-inicio">Fecha inicio</label>
-        <input type="date" id="f-inicio">
+        <div class="fechafila">
+          <input type="date" id="f-inicio">
+          <button class="btn linea chico" type="button" data-hoy="f-inicio">Hoy</button>
+          <input type="text" class="fecha-manual" id="f-inicio-manual"
+                 inputmode="numeric" maxlength="10" autocomplete="off"
+                 placeholder="dd/mm/aaaa"
+                 aria-label="Fecha inicio escrita a mano, formato dd/mm/aaaa">
+        </div>
       </div>
-      <div class="campo">
+      <div class="campo campo-fecha">
         <label for="f-fin">Fecha fin</label>
-        <input type="date" id="f-fin">
+        <div class="fechafila">
+          <input type="date" id="f-fin">
+          <button class="btn linea chico" type="button" data-hoy="f-fin">Hoy</button>
+          <input type="text" class="fecha-manual" id="f-fin-manual"
+                 inputmode="numeric" maxlength="10" autocomplete="off"
+                 placeholder="dd/mm/aaaa"
+                 aria-label="Fecha fin escrita a mano, formato dd/mm/aaaa">
+        </div>
       </div>
       <div class="campo">
         <label>Rango rapido</label>
@@ -128,9 +148,21 @@
     </header>
 
     <section class="filtros">
-      <div class="campo">
+      <div class="campo campo-fecha">
         <label for="f-corte-bl">Fecha de corte</label>
-        <select id="f-corte-bl"></select>
+        <!-- Mismo control de calendario que Fecha inicio / Fecha fin del
+             tablero de SLA, con el mismo atajo manual dd/mm/aaaa y "Hoy".
+             Sigue siendo UNA sola fecha; los cortes que existen de verdad
+             acotan el min/max desde backlog_catalogos, y ese min/max tambien
+             valida lo que se escribe a mano. -->
+        <div class="fechafila">
+          <input type="date" id="f-corte-bl">
+          <button class="btn linea chico" type="button" data-hoy="f-corte-bl">Hoy</button>
+          <input type="text" class="fecha-manual" id="f-corte-bl-manual"
+                 inputmode="numeric" maxlength="10" autocomplete="off"
+                 placeholder="dd/mm/aaaa"
+                 aria-label="Fecha de corte escrita a mano, formato dd/mm/aaaa">
+        </div>
       </div>
       <div class="campo">
         <label for="f-dias-bl">Ventana de tendencia</label>

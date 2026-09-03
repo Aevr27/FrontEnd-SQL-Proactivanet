@@ -341,7 +341,6 @@ function plantillaTrabajo(t) {
       '<dl class="job-datos">' +
         '<dt>Script</dt><dd>' + esc(t.script) + '</dd>' +
         '<dt>Parametros</dt><dd>ninguno (el script usa su configuracion)</dd>' +
-        '<dt>Envios</dt><dd>1</dd>' +
         '<dt>Adjuntos</dt><dd>' + esc(t.adjuntos) + '</dd>' +
         '<dt>Destinatarios</dt><dd>Distribucion normal' +
           (t.destinatarios > 0 ? ' (' + esc(t.destinatarios) + ' configurados)' : ' (sin configurar)') +
@@ -359,15 +358,39 @@ function plantillaTrabajo(t) {
    asi que varios servicios son varias ejecuciones), la fecha de corte, que
    llega calculada del servidor y no se puede editar aqui, y el modo de
    destinatarios. */
+/* Todos los servicios que ofrece el servidor estan elegidos. Es el caso que
+   el script cubre con -Todos. */
+function todosElegidos(elegidos) {
+  return META.servicios.length > 0 && elegidos.length === META.servicios.length;
+}
+
+/* Texto del contador: "ninguno", "WMS", "WMS, PU" o "Todos (12)". */
+function resumenServicios(elegidos) {
+  if (!elegidos.length) { return 'ninguno'; }
+  if (todosElegidos(elegidos)) { return 'Todos (' + elegidos.length + ')'; }
+  return elegidos.join(', ');
+}
+
+/* Interfaz del script que se usara con la seleccion actual. El reparto lo
+   hace el propio .ps1: uno -> -Servicio, varios -> -Servicios, todos ->
+   -Todos. El handler arma la linea; aqui solo se anuncia en la revision. */
+function interfazServicios(elegidos) {
+  if (!elegidos.length) { return '—'; }
+  if (todosElegidos(elegidos)) { return '-Todos'; }
+  if (elegidos.length === 1) { return '-Servicio "' + elegidos[0] + '"'; }
+  return '-Servicios ' + elegidos.join(',');
+}
+
 function bloqueControlesServicios(t) {
   var e = estados[t.id];
+  var puedeTodos = META.servicios.length > 0 && !todosElegidos(e.servicios);
 
   var opciones;
   if (!META.cargado) {
     opciones = '<div class="serv-nota-fecha">Cargando servicios...</div>';
   } else if (!META.servicios.length) {
-    opciones = '<div class="serv-nota-fecha">Sin servicios configurados ' +
-      '(clave AdminServiciosPermitidos en Web.config).</div>';
+    opciones = '<div class="serv-nota-fecha">El servidor no devolvio ningun ' +
+      'servicio.</div>';
   } else {
     opciones = META.servicios.map(function (nombre) {
       var marcado = (e.servicios.indexOf(nombre) !== -1);
@@ -395,10 +418,18 @@ function bloqueControlesServicios(t) {
   return '<div class="serv-controles">' +
       '<div class="serv-bloque">' +
         '<h4>Servicios</h4>' +
+        /* TODOS / LIMPIAR: atajos de la seleccion, no otro modo de envio. Solo
+           marcan y desmarcan las mismas casillas de abajo, que siguen siendo
+           el estado. Se desactivan cuando ya no cambiarian nada. */
+        '<div class="serv-acciones">' +
+          '<button class="btn chico" type="button" data-accion="serv-todos"' +
+            (puedeTodos ? '' : ' disabled') + '>TODOS</button>' +
+          '<button class="btn gris chico" type="button" data-accion="serv-limpiar"' +
+            (e.servicios.length ? '' : ' disabled') + '>LIMPIAR</button>' +
+        '</div>' +
         '<div class="serv-lista">' + opciones + '</div>' +
         '<div class="serv-conteo">Seleccionados: ' +
-          '<b data-rol="servicio">' + esc(e.servicios.join(', ') || 'ninguno') + '</b>' +
-          ' · Envios: <b>' + e.servicios.length + '</b>' +
+          '<b data-rol="servicio">' + esc(resumenServicios(e.servicios)) + '</b>' +
         '</div>' +
       '</div>' +
       '<div class="serv-bloque">' +
@@ -437,8 +468,8 @@ function plantillaServicios(t) {
   var personalizados = (e.modoDestinatarios === 'personalizados');
   var dirs = listaDestinatarios(e.destinatarios);
 
-  /* Revision: exactamente lo que se va a ejecutar. Un envio por servicio,
-     porque el script recibe un -Servicio por ejecucion. */
+  /* Revision: exactamente lo que se va a ejecutar. Una sola ejecucion del
+     script, que es quien reparte los servicios internamente. */
   return bloqueCabecera(t) + bloqueEstado(t) +
     '<div class="job-revision">' +
       '<h4>Servicios — revision</h4>' +
@@ -446,8 +477,8 @@ function plantillaServicios(t) {
         '<dt>Servicios seleccionados</dt><dd>' +
           esc(e.servicios.join(', ') || 'ninguno') + '</dd>' +
         '<dt>Fecha de corte</dt><dd>' + esc(META.fechaCorte || '—') + '</dd>' +
-        '<dt>Envios</dt><dd>' + e.servicios.length + '</dd>' +
         '<dt>Script</dt><dd>' + esc(t.script) + '</dd>' +
+        '<dt>Parametros</dt><dd>' + esc(interfazServicios(e.servicios)) + '</dd>' +
         '<dt>Destinatarios</dt><dd>' +
           (personalizados
             ? 'Personalizados (' + dirs.length + '): ' + esc(dirs.join(', '))
@@ -517,6 +548,23 @@ function refrescarEstado(t) {
   if (enviar) { enviar.disabled = !listo || !!estados[t.id].enviando; }
 }
 
+/* Unico camino para cambiar la seleccion de servicios: una casilla, TODOS y
+   LIMPIAR pasan todos por aqui.
+
+   Se conserva el orden de la lista que manda el servidor -no el de los clics-
+   y se descarta el resultado de la ejecucion anterior, que ya no describe lo
+   que se enviaria. */
+function elegirServicios(t, elegidos) {
+  var e = estados[t.id];
+  if (!t.destacado || e.enviando) { return; }
+
+  e.servicios = META.servicios.filter(function (s) {
+    return elegidos.indexOf(s) !== -1;
+  });
+  e.ejecucion = null;
+  pintarTrabajo(t);
+}
+
 function abrirRevision(t) {
   if (!esListo(t)) { return; }
   estados[t.id].fase = 'revision';
@@ -532,13 +580,20 @@ function cerrarRevision(t) {
 
 /* ---- Ejecucion real ---------------------------------------------------- */
 
-/* Una ejecucion: manda al servidor el identificador del flujo, el servicio
-   (cuando aplica) y las direcciones temporales (cuando las hay). El exito se
-   decide por el codigo de salida del proceso, NO por que el request HTTP
-   haya respondido. */
-function ejecutarUno(t, servicio, destinatarios) {
+/* Una ejecucion: manda al servidor el identificador del flujo, los servicios
+   elegidos (cuando aplica) y las direcciones temporales (cuando las hay).
+
+   Los servicios van en UN solo campo separado por comas. El reparto -uno,
+   varios o los doce- lo decide el handler traduciendolo a -Servicio,
+   -Servicios o -Todos, que es la interfaz que el .ps1 ya implementa: la
+   pagina no hace una llamada por servicio.
+
+   El exito se decide por el codigo de salida del proceso, NO por que el
+   request HTTP haya respondido. */
+function ejecutarUno(t, servicios, destinatarios) {
+  var etiqueta = servicios.length ? resumenServicios(servicios) : '';
   var cuerpo = 'flujo=' + encodeURIComponent(t.id);
-  if (servicio)     { cuerpo += '&servicio=' + encodeURIComponent(servicio); }
+  if (servicios.length) { cuerpo += '&servicios=' + encodeURIComponent(servicios.join(',')); }
   if (destinatarios) { cuerpo += '&destinatarios=' + encodeURIComponent(destinatarios); }
 
   return fetch(ENDPOINT, {
@@ -556,7 +611,7 @@ function ejecutarUno(t, servicio, destinatarios) {
     .then(function (d) {
       if (d.ok) {
         return {
-          servicio: servicio, ok: true,
+          servicio: etiqueta, ok: true,
           titulo: 'Correcto — el script termino con codigo 0 (' + d.duracionMs + ' ms)',
           detalle: d.salida || 'Sin salida.'
         };
@@ -564,7 +619,7 @@ function ejecutarUno(t, servicio, destinatarios) {
       /* Excepcion del handler: no llego a haber proceso. */
       if (d.codigoSalida === undefined) {
         return {
-          servicio: servicio, ok: false,
+          servicio: etiqueta, ok: false,
           titulo: 'Fallo — ' + (d.tipo || 'error') + ' en el servidor',
           detalle: d.error || 'Sin detalle.'
         };
@@ -574,7 +629,7 @@ function ejecutarUno(t, servicio, destinatarios) {
          carpeta Logs\. QA no atrapa sus errores: sale con 1 y solo deja lo
          que haya escrito en la salida de error. */
       return {
-        servicio: servicio, ok: false,
+        servicio: etiqueta, ok: false,
         titulo: 'Fallo — codigo de salida ' + d.codigoSalida +
           (d.codigoSalida === 5 ? ' (revisar la carpeta Logs\\ del script)' : ''),
         detalle: [d.error, d.salida].filter(Boolean).join('\n') || 'Sin salida.'
@@ -582,30 +637,32 @@ function ejecutarUno(t, servicio, destinatarios) {
     })
     .catch(function (err) {
       return {
-        servicio: servicio, ok: false,
+        servicio: etiqueta, ok: false,
         titulo: 'Fallo — no se pudo contactar con el servidor',
         detalle: String(err && err.message ? err.message : err)
       };
     });
 }
 
-function resumenResultados(resultados) {
-  return resultados.map(function (r) {
-    return (r.servicio ? '[' + r.servicio + '] ' : '') + r.titulo +
-      '\n' + (r.detalle || 'Sin salida.');
-  }).join('\n\n');
+function resumenResultados(r) {
+  if (!r) { return ''; }
+  return (r.servicio ? '[' + r.servicio + '] ' : '') + r.titulo +
+    '\n' + (r.detalle || 'Sin salida.');
 }
 
-/* ENVIAR. Es el unico paso que ejecuta algo. Con varios servicios son varias
-   ejecuciones, una detras de otra: el script recibe un -Servicio por
-   ejecucion y no conviene solaparlos, porque los tres comparten carpetas de
-   salida y de logs. */
+/* ENVIAR. Es el unico paso que ejecuta algo.
+
+   Una sola ejecucion, tambien con varios servicios: el .ps1 ya reparte por su
+   cuenta (-Servicios / -Todos hacen una corrida por servicio dentro del mismo
+   proceso, con su log y su codigo de salida). Antes esta funcion encadenaba
+   una llamada HTTP por servicio, que era hacer a mano lo que el script hace
+   mejor: sin solapes y con un unico resultado que leer. */
 function enviarTrabajo(t) {
   var e = estados[t.id];
   if (e.enviando) { return; }                 // sin ejecuciones duplicadas
   if (!esListo(t)) { return; }
 
-  var lote = t.destacado ? e.servicios.slice() : [''];
+  var servicios = t.destacado ? e.servicios.slice() : [];
   var destinatarios = (t.destacado && e.modoDestinatarios === 'personalizados')
     ? listaDestinatarios(e.destinatarios).join(';')
     : '';
@@ -613,37 +670,21 @@ function enviarTrabajo(t) {
   e.enviando = true;
   e.faseAnterior = e.fase;
   e.fase = 'ejecutando';
+  e.ejecucion = {
+    clase: 'en-curso',
+    titulo: 'Ejecutando ' + t.script +
+      (servicios.length ? ' — ' + resumenServicios(servicios) : '') + '...',
+    detalle: servicios.length > 1
+      ? 'El script hace una corrida por servicio: ' + interfazServicios(servicios) + '.'
+      : ''
+  };
   pintarTrabajo(t);
 
-  var resultados = [];
-  var cadena = Promise.resolve();
-
-  lote.forEach(function (servicio) {
-    cadena = cadena.then(function () {
-      e.ejecucion = {
-        clase: 'en-curso',
-        titulo: 'Ejecutando ' + t.script + (servicio ? ' — ' + servicio : '') +
-          (lote.length > 1 ? ' (' + (resultados.length + 1) + ' de ' + lote.length + ')' : '') +
-          '...',
-        detalle: resumenResultados(resultados)
-      };
-      pintarTrabajo(t);
-      return ejecutarUno(t, servicio, destinatarios).then(function (r) {
-        resultados.push(r);
-      });
-    });
-  });
-
-  cadena.then(function () {
-    var fallos = resultados.filter(function (r) { return !r.ok; }).length;
+  ejecutarUno(t, servicios, destinatarios).then(function (r) {
     e.ejecucion = {
-      clase: fallos ? 'fallo' : 'ok',
-      titulo: fallos
-        ? 'Fallo — ' + fallos + ' de ' + resultados.length + ' ejecuciones terminaron mal'
-        : (resultados.length > 1
-            ? 'Correcto — las ' + resultados.length + ' ejecuciones terminaron con codigo 0'
-            : resultados[0].titulo),
-      detalle: resumenResultados(resultados)
+      clase: r.ok ? 'ok' : 'fallo',
+      titulo: r.titulo,
+      detalle: resumenResultados(r)
     };
     e.enviando = false;
     e.fase = e.faseAnterior || 'revision';
@@ -709,6 +750,11 @@ function iniciar() {
       case 'abrir':  abrirRevision(trabajo);  break;
       case 'cerrar': cerrarRevision(trabajo); break;
       case 'enviar': enviarTrabajo(trabajo);  break;
+      /* TODOS / LIMPIAR: solo tocan la seleccion, con la misma regla que un
+         clic en una casilla (se conserva el orden de la lista del servidor y
+         se invalida el resultado anterior). */
+      case 'serv-todos':   elegirServicios(trabajo, META.servicios.slice()); break;
+      case 'serv-limpiar': elegirServicios(trabajo, []);                     break;
     }
   });
 
@@ -725,11 +771,10 @@ function iniciar() {
 
     if (campo.dataset.campo === 'servicio') {
       var otros = e.servicios.filter(function (s) { return s !== campo.value; });
-      e.servicios = campo.checked ? otros.concat([campo.value]) : otros;
-      /* Se conserva el orden de la lista blanca, no el de los clics. */
-      e.servicios = META.servicios.filter(function (s) {
-        return e.servicios.indexOf(s) !== -1;
-      });
+      /* Mismo camino que TODOS y LIMPIAR: elegirServicios ordena, invalida el
+         resultado anterior y repinta. */
+      elegirServicios(trabajo, campo.checked ? otros.concat([campo.value]) : otros);
+      return;
     } else if (campo.dataset.campo === 'modo') {
       e.modoDestinatarios = campo.value;
     } else if (campo.dataset.campo !== 'destinatarios') {

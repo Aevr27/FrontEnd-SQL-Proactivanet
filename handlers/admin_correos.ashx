@@ -12,9 +12,13 @@
 //   - La carpeta de los scripts se lee de Web.config (appSettings, clave
 //     unica AdminScriptsDir), nunca del request. Los tres .ps1 viven juntos
 //     en esa carpeta, fuera del sitio web, y NO se copian aqui.
-//   - El unico parametro variable es -Servicio, y se valida contra la lista
-//     blanca de Web.config: al script se le pasa la cadena canonica de la
-//     configuracion, no la que escribio el navegador.
+//   - Los unicos parametros variables son los del flujo de servicios
+//     (-Servicio / -Servicios / -Todos), y cada nombre se valida contra la
+//     lista blanca canonica de este archivo (ServiciosCanonicos, la misma
+//     lista que $SERVICIOS_TODOS del .ps1): al script se le pasa la cadena
+//     de esa lista, no la que escribio el navegador. Un solo servicio va
+//     como -Servicio, varios como -Servicios y los doce como -Todos, que es
+//     el reparto que el script ya implementa; aqui no se replica.
 //   - Los destinatarios temporales (modo "personalizados" de la consola) NO
 //     se pasan por la linea de comandos ni tocan el .ps1: se escribe una
 //     copia temporal de config_correo_servicio.json con modo_prueba=true y
@@ -81,6 +85,15 @@ public class AdminCorreos : IHttpHandler
     // dejar un request colgado para siempre si el script se queda esperando.
     private const int TiempoLimiteSegundos = 600;
 
+    // Con -Servicios o -Todos el script hace una corrida por servicio dentro
+    // del MISMO proceso, asi que el limite de arriba -pensado para una sola-
+    // se multiplica por el numero de corridas. Sin esto, un recorrido de doce
+    // servicios moriria a medias en el minuto diez.
+    private static int LimiteParaCorridas(int corridas)
+    {
+        return TiempoLimiteSegundos * (corridas < 1 ? 1 : corridas);
+    }
+
     // Clave unica de Web.config con la carpeta donde estan los tres .ps1.
     // Los tres scripts viven juntos, asi que no hay una clave por flujo: una
     // sola ruta que cambiar al mover el sitio de maquina.
@@ -140,14 +153,24 @@ public class AdminCorreos : IHttpHandler
 
             // Argumentos del script. Para qa y backlog no hay ninguno: cada
             // script se basta con su propia configuracion.
-            var argumentos = string.Empty;
+            var lanzamiento = new Lanzamiento();
             string configTemporal = null;
+            var corridas = 1;                 // qa y backlog: siempre una
 
             if (flujo.PideServicio)
             {
-                // Servicio canonico de la lista blanca + fecha del servidor.
-                var servicio = ValidarServicio(context.Request.Form["servicio"]);
-                argumentos = "-Servicio \"" + servicio + "\" -FechaCorte \"" + FechaCorte() + "\"";
+                // Servicios canonicos de la lista blanca + fecha del servidor.
+                // "servicios" es la lista separada por comas que manda la
+                // consola; "servicio" se sigue aceptando para no romper a
+                // ningun cliente que solo mande uno.
+                var pedido = context.Request.Form["servicios"];
+                if (string.IsNullOrWhiteSpace(pedido)) pedido = context.Request.Form["servicio"];
+
+                var elegidos = ValidarServicios(pedido);
+                corridas = elegidos.Count;
+                lanzamiento = ArgumentosServicios(elegidos);
+                lanzamiento.Argumentos += " -FechaCorte " +
+                    Citar(FechaCorte(), lanzamiento.ViaComando);
 
                 // Destinatarios temporales: opcionales. Sin ellos, el script
                 // usa su distribucion normal (dbo.CatServicioCorreo).
@@ -155,13 +178,14 @@ public class AdminCorreos : IHttpHandler
                 if (personalizados.Count > 0)
                 {
                     configTemporal = CrearConfigTemporal(Path.GetDirectoryName(script), personalizados);
-                    argumentos += " -RutaCorreo \"" + configTemporal + "\"";
+                    lanzamiento.Argumentos += " -RutaCorreo " +
+                        Citar(configTemporal, lanzamiento.ViaComando);
                 }
             }
 
             try
             {
-                return Ejecutar(flujo, script, argumentos);
+                return Ejecutar(flujo, script, lanzamiento, LimiteParaCorridas(corridas));
             }
             finally
             {
@@ -248,22 +272,55 @@ public class AdminCorreos : IHttpHandler
         return ruta;
     }
 
-    // Lista blanca de servicios, definida en Web.config separada por comas.
+    // Lista canonica de servicios y ORDEN canonico. Es la misma lista, en el
+    // mismo orden, que $SERVICIOS_TODOS dentro de Enviar_CorreoServicio.ps1:
+    // lo que ese script recorre con -Todos. Vive aqui, en el codigo de la
+    // aplicacion, y no en Web.config, porque:
+    //
+    //   - Web.config es especifico de cada maquina y no esta versionado: la
+    //     lista quedaba a merced de lo que tuviera cada entorno (en este VM
+    //     solo "WMS", de cuando el flujo era un unico servicio).
+    //   - Dar de alta un servicio nuevo obliga a tocar el .ps1 de todas
+    //     formas, asi que la lista tiene que viajar con el codigo.
+    //
+    // Sigue siendo una lista blanca: solo estas cadenas pueden acabar en la
+    // linea de comandos, y se pasan tal como estan escritas aqui, nunca como
+    // las escribio el navegador.
+    private static readonly string[] ServiciosCanonicos =
+    {
+        "PU", "WMS", "AUT", "BAS", "COMU", "CG",
+        "PSOC", "REM", "FEN", "ACAPP", "STI", "PWBI",
+    };
+
+    // Lista blanca efectiva: la canonica, mas lo que agregue la clave
+    // AdminServiciosPermitidos de Web.config si trae algo que no este en
+    // ella. Asi un entorno que de de alta un servicio antes de que llegue
+    // este archivo actualizado sigue funcionando, y ninguno pierde los doce.
+    // La clave ya no puede recortar la lista: no es su trabajo decidir que
+    // servicios existen.
     private static List<string> ServiciosPermitidos()
     {
+        var lista = new List<string>(ServiciosCanonicos);
+
         var crudo = ConfigurationManager.AppSettings["AdminServiciosPermitidos"] ?? string.Empty;
-        var lista = new List<string>();
         foreach (var parte in crudo.Split(','))
         {
             var s = parte.Trim();
-            if (s.Length > 0) lista.Add(s);
+            if (s.Length == 0) continue;
+
+            var repetido = false;
+            foreach (var y in lista)
+                if (string.Equals(y, s, StringComparison.OrdinalIgnoreCase)) { repetido = true; break; }
+
+            if (!repetido) lista.Add(s);
         }
+
         return lista;
     }
 
-    // Devuelve SIEMPRE la cadena tal como esta escrita en la configuracion,
-    // no la que mando el navegador. Asi, llegue lo que llegue, lo unico que
-    // puede acabar en la linea de comandos es un valor de la lista blanca.
+    // Devuelve SIEMPRE la cadena tal como esta escrita en la lista blanca, no
+    // la que mando el navegador. Asi, llegue lo que llegue, lo unico que puede
+    // acabar en la linea de comandos es un valor de la lista.
     private static string ValidarServicio(string pedido)
     {
         pedido = (pedido ?? string.Empty).Trim();
@@ -271,10 +328,6 @@ public class AdminCorreos : IHttpHandler
             throw new ArgumentException("Falta el servicio: el flujo \"servicios\" necesita uno.");
 
         var permitidos = ServiciosPermitidos();
-        if (permitidos.Count == 0)
-            throw new ConfigurationErrorsException(
-                "Falta la clave <appSettings> \"AdminServiciosPermitidos\" en Web.config.");
-
         foreach (var s in permitidos)
             if (string.Equals(s, pedido, StringComparison.OrdinalIgnoreCase))
                 return s;
@@ -282,6 +335,101 @@ public class AdminCorreos : IHttpHandler
         throw new ArgumentException(
             "Servicio no permitido: \"" + pedido + "\". Permitidos: " +
             string.Join(", ", permitidos.ToArray()) + ".");
+    }
+
+    // Uno o varios servicios separados por coma, tal como los manda la
+    // consola. Cada uno pasa por ValidarServicio, se quitan los repetidos y
+    // se devuelven en el ORDEN CANONICO, no en el orden en que se hizo clic:
+    // asi la linea de comandos es reproducible.
+    private static List<string> ValidarServicios(string crudo)
+    {
+        var pedidos = new List<string>();
+        foreach (var parte in (crudo ?? string.Empty).Split(','))
+        {
+            var s = parte.Trim();
+            if (s.Length == 0) continue;
+
+            var canonico = ValidarServicio(s);
+            if (!pedidos.Contains(canonico)) pedidos.Add(canonico);
+        }
+
+        if (pedidos.Count == 0)
+            throw new ArgumentException(
+                "Falta el servicio: el flujo \"servicios\" necesita al menos uno.");
+
+        var ordenados = new List<string>();
+        foreach (var s in ServiciosPermitidos())
+            if (pedidos.Contains(s)) ordenados.Add(s);
+
+        return ordenados;
+    }
+
+    // true si la seleccion es exactamente la lista canonica completa: ese es
+    // el caso que el script cubre con -Todos.
+    private static bool EsTodos(List<string> elegidos)
+    {
+        if (elegidos.Count != ServiciosCanonicos.Length) return false;
+        foreach (var s in ServiciosCanonicos)
+            if (!elegidos.Contains(s)) return false;
+        return true;
+    }
+
+    // Como se va a lanzar el script: sus argumentos y si hace falta -Command
+    // en vez de -File.
+    private class Lanzamiento
+    {
+        public string Argumentos = string.Empty;
+        public bool   ViaComando;      // true: -Command (ver ArgumentosServicios)
+    }
+
+    // Traduce la seleccion de la consola a la interfaz que el script YA tiene:
+    //
+    //   uno       -> -Servicio "WMS"                 (con -File, como siempre)
+    //   varios    -> -Servicios PU,WMS,AUT            (con -Command)
+    //   los doce  -> -Todos                           (con -File, como siempre)
+    //
+    // POR QUE -Command SOLO EN EL CASO DE VARIOS
+    // powershell.exe -File pasa cada argumento como CADENA literal: un
+    // [string[]] no se puede llenar por ahi. Comprobado: "-Servicios PU,WMS"
+    // llega como un unico elemento "PU,WMS", y "-Servicios PU WMS" llega como
+    // un unico elemento "PU" y descarta el resto EN SILENCIO -lo peor posible,
+    // porque el correo se mandaria solo del primer servicio sin avisar-.
+    // Con -Command la coma la interpreta PowerShell y el parametro se enlaza
+    // como el array que es. Los otros dos casos siguen yendo por -File, que ya
+    // funciona: no se cambia lo que no hace falta.
+    //
+    // Alternativa descartada: una llamada HTTP por servicio. El script ya
+    // reparte por su cuenta (un log y un codigo de salida por servicio) y
+    // hacerlo aqui era duplicar esa logica.
+    private static Lanzamiento ArgumentosServicios(List<string> elegidos)
+    {
+        if (EsTodos(elegidos))
+            return new Lanzamiento { Argumentos = "-Todos", ViaComando = false };
+
+        if (elegidos.Count == 1)
+            return new Lanzamiento {
+                Argumentos = "-Servicio " + Citar(elegidos[0], false),
+                ViaComando = false
+            };
+
+        // Los nombres salen de la lista blanca, asi que la lista separada por
+        // comas no necesita comillas (y no debe llevarlas: con comillas
+        // PowerShell la veria como una sola cadena).
+        return new Lanzamiento {
+            Argumentos = "-Servicios " + string.Join(",", elegidos.ToArray()),
+            ViaComando = true
+        };
+    }
+
+    // Comillas segun el modo de lanzamiento: dobles para -File, simples
+    // -duplicando las que trajera el valor- para -Command, donde la linea
+    // entera ya va entre comillas dobles.
+    private static string Citar(string valor, bool viaComando)
+    {
+        valor = valor ?? string.Empty;
+        return viaComando
+            ? "'" + valor.Replace("'", "''") + "'"
+            : "\"" + valor + "\"";
     }
 
     // Direcciones temporales que llegan del navegador, separadas por ; o por
@@ -350,15 +498,33 @@ public class AdminCorreos : IHttpHandler
 
     // ---- Ejecucion --------------------------------------------------------
 
-    private static Dictionary<string, object> Ejecutar(Flujo flujo, string script, string argumentos)
+    private static Dictionary<string, object> Ejecutar(
+        Flujo flujo, string script, Lanzamiento lanzamiento, int limiteSegundos)
     {
         var carpeta = Path.GetDirectoryName(script);
+        var argumentos = lanzamiento.Argumentos ?? string.Empty;
+        var cola = argumentos.Length > 0 ? " " + argumentos : string.Empty;
 
-        // -File con la ruta entre comillas: PowerShell trata todo lo que
-        // sigue como argumentos del script, no como comandos.
-        var linea = "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + "\"";
-        if (!string.IsNullOrEmpty(argumentos))
-            linea += " " + argumentos;
+        var comun = "-NoProfile -NonInteractive -ExecutionPolicy Bypass ";
+        string linea;
+
+        if (lanzamiento.ViaComando)
+        {
+            // -Command: la unica forma de que un parametro [string[]] del
+            // script reciba de verdad varios elementos (ver
+            // ArgumentosServicios). Sigue siendo el mismo .ps1 fijo de este
+            // archivo -la ruta va citada y el navegador no puede influir en
+            // ella-, y no se ejecuta ningun otro comando: solo la llamada al
+            // script y la propagacion de su codigo de salida.
+            linea = comun + "-Command \"& " + Citar(script, true) + cola +
+                    "; exit $LASTEXITCODE\"";
+        }
+        else
+        {
+            // -File con la ruta entre comillas: PowerShell trata todo lo que
+            // sigue como argumentos del script, no como comandos.
+            linea = comun + "-File \"" + script + "\"" + cola;
+        }
 
         var inicio = new ProcessStartInfo
         {
@@ -385,11 +551,11 @@ public class AdminCorreos : IHttpHandler
             salida = proceso.StandardOutput.ReadToEnd();
             error  = proceso.StandardError.ReadToEnd();
 
-            if (!proceso.WaitForExit(TiempoLimiteSegundos * 1000))
+            if (!proceso.WaitForExit(limiteSegundos * 1000))
             {
                 try { proceso.Kill(); } catch { }
                 throw new TimeoutException(
-                    "El script no termino en " + TiempoLimiteSegundos + " segundos y se cancelo.");
+                    "El script no termino en " + limiteSegundos + " segundos y se cancelo.");
             }
 
             codigo = proceso.ExitCode;

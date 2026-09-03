@@ -238,6 +238,7 @@
   /* Barras oscuras, como los selectores del tablero de referencia:
      fondo #1e293b, borde #334155 y texto blanco. Todas miden lo mismo. */
   .filtros input[type="date"],
+  .filtros input[type="text"],
   .filtros select {
     height: 40px; width: 100%;
     border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
@@ -254,8 +255,10 @@
     background-color: var(--ctrl-bg);
 }
   .filtros input[type="date"]:hover,
+  .filtros input[type="text"]:hover,
   .filtros select:hover { background: var(--ctrl-bg-2); border-color: #475569; }
   .filtros input[type="date"]:focus,
+  .filtros input[type="text"]:focus,
   .filtros select:focus {
     outline: none; border-color: var(--accent); background: var(--ctrl-bg-2);
     box-shadow: var(--ring), inset 0 1px 2px rgba(0, 0, 0, .18);
@@ -383,19 +386,81 @@
   /* Rango rapido: grupo segmentado que ocupa el alto de una barra. */
   .filtros .rango-rapido { display: flex; gap: 6px; flex-wrap: wrap; height: 40px; }
 
+  /* ---- Fecha: calendario + "Hoy" + entrada manual dd/mm/aaaa ----
+     Los tres van en UNA sola fila del alto de una barra, para que el campo
+     siga alineado con el resto de los filtros. El campo ocupa dos columnas de
+     la rejilla porque tres controles no caben en el ancho de una. */
+  .filtros .campo-fecha { grid-column: span 2; }
+  .filtros .fechafila {
+    display: flex; align-items: center; gap: 6px; height: 40px; min-width: 0;
+  }
+  .filtros .fechafila input[type="date"] { flex: 1 1 132px; min-width: 0; }
+  .filtros .fechafila .btn { flex: none; height: 40px; }
+  /* Compacta: es un atajo para teclear, no el control principal. */
+  .filtros .fecha-manual {
+    flex: 0 1 104px; min-width: 88px;
+    font-variant-numeric: tabular-nums; letter-spacing: .3px;
+  }
+  .filtros .fecha-manual::placeholder { color: #64748b; font-weight: 500; }
+  /* Fecha imposible o fuera de los limites del calendario: se marca y no se
+     aplica nada, el tablero se queda con la fecha que ya tenia. */
+  .filtros .fecha-manual.mal,
+  .filtros .fecha-manual.mal:hover,
+  .filtros .fecha-manual.mal:focus {
+    border-color: #dc2626;
+    box-shadow: 0 0 0 3px rgba(220, 38, 38, .22), inset 0 1px 2px rgba(0, 0, 0, .18);
+  }
+  @media (max-width: 700px) {
+    .filtros .campo-fecha { grid-column: auto; }
+    .filtros .fechafila { flex-wrap: wrap; height: auto; }
+  }
+
   /* Selector de SLOT: un stepper compacto - N +. Elegir N son "los ultimos N
      SLOTs" (SLOT 0..N-1) y su unico efecto es fijar el rango de fechas, asi que
      va a juego con Rango rapido, no con los desplegables. */
   .filtros .slotstep {
-    display: flex; align-items: center; gap: 6px; height: 40px;
+    display: flex; align-items: center; justify-content: space-between;
+    height: 40px; width: 100%; padding: 0 4px; gap: 0;
+    /* Una sola pieza, con la misma caja que el resto de la barra de filtros
+       (.ms-boton y los input[type=date]): mismo alto, borde, radio y fondo.
+       Antes eran tres controles sueltos flotando uno junto a otro. */
+    border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
+    background: var(--grad-btn);
+    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .18);
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
   }
-  .filtros .slotstep .btn { flex: none; width: 32px; padding: 0; }
-  .filtros .slotstep .btn:disabled { opacity: .45; cursor: default; }
+  .filtros .slotstep:hover { background: var(--ctrl-bg-2); border-color: #475569; }
+  .filtros .slotstep:focus-within {
+    border-color: var(--accent); background: var(--ctrl-bg-2);
+    box-shadow: var(--ring), inset 0 1px 2px rgba(0, 0, 0, .18);
+  }
+  /* Los botones pierden su caja propia: dentro del control son solo el signo,
+     pero conservan toda su area de clic. */
+  .filtros .slotstep .btn {
+    flex: none; width: 32px; height: 38px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border: 0; border-radius: 6px;
+    background: transparent; color: var(--ctrl-ink);
+    font-size: 16px; font-weight: 700; line-height: 1;
+    box-shadow: none;
+  }
+  .filtros .slotstep .btn:hover:not(:disabled) {
+    background: rgba(37, 99, 235, .22); color: #fff;
+    box-shadow: none; filter: none;
+  }
+  .filtros .slotstep .btn:active:not(:disabled) {
+    transform: none; background: rgba(37, 99, 235, .34);
+  }
+  .filtros .slotstep .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .filtros .slotstep .btn:disabled { opacity: .35; cursor: default; background: transparent; }
   .filtros .slotn {
-    min-width: 2.5ch; text-align: center;
+    flex: 1; min-width: 2.5ch; text-align: center;
     font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
+    color: var(--ctrl-ink);
   }
-  /* El acento marca el SLOT ya aplicado, no el numero preparado. */
+  /* El acento marca el SLOT ya aplicado, no el numero preparado. Ahora se ve
+     tambien en el borde, porque el control es una sola pieza. */
+  .filtros .slotstep.sel { border-color: var(--accent); }
   .filtros .slotstep.sel .slotn { color: var(--accent); }
   /* En acento solo cuando el SLOT esta en vigor; inactivo o sin aplicar, apagado
      para no anunciar un periodo que no es el de la grafica. */
