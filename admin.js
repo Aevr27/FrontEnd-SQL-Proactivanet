@@ -43,8 +43,7 @@ var TRABAJOS_CORREO = [
     titulo: 'Correo QA',
     descripcion: 'Reporte de calidad del periodo con sus graficas y adjuntos.',
     script: 'Enviar_CorreoQA.ps1',
-    adjuntos: 3,
-    destinatarios: 4
+    adjuntos: 3
   },
   {
     id: 'backlog',
@@ -52,8 +51,7 @@ var TRABAJOS_CORREO = [
     titulo: 'Correo Backlog',
     descripcion: 'Detalle diario de incidentes y requerimientos en backlog.',
     script: 'Enviar_CorreoBacklog_direccion.ps1',
-    adjuntos: 2,
-    destinatarios: 2
+    adjuntos: 2
   },
   {
     id: 'servicios',
@@ -62,7 +60,6 @@ var TRABAJOS_CORREO = [
     descripcion: 'Reporte por servicio para la fecha de corte, con sus adjuntos.',
     script: 'Enviar_CorreoServicio.ps1',
     adjuntos: 0,
-    destinatarios: 3,
     destacado: true
   }
 ];
@@ -244,17 +241,6 @@ function bloqueDestinatarios(t) {
     '</div>';
 }
 
-/* Como se describe el modo en la pantalla de revision. */
-function resumenDestinatarios(t) {
-  var e = estados[t.id];
-  if (e.modoDestinatarios !== 'personalizados') {
-    return 'Distribucion normal' +
-      (t.destinatarios > 0 ? ' (' + t.destinatarios + ' configurados)' : '');
-  }
-  var dirs = listaDestinatarios(e.destinatarios);
-  return 'Personalizados (' + dirs.length + '): ' + dirs.join(', ');
-}
-
 /* ---- Semaforo automatico ----------------------------------------------
    No hay ningun boton que "prepare" la tarjeta: la validez del envio se
    deduce de lo que hay en pantalla y del estado del servidor, y se recalcula
@@ -401,7 +387,6 @@ function plantillaTrabajo(t) {
             : 'ninguno (el script usa su configuracion)') +
         '</dd>' +
         '<dt>Adjuntos</dt><dd>' + esc(t.adjuntos) + '</dd>' +
-        '<dt>Destinatarios</dt><dd>' + esc(resumenDestinatarios(t)) + '</dd>' +
       '</dl>' +
       bloqueAvisoConfig(t) +
       bloqueEjecucion(t) +
@@ -508,7 +493,6 @@ function plantillaServicios(t) {
         '<dt>Fecha de corte</dt><dd>' + esc(META.fechaCorte || '—') + '</dd>' +
         '<dt>Script</dt><dd>' + esc(t.script) + '</dd>' +
         '<dt>Parametros</dt><dd>' + esc(interfazServicios(e.servicios)) + '</dd>' +
-        '<dt>Destinatarios</dt><dd>' + esc(resumenDestinatarios(t)) + '</dd>' +
       '</dl>' +
       bloqueAvisoConfig(t) +
       bloqueEjecucion(t) +
