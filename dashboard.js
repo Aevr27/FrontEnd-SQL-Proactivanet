@@ -428,12 +428,12 @@ function envolverTexto(ctx, texto, anchoMax) {
    2. Tablero de SLA y productividad
    ======================================================================= */
 /* ===================================================================== *
- * Fechas: formato canonico y entrada manual dd/mm/aaaa
+ * Fechas: formato canonico
  * ===================================================================== */
 
 // aaaa-mm-dd, el unico formato que viaja a los handlers. Estaba dentro de
-// TableroSla; se subio aqui porque ahora lo usan tambien FechaManual y el
-// tablero de Backlog. Su comportamiento no cambio.
+// TableroSla; vive aqui porque lo usan los dos tableros. Su comportamiento
+// no cambio.
 function formatoFecha(d) {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -443,142 +443,6 @@ function formatoFecha(d) {
 function hoyISO() {
   return formatoFecha(new Date());
 }
-
-/* Entrada manual de fechas + boton "Hoy".
-
-   Los controles siguen siendo <input type="date"> nativos y siguen siendo la
-   FUENTE DE LA VERDAD: los filtros leen su .value en aaaa-mm-dd y el contrato
-   con los handlers no cambia. Esto solo agrega, al lado de cada calendario,
-   una caja de texto para teclear la fecha (15/06/2025 es mas rapido que
-   navegar el calendario) y un boton "Hoy".
-
-   El popup nativo del navegador NO se toca: los botones "Borrar" y "Hoy" que
-   aparecen dentro de el son del navegador, no de esta pagina.
-
-   Convenciones en el HTML:
-     <input type="date" id="X">           calendario, valor canonico
-     <input type="text"  id="X-manual">   texto dd/mm/aaaa   (opcional)
-     <button data-hoy="X">                boton "Hoy"        (opcional)
-
-   Al escribir una fecha valida se escribe en el nativo y se dispara SU evento
-   'change', asi que el refresco es exactamente el que ya existia para el
-   calendario (apagar el SLOT en SLA, recargar en Backlog). Una fecha invalida
-   no toca el nativo: se marca la caja y el tablero se queda como estaba. */
-const FechaManual = (function () {
-  const RE_DDMMAAAA = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
-
-  // dd/mm/aaaa -> aaaa-mm-dd, o '' si no es una fecha real. Rechaza
-  // 32/01/2025, 15/13/2025, 29/02/2025 (no bisiesto), fechas incompletas y
-  // cualquier cosa que no sea una fecha.
-  function aISO(texto) {
-    const m = RE_DDMMAAAA.exec(String(texto || '').trim());
-    if (!m) return '';
-    const dia = Number(m[1]), mes = Number(m[2]), anio = Number(m[3]);
-    if (mes < 1 || mes > 12 || dia < 1 || dia > 31) return '';
-    if (anio < 1900 || anio > 2999) return '';
-    const d = new Date(anio, mes - 1, dia);
-    // El constructor "rebota" los dias que no existen (31/04 -> 01/05), asi
-    // que la unica comprobacion fiable es que devuelva lo que se pidio.
-    if (d.getFullYear() !== anio || d.getMonth() !== mes - 1 || d.getDate() !== dia) return '';
-    return formatoFecha(d);
-  }
-
-  // aaaa-mm-dd -> dd/mm/aaaa (vacio si no hay valor).
-  function aTexto(iso) {
-    const t = String(iso || '').slice(0, 10).split('-');
-    if (t.length !== 3 || !t[0] || !t[1] || !t[2]) return '';
-    return `${t[2]}/${t[1]}/${t[0]}`;
-  }
-
-  function piezas(id) {
-    return {
-      nativo: document.getElementById(id),
-      manual: document.getElementById(id + '-manual'),
-      hoy: document.querySelector(`[data-hoy="${id}"]`),
-    };
-  }
-
-  // Deja el texto y el estado habilitado a juego con el calendario. Se llama
-  // al conectar, en cada cambio del nativo y desde fuera cada vez que el
-  // codigo escribe el valor a mano (rango rapido, SLOTs, "Limpiar", catalogos).
-  function sincronizar(id) {
-    const p = piezas(id);
-    if (!p.nativo) return;
-    if (p.manual) {
-      p.manual.value = aTexto(p.nativo.value);
-      p.manual.classList.remove('mal');
-      p.manual.disabled = p.nativo.disabled;
-    }
-    if (p.hoy) p.hoy.disabled = p.nativo.disabled;
-  }
-
-  // Los limites del calendario tambien valen para lo escrito a mano: el
-  // min/max de la fecha de corte son los cortes que existen de verdad.
-  function enRango(nativo, iso) {
-    if (nativo.min && iso < nativo.min) return false;
-    if (nativo.max && iso > nativo.max) return false;
-    return true;
-  }
-
-  // Escribe en el nativo y dispara su 'change'. Si el valor no cambia no se
-  // dispara nada: asi teclear la misma fecha dos veces no recarga dos veces.
-  function fijar(id, iso) {
-    const p = piezas(id);
-    if (!p.nativo || p.nativo.disabled) return false;
-    if (!iso || !enRango(p.nativo, iso)) return false;
-    const cambia = p.nativo.value !== iso;
-    p.nativo.value = iso;
-    sincronizar(id);
-    if (cambia) p.nativo.dispatchEvent(new Event('change', { bubbles: true }));
-    return true;
-  }
-
-  function conectar(id) {
-    const p = piezas(id);
-    if (!p.nativo) return;
-    if (p.nativo.dataset.fmanual === '1') return;   // nunca escuchas duplicadas
-    p.nativo.dataset.fmanual = '1';
-
-    // El calendario manda: cualquier cambio suyo se refleja en el texto.
-    p.nativo.addEventListener('change', () => sincronizar(id));
-
-    if (p.manual) {
-      const confirmar = () => {
-        const texto = p.manual.value.trim();
-        if (!texto) { sincronizar(id); return; }   // vacio: se restaura, sin tocar nada
-        const iso = aISO(texto);
-        if (!iso || !enRango(p.nativo, iso)) {
-          p.manual.classList.add('mal');           // no se aplica: estado intacto
-          return;
-        }
-        fijar(id, iso);
-      };
-      // 'change' cubre el salir del campo; Enter confirma sin esperar al blur.
-      p.manual.addEventListener('change', confirmar);
-      p.manual.addEventListener('keydown', ev => {
-        if (ev.key === 'Enter') { ev.preventDefault(); confirmar(); }
-      });
-      // Mientras se escribe solo se quita la marca de error.
-      p.manual.addEventListener('input', () => p.manual.classList.remove('mal'));
-    }
-
-    if (p.hoy) {
-      p.hoy.addEventListener('click', () => {
-        let iso = hoyISO();
-        // Si hoy queda fuera de los limites -la fecha de corte solo admite
-        // cortes que existen-, "Hoy" lleva al mas cercano en vez de no hacer
-        // nada en silencio.
-        if (p.nativo.max && iso > p.nativo.max) iso = p.nativo.max;
-        if (p.nativo.min && iso < p.nativo.min) iso = p.nativo.min;
-        fijar(id, iso);
-      });
-    }
-
-    sincronizar(id);
-  }
-
-  return { conectar, sincronizar, aISO, aTexto };
-})();
 
 const TableroSla = (function () {
   // El SP topea el detalle en 5000 filas (@TopSeguro). Se pide el maximo
@@ -674,8 +538,8 @@ const TableroSla = (function () {
   }
 
   // ---------------------------------------------------------- filtros al servidor
-  // formatoFecha() y hoyISO() viven ahora en el ambito global (arriba, junto a
-  // FechaManual): los usan los dos tableros, no solo este.
+  // formatoFecha() y hoyISO() viven en el ambito global (arriba): los usan los
+  // dos tableros, no solo este.
 
   // Rango con el que abre el tablero: del dia 1 del mes en curso a hoy. Vive
   // aparte porque lo usan DOS caminos que tienen que coincidir: el arranque
@@ -689,13 +553,10 @@ const TableroSla = (function () {
   }
 
   // Unico sitio donde se escriben las dos fechas por codigo: el arranque,
-  // "Limpiar", los rangos rapidos y los SLOTs pasan por aqui, asi que la
-  // entrada manual dd/mm/aaaa nunca se queda con un valor viejo.
+  // "Limpiar", los rangos rapidos y los SLOTs pasan por aqui.
   function escribirRango(r) {
     document.getElementById('f-inicio').value = r.inicio;
     document.getElementById('f-fin').value = r.fin;
-    FechaManual.sincronizar('f-inicio');
-    FechaManual.sincronizar('f-fin');
   }
 
   function aplicarRangoRapido(tipo) {
@@ -840,9 +701,10 @@ const TableroSla = (function () {
   // Pinta el stepper. No recarga nada: se llama tanto desde renderTodo como
   // desde los botones - / +, que solo mueven el numero.
   function renderSlotStepper() {
-    const n = Math.max(slotsN, 1);   // el minimo visible es 1, aun estando inactivo
-    document.getElementById('slot-n').textContent = String(n);
-    document.getElementById('slot-menos').disabled = slotsN <= 1;
+    // El 0 es un estado propio -SLOT apagado, manda el rango manual-, asi que
+    // se pinta tal cual en vez de ensenar un 1 que nadie ha pedido.
+    document.getElementById('slot-n').textContent = String(slotsN);
+    document.getElementById('slot-menos').disabled = slotsN <= 0;
     document.getElementById('slot-mas').disabled = slotsN >= MAX_SLOTS;
 
     // Sin aplicar, el numero es una intencion: el aviso evita leerlo como si ya
@@ -857,6 +719,10 @@ const TableroSla = (function () {
     const vigente = enModoSlot() && !pendiente;
     document.getElementById('slot-step').classList.toggle('sel', vigente);
     sum.classList.toggle('sel', vigente);
+
+    // Con 0 el control se ve apagado: no hay periodo preparado ni aplicado.
+    document.getElementById('slot-step').classList.toggle('off', slotsN === 0);
+    sum.classList.toggle('off', slotsN === 0);
   }
 
   // Pone en vigor el SLOT preparado escribiendo su rango en las fechas. No
@@ -1306,19 +1172,15 @@ const TableroSla = (function () {
       renderSlotStepper();
     });
     document.getElementById('slot-menos').addEventListener('click', () => {
-      if (slotsN <= 1) return;       // el minimo visible es 1
-      slotsN--;
+      if (slotsN <= 0) return;       // 0 = SLOT apagado, no se baja mas
+      slotsN--;                      // 1 -> 0 solo PREPARA el apagado: nada de
+                                     // red ni de fechas hasta "Aplicar filtros"
       renderSlotStepper();
     });
     // Tocar una fecha a mano apaga el SLOT: si no, "Aplicar filtros" volveria a
-    // escribir el rango del SLOT encima y no habria forma de salir del stepper,
-    // que se queda en 1 como minimo.
+    // escribir el rango del SLOT encima y las fechas escritas se perderian.
     ['f-inicio', 'f-fin'].forEach(id => {
       document.getElementById(id).addEventListener('change', desactivarSlots);
-      // Atajo dd/mm/aaaa + "Hoy". Lo que se teclea acaba en el mismo
-      // <input type="date"> y dispara su 'change', asi que el SLOT se apaga
-      // igual que si se hubiera usado el calendario.
-      FechaManual.conectar(id);
     });
     renderSlotStepper();             // estado inicial: sin SLOT, rango manual
 
@@ -2073,9 +1935,6 @@ const TableroBacklog = (function () {
       corte.value = '';
       corte.disabled = true;
     }
-    // El atajo manual y "Hoy" siguen al calendario: mismo texto, mismos
-    // limites y deshabilitados cuando no hay ningun corte guardado.
-    FechaManual.sincronizar('f-corte-bl');
 
     const aviso = document.getElementById('aviso-historico-bl');
     if (!fechas.length) {
@@ -2133,9 +1992,6 @@ const TableroBacklog = (function () {
     for (const id of ['f-corte-bl', 'f-dias-bl', 'f-granularidad-bl']) {
       document.getElementById(id).addEventListener('change', cargarTodo);
     }
-    // Atajo dd/mm/aaaa + "Hoy" para el corte. Escribe en el mismo
-    // <input type="date"> y dispara su 'change', que es el que recarga.
-    FechaManual.conectar('f-corte-bl');
     document.getElementById('btn-reset-filtros-bl').addEventListener('click', resetFiltros);
     activarSubtabs(document.querySelector('#tab-backlog .tabs').parentElement, () => redimensionar(graficos));
 

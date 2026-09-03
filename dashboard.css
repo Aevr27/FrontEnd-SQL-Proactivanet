@@ -238,7 +238,6 @@
   /* Barras oscuras, como los selectores del tablero de referencia:
      fondo #1e293b, borde #334155 y texto blanco. Todas miden lo mismo. */
   .filtros input[type="date"],
-  .filtros input[type="text"],
   .filtros select {
     height: 40px; width: 100%;
     border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
@@ -255,10 +254,8 @@
     background-color: var(--ctrl-bg);
 }
   .filtros input[type="date"]:hover,
-  .filtros input[type="text"]:hover,
   .filtros select:hover { background: var(--ctrl-bg-2); border-color: #475569; }
   .filtros input[type="date"]:focus,
-  .filtros input[type="text"]:focus,
   .filtros select:focus {
     outline: none; border-color: var(--accent); background: var(--ctrl-bg-2);
     box-shadow: var(--ring), inset 0 1px 2px rgba(0, 0, 0, .18);
@@ -386,35 +383,6 @@
   /* Rango rapido: grupo segmentado que ocupa el alto de una barra. */
   .filtros .rango-rapido { display: flex; gap: 6px; flex-wrap: wrap; height: 40px; }
 
-  /* ---- Fecha: calendario + "Hoy" + entrada manual dd/mm/aaaa ----
-     Los tres van en UNA sola fila del alto de una barra, para que el campo
-     siga alineado con el resto de los filtros. El campo ocupa dos columnas de
-     la rejilla porque tres controles no caben en el ancho de una. */
-  .filtros .campo-fecha { grid-column: span 2; }
-  .filtros .fechafila {
-    display: flex; align-items: center; gap: 6px; height: 40px; min-width: 0;
-  }
-  .filtros .fechafila input[type="date"] { flex: 1 1 132px; min-width: 0; }
-  .filtros .fechafila .btn { flex: none; height: 40px; }
-  /* Compacta: es un atajo para teclear, no el control principal. */
-  .filtros .fecha-manual {
-    flex: 0 1 104px; min-width: 88px;
-    font-variant-numeric: tabular-nums; letter-spacing: .3px;
-  }
-  .filtros .fecha-manual::placeholder { color: #64748b; font-weight: 500; }
-  /* Fecha imposible o fuera de los limites del calendario: se marca y no se
-     aplica nada, el tablero se queda con la fecha que ya tenia. */
-  .filtros .fecha-manual.mal,
-  .filtros .fecha-manual.mal:hover,
-  .filtros .fecha-manual.mal:focus {
-    border-color: #dc2626;
-    box-shadow: 0 0 0 3px rgba(220, 38, 38, .22), inset 0 1px 2px rgba(0, 0, 0, .18);
-  }
-  @media (max-width: 700px) {
-    .filtros .campo-fecha { grid-column: auto; }
-    .filtros .fechafila { flex-wrap: wrap; height: auto; }
-  }
-
   /* Selector de SLOT: un stepper compacto - N +. Elegir N son "los ultimos N
      SLOTs" (SLOT 0..N-1) y su unico efecto es fijar el rango de fechas, asi que
      va a juego con Rango rapido, no con los desplegables. */
@@ -462,10 +430,27 @@
      tambien en el borde, porque el control es una sola pieza. */
   .filtros .slotstep.sel { border-color: var(--accent); }
   .filtros .slotstep.sel .slotn { color: var(--accent); }
+  /* Con 0 SLOTs el control esta apagado: no hay periodo preparado ni aplicado,
+     manda el rango manual de las fechas. */
+  .filtros .slotstep.off { opacity: .6; }
+  .filtros .slotstep.off .slotn { color: var(--muted); }
   /* En acento solo cuando el SLOT esta en vigor; inactivo o sin aplicar, apagado
      para no anunciar un periodo que no es el de la grafica. */
   .filtros .slotsum { width: 100%; font-size: 12px; font-weight: 700; color: var(--muted); }
   .filtros .slotsum.sel { color: var(--accent); }
+  /* La rejilla de filtros alinea los campos por abajo (align-items: end). Este
+     campo tiene una linea mas que los demas -el resumen del SLOT-, asi que su
+     barra quedaba un renglon mas arriba que las vecinas. El resumen se saca del
+     flujo: el campo vuelve a medir etiqueta + barra, el stepper queda a la
+     misma altura que los <input type="date"> y los desplegables de al lado, y
+     el texto se pinta en el hueco entre filas. Ni el control ni su logica
+     cambian. */
+  .filtros .campo-slot { position: relative; }
+  .filtros .campo-slot .slotsum {
+    position: absolute; top: 100%; left: 0;
+    margin-top: 4px; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
 
   .filtros .rango-rapido .btn {
     flex: 1 1 0; min-width: 0; height: 40px; padding: 0 10px;
