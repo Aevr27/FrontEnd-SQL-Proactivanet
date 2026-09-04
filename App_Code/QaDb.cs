@@ -29,6 +29,44 @@ public sealed class QaSolicitudInvalida : Exception
     public QaSolicitudInvalida(string mensaje) : base(mensaje) { }
 }
 
+// Una fila, sin materializarla. La misma cara para la fila que llega de SQL
+// Server y para la que sale de un archivo de snapshot.
+//
+// Resuelve el nombre de columna a su ordinal UNA vez por result set y no por
+// fila: con 5.000 filas y una docena de columnas leidas, esa diferencia se
+// nota. De cada fila solo se convierten las columnas que se piden; las 35
+// columnas que el resumen no mira nunca se convierten a string.
+public sealed class QaLector
+{
+    private readonly IDataRecord _reader;
+    private Dictionary<string, int> _ordinales;
+    private Dictionary<string, object> _fila;
+
+    public QaLector() { }
+
+    public QaLector(IDataReader reader)
+    {
+        _reader = reader;
+        _ordinales = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < reader.FieldCount; i++) _ordinales[reader.GetName(i)] = i;
+    }
+
+    // Apunta el lector a otra fila ya leida (modo snapshot).
+    public void Usar(Dictionary<string, object> fila) { _fila = fila; }
+
+    public string Texto(string columna)
+    {
+        if (_reader == null) return QaDb.Texto(_fila, columna);
+
+        int indice;
+        if (!_ordinales.TryGetValue(columna, out indice)) return null;
+        if (_reader.IsDBNull(indice)) return null;
+
+        object valor = _reader.GetValue(indice);
+        return valor as string ?? Convert.ToString(valor, CultureInfo.InvariantCulture);
+    }
+}
+
 public static class QaDb
 {
     // Tope duro de la conexion, por encima del que traiga Web.config: una
@@ -92,6 +130,56 @@ public static class QaDb
         }
 
         return resultados;
+    }
+
+    // Recorre el PRIMER result set de un stored procedure fila por fila, sin
+    // materializar nada.
+    //
+    // EjecutarMultiple construye un Dictionary<string,object> por fila con las
+    // 49 columnas de la vista, varias de ellas NVARCHAR(MAX) de miles de
+    // caracteres. Para el detalle de una ventana de 15 dias eso son cientos de
+    // miles de conversiones y cadenas que el resumen tira a la basura: solo
+    // necesita contar. Recorrer lee del SqlDataReader y deja que la fila se
+    // descarte en cuanto se conto, asi que la memoria no crece con el rango.
+    //
+    // El modo snapshot pasa por aqui igual, sobre las filas ya leidas del
+    // archivo: quien agrega no distingue un modo del otro.
+    public static void Recorrer(string procedimiento, Dictionary<string, object> parametros,
+                                Action<QaLector> porFila)
+    {
+        string cadena = CadenaConexion();
+
+        if (QaSnapshot.Activo(cadena))
+        {
+            var resultados = QaSnapshot.Leer(QaSnapshot.Carpeta(cadena), procedimiento, parametros);
+            var lectorArchivo = new QaLector();
+            foreach (var fila in Conjunto(resultados, 0))
+            {
+                lectorArchivo.Usar(fila);
+                porFila(lectorArchivo);
+            }
+            return;
+        }
+
+        using (var cn = new SqlConnection(cadena))
+        using (var cmd = new SqlCommand(procedimiento, cn))
+        {
+            cmd.CommandType = CommandType.StoredProcedure;
+            cmd.CommandTimeout = TimeoutComandoSegundos;
+
+            if (parametros != null)
+            {
+                foreach (var kv in parametros)
+                    cmd.Parameters.AddWithValue("@" + kv.Key, kv.Value ?? (object)DBNull.Value);
+            }
+
+            cn.Open();
+            using (var reader = cmd.ExecuteReader())
+            {
+                var lector = new QaLector(reader);
+                while (reader.Read()) porFila(lector);
+            }
+        }
     }
 
     // Atajo para procedimientos de un solo result set.

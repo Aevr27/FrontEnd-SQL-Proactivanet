@@ -1,4 +1,4 @@
-﻿// Capa de adaptacion entre los procedimientos QA que YA existen en la base y
+// Capa de adaptacion entre los procedimientos QA que YA existen en la base y
 // el contrato JSON que espera el tablero (qa_test.js).
 //
 // POR QUE EXISTE ESTE ARCHIVO
@@ -18,6 +18,28 @@
 //   que se hace aqui es SOLO lo que ningun procedimiento existente entrega:
 //   agrupar y contar filas que la base ya devolvio, y recortar/paginar.
 //
+// CUANTAS VECES SE LEE LA VISTA (esto es todo el rendimiento del tablero)
+//   Cada EXEC de un usp_CorreoQA_* vuelve a materializar dbo.vw_CorreoQA_Base
+//   entera. La primera version de action=summary encadenaba CINCO: _Kpis,
+//   _PorGrupo, _PorTecnico, _TopCategorias y _Detalle, una detras de otra. El
+//   tablero tardaba ~2 minutos en devolver 11 KB, y ninguna llamada sola llego
+//   al CommandTimeout de 90 s: el tiempo era la SUMA.
+//
+//   Ahora son DOS, y en paralelo:
+//     - dbo.usp_CorreoQA_Kpis, por los conteos de ayer y de la semana
+//       anterior, que miran FechaFirmaSolucion FUERA de la ventana y no se
+//       pueden derivar de ninguna otra cosa.
+//     - dbo.usp_CorreoQA_Detalle, una sola pasada en streaming de la que
+//       salen los demas bloques.
+//
+//   _PorGrupo, _PorTecnico y _TopCategorias dejaron de llamarse desde el
+//   resumen. No aportaban ningun dato nuevo: contaban, con otra lectura
+//   completa de la misma vista, exactamente las mismas filas que ya vienen en
+//   el detalle. Siguen siendo la fuente del correo diario; el tablero cuenta
+//   sobre las filas que ya tiene en la mano. De paso el tablero recupera
+//   'Sin tecnico' y los grupos por debajo del @Minimo del correo, que esos
+//   procedimientos filtran a proposito porque el correo no los quiere.
+//
 // LO QUE NO SE HACE AQUI
 //   - No se ejecuta SQL escrito a mano: todo son EXEC de procedimientos que ya
 //     estaban en la base. No se crea, altera ni borra ningun objeto.
@@ -26,19 +48,62 @@
 //     columna Validacion de cada fila del detalle.
 //   - No se inventa ningun porcentaje de cumplimiento QARE.
 //   - No se sustituye ningun NULL por un valor de relleno.
-//
-// COSTE CONOCIDO
-//   Cuatro bloques del resumen (validacion, recategorizacion, los contadores
-//   QA/QARE y las distribuciones) no los produce ningun procedimiento
-//   existente. La unica via sin tocar la base es agregarlos en memoria sobre
-//   el detalle del rango, que usp_CorreoQA_Detalle si devuelve. Por eso el
-//   resumen hace una pasada completa del detalle y la cachea unos minutos.
-//   Con la ventana por defecto de 15 dias son unos pocos miles de filas.
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Web;
 using System.Web.Caching;
+
+// Cuanto tarda cada paso de una peticion. Solo duraciones y conteos de filas:
+// ningun dato de la conexion, del servidor ni de los tickets. Se publica en la
+// respuesta unicamente con ?debug=timings.
+public sealed class QaCronometro
+{
+    private readonly object _candado = new object();
+    private readonly Dictionary<string, object> _pasos = new Dictionary<string, object>();
+    private readonly Stopwatch _total = Stopwatch.StartNew();
+
+    // Los pasos se anotan desde dos hilos (el resumen corre en paralelo con
+    // los KPIs), asi que el diccionario va bajo candado.
+    public void Marcar(string paso, long milisegundos)
+    {
+        lock (_candado) { _pasos[paso] = milisegundos; }
+    }
+
+    public void Anotar(string clave, object valor)
+    {
+        lock (_candado) { _pasos[clave] = valor; }
+    }
+
+    public IDisposable Medir(string paso) { return new Medicion(this, paso); }
+
+    public Dictionary<string, object> Resultado()
+    {
+        lock (_candado)
+        {
+            var salida = new Dictionary<string, object>(_pasos);
+            salida["totalMs"] = _total.ElapsedMilliseconds;
+            return salida;
+        }
+    }
+
+    private sealed class Medicion : IDisposable
+    {
+        private readonly QaCronometro _reloj;
+        private readonly string _paso;
+        private readonly Stopwatch _cronometro;
+
+        public Medicion(QaCronometro reloj, string paso)
+        {
+            _reloj = reloj;
+            _paso = paso;
+            _cronometro = Stopwatch.StartNew();
+        }
+
+        public void Dispose() { _reloj.Marcar(_paso, _cronometro.ElapsedMilliseconds); }
+    }
+}
 
 public static class QaCorreo
 {
@@ -46,12 +111,14 @@ public static class QaCorreo
     // Los nombres estan aqui y en ningun otro lado. Todos existen en
     // Tickets_Proactivanet desde antes de este tablero.
     public const string ProcKpis = "dbo.usp_CorreoQA_Kpis";
-    public const string ProcPorGrupo = "dbo.usp_CorreoQA_PorGrupo";
-    public const string ProcPorTecnico = "dbo.usp_CorreoQA_PorTecnico";
-    public const string ProcTopCategorias = "dbo.usp_CorreoQA_TopCategorias";
     public const string ProcDetalle = "dbo.usp_CorreoQA_Detalle";
     public const string ProcCatalogoCategorias = "dbo.usp_CorreoQA_CatalogoCategorias";
     public const string ProcGruposValidos = "dbo.usp_CorreoQA_GruposValidos";
+
+    // Los otros tres del correo diario -- dbo.usp_CorreoQA_PorGrupo,
+    // _PorTecnico y _TopCategorias -- ya no los llama el tablero. Ver la
+    // cabecera: cada uno costaba otra lectura completa de la vista para contar
+    // filas que el detalle ya trae.
 
     // usp_CorreoQA_Detalle no pagina: recorta con @Top. El tope tiene que ser
     // mayor que cualquier ventana razonable (15 dias son ~5.000 tickets) pero
@@ -59,20 +126,19 @@ public static class QaCorreo
     // Si el resultado llega justo en el tope, el handler lo marca en "source".
     private const int TopDetalle = 50000;
 
-    // @Minimo de usp_CorreoQA_PorGrupo / _PorTecnico. El correo lo usa para no
-    // listar grupos con uno o dos tickets; el tablero los quiere todos.
-    private const int MinimoSinUmbral = 1;
-
-    // Categorias que se piden a usp_CorreoQA_TopCategorias para el resumen.
+    // Categorias que publica el bloque aditivo topCategorias.
     private const int TopCategoriasFilas = 10;
 
-    // Vida del detalle cacheado. Corta a proposito: el tablero es de datos en
-    // vivo, esto solo evita repetir la misma pasada al recargar o al pasar de
-    // pagina en el detalle.
-    private const int SegundosCache = 120;
+    // Vida de los agregados del resumen. Son unos pocos KB de contadores, no
+    // filas, asi que se pueden sostener mas que el detalle. Corta igual, porque
+    // el tablero es de datos en vivo: esto solo evita repetir la pasada cuando
+    // varias personas abren el tablero seguidas, cuando el usuario recarga, o
+    // cuando abre una distribucion QARE (action=qare sale de aqui).
+    private const int SegundosCacheResumen = 300;
 
-    // Por encima de esto el detalle no se cachea: no vale la pena sostener en
-    // memoria del App Pool el resultado de un rango enorme.
+    // Vida del detalle materializado (action=detail). Mas corta y con tope de
+    // filas: eso si son tickets enteros en memoria del App Pool.
+    private const int SegundosCacheDetalle = 120;
     private const int FilasMaximasCacheables = 20000;
 
     // ------------------------------------------------------------- columnas
@@ -135,39 +201,20 @@ public static class QaCorreo
     private const int MaximoValoresDistintos = 50;
     private const int MaximoLargoValor = 120;
 
+    // La base agrupaba sobre CONVERT(NVARCHAR(4000), Valor). Se conserva ese
+    // corte para que el conteo de valores distintos no cambie.
+    private const int LargoContado = 4000;
+
     // Las comparaciones de texto ignoran mayusculas porque el collation del
     // servidor tambien: si la base cuenta 'SI' y 'Si' como el mismo valor, el
     // conteo de valores distintos de aqui tiene que hacer lo mismo.
     private static readonly StringComparer Comparador = StringComparer.OrdinalIgnoreCase;
 
     // ============================================================== lecturas
-    // Cada metodo es un EXEC de un procedimiento que ya existia. Los result
-    // sets se devuelven crudos: quien los interpreta es qa.ashx.
-
-    public static Dictionary<string, object> Kpis(string fi, string ff)
+    public static Dictionary<string, object> Kpis(string fi, string ff, QaCronometro reloj)
     {
-        return QaDb.PrimeraFila(QaDb.EjecutarMultiple(ProcKpis, Rango(fi, ff)), 0);
-    }
-
-    public static List<Dictionary<string, object>> PorGrupo(string fi, string ff)
-    {
-        var parametros = Rango(fi, ff);
-        parametros["Minimo"] = MinimoSinUmbral;
-        return QaDb.Conjunto(QaDb.EjecutarMultiple(ProcPorGrupo, parametros), 0);
-    }
-
-    public static List<Dictionary<string, object>> PorTecnico(string fi, string ff)
-    {
-        var parametros = Rango(fi, ff);
-        parametros["Minimo"] = MinimoSinUmbral;
-        return QaDb.Conjunto(QaDb.EjecutarMultiple(ProcPorTecnico, parametros), 0);
-    }
-
-    public static List<Dictionary<string, object>> TopCategorias(string fi, string ff)
-    {
-        var parametros = Rango(fi, ff);
-        parametros["Top"] = TopCategoriasFilas;
-        return QaDb.Conjunto(QaDb.EjecutarMultiple(ProcTopCategorias, parametros), 0);
+        using (reloj.Medir("kpisMs"))
+            return QaDb.PrimeraFila(QaDb.EjecutarMultiple(ProcKpis, Rango(fi, ff)), 0);
     }
 
     public static List<Dictionary<string, object>> CatalogoCategorias(bool soloVigentes)
@@ -183,12 +230,63 @@ public static class QaCorreo
         return QaDb.Conjunto(QaDb.EjecutarMultiple(ProcGruposValidos, null), 0);
     }
 
+    // ================================================== resumen (una pasada)
+    // Todos los bloques que el tablero pinta al abrir, menos los KPIs, salen de
+    // UNA sola lectura de usp_CorreoQA_Detalle contada al vuelo. Ninguna fila se
+    // materializa ni se guarda: por cada ticket se leen las columnas que hacen
+    // falta y se suman contadores.
+    //
+    // El resultado -- unos pocos KB -- se cachea, asi que abrir una
+    // distribucion QARE (action=qare) ya no vuelve a leer la vista.
+    public static Agregados Resumen(string fi, string ff, QaCronometro reloj)
+    {
+        string clave = "qa:resumen:" + fi + ":" + ff;
+
+        var cache = HttpRuntime.Cache;
+        if (cache != null)
+        {
+            var guardado = cache[clave] as Agregados;
+            if (guardado != null)
+            {
+                reloj.Anotar("resumenDesdeCache", true);
+                return guardado;
+            }
+        }
+
+        var agregados = new Agregados();
+        var acumulado = new Acumulado();
+
+        var parametros = Rango(fi, ff);
+        parametros["SoloIncorrectos"] = 0;
+        parametros["Top"] = TopDetalle;
+
+        using (reloj.Medir("detalleMs"))
+            QaDb.Recorrer(ProcDetalle, parametros, acumulado.Contar);
+
+        using (reloj.Medir("agregacionMs"))
+            acumulado.Volcar(agregados);
+
+        reloj.Anotar("filasDetalle", agregados.Total);
+        reloj.Anotar("resumenDesdeCache", false);
+
+        if (cache != null)
+        {
+            cache.Insert(clave, agregados, null,
+                         DateTime.UtcNow.AddSeconds(SegundosCacheResumen),
+                         Cache.NoSlidingExpiration);
+        }
+
+        return agregados;
+    }
+
     // -------------------------------------------------------------- detalle
-    // Filas del rango, normalizadas y cacheadas unos minutos. @SoloIncorrectos
-    // lo resuelve la base cuando el tablero pide justo ese estado; el resto de
-    // filtros no los soporta el procedimiento y se aplican despues, en
-    // Filtrar(), sin que el navegador vea la diferencia.
-    public static List<Dictionary<string, object>> Detalle(string fi, string ff, bool soloIncorrectos)
+    // Filas enteras, para action=detail. Aqui SI hay que materializarlas: el
+    // tablero las serializa. @SoloIncorrectos lo resuelve la base cuando el
+    // tablero pide justo ese estado -- que es su filtro por defecto --, y
+    // entonces viaja una fraccion de las filas del rango.
+    public static List<Dictionary<string, object>> Detalle(string fi, string ff,
+                                                           bool soloIncorrectos,
+                                                           QaCronometro reloj)
     {
         string clave = "qa:detalle:" + fi + ":" + ff + ":" + (soloIncorrectos ? "1" : "0");
 
@@ -196,20 +294,31 @@ public static class QaCorreo
         if (cache != null)
         {
             var guardado = cache[clave] as List<Dictionary<string, object>>;
-            if (guardado != null) return guardado;
+            if (guardado != null)
+            {
+                reloj.Anotar("detalleDesdeCache", true);
+                return guardado;
+            }
         }
 
         var parametros = Rango(fi, ff);
         parametros["SoloIncorrectos"] = soloIncorrectos ? 1 : 0;
         parametros["Top"] = TopDetalle;
 
-        var filas = QaDb.Conjunto(QaDb.EjecutarMultiple(ProcDetalle, parametros), 0);
-        foreach (var fila in filas) Normalizar(fila);
+        List<Dictionary<string, object>> filas;
+        using (reloj.Medir("detalleMs"))
+            filas = QaDb.Conjunto(QaDb.EjecutarMultiple(ProcDetalle, parametros), 0);
+
+        using (reloj.Medir("normalizacionMs"))
+            foreach (var fila in filas) Normalizar(fila);
+
+        reloj.Anotar("filasDetalle", (long)filas.Count);
+        reloj.Anotar("detalleDesdeCache", false);
 
         if (cache != null && filas.Count <= FilasMaximasCacheables)
         {
             cache.Insert(clave, filas, null,
-                         DateTime.UtcNow.AddSeconds(SegundosCache),
+                         DateTime.UtcNow.AddSeconds(SegundosCacheDetalle),
                          Cache.NoSlidingExpiration);
         }
 
@@ -219,10 +328,7 @@ public static class QaCorreo
     // true cuando el detalle llego pegado al tope de @Top y por tanto puede
     // estar recortado. El handler lo publica en "source" para que nadie lea
     // los numeros como si fueran el rango completo.
-    public static bool Truncado(List<Dictionary<string, object>> filas)
-    {
-        return filas != null && filas.Count >= TopDetalle;
-    }
+    public static bool Truncado(long filas) { return filas >= TopDetalle; }
 
     // Un valor que el procedimiento ya devuelve con el nombre visible se deja
     // como esta. Solo se rellena el nombre visible que falte, copiando el de la
@@ -297,54 +403,75 @@ public static class QaCorreo
         public long Total;
         public List<object> Validacion = new List<object>();
         public List<object> Recategorizacion = new List<object>();
+        public List<object> PorGrupo = new List<object>();
+        public List<object> PorTecnico = new List<object>();
+        public List<object> TopCategorias = new List<object>();
         public List<object> Campos = new List<object>();
         // Distribucion de respuestas por indice de campo (0..11). null en los
         // campos de texto libre, igual que antes: eso es lo que distingue un
         // campo codificado de uno abierto.
         public List<List<object>> Distribuciones = new List<List<object>>();
-        // Incorrectos por grupo y por tecnico. Solo se usan para completar lo
-        // que los procedimientos del correo dejan fuera por su @Minimo o por
-        // sus exclusiones; no sustituyen sus conteos.
-        public Dictionary<string, long> IncorrectosPorGrupo =
-            new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, long> IncorrectosPorTecnico =
-            new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
     }
 
-    public static Agregados Agregar(List<Dictionary<string, object>> filas)
+    // Los contadores mientras se recorre el detalle. Vive un solo request y no
+    // guarda ni una fila.
+    private sealed class Acumulado
     {
-        var agregados = new Agregados();
-        agregados.Total = filas.Count;
+        private long _total;
+        private readonly Dictionary<string, long> _validacion = new Dictionary<string, long>(Comparador);
+        private readonly Dictionary<string, long> _grupo = new Dictionary<string, long>(Comparador);
+        private readonly Dictionary<string, long> _tecnico = new Dictionary<string, long>(Comparador);
+        private readonly Dictionary<string, long> _categoriaIncorrectos = new Dictionary<string, long>(Comparador);
+        private readonly Dictionary<string, long> _categoriaTotal = new Dictionary<string, long>(Comparador);
+        private readonly Dictionary<string, long> _recategorizacion = new Dictionary<string, long>();
+        private readonly Dictionary<string, string[]> _etiquetasRecat = new Dictionary<string, string[]>();
 
-        var porValidacion = new Dictionary<string, long>(Comparador);
-        var recategorizacion = new Dictionary<string, long>();
-        var etiquetasRecat = new Dictionary<string, string[]>();
+        // Mientras un campo puede tener distribucion se guardan sus valores. En
+        // cuanto se sabe que no la tendra -- texto libre -- se pasa a guardar
+        // solo una huella de 64 bits por valor: el conteo de valores distintos
+        // sigue siendo el mismo numero que antes, pero deja de sostener en
+        // memoria una descripcion entera por ticket.
+        private readonly Dictionary<string, long>[] _valores;
+        private readonly HashSet<long>[] _huellas;
+        private readonly long[] _respondidos;
+        private readonly int[] _largoMaximo;
 
-        // Un diccionario de valores distintos por campo QA/QARE.
-        var valores = new List<Dictionary<string, long>>();
-        var respondidos = new long[CamposQare.Length];
-        var largoMaximo = new int[CamposQare.Length];
-        for (int i = 0; i < CamposQare.Length; i++)
-            valores.Add(new Dictionary<string, long>(Comparador));
-
-        foreach (var fila in filas)
+        public Acumulado()
         {
-            string validacion = QaDb.Texto(fila, ColValidacion);
-            Sumar(porValidacion, Clave(validacion), 1);
+            _valores = new Dictionary<string, long>[CamposQare.Length];
+            _huellas = new HashSet<long>[CamposQare.Length];
+            _respondidos = new long[CamposQare.Length];
+            _largoMaximo = new int[CamposQare.Length];
+            for (int i = 0; i < CamposQare.Length; i++)
+                _valores[i] = new Dictionary<string, long>(Comparador);
+        }
+
+        public void Contar(QaLector fila)
+        {
+            _total++;
+
+            string validacion = Columna(fila, ColValidacion, "Validacion");
+            Sumar(_validacion, Clave(validacion), 1);
+
+            string categoria = Columna(fila, ColCategoria, "Categoria");
+            Sumar(_categoriaTotal, Clave(categoria), 1);
 
             bool incorrecto = string.Equals(validacion, "Incorrecto",
                                             StringComparison.OrdinalIgnoreCase);
             if (incorrecto)
             {
-                Sumar(agregados.IncorrectosPorGrupo, Clave(QaDb.Texto(fila, ColGrupo)), 1);
-                Sumar(agregados.IncorrectosPorTecnico, Clave(QaDb.Texto(fila, ColTecnico)), 1);
+                string grupo = Columna(fila, ColGrupo, "Grupo");
+                string tecnico = Columna(fila, ColTecnico, "Tecnico");
+                string correcto = Columna(fila, ColGrupoCorrecto, "GrupoCorrecto");
 
-                string grupo = QaDb.Texto(fila, ColGrupo);
-                string correcto = QaDb.Texto(fila, ColGrupoCorrecto);
-                string par = Clave(grupo) + "\u0001" + Clave(correcto);
-                Sumar(recategorizacion, par, 1);
-                if (!etiquetasRecat.ContainsKey(par))
-                    etiquetasRecat[par] = new[] { grupo, correcto };
+                Sumar(_grupo, Clave(grupo), 1);
+                Sumar(_tecnico, Clave(tecnico), 1);
+                Sumar(_categoriaIncorrectos, Clave(categoria), 1);
+
+                string par = Clave(grupo) + Separador + Clave(correcto);
+                Sumar(_recategorizacion, par, 1);
+                if (!_etiquetasRecat.ContainsKey(par))
+                    _etiquetasRecat[par] = new[] { grupo, correcto };
             }
 
             for (int i = 0; i < CamposQare.Length; i++)
@@ -352,94 +479,144 @@ public static class QaCorreo
                 string valor = Valor(fila, CamposQare[i]);
                 if (valor == null) continue;
 
-                respondidos[i]++;
-                if (valor.Length > largoMaximo[i]) largoMaximo[i] = valor.Length;
-                Sumar(valores[i], valor, 1);
+                _respondidos[i]++;
+
+                // La base contaba sobre CONVERT(NVARCHAR(4000), Valor): dos
+                // textos que solo difieren pasados esos caracteres eran el
+                // mismo valor. Se conserva ese corte para no cambiar ni el
+                // conteo de distintos ni el largo maximo.
+                int largo = Math.Min(valor.Length, LargoContado);
+                if (largo > _largoMaximo[i]) _largoMaximo[i] = largo;
+
+                var valores = _valores[i];
+                if (valores != null)
+                {
+                    if (largo <= MaximoLargoValor && valores.Count <= MaximoValoresDistintos)
+                    {
+                        Sumar(valores, largo == valor.Length ? valor : valor.Substring(0, largo), 1);
+                        continue;
+                    }
+
+                    // El campo deja de calificar para distribucion: los valores
+                    // ya vistos se reducen a huellas y a partir de aqui no se
+                    // guarda mas texto. Sin esto un rango grande sostendria una
+                    // descripcion entera por ticket, que es justo lo que este
+                    // recorrido evita.
+                    var convertidas = new HashSet<long>();
+                    foreach (var visto in valores.Keys) convertidas.Add(Huella(visto, visto.Length));
+                    _huellas[i] = convertidas;
+                    _valores[i] = null;
+                }
+
+                _huellas[i].Add(Huella(valor, largo));
             }
         }
 
-        // --- validacion: los cuatro estados por separado, nunca agrupados.
-        var estados = new List<KeyValuePair<string, long>>(porValidacion);
-        estados.Sort(PorTicketsDesc);
-        foreach (var estado in estados)
+        public void Volcar(Agregados agregados)
         {
-            var item = new Dictionary<string, object>();
-            item["validacion"] = Etiqueta(estado.Key);
-            item["tickets"] = estado.Value;
-            item["pct"] = agregados.Total == 0
-                ? 0.0
-                : Math.Round(100.0 * estado.Value / agregados.Total, 2,
-                             MidpointRounding.AwayFromZero);
-            agregados.Validacion.Add(item);
-        }
+            agregados.Total = _total;
 
-        // --- recategorizacion: pares grupo actual -> grupo correcto.
-        var pares = new List<KeyValuePair<string, long>>(recategorizacion);
-        pares.Sort(PorTicketsDesc);
-        foreach (var par in pares)
-        {
-            var item = new Dictionary<string, object>();
-            item["grupo"] = etiquetasRecat[par.Key][0];
-            // NULL de verdad cuando el ticket no tiene grupo correcto: el
-            // tablero lo pinta como "Sin grupo correcto", no como un grupo.
-            item["grupoCorrecto"] = etiquetasRecat[par.Key][1];
-            item["tickets"] = par.Value;
-            agregados.Recategorizacion.Add(item);
-        }
-
-        // --- campos QA/QARE: contadores en crudo, sin porcentaje.
-        for (int i = 0; i < CamposQare.Length; i++)
-        {
-            int distintos = valores[i].Count;
-            bool tieneDistribucion = distintos >= 1
-                                     && distintos <= MaximoValoresDistintos
-                                     && largoMaximo[i] <= MaximoLargoValor;
-
-            var campo = new Dictionary<string, object>();
-            campo["campo"] = CamposQare[i][0];
-            campo["respondidos"] = respondidos[i];
-            campo["sinRespuesta"] = agregados.Total - respondidos[i];
-            campo["valoresDistintos"] = (long)distintos;
-            campo["tieneDistribucion"] = tieneDistribucion;
-            agregados.Campos.Add(campo);
-
-            if (!tieneDistribucion) { agregados.Distribuciones.Add(null); continue; }
-
-            var respuestas = new List<KeyValuePair<string, long>>(valores[i]);
-            respuestas.Sort(PorTicketsDesc);
-
-            var lista = new List<object>();
-            foreach (var respuesta in respuestas)
+            // --- validacion: los cuatro estados por separado, nunca agrupados.
+            foreach (var estado in Ordenar(_validacion))
             {
                 var item = new Dictionary<string, object>();
-                item["respuesta"] = respuesta.Key;
-                item["tickets"] = respuesta.Value;
-                lista.Add(item);
+                item["validacion"] = Etiqueta(estado.Key);
+                item["tickets"] = estado.Value;
+                item["pct"] = _total == 0
+                    ? 0.0
+                    : Math.Round(100.0 * estado.Value / _total, 2, MidpointRounding.AwayFromZero);
+                agregados.Validacion.Add(item);
             }
-            agregados.Distribuciones.Add(lista);
+
+            // --- incorrectos por grupo y por tecnico. 'Sin tecnico' incluido:
+            // el tablero tiene que ver esa barra.
+            foreach (var par in Ordenar(_grupo))
+                agregados.PorGrupo.Add(Item("grupo", Etiqueta(par.Key), par.Value));
+
+            foreach (var par in Ordenar(_tecnico))
+                agregados.PorTecnico.Add(Item("tecnico", Etiqueta(par.Key), par.Value));
+
+            // --- recategorizacion: pares grupo actual -> grupo correcto.
+            foreach (var par in Ordenar(_recategorizacion))
+            {
+                var item = new Dictionary<string, object>();
+                item["grupo"] = _etiquetasRecat[par.Key][0];
+                // NULL de verdad cuando el ticket no tiene grupo correcto: el
+                // tablero lo pinta como "Sin grupo correcto", no como un grupo.
+                item["grupoCorrecto"] = _etiquetasRecat[par.Key][1];
+                item["tickets"] = par.Value;
+                agregados.Recategorizacion.Add(item);
+            }
+
+            // --- top de categorias, con las mismas columnas que publica
+            // usp_CorreoQA_TopCategorias para el correo.
+            int tomadas = 0;
+            foreach (var par in Ordenar(_categoriaIncorrectos))
+            {
+                if (tomadas++ >= TopCategoriasFilas) break;
+
+                long total;
+                _categoriaTotal.TryGetValue(par.Key, out total);
+
+                var item = new Dictionary<string, object>();
+                item["Categoria"] = Etiqueta(par.Key);
+                item["TicketsIncorrectos"] = par.Value;
+                item["TicketsTotales"] = total;
+                item["PorcentajeIncorrectos"] = total == 0
+                    ? 0.0
+                    : Math.Round(100.0 * par.Value / total, 2, MidpointRounding.AwayFromZero);
+                agregados.TopCategorias.Add(item);
+            }
+
+            // --- campos QA/QARE: contadores en crudo, sin porcentaje.
+            for (int i = 0; i < CamposQare.Length; i++)
+            {
+                var valores = _valores[i];
+                // valores == null: el campo resulto ser de texto libre y sus
+                // valores se contaron por huella. El numero de distintos es el
+                // mismo que daba la base; lo que no hay es la lista, que ese
+                // tipo de campo nunca llego a mostrar.
+                int distintos = valores != null ? valores.Count : _huellas[i].Count;
+                bool tieneDistribucion = valores != null
+                                         && distintos >= 1
+                                         && distintos <= MaximoValoresDistintos
+                                         && _largoMaximo[i] <= MaximoLargoValor;
+
+                var campo = new Dictionary<string, object>();
+                campo["campo"] = CamposQare[i][0];
+                campo["respondidos"] = _respondidos[i];
+                campo["sinRespuesta"] = _total - _respondidos[i];
+                campo["valoresDistintos"] = (long)distintos;
+                campo["tieneDistribucion"] = tieneDistribucion;
+                agregados.Campos.Add(campo);
+
+                if (!tieneDistribucion) { agregados.Distribuciones.Add(null); continue; }
+
+                var lista = new List<object>();
+                foreach (var respuesta in Ordenar(valores))
+                {
+                    var item = new Dictionary<string, object>();
+                    item["respuesta"] = respuesta.Key;
+                    item["tickets"] = respuesta.Value;
+                    lista.Add(item);
+                }
+                agregados.Distribuciones.Add(lista);
+            }
         }
 
-        return agregados;
-    }
-
-    // Grupos o tecnicos que el procedimiento del correo dejo fuera (por su
-    // @Minimo, o porque el correo excluye 'Sin tecnico') y que el tablero si
-    // tiene que mostrar. Los que el procedimiento SI devolvio conservan su
-    // conteo: la base manda, esto solo completa.
-    public static void Completar(List<object> destino, Dictionary<string, long> agregado,
-                                 string clave, HashSet<string> yaListados)
-    {
-        var faltantes = new List<KeyValuePair<string, long>>();
-        foreach (var par in agregado)
-            if (!yaListados.Contains(Clave(par.Key))) faltantes.Add(par);
-
-        faltantes.Sort(PorTicketsDesc);
-        foreach (var par in faltantes)
+        private static Dictionary<string, object> Item(string clave, string etiqueta, long tickets)
         {
             var item = new Dictionary<string, object>();
-            item[clave] = Etiqueta(par.Key);
-            item["tickets"] = par.Value;
-            destino.Add(item);
+            item[clave] = etiqueta;
+            item["tickets"] = tickets;
+            return item;
+        }
+
+        private static List<KeyValuePair<string, long>> Ordenar(Dictionary<string, long> mapa)
+        {
+            var lista = new List<KeyValuePair<string, long>>(mapa);
+            lista.Sort(PorTicketsDesc);
+            return lista;
         }
     }
 
@@ -452,27 +629,52 @@ public static class QaCorreo
         return parametros;
     }
 
+    // El nombre visible primero; el de la vista como red, igual que en
+    // Normalizar. Solo se piden las columnas que se van a contar: las demas
+    // nunca se convierten a texto.
+    private static string Columna(QaLector fila, string visible, string vista)
+    {
+        return fila.Texto(visible) ?? fila.Texto(vista);
+    }
+
     // Un NULL del origen no es lo mismo que una cadena vacia, y no puede
     // usarse como clave de diccionario. Se representa con un centinela que
     // Etiqueta() vuelve a convertir en NULL al escribir el JSON.
     private const string Nulo = "\u0000<null>";
 
+    // Separa las dos mitades de la clave de un par de recategorizacion. Un
+    // caracter de control no puede aparecer en un nombre de grupo.
+    private const string Separador = "\u0001";
+
     public static string Clave(string valor) { return valor == null ? Nulo : valor; }
     private static string Etiqueta(string clave) { return clave == Nulo ? null : clave; }
 
     // El valor de un campo QA/QARE, con la misma normalizacion que aplicaba la
-    // base: espacios recortados, vacio = sin respuesta, y recorte a 4000
-    // caracteres para que agrupar sea barato (solo afecta al conteo de valores
-    // distintos de los campos de texto libre, que nunca se enumeran).
-    private static string Valor(Dictionary<string, object> fila, string[] campo)
+    // base: espacios recortados y vacio = sin respuesta.
+    private static string Valor(QaLector fila, string[] campo)
     {
-        string texto = QaDb.Texto(fila, campo[0]);
-        if (texto == null) texto = QaDb.Texto(fila, campo[1]);
+        string texto = Columna(fila, campo[0], campo[1]);
         if (texto == null) return null;
 
         texto = texto.Trim();
-        if (texto.Length == 0) return null;
-        return texto.Length > 4000 ? texto.Substring(0, 4000) : texto;
+        return texto.Length == 0 ? null : texto;
+    }
+
+    // Huella de 64 bits (FNV-1a) de un valor, insensible a mayusculas como el
+    // collation del servidor. Sirve para contar valores distintos sin
+    // guardarlos: con decenas de miles de valores la probabilidad de que dos
+    // distintos choquen en 64 bits es despreciable, y a cambio el campo de
+    // texto libre deja de ocupar memoria. Se recorre el texto sin crear una
+    // copia en minusculas.
+    private static long Huella(string texto, int largo)
+    {
+        ulong hash = 14695981039346656037UL;
+        for (int i = 0; i < largo; i++)
+        {
+            hash ^= char.ToLowerInvariant(texto[i]);
+            hash *= 1099511628211UL;
+        }
+        return unchecked((long)hash);
     }
 
     private static void Sumar(Dictionary<string, long> mapa, string clave, long cuanto)

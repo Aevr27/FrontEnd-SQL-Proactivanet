@@ -1,4 +1,4 @@
-﻿<%@ WebHandler Language="C#" Class="Qa" %>
+<%@ WebHandler Language="C#" Class="Qa" %>
 
 // qa.ashx - API de solo lectura del tablero de QA.
 //
@@ -19,6 +19,12 @@
 //   desplegaron en la base real, asi que el tablero no podia funcionar. Se
 //   dejaron de usar; el pegamento entre los procedimientos que SI existen y
 //   este contrato vive en App_Code/QaCorreo.cs.
+//
+// CUANTAS VECES SE LEE LA VISTA
+//   action=summary hacia CINCO EXEC en serie (_Kpis, _PorGrupo, _PorTecnico,
+//   _TopCategorias, _Detalle) y cada uno vuelve a materializar
+//   dbo.vw_CorreoQA_Base entera: ~2 minutos para devolver 11 KB. Ahora son DOS
+//   y en paralelo, _Kpis y _Detalle. Ver la cabecera de QaCorreo.cs.
 //
 // VENTANA
 //   Por defecto los ultimos 15 dias, igual que usp_CorreoQA_Kpis. Se puede
@@ -49,6 +55,10 @@
 //   GET qa.ashx?action=meta
 //       Solo trazabilidad: generatedAt y source.
 //
+//   Cualquier accion acepta &debug=timings, que agrega source.timings con los
+//   milisegundos de cada paso y el numero de filas recorridas. Son duraciones
+//   y conteos: no lleva servidor, base, usuario, ruta ni datos de tickets.
+//
 // ERRORES: 400 accion o parametro invalido, 500 sitio mal configurado,
 //          502 la base no respondio. Siempre como {"error":true,"message":"..."}.
 //          El mensaje nunca lleva servidor, usuario, ruta ni stack trace.
@@ -58,6 +68,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data.SqlClient;
 using System.Globalization;
+using System.Threading.Tasks;
 using System.Web;
 using System.Web.Script.Serialization;
 
@@ -75,6 +86,17 @@ public class Qa : IHttpHandler
     private const string NotaQare =
         "Datos QA/QARE en crudo. No se aplica ninguna formula de cumplimiento " +
         "porque la regla oficial aun no esta definida.";
+
+    // Todo lo que una peticion arrastra de punta a punta: la ventana, si se
+    // pidieron tiempos, el cronometro y cuantas filas de detalle se leyeron.
+    private sealed class Peticion
+    {
+        public string Fi;
+        public string Ff;
+        public bool Tiempos;
+        public long FilasDetalle;
+        public readonly QaCronometro Reloj = new QaCronometro();
+    }
 
     public void ProcessRequest(HttpContext context)
     {
@@ -98,16 +120,18 @@ public class Qa : IHttpHandler
                 return;
             }
 
-            string fi, ff;
-            QaParams.Rango(context.Request, out fi, out ff);
+            var peticion = new Peticion();
+            QaParams.Rango(context.Request, out peticion.Fi, out peticion.Ff);
+            peticion.Tiempos = string.Equals(context.Request.QueryString["debug"], "timings",
+                                             StringComparison.OrdinalIgnoreCase);
 
             switch (accion)
             {
-                case "summary":   Resumen(context, fi, ff);   return;
-                case "qare":      Qare(context, fi, ff);      return;
-                case "catalogos": Catalogos(context, fi, ff); return;
-                case "meta":      Meta(context, fi, ff);      return;
-                case "detail":    Detalle(context, fi, ff);   return;
+                case "summary":   Resumen(context, peticion);   return;
+                case "qare":      Qare(context, peticion);      return;
+                case "catalogos": Catalogos(context, peticion); return;
+                case "meta":      Meta(context, peticion);      return;
+                case "detail":    Detalle(context, peticion);   return;
 
                 default:
                     Error(context, 400,
@@ -148,7 +172,7 @@ public class Qa : IHttpHandler
                 // No se llego al servidor: red, DNS, VPN o instancia parada.
                 case 53:      // network path not found
                 case 40:      // could not open a connection
-                case -2:      // timeout al conectar
+                case -2:      // timeout al conectar o al ejecutar
                 case 10060:   // connection attempt failed
                 case 11001:   // host desconocido
                     codigo = 502;
@@ -174,9 +198,9 @@ public class Qa : IHttpHandler
                 case 4413:    // no se pudo enlazar la vista
                     codigo = 500;
                     mensaje = "El sitio no puede usar los procedimientos de QA de la base. " +
-                              "Hace falta GRANT EXECUTE sobre dbo.usp_CorreoQA_Kpis, _PorGrupo, " +
-                              "_PorTecnico, _TopCategorias, _Detalle, _CatalogoCategorias y " +
-                              "_GruposValidos, y SELECT sobre dbo.vw_CorreoQA_Base.";
+                              "Hace falta GRANT EXECUTE sobre dbo.usp_CorreoQA_Kpis, _Detalle, " +
+                              "_CatalogoCategorias y _GruposValidos, y SELECT sobre " +
+                              "dbo.vw_CorreoQA_Base.";
                     break;
 
                 default:
@@ -195,15 +219,55 @@ public class Qa : IHttpHandler
     }
 
     // ------------------------------------------------------------ summary
-    // Cinco procedimientos existentes + una pasada de agregacion sobre el
-    // detalle del rango, que es lo unico que ninguno de ellos devuelve
-    // (validacion por estado, pares de recategorizacion y campos QA/QARE).
-    private static void Resumen(HttpContext context, string fi, string ff)
+    // DOS lecturas de la vista, en paralelo:
+    //
+    //   usp_CorreoQA_Kpis      los conteos de ayer y de la semana anterior,
+    //                          que miran FechaFirmaSolucion FUERA de la
+    //                          ventana y no se pueden derivar del detalle.
+    //   usp_CorreoQA_Detalle   una pasada en streaming de la que salen los
+    //                          demas bloques (QaCorreo.Resumen).
+    //
+    // La pasada del detalle, que es la cara, se queda en el hilo del request;
+    // los KPIs, que son una fila, van a un hilo del pool. El tiempo total pasa
+    // a ser el del mas lento, no la suma.
+    private static void Resumen(HttpContext context, Peticion peticion)
     {
-        var kpis = QaCorreo.Kpis(fi, ff);
+        Dictionary<string, object> kpis;
+        QaCorreo.Agregados agregados;
 
-        var filas = QaCorreo.Detalle(fi, ff, false);
-        var agregados = QaCorreo.Agregar(filas);
+        // En modo snapshot no se paraleliza: QaSnapshot resuelve la carpeta con
+        // HttpContext.Current, que no existe en un hilo del pool. Ahi no hay
+        // nada que ganar, son dos lecturas de archivo.
+        if (QaDb.ModoSnapshot)
+        {
+            kpis = QaCorreo.Kpis(peticion.Fi, peticion.Ff, peticion.Reloj);
+            agregados = QaCorreo.Resumen(peticion.Fi, peticion.Ff, peticion.Reloj);
+        }
+        else
+        {
+            string fi = peticion.Fi, ff = peticion.Ff;
+            var reloj = peticion.Reloj;
+
+            var tarea = Task.Factory.StartNew(delegate { return QaCorreo.Kpis(fi, ff, reloj); });
+            try
+            {
+                agregados = QaCorreo.Resumen(fi, ff, reloj);
+            }
+            catch (Exception)
+            {
+                // Si la pasada del detalle falla, la tarea sigue viva: hay que
+                // mirar su excepcion o el finalizador de Task la escalaria mas
+                // tarde, fuera de este request.
+                tarea.ContinueWith(delegate(Task<Dictionary<string, object>> t)
+                {
+                    var ignorada = t.Exception;
+                }, TaskContinuationOptions.OnlyOnFaulted);
+                throw;
+            }
+            kpis = Esperar(tarea);
+        }
+
+        peticion.FilasDetalle = agregados.Total;
 
         // El total lo manda usp_CorreoQA_Kpis. Solo si el procedimiento no
         // devolvio fila (rango sin tickets) se cae al conteo del detalle.
@@ -211,7 +275,7 @@ public class Qa : IHttpHandler
 
         var salida = new Dictionary<string, object>();
         salida["generatedAt"] = Ahora();
-        salida["source"] = Origen(fi, ff, total, filas);
+        salida["source"] = Origen(peticion, total);
 
         var resumen = new Dictionary<string, object>();
         resumen["totalTickets"] = total;
@@ -221,17 +285,22 @@ public class Qa : IHttpHandler
         resumen["incorrectosPct"] = QaDb.Decimal2(kpis, "PorcentajeIncorrectos") ?? (object)0.0;
         salida["summary"] = resumen;
 
-        salida["historico"] = kpis == null ? null : Historico(kpis, ff);
+        salida["historico"] = kpis == null ? null : Historico(kpis, peticion.Ff);
 
-        salida["porGrupo"] = PorGrupo(fi, ff, agregados);
-        salida["porTecnico"] = PorTecnico(fi, ff, agregados);
+        // Incorrectos por grupo y por tecnico, contados sobre la misma pasada
+        // del detalle. Antes eran dos EXEC mas, uno por bloque, que volvian a
+        // leer la vista entera para contar estas mismas filas. Aqui aparecen
+        // ademas 'Sin tecnico' y los grupos por debajo del @Minimo, que
+        // usp_CorreoQA_PorTecnico / _PorGrupo filtran porque el correo no los
+        // quiere y el tablero si.
+        salida["porGrupo"] = agregados.PorGrupo;
+        salida["porTecnico"] = agregados.PorTecnico;
         salida["validacion"] = agregados.Validacion;
         salida["recategorizacion"] = agregados.Recategorizacion;
 
-        // Bloque aditivo: el tablero actual no lo pinta, pero es la unica
-        // metrica por categoria que la base ya publica (usp_CorreoQA_TopCategorias,
-        // el mismo top que sale en el correo diario).
-        salida["topCategorias"] = QaCorreo.TopCategorias(fi, ff);
+        // Bloque aditivo: el tablero actual no lo pinta. Sale de la misma
+        // pasada, con las columnas que publica usp_CorreoQA_TopCategorias.
+        salida["topCategorias"] = agregados.TopCategorias;
 
         // Version ligera de QARE: contadores por campo, sin las
         // distribuciones de respuestas (esas se piden con action=qare).
@@ -242,6 +311,23 @@ public class Qa : IHttpHandler
         salida["qare"] = qare;
 
         Escribir(context, salida);
+    }
+
+    // El resultado de una tarea, con su excepcion original y no envuelta en
+    // una AggregateException: el catch de SqlException de ProcessRequest tiene
+    // que seguir viendo el numero de error de SQL Server.
+    private static T Esperar<T>(Task<T> tarea)
+    {
+        try
+        {
+            return tarea.Result;
+        }
+        catch (AggregateException ex)
+        {
+            var interna = ex.Flatten().InnerException;
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(interna).Throw();
+            throw;   // inalcanzable; el compilador no lo sabe.
+        }
     }
 
     // KPIs de un solo dia, contados por fecha de firma de solucion.
@@ -265,55 +351,14 @@ public class Qa : IHttpHandler
         return historico;
     }
 
-    // Incorrectos por grupo, tal como los cuenta usp_CorreoQA_PorGrupo. Se
-    // pide sin umbral (@Minimo = 1) para que el tablero vea todos los grupos.
-    private static List<object> PorGrupo(string fi, string ff, QaCorreo.Agregados agregados)
-    {
-        var salida = new List<object>();
-        var listados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var fila in QaCorreo.PorGrupo(fi, ff))
-        {
-            var item = new Dictionary<string, object>();
-            item["grupo"] = QaDb.Texto(fila, "Grupo");
-            item["tickets"] = QaDb.Entero(fila, "TicketsIncorrectos");
-            salida.Add(item);
-            listados.Add(QaCorreo.Clave(QaDb.Texto(fila, "Grupo")));
-        }
-
-        // Lo que el procedimiento del correo deje fuera se completa con el
-        // conteo del detalle, para que el tablero no pierda filas.
-        QaCorreo.Completar(salida, agregados.IncorrectosPorGrupo, "grupo", listados);
-        return salida;
-    }
-
-    // Igual que PorGrupo, con una diferencia importante: usp_CorreoQA_PorTecnico
-    // se escribio para el correo, que no lista 'Sin tecnico'. El tablero SI
-    // tiene que mostrar esa barra, para que los tickets sin responsable de 2a
-    // linea no desaparezcan del conteo; por eso se completa con el detalle.
-    private static List<object> PorTecnico(string fi, string ff, QaCorreo.Agregados agregados)
-    {
-        var salida = new List<object>();
-        var listados = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var fila in QaCorreo.PorTecnico(fi, ff))
-        {
-            var item = new Dictionary<string, object>();
-            item["tecnico"] = QaDb.Texto(fila, "Tecnico");
-            item["tickets"] = QaDb.Entero(fila, "TicketsIncorrectos");
-            salida.Add(item);
-            listados.Add(QaCorreo.Clave(QaDb.Texto(fila, "Tecnico")));
-        }
-
-        QaCorreo.Completar(salida, agregados.IncorrectosPorTecnico, "tecnico", listados);
-        return salida;
-    }
-
     // --------------------------------------------------------------- qare
-    private static void Qare(HttpContext context, string fi, string ff)
+    // Las distribuciones se calcularon en la misma pasada que el resumen y
+    // viajan con el en la cache, asi que abrir una distribucion ya no vuelve a
+    // leer la vista: antes esto era otra lectura completa.
+    private static void Qare(HttpContext context, Peticion peticion)
     {
-        var filas = QaCorreo.Detalle(fi, ff, false);
-        var agregados = QaCorreo.Agregar(filas);
+        var agregados = QaCorreo.Resumen(peticion.Fi, peticion.Ff, peticion.Reloj);
+        peticion.FilasDetalle = agregados.Total;
 
         // El orden de los campos es el MISMO que en action=summary: el tablero
         // pide la distribucion por indice, asi que las dos listas tienen que
@@ -321,7 +366,10 @@ public class Qa : IHttpHandler
         var campos = new List<object>();
         for (int i = 0; i < agregados.Campos.Count; i++)
         {
-            var campo = (Dictionary<string, object>)agregados.Campos[i];
+            var origen = (Dictionary<string, object>)agregados.Campos[i];
+            // Copia: el diccionario del resumen esta en la cache y lo comparten
+            // otras peticiones, asi que no se le cuelga nada encima.
+            var campo = new Dictionary<string, object>(origen);
             // respuestas = null distingue el campo de texto libre del campo
             // codificado, igual que hacia el extractor.
             campo["respuestas"] = i < agregados.Distribuciones.Count
@@ -336,14 +384,14 @@ public class Qa : IHttpHandler
 
         var salida = new Dictionary<string, object>();
         salida["generatedAt"] = Ahora();
-        salida["source"] = Origen(fi, ff, agregados.Total, filas);
+        salida["source"] = Origen(peticion, agregados.Total);
         salida["qare"] = qare;
 
         Escribir(context, salida);
     }
 
     // ------------------------------------------------------------- detail
-    private static void Detalle(HttpContext context, string fi, string ff)
+    private static void Detalle(HttpContext context, Peticion peticion)
     {
         var request = context.Request;
 
@@ -364,7 +412,9 @@ public class Qa : IHttpHandler
         bool soloIncorrectos = string.Equals(validacion as string, "Incorrecto",
                                              StringComparison.OrdinalIgnoreCase);
 
-        var filas = QaCorreo.Detalle(fi, ff, soloIncorrectos);
+        var filas = QaCorreo.Detalle(peticion.Fi, peticion.Ff, soloIncorrectos, peticion.Reloj);
+        peticion.FilasDetalle = filas.Count;
+
         var filtradas = QaCorreo.Filtrar(filas, validacion, grupo, tecnico, grupoCorrecto);
 
         long total = filtradas.Count;
@@ -382,61 +432,65 @@ public class Qa : IHttpHandler
         salida["total"] = total;
         salida["returned"] = filasPagina.Count;
         salida["filters"] = filtros;
-        salida["meta"] = Meta(fi, ff, total, filas);
+        salida["meta"] = Meta(peticion, total);
         salida["rows"] = filasPagina;
 
         Escribir(context, salida);
     }
 
     // --------------------------------------------------------- catalogos
-    private static void Catalogos(HttpContext context, string fi, string ff)
+    private static void Catalogos(HttpContext context, Peticion peticion)
     {
         var catalogos = new Dictionary<string, object>();
         // Dos procedimientos distintos, uno por catalogo. Las filas van tal
         // como salen de la base: aqui no se renombra ninguna columna.
-        catalogos["categorias"] = QaCorreo.CatalogoCategorias(true);
-        catalogos["gruposValidos"] = QaCorreo.GruposValidos();
+        using (peticion.Reloj.Medir("catalogoCategoriasMs"))
+            catalogos["categorias"] = QaCorreo.CatalogoCategorias(true);
+        using (peticion.Reloj.Medir("gruposValidosMs"))
+            catalogos["gruposValidos"] = QaCorreo.GruposValidos();
 
         var salida = new Dictionary<string, object>();
         salida["generatedAt"] = Ahora();
-        salida["source"] = Origen(fi, ff, null, null);
+        salida["source"] = Origen(peticion, null);
         salida["catalogos"] = catalogos;
 
         Escribir(context, salida);
     }
 
     // -------------------------------------------------------------- meta
-    private static void Meta(HttpContext context, string fi, string ff)
+    private static void Meta(HttpContext context, Peticion peticion)
     {
-        Escribir(context, Meta(fi, ff, null, null));
+        Escribir(context, Meta(peticion, null));
     }
 
-    private static Dictionary<string, object> Meta(string fi, string ff, object tickets,
-                                                   List<Dictionary<string, object>> filas)
+    private static Dictionary<string, object> Meta(Peticion peticion, object tickets)
     {
         var meta = new Dictionary<string, object>();
         meta["generatedAt"] = Ahora();
-        meta["source"] = Origen(fi, ff, tickets, filas);
+        meta["source"] = Origen(peticion, tickets);
         return meta;
     }
 
     // Trazabilidad de la respuesta: de donde salen los datos y que ventana
     // cubren. Deliberadamente sin servidor, base ni usuario: esto lo ve el
     // navegador.
-    private static Dictionary<string, object> Origen(string fi, string ff, object tickets,
-                                                     List<Dictionary<string, object>> filas)
+    private static Dictionary<string, object> Origen(Peticion peticion, object tickets)
     {
         var source = new Dictionary<string, object>();
         source["origen"] = "SQL Server";
         source["vista"] = "dbo.vw_CorreoQA_Base";
-        source["fechaInicio"] = fi;
-        source["fechaFin"] = ff;
+        source["fechaInicio"] = peticion.Fi;
+        source["fechaFin"] = peticion.Ff;
         source["ticketsRows"] = tickets;
         source["consultadoEn"] = Ahora();
         // usp_CorreoQA_Detalle recorta con @Top. Si el rango pedido lo alcanza,
         // los numeros derivados del detalle cubren solo esas filas, y quien
         // mire el tablero tiene que saberlo.
-        source["truncado"] = QaCorreo.Truncado(filas);
+        source["truncado"] = QaCorreo.Truncado(peticion.FilasDetalle);
+
+        // Milisegundos por paso y filas recorridas. Solo con ?debug=timings, y
+        // solo duraciones y conteos: nada del servidor ni de los tickets.
+        if (peticion.Tiempos) source["timings"] = peticion.Reloj.Resultado();
 
         // Sirviendo archivos exportados: el rango real es el del export, no el
         // que venga por query string, y el origen lo dice sin ambiguedad. El
@@ -445,8 +499,8 @@ public class Qa : IHttpHandler
         {
             source["origen"] = "Snapshot sin conexion (datos congelados)";
             source["exportadoEn"] = QaSnapshot.ExportadoEn;
-            source["fechaInicio"] = QaSnapshot.FechaInicio ?? fi;
-            source["fechaFin"] = QaSnapshot.FechaFin ?? ff;
+            source["fechaInicio"] = QaSnapshot.FechaInicio ?? peticion.Fi;
+            source["fechaFin"] = QaSnapshot.FechaFin ?? peticion.Ff;
         }
 
         return source;
