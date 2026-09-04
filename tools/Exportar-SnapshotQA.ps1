@@ -5,8 +5,8 @@
 
 .DESCRIPTION
     Este script lo corre alguien CON acceso a la base (red o VPN hacia el
-    servidor y permiso EXECUTE sobre los procedimientos usp_QaWeb_*). Genera
-    una carpeta snapshot\ que se entrega a quien no tiene ese acceso.
+    servidor y permiso EXECUTE sobre los procedimientos dbo.usp_CorreoQA_*).
+    Genera una carpeta snapshot\ que se entrega a quien no tiene ese acceso.
 
     Lo que guarda son los result sets CRUDOS de cada procedimiento, tal como
     los devuelve SQL Server. No arma el JSON del tablero: de eso se sigue
@@ -181,16 +181,25 @@ Write-Host ""
 
 $rango = @{ FechaInicio = $FechaInicio; FechaFin = $FechaFin }
 
-Export-Procedimiento -Procedimiento 'dbo.usp_QaWeb_Resumen'   -Parametros $rango -Archivo 'resumen.json'
-Export-Procedimiento -Procedimiento 'dbo.usp_QaWeb_Qare'      -Parametros $rango -Archivo 'qare.json'
-Export-Procedimiento -Procedimiento 'dbo.usp_QaWeb_Catalogos' -Parametros @{ SoloVigentes = 1 } -Archivo 'catalogos.json'
+# Los nombres de archivo NO son libres: App_Code/QaSnapshot.cs los deriva del
+# ultimo segmento del nombre del procedimiento (usp_CorreoQA_PorGrupo ->
+# porgrupo.json). Si aqui se renombra un archivo, el modo snapshot deja de
+# encontrarlo.
+Export-Procedimiento -Procedimiento 'dbo.usp_CorreoQA_Kpis'       -Parametros $rango -Archivo 'kpis.json'
+Export-Procedimiento -Procedimiento 'dbo.usp_CorreoQA_PorGrupo'   -Parametros ($rango + @{ Minimo = 1 })  -Archivo 'porgrupo.json'
+Export-Procedimiento -Procedimiento 'dbo.usp_CorreoQA_PorTecnico' -Parametros ($rango + @{ Minimo = 1 })  -Archivo 'portecnico.json'
+Export-Procedimiento -Procedimiento 'dbo.usp_CorreoQA_TopCategorias' -Parametros ($rango + @{ Top = 10 }) -Archivo 'topcategorias.json'
 
-# PageSize = 0 trae todas las filas del rango, sin filtros: el handler recorta
-# y pagina despues, en memoria.
-Export-Procedimiento -Procedimiento 'dbo.usp_QaWeb_Detalle' `
+Export-Procedimiento -Procedimiento 'dbo.usp_CorreoQA_CatalogoCategorias' `
+    -Parametros @{ SoloVigentes = 1 } -Archivo 'catalogocategorias.json'
+Export-Procedimiento -Procedimiento 'dbo.usp_CorreoQA_GruposValidos' `
+    -Parametros @{} -Archivo 'gruposvalidos.json'
+
+# Todas las filas del rango, sin filtrar: el servidor recorta y pagina despues,
+# en memoria. @Top tiene que ser el mismo tope que QaCorreo.TopDetalle.
+Export-Procedimiento -Procedimiento 'dbo.usp_CorreoQA_Detalle' `
     -Parametros @{ FechaInicio = $FechaInicio; FechaFin = $FechaFin
-                   Validacion = $null; Grupo = $null; Tecnico = $null
-                   GrupoCorrecto = $null; Page = 1; PageSize = 0 } `
+                   SoloIncorrectos = 0; Top = 50000 } `
     -Archivo 'detalle.json'
 
 Write-Host ""

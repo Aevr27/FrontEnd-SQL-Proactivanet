@@ -111,7 +111,7 @@ public class QaDiag : IHttpHandler
                         const string sql =
                             "SELECT DB_NAME() AS base, SUSER_SNAME() AS login_sql, " +
                             "CAST(HAS_PERMS_BY_NAME('dbo.vw_CorreoQA_Base','OBJECT','SELECT') AS int) AS puede_leer_vista, " +
-                            "CAST(HAS_PERMS_BY_NAME('dbo.usp_QaWeb_Resumen','OBJECT','EXECUTE') AS int) AS puede_ejecutar";
+                            "CAST(HAS_PERMS_BY_NAME('dbo.usp_CorreoQA_Kpis','OBJECT','EXECUTE') AS int) AS puede_ejecutar";
                         using (var cmd = new SqlCommand(sql, cn))
                         {
                             cmd.CommandTimeout = 30;
@@ -124,7 +124,7 @@ public class QaDiag : IHttpHandler
                                     // no revela la contraseña ni la cadena de conexion.
                                     datos["loginSql"] = r["login_sql"];
                                     datos["puedeLeerVista"] = ToBool(r["puede_leer_vista"]);
-                                    datos["puedeEjecutarResumen"] = ToBool(r["puede_ejecutar"]);
+                                    datos["puedeEjecutarKpis"] = ToBool(r["puede_ejecutar"]);
                                 }
                             }
                         }
@@ -141,7 +141,7 @@ public class QaDiag : IHttpHandler
                     try
                     {
                         var hoy = DateTime.Today;
-                        using (var cmd = new SqlCommand("dbo.usp_QaWeb_Resumen", cn))
+                        using (var cmd = new SqlCommand("dbo.usp_CorreoQA_Kpis", cn))
                         {
                             cmd.CommandType = CommandType.StoredProcedure;
                             cmd.CommandTimeout = 90;
@@ -174,9 +174,9 @@ public class QaDiag : IHttpHandler
 
                         etapas.Add(Ok(5, "procedimiento de QA ejecutado", new Dictionary<string, object>
                         {
-                            { "procedimiento", "dbo.usp_QaWeb_Resumen" },
+                            { "procedimiento", "dbo.usp_CorreoQA_Kpis" },
                             { "resultSets", resultados.Count },
-                            { "resultSetsEsperados", 6 },
+                            { "resultSetsEsperados", 1 },
                             { "filasPorResultSet", conteos },
                         }));
                     }

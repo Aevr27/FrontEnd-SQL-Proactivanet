@@ -13,11 +13,12 @@
 //
 // POR QUE AQUI Y NO EN EL FRONTEND
 //   El punto de corte es QaDb.EjecutarMultiple, que devuelve los result sets
-//   CRUDOS. El snapshot guarda exactamente eso. Todo lo demas -- el armado
-//   del JSON, los nombres de campo, el bloque QARE, la paginacion del
-//   detalle -- lo sigue haciendo qa.ashx con el mismo codigo que en vivo. No
-//   hay una segunda implementacion del contrato que se pueda desincronizar,
-//   y qa_test.js no se entera de nada.
+//   CRUDOS de cada procedimiento. El snapshot guarda exactamente eso. Todo lo
+//   demas -- el armado del JSON, los nombres de campo, el bloque QARE, el
+//   filtrado y la paginacion del detalle -- lo sigue haciendo el mismo codigo
+//   que en vivo (App_Code/QaCorreo.cs y qa.ashx). No hay una segunda
+//   implementacion del contrato que se pueda desincronizar, y qa_test.js no se
+//   entera de nada.
 //
 // LO QUE EL SNAPSHOT NO PUEDE HACER
 //   Los datos estan CONGELADOS en el rango con el que se exportaron. Mover
@@ -75,6 +76,11 @@ public static class QaSnapshot
 
     // Los result sets de un procedimiento, en el mismo formato que devuelve
     // QaDb.EjecutarMultiple contra SQL Server.
+    //
+    // El detalle se exporta ENTERO: todas las filas del rango, sin filtrar. El
+    // filtrado y la paginacion los aplica QaCorreo despues, con el mismo codigo
+    // que usa sobre las filas que llegan de la base. Aqui no hay una segunda
+    // implementacion que se pueda desincronizar.
     public static List<List<Dictionary<string, object>>> Leer(
         string carpeta, string procedimiento, Dictionary<string, object> parametros)
     {
@@ -83,18 +89,10 @@ public static class QaSnapshot
 
         Cachear(contenido);
 
-        var resultados = ResultSets(contenido, archivo);
-
-        // El detalle se exporta entero y sin filtros (PageSize=0). El filtrado
-        // y la paginacion que en vivo hace el procedimiento se aplican aqui
-        // sobre las filas leidas, para que action=detail se comporte igual.
-        if (procedimiento.EndsWith("_Detalle", StringComparison.OrdinalIgnoreCase))
-            resultados = FiltrarYPaginar(resultados, parametros);
-
-        return resultados;
+        return ResultSets(contenido, archivo);
     }
 
-    // dbo.usp_QaWeb_Resumen -> <carpeta>\resumen.json
+    // dbo.usp_CorreoQA_PorGrupo -> <carpeta>\porgrupo.json
     private static string Archivo(string carpeta, string procedimiento)
     {
         int guion = procedimiento.LastIndexOf('_');
@@ -161,67 +159,6 @@ public static class QaSnapshot
         return resultados;
     }
 
-    // ------------------------------------------------------------- detalle
-    // Nombres de columna del result set 2 de usp_QaWeb_Detalle, por el
-    // parametro de filtro que les corresponde. Van con acento porque asi
-    // salen del procedimiento y asi quedaron en el snapshot.
-    private static readonly string[][] Columnas = new string[][]
-    {
-        new[] { "Validacion",    "Validacion"           },
-        new[] { "Grupo",         "Grupo"                },
-        new[] { "Tecnico",       "Técnico de 2ª línea" },
-        new[] { "GrupoCorrecto", "Grupo Correcto"       },
-    };
-
-    private static List<List<Dictionary<string, object>>> FiltrarYPaginar(
-        List<List<Dictionary<string, object>>> resultados,
-        Dictionary<string, object> parametros)
-    {
-        var todas = QaDb.Conjunto(resultados, 1);
-
-        var filtradas = new List<Dictionary<string, object>>();
-        foreach (var fila in todas)
-            if (Coincide(fila, parametros)) filtradas.Add(fila);
-
-        // El Total exportado corresponde al export sin filtros; el que importa
-        // es el de las filas que pasaron el filtro de ESTA peticion.
-        var total = new Dictionary<string, object>();
-        total["Total"] = (long)filtradas.Count;
-
-        int tamano = Entero(parametros, "PageSize", 100);
-        int pagina = Entero(parametros, "Page", 1);
-        if (pagina < 1) pagina = 1;
-
-        int salto = tamano == 0 ? 0 : (pagina - 1) * tamano;
-        if (salto > filtradas.Count) salto = filtradas.Count;
-        int toma = tamano == 0 ? filtradas.Count - salto
-                               : Math.Min(tamano, filtradas.Count - salto);
-
-        var filasPagina = filtradas.GetRange(salto, toma);
-
-        var salida = new List<List<Dictionary<string, object>>>();
-        salida.Add(new List<Dictionary<string, object>> { total });
-        salida.Add(filasPagina);
-        return salida;
-    }
-
-    private static bool Coincide(Dictionary<string, object> fila,
-                                 Dictionary<string, object> parametros)
-    {
-        foreach (var par in Columnas)
-        {
-            var esperado = Valor(parametros, par[0]) as string;
-            if (string.IsNullOrWhiteSpace(esperado)) continue;
-
-            // Igualdad exacta, como el '=' del procedimiento. La comparacion
-            // ignora mayusculas porque el collation del servidor tambien.
-            var actual = QaDb.Texto(fila, par[1]);
-            if (!string.Equals(actual, esperado.Trim(), StringComparison.OrdinalIgnoreCase))
-                return false;
-        }
-        return true;
-    }
-
     // -------------------------------------------------------------- meta
     private static void Cachear(Dictionary<string, object> raiz)
     {
@@ -235,7 +172,7 @@ public static class QaSnapshot
     }
 
     // action=meta no ejecuta ningun procedimiento, asi que los metadatos se
-    // leen del archivo del resumen. Si no esta, se responde sin ellos en vez
+    // leen del archivo de los KPIs. Si no esta, se responde sin ellos en vez
     // de reventar: meta es informativo.
     private static void LeerMeta()
     {
@@ -245,7 +182,7 @@ public static class QaSnapshot
         {
             var cadena = ConfigurationManager.ConnectionStrings["TicketsProactivanet"];
             if (cadena == null || !Activo(cadena.ConnectionString)) return;
-            Cachear(Deserializar(Archivo(Carpeta(cadena.ConnectionString), "_Resumen")));
+            Cachear(Deserializar(Archivo(Carpeta(cadena.ConnectionString), "_Kpis")));
         }
         catch (Exception)
         {
@@ -263,13 +200,5 @@ public static class QaSnapshot
     {
         object valor = Valor(mapa, clave);
         return valor == null ? null : Convert.ToString(valor, CultureInfo.InvariantCulture);
-    }
-
-    private static int Entero(Dictionary<string, object> mapa, string clave, int porDefecto)
-    {
-        object valor = Valor(mapa, clave);
-        if (valor == null) return porDefecto;
-        try { return Convert.ToInt32(valor, CultureInfo.InvariantCulture); }
-        catch (Exception) { return porDefecto; }
     }
 }

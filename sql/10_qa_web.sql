@@ -1,4 +1,19 @@
 ﻿/* =====================================================================================
+   10_qa_web.sql - OBSOLETO. NO DESPLEGAR.
+
+   Estos procedimientos nunca se desplegaron en Tickets_Proactivanet y el
+   tablero ya NO los usa: qa.ashx se reengancho a los procedimientos QA que la
+   base ya tenia (dbo.usp_CorreoQA_*), los mismos del correo diario. La
+   adaptacion vive en App_Code/QaCorreo.cs.
+
+   El archivo se conserva solo como documentacion: aqui esta escrito, en SQL,
+   el contrato que espera el frontend (los 6 bloques del resumen, los nombres
+   visibles de los 12 campos QA/QARE y las columnas del detalle). Si algun dia
+   se aprueba crear objetos nuevos en la base, este es el punto de partida.
+
+   Desplegarlo tal cual NO arregla nada y crea objetos duplicados.
+
+   ---------------------------------------------------------------------------
    10_qa_web.sql - Procedimientos del tablero web de QA (qa.ashx)
 
    Requisito previo: 05_correo_qa_categorias.sql, que crea dbo.vw_CorreoQA_Base.

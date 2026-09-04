@@ -36,8 +36,9 @@ public static class QaDb
     // arreglar en la base, no una espera que valga la pena sostener.
     private const int TimeoutComandoSegundos = 90;
 
-    // Ejecuta un stored procedure y devuelve TODOS sus result sets.
-    // usp_QaWeb_Resumen devuelve 6; el resto, 2.
+    // Ejecuta un stored procedure y devuelve TODOS sus result sets. Los
+    // procedimientos de QA que usa el tablero (dbo.usp_CorreoQA_*) devuelven
+    // uno cada uno; el metodo sirve igual para los que devuelvan varios.
     public static List<List<Dictionary<string, object>>> EjecutarMultiple(
         string procedimiento, Dictionary<string, object> parametros)
     {
