@@ -2198,9 +2198,41 @@ const TableroExterno = (() => {
   // URL en cada activacion de la pestaña.
   const VERSION = Date.now();
 
+  /* La pestaña "Experiencia" del documento legacy ya la reemplazo el modulo
+     nativo de experiencia/, pero Observabilidad y Orquestacion siguen viviendo
+     ahi, asi que el marco se queda. Para que Experiencia no aparezca dos veces
+     se esconde SOLO esa pestaña legacy, desde aqui y en el evento load del
+     marco: el archivo assets/Tablero_Experiencia.html no se toca (lo regenera
+     TableroExperiencia_v3.7.exe y cualquier edicion se perderia).
+
+     Es el mismo origen -el HTML se sirve del propio sitio-, asi que
+     contentDocument es accesible. Si algun dia no lo fuera (otro host, o
+     file://), el try deja el marco tal cual estaba en vez de romper la
+     pestaña. */
+  function ocultarExperienciaLegacy(marco) {
+    let doc;
+    try { doc = marco.contentDocument; } catch (e) { return; }   // otro origen
+    if (!doc) return;
+
+    const boton = doc.querySelector('.mtab[data-tab="experiencia"]');
+    const panel = doc.getElementById('tab-experiencia');
+    // display en linea gana a la regla .maintab-content.active del legacy, asi
+    // que su propio navegador de pestañas no puede volver a mostrarla.
+    if (boton) boton.style.display = 'none';
+    if (panel) panel.style.display = 'none';
+
+    // Experiencia era la pestaña que abria por omision. Con ella escondida el
+    // marco se veria vacio, asi que se pulsa Observabilidad: su manejador es el
+    // del propio documento legacy, que ademas dispara su renderObserv().
+    const eraLaActiva = !boton || boton.classList.contains('active');
+    const observabilidad = doc.querySelector('.mtab[data-tab="observabilidad"]');
+    if (eraLaActiva && observabilidad) observabilidad.click();
+  }
+
   function init() {
     const marco = document.getElementById('iframe-tablero');
     if (!marco || marco.src) return;
+    marco.addEventListener('load', () => ocultarExperienciaLegacy(marco));
     marco.src = marco.dataset.src + '?v=' + VERSION;
   }
   // El iframe se redimensiona solo con su contenedor; el documento externo
@@ -2208,13 +2240,136 @@ const TableroExterno = (() => {
   return { init, redimensionar: () => {} };
 })();
 
+/* ---------------------------------------------------------------------------
+   Pestaña "Experiencia".
+
+   El modulo sigue siendo experiencia/ (experiencia.html + experiencia.css +
+   experiencia.js + handlers/experiencia.ashx) y su pagina suelta sigue
+   funcionando igual. Aqui solo vive el montaje: traer ese HTML, acotar su
+   hoja de estilos e inyectar su script UNA sola vez, la primera vez que se
+   abre la pestaña. Nada de la logica de Experiencia (KPIs, graficas, filtros,
+   modales, treemap, historico) se copia a este archivo.
+   --------------------------------------------------------------------------- */
+const TableroExperiencia = (() => {
+  const BASE = 'experiencia/';
+
+  /* experiencia.css es la hoja de una pagina completa: resetea `*`, estiliza
+     `body`, `table`, `th`, `td` y define .card/.kpis/.kpi/.tab/.panel/.legend/
+     .badge/.grid2/.grid3/.wrap, exactamente el mismo vocabulario que
+     dashboard.css pero con otros valores. Cargada tal cual, la ultima hoja en
+     entrar repinta la otra (el tablero perderia su .wrap de 1500px, sus
+     sombras, sus hovers y sus animaciones de panel).
+
+     @scope (#tab-experiencia) la deja encerrada en su pestaña sin tocar ni una
+     linea del archivo, asi que la pagina suelta no se entera. De paso, dentro
+     del @scope las reglas de `:root` y `body` no casan con nada -html y body
+     no son descendientes del contenedor-, que es justo lo que se quiere: las
+     variables (--card, --accent, --verde, --radius...) las pone el :root de
+     dashboard.css con los mismos valores, y el reset global ya esta aplicado. */
+  const SOPORTA_SCOPE = (() => {
+    try {
+      const prueba = document.createElement('style');
+      prueba.textContent = '@scope (body) { :scope { color: red } }';
+      document.head.appendChild(prueba);
+      const ok = !!(prueba.sheet && prueba.sheet.cssRules.length);
+      prueba.remove();
+      return ok;
+    } catch (e) { return false; }
+  })();
+
+  async function texto(ruta) {
+    const resp = await fetch(ruta, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`${ruta} -> HTTP ${resp.status}`);
+    return resp.text();
+  }
+
+  async function inyectarCss() {
+    if (document.getElementById('css-experiencia')) return;
+    const css = await texto(BASE + 'experiencia.css');
+    const hoja = document.createElement('style');
+    hoja.id = 'css-experiencia';
+    hoja.textContent = `@scope (#tab-experiencia) {\n${css}\n}`;
+    document.head.appendChild(hoja);
+  }
+
+  async function montarMarcado(cont) {
+    const doc = new DOMParser().parseFromString(await texto(BASE + 'experiencia.html'), 'text/html');
+
+    /* Fuera <script> y <link>: DOMParser no ejecuta los primeros (hay que
+       recrearlos) y de los segundos ya se encarga inyectarCss(). Con ellos se
+       va tambien vendor/chart.umd.min.js (4.4.1), que aqui sobra: la pagina ya
+       carga Chart.js 4.4.4 y meter una segunda copia reemplazaria el global
+       que usan las graficas de SLA y de Backlog. La copia del vendor sigue en
+       su sitio para la pagina suelta. */
+    doc.querySelectorAll('script, link[rel="stylesheet"]').forEach(n => n.remove());
+
+    /* La pagina suelta envuelve su contenido en un #tab-experiencia propio.
+       Aqui ese id ya lo lleva el contenedor de la pestaña, y dos nodos con el
+       mismo id dejarian a getElementById() devolviendo el equivocado: se
+       desarma el envoltorio y se conservan sus hijos. */
+    const interno = doc.getElementById('tab-experiencia');
+    if (interno) interno.replaceWith(...interno.childNodes);
+
+    cont.append(...doc.body.childNodes);
+  }
+
+  function cargarScript(cont) {
+    return new Promise((listo, fallo) => {
+      const s = document.createElement('script');
+      s.src = BASE + 'experiencia.js';
+      s.onload = listo;
+      s.onerror = () => fallo(new Error('no se pudo cargar ' + s.src));
+      cont.appendChild(s);          // al final, con el marcado ya puesto
+    });
+  }
+
+  // Sin @scope no hay forma de aislar la hoja sin reescribirla, asi que se cae
+  // al patron que ya usa la pestaña "Tablero": la misma pagina, en un marco.
+  function montarEnMarco(cont) {
+    const marco = document.createElement('iframe');
+    marco.className = 'tablero-externo';
+    marco.title = 'Tablero de Experiencia';
+    marco.src = BASE + 'experiencia.html';
+    cont.appendChild(marco);
+    console.warn('Este navegador no soporta @scope: Experiencia se monta en un marco.');
+  }
+
+  function init() {
+    const cont = document.getElementById('tab-experiencia');
+    if (!cont || cont.childElementCount) return;   // ya montado
+
+    if (!SOPORTA_SCOPE) return montarEnMarco(cont);
+
+    cont.innerHTML = '<div class="estado" style="padding:24px">Cargando Experiencia...</div>';
+    (async () => {
+      await inyectarCss();
+      cont.textContent = '';
+      await montarMarcado(cont);
+      // experiencia.js es un IIFE que arranca solo y pide su .ashx una vez.
+      await cargarScript(cont);
+    })().catch(err => {
+      console.error(err);
+      cont.innerHTML = `<div class="card" style="margin-top:16px">
+        <h3>No se pudo montar el tablero de Experiencia</h3>
+        <p style="font-size:13px;color:#64748b">${escapeHtml(err.message)} ·
+        el tablero suelto sigue en <a href="${BASE}experiencia.html">${BASE}experiencia.html</a>.</p></div>`;
+    });
+  }
+
+  /* Sus graficas nacen con la pestaña ya visible (activarTab pone la clase
+     .active antes de llamar a init()), asi que no hay que remedirlas al
+     volver: Chart.js responsive se encarga del resto. */
+  return { init, redimensionar: () => {} };
+})();
+
 const MODULOS = {
   sla: TableroSla,
   backlog: TableroBacklog,
+  experiencia: TableroExperiencia,
   tablero: TableroExterno,
 };
 
-const iniciado = { sla: false, backlog: false, tablero: false };
+const iniciado = { sla: false, backlog: false, experiencia: false, tablero: false };
 
 function activarTab(nombre) {
   if (!MODULOS[nombre]) nombre = 'sla';

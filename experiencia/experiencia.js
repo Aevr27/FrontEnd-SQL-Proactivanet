@@ -23,13 +23,27 @@
    con el ultimo corte generado a mano. El banner de arriba avisa cuando se
    esta viendo el mock, para no confundirlo con datos frescos.
 
-   La pagina vive en /experiencia/, por eso las dos rutas van con ../ y sin
-   barra inicial: el sitio puede estar montado en un subdirectorio de IIS. */
-const API_URL  = '../handlers/experiencia.ashx';
-const MOCK_URL = 'data/experiencia.mock.json';
+   Las dos rutas se resuelven contra la carpeta de ESTE archivo, no contra la
+   del documento: el modulo se sirve suelto desde /experiencia/experiencia.html
+   y tambien embebido en /dashboard.html (pestaña "Experiencia"), donde el
+   documento vive un nivel mas arriba. Con rutas relativas al documento, el
+   segundo caso pediria /handlers/../handlers y /data. document.currentScript
+   es valido aqui porque estas lineas corren antes del primer await. */
+const BASE = (document.currentScript && document.currentScript.src)
+  ? new URL('.', document.currentScript.src).href
+  : new URL('.', location.href).href;
+const API_URL  = new URL('../handlers/experiencia.ashx', BASE).href;
+const MOCK_URL = new URL('data/experiencia.mock.json', BASE).href;
+
+/* Raiz del modulo dentro del DOM. Suelto es su propio contenedor; embebido en
+   dashboard.html es la pestaña que lo hospeda, que lleva ese mismo id. Se usa
+   para las consultas por CLASE (.tab, .panel), que si se lanzan contra
+   `document` alcanzan tambien las subpestañas de SLA y de Backlog. Las
+   consultas por id siguen yendo contra `document`: son unicas. */
+const RAIZ = document.getElementById('tab-experiencia') || document.body;
 
 function avisar(html, color){
-  document.body.insertAdjacentHTML('afterbegin',
+  RAIZ.insertAdjacentHTML('afterbegin',
     '<div style="background:' + color.bg + ';border:1px solid ' + color.bd + ';' +
     'color:' + color.fg + ';border-radius:10px;padding:14px 18px;' +
     'margin-bottom:14px;font-size:13px">' + html + '</div>');
@@ -216,7 +230,7 @@ function renderKPIs(cats, det){
     {l:'Categorías sin Iniciativa',v:FMT(nSin),f:`oportunidades · ${FMT(volSin)} tickets sin iniciativa`,s:null},
     {l:'Iniciativas Retrasadas',v:FMT(nVen),f:FMT(ret)+' tickets en riesgo',s:null},
   ];
-  document.getElementById('kpis').innerHTML=cards.map(c=>
+  document.getElementById('kpis-exp').innerHTML=cards.map(c=>
     `<div class="kpi ${c.s?('s'+c.s):''}"><div class="lbl">${c.l}</div>
      <div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
 }
@@ -1292,9 +1306,9 @@ function renderChartEstados(cats){
 // Navega a la pestaña "Iniciativas Activas" y la filtra por el estado dado
 // (usa el mismo filtro cruzado de graficas de TAREA 3, campo "estado").
 function irAActivasPorEstado(estado){
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-  document.querySelector('.tab[data-panel="pAct"]').classList.add('active');
+  RAIZ.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  RAIZ.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  RAIZ.querySelector('.tab[data-panel="pAct"]').classList.add('active');
   document.getElementById('pAct').classList.add('active');
   filtroGraf.act.estado=estado;
   renderAct(currentCats());
@@ -1506,9 +1520,9 @@ const selModo=document.getElementById('selModo');
 if(selModo) selModo.onchange=()=>{modoTiempo=selModo.value;renderAll();};
 
 // tabs
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+RAIZ.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  RAIZ.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  RAIZ.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
   t.classList.add('active');document.getElementById(t.dataset.panel).classList.add('active');
 });
 

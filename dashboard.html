@@ -11,9 +11,10 @@
 <div class="wrap">
 
   <nav class="maintabs">
-    <button class="mtab active" data-tab="sla" type="button">📊 SLA y productividad</button>
-    <button class="mtab" data-tab="backlog" type="button">📥 Backlog</button>
-    <button class="mtab" data-tab="tablero" type="button">📊 Tablero</button>
+    <button class="mtab active" data-tab="sla" type="button">SLA y productividad</button>
+    <button class="mtab" data-tab="backlog" type="button">Backlog</button>
+    <button class="mtab" data-tab="experiencia" type="button">Experiencia</button>
+    <button class="mtab" data-tab="tablero" type="button">Tablero</button>
   </nav>
 
   <!-- ==================================================== Tablero de SLA -->
@@ -247,6 +248,13 @@
        con reemplazar ese archivo en la carpeta del proyecto y recargar; ni
        dashboard.html ni dashboard.js necesitan cambios. El src real lo pone
        activarTab() la primera vez que se abre la pestana (ver data-src). -->
+  <!-- ================================================ Tablero de Experiencia
+       Contenedor vacio a proposito. TableroExperiencia (dashboard.js) trae
+       experiencia/experiencia.html, experiencia.css y experiencia.js la
+       primera vez que se abre la pestaña. El modulo sigue viviendo en
+       experiencia/ y su pagina suelta sigue funcionando igual. -->
+  <div id="tab-experiencia" class="maintab-content"></div>
+
   <div id="tab-tablero" class="maintab-content">
     <iframe id="iframe-tablero"
             class="tablero-externo"
