@@ -43,8 +43,10 @@
 //   GET qa.ashx?action=meta
 //       Solo trazabilidad: generatedAt y source.
 //
-// ERRORES: 400 accion o parametro invalido, 500 sitio mal configurado,
-//          502 la base no respondio. Siempre como {"error":true,"message":"..."}.
+// ERRORES: 400 accion o parametro invalido, 500 sitio mal configurado (incluye
+//          los objetos usp_QaWeb_* sin desplegar o sin permiso), 502 no se
+//          pudo hablar con la base. Siempre como {"error":true,"message":"..."},
+//          y con "sqlNumber" cuando el fallo lo reporto SQL Server.
 //          El mensaje nunca lleva servidor, usuario, ruta ni stack trace.
 
 using System;
@@ -121,14 +123,65 @@ public class Qa : IHttpHandler
             // archivo copiar; no contiene servidor, usuario ni contraseña.
             Error(context, 500, ex.Message);
         }
-        catch (SqlException)
+        catch (SqlException ex)
         {
-            // Sin el mensaje de SQL Server: revelaria el servidor, la base o
-            // el nombre del procedimiento. El detalle queda en el log de
-            // ASP.NET, no en la respuesta.
-            Error(context, 502,
-                "No se pudo consultar la base de datos de QA. Revisa la conexion (VPN, " +
-                "servidor SQL, permisos) o intentalo mas tarde.");
+            // El numero de error de SQL Server es lo unico que separa una
+            // caida de red de un objeto que no existe o de un permiso que
+            // falta. Antes los tres salian con el mismo texto ("revisa la
+            // VPN"), y eso mandaba a buscar el problema donde no estaba: con
+            // el tablero principal funcionando contra la MISMA cadena de
+            // conexion, un procedimiento usp_QaWeb_* sin desplegar se leia
+            // como si el servidor estuviera inalcanzable.
+            //
+            // Sigue sin escribirse ex.Message: llevaria el servidor, la base
+            // y el nombre del procedimiento. Solo sale ex.Number, que es un
+            // codigo de diagnostico y no identifica nada de la instalacion.
+            int codigo;
+            string mensaje;
+
+            switch (ex.Number)
+            {
+                // No se llego al servidor: red, DNS, VPN o instancia parada.
+                case 53:      // network path not found
+                case 40:      // could not open a connection
+                case -2:      // timeout al conectar
+                case 10060:   // connection attempt failed
+                case 11001:   // host desconocido
+                    codigo = 502;
+                    mensaje = "No se pudo contactar al servidor de SQL. Revisa la conexion " +
+                              "(VPN, red, servidor SQL) o intentalo mas tarde.";
+                    break;
+
+                // Se llego al servidor, pero rechazo la identidad del sitio.
+                case 18456:   // login failed
+                case 18452:   // login from untrusted domain
+                case 4060:    // no se pudo abrir la base
+                    codigo = 502;
+                    mensaje = "El servidor de SQL rechazo las credenciales del sitio o la base " +
+                              "indicada. Revisa la cadena de conexion de Web.config.";
+                    break;
+
+                // Se llego y se autentico: faltan los objetos de QA o el
+                // permiso para usarlos. Eso es configuracion de este servidor,
+                // no una caida aguas arriba, asi que 500 y no 502.
+                case 2812:    // no se encontro el procedimiento almacenado
+                case 208:     // nombre de objeto no valido
+                case 229:     // permiso denegado sobre el objeto
+                case 4413:    // no se pudo enlazar la vista
+                    codigo = 500;
+                    mensaje = "Faltan los objetos de QA en la base, o el sitio no tiene permiso " +
+                              "para usarlos. Despliega sql/10_qa_web.sql y concede EXECUTE sobre " +
+                              "los procedimientos usp_QaWeb_*.";
+                    break;
+
+                default:
+                    codigo = 502;
+                    mensaje = "No se pudo consultar la base de datos de QA. Revisa la conexion " +
+                              "(VPN, servidor SQL, permisos) o intentalo mas tarde.";
+                    break;
+            }
+
+            Error(context, codigo, mensaje, ex.Number);
         }
         catch (Exception)
         {
@@ -424,6 +477,15 @@ public class Qa : IHttpHandler
 
     private static void Error(HttpContext context, int codigo, string mensaje)
     {
+        Error(context, codigo, mensaje, null);
+    }
+
+    // sqlNumber solo viaja cuando el fallo vino de SQL Server. Es el numero de
+    // error, nada mas: sirve para saber si hay que mirar la red, las
+    // credenciales o el despliegue de los procedimientos, y no revela el
+    // servidor, la base, el usuario ni la ruta del sitio.
+    private static void Error(HttpContext context, int codigo, string mensaje, int? sqlNumber)
+    {
         context.Response.Clear();
         context.Response.ContentType = "application/json; charset=utf-8";
         context.Response.StatusCode = codigo;
@@ -434,6 +496,8 @@ public class Qa : IHttpHandler
         var error = new Dictionary<string, object>();
         error["error"] = true;
         error["message"] = mensaje;
+        if (sqlNumber.HasValue)
+            error["sqlNumber"] = sqlNumber.Value;
         context.Response.Write(new JavaScriptSerializer().Serialize(error));
     }
 
