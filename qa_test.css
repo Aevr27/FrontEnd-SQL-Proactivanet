@@ -157,6 +157,25 @@ code {
 .lienzo { position: relative; width: 100%; }
 .lienzo-dona { height: 232px; }
 
+/* Alto de partida de las graficas de barras. La pagina se pinta antes de
+   saber cuantas barras habra, y sin esto la tarjeta nace plana y da un salto
+   cuando llegan los datos. El alto exacto lo pone despues qa_test.js. */
+.lienzo-barras { min-height: 264px; }
+
+/* Aviso del lienzo: "Calculando...", "sin datos" o el error del bloque. Va
+   encima del canvas, que se queda donde esta: la grafica se rellena en su
+   sitio en vez de crearse de cero. */
+.lienzo-msg {
+  position: absolute; inset: 0; margin: 0;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 0 14px; text-align: center;
+  color: var(--muted); font-size: 12.5px;
+}
+.lienzo-msg-error { color: var(--rojo); }
+
+/* Valor de una tarjeta que todavia no tiene su dato. */
+.kpi-espera .kpi-val { color: var(--muted-2); font-weight: 600; }
+
 /* ---------- Leyenda de la dona ---------- */
 .leyenda { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; }
 .leyenda-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }

@@ -5,8 +5,15 @@
   Consume unicamente qa.ashx (nunca qa_data.json ni los XLSX). Se sirve por
   HTTP desde el mismo sitio que el handler, asi que las rutas son relativas.
 
-  Carga inicial: una sola peticion, qa.ashx?action=summary (~10 KB).
-  El detalle y los catalogos solo se piden cuando el usuario los pide.
+  La pagina se pinta ENTERA antes de pedir nada: tarjetas, graficas, tablas y
+  controles ya estan aqui, en su sitio y con su tamano definitivo, y cada uno
+  muestra su propio "Calculando..." hasta que llegan sus datos. Ninguna
+  peticion decide si el tablero se ve o no.
+
+  Los datos llegan en dos fases: qa.ashx?action=summary trae KPIs, grupos,
+  tecnicos y recategorizacion; qa.ashx?action=qare completa despues la
+  distribucion por estado y los contadores QA/QARE. El detalle y los catalogos
+  solo se piden cuando el usuario los pide.
 
   Chart.js 4.4.4 local, en assets/vendor/ (no depende del CDN).
 -->
@@ -34,19 +41,16 @@
 
 <main class="contenido">
 
-  <!-- Estados globales de la carga del resumen -->
-  <div id="cargando" class="estado">
-    <span class="spinner" aria-hidden="true"></span>
-    <span>Cargando datos de QA&hellip;</span>
-  </div>
-
+  <!-- Aviso de error del resumen. Es una banda ARRIBA del tablero, no un
+       reemplazo: aunque falle, la estructura sigue en pantalla y los bloques
+       que si cargaron se siguen viendo. -->
   <div id="error-global" class="estado estado-error" hidden>
     <strong>No se pudieron cargar los datos de QA.</strong>
     <span id="error-global-msg"></span>
     <button type="button" class="btn btn-sec" id="btn-reintentar">Reintentar</button>
   </div>
 
-  <div id="tablero" hidden>
+  <div id="tablero">
 
     <section class="kpis" id="kpis"></section>
 
@@ -57,7 +61,10 @@
           <span class="hint" id="hint-grupo"></span>
         </h3>
         <p class="nota-card">Solo tickets con <code>Validacion = Incorrecto</code>. Clic en una barra para ver su detalle.</p>
-        <div class="lienzo" id="lienzo-grupo"><canvas id="chart-grupo"></canvas></div>
+        <div class="lienzo lienzo-barras" id="lienzo-grupo">
+          <canvas id="chart-grupo"></canvas>
+          <p class="lienzo-msg" id="msg-grupo"><span class="spinner" aria-hidden="true"></span>Calculando&hellip;</p>
+        </div>
       </div>
 
       <div class="card">
@@ -69,14 +76,20 @@
           Solo tickets con <code>Validacion = Incorrecto</code>. Clic en una barra para ver su detalle.
           <button type="button" class="enlace" id="btn-tecnicos-todos"></button>
         </p>
-        <div class="lienzo" id="lienzo-tecnico"><canvas id="chart-tecnico"></canvas></div>
+        <div class="lienzo lienzo-barras" id="lienzo-tecnico">
+          <canvas id="chart-tecnico"></canvas>
+          <p class="lienzo-msg" id="msg-tecnico"><span class="spinner" aria-hidden="true"></span>Calculando&hellip;</p>
+        </div>
       </div>
     </section>
 
     <section class="grid-sec">
       <div class="card">
         <h3>Distribucion de validacion<span class="hint" id="hint-validacion"></span></h3>
-        <div class="lienzo lienzo-dona"><canvas id="chart-validacion"></canvas></div>
+        <div class="lienzo lienzo-dona">
+          <canvas id="chart-validacion"></canvas>
+          <p class="lienzo-msg" id="msg-validacion"><span class="spinner" aria-hidden="true"></span>Calculando&hellip;</p>
+        </div>
         <div class="leyenda" id="leyenda-validacion"></div>
       </div>
 

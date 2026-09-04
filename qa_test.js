@@ -102,6 +102,78 @@
     return texto.length > tope ? texto.slice(0, tope - 1) + '…' : texto;
   }
 
+  // ------------------------------------------- estados de carga por bloque
+  // Cada bloque se apaña solo: muestra su propio "Calculando...", su "sin
+  // datos" o su error, sin que ninguno pueda dejar la pagina en blanco.
+
+  // Aviso encima de un lienzo. texto null lo quita y deja ver la grafica.
+  function mensajeLienzo(id, texto, clase) {
+    var caja = $(id);
+    if (!caja) return;
+    if (!texto) { caja.hidden = true; return; }
+    caja.className = 'lienzo-msg' + (clase ? ' ' + clase : '');
+    caja.textContent = texto;
+    caja.hidden = false;
+  }
+
+  function filaTabla(id, columnas, texto, clase) {
+    $(id).innerHTML = '<tr><td colspan="' + columnas + '" class="vacio">' +
+      (clase ? '<span class="' + clase + '">' + esc(texto) + '</span>' : esc(texto)) +
+      '</td></tr>';
+  }
+
+  // Las tarjetas de KPI de la pagina recien abierta: las mismas cinco, con su
+  // titulo, su nota y su color definitivos, y una raya en lugar del numero.
+  // Asi el bloque ocupa desde el principio el alto que va a ocupar.
+  var KPIS = [
+    ['kpi-azul',  'Total tickets',               'Suma ultimos 15 dias'],
+    ['kpi-rojo',  'Tickets incorrectos',         'Validacion = Incorrecto (suma 15 dias)'],
+    ['kpi-ambar', '% incorrectos',               'Sobre el total del rango'],
+    ['kpi-rojo',  'Incorrectos ayer',            'Por fecha de firma de solucion'],
+    ['kpi-azul',  'Incorrectos semana anterior', 'Por fecha de firma de solucion']
+  ];
+
+  function kpisEnEspera(valor) {
+    $('kpis').innerHTML = KPIS.map(function (k) {
+      return tarjeta(k[0] + ' kpi-espera', k[1], valor, k[2]);
+    }).join('');
+  }
+
+  // Arma la pagina COMPLETA antes de pedir un solo dato: tarjetas, graficas
+  // vacias en su sitio, tablas con su aviso y los controles listos. Lo que
+  // llegue despues rellena estos componentes; no los crea.
+  function armarShell() {
+    kpisEnEspera('—');
+
+    // Alto de partida: el definitivo lo pone cada bloque cuando sabe cuantas
+    // barras tiene. Sin esto la tarjeta nace plana y salta al llegar los datos.
+    $('lienzo-grupo').style.height = altoLienzo(8);
+    $('lienzo-tecnico').style.height = altoLienzo(TECNICOS_TOPE);
+
+    graficas.grupo = crearBarras('chart-grupo', COLOR.azul, function (etiqueta) {
+      if (etiqueta === '(sin grupo)') return;
+      aplicarFiltro('grupo', etiqueta);
+    });
+    graficas.tecnico = crearBarras('chart-tecnico', COLOR.morado, function (etiqueta) {
+      aplicarFiltro('tecnico', etiqueta);
+    });
+    graficas.validacion = crearDona();
+
+    $('btn-tecnicos-todos').hidden = true;
+    filaTabla('tbody-recat', 3, 'Calculando…');
+    filaTabla('tbody-qare', 5, 'Calculando…');
+    pintarFiltros();
+  }
+
+  // El resumen no llego: cada bloque de la primera fase lo dice en su sitio y
+  // el resto de la pagina se queda como esta.
+  function faseUnoFallo(mensaje) {
+    kpisEnEspera('n/d');
+    mensajeLienzo('msg-grupo', 'Error al cargar datos.', 'lienzo-msg-error');
+    mensajeLienzo('msg-tecnico', 'Error al cargar datos.', 'lienzo-msg-error');
+    filaTabla('tbody-recat', 3, mensaje);
+  }
+
   // ------------------------------------------------------------------ API
   // Mensajes de error siempre en terminos de usuario: nada de rutas, stacks
   // ni detalles del servidor, vengan de donde vengan.
@@ -147,16 +219,15 @@
 
   // -------------------------------------------------------------- resumen
   function cargarResumen() {
-    $('cargando').hidden = false;
     $('error-global').hidden = true;
-    $('tablero').hidden = true;
 
     // qa.ashx solo existe si un servidor lo ejecuta. Abierta desde el disco la
-    // pagina no tiene origen HTTP, el fetch muere en CORS y el usuario solo ve
-    // el spinner: mejor decirlo aqui.
+    // pagina no tiene origen HTTP y el fetch muere en CORS: mejor decirlo. El
+    // tablero se queda en pantalla, con sus bloques marcados sin datos.
     if (location.protocol !== 'http:' && location.protocol !== 'https:') {
-      $('cargando').hidden = true;
-      $('tablero').hidden = true;
+      faseUnoFallo('Sin servidor.');
+      mensajeLienzo('msg-validacion', 'Sin servidor.', 'lienzo-msg-error');
+      filaTabla('tbody-qare', 5, 'Sin servidor.');
       $('error-global-msg').textContent =
         'Esta pagina necesita el servidor: abrela en ' +
         'http://localhost:8080/qa_test.html (la publica dev-qa.cmd) o en el sitio ' +
@@ -180,14 +251,14 @@
         estado.resumen = datos;
         estado.qareCompleto = null;
         pintarTablero(datos);
-        $('cargando').hidden = true;
         $('error-global').hidden = true;
-        $('tablero').hidden = false;
       })
       .catch(function (err) {
         if (token !== estado.peticionResumen) return;
-        $('cargando').hidden = true;
-        $('tablero').hidden = true;
+        // El aviso va arriba, como banda, y el tablero sigue en pantalla: los
+        // bloques que no dependen de esta peticion no tienen por que
+        // desaparecer.
+        faseUnoFallo(err.message);
         $('error-global-msg').textContent = err.message;
         $('error-global').hidden = false;
       });
@@ -216,12 +287,11 @@
 
   function esperandoCompleto() {
     $('hint-validacion').textContent = '';
-    $('leyenda-validacion').innerHTML =
-      '<div class="vacio">Calculando la distribucion por estado…</div>';
+    $('leyenda-validacion').innerHTML = '';
+    mensajeLienzo('msg-validacion', 'Calculando la distribucion por estado…');
     $('nota-qare').textContent = '';
     $('pie-qare').textContent = '';
-    $('tbody-qare').innerHTML =
-      '<tr><td colspan="5" class="vacio">Calculando los contadores QA/QARE…</td></tr>';
+    filaTabla('tbody-qare', 5, 'Calculando los contadores QA/QARE…');
   }
 
   // Segunda peticion: trae validacion, qare y topCategorias de una sola vez,
@@ -238,10 +308,12 @@
         pintarQare(datos.qare);
       })
       .catch(function (err) {
+        // Falla solo esta fase: los KPIs, las dos graficas de barras y la
+        // recategorizacion ya estan en pantalla y ahi se quedan.
         if (token !== estado.peticionResumen) return;
+        mensajeLienzo('msg-validacion', 'Error al cargar datos.', 'lienzo-msg-error');
         $('leyenda-validacion').innerHTML = '<div class="vacio">' + esc(err.message) + '</div>';
-        $('tbody-qare').innerHTML =
-          '<tr><td colspan="5" class="vacio">' + esc(err.message) + '</td></tr>';
+        filaTabla('tbody-qare', 5, err.message);
       });
   }
 
@@ -312,14 +384,18 @@
   // ------------------------------------------------------------- graficas
   function altoLienzo(n) { return Math.max(240, n * 26 + 64) + 'px'; }
 
-  function barrasHorizontales(canvasId, etiquetas, valores, color, alClic) {
+  // La grafica se CREA vacia cuando se arma la pagina y despues se rellena en
+  // su sitio con pintarBarras. Antes se creaba y se destruia en cada pintado,
+  // lo que ademas obligaba a que existieran los datos para que existiera la
+  // grafica: la tarjeta no podia verse hasta que respondiera SQL.
+  function crearBarras(canvasId, color, alClic) {
     var ctx = $(canvasId).getContext('2d');
     return new Chart(ctx, {
       type: 'bar',
       data: {
-        labels: etiquetas,
+        labels: [],
         datasets: [{
-          data: valores,
+          data: [],
           backgroundColor: color,
           hoverBackgroundColor: COLOR.azulOscuro,
           borderRadius: 3,
@@ -333,8 +409,10 @@
         maintainAspectRatio: false,
         animation: { duration: 220 },
         layout: { padding: { right: 26 } },
-        onClick: function (evento, elementos) {
-          if (alClic && elementos.length) alClic(etiquetas[elementos[0].index]);
+        // Las etiquetas se leen de la grafica y no de una variable capturada:
+        // la lista cambia cada vez que se rellena.
+        onClick: function (evento, elementos, grafica) {
+          if (alClic && elementos.length) alClic(grafica.data.labels[elementos[0].index]);
         },
         onHover: function (evento, elementos) {
           if (alClic) evento.native.target.style.cursor = elementos.length ? 'pointer' : 'default';
@@ -368,6 +446,12 @@
     });
   }
 
+  function pintarBarras(grafica, etiquetas, valores) {
+    grafica.data.labels = etiquetas;
+    grafica.data.datasets[0].data = valores;
+    grafica.update();
+  }
+
   // Dibuja el valor al final de la barra. Chart.js no lo trae de serie y no
   // vale la pena sumar otra dependencia por esto.
   var pluginValores = {
@@ -387,36 +471,31 @@
   };
 
   function pintarGrupo(filas) {
-    var lienzo = $('lienzo-grupo');
     if (!filas.length) {
-      lienzo.innerHTML = '<div class="vacio">No hay grupos con tickets incorrectos en este rango.</div>';
       $('hint-grupo').textContent = '';
+      pintarBarras(graficas.grupo, [], []);
+      mensajeLienzo('msg-grupo', 'No hay grupos con tickets incorrectos en este rango.');
       return;
     }
     var orden = filas.slice().sort(function (a, b) { return b.tickets - a.tickets; });
     $('hint-grupo').textContent = orden.length + ' grupos';
-    lienzo.style.height = altoLienzo(orden.length);
+    $('lienzo-grupo').style.height = altoLienzo(orden.length);
 
-    if (graficas.grupo) graficas.grupo.destroy();
-    graficas.grupo = barrasHorizontales(
-      'chart-grupo',
+    mensajeLienzo('msg-grupo', null);
+    pintarBarras(
+      graficas.grupo,
       orden.map(function (f) { return f.grupo === null ? '(sin grupo)' : f.grupo; }),
-      orden.map(function (f) { return f.tickets; }),
-      COLOR.azul,
-      function (etiqueta) {
-        if (etiqueta === '(sin grupo)') return;
-        aplicarFiltro('grupo', etiqueta);
-      }
+      orden.map(function (f) { return f.tickets; })
     );
   }
 
   function pintarTecnico(filas) {
-    var lienzo = $('lienzo-tecnico');
     var boton = $('btn-tecnicos-todos');
     if (!filas.length) {
-      lienzo.innerHTML = '<div class="vacio">No hay tecnicos con tickets incorrectos en este rango.</div>';
       $('hint-tecnico').textContent = '';
       boton.hidden = true;
+      pintarBarras(graficas.tecnico, [], []);
+      mensajeLienzo('msg-tecnico', 'No hay tecnicos con tickets incorrectos en este rango.');
       return;
     }
 
@@ -430,40 +509,27 @@
     boton.hidden = orden.length <= TECNICOS_TOPE;
     boton.textContent = estado.tecnicosCompletos ? 'Ver solo el top ' + TECNICOS_TOPE : 'Ver los ' + orden.length;
 
-    lienzo.style.height = altoLienzo(visibles.length);
+    $('lienzo-tecnico').style.height = altoLienzo(visibles.length);
 
-    if (graficas.tecnico) graficas.tecnico.destroy();
-    graficas.tecnico = barrasHorizontales(
-      'chart-tecnico',
+    mensajeLienzo('msg-tecnico', null);
+    pintarBarras(
+      graficas.tecnico,
       visibles.map(function (f) { return f.tecnico; }),
-      visibles.map(function (f) { return f.tickets; }),
-      COLOR.morado,
-      function (etiqueta) { aplicarFiltro('tecnico', etiqueta); }
+      visibles.map(function (f) { return f.tickets; })
     );
   }
 
-  function pintarValidacion(filas) {
-    if (!filas.length) {
-      $('leyenda-validacion').innerHTML = '<div class="vacio">Sin datos de validacion.</div>';
-      return;
-    }
-    var etiquetas = filas.map(function (f) { return f.validacion === null ? '(sin valor)' : f.validacion; });
-    var valores = filas.map(function (f) { return f.tickets; });
-    var colores = etiquetas.map(function (e) { return COLOR_VALIDACION[e] || COLOR.gris; });
-    var total = valores.reduce(function (a, b) { return a + b; }, 0);
-
-    $('hint-validacion').textContent = etiquetas.length + ' estados';
-
-    if (graficas.validacion) graficas.validacion.destroy();
-    graficas.validacion = new Chart($('chart-validacion').getContext('2d'), {
+  // La dona se crea vacia con la pagina; aqui solo se le cambian los datos.
+  function crearDona() {
+    return new Chart($('chart-validacion').getContext('2d'), {
       type: 'doughnut',
-      data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores, borderWidth: 2, borderColor: '#fff' }] },
+      data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 2, borderColor: '#fff' }] },
       options: {
         responsive: true, maintainAspectRatio: false, cutout: '58%',
         // La dona tambien filtra: clic en un estado = detalle de ese estado.
-        onClick: function (evento, elementos) {
+        onClick: function (evento, elementos, grafica) {
           if (elementos.length) {
-            var etiqueta = etiquetas[elementos[0].index];
+            var etiqueta = grafica.data.labels[elementos[0].index];
             if (etiqueta !== '(sin valor)') aplicarFiltro('validacion', etiqueta);
           }
         },
@@ -475,6 +541,9 @@
           tooltip: {
             callbacks: {
               label: function (item) {
+                // El total sale de la propia grafica: los datos cambian
+                // despues de crearla.
+                var total = item.dataset.data.reduce(function (a, b) { return a + b; }, 0);
                 var pct = total ? (item.parsed * 100 / total) : 0;
                 return item.label + ': ' + NUM.format(item.parsed) + ' (' + NUM2.format(pct) + '%)';
               }
@@ -483,6 +552,30 @@
         }
       }
     });
+  }
+
+  function pintarValidacion(filas) {
+    if (!filas.length) {
+      $('hint-validacion').textContent = '';
+      $('leyenda-validacion').innerHTML = '<div class="vacio">Sin datos de validacion.</div>';
+      graficas.validacion.data.labels = [];
+      graficas.validacion.data.datasets[0].data = [];
+      graficas.validacion.update();
+      mensajeLienzo('msg-validacion', 'Sin datos de validacion.');
+      return;
+    }
+    var etiquetas = filas.map(function (f) { return f.validacion === null ? '(sin valor)' : f.validacion; });
+    var valores = filas.map(function (f) { return f.tickets; });
+    var colores = etiquetas.map(function (e) { return COLOR_VALIDACION[e] || COLOR.gris; });
+    var total = valores.reduce(function (a, b) { return a + b; }, 0);
+
+    $('hint-validacion').textContent = etiquetas.length + ' estados';
+
+    mensajeLienzo('msg-validacion', null);
+    graficas.validacion.data.labels = etiquetas;
+    graficas.validacion.data.datasets[0].data = valores;
+    graficas.validacion.data.datasets[0].backgroundColor = colores;
+    graficas.validacion.update();
 
     // Leyenda propia: los cuatro estados se listan por separado, nunca se
     // agrupa "Valido" con "OK" ni "Sin catalogo" con "Incorrecto".
@@ -726,6 +819,10 @@
   }
 
   document.addEventListener('DOMContentLoaded', function () {
+    // El orden importa: la pagina se arma ENTERA y se conecta antes de pedir
+    // nada. Lo que llega despues rellena estos componentes, no los crea, asi
+    // que ninguna peticion -- ni su fallo -- decide si el tablero se ve.
+    armarShell();
     conectarEventos();
     cargarResumen();
   });
