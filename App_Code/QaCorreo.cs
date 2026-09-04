@@ -238,9 +238,34 @@ public static class QaCorreo
     //
     // El resultado -- unos pocos KB -- se cachea, asi que abrir una
     // distribucion QARE (action=qare) ya no vuelve a leer la vista.
-    public static Agregados Resumen(string fi, string ff, QaCronometro reloj)
+    // Pasada CORTA: solo los tickets incorrectos del rango, que en la ventana
+    // por defecto son un 8% de las filas. De aqui salen los tres bloques que
+    // el tablero necesita para pintarse, porque los tres miran unicamente
+    // tickets incorrectos: porGrupo, porTecnico y recategorizacion.
+    //
+    // El filtro lo aplica la base con @SoloIncorrectos = 1, no el codigo: lo
+    // que se ahorra son filas que nunca llegan a viajar.
+    public static Agregados Incorrectos(string fi, string ff, QaCronometro reloj)
     {
-        string clave = "qa:resumen:" + fi + ":" + ff;
+        return Pasada(fi, ff, true, "qa:incorrectos:", "detalleIncorrectosMs",
+                      "filasIncorrectos", reloj);
+    }
+
+    // Pasada COMPLETA: todos los tickets del rango. Hace falta para los dos
+    // bloques que miran tickets de cualquier estado -- el corte por Validacion
+    // y los contadores QA/QARE -- y es la cara. Ya no bloquea la carga
+    // inicial: el tablero la pide despues, con action=qare.
+    public static Agregados Completo(string fi, string ff, QaCronometro reloj)
+    {
+        return Pasada(fi, ff, false, "qa:completo:", "detalleCompletoMs",
+                      "filasDetalle", reloj);
+    }
+
+    private static Agregados Pasada(string fi, string ff, bool soloIncorrectos,
+                                    string prefijo, string pasoMs, string pasoFilas,
+                                    QaCronometro reloj)
+    {
+        string clave = prefijo + fi + ":" + ff;
 
         var cache = HttpRuntime.Cache;
         if (cache != null)
@@ -248,20 +273,22 @@ public static class QaCorreo
             var guardado = cache[clave] as Agregados;
             if (guardado != null)
             {
-                reloj.Anotar("resumenDesdeCache", true);
+                reloj.Anotar(prefijo + "desdeCache", true);
+                reloj.Anotar(pasoFilas, guardado.Total);
                 Diagnostico(guardado, reloj);
                 return guardado;
             }
         }
 
         var agregados = new Agregados();
-        var acumulado = new Acumulado();
+        agregados.SoloIncorrectos = soloIncorrectos;
+        var acumulado = new Acumulado(soloIncorrectos);
 
         var parametros = Rango(fi, ff);
-        parametros["SoloIncorrectos"] = 0;
+        parametros["SoloIncorrectos"] = soloIncorrectos ? 1 : 0;
         parametros["Top"] = TopDetalle;
 
-        using (reloj.Medir("detalleMs"))
+        using (reloj.Medir(pasoMs))
             QaDb.Recorrer(ProcDetalle, parametros, acumulado.Contar);
 
         using (reloj.Medir("agregacionMs"))
@@ -270,8 +297,8 @@ public static class QaCorreo
         agregados.ColumnasDetalle = acumulado.Nombres;
         agregados.ColumnasSinResolver = acumulado.SinResolver;
 
-        reloj.Anotar("filasDetalle", agregados.Total);
-        reloj.Anotar("resumenDesdeCache", false);
+        reloj.Anotar(pasoFilas, agregados.Total);
+        reloj.Anotar(prefijo + "desdeCache", false);
         Diagnostico(agregados, reloj);
 
         if (cache != null)
@@ -437,6 +464,12 @@ public static class QaCorreo
     public sealed class Agregados
     {
         public long Total;
+        // true cuando estos contadores salieron de la pasada corta. Entonces
+        // Total son los tickets INCORRECTOS del rango, no todos, y los bloques
+        // que necesitan ver los cuatro estados (Validacion, campos QA/QARE,
+        // topCategorias) se quedan vacios a proposito: pedirlos aqui daria un
+        // numero calculado sobre el 8% de las filas.
+        public bool SoloIncorrectos;
         public List<object> Validacion = new List<object>();
         public List<object> Recategorizacion = new List<object>();
         public List<object> PorGrupo = new List<object>();
@@ -477,8 +510,11 @@ public static class QaCorreo
         private readonly long[] _respondidos;
         private readonly int[] _largoMaximo;
 
-        public Acumulado()
+        private readonly bool _soloIncorrectos;
+
+        public Acumulado(bool soloIncorrectos)
         {
+            _soloIncorrectos = soloIncorrectos;
             _valores = new Dictionary<string, long>[CamposQare.Length];
             _huellas = new HashSet<long>[CamposQare.Length];
             _respondidos = new long[CamposQare.Length];
@@ -504,11 +540,19 @@ public static class QaCorreo
             if (_total == 1) Revisar(fila);
 
             string validacion = Columna(fila, ColValidacion, "Validacion");
-            Sumar(_validacion, Clave(validacion), 1);
-
             string categoria = Columna(fila, ColCategoria, "Categoria");
-            Sumar(_categoriaTotal, Clave(categoria), 1);
 
+            // El corte por estado y el total por categoria solo tienen sentido
+            // cuando la pasada vio los cuatro estados.
+            if (!_soloIncorrectos)
+            {
+                Sumar(_validacion, Clave(validacion), 1);
+                Sumar(_categoriaTotal, Clave(categoria), 1);
+            }
+
+            // Se comprueba aunque la base ya haya filtrado con
+            // @SoloIncorrectos: contar solo lo que de verdad viene marcado
+            // como Incorrecto es correcto en los dos modos.
             bool incorrecto = string.Equals(validacion, "Incorrecto",
                                             StringComparison.OrdinalIgnoreCase);
             if (incorrecto)
@@ -526,6 +570,12 @@ public static class QaCorreo
                 if (!_etiquetasRecat.ContainsKey(par))
                     _etiquetasRecat[par] = new[] { grupo, correcto };
             }
+
+            // Los contadores QA/QARE se miden sobre TODOS los tickets del
+            // rango. En la pasada corta se saltan enteros: leer aqui doce
+            // columnas de texto para luego no publicarlas seria pagar el
+            // precio sin cobrar el dato.
+            if (_soloIncorrectos) return;
 
             for (int i = 0; i < CamposQare.Length; i++)
             {
@@ -569,6 +619,30 @@ public static class QaCorreo
         {
             agregados.Total = _total;
 
+            // --- incorrectos por grupo y por tecnico, y los pares de
+            // recategorizacion. Los tres salen igual de las dos pasadas: solo
+            // miran tickets incorrectos.
+            foreach (var par in Ordenar(_grupo))
+                agregados.PorGrupo.Add(Item("grupo", Etiqueta(par.Key), par.Value));
+
+            foreach (var par in Ordenar(_tecnico))
+                agregados.PorTecnico.Add(Item("tecnico", Etiqueta(par.Key), par.Value));
+
+            foreach (var par in Ordenar(_recategorizacion))
+            {
+                var item = new Dictionary<string, object>();
+                item["grupo"] = _etiquetasRecat[par.Key][0];
+                // NULL de verdad cuando el ticket no tiene grupo correcto: el
+                // tablero lo pinta como "Sin grupo correcto", no como un grupo.
+                item["grupoCorrecto"] = _etiquetasRecat[par.Key][1];
+                item["tickets"] = par.Value;
+                agregados.Recategorizacion.Add(item);
+            }
+
+            // Lo que sigue necesita haber visto los cuatro estados. La pasada
+            // corta lo deja vacio en vez de calcularlo sobre el 8% de las filas.
+            if (_soloIncorrectos) return;
+
             // --- validacion: los cuatro estados por separado, nunca agrupados.
             foreach (var estado in Ordenar(_validacion))
             {
@@ -579,26 +653,6 @@ public static class QaCorreo
                     ? 0.0
                     : Math.Round(100.0 * estado.Value / _total, 2, MidpointRounding.AwayFromZero);
                 agregados.Validacion.Add(item);
-            }
-
-            // --- incorrectos por grupo y por tecnico. 'Sin tecnico' incluido:
-            // el tablero tiene que ver esa barra.
-            foreach (var par in Ordenar(_grupo))
-                agregados.PorGrupo.Add(Item("grupo", Etiqueta(par.Key), par.Value));
-
-            foreach (var par in Ordenar(_tecnico))
-                agregados.PorTecnico.Add(Item("tecnico", Etiqueta(par.Key), par.Value));
-
-            // --- recategorizacion: pares grupo actual -> grupo correcto.
-            foreach (var par in Ordenar(_recategorizacion))
-            {
-                var item = new Dictionary<string, object>();
-                item["grupo"] = _etiquetasRecat[par.Key][0];
-                // NULL de verdad cuando el ticket no tiene grupo correcto: el
-                // tablero lo pinta como "Sin grupo correcto", no como un grupo.
-                item["grupoCorrecto"] = _etiquetasRecat[par.Key][1];
-                item["tickets"] = par.Value;
-                agregados.Recategorizacion.Add(item);
             }
 
             // --- top de categorias, con las mismas columnas que publica

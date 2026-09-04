@@ -83,6 +83,15 @@ public class Qa : IHttpHandler
     private const int TamanoPaginaPorDefecto = 100;
     private const int TamanoPaginaMaximo = 1000;
 
+    // Bloques que action=summary devuelve en null porque necesitan la pasada
+    // completa del detalle. El tablero los pide despues con action=qare, que
+    // los trae los tres. Va en la respuesta para que el frontend no tenga que
+    // saberse la lista de memoria.
+    private static readonly string[] Pendientes = new string[]
+    {
+        "validacion", "qare", "topCategorias",
+    };
+
     private const string NotaQare =
         "Datos QA/QARE en crudo. No se aplica ninguna formula de cumplimiento " +
         "porque la regla oficial aun no esta definida.";
@@ -241,7 +250,7 @@ public class Qa : IHttpHandler
         if (QaDb.ModoSnapshot)
         {
             kpis = QaCorreo.Kpis(peticion.Fi, peticion.Ff, peticion.Reloj);
-            agregados = QaCorreo.Resumen(peticion.Fi, peticion.Ff, peticion.Reloj);
+            agregados = QaCorreo.Incorrectos(peticion.Fi, peticion.Ff, peticion.Reloj);
         }
         else
         {
@@ -251,7 +260,7 @@ public class Qa : IHttpHandler
             var tarea = Task.Factory.StartNew(delegate { return QaCorreo.Kpis(fi, ff, reloj); });
             try
             {
-                agregados = QaCorreo.Resumen(fi, ff, reloj);
+                agregados = QaCorreo.Incorrectos(fi, ff, reloj);
             }
             catch (Exception)
             {
@@ -295,20 +304,15 @@ public class Qa : IHttpHandler
         // quiere y el tablero si.
         salida["porGrupo"] = agregados.PorGrupo;
         salida["porTecnico"] = agregados.PorTecnico;
-        salida["validacion"] = agregados.Validacion;
         salida["recategorizacion"] = agregados.Recategorizacion;
 
-        // Bloque aditivo: el tablero actual no lo pinta. Sale de la misma
-        // pasada, con las columnas que publica usp_CorreoQA_TopCategorias.
-        salida["topCategorias"] = agregados.TopCategorias;
-
-        // Version ligera de QARE: contadores por campo, sin las
-        // distribuciones de respuestas (esas se piden con action=qare).
-        var qare = new Dictionary<string, object>();
-        qare["nota"] = NotaQare;
-        qare["totalTickets"] = total;
-        qare["campos"] = agregados.Campos;
-        salida["qare"] = qare;
+        // Los tres bloques que necesitan haber visto los cuatro estados viajan
+        // como null, no ausentes: el tablero distingue "todavia no esta" de
+        // "no hay datos" y los pide con action=qare. Ver Pendientes.
+        salida["validacion"] = null;
+        salida["qare"] = null;
+        salida["topCategorias"] = null;
+        salida["pendientes"] = Pendientes;
 
         Escribir(context, salida);
     }
@@ -357,7 +361,7 @@ public class Qa : IHttpHandler
     // leer la vista: antes esto era otra lectura completa.
     private static void Qare(HttpContext context, Peticion peticion)
     {
-        var agregados = QaCorreo.Resumen(peticion.Fi, peticion.Ff, peticion.Reloj);
+        var agregados = QaCorreo.Completo(peticion.Fi, peticion.Ff, peticion.Reloj);
         peticion.FilasDetalle = agregados.Total;
 
         // El orden de los campos es el MISMO que en action=summary: el tablero
@@ -386,6 +390,11 @@ public class Qa : IHttpHandler
         salida["generatedAt"] = Ahora();
         salida["source"] = Origen(peticion, agregados.Total);
         salida["qare"] = qare;
+        // Los otros dos bloques que salen de esta misma pasada. Van aqui para
+        // que el tablero complete la carga con UNA sola peticion y no con
+        // tres, cada una pagando el recorrido entero del rango.
+        salida["validacion"] = agregados.Validacion;
+        salida["topCategorias"] = agregados.TopCategorias;
 
         Escribir(context, salida);
     }

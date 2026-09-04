@@ -11,9 +11,16 @@
 
    Peticiones:
      - carga inicial : qa.ashx?action=summary            (~10 KB)
+                       KPIs, grupos, tecnicos y recategorizacion. Solo mira
+                       los tickets incorrectos del rango, que son una fraccion
+                       del total: por eso es la peticion rapida.
+     - completo      : qa.ashx?action=qare               (en segundo plano,
+                       en cuanto el resumen esta pintado)
+                       Distribucion por estado, contadores QA/QARE con sus
+                       respuestas y top de categorias. Recorre TODOS los
+                       tickets del rango, asi que tarda; por eso no bloquea la
+                       carga y sus dos paneles se rellenan al llegar.
      - detalle       : qa.ashx?action=detail&...         (solo al pedirlo)
-     - QARE completo : qa.ashx?action=qare               (solo si hay que
-                       mostrar una distribucion de respuestas)
      - catalogos     : nunca en este prototipo
 
    Regla de datos: lo que el API no trae, no se calcula aqui. No existe
@@ -191,9 +198,51 @@
     pintarKpis(datos.summary, datos.historico);
     pintarGrupo(datos.porGrupo || []);
     pintarTecnico(datos.porTecnico || []);
-    pintarValidacion(datos.validacion || []);
     pintarRecategorizacion(datos.recategorizacion || []);
-    pintarQare(datos.qare);
+
+    // El corte por estado y los contadores QA/QARE son los unicos bloques que
+    // necesitan recorrer TODOS los tickets del rango y no solo los
+    // incorrectos, y ese recorrido es lo que tarda. El resumen ya no espera
+    // por ellos: el servidor los manda como null, aqui se pintan dos avisos y
+    // llegan en una segunda peticion. Todo lo demas ya esta en pantalla.
+    if (datos.validacion === null) {
+      esperandoCompleto();
+      cargarCompleto();
+    } else {
+      pintarValidacion(datos.validacion || []);
+      pintarQare(datos.qare);
+    }
+  }
+
+  function esperandoCompleto() {
+    $('hint-validacion').textContent = '';
+    $('leyenda-validacion').innerHTML =
+      '<div class="vacio">Calculando la distribucion por estado…</div>';
+    $('nota-qare').textContent = '';
+    $('pie-qare').textContent = '';
+    $('tbody-qare').innerHTML =
+      '<tr><td colspan="5" class="vacio">Calculando los contadores QA/QARE…</td></tr>';
+  }
+
+  // Segunda peticion: trae validacion, qare y topCategorias de una sola vez,
+  // porque los tres salen del mismo recorrido. Se guarda entera para que "Ver
+  // respuestas" no tenga que volver a pedir nada.
+  function cargarCompleto() {
+    var token = estado.peticionResumen;
+
+    pedir({ action: 'qare' })
+      .then(function (datos) {
+        if (token !== estado.peticionResumen) return;   // hubo otra recarga
+        estado.qareCompleto = datos;
+        pintarValidacion(datos.validacion || []);
+        pintarQare(datos.qare);
+      })
+      .catch(function (err) {
+        if (token !== estado.peticionResumen) return;
+        $('leyenda-validacion').innerHTML = '<div class="vacio">' + esc(err.message) + '</div>';
+        $('tbody-qare').innerHTML =
+          '<tr><td colspan="5" class="vacio">' + esc(err.message) + '</td></tr>';
+      });
   }
 
   // El bloque "source" describe de donde salieron los datos y que ventana
