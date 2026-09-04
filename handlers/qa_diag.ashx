@@ -1,4 +1,4 @@
-<%@ WebHandler Language="C#" Class="QaDiag" %>
+﻿<%@ WebHandler Language="C#" Class="QaDiag" %>
 
 // DIAGNOSTICO TEMPORAL. Borrar cuando la conexion de qa.ashx quede resuelta.
 //

@@ -1,4 +1,4 @@
-<%@ WebHandler Language="C#" Class="Qa" %>
+﻿<%@ WebHandler Language="C#" Class="Qa" %>
 
 // qa.ashx - API de solo lectura del tablero de QA.
 //

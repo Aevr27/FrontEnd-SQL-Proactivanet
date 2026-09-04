@@ -1,4 +1,4 @@
-// Capa de adaptacion entre los procedimientos QA que YA existen en la base y
+﻿// Capa de adaptacion entre los procedimientos QA que YA existen en la base y
 // el contrato JSON que espera el tablero (qa_test.js).
 //
 // POR QUE EXISTE ESTE ARCHIVO
@@ -249,6 +249,7 @@ public static class QaCorreo
             if (guardado != null)
             {
                 reloj.Anotar("resumenDesdeCache", true);
+                Diagnostico(guardado, reloj);
                 return guardado;
             }
         }
@@ -266,8 +267,12 @@ public static class QaCorreo
         using (reloj.Medir("agregacionMs"))
             acumulado.Volcar(agregados);
 
+        agregados.ColumnasDetalle = acumulado.Nombres;
+        agregados.ColumnasSinResolver = acumulado.SinResolver;
+
         reloj.Anotar("filasDetalle", agregados.Total);
         reloj.Anotar("resumenDesdeCache", false);
+        Diagnostico(agregados, reloj);
 
         if (cache != null)
         {
@@ -277,6 +282,16 @@ public static class QaCorreo
         }
 
         return agregados;
+    }
+
+    // Nombres de columna: los que llegaron y los que no se pudieron resolver.
+    // Es metadato del result set, no contenido de tickets, y solo se publica
+    // con ?debug=timings. Una lista sinResolver no vacia significa que ese
+    // bloque del tablero esta contando NULLs, no datos.
+    private static void Diagnostico(Agregados agregados, QaCronometro reloj)
+    {
+        reloj.Anotar("columnasDetalle", agregados.ColumnasDetalle);
+        reloj.Anotar("columnasSinResolver", agregados.ColumnasSinResolver);
     }
 
     // -------------------------------------------------------------- detalle
@@ -310,7 +325,7 @@ public static class QaCorreo
             filas = QaDb.Conjunto(QaDb.EjecutarMultiple(ProcDetalle, parametros), 0);
 
         using (reloj.Medir("normalizacionMs"))
-            foreach (var fila in filas) Normalizar(fila);
+            Normalizar(filas);
 
         reloj.Anotar("filasDetalle", (long)filas.Count);
         reloj.Anotar("detalleDesdeCache", false);
@@ -334,23 +349,44 @@ public static class QaCorreo
     // como esta. Solo se rellena el nombre visible que falte, copiando el de la
     // vista: asi el contrato del frontend no depende de cual de los dos juegos
     // de nombres traiga el result set.
-    private static void Normalizar(Dictionary<string, object> fila)
+    private static void Normalizar(List<Dictionary<string, object>> filas)
     {
-        if (fila == null) return;
+        if (filas.Count == 0) return;
 
-        foreach (var par in AliasColumnas)
-        {
-            if (fila.ContainsKey(par[0])) continue;
-            object valor;
-            if (fila.TryGetValue(par[1], out valor)) fila[par[0]] = valor;
-        }
+        // Todas las filas del mismo result set traen las mismas claves: el
+        // mapa se arma una vez y no una por fila.
+        var mapa = new QaColumnas(new List<string>(filas[0].Keys));
 
-        foreach (var campo in CamposQare)
+        var copias = new List<string[]>();
+        foreach (var par in AliasColumnas) Copia(copias, mapa, par[0], par[1]);
+        foreach (var campo in CamposQare) Copia(copias, mapa, campo[0], campo[1]);
+        if (copias.Count == 0) return;
+
+        foreach (var fila in filas)
         {
-            if (fila.ContainsKey(campo[0])) continue;
-            object valor;
-            if (fila.TryGetValue(campo[1], out valor)) fila[campo[0]] = valor;
+            foreach (var copia in copias)
+            {
+                object valor;
+                if (fila.TryGetValue(copia[1], out valor)) fila[copia[0]] = valor;
+            }
         }
+    }
+
+    // Anota que la columna 'canonico' hay que copiarla desde la columna real
+    // que la trae. Si la fila ya la tiene con ese nombre exacto no se copia
+    // nada; la copia se agrega tanto si el nombre real solo difiere en los
+    // acentos como si el procedimiento devolvio el nombre crudo de la vista.
+    // Se agrega, no se renombra: la columna original se queda donde estaba.
+    private static void Copia(List<string[]> copias, QaColumnas mapa,
+                              string canonico, string vista)
+    {
+        if (mapa.OrdinalExacto(canonico) >= 0) return;
+
+        int indice = mapa.Ordinal(canonico);
+        if (indice < 0) indice = mapa.Ordinal(vista);
+        if (indice < 0) return;
+
+        copias.Add(new[] { canonico, mapa.Nombres[indice] });
     }
 
     // Filtros que usp_CorreoQA_Detalle no tiene. Igualdad exacta, como el '='
@@ -407,6 +443,11 @@ public static class QaCorreo
         public List<object> PorTecnico = new List<object>();
         public List<object> TopCategorias = new List<object>();
         public List<object> Campos = new List<object>();
+        // Diagnostico: los nombres que usp_CorreoQA_Detalle devolvio de verdad,
+        // y los que el codigo pidio y no aparecieron. Son nombres de columna,
+        // no datos de tickets. Solo salen con ?debug=timings.
+        public List<string> ColumnasDetalle = new List<string>();
+        public List<string> ColumnasSinResolver = new List<string>();
         // Distribucion de respuestas por indice de campo (0..11). null en los
         // campos de texto libre, igual que antes: eso es lo que distingue un
         // campo codificado de uno abierto.
@@ -446,9 +487,21 @@ public static class QaCorreo
                 _valores[i] = new Dictionary<string, long>(Comparador);
         }
 
+        // Los nombres reales del result set y los que no se pudieron resolver.
+        // Se toman de la primera fila: todas comparten esquema.
+        public List<string> Nombres = new List<string>();
+        public List<string> SinResolver = new List<string>();
+
+        // Etiqueta visible de cada campo QA/QARE. Se toma del nombre con el que
+        // la columna llego, no del literal del codigo: asi el tablero muestra
+        // como se llama el campo en la base, y no depende de con que
+        // codificacion se haya compilado este archivo.
+        private readonly string[] _etiquetas = new string[CamposQare.Length];
+
         public void Contar(QaLector fila)
         {
             _total++;
+            if (_total == 1) Revisar(fila);
 
             string validacion = Columna(fila, ColValidacion, "Validacion");
             Sumar(_validacion, Clave(validacion), 1);
@@ -583,7 +636,7 @@ public static class QaCorreo
                                          && _largoMaximo[i] <= MaximoLargoValor;
 
                 var campo = new Dictionary<string, object>();
-                campo["campo"] = CamposQare[i][0];
+                campo["campo"] = _etiquetas[i] ?? CamposQare[i][0];
                 campo["respondidos"] = _respondidos[i];
                 campo["sinRespuesta"] = _total - _respondidos[i];
                 campo["valoresDistintos"] = (long)distintos;
@@ -601,6 +654,37 @@ public static class QaCorreo
                     lista.Add(item);
                 }
                 agregados.Distribuciones.Add(lista);
+            }
+        }
+
+        // Que columnas de las que el resumen necesita NO estan en el result
+        // set. Antes un nombre que no coincidia se leia como NULL en cada fila
+        // y el bloque salia en cero o con una sola barra nula, sin ningun
+        // aviso: eso es lo que hay que poder ver de un vistazo.
+        private void Revisar(QaLector fila)
+        {
+            var mapa = fila.Mapa;
+            if (mapa == null) return;
+
+            foreach (var nombre in mapa.Nombres) Nombres.Add(nombre);
+
+            var necesarias = new List<string[]>();
+            necesarias.Add(new[] { ColValidacion, "Validacion" });
+            necesarias.Add(new[] { ColGrupo, "Grupo" });
+            necesarias.Add(new[] { ColTecnico, "Tecnico" });
+            necesarias.Add(new[] { ColCategoria, "Categoria" });
+            necesarias.Add(new[] { ColGrupoCorrecto, "GrupoCorrecto" });
+            foreach (var campo in CamposQare) necesarias.Add(campo);
+
+            foreach (var par in necesarias)
+                if (mapa.Ordinal(par[0]) < 0 && mapa.Ordinal(par[1]) < 0)
+                    SinResolver.Add(par[0]);
+
+            for (int i = 0; i < CamposQare.Length; i++)
+            {
+                int indice = mapa.Ordinal(CamposQare[i][0]);
+                if (indice < 0) indice = mapa.Ordinal(CamposQare[i][1]);
+                _etiquetas[i] = indice >= 0 ? mapa.Nombres[indice] : CamposQare[i][0];
             }
         }
 

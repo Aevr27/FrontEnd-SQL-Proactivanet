@@ -1,4 +1,4 @@
-// Modo snapshot: el tablero servido desde archivos, sin conexion a SQL Server.
+﻿// Modo snapshot: el tablero servido desde archivos, sin conexion a SQL Server.
 //
 // PARA QUE SIRVE
 //   Para trabajar cuando no hay red ni VPN hacia el servidor. Alguien CON

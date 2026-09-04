@@ -19,6 +19,7 @@ using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
 using System.Globalization;
+using System.Text;
 using System.Web;
 
 // Peticion mal formada del cliente: el handler la traduce a un 400 con este
@@ -29,17 +30,105 @@ public sealed class QaSolicitudInvalida : Exception
     public QaSolicitudInvalida(string mensaje) : base(mensaje) { }
 }
 
+// Los nombres de columna que un result set trajo DE VERDAD, y como llegar a
+// ellos desde el nombre que el codigo pide.
+//
+// El nombre pedido se busca primero exacto. Si no aparece, se compara por
+// "esqueleto": el nombre en minusculas y SIN los caracteres no ASCII.
+//
+// POR QUE EL ESQUELETO
+//   usp_CorreoQA_Detalle devuelve los encabezados del TICKETS_QA_<fecha>.xlsx,
+//   varios con acentos: [Técnico de 2ª línea], [Categoría], y los doce campos
+//   QA/QARE, que llevan ¿ y vocales acentuadas. Un literal con acentos en un
+//   .cs sobrevive intacto solo si el compilador lee el archivo con la misma
+//   codificacion con la que se guardo; ASP.NET compila App_Code leyendo los
+//   fuentes con <globalization fileEncoding>, que por defecto es la codepage
+//   ANSI del servidor y no UTF-8. Con eso, "Técnico de 2ª línea" se convierte
+//   en "TÃ©cnico de 2Âª lÃ­nea" y no coincide con NINGUNA columna: el conteo
+//   sale en cero sin ningun error, que es exactamente lo que le paso al
+//   tablero (porTecnico con una sola barra nula, topCategorias con una sola
+//   categoria nula, los doce campos QARE en cero, y en cambio Validacion,
+//   Grupo y Grupo Correcto -- puro ASCII -- bien).
+//
+//   El destrozo solo toca caracteres no ASCII y solo los cambia por otros no
+//   ASCII, asi que quitarlos de los dos lados deja el mismo esqueleto y la
+//   columna se encuentra igual. Tambien cubre una diferencia de acentuacion
+//   entre lo que dice el codigo y lo que devuelve la base.
+//
+//   No adivina nombres: compara contra los que el result set reporto. Si dos
+//   columnas comparten esqueleto, el esqueleto se marca ambiguo y no se usa.
+public sealed class QaColumnas
+{
+    private readonly Dictionary<string, int> _exactos =
+        new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, int> _esqueletos =
+        new Dictionary<string, int>(StringComparer.Ordinal);
+    private readonly List<string> _nombres = new List<string>();
+
+    public QaColumnas(IList<string> nombres)
+    {
+        for (int i = 0; i < nombres.Count; i++)
+        {
+            string nombre = nombres[i] ?? string.Empty;
+            _nombres.Add(nombre);
+
+            if (!_exactos.ContainsKey(nombre)) _exactos[nombre] = i;
+
+            string esqueleto = Esqueleto(nombre);
+            if (esqueleto.Length == 0) continue;
+            _esqueletos[esqueleto] = _esqueletos.ContainsKey(esqueleto) ? -1 : i;
+        }
+    }
+
+    public IList<string> Nombres { get { return _nombres; } }
+
+    // Ordinal exacto, o -1. Sirve para saber si la fila YA trae ese nombre tal
+    // cual, sin pasar por el esqueleto.
+    public int OrdinalExacto(string columna)
+    {
+        int indice;
+        return _exactos.TryGetValue(columna ?? string.Empty, out indice) ? indice : -1;
+    }
+
+    public int Ordinal(string columna)
+    {
+        int indice = OrdinalExacto(columna);
+        if (indice >= 0) return indice;
+
+        // -1 tambien es el valor con el que se marca un esqueleto ambiguo, y
+        // ambos casos significan lo mismo aqui: no se resuelve.
+        return _esqueletos.TryGetValue(Esqueleto(columna), out indice) ? indice : -1;
+    }
+
+    public static string Esqueleto(string texto)
+    {
+        if (string.IsNullOrEmpty(texto)) return string.Empty;
+
+        var sb = new StringBuilder(texto.Length);
+        bool espacio = false;
+        foreach (char c in texto)
+        {
+            if (c > 127) continue;
+            if (char.IsWhiteSpace(c)) { espacio = sb.Length > 0; continue; }
+            if (espacio) { sb.Append(' '); espacio = false; }
+            sb.Append(char.ToLowerInvariant(c));
+        }
+        return sb.ToString();
+    }
+}
+
 // Una fila, sin materializarla. La misma cara para la fila que llega de SQL
 // Server y para la que sale de un archivo de snapshot.
 //
 // Resuelve el nombre de columna a su ordinal UNA vez por result set y no por
-// fila: con 5.000 filas y una docena de columnas leidas, esa diferencia se
-// nota. De cada fila solo se convierten las columnas que se piden; las 35
-// columnas que el resumen no mira nunca se convierten a string.
+// fila: con miles de filas y una docena de columnas leidas, esa diferencia se
+// nota. De cada fila solo se convierten las columnas que se piden; las que el
+// resumen no mira nunca se convierten a string.
 public sealed class QaLector
 {
     private readonly IDataRecord _reader;
-    private Dictionary<string, int> _ordinales;
+    private readonly QaColumnas _mapaLector;
+    private QaColumnas _mapaFila;
     private Dictionary<string, object> _fila;
 
     public QaLector() { }
@@ -47,21 +136,34 @@ public sealed class QaLector
     public QaLector(IDataReader reader)
     {
         _reader = reader;
-        _ordinales = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-        for (int i = 0; i < reader.FieldCount; i++) _ordinales[reader.GetName(i)] = i;
+
+        var nombres = new List<string>(reader.FieldCount);
+        for (int i = 0; i < reader.FieldCount; i++) nombres.Add(reader.GetName(i));
+        _mapaLector = new QaColumnas(nombres);
     }
 
-    // Apunta el lector a otra fila ya leida (modo snapshot).
-    public void Usar(Dictionary<string, object> fila) { _fila = fila; }
+    // Apunta el lector a otra fila ya leida (modo snapshot). Todas las filas
+    // del mismo archivo comparten claves, asi que el mapa se arma una vez.
+    public void Usar(Dictionary<string, object> fila)
+    {
+        _fila = fila;
+        if (_mapaFila == null && fila != null)
+            _mapaFila = new QaColumnas(new List<string>(fila.Keys));
+    }
+
+    public QaColumnas Mapa { get { return _reader != null ? _mapaLector : _mapaFila; } }
 
     public string Texto(string columna)
     {
-        if (_reader == null) return QaDb.Texto(_fila, columna);
+        var mapa = Mapa;
+        if (mapa == null) return null;
 
-        int indice;
-        if (!_ordinales.TryGetValue(columna, out indice)) return null;
+        int indice = mapa.Ordinal(columna);
+        if (indice < 0) return null;
+
+        if (_reader == null) return QaDb.Texto(_fila, mapa.Nombres[indice]);
+
         if (_reader.IsDBNull(indice)) return null;
-
         object valor = _reader.GetValue(indice);
         return valor as string ?? Convert.ToString(valor, CultureInfo.InvariantCulture);
     }
