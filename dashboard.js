@@ -512,6 +512,11 @@ const TableroSla = (function () {
   // Vive fuera de renderTendencia() para que el callback del tooltip sea
   // siempre el mismo objeto y la grafica se pueda actualizar sin reconstruirla.
   let rangosSlotVigente = null;
+  // Presentacion vigente del eje X de la tendencia (ver estiloTendencia). Vive
+  // fuera de renderTendencia() por el mismo motivo que rangosSlotVigente: el
+  // callback del tick la lee al DIBUJAR, asi que pasar de la vista de 12 SLOTs
+  // a la de un año no obliga a reconstruir la grafica.
+  let estiloTendVigente = { pointRadius: 3, pointHoverRadius: 6, centrado: false, textos: [] };
   // Dimensiones de cross-filter. null = sin filtrar por esa dimension.
   const filtro = { estado: null, prioridad: null, aging: null, sla: null };
 
@@ -779,6 +784,98 @@ const TableroSla = (function () {
     };
   }
 
+  const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
+                        'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  const ETIQUETA_DIA = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+  // Parte una etiqueta diaria "2026-09-03". Devuelve null si la etiqueta no es
+  // un dia -las de SLOT ("SLOT 3") no lo son, y se dejan intactas en todas las
+  // funciones de abajo-.
+  function partesDia(etiqueta) {
+    const m = ETIQUETA_DIA.exec(String(etiqueta ?? ''));
+    return m ? { ano: m[1], mes: Number(m[2]), dia: m[3] } : null;
+  }
+
+  function mesCorto(n) { return MESES_CORTOS[n - 1] || ''; }
+
+  // Titulo del tooltip en vista diaria: "03 sep 2026". El eje puede estar
+  // mostrando solo el mes, pero al hacer hover el dia exacto sigue apareciendo.
+  function fechaLargaTendencia(etiqueta) {
+    const p = partesDia(etiqueta);
+    return p ? `${p.dia} ${mesCorto(p.mes)} ${p.ano}` : String(etiqueta ?? '');
+  }
+
+  /* Presentacion adaptativa de la tendencia. NO toca los datos: las series y
+     las etiquetas internas siguen siendo diarias y completas -el hover sigue
+     alcanzando cada observacion-; lo unico que cambia es cuantos marcadores y
+     cuantas etiquetas del eje X se DIBUJAN. Con un año son ~365 observaciones:
+     pintar 1095 puntos y 365 fechas es justo lo que hacia ilegible esa vista.
+
+     `textos` viene ya resuelto -una entrada por indice, '' donde no va etiqueta-
+     para que el callback del tick solo tenga que indexar. */
+  function estiloTendencia(etiquetas) {
+    const n = etiquetas.length;
+    const textos = new Array(n).fill('');
+
+    if (n > 120) {
+      // Rango largo: una etiqueta por mes y solo el mes, que es lo que deja el
+      // eje limpio (~12-13 etiquetas en un año). Si hay mas de un año en
+      // pantalla se añade el año: dos "sep" distintos no pueden leerse igual.
+      const anos = new Set();
+      etiquetas.forEach(e => { const p = partesDia(e); if (p) anos.add(p.ano); });
+      const conAno = anos.size > 1;
+      // Primer indice de cada mes. Mas alla de dos años los meses tambien se
+      // amontonan, asi que se etiqueta uno de cada `paso` para no pasar de ~13.
+      const iniciosMes = [];
+      let mesPrevio = null;
+      etiquetas.forEach((e, i) => {
+        const p = partesDia(e);
+        if (!p) { textos[i] = String(e ?? ''); return; }
+        const clave = `${p.ano}-${p.mes}`;
+        if (clave === mesPrevio) return;
+        mesPrevio = clave;
+        iniciosMes.push({ i, p });
+      });
+      const paso = Math.ceil(iniciosMes.length / 13) || 1;
+      iniciosMes.forEach(({ i, p }, k) => {
+        if (k % paso !== 0) return;
+        textos[i] = conAno ? `${mesCorto(p.mes)} ${p.ano.slice(2)}` : mesCorto(p.mes);
+      });
+      return { pointRadius: 0, pointHoverRadius: 5, centrado: false, textos };
+    }
+
+    // Rangos corto y medio: fecha con dia, una de cada `paso` para que no se
+    // solapen. Hasta 15 observaciones se dibujan todas y con el punto de
+    // siempre: la vista de 12 SLOTs queda exactamente igual que antes.
+    const paso = n <= 15 ? 1 : Math.ceil(n / 12);
+    etiquetas.forEach((e, i) => {
+      if (i % paso !== 0) return;
+      const p = partesDia(e);
+      textos[i] = p ? `${p.dia} ${mesCorto(p.mes)}` : String(e ?? '');
+    });
+    // Una sola observacion (rango de un dia) no dibuja NINGUN segmento de linea
+    // ni area: la grafica se reduce a tres puntos del tamaño de siempre en
+    // mitad de un lienzo vacio, que es justo lo que se lee como "no se pinto
+    // nada". El punto se agranda para que ese estado se vea intencional. No se
+    // inventa un segundo punto ni se duplica el dato: sigue siendo una
+    // observacion, solo que visible. Mismo recurso que usa Experiencia para
+    // destacar un punto (pointRadii en renderEvol).
+    // `centrado` = escala de categorias con offset. Con UNA sola observacion la
+    // escala sin offset pega el punto contra el eje Y, en el pixel 0: quedan
+    // tres puntitos en la esquina y el 99% del lienzo vacio, que es
+    // exactamente el sintoma de "la grafica no se pinto". Con offset el punto
+    // cae en el centro de su banda, o sea en medio del lienzo. Es una opcion
+    // de la escala, no un dato: la serie sigue teniendo una sola observacion.
+    if (n === 1) return { pointRadius: 5, pointHoverRadius: 8, centrado: true, textos };
+
+    return {
+      pointRadius: n <= 15 ? 3 : (n <= 60 ? 2 : 0),
+      pointHoverRadius: n <= 15 ? 6 : 5,
+      centrado: false,
+      textos,
+    };
+  }
+
   // Resumen del periodo que pide el numero: "Ultimos 3 SLOTs · 90 dias".
   function resumenSlots(n) {
     const cuantos = n === 1 ? 'Ultimo SLOT' : `Ultimos ${n} SLOTs`;
@@ -912,7 +1009,11 @@ const TableroSla = (function () {
     if (!hayFiltro()) {
       // Serie exacta del SP sobre todo el rango.
       const f = datos.tendencia || [];
-      etiquetas = f.map(x => x.Fecha);
+      // El handler serializa la fecha como "aaaa-mm-ddT00:00:00" (ver
+      // DashboardQueries.cs). La hora siempre es cero y solo servia para
+      // ensuciar el eje, asi que la etiqueta interna queda en el dia exacto,
+      // igual que en la rama filtrada de abajo.
+      etiquetas = f.map(x => String(x.Fecha ?? '').slice(0, 10));
       creados = f.map(x => x.TicketsCreados);
       cerrados = f.map(x => x.TicketsCerrados);
       vencidos = f.map(x => x.TicketsSlaVencidos);
@@ -959,17 +1060,37 @@ const TableroSla = (function () {
     // cuando se pasa de vista diaria a agrupada por SLOT.
     rangosSlotVigente = rangosSlot;
 
+    // Cuantas observaciones llegaron. Es el dato que distingue "el endpoint no
+    // trajo nada" de "trajo un solo dia y se ve poco", que desde el navegador
+    // son el mismo sintoma: una grafica que parece vacia.
+    hint.textContent += ` · ${etiquetas.length} ${etiquetas.length === 1 ? 'observacion' : 'observaciones'}`;
+
     if (!etiquetas.length) {
       destruir('tendencia');
+      // Con inicio == fin el mensaje generico ("el rango de fechas") no dice
+      // nada: el rango ES un dia, y lo util es saber CUAL y que la consulta si
+      // respondio. La fecha sale de los inputs, no de los datos -que no hay-.
+      const ini = document.getElementById('f-inicio').value;
+      const fin = document.getElementById('f-fin').value;
+      const unDia = ini && ini === fin;
       return renderEmptyChart('chart-tendencia', hayFiltro()
         ? 'Ningun ticket con fecha de registro pasa los filtros activos.'
-        : 'Sin tickets registrados en el rango de fechas.');
+        : unDia
+          ? `Sin tickets registrados el ${fechaLargaTendencia(ini)}. La consulta respondio, pero ese dia no tiene ningun ticket todavia.`
+          : 'Sin tickets registrados en el rango de fechas.');
     }
+
+    // Igual que rangosSlotVigente: se reasigna el objeto que leen los callbacks
+    // en vez de cambiar la config, para no tener que reconstruir la grafica al
+    // pasar de vista diaria larga a corta o a SLOTs.
+    estiloTendVigente = estiloTendencia(etiquetas);
+    const estilo = estiloTendVigente;
 
     const serie = (label, data, color, rellenar) => ({
       label, data, borderColor: color,
       backgroundColor: rellenar ? 'rgba(37,99,235,.12)' : color,
-      fill: !!rellenar, tension: .3, borderWidth: 2, pointRadius: 3,
+      fill: !!rellenar, tension: .3, borderWidth: 2,
+      pointRadius: estilo.pointRadius, pointHoverRadius: estilo.pointHoverRadius,
     });
 
     dibujarGrafico(graficos, 'tendencia', 'chart-tendencia',
@@ -995,19 +1116,46 @@ const TableroSla = (function () {
               callbacks: {
                 title: (items) => {
                   const r = rangosSlotVigente && rangosSlotVigente[items[0].dataIndex];
-                  return r ? `${items[0].label} · ${r.inicio} → ${r.fin}` : items[0].label;
+                  if (r) return `${items[0].label} · ${r.inicio} → ${r.fin}`;
+                  // El eje puede estar mostrando solo el mes: el titulo lleva
+                  // siempre el dia completo de la observacion bajo el cursor.
+                  return fechaLargaTendencia(items[0].label);
                 }
               }
             }
           },
-          scales: { y: EJE_CONTEO }
+          scales: {
+            // autoSkip elegiria indices arbitrarios ("17 ene", "9 feb"), no
+            // inicios de mes: la densidad se decide en estiloTendencia() y aqui
+            // solo se lee. Los indices sin etiqueta devuelven '' -el punto sigue
+            // en la escala, asi que el hover diario no se pierde-.
+            x: {
+              // offset solo con una observacion (ver estiloTendencia): con dos
+              // o mas centrar la banda metaria margenes que hoy no tiene.
+              offset: estilo.centrado,
+              ticks: {
+                autoSkip: false, maxRotation: 0, minRotation: 0,
+                callback: (_v, i) => estiloTendVigente.textos[i] ?? '',
+              }
+            },
+            y: EJE_CONTEO
+          }
         }
       }),
       gr => {
         gr.data.labels = etiquetas;
-        gr.data.datasets[0].data = creados;
-        gr.data.datasets[1].data = cerrados;
-        gr.data.datasets[2].data = vencidos;
+        const series = [creados, cerrados, vencidos];
+        gr.data.datasets.forEach((ds, i) => {
+          ds.data = series[i];
+          // El estilo de punto depende de cuantas observaciones hay, asi que
+          // cambia con el rango: se reescribe sobre la instancia viva en vez de
+          // reconstruirla.
+          ds.pointRadius = estilo.pointRadius;
+          ds.pointHoverRadius = estilo.pointHoverRadius;
+        });
+        // `offset` es opcion de escala, no un callback: se reescribe a mano
+        // para no reconstruir la grafica al entrar o salir del caso de un dia.
+        gr.options.scales.x.offset = estilo.centrado;
       });
   }
 
