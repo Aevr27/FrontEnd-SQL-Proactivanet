@@ -8,10 +8,15 @@
 //
 // DE DONDE SALE CADA COSA
 // -----------------------
-//   volumen por slot     dbo.vw_TBSlotC1 / _C2 / _CAT      (script "Descargar
+//   volumen por slot     dbo.vw_TBSlotCAT                  (script "Descargar
 //                                                           script v2 usando
 //                                                           vw_Tickets.sql")
-//   volumen por mes      dbo.vw_TBMesC1 / _C2 / _CAT       (09_slots_por_mes.sql)
+//   volumen por mes      dbo.vw_TBMesCAT                   (09_slots_por_mes.sql)
+//
+//   Los niveles C1 y C1&C2 ya NO se piden a vw_TBSlotC1 / _C2 ni a
+//   vw_TBMesC1 / _C2: se repliegan de las dos vistas de arriba (ver
+//   Replegar y la nota "UNA SOLA PASADA POR LAS VISTAS DE VOLUMEN").
+//   Las cuatro vistas siguen existiendo en la base, sin usarse aqui.
 //   iniciativas          dbo.vw_ProblemCategoria + dbo.Problem
 //   duenos por categoria dbo.CatCategoriaDueno (via la vista)
 //   manager de cada SO   dbo.CatPersona                    (13_experiencia_usuario.sql)
@@ -36,10 +41,32 @@
 //
 // UNA CONSULTA POR CONCEPTO, NINGUNA DENTRO DE UN CICLO
 // ----------------------------------------------------
-// Son nueve SELECT sueltos sobre una sola conexion; el cruce (categoria con
+// Son siete SELECT sueltos sobre una sola conexion; el cruce (categoria con
 // sus iniciativas, folio con sus categorias, service owner con su manager) se
 // hace en memoria con diccionarios. No hay N+1 ni un JOIN que multiplique
 // iniciativas por tickets.
+//
+// UNA SOLA PASADA POR LAS VISTAS DE VOLUMEN
+// -----------------------------------------
+// De las seis vistas de volumen solo se consultan DOS: vw_TBSlotCAT y
+// vw_TBMesCAT. Las de C1 y C1&C2 se repliegan en memoria (ver Replegar).
+//
+// No es un atajo: las seis salen de la misma vista base y C1 / C1&C2 son
+// funcion pura de [Categoria V2] (fn_CategoriaC1 y fn_CategoriaC1C2 empiezan
+// por normalizar su argumento, que es justo lo que ya trae esa columna). La
+// llave gruesa se deriva de la fina, asi que sumar las filas finas da los
+// mismos numeros, ticket por ticket.
+//
+// Lo que se ahorra son cuatro barridos completos de dbo.Tickets. Cada vista
+// pasa por vw_TicketsSlotsBase / vw_TicketsMesBase, que evaluan POR FILA tres
+// funciones escalares (fn_NormalizaCategoria, fn_CategoriaC1,
+// fn_CategoriaC1C2). Un UDF escalar no inlineado se invoca una vez por fila y
+// ademas serializa el plan -- con cientos de miles de tickets, seis
+// agregaciones asi son la mayor parte del tiempo de este endpoint. Ahora son
+// dos.
+//
+// Si algun dia se cambia fn_CategoriaC1 o fn_CategoriaC1C2 en la base, hay
+// que reflejarlo en C1DeTsql / C1C2De: son las que replican ese corte.
 
 using System;
 using System.Collections.Generic;
@@ -87,12 +114,19 @@ public static class ExperienciaQueries
             cn.Open();
 
             // --- volumen ---------------------------------------------------
-            var slotC1  = LeerVolumen(cn, "dbo.vw_TBSlotC1",  "Slot", "C1",              0);
-            var slotC2  = LeerVolumen(cn, "dbo.vw_TBSlotC2",  "Slot", "[C1&C2]",         0);
+            // Solo se consultan las DOS vistas de grano fino. Las de C1 y de
+            // C1&C2 se derivan de ellas en memoria (ver Replegar): son la
+            // misma poblacion agrupada mas grueso, y agrupar en el servidor
+            // web cuesta microsegundos contra los segundos que cuesta volver
+            // a barrer dbo.Tickets. Ver la nota "UNA SOLA PASADA POR LAS
+            // VISTAS DE VOLUMEN" en la cabecera.
             var slotCat = LeerVolumen(cn, "dbo.vw_TBSlotCAT", "Slot", "[Categoria V2]",  0);
-            var mesC1   = LeerVolumen(cn, "dbo.vw_TBMesC1",   "Mes",  "C1",              anio);
-            var mesC2   = LeerVolumen(cn, "dbo.vw_TBMesC2",   "Mes",  "[C1&C2]",         anio);
             var mesCat  = LeerVolumen(cn, "dbo.vw_TBMesCAT",  "Mes",  "[Categoria V2]",  anio);
+
+            var slotC1 = Replegar(slotCat, true);
+            var slotC2 = Replegar(slotCat, false);
+            var mesC1  = Replegar(mesCat,  true);
+            var mesC2  = Replegar(mesCat,  false);
 
             // --- iniciativas y catalogos -----------------------------------
             var detalle   = LeerIniciativas(cn, hoy);
@@ -216,6 +250,92 @@ public static class ExperienciaQueries
         }
 
         return filas;
+    }
+
+    // Repliega las filas de vw_TBSlotCAT / vw_TBMesCAT al nivel C1 (aC1 =
+    // true) o C1&C2 (aC1 = false), o sea: lo mismo que devolvian
+    // vw_TBSlotC1 / _C2 y vw_TBMesC1 / _C2, sin volver a la base.
+    //
+    // Es exacto, no una aproximacion. Las seis vistas salen de la MISMA vista
+    // base (vw_TicketsSlotsBase / vw_TicketsMesBase), donde
+    //
+    //     CategoriaV2 = fn_NormalizaCategoria(Categoria)
+    //     C1          = fn_CategoriaC1(Categoria)
+    //     C1C2        = fn_CategoriaC1C2(Categoria)
+    //
+    // y las dos ultimas empiezan por normalizar su argumento. Como
+    // fn_NormalizaCategoria es idempotente (recorta y cambia el NBSP), se
+    // cumple C1 = fn_CategoriaC1(CategoriaV2) y C1C2 =
+    // fn_CategoriaC1C2(CategoriaV2): la llave gruesa es funcion pura de la
+    // fina, asi que agrupar por la fina y sumar da los mismos numeros que la
+    // vista gruesa, ticket por ticket.
+    //
+    // El LEFT JOIN a CatServiceOwner de vw_TBSlotC2 tampoco cambia nada: esa
+    // tabla tiene PK sobre C1C2 (0..1 coincidencias, sin multiplicar filas) y
+    // su unica columna, ServiceOwner, ni siquiera se seleccionaba aqui.
+    private static List<Volumen> Replegar(List<Volumen> origen, bool aC1)
+    {
+        // Indice periodo -> llave -> acumulado. Anidado, y no con una clave de
+        // texto compuesta: cualquier separador que se eligiera podria aparecer
+        // dentro de la categoria y juntar dos periodos distintos. La lista
+        // aparte conserva el orden de aparicion, para que "categorias" salga
+        // ordenado como hasta ahora.
+        var indice = new Dictionary<int, Dictionary<string, Volumen>>();
+        var salida = new List<Volumen>();
+
+        foreach (var v in origen)
+        {
+            var llave = aC1 ? C1DeTsql(v.Llave) : C1C2De(v.Llave);
+            // Llave vacia: la vista gruesa la habria emitido igual y
+            // Acumular la descarta. Se descarta aqui, con el mismo efecto.
+            if (string.IsNullOrEmpty(llave)) continue;
+
+            Dictionary<string, Volumen> delPeriodo;
+            if (!indice.TryGetValue(v.Periodo, out delPeriodo))
+            {
+                delPeriodo = new Dictionary<string, Volumen>(StringComparer.Ordinal);
+                indice[v.Periodo] = delPeriodo;
+            }
+
+            Volumen acumulado;
+            if (!delPeriodo.TryGetValue(llave, out acumulado))
+            {
+                acumulado = new Volumen();
+                acumulado.Periodo = v.Periodo;
+                acumulado.Llave = llave;
+                delPeriodo[llave] = acumulado;
+                salida.Add(acumulado);
+            }
+
+            acumulado.Inc += v.Inc;
+            acumulado.Pet += v.Pet;
+            acumulado.Total += v.Total;
+        }
+
+        return salida;
+    }
+
+    // Replica exacta de dbo.fn_CategoriaC1 sobre una ruta YA normalizada
+    // (que es lo que trae la columna [Categoria V2] de las vistas CAT).
+    //
+    // No se reusa C1De: ese corte se salta los segmentos vacios y no recorta
+    // el resultado, y aqui la llave tiene que salir caracter por caracter
+    // igual a la que emitia vw_TBSlotC1 / vw_TBMesC1, o dejarian de cruzar
+    // con las que ya arma Acumular. Sobre el catalogo real la unica ruta en
+    // que difieren es "//", que la vista resolvia como cadena vacia (y
+    // Acumular descarta) mientras que C1De la deja tal cual.
+    private static string C1DeTsql(string rutaNormalizada)
+    {
+        if (string.IsNullOrEmpty(rutaNormalizada)) return string.Empty;
+
+        var inicio = rutaNormalizada[0] == '/' ? 1 : 0;
+        var siguiente = rutaNormalizada.IndexOf('/', inicio);
+
+        var segmento = siguiente < 0
+            ? rutaNormalizada.Substring(inicio)
+            : rutaNormalizada.Substring(inicio, siguiente - inicio);
+
+        return segmento.Trim();
     }
 
     // ------------------------------------------------------------------
