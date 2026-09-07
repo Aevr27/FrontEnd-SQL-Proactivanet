@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<!--
+  qa_green_theme/index.html - PROTOTIPO VISUAL del tablero de QA.
+
+  Copia aislada de qa/qa.html para probar el tema verde sobre blanco del
+  Template-TD_2026. No sustituye a nada: qa/qa.html y la pestaña "QA" de
+  dashboard.html siguen exactamente como estaban. Esta pagina existe para
+  abrirse al lado de la otra y comparar.
+
+  Que se conserva, tal cual:
+    - los mismos ids con prefijo "qa-", porque qa_green.js los resuelve igual
+    - las mismas secciones, en el mismo orden
+    - la pagina se pinta ENTERA antes de pedir un dato, con su "Calculando..."
+      por bloque
+    - las dos fases de carga (summary, luego qare) y el detalle bajo demanda
+    - el mismo handler: qa_green.js resuelve ../handlers/qa.ashx contra la URL
+      de su propio <script>, asi que desde esta carpeta apunta al mismo sitio
+
+  Que cambia: solo la hoja (qa_green.css) y la paleta de las graficas.
+
+  El envoltorio #tab-qa se mantiene aunque aqui no haya tablero: asi el
+  marcado sigue siendo comparable linea a linea con el de produccion y la
+  hoja puede seguir declarando sus variables en la misma raiz.
+
+  Chart.js 4.4.4 local, el mismo de assets/vendor/.
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QA - Categorizacion de tickets (prototipo verde)</title>
+  <script src="../assets/vendor/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="qa_green.css">
+</head>
+<body>
+<div class="wrap">
+  <div id="tab-qa" class="maintab-content active">
+
+    <!-- Cabecera clara: bloque blanco con un filete de degradado lima-verde
+         arriba y el marcador de seccion a la izquierda del titulo. Sustituye
+         al bloque azul marino sin cambiar lo que dice. -->
+    <header class="top">
+      <div class="top-id">
+        <span class="top-marca" aria-hidden="true"></span>
+        <div>
+          <p class="top-eyebrow">Transformacion Digital &middot; Proactivanet</p>
+          <h1>Tickets Proactivanet &mdash; QA de categorizacion</h1>
+          <div class="sub" id="qa-sub-fuente">Cargando origen de datos&hellip;</div>
+        </div>
+      </div>
+      <div class="acciones-top">
+        <span class="chip" id="qa-chip-fecha">Datos QA: &mdash;</span>
+        <button type="button" class="btn chico" id="qa-btn-recargar">Recargar</button>
+      </div>
+    </header>
+
+    <!-- Aviso de error del resumen. Es una banda ARRIBA del tablero, no un
+         reemplazo: aunque falle, la estructura sigue en pantalla y los bloques
+         que si cargaron se siguen viendo. -->
+    <div id="qa-error-global" class="estado estado-error" hidden>
+      <strong>No se pudieron cargar los datos de QA.</strong>
+      <span id="qa-error-global-msg"></span>
+      <button type="button" class="btn chico" id="qa-btn-reintentar">Reintentar</button>
+    </div>
+
+    <section class="kpis" id="qa-kpis"></section>
+
+    <!-- Las dos graficas del top 10 son un par simetrico: misma rejilla de dos
+         columnas iguales y el mismo alto de lienzo, que fija qa_green.js. -->
+    <section class="grid2">
+      <div class="card">
+        <h3>
+          Top 10 grupos con tickets mal categorizados
+          <span class="hint" id="qa-hint-grupo"></span>
+        </h3>
+        <p class="nota-card">Solo tickets con <code>Validacion = Incorrecto</code>. Clic en una barra para ver su detalle.</p>
+        <div class="lienzo lienzo-barras" id="qa-lienzo-grupo">
+          <canvas id="qa-chart-grupo"></canvas>
+          <p class="lienzo-msg" id="qa-msg-grupo"><span class="spinner" aria-hidden="true"></span>Calculando&hellip;</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>
+          Top 10 tecnicos resolutores con tickets mal categorizados
+          <span class="hint" id="qa-hint-tecnico"></span>
+        </h3>
+        <p class="nota-card">Solo tickets con <code>Validacion = Incorrecto</code>. Clic en una barra para ver su detalle.</p>
+        <div class="lienzo lienzo-barras" id="qa-lienzo-tecnico">
+          <canvas id="qa-chart-tecnico"></canvas>
+          <p class="lienzo-msg" id="qa-msg-tecnico"><span class="spinner" aria-hidden="true"></span>Calculando&hellip;</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid-sec">
+      <div class="card">
+        <h3>Distribucion de validacion<span class="hint" id="qa-hint-validacion"></span></h3>
+        <div class="lienzo lienzo-dona">
+          <canvas id="qa-chart-validacion"></canvas>
+          <p class="lienzo-msg" id="qa-msg-validacion"><span class="spinner" aria-hidden="true"></span>Calculando&hellip;</p>
+        </div>
+        <div class="leyenda" id="qa-leyenda-validacion"></div>
+      </div>
+
+      <div class="card">
+        <h3>Recategorizacion<span class="hint" id="qa-hint-recat"></span></h3>
+        <p class="nota-card">Pares <code>Grupo</code> &rarr; <code>Grupo Correcto</code> de los tickets incorrectos.</p>
+        <div class="tabla-scroll tabla-recat">
+          <table class="tabla">
+            <thead>
+              <tr>
+                <th>Grupo actual</th>
+                <th>Grupo correcto</th>
+                <th class="num">Tickets</th>
+              </tr>
+            </thead>
+            <tbody id="qa-tbody-recat"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Detalle de tickets<span class="hint" id="qa-hint-detalle">bajo demanda</span></h3>
+      <p class="nota-card">
+        El detalle no se carga con la pagina: se pide al servidor ya filtrado y paginado.
+      </p>
+
+      <div class="barra-detalle">
+        <button type="button" class="btn" id="qa-btn-detalle">Ver detalle de incorrectos</button>
+
+        <label class="campo">
+          <span>Filas por pagina</span>
+          <select id="qa-sel-tam">
+            <option value="50">50</option>
+            <option value="100" selected>100</option>
+            <option value="250">250</option>
+          </select>
+        </label>
+
+        <div class="filtros-qa" id="qa-filtros-activos"></div>
+      </div>
+
+      <div id="qa-detalle-cargando" class="estado estado-mini" hidden>
+        <span class="spinner" aria-hidden="true"></span><span>Consultando detalle&hellip;</span>
+      </div>
+
+      <div id="qa-detalle-error" class="estado estado-error estado-mini" hidden>
+        <strong>No se pudo cargar el detalle.</strong> <span id="qa-detalle-error-msg"></span>
+      </div>
+
+      <div id="qa-detalle-panel" hidden>
+        <div class="paginador">
+          <button type="button" class="btn btn-sec chico" id="qa-btn-prev">&larr; Anterior</button>
+          <span id="qa-paginacion-txt" class="paginacion-txt"></span>
+          <button type="button" class="btn btn-sec chico" id="qa-btn-next">Siguiente &rarr;</button>
+        </div>
+
+        <div class="tabla-scroll tabla-detalle">
+          <table class="tabla">
+            <thead>
+              <tr>
+                <th>Codigo</th>
+                <th>Fecha de registro</th>
+                <th>Titulo</th>
+                <th>Grupo</th>
+                <th>Tecnico de 2&ordf; linea</th>
+                <th>Categoria</th>
+                <th>Grupo Correcto</th>
+                <th>Validacion</th>
+              </tr>
+            </thead>
+            <tbody id="qa-tbody-detalle"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <footer class="pie" id="qa-pie-fuente"></footer>
+  </div>
+</div>
+
+<script src="qa_green.js"></script>
+</body>
+</html>
