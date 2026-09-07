@@ -512,12 +512,13 @@ const TableroSla = (function () {
   // false cuando detalle.ashx no pudo cargarse: los agregados del servidor
   // siguen pintandose, pero el cross-filter por clic queda deshabilitado.
   let detalleDisponible = false;
-  // Rangos del eje X cuando la tendencia va agrupada por SLOT (null = diaria).
-  // Vive fuera de renderTendencia() para que el callback del tooltip sea
-  // siempre el mismo objeto y la grafica se pueda actualizar sin reconstruirla.
-  let rangosSlotVigente = null;
+  // Rangos del eje X cuando la tendencia va agrupada en bloques -por SLOT o
+  // por mes- (null = diaria). Vive fuera de renderTendencia() para que el
+  // callback del tooltip sea siempre el mismo objeto y la grafica se pueda
+  // actualizar sin reconstruirla.
+  let rangosBucketVigente = null;
   // Presentacion vigente del eje X de la tendencia (ver estiloTendencia). Vive
-  // fuera de renderTendencia() por el mismo motivo que rangosSlotVigente: el
+  // fuera de renderTendencia() por el mismo motivo que rangosBucketVigente: el
   // callback del tick la lee al DIBUJAR, asi que pasar de la vista de 12 SLOTs
   // a la de un año no obliga a reconstruir la grafica.
   let estiloTendVigente = { pointRadius: 3, pointHoverRadius: 6, centrado: false, textos: [] };
@@ -729,6 +730,12 @@ const TableroSla = (function () {
   // CONTANDO hoy, el SLOT 1 los 30 anteriores, y asi. El selector pide "los
   // ultimos N": N = 1 es el SLOT 0, N = 3 son los SLOT 0, 1 y 2. Su unico
   // efecto es escribir el rango de fechas; la grafica se sigue viendo por dia.
+  // A partir de aqui la vista diaria deja de ser legible y la tendencia pasa
+  // a bloques de un mes. Es el mismo tope con el que estiloTendencia ya dejaba
+  // de dibujar marcadores: por encima, la grafica ya no ensenaba una sola
+  // observacion.
+  const TOPE_DIARIO = 120;
+
   const DIAS_SLOT = 30;
   const MAX_SLOTS = 12;              // hasta 360 dias hacia atras
   // Preparado en el stepper vs. vigente en los datos que hay en pantalla. Son
@@ -788,6 +795,49 @@ const TableroSla = (function () {
     };
   }
 
+  /* Agrupa la serie diaria por mes de calendario. Es el gemelo de
+     agruparPorSlot para el caso que no viene de SLOT -un rango largo escrito a
+     mano o el boton "Año"-, y sale de como resuelve esto Experiencia: su
+     grafica de evolucion NUNCA pinta observaciones crudas, siempre 10 bloques
+     de SLOT o 12 meses de calendario (modoTiempo, renderEvol). Un eje con una
+     docena de categorias reparte sus puntos por todo el ancho; uno con 250
+     dias los amontona y por eso la vista diaria larga ya se dibujaba sin un
+     solo marcador.
+
+     No cambia lo que mide la grafica: son las MISMAS series diarias, sumadas
+     por mes. El tooltip sigue dando el rango exacto de dias que hay detras de
+     cada punto, y los KPIs, la tabla y el resto del tablero no se enteran. */
+  function agruparPorMes(fechas, series) {
+    const cubos = new Map();          // 'aaaa-mm' -> { dias: [], sumas: [] }
+    fechas.forEach((f, i) => {
+      const p = partesDia(f);
+      if (!p) return;                 // etiqueta que no es un dia: se ignora
+      const clave = `${p.ano}-${String(p.mes).padStart(2, '0')}`;
+      if (!cubos.has(clave)) cubos.set(clave, { p, dias: [], sumas: series.map(() => 0) });
+      const acc = cubos.get(clave);
+      acc.dias.push(String(f).slice(0, 10));
+      series.forEach((serie, j) => { acc.sumas[j] += Number(serie[i]) || 0; });
+    });
+
+    const claves = [...cubos.keys()].sort();
+    const anos = new Set(claves.map(c => c.slice(0, 4)));
+    return {
+      // El año solo se escribe si el rango cruza mas de uno: dos "sep"
+      // distintos no pueden leerse igual.
+      etiquetas: claves.map(c => {
+        const { p } = cubos.get(c);
+        return anos.size > 1 ? `${mesCorto(p.mes)} ${p.ano.slice(2)}` : mesCorto(p.mes);
+      }),
+      // Primer y ultimo dia CON DATOS del mes, no el 1 y el 31: el bloque
+      // describe lo que se sumo, no el calendario.
+      rangos: claves.map(c => {
+        const dias = cubos.get(c).dias.slice().sort();
+        return { inicio: dias[0], fin: dias[dias.length - 1] };
+      }),
+      series: series.map((_, j) => claves.map(c => cubos.get(c).sumas[j])),
+    };
+  }
+
   const MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun',
                         'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
   const ETIQUETA_DIA = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -816,8 +866,11 @@ const TableroSla = (function () {
      pintar 1095 puntos y 365 fechas es justo lo que hacia ilegible esa vista.
 
      `textos` viene ya resuelto -una entrada por indice, '' donde no va etiqueta-
-     para que el callback del tick solo tenga que indexar. */
-  function estiloTendencia(etiquetas) {
+     para que el callback del tick solo tenga que indexar.
+
+     `agrupado` avisa de que las etiquetas son bloques (SLOT o mes) y no dias
+     sueltos. */
+  function estiloTendencia(etiquetas, agrupado) {
     const n = etiquetas.length;
     const textos = new Array(n).fill('');
 
@@ -872,10 +925,25 @@ const TableroSla = (function () {
     // de la escala, no un dato: la serie sigue teniendo una sola observacion.
     if (n === 1) return { pointRadius: 5, pointHoverRadius: 8, centrado: true, textos };
 
+    /* Bandas centradas. La escala de categorias sin offset ancla la PRIMERA
+       observacion en el borde izquierdo del area de dibujo y la ULTIMA en el
+       derecho. Con muchas observaciones no se nota; con dos -los dos bloques
+       de "Ultimos 2 SLOTs"- deja un punto pegado a cada extremo, el ultimo
+       medio comido por el borde de la tarjeta y todo el ancho vacio en medio.
+       Con offset cada punto cae en el centro de su banda, asi que dos puntos
+       se reparten el ancho por igual, igual que los 10 bloques de la grafica
+       de Experiencia.
+
+       Se centra siempre que las etiquetas sean bloques -un bloque ocupa un
+       tramo de tiempo, no un instante, y su sitio natural es el centro de su
+       banda- y tambien cuando hay muy pocas observaciones diarias, que es
+       donde el anclaje a los bordes se lee como un error de dibujo. */
+    const centrado = !!agrupado || n <= 4;
+
     return {
       pointRadius: n <= 15 ? 3 : (n <= 60 ? 2 : 0),
       pointHoverRadius: n <= 15 ? 6 : 5,
-      centrado: false,
+      centrado,
       textos,
     };
   }
@@ -1043,26 +1111,42 @@ const TableroSla = (function () {
       hint.textContent = 'recalculada sobre lo filtrado';
     }
 
-    // Con UN SLOT la grafica sigue siendo diaria, igual que siempre. Con dos o
-    // mas se agrupa por SLOT: son las mismas series, sumadas por bloque, para
-    // no pintar cientos de dias ni un eje X ilegible.
-    let rangosSlot = null;
+    /* Granularidad del eje. Es lo unico que decide este bloque: las series de
+       arriba no se tocan, solo se suman por bloque.
+
+       Con UN SLOT la grafica sigue siendo diaria, igual que siempre. Con dos o
+       mas se agrupa por SLOT. Fuera del modo SLOT, un rango largo -"Año" son
+       ~250 dias- se agrupa por mes de calendario, en vez de pintar un punto
+       por dia: es el mismo criterio de Experiencia, cuya grafica de evolucion
+       siempre trabaja con una docena de bloques (SLOT o mes). Por debajo del
+       tope la vista diaria se queda exactamente como estaba. */
+    let rangosBucket = null;
     if (enModoSlot()) {
       if (slotsAplicados > 1) {
         const g = agruparPorSlot(etiquetas, [creados, cerrados, vencidos], slotsAplicados);
         etiquetas = g.etiquetas;
-        rangosSlot = g.rangos;
+        rangosBucket = g.rangos;
         [creados, cerrados, vencidos] = g.series;
         hint.textContent = `${resumenSlots(slotsAplicados)} · agrupado por SLOT`;
       } else {
         hint.textContent = `${resumenSlots(slotsAplicados)} · ${hint.textContent}`;
+      }
+    } else if (etiquetas.length > TOPE_DIARIO) {
+      const g = agruparPorMes(etiquetas, [creados, cerrados, vencidos]);
+      // Un solo mes agrupado seria un unico punto en lugar de sus dias: el
+      // agrupado solo compensa si hay varios bloques que comparar.
+      if (g.etiquetas.length > 1) {
+        etiquetas = g.etiquetas;
+        rangosBucket = g.rangos;
+        [creados, cerrados, vencidos] = g.series;
+        hint.textContent += ' · agrupado por mes';
       }
     }
 
     // El tooltip lee este valor a traves del closure, no de una copia dentro
     // de la config: asi la grafica se puede actualizar en vez de reconstruirse
     // cuando se pasa de vista diaria a agrupada por SLOT.
-    rangosSlotVigente = rangosSlot;
+    rangosBucketVigente = rangosBucket;
 
     // Cuantas observaciones llegaron. Es el dato que distingue "el endpoint no
     // trajo nada" de "trajo un solo dia y se ve poco", que desde el navegador
@@ -1084,10 +1168,10 @@ const TableroSla = (function () {
           : 'Sin tickets registrados en el rango de fechas.');
     }
 
-    // Igual que rangosSlotVigente: se reasigna el objeto que leen los callbacks
+    // Igual que rangosBucketVigente: se reasigna el objeto que leen los callbacks
     // en vez de cambiar la config, para no tener que reconstruir la grafica al
     // pasar de vista diaria larga a corta o a SLOTs.
-    estiloTendVigente = estiloTendencia(etiquetas);
+    estiloTendVigente = estiloTendencia(etiquetas, !!rangosBucket);
     const estilo = estiloTendVigente;
 
     const serie = (label, data, color, rellenar) => ({
@@ -1113,13 +1197,13 @@ const TableroSla = (function () {
           interaction: { mode: 'index', intersect: false },
           plugins: {
             legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
-            // Agrupado por SLOT la etiqueta sola no dice de que fechas habla:
-            // el rango del bloque va en el titulo del tooltip. Sin agrupar,
-            // el titulo es la etiqueta de siempre.
+            // Agrupada en bloques -SLOT o mes- la etiqueta sola no dice de
+            // que fechas habla: el rango del bloque va en el titulo del
+            // tooltip. Sin agrupar, el titulo es la etiqueta de siempre.
             tooltip: {
               callbacks: {
                 title: (items) => {
-                  const r = rangosSlotVigente && rangosSlotVigente[items[0].dataIndex];
+                  const r = rangosBucketVigente && rangosBucketVigente[items[0].dataIndex];
                   if (r) return `${items[0].label} · ${r.inicio} → ${r.fin}`;
                   // El eje puede estar mostrando solo el mes: el titulo lleva
                   // siempre el dia completo de la observacion bajo el cursor.
@@ -1134,8 +1218,9 @@ const TableroSla = (function () {
             // solo se lee. Los indices sin etiqueta devuelven '' -el punto sigue
             // en la escala, asi que el hover diario no se pierde-.
             x: {
-              // offset solo con una observacion (ver estiloTendencia): con dos
-              // o mas centrar la banda metaria margenes que hoy no tiene.
+              // Bandas centradas cuando el eje es de bloques o trae muy pocas
+              // observaciones (ver estiloTendencia). En la vista diaria larga
+              // sigue sin offset, que es como estaba.
               offset: estilo.centrado,
               ticks: {
                 autoSkip: false, maxRotation: 0, minRotation: 0,
