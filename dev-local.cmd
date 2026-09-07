@@ -1,20 +1,20 @@
 @echo off
 REM ---------------------------------------------------------------------
 REM  Levanta el sitio en IIS Express con la raiz del proyecto como raiz
-REM  web, en http://localhost:8080/
+REM  web, en http://localhost:8081/
 REM
 REM  Requisito previo: copiar Web.config.ejemplo como Web.config y poner
 REM  las credenciales reales en YOUR_SQL_USER / YOUR_SQL_PASSWORD.
 REM  Web.config esta en .gitignore: no se sube nunca.
 REM
-REM    http://localhost:8080/                       tablero (dashboard.html)
-REM    http://localhost:8080/qa/qa.html             tablero de QA (suelto)
-REM    http://localhost:8080/handlers/qa_diag.ashx  prueba de conexion
+REM    http://localhost:8081/                       tablero (dashboard.html)
+REM    http://localhost:8081/qa/qa.html             tablero de QA (suelto)
+REM    http://localhost:8081/handlers/qa_diag.ashx  prueba de conexion
 REM ---------------------------------------------------------------------
 setlocal
 
 set "PUERTO=%~1"
-if "%PUERTO%"=="" set "PUERTO=8080"
+if "%PUERTO%"=="" set "PUERTO=8081"
 
 set "IISEXPRESS=%ProgramFiles%\IIS Express\iisexpress.exe"
 if not exist "%IISEXPRESS%" set "IISEXPRESS=%ProgramFiles(x86)%\IIS Express\iisexpress.exe"
