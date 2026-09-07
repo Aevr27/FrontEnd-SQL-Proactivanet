@@ -775,7 +775,7 @@ const TableroSla = (function () {
   // vuelve ilegible (8 SLOTs son ~240 puntos), asi que se muestra un valor por
   // SLOT. No cambia el significado de nada: son las MISMAS series diarias,
   // sumadas por bloque. El eje sigue yendo de lo mas viejo a lo mas reciente,
-  // asi que el ultimo punto es el SLOT 0.
+  // asi que el ultimo punto es el periodo que termina hoy.
   function agruparPorSlot(fechas, series, n) {
     const cubos = new Map();          // indice de SLOT -> {suma por serie}
     fechas.forEach((f, i) => {
@@ -786,12 +786,25 @@ const TableroSla = (function () {
       series.forEach((serie, j) => { acc[j] += Number(serie[i]) || 0; });
     });
 
+    /* Posiciones del eje: el origen y los N periodos reales.
+
+       El SLOT 0 NO es un periodo: es el punto de partida de la grafica, donde
+       empieza lo medido. No tiene datos y su valor es null -no 0-, para que
+       Chart.js lo trate como observacion ausente y no como un periodo en el
+       que la metrica valio cero. Tampoco tiene rango de fechas: no hay dias
+       detras de el.
+
+       Los periodos reales se numeran 1..N de izquierda a derecha, en el mismo
+       orden cronologico de siempre: el SLOT 1 es el mas antiguo del rango
+       pedido y el SLOT N el que termina hoy. Por dentro siguen siendo los
+       indices n-1..0 de slotDeFecha/slotRango, que no se tocan; el numero de
+       la etiqueta es la POSICION en el eje, no el indice del bucket. */
     const indices = [];
     for (let s = n - 1; s >= 0; s--) indices.push(s);   // viejo -> reciente
     return {
-      etiquetas: indices.map(s => `SLOT ${s + 1}`),
-      rangos: indices.map(s => slotRango(s)),
-      series: series.map((_, j) => indices.map(s => (cubos.get(s) || [])[j] || 0)),
+      etiquetas: ['SLOT 0', ...indices.map((_, k) => `SLOT ${k + 1}`)],
+      rangos: [null, ...indices.map(s => slotRango(s))],
+      series: series.map((_, j) => [null, ...indices.map(s => (cubos.get(s) || [])[j] || 0)]),
     };
   }
 
@@ -1150,8 +1163,10 @@ const TableroSla = (function () {
 
     // Cuantas observaciones llegaron. Es el dato que distingue "el endpoint no
     // trajo nada" de "trajo un solo dia y se ve poco", que desde el navegador
-    // son el mismo sintoma: una grafica que parece vacia.
-    hint.textContent += ` · ${etiquetas.length} ${etiquetas.length === 1 ? 'observacion' : 'observaciones'}`;
+    // son el mismo sintoma: una grafica que parece vacia. El origen del eje
+    // (SLOT 0) es null y no cuenta: es una posicion, no una observacion.
+    const observaciones = creados.filter(v => v !== null).length;
+    hint.textContent += ` · ${observaciones} ${observaciones === 1 ? 'observacion' : 'observaciones'}`;
 
     if (!etiquetas.length) {
       destruir('tendencia');
