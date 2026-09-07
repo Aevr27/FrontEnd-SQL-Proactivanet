@@ -789,7 +789,7 @@ const TableroSla = (function () {
     const indices = [];
     for (let s = n - 1; s >= 0; s--) indices.push(s);   // viejo -> reciente
     return {
-      etiquetas: indices.map(s => `SLOT ${s}`),
+      etiquetas: indices.map(s => `SLOT ${s + 1}`),
       rangos: indices.map(s => slotRango(s)),
       series: series.map((_, j) => indices.map(s => (cubos.get(s) || [])[j] || 0)),
     };
@@ -1122,7 +1122,7 @@ const TableroSla = (function () {
        tope la vista diaria se queda exactamente como estaba. */
     let rangosBucket = null;
     if (enModoSlot()) {
-      if (slotsAplicados > 1) {
+      if (slotsAplicados >= 1) {
         const g = agruparPorSlot(etiquetas, [creados, cerrados, vencidos], slotsAplicados);
         etiquetas = g.etiquetas;
         rangosBucket = g.rangos;
