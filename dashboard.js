@@ -1189,16 +1189,39 @@ const TableroSla = (function () {
     estiloTendVigente = estiloTendencia(etiquetas, !!rangosBucket);
     const estilo = estiloTendVigente;
 
-    const serie = (label, data, color, rellenar) => ({
-      label, data, borderColor: color,
-      backgroundColor: rellenar ? 'rgba(37,99,235,.12)' : color,
-      fill: !!rellenar, tension: .3, borderWidth: 2,
-      pointRadius: estilo.pointRadius, pointHoverRadius: estilo.pointHoverRadius,
-    });
+    /* Una sola observacion no es una tendencia. La vista de linea necesita DOS
+       puntos contiguos con dato para trazar un segmento, asi que con uno solo
+       no dibuja ni linea ni area: quedan tres puntitos sueltos y, con el origen
+       SLOT 0 vacio a su izquierda, apoyados en la mitad derecha del lienzo.
+
+       Esa misma observacion en barras ocupa su banda entera: se lee como lo que
+       es -una medida, no una trayectoria- y llena el alto del lienzo en vez de
+       flotar en el. No se inventa ningun dato: el SLOT 0 sigue valiendo null y
+       por tanto sigue sin dibujar nada, y su etiqueta sigue en el eje, que es
+       justo lo que dice "aqui empieza lo medido". */
+    const barras = observaciones === 1;
+
+    const serie = (label, data, color, rellenar) => (barras
+      ? { label, data, backgroundColor: color, borderColor: color, borderWidth: 0,
+          // Con dos bandas y tres series una barra se comeria un sexto del
+          // ancho: el tope la deja en un grosor legible sin estirar nada.
+          maxBarThickness: 48 }
+      : {
+          label, data, borderColor: color,
+          backgroundColor: rellenar ? 'rgba(37,99,235,.12)' : color,
+          fill: !!rellenar, tension: .3, borderWidth: 2,
+          pointRadius: estilo.pointRadius, pointHoverRadius: estilo.pointHoverRadius,
+        });
+
+    // Linea y barras son tipos distintos de grafica y Chart.js no cambia el
+    // tipo sobre la instancia viva: al cruzar ese limite se tira y se
+    // reconstruye. Los demas cambios de rango siguen actualizando la que hay.
+    const tipo = barras ? 'bar' : 'line';
+    if (graficos.tendencia && graficos.tendencia.config.type !== tipo) destruir('tendencia');
 
     dibujarGrafico(graficos, 'tendencia', 'chart-tendencia',
       () => ({
-        type: 'line',
+        type: tipo,
         data: {
           labels: etiquetas,
           datasets: [
