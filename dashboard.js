@@ -8,6 +8,10 @@
    .ashx, render de KPIs, graficas y tablas de las pestanas de SLA,
    productividad, backlog y tableros extra.
 
+   Experiencia y QA no estan aqui: son modulos propios (experiencia/ y qa/)
+   con su pagina, su hoja y su script, que ademas siguen funcionando sueltos.
+   De ellos este archivo solo tiene el montaje perezoso (moduloEmbebido).
+
    El arranque (activarTab del hash inicial) NO vive aqui: sigue siendo un
    <script> aparte al final de dashboard.html, a proposito, para que
    sobreviva a un error de parseo o ejecucion de este archivo.
@@ -2389,41 +2393,41 @@ const TableroExterno = (() => {
 })();
 
 /* ---------------------------------------------------------------------------
-   Pestaña "Experiencia".
+   Modulos embebidos: "Experiencia" y "QA".
 
-   El modulo sigue siendo experiencia/ (experiencia.html + experiencia.css +
-   experiencia.js + handlers/experiencia.ashx) y su pagina suelta sigue
-   funcionando igual. Aqui solo vive el montaje: traer ese HTML, acotar su
-   hoja de estilos e inyectar su script UNA sola vez, la primera vez que se
-   abre la pestaña. Nada de la logica de Experiencia (KPIs, graficas, filtros,
-   modales, treemap, historico) se copia a este archivo.
+   Los dos son lo mismo desde aqui: una carpeta con su pagina, su hoja y su
+   script (experiencia/ y qa/), que sigue funcionando suelta y que ademas se
+   monta dentro de una pestaña. Este bloque solo hace el montaje -traer el
+   marcado, acotar la hoja e inyectar el script UNA vez, la primera vez que se
+   abre la pestaña-; ninguna logica de esos tableros (KPIs, graficas, filtros,
+   detalle, modales) se copia a este archivo.
+
+   Las hojas de los dos modulos son hojas de pagina completa: resetean `*`,
+   estilizan `body`, `table`, `th`, `td` y definen .card/.kpi/.grid2/.tabla...,
+   el mismo vocabulario que dashboard.css pero con otros valores. Cargadas tal
+   cual, la ultima en entrar repinta a la otra (el tablero perderia su .wrap de
+   1500px, sus sombras y sus hovers).
+
+   @scope (#tab-<modulo>) las deja encerradas en su pestaña sin tocar ni una
+   linea de los archivos, asi que las paginas sueltas no se enteran. De paso,
+   dentro del @scope las reglas de `:root` y `body` no casan con nada -html y
+   body no son descendientes del contenedor-, que es justo lo que se quiere.
+   Por eso qa.css declara sus variables tambien en #tab-qa, que si es la raiz
+   del ambito.
    --------------------------------------------------------------------------- */
-const TableroExperiencia = (() => {
-  const BASE = 'experiencia/';
 
-  /* experiencia.css es la hoja de una pagina completa: resetea `*`, estiliza
-     `body`, `table`, `th`, `td` y define .card/.kpis/.kpi/.tab/.panel/.legend/
-     .badge/.grid2/.grid3/.wrap, exactamente el mismo vocabulario que
-     dashboard.css pero con otros valores. Cargada tal cual, la ultima hoja en
-     entrar repinta la otra (el tablero perderia su .wrap de 1500px, sus
-     sombras, sus hovers y sus animaciones de panel).
+const SOPORTA_SCOPE = (() => {
+  try {
+    const prueba = document.createElement('style');
+    prueba.textContent = '@scope (body) { :scope { color: red } }';
+    document.head.appendChild(prueba);
+    const ok = !!(prueba.sheet && prueba.sheet.cssRules.length);
+    prueba.remove();
+    return ok;
+  } catch (e) { return false; }
+})();
 
-     @scope (#tab-experiencia) la deja encerrada en su pestaña sin tocar ni una
-     linea del archivo, asi que la pagina suelta no se entera. De paso, dentro
-     del @scope las reglas de `:root` y `body` no casan con nada -html y body
-     no son descendientes del contenedor-, que es justo lo que se quiere: las
-     variables (--card, --accent, --verde, --radius...) las pone el :root de
-     dashboard.css con los mismos valores, y el reset global ya esta aplicado. */
-  const SOPORTA_SCOPE = (() => {
-    try {
-      const prueba = document.createElement('style');
-      prueba.textContent = '@scope (body) { :scope { color: red } }';
-      document.head.appendChild(prueba);
-      const ok = !!(prueba.sheet && prueba.sheet.cssRules.length);
-      prueba.remove();
-      return ok;
-    } catch (e) { return false; }
-  })();
+function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () => {} }) {
 
   async function texto(ruta) {
     const resp = await fetch(ruta, { cache: 'no-store' });
@@ -2432,30 +2436,41 @@ const TableroExperiencia = (() => {
   }
 
   async function inyectarCss() {
-    if (document.getElementById('css-experiencia')) return;
-    const css = await texto(BASE + 'experiencia.css');
-    const hoja = document.createElement('style');
-    hoja.id = 'css-experiencia';
-    hoja.textContent = `@scope (#tab-experiencia) {\n${css}\n}`;
-    document.head.appendChild(hoja);
+    const idHoja = 'css-' + id;
+    if (document.getElementById(idHoja)) return;
+    let css = await texto(base + hoja);
+
+    /* Los @keyframes salen del @scope: su nombre es global, no un selector, y
+       encerrarlos no aporta nada. Fuera se comportan igual y se evita depender
+       de que el navegador acepte esa anidacion. */
+    const marcos = [];
+    css = css.replace(/@keyframes[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/g, bloque => {
+      marcos.push(bloque);
+      return '';
+    });
+
+    const estilo = document.createElement('style');
+    estilo.id = idHoja;
+    estilo.textContent = `${marcos.join('\n')}\n@scope (#${id}) {\n${css}\n}`;
+    document.head.appendChild(estilo);
   }
 
   async function montarMarcado(cont) {
-    const doc = new DOMParser().parseFromString(await texto(BASE + 'experiencia.html'), 'text/html');
+    const doc = new DOMParser().parseFromString(await texto(base + pagina), 'text/html');
 
     /* Fuera <script> y <link>: DOMParser no ejecuta los primeros (hay que
        recrearlos) y de los segundos ya se encarga inyectarCss(). Con ellos se
-       va tambien vendor/chart.umd.min.js (4.4.1), que aqui sobra: la pagina ya
-       carga Chart.js 4.4.4 y meter una segunda copia reemplazaria el global
-       que usan las graficas de SLA y de Backlog. La copia del vendor sigue en
-       su sitio para la pagina suelta. */
+       va tambien la copia local de Chart.js que cargan las paginas sueltas,
+       que aqui sobra: dashboard.html ya trae Chart.js 4.4.4 y una segunda
+       copia reemplazaria el global que usan las graficas de SLA y de Backlog.
+       Los vendor siguen en su sitio para las paginas sueltas. */
     doc.querySelectorAll('script, link[rel="stylesheet"]').forEach(n => n.remove());
 
-    /* La pagina suelta envuelve su contenido en un #tab-experiencia propio.
-       Aqui ese id ya lo lleva el contenedor de la pestaña, y dos nodos con el
-       mismo id dejarian a getElementById() devolviendo el equivocado: se
-       desarma el envoltorio y se conservan sus hijos. */
-    const interno = doc.getElementById('tab-experiencia');
+    /* La pagina suelta envuelve su contenido en un #tab-<modulo> propio. Aqui
+       ese id ya lo lleva el contenedor de la pestaña, y dos nodos con el mismo
+       id dejarian a getElementById() devolviendo el equivocado: se desarma el
+       envoltorio y se conservan sus hijos. */
+    const interno = doc.getElementById(id);
     if (interno) interno.replaceWith(...interno.childNodes);
 
     cont.append(...doc.body.childNodes);
@@ -2464,7 +2479,7 @@ const TableroExperiencia = (() => {
   function cargarScript(cont) {
     return new Promise((listo, fallo) => {
       const s = document.createElement('script');
-      s.src = BASE + 'experiencia.js';
+      s.src = base + guion;
       s.onload = listo;
       s.onerror = () => fallo(new Error('no se pudo cargar ' + s.src));
       cont.appendChild(s);          // al final, con el marcado ya puesto
@@ -2476,48 +2491,76 @@ const TableroExperiencia = (() => {
   function montarEnMarco(cont) {
     const marco = document.createElement('iframe');
     marco.className = 'tablero-externo';
-    marco.title = 'Tablero de Experiencia';
-    marco.src = BASE + 'experiencia.html';
+    marco.title = 'Tablero de ' + nombre;
+    marco.src = base + pagina;
     cont.appendChild(marco);
-    console.warn('Este navegador no soporta @scope: Experiencia se monta en un marco.');
+    console.warn(`Este navegador no soporta @scope: ${nombre} se monta en un marco.`);
   }
 
   function init() {
-    const cont = document.getElementById('tab-experiencia');
+    const cont = document.getElementById(id);
     if (!cont || cont.childElementCount) return;   // ya montado
 
     if (!SOPORTA_SCOPE) return montarEnMarco(cont);
 
-    cont.innerHTML = '<div class="estado" style="padding:24px">Cargando Experiencia...</div>';
+    cont.innerHTML = `<div class="estado" style="padding:24px">Cargando ${nombre}...</div>`;
     (async () => {
       await inyectarCss();
       cont.textContent = '';
       await montarMarcado(cont);
-      // experiencia.js es un IIFE que arranca solo y pide su .ashx una vez.
+      // El script del modulo es un IIFE que arranca solo y pide su .ashx una vez.
       await cargarScript(cont);
     })().catch(err => {
       console.error(err);
       cont.innerHTML = `<div class="card" style="margin-top:16px">
-        <h3>No se pudo montar el tablero de Experiencia</h3>
+        <h3>No se pudo montar el tablero de ${nombre}</h3>
         <p style="font-size:13px;color:#64748b">${escapeHtml(err.message)} ·
-        el tablero suelto sigue en <a href="${BASE}experiencia.html">${BASE}experiencia.html</a>.</p></div>`;
+        el tablero suelto sigue en <a href="${base}${pagina}">${base}${pagina}</a>.</p></div>`;
     });
   }
 
   /* Sus graficas nacen con la pestaña ya visible (activarTab pone la clase
-     .active antes de llamar a init()), asi que no hay que remedirlas al
-     volver: Chart.js responsive se encarga del resto. */
-  return { init, redimensionar: () => {} };
-})();
+     .active antes de llamar a init()), asi que al volver no hay que
+     reconstruir nada: como mucho, remedir lo que quedo con el contenedor
+     oculto. Cada modulo dice si necesita ese aviso. */
+  return { init, redimensionar: alVolver };
+}
+
+const TableroExperiencia = moduloEmbebido({
+  nombre: 'Experiencia',
+  base: 'experiencia/',
+  id: 'tab-experiencia',
+  pagina: 'experiencia.html',
+  hoja: 'experiencia.css',
+  guion: 'experiencia.js',
+});
+
+/* QA: el modulo publica window.TableroQaModulo al arrancar. Mientras la
+   pestaña estuvo oculta su contenedor midio cero, asi que al volver se le
+   pide que remida sus graficas; los datos ya cargados se quedan como estan y
+   no se repite ninguna peticion a qa.ashx. */
+const TableroQa = moduloEmbebido({
+  nombre: 'QA',
+  base: 'qa/',
+  id: 'tab-qa',
+  pagina: 'qa.html',
+  hoja: 'qa.css',
+  guion: 'qa.js',
+  alVolver: () => {
+    const modulo = window.TableroQaModulo;
+    if (modulo) modulo.redimensionar();
+  },
+});
 
 const MODULOS = {
   sla: TableroSla,
   backlog: TableroBacklog,
   experiencia: TableroExperiencia,
+  qa: TableroQa,
   tablero: TableroExterno,
 };
 
-const iniciado = { sla: false, backlog: false, experiencia: false, tablero: false };
+const iniciado = { sla: false, backlog: false, experiencia: false, qa: false, tablero: false };
 
 function activarTab(nombre) {
   if (!MODULOS[nombre]) nombre = 'sla';

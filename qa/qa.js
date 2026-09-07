@@ -1,5 +1,10 @@
 /* =========================================================================
-   qa_test.js
+   qa/qa.js
+
+   Tablero de QA. Un solo archivo para los dos sitios donde vive el modulo: la
+   pagina suelta qa/qa.html y la pestaña "QA" de dashboard.html, que monta ese
+   mismo marcado e inyecta este mismo script (ver TableroQa en dashboard.js).
+   No hay una segunda copia de esta logica en el tablero.
 
    Tablero de QA. Toda la informacion viene de qa.ashx, que la consulta en
    vivo a SQL Server. El navegador nunca habla con la base: no conoce el
@@ -16,23 +21,46 @@
                        del total: por eso es la peticion rapida.
      - completo      : qa.ashx?action=qare               (en segundo plano,
                        en cuanto el resumen esta pintado)
-                       Distribucion por estado, contadores QA/QARE con sus
-                       respuestas y top de categorias. Recorre TODOS los
-                       tickets del rango, asi que tarda; por eso no bloquea la
-                       carga y sus dos paneles se rellenan al llegar.
+                       Distribucion por estado. Recorre TODOS los tickets del
+                       rango, asi que tarda; por eso no bloquea la carga y su
+                       panel se rellena al llegar. La respuesta trae ademas los
+                       contadores QA/QARE y el top de categorias, que hoy no se
+                       pintan: el bloque que los mostraba en crudo se retiro de
+                       la interfaz a la espera de una visualizacion mejor. El
+                       endpoint y sus datos siguen intactos.
      - detalle       : qa.ashx?action=detail&...         (solo al pedirlo)
-     - catalogos     : nunca en este prototipo
+     - catalogos     : nunca desde aqui
 
-   Regla de datos: lo que el API no trae, no se calcula aqui. No existe
-   ninguna metrica de cumplimiento QARE porque la formula oficial aun no
-   esta definida.
+   Nada de esto se pide al cargar dashboard.html: el modulo entero -marcado,
+   hoja y script- se trae la primera vez que se abre la pestaña, y es entonces
+   cuando sale la primera peticion.
+
+   Regla de datos: lo que el API no trae, no se calcula aqui.
    ========================================================================= */
 
 (function () {
   'use strict';
 
-  var API = 'handlers/qa.ashx';
-  var TECNICOS_TOPE = 15;   // el resto se ve con "ver todos"
+  /* El handler cuelga de la raiz del sitio, pero este script se carga desde
+     dos sitios distintos: qa/qa.html (la pagina suelta) y dashboard.html, que
+     lo inyecta con src="qa/qa.js". Resolver la ruta contra la URL del propio
+     script da handlers/qa.ashx en la raiz en los dos casos. */
+  var API = (function () {
+    var yo = document.currentScript && document.currentScript.src;
+    try { return new URL('../handlers/qa.ashx', yo).href; }
+    catch (e) { return 'handlers/qa.ashx'; }
+  })();
+
+  /* Todos los ids del marcado llevan el prefijo "qa-". En el tablero este
+     modulo comparte documento con SLA y Backlog, que ya tienen su propio
+     #kpis: sin prefijo, getElementById devolveria el bloque equivocado. El
+     prefijo se resuelve en $() y no en cada llamada. */
+  var PREFIJO = 'qa-';
+
+  // Las dos graficas de barras muestran el mismo numero de filas para que las
+  // dos tarjetas midan igual. El recorte es de presentacion: el API sigue
+  // mandando la lista completa y el top se recalcula en cada pintado.
+  var TOP_BARRAS = 10;
 
   var NUM = new Intl.NumberFormat('es-MX');
   var NUM2 = new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -55,8 +83,6 @@
 
   var estado = {
     resumen: null,
-    qareCompleto: null,
-    tecnicosCompletos: false,
     filtros: { validacion: 'Incorrecto', grupo: null, tecnico: null, grupoCorrecto: null },
     pagina: 1,
     tamano: 100,
@@ -69,7 +95,7 @@
   var graficas = { grupo: null, tecnico: null, validacion: null };
 
   // ---------------------------------------------------------------- utiles
-  function $(id) { return document.getElementById(id); }
+  function $(id) { return document.getElementById(PREFIJO + id); }
 
   function esc(valor) {
     if (valor === null || valor === undefined) return '';
@@ -147,8 +173,8 @@
 
     // Alto de partida: el definitivo lo pone cada bloque cuando sabe cuantas
     // barras tiene. Sin esto la tarjeta nace plana y salta al llegar los datos.
-    $('lienzo-grupo').style.height = altoLienzo(8);
-    $('lienzo-tecnico').style.height = altoLienzo(TECNICOS_TOPE);
+    $('lienzo-grupo').style.height = altoLienzo(TOP_BARRAS);
+    $('lienzo-tecnico').style.height = altoLienzo(TOP_BARRAS);
 
     graficas.grupo = crearBarras('chart-grupo', COLOR.azul, function (etiqueta) {
       if (etiqueta === '(sin grupo)') return;
@@ -159,9 +185,7 @@
     });
     graficas.validacion = crearDona();
 
-    $('btn-tecnicos-todos').hidden = true;
     filaTabla('tbody-recat', 3, 'Calculando…');
-    filaTabla('tbody-qare', 5, 'Calculando…');
     pintarFiltros();
   }
 
@@ -227,12 +251,11 @@
     if (location.protocol !== 'http:' && location.protocol !== 'https:') {
       faseUnoFallo('Sin servidor.');
       mensajeLienzo('msg-validacion', 'Sin servidor.', 'lienzo-msg-error');
-      filaTabla('tbody-qare', 5, 'Sin servidor.');
       $('error-global-msg').textContent =
         'Esta pagina necesita el servidor: abrela en ' +
-        'http://localhost:8080/qa_test.html (la publica dev-qa.cmd) o en el sitio ' +
-        'publicado en IIS. Los datos se consultan a la base desde el servidor, no ' +
-        'desde el navegador.';
+        'http://localhost:8080/qa/qa.html (la publica dev-qa.cmd), en la pestaña ' +
+        'QA del tablero o en el sitio publicado en IIS. Los datos se consultan a ' +
+        'la base desde el servidor, no desde el navegador.';
       $('error-global').hidden = false;
       return;
     }
@@ -249,7 +272,6 @@
           throw new Error('La respuesta no contiene la informacion de resumen esperada.');
         }
         estado.resumen = datos;
-        estado.qareCompleto = null;
         pintarTablero(datos);
         $('error-global').hidden = true;
       })
@@ -271,17 +293,16 @@
     pintarTecnico(datos.porTecnico || []);
     pintarRecategorizacion(datos.recategorizacion || []);
 
-    // El corte por estado y los contadores QA/QARE son los unicos bloques que
-    // necesitan recorrer TODOS los tickets del rango y no solo los
-    // incorrectos, y ese recorrido es lo que tarda. El resumen ya no espera
-    // por ellos: el servidor los manda como null, aqui se pintan dos avisos y
-    // llegan en una segunda peticion. Todo lo demas ya esta en pantalla.
+    // El corte por estado es el unico bloque que necesita recorrer TODOS los
+    // tickets del rango y no solo los incorrectos, y ese recorrido es lo que
+    // tarda. El resumen ya no espera por el: el servidor lo manda como null,
+    // aqui se pinta un aviso y llega en una segunda peticion. Todo lo demas ya
+    // esta en pantalla.
     if (datos.validacion === null) {
       esperandoCompleto();
       cargarCompleto();
     } else {
       pintarValidacion(datos.validacion || []);
-      pintarQare(datos.qare);
     }
   }
 
@@ -289,23 +310,17 @@
     $('hint-validacion').textContent = '';
     $('leyenda-validacion').innerHTML = '';
     mensajeLienzo('msg-validacion', 'Calculando la distribucion por estado…');
-    $('nota-qare').textContent = '';
-    $('pie-qare').textContent = '';
-    filaTabla('tbody-qare', 5, 'Calculando los contadores QA/QARE…');
   }
 
-  // Segunda peticion: trae validacion, qare y topCategorias de una sola vez,
-  // porque los tres salen del mismo recorrido. Se guarda entera para que "Ver
-  // respuestas" no tenga que volver a pedir nada.
+  // Segunda peticion. La respuesta trae ademas los contadores QA/QARE y el top
+  // de categorias; hoy solo se pinta la distribucion por estado.
   function cargarCompleto() {
     var token = estado.peticionResumen;
 
     pedir({ action: 'qare' })
       .then(function (datos) {
         if (token !== estado.peticionResumen) return;   // hubo otra recarga
-        estado.qareCompleto = datos;
         pintarValidacion(datos.validacion || []);
-        pintarQare(datos.qare);
       })
       .catch(function (err) {
         // Falla solo esta fase: los KPIs, las dos graficas de barras y la
@@ -313,7 +328,6 @@
         if (token !== estado.peticionResumen) return;
         mensajeLienzo('msg-validacion', 'Error al cargar datos.', 'lienzo-msg-error');
         $('leyenda-validacion').innerHTML = '<div class="vacio">' + esc(err.message) + '</div>';
-        filaTabla('tbody-qare', 5, err.message);
       });
   }
 
@@ -470,6 +484,17 @@
     }
   };
 
+  // Top de la lista que manda el API, de mayor a menor. Se recalcula en cada
+  // pintado, asi que una recarga o un rango distinto rehacen el top solos.
+  function topPorTickets(filas) {
+    return filas.slice()
+      .sort(function (a, b) { return b.tickets - a.tickets; })
+      .slice(0, TOP_BARRAS);
+  }
+
+  // Las dos tarjetas conservan el alto de TOP_BARRAS filas que reservo el
+  // shell: aunque una lista traiga menos, la tarjeta no encoge y el par sigue
+  // midiendo igual.
   function pintarGrupo(filas) {
     if (!filas.length) {
       $('hint-grupo').textContent = '';
@@ -477,39 +502,31 @@
       mensajeLienzo('msg-grupo', 'No hay grupos con tickets incorrectos en este rango.');
       return;
     }
-    var orden = filas.slice().sort(function (a, b) { return b.tickets - a.tickets; });
-    $('hint-grupo').textContent = orden.length + ' grupos';
-    $('lienzo-grupo').style.height = altoLienzo(orden.length);
+    var visibles = topPorTickets(filas);
+    $('hint-grupo').textContent = filas.length > visibles.length
+      ? 'top ' + visibles.length + ' de ' + filas.length + ' grupos'
+      : visibles.length + ' grupos';
 
     mensajeLienzo('msg-grupo', null);
     pintarBarras(
       graficas.grupo,
-      orden.map(function (f) { return f.grupo === null ? '(sin grupo)' : f.grupo; }),
-      orden.map(function (f) { return f.tickets; })
+      visibles.map(function (f) { return f.grupo === null ? '(sin grupo)' : f.grupo; }),
+      visibles.map(function (f) { return f.tickets; })
     );
   }
 
   function pintarTecnico(filas) {
-    var boton = $('btn-tecnicos-todos');
     if (!filas.length) {
       $('hint-tecnico').textContent = '';
-      boton.hidden = true;
       pintarBarras(graficas.tecnico, [], []);
       mensajeLienzo('msg-tecnico', 'No hay tecnicos con tickets incorrectos en este rango.');
       return;
     }
 
-    var orden = filas.slice().sort(function (a, b) { return b.tickets - a.tickets; });
-    var visibles = estado.tecnicosCompletos ? orden : orden.slice(0, TECNICOS_TOPE);
-
-    $('hint-tecnico').textContent = estado.tecnicosCompletos
-      ? orden.length + ' tecnicos'
-      : 'top ' + visibles.length + ' de ' + orden.length;
-
-    boton.hidden = orden.length <= TECNICOS_TOPE;
-    boton.textContent = estado.tecnicosCompletos ? 'Ver solo el top ' + TECNICOS_TOPE : 'Ver los ' + orden.length;
-
-    $('lienzo-tecnico').style.height = altoLienzo(visibles.length);
+    var visibles = topPorTickets(filas);
+    $('hint-tecnico').textContent = filas.length > visibles.length
+      ? 'top ' + visibles.length + ' de ' + filas.length + ' tecnicos'
+      : visibles.length + ' tecnicos';
 
     mensajeLienzo('msg-tecnico', null);
     pintarBarras(
@@ -611,69 +628,6 @@
         '<td class="num">' + NUM.format(f.tickets) + '</td>' +
         '</tr>';
     }).join('');
-  }
-
-  // ----------------------------------------------------------------- QARE
-  function pintarQare(qare) {
-    var cuerpo = $('tbody-qare');
-    if (!qare || !qare.campos || !qare.campos.length) {
-      cuerpo.innerHTML = '<tr><td colspan="5" class="vacio">El origen no contiene campos QARE.</td></tr>';
-      $('nota-qare').textContent = '';
-      return;
-    }
-
-    // La nota la escribe el extractor; se muestra literal.
-    $('nota-qare').textContent = qare.nota || '';
-    $('pie-qare').textContent =
-      'Se muestran los contadores tal como salen de la base. No se calcula ningun porcentaje ' +
-      'de cumplimiento QARE: la regla oficial todavia no esta definida.';
-
-    cuerpo.innerHTML = qare.campos.map(function (campo, i) {
-      var distribucion;
-      if (campo.tieneDistribucion) {
-        distribucion = '<button type="button" class="enlace" data-qare="' + i + '">Ver respuestas</button>';
-      } else if (campo.respondidos === 0) {
-        distribucion = celdaNula('Sin respuestas');
-      } else {
-        distribucion = celdaNula('Texto libre');
-      }
-      return '<tr>' +
-        '<td>' + esc(campo.campo) + '</td>' +
-        '<td class="num">' + NUM.format(campo.respondidos || 0) + '</td>' +
-        '<td class="num">' + NUM.format(campo.sinRespuesta || 0) + '</td>' +
-        '<td class="num">' + NUM.format(campo.valoresDistintos || 0) + '</td>' +
-        '<td id="qare-dist-' + i + '">' + distribucion + '</td>' +
-        '</tr>';
-    }).join('');
-
-    cuerpo.querySelectorAll('button[data-qare]').forEach(function (boton) {
-      boton.addEventListener('click', function () { verDistribucion(Number(boton.getAttribute('data-qare'))); });
-    });
-  }
-
-  // action=qare solo se pide si el usuario abre una distribucion, y una sola
-  // vez por carga del tablero.
-  function verDistribucion(indice) {
-    var celda = $('qare-dist-' + indice);
-    celda.textContent = 'Cargando…';
-
-    var promesa = estado.qareCompleto
-      ? Promise.resolve(estado.qareCompleto)
-      : pedir({ action: 'qare' }).then(function (datos) { estado.qareCompleto = datos; return datos; });
-
-    promesa.then(function (datos) {
-      var campo = datos && datos.qare && datos.qare.campos ? datos.qare.campos[indice] : null;
-      var respuestas = campo && campo.respuestas;
-      if (!respuestas || !respuestas.length) {
-        celda.innerHTML = celdaNula('Sin distribucion');
-        return;
-      }
-      celda.innerHTML = respuestas.map(function (r) {
-        return '<div>' + esc(r.respuesta) + ' <strong>' + NUM.format(r.tickets) + '</strong></div>';
-      }).join('');
-    }).catch(function (err) {
-      celda.innerHTML = '<span class="nulo">' + esc(err.message) + '</span>';
-    });
   }
 
   // -------------------------------------------------------------- detalle
@@ -811,19 +765,44 @@
     $('btn-next').addEventListener('click', function () {
       estado.pagina++; cargarDetalle();
     });
-
-    $('btn-tecnicos-todos').addEventListener('click', function () {
-      estado.tecnicosCompletos = !estado.tecnicosCompletos;
-      pintarTecnico(estado.resumen.porTecnico || []);
-    });
   }
 
-  document.addEventListener('DOMContentLoaded', function () {
-    // El orden importa: la pagina se arma ENTERA y se conecta antes de pedir
-    // nada. Lo que llega despues rellena estos componentes, no los crea, asi
-    // que ninguna peticion -- ni su fallo -- decide si el tablero se ve.
+  // El orden importa: la pagina se arma ENTERA y se conecta antes de pedir
+  // nada. Lo que llega despues rellena estos componentes, no los crea, asi
+  // que ninguna peticion -- ni su fallo -- decide si el tablero se ve.
+  function arrancar() {
+    if (arrancado) return;              // el modulo se monta una sola vez
+    if (!$('kpis')) return;             // sin marcado no hay nada que armar
+    arrancado = true;
     armarShell();
     conectarEventos();
     cargarResumen();
-  });
+  }
+
+  var arrancado = false;
+
+  /* Dos formas de llegar aqui:
+       - pagina suelta: el <script> esta en el HTML y el documento puede seguir
+         cargando, asi que se espera a DOMContentLoaded;
+       - pestaña del tablero: dashboard.js inyecta el script cuando el marcado
+         ya esta puesto y DOMContentLoaded paso hace rato. Entonces se arranca
+         en el acto. */
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', arrancar);
+  } else {
+    arrancar();
+  }
+
+  /* Lo unico que el modulo publica hacia fuera. Lo usa TableroQa (dashboard.js)
+     al volver a la pestaña: las graficas siguen montadas y solo hay que
+     remedirlas, porque mientras la pestaña estuvo oculta su contenedor midio
+     cero. La logica de QA no sale de este archivo. */
+  window.TableroQaModulo = {
+    redimensionar: function () {
+      Object.keys(graficas).forEach(function (k) {
+        if (graficas[k]) graficas[k].resize();
+      });
+    },
+    recargar: cargarResumen
+  };
 })();

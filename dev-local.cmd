@@ -8,7 +8,7 @@ REM  las credenciales reales en YOUR_SQL_USER / YOUR_SQL_PASSWORD.
 REM  Web.config esta en .gitignore: no se sube nunca.
 REM
 REM    http://localhost:8080/                       tablero (dashboard.html)
-REM    http://localhost:8080/qa_test.html           tablero de QA
+REM    http://localhost:8080/qa/qa.html             tablero de QA (suelto)
 REM    http://localhost:8080/handlers/qa_diag.ashx  prueba de conexion
 REM ---------------------------------------------------------------------
 setlocal

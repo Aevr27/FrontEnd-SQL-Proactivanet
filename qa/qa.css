@@ -1,18 +1,34 @@
 /* =========================================================================
-   qa_test.css
+   qa/qa.css
 
-   Estilos del prototipo standalone de QA. Los tokens y los nombres de clase
-   (.kpi, .card, .lienzo, .hint, .tabla) son los mismos que usa dashboard.css
-   del proyecto, para que la migracion posterior a la pestana de QA no
-   implique reescribir el marcado.
+   Estilos del modulo de QA. Los usa la pagina suelta (qa/qa.html) y la
+   pestaña "QA" del tablero, donde dashboard.js inyecta esta misma hoja
+   encerrada en @scope (#tab-qa). De ahi las dos reglas de convivencia:
 
-   Paleta conservadora, sin efectos de cristal ni neon.
+     1. Las variables NO pueden vivir solo en :root. Dentro del @scope, :root
+        no casa con nada (html no es descendiente del contenedor), asi que se
+        declaran tambien en #tab-qa, que es la raiz del ambito y por tanto si
+        casa. En la pagina suelta ese mismo div existe y hereda igual.
+
+        Se listan las tres formas de nombrar esa raiz -:root para la pagina
+        suelta, :scope y #tab-qa para el ambito- porque solo una casa en cada
+        contexto y no cuesta nada nombrarlas todas.
+
+     2. Lo que estiliza el cascaron -body, .wrap, el fondo de pagina- se queda
+        aqui a proposito: dentro del @scope no casa con nada y en el tablero
+        manda dashboard.css. Sirve solo a la pagina suelta.
+
+   El vocabulario de clases (.card, .kpi, .lienzo, .hint, .tabla, header.top)
+   es el mismo de dashboard.css y los valores se alinean con el suyo, para que
+   la pestaña de QA se lea como una seccion mas del tablero y no como otra
+   aplicacion incrustada.
    ========================================================================= */
 
-:root {
+:root, :scope, #tab-qa {
   color-scheme: light;
 
   --bg: #f1f5f9;
+  --bg-2: #e9eef5;
   --card: #ffffff;
   --line: #e2e8f0;
   --line-soft: #eef2f7;
@@ -35,6 +51,7 @@
 
   --radius: 14px;
   --radius-sm: 9px;
+  --radius-xs: 7px;
   --radius-pill: 999px;
   --shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 1px 3px rgba(15, 23, 42, .06);
   --shadow-md: 0 2px 4px rgba(15, 23, 42, .05), 0 8px 20px -6px rgba(15, 23, 42, .12);
@@ -47,24 +64,49 @@
    seguirian visibles aunque el JS las marque como ocultas). */
 [hidden] { display: none !important; }
 
+/* ---------- Cascaron: solo la pagina suelta ---------- */
 body {
   margin: 0;
+  padding: 20px 18px 8px;
   background: var(--bg);
+  background-image:
+    radial-gradient(1200px 520px at 50% -220px, #dbe6f6 0%, rgba(219, 230, 246, 0) 70%),
+    linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
+  background-attachment: fixed;
   color: var(--ink);
-  font: 14px/1.45 "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font: 14px/1.45 "Segoe UI Variable Text", -apple-system, BlinkMacSystemFont,
+        "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
+.wrap { max-width: 1500px; margin: 0 auto; }
 
-/* ---------- Encabezado ---------- */
-.encabezado {
-  display: flex; flex-wrap: wrap; gap: 12px;
-  align-items: center; justify-content: space-between;
-  padding: 16px 22px;
-  background: var(--grad-btn);
-  color: #fff;
+/* ---------- Encabezado de seccion ---------- */
+/* Mismo bloque que header.top de dashboard.css: en el tablero es la cabecera
+   de la pestaña, nunca una segunda cabecera de aplicacion. */
+header.top {
+  position: relative; overflow: hidden;
+  background: linear-gradient(135deg, #0f172a 0%, #172554 45%, #1e3a8a 100%);
+  color: #fff; padding: 24px 28px;
+  border-radius: var(--radius); margin-bottom: 16px;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  flex-wrap: wrap; gap: 14px;
+  box-shadow: var(--shadow-md);
 }
-.encabezado h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: .2px; }
-.encabezado .sub { margin: 3px 0 0; font-size: 12.5px; color: #c7d2fe; }
-.encabezado-acciones { display: flex; align-items: center; gap: 10px; }
+header.top::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background:
+    radial-gradient(520px 200px at 88% -40%, rgba(96, 165, 250, .35), transparent 70%),
+    radial-gradient(360px 180px at 8% 130%, rgba(37, 99, 235, .28), transparent 70%);
+}
+header.top > * { position: relative; z-index: 1; }
+header.top h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.2px; }
+header.top .sub {
+  font-size: 12.5px; color: #cbd5e1; margin-top: 5px;
+  font-variant-numeric: tabular-nums;
+}
+header.top .acciones-top {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+}
 
 .chip {
   display: inline-block; padding: 5px 12px;
@@ -76,36 +118,42 @@ body {
 
 /* ---------- Botones ---------- */
 .btn {
-  padding: 7px 14px; border: 0; cursor: pointer;
-  border-radius: var(--radius-sm);
-  background: var(--accent); color: #fff;
-  font-size: 13px; font-weight: 600; font-family: inherit;
-  transition: background .15s ease;
+  border: 1px solid transparent; border-radius: var(--radius-xs);
+  padding: 9px 16px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 600; color: #fff;
+  background: var(--grad-btn);
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .12);
+  transition: background .15s ease, box-shadow .15s ease, transform .06s ease;
+  white-space: nowrap;
 }
-.btn:hover { background: var(--accent-ink); }
-.btn:disabled { background: var(--muted-2); cursor: not-allowed; }
-.btn-sec { background: #fff; color: var(--ink-2); border: 1px solid var(--line); }
+.btn:hover { background: var(--grad-btn-hover); box-shadow: 0 2px 8px -2px rgba(15, 23, 42, .28); }
+.btn:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
+.btn:disabled { background: var(--muted-2); cursor: not-allowed; box-shadow: none; }
+.btn.chico { padding: 6px 12px; font-size: 12px; }
+
+.btn-sec {
+  background: #fff; color: var(--ink-2); border-color: var(--line); box-shadow: none;
+}
 .btn-sec:hover { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
 .btn-sec:disabled { background: #f8fafc; color: var(--muted-2); border-color: var(--line); }
 
-.enlace {
-  border: 0; background: none; padding: 0; margin-left: 6px;
-  color: var(--accent); font: inherit; font-size: 12.5px;
-  cursor: pointer; text-decoration: underline;
-}
-.enlace:hover { color: var(--accent-ink); }
+header.top .btn { border-color: rgba(255, 255, 255, .28); box-shadow: 0 1px 2px rgba(0, 0, 0, .3); }
+header.top .btn:hover { border-color: rgba(255, 255, 255, .45); }
 
 /* ---------- Layout ---------- */
-.contenido { padding: 18px 22px 28px; max-width: 1560px; margin: 0 auto; }
-
+/* Las dos graficas del top 10 son un par: dos columnas IGUALES, no la rejilla
+   1.6fr/1fr del tablero. Con el mismo numero de barras y el mismo alto de
+   lienzo, las dos tarjetas miden lo mismo. */
 .grid2 {
   display: grid; gap: 16px; margin-bottom: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
 }
 .grid-sec {
   display: grid; gap: 16px; margin-bottom: 16px;
   grid-template-columns: minmax(300px, 1fr) minmax(430px, 1.65fr);
 }
+@media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
 @media (max-width: 980px) { .grid-sec { grid-template-columns: 1fr; } }
 
 .card {
@@ -113,17 +161,33 @@ body {
   border: 1px solid var(--line-soft);
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-  padding: 15px 17px 17px;
+  padding: 18px 20px;
   margin-bottom: 16px;
+  min-width: 0;
+  transition: box-shadow .18s ease;
 }
+.card:hover { box-shadow: var(--shadow-md); }
 .card h3 {
-  margin: 0 0 2px; font-size: 14.5px; font-weight: 600; color: var(--ink);
-  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  margin: 0 0 12px; padding-bottom: 10px;
+  font-size: 13.5px; font-weight: 700; color: var(--ink);
+  border-bottom: 1px solid var(--line-soft);
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  letter-spacing: -.1px;
 }
-.hint { font-size: 12px; font-weight: 500; color: var(--muted); }
+/* .hint suelto: el chip de filtros del detalle. Dentro de un h3 manda la
+   regla de abajo, que lo manda al extremo derecho de la cabecera. */
+.hint { font-size: 11.5px; font-weight: 600; color: var(--muted); }
 
-.nota-card { margin: 4px 0 12px; font-size: 12.5px; color: var(--muted); }
-.nota-pie { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+.card h3 .hint {
+  font-weight: 600; font-size: 10.5px; color: var(--muted); margin-left: auto;
+  text-transform: uppercase; letter-spacing: .4px; white-space: nowrap;
+}
+
+.nota-card {
+  margin: 0 0 12px; font-size: 11.5px; color: var(--muted);
+  background: #f8fafc; border: 1px solid var(--line-soft);
+  border-radius: var(--radius-xs); padding: 8px 10px;
+}
 code {
   background: #f1f5f9; border: 1px solid var(--line);
   border-radius: 4px; padding: 1px 5px; font-size: 12px;
@@ -136,16 +200,18 @@ code {
 }
 .kpi {
   position: relative; overflow: hidden;
-  background: var(--card); border-radius: var(--radius); padding: 14px 16px;
+  background: var(--card); border-radius: var(--radius); padding: 16px 18px;
   box-shadow: var(--shadow); border: 1px solid var(--line-soft);
   border-left: 5px solid var(--accent);
+  transition: transform .18s ease, box-shadow .18s ease;
 }
+.kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
 .kpi .kpi-tit {
-  font-size: 12px; font-weight: 600; text-transform: uppercase;
+  font-size: 11px; font-weight: 600; text-transform: uppercase;
   letter-spacing: .4px; color: var(--muted);
 }
-.kpi .kpi-val { font-size: 27px; font-weight: 700; line-height: 1.15; margin-top: 5px; }
-.kpi .kpi-nota { font-size: 11.5px; color: var(--muted); margin-top: 5px; }
+.kpi .kpi-val { font-size: 26px; font-weight: 800; line-height: 1.15; margin-top: 4px; }
+.kpi .kpi-nota { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
 .kpi-azul   { border-left-color: var(--accent); }
 .kpi-rojo   { border-left-color: var(--rojo); }
@@ -153,13 +219,20 @@ code {
 .kpi-ambar  { border-left-color: var(--ambr); }
 .kpi-ambar  .kpi-val { color: var(--ambr); }
 
+/* Valor de una tarjeta que todavia no tiene su dato. */
+.kpi-espera .kpi-val { color: var(--muted-2); font-weight: 600; }
+
 /* ---------- Lienzos de graficas ---------- */
-.lienzo { position: relative; width: 100%; }
+/* height: auto explicito. dashboard.css tiene su propio .lienzo con
+   height: 260px y, dentro de la pestaña, esa regla tambien alcanza a estos
+   lienzos; el alto de QA lo deciden .lienzo-dona y el que calcula qa.js. */
+.lienzo { position: relative; width: 100%; height: auto; }
 .lienzo-dona { height: 232px; }
 
 /* Alto de partida de las graficas de barras. La pagina se pinta antes de
-   saber cuantas barras habra, y sin esto la tarjeta nace plana y da un salto
-   cuando llegan los datos. El alto exacto lo pone despues qa_test.js. */
+   tener datos, y sin esto la tarjeta nace plana y da un salto cuando llegan.
+   El alto exacto -el de TOP_BARRAS filas- lo pone qa.js al armar el shell y
+   ya no lo vuelve a tocar: las dos tarjetas miden igual siempre. */
 .lienzo-barras { min-height: 264px; }
 
 /* Aviso del lienzo: "Calculando...", "sin datos" o el error del bloque. Va
@@ -172,9 +245,6 @@ code {
   color: var(--muted); font-size: 12.5px;
 }
 .lienzo-msg-error { color: var(--rojo); }
-
-/* Valor de una tarjeta que todavia no tiene su dato. */
-.kpi-espera .kpi-val { color: var(--muted-2); font-weight: 600; }
 
 /* ---------- Leyenda de la dona ---------- */
 .leyenda { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; }
@@ -220,7 +290,9 @@ code {
   background: #fff; color: var(--ink); font: inherit; font-size: 12.5px;
 }
 
-.filtros { display: flex; flex-wrap: wrap; gap: 7px; }
+/* filtros-qa, no "filtros": en el tablero .filtros es el panel de filtros de
+   SLA y Backlog, que es otra cosa. */
+.filtros-qa { display: flex; flex-wrap: wrap; gap: 7px; }
 .filtro {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 4px 10px; border-radius: var(--radius-pill);
@@ -251,9 +323,9 @@ code {
 .spinner {
   width: 15px; height: 15px; flex: none;
   border: 2px solid var(--accent-line); border-top-color: var(--accent);
-  border-radius: 50%; animation: girar .8s linear infinite;
+  border-radius: 50%; animation: qa-girar .8s linear infinite;
 }
-@keyframes girar { to { transform: rotate(360deg); } }
+@keyframes qa-girar { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
 
 .vacio { padding: 18px; text-align: center; color: var(--muted); font-size: 12.5px; }
