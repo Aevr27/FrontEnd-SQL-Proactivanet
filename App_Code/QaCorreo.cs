@@ -41,8 +41,13 @@
 //   procedimientos filtran a proposito porque el correo no los quiere.
 //
 // LO QUE NO SE HACE AQUI
-//   - No se ejecuta SQL escrito a mano: todo son EXEC de procedimientos que ya
-//     estaban en la base. No se crea, altera ni borra ningun objeto.
+//   - No se crea, altera ni borra ningun objeto de la base, y no se escribe
+//     ni una fila: todo lo que sale de aqui son lecturas.
+//   - Casi todo son EXEC de procedimientos que ya estaban en la base. La
+//     unica excepcion son los KPIs del encabezado, que desde el arreglo de
+//     rendimiento salen de una consulta de solo lectura con el texto fijo en
+//     QaDb.KpisUnaPasada (mismas columnas y mismos numeros que
+//     dbo.usp_CorreoQA_Kpis, sin sus dos subconsultas historicas).
 //   - No se reimplementa la regla de Validacion: los cuatro estados
 //     (OK / Incorrecto / Valido / Sin catalogo) llegan ya calculados en la
 //     columna Validacion de cada fila del detalle.
@@ -51,7 +56,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Data.SqlClient;
 using System.Diagnostics;
+using System.Globalization;
 using System.Web;
 using System.Web.Caching;
 
@@ -211,10 +218,114 @@ public static class QaCorreo
     private static readonly StringComparer Comparador = StringComparer.OrdinalIgnoreCase;
 
     // ============================================================== lecturas
+    // Los KPIs del encabezado. NO salen de dbo.usp_CorreoQA_Kpis: ese
+    // procedimiento tarda ~28,6 s, y las dos subconsultas historicas que lo
+    // hunden se resuelven en una sola pasada (ver QaDb.KpisUnaPasada, con el
+    // detalle del plan). Mismas columnas, mismas fechas, mismos numeros.
+    //
+    // El procedimiento sigue existiendo y sigue siendo el del correo diario:
+    // aqui no se toca la base. Solo deja de llamarse desde el tablero, salvo
+    // en los dos casos de abajo.
+    //
+    // Se cachea igual que los agregados del resumen y con la misma vida (5
+    // min): son cinco contadores, y asi recargar el tablero o abrir una
+    // distribucion QARE no vuelve a leer la vista.
     public static Dictionary<string, object> Kpis(string fi, string ff, QaCronometro reloj)
     {
+        string clave = "qa:kpis:" + fi + ":" + ff;
+
+        var cache = HttpRuntime.Cache;
+        if (cache != null)
+        {
+            var guardado = cache[clave] as Dictionary<string, object>;
+            if (guardado != null)
+            {
+                reloj.Anotar("kpisDesdeCache", true);
+                return guardado;
+            }
+        }
+
+        Dictionary<string, object> kpis;
         using (reloj.Medir("kpisMs"))
+            kpis = LeerKpis(fi, ff, reloj);
+
+        reloj.Anotar("kpisDesdeCache", false);
+
+        if (cache != null && kpis != null)
+        {
+            cache.Insert(clave, kpis, null,
+                         DateTime.UtcNow.AddSeconds(SegundosCacheResumen),
+                         Cache.NoSlidingExpiration);
+        }
+
+        return kpis;
+    }
+
+    private static Dictionary<string, object> LeerKpis(string fi, string ff, QaCronometro reloj)
+    {
+        // Modo snapshot: no hay base contra la que consultar, solo los
+        // archivos que exporto tools/Exportar-SnapshotQA.ps1, y uno de ellos
+        // es justo la salida de este procedimiento.
+        if (QaDb.ModoSnapshot)
+        {
+            reloj.Anotar("kpisOrigen", "snapshot");
             return QaDb.PrimeraFila(QaDb.EjecutarMultiple(ProcKpis, Rango(fi, ff)), 0);
+        }
+
+        try
+        {
+            reloj.Anotar("kpisOrigen", "unaPasada");
+            return QaDb.KpisUnaPasada(Dia(fi), Dia(ff));
+        }
+        catch (SqlException ex)
+        {
+            // La cuenta del App Pool tiene EXECUTE sobre los procedimientos QA
+            // (lo comprueba handlers/qa_diag.ashx); que ademas tenga SELECT
+            // sobre dbo.vw_CorreoQA_Base es otra cosa. Si no lo tiene, el
+            // tablero sigue funcionando por donde funcionaba antes -- lento,
+            // pero con los mismos numeros -- y el motivo queda anotado en
+            // ?debug=timings en vez de salir como "Error al cargar datos".
+            if (!FaltaAcceso(ex)) throw;
+
+            reloj.Anotar("kpisOrigen", ProcKpis);
+            reloj.Anotar("kpisSqlError", ex.Number);
+            return QaDb.PrimeraFila(QaDb.EjecutarMultiple(ProcKpis, Rango(fi, ff)), 0);
+        }
+    }
+
+    // Los errores por los que vale la pena reintentar con el procedimiento:
+    // objeto que no se ve o permiso que falta. Cualquier otro (timeout, red,
+    // error de la propia consulta) sube tal cual: repetir la lectura cara no
+    // lo arreglaria y esconderia el problema.
+    private static bool FaltaAcceso(SqlException ex)
+    {
+        foreach (SqlError error in ex.Errors)
+        {
+            switch (error.Number)
+            {
+                case 208:   // Invalid object name
+                case 229:   // permiso denegado sobre el objeto
+                case 230:   // permiso denegado sobre la columna
+                case 297:   // el usuario no tiene permiso para hacer esto
+                case 300:   // permiso denegado (SELECT)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    // Las fechas llegan ya validadas como aaaa-mm-dd (QaParams), pero este es
+    // el punto donde dejan de ser texto: a partir de aqui viajan como DATE.
+    private static DateTime Dia(string fecha)
+    {
+        DateTime dia;
+        if (!DateTime.TryParseExact(fecha, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                                    DateTimeStyles.None, out dia))
+        {
+            throw new QaSolicitudInvalida(
+                "Rango de fechas invalido: se espera el formato aaaa-mm-dd.");
+        }
+        return dia;
     }
 
     public static List<Dictionary<string, object>> CatalogoCategorias(bool soloVigentes)
