@@ -38,6 +38,11 @@ try {
 
 const J = MOCK;
 
+// Identidad de "categoria" (col A). Registro con nombre y a nivel de modulo:
+// sobrevive a los repintados, asi que una categoria no cambia de color cuando
+// el pie se reordena por volumen.
+const REG_CATEGORIA = Paleta.registro('orq-categoria');
+
 // Helpers compartidos en el monolito (bloque de Experiencia); Orquestacion usa estos dos.
 const FMT = n => Math.round(n||0).toLocaleString('es-MX');
 const PCT = n => Math.round((n||0)*100)+'%';
@@ -84,15 +89,11 @@ function renderOrq(){
   ];
   document.getElementById('kpisOr').innerHTML=cards.map(c=>
     `<div class="kpi"><div class="lbl">${c.l}</div><div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
-  /* PALETA CATEGORICA — ocho posiciones en orden fijo, seis de ellas
-     verdes de la familia de marca. Terracota, mostaza y naranja tostado
-     entran solo porque el verde no da ocho tonos separables por si solo.
-     Sin azul, morado, cian ni magenta. Validada (modo claro, pares
-     adyacentes): CVD peor par ΔE 10.5 protan, vision normal ΔE 16.5.
-     Las dos posiciones calidas NO conviven con el semaforo: la unica
-     grafica con rojo/ambar aqui es la de Clasificacion, que tiene su
-     propia escala de estado. */
-  const PALETA_CAT=['#5aa726','#9c5a24','#8cbf1e','#2f8f6b','#b09512','#356b2c','#c9772e','#78c96b'];
+  /* PALETA CATEGORICA — no se define aqui: sale de assets/js/paleta.js
+     (window.Paleta), la misma que usan SLA, Backlog, QA y Experiencia.
+     Una grafica nueva con categorias la pide ahi; no se copia el arreglo.
+     La grafica de Clasificacion de abajo NO la usa: Alta/Media/Baja es
+     severidad y tiene su propia escala de estado. */
   // [ORQ-GRAF1] BARRAS HORIZONTALES por Clasificacion (Alta, Media, Baja, Única)
   const orden=['Alta','Media','Baja','Única'];
   const cvals=orden.map(k=>(o.por_clasif&&o.por_clasif[k])||0);
@@ -114,7 +115,9 @@ function renderOrq(){
   // [ORQ-GRAF2] PIE por Categoria (col A)
   const ent=Object.entries(o.por_categoria).sort((a,b)=>b[1]-a[1]);
   const labels=ent.map(e=>e[0]), data=ent.map(e=>e[1]);
-  const colors=labels.map((_,i)=>PALETA_CAT[i%PALETA_CAT.length]);
+  // Se ordena por volumen, asi que el orden cambia entre cargas: el registro
+  // reparte por orden de ALTA y le deja a cada categoria su color.
+  const colors=REG_CATEGORIA.escala(labels);
   const pctx=document.getElementById('chartClasif');
   if(chartClasif)chartClasif.destroy();
   chartClasif=new Chart(pctx,{type:'pie',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
@@ -124,7 +127,9 @@ function renderOrq(){
   // [ORQ-GRAF3] PIE por Candidato (col B)
   const cOrden=(J.orquestacion.candidatos||[]).slice();
   const candVals=cOrden.map(k=>(o.por_candidato&&o.por_candidato[k])||0);
-  const candColors=PALETA_CAT;
+  // Candidatos: J.orquestacion.candidatos es un catalogo de orden fijo, asi
+  // que basta la posicion.
+  const candColors=Paleta.PALETA_CATEGORICA;
   const kctx=document.getElementById('chartCand');
   if(chartCand)chartCand.destroy();
   chartCand=new Chart(kctx,{type:'pie',data:{labels:cOrden,

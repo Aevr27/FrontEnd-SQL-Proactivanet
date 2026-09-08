@@ -61,32 +61,16 @@ const NEUTRO_SEM = '#8a8578'; // referencia / sin dato
 /* ---------------------------------------------------------------------
    PALETA CATEGORICA — identidad de serie.
 
-   Ocho posiciones en ORDEN FIJO. Seis son verdes de la familia de marca;
-   las dos de apoyo -terracota y mostaza, mas un naranja tostado al final-
-   entran solo porque el verde no da ocho tonos separables por si solo.
-   Nada de azul, morado, cian ni magenta: no vuelve la marca vieja.
+   Ya NO se define aqui: vive en assets/js/paleta.js (window.Paleta) y la
+   comparten los cuatro tableros -SLA, Backlog, QA y Experiencia- mas
+   Orquestacion, para que una categoria conserve su color pase donde pase.
+   Ese archivo explica como consumirla en una grafica nueva; el atajo es
+   Paleta.escala(orden) / Paleta.color(clave, orden) / Paleta.registro(n).
 
-   Validada con scripts/validate_palette.js (modo claro, pares adyacentes):
-   banda de luminosidad OK, croma OK, separacion CVD peor par ΔE 10.5
-   (protan) y vision normal ΔE 16.5. Los rellenos mas claros quedan por
-   debajo de 3:1 contra el blanco, asi que las graficas que los usan
-   llevan siempre leyenda o etiqueta directa -nunca color a secas-.
-
-   Las posiciones 7 y 8 solo aparecen con siete o mas categorias. La 2
-   (terracota) y la 7 (naranja) NO deben convivir con el rojo ni el ambar
-   semanticos en la misma grafica: a simple vista se confunden con ellos.
-   Ninguna de las graficas que llegan a esas posiciones pinta semaforo.
+   Ojo: la paleta categorica es IDENTIDAD. El semaforo, COLOR_PRIORIDAD y
+   RAMPA_ORDINAL de aqui abajo son ESTADO y ORDEN: no salen de la paleta
+   compartida y no deben migrarse a ella.
    --------------------------------------------------------------------- */
-const PALETA_CAT = [
-  VERDE.marca,    // 1 verde de marca
-  '#9c5a24',      // 2 terracota
-  VERDE.lima,     // 3 lima
-  VERDE.pino,     // 4 verde pino
-  '#b09512',      // 5 mostaza
-  VERDE.profundo, // 6 verde profundo
-  '#c9772e',      // 7 naranja tostado
-  VERDE.claro,    // 8 verde claro
-];
 
 /* Rampa ORDINAL — para dimensiones con orden propio (antiguedad). Un solo
    tono, de claro a oscuro, para que el orden se vea en el color. Validada
@@ -553,6 +537,12 @@ const ETIQUETAS_SEGMENTO = {
   },
 };
 
+/* Cifra DENTRO de la barra, para las barras SIMPLES (no apiladas). Es el
+   plugin COMPARTIDO de assets/js/barras.js, el mismo que usan las barras de
+   Experiencia: se le ata el FMT de este tablero y ya. Las apiladas siguen con
+   ETIQUETAS_SEGMENTO de aqui arriba, que sabe de segmentos. */
+const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
+
 // Estado vacio de una grafica. Chart.js no dibuja nada util con datasets
 // vacios -deja los ejes solos, que se leen como si hubiera un error-, asi que
 // aqui se destruye la instancia y se escribe el motivo centrado en el canvas.
@@ -643,16 +633,20 @@ const TableroSla = (function () {
   // Bajar este numero solo reduce cobertura; no requiere tocar el backend.
   const TOPE_DETALLE = 500;
 
-  // Nombres heredados: ya no describen su color. Las cuatro series de la
-  // tendencia bajan por la escala verde y solo "vencidos" conserva el rojo.
-  /* Nombres heredados: ya no describen su color. Creados/Cerrados son dos
-     verdes bien separados -lima contra pino, ΔE 19.7 en vision normal- y
-     Vencidos conserva el rojo semantico (ΔE 13.4 contra el pino). */
-  const AZUL = VERDE.lima, VERDE_S = VERDE.pino, ROJO = ROJO_SEM,
-        MORADO = VERDE.profundo, GRIS = NEUTRO_SEM;
-  /* Barras apiladas de productividad: el par mas separado de la familia
-     (lima contra verde profundo, ΔE 27.8). */
-  const BARRA_A = VERDE.lima, BARRA_B = VERDE.profundo;
+  /* Series con nombre fijo de la tendencia. Creados y Cerrados son IDENTIDAD
+     y salen de la paleta categorica compartida (assets/js/paleta.js), en
+     posiciones fijas para que no cambien si manana se agrega una serie.
+     Vencidos SLA es ESTADO, no identidad: conserva el rojo semantico y por
+     eso NO toma la posicion 2 de la paleta -que tambien es roja-. */
+  const AZUL = Paleta.porIndice(0), VERDE_S = Paleta.porIndice(2), ROJO = ROJO_SEM,
+        MORADO = Paleta.porIndice(4), GRIS = Paleta.NEUTRO;
+  /* Barras apiladas de productividad: mismas dos posiciones categoricas que
+     Creados/Cerrados arriba, para que las dos tarjetas se lean igual. */
+  const BARRA_A = Paleta.porIndice(0), BARRA_B = Paleta.porIndice(2);
+  // Identidad de "estado" del ticket. Un solo registro para todo el tablero
+  // de SLA: si manana otra grafica pinta la misma dimension, debe pedir este
+  // mismo nombre de registro para que los colores coincidan.
+  const REG_ESTADO = Paleta.registro('sla-estado');
   const ORDEN_AGING = ['0-1 dias', '2-3 dias', '4-7 dias', '8-15 dias', '16-30 dias', '31+ dias', 'Sin fecha'];
   // Posicion del cubo dentro del orden -> escalon de la rampa ordinal.
   function colorAging(etiqueta) {
@@ -1423,7 +1417,7 @@ const TableroSla = (function () {
 
     const serie = (label, data, color, rellenar) => ({
       label, data, borderColor: color,
-      backgroundColor: rellenar ? 'rgba(140,191,30,.16)' : color,
+      backgroundColor: rellenar ? 'rgba(37,99,235,.12)' : color,
       fill: !!rellenar, tension: .3, borderWidth: 2,
       pointRadius: estilo.pointRadius, pointHoverRadius: estilo.pointHoverRadius,
     });
@@ -1562,7 +1556,10 @@ const TableroSla = (function () {
     const ent = entradasDim('estado', null);
     const etiquetas = ent.map(e => e[0]);
     const valores = ent.map(e => e[1]);
-    const colores = etiquetas.map((_, i) => PALETA_CAT[i % PALETA_CAT.length]);
+    /* entradasDim('estado') ordena por volumen, asi que el orden cambia con
+       los filtros. El registro reparte por orden de ALTA y no por orden de
+       pintado: un estado conserva su color aunque baje de posicion. */
+    const colores = REG_ESTADO.escala(etiquetas);
     const sel = bordesSeleccion(etiquetas, filtro.estado, 2);
 
     if (!etiquetas.length) {
@@ -1882,8 +1879,10 @@ const TableroSla = (function () {
 const TableroBacklog = (function () {
   // Misma paleta que usa el correo, en el mismo orden: un lider conserva su
   // color entre el correo, la grafica apilada y la tabla de resumen.
-  // Identidad por lider: las ocho posiciones categoricas en su orden fijo.
-  const PALETA = PALETA_CAT;
+  // Identidad por lider: paleta categorica COMPARTIDA (assets/js/paleta.js).
+  // El indice del lider en ordenLideres decide el color -no el orden de
+  // pintado-, asi que un lider lleva el mismo color en la tendencia, la
+  // antiguedad por lider, la tabla de resumen y los swatches.
   // AgingSort >= 5 es exactamente "mas de 30 dias" (ver 07_correo_backlog.sql).
   const SORT_MAS_30 = 5;
 
@@ -1894,8 +1893,7 @@ const TableroBacklog = (function () {
   const ETIQUETA_DIM = { lider: 'Lider', grupo: 'Grupo', prioridad: 'Prioridad', aging: 'Antiguedad' };
 
   function colorLider(nombre) {
-    const i = ordenLideres.indexOf(nombre);
-    return i >= 0 ? PALETA[i % PALETA.length] : NEUTRO_SEM;
+    return Paleta.color(nombre, ordenLideres);
   }
   function hayFiltro() { return dimensionesActivas(filtro).length > 0; }
   // hayFiltro() solo mira el cross-filter de las graficas. Para los mensajes de
@@ -2110,8 +2108,8 @@ const TableroBacklog = (function () {
         labels: serie.map(f => String(f.Periodo).slice(0, 10)),
         datasets: [{
           label: 'Backlog', data: serie.map(f => f.TicketsBacklog),
-          borderColor: filtro.lider ? colorLider(filtro.lider) : PALETA[0],
-          backgroundColor: 'rgba(140,191,30,.16)', fill: true,
+          borderColor: filtro.lider ? colorLider(filtro.lider) : Paleta.porIndice(0),
+          backgroundColor: 'rgba(37,99,235,.12)', fill: true,
           borderWidth: 2, tension: .3, pointRadius: 3,
         }],
       },
@@ -2191,9 +2189,11 @@ const TableroBacklog = (function () {
       return renderEmptyChart('chart-lider-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
+    // Barras.GRUESA va primero: el borderRadius de 6 de esta grafica y el
+    // contorno de seleccion siguen mandando sobre lo que traiga el juego.
     dibujar('chart-lider-bl', {
       type: 'bar',
-      data: { labels: etiquetas, datasets: [{ data: ent.map(e => e[1]),
+      data: { labels: etiquetas, datasets: [{ ...Barras.GRUESA, data: ent.map(e => e[1]),
         backgroundColor: etiquetas.map(colorLider),
         borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
       options: {
@@ -2202,6 +2202,7 @@ const TableroBacklog = (function () {
         scales: EJE_Y_CERO,
         onClick: (evt, _e, gr) => alternarFiltro('lider', etiquetaDelClic(gr, evt)),
       },
+      plugins: [ETIQUETAS_DENTRO],
     });
   }
 
@@ -2222,9 +2223,11 @@ const TableroBacklog = (function () {
       return renderEmptyChart('chart-prioridad-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
+    // El color sigue siendo COLOR_PRIORIDAD: Critica/Alta/Media/Baja es
+    // severidad, no identidad, y no entra en la paleta categorica.
     dibujar('chart-prioridad-bl', {
       type: 'bar',
-      data: { labels: etiquetas, datasets: [{ data: valores,
+      data: { labels: etiquetas, datasets: [{ ...Barras.GRUESA, data: valores,
         backgroundColor: etiquetas.map(l => COLOR_PRIORIDAD[l]),
         borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
       options: {
@@ -2233,6 +2236,7 @@ const TableroBacklog = (function () {
         scales: EJE_Y_CERO,
         onClick: (evt, _e, gr) => alternarFiltro('prioridad', etiquetaDelClic(gr, evt)),
       },
+      plugins: [ETIQUETAS_DENTRO],
     });
   }
 
@@ -2256,7 +2260,12 @@ const TableroBacklog = (function () {
       type: 'bar',
       data: {
         labels: m.buckets,
+        // Solo el grosor del juego compartido. La cifra de cada segmento la
+        // sigue pintando ETIQUETAS_SEGMENTO: en una apilada no hay "fuera de
+        // la barra" donde caer -seria encima del segmento vecino-, asi que el
+        // fallback correcto es omitir el segmento que no da el alto.
         datasets: m.lideres.map(l => ({
+          ...Barras.GRUESA,
           label: l,
           data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
           backgroundColor: colorLider(l),

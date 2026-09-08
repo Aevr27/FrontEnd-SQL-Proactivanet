@@ -65,24 +65,30 @@
   var NUM = new Intl.NumberFormat('es-MX');
   var NUM2 = new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Paleta de GRAFICAS. La marca usa los verdes del degradado tal cual
-  // (#9DD323 / #65BB2B / #478B3C); para rellenar una marca sobre blanco esos
-  // tres son demasiado claros, asi que aqui va la misma escala
-  // re-escalonada. Los nombres de las claves son heredados y ya NO describen
-  // su color: se conservan para no tocar la logica que los cita.
-  //
-  // Los cuatro estados de validacion se validaron juntos (modo claro):
-  // CVD peor par ΔE 10.5 (protan), vision normal ΔE 16.5. El rojo queda
-  // reservado para "Incorrecto" y no se usa en ningun otro sitio.
+  /* Colores de este tablero. Hay DOS sistemas y no se mezclan:
+
+     - IDENTIDAD de serie (barras de Grupo y de Tecnico): sale de la paleta
+       categorica COMPARTIDA, assets/js/paleta.js -> window.Paleta. No se
+       copia el arreglo aqui; una grafica nueva con categorias tambien debe
+       pedirla ahi (Paleta.escala / Paleta.color / Paleta.registro).
+       Embebido en dashboard.html este modulo pierde sus <script> y usa la
+       copia que ya cargo dashboard.html; suelto, la carga qa.html.
+
+     - ESTADO de validacion (OK / Incorrecto / Valido / Sin catalogo): es
+       semantico y se queda como esta. El rojo sigue reservado para
+       "Incorrecto" y no se usa en ningun otro sitio del tablero.
+
+     Los nombres de las claves son heredados y ya NO describen su color: se
+     conservan para no tocar la logica que los cita. */
   var COLOR = {
-    azul: '#5aa726',        // serie primaria: verde de marca
-    azulOscuro: '#356b2c',  // hover de barra: mismo tono, mas profundo
-    verde: '#5aa726',       // estado OK
-    rojo: '#982a18',        // estado Incorrecto (unico uso del rojo)
-    ambar: '#b09512',       // estado Sin catalogo: mostaza, no ambar semantico
-    morado: '#8cbf1e',      // serie secundaria: lima
-    cyan: '#2f8f6b',        // estado Valido: verde pino
-    gris: '#8a8578'         // fuera de catalogo: neutro
+    azul: Paleta.porIndice(0),   // serie primaria (barras por grupo)
+    azulOscuro: '#1d4ed8',       // hover de barra: la primaria, mas profunda
+    verde: '#5aa726',            // estado OK
+    rojo: '#982a18',             // estado Incorrecto (unico uso del rojo)
+    ambar: '#b09512',            // estado Sin catalogo: mostaza, no ambar semantico
+    morado: Paleta.porIndice(2), // serie secundaria (barras por tecnico)
+    cyan: '#2f8f6b',             // estado Valido: verde pino
+    gris: Paleta.NEUTRO          // fuera de catalogo: neutro
   };
   // Tinta de ejes, etiquetas y rejilla: carbon y gris verdoso.
   var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1ea' };

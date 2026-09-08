@@ -101,39 +101,34 @@ const VERDE = {
 };
 /* Tinta legible encima de un relleno de la escala. Los verdes claros
    (lima, --g-300, --g-200) hunden el texto blanco: sobre ellos va carbon.
-   Devuelve #191919 o #fff segun la luminancia relativa del fondo. */
-function tintaSobre(hex){
-  const c=String(hex||'').replace('#','');
-  if(c.length<6) return '#191919';
-  const lin=v=>{v/=255; return v<=0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055,2.4);};
-  const L=0.2126*lin(parseInt(c.slice(0,2),16))
-         +0.7152*lin(parseInt(c.slice(2,4),16))
-         +0.0722*lin(parseInt(c.slice(4,6),16));
-  // Contraste contra blanco vs contra carbon; gana el mas alto.
-  return (1.05/(L+0.05)) >= ((L+0.05)/0.0596) ? '#fff' : '#191919';
-}
+   Vive en assets/js/barras.js, que la comparte con dashboard.js. */
+const tintaSobre = Barras.tintaSobre;
 const ROJO_SEM = '#982a18';   // negativo
 const AMBAR_SEM = '#d97706';  // advertencia
 const NEUTRO_SEM = '#8a8578'; // referencia / sin dato
 
-/* PALETA CATEGORICA — ocho posiciones en ORDEN FIJO, seis de ellas verdes.
-   Terracota, mostaza y naranja tostado entran solo porque el verde no da
-   ocho tonos separables por si solo. Sin azul, morado, cian ni magenta.
-   Validada (modo claro, pares adyacentes): CVD peor par ΔE 10.5 protan,
-   vision normal ΔE 16.5. Las posiciones 2 y 7 son calidas y NO conviven
-   con el rojo/ambar semanticos: ninguna grafica que llegue ahi los pinta. */
-const PALETA_VERDE = ['#5aa726','#9c5a24','#8cbf1e','#2f8f6b','#b09512','#356b2c','#c9772e','#78c96b'];
+/* PALETA CATEGORICA — ya NO se define aqui. Vive en assets/js/paleta.js
+   (window.Paleta) y la comparten SLA, Backlog, QA, Experiencia y
+   Orquestacion, para que una categoria lleve el mismo color en todos.
+   Ese archivo explica como consumirla en una grafica nueva: Paleta.escala(),
+   Paleta.color(), Paleta.registro(). NO se copia el arreglo.
+
+   Embebido en dashboard.html este modulo pierde sus <script> (asi lo monta
+   moduloEmbebido) y usa la copia que ya cargo dashboard.html; suelto, la
+   carga experiencia.html. En las dos rutas hay un unico window.Paleta.
+
+   Aqui abajo, ROJO_SEM / AMBAR_SEM / NEUTRO_SEM, el semaforo SEMC y
+   COLOR_ESTADO son ESTADO y ORDEN, no identidad: no salen de la paleta. */
+const PALETA_CATEGORICA = Paleta.PALETA_CATEGORICA;
 
 const AGR = P.agrupadores;
-/* acolor lo manda el servidor (App_Code/ExperienciaQueries.cs, que no se
-   toca en un cambio de tema) y sigue trayendo la paleta azul/morada vieja.
-   El remapeo es puramente de presentacion: se conserva el ORDEN y el juego
-   de claves del servidor y solo se sustituye el valor de color, para que
-   los agrupadores entren en la escala verde como el resto del tablero. */
-const ACOLOR = {};
-(AGR || Object.keys(P.acolor || {})).forEach((clave, i) => {
-  ACOLOR[clave] = PALETA_VERDE[i % PALETA_VERDE.length];
-});
+/* Identidad de AGRUPADOR. El color no se toma de P.acolor -lo manda el
+   servidor (App_Code/ExperienciaQueries.cs) y ahi no se toca un cambio de
+   tema-: se reasigna en presentacion contra la paleta compartida. Se
+   conserva el ORDEN y el juego de claves del servidor, que es canonico y
+   estable, asi que un agrupador lleva siempre el mismo color -en los chips,
+   en la grafica de historico y donde aparezca- sin depender del repintado. */
+const ACOLOR = Paleta.mapa(AGR || Object.keys(P.acolor || {}));
 
 // Los chips de agrupador se distinguen por el TINTE de fondo; la tinta es
 // siempre la misma para que el texto se lea a 5.7:1 sobre blanco.
@@ -976,7 +971,7 @@ function graficarHist(){
     alert(`Marca al menos una categoría de nivel ${nivel} para graficar.`);
     return;
   }
-  const colores=PALETA_VERDE;
+  const colores=PALETA_CATEGORICA;
   const ctx=document.getElementById('chartHistFull');
   const leyenda=document.getElementById('histChartPopupLegend');
   if(chartHist) chartHist.destroy();
@@ -1229,7 +1224,7 @@ function descargarTickets(){
 // Product Owner": muchas filas con nombres largos no caben legibles en un
 // eje Y de barras horizontal angosto, y el treemap reparte el area
 // proporcional al valor sin ese problema.
-const TM_COLORES=PALETA_VERDE;
+const TM_COLORES=PALETA_CATEGORICA;
 function tmWorst(row,rowSum,scale,sideLen){
   if(!row.length) return Infinity;
   const areaSum=rowSum*scale;
@@ -1333,6 +1328,11 @@ function renderTreemap(containerId,items,opts){
 // Plugin de Chart.js inline (sin dependencias externas, como el treemap) que
 // dibuja el valor de cada barra encima de ella -- Chart.js core no trae un
 // plugin de datalabels.
+/* La cifra dentro de la barra la pinta el plugin COMPARTIDO
+   (assets/js/barras.js), atado al FMT de este tablero. Una sola
+   implementacion: dashboard.js usa ese mismo plugin para las barras de
+   Backlog. Aqui solo se le pone nombre local para no tocar los usos. */
+const valueLabelsDentroPlugin = Barras.etiquetasDentro(FMT);
 const valueLabelsPlugin={
   id:'valueLabels',
   afterDatasetsDraw(chart){
@@ -1386,7 +1386,10 @@ function renderChartEstados(cats){
   const data=labels.map(e=>conteo[e]||0);
   const colors=labels.map(e=>COLOR_ESTADO[e]);
   if(chartEstados) chartEstados.destroy();
-  chartEstados=new Chart(el,{type:'bar',data:{labels,datasets:[{data,backgroundColor:colors}]},
+  // Barra gruesa compartida y la cifra dentro. El color NO cambia: los tres
+  // estados son una progresion semantica (COLOR_ESTADO), no identidades.
+  chartEstados=new Chart(el,{type:'bar',
+    data:{labels,datasets:[Object.assign({},BARRA_GRUESA,{data,backgroundColor:colors})]},
     options:{responsive:true,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.label+': '+FMT(c.raw)+' iniciativas'}}},
       onClick:(evt,elements)=>{
@@ -1395,7 +1398,7 @@ function renderChartEstados(cats){
       },
       onHover:(evt,elements)=>{evt.native.target.style.cursor=elements.length?'pointer':'default';},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}},
-    plugins:[valueLabelsPlugin]});
+    plugins:[valueLabelsDentroPlugin]});
 }
 // Navega a la pestaña "Iniciativas Activas" y la filtra por el estado dado
 // (usa el mismo filtro cruzado de graficas de TAREA 3, campo "estado").
@@ -1472,6 +1475,22 @@ function renderPanelGraf(tab, cats){
 }
 
 let chartBarDir=null;
+
+/* Identidad de DIRECTOR y de PRODUCT OWNER. Las dos dimensiones se ordenan
+   por volumen, asi que su posicion cambia con cada filtro: por eso van por
+   registro con nombre de la paleta COMPARTIDA (assets/js/paleta.js) y no por
+   indice. El registro reparte por orden de ALTA, asi que un director -o un
+   PO- conserva su color aunque baje de puesto, salga del top 15 o se entre a
+   un director en el detalle. Las dos graficas de PO comparten registro, asi
+   que el mismo PO sale del mismo color en "Volumen" y en "Con Iniciativa". */
+const REG_DIRECTOR = Paleta.registro('exp-director');
+const REG_PO = Paleta.registro('exp-po');
+
+/* Grosor de barra: el juego COMPARTIDO de assets/js/barras.js, el mismo que
+   usan las barras de Backlog. No trae borderRadius, asi que sigue mandando el
+   4 que este modulo pone en Chart.defaults.datasets.bar. */
+const BARRA_GRUESA = Barras.GRUESA;
+
 /* Volumen por Product Owner: barras verticales, no treemap.
 
    Con 15 POs y un primer lugar que se lleva cerca de un tercio del total, el
@@ -1493,7 +1512,10 @@ function renderBarrasPO(canvasId, filas, valorDe){
   chartsPO[canvasId] = new Chart(el, {
     type: 'bar',
     data: { labels: datos.map(r => cortaPO(r.po)),
-      datasets: [{ data: datos.map(valorDe), backgroundColor: VERDE.marca }] },
+      // El color se pide con el nombre COMPLETO, no con el recortado del eje:
+      // dos POs distintos pueden compartir los primeros 15 caracteres.
+      datasets: [Object.assign({ data: datos.map(valorDe),
+        backgroundColor: REG_PO.escala(datos.map(r => r.po)) }, BARRA_GRUESA)] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false },
@@ -1506,6 +1528,7 @@ function renderBarrasPO(canvasId, filas, valorDe){
              ticks: { autoSkip: false, maxRotation: 55, minRotation: 55, font: { size: 10 } } },
       },
     },
+    plugins: [valueLabelsDentroPlugin],
   });
 }
 function renderResumen(){
@@ -1540,10 +1563,12 @@ function renderResumen(){
   const bdCtx=document.getElementById('chartBarDir');
   if(chartBarDir)chartBarDir.destroy();
   chartBarDir=new Chart(bdCtx,{type:'bar',data:{labels:dirRows.map(r=>r.dir),
-    datasets:[{data:dirRows.map(r=>r.vol),backgroundColor:VERDE.marca}]},
+    datasets:[Object.assign({data:dirRows.map(r=>r.vol),
+      backgroundColor:REG_DIRECTOR.escala(dirRows.map(r=>r.dir))},BARRA_GRUESA)]},
     options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},
-        y:{ticks:{autoSkip:false,font:{size:11}}}}}});
+        y:{ticks:{autoSkip:false,font:{size:11}}}}},
+    plugins:[valueLabelsDentroPlugin]});
   // barras por PO (top 15) y su version "con iniciativa" (mismas filas/orden)
   const porPO={};
   c1.forEach(c=>{const p=c.po||'(Sin PO)';

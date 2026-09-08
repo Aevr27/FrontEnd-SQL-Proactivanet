@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tickets Proactivanet — Tableros de SLA y Backlog</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<!-- Paleta categorica compartida. Va antes de dashboard.js y antes de los
+     modulos embebidos (Experiencia, QA), que pierden sus <script> al montarse
+     aqui y usan esta copia. -->
+<script src="assets/js/paleta.js"></script>
+<script src="assets/js/barras.js"></script>
 <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
