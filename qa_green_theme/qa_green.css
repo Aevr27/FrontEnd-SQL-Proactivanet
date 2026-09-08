@@ -99,7 +99,7 @@ body {
    un filete de 4px arriba y en la barrita vertical del titulo. */
 header.top {
   position: relative; overflow: hidden;
-  background: var(--surface);
+    background: linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%);
   color: var(--ink);
   padding: 26px 30px 24px;
   border: 1px solid var(--line-soft);
