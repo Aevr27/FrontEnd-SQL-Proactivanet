@@ -1386,11 +1386,17 @@ function renderChartEstados(cats){
   const data=labels.map(e=>conteo[e]||0);
   const colors=labels.map(e=>COLOR_ESTADO[e]);
   if(chartEstados) chartEstados.destroy();
-  // Barra gruesa compartida y la cifra dentro. El color NO cambia: los tres
-  // estados son una progresion semantica (COLOR_ESTADO), no identidades.
-  chartEstados=new Chart(el,{type:'bar',
-    data:{labels,datasets:[Object.assign({},BARRA_GRUESA,{data,backgroundColor:colors})]},
-    options:{responsive:true,plugins:{legend:{display:false},
+  /* Barra gruesa y cifra dentro: ya no se arman aqui, las trae
+     DashboardBarChart (assets/js/grafica.js). El color se pasa hecho en
+     `colores` porque NO es identidad: los tres estados son una progresion
+     semantica (COLOR_ESTADO) y no entran en la paleta categorica. */
+  chartEstados=new DashboardBarChart({
+    canvas: el,
+    etiquetas: labels,
+    datos: data,
+    colores: colors,
+    formato: FMT,
+    opciones:{plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.label+': '+FMT(c.raw)+' iniciativas'}}},
       onClick:(evt,elements)=>{
         if(!elements.length) return;
@@ -1398,7 +1404,7 @@ function renderChartEstados(cats){
       },
       onHover:(evt,elements)=>{evt.native.target.style.cursor=elements.length?'pointer':'default';},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}},
-    plugins:[valueLabelsDentroPlugin]});
+  }).render();
 }
 // Navega a la pestaña "Iniciativas Activas" y la filtra por el estado dado
 // (usa el mismo filtro cruzado de graficas de TAREA 3, campo "estado").

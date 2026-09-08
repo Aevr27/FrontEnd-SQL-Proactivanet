@@ -2189,21 +2189,26 @@ const TableroBacklog = (function () {
       return renderEmptyChart('chart-lider-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
-    // Barras.GRUESA va primero: el borderRadius de 6 de esta grafica y el
-    // contorno de seleccion siguen mandando sobre lo que traiga el juego.
-    dibujar('chart-lider-bl', {
-      type: 'bar',
-      data: { labels: etiquetas, datasets: [{ ...Barras.GRUESA, data: ent.map(e => e[1]),
-        backgroundColor: etiquetas.map(colorLider),
-        borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
+    /* Medidas y cifra dentro las pone DashboardBarChart (assets/js/grafica.js);
+       aqui solo queda lo propio de esta grafica. El color de lider es
+       IDENTIDAD y sale de la posicion en `ordenLideres` -el mismo criterio que
+       colorLider()-, asi que una persona lleva su color en todas las vistas.
+       El borderRadius de 6 y el contorno de seleccion mandan sobre el juego
+       compartido: van en `dataset`, que se aplica despues de las medidas. */
+    graficos['chart-lider-bl'] = new DashboardBarChart({
+      canvas: 'chart-lider-bl',
+      etiquetas,
+      datos: ent.map(e => e[1]),
+      paleta: { orden: ordenLideres },
+      formato: FMT,
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
+      opciones: {
+        maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
         scales: EJE_Y_CERO,
         onClick: (evt, _e, gr) => alternarFiltro('lider', etiquetaDelClic(gr, evt)),
       },
-      plugins: [ETIQUETAS_DENTRO],
-    });
+    }).render();
   }
 
   function renderBarrasPrioridad() {
@@ -2223,21 +2228,23 @@ const TableroBacklog = (function () {
       return renderEmptyChart('chart-prioridad-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
-    // El color sigue siendo COLOR_PRIORIDAD: Critica/Alta/Media/Baja es
-    // severidad, no identidad, y no entra en la paleta categorica.
-    dibujar('chart-prioridad-bl', {
-      type: 'bar',
-      data: { labels: etiquetas, datasets: [{ ...Barras.GRUESA, data: valores,
-        backgroundColor: etiquetas.map(l => COLOR_PRIORIDAD[l]),
-        borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
+    /* El color va en `colores`, hecho, y NO por `paleta`: COLOR_PRIORIDAD es
+       severidad -Critica/Alta/Media/Baja-, no identidad, y no entra en la
+       paleta categorica. Medidas y cifra dentro las trae DashboardBarChart. */
+    graficos['chart-prioridad-bl'] = new DashboardBarChart({
+      canvas: 'chart-prioridad-bl',
+      etiquetas,
+      datos: valores,
+      colores: etiquetas.map(l => COLOR_PRIORIDAD[l]),
+      formato: FMT,
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
+      opciones: {
+        maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
         scales: EJE_Y_CERO,
         onClick: (evt, _e, gr) => alternarFiltro('prioridad', etiquetaDelClic(gr, evt)),
       },
-      plugins: [ETIQUETAS_DENTRO],
-    });
+    }).render();
   }
 
   // Apilada por lider: dentro de cada barra de antiguedad, un color por lider.
@@ -2256,25 +2263,25 @@ const TableroBacklog = (function () {
     // grosor se aplica por segmento, y asi se resalta la columna completa.
     const sel = bordesSeleccion(m.buckets, filtro.aging, 0);
 
-    dibujar('chart-aging-bl', {
-      type: 'bar',
-      data: {
-        labels: m.buckets,
-        // Solo el grosor del juego compartido. La cifra de cada segmento la
-        // sigue pintando ETIQUETAS_SEGMENTO: en una apilada no hay "fuera de
-        // la barra" donde caer -seria encima del segmento vecino-, asi que el
-        // fallback correcto es omitir el segmento que no da el alto.
-        datasets: m.lideres.map(l => ({
-          ...Barras.GRUESA,
-          label: l,
-          data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
-          backgroundColor: colorLider(l),
-          borderColor: sel.borderColor,
-          borderWidth: sel.borderWidth,
-        })),
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
+    /* Apilada: DashboardBarChart pone el grosor a cada dataset, pero la cifra
+       dentro se apaga con `etiquetasDentro: false`. En una apilada no hay
+       "fuera de la barra" donde caer -seria encima del segmento vecino-, asi
+       que aqui manda ETIQUETAS_SEGMENTO, que omite el segmento que no da el
+       alto. El color de lider es identidad y ya viene resuelto por
+       colorLider() (Paleta contra `ordenLideres`), uno por dataset. */
+    graficos['chart-aging-bl'] = new DashboardBarChart({
+      canvas: 'chart-aging-bl',
+      etiquetas: m.buckets,
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
+      datasets: m.lideres.map(l => ({
+        label: l,
+        data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
+        backgroundColor: colorLider(l),
+      })),
+      etiquetasDentro: false,
+      plugins: [ETIQUETAS_SEGMENTO],
+      opciones: {
+        maintainAspectRatio: false,
         plugins: {
           ...LEYENDA_ABAJO,
           tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } },
@@ -2282,8 +2289,7 @@ const TableroBacklog = (function () {
         scales: { x: { stacked: true }, y: { stacked: true, ...EJE_Y_CERO.y } },
         onClick: (evt, _e, gr) => alternarFiltro('aging', etiquetaDelClic(gr, evt)),
       },
-      plugins: [ETIQUETAS_SEGMENTO],
-    });
+    }).render();
   }
 
 
