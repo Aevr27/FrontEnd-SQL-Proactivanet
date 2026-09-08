@@ -91,12 +91,17 @@
     --grad-btn-hover: linear-gradient(160deg, var(--g-500) 0%, var(--g-700) 55%, var(--g-800) 100%);
     --btn-ink: var(--ink);
 
-    /* Controles de filtro: dejaron de ser barras azul marino. Superficie
-       blanca, estructura gris clara y acento verde al enfocar. */
+    /* Controles de filtro: dejaron de ser barras azul marino y tampoco son
+       cajas grises neutras. Superficie blanca -para que el dato se lea-,
+       pero ESTRUCTURA VERDE: el borde, la etiqueta, el hover y el foco
+       salen de la misma escala de la cabecera. Verde donde marca, blanco
+       donde se lee. */
     --ctrl-bg: #ffffff;
     --ctrl-bg-2: var(--g-50);
-    --ctrl-line: var(--line);
+    --ctrl-line: var(--g-200);
+    --ctrl-line-hover: var(--g-400);
     --ctrl-ink: var(--ink);
+    --ctrl-label: var(--g-900);
 
     /* Verde primario apagado para los botones del panel de filtros. */
     --accent-deep: var(--g-700);
@@ -266,11 +271,18 @@
 
   /* ---- Filtros del servidor ---- */
   .filtros {
+    position: relative; overflow: hidden;
     background: var(--card); border-radius: var(--radius);
-    box-shadow: var(--shadow); border: 1px solid var(--line-soft);
+    box-shadow: var(--shadow); border: 1px solid var(--g-100);
     padding: 18px 20px;
     display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
     gap: 16px 14px; align-items: end; margin-bottom: 16px;
+  }
+  /* Filo de marca al borde superior de la tarjeta: ata el panel de filtros
+     al degradado de la cabecera sin pintar de verde ningun control. */
+  .filtros::before {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: var(--grad-linea);
   }
   .filtros .campo {
     display: flex; flex-direction: column; justify-content: flex-end;
@@ -279,7 +291,7 @@
   /* Dos lineas reservadas para la etiqueta: asi todas las barras de la fila
      quedan alineadas aunque un titulo se parta en dos renglones. */
   .filtros label {
-    font-size: 10.5px; font-weight: 700; color: var(--muted);
+    font-size: 10.5px; font-weight: 700; color: var(--ctrl-label);
     text-transform: uppercase; letter-spacing: .5px; line-height: 1.35;
     min-height: 28px; display: flex; align-items: flex-end;
   }
@@ -302,7 +314,7 @@
     background-color: var(--ctrl-bg);
 }
   .filtros input[type="date"]:hover,
-  .filtros select:hover { background: var(--ctrl-bg-2) !important; border-color: var(--g-300); }
+  .filtros select:hover { background: var(--ctrl-bg-2) !important; border-color: var(--ctrl-line-hover); }
   .filtros input[type="date"]:focus,
   .filtros select:focus {
     outline: none; border-color: var(--accent); background: var(--ctrl-bg-2) !important;
@@ -315,7 +327,7 @@
   .filtros select:not([multiple]) {
     appearance: none; -webkit-appearance: none; -moz-appearance: none;
     padding-right: 30px;
-    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235e5e5f' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23478b3c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 10px center;
   }
@@ -354,10 +366,10 @@
     background: var(--ctrl-bg); color: var(--ctrl-ink);
     font: inherit; font-size: 13px; text-align: left; cursor: pointer;
     transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235e5e5f' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23478b3c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat; background-position: right 10px center;
   }
-  .ms-boton:hover { background-color: var(--ctrl-bg-2); border-color: var(--g-300); }
+  .ms-boton:hover { background-color: var(--ctrl-bg-2); border-color: var(--ctrl-line-hover); }
   .ms-boton:focus-visible,
   .ms.abierto .ms-boton {
     outline: none; border-color: var(--accent); background-color: var(--ctrl-bg-2);
@@ -445,7 +457,7 @@
     box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05);
     transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
   }
-  .filtros .slotstep:hover { background: var(--ctrl-bg-2); border-color: var(--g-300); }
+  .filtros .slotstep:hover { background: var(--ctrl-bg-2); border-color: var(--ctrl-line-hover); }
   .filtros .slotstep:focus-within {
     border-color: var(--accent); background: var(--ctrl-bg-2);
     box-shadow: var(--ring), inset 0 1px 2px rgba(25, 25, 25, .05);

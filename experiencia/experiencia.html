@@ -13,7 +13,11 @@
   <header class="top">
     <h1>Tablero de Experiencia al Usuario <span style="font-size:11px;font-weight:400;opacity:.7">v3.7</span></h1>
     <div class="sub" id="subhead">Resumen general — todos los tickets</div>
-    <div class="sub" id="corteFecha" style="font-size:11px;opacity:.85"></div>
+    <!-- Insignia de corte: pastilla blanca a la derecha de la cabecera, mismo
+         trato que el chip de fecha del tablero de QA. Vacia no se pinta
+         (regla :empty en experiencia.css), asi que el JS que la rellena no
+         cambia. -->
+    <div id="corteFecha"></div>
     <div class="selrow">
       <div class="grp"><label>Director</label>
         <select id="selDir"><option value="">— Todos —</option></select></div>
@@ -61,24 +65,40 @@
         <th class="num">Tickets en Riesgo</th><th class="num">% En Tiempo</th>
       </tr></thead><tbody id="bodyDirectores"></tbody></table></div>
     </div>
+    <!-- "Volumen por Product Owner" e "Iniciativas por Estado" cambiaron de
+         sitio. El treemap de PO es el que necesita area -cada bloque lleva
+         nombre y cifra dentro-, asi que pasa a la tarjeta de ancho completo;
+         "Iniciativas por Estado" son tres barras y se leen igual -mejor, ya
+         sin ser bloques gigantes- en una columna angosta. Ni los datos ni el
+         clic de ninguna de las dos cambian. -->
     <div class="grid3" id="gridResumenCharts">
       <div class="card" id="cardBarDir">
         <h3>Volumen por Director (mayor → menor)</h3>
         <canvas id="chartBarDir" style="max-height:300px"></canvas>
       </div>
       <div class="card">
+        <h3>Iniciativas por Estado</h3>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Clic en una barra para ver esas iniciativas en "Iniciativas Activas".</p>
+        <canvas id="chartEstados" style="max-height:280px"></canvas>
+      </div>
+    </div>
+    <!-- Las dos graficas de Product Owner bajan a su propio renglón y dejan
+         de ser treemap. Con 15 POs y un primer lugar que se lleva un tercio
+         del total, el treemap degeneraba en tiras de unos pocos pixeles
+         donde ya no cabía ni el nombre ni la cifra. En barras verticales
+         cada PO conserva alto propio, el orden se lee de un vistazo y el
+         nombre va en el eje. En el hueco que dejaron queda "Iniciativas por
+         Estado", que son tres barras y se leen igual en una columna
+         angosta. Mismos datos, mismo orden y mismo top 15. -->
+    <div class="grid-po">
+      <div class="card">
         <h3 id="tituloBarPO">Volumen por Product Owner (mayor → menor)</h3>
-        <div id="chartBarPO" class="treemap"></div>
+        <div class="lienzo-po"><canvas id="chartBarPO"></canvas></div>
       </div>
       <div class="card">
         <h3 id="tituloBarPOIni">Volumen con Iniciativa por Product Owner</h3>
-        <div id="chartBarPOIni" class="treemap"></div>
+        <div class="lienzo-po"><canvas id="chartBarPOIni"></canvas></div>
       </div>
-    </div>
-    <div class="card" style="margin-bottom:16px">
-      <h3>Iniciativas por Estado</h3>
-      <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Clic en una barra para ver esas iniciativas en "Iniciativas Activas".</p>
-      <canvas id="chartEstados" style="max-height:280px"></canvas>
     </div>
   </section>
 

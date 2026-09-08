@@ -142,6 +142,36 @@ const SEM = v => v>=0.9?'v':(v>=0.7?'a':'r');
 // Semaforo: verde de marca, ambar de advertencia y el rojo de lo negativo.
 const SEMC = {v:VERDE.profundo,a:AMBAR_SEM,r:ROJO_SEM};
 const ESTADOS_ACTIVOS=["En Análisis","En Solución","En Monitoreo"];
+
+/* Presentacion por defecto de Chart.js, a juego con dashboard.js: rejilla
+   suave y BARRAS ESBELTAS. Sin el tope de grosor, una grafica de tres cubos
+   -"Iniciativas por Estado"- estiraba cada barra hasta llenar su categoria y
+   pintaba tres bloques enormes. Solo toca presentacion: ninguna grafica
+   cambia de datos, escala ni eventos, y la que declare lo suyo sigue
+   mandando. */
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.color = '#393939';
+  Chart.defaults.borderColor = '#f2f5ed';
+  if (Chart.defaults.scale && Chart.defaults.scale.grid) {
+    Chart.defaults.scale.grid.color = '#f2f5ed';
+    Chart.defaults.scale.grid.drawTicks = false;
+    Chart.defaults.scale.grid.tickLength = 8;
+  }
+  if (Chart.defaults.datasets && Chart.defaults.datasets.bar) {
+    Object.assign(Chart.defaults.datasets.bar, {
+      maxBarThickness: 26,
+      categoryPercentage: 0.72,
+      barPercentage: 0.80,
+      borderRadius: 4,
+    });
+  }
+  if (Chart.defaults.plugins && Chart.defaults.plugins.tooltip) {
+    Object.assign(Chart.defaults.plugins.tooltip, {
+      backgroundColor: 'rgba(25, 25, 25, .92)',
+      borderColor: '#478b3c', borderWidth: 1,
+    });
+  }
+}
 const badge = v => `<span class="badge b${SEM(v)}">${PCT(v)}</span>`;
 // Semaforo binario (TAREA 4, pestaña "Categorias sin iniciativa"): 0% =
 // rojo, mayor a 0% = amarillo. Sin verde, sin degradado -- deliberadamente
@@ -1442,13 +1472,50 @@ function renderPanelGraf(tab, cats){
 }
 
 let chartBarDir=null;
+/* Volumen por Product Owner: barras verticales, no treemap.
+
+   Con 15 POs y un primer lugar que se lleva cerca de un tercio del total, el
+   treemap degeneraba: los ultimos diez quedaban en tiras de unos pocos
+   pixeles de alto, sin sitio para el nombre ni la cifra. En barras verticales
+   cada PO conserva su propio alto, el orden se lee de un vistazo y el nombre
+   va en el eje. Mismas filas, mismo orden y mismo top 15 que antes: solo
+   cambia como se dibujan.
+
+   El nombre del eje va recortado -no cabe uno completo bajo una barra- y el
+   tooltip da el nombre entero, asi que no se pierde nada. */
+const chartsPO = {};
+const cortaPO = s => (s && s.length > 16) ? s.slice(0, 15) + '…' : s;
+function renderBarrasPO(canvasId, filas, valorDe){
+  const el = document.getElementById(canvasId);
+  if(!el) return;
+  if(chartsPO[canvasId]) chartsPO[canvasId].destroy();
+  const datos = filas.filter(r => valorDe(r) > 0);
+  chartsPO[canvasId] = new Chart(el, {
+    type: 'bar',
+    data: { labels: datos.map(r => cortaPO(r.po)),
+      datasets: [{ data: datos.map(valorDe), backgroundColor: VERDE.marca }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: {
+          title: it => datos[it[0].dataIndex] ? datos[it[0].dataIndex].po : '',
+          label: c => FMT(c.raw) + ' tickets' } } },
+      scales: {
+        y: { beginAtZero: true, ticks: { callback: v => FMT(v) } },
+        x: { grid: { display: false },
+             ticks: { autoSkip: false, maxRotation: 55, minRotation: 55, font: { size: 10 } } },
+      },
+    },
+  });
+}
 function renderResumen(){
   document.getElementById('tituloResumen').textContent='Indicadores por Director';
   document.getElementById('thResumenCol').textContent='Director';
   document.getElementById('tituloBarPO').textContent='Volumen por Product Owner (mayor → menor)';
   document.getElementById('tituloBarPOIni').textContent='Volumen con Iniciativa por Product Owner';
   document.getElementById('cardBarDir').style.display='block';
-  // Sin filtro: 3 graficas (Director + 2 treemap de PO) repartiendo el ancho.
+  // Sin filtro: la rejilla lleva Director + Iniciativas por Estado. Las dos
+  // graficas de Product Owner viven en su propio renglon, debajo.
   document.getElementById('gridResumenCharts').classList.remove('g2cols');
   // Agrupar por director (solo C1 para no duplicar volumen)
   const c1=P.categorias.filter(c=>c.nivel==='C1' && pasaFiltroGlobal(c));
@@ -1477,21 +1544,21 @@ function renderResumen(){
     options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},
         y:{ticks:{autoSkip:false,font:{size:11}}}}}});
-  // treemap por PO (top 15) y su version "con iniciativa" (mismas filas/orden)
+  // barras por PO (top 15) y su version "con iniciativa" (mismas filas/orden)
   const porPO={};
   c1.forEach(c=>{const p=c.po||'(Sin PO)';
     if(!porPO[p])porPO[p]={vol:0,ini:0};
     porPO[p].vol+=volActualDe(c); porPO[p].ini+=conIniVolDe(c);});
   const poRows=Object.entries(porPO).map(([p,v])=>({po:p,vol:v.vol,ini:v.ini}))
     .sort((a,b)=>b.vol-a.vol).slice(0,15);
-  renderTreemap('chartBarPO', poRows.map(r=>({label:r.po,value:r.vol})));
-  renderTreemap('chartBarPOIni', poRows.map(r=>({label:r.po,value:r.ini})));
+  renderBarrasPO('chartBarPO', poRows, r=>r.vol);
+  renderBarrasPO('chartBarPOIni', poRows, r=>r.ini);
 }
 
 // Misma seccion/tabla que renderResumen(), pero agregada por Product Owner
 // dentro de un Director seleccionado (punto 3): filas = POs de ese Director.
-// Con Director filtrado se oculta la grafica de Director y solo quedan las
-// 2 de PO (treemap), que se reparten el ancho completo (g2cols).
+// Con Director filtrado se oculta la grafica de Director y la tarjeta que
+// queda en la rejilla toma el renglon entero (g2cols).
 function renderResumenPorPO(dir){
   document.getElementById('tituloResumen').textContent='Indicadores por Director: '+dir;
   document.getElementById('thResumenCol').textContent='Product Owner';
@@ -1514,8 +1581,8 @@ function renderResumenPorPO(dir){
     `<tr><td><b>${r.po}</b></td><td class="num">${FMT(r.vol)}</td><td class="num">${PCT(r.pct)}</td>
      <td class="num">${FMT(r.ini)}</td><td class="num">${miniBar(r.pctIni)} ${badge(r.pctIni)}</td>
      <td class="num">${FMT(r.ret)}</td><td class="num">${badge(r.pctTiempo)}</td></tr>`).join('');
-  renderTreemap('chartBarPO', poRows.map(r=>({label:r.po,value:r.vol})));
-  renderTreemap('chartBarPOIni', poRows.map(r=>({label:r.po,value:r.ini})));
+  renderBarrasPO('chartBarPO', poRows, r=>r.vol);
+  renderBarrasPO('chartBarPOIni', poRows, r=>r.ini);
 }
 
 // ---- selectores encadenados ----

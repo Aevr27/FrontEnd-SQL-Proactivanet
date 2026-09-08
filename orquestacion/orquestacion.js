@@ -103,7 +103,9 @@ function renderOrq(){
   const ccolors=['#982a18','#d97706','#356b2c','#8a8578'];
   const bctx=document.getElementById('chartCatJobs');
   if(chartCatJobs)chartCatJobs.destroy();
-  chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[{data:cvals,backgroundColor:ccolors}]},
+  chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[{data:cvals,backgroundColor:ccolors,
+    // Barras esbeltas, a juego con el resto de los tableros.
+    maxBarThickness:24,categoryPercentage:.72,barPercentage:.8,borderRadius:4}]},
     options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>FMT(c.raw)+' jobs'}}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}}}}});

@@ -94,10 +94,14 @@ const PALETA_CAT = [
    2.13:1. El cubo "Sin fecha" no es parte del orden: va en neutro. */
 const RAMPA_ORDINAL = ['#8cbf1e', '#6bad24', '#4f9528', '#387d2a', '#256425', '#144819'];
 
+/* Severidad = progresion, no identidades sueltas: el verde se OSCURECE
+   conforme sube la prioridad -Baja lima, Media verde de marca, Alta verde
+   profundo- y solo Critica conserva el rojo semantico. Antes Baja era el
+   verde mas oscuro y Media el mas claro, asi que el color contaba la
+   escala al reves. */
 const COLOR_PRIORIDAD = {
   'Critica': ROJO_SEM, 'Crítica': ROJO_SEM,
-  // Severidad: rojo y ambar se conservan; Media y Baja bajan por el verde.
-  'Alta': AMBAR_SEM, 'Media': VERDE.lima, 'Baja': VERDE.profundo
+  'Alta': VERDE.profundo, 'Media': VERDE.marca, 'Baja': VERDE.lima
 };
 
 // Semaforo de tres niveles: devuelve el sufijo de clase (.kpi.sv/.sa/.sr).
@@ -109,9 +113,27 @@ const COLOR_SEM = { sv: VERDE.profundo, sa: AMBAR_SEM, sr: ROJO_SEM };
    grafica que ya declare su propio `ticks`/`grid` sigue mandando. */
 if (typeof Chart !== 'undefined') {
   Chart.defaults.color = '#393939';
-  Chart.defaults.borderColor = '#eef1ea';
+  Chart.defaults.borderColor = '#f2f5ed';
   if (Chart.defaults.scale && Chart.defaults.scale.grid) {
-    Chart.defaults.scale.grid.color = '#eef1ea';
+    Chart.defaults.scale.grid.color = '#f2f5ed';
+    // La rejilla es referencia, no estructura: sin las marquitas del eje
+    // ni la linea del borde, las barras quedan sobre una cuadricula suave.
+    Chart.defaults.scale.grid.drawTicks = false;
+    Chart.defaults.scale.grid.tickLength = 8;
+  }
+  /* Barras esbeltas. Antes cada barra se estiraba hasta llenar su categoria,
+     asi que una grafica de tres cubos pintaba tres bloques enormes. Con un
+     tope de grosor y un poco de aire entre categorias, la misma grafica se
+     lee igual pero pesa mucho menos en pantalla. Es solo presentacion: no
+     toca datos, escalas ni eventos, y cualquier dataset que declare lo suyo
+     sigue mandando. */
+  if (Chart.defaults.datasets && Chart.defaults.datasets.bar) {
+    Object.assign(Chart.defaults.datasets.bar, {
+      maxBarThickness: 26,
+      categoryPercentage: 0.78,
+      barPercentage: 0.86,
+      borderRadius: 4,
+    });
   }
   if (Chart.defaults.plugins && Chart.defaults.plugins.legend) {
     Chart.defaults.plugins.legend.labels = Object.assign(

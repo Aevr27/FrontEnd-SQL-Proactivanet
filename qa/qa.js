@@ -427,9 +427,11 @@
           data: [],
           backgroundColor: color,
           hoverBackgroundColor: COLOR.azulOscuro,
-          borderRadius: 3,
-          barPercentage: .82,
-          categoryPercentage: .86
+          borderRadius: 4,
+          // Barras esbeltas, a juego con el resto de los tableros.
+          maxBarThickness: 22,
+          barPercentage: .78,
+          categoryPercentage: .74
         }]
       },
       options: {
