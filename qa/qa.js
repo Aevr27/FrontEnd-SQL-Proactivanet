@@ -65,19 +65,24 @@
   var NUM = new Intl.NumberFormat('es-MX');
   var NUM2 = new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Paleta alineada con dashboard.css y con qa.css: la escala verde de la
-  // cabecera (#9DD323 lima -> #65BB2B verde -> #478B3C verde profundo) y
-  // sus interpolaciones. Los nombres de las claves son heredados y ya NO
-  // describen su color; se conservan para no tocar la logica que los cita.
+  // Paleta de GRAFICAS. La marca usa los verdes del degradado tal cual
+  // (#9DD323 / #65BB2B / #478B3C); para rellenar una marca sobre blanco esos
+  // tres son demasiado claros, asi que aqui va la misma escala
+  // re-escalonada. Los nombres de las claves son heredados y ya NO describen
+  // su color: se conservan para no tocar la logica que los cita.
+  //
+  // Los cuatro estados de validacion se validaron juntos (modo claro):
+  // CVD peor par ΔE 10.5 (protan), vision normal ΔE 16.5. El rojo queda
+  // reservado para "Incorrecto" y no se usa en ningun otro sitio.
   var COLOR = {
-    azul: '#65bb2b',        // serie primaria: verde de marca (--g-600)
-    azulOscuro: '#478b3c',  // hover de barra              (--g-800)
-    verde: '#478b3c',       // estado OK                   (--g-800)
-    rojo: '#982a18',        // estado Incorrecto: unico rojo del modulo
-    ambar: '#9dd323',       // estado Sin catalogo: lima, no ambar (--g-400)
-    morado: '#81c727',      // serie secundaria            (--g-500)
-    cyan: '#35702f',        // estado Valido: ancla oscura de la escala
-    gris: '#b7bfb2'         // fuera de catalogo
+    azul: '#5aa726',        // serie primaria: verde de marca
+    azulOscuro: '#356b2c',  // hover de barra: mismo tono, mas profundo
+    verde: '#5aa726',       // estado OK
+    rojo: '#982a18',        // estado Incorrecto (unico uso del rojo)
+    ambar: '#b09512',       // estado Sin catalogo: mostaza, no ambar semantico
+    morado: '#8cbf1e',      // serie secundaria: lima
+    cyan: '#2f8f6b',        // estado Valido: verde pino
+    gris: '#8a8578'         // fuera de catalogo: neutro
   };
   // Tinta de ejes, etiquetas y rejilla: carbon y gris verdoso.
   var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1ea' };

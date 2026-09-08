@@ -84,13 +84,23 @@ function renderOrq(){
   ];
   document.getElementById('kpisOr').innerHTML=cards.map(c=>
     `<div class="kpi"><div class="lbl">${c.l}</div><div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
-  /* Paleta derivada de la escala verde de la cabecera
-     (#9DD323 lima -> #65BB2B verde -> #478B3C verde profundo) y sus
-     interpolaciones. Rojo y ambar se conservan donde el dato lo pide. */
+  /* PALETA CATEGORICA — ocho posiciones en orden fijo, seis de ellas
+     verdes de la familia de marca. Terracota, mostaza y naranja tostado
+     entran solo porque el verde no da ocho tonos separables por si solo.
+     Sin azul, morado, cian ni magenta. Validada (modo claro, pares
+     adyacentes): CVD peor par ΔE 10.5 protan, vision normal ΔE 16.5.
+     Las dos posiciones calidas NO conviven con el semaforo: la unica
+     grafica con rojo/ambar aqui es la de Clasificacion, que tiene su
+     propia escala de estado. */
+  const PALETA_CAT=['#5aa726','#9c5a24','#8cbf1e','#2f8f6b','#b09512','#356b2c','#c9772e','#78c96b'];
   // [ORQ-GRAF1] BARRAS HORIZONTALES por Clasificacion (Alta, Media, Baja, Única)
   const orden=['Alta','Media','Baja','Única'];
   const cvals=orden.map(k=>(o.por_clasif&&o.por_clasif[k])||0);
-  const ccolors=['#982a18','#d97706','#478b3c','#b7bfb2'];
+  // Escala de ESTADO, no de identidad: Alta/Media/Baja son severidad. Se
+  // conserva el semaforo rojo -> ambar -> verde, con neutro para "Única".
+  // La leyenda de abajo pone el nombre al lado de cada color, asi que el
+  // estado nunca depende del color a secas.
+  const ccolors=['#982a18','#d97706','#356b2c','#8a8578'];
   const bctx=document.getElementById('chartCatJobs');
   if(chartCatJobs)chartCatJobs.destroy();
   chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[{data:cvals,backgroundColor:ccolors}]},
@@ -102,8 +112,7 @@ function renderOrq(){
   // [ORQ-GRAF2] PIE por Categoria (col A)
   const ent=Object.entries(o.por_categoria).sort((a,b)=>b[1]-a[1]);
   const labels=ent.map(e=>e[0]), data=ent.map(e=>e[1]);
-  const palette=['#65bb2b','#9dd323','#478b3c','#bae065','#35702f','#81c727','#8fbf6a','#56a333','#d3e9ac','#b7bfb2'];
-  const colors=labels.map((_,i)=>palette[i%palette.length]);
+  const colors=labels.map((_,i)=>PALETA_CAT[i%PALETA_CAT.length]);
   const pctx=document.getElementById('chartClasif');
   if(chartClasif)chartClasif.destroy();
   chartClasif=new Chart(pctx,{type:'pie',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
@@ -113,7 +122,7 @@ function renderOrq(){
   // [ORQ-GRAF3] PIE por Candidato (col B)
   const cOrden=(J.orquestacion.candidatos||[]).slice();
   const candVals=cOrden.map(k=>(o.por_candidato&&o.por_candidato[k])||0);
-  const candColors=['#478b3c','#9dd323','#65bb2b','#35702f','#81c727','#b7bfb2'];
+  const candColors=PALETA_CAT;
   const kctx=document.getElementById('chartCand');
   if(chartCand)chartCand.destroy();
   chartCand=new Chart(kctx,{type:'pie',data:{labels:cOrden,

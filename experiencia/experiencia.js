@@ -92,12 +92,12 @@ const PCT = n => Math.round((n||0)*100)+'%';
    tintes de esa recta. Los mismos valores viven en experiencia.css
    (--g-300 ... --g-900).
    ========================================================================= */
+/* La MARCA usa los verdes del degradado tal cual (#9DD323/#65BB2B/#478B3C).
+   Para RELLENAR marcas sobre blanco esos tres son demasiado claros -el lima
+   se queda en 1.7:1-, asi que la familia de graficas es la misma escala
+   re-escalonada. Misma identidad verde, distinto trabajo. */
 const VERDE = {
-  g300:'#bae065', g400:'#9dd323', g500:'#81c727', g600:'#65bb2b',
-  g700:'#56a333', g800:'#478b3c', g900:'#3a7431',
-  // Anclas solo para series categoricas largas: no son paradas de ningun
-  // degradado, solo separan barras vecinas cuando 7 escalones no bastan.
-  masOscuro:'#35702f', apagado:'#8fbf6a', palido:'#d3e9ac', grisVerde:'#b7bfb2',
+  lima:'#8cbf1e', marca:'#5aa726', pino:'#2f8f6b', profundo:'#356b2c', claro:'#78c96b',
 };
 /* Tinta legible encima de un relleno de la escala. Los verdes claros
    (lima, --g-300, --g-200) hunden el texto blanco: sobre ellos va carbon.
@@ -114,10 +114,15 @@ function tintaSobre(hex){
 }
 const ROJO_SEM = '#982a18';   // negativo
 const AMBAR_SEM = '#d97706';  // advertencia
-/* Rampa categorica: alterna claro y oscuro de la MISMA escala para que dos
-   series contiguas no se confundan. */
-const PALETA_VERDE = [VERDE.g600, VERDE.g400, VERDE.g800, VERDE.g300, VERDE.masOscuro,
-                      VERDE.g500, VERDE.apagado, VERDE.g700, VERDE.palido, VERDE.grisVerde];
+const NEUTRO_SEM = '#8a8578'; // referencia / sin dato
+
+/* PALETA CATEGORICA — ocho posiciones en ORDEN FIJO, seis de ellas verdes.
+   Terracota, mostaza y naranja tostado entran solo porque el verde no da
+   ocho tonos separables por si solo. Sin azul, morado, cian ni magenta.
+   Validada (modo claro, pares adyacentes): CVD peor par ΔE 10.5 protan,
+   vision normal ΔE 16.5. Las posiciones 2 y 7 son calidas y NO conviven
+   con el rojo/ambar semanticos: ninguna grafica que llegue ahi los pinta. */
+const PALETA_VERDE = ['#5aa726','#9c5a24','#8cbf1e','#2f8f6b','#b09512','#356b2c','#c9772e','#78c96b'];
 
 const AGR = P.agrupadores;
 /* acolor lo manda el servidor (App_Code/ExperienciaQueries.cs, que no se
@@ -132,10 +137,10 @@ const ACOLOR = {};
 
 // Los chips de agrupador se distinguen por el TINTE de fondo; la tinta es
 // siempre la misma para que el texto se lea a 5.7:1 sobre blanco.
-const TINTA_CHIP = VERDE.g900;
+const TINTA_CHIP = '#3a7431';
 const SEM = v => v>=0.9?'v':(v>=0.7?'a':'r');
 // Semaforo: verde de marca, ambar de advertencia y el rojo de lo negativo.
-const SEMC = {v:VERDE.g800,a:AMBAR_SEM,r:ROJO_SEM};
+const SEMC = {v:VERDE.profundo,a:AMBAR_SEM,r:ROJO_SEM};
 const ESTADOS_ACTIVOS=["En Análisis","En Solución","En Monitoreo"];
 const badge = v => `<span class="badge b${SEM(v)}">${PCT(v)}</span>`;
 // Semaforo binario (TAREA 4, pestaña "Categorias sin iniciativa"): 0% =
@@ -306,10 +311,10 @@ function renderEvol(cats){
   const ctx=document.getElementById('chartEvol');
   if(chartEvol)chartEvol.destroy();
   // El punto de pronostico conserva el ambar: es una advertencia, no una serie.
-  const pointColors=vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.g800);
+  const pointColors=vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.profundo);
   const pointRadii=vals.map((_,i)=>i===idxPron?6:3);
   chartEvol=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Volumen',data:vals,
-    borderColor:VERDE.g700,backgroundColor:'rgba(101,187,43,.16)',fill:true,tension:.3,
+    borderColor:VERDE.pino,backgroundColor:'rgba(47,143,107,.14)',fill:true,tension:.3,
     pointRadius:pointRadii,pointHoverRadius:pointRadii.map(r=>r+3),
     pointBackgroundColor:pointColors,borderWidth:2}]},
     options:{responsive:true,plugins:{legend:{display:false},
@@ -337,7 +342,8 @@ function renderDona(cats){
   const sinIni=volumenSinIniciativa();
   const labels=[...AGR,'Sin iniciativa'];
   const data=[...des,sinIni];
-  const colors=[...AGR.map(a=>ACOLOR[a]),VERDE.grisVerde];
+  // "Sin iniciativa" no es un agrupador mas: va en neutro, fuera de la rampa.
+  const colors=[...AGR.map(a=>ACOLOR[a]),NEUTRO_SEM];
   const ctx=document.getElementById('chartDona');
   if(chartDona)chartDona.destroy();
   chartDona=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
@@ -1325,9 +1331,10 @@ const valueLabelsPlugin={
 // filtro global (Director/PO/Manager/Service Owner). Clic en una barra
 // navega a "Iniciativas Activas" filtrada por ese estado.
 let chartEstados=null;
-/* Progresion de avance: lima (empieza) -> verde (avanza) -> verde profundo
-   (cierra). Tres escalones de la misma escala, no tres colores sueltos. */
-const COLOR_ESTADO={'En Análisis':VERDE.g400,'En Solución':VERDE.g600,'En Monitoreo':VERDE.g800};
+/* Avance de una iniciativa: es una progresion, no identidades sueltas, asi
+   que va en un solo tono de claro a oscuro, con saltos de luminosidad
+   suficientes para distinguirse (ΔL >= 0.06 entre vecinos). */
+const COLOR_ESTADO={'En Análisis':'#8cbf1e','En Solución':'#4f9528','En Monitoreo':'#256425'};
 function conteoIniciativasPorEstado(cats){
   const c1conHijos=new Set(cats.filter(c=>c.nivel==='C2').map(c=>c.categoria.split('/')[1]));
   const fuente=cats.filter(c=>c.nivel==='C2' || !c1conHijos.has(c.categoria));
@@ -1466,7 +1473,7 @@ function renderResumen(){
   const bdCtx=document.getElementById('chartBarDir');
   if(chartBarDir)chartBarDir.destroy();
   chartBarDir=new Chart(bdCtx,{type:'bar',data:{labels:dirRows.map(r=>r.dir),
-    datasets:[{data:dirRows.map(r=>r.vol),backgroundColor:VERDE.g600}]},
+    datasets:[{data:dirRows.map(r=>r.vol),backgroundColor:VERDE.marca}]},
     options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},
         y:{ticks:{autoSkip:false,font:{size:11}}}}}});

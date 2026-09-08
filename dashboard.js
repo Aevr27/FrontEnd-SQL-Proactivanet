@@ -42,30 +42,67 @@ const PCT = (parte, total) => total > 0 ? Math.round(100 * parte / total) + '%' 
 
    Rojo y ambar se conservan donde el dato es negativo o de advertencia.
    ========================================================================= */
+/* La MARCA (cabecera, botones, pestañas) usa los verdes del degradado tal
+   cual: #9DD323 / #65BB2B / #478B3C. Esos tres son muy claros para rellenar
+   una barra sobre blanco -el lima queda en 1.7:1-, asi que la familia de
+   GRAFICAS es la misma escala re-escalonada para que cada relleno se lea
+   sobre la superficie blanca. Misma identidad verde, distinto trabajo. */
 const VERDE = {
-  g300: '#bae065', g400: '#9dd323', g500: '#81c727', g600: '#65bb2b',
-  g700: '#56a333', g800: '#478b3c', g900: '#3a7431',
-  // Anclas SOLO para series categoricas, cuando 7 escalones no bastan para
-  // separar 10 barras vecinas. No son paradas de ningun degradado.
-  masOscuro: '#35702f', apagado: '#8fbf6a', palido: '#d3e9ac', grisVerde: '#b7bfb2',
+  lima:    '#8cbf1e',   // lima de datos  (hermano de #9DD323)
+  marca:   '#5aa726',   // verde de datos (hermano de #65BB2B)
+  pino:    '#2f8f6b',   // verde pino: el otro verde, no un azul
+  profundo:'#356b2c',   // verde profundo (hermano de #478B3C)
+  claro:   '#78c96b',
 };
 const ROJO_SEM = '#982a18';   // negativo
 const AMBAR_SEM = '#d97706';  // advertencia
+const NEUTRO_SEM = '#8a8578'; // referencia / sin dato
+
+/* ---------------------------------------------------------------------
+   PALETA CATEGORICA — identidad de serie.
+
+   Ocho posiciones en ORDEN FIJO. Seis son verdes de la familia de marca;
+   las dos de apoyo -terracota y mostaza, mas un naranja tostado al final-
+   entran solo porque el verde no da ocho tonos separables por si solo.
+   Nada de azul, morado, cian ni magenta: no vuelve la marca vieja.
+
+   Validada con scripts/validate_palette.js (modo claro, pares adyacentes):
+   banda de luminosidad OK, croma OK, separacion CVD peor par ΔE 10.5
+   (protan) y vision normal ΔE 16.5. Los rellenos mas claros quedan por
+   debajo de 3:1 contra el blanco, asi que las graficas que los usan
+   llevan siempre leyenda o etiqueta directa -nunca color a secas-.
+
+   Las posiciones 7 y 8 solo aparecen con siete o mas categorias. La 2
+   (terracota) y la 7 (naranja) NO deben convivir con el rojo ni el ambar
+   semanticos en la misma grafica: a simple vista se confunden con ellos.
+   Ninguna de las graficas que llegan a esas posiciones pinta semaforo.
+   --------------------------------------------------------------------- */
+const PALETA_CAT = [
+  VERDE.marca,    // 1 verde de marca
+  '#9c5a24',      // 2 terracota
+  VERDE.lima,     // 3 lima
+  VERDE.pino,     // 4 verde pino
+  '#b09512',      // 5 mostaza
+  VERDE.profundo, // 6 verde profundo
+  '#c9772e',      // 7 naranja tostado
+  VERDE.claro,    // 8 verde claro
+];
+
+/* Rampa ORDINAL — para dimensiones con orden propio (antiguedad). Un solo
+   tono, de claro a oscuro, para que el orden se vea en el color. Validada
+   con --ordinal: luminosidad monotona, saltos >= 0.06 y extremo claro a
+   2.13:1. El cubo "Sin fecha" no es parte del orden: va en neutro. */
+const RAMPA_ORDINAL = ['#8cbf1e', '#6bad24', '#4f9528', '#387d2a', '#256425', '#144819'];
 
 const COLOR_PRIORIDAD = {
   'Critica': ROJO_SEM, 'Crítica': ROJO_SEM,
-  // Critica/Alta conservan el rojo y el ambar porque son severidad; Media y
-  // Baja bajan por la escala verde en vez de por colores sueltos.
-  'Alta': AMBAR_SEM, 'Media': VERDE.g400, 'Baja': VERDE.g800
+  // Severidad: rojo y ambar se conservan; Media y Baja bajan por el verde.
+  'Alta': AMBAR_SEM, 'Media': VERDE.lima, 'Baja': VERDE.profundo
 };
-/* Rampa categorica: alterna claro y oscuro de la MISMA escala para que dos
-   series contiguas no se confundan, en vez de repetir un solo verde. */
-const PALETA_CAT = [VERDE.g600, VERDE.g400, VERDE.g800, VERDE.g300, VERDE.masOscuro,
-                    VERDE.g500, VERDE.apagado, VERDE.g700, VERDE.palido, VERDE.grisVerde];
 
 // Semaforo de tres niveles: devuelve el sufijo de clase (.kpi.sv/.sa/.sr).
 const SEM = pct => pct >= 90 ? 'sv' : (pct >= 75 ? 'sa' : 'sr');
-const COLOR_SEM = { sv: VERDE.g800, sa: AMBAR_SEM, sr: ROJO_SEM };
+const COLOR_SEM = { sv: VERDE.profundo, sa: AMBAR_SEM, sr: ROJO_SEM };
 
 /* Ejes, rejilla y leyendas de Chart.js: carbon y gris verdoso, a juego con
    la tinta del tablero. Solo toca la presentacion por defecto; cualquier
@@ -445,7 +482,7 @@ const ORIGEN_SLOT = {
     const a = chart.chartArea;
     const ctx = chart.ctx;
     ctx.save();
-    ctx.strokeStyle = 'rgba(100,116,139,.55)';
+    ctx.strokeStyle = 'rgba(138,133,120,.60)';
     ctx.lineWidth = 1;
     ctx.setLineDash([4, 4]);
     ctx.beginPath();
@@ -453,7 +490,7 @@ const ORIGEN_SLOT = {
     ctx.lineTo(a.left, a.bottom);
     ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = '#64748b';
+    ctx.fillStyle = NEUTRO_SEM;
     ctx.font = '11px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
@@ -586,9 +623,21 @@ const TableroSla = (function () {
 
   // Nombres heredados: ya no describen su color. Las cuatro series de la
   // tendencia bajan por la escala verde y solo "vencidos" conserva el rojo.
-  const AZUL = VERDE.g500, VERDE_S = VERDE.g800, ROJO = ROJO_SEM,
-        MORADO = VERDE.g600, GRIS = '#9aa094';
+  /* Nombres heredados: ya no describen su color. Creados/Cerrados son dos
+     verdes bien separados -lima contra pino, ΔE 19.7 en vision normal- y
+     Vencidos conserva el rojo semantico (ΔE 13.4 contra el pino). */
+  const AZUL = VERDE.lima, VERDE_S = VERDE.pino, ROJO = ROJO_SEM,
+        MORADO = VERDE.profundo, GRIS = NEUTRO_SEM;
+  /* Barras apiladas de productividad: el par mas separado de la familia
+     (lima contra verde profundo, ΔE 27.8). */
+  const BARRA_A = VERDE.lima, BARRA_B = VERDE.profundo;
   const ORDEN_AGING = ['0-1 dias', '2-3 dias', '4-7 dias', '8-15 dias', '16-30 dias', '31+ dias', 'Sin fecha'];
+  // Posicion del cubo dentro del orden -> escalon de la rampa ordinal.
+  function colorAging(etiqueta) {
+    const i = ORDEN_AGING.indexOf(etiqueta);
+    if (i < 0 || etiqueta === 'Sin fecha') return NEUTRO_SEM;
+    return RAMPA_ORDINAL[Math.min(i, RAMPA_ORDINAL.length - 1)];
+  }
 
   const graficos = {};
   let datos = null;
@@ -1352,7 +1401,7 @@ const TableroSla = (function () {
 
     const serie = (label, data, color, rellenar) => ({
       label, data, borderColor: color,
-      backgroundColor: rellenar ? 'rgba(101,187,43,.16)' : color,
+      backgroundColor: rellenar ? 'rgba(140,191,30,.16)' : color,
       fill: !!rellenar, tension: .3, borderWidth: 2,
       pointRadius: estilo.pointRadius, pointHoverRadius: estilo.pointHoverRadius,
     });
@@ -1468,8 +1517,8 @@ const TableroSla = (function () {
         data: {
           labels: etiquetas,
           datasets: [
-            { label: 'Totales', data: totales, backgroundColor: AZUL, borderRadius: 5 },
-            { label: 'Cerrados', data: cerrados, backgroundColor: VERDE_S, borderRadius: 5 },
+            { label: 'Totales', data: totales, backgroundColor: BARRA_A, borderRadius: 5 },
+            { label: 'Cerrados', data: cerrados, backgroundColor: BARRA_B, borderRadius: 5 },
           ]
         },
         options: {
@@ -1633,7 +1682,7 @@ const TableroSla = (function () {
         <td>${escapeHtml(x.tecnico)}</td>
         <td>${escapeHtml(x.grupo)}</td>
         <td class="num"><b>${FMT(x.cerrados)}</b>
-          ${miniBar(tope > 0 ? 100 * x.cerrados / tope : 0, VERDE_S)}</td>
+          ${miniBar(tope > 0 ? 100 * x.cerrados / tope : 0, BARRA_B)}</td>
         <td class="num">${FMT(x.totales)}</td>
         <td class="num">${PCT(x.cerrados, x.totales)}</td>
         <td class="num">${PCT(x.cerrados, totalCerrados)}</td>
@@ -1675,8 +1724,11 @@ const TableroSla = (function () {
     renderEstado();
     renderBarraDim('chart-prioridad', 'prioridad', 'prioridad',
       null, l => COLOR_PRIORIDAD[l] ?? GRIS, 'Ningun ticket pasa los filtros activos.');
+    /* La antiguedad tiene orden propio: se pinta con la rampa ordinal
+       (claro = reciente, oscuro = viejo) en vez de un unico color plano.
+       "Sin fecha" no es parte del orden y va en neutro. */
     renderBarraDim('chart-aging', 'aging', 'aging',
-      ORDEN_AGING, () => MORADO, 'Ningun ticket pasa los filtros activos.');
+      ORDEN_AGING, l => colorAging(l), 'Ningun ticket pasa los filtros activos.');
     if (motivo !== 'filtro') {
       renderSlotStepper();
       renderTopCerrados();
@@ -1808,8 +1860,8 @@ const TableroSla = (function () {
 const TableroBacklog = (function () {
   // Misma paleta que usa el correo, en el mismo orden: un lider conserva su
   // color entre el correo, la grafica apilada y la tabla de resumen.
-  const PALETA = [VERDE.g600, VERDE.g400, VERDE.g800, VERDE.g300, VERDE.masOscuro,
-                  VERDE.g500, VERDE.apagado, VERDE.grisVerde];
+  // Identidad por lider: las ocho posiciones categoricas en su orden fijo.
+  const PALETA = PALETA_CAT;
   // AgingSort >= 5 es exactamente "mas de 30 dias" (ver 07_correo_backlog.sql).
   const SORT_MAS_30 = 5;
 
@@ -1821,7 +1873,7 @@ const TableroBacklog = (function () {
 
   function colorLider(nombre) {
     const i = ordenLideres.indexOf(nombre);
-    return i >= 0 ? PALETA[i % PALETA.length] : VERDE.grisVerde;
+    return i >= 0 ? PALETA[i % PALETA.length] : NEUTRO_SEM;
   }
   function hayFiltro() { return dimensionesActivas(filtro).length > 0; }
   // hayFiltro() solo mira el cross-filter de las graficas. Para los mensajes de
@@ -2037,7 +2089,7 @@ const TableroBacklog = (function () {
         datasets: [{
           label: 'Backlog', data: serie.map(f => f.TicketsBacklog),
           borderColor: filtro.lider ? colorLider(filtro.lider) : PALETA[0],
-          backgroundColor: 'rgba(101,187,43,.16)', fill: true,
+          backgroundColor: 'rgba(140,191,30,.16)', fill: true,
           borderWidth: 2, tension: .3, pointRadius: 3,
         }],
       },
