@@ -1,10 +1,17 @@
 /* =========================================================================
-   qa/qa.js
+   qa_green_theme/qa_green.js
 
-   Tablero de QA. Un solo archivo para los dos sitios donde vive el modulo: la
-   pagina suelta qa/qa.html y la pestaña "QA" de dashboard.html, que monta ese
-   mismo marcado e inyecta este mismo script (ver TableroQa en dashboard.js).
-   No hay una segunda copia de esta logica en el tablero.
+   PROTOTIPO VISUAL. Copia de qa/qa.js para el experimento de tema verde sobre
+   blanco (Template-TD_2026). Aqui SOLO cambian colores: la paleta COLOR, los
+   grises de Chart.js (TINTA) y nada mas. Peticiones, filtros, paginado, las
+   dos fases de carga y el contrato con qa.ashx son identicos al original.
+
+   Esta copia no se monta en dashboard.html: la pestaña "QA" del tablero
+   sigue trayendo qa/qa.html y qa/qa.js. Este archivo solo lo usa
+   qa_green_theme/index.html, que se abre suelto para comparar.
+
+   Si el prototipo se aprueba, lo que viaja a produccion es la hoja de
+   estilos y estas dos constantes, no el archivo entero.
 
    Tablero de QA. Toda la informacion viene de qa.ashx, que la consulta en
    vivo a SQL Server. El navegador nunca habla con la base: no conoce el
@@ -65,22 +72,35 @@
   var NUM = new Intl.NumberFormat('es-MX');
   var NUM2 = new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Paleta alineada con dashboard.css y con qa.css: la escala verde de la
-  // cabecera (#9DD323 lima -> #65BB2B verde -> #478B3C verde profundo) y
-  // sus interpolaciones. Los nombres de las claves son heredados y ya NO
-  // describen su color; se conservan para no tocar la logica que los cita.
+  /* Paleta del prototipo verde. Los nombres de las llaves se conservan tal
+     cual -azul, morado, ambar- porque solo cambia el color que devuelven: asi
+     el resto del archivo es identico a qa/qa.js y el experimento se queda en
+     lo visual. Los valores salen de la escala verde de la cabecera, cuyo
+     degradado es la fuente de la verdad de todo el tema:
+       #9DD323 (lima, --g-400) · #65BB2B (verde, --g-600) · #478B3C
+       (verde profundo, --g-800)
+     El resto son interpolaciones y tintes de esos tres. El rojo #982A18
+     queda reservado para lo negativo.
+
+     Cada color tiene su gemelo en qa_green.css (--g-*, --danger, ...);
+     si se retoca la paleta hay que tocar los dos sitios. */
   var COLOR = {
-    azul: '#65bb2b',        // serie primaria: verde de marca (--g-600)
-    azulOscuro: '#478b3c',  // hover de barra              (--g-800)
-    verde: '#478b3c',       // estado OK                   (--g-800)
-    rojo: '#982a18',        // estado Incorrecto: unico rojo del modulo
-    ambar: '#9dd323',       // estado Sin catalogo: lima, no ambar (--g-400)
-    morado: '#81c727',      // serie secundaria            (--g-500)
-    cyan: '#35702f',        // estado Valido: ancla oscura de la escala
-    gris: '#b7bfb2'         // fuera de catalogo
+    azul: '#65BB2B',        // serie primaria: verde de marca   (--g-600)
+    azulOscuro: '#478B3C',  // hover de barra                   (--g-800)
+    verde: '#478B3C',       // estado OK                        (--g-800)
+    rojo: '#982A18',        // estado Incorrecto (unico uso del rojo)
+    ambar: '#9DD323',       // estado Sin catalogo: lima, no ambar (--g-400)
+    morado: '#81C727',      // serie secundaria                 (--g-500)
+    // Ancla oscura SOLO para separar categorias vecinas. Era #1A5711, un
+    // verde bosque que no esta en la cabecera; este sigue en la misma recta
+    // sin cerrar la escala tan abajo.
+    cyan: '#35702F',        // estado Valido
+    gris: '#B7BFB2'         // estado fuera de catalogo
   };
-  // Tinta de ejes, etiquetas y rejilla: carbon y gris verdoso.
-  var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1ea' };
+
+  // Grises del texto y de la rejilla de las graficas, para que Chart.js use
+  // la misma escala que la hoja de estilos.
+  var TINTA = { eje: '#5E5E5F', etiqueta: '#393939', rejilla: '#EEF1EA' };
 
   // Color por estado de validacion. Un estado que no este en la lista recibe
   // un color neutro, pero conserva su nombre: nunca se agrupa con otro.

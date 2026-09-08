@@ -25,7 +25,7 @@ try {
   MOCK = await resp.json();
 } catch (err) {
   document.body.insertAdjacentHTML('afterbegin',
-    '<div style="background:#fee2e2;border:1px solid #dc2626;color:#7f1d1d;' +
+    '<div style="background:#fdf4f2;border:1px solid #982a18;color:#5c1a0e;' +
     'border-radius:10px;padding:14px 18px;margin-bottom:14px;font-size:13px">' +
     '<b>No se pudo cargar ' + MOCK_URL + '.</b><br>' + String(err) +
     '<br>Si abriste el archivo con doble clic (file://), el navegador bloquea ' +
@@ -74,8 +74,8 @@ function renderObserv(){
     const q=baseApps.filter(a=>a.madurez===n.nivel).length;
     const sel = obNivel===n.nivel;
     return `<div class="nivelBox" data-nivel="${n.nivel}"
-      style="text-align:center;padding:10px 6px;border:2px solid ${sel?'#2563eb':'var(--line)'};
-      border-radius:12px;background:${sel?'#eff6ff':'#fbfdff'};cursor:pointer"
+      style="text-align:center;padding:10px 6px;border:2px solid ${sel?'#478b3c':'var(--line)'};
+      border-radius:12px;background:${sel?'#f4fae7':'#fbfcf8'};cursor:pointer"
       title="${n.desc.replace(/"/g,'&quot;')}">
       <div style="font-size:26px">${n.icono}</div>
       <div style="font-size:19px;font-weight:800;margin:2px 0">${q}</div>
@@ -89,7 +89,7 @@ function renderObserv(){
   document.getElementById('capApps').textContent=`${total} aplicaciones`+(obNivel?` · nivel: ${obNivel}`:'');
   document.getElementById('bodyApps').innerHTML = total? apps.map(a=>
     `<tr><td><b>${a.nombre}</b></td><td style="max-width:240px;font-size:11px">${a.descripcion||'—'}</td>
-     <td>${(a.bia||'').toUpperCase()==='SI'?'<span class="chip" style="background:#fee2e2;color:#dc2626">Crítico</span>':(a.bia||'—')}</td>
+     <td>${(a.bia||'').toUpperCase()==='SI'?'<span class="chip" style="background:#fdf4f2;color:#982a18">Crítico</span>':(a.bia||'—')}</td>
      <td>${a.propietario||'—'}</td><td>${a.seguridad||'—'}</td><td>${a.ciclo_vida||'—'}</td>
      <td>${a.madurez||'—'}</td><td>${a.po||'—'}</td><td>${a.so||'—'}</td></tr>`).join('')
     : '<tr><td colspan="9" class="empty">Sin aplicaciones para el filtro.</td></tr>';

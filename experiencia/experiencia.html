@@ -26,11 +26,11 @@
       <div class="grp"><label>Ver por</label>
         <select id="selModo"><option value="slot">SLOT (30 días)</option><option value="mes">Mes calendario</option></select></div>
       <button id="btnReset">Ver resumen general</button>
-      <button id="btnDescargaTickets" style="display:none;background:#059669">⬇ Descargar Tickets</button>
-      <button id="btnAyuda" style="background:#0891b2">❓ Ayuda / Glosario</button>
+      <button id="btnDescargaTickets" style="display:none;background:#478b3c">⬇ Descargar Tickets</button>
+      <button id="btnAyuda" style="background:#81c727;color:#191919">❓ Ayuda / Glosario</button>
       <a id="ligaHeader" href="#" target="_blank" rel="noopener"
          style="display:none;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;
-         background:#f59e0b;color:#0f172a;font-size:12px;font-weight:700;text-decoration:none">
+         background:#d97706;color:var(--ink);font-size:12px;font-weight:700;text-decoration:none">
          🔎 Consulta el Detalle</a>
     </div>
   </header>
@@ -43,7 +43,7 @@
     <div class="card">
       <h3 id="tituloEvol">Evolución de Tickets por SLOT (30 días c/u · antiguo → reciente)</h3>
       <canvas id="chartEvol"></canvas>
-      <div class="legend"><span><i style="background:#2563eb"></i>Volumen total</span></div>
+      <div class="legend"><span><i style="background:#65bb2b"></i>Volumen total</span></div>
     </div>
     <div class="card">
       <h3 id="tituloDona">Composición del Volumen Actual (SLOT 0)</h3>
@@ -104,7 +104,7 @@
     <div class="panel" id="pSin">
       <p style="font-size:12px;color:var(--muted);margin-bottom:10px">
         Categorías con volumen de tickets <b>sin ninguna iniciativa de reducción</b>, o con iniciativa que <b>no cubre el 100% del volumen</b>. Clic en un C1 para desplegar sus subcategorías.</p>
-      <p style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:8px" id="capSin"></p>
+      <p style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px" id="capSin"></p>
       <table id="tblSin"><thead><tr>
         <th>Categoría</th><th class="num">Vol. Sin Cubrir</th><th class="num">% Con Iniciativa</th>
         <th>Product Owner</th><th>Service Owner</th>
@@ -116,7 +116,7 @@
         Iniciativas con <b>tickets en riesgo por retraso</b>, con fechas y responsables.</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <p style="font-size:11px;color:var(--muted);margin:0">Clic en un bloque o barra para filtrar la tabla; clic de nuevo para quitar ese filtro. Las 3 gráficas se recalculan entre sí.</p>
-        <button id="btnResetGrafVen" style="background:#64748b">↺ Resetear filtro de gráficas</button>
+        <button id="btnResetGrafVen" style="background:#8fbf6a;color:#191919">↺ Resetear filtro de gráficas</button>
       </div>
       <div class="grid3" style="margin-bottom:16px">
         <div class="card">
@@ -132,7 +132,7 @@
         <div class="card"><h3>Vencidas por Estado</h3>
           <canvas id="chartVenEstado" style="max-height:220px"></canvas></div>
       </div>
-      <p style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:8px" id="capVen"></p>
+      <p style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px" id="capVen"></p>
       <table id="tblVen"><thead><tr>
         <th>Categoría</th><th>Folio</th><th>Iniciativa</th><th>Agrup.</th>
         <th class="num">Tickets Riesgo</th><th class="num">Volumen de las categorías</th><th>Estado</th>
@@ -146,7 +146,7 @@
         Listado completo de <b>iniciativas activas</b> (deduplicadas por folio), incluidas las que no tienen categoría asignada.</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <p style="font-size:11px;color:var(--muted);margin:0">Clic en un bloque o barra para filtrar la tabla; clic de nuevo para quitar ese filtro. Las 3 gráficas se recalculan entre sí.</p>
-        <button id="btnResetGrafAct" style="background:#64748b">↺ Resetear filtro de gráficas</button>
+        <button id="btnResetGrafAct" style="background:#8fbf6a;color:#191919">↺ Resetear filtro de gráficas</button>
       </div>
       <div class="grid3" style="margin-bottom:16px">
         <div class="card">
@@ -162,7 +162,7 @@
         <div class="card"><h3>Activas por Estado</h3>
           <canvas id="chartActEstado" style="max-height:220px"></canvas></div>
       </div>
-      <p style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:8px" id="capAct"></p>
+      <p style="font-size:12px;font-weight:700;color:var(--ink);margin-bottom:8px" id="capAct"></p>
       <table id="tblAct"><thead><tr>
         <th>Categoría</th><th>Folio</th><th>Iniciativa</th><th>Agrup.</th>
         <th class="num">Tickets Riesgo</th><th class="num">Volumen a Reducir</th><th>Estado</th>
@@ -178,7 +178,7 @@
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">
         <button id="btnMarcarTodasHist">Marcar todas</button>
         <button id="btnDesmarcarTodasHist">Desmarcar todas</button>
-        <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#334155">
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)">
           Nivel a graficar:
           <select id="selNivelGraf">
             <option value="1">1 (C1)</option>
@@ -186,7 +186,7 @@
             <option value="3">3 (Categoría completa)</option>
           </select>
         </label>
-        <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#334155">
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2)">
           Tipo de gráfica:
           <select id="selTipoGrafHist">
             <option value="bar">Barras</option>
@@ -194,7 +194,7 @@
             <option value="pie">Pie (solo periodo actual)</option>
           </select>
         </label>
-        <button id="btnGraficarHist" style="background:#7c3aed">📊 Graficar seleccionadas</button>
+        <button id="btnGraficarHist" style="background:#65bb2b;color:#191919">📊 Graficar seleccionadas</button>
       </div>
       <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Puedes marcar casillas en cualquier nivel (1, 2 o 3) a la vez; al graficar, el selector de nivel toma en cuenta solo las marcas de ese nivel (las demás quedan marcadas pero no se grafican). La gráfica de Pie solo muestra el periodo actual (SLOT 0 / mes en curso).</p>
       <div style="overflow-x:auto">
@@ -212,19 +212,19 @@
 <div class="modal-bk" id="ayudaBk"><div class="modal" style="max-width:900px">
   <span class="close" id="ayudaClose">&times;</span>
   <h2>Ayuda · Cómo leer el tablero</h2>
-  <div style="font-size:13px;line-height:1.6;color:#334155;margin-top:12px">
-    <h3 style="margin:14px 0 6px;color:#0f172a">Concepto de SLOT y Mes</h3>
+  <div style="font-size:13px;line-height:1.6;color:var(--ink-2);margin-top:12px">
+    <h3 style="margin:14px 0 6px;color:var(--ink)">Concepto de SLOT y Mes</h3>
     <p>Un <b>SLOT</b> es un bloque de <b>30 días</b> de tickets. El <b>SLOT 0</b> son los últimos 30 días
     (el más reciente); el SLOT 1 son los 30 días previos, y así sucesivamente. El selector
     «Ver por» permite alternar el cálculo entre <b>SLOT</b> (bloques de 30 días) y <b>Mes calendario</b>
     (mes natural, Enero a Diciembre); ambos modos aplican a los KPIs, la gráfica de evolución y las tablas.</p>
 
-    <h3 style="margin:14px 0 6px;color:#0f172a">Filtros</h3>
+    <h3 style="margin:14px 0 6px;color:var(--ink)">Filtros</h3>
     <p>El tablero inicia con el <b>resumen general</b> de todos los tickets. Elige un <b>Director</b> para ver
     solo sus categorías; al elegir Director se habilitan sus <b>Product Owners</b>. El botón
     «Ver resumen general» limpia los filtros.</p>
 
-    <h3 style="margin:14px 0 6px;color:#0f172a">Indicadores (KPIs)</h3>
+    <h3 style="margin:14px 0 6px;color:var(--ink)">Indicadores (KPIs)</h3>
     <table style="margin-top:6px">
       <tr><td><b>Volumen Actual</b></td><td>Total de tickets del SLOT 0 (últimos 30 días) o del mes calendario actual, según el modo elegido.</td></tr>
       <tr><td><b>% Tickets con Iniciativa</b></td><td>Tickets cubiertos por iniciativas <b>activas</b> (En Análisis, En Solución, En Monitoreo) ÷ volumen actual. Las <b>cerradas no cuentan</b> como cobertura vigente, y <b>ReqOpr tampoco</b>.</td></tr>
@@ -234,11 +234,11 @@
       <tr><td><b>Iniciativas Retrasadas</b></td><td>Iniciativas con tickets en riesgo por retraso en su ejecución.</td></tr>
     </table>
 
-    <h3 style="margin:14px 0 6px;color:#0f172a">Semáforo</h3>
+    <h3 style="margin:14px 0 6px;color:var(--ink)">Semáforo</h3>
     <p><span class="badge bv">Verde ≥90%</span> &nbsp; <span class="badge ba">Ámbar 70–89%</span> &nbsp;
     <span class="badge br">Rojo &lt;70%</span></p>
 
-    <h3 style="margin:14px 0 6px;color:#0f172a">Detalle por categoría (drill-down)</h3>
+    <h3 style="margin:14px 0 6px;color:var(--ink)">Detalle por categoría (drill-down)</h3>
     <table>
       <tr><td><b>Vol. Anterior</b></td><td>Volumen del SLOT 1 o del mes anterior, según el modo.</td></tr>
       <tr><td><b>Vol. Actual</b></td><td>Volumen del SLOT 0 o del mes actual, según el modo.</td></tr>
@@ -250,17 +250,17 @@
     <p style="margin-top:6px">Clic en el <b>nombre de una categoría</b> abre el detalle de sus iniciativas/Problems
     (sin folios repetidos). Para un C1 se muestran también las de sus subcategorías.</p>
 
-    <h3 style="margin:14px 0 6px;color:#0f172a">Semáforo de fechas (en iniciativas)</h3>
-    <p><span class="dot" style="background:#059669"></span>Verde: cerrada o en monitoreo. &nbsp;
+    <h3 style="margin:14px 0 6px;color:var(--ink)">Semáforo de fechas (en iniciativas)</h3>
+    <p><span class="dot" style="background:#478b3c"></span>Verde: cerrada o en monitoreo. &nbsp;
     <span class="dot" style="background:#d97706"></span>Ámbar: activa y dentro de fecha. &nbsp;
-    <span class="dot" style="background:#dc2626"></span>Rojo: <b>con retraso</b> o fecha vencida.</p>
+    <span class="dot" style="background:#982a18"></span>Rojo: <b>con retraso</b> o fecha vencida.</p>
 
-    <h3 style="margin:14px 0 6px;color:#0f172a">Agrupadores de iniciativa</h3>
+    <h3 style="margin:14px 0 6px;color:var(--ink)">Agrupadores de iniciativa</h3>
     <p><b>Problem</b> (solución de raíz) · <b>SorIA</b> (copiloto interno) · <b>Adopción</b> (capacitación) ·
     <b>Mejora</b> (mejora al aplicativo). <b>ReqOpr</b> (requerimientos/hardware/mantenimiento) se
     contabiliza como «sin iniciativa» y no suma al total.</p>
 
-    <h3 style="margin:14px 0 6px;color:#0f172a">Antigüedad y # Cambios</h3>
+    <h3 style="margin:14px 0 6px;color:var(--ink)">Antigüedad y # Cambios</h3>
     <p><b>Antigüedad</b> = días desde la fecha de creación hasta hoy. <b># Cambios</b> = veces que se
     movieron las fechas de análisis/solución/cierre (disponible en Problems).</p>
   </div>
@@ -269,19 +269,19 @@
 <div class="modal-bk" id="obsBk" style="z-index:60"><div class="modal" style="max-width:640px">
   <span class="close" id="obsClose">&times;</span>
   <h2 id="obsTitle" style="font-size:15px">Detalle del Problem</h2>
-  <div style="font-size:12px;color:#64748b;margin-top:8px">
+  <div style="font-size:12px;color:var(--muted);margin-top:8px">
     <b>Folio:</b> <span id="obsFolio"></span> &nbsp;·&nbsp; <b>Título:</b> <span id="obsTitulo"></span>
   </div>
-  <p style="font-size:12px;font-weight:700;color:#0f172a;margin-top:14px;margin-bottom:4px">Descripción</p>
-  <p id="obsDescripcion" style="font-size:13px;color:#334155;white-space:pre-wrap;line-height:1.6"></p>
-  <p style="font-size:12px;font-weight:700;color:#0f172a;margin-top:14px;margin-bottom:4px">Observaciones</p>
-  <p id="obsBody" style="font-size:13px;color:#334155;white-space:pre-wrap;line-height:1.6"></p>
+  <p style="font-size:12px;font-weight:700;color:var(--ink);margin-top:14px;margin-bottom:4px">Descripción</p>
+  <p id="obsDescripcion" style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;line-height:1.6"></p>
+  <p style="font-size:12px;font-weight:700;color:var(--ink);margin-top:14px;margin-bottom:4px">Observaciones</p>
+  <p id="obsBody" style="font-size:13px;color:var(--ink-2);white-space:pre-wrap;line-height:1.6"></p>
 </div></div>
 
 <div class="modal-bk" id="catPopupBk" style="z-index:60"><div class="modal" style="max-width:720px">
   <span class="close" id="catPopupClose">&times;</span>
   <h2 id="catPopupTitle" style="font-size:15px">Categorías</h2>
-  <div id="catPopupSub" style="font-size:12px;color:#64748b;margin-top:4px;margin-bottom:8px"></div>
+  <div id="catPopupSub" style="font-size:12px;color:var(--muted);margin-top:4px;margin-bottom:8px"></div>
   <table style="margin-top:12px"><thead><tr>
     <th>Categoría</th><th class="num">Volumen Actual de la Categoría</th>
     <th class="num">% Disminución</th><th class="num">Tickets Reduce</th>
@@ -297,11 +297,11 @@
 
 <div class="modal-bk" id="modalBk"><div class="modal">
   <span class="close" id="modalClose">&times;</span>
-  <h2 id="modalTitle"></h2><div id="modalSub" style="font-size:12px;color:#64748b;margin-bottom:8px"></div>
+  <h2 id="modalTitle"></h2><div id="modalSub" style="font-size:12px;color:var(--muted);margin-bottom:8px"></div>
   <a id="ligaModal" href="#" target="_blank" rel="noopener"
-     style="display:none;margin-bottom:12px;padding:6px 12px;border-radius:8px;background:#f59e0b;
-     color:#0f172a;font-size:12px;font-weight:700;text-decoration:none">🔎 Consulta el Detalle</a>
-  <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#334155;margin-bottom:12px;cursor:pointer;margin-left:12px">
+     style="display:none;margin-bottom:12px;padding:6px 12px;border-radius:8px;background:#d97706;
+     color:var(--ink);font-size:12px;font-weight:700;text-decoration:none">🔎 Consulta el Detalle</a>
+  <label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--ink-2);margin-bottom:12px;cursor:pointer;margin-left:12px">
     <input type="checkbox" id="chkCerradas"> Mostrar iniciativas cerradas</label>
   <table><thead><tr>
     <th>Folio</th><th>Iniciativa</th><th>Agrup.</th><th class="num">Tickets Riesgo</th>
