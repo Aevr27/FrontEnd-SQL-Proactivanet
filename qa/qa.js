@@ -65,12 +65,22 @@
   var NUM = new Intl.NumberFormat('es-MX');
   var NUM2 = new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Paleta alineada con dashboard.css.
+  // Paleta alineada con dashboard.css y con qa.css: la escala verde de la
+  // cabecera (#9DD323 lima -> #65BB2B verde -> #478B3C verde profundo) y
+  // sus interpolaciones. Los nombres de las claves son heredados y ya NO
+  // describen su color; se conservan para no tocar la logica que los cita.
   var COLOR = {
-    azul: '#2563eb', azulOscuro: '#1d4ed8', verde: '#059669',
-    rojo: '#dc2626', ambar: '#d97706', morado: '#7c3aed',
-    cyan: '#0891b2', gris: '#94a3b8'
+    azul: '#65bb2b',        // serie primaria: verde de marca (--g-600)
+    azulOscuro: '#478b3c',  // hover de barra              (--g-800)
+    verde: '#478b3c',       // estado OK                   (--g-800)
+    rojo: '#982a18',        // estado Incorrecto: unico rojo del modulo
+    ambar: '#9dd323',       // estado Sin catalogo: lima, no ambar (--g-400)
+    morado: '#81c727',      // serie secundaria            (--g-500)
+    cyan: '#35702f',        // estado Valido: ancla oscura de la escala
+    gris: '#b7bfb2'         // fuera de catalogo
   };
+  // Tinta de ejes, etiquetas y rejilla: carbon y gris verdoso.
+  var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1ea' };
 
   // Color por estado de validacion. Un estado que no este en la lista recibe
   // un color neutro, pero conserva su nombre: nunca se agrupa con otro.
@@ -444,12 +454,12 @@
         scales: {
           x: {
             beginAtZero: true,
-            ticks: { precision: 0, color: '#64748b' },
-            grid: { color: '#eef2f7' }
+            ticks: { precision: 0, color: TINTA.eje },
+            grid: { color: TINTA.rejilla }
           },
           y: {
             ticks: {
-              color: '#334155', autoSkip: false, font: { size: 11.5 },
+              color: TINTA.etiqueta, autoSkip: false, font: { size: 11.5 },
               callback: function (valor) { return recortar(this.getLabelForValue(valor), 42); }
             },
             grid: { display: false }
@@ -474,7 +484,7 @@
       var ctx = chart.ctx;
       ctx.save();
       ctx.font = '600 11px "Segoe UI", Roboto, Arial, sans-serif';
-      ctx.fillStyle = '#334155';
+      ctx.fillStyle = TINTA.etiqueta;
       ctx.textBaseline = 'middle';
       chart.getDatasetMeta(0).data.forEach(function (barra, i) {
         var valor = chart.data.datasets[0].data[i];

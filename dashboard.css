@@ -21,39 +21,86 @@
      clases (kpi, badge, fchip, mini, swatch, vacio, ...).
      ==================================================================== */
   :root {
+    /* El tema es claro y las superficies son blancas. Sin esto, el modo
+       oscuro automatico de Chrome reinvierte la pagina entera y se lleva
+       por delante el verde de marca. qa.css y qa_green.css ya lo declaran. */
+    color-scheme: light;
+
+    /* ==================================================================
+       PALETA CENTRALIZADA — escala verde de la cabecera.
+
+       Fuente de la verdad: el degradado de header.top, que es
+         linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%)
+       Sus tres paradas son --g-800, --g-600 y --g-400. El resto de la
+       escala son interpolaciones y tintes de ESOS tres valores; no hay
+       ningun verde inventado fuera de esa recta.
+
+       Jerarquia: VERDE/LIMA = marca y enfasis · CARBON = texto y
+       estructura · BLANCO = superficie · GRIS CLARO = estructura
+       secundaria · ROJO = negativo · AMBAR = advertencia.
+       ================================================================== */
+    --g-50:  #f4fae7;   /* tinte mas suave (fondos de chip, filas) */
+    --g-100: #e9f5ce;
+    --g-200: #d3e9ac;   /* bordes tenues */
+    --g-300: #bae065;
+    --g-400: #9dd323;   /* LIMA  — parada 100% de la cabecera */
+    --g-500: #81c727;   /* interpolado 400 <-> 600 */
+    --g-600: #65bb2b;   /* VERDE — parada 45% de la cabecera */
+    --g-700: #56a333;   /* interpolado 600 <-> 800 */
+    --g-800: #478b3c;   /* VERDE PROFUNDO — parada 0% de la cabecera */
+    --g-900: #3a7431;   /* extension SOLO para texto/hover: nunca es
+                           parada de un degradado, para no cerrar la
+                           escala en un verde bosque. */
+
     /* Paleta base */
-    --bg: #f1f5f9;
-    --bg-2: #e9eef5;
+    --bg: #ffffff;
+    --bg-2: #f6f8f4;    /* gris muy claro con una gota de verde */
     --card: #ffffff;
-    --line: #e2e8f0;
-    --line-soft: #eef2f7;
-    --ink: #0f172a;
-    --ink-2: #334155;
-    --muted: #64748b;
-    --muted-2: #94a3b8;
-    --accent: #2563eb;
-    --accent-ink: #1d4ed8;
-    --accent-soft: #eff6ff;
-    --accent-line: #bfdbfe;
-    --verde: #059669;
-    --ambr: #d97706;
-    --rojo: #dc2626;
-    --morado: #7c3aed;
-    --cyan: #0891b2;
+    --line: #e3e7de;
+    --line-soft: #eef1ea;
+    --ink: #191919;     /* carbon, no pizarra azulada */
+    --ink-2: #393939;
+    --muted: #5e5e5f;
+    --muted-2: #9aa094;
 
-    /* Degradado de los botones: mismo salto de contraste del encabezado, de izquierda a derecha. */
-    --grad-btn: linear-gradient(100deg, #0f172a 0%, #172554 55%, #1e3a8a 100%);
-    --grad-btn-hover: linear-gradient(100deg, #172554 0%, #1e3a8a 55%, #2563eb 100%);
+    /* Acento de marca = verde de la cabecera */
+    --accent: var(--g-600);
+    --accent-ink: var(--g-900);
+    --accent-soft: var(--g-50);
+    --accent-line: var(--g-200);
+    --verde: var(--g-800);        /* semantico "bien" = verde de marca */
+    --verde-strong: var(--g-900); /* relleno con texto blanco encima */
+    --ambr: #d97706;              /* advertencia: se conserva */
+    --rojo: #982a18;              /* negativo: unico rojo del tablero */
+    /* Nombres heredados que el JS y el CSS viejo siguen citando. Ya no
+       son morado ni cyan: son dos escalones mas de la misma escala. */
+    --morado: var(--g-500);
+    --cyan: var(--g-300);
 
-    /* Controles de filtro: barras oscuras del tablero de referencia. */
-    --ctrl-bg: #172554;
-    --ctrl-bg-2: #1e3a8a;
-    --ctrl-line: #1e3a8a;
-    --ctrl-ink: #ffffff;
+    /* Degradado de marca. La cabecera conserva su 135deg exacto; el resto
+       del tablero usa la MISMA progresion en vertical: lima arriba,
+       verde fresco abajo. */
+    --grad-header: linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%);
+    --grad: linear-gradient(180deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-800) 100%);
+    --grad-linea: linear-gradient(90deg, var(--g-400) 0%, var(--g-600) 50%, var(--g-800) 100%);
 
-    /* Azul primario apagado para los botones del panel de filtros. */
-    --accent-deep: #1e40af;
-    --accent-deep-2: #1c3aa0;
+    /* Botones: lima arriba -> verde fresco abajo, con tinta CARBON.
+       Blanco sobre lima no llega a 4.5:1; carbon sobre esta rampa va de
+       9.9:1 (lima) a 5.7:1 (--g-700), asi que el boton se lee entero. */
+    --grad-btn: linear-gradient(160deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-700) 100%);
+    --grad-btn-hover: linear-gradient(160deg, var(--g-500) 0%, var(--g-700) 55%, var(--g-800) 100%);
+    --btn-ink: var(--ink);
+
+    /* Controles de filtro: dejaron de ser barras azul marino. Superficie
+       blanca, estructura gris clara y acento verde al enfocar. */
+    --ctrl-bg: #ffffff;
+    --ctrl-bg-2: var(--g-50);
+    --ctrl-line: var(--line);
+    --ctrl-ink: var(--ink);
+
+    /* Verde primario apagado para los botones del panel de filtros. */
+    --accent-deep: var(--g-700);
+    --accent-deep-2: var(--g-800);
 
     /* Formas */
     --radius: 14px;
@@ -62,10 +109,10 @@
     --radius-pill: 999px;
 
     /* Profundidad: una escala en vez de una sola sombra plana. */
-    --shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 1px 3px rgba(15, 23, 42, .06);
-    --shadow-md: 0 2px 4px rgba(15, 23, 42, .05), 0 8px 20px -6px rgba(15, 23, 42, .12);
-    --shadow-lg: 0 24px 60px -18px rgba(15, 23, 42, .35);
-    --ring: 0 0 0 3px rgba(37, 99, 235, .22);
+    --shadow: 0 1px 2px rgba(25, 25, 25, .05), 0 1px 3px rgba(25, 25, 25, .06);
+    --shadow-md: 0 2px 4px rgba(25, 25, 25, .05), 0 8px 20px -6px rgba(25, 25, 25, .12);
+    --shadow-lg: 0 24px 60px -18px rgba(25, 25, 25, .35);
+    --ring: 0 0 0 3px rgba(101, 187, 43, .30);
 
     /* Alias de los nombres viejos: parte del CSS y del JS ya los usa. */
     --panel: var(--card);
@@ -88,7 +135,7 @@
     background: var(--bg);
     /* Degradado muy suave: da profundidad sin ensuciar el fondo. */
     background-image:
-      radial-gradient(1200px 520px at 50% -220px, #dbe6f6 0%, rgba(219, 230, 246, 0) 70%),
+      radial-gradient(1200px 520px at 50% -220px, rgba(157, 211, 35, .10) 0%, rgba(157, 211, 35, 0) 70%),
       linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
     background-attachment: fixed;
     color: var(--ink);
@@ -110,22 +157,22 @@
   }
 
   /* Barras de desplazamiento discretas (WebKit) + Firefox. */
-  * { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+  * { scrollbar-width: thin; scrollbar-color: #cbd8c6 transparent; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: #cbd5e1; border-radius: var(--radius-pill);
+    background: #cbd8c6; border-radius: var(--radius-pill);
     border: 3px solid transparent; background-clip: content-box;
   }
-  ::-webkit-scrollbar-thumb:hover { background: #a8b6c8; background-clip: content-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #aebba4; background-clip: content-box; }
 
   /* ---- Pestañas principales ---- */
   .maintabs {
     display: flex; gap: 4px; margin-bottom: 16px;
-    background: rgba(226, 232, 240, .85);
+    background: rgba(227, 231, 222, .85);
     padding: 5px; border-radius: 13px;
     border: 1px solid rgba(255, 255, 255, .7);
-    box-shadow: inset 0 1px 2px rgba(15, 23, 42, .05);
+    box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05);
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
   }
   .mtab {
@@ -135,8 +182,8 @@
     border-radius: var(--radius-sm); transition: background .16s ease, color .16s ease, box-shadow .16s ease;
   }
   .mtab.active {
-    background: var(--grad-btn); color: #fff;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, .08), 0 4px 10px -4px rgba(15, 23, 42, .18);
+    background: var(--grad-btn); color: var(--btn-ink);
+    box-shadow: 0 1px 2px rgba(25, 25, 25, .08), 0 4px 10px -4px rgba(71, 139, 60, .28);
   }
   .mtab:hover:not(.active) { color: var(--ink); background: rgba(255, 255, 255, .55); }
   .maintab-content { display: none; }
@@ -156,8 +203,8 @@
   }
   header.top {
     position: relative; overflow: hidden;
-    background: linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%);
-    color: #fff; padding: 24px 28px;
+    background: var(--grad-header);
+    color: var(--ink); padding: 24px 28px;
     border-radius: var(--radius); margin-bottom: 16px;
     display: flex; align-items: flex-start; justify-content: space-between;
     flex-wrap: wrap; gap: 14px;
@@ -167,30 +214,30 @@
   header.top::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background:
-      radial-gradient(520px 200px at 88% -40%, rgba(96, 165, 250, .35), transparent 70%),
-      radial-gradient(360px 180px at 8% 130%, rgba(37, 99, 235, .28), transparent 70%);
+      radial-gradient(520px 200px at 88% -40%, rgba(244, 250, 231, .40), transparent 70%),
+      repeating-linear-gradient(115deg, rgba(25, 25, 25, .05) 0 1px, transparent 1px 26px);
   }
   header.top > * { position: relative; z-index: 1; }
   header.top h1 { font-size: 20px; font-weight: 700; letter-spacing: -.2px; }
   header.top .sub {
-    font-size: 12.5px; color: #cbd5e1; margin-top: 5px;
+    font-size: 12.5px; color: var(--ink-2); margin-top: 5px;
     font-variant-numeric: tabular-nums;
   }
-  header.top .estado { font-size: 12px; color: #cbd5e1; min-height: 16px; text-align: right; }
+  header.top .estado { font-size: 12px; color: var(--ink-2); min-height: 16px; text-align: right; }
   header.top .acciones-top { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
 
   /* ---- Botones ---- */
   .btn {
     border: 1px solid transparent; border-radius: var(--radius-xs);
     padding: 9px 16px; cursor: pointer;
-    font: inherit; font-size: 13px; font-weight: 600; color: #fff;
+    font: inherit; font-size: 13px; font-weight: 700; color: var(--btn-ink);
     background: var(--grad-btn);
-    box-shadow: 0 1px 2px rgba(15, 23, 42, .12);
+    box-shadow: 0 1px 2px rgba(25, 25, 25, .12);
     transition: filter .15s ease, transform .06s ease, box-shadow .15s ease, background .15s ease;
     white-space: nowrap;
   }
-  .btn:hover { background: var(--grad-btn-hover); box-shadow: 0 2px 8px -2px rgba(15, 23, 42, .28); }
-  .btn:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
+  .btn:hover { background: var(--grad-btn-hover); box-shadow: 0 3px 10px -3px rgba(71, 139, 60, .45); }
+  .btn:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(25, 25, 25, .12); }
   /* Todas las variantes comparten el degradado; solo cambia el peso visual. */
   .btn.gris { background: var(--grad-btn); opacity: .82; }
   .btn.gris:hover { background: var(--grad-btn-hover); opacity: 1; }
@@ -199,22 +246,23 @@
   .btn.chico { padding: 6px 12px; font-size: 12px; }
   /* Boton de contorno, al estilo de "ver categorias" del tablero de referencia. */
   .btn.linea {
-    background: var(--grad-btn); color: var(--accent); border-color: var(--accent-line);
-    font-weight: 600; box-shadow: none;
+    background: var(--grad-btn); color: var(--btn-ink); border-color: var(--g-700);
+    font-weight: 700; box-shadow: none;
   }
   .btn.linea:hover {
-    background: var(--grad-btn); color: #fff; border-color: #1e3a8a;
-    filter: none; box-shadow: 0 2px 8px -2px rgba(37, 99, 235, .5);
+    background: var(--grad-btn-hover); color: var(--btn-ink); border-color: var(--g-800);
+    filter: none; box-shadow: 0 2px 8px -2px rgba(71, 139, 60, .5);
   }
   .btn.linea.active, .btn.linea[aria-pressed="true"] {
-    background: var(--grad-btn); color: #fff; border-color: #1e3a8a;
+    background: var(--grad-btn-hover); color: var(--btn-ink); border-color: var(--g-800);
   }
-  /* Botones del encabezado oscuro: contorno claro para que no floten. */
+  /* La cabecera ya es verde claro: el boton solo necesita un contorno
+     mas firme para no fundirse con el degradado de atras. */
   header.top .btn {
-    border-color: rgba(255, 255, 255, .28);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, .3);
+    border-color: rgba(25, 25, 25, .22);
+    box-shadow: 0 1px 2px rgba(25, 25, 25, .18);
   }
-  header.top .btn:hover { border-color: rgba(255, 255, 255, .45); }
+  header.top .btn:hover { border-color: rgba(25, 25, 25, .38); }
 
   /* ---- Filtros del servidor ---- */
   .filtros {
@@ -235,8 +283,8 @@
     text-transform: uppercase; letter-spacing: .5px; line-height: 1.35;
     min-height: 28px; display: flex; align-items: flex-end;
   }
-  /* Barras oscuras, como los selectores del tablero de referencia:
-     fondo #1e293b, borde #334155 y texto blanco. Todas miden lo mismo. */
+  /* Barras claras: superficie blanca, estructura gris y acento verde al
+     enfocar. Todas miden lo mismo. */
   .filtros input[type="date"],
   .filtros select {
     height: 40px; width: 100%;
@@ -244,30 +292,30 @@
     padding: 0 11px;
     font: inherit; font-size: 13px; font-weight: 500;
     color: var(--ctrl-ink);
-    background: var(--grad-btn) !important;
-    color-scheme: dark;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .18);
+    background: var(--ctrl-bg) !important;
+    color-scheme: light;
+    box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05);
     transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
   }
   .filtros select option {
-    color: #e2e8f0;
+    color: var(--ink);
     background-color: var(--ctrl-bg);
 }
   .filtros input[type="date"]:hover,
-  .filtros select:hover { background: var(--ctrl-bg-2); border-color: #475569; }
+  .filtros select:hover { background: var(--ctrl-bg-2) !important; border-color: var(--g-300); }
   .filtros input[type="date"]:focus,
   .filtros select:focus {
-    outline: none; border-color: var(--accent); background: var(--ctrl-bg-2);
-    box-shadow: var(--ring), inset 0 1px 2px rgba(0, 0, 0, .18);
+    outline: none; border-color: var(--accent); background: var(--ctrl-bg-2) !important;
+    box-shadow: var(--ring), inset 0 1px 2px rgba(25, 25, 25, .05);
   }
   .filtros input[type="date"] { padding: 0 11px; }
-  .filtros input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1) opacity(.65); cursor: pointer; }
-  .filtros input[type="date"]:hover::-webkit-calendar-picker-indicator { filter: invert(1) opacity(1); }
+  .filtros input[type="date"]::-webkit-calendar-picker-indicator { opacity: .55; cursor: pointer; }
+  .filtros input[type="date"]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
   /* Flecha propia solo en los select de una sola linea. */
   .filtros select:not([multiple]) {
     appearance: none; -webkit-appearance: none; -moz-appearance: none;
     padding-right: 30px;
-    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23cbd5e1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235e5e5f' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 10px center;
   }
@@ -285,11 +333,11 @@
   }
   .filtros select[multiple] option {
     padding: 6px 9px; margin: 1px 0; border-radius: 6px;
-    font-size: 12.5px; color: #e2e8f0; background: var(--ctrl-bg);
+    font-size: 12.5px; color: var(--ink-2); background: var(--ctrl-bg);
   }
   .filtros select[multiple] option:checked {
-    background: var(--accent) linear-gradient(0deg, var(--accent), var(--accent));
-    color: #fff; font-weight: 600;
+    background: var(--g-100) linear-gradient(0deg, var(--g-100), var(--g-100));
+    color: var(--g-900); font-weight: 700;
   }
   /* ---- Multi-select propio (filtros de SLA y de Backlog) ----
      El <select multiple> original sigue en el DOM y sigue siendo la fuente de
@@ -306,14 +354,14 @@
     background: var(--ctrl-bg); color: var(--ctrl-ink);
     font: inherit; font-size: 13px; text-align: left; cursor: pointer;
     transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
-    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23cbd5e1' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%235e5e5f' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat; background-position: right 10px center;
   }
-  .ms-boton:hover { background-color: var(--ctrl-bg-2); border-color: var(--accent); }
+  .ms-boton:hover { background-color: var(--ctrl-bg-2); border-color: var(--g-300); }
   .ms-boton:focus-visible,
   .ms.abierto .ms-boton {
     outline: none; border-color: var(--accent); background-color: var(--ctrl-bg-2);
-    box-shadow: var(--ring), inset 0 1px 2px rgba(0, 0, 0, .18);
+    box-shadow: var(--ring), inset 0 1px 2px rgba(25, 25, 25, .05);
   }
   .ms-texto {
     flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -322,27 +370,27 @@
   .ms-conteo {
     flex: none; font-size: 11px; font-weight: 700; line-height: 1;
     padding: 3px 7px; border-radius: 999px;
-    background: var(--accent); color: #fff;
+    background: var(--g-400); color: var(--ink);
   }
-  /* El menu desplegado va en claro, al reves del boton cerrado. */
+  /* El menu desplegado repite la superficie blanca del boton cerrado. */
   .ms-panel {
     position: absolute; z-index: 40; top: calc(100% + 6px); left: 0; right: 0;
     display: none; flex-direction: column;
-    background: #ffffff; border: 1px solid #dbe3ef;
-    border-radius: 10px; box-shadow: 0 8px 24px rgba(15, 23, 42, .14);
+    background: #ffffff; border: 1px solid var(--line);
+    border-radius: 10px; box-shadow: 0 8px 24px rgba(25, 25, 25, .14);
     overflow: hidden;
   }
   .ms.abierto .ms-panel { display: flex; }
   .ms-busca {
     margin: 8px; height: 32px; flex: none;
-    border: 1px solid #dbe3ef; border-radius: 7px;
-    background: #f8fafc; color: #172554;
+    border: 1px solid var(--line); border-radius: 7px;
+    background: var(--bg-2); color: var(--ink);
     font: inherit; font-size: 12.5px; padding: 0 10px;
   }
-  .ms-busca::placeholder { color: #94a3b8; }
+  .ms-busca::placeholder { color: var(--muted-2); }
   .ms-busca:focus {
     outline: none; background: #ffffff; border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, .15);
+    box-shadow: 0 0 0 3px rgba(101, 187, 43, .22);
   }
   /* Atajos "Seleccionar todo / Limpiar": fuera de la vista. Se ocultan por
      CSS para no tocar el JS que los crea ni sus listeners. */
@@ -350,16 +398,16 @@
   /* El buscador queda como unico separador del menu. */
   .ms-lista {
     list-style: none; margin: 0; padding: 6px;
-    border-top: 1px solid #e6ecf5;
+    border-top: 1px solid var(--line-soft);
     max-height: 220px; overflow-y: auto; overscroll-behavior: contain;
   }
   .ms-lista li { margin: 1px 0; }
   .ms-opcion {
     display: flex; align-items: center; gap: 9px;
     padding: 7px 9px; border-radius: 6px; cursor: pointer;
-    font-size: 12.5px; color: #334155;
+    font-size: 12.5px; color: var(--ink-2);
   }
-  .ms-opcion:hover { background: #f1f5f9; color: #172554; }
+  .ms-opcion:hover { background: var(--g-50); color: var(--g-900); }
   /* La casilla sigue en el DOM (es la que recibe el clic del <label> y
      dispara el change), pero se oculta: el estado se ve como una palomita
      a la derecha de la fila. */
@@ -370,15 +418,15 @@
   .ms-opcion span {
     flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .ms-opcion.marcada { background: #eff6ff; color: #1e3a8a; font-weight: 600; }
+  .ms-opcion.marcada { background: var(--g-50); color: var(--g-900); font-weight: 700; }
   .ms-opcion::after {
     content: ""; flex: none; width: 16px; height: 16px; margin-left: auto;
-    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%232563eb%27 stroke-width=%273%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpath d=%27M20 6L9 17l-5-5%27/%3E%3C/svg%3E");
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2716%27 height=%2716%27 viewBox=%270 0 24 24%27 fill=%27none%27 stroke=%27%23478b3c%27 stroke-width=%273%27 stroke-linecap=%27round%27 stroke-linejoin=%27round%27%3E%3Cpath d=%27M20 6L9 17l-5-5%27/%3E%3C/svg%3E");
     background-repeat: no-repeat; background-position: center; background-size: 15px 15px;
     opacity: 0;
   }
   .ms-opcion.marcada::after { opacity: 1; }
-  .ms-vacio { padding: 10px; font-size: 12px; color: #64748b; text-align: center; }
+  .ms-vacio { padding: 10px; font-size: 12px; color: var(--muted); text-align: center; }
 
   /* Rango rapido: grupo segmentado que ocupa el alto de una barra. */
   .filtros .rango-rapido { display: flex; gap: 6px; flex-wrap: wrap; height: 40px; }
@@ -393,14 +441,14 @@
        (.ms-boton y los input[type=date]): mismo alto, borde, radio y fondo.
        Antes eran tres controles sueltos flotando uno junto a otro. */
     border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
-    background: var(--grad-btn);
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .18);
+    background: var(--ctrl-bg);
+    box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05);
     transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
   }
-  .filtros .slotstep:hover { background: var(--ctrl-bg-2); border-color: #475569; }
+  .filtros .slotstep:hover { background: var(--ctrl-bg-2); border-color: var(--g-300); }
   .filtros .slotstep:focus-within {
     border-color: var(--accent); background: var(--ctrl-bg-2);
-    box-shadow: var(--ring), inset 0 1px 2px rgba(0, 0, 0, .18);
+    box-shadow: var(--ring), inset 0 1px 2px rgba(25, 25, 25, .05);
   }
   /* Los botones pierden su caja propia: dentro del control son solo el signo,
      pero conservan toda su area de clic. */
@@ -413,11 +461,11 @@
     box-shadow: none;
   }
   .filtros .slotstep .btn:hover:not(:disabled) {
-    background: rgba(37, 99, 235, .22); color: #fff;
+    background: rgba(101, 187, 43, .22); color: var(--ink);
     box-shadow: none; filter: none;
   }
   .filtros .slotstep .btn:active:not(:disabled) {
-    transform: none; background: rgba(37, 99, 235, .34);
+    transform: none; background: rgba(101, 187, 43, .34);
   }
   .filtros .slotstep .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .filtros .slotstep .btn:disabled { opacity: .35; cursor: default; background: transparent; }
@@ -429,7 +477,7 @@
   /* El acento marca el SLOT ya aplicado, no el numero preparado. Ahora se ve
      tambien en el borde, porque el control es una sola pieza. */
   .filtros .slotstep.sel { border-color: var(--accent); }
-  .filtros .slotstep.sel .slotn { color: var(--accent); }
+  .filtros .slotstep.sel .slotn { color: var(--g-900); }
   /* Con 0 SLOTs el control esta apagado: no hay periodo preparado ni aplicado,
      manda el rango manual de las fechas. */
   .filtros .slotstep.off { opacity: .6; }
@@ -437,7 +485,7 @@
   /* En acento solo cuando el SLOT esta en vigor; inactivo o sin aplicar, apagado
      para no anunciar un periodo que no es el de la grafica. */
   .filtros .slotsum { width: 100%; font-size: 12px; font-weight: 700; color: var(--muted); }
-  .filtros .slotsum.sel { color: var(--accent); }
+  .filtros .slotsum.sel { color: var(--g-900); }
   /* La rejilla de filtros alinea los campos por abajo (align-items: end). Este
      campo tiene una linea mas que los demas -el resumen del SLOT-, asi que su
      barra quedaba un renglon mas arriba que las vecinas. El resumen se saca del
@@ -458,21 +506,21 @@
   }
   /* Los botones de rango van a juego con las barras oscuras vecinas. */
   .filtros .rango-rapido button {
-    border: 1px solid #1e3a8a;
-    background: #172554;
+    border: 1px solid var(--g-700);
+    background: var(--grad-btn);
     border-radius: 8px;
     padding: 6px 10px;
     font: inherit;
     font-size: 12px;
-    font-weight: 600;
-    color: #fff;
+    font-weight: 700;
+    color: var(--btn-ink);
     cursor: pointer;
   }
 
   .filtros .rango-rapido button:hover {
-    background: #1e3a8a;
-    border-color: #2563eb;
-    color: #fff;
+    background: var(--grad-btn-hover);
+    border-color: var(--g-800);
+    color: var(--btn-ink);
   }
   /* Aplicar / Limpiar: renglon propio al pie de la tarjeta, pegado a la
      derecha. Ocupa todas las columnas de la rejilla de filtros. */
@@ -491,20 +539,20 @@
     display: inline-flex; align-items: center; justify-content: center;
     border-radius: var(--radius-xs); font-size: 12.5px; letter-spacing: .1px;
     border: 1px solid var(--accent-deep);
-    background: var(--accent-deep); color: #fff;
-    box-shadow: inset 0 1px 2px rgba(0, 0, 0, .18);
+    background: var(--accent-deep); color: #ffffff;
+    box-shadow: inset 0 1px 2px rgba(25, 25, 25, .18);
   }
   .filtros .acciones .btn:hover {
     background: var(--accent-deep-2); border-color: var(--accent-deep-2);
-    filter: none; box-shadow: inset 0 1px 2px rgba(0, 0, 0, .18);
+    filter: none; box-shadow: inset 0 1px 2px rgba(25, 25, 25, .18);
   }
   /* Limpiar es secundario: identico a una barra vacia. */
   .filtros .acciones .btn.gris {
     order: 1;
-    background: var(--ctrl-bg); border-color: var(--ctrl-line); color: #ffffff;
+    background: var(--ctrl-bg); border-color: var(--ctrl-line); color: var(--ink-2);
   }
   .filtros .acciones .btn.gris:hover {
-    background: var(--ctrl-bg-2); border-color: var(--accent); color: #fff;
+    background: var(--ctrl-bg-2); border-color: var(--accent); color: var(--g-900);
   }
   .filtros .acciones .btn:active { transform: translateY(1px); }
 
@@ -517,19 +565,21 @@
     position: relative; overflow: hidden;
     background: var(--card); border-radius: var(--radius); padding: 16px 18px;
     box-shadow: var(--shadow); border: 1px solid var(--line-soft);
-    border-left: 5px solid var(--accent);
+    border-left: 5px solid transparent;
+    border-image: var(--grad) 1;
     transition: transform .15s ease, box-shadow .15s ease;
   }
   /* Lavado de color heredado del borde izquierdo. */
   .kpi::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background: linear-gradient(100deg, currentColor 0%, transparent 46%);
-    opacity: .045; color: var(--accent);
+    opacity: .07; color: var(--g-600);
   }
   .kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-  .kpi.sv { border-left-color: var(--verde); }
-  .kpi.sa { border-left-color: var(--ambr); }
-  .kpi.sr { border-left-color: var(--rojo); }
+  /* El semaforo pisa el degradado: un solo color plano por estado. */
+  .kpi.sv { border-image: none; border-left-color: var(--verde); }
+  .kpi.sa { border-image: none; border-left-color: var(--ambr); }
+  .kpi.sr { border-image: none; border-left-color: var(--rojo); }
   .kpi.sv::after { color: var(--verde); }
   .kpi.sa::after { color: var(--ambr); }
   .kpi.sr::after { color: var(--rojo); }
@@ -564,7 +614,8 @@
   }
   .card .nota {
     font-size: 11.5px; color: var(--muted); margin: 0 0 12px;
-    background: #f8fafc; border: 1px solid var(--line-soft);
+    background: var(--bg-2); border: 1px solid var(--line-soft);
+    border-left: 3px solid var(--g-200);
     border-radius: var(--radius-xs); padding: 8px 10px;
   }
   .lienzo { position: relative; height: 260px; }
@@ -605,7 +656,7 @@
     cursor: pointer; font-weight: 800; line-height: 1;
     width: 17px; height: 17px; border-radius: 50%;
     display: inline-flex; align-items: center; justify-content: center;
-    background: rgba(37, 99, 235, .12); color: var(--accent-ink);
+    background: rgba(101, 187, 43, .20); color: var(--accent-ink);
     transition: background .15s ease, color .15s ease;
   }
   .fchip .quitar:hover { color: #fff; background: var(--rojo); }
@@ -621,10 +672,10 @@
     cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted);
     transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease;
   }
-  .tab:hover { color: var(--ink); border-color: #cbd5e1; background: #f8fafc; }
+  .tab:hover { color: var(--ink); border-color: var(--g-300); background: var(--g-50); }
   .tab.active {
-    background: var(--grad-btn); color: #ffffff; border-color: var(--accent);
-    box-shadow: 0 2px 8px -2px rgba(37, 99, 235, .55);
+    background: var(--grad-btn); color: var(--btn-ink); border-color: var(--g-700);
+    box-shadow: 0 2px 8px -2px rgba(71, 139, 60, .55);
   }
   .panel { display: none; }
   .panel.active { display: block; animation: aparecer .2s ease both; }
@@ -646,7 +697,7 @@
     white-space: nowrap; cursor: pointer; user-select: none;
     transition: color .15s ease, background .15s ease;
   }
-  th:hover { color: var(--ink); background: #f8fafc; }
+  th:hover { color: var(--ink); background: var(--g-50); }
   th .ord { margin-left: 4px; color: var(--accent); }
   td {
     padding: 9px 8px; border-bottom: 1px solid var(--line-soft);
@@ -654,20 +705,20 @@
   }
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   tbody tr { transition: background .12s ease; }
-  tbody tr:hover { background: #f6f9fd; }
+  tbody tr:hover { background: var(--g-50); }
   tbody tr:last-child td { border-bottom: none; }
   .fecha-cell { white-space: nowrap; font-variant-numeric: tabular-nums; }
 
   /* ---- Drill-down jerarquico ---- */
-  .n1row { background: #f5f8fc; font-weight: 700; cursor: pointer; color: var(--ink); }
+  .n1row { background: var(--bg-2); font-weight: 700; cursor: pointer; color: var(--ink); }
   .n1row td { color: var(--ink); border-bottom-color: var(--line); }
-  .n1row:hover { background: #eef4fb; }
+  .n1row:hover { background: var(--g-50); }
   .n1row td:first-child::before { content: "\25B8 "; color: var(--muted); }
   .n1row.open td:first-child::before { content: "\25BE "; }
   .n2row { display: none; }
   .n2row.show { display: table-row; }
   .n2row td:first-child {
-    padding-left: 24px; color: #475569; font-weight: 400;
+    padding-left: 24px; color: var(--ink-2); font-weight: 400;
     box-shadow: inset 3px 0 0 var(--line);
   }
   .n2exp { cursor: pointer; }
@@ -675,7 +726,7 @@
   .n2exp.open td:first-child::before { content: "\25BE "; font-size: 10px; }
   .n3row { display: none; }
   .n3row.show { display: table-row; }
-  .n3row td { background: #fbfcfe; }
+  .n3row td { background: #fbfcf8; }
   .n3row td:first-child {
     padding-left: 46px; color: var(--muted);
     box-shadow: inset 3px 0 0 var(--line);
@@ -695,16 +746,18 @@
     padding: 2px 9px; font-size: 11px; font-weight: 700; white-space: nowrap;
     border: 1px solid transparent;
   }
-  .pill.vencido { background: #fee2e2; color: #b91c1c; border-color: #fecaca; }
-  .pill.dentro { background: #dcfce7; color: #047857; border-color: #bbf7d0; }
-  .pill.neutro { background: #eef2f7; color: var(--muted); border-color: var(--line); }
+  .pill.vencido { background: #fdf4f2; color: var(--rojo); border-color: #edd3cd; }
+  .pill.dentro { background: var(--g-50); color: var(--g-900); border-color: var(--g-200); }
+  .pill.neutro { background: var(--bg-2); color: var(--muted); border-color: var(--line); }
   /* ---- Indicadores ---- */
   .badge {
     display: inline-block; padding: 2px 9px; border-radius: var(--radius-pill);
     font-size: 11px; font-weight: 700; color: #fff;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, .15);
+    box-shadow: 0 1px 2px rgba(25, 25, 25, .15);
   }
-  .bv { background: var(--verde); } .ba { background: var(--ambr); } .br { background: var(--rojo); }
+  /* Relleno con texto blanco: se usa --verde-strong, no el lima, para que
+     el 11px siga leyendose. */
+  .bv { background: var(--verde-strong); } .ba { background: var(--ambr); } .br { background: var(--rojo); }
   .chip {
     display: inline-block; padding: 2px 8px; border-radius: 6px;
     font-size: 10px; font-weight: 700; letter-spacing: .2px;
@@ -712,7 +765,7 @@
   .mini {
     width: 60px; height: 7px; background: var(--line); border-radius: var(--radius-pill);
     overflow: hidden; display: inline-block; vertical-align: middle;
-    box-shadow: inset 0 1px 1px rgba(15, 23, 42, .07);
+    box-shadow: inset 0 1px 1px rgba(25, 25, 25, .07);
   }
   .mini > i { display: block; height: 100%; border-radius: var(--radius-pill); }
   .arrow-up { color: var(--rojo); font-weight: 800; }
@@ -725,15 +778,15 @@
   }
   .legend span {
     display: flex; align-items: center; gap: 6px; cursor: pointer;
-    padding: 3px 8px; border-radius: var(--radius-pill); background: #f8fafc;
+    padding: 3px 8px; border-radius: var(--radius-pill); background: var(--bg-2);
     transition: opacity .15s ease, background .15s ease, color .15s ease;
   }
-  .legend span:hover { background: #eef2f7; color: var(--ink); }
+  .legend span:hover { background: var(--g-50); color: var(--g-900); }
   .legend span.apagado { opacity: .4; }
   .legend i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
   .vacio {
-    padding: 34px 26px; text-align: center; color: var(--ctrl-ink); font-size: 13px;
-    background: var(--ctrl-bg); border: 1px dashed var(--line);
+    padding: 34px 26px; text-align: center; color: var(--muted); font-size: 13px;
+    background: var(--bg-2); border: 1px dashed var(--g-200);
     border-radius: var(--radius);
   }
   .swatch {
@@ -761,7 +814,7 @@
   .tendencia-linea {
     font-size: 13.5px; margin: 0 0 16px;
     background: var(--card); border: 1px solid var(--line-soft);
-    border-left: 4px solid var(--accent);
+    border-left: 4px solid transparent; border-image: var(--grad) 1;
     border-radius: var(--radius); box-shadow: var(--shadow);
     padding: 12px 16px; color: var(--ink-2);
   }
@@ -821,7 +874,7 @@
     body { background: #fff; padding: 0; }
     .maintabs, .filtros, .barra-filtros, .btn { display: none !important; }
     .card, .kpi, .filtros { box-shadow: none; border: 1px solid var(--line); }
-    header.top { background: #0f172a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    header.top { background: var(--grad-header) !important; color: var(--ink) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
 
   /* ==================================================================
@@ -829,29 +882,30 @@
      prefijadas con .tabx para no alterar SLA ni Backlog; las variables de
      color (--verde/--ambr/--rojo/--radius/...) ya existen en :root.
      ================================================================== */
-.tabx header.top{background:linear-gradient(135deg,#0f172a,#1e3a8a);color:#fff;padding:22px 26px;
+.tabx header.top{background:var(--grad-header);color:var(--ink);padding:22px 26px;
 border-radius:var(--radius);margin-bottom:16px}
 .tabx header.top h1{font-size:19px;font-weight:700}
-.tabx header.top .sub{font-size:13px;color:#cbd5e1;margin-top:3px}
+.tabx header.top .sub{font-size:13px;color:var(--ink-2);margin-top:3px}
 .tabx .selrow{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:14px}
 .tabx .selrow .grp{display:flex;flex-direction:column;gap:4px}
-.tabx .selrow label{font-size:11px;color:#cbd5e1;text-transform:uppercase;letter-spacing:.5px}
-.tabx .selrow select{padding:8px 12px;border-radius:8px;border:1px solid #334155;
-background:#1e293b;color:#fff;font-size:13px;min-width:220px}
-.tabx .selrow button{padding:8px 14px;border-radius:8px;border:none;background:#334155;color:#fff;
-cursor:pointer;font-size:12px;font-weight:600}
-.tabx .selrow button:hover{background:#475569}
+.tabx .selrow label{font-size:11px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.5px}
+.tabx .selrow select{padding:8px 12px;border-radius:8px;border:1px solid var(--line);
+background:#fff;color:var(--ink);font-size:13px;min-width:220px}
+.tabx .selrow button{padding:8px 14px;border-radius:8px;border:1px solid var(--g-700);
+background:var(--grad-btn);color:var(--btn-ink);
+cursor:pointer;font-size:12px;font-weight:700}
+.tabx .selrow button:hover{background:var(--grad-btn-hover)}
 .tabx .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:14px;margin-bottom:16px}
 .tabx .kpi{background:var(--card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07);
-border-left:5px solid var(--accent)}
-.tabx .kpi.sv{border-left-color:var(--verde)}
-.tabx .kpi.sa{border-left-color:var(--ambr)}
-.tabx .kpi.sr{border-left-color:var(--rojo)}
+border-left:5px solid transparent;border-image:var(--grad) 1}
+.tabx .kpi.sv{border-image:none;border-left-color:var(--verde)}
+.tabx .kpi.sa{border-image:none;border-left-color:var(--ambr)}
+.tabx .kpi.sr{border-image:none;border-left-color:var(--rojo)}
 .tabx .kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
 .tabx .kpi .val{font-size:25px;font-weight:800;margin-top:4px}
 .tabx .kpi .foot{font-size:11px;color:var(--muted);margin-top:3px}
 .tabx .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;color:#fff}
-.tabx .bv{background:var(--verde)}
+.tabx .bv{background:var(--verde-strong)}
 .tabx .ba{background:var(--ambr)}
 .tabx .br{background:var(--rojo)}
 .tabx .grid2{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;margin-bottom:16px}
@@ -871,39 +925,39 @@ border-left:5px solid var(--accent)}
   overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:3;line-clamp: 3;-webkit-box-orient:vertical}
 .tabx .treemap-item .tm-value{font-size:10px;opacity:.92;margin-top:2px}
 .tabx .treemap-empty{padding:30px;text-align:center;color:var(--muted);font-size:12px}
-.tabx .treemap-item.tm-selected{outline:3px solid #0f172a;outline-offset:-3px;z-index:2}
+.tabx .treemap-item.tm-selected{outline:3px solid var(--ink);outline-offset:-3px;z-index:2}
 .tabx .treemap-item.tm-dim{opacity:.4}
 .tabx .tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
 .tabx .tab{padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;
 font-size:13px;font-weight:600;color:var(--muted)}
-.tabx .tab.active{background:var(--ctrl-bg);color:#fff;border-color:var(--accent)}
+.tabx .tab.active{background:var(--grad-btn);color:var(--btn-ink);border-color:var(--g-700)}
 .tabx .panel{display:none}
 .tabx .panel.active{display:block}
 .tabx table{width:100%;border-collapse:collapse;font-size:12px}
 .tabx th{text-align:left;padding:9px 8px;border-bottom:2px solid var(--line);color:var(--muted);
 font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;cursor:pointer;user-select:none}
 .tabx th:hover{color:var(--ink)}
-.tabx td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+.tabx td{padding:8px;border-bottom:1px solid var(--line-soft);vertical-align:top}
 .tabx td.num{text-align:right;font-variant-numeric:tabular-nums}
-.tabx tbody tr:hover{background:#f8fafc}
-.tabx .mini{width:56px;height:7px;background:#e2e8f0;border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle}
+.tabx tbody tr:hover{background:var(--g-50)}
+.tabx .mini{width:56px;height:7px;background:var(--line);border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle}
 .tabx .mini>i{display:block;height:100%}
-.tabx .c1row{background:#f8fafc;font-weight:700;cursor:pointer}
+.tabx .c1row{background:var(--bg-2);font-weight:700;cursor:pointer}
 .tabx .c1row td:first-child::before{content:"\25B8 ";color:var(--muted)}
 .tabx .c1row.open td:first-child::before{content:"\25BE "}
 .tabx .c2row{display:none}
 .tabx .c2row.show{display:table-row}
-.tabx .c2row td:first-child{padding-left:22px;color:#475569;font-weight:400}
+.tabx .c2row td:first-child{padding-left:22px;color:var(--ink-2);font-weight:400}
 .tabx .c2exp{cursor:pointer}
 .tabx .c2exp td:first-child::before{content:"\25B8 ";color:var(--muted);font-size:10px}
 .tabx .c2exp.open td:first-child::before{content:"\25BE ";font-size:10px}
 .tabx .c3row{display:none}
 .tabx .c3row.show{display:table-row}
 .tabx .c3row td:first-child{font-size:12px}
-.tabx .catclick{cursor:pointer;color:var(--accent);text-decoration:underline dotted}
-.tabx .btn-ver-cat{cursor:pointer;border:1px solid var(--accent);background:#fff;color:var(--accent);
-  font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;white-space:nowrap}
-.tabx .btn-ver-cat:hover{background:var(--accent);color:#fff}
+.tabx .catclick{cursor:pointer;color:var(--g-900);text-decoration:underline dotted}
+.tabx .btn-ver-cat{cursor:pointer;border:1px solid var(--g-700);background:#fff;color:var(--g-900);
+  font-size:11px;font-weight:700;padding:3px 9px;border-radius:6px;white-space:nowrap}
+.tabx .btn-ver-cat:hover{background:var(--grad-btn);color:var(--btn-ink);border-color:var(--g-800)}
 .tabx .arrow-up{color:var(--rojo);font-weight:800}
 .tabx .arrow-down{color:var(--verde);font-weight:800}
 .tabx .arrow-eq{color:var(--muted)}
@@ -913,11 +967,11 @@ font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap
 .tabx .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:8px}
 .tabx .legend span{display:flex;align-items:center;gap:5px}
 .tabx .legend i{width:11px;height:11px;border-radius:3px}
-.tabx .det-inis{background:#fbfdff}
-.tabx .tag-est{font-size:10px;padding:1px 6px;border-radius:5px;background:#f1f5f9;color:#475569;font-weight:600}
+.tabx .det-inis{background:var(--g-50)}
+.tabx .tag-est{font-size:10px;padding:1px 6px;border-radius:5px;background:var(--bg-2);color:var(--ink-2);font-weight:600}
 .tabx .tag-pron{font-size:10px;padding:1px 6px;border-radius:5px;background:#fef3c7;color:#92400e;font-weight:700;vertical-align:middle}
 .tabx .fecha-cell{white-space:nowrap}
-.tabx .modal-bk{display:none;position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:50;padding:30px}
+.tabx .modal-bk{display:none;position:fixed;inset:0;background:rgba(25,25,25,.55);z-index:50;padding:30px}
 .tabx .modal-bk.show{display:flex;align-items:flex-start;justify-content:center}
 .tabx .modal{background:#fff;border-radius:14px;max-width:1150px;width:100%;max-height:88vh;overflow:auto;padding:22px 24px;margin-top:20px}
 .tabx .modal h2{font-size:16px;margin-bottom:4px}

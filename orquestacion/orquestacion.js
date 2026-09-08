@@ -27,7 +27,7 @@ try {
   MOCK = await resp.json();
 } catch (err) {
   document.body.insertAdjacentHTML('afterbegin',
-    '<div style="background:#fee2e2;border:1px solid #dc2626;color:#7f1d1d;' +
+    '<div style="background:#fdf4f2;border:1px solid #982a18;color:#5c1a0e;' +
     'border-radius:10px;padding:14px 18px;margin-bottom:14px;font-size:13px">' +
     '<b>No se pudo cargar ' + MOCK_URL + '.</b><br>' + String(err) +
     '<br>Si abriste el archivo con doble clic (file://), el navegador bloquea ' +
@@ -84,10 +84,13 @@ function renderOrq(){
   ];
   document.getElementById('kpisOr').innerHTML=cards.map(c=>
     `<div class="kpi"><div class="lbl">${c.l}</div><div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
+  /* Paleta derivada de la escala verde de la cabecera
+     (#9DD323 lima -> #65BB2B verde -> #478B3C verde profundo) y sus
+     interpolaciones. Rojo y ambar se conservan donde el dato lo pide. */
   // [ORQ-GRAF1] BARRAS HORIZONTALES por Clasificacion (Alta, Media, Baja, Única)
   const orden=['Alta','Media','Baja','Única'];
   const cvals=orden.map(k=>(o.por_clasif&&o.por_clasif[k])||0);
-  const ccolors=['#dc2626','#d97706','#059669','#64748b'];
+  const ccolors=['#982a18','#d97706','#478b3c','#b7bfb2'];
   const bctx=document.getElementById('chartCatJobs');
   if(chartCatJobs)chartCatJobs.destroy();
   chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[{data:cvals,backgroundColor:ccolors}]},
@@ -99,7 +102,7 @@ function renderOrq(){
   // [ORQ-GRAF2] PIE por Categoria (col A)
   const ent=Object.entries(o.por_categoria).sort((a,b)=>b[1]-a[1]);
   const labels=ent.map(e=>e[0]), data=ent.map(e=>e[1]);
-  const palette=['#2563eb','#059669','#d97706','#7c3aed','#0891b2','#dc2626','#db2777','#65a30d','#ca8a04','#0d9488'];
+  const palette=['#65bb2b','#9dd323','#478b3c','#bae065','#35702f','#81c727','#8fbf6a','#56a333','#d3e9ac','#b7bfb2'];
   const colors=labels.map((_,i)=>palette[i%palette.length]);
   const pctx=document.getElementById('chartClasif');
   if(chartClasif)chartClasif.destroy();
@@ -110,7 +113,7 @@ function renderOrq(){
   // [ORQ-GRAF3] PIE por Candidato (col B)
   const cOrden=(J.orquestacion.candidatos||[]).slice();
   const candVals=cOrden.map(k=>(o.por_candidato&&o.por_candidato[k])||0);
-  const candColors=['#059669','#dc2626','#2563eb','#d97706','#7c3aed','#64748b'];
+  const candColors=['#478b3c','#9dd323','#65bb2b','#35702f','#81c727','#b7bfb2'];
   const kctx=document.getElementById('chartCand');
   if(chartCand)chartCand.destroy();
   chartCand=new Chart(kctx,{type:'pie',data:{labels:cOrden,
@@ -161,8 +164,8 @@ function renderOrqDirTable(){
   (J.orquestacion.candidatos||[]).forEach(v=>{
     const id='cand_'+v.replace(/[^a-zA-Z0-9]/g,'');
     cont.insertAdjacentHTML('beforeend',
-      `<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#e2e8f0;
-        background:rgba(255,255,255,.08);padding:4px 10px;border-radius:14px;cursor:pointer">
+      `<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#191919;
+        background:rgba(25,25,25,.06);padding:4px 10px;border-radius:14px;cursor:pointer">
         <input type="checkbox" class="candChk" value="${v}" id="${id}"> ${v}</label>`);
   });
   cont.addEventListener('change',e=>{

@@ -31,16 +31,62 @@ function escapeAttr(s) { return escapeHtml(s); }
 const FMT = n => (n === null || n === undefined || n === '') ? '' : Number(n).toLocaleString('es-MX');
 const PCT = (parte, total) => total > 0 ? Math.round(100 * parte / total) + '%' : '—';
 
-const COLOR_PRIORIDAD = {
-  'Critica': '#dc2626', 'Crítica': '#dc2626',
-  'Alta': '#d97706', 'Media': '#eab308', 'Baja': '#16a34a'
+/* =========================================================================
+   PALETA DE GRAFICAS — derivada de la escala verde de la cabecera.
+
+   Las tres paradas del degradado de header.top son la fuente:
+     #9DD323 (lima) · #65BB2B (verde de marca) · #478B3C (verde profundo)
+   Todo lo demas son interpolaciones y tintes de esa recta. Los mismos
+   valores viven en el bloque :root de dashboard.css (--g-300 ... --g-900):
+   al retocar la escala hay que tocar los dos archivos.
+
+   Rojo y ambar se conservan donde el dato es negativo o de advertencia.
+   ========================================================================= */
+const VERDE = {
+  g300: '#bae065', g400: '#9dd323', g500: '#81c727', g600: '#65bb2b',
+  g700: '#56a333', g800: '#478b3c', g900: '#3a7431',
+  // Anclas SOLO para series categoricas, cuando 7 escalones no bastan para
+  // separar 10 barras vecinas. No son paradas de ningun degradado.
+  masOscuro: '#35702f', apagado: '#8fbf6a', palido: '#d3e9ac', grisVerde: '#b7bfb2',
 };
-const PALETA_CAT = ['#2563eb','#059669','#d97706','#7c3aed','#0891b2','#dc2626','#94a3b8',
-                    '#db2777','#65a30d','#0d9488'];
+const ROJO_SEM = '#982a18';   // negativo
+const AMBAR_SEM = '#d97706';  // advertencia
+
+const COLOR_PRIORIDAD = {
+  'Critica': ROJO_SEM, 'Crítica': ROJO_SEM,
+  // Critica/Alta conservan el rojo y el ambar porque son severidad; Media y
+  // Baja bajan por la escala verde en vez de por colores sueltos.
+  'Alta': AMBAR_SEM, 'Media': VERDE.g400, 'Baja': VERDE.g800
+};
+/* Rampa categorica: alterna claro y oscuro de la MISMA escala para que dos
+   series contiguas no se confundan, en vez de repetir un solo verde. */
+const PALETA_CAT = [VERDE.g600, VERDE.g400, VERDE.g800, VERDE.g300, VERDE.masOscuro,
+                    VERDE.g500, VERDE.apagado, VERDE.g700, VERDE.palido, VERDE.grisVerde];
 
 // Semaforo de tres niveles: devuelve el sufijo de clase (.kpi.sv/.sa/.sr).
 const SEM = pct => pct >= 90 ? 'sv' : (pct >= 75 ? 'sa' : 'sr');
-const COLOR_SEM = { sv: '#059669', sa: '#d97706', sr: '#dc2626' };
+const COLOR_SEM = { sv: VERDE.g800, sa: AMBAR_SEM, sr: ROJO_SEM };
+
+/* Ejes, rejilla y leyendas de Chart.js: carbon y gris verdoso, a juego con
+   la tinta del tablero. Solo toca la presentacion por defecto; cualquier
+   grafica que ya declare su propio `ticks`/`grid` sigue mandando. */
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.color = '#393939';
+  Chart.defaults.borderColor = '#eef1ea';
+  if (Chart.defaults.scale && Chart.defaults.scale.grid) {
+    Chart.defaults.scale.grid.color = '#eef1ea';
+  }
+  if (Chart.defaults.plugins && Chart.defaults.plugins.legend) {
+    Chart.defaults.plugins.legend.labels = Object.assign(
+      {}, Chart.defaults.plugins.legend.labels, { color: '#393939', boxWidth: 12, boxHeight: 12 });
+  }
+  if (Chart.defaults.plugins && Chart.defaults.plugins.tooltip) {
+    Object.assign(Chart.defaults.plugins.tooltip, {
+      backgroundColor: 'rgba(25, 25, 25, .92)',
+      borderColor: '#478b3c', borderWidth: 1,
+    });
+  }
+}
 const miniBar = (pct, color) =>
   `<span class="mini" title="${Math.round(pct)}%"><i style="width:${Math.max(0,Math.min(100,pct))}%;background:${color}"></i></span>`;
 
@@ -348,7 +394,7 @@ function etiquetaDelClic(gr, evento) {
 // Resalta con un contorno oscuro el elemento seleccionado de una grafica.
 function bordesSeleccion(etiquetas, seleccionada, grosorNormal) {
   return {
-    borderColor: etiquetas.map(e => e === seleccionada ? '#0f172a' : '#fff'),
+    borderColor: etiquetas.map(e => e === seleccionada ? '#191919' : '#fff'),
     borderWidth: etiquetas.map(e => e === seleccionada ? 3 : grosorNormal),
   };
 }
@@ -403,7 +449,7 @@ const ETIQUETAS_SEGMENTO = {
         const y = ((barra.base ?? 0) + barra.y) / 2;
         const texto = FMT(v);
         // Contorno oscuro: el mismo numero se lee sobre cualquier color de la paleta.
-        ctx.strokeStyle = 'rgba(15,23,42,.65)';
+        ctx.strokeStyle = 'rgba(25,25,25,.72)';
         ctx.lineWidth = 3;
         ctx.strokeText(texto, barra.x, y);
         ctx.fillStyle = '#fff';
@@ -450,7 +496,7 @@ function renderEmptyChart(canvasId, message) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, ancho, alto);
   // Gris medio: se lee igual sobre el tema claro y el oscuro.
-  ctx.fillStyle = '#94a3b8';
+  ctx.fillStyle = '#9aa094';
   ctx.font = '13px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -504,7 +550,10 @@ const TableroSla = (function () {
   // Bajar este numero solo reduce cobertura; no requiere tocar el backend.
   const TOPE_DETALLE = 500;
 
-  const AZUL = '#2563eb', VERDE = '#059669', ROJO = '#dc2626', MORADO = '#7c3aed', GRIS = '#94a3b8';
+  // Nombres heredados: ya no describen su color. Las cuatro series de la
+  // tendencia bajan por la escala verde y solo "vencidos" conserva el rojo.
+  const AZUL = VERDE.g500, VERDE_S = VERDE.g800, ROJO = ROJO_SEM,
+        MORADO = VERDE.g600, GRIS = '#9aa094';
   const ORDEN_AGING = ['0-1 dias', '2-3 dias', '4-7 dias', '8-15 dias', '16-30 dias', '31+ dias', 'Sin fecha'];
 
   const graficos = {};
@@ -1176,7 +1225,7 @@ const TableroSla = (function () {
 
     const serie = (label, data, color, rellenar) => ({
       label, data, borderColor: color,
-      backgroundColor: rellenar ? 'rgba(37,99,235,.12)' : color,
+      backgroundColor: rellenar ? 'rgba(101,187,43,.16)' : color,
       fill: !!rellenar, tension: .3, borderWidth: 2,
       pointRadius: estilo.pointRadius, pointHoverRadius: estilo.pointHoverRadius,
     });
@@ -1188,7 +1237,7 @@ const TableroSla = (function () {
           labels: etiquetas,
           datasets: [
             serie('Creados', creados, AZUL, true),
-            serie('Cerrados', cerrados, VERDE),
+            serie('Cerrados', cerrados, VERDE_S),
             serie('Vencidos SLA', vencidos, ROJO),
           ]
         },
@@ -1286,7 +1335,7 @@ const TableroSla = (function () {
           labels: etiquetas,
           datasets: [
             { label: 'Totales', data: totales, backgroundColor: AZUL, borderRadius: 5 },
-            { label: 'Cerrados', data: cerrados, backgroundColor: VERDE, borderRadius: 5 },
+            { label: 'Cerrados', data: cerrados, backgroundColor: VERDE_S, borderRadius: 5 },
           ]
         },
         options: {
@@ -1443,7 +1492,7 @@ const TableroSla = (function () {
         <td>${escapeHtml(x.tecnico)}</td>
         <td>${escapeHtml(x.grupo)}</td>
         <td class="num"><b>${FMT(x.cerrados)}</b>
-          ${miniBar(tope > 0 ? 100 * x.cerrados / tope : 0, VERDE)}</td>
+          ${miniBar(tope > 0 ? 100 * x.cerrados / tope : 0, VERDE_S)}</td>
         <td class="num">${FMT(x.totales)}</td>
         <td class="num">${PCT(x.cerrados, x.totales)}</td>
         <td class="num">${PCT(x.cerrados, totalCerrados)}</td>
@@ -1618,7 +1667,8 @@ const TableroSla = (function () {
 const TableroBacklog = (function () {
   // Misma paleta que usa el correo, en el mismo orden: un lider conserva su
   // color entre el correo, la grafica apilada y la tabla de resumen.
-  const PALETA = ['#2563eb','#dc2626','#059669','#d97706','#7c3aed','#0891b2','#db2777','#6b7280'];
+  const PALETA = [VERDE.g600, VERDE.g400, VERDE.g800, VERDE.g300, VERDE.masOscuro,
+                  VERDE.g500, VERDE.apagado, VERDE.grisVerde];
   // AgingSort >= 5 es exactamente "mas de 30 dias" (ver 07_correo_backlog.sql).
   const SORT_MAS_30 = 5;
 
@@ -1630,7 +1680,7 @@ const TableroBacklog = (function () {
 
   function colorLider(nombre) {
     const i = ordenLideres.indexOf(nombre);
-    return i >= 0 ? PALETA[i % PALETA.length] : '#6b7280';
+    return i >= 0 ? PALETA[i % PALETA.length] : VERDE.grisVerde;
   }
   function hayFiltro() { return dimensionesActivas(filtro).length > 0; }
   // hayFiltro() solo mira el cross-filter de las graficas. Para los mensajes de
@@ -1846,7 +1896,7 @@ const TableroBacklog = (function () {
         datasets: [{
           label: 'Backlog', data: serie.map(f => f.TicketsBacklog),
           borderColor: filtro.lider ? colorLider(filtro.lider) : PALETA[0],
-          backgroundColor: 'rgba(37,99,235,.12)', fill: true,
+          backgroundColor: 'rgba(101,187,43,.16)', fill: true,
           borderWidth: 2, tension: .3, pointRadius: 3,
         }],
       },
@@ -2599,7 +2649,7 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
       console.error(err);
       cont.innerHTML = `<div class="card" style="margin-top:16px">
         <h3>No se pudo montar el tablero de ${nombre}</h3>
-        <p style="font-size:13px;color:#64748b">${escapeHtml(err.message)} ·
+        <p style="font-size:13px;color:#5e5e5f">${escapeHtml(err.message)} ·
         el tablero suelto sigue en <a href="${base}${pagina}">${base}${pagina}</a>.</p></div>`;
     });
   }

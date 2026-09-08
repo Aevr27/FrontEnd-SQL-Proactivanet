@@ -75,26 +75,32 @@
   /* Paleta del prototipo verde. Los nombres de las llaves se conservan tal
      cual -azul, morado, ambar- porque solo cambia el color que devuelven: asi
      el resto del archivo es identico a qa/qa.js y el experimento se queda en
-     lo visual. Los valores salen del tema corporativo Template-TD_2026:
-     lima 9DD323, verde 65BB2B, verde oscuro 478B3C / 1A5711, y el rojo 982A18
-     reservado para lo negativo.
+     lo visual. Los valores salen de la escala verde de la cabecera, cuyo
+     degradado es la fuente de la verdad de todo el tema:
+       #9DD323 (lima, --g-400) · #65BB2B (verde, --g-600) · #478B3C
+       (verde profundo, --g-800)
+     El resto son interpolaciones y tintes de esos tres. El rojo #982A18
+     queda reservado para lo negativo.
 
-     Cada color tiene su gemelo en qa_green.css (--verde-*, --danger, ...);
+     Cada color tiene su gemelo en qa_green.css (--g-*, --danger, ...);
      si se retoca la paleta hay que tocar los dos sitios. */
   var COLOR = {
-    azul: '#65BB2B',        // serie primaria: verde de marca
-    azulOscuro: '#478B3C',  // hover de barra
-    verde: '#478B3C',       // estado OK
+    azul: '#65BB2B',        // serie primaria: verde de marca   (--g-600)
+    azulOscuro: '#478B3C',  // hover de barra                   (--g-800)
+    verde: '#478B3C',       // estado OK                        (--g-800)
     rojo: '#982A18',        // estado Incorrecto (unico uso del rojo)
-    ambar: '#9DD323',       // estado Sin catalogo: lima, no ambar
-    morado: '#8FBF6A',      // serie secundaria: verde apagado
-    cyan: '#1A5711',        // estado Valido: verde profundo
+    ambar: '#9DD323',       // estado Sin catalogo: lima, no ambar (--g-400)
+    morado: '#81C727',      // serie secundaria                 (--g-500)
+    // Ancla oscura SOLO para separar categorias vecinas. Era #1A5711, un
+    // verde bosque que no esta en la cabecera; este sigue en la misma recta
+    // sin cerrar la escala tan abajo.
+    cyan: '#35702F',        // estado Valido
     gris: '#B7BFB2'         // estado fuera de catalogo
   };
 
   // Grises del texto y de la rejilla de las graficas, para que Chart.js use
   // la misma escala que la hoja de estilos.
-  var TINTA = { eje: '#5E5E5F', etiqueta: '#393939', rejilla: '#ECEFEA' };
+  var TINTA = { eje: '#5E5E5F', etiqueta: '#393939', rejilla: '#EEF1EA' };
 
   // Color por estado de validacion. Un estado que no este en la lista recibe
   // un color neutro, pero conserva su nombre: nunca se agrupa con otro.

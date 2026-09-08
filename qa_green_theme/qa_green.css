@@ -40,18 +40,45 @@
   --muted: #5e5e5f;           /* etiquetas y notas */
   --muted-2: #9aa094;         /* texto en espera, pie */
 
-  /* ---- Verde de marca (Template-TD_2026) ---- */
-  --lima: #9dd323;
-  --verde: #65bb2b;           /* acento primario */
-  --verde-ink: #478b3c;       /* verde para texto y hover */
-  --verde-hondo: #1a5711;     /* verde profundo, jerarquia alta */
-  --verde-soft: #f2f9e9;      /* fondo tenue de chips y filas */
-  --verde-line: #d3e9ac;      /* borde tenue */
+  /* ---- ESCALA VERDE DE MARCA — fuente de la verdad ----
+     Las tres paradas del degradado de header.top de aqui abajo:
+       linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%)
+     son --g-800, --g-600 y --g-400. Todo lo demas son interpolaciones y
+     tintes de esos tres valores. La misma escala vive en dashboard.css,
+     qa/qa.css y en qa_green.js: al retocarla hay que tocarlos todos. */
+  --g-50:  #f4fae7;
+  --g-100: #e9f5ce;
+  --g-200: #d3e9ac;
+  --g-300: #bae065;
+  --g-400: #9dd323;   /* LIMA  — parada 100% */
+  --g-500: #81c727;   /* interpolado 400 <-> 600 */
+  --g-600: #65bb2b;   /* VERDE — parada 45% */
+  --g-700: #56a333;   /* interpolado 600 <-> 800 */
+  --g-800: #478b3c;   /* VERDE PROFUNDO — parada 0% */
+  --g-900: #3a7431;   /* SOLO texto y hover. Nunca es parada de un
+                         degradado: la escala no se cierra en un verde
+                         bosque, porque la cabecera tampoco lo hace. */
 
-  /* Reservado para acentos clave: cabecera, boton primario, tarjeta guia. */
-  --grad: linear-gradient(90deg, var(--lima) 0%, var(--verde) 50%, var(--verde-ink) 100%);
-  --grad-btn: linear-gradient(100deg, var(--verde) 0%, var(--verde-ink) 100%);
-  --grad-btn-hover: linear-gradient(100deg, var(--lima) 0%, var(--verde) 100%);
+  /* Alias por rol. Los nombres viejos siguen vivos para no reescribir las
+     reglas que ya los citan. */
+  --lima: var(--g-400);
+  --verde: var(--g-600);      /* acento primario */
+  --verde-ink: var(--g-800);  /* verde para texto y hover */
+  --verde-hondo: var(--g-900);/* jerarquia alta: era #1a5711, demasiado
+                                 oscuro y ajeno a la cabecera */
+  --verde-soft: var(--g-50);  /* fondo tenue de chips y filas */
+  --verde-line: var(--g-200); /* borde tenue */
+
+  /* La cabecera conserva su 135deg exacto; el resto del tema repite esa
+     misma progresion en vertical: lima arriba, verde fresco abajo. */
+  --grad-header: linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%);
+  --grad: linear-gradient(90deg, var(--g-400) 0%, var(--g-600) 50%, var(--g-800) 100%);
+  --grad-vert: linear-gradient(180deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-800) 100%);
+  /* Boton: lima arriba -> verde fresco abajo, con tinta CARBON. Blanco
+     sobre lima no llega a 4.5:1; carbon va de 9.9:1 a 5.7:1. */
+  --grad-btn: linear-gradient(160deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-700) 100%);
+  --grad-btn-hover: linear-gradient(160deg, var(--g-500) 0%, var(--g-700) 55%, var(--g-800) 100%);
+  --btn-ink: var(--ink);
 
   /* ---- Negativo: unico rojo del tablero ---- */
   --danger: #982a18;
@@ -99,7 +126,7 @@ body {
    un filete de 4px arriba y en la barrita vertical del titulo. */
 header.top {
   position: relative; overflow: hidden;
-    background: linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%);
+  background: var(--grad-header);
   color: var(--ink);
   padding: 26px 30px 24px;
   border: 1px solid var(--line-soft);
@@ -128,7 +155,7 @@ header.top > * { position: relative; z-index: 1; }
    cabecera cabe en 5px de ancho. */
 .top-marca {
   flex: none; width: 5px; border-radius: var(--radius-pill);
-  background: linear-gradient(180deg, var(--lima) 0%, var(--verde-ink) 100%);
+  background: var(--grad-vert);
 }
 .top-eyebrow {
   margin: 0 0 4px; font-size: 10.5px; font-weight: 700;
@@ -159,7 +186,7 @@ header.top .acciones-top {
 .btn {
   border: 1px solid transparent; border-radius: var(--radius-xs);
   padding: 9px 17px; cursor: pointer;
-  font: inherit; font-size: 13px; font-weight: 600; color: #fff;
+  font: inherit; font-size: 13px; font-weight: 700; color: var(--btn-ink);
   background: var(--grad-btn);
   box-shadow: 0 1px 2px rgba(71, 139, 60, .25);
   transition: background .15s ease, box-shadow .15s ease, transform .06s ease;
@@ -280,8 +307,8 @@ code {
    marca); kpi-ambar = metrica derivada (verde profundo); kpi-rojo = la
    metrica negativa, el unico sitio donde entra el rojo. */
 .kpi-azul::before  { background: var(--grad); }
-.kpi-ambar::before { background: var(--verde-hondo); }
-.kpi-ambar .kpi-val { color: var(--verde-hondo); }
+.kpi-ambar::before { background: var(--g-800); }
+.kpi-ambar .kpi-val { color: var(--g-900); }
 .kpi-rojo::before  { background: var(--danger); }
 .kpi-rojo  .kpi-val { color: var(--danger); }
 

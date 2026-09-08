@@ -74,7 +74,7 @@ try {
            'API: ' + String(errApi) + '<br>Mock: ' + String(err2) +
            '<br>Si abriste el archivo con doble clic (file://), el navegador bloquea ' +
            'fetch(). Sirve la carpeta por HTTP.',
-           {bg:'#fee2e2', bd:'#dc2626', fg:'#7f1d1d'});
+           {bg:'#fdf4f2', bd:'#982a18', fg:'#5c1a0e'});
     throw err2;
   }
 }
@@ -83,9 +83,59 @@ const P = DATOS;
 
 const FMT = n => Math.round(n||0).toLocaleString('es-MX');
 const PCT = n => Math.round((n||0)*100)+'%';
-const AGR = P.agrupadores, ACOLOR = P.acolor;
+/* =========================================================================
+   PALETA DE GRAFICAS — escala verde de la cabecera.
+
+   Fuente de la verdad: el degradado de header.top,
+     linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%)
+   Sus paradas son g800 / g600 / g400; lo demas son interpolaciones y
+   tintes de esa recta. Los mismos valores viven en experiencia.css
+   (--g-300 ... --g-900).
+   ========================================================================= */
+const VERDE = {
+  g300:'#bae065', g400:'#9dd323', g500:'#81c727', g600:'#65bb2b',
+  g700:'#56a333', g800:'#478b3c', g900:'#3a7431',
+  // Anclas solo para series categoricas largas: no son paradas de ningun
+  // degradado, solo separan barras vecinas cuando 7 escalones no bastan.
+  masOscuro:'#35702f', apagado:'#8fbf6a', palido:'#d3e9ac', grisVerde:'#b7bfb2',
+};
+/* Tinta legible encima de un relleno de la escala. Los verdes claros
+   (lima, --g-300, --g-200) hunden el texto blanco: sobre ellos va carbon.
+   Devuelve #191919 o #fff segun la luminancia relativa del fondo. */
+function tintaSobre(hex){
+  const c=String(hex||'').replace('#','');
+  if(c.length<6) return '#191919';
+  const lin=v=>{v/=255; return v<=0.03928 ? v/12.92 : Math.pow((v+0.055)/1.055,2.4);};
+  const L=0.2126*lin(parseInt(c.slice(0,2),16))
+         +0.7152*lin(parseInt(c.slice(2,4),16))
+         +0.0722*lin(parseInt(c.slice(4,6),16));
+  // Contraste contra blanco vs contra carbon; gana el mas alto.
+  return (1.05/(L+0.05)) >= ((L+0.05)/0.0596) ? '#fff' : '#191919';
+}
+const ROJO_SEM = '#982a18';   // negativo
+const AMBAR_SEM = '#d97706';  // advertencia
+/* Rampa categorica: alterna claro y oscuro de la MISMA escala para que dos
+   series contiguas no se confundan. */
+const PALETA_VERDE = [VERDE.g600, VERDE.g400, VERDE.g800, VERDE.g300, VERDE.masOscuro,
+                      VERDE.g500, VERDE.apagado, VERDE.g700, VERDE.palido, VERDE.grisVerde];
+
+const AGR = P.agrupadores;
+/* acolor lo manda el servidor (App_Code/ExperienciaQueries.cs, que no se
+   toca en un cambio de tema) y sigue trayendo la paleta azul/morada vieja.
+   El remapeo es puramente de presentacion: se conserva el ORDEN y el juego
+   de claves del servidor y solo se sustituye el valor de color, para que
+   los agrupadores entren en la escala verde como el resto del tablero. */
+const ACOLOR = {};
+(AGR || Object.keys(P.acolor || {})).forEach((clave, i) => {
+  ACOLOR[clave] = PALETA_VERDE[i % PALETA_VERDE.length];
+});
+
+// Los chips de agrupador se distinguen por el TINTE de fondo; la tinta es
+// siempre la misma para que el texto se lea a 5.7:1 sobre blanco.
+const TINTA_CHIP = VERDE.g900;
 const SEM = v => v>=0.9?'v':(v>=0.7?'a':'r');
-const SEMC = {v:'#059669',a:'#d97706',r:'#dc2626'};
+// Semaforo: verde de marca, ambar de advertencia y el rojo de lo negativo.
+const SEMC = {v:VERDE.g800,a:AMBAR_SEM,r:ROJO_SEM};
 const ESTADOS_ACTIVOS=["En Análisis","En Solución","En Monitoreo"];
 const badge = v => `<span class="badge b${SEM(v)}">${PCT(v)}</span>`;
 // Semaforo binario (TAREA 4, pestaña "Categorias sin iniciativa"): 0% =
@@ -100,7 +150,7 @@ function fdateSem(i, campo){
   const val = fdate(i[campo]);
   const mapa = {'En Análisis':'f_analisis','En Solución':'f_solucion','En Monitoreo':'f_cierre'};
   if(i.fecha_retrasada && mapa[i.estado]===campo){
-    return `<b style="color:#dc2626">${val}</b>`;
+    return `<b style="color:#982a18">${val}</b>`;
   }
   return val;
 }
@@ -255,10 +305,11 @@ function renderEvol(cats){
   }
   const ctx=document.getElementById('chartEvol');
   if(chartEvol)chartEvol.destroy();
-  const pointColors=vals.map((_,i)=>i===idxPron?'#f59e0b':'#2563eb');
+  // El punto de pronostico conserva el ambar: es una advertencia, no una serie.
+  const pointColors=vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.g800);
   const pointRadii=vals.map((_,i)=>i===idxPron?6:3);
   chartEvol=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Volumen',data:vals,
-    borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.12)',fill:true,tension:.3,
+    borderColor:VERDE.g700,backgroundColor:'rgba(101,187,43,.16)',fill:true,tension:.3,
     pointRadius:pointRadii,pointHoverRadius:pointRadii.map(r=>r+3),
     pointBackgroundColor:pointColors,borderWidth:2}]},
     options:{responsive:true,plugins:{legend:{display:false},
@@ -286,7 +337,7 @@ function renderDona(cats){
   const sinIni=volumenSinIniciativa();
   const labels=[...AGR,'Sin iniciativa'];
   const data=[...des,sinIni];
-  const colors=[...AGR.map(a=>ACOLOR[a]),'#cbd5e1'];
+  const colors=[...AGR.map(a=>ACOLOR[a]),VERDE.grisVerde];
   const ctx=document.getElementById('chartDona');
   if(chartDona)chartDona.destroy();
   chartDona=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
@@ -512,7 +563,7 @@ function renderSin(cats){
         nodos.sort((a,b)=>sinDeCatV2(b)-sinDeCatV2(a)).forEach(n=>{
           const nombreCorto=n.categoria.split('/').pop();
           const volN=volCatV2(n); const pctN=volN>0?conDeCatV2(n)/volN:0;
-          h+=`<tr class="c3row s${idx} ${gid}"><td style="padding-left:34px;color:#64748b">${nombreCorto}</td>
+          h+=`<tr class="c3row s${idx} ${gid}"><td style="padding-left:34px;color:#5e5e5f">${nombreCorto}</td>
             <td class="num">${FMT(sinDeCatV2(n))}</td><td class="num">${badgeBin(pctN)}</td>
             <td>${n.po||'—'}</td><td>${n.so||'—'}</td></tr>`;
         });
@@ -566,7 +617,7 @@ function openCatPopup(folio){
       <td class="num">${PCT(e.pct_dism)}</td><td class="num">${FMT(e.tickets_reduce)}</td></tr>`;
   });
   const totalRow = entradas.length
-    ? `<tr style="font-weight:700;background:#f8fafc"><td>TOTAL</td><td class="num">${FMT(totalVol)}</td><td></td><td class="num">${FMT(totalReduce)}</td></tr>`
+    ? `<tr style="font-weight:700;background:#f6f8f4"><td>TOTAL</td><td class="num">${FMT(totalVol)}</td><td></td><td class="num">${FMT(totalReduce)}</td></tr>`
     : '';
   document.getElementById('catPopupBody').innerHTML = entradas.length
     ? filas.join('') + totalRow
@@ -638,7 +689,7 @@ function renderVen(cats){
   document.getElementById('bodyVen').innerHTML = rows.length? rows.map(x=>{
     const camb=[x.n_analisis,x.n_solucion,x.n_cierre].reduce((a,b)=>a+(b||0),0);
     return `<tr><td><button class="btn-ver-cat" data-fol="${x.folio}">Ver categorías</button></td><td>${x.folio}</td><td>${x.titulo||'—'}</td>
-      <td><span class="chip" style="background:${ACOLOR[x.agrup]}22;color:${ACOLOR[x.agrup]}">${x.agrup}</span></td>
+      <td><span class="chip" style="background:${ACOLOR[x.agrup]}33;color:${TINTA_CHIP}">${x.agrup}</span></td>
       <td class="num"><b>${FMT(x.riesgo_folio)}</b></td><td class="num">${FMT(volumenCategoriasFolio(x.folio))}</td>
       <td><span class="tag-est">${x.estado||'—'}</span></td>
       <td class="fecha-cell"><span class="dot" style="background:${SEMC[x.sem_fecha]}"></span>${fdateSem(x,'f_analisis')}</td>
@@ -658,7 +709,7 @@ function renderAct(cats){
   document.getElementById('bodyAct').innerHTML = rows.length? rows.map(x=>{
     const camb=[x.n_analisis,x.n_solucion,x.n_cierre].reduce((a,b)=>a+(b||0),0);
     return `<tr><td><button class="btn-ver-cat" data-fol="${x.folio}">Ver categorías</button></td><td>${x.folio}</td><td>${x.titulo||'—'}</td>
-      <td><span class="chip" style="background:${ACOLOR[x.agrup]}22;color:${ACOLOR[x.agrup]}">${x.agrup}</span></td>
+      <td><span class="chip" style="background:${ACOLOR[x.agrup]}33;color:${TINTA_CHIP}">${x.agrup}</span></td>
       <td class="num"><b>${FMT(x.riesgo_folio)}</b></td><td class="num">${FMT(x.vol_reduce_folio)}</td>
       <td><span class="tag-est">${x.estado||'—'}</span></td>
       <td class="fecha-cell"><span class="dot" style="background:${SEMC[x.sem_fecha]}"></span>${fdateSem(x,'f_analisis')}</td>
@@ -792,7 +843,7 @@ function renderHist(){
           const valC3=valoresPeriodos(n);
           const deltaC3=deltaDeValores(valC3);
           const nombreCorto=n.categoria.split('/').pop();
-          hcuerpo+=`<tr class="c3row h${idx} ${gid}"><td>${histChk(3,n.categoria)}</td><td style="padding-left:34px;color:#64748b">${nombreCorto}</td>
+          hcuerpo+=`<tr class="c3row h${idx} ${gid}"><td>${histChk(3,n.categoria)}</td><td style="padding-left:34px;color:#5e5e5f">${nombreCorto}</td>
             ${valC3.map(v=>`<td class="num">${FMT(v)}</td>`).join('')}
             <td class="num">${tend(deltaC3)}</td></tr>`;
         });
@@ -800,7 +851,7 @@ function renderHist(){
     });
   });
   const deltaTotal=deltaDeValores(totalGeneral);
-  hcuerpo+=`<tr style="font-weight:700;background:#f8fafc"><td></td><td>TOTAL</td>
+  hcuerpo+=`<tr style="font-weight:700;background:#f6f8f4"><td></td><td>TOTAL</td>
     ${totalGeneral.map(v=>`<td class="num">${FMT(v)}</td>`).join('')}
     <td class="num">${tend(deltaTotal)}</td></tr>`;
   document.getElementById('bodyHist').innerHTML=hcuerpo||
@@ -889,7 +940,7 @@ function graficarHist(){
     alert(`Marca al menos una categoría de nivel ${nivel} para graficar.`);
     return;
   }
-  const colores=['#2563eb','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#db2777','#4f46e5','#0d9488','#65a30d'];
+  const colores=PALETA_VERDE;
   const ctx=document.getElementById('chartHistFull');
   const leyenda=document.getElementById('histChartPopupLegend');
   if(chartHist) chartHist.destroy();
@@ -1030,7 +1081,7 @@ function renderModalBody(){
            data-desc="${(i.descripcion||'').replace(/"/g,'&quot;')}"
            title="Ver detalle del Problem">${i.folio}</span>`;
     return `<tr><td>${folioCell}</td><td>${i.titulo||'—'}</td>
-     <td><span class="chip" style="background:${ACOLOR[i.agrup]||'#eee'}22;color:${ACOLOR[i.agrup]||'#555'}">${i.agrup||'—'}</span></td>
+     <td><span class="chip" style="background:${(ACOLOR[i.agrup]||'#eeeeee')}33;color:${TINTA_CHIP}">${i.agrup||'—'}</span></td>
      <td class="num">${FMT(i.riesgo_folio)}</td>
      <td class="fecha-cell"><span class="dot" style="background:${SEMC[i.sem_fecha]}"></span>${fdateSem(i,'f_analisis')}</td>
      <td class="fecha-cell">${fdateSem(i,'f_solucion')}</td><td class="fecha-cell">${fdateSem(i,'f_cierre')}</td>
@@ -1142,7 +1193,7 @@ function descargarTickets(){
 // Product Owner": muchas filas con nombres largos no caben legibles en un
 // eje Y de barras horizontal angosto, y el treemap reparte el area
 // proporcional al valor sin ese problema.
-const TM_COLORES=['#2563eb','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#db2777','#4f46e5','#0d9488','#65a30d'];
+const TM_COLORES=PALETA_VERDE;
 function tmWorst(row,rowSum,scale,sideLen){
   if(!row.length) return Infinity;
   const areaSum=rowSum*scale;
@@ -1223,7 +1274,11 @@ function renderTreemap(containerId,items,opts){
     }
     div.style.left=r.x+'px'; div.style.top=r.y+'px';
     div.style.width=Math.max(0,r.w)+'px'; div.style.height=Math.max(0,r.h)+'px';
-    div.style.background=TM_COLORES[i%TM_COLORES.length];
+    const tono=TM_COLORES[i%TM_COLORES.length];
+    div.style.background=tono;
+    // .treemap-item pinta el texto en blanco; sobre los verdes claros de la
+    // escala hay que devolverlo a carbon o la etiqueta desaparece.
+    div.style.color=tintaSobre(tono);
     const pct=total>0?r.value/total:0;
     div.title = opts.onClick
       ? `${r.label}\n${FMT(r.value)} iniciativas\n${PCT(pct)} del total`
@@ -1253,7 +1308,7 @@ const valueLabelsPlugin={
         const val=ds.data[i];
         if(val==null) return;
         ctx.save();
-        ctx.fillStyle='#0f172a';
+        ctx.fillStyle='#191919';
         ctx.font='bold 12px system-ui, -apple-system, sans-serif';
         ctx.textAlign='center';
         ctx.textBaseline='bottom';
@@ -1270,7 +1325,9 @@ const valueLabelsPlugin={
 // filtro global (Director/PO/Manager/Service Owner). Clic en una barra
 // navega a "Iniciativas Activas" filtrada por ese estado.
 let chartEstados=null;
-const COLOR_ESTADO={'En Análisis':'#2563eb','En Solución':'#d97706','En Monitoreo':'#059669'};
+/* Progresion de avance: lima (empieza) -> verde (avanza) -> verde profundo
+   (cierra). Tres escalones de la misma escala, no tres colores sueltos. */
+const COLOR_ESTADO={'En Análisis':VERDE.g400,'En Solución':VERDE.g600,'En Monitoreo':VERDE.g800};
 function conteoIniciativasPorEstado(cats){
   const c1conHijos=new Set(cats.filter(c=>c.nivel==='C2').map(c=>c.categoria.split('/')[1]));
   const fuente=cats.filter(c=>c.nivel==='C2' || !c1conHijos.has(c.categoria));
@@ -1409,7 +1466,7 @@ function renderResumen(){
   const bdCtx=document.getElementById('chartBarDir');
   if(chartBarDir)chartBarDir.destroy();
   chartBarDir=new Chart(bdCtx,{type:'bar',data:{labels:dirRows.map(r=>r.dir),
-    datasets:[{data:dirRows.map(r=>r.vol),backgroundColor:'#2563eb'}]},
+    datasets:[{data:dirRows.map(r=>r.vol),backgroundColor:VERDE.g600}]},
     options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},
         y:{ticks:{autoSkip:false,font:{size:11}}}}}});
