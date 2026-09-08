@@ -1532,8 +1532,14 @@ const TableroSla = (function () {
   // tabla no responde al rango de fechas de los filtros de arriba.
   function periodoRanking() {
     const r = rangoRanking();
-    const cab = r.slots
-      ? `Periodo: ${r.slots.map(s => `SLOT ${s}`).join(' + ')} · ${r.slots.length * DIAS_SLOT} dias`
+    // El encabezado se decide por el modo. Antes miraba un `r.slots` que
+    // rangoRanking dejo de devolver cuando el SLOT paso a fijar el rango del
+    // tablero: siempre venia vacio, asi que la tabla decia "ultimos 7 dias
+    // completos" mientras contaba los 60 dias de dos SLOTs. Es el mismo texto
+    // que el pie de la tendencia, para que no haya dos formas de nombrar el
+    // mismo periodo.
+    const cab = enModoSlot()
+      ? `Periodo: ${resumenSlots(slotsAplicados)}`
       : `Periodo: últimos ${DIAS_RANKING} días completos`;
     return `${cab} · ${fechaLarga(r.inicio)} → ${fechaLarga(r.fin)}`;
   }
@@ -1563,7 +1569,8 @@ const TableroSla = (function () {
 
     if (!ranking.length) {
       cont.innerHTML = `<div class="vacio">Sin tickets cerrados en ${
-        rangoRanking().slots ? 'los SLOT seleccionados' : 'los ultimos 7 dias completos'} para estos grupos.</div>`;
+        enModoSlot() ? 'los SLOT seleccionados' : `los ultimos ${DIAS_RANKING} dias completos`
+      } para estos grupos.</div>`;
       cap.innerHTML = descripcionTopCerrados(0, 0, 0);
       return;
     }
