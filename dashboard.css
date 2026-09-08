@@ -383,8 +383,8 @@
   /* Rango rapido: grupo segmentado que ocupa el alto de una barra. */
   .filtros .rango-rapido { display: flex; gap: 6px; flex-wrap: wrap; height: 40px; }
 
-  /* Selector de SLOT: un stepper compacto - N +. Elegir N son "los ultimos N
-     SLOTs" (SLOT 0..N-1) y su unico efecto es fijar el rango de fechas, asi que
+  /* Selector de SLOT: un stepper compacto - N +. Elegir N son N periodos
+     historicos (SLOT 1..N) y su unico efecto es fijar el rango de fechas, asi que
      va a juego con Rango rapido, no con los desplegables. */
   .filtros .slotstep {
     display: flex; align-items: center; justify-content: space-between;
