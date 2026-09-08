@@ -211,27 +211,32 @@ public static class QaDb
                 do
                 {
                     var filas = new List<Dictionary<string, object>>();
-                    while (reader.Read())
-                    {
-                        var fila = new Dictionary<string, object>();
-                        for (int i = 0; i < reader.FieldCount; i++)
-                        {
-                            object valor = reader.GetValue(i);
-                            if (valor is DBNull)
-                                valor = null;
-                            else if (valor is DateTime)
-                                valor = ((DateTime)valor).ToString("yyyy-MM-ddTHH:mm:ss");
-
-                            fila[reader.GetName(i)] = valor;
-                        }
-                        filas.Add(fila);
-                    }
+                    while (reader.Read()) filas.Add(Fila(reader));
                     resultados.Add(filas);
                 } while (reader.NextResult());
             }
         }
 
         return resultados;
+    }
+
+    // Una fila del lector como diccionario. Las mismas dos conversiones que
+    // el tablero siempre hizo: DBNull -> null, y las fechas a texto ISO sin
+    // zona horaria, que es como las espera el frontend.
+    private static Dictionary<string, object> Fila(IDataRecord reader)
+    {
+        var fila = new Dictionary<string, object>();
+        for (int i = 0; i < reader.FieldCount; i++)
+        {
+            object valor = reader.GetValue(i);
+            if (valor is DBNull)
+                valor = null;
+            else if (valor is DateTime)
+                valor = ((DateTime)valor).ToString("yyyy-MM-ddTHH:mm:ss");
+
+            fila[reader.GetName(i)] = valor;
+        }
+        return fila;
     }
 
     // Recorre el PRIMER result set de un stored procedure fila por fila, sin
@@ -280,6 +285,110 @@ public static class QaDb
             {
                 var lector = new QaLector(reader);
                 while (reader.Read()) porFila(lector);
+            }
+        }
+    }
+
+    // ------------------------------------------------- KPIs en una pasada
+    // La unica consulta escrita a mano del lado de QA -- todo lo demas aqui
+    // son EXEC de procedimientos que la base ya tenia --, con el mismo patron
+    // que ya usan App_Code/DashboardQueries.cs y ExperienciaQueries.cs: texto
+    // constante y valores como SqlParameter. Existe porque
+    // dbo.usp_CorreoQA_Kpis tarda ~28,6 s y no se puede tocar la base:
+    //
+    //   El procedimiento resuelve TicketsIncorrectosAyer y
+    //   TicketsIncorrectosSemanaAnterior con DOS subconsultas escalares
+    //   independientes. Ninguna lleva filtro de ventana, asi que cada una
+    //   recorre dbo.vw_CorreoQA_Base ENTERA (todos los tickets cerrados de la
+    //   historia), y como el predicado es CONVERT(date, FechaFirmaSolucion) =
+    //   @dia -- la columna envuelta en una funcion -- el optimizador no puede
+    //   estimar nada y elige Nested Loops con un Lazy Spool de dbo.Categorias
+    //   (6.394 filas) que rebobina una vez por ticket. Medido en el plan real:
+    //   1,1M + 5,13M filas de spool, 27,8 s de los 28,6 s.
+    //
+    // Aqui los dos conteos salen de UNA pasada compartida y con rangos medio
+    // abiertos [dia, dia+1): FechaFirmaSolucion es DATETIME2(0), asi que
+    // cuentan EXACTAMENTE las mismas filas que CONVERT(date, ...) = @dia, pero
+    // sin envolver la columna. Medido contra la base de QA para
+    // 2026-08-25..2026-09-08: los mismos 12 y 16, en ~0,6 s.
+    //
+    // El agregado de la ventana (TicketsTotales / TicketsIncorrectos /
+    // PorcentajeIncorrectos) se copia EXPRESION POR EXPRESION del
+    // procedimiento, incluido el NULLIF que evita dividir entre cero. Esa
+    // parte nunca fue el problema: cuesta ~0,5 s.
+    //
+    // SEGURIDAD
+    //   El texto es una constante: ningun caller le pasa SQL, ninguna cadena
+    //   se concatena y nada que venga del navegador entra en la consulta. Los
+    //   dos unicos valores viajan como SqlParameter de tipo DATE, y qa.ashx
+    //   solo los acepta con la forma aaaa-mm-dd (QaParams.FechaOpcional).
+    //   Es de solo lectura: dos SELECT, sin INSERT/UPDATE/DELETE/MERGE ni DDL.
+    private const string SqlKpis = @"
+SET NOCOUNT ON;
+
+DECLARE @Ayer DATE = DATEADD(DAY, -1, @FechaFin);
+DECLARE @SemanaAnt DATE = DATEADD(DAY, -8, @FechaFin);
+
+DECLARE @AyerIni   DATETIME2(0) = CONVERT(DATETIME2(0), @Ayer);
+DECLARE @AyerFin   DATETIME2(0) = CONVERT(DATETIME2(0), DATEADD(DAY, 1, @Ayer));
+DECLARE @SemAntIni DATETIME2(0) = CONVERT(DATETIME2(0), @SemanaAnt);
+DECLARE @SemAntFin DATETIME2(0) = CONVERT(DATETIME2(0), DATEADD(DAY, 1, @SemanaAnt));
+
+DECLARE @IncAyer BIGINT;
+DECLARE @IncSemAnt BIGINT;
+
+SELECT
+    @IncAyer = COUNT_BIG(CASE WHEN b.FechaFirmaSolucion >= @AyerIni
+                               AND b.FechaFirmaSolucion <  @AyerFin THEN 1 END),
+    @IncSemAnt = COUNT_BIG(CASE WHEN b.FechaFirmaSolucion >= @SemAntIni
+                                 AND b.FechaFirmaSolucion <  @SemAntFin THEN 1 END)
+FROM dbo.vw_CorreoQA_Base AS b
+WHERE b.Validacion = N'Incorrecto'
+  AND (   (b.FechaFirmaSolucion >= @AyerIni   AND b.FechaFirmaSolucion < @AyerFin)
+       OR (b.FechaFirmaSolucion >= @SemAntIni AND b.FechaFirmaSolucion < @SemAntFin));
+
+SELECT
+    FechaInicio = @FechaInicio,
+    FechaFin = @FechaFin,
+    FechaAyer = @Ayer,
+    FechaSemanaAnterior = @SemanaAnt,
+    TicketsTotales = COUNT_BIG(*),
+    TicketsIncorrectos = SUM(CASE WHEN Validacion = N'Incorrecto' THEN 1 ELSE 0 END),
+    PorcentajeIncorrectos = CAST(
+        100.0 * SUM(CASE WHEN Validacion = N'Incorrecto' THEN 1 ELSE 0 END)
+        / NULLIF(COUNT_BIG(*), 0)
+        AS DECIMAL(6,2)),
+    TicketsIncorrectosAyer = ISNULL(@IncAyer, CONVERT(BIGINT, 0)),
+    TicketsIncorrectosSemanaAnterior = ISNULL(@IncSemAnt, CONVERT(BIGINT, 0))
+FROM dbo.vw_CorreoQA_Base
+WHERE FechaRegistroDia >= @FechaInicio
+  AND FechaRegistroDia <= @FechaFin;
+";
+
+    // La fila de KPIs con las MISMAS columnas que devuelve
+    // dbo.usp_CorreoQA_Kpis (mas FechaAyer y FechaSemanaAnterior, que qa.ashx
+    // ya sabia leer y hasta ahora derivaba solo). Nunca devuelve null: los dos
+    // SELECT son agregados sin GROUP BY, asi que hay fila aunque el rango no
+    // tenga un solo ticket.
+    public static Dictionary<string, object> KpisUnaPasada(DateTime fechaInicio, DateTime fechaFin)
+    {
+        using (var cn = new SqlConnection(CadenaConexion()))
+        using (var cmd = new SqlCommand(SqlKpis, cn))
+        {
+            cmd.CommandType = CommandType.Text;
+            cmd.CommandTimeout = TimeoutComandoSegundos;
+
+            // DATE, no NVARCHAR: sin conversion implicita en el predicado de
+            // FechaRegistroDia, que tambien es DATE.
+            cmd.Parameters.Add("@FechaInicio", SqlDbType.Date).Value = fechaInicio.Date;
+            cmd.Parameters.Add("@FechaFin", SqlDbType.Date).Value = fechaFin.Date;
+
+            cn.Open();
+            using (var reader = cmd.ExecuteReader())
+            {
+                // El SELECT que asigna variables no abre result set: el primero
+                // que llega es el de los KPIs.
+                return reader.Read() ? Fila(reader) : null;
             }
         }
     }

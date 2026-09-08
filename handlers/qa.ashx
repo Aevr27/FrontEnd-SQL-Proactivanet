@@ -230,9 +230,11 @@ public class Qa : IHttpHandler
     // ------------------------------------------------------------ summary
     // DOS lecturas de la vista, en paralelo:
     //
-    //   usp_CorreoQA_Kpis      los conteos de ayer y de la semana anterior,
-    //                          que miran FechaFirmaSolucion FUERA de la
-    //                          ventana y no se pueden derivar del detalle.
+    //   QaCorreo.Kpis          los totales de la ventana mas los conteos de
+    //                          ayer y de la semana anterior, que miran
+    //                          FechaFirmaSolucion FUERA de la ventana y no se
+    //                          pueden derivar del detalle. Los resuelve en una
+    //                          sola pasada; ver QaDb.KpisUnaPasada.
     //   usp_CorreoQA_Detalle   una pasada en streaming de la que salen los
     //                          demas bloques (QaCorreo.Resumen).
     //
@@ -278,8 +280,8 @@ public class Qa : IHttpHandler
 
         peticion.FilasDetalle = agregados.Total;
 
-        // El total lo manda usp_CorreoQA_Kpis. Solo si el procedimiento no
-        // devolvio fila (rango sin tickets) se cae al conteo del detalle.
+        // El total lo mandan los KPIs. Solo si esa lectura no devolvio fila
+        // se cae al conteo del detalle.
         long total = kpis == null ? agregados.Total : QaDb.Entero(kpis, "TicketsTotales");
 
         var salida = new Dictionary<string, object>();
@@ -337,8 +339,8 @@ public class Qa : IHttpHandler
     // KPIs de un solo dia, contados por fecha de firma de solucion.
     //
     // Los conteos (TicketsIncorrectosAyer / SemanaAnterior) los calcula
-    // usp_CorreoQA_Kpis; aqui solo se etiquetan con su fecha. Si el
-    // procedimiento devuelve esas fechas se usan tal cual; si no, se derivan
+    // QaCorreo.Kpis; aqui solo se etiquetan con su fecha. Si esa lectura
+    // devuelve las fechas se usan tal cual; si no, se derivan
     // del fin del rango con la MISMA formula que documenta el procedimiento:
     // ayer = fin - 1, y "semana anterior" = fin - 8 (un solo dia, el mismo dia
     // de la semana que ayer, no un acumulado de siete).
