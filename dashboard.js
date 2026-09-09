@@ -3204,6 +3204,7 @@ const TableroExterno = (() => {
     if (eraLaActiva && observabilidad) observabilidad.click();
 
     montarDesplegables(doc);
+    recolorearLegacy(doc);
   }
 
   /* Observabilidad y Orquestacion, que es lo que se ve de este documento, aun
@@ -3223,6 +3224,21 @@ const TableroExterno = (() => {
       doc.head.appendChild(hoja);
     }
     Desplegable.montar(doc);
+  }
+
+  /* El marco traia su propia paleta -cabecera azul marino, franja de KPI
+     azul y "bien" en verde esmeralda-, que no es la del tablero. Se corrige
+     desde fuera por la misma razon que los desplegables: el HTML es generado
+     y no se puede editar. La hoja entra al final del <head>, asi que gana
+     por orden a las reglas de su <style> sin subir especificidad.
+     Solo color; ningun KPI cambia de estado ni de valor. */
+  function recolorearLegacy(doc) {
+    if (doc.getElementById('css-tablero-legacy')) return;
+    const hoja = doc.createElement('link');
+    hoja.id = 'css-tablero-legacy';
+    hoja.rel = 'stylesheet';
+    hoja.href = new URL('assets/css/tablero-legacy.css', location.href).href;
+    doc.head.appendChild(hoja);
   }
 
   function init() {
