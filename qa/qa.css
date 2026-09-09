@@ -115,11 +115,11 @@ header.top {
   flex-wrap: wrap; gap: 14px;
   box-shadow: var(--shadow-md);
 }
+/* Sin rayado diagonal, igual que el header de SLA: ver dashboard.css. */
 header.top::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(520px 200px at 88% -40%, rgba(244, 250, 231, .40), transparent 70%),
-    repeating-linear-gradient(115deg, rgba(25, 25, 25, .05) 0 1px, transparent 1px 26px);
+    radial-gradient(520px 200px at 88% -40%, rgba(244, 250, 231, .40), transparent 70%);
 }
 header.top > * { position: relative; z-index: 1; }
 header.top h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.2px; }
