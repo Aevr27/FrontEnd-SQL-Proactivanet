@@ -2065,7 +2065,7 @@ const TableroSla = (function () {
   }
 
   async function init() {
-    document.querySelectorAll('#tab-sla [data-rango]').forEach(btn => {
+    document.querySelectorAll('#filtros-sla [data-rango]').forEach(btn => {
       btn.addEventListener('click', () => aplicarRangoRapido(btn.dataset.rango));
     });
     document.getElementById('btn-limpiar').addEventListener('click', () => {
@@ -3177,15 +3177,58 @@ const TableroQa = moduloEmbebido({
   },
 });
 
+/* =======================================================================
+   Pestanas de SLA y Call Center: un solo tablero en dos vistas
+   -----------------------------------------------------------------------
+   El Call Center no tiene datos, filtros ni ciclo de vida propios: su
+   dataset (llamadas.ashx) viaja en la misma carga de TableroSla y lo pintan
+   sus mismas funciones. Al darle pestana propia hay dos cosas que resolver.
+
+   1. Los controles. La barra de filtros y el sello de estado son de los dos
+      -el rango de fechas manda sobre tickets y llamadas por igual, y el
+      filtro de campanas solo mueve al Call Center-. En vez de duplicarlos,
+      se MUEVEN a la pestana que se esta viendo: siguen siendo un unico
+      <select> con sus mismos ids y sus mismos listeners.
+   2. La carga. Abrir cualquiera de las dos pestanas por primera vez dispara
+      el init() de TableroSla; la otra ya solo remide sus graficas, que
+      midieron cero mientras su contenedor estuvo oculto.
+   ======================================================================= */
+function adoptarControlesSla(idTab) {
+  const destino = document.getElementById(idTab);
+  const filtros = document.getElementById('filtros-sla');
+  const estado = document.getElementById('estado-carga');
+  if (!destino || !filtros || !estado) return;
+  destino.querySelector('.acciones-top').appendChild(estado);
+  destino.querySelector('header.top').insertAdjacentElement('afterend', filtros);
+}
+
+let slaIniciado = false;
+
+function pestanaSla(idTab) {
+  return {
+    init() {
+      adoptarControlesSla(idTab);
+      if (slaIniciado) return TableroSla.redimensionar();
+      slaIniciado = true;
+      return TableroSla.init();
+    },
+    redimensionar() {
+      adoptarControlesSla(idTab);
+      TableroSla.redimensionar();
+    },
+  };
+}
+
 const MODULOS = {
-  sla: TableroSla,
+  sla: pestanaSla('tab-sla'),
   backlog: TableroBacklog,
   experiencia: TableroExperiencia,
   qa: TableroQa,
+  call: pestanaSla('tab-call'),
   tablero: TableroExterno,
 };
 
-const iniciado = { sla: false, backlog: false, experiencia: false, qa: false, tablero: false };
+const iniciado = { sla: false, backlog: false, experiencia: false, qa: false, call: false, tablero: false };
 
 function activarTab(nombre) {
   if (!MODULOS[nombre]) nombre = 'sla';
