@@ -67,13 +67,23 @@ box-shadow:0 0 0 3px rgba(255,255,255,.55)}
 background:var(--grad-btn);color:var(--btn-ink);
 cursor:pointer;font-size:12px;font-weight:700}
 .selrow button:hover{background:var(--grad-btn-hover);border-color:var(--g-800)}
-/* "Limpiar" es secundario: no compite con Ayuda ni con Descargar. Superficie
-   blanca como los desplegables de al lado -misma familia que el .btn.gris de
-   SLA y Backlog, adaptado al verde de esta cabecera-. Va al final de la fila,
-   asi que margin-left:auto lo empuja al extremo derecho. */
-.selrow button.gris{margin-left:auto;background:#fff;border-color:var(--g-200);
-color:var(--g-900)}
-.selrow button.gris:hover{background:var(--g-50);border-color:var(--g-400)}
+/* "Limpiar" es secundario: no compite con Ayuda ni con Descargar, pero se
+   queda dentro del verde de marca -mismo degradado, un punto mas apagado,
+   igual que el .btn.gris de SLA y Backlog-. Va al final de la fila, asi que
+   margin-left:auto lo empuja al extremo derecho. */
+.selrow button.gris{margin-left:auto;opacity:.82}
+.selrow button.gris:hover{opacity:1}
+
+/* Botones de accion que viven en los paneles, fuera de la cabecera: sin regla
+   propia salian con el gris del navegador o con verdes sueltos en el HTML.
+   Misma pieza verde que .selrow button. */
+#btnResetGrafVen,#btnResetGrafAct,#btnMarcarTodasHist,#btnDesmarcarTodasHist,#btnGraficarHist{
+padding:8px 14px;border-radius:8px;border:1px solid var(--g-700);
+background:var(--grad-btn);color:var(--btn-ink);
+cursor:pointer;font-size:12px;font-weight:700}
+#btnResetGrafVen:hover,#btnResetGrafAct:hover,#btnMarcarTodasHist:hover,
+#btnDesmarcarTodasHist:hover,#btnGraficarHist:hover{
+background:var(--grad-btn-hover);border-color:var(--g-800)}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:14px;margin-bottom:16px}
 .kpi{background:var(--card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07);
 border-left:5px solid transparent;border-image:var(--grad) 1}

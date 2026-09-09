@@ -155,10 +155,16 @@ header.top .acciones-top {
 .btn:disabled { background: #cfd4c9; color: var(--muted); cursor: not-allowed; box-shadow: none; }
 .btn.chico { padding: 6px 12px; font-size: 12px; }
 
+/* Secundario, no gris: el mismo degradado de marca un punto mas apagado,
+   igual que .btn.gris del tablero. */
 .btn-sec {
-  background: #fff; color: var(--ink-2); border-color: var(--line); box-shadow: none;
+  background: var(--grad-btn); color: var(--btn-ink); border-color: var(--g-700);
+  box-shadow: none; opacity: .82;
 }
-.btn-sec:hover { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
+.btn-sec:hover:not(:disabled) {
+  background: var(--grad-btn-hover); color: var(--btn-ink); border-color: var(--g-800);
+  opacity: 1;
+}
 .btn-sec:disabled { background: var(--bg-2); color: var(--muted-2); border-color: var(--line); }
 
 /* La cabecera ya es verde claro: al boton le basta un contorno mas firme. */

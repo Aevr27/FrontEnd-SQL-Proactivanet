@@ -551,21 +551,23 @@
     flex: 0 0 auto; min-width: 0; height: 34px; padding: 0 16px;
     display: inline-flex; align-items: center; justify-content: center;
     border-radius: var(--radius-xs); font-size: 12.5px; letter-spacing: .1px;
-    border: 1px solid var(--accent-deep);
-    background: var(--accent-deep); color: #ffffff;
+    border: 1px solid var(--g-700);
+    background: var(--grad-btn); color: var(--btn-ink);
     box-shadow: inset 0 1px 2px rgba(25, 25, 25, .18);
   }
   .filtros .acciones .btn:hover {
-    background: var(--accent-deep-2); border-color: var(--accent-deep-2);
+    background: var(--grad-btn-hover); border-color: var(--g-800);
     filter: none; box-shadow: inset 0 1px 2px rgba(25, 25, 25, .18);
   }
-  /* Limpiar es secundario: identico a una barra vacia. */
+  /* Limpiar es secundario: mismo degradado de marca, un punto mas apagado. */
   .filtros .acciones .btn.gris {
     order: 1;
-    background: var(--ctrl-bg); border-color: var(--ctrl-line); color: var(--ink-2);
+    background: var(--grad-btn); border-color: var(--g-700); color: var(--btn-ink);
+    opacity: .82;
   }
   .filtros .acciones .btn.gris:hover {
-    background: var(--ctrl-bg-2); border-color: var(--accent); color: var(--g-900);
+    background: var(--grad-btn-hover); border-color: var(--g-800); color: var(--btn-ink);
+    opacity: 1;
   }
   .filtros .acciones .btn:active { transform: translateY(1px); }
 

@@ -34,8 +34,8 @@
         <select id="selSO"><option value="">— Todos —</option></select></div>
       <div class="grp"><label>Ver por</label>
         <select id="selModo"><option value="slot">SLOT (30 días)</option><option value="mes">Mes calendario</option></select></div>
-      <button id="btnDescargaTickets" style="display:none;background:#478b3c">⬇ Descargar Tickets</button>
-      <button id="btnAyuda" style="background:#81c727;color:#191919">❓ Ayuda / Glosario</button>
+      <button id="btnDescargaTickets" style="display:none">⬇ Descargar Tickets</button>
+      <button id="btnAyuda">❓ Ayuda / Glosario</button>
       <a id="ligaHeader" href="#" target="_blank" rel="noopener"
          style="display:none;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;
          background:#d97706;color:var(--ink);font-size:12px;font-weight:700;text-decoration:none">
@@ -144,7 +144,7 @@
         Iniciativas con <b>tickets en riesgo por retraso</b>, con fechas y responsables.</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <p style="font-size:11px;color:var(--muted);margin:0">Clic en un bloque o barra para filtrar la tabla; clic de nuevo para quitar ese filtro. Las 3 gráficas se recalculan entre sí.</p>
-        <button id="btnResetGrafVen" style="background:#8fbf6a;color:#191919">↺ Resetear filtro de gráficas</button>
+        <button id="btnResetGrafVen">↺ Resetear filtro de gráficas</button>
       </div>
       <div class="grid3" style="margin-bottom:16px">
         <div class="card">
@@ -174,7 +174,7 @@
         Listado completo de <b>iniciativas activas</b> (deduplicadas por folio), incluidas las que no tienen categoría asignada.</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
         <p style="font-size:11px;color:var(--muted);margin:0">Clic en un bloque o barra para filtrar la tabla; clic de nuevo para quitar ese filtro. Las 3 gráficas se recalculan entre sí.</p>
-        <button id="btnResetGrafAct" style="background:#8fbf6a;color:#191919">↺ Resetear filtro de gráficas</button>
+        <button id="btnResetGrafAct">↺ Resetear filtro de gráficas</button>
       </div>
       <div class="grid3" style="margin-bottom:16px">
         <div class="card">
@@ -222,7 +222,7 @@
             <option value="pie">Pie (solo periodo actual)</option>
           </select>
         </label>
-        <button id="btnGraficarHist" style="background:#65bb2b;color:#191919">📊 Graficar seleccionadas</button>
+        <button id="btnGraficarHist">📊 Graficar seleccionadas</button>
       </div>
       <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Puedes marcar casillas en cualquier nivel (1, 2 o 3) a la vez; al graficar, el selector de nivel toma en cuenta solo las marcas de ese nivel (las demás quedan marcadas pero no se grafican). La gráfica de Pie solo muestra el periodo actual (SLOT 0 / mes en curso).</p>
       <div style="overflow-x:auto">
