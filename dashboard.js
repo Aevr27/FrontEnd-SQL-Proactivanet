@@ -3004,6 +3004,27 @@ const TableroExterno = (() => {
     const eraLaActiva = !boton || boton.classList.contains('active');
     const observabilidad = doc.querySelector('.mtab[data-tab="observabilidad"]');
     if (eraLaActiva && observabilidad) observabilidad.click();
+
+    montarDesplegables(doc);
+  }
+
+  /* Observabilidad y Orquestacion, que es lo que se ve de este documento, aun
+     traen <select> nativos. El archivo generado no se puede tocar, pero es del
+     mismo origen: basta con enlazarle la hoja del desplegable y montar sus
+     <select> desde aqui. Desplegable crea los nodos con el ownerDocument del
+     <select>, asi que el modulo funciona dentro del marco sin cargar su
+     archivo ahi. Si el generador reemplaza el HTML, esto sigue valiendo:
+     no hay ni una linea escrita en el. */
+  function montarDesplegables(doc) {
+    if (typeof Desplegable === 'undefined') return;
+    if (!doc.getElementById('css-desplegable')) {
+      const hoja = doc.createElement('link');
+      hoja.id = 'css-desplegable';
+      hoja.rel = 'stylesheet';
+      hoja.href = new URL('assets/css/desplegable.css', location.href).href;
+      doc.head.appendChild(hoja);
+    }
+    Desplegable.montar(doc);
   }
 
   function init() {
@@ -3256,196 +3277,17 @@ document.querySelectorAll('.mtab').forEach(btn => {
 });
 
 /* =======================================================================
-   5. Multi-select propio (solo capa visual de los filtros de SLA y Backlog)
+   5. Desplegables propios (solo capa visual de los filtros)
    -----------------------------------------------------------------------
-   No toca la logica de filtrado ni las llamadas a los .ashx: el
-   <select multiple> original se queda en el DOM con su mismo id, sus mismas
-   <option> y su misma seleccion. Este modulo solo dibuja un desplegable con
-   opciones encima -clic simple para marcar o desmarcar, palomita a la derecha-
-   y copia los cambios en las dos direcciones.
+   La implementacion vive en assets/js/desplegable.js y es UNA sola para todo
+   el tablero: los seis <select multiple> de SLA y Backlog, los dos de una
+   opcion de Backlog y los de los modulos embebidos (Experiencia, QA), que la
+   llaman desde sus propios archivos.
+
+   Aqui no hay logica de filtrado ni llamadas a los .ashx: los <select>
+   originales se quedan en el DOM con sus mismos ids, sus mismas <option> y su
+   misma seleccion, y siguen disparando el mismo `change` de siempre. Los
+   <input type="date"> no son desplegables y no se tocan: conservan el
+   calendario nativo del navegador.
    ======================================================================= */
-(() => {
-  const IDS = ['f-grupos', 'f-tecnicos', 'f-campanas', 'f-c1-bl', 'f-grupos-bl', 'f-lideres-bl'];
-  const controles = [];
-
-  function crear(select) {
-    const envoltura = document.createElement('div');
-    envoltura.className = 'ms';
-    select.parentNode.insertBefore(envoltura, select);
-    envoltura.appendChild(select);
-
-    const boton = document.createElement('button');
-    boton.type = 'button';
-    boton.className = 'ms-boton';
-    boton.setAttribute('aria-haspopup', 'listbox');
-    boton.setAttribute('aria-expanded', 'false');
-    const texto = document.createElement('span');
-    texto.className = 'ms-texto';
-    const conteo = document.createElement('span');
-    conteo.className = 'ms-conteo';
-    boton.append(texto, conteo);
-
-    const panel = document.createElement('div');
-    panel.className = 'ms-panel';
-    const busca = document.createElement('input');
-    busca.type = 'search';
-    busca.className = 'ms-busca';
-    busca.placeholder = 'Buscar...';
-    busca.setAttribute('aria-label', 'Buscar opciones');
-    const acciones = document.createElement('div');
-    acciones.className = 'ms-acciones';
-    const btnTodos = document.createElement('button');
-    btnTodos.type = 'button';
-    btnTodos.textContent = 'Seleccionar todo';
-    const btnNinguno = document.createElement('button');
-    btnNinguno.type = 'button';
-    btnNinguno.textContent = 'Limpiar';
-    acciones.append(btnTodos, btnNinguno);
-    const lista = document.createElement('ul');
-    lista.className = 'ms-lista';
-    lista.setAttribute('role', 'listbox');
-    lista.setAttribute('aria-multiselectable', 'true');
-    panel.append(busca, acciones, lista);
-
-    envoltura.append(boton, panel);
-
-    const etiqueta = document.querySelector(`label[for="${select.id}"]`);
-    const nombre = (etiqueta ? etiqueta.textContent : '').replace(/\s*\(.*\)\s*$/, '').trim() || 'opciones';
-    const vacio = `Todos (${nombre.toLowerCase()})`;
-
-    // Una casilla por <option>. Se reconstruye cuando el catalogo llega.
-    function construir() {
-      lista.textContent = '';
-      const opciones = Array.from(select.options);
-      if (!opciones.length) {
-        const aviso = document.createElement('li');
-        aviso.className = 'ms-vacio';
-        aviso.textContent = 'Sin opciones';
-        lista.appendChild(aviso);
-      }
-      for (const opcion of opciones) {
-        const fila = document.createElement('li');
-        const etq = document.createElement('label');
-        etq.className = 'ms-opcion';
-        etq.setAttribute('role', 'option');
-        const caja = document.createElement('input');
-        caja.type = 'checkbox';
-        caja.checked = opcion.selected;
-        const txt = document.createElement('span');
-        txt.textContent = opcion.text;
-        etq.append(caja, txt);
-        fila.appendChild(etq);
-        lista.appendChild(fila);
-
-        caja.addEventListener('change', () => {
-          opcion.selected = caja.checked;
-          pintar();
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-        });
-      }
-      filtrarLista();
-      pintar();
-    }
-
-    // Refleja en el control lo que diga el <select>, venga de donde venga.
-    function pintar() {
-      const marcadas = Array.from(select.selectedOptions);
-      Array.from(lista.querySelectorAll('.ms-opcion')).forEach((etq, i) => {
-        const opcion = select.options[i];
-        if (!opcion) return;
-        etq.querySelector('input').checked = opcion.selected;
-        etq.classList.toggle('marcada', opcion.selected);
-      });
-      if (!marcadas.length) {
-        texto.textContent = vacio;
-        boton.classList.add('vacio');
-        conteo.style.display = 'none';
-        conteo.textContent = '';
-      } else {
-        texto.textContent = marcadas.map(o => o.text).join(', ');
-        boton.classList.remove('vacio');
-        conteo.style.display = '';
-        conteo.textContent = String(marcadas.length);
-      }
-      boton.title = marcadas.length ? texto.textContent : '';
-    }
-
-    function filtrarLista() {
-      const q = busca.value.trim().toLowerCase();
-      Array.from(lista.children).forEach(li => {
-        const etq = li.querySelector('.ms-opcion');
-        if (!etq) return;
-        li.style.display = (!q || etq.textContent.toLowerCase().includes(q)) ? '' : 'none';
-      });
-    }
-
-    function marcarVisibles(valor) {
-      Array.from(lista.children).forEach((li, i) => {
-        if (li.style.display === 'none') return;
-        const opcion = select.options[i];
-        if (opcion) opcion.selected = valor;
-      });
-      pintar();
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-
-    function abrir() {
-      cerrarTodos(envoltura);
-      envoltura.classList.add('abierto');
-      boton.setAttribute('aria-expanded', 'true');
-      busca.focus();
-    }
-    function cerrar() {
-      envoltura.classList.remove('abierto');
-      boton.setAttribute('aria-expanded', 'false');
-    }
-
-    boton.addEventListener('click', () => {
-      if (envoltura.classList.contains('abierto')) cerrar(); else abrir();
-    });
-    busca.addEventListener('input', filtrarLista);
-    btnTodos.addEventListener('click', () => marcarVisibles(true));
-    btnNinguno.addEventListener('click', () => marcarVisibles(false));
-    envoltura.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && envoltura.classList.contains('abierto')) {
-        e.stopPropagation();
-        cerrar();
-        boton.focus();
-      }
-    });
-
-    // El catalogo se carga despues (innerHTML del <select>): hay que redibujar.
-    new MutationObserver(construir).observe(select, { childList: true });
-    // Cambios hechos por codigo ajeno que si avisan.
-    select.addEventListener('change', pintar);
-
-    construir();
-    return { envoltura, cerrar, pintar };
-  }
-
-  function cerrarTodos(excepto) {
-    for (const c of controles) if (c.envoltura !== excepto) c.cerrar();
-  }
-
-  for (const id of IDS) {
-    const select = document.getElementById(id);
-    if (select) controles.push(crear(select));
-  }
-
-  document.addEventListener('click', e => {
-    if (!e.target.closest('.ms')) cerrarTodos(null);
-  });
-
-  // "Limpiar" de los dos paneles de filtros deselecciona por propiedad
-  // (selectedIndex = -1 / option.selected = false) y no dispara ningun
-  // evento. Las pestañas se inician tarde, asi que no se puede depender del
-  // orden de los listeners: se repinta en el siguiente turno, cuando el
-  // handler propio del boton ya corrio.
-  for (const idBoton of ['btn-limpiar', 'btn-limpiar-bl']) {
-    const limpiar = document.getElementById(idBoton);
-    if (!limpiar) continue;
-    limpiar.addEventListener('click', () => {
-      setTimeout(() => controles.forEach(c => c.pintar()), 0);
-    });
-  }
-})();
+Desplegable.montar(document);

@@ -201,4 +201,9 @@ function renderOrqDirTable(){
 
 renderOrq();
 
+/* Capa visual de los desplegables de esta pagina (Director y Product
+   Owner). Mismo componente compartido que el resto del tablero; ver la
+   nota equivalente en observabilidad.js. */
+if (window.Desplegable) Desplegable.montar(document);
+
 })();

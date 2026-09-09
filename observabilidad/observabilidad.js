@@ -115,4 +115,12 @@ function renderObserv(){
 
 renderObserv();
 
+/* Capa visual de los desplegables de esta pagina (Director y Product
+   Owner). Mismo componente compartido que el resto del tablero: los
+   <select> se quedan con sus ids, sus `sd.onchange` de arriba y su relleno
+   dinamico (fillPOob). Solo aplica a la pagina suelta; dentro de
+   dashboard.html este documento vive en el marco legacy, donde los monta
+   dashboard.js sin tocar el archivo generado. */
+if (window.Desplegable) Desplegable.montar(document);
+
 })();

@@ -1699,4 +1699,18 @@ RAIZ.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 
 fillPO(); fillSO(); renderAll();
 
+/* Capa visual de los desplegables (Director, Product Owner, Manager, Service
+   Owner, Ver por, "ver por" de las graficas...). Es el MISMO componente que
+   usa el resto del tablero, no una copia: assets/js/desplegable.js.
+
+   Los <select> siguen intactos -mismos ids, mismas <option>, mismos
+   `sel.onchange = ...` de aqui arriba-; el componente solo los tapa y les
+   dispara su `change` de siempre. Los catalogos encadenados (fillPO/fillSO
+   rehacen el innerHTML) los redibuja su MutationObserver, y "Limpiar", que
+   escribe .value por propiedad, lo repinta su red de seguridad.
+
+   El guardia cubre las dos vidas del archivo: la pagina suelta lo carga con
+   su propio <script>, y en la pestaña lo trae dashboard.html. */
+if (window.Desplegable) Desplegable.montar(RAIZ);
+
 })();

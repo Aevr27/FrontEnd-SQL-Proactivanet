@@ -823,6 +823,14 @@
     arrancado = true;
     armarShell();
     conectarEventos();
+    /* Capa visual del desplegable de "Filas por pagina". Es el MISMO
+       componente que el resto del tablero (assets/js/desplegable.js), no una
+       copia: el <select id="qa-sel-tam"> se queda con su id, sus opciones y el
+       listener de conectarEventos(), que sigue recibiendo su `change`. Va
+       despues de conectarEventos para que ese listener este puesto antes. */
+    if (window.Desplegable) {
+      Desplegable.montar(document.getElementById('tab-qa') || document);
+    }
     cargarResumen();
   }
 
