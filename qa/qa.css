@@ -61,6 +61,11 @@
   --verde-strong: var(--g-900);
   --ambr: #d97706;    /* advertencia */
   --rojo: #982a18;    /* negativo */
+  /* Superficie y borde del negativo: la pareja de tintes que ya usaba
+     .badge-rojo en crudo. Se nombran para que el rojo suave deje de ser
+     la unica excepcion sin token de la hoja. */
+  --rojo-soft: #fdf4f2;
+  --rojo-line: #edd3cd;
   --morado: var(--g-500);
   --cyan: var(--g-300);
 
@@ -319,7 +324,7 @@ code {
   display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill);
   font-size: 11.5px; font-weight: 600; white-space: nowrap;
 }
-.badge-rojo { background: #fdf4f2; color: var(--rojo); border: 1px solid #edd3cd; }
+.badge-rojo { background: var(--rojo-soft); color: var(--rojo); border: 1px solid var(--rojo-line); }
 .badge-gris { background: var(--bg-2); color: var(--ink-2); border: 1px solid var(--line); }
 
 /* ---------- Detalle: barra y paginador ---------- */
