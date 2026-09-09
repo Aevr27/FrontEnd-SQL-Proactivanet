@@ -31,16 +31,105 @@ function escapeAttr(s) { return escapeHtml(s); }
 const FMT = n => (n === null || n === undefined || n === '') ? '' : Number(n).toLocaleString('es-MX');
 const PCT = (parte, total) => total > 0 ? Math.round(100 * parte / total) + '%' : '—';
 
-const COLOR_PRIORIDAD = {
-  'Critica': '#dc2626', 'Crítica': '#dc2626',
-  'Alta': '#d97706', 'Media': '#eab308', 'Baja': '#16a34a'
+/* =========================================================================
+   PALETA DE GRAFICAS — derivada de la escala verde de la cabecera.
+
+   Las tres paradas del degradado de header.top son la fuente:
+     #9DD323 (lima) · #65BB2B (verde de marca) · #478B3C (verde profundo)
+   Todo lo demas son interpolaciones y tintes de esa recta. Los mismos
+   valores viven en el bloque :root de dashboard.css (--g-300 ... --g-900):
+   al retocar la escala hay que tocar los dos archivos.
+
+   Rojo y ambar se conservan donde el dato es negativo o de advertencia.
+   ========================================================================= */
+/* La MARCA (cabecera, botones, pestañas) usa los verdes del degradado tal
+   cual: #9DD323 / #65BB2B / #478B3C. Esos tres son muy claros para rellenar
+   una barra sobre blanco -el lima queda en 1.7:1-, asi que la familia de
+   GRAFICAS es la misma escala re-escalonada para que cada relleno se lea
+   sobre la superficie blanca. Misma identidad verde, distinto trabajo. */
+const VERDE = {
+  lima:    '#8cbf1e',   // lima de datos  (hermano de #9DD323)
+  marca:   '#5aa726',   // verde de datos (hermano de #65BB2B)
+  pino:    '#2f8f6b',   // verde pino: el otro verde, no un azul
+  profundo:'#356b2c',   // verde profundo (hermano de #478B3C)
+  claro:   '#78c96b',
 };
-const PALETA_CAT = ['#2563eb','#059669','#d97706','#7c3aed','#0891b2','#dc2626','#94a3b8',
-                    '#db2777','#65a30d','#0d9488'];
+const ROJO_SEM = '#982a18';   // negativo
+const AMBAR_SEM = '#d97706';  // advertencia
+const NEUTRO_SEM = '#8a8578'; // referencia / sin dato
+
+/* ---------------------------------------------------------------------
+   PALETA CATEGORICA — identidad de serie.
+
+   Ya NO se define aqui: vive en assets/js/paleta.js (window.Paleta) y la
+   comparten los cuatro tableros -SLA, Backlog, QA y Experiencia- mas
+   Orquestacion, para que una categoria conserve su color pase donde pase.
+   Ese archivo explica como consumirla en una grafica nueva; el atajo es
+   Paleta.escala(orden) / Paleta.color(clave, orden) / Paleta.registro(n).
+
+   Ojo: la paleta categorica es IDENTIDAD. El semaforo, COLOR_PRIORIDAD y
+   RAMPA_ORDINAL de aqui abajo son ESTADO y ORDEN: no salen de la paleta
+   compartida y no deben migrarse a ella.
+   --------------------------------------------------------------------- */
+
+/* Rampa ORDINAL — para dimensiones con orden propio (antiguedad). Un solo
+   tono, de claro a oscuro, para que el orden se vea en el color. Validada
+   con --ordinal: luminosidad monotona, saltos >= 0.06 y extremo claro a
+   2.13:1. El cubo "Sin fecha" no es parte del orden: va en neutro. */
+const RAMPA_ORDINAL = ['#8cbf1e', '#6bad24', '#4f9528', '#387d2a', '#256425', '#144819'];
+
+/* Severidad = progresion, no identidades sueltas: el verde se OSCURECE
+   conforme sube la prioridad -Baja lima, Media verde de marca, Alta verde
+   profundo- y solo Critica conserva el rojo semantico. Antes Baja era el
+   verde mas oscuro y Media el mas claro, asi que el color contaba la
+   escala al reves. */
+const COLOR_PRIORIDAD = {
+  'Critica': ROJO_SEM, 'Crítica': ROJO_SEM,
+  'Alta': VERDE.profundo, 'Media': VERDE.marca, 'Baja': VERDE.lima
+};
 
 // Semaforo de tres niveles: devuelve el sufijo de clase (.kpi.sv/.sa/.sr).
 const SEM = pct => pct >= 90 ? 'sv' : (pct >= 75 ? 'sa' : 'sr');
-const COLOR_SEM = { sv: '#059669', sa: '#d97706', sr: '#dc2626' };
+const COLOR_SEM = { sv: VERDE.profundo, sa: AMBAR_SEM, sr: ROJO_SEM };
+
+/* Ejes, rejilla y leyendas de Chart.js: carbon y gris verdoso, a juego con
+   la tinta del tablero. Solo toca la presentacion por defecto; cualquier
+   grafica que ya declare su propio `ticks`/`grid` sigue mandando. */
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.color = '#393939';
+  Chart.defaults.borderColor = '#f2f5ed';
+  if (Chart.defaults.scale && Chart.defaults.scale.grid) {
+    Chart.defaults.scale.grid.color = '#f2f5ed';
+    // La rejilla es referencia, no estructura: sin las marquitas del eje
+    // ni la linea del borde, las barras quedan sobre una cuadricula suave.
+    Chart.defaults.scale.grid.drawTicks = false;
+    Chart.defaults.scale.grid.tickLength = 8;
+  }
+  /* Barras esbeltas. Antes cada barra se estiraba hasta llenar su categoria,
+     asi que una grafica de tres cubos pintaba tres bloques enormes. Con un
+     tope de grosor y un poco de aire entre categorias, la misma grafica se
+     lee igual pero pesa mucho menos en pantalla. Es solo presentacion: no
+     toca datos, escalas ni eventos, y cualquier dataset que declare lo suyo
+     sigue mandando. */
+  if (Chart.defaults.datasets && Chart.defaults.datasets.bar) {
+    Object.assign(Chart.defaults.datasets.bar, {
+      maxBarThickness: 26,
+      categoryPercentage: 0.78,
+      barPercentage: 0.86,
+      borderRadius: 4,
+    });
+  }
+  if (Chart.defaults.plugins && Chart.defaults.plugins.legend) {
+    Chart.defaults.plugins.legend.labels = Object.assign(
+      {}, Chart.defaults.plugins.legend.labels, { color: '#393939', boxWidth: 12, boxHeight: 12 });
+  }
+  if (Chart.defaults.plugins && Chart.defaults.plugins.tooltip) {
+    Object.assign(Chart.defaults.plugins.tooltip, {
+      backgroundColor: 'rgba(25, 25, 25, .92)',
+      borderColor: '#478b3c', borderWidth: 1,
+    });
+  }
+}
 const miniBar = (pct, color) =>
   `<span class="mini" title="${Math.round(pct)}%"><i style="width:${Math.max(0,Math.min(100,pct))}%;background:${color}"></i></span>`;
 
@@ -70,27 +159,6 @@ function resumirHtmlError(html) {
 // Pares [dimension, valor] con filtro puesto. null = esa dimension no filtra.
 function dimensionesActivas(filtro) {
   return Object.entries(filtro).filter(([, v]) => v !== null);
-}
-
-function limpiarFiltro(filtro, alCambiar) {
-  Object.keys(filtro).forEach(k => { filtro[k] = null; });
-  alCambiar();
-}
-
-// Barra de "filtros activos": un chip por dimension, con su tache para quitarla.
-function pintarChipsFiltro(contenedorId, filtro, etiquetas, alCambiar, textoVacio) {
-  const cont = document.getElementById(contenedorId);
-  const activos = dimensionesActivas(filtro);
-  if (!activos.length) {
-    cont.innerHTML = `<span class="ninguno">${textoVacio}</span>`;
-    return;
-  }
-  cont.innerHTML = activos.map(([d, v]) =>
-    `<span class="fchip"><span class="dim">${etiquetas[d]}:</span>${escapeHtml(v)}
-      <span class="quitar" data-dim="${d}">&times;</span></span>`).join(' ');
-  cont.querySelectorAll('.quitar').forEach(x => {
-    x.addEventListener('click', () => { filtro[x.dataset.dim] = null; alCambiar(); });
-  });
 }
 
 // Fila de tarjetas de KPI. t = { l: etiqueta, v: valor, f: pie, s: semaforo }.
@@ -348,7 +416,7 @@ function etiquetaDelClic(gr, evento) {
 // Resalta con un contorno oscuro el elemento seleccionado de una grafica.
 function bordesSeleccion(etiquetas, seleccionada, grosorNormal) {
   return {
-    borderColor: etiquetas.map(e => e === seleccionada ? '#0f172a' : '#fff'),
+    borderColor: etiquetas.map(e => e === seleccionada ? '#191919' : '#fff'),
     borderWidth: etiquetas.map(e => e === seleccionada ? 3 : grosorNormal),
   };
 }
@@ -403,7 +471,7 @@ const ETIQUETAS_SEGMENTO = {
         const y = ((barra.base ?? 0) + barra.y) / 2;
         const texto = FMT(v);
         // Contorno oscuro: el mismo numero se lee sobre cualquier color de la paleta.
-        ctx.strokeStyle = 'rgba(15,23,42,.65)';
+        ctx.strokeStyle = 'rgba(25,25,25,.72)';
         ctx.lineWidth = 3;
         ctx.strokeText(texto, barra.x, y);
         ctx.fillStyle = '#fff';
@@ -413,6 +481,12 @@ const ETIQUETAS_SEGMENTO = {
     ctx.restore();
   },
 };
+
+/* Cifra DENTRO de la barra, para las barras SIMPLES (no apiladas). Es el
+   plugin COMPARTIDO de assets/js/barras.js, el mismo que usan las barras de
+   Experiencia: se le ata el FMT de este tablero y ya. Las apiladas siguen con
+   ETIQUETAS_SEGMENTO de aqui arriba, que sabe de segmentos. */
+const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
 
 // Estado vacio de una grafica. Chart.js no dibuja nada util con datasets
 // vacios -deja los ejes solos, que se leen como si hubiera un error-, asi que
@@ -450,7 +524,7 @@ function renderEmptyChart(canvasId, message) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, ancho, alto);
   // Gris medio: se lee igual sobre el tema claro y el oscuro.
-  ctx.fillStyle = '#94a3b8';
+  ctx.fillStyle = '#9aa094';
   ctx.font = '13px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -504,8 +578,27 @@ const TableroSla = (function () {
   // Bajar este numero solo reduce cobertura; no requiere tocar el backend.
   const TOPE_DETALLE = 500;
 
-  const AZUL = '#2563eb', VERDE = '#059669', ROJO = '#dc2626', MORADO = '#7c3aed', GRIS = '#94a3b8';
+  /* Series con nombre fijo de la tendencia. Creados y Cerrados son IDENTIDAD
+     y salen de la paleta categorica compartida (assets/js/paleta.js), en
+     posiciones fijas para que no cambien si manana se agrega una serie.
+     Vencidos SLA es ESTADO, no identidad: conserva el rojo semantico y por
+     eso NO toma la posicion 2 de la paleta -que tambien es roja-. */
+  const AZUL = Paleta.porIndice(0), VERDE_S = Paleta.porIndice(2), ROJO = ROJO_SEM,
+        MORADO = Paleta.porIndice(4), GRIS = Paleta.NEUTRO;
+  /* Barras apiladas de productividad: mismas dos posiciones categoricas que
+     Creados/Cerrados arriba, para que las dos tarjetas se lean igual. */
+  const BARRA_A = Paleta.porIndice(0), BARRA_B = Paleta.porIndice(2);
+  // Identidad de "estado" del ticket. Un solo registro para todo el tablero
+  // de SLA: si manana otra grafica pinta la misma dimension, debe pedir este
+  // mismo nombre de registro para que los colores coincidan.
+  const REG_ESTADO = Paleta.registro('sla-estado');
   const ORDEN_AGING = ['0-1 dias', '2-3 dias', '4-7 dias', '8-15 dias', '16-30 dias', '31+ dias', 'Sin fecha'];
+  // Posicion del cubo dentro del orden -> escalon de la rampa ordinal.
+  function colorAging(etiqueta) {
+    const i = ORDEN_AGING.indexOf(etiqueta);
+    if (i < 0 || etiqueta === 'Sin fecha') return NEUTRO_SEM;
+    return RAMPA_ORDINAL[Math.min(i, RAMPA_ORDINAL.length - 1)];
+  }
 
   const graficos = {};
   let datos = null;
@@ -627,8 +720,7 @@ const TableroSla = (function () {
   function alternarFiltro(dim, valor) {
     if (valor === null || valor === undefined) return;
     // Sin detalle no hay con que recalcular las demas graficas: filtrar dejaria
-    // todo en cero y pareceria que no hay tickets. Se avisa en la barra de
-    // chips (renderChips) en vez de filtrar en falso.
+    // todo en cero y pareceria que no hay tickets: mejor no filtrar en falso.
     if (!detalleDisponible) return;
     filtro[dim] = (filtro[dim] === valor) ? null : valor;
     renderTodo('filtro');
@@ -661,6 +753,10 @@ const TableroSla = (function () {
     let inicio, fin = new Date(hoy);
     if (tipo === '7d') { inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6); }
     else if (tipo === 'anio') inicio = new Date(hoy.getFullYear(), 0, 1);
+    // "Mes" (solo Call Center) es el mes en curso, no los ultimos 30 dias: del
+    // dia 1 del mes a hoy, igual que "Año" va del 1 de enero a hoy.
+    else if (tipo === 'mes') inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    else return;   // rango desconocido: mejor no escribir fechas invalidas
     // El rango rapido manda sobre el SLOT: acaba de fijar un periodo distinto,
     // asi que dejar el SLOT en vigor contradiria lo que se acaba de pedir.
     desactivarSlots();
@@ -681,6 +777,29 @@ const TableroSla = (function () {
     // del nombre, asi que la lista se separa con | y el SP la parte con | (ver
     // dbo.fn_Dash_SplitListPipe). Grupos sigue con coma: ninguno la contiene.
     if (tecnicos.length) p.set('tecnicos', tecnicos.join('|'));
+    return p;
+  }
+
+  /* Parametros del Call Center: el MISMO rango de fechas que los tickets -es
+     lo que permite comparar los dos lados de la atencion- mas su filtro
+     propio de campanas.
+
+     La campana se agrega AQUI y no en paramsFiltros() a proposito: asi
+     llamadas.ashx es el unico handler que la recibe. Los de tickets no la
+     leen, pero mandarsela igual dejaria una lista de parametros que no
+     describe lo que cada peticion usa de verdad.
+
+     Los filtros de Grupos y Tecnicos se quitan: una llamada no tiene grupo
+     resolutor, y el handler tampoco los mira.
+
+     Separador coma: a diferencia de los tecnicos ("Apellidos, Nombre"), el
+     valor es el numero de cola y nunca contiene comas. */
+  function paramsLlamadas() {
+    const p = paramsFiltros();
+    p.delete('grupos');
+    p.delete('tecnicos');
+    const campanas = seleccionados('f-campanas');
+    if (campanas.length) p.set('campanas', campanas.join(','));
     return p;
   }
 
@@ -1074,10 +1193,9 @@ const TableroSla = (function () {
     sum.classList.toggle('off', slotsN === 0);
   }
 
-  // Pone en vigor el SLOT preparado escribiendo su rango en las fechas. No
-  // recarga: la recarga la dispara "Aplicar filtros", el unico momento en que
-  // el SLOT entra en juego. Asi los KPIs, la tendencia y el ranking hablan
-  // siempre del mismo periodo que muestra el control.
+  // Pone en vigor el SLOT escribiendo su rango en las fechas. No recarga por su
+  // cuenta: quien lo llama encadena la carga. Asi los KPIs, la tendencia y el
+  // ranking hablan siempre del mismo periodo que muestra el control.
   function aplicarSlots() {
     slotsAplicados = slotsN;
     if (slotsN > 0) {
@@ -1289,7 +1407,7 @@ const TableroSla = (function () {
           labels: etiquetas,
           datasets: [
             serie('Creados', creados, AZUL, true),
-            serie('Cerrados', cerrados, VERDE),
+            serie('Cerrados', cerrados, VERDE_S),
             serie('Vencidos SLA', vencidos, ROJO),
           ]
         },
@@ -1386,8 +1504,8 @@ const TableroSla = (function () {
         data: {
           labels: etiquetas,
           datasets: [
-            { label: 'Totales', data: totales, backgroundColor: AZUL, borderRadius: 5 },
-            { label: 'Cerrados', data: cerrados, backgroundColor: VERDE, borderRadius: 5 },
+            { label: 'Totales', data: totales, backgroundColor: BARRA_A, borderRadius: 5 },
+            { label: 'Cerrados', data: cerrados, backgroundColor: BARRA_B, borderRadius: 5 },
           ]
         },
         options: {
@@ -1409,7 +1527,10 @@ const TableroSla = (function () {
     const ent = entradasDim('estado', null);
     const etiquetas = ent.map(e => e[0]);
     const valores = ent.map(e => e[1]);
-    const colores = etiquetas.map((_, i) => PALETA_CAT[i % PALETA_CAT.length]);
+    /* entradasDim('estado') ordena por volumen, asi que el orden cambia con
+       los filtros. El registro reparte por orden de ALTA y no por orden de
+       pintado: un estado conserva su color aunque baje de posicion. */
+    const colores = REG_ESTADO.escala(etiquetas);
     const sel = bordesSeleccion(etiquetas, filtro.estado, 2);
 
     if (!etiquetas.length) {
@@ -1551,7 +1672,7 @@ const TableroSla = (function () {
         <td>${escapeHtml(x.tecnico)}</td>
         <td>${escapeHtml(x.grupo)}</td>
         <td class="num"><b>${FMT(x.cerrados)}</b>
-          ${miniBar(tope > 0 ? 100 * x.cerrados / tope : 0, VERDE)}</td>
+          ${miniBar(tope > 0 ? 100 * x.cerrados / tope : 0, BARRA_B)}</td>
         <td class="num">${FMT(x.totales)}</td>
         <td class="num">${PCT(x.cerrados, x.totales)}</td>
         <td class="num">${PCT(x.cerrados, totalCerrados)}</td>
@@ -1567,24 +1688,245 @@ const TableroSla = (function () {
     cap.innerHTML = descripcionTopCerrados(totalCerrados, ranking.length, visibles.length);
   }
 
-  // ------------------------------------------------------ barra de filtros activos
-  // Quitar un chip es un cambio de cross-filter, igual que un clic en una
-  // grafica: repintado local ('filtro'), sin tocar el ranking ni el stepper.
-  function renderChips() {
-    pintarChipsFiltro('chips-filtro', filtro, ETIQUETA_DIM, () => renderTodo('filtro'),
-      detalleDisponible
-        ? 'ninguno · clic en una grafica para filtrar'
-        : '⚠ sin detalle cargado · el filtro por clic esta deshabilitado');
-  }
-
-  function resetFiltros() { limpiarFiltro(filtro, () => renderTodo('filtro')); }
-
   /* motivo === 'filtro' -> el repintado viene de un cambio de cross-filter.
      El ranking de cerrados (topCerrados, que se pide aparte y a proposito
      ignora el cross-filter) y el stepper de SLOT no dependen de `filtro`:
      recalcularlos en cada clic reconstruia una tabla de 10 filas con sus
      listeners de ordenacion para nada. Todo lo que SI depende del filtro se
      sigue repintando en el mismo ciclo, asi que ninguna grafica queda vieja. */
+  /* ------------------------------------------- Call Center de Servicios TI
+     Un solo dataset (`llamadas`, de llamadas.ashx) alimenta las tarjetas, las
+     cuatro graficas y el catalogo de campanas.
+
+     Este bloque NO participa del cross-filter: una llamada no comparte
+     dimension con un ticket (no tiene estado, prioridad ni antiguedad), asi
+     que el objeto `filtro` no lo toca y renderTodo() solo lo repinta cuando
+     llegan datos nuevos, no en cada clic sobre las graficas de SLA. Sus
+     unicas entradas son el rango de fechas -compartido con los tickets- y el
+     filtro propio de campanas.
+
+     Reusa lo que ya hay: obtenerJSON, htmlTarjetasKpi, dibujarGrafico,
+     renderEmptyChart, EJE_CONTEO, la paleta compartida y las clases de
+     semaforo sv/sa/sr. No define ningun color ni ningun render propio. */
+
+  // mm:ss. Los segundos crudos ('194') no dicen nada de un vistazo; en un Call
+  // Center todo el mundo lee 3:14.
+  function mmss(segundos) {
+    if (segundos === null || segundos === undefined) return 'N/D';
+    const s = Math.round(Number(segundos));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  /* El abandono es el KPI que se mira primero, y aqui MENOS es mejor: se
+     colorea al reves que el cumplimiento de SLA. Mismas clases que SEM
+     (sv/sa/sr), solo cambia el sentido de los cortes. */
+  const SEM_ABANDONO = pct => pct <= 10 ? 'sv' : (pct <= 20 ? 'sa' : 'sr');
+
+  function renderKpisLlamadas() {
+    const cont = document.getElementById('kpis-llamadas');
+    if (!cont) return;
+    const k = (datos && datos.llamadas && datos.llamadas.kpis) || {};
+
+    const total = k.Llamadas ?? 0;
+    const contestadas = k.Contestadas ?? 0;
+    const abandonadas = k.Abandonadas ?? 0;
+    // Colgaron antes del minuto. Va aparte de 'abandonadas': el backend ya
+    // dejo en Abandonadas solo las que aguantaron mas de un minuto, asi que el
+    // abandono total -el que mide AbandonoPct- es la suma de las dos.
+    const colgaronRapido = k.ColgaronRapido ?? 0;
+    const abandonoTotal = abandonadas + colgaronRapido;
+    const aband = k.AbandonoPct ?? null;
+    const nivel = k.NivelServicioPct ?? null;
+    const umbral = k.UmbralNivelServicioSeg ?? 20;
+
+    cont.innerHTML = htmlTarjetasKpi([
+      { l: 'Llamadas recibidas', v: FMT(total),
+        f: `${FMT(contestadas)} contestadas · ${FMT(abandonoTotal)} abandonadas` },
+      { l: '% de abandono', v: aband !== null ? `${aband}%` : '—',
+        s: aband !== null ? SEM_ABANDONO(aband) : '',
+        f: `${FMT(abandonoTotal)} de ${FMT(total)}` },
+      { l: 'Abandonadas (> 1 min)', v: FMT(abandonadas),
+        f: `esperaron mas de un minuto antes de colgar` },
+      { l: 'Colgaron antes del minuto', v: FMT(colgaronRapido),
+        f: `abandono rapido, sin llegar al minuto` },
+      // El umbral se escribe "menos de Ns" a proposito: la tarjeta se inyecta
+      // con innerHTML y un '<' suelto abre una etiqueta que se come el texto.
+      { l: 'Nivel de servicio', v: nivel !== null ? `${nivel}%` : '—',
+        s: nivel !== null ? SEM(nivel) : '',
+        f: `contestadas en menos de ${umbral}s` },
+      { l: 'Espera promedio', v: mmss(k.EsperaPromSeg),
+        f: `antes de colgar: ${mmss(k.EsperaPromAbanSeg)}` },
+      { l: 'Duracion promedio', v: mmss(k.DuracionPromSeg),
+        f: `${FMT(k.PromedioDiario ?? 0)} llamadas por dia` },
+      { l: 'Agentes activos', v: FMT(k.AgentesActivos ?? 0) },
+    ]);
+  }
+
+  function renderLlamadasDia() {
+    const f = (datos && datos.llamadas && datos.llamadas.tendencia) || [];
+    if (!f.length) {
+      destruir('llamadasDia');
+      return renderEmptyChart('chart-llamadas-dia', 'Sin llamadas en el rango seleccionado.');
+    }
+    // Misma forma de fecha que tendencia.ashx: "aaaa-mm-ddT00:00:00".
+    const etiquetas = f.map(x => String(x.Fecha ?? '').slice(0, 10));
+    const series = [
+      { label: 'Recibidas', data: f.map(x => x.Llamadas), color: AZUL },
+      { label: 'Contestadas', data: f.map(x => x.Contestadas), color: VERDE_S },
+      { label: 'Abandonadas', data: f.map(x => x.Abandonadas), color: ROJO },
+    ];
+
+    dibujarGrafico(graficos, 'llamadasDia', 'chart-llamadas-dia',
+      () => ({
+        type: 'line',
+        data: { labels: etiquetas, datasets: series.map(s => ({
+          label: s.label, data: s.data, borderColor: s.color, backgroundColor: s.color,
+          tension: 0.25, pointRadius: 0, borderWidth: 2 })) },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } } },
+          scales: { y: EJE_CONTEO },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        series.forEach((s, i) => { gr.data.datasets[i].data = s.data; });
+      });
+  }
+
+  /* Volumen en barras y % de abandono en linea sobre un segundo eje: una
+     campana chica con 60% de abandono se pierde si solo se mira el volumen. */
+  function renderLlamadasCampana() {
+    const f = (datos && datos.llamadas && datos.llamadas.campana) || [];
+    if (!f.length) {
+      destruir('llamadasCampana');
+      return renderEmptyChart('chart-llamadas-campana', 'Sin llamadas en el rango seleccionado.');
+    }
+    const etiquetas = f.map(x => x.Campana);
+    const volumen = f.map(x => x.Llamadas);
+    const abandono = f.map(x => x.AbandonoPct);
+
+    dibujarGrafico(graficos, 'llamadasCampana', 'chart-llamadas-campana',
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [
+          { label: 'Llamadas', data: volumen, backgroundColor: AZUL, borderRadius: 6, yAxisID: 'y' },
+          { label: '% abandono', data: abandono, type: 'line', borderColor: ROJO,
+            backgroundColor: ROJO, tension: 0.25, pointRadius: 3, borderWidth: 2, yAxisID: 'y1' },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+            y: Object.assign({}, EJE_CONTEO, { position: 'left' }),
+            y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false },
+                  ticks: { callback: v => `${v}%` } },
+          }
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = volumen;
+        gr.data.datasets[1].data = abandono;
+      });
+  }
+
+  function renderLlamadasHora() {
+    const f = (datos && datos.llamadas && datos.llamadas.hora) || [];
+    if (!f.length) {
+      destruir('llamadasHora');
+      return renderEmptyChart('chart-llamadas-hora', 'Sin llamadas en el rango seleccionado.');
+    }
+    const etiquetas = f.map(x => `${String(x.Hora).padStart(2, '0')}:00`);
+    const contestadas = f.map(x => x.Contestadas);
+    const abandonadas = f.map(x => x.Abandonadas);
+
+    dibujarGrafico(graficos, 'llamadasHora', 'chart-llamadas-hora',
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [
+          { label: 'Contestadas', data: contestadas, backgroundColor: VERDE_S },
+          { label: 'Abandonadas', data: abandonadas, backgroundColor: ROJO },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } } },
+          scales: { x: { stacked: true }, y: Object.assign({}, EJE_CONTEO, { stacked: true }) },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = contestadas;
+        gr.data.datasets[1].data = abandonadas;
+      });
+  }
+
+  function renderLlamadasAgente() {
+    const f = (datos && datos.llamadas && datos.llamadas.agente) || [];
+    if (!f.length) {
+      destruir('llamadasAgente');
+      return renderEmptyChart('chart-llamadas-agente', 'Sin llamadas atendidas en el rango seleccionado.');
+    }
+    const etiquetas = f.map(x => x.Agente);
+    const atendidas = f.map(x => x.Atendidas);
+    // El tooltip lee la duracion por posicion, asi que se congela junto con
+    // las series: si llegan datos nuevos, este arreglo se reemplaza entero.
+    const duraciones = f.map(x => x.DuracionPromSeg);
+
+    dibujarGrafico(graficos, 'llamadasAgente', 'chart-llamadas-agente',
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [{ label: 'Llamadas atendidas',
+          data: atendidas, backgroundColor: MORADO, borderRadius: 6 }] },
+        options: {
+          indexAxis: 'y',
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              label: c => `Atendidas: ${FMT(c.raw)}`,
+              afterLabel: c => `Duracion promedio: ${mmss(duraciones[c.dataIndex])}`,
+            } },
+          },
+          scales: { x: EJE_CONTEO },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = atendidas;
+        // El closure del tooltip apunta al arreglo de ESTA pasada, no al de la
+        // construccion: hay que reinstalarlo para que las duraciones casen.
+        gr.options.plugins.tooltip.callbacks.afterLabel =
+          c => `Duracion promedio: ${mmss(duraciones[c.dataIndex])}`;
+      });
+  }
+
+  /* El catalogo de campanas viaja con los datos y se llena UNA sola vez: si se
+     repoblara en cada carga se perderia la campana que el usuario acaba de
+     elegir. El MutationObserver del multi-select redibuja su panel solo. */
+  function llenarCatalogoCampanas() {
+    const sel = document.getElementById('f-campanas');
+    if (!sel || sel.options.length) return;
+    const cat = (datos && datos.llamadas && datos.llamadas.catalogo) || [];
+    if (!cat.length) return;
+    sel.innerHTML = cat.map(c =>
+      `<option value="${escapeAttr(String(c.NumeroCola))}">${escapeHtml(c.Campana)}</option>`).join('');
+  }
+
+  function renderLlamadas() {
+    const hint = document.getElementById('hint-llamadas');
+    if (hint) {
+      const n = seleccionados('f-campanas').length;
+      hint.textContent = n ? `${n} campaña${n > 1 ? 's' : ''}` : 'todas las campañas';
+    }
+    llenarCatalogoCampanas();
+    renderKpisLlamadas();
+    renderLlamadasDia();
+    renderLlamadasCampana();
+    renderLlamadasHora();
+    renderLlamadasAgente();
+  }
+
   function renderTodo(motivo) {
     perf.ini('renderTodo');
     renderKpis();
@@ -1593,13 +1935,18 @@ const TableroSla = (function () {
     renderEstado();
     renderBarraDim('chart-prioridad', 'prioridad', 'prioridad',
       null, l => COLOR_PRIORIDAD[l] ?? GRIS, 'Ningun ticket pasa los filtros activos.');
+    /* La antiguedad tiene orden propio: se pinta con la rampa ordinal
+       (claro = reciente, oscuro = viejo) en vez de un unico color plano.
+       "Sin fecha" no es parte del orden y va en neutro. */
     renderBarraDim('chart-aging', 'aging', 'aging',
-      ORDEN_AGING, () => MORADO, 'Ningun ticket pasa los filtros activos.');
+      ORDEN_AGING, l => colorAging(l), 'Ningun ticket pasa los filtros activos.');
     if (motivo !== 'filtro') {
       renderSlotStepper();
       renderTopCerrados();
+      // El Call Center no depende del cross-filter (ver bloque de arriba): se
+      // repinta con los datos nuevos, no en cada clic sobre las graficas.
+      renderLlamadas();
     }
-    renderChips();
     perf.fin('renderTodo');
   }
 
@@ -1609,16 +1956,37 @@ const TableroSla = (function () {
     kpis: {}, tendencia: [], productividad: [],
     distribucion: { estado: [], prioridad: [], aging: [] },
     detalle: [], topCerrados: [],
+    // Call Center: si llamadas.ashx falla, el bloque pinta sus estados vacios
+    // y el resto del tablero de SLA sigue igual que siempre.
+    llamadas: { kpis: {}, tendencia: [], campana: [], hora: [], agente: [], catalogo: [] },
   };
 
-  /* Los seis datasets se resuelven POR SEPARADO (allSettled), no con
+  /* Los siete datasets se resuelven POR SEPARADO (allSettled), no con
      Promise.all. Con Promise.all el rechazo de uno solo -tipicamente
      `detalle`, que en un rango de UN dia no se puede trocear y solo puede
      bajar el tope de filas antes de rendirse- saltaba al catch y el tablero
      entero se quedaba sin pintar, aunque kpis/tendencia/distribucion hubieran
      respondido bien. Ahora cada dataset que llega se pinta; los que fallan
      dejan su estado vacio y aparecen listados en la barra de estado. */
+  /* Auto-aplicado de los filtros. Los controles ya no esperan a ningun boton:
+     cada cambio llama a programarCarga(), que agrupa los cambios seguidos -tres
+     casillas de un multi-select, dos clics del stepper- en UNA sola peticion.
+     Y como dos cargas pueden solaparse, cada una lleva su numero: la que ya no
+     es la ultima descarta su respuesta y no pinta datos viejos encima. */
+  const ESPERA_AUTO = 250;             // ms para agrupar cambios seguidos
+  let cargaProgramada = null;
+  let cargaVigente = 0;
+
+  function programarCarga() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = setTimeout(() => { cargaProgramada = null; cargarTodo(); }, ESPERA_AUTO);
+  }
+
   async function cargarTodo() {
+    // Una carga inmediata ("Limpiar", rango rapido) manda sobre la programada.
+    clearTimeout(cargaProgramada);
+    cargaProgramada = null;
+    const miCarga = ++cargaVigente;
     estadoCargando('estado-carga');
     const qs = paramsFiltros().toString();
     const qsGrupos = paramsRankingCerrados().toString();
@@ -1630,9 +1998,12 @@ const TableroSla = (function () {
       ['distribucion',  () => obtenerJSON(`distribucion.ashx?${qs}`)],
       ['detalle',       () => obtenerDetalle(paramsFiltros(), TOPE_DETALLE)],
       ['topCerrados',   () => obtenerJSON(`productividad.ashx?${qsGrupos}`)],
+      ['llamadas',      () => obtenerJSON(`llamadas.ashx?${paramsLlamadas().toString()}`)],
     ];
 
     const resueltos = await Promise.allSettled(peticiones.map(([, pedir]) => pedir()));
+    // Llego tarde: otro cambio de filtro ya lanzo una carga posterior.
+    if (miCarga !== cargaVigente) return;
 
     const nuevos = {};
     const fallos = [];
@@ -1665,18 +2036,13 @@ const TableroSla = (function () {
   }
 
   async function init() {
-    document.querySelectorAll('#tab-sla [data-rango]').forEach(btn => {
+    document.querySelectorAll('#filtros-sla [data-rango]').forEach(btn => {
       btn.addEventListener('click', () => aplicarRangoRapido(btn.dataset.rango));
-    });
-    // Unico punto donde el SLOT entra en vigor: el stepper por si solo no
-    // recarga, se aplica junto al resto de filtros.
-    document.getElementById('btn-aplicar').addEventListener('click', () => {
-      aplicarSlots();
-      cargarTodo();
     });
     document.getElementById('btn-limpiar').addEventListener('click', () => {
       document.getElementById('f-grupos').selectedIndex = -1;
       document.getElementById('f-tecnicos').selectedIndex = -1;
+      document.getElementById('f-campanas').selectedIndex = -1;
       // "Limpiar" deja el tablero como recien abierto: sin SLOT, sin cross
       // filter y con el mismo rango que escribe init(). Antes fijaba hoy a hoy
       // y la tendencia quedaba con un solo dia.
@@ -1685,24 +2051,32 @@ const TableroSla = (function () {
       Object.keys(filtro).forEach(k => { filtro[k] = null; });
       cargarTodo();
     });
-    document.getElementById('btn-reset-filtros').addEventListener('click', resetFiltros);
 
-    // Stepper de SLOTs: solo mueve el numero y repinta. Nada de red hasta que
-    // se pulsa "Aplicar filtros".
+    // Stepper de SLOTs: mueve el numero, pone su rango en vigor y recarga.
+    // El debounce agrupa los clics seguidos en una sola peticion.
     document.getElementById('slot-mas').addEventListener('click', () => {
       slotsN = Math.min(slotsN + 1, MAX_SLOTS);
-      renderSlotStepper();
+      aplicarSlots();
+      programarCarga();
     });
     document.getElementById('slot-menos').addEventListener('click', () => {
       if (slotsN <= 0) return;       // 0 = SLOT apagado, no se baja mas
-      slotsN--;                      // 1 -> 0 solo PREPARA el apagado: nada de
-                                     // red ni de fechas hasta "Aplicar filtros"
-      renderSlotStepper();
+      slotsN--;                      // 1 -> 0 apaga el SLOT: manda el rango
+      aplicarSlots();                // manual que haya escrito en las fechas
+      programarCarga();
     });
-    // Tocar una fecha a mano apaga el SLOT: si no, "Aplicar filtros" volveria a
-    // escribir el rango del SLOT encima y las fechas escritas se perderian.
+    // Tocar una fecha a mano apaga el SLOT: si no, el rango del SLOT se
+    // reescribiria encima y las fechas escritas se perderian.
     ['f-inicio', 'f-fin'].forEach(id => {
-      document.getElementById(id).addEventListener('change', desactivarSlots);
+      document.getElementById(id).addEventListener('change', () => {
+        desactivarSlots();
+        programarCarga();
+      });
+    });
+    // Grupos, tecnicos y campanas: el multi-select propio emite `change` sobre
+    // el <select> original, asi que basta con escucharlo aqui.
+    ['f-grupos', 'f-tecnicos', 'f-campanas'].forEach(id => {
+      document.getElementById(id).addEventListener('change', programarCarga);
     });
     renderSlotStepper();             // estado inicial: sin SLOT, rango manual
 
@@ -1726,7 +2100,10 @@ const TableroSla = (function () {
 const TableroBacklog = (function () {
   // Misma paleta que usa el correo, en el mismo orden: un lider conserva su
   // color entre el correo, la grafica apilada y la tabla de resumen.
-  const PALETA = ['#2563eb','#dc2626','#059669','#d97706','#7c3aed','#0891b2','#db2777','#6b7280'];
+  // Identidad por lider: paleta categorica COMPARTIDA (assets/js/paleta.js).
+  // El indice del lider en ordenLideres decide el color -no el orden de
+  // pintado-, asi que un lider lleva el mismo color en la tendencia, la
+  // antiguedad por lider, la tabla de resumen y los swatches.
   // AgingSort >= 5 es exactamente "mas de 30 dias" (ver 07_correo_backlog.sql).
   const SORT_MAS_30 = 5;
 
@@ -1737,8 +2114,7 @@ const TableroBacklog = (function () {
   const ETIQUETA_DIM = { lider: 'Lider', grupo: 'Grupo', prioridad: 'Prioridad', aging: 'Antiguedad' };
 
   function colorLider(nombre) {
-    const i = ordenLideres.indexOf(nombre);
-    return i >= 0 ? PALETA[i % PALETA.length] : '#6b7280';
+    return Paleta.color(nombre, ordenLideres);
   }
   function hayFiltro() { return dimensionesActivas(filtro).length > 0; }
   // hayFiltro() solo mira el cross-filter de las graficas. Para los mensajes de
@@ -1953,7 +2329,7 @@ const TableroBacklog = (function () {
         labels: serie.map(f => String(f.Periodo).slice(0, 10)),
         datasets: [{
           label: 'Backlog', data: serie.map(f => f.TicketsBacklog),
-          borderColor: filtro.lider ? colorLider(filtro.lider) : PALETA[0],
+          borderColor: filtro.lider ? colorLider(filtro.lider) : Paleta.porIndice(0),
           backgroundColor: 'rgba(37,99,235,.12)', fill: true,
           borderWidth: 2, tension: .3, pointRadius: 3,
         }],
@@ -2034,18 +2410,26 @@ const TableroBacklog = (function () {
       return renderEmptyChart('chart-lider-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
-    dibujar('chart-lider-bl', {
-      type: 'bar',
-      data: { labels: etiquetas, datasets: [{ data: ent.map(e => e[1]),
-        backgroundColor: etiquetas.map(colorLider),
-        borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
+    /* Medidas y cifra dentro las pone DashboardBarChart (assets/js/grafica.js);
+       aqui solo queda lo propio de esta grafica. El color de lider es
+       IDENTIDAD y sale de la posicion en `ordenLideres` -el mismo criterio que
+       colorLider()-, asi que una persona lleva su color en todas las vistas.
+       El borderRadius de 6 y el contorno de seleccion mandan sobre el juego
+       compartido: van en `dataset`, que se aplica despues de las medidas. */
+    graficos['chart-lider-bl'] = new DashboardBarChart({
+      canvas: 'chart-lider-bl',
+      etiquetas,
+      datos: ent.map(e => e[1]),
+      paleta: { orden: ordenLideres },
+      formato: FMT,
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
+      opciones: {
+        maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
         scales: EJE_Y_CERO,
         onClick: (evt, _e, gr) => alternarFiltro('lider', etiquetaDelClic(gr, evt)),
       },
-    });
+    }).render();
   }
 
   function renderBarrasPrioridad() {
@@ -2065,18 +2449,23 @@ const TableroBacklog = (function () {
       return renderEmptyChart('chart-prioridad-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
-    dibujar('chart-prioridad-bl', {
-      type: 'bar',
-      data: { labels: etiquetas, datasets: [{ data: valores,
-        backgroundColor: etiquetas.map(l => COLOR_PRIORIDAD[l]),
-        borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
-      options: {
-        responsive: true, maintainAspectRatio: false,
+    /* El color va en `colores`, hecho, y NO por `paleta`: COLOR_PRIORIDAD es
+       severidad -Critica/Alta/Media/Baja-, no identidad, y no entra en la
+       paleta categorica. Medidas y cifra dentro las trae DashboardBarChart. */
+    graficos['chart-prioridad-bl'] = new DashboardBarChart({
+      canvas: 'chart-prioridad-bl',
+      etiquetas,
+      datos: valores,
+      colores: etiquetas.map(l => COLOR_PRIORIDAD[l]),
+      formato: FMT,
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
+      opciones: {
+        maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
         scales: EJE_Y_CERO,
         onClick: (evt, _e, gr) => alternarFiltro('prioridad', etiquetaDelClic(gr, evt)),
       },
-    });
+    }).render();
   }
 
   // Apilada por lider: dentro de cada barra de antiguedad, un color por lider.
@@ -2095,20 +2484,25 @@ const TableroBacklog = (function () {
     // grosor se aplica por segmento, y asi se resalta la columna completa.
     const sel = bordesSeleccion(m.buckets, filtro.aging, 0);
 
-    dibujar('chart-aging-bl', {
-      type: 'bar',
-      data: {
-        labels: m.buckets,
-        datasets: m.lideres.map(l => ({
-          label: l,
-          data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
-          backgroundColor: colorLider(l),
-          borderColor: sel.borderColor,
-          borderWidth: sel.borderWidth,
-        })),
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
+    /* Apilada: DashboardBarChart pone el grosor a cada dataset, pero la cifra
+       dentro se apaga con `etiquetasDentro: false`. En una apilada no hay
+       "fuera de la barra" donde caer -seria encima del segmento vecino-, asi
+       que aqui manda ETIQUETAS_SEGMENTO, que omite el segmento que no da el
+       alto. El color de lider es identidad y ya viene resuelto por
+       colorLider() (Paleta contra `ordenLideres`), uno por dataset. */
+    graficos['chart-aging-bl'] = new DashboardBarChart({
+      canvas: 'chart-aging-bl',
+      etiquetas: m.buckets,
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
+      datasets: m.lideres.map(l => ({
+        label: l,
+        data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
+        backgroundColor: colorLider(l),
+      })),
+      etiquetasDentro: false,
+      plugins: [ETIQUETAS_SEGMENTO],
+      opciones: {
+        maintainAspectRatio: false,
         plugins: {
           ...LEYENDA_ABAJO,
           tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } },
@@ -2116,8 +2510,7 @@ const TableroBacklog = (function () {
         scales: { x: { stacked: true }, y: { stacked: true, ...EJE_Y_CERO.y } },
         onClick: (evt, _e, gr) => alternarFiltro('aging', etiquetaDelClic(gr, evt)),
       },
-      plugins: [ETIQUETAS_SEGMENTO],
-    });
+    }).render();
   }
 
 
@@ -2395,14 +2788,6 @@ const TableroBacklog = (function () {
     }
   }
 
-  // ------------------------------------------------------ barra de filtros activos
-  function renderChips() {
-    pintarChipsFiltro('chips-filtro-bl', filtro, ETIQUETA_DIM, renderTodo,
-      'ninguno · clic en una grafica o en un lider para filtrar');
-  }
-
-  function resetFiltros() { limpiarFiltro(filtro, renderTodo); }
-
   // ------------------------------------------------- resumen de texto del filtro
   function descripcionFiltro(n) {
     const activos = dimensionesActivas(filtro);
@@ -2421,7 +2806,6 @@ const TableroBacklog = (function () {
     renderLideres();
     renderTablaAging();
     renderAntiguos();
-    renderChips();
   }
 
   function sumaPor(filas, campoClave, campoValor) {
@@ -2470,7 +2854,22 @@ const TableroBacklog = (function () {
     }
   }
 
+  /* Mismo auto-aplicado que el tablero de SLA: los cambios seguidos se agrupan
+     en una peticion y la carga que deja de ser la ultima descarta su respuesta
+     para no pintar datos viejos encima de los recien pedidos. */
+  const ESPERA_AUTO = 250;
+  let cargaProgramada = null;
+  let cargaVigente = 0;
+
+  function programarCarga() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = setTimeout(() => { cargaProgramada = null; cargarTodo(); }, ESPERA_AUTO);
+  }
+
   async function cargarTodo() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = null;
+    const miCarga = ++cargaVigente;
     estadoCargando('estado-carga-bl');
     try {
       const p = paramsFiltros();
@@ -2484,6 +2883,8 @@ const TableroBacklog = (function () {
         obtenerJSON(`backlog_historico.ashx?${qsHist.toString()}`),
         obtenerJSON(`backlog_antiguos.ashx?${qs}`),
       ]);
+      // Llego tarde: otro cambio de filtro ya lanzo una carga posterior.
+      if (miCarga !== cargaVigente) return;
       datos = { resumen, historico, antiguos };
 
       // El orden de lideres se fija UNA vez, con el corte actual, y de ahi
@@ -2495,12 +2896,12 @@ const TableroBacklog = (function () {
       renderTodo();
       estadoOk('estado-carga-bl');
     } catch (err) {
+      if (miCarga !== cargaVigente) return;   // fallo de una carga ya superada
       estadoError('estado-carga-bl', err);
     }
   }
 
   async function init() {
-    document.getElementById('btn-aplicar-bl').addEventListener('click', cargarTodo);
     document.getElementById('btn-limpiar-bl').addEventListener('click', () => {
       for (const id of ['f-c1-bl', 'f-grupos-bl', 'f-lideres-bl']) {
         Array.from(document.getElementById(id).options).forEach(o => { o.selected = false; });
@@ -2509,12 +2910,14 @@ const TableroBacklog = (function () {
       document.getElementById('f-granularidad-bl').value = 'Dia';
       cargarTodo();
     });
-    // Cambiar el corte o la ventana recarga de inmediato: son de un solo clic y
-    // esperar a "Aplicar filtros" se siente roto.
-    for (const id of ['f-corte-bl', 'f-dias-bl', 'f-granularidad-bl']) {
-      document.getElementById(id).addEventListener('change', cargarTodo);
+    // Todos los filtros del backlog recargan solos. Los multi-select emiten
+    // `change` sobre el <select> original desde su capa visual, asi que los
+    // seis pasan por el mismo camino, con el debounce agrupando los cambios
+    // seguidos en una sola peticion.
+    for (const id of ['f-corte-bl', 'f-dias-bl', 'f-granularidad-bl',
+                      'f-c1-bl', 'f-grupos-bl', 'f-lideres-bl']) {
+      document.getElementById(id).addEventListener('change', programarCarga);
     }
-    document.getElementById('btn-reset-filtros-bl').addEventListener('click', resetFiltros);
     activarSubtabs(document.querySelector('#tab-backlog .tabs').parentElement, () => redimensionar(graficos));
 
     try {
@@ -2572,6 +2975,27 @@ const TableroExterno = (() => {
     const eraLaActiva = !boton || boton.classList.contains('active');
     const observabilidad = doc.querySelector('.mtab[data-tab="observabilidad"]');
     if (eraLaActiva && observabilidad) observabilidad.click();
+
+    montarDesplegables(doc);
+  }
+
+  /* Observabilidad y Orquestacion, que es lo que se ve de este documento, aun
+     traen <select> nativos. El archivo generado no se puede tocar, pero es del
+     mismo origen: basta con enlazarle la hoja del desplegable y montar sus
+     <select> desde aqui. Desplegable crea los nodos con el ownerDocument del
+     <select>, asi que el modulo funciona dentro del marco sin cargar su
+     archivo ahi. Si el generador reemplaza el HTML, esto sigue valiendo:
+     no hay ni una linea escrita en el. */
+  function montarDesplegables(doc) {
+    if (typeof Desplegable === 'undefined') return;
+    if (!doc.getElementById('css-desplegable')) {
+      const hoja = doc.createElement('link');
+      hoja.id = 'css-desplegable';
+      hoja.rel = 'stylesheet';
+      hoja.href = new URL('assets/css/desplegable.css', location.href).href;
+      doc.head.appendChild(hoja);
+    }
+    Desplegable.montar(doc);
   }
 
   function init() {
@@ -2707,7 +3131,7 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
       console.error(err);
       cont.innerHTML = `<div class="card" style="margin-top:16px">
         <h3>No se pudo montar el tablero de ${nombre}</h3>
-        <p style="font-size:13px;color:#64748b">${escapeHtml(err.message)} ·
+        <p style="font-size:13px;color:#5e5e5f">${escapeHtml(err.message)} ·
         el tablero suelto sigue en <a href="${base}${pagina}">${base}${pagina}</a>.</p></div>`;
     });
   }
@@ -2745,15 +3169,69 @@ const TableroQa = moduloEmbebido({
   },
 });
 
+/* =======================================================================
+   Pestanas de SLA y Call Center: un solo tablero en dos vistas
+   -----------------------------------------------------------------------
+   El Call Center no tiene datos, filtros ni ciclo de vida propios: su
+   dataset (llamadas.ashx) viaja en la misma carga de TableroSla y lo pintan
+   sus mismas funciones. Al darle pestana propia hay dos cosas que resolver.
+
+   1. Los controles. La barra de filtros y el sello de estado son de los dos
+      -el rango de fechas manda sobre tickets y llamadas por igual, y el
+      filtro de campanas solo mueve al Call Center-. En vez de duplicarlos,
+      se MUEVEN a la pestana que se esta viendo: siguen siendo un unico
+      <select> con sus mismos ids y sus mismos listeners.
+   2. La carga. Abrir cualquiera de las dos pestanas por primera vez dispara
+      el init() de TableroSla; la otra ya solo remide sus graficas, que
+      midieron cero mientras su contenedor estuvo oculto.
+   ======================================================================= */
+function adoptarControlesSla(idTab) {
+  const destino = document.getElementById(idTab);
+  const filtros = document.getElementById('filtros-sla');
+  const estado = document.getElementById('estado-carga');
+  if (!destino || !filtros || !estado) return;
+  destino.querySelector('.acciones-top').appendChild(estado);
+  destino.querySelector('header.top').insertAdjacentElement('afterend', filtros);
+
+  /* Los dos tableros no miden el mismo periodo largo: en SLA interesa el año
+     en curso y en el Call Center el mes en curso. Como la barra es UNA y
+     viaja entre las dos pestañas, el segundo boton del rango rapido se elige
+     aqui, al moverla: los dos <button> ya estan en el marcado y comparten el
+     listener de `#filtros-sla [data-rango]`. "7 dias" no se toca. */
+  const esCallCenter = idTab === 'tab-call';
+  const anio = filtros.querySelector('[data-rango="anio"]');
+  const mes = filtros.querySelector('[data-rango="mes"]');
+  if (anio) anio.hidden = esCallCenter;
+  if (mes) mes.hidden = !esCallCenter;
+}
+
+let slaIniciado = false;
+
+function pestanaSla(idTab) {
+  return {
+    init() {
+      adoptarControlesSla(idTab);
+      if (slaIniciado) return TableroSla.redimensionar();
+      slaIniciado = true;
+      return TableroSla.init();
+    },
+    redimensionar() {
+      adoptarControlesSla(idTab);
+      TableroSla.redimensionar();
+    },
+  };
+}
+
 const MODULOS = {
-  sla: TableroSla,
+  sla: pestanaSla('tab-sla'),
   backlog: TableroBacklog,
   experiencia: TableroExperiencia,
   qa: TableroQa,
+  call: pestanaSla('tab-call'),
   tablero: TableroExterno,
 };
 
-const iniciado = { sla: false, backlog: false, experiencia: false, qa: false, tablero: false };
+const iniciado = { sla: false, backlog: false, experiencia: false, qa: false, call: false, tablero: false };
 
 function activarTab(nombre) {
   if (!MODULOS[nombre]) nombre = 'sla';
@@ -2781,196 +3259,17 @@ document.querySelectorAll('.mtab').forEach(btn => {
 });
 
 /* =======================================================================
-   5. Multi-select propio (solo capa visual de los filtros de SLA y Backlog)
+   5. Desplegables propios (solo capa visual de los filtros)
    -----------------------------------------------------------------------
-   No toca la logica de filtrado ni las llamadas a los .ashx: el
-   <select multiple> original se queda en el DOM con su mismo id, sus mismas
-   <option> y su misma seleccion. Este modulo solo dibuja un desplegable con
-   opciones encima -clic simple para marcar o desmarcar, palomita a la derecha-
-   y copia los cambios en las dos direcciones.
+   La implementacion vive en assets/js/desplegable.js y es UNA sola para todo
+   el tablero: los seis <select multiple> de SLA y Backlog, los dos de una
+   opcion de Backlog y los de los modulos embebidos (Experiencia, QA), que la
+   llaman desde sus propios archivos.
+
+   Aqui no hay logica de filtrado ni llamadas a los .ashx: los <select>
+   originales se quedan en el DOM con sus mismos ids, sus mismas <option> y su
+   misma seleccion, y siguen disparando el mismo `change` de siempre. Los
+   <input type="date"> no son desplegables y no se tocan: conservan el
+   calendario nativo del navegador.
    ======================================================================= */
-(() => {
-  const IDS = ['f-grupos', 'f-tecnicos', 'f-c1-bl', 'f-grupos-bl', 'f-lideres-bl'];
-  const controles = [];
-
-  function crear(select) {
-    const envoltura = document.createElement('div');
-    envoltura.className = 'ms';
-    select.parentNode.insertBefore(envoltura, select);
-    envoltura.appendChild(select);
-
-    const boton = document.createElement('button');
-    boton.type = 'button';
-    boton.className = 'ms-boton';
-    boton.setAttribute('aria-haspopup', 'listbox');
-    boton.setAttribute('aria-expanded', 'false');
-    const texto = document.createElement('span');
-    texto.className = 'ms-texto';
-    const conteo = document.createElement('span');
-    conteo.className = 'ms-conteo';
-    boton.append(texto, conteo);
-
-    const panel = document.createElement('div');
-    panel.className = 'ms-panel';
-    const busca = document.createElement('input');
-    busca.type = 'search';
-    busca.className = 'ms-busca';
-    busca.placeholder = 'Buscar...';
-    busca.setAttribute('aria-label', 'Buscar opciones');
-    const acciones = document.createElement('div');
-    acciones.className = 'ms-acciones';
-    const btnTodos = document.createElement('button');
-    btnTodos.type = 'button';
-    btnTodos.textContent = 'Seleccionar todo';
-    const btnNinguno = document.createElement('button');
-    btnNinguno.type = 'button';
-    btnNinguno.textContent = 'Limpiar';
-    acciones.append(btnTodos, btnNinguno);
-    const lista = document.createElement('ul');
-    lista.className = 'ms-lista';
-    lista.setAttribute('role', 'listbox');
-    lista.setAttribute('aria-multiselectable', 'true');
-    panel.append(busca, acciones, lista);
-
-    envoltura.append(boton, panel);
-
-    const etiqueta = document.querySelector(`label[for="${select.id}"]`);
-    const nombre = (etiqueta ? etiqueta.textContent : '').replace(/\s*\(.*\)\s*$/, '').trim() || 'opciones';
-    const vacio = `Todos (${nombre.toLowerCase()})`;
-
-    // Una casilla por <option>. Se reconstruye cuando el catalogo llega.
-    function construir() {
-      lista.textContent = '';
-      const opciones = Array.from(select.options);
-      if (!opciones.length) {
-        const aviso = document.createElement('li');
-        aviso.className = 'ms-vacio';
-        aviso.textContent = 'Sin opciones';
-        lista.appendChild(aviso);
-      }
-      for (const opcion of opciones) {
-        const fila = document.createElement('li');
-        const etq = document.createElement('label');
-        etq.className = 'ms-opcion';
-        etq.setAttribute('role', 'option');
-        const caja = document.createElement('input');
-        caja.type = 'checkbox';
-        caja.checked = opcion.selected;
-        const txt = document.createElement('span');
-        txt.textContent = opcion.text;
-        etq.append(caja, txt);
-        fila.appendChild(etq);
-        lista.appendChild(fila);
-
-        caja.addEventListener('change', () => {
-          opcion.selected = caja.checked;
-          pintar();
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-        });
-      }
-      filtrarLista();
-      pintar();
-    }
-
-    // Refleja en el control lo que diga el <select>, venga de donde venga.
-    function pintar() {
-      const marcadas = Array.from(select.selectedOptions);
-      Array.from(lista.querySelectorAll('.ms-opcion')).forEach((etq, i) => {
-        const opcion = select.options[i];
-        if (!opcion) return;
-        etq.querySelector('input').checked = opcion.selected;
-        etq.classList.toggle('marcada', opcion.selected);
-      });
-      if (!marcadas.length) {
-        texto.textContent = vacio;
-        boton.classList.add('vacio');
-        conteo.style.display = 'none';
-        conteo.textContent = '';
-      } else {
-        texto.textContent = marcadas.map(o => o.text).join(', ');
-        boton.classList.remove('vacio');
-        conteo.style.display = '';
-        conteo.textContent = String(marcadas.length);
-      }
-      boton.title = marcadas.length ? texto.textContent : '';
-    }
-
-    function filtrarLista() {
-      const q = busca.value.trim().toLowerCase();
-      Array.from(lista.children).forEach(li => {
-        const etq = li.querySelector('.ms-opcion');
-        if (!etq) return;
-        li.style.display = (!q || etq.textContent.toLowerCase().includes(q)) ? '' : 'none';
-      });
-    }
-
-    function marcarVisibles(valor) {
-      Array.from(lista.children).forEach((li, i) => {
-        if (li.style.display === 'none') return;
-        const opcion = select.options[i];
-        if (opcion) opcion.selected = valor;
-      });
-      pintar();
-      select.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-
-    function abrir() {
-      cerrarTodos(envoltura);
-      envoltura.classList.add('abierto');
-      boton.setAttribute('aria-expanded', 'true');
-      busca.focus();
-    }
-    function cerrar() {
-      envoltura.classList.remove('abierto');
-      boton.setAttribute('aria-expanded', 'false');
-    }
-
-    boton.addEventListener('click', () => {
-      if (envoltura.classList.contains('abierto')) cerrar(); else abrir();
-    });
-    busca.addEventListener('input', filtrarLista);
-    btnTodos.addEventListener('click', () => marcarVisibles(true));
-    btnNinguno.addEventListener('click', () => marcarVisibles(false));
-    envoltura.addEventListener('keydown', e => {
-      if (e.key === 'Escape' && envoltura.classList.contains('abierto')) {
-        e.stopPropagation();
-        cerrar();
-        boton.focus();
-      }
-    });
-
-    // El catalogo se carga despues (innerHTML del <select>): hay que redibujar.
-    new MutationObserver(construir).observe(select, { childList: true });
-    // Cambios hechos por codigo ajeno que si avisan.
-    select.addEventListener('change', pintar);
-
-    construir();
-    return { envoltura, cerrar, pintar };
-  }
-
-  function cerrarTodos(excepto) {
-    for (const c of controles) if (c.envoltura !== excepto) c.cerrar();
-  }
-
-  for (const id of IDS) {
-    const select = document.getElementById(id);
-    if (select) controles.push(crear(select));
-  }
-
-  document.addEventListener('click', e => {
-    if (!e.target.closest('.ms')) cerrarTodos(null);
-  });
-
-  // "Limpiar" de los dos paneles de filtros deselecciona por propiedad
-  // (selectedIndex = -1 / option.selected = false) y no dispara ningun
-  // evento. Las pestañas se inician tarde, asi que no se puede depender del
-  // orden de los listeners: se repinta en el siguiente turno, cuando el
-  // handler propio del boton ya corrio.
-  for (const idBoton of ['btn-limpiar', 'btn-limpiar-bl']) {
-    const limpiar = document.getElementById(idBoton);
-    if (!limpiar) continue;
-    limpiar.addEventListener('click', () => {
-      setTimeout(() => controles.forEach(c => c.pintar()), 0);
-    });
-  }
-})();
+Desplegable.montar(document);

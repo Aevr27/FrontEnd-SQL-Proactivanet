@@ -27,34 +27,62 @@
 :root, :scope, #tab-qa {
   color-scheme: light;
 
-  --bg: #f1f5f9;
-  --bg-2: #e9eef5;
-  --card: #ffffff;
-  --line: #e2e8f0;
-  --line-soft: #eef2f7;
-  --ink: #0f172a;
-  --ink-2: #334155;
-  --muted: #64748b;
-  --muted-2: #94a3b8;
-  --accent: #2563eb;
-  --accent-ink: #1d4ed8;
-  --accent-soft: #eff6ff;
-  --accent-line: #bfdbfe;
-  --verde: #059669;
-  --ambr: #d97706;
-  --rojo: #dc2626;
-  --morado: #7c3aed;
-  --cyan: #0891b2;
+  /* PALETA CENTRALIZADA — la misma escala verde que dashboard.css y que
+     qa_green_theme/qa_green.css. Su origen es el degradado de header.top:
+       linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%)
+     --g-800 / --g-600 / --g-400 son esas tres paradas; el resto son
+     interpolaciones y tintes de ellas. Las variables se repiten aqui
+     porque dentro del @scope de la pestaña :root no casa con nada. */
+  --g-50:  #f4fae7;
+  --g-100: #e9f5ce;
+  --g-200: #d3e9ac;
+  --g-300: #bae065;
+  --g-400: #9dd323;   /* LIMA  — parada 100% */
+  --g-500: #81c727;
+  --g-600: #65bb2b;   /* VERDE — parada 45% */
+  --g-700: #56a333;
+  --g-800: #478b3c;   /* VERDE PROFUNDO — parada 0% */
+  --g-900: #3a7431;   /* solo texto/hover, nunca parada de degradado */
 
-  --grad-btn: linear-gradient(100deg, #0f172a 0%, #172554 55%, #1e3a8a 100%);
-  --grad-btn-hover: linear-gradient(100deg, #172554 0%, #1e3a8a 55%, #2563eb 100%);
+  --bg: #ffffff;
+  --bg-2: #f6f8f4;
+  --card: #ffffff;
+  --line: #e3e7de;
+  --line-soft: #eef1ea;
+  --ink: #191919;
+  --ink-2: #393939;
+  --muted: #5e5e5f;
+  --muted-2: #9aa094;
+  --accent: var(--g-600);
+  --accent-ink: var(--g-900);
+  --accent-soft: var(--g-50);
+  --accent-line: var(--g-200);
+  --verde: var(--g-800);
+  --verde-strong: var(--g-900);
+  --ambr: #d97706;    /* advertencia */
+  --rojo: #982a18;    /* negativo */
+  /* Superficie y borde del negativo: la pareja de tintes que ya usaba
+     .badge-rojo en crudo. Se nombran para que el rojo suave deje de ser
+     la unica excepcion sin token de la hoja. */
+  --rojo-soft: #fdf4f2;
+  --rojo-line: #edd3cd;
+  --morado: var(--g-500);
+  --cyan: var(--g-300);
+
+  --grad-header: linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%);
+  --grad: linear-gradient(180deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-800) 100%);
+  /* Boton: lima arriba -> verde fresco abajo, con tinta carbon (blanco
+     sobre lima no llega a 4.5:1). */
+  --grad-btn: linear-gradient(160deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-700) 100%);
+  --grad-btn-hover: linear-gradient(160deg, var(--g-500) 0%, var(--g-700) 55%, var(--g-800) 100%);
+  --btn-ink: var(--ink);
 
   --radius: 14px;
   --radius-sm: 9px;
   --radius-xs: 7px;
   --radius-pill: 999px;
-  --shadow: 0 1px 2px rgba(15, 23, 42, .05), 0 1px 3px rgba(15, 23, 42, .06);
-  --shadow-md: 0 2px 4px rgba(15, 23, 42, .05), 0 8px 20px -6px rgba(15, 23, 42, .12);
+  --shadow: 0 1px 2px rgba(25, 25, 25, .05), 0 1px 3px rgba(25, 25, 25, .06);
+  --shadow-md: 0 2px 4px rgba(25, 25, 25, .05), 0 8px 20px -6px rgba(25, 25, 25, .12);
 }
 
 * { box-sizing: border-box; }
@@ -70,7 +98,7 @@ body {
   padding: 20px 18px 8px;
   background: var(--bg);
   background-image:
-    radial-gradient(1200px 520px at 50% -220px, #dbe6f6 0%, rgba(219, 230, 246, 0) 70%),
+    radial-gradient(1200px 520px at 50% -220px, rgba(157, 211, 35, .10) 0%, rgba(157, 211, 35, 0) 70%),
     linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
   background-attachment: fixed;
   color: var(--ink);
@@ -85,23 +113,23 @@ body {
    de la pestaña, nunca una segunda cabecera de aplicacion. */
 header.top {
   position: relative; overflow: hidden;
-  background: linear-gradient(135deg, #0f172a 0%, #172554 45%, #1e3a8a 100%);
-  color: #fff; padding: 24px 28px;
+  background: var(--grad-header);
+  color: var(--ink); padding: 24px 28px;
   border-radius: var(--radius); margin-bottom: 16px;
   display: flex; align-items: flex-start; justify-content: space-between;
   flex-wrap: wrap; gap: 14px;
   box-shadow: var(--shadow-md);
 }
+/* Sin rayado diagonal, igual que el header de SLA: ver dashboard.css. */
 header.top::after {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(520px 200px at 88% -40%, rgba(96, 165, 250, .35), transparent 70%),
-    radial-gradient(360px 180px at 8% 130%, rgba(37, 99, 235, .28), transparent 70%);
+    radial-gradient(520px 200px at 88% -40%, rgba(244, 250, 231, .40), transparent 70%);
 }
 header.top > * { position: relative; z-index: 1; }
 header.top h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.2px; }
 header.top .sub {
-  font-size: 12.5px; color: #cbd5e1; margin-top: 5px;
+  font-size: 12.5px; color: var(--ink-2); margin-top: 5px;
   font-variant-numeric: tabular-nums;
 }
 header.top .acciones-top {
@@ -111,8 +139,9 @@ header.top .acciones-top {
 .chip {
   display: inline-block; padding: 5px 12px;
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, .12);
-  border: 1px solid rgba(255, 255, 255, .22);
+  background: var(--g-50);
+  border: 1px solid var(--g-200);
+  color: var(--g-900);
   font-size: 12.5px; font-weight: 600; white-space: nowrap;
 }
 
@@ -120,25 +149,32 @@ header.top .acciones-top {
 .btn {
   border: 1px solid transparent; border-radius: var(--radius-xs);
   padding: 9px 16px; cursor: pointer;
-  font: inherit; font-size: 13px; font-weight: 600; color: #fff;
+  font: inherit; font-size: 13px; font-weight: 700; color: var(--btn-ink);
   background: var(--grad-btn);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, .12);
+  box-shadow: 0 1px 2px rgba(25, 25, 25, .12);
   transition: background .15s ease, box-shadow .15s ease, transform .06s ease;
   white-space: nowrap;
 }
-.btn:hover { background: var(--grad-btn-hover); box-shadow: 0 2px 8px -2px rgba(15, 23, 42, .28); }
-.btn:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(15, 23, 42, .12); }
-.btn:disabled { background: var(--muted-2); cursor: not-allowed; box-shadow: none; }
+.btn:hover { background: var(--grad-btn-hover); box-shadow: 0 3px 10px -3px rgba(71, 139, 60, .45); }
+.btn:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(25, 25, 25, .12); }
+.btn:disabled { background: #cfd4c9; color: var(--muted); cursor: not-allowed; box-shadow: none; }
 .btn.chico { padding: 6px 12px; font-size: 12px; }
 
+/* Secundario, no gris: el mismo degradado de marca un punto mas apagado,
+   igual que .btn.gris del tablero. */
 .btn-sec {
-  background: #fff; color: var(--ink-2); border-color: var(--line); box-shadow: none;
+  background: var(--grad-btn); color: var(--btn-ink); border-color: var(--g-700);
+  box-shadow: none; opacity: .82;
 }
-.btn-sec:hover { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent-line); }
-.btn-sec:disabled { background: #f8fafc; color: var(--muted-2); border-color: var(--line); }
+.btn-sec:hover:not(:disabled) {
+  background: var(--grad-btn-hover); color: var(--btn-ink); border-color: var(--g-800);
+  opacity: 1;
+}
+.btn-sec:disabled { background: var(--bg-2); color: var(--muted-2); border-color: var(--line); }
 
-header.top .btn { border-color: rgba(255, 255, 255, .28); box-shadow: 0 1px 2px rgba(0, 0, 0, .3); }
-header.top .btn:hover { border-color: rgba(255, 255, 255, .45); }
+/* La cabecera ya es verde claro: al boton le basta un contorno mas firme. */
+header.top .btn { border-color: rgba(25, 25, 25, .22); box-shadow: 0 1px 2px rgba(25, 25, 25, .18); }
+header.top .btn:hover { border-color: rgba(25, 25, 25, .38); }
 
 /* ---------- Layout ---------- */
 /* Las dos graficas del top 10 son un par: dos columnas IGUALES, no la rejilla
@@ -167,6 +203,11 @@ header.top .btn:hover { border-color: rgba(255, 255, 255, .45); }
   transition: box-shadow .18s ease;
 }
 .card:hover { box-shadow: var(--shadow-md); }
+.card h3::before {
+  content: ""; flex: none; align-self: center;
+  width: 14px; height: 3px; border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, var(--g-400), var(--g-800));
+}
 .card h3 {
   margin: 0 0 12px; padding-bottom: 10px;
   font-size: 13.5px; font-weight: 700; color: var(--ink);
@@ -185,11 +226,13 @@ header.top .btn:hover { border-color: rgba(255, 255, 255, .45); }
 
 .nota-card {
   margin: 0 0 12px; font-size: 11.5px; color: var(--muted);
-  background: #f8fafc; border: 1px solid var(--line-soft);
+  background: var(--bg-2); border: 1px solid var(--line-soft);
+  border-left: 3px solid var(--g-200);
   border-radius: var(--radius-xs); padding: 8px 10px;
 }
 code {
-  background: #f1f5f9; border: 1px solid var(--line);
+  background: var(--g-50); border: 1px solid var(--g-200);
+  color: var(--g-900);
   border-radius: 4px; padding: 1px 5px; font-size: 12px;
 }
 
@@ -202,7 +245,7 @@ code {
   position: relative; overflow: hidden;
   background: var(--card); border-radius: var(--radius); padding: 16px 18px;
   box-shadow: var(--shadow); border: 1px solid var(--line-soft);
-  border-left: 5px solid var(--accent);
+  border-left: 5px solid transparent; border-image: var(--grad) 1;
   transition: transform .18s ease, box-shadow .18s ease;
 }
 .kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
@@ -213,11 +256,15 @@ code {
 .kpi .kpi-val { font-size: 26px; font-weight: 800; line-height: 1.15; margin-top: 4px; }
 .kpi .kpi-nota { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
-.kpi-azul   { border-left-color: var(--accent); }
-.kpi-rojo   { border-left-color: var(--rojo); }
+/* Nombres heredados que escribe el JS y que ya NO describen su color:
+   kpi-azul es la tarjeta de marca (la progresion verde completa) y
+   kpi-ambar la variante verde profunda. El rojo solo queda donde el dato
+   es negativo. */
+.kpi-azul   { border-image: var(--grad) 1; }
+.kpi-rojo   { border-image: none; border-left-color: var(--rojo); }
 .kpi-rojo   .kpi-val { color: var(--rojo); }
-.kpi-ambar  { border-left-color: var(--ambr); }
-.kpi-ambar  .kpi-val { color: var(--ambr); }
+.kpi-ambar  { border-image: none; border-left-color: var(--g-800); }
+.kpi-ambar  .kpi-val { color: var(--g-900); }
 
 /* Valor de una tarjeta que todavia no tiene su dato. */
 .kpi-espera .kpi-val { color: var(--muted-2); font-weight: 600; }
@@ -247,7 +294,7 @@ code {
 .lienzo-msg-error { color: var(--rojo); }
 
 /* ---------- Leyenda de la dona ---------- */
-.leyenda { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; }
+.leyenda { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px; margin-top: 12px; }
 .leyenda-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
 .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
 .leyenda-val { font-weight: 600; }
@@ -261,12 +308,12 @@ code {
 .tabla { width: 100%; border-collapse: collapse; font-size: 12.7px; }
 .tabla th {
   position: sticky; top: 0; z-index: 1;
-  background: #f8fafc; text-align: left; font-weight: 600; color: var(--ink-2);
+  background: var(--bg-2); text-align: left; font-weight: 600; color: var(--ink-2);
   padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
 }
 .tabla td { padding: 7px 10px; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
 .tabla tbody tr:last-child td { border-bottom: 0; }
-.tabla tbody tr:hover { background: var(--accent-soft); }
+.tabla tbody tr:hover { background: var(--g-50); }
 .tabla .num { text-align: right; font-variant-numeric: tabular-nums; }
 .tabla .recorte { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -277,22 +324,29 @@ code {
   display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill);
   font-size: 11.5px; font-weight: 600; white-space: nowrap;
 }
-.badge-rojo { background: #fef2f2; color: var(--rojo); border: 1px solid #fecaca; }
-.badge-gris { background: #f1f5f9; color: var(--ink-2); border: 1px solid var(--line); }
+.badge-rojo { background: var(--rojo-soft); color: var(--rojo); border: 1px solid var(--rojo-line); }
+.badge-gris { background: var(--bg-2); color: var(--ink-2); border: 1px solid var(--line); }
 
 /* ---------- Detalle: barra y paginador ---------- */
 .barra-detalle {
   display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 12px;
 }
 .campo { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted); }
+/* Estructura verde, superficie blanca: mismo criterio que los controles de
+   filtro de dashboard.css. */
 .campo select {
-  padding: 6px 9px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  padding: 6px 9px; border: 1px solid var(--g-200); border-radius: var(--radius-sm);
   background: #fff; color: var(--ink); font: inherit; font-size: 12.5px;
 }
+.campo select:hover { border-color: var(--g-400); }
+.campo select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(101, 187, 43, .22); }
 
 /* filtros-qa, no "filtros": en el tablero .filtros es el panel de filtros de
    SLA y Backlog, que es otra cosa. */
 .filtros-qa { display: flex; flex-wrap: wrap; gap: 7px; }
+/* "Limpiar" cierra la barra por la derecha, como en SLA, Backlog y
+   Experiencia: es la accion de la fila, no un chip mas. */
+#qa-btn-limpiar { margin-left: auto; }
 .filtro {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 4px 10px; border-radius: var(--radius-pill);
@@ -317,12 +371,12 @@ code {
   font-size: 13px; color: var(--ink-2);
 }
 .estado-mini { padding: 10px 13px; font-size: 12.5px; }
-.estado-error { border-left: 5px solid var(--rojo); background: #fffbfb; }
+.estado-error { border-left: 5px solid var(--rojo); background: #fdf4f2; border-color: #edd3cd; }
 .estado-error strong { color: var(--rojo); }
 
 .spinner {
   width: 15px; height: 15px; flex: none;
-  border: 2px solid var(--accent-line); border-top-color: var(--accent);
+  border: 2px solid var(--g-200); border-top-color: var(--g-600);
   border-radius: 50%; animation: qa-girar .8s linear infinite;
 }
 @keyframes qa-girar { to { transform: rotate(360deg); } }
@@ -334,3 +388,6 @@ code {
   margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--line);
   font-size: 11.5px; color: var(--muted-2);
 }
+
+/* Foco visible en verde de marca, igual que en el resto del tablero. */
+:focus-visible { outline: 2px solid var(--g-600); outline-offset: 2px; }

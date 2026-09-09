@@ -40,6 +40,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>QA - Categorizacion de tickets</title>
   <script src="../assets/vendor/chart.umd.min.js"></script>
+  <!-- Paleta categorica compartida (solo para la pagina suelta: embebida en
+       dashboard.html este <script> se quita y manda la copia de alli). -->
+  <script src="../assets/js/paleta.js"></script>
+  <!-- Desplegable compartido, con la misma nota: solo para la pagina suelta. -->
+  <script src="../assets/js/desplegable.js"></script>
+  <link rel="stylesheet" href="../assets/css/desplegable.css">
   <link rel="stylesheet" href="qa.css">
 </head>
 <body>
@@ -57,7 +63,7 @@
       </div>
       <div class="acciones-top">
         <span class="chip" id="qa-chip-fecha">Datos QA: &mdash;</span>
-        <button type="button" class="btn chico" id="qa-btn-recargar">Recargar</button>
+        <button type="button" class="btn chico" id="qa-btn-recargar">Limpiar</button>
       </div>
     </header>
 
@@ -147,6 +153,12 @@
         </label>
 
         <div class="filtros-qa" id="qa-filtros-activos"></div>
+
+        <!-- "Limpiar": mismo nombre y mismo trato secundario que en SLA,
+             Backlog y Experiencia. Devuelve el detalle a como abre -solo los
+             incorrectos-, en vez de quitar los filtros uno por uno con la ×.
+             Oculto mientras no haya nada que limpiar. -->
+        <button type="button" class="btn btn-sec chico" id="qa-btn-limpiar" hidden>Limpiar</button>
       </div>
 
       <div id="qa-detalle-cargando" class="estado estado-mini" hidden>

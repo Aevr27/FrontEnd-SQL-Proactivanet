@@ -65,12 +65,33 @@
   var NUM = new Intl.NumberFormat('es-MX');
   var NUM2 = new Intl.NumberFormat('es-MX', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Paleta alineada con dashboard.css.
+  /* Colores de este tablero. Hay DOS sistemas y no se mezclan:
+
+     - IDENTIDAD de serie (barras de Grupo y de Tecnico): sale de la paleta
+       categorica COMPARTIDA, assets/js/paleta.js -> window.Paleta. No se
+       copia el arreglo aqui; una grafica nueva con categorias tambien debe
+       pedirla ahi (Paleta.escala / Paleta.color / Paleta.registro).
+       Embebido en dashboard.html este modulo pierde sus <script> y usa la
+       copia que ya cargo dashboard.html; suelto, la carga qa.html.
+
+     - ESTADO de validacion (OK / Incorrecto / Valido / Sin catalogo): es
+       semantico y se queda como esta. El rojo sigue reservado para
+       "Incorrecto" y no se usa en ningun otro sitio del tablero.
+
+     Los nombres de las claves son heredados y ya NO describen su color: se
+     conservan para no tocar la logica que los cita. */
   var COLOR = {
-    azul: '#2563eb', azulOscuro: '#1d4ed8', verde: '#059669',
-    rojo: '#dc2626', ambar: '#d97706', morado: '#7c3aed',
-    cyan: '#0891b2', gris: '#94a3b8'
+    azul: Paleta.porIndice(0),   // serie primaria (barras por grupo)
+    azulOscuro: '#1d4ed8',       // hover de barra: la primaria, mas profunda
+    verde: '#5aa726',            // estado OK
+    rojo: '#982a18',             // estado Incorrecto (unico uso del rojo)
+    ambar: '#b09512',            // estado Sin catalogo: mostaza, no ambar semantico
+    morado: Paleta.porIndice(2), // serie secundaria (barras por tecnico)
+    cyan: '#2f8f6b',             // estado Valido: verde pino
+    gris: Paleta.NEUTRO          // fuera de catalogo: neutro
   };
+  // Tinta de ejes, etiquetas y rejilla: carbon y gris verdoso.
+  var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1ea' };
 
   // Color por estado de validacion. Un estado que no este en la lista recibe
   // un color neutro, pero conserva su nombre: nunca se agrupa con otro.
@@ -412,9 +433,11 @@
           data: [],
           backgroundColor: color,
           hoverBackgroundColor: COLOR.azulOscuro,
-          borderRadius: 3,
-          barPercentage: .82,
-          categoryPercentage: .86
+          borderRadius: 4,
+          // Barras esbeltas, a juego con el resto de los tableros.
+          maxBarThickness: 22,
+          barPercentage: .78,
+          categoryPercentage: .74
         }]
       },
       options: {
@@ -444,12 +467,12 @@
         scales: {
           x: {
             beginAtZero: true,
-            ticks: { precision: 0, color: '#64748b' },
-            grid: { color: '#eef2f7' }
+            ticks: { precision: 0, color: TINTA.eje },
+            grid: { color: TINTA.rejilla }
           },
           y: {
             ticks: {
-              color: '#334155', autoSkip: false, font: { size: 11.5 },
+              color: TINTA.etiqueta, autoSkip: false, font: { size: 11.5 },
               callback: function (valor) { return recortar(this.getLabelForValue(valor), 42); }
             },
             grid: { display: false }
@@ -474,7 +497,7 @@
       var ctx = chart.ctx;
       ctx.save();
       ctx.font = '600 11px "Segoe UI", Roboto, Arial, sans-serif';
-      ctx.fillStyle = '#334155';
+      ctx.fillStyle = TINTA.etiqueta;
       ctx.textBaseline = 'middle';
       chart.getDatasetMeta(0).data.forEach(function (barra, i) {
         var valor = chart.data.datasets[0].data[i];
@@ -631,6 +654,22 @@
   }
 
   // -------------------------------------------------------------- detalle
+  // Estado con el que abre el detalle: solo los incorrectos, sin acotar por
+  // grupo ni tecnico. Lo comparten "Ver detalle de incorrectos" y "Limpiar",
+  // que tienen que dejar exactamente la misma vista.
+  function filtrosPorDefecto() {
+    return { validacion: 'Incorrecto', grupo: null, tecnico: null, grupoCorrecto: null };
+  }
+
+  // Hay algo que limpiar solo si el usuario se movio del estado de apertura:
+  // con la vista recien abierta el boton no tendria nada que hacer.
+  function hayFiltrosPropios() {
+    var porDefecto = filtrosPorDefecto();
+    return Object.keys(porDefecto).some(function (k) {
+      return estado.filtros[k] !== porDefecto[k];
+    });
+  }
+
   function aplicarFiltro(nombre, valor) {
     estado.filtros[nombre] = valor;
     estado.pagina = 1;
@@ -659,6 +698,8 @@
         cargarDetalle();
       });
     });
+
+    $('btn-limpiar').hidden = !hayFiltrosPropios();
   }
 
   function cargarDetalle() {
@@ -748,7 +789,13 @@
     $('btn-reintentar').addEventListener('click', cargarResumen);
 
     $('btn-detalle').addEventListener('click', function () {
-      estado.filtros = { validacion: 'Incorrecto', grupo: null, tecnico: null, grupoCorrecto: null };
+      estado.filtros = filtrosPorDefecto();
+      estado.pagina = 1;
+      cargarDetalle();
+    });
+
+    $('btn-limpiar').addEventListener('click', function () {
+      estado.filtros = filtrosPorDefecto();
       estado.pagina = 1;
       cargarDetalle();
     });
@@ -776,6 +823,14 @@
     arrancado = true;
     armarShell();
     conectarEventos();
+    /* Capa visual del desplegable de "Filas por pagina". Es el MISMO
+       componente que el resto del tablero (assets/js/desplegable.js), no una
+       copia: el <select id="qa-sel-tam"> se queda con su id, sus opciones y el
+       listener de conectarEventos(), que sigue recibiendo su `change`. Va
+       despues de conectarEventos para que ese listener este puesto antes. */
+    if (window.Desplegable) {
+      Desplegable.montar(document.getElementById('tab-qa') || document);
+    }
     cargarResumen();
   }
 

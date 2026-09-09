@@ -27,7 +27,7 @@ try {
   MOCK = await resp.json();
 } catch (err) {
   document.body.insertAdjacentHTML('afterbegin',
-    '<div style="background:#fee2e2;border:1px solid #dc2626;color:#7f1d1d;' +
+    '<div style="background:#fdf4f2;border:1px solid #982a18;color:#5c1a0e;' +
     'border-radius:10px;padding:14px 18px;margin-bottom:14px;font-size:13px">' +
     '<b>No se pudo cargar ' + MOCK_URL + '.</b><br>' + String(err) +
     '<br>Si abriste el archivo con doble clic (file://), el navegador bloquea ' +
@@ -37,6 +37,11 @@ try {
 }
 
 const J = MOCK;
+
+// Identidad de "categoria" (col A). Registro con nombre y a nivel de modulo:
+// sobrevive a los repintados, asi que una categoria no cambia de color cuando
+// el pie se reordena por volumen.
+const REG_CATEGORIA = Paleta.registro('orq-categoria');
 
 // Helpers compartidos en el monolito (bloque de Experiencia); Orquestacion usa estos dos.
 const FMT = n => Math.round(n||0).toLocaleString('es-MX');
@@ -84,13 +89,24 @@ function renderOrq(){
   ];
   document.getElementById('kpisOr').innerHTML=cards.map(c=>
     `<div class="kpi"><div class="lbl">${c.l}</div><div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
+  /* PALETA CATEGORICA — no se define aqui: sale de assets/js/paleta.js
+     (window.Paleta), la misma que usan SLA, Backlog, QA y Experiencia.
+     Una grafica nueva con categorias la pide ahi; no se copia el arreglo.
+     La grafica de Clasificacion de abajo NO la usa: Alta/Media/Baja es
+     severidad y tiene su propia escala de estado. */
   // [ORQ-GRAF1] BARRAS HORIZONTALES por Clasificacion (Alta, Media, Baja, Única)
   const orden=['Alta','Media','Baja','Única'];
   const cvals=orden.map(k=>(o.por_clasif&&o.por_clasif[k])||0);
-  const ccolors=['#dc2626','#d97706','#059669','#64748b'];
+  // Escala de ESTADO, no de identidad: Alta/Media/Baja son severidad. Se
+  // conserva el semaforo rojo -> ambar -> verde, con neutro para "Única".
+  // La leyenda de abajo pone el nombre al lado de cada color, asi que el
+  // estado nunca depende del color a secas.
+  const ccolors=['#982a18','#d97706','#356b2c','#8a8578'];
   const bctx=document.getElementById('chartCatJobs');
   if(chartCatJobs)chartCatJobs.destroy();
-  chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[{data:cvals,backgroundColor:ccolors}]},
+  chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[{data:cvals,backgroundColor:ccolors,
+    // Barras esbeltas, a juego con el resto de los tableros.
+    maxBarThickness:24,categoryPercentage:.72,barPercentage:.8,borderRadius:4}]},
     options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>FMT(c.raw)+' jobs'}}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}}}}});
@@ -99,8 +115,9 @@ function renderOrq(){
   // [ORQ-GRAF2] PIE por Categoria (col A)
   const ent=Object.entries(o.por_categoria).sort((a,b)=>b[1]-a[1]);
   const labels=ent.map(e=>e[0]), data=ent.map(e=>e[1]);
-  const palette=['#2563eb','#059669','#d97706','#7c3aed','#0891b2','#dc2626','#db2777','#65a30d','#ca8a04','#0d9488'];
-  const colors=labels.map((_,i)=>palette[i%palette.length]);
+  // Se ordena por volumen, asi que el orden cambia entre cargas: el registro
+  // reparte por orden de ALTA y le deja a cada categoria su color.
+  const colors=REG_CATEGORIA.escala(labels);
   const pctx=document.getElementById('chartClasif');
   if(chartClasif)chartClasif.destroy();
   chartClasif=new Chart(pctx,{type:'pie',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
@@ -110,7 +127,9 @@ function renderOrq(){
   // [ORQ-GRAF3] PIE por Candidato (col B)
   const cOrden=(J.orquestacion.candidatos||[]).slice();
   const candVals=cOrden.map(k=>(o.por_candidato&&o.por_candidato[k])||0);
-  const candColors=['#059669','#dc2626','#2563eb','#d97706','#7c3aed','#64748b'];
+  // Candidatos: J.orquestacion.candidatos es un catalogo de orden fijo, asi
+  // que basta la posicion.
+  const candColors=Paleta.PALETA_CATEGORICA;
   const kctx=document.getElementById('chartCand');
   if(chartCand)chartCand.destroy();
   chartCand=new Chart(kctx,{type:'pie',data:{labels:cOrden,
@@ -161,8 +180,8 @@ function renderOrqDirTable(){
   (J.orquestacion.candidatos||[]).forEach(v=>{
     const id='cand_'+v.replace(/[^a-zA-Z0-9]/g,'');
     cont.insertAdjacentHTML('beforeend',
-      `<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#e2e8f0;
-        background:rgba(255,255,255,.08);padding:4px 10px;border-radius:14px;cursor:pointer">
+      `<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#191919;
+        background:rgba(25,25,25,.06);padding:4px 10px;border-radius:14px;cursor:pointer">
         <input type="checkbox" class="candChk" value="${v}" id="${id}"> ${v}</label>`);
   });
   cont.addEventListener('change',e=>{
@@ -181,5 +200,10 @@ function renderOrqDirTable(){
 })();
 
 renderOrq();
+
+/* Capa visual de los desplegables de esta pagina (Director y Product
+   Owner). Mismo componente compartido que el resto del tablero; ver la
+   nota equivalente en observabilidad.js. */
+if (window.Desplegable) Desplegable.montar(document);
 
 })();

@@ -74,7 +74,7 @@ try {
            'API: ' + String(errApi) + '<br>Mock: ' + String(err2) +
            '<br>Si abriste el archivo con doble clic (file://), el navegador bloquea ' +
            'fetch(). Sirve la carpeta por HTTP.',
-           {bg:'#fee2e2', bd:'#dc2626', fg:'#7f1d1d'});
+           {bg:'#fdf4f2', bd:'#982a18', fg:'#5c1a0e'});
     throw err2;
   }
 }
@@ -83,10 +83,90 @@ const P = DATOS;
 
 const FMT = n => Math.round(n||0).toLocaleString('es-MX');
 const PCT = n => Math.round((n||0)*100)+'%';
-const AGR = P.agrupadores, ACOLOR = P.acolor;
+/* =========================================================================
+   PALETA DE GRAFICAS — escala verde de la cabecera.
+
+   Fuente de la verdad: el degradado de header.top,
+     linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%)
+   Sus paradas son g800 / g600 / g400; lo demas son interpolaciones y
+   tintes de esa recta. Los mismos valores viven en experiencia.css
+   (--g-300 ... --g-900).
+   ========================================================================= */
+/* La MARCA usa los verdes del degradado tal cual (#9DD323/#65BB2B/#478B3C).
+   Para RELLENAR marcas sobre blanco esos tres son demasiado claros -el lima
+   se queda en 1.7:1-, asi que la familia de graficas es la misma escala
+   re-escalonada. Misma identidad verde, distinto trabajo. */
+const VERDE = {
+  lima:'#8cbf1e', marca:'#5aa726', pino:'#2f8f6b', profundo:'#356b2c', claro:'#78c96b',
+};
+/* Tinta legible encima de un relleno de la escala. Los verdes claros
+   (lima, --g-300, --g-200) hunden el texto blanco: sobre ellos va carbon.
+   Vive en assets/js/barras.js, que la comparte con dashboard.js. */
+const tintaSobre = Barras.tintaSobre;
+const ROJO_SEM = '#982a18';   // negativo
+const AMBAR_SEM = '#d97706';  // advertencia
+const NEUTRO_SEM = '#8a8578'; // referencia / sin dato
+
+/* PALETA CATEGORICA — ya NO se define aqui. Vive en assets/js/paleta.js
+   (window.Paleta) y la comparten SLA, Backlog, QA, Experiencia y
+   Orquestacion, para que una categoria lleve el mismo color en todos.
+   Ese archivo explica como consumirla en una grafica nueva: Paleta.escala(),
+   Paleta.color(), Paleta.registro(). NO se copia el arreglo.
+
+   Embebido en dashboard.html este modulo pierde sus <script> (asi lo monta
+   moduloEmbebido) y usa la copia que ya cargo dashboard.html; suelto, la
+   carga experiencia.html. En las dos rutas hay un unico window.Paleta.
+
+   Aqui abajo, ROJO_SEM / AMBAR_SEM / NEUTRO_SEM, el semaforo SEMC y
+   COLOR_ESTADO son ESTADO y ORDEN, no identidad: no salen de la paleta. */
+const PALETA_CATEGORICA = Paleta.PALETA_CATEGORICA;
+
+const AGR = P.agrupadores;
+/* Identidad de AGRUPADOR. El color no se toma de P.acolor -lo manda el
+   servidor (App_Code/ExperienciaQueries.cs) y ahi no se toca un cambio de
+   tema-: se reasigna en presentacion contra la paleta compartida. Se
+   conserva el ORDEN y el juego de claves del servidor, que es canonico y
+   estable, asi que un agrupador lleva siempre el mismo color -en los chips,
+   en la grafica de historico y donde aparezca- sin depender del repintado. */
+const ACOLOR = Paleta.mapa(AGR || Object.keys(P.acolor || {}));
+
+// Los chips de agrupador se distinguen por el TINTE de fondo; la tinta es
+// siempre la misma para que el texto se lea a 5.7:1 sobre blanco.
+const TINTA_CHIP = '#3a7431';
 const SEM = v => v>=0.9?'v':(v>=0.7?'a':'r');
-const SEMC = {v:'#059669',a:'#d97706',r:'#dc2626'};
+// Semaforo: verde de marca, ambar de advertencia y el rojo de lo negativo.
+const SEMC = {v:VERDE.profundo,a:AMBAR_SEM,r:ROJO_SEM};
 const ESTADOS_ACTIVOS=["En Análisis","En Solución","En Monitoreo"];
+
+/* Presentacion por defecto de Chart.js, a juego con dashboard.js: rejilla
+   suave y BARRAS ESBELTAS. Sin el tope de grosor, una grafica de tres cubos
+   -"Iniciativas por Estado"- estiraba cada barra hasta llenar su categoria y
+   pintaba tres bloques enormes. Solo toca presentacion: ninguna grafica
+   cambia de datos, escala ni eventos, y la que declare lo suyo sigue
+   mandando. */
+if (typeof Chart !== 'undefined') {
+  Chart.defaults.color = '#393939';
+  Chart.defaults.borderColor = '#f2f5ed';
+  if (Chart.defaults.scale && Chart.defaults.scale.grid) {
+    Chart.defaults.scale.grid.color = '#f2f5ed';
+    Chart.defaults.scale.grid.drawTicks = false;
+    Chart.defaults.scale.grid.tickLength = 8;
+  }
+  if (Chart.defaults.datasets && Chart.defaults.datasets.bar) {
+    Object.assign(Chart.defaults.datasets.bar, {
+      maxBarThickness: 26,
+      categoryPercentage: 0.72,
+      barPercentage: 0.80,
+      borderRadius: 4,
+    });
+  }
+  if (Chart.defaults.plugins && Chart.defaults.plugins.tooltip) {
+    Object.assign(Chart.defaults.plugins.tooltip, {
+      backgroundColor: 'rgba(25, 25, 25, .92)',
+      borderColor: '#478b3c', borderWidth: 1,
+    });
+  }
+}
 const badge = v => `<span class="badge b${SEM(v)}">${PCT(v)}</span>`;
 // Semaforo binario (TAREA 4, pestaña "Categorias sin iniciativa"): 0% =
 // rojo, mayor a 0% = amarillo. Sin verde, sin degradado -- deliberadamente
@@ -100,7 +180,7 @@ function fdateSem(i, campo){
   const val = fdate(i[campo]);
   const mapa = {'En Análisis':'f_analisis','En Solución':'f_solucion','En Monitoreo':'f_cierre'};
   if(i.fecha_retrasada && mapa[i.estado]===campo){
-    return `<b style="color:#dc2626">${val}</b>`;
+    return `<b style="color:#982a18">${val}</b>`;
   }
   return val;
 }
@@ -255,10 +335,11 @@ function renderEvol(cats){
   }
   const ctx=document.getElementById('chartEvol');
   if(chartEvol)chartEvol.destroy();
-  const pointColors=vals.map((_,i)=>i===idxPron?'#f59e0b':'#2563eb');
+  // El punto de pronostico conserva el ambar: es una advertencia, no una serie.
+  const pointColors=vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.profundo);
   const pointRadii=vals.map((_,i)=>i===idxPron?6:3);
   chartEvol=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Volumen',data:vals,
-    borderColor:'#2563eb',backgroundColor:'rgba(37,99,235,.12)',fill:true,tension:.3,
+    borderColor:VERDE.pino,backgroundColor:'rgba(47,143,107,.14)',fill:true,tension:.3,
     pointRadius:pointRadii,pointHoverRadius:pointRadii.map(r=>r+3),
     pointBackgroundColor:pointColors,borderWidth:2}]},
     options:{responsive:true,plugins:{legend:{display:false},
@@ -286,7 +367,8 @@ function renderDona(cats){
   const sinIni=volumenSinIniciativa();
   const labels=[...AGR,'Sin iniciativa'];
   const data=[...des,sinIni];
-  const colors=[...AGR.map(a=>ACOLOR[a]),'#cbd5e1'];
+  // "Sin iniciativa" no es un agrupador mas: va en neutro, fuera de la rampa.
+  const colors=[...AGR.map(a=>ACOLOR[a]),NEUTRO_SEM];
   const ctx=document.getElementById('chartDona');
   if(chartDona)chartDona.destroy();
   chartDona=new Chart(ctx,{type:'doughnut',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
@@ -512,7 +594,7 @@ function renderSin(cats){
         nodos.sort((a,b)=>sinDeCatV2(b)-sinDeCatV2(a)).forEach(n=>{
           const nombreCorto=n.categoria.split('/').pop();
           const volN=volCatV2(n); const pctN=volN>0?conDeCatV2(n)/volN:0;
-          h+=`<tr class="c3row s${idx} ${gid}"><td style="padding-left:34px;color:#64748b">${nombreCorto}</td>
+          h+=`<tr class="c3row s${idx} ${gid}"><td style="padding-left:34px;color:#5e5e5f">${nombreCorto}</td>
             <td class="num">${FMT(sinDeCatV2(n))}</td><td class="num">${badgeBin(pctN)}</td>
             <td>${n.po||'—'}</td><td>${n.so||'—'}</td></tr>`;
         });
@@ -566,7 +648,7 @@ function openCatPopup(folio){
       <td class="num">${PCT(e.pct_dism)}</td><td class="num">${FMT(e.tickets_reduce)}</td></tr>`;
   });
   const totalRow = entradas.length
-    ? `<tr style="font-weight:700;background:#f8fafc"><td>TOTAL</td><td class="num">${FMT(totalVol)}</td><td></td><td class="num">${FMT(totalReduce)}</td></tr>`
+    ? `<tr style="font-weight:700;background:#f6f8f4"><td>TOTAL</td><td class="num">${FMT(totalVol)}</td><td></td><td class="num">${FMT(totalReduce)}</td></tr>`
     : '';
   document.getElementById('catPopupBody').innerHTML = entradas.length
     ? filas.join('') + totalRow
@@ -638,7 +720,7 @@ function renderVen(cats){
   document.getElementById('bodyVen').innerHTML = rows.length? rows.map(x=>{
     const camb=[x.n_analisis,x.n_solucion,x.n_cierre].reduce((a,b)=>a+(b||0),0);
     return `<tr><td><button class="btn-ver-cat" data-fol="${x.folio}">Ver categorías</button></td><td>${x.folio}</td><td>${x.titulo||'—'}</td>
-      <td><span class="chip" style="background:${ACOLOR[x.agrup]}22;color:${ACOLOR[x.agrup]}">${x.agrup}</span></td>
+      <td><span class="chip" style="background:${ACOLOR[x.agrup]}33;color:${TINTA_CHIP}">${x.agrup}</span></td>
       <td class="num"><b>${FMT(x.riesgo_folio)}</b></td><td class="num">${FMT(volumenCategoriasFolio(x.folio))}</td>
       <td><span class="tag-est">${x.estado||'—'}</span></td>
       <td class="fecha-cell"><span class="dot" style="background:${SEMC[x.sem_fecha]}"></span>${fdateSem(x,'f_analisis')}</td>
@@ -658,7 +740,7 @@ function renderAct(cats){
   document.getElementById('bodyAct').innerHTML = rows.length? rows.map(x=>{
     const camb=[x.n_analisis,x.n_solucion,x.n_cierre].reduce((a,b)=>a+(b||0),0);
     return `<tr><td><button class="btn-ver-cat" data-fol="${x.folio}">Ver categorías</button></td><td>${x.folio}</td><td>${x.titulo||'—'}</td>
-      <td><span class="chip" style="background:${ACOLOR[x.agrup]}22;color:${ACOLOR[x.agrup]}">${x.agrup}</span></td>
+      <td><span class="chip" style="background:${ACOLOR[x.agrup]}33;color:${TINTA_CHIP}">${x.agrup}</span></td>
       <td class="num"><b>${FMT(x.riesgo_folio)}</b></td><td class="num">${FMT(x.vol_reduce_folio)}</td>
       <td><span class="tag-est">${x.estado||'—'}</span></td>
       <td class="fecha-cell"><span class="dot" style="background:${SEMC[x.sem_fecha]}"></span>${fdateSem(x,'f_analisis')}</td>
@@ -792,7 +874,7 @@ function renderHist(){
           const valC3=valoresPeriodos(n);
           const deltaC3=deltaDeValores(valC3);
           const nombreCorto=n.categoria.split('/').pop();
-          hcuerpo+=`<tr class="c3row h${idx} ${gid}"><td>${histChk(3,n.categoria)}</td><td style="padding-left:34px;color:#64748b">${nombreCorto}</td>
+          hcuerpo+=`<tr class="c3row h${idx} ${gid}"><td>${histChk(3,n.categoria)}</td><td style="padding-left:34px;color:#5e5e5f">${nombreCorto}</td>
             ${valC3.map(v=>`<td class="num">${FMT(v)}</td>`).join('')}
             <td class="num">${tend(deltaC3)}</td></tr>`;
         });
@@ -800,7 +882,7 @@ function renderHist(){
     });
   });
   const deltaTotal=deltaDeValores(totalGeneral);
-  hcuerpo+=`<tr style="font-weight:700;background:#f8fafc"><td></td><td>TOTAL</td>
+  hcuerpo+=`<tr style="font-weight:700;background:#f6f8f4"><td></td><td>TOTAL</td>
     ${totalGeneral.map(v=>`<td class="num">${FMT(v)}</td>`).join('')}
     <td class="num">${tend(deltaTotal)}</td></tr>`;
   document.getElementById('bodyHist').innerHTML=hcuerpo||
@@ -889,7 +971,7 @@ function graficarHist(){
     alert(`Marca al menos una categoría de nivel ${nivel} para graficar.`);
     return;
   }
-  const colores=['#2563eb','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#db2777','#4f46e5','#0d9488','#65a30d'];
+  const colores=PALETA_CATEGORICA;
   const ctx=document.getElementById('chartHistFull');
   const leyenda=document.getElementById('histChartPopupLegend');
   if(chartHist) chartHist.destroy();
@@ -1030,7 +1112,7 @@ function renderModalBody(){
            data-desc="${(i.descripcion||'').replace(/"/g,'&quot;')}"
            title="Ver detalle del Problem">${i.folio}</span>`;
     return `<tr><td>${folioCell}</td><td>${i.titulo||'—'}</td>
-     <td><span class="chip" style="background:${ACOLOR[i.agrup]||'#eee'}22;color:${ACOLOR[i.agrup]||'#555'}">${i.agrup||'—'}</span></td>
+     <td><span class="chip" style="background:${(ACOLOR[i.agrup]||'#eeeeee')}33;color:${TINTA_CHIP}">${i.agrup||'—'}</span></td>
      <td class="num">${FMT(i.riesgo_folio)}</td>
      <td class="fecha-cell"><span class="dot" style="background:${SEMC[i.sem_fecha]}"></span>${fdateSem(i,'f_analisis')}</td>
      <td class="fecha-cell">${fdateSem(i,'f_solucion')}</td><td class="fecha-cell">${fdateSem(i,'f_cierre')}</td>
@@ -1142,7 +1224,7 @@ function descargarTickets(){
 // Product Owner": muchas filas con nombres largos no caben legibles en un
 // eje Y de barras horizontal angosto, y el treemap reparte el area
 // proporcional al valor sin ese problema.
-const TM_COLORES=['#2563eb','#7c3aed','#0891b2','#059669','#d97706','#dc2626','#db2777','#4f46e5','#0d9488','#65a30d'];
+const TM_COLORES=PALETA_CATEGORICA;
 function tmWorst(row,rowSum,scale,sideLen){
   if(!row.length) return Infinity;
   const areaSum=rowSum*scale;
@@ -1223,7 +1305,11 @@ function renderTreemap(containerId,items,opts){
     }
     div.style.left=r.x+'px'; div.style.top=r.y+'px';
     div.style.width=Math.max(0,r.w)+'px'; div.style.height=Math.max(0,r.h)+'px';
-    div.style.background=TM_COLORES[i%TM_COLORES.length];
+    const tono=TM_COLORES[i%TM_COLORES.length];
+    div.style.background=tono;
+    // .treemap-item pinta el texto en blanco; sobre los verdes claros de la
+    // escala hay que devolverlo a carbon o la etiqueta desaparece.
+    div.style.color=tintaSobre(tono);
     const pct=total>0?r.value/total:0;
     div.title = opts.onClick
       ? `${r.label}\n${FMT(r.value)} iniciativas\n${PCT(pct)} del total`
@@ -1242,6 +1328,11 @@ function renderTreemap(containerId,items,opts){
 // Plugin de Chart.js inline (sin dependencias externas, como el treemap) que
 // dibuja el valor de cada barra encima de ella -- Chart.js core no trae un
 // plugin de datalabels.
+/* La cifra dentro de la barra la pinta el plugin COMPARTIDO
+   (assets/js/barras.js), atado al FMT de este tablero. Una sola
+   implementacion: dashboard.js usa ese mismo plugin para las barras de
+   Backlog. Aqui solo se le pone nombre local para no tocar los usos. */
+const valueLabelsDentroPlugin = Barras.etiquetasDentro(FMT);
 const valueLabelsPlugin={
   id:'valueLabels',
   afterDatasetsDraw(chart){
@@ -1253,7 +1344,7 @@ const valueLabelsPlugin={
         const val=ds.data[i];
         if(val==null) return;
         ctx.save();
-        ctx.fillStyle='#0f172a';
+        ctx.fillStyle='#191919';
         ctx.font='bold 12px system-ui, -apple-system, sans-serif';
         ctx.textAlign='center';
         ctx.textBaseline='bottom';
@@ -1270,7 +1361,10 @@ const valueLabelsPlugin={
 // filtro global (Director/PO/Manager/Service Owner). Clic en una barra
 // navega a "Iniciativas Activas" filtrada por ese estado.
 let chartEstados=null;
-const COLOR_ESTADO={'En Análisis':'#2563eb','En Solución':'#d97706','En Monitoreo':'#059669'};
+/* Avance de una iniciativa: es una progresion, no identidades sueltas, asi
+   que va en un solo tono de claro a oscuro, con saltos de luminosidad
+   suficientes para distinguirse (ΔL >= 0.06 entre vecinos). */
+const COLOR_ESTADO={'En Análisis':'#8cbf1e','En Solución':'#4f9528','En Monitoreo':'#256425'};
 function conteoIniciativasPorEstado(cats){
   const c1conHijos=new Set(cats.filter(c=>c.nivel==='C2').map(c=>c.categoria.split('/')[1]));
   const fuente=cats.filter(c=>c.nivel==='C2' || !c1conHijos.has(c.categoria));
@@ -1292,8 +1386,17 @@ function renderChartEstados(cats){
   const data=labels.map(e=>conteo[e]||0);
   const colors=labels.map(e=>COLOR_ESTADO[e]);
   if(chartEstados) chartEstados.destroy();
-  chartEstados=new Chart(el,{type:'bar',data:{labels,datasets:[{data,backgroundColor:colors}]},
-    options:{responsive:true,plugins:{legend:{display:false},
+  /* Barra gruesa y cifra dentro: ya no se arman aqui, las trae
+     DashboardBarChart (assets/js/grafica.js). El color se pasa hecho en
+     `colores` porque NO es identidad: los tres estados son una progresion
+     semantica (COLOR_ESTADO) y no entran en la paleta categorica. */
+  chartEstados=new DashboardBarChart({
+    canvas: el,
+    etiquetas: labels,
+    datos: data,
+    colores: colors,
+    formato: FMT,
+    opciones:{plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.label+': '+FMT(c.raw)+' iniciativas'}}},
       onClick:(evt,elements)=>{
         if(!elements.length) return;
@@ -1301,7 +1404,7 @@ function renderChartEstados(cats){
       },
       onHover:(evt,elements)=>{evt.native.target.style.cursor=elements.length?'pointer':'default';},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}},
-    plugins:[valueLabelsPlugin]});
+  }).render();
 }
 // Navega a la pestaña "Iniciativas Activas" y la filtra por el estado dado
 // (usa el mismo filtro cruzado de graficas de TAREA 3, campo "estado").
@@ -1378,13 +1481,70 @@ function renderPanelGraf(tab, cats){
 }
 
 let chartBarDir=null;
+
+/* Identidad de DIRECTOR y de PRODUCT OWNER. Las dos dimensiones se ordenan
+   por volumen, asi que su posicion cambia con cada filtro: por eso van por
+   registro con nombre de la paleta COMPARTIDA (assets/js/paleta.js) y no por
+   indice. El registro reparte por orden de ALTA, asi que un director -o un
+   PO- conserva su color aunque baje de puesto, salga del top 15 o se entre a
+   un director en el detalle. Las dos graficas de PO comparten registro, asi
+   que el mismo PO sale del mismo color en "Volumen" y en "Con Iniciativa". */
+const REG_DIRECTOR = Paleta.registro('exp-director');
+const REG_PO = Paleta.registro('exp-po');
+
+/* Grosor de barra: el juego COMPARTIDO de assets/js/barras.js, el mismo que
+   usan las barras de Backlog. No trae borderRadius, asi que sigue mandando el
+   4 que este modulo pone en Chart.defaults.datasets.bar. */
+const BARRA_GRUESA = Barras.GRUESA;
+
+/* Volumen por Product Owner: barras verticales, no treemap.
+
+   Con 15 POs y un primer lugar que se lleva cerca de un tercio del total, el
+   treemap degeneraba: los ultimos diez quedaban en tiras de unos pocos
+   pixeles de alto, sin sitio para el nombre ni la cifra. En barras verticales
+   cada PO conserva su propio alto, el orden se lee de un vistazo y el nombre
+   va en el eje. Mismas filas, mismo orden y mismo top 15 que antes: solo
+   cambia como se dibujan.
+
+   El nombre del eje va recortado -no cabe uno completo bajo una barra- y el
+   tooltip da el nombre entero, asi que no se pierde nada. */
+const chartsPO = {};
+const cortaPO = s => (s && s.length > 16) ? s.slice(0, 15) + '…' : s;
+function renderBarrasPO(canvasId, filas, valorDe){
+  const el = document.getElementById(canvasId);
+  if(!el) return;
+  if(chartsPO[canvasId]) chartsPO[canvasId].destroy();
+  const datos = filas.filter(r => valorDe(r) > 0);
+  chartsPO[canvasId] = new Chart(el, {
+    type: 'bar',
+    data: { labels: datos.map(r => cortaPO(r.po)),
+      // El color se pide con el nombre COMPLETO, no con el recortado del eje:
+      // dos POs distintos pueden compartir los primeros 15 caracteres.
+      datasets: [Object.assign({ data: datos.map(valorDe),
+        backgroundColor: REG_PO.escala(datos.map(r => r.po)) }, BARRA_GRUESA)] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: {
+          title: it => datos[it[0].dataIndex] ? datos[it[0].dataIndex].po : '',
+          label: c => FMT(c.raw) + ' tickets' } } },
+      scales: {
+        y: { beginAtZero: true, ticks: { callback: v => FMT(v) } },
+        x: { grid: { display: false },
+             ticks: { autoSkip: false, maxRotation: 55, minRotation: 55, font: { size: 10 } } },
+      },
+    },
+    plugins: [valueLabelsDentroPlugin],
+  });
+}
 function renderResumen(){
   document.getElementById('tituloResumen').textContent='Indicadores por Director';
   document.getElementById('thResumenCol').textContent='Director';
   document.getElementById('tituloBarPO').textContent='Volumen por Product Owner (mayor → menor)';
   document.getElementById('tituloBarPOIni').textContent='Volumen con Iniciativa por Product Owner';
   document.getElementById('cardBarDir').style.display='block';
-  // Sin filtro: 3 graficas (Director + 2 treemap de PO) repartiendo el ancho.
+  // Sin filtro: la rejilla lleva Director + Iniciativas por Estado. Las dos
+  // graficas de Product Owner viven en su propio renglon, debajo.
   document.getElementById('gridResumenCharts').classList.remove('g2cols');
   // Agrupar por director (solo C1 para no duplicar volumen)
   const c1=P.categorias.filter(c=>c.nivel==='C1' && pasaFiltroGlobal(c));
@@ -1409,25 +1569,27 @@ function renderResumen(){
   const bdCtx=document.getElementById('chartBarDir');
   if(chartBarDir)chartBarDir.destroy();
   chartBarDir=new Chart(bdCtx,{type:'bar',data:{labels:dirRows.map(r=>r.dir),
-    datasets:[{data:dirRows.map(r=>r.vol),backgroundColor:'#2563eb'}]},
+    datasets:[Object.assign({data:dirRows.map(r=>r.vol),
+      backgroundColor:REG_DIRECTOR.escala(dirRows.map(r=>r.dir))},BARRA_GRUESA)]},
     options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},
-        y:{ticks:{autoSkip:false,font:{size:11}}}}}});
-  // treemap por PO (top 15) y su version "con iniciativa" (mismas filas/orden)
+        y:{ticks:{autoSkip:false,font:{size:11}}}}},
+    plugins:[valueLabelsDentroPlugin]});
+  // barras por PO (top 15) y su version "con iniciativa" (mismas filas/orden)
   const porPO={};
   c1.forEach(c=>{const p=c.po||'(Sin PO)';
     if(!porPO[p])porPO[p]={vol:0,ini:0};
     porPO[p].vol+=volActualDe(c); porPO[p].ini+=conIniVolDe(c);});
   const poRows=Object.entries(porPO).map(([p,v])=>({po:p,vol:v.vol,ini:v.ini}))
     .sort((a,b)=>b.vol-a.vol).slice(0,15);
-  renderTreemap('chartBarPO', poRows.map(r=>({label:r.po,value:r.vol})));
-  renderTreemap('chartBarPOIni', poRows.map(r=>({label:r.po,value:r.ini})));
+  renderBarrasPO('chartBarPO', poRows, r=>r.vol);
+  renderBarrasPO('chartBarPOIni', poRows, r=>r.ini);
 }
 
 // Misma seccion/tabla que renderResumen(), pero agregada por Product Owner
 // dentro de un Director seleccionado (punto 3): filas = POs de ese Director.
-// Con Director filtrado se oculta la grafica de Director y solo quedan las
-// 2 de PO (treemap), que se reparten el ancho completo (g2cols).
+// Con Director filtrado se oculta la grafica de Director y la tarjeta que
+// queda en la rejilla toma el renglon entero (g2cols).
 function renderResumenPorPO(dir){
   document.getElementById('tituloResumen').textContent='Indicadores por Director: '+dir;
   document.getElementById('thResumenCol').textContent='Product Owner';
@@ -1450,8 +1612,8 @@ function renderResumenPorPO(dir){
     `<tr><td><b>${r.po}</b></td><td class="num">${FMT(r.vol)}</td><td class="num">${PCT(r.pct)}</td>
      <td class="num">${FMT(r.ini)}</td><td class="num">${miniBar(r.pctIni)} ${badge(r.pctIni)}</td>
      <td class="num">${FMT(r.ret)}</td><td class="num">${badge(r.pctTiempo)}</td></tr>`).join('');
-  renderTreemap('chartBarPO', poRows.map(r=>({label:r.po,value:r.vol})));
-  renderTreemap('chartBarPOIni', poRows.map(r=>({label:r.po,value:r.ini})));
+  renderBarrasPO('chartBarPO', poRows, r=>r.vol);
+  renderBarrasPO('chartBarPOIni', poRows, r=>r.ini);
 }
 
 // ---- selectores encadenados ----
@@ -1479,9 +1641,18 @@ function fillSO(){
 selMgr.onchange=()=>{fMgr=selMgr.value;fSO='';fillSO();renderAll();};
 selSO.onchange=()=>{fSO=selSO.value;renderAll();};
 
+// "Limpiar" deja el tablero como recien abierto, igual que el de SLA: ademas
+// de los cuatro desplegables borra el cross-filter de las graficas de Vencidas
+// y Activas, que si no seguiria acotando lo que se ve sin que ningun filtro de
+// arriba lo anuncie. La dimension elegida (dim) NO se toca: es el selector de
+// "ver por", no una seleccion, igual que en los resets de cada panel.
 document.getElementById('btnReset').onclick=()=>{
   fDir='';fPO='';fMgr='';fSO='';
-  selDir.value='';selMgr.value='';fillPO();fillSO();renderAll();
+  selDir.value='';selMgr.value='';fillPO();fillSO();
+  for(const p of ['ven','act']){
+    filtroGraf[p].dimVal='';filtroGraf[p].agrup='';filtroGraf[p].estado='';
+  }
+  renderAll();
 };
 
 // ---- TAREA 3: wiring del selector de dimension y boton de reset del
@@ -1527,5 +1698,19 @@ RAIZ.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
 });
 
 fillPO(); fillSO(); renderAll();
+
+/* Capa visual de los desplegables (Director, Product Owner, Manager, Service
+   Owner, Ver por, "ver por" de las graficas...). Es el MISMO componente que
+   usa el resto del tablero, no una copia: assets/js/desplegable.js.
+
+   Los <select> siguen intactos -mismos ids, mismas <option>, mismos
+   `sel.onchange = ...` de aqui arriba-; el componente solo los tapa y les
+   dispara su `change` de siempre. Los catalogos encadenados (fillPO/fillSO
+   rehacen el innerHTML) los redibuja su MutationObserver, y "Limpiar", que
+   escribe .value por propiedad, lo repinta su red de seguridad.
+
+   El guardia cubre las dos vidas del archivo: la pagina suelta lo carga con
+   su propio <script>, y en la pestaña lo trae dashboard.html. */
+if (window.Desplegable) Desplegable.montar(RAIZ);
 
 })();

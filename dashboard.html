@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tickets Proactivanet — Tableros de SLA y Backlog</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<!-- Paleta categorica compartida. Va antes de dashboard.js y antes de los
+     modulos embebidos (Experiencia, QA), que pierden sus <script> al montarse
+     aqui y usan esta copia. -->
+<script src="assets/js/paleta.js"></script>
+<script src="assets/js/barras.js"></script>
+<script src="assets/js/grafica.js"></script>
+<!-- Desplegable propio, uno solo para todo el tablero. Se carga aqui, en la
+     pagina anfitriona, asi que los modulos embebidos (Experiencia, QA) -que
+     pierden sus <script> y sus <link> al montarse- lo encuentran ya puesto. -->
+<script src="assets/js/desplegable.js"></script>
+<link rel="stylesheet" href="assets/css/desplegable.css">
 <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
@@ -15,6 +26,7 @@
     <button class="mtab" data-tab="backlog" type="button">Backlog</button>
     <button class="mtab" data-tab="experiencia" type="button">Experiencia</button>
     <button class="mtab" data-tab="qa" type="button">QA</button>
+    <button class="mtab" data-tab="call" type="button">Call Center</button>
     <button class="mtab" data-tab="tablero" type="button">Tablero</button>
   </nav>
 
@@ -29,7 +41,7 @@
       </div>
     </header>
 
-    <section class="filtros">
+    <section class="filtros" id="filtros-sla">
       <div class="campo">
         <label for="f-inicio">Fecha inicio</label>
         <input type="date" id="f-inicio">
@@ -40,9 +52,16 @@
       </div>
       <div class="campo">
         <label>Rango rapido</label>
+        <!-- "7 dias" es de las dos pestañas. El segundo boton no: SLA mira el
+             año en curso y el Call Center el mes en curso, asi que los dos
+             estan aqui y adoptarControlesSla() (dashboard.js) ensena el que
+             toca al mover esta misma barra a la pestaña visible. No se
+             duplica el marcado ni se cablea ningun listener aparte: los tres
+             pasan por el mismo `#filtros-sla [data-rango]`. -->
         <div class="rango-rapido">
           <button class="btn linea chico" type="button" data-rango="7d">7 dias</button>
           <button class="btn linea chico" type="button" data-rango="anio">Año</button>
+          <button class="btn linea chico" type="button" data-rango="mes" hidden>Mes</button>
         </div>
       </div>
       <!-- campo-slot: el resumen de abajo no cuenta para la altura del campo,
@@ -64,8 +83,13 @@
         <label for="f-tecnicos">Tecnicos</label>
         <select id="f-tecnicos" multiple></select>
       </div>
+      <!-- Campanas del Call Center. Solo la lee llamadas.ashx: los demas
+           handlers de esta pestana ignoran el parametro `campanas`. -->
+      <div class="campo">
+        <label for="f-campanas">Campanas</label>
+        <select id="f-campanas" multiple></select>
+      </div>
       <div class="campo acciones">
-        <button class="btn" id="btn-aplicar" type="button">Aplicar filtros</button>
         <button class="btn gris" id="btn-limpiar" type="button">Limpiar</button>
       </div>
     </section>
@@ -78,7 +102,7 @@
         <div class="lienzo alta"><canvas id="chart-tendencia"></canvas></div>
       </div>
       <div class="card">
-        <h3>Productividad por tecnico<span class="hint">top 15</span></h3>
+        <h3>Productividad por tecnico</h3>
         <div class="lienzo alta"><canvas id="chart-productividad"></canvas></div>
       </div>
     </section>
@@ -97,12 +121,6 @@
         <h3>Antiguedad</h3>
         <div class="lienzo"><canvas id="chart-aging"></canvas></div>
       </div>
-    </section>
-
-    <section class="barra-filtros">
-      <span class="titulo">Filtros activos</span>
-      <span id="chips-filtro"></span>
-      <button class="btn gris chico" id="btn-reset-filtros" type="button">↺ Resetear</button>
     </section>
 
     <section class="card">
@@ -169,7 +187,6 @@
         <select id="f-lideres-bl" multiple></select>
       </div>
       <div class="campo acciones">
-        <button class="btn" id="btn-aplicar-bl" type="button">Aplicar filtros</button>
         <button class="btn gris" id="btn-limpiar-bl" type="button">Limpiar</button>
       </div>
     </section>
@@ -203,12 +220,6 @@
         <h3>Por antiguedad</h3>
         <div class="lienzo"><canvas id="chart-aging-bl"></canvas></div>
       </div>
-    </section>
-
-    <section class="barra-filtros">
-      <span class="titulo">Filtros activos</span>
-      <span id="chips-filtro-bl"></span>
-      <button class="btn gris chico" id="btn-reset-filtros-bl" type="button">↺ Resetear</button>
     </section>
 
     <section class="card">
@@ -262,6 +273,60 @@
        abre la pestaña: dashboard.html no pide nada a qa.ashx al cargar. El
        modulo vive en qa/ y su pagina suelta sigue funcionando igual. -->
   <div id="tab-qa" class="maintab-content"></div>
+
+  <!-- ================================================ Call Center de Servicios TI
+       Pestana propia. El bloque es el MISMO de siempre -mismos ids, mismas
+       graficas- y lo siguen cargando y pintando las funciones de TableroSla:
+       llamadas.ashx viaja en su misma peticion. Lo unico que cambia es donde
+       se ve. La barra de filtros y el sello de estado no se duplican: son los
+       nodos de SLA, que dashboard.js mueve a la pestana que este visible. -->
+  <div id="tab-call" class="maintab-content">
+    <header class="top">
+      <div>
+        <h1>Tickets Proactivanet — Call Center</h1>
+      </div>
+      <div class="acciones-top"></div>
+    </header>
+
+    <!-- Llamadas y tickets son la misma atencion vista por dos lados, y por eso
+         comparten el rango de fechas de la barra de arriba: con el mismo rango
+         puesto se ve de un vistazo si el dia que se dispararon los tickets
+         tambien se dispararon las llamadas.
+
+         Los filtros por clic de las graficas de SLA (cross-filter) NO alcanzan
+         a este bloque: una llamada no comparte ninguna dimension con un ticket
+         -no tiene estado, prioridad ni antiguedad-. Solo lo mueven el rango de
+         fechas y su propio filtro de campanas. -->
+    <section class="card">
+      <h3>Call Center de Servicios TI<span class="hint" id="hint-llamadas"></span></h3>
+      <div class="nota">Llamadas recibidas en el rango de fechas de arriba. Los filtros de
+        <b>Grupos</b> y <b>Tecnicos</b> no aplican: una llamada no tiene grupo resolutor.
+        El filtro de <b>Campanas</b> mueve <b>solo</b> este bloque.</div>
+      <div class="kpis" id="kpis-llamadas"></div>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h3>Llamadas por dia<span class="hint">recibidas vs contestadas vs abandonadas</span></h3>
+        <div class="lienzo alta"><canvas id="chart-llamadas-dia"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Atencion por agente<span class="hint">top 15</span></h3>
+        <div class="lienzo alta"><canvas id="chart-llamadas-agente"></canvas></div>
+      </div>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h3>Abandono por campana<span class="hint">volumen y % de abandono</span></h3>
+        <div class="lienzo"><canvas id="chart-llamadas-campana"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Llamadas por hora del dia</h3>
+        <div class="lienzo"><canvas id="chart-llamadas-hora"></canvas></div>
+      </div>
+    </section>
+  </div>
 
   <div id="tab-tablero" class="maintab-content">
     <iframe id="iframe-tablero"

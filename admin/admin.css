@@ -100,14 +100,14 @@
   display: flex; align-items: center; gap: 7px;
   font-size: 11.5px; font-weight: 600; color: var(--ink-2);
   padding: 6px 9px;
-  background: #f8fafc;
+  background: var(--bg-2);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-xs);
 }
 .job-punto {
   width: 8px; height: 8px; border-radius: var(--radius-pill);
   background: var(--muted-2); flex: none;
-  box-shadow: 0 0 0 3px rgba(148, 163, 184, .18);
+  box-shadow: 0 0 0 3px rgba(154, 160, 148, .18);
 }
 /* Amarillo: al flujo le falta algo. El latido queda solo para la ejecucion,
    que si es un proceso en curso. */
@@ -120,7 +120,7 @@
 }
 .job[data-estado="listo"] .job-punto,
 .job[data-estado="revision"] .job-punto {
-  background: var(--verde); box-shadow: 0 0 0 3px rgba(5, 150, 105, .18);
+  background: var(--verde); box-shadow: 0 0 0 3px rgba(71, 139, 60, .22);
 }
 @keyframes job-latido { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) {
@@ -182,7 +182,7 @@
 
 .job-nota {
   font-size: 10.5px; color: var(--muted);
-  background: #f8fafc; border: 1px solid var(--line-soft);
+  background: var(--bg-2); border: 1px solid var(--line-soft);
   border-radius: var(--radius-xs); padding: 6px 8px;
 }
 
@@ -227,7 +227,7 @@
 }
 
 .serv-bloque {
-  background: #f8fafc;
+  background: var(--bg-2);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-xs);
   padding: 10px 11px;
@@ -323,7 +323,7 @@
 /* ---- Modal de herramientas ---- */
 .admin-modal-fondo {
   position: fixed; inset: 0; z-index: 50;
-  background: rgba(15, 23, 42, .48);
+  background: rgba(25, 25, 25, .48);
   display: grid; place-items: center;
   padding: 20px;
 }
