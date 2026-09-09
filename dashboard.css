@@ -71,6 +71,10 @@
     --verde: var(--g-800);        /* semantico "bien" = verde de marca */
     --verde-strong: var(--g-900); /* relleno con texto blanco encima */
     --ambr: #d97706;              /* advertencia: se conserva */
+    /* Semaforo de los KPI. Vive aparte de --verde (que es el verde profundo
+       de marca y lo usan flechas, badges y admin) porque el "bien" de una
+       tarjeta KPI es el lima de la cabecera, no el verde profundo. */
+    --kpi-ok: var(--g-400);       /* lima: estado bueno */
     --rojo: #982a18;              /* negativo: unico rojo del tablero */
     /* Nombres heredados que el JS y el CSS viejo siguen citando. Ya no
        son morado ni cyan: son dos escalones mas de la misma escala. */
@@ -514,22 +518,22 @@
     position: relative; overflow: hidden;
     background: var(--card); border-radius: var(--radius); padding: 16px 18px;
     box-shadow: var(--shadow); border: 1px solid var(--line-soft);
-    border-left: 5px solid transparent;
-    border-image: var(--grad) 1;
+    border-left: 5px solid var(--kpi-ok);
     transition: transform .15s ease, box-shadow .15s ease;
   }
   /* Lavado de color heredado del borde izquierdo. */
   .kpi::after {
     content: ""; position: absolute; inset: 0; pointer-events: none;
     background: linear-gradient(100deg, currentColor 0%, transparent 46%);
-    opacity: .07; color: var(--g-600);
+    opacity: .07; color: var(--kpi-ok);
   }
   .kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-  /* El semaforo pisa el degradado: un solo color plano por estado. */
-  .kpi.sv { border-image: none; border-left-color: var(--verde); }
-  .kpi.sa { border-image: none; border-left-color: var(--ambr); }
-  .kpi.sr { border-image: none; border-left-color: var(--rojo); }
-  .kpi.sv::after { color: var(--verde); }
+  /* Semaforo: un solo color plano en la franja izquierda por estado.
+     lima = bien, ambar = aviso, rojo = mal. No hay mas estados. */
+  .kpi.sv { border-left-color: var(--kpi-ok); }
+  .kpi.sa { border-left-color: var(--ambr); }
+  .kpi.sr { border-left-color: var(--rojo); }
+  .kpi.sv::after { color: var(--kpi-ok); }
   .kpi.sa::after { color: var(--ambr); }
   .kpi.sr::after { color: var(--rojo); }
   .kpi .lbl {
@@ -807,10 +811,10 @@ cursor:pointer;font-size:12px;font-weight:700}
 .tabx .selrow button:hover{background:var(--grad-btn-hover)}
 .tabx .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:14px;margin-bottom:16px}
 .tabx .kpi{background:var(--card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07);
-border-left:5px solid transparent;border-image:var(--grad) 1}
-.tabx .kpi.sv{border-image:none;border-left-color:var(--verde)}
-.tabx .kpi.sa{border-image:none;border-left-color:var(--ambr)}
-.tabx .kpi.sr{border-image:none;border-left-color:var(--rojo)}
+border-left:5px solid var(--kpi-ok)}
+.tabx .kpi.sv{border-left-color:var(--kpi-ok)}
+.tabx .kpi.sa{border-left-color:var(--ambr)}
+.tabx .kpi.sr{border-left-color:var(--rojo)}
 .tabx .kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
 .tabx .kpi .val{font-size:25px;font-weight:800;margin-top:4px}
 .tabx .kpi .foot{font-size:11px;color:var(--muted);margin-top:3px}

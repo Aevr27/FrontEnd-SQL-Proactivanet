@@ -60,6 +60,9 @@
   --verde: var(--g-800);
   --verde-strong: var(--g-900);
   --ambr: #d97706;    /* advertencia */
+  /* Semaforo de los KPI: el "bien" de una tarjeta es el lima de la cabecera,
+     no --verde (verde profundo de marca, que usan badges y notas). */
+  --kpi-ok: var(--g-400);
   --rojo: #982a18;    /* negativo */
   /* Superficie y borde del negativo: la pareja de tintes que ya usaba
      .badge-rojo en crudo. Se nombran para que el rojo suave deje de ser
@@ -245,7 +248,7 @@ code {
   position: relative; overflow: hidden;
   background: var(--card); border-radius: var(--radius); padding: 16px 18px;
   box-shadow: var(--shadow); border: 1px solid var(--line-soft);
-  border-left: 5px solid transparent; border-image: var(--grad) 1;
+  border-left: 5px solid var(--kpi-ok);
   transition: transform .18s ease, box-shadow .18s ease;
 }
 .kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
@@ -256,15 +259,14 @@ code {
 .kpi .kpi-val { font-size: 26px; font-weight: 800; line-height: 1.15; margin-top: 4px; }
 .kpi .kpi-nota { font-size: 11px; color: var(--muted); margin-top: 4px; }
 
-/* Nombres heredados que escribe el JS y que ya NO describen su color:
-   kpi-azul es la tarjeta de marca (la progresion verde completa) y
-   kpi-ambar la variante verde profunda. El rojo solo queda donde el dato
-   es negativo. */
-.kpi-azul   { border-image: var(--grad) 1; }
-.kpi-rojo   { border-image: none; border-left-color: var(--rojo); }
+/* Nombres heredados que escribe el JS y que ya NO describen su color.
+   Los tres son el mismo semaforo de franja izquierda que .sv/.sa/.sr:
+   kpi-azul = bien (lima), kpi-ambar = aviso (ambar), kpi-rojo = mal. */
+.kpi-azul   { border-left-color: var(--kpi-ok); }
+.kpi-rojo   { border-left-color: var(--rojo); }
 .kpi-rojo   .kpi-val { color: var(--rojo); }
-.kpi-ambar  { border-image: none; border-left-color: var(--g-800); }
-.kpi-ambar  .kpi-val { color: var(--g-900); }
+.kpi-ambar  { border-left-color: var(--ambr); }
+.kpi-ambar  .kpi-val { color: var(--ambr); }
 
 /* Valor de una tarjeta que todavia no tiene su dato. */
 .kpi-espera .kpi-val { color: var(--muted-2); font-weight: 600; }
