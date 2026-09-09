@@ -19,15 +19,23 @@
 <body>
 <div class="wrap">
   <div id="tab-experiencia" class="maintab-content active">
+  <!-- Cabecera de seccion, con la misma forma que las de SLA, Backlog, QA y
+       Call Center: titulo y subtitulo a la izquierda, y en .acciones-top, a la
+       derecha, la pastilla del corte -el mismo sitio que ocupan el sello del
+       ETL en SLA y el chip de fecha en QA-. Lo que salio de aqui es la fila de
+       filtros: era lo que hacia crecer la barra verde hasta triplicar la de
+       las demas pestañas. Ahora es su propia franja, debajo. -->
   <header class="top">
-    <h1>Tablero de Experiencia al Usuario <span style="font-size:11px;font-weight:400;opacity:.7">v3.7</span></h1>
-    <div class="sub" id="subhead">Resumen general — todos los tickets</div>
-    <!-- Insignia de corte: pastilla blanca a la derecha de la cabecera, mismo
-         trato que el chip de fecha del tablero de QA. Vacia no se pinta
-         (regla :empty en experiencia.css), asi que el JS que la rellena no
-         cambia. -->
-    <div id="corteFecha"></div>
-    <div class="selrow">
+    <div>
+      <h1>Tablero de Experiencia al Usuario <span class="ver">v3.7</span></h1>
+      <div class="sub" id="subhead">Resumen general — todos los tickets</div>
+    </div>
+    <div class="acciones-top">
+      <div id="corteFecha"></div>
+    </div>
+  </header>
+
+  <section class="selrow">
       <div class="grp"><label>Director</label>
         <select id="selDir"><option value="">— Todos —</option></select></div>
       <div class="grp"><label>Product Owner</label>
@@ -48,8 +56,7 @@
            trato secundario que en las pestanas de SLA y de Backlog. Antes se
            llamaba "Ver resumen general" y vivia entre los desplegables. -->
       <button id="btnReset" class="gris">Limpiar</button>
-    </div>
-  </header>
+    </section>
 
   <!-- id="kpis-exp", no "kpis": dashboard.html ya tiene un #kpis en la pestaña
        de SLA y este bloque se monta en el mismo documento. -->

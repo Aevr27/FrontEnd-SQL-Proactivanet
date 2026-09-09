@@ -25,35 +25,51 @@ color-scheme:light;
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
 background:var(--bg-2);color:var(--ink);padding:18px;line-height:1.4}
-.wrap{max-width:1320px;margin:0 auto}
+/* 1500, el mismo ancho de contenido que dashboard.css y qa.css. Con 1320
+   este tablero quedaba 180px mas estrecho y descuadrado a la izquierda
+   respecto a las demas pestañas, porque su .wrap se monta DENTRO del
+   .wrap del tablero. */
+.wrap{max-width:1500px;margin:0 auto}
 .maintab-content{display:none}
 .maintab-content.active{display:block}
-/* Rejilla de la cabecera: titulo y subtitulo a la izquierda, la insignia de
-   corte pegada a la derecha, y la fila de filtros ocupando el ancho entero
-   debajo. Solo coloca lo que ya existia; no se agrego ni se quito nada del
-   marcado salvo el contenedor de la insignia. */
+/* Cabecera de seccion: la misma pieza que header.top en dashboard.css y en
+   qa.css -barra verde, titulo y subtitulo a la izquierda, y la insignia de
+   datos a la derecha-. Antes era una rejilla de tres filas que ademas metia
+   dentro la fila entera de filtros: crecia hasta 193px de alto contra los
+   77px de la cabecera de SLA, y la pestaña no se parecia a ninguna otra. Los
+   filtros salieron a su propia franja; el corte se queda aqui, en el mismo
+   sitio que el sello del ETL en SLA y el chip de fecha en QA. */
 header.top{background:var(--grad-header);color:var(--ink);padding:22px 26px;
 border-radius:var(--radius);margin-bottom:16px;
-display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:16px;align-items:start}
-header.top h1{font-size:19px;font-weight:700;grid-column:1;grid-row:1}
+display:flex;align-items:flex-start;justify-content:space-between;
+flex-wrap:wrap;gap:14px}
+header.top h1{font-size:19px;font-weight:700}
+header.top h1 .ver{font-size:11px;font-weight:400;opacity:.7}
 header.top .sub{font-size:13px;color:var(--ink-2);margin-top:3px}
-header.top #subhead{grid-column:1;grid-row:2}
-header.top .selrow{grid-column:1/-1;grid-row:3}
+header.top .acciones-top{display:flex;flex-direction:column;align-items:flex-end;
+gap:8px;align-self:center}
 /* Insignia de corte de datos: pastilla blanca chica dentro del verde, mismo
-   trato que el chip de fecha de QA. Es informacion, no un boton: sin sombra
-   dura, sin degradado y sin cursor. Vacia no se pinta. */
-#corteFecha{grid-column:2;grid-row:1/span 2;justify-self:end;align-self:center;
-display:inline-block;padding:5px 12px;border-radius:999px;
+   trato que el sello del ETL de SLA y que el chip de fecha de QA. Es
+   informacion, no un boton: sin sombra dura, sin degradado y sin cursor.
+   Vacia no se pinta. */
+#corteFecha{display:inline-block;padding:5px 12px;border-radius:999px;
 background:rgba(255,255,255,.92);border:1px solid rgba(255,255,255,.6);
 color:var(--g-900);font-size:11.5px;font-weight:600;white-space:nowrap;
 box-shadow:0 1px 2px rgba(25,25,25,.10)}
 #corteFecha:empty{display:none}
+
+/* Barra de filtros: fuera de la cabecera y con la misma tarjeta que la
+   .filtros de SLA y Backlog. Los controles no cambian de sitio ni de orden;
+   solo dejan de ir sobre el verde. */
+.selrow{position:relative;overflow:hidden;
+display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;
+background:var(--card);border:1px solid var(--g-100);border-radius:var(--radius);
+box-shadow:0 1px 3px rgba(0,0,0,.07);padding:16px 20px;margin-bottom:16px}
+.selrow::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;
+background:var(--grad)}
 @media(max-width:700px){
-  header.top{grid-template-columns:minmax(0,1fr)}
-  #corteFecha{grid-column:1;grid-row:3;justify-self:start;margin-top:8px}
-  header.top .selrow{grid-row:4}
+  header.top .acciones-top{align-items:flex-start;align-self:flex-start}
 }
-.selrow{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:14px}
 .selrow .grp{display:flex;flex-direction:column;gap:4px}
 .selrow label{font-size:11px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.5px}
 /* Controles del filtro: superficie blanca -para que el dato se lea sobre el
@@ -62,7 +78,7 @@ box-shadow:0 1px 2px rgba(25,25,25,.10)}
 background:#fff;color:var(--ink);font-size:13px;min-width:220px}
 .selrow select:hover{border-color:var(--g-400)}
 .selrow select:focus{outline:none;border-color:var(--g-800);
-box-shadow:0 0 0 3px rgba(255,255,255,.55)}
+box-shadow:0 0 0 3px rgba(101,187,43,.30)}
 .selrow button{padding:8px 14px;border-radius:8px;border:1px solid var(--g-700);
 background:var(--grad-btn);color:var(--btn-ink);
 cursor:pointer;font-size:12px;font-weight:700}
