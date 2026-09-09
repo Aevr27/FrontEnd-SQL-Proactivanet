@@ -832,6 +832,29 @@ const TableroSla = (function () {
     return p;
   }
 
+  /* Parametros del Call Center: el MISMO rango de fechas que los tickets -es
+     lo que permite comparar los dos lados de la atencion- mas su filtro
+     propio de campanas.
+
+     La campana se agrega AQUI y no en paramsFiltros() a proposito: asi
+     llamadas.ashx es el unico handler que la recibe. Los de tickets no la
+     leen, pero mandarsela igual dejaria una lista de parametros que no
+     describe lo que cada peticion usa de verdad.
+
+     Los filtros de Grupos y Tecnicos se quitan: una llamada no tiene grupo
+     resolutor, y el handler tampoco los mira.
+
+     Separador coma: a diferencia de los tecnicos ("Apellidos, Nombre"), el
+     valor es el numero de cola y nunca contiene comas. */
+  function paramsLlamadas() {
+    const p = paramsFiltros();
+    p.delete('grupos');
+    p.delete('tecnicos');
+    const campanas = seleccionados('f-campanas');
+    if (campanas.length) p.set('campanas', campanas.join(','));
+    return p;
+  }
+
   // Mismo rango de fechas, pero sin el filtro de Tecnicos: es lo que alimenta
   // el ranking de personas con mas tickets cerrados.
   function paramsSoloGrupos() {
@@ -1735,6 +1758,230 @@ const TableroSla = (function () {
      recalcularlos en cada clic reconstruia una tabla de 10 filas con sus
      listeners de ordenacion para nada. Todo lo que SI depende del filtro se
      sigue repintando en el mismo ciclo, asi que ninguna grafica queda vieja. */
+  /* ------------------------------------------- Call Center de Servicios TI
+     Un solo dataset (`llamadas`, de llamadas.ashx) alimenta las tarjetas, las
+     cuatro graficas y el catalogo de campanas.
+
+     Este bloque NO participa del cross-filter: una llamada no comparte
+     dimension con un ticket (no tiene estado, prioridad ni antiguedad), asi
+     que el objeto `filtro` no lo toca y renderTodo() solo lo repinta cuando
+     llegan datos nuevos, no en cada clic sobre las graficas de SLA. Sus
+     unicas entradas son el rango de fechas -compartido con los tickets- y el
+     filtro propio de campanas.
+
+     Reusa lo que ya hay: obtenerJSON, htmlTarjetasKpi, dibujarGrafico,
+     renderEmptyChart, EJE_CONTEO, la paleta compartida y las clases de
+     semaforo sv/sa/sr. No define ningun color ni ningun render propio. */
+
+  // mm:ss. Los segundos crudos ('194') no dicen nada de un vistazo; en un Call
+  // Center todo el mundo lee 3:14.
+  function mmss(segundos) {
+    if (segundos === null || segundos === undefined) return 'N/D';
+    const s = Math.round(Number(segundos));
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  }
+
+  /* El abandono es el KPI que se mira primero, y aqui MENOS es mejor: se
+     colorea al reves que el cumplimiento de SLA. Mismas clases que SEM
+     (sv/sa/sr), solo cambia el sentido de los cortes. */
+  const SEM_ABANDONO = pct => pct <= 10 ? 'sv' : (pct <= 20 ? 'sa' : 'sr');
+
+  function renderKpisLlamadas() {
+    const cont = document.getElementById('kpis-llamadas');
+    if (!cont) return;
+    const k = (datos && datos.llamadas && datos.llamadas.kpis) || {};
+
+    const total = k.Llamadas ?? 0;
+    const contestadas = k.Contestadas ?? 0;
+    const abandonadas = k.Abandonadas ?? 0;
+    const aband = k.AbandonoPct ?? null;
+    const nivel = k.NivelServicioPct ?? null;
+    const umbral = k.UmbralNivelServicioSeg ?? 20;
+
+    cont.innerHTML = htmlTarjetasKpi([
+      { l: 'Llamadas recibidas', v: FMT(total),
+        f: `${FMT(contestadas)} contestadas · ${FMT(abandonadas)} abandonadas` },
+      { l: '% de abandono', v: aband !== null ? `${aband}%` : '—',
+        s: aband !== null ? SEM_ABANDONO(aband) : '',
+        f: `${FMT(abandonadas)} de ${FMT(total)}` },
+      // El umbral se escribe "menos de Ns" a proposito: la tarjeta se inyecta
+      // con innerHTML y un '<' suelto abre una etiqueta que se come el texto.
+      { l: 'Nivel de servicio', v: nivel !== null ? `${nivel}%` : '—',
+        s: nivel !== null ? SEM(nivel) : '',
+        f: `contestadas en menos de ${umbral}s` },
+      { l: 'Espera promedio', v: mmss(k.EsperaPromSeg),
+        f: `antes de colgar: ${mmss(k.EsperaPromAbanSeg)}` },
+      { l: 'Duracion promedio', v: mmss(k.DuracionPromSeg),
+        f: `${FMT(k.PromedioDiario ?? 0)} llamadas por dia` },
+      { l: 'Agentes activos', v: FMT(k.AgentesActivos ?? 0) },
+    ]);
+  }
+
+  function renderLlamadasDia() {
+    const f = (datos && datos.llamadas && datos.llamadas.tendencia) || [];
+    if (!f.length) {
+      destruir('llamadasDia');
+      return renderEmptyChart('chart-llamadas-dia', 'Sin llamadas en el rango seleccionado.');
+    }
+    // Misma forma de fecha que tendencia.ashx: "aaaa-mm-ddT00:00:00".
+    const etiquetas = f.map(x => String(x.Fecha ?? '').slice(0, 10));
+    const series = [
+      { label: 'Recibidas', data: f.map(x => x.Llamadas), color: AZUL },
+      { label: 'Contestadas', data: f.map(x => x.Contestadas), color: VERDE_S },
+      { label: 'Abandonadas', data: f.map(x => x.Abandonadas), color: ROJO },
+    ];
+
+    dibujarGrafico(graficos, 'llamadasDia', 'chart-llamadas-dia',
+      () => ({
+        type: 'line',
+        data: { labels: etiquetas, datasets: series.map(s => ({
+          label: s.label, data: s.data, borderColor: s.color, backgroundColor: s.color,
+          tension: 0.25, pointRadius: 0, borderWidth: 2 })) },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } } },
+          scales: { y: EJE_CONTEO },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        series.forEach((s, i) => { gr.data.datasets[i].data = s.data; });
+      });
+  }
+
+  /* Volumen en barras y % de abandono en linea sobre un segundo eje: una
+     campana chica con 60% de abandono se pierde si solo se mira el volumen. */
+  function renderLlamadasCampana() {
+    const f = (datos && datos.llamadas && datos.llamadas.campana) || [];
+    if (!f.length) {
+      destruir('llamadasCampana');
+      return renderEmptyChart('chart-llamadas-campana', 'Sin llamadas en el rango seleccionado.');
+    }
+    const etiquetas = f.map(x => x.Campana);
+    const volumen = f.map(x => x.Llamadas);
+    const abandono = f.map(x => x.AbandonoPct);
+
+    dibujarGrafico(graficos, 'llamadasCampana', 'chart-llamadas-campana',
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [
+          { label: 'Llamadas', data: volumen, backgroundColor: AZUL, borderRadius: 6, yAxisID: 'y' },
+          { label: '% abandono', data: abandono, type: 'line', borderColor: ROJO,
+            backgroundColor: ROJO, tension: 0.25, pointRadius: 3, borderWidth: 2, yAxisID: 'y1' },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+            y: Object.assign({}, EJE_CONTEO, { position: 'left' }),
+            y1: { beginAtZero: true, position: 'right', grid: { drawOnChartArea: false },
+                  ticks: { callback: v => `${v}%` } },
+          }
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = volumen;
+        gr.data.datasets[1].data = abandono;
+      });
+  }
+
+  function renderLlamadasHora() {
+    const f = (datos && datos.llamadas && datos.llamadas.hora) || [];
+    if (!f.length) {
+      destruir('llamadasHora');
+      return renderEmptyChart('chart-llamadas-hora', 'Sin llamadas en el rango seleccionado.');
+    }
+    const etiquetas = f.map(x => `${String(x.Hora).padStart(2, '0')}:00`);
+    const contestadas = f.map(x => x.Contestadas);
+    const abandonadas = f.map(x => x.Abandonadas);
+
+    dibujarGrafico(graficos, 'llamadasHora', 'chart-llamadas-hora',
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [
+          { label: 'Contestadas', data: contestadas, backgroundColor: VERDE_S },
+          { label: 'Abandonadas', data: abandonadas, backgroundColor: ROJO },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } } },
+          scales: { x: { stacked: true }, y: Object.assign({}, EJE_CONTEO, { stacked: true }) },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = contestadas;
+        gr.data.datasets[1].data = abandonadas;
+      });
+  }
+
+  function renderLlamadasAgente() {
+    const f = (datos && datos.llamadas && datos.llamadas.agente) || [];
+    if (!f.length) {
+      destruir('llamadasAgente');
+      return renderEmptyChart('chart-llamadas-agente', 'Sin llamadas atendidas en el rango seleccionado.');
+    }
+    const etiquetas = f.map(x => x.Agente);
+    const atendidas = f.map(x => x.Atendidas);
+    // El tooltip lee la duracion por posicion, asi que se congela junto con
+    // las series: si llegan datos nuevos, este arreglo se reemplaza entero.
+    const duraciones = f.map(x => x.DuracionPromSeg);
+
+    dibujarGrafico(graficos, 'llamadasAgente', 'chart-llamadas-agente',
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [{ label: 'Llamadas atendidas',
+          data: atendidas, backgroundColor: MORADO, borderRadius: 6 }] },
+        options: {
+          indexAxis: 'y',
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              label: c => `Atendidas: ${FMT(c.raw)}`,
+              afterLabel: c => `Duracion promedio: ${mmss(duraciones[c.dataIndex])}`,
+            } },
+          },
+          scales: { x: EJE_CONTEO },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = atendidas;
+        // El closure del tooltip apunta al arreglo de ESTA pasada, no al de la
+        // construccion: hay que reinstalarlo para que las duraciones casen.
+        gr.options.plugins.tooltip.callbacks.afterLabel =
+          c => `Duracion promedio: ${mmss(duraciones[c.dataIndex])}`;
+      });
+  }
+
+  /* El catalogo de campanas viaja con los datos y se llena UNA sola vez: si se
+     repoblara en cada carga se perderia la campana que el usuario acaba de
+     elegir. El MutationObserver del multi-select redibuja su panel solo. */
+  function llenarCatalogoCampanas() {
+    const sel = document.getElementById('f-campanas');
+    if (!sel || sel.options.length) return;
+    const cat = (datos && datos.llamadas && datos.llamadas.catalogo) || [];
+    if (!cat.length) return;
+    sel.innerHTML = cat.map(c =>
+      `<option value="${escapeAttr(String(c.NumeroCola))}">${escapeHtml(c.Campana)}</option>`).join('');
+  }
+
+  function renderLlamadas() {
+    const hint = document.getElementById('hint-llamadas');
+    if (hint) {
+      const n = seleccionados('f-campanas').length;
+      hint.textContent = n ? `${n} campaña${n > 1 ? 's' : ''}` : 'todas las campañas';
+    }
+    llenarCatalogoCampanas();
+    renderKpisLlamadas();
+    renderLlamadasDia();
+    renderLlamadasCampana();
+    renderLlamadasHora();
+    renderLlamadasAgente();
+  }
+
   function renderTodo(motivo) {
     perf.ini('renderTodo');
     renderKpis();
@@ -1751,6 +1998,9 @@ const TableroSla = (function () {
     if (motivo !== 'filtro') {
       renderSlotStepper();
       renderTopCerrados();
+      // El Call Center no depende del cross-filter (ver bloque de arriba): se
+      // repinta con los datos nuevos, no en cada clic sobre las graficas.
+      renderLlamadas();
     }
     renderChips();
     perf.fin('renderTodo');
@@ -1762,9 +2012,12 @@ const TableroSla = (function () {
     kpis: {}, tendencia: [], productividad: [],
     distribucion: { estado: [], prioridad: [], aging: [] },
     detalle: [], topCerrados: [],
+    // Call Center: si llamadas.ashx falla, el bloque pinta sus estados vacios
+    // y el resto del tablero de SLA sigue igual que siempre.
+    llamadas: { kpis: {}, tendencia: [], campana: [], hora: [], agente: [], catalogo: [] },
   };
 
-  /* Los seis datasets se resuelven POR SEPARADO (allSettled), no con
+  /* Los siete datasets se resuelven POR SEPARADO (allSettled), no con
      Promise.all. Con Promise.all el rechazo de uno solo -tipicamente
      `detalle`, que en un rango de UN dia no se puede trocear y solo puede
      bajar el tope de filas antes de rendirse- saltaba al catch y el tablero
@@ -1783,6 +2036,7 @@ const TableroSla = (function () {
       ['distribucion',  () => obtenerJSON(`distribucion.ashx?${qs}`)],
       ['detalle',       () => obtenerDetalle(paramsFiltros(), TOPE_DETALLE)],
       ['topCerrados',   () => obtenerJSON(`productividad.ashx?${qsGrupos}`)],
+      ['llamadas',      () => obtenerJSON(`llamadas.ashx?${paramsLlamadas().toString()}`)],
     ];
 
     const resueltos = await Promise.allSettled(peticiones.map(([, pedir]) => pedir()));
@@ -1830,6 +2084,7 @@ const TableroSla = (function () {
     document.getElementById('btn-limpiar').addEventListener('click', () => {
       document.getElementById('f-grupos').selectedIndex = -1;
       document.getElementById('f-tecnicos').selectedIndex = -1;
+      document.getElementById('f-campanas').selectedIndex = -1;
       // "Limpiar" deja el tablero como recien abierto: sin SLOT, sin cross
       // filter y con el mismo rango que escribe init(). Antes fijaba hoy a hoy
       // y la tendencia quedaba con un solo dia.
@@ -2962,7 +3217,7 @@ document.querySelectorAll('.mtab').forEach(btn => {
    y copia los cambios en las dos direcciones.
    ======================================================================= */
 (() => {
-  const IDS = ['f-grupos', 'f-tecnicos', 'f-c1-bl', 'f-grupos-bl', 'f-lideres-bl'];
+  const IDS = ['f-grupos', 'f-tecnicos', 'f-campanas', 'f-c1-bl', 'f-grupos-bl', 'f-lideres-bl'];
   const controles = [];
 
   function crear(select) {

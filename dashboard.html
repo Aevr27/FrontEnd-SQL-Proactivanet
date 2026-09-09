@@ -70,6 +70,12 @@
         <label for="f-tecnicos">Tecnicos</label>
         <select id="f-tecnicos" multiple></select>
       </div>
+      <!-- Campanas del Call Center. Solo la lee llamadas.ashx: los demas
+           handlers de esta pestana ignoran el parametro `campanas`. -->
+      <div class="campo">
+        <label for="f-campanas">Campanas</label>
+        <select id="f-campanas" multiple></select>
+      </div>
       <div class="campo acciones">
         <button class="btn" id="btn-aplicar" type="button">Aplicar filtros</button>
         <button class="btn gris" id="btn-limpiar" type="button">Limpiar</button>
@@ -117,6 +123,46 @@
         <b>Grupos</b>: no lo mueven el filtro de Tecnicos ni los filtros por clic del tablero.</div>
       <div class="cap" id="cap-top-cerrados"></div>
       <div class="scroll-x" id="tabla-top-cerrados"></div>
+    </section>
+
+    <!-- ================================== Call Center de Servicios TI
+         Va en esta misma pestana y no en una aparte porque las llamadas y los
+         tickets son la misma atencion vista por dos lados: con el mismo rango
+         de fechas arriba se ve de un vistazo si el dia que se dispararon los
+         tickets tambien se dispararon las llamadas.
+
+         Los filtros por clic de las graficas de SLA (cross-filter) NO alcanzan
+         a este bloque: una llamada no comparte ninguna dimension con un ticket
+         -no tiene estado, prioridad ni antiguedad-. Solo lo mueven el rango de
+         fechas y su propio filtro de campanas. -->
+    <section class="card">
+      <h3>Call Center de Servicios TI<span class="hint" id="hint-llamadas"></span></h3>
+      <div class="nota">Llamadas recibidas en el rango de fechas de arriba. Los filtros de
+        <b>Grupos</b> y <b>Tecnicos</b> no aplican: una llamada no tiene grupo resolutor.
+        El filtro de <b>Campanas</b> mueve <b>solo</b> este bloque.</div>
+      <div class="kpis" id="kpis-llamadas"></div>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h3>Llamadas por dia<span class="hint">recibidas vs contestadas vs abandonadas</span></h3>
+        <div class="lienzo alta"><canvas id="chart-llamadas-dia"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Atencion por agente<span class="hint">top 15</span></h3>
+        <div class="lienzo alta"><canvas id="chart-llamadas-agente"></canvas></div>
+      </div>
+    </section>
+
+    <section class="grid2">
+      <div class="card">
+        <h3>Abandono por campana<span class="hint">volumen y % de abandono</span></h3>
+        <div class="lienzo"><canvas id="chart-llamadas-campana"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Llamadas por hora del dia</h3>
+        <div class="lienzo"><canvas id="chart-llamadas-hora"></canvas></div>
+      </div>
     </section>
 
     <footer>
