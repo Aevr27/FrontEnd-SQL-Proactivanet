@@ -289,7 +289,7 @@ code {
 .lienzo-msg-error { color: var(--rojo); }
 
 /* ---------- Leyenda de la dona ---------- */
-.leyenda { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 12px; }
+.leyenda { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 14px; margin-top: 12px; }
 .leyenda-item { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); }
 .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
 .leyenda-val { font-weight: 600; }
