@@ -1541,11 +1541,15 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'productividad', 'chart-productividad',
       () => ({
         type: 'bar',
+        /* Medidas y cifra dentro salen de assets/js/barras.js, igual que en
+           Backlog: los defaults del tablero dejan estas barras en palitos y
+           la cifra tenia que buscarse en el tooltip. */
+        plugins: [Barras.etiquetasDentro(FMT)],
         data: {
           labels: etiquetas,
           datasets: [
-            { label: 'Totales', data: totales, backgroundColor: BARRA_A, borderRadius: 5 },
-            { label: 'Cerrados', data: cerrados, backgroundColor: BARRA_B, borderRadius: 5 },
+            { ...Barras.GRUESA, label: 'Totales', data: totales, backgroundColor: BARRA_A, borderRadius: 6 },
+            { ...Barras.GRUESA, label: 'Cerrados', data: cerrados, backgroundColor: BARRA_B, borderRadius: 6 },
           ]
         },
         options: {
@@ -1623,7 +1627,11 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, idGrafico, idCanvas,
       () => ({
         type: 'bar',
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
+        /* Barras.GRUESA + cifra dentro (assets/js/barras.js). El color lo
+           sigue poniendo colorFn -prioridad y rampa de antiguedad-: aqui solo
+           entran medidas y etiqueta. */
+        plugins: [Barras.etiquetasDentro(FMT)],
+        data: { labels: etiquetas, datasets: [{ ...Barras.GRUESA, data: valores, backgroundColor: colores,
           borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
         options: {
           responsive: true, maintainAspectRatio: false,
