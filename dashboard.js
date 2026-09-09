@@ -606,6 +606,13 @@ function hoyISO() {
   return formatoFecha(new Date());
 }
 
+/* Las columnas DATE llegan como "2026-08-01T00:00:00": SqlDataReader las
+   entrega como DateTime y DashboardDb las serializa con hora. Puesta tal cual
+   de etiqueta en el eje X, la hora ocupa mas que la fecha y no dice nada. */
+function soloFecha(v) {
+  return String(v ?? '').slice(0, 10);
+}
+
 const TableroSla = (function () {
   // El SP topea el detalle en 5000 filas (@TopSeguro). Se pide el maximo
   // porque el cross-filter de las graficas se calcula sobre estas filas.
@@ -1802,7 +1809,7 @@ const TableroSla = (function () {
       return renderEmptyChart('chart-llamadas-dia', 'Sin llamadas en el rango seleccionado.');
     }
     // Misma forma de fecha que tendencia.ashx: "aaaa-mm-ddT00:00:00".
-    const etiquetas = f.map(x => String(x.Fecha ?? '').slice(0, 10));
+    const etiquetas = f.map(x => soloFecha(x.Fecha));
     const series = [
       { label: 'Recibidas', data: f.map(x => x.Llamadas), color: AZUL },
       { label: 'Contestadas', data: f.map(x => x.Contestadas), color: VERDE_S },
@@ -1960,6 +1967,180 @@ const TableroSla = (function () {
     renderLlamadasAgente();
   }
 
+
+  /* ----------------------------------------------- Carga combinada
+     Cruce de las dos fuentes en la misma fila: quien cierra pocos tickets
+     porque se le fue el dia en el telefono. Sale de carga_combinada.ashx
+     (dbo.usp_Dash_CargaCombinada) y solo trae a la gente que esta en
+     dbo.CatAgenteTecnico, que es la que hace las dos cosas.
+
+     Vive FUERA de `datos` y fuera de renderTodo() a proposito: su peticion
+     va aparte de las demas del tablero (ver cargarTodo) y se pinta sola en
+     cuanto responde, sin esperar ni afectar al resto del Call Center.
+
+     Reusa lo que ya hay: dibujarGrafico, destruir, EJE_CONTEO, la paleta
+     compartida y hacerOrdenable. No define ningun color propio. */
+
+  // Filas que pide el procedimiento. La grafica solo dibuja las 15 primeras
+  // -en un panel de 320px, 20 barras quedan de tres pixeles-; la tabla de
+  // abajo si las trae todas.
+  const TOPE_CARGA = 20;
+  const TOPE_CARGA_GRAFICA = 15;
+
+  /* Mismo rango de fechas que los tickets y el MISMO filtro de Grupos: aqui
+     el grupo si se usa, pero contra el grupo donde el tecnico tiene mas
+     tickets (dbo.CatAgenteTecnico.Grupo), no contra el del ticket. El de
+     Tecnicos se quita: el procedimiento no lo mira. */
+  function paramsCargaCombinada() {
+    const p = paramsFiltros();
+    p.delete('tecnicos');
+    p.set('top', String(TOPE_CARGA));
+    return p;
+  }
+
+  /* Muestra u oculta las dos graficas y la tabla en bloque. Cuando no hay
+     cruce que pintar se esconden enteras: dos recuadros vacios y una tabla
+     sin filas no explican nada, y el mensaje del estado si. */
+  function mostrarBloqueCarga(visible) {
+    ['graficos-carga', 'card-tabla-carga'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = visible ? '' : 'none';
+    });
+  }
+
+  function estadoCargaCombinada(html) {
+    const el = document.getElementById('estado-carga-combinada');
+    if (!el) return;
+    el.innerHTML = html ? `<div class="vacio">${html}</div>` : '';
+  }
+
+  function renderCargaTecnico(filas) {
+    const top = filas.slice(0, TOPE_CARGA_GRAFICA);
+    const etiquetas = top.map(x => x.Tecnico);
+    const tickets = top.map(x => x.Tickets ?? 0);
+    const llamadas = top.map(x => x.Llamadas ?? 0);
+    // El pie del tooltip lee por posicion, asi que se congela junto con las
+    // series: si llegan datos nuevos, este arreglo se reemplaza entero.
+    const detalle = top.map(x => `Atenciones: ${FMT(x.Atenciones ?? 0)} \u00b7 ${x.LlamadasPct ?? 0}% llamadas \u00b7 ${FMT(x.MinutosHablados ?? 0)} min hablados`);
+    const pie = items => detalle[items[0].dataIndex];
+
+    dibujarGrafico(graficos, 'cargaTecnico', 'chart-carga-tecnico',
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [
+          { label: 'Tickets cerrados', data: tickets, backgroundColor: BARRA_A, borderRadius: 6 },
+          { label: 'Llamadas atendidas', data: llamadas, backgroundColor: MORADO, borderRadius: 6 },
+        ] },
+        options: {
+          indexAxis: 'y',
+          responsive: true, maintainAspectRatio: false,
+          /* Apiladas a proposito: el largo total de la barra es el total de
+             atenciones y el color dice como se reparte. Lado a lado se
+             compararia ticket contra llamada, que no es la pregunta. */
+          scales: { x: Object.assign({}, EJE_CONTEO, { stacked: true }), y: { stacked: true } },
+          plugins: {
+            tooltip: { callbacks: {
+              label: c => `${c.dataset.label}: ${FMT(c.raw)}`,
+              // footer y no afterLabel: afterLabel se repetiria en cada uno de
+              // los dos datasets del mismo tecnico.
+              footer: pie,
+            } },
+          },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = tickets;
+        gr.data.datasets[1].data = llamadas;
+        // El closure apunta al arreglo de ESTA pasada, no al de la
+        // construccion: hay que reinstalarlo para que el pie case.
+        gr.options.plugins.tooltip.callbacks.footer = pie;
+      });
+  }
+
+  function renderCargaDia(filas) {
+    const etiquetas = filas.map(x => soloFecha(x.Fecha));
+    const tickets = filas.map(x => x.Tickets ?? 0);
+    const llamadas = filas.map(x => x.Llamadas ?? 0);
+
+    dibujarGrafico(graficos, 'cargaDia', 'chart-carga-dia',
+      () => ({
+        type: 'line',
+        data: { labels: etiquetas, datasets: [
+          { label: 'Tickets cerrados', data: tickets, borderColor: BARRA_A,
+            backgroundColor: BARRA_A, tension: 0.25, pointRadius: 0, borderWidth: 2 },
+          { label: 'Llamadas atendidas', data: llamadas, borderColor: MORADO,
+            backgroundColor: MORADO, tension: 0.25, pointRadius: 0, borderWidth: 2 },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } } },
+          scales: { y: EJE_CONTEO },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = tickets;
+        gr.data.datasets[1].data = llamadas;
+      });
+  }
+
+  function renderTablaCarga(filas) {
+    const cont = document.getElementById('tabla-carga');
+    if (!cont) return;
+    const filasHtml = filas.map(x => `<tr>
+        <td>${escapeHtml(x.Tecnico)}</td>
+        <td>${escapeHtml(x.Grupo)}</td>
+        <td class="num">${FMT(x.Tickets ?? 0)}</td>
+        <td class="num">${FMT(x.Llamadas ?? 0)}</td>
+        <td class="num"><b>${FMT(x.Atenciones ?? 0)}</b></td>
+        <td class="num">${x.LlamadasPct ?? 0}%</td>
+        <td class="num">${FMT(x.MinutosHablados ?? 0)}</td>
+      </tr>`).join('');
+
+    cont.innerHTML = `<table><thead><tr>
+        <th>Tecnico</th><th>Grupo</th>
+        <th class="num">Tickets cerrados</th><th class="num">Llamadas atendidas</th>
+        <th class="num">Atenciones</th><th class="num">% llamadas</th>
+        <th class="num">Minutos hablados</th>
+      </tr></thead><tbody>${filasHtml}</tbody></table>`;
+    hacerOrdenable(cont.querySelector('table'));
+  }
+
+  function renderCargaCombinada(d) {
+    const filas = (d && d.tecnicos) || [];
+    const hint = document.getElementById('hint-carga');
+    if (hint) hint.textContent = (d && d.grupos) ? String(d.grupos) : '';
+
+    if (!filas.length) {
+      /* El caso mas probable no es que no haya habido actividad, sino que el
+         catalogo de extensiones no este capturado para esos grupos, asi que
+         se dice en vez de dejar dos recuadros vacios. */
+      destruir('cargaTecnico');
+      destruir('cargaDia');
+      mostrarBloqueCarga(false);
+      estadoCargaCombinada(`Sin cruce para este filtro. Se busco en los grupos: ${escapeHtml((d && d.grupos) || '')}.<br>Si el rango si tuvo actividad, revisa que dbo.CatAgenteTecnico tenga capturadas las extensiones de esos grupos.`);
+      return;
+    }
+
+    estadoCargaCombinada('');
+    mostrarBloqueCarga(true);
+    renderCargaTecnico(filas);
+    renderCargaDia((d && d.serie) || []);
+    renderTablaCarga(filas);
+  }
+
+  function errorCargaCombinada(err) {
+    destruir('cargaTecnico');
+    destruir('cargaDia');
+    mostrarBloqueCarga(false);
+    const hint = document.getElementById('hint-carga');
+    if (hint) hint.textContent = '';
+    estadoCargaCombinada(`No se pudo cargar el cruce: ${escapeHtml((err && err.message) || err)}`);
+    console.error(err);
+  }
+
   function renderTodo(motivo) {
     perf.ini('renderTodo');
     renderKpis();
@@ -2023,6 +2204,19 @@ const TableroSla = (function () {
     estadoCargando('estado-carga');
     const qs = paramsFiltros().toString();
     const qsGrupos = paramsRankingCerrados().toString();
+
+    /* El cruce va APARTE del allSettled de abajo, con su propio manejo de
+       error: depende de dbo.usp_Dash_CargaCombinada, que un servidor que
+       todavia no corrio ese script no tiene. Metido en la lista, su fallo se
+       sumaria a `fallos` y se anunciaria en la barra de estado como si el
+       tablero entero hubiera venido incompleto, cuando lo unico que falta es
+       el ultimo bloque del Call Center. Se lanza aqui para que salga en
+       paralelo con las demas, y se pinta solo en cuanto responde. */
+    estadoCargaCombinada('Cargando el cruce de tickets y llamadas...');
+    obtenerJSON(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
+      d => { if (miCarga === cargaVigente) renderCargaCombinada(d); },
+      e => { if (miCarga === cargaVigente) errorCargaCombinada(e); }
+    ).catch(e => console.error(e));
 
     const peticiones = [
       ['kpis',          () => obtenerJSON(`kpis.ashx?${qs}`)],

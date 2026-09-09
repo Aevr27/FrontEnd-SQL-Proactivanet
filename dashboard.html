@@ -326,6 +326,43 @@
         <div class="lienzo"><canvas id="chart-llamadas-hora"></canvas></div>
       </div>
     </section>
+
+    <!-- ------------------------------------------------- Carga combinada
+         Unico bloque donde llamadas y tickets caen en la MISMA fila, y
+         contesta lo que las graficas de arriba dejan abierto: quien cierra
+         pocos tickets porque se le fue el dia en el telefono. Solo sale la
+         gente que esta en dbo.CatAgenteTecnico -la que hace las dos cosas-.
+
+         Se pide a carga_combinada.ashx en una peticion APARTE del resto del
+         Call Center: depende de dbo.usp_Dash_CargaCombinada, que puede no
+         estar en un servidor viejo. Si falla, este bloque pinta su estado
+         vacio y las tarjetas y graficas de arriba siguen igual. -->
+    <section class="card">
+      <h3>Carga combinada: tickets y llamadas por tecnico<span class="hint" id="hint-carga"></span></h3>
+      <div class="nota">Solo los tecnicos con extension telefonica registrada en el catalogo.
+        Los tickets se cuentan por fecha de firma de solucion y las llamadas solo si fueron
+        contestadas. El filtro de <b>Grupos</b> si aplica aqui, pero contra el grupo donde el
+        tecnico tiene mas tickets, no contra el grupo del ticket.</div>
+      <div id="estado-carga-combinada"></div>
+    </section>
+
+    <section class="grid2" id="graficos-carga">
+      <div class="card">
+        <h3>Tickets vs llamadas por tecnico<span class="hint">top 15</span></h3>
+        <div class="lienzo alta"><canvas id="chart-carga-tecnico"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Del equipo, por dia<span class="hint">tickets cerrados vs llamadas atendidas</span></h3>
+        <div class="lienzo alta"><canvas id="chart-carga-dia"></canvas></div>
+      </div>
+    </section>
+
+    <section class="card" id="card-tabla-carga">
+      <h3>Detalle por tecnico</h3>
+      <div class="nota">Atenciones = tickets + llamadas. No mide esfuerzo: mide cuantas cosas
+        despacho la persona.</div>
+      <div class="scroll-x" id="tabla-carga"></div>
+    </section>
   </div>
 
   <div id="tab-tablero" class="maintab-content">
