@@ -80,7 +80,15 @@ BEGIN
         FechaFin    = @FechaFin,
         Llamadas    = COUNT_BIG(*),
         Contestadas = SUM(CONVERT(INT, EsContestada)),
-        Abandonadas = SUM(CONVERT(INT, EsAbandonada)),
+        -- Se parte el abandono en dos: colgar antes del minuto es impaciencia
+        -- y no falta de atencion, y mezclarlo con el resto infla la cifra que
+        -- de verdad duele. 'Abandonadas' pasa a ser solo lo que se fue
+        -- despues de aguantar mas de un minuto.
+        Abandonadas    = SUM(CASE WHEN EsAbandonada = 1 AND EsperaSeg >  60 THEN 1 ELSE 0 END),
+        ColgaronRapido = SUM(CASE WHEN EsAbandonada = 1 AND EsperaSeg <= 60 THEN 1 ELSE 0 END),
+
+        -- El porcentaje sigue midiendo TODO el abandono, rapido incluido: es
+        -- la tasa que se compara contra el historico y contra las graficas.
         AbandonoPct = CONVERT(DECIMAL(6,2),
                       100.0 * SUM(CONVERT(INT, EsAbandonada)) / NULLIF(COUNT_BIG(*), 0)),
 

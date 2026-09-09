@@ -1794,16 +1794,25 @@ const TableroSla = (function () {
     const total = k.Llamadas ?? 0;
     const contestadas = k.Contestadas ?? 0;
     const abandonadas = k.Abandonadas ?? 0;
+    // Colgaron antes del minuto. Va aparte de 'abandonadas': el backend ya
+    // dejo en Abandonadas solo las que aguantaron mas de un minuto, asi que el
+    // abandono total -el que mide AbandonoPct- es la suma de las dos.
+    const colgaronRapido = k.ColgaronRapido ?? 0;
+    const abandonoTotal = abandonadas + colgaronRapido;
     const aband = k.AbandonoPct ?? null;
     const nivel = k.NivelServicioPct ?? null;
     const umbral = k.UmbralNivelServicioSeg ?? 20;
 
     cont.innerHTML = htmlTarjetasKpi([
       { l: 'Llamadas recibidas', v: FMT(total),
-        f: `${FMT(contestadas)} contestadas · ${FMT(abandonadas)} abandonadas` },
+        f: `${FMT(contestadas)} contestadas · ${FMT(abandonoTotal)} abandonadas` },
       { l: '% de abandono', v: aband !== null ? `${aband}%` : '—',
         s: aband !== null ? SEM_ABANDONO(aband) : '',
-        f: `${FMT(abandonadas)} de ${FMT(total)}` },
+        f: `${FMT(abandonoTotal)} de ${FMT(total)}` },
+      { l: 'Abandonadas (> 1 min)', v: FMT(abandonadas),
+        f: `esperaron mas de un minuto antes de colgar` },
+      { l: 'Colgaron antes del minuto', v: FMT(colgaronRapido),
+        f: `abandono rapido, sin llegar al minuto` },
       // El umbral se escribe "menos de Ns" a proposito: la tarjeta se inyecta
       // con innerHTML y un '<' suelto abre una etiqueta que se come el texto.
       { l: 'Nivel de servicio', v: nivel !== null ? `${nivel}%` : '—',
