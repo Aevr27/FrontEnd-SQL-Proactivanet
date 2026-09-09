@@ -448,6 +448,9 @@
     flex: 1 1 0; min-width: 0; height: 40px; padding: 0 10px;
     display: inline-flex; align-items: center; justify-content: center;
   }
+  /* El display de la regla de arriba le gana al del atributo, asi que el
+     boton oculto -"Año" en Call Center, "Mes" en SLA- necesita decirlo aqui. */
+  .filtros .rango-rapido .btn[hidden] { display: none; }
   /* Los botones de rango van a juego con las barras oscuras vecinas. */
   .filtros .rango-rapido button {
     border: 1px solid var(--g-700);

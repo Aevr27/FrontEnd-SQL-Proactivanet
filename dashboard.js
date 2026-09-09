@@ -787,6 +787,10 @@ const TableroSla = (function () {
     let inicio, fin = new Date(hoy);
     if (tipo === '7d') { inicio = new Date(hoy); inicio.setDate(inicio.getDate() - 6); }
     else if (tipo === 'anio') inicio = new Date(hoy.getFullYear(), 0, 1);
+    // "Mes" (solo Call Center) es el mes en curso, no los ultimos 30 dias: del
+    // dia 1 del mes a hoy, igual que "Año" va del 1 de enero a hoy.
+    else if (tipo === 'mes') inicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    else return;   // rango desconocido: mejor no escribir fechas invalidas
     // El rango rapido manda sobre el SLOT: acaba de fijar un periodo distinto,
     // asi que dejar el SLOT en vigor contradiria lo que se acaba de pedir.
     desactivarSlots();
@@ -3221,6 +3225,17 @@ function adoptarControlesSla(idTab) {
   if (!destino || !filtros || !estado) return;
   destino.querySelector('.acciones-top').appendChild(estado);
   destino.querySelector('header.top').insertAdjacentElement('afterend', filtros);
+
+  /* Los dos tableros no miden el mismo periodo largo: en SLA interesa el año
+     en curso y en el Call Center el mes en curso. Como la barra es UNA y
+     viaja entre las dos pestañas, el segundo boton del rango rapido se elige
+     aqui, al moverla: los dos <button> ya estan en el marcado y comparten el
+     listener de `#filtros-sla [data-rango]`. "7 dias" no se toca. */
+  const esCallCenter = idTab === 'tab-call';
+  const anio = filtros.querySelector('[data-rango="anio"]');
+  const mes = filtros.querySelector('[data-rango="mes"]');
+  if (anio) anio.hidden = esCallCenter;
+  if (mes) mes.hidden = !esCallCenter;
 }
 
 let slaIniciado = false;

@@ -52,9 +52,16 @@
       </div>
       <div class="campo">
         <label>Rango rapido</label>
+        <!-- "7 dias" es de las dos pestañas. El segundo boton no: SLA mira el
+             año en curso y el Call Center el mes en curso, asi que los dos
+             estan aqui y adoptarControlesSla() (dashboard.js) ensena el que
+             toca al mover esta misma barra a la pestaña visible. No se
+             duplica el marcado ni se cablea ningun listener aparte: los tres
+             pasan por el mismo `#filtros-sla [data-rango]`. -->
         <div class="rango-rapido">
           <button class="btn linea chico" type="button" data-rango="7d">7 dias</button>
           <button class="btn linea chico" type="button" data-rango="anio">Año</button>
+          <button class="btn linea chico" type="button" data-rango="mes" hidden>Mes</button>
         </div>
       </div>
       <!-- campo-slot: el resumen de abajo no cuenta para la altura del campo,
