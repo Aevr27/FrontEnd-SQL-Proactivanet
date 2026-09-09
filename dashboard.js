@@ -161,27 +161,6 @@ function dimensionesActivas(filtro) {
   return Object.entries(filtro).filter(([, v]) => v !== null);
 }
 
-function limpiarFiltro(filtro, alCambiar) {
-  Object.keys(filtro).forEach(k => { filtro[k] = null; });
-  alCambiar();
-}
-
-// Barra de "filtros activos": un chip por dimension, con su tache para quitarla.
-function pintarChipsFiltro(contenedorId, filtro, etiquetas, alCambiar, textoVacio) {
-  const cont = document.getElementById(contenedorId);
-  const activos = dimensionesActivas(filtro);
-  if (!activos.length) {
-    cont.innerHTML = `<span class="ninguno">${textoVacio}</span>`;
-    return;
-  }
-  cont.innerHTML = activos.map(([d, v]) =>
-    `<span class="fchip"><span class="dim">${etiquetas[d]}:</span>${escapeHtml(v)}
-      <span class="quitar" data-dim="${d}">&times;</span></span>`).join(' ');
-  cont.querySelectorAll('.quitar').forEach(x => {
-    x.addEventListener('click', () => { filtro[x.dataset.dim] = null; alCambiar(); });
-  });
-}
-
 // Fila de tarjetas de KPI. t = { l: etiqueta, v: valor, f: pie, s: semaforo }.
 function htmlTarjetasKpi(tarjetas) {
   return tarjetas.map(t => `
@@ -775,8 +754,7 @@ const TableroSla = (function () {
   function alternarFiltro(dim, valor) {
     if (valor === null || valor === undefined) return;
     // Sin detalle no hay con que recalcular las demas graficas: filtrar dejaria
-    // todo en cero y pareceria que no hay tickets. Se avisa en la barra de
-    // chips (renderChips) en vez de filtrar en falso.
+    // todo en cero y pareceria que no hay tickets: mejor no filtrar en falso.
     if (!detalleDisponible) return;
     filtro[dim] = (filtro[dim] === valor) ? null : valor;
     renderTodo('filtro');
@@ -1739,18 +1717,6 @@ const TableroSla = (function () {
     cap.innerHTML = descripcionTopCerrados(totalCerrados, ranking.length, visibles.length);
   }
 
-  // ------------------------------------------------------ barra de filtros activos
-  // Quitar un chip es un cambio de cross-filter, igual que un clic en una
-  // grafica: repintado local ('filtro'), sin tocar el ranking ni el stepper.
-  function renderChips() {
-    pintarChipsFiltro('chips-filtro', filtro, ETIQUETA_DIM, () => renderTodo('filtro'),
-      detalleDisponible
-        ? 'ninguno · clic en una grafica para filtrar'
-        : '⚠ sin detalle cargado · el filtro por clic esta deshabilitado');
-  }
-
-  function resetFiltros() { limpiarFiltro(filtro, () => renderTodo('filtro')); }
-
   /* motivo === 'filtro' -> el repintado viene de un cambio de cross-filter.
      El ranking de cerrados (topCerrados, que se pide aparte y a proposito
      ignora el cross-filter) y el stepper de SLOT no dependen de `filtro`:
@@ -2010,7 +1976,6 @@ const TableroSla = (function () {
       // repinta con los datos nuevos, no en cada clic sobre las graficas.
       renderLlamadas();
     }
-    renderChips();
     perf.fin('renderTodo');
   }
 
@@ -2115,7 +2080,6 @@ const TableroSla = (function () {
       Object.keys(filtro).forEach(k => { filtro[k] = null; });
       cargarTodo();
     });
-    document.getElementById('btn-reset-filtros').addEventListener('click', resetFiltros);
 
     // Stepper de SLOTs: mueve el numero, pone su rango en vigor y recarga.
     // El debounce agrupa los clics seguidos en una sola peticion.
@@ -2853,14 +2817,6 @@ const TableroBacklog = (function () {
     }
   }
 
-  // ------------------------------------------------------ barra de filtros activos
-  function renderChips() {
-    pintarChipsFiltro('chips-filtro-bl', filtro, ETIQUETA_DIM, renderTodo,
-      'ninguno · clic en una grafica o en un lider para filtrar');
-  }
-
-  function resetFiltros() { limpiarFiltro(filtro, renderTodo); }
-
   // ------------------------------------------------- resumen de texto del filtro
   function descripcionFiltro(n) {
     const activos = dimensionesActivas(filtro);
@@ -2879,7 +2835,6 @@ const TableroBacklog = (function () {
     renderLideres();
     renderTablaAging();
     renderAntiguos();
-    renderChips();
   }
 
   function sumaPor(filas, campoClave, campoValor) {
@@ -2992,7 +2947,6 @@ const TableroBacklog = (function () {
                       'f-c1-bl', 'f-grupos-bl', 'f-lideres-bl']) {
       document.getElementById(id).addEventListener('change', programarCarga);
     }
-    document.getElementById('btn-reset-filtros-bl').addEventListener('click', resetFiltros);
     activarSubtabs(document.querySelector('#tab-backlog .tabs').parentElement, () => redimensionar(graficos));
 
     try {
