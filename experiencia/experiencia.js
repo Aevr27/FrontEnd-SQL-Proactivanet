@@ -1641,9 +1641,18 @@ function fillSO(){
 selMgr.onchange=()=>{fMgr=selMgr.value;fSO='';fillSO();renderAll();};
 selSO.onchange=()=>{fSO=selSO.value;renderAll();};
 
+// "Limpiar" deja el tablero como recien abierto, igual que el de SLA: ademas
+// de los cuatro desplegables borra el cross-filter de las graficas de Vencidas
+// y Activas, que si no seguiria acotando lo que se ve sin que ningun filtro de
+// arriba lo anuncie. La dimension elegida (dim) NO se toca: es el selector de
+// "ver por", no una seleccion, igual que en los resets de cada panel.
 document.getElementById('btnReset').onclick=()=>{
   fDir='';fPO='';fMgr='';fSO='';
-  selDir.value='';selMgr.value='';fillPO();fillSO();renderAll();
+  selDir.value='';selMgr.value='';fillPO();fillSO();
+  for(const p of ['ven','act']){
+    filtroGraf[p].dimVal='';filtroGraf[p].agrup='';filtroGraf[p].estado='';
+  }
+  renderAll();
 };
 
 // ---- TAREA 3: wiring del selector de dimension y boton de reset del

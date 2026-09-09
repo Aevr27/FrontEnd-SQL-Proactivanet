@@ -34,13 +34,16 @@
         <select id="selSO"><option value="">— Todos —</option></select></div>
       <div class="grp"><label>Ver por</label>
         <select id="selModo"><option value="slot">SLOT (30 días)</option><option value="mes">Mes calendario</option></select></div>
-      <button id="btnReset">Ver resumen general</button>
       <button id="btnDescargaTickets" style="display:none;background:#478b3c">⬇ Descargar Tickets</button>
       <button id="btnAyuda" style="background:#81c727;color:#191919">❓ Ayuda / Glosario</button>
       <a id="ligaHeader" href="#" target="_blank" rel="noopener"
          style="display:none;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;
          background:#d97706;color:var(--ink);font-size:12px;font-weight:700;text-decoration:none">
          🔎 Consulta el Detalle</a>
+      <!-- "Limpiar", ultimo y a la derecha: mismo nombre, mismo sitio y mismo
+           trato secundario que en las pestanas de SLA y de Backlog. Antes se
+           llamaba "Ver resumen general" y vivia entre los desplegables. -->
+      <button id="btnReset" class="gris">Limpiar</button>
     </div>
   </header>
 
@@ -247,7 +250,8 @@
     <h3 style="margin:14px 0 6px;color:var(--ink)">Filtros</h3>
     <p>El tablero inicia con el <b>resumen general</b> de todos los tickets. Elige un <b>Director</b> para ver
     solo sus categorías; al elegir Director se habilitan sus <b>Product Owners</b>. El botón
-    «Ver resumen general» limpia los filtros.</p>
+    «Limpiar», al final de la fila, devuelve el tablero al resumen general: borra los cuatro
+    desplegables y también la selección hecha por clic en las gráficas de Vencidas y Activas.</p>
 
     <h3 style="margin:14px 0 6px;color:var(--ink)">Indicadores (KPIs)</h3>
     <table style="margin-top:6px">

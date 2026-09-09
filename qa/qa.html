@@ -150,6 +150,12 @@
         </label>
 
         <div class="filtros-qa" id="qa-filtros-activos"></div>
+
+        <!-- "Limpiar": mismo nombre y mismo trato secundario que en SLA,
+             Backlog y Experiencia. Devuelve el detalle a como abre -solo los
+             incorrectos-, en vez de quitar los filtros uno por uno con la ×.
+             Oculto mientras no haya nada que limpiar. -->
+        <button type="button" class="btn btn-sec chico" id="qa-btn-limpiar" hidden>Limpiar</button>
       </div>
 
       <div id="qa-detalle-cargando" class="estado estado-mini" hidden>

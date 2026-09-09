@@ -333,6 +333,9 @@ code {
 /* filtros-qa, no "filtros": en el tablero .filtros es el panel de filtros de
    SLA y Backlog, que es otra cosa. */
 .filtros-qa { display: flex; flex-wrap: wrap; gap: 7px; }
+/* "Limpiar" cierra la barra por la derecha, como en SLA, Backlog y
+   Experiencia: es la accion de la fila, no un chip mas. */
+#qa-btn-limpiar { margin-left: auto; }
 .filtro {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 4px 10px; border-radius: var(--radius-pill);

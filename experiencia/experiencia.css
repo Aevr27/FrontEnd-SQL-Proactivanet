@@ -67,6 +67,13 @@ box-shadow:0 0 0 3px rgba(255,255,255,.55)}
 background:var(--grad-btn);color:var(--btn-ink);
 cursor:pointer;font-size:12px;font-weight:700}
 .selrow button:hover{background:var(--grad-btn-hover);border-color:var(--g-800)}
+/* "Limpiar" es secundario: no compite con Ayuda ni con Descargar. Superficie
+   blanca como los desplegables de al lado -misma familia que el .btn.gris de
+   SLA y Backlog, adaptado al verde de esta cabecera-. Va al final de la fila,
+   asi que margin-left:auto lo empuja al extremo derecho. */
+.selrow button.gris{margin-left:auto;background:#fff;border-color:var(--g-200);
+color:var(--g-900)}
+.selrow button.gris:hover{background:var(--g-50);border-color:var(--g-400)}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:14px;margin-bottom:16px}
 .kpi{background:var(--card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07);
 border-left:5px solid transparent;border-image:var(--grad) 1}
