@@ -923,8 +923,8 @@ const TableroSla = (function () {
     inicio.setDate(inicio.getDate() - (DIAS_SLOT - 1));
     return { inicio: formatoFecha(inicio), fin: formatoFecha(fin) };
   }
-  // Hay SLOT en vigor solo cuando el usuario aplico uno: el numero preparado en
-  // el stepper no cuenta hasta que se pulsa "Aplicar filtros".
+  // Hay SLOT en vigor solo cuando hay uno aplicado: el 0 es "sin SLOT" y deja
+  // mandar al rango manual de las fechas.
   function enModoSlot() {
     return slotsAplicados > 0;
   }
@@ -1235,10 +1235,9 @@ const TableroSla = (function () {
     sum.classList.toggle('off', slotsN === 0);
   }
 
-  // Pone en vigor el SLOT preparado escribiendo su rango en las fechas. No
-  // recarga: la recarga la dispara "Aplicar filtros", el unico momento en que
-  // el SLOT entra en juego. Asi los KPIs, la tendencia y el ranking hablan
-  // siempre del mismo periodo que muestra el control.
+  // Pone en vigor el SLOT escribiendo su rango en las fechas. No recarga por su
+  // cuenta: quien lo llama encadena la carga. Asi los KPIs, la tendencia y el
+  // ranking hablan siempre del mismo periodo que muestra el control.
   function aplicarSlots() {
     slotsAplicados = slotsN;
     if (slotsN > 0) {
@@ -2033,7 +2032,25 @@ const TableroSla = (function () {
      entero se quedaba sin pintar, aunque kpis/tendencia/distribucion hubieran
      respondido bien. Ahora cada dataset que llega se pinta; los que fallan
      dejan su estado vacio y aparecen listados en la barra de estado. */
+  /* Auto-aplicado de los filtros. Los controles ya no esperan a ningun boton:
+     cada cambio llama a programarCarga(), que agrupa los cambios seguidos -tres
+     casillas de un multi-select, dos clics del stepper- en UNA sola peticion.
+     Y como dos cargas pueden solaparse, cada una lleva su numero: la que ya no
+     es la ultima descarta su respuesta y no pinta datos viejos encima. */
+  const ESPERA_AUTO = 250;             // ms para agrupar cambios seguidos
+  let cargaProgramada = null;
+  let cargaVigente = 0;
+
+  function programarCarga() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = setTimeout(() => { cargaProgramada = null; cargarTodo(); }, ESPERA_AUTO);
+  }
+
   async function cargarTodo() {
+    // Una carga inmediata ("Limpiar", rango rapido) manda sobre la programada.
+    clearTimeout(cargaProgramada);
+    cargaProgramada = null;
+    const miCarga = ++cargaVigente;
     estadoCargando('estado-carga');
     const qs = paramsFiltros().toString();
     const qsGrupos = paramsRankingCerrados().toString();
@@ -2049,6 +2066,8 @@ const TableroSla = (function () {
     ];
 
     const resueltos = await Promise.allSettled(peticiones.map(([, pedir]) => pedir()));
+    // Llego tarde: otro cambio de filtro ya lanzo una carga posterior.
+    if (miCarga !== cargaVigente) return;
 
     const nuevos = {};
     const fallos = [];
@@ -2084,12 +2103,6 @@ const TableroSla = (function () {
     document.querySelectorAll('#tab-sla [data-rango]').forEach(btn => {
       btn.addEventListener('click', () => aplicarRangoRapido(btn.dataset.rango));
     });
-    // Unico punto donde el SLOT entra en vigor: el stepper por si solo no
-    // recarga, se aplica junto al resto de filtros.
-    document.getElementById('btn-aplicar').addEventListener('click', () => {
-      aplicarSlots();
-      cargarTodo();
-    });
     document.getElementById('btn-limpiar').addEventListener('click', () => {
       document.getElementById('f-grupos').selectedIndex = -1;
       document.getElementById('f-tecnicos').selectedIndex = -1;
@@ -2104,22 +2117,31 @@ const TableroSla = (function () {
     });
     document.getElementById('btn-reset-filtros').addEventListener('click', resetFiltros);
 
-    // Stepper de SLOTs: solo mueve el numero y repinta. Nada de red hasta que
-    // se pulsa "Aplicar filtros".
+    // Stepper de SLOTs: mueve el numero, pone su rango en vigor y recarga.
+    // El debounce agrupa los clics seguidos en una sola peticion.
     document.getElementById('slot-mas').addEventListener('click', () => {
       slotsN = Math.min(slotsN + 1, MAX_SLOTS);
-      renderSlotStepper();
+      aplicarSlots();
+      programarCarga();
     });
     document.getElementById('slot-menos').addEventListener('click', () => {
       if (slotsN <= 0) return;       // 0 = SLOT apagado, no se baja mas
-      slotsN--;                      // 1 -> 0 solo PREPARA el apagado: nada de
-                                     // red ni de fechas hasta "Aplicar filtros"
-      renderSlotStepper();
+      slotsN--;                      // 1 -> 0 apaga el SLOT: manda el rango
+      aplicarSlots();                // manual que haya escrito en las fechas
+      programarCarga();
     });
-    // Tocar una fecha a mano apaga el SLOT: si no, "Aplicar filtros" volveria a
-    // escribir el rango del SLOT encima y las fechas escritas se perderian.
+    // Tocar una fecha a mano apaga el SLOT: si no, el rango del SLOT se
+    // reescribiria encima y las fechas escritas se perderian.
     ['f-inicio', 'f-fin'].forEach(id => {
-      document.getElementById(id).addEventListener('change', desactivarSlots);
+      document.getElementById(id).addEventListener('change', () => {
+        desactivarSlots();
+        programarCarga();
+      });
+    });
+    // Grupos, tecnicos y campanas: el multi-select propio emite `change` sobre
+    // el <select> original, asi que basta con escucharlo aqui.
+    ['f-grupos', 'f-tecnicos', 'f-campanas'].forEach(id => {
+      document.getElementById(id).addEventListener('change', programarCarga);
     });
     renderSlotStepper();             // estado inicial: sin SLOT, rango manual
 
@@ -2906,7 +2928,22 @@ const TableroBacklog = (function () {
     }
   }
 
+  /* Mismo auto-aplicado que el tablero de SLA: los cambios seguidos se agrupan
+     en una peticion y la carga que deja de ser la ultima descarta su respuesta
+     para no pintar datos viejos encima de los recien pedidos. */
+  const ESPERA_AUTO = 250;
+  let cargaProgramada = null;
+  let cargaVigente = 0;
+
+  function programarCarga() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = setTimeout(() => { cargaProgramada = null; cargarTodo(); }, ESPERA_AUTO);
+  }
+
   async function cargarTodo() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = null;
+    const miCarga = ++cargaVigente;
     estadoCargando('estado-carga-bl');
     try {
       const p = paramsFiltros();
@@ -2920,6 +2957,8 @@ const TableroBacklog = (function () {
         obtenerJSON(`backlog_historico.ashx?${qsHist.toString()}`),
         obtenerJSON(`backlog_antiguos.ashx?${qs}`),
       ]);
+      // Llego tarde: otro cambio de filtro ya lanzo una carga posterior.
+      if (miCarga !== cargaVigente) return;
       datos = { resumen, historico, antiguos };
 
       // El orden de lideres se fija UNA vez, con el corte actual, y de ahi
@@ -2931,12 +2970,12 @@ const TableroBacklog = (function () {
       renderTodo();
       estadoOk('estado-carga-bl');
     } catch (err) {
+      if (miCarga !== cargaVigente) return;   // fallo de una carga ya superada
       estadoError('estado-carga-bl', err);
     }
   }
 
   async function init() {
-    document.getElementById('btn-aplicar-bl').addEventListener('click', cargarTodo);
     document.getElementById('btn-limpiar-bl').addEventListener('click', () => {
       for (const id of ['f-c1-bl', 'f-grupos-bl', 'f-lideres-bl']) {
         Array.from(document.getElementById(id).options).forEach(o => { o.selected = false; });
@@ -2945,10 +2984,13 @@ const TableroBacklog = (function () {
       document.getElementById('f-granularidad-bl').value = 'Dia';
       cargarTodo();
     });
-    // Cambiar el corte o la ventana recarga de inmediato: son de un solo clic y
-    // esperar a "Aplicar filtros" se siente roto.
-    for (const id of ['f-corte-bl', 'f-dias-bl', 'f-granularidad-bl']) {
-      document.getElementById(id).addEventListener('change', cargarTodo);
+    // Todos los filtros del backlog recargan solos. Los multi-select emiten
+    // `change` sobre el <select> original desde su capa visual, asi que los
+    // seis pasan por el mismo camino, con el debounce agrupando los cambios
+    // seguidos en una sola peticion.
+    for (const id of ['f-corte-bl', 'f-dias-bl', 'f-granularidad-bl',
+                      'f-c1-bl', 'f-grupos-bl', 'f-lideres-bl']) {
+      document.getElementById(id).addEventListener('change', programarCarga);
     }
     document.getElementById('btn-reset-filtros-bl').addEventListener('click', resetFiltros);
     activarSubtabs(document.querySelector('#tab-backlog .tabs').parentElement, () => redimensionar(graficos));
