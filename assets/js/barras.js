@@ -90,6 +90,12 @@
         chart.data.datasets.forEach(function (ds, dsIdx) {
           var meta = chart.getDatasetMeta(dsIdx);
           if (meta.hidden) return;
+          /* En una grafica mixta -barras de volumen mas una linea de
+             porcentaje sobre un segundo eje, como "Abandono por campana"- los
+             elementos de la linea son puntos, sin base ni grosor: medirlos da
+             NaN y la cifra caeria en cualquier parte. La cifra dentro es cosa
+             de las barras, asi que los demas tipos se dejan al tooltip. */
+          if ((meta.type || ds.type || chart.config.type) !== 'bar') return;
           meta.data.forEach(function (bar, i) {
             var val = ds.data[i];
             if (val == null) return;

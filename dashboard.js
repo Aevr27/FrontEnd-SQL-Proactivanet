@@ -485,11 +485,20 @@ const ORIGEN_SLOT = {
 
 // Chart.js core no trae plugin de datalabels: este dibuja la cantidad dentro
 // de cada segmento de una barra apilada -un numero por color-. Los segmentos
-// que no dan alto para el texto se dejan al tooltip.
+// donde la cifra no cabe se dejan al tooltip.
+//
+// Sirve para los dos ejes. Con el eje normal la pila crece hacia arriba y el
+// segmento va de `base` a `y`; con indexAxis 'y' crece hacia la derecha y va
+// de `base` a `x`. Se mide la CAJA del segmento -alto y ancho- en vez de solo
+// el largo: una pila de 24 horas da segmentos altos pero angostos, donde un
+// "1.234" se salia por los costados encima de los vecinos.
 const ETIQUETAS_SEGMENTO = {
   id: 'etiquetasSegmento',
   afterDatasetsDraw(chart) {
     const ctx = chart.ctx;
+    const horizontal = chart.options && chart.options.indexAxis === 'y';
+    const ALTO_TEXTO = 14;   // alto minimo de caja para que quepa la cifra
+    const AIRE = 6;          // margen a los costados, dentro del segmento
     ctx.save();
     ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center';
@@ -500,15 +509,22 @@ const ETIQUETAS_SEGMENTO = {
       meta.data.forEach((barra, j) => {
         const v = ds.data[j];
         if (!v) return;
-        if (Math.abs((barra.base ?? 0) - barra.y) < 14) return;
-        const y = ((barra.base ?? 0) + barra.y) / 2;
+        const base = barra.base ?? 0;
+        const largo = Math.abs(base - (horizontal ? barra.x : barra.y));
+        const grueso = Math.abs(horizontal ? barra.height : barra.width);
+        const alto = horizontal ? grueso : largo;
+        const ancho = horizontal ? largo : grueso;
         const texto = FMT(v);
+        if (alto < ALTO_TEXTO) return;
+        if (ancho < ctx.measureText(texto).width + AIRE * 2) return;
+        const x = horizontal ? (base + barra.x) / 2 : barra.x;
+        const y = horizontal ? barra.y : (base + barra.y) / 2;
         // Contorno oscuro: el mismo numero se lee sobre cualquier color de la paleta.
         ctx.strokeStyle = 'rgba(25,25,25,.72)';
         ctx.lineWidth = 3;
-        ctx.strokeText(texto, barra.x, y);
+        ctx.strokeText(texto, x, y);
         ctx.fillStyle = '#fff';
-        ctx.fillText(texto, barra.x, y);
+        ctx.fillText(texto, x, y);
       });
     });
     ctx.restore();
@@ -1859,8 +1875,12 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'llamadasCampana', 'chart-llamadas-campana',
       () => ({
         type: 'bar',
+        /* La cifra dentro de la barra, como en el resto del tablero. El
+           plugin compartido solo mira los datasets de tipo `bar`, asi que la
+           serie de % -que es linea- se queda con su tooltip. */
+        plugins: [ETIQUETAS_DENTRO],
         data: { labels: etiquetas, datasets: [
-          { label: 'Llamadas', data: volumen, backgroundColor: AZUL, borderRadius: 6, yAxisID: 'y' },
+          { label: 'Llamadas', data: volumen, backgroundColor: AZUL, yAxisID: 'y' },
           { label: '% abandono', data: abandono, type: 'line', borderColor: ROJO,
             backgroundColor: ROJO, tension: 0.25, pointRadius: 3, borderWidth: 2, yAxisID: 'y1' },
         ] },
@@ -1890,12 +1910,24 @@ const TableroSla = (function () {
     const contestadas = f.map(x => x.Contestadas);
     const abandonadas = f.map(x => x.Abandonadas);
 
+    /* Aire local, y SOLO aqui: mismo caso que "Por antiguedad" del Backlog
+       pero peor, porque aqui son 24 cubos. Con el juego compartido -.9 x .9,
+       la barra en el 81% de su ranura- las columnas quedan pegadas y el dia
+       se lee como una sola mancha. Con .72 x .86 la barra ocupa el 62% y cada
+       hora se separa de la siguiente. El tope de grosor y el radio siguen
+       siendo los del default compartido: solo se cambia el reparto de la
+       ranura, y solo en esta grafica. */
+    const AIRE_HORA = { categoryPercentage: 0.72, barPercentage: 0.86 };
+
     dibujarGrafico(graficos, 'llamadasHora', 'chart-llamadas-hora',
       () => ({
         type: 'bar',
+        // Apilada: la cifra la pone ETIQUETAS_SEGMENTO, que sabe de segmentos
+        // y omite el que no da la caja en vez de sacar el numero afuera.
+        plugins: [ETIQUETAS_SEGMENTO],
         data: { labels: etiquetas, datasets: [
-          { label: 'Contestadas', data: contestadas, backgroundColor: VERDE_S },
-          { label: 'Abandonadas', data: abandonadas, backgroundColor: ROJO },
+          { ...AIRE_HORA, label: 'Contestadas', data: contestadas, backgroundColor: VERDE_S },
+          { ...AIRE_HORA, label: 'Abandonadas', data: abandonadas, backgroundColor: ROJO },
         ] },
         options: {
           responsive: true, maintainAspectRatio: false,
@@ -1925,8 +1957,11 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'llamadasAgente', 'chart-llamadas-agente',
       () => ({
         type: 'bar',
+        // Cifra dentro de la barra: el plugin compartido mide a lo ancho
+        // cuando indexAxis es 'y', asi que la grafica sigue horizontal.
+        plugins: [ETIQUETAS_DENTRO],
         data: { labels: etiquetas, datasets: [{ label: 'Llamadas atendidas',
-          data: atendidas, backgroundColor: MORADO, borderRadius: 6 }] },
+          data: atendidas, backgroundColor: MORADO }] },
         options: {
           indexAxis: 'y',
           responsive: true, maintainAspectRatio: false,
@@ -2036,9 +2071,13 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'cargaTecnico', 'chart-carga-tecnico',
       () => ({
         type: 'bar',
+        // Apilada, como la de antiguedad del Backlog pero tumbada: la cifra
+        // de cada segmento la pone ETIQUETAS_SEGMENTO. La geometria -grosor,
+        // aire y radio- ya viene del default compartido.
+        plugins: [ETIQUETAS_SEGMENTO],
         data: { labels: etiquetas, datasets: [
-          { label: 'Tickets cerrados', data: tickets, backgroundColor: BARRA_A, borderRadius: 6 },
-          { label: 'Llamadas atendidas', data: llamadas, backgroundColor: MORADO, borderRadius: 6 },
+          { label: 'Tickets cerrados', data: tickets, backgroundColor: BARRA_A },
+          { label: 'Llamadas atendidas', data: llamadas, backgroundColor: MORADO },
         ] },
         options: {
           indexAxis: 'y',
