@@ -89,6 +89,18 @@ const COLOR_PRIORIDAD = {
   'Alta': AMBAR_SEM, 'Media': VERDE.marca, 'Baja': VERDE.lima
 };
 
+/* Semaforo de severidad ORIGINAL -rojo / naranja / oro / verde-, el juego con
+   el que nacio el tablero (ver e58add5) y el unico que lee de un vistazo sin
+   el rotulo del eje: Critica roja, Alta naranja, Media oro, Baja verde.
+   Vive aparte de COLOR_PRIORIDAD a proposito: SOLO lo usa "Por prioridad" del
+   Backlog (chart-prioridad-bl). El resto del tablero -chart-prioridad de la
+   vista de SLA- sigue con COLOR_PRIORIDAD y su escala verde de marca, asi que
+   tocar uno no repinta el otro. */
+const COLOR_PRIORIDAD_SEMAFORO = {
+  'Critica': '#dc2626', 'Crítica': '#dc2626',
+  'Alta': '#d97706', 'Media': '#eab308', 'Baja': '#16a34a'
+};
+
 // Semaforo de tres niveles: devuelve el sufijo de clase (.kpi.sv/.sa/.sr).
 const SEM = pct => pct >= 90 ? 'sv' : (pct >= 75 ? 'sa' : 'sr');
 const COLOR_SEM = { sv: VERDE.profundo, sa: AMBAR_SEM, sr: ROJO_SEM };
@@ -2805,14 +2817,16 @@ const TableroBacklog = (function () {
       return renderEmptyChart('chart-prioridad-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
-    /* El color va en `colores`, hecho, y NO por `paleta`: COLOR_PRIORIDAD es
+    /* El color va en `colores`, hecho, y NO por `paleta`: la prioridad es
        severidad -Critica/Alta/Media/Baja-, no identidad, y no entra en la
-       paleta categorica. Medidas y cifra dentro las trae DashboardBarChart. */
+       paleta categorica. Aqui manda COLOR_PRIORIDAD_SEMAFORO -rojo, naranja,
+       oro, verde-, que es el juego original de esta grafica y no el de la
+       escala verde. Medidas y cifra dentro las trae DashboardBarChart. */
     graficos['chart-prioridad-bl'] = new DashboardBarChart({
       canvas: 'chart-prioridad-bl',
       etiquetas,
       datos: valores,
-      colores: etiquetas.map(l => COLOR_PRIORIDAD[l]),
+      colores: etiquetas.map(l => COLOR_PRIORIDAD_SEMAFORO[l]),
       formato: FMT,
       /* Aire local, y SOLO aqui. Son CUATRO categorias en una tarjeta de
          .grid3 -un tercio del ancho-, asi que la ranura de cada prioridad
