@@ -2073,11 +2073,6 @@ const TableroSla = (function () {
   }
 
   function renderLlamadas() {
-    const hint = document.getElementById('hint-llamadas');
-    if (hint) {
-      const n = seleccionados('f-campanas').length;
-      hint.textContent = n ? `${n} campaña${n > 1 ? 's' : ''}` : 'todas las campañas';
-    }
     llenarCatalogoCampanas();
     renderKpisLlamadas();
     renderLlamadasDia();

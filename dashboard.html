@@ -305,18 +305,14 @@
          Los filtros por clic de las graficas de SLA (cross-filter) NO alcanzan
          a este bloque: una llamada no comparte ninguna dimension con un ticket
          -no tiene estado, prioridad ni antiguedad-. Solo lo mueven el rango de
-         fechas y su propio filtro de campanas. -->
-    <section class="card">
-      <h3>Call Center de Servicios TI<span class="hint" id="hint-llamadas"></span></h3>
-      <div class="nota">Llamadas recibidas en el rango de fechas de arriba. Los filtros de
-        <b>Grupos</b> y <b>Tecnicos</b> no aplican: una llamada no tiene grupo resolutor.
-        El filtro de <b>Campañas</b> mueve <b>solo</b> este bloque.</div>
-    </section>
+         fechas y su propio filtro de campanas.
 
-    <!-- La rejilla de KPI va FUERA de la tarjeta de arriba, como en SLA y en
-         Backlog. Dentro, los 20px de padding de `.card` le restaban 42px de
-         ancho util y sus tarjetas salian 7px mas estrechas que las del resto
-         del tablero. -->
+         La rejilla de KPI abre la pestana, como en SLA y en Backlog: filtros,
+         KPI y luego graficas. Antes iba precedida de una `.card` de titulo que
+         repetia el nombre de la pestana y no aportaba dato ninguno; ademas, la
+         rejilla vivia DENTRO de esa tarjeta y sus 20px de padding le restaban
+         42px de ancho util, asi que las tarjetas salian 7px mas estrechas que
+         las del resto del tablero. -->
     <section class="kpis" id="kpis-llamadas"></section>
 
     <section class="grid2">
