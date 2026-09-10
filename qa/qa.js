@@ -655,19 +655,10 @@
 
   // -------------------------------------------------------------- detalle
   // Estado con el que abre el detalle: solo los incorrectos, sin acotar por
-  // grupo ni tecnico. Lo comparten "Ver detalle de incorrectos" y "Limpiar",
-  // que tienen que dejar exactamente la misma vista.
+  // grupo ni tecnico. Lo fija "Ver detalle de incorrectos" cada vez que se
+  // abre la vista.
   function filtrosPorDefecto() {
     return { validacion: 'Incorrecto', grupo: null, tecnico: null, grupoCorrecto: null };
-  }
-
-  // Hay algo que limpiar solo si el usuario se movio del estado de apertura:
-  // con la vista recien abierta el boton no tendria nada que hacer.
-  function hayFiltrosPropios() {
-    var porDefecto = filtrosPorDefecto();
-    return Object.keys(porDefecto).some(function (k) {
-      return estado.filtros[k] !== porDefecto[k];
-    });
   }
 
   function aplicarFiltro(nombre, valor) {
@@ -698,8 +689,6 @@
         cargarDetalle();
       });
     });
-
-    $('btn-limpiar').hidden = !hayFiltrosPropios();
   }
 
   function cargarDetalle() {
@@ -789,12 +778,6 @@
     $('btn-reintentar').addEventListener('click', cargarResumen);
 
     $('btn-detalle').addEventListener('click', function () {
-      estado.filtros = filtrosPorDefecto();
-      estado.pagina = 1;
-      cargarDetalle();
-    });
-
-    $('btn-limpiar').addEventListener('click', function () {
       estado.filtros = filtrosPorDefecto();
       estado.pagina = 1;
       cargarDetalle();
