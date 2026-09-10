@@ -702,12 +702,9 @@
     display: inline-block; padding: 2px 8px; border-radius: 6px;
     font-size: 10px; font-weight: 700; letter-spacing: .2px;
   }
-  .mini {
-    width: 60px; height: 7px; background: var(--line); border-radius: var(--radius-pill);
-    overflow: hidden; display: inline-block; vertical-align: middle;
-    box-shadow: inset 0 1px 1px rgba(25, 25, 25, .07);
-  }
-  .mini > i { display: block; height: 100%; border-radius: var(--radius-pill); }
+  /* El medidor `.mini` vive en assets/css/barra-mini.css: lo pintan este
+     tablero y Experiencia, y tenerlo aqui obligaba a mantener dos copias que
+     se habian separado. */
   .arrow-up { color: var(--rojo); font-weight: 800; }
   .arrow-down { color: var(--verde); font-weight: 800; }
   .arrow-eq { color: var(--muted); }

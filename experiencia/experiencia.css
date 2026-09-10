@@ -182,8 +182,9 @@ th:hover{color:var(--ink)}
 td{padding:8px;border-bottom:1px solid var(--line-soft);vertical-align:top}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
 tbody tr:hover{background:var(--g-50)}
-.mini{width:56px;height:7px;background:var(--line);border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle}
-.mini>i{display:block;height:100%}
+/* `.mini` sale de ../assets/css/barra-mini.css, que esta pagina carga en su
+   <head> y el tablero anfitrion tambien. Una sola definicion para los tres
+   caminos por los que se ve este modulo. */
 .c1row{background:var(--bg-2);font-weight:700;cursor:pointer}
 .c1row td:first-child::before{content:"\25B8 ";color:var(--muted)}
 .c1row.open td:first-child::before{content:"\25BE "}
