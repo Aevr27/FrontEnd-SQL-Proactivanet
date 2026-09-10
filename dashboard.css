@@ -475,6 +475,11 @@
   /* El display de la regla de arriba le gana al del atributo, asi que el
      boton oculto -"Año" en Call Center, "Mes" en SLA- necesita decirlo aqui. */
   .filtros .rango-rapido .btn[hidden] { display: none; }
+  /* Lo mismo para un campo entero de la barra: `.filtros .campo` pone
+     display:flex y le gana al del atributo. Lo usa el campo de SLOTs, que se
+     retira cuando la barra esta en la pestaña de Call Center. Al quitarse del
+     flujo no deja hueco: las barras vecinas se reparten el ancho. */
+  .filtros .campo[hidden] { display: none; }
   /* Los botones de rango van a juego con las barras oscuras vecinas. */
   .filtros .rango-rapido button {
     border: 1px solid var(--g-700);

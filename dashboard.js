@@ -1260,11 +1260,86 @@ const TableroSla = (function () {
     renderSlotStepper();
   }
 
+  /* ------------------------------------------ Acotado al Call Center
+     La barra de filtros es UNA sola y viaja entre las pestañas "SLA y
+     productividad" y "Call Center" (ver adoptarControlesSla). Ahi no todos
+     los grupos vienen a cuento: quien contesta telefono esta en Service Desk
+     o End User, y fuera de esos dos no hay llamadas ni tecnicos que cruzar.
+     El backend ya lo sabia -carga_combinada.ashx manda ese par como valor por
+     omision de @Grupos-, asi que catalogos.ashx devuelve ahora, junto a las
+     listas completas de SLA, el subconjunto del Call Center leido de la misma
+     vista de donde sale todo lo demas: la relacion tecnico -> grupo es la que
+     ya esta en los datos, aqui no hay ninguna lista de nombres a mano.
+
+     No se esconden <option> con CSS: se cambia el juego de <option> del
+     <select>, que es la fuente de la verdad de la que leen paramsFiltros() y
+     el desplegable propio -su MutationObserver de childList repinta el panel
+     solo-. Lo que estuviera elegido en SLA se guarda al entrar y se devuelve
+     entero al salir, para que la otra pestaña no pierda sus filtros por haber
+     pasado por aqui. */
+  let catalogos = { grupos: [], tecnicos: [], gruposCall: [], tecnicosCall: [] };
+  let enCallCenter = false;
+  let seleccionSla = null;   // lo elegido en SLA mientras la barra esta prestada
+
+  const opcionesHtml = v => v.map(
+    x => `<option value="${escapeAttr(x)}">${escapeHtml(x)}</option>`).join('');
+
+  /* Reescribe las <option> de un <select> y le devuelve la seleccion que se
+     le pida, quedandose solo con los valores que sigan existiendo. Responde
+     si la seleccion EFECTIVA cambio, que es lo unico que obliga a recargar. */
+  function ponerOpciones(id, valores, deseada) {
+    const sel = document.getElementById(id);
+    if (!sel) return false;
+    const antes = JSON.stringify(seleccionados(id));
+    sel.innerHTML = opcionesHtml(valores ?? []);
+    const quiero = new Set(deseada ?? []);
+    for (const op of sel.options) op.selected = quiero.has(op.value);
+    return JSON.stringify(seleccionados(id)) !== antes;
+  }
+
+  function aplicarCatalogos() {
+    const g = enCallCenter ? catalogos.gruposCall : catalogos.grupos;
+    const t = enCallCenter ? catalogos.tecnicosCall : catalogos.tecnicos;
+    const quiero = seleccionSla ?? {
+      grupos: seleccionados('f-grupos'), tecnicos: seleccionados('f-tecnicos') };
+    // Los dos se evaluan SIEMPRE: con || el segundo se saltaria en cuanto el
+    // primero cambiara, y el <select> de tecnicos se quedaria con el catalogo
+    // de la otra pestaña.
+    const cambioG = ponerOpciones('f-grupos', g, quiero.grupos);
+    const cambioT = ponerOpciones('f-tecnicos', t, quiero.tecnicos);
+    return cambioG || cambioT;
+  }
+
+  /* La llama adoptarControlesSla() al mover la barra de pestaña. Si el juego
+     de filtros que queda puesto no es el que trajo los datos que hay en
+     pantalla, se pide una carga: si no, se estaria viendo una barra que dice
+     una cosa y unas graficas que dicen otra. */
+  function modoCallCenter(esCall) {
+    if (esCall === enCallCenter) return;
+    // Al entrar se guarda lo de SLA; al salir se devuelve y se olvida.
+    seleccionSla = esCall
+      ? { grupos: seleccionados('f-grupos'), tecnicos: seleccionados('f-tecnicos') }
+      : seleccionSla;
+    enCallCenter = esCall;
+    const cambio = aplicarCatalogos();
+    if (!esCall) seleccionSla = null;
+    if (cambio) programarCarga();
+  }
+
   async function cargarCatalogos() {
     const cat = await obtenerJSON('catalogos.ashx');
-    const opciones = v => v.map(x => `<option value="${escapeAttr(x)}">${escapeHtml(x)}</option>`).join('');
-    document.getElementById('f-grupos').innerHTML = opciones(cat.grupos ?? []);
-    document.getElementById('f-tecnicos').innerHTML = opciones(cat.tecnicos ?? []);
+    catalogos = {
+      grupos: cat.grupos ?? [],
+      tecnicos: cat.tecnicos ?? [],
+      // Servidor viejo -o catalogos.ashx sin actualizar-: sin el subconjunto
+      // se cae a las listas completas. Es la conducta de antes, no una
+      // pestaña rota.
+      gruposCall: cat.gruposCall ?? cat.grupos ?? [],
+      tecnicosCall: cat.tecnicosCall ?? cat.tecnicos ?? [],
+    };
+    // El catalogo llega despues del primer pintado: si para entonces la barra
+    // ya esta en el Call Center, tiene que nacer acotada.
+    aplicarCatalogos();
   }
 
   // ---------------------------------------------------------------------- KPIs
@@ -2038,6 +2113,17 @@ const TableroSla = (function () {
   function paramsCargaCombinada() {
     const p = paramsFiltros();
     p.delete('tecnicos');
+    /* El cruce es Call Center: nunca puede pedir un grupo que no atienda
+       telefono. Acotar el <select> ya lo evita en la practica, pero el
+       parametro se recorta igual aqui, que es por donde de verdad sale la
+       peticion: la barra la comparten dos pestañas y lo que traiga puesto SLA
+       no tiene por que llegar hasta aqui. Si no queda ninguno se quita el
+       parametro y manda el valor por omision del handler, que es ese mismo
+       par de grupos. */
+    const permitidos = new Set(catalogos.gruposCall ?? []);
+    const grupos = seleccionados('f-grupos').filter(g => permitidos.has(g));
+    if (grupos.length) p.set('grupos', grupos.join(','));
+    else p.delete('grupos');
     p.set('top', String(TOPE_CARGA));
     return p;
   }
@@ -2366,7 +2452,7 @@ const TableroSla = (function () {
     await cargarTodo();
   }
 
-  return { init, redimensionar: () => redimensionar(graficos) };
+  return { init, redimensionar: () => redimensionar(graficos), modoCallCenter };
 })();
 
 /* =======================================================================
@@ -3507,6 +3593,19 @@ function adoptarControlesSla(idTab) {
   const mes = filtros.querySelector('[data-rango="mes"]');
   if (anio) anio.hidden = esCallCenter;
   if (mes) mes.hidden = !esCallCenter;
+
+  /* El SLOT es un concepto de tickets -el corte quincenal con el que se mide
+     el cumplimiento-, no de llamadas: en el Call Center el control no tenia
+     nada que decir. Se retira el campo entero, con su etiqueta y su resumen,
+     asi que no queda ni boton vacio ni hueco reservado (dashboard.css:
+     `.filtros .campo[hidden]`). En SLA sigue exactamente igual: el marcado y
+     los listeners no se tocan, solo deja de mostrarse mientras la barra esta
+     prestada a la otra pestaña. */
+  const slot = filtros.querySelector('.campo-slot');
+  if (slot) slot.hidden = esCallCenter;
+
+  /* Grupos y tecnicos: en el Call Center solo los que atienden telefono. */
+  TableroSla.modoCallCenter(esCallCenter);
 }
 
 let slaIniciado = false;
