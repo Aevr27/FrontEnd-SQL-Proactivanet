@@ -168,6 +168,10 @@ App_Code/
 
 Copia `Web.config.ejemplo` como `Web.config` en el servidor y ajusta la conexión a SQL Server.
 
+> **Si el servidor ya tiene un `Web.config`**, no basta con copiar los archivos del sitio: hay que añadirle **a mano, una sola vez**, el bloque `<staticContent><clientCache>` de `Web.config.ejemplo` (y los tres `<location path="*/vendor">` que lo acompañan). Sin él, IIS manda los `.css` y `.js` sin `Cache-Control`, el navegador aplica su heurística y **un despliegue puede quedar invisible**: se copian los archivos nuevos y el navegador sigue pintando la hoja anterior, sin ningún aviso. Ya pasó una vez.
+>
+> Para comprobarlo: DevTools → Network, recargar sin forzar. `dashboard.css` debe traer `cache-control: no-cache` en la respuesta y salir como `304`; `assets/vendor/chart.umd.min.js` debe salir de caché.
+
 **No copies `requirements.txt` ni `config.json` al sitio IIS.** Esos archivos pertenecen al ETL. La conexión del tablero se configura mediante `Web.config`.
 
 ### Application Pool
