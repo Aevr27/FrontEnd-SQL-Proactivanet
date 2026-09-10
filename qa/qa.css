@@ -254,24 +254,10 @@ code {
 }
 
 /* ---------- KPIs ---------- */
-.kpis {
-  display: grid; gap: 14px; margin-bottom: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-}
-.kpi {
-  position: relative; overflow: hidden;
-  background: var(--card); border-radius: var(--radius); padding: 16px 18px;
-  box-shadow: var(--shadow); border: 1px solid var(--line-soft);
-  border-left: 5px solid var(--kpi-ok);
-  transition: transform .18s ease, box-shadow .18s ease;
-}
-.kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-.kpi .kpi-tit {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .4px; color: var(--muted);
-}
-.kpi .kpi-val { font-size: 26px; font-weight: 800; line-height: 1.15; margin-top: 4px; }
-.kpi .kpi-nota { font-size: 11px; color: var(--muted); margin-top: 4px; }
+/* La geometria (`.kpis`, `.kpi` y los tres hijos) vive en
+   ../assets/css/kpi.css, que declara kpi-tit / kpi-val / kpi-nota junto a
+   los nombres lbl / val / foot del resto del tablero. Aqui solo queda el
+   color, que es lo unico propio de QA. */
 
 /* Nombres heredados que escribe el JS y que ya NO describen su color.
    Los tres son el mismo semaforo de franja izquierda que .sv/.sa/.sr:

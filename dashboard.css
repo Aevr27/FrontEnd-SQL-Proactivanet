@@ -535,42 +535,8 @@
   .filtros .acciones .btn:active { transform: translateY(1px); }
 
   /* ---- KPIs ---- */
-  .kpis {
-    display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 14px; margin-bottom: 16px;
-  }
-  .kpi {
-    position: relative; overflow: hidden;
-    background: var(--card); border-radius: var(--radius); padding: 16px 18px;
-    box-shadow: var(--shadow); border: 1px solid var(--line-soft);
-    border-left: 5px solid var(--kpi-ok);
-    transition: transform .15s ease, box-shadow .15s ease;
-  }
-  /* Lavado de color heredado del borde izquierdo. */
-  .kpi::after {
-    content: ""; position: absolute; inset: 0; pointer-events: none;
-    background: linear-gradient(100deg, currentColor 0%, transparent 46%);
-    opacity: .07; color: var(--kpi-ok);
-  }
-  .kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-  /* Semaforo: un solo color plano en la franja izquierda por estado.
-     lima = bien, ambar = aviso, rojo = mal. No hay mas estados. */
-  .kpi.sv { border-left-color: var(--kpi-ok); }
-  .kpi.sa { border-left-color: var(--ambr); }
-  .kpi.sr { border-left-color: var(--rojo); }
-  .kpi.sv::after { color: var(--kpi-ok); }
-  .kpi.sa::after { color: var(--ambr); }
-  .kpi.sr::after { color: var(--rojo); }
-  .kpi .lbl {
-    font-size: 10.5px; color: var(--muted); text-transform: uppercase;
-    letter-spacing: .5px; font-weight: 700;
-  }
-  .kpi .val {
-    font-size: 27px; font-weight: 800; margin-top: 5px; line-height: 1.1;
-    letter-spacing: -.6px; font-variant-numeric: tabular-nums;
-  }
-  .kpi .foot { font-size: 11px; color: var(--muted); margin-top: 4px; }
-  .kpi .badge { vertical-align: 2px; }
+  /* `.kpis` y `.kpi` viven en assets/css/kpi.css: los pintan tambien
+     experiencia.js y qa.js, y las tres copias se habian separado. */
 
   /* ---- Tarjetas y rejillas ---- */
   .card {
@@ -809,7 +775,6 @@
     .filtros .acciones { flex-wrap: wrap; justify-content: stretch; }
     .filtros .acciones .btn { flex: 1 1 140px; min-width: 0; }
     .card { padding: 14px 14px; }
-    .kpi .val { font-size: 23px; }
     .lienzo { height: 230px; }
     .lienzo.alta { height: 270px; }
   }

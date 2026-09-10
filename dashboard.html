@@ -20,6 +20,11 @@
      y aqui por lo mismo: Experiencia lo pinta y al embeberse pierde sus
      <link>. -->
 <link rel="stylesheet" href="assets/css/barra-mini.css">
+<!-- La tarjeta KPI, tambien una sola para todo el tablero: la pintan SLA,
+     Backlog y Call Center desde aqui, y Experiencia y QA desde sus propios
+     modulos. Va antes de dashboard.css por el mismo motivo que las otras
+     dos compartidas. -->
+<link rel="stylesheet" href="assets/css/kpi.css">
 <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
@@ -306,8 +311,13 @@
       <div class="nota">Llamadas recibidas en el rango de fechas de arriba. Los filtros de
         <b>Grupos</b> y <b>Tecnicos</b> no aplican: una llamada no tiene grupo resolutor.
         El filtro de <b>Campañas</b> mueve <b>solo</b> este bloque.</div>
-      <div class="kpis" id="kpis-llamadas"></div>
     </section>
+
+    <!-- La rejilla de KPI va FUERA de la tarjeta de arriba, como en SLA y en
+         Backlog. Dentro, los 20px de padding de `.card` le restaban 42px de
+         ancho util y sus tarjetas salian 7px mas estrechas que las del resto
+         del tablero. -->
+    <section class="kpis" id="kpis-llamadas"></section>
 
     <section class="grid2">
       <div class="card">
