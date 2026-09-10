@@ -118,8 +118,9 @@ header.top {
   position: relative; overflow: hidden;
   background: var(--grad-header);
   color: var(--ink); padding: 24px 28px;
+  min-height: 100px;
   border-radius: var(--radius); margin-bottom: 16px;
-  display: flex; align-items: flex-start; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 14px;
   box-shadow: var(--shadow-md);
 }
@@ -135,8 +136,12 @@ header.top .sub {
   font-size: 12.5px; color: var(--ink-2); margin-top: 5px;
   font-variant-numeric: tabular-nums;
 }
+/* En fila: el chip de fecha y "Limpiar" uno al lado del otro. Apilados eran
+   los que marcaban el alto de esta cabecera y la dejaban mas alta que la de
+   SLA, Backlog y Call Center. */
 header.top .acciones-top {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  display: flex; flex-direction: row; align-items: center;
+  justify-content: flex-end; flex-wrap: wrap; gap: 8px;
 }
 
 .chip {
@@ -191,6 +196,15 @@ header.top .btn:hover { border-color: rgba(25, 25, 25, .38); }
 .grid-sec {
   display: grid; gap: 16px; margin-bottom: 16px;
   grid-template-columns: minmax(300px, 1fr) minmax(430px, 1.65fr);
+}
+/* Las mismas medidas chicas que dashboard.css da a header.top en pantalla
+   angosta. Se repiten aqui porque qa.css se carga DESPUES de dashboard.css y,
+   a igual especificidad, gana la ultima: sin este bloque la cabecera de QA se
+   quedaria con la geometria de escritorio dentro del tablero. */
+@media (max-width: 700px) {
+  header.top { padding: 18px 18px; min-height: 84px; }
+  header.top h1 { font-size: 17px; }
+  header.top .acciones-top { justify-content: flex-start; }
 }
 @media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
 @media (max-width: 980px) { .grid-sec { grid-template-columns: 1fr; } }

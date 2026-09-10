@@ -19,6 +19,8 @@ color-scheme:light;
 /* Misma sombra que dashboard.css, para que la tarjeta KPI de la pestaña y
    la de la pagina suelta tengan el mismo relieve. */
 --shadow:0 1px 2px rgba(25,25,25,.05),0 1px 3px rgba(25,25,25,.06);
+/* La sombra alta de dashboard.css, la que lleva header.top. Mismo valor. */
+--shadow-md:0 2px 4px rgba(25,25,25,.05),0 8px 20px -6px rgba(25,25,25,.12);
 --rojo:#982a18;   /* negativo */
 --radius:14px;
 --grad-header:linear-gradient(135deg,#478B3C 0%,#65BB2B 45%,#9DD323 100%);
@@ -45,15 +47,28 @@ background:var(--bg-2);color:var(--ink);padding:18px;line-height:1.4}
    77px de la cabecera de SLA, y la pestaña no se parecia a ninguna otra. Los
    filtros salieron a su propia franja; el corte se queda aqui, en el mismo
    sitio que el sello del ETL en SLA y el chip de fecha en QA. */
-header.top{background:var(--grad-header);color:var(--ink);padding:22px 26px;
+/* Las medidas son las de header.top en dashboard.css y qa.css, al pixel: esta
+   pestaña se monta dentro del tablero, donde la barra verde tiene que ser la
+   MISMA pieza que en SLA, Backlog, Call Center y QA. Iba con 22px de padding,
+   titulo de 19px y subtitulo de 13px, y por eso se leia mas baja y con otra
+   tipografia que las demas. El brillo de esquina y la sombra tambien venian de
+   menos. */
+header.top{position:relative;overflow:hidden;
+background:var(--grad-header);color:var(--ink);padding:24px 28px;
+min-height:100px;
 border-radius:var(--radius);margin-bottom:16px;
-display:flex;align-items:flex-start;justify-content:space-between;
-flex-wrap:wrap;gap:14px}
-header.top h1{font-size:19px;font-weight:700}
+display:flex;align-items:center;justify-content:space-between;
+flex-wrap:wrap;gap:14px;
+box-shadow:var(--shadow-md)}
+header.top::after{content:"";position:absolute;inset:0;pointer-events:none;
+background:radial-gradient(520px 200px at 88% -40%,rgba(244,250,231,.40),transparent 70%)}
+header.top>*{position:relative;z-index:1}
+header.top h1{font-size:20px;font-weight:700;letter-spacing:-.2px}
 header.top h1 .ver{font-size:11px;font-weight:400;opacity:.7}
-header.top .sub{font-size:13px;color:var(--ink-2);margin-top:3px}
-header.top .acciones-top{display:flex;flex-direction:column;align-items:flex-end;
-gap:8px;align-self:center}
+header.top .sub{font-size:12.5px;color:var(--ink-2);margin-top:5px;
+font-variant-numeric:tabular-nums}
+header.top .acciones-top{display:flex;flex-direction:row;align-items:center;
+justify-content:flex-end;flex-wrap:wrap;gap:8px}
 /* Insignia de corte de datos: pastilla blanca chica dentro del verde, mismo
    trato que el sello del ETL de SLA y que el chip de fecha de QA. Es
    informacion, no un boton: sin sombra dura, sin degradado y sin cursor.
@@ -73,8 +88,13 @@ background:var(--card);border:1px solid var(--g-100);border-radius:var(--radius)
 box-shadow:0 1px 3px rgba(0,0,0,.07);padding:16px 20px;margin-bottom:16px}
 .selrow::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;
 background:var(--grad)}
+/* Las mismas medidas chicas que dashboard.css y qa.css dan a header.top en
+   pantalla angosta: esta hoja se carga despues de dashboard.css y, a igual
+   especificidad, gana la ultima. */
 @media(max-width:700px){
-  header.top .acciones-top{align-items:flex-start;align-self:flex-start}
+  header.top{padding:18px 18px;min-height:84px}
+  header.top h1{font-size:17px}
+  header.top .acciones-top{justify-content:flex-start}
 }
 .selrow .grp{display:flex;flex-direction:column;gap:4px}
 .selrow label{font-size:11px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.5px}

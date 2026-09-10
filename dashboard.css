@@ -210,12 +210,25 @@
     background: transparent;
     margin-top: -26px;
   }
+  /* GEOMETRIA UNICA DE LA BARRA VERDE
+     ---------------------------------
+     La misma pieza en las seis pestañas: SLA, Backlog y Call Center la traen
+     de aqui; QA y Experiencia repiten estas medidas en qa.css y en
+     experiencia.css, porque sus paginas sueltas se abren sin dashboard.css.
+     Si cambia una, cambian las tres.
+
+     min-height 100px es el alto NATURAL de la cabecera mas alta -titulo de
+     20px y subtitulo de 12.5px sobre line-height 1.45, mas los 48px de
+     padding-, no un numero elegido a ojo. Las pestañas sin subtitulo llegan a
+     ese alto con aire, no estirando el texto: el contenido se centra
+     verticalmente y conserva su tipografia. */
   header.top {
     position: relative; overflow: hidden;
     background: var(--grad-header);
     color: var(--ink); padding: 24px 28px;
+    min-height: 100px;
     border-radius: var(--radius); margin-bottom: 16px;
-    display: flex; align-items: flex-start; justify-content: space-between;
+    display: flex; align-items: center; justify-content: space-between;
     flex-wrap: wrap; gap: 14px;
     box-shadow: var(--shadow-md);
   }
@@ -247,7 +260,14 @@
   }
   header.top #estado-carga:empty,
   header.top #estado-carga-bl:empty { display: none; }
-  header.top .acciones-top { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  /* En fila, no en columna: apilada, un bloque con dos hijos -el chip de fecha
+     y un boton, como en QA- crecia mas que el titulo y era ese bloque, y no la
+     cabecera, el que decidia el alto de la barra. En fila ninguna pestaña
+     empuja el alto por su cuenta. */
+  header.top .acciones-top {
+    display: flex; flex-direction: row; align-items: center;
+    justify-content: flex-end; flex-wrap: wrap; gap: 8px;
+  }
 
   /* ---- Botones ---- */
   .btn {
@@ -761,9 +781,14 @@
   }
   @media (max-width: 700px) {
     body { padding: 12px 12px 4px; }
-    header.top { padding: 18px 18px; }
+    /* Mismo criterio que en ancho completo, con las medidas de aqui: 17px de
+       titulo y 36px de padding dan 84px de alto natural. Sin recalcularlo, los
+       100px de arriba dejarian una franja verde vacia en pantalla chica. */
+    header.top { padding: 18px 18px; min-height: 84px; }
     header.top h1 { font-size: 17px; }
-    header.top .acciones-top { align-items: flex-start; }
+    /* Envuelta, la fila arranca por la izquierda: debajo del titulo, no
+       colgada a la derecha. */
+    header.top .acciones-top { justify-content: flex-start; }
     header.top .estado { text-align: left; }
     .mtab { padding: 10px 8px; font-size: 12.5px; }
     .filtros { padding: 14px 14px; grid-template-columns: 1fr; }
