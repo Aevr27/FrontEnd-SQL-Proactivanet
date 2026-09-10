@@ -3599,6 +3599,14 @@ function adoptarControlesSla(idTab) {
   const slot = filtros.querySelector('.campo-slot');
   if (slot) slot.hidden = esCallCenter;
 
+  /* Campanas es la cara opuesta del SLOT: la cola de llamadas no dice nada de
+     un ticket y ningun handler de SLA lee el parametro `campanas` (solo lo
+     manda paramsLlamadas()). Se retira el campo entero en SLA -etiqueta y
+     <select>- y vuelve en el Call Center, donde sigue siendo el mismo control
+     con sus mismos ids, listeners y seleccion: viajar a SLA no la pierde. */
+  const campanas = filtros.querySelector('.campo-campanas');
+  if (campanas) campanas.hidden = !esCallCenter;
+
   /* Grupos y tecnicos: en el Call Center solo los que atienden telefono. */
   TableroSla.modoCallCenter(esCallCenter);
 }

@@ -93,8 +93,12 @@
         <select id="f-tecnicos" multiple></select>
       </div>
       <!-- Campanas del Call Center. Solo la lee llamadas.ashx: los demas
-           handlers de esta pestana ignoran el parametro `campanas`. -->
-      <div class="campo">
+           handlers de esta pestana ignoran el parametro `campanas`, y en SLA
+           el filtro no significa nada -un ticket no tiene cola-, asi que el
+           campo entero se retira mientras la barra esta en SLA, igual que el
+           SLOT se retira en el Call Center (adoptarControlesSla, dashboard.js).
+           Nace oculto porque SLA es la pestana de arranque. -->
+      <div class="campo campo-campanas" hidden>
         <label for="f-campanas">Campañas</label>
         <select id="f-campanas" multiple></select>
       </div>
