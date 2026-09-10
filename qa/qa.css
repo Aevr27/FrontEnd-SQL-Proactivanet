@@ -136,9 +136,10 @@ header.top .sub {
   font-size: 12.5px; color: var(--ink-2); margin-top: 5px;
   font-variant-numeric: tabular-nums;
 }
-/* En fila: el chip de fecha y "Limpiar" uno al lado del otro. Apilados eran
-   los que marcaban el alto de esta cabecera y la dejaban mas alta que la de
-   SLA, Backlog y Call Center. */
+/* En fila y pegadas a la derecha. Hoy solo cuelga de aqui el chip de fecha,
+   pero la cabecera comparte la regla con SLA, Backlog y Call Center: cuando
+   hay mas de un elemento, apilarlos era lo que dejaba esta cabecera mas alta
+   que las demas. */
 header.top .acciones-top {
   display: flex; flex-direction: row; align-items: center;
   justify-content: flex-end; flex-wrap: wrap; gap: 8px;

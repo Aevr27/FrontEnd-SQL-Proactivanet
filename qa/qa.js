@@ -776,11 +776,6 @@
 
   // ------------------------------------------------------------- arranque
   function conectarEventos() {
-    $('btn-recargar').addEventListener('click', function () {
-      estado.detalleAbierto = false;
-      $('detalle-panel').hidden = true;
-      cargarResumen();
-    });
     $('btn-reintentar').addEventListener('click', cargarResumen);
 
     $('btn-detalle').addEventListener('click', function () {
