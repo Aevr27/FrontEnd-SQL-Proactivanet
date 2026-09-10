@@ -3022,8 +3022,29 @@ const TableroBacklog = (function () {
       if (!ordenBucket.has(f.Aging)) ordenBucket.set(f.Aging, f.AgingSort);
       totalCrudo.set(f.Lider, (totalCrudo.get(f.Lider) ?? 0) + f.Tickets);
     }
-    // Los buckets van en orden real de antiguedad (AgingSort), no alfabetico.
-    const buckets = [...ordenBucket.entries()].sort((a, b) => a[1] - b[1]).map(e => e[0]);
+    /* Los buckets van en orden real de antiguedad, no alfabetico. El criterio
+       ES el AgingSort del SP, pero NO se usa a secas: el procedimiento numera
+       mal el cubo mas nuevo -"menos de un dia" sale detras de un rango de
+       dias que deberia ir despues-, y el orden equivocado se veia igual en la
+       grafica que en la matriz de aqui abajo, porque las dos salen de esta
+       funcion.
+
+       El arreglo de fondo es el AgingSort del SP; mientras tanto manda el
+       ROTULO, que si trae la informacion: el primer numero del texto es el
+       borde inferior del rango -"4-7 dias" -> 4, "31+ dias" -> 31-, y el cubo
+       mas nuevo no trae numero -"menos de un dia"-, asi que cuenta como 0 y
+       encabeza. "Sin fecha" no es un escalon de la escalera -no se sabe si es
+       viejo- y se va al final, el mismo criterio que ya sigue colorAging() al
+       sacarlo de la rampa ordinal. Empates: decide el AgingSort. */
+    function rangoDelRotulo(etiqueta) {
+      const texto = String(etiqueta);
+      if (/sin\s+(fecha|dato)/i.test(texto)) return Number.MAX_SAFE_INTEGER;
+      const n = texto.match(/\d+/);
+      return n ? parseInt(n[0], 10) : 0;
+    }
+    const buckets = [...ordenBucket.entries()]
+      .sort((a, b) => (rangoDelRotulo(a[0]) - rangoDelRotulo(b[0])) || (a[1] - b[1]))
+      .map(e => e[0]);
     const top = new Set([...totalCrudo.entries()].sort((a, b) => b[1] - a[1]).slice(0, topLideres).map(e => e[0]));
 
     const valores = new Map();
