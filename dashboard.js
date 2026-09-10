@@ -2814,6 +2814,17 @@ const TableroBacklog = (function () {
       datos: valores,
       colores: etiquetas.map(l => COLOR_PRIORIDAD[l]),
       formato: FMT,
+      /* Aire local, y SOLO aqui. Son CUATRO categorias en una tarjeta de
+         .grid3 -un tercio del ancho-, asi que la ranura de cada prioridad
+         anda por los 85px y el tope compartido de 44px (Barras.GRUESA) deja
+         la barra en la mitad de su ranura: mas hueco que barra. Subiendo
+         SOLO el tope a 72px manda otra vez el .81 de los porcentajes
+         compartidos -barra en el 81% de la ranura, 19% de aire entre
+         vecinas- y en un monitor ancho el nuevo tope corta antes de que la
+         barra se vuelva un bloque. Los dos porcentajes NO se tocan: el
+         reparto es el mismo del resto del tablero. Va en `barra:` y no en
+         Barras.GRUESA justo para no engordar las demas graficas. */
+      barra: { maxBarThickness: 72 },
       dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
       opciones: {
         maintainAspectRatio: false,
@@ -2824,59 +2835,87 @@ const TableroBacklog = (function () {
     }).render();
   }
 
-  // Apilada por lider: dentro de cada barra de antiguedad, un color por lider.
-  // Es el mismo color que ese lider tiene en el resto de graficas, en las
-  // tablas de abajo y en el correo diario, asi que se puede seguir a una
-  // persona de una vista a otra. Los lideres chicos se agrupan en "Otros"
-  // -mismo criterio que la matriz de "Resumen por antiguedad"-.
-  // El clic sigue filtrando por bucket de antiguedad, no por lider.
+  /* Apilada HORIZONTAL: una fila por CUBO DE ANTIGUEDAD -de 0-1 dias arriba
+     al cubo mas viejo abajo, en orden de AgingSort- y dentro de la fila un
+     segmento por lider. Es la misma matriz de siempre; lo unico que cambio
+     respecto a la version vertical es el eje.
+
+     El color es IDENTIDAD DE LIDER y lo resuelve colorLider() (Paleta contra
+     `ordenLideres`), asi que una persona lleva el mismo color aqui, en
+     "Backlog por lider", en la matriz de abajo, en el drill-down y en el
+     correo diario. Los lideres chicos se agrupan en "Otros" -mismo criterio
+     que la matriz de "Resumen por antiguedad"-.
+
+     La leyenda va ARRIBA y es la que nombra a cada lider con su color: un
+     dataset ES un lider, asi que sigue siendo clicable -apagar una entrada
+     saca a esa persona de todas las pilas- y envuelve sola cuando los
+     nombres son largos. Por eso el nombre completo vive aqui y no en el eje:
+     el eje solo lleva los rotulos cortos de los cubos.
+
+     El clic en un segmento filtra por BUCKET de antiguedad, que es la
+     CATEGORIA de la fila, no por lider. */
   function renderBarrasAging() {
     const m = construirMatrizAging(agingFiltrado('aging'));
     if (!m) {
       return renderEmptyChart('chart-aging-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
-    // El contorno marca la barra seleccionada. Va en cada dataset porque el
-    // grosor se aplica por segmento, y asi se resalta la columna completa.
+    // El contorno marca la fila seleccionada. Va en cada dataset porque el
+    // grosor se aplica por segmento, y asi se resalta la pila completa.
     const sel = bordesSeleccion(m.buckets, filtro.aging, 0);
 
-    /* Apilada: DashboardBarChart pone el grosor a cada dataset, pero la cifra
-       dentro se apaga con `etiquetasDentro: false`. En una apilada no hay
-       "fuera de la barra" donde caer -seria encima del segmento vecino-, asi
-       que aqui manda ETIQUETAS_SEGMENTO, que omite el segmento que no da el
-       alto. El color de lider es identidad y ya viene resuelto por
-       colorLider() (Paleta contra `ordenLideres`), uno por dataset. */
+    /* Aire local, y SOLO aqui. Son hasta siete filas de antiguedad en los
+       260px del .lienzo -menos lo que se lleva la leyenda de arriba-, asi
+       que la ranura de cada fila anda por los 30px y el juego compartido
+       -.9 x .9 con tope de 44px- pegaria una fila con la siguiente. Con
+       .78 x .88 la barra ocupa el 69% de su ranura, y el tope propio de 26px
+       la deja compacta tambien cuando hay tres cubos y sobra alto. El radio
+       lo sigue poniendo el default compartido (Barras.RADIO). Va en `barra:`
+       y no en Barras.GRUESA justo para no adelgazar las demas graficas. */
     graficos['chart-aging-bl'] = new DashboardBarChart({
       canvas: 'chart-aging-bl',
       etiquetas: m.buckets,
-      /* Aire local, y SOLO aqui. Esta grafica lleva siete cubos de antiguedad
-         donde las de prioridad llevan tres o cuatro, asi que la ranura de cada
-         categoria es la mitad de ancha y el juego compartido -.9 x .9, la
-         barra en el 81% de su ranura- dejaba las columnas casi pegadas: en una
-         tarjeta angosta el tope de 44px se alcanza y solo quedan unos pocos
-         pixeles entre pila y pila. Con .72 x .86 la barra ocupa el 62% de la
-         ranura, asi que el hueco entre cubos se dobla y cada columna apilada
-         -y las cifras de ETIQUETAS_SEGMENTO dentro de cada segmento- se lee
-         como un bloque aparte. El tope de 44px NO se baja: el grosor sigue
-         siendo el del resto del tablero cuando hay sitio, y el radio lo sigue
-         poniendo el default compartido. Va en `barra:` y no en Barras.GRUESA
-         justo para no adelgazar las demas graficas. */
-      barra: { categoryPercentage: 0.72, barPercentage: 0.86 },
+      barra: { categoryPercentage: 0.78, barPercentage: 0.88, maxBarThickness: 26 },
       dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
       datasets: m.lideres.map(l => ({
         label: l,
         data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
         backgroundColor: colorLider(l),
       })),
+      /* Apilada: la cifra de cada segmento la pone ETIQUETAS_SEGMENTO, que
+         sabe de segmentos -y ya mide la caja en los dos ejes- y omite el que
+         no da el ancho. El plugin compartido no sirve: sacaria la cifra
+         fuera de la barra, encima del segmento vecino. */
       etiquetasDentro: false,
       plugins: [ETIQUETAS_SEGMENTO],
       opciones: {
+        indexAxis: 'y',
         maintainAspectRatio: false,
         plugins: {
-          ...LEYENDA_ABAJO,
-          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } },
+          /* Leyenda ARRIBA -no la LEYENDA_ABAJO compartida-: aqui es lo que
+             traduce color -> persona, asi que se lee ANTES de las barras.
+             `boxWidth` chico y fuente de 10 para que cinco o seis nombres
+             largos quepan en dos lineas sin empujar el lienzo. */
+          legend: {
+            position: 'top',
+            labels: { boxWidth: 12, font: { size: 10 }, padding: 8 },
+          },
+          tooltip: {
+            callbacks: {
+              label: c => `${c.dataset.label}: ${FMT(c.raw)}`,
+              // El total del cubo ya lo trae construirMatrizAging: aqui solo
+              // se muestra, no se vuelve a sumar.
+              footer: c => `Total: ${FMT(m.totalPorBucket.get(c[0]?.label) ?? 0)}`,
+            },
+          },
         },
-        scales: { x: { stacked: true }, y: { stacked: true, ...EJE_Y_CERO.y } },
+        scales: {
+          // El eje numerico pasa a la horizontal: se lleva EJE_Y_CERO tal cual.
+          x: { stacked: true, ...EJE_Y_CERO.y },
+          // Rotulos de cubo: cortos -"16-30 dias"-, van enteros y sin saltarse
+          // ninguno.
+          y: { stacked: true, grid: { display: false }, ticks: { autoSkip: false } },
+        },
         onClick: (evt, _e, gr) => alternarFiltro('aging', etiquetaDelClic(gr, evt)),
       },
     }).render();
