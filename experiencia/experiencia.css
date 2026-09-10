@@ -4,7 +4,16 @@
    --g-800 / --g-600 / --g-400 son esas paradas; el resto, interpolaciones
    y tintes de ellas. --g-900 solo se usa como tinta y hover, nunca como
    parada de un degradado. */
-:root{
+
+/* Los tres selectores, como en qa.css: embebida en el tablero esta hoja va
+   dentro de un @scope (#tab-experiencia), y ahi `:root` NO casa con nada
+   -html no es descendiente del contenedor del scope-, asi que cada var() se
+   caia al :root de dashboard.css sin avisar. Hoy los dos juegos de tokens
+   coinciden valor por valor y no se nota; el dia que uno se mueva, la
+   diferencia saldria solo dentro de la pestaña y no en la pagina suelta.
+   `:scope` y `#tab-experiencia` cubren ese caso; `:root` sigue sirviendo a la pagina
+   suelta. */
+:root, :scope, #tab-experiencia {
 color-scheme:light;
 --g-50:#f4fae7;--g-100:#e9f5ce;--g-200:#d3e9ac;--g-300:#bae065;--g-400:#9dd323;
 --g-500:#81c727;--g-600:#65bb2b;--g-700:#56a333;--g-800:#478b3c;--g-900:#3a7431;
