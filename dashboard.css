@@ -751,10 +751,20 @@
   footer .badge { margin: 0 2px; }
 
   /* ---- Propios del tablero de backlog ---- */
+  /* La franja va de color plano, como la de .aviso de aqui abajo. Antes era
+     border-image con el degradado de la cabecera, que ademas de pintar los
+     cuatro lados ANULA el render de border-radius: esta caja era la unica de
+     esquinas cuadradas del tablero. Mismo motivo -y mismo arreglo- por el que
+     las tarjetas KPI dejaron de usarlo.
+
+     El color es --accent, neutro a proposito: esto no es un semaforo. El
+     sentido de la variacion lo dice .delta con su flecha, y la caja sale
+     igual suba o baje, asi que teñir la franja de verde o rojo afirmaria algo
+     que el dato no siempre respalda. */
   .tendencia-linea {
     font-size: 13.5px; margin: 0 0 16px;
     background: var(--card); border: 1px solid var(--line-soft);
-    border-left: 4px solid transparent; border-image: var(--grad) 1;
+    border-left: 4px solid var(--accent);
     border-radius: var(--radius); box-shadow: var(--shadow);
     padding: 12px 16px; color: var(--ink-2);
   }
@@ -820,104 +830,3 @@
     .card, .kpi, .filtros { box-shadow: none; border: 1px solid var(--line); }
     header.top { background: var(--grad-header) !important; color: var(--ink) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
-
-  /* ==================================================================
-     Pestanas importadas de Tablero_Experiencia.html. Todas las reglas van
-     prefijadas con .tabx para no alterar SLA ni Backlog; las variables de
-     color (--verde/--ambr/--rojo/--radius/...) ya existen en :root.
-     ================================================================== */
-.tabx header.top{background:var(--grad-header);color:var(--ink);padding:22px 26px;
-border-radius:var(--radius);margin-bottom:16px}
-.tabx header.top h1{font-size:19px;font-weight:700}
-.tabx header.top .sub{font-size:13px;color:var(--ink-2);margin-top:3px}
-.tabx .selrow{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;margin-top:14px}
-.tabx .selrow .grp{display:flex;flex-direction:column;gap:4px}
-.tabx .selrow label{font-size:11px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.5px}
-.tabx .selrow select{padding:8px 12px;border-radius:8px;border:1px solid var(--line);
-background:#fff;color:var(--ink);font-size:13px;min-width:220px}
-.tabx .selrow button{padding:8px 14px;border-radius:8px;border:1px solid var(--g-700);
-background:var(--grad-btn);color:var(--btn-ink);
-cursor:pointer;font-size:12px;font-weight:700}
-.tabx .selrow button:hover{background:var(--grad-btn-hover)}
-.tabx .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:14px;margin-bottom:16px}
-.tabx .kpi{background:var(--card);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);
-border:1px solid var(--line-soft);border-left:5px solid var(--kpi-ok)}
-.tabx .kpi.sv{border-left-color:var(--kpi-ok)}
-.tabx .kpi.sa{border-left-color:var(--ambr)}
-.tabx .kpi.sr{border-left-color:var(--rojo)}
-.tabx .kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
-.tabx .kpi .val{font-size:25px;font-weight:800;margin-top:4px}
-.tabx .kpi .foot{font-size:11px;color:var(--muted);margin-top:3px}
-.tabx .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;color:#fff}
-.tabx .bv{background:var(--verde-strong)}
-.tabx .ba{background:var(--ambr)}
-.tabx .br{background:var(--rojo)}
-.tabx .grid2{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;margin-bottom:16px}
-@media(max-width:900px){.tabx .grid2{grid-template-columns:1fr}}
-.tabx .grid3{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:16px;margin-bottom:16px}
-@media(max-width:900px){.tabx .grid3{grid-template-columns:1fr}}
-.tabx .grid3.g2cols{grid-template-columns:1fr 1fr}
-@media(max-width:900px){.tabx .grid3.g2cols{grid-template-columns:1fr}}
-.tabx .card{background:var(--card);border-radius:var(--radius);padding:18px 20px;box-shadow:0 1px 3px rgba(0,0,0,.07)}
-.tabx .card h3{font-size:14px;font-weight:700;margin-bottom:14px}
-.tabx .card canvas{max-height:280px}
-.tabx .treemap{position:relative;width:100%;height:300px}
-.tabx .treemap-item{position:absolute;box-sizing:border-box;border:2px solid #fff;overflow:hidden;
-  display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;
-  padding:3px;color:#fff;border-radius:2px}
-.tabx .treemap-item .tm-label{font-size:11px;font-weight:700;line-height:1.25;max-width:100%;
-  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:3;line-clamp: 3;-webkit-box-orient:vertical}
-.tabx .treemap-item .tm-value{font-size:10px;opacity:.92;margin-top:2px}
-.tabx .treemap-empty{padding:30px;text-align:center;color:var(--muted);font-size:12px}
-.tabx .treemap-item.tm-selected{outline:3px solid var(--ink);outline-offset:-3px;z-index:2}
-.tabx .treemap-item.tm-dim{opacity:.4}
-.tabx .tabs{display:flex;gap:6px;margin-bottom:14px;flex-wrap:wrap}
-.tabx .tab{padding:8px 14px;border-radius:8px;border:1px solid var(--line);background:#fff;cursor:pointer;
-font-size:13px;font-weight:600;color:var(--muted)}
-.tabx .tab.active{background:var(--grad-btn);color:var(--btn-ink);border-color:var(--g-700)}
-.tabx .panel{display:none}
-.tabx .panel.active{display:block}
-.tabx table{width:100%;border-collapse:collapse;font-size:12px}
-.tabx th{text-align:left;padding:9px 8px;border-bottom:2px solid var(--line);color:var(--muted);
-font-size:10.5px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;cursor:pointer;user-select:none}
-.tabx th:hover{color:var(--ink)}
-.tabx td{padding:8px;border-bottom:1px solid var(--line-soft);vertical-align:top}
-.tabx td.num{text-align:right;font-variant-numeric:tabular-nums}
-.tabx tbody tr:hover{background:var(--g-50)}
-.tabx .mini{width:56px;height:7px;background:var(--line);border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle}
-.tabx .mini>i{display:block;height:100%}
-.tabx .c1row{background:var(--bg-2);font-weight:700;cursor:pointer}
-.tabx .c1row td:first-child::before{content:"\25B8 ";color:var(--muted)}
-.tabx .c1row.open td:first-child::before{content:"\25BE "}
-.tabx .c2row{display:none}
-.tabx .c2row.show{display:table-row}
-.tabx .c2row td:first-child{padding-left:22px;color:var(--ink-2);font-weight:400}
-.tabx .c2exp{cursor:pointer}
-.tabx .c2exp td:first-child::before{content:"\25B8 ";color:var(--muted);font-size:10px}
-.tabx .c2exp.open td:first-child::before{content:"\25BE ";font-size:10px}
-.tabx .c3row{display:none}
-.tabx .c3row.show{display:table-row}
-.tabx .c3row td:first-child{font-size:12px}
-.tabx .catclick{cursor:pointer;color:var(--g-900);text-decoration:underline dotted}
-.tabx .btn-ver-cat{cursor:pointer;border:1px solid var(--g-700);background:#fff;color:var(--g-900);
-  font-size:11px;font-weight:700;padding:3px 9px;border-radius:6px;white-space:nowrap}
-.tabx .btn-ver-cat:hover{background:var(--grad-btn);color:var(--btn-ink);border-color:var(--g-800)}
-.tabx .arrow-up{color:var(--rojo);font-weight:800}
-.tabx .arrow-down{color:var(--verde);font-weight:800}
-.tabx .arrow-eq{color:var(--muted)}
-.tabx .chip{display:inline-block;padding:1px 7px;border-radius:6px;font-size:10px;font-weight:700}
-.tabx .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
-.tabx .empty{padding:26px;text-align:center;color:var(--muted);font-size:13px}
-.tabx .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--muted);margin-top:8px}
-.tabx .legend span{display:flex;align-items:center;gap:5px}
-.tabx .legend i{width:11px;height:11px;border-radius:3px}
-.tabx .det-inis{background:var(--g-50)}
-.tabx .tag-est{font-size:10px;padding:1px 6px;border-radius:5px;background:var(--bg-2);color:var(--ink-2);font-weight:600}
-.tabx .tag-pron{font-size:10px;padding:1px 6px;border-radius:5px;background:#fef3c7;color:#92400e;font-weight:700;vertical-align:middle}
-.tabx .fecha-cell{white-space:nowrap}
-.tabx .modal-bk{display:none;position:fixed;inset:0;background:rgba(25,25,25,.55);z-index:50;padding:30px}
-.tabx .modal-bk.show{display:flex;align-items:flex-start;justify-content:center}
-.tabx .modal{background:#fff;border-radius:14px;max-width:1150px;width:100%;max-height:88vh;overflow:auto;padding:22px 24px;margin-top:20px}
-.tabx .modal h2{font-size:16px;margin-bottom:4px}
-.tabx .modal .close{float:right;cursor:pointer;font-size:22px;color:var(--muted);line-height:1}
-.tabx footer{text-align:center;color:var(--muted);font-size:11px;margin-top:20px;padding:12px}

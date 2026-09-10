@@ -11,9 +11,9 @@
 
    Solo presentacion. El documento traia su propia paleta -cabecera azul
    marino, franja de KPI azul y "bien" en verde esmeralda-, que no es la del
-   tablero. Aqui se le pone la misma que usa dashboard.css para las pestañas
-   importadas (.tabx): cabecera con el degradado de marca y semaforo de KPI
-   lima / ambar / rojo. Ni un valor, ni un estado, ni un dato cambia.
+   tablero. Aqui se le pone la misma que usa dashboard.css: cabecera con el
+   degradado de marca y semaforo de KPI lima / ambar / rojo. Ni un valor, ni
+   un estado, ni un dato cambia.
    ========================================================================= */
 
 :root {
@@ -41,7 +41,7 @@
 /* ---------- Cabecera ----------
    Pasa de azul marino a la banda de marca. Sobre lima el texto blanco no
    llega a 4.5:1, asi que el titulo y sus etiquetas pasan a tinta oscura,
-   igual que en .tabx header.top de dashboard.css. */
+   igual que en header.top de dashboard.css. */
 header.top {
   background: var(--tl-grad-header);
   color: var(--tl-ink);
