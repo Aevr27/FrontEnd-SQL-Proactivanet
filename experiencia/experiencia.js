@@ -152,14 +152,12 @@ if (typeof Chart !== 'undefined') {
     Chart.defaults.scale.grid.drawTicks = false;
     Chart.defaults.scale.grid.tickLength = 8;
   }
-  if (Chart.defaults.datasets && Chart.defaults.datasets.bar) {
-    Object.assign(Chart.defaults.datasets.bar, {
-      maxBarThickness: 26,
-      categoryPercentage: 0.72,
-      barPercentage: 0.80,
-      borderRadius: 4,
-    });
-  }
+  /* Geometria de barra, la MISMA que el resto de los tableros: el default
+     ya no es un juego propio de este modulo -tope de 26px y .72/.80 de
+     ranura, que dejaba palitos- sino el compartido de assets/js/barras.js.
+     Solo toca `Chart.defaults.datasets.bar`: linea, dona y pastel no lo
+     miran. */
+  Barras.aplicarDefaults();
   if (Chart.defaults.plugins && Chart.defaults.plugins.tooltip) {
     Object.assign(Chart.defaults.plugins.tooltip, {
       backgroundColor: 'rgba(25, 25, 25, .92)',
@@ -1493,8 +1491,11 @@ const REG_DIRECTOR = Paleta.registro('exp-director');
 const REG_PO = Paleta.registro('exp-po');
 
 /* Grosor de barra: el juego COMPARTIDO de assets/js/barras.js, el mismo que
-   usan las barras de Backlog. No trae borderRadius, asi que sigue mandando el
-   4 que este modulo pone en Chart.defaults.datasets.bar. */
+   usan las barras de Backlog. Desde que Barras.aplicarDefaults() lo deja como
+   default del tipo `bar`, este alias ya no hace falta para que la barra salga
+   gruesa; se conserva porque lo nombran las dos graficas de abajo y porque
+   deja escrito, ahi mismo, que su grosor no es una decision local. El radio
+   lo pone tambien el default (Barras.RADIO). */
 const BARRA_GRUESA = Barras.GRUESA;
 
 /* Volumen por Product Owner: barras verticales, no treemap.

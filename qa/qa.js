@@ -417,7 +417,13 @@
   }
 
   // ------------------------------------------------------------- graficas
-  function altoLienzo(n) { return Math.max(240, n * 26 + 64) + 'px'; }
+  /* Alto reservado por fila. Las dos graficas son HORIZONTALES: el alto del
+     lienzo es lo que decide la ranura de cada barra, y con 26px por fila la
+     barra salia de unos 21px por mucho que se le subiera el tope. Con 40 la
+     ranura da para la barra gruesa del resto de los tableros (Barras.GRUESA)
+     y para que la cifra del final quepa sin encimarse con la vecina. */
+  var ALTO_FILA = 40;
+  function altoLienzo(n) { return Math.max(240, n * ALTO_FILA + 64) + 'px'; }
 
   // La grafica se CREA vacia cuando se arma la pagina y despues se rellena en
   // su sitio con pintarBarras. Antes se creaba y se destruia en cada pintado,
@@ -429,16 +435,16 @@
       type: 'bar',
       data: {
         labels: [],
-        datasets: [{
+        // Las medidas y el radio salen del juego COMPARTIDO de
+        // assets/js/barras.js -el mismo de SLA, Backlog y Experiencia- en vez
+        // del arreglo propio que tenia este modulo (tope de 22px y .78/.74 de
+        // ranura), que dejaba estas barras mas delgadas que las de al lado.
+        datasets: [Object.assign({}, Barras.GRUESA, {
           data: [],
           backgroundColor: color,
           hoverBackgroundColor: COLOR.azulOscuro,
-          borderRadius: 4,
-          // Barras esbeltas, a juego con el resto de los tableros.
-          maxBarThickness: 22,
-          barPercentage: .78,
-          categoryPercentage: .74
-        }]
+          borderRadius: Barras.RADIO
+        })]
       },
       options: {
         indexAxis: 'y',

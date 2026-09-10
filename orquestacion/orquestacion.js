@@ -104,9 +104,11 @@ function renderOrq(){
   const ccolors=['#982a18','#d97706','#356b2c','#8a8578'];
   const bctx=document.getElementById('chartCatJobs');
   if(chartCatJobs)chartCatJobs.destroy();
-  chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[{data:cvals,backgroundColor:ccolors,
-    // Barras esbeltas, a juego con el resto de los tableros.
-    maxBarThickness:24,categoryPercentage:.72,barPercentage:.8,borderRadius:4}]},
+  // Medidas y radio del juego COMPARTIDO (assets/js/barras.js), el mismo que
+  // usan SLA, Backlog, QA y Experiencia. Antes eran un arreglo propio -tope de
+  // 24px y .72/.8 de ranura- que con cuatro categorias dejaba cuatro palitos.
+  chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[
+    Object.assign({},Barras.GRUESA,{data:cvals,backgroundColor:ccolors,borderRadius:Barras.RADIO})]},
     options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>FMT(c.raw)+' jobs'}}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}}}}});

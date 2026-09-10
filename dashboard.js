@@ -78,14 +78,15 @@ const NEUTRO_SEM = '#8a8578'; // referencia / sin dato
    2.13:1. El cubo "Sin fecha" no es parte del orden: va en neutro. */
 const RAMPA_ORDINAL = ['#8cbf1e', '#6bad24', '#4f9528', '#387d2a', '#256425', '#144819'];
 
-/* Severidad = progresion, no identidades sueltas: el verde se OSCURECE
-   conforme sube la prioridad -Baja lima, Media verde de marca, Alta verde
-   profundo- y solo Critica conserva el rojo semantico. Antes Baja era el
-   verde mas oscuro y Media el mas claro, asi que el color contaba la
-   escala al reves. */
+/* Severidad = progresion, y la progresion es la del SEMAFORO: Baja lima y
+   Media verde de marca son territorio tranquilo, Alta pasa a ambar -ya es
+   advertencia, no un verde mas oscuro- y Critica se queda en el rojo
+   semantico. Antes Alta era verde profundo: el color decia "esto va bien"
+   de un ticket que ya pide atencion, y solo el rotulo del eje contaba la
+   diferencia. */
 const COLOR_PRIORIDAD = {
   'Critica': ROJO_SEM, 'Crítica': ROJO_SEM,
-  'Alta': VERDE.profundo, 'Media': VERDE.marca, 'Baja': VERDE.lima
+  'Alta': AMBAR_SEM, 'Media': VERDE.marca, 'Baja': VERDE.lima
 };
 
 // Semaforo de tres niveles: devuelve el sufijo de clase (.kpi.sv/.sa/.sr).
@@ -105,20 +106,18 @@ if (typeof Chart !== 'undefined') {
     Chart.defaults.scale.grid.drawTicks = false;
     Chart.defaults.scale.grid.tickLength = 8;
   }
-  /* Barras esbeltas. Antes cada barra se estiraba hasta llenar su categoria,
-     asi que una grafica de tres cubos pintaba tres bloques enormes. Con un
-     tope de grosor y un poco de aire entre categorias, la misma grafica se
-     lee igual pero pesa mucho menos en pantalla. Es solo presentacion: no
-     toca datos, escalas ni eventos, y cualquier dataset que declare lo suyo
-     sigue mandando. */
-  if (Chart.defaults.datasets && Chart.defaults.datasets.bar) {
-    Object.assign(Chart.defaults.datasets.bar, {
-      maxBarThickness: 26,
-      categoryPercentage: 0.78,
-      barPercentage: 0.86,
-      borderRadius: 4,
-    });
-  }
+  /* Geometria de barra, para TODAS las barras del tablero. Antes aqui vivia
+     un juego propio -tope de 26px y .78/.86 de ranura- que dejaba palitos, y
+     las graficas que querian barra de verdad tenian que declarar
+     Barras.GRUESA una por una; las de Call Center nunca lo hicieron y se
+     quedaron distintas. Ahora el default ES el juego compartido
+     (assets/js/barras.js): mismo grosor, mismo aire y mismo radio en SLA,
+     Backlog, Call Center, QA y Experiencia sin repetir nada.
+
+     Solo toca `Chart.defaults.datasets.bar`: linea, dona y pastel no lo
+     miran. Es presentacion: no cambia datos, escalas ni eventos, y el
+     dataset que declare lo suyo sigue mandando. */
+  Barras.aplicarDefaults();
   if (Chart.defaults.plugins && Chart.defaults.plugins.legend) {
     Chart.defaults.plugins.legend.labels = Object.assign(
       {}, Chart.defaults.plugins.legend.labels, { color: '#393939', boxWidth: 12, boxHeight: 12 });
@@ -1541,9 +1540,11 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'productividad', 'chart-productividad',
       () => ({
         type: 'bar',
-        /* Medidas y cifra dentro salen de assets/js/barras.js, igual que en
-           Backlog: los defaults del tablero dejan estas barras en palitos y
-           la cifra tenia que buscarse en el tooltip. */
+        /* La cifra dentro sale de assets/js/barras.js, igual que en Backlog:
+           sin ella habia que buscar el numero en el tooltip. Las medidas ya
+           vienen del default compartido (Barras.aplicarDefaults, arriba); el
+           spread de Barras.GRUESA se deja explicito porque esta grafica lleva
+           DOS series por tecnico y quiere el juego grueso con o sin default. */
         plugins: [Barras.etiquetasDentro(FMT)],
         data: {
           labels: etiquetas,
@@ -1627,9 +1628,9 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, idGrafico, idCanvas,
       () => ({
         type: 'bar',
-        /* Barras.GRUESA + cifra dentro (assets/js/barras.js). El color lo
-           sigue poniendo colorFn -prioridad y rampa de antiguedad-: aqui solo
-           entran medidas y etiqueta. */
+        /* Cifra dentro (assets/js/barras.js); las medidas ya vienen del
+           default compartido. El color lo sigue poniendo colorFn -prioridad y
+           rampa de antiguedad-: aqui no se decide ningun color. */
         plugins: [Barras.etiquetasDentro(FMT)],
         data: { labels: etiquetas, datasets: [{ ...Barras.GRUESA, data: valores, backgroundColor: colores,
           borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
@@ -2728,6 +2729,19 @@ const TableroBacklog = (function () {
     graficos['chart-aging-bl'] = new DashboardBarChart({
       canvas: 'chart-aging-bl',
       etiquetas: m.buckets,
+      /* Aire local, y SOLO aqui. Esta grafica lleva siete cubos de antiguedad
+         donde las de prioridad llevan tres o cuatro, asi que la ranura de cada
+         categoria es la mitad de ancha y el juego compartido -.9 x .9, la
+         barra en el 81% de su ranura- dejaba las columnas casi pegadas: en una
+         tarjeta angosta el tope de 44px se alcanza y solo quedan unos pocos
+         pixeles entre pila y pila. Con .72 x .86 la barra ocupa el 62% de la
+         ranura, asi que el hueco entre cubos se dobla y cada columna apilada
+         -y las cifras de ETIQUETAS_SEGMENTO dentro de cada segmento- se lee
+         como un bloque aparte. El tope de 44px NO se baja: el grosor sigue
+         siendo el del resto del tablero cuando hay sitio, y el radio lo sigue
+         poniendo el default compartido. Va en `barra:` y no en Barras.GRUESA
+         justo para no adelgazar las demas graficas. */
+      barra: { categoryPercentage: 0.72, barPercentage: 0.86 },
       dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
       datasets: m.lideres.map(l => ({
         label: l,

@@ -20,6 +20,12 @@
 
         datasets: [{ ...Barras.GRUESA, data, backgroundColor, borderRadius: 6 }]
 
+      Barras.RADIO es ese 6, y Barras.aplicarDefaults() deja las dos cosas
+      -medidas y radio- como default de Chart.js para el tipo `bar`, asi que
+      una grafica de barras del tablero ya no tiene que declarar ninguna de
+      las dos. Solo toca `Chart.defaults.datasets.bar`: linea, dona y pastel
+      no lo miran.
+
    2) Barras.etiquetasDentro(FMT) — plugin de Chart.js que pinta el valor
       DENTRO de la barra y centrado. Recibe el formateador de numeros de cada
       tablero, que no es el mismo en los dos. Sirve para los dos ejes: con
@@ -37,6 +43,25 @@
   'use strict';
 
   var GRUESA = { categoryPercentage: 0.9, barPercentage: 0.9, maxBarThickness: 44 };
+
+  /* Radio de esquina de una barra. Vive aqui y no suelto en cada tablero
+     para que las cuatro vistas redondeen igual. */
+  var RADIO = 6;
+
+  /* Deja GRUESA + RADIO como DEFAULT de Chart.js para el tipo `bar`, y solo
+     para ese tipo: `Chart.defaults.datasets.bar` no lo miran ni linea, ni
+     dona, ni pastel. Es lo que hace que una grafica de barras nueva salga ya
+     con la geometria del tablero sin copiar nada, y que las que existen no
+     tengan que declararla una por una. Cualquier dataset que declare lo suyo
+     -un tope propio, otro radio- sigue mandando encima.
+
+     Lo llaman dashboard.js, experiencia.js, qa.js y orquestacion.js justo
+     donde antes cada uno escribia su propio juego de medidas. */
+  function aplicarDefaults() {
+    if (typeof Chart === 'undefined') return;
+    if (!Chart.defaults.datasets || !Chart.defaults.datasets.bar) return;
+    Object.assign(Chart.defaults.datasets.bar, GRUESA, { borderRadius: RADIO });
+  }
 
   /* Tinta legible encima de un relleno. Devuelve #191919 o #fff segun la
      luminancia relativa del fondo: gana el que mas contraste da. */
@@ -112,5 +137,6 @@
     };
   }
 
-  raiz.Barras = { GRUESA: GRUESA, tintaSobre: tintaSobre, etiquetasDentro: etiquetasDentro };
+  raiz.Barras = { GRUESA: GRUESA, RADIO: RADIO, aplicarDefaults: aplicarDefaults,
+                  tintaSobre: tintaSobre, etiquetasDentro: etiquetasDentro };
 })(window);
