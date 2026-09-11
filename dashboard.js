@@ -234,6 +234,74 @@ async function obtenerJSON(ruta) {
 }
 
 /* -----------------------------------------------------------------------
+   Cache de corta vida para los agregados del tablero de SLA.
+
+   Motivo: el stepper de SLOT reescribe el rango a 0-30N dias, asi que bajar
+   de SLOT 3 a SLOT 2 vuelve a pedir un periodo que se acaba de traer entero.
+   Los agregados son caros (kpis, distribucion y productividad rondan varios
+   segundos en rangos largos) y no cambian de un minuto a otro: el ETL corre
+   muy de tarde en tarde y su sello viaja en kpis.UltimaActualizacionEtl.
+
+   Solo la envoltura obtenerJSONSla() pasa por aqui, y solo la usa
+   cargarTodo() del tablero de SLA. obtenerJSON() queda intacta, asi que el
+   tablero de Backlog, los catalogos y el troceo de detalle.ashx siguen
+   pidiendo a la red igual que antes.
+
+   La clave es la URL RESUELTA COMPLETA (urlHandler + querystring), asi que
+   dos rangos o dos filtros distintos son entradas distintas por
+   construccion: no hace falta vaciar la cache al mover un filtro, y
+   vaciarla ahi anularia justo el caso que se quiere aprovechar -volver a un
+   SLOT ya visitado-.
+
+   Se guarda la PROMESA, no el resultado: dos peticiones simultaneas a la
+   misma URL comparten un unico viaje. Un rechazo borra su entrada, asi que
+   los errores nunca se cachean.
+   ----------------------------------------------------------------------- */
+const CACHE_SLA_MS = 60000;     // vida de una entrada
+const CACHE_SLA_MAX = 40;       // tope duro de entradas
+const cacheSla = new Map();     // url resuelta -> { t, promesa }
+
+// Vacia la cache entera. La llaman los caminos en los que el usuario pide
+// datos frescos a proposito ("Limpiar") y el arranque del tablero.
+function purgarCacheSla() { cacheSla.clear(); }
+
+function podarCacheSla(ahora) {
+  for (const [clave, ent] of cacheSla) {
+    if (ahora - ent.t >= CACHE_SLA_MS) cacheSla.delete(clave);
+  }
+}
+
+function obtenerJSONSla(ruta) {
+  // Con datos simulados no hay red que ahorrar y mock-data ya trae sus
+  // propias caches: se pasa de largo para no alterar el modo de prueba.
+  if (window.MockData && window.MockData.MOCK_DATA) return obtenerJSON(ruta);
+
+  const ahora = Date.now();
+  podarCacheSla(ahora);
+
+  const clave = urlHandler(ruta);
+  const guardado = cacheSla.get(clave);
+  if (guardado) return guardado.promesa;
+
+  const promesa = obtenerJSON(ruta);
+  /* Un fallo no se guarda: se borra la entrada para que el siguiente intento
+     vuelva a pedir. Se comprueba que la entrada siga siendo ESTA antes de
+     borrarla, por si ya la reemplazo una peticion posterior. El .catch() de
+     aqui solo observa; el rechazo original sigue viajando al llamador, que
+     es quien lo trata (allSettled en cargarTodo). */
+  promesa.catch(() => {
+    const ent = cacheSla.get(clave);
+    if (ent && ent.promesa === promesa) cacheSla.delete(clave);
+  });
+  cacheSla.set(clave, { t: ahora, promesa });
+
+  // Map conserva el orden de insercion: la primera clave es la mas vieja.
+  while (cacheSla.size > CACHE_SLA_MAX) cacheSla.delete(cacheSla.keys().next().value);
+
+  return promesa;
+}
+
+/* -----------------------------------------------------------------------
    detalle.ashx serializa con JavaScriptSerializer, que trae un tope de
    longitud (maxJsonLength, 2 MB por omision). Con rangos grandes la
    respuesta lo revienta y el handler responde HTTP 500 con
@@ -2848,19 +2916,41 @@ const TableroSla = (function () {
        el ultimo bloque del Call Center. Se lanza aqui para que salga en
        paralelo con las demas, y se pinta solo en cuanto responde. */
     estadoCargaCombinada('Cargando el cruce de tickets y llamadas...');
-    obtenerJSON(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
+    obtenerJSONSla(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
       d => { if (miCarga === cargaVigente) renderCargaCombinada(d); },
       e => { if (miCarga === cargaVigente) errorCargaCombinada(e); }
     ).catch(e => console.error(e));
 
+    /* El ranking de personas (topCerrados) pide el MISMO productividad.ashx
+       que la grafica, solo que con su propio rango y sin el filtro de
+       tecnicos. En modo SLOT los dos rangos coinciden -rangoRanking() con
+       SLOT devuelve justo el rango del tablero-, asi que sin tecnicos
+       seleccionados las dos querystrings salen identicas y se pedia dos
+       veces la consulta mas cara del tablero.
+
+       La comparacion es entre las querystrings REALES, no contra
+       enModoSlot(): si manana cambia rangoRanking() o el reparto de
+       filtros, esto sigue siendo correcto solo. Cuando difieren se hacen
+       las dos peticiones de siempre.
+
+       Las dos ramas comparten el MISMO array. Es seguro: renderProductividad
+       copia con slice+map antes de tocar nada y renderTopCerrados ordena el
+       array nuevo que devuelve su propio .map(). Ninguno muta las filas de
+       `datos`. */
+    let productividad = null;
+    const pedirProductividad = () =>
+      (productividad || (productividad = obtenerJSONSla(`productividad.ashx?${qs}`)));
+
     const peticiones = [
-      ['kpis',          () => obtenerJSON(`kpis.ashx?${qs}`)],
-      ['tendencia',     () => obtenerJSON(`tendencia.ashx?${qs}`)],
-      ['productividad', () => obtenerJSON(`productividad.ashx?${qs}`)],
-      ['distribucion',  () => obtenerJSON(`distribucion.ashx?${qs}`)],
+      ['kpis',          () => obtenerJSONSla(`kpis.ashx?${qs}`)],
+      ['tendencia',     () => obtenerJSONSla(`tendencia.ashx?${qs}`)],
+      ['productividad', () => pedirProductividad()],
+      ['distribucion',  () => obtenerJSONSla(`distribucion.ashx?${qs}`)],
       ['detalle',       () => obtenerDetalle(paramsFiltros(), TOPE_DETALLE)],
-      ['topCerrados',   () => obtenerJSON(`productividad.ashx?${qsGrupos}`)],
-      ['llamadas',      () => obtenerJSON(`llamadas.ashx?${paramsLlamadas().toString()}`)],
+      ['topCerrados',   () => (qsGrupos === qs
+                                ? pedirProductividad()
+                                : obtenerJSONSla(`productividad.ashx?${qsGrupos}`))],
+      ['llamadas',      () => obtenerJSONSla(`llamadas.ashx?${paramsLlamadas().toString()}`)],
     ];
 
     const resueltos = await Promise.allSettled(peticiones.map(([, pedir]) => pedir()));
@@ -2908,6 +2998,10 @@ const TableroSla = (function () {
       // "Limpiar" deja el tablero como recien abierto: sin SLOT, sin cross
       // filter y con el mismo rango que escribe init(). Antes fijaba hoy a hoy
       // y la tendencia quedaba con un solo dia.
+      // Es ademas el unico control con el que el usuario pide datos frescos a
+      // proposito, asi que tira la cache: despues de pulsarlo, todo lo que se
+      // pinte tiene que venir del servidor.
+      purgarCacheSla();
       desactivarSlots();
       escribirRango(rangoPorDefecto());
       Object.keys(filtro).forEach(k => { filtro[k] = null; });
@@ -2950,6 +3044,9 @@ const TableroSla = (function () {
       estadoError('estado-carga', err);
       return;
     }
+    // Arranque del tablero: nada heredado de una sesion anterior de la misma
+    // pagina (la pestana se puede reinicializar sin recargar el documento).
+    purgarCacheSla();
     await cargarTodo();
   }
 
