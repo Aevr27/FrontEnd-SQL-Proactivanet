@@ -390,6 +390,41 @@ public static class ExperienciaQueries
 
         var filas = new List<Detalle>();
 
+        // POR QUE SE DEDUPLICA
+        // --------------------
+        // dbo.vw_ProblemCategoria abanica. Su LEFT JOIN contra
+        // dbo.CatCategoriaDueno por C1 no es "el dueño de esta rama": es un
+        // JOIN relacional que pega TODAS las filas N2 hermanas de ese C1, asi
+        // que una fila de dbo.ProblemCategoria sale repetida tantas veces como
+        // filas tenga su C1 en ese catalogo (28 para "Soria", 9 para
+        // "S-FENIX WMS", 3 para "S-Punto de Venta").
+        //
+        // Sumar TicketsReduce sobre esas copias -que es lo que hacen
+        // ArmarCategoriasV2, ArmarCategorias y reducePorFolio- multiplicaba el
+        // compromiso por ese mismo factor: /Soria/Punto de Venta/Precios daba
+        // 13.076 en vez de 467. Una hoja asi queda "cubierta al 100%" y
+        // desaparece de Con/Sin Iniciativa, arrastrando su volumen fuera del
+        // denominador del % de su rama.
+        //
+        // Se conserva la PRIMERA fila de cada (Codigo, Categoria), el mismo
+        // criterio con el que Directorio se queda con un solo dueño por C1.
+        // No es un recorte: esa pareja es unica en dbo.ProblemCategoria, asi
+        // que las copias son identicas en todo lo que se lee aqui.
+        //
+        // Va en memoria y no como SELECT DISTINCT porque el SELECT arrastra
+        // p.Descripcion y p.Observaciones: distinguir por esas dos columnas es
+        // caro y depende de su tipo.
+        //
+        // Lo correcto de fondo seria que la vista resolviera el dueño de C1 con
+        // un OUTER APPLY (SELECT TOP 1 ...) en vez de un JOIN, pero esa vista
+        // la lee tambien dbo.vw_ProblemResumen y no se toca desde aqui.
+        //
+        // El separador de la clave es un espacio duro: fn_NormalizaCategoria lo
+        // convierte en espacio normal, asi que no puede aparecer dentro de una
+        // ruta ya normalizada y no puede confundir dos parejas distintas.
+        const string SEP = " ";
+        var vistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         using (var cmd = new SqlCommand(SQL, cn))
         {
             cmd.CommandType = CommandType.Text;
@@ -400,6 +435,10 @@ public static class ExperienciaQueries
                     var d = new Detalle();
                     d.Folio = Texto(rd.GetValue(0));
                     d.Categoria = Texto(rd.GetValue(1));
+
+                    if (!vistas.Add((d.Folio ?? "") + SEP + (d.Categoria ?? "")))
+                        continue;
+
                     d.C1 = Texto(rd.GetValue(2));
                     d.C1C2 = Texto(rd.GetValue(3));
                     d.Titulo = Texto(rd.GetValue(4));

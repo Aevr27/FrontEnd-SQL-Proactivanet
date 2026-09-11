@@ -6,7 +6,16 @@
 // dashboard.js lo pide una sola vez al arrancar, sin query string
 // (cargarCatalogos -> obtenerJSON('catalogos.ashx')), y espera:
 //
-//     { "grupos": ["...", "..."], "tecnicos": ["...", "..."] }
+//     { "grupos": ["...", "..."], "tecnicos": ["...", "..."],
+//       "gruposCall": ["...", "..."], "tecnicosCall": ["...", "..."] }
+//
+// Las dos primeras listas son las de SIEMPRE y no cambian: son los filtros
+// del tablero de SLA. Las dos que terminan en 'Call' son el subconjunto del
+// Call Center -los grupos que atienden telefono y solo los tecnicos que estan
+// en ellos- y viajan aparte, en la misma peticion, porque la barra de filtros
+// es UNA sola que viaja entre las dos pestanas: el sitio necesita las dos
+// versiones para poder acotar los <select> al entrar al Call Center y
+// devolverlos completos al volver a SLA.
 //
 // dbo.usp_Dash_Catalogos devuelve dos result sets de UNA columna cada uno
 // (grupos primero, tecnicos despues), tal como lo describe el comentario de
@@ -31,10 +40,19 @@ public class Catalogos : IHttpHandler
         {
             var sets = DashboardDb.EjecutarMultiple("dbo.usp_Dash_Catalogos", null);
 
+            // El subconjunto del Call Center NO sale del procedimiento: se
+            // consulta aparte (DashboardQueries.CatalogosCallCenter) contra la
+            // misma vista que el resto del tablero, que es donde vive la
+            // relacion tecnico -> grupo. Asi el procedimiento se queda como
+            // esta y las listas de SLA no cambian ni un valor.
+            var call = DashboardQueries.CatalogosCallCenter();
+
             return new Dictionary<string, object>
             {
-                { "grupos",   ValoresDe(sets, 0) },
-                { "tecnicos", ValoresDe(sets, 1) },
+                { "grupos",       ValoresDe(sets, 0) },
+                { "tecnicos",     ValoresDe(sets, 1) },
+                { "gruposCall",   call["grupos"] },
+                { "tecnicosCall", call["tecnicos"] },
             };
         });
     }

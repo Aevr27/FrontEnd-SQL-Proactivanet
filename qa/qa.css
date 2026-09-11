@@ -60,6 +60,9 @@
   --verde: var(--g-800);
   --verde-strong: var(--g-900);
   --ambr: #d97706;    /* advertencia */
+  /* Semaforo de los KPI: el "bien" de una tarjeta es el lima de la cabecera,
+     no --verde (verde profundo de marca, que usan badges y notas). */
+  --kpi-ok: var(--g-400);
   --rojo: #982a18;    /* negativo */
   /* Superficie y borde del negativo: la pareja de tintes que ya usaba
      .badge-rojo en crudo. Se nombran para que el rojo suave deje de ser
@@ -115,8 +118,9 @@ header.top {
   position: relative; overflow: hidden;
   background: var(--grad-header);
   color: var(--ink); padding: 24px 28px;
+  min-height: 100px;
   border-radius: var(--radius); margin-bottom: 16px;
-  display: flex; align-items: flex-start; justify-content: space-between;
+  display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 14px;
   box-shadow: var(--shadow-md);
 }
@@ -132,8 +136,13 @@ header.top .sub {
   font-size: 12.5px; color: var(--ink-2); margin-top: 5px;
   font-variant-numeric: tabular-nums;
 }
+/* En fila y pegadas a la derecha. Hoy solo cuelga de aqui el chip de fecha,
+   pero la cabecera comparte la regla con SLA, Backlog y Call Center: cuando
+   hay mas de un elemento, apilarlos era lo que dejaba esta cabecera mas alta
+   que las demas. */
 header.top .acciones-top {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  display: flex; flex-direction: row; align-items: center;
+  justify-content: flex-end; flex-wrap: wrap; gap: 8px;
 }
 
 .chip {
@@ -189,6 +198,15 @@ header.top .btn:hover { border-color: rgba(25, 25, 25, .38); }
   display: grid; gap: 16px; margin-bottom: 16px;
   grid-template-columns: minmax(300px, 1fr) minmax(430px, 1.65fr);
 }
+/* Las mismas medidas chicas que dashboard.css da a header.top en pantalla
+   angosta. Se repiten aqui porque qa.css se carga DESPUES de dashboard.css y,
+   a igual especificidad, gana la ultima: sin este bloque la cabecera de QA se
+   quedaria con la geometria de escritorio dentro del tablero. */
+@media (max-width: 700px) {
+  header.top { padding: 18px 18px; min-height: 84px; }
+  header.top h1 { font-size: 17px; }
+  header.top .acciones-top { justify-content: flex-start; }
+}
 @media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
 @media (max-width: 980px) { .grid-sec { grid-template-columns: 1fr; } }
 
@@ -237,34 +255,19 @@ code {
 }
 
 /* ---------- KPIs ---------- */
-.kpis {
-  display: grid; gap: 14px; margin-bottom: 16px;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-}
-.kpi {
-  position: relative; overflow: hidden;
-  background: var(--card); border-radius: var(--radius); padding: 16px 18px;
-  box-shadow: var(--shadow); border: 1px solid var(--line-soft);
-  border-left: 5px solid transparent; border-image: var(--grad) 1;
-  transition: transform .18s ease, box-shadow .18s ease;
-}
-.kpi:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
-.kpi .kpi-tit {
-  font-size: 11px; font-weight: 600; text-transform: uppercase;
-  letter-spacing: .4px; color: var(--muted);
-}
-.kpi .kpi-val { font-size: 26px; font-weight: 800; line-height: 1.15; margin-top: 4px; }
-.kpi .kpi-nota { font-size: 11px; color: var(--muted); margin-top: 4px; }
+/* La geometria (`.kpis`, `.kpi` y los tres hijos) vive en
+   ../assets/css/kpi.css, que declara kpi-tit / kpi-val / kpi-nota junto a
+   los nombres lbl / val / foot del resto del tablero. Aqui solo queda el
+   color, que es lo unico propio de QA. */
 
-/* Nombres heredados que escribe el JS y que ya NO describen su color:
-   kpi-azul es la tarjeta de marca (la progresion verde completa) y
-   kpi-ambar la variante verde profunda. El rojo solo queda donde el dato
-   es negativo. */
-.kpi-azul   { border-image: var(--grad) 1; }
-.kpi-rojo   { border-image: none; border-left-color: var(--rojo); }
+/* Nombres heredados que escribe el JS y que ya NO describen su color.
+   Los tres son el mismo semaforo de franja izquierda que .sv/.sa/.sr:
+   kpi-azul = bien (lima), kpi-ambar = aviso (ambar), kpi-rojo = mal. */
+.kpi-azul   { border-left-color: var(--kpi-ok); }
+.kpi-rojo   { border-left-color: var(--rojo); }
 .kpi-rojo   .kpi-val { color: var(--rojo); }
-.kpi-ambar  { border-image: none; border-left-color: var(--g-800); }
-.kpi-ambar  .kpi-val { color: var(--g-900); }
+.kpi-ambar  { border-left-color: var(--ambr); }
+.kpi-ambar  .kpi-val { color: var(--ambr); }
 
 /* Valor de una tarjeta que todavia no tiene su dato. */
 .kpi-espera .kpi-val { color: var(--muted-2); font-weight: 600; }
@@ -344,9 +347,6 @@ code {
 /* filtros-qa, no "filtros": en el tablero .filtros es el panel de filtros de
    SLA y Backlog, que es otra cosa. */
 .filtros-qa { display: flex; flex-wrap: wrap; gap: 7px; }
-/* "Limpiar" cierra la barra por la derecha, como en SLA, Backlog y
-   Experiencia: es la accion de la fila, no un chip mas. */
-#qa-btn-limpiar { margin-left: auto; }
 .filtro {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 4px 10px; border-radius: var(--radius-pill);

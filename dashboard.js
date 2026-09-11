@@ -78,14 +78,27 @@ const NEUTRO_SEM = '#8a8578'; // referencia / sin dato
    2.13:1. El cubo "Sin fecha" no es parte del orden: va en neutro. */
 const RAMPA_ORDINAL = ['#8cbf1e', '#6bad24', '#4f9528', '#387d2a', '#256425', '#144819'];
 
-/* Severidad = progresion, no identidades sueltas: el verde se OSCURECE
-   conforme sube la prioridad -Baja lima, Media verde de marca, Alta verde
-   profundo- y solo Critica conserva el rojo semantico. Antes Baja era el
-   verde mas oscuro y Media el mas claro, asi que el color contaba la
-   escala al reves. */
+/* Severidad = progresion, y la progresion es la del SEMAFORO: Baja lima y
+   Media verde de marca son territorio tranquilo, Alta pasa a ambar -ya es
+   advertencia, no un verde mas oscuro- y Critica se queda en el rojo
+   semantico. Antes Alta era verde profundo: el color decia "esto va bien"
+   de un ticket que ya pide atencion, y solo el rotulo del eje contaba la
+   diferencia. */
 const COLOR_PRIORIDAD = {
   'Critica': ROJO_SEM, 'Crítica': ROJO_SEM,
-  'Alta': VERDE.profundo, 'Media': VERDE.marca, 'Baja': VERDE.lima
+  'Alta': AMBAR_SEM, 'Media': VERDE.marca, 'Baja': VERDE.lima
+};
+
+/* Semaforo de severidad ORIGINAL -rojo / naranja / oro / verde-, el juego con
+   el que nacio el tablero (ver e58add5) y el unico que lee de un vistazo sin
+   el rotulo del eje: Critica roja, Alta naranja, Media oro, Baja verde.
+   Vive aparte de COLOR_PRIORIDAD a proposito: SOLO lo usa "Por prioridad" del
+   Backlog (chart-prioridad-bl). El resto del tablero -chart-prioridad de la
+   vista de SLA- sigue con COLOR_PRIORIDAD y su escala verde de marca, asi que
+   tocar uno no repinta el otro. */
+const COLOR_PRIORIDAD_SEMAFORO = {
+  'Critica': '#dc2626', 'Crítica': '#dc2626',
+  'Alta': '#d97706', 'Media': '#eab308', 'Baja': '#16a34a'
 };
 
 // Semaforo de tres niveles: devuelve el sufijo de clase (.kpi.sv/.sa/.sr).
@@ -105,20 +118,18 @@ if (typeof Chart !== 'undefined') {
     Chart.defaults.scale.grid.drawTicks = false;
     Chart.defaults.scale.grid.tickLength = 8;
   }
-  /* Barras esbeltas. Antes cada barra se estiraba hasta llenar su categoria,
-     asi que una grafica de tres cubos pintaba tres bloques enormes. Con un
-     tope de grosor y un poco de aire entre categorias, la misma grafica se
-     lee igual pero pesa mucho menos en pantalla. Es solo presentacion: no
-     toca datos, escalas ni eventos, y cualquier dataset que declare lo suyo
-     sigue mandando. */
-  if (Chart.defaults.datasets && Chart.defaults.datasets.bar) {
-    Object.assign(Chart.defaults.datasets.bar, {
-      maxBarThickness: 26,
-      categoryPercentage: 0.78,
-      barPercentage: 0.86,
-      borderRadius: 4,
-    });
-  }
+  /* Geometria de barra, para TODAS las barras del tablero. Antes aqui vivia
+     un juego propio -tope de 26px y .78/.86 de ranura- que dejaba palitos, y
+     las graficas que querian barra de verdad tenian que declarar
+     Barras.GRUESA una por una; las de Call Center nunca lo hicieron y se
+     quedaron distintas. Ahora el default ES el juego compartido
+     (assets/js/barras.js): mismo grosor, mismo aire y mismo radio en SLA,
+     Backlog, Call Center, QA y Experiencia sin repetir nada.
+
+     Solo toca `Chart.defaults.datasets.bar`: linea, dona y pastel no lo
+     miran. Es presentacion: no cambia datos, escalas ni eventos, y el
+     dataset que declare lo suyo sigue mandando. */
+  Barras.aplicarDefaults();
   if (Chart.defaults.plugins && Chart.defaults.plugins.legend) {
     Chart.defaults.plugins.legend.labels = Object.assign(
       {}, Chart.defaults.plugins.legend.labels, { color: '#393939', boxWidth: 12, boxHeight: 12 });
@@ -452,11 +463,20 @@ function dibujarGrafico(graficos, id, canvasId, construir, actualizar) {
 
 // Chart.js core no trae plugin de datalabels: este dibuja la cantidad dentro
 // de cada segmento de una barra apilada -un numero por color-. Los segmentos
-// que no dan alto para el texto se dejan al tooltip.
+// donde la cifra no cabe se dejan al tooltip.
+//
+// Sirve para los dos ejes. Con el eje normal la pila crece hacia arriba y el
+// segmento va de `base` a `y`; con indexAxis 'y' crece hacia la derecha y va
+// de `base` a `x`. Se mide la CAJA del segmento -alto y ancho- en vez de solo
+// el largo: una pila de 24 horas da segmentos altos pero angostos, donde un
+// "1.234" se salia por los costados encima de los vecinos.
 const ETIQUETAS_SEGMENTO = {
   id: 'etiquetasSegmento',
   afterDatasetsDraw(chart) {
     const ctx = chart.ctx;
+    const horizontal = chart.options && chart.options.indexAxis === 'y';
+    const ALTO_TEXTO = 14;   // alto minimo de caja para que quepa la cifra
+    const AIRE = 6;          // margen a los costados, dentro del segmento
     ctx.save();
     ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
     ctx.textAlign = 'center';
@@ -467,15 +487,22 @@ const ETIQUETAS_SEGMENTO = {
       meta.data.forEach((barra, j) => {
         const v = ds.data[j];
         if (!v) return;
-        if (Math.abs((barra.base ?? 0) - barra.y) < 14) return;
-        const y = ((barra.base ?? 0) + barra.y) / 2;
+        const base = barra.base ?? 0;
+        const largo = Math.abs(base - (horizontal ? barra.x : barra.y));
+        const grueso = Math.abs(horizontal ? barra.height : barra.width);
+        const alto = horizontal ? grueso : largo;
+        const ancho = horizontal ? largo : grueso;
         const texto = FMT(v);
+        if (alto < ALTO_TEXTO) return;
+        if (ancho < ctx.measureText(texto).width + AIRE * 2) return;
+        const x = horizontal ? (base + barra.x) / 2 : barra.x;
+        const y = horizontal ? barra.y : (base + barra.y) / 2;
         // Contorno oscuro: el mismo numero se lee sobre cualquier color de la paleta.
         ctx.strokeStyle = 'rgba(25,25,25,.72)';
         ctx.lineWidth = 3;
-        ctx.strokeText(texto, barra.x, y);
+        ctx.strokeText(texto, x, y);
         ctx.fillStyle = '#fff';
-        ctx.fillText(texto, barra.x, y);
+        ctx.fillText(texto, x, y);
       });
     });
     ctx.restore();
@@ -570,6 +597,13 @@ function formatoFecha(d) {
 }
 function hoyISO() {
   return formatoFecha(new Date());
+}
+
+/* Las columnas DATE llegan como "2026-08-01T00:00:00": SqlDataReader las
+   entrega como DateTime y DashboardDb las serializa con hora. Puesta tal cual
+   de etiqueta en el eje X, la hora ocupa mas que la fecha y no dice nada. */
+function soloFecha(v) {
+  return String(v ?? '').slice(0, 10);
 }
 
 const TableroSla = (function () {
@@ -1214,11 +1248,86 @@ const TableroSla = (function () {
     renderSlotStepper();
   }
 
+  /* ------------------------------------------ Acotado al Call Center
+     La barra de filtros es UNA sola y viaja entre las pestañas "SLA y
+     productividad" y "Call Center" (ver adoptarControlesSla). Ahi no todos
+     los grupos vienen a cuento: quien contesta telefono esta en Service Desk
+     o End User, y fuera de esos dos no hay llamadas ni tecnicos que cruzar.
+     El backend ya lo sabia -carga_combinada.ashx manda ese par como valor por
+     omision de @Grupos-, asi que catalogos.ashx devuelve ahora, junto a las
+     listas completas de SLA, el subconjunto del Call Center leido de la misma
+     vista de donde sale todo lo demas: la relacion tecnico -> grupo es la que
+     ya esta en los datos, aqui no hay ninguna lista de nombres a mano.
+
+     No se esconden <option> con CSS: se cambia el juego de <option> del
+     <select>, que es la fuente de la verdad de la que leen paramsFiltros() y
+     el desplegable propio -su MutationObserver de childList repinta el panel
+     solo-. Lo que estuviera elegido en SLA se guarda al entrar y se devuelve
+     entero al salir, para que la otra pestaña no pierda sus filtros por haber
+     pasado por aqui. */
+  let catalogos = { grupos: [], tecnicos: [], gruposCall: [], tecnicosCall: [] };
+  let enCallCenter = false;
+  let seleccionSla = null;   // lo elegido en SLA mientras la barra esta prestada
+
+  const opcionesHtml = v => v.map(
+    x => `<option value="${escapeAttr(x)}">${escapeHtml(x)}</option>`).join('');
+
+  /* Reescribe las <option> de un <select> y le devuelve la seleccion que se
+     le pida, quedandose solo con los valores que sigan existiendo. Responde
+     si la seleccion EFECTIVA cambio, que es lo unico que obliga a recargar. */
+  function ponerOpciones(id, valores, deseada) {
+    const sel = document.getElementById(id);
+    if (!sel) return false;
+    const antes = JSON.stringify(seleccionados(id));
+    sel.innerHTML = opcionesHtml(valores ?? []);
+    const quiero = new Set(deseada ?? []);
+    for (const op of sel.options) op.selected = quiero.has(op.value);
+    return JSON.stringify(seleccionados(id)) !== antes;
+  }
+
+  function aplicarCatalogos() {
+    const g = enCallCenter ? catalogos.gruposCall : catalogos.grupos;
+    const t = enCallCenter ? catalogos.tecnicosCall : catalogos.tecnicos;
+    const quiero = seleccionSla ?? {
+      grupos: seleccionados('f-grupos'), tecnicos: seleccionados('f-tecnicos') };
+    // Los dos se evaluan SIEMPRE: con || el segundo se saltaria en cuanto el
+    // primero cambiara, y el <select> de tecnicos se quedaria con el catalogo
+    // de la otra pestaña.
+    const cambioG = ponerOpciones('f-grupos', g, quiero.grupos);
+    const cambioT = ponerOpciones('f-tecnicos', t, quiero.tecnicos);
+    return cambioG || cambioT;
+  }
+
+  /* La llama adoptarControlesSla() al mover la barra de pestaña. Si el juego
+     de filtros que queda puesto no es el que trajo los datos que hay en
+     pantalla, se pide una carga: si no, se estaria viendo una barra que dice
+     una cosa y unas graficas que dicen otra. */
+  function modoCallCenter(esCall) {
+    if (esCall === enCallCenter) return;
+    // Al entrar se guarda lo de SLA; al salir se devuelve y se olvida.
+    seleccionSla = esCall
+      ? { grupos: seleccionados('f-grupos'), tecnicos: seleccionados('f-tecnicos') }
+      : seleccionSla;
+    enCallCenter = esCall;
+    const cambio = aplicarCatalogos();
+    if (!esCall) seleccionSla = null;
+    if (cambio) programarCarga();
+  }
+
   async function cargarCatalogos() {
     const cat = await obtenerJSON('catalogos.ashx');
-    const opciones = v => v.map(x => `<option value="${escapeAttr(x)}">${escapeHtml(x)}</option>`).join('');
-    document.getElementById('f-grupos').innerHTML = opciones(cat.grupos ?? []);
-    document.getElementById('f-tecnicos').innerHTML = opciones(cat.tecnicos ?? []);
+    catalogos = {
+      grupos: cat.grupos ?? [],
+      tecnicos: cat.tecnicos ?? [],
+      // Servidor viejo -o catalogos.ashx sin actualizar-: sin el subconjunto
+      // se cae a las listas completas. Es la conducta de antes, no una
+      // pestaña rota.
+      gruposCall: cat.gruposCall ?? cat.grupos ?? [],
+      tecnicosCall: cat.tecnicosCall ?? cat.tecnicos ?? [],
+    };
+    // El catalogo llega despues del primer pintado: si para entonces la barra
+    // ya esta en el Call Center, tiene que nacer acotada.
+    aplicarCatalogos();
   }
 
   // ---------------------------------------------------------------------- KPIs
@@ -1467,29 +1576,161 @@ const TableroSla = (function () {
       });
   }
 
+  /* Productividad por tecnico: barra apilada de tres tramos que SUMAN, sin
+     contar dos veces un ticket vencido:
+       Cerrados     = TicketsCerrados - TicketsCerradosSlaVencidos  (verde)
+       Abiertos     = TicketsAbiertos - TicketsAbiertosSlaVencidos  (amarillo)
+       SLA vencidos = TicketsCerradosSlaVencidos + TicketsAbiertosSlaVencidos (rojo)
+     El total a la derecha es TicketsTotales tal cual. Vive fuera de
+     renderProductividad() por el mismo motivo que rangosBucketVigente: el
+     tooltip y el plugin son los de la PRIMERA construccion y leen aqui la
+     fila vigente. */
+  let productividadVigente = [];
+
+  const PROD_SERIES = [
+    { clave: 'segCer', label: 'Cerrados',     color: '#4CAF50' },
+    { clave: 'segAb',  label: 'Abiertos',     color: '#eab308' },
+    { clave: 'segVen', label: 'SLA vencidos', color: '#f87171' },
+  ];
+
+  // Tramos de una fila. Si el backend aun no manda el desglose de vencidos
+  // (C# sin desplegar), los vencidos quedan en 0 y la barra sale en dos
+  // tramos, sin inventar datos.
+  function tramosProductividad(r) {
+    const n = v => Number(v) || 0;
+    const cerVen = n(r.TicketsCerradosSlaVencidos), abVen = n(r.TicketsAbiertosSlaVencidos);
+    return {
+      segCer: Math.max(0, n(r.TicketsCerrados) - cerVen),
+      segAb:  Math.max(0, n(r.TicketsAbiertos) - abVen),
+      segVen: cerVen + abVen,
+    };
+  }
+
+  // TicketsTotales FUERA, justo despues de la punta de la barra COMPLETA: la
+  // posicion la da el tramo visible que llega mas a la derecha y el VALOR es
+  // productividadVigente[i].TicketsTotales, el total autoritativo.
+  const CIFRA_PUNTA = {
+    id: 'cifraPunta',
+    afterDatasetsDraw(chart) {
+      const ctx = chart.ctx;
+      const metas = chart.data.datasets.map((_, d) => chart.getDatasetMeta(d));
+      ctx.save();
+      ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#393939';
+      ctx.textAlign = 'left';
+      productividadVigente.forEach((r, i) => {
+        if (!r || r.TicketsTotales == null) return;
+        let punta = null, y = null;
+        metas.forEach(m => {
+          if (!m || m.hidden || !m.data[i]) return;
+          const b = m.data[i];
+          if (punta === null || b.x > punta) { punta = b.x; y = b.y; }
+        });
+        if (punta === null) return;
+        ctx.fillText(FMT(r.TicketsTotales), punta + 6, y);
+      });
+      ctx.restore();
+    },
+  };
+
+  // Aire a la derecha del area para que la cifra de la barra mas larga no la
+  // corte la tarjeta: ~7px por caracter del numero mas ancho mas el hueco.
+  function airePunta(valores) {
+    const ancho = Math.max(1, ...valores.map(v => FMT(v).length));
+    return 12 + ancho * 7;
+  }
+
+  // Nombre del tecnico en el eje Y. Entero mientras quepa en ~un tercio del
+  // ancho de la grafica; si no, se corta con "…" -el tooltip lo da completo-.
+  function nombreEje(nombre, anchoGrafica) {
+    const s = String(nombre ?? '');
+    const max = Math.max(12, Math.floor((anchoGrafica || 0) * 0.34 / 6.2));
+    return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
+  }
+
+  /* Tooltip HTML (external de Chart.js): el de canvas no alinea cifras a la
+     derecha ni pinta separador. Arriba los tres tramos con su punto de color;
+     bajo la raya, Total y los indicadores. Solo los campos que vienen en la
+     fila: con filtros por clic el ranking se recalcula sobre `detalle` y ahi
+     no hay SlaEvaluable, asi que no se pinta un "0" que parezca un dato. */
+  function tooltipProductividad({ chart, tooltip }) {
+    const cont = chart.canvas.parentNode;
+    let el = cont.querySelector('.tt-prod');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'tt-prod';
+      el.style.cssText = 'position:absolute;pointer-events:none;z-index:5;min-width:190px;'
+        + 'background:#fff;border:1px solid #e6e8ec;border-radius:10px;padding:10px 12px;'
+        + 'box-shadow:0 6px 18px rgba(20,24,31,.12);font:12px system-ui,-apple-system,sans-serif;'
+        + 'color:#393939;transition:opacity .12s;';
+      if (getComputedStyle(cont).position === 'static') cont.style.position = 'relative';
+      cont.appendChild(el);
+    }
+    const i = tooltip.dataPoints && tooltip.dataPoints.length ? tooltip.dataPoints[0].dataIndex : -1;
+    const r = productividadVigente[i];
+    if (!tooltip.opacity || !r) { el.style.opacity = 0; return; }
+
+    const num = v => v !== null && v !== undefined && v !== '' && isFinite(Number(v));
+    const dec = v => Number(v).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const fila = (izq, der) => `<div style="display:flex;justify-content:space-between;gap:18px;line-height:1.7">`
+      + `<span>${izq}</span><span style="font-variant-numeric:tabular-nums">${der}</span></div>`;
+    const punto = c => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};margin-right:7px"></span>`;
+
+    let html = `<div style="font-weight:700;font-size:13px;margin-bottom:4px">${esc(r.Tecnico)}</div>`;
+    PROD_SERIES.forEach(s => { html += fila(punto(s.color) + s.label, FMT(r[s.clave])); });
+    html += '<div style="border-top:1px solid #e6e8ec;margin:6px 0 4px"></div>';
+    html += fila('Total', FMT(r.TicketsTotales));
+    if (num(r.CumplimientoSlaPct))      html += fila('Cumplimiento SLA', `${dec(r.CumplimientoSlaPct)}%`);
+    if (num(r.HorasResolucionPromedio)) html += fila('Prom. resolución', `${dec(r.HorasResolucionPromedio)} h`);
+    el.innerHTML = html;
+
+    // A la derecha del cursor; si no cabe, a la izquierda. Sin salirse abajo.
+    const x0 = chart.canvas.offsetLeft, y0 = chart.canvas.offsetTop;
+    let x = x0 + tooltip.caretX + 14;
+    if (x + el.offsetWidth > x0 + chart.width) x = x0 + tooltip.caretX - el.offsetWidth - 14;
+    let y = y0 + tooltip.caretY - el.offsetHeight / 2;
+    y = Math.max(y0, Math.min(y, y0 + chart.height - el.offsetHeight));
+    el.style.left = `${Math.max(x0, x)}px`;
+    el.style.top = `${y}px`;
+    el.style.opacity = 1;
+  }
+
   function renderProductividad() {
-    let etiquetas, totales, cerrados;
+    let top;
 
     if (!hayFiltro()) {
-      const top = (datos.productividad || []).slice(0, 15);
-      etiquetas = top.map(x => x.Tecnico);
-      totales = top.map(x => x.TicketsTotales);
-      cerrados = top.map(x => x.TicketsCerrados);
+      // Filas del SP tal cual, con todos sus campos: el tooltip las lee.
+      top = (datos.productividad || []).slice(0, 15);
     } else {
       const f = filas(null);
       const m = new Map();
       for (const r of f) {
         const t = r.Tecnico || '(sin tecnico)';
-        if (!m.has(t)) m.set(t, { tot: 0, cer: 0 });
+        if (!m.has(t)) m.set(t, { tot: 0, cer: 0, ab: 0, cerVen: 0, abVen: 0, hSum: 0, hN: 0 });
         const a = m.get(t);
+        const vencido = r.SlaVencido === true || r.SlaVencido === 1;
         a.tot++;
-        if (r.FechaFirmaCierre) a.cer++;
+        if (r.FechaFirmaCierre) { a.cer++; if (vencido) a.cerVen++; }
+        else { a.ab++; if (vencido) a.abVen++; }
+        const h = r.HorasResolucion;
+        if (h !== null && h !== undefined && h !== '' && isFinite(Number(h))) { a.hSum += Number(h); a.hN++; }
       }
-      const top = [...m.entries()].sort((a, b) => b[1].tot - a[1].tot).slice(0, 15);
-      etiquetas = top.map(e => e[0]);
-      totales = top.map(e => e[1].tot);
-      cerrados = top.map(e => e[1].cer);
+      top = [...m.entries()].sort((a, b) => b[1].tot - a[1].tot).slice(0, 15)
+        .map(([t, a]) => ({
+          Tecnico: t, TicketsTotales: a.tot, TicketsCerrados: a.cer, TicketsAbiertos: a.ab,
+          TicketsCerradosSlaVencidos: a.cerVen, TicketsAbiertosSlaVencidos: a.abVen,
+          HorasResolucionPromedio: a.hN ? a.hSum / a.hN : null,
+        }));
     }
+
+    // Copia con los tramos calculados: no se tocan las filas de `datos`.
+    top = top.map(r => ({ ...r, ...tramosProductividad(r) }));
+    const etiquetas = top.map(x => x.Tecnico);
+    const totales = top.map(x => x.TicketsTotales);
+    const series = PROD_SERIES.map(s => top.map(x => x[s.clave]));
+    productividadVigente = top;
 
     if (!etiquetas.length) {
       destruir('productividad');
@@ -1501,23 +1742,46 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'productividad', 'chart-productividad',
       () => ({
         type: 'bar',
+        plugins: [CIFRA_PUNTA],
         data: {
           labels: etiquetas,
-          datasets: [
-            { label: 'Totales', data: totales, backgroundColor: BARRA_A, borderRadius: 5 },
-            { label: 'Cerrados', data: cerrados, backgroundColor: BARRA_B, borderRadius: 5 },
-          ]
+          // Grosor: el default compartido de Barras.aplicarDefaults. Radio
+          // casi recto: la barra se lee como un bloque, no como pildoras.
+          datasets: PROD_SERIES.map((s, k) => ({
+            label: s.label,
+            data: series[k],
+            backgroundColor: s.color,
+            hoverBackgroundColor: s.color,
+            borderRadius: 2,
+            borderSkipped: false,
+            stack: 'tickets',
+          }))
         },
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
-          scales: { x: EJE_CONTEO }
+          layout: { padding: { right: airePunta(totales) } },
+          interaction: { mode: 'index', axis: 'y', intersect: false },
+          plugins: {
+            legend: { display: true, position: 'bottom', align: 'start',
+                      labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8,
+                                padding: 18, color: '#393939', font: { size: 11 } } },
+            tooltip: { enabled: false, external: tooltipProductividad }
+          },
+          scales: {
+            x: { ...EJE_CONTEO,stacked: true,
+                 grid: { color: 'rgba(25,25,25,.06)', drawTicks: false },
+                 border: { display: false },
+                 ticks: { ...EJE_CONTEO.ticks, color: '#8a8578', font: { size: 10 }, padding: 6, maxTicksLimit: 6 } },
+            y: { stacked: true, grid: { display: false }, border: { display: false },
+                 ticks: { color: '#393939', font: { size: 11 }, padding: 6, autoSkip: false,
+                          callback(v) { return nombreEje(this.getLabelForValue(v), this.chart.width); } } },
+          }
         }
       }),
       gr => {
         gr.data.labels = etiquetas;
-        gr.data.datasets[0].data = totales;
-        gr.data.datasets[1].data = cerrados;
+        series.forEach((d, k) => { gr.data.datasets[k].data = d; });
+        gr.options.layout.padding.right = airePunta(totales);
       });
   }
 
@@ -1583,7 +1847,11 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, idGrafico, idCanvas,
       () => ({
         type: 'bar',
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
+        /* Cifra dentro (assets/js/barras.js); las medidas ya vienen del
+           default compartido. El color lo sigue poniendo colorFn -prioridad y
+           rampa de antiguedad-: aqui no se decide ningun color. */
+        plugins: [Barras.etiquetasDentro(FMT)],
+        data: { labels: etiquetas, datasets: [{ ...Barras.GRUESA, data: valores, backgroundColor: colores,
           borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
         options: {
           responsive: true, maintainAspectRatio: false,
@@ -1769,7 +2037,7 @@ const TableroSla = (function () {
       return renderEmptyChart('chart-llamadas-dia', 'Sin llamadas en el rango seleccionado.');
     }
     // Misma forma de fecha que tendencia.ashx: "aaaa-mm-ddT00:00:00".
-    const etiquetas = f.map(x => String(x.Fecha ?? '').slice(0, 10));
+    const etiquetas = f.map(x => soloFecha(x.Fecha));
     const series = [
       { label: 'Recibidas', data: f.map(x => x.Llamadas), color: AZUL },
       { label: 'Contestadas', data: f.map(x => x.Contestadas), color: VERDE_S },
@@ -1810,8 +2078,12 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'llamadasCampana', 'chart-llamadas-campana',
       () => ({
         type: 'bar',
+        /* La cifra dentro de la barra, como en el resto del tablero. El
+           plugin compartido solo mira los datasets de tipo `bar`, asi que la
+           serie de % -que es linea- se queda con su tooltip. */
+        plugins: [ETIQUETAS_DENTRO],
         data: { labels: etiquetas, datasets: [
-          { label: 'Llamadas', data: volumen, backgroundColor: AZUL, borderRadius: 6, yAxisID: 'y' },
+          { label: 'Llamadas', data: volumen, backgroundColor: AZUL, yAxisID: 'y' },
           { label: '% abandono', data: abandono, type: 'line', borderColor: ROJO,
             backgroundColor: ROJO, tension: 0.25, pointRadius: 3, borderWidth: 2, yAxisID: 'y1' },
         ] },
@@ -1841,12 +2113,24 @@ const TableroSla = (function () {
     const contestadas = f.map(x => x.Contestadas);
     const abandonadas = f.map(x => x.Abandonadas);
 
+    /* Aire local, y SOLO aqui: mismo caso que "Por antiguedad" del Backlog
+       pero peor, porque aqui son 24 cubos. Con el juego compartido -.9 x .9,
+       la barra en el 81% de su ranura- las columnas quedan pegadas y el dia
+       se lee como una sola mancha. Con .72 x .86 la barra ocupa el 62% y cada
+       hora se separa de la siguiente. El tope de grosor y el radio siguen
+       siendo los del default compartido: solo se cambia el reparto de la
+       ranura, y solo en esta grafica. */
+    const AIRE_HORA = { categoryPercentage: 0.72, barPercentage: 0.86 };
+
     dibujarGrafico(graficos, 'llamadasHora', 'chart-llamadas-hora',
       () => ({
         type: 'bar',
+        // Apilada: la cifra la pone ETIQUETAS_SEGMENTO, que sabe de segmentos
+        // y omite el que no da la caja en vez de sacar el numero afuera.
+        plugins: [ETIQUETAS_SEGMENTO],
         data: { labels: etiquetas, datasets: [
-          { label: 'Contestadas', data: contestadas, backgroundColor: VERDE_S },
-          { label: 'Abandonadas', data: abandonadas, backgroundColor: ROJO },
+          { ...AIRE_HORA, label: 'Contestadas', data: contestadas, backgroundColor: VERDE_S },
+          { ...AIRE_HORA, label: 'Abandonadas', data: abandonadas, backgroundColor: ROJO },
         ] },
         options: {
           responsive: true, maintainAspectRatio: false,
@@ -1876,8 +2160,11 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'llamadasAgente', 'chart-llamadas-agente',
       () => ({
         type: 'bar',
+        // Cifra dentro de la barra: el plugin compartido mide a lo ancho
+        // cuando indexAxis es 'y', asi que la grafica sigue horizontal.
+        plugins: [ETIQUETAS_DENTRO],
         data: { labels: etiquetas, datasets: [{ label: 'Llamadas atendidas',
-          data: atendidas, backgroundColor: MORADO, borderRadius: 6 }] },
+          data: atendidas, backgroundColor: MORADO }] },
         options: {
           indexAxis: 'y',
           responsive: true, maintainAspectRatio: false,
@@ -1914,17 +2201,201 @@ const TableroSla = (function () {
   }
 
   function renderLlamadas() {
-    const hint = document.getElementById('hint-llamadas');
-    if (hint) {
-      const n = seleccionados('f-campanas').length;
-      hint.textContent = n ? `${n} campaña${n > 1 ? 's' : ''}` : 'todas las campañas';
-    }
     llenarCatalogoCampanas();
     renderKpisLlamadas();
     renderLlamadasDia();
     renderLlamadasCampana();
     renderLlamadasHora();
     renderLlamadasAgente();
+  }
+
+
+  /* ----------------------------------------------- Carga combinada
+     Cruce de las dos fuentes en la misma fila: quien cierra pocos tickets
+     porque se le fue el dia en el telefono. Sale de carga_combinada.ashx
+     (dbo.usp_Dash_CargaCombinada) y solo trae a la gente que esta en
+     dbo.CatAgenteTecnico, que es la que hace las dos cosas.
+
+     Vive FUERA de `datos` y fuera de renderTodo() a proposito: su peticion
+     va aparte de las demas del tablero (ver cargarTodo) y se pinta sola en
+     cuanto responde, sin esperar ni afectar al resto del Call Center.
+
+     Reusa lo que ya hay: dibujarGrafico, destruir, EJE_CONTEO, la paleta
+     compartida y hacerOrdenable. No define ningun color propio. */
+
+  // Filas que pide el procedimiento. La grafica solo dibuja las 15 primeras
+  // -en un panel de 320px, 20 barras quedan de tres pixeles-; la tabla de
+  // abajo si las trae todas.
+  const TOPE_CARGA = 20;
+  const TOPE_CARGA_GRAFICA = 15;
+
+  /* Mismo rango de fechas que los tickets y el MISMO filtro de Grupos: aqui
+     el grupo si se usa, pero contra el grupo donde el tecnico tiene mas
+     tickets (dbo.CatAgenteTecnico.Grupo), no contra el del ticket. El de
+     Tecnicos se quita: el procedimiento no lo mira. */
+  function paramsCargaCombinada() {
+    const p = paramsFiltros();
+    p.delete('tecnicos');
+    /* El cruce es Call Center: nunca puede pedir un grupo que no atienda
+       telefono. Acotar el <select> ya lo evita en la practica, pero el
+       parametro se recorta igual aqui, que es por donde de verdad sale la
+       peticion: la barra la comparten dos pestañas y lo que traiga puesto SLA
+       no tiene por que llegar hasta aqui. Si no queda ninguno se quita el
+       parametro y manda el valor por omision del handler, que es ese mismo
+       par de grupos. */
+    const permitidos = new Set(catalogos.gruposCall ?? []);
+    const grupos = seleccionados('f-grupos').filter(g => permitidos.has(g));
+    if (grupos.length) p.set('grupos', grupos.join(','));
+    else p.delete('grupos');
+    p.set('top', String(TOPE_CARGA));
+    return p;
+  }
+
+  /* Muestra u oculta las dos graficas y la tabla en bloque. Cuando no hay
+     cruce que pintar se esconden enteras: dos recuadros vacios y una tabla
+     sin filas no explican nada, y el mensaje del estado si. */
+  function mostrarBloqueCarga(visible) {
+    ['graficos-carga', 'card-tabla-carga'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = visible ? '' : 'none';
+    });
+  }
+
+  function estadoCargaCombinada(html) {
+    const el = document.getElementById('estado-carga-combinada');
+    if (!el) return;
+    el.innerHTML = html ? `<div class="vacio">${html}</div>` : '';
+  }
+
+  function renderCargaTecnico(filas) {
+    const top = filas.slice(0, TOPE_CARGA_GRAFICA);
+    const etiquetas = top.map(x => x.Tecnico);
+    const tickets = top.map(x => x.Tickets ?? 0);
+    const llamadas = top.map(x => x.Llamadas ?? 0);
+    // El pie del tooltip lee por posicion, asi que se congela junto con las
+    // series: si llegan datos nuevos, este arreglo se reemplaza entero.
+    const detalle = top.map(x => `Atenciones: ${FMT(x.Atenciones ?? 0)} \u00b7 ${x.LlamadasPct ?? 0}% llamadas \u00b7 ${FMT(x.MinutosHablados ?? 0)} min hablados`);
+    const pie = items => detalle[items[0].dataIndex];
+
+    dibujarGrafico(graficos, 'cargaTecnico', 'chart-carga-tecnico',
+      () => ({
+        type: 'bar',
+        // Apilada, como la de antiguedad del Backlog pero tumbada: la cifra
+        // de cada segmento la pone ETIQUETAS_SEGMENTO. La geometria -grosor,
+        // aire y radio- ya viene del default compartido.
+        plugins: [ETIQUETAS_SEGMENTO],
+        data: { labels: etiquetas, datasets: [
+          { label: 'Tickets cerrados', data: tickets, backgroundColor: BARRA_A },
+          { label: 'Llamadas atendidas', data: llamadas, backgroundColor: MORADO },
+        ] },
+        options: {
+          indexAxis: 'y',
+          responsive: true, maintainAspectRatio: false,
+          /* Apiladas a proposito: el largo total de la barra es el total de
+             atenciones y el color dice como se reparte. Lado a lado se
+             compararia ticket contra llamada, que no es la pregunta. */
+          scales: { x: Object.assign({}, EJE_CONTEO, { stacked: true }), y: { stacked: true } },
+          plugins: {
+            tooltip: { callbacks: {
+              label: c => `${c.dataset.label}: ${FMT(c.raw)}`,
+              // footer y no afterLabel: afterLabel se repetiria en cada uno de
+              // los dos datasets del mismo tecnico.
+              footer: pie,
+            } },
+          },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = tickets;
+        gr.data.datasets[1].data = llamadas;
+        // El closure apunta al arreglo de ESTA pasada, no al de la
+        // construccion: hay que reinstalarlo para que el pie case.
+        gr.options.plugins.tooltip.callbacks.footer = pie;
+      });
+  }
+
+  function renderCargaDia(filas) {
+    const etiquetas = filas.map(x => soloFecha(x.Fecha));
+    const tickets = filas.map(x => x.Tickets ?? 0);
+    const llamadas = filas.map(x => x.Llamadas ?? 0);
+
+    dibujarGrafico(graficos, 'cargaDia', 'chart-carga-dia',
+      () => ({
+        type: 'line',
+        data: { labels: etiquetas, datasets: [
+          { label: 'Tickets cerrados', data: tickets, borderColor: BARRA_A,
+            backgroundColor: BARRA_A, tension: 0.25, pointRadius: 0, borderWidth: 2 },
+          { label: 'Llamadas atendidas', data: llamadas, borderColor: MORADO,
+            backgroundColor: MORADO, tension: 0.25, pointRadius: 0, borderWidth: 2 },
+        ] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } } },
+          scales: { y: EJE_CONTEO },
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = tickets;
+        gr.data.datasets[1].data = llamadas;
+      });
+  }
+
+  function renderTablaCarga(filas) {
+    const cont = document.getElementById('tabla-carga');
+    if (!cont) return;
+    const filasHtml = filas.map(x => `<tr>
+        <td>${escapeHtml(x.Tecnico)}</td>
+        <td>${escapeHtml(x.Grupo)}</td>
+        <td class="num">${FMT(x.Tickets ?? 0)}</td>
+        <td class="num">${FMT(x.Llamadas ?? 0)}</td>
+        <td class="num"><b>${FMT(x.Atenciones ?? 0)}</b></td>
+        <td class="num">${x.LlamadasPct ?? 0}%</td>
+        <td class="num">${FMT(x.MinutosHablados ?? 0)}</td>
+      </tr>`).join('');
+
+    cont.innerHTML = `<table><thead><tr>
+        <th>Tecnico</th><th>Grupo</th>
+        <th class="num">Tickets cerrados</th><th class="num">Llamadas atendidas</th>
+        <th class="num">Atenciones</th><th class="num">% llamadas</th>
+        <th class="num">Minutos hablados</th>
+      </tr></thead><tbody>${filasHtml}</tbody></table>`;
+    hacerOrdenable(cont.querySelector('table'));
+  }
+
+  function renderCargaCombinada(d) {
+    const filas = (d && d.tecnicos) || [];
+    const hint = document.getElementById('hint-carga');
+    if (hint) hint.textContent = (d && d.grupos) ? String(d.grupos) : '';
+
+    if (!filas.length) {
+      /* El caso mas probable no es que no haya habido actividad, sino que el
+         catalogo de extensiones no este capturado para esos grupos, asi que
+         se dice en vez de dejar dos recuadros vacios. */
+      destruir('cargaTecnico');
+      destruir('cargaDia');
+      mostrarBloqueCarga(false);
+      estadoCargaCombinada(`Sin cruce para este filtro. Se busco en los grupos: ${escapeHtml((d && d.grupos) || '')}.<br>Si el rango si tuvo actividad, revisa que dbo.CatAgenteTecnico tenga capturadas las extensiones de esos grupos.`);
+      return;
+    }
+
+    estadoCargaCombinada('');
+    mostrarBloqueCarga(true);
+    renderCargaTecnico(filas);
+    renderCargaDia((d && d.serie) || []);
+    renderTablaCarga(filas);
+  }
+
+  function errorCargaCombinada(err) {
+    destruir('cargaTecnico');
+    destruir('cargaDia');
+    mostrarBloqueCarga(false);
+    const hint = document.getElementById('hint-carga');
+    if (hint) hint.textContent = '';
+    estadoCargaCombinada(`No se pudo cargar el cruce: ${escapeHtml((err && err.message) || err)}`);
+    console.error(err);
   }
 
   function renderTodo(motivo) {
@@ -1990,6 +2461,19 @@ const TableroSla = (function () {
     estadoCargando('estado-carga');
     const qs = paramsFiltros().toString();
     const qsGrupos = paramsRankingCerrados().toString();
+
+    /* El cruce va APARTE del allSettled de abajo, con su propio manejo de
+       error: depende de dbo.usp_Dash_CargaCombinada, que un servidor que
+       todavia no corrio ese script no tiene. Metido en la lista, su fallo se
+       sumaria a `fallos` y se anunciaria en la barra de estado como si el
+       tablero entero hubiera venido incompleto, cuando lo unico que falta es
+       el ultimo bloque del Call Center. Se lanza aqui para que salga en
+       paralelo con las demas, y se pinta solo en cuanto responde. */
+    estadoCargaCombinada('Cargando el cruce de tickets y llamadas...');
+    obtenerJSON(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
+      d => { if (miCarga === cargaVigente) renderCargaCombinada(d); },
+      e => { if (miCarga === cargaVigente) errorCargaCombinada(e); }
+    ).catch(e => console.error(e));
 
     const peticiones = [
       ['kpis',          () => obtenerJSON(`kpis.ashx?${qs}`)],
@@ -2091,7 +2575,7 @@ const TableroSla = (function () {
     await cargarTodo();
   }
 
-  return { init, redimensionar: () => redimensionar(graficos) };
+  return { init, redimensionar: () => redimensionar(graficos), modoCallCenter };
 })();
 
 /* =======================================================================
@@ -2449,15 +2933,28 @@ const TableroBacklog = (function () {
       return renderEmptyChart('chart-prioridad-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
-    /* El color va en `colores`, hecho, y NO por `paleta`: COLOR_PRIORIDAD es
+    /* El color va en `colores`, hecho, y NO por `paleta`: la prioridad es
        severidad -Critica/Alta/Media/Baja-, no identidad, y no entra en la
-       paleta categorica. Medidas y cifra dentro las trae DashboardBarChart. */
+       paleta categorica. Aqui manda COLOR_PRIORIDAD_SEMAFORO -rojo, naranja,
+       oro, verde-, que es el juego original de esta grafica y no el de la
+       escala verde. Medidas y cifra dentro las trae DashboardBarChart. */
     graficos['chart-prioridad-bl'] = new DashboardBarChart({
       canvas: 'chart-prioridad-bl',
       etiquetas,
       datos: valores,
-      colores: etiquetas.map(l => COLOR_PRIORIDAD[l]),
+      colores: etiquetas.map(l => COLOR_PRIORIDAD_SEMAFORO[l]),
       formato: FMT,
+      /* Aire local, y SOLO aqui. Son CUATRO categorias en una tarjeta de
+         .grid3 -un tercio del ancho-, asi que la ranura de cada prioridad
+         anda por los 85px y el tope compartido de 44px (Barras.GRUESA) deja
+         la barra en la mitad de su ranura: mas hueco que barra. Subiendo
+         SOLO el tope a 72px manda otra vez el .81 de los porcentajes
+         compartidos -barra en el 81% de la ranura, 19% de aire entre
+         vecinas- y en un monitor ancho el nuevo tope corta antes de que la
+         barra se vuelva un bloque. Los dos porcentajes NO se tocan: el
+         reparto es el mismo del resto del tablero. Va en `barra:` y no en
+         Barras.GRUESA justo para no engordar las demas graficas. */
+      barra: { maxBarThickness: 72 },
       dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
       opciones: {
         maintainAspectRatio: false,
@@ -2468,46 +2965,87 @@ const TableroBacklog = (function () {
     }).render();
   }
 
-  // Apilada por lider: dentro de cada barra de antiguedad, un color por lider.
-  // Es el mismo color que ese lider tiene en el resto de graficas, en las
-  // tablas de abajo y en el correo diario, asi que se puede seguir a una
-  // persona de una vista a otra. Los lideres chicos se agrupan en "Otros"
-  // -mismo criterio que la matriz de "Resumen por antiguedad"-.
-  // El clic sigue filtrando por bucket de antiguedad, no por lider.
+  /* Apilada HORIZONTAL: una fila por CUBO DE ANTIGUEDAD -de 0-1 dias arriba
+     al cubo mas viejo abajo, en orden de AgingSort- y dentro de la fila un
+     segmento por lider. Es la misma matriz de siempre; lo unico que cambio
+     respecto a la version vertical es el eje.
+
+     El color es IDENTIDAD DE LIDER y lo resuelve colorLider() (Paleta contra
+     `ordenLideres`), asi que una persona lleva el mismo color aqui, en
+     "Backlog por lider", en la matriz de abajo, en el drill-down y en el
+     correo diario. Los lideres chicos se agrupan en "Otros" -mismo criterio
+     que la matriz de "Resumen por antiguedad"-.
+
+     La leyenda va ARRIBA y es la que nombra a cada lider con su color: un
+     dataset ES un lider, asi que sigue siendo clicable -apagar una entrada
+     saca a esa persona de todas las pilas- y envuelve sola cuando los
+     nombres son largos. Por eso el nombre completo vive aqui y no en el eje:
+     el eje solo lleva los rotulos cortos de los cubos.
+
+     El clic en un segmento filtra por BUCKET de antiguedad, que es la
+     CATEGORIA de la fila, no por lider. */
   function renderBarrasAging() {
     const m = construirMatrizAging(agingFiltrado('aging'));
     if (!m) {
       return renderEmptyChart('chart-aging-bl', 'Sin tickets en backlog para este corte y filtros.');
     }
 
-    // El contorno marca la barra seleccionada. Va en cada dataset porque el
-    // grosor se aplica por segmento, y asi se resalta la columna completa.
+    // El contorno marca la fila seleccionada. Va en cada dataset porque el
+    // grosor se aplica por segmento, y asi se resalta la pila completa.
     const sel = bordesSeleccion(m.buckets, filtro.aging, 0);
 
-    /* Apilada: DashboardBarChart pone el grosor a cada dataset, pero la cifra
-       dentro se apaga con `etiquetasDentro: false`. En una apilada no hay
-       "fuera de la barra" donde caer -seria encima del segmento vecino-, asi
-       que aqui manda ETIQUETAS_SEGMENTO, que omite el segmento que no da el
-       alto. El color de lider es identidad y ya viene resuelto por
-       colorLider() (Paleta contra `ordenLideres`), uno por dataset. */
+    /* Aire local, y SOLO aqui. Son hasta siete filas de antiguedad en los
+       260px del .lienzo -menos lo que se lleva la leyenda de arriba-, asi
+       que la ranura de cada fila anda por los 30px y el juego compartido
+       -.9 x .9 con tope de 44px- pegaria una fila con la siguiente. Con
+       .78 x .88 la barra ocupa el 69% de su ranura, y el tope propio de 26px
+       la deja compacta tambien cuando hay tres cubos y sobra alto. El radio
+       lo sigue poniendo el default compartido (Barras.RADIO). Va en `barra:`
+       y no en Barras.GRUESA justo para no adelgazar las demas graficas. */
     graficos['chart-aging-bl'] = new DashboardBarChart({
       canvas: 'chart-aging-bl',
       etiquetas: m.buckets,
+      barra: { categoryPercentage: 0.78, barPercentage: 0.88, maxBarThickness: 26 },
       dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
       datasets: m.lideres.map(l => ({
         label: l,
         data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
         backgroundColor: colorLider(l),
       })),
+      /* Apilada: la cifra de cada segmento la pone ETIQUETAS_SEGMENTO, que
+         sabe de segmentos -y ya mide la caja en los dos ejes- y omite el que
+         no da el ancho. El plugin compartido no sirve: sacaria la cifra
+         fuera de la barra, encima del segmento vecino. */
       etiquetasDentro: false,
       plugins: [ETIQUETAS_SEGMENTO],
       opciones: {
+        indexAxis: 'y',
         maintainAspectRatio: false,
         plugins: {
-          ...LEYENDA_ABAJO,
-          tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } },
+          /* Leyenda ARRIBA -no la LEYENDA_ABAJO compartida-: aqui es lo que
+             traduce color -> persona, asi que se lee ANTES de las barras.
+             `boxWidth` chico y fuente de 10 para que cinco o seis nombres
+             largos quepan en dos lineas sin empujar el lienzo. */
+          legend: {
+            position: 'top',
+            labels: { boxWidth: 12, font: { size: 10 }, padding: 8 },
+          },
+          tooltip: {
+            callbacks: {
+              label: c => `${c.dataset.label}: ${FMT(c.raw)}`,
+              // El total del cubo ya lo trae construirMatrizAging: aqui solo
+              // se muestra, no se vuelve a sumar.
+              footer: c => `Total: ${FMT(m.totalPorBucket.get(c[0]?.label) ?? 0)}`,
+            },
+          },
         },
-        scales: { x: { stacked: true }, y: { stacked: true, ...EJE_Y_CERO.y } },
+        scales: {
+          // El eje numerico pasa a la horizontal: se lleva EJE_Y_CERO tal cual.
+          x: { stacked: true, ...EJE_Y_CERO.y },
+          // Rotulos de cubo: cortos -"16-30 dias"-, van enteros y sin saltarse
+          // ninguno.
+          y: { stacked: true, grid: { display: false }, ticks: { autoSkip: false } },
+        },
         onClick: (evt, _e, gr) => alternarFiltro('aging', etiquetaDelClic(gr, evt)),
       },
     }).render();
@@ -2614,8 +3152,29 @@ const TableroBacklog = (function () {
       if (!ordenBucket.has(f.Aging)) ordenBucket.set(f.Aging, f.AgingSort);
       totalCrudo.set(f.Lider, (totalCrudo.get(f.Lider) ?? 0) + f.Tickets);
     }
-    // Los buckets van en orden real de antiguedad (AgingSort), no alfabetico.
-    const buckets = [...ordenBucket.entries()].sort((a, b) => a[1] - b[1]).map(e => e[0]);
+    /* Los buckets van en orden real de antiguedad, no alfabetico. El criterio
+       ES el AgingSort del SP, pero NO se usa a secas: el procedimiento numera
+       mal el cubo mas nuevo -"menos de un dia" sale detras de un rango de
+       dias que deberia ir despues-, y el orden equivocado se veia igual en la
+       grafica que en la matriz de aqui abajo, porque las dos salen de esta
+       funcion.
+
+       El arreglo de fondo es el AgingSort del SP; mientras tanto manda el
+       ROTULO, que si trae la informacion: el primer numero del texto es el
+       borde inferior del rango -"4-7 dias" -> 4, "31+ dias" -> 31-, y el cubo
+       mas nuevo no trae numero -"menos de un dia"-, asi que cuenta como 0 y
+       encabeza. "Sin fecha" no es un escalon de la escalera -no se sabe si es
+       viejo- y se va al final, el mismo criterio que ya sigue colorAging() al
+       sacarlo de la rampa ordinal. Empates: decide el AgingSort. */
+    function rangoDelRotulo(etiqueta) {
+      const texto = String(etiqueta);
+      if (/sin\s+(fecha|dato)/i.test(texto)) return Number.MAX_SAFE_INTEGER;
+      const n = texto.match(/\d+/);
+      return n ? parseInt(n[0], 10) : 0;
+    }
+    const buckets = [...ordenBucket.entries()]
+      .sort((a, b) => (rangoDelRotulo(a[0]) - rangoDelRotulo(b[0])) || (a[1] - b[1]))
+      .map(e => e[0]);
     const top = new Set([...totalCrudo.entries()].sort((a, b) => b[1] - a[1]).slice(0, topLideres).map(e => e[0]));
 
     const valores = new Map();
@@ -2977,6 +3536,7 @@ const TableroExterno = (() => {
     if (eraLaActiva && observabilidad) observabilidad.click();
 
     montarDesplegables(doc);
+    recolorearLegacy(doc);
   }
 
   /* Observabilidad y Orquestacion, que es lo que se ve de este documento, aun
@@ -2996,6 +3556,21 @@ const TableroExterno = (() => {
       doc.head.appendChild(hoja);
     }
     Desplegable.montar(doc);
+  }
+
+  /* El marco traia su propia paleta -cabecera azul marino, franja de KPI
+     azul y "bien" en verde esmeralda-, que no es la del tablero. Se corrige
+     desde fuera por la misma razon que los desplegables: el HTML es generado
+     y no se puede editar. La hoja entra al final del <head>, asi que gana
+     por orden a las reglas de su <style> sin subir especificidad.
+     Solo color; ningun KPI cambia de estado ni de valor. */
+  function recolorearLegacy(doc) {
+    if (doc.getElementById('css-tablero-legacy')) return;
+    const hoja = doc.createElement('link');
+    hoja.id = 'css-tablero-legacy';
+    hoja.rel = 'stylesheet';
+    hoja.href = new URL('assets/css/tablero-legacy.css', location.href).href;
+    doc.head.appendChild(hoja);
   }
 
   function init() {
@@ -3203,6 +3778,27 @@ function adoptarControlesSla(idTab) {
   const mes = filtros.querySelector('[data-rango="mes"]');
   if (anio) anio.hidden = esCallCenter;
   if (mes) mes.hidden = !esCallCenter;
+
+  /* El SLOT es un concepto de tickets -el corte quincenal con el que se mide
+     el cumplimiento-, no de llamadas: en el Call Center el control no tenia
+     nada que decir. Se retira el campo entero, con su etiqueta y su resumen,
+     asi que no queda ni boton vacio ni hueco reservado (dashboard.css:
+     `.filtros .campo[hidden]`). En SLA sigue exactamente igual: el marcado y
+     los listeners no se tocan, solo deja de mostrarse mientras la barra esta
+     prestada a la otra pestaña. */
+  const slot = filtros.querySelector('.campo-slot');
+  if (slot) slot.hidden = esCallCenter;
+
+  /* Campanas es la cara opuesta del SLOT: la cola de llamadas no dice nada de
+     un ticket y ningun handler de SLA lee el parametro `campanas` (solo lo
+     manda paramsLlamadas()). Se retira el campo entero en SLA -etiqueta y
+     <select>- y vuelve en el Call Center, donde sigue siendo el mismo control
+     con sus mismos ids, listeners y seleccion: viajar a SLA no la pierde. */
+  const campanas = filtros.querySelector('.campo-campanas');
+  if (campanas) campanas.hidden = !esCallCenter;
+
+  /* Grupos y tecnicos: en el Call Center solo los que atienden telefono. */
+  TableroSla.modoCallCenter(esCallCenter);
 }
 
 let slaIniciado = false;

@@ -16,6 +16,15 @@
      pierden sus <script> y sus <link> al montarse- lo encuentran ya puesto. -->
 <script src="assets/js/desplegable.js"></script>
 <link rel="stylesheet" href="assets/css/desplegable.css">
+<!-- El medidor `.mini` de las tablas, tambien uno solo para todo el tablero
+     y aqui por lo mismo: Experiencia lo pinta y al embeberse pierde sus
+     <link>. -->
+<link rel="stylesheet" href="assets/css/barra-mini.css">
+<!-- La tarjeta KPI, tambien una sola para todo el tablero: la pintan SLA,
+     Backlog y Call Center desde aqui, y Experiencia y QA desde sus propios
+     modulos. Va antes de dashboard.css por el mismo motivo que las otras
+     dos compartidas. -->
+<link rel="stylesheet" href="assets/css/kpi.css">
 <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
@@ -84,9 +93,13 @@
         <select id="f-tecnicos" multiple></select>
       </div>
       <!-- Campanas del Call Center. Solo la lee llamadas.ashx: los demas
-           handlers de esta pestana ignoran el parametro `campanas`. -->
-      <div class="campo">
-        <label for="f-campanas">Campanas</label>
+           handlers de esta pestana ignoran el parametro `campanas`, y en SLA
+           el filtro no significa nada -un ticket no tiene cola-, asi que el
+           campo entero se retira mientras la barra esta en SLA, igual que el
+           SLOT se retira en el Call Center (adoptarControlesSla, dashboard.js).
+           Nace oculto porque SLA es la pestana de arranque. -->
+      <div class="campo campo-campanas" hidden>
+        <label for="f-campanas">Campañas</label>
         <select id="f-campanas" multiple></select>
       </div>
       <div class="campo acciones">
@@ -296,14 +309,15 @@
          Los filtros por clic de las graficas de SLA (cross-filter) NO alcanzan
          a este bloque: una llamada no comparte ninguna dimension con un ticket
          -no tiene estado, prioridad ni antiguedad-. Solo lo mueven el rango de
-         fechas y su propio filtro de campanas. -->
-    <section class="card">
-      <h3>Call Center de Servicios TI<span class="hint" id="hint-llamadas"></span></h3>
-      <div class="nota">Llamadas recibidas en el rango de fechas de arriba. Los filtros de
-        <b>Grupos</b> y <b>Tecnicos</b> no aplican: una llamada no tiene grupo resolutor.
-        El filtro de <b>Campanas</b> mueve <b>solo</b> este bloque.</div>
-      <div class="kpis" id="kpis-llamadas"></div>
-    </section>
+         fechas y su propio filtro de campanas.
+
+         La rejilla de KPI abre la pestana, como en SLA y en Backlog: filtros,
+         KPI y luego graficas. Antes iba precedida de una `.card` de titulo que
+         repetia el nombre de la pestana y no aportaba dato ninguno; ademas, la
+         rejilla vivia DENTRO de esa tarjeta y sus 20px de padding le restaban
+         42px de ancho util, asi que las tarjetas salian 7px mas estrechas que
+         las del resto del tablero. -->
+    <section class="kpis" id="kpis-llamadas"></section>
 
     <section class="grid2">
       <div class="card">
@@ -318,13 +332,50 @@
 
     <section class="grid2">
       <div class="card">
-        <h3>Abandono por campana<span class="hint">volumen y % de abandono</span></h3>
+        <h3>Abandono por campaña<span class="hint">volumen y % de abandono</span></h3>
         <div class="lienzo"><canvas id="chart-llamadas-campana"></canvas></div>
       </div>
       <div class="card">
         <h3>Llamadas por hora del dia</h3>
         <div class="lienzo"><canvas id="chart-llamadas-hora"></canvas></div>
       </div>
+    </section>
+
+    <!-- ------------------------------------------------- Carga combinada
+         Unico bloque donde llamadas y tickets caen en la MISMA fila, y
+         contesta lo que las graficas de arriba dejan abierto: quien cierra
+         pocos tickets porque se le fue el dia en el telefono. Solo sale la
+         gente que esta en dbo.CatAgenteTecnico -la que hace las dos cosas-.
+
+         Se pide a carga_combinada.ashx en una peticion APARTE del resto del
+         Call Center: depende de dbo.usp_Dash_CargaCombinada, que puede no
+         estar en un servidor viejo. Si falla, este bloque pinta su estado
+         vacio y las tarjetas y graficas de arriba siguen igual. -->
+    <section class="card">
+      <h3>Carga combinada: tickets y llamadas por tecnico<span class="hint" id="hint-carga"></span></h3>
+      <div class="nota">Solo los tecnicos con extension telefonica registrada en el catalogo.
+        Los tickets se cuentan por fecha de firma de solucion y las llamadas solo si fueron
+        contestadas. El filtro de <b>Grupos</b> si aplica aqui, pero contra el grupo donde el
+        tecnico tiene mas tickets, no contra el grupo del ticket.</div>
+      <div id="estado-carga-combinada"></div>
+    </section>
+
+    <section class="grid2" id="graficos-carga">
+      <div class="card">
+        <h3>Tickets vs llamadas por tecnico<span class="hint">top 15</span></h3>
+        <div class="lienzo alta"><canvas id="chart-carga-tecnico"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Del equipo, por dia<span class="hint">tickets cerrados vs llamadas atendidas</span></h3>
+        <div class="lienzo alta"><canvas id="chart-carga-dia"></canvas></div>
+      </div>
+    </section>
+
+    <section class="card" id="card-tabla-carga">
+      <h3>Detalle por tecnico</h3>
+      <div class="nota">Atenciones = tickets + llamadas. No mide esfuerzo: mide cuantas cosas
+        despacho la persona.</div>
+      <div class="scroll-x" id="tabla-carga"></div>
     </section>
   </div>
 

@@ -4,7 +4,16 @@
    --g-800 / --g-600 / --g-400 son esas paradas; el resto, interpolaciones
    y tintes de ellas. --g-900 solo se usa como tinta y hover, nunca como
    parada de un degradado. */
-:root{
+
+/* Los tres selectores, como en qa.css: embebida en el tablero esta hoja va
+   dentro de un @scope (#tab-experiencia), y ahi `:root` NO casa con nada
+   -html no es descendiente del contenedor del scope-, asi que cada var() se
+   caia al :root de dashboard.css sin avisar. Hoy los dos juegos de tokens
+   coinciden valor por valor y no se nota; el dia que uno se mueva, la
+   diferencia saldria solo dentro de la pestaña y no en la pagina suelta.
+   `:scope` y `#tab-experiencia` cubren ese caso; `:root` sigue sirviendo a la pagina
+   suelta. */
+:root, :scope, #tab-experiencia {
 color-scheme:light;
 --g-50:#f4fae7;--g-100:#e9f5ce;--g-200:#d3e9ac;--g-300:#bae065;--g-400:#9dd323;
 --g-500:#81c727;--g-600:#65bb2b;--g-700:#56a333;--g-800:#478b3c;--g-900:#3a7431;
@@ -13,6 +22,14 @@ color-scheme:light;
 --accent:var(--g-600);--accent-ink:var(--g-900);
 --verde:var(--g-800);--verde-strong:var(--g-900);
 --ambr:#d97706;   /* advertencia */
+/* Semaforo de los KPI: el "bien" de una tarjeta es el lima de la cabecera,
+   no --verde (verde profundo de marca, que usan flechas y badges). */
+--kpi-ok:var(--g-400);
+/* Misma sombra que dashboard.css, para que la tarjeta KPI de la pestaña y
+   la de la pagina suelta tengan el mismo relieve. */
+--shadow:0 1px 2px rgba(25,25,25,.05),0 1px 3px rgba(25,25,25,.06);
+/* La sombra alta de dashboard.css, la que lleva header.top. Mismo valor. */
+--shadow-md:0 2px 4px rgba(25,25,25,.05),0 8px 20px -6px rgba(25,25,25,.12);
 --rojo:#982a18;   /* negativo */
 --radius:14px;
 --grad-header:linear-gradient(135deg,#478B3C 0%,#65BB2B 45%,#9DD323 100%);
@@ -39,15 +56,28 @@ background:var(--bg-2);color:var(--ink);padding:18px;line-height:1.4}
    77px de la cabecera de SLA, y la pestaña no se parecia a ninguna otra. Los
    filtros salieron a su propia franja; el corte se queda aqui, en el mismo
    sitio que el sello del ETL en SLA y el chip de fecha en QA. */
-header.top{background:var(--grad-header);color:var(--ink);padding:22px 26px;
+/* Las medidas son las de header.top en dashboard.css y qa.css, al pixel: esta
+   pestaña se monta dentro del tablero, donde la barra verde tiene que ser la
+   MISMA pieza que en SLA, Backlog, Call Center y QA. Iba con 22px de padding,
+   titulo de 19px y subtitulo de 13px, y por eso se leia mas baja y con otra
+   tipografia que las demas. El brillo de esquina y la sombra tambien venian de
+   menos. */
+header.top{position:relative;overflow:hidden;
+background:var(--grad-header);color:var(--ink);padding:24px 28px;
+min-height:100px;
 border-radius:var(--radius);margin-bottom:16px;
-display:flex;align-items:flex-start;justify-content:space-between;
-flex-wrap:wrap;gap:14px}
-header.top h1{font-size:19px;font-weight:700}
+display:flex;align-items:center;justify-content:space-between;
+flex-wrap:wrap;gap:14px;
+box-shadow:var(--shadow-md)}
+header.top::after{content:"";position:absolute;inset:0;pointer-events:none;
+background:radial-gradient(520px 200px at 88% -40%,rgba(244,250,231,.40),transparent 70%)}
+header.top>*{position:relative;z-index:1}
+header.top h1{font-size:20px;font-weight:700;letter-spacing:-.2px}
 header.top h1 .ver{font-size:11px;font-weight:400;opacity:.7}
-header.top .sub{font-size:13px;color:var(--ink-2);margin-top:3px}
-header.top .acciones-top{display:flex;flex-direction:column;align-items:flex-end;
-gap:8px;align-self:center}
+header.top .sub{font-size:12.5px;color:var(--ink-2);margin-top:5px;
+font-variant-numeric:tabular-nums}
+header.top .acciones-top{display:flex;flex-direction:row;align-items:center;
+justify-content:flex-end;flex-wrap:wrap;gap:8px}
 /* Insignia de corte de datos: pastilla blanca chica dentro del verde, mismo
    trato que el sello del ETL de SLA y que el chip de fecha de QA. Es
    informacion, no un boton: sin sombra dura, sin degradado y sin cursor.
@@ -67,8 +97,13 @@ background:var(--card);border:1px solid var(--g-100);border-radius:var(--radius)
 box-shadow:0 1px 3px rgba(0,0,0,.07);padding:16px 20px;margin-bottom:16px}
 .selrow::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;
 background:var(--grad)}
+/* Las mismas medidas chicas que dashboard.css y qa.css dan a header.top en
+   pantalla angosta: esta hoja se carga despues de dashboard.css y, a igual
+   especificidad, gana la ultima. */
 @media(max-width:700px){
-  header.top .acciones-top{align-items:flex-start;align-self:flex-start}
+  header.top{padding:18px 18px;min-height:84px}
+  header.top h1{font-size:17px}
+  header.top .acciones-top{justify-content:flex-start}
 }
 .selrow .grp{display:flex;flex-direction:column;gap:4px}
 .selrow label{font-size:11px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.5px}
@@ -100,15 +135,10 @@ cursor:pointer;font-size:12px;font-weight:700}
 #btnResetGrafVen:hover,#btnResetGrafAct:hover,#btnMarcarTodasHist:hover,
 #btnDesmarcarTodasHist:hover,#btnGraficarHist:hover{
 background:var(--grad-btn-hover);border-color:var(--g-800)}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:14px;margin-bottom:16px}
-.kpi{background:var(--card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07);
-border-left:5px solid transparent;border-image:var(--grad) 1}
-.kpi.sv{border-image:none;border-left-color:var(--verde)}
-.kpi.sa{border-image:none;border-left-color:var(--ambr)}
-.kpi.sr{border-image:none;border-left-color:var(--rojo)}
-.kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
-.kpi .val{font-size:25px;font-weight:800;margin-top:4px}
-.kpi .foot{font-size:11px;color:var(--muted);margin-top:3px}
+/* `.kpis` y `.kpi` viven en ../assets/css/kpi.css, junto con la copia que
+   tenian dashboard.css y qa.css. Esta se habia quedado con la pista en
+   175px y el valor en 25px, y por el @scope de la pestaña le ganaba a la
+   del tablero: las tarjetas de Experiencia no median como las demas. */
 .badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:700;color:#fff}
 .bv{background:var(--verde-strong)}.ba{background:var(--ambr)}.br{background:var(--rojo)}
 .grid2{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;margin-bottom:16px}
@@ -156,8 +186,9 @@ th:hover{color:var(--ink)}
 td{padding:8px;border-bottom:1px solid var(--line-soft);vertical-align:top}
 td.num{text-align:right;font-variant-numeric:tabular-nums}
 tbody tr:hover{background:var(--g-50)}
-.mini{width:56px;height:7px;background:var(--line);border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle}
-.mini>i{display:block;height:100%}
+/* `.mini` sale de ../assets/css/barra-mini.css, que esta pagina carga en su
+   <head> y el tablero anfitrion tambien. Una sola definicion para los tres
+   caminos por los que se ve este modulo. */
 .c1row{background:var(--bg-2);font-weight:700;cursor:pointer}
 .c1row td:first-child::before{content:"\25B8 ";color:var(--muted)}
 .c1row.open td:first-child::before{content:"\25BE "}

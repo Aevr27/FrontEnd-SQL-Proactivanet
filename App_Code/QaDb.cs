@@ -495,17 +495,19 @@ WHERE FechaRegistroDia >= @FechaInicio
 // se concatena a una consulta: todo termina como SqlParameter.
 public static class QaParams
 {
-    // Ventana por defecto del tablero: los ultimos 15 dias, exactamente la
-    // misma que usa usp_CorreoQA_Kpis (@FechaFin = hoy, @FechaInicio = hoy-14).
+    // Ventana por defecto del tablero: los 15 dias completos que terminan
+    // ayer, exactamente la misma que usa el correo de QA (@FechaFin = hoy-1,
+    // @FechaInicio = @FechaFin-14). El dia en curso queda fuera porque todavia
+    // no esta cerrado y movia los KPIs a lo largo de la jornada.
     // Se puede cambiar por query string, sobre todo para reproducir un dia
     // concreto al comparar contra el correo de QA.
     public const int DiasVentana = 15;
 
     public static void Rango(HttpRequest request, out string fechaInicio, out string fechaFin)
     {
-        var hoy = DateTime.Today;
+        var ayer = DateTime.Today.AddDays(-1);
 
-        fechaFin = FechaOpcional(request, "fecha_fin") ?? hoy.ToString("yyyy-MM-dd");
+        fechaFin = FechaOpcional(request, "fecha_fin") ?? ayer.ToString("yyyy-MM-dd");
 
         var inicio = FechaOpcional(request, "fecha_inicio");
         if (inicio == null)

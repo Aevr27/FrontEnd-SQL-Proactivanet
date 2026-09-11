@@ -84,6 +84,25 @@
       </files>
     </defaultDocument>
 
+    <!-- CACHE DE LOS ARCHIVOS ESTATICOS
+         IIS mandaba solo Last-Modified, sin Cache-Control. Sin esa cabecera
+         el navegador aplica su heuristica -se queda con el archivo un rato
+         sin volver a preguntar-, y por eso un despliegue puede quedar
+         invisible: se copian los archivos nuevos y el navegador sigue
+         pintando la hoja vieja, sin ningun aviso.
+
+         DisableCache manda "Cache-Control: no-cache". NO prohibe guardar:
+         obliga a revalidar. Lo que no cambio vuelve como 304 -unos cientos
+         de bytes, nada en una red interna- y lo que si cambio llega entero.
+
+         Cubre tambien los .html, que es lo que de verdad importa: si
+         dashboard.html se sirviera viejo, cualquier ?v= escrito DENTRO de el
+         no llegaria nunca al navegador. Por eso esto va aqui y no como
+         parametro en las etiquetas <link> y <script>. -->
+    <staticContent>
+      <clientCache cacheControlMode="DisableCache" />
+    </staticContent>
+
     <security>
       <requestFiltering>
         <!-- El SQL fuente y los snapshots del modo offline no se sirven por
@@ -103,5 +122,31 @@
       </requestFiltering>
     </security>
   </system.webServer>
+
+  <!-- Las carpetas vendor/ son de terceros (la copia local de Chart.js).
+       No las tocamos nosotros y su nombre no cambia, asi que revalidarlas en
+       cada carga solo gasta viajes: se quedan cacheables un año. Si algun dia
+       se sube de version, se cambia el nombre del archivo. -->
+  <location path="assets/vendor">
+    <system.webServer>
+      <staticContent>
+        <clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="365.00:00:00" />
+      </staticContent>
+    </system.webServer>
+  </location>
+  <location path="experiencia/vendor">
+    <system.webServer>
+      <staticContent>
+        <clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="365.00:00:00" />
+      </staticContent>
+    </system.webServer>
+  </location>
+  <location path="orquestacion/vendor">
+    <system.webServer>
+      <staticContent>
+        <clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="365.00:00:00" />
+      </staticContent>
+    </system.webServer>
+  </location>
 
 </configuration>

@@ -12,6 +12,9 @@ color-scheme:light;
 --accent:var(--g-600);--accent-ink:var(--g-900);
 --verde:var(--g-800);--verde-strong:var(--g-900);
 --ambr:#d97706;   /* advertencia */
+/* Semaforo de los KPI: el "bien" de una tarjeta es el lima de la cabecera,
+   no --verde (verde profundo de marca, que usan flechas y badges). */
+--kpi-ok:var(--g-400);
 --rojo:#982a18;   /* negativo */
 --radius:14px;
 --grad-header:linear-gradient(135deg,#478B3C 0%,#65BB2B 45%,#9DD323 100%);
@@ -42,10 +45,10 @@ cursor:pointer;font-size:12px;font-weight:700}
 .selrow button:hover{background:var(--grad-btn-hover);border-color:var(--g-800)}
 .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:14px;margin-bottom:16px}
 .kpi{background:var(--card);border-radius:var(--radius);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.07);
-border-left:5px solid transparent;border-image:var(--grad) 1}
-.kpi.sv{border-image:none;border-left-color:var(--verde)}
-.kpi.sa{border-image:none;border-left-color:var(--ambr)}
-.kpi.sr{border-image:none;border-left-color:var(--rojo)}
+border-left:5px solid var(--kpi-ok)}
+.kpi.sv{border-left-color:var(--kpi-ok)}
+.kpi.sa{border-left-color:var(--ambr)}
+.kpi.sr{border-left-color:var(--rojo)}
 .kpi .lbl{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600}
 .kpi .val{font-size:25px;font-weight:800;margin-top:4px}
 .kpi .foot{font-size:11px;color:var(--muted);margin-top:3px}

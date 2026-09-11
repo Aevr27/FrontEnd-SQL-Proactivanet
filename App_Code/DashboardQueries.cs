@@ -261,6 +261,8 @@ SELECT
     TicketsCerrados = SUM(CASE WHEN EstaCerrado = 1 THEN 1 ELSE 0 END),
     TicketsAbiertos = SUM(CASE WHEN EstaAbierto = 1 THEN 1 ELSE 0 END),
     TicketsSlaVencidos = SUM(CASE WHEN SlaVencido = 1 THEN 1 ELSE 0 END),
+    TicketsCerradosSlaVencidos = SUM(CASE WHEN EstaCerrado = 1 AND SlaVencido = 1 THEN 1 ELSE 0 END),
+    TicketsAbiertosSlaVencidos = SUM(CASE WHEN EstaAbierto = 1 AND SlaVencido = 1 THEN 1 ELSE 0 END),
     CumplimientoSlaPct = CAST(
         100.0 * SUM(CASE WHEN SlaEvaluable = 1 AND DentroSla = 1 THEN 1 ELSE 0 END)
         / NULLIF(SUM(CASE WHEN SlaEvaluable = 1 THEN 1 ELSE 0 END), 0)
@@ -361,5 +363,117 @@ ORDER BY FechaRegistro DESC;";
         {
             cmd.Parameters.Add("@TopSeguro", SqlDbType.Int).Value = topSeguro;
         });
+    }
+
+    // ---------------------------------------------------------------------
+    // Catalogo propio del Call Center
+    // ---------------------------------------------------------------------
+
+    // Los grupos que atienden telefono. Es el mismo par que ya usaba
+    // carga_combinada.ashx como valor por omision de su parametro @Grupos:
+    // fuera de estos dos no hay nadie que conteste llamadas, asi que la
+    // pestana de Call Center no tiene por que ofrecer el resto.
+    //
+    // El nombre viaja tal cual esta escrito en vw_Dash_ProductividadBase.Grupo
+    // porque es el mismo texto que llena las <option> del filtro: si aqui se
+    // escribiera distinto, el valor seleccionado no casaria con el catalogo.
+    public static readonly string[] GruposCallCenter = { "Service Desk", "End User" };
+
+    /* Grupos y tecnicos del Call Center, para acotar los dos <select> cuando
+       la barra de filtros esta en esa pestana.
+
+       Va APARTE de dbo.usp_Dash_Catalogos -que sigue sirviendo las listas
+       completas del tablero de SLA, sin tocar- y sale de la misma vista que
+       el resto de las consultas de este archivo, asi que la relacion
+       tecnico -> grupo es la que ya existe en los datos: no hay ninguna lista
+       de nombres escrita a mano.
+
+       Sin filtro de fechas, igual que el catalogo de SLA: la lista de un
+       filtro no puede encogerse por el rango que el usuario tenga puesto, o
+       el tecnico que eligio desapareceria al mover una fecha.
+
+       Los grupos se devuelven leidos de la vista y no desde la constante para
+       que salgan con la grafia y el espaciado exactos con que estan grabados
+       -el IN los encuentra igual, la colacion del servidor no distingue
+       mayusculas- y para que un grupo que no exista en los datos no aparezca
+       en el desplegable. */
+    public static Dictionary<string, object> CatalogosCallCenter()
+    {
+        const string sql = @"
+SELECT DISTINCT Grupo
+FROM dbo.vw_Dash_ProductividadBase
+WHERE Grupo IN ({0})
+ORDER BY Grupo;
+
+SELECT DISTINCT Tecnico
+FROM dbo.vw_Dash_ProductividadBase
+WHERE Tecnico IS NOT NULL AND LTRIM(RTRIM(Tecnico)) <> N''
+  AND Grupo IN ({0})
+ORDER BY Tecnico;";
+
+        var resultados = new List<List<Dictionary<string, object>>>();
+
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        using (var cmd = new SqlCommand())
+        {
+            // Un parametro por grupo, como en EnLista(): los nombres no se
+            // concatenan nunca dentro del SQL.
+            var marcas = new StringBuilder();
+            for (int i = 0; i < GruposCallCenter.Length; i++)
+            {
+                var nombre = "@gcc" + i;
+                if (i > 0) marcas.Append(", ");
+                marcas.Append(nombre);
+                cmd.Parameters.Add(nombre, SqlDbType.NVarChar, 4000).Value = GruposCallCenter[i];
+            }
+
+            cmd.Connection = cn;
+            cmd.CommandType = CommandType.Text;
+            cmd.CommandText = string.Format(sql, marcas.ToString());
+
+            cn.Open();
+            using (var reader = cmd.ExecuteReader())
+            {
+                do
+                {
+                    var filas = new List<Dictionary<string, object>>();
+                    while (reader.Read())
+                    {
+                        var fila = new Dictionary<string, object>();
+                        for (int i = 0; i < reader.FieldCount; i++)
+                        {
+                            object valor = reader.GetValue(i);
+                            fila[reader.GetName(i)] = (valor is DBNull) ? null : valor;
+                        }
+                        filas.Add(fila);
+                    }
+                    resultados.Add(filas);
+                } while (reader.NextResult());
+            }
+        }
+
+        return new Dictionary<string, object>
+        {
+            { "grupos",   Columna(resultados, 0) },
+            { "tecnicos", Columna(resultados, 1) },
+        };
+    }
+
+    // Aplana un result set de una sola columna a ["valor", "valor", ...].
+    private static List<object> Columna(
+        List<List<Dictionary<string, object>>> resultados, int indice)
+    {
+        var salida = new List<object>();
+        if (resultados == null || indice < 0 || indice >= resultados.Count) return salida;
+
+        foreach (var fila in resultados[indice])
+        {
+            foreach (var valor in fila.Values)
+            {
+                if (valor != null) salida.Add(valor);
+                break;
+            }
+        }
+        return salida;
     }
 }
