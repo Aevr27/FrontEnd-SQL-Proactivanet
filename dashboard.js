@@ -1541,25 +1541,48 @@ const TableroSla = (function () {
      vigente. */
   let productividadVigente = [];
 
-  // La cifra al FINAL de cada barra, en carbon sobre el fondo de la tarjeta.
-  // Barras.etiquetasDentro la centra DENTRO, que en un ranking obliga a
-  // buscarla a media barra; aqui el numero cae donde termina la lectura.
+  // Dos cifras por barra apilada:
+  // - Cerrados, centrada DENTRO del tramo verde (dataset 0), en blanco, solo
+  //   si cabe en el tramo.
+  // - TicketsTotales, FUERA, justo despues de la punta de la barra COMPLETA:
+  //   la posicion la da el ultimo dataset apilado visible (Abiertos, o
+  //   Cerrados si Abiertos esta oculto o en 0) y el VALOR sale de
+  //   productividadVigente[i].TicketsTotales, que es el total autoritativo.
   const CIFRA_PUNTA = {
     id: 'cifraPunta',
     afterDatasetsDraw(chart) {
       const ctx = chart.ctx;
-      const meta = chart.getDatasetMeta(0);
-      const ds = chart.data.datasets[0];
-      if (!meta || meta.hidden || !ds) return;
+      const metas = chart.data.datasets.map((_, d) => chart.getDatasetMeta(d));
       ctx.save();
       ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+      ctx.textBaseline = 'middle';
+
+      const mCer = metas[0], dsCer = chart.data.datasets[0];
+      if (mCer && !mCer.hidden && dsCer) {
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'center';
+        mCer.data.forEach((barra, i) => {
+          const v = Number(dsCer.data[i]);
+          if (!v) return;
+          const txt = FMT(v);
+          const ancho = Math.abs(barra.x - barra.base);
+          if (ctx.measureText(txt).width + 8 > ancho) return;
+          ctx.fillText(txt, (barra.x + barra.base) / 2, barra.y);
+        });
+      }
+
       ctx.fillStyle = '#393939';
       ctx.textAlign = 'left';
-      ctx.textBaseline = 'middle';
-      meta.data.forEach((barra, i) => {
-        const v = ds.data[i];
-        if (v == null) return;
-        ctx.fillText(FMT(v), barra.x + 6, barra.y);
+      productividadVigente.forEach((r, i) => {
+        if (!r || r.TicketsTotales == null) return;
+        let punta = null, y = null;
+        metas.forEach(m => {
+          if (!m || m.hidden || !m.data[i]) return;
+          const b = m.data[i];
+          if (punta === null || b.x > punta) { punta = b.x; y = b.y; }
+        });
+        if (punta === null) return;
+        ctx.fillText(FMT(r.TicketsTotales), punta + 6, y);
       });
       ctx.restore();
     },
@@ -1644,6 +1667,8 @@ const TableroSla = (function () {
             data: cerrados,
             backgroundColor: '#4CAF50',
             hoverBackgroundColor: '#4CAF50',
+            borderRadius: 2,
+            borderSkipped: false,
             stack: 'tickets'
           },
           {
@@ -1651,6 +1676,8 @@ const TableroSla = (function () {
             data: abiertos,
             backgroundColor: BARRA_A,
             hoverBackgroundColor: BARRA_A,
+            borderRadius: 2,
+            borderSkipped: false,
             stack: 'tickets'
           }
 ]
@@ -1659,7 +1686,8 @@ const TableroSla = (function () {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
           layout: { padding: { right: airePunta(totales) } },
           plugins: {
-            legend: { display: false },
+            legend: { display: true, position: 'bottom',
+                      labels: { boxWidth: 14, boxHeight: 10, color: '#393939', font: { size: 11 } } },
             tooltip: {
               displayColors: false,
               callbacks: {
@@ -1684,7 +1712,8 @@ const TableroSla = (function () {
       }),
       gr => {
         gr.data.labels = etiquetas;
-        gr.data.datasets[0].data = totales;
+        gr.data.datasets[0].data = cerrados;
+        gr.data.datasets[1].data = abiertos;
         gr.options.layout.padding.right = airePunta(totales);
       });
   }
