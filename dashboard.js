@@ -2019,7 +2019,9 @@ const TableroSla = (function () {
     // Colgaron antes del minuto. Va aparte de 'abandonadas': el backend ya
     // dejo en Abandonadas solo las que aguantaron mas de un minuto, asi que el
     // abandono total -el que mide AbandonoPct- es la suma de las dos.
-    const colgaronRapido = k.ColgaronRapido ?? 0;
+    // El procedimiento de la VM la devuelve como 'ColgadasRapido'; el del repo,
+    // como 'ColgaronRapido'. Se aceptan los dos nombres.
+    const colgaronRapido = k.ColgadasRapido ?? k.ColgaronRapido ?? 0;
     const abandonoTotal = abandonadas + colgaronRapido;
     const aband = k.AbandonoPct ?? null;
     const nivel = k.NivelServicioPct ?? null;
