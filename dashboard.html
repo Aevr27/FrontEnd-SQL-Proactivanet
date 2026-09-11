@@ -44,6 +44,11 @@
     <header class="top">
       <div>
         <h1>Tickets Proactivanet — SLA y productividad</h1>
+        <!-- El rango de esta pestaña filtra por FECHA DE SOLUCION (solo los
+             "creados" van por fecha de registro). Decirlo aqui evita la
+             pregunta de por que un numero no cuadra con el Backlog. -->
+        <div class="sub">El rango mide <b>lo que se resolvio</b> en el periodo.
+          Lo que sigue pendiente vive en la pestaña de Backlog.</div>
       </div>
       <div class="acciones-top">
         <div class="estado" id="estado-carga"></div>
@@ -111,7 +116,7 @@
 
     <section class="grid2">
       <div class="card">
-        <h3>Tendencia diaria<span class="hint" id="hint-tendencia"></span></h3>
+        <h3>Entra vs sale<span class="hint" id="hint-tendencia"></span></h3>
         <div class="lienzo alta"><canvas id="chart-tendencia"></canvas></div>
       </div>
       <div class="card">
@@ -136,8 +141,27 @@
       </div>
     </section>
 
+    <!-- Lo que se porto del tablero nuevo de SLA. Van en una fila APARTE y
+         no en lugar de Estado/Antiguedad: esas dos se quedan hasta que se
+         decida si se retiran. Vencidos y reabiertos por grupo salen
+         agregados del servidor y no responden a los filtros por clic. -->
+    <section class="grid3">
+      <div class="card">
+        <h3>Cumplimiento de SLA en el tiempo<span class="hint" id="hint-sla-tiempo"></span></h3>
+        <div class="lienzo"><canvas id="chart-sla-tiempo"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Donde se pierde el SLA<span class="hint" id="hint-vencidos-grupo">top 12 grupos</span></h3>
+        <div class="lienzo"><canvas id="chart-vencidos-grupo"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Reabiertos por grupo<span class="hint" id="hint-reabiertos"></span></h3>
+        <div class="lienzo"><canvas id="chart-reabiertos-grupo"></canvas></div>
+      </div>
+    </section>
+
     <section class="card">
-      <h3>Personas con mas tickets cerrados<span class="hint">top 10</span></h3>
+      <h3>Personas con mas tickets resueltos<span class="hint">top 10</span></h3>
       <div class="nota">Este ranking depende <b>solo</b> del rango de fechas y del filtro de
         <b>Grupos</b>: no lo mueven el filtro de Tecnicos ni los filtros por clic del tablero.</div>
       <div class="cap" id="cap-top-cerrados"></div>
