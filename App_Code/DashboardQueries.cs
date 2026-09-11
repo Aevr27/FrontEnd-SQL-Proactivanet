@@ -34,9 +34,14 @@
 //     series de "creados", que van por FechaRegistro;
 //   - el veredicto de SLA y las horas de resolucion se miden contra la firma
 //     de solucion, no contra la de cierre;
-//   - reabierto = IntentosSolucion > 1.
-// El tecnico sigue siendo el ASIGNADO (b.Tecnico = TecnicoSegundaLinea): la
-// vista no trae FirmaSolucion y no se une a dbo.Tickets para obtenerla.
+//   - reabierto = IntentosSolucion > 1;
+//   - los 'Rechazada' no cuentan como resueltos (si como creados);
+//   - las cuentas de dbo.CatCuentaNoPersona salen de lo que habla de personas;
+//   - primera respuesta = TiempoPrimeraRespuestaHorasMin ('Nh NNm') en minutos.
+// El tecnico es b.Tecnico tal como lo define la vista desplegada: el asignado
+// con la vista anterior, la firma de solucion con la de 04_dashboard_sla.sql.
+// Es el mismo campo que llena el filtro (usp_Dash_Catalogos), asi que los dos
+// cambian juntos.
 
 using System;
 using System.Collections.Generic;
@@ -116,8 +121,18 @@ public static class DashboardQueries
        Los IN de grupo y tecnico se arman UNA vez y se reusan en los dos: una
        segunda llamada a EnLista declararia @g0/@t0 otra vez y SqlCommand
        fallaria con "parameter has already been declared". */
+    /* RECHAZAR NO ES RESOLVER (EsRechazado de 04_dashboard_sla.sql): un
+       ticket en estado 'Rechazada' trae fecha de firma de solucion, pero nadie
+       lo resolvio. {0} los deja fuera de todo lo resuelto -KPIs, SLA,
+       tendencia, productividad, distribuciones y detalle-. {1} NO: el ticket
+       si entro, y al darlo de alta nadie sabia que se iba a rechazar. {2} son
+       los rechazados del mismo periodo, para la tarjeta de "Creados".
+       Estado NULL cuenta como no rechazado, igual que el CASE de la vista. */
+    private const string NoRechazado = " AND (b.Estado IS NULL OR b.Estado <> N'Rechazada')";
+
     private static void Predicados(SqlCommand cmd, Filtros f,
-                                   out string porSolucion, out string porRegistro)
+                                   out string porSolucion, out string porRegistro,
+                                   out string rechazados)
     {
         cmd.Parameters.Add("@FechaInicio", SqlDbType.Date).Value = f.FechaInicio;
         cmd.Parameters.Add("@FechaFin", SqlDbType.Date).Value = f.FechaFin;
@@ -125,11 +140,83 @@ public static class DashboardQueries
         string comunes = EnLista(cmd, "b.Grupo", "g", f.Grupos)
                        + EnLista(cmd, "b.Tecnico", "t", f.Tecnicos);
 
-        porSolucion = "b.FechaFirmaSolucion >= @FechaInicio"
-                    + " AND b.FechaFirmaSolucion < DATEADD(DAY, 1, @FechaFin)" + comunes;
+        string solucion = "b.FechaFirmaSolucion >= @FechaInicio"
+                        + " AND b.FechaFirmaSolucion < DATEADD(DAY, 1, @FechaFin)" + comunes;
+        porSolucion = solucion + NoRechazado;
+        rechazados = solucion + " AND b.Estado = N'Rechazada'";
         porRegistro = "b.FechaRegistro >= @FechaInicio"
                     + " AND b.FechaRegistro < DATEADD(DAY, 1, @FechaFin)" + comunes;
     }
+
+    /* CUENTAS QUE NO SON PERSONAS (dbo.CatCuentaNoPersona, 04_dashboard_sla.sql).
+       'Desk, Smart' y compania firman soluciones sin ser nadie. Salen de lo
+       que habla de PERSONAS -la grafica por tecnico, el ranking y el conteo de
+       tecnicos activos-; NO de los volumenes ni del SLA: ese trabajo si se
+       hizo, y se ensena en la tarjeta "Automatizado".
+
+       Se compara contra b.Tecnico, que es el tecnico que ensena el tablero y
+       el que filtra el <select>. Con la vista de 04_dashboard_sla.sql es la
+       firma de solucion con respaldo en el asignado: el mismo COALESCE contra
+       el que empata el catalogo del jefe.
+
+       Si el catalogo aun no existe en la base, se cae a las dos cuentas que
+       el tablero ya excluia a mano. No se inventan mas: las demas solo entran
+       via el catalogo. */
+    private const string EsPersonaCatalogo = @"
+        EsPersona = CONVERT(bit, CASE WHEN EXISTS (
+            SELECT 1 FROM dbo.CatCuentaNoPersona c
+            WHERE c.Habilitado = 1 AND c.Cuenta = b.Tecnico) THEN 0 ELSE 1 END)";
+
+    private const string EsPersonaRespaldo = @"
+        EsPersona = CONVERT(bit, CASE WHEN b.Tecnico IN (N'Desk, Smart', N'User, Setup') THEN 0 ELSE 1 END)";
+
+    // Si dbo.CatCuentaNoPersona existe. Una tabla que falta no se puede ni
+    // nombrar en la consulta -revienta al ejecutarse-, asi que se pregunta
+    // antes. El "si" se guarda para siempre; el "no" se vuelve a preguntar
+    // cada 10 minutos, para enterarse cuando el jefe corra el script sin
+    // tener que reciclar el sitio.
+    private static bool catalogoNoPersona;
+    private static DateTime catalogoRevisado = DateTime.MinValue;
+
+    private static bool HayCatalogoNoPersona()
+    {
+        if (catalogoNoPersona || DateTime.UtcNow - catalogoRevisado < TimeSpan.FromMinutes(10))
+            return catalogoNoPersona;
+
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        using (var cmd = new SqlCommand("SELECT OBJECT_ID(N'dbo.CatCuentaNoPersona', N'U')", cn))
+        {
+            cn.Open();
+            object id = cmd.ExecuteScalar();
+            catalogoNoPersona = id != null && !(id is DBNull);
+        }
+        catalogoRevisado = DateTime.UtcNow;
+        return catalogoNoPersona;
+    }
+
+    /* Minutos hasta la primera respuesta, del texto 'Nh NNm' de
+       dbo.Tickets.TiempoPrimeraRespuestaHorasMin. Mismo parseo que
+       MinutosPrimeraRespuesta en 04_dashboard_sla.sql: el campo de horas
+       enteras (TiempoPrimeraRespuesta) vale '0' en 7 de cada 10 tickets y
+       seria una constante. TRY_CONVERT y las dos guardas de CHARINDEX para
+       que un formato distinto de NULL y no un numero equivocado.
+
+       Sale de dbo.Tickets y no de la vista porque la vista anterior no trae
+       la columna. CodigoTicket es la llave primaria: una fila o ninguna. */
+    private const string PrimeraRespuesta = @"
+OUTER APPLY (
+    SELECT MinutosPrimeraRespuesta = CASE
+        WHEN CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) > 1
+         AND CHARINDEX(N'm', tk.TiempoPrimeraRespuestaHorasMin)
+           > CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin)
+        THEN TRY_CONVERT(INT, LEFT(tk.TiempoPrimeraRespuestaHorasMin,
+                                   CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) - 1)) * 60
+           + TRY_CONVERT(INT, SUBSTRING(tk.TiempoPrimeraRespuestaHorasMin,
+                                        CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) + 2, 2))
+        ELSE NULL END
+    FROM dbo.Tickets tk
+    WHERE tk.CodigoTicket = b.CodigoTicket
+) AS pr1";
 
     /* SLA, horas de resolucion y reabierto, medidos contra la FIRMA DE
        SOLUCION. Es la definicion de 04_dashboard_sla.sql, calculada aqui con
@@ -205,11 +292,19 @@ CROSS APPLY (
         {
             cmd.Connection = cn;
             cmd.CommandType = CommandType.Text;
-            // {0} = por fecha de solucion, {1} = por fecha de registro. Una
-            // consulta que solo use {0} ignora el segundo sin problema.
-            string porSolucion, porRegistro;
-            Predicados(cmd, f, out porSolucion, out porRegistro);
-            cmd.CommandText = string.Format(sql, porSolucion, porRegistro);
+            // {0} = por fecha de solucion (sin rechazados), {1} = por fecha de
+            // registro, {2} = rechazados por fecha de solucion, {3} = el
+            // CROSS APPLY de EsPersona (alias np). Una consulta que no use
+            // alguno lo ignora sin problema; {3} solo se arma si se usa, para
+            // no preguntar por el catalogo en balde.
+            string porSolucion, porRegistro, rechazados;
+            Predicados(cmd, f, out porSolucion, out porRegistro, out rechazados);
+            string persona = sql.Contains("{3}")
+                ? "\nCROSS APPLY (SELECT"
+                  + (HayCatalogoNoPersona() ? EsPersonaCatalogo : EsPersonaRespaldo)
+                  + "\n) AS np"
+                : string.Empty;
+            cmd.CommandText = string.Format(sql, porSolucion, porRegistro, rechazados, persona);
             if (extra != null) extra(cmd);
 
             cn.Open();
@@ -249,7 +344,7 @@ CROSS APPLY (
     }
 
     // ---------------------------------------------------------------------
-    // Las cinco consultas ({0} = por solucion, {1} = por registro)
+    // Las cinco consultas ({0}..{3}: ver Ejecutar)
     // ---------------------------------------------------------------------
 
     /* KPIs. Todo sale de lo RESUELTO en el rango ({0}), salvo TicketsCreados.
@@ -267,9 +362,20 @@ CROSS APPLY (
     SELECT
         b.Grupo, b.Tecnico, b.Prioridad, b.EstaCerrado, b.EstaAbierto,
         b.HorasCiclo, b.ReasignacionesGrupo,
-        s.SlaEvaluable, s.SlaVencido, s.DentroSla, s.HorasResolucion, s.EsReabierto
-    FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"
+        s.SlaEvaluable, s.SlaVencido, s.DentroSla, s.HorasResolucion, s.EsReabierto,
+        np.EsPersona, pr1.MinutosPrimeraRespuesta
+    FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"{3}" + PrimeraRespuesta + @"
     WHERE {0}
+),
+/* Percentiles de la primera respuesta, por lo mismo que las horas: el
+   promedio lo decide la cola. Solo los tickets con dato. */
+pr AS
+(
+    SELECT TOP (1)
+        Mediana = PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY MinutosPrimeraRespuesta) OVER (),
+        P90     = PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY MinutosPrimeraRespuesta) OVER ()
+    FROM base
+    WHERE MinutosPrimeraRespuesta IS NOT NULL
 ),
 /* Mediana y p90 de las horas de resolucion: la distribucion tiene cola larga
    y el promedio lo decide un punado de tickets de semanas. TOP (1) porque
@@ -305,12 +411,21 @@ SELECT
         AS DECIMAL(6,2)
     ),
     GruposActivos = COUNT(DISTINCT Grupo),
-    TecnicosActivos = COUNT(DISTINCT Tecnico),
+    -- Solo personas: una cuenta de sistema no es un tecnico activo.
+    TecnicosActivos = COUNT(DISTINCT CASE WHEN EsPersona = 1 THEN Tecnico END),
+    -- Lo que resolvieron las cuentas que no son personas. Sigue dentro de
+    -- TicketsResueltos: solo sale de lo que habla de personas.
+    TicketsAutomatizados = SUM(CASE WHEN EsPersona = 0 THEN 1 ELSE 0 END),
+    -- Rechazados del mismo periodo y con los mismos filtros. No estan en
+    -- TicketsResueltos pero si en TicketsCreados: explican parte del hueco.
+    TicketsRechazados = (SELECT COUNT_BIG(*) FROM dbo.vw_Dash_ProductividadBase b WHERE {2}),
     HorasResolucionPromedio = CAST(AVG(HorasResolucion) AS DECIMAL(18,2)),
     -- Subconsultas y no JOIN contra pct: si nada tiene horas, pct no trae
     -- filas y un CROSS JOIN dejaria el tablero sin KPIs.
     HorasResolucionMediana = (SELECT TOP (1) CAST(Mediana AS DECIMAL(18,2)) FROM pct),
     HorasResolucionP90     = (SELECT TOP (1) CAST(P90     AS DECIMAL(18,2)) FROM pct),
+    MinutosPrimeraRespuestaMediana = (SELECT TOP (1) CAST(Mediana AS DECIMAL(18,2)) FROM pr),
+    MinutosPrimeraRespuestaP90     = (SELECT TOP (1) CAST(P90     AS DECIMAL(18,2)) FROM pr),
     HorasCicloPromedio = CAST(AVG(HorasCiclo) AS DECIMAL(18,2)),
     ReasignacionesPromedio = CAST(AVG(CAST(ReasignacionesGrupo AS DECIMAL(18,2))) AS DECIMAL(18,2)),
     TicketsAltaPrioridad = SUM(CASE WHEN Prioridad IN (N'Alta', N'Crítica', N'Critica', N'Urgente') THEN 1 ELSE 0 END),
@@ -386,7 +501,9 @@ ORDER BY COALESCE(c.Fecha, r.Fecha);";
 
        Nuevas, aditivas: TicketsResueltos, TicketsDentroSla,
        TicketsSinSlaEvaluable -las tres parten TicketsResueltos exacto:
-       dentro + vencidos + sin evaluable- y TicketsReabiertos. */
+       dentro + vencidos + sin evaluable- y TicketsReabiertos.
+
+       Solo personas (EsPersona = 1): alimenta la grafica y el ranking. */
     public static List<Dictionary<string, object>> Productividad(Filtros f)
     {
         const string sql = @"
@@ -409,8 +526,11 @@ SELECT
         AS DECIMAL(6,2)
     ),
     HorasResolucionPromedio = CAST(AVG(s.HorasResolucion) AS DECIMAL(18,2))
-FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"
+FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"{3}
 WHERE {0}
+  -- Solo personas: las cuentas de sistema no compiten en un ranking de
+  -- gente. Lo que resuelven sale en la tarjeta ""Automatizado"".
+  AND np.EsPersona = 1
 GROUP BY b.Tecnico
 ORDER BY TicketsTotales DESC, b.Tecnico;";
 
@@ -517,8 +637,12 @@ SELECT TOP (@TopSeguro)
     b.ReasignacionesGrupo,
     b.IntentosSolucion,
     s.EsReabierto,
+    -- El cross-filter recalcula con estas la primera respuesta y deja fuera
+    -- de la grafica por tecnico a las cuentas que no son personas.
+    pr1.MinutosPrimeraRespuesta,
+    np.EsPersona,
     b.Tienda
-FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"
+FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"{3}" + PrimeraRespuesta + @"
 WHERE {0}
 ORDER BY b.FechaFirmaSolucion DESC;";
 

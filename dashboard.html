@@ -150,6 +150,14 @@
       </div>
     </section>
 
+    <!-- Reabiertos en el tiempo: comparte el eje X con "Cumplimiento de SLA en
+         el tiempo" y la tendencia (dia, mes o SLOT). Va en su propia fila, a
+         todo lo ancho, para no romper la rejilla 2x2 de arriba. -->
+    <section class="card">
+      <h3>Reabiertos en el tiempo<span class="hint" id="hint-reabiertos-tiempo"></span></h3>
+      <div class="lienzo"><canvas id="chart-reabiertos-tiempo"></canvas></div>
+    </section>
+
     <section class="card">
       <h3>Personas con mas tickets resueltos<span class="hint">top 10</span></h3>
       <div class="nota">Este ranking depende <b>solo</b> del rango de fechas y del filtro de
