@@ -1543,6 +1543,23 @@ const TableroSla = (function () {
      fila vigente. */
   let productividadVigente = [];
 
+  // Tecnicos que NO entran en el ranking de Productividad (cuentas genericas,
+  // no personas). Se quitan ANTES del Top 15 para que entre otro en su lugar.
+  // Solo afecta a esta grafica. Para agregar uno, sumarlo aqui tal como llega
+  // en `Tecnico`; se compara sin mayusculas ni espacios de sobra.
+  const TECNICOS_EXCLUIDOS_PRODUCTIVIDAD = new Set([
+    'Desk, Smart',
+    'User, Setup',
+  ].map(normTecnico));
+
+  function normTecnico(t) {
+    return String(t ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+  }
+
+  function excluidoDeProductividad(t) {
+    return TECNICOS_EXCLUIDOS_PRODUCTIVIDAD.has(normTecnico(t));
+  }
+
   const PROD_SERIES = [
     { clave: 'segCer', label: 'Cerrados',     color: '#4CAF50' },
     { clave: 'segAb',  label: 'Abiertos',     color: '#eab308' },
@@ -1658,11 +1675,12 @@ const TableroSla = (function () {
 
     if (!hayFiltro()) {
       // Filas del SP tal cual, con todos sus campos: el tooltip las lee.
-      top = (datos.productividad || []).slice(0, 15);
+      top = (datos.productividad || []).filter(r => !excluidoDeProductividad(r.Tecnico)).slice(0, 15);
     } else {
       const f = filas(null);
       const m = new Map();
       for (const r of f) {
+        if (excluidoDeProductividad(r.Tecnico)) continue;
         const t = r.Tecnico || '(sin tecnico)';
         if (!m.has(t)) m.set(t, { tot: 0, cer: 0, ab: 0, cerVen: 0, abVen: 0, hSum: 0, hN: 0 });
         const a = m.get(t);
