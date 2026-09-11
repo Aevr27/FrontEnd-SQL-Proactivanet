@@ -3538,17 +3538,22 @@ const TableroBacklog = (function () {
        funcion.
 
        El arreglo de fondo es el AgingSort del SP; mientras tanto manda el
-       ROTULO, que si trae la informacion: el primer numero del texto es el
-       borde inferior del rango -"4-7 dias" -> 4, "31+ dias" -> 31-, y el cubo
-       mas nuevo no trae numero -"menos de un dia"-, asi que cuenta como 0 y
-       encabeza. "Sin fecha" no es un escalon de la escalera -no se sabe si es
-       viejo- y se va al final, el mismo criterio que ya sigue colorAging() al
-       sacarlo de la rampa ordinal. Empates: decide el AgingSort. */
+       ROTULO, pasado a dias con su unidad: 07_correo_backlog.sql escribe
+       "1-7 dias", "+16 dias", "+1 mes", "+2 meses"... "+1 año". Tomar solo el
+       primer numero dejaba "+1 mes" y "+1 año" en 1, empatados con
+       "Menos de 1 día" -que TAMBIEN trae un 1-, y el empate lo decidia el
+       AgingSort malo. "Menos de..." va siempre primero (-1), sin empates.
+       "Sin fecha" no es un escalon de la escalera -no se sabe si es viejo- y
+       se va al final, el mismo criterio que ya sigue colorAging() al sacarlo
+       de la rampa ordinal. Empates restantes: decide el AgingSort. */
     function rangoDelRotulo(etiqueta) {
       const texto = String(etiqueta);
+      if (/menos\s+de/i.test(texto)) return -1;
       if (/sin\s+(fecha|dato)/i.test(texto)) return Number.MAX_SAFE_INTEGER;
       const n = texto.match(/\d+/);
-      return n ? parseInt(n[0], 10) : 0;
+      if (!n) return 0;
+      const unidad = /a[nñ]o/i.test(texto) ? 365 : (/mes/i.test(texto) ? 30 : 1);
+      return parseInt(n[0], 10) * unidad;
     }
     const buckets = [...ordenBucket.entries()]
       .sort((a, b) => (rangoDelRotulo(a[0]) - rangoDelRotulo(b[0])) || (a[1] - b[1]))
