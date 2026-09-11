@@ -625,17 +625,11 @@ const TableroSla = (function () {
   /* Barras apiladas de productividad: mismas dos posiciones categoricas que
      Creados/Cerrados arriba, para que las dos tarjetas se lean igual. */
   const BARRA_A = Paleta.porIndice(0), BARRA_B = Paleta.porIndice(2);
-  // Identidad de "estado" del ticket. Un solo registro para todo el tablero
-  // de SLA: si manana otra grafica pinta la misma dimension, debe pedir este
-  // mismo nombre de registro para que los colores coincidan.
-  const REG_ESTADO = Paleta.registro('sla-estado');
-  const ORDEN_AGING = ['0-1 dias', '2-3 dias', '4-7 dias', '8-15 dias', '16-30 dias', '31+ dias', 'Sin fecha'];
-  // Posicion del cubo dentro del orden -> escalon de la rampa ordinal.
-  function colorAging(etiqueta) {
-    const i = ORDEN_AGING.indexOf(etiqueta);
-    if (i < 0 || etiqueta === 'Sin fecha') return NEUTRO_SEM;
-    return RAMPA_ORDINAL[Math.min(i, RAMPA_ORDINAL.length - 1)];
-  }
+  /* Aqui estaban REG_ESTADO, ORDEN_AGING y colorAging(), de las graficas de
+     Estado y Antiguedad. Se retiraron: describian la situacion ACTUAL de los
+     tickets, que es la pregunta del Backlog, y la pestaña ahora mide lo
+     resuelto. El Backlog tiene su propio orden de antiguedad y no dependia
+     de nada de esto. */
 
   const graficos = {};
   let datos = null;
@@ -653,23 +647,22 @@ const TableroSla = (function () {
   // a la de un año no obliga a reconstruir la grafica.
   let estiloTendVigente = { pointRadius: 3, pointHoverRadius: 6, centrado: false, textos: [] };
   // Dimensiones de cross-filter. null = sin filtrar por esa dimension.
-  const filtro = { estado: null, prioridad: null, aging: null, sla: null };
+  // 'estado' y 'aging' se fueron con sus graficas: sin donde hacer clic,
+  // dejarlas solo daria un filtro fantasma que nada puede apagar.
+  const filtro = { prioridad: null, sla: null };
 
-  const ETIQUETA_DIM = { estado: 'Estado', prioridad: 'Prioridad',
-                         aging: 'Antiguedad', sla: 'SLA' };
+  const ETIQUETA_DIM = { prioridad: 'Prioridad', sla: 'SLA' };
 
-  // Etiqueta de respaldo cuando el campo viene vacio. Son exactamente las
-  // mismas que emite distribucion.ashx (ISNULL(NULLIF(...))), asi que una
+  // Etiqueta de respaldo cuando el campo viene vacio. Es exactamente la
+  // misma que emite distribucion.ashx (ISNULL(NULLIF(...))), asi que una
   // rebanada agregada por el servidor y la misma rebanada recalculada sobre
   // `detalle` se llaman igual y el cross-filter por clic casa en los dos casos.
-  const SIN_VALOR = { estado: 'Sin estado', prioridad: 'Sin prioridad', aging: 'Sin fecha' };
+  const SIN_VALOR = { prioridad: 'Sin prioridad' };
 
   const txt = v => String(v ?? '').trim();
 
   const VALOR_DIM = {
-    estado:    r => txt(r.Estado) || SIN_VALOR.estado,
     prioridad: r => txt(r.Prioridad) || SIN_VALOR.prioridad,
-    aging:     r => txt(r.AgingBucket) || SIN_VALOR.aging,
     sla:       r => (r.SlaVencido === true || r.SlaVencido === 1) ? 'Vencido'
                   : (r.DentroSla === true || r.DentroSla === 1) ? 'Dentro' : 'N/D',
   };
@@ -1893,52 +1886,8 @@ const TableroSla = (function () {
       });
   }
 
-  // Dona de estado. Se calcula omitiendo su propia dimension para que al
-  // seleccionar un estado sigan viendose los demas.
-  function renderEstado() {
-    const ent = entradasDim('estado', null);
-    const etiquetas = ent.map(e => e[0]);
-    const valores = ent.map(e => e[1]);
-    /* entradasDim('estado') ordena por volumen, asi que el orden cambia con
-       los filtros. El registro reparte por orden de ALTA y no por orden de
-       pintado: un estado conserva su color aunque baje de posicion. */
-    const colores = REG_ESTADO.escala(etiquetas);
-    const sel = bordesSeleccion(etiquetas, filtro.estado, 2);
-
-    if (!etiquetas.length) {
-      destruir('estado');
-      document.getElementById('legend-estado').innerHTML = '';
-      return renderEmptyChart('chart-estado', 'Ningun ticket pasa los filtros activos.');
-    }
-
-    dibujarGrafico(graficos, 'estado', 'chart-estado',
-      () => ({
-        type: 'doughnut',
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
-          borderColor: sel.borderColor, borderWidth: sel.borderWidth }] },
-        options: {
-          responsive: true, maintainAspectRatio: false, cutout: '58%',
-          plugins: { legend: { display: false },
-            tooltip: { callbacks: { label: c => `${c.label}: ${FMT(c.raw)}` } } },
-          onClick: (evt, _els, gr) => alternarFiltro('estado', etiquetaDelClic(gr, evt)),
-        }
-      }),
-      gr => {
-        gr.data.labels = etiquetas;
-        const ds = gr.data.datasets[0];
-        ds.data = valores;
-        ds.backgroundColor = colores;
-        ds.borderColor = sel.borderColor;
-        ds.borderWidth = sel.borderWidth;
-      });
-
-    document.getElementById('legend-estado').innerHTML = etiquetas.map((l, i) =>
-      `<span data-valor="${escapeAttr(l)}" class="${filtro.estado && filtro.estado !== l ? 'apagado' : ''}">
-         <i style="background:${colores[i]}"></i>${escapeHtml(l)}: ${FMT(valores[i])}</span>`).join('');
-    document.querySelectorAll('#legend-estado span').forEach(s => {
-      s.addEventListener('click', () => alternarFiltro('estado', s.dataset.valor));
-    });
-  }
+  /* Aqui vivia renderEstado(), la dona de Estado. Se retiro junto con la de
+     Antiguedad: las dos eran la foto de hoy, que contesta el Backlog. */
 
   /* Cumplimiento de SLA a lo largo del periodo.
 
@@ -2712,14 +2661,8 @@ const TableroSla = (function () {
     renderKpis();
     renderTendencia();
     renderProductividad();
-    renderEstado();
     renderBarraDim('chart-prioridad', 'prioridad', 'prioridad',
       null, l => COLOR_PRIORIDAD[l] ?? GRIS, 'Ningun ticket pasa los filtros activos.');
-    /* La antiguedad tiene orden propio: se pinta con la rampa ordinal
-       (claro = reciente, oscuro = viejo) en vez de un unico color plano.
-       "Sin fecha" no es parte del orden y va en neutro. */
-    renderBarraDim('chart-aging', 'aging', 'aging',
-      ORDEN_AGING, l => colorAging(l), 'Ningun ticket pasa los filtros activos.');
     // Desglose por grupo: agregado del servidor, no depende del cross-filter
     // (el de cumplimiento en el tiempo lo pinta renderTendencia).
     renderVencidosGrupo();
@@ -2738,7 +2681,7 @@ const TableroSla = (function () {
      estos casos como "sin datos" y pinta el estado vacio de siempre. */
   const DATASET_VACIO = {
     kpis: {}, tendencia: [], productividad: [],
-    distribucion: { estado: [], prioridad: [], aging: [], vencidosGrupo: [], reabiertosGrupo: [] },
+    distribucion: { prioridad: [], vencidosGrupo: [], reabiertosGrupo: [] },
     detalle: [], topCerrados: [],
     // Call Center: si llamadas.ashx falla, el bloque pinta sus estados vacios
     // y el resto del tablero de SLA sigue igual que siempre.

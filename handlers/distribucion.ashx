@@ -11,19 +11,17 @@ public class Distribucion : IHttpHandler
         {
             // Ver App_Code/DashboardQueries.cs: reemplaza a
             // dbo.usp_Dash_DistribucionMulti por el filtro de tecnicos.
-            // Cinco result sets, leidos por posicion: los tres de siempre
-            // (estado, prioridad, aging) y, detras, los dos del desglose por
-            // grupo -vencidos y reabiertos-. Los viejos van primero para que
-            // un DashboardQueries.cs anterior siga funcionando con este handler.
+            // Tres result sets, leidos por posicion: prioridad, vencidos por
+            // grupo y reabiertos por grupo. Estado y aging se quitaron con sus
+            // graficas. Este handler y App_Code/DashboardQueries.cs se
+            // despliegan JUNTOS: el orden de los sets es el contrato.
             var resultados = DashboardQueries.Distribucion(DashboardQueries.Filtros.Desde(context.Request));
 
             return new Dictionary<string, object>
             {
-                { "estado", resultados.Count > 0 ? resultados[0] : new List<Dictionary<string, object>>() },
-                { "prioridad", resultados.Count > 1 ? resultados[1] : new List<Dictionary<string, object>>() },
-                { "aging", resultados.Count > 2 ? resultados[2] : new List<Dictionary<string, object>>() },
-                { "vencidosGrupo", resultados.Count > 3 ? resultados[3] : new List<Dictionary<string, object>>() },
-                { "reabiertosGrupo", resultados.Count > 4 ? resultados[4] : new List<Dictionary<string, object>>() },
+                { "prioridad", resultados.Count > 0 ? resultados[0] : new List<Dictionary<string, object>>() },
+                { "vencidosGrupo", resultados.Count > 1 ? resultados[1] : new List<Dictionary<string, object>>() },
+                { "reabiertosGrupo", resultados.Count > 2 ? resultados[2] : new List<Dictionary<string, object>>() },
             };
         });
     }

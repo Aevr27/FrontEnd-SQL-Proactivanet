@@ -417,14 +417,14 @@ ORDER BY TicketsTotales DESC, b.Tecnico;";
         return Unico(sql, f, null);
     }
 
-    /* Cinco result sets sobre lo RESUELTO en el rango, materializado una vez.
-
-       Los tres primeros -estado, prioridad, aging- van en el MISMO orden de
-       siempre, porque distribucion.ashx los lee por posicion. Los dos nuevos
-       van al final para que el handler actual los ignore sin romperse:
-         [3] vencidos por grupo (top 12, solo grupos con algun vencido)
-         [4] reabiertos por grupo (top 12 por %, minimo 50 resueltos: con
-             menos, el porcentaje es ruido) */
+    /* Tres result sets sobre lo RESUELTO en el rango, materializado una vez,
+       en el orden en que los lee distribucion.ashx:
+         [0] prioridad
+         [1] vencidos por grupo (top 12, solo grupos con algun vencido)
+         [2] reabiertos por grupo (top 12 por %, minimo 50 resueltos: con
+             menos, el porcentaje es ruido)
+       Eran cinco: estado y aging se quitaron con sus graficas -eran la foto
+       de hoy, que contesta el Backlog-. */
     public static List<List<Dictionary<string, object>>> Distribucion(Filtros f)
     {
         const string sql = @"
@@ -432,9 +432,7 @@ SET NOCOUNT ON;
 
 SELECT
     b.Grupo,
-    b.Estado,
     b.Prioridad,
-    b.AgingBucket,
     s.SlaEvaluable,
     s.SlaVencido,
     s.DentroSla,
@@ -444,33 +442,11 @@ FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"
 WHERE {0};
 
 SELECT
-    Valor = ISNULL(NULLIF(LTRIM(RTRIM(Estado)), N''), N'Sin estado'),
-    Tickets = COUNT_BIG(*)
-FROM #DistribucionBase
-GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(Estado)), N''), N'Sin estado')
-ORDER BY Tickets DESC;
-
-SELECT
     Valor = ISNULL(NULLIF(LTRIM(RTRIM(Prioridad)), N''), N'Sin prioridad'),
     Tickets = COUNT_BIG(*)
 FROM #DistribucionBase
 GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(Prioridad)), N''), N'Sin prioridad')
 ORDER BY Tickets DESC;
-
-SELECT
-    Valor = AgingBucket,
-    Tickets = COUNT_BIG(*)
-FROM #DistribucionBase
-GROUP BY AgingBucket
-ORDER BY CASE AgingBucket
-    WHEN N'0-1 dias' THEN 1
-    WHEN N'2-3 dias' THEN 2
-    WHEN N'4-7 dias' THEN 3
-    WHEN N'8-15 dias' THEN 4
-    WHEN N'16-30 dias' THEN 5
-    WHEN N'31+ dias' THEN 6
-    ELSE 99
-END;
 
 SELECT TOP (12)
     Valor      = ISNULL(NULLIF(LTRIM(RTRIM(Grupo)), N''), N'Sin grupo'),
@@ -502,8 +478,8 @@ ORDER BY ReabiertosPct DESC;
 
 DROP TABLE #DistribucionBase;";
 
-        // SELECT ... INTO no abre result set en el reader, asi que los cinco
-        // que salen son estado, prioridad, aging, vencidos y reabiertos.
+        // SELECT ... INTO no abre result set en el reader, asi que los tres
+        // que salen son prioridad, vencidos y reabiertos.
         return Ejecutar(sql, f, null);
     }
 

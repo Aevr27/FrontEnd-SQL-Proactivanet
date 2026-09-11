@@ -125,27 +125,13 @@
       </div>
     </section>
 
-    <section class="grid3">
-      <div class="card">
-        <h3>Estado</h3>
-        <div class="lienzo"><canvas id="chart-estado"></canvas></div>
-        <div class="legend" id="legend-estado"></div>
-      </div>
-      <div class="card">
-        <h3>Prioridad</h3>
-        <div class="lienzo"><canvas id="chart-prioridad"></canvas></div>
-      </div>
-      <div class="card">
-        <h3>Antiguedad</h3>
-        <div class="lienzo"><canvas id="chart-aging"></canvas></div>
-      </div>
-    </section>
-
-    <!-- Lo que se porto del tablero nuevo de SLA. Van en una fila APARTE y
-         no en lugar de Estado/Antiguedad: esas dos se quedan hasta que se
-         decida si se retiran. Vencidos y reabiertos por grupo salen
-         agregados del servidor y no responden a los filtros por clic. -->
-    <section class="grid3">
+    <!-- Aqui estaban "Estado" y "Antiguedad". Se retiraron: contestaban en
+         que situacion estan los tickets AHORA, que es la pregunta del Backlog,
+         y la pestaña mide lo resuelto en el periodo. Prioridad se queda: la
+         prioridad de lo resuelto dice en que se fue el esfuerzo. Vencidos y
+         reabiertos por grupo salen agregados del servidor y no responden a
+         los filtros por clic. -->
+    <section class="grid2x2">
       <div class="card">
         <h3>Cumplimiento de SLA en el tiempo<span class="hint" id="hint-sla-tiempo"></span></h3>
         <div class="lienzo"><canvas id="chart-sla-tiempo"></canvas></div>
@@ -153,6 +139,10 @@
       <div class="card">
         <h3>Donde se pierde el SLA<span class="hint" id="hint-vencidos-grupo">top 12 grupos</span></h3>
         <div class="lienzo"><canvas id="chart-vencidos-grupo"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Prioridad de lo resuelto</h3>
+        <div class="lienzo"><canvas id="chart-prioridad"></canvas></div>
       </div>
       <div class="card">
         <h3>Reabiertos por grupo<span class="hint" id="hint-reabiertos"></span></h3>
