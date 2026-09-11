@@ -294,8 +294,11 @@ async function obtenerDetalle(params, tope) {
 
   const filas = await tramo(params.get('fecha_inicio'), params.get('fecha_fin'), tope, 0);
   // Los tramos vienen en orden cronologico; el tablero asume mas recientes
-  // primero, igual que cuando responde una sola llamada.
-  return filas.sort((a, b) => String(b.FechaRegistro || '').localeCompare(String(a.FechaRegistro || '')));
+  // primero, igual que cuando responde una sola llamada. "Reciente" es por
+  // fecha de solucion, que es por la que filtra y ordena detalle.ashx; si el
+  // backend aun no la manda, se cae a la de registro como antes.
+  const clave = r => String(r.FechaFirmaSolucion || r.FechaRegistro || '');
+  return filas.sort((a, b) => clave(b).localeCompare(clave(a)));
 }
 
 function seleccionados(id) {
@@ -622,17 +625,11 @@ const TableroSla = (function () {
   /* Barras apiladas de productividad: mismas dos posiciones categoricas que
      Creados/Cerrados arriba, para que las dos tarjetas se lean igual. */
   const BARRA_A = Paleta.porIndice(0), BARRA_B = Paleta.porIndice(2);
-  // Identidad de "estado" del ticket. Un solo registro para todo el tablero
-  // de SLA: si manana otra grafica pinta la misma dimension, debe pedir este
-  // mismo nombre de registro para que los colores coincidan.
-  const REG_ESTADO = Paleta.registro('sla-estado');
-  const ORDEN_AGING = ['0-1 dias', '2-3 dias', '4-7 dias', '8-15 dias', '16-30 dias', '31+ dias', 'Sin fecha'];
-  // Posicion del cubo dentro del orden -> escalon de la rampa ordinal.
-  function colorAging(etiqueta) {
-    const i = ORDEN_AGING.indexOf(etiqueta);
-    if (i < 0 || etiqueta === 'Sin fecha') return NEUTRO_SEM;
-    return RAMPA_ORDINAL[Math.min(i, RAMPA_ORDINAL.length - 1)];
-  }
+  /* Aqui estaban REG_ESTADO, ORDEN_AGING y colorAging(), de las graficas de
+     Estado y Antiguedad. Se retiraron: describian la situacion ACTUAL de los
+     tickets, que es la pregunta del Backlog, y la pestaña ahora mide lo
+     resuelto. El Backlog tiene su propio orden de antiguedad y no dependia
+     de nada de esto. */
 
   const graficos = {};
   let datos = null;
@@ -650,23 +647,22 @@ const TableroSla = (function () {
   // a la de un año no obliga a reconstruir la grafica.
   let estiloTendVigente = { pointRadius: 3, pointHoverRadius: 6, centrado: false, textos: [] };
   // Dimensiones de cross-filter. null = sin filtrar por esa dimension.
-  const filtro = { estado: null, prioridad: null, aging: null, sla: null };
+  // 'estado' y 'aging' se fueron con sus graficas: sin donde hacer clic,
+  // dejarlas solo daria un filtro fantasma que nada puede apagar.
+  const filtro = { prioridad: null, sla: null };
 
-  const ETIQUETA_DIM = { estado: 'Estado', prioridad: 'Prioridad',
-                         aging: 'Antiguedad', sla: 'SLA' };
+  const ETIQUETA_DIM = { prioridad: 'Prioridad', sla: 'SLA' };
 
-  // Etiqueta de respaldo cuando el campo viene vacio. Son exactamente las
-  // mismas que emite distribucion.ashx (ISNULL(NULLIF(...))), asi que una
+  // Etiqueta de respaldo cuando el campo viene vacio. Es exactamente la
+  // misma que emite distribucion.ashx (ISNULL(NULLIF(...))), asi que una
   // rebanada agregada por el servidor y la misma rebanada recalculada sobre
   // `detalle` se llaman igual y el cross-filter por clic casa en los dos casos.
-  const SIN_VALOR = { estado: 'Sin estado', prioridad: 'Sin prioridad', aging: 'Sin fecha' };
+  const SIN_VALOR = { prioridad: 'Sin prioridad' };
 
   const txt = v => String(v ?? '').trim();
 
   const VALOR_DIM = {
-    estado:    r => txt(r.Estado) || SIN_VALOR.estado,
     prioridad: r => txt(r.Prioridad) || SIN_VALOR.prioridad,
-    aging:     r => txt(r.AgingBucket) || SIN_VALOR.aging,
     sla:       r => (r.SlaVencido === true || r.SlaVencido === 1) ? 'Vencido'
                   : (r.DentroSla === true || r.DentroSla === 1) ? 'Dentro' : 'N/D',
   };
@@ -1331,57 +1327,143 @@ const TableroSla = (function () {
   }
 
   // ---------------------------------------------------------------------- KPIs
+  /* Semaforo de reabiertos: al reves que el de SLA -aqui menos es mejor-, y
+     con cortes de 5% y 10% porque el promedio global ronda el 4%: con los
+     umbrales del SLA todo saldria verde siempre. */
+  const SEM_REABIERTOS = pct =>
+    (pct === null || pct === undefined || !isFinite(Number(pct))) ? ''
+      : (Number(pct) <= 5 ? 'sv' : (Number(pct) <= 10 ? 'sa' : 'sr'));
+
+  /* Pie de la tarjeta de "Creados": el balance del periodo en una frase. Si
+     entraron mas de los que se resolvieron, el backlog crecio.
+
+     Los rechazados no son resueltos -rechazar no es resolver-, pero si
+     salieron del backlog, asi que parte del hueco entre las dos cifras es eso
+     y no trabajo pendiente. Se dicen aparte y NO se suman a resueltos: los
+     creados van por fecha de registro y los otros dos por fecha de solucion,
+     asi que creados = resueltos + rechazados no tiene por que cuadrar. */
+  function balanceTexto(creados, resueltos, rechazados) {
+    const d = resueltos - creados;
+    const nota = rechazados ? ` · ${FMT(rechazados)} rechazados aparte` : '';
+    if (!creados && !resueltos) return `sin movimiento en el periodo${nota}`;
+    if (d === 0) return `entraron y salieron los mismos${nota}`;
+    return (d > 0
+      ? `se resolvieron ${FMT(d)} mas de los que entraron`
+      : `entraron ${FMT(-d)} mas de los que se resolvieron`) + nota;
+  }
+
+  /* Minutos -> '45 min' o '3h 20m'. La primera respuesta se mide casi toda
+     en minutos, pero la cola se va a horas y '212 min' no se lee de un
+     vistazo. */
+  function minutosLegibles(v) {
+    if (v === null || v === undefined) return 'N/D';
+    const m = Math.round(Number(v));
+    if (!isFinite(m)) return 'N/D';
+    if (m < 60) return `${m} min`;
+    const h = Math.floor(m / 60), r = m % 60;
+    return r ? `${h}h ${String(r).padStart(2, '0')}m` : `${h}h`;
+  }
+
+  // Cuenta que no es persona (dbo.CatCuentaNoPersona): el servidor la marca
+  // con EsPersona = 0 en el detalle. Sin el campo -backend anterior- cuenta
+  // como persona.
+  const noEsPersona = r => r.EsPersona === false || r.EsPersona === 0;
+
+  // Mediana interpolada entre los dos centrales cuando el conteo es par, que
+  // es lo mismo que hace PERCENTILE_CONT en kpis.ashx.
+  function mediana(valores) {
+    const o = valores.map(Number).filter(v => isFinite(v)).sort((a, b) => a - b);
+    if (!o.length) return null;
+    const m = o.length % 2 ? o[(o.length - 1) / 2] : (o[o.length / 2 - 1] + o[o.length / 2]) / 2;
+    return Math.round(100 * m) / 100;
+  }
+
+  const esReabierto = r => r.EsReabierto === true || r.EsReabierto === 1 || Number(r.IntentosSolucion) > 1;
+
   function renderKpis() {
     const cont = document.getElementById('kpis');
     const k = datos.kpis || {};
-    const totalRango = k.TicketsTotales ?? 0;
+    /* El rango mide lo RESUELTO (fecha de solucion). TicketsResueltos es el
+       campo nuevo; TicketsTotales vale lo mismo y queda de respaldo para un
+       backend anterior. */
+    const resueltos = k.TicketsResueltos ?? k.TicketsTotales ?? 0;
 
     let tarjetas;
     if (!hayFiltro()) {
-      // Sin cross-filter los KPIs salen del SP: son exactos sobre todo el rango.
+      // Sin cross-filter los KPIs salen del servidor: son exactos sobre todo el rango.
       const cumpl = k.CumplimientoSlaPct ?? null;
       const evaluables = k.TicketsSlaEvaluable ?? 0;
       const vencidos = k.TicketsSlaVencidos ?? 0;
+      const reabPct = k.ReabiertosPct ?? null;
       tarjetas = [
-        { l: 'Tickets totales', v: FMT(totalRango),
-          f: `${FMT(k.TicketsAbiertos ?? 0)} abiertos · ${FMT(k.TicketsCerrados ?? 0)} cerrados` },
-        { l: 'Abiertos', v: FMT(k.TicketsAbiertos ?? 0), f: `${PCT(k.TicketsAbiertos ?? 0, totalRango)} del total` },
-        { l: 'Cerrados', v: FMT(k.TicketsCerrados ?? 0), f: `${PCT(k.TicketsCerrados ?? 0, totalRango)} del total` },
+        { l: 'Resueltos', v: FMT(resueltos),
+          f: k.TicketsAbiertos ? `${FMT(k.TicketsAbiertos)} aun esperan el cierre` : 'lo que el equipo despacho' },
+        { l: 'Creados', v: k.TicketsCreados != null ? FMT(k.TicketsCreados) : 'N/D',
+          f: k.TicketsCreados != null ? balanceTexto(k.TicketsCreados, resueltos, k.TicketsRechazados ?? 0) : 'por fecha de registro' },
+        /* Primera respuesta: sale del texto 'Nh NNm' de Proactivanet, no del
+           campo de horas enteras, que vale 0 en 7 de cada 10 tickets. Es otra
+           metrica que las horas de resolucion. */
+        { l: '1a respuesta (mediana)', v: minutosLegibles(k.MinutosPrimeraRespuestaMediana),
+          f: k.MinutosPrimeraRespuestaP90 != null ? `p90 ${minutosLegibles(k.MinutosPrimeraRespuestaP90)}` : 'sin dato de primera respuesta' },
         { l: 'Cumplimiento SLA', v: cumpl !== null ? `${cumpl}%` : 'N/D',
           f: evaluables ? `${FMT(k.TicketsDentroSla ?? 0)} de ${FMT(evaluables)} evaluables` : 'sin SLA evaluable',
           s: cumpl !== null ? SEM(cumpl) : '' },
         { l: 'Vencidos SLA', v: FMT(vencidos),
           f: `${FMT(k.TicketsAltaPrioridad ?? 0)} de prioridad alta o critica`, s: vencidos > 0 ? 'sr' : 'sv' },
-        { l: 'Horas resolucion promedio', v: k.HorasResolucionPromedio ?? 'N/D',
-          f: k.HorasCicloPromedio ? `ciclo promedio ${k.HorasCicloPromedio} h` : 'solo tickets cerrados' },
-        { l: 'Tecnicos activos', v: FMT(k.TecnicosActivos ?? 0), f: `${FMT(k.GruposActivos ?? 0)} grupos activos` },
+        /* Mediana y no promedio: el tiempo de resolucion tiene cola larga y
+           el promedio lo deciden unos cuantos tickets de semanas. El promedio
+           sigue en el pie para quien lo cuadre contra un reporte viejo. */
+        { l: 'Horas resolucion (mediana)', v: k.HorasResolucionMediana ?? 'N/D',
+          f: k.HorasResolucionPromedio != null ? `promedio ${k.HorasResolucionPromedio} h` : 'de registro a solucion' },
+        { l: 'Horas resolucion (p90)', v: k.HorasResolucionP90 ?? 'N/D',
+          f: '9 de cada 10 tardaron menos' },
+        { l: 'Reabiertos', v: reabPct !== null ? `${reabPct}%` : 'N/D',
+          f: `${FMT(k.TicketsReabiertos ?? 0)} volvieron despues de darse por resueltos`,
+          s: SEM_REABIERTOS(reabPct) },
+        /* Lo que resolvieron las cuentas que NO son personas
+           (dbo.CatCuentaNoPersona). Se ensena para que sacarlas del ranking
+           no las esconda. El porcentaje es sobre Resueltos, que YA las
+           incluye: la exclusion solo toca lo que habla de personas. */
+        { l: 'Automatizado', v: k.TicketsAutomatizados != null ? FMT(k.TicketsAutomatizados) : 'N/D',
+          f: k.TicketsAutomatizados != null ? `${PCT(k.TicketsAutomatizados, resueltos)} de lo resuelto · fuera del ranking` : 'cuentas que no son personas' },
+        { l: 'Tecnicos activos', v: FMT(k.TecnicosActivos ?? 0), f: `${FMT(k.GruposActivos ?? 0)} grupos · solo personas` },
         { l: 'Reasignaciones promedio', v: k.ReasignacionesPromedio ?? 'N/D', f: 'cambios de grupo por ticket' },
       ];
     } else {
       // Con cross-filter se recalculan sobre las filas cargadas. El pie lo dice
       // explicitamente para que nadie los confunda con el total del rango.
+      // "Creados" y p90 no se recalculan: el detalle solo trae lo resuelto y
+      // viene topeado, asi que cualquier cifra seria inventada.
       const f = filas(null);
       const n = f.length;
       const cargadas = (datos.detalle || []).length;
-      const abiertos = f.filter(r => !r.FechaFirmaCierre).length;
       const vencidos = f.filter(r => r.SlaVencido === true || r.SlaVencido === 1).length;
       const dentro = f.filter(r => r.DentroSla === true || r.DentroSla === 1).length;
+      const reabiertos = f.filter(esReabierto).length;
       const evaluables = vencidos + dentro;
       const cumpl = evaluables > 0 ? Math.round(1000 * dentro / evaluables) / 10 : null;
       const horas = f.map(r => r.HorasResolucion).filter(h => h !== null && h !== undefined);
       const promedio = horas.length ? Math.round(100 * horas.reduce((a, b) => a + Number(b), 0) / horas.length) / 100 : null;
+      const med = mediana(horas);
+      // Misma mediana interpolada, sobre los tickets filtrados con dato.
+      const respuestas = f.map(r => r.MinutosPrimeraRespuesta).filter(x => x !== null && x !== undefined);
+      const medRespuesta = mediana(respuestas);
+      const reabPct = n ? Math.round(1000 * reabiertos / n) / 10 : null;
       const deN = `filtrado: ${FMT(n)} de ${FMT(cargadas)} cargados`;
 
       tarjetas = [
-        { l: 'Tickets filtrados', v: FMT(n), f: deN },
-        { l: 'Abiertos', v: FMT(abiertos), f: `${PCT(abiertos, n)} de lo filtrado` },
-        { l: 'Cerrados', v: FMT(n - abiertos), f: `${PCT(n - abiertos, n)} de lo filtrado` },
+        { l: 'Resueltos (filtrado)', v: FMT(n), f: deN },
         { l: 'Cumplimiento SLA', v: cumpl !== null ? `${cumpl}%` : 'N/D',
           f: evaluables ? `${FMT(dentro)} de ${FMT(evaluables)} evaluables` : 'sin SLA evaluable',
           s: cumpl !== null ? SEM(cumpl) : '' },
         { l: 'Vencidos SLA', v: FMT(vencidos), f: `${PCT(vencidos, n)} de lo filtrado`, s: vencidos > 0 ? 'sr' : 'sv' },
-        { l: 'Horas resolucion promedio', v: promedio ?? 'N/D', f: `${FMT(horas.length)} tickets cerrados` },
-        { l: 'Tecnicos', v: FMT(new Set(f.map(r => r.Tecnico).filter(Boolean)).size), f: 'en lo filtrado' },
+        { l: 'Horas resolucion (mediana)', v: med ?? 'N/D',
+          f: `${FMT(horas.length)} tickets resueltos${promedio !== null ? ` · promedio ${promedio} h` : ''}` },
+        { l: '1a respuesta (mediana)', v: minutosLegibles(medRespuesta), f: `${FMT(respuestas.length)} con dato` },
+        { l: 'Reabiertos', v: reabPct !== null ? `${reabPct}%` : 'N/D',
+          f: `${FMT(reabiertos)} de lo filtrado`, s: SEM_REABIERTOS(reabPct) },
+        // Solo personas, igual que "Tecnicos activos" sin filtro.
+        { l: 'Tecnicos', v: FMT(new Set(f.filter(r => !noEsPersona(r)).map(r => r.Tecnico).filter(Boolean)).size), f: 'en lo filtrado · solo personas' },
         { l: 'Grupos', v: FMT(new Set(f.map(r => r.Grupo).filter(Boolean)).size), f: 'en lo filtrado' },
       ];
     }
@@ -1396,10 +1478,18 @@ const TableroSla = (function () {
 
   function renderTendencia() {
     const hint = document.getElementById('hint-tendencia');
-    let etiquetas, creados, cerrados, vencidos;
+    /* `cerrados` es la serie de RESUELTOS (por fecha de solucion); conserva el
+       nombre para no tocar el resto del bloque. dentro/evaluables son el
+       numerador y el denominador del cumplimiento: viajan por aqui, y no en
+       su propia funcion, para que "Cumplimiento de SLA en el tiempo" comparta
+       EXACTAMENTE este eje -misma agrupacion por dia, mes o SLOT-. */
+    // reabiertos es el numerador de "Reabiertos en el tiempo" (el
+    // denominador son los resueltos): viaja por aqui por lo mismo.
+    let etiquetas, creados, cerrados, vencidos, dentro, evaluables, reabiertos;
 
     if (!hayFiltro()) {
-      // Serie exacta del SP sobre todo el rango.
+      // Serie exacta del servidor sobre todo el rango: creados por fecha de
+      // registro, resueltos y SLA por fecha de solucion.
       const f = datos.tendencia || [];
       // El handler serializa la fecha como "aaaa-mm-ddT00:00:00" (ver
       // DashboardQueries.cs). La hora siempre es cero y solo servia para
@@ -1407,28 +1497,43 @@ const TableroSla = (function () {
       // igual que en la rama filtrada de abajo.
       etiquetas = f.map(x => String(x.Fecha ?? '').slice(0, 10));
       creados = f.map(x => x.TicketsCreados);
-      cerrados = f.map(x => x.TicketsCerrados);
+      cerrados = f.map(x => x.TicketsResueltos ?? x.TicketsCerrados);
       vencidos = f.map(x => x.TicketsSlaVencidos);
-      hint.textContent = 'creados vs cerrados vs vencidos';
+      dentro = f.map(x => x.TicketsDentroSla ?? 0);
+      evaluables = f.map(x => x.TicketsSlaEvaluable ?? 0);
+      reabiertos = f.map(x => x.TicketsReabiertos ?? 0);
+      hint.textContent = 'creados (por registro) vs resueltos (por solucion)';
     } else {
-      // Recalculada sobre las filas filtradas, agrupando por dia de registro.
+      /* Recalculada sobre las filas filtradas, agrupando por dia de SOLUCION,
+         igual que el servidor. "Creados" no se puede recalcular -el detalle
+         solo trae lo resuelto en el rango-, asi que se queda en cero mientras
+         haya un filtro por clic, y el pie lo dice. */
       const f = filas(null);
       const porDia = new Map();
       for (const r of f) {
-        const d = String(r.FechaRegistro ?? '').slice(0, 10);
+        const d = String(r.FechaFirmaSolucion ?? r.FechaRegistro ?? '').slice(0, 10);
         if (!d) continue;
-        if (!porDia.has(d)) porDia.set(d, { c: 0, cer: 0, ven: 0 });
+        if (!porDia.has(d)) porDia.set(d, { res: 0, ven: 0, den: 0, num: 0, reab: 0 });
         const a = porDia.get(d);
-        a.c++;
-        if (r.FechaFirmaCierre) a.cer++;
-        if (r.SlaVencido === true || r.SlaVencido === 1) a.ven++;
+        const ven = r.SlaVencido === true || r.SlaVencido === 1;
+        const den = r.DentroSla === true || r.DentroSla === 1;
+        a.res++;
+        if (ven) a.ven++;
+        // Evaluable = tiene veredicto: el detalle no trae SlaEvaluable, pero
+        // un ticket con veredicto es exactamente eso.
+        if (ven || den) a.den++;
+        if (den) a.num++;
+        if (esReabierto(r)) a.reab++;
       }
       const dias = [...porDia.keys()].sort();
       etiquetas = dias;
-      creados = dias.map(d => porDia.get(d).c);
-      cerrados = dias.map(d => porDia.get(d).cer);
+      creados = dias.map(() => 0);
+      cerrados = dias.map(d => porDia.get(d).res);
       vencidos = dias.map(d => porDia.get(d).ven);
-      hint.textContent = 'recalculada sobre lo filtrado';
+      dentro = dias.map(d => porDia.get(d).num);
+      evaluables = dias.map(d => porDia.get(d).den);
+      reabiertos = dias.map(d => porDia.get(d).reab);
+      hint.textContent = 'resueltos, recalculado sobre lo filtrado (creados no aplica)';
     }
 
     /* Granularidad del eje. Es lo unico que decide este bloque: las series de
@@ -1444,19 +1549,19 @@ const TableroSla = (function () {
        debajo del tope la vista diaria se queda exactamente como estaba. */
     let rangosBucket = null;
     if (enModoSlot()) {
-      const g = agruparPorSlot(etiquetas, [creados, cerrados, vencidos], slotsAplicados);
+      const g = agruparPorSlot(etiquetas, [creados, cerrados, vencidos, dentro, evaluables, reabiertos], slotsAplicados);
       etiquetas = g.etiquetas;
       rangosBucket = g.rangos;
-      [creados, cerrados, vencidos] = g.series;
+      [creados, cerrados, vencidos, dentro, evaluables, reabiertos] = g.series;
       hint.textContent = `${resumenSlots(slotsAplicados)} · agrupado por SLOT`;
     } else if (etiquetas.length > TOPE_DIARIO) {
-      const g = agruparPorMes(etiquetas, [creados, cerrados, vencidos]);
+      const g = agruparPorMes(etiquetas, [creados, cerrados, vencidos, dentro, evaluables, reabiertos]);
       // Un solo mes agrupado seria un unico punto en lugar de sus dias: el
       // agrupado solo compensa si hay varios bloques que comparar.
       if (g.etiquetas.length > 1) {
         etiquetas = g.etiquetas;
         rangosBucket = g.rangos;
-        [creados, cerrados, vencidos] = g.series;
+        [creados, cerrados, vencidos, dentro, evaluables, reabiertos] = g.series;
         hint.textContent += ' · agrupado por mes';
       }
     }
@@ -1474,6 +1579,10 @@ const TableroSla = (function () {
 
     if (!etiquetas.length) {
       destruir('tendencia');
+      // La de cumplimiento comparte este eje: sin observaciones pinta tambien
+      // su propio vacio en vez de quedarse con el dibujo del rango anterior.
+      renderSlaTiempo([], [], []);
+      renderReabiertosTiempo([], [], []);
       // Con inicio == fin el mensaje generico ("el rango de fechas") no dice
       // nada: el rango ES un dia, y lo util es saber CUAL y que la consulta si
       // respondio. La fecha sale de los inputs, no de los datos -que no hay-.
@@ -1481,10 +1590,10 @@ const TableroSla = (function () {
       const fin = document.getElementById('f-fin').value;
       const unDia = ini && ini === fin;
       return renderEmptyChart('chart-tendencia', hayFiltro()
-        ? 'Ningun ticket con fecha de registro pasa los filtros activos.'
+        ? 'Ningun ticket resuelto pasa los filtros activos.'
         : unDia
-          ? `Sin tickets registrados el ${fechaLargaTendencia(ini)}. La consulta respondio, pero ese dia no tiene ningun ticket todavia.`
-          : 'Sin tickets registrados en el rango de fechas.');
+          ? `Sin tickets creados ni resueltos el ${fechaLargaTendencia(ini)}. La consulta respondio, pero ese dia no tiene movimiento todavia.`
+          : 'Sin tickets creados ni resueltos en el rango de fechas.');
     }
 
     // Igual que rangosBucketVigente: se reasigna el objeto que leen los callbacks
@@ -1502,6 +1611,11 @@ const TableroSla = (function () {
     if (enModoSlot()) estiloTendVigente.centrado = false;
     const estilo = estiloTendVigente;
 
+    // Con el eje ya resuelto: las dos graficas comparten etiquetas, rangos de
+    // bloque y estilo por construccion, no por coincidencia.
+    renderSlaTiempo(etiquetas, dentro, evaluables);
+    renderReabiertosTiempo(etiquetas, reabiertos, cerrados);
+
     const serie = (label, data, color, rellenar) => ({
       label, data, borderColor: color,
       backgroundColor: rellenar ? 'rgba(37,99,235,.12)' : color,
@@ -1516,7 +1630,7 @@ const TableroSla = (function () {
           labels: etiquetas,
           datasets: [
             serie('Creados', creados, AZUL, true),
-            serie('Cerrados', cerrados, VERDE_S),
+            serie('Resueltos', cerrados, VERDE_S),
             serie('Vencidos SLA', vencidos, ROJO),
           ]
         },
@@ -1576,45 +1690,45 @@ const TableroSla = (function () {
       });
   }
 
-  /* Productividad por tecnico: barra apilada de tres tramos que SUMAN, sin
-     contar dos veces un ticket vencido:
-       Cerrados     = TicketsCerrados - TicketsCerradosSlaVencidos  (verde)
-       Abiertos     = TicketsAbiertos - TicketsAbiertosSlaVencidos  (amarillo)
-       SLA vencidos = TicketsCerradosSlaVencidos + TicketsAbiertosSlaVencidos (rojo)
+  /* Productividad por tecnico: barra apilada de tres tramos que SUMAN
+     exactamente lo resuelto en el rango (fecha de solucion):
+       Dentro SLA        = TicketsDentroSla        (verde)
+       Sin SLA evaluable = TicketsSinSlaEvaluable  (amarillo)
+       SLA vencidos      = TicketsSlaVencidos      (rojo)
+     Reabiertos NO es un cuarto tramo: se solapa con los tres; va en el
+     tooltip. Con un backend anterior (sin TicketsDentroSla) se cae al reparto
+     viejo cerrados/abiertos/vencidos -ver tramosProductividad-.
      El total a la derecha es TicketsTotales tal cual. Vive fuera de
      renderProductividad() por el mismo motivo que rangosBucketVigente: el
      tooltip y el plugin son los de la PRIMERA construccion y leen aqui la
      fila vigente. */
   let productividadVigente = [];
 
-  // Tecnicos que NO entran en el ranking de Productividad (cuentas genericas,
-  // no personas). Se quitan ANTES del Top 15 para que entre otro en su lugar.
-  // Solo afecta a esta grafica. Para agregar uno, sumarlo aqui tal como llega
-  // en `Tecnico`; se compara sin mayusculas ni espacios de sobra.
-  const TECNICOS_EXCLUIDOS_PRODUCTIVIDAD = new Set([
-    'Desk, Smart',
-    'User, Setup',
-  ].map(normTecnico));
+  // Las cuentas que no son personas ya no se excluyen con una lista escrita
+  // aqui: productividad.ashx las deja fuera con dbo.CatCuentaNoPersona (o, si
+  // el catalogo aun no esta en la base, con las dos cuentas que esta lista
+  // tenia). Con filtros por clic se quitan del detalle con EsPersona, ANTES
+  // del Top 15, para que entre otro en su lugar.
 
-  function normTecnico(t) {
-    return String(t ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
-  }
-
-  function excluidoDeProductividad(t) {
-    return TECNICOS_EXCLUIDOS_PRODUCTIVIDAD.has(normTecnico(t));
-  }
-
+  // Mismos colores y posiciones de siempre; cambia lo que mide cada tramo.
   const PROD_SERIES = [
-    { clave: 'segCer', label: 'Cerrados',     color: '#4CAF50' },
-    { clave: 'segAb',  label: 'Abiertos',     color: '#eab308' },
-    { clave: 'segVen', label: 'SLA vencidos', color: '#f87171' },
+    { clave: 'segCer', label: 'Dentro SLA',        color: '#4CAF50' },
+    { clave: 'segAb',  label: 'Sin SLA evaluable', color: '#eab308' },
+    { clave: 'segVen', label: 'SLA vencidos',      color: '#f87171' },
   ];
 
-  // Tramos de una fila. Si el backend aun no manda el desglose de vencidos
-  // (C# sin desplegar), los vencidos quedan en 0 y la barra sale en dos
-  // tramos, sin inventar datos.
+  // Tramos de una fila. Con el backend nuevo, el reparto dentro / sin SLA /
+  // vencidos, que suma TicketsResueltos. Con uno anterior (sin
+  // TicketsDentroSla), el reparto viejo, sin inventar datos.
   function tramosProductividad(r) {
     const n = v => Number(v) || 0;
+    if (r.TicketsDentroSla != null) {
+      return {
+        segCer: n(r.TicketsDentroSla),
+        segAb:  n(r.TicketsSinSlaEvaluable),
+        segVen: n(r.TicketsSlaVencidos),
+      };
+    }
     const cerVen = n(r.TicketsCerradosSlaVencidos), abVen = n(r.TicketsAbiertosSlaVencidos);
     return {
       segCer: Math.max(0, n(r.TicketsCerrados) - cerVen),
@@ -1698,7 +1812,8 @@ const TableroSla = (function () {
     let html = `<div style="font-weight:700;font-size:13px;margin-bottom:4px">${esc(r.Tecnico)}</div>`;
     PROD_SERIES.forEach(s => { html += fila(punto(s.color) + s.label, FMT(r[s.clave])); });
     html += '<div style="border-top:1px solid #e6e8ec;margin:6px 0 4px"></div>';
-    html += fila('Total', FMT(r.TicketsTotales));
+    html += fila('Resueltos', FMT(r.TicketsTotales));
+    if (num(r.TicketsReabiertos))       html += fila('Reabiertos', FMT(r.TicketsReabiertos));
     if (num(r.CumplimientoSlaPct))      html += fila('Cumplimiento SLA', `${dec(r.CumplimientoSlaPct)}%`);
     if (num(r.HorasResolucionPromedio)) html += fila('Prom. resolución', `${dec(r.HorasResolucionPromedio)} h`);
     el.innerHTML = html;
@@ -1719,26 +1834,30 @@ const TableroSla = (function () {
 
     if (!hayFiltro()) {
       // Filas del SP tal cual, con todos sus campos: el tooltip las lee.
-      top = (datos.productividad || []).filter(r => !excluidoDeProductividad(r.Tecnico)).slice(0, 15);
+      top = (datos.productividad || []).slice(0, 15);
     } else {
       const f = filas(null);
       const m = new Map();
       for (const r of f) {
-        if (excluidoDeProductividad(r.Tecnico)) continue;
+        if (noEsPersona(r)) continue;
         const t = r.Tecnico || '(sin tecnico)';
-        if (!m.has(t)) m.set(t, { tot: 0, cer: 0, ab: 0, cerVen: 0, abVen: 0, hSum: 0, hN: 0 });
+        if (!m.has(t)) m.set(t, { tot: 0, den: 0, sin: 0, ven: 0, reab: 0, hSum: 0, hN: 0 });
         const a = m.get(t);
         const vencido = r.SlaVencido === true || r.SlaVencido === 1;
+        const dentro = r.DentroSla === true || r.DentroSla === 1;
         a.tot++;
-        if (r.FechaFirmaCierre) { a.cer++; if (vencido) a.cerVen++; }
-        else { a.ab++; if (vencido) a.abVen++; }
+        // Mismo reparto que el servidor: con veredicto es dentro o vencido;
+        // sin veredicto, no tenia fecha compromiso.
+        if (vencido) a.ven++; else if (dentro) a.den++; else a.sin++;
+        if (esReabierto(r)) a.reab++;
         const h = r.HorasResolucion;
         if (h !== null && h !== undefined && h !== '' && isFinite(Number(h))) { a.hSum += Number(h); a.hN++; }
       }
       top = [...m.entries()].sort((a, b) => b[1].tot - a[1].tot).slice(0, 15)
         .map(([t, a]) => ({
-          Tecnico: t, TicketsTotales: a.tot, TicketsCerrados: a.cer, TicketsAbiertos: a.ab,
-          TicketsCerradosSlaVencidos: a.cerVen, TicketsAbiertosSlaVencidos: a.abVen,
+          Tecnico: t, TicketsTotales: a.tot, TicketsResueltos: a.tot,
+          TicketsDentroSla: a.den, TicketsSinSlaEvaluable: a.sin, TicketsSlaVencidos: a.ven,
+          TicketsReabiertos: a.reab,
           HorasResolucionPromedio: a.hN ? a.hSum / a.hN : null,
         }));
     }
@@ -1754,7 +1873,7 @@ const TableroSla = (function () {
       destruir('productividad');
       return renderEmptyChart('chart-productividad', hayFiltro()
         ? 'Ningun tecnico tiene tickets con los filtros activos.'
-        : 'Sin tickets asignados en el rango de fechas.');
+        : 'Nadie resolvio tickets en el rango de fechas.');
     }
 
     dibujarGrafico(graficos, 'productividad', 'chart-productividad',
@@ -1803,51 +1922,284 @@ const TableroSla = (function () {
       });
   }
 
-  // Dona de estado. Se calcula omitiendo su propia dimension para que al
-  // seleccionar un estado sigan viendose los demas.
-  function renderEstado() {
-    const ent = entradasDim('estado', null);
-    const etiquetas = ent.map(e => e[0]);
-    const valores = ent.map(e => e[1]);
-    /* entradasDim('estado') ordena por volumen, asi que el orden cambia con
-       los filtros. El registro reparte por orden de ALTA y no por orden de
-       pintado: un estado conserva su color aunque baje de posicion. */
-    const colores = REG_ESTADO.escala(etiquetas);
-    const sel = bordesSeleccion(etiquetas, filtro.estado, 2);
+  /* Aqui vivia renderEstado(), la dona de Estado. Se retiro junto con la de
+     Antiguedad: las dos eran la foto de hoy, que contesta el Backlog. */
 
-    if (!etiquetas.length) {
-      destruir('estado');
-      document.getElementById('legend-estado').innerHTML = '';
-      return renderEmptyChart('chart-estado', 'Ningun ticket pasa los filtros activos.');
+  /* Cumplimiento de SLA a lo largo del periodo.
+
+     Recibe el eje ya resuelto por renderTendencia -mismas etiquetas, misma
+     agrupacion por dia, mes o SLOT, incluido el SLOT 0- y los dos conteos por
+     bloque. El porcentaje se calcula AQUI dividiendo las sumas del bloque: un
+     porcentaje diario no se puede promediar para sacar el del mes. El eje X
+     lee el mismo estiloTendVigente y rangosBucketVigente que la tendencia. */
+  const META_SLA = 90;
+
+  function renderSlaTiempo(etiquetas, dentro, evaluables) {
+    const hint = document.getElementById('hint-sla-tiempo');
+    const totalNum = (dentro || []).reduce((a, b) => a + (Number(b) || 0), 0);
+    const totalDen = (evaluables || []).reduce((a, b) => a + (Number(b) || 0), 0);
+
+    if (!etiquetas.length || !totalDen) {
+      destruir('slaTiempo');
+      hint.textContent = '';
+      return renderEmptyChart('chart-sla-tiempo', hayFiltro()
+        ? 'Ningun ticket con SLA evaluable pasa los filtros activos.'
+        : 'Ningun ticket del rango tiene SLA evaluable.');
     }
 
-    dibujarGrafico(graficos, 'estado', 'chart-estado',
+    // null y no cero cuando el bloque no tuvo evaluables: un cero se leeria
+    // como "incumplimos todo" cuando no hubo nada que medir.
+    const pct = etiquetas.map((_, i) => {
+      const den = Number(evaluables[i]) || 0;
+      return den ? Math.round(1000 * (Number(dentro[i]) || 0) / den) / 10 : null;
+    });
+    const global = Math.round(1000 * totalNum / totalDen) / 10;
+    hint.textContent = `${global}% en el periodo · meta ${META_SLA}%`;
+    const color = COLOR_SEM[SEM(global)];
+    const meta = etiquetas.map(() => META_SLA);
+
+    dibujarGrafico(graficos, 'slaTiempo', 'chart-sla-tiempo',
       () => ({
-        type: 'doughnut',
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
-          borderColor: sel.borderColor, borderWidth: sel.borderWidth }] },
+        type: 'line',
+        data: {
+          labels: etiquetas,
+          datasets: [
+            { label: 'Cumplimiento', data: pct, borderColor: color, backgroundColor: color,
+              tension: .3, borderWidth: 2, pointRadius: estiloTendVigente.pointRadius,
+              pointHoverRadius: estiloTendVigente.pointHoverRadius, spanGaps: false },
+            // Meta como dataset y no como anotacion: el plugin de anotaciones
+            // no esta cargado y no vale traerlo por una raya.
+            { label: `Meta ${META_SLA}%`, data: meta, borderColor: NEUTRO_SEM, borderDash: [5, 4],
+              borderWidth: 1, pointRadius: 0, pointHoverRadius: 0, fill: false },
+          ]
+        },
         options: {
-          responsive: true, maintainAspectRatio: false, cutout: '58%',
-          plugins: { legend: { display: false },
-            tooltip: { callbacks: { label: c => `${c.label}: ${FMT(c.raw)}` } } },
-          onClick: (evt, _els, gr) => alternarFiltro('estado', etiquetaDelClic(gr, evt)),
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              title: (items) => {
+                const r = rangosBucketVigente && rangosBucketVigente[items[0].dataIndex];
+                if (r) return `${items[0].label} · ${r.inicio} → ${r.fin}`;
+                return fechaLargaTendencia(items[0].label);
+              },
+              label: c => {
+                if (c.datasetIndex === 1) return `Meta: ${META_SLA}%`;
+                if (c.raw === null) return 'Sin tickets evaluables';
+                const g = graficos.slaTiempo && graficos.slaTiempo.$sla;
+                if (!g) return `${c.raw}%`;
+                return `${c.raw}% · ${FMT(g.dentro[c.dataIndex])} de ${FMT(g.evaluables[c.dataIndex])} evaluables`;
+              }
+            } },
+          },
+          scales: {
+            x: {
+              offset: estiloTendVigente.centrado,
+              ticks: { autoSkip: false, maxRotation: 0, minRotation: 0,
+                       callback: (_v, i) => estiloTendVigente.textos[i] ?? '' }
+            },
+            y: { beginAtZero: true, max: 100, ticks: { callback: v => `${v}%` } }
+          }
         }
       }),
       gr => {
         gr.data.labels = etiquetas;
         const ds = gr.data.datasets[0];
-        ds.data = valores;
-        ds.backgroundColor = colores;
-        ds.borderColor = sel.borderColor;
-        ds.borderWidth = sel.borderWidth;
+        ds.data = pct;
+        ds.borderColor = color;
+        ds.backgroundColor = color;
+        ds.pointRadius = estiloTendVigente.pointRadius;
+        ds.pointHoverRadius = estiloTendVigente.pointHoverRadius;
+        gr.data.datasets[1].data = meta;
+        gr.options.scales.x.offset = estiloTendVigente.centrado;
       });
+    // Los conteos del bloque para el tooltip, sobre la instancia viva: el
+    // callback es el de la primera construccion y no ve este closure.
+    if (graficos.slaTiempo) graficos.slaTiempo.$sla = { dentro, evaluables };
+  }
 
-    document.getElementById('legend-estado').innerHTML = etiquetas.map((l, i) =>
-      `<span data-valor="${escapeAttr(l)}" class="${filtro.estado && filtro.estado !== l ? 'apagado' : ''}">
-         <i style="background:${colores[i]}"></i>${escapeHtml(l)}: ${FMT(valores[i])}</span>`).join('');
-    document.querySelectorAll('#legend-estado span').forEach(s => {
-      s.addEventListener('click', () => alternarFiltro('estado', s.dataset.valor));
+  /* Reabiertos a lo largo del periodo.
+
+     Mismo eje que la de cumplimiento -etiquetas, agrupacion por dia, mes o
+     SLOT, incluido el SLOT 0, estiloTendVigente y rangosBucketVigente-,
+     resuelto una sola vez en renderTendencia. El porcentaje de cada bloque es
+     reabiertos entre resueltos de ese bloque, sumados: un porcentaje diario
+     no se puede promediar. Reabierto = IntentosSolucion > 1, sobre lo
+     resuelto por fecha de solucion y sin rechazados. */
+  function renderReabiertosTiempo(etiquetas, reabiertos, resueltos) {
+    const hint = document.getElementById('hint-reabiertos-tiempo');
+    const totalNum = (reabiertos || []).reduce((a, b) => a + (Number(b) || 0), 0);
+    const totalDen = (resueltos || []).reduce((a, b) => a + (Number(b) || 0), 0);
+
+    if (!etiquetas.length || !totalDen) {
+      destruir('reabiertosTiempo');
+      hint.textContent = '';
+      return renderEmptyChart('chart-reabiertos-tiempo', hayFiltro()
+        ? 'Ningun ticket resuelto pasa los filtros activos.'
+        : 'Sin tickets resueltos en el rango de fechas.');
+    }
+
+    // null y no cero cuando el bloque no resolvio nada: no hubo que medir.
+    const pct = etiquetas.map((_, i) => {
+      const den = Number(resueltos[i]) || 0;
+      return den ? Math.round(1000 * (Number(reabiertos[i]) || 0) / den) / 10 : null;
     });
+    const global = Math.round(1000 * totalNum / totalDen) / 10;
+    hint.textContent = `${global}% en el periodo`;
+    const color = COLOR_SEM[SEM_REABIERTOS(global)] || NEUTRO_SEM;
+
+    dibujarGrafico(graficos, 'reabiertosTiempo', 'chart-reabiertos-tiempo',
+      () => ({
+        type: 'line',
+        data: {
+          labels: etiquetas,
+          datasets: [
+            { label: 'Reabiertos', data: pct, borderColor: color, backgroundColor: color,
+              tension: .3, borderWidth: 2, pointRadius: estiloTendVigente.pointRadius,
+              pointHoverRadius: estiloTendVigente.pointHoverRadius, spanGaps: false },
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          interaction: { mode: 'index', intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              title: (items) => {
+                const r = rangosBucketVigente && rangosBucketVigente[items[0].dataIndex];
+                if (r) return `${items[0].label} · ${r.inicio} → ${r.fin}`;
+                return fechaLargaTendencia(items[0].label);
+              },
+              label: c => {
+                if (c.raw === null) return 'Sin tickets resueltos';
+                const g = graficos.reabiertosTiempo && graficos.reabiertosTiempo.$reab;
+                if (!g) return `${c.raw}%`;
+                return `${c.raw}% · ${FMT(g.reabiertos[c.dataIndex])} de ${FMT(g.resueltos[c.dataIndex])} resueltos`;
+              }
+            } },
+          },
+          scales: {
+            x: {
+              offset: estiloTendVigente.centrado,
+              ticks: { autoSkip: false, maxRotation: 0, minRotation: 0,
+                       callback: (_v, i) => estiloTendVigente.textos[i] ?? '' }
+            },
+            // Sin max fijo: el rango real ronda el 3-7% y un 0-100 dejaria
+            // la linea pegada al suelo.
+            y: { beginAtZero: true, ticks: { callback: v => `${v}%` } }
+          }
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        const ds = gr.data.datasets[0];
+        ds.data = pct;
+        ds.borderColor = color;
+        ds.backgroundColor = color;
+        ds.pointRadius = estiloTendVigente.pointRadius;
+        ds.pointHoverRadius = estiloTendVigente.pointHoverRadius;
+        gr.options.scales.x.offset = estiloTendVigente.centrado;
+      });
+    // Igual que $sla: el tooltip lee los conteos vigentes de la instancia viva.
+    if (graficos.reabiertosTiempo) graficos.reabiertosTiempo.$reab = { reabiertos, resueltos };
+  }
+
+  /* Donde se pierde el SLA: vencidos por grupo, en horizontal, con el
+     cumplimiento del grupo en el tooltip. El color lo decide el cumplimiento
+     del grupo, no su volumen. Sale agregado del servidor sobre todo el rango
+     (distribucion.ashx) y NO participa del cross-filter: el grupo ya es un
+     filtro de la barra de arriba. */
+  function renderVencidosGrupo() {
+    const filasG = (datos && datos.distribucion && datos.distribucion.vencidosGrupo) || [];
+    if (!filasG.length) {
+      destruir('vencidosGrupo');
+      // Que no haya vencidos es buena noticia, no un tablero roto.
+      return renderEmptyChart('chart-vencidos-grupo', 'Ningun grupo tiene tickets vencidos en el rango.');
+    }
+
+    const etiquetas = filasG.map(x => String(x.Valor ?? ''));
+    const valores = filasG.map(x => Number(x.Vencidos) || 0);
+    const colores = filasG.map(x => {
+      const c = x.CumplimientoPct;
+      return (c === null || c === undefined) ? NEUTRO_SEM : COLOR_SEM[SEM(Number(c))];
+    });
+
+    dibujarGrafico(graficos, 'vencidosGrupo', 'chart-vencidos-grupo',
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores, borderRadius: 4 }] },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              label: c => `Vencidos: ${FMT(c.raw)}`,
+              afterLabel: c => {
+                const lista = (datos && datos.distribucion && datos.distribucion.vencidosGrupo) || [];
+                const x = lista[c.dataIndex];
+                if (!x) return '';
+                const cum = (x.CumplimientoPct === null || x.CumplimientoPct === undefined)
+                  ? 'sin SLA evaluable' : `cumplimiento ${x.CumplimientoPct}%`;
+                return `${cum} · ${FMT(x.Evaluables)} evaluables`;
+              }
+            } },
+          },
+          scales: { x: EJE_CONTEO }
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = valores;
+        gr.data.datasets[0].backgroundColor = colores;
+      });
+  }
+
+  /* Reabiertos por grupo: el PORCENTAJE, no el volumen -el grupo mas grande
+     seria siempre la barra mas larga-. El conteo va en el tooltip. El
+     servidor deja fuera a los grupos con menos de 50 resueltos. Igual que
+     vencidos por grupo, no participa del cross-filter. */
+  function renderReabiertosGrupo() {
+    const hint = document.getElementById('hint-reabiertos');
+    const filasG = (datos && datos.distribucion && datos.distribucion.reabiertosGrupo) || [];
+
+    if (!filasG.length) {
+      destruir('reabiertosGrupo');
+      hint.textContent = '';
+      return renderEmptyChart('chart-reabiertos-grupo',
+        'Ningun grupo con 50 o mas resueltos tiene reabiertos en el rango.');
+    }
+
+    hint.textContent = 'minimo 50 resueltos';
+    const etiquetas = filasG.map(x => String(x.Valor ?? ''));
+    const valores = filasG.map(x => Number(x.ReabiertosPct) || 0);
+    const colores = filasG.map(x => COLOR_SEM[SEM_REABIERTOS(x.ReabiertosPct)] || NEUTRO_SEM);
+
+    dibujarGrafico(graficos, 'reabiertosGrupo', 'chart-reabiertos-grupo',
+      () => ({
+        type: 'bar',
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores, borderRadius: 4 }] },
+        options: {
+          indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: {
+              label: c => `${c.raw}% reabiertos`,
+              afterLabel: c => {
+                const lista = (datos && datos.distribucion && datos.distribucion.reabiertosGrupo) || [];
+                const x = lista[c.dataIndex];
+                return x ? `${FMT(x.Reabiertos)} de ${FMT(x.Resueltos)} resueltos` : '';
+              }
+            } },
+          },
+          scales: { x: { beginAtZero: true, ticks: { callback: v => `${v}%` } } }
+        }
+      }),
+      gr => {
+        gr.data.labels = etiquetas;
+        gr.data.datasets[0].data = valores;
+        gr.data.datasets[0].backgroundColor = colores;
+      });
   }
 
   function renderBarraDim(idCanvas, idGrafico, dim, orden, colorFn, mensajeVacio) {
@@ -1889,10 +2241,14 @@ const TableroSla = (function () {
       });
   }
 
-  // ------------------------------------------- personas con mas tickets cerrados
+  // ------------------------------------------ personas con mas tickets resueltos
   // Ranking independiente del cross-filter: se pide aparte a productividad.ashx
   // con el rango de fechas y SOLO el filtro de Grupos, asi que ni el filtro de
   // Tecnicos ni los filtros por clic del tablero lo mueven.
+  //
+  // Ordena por RESUELTOS (fecha de solucion). "Ya cerrados" son los resueltos
+  // que ademas tienen firma de cierre: el cierre lo pone Proactivanet despues,
+  // asi que la diferencia es tramite pendiente, no trabajo sin hacer.
   const TOPE_CERRADOS = 10;
 
   // 'YYYY-MM-DD' -> 'DD/MM/YYYY' (solo para mostrar; no se reinterpreta como
@@ -1922,27 +2278,31 @@ const TableroSla = (function () {
     const g = seleccionados('f-grupos');
     const txt = g.length ? `Grupos: ${escapeHtml(g.join(' · '))}` : 'todos los grupos';
     const per = `<span class="suave">${escapeHtml(periodoRanking())}</span><br>`;
-    if (!personas) return `${per}0 tickets cerrados <span class="suave">· ${txt}</span>`;
+    if (!personas) return `${per}0 tickets resueltos <span class="suave">· ${txt}</span>`;
     const corte = mostradas < personas
       ? ` · top ${mostradas} de ${FMT(personas)} personas` : '';
-    return `${per}${FMT(totalCerrados)} tickets cerrados <span class="suave">· ${txt}${corte}</span>`;
+    return `${per}${FMT(totalCerrados)} tickets resueltos <span class="suave">· ${txt}${corte}</span>`;
   }
 
   function renderTopCerrados() {
     const cont = document.getElementById('tabla-top-cerrados');
     const cap = document.getElementById('cap-top-cerrados');
+    /* `cerrados` es la cifra que ordena -ahora los RESUELTOS- y `totales` la
+       de contraste -los ya cerrados-; conservan el nombre para no tocar el
+       armado de la tabla. Con un backend anterior, resueltos cae a
+       TicketsTotales y la tabla se lee como antes. */
     const ranking = (datos.topCerrados || [])
       .map(x => ({
         tecnico: x.Tecnico || '(sin tecnico)',
         grupo: x.Grupo || '',
-        cerrados: Number(x.TicketsCerrados) || 0,
-        totales: Number(x.TicketsTotales) || 0,
+        cerrados: Number(x.TicketsResueltos ?? x.TicketsTotales) || 0,
+        totales: Number(x.TicketsCerrados) || 0,
       }))
       .filter(x => x.cerrados > 0)
       .sort((a, b) => b.cerrados - a.cerrados);
 
     if (!ranking.length) {
-      cont.innerHTML = `<div class="vacio">Sin tickets cerrados en ${
+      cont.innerHTML = `<div class="vacio">Sin tickets resueltos en ${
         enModoSlot() ? 'los SLOT seleccionados' : `los ultimos ${DIAS_RANKING} dias completos`
       } para estos grupos.</div>`;
       cap.innerHTML = descripcionTopCerrados(0, 0, 0);
@@ -1960,14 +2320,14 @@ const TableroSla = (function () {
         <td class="num"><b>${FMT(x.cerrados)}</b>
           ${miniBar(tope > 0 ? 100 * x.cerrados / tope : 0, BARRA_B)}</td>
         <td class="num">${FMT(x.totales)}</td>
-        <td class="num">${PCT(x.cerrados, x.totales)}</td>
+        <td class="num">${PCT(x.totales, x.cerrados)}</td>
         <td class="num">${PCT(x.cerrados, totalCerrados)}</td>
       </tr>`).join('');
 
     cont.innerHTML = `<table><thead><tr>
         <th class="num">#</th><th>Persona</th><th>Grupo</th>
-        <th class="num">Tickets cerrados</th><th class="num">Tickets totales</th>
-        <th class="num">% cerrados</th><th class="num">% del total cerrado</th>
+        <th class="num">Tickets resueltos</th><th class="num">Ya cerrados</th>
+        <th class="num">% ya cerrados</th><th class="num">% del total resuelto</th>
       </tr></thead><tbody>${filasHtml}</tbody></table>`;
     hacerOrdenable(cont.querySelector('table'));
 
@@ -2019,7 +2379,9 @@ const TableroSla = (function () {
     // Colgaron antes del minuto. Va aparte de 'abandonadas': el backend ya
     // dejo en Abandonadas solo las que aguantaron mas de un minuto, asi que el
     // abandono total -el que mide AbandonoPct- es la suma de las dos.
-    const colgaronRapido = k.ColgaronRapido ?? 0;
+    // El procedimiento de la VM la devuelve como 'ColgadasRapido'; el del repo,
+    // como 'ColgaronRapido'. Se aceptan los dos nombres.
+    const colgaronRapido = k.ColgadasRapido ?? k.ColgaronRapido ?? 0;
     const abandonoTotal = abandonadas + colgaronRapido;
     const aband = k.AbandonoPct ?? null;
     const nivel = k.NivelServicioPct ?? null;
@@ -2421,14 +2783,12 @@ const TableroSla = (function () {
     renderKpis();
     renderTendencia();
     renderProductividad();
-    renderEstado();
     renderBarraDim('chart-prioridad', 'prioridad', 'prioridad',
       null, l => COLOR_PRIORIDAD[l] ?? GRIS, 'Ningun ticket pasa los filtros activos.');
-    /* La antiguedad tiene orden propio: se pinta con la rampa ordinal
-       (claro = reciente, oscuro = viejo) en vez de un unico color plano.
-       "Sin fecha" no es parte del orden y va en neutro. */
-    renderBarraDim('chart-aging', 'aging', 'aging',
-      ORDEN_AGING, l => colorAging(l), 'Ningun ticket pasa los filtros activos.');
+    // Desglose por grupo: agregado del servidor, no depende del cross-filter
+    // (el de cumplimiento en el tiempo lo pinta renderTendencia).
+    renderVencidosGrupo();
+    renderReabiertosGrupo();
     if (motivo !== 'filtro') {
       renderSlotStepper();
       renderTopCerrados();
@@ -2443,7 +2803,7 @@ const TableroSla = (function () {
      estos casos como "sin datos" y pinta el estado vacio de siempre. */
   const DATASET_VACIO = {
     kpis: {}, tendencia: [], productividad: [],
-    distribucion: { estado: [], prioridad: [], aging: [] },
+    distribucion: { prioridad: [], vencidosGrupo: [], reabiertosGrupo: [] },
     detalle: [], topCerrados: [],
     // Call Center: si llamadas.ashx falla, el bloque pinta sus estados vacios
     // y el resto del tablero de SLA sigue igual que siempre.
@@ -3178,17 +3538,22 @@ const TableroBacklog = (function () {
        funcion.
 
        El arreglo de fondo es el AgingSort del SP; mientras tanto manda el
-       ROTULO, que si trae la informacion: el primer numero del texto es el
-       borde inferior del rango -"4-7 dias" -> 4, "31+ dias" -> 31-, y el cubo
-       mas nuevo no trae numero -"menos de un dia"-, asi que cuenta como 0 y
-       encabeza. "Sin fecha" no es un escalon de la escalera -no se sabe si es
-       viejo- y se va al final, el mismo criterio que ya sigue colorAging() al
-       sacarlo de la rampa ordinal. Empates: decide el AgingSort. */
+       ROTULO, pasado a dias con su unidad: 07_correo_backlog.sql escribe
+       "1-7 dias", "+16 dias", "+1 mes", "+2 meses"... "+1 año". Tomar solo el
+       primer numero dejaba "+1 mes" y "+1 año" en 1, empatados con
+       "Menos de 1 día" -que TAMBIEN trae un 1-, y el empate lo decidia el
+       AgingSort malo. "Menos de..." va siempre primero (-1), sin empates.
+       "Sin fecha" no es un escalon de la escalera -no se sabe si es viejo- y
+       se va al final, el mismo criterio que ya sigue colorAging() al sacarlo
+       de la rampa ordinal. Empates restantes: decide el AgingSort. */
     function rangoDelRotulo(etiqueta) {
       const texto = String(etiqueta);
+      if (/menos\s+de/i.test(texto)) return -1;
       if (/sin\s+(fecha|dato)/i.test(texto)) return Number.MAX_SAFE_INTEGER;
       const n = texto.match(/\d+/);
-      return n ? parseInt(n[0], 10) : 0;
+      if (!n) return 0;
+      const unidad = /a[nñ]o/i.test(texto) ? 365 : (/mes/i.test(texto) ? 30 : 1);
+      return parseInt(n[0], 10) * unidad;
     }
     const buckets = [...ordenBucket.entries()]
       .sort((a, b) => (rangoDelRotulo(a[0]) - rangoDelRotulo(b[0])) || (a[1] - b[1]))
