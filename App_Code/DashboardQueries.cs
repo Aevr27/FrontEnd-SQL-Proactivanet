@@ -261,6 +261,8 @@ SELECT
     TicketsCerrados = SUM(CASE WHEN EstaCerrado = 1 THEN 1 ELSE 0 END),
     TicketsAbiertos = SUM(CASE WHEN EstaAbierto = 1 THEN 1 ELSE 0 END),
     TicketsSlaVencidos = SUM(CASE WHEN SlaVencido = 1 THEN 1 ELSE 0 END),
+    TicketsCerradosSlaVencidos = SUM(CASE WHEN EstaCerrado = 1 AND SlaVencido = 1 THEN 1 ELSE 0 END),
+    TicketsAbiertosSlaVencidos = SUM(CASE WHEN EstaAbierto = 1 AND SlaVencido = 1 THEN 1 ELSE 0 END),
     CumplimientoSlaPct = CAST(
         100.0 * SUM(CASE WHEN SlaEvaluable = 1 AND DentroSla = 1 THEN 1 ELSE 0 END)
         / NULLIF(SUM(CASE WHEN SlaEvaluable = 1 THEN 1 ELSE 0 END), 0)

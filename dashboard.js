@@ -1532,22 +1532,39 @@ const TableroSla = (function () {
       });
   }
 
-  /* Productividad por tecnico: ranking horizontal de UNA serie, el volumen
-     (TicketsTotales), de mayor a menor. El resto de lo que trae
-     usp_Dash_ProductividadTecnicoMulti -cerrados, abiertos, SLA, horas- no se
-     pinta encima: va en el tooltip de cada tecnico. Vive fuera de
+  /* Productividad por tecnico: barra apilada de tres tramos que SUMAN, sin
+     contar dos veces un ticket vencido:
+       Cerrados     = TicketsCerrados - TicketsCerradosSlaVencidos  (verde)
+       Abiertos     = TicketsAbiertos - TicketsAbiertosSlaVencidos  (amarillo)
+       SLA vencidos = TicketsCerradosSlaVencidos + TicketsAbiertosSlaVencidos (rojo)
+     El total a la derecha es TicketsTotales tal cual. Vive fuera de
      renderProductividad() por el mismo motivo que rangosBucketVigente: el
-     callback del tooltip es el de la PRIMERA construccion y lee aqui la fila
-     vigente. */
+     tooltip y el plugin son los de la PRIMERA construccion y leen aqui la
+     fila vigente. */
   let productividadVigente = [];
 
-  // Dos cifras por barra apilada:
-  // - Cerrados, centrada DENTRO del tramo verde (dataset 0), en blanco, solo
-  //   si cabe en el tramo.
-  // - TicketsTotales, FUERA, justo despues de la punta de la barra COMPLETA:
-  //   la posicion la da el ultimo dataset apilado visible (Abiertos, o
-  //   Cerrados si Abiertos esta oculto o en 0) y el VALOR sale de
-  //   productividadVigente[i].TicketsTotales, que es el total autoritativo.
+  const PROD_SERIES = [
+    { clave: 'segCer', label: 'Cerrados',     color: '#4CAF50' },
+    { clave: 'segAb',  label: 'Abiertos',     color: '#eab308' },
+    { clave: 'segVen', label: 'SLA vencidos', color: '#f87171' },
+  ];
+
+  // Tramos de una fila. Si el backend aun no manda el desglose de vencidos
+  // (C# sin desplegar), los vencidos quedan en 0 y la barra sale en dos
+  // tramos, sin inventar datos.
+  function tramosProductividad(r) {
+    const n = v => Number(v) || 0;
+    const cerVen = n(r.TicketsCerradosSlaVencidos), abVen = n(r.TicketsAbiertosSlaVencidos);
+    return {
+      segCer: Math.max(0, n(r.TicketsCerrados) - cerVen),
+      segAb:  Math.max(0, n(r.TicketsAbiertos) - abVen),
+      segVen: cerVen + abVen,
+    };
+  }
+
+  // TicketsTotales FUERA, justo despues de la punta de la barra COMPLETA: la
+  // posicion la da el tramo visible que llega mas a la derecha y el VALOR es
+  // productividadVigente[i].TicketsTotales, el total autoritativo.
   const CIFRA_PUNTA = {
     id: 'cifraPunta',
     afterDatasetsDraw(chart) {
@@ -1556,21 +1573,6 @@ const TableroSla = (function () {
       ctx.save();
       ctx.font = '600 11px system-ui, -apple-system, sans-serif';
       ctx.textBaseline = 'middle';
-
-      const mCer = metas[0], dsCer = chart.data.datasets[0];
-      if (mCer && !mCer.hidden && dsCer) {
-        ctx.fillStyle = '#ffffff';
-        ctx.textAlign = 'center';
-        mCer.data.forEach((barra, i) => {
-          const v = Number(dsCer.data[i]);
-          if (!v) return;
-          const txt = FMT(v);
-          const ancho = Math.abs(barra.x - barra.base);
-          if (ctx.measureText(txt).width + 8 > ancho) return;
-          ctx.fillText(txt, (barra.x + barra.base) / 2, barra.y);
-        });
-      }
-
       ctx.fillStyle = '#393939';
       ctx.textAlign = 'left';
       productividadVigente.forEach((r, i) => {
@@ -1603,19 +1605,52 @@ const TableroSla = (function () {
     return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
   }
 
-  // Lineas del tooltip. Solo los campos que vienen en la fila: con filtros
-  // por clic el ranking se recalcula sobre `detalle` y ahi solo hay totales y
-  // cerrados, asi que no se pinta un "0" o un "—" que parezca un dato.
-  function lineasProductividad(r) {
+  /* Tooltip HTML (external de Chart.js): el de canvas no alinea cifras a la
+     derecha ni pinta separador. Arriba los tres tramos con su punto de color;
+     bajo la raya, Total y los indicadores. Solo los campos que vienen en la
+     fila: con filtros por clic el ranking se recalcula sobre `detalle` y ahi
+     no hay SlaEvaluable, asi que no se pinta un "0" que parezca un dato. */
+  function tooltipProductividad({ chart, tooltip }) {
+    const cont = chart.canvas.parentNode;
+    let el = cont.querySelector('.tt-prod');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'tt-prod';
+      el.style.cssText = 'position:absolute;pointer-events:none;z-index:5;min-width:190px;'
+        + 'background:#fff;border:1px solid #e6e8ec;border-radius:10px;padding:10px 12px;'
+        + 'box-shadow:0 6px 18px rgba(20,24,31,.12);font:12px system-ui,-apple-system,sans-serif;'
+        + 'color:#393939;transition:opacity .12s;';
+      if (getComputedStyle(cont).position === 'static') cont.style.position = 'relative';
+      cont.appendChild(el);
+    }
+    const i = tooltip.dataPoints && tooltip.dataPoints.length ? tooltip.dataPoints[0].dataIndex : -1;
+    const r = productividadVigente[i];
+    if (!tooltip.opacity || !r) { el.style.opacity = 0; return; }
+
     const num = v => v !== null && v !== undefined && v !== '' && isFinite(Number(v));
     const dec = v => Number(v).toLocaleString('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-    const out = [`Total: ${FMT(r.TicketsTotales)}`];
-    if (num(r.TicketsCerrados))         out.push(`Cerrados: ${FMT(r.TicketsCerrados)}`);
-    if (num(r.TicketsAbiertos))         out.push(`Abiertos: ${FMT(r.TicketsAbiertos)}`);
-    if (num(r.TicketsSlaVencidos))      out.push(`SLA vencidos: ${FMT(r.TicketsSlaVencidos)}`);
-    if (num(r.CumplimientoSlaPct))      out.push(`Cumplimiento SLA: ${dec(r.CumplimientoSlaPct)}%`);
-    if (num(r.HorasResolucionPromedio)) out.push(`Prom. resolución: ${dec(r.HorasResolucionPromedio)} h`);
-    return out;
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    const fila = (izq, der) => `<div style="display:flex;justify-content:space-between;gap:18px;line-height:1.7">`
+      + `<span>${izq}</span><span style="font-variant-numeric:tabular-nums">${der}</span></div>`;
+    const punto = c => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${c};margin-right:7px"></span>`;
+
+    let html = `<div style="font-weight:700;font-size:13px;margin-bottom:4px">${esc(r.Tecnico)}</div>`;
+    PROD_SERIES.forEach(s => { html += fila(punto(s.color) + s.label, FMT(r[s.clave])); });
+    html += '<div style="border-top:1px solid #e6e8ec;margin:6px 0 4px"></div>';
+    html += fila('Total', FMT(r.TicketsTotales));
+    if (num(r.CumplimientoSlaPct))      html += fila('Cumplimiento SLA', `${dec(r.CumplimientoSlaPct)}%`);
+    if (num(r.HorasResolucionPromedio)) html += fila('Prom. resolución', `${dec(r.HorasResolucionPromedio)} h`);
+    el.innerHTML = html;
+
+    // A la derecha del cursor; si no cabe, a la izquierda. Sin salirse abajo.
+    const x0 = chart.canvas.offsetLeft, y0 = chart.canvas.offsetTop;
+    let x = x0 + tooltip.caretX + 14;
+    if (x + el.offsetWidth > x0 + chart.width) x = x0 + tooltip.caretX - el.offsetWidth - 14;
+    let y = y0 + tooltip.caretY - el.offsetHeight / 2;
+    y = Math.max(y0, Math.min(y, y0 + chart.height - el.offsetHeight));
+    el.style.left = `${Math.max(x0, x)}px`;
+    el.style.top = `${y}px`;
+    el.style.opacity = 1;
   }
 
   function renderProductividad() {
@@ -1629,20 +1664,28 @@ const TableroSla = (function () {
       const m = new Map();
       for (const r of f) {
         const t = r.Tecnico || '(sin tecnico)';
-        if (!m.has(t)) m.set(t, { tot: 0, cer: 0, ab: 0 });
+        if (!m.has(t)) m.set(t, { tot: 0, cer: 0, ab: 0, cerVen: 0, abVen: 0, hSum: 0, hN: 0 });
         const a = m.get(t);
+        const vencido = r.SlaVencido === true || r.SlaVencido === 1;
         a.tot++;
-        if (r.FechaFirmaCierre) a.cer++;
-    else a.ab++;
+        if (r.FechaFirmaCierre) { a.cer++; if (vencido) a.cerVen++; }
+        else { a.ab++; if (vencido) a.abVen++; }
+        const h = r.HorasResolucion;
+        if (h !== null && h !== undefined && h !== '' && isFinite(Number(h))) { a.hSum += Number(h); a.hN++; }
       }
       top = [...m.entries()].sort((a, b) => b[1].tot - a[1].tot).slice(0, 15)
-        .map(([t, a]) => ({ Tecnico: t, TicketsTotales: a.tot, TicketsCerrados: a.cer, TicketsAbiertos: a.ab }));
+        .map(([t, a]) => ({
+          Tecnico: t, TicketsTotales: a.tot, TicketsCerrados: a.cer, TicketsAbiertos: a.ab,
+          TicketsCerradosSlaVencidos: a.cerVen, TicketsAbiertosSlaVencidos: a.abVen,
+          HorasResolucionPromedio: a.hN ? a.hSum / a.hN : null,
+        }));
     }
 
+    // Copia con los tramos calculados: no se tocan las filas de `datos`.
+    top = top.map(r => ({ ...r, ...tramosProductividad(r) }));
     const etiquetas = top.map(x => x.Tecnico);
     const totales = top.map(x => x.TicketsTotales);
-    const cerrados = top.map(x => x.TicketsCerrados);
-    const abiertos = top.map(x => x.TicketsAbiertos);
+    const series = PROD_SERIES.map(s => top.map(x => x[s.clave]));
     productividadVigente = top;
 
     if (!etiquetas.length) {
@@ -1658,46 +1701,27 @@ const TableroSla = (function () {
         plugins: [CIFRA_PUNTA],
         data: {
           labels: etiquetas,
-          // Medidas y radio: los defaults compartidos de Barras.aplicarDefaults.
-          // Un solo color -la identidad de "Totales" de siempre-: el ranking
-          // se lee por largo, no por tono.
-          datasets: [
-          {
-            label: 'Cerrados',
-            data: cerrados,
-            backgroundColor: '#4CAF50',
-            hoverBackgroundColor: '#4CAF50',
+          // Grosor: el default compartido de Barras.aplicarDefaults. Radio
+          // casi recto: la barra se lee como un bloque, no como pildoras.
+          datasets: PROD_SERIES.map((s, k) => ({
+            label: s.label,
+            data: series[k],
+            backgroundColor: s.color,
+            hoverBackgroundColor: s.color,
             borderRadius: 2,
             borderSkipped: false,
-            stack: 'tickets'
-          },
-          {
-            label: 'Abiertos',
-            data: abiertos,
-            backgroundColor: BARRA_A,
-            hoverBackgroundColor: BARRA_A,
-            borderRadius: 2,
-            borderSkipped: false,
-            stack: 'tickets'
-          }
-]
+            stack: 'tickets',
+          }))
         },
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
           layout: { padding: { right: airePunta(totales) } },
+          interaction: { mode: 'index', axis: 'y', intersect: false },
           plugins: {
-            legend: { display: true, position: 'bottom',
-                      labels: { boxWidth: 14, boxHeight: 10, color: '#393939', font: { size: 11 } } },
-            tooltip: {
-              displayColors: false,
-              callbacks: {
-                title: items => {
-                  const r = items.length ? productividadVigente[items[0].dataIndex] : null;
-                  return r ? String(r.Tecnico ?? '') : (items[0] ? items[0].label : '');
-                },
-                label: c => lineasProductividad(productividadVigente[c.dataIndex] || { TicketsTotales: c.raw }),
-              }
-            }
+            legend: { display: true, position: 'bottom', align: 'start',
+                      labels: { usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8,
+                                padding: 18, color: '#393939', font: { size: 11 } } },
+            tooltip: { enabled: false, external: tooltipProductividad }
           },
           scales: {
             x: { ...EJE_CONTEO,stacked: true,
@@ -1712,8 +1736,7 @@ const TableroSla = (function () {
       }),
       gr => {
         gr.data.labels = etiquetas;
-        gr.data.datasets[0].data = cerrados;
-        gr.data.datasets[1].data = abiertos;
+        series.forEach((d, k) => { gr.data.datasets[k].data = d; });
         gr.options.layout.padding.right = airePunta(totales);
       });
   }
