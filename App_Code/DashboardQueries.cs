@@ -50,6 +50,7 @@ using System.Data;
 using System.Data.SqlClient;
 using System.Text;
 using System.Web;
+using System.Web.Caching;
 
 public static class DashboardQueries
 {
@@ -280,12 +281,81 @@ CROSS APPLY (
     // Ejecucion
     // ---------------------------------------------------------------------
 
+    /* CACHE DE RESULTADOS, en la memoria del App Pool (HttpRuntime.Cache).
+
+       Por que: el stepper de SLOT reescribe el rango a 0-30N dias, asi que
+       cada paso vuelve a pedir un periodo que contiene entero al anterior, y
+       las cinco consultas de arriba son varios segundos cada una en rangos
+       largos. La cache del navegador (obtenerJSONSla en dashboard.js) ya
+       evita repetir dentro de una pestana; esta evita repetir entre pestanas,
+       entre usuarios y despues de un F5, que es justo lo que el navegador no
+       puede.
+
+       Vida corta a proposito: los datos son de un ETL que corre de tarde en
+       tarde, y su sello viaja en kpis.UltimaActualizacionEtl para que nadie
+       lea numeros sin saber de cuando son.
+
+       La clave es el TEXTO FINAL de la consulta mas el valor de cada
+       parametro. El texto final ya incluye los predicados armados
+       (fechas, IN de grupos y tecnicos) y la rama de EsPersona que decidio
+       HayCatalogoNoPersona(), asi que dos peticiones con la misma clave
+       ejecutarian byte a byte el mismo SQL con los mismos valores. No se
+       resume ni se hashea: una colision devolveria datos de otro filtro, y
+       unos pocos KB por entrada no son problema.
+
+       OJO con lo que se guarda: es la MISMA lista que se devuelve a todos los
+       que acierten en la cache. Se puede porque nadie la muta -los handlers
+       solo la indexan y la serializan, y ningun metodo de esta clase escribe
+       en las filas que devuelve-. Si algun dia alguien ordena o modifica esas
+       listas en sitio, hay que copiarlas aqui antes de guardarlas.
+
+       Dos peticiones identicas y simultaneas pueden fallar las dos y
+       ejecutar la consulta dos veces. Se acepta: encadenarlas pediria un
+       bloqueo por clave, y el caso que duele -volver a un SLOT ya visto- es
+       secuencial, no simultaneo. */
+    private const int SegundosCache = 300;
+
+    private static string ClaveCache(SqlCommand cmd)
+    {
+        // Separador entre parametros: US (unit separator, ASCII 31). Es un
+        // caracter de control, asi que no puede aparecer ni en el SQL ni en un
+        // nombre de grupo o de tecnico; sin el, dos juegos distintos de
+        // parametros podrian producir la misma cadena. Se escribe como (char)31
+        // y no como escape para que no dependa de la codificacion del archivo.
+        const char sep = (char)31;
+
+        var sb = new StringBuilder("dash:sla:");
+        sb.Append(cmd.CommandText);
+        foreach (SqlParameter p in cmd.Parameters)
+        {
+            sb.Append(sep).Append(p.ParameterName).Append('=');
+            object v = p.Value;
+            if (v == null || v is DBNull)
+                sb.Append("<null>");
+            else if (v is DateTime)
+                sb.Append(((DateTime)v).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            else
+                sb.Append(Convert.ToString(v, CultureInfo.InvariantCulture));
+        }
+        return sb.ToString();
+    }
+
     // Mismo contrato de salida que DashboardDb.EjecutarMultiple (DBNull -> null,
     // DateTime -> ISO 8601) para que el JSON no cambie ni una coma.
     private static List<List<Dictionary<string, object>>> Ejecutar(
         string sql, Filtros f, Action<SqlCommand> extra)
     {
+        return Ejecutar(sql, f, extra, true);
+    }
+
+    /* `cachear` en false para las consultas que no compensan: ver Detalle,
+       que es la mas barata del tablero y la de respuesta mas grande. */
+    private static List<List<Dictionary<string, object>>> Ejecutar(
+        string sql, Filtros f, Action<SqlCommand> extra, bool cachear)
+    {
         var resultados = new List<List<Dictionary<string, object>>>();
+        var cache = cachear ? HttpRuntime.Cache : null;
+        string clave = null;
 
         using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
         using (var cmd = new SqlCommand())
@@ -306,6 +376,17 @@ CROSS APPLY (
                 : string.Empty;
             cmd.CommandText = string.Format(sql, porSolucion, porRegistro, rechazados, persona);
             if (extra != null) extra(cmd);
+
+            /* La clave sale del comando YA armado: hace falta el texto final
+               -con los predicados y la rama de EsPersona dentro- y el valor de
+               cada parametro. En acierto se vuelve sin llegar a abrir la
+               conexion. */
+            if (cache != null)
+            {
+                clave = ClaveCache(cmd);
+                var guardado = cache[clave] as List<List<Dictionary<string, object>>>;
+                if (guardado != null) return guardado;
+            }
 
             cn.Open();
             using (var reader = cmd.ExecuteReader())
@@ -333,13 +414,28 @@ CROSS APPLY (
             }
         }
 
+        // Expiracion absoluta, no deslizante: una entrada muy consultada no
+        // puede quedarse viva indefinidamente tapando un ETL nuevo.
+        if (cache != null && clave != null)
+        {
+            cache.Insert(clave, resultados, null,
+                         DateTime.UtcNow.AddSeconds(SegundosCache),
+                         Cache.NoSlidingExpiration);
+        }
+
         return resultados;
     }
 
     private static List<Dictionary<string, object>> Unico(
         string sql, Filtros f, Action<SqlCommand> extra)
     {
-        var resultados = Ejecutar(sql, f, extra);
+        return Unico(sql, f, true, extra);
+    }
+
+    private static List<Dictionary<string, object>> Unico(
+        string sql, Filtros f, bool cachear, Action<SqlCommand> extra)
+    {
+        var resultados = Ejecutar(sql, f, extra, cachear);
         return resultados.Count > 0 ? resultados[0] : new List<Dictionary<string, object>>();
     }
 
@@ -646,8 +742,16 @@ FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"{3}" + PrimeraRespues
 WHERE {0}
 ORDER BY b.FechaFirmaSolucion DESC;";
 
+        /* SIN cachear, a proposito. Es la consulta mas barata del tablero
+           (~25 ms: lleva TOP y un indice por fecha de solucion la ordena) y a
+           la vez la de respuesta mas grande -hasta 5.000 tickets enteros-.
+           Guardarla llenaria la memoria del App Pool para ahorrar lo que no
+           duele. Ademas el troceo del navegador (obtenerDetalle) reintenta
+           con topes distintos cuando la respuesta no cabe en el
+           serializador, asi que una misma vista puede generar varias claves
+           que no se volverian a usar. */
         int topSeguro = (top <= 0) ? 500 : (top > 5000 ? 5000 : top);
-        return Unico(sql, f, delegate(SqlCommand cmd)
+        return Unico(sql, f, false, delegate(SqlCommand cmd)
         {
             cmd.Parameters.Add("@TopSeguro", SqlDbType.Int).Value = topSeguro;
         });
