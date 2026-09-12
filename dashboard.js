@@ -2917,6 +2917,21 @@ const TableroSla = (function () {
      llega, el clic real lo volvera a pedir y ahi si se vera el error-. */
   const PREFETCH_DESDE = 3;
 
+  /* Y hasta el 6, no hasta MAX_SLOTS. El calentado no puede pedir mas de lo
+     que la cache aguanta: cada SLOT deja 6 entradas -7 si hay tecnicos
+     seleccionados, que separan productividad del ranking- y CACHE_SLA_MAX son
+     40. Del 3 al 12 serian unas 60, y como se desalojan por orden de
+     insercion, las ultimas irian tirando primero las de la carga REAL que el
+     usuario esta mirando y luego las de los SLOTs 3, 4 y 5, que son
+     justamente los que tiene mas cerca del dedo: el calentado acababa
+     vaciando lo que venia a llenar.
+
+     Del 3 al 6 son 28 entradas en el peor caso y la carga real ocupa otras 7:
+     35, por debajo del tope. Ademas CACHE_SLA_MS es 60 s y cada SLOT tarda
+     varios segundos, asi que una cadena mas larga expiraria por su cuenta
+     antes de que nadie llegara a pulsar los SLOTs lejanos. */
+  const PREFETCH_HASTA = 6;
+
   // El modulo de SLA se ve en dos pestañas (SLA y Call Center) y las dos
   // comparten esta misma carga. Fuera de ellas no se calienta nada.
   function slaALaVista() {
@@ -2972,7 +2987,7 @@ const TableroSla = (function () {
     return resueltos.every(r => r.status === 'fulfilled');
   }
 
-  /* La cadena 3 -> MAX_SLOTS, con el numero de carga de testigo: si el usuario
+  /* La cadena 3 -> PREFETCH_HASTA, con el numero de carga de testigo: si el usuario
      mueve un filtro o pulsa el stepper, cargarTodo() incrementa cargaVigente
      y esta cadena se abandona en el siguiente corte, sin poder calentar ya
      nada del estado viejo. La carga nueva arranca la suya desde el 3. */
@@ -2986,14 +3001,14 @@ const TableroSla = (function () {
     if (!document.getElementById('f-inicio').value) return;
     if (!document.getElementById('f-fin').value) return;
 
-    for (let k = PREFETCH_DESDE; k <= MAX_SLOTS; k++) {
+    for (let k = PREFETCH_DESDE; k <= PREFETCH_HASTA; k++) {
       if (miCarga !== cargaVigente || !slaALaVista()) return;
       const ok = await calentarSlot(k);
       if (!ok) return;
       /* Respiro entre SLOTs: devuelve el turno al navegador antes del
          siguiente bloque, para que el calentado no compita con la interfaz.
-         Es un turno suelto y la cadena termina en MAX_SLOTS: no queda ningun
-         temporizador vivo. */
+         Es un turno suelto y la cadena termina en PREFETCH_HASTA: no queda
+         ningun temporizador vivo. */
       await new Promise(listo => setTimeout(listo, 0));
     }
   }
