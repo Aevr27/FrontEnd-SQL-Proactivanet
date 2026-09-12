@@ -234,6 +234,74 @@ async function obtenerJSON(ruta) {
 }
 
 /* -----------------------------------------------------------------------
+   Cache de corta vida para los agregados del tablero de SLA.
+
+   Motivo: el stepper de SLOT reescribe el rango a 0-30N dias, asi que bajar
+   de SLOT 3 a SLOT 2 vuelve a pedir un periodo que se acaba de traer entero.
+   Los agregados son caros (kpis, distribucion y productividad rondan varios
+   segundos en rangos largos) y no cambian de un minuto a otro: el ETL corre
+   muy de tarde en tarde y su sello viaja en kpis.UltimaActualizacionEtl.
+
+   Solo la envoltura obtenerJSONSla() pasa por aqui, y solo la usa
+   cargarTodo() del tablero de SLA. obtenerJSON() queda intacta, asi que el
+   tablero de Backlog, los catalogos y el troceo de detalle.ashx siguen
+   pidiendo a la red igual que antes.
+
+   La clave es la URL RESUELTA COMPLETA (urlHandler + querystring), asi que
+   dos rangos o dos filtros distintos son entradas distintas por
+   construccion: no hace falta vaciar la cache al mover un filtro, y
+   vaciarla ahi anularia justo el caso que se quiere aprovechar -volver a un
+   SLOT ya visitado-.
+
+   Se guarda la PROMESA, no el resultado: dos peticiones simultaneas a la
+   misma URL comparten un unico viaje. Un rechazo borra su entrada, asi que
+   los errores nunca se cachean.
+   ----------------------------------------------------------------------- */
+const CACHE_SLA_MS = 60000;     // vida de una entrada
+const CACHE_SLA_MAX = 40;       // tope duro de entradas
+const cacheSla = new Map();     // url resuelta -> { t, promesa }
+
+// Vacia la cache entera. La llaman los caminos en los que el usuario pide
+// datos frescos a proposito ("Limpiar") y el arranque del tablero.
+function purgarCacheSla() { cacheSla.clear(); }
+
+function podarCacheSla(ahora) {
+  for (const [clave, ent] of cacheSla) {
+    if (ahora - ent.t >= CACHE_SLA_MS) cacheSla.delete(clave);
+  }
+}
+
+function obtenerJSONSla(ruta) {
+  // Con datos simulados no hay red que ahorrar y mock-data ya trae sus
+  // propias caches: se pasa de largo para no alterar el modo de prueba.
+  if (window.MockData && window.MockData.MOCK_DATA) return obtenerJSON(ruta);
+
+  const ahora = Date.now();
+  podarCacheSla(ahora);
+
+  const clave = urlHandler(ruta);
+  const guardado = cacheSla.get(clave);
+  if (guardado) return guardado.promesa;
+
+  const promesa = obtenerJSON(ruta);
+  /* Un fallo no se guarda: se borra la entrada para que el siguiente intento
+     vuelva a pedir. Se comprueba que la entrada siga siendo ESTA antes de
+     borrarla, por si ya la reemplazo una peticion posterior. El .catch() de
+     aqui solo observa; el rechazo original sigue viajando al llamador, que
+     es quien lo trata (allSettled en cargarTodo). */
+  promesa.catch(() => {
+    const ent = cacheSla.get(clave);
+    if (ent && ent.promesa === promesa) cacheSla.delete(clave);
+  });
+  cacheSla.set(clave, { t: ahora, promesa });
+
+  // Map conserva el orden de insercion: la primera clave es la mas vieja.
+  while (cacheSla.size > CACHE_SLA_MAX) cacheSla.delete(cacheSla.keys().next().value);
+
+  return promesa;
+}
+
+/* -----------------------------------------------------------------------
    detalle.ashx serializa con JavaScriptSerializer, que trae un tope de
    longitud (maxJsonLength, 2 MB por omision). Con rangos grandes la
    respuesta lo revienta y el handler responde HTTP 500 con
@@ -2831,6 +2899,157 @@ const TableroSla = (function () {
     cargaProgramada = setTimeout(() => { cargaProgramada = null; cargarTodo(); }, ESPERA_AUTO);
   }
 
+  /* ------------------------------------------- Calentado de SLOTs futuros
+     Terminada una carga real, se piden EN SEGUNDO PLANO los SLOTs que el
+     usuario todavia no ha visitado, para que su clic encuentre la respuesta
+     ya en la cache de 60 s de obtenerJSONSla(). No hay cache nueva ni
+     estructura aparte: se pide por las MISMAS URLs que pediria un clic real
+     y cachearlas es el efecto, no un paso extra.
+
+     Del 3 en adelante: el 1 y el 2 ya responden rapido y el 0 no es un
+     periodo. De uno en uno, esperando a que termine cada SLOT, para no
+     lanzar setenta peticiones a la vez contra el mismo servidor que esta
+     atendiendo al usuario.
+
+     Nada de esto pinta: no se llama a ningun render, no se toca `datos`, ni
+     las fechas, ni slotsN, ni el cross-filter, ni la barra de estado. Un
+     fallo corta la cadena y se queda callado -es trabajo especulativo: si no
+     llega, el clic real lo volvera a pedir y ahi si se vera el error-. */
+  const PREFETCH_DESDE = 3;
+
+  /* Y hasta el 6, no hasta MAX_SLOTS. El calentado no puede pedir mas de lo
+     que la cache aguanta: cada SLOT deja 6 entradas -7 si hay tecnicos
+     seleccionados, que separan productividad del ranking- y CACHE_SLA_MAX son
+     40. Del 3 al 12 serian unas 60, y como se desalojan por orden de
+     insercion, las ultimas irian tirando primero las de la carga REAL que el
+     usuario esta mirando y luego las de los SLOTs 3, 4 y 5, que son
+     justamente los que tiene mas cerca del dedo: el calentado acababa
+     vaciando lo que venia a llenar.
+
+     Del 3 al 6 son 28 entradas en el peor caso y la carga real ocupa otras 7:
+     35, por debajo del tope. Ademas CACHE_SLA_MS es 60 s y cada SLOT tarda
+     varios segundos, asi que una cadena mas larga expiraria por su cuenta
+     antes de que nadie llegara a pulsar los SLOTs lejanos. */
+  const PREFETCH_HASTA = 6;
+
+  /* Pausa entre SLOTs. Antes era setTimeout(0): devolvia el turno, pero
+     encadenaba el siguiente bloque de 6 peticiones en el tick siguiente, asi
+     que el calentado iba tan rapido como diera el servidor y competia con lo
+     que el usuario estuviera haciendo.
+
+     Ahora se espera de verdad. Primero un minimo fijo, que es el respiro que
+     necesita el SERVIDOR -es la misma instancia que atiende los .ashx del
+     usuario, y ahi requestIdleCallback no ayuda: mide si el NAVEGADOR esta
+     ocioso, no si lo esta SQL Server-. Despues, ya cumplido ese minimo, se
+     espera a un hueco de inactividad del navegador, para no arrancar el
+     bloque justo encima de un repintado.
+
+     El tope del idle evita quedarse colgado: en una pestaña ocupada
+     requestIdleCallback podria no llegar nunca, y esto tiene que terminar. */
+  const PAUSA_SLOT_MS = 750;      // respiro minimo para el servidor
+  const PAUSA_IDLE_MS = 2000;     // tope de espera a que el navegador respire
+
+  function respiroEntreSlots() {
+    return new Promise(listo => {
+      setTimeout(() => {
+        // requestIdleCallback no esta en todos los navegadores (Safari tardo
+        // en traerlo). Sin el, el minimo fijo de arriba ya es la pausa.
+        if (typeof requestIdleCallback === 'function') {
+          requestIdleCallback(() => listo(), { timeout: PAUSA_IDLE_MS });
+        } else {
+          listo();
+        }
+      }, PAUSA_SLOT_MS);
+    });
+  }
+
+  // El modulo de SLA se ve en dos pestañas (SLA y Call Center) y las dos
+  // comparten esta misma carga. Fuera de ellas no se calienta nada.
+  function slaALaVista() {
+    return ['tab-sla', 'tab-call'].some(id => {
+      const el = document.getElementById(id);
+      return !!el && el.classList.contains('active');
+    });
+  }
+
+  /* El rango del SLOT k escrito sobre unos parametros ya armados. Es la misma
+     cuenta que hace aplicarSlots() -del inicio del SLOT k al fin del 1, o sea
+     el periodo ACUMULADO, no el tramo suelto de 30 dias-, pero sin tocar los
+     <input>: el tablero visible no se entera.
+
+     URLSearchParams.set conserva la posicion de una clave que ya existe, asi
+     que la querystring sale con las claves en el mismo orden que la de un
+     clic real. De ahi que solo se llame con fechas ya presentes. */
+  function conRangoDeSlot(p, k) {
+    p.set('fecha_inicio', slotRango(k).inicio);
+    p.set('fecha_fin', slotRango(1).fin);
+    return p;
+  }
+
+  /* Un SLOT: las mismas peticiones de cargarTodo() menos `detalle` -que no se
+     cachea y ademas se trocea-, en paralelo como alli. Se conserva el
+     deduplicado de productividad comparando las querystrings REALES, igual
+     que arriba: en modo SLOT el ranking mide el mismo periodo, asi que sin
+     tecnicos seleccionados las dos salen identicas y se comparte la promesa. */
+  async function calentarSlot(k) {
+    const qs = conRangoDeSlot(paramsFiltros(), k).toString();
+    const qsGrupos = conRangoDeSlot(paramsSoloGrupos(), k).toString();
+
+    let productividad = null;
+    const pedirProductividad = () =>
+      (productividad || (productividad = obtenerJSONSla(`productividad.ashx?${qs}`)));
+
+    const resueltos = await Promise.allSettled([
+      obtenerJSONSla(`kpis.ashx?${qs}`),
+      obtenerJSONSla(`tendencia.ashx?${qs}`),
+      pedirProductividad(),
+      obtenerJSONSla(`distribucion.ashx?${qs}`),
+      (qsGrupos === qs
+        ? pedirProductividad()
+        : obtenerJSONSla(`productividad.ashx?${qsGrupos}`)),
+      obtenerJSONSla(`llamadas.ashx?${conRangoDeSlot(paramsLlamadas(), k).toString()}`),
+      obtenerJSONSla(`carga_combinada.ashx?${conRangoDeSlot(paramsCargaCombinada(), k).toString()}`),
+    ]);
+
+    /* allSettled y no all a proposito: con all, el rechazo de una dejaria a
+       las otras seis sin nadie escuchandolas y el navegador las anunciaria
+       como unhandledrejection. Es el mismo motivo por el que cargarTodo() usa
+       allSettled. */
+    return resueltos.every(r => r.status === 'fulfilled');
+  }
+
+  /* La cadena 3 -> PREFETCH_HASTA, con el numero de carga de testigo: si el usuario
+     mueve un filtro o pulsa el stepper, cargarTodo() incrementa cargaVigente
+     y esta cadena se abandona en el siguiente corte, sin poder calentar ya
+     nada del estado viejo. La carga nueva arranca la suya desde el 3. */
+  async function calentarSlotsFuturos(miCarga) {
+    // Con datos simulados no hay red que ahorrar -obtenerJSONSla se salta la
+    // cache en ese modo-, asi que no se calienta nada.
+    if (window.MockData && window.MockData.MOCK_DATA) return;
+    // Sin rango escrito, paramsFiltros() no lleva fechas y `set` las pondria
+    // al final: la querystring no seria la de un clic real y calentaria una
+    // entrada que nadie va a acertar.
+    if (!document.getElementById('f-inicio').value) return;
+    if (!document.getElementById('f-fin').value) return;
+
+    for (let k = PREFETCH_DESDE; k <= PREFETCH_HASTA; k++) {
+      if (miCarga !== cargaVigente || !slaALaVista()) return;
+      const ok = await calentarSlot(k);
+      if (!ok) return;
+      /* Respiro ENTRE SLOTs, nunca entre las peticiones de uno: dentro del
+         SLOT siguen saliendo todas a la vez, como en cargarTodo(). La pausa
+         va aqui, despues de un bloque completo.
+
+         No se pausa despues del ultimo: la cadena ya ha terminado y dejar un
+         temporizador corriendo para no hacer nada detras no tiene sentido.
+
+         Tras la pausa vuelve el principio del bucle, que es donde se
+         comprueba cargaVigente: si el usuario movio algo mientras se
+         esperaba, la cadena se abandona ahi sin pedir el SLOT siguiente. */
+      if (k < PREFETCH_HASTA) await respiroEntreSlots();
+    }
+  }
+
   async function cargarTodo() {
     // Una carga inmediata ("Limpiar", rango rapido) manda sobre la programada.
     clearTimeout(cargaProgramada);
@@ -2848,19 +3067,41 @@ const TableroSla = (function () {
        el ultimo bloque del Call Center. Se lanza aqui para que salga en
        paralelo con las demas, y se pinta solo en cuanto responde. */
     estadoCargaCombinada('Cargando el cruce de tickets y llamadas...');
-    obtenerJSON(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
+    obtenerJSONSla(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
       d => { if (miCarga === cargaVigente) renderCargaCombinada(d); },
       e => { if (miCarga === cargaVigente) errorCargaCombinada(e); }
     ).catch(e => console.error(e));
 
+    /* El ranking de personas (topCerrados) pide el MISMO productividad.ashx
+       que la grafica, solo que con su propio rango y sin el filtro de
+       tecnicos. En modo SLOT los dos rangos coinciden -rangoRanking() con
+       SLOT devuelve justo el rango del tablero-, asi que sin tecnicos
+       seleccionados las dos querystrings salen identicas y se pedia dos
+       veces la consulta mas cara del tablero.
+
+       La comparacion es entre las querystrings REALES, no contra
+       enModoSlot(): si manana cambia rangoRanking() o el reparto de
+       filtros, esto sigue siendo correcto solo. Cuando difieren se hacen
+       las dos peticiones de siempre.
+
+       Las dos ramas comparten el MISMO array. Es seguro: renderProductividad
+       copia con slice+map antes de tocar nada y renderTopCerrados ordena el
+       array nuevo que devuelve su propio .map(). Ninguno muta las filas de
+       `datos`. */
+    let productividad = null;
+    const pedirProductividad = () =>
+      (productividad || (productividad = obtenerJSONSla(`productividad.ashx?${qs}`)));
+
     const peticiones = [
-      ['kpis',          () => obtenerJSON(`kpis.ashx?${qs}`)],
-      ['tendencia',     () => obtenerJSON(`tendencia.ashx?${qs}`)],
-      ['productividad', () => obtenerJSON(`productividad.ashx?${qs}`)],
-      ['distribucion',  () => obtenerJSON(`distribucion.ashx?${qs}`)],
+      ['kpis',          () => obtenerJSONSla(`kpis.ashx?${qs}`)],
+      ['tendencia',     () => obtenerJSONSla(`tendencia.ashx?${qs}`)],
+      ['productividad', () => pedirProductividad()],
+      ['distribucion',  () => obtenerJSONSla(`distribucion.ashx?${qs}`)],
       ['detalle',       () => obtenerDetalle(paramsFiltros(), TOPE_DETALLE)],
-      ['topCerrados',   () => obtenerJSON(`productividad.ashx?${qsGrupos}`)],
-      ['llamadas',      () => obtenerJSON(`llamadas.ashx?${paramsLlamadas().toString()}`)],
+      ['topCerrados',   () => (qsGrupos === qs
+                                ? pedirProductividad()
+                                : obtenerJSONSla(`productividad.ashx?${qsGrupos}`))],
+      ['llamadas',      () => obtenerJSONSla(`llamadas.ashx?${paramsLlamadas().toString()}`)],
     ];
 
     const resueltos = await Promise.allSettled(peticiones.map(([, pedir]) => pedir()));
@@ -2895,6 +3136,12 @@ const TableroSla = (function () {
     invalidarFilas();
     renderTodo();
     estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.UltimaActualizacionEtl, fallos);
+
+    /* Y ya con el tablero pintado, se calientan en segundo plano los SLOTs
+       que el usuario todavia no ha pedido. Sin await: la carga visible ya
+       termino y esto no puede retrasar ni el pintado ni el init() que espera
+       a cargarTodo(). */
+    calentarSlotsFuturos(miCarga).catch(e => console.error(e));
   }
 
   async function init() {
@@ -2908,6 +3155,10 @@ const TableroSla = (function () {
       // "Limpiar" deja el tablero como recien abierto: sin SLOT, sin cross
       // filter y con el mismo rango que escribe init(). Antes fijaba hoy a hoy
       // y la tendencia quedaba con un solo dia.
+      // Es ademas el unico control con el que el usuario pide datos frescos a
+      // proposito, asi que tira la cache: despues de pulsarlo, todo lo que se
+      // pinte tiene que venir del servidor.
+      purgarCacheSla();
       desactivarSlots();
       escribirRango(rangoPorDefecto());
       Object.keys(filtro).forEach(k => { filtro[k] = null; });
@@ -2950,6 +3201,9 @@ const TableroSla = (function () {
       estadoError('estado-carga', err);
       return;
     }
+    // Arranque del tablero: nada heredado de una sesion anterior de la misma
+    // pagina (la pestana se puede reinicializar sin recargar el documento).
+    purgarCacheSla();
     await cargarTodo();
   }
 

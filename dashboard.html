@@ -4,7 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tickets Proactivanet — Tableros de SLA y Backlog</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<!-- Chart.js desde la copia local, no desde el CDN: el tablero corre en una VM
+     interna y una salida a jsdelivr que no exista o que tarde deja TODAS las
+     graficas sin dibujar, con `Chart is not defined` en la consola. Es la misma
+     copia y la misma version que ya usan Experiencia, Orquestacion y QA
+     (assets/vendor/chart.umd.min.js es el dist 4.4.4 bajado de jsdelivr). -->
+<script src="assets/vendor/chart.umd.min.js"></script>
 <!-- Paleta categorica compartida. Va antes de dashboard.js y antes de los
      modulos embebidos (Experiencia, QA), que pierden sus <script> al montarse
      aqui y usan esta copia. -->

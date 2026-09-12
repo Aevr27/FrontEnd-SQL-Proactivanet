@@ -50,6 +50,7 @@ using System.Data;
 using System.Data.SqlClient;
 using System.Text;
 using System.Web;
+using System.Web.Caching;
 
 public static class DashboardQueries
 {
@@ -280,12 +281,81 @@ CROSS APPLY (
     // Ejecucion
     // ---------------------------------------------------------------------
 
+    /* CACHE DE RESULTADOS, en la memoria del App Pool (HttpRuntime.Cache).
+
+       Por que: el stepper de SLOT reescribe el rango a 0-30N dias, asi que
+       cada paso vuelve a pedir un periodo que contiene entero al anterior, y
+       las cinco consultas de arriba son varios segundos cada una en rangos
+       largos. La cache del navegador (obtenerJSONSla en dashboard.js) ya
+       evita repetir dentro de una pestana; esta evita repetir entre pestanas,
+       entre usuarios y despues de un F5, que es justo lo que el navegador no
+       puede.
+
+       Vida corta a proposito: los datos son de un ETL que corre de tarde en
+       tarde, y su sello viaja en kpis.UltimaActualizacionEtl para que nadie
+       lea numeros sin saber de cuando son.
+
+       La clave es el TEXTO FINAL de la consulta mas el valor de cada
+       parametro. El texto final ya incluye los predicados armados
+       (fechas, IN de grupos y tecnicos) y la rama de EsPersona que decidio
+       HayCatalogoNoPersona(), asi que dos peticiones con la misma clave
+       ejecutarian byte a byte el mismo SQL con los mismos valores. No se
+       resume ni se hashea: una colision devolveria datos de otro filtro, y
+       unos pocos KB por entrada no son problema.
+
+       OJO con lo que se guarda: es la MISMA lista que se devuelve a todos los
+       que acierten en la cache. Se puede porque nadie la muta -los handlers
+       solo la indexan y la serializan, y ningun metodo de esta clase escribe
+       en las filas que devuelve-. Si algun dia alguien ordena o modifica esas
+       listas en sitio, hay que copiarlas aqui antes de guardarlas.
+
+       Dos peticiones identicas y simultaneas pueden fallar las dos y
+       ejecutar la consulta dos veces. Se acepta: encadenarlas pediria un
+       bloqueo por clave, y el caso que duele -volver a un SLOT ya visto- es
+       secuencial, no simultaneo. */
+    private const int SegundosCache = 300;
+
+    private static string ClaveCache(SqlCommand cmd)
+    {
+        // Separador entre parametros: US (unit separator, ASCII 31). Es un
+        // caracter de control, asi que no puede aparecer ni en el SQL ni en un
+        // nombre de grupo o de tecnico; sin el, dos juegos distintos de
+        // parametros podrian producir la misma cadena. Se escribe como (char)31
+        // y no como escape para que no dependa de la codificacion del archivo.
+        const char sep = (char)31;
+
+        var sb = new StringBuilder("dash:sla:");
+        sb.Append(cmd.CommandText);
+        foreach (SqlParameter p in cmd.Parameters)
+        {
+            sb.Append(sep).Append(p.ParameterName).Append('=');
+            object v = p.Value;
+            if (v == null || v is DBNull)
+                sb.Append("<null>");
+            else if (v is DateTime)
+                sb.Append(((DateTime)v).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+            else
+                sb.Append(Convert.ToString(v, CultureInfo.InvariantCulture));
+        }
+        return sb.ToString();
+    }
+
     // Mismo contrato de salida que DashboardDb.EjecutarMultiple (DBNull -> null,
     // DateTime -> ISO 8601) para que el JSON no cambie ni una coma.
     private static List<List<Dictionary<string, object>>> Ejecutar(
         string sql, Filtros f, Action<SqlCommand> extra)
     {
+        return Ejecutar(sql, f, extra, true);
+    }
+
+    /* `cachear` en false para las consultas que no compensan: ver Detalle,
+       que es la mas barata del tablero y la de respuesta mas grande. */
+    private static List<List<Dictionary<string, object>>> Ejecutar(
+        string sql, Filtros f, Action<SqlCommand> extra, bool cachear)
+    {
         var resultados = new List<List<Dictionary<string, object>>>();
+        var cache = cachear ? HttpRuntime.Cache : null;
+        string clave = null;
 
         using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
         using (var cmd = new SqlCommand())
@@ -306,6 +376,17 @@ CROSS APPLY (
                 : string.Empty;
             cmd.CommandText = string.Format(sql, porSolucion, porRegistro, rechazados, persona);
             if (extra != null) extra(cmd);
+
+            /* La clave sale del comando YA armado: hace falta el texto final
+               -con los predicados y la rama de EsPersona dentro- y el valor de
+               cada parametro. En acierto se vuelve sin llegar a abrir la
+               conexion. */
+            if (cache != null)
+            {
+                clave = ClaveCache(cmd);
+                var guardado = cache[clave] as List<List<Dictionary<string, object>>>;
+                if (guardado != null) return guardado;
+            }
 
             cn.Open();
             using (var reader = cmd.ExecuteReader())
@@ -333,13 +414,28 @@ CROSS APPLY (
             }
         }
 
+        // Expiracion absoluta, no deslizante: una entrada muy consultada no
+        // puede quedarse viva indefinidamente tapando un ETL nuevo.
+        if (cache != null && clave != null)
+        {
+            cache.Insert(clave, resultados, null,
+                         DateTime.UtcNow.AddSeconds(SegundosCache),
+                         Cache.NoSlidingExpiration);
+        }
+
         return resultados;
     }
 
     private static List<Dictionary<string, object>> Unico(
         string sql, Filtros f, Action<SqlCommand> extra)
     {
-        var resultados = Ejecutar(sql, f, extra);
+        return Unico(sql, f, true, extra);
+    }
+
+    private static List<Dictionary<string, object>> Unico(
+        string sql, Filtros f, bool cachear, Action<SqlCommand> extra)
+    {
+        var resultados = Ejecutar(sql, f, extra, cachear);
         return resultados.Count > 0 ? resultados[0] : new List<Dictionary<string, object>>();
     }
 
@@ -367,26 +463,32 @@ CROSS APPLY (
     FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"{3}" + PrimeraRespuesta + @"
     WHERE {0}
 ),
-/* Percentiles de la primera respuesta, por lo mismo que las horas: el
-   promedio lo decide la cola. Solo los tickets con dato. */
-pr AS
+/* Los cuatro percentiles, calculados EN LA MISMA PASADA que todo lo demas.
+
+   Antes vivian en dos CTE aparte (pr y pct) que leian `base`, y el SELECT
+   final la leia una tercera vez. Un CTE no se materializa: SQL Server lo
+   inlinea en cada referencia, asi que `base` -con su OUTER APPLY contra
+   dbo.Tickets fila a fila y el EXISTS de EsPersona- se evaluaba hasta TRES
+   veces por peticion. Referenciandola una sola vez se paga una.
+
+   Se calculan sin filtrar los NULL, y eso NO cambia el resultado:
+   PERCENTILE_CONT ignora los NULL de su ORDER BY, asi que calcular sobre
+   todas las filas da lo mismo que el antiguo WHERE ... IS NOT NULL. Si no
+   queda ni un valor con dato, devuelve NULL, igual que antes devolvia NULL
+   el subquery contra un CTE sin filas.
+
+   Sin PARTITION BY el valor es constante en todas las filas, asi que el
+   MAX() de abajo lo recoge tal cual; sobre cero filas da NULL, que es lo
+   que el tablero ya sabia recibir. */
+conPct AS
 (
-    SELECT TOP (1)
-        Mediana = PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY MinutosPrimeraRespuesta) OVER (),
-        P90     = PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY MinutosPrimeraRespuesta) OVER ()
-    FROM base
-    WHERE MinutosPrimeraRespuesta IS NOT NULL
-),
-/* Mediana y p90 de las horas de resolucion: la distribucion tiene cola larga
-   y el promedio lo decide un punado de tickets de semanas. TOP (1) porque
-   PERCENTILE_CONT es de ventana y repite el valor en cada fila. */
-pct AS
-(
-    SELECT TOP (1)
-        Mediana = PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY HorasResolucion) OVER (),
-        P90     = PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY HorasResolucion) OVER ()
-    FROM base
-    WHERE HorasResolucion IS NOT NULL
+    SELECT
+        b2.*,
+        HorasMediana = PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY b2.HorasResolucion) OVER (),
+        HorasP90     = PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY b2.HorasResolucion) OVER (),
+        PrMediana    = PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY b2.MinutosPrimeraRespuesta) OVER (),
+        PrP90        = PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY b2.MinutosPrimeraRespuesta) OVER ()
+    FROM base AS b2
 )
 SELECT
     FechaInicio = @FechaInicio,
@@ -420,12 +522,14 @@ SELECT
     -- TicketsResueltos pero si en TicketsCreados: explican parte del hueco.
     TicketsRechazados = (SELECT COUNT_BIG(*) FROM dbo.vw_Dash_ProductividadBase b WHERE {2}),
     HorasResolucionPromedio = CAST(AVG(HorasResolucion) AS DECIMAL(18,2)),
-    -- Subconsultas y no JOIN contra pct: si nada tiene horas, pct no trae
-    -- filas y un CROSS JOIN dejaria el tablero sin KPIs.
-    HorasResolucionMediana = (SELECT TOP (1) CAST(Mediana AS DECIMAL(18,2)) FROM pct),
-    HorasResolucionP90     = (SELECT TOP (1) CAST(P90     AS DECIMAL(18,2)) FROM pct),
-    MinutosPrimeraRespuestaMediana = (SELECT TOP (1) CAST(Mediana AS DECIMAL(18,2)) FROM pr),
-    MinutosPrimeraRespuestaP90     = (SELECT TOP (1) CAST(P90     AS DECIMAL(18,2)) FROM pr),
+    -- Ventana sin PARTITION BY: el valor es el mismo en todas las filas, asi
+    -- que MAX() lo recoge sin alterarlo, y sobre cero filas da NULL -que es
+    -- justo lo que antes devolvia el subquery contra un CTE sin filas-. El
+    -- CAST se queda donde estaba, asi que el redondeo es identico.
+    HorasResolucionMediana = CAST(MAX(HorasMediana) AS DECIMAL(18,2)),
+    HorasResolucionP90     = CAST(MAX(HorasP90)     AS DECIMAL(18,2)),
+    MinutosPrimeraRespuestaMediana = CAST(MAX(PrMediana) AS DECIMAL(18,2)),
+    MinutosPrimeraRespuestaP90     = CAST(MAX(PrP90)     AS DECIMAL(18,2)),
     HorasCicloPromedio = CAST(AVG(HorasCiclo) AS DECIMAL(18,2)),
     ReasignacionesPromedio = CAST(AVG(CAST(ReasignacionesGrupo AS DECIMAL(18,2))) AS DECIMAL(18,2)),
     TicketsAltaPrioridad = SUM(CASE WHEN Prioridad IN (N'Alta', N'Crítica', N'Critica', N'Urgente') THEN 1 ELSE 0 END),
@@ -439,7 +543,7 @@ SELECT
         FROM dbo.EtlLog l
         WHERE l.Proceso = N'Proactivanet tickets'
     )
-FROM base;";
+FROM conPct;";
 
         var filas = Unico(sql, f, null);
         return filas.Count > 0 ? filas[0] : new Dictionary<string, object>();
@@ -547,56 +651,74 @@ ORDER BY TicketsTotales DESC, b.Tecnico;";
        de hoy, que contesta el Backlog-. */
     public static List<List<Dictionary<string, object>>> Distribucion(Filtros f)
     {
+        /* La tabla temporal guarda el AGREGADO por (Grupo, Prioridad), no una
+           fila por ticket. Los tres result sets son sumas de sumas: agrupar
+           antes da los mismos numeros -SUM y COUNT se pueden encadenar- pero
+           escribe en tempdb tantas filas como combinaciones de grupo y
+           prioridad existan, en vez de tantas como tickets tenga el rango.
+
+           Sigue siendo una tabla temporal y no un CTE porque un CTE se
+           inlinea en cada referencia: las tres lecturas de abajo repetirian
+           la pasada por la vista y su CROSS APPLY, que es justo lo caro.
+
+           Los nombres de las columnas agregadas (Filas, ConSla, FueraSla,
+           EnSla, Reaperturas) no coinciden a proposito con ningun alias de
+           salida: asi ORDER BY Vencidos o HAVING SUM(Filas) no pueden
+           resolverse contra la columna equivocada. */
         const string sql = @"
 SET NOCOUNT ON;
 
 SELECT
-    b.Grupo,
-    b.Prioridad,
-    s.SlaEvaluable,
-    s.SlaVencido,
-    s.DentroSla,
-    s.EsReabierto
-INTO #DistribucionBase
+    Grupo      = ISNULL(NULLIF(LTRIM(RTRIM(b.Grupo)), N''), N'Sin grupo'),
+    Prioridad  = ISNULL(NULLIF(LTRIM(RTRIM(b.Prioridad)), N''), N'Sin prioridad'),
+    Filas      = COUNT_BIG(*),
+    ConSla     = SUM(CASE WHEN s.SlaEvaluable = 1 THEN 1 ELSE 0 END),
+    FueraSla   = SUM(CASE WHEN s.SlaVencido = 1 THEN 1 ELSE 0 END),
+    EnSla      = SUM(CASE WHEN s.SlaEvaluable = 1 AND s.DentroSla = 1 THEN 1 ELSE 0 END),
+    Reaperturas = SUM(CASE WHEN s.EsReabierto = 1 THEN 1 ELSE 0 END)
+INTO #DistribucionAgg
 FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"
-WHERE {0};
+WHERE {0}
+GROUP BY
+    ISNULL(NULLIF(LTRIM(RTRIM(b.Grupo)), N''), N'Sin grupo'),
+    ISNULL(NULLIF(LTRIM(RTRIM(b.Prioridad)), N''), N'Sin prioridad');
 
 SELECT
-    Valor = ISNULL(NULLIF(LTRIM(RTRIM(Prioridad)), N''), N'Sin prioridad'),
-    Tickets = COUNT_BIG(*)
-FROM #DistribucionBase
-GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(Prioridad)), N''), N'Sin prioridad')
+    Valor = Prioridad,
+    Tickets = SUM(Filas)
+FROM #DistribucionAgg
+GROUP BY Prioridad
 ORDER BY Tickets DESC;
 
 SELECT TOP (12)
-    Valor      = ISNULL(NULLIF(LTRIM(RTRIM(Grupo)), N''), N'Sin grupo'),
-    Vencidos   = SUM(CASE WHEN SlaVencido = 1 THEN 1 ELSE 0 END),
-    Evaluables = SUM(CASE WHEN SlaEvaluable = 1 THEN 1 ELSE 0 END),
+    Valor      = Grupo,
+    Vencidos   = SUM(FueraSla),
+    Evaluables = SUM(ConSla),
     -- El porcentaje junto al volumen: un grupo chico con 8 de 10 vencidos
     -- esta peor que uno grande con 50 de 5,000.
     CumplimientoPct = CAST(
-        100.0 * SUM(CASE WHEN SlaEvaluable = 1 AND DentroSla = 1 THEN 1 ELSE 0 END)
-        / NULLIF(SUM(CASE WHEN SlaEvaluable = 1 THEN 1 ELSE 0 END), 0)
+        100.0 * SUM(EnSla)
+        / NULLIF(SUM(ConSla), 0)
         AS DECIMAL(6,2))
-FROM #DistribucionBase
-GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(Grupo)), N''), N'Sin grupo')
-HAVING SUM(CASE WHEN SlaVencido = 1 THEN 1 ELSE 0 END) > 0
+FROM #DistribucionAgg
+GROUP BY Grupo
+HAVING SUM(FueraSla) > 0
 ORDER BY Vencidos DESC;
 
 SELECT TOP (12)
-    Valor      = ISNULL(NULLIF(LTRIM(RTRIM(Grupo)), N''), N'Sin grupo'),
-    Resueltos  = COUNT_BIG(*),
-    Reabiertos = SUM(CASE WHEN EsReabierto = 1 THEN 1 ELSE 0 END),
+    Valor      = Grupo,
+    Resueltos  = SUM(Filas),
+    Reabiertos = SUM(Reaperturas),
     ReabiertosPct = CAST(
-        100.0 * SUM(CASE WHEN EsReabierto = 1 THEN 1 ELSE 0 END)
-        / NULLIF(COUNT_BIG(*), 0) AS DECIMAL(6,2))
-FROM #DistribucionBase
-GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(Grupo)), N''), N'Sin grupo')
-HAVING COUNT_BIG(*) >= 50
-   AND SUM(CASE WHEN EsReabierto = 1 THEN 1 ELSE 0 END) > 0
+        100.0 * SUM(Reaperturas)
+        / NULLIF(SUM(Filas), 0) AS DECIMAL(6,2))
+FROM #DistribucionAgg
+GROUP BY Grupo
+HAVING SUM(Filas) >= 50
+   AND SUM(Reaperturas) > 0
 ORDER BY ReabiertosPct DESC;
 
-DROP TABLE #DistribucionBase;";
+DROP TABLE #DistribucionAgg;";
 
         // SELECT ... INTO no abre result set en el reader, asi que los tres
         // que salen son prioridad, vencidos y reabiertos.
@@ -646,8 +768,16 @@ FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"{3}" + PrimeraRespues
 WHERE {0}
 ORDER BY b.FechaFirmaSolucion DESC;";
 
+        /* SIN cachear, a proposito. Es la consulta mas barata del tablero
+           (~25 ms: lleva TOP y un indice por fecha de solucion la ordena) y a
+           la vez la de respuesta mas grande -hasta 5.000 tickets enteros-.
+           Guardarla llenaria la memoria del App Pool para ahorrar lo que no
+           duele. Ademas el troceo del navegador (obtenerDetalle) reintenta
+           con topes distintos cuando la respuesta no cabe en el
+           serializador, asi que una misma vista puede generar varias claves
+           que no se volverian a usar. */
         int topSeguro = (top <= 0) ? 500 : (top > 5000 ? 5000 : top);
-        return Unico(sql, f, delegate(SqlCommand cmd)
+        return Unico(sql, f, false, delegate(SqlCommand cmd)
         {
             cmd.Parameters.Add("@TopSeguro", SqlDbType.Int).Value = topSeguro;
         });
