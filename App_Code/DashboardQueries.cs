@@ -651,56 +651,74 @@ ORDER BY TicketsTotales DESC, b.Tecnico;";
        de hoy, que contesta el Backlog-. */
     public static List<List<Dictionary<string, object>>> Distribucion(Filtros f)
     {
+        /* La tabla temporal guarda el AGREGADO por (Grupo, Prioridad), no una
+           fila por ticket. Los tres result sets son sumas de sumas: agrupar
+           antes da los mismos numeros -SUM y COUNT se pueden encadenar- pero
+           escribe en tempdb tantas filas como combinaciones de grupo y
+           prioridad existan, en vez de tantas como tickets tenga el rango.
+
+           Sigue siendo una tabla temporal y no un CTE porque un CTE se
+           inlinea en cada referencia: las tres lecturas de abajo repetirian
+           la pasada por la vista y su CROSS APPLY, que es justo lo caro.
+
+           Los nombres de las columnas agregadas (Filas, ConSla, FueraSla,
+           EnSla, Reaperturas) no coinciden a proposito con ningun alias de
+           salida: asi ORDER BY Vencidos o HAVING SUM(Filas) no pueden
+           resolverse contra la columna equivocada. */
         const string sql = @"
 SET NOCOUNT ON;
 
 SELECT
-    b.Grupo,
-    b.Prioridad,
-    s.SlaEvaluable,
-    s.SlaVencido,
-    s.DentroSla,
-    s.EsReabierto
-INTO #DistribucionBase
+    Grupo      = ISNULL(NULLIF(LTRIM(RTRIM(b.Grupo)), N''), N'Sin grupo'),
+    Prioridad  = ISNULL(NULLIF(LTRIM(RTRIM(b.Prioridad)), N''), N'Sin prioridad'),
+    Filas      = COUNT_BIG(*),
+    ConSla     = SUM(CASE WHEN s.SlaEvaluable = 1 THEN 1 ELSE 0 END),
+    FueraSla   = SUM(CASE WHEN s.SlaVencido = 1 THEN 1 ELSE 0 END),
+    EnSla      = SUM(CASE WHEN s.SlaEvaluable = 1 AND s.DentroSla = 1 THEN 1 ELSE 0 END),
+    Reaperturas = SUM(CASE WHEN s.EsReabierto = 1 THEN 1 ELSE 0 END)
+INTO #DistribucionAgg
 FROM dbo.vw_Dash_ProductividadBase b" + SlaPorSolucion + @"
-WHERE {0};
+WHERE {0}
+GROUP BY
+    ISNULL(NULLIF(LTRIM(RTRIM(b.Grupo)), N''), N'Sin grupo'),
+    ISNULL(NULLIF(LTRIM(RTRIM(b.Prioridad)), N''), N'Sin prioridad');
 
 SELECT
-    Valor = ISNULL(NULLIF(LTRIM(RTRIM(Prioridad)), N''), N'Sin prioridad'),
-    Tickets = COUNT_BIG(*)
-FROM #DistribucionBase
-GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(Prioridad)), N''), N'Sin prioridad')
+    Valor = Prioridad,
+    Tickets = SUM(Filas)
+FROM #DistribucionAgg
+GROUP BY Prioridad
 ORDER BY Tickets DESC;
 
 SELECT TOP (12)
-    Valor      = ISNULL(NULLIF(LTRIM(RTRIM(Grupo)), N''), N'Sin grupo'),
-    Vencidos   = SUM(CASE WHEN SlaVencido = 1 THEN 1 ELSE 0 END),
-    Evaluables = SUM(CASE WHEN SlaEvaluable = 1 THEN 1 ELSE 0 END),
+    Valor      = Grupo,
+    Vencidos   = SUM(FueraSla),
+    Evaluables = SUM(ConSla),
     -- El porcentaje junto al volumen: un grupo chico con 8 de 10 vencidos
     -- esta peor que uno grande con 50 de 5,000.
     CumplimientoPct = CAST(
-        100.0 * SUM(CASE WHEN SlaEvaluable = 1 AND DentroSla = 1 THEN 1 ELSE 0 END)
-        / NULLIF(SUM(CASE WHEN SlaEvaluable = 1 THEN 1 ELSE 0 END), 0)
+        100.0 * SUM(EnSla)
+        / NULLIF(SUM(ConSla), 0)
         AS DECIMAL(6,2))
-FROM #DistribucionBase
-GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(Grupo)), N''), N'Sin grupo')
-HAVING SUM(CASE WHEN SlaVencido = 1 THEN 1 ELSE 0 END) > 0
+FROM #DistribucionAgg
+GROUP BY Grupo
+HAVING SUM(FueraSla) > 0
 ORDER BY Vencidos DESC;
 
 SELECT TOP (12)
-    Valor      = ISNULL(NULLIF(LTRIM(RTRIM(Grupo)), N''), N'Sin grupo'),
-    Resueltos  = COUNT_BIG(*),
-    Reabiertos = SUM(CASE WHEN EsReabierto = 1 THEN 1 ELSE 0 END),
+    Valor      = Grupo,
+    Resueltos  = SUM(Filas),
+    Reabiertos = SUM(Reaperturas),
     ReabiertosPct = CAST(
-        100.0 * SUM(CASE WHEN EsReabierto = 1 THEN 1 ELSE 0 END)
-        / NULLIF(COUNT_BIG(*), 0) AS DECIMAL(6,2))
-FROM #DistribucionBase
-GROUP BY ISNULL(NULLIF(LTRIM(RTRIM(Grupo)), N''), N'Sin grupo')
-HAVING COUNT_BIG(*) >= 50
-   AND SUM(CASE WHEN EsReabierto = 1 THEN 1 ELSE 0 END) > 0
+        100.0 * SUM(Reaperturas)
+        / NULLIF(SUM(Filas), 0) AS DECIMAL(6,2))
+FROM #DistribucionAgg
+GROUP BY Grupo
+HAVING SUM(Filas) >= 50
+   AND SUM(Reaperturas) > 0
 ORDER BY ReabiertosPct DESC;
 
-DROP TABLE #DistribucionBase;";
+DROP TABLE #DistribucionAgg;";
 
         // SELECT ... INTO no abre result set en el reader, asi que los tres
         // que salen son prioridad, vencidos y reabiertos.
