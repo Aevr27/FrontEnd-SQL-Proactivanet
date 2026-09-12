@@ -2932,6 +2932,37 @@ const TableroSla = (function () {
      antes de que nadie llegara a pulsar los SLOTs lejanos. */
   const PREFETCH_HASTA = 6;
 
+  /* Pausa entre SLOTs. Antes era setTimeout(0): devolvia el turno, pero
+     encadenaba el siguiente bloque de 6 peticiones en el tick siguiente, asi
+     que el calentado iba tan rapido como diera el servidor y competia con lo
+     que el usuario estuviera haciendo.
+
+     Ahora se espera de verdad. Primero un minimo fijo, que es el respiro que
+     necesita el SERVIDOR -es la misma instancia que atiende los .ashx del
+     usuario, y ahi requestIdleCallback no ayuda: mide si el NAVEGADOR esta
+     ocioso, no si lo esta SQL Server-. Despues, ya cumplido ese minimo, se
+     espera a un hueco de inactividad del navegador, para no arrancar el
+     bloque justo encima de un repintado.
+
+     El tope del idle evita quedarse colgado: en una pestaña ocupada
+     requestIdleCallback podria no llegar nunca, y esto tiene que terminar. */
+  const PAUSA_SLOT_MS = 750;      // respiro minimo para el servidor
+  const PAUSA_IDLE_MS = 2000;     // tope de espera a que el navegador respire
+
+  function respiroEntreSlots() {
+    return new Promise(listo => {
+      setTimeout(() => {
+        // requestIdleCallback no esta en todos los navegadores (Safari tardo
+        // en traerlo). Sin el, el minimo fijo de arriba ya es la pausa.
+        if (typeof requestIdleCallback === 'function') {
+          requestIdleCallback(() => listo(), { timeout: PAUSA_IDLE_MS });
+        } else {
+          listo();
+        }
+      }, PAUSA_SLOT_MS);
+    });
+  }
+
   // El modulo de SLA se ve en dos pestañas (SLA y Call Center) y las dos
   // comparten esta misma carga. Fuera de ellas no se calienta nada.
   function slaALaVista() {
@@ -3005,11 +3036,17 @@ const TableroSla = (function () {
       if (miCarga !== cargaVigente || !slaALaVista()) return;
       const ok = await calentarSlot(k);
       if (!ok) return;
-      /* Respiro entre SLOTs: devuelve el turno al navegador antes del
-         siguiente bloque, para que el calentado no compita con la interfaz.
-         Es un turno suelto y la cadena termina en PREFETCH_HASTA: no queda
-         ningun temporizador vivo. */
-      await new Promise(listo => setTimeout(listo, 0));
+      /* Respiro ENTRE SLOTs, nunca entre las peticiones de uno: dentro del
+         SLOT siguen saliendo todas a la vez, como en cargarTodo(). La pausa
+         va aqui, despues de un bloque completo.
+
+         No se pausa despues del ultimo: la cadena ya ha terminado y dejar un
+         temporizador corriendo para no hacer nada detras no tiene sentido.
+
+         Tras la pausa vuelve el principio del bucle, que es donde se
+         comprueba cargaVigente: si el usuario movio algo mientras se
+         esperaba, la cadena se abandona ahi sin pedir el SLOT siguiente. */
+      if (k < PREFETCH_HASTA) await respiroEntreSlots();
     }
   }
 
