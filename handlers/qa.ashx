@@ -506,7 +506,10 @@ public class Qa : IHttpHandler
        SLA. No es el sello de otra base: es el de la suya.
 
        En modo snapshot los datos estan congelados y su fecha autoritativa es
-       la del export, no la del ETL. */
+       la del export, no la del ETL.
+
+       La zona se declara abajo, por origen: el ETL esta en UTC y el export no
+       se sabe. */
     private static Dictionary<string, object> DatosInfo(Peticion peticion)
     {
         var snapshot = QaDb.ModoSnapshot;
@@ -518,9 +521,21 @@ public class Qa : IHttpHandler
         object desde = snapshot ? (QaSnapshot.FechaInicio ?? peticion.Fi) : peticion.Fi;
         object hasta = snapshot ? (QaSnapshot.FechaFin ?? peticion.Ff) : peticion.Ff;
 
+        /* De que zona viene el sello. Son dos origenes distintos y no se puede
+           tratarlos igual:
+
+             en vivo   dbo.EtlLog.Fin, guardado en UTC por un host que corre en
+                       UTC -> lo convierte el contrato compartido;
+             snapshot  exportadoEn, un texto que escribio el exportador con la
+                       hora que tuviera su maquina. Este servidor no sabe en
+                       que zona esta, y adivinarlo seria correr seis horas un
+                       dato ajeno -> se muestra tal cual. */
+        var zona = snapshot ? ZonaSello.YaLocal : ZonaSello.Utc;
+
         var info = DashboardDataInfo.Periodo(
             "QA de categorizacion",
             sello,
+            zona,
             desde,
             hasta,
             snapshot

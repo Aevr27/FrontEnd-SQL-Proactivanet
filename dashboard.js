@@ -240,7 +240,9 @@ async function obtenerJSON(ruta) {
    de SLOT 3 a SLOT 2 vuelve a pedir un periodo que se acaba de traer entero.
    Los agregados son caros (kpis, distribucion y productividad rondan varios
    segundos en rangos largos) y no cambian de un minuto a otro: el ETL corre
-   muy de tarde en tarde y su sello viaja en kpis.UltimaActualizacionEtl.
+   muy de tarde en tarde y su sello viaja en kpis.meta (la columna cruda
+   kpis.UltimaActualizacionEtl sigue ahi, pero en UTC: la que ya viene en hora
+   de Mexico, y la unica que se pinta, es meta.ultimaActualizacion).
 
    Solo la envoltura obtenerJSONSla() pasa por aqui, y solo la usa
    cargarTodo() del tablero de SLA. obtenerJSON() queda intacta, asi que el

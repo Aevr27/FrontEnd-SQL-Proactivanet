@@ -38,6 +38,21 @@ using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Globalization;
 
+/* En que zona horaria esta el sello que entrega un origen. Lo declara el
+   llamador porque es lo unico que no se puede deducir mirando el valor, y
+   equivocarse corre el rotulo seis horas sin que nada falle. */
+public enum ZonaSello
+{
+    /* Guardado en UTC. Es el caso de todo lo que escribe SQL Server en esta
+       instalacion: el host corre en UTC, asi que GETDATE()/SYSDATETIME() y los
+       DEFAULT que los usan dan UTC sin offset. */
+    Utc,
+
+    /* Ya viene en la hora que se quiere mostrar, o en una zona que este
+       servidor no conoce y no debe adivinar. No se convierte. */
+    YaLocal,
+}
+
 public sealed class DashboardDataInfo
 {
     // Ventana rodante de 30 dias (o de 30N, que es como el stepper de SLOT
@@ -56,9 +71,16 @@ public sealed class DashboardDataInfo
     // del periodo no lo vuelva a escribir a mano.
     public const int DiasSlot = 30;
 
-    /* Fin del ultimo ETL de tickets. dbo.EtlLog guarda la hora en UTC; se
-       convierte a hora local de Mexico aqui para que el navegador solo tenga
-       que formatearla (AT TIME ZONE: SQL Server 2016+).
+    /* Fin del ultimo ETL de tickets, TAL COMO ESTA GUARDADO: en UTC.
+       dbo.EtlLog.Fin es UTC, y el host de SQL Server corre en UTC.
+
+       Antes esta consulta hacia el salto de zona en el servidor de base
+       (AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)').
+       Se quito para que exista UN SOLO sitio donde un sello cambia de zona:
+       AZona(), aqui abajo. Con dos mecanismos -el de SQL Server, sujeto a su
+       propia base de zonas horarias, y el de .NET- SLA podia acabar mostrando
+       un offset distinto del de Backlog o Experiencia con el mismo dato.
+       De paso deja de exigir SQL Server 2016+.
 
        DEFINICION UNICA: la consulta de KPIs la incrusta como subquery
        (DashboardQueries.Kpis) y QA la ejecuta suelta con LeerUltimoEtlTickets.
@@ -66,14 +88,37 @@ public sealed class DashboardDataInfo
        una sola linea a proposito: se incrusta dentro de otra consulta y un
        comentario "--" se comeria lo que venga detras. */
     public const string SqlUltimoEtlTickets =
-        "SELECT CAST(" +
-        " MAX(l.Fin) AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'" +
-        " AS DATETIME2(0))" +
+        "SELECT CAST(MAX(l.Fin) AS DATETIME2(0))" +
         " FROM dbo.EtlLog l" +
         " WHERE l.Proceso = N'Proactivanet tickets'";
 
+    /* ZONA DE PRESENTACION: Mexico, UTC-06 fijo.
+
+       Se construye a mano en vez de pedirle al sistema "Central Standard Time
+       (Mexico)" por dos motivos: el tablero quiere un offset FIJO -Mexico ya
+       no aplica horario de verano y el negocio razona en UTC-06 todo el año-,
+       y una TimeZoneInfo del sistema arrastraria las reglas de DST que tenga
+       instalada esa maquina, que es exactamente la variacion que no se quiere.
+       Sigue siendo una conversion de TimeZoneInfo, no un AddHours(-6) suelto:
+       hay un unico objeto de zona y una unica llamada que lo usa. */
+    private static readonly TimeZoneInfo ZonaPresentacion =
+        TimeZoneInfo.CreateCustomTimeZone(
+            "Dashboard Mexico UTC-06", TimeSpan.FromHours(-6),
+            "Mexico (UTC-06)", "Mexico (UTC-06)");
+
     public string Fuente;
+    /* El sello TAL COMO LO DIO SU ORIGEN. No se toca: la conversion de zona es
+       de presentacion y vive en SelloParaMostrar(). Quien lea esta propiedad
+       esta leyendo el valor autoritativo, no el rotulo. */
     public DateTime? UltimaActualizacion;
+    /* En que zona esta ese valor. Lo declara quien construye el metadato,
+       porque solo el sabe de donde salio; no se adivina. */
+    public ZonaSello ZonaUltimaActualizacion = ZonaSello.YaLocal;
+    /* Si el valor traia hora. Un DATE de negocio (la FechaCorte del Backlog,
+       el corte guardado del mock de Experiencia) no es un timestamp: se
+       muestra como fecha y NO se le aplica ninguna zona, porque correrlo seis
+       horas lo mandaria al dia anterior. */
+    public bool SelloConHora;
     public DateTime? PeriodoInicio;
     public DateTime? PeriodoFin;
     public string TipoPeriodo = TipoNinguno;
@@ -86,11 +131,11 @@ public sealed class DashboardDataInfo
 
     // Sello sin periodo (Backlog: una foto, no una ventana).
     public static DashboardDataInfo Corte(
-        string fuente, object ultimaActualizacion, string origen)
+        string fuente, object ultimaActualizacion, ZonaSello zona, string origen)
     {
         var info = new DashboardDataInfo();
         info.Fuente = fuente;
-        info.UltimaActualizacion = AFecha(ultimaActualizacion);
+        info.PonerSello(ultimaActualizacion, zona);
         info.TipoPeriodo = TipoCorte;
         info.Origen = origen;
         return info;
@@ -100,17 +145,50 @@ public sealed class DashboardDataInfo
     // asi que ninguna pestana puede declararse "rodante de 30 dias" con un
     // rango que no lo es.
     public static DashboardDataInfo Periodo(
-        string fuente, object ultimaActualizacion,
+        string fuente, object ultimaActualizacion, ZonaSello zona,
         object periodoInicio, object periodoFin, string origen)
     {
         var info = new DashboardDataInfo();
         info.Fuente = fuente;
-        info.UltimaActualizacion = AFecha(ultimaActualizacion);
-        info.PeriodoInicio = AFecha(periodoInicio);
-        info.PeriodoFin = AFecha(periodoFin);
+        info.PonerSello(ultimaActualizacion, zona);
+        /* El periodo NO pasa por la zona. Son fechas de negocio -el limite de
+           la ventana que filtro la consulta-, no instantes: el dia 15/08 es el
+           15/08 mire quien lo mire, y correrlo seis horas lo convertiria en el
+           14. Solo el sello es un instante. */
+        bool ignorada;
+        info.PeriodoInicio = AFecha(periodoInicio, out ignorada);
+        info.PeriodoFin = AFecha(periodoFin, out ignorada);
         info.TipoPeriodo = Clasificar(info.PeriodoInicio, info.PeriodoFin);
         info.Origen = origen;
         return info;
+    }
+
+    // Guarda el sello crudo y lo que hace falta para presentarlo: su zona y si
+    // traia hora. La conversion no ocurre aqui, sino al pedir el valor a
+    // mostrar, para que la propiedad publica siga siendo la del origen.
+    private void PonerSello(object valor, ZonaSello zona)
+    {
+        bool conHora;
+        UltimaActualizacion = AFecha(valor, out conHora);
+        SelloConHora = conHora;
+        ZonaUltimaActualizacion = zona;
+    }
+
+    /* El sello ya en zona de presentacion. UNICO punto del tablero donde un
+       sello cambia de zona: ningun consumidor -ni los handlers, ni el
+       navegador- vuelve a tocar la hora.
+
+       Solo se convierte lo que es un instante en UTC. Un valor sin hora es una
+       fecha de negocio y se devuelve intacta (ver SelloConHora). */
+    public DateTime? SelloParaMostrar()
+    {
+        if (!UltimaActualizacion.HasValue) return null;
+        if (ZonaUltimaActualizacion != ZonaSello.Utc || !SelloConHora)
+            return UltimaActualizacion;
+
+        return TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.SpecifyKind(UltimaActualizacion.Value, DateTimeKind.Utc),
+            ZonaPresentacion);
     }
 
     /* Rodante de 30 dias = termina hoy y mide un multiplo exacto de 30 dias.
@@ -146,7 +224,10 @@ public sealed class DashboardDataInfo
     {
         var salida = new Dictionary<string, object>();
         salida["fuente"] = Fuente;
-        salida["ultimaActualizacion"] = Iso(UltimaActualizacion, true);
+        // Ya en zona de presentacion: el navegador solo reordena los digitos.
+        // Sin hora se manda como fecha suelta y el formateador compartido
+        // pinta "DD/MM/YYYY" sin inventar un "· 00:00".
+        salida["ultimaActualizacion"] = Iso(SelloParaMostrar(), SelloConHora);
         salida["periodoInicio"] = Iso(PeriodoInicio, false);
         salida["periodoFin"] = Iso(PeriodoFin, false);
         salida["tipoPeriodo"] = TipoPeriodo;
@@ -163,14 +244,28 @@ public sealed class DashboardDataInfo
             CultureInfo.InvariantCulture);
     }
 
-    // Acepta lo que ya traen las respuestas existentes: un DateTime de SQL, el
-    // texto ISO que DashboardDb produce al serializar, o una fecha suelta
-    // "yyyy-MM-dd" del query string. Cualquier otra cosa se descarta en vez de
-    // reventar: sin sello el tablero ya sabe pintar el rotulo vacio.
-    private static DateTime? AFecha(object valor)
+    /* Acepta lo que ya traen las respuestas existentes: un DateTime de SQL, el
+       texto ISO que DashboardDb produce al serializar, o una fecha suelta
+       "yyyy-MM-dd" del query string. Cualquier otra cosa se descarta en vez de
+       reventar: sin sello el tablero ya sabe pintar el rotulo vacio.
+
+       'conHora' distingue un instante de una fecha de negocio, que es lo que
+       decide si se le aplica la zona. Un texto "yyyy-MM-dd" nunca la lleva; un
+       DateTime de SQL la lleva salvo que venga exactamente a medianoche, que
+       es como llega una columna DATE. Un timestamp que caiga clavado en
+       00:00:00 se mostraria entonces como fecha: es el unico caso ambiguo y se
+       prefiere no correr una fecha de negocio seis horas por adivinar. */
+    private static DateTime? AFecha(object valor, out bool conHora)
     {
+        conHora = false;
         if (valor == null) return null;
-        if (valor is DateTime) return (DateTime)valor;
+
+        if (valor is DateTime)
+        {
+            var fecha = (DateTime)valor;
+            conHora = fecha.TimeOfDay != TimeSpan.Zero;
+            return fecha;
+        }
 
         var texto = valor.ToString();
         if (string.IsNullOrWhiteSpace(texto)) return null;
@@ -178,13 +273,19 @@ public sealed class DashboardDataInfo
         DateTime salida;
         if (DateTime.TryParseExact(texto, "yyyy-MM-ddTHH:mm:ss",
                 CultureInfo.InvariantCulture, DateTimeStyles.None, out salida))
+        {
+            conHora = true;
             return salida;
+        }
         if (DateTime.TryParseExact(texto, "yyyy-MM-dd",
                 CultureInfo.InvariantCulture, DateTimeStyles.None, out salida))
             return salida;
         if (DateTime.TryParse(texto, CultureInfo.InvariantCulture,
                 DateTimeStyles.None, out salida))
+        {
+            conHora = salida.TimeOfDay != TimeSpan.Zero;
             return salida;
+        }
 
         return null;
     }

@@ -239,8 +239,13 @@ ORDER BY s.FechaCorte DESC;";
             error = ex.Message;
         }
 
+        /* FechaHoraSnapshot es datetime2 con DEFAULT (sysdatetime()) y el host
+           de SQL Server corre en UTC, asi que lo guardado es UTC sin offset.
+           Se declara como tal y el contrato compartido lo pasa a UTC-06 para
+           mostrarlo; el valor de la tabla no se toca. FechaCorte, que es un
+           DATE de negocio, no entra aqui y por tanto no cambia de zona. */
         var info = DashboardDataInfo.Corte(
-            "Backlog", sello,
+            "Backlog", sello, ZonaSello.Utc,
             "dbo.CorreoBacklogSnapshot.FechaHoraSnapshot" +
             (corte == null ? "" : " (corte " + FechaTexto(corte) + ")"));
 

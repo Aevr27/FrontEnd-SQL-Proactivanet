@@ -27,17 +27,23 @@ public class Kpis : IHttpHandler
 
                  UltimaActualizacionEtl  fin del ultimo ETL de tickets
                                          (dbo.EtlLog), no la hora del servidor
-                                         ni la del navegador;
+                                         ni la del navegador. Llega en UTC -es
+                                         como lo guarda la tabla, y el host de
+                                         SQL Server corre en UTC-, de ahi
+                                         ZonaSello.Utc: el salto a UTC-06 lo
+                                         hace el contrato compartido;
                  FechaInicio/FechaFin    el rango que la consulta USO de
                                          verdad, devuelto por ella misma, asi
                                          que el rotulo no puede discrepar de
-                                         los numeros que acompana.
+                                         los numeros que acompana. Son fechas
+                                         de negocio y no cambian de zona.
 
                Va como llave "meta" del mismo objeto: las llaves de KPIs que
                ya lee el tablero no se tocan. */
             kpis["meta"] = DashboardDataInfo.Periodo(
                 "SLA y productividad",
                 Valor(kpis, "UltimaActualizacionEtl"),
+                ZonaSello.Utc,
                 Valor(kpis, "FechaInicio"),
                 Valor(kpis, "FechaFin"),
                 "dbo.EtlLog (Proactivanet tickets)").AJson();

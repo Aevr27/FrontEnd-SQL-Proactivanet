@@ -175,31 +175,40 @@ public static class ExperienciaQueries
             foreach (var kv in ArmarCatalogos(dir))
                 salida[kv.Key] = kv.Value;
 
-            salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
-            salida["fecha_actualizacion"] = corte.HasValue
-                ? corte.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)
-                : hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
-            salida["liga_detalle"] = ExperienciaConfig.LigaDetalle();
-
             /* Metadato de frescura y periodo de ESTA pestana, en el contrato
                compartido (App_Code/DashboardDataInfo.cs). Los dos valores
                salen de donde ya salian los datos, no de un calculo nuevo:
 
                  sello    MAX(FechaUltimaCargaDW) de dbo.Tickets, el mismo
                           'corte' que ya alimentaba fecha_actualizacion -pero
-                          con su hora, que el formato dd/MM/yyyy tiraba-;
+                          con su hora, que el formato dd/MM/yyyy tiraba-. Lo
+                          escribe SQL Server, cuyo host corre en UTC, asi que
+                          va como ZonaSello.Utc y es el contrato compartido
+                          quien lo pasa a UTC-06;
                  periodo  el SLOT 0, que es la ventana de los ultimos
                           DIAS_SLOT dias contada desde el MISMO 'hoy' con el
-                          que ArmarCalendario rotula el eje.
-
-               fecha_gen y fecha_actualizacion se conservan tal cual: el mock
-               y la pagina suelta siguen leyendolas. */
-            salida["meta"] = DashboardDataInfo.Periodo(
+                          que ArmarCalendario rotula el eje. Son fechas de
+                          negocio: no cambian de zona. */
+            var info = DashboardDataInfo.Periodo(
                 "Experiencia al Usuario",
                 corte,
+                ZonaSello.Utc,
                 hoy.AddDays(-DIAS_SLOT),
                 hoy,
-                "MAX(FechaUltimaCargaDW) de dbo.Tickets").AJson();
+                "MAX(FechaUltimaCargaDW) de dbo.Tickets");
+
+            salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            /* El dia del mismo sello, ya en zona de presentacion: si se
+               formateara el 'corte' crudo, un ETL de madrugada UTC pintaria
+               aqui el dia siguiente al que dice meta. Es el unico consumidor
+               que quedaba leyendo el valor sin convertir. El mock y la pagina
+               suelta siguen encontrando la llave con el mismo formato. */
+            var selloLocal = info.SelloParaMostrar();
+            salida["fecha_actualizacion"] = (selloLocal ?? hoy)
+                .ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            salida["liga_detalle"] = ExperienciaConfig.LigaDetalle();
+
+            salida["meta"] = info.AJson();
 
             return salida;
         }

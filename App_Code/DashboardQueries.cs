@@ -537,6 +537,8 @@ SELECT
     -- la subconsulta vive en DashboardDataInfo.SqlUltimoEtlTickets: es la MISMA
     -- definicion que lee QA por su cuenta, y tenerla en un solo sitio evita que
     -- dos pestanas acaben mostrando sellos distintos del mismo ETL.
+    -- Sale en UTC, tal como lo guarda dbo.EtlLog; el salto a UTC-06 lo hace
+    -- DashboardDataInfo al presentarlo, no esta consulta.
     UltimaActualizacionEtl = (" + DashboardDataInfo.SqlUltimoEtlTickets + @")
 FROM conPct;";
 
