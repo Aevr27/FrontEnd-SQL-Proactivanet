@@ -3931,11 +3931,31 @@ const TableroBacklog = (function () {
     return limpio.length > LARGO_TOOLTIP ? limpio.slice(0, LARGO_TOOLTIP) + '...' : limpio;
   }
 
-  function renderAntiguos(topPorLider = 10) {
+  /* Cuantas filas lista la seccion. La eleccion es CRONOLOGICA, no de edad:
+     de los tickets del corte que pasan los filtros del tablero se listan los
+     TOPE_ANTIGUOS mas viejos, haya los que haya. Antes el endpoint pedia solo
+     los de mas de 120 dias y la seccion desaparecia cuando el corte no tenia
+     ninguno tan viejo; ese umbral ya no participa (ver handlers/
+     backlog_antiguos.ashx). Si hay menos de TOPE_ANTIGUOS, se listan todos. */
+  const TOPE_ANTIGUOS = 10;
+
+  /* De mas viejo a mas nuevo por fecha de registro. Se ordena por
+     FechaRegistro y no por DiasBacklog porque la fecha es el dato de origen
+     -DiasBacklog es un derivado del corte- y porque puede venir en null: esos
+     se van al final, nunca por delante de un ticket con fecha. El formato que
+     manda el servidor es 'YYYY-MM-DDTHH:mm:ss', asi que comparar las cadenas
+     ya ordena cronologicamente. */
+  function masViejoPrimero(a, b) {
+    const fa = a.FechaRegistro || '', fb = b.FechaRegistro || '';
+    if (!fa) return fb ? 1 : 0;
+    if (!fb) return -1;
+    return fa < fb ? -1 : (fa > fb ? 1 : 0);
+  }
+
+  function renderAntiguos(tope = TOPE_ANTIGUOS) {
     const cont = document.getElementById('tabla-antiguos-bl');
     const cap = document.getElementById('cap-antiguos-bl');
     const d = datos.antiguos || {};
-    const meses = Math.round((d.diasMinimo ?? 0) / 30);
 
     // Estos tickets si traen Lider y Prioridad, asi que respetan el filtro
     // de lider y el de prioridad; el de grupo tambien viene en cada ticket.
@@ -3946,25 +3966,29 @@ const TableroBacklog = (function () {
 
     if (!tickets.length) {
       cap.innerHTML = descripcionFiltro(0);
-      cont.innerHTML = `<div class="vacio">No hay tickets con mas de ${d.diasMinimo ?? '—'} dias en backlog para este filtro.</div>`;
+      cont.innerHTML = `<div class="vacio">No hay tickets en backlog para este corte y filtros.</div>`;
       return;
     }
 
+    // Los mas antiguos del rango, primero. El corte es el TOPE, no la edad.
+    const listados = tickets.slice().sort(masViejoPrimero).slice(0, tope);
+
+    /* Se agrupan por lider SOLO para presentarlos: la seleccion ya esta hecha
+       arriba y es global, asi que los grupos salen en el orden en que aparece
+       su ticket mas viejo y ninguno adelanta a otro por tener mas filas. */
     const porLider = new Map();
-    for (const t of tickets) {
+    for (const t of listados) {
       if (!porLider.has(t.Lider)) porLider.set(t.Lider, []);
       porLider.get(t.Lider).push(t);
     }
-    // Primero el lider que mas arrastra; dentro, del mas antiguo al menos.
-    const grupos = [...porLider.entries()].sort((a, b) => b[1].length - a[1].length);
+    const grupos = [...porLider.entries()];
 
-    cap.innerHTML = `${FMT(tickets.length)} tickets con mas de ${d.diasMinimo} dias `
-      + `<span class="suave">(${meses} meses) · se listan los ${topPorLider} mas antiguos de cada lider</span>`;
+    cap.innerHTML = `Los ${FMT(listados.length)} tickets mas antiguos `
+      + `<span class="suave">de los ${FMT(tickets.length)} en backlog de este corte · `
+      + `del mas viejo al mas nuevo por fecha de registro</span>`;
 
     cont.innerHTML = grupos.map(([lider, lista]) => {
-      const orden = lista.slice().sort((a, b) => b.DiasBacklog - a.DiasBacklog).slice(0, topPorLider);
-      const sufijo = lista.length > topPorLider ? `mostrando ${topPorLider} de ${lista.length}` : `${lista.length}`;
-      const filas = orden.map(t => `<tr>
+      const filas = lista.map(t => `<tr>
           <td class="con-hint" title="${escapeAttr(tooltipDescripcion(t.Descripcion))}">${celdaCodigo(t)}</td>
           <td class="num"><b>${FMT(t.DiasBacklog)}</b></td>
           <td class="fecha-cell">${String(t.FechaRegistro ?? '').slice(0, 10)}</td>
@@ -3976,7 +4000,7 @@ const TableroBacklog = (function () {
         </tr>`).join('');
       return `<div class="grupo-lider" style="color:${colorLider(lider)}">
           <span class="swatch" style="background:${colorLider(lider)}"></span>${escapeHtml(lider)}
-          <span class="conteo">${sufijo}</span></div>
+          <span class="conteo">${lista.length}</span></div>
         <table><thead><tr><th>Ticket</th><th class="num">Dias</th><th>Registro</th><th>Prioridad</th>
           <th>Grupo</th><th>Tecnico</th><th>Subestado</th><th>Titulo</th></tr></thead>
         <tbody>${filas}</tbody></table>`;

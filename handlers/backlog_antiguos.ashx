@@ -7,15 +7,29 @@
 // (backlog_antiguos.ashx?c1=...&grupos=...&lideres=...&fecha_corte=...) y
 // espera:
 //
-//     { "diasMinimo": 120, "tickets": [ { "Lider": "...", "Grupo": "...",
-//                                         "Prioridad": "...", ... }, ... ] }
+//     { "tickets": [ { "Lider": "...", "Grupo": "...",
+//                      "Prioridad": "...", ... }, ... ] }
 //
-// diasMinimo es solo para el texto de la tabla ("tickets con mas de N dias",
-// y los meses que dashboard.js calcula dividiendo entre 30); las filas salen
-// de dbo.usp_CorreoBacklog_Datos. El tablero no manda ese umbral, asi que se
-// usa el que documenta DASHBOARD.md para esta tabla, mas de 4 meses = 120
-// dias, y se devuelve el mismo valor que se le paso al procedimiento para
-// que el texto y los datos no se contradigan.
+// AQUI NO SE FILTRA POR ANTIGUEDAD. Antes se le pasaba @DiasMinimo = 120 al
+// procedimiento -"mas de 4 meses"-, y la tabla se quedaba VACIA cuando el
+// corte no tenia ningun ticket tan viejo, que no es lo que la seccion quiere
+// decir: quiere decir "los mas antiguos que haya". La eleccion es
+// cronologica, no de edad minima, y la hace dashboard.js (renderAntiguos)
+// sobre los tickets del corte ya filtrados por el tablero: ordena por
+// FechaRegistro de mas viejo a mas nuevo y se queda con los primeros
+// TOPE_ANTIGUOS. Por eso aqui se piden TODOS los del corte (@DiasMinimo =
+// NULL) y no se devuelve ningun umbral.
+//
+// El umbral de 120 dias sigue vivo donde si significa algo: el correo diario
+// de direccion (reenviacorreo/, antiguos_dias_minimo en su configuracion),
+// que es otro consumidor del mismo procedimiento y no se toca.
+//
+// Como ya no hay filtro de edad, el corte entero viaja al navegador, y estas
+// descripciones llegan a tener decenas de miles de caracteres. Por eso se usa
+// @MaxDescripcion, que el procedimiento ya trae justamente para el tablero:
+// la tabla solo pinta la descripcion en un title=, recortado ademas a
+// LARGO_TOOLTIP (300) en dashboard.js, asi que mover mas que eso seria tirar
+// ancho de banda.
 //
 // Cada ticket lleva ademas IdProactivanet: el Id interno (GUID) con el que
 // dashboard.js (celdaCodigo) enlaza el codigo al formulario de la incidencia.
@@ -32,25 +46,27 @@ using System.Web.Script.Serialization;
 
 public class BacklogAntiguos : IHttpHandler
 {
-    private const int DiasMinimoPorDefecto = 120;
+    // Lo mismo que LARGO_TOOLTIP en dashboard.js: la descripcion solo se usa
+    // para el title= de la celda del codigo, y ahi se recorta a 300. Traer
+    // mas no cambia nada de lo que se ve.
+    private const int MaxDescripcion = 300;
 
     public void ProcessRequest(HttpContext context)
     {
         DashboardHandler.Responder(context, delegate
         {
-            var diasMinimo = DashboardParams.Entero(
-                context.Request, "dias_minimo", DiasMinimoPorDefecto);
-
             var parametros = BacklogUtil.Filtros(context.Request);
             parametros["FechaCorte"] = BacklogUtil.FechaCorte(context.Request);
-            parametros["DiasMinimo"] = diasMinimo;
+            // NULL = todos los del corte. La seleccion de "los mas antiguos"
+            // es cronologica y la hace dashboard.js; ver la nota de arriba.
+            parametros["DiasMinimo"] = null;
+            parametros["MaxDescripcion"] = MaxDescripcion;
 
             var tickets = DashboardDb.Ejecutar("dbo.usp_CorreoBacklog_Datos", parametros);
             AgregarIds(tickets);
 
             return new Dictionary<string, object>
             {
-                { "diasMinimo", diasMinimo },
                 { "tickets", tickets },
             };
         });

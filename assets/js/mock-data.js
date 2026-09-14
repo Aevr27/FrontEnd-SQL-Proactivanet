@@ -248,7 +248,9 @@ function crearMockBacklog() {
     catalogos:{c1:['Aplicaciones','Infraestructura','Operaciones','Retail'],grupos,lideres,fechas},
     resumen,
     historico:{total:totalSeries,porLider},
-    antiguos:{diasMinimo:30,tickets:antiguos}
+    // Sin umbral de antiguedad: el endpoint real manda todos los del corte
+    // y dashboard.js (renderAntiguos) elige cronologicamente los mas viejos.
+    antiguos:{tickets:antiguos}
   };
 }
 
@@ -351,10 +353,7 @@ function mockBacklog(ruta) {
     ? [...porFecha.entries()].sort().map(([Periodo, TicketsBacklog]) => ({ Periodo, TicketsBacklog }))
     : (MOCK_BACKLOG.historico.total || []);
 
-  const antiguos = {
-    diasMinimo: MOCK_BACKLOG.antiguos.diasMinimo,
-    tickets: f(MOCK_BACKLOG.antiguos.tickets),
-  };
+  const antiguos = { tickets: f(MOCK_BACKLOG.antiguos.tickets) };
 
   const salida = { catalogos: MOCK_BACKLOG.catalogos, resumen, historico: { total, porLider }, antiguos };
   MOCK_BACKLOG_CACHE.set(qs, salida);

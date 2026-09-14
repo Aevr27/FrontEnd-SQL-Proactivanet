@@ -87,9 +87,9 @@ Incluye:
 - backlog por prioridad;
 - antigüedad apilada por líder;
 - tabla resumen;
-- listado de tickets con más de 4 meses.
+- listado de los 10 tickets más antiguos del corte.
 
-El listado de tickets antiguos permite mostrar la descripción al pasar el ratón sobre el código. El código también puede funcionar como enlace directo al ticket en Proactivanet cuando existe su GUID correspondiente.
+El listado de tickets antiguos no exige una antigüedad mínima: ordena los tickets del corte por fecha de registro, del más viejo al más nuevo, y muestra los diez primeros (todos, si hay menos de diez). Permite mostrar la descripción al pasar el ratón sobre el código. El código también puede funcionar como enlace directo al ticket en Proactivanet cuando existe su GUID correspondiente.
 
 Las descripciones pueden contener HTML procedente de Outlook y ser muy grandes. Para el tablero se limita el contenido recibido y posteriormente se limpia y recorta en el navegador.
 
