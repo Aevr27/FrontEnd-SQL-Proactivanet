@@ -50,19 +50,16 @@ public class BacklogResumen : IHttpHandler
 
             /* Metadato de frescura de ESTA pestana, en el contrato compartido
                (App_Code/DashboardDataInfo.cs). El Backlog no es una ventana
-               sino una FOTO: su fecha autoritativa es el corte de
-               dbo.CorreoBacklogSnapshot con el que se respondio, no la hora
-               del servidor ni la del navegador. Por eso va como Corte() y
-               viaja sin periodo: el tablero pinta el sello y nada mas.
+               sino una FOTO, asi que viaja sin periodo: el tablero pinta el
+               sello y nada mas.
 
-               Vacio cuando la peticion no mando fecha_corte -el procedimiento
-               elige entonces el corte mas reciente y este handler no llega a
-               saber cual fue-. dashboard.js siempre la manda (la toma de
-               backlog_catalogos, que es la lista real de cortes guardados). */
-            var info = DashboardDataInfo.Corte(
-                "Backlog", corte, "dbo.CorreoBacklogSnapshot (fecha de corte)");
-            if (corte == null)
-                info.Nota = "Sin fecha_corte en la peticion: se uso el corte mas reciente.";
+               El sello es dbo.CorreoBacklogSnapshot.FechaHoraSnapshot -cuando
+               se tomo la foto-, acotado al MISMO corte que acaba de responder
+               el procedimiento. FechaCorte sigue siendo lo que siempre fue: la
+               dimension de negocio con la que se filtra y se agrupa, y que se
+               pasa intacta al procedimiento unas lineas mas arriba. Ver
+               BacklogUtil.DatosInfo en App_Code/DashboardDb.cs. */
+            var info = BacklogUtil.DatosInfo(corte);
 
             return new Dictionary<string, object>
             {

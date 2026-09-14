@@ -11,6 +11,7 @@ using System.Collections.Generic;
 using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
+using System.Globalization;
 using System.Web;
 using System.Web.Script.Serialization;
 
@@ -163,6 +164,101 @@ public static class BacklogUtil
     {
         var valor = request.QueryString["fecha_corte"];
         return string.IsNullOrWhiteSpace(valor) ? null : (object)valor;
+    }
+
+    /* Metadato de frescura del Backlog, en el contrato compartido
+       (App_Code/DashboardDataInfo.cs).
+
+       QUE SELLO ES. dbo.CorreoBacklogSnapshot guarda DOS fechas por fila y no
+       significan lo mismo:
+
+         FechaCorte         (date)      el dia que la foto RETRATA. Es la
+                                        dimension de negocio: la eligen los
+                                        filtros, la devuelven los catalogos y
+                                        contra ella agrupa todo el tablero.
+         FechaHoraSnapshot  (datetime2) cuando se TOMO esa foto. Es la unica
+                                        que dice de cuando son los datos.
+
+       El sello es FechaHoraSnapshot. FechaCorte se queda intacta en su papel
+       de siempre -este metodo no la toca, solo la lee para acotar-; usarla
+       como "ultima actualizacion" era lo que dejaba la hora en 00:00, porque
+       un date no tiene hora que mostrar.
+
+       QUE FOTO. La MISMA que respondio el procedimiento, no un maximo global:
+
+         - con @FechaCorte, se acota a ese corte exacto;
+         - sin el, se toma el corte mas reciente guardado, que es justo lo que
+           dbo.usp_CorreoBacklog_Principal hace cuando recibe NULL.
+
+       Dentro de un corte hay una fila por ticket y todas comparten la carga,
+       asi que MAX() sobre el grupo devuelve el sello de esa carga; si alguna
+       vez un corte se recargara en dos pasadas, el sello seria el de la
+       ultima, que es la que dejo los datos que se estan viendo.
+
+       Sin fila -corte inexistente, o tabla sin llenar- el sello se queda en
+       null y el tablero pinta la cabecera vacia: no se sustituye por
+       FechaCorte ni por la hora del servidor. */
+    public static DashboardDataInfo DatosInfo(object fechaCorte)
+    {
+        const string SQL = @"
+SELECT TOP (1)
+    FechaCorte        = s.FechaCorte,
+    FechaHoraSnapshot = MAX(s.FechaHoraSnapshot)
+FROM dbo.CorreoBacklogSnapshot AS s
+WHERE @FechaCorte IS NULL OR s.FechaCorte = @FechaCorte
+GROUP BY s.FechaCorte
+ORDER BY s.FechaCorte DESC;";
+
+        object corte = null;
+        object sello = null;
+        string error = null;
+
+        try
+        {
+            using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+            using (var cmd = new SqlCommand(SQL, cn))
+            {
+                cmd.CommandType = CommandType.Text;
+                cmd.Parameters.AddWithValue("@FechaCorte", fechaCorte ?? (object)DBNull.Value);
+
+                cn.Open();
+                using (var rd = cmd.ExecuteReader())
+                {
+                    if (rd.Read())
+                    {
+                        if (!rd.IsDBNull(0)) corte = rd.GetValue(0);
+                        if (!rd.IsDBNull(1)) sello = rd.GetValue(1);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // El sello es informacion de cabecera: que falle no puede tumbar
+            // la respuesta de datos que lo acompana.
+            error = ex.Message;
+        }
+
+        var info = DashboardDataInfo.Corte(
+            "Backlog", sello,
+            "dbo.CorreoBacklogSnapshot.FechaHoraSnapshot" +
+            (corte == null ? "" : " (corte " + FechaTexto(corte) + ")"));
+
+        if (error != null)
+            info.Nota = "No se pudo leer FechaHoraSnapshot: " + error;
+        else if (sello == null)
+            info.Nota = "El corte consultado no tiene FechaHoraSnapshot guardada.";
+
+        return info;
+    }
+
+    // Solo para el texto de "origen": el corte que de verdad se uso, tal como
+    // lo tiene la tabla. No entra en ningun calculo.
+    private static string FechaTexto(object valor)
+    {
+        return (valor is DateTime)
+            ? ((DateTime)valor).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+            : Convert.ToString(valor, CultureInfo.InvariantCulture);
     }
 }
 
