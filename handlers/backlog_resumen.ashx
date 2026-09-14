@@ -10,7 +10,14 @@
 //     { "kpis": { "BacklogTotal": 0, "Criticos": 0, "Altos": 0,
 //                 "Mayor30Dias": 0, "Reasignados": 0, "Reabiertos": 0 },
 //       "prioridad": [...], "aging": [...],
-//       "reasignaciones": [...], "reabiertos": [...], "sla": [...] }
+//       "reasignaciones": [...], "reabiertos": [...], "sla": [...],
+//       "meta": { ultimaActualizacion, periodoInicio, periodoFin, tipoPeriodo } }
+//
+// "meta" es el contrato compartido de frescura del tablero
+// (App_Code/DashboardDataInfo.cs), el mismo que publican kpis.ashx,
+// experiencia.ashx y qa.ashx para que las cuatro pestañas se pinten con un
+// unico componente. El tablero lo lee para el sello de la cabecera y no
+// depende de el para ningun numero.
 //
 // dbo.usp_CorreoBacklog_Principal devuelve seis result sets y aqui se mapean
 // POR POSICION, en el orden en que el procedimiento los emite (ver los
@@ -36,9 +43,26 @@ public class BacklogResumen : IHttpHandler
         DashboardHandler.Responder(context, delegate
         {
             var parametros = BacklogUtil.Filtros(context.Request);
-            parametros["FechaCorte"] = BacklogUtil.FechaCorte(context.Request);
+            var corte = BacklogUtil.FechaCorte(context.Request);
+            parametros["FechaCorte"] = corte;
 
             var sets = DashboardDb.EjecutarMultiple("dbo.usp_CorreoBacklog_Principal", parametros);
+
+            /* Metadato de frescura de ESTA pestana, en el contrato compartido
+               (App_Code/DashboardDataInfo.cs). El Backlog no es una ventana
+               sino una FOTO: su fecha autoritativa es el corte de
+               dbo.CorreoBacklogSnapshot con el que se respondio, no la hora
+               del servidor ni la del navegador. Por eso va como Corte() y
+               viaja sin periodo: el tablero pinta el sello y nada mas.
+
+               Vacio cuando la peticion no mando fecha_corte -el procedimiento
+               elige entonces el corte mas reciente y este handler no llega a
+               saber cual fue-. dashboard.js siempre la manda (la toma de
+               backlog_catalogos, que es la lista real de cortes guardados). */
+            var info = DashboardDataInfo.Corte(
+                "Backlog", corte, "dbo.CorreoBacklogSnapshot (fecha de corte)");
+            if (corte == null)
+                info.Nota = "Sin fecha_corte en la peticion: se uso el corte mas reciente.";
 
             return new Dictionary<string, object>
             {
@@ -48,6 +72,7 @@ public class BacklogResumen : IHttpHandler
                 { "reasignaciones", Filas(sets, 3) },
                 { "reabiertos",    Filas(sets, 4) },
                 { "sla",           Filas(sets, 5) },
+                { "meta",          info.AJson() },
             };
         });
     }

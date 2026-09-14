@@ -360,9 +360,27 @@
     var desde = fechaCorta(src.fechaInicio);
     var hasta = fechaCorta(src.fechaFin);
 
-    $('chip-fecha').textContent = (desde && hasta)
-      ? 'Datos QA: ' + desde + ' – ' + hasta
-      : 'Datos QA: sin rango informado';
+    /* Sello de frescura y periodo, con el componente compartido
+       (assets/js/datos-info.js). El metadato lo arma qa.ashx -> DatosInfo():
+       el sello es el fin del ultimo ETL de tickets registrado en dbo.EtlLog,
+       la misma base y la misma definicion que publica SLA, y el periodo es la
+       ventana que la consulta USO (por omision los 15 dias del correo de QA).
+
+       Antes esta pastilla solo mostraba el rango; el unico dato de tiempo que
+       llegaba era generatedAt, que es la hora del servidor al responder y no
+       dice de cuando son los datos. Ese valor sigue en el pie de fuente como
+       "Consultado", que es lo que de verdad significa. */
+    if (datos.dataInfo) {
+      DatosInfo.pintar($('chip-fecha'), datos.dataInfo);
+    } else {
+      // Respuesta anterior a dataInfo: queda el rango, que source si trae.
+      DatosInfo.pintar($('chip-fecha'), DatosInfo.armar({
+        fuente: 'QA de categorizacion',
+        inicio: src.fechaInicio,
+        fin: src.fechaFin,
+        origen: src.vista || null,
+      }));
+    }
 
     var partes = [];
     partes.push('Origen: ' + (src.origen || 'no informado'));

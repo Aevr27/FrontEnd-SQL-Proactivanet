@@ -30,6 +30,11 @@
      modulos. Va antes de dashboard.css por el mismo motivo que las otras
      dos compartidas. -->
 <link rel="stylesheet" href="assets/css/kpi.css">
+<!-- El sello de "Última actualización" / "Periodo", uno solo para las cuatro
+     pestañas (SLA y Call Center, Backlog, Experiencia y QA) y aqui por el
+     mismo motivo que las otras compartidas: los modulos embebidos pierden sus
+     <link> al montarse. -->
+<link rel="stylesheet" href="assets/css/datos-info.css">
 <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
@@ -415,6 +420,11 @@
   </div>
 </div>
 
+
+<!-- Sello de frescura compartido (window.DatosInfo). Antes que dashboard.js y
+     que los modulos embebidos: los cuatro tableros lo usan para pintar
+     "Última actualización" y "Periodo" con el mismo formato. -->
+<script src="assets/js/datos-info.js"></script>
 
 <!-- Datos simulados (MOCK_DATA). Se carga antes que dashboard.js. -->
 <script src="assets/js/mock-data.js"></script>

@@ -96,6 +96,12 @@ public static class ExperienciaQueries
     // Cuantos slots pinta el tablero: 0 = ultimos 30 dias, 9 = el mas viejo.
     private const int SLOTS = 10;
 
+    // Dias que mide un slot. Era un 30 suelto dentro de ArmarCalendario; ahora
+    // viene del contrato compartido (DashboardDataInfo.DiasSlot) para que las
+    // etiquetas del eje y el periodo que se publica en "meta" no puedan
+    // separarse. No cambia la semantica: 0-30d, 31-60d, etc. siguen igual.
+    private const int DIAS_SLOT = DashboardDataInfo.DiasSlot;
+
     // ------------------------------------------------------------------
     // Punto de entrada
     // ------------------------------------------------------------------
@@ -174,6 +180,26 @@ public static class ExperienciaQueries
                 ? corte.Value.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture)
                 : hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
             salida["liga_detalle"] = ExperienciaConfig.LigaDetalle();
+
+            /* Metadato de frescura y periodo de ESTA pestana, en el contrato
+               compartido (App_Code/DashboardDataInfo.cs). Los dos valores
+               salen de donde ya salian los datos, no de un calculo nuevo:
+
+                 sello    MAX(FechaUltimaCargaDW) de dbo.Tickets, el mismo
+                          'corte' que ya alimentaba fecha_actualizacion -pero
+                          con su hora, que el formato dd/MM/yyyy tiraba-;
+                 periodo  el SLOT 0, que es la ventana de los ultimos
+                          DIAS_SLOT dias contada desde el MISMO 'hoy' con el
+                          que ArmarCalendario rotula el eje.
+
+               fecha_gen y fecha_actualizacion se conservan tal cual: el mock
+               y la pagina suelta siguen leyendolas. */
+            salida["meta"] = DashboardDataInfo.Periodo(
+                "Experiencia al Usuario",
+                corte,
+                hoy.AddDays(-DIAS_SLOT),
+                hoy,
+                "MAX(FechaUltimaCargaDW) de dbo.Tickets").AJson();
 
             return salida;
         }
@@ -1157,7 +1183,7 @@ public static class ExperienciaQueries
         var slotNums = new List<object>();
         for (int s = 0; s < SLOTS; s++)
         {
-            var fecha = hoy.AddDays(-30 * s);
+            var fecha = hoy.AddDays(-DIAS_SLOT * s);
             var etiqueta = MES_ABREV[fecha.Month - 1];
             slots.Add(s == 0 ? etiqueta + " (0-30d)" : etiqueta);
             slotNums.Add(s);

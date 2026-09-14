@@ -373,42 +373,41 @@ function seleccionados(id) {
   return Array.from(document.getElementById(id).selectedOptions).map(o => o.value);
 }
 
-function estadoCargando(id) { document.getElementById(id).textContent = 'Cargando...'; }
+function estadoCargando(id) { DatosInfo.mensaje(id, 'Cargando...'); }
 
-// Sello del ultimo ETL (kpis.ashx -> UltimaActualizacionEtl), que ya llega en
-// hora local de Mexico como 'yyyy-MM-ddTHH:mm:ss'. Se parte el texto en vez de
-// usar new Date(): el navegador interpretaria la cadena sin zona como local y
-// la recorreria si la maquina no esta en la zona de Mexico.
-function formatoSelloEtl(iso) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(iso || ''));
-  return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : null;
+/* Sello de frescura y periodo de la cabecera.
+
+   El formato, el parseo de las fechas y el marcado ya no viven aqui: los pone
+   DatosInfo (assets/js/datos-info.js), el mismo componente que usan
+   Experiencia y QA. Este archivo solo le entrega el metadato que mando el
+   backend -kpis.meta en SLA y Call Center, resumen.meta en Backlog- y ese
+   metadato es el unico origen de las fechas: aqui no se calcula ninguna.
+
+   Sin metadato el rotulo se queda vacio. Antes se caia a
+   `new Date().toLocaleTimeString()`, que decia cuando se miro la pantalla y no
+   de cuando eran los datos; leerlo como "ultima actualizacion" era justo el
+   error que este cambio viene a quitar. */
+function estadoOk(id, meta, opciones) {
+  DatosInfo.pintar(id, meta, opciones);
 }
 
-// Sin sello del ETL (pestana de backlog, o EtlLog sin filas) se mantiene la
-// hora del navegador como antes.
-function estadoOk(id, selloEtl) {
-  const sello = formatoSelloEtl(selloEtl);
-  document.getElementById(id).textContent = sello
-    ? `Última actualización: ${sello}`
-    : `Actualizado ${new Date().toLocaleTimeString('es-MX')}`;
-}
 function estadoError(id, err) {
-  const el = document.getElementById(id);
-  el.textContent = `Error al cargar datos: ${err.message}`;
-  el.title = err.message;
+  DatosInfo.mensaje(id, `Error al cargar datos: ${err.message}`, err.message);
   console.error(err);
 }
 
 // Carga parcial: el tablero pinta lo que si llego y dice, sin esconderlo, que
 // datasets se quedaron fuera. `fallos` = [{ nombre, error }]. Sin fallos se
 // comporta exactamente como estadoOk().
-function estadoParcial(id, selloEtl, fallos) {
-  estadoOk(id, selloEtl);
-  if (!fallos || !fallos.length) return;
-  const el = document.getElementById(id);
+function estadoParcial(id, meta, fallos, opciones) {
+  if (!fallos || !fallos.length) return estadoOk(id, meta, opciones);
+
   const nombres = fallos.map(f => f.nombre).join(', ');
-  el.textContent += ` · ⚠ sin datos de: ${nombres}`;
-  el.title = fallos.map(f => `${f.nombre}: ${f.error && f.error.message}`).join('\n');
+  DatosInfo.pintar(id, meta, {
+    ...opciones,
+    sufijo: ` · ⚠ sin datos de: ${nombres}`,
+    titulo: fallos.map(f => `${f.nombre}: ${f.error && f.error.message}`).join('\n'),
+  });
   fallos.forEach(f => console.error(`[${f.nombre}]`, f.error));
 }
 
@@ -2946,7 +2945,7 @@ const TableroSla = (function () {
 
      El tope del idle evita quedarse colgado: en una pestaña ocupada
      requestIdleCallback podria no llegar nunca, y esto tiene que terminar. */
-  const PAUSA_SLOT_MS = 750;      // respiro minimo para el servidor
+  const PAUSA_SLOT_MS = 300;      // respiro minimo para el servidor
   const PAUSA_IDLE_MS = 2000;     // tope de espera a que el navegador respire
 
   function respiroEntreSlots() {
@@ -3135,7 +3134,16 @@ const TableroSla = (function () {
     Object.keys(filtro).forEach(k => { filtro[k] = null; });
     invalidarFilas();
     renderTodo();
-    estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.UltimaActualizacionEtl, fallos);
+    /* kpis.meta trae el sello del ETL y el rango que la consulta USO: las dos
+       cosas salen de la misma fila de kpis.ashx, asi que ninguna puede
+       discrepar de los numeros que acompana.
+
+       De la cabecera solo se pinta el sello. El rango ya esta a la vista en la
+       barra de filtros de esta misma pestaña -Fecha inicio, Fecha fin y el
+       selector de SLOT, que ademas explica la semantica de los 30 dias-, y
+       repetirlo aqui seria el mismo dato en dos sitios. El periodo sigue
+       viajando en meta; solo no se dibuja. */
+    estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.meta, fallos, { periodo: false });
 
     /* Y ya con el tablero pintado, se calientan en segundo plano los SLOTs
        que el usuario todavia no ha pedido. Sin await: la carga visible ya
@@ -4090,7 +4098,10 @@ const TableroBacklog = (function () {
 
       Object.keys(filtro).forEach(k => { filtro[k] = null; });
       renderTodo();
-      estadoOk('estado-carga-bl');
+      // El Backlog es una foto, no una ventana: su metadato viaja sin periodo
+      // y su "ultima actualizacion" es la fecha de corte de
+      // dbo.CorreoBacklogSnapshot con la que respondio el handler.
+      estadoOk('estado-carga-bl', resumen.meta);
     } catch (err) {
       if (miCarga !== cargaVigente) return;   // fallo de una carga ya superada
       estadoError('estado-carga-bl', err);

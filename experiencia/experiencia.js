@@ -231,8 +231,27 @@ function pronosticoMes(volReal){
     const m=document.getElementById('ligaModal');
     if(m){m.href=url;}
   }
+  /* Sello de frescura y periodo, con el componente compartido
+     (assets/js/datos-info.js). El metadato lo arma el backend en
+     App_Code/ExperienciaQueries.cs -sello = MAX(FechaUltimaCargaDW) de
+     dbo.Tickets, periodo = el SLOT 0, o sea los ultimos 30 dias contados
+     desde el MISMO 'hoy' con el que se rotula el eje- y aqui no se calcula
+     ninguna fecha ni se da formato a mano.
+
+     P.meta falta en el mock guardado (data/experiencia.mock.json, anterior a
+     este contrato): en ese caso se cae a fecha_actualizacion, que ya venia
+     formateada como dd/MM/yyyy y es lo unico que ese archivo sabe del corte.
+     Con el handler respondiendo, manda siempre P.meta. */
   const cf=document.getElementById('corteFecha');
-  if(cf && P.fecha_actualizacion) cf.textContent='Corte Actualización de Tickets: '+P.fecha_actualizacion;
+  if(cf && P.meta){
+    DatosInfo.pintar(cf, P.meta);
+  } else if(cf && P.fecha_actualizacion){
+    DatosInfo.pintar(cf, DatosInfo.armar({
+      fuente: 'Experiencia al Usuario',
+      sello: P.fecha_actualizacion,
+      origen: 'Corte guardado en data/experiencia.mock.json',
+    }));
+  }
 })();
 
 // ---- filtrar categorias segun Director / PO ----

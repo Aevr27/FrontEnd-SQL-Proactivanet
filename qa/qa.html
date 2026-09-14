@@ -52,6 +52,10 @@
   <!-- Tarjeta KPI compartida; hace falta en la pagina suelta y en el
        iframe de respaldo. -->
   <link rel="stylesheet" href="../assets/css/kpi.css">
+  <!-- Sello de "Última actualización" / "Periodo", compartido con el resto
+       del tablero, con la misma nota: solo para la pagina suelta. -->
+  <link rel="stylesheet" href="../assets/css/datos-info.css">
+  <script src="../assets/js/datos-info.js"></script>
   <link rel="stylesheet" href="qa.css">
 </head>
 <body>
@@ -68,7 +72,10 @@
         <div class="sub" id="qa-sub-fuente">Cargando origen de datos&hellip;</div>
       </div>
       <div class="acciones-top">
-        <span class="chip" id="qa-chip-fecha">Datos QA: &mdash;</span>
+        <!-- El sello lo pinta DatosInfo (assets/js/datos-info.js) con la clase
+             .datos-info, compartida con SLA, Backlog y Experiencia. Ya no lleva
+             .chip: esa era la version propia de QA de la misma pastilla. -->
+        <div id="qa-chip-fecha"></div>
       </div>
     </header>
 
