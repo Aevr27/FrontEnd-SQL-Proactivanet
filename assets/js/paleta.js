@@ -63,6 +63,26 @@
      8: es el color de "esto no es una categoria". */
   var NEUTRO = '#6b7280';
 
+  /* AZUL DE SERIE UNICA — el relleno por defecto de una barra ORDINARIA.
+
+     Una grafica de ranking o de comparacion con UNA sola serie -"top 10 por
+     grupo", "volumen por director", "llamadas por agente"- no esta contando
+     ocho identidades distintas: esta contando una magnitud, y las barras solo
+     se comparan entre si por su largo. Pintarlas de ocho colores hacia creer
+     que el color decia algo. Todas van de este azul.
+
+     NO es un azul nuevo: es la MISMA posicion 1 de la paleta categorica, el
+     azul que ya llevaban las barras por grupo de QA y la serie Creados del
+     tablero de SLA. Se le pone nombre para que una grafica pueda pedir "el
+     azul de una barra normal" sin depender de que ese sea el indice 0.
+
+     Lo aplica Barras.aplicarDefaults() como default de Chart.js para el tipo
+     `bar`, asi que una grafica ordinaria no tiene que pedirlo: le basta con
+     NO declarar color. Se declara color solo cuando el color SIGNIFICA algo
+     -semaforo, severidad, estado, rampa ordinal- o cuando la barra es una
+     identidad que se repite en otras vistas (lider, categoria de un pastel). */
+  var AZUL_SERIE = PALETA_CATEGORICA[0];
+
   // Color de la posicion i, dando la vuelta cuando hay mas categorias que
   // colores. La vuelta es intencional: ocho identidades separables es el
   // limite util; a partir de ahi la grafica necesita leyenda o etiqueta
@@ -128,6 +148,7 @@
   raiz.Paleta = {
     PALETA_CATEGORICA: PALETA_CATEGORICA,
     NEUTRO: NEUTRO,
+    AZUL_SERIE: AZUL_SERIE,
     porIndice: porIndice,
     color: color,
     escala: escala,

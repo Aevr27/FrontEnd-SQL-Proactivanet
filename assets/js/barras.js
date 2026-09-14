@@ -34,6 +34,13 @@
    3) Barras.tintaSobre(hex) — carbon o blanco, el que mas contraste de
       contra ese relleno. Es la tinta que usa el plugin.
 
+   4bis) El COLOR por defecto de una barra ordinaria. Barras.aplicarDefaults()
+      deja Paleta.AZUL_SERIE como backgroundColor del tipo `bar`: una grafica
+      de UNA serie que compara magnitudes -un top 10, un ranking por persona-
+      no declara color y sale del azul compartido. Declaran color solo las que
+      lo usan para DECIR algo (semaforo, severidad, estado, rampa ordinal) y
+      las que pintan una IDENTIDAD que se repite en otras vistas.
+
    4) Barras.fuente(px) y Barras.TINTA_FUERA — la tipografia y la tinta de
       cualquier cifra pintada sobre una barra. Las usan tambien los dos
       plugins de dashboard.js que NO son este -ETIQUETAS_SEGMENTO y
@@ -81,6 +88,16 @@
     if (typeof Chart === 'undefined') return;
     if (!Chart.defaults.datasets || !Chart.defaults.datasets.bar) return;
     Object.assign(Chart.defaults.datasets.bar, GRUESA, { borderRadius: RADIO });
+    /* Y el COLOR de una barra ordinaria, por el mismo motivo que las medidas:
+       una grafica de una sola serie mide una magnitud, no ocho identidades.
+       El azul sale de la paleta compartida (Paleta.AZUL_SERIE), no de aqui:
+       este archivo no define colores. Es solo un DEFAULT -cualquier dataset
+       que declare backgroundColor sigue mandando-, asi que los sistemas
+       semanticos -semaforo de SLA, severidad, prioridad, rampa de antiguedad,
+       estados de QA- y las series de identidad -lider, categoria- no se
+       enteran: ya pasan su color hecho. */
+    if (typeof Paleta !== 'undefined' && Paleta.AZUL_SERIE)
+      Chart.defaults.datasets.bar.backgroundColor = Paleta.AZUL_SERIE;
   }
 
   /* Tinta legible encima de un relleno. Devuelve #191919 o #fff segun la

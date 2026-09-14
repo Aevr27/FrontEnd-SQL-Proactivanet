@@ -1491,15 +1491,17 @@ function renderPanelGraf(tab, cats){
 
 let chartBarDir=null;
 
-/* Identidad de DIRECTOR y de PRODUCT OWNER. Las dos dimensiones se ordenan
-   por volumen, asi que su posicion cambia con cada filtro: por eso van por
-   registro con nombre de la paleta COMPARTIDA (assets/js/paleta.js) y no por
-   indice. El registro reparte por orden de ALTA, asi que un director -o un
-   PO- conserva su color aunque baje de puesto, salga del top 15 o se entre a
-   un director en el detalle. Las dos graficas de PO comparten registro, asi
-   que el mismo PO sale del mismo color en "Volumen" y en "Con Iniciativa". */
-const REG_DIRECTOR = Paleta.registro('exp-director');
-const REG_PO = Paleta.registro('exp-po');
+/* Aqui vivian REG_DIRECTOR y REG_PO, dos registros de la paleta categorica
+   que repartian un color por director y otro por Product Owner. Se retiraron:
+   las tres graficas que los usaban -"Volumen por Director", "Volumen por
+   Product Owner" y su version "con Iniciativa"- son rankings de UNA sola
+   serie, donde el dato es el largo de la barra y el nombre ya va en el eje.
+   El color no distinguia nada -no hay leyenda que traducir, ni una segunda
+   serie de la que separarse- y el arcoiris hacia pensar que si. Las tres
+   toman ahora el azul de barra ordinaria del default compartido
+   (Barras.aplicarDefaults -> Paleta.AZUL_SERIE), igual que los rankings de
+   QA y el de llamadas por agente. Donde el color SI es identidad -el treemap
+   y el pastel de esta misma pagina- la paleta sigue igual. */
 
 /* Aqui vivia `BARRA_GRUESA`, un alias de Barras.GRUESA que las dos graficas
    de abajo copiaban en su dataset. Ya no hace falta: las dos pasan por
@@ -1526,15 +1528,12 @@ function renderBarrasPO(canvasId, filas, valorDe){
   const datos = filas.filter(r => valorDe(r) > 0);
   /* Medidas, radio y cifra dentro las pone DashboardBarChart; aqui solo queda
      lo propio: el eje con los nombres recortados y el tooltip con el completo.
-     El color se pide con el nombre COMPLETO, no con el recortado del eje: dos
-     POs distintos pueden compartir los primeros 15 caracteres. Va por
-     `colores` -no por `paleta`- porque el registro se consulta con esos
-     nombres completos y las etiquetas de la grafica son las cortas. */
+     Sin `colores` ni `paleta`: ranking de una sola serie, asi que las barras
+     salen del azul compartido por default. */
   chartsPO[canvasId] = new DashboardBarChart({
     canvas: el,
     etiquetas: datos.map(r => cortaPO(r.po)),
     datos: datos.map(valorDe),
-    colores: REG_PO.escala(datos.map(r => r.po)),
     formato: FMT,
     opciones: {
       maintainAspectRatio: false,
@@ -1582,14 +1581,14 @@ function renderResumen(){
   const bdCtx=document.getElementById('chartBarDir');
   if(chartBarDir)chartBarDir.destroy();
   /* Ranking HORIZONTAL, pero con el mismo lenguaje que las verticales: el
-     grosor, el radio y la cifra dentro salen de DashboardBarChart, que mide a
-     lo ancho cuando indexAxis es 'y'. Lo unico propio es la orientacion y que
-     el nombre del director va entero en el eje, sin recortar. */
+     grosor, el radio, la cifra dentro y el azul de barra ordinaria salen de
+     DashboardBarChart, que ademas mide a lo ancho cuando indexAxis es 'y'. Lo
+     unico propio es la orientacion y que el nombre del director va entero en
+     el eje, sin recortar. */
   chartBarDir=new DashboardBarChart({
     canvas: bdCtx,
     etiquetas: dirRows.map(r=>r.dir),
     datos: dirRows.map(r=>r.vol),
-    colores: REG_DIRECTOR.escala(dirRows.map(r=>r.dir)),
     formato: FMT,
     opciones:{indexAxis:'y',plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},

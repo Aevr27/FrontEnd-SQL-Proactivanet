@@ -2628,9 +2628,17 @@ const TableroSla = (function () {
         type: 'bar',
         // Cifra dentro de la barra: el plugin compartido mide a lo ancho
         // cuando indexAxis es 'y', asi que la grafica sigue horizontal.
+        //
+        // Sin backgroundColor a proposito: es un ranking de UNA serie -cada
+        // barra es el mismo dato, atendidas, sobre otro agente-, asi que toma
+        // el azul de barra ordinaria del default compartido
+        // (Barras.aplicarDefaults -> Paleta.AZUL_SERIE). Antes llevaba el
+        // morado de "Llamadas atendidas" de las dos graficas de arriba, donde
+        // ese color SI distingue una serie de la otra; aqui no habia ninguna
+        // segunda serie de la que distinguirse.
         plugins: [ETIQUETAS_DENTRO],
         data: { labels: etiquetas, datasets: [{ label: 'Llamadas atendidas',
-          data: atendidas, backgroundColor: MORADO }] },
+          data: atendidas }] },
         options: {
           indexAxis: 'y',
           responsive: true, maintainAspectRatio: false,

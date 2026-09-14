@@ -67,12 +67,15 @@
 
   /* Colores de este tablero. Hay DOS sistemas y no se mezclan:
 
-     - IDENTIDAD de serie (barras de Grupo y de Tecnico): sale de la paleta
-       categorica COMPARTIDA, assets/js/paleta.js -> window.Paleta. No se
-       copia el arreglo aqui; una grafica nueva con categorias tambien debe
-       pedirla ahi (Paleta.escala / Paleta.color / Paleta.registro).
-       Embebido en dashboard.html este modulo pierde sus <script> y usa la
-       copia que ya cargo dashboard.html; suelto, la carga qa.html.
+     - MAGNITUD (las dos barras, Grupo y Tecnico): las dos son un TOP 10 de
+       una sola serie, asi que las dos llevan el azul de barra ordinaria
+       compartido, Paleta.AZUL_SERIE. Antes la de Tecnico iba de otro color
+       -la posicion 2 de la paleta- y eso sugeria que Grupo y Tecnico median
+       cosas distintas: miden lo mismo, incidencias, sobre otra dimension.
+       El azul sale de la paleta COMPARTIDA, assets/js/paleta.js ->
+       window.Paleta; no se copia ningun color aqui. Embebido en
+       dashboard.html este modulo pierde sus <script> y usa la copia que ya
+       cargo dashboard.html; suelto, la carga qa.html.
 
      - ESTADO de validacion (OK / Incorrecto / Valido / Sin catalogo): es
        semantico y se queda como esta. El rojo sigue reservado para
@@ -81,12 +84,11 @@
      Los nombres de las claves son heredados y ya NO describen su color: se
      conservan para no tocar la logica que los cita. */
   var COLOR = {
-    azul: Paleta.porIndice(0),   // serie primaria (barras por grupo)
+    azul: Paleta.AZUL_SERIE,     // las dos barras de ranking (grupo y tecnico)
     azulOscuro: '#1d4ed8',       // hover de barra: la primaria, mas profunda
     verde: '#5aa726',            // estado OK
     rojo: '#982a18',             // estado Incorrecto (unico uso del rojo)
     ambar: '#b09512',            // estado Sin catalogo: mostaza, no ambar semantico
-    morado: Paleta.porIndice(2), // serie secundaria (barras por tecnico)
     cyan: '#2f8f6b',             // estado Valido: verde pino
     gris: Paleta.NEUTRO          // fuera de catalogo: neutro
   };
@@ -208,7 +210,7 @@
       if (etiqueta === '(sin grupo)') return;
       aplicarFiltro('grupo', etiqueta);
     });
-    graficas.tecnico = crearBarras('chart-tecnico', COLOR.morado, function (etiqueta) {
+    graficas.tecnico = crearBarras('chart-tecnico', COLOR.azul, function (etiqueta) {
       aplicarFiltro('tecnico', etiqueta);
     });
     graficas.validacion = crearDona();

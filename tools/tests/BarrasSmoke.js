@@ -13,11 +13,17 @@
 var fs = require('fs');
 var path = require('path');
 
-// barras.js se escribe a si mismo en `window`. Se le da uno.
+// paleta.js y barras.js se escriben a si mismos en `window`. Se les da uno,
+// y el mismo para los dos: aplicarDefaults() lee de ahi el azul de serie.
 var raiz = path.join(__dirname, '..', '..');
 var ventana = {};
-(new Function('window', fs.readFileSync(path.join(raiz, 'assets', 'js', 'barras.js'), 'utf8')))(ventana);
+function cargar(archivo) {
+  (new Function('window', fs.readFileSync(path.join(raiz, 'assets', 'js', archivo), 'utf8')))(ventana);
+}
+cargar('paleta.js');
+cargar('barras.js');
 var Barras = ventana.Barras;
+var Paleta = ventana.Paleta;
 
 var fallos = 0;
 function Check(caso, esperado, obtenido) {
@@ -212,6 +218,40 @@ var FMT = function (v) { return String(v); };
   });
   var p = correr(g, function (v) { return v + '%'; });
   Check('formato del tablero: lleva su sufijo', '12%', p[0].texto);
+})();
+
+/* Color por defecto de una barra ORDINARIA. aplicarDefaults() tiene que dejar
+   el azul de serie compartido en los defaults del tipo `bar`, y NO tocar nada
+   de lo que declare la grafica: los sistemas semanticos -semaforo, prioridad,
+   rampa de antiguedad, estados de QA- pasan su color hecho en el dataset y
+   tienen que seguir mandando encima. */
+(function () {
+  // Chart.js de mentira: solo el arbol de defaults que mira aplicarDefaults().
+  var ChartPrevio = global.Chart;
+  global.Chart = { defaults: { datasets: { bar: {} } } };
+  // barras.js llama a `Paleta` por global, no por el `window` que se le dio.
+  var PaletaPrevia = global.Paleta;
+  global.Paleta = Paleta;
+
+  Barras.aplicarDefaults();
+  var porDefecto = global.Chart.defaults.datasets.bar;
+
+  Check('default de barra: el azul de serie compartido',
+        Paleta.AZUL_SERIE, porDefecto.backgroundColor);
+  Check('default de barra: sale de la paleta, no de un azul suelto',
+        Paleta.PALETA_CATEGORICA[0], porDefecto.backgroundColor);
+  Check('default de barra: la geometria compartida sigue ahi',
+        Barras.GRUESA.maxBarThickness, porDefecto.maxBarThickness);
+
+  /* Un dataset con color propio -el semaforo de "Vencidos por grupo"- gana:
+     Chart.js aplica los defaults del tipo POR DEBAJO de lo que trae el
+     dataset, que es lo que replica este Object.assign. */
+  var semaforo = Object.assign({}, porDefecto, { backgroundColor: '#982a18' });
+  Check('default de barra: el color semantico manda encima',
+        '#982a18', semaforo.backgroundColor);
+
+  global.Chart = ChartPrevio;
+  global.Paleta = PaletaPrevia;
 })();
 
 console.log(fallos ? ('\n' + fallos + ' FALLO(S)') : '\nTodo PASS');
