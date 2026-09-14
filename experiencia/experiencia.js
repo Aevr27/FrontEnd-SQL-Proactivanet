@@ -1342,35 +1342,17 @@ function renderTreemap(containerId,items,opts){
   });
 }
 
-// Plugin de Chart.js inline (sin dependencias externas, como el treemap) que
-// dibuja el valor de cada barra encima de ella -- Chart.js core no trae un
-// plugin de datalabels.
-/* La cifra dentro de la barra la pinta el plugin COMPARTIDO
-   (assets/js/barras.js), atado al FMT de este tablero. Una sola
-   implementacion: dashboard.js usa ese mismo plugin para las barras de
-   Backlog. Aqui solo se le pone nombre local para no tocar los usos. */
-const valueLabelsDentroPlugin = Barras.etiquetasDentro(FMT);
-const valueLabelsPlugin={
-  id:'valueLabels',
-  afterDatasetsDraw(chart){
-    const ctx=chart.ctx;
-    chart.data.datasets.forEach((ds,dsIdx)=>{
-      const meta=chart.getDatasetMeta(dsIdx);
-      if(meta.hidden) return;
-      meta.data.forEach((bar,i)=>{
-        const val=ds.data[i];
-        if(val==null) return;
-        ctx.save();
-        ctx.fillStyle='#191919';
-        ctx.font='bold 12px system-ui, -apple-system, sans-serif';
-        ctx.textAlign='center';
-        ctx.textBaseline='bottom';
-        ctx.fillText(FMT(val), bar.x, bar.y-4);
-        ctx.restore();
-      });
-    });
-  }
-};
+/* Aqui vivian los dos plugins de cifra de este tablero y ya no vive ninguno:
+   las cuatro graficas de barras pasan por DashboardBarChart
+   (assets/js/grafica.js), que enchufa solo el plugin COMPARTIDO de
+   assets/js/barras.js atado al FMT de esta pagina.
+
+   - `valueLabelsDentroPlugin` era un alias de Barras.etiquetasDentro(FMT);
+     ahora lo crea DashboardBarChart.
+   - `valueLabelsPlugin` pintaba la cifra SIEMPRE por ENCIMA de la barra, en
+     carbon y sin mirar si cabia dentro. Lo usaba una sola grafica -las barras
+     de estado del panel cross-filter-, que quedaba distinta de su gemela
+     "Iniciativas por Estado" teniendo los mismos datos y los mismos colores. */
 
 // ---- Iniciativas por Estado (TAREA 2): barras verticales, orden fijo
 // En Análisis -> En Solución -> En Monitoreo (mismo orden que ESTADOS_ACTIVOS),
@@ -1455,8 +1437,18 @@ function renderBarrasFiltroEstado(tab, conteo, seleccionado){
     return (!seleccionado || seleccionado===e) ? base : base+'40';
   });
   if(chartsFiltroEstado[tab]) chartsFiltroEstado[tab].destroy();
-  chartsFiltroEstado[tab]=new Chart(el,{type:'bar',data:{labels,datasets:[{data,backgroundColor:colors}]},
-    options:{responsive:true,plugins:{legend:{display:false},
+  /* Misma grafica que "Iniciativas por Estado" pero dentro del panel
+     cross-filter, asi que va por el MISMO camino: DashboardBarChart pone
+     medidas, radio y cifra dentro. El color se pasa hecho en `colores`
+     porque es progresion semantica (COLOR_ESTADO), con el `+'40'` que
+     apaga los estados no seleccionados: eso es del filtro, no del estilo. */
+  chartsFiltroEstado[tab]=new DashboardBarChart({
+    canvas: el,
+    etiquetas: labels,
+    datos: data,
+    colores: colors,
+    formato: FMT,
+    opciones:{plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.label+': '+FMT(c.raw)+' iniciativas'}}},
       onClick:(evt,elements)=>{
         if(!elements.length) return;
@@ -1464,7 +1456,7 @@ function renderBarrasFiltroEstado(tab, conteo, seleccionado){
       },
       onHover:(evt,elements)=>{evt.native.target.style.cursor=elements.length?'pointer':'default';},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}},
-    plugins:[valueLabelsPlugin]});
+  }).render();
 }
 // Renderiza las 3 graficas del panel cross-filter de una pestaña (ven/act).
 // Cada grafica se calcula sobre las filas ya filtradas por las OTRAS 2
@@ -1509,13 +1501,10 @@ let chartBarDir=null;
 const REG_DIRECTOR = Paleta.registro('exp-director');
 const REG_PO = Paleta.registro('exp-po');
 
-/* Grosor de barra: el juego COMPARTIDO de assets/js/barras.js, el mismo que
-   usan las barras de Backlog. Desde que Barras.aplicarDefaults() lo deja como
-   default del tipo `bar`, este alias ya no hace falta para que la barra salga
-   gruesa; se conserva porque lo nombran las dos graficas de abajo y porque
-   deja escrito, ahi mismo, que su grosor no es una decision local. El radio
-   lo pone tambien el default (Barras.RADIO). */
-const BARRA_GRUESA = Barras.GRUESA;
+/* Aqui vivia `BARRA_GRUESA`, un alias de Barras.GRUESA que las dos graficas
+   de abajo copiaban en su dataset. Ya no hace falta: las dos pasan por
+   DashboardBarChart, que aplica el juego compartido solo, y el grosor y el
+   radio son ademas el default del tipo `bar` desde Barras.aplicarDefaults(). */
 
 /* Volumen por Product Owner: barras verticales, no treemap.
 
@@ -1535,15 +1524,20 @@ function renderBarrasPO(canvasId, filas, valorDe){
   if(!el) return;
   if(chartsPO[canvasId]) chartsPO[canvasId].destroy();
   const datos = filas.filter(r => valorDe(r) > 0);
-  chartsPO[canvasId] = new Chart(el, {
-    type: 'bar',
-    data: { labels: datos.map(r => cortaPO(r.po)),
-      // El color se pide con el nombre COMPLETO, no con el recortado del eje:
-      // dos POs distintos pueden compartir los primeros 15 caracteres.
-      datasets: [Object.assign({ data: datos.map(valorDe),
-        backgroundColor: REG_PO.escala(datos.map(r => r.po)) }, BARRA_GRUESA)] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
+  /* Medidas, radio y cifra dentro las pone DashboardBarChart; aqui solo queda
+     lo propio: el eje con los nombres recortados y el tooltip con el completo.
+     El color se pide con el nombre COMPLETO, no con el recortado del eje: dos
+     POs distintos pueden compartir los primeros 15 caracteres. Va por
+     `colores` -no por `paleta`- porque el registro se consulta con esos
+     nombres completos y las etiquetas de la grafica son las cortas. */
+  chartsPO[canvasId] = new DashboardBarChart({
+    canvas: el,
+    etiquetas: datos.map(r => cortaPO(r.po)),
+    datos: datos.map(valorDe),
+    colores: REG_PO.escala(datos.map(r => r.po)),
+    formato: FMT,
+    opciones: {
+      maintainAspectRatio: false,
       plugins: { legend: { display: false },
         tooltip: { callbacks: {
           title: it => datos[it[0].dataIndex] ? datos[it[0].dataIndex].po : '',
@@ -1554,8 +1548,7 @@ function renderBarrasPO(canvasId, filas, valorDe){
              ticks: { autoSkip: false, maxRotation: 55, minRotation: 55, font: { size: 10 } } },
       },
     },
-    plugins: [valueLabelsDentroPlugin],
-  });
+  }).render();
 }
 function renderResumen(){
   document.getElementById('tituloResumen').textContent='Indicadores por Director';
@@ -1588,13 +1581,20 @@ function renderResumen(){
   // barras por director (nombre completo en el eje Y, sin truncar)
   const bdCtx=document.getElementById('chartBarDir');
   if(chartBarDir)chartBarDir.destroy();
-  chartBarDir=new Chart(bdCtx,{type:'bar',data:{labels:dirRows.map(r=>r.dir),
-    datasets:[Object.assign({data:dirRows.map(r=>r.vol),
-      backgroundColor:REG_DIRECTOR.escala(dirRows.map(r=>r.dir))},BARRA_GRUESA)]},
-    options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
+  /* Ranking HORIZONTAL, pero con el mismo lenguaje que las verticales: el
+     grosor, el radio y la cifra dentro salen de DashboardBarChart, que mide a
+     lo ancho cuando indexAxis es 'y'. Lo unico propio es la orientacion y que
+     el nombre del director va entero en el eje, sin recortar. */
+  chartBarDir=new DashboardBarChart({
+    canvas: bdCtx,
+    etiquetas: dirRows.map(r=>r.dir),
+    datos: dirRows.map(r=>r.vol),
+    colores: REG_DIRECTOR.escala(dirRows.map(r=>r.dir)),
+    formato: FMT,
+    opciones:{indexAxis:'y',plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},
         y:{ticks:{autoSkip:false,font:{size:11}}}}},
-    plugins:[valueLabelsDentroPlugin]});
+  }).render();
   // barras por PO (top 15) y su version "con iniciativa" (mismas filas/orden)
   const porPO={};
   c1.forEach(c=>{const p=c.po||'(Sin PO)';

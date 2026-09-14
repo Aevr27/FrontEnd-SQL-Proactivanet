@@ -550,7 +550,7 @@ const ETIQUETAS_SEGMENTO = {
     const ALTO_TEXTO = 14;   // alto minimo de caja para que quepa la cifra
     const AIRE = 6;          // margen a los costados, dentro del segmento
     ctx.save();
-    ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+    ctx.font = Barras.fuente(11);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     chart.data.datasets.forEach((ds, i) => {
@@ -586,6 +586,11 @@ const ETIQUETAS_SEGMENTO = {
    Experiencia: se le ata el FMT de este tablero y ya. Las apiladas siguen con
    ETIQUETAS_SEGMENTO de aqui arriba, que sabe de segmentos. */
 const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
+
+/* La misma cifra dentro, pero para las barras que miden un PORCENTAJE y no
+   un conteo -"Reabiertos por grupo"-. Solo cambia el formateador: sin el "%"
+   la cifra suelta dentro de la barra se leeria como tickets. */
+const ETIQUETAS_DENTRO_PCT = Barras.etiquetasDentro(v => `${FMT(v)}%`);
 
 // Estado vacio de una grafica. Chart.js no dibuja nada util con datasets
 // vacios -deja los ejes solos, que se leen como si hubiera un error-, asi que
@@ -1815,7 +1820,7 @@ const TableroSla = (function () {
       const ctx = chart.ctx;
       const metas = chart.data.datasets.map((_, d) => chart.getDatasetMeta(d));
       ctx.save();
-      ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+      ctx.font = Barras.fuente(11, '600');
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#393939';
       ctx.textAlign = 'left';
@@ -2197,7 +2202,13 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'vencidosGrupo', 'chart-vencidos-grupo',
       () => ({
         type: 'bar',
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores, borderRadius: 4 }] },
+        /* Ranking horizontal: misma cifra dentro y mismas medidas que el resto
+           del tablero. El radio lo pone el default compartido (Barras.RADIO);
+           antes esta grafica llevaba un 4 suelto que la dejaba menos
+           redondeada que sus vecinas sin que eso significara nada. El color
+           sigue siendo SEMAFORO de cumplimiento: no se toca. */
+        plugins: [ETIQUETAS_DENTRO],
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores }] },
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
           plugins: {
@@ -2247,7 +2258,11 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'reabiertosGrupo', 'chart-reabiertos-grupo',
       () => ({
         type: 'bar',
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores, borderRadius: 4 }] },
+        /* Igual que "Vencidos por grupo", pero la barra mide un PORCENTAJE:
+           la cifra dentro lleva su "%" (ETIQUETAS_DENTRO_PCT). Medidas y radio
+           del default compartido; el semaforo de reabiertos no se toca. */
+        plugins: [ETIQUETAS_DENTRO_PCT],
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores }] },
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
           plugins: {
@@ -2286,12 +2301,14 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, idGrafico, idCanvas,
       () => ({
         type: 'bar',
-        /* Cifra dentro (assets/js/barras.js); las medidas ya vienen del
-           default compartido. El color lo sigue poniendo colorFn -prioridad y
-           rampa de antiguedad-: aqui no se decide ningun color. */
-        plugins: [Barras.etiquetasDentro(FMT)],
-        data: { labels: etiquetas, datasets: [{ ...Barras.GRUESA, data: valores, backgroundColor: colores,
-          borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
+        /* Cifra dentro: la instancia COMPARTIDA del plugin, no una nueva por
+           configuracion. Medidas y radio ya vienen del default compartido
+           (Barras.aplicarDefaults), asi que aqui solo queda lo propio de esta
+           grafica: el color de colorFn -prioridad y rampa de antiguedad- y el
+           contorno de seleccion. */
+        plugins: [ETIQUETAS_DENTRO],
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
+          borderColor: sel.borderColor, borderWidth: sel.borderWidth }] },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false },
@@ -3540,15 +3557,16 @@ const TableroBacklog = (function () {
        aqui solo queda lo propio de esta grafica. El color de lider es
        IDENTIDAD y sale de la posicion en `ordenLideres` -el mismo criterio que
        colorLider()-, asi que una persona lleva su color en todas las vistas.
-       El borderRadius de 6 y el contorno de seleccion mandan sobre el juego
-       compartido: van en `dataset`, que se aplica despues de las medidas. */
+       El contorno de seleccion manda sobre el juego compartido: va en
+       `dataset`, que se aplica despues de las medidas. El radio ya lo pone el
+       default compartido (Barras.RADIO). */
     graficos['chart-lider-bl'] = new DashboardBarChart({
       canvas: 'chart-lider-bl',
       etiquetas,
       datos: ent.map(e => e[1]),
       paleta: { orden: ordenLideres },
       formato: FMT,
-      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
       opciones: {
         maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
@@ -3597,7 +3615,7 @@ const TableroBacklog = (function () {
          reparto es el mismo del resto del tablero. Va en `barra:` y no en
          Barras.GRUESA justo para no engordar las demas graficas. */
       barra: { maxBarThickness: 72 },
-      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
       opciones: {
         maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },

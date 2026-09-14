@@ -33,7 +33,6 @@
        datos: totales,
        paleta: { registro: 'backlog-lider' },   // o { orden: ordenLideres }
        formato: FMT,
-       dataset: { borderRadius: 6 },
        opciones: {
          maintainAspectRatio: false,
          plugins: { legend: { display: false } },
@@ -43,8 +42,10 @@
      }).render();
 
    Eso ya trae barra gruesa, esquina redondeada y la cifra dentro. No hay que
-   copiar ni el juego de medidas, ni el plugin, ni la logica de contraste, ni
-   ningun arreglo de colores.
+   copiar ni el juego de medidas, ni el radio, ni el plugin, ni la logica de
+   contraste, ni ningun arreglo de colores. `dataset:` es solo para lo que si
+   es de esa grafica -el contorno de seleccion del cross-filter, por ejemplo-,
+   no para repetir la geometria compartida.
 
    COLOR — las tres formas, en orden de precedencia
    -------------------------------------------------------------------------

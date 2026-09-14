@@ -47,6 +47,18 @@ const REG_CATEGORIA = Paleta.registro('orq-categoria');
 const FMT = n => Math.round(n||0).toLocaleString('es-MX');
 const PCT = n => Math.round((n||0)*100)+'%';
 
+/* Geometria de barra del juego COMPARTIDO (assets/js/barras.js) como DEFAULT
+   del tipo `bar`, igual que dashboard.js, experiencia.js y qa.js. Antes este
+   modulo no lo llamaba y su unica grafica de barras copiaba Barras.GRUESA y
+   Barras.RADIO dentro del dataset. Es idempotente: embebido en dashboard.html
+   el tablero ya lo llamo. */
+Barras.aplicarDefaults();
+
+/* La cifra dentro de la barra: el plugin COMPARTIDO, atado al FMT de este
+   modulo. Es la misma cifra -misma fuente, mismo contraste, misma salida
+   afuera cuando la barra es corta- que en SLA, Backlog, QA y Experiencia. */
+const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
+
 // Declarado en el monolito dentro del bloque de navegacion de pestanas, pero solo usado aqui.
 let chartCatJobs=null;
 
@@ -104,14 +116,18 @@ function renderOrq(){
   const ccolors=['#982a18','#d97706','#356b2c','#8a8578'];
   const bctx=document.getElementById('chartCatJobs');
   if(chartCatJobs)chartCatJobs.destroy();
-  // Medidas y radio del juego COMPARTIDO (assets/js/barras.js), el mismo que
-  // usan SLA, Backlog, QA y Experiencia. Antes eran un arreglo propio -tope de
-  // 24px y .72/.8 de ranura- que con cuatro categorias dejaba cuatro palitos.
+  /* Medidas y radio ya son el DEFAULT compartido (Barras.aplicarDefaults,
+     arriba), el mismo que usan SLA, Backlog, QA y Experiencia. Antes eran un
+     arreglo propio -tope de 24px y .72/.8 de ranura- que con cuatro
+     categorias dejaba cuatro palitos. La cifra va dentro de la barra como en
+     el resto; la leyenda de abajo sigue dando el conteo por escrito, que es
+     lo que traduce color -> clasificacion. */
   chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[
-    Object.assign({},Barras.GRUESA,{data:cvals,backgroundColor:ccolors,borderRadius:Barras.RADIO})]},
+    {data:cvals,backgroundColor:ccolors}]},
     options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>FMT(c.raw)+' jobs'}}},
-      scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}}}}});
+      scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}}}},
+    plugins:[ETIQUETAS_DENTRO]});
   document.getElementById('legendCatJobs').innerHTML=orden.map((l,i)=>
     `<span><i style="background:${ccolors[i]}"></i>${l}: ${FMT(cvals[i])}</span>`).join('');
   // [ORQ-GRAF2] PIE por Categoria (col A)

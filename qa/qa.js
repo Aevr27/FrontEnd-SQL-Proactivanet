@@ -192,6 +192,13 @@
   function armarShell() {
     kpisEnEspera('—');
 
+    /* Geometria de barra del juego COMPARTIDO (assets/js/barras.js) como
+       DEFAULT del tipo `bar`, igual que hacen dashboard.js y experiencia.js.
+       Antes este modulo no lo llamaba y tenia que copiar Barras.GRUESA y
+       Barras.RADIO dentro de su dataset. Es idempotente: cuando QA va
+       embebido en dashboard.html el tablero ya lo llamo. */
+    Barras.aplicarDefaults();
+
     // Alto de partida: el definitivo lo pone cada bloque cuando sabe cuantas
     // barras tiene. Sin esto la tarjeta nace plana y salta al llegar los datos.
     $('lienzo-grupo').style.height = altoLienzo(TOP_BARRAS);
@@ -453,16 +460,16 @@
       type: 'bar',
       data: {
         labels: [],
-        // Las medidas y el radio salen del juego COMPARTIDO de
-        // assets/js/barras.js -el mismo de SLA, Backlog y Experiencia- en vez
-        // del arreglo propio que tenia este modulo (tope de 22px y .78/.74 de
-        // ranura), que dejaba estas barras mas delgadas que las de al lado.
-        datasets: [Object.assign({}, Barras.GRUESA, {
+        // Las medidas y el radio ya son el default compartido
+        // (Barras.aplicarDefaults, arriba en armarShell): el mismo de SLA,
+        // Backlog y Experiencia. Antes este modulo tenia un arreglo propio
+        // -tope de 22px y .78/.74 de ranura- que dejaba estas barras mas
+        // delgadas que las de al lado.
+        datasets: [{
           data: [],
           backgroundColor: color,
-          hoverBackgroundColor: COLOR.azulOscuro,
-          borderRadius: Barras.RADIO
-        })]
+          hoverBackgroundColor: COLOR.azulOscuro
+        }]
       },
       options: {
         indexAxis: 'y',
@@ -485,8 +492,8 @@
               label: function (item) { return NUM.format(item.parsed.x) + ' tickets'; }
             }
           },
-          // Valor al final de cada barra, sin plugins externos.
-          etiquetasValor: {}
+          // La cifra la pinta el plugin COMPARTIDO (ver mas abajo), que no
+          // se configura por opciones.
         },
         scales: {
           x: {
@@ -503,7 +510,7 @@
           }
         }
       },
-      plugins: [pluginValores]
+      plugins: [ETIQUETAS_DENTRO]
     });
   }
 
@@ -513,23 +520,16 @@
     grafica.update();
   }
 
-  // Dibuja el valor al final de la barra. Chart.js no lo trae de serie y no
-  // vale la pena sumar otra dependencia por esto.
-  var pluginValores = {
-    id: 'etiquetasValor',
-    afterDatasetsDraw: function (chart) {
-      var ctx = chart.ctx;
-      ctx.save();
-      ctx.font = '600 11px "Segoe UI", Roboto, Arial, sans-serif';
-      ctx.fillStyle = TINTA.etiqueta;
-      ctx.textBaseline = 'middle';
-      chart.getDatasetMeta(0).data.forEach(function (barra, i) {
-        var valor = chart.data.datasets[0].data[i];
-        ctx.fillText(NUM.format(valor), barra.x + 6, barra.y);
-      });
-      ctx.restore();
-    }
-  };
+  /* La cifra de cada barra: el plugin COMPARTIDO de assets/js/barras.js,
+     atado al formateador de este modulo. Aqui vivia `pluginValores`, que la
+     pintaba SIEMPRE por fuera de la punta, en gris y con otra fuente; el
+     compartido la mete DENTRO de la barra cuando cabe -con tinta de contraste
+     contra el relleno- y solo la saca afuera en las barras cortas de la cola.
+     El `layout.padding.right` de arriba es justamente el hueco para esas.
+
+     Se crea una sola vez y lo comparten las dos graficas horizontales de la
+     pagina: el plugin no guarda estado. */
+  var ETIQUETAS_DENTRO = Barras.etiquetasDentro(function (v) { return NUM.format(v); });
 
   // Top de la lista que manda el API, de mayor a menor. Se recalcula en cada
   // pintado, asi que una recarga o un rango distinto rehacen el top solos.
