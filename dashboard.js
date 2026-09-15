@@ -3249,24 +3249,28 @@ const TableroSla = (function () {
    3. Tablero de Backlog
    ======================================================================= */
 const TableroBacklog = (function () {
-  // Misma paleta que usa el correo, en el mismo orden: un lider conserva su
-  // color entre el correo, la grafica apilada y la tabla de resumen.
-  // Identidad por lider: paleta categorica COMPARTIDA (assets/js/paleta.js).
-  // El indice del lider en ordenLideres decide el color -no el orden de
-  // pintado-, asi que un lider lleva el mismo color en la tendencia, la
-  // antiguedad por lider, la tabla de resumen y los swatches.
+  // Identidad por lider: la tabla COMPARTIDA de assets/js/paleta.js
+  // (Paleta.registrarLideres / Paleta.colorLider). El color va con el NOMBRE
+  // -el mapa fijo de paleta.js, los colores de siempre-, nunca con el ranking
+  // de una grafica ni con el orden en que llegan los datos; el orden
+  // alfabetico con `Sin Torre` al final es solo el de las LISTAS. Asi una
+  // persona lleva el mismo color en la tendencia, la
+  // antiguedad por lider, la tabla de resumen, los swatches, el correo y los
+  // rankings de Experiencia.
   // AgingSort >= 5 es exactamente "mas de 30 dias" (ver 07_correo_backlog.sql).
   const SORT_MAS_30 = 5;
 
   const graficos = {};
   let datos = null;
+  // El orden canonico de lideres del corte (A->Z, `Sin Torre` al final) tal
+  // como lo devuelve la tabla compartida. Es el orden de referencia de las
+  // leyendas; el color ya no se consulta contra el, sino por nombre.
   let ordenLideres = [];
   const filtro = { lider: null, grupo: null, prioridad: null, aging: null };
   const ETIQUETA_DIM = { lider: 'Lider', grupo: 'Grupo', prioridad: 'Prioridad', aging: 'Antiguedad' };
 
-  function colorLider(nombre) {
-    return Paleta.color(nombre, ordenLideres);
-  }
+  // Atajo local: el color lo resuelve la tabla compartida, no esta pestana.
+  const colorLider = nombre => Paleta.colorLider(nombre);
   function hayFiltro() { return dimensionesActivas(filtro).length > 0; }
   // hayFiltro() solo mira el cross-filter de las graficas. Para los mensajes de
   // "sin datos" tambien cuentan los multiselect de arriba.
@@ -3505,7 +3509,10 @@ const TableroBacklog = (function () {
       .filter(x => !elegidos.length || elegidos.includes(x.Lider));
     const esc = escalasTendencia();
     const fechas = [...new Set(f.map(x => String(x.FechaCorte).slice(0, 10)))].sort();
-    let nombres = [...new Set(f.map(x => x.Lider))];
+    // El orden de los datasets ES el orden de la leyenda, asi que va por el
+    // canonico -A->Z, `Sin Torre` al final- y no por el orden en que el SP
+    // devolvio las filas: dos cargas distintas pintan la misma leyenda.
+    let nombres = Paleta.ordenarLideres([...new Set(f.map(x => x.Lider))]);
     // Con grupo / prioridad / antiguedad activos, los lideres que quedan en
     // cero bajo ese filtro se sacan: una linea plana en 0 solo ensucia.
     if (esc) nombres = nombres.filter(n => (esc.porLider.get(n) ?? 0) > 0);
@@ -3563,8 +3570,9 @@ const TableroBacklog = (function () {
 
     /* Medidas y cifra dentro las pone DashboardBarChart (assets/js/grafica.js);
        aqui solo queda lo propio de esta grafica. El color de lider es
-       IDENTIDAD y sale de la posicion en `ordenLideres` -el mismo criterio que
-       colorLider()-, asi que una persona lleva su color en todas las vistas.
+       IDENTIDAD y lo resuelve por NOMBRE la tabla compartida (Paleta.colorLider,
+       lo mismo que `paleta: { lider: true }`), asi que las barras pueden seguir
+       ordenadas por volumen -mayor a menor- sin que nadie cambie de color.
        El contorno de seleccion manda sobre el juego compartido: va en
        `dataset`, que se aplica despues de las medidas. El radio ya lo pone el
        default compartido (Barras.RADIO). */
@@ -3572,7 +3580,7 @@ const TableroBacklog = (function () {
       canvas: 'chart-lider-bl',
       etiquetas,
       datos: ent.map(e => e[1]),
-      paleta: { orden: ordenLideres },
+      paleta: { lider: true },
       formato: FMT,
       dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
       opciones: {
@@ -3638,8 +3646,8 @@ const TableroBacklog = (function () {
      segmento por lider. Es la misma matriz de siempre; lo unico que cambio
      respecto a la version vertical es el eje.
 
-     El color es IDENTIDAD DE LIDER y lo resuelve colorLider() (Paleta contra
-     `ordenLideres`), asi que una persona lleva el mismo color aqui, en
+     El color es IDENTIDAD DE LIDER y lo resuelve colorLider() por NOMBRE
+     (tabla compartida de paleta.js), asi que una persona lleva el mismo color aqui, en
      "Backlog por lider", en la matriz de abajo, en el drill-down y en el
      correo diario. Los lideres chicos se agrupan en "Otros" -mismo criterio
      que la matriz de "Resumen por antiguedad"-.
@@ -3861,7 +3869,12 @@ const TableroBacklog = (function () {
 
     const totalPorLider = new Map(usados.map(l =>
       [l, buckets.reduce((acc, b) => acc + (valores.get(`${b}|${l}`) ?? 0), 0)]));
-    const lideres = usados.filter(l => l !== 'Otros').sort((a, b) => totalPorLider.get(b) - totalPorLider.get(a));
+    /* El orden de los lideres ES el de la leyenda de la apilada y el de las
+       columnas de la matriz: va por el canonico compartido -A->Z con `Sin
+       Torre` al final- y no por volumen, para que no cambie de un corte a
+       otro. Quien entra al top lo sigue decidiendo el volumen (`top`); esto
+       solo ordena a los que ya entraron. 'Otros' no es un lider: cierra. */
+    const lideres = Paleta.ordenarLideres(usados.filter(l => l !== 'Otros'));
     if (usados.includes('Otros')) lideres.push('Otros');
 
     const totalPorBucket = new Map(buckets.map(b =>
@@ -4143,10 +4156,13 @@ const TableroBacklog = (function () {
       if (miCarga !== cargaVigente) return;
       datos = { resumen, historico, antiguos };
 
-      // El orden de lideres se fija UNA vez, con el corte actual, y de ahi
-      // salen los colores de todas las vistas.
-      const totalPorLider = sumaPor(resumen.prioridad ?? [], 'Lider', 'Total');
-      ordenLideres = [...totalPorLider.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+      // El roster de lideres del corte se da de alta UNA vez en la tabla
+      // compartida, que lo devuelve en el orden canonico -A->Z con `Sin
+      // Torre` al final-. De ahi salen los colores de todas las vistas; el
+      // volumen ya NO decide color, solo el orden de las barras de cada
+      // grafica que se ordene por volumen.
+      ordenLideres = Paleta.registrarLideres(
+        (resumen.prioridad ?? []).map(x => x.Lider));
 
       Object.keys(filtro).forEach(k => { filtro[k] = null; });
       renderTodo();

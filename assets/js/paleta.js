@@ -145,6 +145,165 @@
     return registros[nombre];
   }
 
+
+  /* =======================================================================
+     IDENTIDAD DE LIDER — una sola tabla nombre -> color para TODO el tablero.
+
+     Un lider (torre, director, Product Owner: son las mismas personas vistas
+     desde distintas paginas) tiene UN color y no lo suelta: la tendencia por
+     lider, la apilada de antiguedad, la matriz, los swatches del Backlog y
+     los rankings de Experiencia pintan a la misma persona igual.
+
+     Aqui hay DOS cosas separadas, y conviene no mezclarlas:
+
+     1) EL COLOR sale del NOMBRE, de un mapa escrito a mano
+        (COLOR_LIDER_FIJO, mas abajo). Son los colores que estas personas ya
+        llevaban; lo que cambia es que ya NO dependen del ranking por volumen
+        del corte, asi que nadie se recolorea porque otro suba o baje.
+
+     2) EL ORDEN en que se LISTAN -leyenda, columnas de la matriz- es
+        alfabetico (localeCompare en es, sin distinguir acentos ni caja), con
+        `Sin Torre` SIEMPRE al final: es una categoria conocida del tablero,
+        no una persona, y no debe colarse entre las Ss.
+
+     Los cubos de "sin dato" -"(Sin director)", "(Sin PO)", "Otros"...- NO
+     son lideres: no entran al orden y van de NEUTRO, para que nunca se
+     lleven el color de una persona real.
+
+     Por eso una grafica puede ordenar sus barras por volumen -mayor a menor-
+     sin tocar el color: el puesto en la grafica, el sitio en la leyenda y la
+     identidad del color son tres cosas distintas.
+
+     Uso:
+       Paleta.registrarLideres(nombres)  // da de alta el roster de la pagina
+                                         // y devuelve el orden canonico (la
+                                         // leyenda se pinta con este arreglo)
+       Paleta.colorLider(nombre)         // color de esa persona, siempre igual
+       Paleta.ordenarLideres(nombres)    // solo ordena, sin dar de alta
+     ======================================================================= */
+
+  var SIN_TORRE = 'Sin Torre';
+
+  // "(Sin director)", "(Sin PO)", "(Sin dato)", "Sin asignar", "Otros": cubos
+  // de resto, no personas. `Sin Torre` es la excepcion: es una torre conocida.
+  function esCuboSinDato(nombre) {
+    if (nombre === null || nombre === undefined) return true;
+    var t = String(nombre).trim();
+    if (!t) return true;
+    if (mismaClave(t, SIN_TORRE)) return false;
+    return /^\(?\s*sin\s/i.test(t) || /^otros$/i.test(t);
+  }
+
+  // Comparacion de nombres tolerante a acentos y mayusculas: la misma persona
+  // escrita "JESUS CAMPA" o "Jesús Campa" es UN lider, no dos.
+  function clave(nombre) {
+    var t = String(nombre === null || nombre === undefined ? '' : nombre).trim();
+    if (t.normalize) t = t.normalize('NFD').replace(/[̀-ͯ]/g, '');
+    return t.toLowerCase().replace(/\s+/g, ' ');
+  }
+  function mismaClave(a, b) { return clave(a) === clave(b); }
+
+  function comparaLideres(a, b) {
+    var ta = mismaClave(a, SIN_TORRE), tb = mismaClave(b, SIN_TORRE);
+    if (ta !== tb) return ta ? 1 : -1;          // Sin Torre, siempre al final
+    if (ta && tb) return 0;
+    return clave(a).localeCompare(clave(b), 'es');
+  }
+
+  // Alfabetico con `Sin Torre` al final. Quita duplicados y cubos sin dato:
+  // es el orden de la LEYENDA y de la tabla de colores.
+  function ordenarLideres(nombres) {
+    var vistos = {}, salida = [];
+    (nombres || []).forEach(function (n) {
+      if (esCuboSinDato(n)) return;
+      var k = clave(n);
+      if (k in vistos) return;
+      vistos[k] = true;
+      salida.push(String(n).trim());
+    });
+    return salida.sort(comparaLideres);
+  }
+
+  /* COLOR CONGELADO POR NOMBRE — el reparto historico, escrito a mano.
+
+     Estos son los colores que los lideres YA llevaban en el Backlog y en el
+     correo, cuando el reparto salia del ranking por volumen del corte. Se
+     fijan aqui, por NOMBRE, justo para que dejen de depender del volumen:
+     una persona que baja de puesto -o un corte donde otro sube- ya no
+     recolorea el tablero. Son los mismos colores de siempre, con el mismo
+     origen: posiciones de PALETA_CATEGORICA, ningun hex nuevo.
+
+     El ORDEN en que aparecen los nombres AQUI no significa nada: la leyenda
+     va aparte, en orden alfabetico con `Sin Torre` al final. Este mapa solo
+     dice quien lleva que color.
+
+     Para mover un color, cambiar la posicion de PALETA_CATEGORICA que se
+     pide aqui. Para dar de alta a un lider nuevo, agregarlo con la posicion
+     que le toque: mientras no este en esta lista, cae en el reparto
+     automatico de abajo. */
+  var COLOR_LIDER_FIJO = {
+    'Laura Cardenas':  PALETA_CATEGORICA[0],   // azul
+    'Jesus Campa':     PALETA_CATEGORICA[1],   // rojo
+    'Adriana Lozano':  PALETA_CATEGORICA[2],   // verde
+    'Bendrix Zuir':    PALETA_CATEGORICA[3],   // naranja
+    'Carlos Garcia':   PALETA_CATEGORICA[4],   // morado
+    'Sergio Gonzalez': PALETA_CATEGORICA[5],   // cian
+    'Sin Torre':       PALETA_CATEGORICA[6]    // rosa
+  };
+
+  // El mapa fijo, indexado por la misma clave tolerante a acentos y caja que
+  // usa todo lo demas.
+  var FIJOS = {};
+  (function () {
+    for (var n in COLOR_LIDER_FIJO) {
+      if (COLOR_LIDER_FIJO.hasOwnProperty(n)) FIJOS[clave(n)] = COLOR_LIDER_FIJO[n];
+    }
+  })();
+
+  /* El roster vivo de la pagina. Quien esta en el mapa fijo se lleva SU
+     color; a quien no -un lider nuevo que todavia nadie escribio arriba- se
+     le presta una posicion que no este ocupada, repartida sobre el orden
+     canonico para que al menos salga igual en todas las graficas de la
+     sesion. Se recalcula entero en cada alta -no por orden de llegada como
+     `registro()`-, asi que da igual que grafica pinte primero. */
+  var rosterLideres = [];
+  var colorDeLider = {};
+
+  function repartirLideres() {
+    colorDeLider = {};
+    var tomados = {}, libres = [];
+    rosterLideres.forEach(function (n) {
+      var fijo = FIJOS[clave(n)];
+      if (fijo) { colorDeLider[clave(n)] = fijo; tomados[fijo] = true; }
+    });
+    PALETA_CATEGORICA.forEach(function (c) { if (!tomados[c]) libres.push(c); });
+    var i = 0;
+    rosterLideres.forEach(function (n) {
+      if (colorDeLider[clave(n)]) return;
+      colorDeLider[clave(n)] = libres.length ? libres[i++ % libres.length] : NEUTRO;
+    });
+  }
+
+  // Da de alta los nombres que falten y devuelve el orden canonico COMPLETO.
+  function registrarLideres(nombres) {
+    var antes = rosterLideres.length;
+    rosterLideres = ordenarLideres(rosterLideres.concat(nombres || []));
+    if (rosterLideres.length !== antes) repartirLideres();
+    return rosterLideres.slice();
+  }
+
+  // Color de una persona. El mapa fijo manda siempre -aunque esa persona no
+  // se haya dado de alta en esta vista-. Un cubo sin dato, o un nombre nuevo
+  // que nadie registro, sale de NEUTRO: nunca hereda el color de otro lider.
+  function colorLider(nombre) {
+    if (esCuboSinDato(nombre)) return NEUTRO;
+    var k = clave(nombre);
+    return FIJOS[k] || colorDeLider[k] || NEUTRO;
+  }
+
+  // Orden canonico ya dado de alta, para pintar una leyenda.
+  function lideres() { return rosterLideres.slice(); }
+
   raiz.Paleta = {
     PALETA_CATEGORICA: PALETA_CATEGORICA,
     NEUTRO: NEUTRO,
@@ -153,6 +312,11 @@
     color: color,
     escala: escala,
     mapa: mapa,
-    registro: registro
+    registro: registro,
+    SIN_TORRE: SIN_TORRE,
+    ordenarLideres: ordenarLideres,
+    registrarLideres: registrarLideres,
+    colorLider: colorLider,
+    lideres: lideres
   };
 })(window);

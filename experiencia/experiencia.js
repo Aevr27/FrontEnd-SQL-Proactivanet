@@ -1389,7 +1389,13 @@ function renderTreemap(containerId,items,opts){
     }
     div.style.left=r.x+'px'; div.style.top=r.y+'px';
     div.style.width=Math.max(0,r.w)+'px'; div.style.height=Math.max(0,r.h)+'px';
-    const tono=TM_COLORES[i%TM_COLORES.length];
+    /* `lider: true` -el treemap de la dimension Director / Product Owner-
+       pide el color por NOMBRE a la tabla compartida, igual que las barras:
+       ese recuadro es una persona, y la persona lleva su color aunque el
+       treemap la ordene por area. Sin esa marca -el treemap de agrupacion,
+       cuyos recuadros son Problem / SorIA / Mejora...- sigue el reparto por
+       posicion de la paleta categorica, que ahi no representa a nadie. */
+    const tono=opts.lider ? Paleta.colorLider(r.label) : TM_COLORES[i%TM_COLORES.length];
     div.style.background=tono;
     // .treemap-item pinta el texto en blanco; sobre los verdes claros de la
     // escala hay que devolverlo a carbon o la etiqueta desaparece.
@@ -1538,9 +1544,12 @@ function renderPanelGraf(tab, cats){
   const rowsDim=aplicarFiltroGraf(baseRows, est, 'dim');
   const conteoDim={};
   rowsDim.forEach(r=>{ const v=r[est.dim]||'(Sin dato)'; conteoDim[v]=(conteoDim[v]||0)+1; });
+  // La dimension de este treemap es SIEMPRE una persona -Director o Product
+  // Owner-, asi que el color es identidad y sale de la tabla compartida.
+  registrarDimension(Object.keys(conteoDim));
   renderTreemap('chart'+cap1(tab)+'Dim',
     Object.entries(conteoDim).map(([label,value])=>({label,value})),
-    {selected:est.dimVal, onClick:val=>toggleFiltroGraf(tab,'dimVal',val)});
+    {selected:est.dimVal, lider:true, onClick:val=>toggleFiltroGraf(tab,'dimVal',val)});
 
   const rowsAgrup=aplicarFiltroGraf(baseRows, est, 'agrup');
   const conteoAgrup={};
@@ -1558,17 +1567,31 @@ function renderPanelGraf(tab, cats){
 
 let chartBarDir=null;
 
-/* Aqui vivian REG_DIRECTOR y REG_PO, dos registros de la paleta categorica
-   que repartian un color por director y otro por Product Owner. Se retiraron:
-   las tres graficas que los usaban -"Volumen por Director", "Volumen por
-   Product Owner" y su version "con Iniciativa"- son rankings de UNA sola
-   serie, donde el dato es el largo de la barra y el nombre ya va en el eje.
-   El color no distinguia nada -no hay leyenda que traducir, ni una segunda
-   serie de la que separarse- y el arcoiris hacia pensar que si. Las tres
-   toman ahora el azul de barra ordinaria del default compartido
-   (Barras.aplicarDefaults -> Paleta.AZUL_SERIE), igual que los rankings de
-   QA y el de llamadas por agente. Donde el color SI es identidad -el treemap
-   y el pastel de esta misma pagina- la paleta sigue igual. */
+/* IDENTIDAD DE LIDER en "Volumen por Director", "Volumen por Product Owner"
+   y su version "con Iniciativa".
+
+   Aqui vivieron primero REG_DIRECTOR y REG_PO -dos registros que repartian
+   color por orden de ALTA- y despues nada: las tres graficas pasaron al azul
+   de barra ordinaria (Paleta.AZUL_SERIE). Las dos cosas estaban mal por el
+   mismo motivo: un director o un PO NO es una barra anonima, es la misma
+   persona que el Backlog pinta como lider en su tendencia, en su apilada de
+   antiguedad y en sus swatches. Si ahi es azul, aqui tiene que ser azul.
+
+   Asi que las tres piden el color por NOMBRE -el color de siempre de esa
+   persona, congelado en paleta.js- a la tabla compartida
+   (Paleta.colorLider, via `paleta: { lider: true }`). El registro local
+   desaparece a proposito: un solo mapa nombre -> color para todo el tablero,
+   sin copias que se contradigan.
+
+   El ORDEN de las barras no se toca: los tres rankings siguen de mayor a
+   menor volumen. El color va con la persona, el puesto con la cifra: una
+   persona que baja del primero al quinto lugar conserva su color.
+
+   `registrarDimension()` da de alta el roster de la vista antes de pintar,
+   para que el reparto sea el mismo conjunto en las tres graficas. Los cubos
+   "(Sin director)" y "(Sin PO)" NO son personas: la tabla compartida los
+   deja fuera del orden y los pinta de NEUTRO. */
+function registrarDimension(nombres){ Paleta.registrarLideres(nombres); }
 
 /* Aqui vivia `BARRA_GRUESA`, un alias de Barras.GRUESA que las dos graficas
    de abajo copiaban en su dataset. Ya no hace falta: las dos pasan por
@@ -1595,12 +1618,17 @@ function renderBarrasPO(canvasId, filas, valorDe){
   const datos = filas.filter(r => valorDe(r) > 0);
   /* Medidas, radio y cifra dentro las pone DashboardBarChart; aqui solo queda
      lo propio: el eje con los nombres recortados y el tooltip con el completo.
-     Sin `colores` ni `paleta`: ranking de una sola serie, asi que las barras
-     salen del azul compartido por default. */
+     El color es IDENTIDAD y se pide con el nombre COMPLETO -no con el
+     recortado del eje: dos POs distintos pueden compartir los primeros 15
+     caracteres-, asi que va por `colores`, ya resuelto contra la tabla
+     compartida. Las dos graficas de PO -"Volumen" y "Con Iniciativa"- salen
+     por aqui, de modo que el mismo PO sale del mismo color en las dos. */
+  registrarDimension(datos.map(r => r.po));
   chartsPO[canvasId] = new DashboardBarChart({
     canvas: el,
     etiquetas: datos.map(r => cortaPO(r.po)),
     datos: datos.map(valorDe),
+    colores: datos.map(r => Paleta.colorLider(r.po)),
     formato: FMT,
     opciones: {
       maintainAspectRatio: false,
@@ -1648,14 +1676,18 @@ function renderResumen(){
   const bdCtx=document.getElementById('chartBarDir');
   if(chartBarDir)chartBarDir.destroy();
   /* Ranking HORIZONTAL, pero con el mismo lenguaje que las verticales: el
-     grosor, el radio, la cifra dentro y el azul de barra ordinaria salen de
-     DashboardBarChart, que ademas mide a lo ancho cuando indexAxis es 'y'. Lo
-     unico propio es la orientacion y que el nombre del director va entero en
-     el eje, sin recortar. */
+     grosor, el radio y la cifra dentro salen de DashboardBarChart, que ademas
+     mide a lo ancho cuando indexAxis es 'y'. Lo propio es la orientacion, que
+     el nombre del director va entero en el eje y que el color es IDENTIDAD:
+     `paleta: { lider: true }` lo resuelve por nombre contra la tabla
+     compartida, el mismo color que esa persona lleva en el Backlog. Las
+     barras siguen ordenadas por volumen (mayor -> menor). */
+  registrarDimension(dirRows.map(r=>r.dir));
   chartBarDir=new DashboardBarChart({
     canvas: bdCtx,
     etiquetas: dirRows.map(r=>r.dir),
     datos: dirRows.map(r=>r.vol),
+    paleta: { lider: true },
     formato: FMT,
     opciones:{indexAxis:'y',plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},

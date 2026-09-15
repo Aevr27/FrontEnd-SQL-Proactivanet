@@ -31,7 +31,7 @@
        canvas: 'chart-x',
        etiquetas: nombres,
        datos: totales,
-       paleta: { registro: 'backlog-lider' },   // o { orden: ordenLideres }
+       paleta: { lider: true },   // o { registro: 'x' } / { orden: [...] }
        formato: FMT,
        opciones: {
          maintainAspectRatio: false,
@@ -143,6 +143,11 @@
       if (this.o.colores) return this.o.colores;
       var p = this.o.paleta;
       if (!p) return undefined;
+      /* `lider: true` — identidad de persona. El color sale de la tabla
+         compartida por NOMBRE (Paleta.colorLider), asi que no importa como
+         este ordenada esta grafica: un ranking por volumen puede mover a una
+         persona de primera a quinta sin cambiarle el color. */
+      if (p.lider) return (etiquetas || []).map(function (e) { return Paleta.colorLider(e); });
       if (p.registro) return Paleta.registro(p.registro).escala(etiquetas);
       if (p.orden) return (etiquetas || []).map(function (e) { return Paleta.color(e, p.orden); });
       return Paleta.escala(etiquetas);
