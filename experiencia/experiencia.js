@@ -1202,7 +1202,8 @@ function renderAll(){
 
 // [Pendientes Claude #7]: descarga CSV de los tickets del periodo vigente
 // (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
-// filtrados por Director/PO, sin backend (Blob + <a download>). Si esta
+// filtrados por Director/PO/Manager/Service Owner -- los mismos cuatro que
+// habilitan el boton -- sin backend (Blob + <a download>). Si esta
 // corrida no trajo detalle de tickets (payload.tickets_detalle vacio --
 // no se activo "Actualizar Base de Tickets"), cae a descargar el archivo
 // fisico Detalle_Tickets.xlsx que deberia existir en la misma carpeta de
@@ -1216,7 +1217,8 @@ function descargarTickets(){
   }
   const periodoOk = t => modoTiempo==='mes' ? t.mes===P.mes_actual : t.slot===0;
   const filtrados=(P.tickets_detalle||[]).filter(t=>
-    periodoOk(t) && (!fDir || t.director===fDir) && (!fPO || t.po===fPO));
+    periodoOk(t) && (!fDir || t.director===fDir) && (!fPO || t.po===fPO)
+    && (!fMgr || t.manager===fMgr) && (!fSO || t.so===fSO));
   if(!filtrados.length){ alert('No hay tickets para el filtro y periodo actuales.'); return; }
   const cols=[
     ['fecha','Fecha de registro'], ['codigo','C\u00F3digo'], ['grupo','Grupo'],
@@ -1230,7 +1232,10 @@ function descargarTickets(){
   const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
-  a.href=url; a.download='Tickets_'+(fDir||fPO||'filtro').replace(/[^a-z0-9]+/gi,'_')+'.csv';
+  // Un solo filtro activo -> su nombre en el archivo; varios -> nombre corto.
+  const activos=[fDir,fPO,fMgr,fSO].filter(Boolean);
+  const sufijo=activos.length===1?activos[0]:(activos.length?'filtrado':'filtro');
+  a.href=url; a.download='Tickets_'+sufijo.replace(/[^a-z0-9]+/gi,'_')+'.csv';
   document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 }
