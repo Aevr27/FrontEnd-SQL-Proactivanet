@@ -1252,6 +1252,281 @@ function cargarXLSX(){
   return xlsxCargando;
 }
 
+/* === LIBRO XLSX (inicio) ===
+   No lo carga nadie mas que descargarTickets(); vive aparte para que la
+   prueba tools/tests/LibroTicketsSmoke.js pueda ejecutarlo tal cual, sin
+   navegador. Entre los dos marcadores no hay nada del tablero: ni P, ni
+   document, ni filtros. Todo entra por parametro.
+
+   QUE HACE Y POR QUE ASI
+   ----------------------
+   La hoja que sale de SheetJS es correcta pero pelada: el vendor que trae el
+   proyecto (vendor/xlsx.mini.min.js, la build comunitaria 0.18.5) escribe
+   anchos de columna, altos de fila, combinaciones y autofiltro, pero NO
+   escribe estilos de celda -el `s` de una celda se ignora al guardar- ni
+   paneles congelados. Se comprobo: un libro con `fill` y `!freeze` sale sin
+   `fills` en styles.xml y sin `<pane>` en la hoja.
+
+   Asi que el libro se arma con SheetJS como siempre -mismas filas, mismas
+   columnas, mismos valores- y despues se le retocan DOS piezas del .xlsx ya
+   generado, con el mismo vendor (XLSX.CFB, que lee y escribe el zip):
+
+     xl/styles.xml            se sustituye por la hoja de estilos de abajo
+     xl/worksheets/sheet1.xml se le mete el <pane> congelado y un s="i" por
+                              celda, que apunta a esos estilos
+
+   NO se toca ni un valor: el `s` es una referencia de formato y el texto de
+   cada celda es el que puso SheetJS. Nada de esto altera que tickets se
+   exportan ni con que campos: eso lo decide descargarTickets().
+
+   La paleta es la del tablero, en acento y no en masa: el verde va en la
+   fila de encabezados y en el total, el resto es gris muy claro para las
+   filas alternas y texto casi negro. Un libro verde entero seria peor de
+   leer que el volcado que ya habia. */
+const LibroTickets = (function () {
+  'use strict';
+
+  /* Colores en ARGB, como los quiere OOXML (dos digitos de alfa delante).
+     El verde es el del tablero; los tenues son ese mismo tono lavado, para
+     que el semaforo del Estado no grite. */
+  const VERDE = 'FF166534';        // encabezado de la tabla y cifras fuertes
+  const VERDE_TENUE = 'FFE7F3EC';
+  const AMBAR = 'FF92400E', AMBAR_TENUE = 'FFFDF3E3';
+  const ROJO = 'FF991B1B', ROJO_TENUE = 'FFFCE9E9';
+  const TINTA = 'FF111827', TINTA_SUAVE = 'FF6B7280';
+  const ZEBRA = 'FFF3F6F4';        // fila alterna: gris con una gota de verde
+  const LINEA = 'FFE2E6E4';        // borde de la tabla
+
+  /* Los indices de cellXfs que se usan al pintar. El orden importa: es el
+     mismo del arreglo `xfs` de HOJA_ESTILOS. */
+  const E = {
+    BASE: 0, TITULO: 1, SUBTITULO: 2, META_ETIQUETA: 3, META_VALOR: 4,
+    META_FUERTE: 5, ENCABEZADO: 6, CELDA: 7, CELDA_ZEBRA: 8,
+    CELDA_LARGA: 9, CELDA_LARGA_ZEBRA: 10,
+    ESTADO_VERDE: 11, ESTADO_AMBAR: 12, ESTADO_ROJO: 13,
+  };
+
+  function fuente(attrs) { return '<font>' + attrs + '<name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'; }
+  function relleno(color) { return '<fill><patternFill patternType="solid"><fgColor rgb="' + color + '"/><bgColor indexed="64"/></patternFill></fill>'; }
+
+  /* styles.xml completo. Se escribe entero -y no parcheando el que genera
+     SheetJS- porque ese trae una sola fuente, un solo relleno y un solo xf:
+     no hay nada que conservar. */
+  function hojaEstilos() {
+    const fuentes = [
+      fuente('<sz val="11"/><color rgb="' + TINTA + '"/>'),                          // 0 base
+      fuente('<b/><sz val="16"/><color rgb="' + TINTA + '"/>'),                      // 1 titulo
+      fuente('<sz val="10"/><color rgb="' + TINTA_SUAVE + '"/>'),                    // 2 subtitulo
+      fuente('<b/><sz val="10"/><color rgb="' + TINTA_SUAVE + '"/>'),                // 3 etiqueta
+      fuente('<sz val="10"/><color rgb="' + TINTA + '"/>'),                          // 4 valor
+      fuente('<b/><sz val="11"/><color rgb="FFFFFFFF"/>'),                           // 5 encabezado
+      fuente('<b/><sz val="10"/><color rgb="' + VERDE + '"/>'),                      // 6 cifra fuerte
+      fuente('<b/><sz val="11"/><color rgb="' + VERDE + '"/>'),                      // 7 estado verde
+      fuente('<b/><sz val="11"/><color rgb="' + AMBAR + '"/>'),                      // 8 estado ambar
+      fuente('<b/><sz val="11"/><color rgb="' + ROJO + '"/>'),                       // 9 estado rojo
+    ];
+    const rellenos = [
+      '<fill><patternFill patternType="none"/></fill>',
+      '<fill><patternFill patternType="gray125"/></fill>',
+      relleno(VERDE), relleno(ZEBRA), relleno(VERDE_TENUE),
+      relleno(AMBAR_TENUE), relleno(ROJO_TENUE),
+    ];
+    const lado = '<left style="thin"><color rgb="' + LINEA + '"/></left>'
+      + '<right style="thin"><color rgb="' + LINEA + '"/></right>'
+      + '<top style="thin"><color rgb="' + LINEA + '"/></top>'
+      + '<bottom style="thin"><color rgb="' + LINEA + '"/></bottom><diagonal/>';
+    const bordes = [
+      '<border><left/><right/><top/><bottom/><diagonal/></border>',
+      '<border>' + lado + '</border>',
+    ];
+    // [numFmt, fuente, relleno, borde, alineacion]
+    const xfs = [
+      [0, 0, 0, 0, ''],
+      [0, 1, 0, 0, '<alignment vertical="center"/>'],
+      [0, 2, 0, 0, '<alignment vertical="center"/>'],
+      [0, 3, 0, 0, '<alignment vertical="center"/>'],
+      [0, 4, 0, 0, '<alignment vertical="center"/>'],
+      [0, 6, 0, 0, '<alignment vertical="center"/>'],
+      [0, 5, 2, 1, '<alignment vertical="center" wrapText="1"/>'],
+      [0, 0, 0, 1, '<alignment vertical="top"/>'],
+      [0, 0, 3, 1, '<alignment vertical="top"/>'],
+      [0, 0, 0, 1, '<alignment vertical="top" wrapText="1"/>'],
+      [0, 0, 3, 1, '<alignment vertical="top" wrapText="1"/>'],
+      [0, 7, 4, 1, '<alignment vertical="top"/>'],
+      [0, 8, 5, 1, '<alignment vertical="top"/>'],
+      [0, 9, 6, 1, '<alignment vertical="top"/>'],
+    ];
+    const xf = xfs.map(function (x) {
+      return '<xf numFmtId="' + x[0] + '" fontId="' + x[1] + '" fillId="' + x[2] + '"'
+        + ' borderId="' + x[3] + '" xfId="0" applyFont="1" applyFill="1" applyBorder="1"'
+        + (x[4] ? ' applyAlignment="1">' + x[4] + '</xf>' : '/>');
+    }).join('');
+
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      + '<fonts count="' + fuentes.length + '">' + fuentes.join('') + '</fonts>'
+      + '<fills count="' + rellenos.length + '">' + rellenos.join('') + '</fills>'
+      + '<borders count="' + bordes.length + '">' + bordes.join('') + '</borders>'
+      + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+      + '<cellXfs count="' + xfs.length + '">' + xf + '</cellXfs>'
+      + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+      + '<dxfs count="0"/>'
+      + '<tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleMedium4"/>'
+      + '</styleSheet>';
+  }
+
+  /* Semaforo del Estado, y SOLO del Estado: es la unica columna exportada
+     cuyo valor es una situacion y no un texto libre. No hay columna de SLA
+     ni de prioridad en el export, asi que no se inventa ninguna. Lo que no
+     reconozca sale con el formato normal, sin color. */
+  function estiloEstado(valor) {
+    const v = String(valor || '').toLowerCase();
+    if (!v) return null;
+    if (/(cerrad|resuelt|solucionad|finalizad|complet)/.test(v)) return E.ESTADO_VERDE;
+    if (/(cancelad|rechazad|reabiert|escalad)/.test(v)) return E.ESTADO_ROJO;
+    if (/(pendiente|espera|proceso|curso|asignad|abiert|nuev)/.test(v)) return E.ESTADO_AMBAR;
+    return null;
+  }
+
+  // "A", "B", ... "Z", "AA". Lo mismo que XLSX.utils.encode_col, escrito
+  // aqui para que el bloque no dependa de nada al probarlo suelto.
+  function letraCol(i) {
+    let n = i, s = '';
+    do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+    return s;
+  }
+
+  /* Arma la matriz de la hoja: cabecera del reporte, metadatos, un renglon
+     en blanco y la tabla. Devuelve tambien donde empieza la tabla, que es lo
+     que necesitan el autofiltro, el panel congelado y el pintado.
+
+     `meta` son pares [etiqueta, valor] que decide quien llama: aqui no se
+     consulta ningun filtro ni se inventa ningun dato. */
+  function componer(titulo, subtitulo, meta, encabezados, filas) {
+    const aoa = [[titulo], [subtitulo], []];
+    meta.forEach(function (par) { aoa.push([par[0], par[1]]); });
+    aoa.push([]);
+    const filaEncabezado = aoa.length;      // 0-based: la fila que sigue
+    aoa.push(encabezados.slice());
+    filas.forEach(function (f) { aoa.push(f.slice()); });
+    return { aoa: aoa, filaEncabezado: filaEncabezado };
+  }
+
+  /* El s="i" de cada celda, por posicion. `largas` son las columnas que
+     llevan wrapText -titulo, descripcion, solucion-: las que pueden traer un
+     parrafo y sin ajuste harian la hoja absurdamente ancha. */
+  function estiloDe(fila, col, disposicion) {
+    const d = disposicion;
+    if (fila === 0) return col === 0 ? E.TITULO : E.BASE;
+    if (fila === 1) return col === 0 ? E.SUBTITULO : E.BASE;
+    if (fila < d.filaEncabezado - 1) {
+      if (col === 0) return E.META_ETIQUETA;
+      return d.filaFuerte === fila ? E.META_FUERTE : E.META_VALOR;
+    }
+    if (fila === d.filaEncabezado) return E.ENCABEZADO;
+    if (fila > d.filaEncabezado) {
+      const zebra = (fila - d.filaEncabezado) % 2 === 0;
+      if (col === d.colEstado) {
+        const propio = estiloEstado(d.valorEstado(fila));
+        if (propio !== null) return propio;
+      }
+      if (d.largas.indexOf(col) >= 0) return zebra ? E.CELDA_LARGA_ZEBRA : E.CELDA_LARGA;
+      return zebra ? E.CELDA_ZEBRA : E.CELDA;
+    }
+    return E.BASE;
+  }
+
+  // Cadena binaria -> bytes, para devolverle a CFB el XML retocado.
+  function aBytes(texto) {
+    const b = new Uint8Array(texto.length);
+    for (let i = 0; i < texto.length; i++) b[i] = texto.charCodeAt(i) & 255;
+    return b;
+  }
+  function aTexto(contenido) {
+    let s = '';
+    for (let i = 0; i < contenido.length; i++) s += String.fromCharCode(contenido[i]);
+    return s;
+  }
+
+  /* Congela por debajo del encabezado de la tabla -cabecera y metadatos se
+     quedan a la vista- y mete el s="i" celda por celda. Las dos cosas se
+     hacen sobre el XML ya escrito porque la build comunitaria no las emite:
+     ver la nota de arriba. */
+  function retocarHoja(xml, disposicion) {
+    const primeraDatos = disposicion.filaEncabezado + 2;   // 1-based, tras el encabezado
+    const pane = '<sheetView workbookViewId="0">'
+      + '<pane ySplit="' + (primeraDatos - 1) + '" topLeftCell="A' + primeraDatos + '"'
+      + ' activePane="bottomLeft" state="frozen"/>'
+      + '<selection pane="bottomLeft" activeCell="A' + primeraDatos + '" sqref="A' + primeraDatos + '"/>'
+      + '</sheetView>';
+    let salida = xml.replace('<sheetView workbookViewId="0"/>', pane);
+
+    return salida.replace(/<c r="([A-Z]+)(\d+)"/g, function (todo, letras, numero) {
+      let col = 0;
+      for (let i = 0; i < letras.length; i++) col = col * 26 + (letras.charCodeAt(i) - 64);
+      const estilo = estiloDe(parseInt(numero, 10) - 1, col - 1, disposicion);
+      return estilo ? todo + ' s="' + estilo + '"' : todo;
+    });
+  }
+
+  /* Construye el .xlsx y devuelve sus bytes. `XLSX` entra por parametro -no
+     se toca window- para que la prueba pueda pasarle el mismo vendor.
+
+     opciones: { titulo, subtitulo, meta, etiquetaTotal, encabezados, filas,
+                 anchos, largas, colEstado, hoja } */
+  function construir(XLSX, opciones) {
+    const compuesto = componer(opciones.titulo, opciones.subtitulo,
+      opciones.meta, opciones.encabezados, opciones.filas);
+    const aoa = compuesto.aoa;
+
+    const hoja = XLSX.utils.aoa_to_sheet(aoa);
+    hoja['!cols'] = opciones.anchos.map(function (w) { return { wch: w }; });
+    // Alto propio solo donde hace falta: titulo, subtitulo y encabezado. Las
+    // filas de datos se quedan sin alto fijo a proposito, para que Excel las
+    // crezca solo cuando el texto ajustado ocupe dos o tres renglones.
+    const filas = [];
+    filas[0] = { hpt: 26 };
+    filas[1] = { hpt: 15 };
+    filas[compuesto.filaEncabezado] = { hpt: 22 };
+    hoja['!rows'] = filas;
+    // La cabecera se combina ARRIBA de la tabla; dentro de la tabla no hay
+    // ninguna combinacion, que romperia ordenar y filtrar.
+    const ultimaCol = opciones.encabezados.length - 1;
+    hoja['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: ultimaCol } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: ultimaCol } },
+    ];
+    const refEncabezado = 'A' + (compuesto.filaEncabezado + 1);
+    hoja['!autofilter'] = { ref: refEncabezado + ':' + letraCol(ultimaCol) + aoa.length };
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, opciones.hoja);
+
+    const disposicion = {
+      filaEncabezado: compuesto.filaEncabezado,
+      filaFuerte: opciones.etiquetaTotal
+        ? 3 + opciones.meta.map(function (m) { return m[0]; }).indexOf(opciones.etiquetaTotal)
+        : -1,
+      largas: opciones.largas || [],
+      colEstado: opciones.colEstado === undefined ? -1 : opciones.colEstado,
+      valorEstado: function (fila) {
+        const f = opciones.filas[fila - compuesto.filaEncabezado - 1];
+        return f ? f[opciones.colEstado] : '';
+      },
+    };
+
+    const zip = XLSX.CFB.read(XLSX.write(libro, { type: 'binary', bookType: 'xlsx' }), { type: 'binary' });
+    XLSX.CFB.utils.cfb_add(zip, '/xl/styles.xml', aBytes(hojaEstilos()));
+    const hojaXml = XLSX.CFB.find(zip, '/xl/worksheets/sheet1.xml');
+    XLSX.CFB.utils.cfb_add(zip, '/xl/worksheets/sheet1.xml',
+      aBytes(retocarHoja(aTexto(hojaXml.content), disposicion)));
+    return XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
+  }
+
+  return { construir: construir, estiloEstado: estiloEstado, ESTILOS: E };
+})();
+/* === LIBRO XLSX (fin) === */
+
 // [Pendientes Claude #7]: descarga XLSX de los tickets del periodo vigente
 // (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
 // filtrados por Director/PO/Manager/Service Owner -- los mismos cuatro que
@@ -1285,18 +1560,57 @@ async function descargarTickets(){
     ];
     // Matriz (no json_to_sheet) para fijar el orden de columnas y forzar texto:
     // los codigos y fechas no deben reinterpretarse como numero o fecha Excel.
-    const aoa=[cols.map(c=>c[1])].concat(
-      filtrados.map(t=>cols.map(c=>{const v=t[c[0]]; return v==null?'':String(v);})));
+    const encabezados=cols.map(c=>c[1]);
+    const filas=filtrados.map(t=>cols.map(c=>{const v=t[c[0]]; return v==null?'':String(v);}));
     let XLSX;
     try{ XLSX=await cargarXLSX(); }
     catch(e){ console.error(e); alert('No se pudo cargar el generador de Excel.'); return; }
-    const hoja=XLSX.utils.aoa_to_sheet(aoa);
-    const libro=XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(libro, hoja, 'Tickets');
+    /* El contenido es el de siempre -las mismas filas y las mismas columnas de
+       `cols`-; lo que cambia es la presentacion, que la arma LibroTickets: una
+       cabecera de reporte, los filtros con los que se genero y la tabla con
+       encabezado fijo, autofiltro y filas alternas. Los metadatos salen SOLO
+       de lo que ya tiene el tablero: el periodo vigente (el mismo que decide
+       `periodoOk`), los cuatro filtros -"Todos" cuando no hay uno puesto-, el
+       total de filas exportadas y la fecha del equipo. */
+    const periodo = modoTiempo==='mes'
+      ? (P.meses[P.mes_nums.indexOf(P.mes_actual)] || 'Mes actual')
+      : (P.slots[0] || '0-30 dias');
+    const bytes = LibroTickets.construir(XLSX, {
+      hoja: 'Tickets',
+      titulo: 'Tickets — Dashboard Export',
+      subtitulo: 'Tablero de Experiencia',
+      meta: [
+        ['Periodo', periodo],
+        ['Director', fDir || 'Todos'],
+        ['Product Owner', fPO || 'Todos'],
+        ['Manager', fMgr || 'Todos'],
+        ['Service Owner', fSO || 'Todos'],
+        ['Total de tickets', FMT(filas.length)],
+        ['Exportado', new Date().toLocaleString('es-MX')],
+      ],
+      etiquetaTotal: 'Total de tickets',
+      encabezados,
+      filas,
+      // Anchos por columna, en caracteres. Los tres campos de parrafo
+      // -Titulo, Descripcion, Solucion- van anchos Y con ajuste de texto.
+      anchos: [18, 15, 24, 16, 42, 60, 26, 45, 14, 16],
+      largas: [4, 5, 7],
+      colEstado: 3,
+    });
     // Un solo filtro activo -> su nombre en el archivo; varios -> nombre corto.
     const activos=[fDir,fPO,fMgr,fSO].filter(Boolean);
     const sufijo=activos.length===1?activos[0]:(activos.length?'filtrado':'filtro');
-    XLSX.writeFile(libro, 'Tickets_'+sufijo.replace(/[^a-z0-9]+/gi,'_')+'.xlsx');
+    const nombre='Tickets_'+sufijo.replace(/[^a-z0-9]+/gi,'_')+'.xlsx';
+    /* Se descarga desde un Blob y no con XLSX.writeFile porque el libro ya
+       viene retocado: writeFile volveria a generarlo desde el libro en
+       memoria y se perderian los estilos y el panel congelado. El nombre y su
+       sufijo por filtro son exactamente los de antes. */
+    const url=URL.createObjectURL(new Blob([bytes],
+      {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    const a=document.createElement('a');
+    a.href=url; a.download=nombre;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 60000);
   } finally {
     if(btn){ btn.disabled=false; btn.textContent=rotulo; }
   }
