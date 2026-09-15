@@ -1376,8 +1376,9 @@ const LibroTickets = (function () {
   }
 
   /* Semaforo del Estado, y SOLO del Estado: es la unica columna exportada
-     cuyo valor es una situacion y no un texto libre. No hay columna de SLA
-     ni de prioridad en el export, asi que no se inventa ninguna. Lo que no
+     cuyo valor es una situacion y no un texto libre. Subestado y Prioridad
+     tambien se exportan, pero sin color: sus valores no tienen una escala
+     acordada y no se inventa ninguna. Lo que no
      reconozca sale con el formato normal, sin color. */
   function estiloEstado(valor) {
     const v = String(valor || '').toLowerCase();
@@ -1527,6 +1528,44 @@ const LibroTickets = (function () {
 })();
 /* === LIBRO XLSX (fin) === */
 
+/* === COLUMNAS XLSX (inicio) ===
+   Las 24 columnas del export, en el orden pedido: [llave de tickets_detalle,
+   encabezado, ancho]. El encabezado es el nombre del campo en dbo.vw_Tickets.
+   Categoria y Tipo leen las llaves *_origen (los campos crudos), no
+   categoria_raw/tipo, que son CategoriaV2 y TipoTicket de la vista de slots.
+   tools/tests/LibroTicketsSmoke.js recorta y ejecuta este bloque tal cual. */
+const COLUMNAS_TICKETS = [
+  ['fecha_registro', 'FechaRegistro', 19],
+  ['fecha_estimada_resolucion', 'FechaEstimadaResolucion', 19],
+  ['codigo', 'CodigoTicket', 15],
+  ['grupo', 'Grupo', 24],
+  ['tecnico_segunda_linea', 'TecnicoSegundaLinea', 26],
+  ['estado', 'Estado', 16],
+  ['subestado', 'Subestado', 18],
+  ['prioridad', 'Prioridad', 12],
+  ['titulo', 'Titulo', 42],
+  ['descripcion', 'Descripcion', 60],
+  ['cliente', 'Cliente', 24],
+  ['sucursal', 'Sucursal', 24],
+  ['categoria_origen', 'Categoria', 30],
+  ['solucion', 'SolucionUsuario', 45],
+  ['fecha_firma_solucion', 'FechaFirmaSolucion', 19],
+  ['fecha_ultima_modificacion', 'FechaUltimaModificacion', 19],
+  ['fecha_firma_cierre', 'FechaFirmaCierre', 19],
+  ['firma_cierre_revocacion', 'FirmaCierreRevocacion', 24],
+  ['firma_solucion', 'FirmaSolucion', 24],
+  ['responsable_ultima_modificacion', 'ResponsableUltimaModificacion', 26],
+  ['notificado_por', 'NotificadoPor', 26],
+  ['tipo_origen', 'Tipo', 14],
+  ['registrado_por', 'RegistradoPor', 26],
+  ['tipo_rel', 'TipoRelacion', 16],
+];
+// Un ticket -> su renglon, todo como texto; lo que no venga sale vacio.
+function filaTicket(t, cols) {
+  return cols.map(function (c) { const v = t[c[0]]; return v == null ? '' : String(v); });
+}
+/* === COLUMNAS XLSX (fin) === */
+
 // [Pendientes Claude #7]: descarga XLSX de los tickets del periodo vigente
 // (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
 // filtrados por Director/PO/Manager/Service Owner -- los mismos cuatro que
@@ -1552,16 +1591,11 @@ async function descargarTickets(){
       periodoOk(t) && (!fDir || t.director===fDir) && (!fPO || t.po===fPO)
       && (!fMgr || t.manager===fMgr) && (!fSO || t.so===fSO));
     if(!filtrados.length){ alert('No hay tickets para el filtro y periodo actuales.'); return; }
-    const cols=[
-      ['fecha','Fecha de registro'], ['codigo','Código'], ['grupo','Grupo'],
-      ['estado','Estado'], ['titulo','Título'], ['descripcion','Descripción'],
-      ['categoria_raw','Categoría'], ['solucion','Solución para el usuario'],
-      ['tipo','Tipo'], ['tipo_rel','Tipo relación'],
-    ];
+    const cols=COLUMNAS_TICKETS;
     // Matriz (no json_to_sheet) para fijar el orden de columnas y forzar texto:
     // los codigos y fechas no deben reinterpretarse como numero o fecha Excel.
     const encabezados=cols.map(c=>c[1]);
-    const filas=filtrados.map(t=>cols.map(c=>{const v=t[c[0]]; return v==null?'':String(v);}));
+    const filas=filtrados.map(t=>filaTicket(t, cols));
     let XLSX;
     try{ XLSX=await cargarXLSX(); }
     catch(e){ console.error(e); alert('No se pudo cargar el generador de Excel.'); return; }
@@ -1592,10 +1626,12 @@ async function descargarTickets(){
       encabezados,
       filas,
       // Anchos por columna, en caracteres. Los tres campos de parrafo
-      // -Titulo, Descripcion, Solucion- van anchos Y con ajuste de texto.
-      anchos: [18, 15, 24, 16, 42, 60, 26, 45, 14, 16],
-      largas: [4, 5, 7],
-      colEstado: 3,
+      // -Titulo, Descripcion, SolucionUsuario- van anchos Y con ajuste de
+      // texto; sus posiciones se buscan por llave para no desfasarse si el
+      // orden de COLUMNAS_TICKETS cambia.
+      anchos: cols.map(c=>c[2]),
+      largas: ['titulo','descripcion','solucion'].map(k=>cols.findIndex(c=>c[0]===k)),
+      colEstado: cols.findIndex(c=>c[0]==='estado'),
     });
     // Un solo filtro activo -> su nombre en el archivo; varios -> nombre corto.
     const activos=[fDir,fPO,fMgr,fSO].filter(Boolean);

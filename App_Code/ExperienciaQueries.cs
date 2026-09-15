@@ -695,7 +695,15 @@ public static class ExperienciaQueries
             "SELECT TOP (@tope) b.CodigoTicket, b.FechaRegistro, b.Grupo, b.Estado, " +
             "       t.Titulo, t.Descripcion, b.CategoriaV2, t.SolucionUsuario, " +
             "       b.TipoTicket, b.TipoRelacion, b.C1, b.C1C2, b.Slot, " +
-            "       Mes = CONVERT(INT, t.Calendar_Month) " +
+            "       Mes = CONVERT(INT, t.Calendar_Month), " +
+            // Del 14 en adelante: columnas de dbo.vw_Tickets que solo pide el
+            // XLSX. No tocan la vista base ni el filtro, solo la proyeccion.
+            "       t.FechaEstimadaResolucion, t.TecnicoSegundaLinea, t.Subestado, " +
+            "       t.Prioridad, t.Cliente, t.Sucursal, t.Categoria, " +
+            "       t.FechaFirmaSolucion, t.FechaUltimaModificacion, t.FechaFirmaCierre, " +
+            "       t.FirmaCierreRevocacion, t.FirmaSolucion, " +
+            "       t.ResponsableUltimaModificacion, t.NotificadoPor, t.Tipo, " +
+            "       t.RegistradoPor " +
             "FROM dbo.vw_TicketsSlotsBase AS b " +
             "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
             "WHERE b.Slot = 0 " +
@@ -723,6 +731,29 @@ public static class ExperienciaQueries
                     t["tipo_rel"] = Texto(rd.GetValue(9));
                     t["slot"] = Entero(rd.GetValue(12));
                     t["mes"] = Entero(rd.GetValue(13));
+
+                    // Campos crudos de dbo.vw_Tickets para el XLSX. Categoria y
+                    // Tipo van con sufijo _origen porque 'categoria_raw' y
+                    // 'tipo' ya existen y son otra cosa (CategoriaV2 y
+                    // TipoTicket de la vista de slots). Las fechas llevan hora:
+                    // en firma y modificacion el dia solo no dice nada.
+                    t["fecha_registro"] = FechaHora(rd.GetValue(1));
+                    t["fecha_estimada_resolucion"] = FechaHora(rd.GetValue(14));
+                    t["tecnico_segunda_linea"] = Texto(rd.GetValue(15));
+                    t["subestado"] = Texto(rd.GetValue(16));
+                    t["prioridad"] = Texto(rd.GetValue(17));
+                    t["cliente"] = Texto(rd.GetValue(18));
+                    t["sucursal"] = Texto(rd.GetValue(19));
+                    t["categoria_origen"] = Texto(rd.GetValue(20));
+                    t["fecha_firma_solucion"] = FechaHora(rd.GetValue(21));
+                    t["fecha_ultima_modificacion"] = FechaHora(rd.GetValue(22));
+                    t["fecha_firma_cierre"] = FechaHora(rd.GetValue(23));
+                    t["firma_cierre_revocacion"] = Texto(rd.GetValue(24));
+                    t["firma_solucion"] = Texto(rd.GetValue(25));
+                    t["responsable_ultima_modificacion"] = Texto(rd.GetValue(26));
+                    t["notificado_por"] = Texto(rd.GetValue(27));
+                    t["tipo_origen"] = Texto(rd.GetValue(28));
+                    t["registrado_por"] = Texto(rd.GetValue(29));
 
                     // El tablero filtra el export por Director/PO, asi que
                     // cada ticket carga los suyos, resueltos igual que su
@@ -1409,6 +1440,14 @@ public static class ExperienciaQueries
         if (v == null || v is DBNull) return null;
         return Convert.ToDateTime(v, CultureInfo.InvariantCulture)
                       .ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    // Fecha con hora, como texto: las columnas de dbo.Tickets son DATETIME2(0).
+    private static string FechaHora(object v)
+    {
+        if (v == null || v is DBNull) return null;
+        return Convert.ToDateTime(v, CultureInfo.InvariantCulture)
+                      .ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
     }
 
     private static int DiasDesde(object v, DateTime hoy)

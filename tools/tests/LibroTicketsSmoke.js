@@ -7,8 +7,8 @@
 // de SheetJS que usa la pagina (experiencia/vendor/xlsx.mini.min.js), y abre
 // el .xlsx resultante para comprobar dos cosas distintas:
 //
-//   1) que el CONTENIDO es el mismo que se exportaba antes -las mismas filas,
-//      las mismas columnas y los mismos valores, como texto-, y
+//   1) que el CONTENIDO es el esperado -las 24 columnas del bloque
+//      COLUMNAS XLSX, en su orden, y cada valor como texto bajo su encabezado-, y
 //   2) que el FORMATO llego al archivo: estilos, panel congelado, autofiltro,
 //      anchos y ajuste de texto, que la build comunitaria de SheetJS no
 //      escribe por su cuenta.
@@ -45,20 +45,46 @@ function Check(caso, esperado, obtenido) {
 
 var LibroTickets = cargarLibroTickets();
 
-// Las mismas diez columnas que exporta descargarTickets(), en su orden.
-var ENCABEZADOS = ['Fecha de registro', 'Código', 'Grupo', 'Estado', 'Título',
-  'Descripción', 'Categoría', 'Solución para el usuario', 'Tipo', 'Tipo relación'];
+// Las columnas REALES del export (bloque COLUMNAS XLSX de experiencia.js).
+function cargarColumnas() {
+  var fuente = fs.readFileSync(path.join(raiz, 'experiencia', 'experiencia.js'), 'utf8');
+  var ini = fuente.indexOf('/* === COLUMNAS XLSX (inicio) ===');
+  var fin = fuente.indexOf('/* === COLUMNAS XLSX (fin) === */');
+  if (ini < 0 || fin < 0) throw new Error('no se encontraron los marcadores COLUMNAS XLSX en experiencia/experiencia.js');
+  return (new Function(fuente.slice(ini, fin) + '\nreturn { cols: COLUMNAS_TICKETS, fila: filaTicket };'))();
+}
+var Columnas = cargarColumnas();
+var COLS = Columnas.cols;
 
-var FILAS = [
-  ['2026-09-01 08:12', 'INC-000101', 'Mesa de Servicio', 'Cerrado', 'Caja no imprime',
-   'Descripción larga '.repeat(12), 'S-Punto de Venta', 'Se reinicio el servicio', 'Incidencia', 'Problem'],
-  ['2026-09-02 09:30', 'INC-000102', 'Infraestructura', 'Pendiente', 'VPN intermitente',
-   'Otra descripción', 'S-Redes', '', 'Incidencia', ''],
-  ['2026-09-03 10:45', 'INC-000103', 'Aplicaciones', 'Reabierto', 'Error 500 en portal',
-   '', 'S-Portal', 'Pendiente de analisis', 'Petición', 'Mejora'],
-  ['2026-09-04 11:00', 'REQ-000104', 'Retail', 'Estado desconocido', 'Alta de usuario',
-   '', 'S-Retail', '', 'Petición', ''],
-];
+// Los 24 campos pedidos, en su orden exacto.
+var PEDIDOS = ['FechaRegistro', 'FechaEstimadaResolucion', 'CodigoTicket', 'Grupo',
+  'TecnicoSegundaLinea', 'Estado', 'Subestado', 'Prioridad', 'Titulo', 'Descripcion',
+  'Cliente', 'Sucursal', 'Categoria', 'SolucionUsuario', 'FechaFirmaSolucion',
+  'FechaUltimaModificacion', 'FechaFirmaCierre', 'FirmaCierreRevocacion', 'FirmaSolucion',
+  'ResponsableUltimaModificacion', 'NotificadoPor', 'Tipo', 'RegistradoPor', 'TipoRelacion'];
+
+// Las llaves que escribe LeerTicketsDetalle (App_Code/ExperienciaQueries.cs):
+// si una columna apunta a una llave que el servidor no manda, saldria vacia.
+var servidor = fs.readFileSync(path.join(raiz, 'App_Code', 'ExperienciaQueries.cs'), 'utf8');
+var llavesServidor = {};
+(servidor.match(/t\["([a-z_0-9]+)"\]\s*=/g) || []).forEach(function (m) {
+  llavesServidor[m.match(/"([^"]+)"/)[1]] = true;
+});
+
+var ENCABEZADOS = COLS.map(function (c) { return c[1]; });
+
+var ESTADOS = ['Cerrado', 'Pendiente', 'Reabierto', 'Estado desconocido'];
+// Cada ticket lleva en cada llave un valor que dice su columna y su fila, asi
+// un desfase entre llave y encabezado se ve en la comparacion.
+var TICKETS = ESTADOS.map(function (estado, f) {
+  var t = { director: 'X', po: 'Y', slot: 0, mes: 9, categoria_raw: 'NO-EXPORTAR', tipo: 'NO-EXPORTAR' };
+  COLS.forEach(function (c) { t[c[0]] = c[1] + '#' + f; });
+  t.estado = estado;
+  t.codigo = '000' + (101 + f);     // parece numero: debe seguir texto
+  if (f === 1) t.subestado = null;  // null sale vacio
+  return t;
+});
+var FILAS = TICKETS.map(function (t) { return Columnas.fila(t, COLS); });
 
 var META = [
   ['Periodo', 'Sep (0-30d)'],
@@ -78,10 +104,29 @@ var bytes = LibroTickets.construir(XLSX, {
   etiquetaTotal: 'Total de tickets',
   encabezados: ENCABEZADOS,
   filas: FILAS,
-  anchos: [18, 15, 24, 16, 42, 60, 26, 45, 14, 16],
-  largas: [4, 5, 7],
-  colEstado: 3,
+  anchos: COLS.map(function (c) { return c[2]; }),
+  largas: ['titulo', 'descripcion', 'solucion'].map(function (k) { return COLS.findIndex(function (c) { return c[0] === k; }); }),
+  colEstado: COLS.findIndex(function (c) { return c[0] === 'estado'; }),
 });
+
+// ------------------------------------------------------------------ columnas
+Check('son 24 columnas', '24', String(COLS.length));
+Check('los encabezados son los 24 pedidos, en su orden', PEDIDOS.join('|'), ENCABEZADOS.join('|'));
+Check('ninguna llave repetida', String(COLS.length),
+  String(Object.keys(COLS.reduce(function (o, c) { o[c[0]] = 1; return o; }, {})).length));
+Check('cada llave la manda LeerTicketsDetalle', '',
+  COLS.filter(function (c) { return !llavesServidor[c[0]]; }).map(function (c) { return c[0]; }).join(','));
+Check('Categoria y Tipo son los campos crudos, no CategoriaV2/TipoTicket', 'true',
+  FILAS[0].indexOf('NO-EXPORTAR') < 0);
+Check('un null sale vacio', '', FILAS[1][PEDIDOS.indexOf('Subestado')]);
+var mapeo = true;
+FILAS.forEach(function (fila, f) {
+  COLS.forEach(function (c, k) {
+    if (c[0] === 'estado' || c[0] === 'codigo' || (f === 1 && c[0] === 'subestado')) return;
+    if (fila[k] !== c[1] + '#' + f) mapeo = false;
+  });
+});
+Check('cada valor cae bajo su encabezado', 'true', mapeo);
 
 // ------------------------------------------------------------------ contenido
 var libro = XLSX.read(Buffer.from(bytes), { type: 'buffer' });
@@ -109,7 +154,7 @@ for (var f = 0; f < FILAS.length; f++) {
   }
 }
 Check('cada valor llega intacto, sin reinterpretar', 'true', iguales);
-Check('el codigo sigue siendo texto, no numero', 's', hoja[XLSX.utils.encode_cell({ r: iEnc + 1, c: 1 })].t);
+Check('el codigo sigue siendo texto, no numero', 's', hoja[XLSX.utils.encode_cell({ r: iEnc + 1, c: PEDIDOS.indexOf('CodigoTicket') })].t);
 
 // -------------------------------------------------------------------- cabecera
 Check('el titulo del reporte esta arriba', 'Tickets — Dashboard Export', matriz[0][0]);
@@ -141,7 +186,7 @@ Check('el encabezado de la tabla queda congelado', 'true',
   hojaXml.indexOf('<pane ySplit="' + (iEnc + 1) + '" topLeftCell="A' + (iEnc + 2) + '"') >= 0
   && hojaXml.indexOf('state="frozen"') >= 0);
 Check('el autofiltro va sobre la tabla, no sobre la cabecera', 'true',
-  hojaXml.indexOf('<autoFilter ref="A' + (iEnc + 1) + ':J' + (matriz.length) + '"') >= 0);
+  hojaXml.indexOf('<autoFilter ref="A' + (iEnc + 1) + ':X' + (matriz.length) + '"') >= 0);
 Check('las columnas llevan ancho propio', 'true', /<col min="1"[^>]*customWidth="1"/.test(hojaXml));
 Check('las celdas apuntan a un estilo', 'true', / s="[0-9]+"/.test(hojaXml));
 
@@ -159,7 +204,7 @@ Check('Cerrado lleva enfasis verde', String(E.ESTADO_VERDE), String(LibroTickets
 Check('Pendiente lleva enfasis ambar', String(E.ESTADO_AMBAR), String(LibroTickets.estiloEstado('Pendiente')));
 Check('Reabierto lleva enfasis rojo', String(E.ESTADO_ROJO), String(LibroTickets.estiloEstado('Reabierto')));
 Check('un estado desconocido no se pinta', 'null', String(LibroTickets.estiloEstado('Estado desconocido')));
-Check('el valor del estado no cambia', 'Reabierto', matriz[iEnc + 3][3]);
+Check('el valor del estado no cambia', 'Reabierto', matriz[iEnc + 3][PEDIDOS.indexOf('Estado')]);
 
 console.log(fallos ? ('FALLOS: ' + fallos) : 'TODO PASA');
 process.exit(fallos ? 1 : 0);
