@@ -3954,10 +3954,15 @@ const TableroBacklog = (function () {
 
   /* Cuantas filas lista la seccion. La eleccion es CRONOLOGICA, no de edad:
      de los tickets del corte que pasan los filtros del tablero se listan los
-     TOPE_ANTIGUOS mas viejos, haya los que haya. Antes el endpoint pedia solo
-     los de mas de 120 dias y la seccion desaparecia cuando el corte no tenia
-     ninguno tan viejo; ese umbral ya no participa (ver handlers/
-     backlog_antiguos.ashx). Si hay menos de TOPE_ANTIGUOS, se listan todos. */
+     TOPE_ANTIGUOS mas viejos DE CADA LIDER, haya los que haya. No hay edad
+     minima: un lider con 100 tickets aporta sus 10 mas viejos, y uno con 3
+     aporta los 3, aunque sean de ayer.
+
+     La eleccion ya viene hecha del servidor: backlog_antiguos.ashx recorta
+     por lider -ROW_NUMBER() OVER (PARTITION BY Lider ORDER BY FechaRegistro)-
+     y manda solo esas filas, no el corte entero. TOPE_ANTIGUOS es el mismo
+     numero que TopePorLider del handler; aqui se vuelve a aplicar porque el
+     cross-filter del tablero puede recortar mas, nunca mas de la cuenta. */
   const TOPE_ANTIGUOS = 10;
 
   /* De mas viejo a mas nuevo por fecha de registro. Se ordena por
@@ -3991,21 +3996,42 @@ const TableroBacklog = (function () {
       return;
     }
 
-    // Los mas antiguos del rango, primero. El corte es el TOPE, no la edad.
-    const listados = tickets.slice().sort(masViejoPrimero).slice(0, tope);
+    /* La seleccion es POR LIDER, no global: cada lider aporta sus `tope`
+       tickets mas viejos por FechaRegistro. Nadie tapa a nadie -un lider con
+       mucho backlog viejo ya no se lleva la tabla entera- y el que tiene
+       menos de `tope` sale con los que tenga.
 
-    /* Se agrupan por lider SOLO para presentarlos: la seleccion ya esta hecha
-       arriba y es global, asi que los grupos salen en el orden en que aparece
-       su ticket mas viejo y ninguno adelanta a otro por tener mas filas. */
+       El servidor ya manda recortado; esto se vuelve a aplicar porque el
+       cross-filter de arriba (grupo, prioridad) puede quitar filas de un
+       lider, nunca anadirlas. */
     const porLider = new Map();
-    for (const t of listados) {
+    for (const t of tickets) {
       if (!porLider.has(t.Lider)) porLider.set(t.Lider, []);
       porLider.get(t.Lider).push(t);
     }
-    const grupos = [...porLider.entries()];
+    for (const [lider, lista] of porLider) {
+      porLider.set(lider, lista.sort(masViejoPrimero).slice(0, tope));
+    }
 
-    cap.innerHTML = `Los ${FMT(listados.length)} tickets mas antiguos `
-      + `<span class="suave">de los ${FMT(tickets.length)} en backlog de este corte · `
+    /* Los lideres se LISTAN en el orden canonico -A->Z con `Sin Torre` al
+       final, el mismo de las leyendas (assets/js/paleta.js)-, y no en el
+       orden en que el servidor mando sus filas: asi la tabla sale igual entre
+       dos cargas. Lo que la tabla compartida no reconozca como lider -un cubo
+       de resto, un nombre raro- se va al final sin perderse, en el orden en
+       que llego: `sort` es estable y todos empatan en Infinity. */
+    const rango = new Map(Paleta.ordenarLideres([...porLider.keys()])
+      .map((n, i) => [n, i]));
+    const grupos = [...porLider.keys()]
+      .sort((a, b) => (rango.get(a) ?? Infinity) - (rango.get(b) ?? Infinity))
+      .map(l => [l, porLider.get(l)]);
+    const listados = grupos.reduce((n, g) => n + g[1].length, 0);
+
+    // `total` es del corte ENTERO, antes del recorte por lider del handler;
+    // si un endpoint viejo no lo manda, se cae a lo que haya llegado.
+    const enBacklog = d.total ?? (d.tickets ?? []).length;
+    cap.innerHTML = `Los ${FMT(tope)} tickets mas antiguos de cada lider `
+      + `<span class="suave">(${FMT(listados)} en total, de los `
+      + `${FMT(enBacklog)} en backlog de este corte) · `
       + `del mas viejo al mas nuevo por fecha de registro</span>`;
 
     cont.innerHTML = grupos.map(([lider, lista]) => {
