@@ -1199,12 +1199,38 @@ function renderAll(){
   if(btnDesc) btnDesc.style.display=(fDir||fPO||fMgr||fSO)?'inline-block':'none';
 }
 
-// [Pendientes Claude #7]: descarga XLSX de los tickets del periodo vigente
-// (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
-// filtrados por Director/PO/Manager/Service Owner -- los mismos cuatro que
-// habilitan el boton. El libro se arma en memoria con SheetJS
-// (vendor/xlsx.mini.min.js) y se descarga sin backend: ya no se busca
-// ningun archivo fisico en la carpeta del tablero.
+// POR QUE NO BASTA CON P.tickets_detalle
+// -------------------------------------
+// handlers/experiencia.ashx solo llena tickets_detalle cuando recibe
+// ?detalle=N; por omision son 0 y devuelve la lista vacia (es el unico bloque
+// del payload que cuesta decenas de miles de filas, y el tablero -- KPIs,
+// graficas, categorias -- no lo necesita para nada). La carga inicial no pasa
+// ese parametro, asi que en la VM el arreglo siempre llega vacio y el export
+// moria en "No hay tickets".
+//
+// Ninguna otra llave trae tickets individuales: categorias y categorias_v2
+// son conteos agregados por categoria (vol_slot/vol_mes) y
+// categorias_por_folio va indexada por folio de Problem, no de ticket.
+//
+// Asi que el detalle se pide al MISMO handler, una sola vez, cuando se pulsa
+// el boton -- no en la carga del tablero, que ya pesa 1.6 MB sin el. El
+// resultado se guarda en memoria: dos descargas seguidas no vuelven a pedirlo.
+const TOPE_TICKETS = 50000;      // el mismo tope que impone el handler
+let ticketsCache = (P.tickets_detalle && P.tickets_detalle.length) ? P.tickets_detalle : null;
+let ticketsPidiendo = null;
+function pedirTickets(){
+  if(ticketsCache) return Promise.resolve(ticketsCache);
+  if(!ticketsPidiendo){
+    const url=new URL(API_URL);
+    url.searchParams.set('detalle', String(TOPE_TICKETS));
+    ticketsPidiendo=traer(url.href).then(d=>{
+      ticketsCache=(d && d.tickets_detalle) || [];
+      return ticketsCache;
+    }).catch(e=>{ ticketsPidiendo=null; throw e; });
+  }
+  return ticketsPidiendo;
+}
+
 // SheetJS se trae la primera vez que se pulsa el boton, no al cargar el
 // tablero: son 250 KB que la mayoria de las visitas no necesita. La ruta se
 // resuelve contra BASE (la carpeta de ESTE archivo) porque embebido en
@@ -1226,32 +1252,54 @@ function cargarXLSX(){
   return xlsxCargando;
 }
 
+// [Pendientes Claude #7]: descarga XLSX de los tickets del periodo vigente
+// (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
+// filtrados por Director/PO/Manager/Service Owner -- los mismos cuatro que
+// habilitan el boton. El detalle se pide al handler al pulsar (ver
+// pedirTickets); el libro se arma en memoria con SheetJS
+// (vendor/xlsx.mini.min.js) y se descarga sin backend: ya no se busca
+// ningun archivo fisico en la carpeta del tablero.
 async function descargarTickets(){
-  const periodoOk = t => modoTiempo==='mes' ? t.mes===P.mes_actual : t.slot===0;
-  const filtrados=(P.tickets_detalle||[]).filter(t=>
-    periodoOk(t) && (!fDir || t.director===fDir) && (!fPO || t.po===fPO)
-    && (!fMgr || t.manager===fMgr) && (!fSO || t.so===fSO));
-  if(!filtrados.length){ alert('No hay tickets para el filtro y periodo actuales.'); return; }
-  const cols=[
-    ['fecha','Fecha de registro'], ['codigo','Código'], ['grupo','Grupo'],
-    ['estado','Estado'], ['titulo','Título'], ['descripcion','Descripción'],
-    ['categoria_raw','Categoría'], ['solucion','Solución para el usuario'],
-    ['tipo','Tipo'], ['tipo_rel','Tipo relación'],
-  ];
-  // Matriz (no json_to_sheet) para fijar el orden de columnas y forzar texto:
-  // los codigos y fechas no deben reinterpretarse como numero o fecha Excel.
-  const aoa=[cols.map(c=>c[1])].concat(
-    filtrados.map(t=>cols.map(c=>{const v=t[c[0]]; return v==null?'':String(v);})));
-  let XLSX;
-  try{ XLSX=await cargarXLSX(); }
-  catch(e){ console.error(e); alert('No se pudo cargar el generador de Excel.'); return; }
-  const hoja=XLSX.utils.aoa_to_sheet(aoa);
-  const libro=XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(libro, hoja, 'Tickets');
-  // Un solo filtro activo -> su nombre en el archivo; varios -> nombre corto.
-  const activos=[fDir,fPO,fMgr,fSO].filter(Boolean);
-  const sufijo=activos.length===1?activos[0]:(activos.length?'filtrado':'filtro');
-  XLSX.writeFile(libro, 'Tickets_'+sufijo.replace(/[^a-z0-9]+/gi,'_')+'.xlsx');
+  const btn=document.getElementById('btnDescargaTickets');
+  const rotulo=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Preparando...'; }
+  try{
+    let tickets;
+    try{ tickets=await pedirTickets(); }
+    catch(e){ console.error(e); alert('No se pudo traer el detalle de tickets: '+e.message); return; }
+    // El handler corta con TOP (@tope) ORDER BY FechaRegistro DESC: si vino
+    // justo el tope, lo que falta son los mas viejos y conviene decirlo.
+    if(tickets.length>=TOPE_TICKETS)
+      alert('El servidor devolvio el maximo de '+TOPE_TICKETS+' tickets; puede '
+           +'faltar lo mas antiguo del periodo. El archivo se genera con lo recibido.');
+    const periodoOk = t => modoTiempo==='mes' ? t.mes===P.mes_actual : t.slot===0;
+    const filtrados=tickets.filter(t=>
+      periodoOk(t) && (!fDir || t.director===fDir) && (!fPO || t.po===fPO)
+      && (!fMgr || t.manager===fMgr) && (!fSO || t.so===fSO));
+    if(!filtrados.length){ alert('No hay tickets para el filtro y periodo actuales.'); return; }
+    const cols=[
+      ['fecha','Fecha de registro'], ['codigo','Código'], ['grupo','Grupo'],
+      ['estado','Estado'], ['titulo','Título'], ['descripcion','Descripción'],
+      ['categoria_raw','Categoría'], ['solucion','Solución para el usuario'],
+      ['tipo','Tipo'], ['tipo_rel','Tipo relación'],
+    ];
+    // Matriz (no json_to_sheet) para fijar el orden de columnas y forzar texto:
+    // los codigos y fechas no deben reinterpretarse como numero o fecha Excel.
+    const aoa=[cols.map(c=>c[1])].concat(
+      filtrados.map(t=>cols.map(c=>{const v=t[c[0]]; return v==null?'':String(v);})));
+    let XLSX;
+    try{ XLSX=await cargarXLSX(); }
+    catch(e){ console.error(e); alert('No se pudo cargar el generador de Excel.'); return; }
+    const hoja=XLSX.utils.aoa_to_sheet(aoa);
+    const libro=XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Tickets');
+    // Un solo filtro activo -> su nombre en el archivo; varios -> nombre corto.
+    const activos=[fDir,fPO,fMgr,fSO].filter(Boolean);
+    const sufijo=activos.length===1?activos[0]:(activos.length?'filtrado':'filtro');
+    XLSX.writeFile(libro, 'Tickets_'+sufijo.replace(/[^a-z0-9]+/gi,'_')+'.xlsx');
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent=rotulo; }
+  }
 }
 
 // ---- Treemap propio (algoritmo "squarified", sin dependencias externas --
