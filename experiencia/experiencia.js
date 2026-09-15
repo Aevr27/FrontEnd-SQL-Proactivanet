@@ -1193,51 +1193,65 @@ function renderAll(){
   else if(modoResumen==='po') renderResumenPorPO(fDir);
   if(modoResumen!=='oculto') renderChartEstados(cats);
   // [Pendientes Claude #7]: se muestra con cualquier filtro de Director/PO
-  // activo, sin importar si esta corrida trajo detalle de tickets -- si no
-  // lo trajo, se asume que ya existe un Detalle_Tickets.xlsx de una corrida
-  // anterior en la misma carpeta que este tablero (ver descargarTickets()).
+  // activo; si esta corrida no trajo detalle de tickets, descargarTickets()
+  // avisa que no hay nada que exportar (ya no hay archivo fisico de respaldo).
   const btnDesc=document.getElementById('btnDescargaTickets');
   if(btnDesc) btnDesc.style.display=(fDir||fPO||fMgr||fSO)?'inline-block':'none';
 }
 
-// [Pendientes Claude #7]: descarga CSV de los tickets del periodo vigente
+// [Pendientes Claude #7]: descarga XLSX de los tickets del periodo vigente
 // (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
 // filtrados por Director/PO/Manager/Service Owner -- los mismos cuatro que
-// habilitan el boton -- sin backend (Blob + <a download>). Si esta
-// corrida no trajo detalle de tickets (payload.tickets_detalle vacio --
-// no se activo "Actualizar Base de Tickets"), cae a descargar el archivo
-// fisico Detalle_Tickets.xlsx que deberia existir en la misma carpeta de
-// una corrida anterior.
-function descargarTickets(){
-  if(!(P.tickets_detalle && P.tickets_detalle.length)){
-    const a=document.createElement('a');
-    a.href='Detalle_Tickets.xlsx'; a.download='Detalle_Tickets.xlsx';
-    document.body.appendChild(a); a.click(); a.remove();
-    return;
+// habilitan el boton. El libro se arma en memoria con SheetJS
+// (vendor/xlsx.mini.min.js) y se descarga sin backend: ya no se busca
+// ningun archivo fisico en la carpeta del tablero.
+// SheetJS se trae la primera vez que se pulsa el boton, no al cargar el
+// tablero: son 250 KB que la mayoria de las visitas no necesita. La ruta se
+// resuelve contra BASE (la carpeta de ESTE archivo) porque embebido en
+// dashboard.html el documento vive un nivel mas arriba; ademas, ahi el
+// montador borra los <script> de experiencia.html, asi que una etiqueta en el
+// marcado no serviria para la pestaña.
+let xlsxCargando=null;
+function cargarXLSX(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  if(!xlsxCargando){
+    xlsxCargando=new Promise((listo,fallo)=>{
+      const s=document.createElement('script');
+      s.src=new URL('vendor/xlsx.mini.min.js', BASE).href;
+      s.onload=()=>listo(window.XLSX);
+      s.onerror=()=>{ xlsxCargando=null; fallo(new Error('no se pudo cargar '+s.src)); };
+      document.head.appendChild(s);
+    });
   }
+  return xlsxCargando;
+}
+
+async function descargarTickets(){
   const periodoOk = t => modoTiempo==='mes' ? t.mes===P.mes_actual : t.slot===0;
   const filtrados=(P.tickets_detalle||[]).filter(t=>
     periodoOk(t) && (!fDir || t.director===fDir) && (!fPO || t.po===fPO)
     && (!fMgr || t.manager===fMgr) && (!fSO || t.so===fSO));
   if(!filtrados.length){ alert('No hay tickets para el filtro y periodo actuales.'); return; }
   const cols=[
-    ['fecha','Fecha de registro'], ['codigo','C\u00F3digo'], ['grupo','Grupo'],
-    ['estado','Estado'], ['titulo','T\u00EDtulo'], ['descripcion','Descripci\u00F3n'],
-    ['categoria_raw','Categor\u00EDa'], ['solucion','Soluci\u00F3n para el usuario'],
-    ['tipo','Tipo'], ['tipo_rel','Tipo relaci\u00F3n'],
+    ['fecha','Fecha de registro'], ['codigo','Código'], ['grupo','Grupo'],
+    ['estado','Estado'], ['titulo','Título'], ['descripcion','Descripción'],
+    ['categoria_raw','Categoría'], ['solucion','Solución para el usuario'],
+    ['tipo','Tipo'], ['tipo_rel','Tipo relación'],
   ];
-  const esc=v=>{const s=(v==null?'':String(v)).replace(/"/g,'""'); return /[",\n]/.test(s)?`"${s}"`:s;};
-  const csv=[cols.map(c=>c[1]).join(',')]
-    .concat(filtrados.map(t=>cols.map(c=>esc(t[c[0]])).join(','))).join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
+  // Matriz (no json_to_sheet) para fijar el orden de columnas y forzar texto:
+  // los codigos y fechas no deben reinterpretarse como numero o fecha Excel.
+  const aoa=[cols.map(c=>c[1])].concat(
+    filtrados.map(t=>cols.map(c=>{const v=t[c[0]]; return v==null?'':String(v);})));
+  let XLSX;
+  try{ XLSX=await cargarXLSX(); }
+  catch(e){ console.error(e); alert('No se pudo cargar el generador de Excel.'); return; }
+  const hoja=XLSX.utils.aoa_to_sheet(aoa);
+  const libro=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(libro, hoja, 'Tickets');
   // Un solo filtro activo -> su nombre en el archivo; varios -> nombre corto.
   const activos=[fDir,fPO,fMgr,fSO].filter(Boolean);
   const sufijo=activos.length===1?activos[0]:(activos.length?'filtrado':'filtro');
-  a.href=url; a.download='Tickets_'+sufijo.replace(/[^a-z0-9]+/gi,'_')+'.csv';
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
+  XLSX.writeFile(libro, 'Tickets_'+sufijo.replace(/[^a-z0-9]+/gi,'_')+'.xlsx');
 }
 
 // ---- Treemap propio (algoritmo "squarified", sin dependencias externas --
