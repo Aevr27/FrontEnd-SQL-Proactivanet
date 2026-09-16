@@ -82,10 +82,10 @@ justify-content:flex-end;flex-wrap:wrap;gap:8px}
    trato que el sello del ETL de SLA y que el chip de fecha de QA. Es
    informacion, no un boton: sin sombra dura, sin degradado y sin cursor.
    Vacia no se pinta. */
-#corteFecha{display:inline-block;padding:5px 12px;border-radius:999px;
-background:rgba(255,255,255,.92);border:1px solid rgba(255,255,255,.6);
-color:var(--g-900);font-size:11.5px;font-weight:600;white-space:nowrap;
-box-shadow:0 1px 2px rgba(25,25,25,.10)}
+/* La pastilla del corte ya NO se describe aqui: es .datos-info, en
+   assets/css/datos-info.css, la misma que usan SLA, Backlog y QA. Este
+   selector solo esconde el nodo mientras esta vacio; el aspecto lo pone el
+   componente compartido. */
 #corteFecha:empty{display:none}
 
 /* Barra de filtros: fuera de la cabecera y con la misma tarjeta que la

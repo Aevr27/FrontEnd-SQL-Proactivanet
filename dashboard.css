@@ -246,18 +246,11 @@
     font-size: 12.5px; color: var(--ink-2); margin-top: 5px;
     font-variant-numeric: tabular-nums;
   }
-  header.top .estado { font-size: 12px; color: var(--ink-2); min-height: 16px; text-align: right; }
-  /* Sello del ETL como pastilla blanca: mismo trato visual que #corteFecha en
-     experiencia.css y que el chip de fecha de QA. Vale para las dos cabeceras
-     propias del tablero, SLA y Backlog. */
-  header.top #estado-carga,
-  header.top #estado-carga-bl {
-    display: inline-block; padding: 5px 12px;
-    border-radius: var(--radius-pill);
-    background: rgba(255, 255, 255, .92);
-    border: 1px solid rgba(255, 255, 255, .6);
-    box-shadow: 0 1px 2px rgba(25, 25, 25, .10);
-  }
+  /* La pastilla del sello ya NO se describe aqui: es .datos-info, en
+     assets/css/datos-info.css, la misma para SLA, Backlog, Experiencia y QA.
+     Este selector solo reserva el alto para que la cabecera no salte mientras
+     el nodo esta vacio; el aspecto lo pone el componente compartido. */
+  header.top .estado { min-height: 16px; }
   header.top #estado-carga:empty,
   header.top #estado-carga-bl:empty { display: none; }
   /* En fila, no en columna: apilada, un bloque con dos hijos -el chip de fecha

@@ -240,7 +240,9 @@ async function obtenerJSON(ruta) {
    de SLOT 3 a SLOT 2 vuelve a pedir un periodo que se acaba de traer entero.
    Los agregados son caros (kpis, distribucion y productividad rondan varios
    segundos en rangos largos) y no cambian de un minuto a otro: el ETL corre
-   muy de tarde en tarde y su sello viaja en kpis.UltimaActualizacionEtl.
+   muy de tarde en tarde y su sello viaja en kpis.meta (la columna cruda
+   kpis.UltimaActualizacionEtl sigue ahi, pero en UTC: la que ya viene en hora
+   de Mexico, y la unica que se pinta, es meta.ultimaActualizacion).
 
    Solo la envoltura obtenerJSONSla() pasa por aqui, y solo la usa
    cargarTodo() del tablero de SLA. obtenerJSON() queda intacta, asi que el
@@ -373,42 +375,41 @@ function seleccionados(id) {
   return Array.from(document.getElementById(id).selectedOptions).map(o => o.value);
 }
 
-function estadoCargando(id) { document.getElementById(id).textContent = 'Cargando...'; }
+function estadoCargando(id) { DatosInfo.mensaje(id, 'Cargando...'); }
 
-// Sello del ultimo ETL (kpis.ashx -> UltimaActualizacionEtl), que ya llega en
-// hora local de Mexico como 'yyyy-MM-ddTHH:mm:ss'. Se parte el texto en vez de
-// usar new Date(): el navegador interpretaria la cadena sin zona como local y
-// la recorreria si la maquina no esta en la zona de Mexico.
-function formatoSelloEtl(iso) {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(String(iso || ''));
-  return m ? `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}` : null;
+/* Sello de frescura y periodo de la cabecera.
+
+   El formato, el parseo de las fechas y el marcado ya no viven aqui: los pone
+   DatosInfo (assets/js/datos-info.js), el mismo componente que usan
+   Experiencia y QA. Este archivo solo le entrega el metadato que mando el
+   backend -kpis.meta en SLA y Call Center, resumen.meta en Backlog- y ese
+   metadato es el unico origen de las fechas: aqui no se calcula ninguna.
+
+   Sin metadato el rotulo se queda vacio. Antes se caia a
+   `new Date().toLocaleTimeString()`, que decia cuando se miro la pantalla y no
+   de cuando eran los datos; leerlo como "ultima actualizacion" era justo el
+   error que este cambio viene a quitar. */
+function estadoOk(id, meta, opciones) {
+  DatosInfo.pintar(id, meta, opciones);
 }
 
-// Sin sello del ETL (pestana de backlog, o EtlLog sin filas) se mantiene la
-// hora del navegador como antes.
-function estadoOk(id, selloEtl) {
-  const sello = formatoSelloEtl(selloEtl);
-  document.getElementById(id).textContent = sello
-    ? `Última actualización: ${sello}`
-    : `Actualizado ${new Date().toLocaleTimeString('es-MX')}`;
-}
 function estadoError(id, err) {
-  const el = document.getElementById(id);
-  el.textContent = `Error al cargar datos: ${err.message}`;
-  el.title = err.message;
+  DatosInfo.mensaje(id, `Error al cargar datos: ${err.message}`, err.message);
   console.error(err);
 }
 
 // Carga parcial: el tablero pinta lo que si llego y dice, sin esconderlo, que
 // datasets se quedaron fuera. `fallos` = [{ nombre, error }]. Sin fallos se
 // comporta exactamente como estadoOk().
-function estadoParcial(id, selloEtl, fallos) {
-  estadoOk(id, selloEtl);
-  if (!fallos || !fallos.length) return;
-  const el = document.getElementById(id);
+function estadoParcial(id, meta, fallos, opciones) {
+  if (!fallos || !fallos.length) return estadoOk(id, meta, opciones);
+
   const nombres = fallos.map(f => f.nombre).join(', ');
-  el.textContent += ` · ⚠ sin datos de: ${nombres}`;
-  el.title = fallos.map(f => `${f.nombre}: ${f.error && f.error.message}`).join('\n');
+  DatosInfo.pintar(id, meta, {
+    ...opciones,
+    sufijo: ` · ⚠ sin datos de: ${nombres}`,
+    titulo: fallos.map(f => `${f.nombre}: ${f.error && f.error.message}`).join('\n'),
+  });
   fallos.forEach(f => console.error(`[${f.nombre}]`, f.error));
 }
 
@@ -549,7 +550,7 @@ const ETIQUETAS_SEGMENTO = {
     const ALTO_TEXTO = 14;   // alto minimo de caja para que quepa la cifra
     const AIRE = 6;          // margen a los costados, dentro del segmento
     ctx.save();
-    ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
+    ctx.font = Barras.fuente(11);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     chart.data.datasets.forEach((ds, i) => {
@@ -585,6 +586,11 @@ const ETIQUETAS_SEGMENTO = {
    Experiencia: se le ata el FMT de este tablero y ya. Las apiladas siguen con
    ETIQUETAS_SEGMENTO de aqui arriba, que sabe de segmentos. */
 const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
+
+/* La misma cifra dentro, pero para las barras que miden un PORCENTAJE y no
+   un conteo -"Reabiertos por grupo"-. Solo cambia el formateador: sin el "%"
+   la cifra suelta dentro de la barra se leeria como tickets. */
+const ETIQUETAS_DENTRO_PCT = Barras.etiquetasDentro(v => `${FMT(v)}%`);
 
 // Estado vacio de una grafica. Chart.js no dibuja nada util con datasets
 // vacios -deja los ejes solos, que se leen como si hubiera un error-, asi que
@@ -1814,7 +1820,7 @@ const TableroSla = (function () {
       const ctx = chart.ctx;
       const metas = chart.data.datasets.map((_, d) => chart.getDatasetMeta(d));
       ctx.save();
-      ctx.font = '600 11px system-ui, -apple-system, sans-serif';
+      ctx.font = Barras.fuente(11, '600');
       ctx.textBaseline = 'middle';
       ctx.fillStyle = '#393939';
       ctx.textAlign = 'left';
@@ -2196,7 +2202,13 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'vencidosGrupo', 'chart-vencidos-grupo',
       () => ({
         type: 'bar',
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores, borderRadius: 4 }] },
+        /* Ranking horizontal: misma cifra dentro y mismas medidas que el resto
+           del tablero. El radio lo pone el default compartido (Barras.RADIO);
+           antes esta grafica llevaba un 4 suelto que la dejaba menos
+           redondeada que sus vecinas sin que eso significara nada. El color
+           sigue siendo SEMAFORO de cumplimiento: no se toca. */
+        plugins: [ETIQUETAS_DENTRO],
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores }] },
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
           plugins: {
@@ -2246,7 +2258,11 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'reabiertosGrupo', 'chart-reabiertos-grupo',
       () => ({
         type: 'bar',
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores, borderRadius: 4 }] },
+        /* Igual que "Vencidos por grupo", pero la barra mide un PORCENTAJE:
+           la cifra dentro lleva su "%" (ETIQUETAS_DENTRO_PCT). Medidas y radio
+           del default compartido; el semaforo de reabiertos no se toca. */
+        plugins: [ETIQUETAS_DENTRO_PCT],
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores }] },
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
           plugins: {
@@ -2285,12 +2301,14 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, idGrafico, idCanvas,
       () => ({
         type: 'bar',
-        /* Cifra dentro (assets/js/barras.js); las medidas ya vienen del
-           default compartido. El color lo sigue poniendo colorFn -prioridad y
-           rampa de antiguedad-: aqui no se decide ningun color. */
-        plugins: [Barras.etiquetasDentro(FMT)],
-        data: { labels: etiquetas, datasets: [{ ...Barras.GRUESA, data: valores, backgroundColor: colores,
-          borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 }] },
+        /* Cifra dentro: la instancia COMPARTIDA del plugin, no una nueva por
+           configuracion. Medidas y radio ya vienen del default compartido
+           (Barras.aplicarDefaults), asi que aqui solo queda lo propio de esta
+           grafica: el color de colorFn -prioridad y rampa de antiguedad- y el
+           contorno de seleccion. */
+        plugins: [ETIQUETAS_DENTRO],
+        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
+          borderColor: sel.borderColor, borderWidth: sel.borderWidth }] },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false },
@@ -2610,9 +2628,17 @@ const TableroSla = (function () {
         type: 'bar',
         // Cifra dentro de la barra: el plugin compartido mide a lo ancho
         // cuando indexAxis es 'y', asi que la grafica sigue horizontal.
+        //
+        // Sin backgroundColor a proposito: es un ranking de UNA serie -cada
+        // barra es el mismo dato, atendidas, sobre otro agente-, asi que toma
+        // el azul de barra ordinaria del default compartido
+        // (Barras.aplicarDefaults -> Paleta.AZUL_SERIE). Antes llevaba el
+        // morado de "Llamadas atendidas" de las dos graficas de arriba, donde
+        // ese color SI distingue una serie de la otra; aqui no habia ninguna
+        // segunda serie de la que distinguirse.
         plugins: [ETIQUETAS_DENTRO],
         data: { labels: etiquetas, datasets: [{ label: 'Llamadas atendidas',
-          data: atendidas, backgroundColor: MORADO }] },
+          data: atendidas }] },
         options: {
           indexAxis: 'y',
           responsive: true, maintainAspectRatio: false,
@@ -2946,7 +2972,7 @@ const TableroSla = (function () {
 
      El tope del idle evita quedarse colgado: en una pestaña ocupada
      requestIdleCallback podria no llegar nunca, y esto tiene que terminar. */
-  const PAUSA_SLOT_MS = 750;      // respiro minimo para el servidor
+  const PAUSA_SLOT_MS = 300;      // respiro minimo para el servidor
   const PAUSA_IDLE_MS = 2000;     // tope de espera a que el navegador respire
 
   function respiroEntreSlots() {
@@ -3135,7 +3161,16 @@ const TableroSla = (function () {
     Object.keys(filtro).forEach(k => { filtro[k] = null; });
     invalidarFilas();
     renderTodo();
-    estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.UltimaActualizacionEtl, fallos);
+    /* kpis.meta trae el sello del ETL y el rango que la consulta USO: las dos
+       cosas salen de la misma fila de kpis.ashx, asi que ninguna puede
+       discrepar de los numeros que acompana.
+
+       De la cabecera solo se pinta el sello. El rango ya esta a la vista en la
+       barra de filtros de esta misma pestaña -Fecha inicio, Fecha fin y el
+       selector de SLOT, que ademas explica la semantica de los 30 dias-, y
+       repetirlo aqui seria el mismo dato en dos sitios. El periodo sigue
+       viajando en meta; solo no se dibuja. */
+    estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.meta, fallos, { periodo: false });
 
     /* Y ya con el tablero pintado, se calientan en segundo plano los SLOTs
        que el usuario todavia no ha pedido. Sin await: la carga visible ya
@@ -3214,24 +3249,28 @@ const TableroSla = (function () {
    3. Tablero de Backlog
    ======================================================================= */
 const TableroBacklog = (function () {
-  // Misma paleta que usa el correo, en el mismo orden: un lider conserva su
-  // color entre el correo, la grafica apilada y la tabla de resumen.
-  // Identidad por lider: paleta categorica COMPARTIDA (assets/js/paleta.js).
-  // El indice del lider en ordenLideres decide el color -no el orden de
-  // pintado-, asi que un lider lleva el mismo color en la tendencia, la
-  // antiguedad por lider, la tabla de resumen y los swatches.
+  // Identidad por lider: la tabla COMPARTIDA de assets/js/paleta.js
+  // (Paleta.registrarLideres / Paleta.colorLider). El color va con el NOMBRE
+  // -el mapa fijo de paleta.js, los colores de siempre-, nunca con el ranking
+  // de una grafica ni con el orden en que llegan los datos; el orden
+  // alfabetico con `Sin Torre` al final es solo el de las LISTAS. Asi una
+  // persona lleva el mismo color en la tendencia, la
+  // antiguedad por lider, la tabla de resumen, los swatches, el correo y los
+  // rankings de Experiencia.
   // AgingSort >= 5 es exactamente "mas de 30 dias" (ver 07_correo_backlog.sql).
   const SORT_MAS_30 = 5;
 
   const graficos = {};
   let datos = null;
+  // El orden canonico de lideres del corte (A->Z, `Sin Torre` al final) tal
+  // como lo devuelve la tabla compartida. Es el orden de referencia de las
+  // leyendas; el color ya no se consulta contra el, sino por nombre.
   let ordenLideres = [];
   const filtro = { lider: null, grupo: null, prioridad: null, aging: null };
   const ETIQUETA_DIM = { lider: 'Lider', grupo: 'Grupo', prioridad: 'Prioridad', aging: 'Antiguedad' };
 
-  function colorLider(nombre) {
-    return Paleta.color(nombre, ordenLideres);
-  }
+  // Atajo local: el color lo resuelve la tabla compartida, no esta pestana.
+  const colorLider = nombre => Paleta.colorLider(nombre);
   function hayFiltro() { return dimensionesActivas(filtro).length > 0; }
   // hayFiltro() solo mira el cross-filter de las graficas. Para los mensajes de
   // "sin datos" tambien cuentan los multiselect de arriba.
@@ -3470,7 +3509,10 @@ const TableroBacklog = (function () {
       .filter(x => !elegidos.length || elegidos.includes(x.Lider));
     const esc = escalasTendencia();
     const fechas = [...new Set(f.map(x => String(x.FechaCorte).slice(0, 10)))].sort();
-    let nombres = [...new Set(f.map(x => x.Lider))];
+    // El orden de los datasets ES el orden de la leyenda, asi que va por el
+    // canonico -A->Z, `Sin Torre` al final- y no por el orden en que el SP
+    // devolvio las filas: dos cargas distintas pintan la misma leyenda.
+    let nombres = Paleta.ordenarLideres([...new Set(f.map(x => x.Lider))]);
     // Con grupo / prioridad / antiguedad activos, los lideres que quedan en
     // cero bajo ese filtro se sacan: una linea plana en 0 solo ensucia.
     if (esc) nombres = nombres.filter(n => (esc.porLider.get(n) ?? 0) > 0);
@@ -3528,17 +3570,19 @@ const TableroBacklog = (function () {
 
     /* Medidas y cifra dentro las pone DashboardBarChart (assets/js/grafica.js);
        aqui solo queda lo propio de esta grafica. El color de lider es
-       IDENTIDAD y sale de la posicion en `ordenLideres` -el mismo criterio que
-       colorLider()-, asi que una persona lleva su color en todas las vistas.
-       El borderRadius de 6 y el contorno de seleccion mandan sobre el juego
-       compartido: van en `dataset`, que se aplica despues de las medidas. */
+       IDENTIDAD y lo resuelve por NOMBRE la tabla compartida (Paleta.colorLider,
+       lo mismo que `paleta: { lider: true }`), asi que las barras pueden seguir
+       ordenadas por volumen -mayor a menor- sin que nadie cambie de color.
+       El contorno de seleccion manda sobre el juego compartido: va en
+       `dataset`, que se aplica despues de las medidas. El radio ya lo pone el
+       default compartido (Barras.RADIO). */
     graficos['chart-lider-bl'] = new DashboardBarChart({
       canvas: 'chart-lider-bl',
       etiquetas,
       datos: ent.map(e => e[1]),
-      paleta: { orden: ordenLideres },
+      paleta: { lider: true },
       formato: FMT,
-      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
       opciones: {
         maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
@@ -3587,7 +3631,7 @@ const TableroBacklog = (function () {
          reparto es el mismo del resto del tablero. Va en `barra:` y no en
          Barras.GRUESA justo para no engordar las demas graficas. */
       barra: { maxBarThickness: 72 },
-      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 6 },
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
       opciones: {
         maintainAspectRatio: false,
         plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
@@ -3602,8 +3646,8 @@ const TableroBacklog = (function () {
      segmento por lider. Es la misma matriz de siempre; lo unico que cambio
      respecto a la version vertical es el eje.
 
-     El color es IDENTIDAD DE LIDER y lo resuelve colorLider() (Paleta contra
-     `ordenLideres`), asi que una persona lleva el mismo color aqui, en
+     El color es IDENTIDAD DE LIDER y lo resuelve colorLider() por NOMBRE
+     (tabla compartida de paleta.js), asi que una persona lleva el mismo color aqui, en
      "Backlog por lider", en la matriz de abajo, en el drill-down y en el
      correo diario. Los lideres chicos se agrupan en "Otros" -mismo criterio
      que la matriz de "Resumen por antiguedad"-.
@@ -3825,7 +3869,12 @@ const TableroBacklog = (function () {
 
     const totalPorLider = new Map(usados.map(l =>
       [l, buckets.reduce((acc, b) => acc + (valores.get(`${b}|${l}`) ?? 0), 0)]));
-    const lideres = usados.filter(l => l !== 'Otros').sort((a, b) => totalPorLider.get(b) - totalPorLider.get(a));
+    /* El orden de los lideres ES el de la leyenda de la apilada y el de las
+       columnas de la matriz: va por el canonico compartido -A->Z con `Sin
+       Torre` al final- y no por volumen, para que no cambie de un corte a
+       otro. Quien entra al top lo sigue decidiendo el volumen (`top`); esto
+       solo ordena a los que ya entraron. 'Otros' no es un lider: cierra. */
+    const lideres = Paleta.ordenarLideres(usados.filter(l => l !== 'Otros'));
     if (usados.includes('Otros')) lideres.push('Otros');
 
     const totalPorBucket = new Map(buckets.map(b =>
@@ -3903,11 +3952,36 @@ const TableroBacklog = (function () {
     return limpio.length > LARGO_TOOLTIP ? limpio.slice(0, LARGO_TOOLTIP) + '...' : limpio;
   }
 
-  function renderAntiguos(topPorLider = 10) {
+  /* Cuantas filas lista la seccion. La eleccion es CRONOLOGICA, no de edad:
+     de los tickets del corte que pasan los filtros del tablero se listan los
+     TOPE_ANTIGUOS mas viejos DE CADA LIDER, haya los que haya. No hay edad
+     minima: un lider con 100 tickets aporta sus 10 mas viejos, y uno con 3
+     aporta los 3, aunque sean de ayer.
+
+     La eleccion ya viene hecha del servidor: backlog_antiguos.ashx recorta
+     por lider -ROW_NUMBER() OVER (PARTITION BY Lider ORDER BY FechaRegistro)-
+     y manda solo esas filas, no el corte entero. TOPE_ANTIGUOS es el mismo
+     numero que TopePorLider del handler; aqui se vuelve a aplicar porque el
+     cross-filter del tablero puede recortar mas, nunca mas de la cuenta. */
+  const TOPE_ANTIGUOS = 10;
+
+  /* De mas viejo a mas nuevo por fecha de registro. Se ordena por
+     FechaRegistro y no por DiasBacklog porque la fecha es el dato de origen
+     -DiasBacklog es un derivado del corte- y porque puede venir en null: esos
+     se van al final, nunca por delante de un ticket con fecha. El formato que
+     manda el servidor es 'YYYY-MM-DDTHH:mm:ss', asi que comparar las cadenas
+     ya ordena cronologicamente. */
+  function masViejoPrimero(a, b) {
+    const fa = a.FechaRegistro || '', fb = b.FechaRegistro || '';
+    if (!fa) return fb ? 1 : 0;
+    if (!fb) return -1;
+    return fa < fb ? -1 : (fa > fb ? 1 : 0);
+  }
+
+  function renderAntiguos(tope = TOPE_ANTIGUOS) {
     const cont = document.getElementById('tabla-antiguos-bl');
     const cap = document.getElementById('cap-antiguos-bl');
     const d = datos.antiguos || {};
-    const meses = Math.round((d.diasMinimo ?? 0) / 30);
 
     // Estos tickets si traen Lider y Prioridad, asi que respetan el filtro
     // de lider y el de prioridad; el de grupo tambien viene en cada ticket.
@@ -3918,25 +3992,50 @@ const TableroBacklog = (function () {
 
     if (!tickets.length) {
       cap.innerHTML = descripcionFiltro(0);
-      cont.innerHTML = `<div class="vacio">No hay tickets con mas de ${d.diasMinimo ?? '—'} dias en backlog para este filtro.</div>`;
+      cont.innerHTML = `<div class="vacio">No hay tickets en backlog para este corte y filtros.</div>`;
       return;
     }
 
+    /* La seleccion es POR LIDER, no global: cada lider aporta sus `tope`
+       tickets mas viejos por FechaRegistro. Nadie tapa a nadie -un lider con
+       mucho backlog viejo ya no se lleva la tabla entera- y el que tiene
+       menos de `tope` sale con los que tenga.
+
+       El servidor ya manda recortado; esto se vuelve a aplicar porque el
+       cross-filter de arriba (grupo, prioridad) puede quitar filas de un
+       lider, nunca anadirlas. */
     const porLider = new Map();
     for (const t of tickets) {
       if (!porLider.has(t.Lider)) porLider.set(t.Lider, []);
       porLider.get(t.Lider).push(t);
     }
-    // Primero el lider que mas arrastra; dentro, del mas antiguo al menos.
-    const grupos = [...porLider.entries()].sort((a, b) => b[1].length - a[1].length);
+    for (const [lider, lista] of porLider) {
+      porLider.set(lider, lista.sort(masViejoPrimero).slice(0, tope));
+    }
 
-    cap.innerHTML = `${FMT(tickets.length)} tickets con mas de ${d.diasMinimo} dias `
-      + `<span class="suave">(${meses} meses) · se listan los ${topPorLider} mas antiguos de cada lider</span>`;
+    /* Los lideres se LISTAN en el orden canonico -A->Z con `Sin Torre` al
+       final, el mismo de las leyendas (assets/js/paleta.js)-, y no en el
+       orden en que el servidor mando sus filas: asi la tabla sale igual entre
+       dos cargas. Lo que la tabla compartida no reconozca como lider -un cubo
+       de resto, un nombre raro- se va al final sin perderse, en el orden en
+       que llego: `sort` es estable y todos empatan en Infinity. */
+    const rango = new Map(Paleta.ordenarLideres([...porLider.keys()])
+      .map((n, i) => [n, i]));
+    const grupos = [...porLider.keys()]
+      .sort((a, b) => (rango.get(a) ?? Infinity) - (rango.get(b) ?? Infinity))
+      .map(l => [l, porLider.get(l)]);
+    const listados = grupos.reduce((n, g) => n + g[1].length, 0);
+
+    // `total` es del corte ENTERO, antes del recorte por lider del handler;
+    // si un endpoint viejo no lo manda, se cae a lo que haya llegado.
+    const enBacklog = d.total ?? (d.tickets ?? []).length;
+    cap.innerHTML = `Los ${FMT(tope)} tickets mas antiguos de cada lider `
+      + `<span class="suave">(${FMT(listados)} en total, de los `
+      + `${FMT(enBacklog)} en backlog de este corte) · `
+      + `del mas viejo al mas nuevo por fecha de registro</span>`;
 
     cont.innerHTML = grupos.map(([lider, lista]) => {
-      const orden = lista.slice().sort((a, b) => b.DiasBacklog - a.DiasBacklog).slice(0, topPorLider);
-      const sufijo = lista.length > topPorLider ? `mostrando ${topPorLider} de ${lista.length}` : `${lista.length}`;
-      const filas = orden.map(t => `<tr>
+      const filas = lista.map(t => `<tr>
           <td class="con-hint" title="${escapeAttr(tooltipDescripcion(t.Descripcion))}">${celdaCodigo(t)}</td>
           <td class="num"><b>${FMT(t.DiasBacklog)}</b></td>
           <td class="fecha-cell">${String(t.FechaRegistro ?? '').slice(0, 10)}</td>
@@ -3948,7 +4047,7 @@ const TableroBacklog = (function () {
         </tr>`).join('');
       return `<div class="grupo-lider" style="color:${colorLider(lider)}">
           <span class="swatch" style="background:${colorLider(lider)}"></span>${escapeHtml(lider)}
-          <span class="conteo">${sufijo}</span></div>
+          <span class="conteo">${lista.length}</span></div>
         <table><thead><tr><th>Ticket</th><th class="num">Dias</th><th>Registro</th><th>Prioridad</th>
           <th>Grupo</th><th>Tecnico</th><th>Subestado</th><th>Titulo</th></tr></thead>
         <tbody>${filas}</tbody></table>`;
@@ -4083,14 +4182,20 @@ const TableroBacklog = (function () {
       if (miCarga !== cargaVigente) return;
       datos = { resumen, historico, antiguos };
 
-      // El orden de lideres se fija UNA vez, con el corte actual, y de ahi
-      // salen los colores de todas las vistas.
-      const totalPorLider = sumaPor(resumen.prioridad ?? [], 'Lider', 'Total');
-      ordenLideres = [...totalPorLider.entries()].sort((a, b) => b[1] - a[1]).map(e => e[0]);
+      // El roster de lideres del corte se da de alta UNA vez en la tabla
+      // compartida, que lo devuelve en el orden canonico -A->Z con `Sin
+      // Torre` al final-. De ahi salen los colores de todas las vistas; el
+      // volumen ya NO decide color, solo el orden de las barras de cada
+      // grafica que se ordene por volumen.
+      ordenLideres = Paleta.registrarLideres(
+        (resumen.prioridad ?? []).map(x => x.Lider));
 
       Object.keys(filtro).forEach(k => { filtro[k] = null; });
       renderTodo();
-      estadoOk('estado-carga-bl');
+      // El Backlog es una foto, no una ventana: su metadato viaja sin periodo
+      // y su "ultima actualizacion" es la fecha de corte de
+      // dbo.CorreoBacklogSnapshot con la que respondio el handler.
+      estadoOk('estado-carga-bl', resumen.meta);
     } catch (err) {
       if (miCarga !== cargaVigente) return;   // fallo de una carga ya superada
       estadoError('estado-carga-bl', err);

@@ -231,8 +231,27 @@ function pronosticoMes(volReal){
     const m=document.getElementById('ligaModal');
     if(m){m.href=url;}
   }
+  /* Sello de frescura y periodo, con el componente compartido
+     (assets/js/datos-info.js). El metadato lo arma el backend en
+     App_Code/ExperienciaQueries.cs -sello = MAX(FechaUltimaCargaDW) de
+     dbo.Tickets, periodo = el SLOT 0, o sea los ultimos 30 dias contados
+     desde el MISMO 'hoy' con el que se rotula el eje- y aqui no se calcula
+     ninguna fecha ni se da formato a mano.
+
+     P.meta falta en el mock guardado (data/experiencia.mock.json, anterior a
+     este contrato): en ese caso se cae a fecha_actualizacion, que ya venia
+     formateada como dd/MM/yyyy y es lo unico que ese archivo sabe del corte.
+     Con el handler respondiendo, manda siempre P.meta. */
   const cf=document.getElementById('corteFecha');
-  if(cf && P.fecha_actualizacion) cf.textContent='Corte Actualización de Tickets: '+P.fecha_actualizacion;
+  if(cf && P.meta){
+    DatosInfo.pintar(cf, P.meta);
+  } else if(cf && P.fecha_actualizacion){
+    DatosInfo.pintar(cf, DatosInfo.armar({
+      fuente: 'Experiencia al Usuario',
+      sello: P.fecha_actualizacion,
+      origen: 'Corte guardado en data/experiencia.mock.json',
+    }));
+  }
 })();
 
 // ---- filtrar categorias segun Director / PO ----
@@ -1174,46 +1193,463 @@ function renderAll(){
   else if(modoResumen==='po') renderResumenPorPO(fDir);
   if(modoResumen!=='oculto') renderChartEstados(cats);
   // [Pendientes Claude #7]: se muestra con cualquier filtro de Director/PO
-  // activo, sin importar si esta corrida trajo detalle de tickets -- si no
-  // lo trajo, se asume que ya existe un Detalle_Tickets.xlsx de una corrida
-  // anterior en la misma carpeta que este tablero (ver descargarTickets()).
+  // activo; si esta corrida no trajo detalle de tickets, descargarTickets()
+  // avisa que no hay nada que exportar (ya no hay archivo fisico de respaldo).
   const btnDesc=document.getElementById('btnDescargaTickets');
   if(btnDesc) btnDesc.style.display=(fDir||fPO||fMgr||fSO)?'inline-block':'none';
 }
 
-// [Pendientes Claude #7]: descarga CSV de los tickets del periodo vigente
-// (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
-// filtrados por Director/PO, sin backend (Blob + <a download>). Si esta
-// corrida no trajo detalle de tickets (payload.tickets_detalle vacio --
-// no se activo "Actualizar Base de Tickets"), cae a descargar el archivo
-// fisico Detalle_Tickets.xlsx que deberia existir en la misma carpeta de
-// una corrida anterior.
-function descargarTickets(){
-  if(!(P.tickets_detalle && P.tickets_detalle.length)){
-    const a=document.createElement('a');
-    a.href='Detalle_Tickets.xlsx'; a.download='Detalle_Tickets.xlsx';
-    document.body.appendChild(a); a.click(); a.remove();
-    return;
+// POR QUE NO BASTA CON P.tickets_detalle
+// -------------------------------------
+// handlers/experiencia.ashx solo llena tickets_detalle cuando recibe
+// ?detalle=N; por omision son 0 y devuelve la lista vacia (es el unico bloque
+// del payload que cuesta decenas de miles de filas, y el tablero -- KPIs,
+// graficas, categorias -- no lo necesita para nada). La carga inicial no pasa
+// ese parametro, asi que en la VM el arreglo siempre llega vacio y el export
+// moria en "No hay tickets".
+//
+// Ninguna otra llave trae tickets individuales: categorias y categorias_v2
+// son conteos agregados por categoria (vol_slot/vol_mes) y
+// categorias_por_folio va indexada por folio de Problem, no de ticket.
+//
+// Asi que el detalle se pide al MISMO handler, una sola vez, cuando se pulsa
+// el boton -- no en la carga del tablero, que ya pesa 1.6 MB sin el. El
+// resultado se guarda en memoria: dos descargas seguidas no vuelven a pedirlo.
+const TOPE_TICKETS = 50000;      // el mismo tope que impone el handler
+let ticketsCache = (P.tickets_detalle && P.tickets_detalle.length) ? P.tickets_detalle : null;
+let ticketsPidiendo = null;
+function pedirTickets(){
+  if(ticketsCache) return Promise.resolve(ticketsCache);
+  if(!ticketsPidiendo){
+    const url=new URL(API_URL);
+    url.searchParams.set('detalle', String(TOPE_TICKETS));
+    ticketsPidiendo=traer(url.href).then(d=>{
+      ticketsCache=(d && d.tickets_detalle) || [];
+      return ticketsCache;
+    }).catch(e=>{ ticketsPidiendo=null; throw e; });
   }
-  const periodoOk = t => modoTiempo==='mes' ? t.mes===P.mes_actual : t.slot===0;
-  const filtrados=(P.tickets_detalle||[]).filter(t=>
-    periodoOk(t) && (!fDir || t.director===fDir) && (!fPO || t.po===fPO));
-  if(!filtrados.length){ alert('No hay tickets para el filtro y periodo actuales.'); return; }
-  const cols=[
-    ['fecha','Fecha de registro'], ['codigo','C\u00F3digo'], ['grupo','Grupo'],
-    ['estado','Estado'], ['titulo','T\u00EDtulo'], ['descripcion','Descripci\u00F3n'],
-    ['categoria_raw','Categor\u00EDa'], ['solucion','Soluci\u00F3n para el usuario'],
-    ['tipo','Tipo'], ['tipo_rel','Tipo relaci\u00F3n'],
-  ];
-  const esc=v=>{const s=(v==null?'':String(v)).replace(/"/g,'""'); return /[",\n]/.test(s)?`"${s}"`:s;};
-  const csv=[cols.map(c=>c[1]).join(',')]
-    .concat(filtrados.map(t=>cols.map(c=>esc(t[c[0]])).join(','))).join('\n');
-  const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download='Tickets_'+(fDir||fPO||'filtro').replace(/[^a-z0-9]+/gi,'_')+'.csv';
-  document.body.appendChild(a); a.click(); a.remove();
-  URL.revokeObjectURL(url);
+  return ticketsPidiendo;
+}
+
+// SheetJS se trae la primera vez que se pulsa el boton, no al cargar el
+// tablero: son 250 KB que la mayoria de las visitas no necesita. La ruta se
+// resuelve contra BASE (la carpeta de ESTE archivo) porque embebido en
+// dashboard.html el documento vive un nivel mas arriba; ademas, ahi el
+// montador borra los <script> de experiencia.html, asi que una etiqueta en el
+// marcado no serviria para la pestaña.
+let xlsxCargando=null;
+function cargarXLSX(){
+  if(window.XLSX) return Promise.resolve(window.XLSX);
+  if(!xlsxCargando){
+    xlsxCargando=new Promise((listo,fallo)=>{
+      const s=document.createElement('script');
+      s.src=new URL('vendor/xlsx.mini.min.js', BASE).href;
+      s.onload=()=>listo(window.XLSX);
+      s.onerror=()=>{ xlsxCargando=null; fallo(new Error('no se pudo cargar '+s.src)); };
+      document.head.appendChild(s);
+    });
+  }
+  return xlsxCargando;
+}
+
+/* === LIBRO XLSX (inicio) ===
+   No lo carga nadie mas que descargarTickets(); vive aparte para que la
+   prueba tools/tests/LibroTicketsSmoke.js pueda ejecutarlo tal cual, sin
+   navegador. Entre los dos marcadores no hay nada del tablero: ni P, ni
+   document, ni filtros. Todo entra por parametro.
+
+   QUE HACE Y POR QUE ASI
+   ----------------------
+   La hoja que sale de SheetJS es correcta pero pelada: el vendor que trae el
+   proyecto (vendor/xlsx.mini.min.js, la build comunitaria 0.18.5) escribe
+   anchos de columna, altos de fila, combinaciones y autofiltro, pero NO
+   escribe estilos de celda -el `s` de una celda se ignora al guardar- ni
+   paneles congelados. Se comprobo: un libro con `fill` y `!freeze` sale sin
+   `fills` en styles.xml y sin `<pane>` en la hoja.
+
+   Asi que el libro se arma con SheetJS como siempre -mismas filas, mismas
+   columnas, mismos valores- y despues se le retocan DOS piezas del .xlsx ya
+   generado, con el mismo vendor (XLSX.CFB, que lee y escribe el zip):
+
+     xl/styles.xml            se sustituye por la hoja de estilos de abajo
+     xl/worksheets/sheet1.xml se le mete el <pane> congelado y un s="i" por
+                              celda, que apunta a esos estilos
+
+   NO se toca ni un valor: el `s` es una referencia de formato y el texto de
+   cada celda es el que puso SheetJS. Nada de esto altera que tickets se
+   exportan ni con que campos: eso lo decide descargarTickets().
+
+   La paleta es la del tablero, en acento y no en masa: el verde va en la
+   fila de encabezados y en el total, el resto es gris muy claro para las
+   filas alternas y texto casi negro. Un libro verde entero seria peor de
+   leer que el volcado que ya habia. */
+const LibroTickets = (function () {
+  'use strict';
+
+  /* Colores en ARGB, como los quiere OOXML (dos digitos de alfa delante).
+     El verde es el del tablero; los tenues son ese mismo tono lavado, para
+     que el semaforo del Estado no grite. */
+  const VERDE = 'FF166534';        // encabezado de la tabla y cifras fuertes
+  const VERDE_TENUE = 'FFE7F3EC';
+  const AMBAR = 'FF92400E', AMBAR_TENUE = 'FFFDF3E3';
+  const ROJO = 'FF991B1B', ROJO_TENUE = 'FFFCE9E9';
+  const TINTA = 'FF111827', TINTA_SUAVE = 'FF6B7280';
+  const ZEBRA = 'FFF3F6F4';        // fila alterna: gris con una gota de verde
+  const LINEA = 'FFE2E6E4';        // borde de la tabla
+
+  /* Los indices de cellXfs que se usan al pintar. El orden importa: es el
+     mismo del arreglo `xfs` de HOJA_ESTILOS. */
+  const E = {
+    BASE: 0, TITULO: 1, SUBTITULO: 2, META_ETIQUETA: 3, META_VALOR: 4,
+    META_FUERTE: 5, ENCABEZADO: 6, CELDA: 7, CELDA_ZEBRA: 8,
+    CELDA_LARGA: 9, CELDA_LARGA_ZEBRA: 10,
+    ESTADO_VERDE: 11, ESTADO_AMBAR: 12, ESTADO_ROJO: 13,
+  };
+
+  function fuente(attrs) { return '<font>' + attrs + '<name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'; }
+  function relleno(color) { return '<fill><patternFill patternType="solid"><fgColor rgb="' + color + '"/><bgColor indexed="64"/></patternFill></fill>'; }
+
+  /* styles.xml completo. Se escribe entero -y no parcheando el que genera
+     SheetJS- porque ese trae una sola fuente, un solo relleno y un solo xf:
+     no hay nada que conservar. */
+  function hojaEstilos() {
+    const fuentes = [
+      fuente('<sz val="11"/><color rgb="' + TINTA + '"/>'),                          // 0 base
+      fuente('<b/><sz val="16"/><color rgb="' + TINTA + '"/>'),                      // 1 titulo
+      fuente('<sz val="10"/><color rgb="' + TINTA_SUAVE + '"/>'),                    // 2 subtitulo
+      fuente('<b/><sz val="10"/><color rgb="' + TINTA_SUAVE + '"/>'),                // 3 etiqueta
+      fuente('<sz val="10"/><color rgb="' + TINTA + '"/>'),                          // 4 valor
+      fuente('<b/><sz val="11"/><color rgb="FFFFFFFF"/>'),                           // 5 encabezado
+      fuente('<b/><sz val="10"/><color rgb="' + VERDE + '"/>'),                      // 6 cifra fuerte
+      fuente('<b/><sz val="11"/><color rgb="' + VERDE + '"/>'),                      // 7 estado verde
+      fuente('<b/><sz val="11"/><color rgb="' + AMBAR + '"/>'),                      // 8 estado ambar
+      fuente('<b/><sz val="11"/><color rgb="' + ROJO + '"/>'),                       // 9 estado rojo
+    ];
+    const rellenos = [
+      '<fill><patternFill patternType="none"/></fill>',
+      '<fill><patternFill patternType="gray125"/></fill>',
+      relleno(VERDE), relleno(ZEBRA), relleno(VERDE_TENUE),
+      relleno(AMBAR_TENUE), relleno(ROJO_TENUE),
+    ];
+    const lado = '<left style="thin"><color rgb="' + LINEA + '"/></left>'
+      + '<right style="thin"><color rgb="' + LINEA + '"/></right>'
+      + '<top style="thin"><color rgb="' + LINEA + '"/></top>'
+      + '<bottom style="thin"><color rgb="' + LINEA + '"/></bottom><diagonal/>';
+    const bordes = [
+      '<border><left/><right/><top/><bottom/><diagonal/></border>',
+      '<border>' + lado + '</border>',
+    ];
+    // [numFmt, fuente, relleno, borde, alineacion]
+    const xfs = [
+      [0, 0, 0, 0, ''],
+      [0, 1, 0, 0, '<alignment vertical="center"/>'],
+      [0, 2, 0, 0, '<alignment vertical="center"/>'],
+      [0, 3, 0, 0, '<alignment vertical="center"/>'],
+      [0, 4, 0, 0, '<alignment vertical="center"/>'],
+      [0, 6, 0, 0, '<alignment vertical="center"/>'],
+      [0, 5, 2, 1, '<alignment vertical="center" wrapText="1"/>'],
+      [0, 0, 0, 1, '<alignment vertical="top"/>'],
+      [0, 0, 3, 1, '<alignment vertical="top"/>'],
+      [0, 0, 0, 1, '<alignment vertical="top" wrapText="1"/>'],
+      [0, 0, 3, 1, '<alignment vertical="top" wrapText="1"/>'],
+      [0, 7, 4, 1, '<alignment vertical="top"/>'],
+      [0, 8, 5, 1, '<alignment vertical="top"/>'],
+      [0, 9, 6, 1, '<alignment vertical="top"/>'],
+    ];
+    const xf = xfs.map(function (x) {
+      return '<xf numFmtId="' + x[0] + '" fontId="' + x[1] + '" fillId="' + x[2] + '"'
+        + ' borderId="' + x[3] + '" xfId="0" applyFont="1" applyFill="1" applyBorder="1"'
+        + (x[4] ? ' applyAlignment="1">' + x[4] + '</xf>' : '/>');
+    }).join('');
+
+    return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      + '<fonts count="' + fuentes.length + '">' + fuentes.join('') + '</fonts>'
+      + '<fills count="' + rellenos.length + '">' + rellenos.join('') + '</fills>'
+      + '<borders count="' + bordes.length + '">' + bordes.join('') + '</borders>'
+      + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+      + '<cellXfs count="' + xfs.length + '">' + xf + '</cellXfs>'
+      + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+      + '<dxfs count="0"/>'
+      + '<tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleMedium4"/>'
+      + '</styleSheet>';
+  }
+
+  /* Semaforo del Estado, y SOLO del Estado: es la unica columna exportada
+     cuyo valor es una situacion y no un texto libre. Subestado y Prioridad
+     tambien se exportan, pero sin color: sus valores no tienen una escala
+     acordada y no se inventa ninguna. Lo que no
+     reconozca sale con el formato normal, sin color. */
+  function estiloEstado(valor) {
+    const v = String(valor || '').toLowerCase();
+    if (!v) return null;
+    if (/(cerrad|resuelt|solucionad|finalizad|complet)/.test(v)) return E.ESTADO_VERDE;
+    if (/(cancelad|rechazad|reabiert|escalad)/.test(v)) return E.ESTADO_ROJO;
+    if (/(pendiente|espera|proceso|curso|asignad|abiert|nuev)/.test(v)) return E.ESTADO_AMBAR;
+    return null;
+  }
+
+  // "A", "B", ... "Z", "AA". Lo mismo que XLSX.utils.encode_col, escrito
+  // aqui para que el bloque no dependa de nada al probarlo suelto.
+  function letraCol(i) {
+    let n = i, s = '';
+    do { s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26) - 1; } while (n >= 0);
+    return s;
+  }
+
+  /* Arma la matriz de la hoja: cabecera del reporte, metadatos, un renglon
+     en blanco y la tabla. Devuelve tambien donde empieza la tabla, que es lo
+     que necesitan el autofiltro, el panel congelado y el pintado.
+
+     `meta` son pares [etiqueta, valor] que decide quien llama: aqui no se
+     consulta ningun filtro ni se inventa ningun dato. */
+  function componer(titulo, subtitulo, meta, encabezados, filas) {
+    const aoa = [[titulo], [subtitulo], []];
+    meta.forEach(function (par) { aoa.push([par[0], par[1]]); });
+    aoa.push([]);
+    const filaEncabezado = aoa.length;      // 0-based: la fila que sigue
+    aoa.push(encabezados.slice());
+    filas.forEach(function (f) { aoa.push(f.slice()); });
+    return { aoa: aoa, filaEncabezado: filaEncabezado };
+  }
+
+  /* El s="i" de cada celda, por posicion. `largas` son las columnas que
+     llevan wrapText -titulo, descripcion, solucion-: las que pueden traer un
+     parrafo y sin ajuste harian la hoja absurdamente ancha. */
+  function estiloDe(fila, col, disposicion) {
+    const d = disposicion;
+    if (fila === 0) return col === 0 ? E.TITULO : E.BASE;
+    if (fila === 1) return col === 0 ? E.SUBTITULO : E.BASE;
+    if (fila < d.filaEncabezado - 1) {
+      if (col === 0) return E.META_ETIQUETA;
+      return d.filaFuerte === fila ? E.META_FUERTE : E.META_VALOR;
+    }
+    if (fila === d.filaEncabezado) return E.ENCABEZADO;
+    if (fila > d.filaEncabezado) {
+      const zebra = (fila - d.filaEncabezado) % 2 === 0;
+      if (col === d.colEstado) {
+        const propio = estiloEstado(d.valorEstado(fila));
+        if (propio !== null) return propio;
+      }
+      if (d.largas.indexOf(col) >= 0) return zebra ? E.CELDA_LARGA_ZEBRA : E.CELDA_LARGA;
+      return zebra ? E.CELDA_ZEBRA : E.CELDA;
+    }
+    return E.BASE;
+  }
+
+  // Cadena binaria -> bytes, para devolverle a CFB el XML retocado.
+  function aBytes(texto) {
+    const b = new Uint8Array(texto.length);
+    for (let i = 0; i < texto.length; i++) b[i] = texto.charCodeAt(i) & 255;
+    return b;
+  }
+  function aTexto(contenido) {
+    let s = '';
+    for (let i = 0; i < contenido.length; i++) s += String.fromCharCode(contenido[i]);
+    return s;
+  }
+
+  /* Congela por debajo del encabezado de la tabla -cabecera y metadatos se
+     quedan a la vista- y mete el s="i" celda por celda. Las dos cosas se
+     hacen sobre el XML ya escrito porque la build comunitaria no las emite:
+     ver la nota de arriba. */
+  function retocarHoja(xml, disposicion) {
+    const primeraDatos = disposicion.filaEncabezado + 2;   // 1-based, tras el encabezado
+    const pane = '<sheetView workbookViewId="0">'
+      + '<pane ySplit="' + (primeraDatos - 1) + '" topLeftCell="A' + primeraDatos + '"'
+      + ' activePane="bottomLeft" state="frozen"/>'
+      + '<selection pane="bottomLeft" activeCell="A' + primeraDatos + '" sqref="A' + primeraDatos + '"/>'
+      + '</sheetView>';
+    let salida = xml.replace('<sheetView workbookViewId="0"/>', pane);
+
+    return salida.replace(/<c r="([A-Z]+)(\d+)"/g, function (todo, letras, numero) {
+      let col = 0;
+      for (let i = 0; i < letras.length; i++) col = col * 26 + (letras.charCodeAt(i) - 64);
+      const estilo = estiloDe(parseInt(numero, 10) - 1, col - 1, disposicion);
+      return estilo ? todo + ' s="' + estilo + '"' : todo;
+    });
+  }
+
+  /* Construye el .xlsx y devuelve sus bytes. `XLSX` entra por parametro -no
+     se toca window- para que la prueba pueda pasarle el mismo vendor.
+
+     opciones: { titulo, subtitulo, meta, etiquetaTotal, encabezados, filas,
+                 anchos, largas, colEstado, hoja } */
+  function construir(XLSX, opciones) {
+    const compuesto = componer(opciones.titulo, opciones.subtitulo,
+      opciones.meta, opciones.encabezados, opciones.filas);
+    const aoa = compuesto.aoa;
+
+    const hoja = XLSX.utils.aoa_to_sheet(aoa);
+    hoja['!cols'] = opciones.anchos.map(function (w) { return { wch: w }; });
+    // Alto propio solo donde hace falta: titulo, subtitulo y encabezado. Las
+    // filas de datos se quedan sin alto fijo a proposito, para que Excel las
+    // crezca solo cuando el texto ajustado ocupe dos o tres renglones.
+    const filas = [];
+    filas[0] = { hpt: 26 };
+    filas[1] = { hpt: 15 };
+    filas[compuesto.filaEncabezado] = { hpt: 22 };
+    hoja['!rows'] = filas;
+    // La cabecera se combina ARRIBA de la tabla; dentro de la tabla no hay
+    // ninguna combinacion, que romperia ordenar y filtrar.
+    const ultimaCol = opciones.encabezados.length - 1;
+    hoja['!merges'] = [
+      { s: { r: 0, c: 0 }, e: { r: 0, c: ultimaCol } },
+      { s: { r: 1, c: 0 }, e: { r: 1, c: ultimaCol } },
+    ];
+    const refEncabezado = 'A' + (compuesto.filaEncabezado + 1);
+    hoja['!autofilter'] = { ref: refEncabezado + ':' + letraCol(ultimaCol) + aoa.length };
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, opciones.hoja);
+
+    const disposicion = {
+      filaEncabezado: compuesto.filaEncabezado,
+      filaFuerte: opciones.etiquetaTotal
+        ? 3 + opciones.meta.map(function (m) { return m[0]; }).indexOf(opciones.etiquetaTotal)
+        : -1,
+      largas: opciones.largas || [],
+      colEstado: opciones.colEstado === undefined ? -1 : opciones.colEstado,
+      valorEstado: function (fila) {
+        const f = opciones.filas[fila - compuesto.filaEncabezado - 1];
+        return f ? f[opciones.colEstado] : '';
+      },
+    };
+
+    const zip = XLSX.CFB.read(XLSX.write(libro, { type: 'binary', bookType: 'xlsx' }), { type: 'binary' });
+    XLSX.CFB.utils.cfb_add(zip, '/xl/styles.xml', aBytes(hojaEstilos()));
+    const hojaXml = XLSX.CFB.find(zip, '/xl/worksheets/sheet1.xml');
+    XLSX.CFB.utils.cfb_add(zip, '/xl/worksheets/sheet1.xml',
+      aBytes(retocarHoja(aTexto(hojaXml.content), disposicion)));
+    return XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
+  }
+
+  return { construir: construir, estiloEstado: estiloEstado, ESTILOS: E };
+})();
+/* === LIBRO XLSX (fin) === */
+
+/* === COLUMNAS XLSX (inicio) ===
+   Las 24 columnas del export, en el orden pedido: [llave de tickets_detalle,
+   encabezado, ancho]. El encabezado es el nombre del campo en dbo.vw_Tickets.
+   Categoria y Tipo leen las llaves *_origen (los campos crudos), no
+   categoria_raw/tipo, que son CategoriaV2 y TipoTicket de la vista de slots.
+   tools/tests/LibroTicketsSmoke.js recorta y ejecuta este bloque tal cual. */
+const COLUMNAS_TICKETS = [
+  ['fecha_registro', 'FechaRegistro', 19],
+  ['fecha_estimada_resolucion', 'FechaEstimadaResolucion', 19],
+  ['codigo', 'CodigoTicket', 15],
+  ['grupo', 'Grupo', 24],
+  ['tecnico_segunda_linea', 'TecnicoSegundaLinea', 26],
+  ['estado', 'Estado', 16],
+  ['subestado', 'Subestado', 18],
+  ['prioridad', 'Prioridad', 12],
+  ['titulo', 'Titulo', 42],
+  ['descripcion', 'Descripcion', 60],
+  ['cliente', 'Cliente', 24],
+  ['sucursal', 'Sucursal', 24],
+  ['categoria_origen', 'Categoria', 30],
+  ['solucion', 'SolucionUsuario', 45],
+  ['fecha_firma_solucion', 'FechaFirmaSolucion', 19],
+  ['fecha_ultima_modificacion', 'FechaUltimaModificacion', 19],
+  ['fecha_firma_cierre', 'FechaFirmaCierre', 19],
+  ['firma_cierre_revocacion', 'FirmaCierreRevocacion', 24],
+  ['firma_solucion', 'FirmaSolucion', 24],
+  ['responsable_ultima_modificacion', 'ResponsableUltimaModificacion', 26],
+  ['notificado_por', 'NotificadoPor', 26],
+  ['tipo_origen', 'Tipo', 14],
+  ['registrado_por', 'RegistradoPor', 26],
+  ['tipo_rel', 'TipoRelacion', 16],
+];
+// Un ticket -> su renglon, todo como texto; lo que no venga sale vacio.
+function filaTicket(t, cols) {
+  return cols.map(function (c) { const v = t[c[0]]; return v == null ? '' : String(v); });
+}
+/* === COLUMNAS XLSX (fin) === */
+
+// [Pendientes Claude #7]: descarga XLSX de los tickets del periodo vigente
+// (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
+// filtrados por Director/PO/Manager/Service Owner -- los mismos cuatro que
+// habilitan el boton. El detalle se pide al handler al pulsar (ver
+// pedirTickets); el libro se arma en memoria con SheetJS
+// (vendor/xlsx.mini.min.js) y se descarga sin backend: ya no se busca
+// ningun archivo fisico en la carpeta del tablero.
+async function descargarTickets(){
+  const btn=document.getElementById('btnDescargaTickets');
+  const rotulo=btn?btn.textContent:'';
+  if(btn){ btn.disabled=true; btn.textContent='Preparando...'; }
+  try{
+    let tickets;
+    try{ tickets=await pedirTickets(); }
+    catch(e){ console.error(e); alert('No se pudo traer el detalle de tickets: '+e.message); return; }
+    // El handler corta con TOP (@tope) ORDER BY FechaRegistro DESC: si vino
+    // justo el tope, lo que falta son los mas viejos y conviene decirlo.
+    if(tickets.length>=TOPE_TICKETS)
+      alert('El servidor devolvio el maximo de '+TOPE_TICKETS+' tickets; puede '
+           +'faltar lo mas antiguo del periodo. El archivo se genera con lo recibido.');
+    const periodoOk = t => modoTiempo==='mes' ? t.mes===P.mes_actual : t.slot===0;
+    const filtrados=tickets.filter(t=>
+      periodoOk(t) && (!fDir || t.director===fDir) && (!fPO || t.po===fPO)
+      && (!fMgr || t.manager===fMgr) && (!fSO || t.so===fSO));
+    if(!filtrados.length){ alert('No hay tickets para el filtro y periodo actuales.'); return; }
+    const cols=COLUMNAS_TICKETS;
+    // Matriz (no json_to_sheet) para fijar el orden de columnas y forzar texto:
+    // los codigos y fechas no deben reinterpretarse como numero o fecha Excel.
+    const encabezados=cols.map(c=>c[1]);
+    const filas=filtrados.map(t=>filaTicket(t, cols));
+    let XLSX;
+    try{ XLSX=await cargarXLSX(); }
+    catch(e){ console.error(e); alert('No se pudo cargar el generador de Excel.'); return; }
+    /* El contenido es el de siempre -las mismas filas y las mismas columnas de
+       `cols`-; lo que cambia es la presentacion, que la arma LibroTickets: una
+       cabecera de reporte, los filtros con los que se genero y la tabla con
+       encabezado fijo, autofiltro y filas alternas. Los metadatos salen SOLO
+       de lo que ya tiene el tablero: el periodo vigente (el mismo que decide
+       `periodoOk`), los cuatro filtros -"Todos" cuando no hay uno puesto-, el
+       total de filas exportadas y la fecha del equipo. */
+    const periodo = modoTiempo==='mes'
+      ? (P.meses[P.mes_nums.indexOf(P.mes_actual)] || 'Mes actual')
+      : (P.slots[0] || '0-30 dias');
+    const bytes = LibroTickets.construir(XLSX, {
+      hoja: 'Tickets',
+      titulo: 'Tickets — Dashboard Export',
+      subtitulo: 'Tablero de Experiencia',
+      meta: [
+        ['Periodo', periodo],
+        ['Director', fDir || 'Todos'],
+        ['Product Owner', fPO || 'Todos'],
+        ['Manager', fMgr || 'Todos'],
+        ['Service Owner', fSO || 'Todos'],
+        ['Total de tickets', FMT(filas.length)],
+        ['Exportado', new Date().toLocaleString('es-MX')],
+      ],
+      etiquetaTotal: 'Total de tickets',
+      encabezados,
+      filas,
+      // Anchos por columna, en caracteres. Los tres campos de parrafo
+      // -Titulo, Descripcion, SolucionUsuario- van anchos Y con ajuste de
+      // texto; sus posiciones se buscan por llave para no desfasarse si el
+      // orden de COLUMNAS_TICKETS cambia.
+      anchos: cols.map(c=>c[2]),
+      largas: ['titulo','descripcion','solucion'].map(k=>cols.findIndex(c=>c[0]===k)),
+      colEstado: cols.findIndex(c=>c[0]==='estado'),
+    });
+    // Un solo filtro activo -> su nombre en el archivo; varios -> nombre corto.
+    const activos=[fDir,fPO,fMgr,fSO].filter(Boolean);
+    const sufijo=activos.length===1?activos[0]:(activos.length?'filtrado':'filtro');
+    const nombre='Tickets_'+sufijo.replace(/[^a-z0-9]+/gi,'_')+'.xlsx';
+    /* Se descarga desde un Blob y no con XLSX.writeFile porque el libro ya
+       viene retocado: writeFile volveria a generarlo desde el libro en
+       memoria y se perderian los estilos y el panel congelado. El nombre y su
+       sufijo por filtro son exactamente los de antes. */
+    const url=URL.createObjectURL(new Blob([bytes],
+      {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
+    const a=document.createElement('a');
+    a.href=url; a.download=nombre;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 60000);
+  } finally {
+    if(btn){ btn.disabled=false; btn.textContent=rotulo; }
+  }
 }
 
 // ---- Treemap propio (algoritmo "squarified", sin dependencias externas --
@@ -1303,7 +1739,13 @@ function renderTreemap(containerId,items,opts){
     }
     div.style.left=r.x+'px'; div.style.top=r.y+'px';
     div.style.width=Math.max(0,r.w)+'px'; div.style.height=Math.max(0,r.h)+'px';
-    const tono=TM_COLORES[i%TM_COLORES.length];
+    /* `lider: true` -el treemap de la dimension Director / Product Owner-
+       pide el color por NOMBRE a la tabla compartida, igual que las barras:
+       ese recuadro es una persona, y la persona lleva su color aunque el
+       treemap la ordene por area. Sin esa marca -el treemap de agrupacion,
+       cuyos recuadros son Problem / SorIA / Mejora...- sigue el reparto por
+       posicion de la paleta categorica, que ahi no representa a nadie. */
+    const tono=opts.lider ? Paleta.colorLider(r.label) : TM_COLORES[i%TM_COLORES.length];
     div.style.background=tono;
     // .treemap-item pinta el texto en blanco; sobre los verdes claros de la
     // escala hay que devolverlo a carbon o la etiqueta desaparece.
@@ -1323,35 +1765,17 @@ function renderTreemap(containerId,items,opts){
   });
 }
 
-// Plugin de Chart.js inline (sin dependencias externas, como el treemap) que
-// dibuja el valor de cada barra encima de ella -- Chart.js core no trae un
-// plugin de datalabels.
-/* La cifra dentro de la barra la pinta el plugin COMPARTIDO
-   (assets/js/barras.js), atado al FMT de este tablero. Una sola
-   implementacion: dashboard.js usa ese mismo plugin para las barras de
-   Backlog. Aqui solo se le pone nombre local para no tocar los usos. */
-const valueLabelsDentroPlugin = Barras.etiquetasDentro(FMT);
-const valueLabelsPlugin={
-  id:'valueLabels',
-  afterDatasetsDraw(chart){
-    const ctx=chart.ctx;
-    chart.data.datasets.forEach((ds,dsIdx)=>{
-      const meta=chart.getDatasetMeta(dsIdx);
-      if(meta.hidden) return;
-      meta.data.forEach((bar,i)=>{
-        const val=ds.data[i];
-        if(val==null) return;
-        ctx.save();
-        ctx.fillStyle='#191919';
-        ctx.font='bold 12px system-ui, -apple-system, sans-serif';
-        ctx.textAlign='center';
-        ctx.textBaseline='bottom';
-        ctx.fillText(FMT(val), bar.x, bar.y-4);
-        ctx.restore();
-      });
-    });
-  }
-};
+/* Aqui vivian los dos plugins de cifra de este tablero y ya no vive ninguno:
+   las cuatro graficas de barras pasan por DashboardBarChart
+   (assets/js/grafica.js), que enchufa solo el plugin COMPARTIDO de
+   assets/js/barras.js atado al FMT de esta pagina.
+
+   - `valueLabelsDentroPlugin` era un alias de Barras.etiquetasDentro(FMT);
+     ahora lo crea DashboardBarChart.
+   - `valueLabelsPlugin` pintaba la cifra SIEMPRE por ENCIMA de la barra, en
+     carbon y sin mirar si cabia dentro. Lo usaba una sola grafica -las barras
+     de estado del panel cross-filter-, que quedaba distinta de su gemela
+     "Iniciativas por Estado" teniendo los mismos datos y los mismos colores. */
 
 // ---- Iniciativas por Estado (TAREA 2): barras verticales, orden fijo
 // En Análisis -> En Solución -> En Monitoreo (mismo orden que ESTADOS_ACTIVOS),
@@ -1436,8 +1860,18 @@ function renderBarrasFiltroEstado(tab, conteo, seleccionado){
     return (!seleccionado || seleccionado===e) ? base : base+'40';
   });
   if(chartsFiltroEstado[tab]) chartsFiltroEstado[tab].destroy();
-  chartsFiltroEstado[tab]=new Chart(el,{type:'bar',data:{labels,datasets:[{data,backgroundColor:colors}]},
-    options:{responsive:true,plugins:{legend:{display:false},
+  /* Misma grafica que "Iniciativas por Estado" pero dentro del panel
+     cross-filter, asi que va por el MISMO camino: DashboardBarChart pone
+     medidas, radio y cifra dentro. El color se pasa hecho en `colores`
+     porque es progresion semantica (COLOR_ESTADO), con el `+'40'` que
+     apaga los estados no seleccionados: eso es del filtro, no del estilo. */
+  chartsFiltroEstado[tab]=new DashboardBarChart({
+    canvas: el,
+    etiquetas: labels,
+    datos: data,
+    colores: colors,
+    formato: FMT,
+    opciones:{plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.label+': '+FMT(c.raw)+' iniciativas'}}},
       onClick:(evt,elements)=>{
         if(!elements.length) return;
@@ -1445,7 +1879,7 @@ function renderBarrasFiltroEstado(tab, conteo, seleccionado){
       },
       onHover:(evt,elements)=>{evt.native.target.style.cursor=elements.length?'pointer':'default';},
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}},
-    plugins:[valueLabelsPlugin]});
+  }).render();
 }
 // Renderiza las 3 graficas del panel cross-filter de una pestaña (ven/act).
 // Cada grafica se calcula sobre las filas ya filtradas por las OTRAS 2
@@ -1460,9 +1894,12 @@ function renderPanelGraf(tab, cats){
   const rowsDim=aplicarFiltroGraf(baseRows, est, 'dim');
   const conteoDim={};
   rowsDim.forEach(r=>{ const v=r[est.dim]||'(Sin dato)'; conteoDim[v]=(conteoDim[v]||0)+1; });
+  // La dimension de este treemap es SIEMPRE una persona -Director o Product
+  // Owner-, asi que el color es identidad y sale de la tabla compartida.
+  registrarDimension(Object.keys(conteoDim));
   renderTreemap('chart'+cap1(tab)+'Dim',
     Object.entries(conteoDim).map(([label,value])=>({label,value})),
-    {selected:est.dimVal, onClick:val=>toggleFiltroGraf(tab,'dimVal',val)});
+    {selected:est.dimVal, lider:true, onClick:val=>toggleFiltroGraf(tab,'dimVal',val)});
 
   const rowsAgrup=aplicarFiltroGraf(baseRows, est, 'agrup');
   const conteoAgrup={};
@@ -1480,23 +1917,36 @@ function renderPanelGraf(tab, cats){
 
 let chartBarDir=null;
 
-/* Identidad de DIRECTOR y de PRODUCT OWNER. Las dos dimensiones se ordenan
-   por volumen, asi que su posicion cambia con cada filtro: por eso van por
-   registro con nombre de la paleta COMPARTIDA (assets/js/paleta.js) y no por
-   indice. El registro reparte por orden de ALTA, asi que un director -o un
-   PO- conserva su color aunque baje de puesto, salga del top 15 o se entre a
-   un director en el detalle. Las dos graficas de PO comparten registro, asi
-   que el mismo PO sale del mismo color en "Volumen" y en "Con Iniciativa". */
-const REG_DIRECTOR = Paleta.registro('exp-director');
-const REG_PO = Paleta.registro('exp-po');
+/* IDENTIDAD DE LIDER en "Volumen por Director", "Volumen por Product Owner"
+   y su version "con Iniciativa".
 
-/* Grosor de barra: el juego COMPARTIDO de assets/js/barras.js, el mismo que
-   usan las barras de Backlog. Desde que Barras.aplicarDefaults() lo deja como
-   default del tipo `bar`, este alias ya no hace falta para que la barra salga
-   gruesa; se conserva porque lo nombran las dos graficas de abajo y porque
-   deja escrito, ahi mismo, que su grosor no es una decision local. El radio
-   lo pone tambien el default (Barras.RADIO). */
-const BARRA_GRUESA = Barras.GRUESA;
+   Aqui vivieron primero REG_DIRECTOR y REG_PO -dos registros que repartian
+   color por orden de ALTA- y despues nada: las tres graficas pasaron al azul
+   de barra ordinaria (Paleta.AZUL_SERIE). Las dos cosas estaban mal por el
+   mismo motivo: un director o un PO NO es una barra anonima, es la misma
+   persona que el Backlog pinta como lider en su tendencia, en su apilada de
+   antiguedad y en sus swatches. Si ahi es azul, aqui tiene que ser azul.
+
+   Asi que las tres piden el color por NOMBRE -el color de siempre de esa
+   persona, congelado en paleta.js- a la tabla compartida
+   (Paleta.colorLider, via `paleta: { lider: true }`). El registro local
+   desaparece a proposito: un solo mapa nombre -> color para todo el tablero,
+   sin copias que se contradigan.
+
+   El ORDEN de las barras no se toca: los tres rankings siguen de mayor a
+   menor volumen. El color va con la persona, el puesto con la cifra: una
+   persona que baja del primero al quinto lugar conserva su color.
+
+   `registrarDimension()` da de alta el roster de la vista antes de pintar,
+   para que el reparto sea el mismo conjunto en las tres graficas. Los cubos
+   "(Sin director)" y "(Sin PO)" NO son personas: la tabla compartida los
+   deja fuera del orden y los pinta de NEUTRO. */
+function registrarDimension(nombres){ Paleta.registrarLideres(nombres); }
+
+/* Aqui vivia `BARRA_GRUESA`, un alias de Barras.GRUESA que las dos graficas
+   de abajo copiaban en su dataset. Ya no hace falta: las dos pasan por
+   DashboardBarChart, que aplica el juego compartido solo, y el grosor y el
+   radio son ademas el default del tipo `bar` desde Barras.aplicarDefaults(). */
 
 /* Volumen por Product Owner: barras verticales, no treemap.
 
@@ -1516,15 +1966,22 @@ function renderBarrasPO(canvasId, filas, valorDe){
   if(!el) return;
   if(chartsPO[canvasId]) chartsPO[canvasId].destroy();
   const datos = filas.filter(r => valorDe(r) > 0);
-  chartsPO[canvasId] = new Chart(el, {
-    type: 'bar',
-    data: { labels: datos.map(r => cortaPO(r.po)),
-      // El color se pide con el nombre COMPLETO, no con el recortado del eje:
-      // dos POs distintos pueden compartir los primeros 15 caracteres.
-      datasets: [Object.assign({ data: datos.map(valorDe),
-        backgroundColor: REG_PO.escala(datos.map(r => r.po)) }, BARRA_GRUESA)] },
-    options: {
-      responsive: true, maintainAspectRatio: false,
+  /* Medidas, radio y cifra dentro las pone DashboardBarChart; aqui solo queda
+     lo propio: el eje con los nombres recortados y el tooltip con el completo.
+     El color es IDENTIDAD y se pide con el nombre COMPLETO -no con el
+     recortado del eje: dos POs distintos pueden compartir los primeros 15
+     caracteres-, asi que va por `colores`, ya resuelto contra la tabla
+     compartida. Las dos graficas de PO -"Volumen" y "Con Iniciativa"- salen
+     por aqui, de modo que el mismo PO sale del mismo color en las dos. */
+  registrarDimension(datos.map(r => r.po));
+  chartsPO[canvasId] = new DashboardBarChart({
+    canvas: el,
+    etiquetas: datos.map(r => cortaPO(r.po)),
+    datos: datos.map(valorDe),
+    colores: datos.map(r => Paleta.colorLider(r.po)),
+    formato: FMT,
+    opciones: {
+      maintainAspectRatio: false,
       plugins: { legend: { display: false },
         tooltip: { callbacks: {
           title: it => datos[it[0].dataIndex] ? datos[it[0].dataIndex].po : '',
@@ -1535,8 +1992,7 @@ function renderBarrasPO(canvasId, filas, valorDe){
              ticks: { autoSkip: false, maxRotation: 55, minRotation: 55, font: { size: 10 } } },
       },
     },
-    plugins: [valueLabelsDentroPlugin],
-  });
+  }).render();
 }
 function renderResumen(){
   document.getElementById('tituloResumen').textContent='Indicadores por Director';
@@ -1569,13 +2025,24 @@ function renderResumen(){
   // barras por director (nombre completo en el eje Y, sin truncar)
   const bdCtx=document.getElementById('chartBarDir');
   if(chartBarDir)chartBarDir.destroy();
-  chartBarDir=new Chart(bdCtx,{type:'bar',data:{labels:dirRows.map(r=>r.dir),
-    datasets:[Object.assign({data:dirRows.map(r=>r.vol),
-      backgroundColor:REG_DIRECTOR.escala(dirRows.map(r=>r.dir))},BARRA_GRUESA)]},
-    options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false}},
+  /* Ranking HORIZONTAL, pero con el mismo lenguaje que las verticales: el
+     grosor, el radio y la cifra dentro salen de DashboardBarChart, que ademas
+     mide a lo ancho cuando indexAxis es 'y'. Lo propio es la orientacion, que
+     el nombre del director va entero en el eje y que el color es IDENTIDAD:
+     `paleta: { lider: true }` lo resuelve por nombre contra la tabla
+     compartida, el mismo color que esa persona lleva en el Backlog. Las
+     barras siguen ordenadas por volumen (mayor -> menor). */
+  registrarDimension(dirRows.map(r=>r.dir));
+  chartBarDir=new DashboardBarChart({
+    canvas: bdCtx,
+    etiquetas: dirRows.map(r=>r.dir),
+    datos: dirRows.map(r=>r.vol),
+    paleta: { lider: true },
+    formato: FMT,
+    opciones:{indexAxis:'y',plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},
         y:{ticks:{autoSkip:false,font:{size:11}}}}},
-    plugins:[valueLabelsDentroPlugin]});
+  }).render();
   // barras por PO (top 15) y su version "con iniciativa" (mismas filas/orden)
   const porPO={};
   c1.forEach(c=>{const p=c.po||'(Sin PO)';

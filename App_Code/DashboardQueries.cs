@@ -533,16 +533,13 @@ SELECT
     HorasCicloPromedio = CAST(AVG(HorasCiclo) AS DECIMAL(18,2)),
     ReasignacionesPromedio = CAST(AVG(CAST(ReasignacionesGrupo AS DECIMAL(18,2))) AS DECIMAL(18,2)),
     TicketsAltaPrioridad = SUM(CASE WHEN Prioridad IN (N'Alta', N'Crítica', N'Critica', N'Urgente') THEN 1 ELSE 0 END),
-    -- Fin del ultimo ETL de tickets, para el sello del encabezado. dbo.EtlLog
-    -- guarda la hora en UTC; se convierte a hora local de Mexico aqui para que
-    -- el navegador solo tenga que formatearla (AT TIME ZONE: SQL Server 2016+).
-    UltimaActualizacionEtl = (
-        SELECT CAST(
-            MAX(l.Fin) AT TIME ZONE 'UTC' AT TIME ZONE 'Central Standard Time (Mexico)'
-            AS DATETIME2(0))
-        FROM dbo.EtlLog l
-        WHERE l.Proceso = N'Proactivanet tickets'
-    )
+    -- Fin del ultimo ETL de tickets, para el sello del encabezado. El texto de
+    -- la subconsulta vive en DashboardDataInfo.SqlUltimoEtlTickets: es la MISMA
+    -- definicion que lee QA por su cuenta, y tenerla en un solo sitio evita que
+    -- dos pestanas acaben mostrando sellos distintos del mismo ETL.
+    -- Sale en UTC, tal como lo guarda dbo.EtlLog; el salto a UTC-06 lo hace
+    -- DashboardDataInfo al presentarlo, no esta consulta.
+    UltimaActualizacionEtl = (" + DashboardDataInfo.SqlUltimoEtlTickets + @")
 FROM conPct;";
 
         var filas = Unico(sql, f, null);
