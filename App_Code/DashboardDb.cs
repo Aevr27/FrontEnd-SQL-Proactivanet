@@ -8,7 +8,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
 using System.Globalization;
@@ -42,21 +41,7 @@ public static class DashboardDb
                 do
                 {
                     var filas = new List<Dictionary<string, object>>();
-                    while (reader.Read())
-                    {
-                        var fila = new Dictionary<string, object>();
-                        for (int i = 0; i < reader.FieldCount; i++)
-                        {
-                            object valor = reader.GetValue(i);
-                            if (valor is DBNull)
-                                valor = null;
-                            else if (valor is DateTime)
-                                valor = ((DateTime)valor).ToString("yyyy-MM-ddTHH:mm:ss");
-
-                            fila[reader.GetName(i)] = valor;
-                        }
-                        filas.Add(fila);
-                    }
+                    while (reader.Read()) filas.Add(SqlRowMapper.Fila(reader));
                     resultados.Add(filas);
                 } while (reader.NextResult());
             }
@@ -73,35 +58,6 @@ public static class DashboardDb
         return resultados.Count > 0 ? resultados[0] : new List<Dictionary<string, object>>();
     }
 
-    // Consulta de texto plano, sin parametros. La usa unicamente
-    // diagnostico.ashx: todo lo demas pasa por stored procedures.
-    public static List<Dictionary<string, object>> EjecutarTexto(string sql)
-    {
-        var filas = new List<Dictionary<string, object>>();
-
-        using (var cn = new SqlConnection(ConnectionString()))
-        using (var cmd = new SqlCommand(sql, cn))
-        {
-            cmd.CommandType = CommandType.Text;
-            cn.Open();
-            using (var reader = cmd.ExecuteReader())
-            {
-                while (reader.Read())
-                {
-                    var fila = new Dictionary<string, object>();
-                    for (int i = 0; i < reader.FieldCount; i++)
-                    {
-                        object valor = reader.GetValue(i);
-                        fila[reader.GetName(i)] = (valor is DBNull) ? null : valor;
-                    }
-                    filas.Add(fila);
-                }
-            }
-        }
-
-        return filas;
-    }
-
     // Expuesta para DashboardQueries, que abre su propia conexion para las
     // consultas de texto parametrizado del tablero de SLA.
     public static string CadenaConexion()
@@ -111,17 +67,7 @@ public static class DashboardDb
 
     private static string ConnectionString()
     {
-        var cs = ConfigurationManager.ConnectionStrings["TicketsProactivanet"];
-        if (cs == null || string.IsNullOrWhiteSpace(cs.ConnectionString))
-        {
-            // Sin este mensaje, la referencia nula reventaba con un
-            // NullReferenceException que no decia nada util: el sintoma en
-            // pantalla era solo "Error al cargar datos".
-            throw new ConfigurationErrorsException(
-                "Falta la cadena de conexion 'TicketsProactivanet' en Web.config. " +
-                "Copia Web.config.ejemplo como Web.config en la raiz del sitio y ajusta el servidor/credenciales.");
-        }
-        return cs.ConnectionString;
+        return ConnectionStringProvider.ObtenerCadena();
     }
 }
 

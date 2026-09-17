@@ -15,7 +15,6 @@
 
 using System;
 using System.Collections.Generic;
-using System.Configuration;
 using System.Data;
 using System.Data.SqlClient;
 using System.Globalization;
@@ -220,23 +219,12 @@ public static class QaDb
         return resultados;
     }
 
-    // Una fila del lector como diccionario. Las mismas dos conversiones que
-    // el tablero siempre hizo: DBNull -> null, y las fechas a texto ISO sin
-    // zona horaria, que es como las espera el frontend.
+    // Una fila del lector como diccionario. Mismas dos conversiones que el
+    // tablero siempre hizo (DBNull -> null, fechas a texto ISO sin zona);
+    // compartidas con DashboardDb via SqlRowMapper.
     private static Dictionary<string, object> Fila(IDataRecord reader)
     {
-        var fila = new Dictionary<string, object>();
-        for (int i = 0; i < reader.FieldCount; i++)
-        {
-            object valor = reader.GetValue(i);
-            if (valor is DBNull)
-                valor = null;
-            else if (valor is DateTime)
-                valor = ((DateTime)valor).ToString("yyyy-MM-ddTHH:mm:ss");
-
-            fila[reader.GetName(i)] = valor;
-        }
-        return fila;
+        return SqlRowMapper.Fila(reader);
     }
 
     // Recorre el PRIMER result set de un stored procedure fila por fila, sin
@@ -469,25 +457,14 @@ WHERE FechaRegistroDia >= @FechaInicio
     {
         get
         {
-            var cs = ConfigurationManager.ConnectionStrings["TicketsProactivanet"];
-            return cs != null && QaSnapshot.Activo(cs.ConnectionString);
+            string cadena;
+            return ConnectionStringProvider.TryObtenerCadena(out cadena) && QaSnapshot.Activo(cadena);
         }
     }
 
     private static string CadenaConexion()
     {
-        var cs = ConfigurationManager.ConnectionStrings["TicketsProactivanet"];
-        if (cs == null || string.IsNullOrWhiteSpace(cs.ConnectionString))
-        {
-            // Sin este mensaje la referencia nula revienta con un
-            // NullReferenceException que no dice nada util, y en pantalla solo
-            // se ve "Error al cargar datos".
-            throw new ConfigurationErrorsException(
-                "Falta la cadena de conexion 'TicketsProactivanet' en Web.config. " +
-                "Copia Web.config.ejemplo como Web.config en la raiz del sitio y " +
-                "ajusta el servidor/credenciales.");
-        }
-        return cs.ConnectionString;
+        return ConnectionStringProvider.ObtenerCadena();
     }
 }
 

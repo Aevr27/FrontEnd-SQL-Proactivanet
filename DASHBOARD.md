@@ -69,10 +69,10 @@ Los gráficos utilizan Chart.js mediante CDN. Si el servidor no tiene salida a i
 
 En la misma pestaña, y con los mismos filtros de fecha, se muestran dos bloques adicionales:
 
-- **Call Center** — tarjetas y gráficos de llamadas, servidos por `llamadas.ashx`. Los filtros de grupo y técnico no se aplican: una llamada no tiene grupo resolutor.
-- **Carga combinada** — tickets y llamadas por técnico en la misma fila, servido por `carga_combinada.ashx`. Solo incluye a los técnicos con extensión telefónica registrada en `dbo.CatAgenteTecnico`. Los tickets se cuentan por fecha de firma de solución y las llamadas únicamente si fueron contestadas.
+- **Call Center** — tarjetas y gráficos de llamadas, servidos por `llamadas.ashx`. El filtro de grupo no se aplica: una llamada no tiene grupo resolutor. El de técnico solo acota «Atención por agente»: el handler traduce el nombre a extensiones con `dbo.CatAgenteTecnico` (y `dbo.CatAgenteTecnicoAlias` para nombres viejos) y descarta las filas del resto. Los procedimientos no cambian.
+- **Carga combinada** — tickets y llamadas por técnico en la misma fila, servido por `carga_combinada.ashx`. Solo incluye a los técnicos con extensión telefónica registrada en `dbo.CatAgenteTecnico`; los filtros de grupo y técnico lo acotan. Los tickets se cuentan por fecha de firma de solución y las llamadas únicamente si fueron contestadas.
 
-Ambos bloques requieren que se hayan ejecutado `14_llamadas_callcenter.sql`, `15_dashboard_llamadas.sql` y `16_cruce_llamadas_tickets.sql`. Si faltan, el resto del tablero sigue funcionando y el bloque de carga combinada se desactiva indicando el motivo.
+Ambos bloques requieren que se hayan ejecutado `14_llamadas_callcenter.sql`, `15_dashboard_llamadas.sql` y `16_cruce_llamadas_tickets.sql` (repo Integracion_SQL, rama `feature/tablero-sla-productividad`). El filtro de técnico no necesita ningún script nuevo: usa los catálogos que ya crea el 16. Si faltan, el resto del tablero sigue funcionando y el bloque de carga combinada se desactiva indicando el motivo.
 
 ## 3. Dashboard de Backlog
 

@@ -893,15 +893,16 @@ const TableroSla = (function () {
      leen, pero mandarsela igual dejaria una lista de parametros que no
      describe lo que cada peticion usa de verdad.
 
-     Los filtros de Grupos y Tecnicos se quitan: una llamada no tiene grupo
-     resolutor, y el handler tampoco los mira.
+     Grupos se quita: una llamada no tiene grupo resolutor. Tecnicos se
+     queda, recortado a los del Call Center (ver tecnicosCallElegidos): el
+     handler lo usa solo para "Atencion por agente".
 
      Separador coma: a diferencia de los tecnicos ("Apellidos, Nombre"), el
      valor es el numero de cola y nunca contiene comas. */
   function paramsLlamadas() {
     const p = paramsFiltros();
     p.delete('grupos');
-    p.delete('tecnicos');
+    ponerTecnicosCall(p);
     const campanas = seleccionados('f-campanas');
     if (campanas.length) p.set('campanas', campanas.join(','));
     return p;
@@ -1353,6 +1354,22 @@ const TableroSla = (function () {
     const quiero = new Set(deseada ?? []);
     for (const op of sel.options) op.selected = quiero.has(op.value);
     return JSON.stringify(seleccionados(id)) !== antes;
+  }
+
+  /* Los tecnicos elegidos que existen en el catalogo del Call Center. La
+     barra se comparte con SLA, y ahi el <select> trae a todos: un tecnico de
+     otra area no tiene extension y solo vaciaria las graficas de llamadas. */
+  function tecnicosCallElegidos() {
+    const permitidos = new Set(catalogos.tecnicosCall ?? []);
+    return seleccionados('f-tecnicos').filter(t => permitidos.has(t));
+  }
+
+  // Mismo separador | que paramsFiltros(): los nombres llevan coma.
+  function ponerTecnicosCall(p) {
+    const tecnicos = tecnicosCallElegidos();
+    if (tecnicos.length) p.set('tecnicos', tecnicos.join('|'));
+    else p.delete('tecnicos');
+    return p;
   }
 
   function aplicarCatalogos() {
@@ -2709,7 +2726,7 @@ const TableroSla = (function () {
      Tecnicos se quita: el procedimiento no lo mira. */
   function paramsCargaCombinada() {
     const p = paramsFiltros();
-    p.delete('tecnicos');
+    ponerTecnicosCall(p);
     /* El cruce es Call Center: nunca puede pedir un grupo que no atienda
        telefono. Acotar el <select> ya lo evita en la practica, pero el
        parametro se recorta igual aqui, que es por donde de verdad sale la
