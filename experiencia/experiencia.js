@@ -229,9 +229,21 @@ function pronosticoMes(volReal){
   return Math.round(volReal / P.dias_transcurridos_mes * 30);
 }
 
-// Enlace "Consulta el Detalle" (header y modal) desde LIGADETALLE
+/* Enlace "Consulta el Detalle" (header y modal) desde LIGADETALLE.
+
+   La URL viene de fuera -AppSettings["ExperienciaLigaDetalle"], via el
+   handler-, asi que se valida el ESQUEMA antes de ponerla en un href. Un
+   `javascript:...` no tiene ni un caracter que el escape de HTML cambie, y
+   en un <a href> se ejecuta al hacer clic.
+
+   LIGA_DETALLE es '' cuando el valor no sirve, que es exactamente lo mismo
+   que cuando no hay valor: los dos enlaces nacen con display:none en el
+   marcado y se quedan asi. No se avisa de nada al usuario -no es un error
+   suyo- y el resto del tablero no cambia. */
+const LIGA_DETALLE = Escape.url(P.liga_detalle);
+
 (function(){
-  const url=P.liga_detalle;
+  const url=LIGA_DETALLE;
   if(url){
     const h=document.getElementById('ligaHeader');
     if(h){h.href=url; h.style.display='inline-flex';}
@@ -1122,7 +1134,7 @@ function renderModalBody(){
   const nCer=new Set(c.iniciativas.filter(i=>i.agrup!=='ReqOpr' && i.estado==='Cerrado').map(i=>i.folio)).size;
   document.getElementById('modalTitle').textContent=c.categoria;
   const lm=document.getElementById('ligaModal');
-  if(lm && P.liga_detalle) lm.style.display='inline-block';
+  if(lm && LIGA_DETALLE) lm.style.display='inline-block';
   document.getElementById('modalSub').textContent=
     `Volumen actual: ${FMT(volActualDe(c))} · Con iniciativa activa: ${FMT(c.ini_total)} (${PCT(c.pct_inic)}) · `
     +`${nAct} activas · ${nCer} cerradas`;

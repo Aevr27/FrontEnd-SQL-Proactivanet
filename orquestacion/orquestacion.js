@@ -162,7 +162,11 @@ function renderOrq(){
     `<span><i style="background:${candColors[i%candColors.length]}"></i>${esc(l)}: ${FMT(candVals[i])}</span>`).join('');
   // [ORQ-TABL] tabla resumen de KPIs por director
   renderOrqDirTable();
-  if(J.liga_detalle){const h=document.getElementById('ligaHeaderOr');if(h){h.href=J.liga_detalle;h.style.display='inline-flex';}}
+  /* Misma regla que en Observabilidad: la liga viene del JSON y solo se
+     pone en el href si resuelve a http o https. Si no, el <a> se queda
+     oculto como estaba. */
+  const ligaOr=Escape.url(J.liga_detalle);
+  if(ligaOr){const h=document.getElementById('ligaHeaderOr');if(h){h.href=ligaOr;h.style.display='inline-flex';}}
 }
 function renderOrqDirTable(){
   const cel=(J.orquestacion.celdas||[]).filter(c=>{

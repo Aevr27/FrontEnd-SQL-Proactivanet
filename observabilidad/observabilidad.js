@@ -98,7 +98,11 @@ function renderObserv(){
      <td>${esc(a.propietario||'—')}</td><td>${esc(a.seguridad||'—')}</td><td>${esc(a.ciclo_vida||'—')}</td>
      <td>${esc(a.madurez||'—')}</td><td>${esc(a.po||'—')}</td><td>${esc(a.so||'—')}</td></tr>`).join('')
     : '<tr><td colspan="9" class="empty">Sin aplicaciones para el filtro.</td></tr>';
-  if(J.liga_detalle){const h=document.getElementById('ligaHeaderOb');if(h){h.href=J.liga_detalle;h.style.display='inline-flex';}}
+  /* La liga sale del JSON, asi que se valida el esquema antes del href:
+     solo http y https llegan al enlace. Si no sirve, el <a> se queda con su
+     display:none del marcado, igual que cuando no viene liga. */
+  const ligaOb=Escape.url(J.liga_detalle);
+  if(ligaOb){const h=document.getElementById('ligaHeaderOb');if(h){h.href=ligaOb;h.style.display='inline-flex';}}
 }
 // selectores observabilidad
 (function(){
