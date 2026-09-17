@@ -9,11 +9,12 @@
 // El filtro de grupo NO se pasa: una llamada no tiene grupo resolutor. El
 // filtro propio es la campana.
 //
-// El de tecnicos solo mueve "Atencion por agente": con tecnicos elegidos ese
-// result set se reemplaza por DashboardQueries.LlamadasPorAgente, que cruza
-// la extension con el tecnico por dbo.vw_TecnicoAgente. Las tarjetas y las
-// otras tres graficas son de toda la cola y no cambian. Sin tecnicos todo
-// sale del procedimiento, como siempre.
+// El de tecnicos ('tecnicos', separado por '|') solo lo recibe
+// dbo.usp_Dash_LlamadasGraficas, y ahi solo acota "Atencion por agente"
+// (sql/17_call_center_filtro_tecnicos.sql). Las tarjetas y las otras tres
+// graficas son de toda la cola. Se manda SOLO si hay tecnicos elegidos: en
+// una base sin el script 17 la pestana sigue funcionando mientras no se elija
+// ninguno (con uno elegido, el procedimiento rechaza el parametro).
 
 using System.Collections.Generic;
 using System.Web;
@@ -35,13 +36,12 @@ public class Llamadas : IHttpHandler
             };
 
             var kpis = DashboardDb.Ejecutar("dbo.usp_Dash_LlamadasKpis", parametros);
-            var graficas = DashboardDb.EjecutarMultiple("dbo.usp_Dash_LlamadasGraficas", parametros);
-            var filtros = DashboardQueries.Filtros.Desde(context.Request);
-            if (filtros.Tecnicos.Count > 0 && graficas.Count > 3)
-            {
-                graficas[3] = DashboardQueries.LlamadasPorAgente(
-                    filtros, DashboardQueries.Lista(context.Request.QueryString["campanas"]), 15);
-            }
+
+            // Copia: usp_Dash_LlamadasKpis no acepta @Tecnicos.
+            var parametrosGraficas = new Dictionary<string, object>(parametros);
+            object tecnicos = DashboardParams.ListaONulo(context.Request, "tecnicos");
+            if (tecnicos != null) parametrosGraficas["Tecnicos"] = tecnicos;
+            var graficas = DashboardDb.EjecutarMultiple("dbo.usp_Dash_LlamadasGraficas", parametrosGraficas);
 
             var campanas = DashboardDb.Ejecutar("dbo.usp_Dash_LlamadasCatalogos",
                                                 new Dictionary<string, object>());
