@@ -1365,13 +1365,17 @@ const TableroSla = (function () {
   /* ------------------------------------------ Acotado al Call Center
      La barra de filtros es UNA sola y viaja entre las pestañas "SLA y
      productividad" y "Call Center" (ver adoptarControlesSla). Ahi no todos
-     los grupos vienen a cuento: quien contesta telefono esta en Service Desk
-     o End User, y fuera de esos dos no hay llamadas ni tecnicos que cruzar.
-     El backend ya lo sabia -carga_combinada.ashx manda ese par como valor por
-     omision de @Grupos-, asi que catalogos.ashx devuelve ahora, junto a las
-     listas completas de SLA, el subconjunto del Call Center leido de la misma
-     vista de donde sale todo lo demas: la relacion tecnico -> grupo es la que
-     ya esta en los datos, aqui no hay ninguna lista de nombres a mano.
+     los tecnicos vienen a cuento: quien contesta telefono esta en Service
+     Desk o End User, y un tecnico de otra area no tiene extension, asi que
+     elegirlo solo vaciaria las graficas de llamadas. catalogos.ashx devuelve,
+     junto a las listas completas de SLA, el subconjunto del Call Center leido
+     de la misma vista de donde sale todo lo demas: la relacion tecnico ->
+     grupo es la que ya esta en los datos, aqui no hay ninguna lista de
+     nombres a mano.
+
+     Solo se acota Tecnicos. Grupos no se toca: en el Call Center el campo no
+     se muestra (ninguna de sus peticiones lo lee) y en SLA la lista es la
+     completa de siempre.
 
      No se esconden <option> con CSS: se cambia el juego de <option> del
      <select>, que es la fuente de la verdad de la que leen paramsFiltros() y
@@ -1379,7 +1383,7 @@ const TableroSla = (function () {
      solo-. Lo que estuviera elegido en SLA se guarda al entrar y se devuelve
      entero al salir, para que la otra pestaña no pierda sus filtros por haber
      pasado por aqui. */
-  let catalogos = { grupos: [], tecnicos: [], gruposCall: [], tecnicosCall: [] };
+  let catalogos = { grupos: [], tecnicos: [], tecnicosCall: [] };
   let enCallCenter = false;
   let seleccionSla = null;   // lo elegido en SLA mientras la barra esta prestada
 
@@ -1415,15 +1419,24 @@ const TableroSla = (function () {
     return p;
   }
 
+  /* Grupos se llena SIEMPRE con la lista completa -es el catalogo de SLA, la
+     unica pestaña donde el campo se muestra- y ya no se conmuta al entrar al
+     Call Center: alli reescribir sus <option> no cambiaba nada de lo que se
+     veia y, si la seleccion de SLA caia fuera del subconjunto, forzaba una
+     recarga solo por cambiar de pestaña. El que si se acota es Tecnicos, que
+     en el Call Center mueve "Atencion por agente" y el cruce de carga.
+
+     Aun asi se reescribe en cada pasada -y no solo al llegar el catalogo-
+     porque ponerOpciones() es tambien lo que conserva la seleccion viva: el
+     <select> es el mismo nodo viajando entre pestañas. */
   function aplicarCatalogos() {
-    const g = enCallCenter ? catalogos.gruposCall : catalogos.grupos;
     const t = enCallCenter ? catalogos.tecnicosCall : catalogos.tecnicos;
-    const quiero = seleccionSla ?? {
-      grupos: seleccionados('f-grupos'), tecnicos: seleccionados('f-tecnicos') };
+    const quiero = seleccionSla ?? { tecnicos: seleccionados('f-tecnicos') };
     // Los dos se evaluan SIEMPRE: con || el segundo se saltaria en cuanto el
     // primero cambiara, y el <select> de tecnicos se quedaria con el catalogo
     // de la otra pestaña.
-    const cambioG = ponerOpciones('f-grupos', g, quiero.grupos);
+    const cambioG = ponerOpciones('f-grupos', catalogos.grupos,
+      seleccionados('f-grupos'));
     const cambioT = ponerOpciones('f-tecnicos', t, quiero.tecnicos);
     return cambioG || cambioT;
   }
@@ -1436,7 +1449,7 @@ const TableroSla = (function () {
     if (esCall === enCallCenter) return;
     // Al entrar se guarda lo de SLA; al salir se devuelve y se olvida.
     seleccionSla = esCall
-      ? { grupos: seleccionados('f-grupos'), tecnicos: seleccionados('f-tecnicos') }
+      ? { tecnicos: seleccionados('f-tecnicos') }
       : seleccionSla;
     enCallCenter = esCall;
     const cambio = aplicarCatalogos();
@@ -1450,9 +1463,9 @@ const TableroSla = (function () {
       grupos: cat.grupos ?? [],
       tecnicos: cat.tecnicos ?? [],
       // Servidor viejo -o catalogos.ashx sin actualizar-: sin el subconjunto
-      // se cae a las listas completas. Es la conducta de antes, no una
-      // pestaña rota.
-      gruposCall: cat.gruposCall ?? cat.grupos ?? [],
+      // se cae a la lista completa. Es la conducta de antes, no una pestaña
+      // rota. `gruposCall` sigue viajando en la respuesta y ya no se usa: el
+      // filtro de Grupos no existe en el Call Center.
       tecnicosCall: cat.tecnicosCall ?? cat.tecnicos ?? [],
     };
     // El catalogo llega despues del primer pintado: si para entonces la barra
@@ -2763,24 +2776,22 @@ const TableroSla = (function () {
   const TOPE_CARGA = 20;
   const TOPE_CARGA_GRAFICA = 15;
 
-  /* Mismo rango de fechas que los tickets y el MISMO filtro de Grupos: aqui
-     el grupo si se usa, pero contra el grupo donde el tecnico tiene mas
-     tickets (dbo.CatAgenteTecnico.Grupo), no contra el del ticket. El de
-     Tecnicos se quita: el procedimiento no lo mira. */
+  /* Mismo rango de fechas que los tickets, y nada mas de la barra salvo
+     Tecnicos.
+
+     Grupos NO viaja: el parametro existe en el procedimiento, pero medido
+     contra el grupo donde el tecnico tiene mas tickets
+     (dbo.CatAgenteTecnico.Grupo), no contra el del ticket. Era el mismo
+     control de la barra significando dos cosas distintas segun la pestaña, y
+     el filtro se retiro del Call Center: sin grupos el handler manda su valor
+     por omision, que es el par de grupos que atiende telefono. El
+     procedimiento y el contrato del handler no cambian; solo se deja de
+     mandar el parametro, y el hint del bloque sigue diciendo en que grupos
+     se busco porque eso viaja en la respuesta. */
   function paramsCargaCombinada() {
     const p = paramsFiltros();
+    p.delete('grupos');
     ponerTecnicosCall(p);
-    /* El cruce es Call Center: nunca puede pedir un grupo que no atienda
-       telefono. Acotar el <select> ya lo evita en la practica, pero el
-       parametro se recorta igual aqui, que es por donde de verdad sale la
-       peticion: la barra la comparten dos pestañas y lo que traiga puesto SLA
-       no tiene por que llegar hasta aqui. Si no queda ninguno se quita el
-       parametro y manda el valor por omision del handler, que es ese mismo
-       par de grupos. */
-    const permitidos = new Set(catalogos.gruposCall ?? []);
-    const grupos = seleccionados('f-grupos').filter(g => permitidos.has(g));
-    if (grupos.length) p.set('grupos', grupos.join(','));
-    else p.delete('grupos');
     p.set('top', String(TOPE_CARGA));
     return p;
   }
@@ -4632,7 +4643,17 @@ function adoptarControlesSla(idTab) {
   const campanas = filtros.querySelector('.campo-campanas');
   if (campanas) campanas.hidden = !esCallCenter;
 
-  /* Grupos y tecnicos: en el Call Center solo los que atienden telefono. */
+  /* Grupos se retira en el Call Center, como el SLOT: ninguna peticion de esa
+     pestaña lo lee. llamadas.ashx nunca lo recibio -una llamada no tiene
+     grupo resolutor- y el cruce de carga combinada pide ahora los grupos por
+     omision del handler, que son justo los que atienden telefono. Dejarlo a
+     la vista era ofrecer un filtro que no movia nada de lo que se estaba
+     viendo. En SLA sigue igual: el <select> es el mismo, con su seleccion y
+     sus listeners; solo deja de mostrarse mientras la barra esta prestada. */
+  const grupos = filtros.querySelector('.campo-grupos');
+  if (grupos) grupos.hidden = esCallCenter;
+
+  /* Tecnicos: en el Call Center solo los que atienden telefono. */
   TableroSla.modoCallCenter(esCallCenter);
 }
 

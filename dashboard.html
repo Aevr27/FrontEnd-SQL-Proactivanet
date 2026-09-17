@@ -99,7 +99,14 @@
         </div>
         <span class="slotsum" id="slot-sum"></span>
       </div>
-      <div class="campo">
+      <!-- Grupos es de SLA. En el Call Center no tenia a que aplicarse: una
+           llamada no tiene grupo resolutor (llamadas.ashx no lee el
+           parametro) y el unico bloque que lo miraba -el cruce de carga
+           combinada- lo hacia contra el grupo del TECNICO, no del ticket, asi
+           que el mismo filtro significaba una cosa en cada pestana. El campo
+           entero se retira mientras la barra esta en el Call Center, igual
+           que el SLOT (adoptarControlesSla, dashboard.js). -->
+      <div class="campo campo-grupos">
         <label for="f-grupos">Grupos</label>
         <select id="f-grupos" multiple></select>
       </div>
@@ -388,8 +395,8 @@
       <h3>Carga combinada: tickets y llamadas por tecnico<span class="hint" id="hint-carga"></span></h3>
       <div class="nota">Solo los tecnicos con extension telefonica registrada en el catalogo.
         Los tickets se cuentan por fecha de firma de solucion y las llamadas solo si fueron
-        contestadas. Los filtros de <b>Grupos</b> y <b>Tecnicos</b> si aplican aqui; Grupos, contra
-        el grupo donde el tecnico tiene mas tickets, no contra el grupo del ticket.</div>
+        contestadas. El filtro de <b>Tecnicos</b> si aplica aqui. Los grupos son fijos: los
+        que atienden telefono, y van indicados junto al titulo.</div>
       <div id="estado-carga-combinada"></div>
     </section>
 
