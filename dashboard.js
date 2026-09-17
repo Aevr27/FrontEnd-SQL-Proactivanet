@@ -3831,12 +3831,16 @@ document.querySelectorAll('.mnav').forEach(btn => {
    modulo tampoco pierde el estado de la barra -nadie lo reescribe- y
    plegarla no vuelve a montar el modulo que se esta viendo.
 
+   La clase va en <html> y no en el contenedor: la barra esta fija al borde
+   de la ventana y el hueco que se le reserva es el padding-left del <body>,
+   que es hermano de .wrap y no podria leer una clase de dentro.
+
    El estado vive en el DOM y dura lo que dura la pagina. Sin localStorage a
    proposito: el tablero se abre en una VM interna con sesiones compartidas y
    no hay ningun otro ajuste del usuario persistido aqui; guardar este seria
    el primero.
    ======================================================================= */
-const armazon = document.getElementById('shell');
+const armazon = document.documentElement;
 const botonPlegar = document.getElementById('lateral-plegar');
 
 function plegarLateral(cerrar) {

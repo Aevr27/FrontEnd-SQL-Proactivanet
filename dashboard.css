@@ -148,7 +148,11 @@
       linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
     background-attachment: fixed;
     color: var(--ink);
-    padding: 20px 18px 8px;
+    /* El relleno izquierdo es el hueco que ocupa la barra fija. Lo demas son
+       los mismos 20/18/8 de siempre, asi que la caja centrada de dentro se
+       ve igual que antes de que existiera la barra. */
+    padding: 20px 18px 8px calc(var(--lateral-ancho) + var(--lateral-hueco));
+    transition: padding-left .18s ease;
     line-height: 1.45;
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
@@ -186,39 +190,46 @@
      contenedores .maintab-content NO cambiaron: siguen siendo los mismos y
      los sigue encendiendo activarTab().
 
-     El ancho es una variable en .wrap, asi que plegar la barra es cambiar
-     UN numero y la columna de contenido se estira sola. minmax(0, 1fr) en
-     la columna util es lo que evita que una tabla ancha empuje el ancho de
-     la rejilla y saque scroll horizontal a la pagina entera.
+     COLOCACION. La barra va pegada al BORDE IZQUIERDO de la ventana, no
+     dentro de la caja centrada: es position:fixed y ocupa el alto completo.
+     El contenido sigue centrado exactamente como antes de que existiera la
+     barra -.wrap conserva su max-width y su margin auto-; lo unico que
+     cambia es que el <body> le reserva a la izquierda el ancho de la barra,
+     asi que el centrado ocurre dentro del espacio que queda.
+
+     El ancho es UNA variable en <html>, y plegar la barra es cambiar ese
+     numero: la barra se estrecha y el hueco reservado se estrecha con ella,
+     sin que nada mas se entere. Por eso la clase .lateral-cerrada va en
+     <html> y no en .wrap: el relleno del <body> tambien depende de ella.
      ==================================================================== */
-  .wrap {
-    --lateral-ancho: 234px;
-    display: grid;
-    grid-template-columns: var(--lateral-ancho) minmax(0, 1fr);
-    gap: 18px;
-    align-items: start;
-    transition: grid-template-columns .18s ease;
+  :root {
+    --lateral-ancho: 272px;
+    /* Aire entre la barra y la caja de contenido. */
+    --lateral-hueco: 22px;
   }
-  .wrap.lateral-cerrada { --lateral-ancho: 64px; }
+  html.lateral-cerrada { --lateral-ancho: 76px; }
 
   .lateral {
-    position: sticky; top: 20px;
-    /* Se queda a la vista con la pagina larga y nunca se pasa del alto util:
-       con muchos modulos, la lista es la que se desplaza, no la barra. */
-    max-height: calc(100vh - 28px);
-    display: flex; flex-direction: column; gap: 10px;
-    padding: 10px;
-    background: rgba(227, 231, 222, .85);
+    position: fixed; left: 0; top: 0; bottom: 0;
+    width: var(--lateral-ancho);
+    z-index: 50;
+    display: flex; flex-direction: column; gap: 12px;
+    padding: 14px 12px;
+    background: rgba(227, 231, 222, .92);
     border: 1px solid rgba(255, 255, 255, .7);
-    border-radius: 13px;
-    box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05);
+    border-left: 0;
+    /* Solo las esquinas de la derecha: las de la izquierda quedan fuera de
+       la pantalla y redondearlas dejaria dos mordidas en el borde. */
+    border-radius: 0 16px 16px 0;
+    box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05), 6px 0 24px -18px rgba(25, 25, 25, .45);
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
     overflow: hidden;
+    transition: width .18s ease;
   }
 
   .lateral-cabecera {
     display: flex; align-items: center; gap: 8px;
-    padding: 4px 2px 8px 6px;
+    padding: 4px 2px 12px 8px;
     border-bottom: 1px solid rgba(255, 255, 255, .8);
   }
   .lateral-marca {
@@ -226,21 +237,21 @@
   }
   .lateral-sigla {
     flex: none;
-    width: 26px; height: 26px; border-radius: var(--radius-xs);
+    width: 32px; height: 32px; border-radius: var(--radius-sm);
     display: grid; place-items: center;
     background: var(--grad-btn); color: var(--btn-ink);
-    font-weight: 800; font-size: 14px; line-height: 1;
+    font-weight: 800; font-size: 17px; line-height: 1;
     box-shadow: 0 1px 2px rgba(25, 25, 25, .08);
   }
   .lateral-nombre {
-    font-weight: 800; font-size: 12.5px; letter-spacing: .6px;
+    font-weight: 800; font-size: 13.5px; letter-spacing: .7px;
     text-transform: uppercase; color: var(--accent-ink);
     white-space: nowrap; overflow: hidden;
   }
 
   .lateral-plegar {
     flex: none;
-    width: 28px; height: 28px; padding: 0;
+    width: 32px; height: 32px; padding: 0;
     display: grid; place-items: center;
     border: 1px solid transparent; border-radius: var(--radius-xs);
     background: transparent; color: var(--muted); cursor: pointer;
@@ -248,28 +259,28 @@
   }
   .lateral-plegar:hover { background: rgba(255, 255, 255, .7); color: var(--ink); }
   .lateral-plegar-ico {
-    width: 18px; height: 18px;
+    width: 20px; height: 20px;
     fill: none; stroke: currentColor; stroke-width: 2;
     stroke-linecap: round; stroke-linejoin: round;
     transition: transform .18s ease;
   }
 
-  .lateral-lista { list-style: none; display: flex; flex-direction: column; gap: 3px; }
+  .lateral-lista { list-style: none; display: flex; flex-direction: column; gap: 4px; }
   /* La lista es lo unico que se desplaza cuando entren mas modulos. */
   .lateral nav { min-height: 0; overflow-y: auto; overflow-x: hidden; }
 
   .mnav {
     width: 100%;
-    display: flex; align-items: center; gap: 11px;
-    padding: 10px 12px;
+    display: flex; align-items: center; gap: 13px;
+    padding: 13px 14px;
     border: none; background: transparent; cursor: pointer; text-align: left;
-    font: inherit; font-size: 13.5px; font-weight: 700; color: var(--muted);
+    font: inherit; font-size: 14.5px; font-weight: 700; color: var(--muted);
     letter-spacing: .1px;
     border-radius: var(--radius-sm);
     transition: background .16s ease, color .16s ease, box-shadow .16s ease;
   }
   .mnav-ico {
-    flex: none; width: 19px; height: 19px;
+    flex: none; width: 22px; height: 22px;
     fill: none; stroke: currentColor; stroke-width: 1.8;
     stroke-linecap: round; stroke-linejoin: round;
   }
@@ -291,7 +302,7 @@
   .lateral-cerrada .mnav-txt { display: none; }
   .lateral-cerrada .lateral-cabecera { flex-direction: column; gap: 6px; padding: 4px 0 8px; }
   .lateral-cerrada .lateral-marca { flex: none; justify-content: center; }
-  .lateral-cerrada .mnav { justify-content: center; padding: 11px 0; }
+  .lateral-cerrada .mnav { justify-content: center; padding: 14px 0; }
   .lateral-cerrada .lateral-plegar-ico { transform: rotate(180deg); }
 
   /* ---- Contenido ---- */
@@ -817,20 +828,26 @@
     /* Pantalla estrecha: la barra nace plegada (lo pone dashboard.js) y al
        desplegarla se monta ENCIMA del contenido en vez de estrujarlo. Es la
        misma barra y la misma lista: no hay una segunda navegacion para
-       movil. La rejilla reserva siempre el carril de iconos, asi el
-       contenido no salta cuando la barra se abre o se cierra. */
-    .wrap { grid-template-columns: 60px minmax(0, 1fr); gap: 12px; }
-    .wrap.lateral-cerrada { grid-template-columns: 60px minmax(0, 1fr); }
-    .lateral {
-      width: var(--lateral-ancho);
-      max-height: calc(100vh - 20px);
-      z-index: 40;
+       movil.
+
+       El truco es que el <body> reserva SIEMPRE el carril de iconos, no el
+       ancho real de la barra: la barra crece por encima y el contenido no se
+       mueve ni salta al abrirla o cerrarla. */
+    body { padding-left: calc(68px + 12px); }
+    /* Desplegada aqui no es la medida de escritorio: seria casi la pantalla
+       entera. */
+    html:not(.lateral-cerrada) { --lateral-ancho: 250px; }
+    html.lateral-cerrada { --lateral-ancho: 68px; }
+    /* Abierta tapa contenido, asi que deja de ser translucida. */
+    html:not(.lateral-cerrada) .lateral {
+      background: rgba(240, 244, 236, .98);
       box-shadow: var(--shadow-md);
     }
-    .wrap:not(.lateral-cerrada) .lateral { background: rgba(240, 244, 236, .98); }
   }
   @media (max-width: 700px) {
-    body { padding: 12px 12px 4px; }
+    /* El cuarto valor es el carril de la barra: un `padding` de tres valores
+       lo pondria a 12px y la barra se comeria el contenido. */
+    body { padding: 12px 12px 4px calc(68px + 10px); }
     /* Mismo criterio que en ancho completo, con las medidas de aqui: 17px de
        titulo y 36px de padding dan 84px de alto natural. Sin recalcularlo, los
        100px de arriba dejarian una franja verde vacia en pantalla chica. */
@@ -860,8 +877,8 @@
   @media print {
     body { background: #fff; padding: 0; }
     .lateral, .filtros, .btn { display: none !important; }
-    /* Impresa, la pagina es una sola columna: sin barra no hay carril. */
-    .wrap { display: block; }
+    /* Impresa no hay barra, asi que tampoco hay carril que reservarle. */
+    body { padding-left: 0; }
     .card, .kpi, .filtros { box-shadow: none; border: 1px solid var(--line); }
     header.top { background: var(--grad-header) !important; color: var(--ink) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }
