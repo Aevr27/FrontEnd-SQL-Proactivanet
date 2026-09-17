@@ -173,5 +173,71 @@ LIDERES.forEach(function (n) {
   Check('tras el cambio, ' + n + ' conserva su color fijo', HISTORICOS[n], B.colorLider(n));
 });
 
+
+/* =========================================================================
+   VARIANTES DE NOMBRE COMPLETO — Experiencia trae a las mismas personas con
+   todos sus apellidos ("Sergio Gonzalez Guzman"), mientras el mapa fijo las
+   tiene en corto ("Sergio Gonzalez"). Antes de esto, la version larga no
+   encontraba su color fijo y caia en la huella del nombre: la misma persona
+   salia de un color en el Backlog y de otro en Experiencia.
+   ========================================================================= */
+var V = cargarPaleta();
+
+// Exactos: el mapa fijo sigue mandando, sin tocar ningun hex.
+Object.keys(HISTORICOS).forEach(function (n) {
+  Check('exacto: ' + n, HISTORICOS[n], V.colorLider(n));
+});
+
+// Variantes largas de los nombres del mapa fijo: mismo color que el corto.
+var VARIANTES = {
+  'Sergio Gonzalez Guzman':            'Sergio Gonzalez',
+  'Sergio Gonzalez Lopez':             'Sergio Gonzalez',
+  'Jesus Campa Morones':               'Jesus Campa',
+  'Bendrix Zuir Rios':                 'Bendrix Zuir',
+  'Laura Graciela Cardenas Gonzalez':  'Laura Cardenas',
+  'Carlos Francisco Garcia Chavez Nava': 'Carlos Garcia',
+  'ADRIANA  LOZANO  MERAZ':            'Adriana Lozano'
+};
+Object.keys(VARIANTES).forEach(function (largo) {
+  var corto = VARIANTES[largo];
+  Check('variante "' + largo + '" = ' + corto, HISTORICOS[corto], V.colorLider(largo));
+  Check('canonico de "' + largo + '"', corto.toLowerCase(), String(V.canonicoLider(largo)));
+});
+
+// Cubos sin dato: el gris se queda donde debe estar.
+['(Sin PO)', '(Sin director)', '(Sin dato)', 'Otros', 'Sin asignar', '', '   ', null, undefined]
+  .forEach(function (cubo) {
+    Check('sin dato de NEUTRO: ' + JSON.stringify(cubo), V.NEUTRO, V.colorLider(cubo));
+  });
+
+/* NO-COLISION: la regla es nombre + apellido completos, no parecido. Estos
+   nombres comparten una palabra con un lider fijo y NO son esa persona: no
+   deben heredar su color por coincidencia parcial. */
+var NO_SON = [
+  ['Sergio Valerio Perez',    'Sergio Gonzalez'],   // mismo nombre, otro apellido
+  ['Javier Tapia Gonzalez',   'Sergio Gonzalez'],   // mismo apellido, otro nombre
+  ['Laura Martinez Ruiz',     'Laura Cardenas'],
+  ['Carlos Mendoza Solis',    'Carlos Garcia'],
+  ['Jesus Ramirez Tovar',     'Jesus Campa'],
+  ['Bendrix Salas Ochoa',     'Bendrix Zuir'],
+  ['Adriana Gonzalez Prado',  'Adriana Lozano'],
+  ['Sin Torre Alta Direccion','Sin Torre']          // la categoria no absorbe personas
+];
+NO_SON.forEach(function (par) {
+  Check('"' + par[0] + '" NO canoniza a ' + par[1], 'null', String(V.canonicoLider(par[0])));
+});
+Check('dos personas distintas no se igualan por coincidencia parcial',
+  'false',
+  (V.colorLider('Sergio Valerio Perez') === V.colorLider('Sergio Gonzalez Guzman')
+    && V.colorLider('Laura Martinez Ruiz') === V.colorLider('Laura Graciela Cardenas Gonzalez'))
+    ? 'true' : 'false');
+
+// Una persona real con apellidos de mas NUNCA sale gris.
+['Yuri Vladimir Lopez Martinez', 'Christian Israel Garcia Oseguera',
+ 'Elia Veronica Diaz Ampudia', 'Carmen Ortiz Guerrero'].forEach(function (n) {
+  Check('persona real no fija, sin gris: ' + n, 'false',
+    V.colorLider(n) === V.NEUTRO ? 'true' : 'false');
+});
+
 console.log(fallos ? ('FALLOS: ' + fallos) : 'TODO PASA');
 process.exit(fallos ? 1 : 0);

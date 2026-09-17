@@ -262,6 +262,90 @@
     }
   })();
 
+  /* =======================================================================
+     VARIANTES DE NOMBRE — la MISMA persona escrita larga o corta.
+
+     El Backlog y el correo traen a los lideres en forma corta -"Sergio
+     Gonzalez"-, que es como estan escritos en COLOR_LIDER_FIJO. Experiencia
+     los trae como los guarda la organizacion, con todos los apellidos:
+     "Sergio Gonzalez Guzman", "Laura Graciela Cardenas Gonzalez". Son la
+     misma persona y tienen que llevar el MISMO color; con solo la clave
+     exacta, la version larga no encontraba su color fijo y caia en la huella
+     del nombre, que reparte bien pero no respeta la identidad historica.
+
+     Se resuelve en dos escalones, del mas seguro al menos seguro:
+
+     1) ALIAS_LIDER: nombre escrito a mano -> nombre canonico. Es el escape
+        para lo que ninguna regla puede adivinar (un nombre con orden
+        invertido, un apodo, un apellido de casada). Vacio a proposito: se
+        agrega SOLO cuando aparezca un caso real.
+
+     2) Regla de nombre completo, deliberadamente estrecha. Un nombre largo
+        es variante de un lider fijo de dos palabras -nombre + apellido-
+        SOLO si:
+          - el PRIMER nombre coincide exacto, y
+          - el apellido del lider fijo aparece como una palabra completa
+            entre las siguientes, y
+          - NINGUN otro lider fijo cumple lo mismo.
+        Nada de prefijos, subcadenas ni distancias: "Sergio Valerio Perez" no
+        es "Sergio Gonzalez" -el apellido no esta- y "Javier Tapia Gonzalez"
+        tampoco -el nombre no coincide-. Si dos lideres fijos empataran, no
+        se elige ninguno: mas vale un color de huella que mezclar personas.
+
+     `Sin Torre` queda FUERA de esta regla: es una categoria del tablero, no
+     una persona, y no debe absorber a nadie por parecido. */
+  var ALIAS_LIDER = {
+    // 'Nombre tal y como llega': 'Nombre canonico de COLOR_LIDER_FIJO'
+  };
+
+  var ALIAS = {};
+  (function () {
+    for (var a in ALIAS_LIDER) {
+      if (ALIAS_LIDER.hasOwnProperty(a)) ALIAS[clave(a)] = clave(ALIAS_LIDER[a]);
+    }
+  })();
+
+  // Los lideres fijos que SI son personas de dos palabras, ya partidos en
+  // { nombre, apellido, clave } para no rehacer el trabajo en cada llamada.
+  var FIJOS_PERSONA = (function () {
+    var lista = [];
+    for (var n in COLOR_LIDER_FIJO) {
+      if (!COLOR_LIDER_FIJO.hasOwnProperty(n)) continue;
+      if (mismaClave(n, SIN_TORRE)) continue;
+      var partes = clave(n).split(' ');
+      if (partes.length !== 2) continue;
+      lista.push({ clave: clave(n), nombre: partes[0], apellido: partes[1] });
+    }
+    return lista;
+  })();
+
+  /* Clave canonica de un nombre ya normalizado: la del lider fijo del que es
+     variante inequivoca, o null si no lo es. */
+  function claveVariante(k) {
+    var palabras = k.split(' ');
+    if (palabras.length < 3) return null;   // exacto y dos palabras: ya lo vio FIJOS
+    var encontrado = null;
+    for (var i = 0; i < FIJOS_PERSONA.length; i++) {
+      var f = FIJOS_PERSONA[i];
+      if (palabras[0] !== f.nombre) continue;
+      if (palabras.indexOf(f.apellido, 1) < 0) continue;
+      if (encontrado) return null;          // dos candidatos: no se adivina
+      encontrado = f.clave;
+    }
+    return encontrado;
+  }
+
+  /* Nombre canonico de una persona: el del mapa fijo cuando el que llega es
+     el mismo, un alias o una variante larga inequivoca; si no, el nombre tal
+     cual vino. Sirve para pintar y tambien para comparar identidades. */
+  function canonicoLider(nombre) {
+    if (esCuboSinDato(nombre)) return null;
+    var k = clave(nombre);
+    if (FIJOS[k]) return k;
+    if (ALIAS[k] && FIJOS[ALIAS[k]]) return ALIAS[k];
+    return claveVariante(k);
+  }
+
   /* COLORES QUE PUEDE LLEVAR UNA PERSONA.
 
      Son las MISMAS posiciones de PALETA_CATEGORICA, menos la que vale
@@ -332,7 +416,10 @@
   function colorLider(nombre) {
     if (esCuboSinDato(nombre)) return NEUTRO;
     var k = clave(nombre);
-    if (FIJOS[k]) return FIJOS[k];
+    // Nombre exacto, alias escrito a mano o variante larga inequivoca: los
+    // tres son la misma persona y llevan el color fijo de siempre.
+    var canon = canonicoLider(nombre);
+    if (canon && FIJOS[canon]) return FIJOS[canon];
     return PALETA_LIDER[huella(k) % PALETA_LIDER.length];
   }
 
@@ -353,6 +440,7 @@
     ordenarLideres: ordenarLideres,
     registrarLideres: registrarLideres,
     colorLider: colorLider,
+    canonicoLider: canonicoLider,
     lideres: lideres
   };
 })(window);
