@@ -908,4 +908,204 @@ ORDER BY Tecnico;";
         }
         return salida;
     }
+
+    // ---------------------------------------------------------------------
+    // Call Center: el filtro de Tecnicos
+    // ---------------------------------------------------------------------
+
+    /* POR QUE HACE FALTA TRADUCIR
+       Una llamada no trae tecnico, trae la EXTENSION del conmutador
+       (dbo.Llamadas.NumeroAgente). El <select> de Tecnicos manda nombres. El
+       puente ya existe en la base y son dos tablas
+       (16_cruce_llamadas_tickets.sql):
+
+         dbo.CatAgenteTecnico       extension <-> tecnico (nombre ACTUAL). Es
+                                    el catalogo primario; solo Habilitado = 1.
+         dbo.CatAgenteTecnicoAlias  nombres VIEJOS de la misma persona, de
+                                    cuando le corrigieron el usuario. Se
+                                    consulta SOLO para los nombres que no
+                                    empataron arriba, porque la lista del
+                                    tablero sale de los nombres de los
+                                    tickets y ahi esos nombres siguen vivos.
+
+       Los procedimientos NO se tocan: se les piden los mismos result sets de
+       siempre -con su propio tope, que es un parametro que ya tenian- y aqui
+       solo se descartan las filas que no son de los tecnicos elegidos. */
+    public sealed class AgentesElegidos
+    {
+        // Extensiones, para las filas de llamadas (por NumeroAgente).
+        public readonly HashSet<int> Numeros = new HashSet<int>();
+        // Nombres PRINCIPALES, para las filas del cruce (por Tecnico). Sin
+        // distinguir mayusculas, como la colacion de la base.
+        public readonly HashSet<string> Tecnicos =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Nadie que empatara: el filtro deja las listas vacias, y eso es
+        // correcto -el tecnico elegido no tiene extension registrada-.
+        public bool Vacio { get { return Numeros.Count == 0; } }
+    }
+
+    /* Traduce los nombres elegidos a extensiones. `grupos` acota por
+       CatAgenteTecnico.Grupo -el grupo donde el tecnico tiene mas tickets, el
+       mismo criterio que usa usp_Dash_CargaCombinada-; vacio = sin acotar.
+
+       Dos consultas y no un OR: el catalogo primario manda, y Alias solo se
+       pregunta por lo que quedo sin empatar (punto 3 del contrato de este
+       filtro). Asi un nombre que existe en las dos tablas se resuelve por
+       CatAgenteTecnico. */
+    public static AgentesElegidos ResolverAgentes(List<string> nombres, List<string> grupos)
+    {
+        var salida = new AgentesElegidos();
+        if (nombres == null || nombres.Count == 0) return salida;
+
+        var pendientes = new HashSet<string>(nombres, StringComparer.OrdinalIgnoreCase);
+
+        const string SqlPrimario = @"
+SELECT c.NumeroAgente, c.Tecnico
+FROM dbo.CatAgenteTecnico AS c
+WHERE c.Habilitado = 1
+  AND NULLIF(LTRIM(RTRIM(c.Tecnico)), N'') IS NOT NULL{0}{1}";
+
+        // Alias -> extension -> fila del catalogo primario. El nombre que se
+        // guarda es el PRINCIPAL: es el que traen las filas del cruce.
+        const string SqlAlias = @"
+SELECT c.NumeroAgente, c.Tecnico, Alias = a.Tecnico
+FROM dbo.CatAgenteTecnicoAlias AS a
+INNER JOIN dbo.CatAgenteTecnico AS c ON c.NumeroAgente = a.NumeroAgente
+WHERE c.Habilitado = 1
+  AND NULLIF(LTRIM(RTRIM(c.Tecnico)), N'') IS NOT NULL{0}{1}";
+
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+
+            using (var cmd = new SqlCommand())
+            {
+                cmd.Connection = cn;
+                cmd.CommandType = CommandType.Text;
+                cmd.CommandText = string.Format(SqlPrimario,
+                    EnLista(cmd, "c.Grupo", "gcc", grupos),
+                    EnLista(cmd, "c.Tecnico", "tc", nombres));
+                LeerAgentes(cmd, salida, pendientes, null);
+            }
+
+            if (pendientes.Count == 0) return salida;
+
+            var viejos = new List<string>(pendientes);
+            using (var cmd = new SqlCommand())
+            {
+                cmd.Connection = cn;
+                cmd.CommandType = CommandType.Text;
+                cmd.CommandText = string.Format(SqlAlias,
+                    EnLista(cmd, "c.Grupo", "gcc", grupos),
+                    EnLista(cmd, "a.Tecnico", "ta", viejos));
+                LeerAgentes(cmd, salida, pendientes, "Alias");
+            }
+        }
+
+        return salida;
+    }
+
+    // Lee NumeroAgente/Tecnico y va tachando de `pendientes` lo que empato.
+    // `columnaNombre` es la columna por la que se empato -nula en el catalogo
+    // primario, donde el empate fue contra Tecnico-.
+    private static void LeerAgentes(SqlCommand cmd, AgentesElegidos salida,
+                                    HashSet<string> pendientes, string columnaNombre)
+    {
+        using (var rd = cmd.ExecuteReader())
+        {
+            while (rd.Read())
+            {
+                if (rd.IsDBNull(0) || rd.IsDBNull(1)) continue;
+
+                salida.Numeros.Add(Convert.ToInt32(rd.GetValue(0)));
+                string principal = Convert.ToString(rd.GetValue(1));
+                salida.Tecnicos.Add(principal);
+                pendientes.Remove(columnaNombre == null
+                    ? principal
+                    : Convert.ToString(rd["Alias"]));
+            }
+        }
+    }
+
+    /* Serie diaria del equipo para los tecnicos elegidos.
+
+       Es el UNICO agregado que se repite aqui, y no hay forma de evitarlo: el
+       segundo result set de usp_Dash_CargaCombinada ya viene sumado por dia
+       para TODO el equipo, asi que no se puede acotar filtrando sus filas. Las
+       columnas y el orden son los de ese result set, y sale de la misma
+       dbo.vw_CargaTecnicoDia que usa el procedimiento. */
+    public static List<Dictionary<string, object>> SerieCargaTecnicos(
+        DateTime fechaInicio, DateTime fechaFin, ICollection<string> tecnicos)
+    {
+        var filas = new List<Dictionary<string, object>>();
+        if (tecnicos == null || tecnicos.Count == 0) return filas;
+
+        const string SQL = @"
+SELECT
+    Fecha    = v.Dia,
+    Tickets  = SUM(v.Tickets),
+    Llamadas = SUM(v.Llamadas)
+FROM dbo.vw_CargaTecnicoDia AS v
+WHERE v.Dia BETWEEN @FechaInicio AND @FechaFin{0}
+GROUP BY v.Dia
+ORDER BY v.Dia;";
+
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        using (var cmd = new SqlCommand())
+        {
+            cmd.Connection = cn;
+            cmd.CommandType = CommandType.Text;
+            cmd.Parameters.Add("@FechaInicio", SqlDbType.Date).Value = fechaInicio;
+            cmd.Parameters.Add("@FechaFin", SqlDbType.Date).Value = fechaFin;
+            cmd.CommandText = string.Format(SQL,
+                EnLista(cmd, "v.Tecnico", "tc", new List<string>(tecnicos)));
+
+            cn.Open();
+            using (var rd = cmd.ExecuteReader())
+            {
+                while (rd.Read()) filas.Add(SqlRowMapper.Fila(rd));
+            }
+        }
+
+        return filas;
+    }
+
+    // Las filas de un result set que son de los tecnicos elegidos, en el mismo
+    // orden que las devolvio el procedimiento y hasta `tope` filas. `columna`
+    // es NumeroAgente (llamadas) o Tecnico (cruce).
+    public static List<Dictionary<string, object>> SoloDeLosElegidos(
+        List<Dictionary<string, object>> filas, string columna,
+        AgentesElegidos elegidos, int tope)
+    {
+        var salida = new List<Dictionary<string, object>>();
+        if (filas == null) return salida;
+
+        foreach (var fila in filas)
+        {
+            object valor;
+            if (!fila.TryGetValue(columna, out valor) || valor == null) continue;
+
+            bool mio = (columna == "NumeroAgente")
+                ? elegidos.Numeros.Contains(Convert.ToInt32(valor))
+                : elegidos.Tecnicos.Contains(Convert.ToString(valor));
+
+            if (!mio) continue;
+            salida.Add(fila);
+            if (salida.Count >= tope) break;
+        }
+        return salida;
+    }
+
+    // Lista separada por coma del query string (grupos), para los handlers.
+    public static List<string> ListaPorComa(string valor)
+    {
+        return Partir(valor, ',');
+    }
+
+    // Lista separada por '|' (tecnicos: sus nombres llevan coma dentro).
+    public static List<string> ListaPorPipe(string valor)
+    {
+        return Partir(valor, '|');
+    }
 }
