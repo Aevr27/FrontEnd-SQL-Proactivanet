@@ -3771,7 +3771,7 @@ function activarTab(nombre) {
   /* aria-current marca la seccion en curso para un lector de pantalla; la
      clase .active sigue siendo la que pinta. Las dos dicen lo mismo y se
      mueven juntas. */
-  document.querySelectorAll('.mtab').forEach(b => {
+  document.querySelectorAll('.mnav').forEach(b => {
     const activo = b.dataset.tab === nombre;
     b.classList.toggle('active', activo);
     if (activo) b.setAttribute('aria-current', 'page');
@@ -3812,9 +3812,61 @@ function activarTab(nombre) {
     .finally(() => { montando.delete(nombre); });
 }
 
-document.querySelectorAll('.mtab').forEach(btn => {
-  btn.addEventListener('click', () => activarTab(btn.dataset.tab));
+document.querySelectorAll('.mnav').forEach(btn => {
+  btn.addEventListener('click', () => {
+    activarTab(btn.dataset.tab);
+    /* En pantalla estrecha la barra desplegada se monta ENCIMA del contenido
+       (ver dashboard.css): si se quedara abierta, taparia justo el modulo que
+       se acaba de elegir. En escritorio no aplica y no se toca nada. */
+    if (window.matchMedia('(max-width: 900px)').matches) plegarLateral(true);
+  });
 });
+
+/* =======================================================================
+   4bis. Barra lateral: plegar y desplegar
+   -----------------------------------------------------------------------
+   Solo capa visual del armazon. No conoce MODULOS, ni el hash, ni el ciclo
+   de montaje: cambiar de ancho no reinicia nada, porque lo unico que hace
+   es poner o quitar una clase en el contenedor .wrap. Por eso cambiar de
+   modulo tampoco pierde el estado de la barra -nadie lo reescribe- y
+   plegarla no vuelve a montar el modulo que se esta viendo.
+
+   El estado vive en el DOM y dura lo que dura la pagina. Sin localStorage a
+   proposito: el tablero se abre en una VM interna con sesiones compartidas y
+   no hay ningun otro ajuste del usuario persistido aqui; guardar este seria
+   el primero.
+   ======================================================================= */
+const armazon = document.getElementById('shell');
+const botonPlegar = document.getElementById('lateral-plegar');
+
+function plegarLateral(cerrar) {
+  if (!armazon) return;
+  armazon.classList.toggle('lateral-cerrada', cerrar);
+  if (!botonPlegar) return;
+  const texto = cerrar ? 'Desplegar el menu' : 'Contraer el menu';
+  botonPlegar.setAttribute('aria-expanded', String(!cerrar));
+  botonPlegar.setAttribute('aria-label', texto);
+  botonPlegar.title = texto;
+  /* Las graficas de Chart.js miden su contenedor al dibujarse. Al cambiar el
+     ancho util hay que remedirlas, y eso ya lo sabe hacer cada modulo ya
+     montado con su redimensionar(); los que no estan montados siguen sin
+     tocarse. La transicion de la barra dura .18s: se espera a que termine
+     para medir el ancho final. */
+  setTimeout(() => {
+    listo.forEach(n => { try { MODULOS[n].redimensionar(); } catch (e) { console.error(e); } });
+  }, 220);
+}
+
+if (botonPlegar) {
+  botonPlegar.addEventListener('click', () => {
+    plegarLateral(!armazon.classList.contains('lateral-cerrada'));
+  });
+}
+
+/* Arranque en estrecho: la barra nace plegada para no comerse la pantalla.
+   A partir de ahi manda el usuario; no se vuelve a forzar al girar el
+   dispositivo, que seria pelearse con su ultima decision. */
+if (window.matchMedia('(max-width: 900px)').matches) plegarLateral(true);
 
 /* =======================================================================
    5. Desplegables propios (solo capa visual de los filtros)
