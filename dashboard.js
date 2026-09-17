@@ -3551,12 +3551,22 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
 
   function init() {
     const cont = document.getElementById(id);
-    if (!cont || cont.childElementCount) return;   // ya montado
+    /* Contenedor con algo dentro = ya montado, y no se toca... salvo que lo
+       que tenga sea la tarjeta de un intento fallido, que si es reintentable.
+       Sin esa excepcion el reintento moria aqui mismo y devolvia undefined,
+       que activarTab leeria como exito. */
+    if (!cont) return;
+    if (cont.childElementCount && !cont.querySelector('[data-fallo-montaje]')) return;
 
     if (!SOPORTA_SCOPE) return montarEnMarco(cont);
 
+    // Este innerHTML es parte de la proteccion contra montaje doble: deja el
+    // contenedor con un hijo antes del primer await, asi que una segunda
+    // llamada a init() se corta en la guarda de arriba.
     cont.innerHTML = `<div class="estado" style="padding:24px">Cargando ${nombre}...</div>`;
-    (async () => {
+    // Se DEVUELVE la cadena para que activarTab sepa si el montaje termino
+    // bien: sin esto init() volvia al instante y el fallo se perdia aqui.
+    return (async () => {
       await inyectarCss();
       cont.textContent = '';
       await montarMarcado(cont);
@@ -3564,10 +3574,14 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
       await cargarScript(cont);
     })().catch(err => {
       console.error(err);
-      cont.innerHTML = `<div class="card" style="margin-top:16px">
+      cont.innerHTML = `<div class="card" data-fallo-montaje style="margin-top:16px">
         <h3>No se pudo montar el tablero de ${nombre}</h3>
         <p style="font-size:13px;color:#5e5e5f">${escapeHtml(err.message)} ·
-        el tablero suelto sigue en <a href="${base}${pagina}">${base}${pagina}</a>.</p></div>`;
+        el tablero suelto sigue en <a href="${base}${pagina}">${base}${pagina}</a>.</p>
+        <p style="font-size:13px;color:#5e5e5f">Volver a entrar en la pestaña lo intenta de nuevo.</p></div>`;
+      // Se relanza: activarTab lo necesita para NO marcar la pestaña como
+      // inicializada y dejarla reintentable.
+      throw err;
     });
   }
 
@@ -3721,13 +3735,48 @@ const MODULOS = {
   tablero: TableroExterno,
 };
 
-const iniciado = { sla: false, backlog: false, experiencia: false, qa: false, call: false, tablero: false };
+/* Estado del montaje. MODULOS dice que pestañas EXISTEN; estos dos dicen en
+   que punto esta cada una, y arrancan vacios: ningun nombre de modulo se
+   repite aqui, asi que agregar una pestaña se hace en MODULOS y en el marcado,
+   en ningun sitio mas.
+
+   `listo`    -> su init() termino BIEN. Nunca se vuelve a inicializar.
+   `montando` -> init() esta en vuelo. Un segundo clic mientras carga no
+                 arranca un segundo montaje ni una segunda peticion.
+
+   Lo que NO esta en ninguno de los dos es "sin empezar", y ahi vuelve una
+   pestaña cuyo init() fallo: el siguiente clic reintenta. Antes se marcaba
+   como iniciada ANTES de llamar a init(), asi que un fallo de red al traer
+   backlog.html, experiencia.html o qa.html dejaba la pestaña muerta -solo
+   redimensionar()- hasta recargar el documento. */
+const listo = new Set();
+const montando = new Set();
+
+/* Own-property a proposito. Con `MODULOS[nombre]` las claves heredadas de
+   Object.prototype -constructor, __proto__, toString, valueOf...- pasaban el
+   filtro: el nombre se daba por bueno, se apagaban todas las pestañas, ningun
+   contenedor casaba con `tab-<nombre>` y se reventaba en .init(). Se llega
+   desde el hash, que es texto libre.
+   hasOwnProperty.call en vez de Object.hasOwn: el camino de respaldo sin
+   @scope (montarEnMarco) existe para navegadores viejos, y ahi Object.hasOwn
+   puede no estar. */
+function resolverModulo(nombre) {
+  return Object.prototype.hasOwnProperty.call(MODULOS, nombre) ? nombre : 'sla';
+}
 
 function activarTab(nombre) {
-  if (!MODULOS[nombre]) nombre = 'sla';
+  nombre = resolverModulo(nombre);
 
   const idContenedor = 'tab-' + nombre;
-  document.querySelectorAll('.mtab').forEach(b => b.classList.toggle('active', b.dataset.tab === nombre));
+  /* aria-current marca la seccion en curso para un lector de pantalla; la
+     clase .active sigue siendo la que pinta. Las dos dicen lo mismo y se
+     mueven juntas. */
+  document.querySelectorAll('.mtab').forEach(b => {
+    const activo = b.dataset.tab === nombre;
+    b.classList.toggle('active', activo);
+    if (activo) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
   document.querySelectorAll('.maintab-content').forEach(d => d.classList.toggle('active', d.id === idContenedor));
   // Abierto con file:// el navegador trata cada archivo como origen unico y
   // replaceState puede lanzar SecurityError, que mataria el resto de
@@ -3736,12 +3785,31 @@ function activarTab(nombre) {
 
   // Solo la pestaña que se esta viendo pega a sus .ashx; la otra espera a su
   // primer clic. Al volver, las graficas ya existen y solo hay que remedirlas.
-  if (!iniciado[nombre]) {
-    iniciado[nombre] = true;
-    MODULOS[nombre].init();
-  } else {
-    MODULOS[nombre].redimensionar();
-  }
+  if (listo.has(nombre)) return MODULOS[nombre].redimensionar();
+  if (montando.has(nombre)) return;   // ya hay un montaje en vuelo
+
+  montando.add(nombre);
+  /* Promise.resolve().then() envuelve por igual a los init() sincronos
+     (TableroExterno) y a los async (SLA, y los modulos embebidos desde que
+     init() devuelve su cadena): una excepcion sincrona tambien cae en el
+     .catch en vez de subir a un listener de clic.
+
+     Solo se marca `listo` si la promesa RESUELVE. Nota sobre SLA: su init()
+     atiende el fallo de catalogos por dentro -estadoError() y `return`-, asi
+     que resuelve igual y se queda inicializado. Es a proposito: engancha sus
+     listeners al entrar, y reintentarlo los ataria por segunda vez. El
+     reintento es para los montajes que de verdad rechazan, que son los de
+     moduloEmbebido(). */
+  Promise.resolve()
+    .then(() => MODULOS[nombre].init())
+    .then(() => { listo.add(nombre); })
+    .catch(err => {
+      // Queda fuera de `listo`: el proximo clic en la pestaña vuelve a
+      // intentarlo. La tarjeta de error, con su enlace al tablero suelto,
+      // sigue a la vista mientras tanto.
+      console.error(`No se pudo inicializar la pestaña "${nombre}":`, err);
+    })
+    .finally(() => { montando.delete(nombre); });
 }
 
 document.querySelectorAll('.mtab').forEach(btn => {

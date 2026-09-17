@@ -40,17 +40,29 @@
 <body>
 <div class="wrap">
 
-  <nav class="maintabs">
-    <button class="mtab active" data-tab="sla" type="button">SLA y productividad</button>
-    <button class="mtab" data-tab="backlog" type="button">Backlog</button>
-    <button class="mtab" data-tab="experiencia" type="button">Experiencia</button>
-    <button class="mtab" data-tab="qa" type="button">QA</button>
-    <button class="mtab" data-tab="call" type="button">Call Center</button>
-    <button class="mtab" data-tab="tablero" type="button">Tablero</button>
+  <!-- Navegacion entre SECCIONES del tablero, no un tablist de ARIA.
+       Parecen pestañas, pero cada entrada es un tablero independiente -su
+       carpeta, sus handlers, su propia pagina suelta- y cambia el hash de la
+       URL, asi que se describe como navegacion: <nav> con nombre, y
+       aria-current="page" sobre la que se esta viendo (lo pone activarTab, en
+       dashboard.js, junto con la clase .active).
+
+       No se usa role="tablist"/"tab"/"tabpanel" a proposito: ese patron obliga
+       a tabindex movil y a flechas/Home/End para ser correcto, y aqui no
+       aportaria nada sobre lo que ya hace un <button> nativo. El
+       comportamiento de teclado no cambia: Tab para recorrer, Enter o Espacio
+       para entrar. -->
+  <nav class="maintabs" aria-label="Secciones del tablero">
+    <button class="mtab active" id="mtab-sla" data-tab="sla" type="button" aria-current="page">SLA y productividad</button>
+    <button class="mtab" id="mtab-backlog" data-tab="backlog" type="button">Backlog</button>
+    <button class="mtab" id="mtab-experiencia" data-tab="experiencia" type="button">Experiencia</button>
+    <button class="mtab" id="mtab-qa" data-tab="qa" type="button">QA</button>
+    <button class="mtab" id="mtab-call" data-tab="call" type="button">Call Center</button>
+    <button class="mtab" id="mtab-tablero" data-tab="tablero" type="button">Tablero</button>
   </nav>
 
   <!-- ==================================================== Tablero de SLA -->
-  <div id="tab-sla" class="maintab-content active">
+  <div id="tab-sla" class="maintab-content active" role="region" aria-labelledby="mtab-sla">
     <header class="top">
       <div>
         <h1>Tickets Proactivanet — SLA y productividad</h1>
@@ -197,7 +209,7 @@
        Backlog -filtros, KPIs, las cinco graficas y los tres paneles de
        tablas- vive ahora SOLO en backlog/backlog.html, con sus mismos ids, y
        su pagina suelta funciona igual. -->
-  <div id="tab-backlog" class="maintab-content"></div>
+  <div id="tab-backlog" class="maintab-content" role="region" aria-labelledby="mtab-backlog"></div>
 
   <!-- =============================================== Tablero (externo) -->
   <!-- Experiencia al Usuario, Observabilidad y Orquestacion ya no viven aqui:
@@ -211,14 +223,14 @@
        experiencia/experiencia.html, experiencia.css y experiencia.js la
        primera vez que se abre la pestaña. El modulo sigue viviendo en
        experiencia/ y su pagina suelta sigue funcionando igual. -->
-  <div id="tab-experiencia" class="maintab-content"></div>
+  <div id="tab-experiencia" class="maintab-content" role="region" aria-labelledby="mtab-experiencia"></div>
 
   <!-- ======================================================= Tablero de QA
        Contenedor vacio a proposito, igual que Experiencia. TableroQa
        (dashboard.js) trae qa/qa.html, qa.css y qa.js la primera vez que se
        abre la pestaña: dashboard.html no pide nada a qa.ashx al cargar. El
        modulo vive en qa/ y su pagina suelta sigue funcionando igual. -->
-  <div id="tab-qa" class="maintab-content"></div>
+  <div id="tab-qa" class="maintab-content" role="region" aria-labelledby="mtab-qa"></div>
 
   <!-- ================================================ Call Center de Servicios TI
        Pestana propia. El bloque es el MISMO de siempre -mismos ids, mismas
@@ -226,7 +238,7 @@
        llamadas.ashx viaja en su misma peticion. Lo unico que cambia es donde
        se ve. La barra de filtros y el sello de estado no se duplican: son los
        nodos de SLA, que dashboard.js mueve a la pestana que este visible. -->
-  <div id="tab-call" class="maintab-content">
+  <div id="tab-call" class="maintab-content" role="region" aria-labelledby="mtab-call">
     <header class="top">
       <div>
         <h1>Tickets Proactivanet — Call Center</h1>
@@ -313,7 +325,7 @@
     </section>
   </div>
 
-  <div id="tab-tablero" class="maintab-content">
+  <div id="tab-tablero" class="maintab-content" role="region" aria-labelledby="mtab-tablero">
     <iframe id="iframe-tablero"
             class="tablero-externo"
             data-src="assets/Tablero_Experiencia.html"

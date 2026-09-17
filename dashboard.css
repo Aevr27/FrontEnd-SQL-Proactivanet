@@ -196,7 +196,11 @@
   }
   .mtab:hover:not(.active) { color: var(--ink); background: rgba(255, 255, 255, .55); }
   .maintab-content { display: none; }
-  .maintab-content.active { display: block; animation: aparecer .22s ease both; }
+  /* Sin `animation`: la declaracion decia `aparecer .22s`, pero @keyframes
+     aparecer no existe -ni aqui, ni en assets/css/, ni en las hojas de los
+     modulos-, asi que nunca se animo nada. Se retira la referencia muerta en
+     vez de inventar la animacion. */
+  .maintab-content.active { display: block; }
 
   /* Tablero_Experiencia.html va dentro de un iframe: es un documento
      independiente y solo necesita ocupar el alto util de la pestaña. */
@@ -580,7 +584,8 @@
     box-shadow: 0 2px 8px -2px rgba(71, 139, 60, .55);
   }
   .panel { display: none; }
-  .panel.active { display: block; animation: aparecer .2s ease both; }
+  /* Misma referencia muerta a `aparecer` que en .maintab-content.active. */
+  .panel.active { display: block; }
   .scroll-x { overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
 
   /* Linea que dice que filtro esta aplicado sobre cada tabla. */
