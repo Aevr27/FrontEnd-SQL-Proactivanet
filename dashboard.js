@@ -592,6 +592,49 @@ const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
    la cifra suelta dentro de la barra se leeria como tickets. */
 const ETIQUETAS_DENTRO_PCT = Barras.etiquetasDentro(v => `${FMT(v)}%`);
 
+/* Estado vacio DENTRO de una grafica viva, sin destruirla. renderEmptyChart()
+   -el de abajo- mata la instancia y escribe el mensaje a mano sobre el canvas:
+   sirve donde el vacio es el final del render, pero no donde la grafica tiene
+   que seguir en pantalla mientras se pide el dato nuevo, porque destruir y
+   reconstruir es justo el parpadeo que se quiere evitar.
+
+   Aqui la instancia se queda: se le vacian los datasets y este plugin escribe
+   el motivo centrado en el area de dibujo. Tarjeta, titulo, leyenda y ejes
+   siguen a la vista. El mensaje viaja en `options.plugins.sinDatos.mensaje`,
+   asi que se cambia con un update() normal ("Cargando..." mientras vuelve la
+   peticion, el motivo del vacio cuando ya volvio).
+
+   Solo pinta si NINGUN dataset tiene datos: con datos no estorba. */
+const SIN_DATOS = {
+  id: 'sinDatos',
+  afterDraw(chart) {
+    const datasets = (chart.data && chart.data.datasets) || [];
+    if (datasets.some(ds => ((ds && ds.data) || []).length)) return;
+
+    const opciones = (chart.options.plugins && chart.options.plugins.sinDatos) || {};
+    const mensaje = String(opciones.mensaje ?? 'Sin datos.');
+    if (!mensaje) return;
+
+    const area = chart.chartArea;
+    if (!area) return;
+    const ctx = chart.ctx;
+    const ancho = area.right - area.left;
+    ctx.save();
+    // Gris medio y misma tipografia que renderEmptyChart: el vacio se lee
+    // igual venga de un sitio o del otro.
+    ctx.fillStyle = '#9aa094';
+    ctx.font = '13px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const lineas = envolverTexto(ctx, mensaje, Math.max(80, ancho - 32));
+    const salto = 18;
+    const x = (area.left + area.right) / 2;
+    const y0 = (area.top + area.bottom) / 2 - (lineas.length - 1) * salto / 2;
+    lineas.forEach((linea, i) => ctx.fillText(linea, x, y0 + i * salto));
+    ctx.restore();
+  },
+};
+
 // Estado vacio de una grafica. Chart.js no dibuja nada util con datasets
 // vacios -deja los ejes solos, que se leen como si hubiera un error-, asi que
 // aqui se destruye la instancia y se escribe el motivo centrado en el canvas.
@@ -2758,7 +2801,12 @@ const TableroSla = (function () {
     el.innerHTML = html ? `<div class="vacio">${html}</div>` : '';
   }
 
-  function renderCargaTecnico(filas) {
+  /* Las dos graficas de este bloque se pintan SIEMPRE, incluso sin filas: con
+     `filas` vacio salen con los datasets vacios y el plugin SIN_DATOS escribe
+     `mensajeVacio` dentro del area de dibujo. Ni se destruye la instancia ni
+     se esconde la tarjeta, asi que un cambio de filtro se ve como
+     "grafica vacia -> datos nuevos" y no como "grafica -> hueco -> grafica". */
+  function renderCargaTecnico(filas, mensajeVacio) {
     const top = filas.slice(0, TOPE_CARGA_GRAFICA);
     const etiquetas = top.map(x => x.Tecnico);
     const tickets = top.map(x => x.Tickets ?? 0);
@@ -2774,7 +2822,7 @@ const TableroSla = (function () {
         // Apilada, como la de antiguedad del Backlog pero tumbada: la cifra
         // de cada segmento la pone ETIQUETAS_SEGMENTO. La geometria -grosor,
         // aire y radio- ya viene del default compartido.
-        plugins: [ETIQUETAS_SEGMENTO],
+        plugins: [ETIQUETAS_SEGMENTO, SIN_DATOS],
         data: { labels: etiquetas, datasets: [
           { label: 'Tickets cerrados', data: tickets, backgroundColor: BARRA_A },
           { label: 'Llamadas atendidas', data: llamadas, backgroundColor: MORADO },
@@ -2787,6 +2835,7 @@ const TableroSla = (function () {
              compararia ticket contra llamada, que no es la pregunta. */
           scales: { x: Object.assign({}, EJE_CONTEO, { stacked: true }), y: { stacked: true } },
           plugins: {
+            sinDatos: { mensaje: mensajeVacio },
             tooltip: { callbacks: {
               label: c => `${c.dataset.label}: ${FMT(c.raw)}`,
               // footer y no afterLabel: afterLabel se repetiria en cada uno de
@@ -2800,13 +2849,14 @@ const TableroSla = (function () {
         gr.data.labels = etiquetas;
         gr.data.datasets[0].data = tickets;
         gr.data.datasets[1].data = llamadas;
+        gr.options.plugins.sinDatos = { mensaje: mensajeVacio };
         // El closure apunta al arreglo de ESTA pasada, no al de la
         // construccion: hay que reinstalarlo para que el pie case.
         gr.options.plugins.tooltip.callbacks.footer = pie;
       });
   }
 
-  function renderCargaDia(filas) {
+  function renderCargaDia(filas, mensajeVacio) {
     const etiquetas = filas.map(x => soloFecha(x.Fecha));
     const tickets = filas.map(x => x.Tickets ?? 0);
     const llamadas = filas.map(x => x.Llamadas ?? 0);
@@ -2814,6 +2864,7 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'cargaDia', 'chart-carga-dia',
       () => ({
         type: 'line',
+        plugins: [SIN_DATOS],
         data: { labels: etiquetas, datasets: [
           { label: 'Tickets cerrados', data: tickets, borderColor: BARRA_A,
             backgroundColor: BARRA_A, tension: 0.25, pointRadius: 0, borderWidth: 2 },
@@ -2823,7 +2874,10 @@ const TableroSla = (function () {
         options: {
           responsive: true, maintainAspectRatio: false,
           interaction: { mode: 'index', intersect: false },
-          plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } } },
+          plugins: {
+            sinDatos: { mensaje: mensajeVacio },
+            tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } },
+          },
           scales: { y: EJE_CONTEO },
         }
       }),
@@ -2831,6 +2885,7 @@ const TableroSla = (function () {
         gr.data.labels = etiquetas;
         gr.data.datasets[0].data = tickets;
         gr.data.datasets[1].data = llamadas;
+        gr.options.plugins.sinDatos = { mensaje: mensajeVacio };
       });
   }
 
@@ -2856,6 +2911,18 @@ const TableroSla = (function () {
     hacerOrdenable(cont.querySelector('table'));
   }
 
+  /* Vacia las dos graficas del bloque SIN quitarlas de la pantalla. Se llama
+     en cuanto arranca una carga: el dato viejo no puede quedarse puesto
+     mientras vuelve el del filtro nuevo, y la tarjeta tampoco puede
+     desaparecer. La tabla se vacia en la misma pasada para que no quede
+     contando tecnicos que las graficas ya no muestran. */
+  function pintarCargaVacia(mensaje) {
+    mostrarBloqueCarga(true);
+    renderCargaTecnico([], mensaje);
+    renderCargaDia([], mensaje);
+    renderTablaCarga([]);
+  }
+
   function renderCargaCombinada(d) {
     const filas = (d && d.tecnicos) || [];
     const hint = document.getElementById('hint-carga');
@@ -2864,18 +2931,21 @@ const TableroSla = (function () {
     if (!filas.length) {
       /* El caso mas probable no es que no haya habido actividad, sino que el
          catalogo de extensiones no este capturado para esos grupos, asi que
-         se dice en vez de dejar dos recuadros vacios. */
-      destruir('cargaTecnico');
-      destruir('cargaDia');
-      mostrarBloqueCarga(false);
+         se dice, en la nota de arriba y dentro de las propias graficas.
+
+         Antes se destruian las dos instancias y se escondia el bloque entero.
+         Ahora las tarjetas se quedan, vacias: con el bloque desapareciendo y
+         volviendo, cada cambio de filtro movia el resto de la pestana de
+         sitio, y el mensaje del estado quedaba donde ya no habia graficas. */
+      pintarCargaVacia('Sin cruce para este filtro.');
       estadoCargaCombinada(`Sin cruce para este filtro. Se busco en los grupos: ${escapeHtml((d && d.grupos) || '')}.<br>Si el rango si tuvo actividad, revisa que dbo.CatAgenteTecnico tenga capturadas las extensiones de esos grupos.`);
       return;
     }
 
     estadoCargaCombinada('');
     mostrarBloqueCarga(true);
-    renderCargaTecnico(filas);
-    renderCargaDia((d && d.serie) || []);
+    renderCargaTecnico(filas, 'Sin cruce para este filtro.');
+    renderCargaDia((d && d.serie) || [], 'Sin cruce para este filtro.');
     renderTablaCarga(filas);
   }
 
@@ -3110,6 +3180,12 @@ const TableroSla = (function () {
        el ultimo bloque del Call Center. Se lanza aqui para que salga en
        paralelo con las demas, y se pinta solo en cuanto responde. */
     estadoCargaCombinada('Cargando el cruce de tickets y llamadas...');
+    /* Las graficas del cruce se vacian YA, antes de pedir nada: mientras
+       vuelve la respuesta no puede quedarse a la vista el reparto del filtro
+       anterior, que se leeria como el del filtro nuevo. Quedan las tarjetas
+       con sus ejes y el "Cargando..." dentro. El guardia de `miCarga` de abajo
+       es lo que impide que una respuesta atrasada las vuelva a llenar. */
+    pintarCargaVacia('Cargando el cruce de tickets y llamadas...');
     obtenerJSONSla(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
       d => { if (miCarga === cargaVigente) renderCargaCombinada(d); },
       e => { if (miCarga === cargaVigente) errorCargaCombinada(e); }
