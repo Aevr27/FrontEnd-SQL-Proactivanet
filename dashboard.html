@@ -10,6 +10,9 @@
      copia y la misma version que ya usan Experiencia, Orquestacion y QA
      (assets/vendor/chart.umd.min.js es el dist 4.4.4 bajado de jsdelivr). -->
 <script src="assets/vendor/chart.umd.min.js"></script>
+<!-- Escape de HTML compartido. Va ANTES de los modulos: todo lo que sale de
+     SQL se pega con innerHTML y tiene que entrar como texto, no como marcado. -->
+<script src="assets/js/escape.js"></script>
 <!-- Paleta categorica compartida. Va antes de dashboard.js y antes de los
      modulos embebidos (Experiencia, QA), que pierden sus <script> al montarse
      aqui y usan esta copia. -->

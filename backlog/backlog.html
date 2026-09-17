@@ -45,7 +45,10 @@
        correo diario: no se copia al modulo. Solo para la pagina suelta,
        embebida en dashboard.html este <script> se quita y manda la copia
        de alli. -->
-  <script src="../assets/js/paleta.js"></script>
+  <!-- Escape de HTML compartido. Va ANTES de los modulos: todo lo que sale de
+     SQL se pega con innerHTML y tiene que entrar como texto, no como marcado. -->
+<script src="../assets/js/escape.js"></script>
+<script src="../assets/js/paleta.js"></script>
   <!-- Geometria y cifra de las barras, con la misma nota: solo para la
        pagina suelta. -->
   <script src="../assets/js/barras.js"></script>

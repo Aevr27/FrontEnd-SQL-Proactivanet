@@ -1,10 +1,10 @@
 // Una fila de SqlDataReader a Dictionary<string,object>, con la misma
 // conversion que ya hacian por separado DashboardDb.EjecutarMultiple,
-// QaDb.Fila, DashboardQueries.Ejecutar y qa_diag.ashx: DBNull -> null,
-// DateTime -> texto ISO 8601 sin zona (yyyy-MM-ddTHH:mm:ss), el resto tal cual.
+// QaDb.Fila y DashboardQueries.Ejecutar: DBNull -> null, DateTime -> texto
+// ISO 8601 sin zona (yyyy-MM-ddTHH:mm:ss), el resto tal cual.
 //
-// Las cuatro copias eran identicas caracter por caracter; esto no cambia que
-// devuelven, solo deja de repetir el mismo bucle cuatro veces.
+// Las copias eran identicas caracter por caracter; esto no cambia que
+// devuelven, solo deja de repetir el mismo bucle.
 using System;
 using System.Collections.Generic;
 using System.Data;

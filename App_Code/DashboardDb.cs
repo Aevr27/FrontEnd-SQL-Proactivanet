@@ -9,6 +9,7 @@
 using System;
 using System.Collections.Generic;
 using System.Data;
+using System.Configuration;
 using System.Data.SqlClient;
 using System.Globalization;
 using System.Web;
@@ -181,8 +182,10 @@ ORDER BY s.FechaCorte DESC;";
         catch (Exception ex)
         {
             // El sello es informacion de cabecera: que falle no puede tumbar
-            // la respuesta de datos que lo acompana.
-            error = ex.Message;
+            // la respuesta de datos que lo acompana. La nota se PINTA en el
+            // tablero, asi que va saneada; el detalle, a la traza.
+            DashboardHandler.Registrar("DashboardDataInfo", ex);
+            error = DashboardHandler.MensajeSeguro(ex);
         }
 
         /* FechaHoraSnapshot es datetime2 con DEFAULT (sysdatetime()) y el host
@@ -220,6 +223,60 @@ ORDER BY s.FechaCorte DESC;";
 // generico sin decir que estaba mal.
 public static class DashboardHandler
 {
+    /* MENSAJE SEGURO — lo unico que puede cruzar al navegador cuando algo
+       truena.
+
+       ex.Message de una SqlException lleva el nombre del servidor, el de la
+       base, el del procedimiento y a veces el del login; el de una excepcion
+       de .NET puede llevar rutas del disco del servidor. Nada de eso le sirve
+       a quien mira el tablero y todo eso le sirve a quien lo esta sondeando,
+       asi que se queda del lado del servidor.
+
+       El diagnostico NO se pierde: el detalle completo va a la traza de
+       ASP.NET (Registrar, abajo) y ahi lo lee quien administra el sitio.
+
+       El criterio es el mismo que qa.ashx ya usaba, y por eso este helper
+       reproduce su reparto en vez de inventar otro:
+         - SqlException            -> texto generico + ex.Number, que es un
+                                      codigo de diagnostico y no identifica
+                                      nada de la instalacion;
+         - ConfigurationErrorsException -> su mensaje tal cual: lo escribe
+                                      ConnectionStringProvider y dice que
+                                      archivo falta copiar, sin servidor,
+                                      usuario ni contraseña;
+         - lo demas                -> texto generico. */
+    public static string MensajeSeguro(Exception ex)
+    {
+        if (ex == null) return "Error desconocido en el servidor.";
+
+        if (ex is ConfigurationErrorsException) return ex.Message;
+
+        var sql = ex as SqlException;
+        if (sql != null)
+        {
+            return "El servidor de SQL rechazo la consulta (error " +
+                   sql.Number.ToString(CultureInfo.InvariantCulture) +
+                   "). Revisa la traza del servidor para el detalle.";
+        }
+
+        return "Ocurrio un error en el servidor al preparar la respuesta. " +
+               "Revisa la traza del servidor para el detalle.";
+    }
+
+    /* El detalle completo, a la traza de ASP.NET (trace.axd).
+
+       Se usa HttpContext.Trace y no System.Diagnostics.Trace porque los
+       metodos de ese ultimo son [Conditional("TRACE")] y ASP.NET no define
+       ese simbolo al compilar App_Code y los .ashx: las llamadas
+       desapareceran sin dejar rastro. Es la misma razon que ya estaba escrita
+       en backlog_antiguos.ashx. */
+    public static void Registrar(string categoria, Exception ex)
+    {
+        var ctx = HttpContext.Current;
+        if (ctx == null || ex == null) return;
+        ctx.Trace.Warn(categoria, ex.GetType().Name + ": " + ex.Message, ex);
+    }
+
     public static void Responder(HttpContext context, Func<object> trabajo)
     {
         context.Response.ContentType = "application/json; charset=utf-8";
@@ -236,9 +293,14 @@ public static class DashboardHandler
             context.Response.StatusCode = 500;
             context.Response.TrySkipIisCustomErrors = true;
 
+            // El detalle se queda en la traza del servidor; al navegador solo
+            // va el mensaje saneado. El contrato JSON no cambia: mismas dos
+            // llaves, "error" y "tipo".
+            Registrar("DashboardHandler", ex);
+
             var error = new Dictionary<string, object>
             {
-                { "error", ex.Message },
+                { "error", MensajeSeguro(ex) },
                 { "tipo", ex.GetType().Name },
             };
             context.Response.Write(new JavaScriptSerializer().Serialize(error));

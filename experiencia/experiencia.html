@@ -25,6 +25,9 @@
 <script src="vendor/chart.umd.min.js"></script>
 <!-- Paleta categorica compartida (solo para la pagina suelta: embebida en
      dashboard.html este <script> se quita y manda la copia de alli). -->
+<!-- Escape de HTML compartido. Va ANTES de los modulos: todo lo que sale de
+     SQL se pega con innerHTML y tiene que entrar como texto, no como marcado. -->
+<script src="../assets/js/escape.js"></script>
 <script src="../assets/js/paleta.js"></script>
 <script src="../assets/js/barras.js"></script>
 <script src="../assets/js/grafica.js"></script>

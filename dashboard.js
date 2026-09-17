@@ -23,10 +23,11 @@
    1. Preambulo compartido
    ======================================================================= */
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function escapeAttr(s) { return escapeHtml(s); }
+/* La implementacion vive en assets/js/escape.js, una sola para todo el
+   tablero. Aqui quedan los dos nombres locales porque los usan decenas de
+   plantillas de este archivo; lo que ya no se repite es la logica. */
+function escapeHtml(s) { return Escape.html(s); }
+function escapeAttr(s) { return Escape.attr(s); }
 
 const FMT = n => (n === null || n === undefined || n === '') ? '' : Number(n).toLocaleString('es-MX');
 const PCT = (parte, total) => total > 0 ? Math.round(100 * parte / total) + '%' : '—';
