@@ -190,120 +190,14 @@
     </footer>
   </div>
 
-  <!-- ================================================ Tablero de Backlog -->
-  <div id="tab-backlog" class="maintab-content">
-    <header class="top">
-      <div>
-        <h1>Tickets Proactivanet — Backlog</h1>
-      </div>
-      <div class="acciones-top">
-        <div class="estado" id="estado-carga-bl"></div>
-      </div>
-    </header>
-
-    <section class="filtros">
-      <div class="campo">
-        <label for="f-corte-bl">Fecha de corte</label>
-        <!-- Mismo control de calendario que Fecha inicio / Fecha fin del
-             tablero de SLA. Sigue siendo UNA sola fecha; los cortes que
-             existen de verdad acotan el min/max desde backlog_catalogos. -->
-        <input type="date" id="f-corte-bl">
-      </div>
-      <div class="campo">
-        <label for="f-dias-bl">Ventana de tendencia</label>
-        <select id="f-dias-bl">
-          <option value="15">Ultimos 15 dias</option>
-          <option value="30" selected>Ultimos 30 dias</option>
-          <option value="90">Ultimos 90 dias</option>
-          <option value="365">Ultimo año</option>
-        </select>
-      </div>
-      <div class="campo">
-        <label for="f-granularidad-bl">Agrupar tendencia por</label>
-        <select id="f-granularidad-bl">
-          <option value="Dia" selected>Dia</option>
-          <option value="Semana">Semana</option>
-          <option value="Mes">Mes</option>
-        </select>
-      </div>
-      <div class="campo">
-        <label for="f-c1-bl">Servicio / C1 (elige varios)</label>
-        <select id="f-c1-bl" multiple></select>
-      </div>
-      <div class="campo">
-        <label for="f-grupos-bl">Grupos (elige varios)</label>
-        <select id="f-grupos-bl" multiple></select>
-      </div>
-      <div class="campo">
-        <label for="f-lideres-bl">Lideres (elige varios)</label>
-        <select id="f-lideres-bl" multiple></select>
-      </div>
-      <div class="campo acciones">
-        <button class="btn gris" id="btn-limpiar-bl" type="button">Limpiar</button>
-      </div>
-    </section>
-
-    <div id="aviso-historico-bl"></div>
-    <p class="tendencia-linea" id="tendencia-linea-bl"></p>
-
-    <section class="kpis" id="kpis-bl"></section>
-
-    <section class="grid2">
-      <div class="card">
-        <h3>Tendencia del backlog<span class="hint" id="hint-tendencia-bl"></span></h3>
-        <div class="lienzo alta"><canvas id="chart-tendencia-bl"></canvas></div>
-      </div>
-      <div class="card">
-        <h3>Tendencia por lider<span class="hint" id="hint-tendencia-lider-bl">avance de cada torre</span></h3>
-        <div class="lienzo alta"><canvas id="chart-tendencia-lider-bl"></canvas></div>
-      </div>
-    </section>
-
-    <section class="grid3">
-      <div class="card">
-        <h3>Backlog por lider</h3>
-        <div class="lienzo"><canvas id="chart-lider-bl"></canvas></div>
-      </div>
-      <div class="card">
-        <h3>Por prioridad</h3>
-        <div class="lienzo"><canvas id="chart-prioridad-bl"></canvas></div>
-      </div>
-      <div class="card">
-        <h3>Por antiguedad</h3>
-        <div class="lienzo"><canvas id="chart-aging-bl"></canvas></div>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="tabs">
-        <div class="tab active" data-panel="p-lideres-bl">Lideres (drill-down)</div>
-        <div class="tab" data-panel="p-aging-bl">Resumen por antiguedad</div>
-        <div class="tab" data-panel="p-antiguos-bl">Tickets mas antiguos</div>
-      </div>
-
-      <div class="panel active" id="p-lideres-bl">
-        <div class="nota">Clic en la flecha para desplegar los grupos del lider; clic en el nombre
-          para filtrar todo el tablero.</div>
-        <div class="cap" id="cap-lideres-bl"></div>
-        <div class="scroll-x" id="tabla-lideres-bl"></div>
-      </div>
-
-      <div class="panel" id="p-aging-bl">
-        <div class="cap" id="cap-aging-bl"></div>
-        <div class="scroll-x" id="tabla-aging-bl"></div>
-      </div>
-
-      <div class="panel" id="p-antiguos-bl">
-        <div class="cap" id="cap-antiguos-bl"></div>
-        <div class="scroll-x" id="tabla-antiguos-bl"></div>
-      </div>
-    </section>
-
-    <footer>
-      Fuente: cortes diarios guardados en <b>dbo.CorreoBacklogSnapshot</b> ·
-      El color de cada lider es el mismo que usa el correo diario.
-    </footer>
-  </div>
+  <!-- ================================================ Tablero de Backlog
+       Contenedor vacio a proposito, igual que el de Experiencia y el de QA.
+       TableroBacklog (dashboard.js) trae backlog/backlog.html, backlog.css y
+       backlog.js la primera vez que se abre la pestaña. El marcado del
+       Backlog -filtros, KPIs, las cinco graficas y los tres paneles de
+       tablas- vive ahora SOLO en backlog/backlog.html, con sus mismos ids, y
+       su pagina suelta funciona igual. -->
+  <div id="tab-backlog" class="maintab-content"></div>
 
   <!-- =============================================== Tablero (externo) -->
   <!-- Experiencia al Usuario, Observabilidad y Orquestacion ya no viven aqui:

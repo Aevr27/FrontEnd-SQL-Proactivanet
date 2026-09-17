@@ -251,8 +251,9 @@
      Este selector solo reserva el alto para que la cabecera no salte mientras
      el nodo esta vacio; el aspecto lo pone el componente compartido. */
   header.top .estado { min-height: 16px; }
-  header.top #estado-carga:empty,
-  header.top #estado-carga-bl:empty { display: none; }
+  /* El hermano #estado-carga-bl:empty vive ahora en backlog/backlog.css, con
+     el resto de lo privado del Backlog. */
+  header.top #estado-carga:empty { display: none; }
   /* En fila, no en columna: apilada, un bloque con dos hijos -el chip de fecha
      y un boton, como en QA- crecia mas que el titulo y era ese bloque, y no la
      cabecera, el que decidia el alto de la barra. En fila ninguna pestaña
@@ -687,20 +688,6 @@
     background: var(--bg-2); border: 1px dashed var(--g-200);
     border-radius: var(--radius);
   }
-  .swatch {
-    display: inline-block; width: 10px; height: 10px; border-radius: 3px;
-    margin-right: 6px; vertical-align: middle;
-  }
-
-  /* ---- Avisos ---- */
-  .aviso {
-    background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
-    border-left: 4px solid var(--ambr);
-    border-radius: var(--radius); padding: 11px 15px;
-    font-size: 12.5px; margin-bottom: 14px;
-    box-shadow: var(--shadow);
-  }
-
   footer {
     text-align: center; color: var(--muted); font-size: 11px;
     margin-top: 22px; padding: 16px 12px;
@@ -708,42 +695,10 @@
   }
   footer .badge { margin: 0 2px; }
 
-  /* ---- Propios del tablero de backlog ---- */
-  /* La franja va de color plano, como la de .aviso de aqui abajo. Antes era
-     border-image con el degradado de la cabecera, que ademas de pintar los
-     cuatro lados ANULA el render de border-radius: esta caja era la unica de
-     esquinas cuadradas del tablero. Mismo motivo -y mismo arreglo- por el que
-     las tarjetas KPI dejaron de usarlo.
-
-     El color es --accent, neutro a proposito: esto no es un semaforo. El
-     sentido de la variacion lo dice .delta con su flecha, y la caja sale
-     igual suba o baje, asi que teñir la franja de verde o rojo afirmaria algo
-     que el dato no siempre respalda. */
-  .tendencia-linea {
-    font-size: 13.5px; margin: 0 0 16px;
-    background: var(--card); border: 1px solid var(--line-soft);
-    border-left: 4px solid var(--accent);
-    border-radius: var(--radius); box-shadow: var(--shadow);
-    padding: 12px 16px; color: var(--ink-2);
-  }
-  .tendencia-linea:empty { display: none; }
-  .tendencia-linea .delta { font-weight: 700; }
-  .grupo-lider {
-    margin: 20px 0 8px; font-size: 14px; font-weight: 700;
-    display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
-  }
-  .grupo-lider .conteo {
-    font-weight: 600; font-size: 10.5px; color: var(--muted); margin-left: 8px;
-    text-transform: uppercase; letter-spacing: .4px;
-  }
-  /* Señal visual de que la celda tiene tooltip; si no, nadie descubre que
-     pasando el raton aparece la descripcion. */
-  .con-hint { cursor: help; border-bottom: 1px dotted var(--muted-2); }
-  /* Codigo de ticket que si tiene GUID en el mapeo: abre el formulario de
-     edicion en Proactivanet. Los que no lo tienen se quedan como texto. */
-  .enlace-ticket { color: var(--accent); text-decoration: none; font-weight: 600; }
-  .enlace-ticket:hover { text-decoration: underline; }
-  .enlace-ticket::after { content: '\2197'; font-size: 0.72em; margin-left: 3px; opacity: 0.55; }
+  /* Lo propio del tablero de backlog -.aviso, .swatch, .tendencia-linea,
+     .grupo-lider, .con-hint, .enlace-ticket- ya no esta aqui: vive en
+     backlog/backlog.css desde que el Backlog salio a su propio modulo.
+     Ninguna otra vista del tablero usaba esas clases. */
   /* ---- Responsivo ---- */
   @media (max-width: 1100px) {
     .grid2 { grid-template-columns: 1fr 1fr; }
