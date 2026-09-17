@@ -105,5 +105,73 @@ var antes = LIDERES.map(P.colorLider).join('|');
 P.registrarLideres(['Laura Cardenas', 'Sin Torre']);
 Check('re-registrar un lider conocido no recolorea', antes, LIDERES.map(P.colorLider).join('|'));
 
+/* =========================================================================
+   9. EL ORDEN DE CARGA NO PINTA NADA  (la regresion de las barras grises)
+
+   Sintoma: Experiencia abierta directamente pintaba bien a sus PO y
+   directores; abierta DESPUES de otra pestaña, los mismos nombres salian
+   grises.
+
+   Causa: el reparto de colores se hacia sobre las posiciones que los
+   lideres fijos NO ocupaban. El Backlog y SLA registran a los siete lideres
+   fijos, que se llevan siete de las ocho posiciones de la paleta; la unica
+   que quedaba "libre" era la del gris, asi que toda persona fuera del mapa
+   fijo se pintaba de NEUTRO. El color dependia de quien se hubiera
+   registrado antes.
+
+   Regla que se fija aqui: el color de una persona sale de su nombre
+   normalizado y de nada mas.
+   ========================================================================= */
+var GENTE_EXPERIENCIA = ['Ana Ruiz', 'Pedro Solis', 'Marta Diaz', 'Luis Pena',
+                         'Veronica Salas', 'Hugo Mena'];
+
+// Escenario A: Experiencia es lo primero que se carga.
+var A = cargarPaleta();
+A.registrarLideres(GENTE_EXPERIENCIA);
+var COLORES_A = GENTE_EXPERIENCIA.map(A.colorLider).join('|');
+
+// Escenario B: otra pestaña registra ANTES el roster completo de lideres
+// fijos -que es justo lo que hacen el Backlog y SLA- y despues llega
+// Experiencia con exactamente la misma gente.
+var B = cargarPaleta();
+B.registrarLideres(LIDERES);
+B.registrarLideres(GENTE_EXPERIENCIA);
+Check('A/B: el mismo nombre saca el mismo color aunque otra pestaña cargue antes',
+  COLORES_A, GENTE_EXPERIENCIA.map(B.colorLider).join('|'));
+
+// Escenario C: nadie registro nada. colorLider() responde igual: el color no
+// depende de estar de alta en el roster.
+Check('C: sin registrar a nadie, los colores son los mismos',
+  COLORES_A, GENTE_EXPERIENCIA.map(cargarPaleta().colorLider).join('|'));
+
+// Y el sintoma concreto: ninguna persona real se vuelve gris por el orden.
+Check('ninguna persona real cae en NEUTRO con el roster fijo ya cargado',
+  'true',
+  GENTE_EXPERIENCIA.every(function (n) { return B.colorLider(n) !== B.NEUTRO; }) ? 'true' : 'false');
+
+// El gris no es un color repartible: no esta entre los que puede llevar una
+// persona. Es lo que impide que vuelva a pasar.
+Check('NEUTRO no esta en la paleta de personas',
+  'false', P.PALETA_LIDER.indexOf(P.NEUTRO) >= 0 ? 'true' : 'false');
+Check('la paleta de personas es la categorica menos el gris',
+  P.PALETA_CATEGORICA.filter(function (c) { return c !== P.NEUTRO; }).join('|'),
+  P.PALETA_LIDER.join('|'));
+
+// Registrar en distinto orden, o registrar de mas, tampoco mueve a nadie.
+var D = cargarPaleta();
+D.registrarLideres(GENTE_EXPERIENCIA.slice().reverse());
+D.registrarLideres(['Otros', '(Sin PO)', 'Zulema Ybarra']);
+Check('D: alta al reves y con cubos sin dato de por medio, mismo color',
+  COLORES_A, GENTE_EXPERIENCIA.map(D.colorLider).join('|'));
+
+// La normalizacion de clave() sigue mandando para la gente NO fija.
+Check('una persona no fija con acentos y caja distinta es la misma',
+  A.colorLider('Veronica Salas'), A.colorLider('VERÓNICA  SALAS'));
+
+// Los lideres fijos siguen ganando a la huella: su color es el escrito a mano.
+LIDERES.forEach(function (n) {
+  Check('tras el cambio, ' + n + ' conserva su color fijo', HISTORICOS[n], B.colorLider(n));
+});
+
 console.log(fallos ? ('FALLOS: ' + fallos) : 'TODO PASA');
 process.exit(fallos ? 1 : 0);

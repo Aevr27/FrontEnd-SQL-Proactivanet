@@ -156,10 +156,12 @@
 
      Aqui hay DOS cosas separadas, y conviene no mezclarlas:
 
-     1) EL COLOR sale del NOMBRE, de un mapa escrito a mano
-        (COLOR_LIDER_FIJO, mas abajo). Son los colores que estas personas ya
-        llevaban; lo que cambia es que ya NO dependen del ranking por volumen
-        del corte, asi que nadie se recolorea porque otro suba o baje.
+     1) EL COLOR sale del NOMBRE y de nada mas: de un mapa escrito a mano
+        (COLOR_LIDER_FIJO, mas abajo) para los lideres historicos, y de la
+        huella del nombre normalizado para el resto. Son los colores que
+        estas personas ya llevaban; lo que cambia es que ya NO dependen del
+        ranking por volumen del corte, ni del roster vivo, ni de que pestaña
+        se haya abierto primero.
 
      2) EL ORDEN en que se LISTAN -leyenda, columnas de la matriz- es
         alfabetico (localeCompare en es, sin distinguir acentos ni caja), con
@@ -239,8 +241,8 @@
 
      Para mover un color, cambiar la posicion de PALETA_CATEGORICA que se
      pide aqui. Para dar de alta a un lider nuevo, agregarlo con la posicion
-     que le toque: mientras no este en esta lista, cae en el reparto
-     automatico de abajo. */
+     que le toque: mientras no este en esta lista, su color sale de la huella
+     de su nombre (colorLider, mas abajo), que es estable pero no elegida. */
   var COLOR_LIDER_FIJO = {
     'Laura Cardenas':  PALETA_CATEGORICA[0],   // azul
     'Jesus Campa':     PALETA_CATEGORICA[1],   // rojo
@@ -260,45 +262,78 @@
     }
   })();
 
-  /* El roster vivo de la pagina. Quien esta en el mapa fijo se lleva SU
-     color; a quien no -un lider nuevo que todavia nadie escribio arriba- se
-     le presta una posicion que no este ocupada, repartida sobre el orden
-     canonico para que al menos salga igual en todas las graficas de la
-     sesion. Se recalcula entero en cada alta -no por orden de llegada como
-     `registro()`-, asi que da igual que grafica pinte primero. */
-  var rosterLideres = [];
-  var colorDeLider = {};
+  /* COLORES QUE PUEDE LLEVAR UNA PERSONA.
 
-  function repartirLideres() {
-    colorDeLider = {};
-    var tomados = {}, libres = [];
-    rosterLideres.forEach(function (n) {
-      var fijo = FIJOS[clave(n)];
-      if (fijo) { colorDeLider[clave(n)] = fijo; tomados[fijo] = true; }
-    });
-    PALETA_CATEGORICA.forEach(function (c) { if (!tomados[c]) libres.push(c); });
-    var i = 0;
-    rosterLideres.forEach(function (n) {
-      if (colorDeLider[clave(n)]) return;
-      colorDeLider[clave(n)] = libres.length ? libres[i++ % libres.length] : NEUTRO;
-    });
+     Son las MISMAS posiciones de PALETA_CATEGORICA, menos la que vale
+     NEUTRO: el gris significa "esto no es una categoria", y prestarselo a
+     una persona real es justo el error que se arregla aqui. No hay ningun
+     hex nuevo. */
+  var PALETA_LIDER = PALETA_CATEGORICA.filter(function (c) { return c !== NEUTRO; });
+
+  /* Huella estable de una clave (FNV-1a de 32 bits, mas una vuelta de
+     mezcla). Solo se le pide que el MISMO texto de siempre el MISMO numero,
+     dentro y fuera del navegador, y que los nombres se repartan parejo entre
+     las siete posiciones. No es criptografia: es la forma de que el color
+     salga del nombre y de nada mas.
+
+     La mezcla final no es adorno. Los bits BAJOS de FNV-1a estan mal
+     repartidos, y aqui se toma justo el resto entre 7: con un lote de 30
+     nombres reales el reparto salia 3/5/2/7/8/1/4 -un color casi sin usar y
+     otro con el triple de la cuenta-, y con la mezcla queda 5/4/4/3/5/5/4.
+
+     `>>> 0` en cada paso mantiene el valor en entero sin signo de 32 bits, y
+     Math.imul multiplica como entero de 32 bits: sin eso la multiplicacion
+     se va al terreno de los flotantes, pierde bits altos y el resultado deja
+     de ser reproducible. */
+  function huella(k) {
+    var h = 2166136261;
+    for (var i = 0; i < k.length; i++) {
+      h ^= k.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    h ^= h >>> 16;
+    h = Math.imul(h, 2246822507) >>> 0;
+    h ^= h >>> 13;
+    h = Math.imul(h, 3266489909) >>> 0;
+    h ^= h >>> 16;
+    return h >>> 0;
   }
+
+  /* El roster vivo de la pagina. YA NO decide colores: es solo el orden
+     canonico -A->Z con `Sin Torre` al final- con el que se pintan leyendas y
+     columnas de matriz. El color se calcula aparte, desde el nombre.
+
+     Antes esto repartia las posiciones que los lideres fijos no ocupaban, y
+     de ahi salia el error: cuando el roster ya traia a los siete lideres
+     fijos -porque el Backlog o SLA se habian abierto primero- las unicas
+     posiciones "libres" que quedaban eran la del gris, asi que TODA persona
+     que no estuviera en el mapa fijo se pintaba de NEUTRO. El color dependia
+     de que pestaña se hubiera cargado antes. */
+  var rosterLideres = [];
 
   // Da de alta los nombres que falten y devuelve el orden canonico COMPLETO.
   function registrarLideres(nombres) {
-    var antes = rosterLideres.length;
     rosterLideres = ordenarLideres(rosterLideres.concat(nombres || []));
-    if (rosterLideres.length !== antes) repartirLideres();
     return rosterLideres.slice();
   }
 
-  // Color de una persona. El mapa fijo manda siempre -aunque esa persona no
-  // se haya dado de alta en esta vista-. Un cubo sin dato, o un nombre nuevo
-  // que nadie registro, sale de NEUTRO: nunca hereda el color de otro lider.
+  /* Color de una persona, SOLO en funcion de su nombre normalizado.
+
+     1) Un cubo sin dato -"(Sin director)", "(Sin PO)", "Otros", vacio...- es
+        NEUTRO: no es una persona.
+     2) El mapa fijo manda, aunque esa persona no se haya dado de alta en
+        esta vista.
+     3) El resto sale de la huella de su clave. Es determinista: la misma
+        persona saca el mismo color en cada grafica, en cada pestaña y en
+        cada carga, sin que importe quien se registro primero ni si se
+        registro. Dos personas pueden coincidir en color -son siete
+        posiciones-, que es el mismo tope que la paleta ya tenia declarado
+        arriba; lo que no puede pasar es que alguien real salga gris. */
   function colorLider(nombre) {
     if (esCuboSinDato(nombre)) return NEUTRO;
     var k = clave(nombre);
-    return FIJOS[k] || colorDeLider[k] || NEUTRO;
+    if (FIJOS[k]) return FIJOS[k];
+    return PALETA_LIDER[huella(k) % PALETA_LIDER.length];
   }
 
   // Orden canonico ya dado de alta, para pintar una leyenda.
@@ -306,6 +341,7 @@
 
   raiz.Paleta = {
     PALETA_CATEGORICA: PALETA_CATEGORICA,
+    PALETA_LIDER: PALETA_LIDER,
     NEUTRO: NEUTRO,
     AZUL_SERIE: AZUL_SERIE,
     porIndice: porIndice,
