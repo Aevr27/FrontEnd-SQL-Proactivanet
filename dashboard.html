@@ -340,8 +340,9 @@
 
          Los filtros por clic de las graficas de SLA (cross-filter) NO alcanzan
          a este bloque: una llamada no comparte ninguna dimension con un ticket
-         -no tiene estado, prioridad ni antiguedad-. Solo lo mueven el rango de
-         fechas y su propio filtro de campanas.
+         -no tiene estado, prioridad ni antiguedad-. Lo mueven el rango de
+         fechas y su propio filtro de campanas; Tecnicos solo mueve "Atencion
+         por agente" y la carga combinada.
 
          La rejilla de KPI abre la pestana, como en SLA y en Backlog: filtros,
          KPI y luego graficas. Antes iba precedida de una `.card` de titulo que
@@ -387,8 +388,8 @@
       <h3>Carga combinada: tickets y llamadas por tecnico<span class="hint" id="hint-carga"></span></h3>
       <div class="nota">Solo los tecnicos con extension telefonica registrada en el catalogo.
         Los tickets se cuentan por fecha de firma de solucion y las llamadas solo si fueron
-        contestadas. El filtro de <b>Grupos</b> si aplica aqui, pero contra el grupo donde el
-        tecnico tiene mas tickets, no contra el grupo del ticket.</div>
+        contestadas. Los filtros de <b>Grupos</b> y <b>Tecnicos</b> si aplican aqui; Grupos, contra
+        el grupo donde el tecnico tiene mas tickets, no contra el grupo del ticket.</div>
       <div id="estado-carga-combinada"></div>
     </section>
 

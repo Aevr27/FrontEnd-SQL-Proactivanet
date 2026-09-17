@@ -6,8 +6,14 @@
 // campanas: son tres procedimientos, pero el tablero los pide siempre juntos
 // y separarlos en tres .ashx solo agregaria viajes.
 //
-// Los filtros de grupo y tecnico NO se pasan: una llamada no tiene grupo
-// resolutor. El unico filtro propio es la campana.
+// El filtro de grupo NO se pasa: una llamada no tiene grupo resolutor. El
+// filtro propio es la campana.
+//
+// El de tecnicos solo mueve "Atencion por agente": con tecnicos elegidos ese
+// result set se reemplaza por DashboardQueries.LlamadasPorAgente, que cruza
+// la extension con el tecnico por dbo.vw_TecnicoAgente. Las tarjetas y las
+// otras tres graficas son de toda la cola y no cambian. Sin tecnicos todo
+// sale del procedimiento, como siempre.
 
 using System.Collections.Generic;
 using System.Web;
@@ -30,6 +36,13 @@ public class Llamadas : IHttpHandler
 
             var kpis = DashboardDb.Ejecutar("dbo.usp_Dash_LlamadasKpis", parametros);
             var graficas = DashboardDb.EjecutarMultiple("dbo.usp_Dash_LlamadasGraficas", parametros);
+            var filtros = DashboardQueries.Filtros.Desde(context.Request);
+            if (filtros.Tecnicos.Count > 0 && graficas.Count > 3)
+            {
+                graficas[3] = DashboardQueries.LlamadasPorAgente(
+                    filtros, DashboardQueries.Lista(context.Request.QueryString["campanas"]), 15);
+            }
+
             var campanas = DashboardDb.Ejecutar("dbo.usp_Dash_LlamadasCatalogos",
                                                 new Dictionary<string, object>());
 

@@ -12,6 +12,11 @@
 // sin extensiones telefonicas la tabla sale vacia, y eso es correcto: ahi no
 // hay nadie que haga las dos cosas. Se devuelve 'grupos' en la respuesta para
 // que el sitio pueda decir con que grupos se cruzo.
+//
+// Con tecnicos elegidos (parametro 'tecnicos', separado por '|') el cruce se
+// acota a esas personas con DashboardQueries.CargaCombinada, que repite el
+// procedimiento con ese filtro de mas. Sin tecnicos se llama al procedimiento
+// como siempre.
 
 using System.Collections.Generic;
 using System.Web;
@@ -35,15 +40,26 @@ public class CargaCombinada : IHttpHandler
             object seleccion = DashboardParams.ListaONulo(context.Request, "grupos");
             string grupos = (seleccion == null) ? GruposPorDefecto : seleccion.ToString();
 
-            var parametros = new Dictionary<string, object>
-            {
-                { "FechaInicio", fi },
-                { "FechaFin", ff },
-                { "Grupos", grupos },
-                { "Top", DashboardParams.Entero(context.Request, "top", 20) },
-            };
+            int top = DashboardParams.Entero(context.Request, "top", 20);
+            var filtros = DashboardQueries.Filtros.Desde(context.Request);
 
-            var resultados = DashboardDb.EjecutarMultiple("dbo.usp_Dash_CargaCombinada", parametros);
+            List<List<Dictionary<string, object>>> resultados;
+            if (filtros.Tecnicos.Count > 0)
+            {
+                resultados = DashboardQueries.CargaCombinada(
+                    filtros, DashboardQueries.Lista(grupos), top);
+            }
+            else
+            {
+                var parametros = new Dictionary<string, object>
+                {
+                    { "FechaInicio", fi },
+                    { "FechaFin", ff },
+                    { "Grupos", grupos },
+                    { "Top", top },
+                };
+                resultados = DashboardDb.EjecutarMultiple("dbo.usp_Dash_CargaCombinada", parametros);
+            }
             var vacio = new List<Dictionary<string, object>>();
 
             return new Dictionary<string, object>

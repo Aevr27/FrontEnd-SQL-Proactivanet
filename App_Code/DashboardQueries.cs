@@ -811,7 +811,14 @@ ORDER BY b.FechaFirmaSolucion DESC;";
        que salgan con la grafia y el espaciado exactos con que estan grabados
        -el IN los encuentra igual, la colacion del servidor no distingue
        mayusculas- y para que un grupo que no exista en los datos no aparezca
-       en el desplegable. */
+       en el desplegable.
+
+       Los tecnicos se asignan a su grupo PRINCIPAL -en el que tienen mas
+       tickets-, no a cualquier grupo en el que aparezcan: la vista guarda el
+       grupo del ticket, no el del tecnico, y con un simple IN entraba al Call
+       Center cualquiera de otra area que alguna vez cerro un ticket de
+       Service Desk o End User. No hay tabla de pertenencia tecnico -> grupo;
+       el grupo con mas tickets es lo mas cercano que hay en los datos. */
     public static Dictionary<string, object> CatalogosCallCenter()
     {
         const string sql = @"
@@ -820,9 +827,19 @@ FROM dbo.vw_Dash_ProductividadBase
 WHERE Grupo IN ({0})
 ORDER BY Grupo;
 
-SELECT DISTINCT Tecnico
-FROM dbo.vw_Dash_ProductividadBase
-WHERE Tecnico IS NOT NULL AND LTRIM(RTRIM(Tecnico)) <> N''
+WITH PorGrupo AS (
+    SELECT Tecnico, Grupo, Tickets = COUNT_BIG(*)
+    FROM dbo.vw_Dash_ProductividadBase
+    WHERE Tecnico IS NOT NULL AND LTRIM(RTRIM(Tecnico)) <> N''
+    GROUP BY Tecnico, Grupo
+), Principal AS (
+    SELECT Tecnico, Grupo,
+           Orden = ROW_NUMBER() OVER (PARTITION BY Tecnico ORDER BY Tickets DESC, Grupo)
+    FROM PorGrupo
+)
+SELECT Tecnico
+FROM Principal
+WHERE Orden = 1
   AND Grupo IN ({0})
 ORDER BY Tecnico;";
 
@@ -890,5 +907,140 @@ ORDER BY Tecnico;";
             }
         }
         return salida;
+    }
+
+    // ---------------------------------------------------------------------
+    // Call Center filtrado por tecnico
+    // ---------------------------------------------------------------------
+
+    /* El filtro de Tecnicos en la pestana de Call Center. Solo se usa cuando
+       hay tecnicos elegidos: sin seleccion los handlers siguen llamando a
+       dbo.usp_Dash_LlamadasGraficas y dbo.usp_Dash_CargaCombinada como
+       siempre, y la base no necesita ningun cambio.
+
+       Una llamada no trae tecnico, trae extension. El puente es
+       dbo.vw_TecnicoAgente (16_cruce_llamadas_tickets.sql): una fila por cada
+       nombre con el que la persona aparece en los tickets, asi que el tecnico
+       elegido empata aunque este escrito con un nombre viejo (alias). Se usa
+       como IN (SELECT NumeroAgente ...) y no como JOIN: una persona con alias
+       tiene varias filas y el JOIN multiplicaria las llamadas. */
+    private static string AgentesDeTecnicos(SqlCommand cmd, List<string> tecnicos)
+    {
+        // Un parametro por nombre, usado en las dos columnas.
+        var marcas = new StringBuilder();
+        for (int i = 0; i < tecnicos.Count; i++)
+        {
+            var nombre = "@tc" + i;
+            if (i > 0) marcas.Append(", ");
+            marcas.Append(nombre);
+            cmd.Parameters.Add(nombre, SqlDbType.NVarChar, 4000).Value = tecnicos[i];
+        }
+        return "(SELECT ta.NumeroAgente FROM dbo.vw_TecnicoAgente AS ta"
+             + " WHERE ta.TecnicoPrincipal IN (" + marcas + ")"
+             + " OR ta.TecnicoEnTickets IN (" + marcas + "))";
+    }
+
+    // Filtros con solo el rango: los IN de grupos y tecnicos de Predicados()
+    // son contra la vista de tickets y aqui no aplican.
+    private static Filtros SoloRango(Filtros f)
+    {
+        var r = new Filtros();
+        r.FechaInicio = f.FechaInicio;
+        r.FechaFin = f.FechaFin;
+        return r;
+    }
+
+    /* "Atencion por agente" con los tecnicos elegidos. Mismas columnas y
+       mismo orden que el 4o result set de dbo.usp_Dash_LlamadasGraficas. */
+    public static List<Dictionary<string, object>> LlamadasPorAgente(
+        Filtros f, List<string> campanas, int top)
+    {
+        List<string> tecnicos = f.Tecnicos;
+        string sqlBase = @"
+SELECT TOP (@TopAgentes)
+    Agente          = ISNULL(l.NombreAgente, CONVERT(NVARCHAR(20), l.NumeroAgente)),
+    NumeroAgente    = l.NumeroAgente,
+    Atendidas       = COUNT(*),
+    DuracionPromSeg = CONVERT(INT, AVG(CONVERT(FLOAT, l.DuracionSeg))),
+    MinutosHablados = SUM(l.DuracionSeg) / 60
+FROM dbo.Llamadas AS l
+WHERE l.FechaLlamadaDia >= @FechaInicio
+  AND l.FechaLlamadaDia <= @FechaFin
+  AND l.EsContestada = 1
+  AND l.NumeroAgente IS NOT NULL
+  AND l.NumeroAgente IN AGENTES
+  CAMPANAS
+GROUP BY ISNULL(l.NombreAgente, CONVERT(NVARCHAR(20), l.NumeroAgente)), l.NumeroAgente
+ORDER BY COUNT(*) DESC;";
+
+        // Ejecutar() ya dejo el texto armado en el comando: aqui se ponen los
+        // IN, cada uno con sus parametros, antes de calcular la clave de cache.
+        return Unico(sqlBase, SoloRango(f), cmd =>
+        {
+            cmd.CommandText = cmd.CommandText
+                .Replace("AGENTES", AgentesDeTecnicos(cmd, tecnicos))
+                .Replace("CAMPANAS", EnLista(cmd, "CONVERT(NVARCHAR(20), l.NumeroCola)", "cc", campanas));
+            cmd.Parameters.Add("@TopAgentes", SqlDbType.Int).Value = top;
+        });
+    }
+
+    /* Carga combinada con los tecnicos elegidos. Es dbo.usp_Dash_CargaCombinada
+       con un filtro mas sobre el catalogo (#C del procedimiento): mismas
+       columnas y mismos dos result sets, asi que el sitio no distingue de
+       donde vinieron. */
+    public static List<List<Dictionary<string, object>>> CargaCombinada(
+        Filtros f, List<string> grupos, int top)
+    {
+        List<string> tecnicos = f.Tecnicos;
+        string sqlBase = @"
+IF OBJECT_ID('tempdb..#C') IS NOT NULL DROP TABLE #C;
+SELECT c.Tecnico, c.Grupo
+INTO #C
+FROM dbo.CatAgenteTecnico AS c
+WHERE c.Habilitado = 1
+  AND NULLIF(LTRIM(RTRIM(c.Tecnico)), N'') IS NOT NULL
+  AND c.NumeroAgente IN AGENTES
+  GRUPOS;
+
+SELECT TOP (@Top)
+    v.Tecnico,
+    c.Grupo,
+    Tickets    = SUM(v.Tickets),
+    Llamadas   = SUM(v.Llamadas),
+    Atenciones = SUM(v.Atenciones),
+    MinutosHablados = SUM(v.MinutosHablados),
+    LlamadasPct = CONVERT(DECIMAL(5,2),
+                  100.0 * SUM(v.Llamadas) / NULLIF(SUM(v.Atenciones), 0))
+FROM dbo.vw_CargaTecnicoDia AS v
+INNER JOIN #C AS c ON c.Tecnico = v.Tecnico
+WHERE v.Dia BETWEEN @FechaInicio AND @FechaFin
+GROUP BY v.Tecnico, c.Grupo
+ORDER BY SUM(v.Atenciones) DESC;
+
+SELECT
+    Fecha    = v.Dia,
+    Tickets  = SUM(v.Tickets),
+    Llamadas = SUM(v.Llamadas)
+FROM dbo.vw_CargaTecnicoDia AS v
+INNER JOIN #C AS c ON c.Tecnico = v.Tecnico
+WHERE v.Dia BETWEEN @FechaInicio AND @FechaFin
+GROUP BY v.Dia
+ORDER BY v.Dia;
+
+DROP TABLE #C;";
+
+        return Ejecutar(sqlBase, SoloRango(f), cmd =>
+        {
+            cmd.CommandText = cmd.CommandText
+                .Replace("AGENTES", AgentesDeTecnicos(cmd, tecnicos))
+                .Replace("GRUPOS", EnLista(cmd, "c.Grupo", "cg", grupos));
+            cmd.Parameters.Add("@Top", SqlDbType.Int).Value = top;
+        });
+    }
+
+    // Lista separada por coma del query string, para los handlers.
+    public static List<string> Lista(string valor)
+    {
+        return Partir(valor, ',');
     }
 }
