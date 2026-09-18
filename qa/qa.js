@@ -591,7 +591,7 @@
       type: 'doughnut',
       data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 2, borderColor: '#fff' }] },
       options: {
-        responsive: true, maintainAspectRatio: false, cutout: '58%',
+        responsive: false, maintainAspectRatio: false, cutout: '58%',
         // La dona tambien filtra: clic en un estado = detalle de ese estado.
         onClick: function (evento, elementos, grafica) {
           if (elementos.length) {
