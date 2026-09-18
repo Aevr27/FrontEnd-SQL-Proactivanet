@@ -277,7 +277,19 @@ code {
    height: 260px y, dentro de la pestaña, esa regla tambien alcanza a estos
    lienzos; el alto de QA lo deciden .lienzo-dona y el que calcula qa.js. */
 .lienzo { position: relative; width: 100%; height: auto; }
-.lienzo-dona { height: 232px; }
+.lienzo-dona {
+  height: 232px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.lienzo-dona canvas {
+  width: 232px !important;
+  height: 232px !important;
+  max-width: 100%;
+  max-height: 100%;
+}
 
 /* Alto de partida de las graficas de barras. La pagina se pinta antes de
    tener datos, y sin esto la tarjeta nace plana y da un salto cuando llegan.
