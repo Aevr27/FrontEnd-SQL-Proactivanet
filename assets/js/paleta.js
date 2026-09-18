@@ -348,22 +348,38 @@
 
   /* COLORES QUE PUEDE LLEVAR UNA PERSONA.
 
-     Son las MISMAS posiciones de PALETA_CATEGORICA, menos la que vale
-     NEUTRO: el gris significa "esto no es una categoria", y prestarselo a
-     una persona real es justo el error que se arregla aqui. No hay ningun
-     hex nuevo. */
-  var PALETA_LIDER = PALETA_CATEGORICA.filter(function (c) { return c !== NEUTRO; });
+     Las siete posiciones de PALETA_CATEGORICA alcanzaban para una torre del
+     Backlog, no para los quince Product Owners de Experiencia: con siete
+     tonos y quince personas la repeticion no era un riesgo, era aritmetica.
+     Esta lista es la paleta de PERSONAS y son diecinueve colores.
+
+     El gris NEUTRO no esta y no debe estar: significa "esto no es una
+     categoria", y prestarselo a una persona real es el error que ya se
+     arreglo una vez. PALETA_CATEGORICA -la de las graficas de categoria, no
+     de personas- se queda exactamente como estaba: ampliar personas no
+     recolorea estados, severidades ni rampas. */
+  var PALETA_PERSONA = [
+    '#d97706', '#ef4444', '#16a34a', '#3b82f6', '#8b5cf6',
+    '#06b6d4', '#ec4899', '#eab308', '#84cc16', '#6366f1',
+    '#f97316', '#14b8a6', '#f43f5e', '#10b981', '#f59e0b',
+    '#0ea5e9', '#a855f7', '#475569', '#fb7185'
+  ];
+
+  // Nombre viejo de la paleta de personas. Se conserva para no romper a quien
+  // la pida asi; es la misma lista.
+  var PALETA_LIDER = PALETA_PERSONA;
 
   /* Huella estable de una clave (FNV-1a de 32 bits, mas una vuelta de
      mezcla). Solo se le pide que el MISMO texto de siempre el MISMO numero,
      dentro y fuera del navegador, y que los nombres se repartan parejo entre
-     las siete posiciones. No es criptografia: es la forma de que el color
-     salga del nombre y de nada mas.
+     las posiciones de la paleta de personas. No es criptografia: es la forma
+     de que el color salga del nombre y de nada mas.
 
      La mezcla final no es adorno. Los bits BAJOS de FNV-1a estan mal
-     repartidos, y aqui se toma justo el resto entre 7: con un lote de 30
-     nombres reales el reparto salia 3/5/2/7/8/1/4 -un color casi sin usar y
-     otro con el triple de la cuenta-, y con la mezcla queda 5/4/4/3/5/5/4.
+     repartidos, y aqui se toma justo el resto entre el tamano de la paleta:
+     con un lote de 30 nombres reales y siete colores el reparto salia
+     3/5/2/7/8/1/4 -un color casi sin usar y otro con el triple de la cuenta-,
+     y con la mezcla queda 5/4/4/3/5/5/4.
 
      `>>> 0` en cada paso mantiene el valor en entero sin signo de 32 bits, y
      Math.imul multiplica como entero de 32 bits: sin eso la multiplicacion
@@ -420,7 +436,131 @@
     // tres son la misma persona y llevan el color fijo de siempre.
     var canon = canonicoLider(nombre);
     if (canon && FIJOS[canon]) return FIJOS[canon];
-    return PALETA_LIDER[huella(k) % PALETA_LIDER.length];
+    return PALETA_PERSONA[huella(k) % PALETA_PERSONA.length];
+  }
+
+
+  /* =======================================================================
+     DIRECTOR — una dimension APARTE de lider / Product Owner.
+
+     Son cinco identidades cerradas y con color propio desde hace tiempo, y
+     no comparten cupo con los POs: registrar a un Director no gasta un color
+     de la paleta de personas, porque no hay tal cupo global. El color va con
+     la persona, no con el puesto de su barra: si un Director pasa de quinto
+     a primero, conserva su color.
+
+     No hay tabla visible de Directores en ninguna pagina: esto es solo el
+     mapa nombre -> color. "(Sin director)" no esta aqui porque no es una
+     persona: lo pinta NEUTRO la regla de cubos sin dato, como siempre.
+
+     Un Director que no este en este mapa cae al reparto normal de personas.
+     ======================================================================= */
+  var COLOR_DIRECTOR_FIJO = {
+    'Yuri Vladimir Lopez Martinez':     '#d97706',   // naranja
+    'Eduardo Andres Ortiz Lopez':       '#ef4444',   // rojo
+    'Elia Veronica Diaz Ampudia':       '#16a34a',   // verde
+    'Christian Israel Garcia Oseguera': '#3b82f6'    // azul
+  };
+
+  var DIRECTORES = {};
+  (function () {
+    for (var n in COLOR_DIRECTOR_FIJO) {
+      if (COLOR_DIRECTOR_FIJO.hasOwnProperty(n)) DIRECTORES[clave(n)] = COLOR_DIRECTOR_FIJO[n];
+    }
+  })();
+
+  // Color de un Director: el del mapa de arriba; si no esta, el que le toque
+  // como persona. Los cubos sin dato, NEUTRO.
+  function colorDirector(nombre) {
+    if (esCuboSinDato(nombre)) return NEUTRO;
+    var fijo = DIRECTORES[clave(nombre)];
+    return fijo || colorLider(nombre);
+  }
+
+
+  /* =======================================================================
+     REPARTO SIN REPETICION DENTRO DE UNA GRAFICA.
+
+     colorLider() reparte por huella del nombre: es estable en todo el
+     tablero pero ciego a quien mas hay en la grafica, asi que dos personas
+     pueden caer en el mismo color aunque sobren colores libres. En una
+     grafica de quince POs eso se lee como "estos dos son lo mismo".
+
+     escalaPersonas(nombres) pinta la LISTA COMPLETA de una vez y por eso si
+     puede evitarlo:
+
+       1) Identidad primero. Cubo sin dato -> NEUTRO. Lider historico (nombre
+          exacto, alias o variante larga) -> su color de siempre. Director,
+          cuando se pide por escalaDirectores() -> su color de siempre. Esos
+          colores NO se negocian y quedan marcados como ocupados.
+       2) Al resto se le da el color de su huella; si ya esta ocupado en ESTA
+          grafica, se avanza por la paleta hasta el primero libre.
+       3) Si hay mas personas que colores, se recicla: se devuelve el de la
+          huella. Con los tamanos de Experiencia no se llega ahi.
+
+     El reparto del paso 2 se hace en orden ALFABETICO de la clave, no en el
+     orden en que llegan las barras: asi un ranking por volumen puede
+     reordenarse entero sin que nadie cambie de color. Misma gente = mismos
+     colores, siempre, y sin estado global que dependa de que pestaña se
+     abrio primero.
+
+     Los dos limites, dichos claro: el color de una persona SIN color fijo
+     puede cambiar si cambia el CONJUNTO de la grafica (un filtro que saca a
+     otra persona libera un color y deshace un desvio), y puede diferir del
+     que le da colorLider() suelto. Las identidades fijas -los siete lideres
+     historicos y los cuatro Directores- no se mueven nunca. */
+  function reservar(k, usados) {
+    var n = PALETA_PERSONA.length;
+    var inicio = huella(k) % n;
+    for (var d = 0; d < n; d++) {
+      var c = PALETA_PERSONA[(inicio + d) % n];
+      if (!usados[c]) { usados[c] = true; return c; }
+    }
+    return PALETA_PERSONA[inicio];
+  }
+
+  // `colorFijoDe` devuelve el color congelado de un nombre, o null si esa
+  // persona no tiene uno. Es lo unico que separa a Director de PO/lider.
+  function repartir(nombres, colorFijoDe) {
+    var lista = nombres || [];
+    var salida = new Array(lista.length);
+    var usados = {};
+    var yaVisto = {};    // clave -> color, para que un nombre repetido en la
+                         // misma lista no gaste dos colores
+    var libres = [];
+
+    lista.forEach(function (n, i) {
+      if (esCuboSinDato(n)) { salida[i] = NEUTRO; return; }
+      var fijo = colorFijoDe(n);
+      if (fijo) { salida[i] = fijo; usados[fijo] = true; yaVisto[clave(n)] = fijo; return; }
+      libres.push(i);
+    });
+
+    libres.slice().sort(function (a, b) {
+      return clave(lista[a]).localeCompare(clave(lista[b]), 'es');
+    }).forEach(function (i) {
+      var k = clave(lista[i]);
+      if (!(k in yaVisto)) yaVisto[k] = reservar(k, usados);
+      salida[i] = yaVisto[k];
+    });
+
+    return salida;
+  }
+
+  function fijoDeLider(nombre) {
+    var canon = canonicoLider(nombre);
+    return (canon && FIJOS[canon]) || null;
+  }
+
+  // Colores paralelos a `nombres` para una grafica de personas (lideres,
+  // Product Owners) sin repetir mientras queden colores.
+  function escalaPersonas(nombres) { return repartir(nombres, fijoDeLider); }
+
+  // Igual, pero la identidad fija que manda es la de Director.
+  function escalaDirectores(nombres) {
+    return repartir(nombres, function (n) {
+      return DIRECTORES[clave(n)] || fijoDeLider(n);
+    });
   }
 
   // Orden canonico ya dado de alta, para pintar una leyenda.
@@ -428,6 +568,7 @@
 
   raiz.Paleta = {
     PALETA_CATEGORICA: PALETA_CATEGORICA,
+    PALETA_PERSONA: PALETA_PERSONA,
     PALETA_LIDER: PALETA_LIDER,
     NEUTRO: NEUTRO,
     AZUL_SERIE: AZUL_SERIE,
@@ -440,6 +581,9 @@
     ordenarLideres: ordenarLideres,
     registrarLideres: registrarLideres,
     colorLider: colorLider,
+    colorDirector: colorDirector,
+    escalaPersonas: escalaPersonas,
+    escalaDirectores: escalaDirectores,
     canonicoLider: canonicoLider,
     lideres: lideres
   };

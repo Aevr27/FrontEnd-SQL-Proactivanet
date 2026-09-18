@@ -1750,6 +1750,16 @@ function renderTreemap(containerId,items,opts){
   const total=data.reduce((s,it)=>s+it.value,0);
   const w=el.clientWidth||300, h=el.clientHeight||300;
   const rects=squarify(data,0,0,w,h);
+  /* Color de identidad, resuelto para TODOS los recuadros de golpe: es lo
+     que deja esquivar que dos personas distintas caigan en el mismo tono
+     mientras queden colores libres. Se indexa por etiqueta -no por posicion-
+     porque el treemap ordena por area y ese orden no debe decidir color. */
+  const tonoDe={};
+  if(opts.lider){
+    const nombres=data.map(it=>it.label);
+    const escala=opts.director ? Paleta.escalaDirectores(nombres) : Paleta.escalaPersonas(nombres);
+    nombres.forEach((n,i)=>{ tonoDe[n]=escala[i]; });
+  }
   rects.forEach((r,i)=>{
     const div=document.createElement('div');
     div.className='treemap-item';
@@ -1764,7 +1774,7 @@ function renderTreemap(containerId,items,opts){
        treemap la ordene por area. Sin esa marca -el treemap de agrupacion,
        cuyos recuadros son Problem / SorIA / Mejora...- sigue el reparto por
        posicion de la paleta categorica, que ahi no representa a nadie. */
-    const tono=opts.lider ? Paleta.colorLider(r.label) : TM_COLORES[i%TM_COLORES.length];
+    const tono=opts.lider ? tonoDe[r.label] : TM_COLORES[i%TM_COLORES.length];
     div.style.background=tono;
     // .treemap-item pinta el texto en blanco; sobre los verdes claros de la
     // escala hay que devolverlo a carbon o la etiqueta desaparece.
@@ -1918,7 +1928,8 @@ function renderPanelGraf(tab, cats){
   registrarDimension(Object.keys(conteoDim));
   renderTreemap('chart'+cap1(tab)+'Dim',
     Object.entries(conteoDim).map(([label,value])=>({label,value})),
-    {selected:est.dimVal, lider:true, onClick:val=>toggleFiltroGraf(tab,'dimVal',val)});
+    {selected:est.dimVal, lider:true, director:est.dim==='director',
+     onClick:val=>toggleFiltroGraf(tab,'dimVal',val)});
 
   const rowsAgrup=aplicarFiltroGraf(baseRows, est, 'agrup');
   const conteoAgrup={};
@@ -1947,10 +1958,15 @@ let chartBarDir=null;
    antiguedad y en sus swatches. Si ahi es azul, aqui tiene que ser azul.
 
    Asi que las tres piden el color por NOMBRE -el color de siempre de esa
-   persona, congelado en paleta.js- a la tabla compartida
-   (Paleta.colorLider, via `paleta: { lider: true }`). El registro local
-   desaparece a proposito: un solo mapa nombre -> color para todo el tablero,
-   sin copias que se contradigan.
+   persona, congelado en paleta.js- a la tabla compartida: la de Director por
+   `paleta: { directores: true }` y las dos de PO por Paleta.escalaPersonas().
+   El registro local desaparece a proposito: un solo mapa nombre -> color para
+   todo el tablero, sin copias que se contradigan.
+
+   Se piden por LISTA y no nombre a nombre para que dentro de una misma
+   grafica no se repita color mientras queden libres; las dos dimensiones van
+   por caminos distintos porque Director y Product Owner son dimensiones
+   distintas y no comparten cupo de colores.
 
    El ORDEN de las barras no se toca: los tres rankings siguen de mayor a
    menor volumen. El color va con la persona, el puesto con la cifra: una
@@ -1991,13 +2007,22 @@ function renderBarrasPO(canvasId, filas, valorDe){
      recortado del eje: dos POs distintos pueden compartir los primeros 15
      caracteres-, asi que va por `colores`, ya resuelto contra la tabla
      compartida. Las dos graficas de PO -"Volumen" y "Con Iniciativa"- salen
-     por aqui, de modo que el mismo PO sale del mismo color en las dos. */
+     por aqui con las MISMAS filas, de modo que el mismo PO sale del mismo
+     color en las dos.
+
+     Se piden los quince de golpe (Paleta.escalaPersonas) y no uno por uno:
+     con quince personas y una paleta pequena dos POs distintos acababan del
+     mismo color. Pidiendo la lista completa, quien tiene color historico lo
+     conserva y al resto se le esquiva la colision mientras queden colores.
+     El reparto no depende del orden de las barras, asi que el ranking por
+     volumen puede reordenarse sin recolorear a nadie. */
   registrarDimension(datos.map(r => r.po));
+  const coloresPO = Paleta.escalaPersonas(datos.map(r => r.po));
   chartsPO[canvasId] = new DashboardBarChart({
     canvas: el,
     etiquetas: datos.map(r => cortaPO(r.po)),
     datos: datos.map(valorDe),
-    colores: datos.map(r => Paleta.colorLider(r.po)),
+    colores: coloresPO,
     formato: FMT,
     opciones: {
       maintainAspectRatio: false,
@@ -2048,15 +2073,17 @@ function renderResumen(){
      grosor, el radio y la cifra dentro salen de DashboardBarChart, que ademas
      mide a lo ancho cuando indexAxis es 'y'. Lo propio es la orientacion, que
      el nombre del director va entero en el eje y que el color es IDENTIDAD:
-     `paleta: { lider: true }` lo resuelve por nombre contra la tabla
-     compartida, el mismo color que esa persona lleva en el Backlog. Las
-     barras siguen ordenadas por volumen (mayor -> menor). */
+     `paleta: { directores: true }` lo resuelve por NOMBRE contra el mapa de
+     Directores de la tabla compartida. Director es una dimension propia: sus
+     colores no salen del cupo de Product Owners ni se los quitan. Las barras
+     siguen ordenadas por volumen (mayor -> menor) y el color no se mueve con
+     el puesto. */
   registrarDimension(dirRows.map(r=>r.dir));
   chartBarDir=new DashboardBarChart({
     canvas: bdCtx,
     etiquetas: dirRows.map(r=>r.dir),
     datos: dirRows.map(r=>r.vol),
-    paleta: { lider: true },
+    paleta: { directores: true },
     formato: FMT,
     opciones:{indexAxis:'y',plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},
