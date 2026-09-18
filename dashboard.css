@@ -148,7 +148,11 @@
       linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%);
     background-attachment: fixed;
     color: var(--ink);
-    padding: 20px 18px 8px;
+    /* El relleno izquierdo es el hueco que ocupa la barra fija. Lo demas son
+       los mismos 20/18/8 de siempre, asi que la caja centrada de dentro se
+       ve igual que antes de que existiera la barra. */
+    padding: 20px 18px 8px calc(var(--lateral-ancho) + var(--lateral-hueco));
+    transition: padding-left .18s ease;
     line-height: 1.45;
     font-size: 14px;
     -webkit-font-smoothing: antialiased;
@@ -175,28 +179,141 @@
   }
   ::-webkit-scrollbar-thumb:hover { background: #aebba4; background-clip: content-box; }
 
-  /* ---- Pestañas principales ---- */
-  .maintabs {
-    display: flex; gap: 4px; margin-bottom: 16px;
-    background: rgba(227, 231, 222, .85);
-    padding: 5px; border-radius: 13px;
+  /* ====================================================================
+     BARRA LATERAL — navegacion entre modulos del tablero.
+
+     Es infraestructura del ARMAZON, no de un modulo: ningun tablero
+     embebido (backlog/, experiencia/, qa/) la conoce ni la repite. Por eso
+     vive aqui, en la hoja global, y no en una hoja propia.
+
+     Sustituye a la fila .maintabs/.mtab de pestañas de arriba. Los
+     contenedores .maintab-content NO cambiaron: siguen siendo los mismos y
+     los sigue encendiendo activarTab().
+
+     COLOCACION. La barra va pegada al BORDE IZQUIERDO de la ventana, no
+     dentro de la caja centrada: es position:fixed y ocupa el alto completo.
+     El contenido sigue centrado exactamente como antes de que existiera la
+     barra -.wrap conserva su max-width y su margin auto-; lo unico que
+     cambia es que el <body> le reserva a la izquierda el ancho de la barra,
+     asi que el centrado ocurre dentro del espacio que queda.
+
+     El ancho es UNA variable en <html>, y plegar la barra es cambiar ese
+     numero: la barra se estrecha y el hueco reservado se estrecha con ella,
+     sin que nada mas se entere. Por eso la clase .lateral-cerrada va en
+     <html> y no en .wrap: el relleno del <body> tambien depende de ella.
+     ==================================================================== */
+  :root {
+    --lateral-ancho: 272px;
+    /* Aire entre la barra y la caja de contenido. */
+    --lateral-hueco: 22px;
+  }
+  html.lateral-cerrada { --lateral-ancho: 76px; }
+
+  .lateral {
+    position: fixed; left: 0; top: 0; bottom: 0;
+    width: var(--lateral-ancho);
+    z-index: 50;
+    display: flex; flex-direction: column; gap: 12px;
+    padding: 14px 12px;
+    background: rgba(227, 231, 222, .92);
     border: 1px solid rgba(255, 255, 255, .7);
-    box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05);
+    border-left: 0;
+    /* Solo las esquinas de la derecha: las de la izquierda quedan fuera de
+       la pantalla y redondearlas dejaria dos mordidas en el borde. */
+    border-radius: 0 16px 16px 0;
+    box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05), 6px 0 24px -18px rgba(25, 25, 25, .45);
     -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+    overflow: hidden;
+    transition: width .18s ease;
   }
-  .mtab {
-    flex: 1; padding: 12px 16px; border: none; background: transparent; cursor: pointer;
-    font: inherit; font-size: 14px; font-weight: 700; color: var(--muted);
+
+  .lateral-cabecera {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 2px 12px 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, .8);
+  }
+  .lateral-marca {
+    display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1;
+  }
+  .lateral-sigla {
+    flex: none;
+    width: 32px; height: 32px; border-radius: var(--radius-sm);
+    display: grid; place-items: center;
+    background: var(--grad-btn); color: var(--btn-ink);
+    font-weight: 800; font-size: 17px; line-height: 1;
+    box-shadow: 0 1px 2px rgba(25, 25, 25, .08);
+  }
+  .lateral-nombre {
+    font-weight: 800; font-size: 13.5px; letter-spacing: .7px;
+    text-transform: uppercase; color: var(--accent-ink);
+    white-space: nowrap; overflow: hidden;
+  }
+
+  .lateral-plegar {
+    flex: none;
+    width: 32px; height: 32px; padding: 0;
+    display: grid; place-items: center;
+    border: 1px solid transparent; border-radius: var(--radius-xs);
+    background: transparent; color: var(--muted); cursor: pointer;
+    transition: background .16s ease, color .16s ease;
+  }
+  .lateral-plegar:hover { background: rgba(255, 255, 255, .7); color: var(--ink); }
+  .lateral-plegar-ico {
+    width: 20px; height: 20px;
+    fill: none; stroke: currentColor; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round;
+    transition: transform .18s ease;
+  }
+
+  .lateral-lista { list-style: none; display: flex; flex-direction: column; gap: 4px; }
+  /* La lista es lo unico que se desplaza cuando entren mas modulos. */
+  .lateral nav { min-height: 0; overflow-y: auto; overflow-x: hidden; }
+
+  .mnav {
+    width: 100%;
+    display: flex; align-items: center; gap: 13px;
+    padding: 13px 14px;
+    border: none; background: transparent; cursor: pointer; text-align: left;
+    font: inherit; font-size: 14.5px; font-weight: 700; color: var(--muted);
     letter-spacing: .1px;
-    border-radius: var(--radius-sm); transition: background .16s ease, color .16s ease, box-shadow .16s ease;
+    border-radius: var(--radius-sm);
+    transition: background .16s ease, color .16s ease, box-shadow .16s ease;
   }
-  .mtab.active {
+  .mnav-ico {
+    flex: none; width: 22px; height: 22px;
+    fill: none; stroke: currentColor; stroke-width: 1.8;
+    stroke-linecap: round; stroke-linejoin: round;
+  }
+  .mnav-txt { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mnav:hover:not(.active) { color: var(--ink); background: rgba(255, 255, 255, .55); }
+  /* Mismo lenguaje de "seleccionado" que tenia la pestaña activa: degradado
+     de marca y tinta carbon. No hay dos estados activos distintos en el
+     tablero. */
+  .mnav.active {
     background: var(--grad-btn); color: var(--btn-ink);
     box-shadow: 0 1px 2px rgba(25, 25, 25, .08), 0 4px 10px -4px rgba(71, 139, 60, .28);
   }
-  .mtab:hover:not(.active) { color: var(--ink); background: rgba(255, 255, 255, .55); }
+
+  /* ---- Plegada: solo iconos ----
+     El texto se oculta con display:none, no con opacidad: asi tampoco lo lee
+     un lector de pantalla a medias. El nombre de cada entrada sigue llegando
+     por el title del <button>, que es el mismo texto. */
+  .lateral-cerrada .lateral-nombre,
+  .lateral-cerrada .mnav-txt { display: none; }
+  .lateral-cerrada .lateral-cabecera { flex-direction: column; gap: 6px; padding: 4px 0 8px; }
+  .lateral-cerrada .lateral-marca { flex: none; justify-content: center; }
+  .lateral-cerrada .mnav { justify-content: center; padding: 14px 0; }
+  .lateral-cerrada .lateral-plegar-ico { transform: rotate(180deg); }
+
+  /* ---- Contenido ---- */
+  .lateral-contenido { min-width: 0; }
+
   .maintab-content { display: none; }
-  .maintab-content.active { display: block; animation: aparecer .22s ease both; }
+  /* Sin `animation`: la declaracion decia `aparecer .22s`, pero @keyframes
+     aparecer no existe -ni aqui, ni en assets/css/, ni en las hojas de los
+     modulos-, asi que nunca se animo nada. Se retira la referencia muerta en
+     vez de inventar la animacion. */
+  .maintab-content.active { display: block; }
 
   /* Tablero_Experiencia.html va dentro de un iframe: es un documento
      independiente y solo necesita ocupar el alto util de la pestaña. */
@@ -251,8 +368,9 @@
      Este selector solo reserva el alto para que la cabecera no salte mientras
      el nodo esta vacio; el aspecto lo pone el componente compartido. */
   header.top .estado { min-height: 16px; }
-  header.top #estado-carga:empty,
-  header.top #estado-carga-bl:empty { display: none; }
+  /* El hermano #estado-carga-bl:empty vive ahora en backlog/backlog.css, con
+     el resto de lo privado del Backlog. */
+  header.top #estado-carga:empty { display: none; }
   /* En fila, no en columna: apilada, un bloque con dos hijos -el chip de fecha
      y un boton, como en QA- crecia mas que el titulo y era ese bloque, y no la
      cabecera, el que decidia el alto de la barra. En fila ninguna pestaña
@@ -579,7 +697,8 @@
     box-shadow: 0 2px 8px -2px rgba(71, 139, 60, .55);
   }
   .panel { display: none; }
-  .panel.active { display: block; animation: aparecer .2s ease both; }
+  /* Misma referencia muerta a `aparecer` que en .maintab-content.active. */
+  .panel.active { display: block; }
   .scroll-x { overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
 
   /* Linea que dice que filtro esta aplicado sobre cada tabla. */
@@ -687,20 +806,6 @@
     background: var(--bg-2); border: 1px dashed var(--g-200);
     border-radius: var(--radius);
   }
-  .swatch {
-    display: inline-block; width: 10px; height: 10px; border-radius: 3px;
-    margin-right: 6px; vertical-align: middle;
-  }
-
-  /* ---- Avisos ---- */
-  .aviso {
-    background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
-    border-left: 4px solid var(--ambr);
-    border-radius: var(--radius); padding: 11px 15px;
-    font-size: 12.5px; margin-bottom: 14px;
-    box-shadow: var(--shadow);
-  }
-
   footer {
     text-align: center; color: var(--muted); font-size: 11px;
     margin-top: 22px; padding: 16px 12px;
@@ -708,42 +813,10 @@
   }
   footer .badge { margin: 0 2px; }
 
-  /* ---- Propios del tablero de backlog ---- */
-  /* La franja va de color plano, como la de .aviso de aqui abajo. Antes era
-     border-image con el degradado de la cabecera, que ademas de pintar los
-     cuatro lados ANULA el render de border-radius: esta caja era la unica de
-     esquinas cuadradas del tablero. Mismo motivo -y mismo arreglo- por el que
-     las tarjetas KPI dejaron de usarlo.
-
-     El color es --accent, neutro a proposito: esto no es un semaforo. El
-     sentido de la variacion lo dice .delta con su flecha, y la caja sale
-     igual suba o baje, asi que teñir la franja de verde o rojo afirmaria algo
-     que el dato no siempre respalda. */
-  .tendencia-linea {
-    font-size: 13.5px; margin: 0 0 16px;
-    background: var(--card); border: 1px solid var(--line-soft);
-    border-left: 4px solid var(--accent);
-    border-radius: var(--radius); box-shadow: var(--shadow);
-    padding: 12px 16px; color: var(--ink-2);
-  }
-  .tendencia-linea:empty { display: none; }
-  .tendencia-linea .delta { font-weight: 700; }
-  .grupo-lider {
-    margin: 20px 0 8px; font-size: 14px; font-weight: 700;
-    display: flex; align-items: center; gap: 2px; flex-wrap: wrap;
-  }
-  .grupo-lider .conteo {
-    font-weight: 600; font-size: 10.5px; color: var(--muted); margin-left: 8px;
-    text-transform: uppercase; letter-spacing: .4px;
-  }
-  /* Señal visual de que la celda tiene tooltip; si no, nadie descubre que
-     pasando el raton aparece la descripcion. */
-  .con-hint { cursor: help; border-bottom: 1px dotted var(--muted-2); }
-  /* Codigo de ticket que si tiene GUID en el mapeo: abre el formulario de
-     edicion en Proactivanet. Los que no lo tienen se quedan como texto. */
-  .enlace-ticket { color: var(--accent); text-decoration: none; font-weight: 600; }
-  .enlace-ticket:hover { text-decoration: underline; }
-  .enlace-ticket::after { content: '\2197'; font-size: 0.72em; margin-left: 3px; opacity: 0.55; }
+  /* Lo propio del tablero de backlog -.aviso, .swatch, .tendencia-linea,
+     .grupo-lider, .con-hint, .enlace-ticket- ya no esta aqui: vive en
+     backlog/backlog.css desde que el Backlog salio a su propio modulo.
+     Ninguna otra vista del tablero usaba esas clases. */
   /* ---- Responsivo ---- */
   @media (max-width: 1100px) {
     .grid2 { grid-template-columns: 1fr 1fr; }
@@ -751,9 +824,30 @@
   }
   @media (max-width: 900px) {
     .grid2, .grid3, .grid2x2 { grid-template-columns: 1fr; }
+
+    /* Pantalla estrecha: la barra nace plegada (lo pone dashboard.js) y al
+       desplegarla se monta ENCIMA del contenido en vez de estrujarlo. Es la
+       misma barra y la misma lista: no hay una segunda navegacion para
+       movil.
+
+       El truco es que el <body> reserva SIEMPRE el carril de iconos, no el
+       ancho real de la barra: la barra crece por encima y el contenido no se
+       mueve ni salta al abrirla o cerrarla. */
+    body { padding-left: calc(68px + 12px); }
+    /* Desplegada aqui no es la medida de escritorio: seria casi la pantalla
+       entera. */
+    html:not(.lateral-cerrada) { --lateral-ancho: 250px; }
+    html.lateral-cerrada { --lateral-ancho: 68px; }
+    /* Abierta tapa contenido, asi que deja de ser translucida. */
+    html:not(.lateral-cerrada) .lateral {
+      background: rgba(240, 244, 236, .98);
+      box-shadow: var(--shadow-md);
+    }
   }
   @media (max-width: 700px) {
-    body { padding: 12px 12px 4px; }
+    /* El cuarto valor es el carril de la barra: un `padding` de tres valores
+       lo pondria a 12px y la barra se comeria el contenido. */
+    body { padding: 12px 12px 4px calc(68px + 10px); }
     /* Mismo criterio que en ancho completo, con las medidas de aqui: 17px de
        titulo y 36px de padding dan 84px de alto natural. Sin recalcularlo, los
        100px de arriba dejarian una franja verde vacia en pantalla chica. */
@@ -763,7 +857,6 @@
        colgada a la derecha. */
     header.top .acciones-top { justify-content: flex-start; }
     header.top .estado { text-align: left; }
-    .mtab { padding: 10px 8px; font-size: 12.5px; }
     .filtros { padding: 14px 14px; grid-template-columns: 1fr; }
     .filtros label { min-height: 0; }
     .filtros .rango-rapido { height: auto; }
@@ -783,7 +876,9 @@
 
   @media print {
     body { background: #fff; padding: 0; }
-    .maintabs, .filtros, .btn { display: none !important; }
+    .lateral, .filtros, .btn { display: none !important; }
+    /* Impresa no hay barra, asi que tampoco hay carril que reservarle. */
+    body { padding-left: 0; }
     .card, .kpi, .filtros { box-shadow: none; border: 1px solid var(--line); }
     header.top { background: var(--grad-header) !important; color: var(--ink) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   }

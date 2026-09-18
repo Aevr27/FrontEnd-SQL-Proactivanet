@@ -10,6 +10,9 @@
      copia y la misma version que ya usan Experiencia, Orquestacion y QA
      (assets/vendor/chart.umd.min.js es el dist 4.4.4 bajado de jsdelivr). -->
 <script src="assets/vendor/chart.umd.min.js"></script>
+<!-- Escape de HTML compartido. Va ANTES de los modulos: todo lo que sale de
+     SQL se pega con innerHTML y tiene que entrar como texto, no como marcado. -->
+<script src="assets/js/escape.js"></script>
 <!-- Paleta categorica compartida. Va antes de dashboard.js y antes de los
      modulos embebidos (Experiencia, QA), que pierden sus <script> al montarse
      aqui y usan esta copia. -->
@@ -38,19 +41,102 @@
 <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
-<div class="wrap">
+<div class="wrap" id="shell">
 
-  <nav class="maintabs">
-    <button class="mtab active" data-tab="sla" type="button">SLA y productividad</button>
-    <button class="mtab" data-tab="backlog" type="button">Backlog</button>
-    <button class="mtab" data-tab="experiencia" type="button">Experiencia</button>
-    <button class="mtab" data-tab="qa" type="button">QA</button>
-    <button class="mtab" data-tab="call" type="button">Call Center</button>
-    <button class="mtab" data-tab="tablero" type="button">Tablero</button>
-  </nav>
+  <!-- ================================================== Barra lateral ====
+       Navegacion entre SECCIONES del tablero, no un tablist de ARIA.
+       Cada entrada es un tablero independiente -su carpeta, sus handlers, su
+       propia pagina suelta- y cambia el hash de la URL, asi que se describe
+       como navegacion: <nav> con nombre, y aria-current="page" sobre la que
+       se esta viendo (lo pone activarTab, en dashboard.js, junto con la clase
+       .active).
+
+       No se usa role="tablist"/"tab"/"tabpanel" a proposito: ese patron obliga
+       a tabindex movil y a flechas/Home/End para ser correcto, y aqui no
+       aportaria nada sobre lo que ya hace un <button> nativo. El
+       comportamiento de teclado no cambia: Tab para recorrer, Enter o Espacio
+       para entrar.
+
+       Agregar un modulo son TRES cosas y ninguna es rediseñar la barra: un
+       <li> aqui con su data-tab, su entrada en MODULOS (dashboard.js) y su
+       contenedor #tab-<nombre>. La lista crece en vertical sola. -->
+  <aside class="lateral" id="lateral">
+    <div class="lateral-cabecera">
+      <span class="lateral-marca">
+        <span class="lateral-sigla" aria-hidden="true">P</span>
+        <span class="lateral-nombre">Proactivanet</span>
+      </span>
+      <!-- Un solo control para plegar y desplegar. aria-expanded dice el
+           estado real; el title/aria-label cambian con el, en dashboard.js. -->
+      <button class="lateral-plegar" id="lateral-plegar" type="button"
+              aria-controls="lateral" aria-expanded="true"
+              aria-label="Contraer el menu" title="Contraer el menu">
+        <svg class="lateral-plegar-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M14.5 6.5 9 12l5.5 5.5"/>
+        </svg>
+      </button>
+    </div>
+
+    <nav aria-label="Secciones del tablero">
+      <ul class="lateral-lista">
+        <li>
+          <button class="mnav active" id="mtab-sla" data-tab="sla" type="button" aria-current="page" title="SLA y productividad">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 19h16M7 19V10M12 19V5M17 19v-6"/>
+            </svg>
+            <span class="mnav-txt">SLA y productividad</span>
+          </button>
+        </li>
+        <li>
+          <button class="mnav" id="mtab-backlog" data-tab="backlog" type="button" title="Backlog">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>
+            </svg>
+            <span class="mnav-txt">Backlog</span>
+          </button>
+        </li>
+        <li>
+          <button class="mnav" id="mtab-experiencia" data-tab="experiencia" type="button" title="Experiencia">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/>
+            </svg>
+            <span class="mnav-txt">Experiencia</span>
+          </button>
+        </li>
+        <li>
+          <button class="mnav" id="mtab-qa" data-tab="qa" type="button" title="QA">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M9.5 3h5M10 3v6.2L5.3 17.6A2 2 0 0 0 7 20.6h10a2 2 0 0 0 1.7-3L14 9.2V3"/>
+            </svg>
+            <span class="mnav-txt">QA</span>
+          </button>
+        </li>
+        <li>
+          <button class="mnav" id="mtab-call" data-tab="call" type="button" title="Call Center">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4.5 5.5 8 4l2.2 4-2 1.7a12 12 0 0 0 6.1 6.1l1.7-2 4 2.2-1.5 3.5a2 2 0 0 1-2.1 1.1C10.4 19.7 4.3 13.6 3.4 7.6a2 2 0 0 1 1.1-2.1z"/>
+            </svg>
+            <span class="mnav-txt">Call Center</span>
+          </button>
+        </li>
+        <li>
+          <button class="mnav" id="mtab-tablero" data-tab="tablero" type="button" title="Tablero">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3.5 4.5h17v11h-17z"/><path d="M8 20h8M12 15.5V20"/>
+            </svg>
+            <span class="mnav-txt">Tablero</span>
+          </button>
+        </li>
+      </ul>
+    </nav>
+  </aside>
+
+  <!-- Columna de contenido. Los contenedores #tab-* no cambiaron de id ni de
+       clase: siguen siendo los mismos que enciende activarTab(). -->
+  <div class="lateral-contenido">
 
   <!-- ==================================================== Tablero de SLA -->
-  <div id="tab-sla" class="maintab-content active">
+  <div id="tab-sla" class="maintab-content active" role="region" aria-labelledby="mtab-sla">
     <header class="top">
       <div>
         <h1>Tickets Proactivanet — SLA y productividad</h1>
@@ -99,7 +185,14 @@
         </div>
         <span class="slotsum" id="slot-sum"></span>
       </div>
-      <div class="campo">
+      <!-- Grupos es de SLA. En el Call Center no tenia a que aplicarse: una
+           llamada no tiene grupo resolutor (llamadas.ashx no lee el
+           parametro) y el unico bloque que lo miraba -el cruce de carga
+           combinada- lo hacia contra el grupo del TECNICO, no del ticket, asi
+           que el mismo filtro significaba una cosa en cada pestana. El campo
+           entero se retira mientras la barra esta en el Call Center, igual
+           que el SLOT (adoptarControlesSla, dashboard.js). -->
+      <div class="campo campo-grupos">
         <label for="f-grupos">Grupos</label>
         <select id="f-grupos" multiple></select>
       </div>
@@ -183,120 +276,14 @@
     </footer>
   </div>
 
-  <!-- ================================================ Tablero de Backlog -->
-  <div id="tab-backlog" class="maintab-content">
-    <header class="top">
-      <div>
-        <h1>Tickets Proactivanet — Backlog</h1>
-      </div>
-      <div class="acciones-top">
-        <div class="estado" id="estado-carga-bl"></div>
-      </div>
-    </header>
-
-    <section class="filtros">
-      <div class="campo">
-        <label for="f-corte-bl">Fecha de corte</label>
-        <!-- Mismo control de calendario que Fecha inicio / Fecha fin del
-             tablero de SLA. Sigue siendo UNA sola fecha; los cortes que
-             existen de verdad acotan el min/max desde backlog_catalogos. -->
-        <input type="date" id="f-corte-bl">
-      </div>
-      <div class="campo">
-        <label for="f-dias-bl">Ventana de tendencia</label>
-        <select id="f-dias-bl">
-          <option value="15">Ultimos 15 dias</option>
-          <option value="30" selected>Ultimos 30 dias</option>
-          <option value="90">Ultimos 90 dias</option>
-          <option value="365">Ultimo año</option>
-        </select>
-      </div>
-      <div class="campo">
-        <label for="f-granularidad-bl">Agrupar tendencia por</label>
-        <select id="f-granularidad-bl">
-          <option value="Dia" selected>Dia</option>
-          <option value="Semana">Semana</option>
-          <option value="Mes">Mes</option>
-        </select>
-      </div>
-      <div class="campo">
-        <label for="f-c1-bl">Servicio / C1 (elige varios)</label>
-        <select id="f-c1-bl" multiple></select>
-      </div>
-      <div class="campo">
-        <label for="f-grupos-bl">Grupos (elige varios)</label>
-        <select id="f-grupos-bl" multiple></select>
-      </div>
-      <div class="campo">
-        <label for="f-lideres-bl">Lideres (elige varios)</label>
-        <select id="f-lideres-bl" multiple></select>
-      </div>
-      <div class="campo acciones">
-        <button class="btn gris" id="btn-limpiar-bl" type="button">Limpiar</button>
-      </div>
-    </section>
-
-    <div id="aviso-historico-bl"></div>
-    <p class="tendencia-linea" id="tendencia-linea-bl"></p>
-
-    <section class="kpis" id="kpis-bl"></section>
-
-    <section class="grid2">
-      <div class="card">
-        <h3>Tendencia del backlog<span class="hint" id="hint-tendencia-bl"></span></h3>
-        <div class="lienzo alta"><canvas id="chart-tendencia-bl"></canvas></div>
-      </div>
-      <div class="card">
-        <h3>Tendencia por lider<span class="hint" id="hint-tendencia-lider-bl">avance de cada torre</span></h3>
-        <div class="lienzo alta"><canvas id="chart-tendencia-lider-bl"></canvas></div>
-      </div>
-    </section>
-
-    <section class="grid3">
-      <div class="card">
-        <h3>Backlog por lider</h3>
-        <div class="lienzo"><canvas id="chart-lider-bl"></canvas></div>
-      </div>
-      <div class="card">
-        <h3>Por prioridad</h3>
-        <div class="lienzo"><canvas id="chart-prioridad-bl"></canvas></div>
-      </div>
-      <div class="card">
-        <h3>Por antiguedad</h3>
-        <div class="lienzo"><canvas id="chart-aging-bl"></canvas></div>
-      </div>
-    </section>
-
-    <section class="card">
-      <div class="tabs">
-        <div class="tab active" data-panel="p-lideres-bl">Lideres (drill-down)</div>
-        <div class="tab" data-panel="p-aging-bl">Resumen por antiguedad</div>
-        <div class="tab" data-panel="p-antiguos-bl">Tickets mas antiguos</div>
-      </div>
-
-      <div class="panel active" id="p-lideres-bl">
-        <div class="nota">Clic en la flecha para desplegar los grupos del lider; clic en el nombre
-          para filtrar todo el tablero.</div>
-        <div class="cap" id="cap-lideres-bl"></div>
-        <div class="scroll-x" id="tabla-lideres-bl"></div>
-      </div>
-
-      <div class="panel" id="p-aging-bl">
-        <div class="cap" id="cap-aging-bl"></div>
-        <div class="scroll-x" id="tabla-aging-bl"></div>
-      </div>
-
-      <div class="panel" id="p-antiguos-bl">
-        <div class="cap" id="cap-antiguos-bl"></div>
-        <div class="scroll-x" id="tabla-antiguos-bl"></div>
-      </div>
-    </section>
-
-    <footer>
-      Fuente: cortes diarios guardados en <b>dbo.CorreoBacklogSnapshot</b> ·
-      El color de cada lider es el mismo que usa el correo diario.
-    </footer>
-  </div>
+  <!-- ================================================ Tablero de Backlog
+       Contenedor vacio a proposito, igual que el de Experiencia y el de QA.
+       TableroBacklog (dashboard.js) trae backlog/backlog.html, backlog.css y
+       backlog.js la primera vez que se abre la pestaña. El marcado del
+       Backlog -filtros, KPIs, las cinco graficas y los tres paneles de
+       tablas- vive ahora SOLO en backlog/backlog.html, con sus mismos ids, y
+       su pagina suelta funciona igual. -->
+  <div id="tab-backlog" class="maintab-content" role="region" aria-labelledby="mtab-backlog"></div>
 
   <!-- =============================================== Tablero (externo) -->
   <!-- Experiencia al Usuario, Observabilidad y Orquestacion ya no viven aqui:
@@ -310,14 +297,14 @@
        experiencia/experiencia.html, experiencia.css y experiencia.js la
        primera vez que se abre la pestaña. El modulo sigue viviendo en
        experiencia/ y su pagina suelta sigue funcionando igual. -->
-  <div id="tab-experiencia" class="maintab-content"></div>
+  <div id="tab-experiencia" class="maintab-content" role="region" aria-labelledby="mtab-experiencia"></div>
 
   <!-- ======================================================= Tablero de QA
        Contenedor vacio a proposito, igual que Experiencia. TableroQa
        (dashboard.js) trae qa/qa.html, qa.css y qa.js la primera vez que se
        abre la pestaña: dashboard.html no pide nada a qa.ashx al cargar. El
        modulo vive en qa/ y su pagina suelta sigue funcionando igual. -->
-  <div id="tab-qa" class="maintab-content"></div>
+  <div id="tab-qa" class="maintab-content" role="region" aria-labelledby="mtab-qa"></div>
 
   <!-- ================================================ Call Center de Servicios TI
        Pestana propia. El bloque es el MISMO de siempre -mismos ids, mismas
@@ -325,7 +312,7 @@
        llamadas.ashx viaja en su misma peticion. Lo unico que cambia es donde
        se ve. La barra de filtros y el sello de estado no se duplican: son los
        nodos de SLA, que dashboard.js mueve a la pestana que este visible. -->
-  <div id="tab-call" class="maintab-content">
+  <div id="tab-call" class="maintab-content" role="region" aria-labelledby="mtab-call">
     <header class="top">
       <div>
         <h1>Tickets Proactivanet — Call Center</h1>
@@ -388,8 +375,8 @@
       <h3>Carga combinada: tickets y llamadas por tecnico<span class="hint" id="hint-carga"></span></h3>
       <div class="nota">Solo los tecnicos con extension telefonica registrada en el catalogo.
         Los tickets se cuentan por fecha de firma de solucion y las llamadas solo si fueron
-        contestadas. Los filtros de <b>Grupos</b> y <b>Tecnicos</b> si aplican aqui; Grupos, contra
-        el grupo donde el tecnico tiene mas tickets, no contra el grupo del ticket.</div>
+        contestadas. El filtro de <b>Tecnicos</b> si aplica aqui. Los grupos son fijos: los
+        que atienden telefono, y van indicados junto al titulo.</div>
       <div id="estado-carga-combinada"></div>
     </section>
 
@@ -412,13 +399,15 @@
     </section>
   </div>
 
-  <div id="tab-tablero" class="maintab-content">
+  <div id="tab-tablero" class="maintab-content" role="region" aria-labelledby="mtab-tablero">
     <iframe id="iframe-tablero"
             class="tablero-externo"
             data-src="assets/Tablero_Experiencia.html"
             title="Tablero"
             loading="lazy"></iframe>
   </div>
+
+  </div><!-- /.lateral-contenido -->
 </div>
 
 

@@ -23,10 +23,11 @@
    1. Preambulo compartido
    ======================================================================= */
 
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-function escapeAttr(s) { return escapeHtml(s); }
+/* La implementacion vive en assets/js/escape.js, una sola para todo el
+   tablero. Aqui quedan los dos nombres locales porque los usan decenas de
+   plantillas de este archivo; lo que ya no se repite es la logica. */
+function escapeHtml(s) { return Escape.html(s); }
+function escapeAttr(s) { return Escape.attr(s); }
 
 const FMT = n => (n === null || n === undefined || n === '') ? '' : Number(n).toLocaleString('es-MX');
 const PCT = (parte, total) => total > 0 ? Math.round(100 * parte / total) + '%' : '—';
@@ -89,17 +90,11 @@ const COLOR_PRIORIDAD = {
   'Alta': AMBAR_SEM, 'Media': VERDE.marca, 'Baja': VERDE.lima
 };
 
-/* Semaforo de severidad ORIGINAL -rojo / naranja / oro / verde-, el juego con
-   el que nacio el tablero (ver e58add5) y el unico que lee de un vistazo sin
-   el rotulo del eje: Critica roja, Alta naranja, Media oro, Baja verde.
-   Vive aparte de COLOR_PRIORIDAD a proposito: SOLO lo usa "Por prioridad" del
-   Backlog (chart-prioridad-bl). El resto del tablero -chart-prioridad de la
-   vista de SLA- sigue con COLOR_PRIORIDAD y su escala verde de marca, asi que
-   tocar uno no repinta el otro. */
-const COLOR_PRIORIDAD_SEMAFORO = {
-  'Critica': '#dc2626', 'Crítica': '#dc2626',
-  'Alta': '#d97706', 'Media': '#eab308', 'Baja': '#16a34a'
-};
+/* El semaforo de severidad ORIGINAL -rojo / naranja / oro / verde, ver
+   e58add5- ya no esta aqui: lo usaba SOLO "Por prioridad" del Backlog
+   (chart-prioridad-bl) y se fue con el a backlog/backlog.js. El
+   COLOR_PRIORIDAD de aqui arriba, con la escala verde de marca, es el de
+   chart-prioridad de la vista de SLA y no lo movio nadie. */
 
 // Semaforo de tres niveles: devuelve el sufijo de clase (.kpi.sv/.sa/.sr).
 const SEM = pct => pct >= 90 ? 'sv' : (pct >= 75 ? 'sa' : 'sr');
@@ -459,16 +454,9 @@ function redimensionar(graficos) {
   Object.values(graficos).forEach(g => { if (g) g.resize(); });
 }
 
-function activarSubtabs(contenedor, alMostrar) {
-  contenedor.querySelectorAll('.tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      contenedor.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t === tab));
-      contenedor.querySelectorAll('.panel').forEach(p =>
-        p.classList.toggle('active', p.id === tab.dataset.panel));
-      if (alMostrar) alMostrar(tab.dataset.panel);
-    });
-  });
-}
+/* activarSubtabs() tampoco esta ya aqui: los unicos subtabs del tablero eran
+   los tres paneles de tablas del Backlog, asi que se fue con el a
+   backlog/backlog.js. Ninguna vista de SLA ni de Call Center los usa. */
 
 // Cuenta filas agrupando por una funcion de clave. Devuelve un Map ordenado
 // de mayor a menor, salvo que se pase un orden canonico.
@@ -591,6 +579,49 @@ const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
    un conteo -"Reabiertos por grupo"-. Solo cambia el formateador: sin el "%"
    la cifra suelta dentro de la barra se leeria como tickets. */
 const ETIQUETAS_DENTRO_PCT = Barras.etiquetasDentro(v => `${FMT(v)}%`);
+
+/* Estado vacio DENTRO de una grafica viva, sin destruirla. renderEmptyChart()
+   -el de abajo- mata la instancia y escribe el mensaje a mano sobre el canvas:
+   sirve donde el vacio es el final del render, pero no donde la grafica tiene
+   que seguir en pantalla mientras se pide el dato nuevo, porque destruir y
+   reconstruir es justo el parpadeo que se quiere evitar.
+
+   Aqui la instancia se queda: se le vacian los datasets y este plugin escribe
+   el motivo centrado en el area de dibujo. Tarjeta, titulo, leyenda y ejes
+   siguen a la vista. El mensaje viaja en `options.plugins.sinDatos.mensaje`,
+   asi que se cambia con un update() normal ("Cargando..." mientras vuelve la
+   peticion, el motivo del vacio cuando ya volvio).
+
+   Solo pinta si NINGUN dataset tiene datos: con datos no estorba. */
+const SIN_DATOS = {
+  id: 'sinDatos',
+  afterDraw(chart) {
+    const datasets = (chart.data && chart.data.datasets) || [];
+    if (datasets.some(ds => ((ds && ds.data) || []).length)) return;
+
+    const opciones = (chart.options.plugins && chart.options.plugins.sinDatos) || {};
+    const mensaje = String(opciones.mensaje ?? 'Sin datos.');
+    if (!mensaje) return;
+
+    const area = chart.chartArea;
+    if (!area) return;
+    const ctx = chart.ctx;
+    const ancho = area.right - area.left;
+    ctx.save();
+    // Gris medio y misma tipografia que renderEmptyChart: el vacio se lee
+    // igual venga de un sitio o del otro.
+    ctx.fillStyle = '#9aa094';
+    ctx.font = '13px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const lineas = envolverTexto(ctx, mensaje, Math.max(80, ancho - 32));
+    const salto = 18;
+    const x = (area.left + area.right) / 2;
+    const y0 = (area.top + area.bottom) / 2 - (lineas.length - 1) * salto / 2;
+    lineas.forEach((linea, i) => ctx.fillText(linea, x, y0 + i * salto));
+    ctx.restore();
+  },
+};
 
 // Estado vacio de una grafica. Chart.js no dibuja nada util con datasets
 // vacios -deja los ejes solos, que se leen como si hubiera un error-, asi que
@@ -1322,13 +1353,17 @@ const TableroSla = (function () {
   /* ------------------------------------------ Acotado al Call Center
      La barra de filtros es UNA sola y viaja entre las pestañas "SLA y
      productividad" y "Call Center" (ver adoptarControlesSla). Ahi no todos
-     los grupos vienen a cuento: quien contesta telefono esta en Service Desk
-     o End User, y fuera de esos dos no hay llamadas ni tecnicos que cruzar.
-     El backend ya lo sabia -carga_combinada.ashx manda ese par como valor por
-     omision de @Grupos-, asi que catalogos.ashx devuelve ahora, junto a las
-     listas completas de SLA, el subconjunto del Call Center leido de la misma
-     vista de donde sale todo lo demas: la relacion tecnico -> grupo es la que
-     ya esta en los datos, aqui no hay ninguna lista de nombres a mano.
+     los tecnicos vienen a cuento: quien contesta telefono esta en Service
+     Desk o End User, y un tecnico de otra area no tiene extension, asi que
+     elegirlo solo vaciaria las graficas de llamadas. catalogos.ashx devuelve,
+     junto a las listas completas de SLA, el subconjunto del Call Center leido
+     de la misma vista de donde sale todo lo demas: la relacion tecnico ->
+     grupo es la que ya esta en los datos, aqui no hay ninguna lista de
+     nombres a mano.
+
+     Solo se acota Tecnicos. Grupos no se toca: en el Call Center el campo no
+     se muestra (ninguna de sus peticiones lo lee) y en SLA la lista es la
+     completa de siempre.
 
      No se esconden <option> con CSS: se cambia el juego de <option> del
      <select>, que es la fuente de la verdad de la que leen paramsFiltros() y
@@ -1336,7 +1371,7 @@ const TableroSla = (function () {
      solo-. Lo que estuviera elegido en SLA se guarda al entrar y se devuelve
      entero al salir, para que la otra pestaña no pierda sus filtros por haber
      pasado por aqui. */
-  let catalogos = { grupos: [], tecnicos: [], gruposCall: [], tecnicosCall: [] };
+  let catalogos = { grupos: [], tecnicos: [], tecnicosCall: [] };
   let enCallCenter = false;
   let seleccionSla = null;   // lo elegido en SLA mientras la barra esta prestada
 
@@ -1372,15 +1407,24 @@ const TableroSla = (function () {
     return p;
   }
 
+  /* Grupos se llena SIEMPRE con la lista completa -es el catalogo de SLA, la
+     unica pestaña donde el campo se muestra- y ya no se conmuta al entrar al
+     Call Center: alli reescribir sus <option> no cambiaba nada de lo que se
+     veia y, si la seleccion de SLA caia fuera del subconjunto, forzaba una
+     recarga solo por cambiar de pestaña. El que si se acota es Tecnicos, que
+     en el Call Center mueve "Atencion por agente" y el cruce de carga.
+
+     Aun asi se reescribe en cada pasada -y no solo al llegar el catalogo-
+     porque ponerOpciones() es tambien lo que conserva la seleccion viva: el
+     <select> es el mismo nodo viajando entre pestañas. */
   function aplicarCatalogos() {
-    const g = enCallCenter ? catalogos.gruposCall : catalogos.grupos;
     const t = enCallCenter ? catalogos.tecnicosCall : catalogos.tecnicos;
-    const quiero = seleccionSla ?? {
-      grupos: seleccionados('f-grupos'), tecnicos: seleccionados('f-tecnicos') };
+    const quiero = seleccionSla ?? { tecnicos: seleccionados('f-tecnicos') };
     // Los dos se evaluan SIEMPRE: con || el segundo se saltaria en cuanto el
     // primero cambiara, y el <select> de tecnicos se quedaria con el catalogo
     // de la otra pestaña.
-    const cambioG = ponerOpciones('f-grupos', g, quiero.grupos);
+    const cambioG = ponerOpciones('f-grupos', catalogos.grupos,
+      seleccionados('f-grupos'));
     const cambioT = ponerOpciones('f-tecnicos', t, quiero.tecnicos);
     return cambioG || cambioT;
   }
@@ -1393,7 +1437,7 @@ const TableroSla = (function () {
     if (esCall === enCallCenter) return;
     // Al entrar se guarda lo de SLA; al salir se devuelve y se olvida.
     seleccionSla = esCall
-      ? { grupos: seleccionados('f-grupos'), tecnicos: seleccionados('f-tecnicos') }
+      ? { tecnicos: seleccionados('f-tecnicos') }
       : seleccionSla;
     enCallCenter = esCall;
     const cambio = aplicarCatalogos();
@@ -1407,9 +1451,9 @@ const TableroSla = (function () {
       grupos: cat.grupos ?? [],
       tecnicos: cat.tecnicos ?? [],
       // Servidor viejo -o catalogos.ashx sin actualizar-: sin el subconjunto
-      // se cae a las listas completas. Es la conducta de antes, no una
-      // pestaña rota.
-      gruposCall: cat.gruposCall ?? cat.grupos ?? [],
+      // se cae a la lista completa. Es la conducta de antes, no una pestaña
+      // rota. `gruposCall` sigue viajando en la respuesta y ya no se usa: el
+      // filtro de Grupos no existe en el Call Center.
       tecnicosCall: cat.tecnicosCall ?? cat.tecnicos ?? [],
     };
     // El catalogo llega despues del primer pintado: si para entonces la barra
@@ -2720,24 +2764,22 @@ const TableroSla = (function () {
   const TOPE_CARGA = 20;
   const TOPE_CARGA_GRAFICA = 15;
 
-  /* Mismo rango de fechas que los tickets y el MISMO filtro de Grupos: aqui
-     el grupo si se usa, pero contra el grupo donde el tecnico tiene mas
-     tickets (dbo.CatAgenteTecnico.Grupo), no contra el del ticket. El de
-     Tecnicos se quita: el procedimiento no lo mira. */
+  /* Mismo rango de fechas que los tickets, y nada mas de la barra salvo
+     Tecnicos.
+
+     Grupos NO viaja: el parametro existe en el procedimiento, pero medido
+     contra el grupo donde el tecnico tiene mas tickets
+     (dbo.CatAgenteTecnico.Grupo), no contra el del ticket. Era el mismo
+     control de la barra significando dos cosas distintas segun la pestaña, y
+     el filtro se retiro del Call Center: sin grupos el handler manda su valor
+     por omision, que es el par de grupos que atiende telefono. El
+     procedimiento y el contrato del handler no cambian; solo se deja de
+     mandar el parametro, y el hint del bloque sigue diciendo en que grupos
+     se busco porque eso viaja en la respuesta. */
   function paramsCargaCombinada() {
     const p = paramsFiltros();
+    p.delete('grupos');
     ponerTecnicosCall(p);
-    /* El cruce es Call Center: nunca puede pedir un grupo que no atienda
-       telefono. Acotar el <select> ya lo evita en la practica, pero el
-       parametro se recorta igual aqui, que es por donde de verdad sale la
-       peticion: la barra la comparten dos pestañas y lo que traiga puesto SLA
-       no tiene por que llegar hasta aqui. Si no queda ninguno se quita el
-       parametro y manda el valor por omision del handler, que es ese mismo
-       par de grupos. */
-    const permitidos = new Set(catalogos.gruposCall ?? []);
-    const grupos = seleccionados('f-grupos').filter(g => permitidos.has(g));
-    if (grupos.length) p.set('grupos', grupos.join(','));
-    else p.delete('grupos');
     p.set('top', String(TOPE_CARGA));
     return p;
   }
@@ -2758,7 +2800,12 @@ const TableroSla = (function () {
     el.innerHTML = html ? `<div class="vacio">${html}</div>` : '';
   }
 
-  function renderCargaTecnico(filas) {
+  /* Las dos graficas de este bloque se pintan SIEMPRE, incluso sin filas: con
+     `filas` vacio salen con los datasets vacios y el plugin SIN_DATOS escribe
+     `mensajeVacio` dentro del area de dibujo. Ni se destruye la instancia ni
+     se esconde la tarjeta, asi que un cambio de filtro se ve como
+     "grafica vacia -> datos nuevos" y no como "grafica -> hueco -> grafica". */
+  function renderCargaTecnico(filas, mensajeVacio) {
     const top = filas.slice(0, TOPE_CARGA_GRAFICA);
     const etiquetas = top.map(x => x.Tecnico);
     const tickets = top.map(x => x.Tickets ?? 0);
@@ -2774,7 +2821,7 @@ const TableroSla = (function () {
         // Apilada, como la de antiguedad del Backlog pero tumbada: la cifra
         // de cada segmento la pone ETIQUETAS_SEGMENTO. La geometria -grosor,
         // aire y radio- ya viene del default compartido.
-        plugins: [ETIQUETAS_SEGMENTO],
+        plugins: [ETIQUETAS_SEGMENTO, SIN_DATOS],
         data: { labels: etiquetas, datasets: [
           { label: 'Tickets cerrados', data: tickets, backgroundColor: BARRA_A },
           { label: 'Llamadas atendidas', data: llamadas, backgroundColor: MORADO },
@@ -2787,6 +2834,7 @@ const TableroSla = (function () {
              compararia ticket contra llamada, que no es la pregunta. */
           scales: { x: Object.assign({}, EJE_CONTEO, { stacked: true }), y: { stacked: true } },
           plugins: {
+            sinDatos: { mensaje: mensajeVacio },
             tooltip: { callbacks: {
               label: c => `${c.dataset.label}: ${FMT(c.raw)}`,
               // footer y no afterLabel: afterLabel se repetiria en cada uno de
@@ -2800,13 +2848,14 @@ const TableroSla = (function () {
         gr.data.labels = etiquetas;
         gr.data.datasets[0].data = tickets;
         gr.data.datasets[1].data = llamadas;
+        gr.options.plugins.sinDatos = { mensaje: mensajeVacio };
         // El closure apunta al arreglo de ESTA pasada, no al de la
         // construccion: hay que reinstalarlo para que el pie case.
         gr.options.plugins.tooltip.callbacks.footer = pie;
       });
   }
 
-  function renderCargaDia(filas) {
+  function renderCargaDia(filas, mensajeVacio) {
     const etiquetas = filas.map(x => soloFecha(x.Fecha));
     const tickets = filas.map(x => x.Tickets ?? 0);
     const llamadas = filas.map(x => x.Llamadas ?? 0);
@@ -2814,6 +2863,7 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'cargaDia', 'chart-carga-dia',
       () => ({
         type: 'line',
+        plugins: [SIN_DATOS],
         data: { labels: etiquetas, datasets: [
           { label: 'Tickets cerrados', data: tickets, borderColor: BARRA_A,
             backgroundColor: BARRA_A, tension: 0.25, pointRadius: 0, borderWidth: 2 },
@@ -2823,7 +2873,10 @@ const TableroSla = (function () {
         options: {
           responsive: true, maintainAspectRatio: false,
           interaction: { mode: 'index', intersect: false },
-          plugins: { tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } } },
+          plugins: {
+            sinDatos: { mensaje: mensajeVacio },
+            tooltip: { callbacks: { label: c => `${c.dataset.label}: ${FMT(c.raw)}` } },
+          },
           scales: { y: EJE_CONTEO },
         }
       }),
@@ -2831,6 +2884,7 @@ const TableroSla = (function () {
         gr.data.labels = etiquetas;
         gr.data.datasets[0].data = tickets;
         gr.data.datasets[1].data = llamadas;
+        gr.options.plugins.sinDatos = { mensaje: mensajeVacio };
       });
   }
 
@@ -2856,6 +2910,18 @@ const TableroSla = (function () {
     hacerOrdenable(cont.querySelector('table'));
   }
 
+  /* Vacia las dos graficas del bloque SIN quitarlas de la pantalla. Se llama
+     en cuanto arranca una carga: el dato viejo no puede quedarse puesto
+     mientras vuelve el del filtro nuevo, y la tarjeta tampoco puede
+     desaparecer. La tabla se vacia en la misma pasada para que no quede
+     contando tecnicos que las graficas ya no muestran. */
+  function pintarCargaVacia(mensaje) {
+    mostrarBloqueCarga(true);
+    renderCargaTecnico([], mensaje);
+    renderCargaDia([], mensaje);
+    renderTablaCarga([]);
+  }
+
   function renderCargaCombinada(d) {
     const filas = (d && d.tecnicos) || [];
     const hint = document.getElementById('hint-carga');
@@ -2864,18 +2930,21 @@ const TableroSla = (function () {
     if (!filas.length) {
       /* El caso mas probable no es que no haya habido actividad, sino que el
          catalogo de extensiones no este capturado para esos grupos, asi que
-         se dice en vez de dejar dos recuadros vacios. */
-      destruir('cargaTecnico');
-      destruir('cargaDia');
-      mostrarBloqueCarga(false);
+         se dice, en la nota de arriba y dentro de las propias graficas.
+
+         Antes se destruian las dos instancias y se escondia el bloque entero.
+         Ahora las tarjetas se quedan, vacias: con el bloque desapareciendo y
+         volviendo, cada cambio de filtro movia el resto de la pestana de
+         sitio, y el mensaje del estado quedaba donde ya no habia graficas. */
+      pintarCargaVacia('Sin cruce para este filtro.');
       estadoCargaCombinada(`Sin cruce para este filtro. Se busco en los grupos: ${escapeHtml((d && d.grupos) || '')}.<br>Si el rango si tuvo actividad, revisa que dbo.CatAgenteTecnico tenga capturadas las extensiones de esos grupos.`);
       return;
     }
 
     estadoCargaCombinada('');
     mostrarBloqueCarga(true);
-    renderCargaTecnico(filas);
-    renderCargaDia((d && d.serie) || []);
+    renderCargaTecnico(filas, 'Sin cruce para este filtro.');
+    renderCargaDia((d && d.serie) || [], 'Sin cruce para este filtro.');
     renderTablaCarga(filas);
   }
 
@@ -3110,6 +3179,12 @@ const TableroSla = (function () {
        el ultimo bloque del Call Center. Se lanza aqui para que salga en
        paralelo con las demas, y se pinta solo en cuanto responde. */
     estadoCargaCombinada('Cargando el cruce de tickets y llamadas...');
+    /* Las graficas del cruce se vacian YA, antes de pedir nada: mientras
+       vuelve la respuesta no puede quedarse a la vista el reparto del filtro
+       anterior, que se leeria como el del filtro nuevo. Quedan las tarjetas
+       con sus ejes y el "Cargando..." dentro. El guardia de `miCarga` de abajo
+       es lo que impide que una respuesta atrasada las vuelva a llenar. */
+    pintarCargaVacia('Cargando el cruce de tickets y llamadas...');
     obtenerJSONSla(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
       d => { if (miCarga === cargaVigente) renderCargaCombinada(d); },
       e => { if (miCarga === cargaVigente) errorCargaCombinada(e); }
@@ -3263,992 +3338,19 @@ const TableroSla = (function () {
 })();
 
 /* =======================================================================
-   3. Tablero de Backlog
+   3. Tablero de Backlog -> backlog/backlog.js
+   -----------------------------------------------------------------------
+   Ya no esta aqui. El Backlog es un modulo propio -backlog/backlog.html,
+   backlog.css y backlog.js-, como experiencia/ y qa/, y se monta con
+   moduloEmbebido() mas abajo (const TableroBacklog).
+
+   Su logica bajo TAL CUAL: los mismos calculos, las mismas peticiones a
+   backlog_*.ashx, los mismos colores por lider (que siguen saliendo de la
+   tabla compartida de assets/js/paleta.js) y el mismo "10 mas antiguos por
+   lider". Lo unico que se copio al modulo es el minimo del preambulo de
+   aqui arriba que leia por scope global; el preambulo no se toco y sigue
+   sirviendo a SLA y Call Center.
    ======================================================================= */
-const TableroBacklog = (function () {
-  // Identidad por lider: la tabla COMPARTIDA de assets/js/paleta.js
-  // (Paleta.registrarLideres / Paleta.colorLider). El color va con el NOMBRE
-  // -el mapa fijo de paleta.js, los colores de siempre-, nunca con el ranking
-  // de una grafica ni con el orden en que llegan los datos; el orden
-  // alfabetico con `Sin Torre` al final es solo el de las LISTAS. Asi una
-  // persona lleva el mismo color en la tendencia, la
-  // antiguedad por lider, la tabla de resumen, los swatches, el correo y los
-  // rankings de Experiencia.
-  // AgingSort >= 5 es exactamente "mas de 30 dias" (ver 07_correo_backlog.sql).
-  const SORT_MAS_30 = 5;
-
-  const graficos = {};
-  let datos = null;
-  // El orden canonico de lideres del corte (A->Z, `Sin Torre` al final) tal
-  // como lo devuelve la tabla compartida. Es el orden de referencia de las
-  // leyendas; el color ya no se consulta contra el, sino por nombre.
-  let ordenLideres = [];
-  const filtro = { lider: null, grupo: null, prioridad: null, aging: null };
-  const ETIQUETA_DIM = { lider: 'Lider', grupo: 'Grupo', prioridad: 'Prioridad', aging: 'Antiguedad' };
-
-  // Atajo local: el color lo resuelve la tabla compartida, no esta pestana.
-  const colorLider = nombre => Paleta.colorLider(nombre);
-  function hayFiltro() { return dimensionesActivas(filtro).length > 0; }
-  // hayFiltro() solo mira el cross-filter de las graficas. Para los mensajes de
-  // "sin datos" tambien cuentan los multiselect de arriba.
-  function hayFiltroAlguno() {
-    return hayFiltro()
-      || ['f-c1-bl', 'f-grupos-bl', 'f-lideres-bl'].some(id => seleccionados(id).length > 0);
-  }
-
-  // Los 6 result sets son agregados completos por (Lider, Grupo): filtrar por
-  // esas dos dimensiones es exacto, sin depender de ningun tope.
-  function porLiderGrupo(conjunto, omitir) {
-    return (conjunto || []).filter(x => {
-      if (omitir !== 'lider' && filtro.lider !== null && x.Lider !== filtro.lider) return false;
-      if (omitir !== 'grupo' && filtro.grupo !== null && x.Grupo !== filtro.grupo) return false;
-      return true;
-    });
-  }
-  // Prioridad y antiguedad viven en result sets distintos (marginales, no una
-  // tabla cruzada), asi que solo pueden filtrar al conjunto al que pertenecen.
-  function agingFiltrado(omitir) {
-    return porLiderGrupo(datos.resumen.aging, omitir)
-      .filter(x => omitir === 'aging' || filtro.aging === null || x.Aging === filtro.aging);
-  }
-
-  function alternarFiltro(dim, valor) {
-    if (valor === null || valor === undefined) return;
-    filtro[dim] = (filtro[dim] === valor) ? null : valor;
-    // Cambiar de lider invalida el grupo elegido: puede no existir en el nuevo.
-    if (dim === 'lider') filtro.grupo = null;
-    renderTodo();
-  }
-
-  function paramsFiltros() {
-    const p = new URLSearchParams();
-    const corte = document.getElementById('f-corte-bl').value;
-    if (corte) p.set('fecha_corte', corte);
-    const c1 = seleccionados('f-c1-bl');
-    const grupos = seleccionados('f-grupos-bl');
-    const lideres = seleccionados('f-lideres-bl');
-    if (c1.length) p.set('c1', c1.join(','));
-    if (grupos.length) p.set('grupos', grupos.join(','));
-    if (lideres.length) p.set('lideres', lideres.join(','));
-    return p;
-  }
-
-  function dibujar(id, config) {
-    // Se busca por canvas y no en `graficos`: renderEmptyChart pudo haber
-    // destruido la grafica anterior sin pasar por este registro.
-    const previo = Chart.getChart(id);
-    if (previo) previo.destroy();
-    graficos[id] = new Chart(document.getElementById(id), config);
-  }
-
-  const LEYENDA_ABAJO = { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } } };
-  const EJE_Y_CERO = { y: { beginAtZero: true, ticks: { precision: 0, callback: v => FMT(v) } } };
-
-  // ---------------------------------------------------------------------- KPIs
-  function renderKpis() {
-    const r = datos.resumen;
-    let total, criticos, altos, mayor30, reasignados, reabiertos, exacto;
-
-    if (!hayFiltro()) {
-      const k = r.kpis || {};
-      total = k.BacklogTotal ?? 0;
-      criticos = k.Criticos ?? 0;
-      altos = k.Altos ?? 0;
-      mayor30 = k.Mayor30Dias ?? 0;
-      reasignados = k.Reasignados ?? 0;
-      reabiertos = k.Reabiertos ?? 0;
-      exacto = true;
-    } else {
-      // Recalculo exacto: cada result set trae Lider y Grupo, asi que la suma
-      // filtrada equivale a lo que devolveria el SP con esos filtros.
-      const pr = porLiderGrupo(r.prioridad);
-      total = pr.reduce((a, x) => a + (x.Total ?? 0), 0);
-      criticos = pr.reduce((a, x) => a + (x.Critica ?? 0), 0);
-      altos = pr.reduce((a, x) => a + (x.Alta ?? 0), 0);
-      mayor30 = porLiderGrupo(r.aging).filter(x => (x.AgingSort ?? 0) >= SORT_MAS_30)
-        .reduce((a, x) => a + (x.Tickets ?? 0), 0);
-      reasignados = porLiderGrupo(r.reasignaciones).reduce((a, x) => a + (x.Tickets ?? 0), 0);
-      reabiertos = porLiderGrupo(r.reabiertos).reduce((a, x) => a + (x.Tickets ?? 0), 0);
-      exacto = true;
-    }
-
-    const corte = document.getElementById('f-corte-bl').value;
-    const pie = hayFiltro() ? 'sobre lo filtrado' : (corte ? `corte ${corte}` : '');
-
-    const tarjetas = [
-      { l: 'Backlog', v: FMT(total), f: pie },
-      { l: 'Criticos', v: FMT(criticos), f: `${PCT(criticos, total)} del backlog`, s: 'sr' },
-      { l: 'Altos', v: FMT(altos), f: `${PCT(altos, total)} del backlog`, s: 'sa' },
-      { l: '+30 dias', v: FMT(mayor30), f: `${PCT(mayor30, total)} del backlog` },
-      { l: 'Reasignados', v: FMT(reasignados), f: 'cambiaron de grupo al menos una vez' },
-      { l: 'Reabiertos', v: FMT(reabiertos), f: 'mas de un intento de solucion' },
-    ];
-
-    document.getElementById('kpis-bl').innerHTML = htmlTarjetasKpi(tarjetas);
-  }
-
-  // -------------------------------------------------------------------- graficas
-
-  // El historico solo trae la dimension Lider, asi que un cross-filter por
-  // grupo / prioridad / antiguedad no se puede reconstruir exacto hacia atras.
-  // Se calcula que proporcion del backlog de cada lider deja pasar ese filtro
-  // EN EL CORTE ACTUAL y esa proporcion se aplica a toda su serie. Devuelve
-  // null cuando no hace falta escalar -sin filtros, o solo por lider-, que es
-  // el unico caso en que la tendencia es exacta.
-  function escalasTendencia() {
-    if (filtro.grupo === null && filtro.prioridad === null && filtro.aging === null) return null;
-
-    const pr = datos.resumen.prioridad || [];
-    const base = sumaPor(pr, 'Lider', 'Total');
-
-    // Numerador: prioridad ya filtrada por grupo, tomando la columna de la
-    // prioridad elegida -o el Total si no hay prioridad en el filtro-.
-    const campo = filtro.prioridad ?? 'Total';
-    const num = new Map();
-    for (const x of pr) {
-      if (filtro.grupo !== null && x.Grupo !== filtro.grupo) continue;
-      num.set(x.Lider, (num.get(x.Lider) ?? 0) + (x[campo] ?? 0));
-    }
-
-    // La antiguedad vive en otro result set -una marginal, no una tabla
-    // cruzada-, asi que entra como proporcion extra por lider.
-    if (filtro.aging !== null) {
-      const totAg = new Map(), selAg = new Map();
-      for (const x of datos.resumen.aging || []) {
-        if (filtro.grupo !== null && x.Grupo !== filtro.grupo) continue;
-        totAg.set(x.Lider, (totAg.get(x.Lider) ?? 0) + (x.Tickets ?? 0));
-        if (x.Aging === filtro.aging) selAg.set(x.Lider, (selAg.get(x.Lider) ?? 0) + (x.Tickets ?? 0));
-      }
-      for (const [l, v] of num) {
-        const t = totAg.get(l) ?? 0;
-        num.set(l, t > 0 ? v * (selAg.get(l) ?? 0) / t : 0);
-      }
-    }
-
-    const porLider = new Map();
-    for (const [l, b] of base) porLider.set(l, b > 0 ? (num.get(l) ?? 0) / b : 0);
-
-    const sumaBase = [...base.values()].reduce((a, v) => a + v, 0);
-    const sumaNum = [...num.values()].reduce((a, v) => a + v, 0);
-    return { porLider, global: sumaBase > 0 ? sumaNum / sumaBase : 0 };
-  }
-
-  // Aplica un factor a una serie [{Periodo, TicketsBacklog}].
-  function escalarSerie(serie, factor) {
-    if (factor === null || factor === undefined) return serie;
-    return serie.map(p => ({ ...p, TicketsBacklog: Math.round((p.TicketsBacklog ?? 0) * factor) }));
-  }
-
-  // Texto del encabezado: que se esta viendo y si el numero es exacto.
-  function pieTendencia(esc) {
-    const activos = dimensionesActivas(filtro);
-    if (!activos.length) return 'todos los lideres';
-    const txt = activos.map(([d, v]) => ETIQUETA_DIM[d] + ': ' + v).join(' \u00b7 ');
-    return esc ? txt + ' \u00b7 estimado con la proporcion del corte actual' : txt;
-  }
-
-  // Serie total del periodo. Con lideres elegidos en el multiselect se
-  // reconstruye sumando sus series -el total que manda el SP puede venir sin
-  // filtrar, y de todos modos asi cuadra con la grafica por lider-.
-  function serieTotalVisible() {
-    const elegidos = seleccionados('f-lideres-bl');
-    if (!elegidos.length) return datos.historico.total || [];
-
-    // usp_..._HistoricoPorLider topea la serie en TopLideres: si alguno de los
-    // lideres elegidos no viene en ella, sumarla daria de menos. En ese caso se
-    // deja el total que mando el SP, que si trae el filtro aplicado.
-    const filas = datos.historico.porLider || [];
-    const presentes = new Set(filas.map(x => x.Lider));
-    if (!elegidos.every(l => presentes.has(l))) return datos.historico.total || [];
-
-    const m = new Map();
-    for (const x of filas) {
-      if (!elegidos.includes(x.Lider)) continue;
-      const d = String(x.FechaCorte).slice(0, 10);
-      m.set(d, (m.get(d) ?? 0) + (x.Tickets ?? 0));
-    }
-    if (!m.size) return datos.historico.total || [];
-    return [...m.entries()].sort().map(([Periodo, TicketsBacklog]) => ({ Periodo, TicketsBacklog }));
-  }
-
-  function renderTendenciaTotal() {
-    const hint = document.getElementById('hint-tendencia-bl');
-    const esc = escalasTendencia();
-    let serie;
-    if (filtro.lider) {
-      // La serie por lider si permite reconstruir la tendencia del filtro.
-      const f = (datos.historico.porLider || []).filter(x => x.Lider === filtro.lider);
-      const m = new Map();
-      for (const x of f) m.set(String(x.FechaCorte).slice(0, 10), x.Tickets);
-      serie = [...m.entries()].sort().map(([Periodo, TicketsBacklog]) => ({ Periodo, TicketsBacklog }));
-      serie = escalarSerie(serie, esc ? (esc.porLider.get(filtro.lider) ?? 0) : null);
-    } else {
-      serie = escalarSerie(serieTotalVisible(), esc ? esc.global : null);
-    }
-    hint.textContent = pieTendencia(esc);
-    datos.serieVisible = serie;
-
-    if (!serie.length) {
-      renderLineaTendencia(serie);
-      return renderEmptyChart('chart-tendencia-bl', hayFiltroAlguno()
-        ? 'Sin backlog historico para los filtros activos.'
-        : 'No hay cortes guardados en el historico para esta ventana.');
-    }
-
-    dibujar('chart-tendencia-bl', {
-      type: 'line',
-      data: {
-        labels: serie.map(f => String(f.Periodo).slice(0, 10)),
-        datasets: [{
-          label: 'Backlog', data: serie.map(f => f.TicketsBacklog),
-          borderColor: filtro.lider ? colorLider(filtro.lider) : Paleta.porIndice(0),
-          backgroundColor: 'rgba(37,99,235,.12)', fill: true,
-          borderWidth: 2, tension: .3, pointRadius: 3,
-        }],
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false } }, scales: EJE_Y_CERO,
-      },
-    });
-    renderLineaTendencia(serie);
-  }
-
-  // Convierte el formato largo (FechaCorte, Lider, Tickets) en una serie por
-  // lider, rellenando con 0 las fechas donde un lider no tiene filas -si no,
-  // las lineas quedan desalineadas entre si-.
-  function renderTendenciaLider() {
-    // El multiselect de lideres ya se manda al SP, pero se vuelve a aplicar
-    // aqui: es la unica forma de garantizar que la grafica siga la seleccion
-    // aunque el backend -o el mock- devuelva la serie completa.
-    const elegidos = seleccionados('f-lideres-bl');
-    const f = (datos.historico.porLider || [])
-      .filter(x => !elegidos.length || elegidos.includes(x.Lider));
-    const esc = escalasTendencia();
-    const fechas = [...new Set(f.map(x => String(x.FechaCorte).slice(0, 10)))].sort();
-    // El orden de los datasets ES el orden de la leyenda, asi que va por el
-    // canonico -A->Z, `Sin Torre` al final- y no por el orden en que el SP
-    // devolvio las filas: dos cargas distintas pintan la misma leyenda.
-    let nombres = Paleta.ordenarLideres([...new Set(f.map(x => x.Lider))]);
-    // Con grupo / prioridad / antiguedad activos, los lideres que quedan en
-    // cero bajo ese filtro se sacan: una linea plana en 0 solo ensucia.
-    if (esc) nombres = nombres.filter(n => (esc.porLider.get(n) ?? 0) > 0);
-    const mapa = new Map(f.map(x => [`${String(x.FechaCorte).slice(0,10)}|${x.Lider}`, x.Tickets]));
-
-    const hint = document.getElementById('hint-tendencia-lider-bl');
-    if (hint) {
-      const pie = pieTendencia(esc);
-      hint.textContent = pie === 'todos los lideres' ? 'avance de cada torre' : pie;
-    }
-
-    if (!fechas.length || !nombres.length) {
-      return renderEmptyChart('chart-tendencia-lider-bl',
-        'Ningun lider tiene backlog historico con los filtros activos.');
-    }
-
-    dibujar('chart-tendencia-lider-bl', {
-      type: 'line',
-      data: {
-        labels: fechas,
-        datasets: nombres.map(n => ({
-          label: n,
-          data: fechas.map(d => {
-            const v = mapa.get(`${d}|${n}`) ?? 0;
-            return esc ? Math.round(v * (esc.porLider.get(n) ?? 0)) : v;
-          }),
-          borderColor: colorLider(n), backgroundColor: colorLider(n),
-          // La linea del lider seleccionado se engrosa y las demas se atenuan.
-          borderWidth: filtro.lider === n ? 4 : (filtro.lider ? 1 : 2),
-          pointRadius: filtro.lider === n ? 3 : 2,
-        })),
-      },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: LEYENDA_ABAJO, scales: EJE_Y_CERO,
-        onClick: (evt, els, gr) => {
-          if (!els.length) return;
-          alternarFiltro('lider', gr.data.datasets[els[0].datasetIndex].label);
-        },
-      },
-    });
-  }
-
-  function renderBarrasLider() {
-    const pr = porLiderGrupo(datos.resumen.prioridad, 'lider');
-    const m = new Map();
-    for (const x of pr) m.set(x.Lider, (m.get(x.Lider) ?? 0) + (x.Total ?? 0));
-    const ent = [...m.entries()].sort((a, b) => b[1] - a[1]);
-    const etiquetas = ent.map(e => e[0]);
-    const sel = bordesSeleccion(etiquetas, filtro.lider, 0);
-
-    if (!etiquetas.length) {
-      return renderEmptyChart('chart-lider-bl', 'Sin tickets en backlog para este corte y filtros.');
-    }
-
-    /* Medidas y cifra dentro las pone DashboardBarChart (assets/js/grafica.js);
-       aqui solo queda lo propio de esta grafica. El color de lider es
-       IDENTIDAD y lo resuelve por NOMBRE la tabla compartida (Paleta.colorLider,
-       lo mismo que `paleta: { lider: true }`), asi que las barras pueden seguir
-       ordenadas por volumen -mayor a menor- sin que nadie cambie de color.
-       El contorno de seleccion manda sobre el juego compartido: va en
-       `dataset`, que se aplica despues de las medidas. El radio ya lo pone el
-       default compartido (Barras.RADIO). */
-    graficos['chart-lider-bl'] = new DashboardBarChart({
-      canvas: 'chart-lider-bl',
-      etiquetas,
-      datos: ent.map(e => e[1]),
-      paleta: { lider: true },
-      formato: FMT,
-      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
-      opciones: {
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
-        scales: EJE_Y_CERO,
-        onClick: (evt, _e, gr) => alternarFiltro('lider', etiquetaDelClic(gr, evt)),
-      },
-    }).render();
-  }
-
-  function renderBarrasPrioridad() {
-    const pr = porLiderGrupo(datos.resumen.prioridad);
-    const etiquetas = ['Critica', 'Alta', 'Media', 'Baja'];
-    const valores = [
-      pr.reduce((a, x) => a + (x.Critica ?? 0), 0),
-      pr.reduce((a, x) => a + (x.Alta ?? 0), 0),
-      pr.reduce((a, x) => a + (x.Media ?? 0), 0),
-      pr.reduce((a, x) => a + (x.Baja ?? 0), 0),
-    ];
-    const sel = bordesSeleccion(etiquetas, filtro.prioridad, 0);
-
-    // No basta con que haya filas: puede haber filas con las cuatro
-    // prioridades en cero, y una grafica de puros ceros no dice nada.
-    if (!valores.some(v => v > 0)) {
-      return renderEmptyChart('chart-prioridad-bl', 'Sin tickets en backlog para este corte y filtros.');
-    }
-
-    /* El color va en `colores`, hecho, y NO por `paleta`: la prioridad es
-       severidad -Critica/Alta/Media/Baja-, no identidad, y no entra en la
-       paleta categorica. Aqui manda COLOR_PRIORIDAD_SEMAFORO -rojo, naranja,
-       oro, verde-, que es el juego original de esta grafica y no el de la
-       escala verde. Medidas y cifra dentro las trae DashboardBarChart. */
-    graficos['chart-prioridad-bl'] = new DashboardBarChart({
-      canvas: 'chart-prioridad-bl',
-      etiquetas,
-      datos: valores,
-      colores: etiquetas.map(l => COLOR_PRIORIDAD_SEMAFORO[l]),
-      formato: FMT,
-      /* Aire local, y SOLO aqui. Son CUATRO categorias en una tarjeta de
-         .grid3 -un tercio del ancho-, asi que la ranura de cada prioridad
-         anda por los 85px y el tope compartido de 44px (Barras.GRUESA) deja
-         la barra en la mitad de su ranura: mas hueco que barra. Subiendo
-         SOLO el tope a 72px manda otra vez el .81 de los porcentajes
-         compartidos -barra en el 81% de la ranura, 19% de aire entre
-         vecinas- y en un monitor ancho el nuevo tope corta antes de que la
-         barra se vuelva un bloque. Los dos porcentajes NO se tocan: el
-         reparto es el mismo del resto del tablero. Va en `barra:` y no en
-         Barras.GRUESA justo para no engordar las demas graficas. */
-      barra: { maxBarThickness: 72 },
-      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
-      opciones: {
-        maintainAspectRatio: false,
-        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
-        scales: EJE_Y_CERO,
-        onClick: (evt, _e, gr) => alternarFiltro('prioridad', etiquetaDelClic(gr, evt)),
-      },
-    }).render();
-  }
-
-  /* Apilada HORIZONTAL: una fila por CUBO DE ANTIGUEDAD -de 0-1 dias arriba
-     al cubo mas viejo abajo, en orden de AgingSort- y dentro de la fila un
-     segmento por lider. Es la misma matriz de siempre; lo unico que cambio
-     respecto a la version vertical es el eje.
-
-     El color es IDENTIDAD DE LIDER y lo resuelve colorLider() por NOMBRE
-     (tabla compartida de paleta.js), asi que una persona lleva el mismo color aqui, en
-     "Backlog por lider", en la matriz de abajo, en el drill-down y en el
-     correo diario. Los lideres chicos se agrupan en "Otros" -mismo criterio
-     que la matriz de "Resumen por antiguedad"-.
-
-     La leyenda va ARRIBA y es la que nombra a cada lider con su color: un
-     dataset ES un lider, asi que sigue siendo clicable -apagar una entrada
-     saca a esa persona de todas las pilas- y envuelve sola cuando los
-     nombres son largos. Por eso el nombre completo vive aqui y no en el eje:
-     el eje solo lleva los rotulos cortos de los cubos.
-
-     El clic en un segmento filtra por BUCKET de antiguedad, que es la
-     CATEGORIA de la fila, no por lider. */
-  function renderBarrasAging() {
-    const m = construirMatrizAging(agingFiltrado('aging'));
-    if (!m) {
-      return renderEmptyChart('chart-aging-bl', 'Sin tickets en backlog para este corte y filtros.');
-    }
-
-    // El contorno marca la fila seleccionada. Va en cada dataset porque el
-    // grosor se aplica por segmento, y asi se resalta la pila completa.
-    const sel = bordesSeleccion(m.buckets, filtro.aging, 0);
-
-    /* Aire local, y SOLO aqui. Son hasta siete filas de antiguedad en los
-       260px del .lienzo -menos lo que se lleva la leyenda de arriba-, asi
-       que la ranura de cada fila anda por los 30px y el juego compartido
-       -.9 x .9 con tope de 44px- pegaria una fila con la siguiente. Con
-       .78 x .88 la barra ocupa el 69% de su ranura, y el tope propio de 26px
-       la deja compacta tambien cuando hay tres cubos y sobra alto. El radio
-       lo sigue poniendo el default compartido (Barras.RADIO). Va en `barra:`
-       y no en Barras.GRUESA justo para no adelgazar las demas graficas. */
-    graficos['chart-aging-bl'] = new DashboardBarChart({
-      canvas: 'chart-aging-bl',
-      etiquetas: m.buckets,
-      barra: { categoryPercentage: 0.78, barPercentage: 0.88, maxBarThickness: 26 },
-      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
-      datasets: m.lideres.map(l => ({
-        label: l,
-        data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
-        backgroundColor: colorLider(l),
-      })),
-      /* Apilada: la cifra de cada segmento la pone ETIQUETAS_SEGMENTO, que
-         sabe de segmentos -y ya mide la caja en los dos ejes- y omite el que
-         no da el ancho. El plugin compartido no sirve: sacaria la cifra
-         fuera de la barra, encima del segmento vecino. */
-      etiquetasDentro: false,
-      plugins: [ETIQUETAS_SEGMENTO],
-      opciones: {
-        indexAxis: 'y',
-        maintainAspectRatio: false,
-        plugins: {
-          /* Leyenda ARRIBA -no la LEYENDA_ABAJO compartida-: aqui es lo que
-             traduce color -> persona, asi que se lee ANTES de las barras.
-             `boxWidth` chico y fuente de 10 para que cinco o seis nombres
-             largos quepan en dos lineas sin empujar el lienzo. */
-          legend: {
-            position: 'top',
-            labels: { boxWidth: 12, font: { size: 10 }, padding: 8 },
-          },
-          tooltip: {
-            callbacks: {
-              label: c => `${c.dataset.label}: ${FMT(c.raw)}`,
-              // El total del cubo ya lo trae construirMatrizAging: aqui solo
-              // se muestra, no se vuelve a sumar.
-              footer: c => `Total: ${FMT(m.totalPorBucket.get(c[0]?.label) ?? 0)}`,
-            },
-          },
-        },
-        scales: {
-          // El eje numerico pasa a la horizontal: se lleva EJE_Y_CERO tal cual.
-          x: { stacked: true, ...EJE_Y_CERO.y },
-          // Rotulos de cubo: cortos -"16-30 dias"-, van enteros y sin saltarse
-          // ninguno.
-          y: { stacked: true, grid: { display: false }, ticks: { autoSkip: false } },
-        },
-        onClick: (evt, _e, gr) => alternarFiltro('aging', etiquetaDelClic(gr, evt)),
-      },
-    }).render();
-  }
-
-
-  // -------------------------------------------------- drill-down Lider -> Grupo
-  function renderLideres() {
-    const cont = document.getElementById('tabla-lideres-bl');
-    const pr = porLiderGrupo(datos.resumen.prioridad, 'lider');
-    if (!pr.length) { cont.innerHTML = '<div class="vacio">Sin datos para este corte.</div>'; return; }
-
-    // Indices auxiliares por (lider|grupo) para las columnas que viven en
-    // otros result sets.
-    const mas30 = new Map(), slaFuera = new Map(), slaTotal = new Map();
-    for (const x of datos.resumen.aging || []) {
-      if ((x.AgingSort ?? 0) < SORT_MAS_30) continue;
-      const k = `${x.Lider}|${x.Grupo}`;
-      mas30.set(k, (mas30.get(k) ?? 0) + (x.Tickets ?? 0));
-    }
-    for (const x of datos.resumen.sla || []) {
-      const k = `${x.Lider}|${x.Grupo}`;
-      slaTotal.set(k, (slaTotal.get(k) ?? 0) + (x.Tickets ?? 0));
-      if (x.EstadoSLA === 'Fuera SLA') slaFuera.set(k, (slaFuera.get(k) ?? 0) + (x.Tickets ?? 0));
-    }
-
-    const porLider = new Map();
-    for (const x of pr) {
-      if (!porLider.has(x.Lider)) porLider.set(x.Lider, []);
-      porLider.get(x.Lider).push(x);
-    }
-    const granTotal = pr.reduce((a, x) => a + (x.Total ?? 0), 0);
-
-    const agrega = filas => {
-      const t = filas.reduce((a, x) => a + (x.Total ?? 0), 0);
-      const c = filas.reduce((a, x) => a + (x.Critica ?? 0), 0);
-      const al = filas.reduce((a, x) => a + (x.Alta ?? 0), 0);
-      const m30 = filas.reduce((a, x) => a + (mas30.get(`${x.Lider}|${x.Grupo}`) ?? 0), 0);
-      const sf = filas.reduce((a, x) => a + (slaFuera.get(`${x.Lider}|${x.Grupo}`) ?? 0), 0);
-      const st = filas.reduce((a, x) => a + (slaTotal.get(`${x.Lider}|${x.Grupo}`) ?? 0), 0);
-      return { t, c, al, m30, pctFuera: st > 0 ? Math.round(100 * sf / st) : null };
-    };
-
-    const celdas = (a, color) => {
-      const clase = a.pctFuera === null ? '' : (a.pctFuera <= 5 ? 'bv' : a.pctFuera <= 15 ? 'ba' : 'br');
-      return `<td class="num">${FMT(a.t)}</td>
-        <td class="num">${PCT(a.t, granTotal)} ${miniBar(granTotal > 0 ? 100 * a.t / granTotal : 0, color)}</td>
-        <td class="num">${FMT(a.c)}</td><td class="num">${FMT(a.al)}</td><td class="num">${FMT(a.m30)}</td>
-        <td class="num">${a.pctFuera === null ? '—' : `<span class="badge ${clase}">${a.pctFuera}%</span>`}</td>`;
-    };
-
-    const lideres = [...porLider.entries()]
-      .map(([l, f]) => [l, f, agrega(f)])
-      .sort((a, b) => b[2].t - a[2].t);
-
-    let html = '';
-    lideres.forEach(([lider, filasLider, agLider], i) => {
-      const color = colorLider(lider);
-      const sel = filtro.lider === lider ? ' fila-sel' : '';
-      html += `<tr class="n1row${sel}" data-n1="${i}">
-        <td><span class="swatch" style="background:${color}"></span><span class="filtrable"
-          data-dim="lider" data-valor="${escapeAttr(lider)}">${escapeHtml(lider)}</span></td>
-        ${celdas(agLider, color)}</tr>`;
-
-      filasLider.slice().sort((a, b) => (b.Total ?? 0) - (a.Total ?? 0)).forEach(g => {
-        const selG = filtro.grupo === g.Grupo ? ' fila-sel' : '';
-        html += `<tr class="n2row${selG}" data-p1="${i}">
-          <td><span class="filtrable" data-dim="grupo" data-valor="${escapeAttr(g.Grupo)}">${escapeHtml(g.Grupo)}</span></td>
-          ${celdas(agrega([g]), color)}</tr>`;
-      });
-    });
-
-    cont.innerHTML = `<table><thead><tr>
-        <th>Lider / Grupo</th><th class="num">Tickets</th><th class="num">% del total</th>
-        <th class="num">Criticos</th><th class="num">Altos</th><th class="num">+30 dias</th>
-        <th class="num">% Fuera SLA</th>
-      </tr></thead><tbody>${html}</tbody></table>`;
-
-    cont.querySelectorAll('.n1row').forEach(fila => {
-      fila.addEventListener('click', e => {
-        if (e.target.classList.contains('filtrable')) return;
-        const abierto = fila.classList.toggle('open');
-        cont.querySelectorAll(`.n2row[data-p1="${fila.dataset.n1}"]`)
-          .forEach(h => h.classList.toggle('show', abierto));
-      });
-    });
-    cont.querySelectorAll('.filtrable').forEach(el => {
-      el.addEventListener('click', e => { e.stopPropagation(); alternarFiltro(el.dataset.dim, el.dataset.valor); });
-    });
-
-    document.getElementById('cap-lideres-bl').innerHTML = descripcionFiltro(granTotal);
-  }
-
-  // ------------------------------------------------ matriz de antiguedad x lider
-  // Mismo calculo que hace el correo en PowerShell: agrupa el result set de
-  // antiguedad en una matriz bucket x lider, con los N lideres mas grandes y
-  // el resto en 'Otros'.
-  function construirMatrizAging(filas, topLideres = 8) {
-    if (!filas.length) return null;
-
-    const ordenBucket = new Map();
-    const totalCrudo = new Map();
-    for (const f of filas) {
-      if (!ordenBucket.has(f.Aging)) ordenBucket.set(f.Aging, f.AgingSort);
-      totalCrudo.set(f.Lider, (totalCrudo.get(f.Lider) ?? 0) + f.Tickets);
-    }
-    /* Los buckets van en orden real de antiguedad, no alfabetico. El criterio
-       ES el AgingSort del SP, pero NO se usa a secas: el procedimiento numera
-       mal el cubo mas nuevo -"menos de un dia" sale detras de un rango de
-       dias que deberia ir despues-, y el orden equivocado se veia igual en la
-       grafica que en la matriz de aqui abajo, porque las dos salen de esta
-       funcion.
-
-       El arreglo de fondo es el AgingSort del SP; mientras tanto manda el
-       ROTULO, pasado a dias con su unidad: 07_correo_backlog.sql escribe
-       "1-7 dias", "+16 dias", "+1 mes", "+2 meses"... "+1 año". Tomar solo el
-       primer numero dejaba "+1 mes" y "+1 año" en 1, empatados con
-       "Menos de 1 día" -que TAMBIEN trae un 1-, y el empate lo decidia el
-       AgingSort malo. "Menos de..." va siempre primero (-1), sin empates.
-       "Sin fecha" no es un escalon de la escalera -no se sabe si es viejo- y
-       se va al final, el mismo criterio que ya sigue colorAging() al sacarlo
-       de la rampa ordinal. Empates restantes: decide el AgingSort. */
-    function rangoDelRotulo(etiqueta) {
-      const texto = String(etiqueta);
-      if (/menos\s+de/i.test(texto)) return -1;
-      if (/sin\s+(fecha|dato)/i.test(texto)) return Number.MAX_SAFE_INTEGER;
-      const n = texto.match(/\d+/);
-      if (!n) return 0;
-      const unidad = /a[nñ]o/i.test(texto) ? 365 : (/mes/i.test(texto) ? 30 : 1);
-      return parseInt(n[0], 10) * unidad;
-    }
-    const buckets = [...ordenBucket.entries()]
-      .sort((a, b) => (rangoDelRotulo(a[0]) - rangoDelRotulo(b[0])) || (a[1] - b[1]))
-      .map(e => e[0]);
-    const top = new Set([...totalCrudo.entries()].sort((a, b) => b[1] - a[1]).slice(0, topLideres).map(e => e[0]));
-
-    const valores = new Map();
-    const usados = [];
-    for (const f of filas) {
-      const l = top.has(f.Lider) ? f.Lider : 'Otros';
-      if (!usados.includes(l)) usados.push(l);
-      const clave = `${f.Aging}|${l}`;
-      valores.set(clave, (valores.get(clave) ?? 0) + f.Tickets);
-    }
-
-    const totalPorLider = new Map(usados.map(l =>
-      [l, buckets.reduce((acc, b) => acc + (valores.get(`${b}|${l}`) ?? 0), 0)]));
-    /* El orden de los lideres ES el de la leyenda de la apilada y el de las
-       columnas de la matriz: va por el canonico compartido -A->Z con `Sin
-       Torre` al final- y no por volumen, para que no cambie de un corte a
-       otro. Quien entra al top lo sigue decidiendo el volumen (`top`); esto
-       solo ordena a los que ya entraron. 'Otros' no es un lider: cierra. */
-    const lideres = Paleta.ordenarLideres(usados.filter(l => l !== 'Otros'));
-    if (usados.includes('Otros')) lideres.push('Otros');
-
-    const totalPorBucket = new Map(buckets.map(b =>
-      [b, lideres.reduce((acc, l) => acc + (valores.get(`${b}|${l}`) ?? 0), 0)]));
-
-    return { buckets, lideres, valores, totalPorLider, totalPorBucket };
-  }
-
-  function renderTablaAging() {
-    const cont = document.getElementById('tabla-aging-bl');
-    const m = construirMatrizAging(agingFiltrado());
-    if (!m) { cont.innerHTML = '<div class="vacio">Sin datos para este filtro.</div>'; return; }
-
-    const granTotal = m.lideres.reduce((a, l) => a + m.totalPorLider.get(l), 0);
-    const th = m.lideres.map(l =>
-      `<th class="num" style="color:${colorLider(l)}"><span class="swatch" style="background:${colorLider(l)}"></span>${escapeHtml(l)}</th>`).join('');
-    const filas = m.buckets.map(b => {
-      const celdas = m.lideres.map(l => {
-        const v = m.valores.get(`${b}|${l}`) ?? 0;
-        return `<td class="num">${v ? FMT(v) : ''}</td>`;
-      }).join('');
-      return `<tr><td><b>${escapeHtml(b)}</b></td>${celdas}<td class="num"><b>${FMT(m.totalPorBucket.get(b))}</b></td></tr>`;
-    }).join('');
-    const totales = m.lideres.map(l => {
-      const v = m.totalPorLider.get(l);
-      const pct = granTotal > 0 ? 100 * v / granTotal : 0;
-      return `<td class="num"><b>${FMT(v)}</b><br>${miniBar(pct, colorLider(l))}</td>`;
-    }).join('');
-
-    // Esta tabla lleva fila de totales al final, por eso no se le aplica
-    // hacerOrdenable(): reordenar dejaria el total en medio.
-    cont.innerHTML = `<table><thead><tr><th>Antiguedad</th>${th}<th class="num">Total</th></tr></thead>`
-      + `<tbody>${filas}<tr><td><b>Total</b></td>${totales}<td class="num"><b>${FMT(granTotal)}</b></td></tr></tbody></table>`;
-    document.getElementById('cap-aging-bl').innerHTML = descripcionFiltro(granTotal);
-  }
-
-  // ==================================================== Tickets mas antiguos
-  // Las descripciones vienen de Proactivanet con HTML pegado desde Outlook y a
-  // veces con caracteres de control de Windows-1252. En un atributo title= las
-  // etiquetas se verian literales, asi que se limpian antes de mostrarlas.
-  const LARGO_TOOLTIP = 300;
-
-  function limpiarDescripcion(texto) {
-    if (!texto) return '';
-    return String(texto)
-      .replace(/<(br|\/p|\/div|\/tr)\s*\/?>/gi, ' ')
-      .replace(/<[^>]*>/g, ' ')
-      .replace(/&nbsp;/g, ' ').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
-      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
-      .replace(/[\x00-\x1F\x7F-\x9F]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  // Formulario de edicion de la incidencia en Proactivanet. Pide el Id interno
-  // (GUID), no el codigo: ese Id lo resuelve sincronizar_ids.py contra el API y
-  // lo guarda en dbo.TicketProactivanetId. Si el ticket todavia no esta en ese
-  // mapeo, el endpoint manda IdProactivanet = null y el codigo se pinta como
-  // texto plano, sin enlace roto.
-  const URL_TICKET_PROACTIVANET =
-    'https://soriana.proactivanet.com/proactivanet/servicedesk/incidents/formIncidents/formIncidents.paw?id=';
-
-  function celdaCodigo(t) {
-    const codigo = escapeHtml(t.CodigoTicket);
-    if (!t.IdProactivanet) return codigo;
-    const href = URL_TICKET_PROACTIVANET + encodeURIComponent(t.IdProactivanet);
-    // Sin title= propio a proposito: si el enlace trajera el suyo taparia el de
-    // la celda, que es el que muestra la descripcion del ticket.
-    return `<a class="enlace-ticket" href="${href}" target="_blank" rel="noopener">${codigo}</a>`;
-  }
-
-  function tooltipDescripcion(texto) {
-    const limpio = limpiarDescripcion(texto);
-    if (!limpio) return 'Este ticket no tiene descripcion.';
-    return limpio.length > LARGO_TOOLTIP ? limpio.slice(0, LARGO_TOOLTIP) + '...' : limpio;
-  }
-
-  /* Cuantas filas lista la seccion. La eleccion es CRONOLOGICA, no de edad:
-     de los tickets del corte que pasan los filtros del tablero se listan los
-     TOPE_ANTIGUOS mas viejos DE CADA LIDER, haya los que haya. No hay edad
-     minima: un lider con 100 tickets aporta sus 10 mas viejos, y uno con 3
-     aporta los 3, aunque sean de ayer.
-
-     La eleccion ya viene hecha del servidor: backlog_antiguos.ashx recorta
-     por lider -ROW_NUMBER() OVER (PARTITION BY Lider ORDER BY FechaRegistro)-
-     y manda solo esas filas, no el corte entero. TOPE_ANTIGUOS es el mismo
-     numero que TopePorLider del handler; aqui se vuelve a aplicar porque el
-     cross-filter del tablero puede recortar mas, nunca mas de la cuenta. */
-  const TOPE_ANTIGUOS = 10;
-
-  /* De mas viejo a mas nuevo por fecha de registro. Se ordena por
-     FechaRegistro y no por DiasBacklog porque la fecha es el dato de origen
-     -DiasBacklog es un derivado del corte- y porque puede venir en null: esos
-     se van al final, nunca por delante de un ticket con fecha. El formato que
-     manda el servidor es 'YYYY-MM-DDTHH:mm:ss', asi que comparar las cadenas
-     ya ordena cronologicamente. */
-  function masViejoPrimero(a, b) {
-    const fa = a.FechaRegistro || '', fb = b.FechaRegistro || '';
-    if (!fa) return fb ? 1 : 0;
-    if (!fb) return -1;
-    return fa < fb ? -1 : (fa > fb ? 1 : 0);
-  }
-
-  function renderAntiguos(tope = TOPE_ANTIGUOS) {
-    const cont = document.getElementById('tabla-antiguos-bl');
-    const cap = document.getElementById('cap-antiguos-bl');
-    const d = datos.antiguos || {};
-
-    // Estos tickets si traen Lider y Prioridad, asi que respetan el filtro
-    // de lider y el de prioridad; el de grupo tambien viene en cada ticket.
-    let tickets = (d.tickets ?? []).filter(t =>
-      (filtro.lider === null || t.Lider === filtro.lider) &&
-      (filtro.grupo === null || t.Grupo === filtro.grupo) &&
-      (filtro.prioridad === null || t.Prioridad === filtro.prioridad));
-
-    if (!tickets.length) {
-      cap.innerHTML = descripcionFiltro(0);
-      cont.innerHTML = `<div class="vacio">No hay tickets en backlog para este corte y filtros.</div>`;
-      return;
-    }
-
-    /* La seleccion es POR LIDER, no global: cada lider aporta sus `tope`
-       tickets mas viejos por FechaRegistro. Nadie tapa a nadie -un lider con
-       mucho backlog viejo ya no se lleva la tabla entera- y el que tiene
-       menos de `tope` sale con los que tenga.
-
-       El servidor ya manda recortado; esto se vuelve a aplicar porque el
-       cross-filter de arriba (grupo, prioridad) puede quitar filas de un
-       lider, nunca anadirlas. */
-    const porLider = new Map();
-    for (const t of tickets) {
-      if (!porLider.has(t.Lider)) porLider.set(t.Lider, []);
-      porLider.get(t.Lider).push(t);
-    }
-    for (const [lider, lista] of porLider) {
-      porLider.set(lider, lista.sort(masViejoPrimero).slice(0, tope));
-    }
-
-    /* Los lideres se LISTAN en el orden canonico -A->Z con `Sin Torre` al
-       final, el mismo de las leyendas (assets/js/paleta.js)-, y no en el
-       orden en que el servidor mando sus filas: asi la tabla sale igual entre
-       dos cargas. Lo que la tabla compartida no reconozca como lider -un cubo
-       de resto, un nombre raro- se va al final sin perderse, en el orden en
-       que llego: `sort` es estable y todos empatan en Infinity. */
-    const rango = new Map(Paleta.ordenarLideres([...porLider.keys()])
-      .map((n, i) => [n, i]));
-    const grupos = [...porLider.keys()]
-      .sort((a, b) => (rango.get(a) ?? Infinity) - (rango.get(b) ?? Infinity))
-      .map(l => [l, porLider.get(l)]);
-    const listados = grupos.reduce((n, g) => n + g[1].length, 0);
-
-    // `total` es del corte ENTERO, antes del recorte por lider del handler;
-    // si un endpoint viejo no lo manda, se cae a lo que haya llegado.
-    const enBacklog = d.total ?? (d.tickets ?? []).length;
-    cap.innerHTML = `Los ${FMT(tope)} tickets mas antiguos de cada lider `
-      + `<span class="suave">(${FMT(listados)} en total, de los `
-      + `${FMT(enBacklog)} en backlog de este corte) · `
-      + `del mas viejo al mas nuevo por fecha de registro</span>`;
-
-    cont.innerHTML = grupos.map(([lider, lista]) => {
-      const filas = lista.map(t => `<tr>
-          <td class="con-hint" title="${escapeAttr(tooltipDescripcion(t.Descripcion))}">${celdaCodigo(t)}</td>
-          <td class="num"><b>${FMT(t.DiasBacklog)}</b></td>
-          <td class="fecha-cell">${String(t.FechaRegistro ?? '').slice(0, 10)}</td>
-          <td>${escapeHtml(t.Prioridad)}</td>
-          <td>${escapeHtml(t.Grupo)}</td>
-          <td>${escapeHtml(t.TecnicoSegundaLinea)}</td>
-          <td>${escapeHtml(t.Subestado)}</td>
-          <td>${escapeHtml(String(t.Titulo ?? '').slice(0, 70))}</td>
-        </tr>`).join('');
-      return `<div class="grupo-lider" style="color:${colorLider(lider)}">
-          <span class="swatch" style="background:${colorLider(lider)}"></span>${escapeHtml(lider)}
-          <span class="conteo">${lista.length}</span></div>
-        <table><thead><tr><th>Ticket</th><th class="num">Dias</th><th>Registro</th><th>Prioridad</th>
-          <th>Grupo</th><th>Tecnico</th><th>Subestado</th><th>Titulo</th></tr></thead>
-        <tbody>${filas}</tbody></table>`;
-    }).join('');
-
-    cont.querySelectorAll('table').forEach(hacerOrdenable);
-  }
-
-  // ------------------------------------------------------------------ variacion
-  function flecha(dif) {
-    if (dif > 0) return '<span class="arrow-up">&#9650;</span>';
-    if (dif < 0) return '<span class="arrow-down">&#9660;</span>';
-    return '<span class="arrow-eq">&#8212;</span>';
-  }
-
-  // Variacion contra el corte anterior: los dos ultimos puntos de la serie ya
-  // filtrada, en vez de usp_CorreoBacklog_Comparativa -que ignora los filtros
-  // y daria un delta que no cuadra con lo que se ve-.
-  function renderLineaTendencia(serie) {
-    const linea = document.getElementById('tendencia-linea-bl');
-    const quien = filtro.lider ? ` de <b>${escapeHtml(filtro.lider)}</b>` : ' total';
-    if (serie.length >= 2) {
-      const actual = serie[serie.length - 1].TicketsBacklog;
-      const previo = serie[serie.length - 2].TicketsBacklog;
-      const dif = actual - previo;
-      linea.innerHTML = `Backlog${quien}: <b>${FMT(actual)}</b> `
-        + `<span class="delta">${flecha(dif)} ${FMT(Math.abs(dif))}</span> `
-        + `vs. el periodo anterior (${String(serie[serie.length - 2].Periodo).slice(0, 10)}: ${FMT(previo)})`;
-    } else if (serie.length === 1) {
-      linea.innerHTML = `Backlog${quien}: <b>${FMT(serie[0].TicketsBacklog)}</b> (sin periodo anterior para comparar todavia)`;
-    } else {
-      linea.textContent = '';
-    }
-  }
-
-  // ------------------------------------------------- resumen de texto del filtro
-  function descripcionFiltro(n) {
-    const activos = dimensionesActivas(filtro);
-    if (!activos.length) return `${FMT(n)} tickets <span class="suave">· sin filtros de tablero</span>`;
-    const txt = activos.map(([d, v]) => `${ETIQUETA_DIM[d]}: ${escapeHtml(v)}`).join(' · ');
-    return `${FMT(n)} tickets <span class="suave">· ${txt}</span>`;
-  }
-
-  function renderTodo() {
-    renderKpis();
-    renderTendenciaTotal();
-    renderTendenciaLider();
-    renderBarrasLider();
-    renderBarrasPrioridad();
-    renderBarrasAging();
-    renderLideres();
-    renderTablaAging();
-    renderAntiguos();
-  }
-
-  function sumaPor(filas, campoClave, campoValor) {
-    const m = new Map();
-    for (const f of filas) m.set(f[campoClave], (m.get(f[campoClave]) ?? 0) + f[campoValor]);
-    return m;
-  }
-
-  async function cargarCatalogos() {
-    const c = await obtenerJSON('backlog_catalogos.ashx');
-    const llenar = (id, valores) => {
-      document.getElementById(id).innerHTML =
-        valores.map(v => `<option value="${escapeAttr(v)}">${escapeHtml(v)}</option>`).join('');
-    };
-    llenar('f-c1-bl', c.c1 ?? []);
-    llenar('f-grupos-bl', c.grupos ?? []);
-    llenar('f-lideres-bl', c.lideres ?? []);
-
-    // Las fechas vienen de la mas reciente a la mas vieja: la primera es el
-    // corte con el que abre el tablero, igual que cuando esto era un <select>.
-    // El calendario se acota al primer y ultimo corte guardado, que es la
-    // validacion que antes daba la propia lista de opciones.
-    const fechas = (c.fechas ?? []).map(f => String(f).slice(0, 10));
-    const corte = document.getElementById('f-corte-bl');
-    if (fechas.length) {
-      corte.min = fechas[fechas.length - 1];
-      corte.max = fechas[0];
-      corte.value = fechas[0];
-      corte.disabled = false;
-    } else {
-      corte.removeAttribute('min');
-      corte.removeAttribute('max');
-      corte.value = '';
-      corte.disabled = true;
-    }
-
-    const aviso = document.getElementById('aviso-historico-bl');
-    if (!fechas.length) {
-      aviso.innerHTML = '<div class="aviso">No hay ningun corte guardado en <b>dbo.CorreoBacklogSnapshot</b>. '
-        + 'Corre <b>usp_CorreoBacklog_Backfill</b> y el correo diario para que se llene.</div>';
-    } else if (fechas.length < 2) {
-      aviso.innerHTML = '<div class="aviso">Solo hay un corte guardado, asi que las graficas de tendencia van a salir vacias. '
-        + 'Corre <b>usp_CorreoBacklog_Backfill</b> para llenar el historico hacia atras.</div>';
-    } else {
-      aviso.innerHTML = '';
-    }
-  }
-
-  /* Mismo auto-aplicado que el tablero de SLA: los cambios seguidos se agrupan
-     en una peticion y la carga que deja de ser la ultima descarta su respuesta
-     para no pintar datos viejos encima de los recien pedidos. */
-  const ESPERA_AUTO = 250;
-  let cargaProgramada = null;
-  let cargaVigente = 0;
-
-  function programarCarga() {
-    clearTimeout(cargaProgramada);
-    cargaProgramada = setTimeout(() => { cargaProgramada = null; cargarTodo(); }, ESPERA_AUTO);
-  }
-
-  async function cargarTodo() {
-    clearTimeout(cargaProgramada);
-    cargaProgramada = null;
-    const miCarga = ++cargaVigente;
-    estadoCargando('estado-carga-bl');
-    try {
-      const p = paramsFiltros();
-      const qs = p.toString();
-      const qsHist = new URLSearchParams(p);
-      qsHist.set('dias', document.getElementById('f-dias-bl').value);
-      qsHist.set('granularidad', document.getElementById('f-granularidad-bl').value);
-
-      const [resumen, historico, antiguos] = await Promise.all([
-        obtenerJSON(`backlog_resumen.ashx?${qs}`),
-        obtenerJSON(`backlog_historico.ashx?${qsHist.toString()}`),
-        obtenerJSON(`backlog_antiguos.ashx?${qs}`),
-      ]);
-      // Llego tarde: otro cambio de filtro ya lanzo una carga posterior.
-      if (miCarga !== cargaVigente) return;
-      datos = { resumen, historico, antiguos };
-
-      // El roster de lideres del corte se da de alta UNA vez en la tabla
-      // compartida, que lo devuelve en el orden canonico -A->Z con `Sin
-      // Torre` al final-. De ahi salen los colores de todas las vistas; el
-      // volumen ya NO decide color, solo el orden de las barras de cada
-      // grafica que se ordene por volumen.
-      ordenLideres = Paleta.registrarLideres(
-        (resumen.prioridad ?? []).map(x => x.Lider));
-
-      Object.keys(filtro).forEach(k => { filtro[k] = null; });
-      renderTodo();
-      // El Backlog es una foto, no una ventana: su metadato viaja sin periodo
-      // y su "ultima actualizacion" es la fecha de corte de
-      // dbo.CorreoBacklogSnapshot con la que respondio el handler.
-      estadoOk('estado-carga-bl', resumen.meta);
-    } catch (err) {
-      if (miCarga !== cargaVigente) return;   // fallo de una carga ya superada
-      estadoError('estado-carga-bl', err);
-    }
-  }
-
-  async function init() {
-    document.getElementById('btn-limpiar-bl').addEventListener('click', () => {
-      for (const id of ['f-c1-bl', 'f-grupos-bl', 'f-lideres-bl']) {
-        Array.from(document.getElementById(id).options).forEach(o => { o.selected = false; });
-      }
-      document.getElementById('f-dias-bl').value = '30';
-      document.getElementById('f-granularidad-bl').value = 'Dia';
-      cargarTodo();
-    });
-    // Todos los filtros del backlog recargan solos. Los multi-select emiten
-    // `change` sobre el <select> original desde su capa visual, asi que los
-    // seis pasan por el mismo camino, con el debounce agrupando los cambios
-    // seguidos en una sola peticion.
-    for (const id of ['f-corte-bl', 'f-dias-bl', 'f-granularidad-bl',
-                      'f-c1-bl', 'f-grupos-bl', 'f-lideres-bl']) {
-      document.getElementById(id).addEventListener('change', programarCarga);
-    }
-    activarSubtabs(document.querySelector('#tab-backlog .tabs').parentElement, () => redimensionar(graficos));
-
-    try {
-      await cargarCatalogos();
-    } catch (err) {
-      estadoError('estado-carga-bl', err);
-      return;
-    }
-    await cargarTodo();
-  }
-
-  return { init, redimensionar: () => redimensionar(graficos) };
-})();
 
 /* =======================================================================
    4. Router de pestañas principales (carga perezosa)
@@ -4450,12 +3552,22 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
 
   function init() {
     const cont = document.getElementById(id);
-    if (!cont || cont.childElementCount) return;   // ya montado
+    /* Contenedor con algo dentro = ya montado, y no se toca... salvo que lo
+       que tenga sea la tarjeta de un intento fallido, que si es reintentable.
+       Sin esa excepcion el reintento moria aqui mismo y devolvia undefined,
+       que activarTab leeria como exito. */
+    if (!cont) return;
+    if (cont.childElementCount && !cont.querySelector('[data-fallo-montaje]')) return;
 
     if (!SOPORTA_SCOPE) return montarEnMarco(cont);
 
+    // Este innerHTML es parte de la proteccion contra montaje doble: deja el
+    // contenedor con un hijo antes del primer await, asi que una segunda
+    // llamada a init() se corta en la guarda de arriba.
     cont.innerHTML = `<div class="estado" style="padding:24px">Cargando ${nombre}...</div>`;
-    (async () => {
+    // Se DEVUELVE la cadena para que activarTab sepa si el montaje termino
+    // bien: sin esto init() volvia al instante y el fallo se perdia aqui.
+    return (async () => {
       await inyectarCss();
       cont.textContent = '';
       await montarMarcado(cont);
@@ -4463,10 +3575,14 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
       await cargarScript(cont);
     })().catch(err => {
       console.error(err);
-      cont.innerHTML = `<div class="card" style="margin-top:16px">
+      cont.innerHTML = `<div class="card" data-fallo-montaje style="margin-top:16px">
         <h3>No se pudo montar el tablero de ${nombre}</h3>
         <p style="font-size:13px;color:#5e5e5f">${escapeHtml(err.message)} ·
-        el tablero suelto sigue en <a href="${base}${pagina}">${base}${pagina}</a>.</p></div>`;
+        el tablero suelto sigue en <a href="${base}${pagina}">${base}${pagina}</a>.</p>
+        <p style="font-size:13px;color:#5e5e5f">Volver a entrar en la pestaña lo intenta de nuevo.</p></div>`;
+      // Se relanza: activarTab lo necesita para NO marcar la pestaña como
+      // inicializada y dejarla reintentable.
+      throw err;
     });
   }
 
@@ -4484,6 +3600,30 @@ const TableroExperiencia = moduloEmbebido({
   pagina: 'experiencia.html',
   hoja: 'experiencia.css',
   guion: 'experiencia.js',
+});
+
+/* Backlog: mismo trato que Experiencia y QA desde que salio a backlog/. El
+   modulo publica window.TableroBacklogModulo al arrancar, y al volver a la
+   pestaña se le pide que remida sus graficas -midieron cero mientras su
+   contenedor estuvo oculto-. Los datos ya cargados se quedan como estan y no
+   se repite ninguna peticion a los backlog_*.ashx.
+
+   Su hoja es la excepcion entre los tres modulos: backlog.css lleva SOLO lo
+   privado del Backlog, porque su vocabulario visual (.card, .kpi, .grid2...)
+   es el de dashboard.css, que en esta pagina ya esta cargado. Por eso al
+   montarla el @scope (#tab-backlog) de inyectarCss() no tapa nada del
+   cascaron: no hay reglas que se pisen. */
+const TableroBacklog = moduloEmbebido({
+  nombre: 'Backlog',
+  base: 'backlog/',
+  id: 'tab-backlog',
+  pagina: 'backlog.html',
+  hoja: 'backlog.css',
+  guion: 'backlog.js',
+  alVolver: () => {
+    const modulo = window.TableroBacklogModulo;
+    if (modulo) modulo.redimensionar();
+  },
 });
 
 /* QA: el modulo publica window.TableroQaModulo al arrancar. Mientras la
@@ -4556,7 +3696,17 @@ function adoptarControlesSla(idTab) {
   const campanas = filtros.querySelector('.campo-campanas');
   if (campanas) campanas.hidden = !esCallCenter;
 
-  /* Grupos y tecnicos: en el Call Center solo los que atienden telefono. */
+  /* Grupos se retira en el Call Center, como el SLOT: ninguna peticion de esa
+     pestaña lo lee. llamadas.ashx nunca lo recibio -una llamada no tiene
+     grupo resolutor- y el cruce de carga combinada pide ahora los grupos por
+     omision del handler, que son justo los que atienden telefono. Dejarlo a
+     la vista era ofrecer un filtro que no movia nada de lo que se estaba
+     viendo. En SLA sigue igual: el <select> es el mismo, con su seleccion y
+     sus listeners; solo deja de mostrarse mientras la barra esta prestada. */
+  const grupos = filtros.querySelector('.campo-grupos');
+  if (grupos) grupos.hidden = esCallCenter;
+
+  /* Tecnicos: en el Call Center solo los que atienden telefono. */
   TableroSla.modoCallCenter(esCallCenter);
 }
 
@@ -4586,13 +3736,48 @@ const MODULOS = {
   tablero: TableroExterno,
 };
 
-const iniciado = { sla: false, backlog: false, experiencia: false, qa: false, call: false, tablero: false };
+/* Estado del montaje. MODULOS dice que pestañas EXISTEN; estos dos dicen en
+   que punto esta cada una, y arrancan vacios: ningun nombre de modulo se
+   repite aqui, asi que agregar una pestaña se hace en MODULOS y en el marcado,
+   en ningun sitio mas.
+
+   `listo`    -> su init() termino BIEN. Nunca se vuelve a inicializar.
+   `montando` -> init() esta en vuelo. Un segundo clic mientras carga no
+                 arranca un segundo montaje ni una segunda peticion.
+
+   Lo que NO esta en ninguno de los dos es "sin empezar", y ahi vuelve una
+   pestaña cuyo init() fallo: el siguiente clic reintenta. Antes se marcaba
+   como iniciada ANTES de llamar a init(), asi que un fallo de red al traer
+   backlog.html, experiencia.html o qa.html dejaba la pestaña muerta -solo
+   redimensionar()- hasta recargar el documento. */
+const listo = new Set();
+const montando = new Set();
+
+/* Own-property a proposito. Con `MODULOS[nombre]` las claves heredadas de
+   Object.prototype -constructor, __proto__, toString, valueOf...- pasaban el
+   filtro: el nombre se daba por bueno, se apagaban todas las pestañas, ningun
+   contenedor casaba con `tab-<nombre>` y se reventaba en .init(). Se llega
+   desde el hash, que es texto libre.
+   hasOwnProperty.call en vez de Object.hasOwn: el camino de respaldo sin
+   @scope (montarEnMarco) existe para navegadores viejos, y ahi Object.hasOwn
+   puede no estar. */
+function resolverModulo(nombre) {
+  return Object.prototype.hasOwnProperty.call(MODULOS, nombre) ? nombre : 'sla';
+}
 
 function activarTab(nombre) {
-  if (!MODULOS[nombre]) nombre = 'sla';
+  nombre = resolverModulo(nombre);
 
   const idContenedor = 'tab-' + nombre;
-  document.querySelectorAll('.mtab').forEach(b => b.classList.toggle('active', b.dataset.tab === nombre));
+  /* aria-current marca la seccion en curso para un lector de pantalla; la
+     clase .active sigue siendo la que pinta. Las dos dicen lo mismo y se
+     mueven juntas. */
+  document.querySelectorAll('.mnav').forEach(b => {
+    const activo = b.dataset.tab === nombre;
+    b.classList.toggle('active', activo);
+    if (activo) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
   document.querySelectorAll('.maintab-content').forEach(d => d.classList.toggle('active', d.id === idContenedor));
   // Abierto con file:// el navegador trata cada archivo como origen unico y
   // replaceState puede lanzar SecurityError, que mataria el resto de
@@ -4601,25 +3786,101 @@ function activarTab(nombre) {
 
   // Solo la pestaña que se esta viendo pega a sus .ashx; la otra espera a su
   // primer clic. Al volver, las graficas ya existen y solo hay que remedirlas.
-  if (!iniciado[nombre]) {
-    iniciado[nombre] = true;
-    MODULOS[nombre].init();
-  } else {
-    MODULOS[nombre].redimensionar();
-  }
+  if (listo.has(nombre)) return MODULOS[nombre].redimensionar();
+  if (montando.has(nombre)) return;   // ya hay un montaje en vuelo
+
+  montando.add(nombre);
+  /* Promise.resolve().then() envuelve por igual a los init() sincronos
+     (TableroExterno) y a los async (SLA, y los modulos embebidos desde que
+     init() devuelve su cadena): una excepcion sincrona tambien cae en el
+     .catch en vez de subir a un listener de clic.
+
+     Solo se marca `listo` si la promesa RESUELVE. Nota sobre SLA: su init()
+     atiende el fallo de catalogos por dentro -estadoError() y `return`-, asi
+     que resuelve igual y se queda inicializado. Es a proposito: engancha sus
+     listeners al entrar, y reintentarlo los ataria por segunda vez. El
+     reintento es para los montajes que de verdad rechazan, que son los de
+     moduloEmbebido(). */
+  Promise.resolve()
+    .then(() => MODULOS[nombre].init())
+    .then(() => { listo.add(nombre); })
+    .catch(err => {
+      // Queda fuera de `listo`: el proximo clic en la pestaña vuelve a
+      // intentarlo. La tarjeta de error, con su enlace al tablero suelto,
+      // sigue a la vista mientras tanto.
+      console.error(`No se pudo inicializar la pestaña "${nombre}":`, err);
+    })
+    .finally(() => { montando.delete(nombre); });
 }
 
-document.querySelectorAll('.mtab').forEach(btn => {
-  btn.addEventListener('click', () => activarTab(btn.dataset.tab));
+document.querySelectorAll('.mnav').forEach(btn => {
+  btn.addEventListener('click', () => {
+    activarTab(btn.dataset.tab);
+    /* En pantalla estrecha la barra desplegada se monta ENCIMA del contenido
+       (ver dashboard.css): si se quedara abierta, taparia justo el modulo que
+       se acaba de elegir. En escritorio no aplica y no se toca nada. */
+    if (window.matchMedia('(max-width: 900px)').matches) plegarLateral(true);
+  });
 });
+
+/* =======================================================================
+   4bis. Barra lateral: plegar y desplegar
+   -----------------------------------------------------------------------
+   Solo capa visual del armazon. No conoce MODULOS, ni el hash, ni el ciclo
+   de montaje: cambiar de ancho no reinicia nada, porque lo unico que hace
+   es poner o quitar una clase en el contenedor .wrap. Por eso cambiar de
+   modulo tampoco pierde el estado de la barra -nadie lo reescribe- y
+   plegarla no vuelve a montar el modulo que se esta viendo.
+
+   La clase va en <html> y no en el contenedor: la barra esta fija al borde
+   de la ventana y el hueco que se le reserva es el padding-left del <body>,
+   que es hermano de .wrap y no podria leer una clase de dentro.
+
+   El estado vive en el DOM y dura lo que dura la pagina. Sin localStorage a
+   proposito: el tablero se abre en una VM interna con sesiones compartidas y
+   no hay ningun otro ajuste del usuario persistido aqui; guardar este seria
+   el primero.
+   ======================================================================= */
+const armazon = document.documentElement;
+const botonPlegar = document.getElementById('lateral-plegar');
+
+function plegarLateral(cerrar) {
+  if (!armazon) return;
+  armazon.classList.toggle('lateral-cerrada', cerrar);
+  if (!botonPlegar) return;
+  const texto = cerrar ? 'Desplegar el menu' : 'Contraer el menu';
+  botonPlegar.setAttribute('aria-expanded', String(!cerrar));
+  botonPlegar.setAttribute('aria-label', texto);
+  botonPlegar.title = texto;
+  /* Las graficas de Chart.js miden su contenedor al dibujarse. Al cambiar el
+     ancho util hay que remedirlas, y eso ya lo sabe hacer cada modulo ya
+     montado con su redimensionar(); los que no estan montados siguen sin
+     tocarse. La transicion de la barra dura .18s: se espera a que termine
+     para medir el ancho final. */
+  setTimeout(() => {
+    listo.forEach(n => { try { MODULOS[n].redimensionar(); } catch (e) { console.error(e); } });
+  }, 220);
+}
+
+if (botonPlegar) {
+  botonPlegar.addEventListener('click', () => {
+    plegarLateral(!armazon.classList.contains('lateral-cerrada'));
+  });
+}
+
+/* Arranque en estrecho: la barra nace plegada para no comerse la pantalla.
+   A partir de ahi manda el usuario; no se vuelve a forzar al girar el
+   dispositivo, que seria pelearse con su ultima decision. */
+if (window.matchMedia('(max-width: 900px)').matches) plegarLateral(true);
 
 /* =======================================================================
    5. Desplegables propios (solo capa visual de los filtros)
    -----------------------------------------------------------------------
    La implementacion vive en assets/js/desplegable.js y es UNA sola para todo
-   el tablero: los seis <select multiple> de SLA y Backlog, los dos de una
-   opcion de Backlog y los de los modulos embebidos (Experiencia, QA), que la
-   llaman desde sus propios archivos.
+   el tablero: los <select multiple> de SLA y Call Center, que monta la llamada
+   de aqui abajo, y los de los modulos embebidos (Backlog, Experiencia, QA),
+   que la llaman desde sus propios archivos sobre su propia raiz -su marcado
+   entra despues de esta linea, asi que esta no los alcanza-.
 
    Aqui no hay logica de filtrado ni llamadas a los .ashx: los <select>
    originales se quedan en el DOM con sus mismos ids, sus mismas <option> y su

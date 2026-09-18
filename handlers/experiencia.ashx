@@ -65,11 +65,20 @@ public class Experiencia : IHttpHandler
             context.Response.StatusCode = 500;
             context.Response.TrySkipIisCustomErrors = true;
 
-            // Solo el mensaje y el tipo: ni la traza ni la cadena de conexion
-            // salen del servidor. experiencia.js lee "error" y cae al mock.
+            /* Ni la traza, ni la cadena de conexion, ni el mensaje crudo de
+               SQL Server -que lleva servidor, base y procedimiento- salen del
+               servidor: el navegador recibe el texto saneado que arma
+               DashboardHandler.MensajeSeguro, el mismo criterio que usan la
+               envoltura comun y qa.ashx.
+
+               El detalle completo va a la traza de ASP.NET. El contrato JSON
+               no cambia: siguen siendo las mismas dos llaves, y
+               experiencia.js sigue leyendo "error" para caer al mock. */
+            DashboardHandler.Registrar("experiencia.ashx", ex);
+
             var error = new Dictionary<string, object>
             {
-                { "error", ex.Message },
+                { "error", DashboardHandler.MensajeSeguro(ex) },
                 { "tipo", ex.GetType().Name },
             };
             context.Response.Write(serializador.Serialize(error));
