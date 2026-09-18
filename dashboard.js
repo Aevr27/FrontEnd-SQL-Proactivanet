@@ -3868,10 +3868,11 @@ if (botonPlegar) {
   });
 }
 
-/* Arranque en estrecho: la barra nace plegada para no comerse la pantalla.
-   A partir de ahi manda el usuario; no se vuelve a forzar al girar el
-   dispositivo, que seria pelearse con su ultima decision. */
-if (window.matchMedia('(max-width: 900px)').matches) plegarLateral(true);
+/* Arranque: la barra nace plegada en cualquier ancho. No se hace aqui sino
+   en el marcado -class="lateral-cerrada" en <html> y aria-expanded="false"
+   en el boton-: asi el primer pintado ya sale plegado, sin la transicion de
+   .18s ni el salto del contenido que daria plegarla al cargar el script. A
+   partir de ahi manda el usuario. */
 
 /* =======================================================================
    5. Desplegables propios (solo capa visual de los filtros)
