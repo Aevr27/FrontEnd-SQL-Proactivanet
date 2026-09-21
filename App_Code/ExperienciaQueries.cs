@@ -922,8 +922,12 @@ public static class ExperienciaQueries
         var porC1C2 = new Dictionary<string, List<Detalle>>(StringComparer.OrdinalIgnoreCase);
         foreach (var d in detalle)
         {
-            Agregar(porC1, d.C1, d);
-            Agregar(porC1C2, d.C1C2, d);
+            // Mismo repliegue de emergencia que la UNION de mas abajo: si la
+            // vista no poblo el nivel, se corta de la ruta. Asi la fila que
+            // AsegurarFila crea con la llave derivada encuentra su
+            // iniciativa, en vez de nacer vacia.
+            Agregar(porC1, !string.IsNullOrEmpty(d.C1) ? d.C1 : C1De(d.Categoria), d);
+            Agregar(porC1C2, !string.IsNullOrEmpty(d.C1C2) ? d.C1C2 : C1C2De(d.Categoria), d);
         }
 
         // UNION con el universo de iniciativas.
@@ -942,17 +946,28 @@ public static class ExperienciaQueries
         // hace nada: no se duplica ninguna fila existente ni se toca su
         // volumen.
         //
-        // Se filtra por iniciativa ACTIVA y de un agrupador del tablero: es
-        // el mismo predicado con el que se calculan ini / ini_total / ret un
-        // poco mas abajo, o sea el unico que puede hacer visible la fila
-        // (renderDet solo muestra una categoria con volumen > 0 o con
-        // ini_total > 0). Crear filas por iniciativas cerradas engordaria el
-        // payload con categorias que ninguna vista llega a pintar.
+        // El unico filtro es EsRegistroDeIniciativa: que la fila SEA una
+        // iniciativa. Ni el estado ni el agrupador recortan aqui -ver la
+        // nota "QUE NO PUEDE ESCONDER UNA INICIATIVA" en ese helper-, porque
+        // una iniciativa cerrada o con un TipoAgrupado fuera de AGRUPADORES
+        // SI se publica cuando su categoria tiene tickets (mas abajo,
+        // c["iniciativas"] lleva la rama entera sin filtrar). Recortarla solo
+        // cuando no hay volumen la escondia por una condicion de tickets, que
+        // es justo lo que esta union existe para evitar.
+        //
+        // Las llaves C1 / C1&C2 salen de la vista; si vinieran vacias se
+        // derivan de la propia ruta con los mismos cortes (C1De / C1C2De son
+        // las replicas de fn_CategoriaC1 / fn_CategoriaC1C2), para que una
+        // fila con el nivel sin poblar tampoco se quede sin donde colgarse.
         foreach (var d in detalle)
         {
-            if (!d.Activa || !EsAgrupador(d.Agrup)) continue;
-            AsegurarFila(filas, d.C1, "C1");
-            AsegurarFila(filas, d.C1C2, "C2");
+            if (!EsRegistroDeIniciativa(d)) continue;
+
+            var c1 = !string.IsNullOrEmpty(d.C1) ? d.C1 : C1De(d.Categoria);
+            var c1c2 = !string.IsNullOrEmpty(d.C1C2) ? d.C1C2 : C1C2De(d.Categoria);
+
+            AsegurarFila(filas, c1, "C1");
+            AsegurarFila(filas, c1c2, "C2");
         }
 
         // vol_reduce_folio es del folio completo, no de la rama: se suma una
@@ -1177,6 +1192,13 @@ public static class ExperienciaQueries
         // d.Categoria ya viene normalizado por LeerIniciativas, asi que la
         // llave es la misma cadena que trae [Categoria V2] para esa ruta.
         //
+        // El filtro es el mismo que en ArmarCategorias: solo
+        // EsRegistroDeIniciativa. Ni el estado ni el agrupador recortan, por
+        // la misma razon -en una ruta CON tickets esas iniciativas ya se
+        // publican hoy (tiene_iniciativa se marca sin mirar ninguno de los
+        // dos, unas lineas mas arriba), asi que esconderlas cuando la ruta no
+        // tiene volumen seria ocultarlas por una condicion de tickets.
+        //
         // Va ANTES de calcular es_hoja a proposito: el comentario de abajo
         // define es_hoja sobre el catalogo completo y sin mirar el volumen
         // del periodo, y estas rutas ahora son parte de ese catalogo. Para
@@ -1188,7 +1210,7 @@ public static class ExperienciaQueries
         // jerarquia correcta.
         foreach (var d in detalle)
         {
-            if (!d.Activa || !EsAgrupador(d.Agrup)) continue;
+            if (!EsRegistroDeIniciativa(d)) continue;
             AsegurarFila(filas, d.Categoria, null);
         }
 
@@ -1480,6 +1502,43 @@ public static class ExperienciaQueries
             mapa[llave] = lista;
         }
         lista.Add(d);
+    }
+
+    // Si la fila de 'detalle' es un registro de iniciativa de verdad, y por
+    // tanto merece que exista la categoria a la que apunta.
+    //
+    // Es el UNICO filtro de la union "tickets UNION iniciativas". Dos
+    // condiciones, las dos de integridad del dato, no de negocio:
+    //
+    //   Folio    el Problem al que pertenece. LeerIniciativas lo trae del
+    //            INNER JOIN contra dbo.Problem y deduplica por
+    //            (Codigo, Categoria), asi que sin Folio no hay registro que
+    //            identificar.
+    //   Titulo   es v.Iniciativa (ver LeerIniciativas: la columna 4 del
+    //            SELECT). Un Problem SIN iniciativa no se convierte en
+    //            iniciativa: no se le inventa una categoria.
+    //
+    // QUE NO PUEDE ESCONDER UNA INICIATIVA
+    // ------------------------------------
+    // Ni el estado (EsActiva), ni el TipoAgrupado (EsAgrupador), ni que la
+    // categoria este marcada inactiva, ni que falte de dbo.Categorias, ni
+    // que no tenga un solo ticket en ningun slot ni en ningun mes, ni que no
+    // aparezca en vw_TBSlotCAT / vw_TBMesCAT. Todo eso son hechos del
+    // CATALOGO o del VOLUMEN de tickets, y una iniciativa valida no deja de
+    // existir por ellos: en una categoria que si tiene tickets esas mismas
+    // filas ya se publican hoy.
+    //
+    // La elegibilidad (activa + agrupador) sigue viva donde le toca: en los
+    // agregados ini / ini_total / ret, que son "tickets comprometidos por
+    // iniciativas vivas". Esta funcion decide si la CATEGORIA existe, no
+    // cuanto suma la iniciativa.
+    //
+    // La categoria en si la valida AsegurarFila, que ignora la llave vacia.
+    private static bool EsRegistroDeIniciativa(Detalle d)
+    {
+        return d != null
+            && !string.IsNullOrEmpty(d.Folio)
+            && !string.IsNullOrEmpty(d.Titulo);
     }
 
     private static bool EsAgrupador(string agrup)

@@ -8,8 +8,17 @@
 //   3) categoria con iniciativa y SIN tickets   -> existe, en CERO
 //   4) esa misma, ausente de vw_TBSlotCAT       -> entra en categorias_v2
 //
-// y, de paso, que una iniciativa cerrada sin tickets NO invente categoria y
-// que el universo no crezca de mas.
+// y los casos que aporta la regla "toda iniciativa valida se representa",
+// donde el unico filtro es EsRegistroDeIniciativa:
+//
+//   5) iniciativa CERRADA sin tickets           -> tambien crea categoria,
+//                                                  con los agregados en 0
+//   6) TipoAgrupado fuera de AGRUPADORES        -> tambien crea categoria
+//   7) la vista no poblo C1 / C1&C2             -> se cortan de la ruta
+//   8) Problem SIN iniciativa                   -> NO crea categoria
+//   9) dos Problems en la misma categoria       -> los dos, una sola fila
+//
+// y, de paso, que el universo no crezca de mas.
 //
 // Se entra por reflexion a proposito: ArmarCategorias / ArmarCategoriasV2
 // son privados y su entrada publica (Construir) abre una conexion a la
@@ -57,10 +66,17 @@ public static class UnionSmoke
     static object Det(string folio, string cat, string c1, string c1c2,
                       string estado, string agrup, int reduce)
     {
+        return Det(folio, cat, c1, c1c2, estado, agrup, reduce, "T " + folio);
+    }
+
+    // 'titulo' es v.Iniciativa: en null significa "Problem sin iniciativa".
+    static object Det(string folio, string cat, string c1, string c1c2,
+                      string estado, string agrup, int reduce, string titulo)
+    {
         var d = Nuevo(TDet);
         Set(d, "Folio", folio); Set(d, "Categoria", cat);
         Set(d, "C1", c1); Set(d, "C1C2", c1c2);
-        Set(d, "Titulo", "T " + folio); Set(d, "TituloProblem", "TP " + folio);
+        Set(d, "Titulo", titulo); Set(d, "TituloProblem", "TP " + folio);
         Set(d, "Estado", estado); Set(d, "Agrup", agrup);
         Set(d, "TicketsReduce", reduce);
         // Semaforo() es privado y estatico: se llama igual que en produccion,
@@ -78,6 +94,27 @@ public static class UnionSmoke
             return f;
         }
         return null;
+    }
+
+    static int Contar(IList filas, string categoria, string nivel)
+    {
+        var n = 0;
+        foreach (Dictionary<string, object> f in filas)
+        {
+            if (!string.Equals((string)f["categoria"], categoria, StringComparison.Ordinal)) continue;
+            if (nivel != null && !string.Equals((string)f["nivel"], nivel, StringComparison.Ordinal)) continue;
+            n++;
+        }
+        return n;
+    }
+
+    // Los folios adjuntos a una fila, en orden y separados por coma.
+    static string Folios(Dictionary<string, object> fila)
+    {
+        var folios = new List<string>();
+        foreach (Dictionary<string, object> i in (IList)fila["iniciativas"])
+            folios.Add((string)i["folio"]);
+        return string.Join(",", folios.ToArray());
     }
 
     static void Chk(string caso, object esperado, object obtenido)
@@ -130,8 +167,18 @@ public static class UnionSmoke
         detalle.Add(Det("P1", "/Con/Sub/Hoja", "Con", "/Con/Sub", "En Análisis", "Problem", 3));
         // La que hoy se pierde: activa, sin ninguna fila de volumen.
         detalle.Add(Det("P2", "/Solo/Sub/Hoja", "Solo", "/Solo/Sub", "En Solución", "Mejora", 5));
-        // Cerrada y sin volumen: NO debe crear categoria.
+        // Cerrada y sin volumen: SI crea categoria (caso 5), con los
+        // agregados de iniciativas vivas en 0.
         detalle.Add(Det("P3", "/Cerrada/Sub/Hoja", "Cerrada", "/Cerrada/Sub", "Cerrado", "Problem", 9));
+        // Activa pero con un TipoAgrupado fuera de AGRUPADORES (caso 6):
+        // tampoco puede desaparecer, y tampoco suma a ini_total.
+        detalle.Add(Det("P4", "/Rara/Sub/Hoja", "Rara", "/Rara/Sub", "En Análisis", "ReqOpr", 7));
+        // La vista no poblo C1 ni C1&C2 (caso 7): se cortan de la ruta.
+        detalle.Add(Det("P5", "/Muda/Sub/Hoja", null, null, "En Solución", "Problem", 4));
+        // Problem sin iniciativa (caso 8): no inventa categoria.
+        detalle.Add(Det("P6", "/Vacia/Sub/Hoja", "Vacia", "/Vacia/Sub", "En Análisis", "Problem", 2, null));
+        // Segundo Problem en la MISMA categoria que P2 (caso 9).
+        detalle.Add(Det("P7", "/Solo/Sub/Hoja", "Solo", "/Solo/Sub", "En Análisis", "Problem", 6));
 
         var dir = Activator.CreateInstance(TDir, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance,
             null, new object[] { Lista(TDue), new Dictionary<string, string>() }, null);
@@ -179,25 +226,67 @@ public static class UnionSmoke
             soloC2["inc"] + "/" + soloC2["pet"] + "/" + soloC2["reqopr"]);
         Chk("caso 3: vol_slot vacio, no fabricado", 0, ((IDictionary)soloC2["vol_slot"]).Count);
         Chk("caso 3: vol_mes vacio, no fabricado", 0, ((IDictionary)soloC2["vol_mes"]).Count);
-        Chk("caso 3: ini_total es el compromiso de la iniciativa", 5, soloC2["ini_total"]);
-        Chk("caso 3: la iniciativa queda adjunta", 1, ((IList)soloC2["iniciativas"]).Count);
+        // P2 (5) + P7 (6): las dos activas y con agrupador valido.
+        Chk("caso 3: ini_total es el compromiso de las iniciativas", 11, soloC2["ini_total"]);
         Chk("caso 3: el C1 de la fila C2 es el correcto", "Solo", soloC2["c1"]);
+
+        // ---- caso 9: dos Problems en la misma categoria sin tickets ----
+        Chk("caso 9: una sola fila C2 para los dos Problems", 1,
+            Contar(cats, "/Solo/Sub", "C2"));
+        Chk("caso 9: las dos iniciativas quedan adjuntas", 2,
+            ((IList)soloC2["iniciativas"]).Count);
+        Chk("caso 9: los dos folios, sin repetir", "P2,P7", Folios(soloC2));
+        Chk("caso 9: una sola fila v2 para la ruta", 1,
+            Contar(v2, "/Solo/Sub/Hoja", null));
 
         var soloV2 = Buscar(v2, "/Solo/Sub/Hoja", null);
         Chk("caso 4: la ruta completa entra en categorias_v2", true, soloV2 != null);
         Chk("caso 4: Con iniciativa", true, soloV2["tiene_iniciativa"]);
-        Chk("caso 4: ticket_reduce conservado", 5, soloV2["ticket_reduce"]);
+        Chk("caso 4: ticket_reduce conservado", 11, soloV2["ticket_reduce"]);
         Chk("caso 4: vol_slot vacio", 0, ((IDictionary)soloV2["vol_slot"]).Count);
         Chk("caso 4: es hoja", true, soloV2["es_hoja"]);
 
-        // ---- una iniciativa cerrada y sin tickets no inventa categoria ----
-        Chk("cerrada sin tickets: no crea fila C2", true, Buscar(cats, "/Cerrada/Sub", "C2") == null);
-        Chk("cerrada sin tickets: no crea fila v2", true, Buscar(v2, "/Cerrada/Sub/Hoja", null) == null);
+        // ---- caso 5: iniciativa CERRADA y sin tickets ----
+        // Antes se descartaba. Ahora existe: esconderla era esconderla por
+        // falta de tickets, y en una categoria CON tickets ya se publicaba.
+        var cerC2 = Buscar(cats, "/Cerrada/Sub", "C2");
+        Chk("caso 5: la cerrada sin tickets crea fila C2", true, cerC2 != null);
+        Chk("caso 5: vol_actual en 0", 0, cerC2["vol_actual"]);
+        Chk("caso 5: no suma a ini_total (no esta viva)", 0, cerC2["ini_total"]);
+        Chk("caso 5: ret en 0", 0, cerC2["ret"]);
+        Chk("caso 5: la iniciativa queda adjunta", 1, ((IList)cerC2["iniciativas"]).Count);
+        var cerV2 = Buscar(v2, "/Cerrada/Sub/Hoja", null);
+        Chk("caso 5: la ruta entra en categorias_v2", true, cerV2 != null);
+        Chk("caso 5: marca tiene_iniciativa", true, cerV2["tiene_iniciativa"]);
+        Chk("caso 5: ticket_reduce en 0 (no esta viva)", 0, cerV2["ticket_reduce"]);
+
+        // ---- caso 6: TipoAgrupado fuera de AGRUPADORES ----
+        var raraC2 = Buscar(cats, "/Rara/Sub", "C2");
+        Chk("caso 6: el agrupador inesperado crea fila C2", true, raraC2 != null);
+        Chk("caso 6: no suma a ini_total", 0, raraC2["ini_total"]);
+        Chk("caso 6: la iniciativa queda adjunta", 1, ((IList)raraC2["iniciativas"]).Count);
+        Chk("caso 6: la ruta entra en categorias_v2", true,
+            Buscar(v2, "/Rara/Sub/Hoja", null) != null);
+
+        // ---- caso 7: la vista no poblo C1 ni C1&C2 ----
+        Chk("caso 7: el C1 se corta de la ruta", true, Buscar(cats, "Muda", "C1") != null);
+        var mudaC2 = Buscar(cats, "/Muda/Sub", "C2");
+        Chk("caso 7: el C1&C2 se corta de la ruta", true, mudaC2 != null);
+        Chk("caso 7: la iniciativa llega a su fila", 1, ((IList)mudaC2["iniciativas"]).Count);
+        Chk("caso 7: y suma a ini_total", 4, mudaC2["ini_total"]);
+
+        // ---- caso 8: Problem SIN iniciativa ----
+        Chk("caso 8: no crea fila C1", true, Buscar(cats, "Vacia", "C1") == null);
+        Chk("caso 8: no crea fila C2", true, Buscar(cats, "/Vacia/Sub", "C2") == null);
+        Chk("caso 8: no crea fila v2", true, Buscar(v2, "/Vacia/Sub/Hoja", null) == null);
 
         // ---- el universo no crecio de mas ----
-        // cats: C1 Con/Sin/Solo + C2 /Con/Sub, /Sin/Sub, /Solo/Sub = 6
-        Chk("categorias: exactamente las 6 esperadas", 6, cats.Count);
-        Chk("categorias_v2: exactamente las 3 esperadas", 3, v2.Count);
+        // cats: C1 Con/Sin/Solo/Cerrada/Rara/Muda + C2 /Con/Sub, /Sin/Sub,
+        //       /Solo/Sub, /Cerrada/Sub, /Rara/Sub, /Muda/Sub = 12
+        Chk("categorias: exactamente las 12 esperadas", 12, cats.Count);
+        // v2: /Con/Sub/Hoja, /Sin/Sub/Hoja, /Solo/Sub/Hoja,
+        //     /Cerrada/Sub/Hoja, /Rara/Sub/Hoja, /Muda/Sub/Hoja = 6
+        Chk("categorias_v2: exactamente las 6 esperadas", 6, v2.Count);
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO OK" : fallos + " FALLAS");
