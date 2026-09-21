@@ -66,7 +66,35 @@
 // dos.
 //
 // Si algun dia se cambia fn_CategoriaC1 o fn_CategoriaC1C2 en la base, hay
-// que reflejarlo en C1DeTsql / C1C2De: son las que replican ese corte.
+// que reflejarlo en C1DeTsql / C1C2De: son las que replican ese corte. Lo
+// mismo con fn_NormalizaCategoria y Normaliza.
+//
+// QUE CATEGORIAS EXISTEN: TICKETS *UNION* INICIATIVAS
+// ---------------------------------------------------
+// El universo de categorias NO sale solo de las vistas de volumen. Si
+// saliera, una categoria con iniciativa pero sin un solo ticket en la
+// ventana no existiria como categoria y su iniciativa no se pintaria en
+// ningun lado, que es justo lo que pasaba.
+//
+// Las categorias entran por dos puertas:
+//
+//   Acumular      las que tuvieron tickets (vw_TBSlotCAT / vw_TBMesCAT),
+//                 con su volumen por periodo;
+//   AsegurarFila  las de las iniciativas ACTIVAS de dbo.vw_ProblemCategoria
+//                 (VigenteEnOrigen = 1) que la primera puerta no trajo, en
+//                 CERO: sin ninguna fila de volumen inventada.
+//
+// Las dos puertas usan la MISMA identidad de categoria -la ruta normalizada
+// por fn_NormalizaCategoria, y sus cortes C1 / C1&C2 por fn_CategoriaC1 /
+// fn_CategoriaC1C2-, asi que una categoria que llega por las dos se
+// reconoce y queda una sola fila, con su volumen intacto.
+//
+// El catalogo de validez es la vigencia de la propia vista de iniciativas,
+// que es la que este archivo ya consultaba. NO se usa dbo.Categorias: en
+// este repo solo la lee la ruta de QA (sql/10_qa_web.sql), meterla aqui
+// seria un segundo modelo de categoria en paralelo, y una categoria marcada
+// inactiva en el catalogo puede tener una iniciativa activa perfectamente
+// valida -precisamente la que hay que mostrar-.
 
 using System;
 using System.Collections.Generic;
@@ -101,6 +129,11 @@ public static class ExperienciaQueries
     // etiquetas del eje y el periodo que se publica en "meta" no puedan
     // separarse. No cambia la semantica: 0-30d, 31-60d, etc. siguen igual.
     private const int DIAS_SLOT = DashboardDataInfo.DiasSlot;
+
+    // Espacio duro. Va por codigo de caracter y no como literal para que
+    // ningun editor lo confunda con un espacio normal (mismo criterio que
+    // tools/PruebaReplegarExperiencia.cs).
+    private const char NBSP = ' ';
 
     // ------------------------------------------------------------------
     // Punto de entrada
@@ -469,7 +502,27 @@ public static class ExperienciaQueries
                 {
                     var d = new Detalle();
                     d.Folio = Texto(rd.GetValue(0));
-                    d.Categoria = Texto(rd.GetValue(1));
+
+                    // La ruta se guarda NORMALIZADA, no cruda. Es la misma
+                    // identidad de categoria que usa el resto del payload:
+                    // [Categoria V2] de las vistas de volumen ya viene de
+                    // fn_NormalizaCategoria, y v.C1 / v.C1C2 de esta misma
+                    // vista salen de fn_CategoriaC1 / fn_CategoriaC1C2, que
+                    // normalizan su argumento antes de cortar.
+                    //
+                    // Hace falta desde que el universo de categorias es la
+                    // UNION de tickets e iniciativas (ver AsegurarFila): una
+                    // ruta que traiga un NBSP o un espacio al final no
+                    // cruzaria con su propia fila de volumen -los
+                    // diccionarios de categoria comparan Ordinal- y se
+                    // crearia una categoria duplicada, con el volumen en una
+                    // copia y la iniciativa en la otra.
+                    //
+                    // Como fn_NormalizaCategoria es idempotente, las rutas
+                    // que ya venian limpias -la inmensa mayoria- no cambian,
+                    // y por tanto tampoco cambia lo que hoy publica
+                    // categorias_por_folio ni el cruce de ticket_reduce.
+                    d.Categoria = Normaliza(Texto(rd.GetValue(1)));
 
                     if (!vistas.Add((d.Folio ?? "") + SEP + (d.Categoria ?? "")))
                         continue;
@@ -873,6 +926,35 @@ public static class ExperienciaQueries
             Agregar(porC1C2, d.C1C2, d);
         }
 
+        // UNION con el universo de iniciativas.
+        //
+        // Hasta aqui 'filas' solo tiene las ramas que tuvieron tickets. Una
+        // rama cuyas categorias no registraron ni un ticket en ninguno de
+        // los diez slots ni en ningun mes del año no aparece en las vistas
+        // de volumen, asi que Acumular no le creo fila y las dos busquedas
+        // de mas abajo (porC1 / porC1C2) nunca llegaban a hacerse: la
+        // iniciativa existia en 'detalle' y no se pintaba en ningun lado.
+        //
+        // Las llaves son las de la propia vista de iniciativas (v.C1 y
+        // v.C1C2, derivadas por fn_CategoriaC1 / fn_CategoriaC1C2), o sea
+        // exactamente las mismas que emiten las vistas de volumen. Por eso
+        // una categoria que SI tiene tickets se reconoce y AsegurarFila no
+        // hace nada: no se duplica ninguna fila existente ni se toca su
+        // volumen.
+        //
+        // Se filtra por iniciativa ACTIVA y de un agrupador del tablero: es
+        // el mismo predicado con el que se calculan ini / ini_total / ret un
+        // poco mas abajo, o sea el unico que puede hacer visible la fila
+        // (renderDet solo muestra una categoria con volumen > 0 o con
+        // ini_total > 0). Crear filas por iniciativas cerradas engordaria el
+        // payload con categorias que ninguna vista llega a pintar.
+        foreach (var d in detalle)
+        {
+            if (!d.Activa || !EsAgrupador(d.Agrup)) continue;
+            AsegurarFila(filas, d.C1, "C1");
+            AsegurarFila(filas, d.C1C2, "C2");
+        }
+
         // vol_reduce_folio es del folio completo, no de la rama: se suma una
         // sola vez para todos.
         var reducePorFolio = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1083,6 +1165,31 @@ public static class ExperienciaQueries
             int v;
             reduce.TryGetValue(d.Categoria, out v);
             reduce[d.Categoria] = v + d.TicketsReduce;
+        }
+
+        // UNION con el universo de iniciativas, igual que en
+        // ArmarCategorias pero a nivel de ruta completa: la categoria de una
+        // iniciativa activa que no tuvo tickets en ningun periodo no viene
+        // en vw_TBSlotCAT ni en vw_TBMesCAT, y sin fila aqui el
+        // tiene_iniciativa / ticket_reduce que se acaban de indexar no los
+        // lee nadie.
+        //
+        // d.Categoria ya viene normalizado por LeerIniciativas, asi que la
+        // llave es la misma cadena que trae [Categoria V2] para esa ruta.
+        //
+        // Va ANTES de calcular es_hoja a proposito: el comentario de abajo
+        // define es_hoja sobre el catalogo completo y sin mirar el volumen
+        // del periodo, y estas rutas ahora son parte de ese catalogo. Para
+        // la vista de Con/Sin Iniciativa eso es inocuo -experiencia.js
+        // reevalua "hoja del periodo" en esHojaPeriodo(), que solo mira
+        // rutas con volumen > 0-, pero si afecta al historico, que filtra
+        // por el es_hoja estatico: una ruta que hasta hoy era hoja y ahora
+        // tiene una descendiente con iniciativa deja de serlo, que es la
+        // jerarquia correcta.
+        foreach (var d in detalle)
+        {
+            if (!d.Activa || !EsAgrupador(d.Agrup)) continue;
+            AsegurarFila(filas, d.Categoria, null);
         }
 
         // es_hoja: una ruta deja de ser hoja si existe otra que cuelga de
@@ -1302,6 +1409,44 @@ public static class ExperienciaQueries
         }
     }
 
+    // Asegura que exista la fila de una categoria, la haya visto Acumular o
+    // no. Si ya esta, no toca nada: el volumen que ya acumulo manda.
+    //
+    // POR QUE EXISTE
+    // --------------
+    // Acumular es la unica puerta por la que entraban categorias, y solo ve
+    // filas de vw_TBSlotCAT / vw_TBMesCAT. Una categoria sin UN SOLO ticket
+    // en ningun periodo no tiene fila en esas vistas, asi que no existia
+    // como categoria y su iniciativa no tenia donde colgarse: el
+    // TryGetValue de ArmarCategorias / ArmarCategoriasV2 fallaba y la
+    // iniciativa desaparecia del tablero. El universo de categorias pasa a
+    // ser tickets UNION iniciativas.
+    //
+    // CERO TICKETS, NO TICKETS FABRICADOS
+    // -----------------------------------
+    // La fila nace con Slot y Mes VACIOS y con Inc/Pet/Total en 0. No se
+    // inventa ninguna fila de volumen: Periodo() sobre un diccionario vacio
+    // devuelve 0 -asi que vol_actual, vol_anterior y sus variantes de mes
+    // salen en 0- y Mapa() devuelve un objeto vacio, que es lo que
+    // experiencia.js ya espera (volSlotOMes cae a ||0). El reparto por tipo
+    // queda en 0 y reqopr = max(0, 0-0-0) = 0.
+    //
+    // La llave tiene que salir de las mismas funciones que la de Acumular
+    // (fn_CategoriaC1 / fn_CategoriaC1C2 / fn_NormalizaCategoria, o sus
+    // replicas), porque el diccionario compara Ordinal; de ahi que quien
+    // llama pase v.C1 / v.C1C2 de la vista, o la ruta ya normalizada.
+    private static void AsegurarFila(Dictionary<string, Fila> filas, string llave, string nivel)
+    {
+        if (string.IsNullOrEmpty(llave)) return;
+        if (filas.ContainsKey(llave)) return;
+
+        var f = new Fila();
+        f.Categoria = llave;
+        f.Nivel = nivel;
+        f.C1 = nivel == "C1" ? llave : C1De(llave);
+        filas[llave] = f;
+    }
+
     // "/A/B/C" -> "A". Mismo corte que dbo.fn_CategoriaC1.
     private static string C1De(string ruta)
     {
@@ -1412,6 +1557,29 @@ public static class ExperienciaQueries
                 sb.Append(c);
         }
         return sb.ToString();
+    }
+
+    // Replica de dbo.fn_NormalizaCategoria:
+    //
+    //     LTRIM(RTRIM(REPLACE(ISNULL(@c, ''), NCHAR(160), ' ')))
+    //
+    // o sea: el espacio duro pasa a espacio normal y se recortan los
+    // espacios de los extremos (LTRIM/RTRIM de T-SQL recortan ESPACIOS, no
+    // cualquier blanco, de ahi el Trim(' ') y no el Trim() pelado).
+    //
+    // Es la definicion de identidad de una categoria en todo el tablero: la
+    // columna [Categoria V2] de las vistas de volumen es exactamente esto
+    // aplicado a Tickets.Categoria, y fn_CategoriaC1 / fn_CategoriaC1C2
+    // empiezan por llamarla. Es idempotente: una ruta ya normalizada -que es
+    // el caso de casi todas- sale igual que entro.
+    //
+    // Se devuelve null en vez de cadena vacia para que el resultado encaje
+    // con Texto(), que es de donde vienen estas rutas.
+    private static string Normaliza(string ruta)
+    {
+        if (ruta == null) return null;
+        var limpia = ruta.Replace(NBSP, ' ').Trim(' ');
+        return limpia.Length == 0 ? null : limpia;
     }
 
     private static string Texto(object v)
