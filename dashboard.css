@@ -673,15 +673,10 @@
     border-left: 3px solid var(--g-200);
     border-radius: var(--radius-xs); padding: 8px 10px;
   }
-  /* Reparto por rebanada encima del lienzo: informativo, nunca protagonista.
-     Va fuera del canvas, asi que no le quita alto a la grafica. */
-  .resumen-dim {
-    display: flex; flex-wrap: wrap; gap: 6px 10px;
-    margin: -4px 0 10px; font-size: 11px; color: var(--muted);
-  }
-  .resumen-dim:empty { display: none; }
-  .resumen-dim .chip-dim { white-space: nowrap; }
-  .resumen-dim .chip-dim b { font-weight: 700; color: var(--ink); }
+  /* .resumen-dim / .chip-dim se fueron con la linea de chips que iba encima
+     del lienzo de "Prioridad de lo resuelto": repetia la cifra que cada barra
+     ya lleva dentro. El porcentaje que si aportaba pasa a pintarse encima de
+     su barra (PCT_ENCIMA en dashboard.js), dentro del canvas. */
 
   .lienzo { position: relative; height: 260px; }
   .lienzo.alta { height: 320px; }

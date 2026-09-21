@@ -2358,30 +2358,65 @@ const TableroSla = (function () {
       });
   }
 
-  /* Total de la grafica y reparto por rebanada, FUERA del lienzo: el total en
-     la esquina del encabezado (el hueco de .hint) y una linea de chips encima
-     del canvas. Los dos numeros salen de las MISMAS entradas que pintan las
-     barras -entradasDim(), o sea el agregado del servidor o el recuento sobre
+  /* Total de la grafica, FUERA del lienzo: en la esquina del encabezado (el
+     hueco de .hint). Sale de las MISMAS entradas que pintan las barras
+     -entradasDim(), o sea el agregado del servidor o el recuento sobre
      `detalle`, segun el cross-filter-, asi que no hay una segunda lectura ni
      una segunda definicion de "resuelto": el total es la suma de las barras.
+
+     Devuelve el reparto ya formateado, en el orden de `ent`, para que lo
+     pinte PCT_ENCIMA. Antes ese reparto iba en una linea de chips encima del
+     canvas (.resumen-dim) que repetia el nombre de la rebanada -ya esta bajo
+     su barra- y su conteo -ya esta DENTRO de la barra-. De los tres datos
+     solo el porcentaje no estaba en ningun otro sitio, asi que es el unico
+     que sobrevive, y ahora va pegado a la barra que describe.
+
+     La cuenta no cambia: misma participacion sobre el mismo total, con el
+     mismo toFixed(1).
 
      El porcentaje es la PARTICIPACION de cada rebanada en ese total, no una
      tasa de resolucion: toda la poblacion de esta grafica ya es lo resuelto
      del rango. Con total 0 no hay denominador y se escribe N/D, no 0%. */
   function renderResumenDim(idCanvas, ent) {
     const cajaTotal = document.getElementById(idCanvas.replace('chart-', 'hint-'));
-    const caja = document.getElementById(idCanvas.replace('chart-', 'resumen-'));
-    if (!cajaTotal && !caja) return;
-
     const total = ent.reduce((s, e) => s + e[1], 0);
     if (cajaTotal) cajaTotal.textContent = `Total: ${FMT(total)}`;
-    if (!caja) return;
 
-    caja.innerHTML = ent.map(([etiqueta, n]) => {
-      const pct = total > 0 ? `${(n / total * 100).toFixed(1)}%` : 'N/D';
-      return `<span class="chip-dim"><b>${escapeHtml(etiqueta)}</b> ${FMT(n)} · ${pct}</span>`;
-    }).join('');
+    return ent.map(([, n]) => total > 0 ? `${(n / total * 100).toFixed(1)}%` : 'N/D');
   }
+
+  /* El porcentaje de cada barra, pegado por ENCIMA de su punta. Hermano de
+     CIFRA_PUNTA, que hace lo mismo a la derecha en la horizontal de
+     productividad: el conteo se queda DENTRO de la barra (ETIQUETAS_DENTRO) y
+     el porcentaje no lo tapa.
+
+     Lee `pctDimVigente` y no un dataset porque el porcentaje NO es una serie:
+     es el reparto que ya calculo renderResumenDim sobre las mismas entradas
+     que pintan las barras. Vive fuera de renderBarraDim por el mismo motivo
+     que CIFRA_PUNTA: el plugin es el de la PRIMERA construccion y tiene que
+     leer aqui el reparto vigente. */
+  let pctDimVigente = [];
+
+  const PCT_ENCIMA = {
+    id: 'pctEncima',
+    afterDatasetsDraw(chart) {
+      const meta = chart.getDatasetMeta(0);
+      if (!meta || meta.hidden) return;
+
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.font = Barras.fuente(12, '600');
+      ctx.fillStyle = Barras.TINTA_FUERA;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      meta.data.forEach((bar, i) => {
+        const pct = pctDimVigente[i];
+        if (pct == null) return;
+        ctx.fillText(pct, bar.x, bar.y - 6);
+      });
+      ctx.restore();
+    },
+  };
 
   function renderBarraDim(idCanvas, idGrafico, dim, orden, colorFn, mensajeVacio) {
     const ent = entradasDim(dim, orden);
@@ -2392,7 +2427,7 @@ const TableroSla = (function () {
 
     // Antes del corte por grafica vacia: sin rebanadas el resumen tambien
     // tiene que quedar en cero y no con los numeros del filtro anterior.
-    renderResumenDim(idCanvas, ent);
+    pctDimVigente = renderResumenDim(idCanvas, ent);
 
     if (!etiquetas.length) {
       destruir(idGrafico);
@@ -2407,14 +2442,18 @@ const TableroSla = (function () {
            (Barras.aplicarDefaults), asi que aqui solo queda lo propio de esta
            grafica: el color de colorFn -prioridad y rampa de antiguedad- y el
            contorno de seleccion. */
-        plugins: [ETIQUETAS_DENTRO],
+        plugins: [ETIQUETAS_DENTRO, PCT_ENCIMA],
         data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
           borderColor: sel.borderColor, borderWidth: sel.borderWidth }] },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false },
             tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
-          scales: { y: EJE_CONTEO },
+          /* `grace` es SOLO de esta grafica -no de EJE_CONTEO, que comparten
+             otras seis-: sube el tope del eje un 12% para que el porcentaje
+             de la barra mas alta no quede pegado al borde de la tarjeta ni lo
+             recorte el lienzo. */
+          scales: { y: { ...EJE_CONTEO, grace: '12%' } },
           onClick: (evt, _els, gr) => alternarFiltro(dim, etiquetaDelClic(gr, evt)),
         }
       }),
