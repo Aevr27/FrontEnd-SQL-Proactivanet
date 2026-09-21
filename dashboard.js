@@ -1541,9 +1541,13 @@ const TableroSla = (function () {
 
            El servidor ya la manda en HORARIO HABIL -lunes a viernes, 08:00 a
            18:30-, asi que ni la noche ni el fin de semana inflan la cifra. La
-           cifra grande es la MEDIANA y el pie el p90: ninguno es promedio. */
+           cifra grande es la MEDIANA y el pie el p90: ninguno es promedio.
+
+           El pie dice '90% < Xh Ym' y no 'p90': fuera de TI nadie lee un
+           percentil, pero todo el mundo entiende que 9 de cada 10 quedaron
+           por debajo de ese tiempo. */
         { l: 'Tiempo de 1ª respuesta', v: minutosLegibles(k.MinutosPrimeraRespuestaMediana),
-          f: k.MinutosPrimeraRespuestaP90 != null ? `p90 ${minutosLegibles(k.MinutosPrimeraRespuestaP90)}` : 'sin dato de primera respuesta' },
+          f: k.MinutosPrimeraRespuestaP90 != null ? `90% < ${minutosLegibles(k.MinutosPrimeraRespuestaP90)}` : 'sin dato de primera respuesta' },
         { l: 'Cumplimiento SLA', v: cumpl !== null ? `${cumpl}%` : 'N/D',
           f: evaluables ? `${FMT(k.TicketsDentroSla ?? 0)} de ${FMT(evaluables)} evaluables` : 'sin SLA evaluable',
           s: cumpl !== null ? SEM(cumpl) : '' },
@@ -1554,7 +1558,9 @@ const TableroSla = (function () {
            sigue en el pie para quien lo cuadre contra un reporte viejo. */
         { l: 'Horas resolucion (mediana)', v: k.HorasResolucionMediana ?? 'N/D',
           f: k.HorasResolucionPromedio != null ? `promedio ${k.HorasResolucionPromedio} h` : 'de registro a solucion' },
-        { l: 'Horas resolucion (p90)', v: k.HorasResolucionP90 ?? 'N/D',
+        /* '(90%)' y no '(p90)' por lo mismo que la primera respuesta: el
+           percentil no se lee fuera de TI. El pie lo termina de explicar. */
+        { l: 'Horas resolucion (90%)', v: k.HorasResolucionP90 ?? 'N/D',
           f: '9 de cada 10 tardaron menos' },
         { l: 'Reabiertos', v: reabPct !== null ? `${reabPct}%` : 'N/D',
           f: `${FMT(k.TicketsReabiertos ?? 0)} volvieron despues de darse por resueltos`,
