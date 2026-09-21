@@ -1537,8 +1537,12 @@ const TableroSla = (function () {
           f: k.TicketsCreados != null ? balanceTexto(k.TicketsCreados, resueltos, k.TicketsRechazados ?? 0) : 'por fecha de registro' },
         /* Primera respuesta: sale del texto 'Nh NNm' de Proactivanet, no del
            campo de horas enteras, que vale 0 en 7 de cada 10 tickets. Es otra
-           metrica que las horas de resolucion. */
-        { l: '1a respuesta (mediana)', v: minutosLegibles(k.MinutosPrimeraRespuestaMediana),
+           metrica que las horas de resolucion.
+
+           El servidor ya la manda en HORARIO HABIL -lunes a viernes, 08:00 a
+           18:30-, asi que ni la noche ni el fin de semana inflan la cifra. La
+           cifra grande es la MEDIANA y el pie el p90: ninguno es promedio. */
+        { l: 'Tiempo de 1ª respuesta', v: minutosLegibles(k.MinutosPrimeraRespuestaMediana),
           f: k.MinutosPrimeraRespuestaP90 != null ? `p90 ${minutosLegibles(k.MinutosPrimeraRespuestaP90)}` : 'sin dato de primera respuesta' },
         { l: 'Cumplimiento SLA', v: cumpl !== null ? `${cumpl}%` : 'N/D',
           f: evaluables ? `${FMT(k.TicketsDentroSla ?? 0)} de ${FMT(evaluables)} evaluables` : 'sin SLA evaluable',
@@ -1581,6 +1585,7 @@ const TableroSla = (function () {
       const promedio = horas.length ? Math.round(100 * horas.reduce((a, b) => a + Number(b), 0) / horas.length) / 100 : null;
       const med = mediana(horas);
       // Misma mediana interpolada, sobre los tickets filtrados con dato.
+      // MinutosPrimeraRespuesta ya llega en minutos HABILES desde el servidor.
       const respuestas = f.map(r => r.MinutosPrimeraRespuesta).filter(x => x !== null && x !== undefined);
       const medRespuesta = mediana(respuestas);
       const reabPct = n ? Math.round(1000 * reabiertos / n) / 10 : null;
@@ -1594,7 +1599,7 @@ const TableroSla = (function () {
         { l: 'Vencidos SLA', v: FMT(vencidos), f: `${PCT(vencidos, n)} de lo filtrado`, s: vencidos > 0 ? 'sr' : 'sv' },
         { l: 'Horas resolucion (mediana)', v: med ?? 'N/D',
           f: `${FMT(horas.length)} tickets resueltos${promedio !== null ? ` · promedio ${promedio} h` : ''}` },
-        { l: '1a respuesta (mediana)', v: minutosLegibles(medRespuesta), f: `${FMT(respuestas.length)} con dato` },
+        { l: 'Tiempo de 1ª respuesta', v: minutosLegibles(medRespuesta), f: `${FMT(respuestas.length)} con dato` },
         { l: 'Reabiertos', v: reabPct !== null ? `${reabPct}%` : 'N/D',
           f: `${FMT(reabiertos)} de lo filtrado`, s: SEM_REABIERTOS(reabPct) },
         // Solo personas, igual que "Tecnicos activos" sin filtro.
