@@ -2358,12 +2358,41 @@ const TableroSla = (function () {
       });
   }
 
+  /* Total de la grafica y reparto por rebanada, FUERA del lienzo: el total en
+     la esquina del encabezado (el hueco de .hint) y una linea de chips encima
+     del canvas. Los dos numeros salen de las MISMAS entradas que pintan las
+     barras -entradasDim(), o sea el agregado del servidor o el recuento sobre
+     `detalle`, segun el cross-filter-, asi que no hay una segunda lectura ni
+     una segunda definicion de "resuelto": el total es la suma de las barras.
+
+     El porcentaje es la PARTICIPACION de cada rebanada en ese total, no una
+     tasa de resolucion: toda la poblacion de esta grafica ya es lo resuelto
+     del rango. Con total 0 no hay denominador y se escribe N/D, no 0%. */
+  function renderResumenDim(idCanvas, ent) {
+    const cajaTotal = document.getElementById(idCanvas.replace('chart-', 'hint-'));
+    const caja = document.getElementById(idCanvas.replace('chart-', 'resumen-'));
+    if (!cajaTotal && !caja) return;
+
+    const total = ent.reduce((s, e) => s + e[1], 0);
+    if (cajaTotal) cajaTotal.textContent = `Total: ${FMT(total)}`;
+    if (!caja) return;
+
+    caja.innerHTML = ent.map(([etiqueta, n]) => {
+      const pct = total > 0 ? `${(n / total * 100).toFixed(1)}%` : 'N/D';
+      return `<span class="chip-dim"><b>${escapeHtml(etiqueta)}</b> ${FMT(n)} · ${pct}</span>`;
+    }).join('');
+  }
+
   function renderBarraDim(idCanvas, idGrafico, dim, orden, colorFn, mensajeVacio) {
     const ent = entradasDim(dim, orden);
     const etiquetas = ent.map(e => e[0]);
     const valores = ent.map(e => e[1]);
     const colores = etiquetas.map((l, i) => colorFn(l, i));
     const sel = bordesSeleccion(etiquetas, filtro[dim], 0);
+
+    // Antes del corte por grafica vacia: sin rebanadas el resumen tambien
+    // tiene que quedar en cero y no con los numeros del filtro anterior.
+    renderResumenDim(idCanvas, ent);
 
     if (!etiquetas.length) {
       destruir(idGrafico);
