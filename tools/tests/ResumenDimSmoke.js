@@ -3,14 +3,20 @@
 //
 // NO forma parte del sitio: vive fuera de assets/, asi que ni IIS ni el
 // navegador lo cargan nunca. Recorta la funcion del propio dashboard.js y la
-// corre con un DOM de mentira, para que el total del encabezado y los chips de
-// reparto no se rompan sin que nadie se entere. Lo que fija:
+// corre con un DOM de mentira, para que el total del encabezado y el reparto
+// no se rompan sin que nadie se entere. Lo que fija:
 //
 //   - el total es la SUMA de las rebanadas que pinta la grafica;
 //   - el porcentaje es participacion sobre ese total, a un decimal;
 //   - una rebanada en 0 da 0.0%, no N/D (si hay denominador);
 //   - sin rebanadas -o con total 0- se escribe N/D y el total queda en 0;
-//   - la etiqueta se escapa antes de ir a innerHTML.
+//   - el reparto sale EN EL ORDEN de las entradas, que es como lo indexa
+//     PCT_ENCIMA contra las barras.
+//
+// El reparto ya no se escribe como chips en .resumen-dim: la funcion lo
+// DEVUELVE y lo pinta PCT_ENCIMA encima de cada barra. Por eso desaparecio el
+// caso del escape de la etiqueta -no hay innerHTML ni etiqueta de por medio,
+// solo el porcentaje- y las aserciones miran el arreglo devuelto.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -38,19 +44,13 @@ var cuerpo = fuente.slice(ini, fin + 4);
 var FMT = function (n) {
   return (n === null || n === undefined || n === '') ? '' : Number(n).toLocaleString('es-MX');
 };
-var escapeHtml = function (s) {
-  return String(s === null || s === undefined ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-};
-
 var nodos = {};
 var document = {
   getElementById: function (id) { return nodos[id] || null; }
 };
 
-var renderResumenDim = (new Function('FMT', 'escapeHtml', 'document',
-  cuerpo + '\n return renderResumenDim;'))(FMT, escapeHtml, document);
+var renderResumenDim = (new Function('FMT', 'document',
+  cuerpo + '\n return renderResumenDim;'))(FMT, document);
 
 var fallos = 0;
 function Check(caso, esperado, obtenido) {
@@ -61,50 +61,46 @@ function Check(caso, esperado, obtenido) {
 }
 
 function correr(entradas) {
-  nodos = {
-    'hint-prioridad': { textContent: '' },
-    'resumen-prioridad': { innerHTML: '' }
-  };
-  renderResumenDim('chart-prioridad', entradas);
-  return { total: nodos['hint-prioridad'].textContent, chips: nodos['resumen-prioridad'].innerHTML };
+  nodos = { 'hint-prioridad': { textContent: '' } };
+  var pct = renderResumenDim('chart-prioridad', entradas);
+  return { total: nodos['hint-prioridad'].textContent, pct: pct };
 }
 
 // A) Reparto normal: el de la captura del tablero.
 var a = correr([['Media', 3155], ['Alta', 2528], ['Baja', 1664], ['Critica', 1476]]);
 Check('A total = suma de las barras', 'Total: 8,823', a.total);
-Check('A Media', true, a.chips.indexOf('<b>Media</b> 3,155 · 35.8%') >= 0);
-Check('A Alta', true, a.chips.indexOf('<b>Alta</b> 2,528 · 28.7%') >= 0);
-Check('A Baja', true, a.chips.indexOf('<b>Baja</b> 1,664 · 18.9%') >= 0);
-Check('A Critica', true, a.chips.indexOf('<b>Critica</b> 1,476 · 16.7%') >= 0);
+// El reparto va en el MISMO orden que las entradas: PCT_ENCIMA lo indexa
+// contra meta.data[i], asi que un reordenamiento pondria el porcentaje de una
+// prioridad encima de la barra de otra.
+Check('A reparto en orden', '35.8%,28.7%,18.9%,16.7%', a.pct.join(','));
 Check('A los porcentajes suman ~100', '100.1',
   (35.8 + 28.7 + 18.9 + 16.7).toFixed(1));  // el redondeo a un decimal no cierra exacto
 
 // B) Rebanada en cero con denominador valido: 0.0%, NO N/D.
 var b = correr([['Media', 10], ['Critica', 0]]);
 Check('B total', 'Total: 10', b.total);
-Check('B rebanada en cero', true, b.chips.indexOf('<b>Critica</b> 0 · 0.0%') >= 0);
+Check('B rebanada en cero', '0.0%', b.pct[1]);
 
 // C) Sin rebanadas (grafica vacia): total 0 y ningun chip.
 var c = correr([]);
 Check('C total sin rebanadas', 'Total: 0', c.total);
-Check('C sin chips', '', c.chips);
+Check('C sin reparto', 0, c.pct.length);
 
 // D) Todas las rebanadas en cero: sin denominador se escribe N/D, no 0%.
 var d = correr([['Media', 0], ['Alta', 0]]);
 Check('D total', 'Total: 0', d.total);
-Check('D N/D y no 0%', true, d.chips.indexOf('<b>Media</b> 0 · N/D') >= 0);
-Check('D sin porcentaje inventado', -1, d.chips.indexOf('0.0%'));
+Check('D N/D y no 0%', 'N/D,N/D', d.pct.join(','));
+Check('D sin porcentaje inventado', -1, d.pct.join(',').indexOf('0.0%'));
 
-// E) La etiqueta va escapada: llega de datos, no del codigo.
-var e = correr([['<img src=x>', 5]]);
-Check('E etiqueta escapada', true, e.chips.indexOf('&lt;img src=x&gt;') >= 0);
-Check('E sin etiqueta cruda', -1, e.chips.indexOf('<img'));
+// E) Una sola rebanada se lleva el 100%: es el denominador de si misma.
+var e = correr([['Media', 5]]);
+Check('E rebanada unica', '100.0%', e.pct[0]);
 
-// F) Tarjeta sin los huecos del resumen: no revienta (otras graficas de
-//    dimension pueden no tenerlos).
+// F) Tarjeta sin el hueco del total: no revienta (otras graficas de
+//    dimension pueden no tenerlo) y el reparto igual sale.
 nodos = {};
-renderResumenDim('chart-otra', [['X', 1]]);
-Check('F sin huecos no revienta', 'ok', 'ok');
+Check('F sin hueco no revienta', '100.0%',
+  renderResumenDim('chart-otra', [['X', 1]])[0]);
 
 console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\nTODO PASA');
 process.exit(fallos ? 1 : 0);
