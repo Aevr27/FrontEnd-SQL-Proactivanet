@@ -19,11 +19,14 @@
 // permisos de DDL, solo copiar App_Code y los .ashx al sitio de IIS. ASP.NET
 // compila App_Code solo en el primer request.
 //
-// OJO: mientras esto este activo, la logica de las consultas vive en dos
-// sitios (estos textos y los procedimientos usp_Dash_*Multi). Si alguien
-// cambia los procedimientos, el tablero no se entera. Si algun dia se ejecuta
-// fix_tecnicos_separador_pipe.sql en la base, los handlers pueden volver a
-// llamar a los procedimientos y este archivo se borra.
+// OJO: los procedimientos usp_Dash_*Multi que estas consultas sustituyeron
+// siguen existiendo en la base, pero YA NO los llama nadie y sus reglas
+// dejaron de ser las del tablero: miden el rango por FechaRegistro, cuentan
+// los 'Rechazada' como resueltos, juzgan el SLA contra la firma de CIERRE y
+// no excluyen las cuentas que no son personas. Volver a llamarlos NO seria
+// volver atras un refactor, seria cambiar los numeros del tablero. El plan
+// viejo -ejecutar fix_tecnicos_separador_pipe.sql y borrar este archivo- ya
+// no aplica: ese script conserva solo dbo.fn_Dash_SplitListPipe.
 //
 // Las consultas partieron como copia literal del cuerpo de los procedimientos
 // (mismo campo b.Tecnico, mismo tope de filas). Ya NO lo son en fechas ni en
@@ -37,7 +40,10 @@
 //   - reabierto = IntentosSolucion > 1;
 //   - los 'Rechazada' no cuentan como resueltos (si como creados);
 //   - las cuentas de dbo.CatCuentaNoPersona salen de lo que habla de personas;
-//   - primera respuesta = TiempoPrimeraRespuestaHorasMin ('Nh NNm') en minutos.
+//   - primera respuesta = TiempoPrimeraRespuestaHorasMin ('Nh NNm'), pero
+//     remedida en HORARIO HABIL (lunes a viernes, 08:00-18:30): ver
+//     PrimeraRespuesta y MinutosHabilesDesdeAncla. La mediana y el p90 del
+//     tablero salen de esos minutos habiles, no de minutos de reloj.
 // El tecnico es b.Tecnico tal como lo define la vista desplegada: el asignado
 // con la vista anterior, la firma de solucion con la de 04_dashboard_sla.sql.
 // Es el mismo campo que llena el filtro (usp_Dash_Catalogos), asi que los dos
@@ -58,6 +64,50 @@ public static class DashboardQueries
     // Filtros comunes
     // ---------------------------------------------------------------------
 
+    /* LA SELECCION DE TECNICOS, de punta a punta.
+
+       Los nombres de tecnico tienen el formato "Apellidos, Nombre", asi que
+       SIEMPRE llevan una coma dentro. Eso obliga a dos reglas que antes
+       vivian separadas -el literal '|' en Filtros.Desde y en ListaPorPipe, y
+       la construccion del IN en EnLista-, y que tenian que cambiar juntas sin
+       que nada lo dijera:
+
+         1. la lista viaja separada por '|', nunca por coma (dashboard.js ya
+            la manda asi);
+         2. cada nombre se manda como su PROPIO parametro dentro de un IN, asi
+            que ninguna coma vuelve a tocar un parser de SQL ni hay forma de
+            inyectar.
+
+       Las dos son ahora de esta clase. Si alguna vez cambia el separador, se
+       cambia Separador y ya: no queda ningun '|' suelto por el archivo. */
+    public sealed class TecnicoFiltro
+    {
+        // El separador de la lista de tecnicos. NO es coma a proposito: ver
+        // el comentario de arriba.
+        public const char Separador = '|';
+
+        private readonly List<string> nombres;
+
+        public TecnicoFiltro(string lista)
+        {
+            nombres = Partir(lista, Separador);
+        }
+
+        // Los nombres ya partidos, para quien necesite la lista en si
+        // (ResolverAgentes, el catalogo del Call Center).
+        public List<string> Nombres { get { return nombres; } }
+
+        public bool Vacio { get { return nombres.Count == 0; } }
+
+        /* El "AND columna IN (@t0, @t1, ...)" de esta seleccion, con los
+           parametros ya cargados en el comando. Vacio = sin filtro, igual que
+           el NULL que recibian los procedimientos. */
+        public string Predicado(SqlCommand cmd, string columna, string prefijo)
+        {
+            return EnLista(cmd, columna, prefijo, nombres);
+        }
+    }
+
     // Filtros de un request del tablero de SLA, ya listos para inyectarse en
     // una consulta de texto.
     public sealed class Filtros
@@ -65,7 +115,7 @@ public static class DashboardQueries
         public DateTime FechaInicio;
         public DateTime FechaFin;
         public List<string> Grupos = new List<string>();
-        public List<string> Tecnicos = new List<string>();
+        public TecnicoFiltro Tecnicos = new TecnicoFiltro(null);
 
         public static Filtros Desde(HttpRequest request)
         {
@@ -76,7 +126,7 @@ public static class DashboardQueries
             f.FechaInicio = Fecha(fi);
             f.FechaFin = Fecha(ff);
             f.Grupos = Partir(request.QueryString["grupos"], ',');
-            f.Tecnicos = Partir(request.QueryString["tecnicos"], '|');
+            f.Tecnicos = new TecnicoFiltro(request.QueryString["tecnicos"]);
             return f;
         }
     }
@@ -139,7 +189,7 @@ public static class DashboardQueries
         cmd.Parameters.Add("@FechaFin", SqlDbType.Date).Value = f.FechaFin;
 
         string comunes = EnLista(cmd, "b.Grupo", "g", f.Grupos)
-                       + EnLista(cmd, "b.Tecnico", "t", f.Tecnicos);
+                       + f.Tecnicos.Predicado(cmd, "b.Tecnico", "t");
 
         string solucion = "b.FechaFirmaSolucion >= @FechaInicio"
                         + " AND b.FechaFirmaSolucion < DATEADD(DAY, 1, @FechaFin)" + comunes;
@@ -195,29 +245,95 @@ public static class DashboardQueries
         return catalogoNoPersona;
     }
 
-    /* Minutos hasta la primera respuesta, del texto 'Nh NNm' de
-       dbo.Tickets.TiempoPrimeraRespuestaHorasMin. Mismo parseo que
+    /* Minutos HABILES hasta la primera respuesta.
+
+       El dato de origen es el texto 'Nh NNm' de
+       dbo.Tickets.TiempoPrimeraRespuestaHorasMin, que Proactivanet mide en
+       tiempo de CALENDARIO desde el registro. Mismo parseo que
        MinutosPrimeraRespuesta en 04_dashboard_sla.sql: el campo de horas
        enteras (TiempoPrimeraRespuesta) vale '0' en 7 de cada 10 tickets y
        seria una constante. TRY_CONVERT y las dos guardas de CHARINDEX para
        que un formato distinto de NULL y no un numero equivocado.
 
+       Sobre ese calendario se reconstruye el INSTANTE de la primera
+       respuesta -FechaRegistro + los minutos del texto- y se vuelve a medir
+       el hueco contando SOLO horario habil (ver MinutosHabilesDesdeAncla).
+       La columna sigue llamandose MinutosPrimeraRespuesta y sigue en
+       minutos, pero ya no son minutos de reloj: son minutos habiles. De ahi
+       salen la mediana y el p90 del tablero.
+
+       La base no guarda la fecha de la primera respuesta -solo el texto del
+       transcurrido-, asi que reconstruirla desde FechaRegistro es la unica
+       forma de tener los dos extremos que el horario habil necesita.
+
        Sale de dbo.Tickets y no de la vista porque la vista anterior no trae
-       la columna. CodigoTicket es la llave primaria: una fila o ninguna. */
-    private const string PrimeraRespuesta = @"
+       la columna. CodigoTicket es la llave primaria: una fila o ninguna.
+
+       NULL manda: sin texto valido no hay MinutosCalendario, sin el no hay
+       Fin, y sin Fin no hay resta. El ticket queda sin dato, igual que antes,
+       y PERCENTILE_CONT lo ignora. */
+    private static readonly string PrimeraRespuesta = @"
 OUTER APPLY (
-    SELECT MinutosPrimeraRespuesta = CASE
-        WHEN CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) > 1
-         AND CHARINDEX(N'm', tk.TiempoPrimeraRespuestaHorasMin)
-           > CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin)
-        THEN TRY_CONVERT(INT, LEFT(tk.TiempoPrimeraRespuestaHorasMin,
-                                   CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) - 1)) * 60
-           + TRY_CONVERT(INT, SUBSTRING(tk.TiempoPrimeraRespuestaHorasMin,
-                                        CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) + 2, 2))
-        ELSE NULL END
+    SELECT MinutosPrimeraRespuesta = h.HabilesFin - h.HabilesIni
     FROM dbo.Tickets tk
+    CROSS APPLY (
+        SELECT MinutosCalendario = CASE
+            WHEN CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) > 1
+             AND CHARINDEX(N'm', tk.TiempoPrimeraRespuestaHorasMin)
+               > CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin)
+            THEN TRY_CONVERT(INT, LEFT(tk.TiempoPrimeraRespuestaHorasMin,
+                                       CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) - 1)) * 60
+               + TRY_CONVERT(INT, SUBSTRING(tk.TiempoPrimeraRespuestaHorasMin,
+                                            CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) + 2, 2))
+            ELSE NULL END
+    ) AS cal
+    CROSS APPLY (
+        SELECT Inicio = b.FechaRegistro,
+               Fin = DATEADD(MINUTE, cal.MinutosCalendario, b.FechaRegistro)
+    ) AS mom
+    CROSS APPLY (
+        SELECT HabilesIni = " + MinutosHabiles("mom.Inicio") + @",
+               HabilesFin = " + MinutosHabiles("mom.Fin") + @"
+    ) AS h
     WHERE tk.CodigoTicket = b.CodigoTicket
 ) AS pr1";
+
+    /* HORARIO HABIL: lunes a viernes, 08:00 a 18:30. Sabado y domingo no
+       cuentan, y de los dias habiles solo cuenta lo que cae dentro de la
+       ventana: antes de las 08:00 y despues de las 18:30 no suma nada.
+
+       La expresion devuelve los minutos habiles acumulados DESDE UN ANCLA
+       fija -el lunes 1900-01-01- hasta el momento que se le pase. El
+       transcurrido habil entre dos instantes es la resta de sus dos
+       acumulados, sin bucles ni tabla de calendario: una semana son 5 dias
+       de 630 minutos (3150), el dia de la semana suma los dias habiles ya
+       cerrados -sabado y domingo se topan en 5- y el ultimo sumando es el
+       trozo de la ventana que el reloj ya consumio hoy.
+
+         480  = 08:00 en minutos desde medianoche
+         1110 = 18:30
+         630  = 1110 - 480, la jornada
+         3150 = 630 * 5, la semana
+
+       $M$ es el momento; MinutosHabiles() lo sustituye. El texto se extrae
+       tal cual desde tools/tests/HorasHabilesSmoke.ps1, asi que la prueba
+       mide ESTA expresion y no una copia que pueda quedarse atras. */
+    // <<MINUTOS_HABILES
+    private const string MinutosHabilesDesdeAncla = @"
+          (DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) / 7) * 3150
+        + (CASE WHEN DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) % 7 > 5 THEN 5
+                ELSE DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) % 7 END) * 630
+        + CASE
+            WHEN DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) % 7 >= 5 THEN 0
+            WHEN DATEDIFF(MINUTE, CONVERT(date, $M$), $M$) <= 480 THEN 0
+            WHEN DATEDIFF(MINUTE, CONVERT(date, $M$), $M$) >= 1110 THEN 630
+            ELSE DATEDIFF(MINUTE, CONVERT(date, $M$), $M$) - 480 END";
+    // MINUTOS_HABILES>>
+
+    private static string MinutosHabiles(string momento)
+    {
+        return MinutosHabilesDesdeAncla.Replace("$M$", momento);
+    }
 
     /* SLA, horas de resolucion y reabierto, medidos contra la FIRMA DE
        SOLUCION. Es la definicion de 04_dashboard_sla.sql, calculada aqui con
@@ -395,20 +511,7 @@ CROSS APPLY (
                 {
                     var filas = new List<Dictionary<string, object>>();
                     while (reader.Read())
-                    {
-                        var fila = new Dictionary<string, object>();
-                        for (int i = 0; i < reader.FieldCount; i++)
-                        {
-                            object valor = reader.GetValue(i);
-                            if (valor is DBNull)
-                                valor = null;
-                            else if (valor is DateTime)
-                                valor = ((DateTime)valor).ToString("yyyy-MM-ddTHH:mm:ss");
-
-                            fila[reader.GetName(i)] = valor;
-                        }
-                        filas.Add(fila);
-                    }
+                        filas.Add(SqlRowMapper.Fila(reader));
                     resultados.Add(filas);
                 } while (reader.NextResult());
             }
@@ -452,7 +555,8 @@ CROSS APPLY (
          TicketsAbiertos  = de esos, los resueltos que aun esperan el cierre */
     public static Dictionary<string, object> Kpis(Filtros f)
     {
-        const string sql = @"
+        // Texto armado: PrimeraRespuesta no es constante (lleva el horario habil).
+        string sql = @"
 ;WITH base AS
 (
     SELECT
@@ -730,7 +834,8 @@ DROP TABLE #DistribucionAgg;";
        arriba lo recien resuelto. */
     public static List<Dictionary<string, object>> Detalle(Filtros f, int top)
     {
-        const string sql = @"
+        // Texto armado: PrimeraRespuesta no es constante (lleva el horario habil).
+        string sql = @"
 SELECT TOP (@TopSeguro)
     b.CodigoTicket,
     b.FechaRegistro,
@@ -1103,9 +1208,10 @@ ORDER BY v.Dia;";
         return Partir(valor, ',');
     }
 
-    // Lista separada por '|' (tecnicos: sus nombres llevan coma dentro).
+    // Lista de tecnicos del query string. El separador lo pone TecnicoFiltro,
+    // no un literal aqui: es la misma regla que usa el filtro del tablero.
     public static List<string> ListaPorPipe(string valor)
     {
-        return Partir(valor, '|');
+        return new TecnicoFiltro(valor).Nombres;
     }
 }

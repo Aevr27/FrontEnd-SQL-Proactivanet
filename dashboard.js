@@ -1537,9 +1537,17 @@ const TableroSla = (function () {
           f: k.TicketsCreados != null ? balanceTexto(k.TicketsCreados, resueltos, k.TicketsRechazados ?? 0) : 'por fecha de registro' },
         /* Primera respuesta: sale del texto 'Nh NNm' de Proactivanet, no del
            campo de horas enteras, que vale 0 en 7 de cada 10 tickets. Es otra
-           metrica que las horas de resolucion. */
-        { l: '1a respuesta (mediana)', v: minutosLegibles(k.MinutosPrimeraRespuestaMediana),
-          f: k.MinutosPrimeraRespuestaP90 != null ? `p90 ${minutosLegibles(k.MinutosPrimeraRespuestaP90)}` : 'sin dato de primera respuesta' },
+           metrica que las horas de resolucion.
+
+           El servidor ya la manda en HORARIO HABIL -lunes a viernes, 08:00 a
+           18:30-, asi que ni la noche ni el fin de semana inflan la cifra. La
+           cifra grande es la MEDIANA y el pie el p90: ninguno es promedio.
+
+           El pie dice '90% < Xh Ym' y no 'p90': fuera de TI nadie lee un
+           percentil, pero todo el mundo entiende que 9 de cada 10 quedaron
+           por debajo de ese tiempo. */
+        { l: 'Tiempo de 1ª respuesta', v: minutosLegibles(k.MinutosPrimeraRespuestaMediana),
+          f: k.MinutosPrimeraRespuestaP90 != null ? `90% < ${minutosLegibles(k.MinutosPrimeraRespuestaP90)}` : 'sin dato de primera respuesta' },
         { l: 'Cumplimiento SLA', v: cumpl !== null ? `${cumpl}%` : 'N/D',
           f: evaluables ? `${FMT(k.TicketsDentroSla ?? 0)} de ${FMT(evaluables)} evaluables` : 'sin SLA evaluable',
           s: cumpl !== null ? SEM(cumpl) : '' },
@@ -1550,7 +1558,9 @@ const TableroSla = (function () {
            sigue en el pie para quien lo cuadre contra un reporte viejo. */
         { l: 'Horas resolucion (mediana)', v: k.HorasResolucionMediana ?? 'N/D',
           f: k.HorasResolucionPromedio != null ? `promedio ${k.HorasResolucionPromedio} h` : 'de registro a solucion' },
-        { l: 'Horas resolucion (p90)', v: k.HorasResolucionP90 ?? 'N/D',
+        /* '(90%)' y no '(p90)' por lo mismo que la primera respuesta: el
+           percentil no se lee fuera de TI. El pie lo termina de explicar. */
+        { l: 'Horas resolucion (90%)', v: k.HorasResolucionP90 ?? 'N/D',
           f: '9 de cada 10 tardaron menos' },
         { l: 'Reabiertos', v: reabPct !== null ? `${reabPct}%` : 'N/D',
           f: `${FMT(k.TicketsReabiertos ?? 0)} volvieron despues de darse por resueltos`,
@@ -1581,6 +1591,7 @@ const TableroSla = (function () {
       const promedio = horas.length ? Math.round(100 * horas.reduce((a, b) => a + Number(b), 0) / horas.length) / 100 : null;
       const med = mediana(horas);
       // Misma mediana interpolada, sobre los tickets filtrados con dato.
+      // MinutosPrimeraRespuesta ya llega en minutos HABILES desde el servidor.
       const respuestas = f.map(r => r.MinutosPrimeraRespuesta).filter(x => x !== null && x !== undefined);
       const medRespuesta = mediana(respuestas);
       const reabPct = n ? Math.round(1000 * reabiertos / n) / 10 : null;
@@ -1594,7 +1605,7 @@ const TableroSla = (function () {
         { l: 'Vencidos SLA', v: FMT(vencidos), f: `${PCT(vencidos, n)} de lo filtrado`, s: vencidos > 0 ? 'sr' : 'sv' },
         { l: 'Horas resolucion (mediana)', v: med ?? 'N/D',
           f: `${FMT(horas.length)} tickets resueltos${promedio !== null ? ` · promedio ${promedio} h` : ''}` },
-        { l: '1a respuesta (mediana)', v: minutosLegibles(medRespuesta), f: `${FMT(respuestas.length)} con dato` },
+        { l: 'Tiempo de 1ª respuesta', v: minutosLegibles(medRespuesta), f: `${FMT(respuestas.length)} con dato` },
         { l: 'Reabiertos', v: reabPct !== null ? `${reabPct}%` : 'N/D',
           f: `${FMT(reabiertos)} de lo filtrado`, s: SEM_REABIERTOS(reabPct) },
         // Solo personas, igual que "Tecnicos activos" sin filtro.
@@ -2347,12 +2358,76 @@ const TableroSla = (function () {
       });
   }
 
+  /* Total de la grafica, FUERA del lienzo: en la esquina del encabezado (el
+     hueco de .hint). Sale de las MISMAS entradas que pintan las barras
+     -entradasDim(), o sea el agregado del servidor o el recuento sobre
+     `detalle`, segun el cross-filter-, asi que no hay una segunda lectura ni
+     una segunda definicion de "resuelto": el total es la suma de las barras.
+
+     Devuelve el reparto ya formateado, en el orden de `ent`, para que lo
+     pinte PCT_ENCIMA. Antes ese reparto iba en una linea de chips encima del
+     canvas (.resumen-dim) que repetia el nombre de la rebanada -ya esta bajo
+     su barra- y su conteo -ya esta DENTRO de la barra-. De los tres datos
+     solo el porcentaje no estaba en ningun otro sitio, asi que es el unico
+     que sobrevive, y ahora va pegado a la barra que describe.
+
+     La cuenta no cambia: misma participacion sobre el mismo total, con el
+     mismo toFixed(1).
+
+     El porcentaje es la PARTICIPACION de cada rebanada en ese total, no una
+     tasa de resolucion: toda la poblacion de esta grafica ya es lo resuelto
+     del rango. Con total 0 no hay denominador y se escribe N/D, no 0%. */
+  function renderResumenDim(idCanvas, ent) {
+    const cajaTotal = document.getElementById(idCanvas.replace('chart-', 'hint-'));
+    const total = ent.reduce((s, e) => s + e[1], 0);
+    if (cajaTotal) cajaTotal.textContent = `Total: ${FMT(total)}`;
+
+    return ent.map(([, n]) => total > 0 ? `${(n / total * 100).toFixed(1)}%` : 'N/D');
+  }
+
+  /* El porcentaje de cada barra, pegado por ENCIMA de su punta. Hermano de
+     CIFRA_PUNTA, que hace lo mismo a la derecha en la horizontal de
+     productividad: el conteo se queda DENTRO de la barra (ETIQUETAS_DENTRO) y
+     el porcentaje no lo tapa.
+
+     Lee `pctDimVigente` y no un dataset porque el porcentaje NO es una serie:
+     es el reparto que ya calculo renderResumenDim sobre las mismas entradas
+     que pintan las barras. Vive fuera de renderBarraDim por el mismo motivo
+     que CIFRA_PUNTA: el plugin es el de la PRIMERA construccion y tiene que
+     leer aqui el reparto vigente. */
+  let pctDimVigente = [];
+
+  const PCT_ENCIMA = {
+    id: 'pctEncima',
+    afterDatasetsDraw(chart) {
+      const meta = chart.getDatasetMeta(0);
+      if (!meta || meta.hidden) return;
+
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.font = Barras.fuente(12, '600');
+      ctx.fillStyle = Barras.TINTA_FUERA;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      meta.data.forEach((bar, i) => {
+        const pct = pctDimVigente[i];
+        if (pct == null) return;
+        ctx.fillText(pct, bar.x, bar.y - 6);
+      });
+      ctx.restore();
+    },
+  };
+
   function renderBarraDim(idCanvas, idGrafico, dim, orden, colorFn, mensajeVacio) {
     const ent = entradasDim(dim, orden);
     const etiquetas = ent.map(e => e[0]);
     const valores = ent.map(e => e[1]);
     const colores = etiquetas.map((l, i) => colorFn(l, i));
     const sel = bordesSeleccion(etiquetas, filtro[dim], 0);
+
+    // Antes del corte por grafica vacia: sin rebanadas el resumen tambien
+    // tiene que quedar en cero y no con los numeros del filtro anterior.
+    pctDimVigente = renderResumenDim(idCanvas, ent);
 
     if (!etiquetas.length) {
       destruir(idGrafico);
@@ -2367,14 +2442,18 @@ const TableroSla = (function () {
            (Barras.aplicarDefaults), asi que aqui solo queda lo propio de esta
            grafica: el color de colorFn -prioridad y rampa de antiguedad- y el
            contorno de seleccion. */
-        plugins: [ETIQUETAS_DENTRO],
+        plugins: [ETIQUETAS_DENTRO, PCT_ENCIMA],
         data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores,
           borderColor: sel.borderColor, borderWidth: sel.borderWidth }] },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: { legend: { display: false },
             tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
-          scales: { y: EJE_CONTEO },
+          /* `grace` es SOLO de esta grafica -no de EJE_CONTEO, que comparten
+             otras seis-: sube el tope del eje un 12% para que el porcentaje
+             de la barra mas alta no quede pegado al borde de la tarjeta ni lo
+             recorte el lienzo. */
+          scales: { y: { ...EJE_CONTEO, grace: '12%' } },
           onClick: (evt, _els, gr) => alternarFiltro(dim, etiquetaDelClic(gr, evt)),
         }
       }),
@@ -3868,10 +3947,11 @@ if (botonPlegar) {
   });
 }
 
-/* Arranque en estrecho: la barra nace plegada para no comerse la pantalla.
-   A partir de ahi manda el usuario; no se vuelve a forzar al girar el
-   dispositivo, que seria pelearse con su ultima decision. */
-if (window.matchMedia('(max-width: 900px)').matches) plegarLateral(true);
+/* Arranque: la barra nace plegada en cualquier ancho. No se hace aqui sino
+   en el marcado -class="lateral-cerrada" en <html> y aria-expanded="false"
+   en el boton-: asi el primer pintado ya sale plegado, sin la transicion de
+   .18s ni el salto del contenido que daria plegarla al cargar el script. A
+   partir de ahi manda el usuario. */
 
 /* =======================================================================
    5. Desplegables propios (solo capa visual de los filtros)
