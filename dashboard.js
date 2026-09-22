@@ -3059,6 +3059,109 @@ const TableroSla = (function () {
     console.error(err);
   }
 
+  /* ------------------------------------------- SLA por lider y grupo
+     Pinta el result set de dbo.usp_Dash_SlaLiderGrupo (sla_lider_grupo.ashx)
+     tal como llega: no suma, no filtra, no recalcula ningun porcentaje. Solo
+     da formato -enteros con FMT, porcentajes a dos decimales- y colorea con
+     los semaforos que ya usan las tarjetas de KPI: SEM para el cumplimiento y
+     SEM_REABIERTOS para los reabiertos, en las mismas pastillas .bv/.ba/.br
+     del pie de la pestaña.
+
+     "% Vencidos" viaja en el JSON pero no se muestra: con SLA evaluable es el
+     complemento del cumplimiento.
+
+     Las columnas se buscan por nombre, sin acentos ni mayusculas y con el "%"
+     leido como "pct": asi "% Vencidos" no se confunde con "Vencidos" y un
+     alias con o sin tilde ("Líder"/"Lider") sale igual. */
+  const COLUMNAS_LIDER_GRUPO = [
+    { clave: 'lider',           titulo: 'Líder',        tipo: 'txt' },
+    { clave: 'grupo',           titulo: 'Grupo',        tipo: 'txt' },
+    { clave: 'total',           titulo: 'Total',        tipo: 'int' },
+    { clave: 'dentrosla',       titulo: 'Dentro SLA',   tipo: 'int' },
+    { clave: 'vencidos',        titulo: 'Vencidos',     tipo: 'int' },
+    { clave: 'pctcumplimiento', titulo: 'Cumplimiento', tipo: 'pct', sem: v => SEM(v) },
+    { clave: 'reabiertos',      titulo: 'Reabiertos',   tipo: 'int' },
+    { clave: 'pctreabiertos',   titulo: '% Reabiertos', tipo: 'pct', sem: v => SEM_REABIERTOS(v) },
+  ];
+  const BADGE_SEM = { sv: 'bv', sa: 'ba', sr: 'br' };
+
+  function claveColumna(nombre) {
+    return String(nombre).normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/%/g, 'pct').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  function celdaLiderGrupo(col, v) {
+    const vacio = v === null || v === undefined || v === '';
+    if (col.tipo === 'txt') return `<td class="txt">${vacio ? '—' : escapeHtml(v)}</td>`;
+    if (vacio || !isFinite(Number(v))) return '<td class="num">—</td>';
+    if (col.tipo === 'int') return `<td class="num">${FMT(v)}</td>`;
+    const texto = `${Number(v).toFixed(2)}%`;
+    const badge = BADGE_SEM[col.sem(Number(v))];
+    return `<td class="num">${badge ? `<span class="badge ${badge}">${texto}</span>` : texto}</td>`;
+  }
+
+  /* Que filtros del tablero NO llegaron a la tabla. El handler solo manda los
+     que el procedimiento declara y dice cuales mando en `parametros`; el de
+     tecnicos no se manda nunca. Se avisa en vez de callarlo, para que nadie lea
+     la tabla como acotada cuando no lo esta. */
+  function avisoFiltrosLiderGrupo(d) {
+    const usados = (d && Array.isArray(d.parametros)) ? d.parametros : [];
+    const avisos = [];
+    if (!usados.includes('FechaInicio') || !usados.includes('FechaFin')) {
+      avisos.push('no recibe el rango de fechas del tablero');
+    }
+    if (seleccionados('f-grupos').length && !usados.includes('Grupos')) {
+      avisos.push('no la acota el filtro de Grupos');
+    }
+    if (seleccionados('f-tecnicos').length) avisos.push('no la acota el filtro de Tecnicos');
+    return avisos;
+  }
+
+  function renderSlaLiderGrupo(d) {
+    const cont = document.getElementById('tabla-sla-lider-grupo');
+    const cap = document.getElementById('cap-sla-lider-grupo');
+    const hint = document.getElementById('hint-sla-lider-grupo');
+    if (!cont) return;
+    const filas = (d && Array.isArray(d.sla_lider_grupo)) ? d.sla_lider_grupo : [];
+
+    const avisos = avisoFiltrosLiderGrupo(d);
+    if (cap) {
+      cap.innerHTML = avisos.length
+        ? `<span class="suave">Esta tabla ${escapeHtml(avisos.join('; '))}.</span>` : '';
+    }
+    if (hint) hint.textContent = filas.length ? `${FMT(filas.length)} filas` : '';
+
+    if (!filas.length) {
+      cont.innerHTML = '<div class="vacio">Sin datos para el periodo seleccionado.</div>';
+      return;
+    }
+
+    const nombres = {};
+    Object.keys(filas[0]).forEach(k => { nombres[claveColumna(k)] = k; });
+
+    const filasHtml = filas.map(x => `<tr>${COLUMNAS_LIDER_GRUPO.map(col =>
+      celdaLiderGrupo(col, nombres[col.clave] !== undefined ? x[nombres[col.clave]] : null)).join('')}</tr>`).join('');
+
+    cont.innerHTML = `<table><thead><tr>${COLUMNAS_LIDER_GRUPO.map(col =>
+      `<th${col.tipo === 'txt' ? '' : ' class="num"'}>${col.titulo}</th>`).join('')}</tr></thead>
+      <tbody>${filasHtml}</tbody></table>`;
+    hacerOrdenable(cont.querySelector('table'));
+  }
+
+  function estadoSlaLiderGrupo(mensaje) {
+    const cont = document.getElementById('tabla-sla-lider-grupo');
+    const cap = document.getElementById('cap-sla-lider-grupo');
+    const hint = document.getElementById('hint-sla-lider-grupo');
+    if (cap) cap.innerHTML = '';
+    if (hint) hint.textContent = '';
+    if (cont) cont.innerHTML = `<div class="vacio">${mensaje}</div>`;
+  }
+
+  function errorSlaLiderGrupo(err) {
+    estadoSlaLiderGrupo(`No se pudo cargar la tabla: ${escapeHtml((err && err.message) || err)}`);
+    console.error(err);
+  }
+
   function renderTodo(motivo) {
     perf.ini('renderTodo');
     renderKpis();
@@ -3289,6 +3392,16 @@ const TableroSla = (function () {
     obtenerJSONSla(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
       d => { if (miCarga === cargaVigente) renderCargaCombinada(d); },
       e => { if (miCarga === cargaVigente) errorCargaCombinada(e); }
+    ).catch(e => console.error(e));
+
+    /* SLA por lider y grupo: tambien APARTE, por el mismo motivo que el
+       cruce. Depende de dbo.usp_Dash_SlaLiderGrupo; si falla, solo su tarjeta
+       lo dice y no cuenta en `fallos`. Mismos filtros que el resto de la
+       pestaña: el handler decide cuales acepta el procedimiento. */
+    estadoSlaLiderGrupo('Cargando...');
+    obtenerJSONSla(`sla_lider_grupo.ashx?${qs}`).then(
+      d => { if (miCarga === cargaVigente) renderSlaLiderGrupo(d); },
+      e => { if (miCarga === cargaVigente) errorSlaLiderGrupo(e); }
     ).catch(e => console.error(e));
 
     /* El ranking de personas (topCerrados) pide el MISMO productividad.ashx

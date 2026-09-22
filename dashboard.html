@@ -220,6 +220,17 @@
 
     <section class="kpis" id="kpis"></section>
 
+    <!-- Cumplimiento por lider y grupo: el result set de
+         dbo.usp_Dash_SlaLiderGrupo tal cual, via handlers/sla_lider_grupo.ashx.
+         Se pide APARTE del resto de la pestaña: si falla, solo esta tarjeta
+         muestra el error y los KPIs y graficas siguen igual. No responde al
+         cross-filter de las graficas. -->
+    <section class="card" id="card-sla-lider-grupo">
+      <h3>Cumplimiento de SLA por lider y grupo<span class="hint" id="hint-sla-lider-grupo"></span></h3>
+      <div class="cap" id="cap-sla-lider-grupo"></div>
+      <div class="scroll-x tabla-alta" id="tabla-sla-lider-grupo"></div>
+    </section>
+
     <section class="grid2">
       <div class="card">
         <h3>Entra vs sale<span class="hint" id="hint-tendencia"></span></h3>

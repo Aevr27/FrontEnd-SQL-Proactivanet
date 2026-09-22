@@ -705,6 +705,13 @@
   /* Misma referencia muerta a `aparecer` que en .maintab-content.active. */
   .panel.active { display: block; }
   .scroll-x { overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
+  /* Tabla con muchas filas (SLA por lider y grupo): scroll vertical propio y
+     encabezado fijo, para que no empuje las graficas de abajo una pantalla
+     entera. Todas las filas siguen ahi; solo se desplazan. Un nombre de grupo
+     sin espacios parte linea en vez de ensanchar la tarjeta. */
+  .tabla-alta { max-height: 460px; overflow-y: auto; }
+  .tabla-alta thead th { position: sticky; top: 0; z-index: 1; }
+  .tabla-alta td.txt { min-width: 120px; overflow-wrap: anywhere; }
 
   /* Linea que dice que filtro esta aplicado sobre cada tabla. */
   .cap {
