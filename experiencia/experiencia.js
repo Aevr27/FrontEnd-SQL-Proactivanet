@@ -90,6 +90,10 @@ const esc = v => Escape.html(v);
 
 const FMT = n => Math.round(n||0).toLocaleString('es-MX');
 const PCT = n => Math.round((n||0)*100)+'%';
+/* Cifra del primer y del ultimo punto de una linea: el plugin compartido
+   de assets/js/lineas.js atado al FMT de esta pagina. Se enchufa por
+   grafica en su arreglo `plugins`, igual que la cifra dentro de la barra. */
+const CIFRAS_EXTREMOS = Lineas.cifrasExtremos(FMT);
 /* =========================================================================
    PALETA DE GRAFICAS — escala verde de la cabecera.
 
@@ -374,7 +378,8 @@ function renderEvol(cats){
   // El punto de pronostico conserva el ambar: es una advertencia, no una serie.
   const pointColors=vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.profundo);
   const pointRadii=vals.map((_,i)=>i===idxPron?6:3);
-  chartEvol=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Volumen',data:vals,
+  // De cuanto volumen arranca la ventana y en cuanto acaba, sobre la linea.
+  chartEvol=new Chart(ctx,{type:'line',plugins:[CIFRAS_EXTREMOS],data:{labels,datasets:[{label:'Volumen',data:vals,
     borderColor:VERDE.pino,backgroundColor:'rgba(47,143,107,.14)',fill:true,tension:.3,
     pointRadius:pointRadii,pointHoverRadius:pointRadii.map(r=>r+3),
     pointBackgroundColor:pointColors,borderWidth:2}]},
@@ -1041,7 +1046,11 @@ function graficarHist(){
     const seriesOrdenadas = tipo==='bar'
       ? series.slice().sort((a,b)=>b.data.reduce((s,v)=>s+v,0)-a.data.reduce((s,v)=>s+v,0))
       : series;
-    cfg={type:tipo,data:{labels,
+    // Las cifras de los extremos son de la vista de LINEAS: son el primer y
+    // el ultimo punto de una serie en el tiempo. En la vista de barras cada
+    // barra es un periodo suelto y no hay "extremos" que leer, asi que esa se
+    // queda como estaba.
+    cfg={type:tipo,plugins:tipo==='line'?[CIFRAS_EXTREMOS]:[],data:{labels,
       datasets:seriesOrdenadas.map((s,i)=>({label:s.label,data:s.data,
         borderColor:colores[i%colores.length],
         backgroundColor: tipo==='line' ? colores[i%colores.length]+'33' : colores[i%colores.length],

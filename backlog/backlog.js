@@ -386,6 +386,12 @@ const TableroBacklog = (function () {
     graficos[id] = new Chart(document.getElementById(id), config);
   }
 
+  /* Cifra del primer y del ultimo punto de una linea. Es el plugin compartido
+     de assets/js/lineas.js, atado al FMT de este tablero: las dos tendencias
+     de aqui contestan "de cuanto salio y en cuanto acabo" sin pasar el raton.
+     Se declara una vez y se enchufa por grafica, como ETIQUETAS_DENTRO. */
+  const CIFRAS_EXTREMOS = Lineas.cifrasExtremos(FMT);
+
   const LEYENDA_ABAJO = { legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 10 } } } };
   const EJE_Y_CERO = { y: { beginAtZero: true, ticks: { precision: 0, callback: v => FMT(v) } } };
 
@@ -542,6 +548,8 @@ const TableroBacklog = (function () {
 
     dibujar('chart-tendencia-bl', {
       type: 'line',
+      // De cuanto backlog se salio y en cuanto se acabo, sobre la linea.
+      plugins: [CIFRAS_EXTREMOS],
       data: {
         labels: serie.map(f => String(f.Periodo).slice(0, 10)),
         datasets: [{
@@ -593,6 +601,10 @@ const TableroBacklog = (function () {
 
     dibujar('chart-tendencia-lider-bl', {
       type: 'line',
+      /* Cada torre trae la cifra de su extremo en SU color. Con muchos
+         lideres no caben todas: el plugin omite la que pisaria a otra en vez
+         de encimarlas, asi que se ven las que tienen sitio limpio. */
+      plugins: [CIFRAS_EXTREMOS],
       data: {
         labels: fechas,
         datasets: nombres.map(n => ({

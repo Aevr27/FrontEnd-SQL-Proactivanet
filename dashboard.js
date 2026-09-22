@@ -580,6 +580,22 @@ const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
    la cifra suelta dentro de la barra se leeria como tickets. */
 const ETIQUETAS_DENTRO_PCT = Barras.etiquetasDentro(v => `${FMT(v)}%`);
 
+/* Cifra de los EXTREMOS de una linea: el tercer miembro de la familia, el de
+   las tendencias. Es el plugin compartido de assets/js/lineas.js atado al FMT
+   de este tablero, igual que ETIQUETAS_DENTRO. Se enchufa por grafica en su
+   arreglo `plugins`. */
+const CIFRAS_EXTREMOS = Lineas.cifrasExtremos(FMT);
+
+/* Las mismas cifras para las lineas que miden un PORCENTAJE -cumplimiento de
+   SLA, reabiertos-. Igual que con ETIQUETAS_DENTRO_PCT, solo cambia el
+   formateador: sin el "%" la cifra suelta al final de la linea se leeria como
+   tickets. */
+const CIFRAS_EXTREMOS_PCT = Lineas.cifrasExtremos(v => `${v}%`);
+
+/* Y la del SLA, que ademas deja fuera el dataset 1: la raya de Meta es una
+   constante, no una observacion, y su valor ya esta en su propia etiqueta. */
+const CIFRAS_EXTREMOS_SLA = Lineas.cifrasExtremos(v => `${v}%`, { omitir: [1] });
+
 /* Estado vacio DENTRO de una grafica viva, sin destruirla. renderEmptyChart()
    -el de abajo- mata la instancia y escribe el mensaje a mano sobre el canvas:
    sirve donde el vacio es el final del render, pero no donde la grafica tiene
@@ -1772,6 +1788,9 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'tendencia', 'chart-tendencia',
       () => ({
         type: 'line',
+        // Con que volumen arranco el rango y con cual acabo, en las tres
+        // series y cada una en su color.
+        plugins: [CIFRAS_EXTREMOS],
         data: {
           labels: etiquetas,
           datasets: [
@@ -2107,6 +2126,7 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'slaTiempo', 'chart-sla-tiempo',
       () => ({
         type: 'line',
+        plugins: [CIFRAS_EXTREMOS_SLA],
         data: {
           labels: etiquetas,
           datasets: [
@@ -2198,6 +2218,7 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'reabiertosTiempo', 'chart-reabiertos-tiempo',
       () => ({
         type: 'line',
+        plugins: [CIFRAS_EXTREMOS_PCT],
         data: {
           labels: etiquetas,
           datasets: [
@@ -2653,6 +2674,7 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'llamadasDia', 'chart-llamadas-dia',
       () => ({
         type: 'line',
+        plugins: [CIFRAS_EXTREMOS],
         data: { labels: etiquetas, datasets: series.map(s => ({
           label: s.label, data: s.data, borderColor: s.color, backgroundColor: s.color,
           tension: 0.25, pointRadius: 0, borderWidth: 2 })) },
@@ -2942,7 +2964,7 @@ const TableroSla = (function () {
     dibujarGrafico(graficos, 'cargaDia', 'chart-carga-dia',
       () => ({
         type: 'line',
-        plugins: [SIN_DATOS],
+        plugins: [SIN_DATOS, CIFRAS_EXTREMOS],
         data: { labels: etiquetas, datasets: [
           { label: 'Tickets cerrados', data: tickets, borderColor: BARRA_A,
             backgroundColor: BARRA_A, tension: 0.25, pointRadius: 0, borderWidth: 2 },
