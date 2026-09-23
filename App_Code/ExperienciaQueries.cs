@@ -444,6 +444,7 @@ public static class ExperienciaQueries
         public bool Activa;            // estado en ESTADOS_ACTIVOS
         public bool Retrasada;         // activa y con la fecha de su estado vencida
         public string SemFecha;        // verde / ambar / rojo
+        public bool ControlFecha = true; // CatPrefijoProblem.ControlDeFecha de su prefijo
     }
 
     private static List<Detalle> LeerIniciativas(SqlConnection cn, DateTime hoy)
@@ -460,9 +461,11 @@ public static class ExperienciaQueries
             "       v.Estado, v.TipoAgrupado, v.TicketsReduce, v.PctDisminucion, " +
             "       v.FechaAnalisis, v.FechaSolucion, v.FechaCierre, " +
             "       v.NroCambioFechaAnalisis, v.NroCambioFechaSolucion, v.NroCambioFechaCierre, " +
-            "       p.Descripcion, p.Observaciones, p.FechaCreacion " +
+            "       p.Descripcion, p.Observaciones, p.FechaCreacion, " +
+            "       ISNULL(cp.ControlDeFecha, 1) " +
             "FROM dbo.vw_ProblemCategoria AS v " +
             "INNER JOIN dbo.Problem AS p ON p.Codigo = v.Codigo " +
+            "LEFT JOIN dbo.CatPrefijoProblem AS cp ON cp.Prefijo = p.Prefijo " +
             "WHERE v.VigenteEnOrigen = 1";
 
         var filas = new List<Detalle>();
@@ -558,6 +561,7 @@ public static class ExperienciaQueries
                     d.Descripcion = Texto(rd.GetValue(16));
                     d.Observaciones = Texto(rd.GetValue(17));
                     d.Antiguedad = DiasDesde(rd.GetValue(18), hoy);
+                    d.ControlFecha = Convert.ToBoolean(rd.GetValue(19));
 
                     Canonizar(d);
                     Semaforo(d, hoy);
@@ -585,8 +589,10 @@ public static class ExperienciaQueries
             "       p.FechaAnalisis, p.FechaSolucion, p.FechaCierre, " +
             "       p.NroCambioFechaAnalisis, p.NroCambioFechaSolucion, p.NroCambioFechaCierre, " +
             "       p.Descripcion, p.Observaciones, p.FechaCreacion, " +
-            "       p.OwnerServicio, p.OwnerProblem, p.Direccion " +
+            "       p.OwnerServicio, p.OwnerProblem, p.Direccion, " +
+            "       ISNULL(cp.ControlDeFecha, 1) " +
             "FROM dbo.Problem AS p " +
+            "LEFT JOIN dbo.CatPrefijoProblem AS cp ON cp.Prefijo = p.Prefijo " +
             "WHERE p.VigenteEnOrigen = 1 " +
             "  AND NOT EXISTS (SELECT 1 FROM dbo.ProblemCategoria AS pc " +
             "                  WHERE pc.Codigo = p.Codigo AND pc.VigenteEnOrigen = 1)";
@@ -618,6 +624,7 @@ public static class ExperienciaQueries
                     d.So = Texto(rd.GetValue(13));
                     d.Po = Texto(rd.GetValue(14));
                     d.Director = Texto(rd.GetValue(15));
+                    d.ControlFecha = Convert.ToBoolean(rd.GetValue(16));
 
                     Canonizar(d);
                     Semaforo(d, hoy);
@@ -646,6 +653,16 @@ public static class ExperienciaQueries
         if (!d.Activa)
         {
             d.SemFecha = "verde";
+            d.Retrasada = false;
+            return;
+        }
+
+        // Prefijos con CatPrefijoProblem.ControlDeFecha = 0 (REQ, RTI): no
+        // tienen fecha comprometida que vencer. Siguen activas -cuentan en
+        // totales-, pero nunca como retrasadas.
+        if (!d.ControlFecha)
+        {
+            d.SemFecha = "ambar";
             d.Retrasada = false;
             return;
         }
