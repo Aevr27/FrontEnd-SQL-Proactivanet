@@ -1329,7 +1329,10 @@ const TableroSla = (function () {
   function renderSlotStepper() {
     // El 0 es un estado propio -SLOT apagado, manda el rango manual-, asi que
     // se pinta tal cual en vez de ensenar un 1 que nadie ha pedido.
-    document.getElementById('slot-n').textContent = String(slotsN);
+    // Mientras alguien escribe en el campo no se le pisa el texto: una carga
+    // que acabe a mitad de tecleo repintaria el numero anterior.
+    const campo = document.getElementById('slot-n');
+    if (document.activeElement !== campo) campo.value = String(slotsN);
     document.getElementById('slot-menos').disabled = slotsN <= 0;
     document.getElementById('slot-mas').disabled = slotsN >= MAX_SLOTS;
 
@@ -1349,6 +1352,15 @@ const TableroSla = (function () {
     // Con 0 el control se ve apagado: no hay periodo preparado ni aplicado.
     document.getElementById('slot-step').classList.toggle('off', slotsN === 0);
     sum.classList.toggle('off', slotsN === 0);
+  }
+
+  // Numero escrito a mano en el stepper. Solo cuentan los digitos, y lo que
+  // pase del tope se queda en el tope: 20502141 es 12. Sin digitos devuelve
+  // null y el campo vuelve al numero que habia.
+  function leerSlotsEscritos(texto) {
+    const digitos = String(texto ?? '').replace(/\D/g, '');
+    if (!digitos) return null;
+    return Math.min(Number(digitos), MAX_SLOTS);
   }
 
   // Pone en vigor el SLOT escribiendo su rango en las fechas. No recarga por su
@@ -3625,6 +3637,31 @@ const TableroSla = (function () {
       slotsN--;                      // 1 -> 0 apaga el SLOT: manda el rango
       aplicarSlots();                // manual que haya escrito en las fechas
       programarCarga();
+    });
+    // El numero tambien se escribe. Mientras se teclea solo se quitan los
+    // caracteres que no son digitos; se aplica al confirmar (Enter o salir
+    // del campo), acotado a 0..MAX_SLOTS, igual que con - / +.
+    const campoSlots = document.getElementById('slot-n');
+    campoSlots.addEventListener('input', () => {
+      const limpio = campoSlots.value.replace(/\D/g, '');
+      if (limpio !== campoSlots.value) campoSlots.value = limpio;
+    });
+    campoSlots.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); campoSlots.blur(); }
+      if (e.key === 'Escape') { campoSlots.value = String(slotsN); campoSlots.blur(); }
+    });
+    campoSlots.addEventListener('focus', () => campoSlots.select());
+    campoSlots.addEventListener('change', () => {
+      const n = leerSlotsEscritos(campoSlots.value);
+      // `change` puede llegar con el foco aun en el campo, y renderSlotStepper
+      // no pisa el texto mientras hay foco: el numero final se escribe aqui.
+      // Vacio o igual al actual solo normaliza el texto ("20502141" -> "12").
+      if (n !== null && n !== slotsN) {
+        slotsN = n;
+        aplicarSlots();
+        programarCarga();
+      }
+      campoSlots.value = String(slotsN);
     });
     // Tocar una fecha a mano apaga el SLOT: si no, el rango del SLOT se
     // reescribiria encima y las fechas escritas se perderian.

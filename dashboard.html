@@ -183,7 +183,11 @@
         <label for="slot-n">Ultimos SLOTs</label>
         <div class="slotstep" id="slot-step">
           <button class="btn linea chico" type="button" id="slot-menos" aria-label="Un SLOT menos">−</button>
-          <output class="slotn" id="slot-n" for="slot-menos slot-mas">1</output>
+          <!-- Se puede escribir el numero: al confirmar (Enter o salir del
+               campo) se acota a 0..MAX_SLOTS en dashboard.js. -->
+          <input class="slotn" id="slot-n" type="text" inputmode="numeric"
+                 autocomplete="off" spellcheck="false" value="1"
+                 aria-label="Numero de SLOTs (0 a 12)">
           <button class="btn linea chico" type="button" id="slot-mas" aria-label="Un SLOT mas">+</button>
         </div>
         <span class="slotsum" id="slot-sum"></span>
