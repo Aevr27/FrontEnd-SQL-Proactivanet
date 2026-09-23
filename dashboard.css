@@ -117,6 +117,11 @@
     --radius-xs: 7px;
     --radius-pill: 999px;
 
+    /* Separacion entre bloques de una pestaña -cabecera, filtros, KPIs,
+       tarjetas y rejillas- y entre las tarjetas de una rejilla. Un solo
+       valor: cambiarlo aqui mueve todas las separaciones a la vez. */
+    --gap-bloque: 16px;
+
     /* Profundidad: una escala en vez de una sola sombra plana. */
     --shadow: 0 1px 2px rgba(25, 25, 25, .05), 0 1px 3px rgba(25, 25, 25, .06);
     --shadow-md: 0 2px 4px rgba(25, 25, 25, .05), 0 8px 20px -6px rgba(25, 25, 25, .12);
@@ -344,7 +349,7 @@
     background: var(--grad-header);
     color: var(--ink); padding: 24px 28px;
     min-height: 100px;
-    border-radius: var(--radius); margin-bottom: 16px;
+    border-radius: var(--radius); margin-bottom: var(--gap-bloque);
     display: flex; align-items: center; justify-content: space-between;
     flex-wrap: wrap; gap: 14px;
     box-shadow: var(--shadow-md);
@@ -425,7 +430,7 @@
     box-shadow: var(--shadow); border: 1px solid var(--g-100);
     padding: 18px 20px;
     display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
-    gap: 16px 14px; align-items: end; margin-bottom: 16px;
+    gap: 16px 14px; align-items: end; margin-bottom: var(--gap-bloque);
   }
   /* Filo de marca al borde superior de la tarjeta: ata el panel de filtros
      al degradado de la cabecera sin pintar de verde ningun control. */
@@ -657,6 +662,11 @@
     transition: box-shadow .18s ease;
   }
   .card:hover { box-shadow: var(--shadow-md); }
+  /* Una tarjeta suelta en la pestaña -no dentro de una rejilla- se separa
+     del bloque siguiente igual que las rejillas: antes no llevaba margen y
+     quedaba pegada a lo de abajo. Dentro de .grid2/.grid2x2 la separacion
+     la pone el gap de la rejilla, asi que esto no las toca. */
+  .maintab-content > .card { margin-bottom: var(--gap-bloque); }
   .card h3 {
     font-size: 13.5px; font-weight: 700; margin-bottom: 14px;
     padding-bottom: 10px; border-bottom: 1px solid var(--line-soft);
@@ -680,10 +690,10 @@
 
   .lienzo { position: relative; height: 260px; }
   .lienzo.alta { height: 320px; }
-  .grid2 { display: grid; grid-template-columns: 1.6fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+  .grid2 { display: grid; grid-template-columns: 1.6fr 1fr; gap: var(--gap-bloque); margin-bottom: var(--gap-bloque); }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap-bloque); margin-bottom: var(--gap-bloque); }
   /* Cuatro tarjetas en 2x2 a mitades iguales (.grid2 es 1.6fr/1fr). */
-  .grid2x2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-bottom: 16px; }
+  .grid2x2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--gap-bloque); margin-bottom: var(--gap-bloque); }
 
   /* ---- Sub-pestañas ---- */
   .tabs {
@@ -705,6 +715,33 @@
   /* Misma referencia muerta a `aparecer` que en .maintab-content.active. */
   .panel.active { display: block; }
   .scroll-x { overflow-x: auto; margin: 0 -4px; padding: 0 4px 4px; }
+  /* Tabla con muchas filas (SLA por lider y grupo): scroll vertical propio y
+     encabezado fijo, para que no empuje las graficas de abajo una pantalla
+     entera. Todas las filas siguen ahi; solo se desplazan. Un nombre de grupo
+     sin espacios parte linea en vez de ensanchar la tarjeta. */
+  .tabla-alta { max-height: 460px; overflow-y: auto; }
+  .tabla-alta thead th { position: sticky; top: 0; z-index: 1; }
+  .tabla-alta td.txt { min-width: 120px; overflow-wrap: anywhere; }
+  /* Boton de plegar de una tarjeta: el mismo chevron y el mismo giro que
+     .lateral-plegar, a tamaño de titulo. Plegada, la tarjeta se queda en su
+     titulo: sin la raya ni el aire que separan el titulo del cuerpo. */
+  .plegar-tabla {
+    flex: none; align-self: center;
+    width: 24px; height: 24px; padding: 0;
+    display: grid; place-items: center;
+    border: 1px solid transparent; border-radius: var(--radius-xs);
+    background: transparent; color: var(--muted); cursor: pointer;
+    transition: background .16s ease, color .16s ease;
+  }
+  .plegar-tabla:hover { background: var(--g-50); color: var(--ink); }
+  .plegar-tabla-ico {
+    width: 16px; height: 16px;
+    fill: none; stroke: currentColor; stroke-width: 2;
+    stroke-linecap: round; stroke-linejoin: round;
+    transition: transform .18s ease;
+  }
+  .plegar-tabla[aria-expanded="true"] .plegar-tabla-ico { transform: rotate(90deg); }
+  .card.plegada h3 { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
 
   /* Linea que dice que filtro esta aplicado sobre cada tabla. */
   .cap {

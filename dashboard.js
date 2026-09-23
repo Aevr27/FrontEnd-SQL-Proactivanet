@@ -3059,6 +3059,210 @@ const TableroSla = (function () {
     console.error(err);
   }
 
+  /* ------------------------------------------- SLA por lider y grupo
+     Pinta el result set de dbo.usp_Dash_SlaLiderGrupo (sla_lider_grupo.ashx)
+     tal como llega: no suma, no filtra, no recalcula ningun porcentaje. Solo
+     da formato -enteros con FMT, porcentajes a dos decimales- y colorea con
+     los semaforos que ya usan las tarjetas de KPI: SEM para el cumplimiento y
+     SEM_REABIERTOS para los reabiertos, en las mismas pastillas .bv/.ba/.br
+     del pie de la pestaña.
+
+     "% Vencidos" viaja en el JSON pero no se muestra: con SLA evaluable es el
+     complemento del cumplimiento.
+
+     DE DONDE SALE CADA CELDA. El handler manda la fila dos veces: por nombre
+     (sla_lider_grupo) y por posicion (valores, con columnas = nombre y tipo
+     de cada posicion). Leer solo por nombre dejaba las cifras en "—" en la
+     VM: las columnas calculadas del procedimiento no traen los nombres que
+     se esperaban -sin alias se llaman "" y se pisan dentro del diccionario-,
+     y solo Lider y Grupo se encontraban.
+
+     Asi que:
+       1. si TODAS las columnas se encuentran por nombre en `columnas`, se usa
+          el nombre -sin acentos ni mayusculas y con el "%" leido como "pct",
+          para que "% Vencidos" no se confunda con "Vencidos"-;
+       2. si no, y el procedimiento devolvio sus 9 columnas, se usa la
+          posicion (`pos`), que es el orden del SELECT: Lider, Grupo, Total,
+          Dentro SLA, Vencidos, % Cumplimiento, % Vencidos, Reabiertos,
+          % Reabiertos;
+       3. si tampoco, la tarjeta dice cuantas columnas llegaron en vez de
+          pintar una tabla con las cifras cambiadas de sitio. */
+  const COLUMNAS_LIDER_GRUPO = [
+    { clave: 'lider',           pos: 0, titulo: 'Líder',        tipo: 'txt' },
+    { clave: 'grupo',           pos: 1, titulo: 'Grupo',        tipo: 'txt' },
+    { clave: 'total',           pos: 2, titulo: 'Total',        tipo: 'int' },
+    { clave: 'dentrosla',       pos: 3, titulo: 'Dentro SLA',   tipo: 'int' },
+    { clave: 'vencidos',        pos: 4, titulo: 'Vencidos',     tipo: 'int' },
+    { clave: 'pctcumplimiento', pos: 5, titulo: 'Cumplimiento', tipo: 'pct', sem: v => SEM(v) },
+    { clave: 'reabiertos',      pos: 7, titulo: 'Reabiertos',   tipo: 'int' },
+    { clave: 'pctreabiertos',   pos: 8, titulo: '% Reabiertos', tipo: 'pct', sem: v => SEM_REABIERTOS(v) },
+  ];
+  const COLUMNAS_SP_LIDER_GRUPO = 9;
+  const ORDEN_LIDER_GRUPO = 'pctcumplimiento';   // orden inicial, descendente
+  const BADGE_SEM = { sv: 'bv', sa: 'ba', sr: 'br' };
+
+  function claveColumna(nombre) {
+    return String(nombre ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .replace(/%/g, 'pct').toLowerCase().replace(/[^a-z0-9]/g, '');
+  }
+
+  /* Filas del JSON como arreglos en el orden de COLUMNAS_LIDER_GRUPO, o un
+     texto de error. Con un handler anterior -sin `valores`- se cae a la
+     lectura por nombre sobre sla_lider_grupo, que es la de antes. */
+  function filasLiderGrupo(d) {
+    const valores = d && Array.isArray(d.valores) ? d.valores : null;
+    if (!valores) {
+      const filas = (d && Array.isArray(d.sla_lider_grupo)) ? d.sla_lider_grupo : [];
+      if (!filas.length) return { filas: [] };
+      const nombres = {};
+      Object.keys(filas[0]).forEach(k => { nombres[claveColumna(k)] = k; });
+      return { filas: filas.map(x => COLUMNAS_LIDER_GRUPO.map(col =>
+        nombres[col.clave] !== undefined ? x[nombres[col.clave]] : null)) };
+    }
+    if (!valores.length) return { filas: [] };
+
+    const columnas = Array.isArray(d.columnas) ? d.columnas : [];
+    const porNombre = {};
+    columnas.forEach((c, i) => {
+      const k = claveColumna(c && c.nombre);
+      // Un nombre repetido (o vacio) no sirve para ubicar la columna.
+      porNombre[k] = (k && !(k in porNombre)) ? i : -1;
+    });
+    let indices = COLUMNAS_LIDER_GRUPO.map(col =>
+      (porNombre[col.clave] ?? -1) >= 0 ? porNombre[col.clave] : -1);
+    if (indices.some(i => i < 0)) {
+      const ancho = columnas.length || valores[0].length;
+      if (ancho !== COLUMNAS_SP_LIDER_GRUPO) {
+        return { error: `El procedimiento devolvio ${ancho} columnas; la tabla espera ${COLUMNAS_SP_LIDER_GRUPO}.` };
+      }
+      indices = COLUMNAS_LIDER_GRUPO.map(col => col.pos);
+    }
+    return { filas: valores.map(v => indices.map(i => (Array.isArray(v) ? v[i] : null))) };
+  }
+
+  /* Numero tal como lo mando SQL. JavaScriptSerializer escribe int y decimal
+     como numeros; si el procedimiento los devolviera como texto ("80.00" o
+     "80.00%") se leen igual. Cualquier otra cosa es "sin dato". */
+  function numeroLiderGrupo(v) {
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    if (typeof v !== 'string') return null;
+    const t = v.trim().replace(/%$/, '').trim();
+    return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null;
+  }
+
+  function celdaLiderGrupo(col, v) {
+    if (col.tipo === 'txt') {
+      const vacio = v === null || v === undefined || v === '';
+      return `<td class="txt">${vacio ? '—' : escapeHtml(v)}</td>`;
+    }
+    const n = numeroLiderGrupo(v);
+    if (n === null) return '<td class="num">—</td>';
+    if (col.tipo === 'int') return `<td class="num">${FMT(n)}</td>`;
+    const texto = `${n.toFixed(2)}%`;
+    const badge = BADGE_SEM[col.sem(n)];
+    return `<td class="num">${badge ? `<span class="badge ${badge}">${texto}</span>` : texto}</td>`;
+  }
+
+  /* Que filtros del tablero NO llegaron a la tabla. El handler solo manda los
+     que el procedimiento declara y dice cuales mando en `parametros`; el de
+     tecnicos no se manda nunca. Se avisa en vez de callarlo, para que nadie lea
+     la tabla como acotada cuando no lo esta. */
+  function avisoFiltrosLiderGrupo(d) {
+    const usados = (d && Array.isArray(d.parametros)) ? d.parametros : [];
+    const avisos = [];
+    if (!usados.includes('FechaInicio') || !usados.includes('FechaFin')) {
+      avisos.push('no recibe el rango de fechas del tablero');
+    }
+    if (seleccionados('f-grupos').length && !usados.includes('Grupos')) {
+      avisos.push('no la acota el filtro de Grupos');
+    }
+    if (seleccionados('f-tecnicos').length) avisos.push('no la acota el filtro de Tecnicos');
+    return avisos;
+  }
+
+  function renderSlaLiderGrupo(d) {
+    const cont = document.getElementById('tabla-sla-lider-grupo');
+    const cap = document.getElementById('cap-sla-lider-grupo');
+    const hint = document.getElementById('hint-sla-lider-grupo');
+    if (!cont) return;
+    const { filas, error } = filasLiderGrupo(d);
+
+    if (error) {
+      estadoSlaLiderGrupo(escapeHtml(error));
+      return;
+    }
+
+    const avisos = avisoFiltrosLiderGrupo(d);
+    if (cap) {
+      cap.innerHTML = avisos.length
+        ? `<span class="suave">Esta tabla ${escapeHtml(avisos.join('; '))}.</span>` : '';
+    }
+    if (hint) hint.textContent = filas.length ? `${FMT(filas.length)} filas` : '';
+
+    if (!filas.length) {
+      cont.innerHTML = '<div class="vacio">Sin datos para el periodo seleccionado.</div>';
+      return;
+    }
+
+    /* Orden inicial: Cumplimiento de 100% a 0%. Solo reordena filas; los
+       valores son los del procedimiento. Sin cifra van al final, y los
+       empates conservan el orden en que llegaron (sort estable). La columna
+       nace marcada con ▼ y data-orden="desc", que es justo lo que
+       hacerOrdenable deja tras un clic: el siguiente clic pasa a ascendente. */
+    const iOrden = COLUMNAS_LIDER_GRUPO.findIndex(col => col.clave === ORDEN_LIDER_GRUPO);
+    const clave = v => numeroLiderGrupo(v[iOrden]);
+    const ordenadas = filas.slice().sort((a, b) => {
+      const x = clave(a), y = clave(b);
+      if (x === null || y === null) return (x === null) - (y === null);
+      return y - x;
+    });
+
+    const filasHtml = ordenadas.map(v => `<tr>${COLUMNAS_LIDER_GRUPO.map((col, i) =>
+      celdaLiderGrupo(col, v[i])).join('')}</tr>`).join('');
+
+    cont.innerHTML = `<table><thead><tr>${COLUMNAS_LIDER_GRUPO.map((col, i) => {
+      const clase = col.tipo === 'txt' ? '' : ' class="num"';
+      return i === iOrden
+        ? `<th${clase} data-orden="desc">${col.titulo}<span class="ord">▼</span></th>`
+        : `<th${clase}>${col.titulo}</th>`;
+    }).join('')}</tr></thead>
+      <tbody>${filasHtml}</tbody></table>`;
+    hacerOrdenable(cont.querySelector('table'));
+  }
+
+  function estadoSlaLiderGrupo(mensaje) {
+    const cont = document.getElementById('tabla-sla-lider-grupo');
+    const cap = document.getElementById('cap-sla-lider-grupo');
+    const hint = document.getElementById('hint-sla-lider-grupo');
+    if (cap) cap.innerHTML = '';
+    if (hint) hint.textContent = '';
+    if (cont) cont.innerHTML = `<div class="vacio">${mensaje}</div>`;
+  }
+
+  function errorSlaLiderGrupo(err) {
+    estadoSlaLiderGrupo(`No se pudo cargar la tabla: ${escapeHtml((err && err.message) || err)}`);
+    console.error(err);
+  }
+
+  /* Plegado de la tarjeta. Nace PLEGADA en cada carga de la pagina -el
+     marcado ya trae aria-expanded="false" y el cuerpo oculto- y el estado
+     vive solo en el DOM: sin localStorage, igual que la barra lateral
+     (plegarLateral). Solo el boton pliega; el titulo y el numero de filas se
+     quedan a la vista. Recargar datos no toca el estado: el usuario que la
+     abrio la sigue viendo abierta al mover un filtro. */
+  function plegarSlaLiderGrupo(abrir) {
+    const boton = document.getElementById('plegar-sla-lider-grupo');
+    const cuerpo = document.getElementById('cuerpo-sla-lider-grupo');
+    if (!boton || !cuerpo) return;
+    const texto = `${abrir ? 'Ocultar' : 'Mostrar'} tabla de cumplimiento de SLA por líder y grupo`;
+    cuerpo.hidden = !abrir;
+    const card = document.getElementById('card-sla-lider-grupo');
+    if (card) card.classList.toggle('plegada', !abrir);
+    boton.setAttribute('aria-expanded', String(abrir));
+    boton.setAttribute('aria-label', texto);
+    boton.title = texto;
+  }
+
   function renderTodo(motivo) {
     perf.ini('renderTodo');
     renderKpis();
@@ -3291,6 +3495,16 @@ const TableroSla = (function () {
       e => { if (miCarga === cargaVigente) errorCargaCombinada(e); }
     ).catch(e => console.error(e));
 
+    /* SLA por lider y grupo: tambien APARTE, por el mismo motivo que el
+       cruce. Depende de dbo.usp_Dash_SlaLiderGrupo; si falla, solo su tarjeta
+       lo dice y no cuenta en `fallos`. Mismos filtros que el resto de la
+       pestaña: el handler decide cuales acepta el procedimiento. */
+    estadoSlaLiderGrupo('Cargando...');
+    obtenerJSONSla(`sla_lider_grupo.ashx?${qs}`).then(
+      d => { if (miCarga === cargaVigente) renderSlaLiderGrupo(d); },
+      e => { if (miCarga === cargaVigente) errorSlaLiderGrupo(e); }
+    ).catch(e => console.error(e));
+
     /* El ranking de personas (topCerrados) pide el MISMO productividad.ashx
        que la grafica, solo que con su propio rango y sin el filtro de
        tecnicos. En modo SLOT los dos rangos coinciden -rangoRanking() con
@@ -3420,6 +3634,14 @@ const TableroSla = (function () {
       document.getElementById(id).addEventListener('change', programarCarga);
     });
     renderSlotStepper();             // estado inicial: sin SLOT, rango manual
+
+    // Tabla de SLA por lider y grupo: plegada al abrir, el boton la alterna.
+    const botonLiderGrupo = document.getElementById('plegar-sla-lider-grupo');
+    if (botonLiderGrupo) {
+      botonLiderGrupo.addEventListener('click', () =>
+        plegarSlaLiderGrupo(botonLiderGrupo.getAttribute('aria-expanded') !== 'true'));
+    }
+    plegarSlaLiderGrupo(false);
 
     escribirRango(rangoPorDefecto());
 
