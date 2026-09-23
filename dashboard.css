@@ -633,9 +633,17 @@
     font: inherit; font-size: 12px; font-weight: 700; line-height: 1;
     white-space: nowrap; overflow: hidden; text-overflow: clip;
     cursor: pointer;
-    transition: background .15s ease, border-color .15s ease;
+    box-shadow: 0 1px 2px rgba(25, 25, 25, .12);
+    transition: background .15s ease, border-color .15s ease,
+                transform .06s ease, box-shadow .15s ease;
   }
-  .filtros .btn-proveedores:hover { border-color: var(--g-800); }
+  /* Mismo "hundirse" al pulsar que .btn (7 dias, Año, Limpiar). */
+  .filtros .btn-proveedores:hover {
+    border-color: var(--g-800); box-shadow: 0 2px 8px -2px rgba(71, 139, 60, .5);
+  }
+  .filtros .btn-proveedores:active {
+    transform: translateY(1px); box-shadow: 0 1px 2px rgba(25, 25, 25, .12);
+  }
   .filtros .btn-proveedores[data-estado="excluir"] {
     background: var(--grad-btn-hover); border-color: var(--g-800);
   }
