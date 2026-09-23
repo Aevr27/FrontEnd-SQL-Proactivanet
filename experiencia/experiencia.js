@@ -81,8 +81,19 @@ try {
 
 const P = DATOS;
 
+/* Escape de HTML. La implementacion es la compartida de assets/js/escape.js:
+   todo lo que sale del handler -categorias, titulos, descripciones, folios,
+   estados, nombres de Director/PO/Service Owner- se pega con innerHTML y
+   tiene que entrar como TEXTO. Los numeros pasan por FMT/PCT y no hace falta
+   escaparlos. */
+const esc = v => Escape.html(v);
+
 const FMT = n => Math.round(n||0).toLocaleString('es-MX');
 const PCT = n => Math.round((n||0)*100)+'%';
+/* Cifra del primer y del ultimo punto de una linea: el plugin compartido
+   de assets/js/lineas.js atado al FMT de esta pagina. Se enchufa por
+   grafica en su arreglo `plugins`, igual que la cifra dentro de la barra. */
+const CIFRAS_EXTREMOS = Lineas.cifrasExtremos(FMT);
 /* =========================================================================
    PALETA DE GRAFICAS — escala verde de la cabecera.
 
@@ -175,7 +186,7 @@ const miniBar = v => {const s=SEM(v);return `<span class="mini"><i style="width:
 const fdate = s => s? s.split('-').reverse().join('/') : '—';
 // Pinta una fecha en rojo+negritas si corresponde al estado y esta retrasada.
 function fdateSem(i, campo){
-  const val = fdate(i[campo]);
+  const val = esc(fdate(i[campo]));
   const mapa = {'En Análisis':'f_analisis','En Solución':'f_solucion','En Monitoreo':'f_cierre'};
   if(i.fecha_retrasada && mapa[i.estado]===campo){
     return `<b style="color:#982a18">${val}</b>`;
@@ -222,9 +233,21 @@ function pronosticoMes(volReal){
   return Math.round(volReal / P.dias_transcurridos_mes * 30);
 }
 
-// Enlace "Consulta el Detalle" (header y modal) desde LIGADETALLE
+/* Enlace "Consulta el Detalle" (header y modal) desde LIGADETALLE.
+
+   La URL viene de fuera -AppSettings["ExperienciaLigaDetalle"], via el
+   handler-, asi que se valida el ESQUEMA antes de ponerla en un href. Un
+   `javascript:...` no tiene ni un caracter que el escape de HTML cambie, y
+   en un <a href> se ejecuta al hacer clic.
+
+   LIGA_DETALLE es '' cuando el valor no sirve, que es exactamente lo mismo
+   que cuando no hay valor: los dos enlaces nacen con display:none en el
+   marcado y se quedan asi. No se avisa de nada al usuario -no es un error
+   suyo- y el resto del tablero no cambia. */
+const LIGA_DETALLE = Escape.url(P.liga_detalle);
+
 (function(){
-  const url=P.liga_detalle;
+  const url=LIGA_DETALLE;
   if(url){
     const h=document.getElementById('ligaHeader');
     if(h){h.href=url; h.style.display='inline-flex';}
@@ -355,7 +378,8 @@ function renderEvol(cats){
   // El punto de pronostico conserva el ambar: es una advertencia, no una serie.
   const pointColors=vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.profundo);
   const pointRadii=vals.map((_,i)=>i===idxPron?6:3);
-  chartEvol=new Chart(ctx,{type:'line',data:{labels,datasets:[{label:'Volumen',data:vals,
+  // De cuanto volumen arranca la ventana y en cuanto acaba, sobre la linea.
+  chartEvol=new Chart(ctx,{type:'line',plugins:[CIFRAS_EXTREMOS],data:{labels,datasets:[{label:'Volumen',data:vals,
     borderColor:VERDE.pino,backgroundColor:'rgba(47,143,107,.14)',fill:true,tension:.3,
     pointRadius:pointRadii,pointHoverRadius:pointRadii.map(r=>r+3),
     pointBackgroundColor:pointColors,borderWidth:2}]},
@@ -392,7 +416,7 @@ function renderDona(cats){
     options:{responsive:true,cutout:'58%',plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.label+': '+FMT(c.raw)}}}}});
   document.getElementById('legendDona').innerHTML=labels.map((l,i)=>
-    `<span><i style="background:${colors[i]}"></i>${l}: ${FMT(data[i])}</span>`).join('');
+    `<span><i style="background:${colors[i]}"></i>${esc(l)}: ${FMT(data[i])}</span>`).join('');
 }
 
 function tend(delta){
@@ -440,23 +464,23 @@ function renderDet(cats){
     const aConIni=conIniVolDe({nivel:'C1', categoria:c1});
     const aPctInic = aVol>0 ? Math.min(aConIni/aVol,1) : 0;
     h+=`<tr class="c1row" data-g="g${idx}">
-      <td><span class="catclick" data-cat="${encodeURIComponent(agg.categoria)}">${c1}</span></td>
+      <td><span class="catclick" data-cat="${encodeURIComponent(agg.categoria)}">${esc(c1)}</span></td>
       <td class="num">${FMT(aPrev)}</td><td class="num">${FMT(aVol)}</td>
       <td class="num">${tend(aDelta)}</td><td class="num">${FMT(aConIni)}</td>
       <td class="num">${miniBar(aPctInic)} ${badge(aPctInic)}</td>
       <td class="num">${FMT(agg.ret)}</td><td class="num">${badge(agg.pct_en_tiempo)}</td>
-      <td>${agg.po||'—'}</td><td>${agg.so||'—'}</td></tr>`;
+      <td>${esc(agg.po||'—')}</td><td>${esc(agg.so||'—')}</td></tr>`;
     hijos.forEach(c=>{
       const cVol=volActualDe(c), cPrev=volAnteriorDe(c), cDelta=deltaDe(c);
       const cConIni=conIniVolDe(c);
       const cPctInic = cVol>0 ? Math.min(cConIni/cVol,1) : 0;
       h+=`<tr class="c2row g${idx}">
-        <td><span class="catclick" data-cat="${encodeURIComponent(c.categoria)}">${c.categoria}</span></td>
+        <td><span class="catclick" data-cat="${encodeURIComponent(c.categoria)}">${esc(c.categoria)}</span></td>
         <td class="num">${FMT(cPrev)}</td><td class="num">${FMT(cVol)}</td>
         <td class="num">${tend(cDelta)}</td><td class="num">${FMT(cConIni)}</td>
         <td class="num">${miniBar(cPctInic)} ${badge(cPctInic)}</td>
         <td class="num">${FMT(c.ret)}</td><td class="num">${badge(c.pct_en_tiempo)}</td>
-        <td>${c.po||'—'}</td><td>${c.so||'—'}</td></tr>`;
+        <td>${esc(c.po||'—')}</td><td>${esc(c.so||'—')}</td></tr>`;
     });
   });
   document.getElementById('bodyDet').innerHTML=h||'<tr><td colspan="10" class="empty">Sin datos</td></tr>';
@@ -603,17 +627,17 @@ function renderSin(cats){
       if(esHojaC2){
         h+=`<tr class="c2row s${idx}"><td>${c1c2}</td>
           <td class="num">${FMT(sC2)}</td><td class="num">${badgeBin(pC2)}</td>
-          <td>${c2Info.po||nodos[0].po||'—'}</td><td>${c2Info.so||nodos[0].so||'—'}</td></tr>`;
+          <td>${esc(c2Info.po||nodos[0].po||'—')}</td><td>${esc(c2Info.so||nodos[0].so||'—')}</td></tr>`;
       }else{
         h+=`<tr class="c2row s${idx} c2exp" data-g2="${gid}"><td>${c1c2}</td>
           <td class="num">${FMT(sC2)}</td><td class="num">${badgeBin(pC2)}</td>
-          <td>${c2Info.po||'—'}</td><td>${c2Info.so||'—'}</td></tr>`;
+          <td>${esc(c2Info.po||'—')}</td><td>${esc(c2Info.so||'—')}</td></tr>`;
         nodos.sort((a,b)=>sinDeCatV2(b)-sinDeCatV2(a)).forEach(n=>{
           const nombreCorto=n.categoria.split('/').pop();
           const volN=volCatV2(n); const pctN=volN>0?conDeCatV2(n)/volN:0;
-          h+=`<tr class="c3row s${idx} ${gid}"><td style="padding-left:34px;color:#5e5e5f">${nombreCorto}</td>
+          h+=`<tr class="c3row s${idx} ${gid}"><td style="padding-left:34px;color:#5e5e5f">${esc(nombreCorto)}</td>
             <td class="num">${FMT(sinDeCatV2(n))}</td><td class="num">${badgeBin(pctN)}</td>
-            <td>${n.po||'—'}</td><td>${n.so||'—'}</td></tr>`;
+            <td>${esc(n.po||'—')}</td><td>${esc(n.so||'—')}</td></tr>`;
         });
       }
     });
@@ -654,14 +678,14 @@ function openCatPopup(folio){
   if(sub){
     const titulo=(entradas[0]&&entradas[0].titulo_problem)||'—';
     const desc=(entradas[0]&&entradas[0].descripcion)||'—';
-    sub.innerHTML=`<b>Título:</b> ${titulo}<br><b>Descripción:</b> ${desc}`;
+    sub.innerHTML=`<b>Título:</b> ${esc(titulo)}<br><b>Descripción:</b> ${esc(desc)}`;
   }
   let totalVol=0, totalReduce=0;
   const filas=entradas.map(e=>{
     const cv=map.get(e.categoria);
     const vol=cv?volCatV2(cv):0;
     totalVol+=vol; totalReduce+=(e.tickets_reduce||0);
-    return `<tr><td>${e.categoria}</td><td class="num">${FMT(vol)}</td>
+    return `<tr><td>${esc(e.categoria)}</td><td class="num">${FMT(vol)}</td>
       <td class="num">${PCT(e.pct_dism)}</td><td class="num">${FMT(e.tickets_reduce)}</td></tr>`;
   });
   const totalRow = entradas.length
@@ -736,13 +760,13 @@ function renderVen(cats){
   rows.sort((a,b)=>b.retrazado-a.retrazado);
   document.getElementById('bodyVen').innerHTML = rows.length? rows.map(x=>{
     const camb=[x.n_analisis,x.n_solucion,x.n_cierre].reduce((a,b)=>a+(b||0),0);
-    return `<tr><td><button class="btn-ver-cat" data-fol="${x.folio}">Ver categorías</button></td><td>${x.folio}</td><td>${x.titulo||'—'}</td>
-      <td><span class="chip" style="background:${ACOLOR[x.agrup]}33;color:${TINTA_CHIP}">${x.agrup}</span></td>
+    return `<tr><td><button class="btn-ver-cat" data-fol="${Escape.attr(x.folio)}">Ver categorías</button></td><td>${esc(x.folio)}</td><td>${esc(x.titulo||'—')}</td>
+      <td><span class="chip" style="background:${ACOLOR[x.agrup]}33;color:${TINTA_CHIP}">${esc(x.agrup)}</span></td>
       <td class="num"><b>${FMT(x.riesgo_folio)}</b></td><td class="num">${FMT(volumenCategoriasFolio(x.folio))}</td>
-      <td><span class="tag-est">${x.estado||'—'}</span></td>
+      <td><span class="tag-est">${esc(x.estado||'—')}</span></td>
       <td class="fecha-cell"><span class="dot" style="background:${SEMC[x.sem_fecha]}"></span>${fdateSem(x,'f_analisis')}</td>
       <td class="fecha-cell">${fdateSem(x,'f_solucion')}</td><td class="fecha-cell">${fdateSem(x,'f_cierre')}</td>
-      <td class="num">${FMT(camb)}</td><td>${x.po||'—'}</td></tr>`;
+      <td class="num">${FMT(camb)}</td><td>${esc(x.po||'—')}</td></tr>`;
   }).join('') : '<tr><td colspan="12" class="empty">Sin iniciativas retrasadas ✅</td></tr>';
   const cap=document.getElementById('capVen');
   if(cap) cap.textContent=`${rows.length} iniciativas activas retrasadas`;
@@ -756,13 +780,13 @@ function renderAct(cats){
   rows.sort((a,b)=>(b.riesgo_folio||0)-(a.riesgo_folio||0));
   document.getElementById('bodyAct').innerHTML = rows.length? rows.map(x=>{
     const camb=[x.n_analisis,x.n_solucion,x.n_cierre].reduce((a,b)=>a+(b||0),0);
-    return `<tr><td><button class="btn-ver-cat" data-fol="${x.folio}">Ver categorías</button></td><td>${x.folio}</td><td>${x.titulo||'—'}</td>
-      <td><span class="chip" style="background:${ACOLOR[x.agrup]}33;color:${TINTA_CHIP}">${x.agrup}</span></td>
+    return `<tr><td><button class="btn-ver-cat" data-fol="${Escape.attr(x.folio)}">Ver categorías</button></td><td>${esc(x.folio)}</td><td>${esc(x.titulo||'—')}</td>
+      <td><span class="chip" style="background:${ACOLOR[x.agrup]}33;color:${TINTA_CHIP}">${esc(x.agrup)}</span></td>
       <td class="num"><b>${FMT(x.riesgo_folio)}</b></td><td class="num">${FMT(x.vol_reduce_folio)}</td>
-      <td><span class="tag-est">${x.estado||'—'}</span></td>
+      <td><span class="tag-est">${esc(x.estado||'—')}</span></td>
       <td class="fecha-cell"><span class="dot" style="background:${SEMC[x.sem_fecha]}"></span>${fdateSem(x,'f_analisis')}</td>
       <td class="fecha-cell">${fdateSem(x,'f_solucion')}</td><td class="fecha-cell">${fdateSem(x,'f_cierre')}</td>
-      <td class="num">${FMT(camb)}</td><td>${x.po||'—'}</td></tr>`;
+      <td class="num">${FMT(camb)}</td><td>${esc(x.po||'—')}</td></tr>`;
   }).join('') : '<tr><td colspan="12" class="empty">Sin iniciativas activas</td></tr>';
   const cap=document.getElementById('capAct');
   if(cap) cap.textContent=`${rows.length} iniciativas activas`;
@@ -843,7 +867,7 @@ function histChk(nivel,categoria){
 function renderHeadHist(){
   const labels=etiquetasPeriodos();
   let h='<th></th><th>Categoría</th>';
-  labels.forEach(l=>{h+=`<th class="num">${l}</th>`;});
+  labels.forEach(l=>{h+=`<th class="num">${esc(l)}</th>`;});
   h+='<th class="num">Tend.</th>';
   const thead=document.getElementById('theadHist');
   if(thead) thead.innerHTML=h;
@@ -867,7 +891,7 @@ function renderHist(){
     const deltaC1=deltaDeValores(valC1);
     hcuerpo+=`<tr class="c1row" data-g="h${idx}">
       <td>${histChk(1,c1)}</td>
-      <td>${c1}</td>
+      <td>${esc(c1)}</td>
       ${valC1.map(v=>`<td class="num">${FMT(v)}</td>`).join('')}
       <td class="num">${tend(deltaC1)}</td></tr>`;
     Object.keys(grupos[c1]).sort((a,b)=>{
@@ -880,18 +904,18 @@ function renderHist(){
       const gid='h'+idx+'_'+jdx;
       const esHojaC2=nodos.length===1 && nodos[0].categoria===c1c2;
       if(esHojaC2){
-        hcuerpo+=`<tr class="c2row h${idx}"><td>${histChk(2,c1c2)}</td><td>${c1c2}</td>
+        hcuerpo+=`<tr class="c2row h${idx}"><td>${histChk(2,c1c2)}</td><td>${esc(c1c2)}</td>
           ${valC2.map(v=>`<td class="num">${FMT(v)}</td>`).join('')}
           <td class="num">${tend(deltaC2)}</td></tr>`;
       }else{
-        hcuerpo+=`<tr class="c2row h${idx} c2exp" data-g2="${gid}"><td>${histChk(2,c1c2)}</td><td>${c1c2}</td>
+        hcuerpo+=`<tr class="c2row h${idx} c2exp" data-g2="${gid}"><td>${histChk(2,c1c2)}</td><td>${esc(c1c2)}</td>
           ${valC2.map(v=>`<td class="num">${FMT(v)}</td>`).join('')}
           <td class="num">${tend(deltaC2)}</td></tr>`;
         nodos.slice().sort((a,b)=>volSlotOMes(b,nums[iAct])-volSlotOMes(a,nums[iAct])).forEach(n=>{
           const valC3=valoresPeriodos(n);
           const deltaC3=deltaDeValores(valC3);
           const nombreCorto=n.categoria.split('/').pop();
-          hcuerpo+=`<tr class="c3row h${idx} ${gid}"><td>${histChk(3,n.categoria)}</td><td style="padding-left:34px;color:#5e5e5f">${nombreCorto}</td>
+          hcuerpo+=`<tr class="c3row h${idx} ${gid}"><td>${histChk(3,n.categoria)}</td><td style="padding-left:34px;color:#5e5e5f">${esc(nombreCorto)}</td>
             ${valC3.map(v=>`<td class="num">${FMT(v)}</td>`).join('')}
             <td class="num">${tend(deltaC3)}</td></tr>`;
         });
@@ -1011,7 +1035,7 @@ function graficarHist(){
         }}}}}};
     leyenda.innerHTML=pieSeries.map((s,i)=>{
       const pct=totalPie>0?s.valor/totalPie:0;
-      return `<span><i style="background:${colores[i%colores.length]}"></i>${s.label}: ${FMT(s.valor)} (${PCT(pct)})</span>`;
+      return `<span><i style="background:${colores[i%colores.length]}"></i>${esc(s.label)}: ${FMT(s.valor)} (${PCT(pct)})</span>`;
     }).join('');
     leyenda.style.display='flex';
   } else {
@@ -1022,7 +1046,11 @@ function graficarHist(){
     const seriesOrdenadas = tipo==='bar'
       ? series.slice().sort((a,b)=>b.data.reduce((s,v)=>s+v,0)-a.data.reduce((s,v)=>s+v,0))
       : series;
-    cfg={type:tipo,data:{labels,
+    // Las cifras de los extremos son de la vista de LINEAS: son el primer y
+    // el ultimo punto de una serie en el tiempo. En la vista de barras cada
+    // barra es un periodo suelto y no hay "extremos" que leer, asi que esa se
+    // queda como estaba.
+    cfg={type:tipo,plugins:tipo==='line'?[CIFRAS_EXTREMOS]:[],data:{labels,
       datasets:seriesOrdenadas.map((s,i)=>({label:s.label,data:s.data,
         borderColor:colores[i%colores.length],
         backgroundColor: tipo==='line' ? colores[i%colores.length]+'33' : colores[i%colores.length],
@@ -1115,7 +1143,7 @@ function renderModalBody(){
   const nCer=new Set(c.iniciativas.filter(i=>i.agrup!=='ReqOpr' && i.estado==='Cerrado').map(i=>i.folio)).size;
   document.getElementById('modalTitle').textContent=c.categoria;
   const lm=document.getElementById('ligaModal');
-  if(lm && P.liga_detalle) lm.style.display='inline-block';
+  if(lm && LIGA_DETALLE) lm.style.display='inline-block';
   document.getElementById('modalSub').textContent=
     `Volumen actual: ${FMT(volActualDe(c))} · Con iniciativa activa: ${FMT(c.ini_total)} (${PCT(c.pct_inic)}) · `
     +`${nAct} activas · ${nCer} cerradas`;
@@ -1124,17 +1152,17 @@ function renderModalBody(){
     // POP-1: el folio siempre se muestra como liga -- el disparador de
     // POP-2 (detalle del Problem) ya no depende de que existan observaciones.
     const folioCell = `<span class="folioclick" style="color:var(--accent);cursor:pointer;text-decoration:underline dotted"
-           data-obs="${obs.replace(/"/g,'&quot;')}" data-fol="${i.folio}"
-           data-titulo="${(i.titulo_problem||'').replace(/"/g,'&quot;')}"
-           data-desc="${(i.descripcion||'').replace(/"/g,'&quot;')}"
-           title="Ver detalle del Problem">${i.folio}</span>`;
-    return `<tr><td>${folioCell}</td><td>${i.titulo||'—'}</td>
-     <td><span class="chip" style="background:${(ACOLOR[i.agrup]||'#eeeeee')}33;color:${TINTA_CHIP}">${i.agrup||'—'}</span></td>
+           data-obs="${Escape.attr(obs)}" data-fol="${Escape.attr(i.folio)}"
+           data-titulo="${Escape.attr(i.titulo_problem||'')}"
+           data-desc="${Escape.attr(i.descripcion||'')}"
+           title="Ver detalle del Problem">${esc(i.folio)}</span>`;
+    return `<tr><td>${folioCell}</td><td>${esc(i.titulo||'—')}</td>
+     <td><span class="chip" style="background:${(ACOLOR[i.agrup]||'#eeeeee')}33;color:${TINTA_CHIP}">${esc(i.agrup||'—')}</span></td>
      <td class="num">${FMT(i.riesgo_folio)}</td>
      <td class="fecha-cell"><span class="dot" style="background:${SEMC[i.sem_fecha]}"></span>${fdateSem(i,'f_analisis')}</td>
      <td class="fecha-cell">${fdateSem(i,'f_solucion')}</td><td class="fecha-cell">${fdateSem(i,'f_cierre')}</td>
      <td class="num">${i.antiguedad!=null?i.antiguedad+' d':'—'}</td>
-     <td><span class="tag-est">${i.estado||'—'}</span></td><td>${i.po||'—'}</td><td>${i.so||'—'}</td></tr>`;
+     <td><span class="tag-est">${esc(i.estado||'—')}</span></td><td>${esc(i.po||'—')}</td><td>${esc(i.so||'—')}</td></tr>`;
    }).join('') : `<tr><td colspan="11" class="empty">${verCerradas?'Esta categoría no tiene iniciativas registradas.':'Sin iniciativas activas. Marca la casilla para ver las cerradas.'}</td></tr>`;
   // click en folio -> POP-2 (Folio, Titulo, Descripcion y Observaciones del Problem)
   document.querySelectorAll('#modalBody .folioclick').forEach(el=>{
@@ -1731,6 +1759,16 @@ function renderTreemap(containerId,items,opts){
   const total=data.reduce((s,it)=>s+it.value,0);
   const w=el.clientWidth||300, h=el.clientHeight||300;
   const rects=squarify(data,0,0,w,h);
+  /* Color de identidad, resuelto para TODOS los recuadros de golpe: es lo
+     que deja esquivar que dos personas distintas caigan en el mismo tono
+     mientras queden colores libres. Se indexa por etiqueta -no por posicion-
+     porque el treemap ordena por area y ese orden no debe decidir color. */
+  const tonoDe={};
+  if(opts.lider){
+    const nombres=data.map(it=>it.label);
+    const escala=opts.director ? Paleta.escalaDirectores(nombres) : Paleta.escalaPersonas(nombres);
+    nombres.forEach((n,i)=>{ tonoDe[n]=escala[i]; });
+  }
   rects.forEach((r,i)=>{
     const div=document.createElement('div');
     div.className='treemap-item';
@@ -1745,7 +1783,7 @@ function renderTreemap(containerId,items,opts){
        treemap la ordene por area. Sin esa marca -el treemap de agrupacion,
        cuyos recuadros son Problem / SorIA / Mejora...- sigue el reparto por
        posicion de la paleta categorica, que ahi no representa a nadie. */
-    const tono=opts.lider ? Paleta.colorLider(r.label) : TM_COLORES[i%TM_COLORES.length];
+    const tono=opts.lider ? tonoDe[r.label] : TM_COLORES[i%TM_COLORES.length];
     div.style.background=tono;
     // .treemap-item pinta el texto en blanco; sobre los verdes claros de la
     // escala hay que devolverlo a carbon o la etiqueta desaparece.
@@ -1755,7 +1793,7 @@ function renderTreemap(containerId,items,opts){
       ? `${r.label}\n${FMT(r.value)} iniciativas\n${PCT(pct)} del total`
       : `${r.label}: ${FMT(r.value)}`;
     if(r.w>=34 && r.h>=24){
-      div.innerHTML=`<div class="tm-label">${r.label}</div><div class="tm-value">${FMT(r.value)}${opts.onClick?' · '+PCT(pct):''}</div>`;
+      div.innerHTML=`<div class="tm-label">${esc(r.label)}</div><div class="tm-value">${FMT(r.value)}${opts.onClick?' · '+PCT(pct):''}</div>`;
     }
     if(opts.onClick){
       div.style.cursor='pointer';
@@ -1899,7 +1937,8 @@ function renderPanelGraf(tab, cats){
   registrarDimension(Object.keys(conteoDim));
   renderTreemap('chart'+cap1(tab)+'Dim',
     Object.entries(conteoDim).map(([label,value])=>({label,value})),
-    {selected:est.dimVal, lider:true, onClick:val=>toggleFiltroGraf(tab,'dimVal',val)});
+    {selected:est.dimVal, lider:true, director:est.dim==='director',
+     onClick:val=>toggleFiltroGraf(tab,'dimVal',val)});
 
   const rowsAgrup=aplicarFiltroGraf(baseRows, est, 'agrup');
   const conteoAgrup={};
@@ -1928,10 +1967,15 @@ let chartBarDir=null;
    antiguedad y en sus swatches. Si ahi es azul, aqui tiene que ser azul.
 
    Asi que las tres piden el color por NOMBRE -el color de siempre de esa
-   persona, congelado en paleta.js- a la tabla compartida
-   (Paleta.colorLider, via `paleta: { lider: true }`). El registro local
-   desaparece a proposito: un solo mapa nombre -> color para todo el tablero,
-   sin copias que se contradigan.
+   persona, congelado en paleta.js- a la tabla compartida: la de Director por
+   `paleta: { directores: true }` y las dos de PO por Paleta.escalaPersonas().
+   El registro local desaparece a proposito: un solo mapa nombre -> color para
+   todo el tablero, sin copias que se contradigan.
+
+   Se piden por LISTA y no nombre a nombre para que dentro de una misma
+   grafica no se repita color mientras queden libres; las dos dimensiones van
+   por caminos distintos porque Director y Product Owner son dimensiones
+   distintas y no comparten cupo de colores.
 
    El ORDEN de las barras no se toca: los tres rankings siguen de mayor a
    menor volumen. El color va con la persona, el puesto con la cifra: una
@@ -1972,13 +2016,22 @@ function renderBarrasPO(canvasId, filas, valorDe){
      recortado del eje: dos POs distintos pueden compartir los primeros 15
      caracteres-, asi que va por `colores`, ya resuelto contra la tabla
      compartida. Las dos graficas de PO -"Volumen" y "Con Iniciativa"- salen
-     por aqui, de modo que el mismo PO sale del mismo color en las dos. */
+     por aqui con las MISMAS filas, de modo que el mismo PO sale del mismo
+     color en las dos.
+
+     Se piden los quince de golpe (Paleta.escalaPersonas) y no uno por uno:
+     con quince personas y una paleta pequena dos POs distintos acababan del
+     mismo color. Pidiendo la lista completa, quien tiene color historico lo
+     conserva y al resto se le esquiva la colision mientras queden colores.
+     El reparto no depende del orden de las barras, asi que el ranking por
+     volumen puede reordenarse sin recolorear a nadie. */
   registrarDimension(datos.map(r => r.po));
+  const coloresPO = Paleta.escalaPersonas(datos.map(r => r.po));
   chartsPO[canvasId] = new DashboardBarChart({
     canvas: el,
     etiquetas: datos.map(r => cortaPO(r.po)),
     datos: datos.map(valorDe),
-    colores: datos.map(r => Paleta.colorLider(r.po)),
+    colores: coloresPO,
     formato: FMT,
     opciones: {
       maintainAspectRatio: false,
@@ -2019,7 +2072,7 @@ function renderResumen(){
     ret:v.ret, pctTiempo:v.ini>0?Math.max(0,Math.min(1,1-v.ret/v.ini)):1,
   })).sort((a,b)=>b.vol-a.vol);
   document.getElementById('bodyDirectores').innerHTML=dirRows.map(r=>
-    `<tr><td><b>${r.dir}</b></td><td class="num">${FMT(r.vol)}</td><td class="num">${PCT(r.pct)}</td>
+    `<tr><td><b>${esc(r.dir)}</b></td><td class="num">${FMT(r.vol)}</td><td class="num">${PCT(r.pct)}</td>
      <td class="num">${FMT(r.ini)}</td><td class="num">${miniBar(r.pctIni)} ${badge(r.pctIni)}</td>
      <td class="num">${FMT(r.ret)}</td><td class="num">${badge(r.pctTiempo)}</td></tr>`).join('');
   // barras por director (nombre completo en el eje Y, sin truncar)
@@ -2029,15 +2082,17 @@ function renderResumen(){
      grosor, el radio y la cifra dentro salen de DashboardBarChart, que ademas
      mide a lo ancho cuando indexAxis es 'y'. Lo propio es la orientacion, que
      el nombre del director va entero en el eje y que el color es IDENTIDAD:
-     `paleta: { lider: true }` lo resuelve por nombre contra la tabla
-     compartida, el mismo color que esa persona lleva en el Backlog. Las
-     barras siguen ordenadas por volumen (mayor -> menor). */
+     `paleta: { directores: true }` lo resuelve por NOMBRE contra el mapa de
+     Directores de la tabla compartida. Director es una dimension propia: sus
+     colores no salen del cupo de Product Owners ni se los quitan. Las barras
+     siguen ordenadas por volumen (mayor -> menor) y el color no se mueve con
+     el puesto. */
   registrarDimension(dirRows.map(r=>r.dir));
   chartBarDir=new DashboardBarChart({
     canvas: bdCtx,
     etiquetas: dirRows.map(r=>r.dir),
     datos: dirRows.map(r=>r.vol),
-    paleta: { lider: true },
+    paleta: { directores: true },
     formato: FMT,
     opciones:{indexAxis:'y',plugins:{legend:{display:false}},
       scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}},
@@ -2077,7 +2132,7 @@ function renderResumenPorPO(dir){
     ret:v.ret, pctTiempo:v.ini>0?Math.max(0,Math.min(1,1-v.ret/v.ini)):1,
   })).sort((a,b)=>b.vol-a.vol);
   document.getElementById('bodyDirectores').innerHTML=poRows.map(r=>
-    `<tr><td><b>${r.po}</b></td><td class="num">${FMT(r.vol)}</td><td class="num">${PCT(r.pct)}</td>
+    `<tr><td><b>${esc(r.po)}</b></td><td class="num">${FMT(r.vol)}</td><td class="num">${PCT(r.pct)}</td>
      <td class="num">${FMT(r.ini)}</td><td class="num">${miniBar(r.pctIni)} ${badge(r.pctIni)}</td>
      <td class="num">${FMT(r.ret)}</td><td class="num">${badge(r.pctTiempo)}</td></tr>`).join('');
   renderBarrasPO('chartBarPO', poRows, r=>r.vol);
@@ -2086,11 +2141,11 @@ function renderResumenPorPO(dir){
 
 // ---- selectores encadenados ----
 const selDir=document.getElementById('selDir'), selPO=document.getElementById('selPO');
-P.directores.forEach(d=>selDir.insertAdjacentHTML('beforeend',`<option value="${d}">${d}</option>`));
+P.directores.forEach(d=>selDir.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(d)}">${esc(d)}</option>`));
 function fillPO(){
   selPO.innerHTML='<option value="">— Todos —</option>';
   const pos = fDir? (P.jerarquia[fDir]||[]) : [...new Set(P.categorias.map(c=>c.po).filter(Boolean))].sort();
-  pos.forEach(p=>selPO.insertAdjacentHTML('beforeend',`<option value="${p}">${p}</option>`));
+  pos.forEach(p=>selPO.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(p)}">${esc(p)}</option>`));
 }
 selDir.onchange=()=>{fDir=selDir.value;fPO='';fillPO();renderAll();};
 selPO.onchange=()=>{fPO=selPO.value;renderAll();};
@@ -2099,12 +2154,12 @@ selPO.onchange=()=>{fPO=selPO.value;renderAll();};
 // Service Owner reporta a un Manager, ver TAREA 1 / generar.py so_manager).
 // Se combinan con Director/PO via AND (pasaFiltroGlobal), no se excluyen.
 const selMgr=document.getElementById('selMgr'), selSO=document.getElementById('selSO');
-(P.managers||[]).forEach(m=>selMgr.insertAdjacentHTML('beforeend',`<option value="${m}">${m}</option>`));
+(P.managers||[]).forEach(m=>selMgr.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(m)}">${esc(m)}</option>`));
 function fillSO(){
   selSO.innerHTML='<option value="">— Todos —</option>';
   const sos = fMgr ? ((P.jerarquia_mgr||{})[fMgr]||[])
     : [...new Set(P.categorias.map(c=>c.so).filter(Boolean))].sort();
-  sos.forEach(s=>selSO.insertAdjacentHTML('beforeend',`<option value="${s}">${s}</option>`));
+  sos.forEach(s=>selSO.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(s)}">${esc(s)}</option>`));
 }
 selMgr.onchange=()=>{fMgr=selMgr.value;fSO='';fillSO();renderAll();};
 selSO.onchange=()=>{fSO=selSO.value;renderAll();};

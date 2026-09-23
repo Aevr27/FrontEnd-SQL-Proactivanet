@@ -18,7 +18,7 @@
 //   Replegar y la nota "UNA SOLA PASADA POR LAS VISTAS DE VOLUMEN").
 //   Las cuatro vistas siguen existiendo en la base, sin usarse aqui.
 //   iniciativas          dbo.vw_ProblemCategoria + dbo.Problem
-//   duenos por categoria dbo.CatCategoriaDueno (via la vista)
+//   duenos por categoria dbo.CatCategoriaDueno (Directorio; tambien para las iniciativas)
 //   manager de cada SO   dbo.CatPersona                    (13_experiencia_usuario.sql)
 //
 // Las tres vistas por slot y las tres por mes son la MISMA agrupacion con
@@ -66,7 +66,35 @@
 // dos.
 //
 // Si algun dia se cambia fn_CategoriaC1 o fn_CategoriaC1C2 en la base, hay
-// que reflejarlo en C1DeTsql / C1C2De: son las que replican ese corte.
+// que reflejarlo en C1DeTsql / C1C2De: son las que replican ese corte. Lo
+// mismo con fn_NormalizaCategoria y Normaliza.
+//
+// QUE CATEGORIAS EXISTEN: TICKETS *UNION* INICIATIVAS
+// ---------------------------------------------------
+// El universo de categorias NO sale solo de las vistas de volumen. Si
+// saliera, una categoria con iniciativa pero sin un solo ticket en la
+// ventana no existiria como categoria y su iniciativa no se pintaria en
+// ningun lado, que es justo lo que pasaba.
+//
+// Las categorias entran por dos puertas:
+//
+//   Acumular      las que tuvieron tickets (vw_TBSlotCAT / vw_TBMesCAT),
+//                 con su volumen por periodo;
+//   AsegurarFila  las de las iniciativas ACTIVAS de dbo.vw_ProblemCategoria
+//                 (VigenteEnOrigen = 1) que la primera puerta no trajo, en
+//                 CERO: sin ninguna fila de volumen inventada.
+//
+// Las dos puertas usan la MISMA identidad de categoria -la ruta normalizada
+// por fn_NormalizaCategoria, y sus cortes C1 / C1&C2 por fn_CategoriaC1 /
+// fn_CategoriaC1C2-, asi que una categoria que llega por las dos se
+// reconoce y queda una sola fila, con su volumen intacto.
+//
+// El catalogo de validez es la vigencia de la propia vista de iniciativas,
+// que es la que este archivo ya consultaba. NO se usa dbo.Categorias: en
+// este repo solo la lee la ruta de QA (sql/10_qa_web.sql), meterla aqui
+// seria un segundo modelo de categoria en paralelo, y una categoria marcada
+// inactiva en el catalogo puede tener una iniciativa activa perfectamente
+// valida -precisamente la que hay que mostrar-.
 
 using System;
 using System.Collections.Generic;
@@ -101,6 +129,11 @@ public static class ExperienciaQueries
     // etiquetas del eje y el periodo que se publica en "meta" no puedan
     // separarse. No cambia la semantica: 0-30d, 31-60d, etc. siguen igual.
     private const int DIAS_SLOT = DashboardDataInfo.DiasSlot;
+
+    // Espacio duro. Va por codigo de caracter y no como literal para que
+    // ningun editor lo confunda con un espacio normal (mismo criterio que
+    // tools/PruebaReplegarExperiencia.cs).
+    private const char NBSP = ' ';
 
     // ------------------------------------------------------------------
     // Punto de entrada
@@ -146,6 +179,11 @@ public static class ExperienciaQueries
             // rearmar los diccionarios en cada bloque. Va antes que las
             // iniciativas sueltas porque esas ya necesitan resolver Manager.
             var dir = new Directorio(duenos, personas);
+
+            // Los dueños de cada iniciativa son los de su categoria, resueltos
+            // por el MISMO Directorio que resuelve los de las filas de
+            // categoria. Ver AlinearDuenos.
+            AlinearDuenos(detalle, dir);
 
             var sueltas = LeerIniciativasSinCategoria(cn, hoy, dir);
 
@@ -399,28 +437,35 @@ public static class ExperienciaQueries
         public int NAnalisis;
         public int NSolucion;
         public int NCierre;
-        public string Po;
+        public string Po;              // los de su categoria (AlinearDuenos)
         public string So;
         public string Director;
         public int Antiguedad;
         public bool Activa;            // estado en ESTADOS_ACTIVOS
         public bool Retrasada;         // activa y con la fecha de su estado vencida
         public string SemFecha;        // verde / ambar / rojo
+        public bool ControlFecha = true; // CatPrefijoProblem.ControlDeFecha de su prefijo
     }
 
     private static List<Detalle> LeerIniciativas(SqlConnection cn, DateTime hoy)
     {
         // p.Descripcion y p.Observaciones no las expone la vista y el tablero
         // las pinta en la tarjeta de la iniciativa, de ahi el JOIN a Problem.
+        //
+        // v.ProductOwner / v.ServiceOwner / v.DirectorPO ya NO se leen: los
+        // dueños de la iniciativa son los de su categoria y los resuelve
+        // AlinearDuenos con el Directorio, que es con lo que el tablero
+        // filtra. Ver la nota "UNA SOLA RESOLUCION DE DUEÑOS" ahi.
         const string SQL =
             "SELECT v.Codigo, v.Categoria, v.C1, v.C1C2, v.Iniciativa, v.Titulo, " +
             "       v.Estado, v.TipoAgrupado, v.TicketsReduce, v.PctDisminucion, " +
             "       v.FechaAnalisis, v.FechaSolucion, v.FechaCierre, " +
             "       v.NroCambioFechaAnalisis, v.NroCambioFechaSolucion, v.NroCambioFechaCierre, " +
-            "       v.ProductOwner, v.ServiceOwner, v.DirectorPO, " +
-            "       p.Descripcion, p.Observaciones, p.FechaCreacion " +
+            "       p.Descripcion, p.Observaciones, p.FechaCreacion, " +
+            "       ISNULL(cp.ControlDeFecha, 1) " +
             "FROM dbo.vw_ProblemCategoria AS v " +
             "INNER JOIN dbo.Problem AS p ON p.Codigo = v.Codigo " +
+            "LEFT JOIN dbo.CatPrefijoProblem AS cp ON cp.Prefijo = p.Prefijo " +
             "WHERE v.VigenteEnOrigen = 1";
 
         var filas = new List<Detalle>();
@@ -469,15 +514,40 @@ public static class ExperienciaQueries
                 {
                     var d = new Detalle();
                     d.Folio = Texto(rd.GetValue(0));
-                    d.Categoria = Texto(rd.GetValue(1));
+
+                    // La ruta se guarda NORMALIZADA, no cruda. Es la misma
+                    // identidad de categoria que usa el resto del payload:
+                    // [Categoria V2] de las vistas de volumen ya viene de
+                    // fn_NormalizaCategoria, y v.C1 / v.C1C2 de esta misma
+                    // vista salen de fn_CategoriaC1 / fn_CategoriaC1C2, que
+                    // normalizan su argumento antes de cortar.
+                    //
+                    // Hace falta desde que el universo de categorias es la
+                    // UNION de tickets e iniciativas (ver AsegurarFila): una
+                    // ruta que traiga un NBSP o un espacio al final no
+                    // cruzaria con su propia fila de volumen -los
+                    // diccionarios de categoria comparan Ordinal- y se
+                    // crearia una categoria duplicada, con el volumen en una
+                    // copia y la iniciativa en la otra.
+                    //
+                    // Como fn_NormalizaCategoria es idempotente, las rutas
+                    // que ya venian limpias -la inmensa mayoria- no cambian,
+                    // y por tanto tampoco cambia lo que hoy publica
+                    // categorias_por_folio ni el cruce de ticket_reduce.
+                    d.Categoria = Normaliza(Texto(rd.GetValue(1)));
 
                     if (!vistas.Add((d.Folio ?? "") + SEP + (d.Categoria ?? "")))
                         continue;
 
                     d.C1 = Texto(rd.GetValue(2));
                     d.C1C2 = Texto(rd.GetValue(3));
-                    d.Titulo = Texto(rd.GetValue(4));
                     d.TituloProblem = Texto(rd.GetValue(5));
+                    // Un Problem recien creado puede tener su fila en
+                    // ProblemCategoria antes de que alguien capture el titulo
+                    // de la iniciativa. El titulo es un dato de PRESENTACION:
+                    // se pinta el del Problem mientras tanto, igual que la
+                    // tarjeta ya lo hacia con titulo_problem.
+                    d.Titulo = Texto(rd.GetValue(4)) ?? d.TituloProblem;
                     d.Estado = Texto(rd.GetValue(6));
                     d.Agrup = Texto(rd.GetValue(7));
                     d.TicketsReduce = Entero(rd.GetValue(8));
@@ -488,13 +558,12 @@ public static class ExperienciaQueries
                     d.NAnalisis = Entero(rd.GetValue(13));
                     d.NSolucion = Entero(rd.GetValue(14));
                     d.NCierre = Entero(rd.GetValue(15));
-                    d.Po = Texto(rd.GetValue(16));
-                    d.So = Texto(rd.GetValue(17));
-                    d.Director = Texto(rd.GetValue(18));
-                    d.Descripcion = Texto(rd.GetValue(19));
-                    d.Observaciones = Texto(rd.GetValue(20));
-                    d.Antiguedad = DiasDesde(rd.GetValue(21), hoy);
+                    d.Descripcion = Texto(rd.GetValue(16));
+                    d.Observaciones = Texto(rd.GetValue(17));
+                    d.Antiguedad = DiasDesde(rd.GetValue(18), hoy);
+                    d.ControlFecha = Convert.ToBoolean(rd.GetValue(19));
 
+                    Canonizar(d);
                     Semaforo(d, hoy);
                     filas.Add(d);
                 }
@@ -520,8 +589,10 @@ public static class ExperienciaQueries
             "       p.FechaAnalisis, p.FechaSolucion, p.FechaCierre, " +
             "       p.NroCambioFechaAnalisis, p.NroCambioFechaSolucion, p.NroCambioFechaCierre, " +
             "       p.Descripcion, p.Observaciones, p.FechaCreacion, " +
-            "       p.OwnerServicio, p.OwnerProblem, p.Direccion " +
+            "       p.OwnerServicio, p.OwnerProblem, p.Direccion, " +
+            "       ISNULL(cp.ControlDeFecha, 1) " +
             "FROM dbo.Problem AS p " +
+            "LEFT JOIN dbo.CatPrefijoProblem AS cp ON cp.Prefijo = p.Prefijo " +
             "WHERE p.VigenteEnOrigen = 1 " +
             "  AND NOT EXISTS (SELECT 1 FROM dbo.ProblemCategoria AS pc " +
             "                  WHERE pc.Codigo = p.Codigo AND pc.VigenteEnOrigen = 1)";
@@ -553,7 +624,9 @@ public static class ExperienciaQueries
                     d.So = Texto(rd.GetValue(13));
                     d.Po = Texto(rd.GetValue(14));
                     d.Director = Texto(rd.GetValue(15));
+                    d.ControlFecha = Convert.ToBoolean(rd.GetValue(16));
 
+                    Canonizar(d);
                     Semaforo(d, hoy);
                     filas.Add(Iniciativa(d, d.TicketsReduce, 0, dir));
                 }
@@ -584,6 +657,16 @@ public static class ExperienciaQueries
             return;
         }
 
+        // Prefijos con CatPrefijoProblem.ControlDeFecha = 0 (REQ, RTI): no
+        // tienen fecha comprometida que vencer. Siguen activas -cuentan en
+        // totales-, pero nunca como retrasadas.
+        if (!d.ControlFecha)
+        {
+            d.SemFecha = "ambar";
+            d.Retrasada = false;
+            return;
+        }
+
         string fecha = null;
         var estado = Clave(d.Estado);
         if (estado == Clave("En Análisis")) fecha = d.FAnalisis;
@@ -607,6 +690,32 @@ public static class ExperienciaQueries
         return false;
     }
 
+    // Publica el estado y el agrupador con la grafia EXACTA del contrato
+    // cuando el servidor ya los reconoce como uno de los suyos.
+    //
+    // El servidor compara tolerante (EsActiva por Clave: sin acentos, sin
+    // mayusculas, sin espacios de sobra; EsAgrupador sin mayusculas), pero
+    // experiencia.js compara exacto: ESTADOS_ACTIVOS.includes(i.estado) y
+    // AGR.includes(i.agrup). Una iniciativa con "En Analisis" o "MEJORA"
+    // sumaba a ini_total -la categoria se pintaba- y a la vez no salia en
+    // Activas, Vencidas, la grafica de estados ni el modal. Se arregla el
+    // dato que cruza el contrato, no se copia la tolerancia al navegador.
+    //
+    // Lo que no se reconoce sale tal cual (p. ej. "Cerrado"): el modal lo
+    // cuenta por su grafia y no hay forma canonica que darle.
+    private static void Canonizar(Detalle d)
+    {
+        var estado = Clave(d.Estado);
+        for (int i = 0; i < ESTADOS_ACTIVOS.Length; i++)
+            if (Clave(ESTADOS_ACTIVOS[i]) == estado)
+                d.Estado = ESTADOS_ACTIVOS[i];
+
+        var agrup = d.Agrup == null ? null : d.Agrup.Trim();
+        for (int i = 0; i < AGRUPADORES.Length; i++)
+            if (string.Equals(AGRUPADORES[i], agrup, StringComparison.OrdinalIgnoreCase))
+                d.Agrup = AGRUPADORES[i];
+    }
+
     // ------------------------------------------------------------------
     // 3) Catalogos de personas
     // ------------------------------------------------------------------
@@ -618,13 +727,36 @@ public static class ExperienciaQueries
         public string Po;
         public string So;
         public string Director;
+        public bool Vigente;      // VigenteEnOrigen = 1 (ver LeerDuenos)
     }
 
+    // QUE FILAS SE LEEN
+    // -----------------
+    // TODAS, vigentes o no, porque es lo que hace dbo.vw_ProblemCategoria:
+    // su LEFT JOIN a CatCategoriaDueno no filtra VigenteEnOrigen. Cuando una
+    // categoria se desactiva, el ETL marca sus filas de dueño como no
+    // vigentes, pero la vista le sigue dando esos dueños a sus iniciativas.
+    // Con el filtro, el tablero dejaba la categoria sin dueño: la iniciativa
+    // pintaba "PO X" y desaparecia al filtrar por X (PRB 2026-000172 en
+    // /S-Precios y Promociones, las seis filas en VigenteEnOrigen = 0).
+    //
+    // Las vigentes van primero dentro de su C1: si hay de las dos, hereda y
+    // cruza la vigente. Las no vigentes resuelven dueños, pero NO alimentan
+    // los selects de Director / PO / Manager (ver ArmarCatalogos).
+    //
+    // El ORDER BY no es cosmetico. Directorio se queda con la PRIMERA fila de
+    // cada C1 para heredar dueños a un N2 sin fila propia -el caso de toda
+    // categoria nueva-, y si ese C1 tiene hermanos con dueños distintos, sin
+    // orden la herencia dependia del plan de ejecucion.
+    //
+    // Nombres y llaves se normalizan en Directorio, no aqui.
     private static List<Dueno> LeerDuenos(SqlConnection cn)
     {
         const string SQL =
-            "SELECT CategoriaN2, C1, ProductOwner, ServiceOwner, DirectorPO " +
-            "FROM dbo.CatCategoriaDueno WHERE VigenteEnOrigen = 1";
+            "SELECT CategoriaN2, C1, ProductOwner, ServiceOwner, DirectorPO, " +
+            "       Vigente = CASE WHEN VigenteEnOrigen = 1 THEN 1 ELSE 0 END " +
+            "FROM dbo.CatCategoriaDueno " +
+            "ORDER BY C1, CASE WHEN VigenteEnOrigen = 1 THEN 0 ELSE 1 END, CategoriaN2";
 
         var filas = new List<Dueno>();
 
@@ -639,6 +771,7 @@ public static class ExperienciaQueries
                 d.Po = Texto(rd.GetValue(2));
                 d.So = Texto(rd.GetValue(3));
                 d.Director = Texto(rd.GetValue(4));
+                d.Vigente = Entero(rd.GetValue(5)) == 1;
                 filas.Add(d);
             }
         }
@@ -661,9 +794,12 @@ public static class ExperienciaQueries
         {
             while (rd.Read())
             {
-                var nombre = Texto(rd.GetValue(0));
+                // Mismo recorte que Directorio aplica a los nombres de
+                // CatCategoriaDueno: el Service Owner de la categoria tiene
+                // que encontrar su fila aqui.
+                var nombre = Normaliza(Texto(rd.GetValue(0)));
                 if (nombre == null) continue;
-                mapa[nombre] = Texto(rd.GetValue(1));
+                mapa[nombre] = Normaliza(Texto(rd.GetValue(1)));
             }
         }
 
@@ -793,8 +929,21 @@ public static class ExperienciaQueries
             _porC1 = new Dictionary<string, Dueno>(StringComparer.OrdinalIgnoreCase);
             _managerDe = personas;
 
+            // Llaves y nombres se normalizan como las rutas (Normaliza). Las
+            // rutas de categoria ya llegan asi (vistas de volumen y
+            // LeerIniciativas); el catalogo de dueños, no necesariamente:
+            // un espacio de sobra o un NBSP en CategoriaN2 -que el "=" de
+            // SQL si perdona- dejaba al N2 sin cruzar con su categoria, y
+            // en un nombre daba dos Directores/PO "distintos" en los
+            // selects, o un Service Owner sin su fila en CatPersona.
             foreach (var d in duenos)
             {
+                d.CategoriaN2 = Normaliza(d.CategoriaN2);
+                d.C1 = Normaliza(d.C1);
+                d.Po = Normaliza(d.Po);
+                d.So = Normaliza(d.So);
+                d.Director = Normaliza(d.Director);
+
                 if (d.CategoriaN2 != null && !_porN2.ContainsKey(d.CategoriaN2))
                     _porN2[d.CategoriaN2] = d;
                 if (d.C1 != null && !_porC1.ContainsKey(d.C1))
@@ -807,6 +956,8 @@ public static class ExperienciaQueries
                              out string po, out string so, out string director, out string manager)
         {
             Dueno n2 = null, raiz = null;
+            c1c2 = Normaliza(c1c2);
+            c1 = Normaliza(c1);
             if (c1c2 != null) _porN2.TryGetValue(c1c2, out n2);
             if (c1 != null) _porC1.TryGetValue(c1, out raiz);
 
@@ -819,6 +970,7 @@ public static class ExperienciaQueries
         public string ManagerDe(string persona)
         {
             string m;
+            persona = Normaliza(persona);
             if (persona != null && _managerDe.TryGetValue(persona, out m))
                 return m;
             return null;
@@ -832,6 +984,46 @@ public static class ExperienciaQueries
         private static string Primero(string a, string b)
         {
             return string.IsNullOrEmpty(a) ? b : a;
+        }
+    }
+
+    // UNA SOLA RESOLUCION DE DUEÑOS
+    // -----------------------------
+    // El filtro global del tablero (pasaFiltroGlobal en experiencia.js) se
+    // aplica a las CATEGORIAS, y una iniciativa solo se ve a traves de la
+    // categoria que la lleva: ese es el contrato -"no se pueden filtrar"
+    // dice LeerIniciativasSinCategoria de las que no tienen categoria-. Los
+    // dueños que pinta la iniciativa tienen que ser, por tanto, los mismos
+    // con los que se filtra su categoria.
+    //
+    // No lo eran. La categoria se resolvia aqui, con Directorio; la
+    // iniciativa traia los de dbo.vw_ProblemCategoria. Las dos aplican la
+    // misma regla (N2 exacto, si no se hereda del C1), pero la vista hereda
+    // con un LEFT JOIN por C1 que abanica a TODOS los N2 hermanos, y
+    // LeerIniciativas se queda con la primera copia: para un N2 sin fila
+    // propia en CatCategoriaDueno -justo el de una categoria recien creada-
+    // la iniciativa se llevaba los dueños de un hermano cualquiera, y la
+    // categoria los de otro. Resultado: la iniciativa decia "PO Y", se
+    // filtraba por Y, y desaparecia porque su categoria era de otro PO.
+    // Tambien divergian con espacios de sobra en CategoriaN2, que el "=" de
+    // SQL ignora y el diccionario de aqui no.
+    //
+    // Ahora hay una sola resolucion para todo el payload -categorias,
+    // categorias_v2, iniciativas, detalle de tickets y los catalogos de los
+    // selects-: la del Directorio, con la llave C1 / C1&C2 de la propia
+    // iniciativa (la misma que la pone en su fila de categoria).
+    //
+    // Las iniciativas sin categoria (LeerIniciativasSinCategoria) no pasan
+    // por aqui: no tienen categoria de la que heredar y conservan los
+    // dueños del propio Problem.
+    private static void AlinearDuenos(List<Detalle> detalle, Directorio dir)
+    {
+        foreach (var d in detalle)
+        {
+            var c1 = !string.IsNullOrEmpty(d.C1) ? d.C1 : C1De(d.Categoria);
+            var c1c2 = !string.IsNullOrEmpty(d.C1C2) ? d.C1C2 : C1C2De(d.Categoria);
+            string manager;
+            dir.Resolver(c1, c1c2, out d.Po, out d.So, out d.Director, out manager);
         }
     }
 
@@ -869,8 +1061,52 @@ public static class ExperienciaQueries
         var porC1C2 = new Dictionary<string, List<Detalle>>(StringComparer.OrdinalIgnoreCase);
         foreach (var d in detalle)
         {
-            Agregar(porC1, d.C1, d);
-            Agregar(porC1C2, d.C1C2, d);
+            // Mismo repliegue de emergencia que la UNION de mas abajo: si la
+            // vista no poblo el nivel, se corta de la ruta. Asi la fila que
+            // AsegurarFila crea con la llave derivada encuentra su
+            // iniciativa, en vez de nacer vacia.
+            Agregar(porC1, !string.IsNullOrEmpty(d.C1) ? d.C1 : C1De(d.Categoria), d);
+            Agregar(porC1C2, !string.IsNullOrEmpty(d.C1C2) ? d.C1C2 : C1C2De(d.Categoria), d);
+        }
+
+        // UNION con el universo de iniciativas.
+        //
+        // Hasta aqui 'filas' solo tiene las ramas que tuvieron tickets. Una
+        // rama cuyas categorias no registraron ni un ticket en ninguno de
+        // los diez slots ni en ningun mes del año no aparece en las vistas
+        // de volumen, asi que Acumular no le creo fila y las dos busquedas
+        // de mas abajo (porC1 / porC1C2) nunca llegaban a hacerse: la
+        // iniciativa existia en 'detalle' y no se pintaba en ningun lado.
+        //
+        // Las llaves son las de la propia vista de iniciativas (v.C1 y
+        // v.C1C2, derivadas por fn_CategoriaC1 / fn_CategoriaC1C2), o sea
+        // exactamente las mismas que emiten las vistas de volumen. Por eso
+        // una categoria que SI tiene tickets se reconoce y AsegurarFila no
+        // hace nada: no se duplica ninguna fila existente ni se toca su
+        // volumen.
+        //
+        // El unico filtro es EsRegistroDeIniciativa: que la fila SEA una
+        // iniciativa. Ni el estado ni el agrupador recortan aqui -ver la
+        // nota "QUE NO PUEDE ESCONDER UNA INICIATIVA" en ese helper-, porque
+        // una iniciativa cerrada o con un TipoAgrupado fuera de AGRUPADORES
+        // SI se publica cuando su categoria tiene tickets (mas abajo,
+        // c["iniciativas"] lleva la rama entera sin filtrar). Recortarla solo
+        // cuando no hay volumen la escondia por una condicion de tickets, que
+        // es justo lo que esta union existe para evitar.
+        //
+        // Las llaves C1 / C1&C2 salen de la vista; si vinieran vacias se
+        // derivan de la propia ruta con los mismos cortes (C1De / C1C2De son
+        // las replicas de fn_CategoriaC1 / fn_CategoriaC1C2), para que una
+        // fila con el nivel sin poblar tampoco se quede sin donde colgarse.
+        foreach (var d in detalle)
+        {
+            if (!EsRegistroDeIniciativa(d)) continue;
+
+            var c1 = !string.IsNullOrEmpty(d.C1) ? d.C1 : C1De(d.Categoria);
+            var c1c2 = !string.IsNullOrEmpty(d.C1C2) ? d.C1C2 : C1C2De(d.Categoria);
+
+            AsegurarFila(filas, c1, "C1");
+            AsegurarFila(filas, c1c2, "C2");
         }
 
         // vol_reduce_folio es del folio completo, no de la rama: se suma una
@@ -1085,6 +1321,38 @@ public static class ExperienciaQueries
             reduce[d.Categoria] = v + d.TicketsReduce;
         }
 
+        // UNION con el universo de iniciativas, igual que en
+        // ArmarCategorias pero a nivel de ruta completa: la categoria de una
+        // iniciativa activa que no tuvo tickets en ningun periodo no viene
+        // en vw_TBSlotCAT ni en vw_TBMesCAT, y sin fila aqui el
+        // tiene_iniciativa / ticket_reduce que se acaban de indexar no los
+        // lee nadie.
+        //
+        // d.Categoria ya viene normalizado por LeerIniciativas, asi que la
+        // llave es la misma cadena que trae [Categoria V2] para esa ruta.
+        //
+        // El filtro es el mismo que en ArmarCategorias: solo
+        // EsRegistroDeIniciativa. Ni el estado ni el agrupador recortan, por
+        // la misma razon -en una ruta CON tickets esas iniciativas ya se
+        // publican hoy (tiene_iniciativa se marca sin mirar ninguno de los
+        // dos, unas lineas mas arriba), asi que esconderlas cuando la ruta no
+        // tiene volumen seria ocultarlas por una condicion de tickets.
+        //
+        // Va ANTES de calcular es_hoja a proposito: el comentario de abajo
+        // define es_hoja sobre el catalogo completo y sin mirar el volumen
+        // del periodo, y estas rutas ahora son parte de ese catalogo. Para
+        // la vista de Con/Sin Iniciativa eso es inocuo -experiencia.js
+        // reevalua "hoja del periodo" en esHojaPeriodo(), que solo mira
+        // rutas con volumen > 0-, pero si afecta al historico, que filtra
+        // por el es_hoja estatico: una ruta que hasta hoy era hoja y ahora
+        // tiene una descendiente con iniciativa deja de serlo, que es la
+        // jerarquia correcta.
+        foreach (var d in detalle)
+        {
+            if (!EsRegistroDeIniciativa(d)) continue;
+            AsegurarFila(filas, d.Categoria, null);
+        }
+
         // es_hoja: una ruta deja de ser hoja si existe otra que cuelga de
         // ella. Se calcula sobre el catalogo completo, sin mirar el volumen
         // del periodo (experiencia.js ya reevalua "hoja del periodo" por su
@@ -1161,8 +1429,12 @@ public static class ExperienciaQueries
         // jerarquia: Director -> sus Product Owners (la que llena los dos
         // selects encadenados de arriba del tablero).
         var jerarquia = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+        // Solo filas vigentes: una categoria dada de baja resuelve sus dueños
+        // (LeerDuenos), pero no mete en los selects a un Director o PO que ya
+        // solo existe en ella.
         foreach (var d in dir.Duenos())
         {
+            if (!d.Vigente) continue;
             if (string.IsNullOrEmpty(d.Director) || string.IsNullOrEmpty(d.Po)) continue;
             SortedSet<string> pos;
             if (!jerarquia.TryGetValue(d.Director, out pos))
@@ -1179,6 +1451,7 @@ public static class ExperienciaQueries
         var jerarquiaMgr = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
         foreach (var d in dir.Duenos())
         {
+            if (!d.Vigente) continue;
             if (string.IsNullOrEmpty(d.So)) continue;
             var manager = dir.ManagerDe(d.So);
             if (string.IsNullOrEmpty(manager)) continue;
@@ -1302,6 +1575,44 @@ public static class ExperienciaQueries
         }
     }
 
+    // Asegura que exista la fila de una categoria, la haya visto Acumular o
+    // no. Si ya esta, no toca nada: el volumen que ya acumulo manda.
+    //
+    // POR QUE EXISTE
+    // --------------
+    // Acumular es la unica puerta por la que entraban categorias, y solo ve
+    // filas de vw_TBSlotCAT / vw_TBMesCAT. Una categoria sin UN SOLO ticket
+    // en ningun periodo no tiene fila en esas vistas, asi que no existia
+    // como categoria y su iniciativa no tenia donde colgarse: el
+    // TryGetValue de ArmarCategorias / ArmarCategoriasV2 fallaba y la
+    // iniciativa desaparecia del tablero. El universo de categorias pasa a
+    // ser tickets UNION iniciativas.
+    //
+    // CERO TICKETS, NO TICKETS FABRICADOS
+    // -----------------------------------
+    // La fila nace con Slot y Mes VACIOS y con Inc/Pet/Total en 0. No se
+    // inventa ninguna fila de volumen: Periodo() sobre un diccionario vacio
+    // devuelve 0 -asi que vol_actual, vol_anterior y sus variantes de mes
+    // salen en 0- y Mapa() devuelve un objeto vacio, que es lo que
+    // experiencia.js ya espera (volSlotOMes cae a ||0). El reparto por tipo
+    // queda en 0 y reqopr = max(0, 0-0-0) = 0.
+    //
+    // La llave tiene que salir de las mismas funciones que la de Acumular
+    // (fn_CategoriaC1 / fn_CategoriaC1C2 / fn_NormalizaCategoria, o sus
+    // replicas), porque el diccionario compara Ordinal; de ahi que quien
+    // llama pase v.C1 / v.C1C2 de la vista, o la ruta ya normalizada.
+    private static void AsegurarFila(Dictionary<string, Fila> filas, string llave, string nivel)
+    {
+        if (string.IsNullOrEmpty(llave)) return;
+        if (filas.ContainsKey(llave)) return;
+
+        var f = new Fila();
+        f.Categoria = llave;
+        f.Nivel = nivel;
+        f.C1 = nivel == "C1" ? llave : C1De(llave);
+        filas[llave] = f;
+    }
+
     // "/A/B/C" -> "A". Mismo corte que dbo.fn_CategoriaC1.
     private static string C1De(string ruta)
     {
@@ -1335,6 +1646,48 @@ public static class ExperienciaQueries
             mapa[llave] = lista;
         }
         lista.Add(d);
+    }
+
+    // Si la fila de 'detalle' es un registro de iniciativa de verdad, y por
+    // tanto merece que exista la categoria a la que apunta.
+    //
+    // Es el UNICO filtro de la union "tickets UNION iniciativas", y es de
+    // integridad del dato, no de negocio:
+    //
+    //   Folio    el Problem al que pertenece. LeerIniciativas lo trae del
+    //            INNER JOIN contra dbo.Problem y deduplica por
+    //            (Codigo, Categoria), asi que sin Folio no hay registro que
+    //            identificar.
+    //
+    // Ya NO se exige titulo de iniciativa (v.Iniciativa). Esa condicion solo
+    // regia en la union: en una categoria CON tickets la misma fila se
+    // publicaba igual -porC1 / porC1C2 no la miran-, asi que un Problem
+    // recien creado, con su categoria asignada pero el titulo de la
+    // iniciativa aun sin capturar, existia o no segun hubiera tickets. Es
+    // justo la condicion de volumen que esta union existe para quitar. La
+    // fila de dbo.ProblemCategoria vigente ES el registro; el titulo cae al
+    // del Problem en LeerIniciativas.
+    //
+    // QUE NO PUEDE ESCONDER UNA INICIATIVA
+    // ------------------------------------
+    // Ni el estado (EsActiva), ni el TipoAgrupado (EsAgrupador), ni que la
+    // categoria este marcada inactiva, ni que falte de dbo.Categorias, ni
+    // que no tenga un solo ticket en ningun slot ni en ningun mes, ni que no
+    // aparezca en vw_TBSlotCAT / vw_TBMesCAT. Todo eso son hechos del
+    // CATALOGO o del VOLUMEN de tickets, y una iniciativa valida no deja de
+    // existir por ellos: en una categoria que si tiene tickets esas mismas
+    // filas ya se publican hoy.
+    //
+    // La elegibilidad (activa + agrupador) sigue viva donde le toca: en los
+    // agregados ini / ini_total / ret, que son "tickets comprometidos por
+    // iniciativas vivas". Esta funcion decide si la CATEGORIA existe, no
+    // cuanto suma la iniciativa.
+    //
+    // La categoria en si la valida AsegurarFila, que ignora la llave vacia.
+    private static bool EsRegistroDeIniciativa(Detalle d)
+    {
+        return d != null
+            && !string.IsNullOrEmpty(d.Folio);
     }
 
     private static bool EsAgrupador(string agrup)
@@ -1412,6 +1765,29 @@ public static class ExperienciaQueries
                 sb.Append(c);
         }
         return sb.ToString();
+    }
+
+    // Replica de dbo.fn_NormalizaCategoria:
+    //
+    //     LTRIM(RTRIM(REPLACE(ISNULL(@c, ''), NCHAR(160), ' ')))
+    //
+    // o sea: el espacio duro pasa a espacio normal y se recortan los
+    // espacios de los extremos (LTRIM/RTRIM de T-SQL recortan ESPACIOS, no
+    // cualquier blanco, de ahi el Trim(' ') y no el Trim() pelado).
+    //
+    // Es la definicion de identidad de una categoria en todo el tablero: la
+    // columna [Categoria V2] de las vistas de volumen es exactamente esto
+    // aplicado a Tickets.Categoria, y fn_CategoriaC1 / fn_CategoriaC1C2
+    // empiezan por llamarla. Es idempotente: una ruta ya normalizada -que es
+    // el caso de casi todas- sale igual que entro.
+    //
+    // Se devuelve null en vez de cadena vacia para que el resultado encaje
+    // con Texto(), que es de donde vienen estas rutas.
+    private static string Normaliza(string ruta)
+    {
+        if (ruta == null) return null;
+        var limpia = ruta.Replace(NBSP, ' ').Trim(' ');
+        return limpia.Length == 0 ? null : limpia;
     }
 
     private static string Texto(object v)

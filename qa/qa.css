@@ -194,6 +194,10 @@ header.top .btn:hover { border-color: rgba(25, 25, 25, .38); }
   grid-template-columns: 1fr 1fr;
   align-items: start;
 }
+/* Sin align-items: las dos tarjetas de la fila se estiran al alto de la mas
+   alta -Recategorizacion, con su tabla de 292px- y quedan alineadas arriba y
+   abajo. El sobrante de la tarjeta de la dona no es hueco muerto: .dona-grupo
+   lo reparte arriba y abajo del conjunto dona + leyenda. */
 .grid-sec {
   display: grid; gap: 16px; margin-bottom: 16px;
   grid-template-columns: minmax(300px, 1fr) minmax(430px, 1.65fr);
@@ -277,7 +281,29 @@ code {
    height: 260px y, dentro de la pestaña, esa regla tambien alcanza a estos
    lienzos; el alto de QA lo deciden .lienzo-dona y el que calcula qa.js. */
 .lienzo { position: relative; width: 100%; height: auto; }
-.lienzo-dona { height: 232px; }
+/* La dona es su propio marco cuadrado y centrado: caja de lado 232 (menos si
+   la tarjeta es mas estrecha) con aspect-ratio 1. Asi Chart.js -responsive,
+   aspectRatio 1- siempre mide igual de ancho que de alto y no hay que pelear
+   con el width/height que escribe en el style del canvas. */
+.lienzo-dona {
+  width: min(232px, 100%);
+  height: auto;
+  aspect-ratio: 1;
+  margin-inline: auto;
+  flex: none;
+}
+
+/* La tarjeta de la dona es una columna: el h3 arriba y .dona-grupo ocupando
+   TODO lo que sobre hasta igualar el alto de Recategorizacion. Dentro del
+   grupo, justify-content: center deja el mismo aire encima de la dona que
+   debajo de la leyenda, con las dos filas de leyenda pegadas a la dona. */
+.card-dona { display: flex; flex-direction: column; }
+.dona-grupo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
 
 /* Alto de partida de las graficas de barras. La pagina se pinta antes de
    tener datos, y sin esto la tarjeta nace plana y da un salto cuando llegan.

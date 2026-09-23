@@ -31,7 +31,8 @@
        canvas: 'chart-x',
        etiquetas: nombres,
        datos: totales,
-       paleta: { lider: true },   // o { registro: 'x' } / { orden: [...] }
+       paleta: { lider: true },   // o { personas: true } / { directores: true }
+                                  // / { registro: 'x' } / { orden: [...] }
        formato: FMT,
        opciones: {
          maintainAspectRatio: false,
@@ -148,6 +149,14 @@
          este ordenada esta grafica: un ranking por volumen puede mover a una
          persona de primera a quinta sin cambiarle el color. */
       if (p.lider) return (etiquetas || []).map(function (e) { return Paleta.colorLider(e); });
+      /* `personas: true` / `directores: true` — la misma identidad, pero
+         resuelta para la LISTA COMPLETA, que es lo que permite no repetir
+         color dentro de esta grafica mientras queden libres. Los colores
+         fijos -lideres historicos, Directores- salen igual que con
+         `lider: true`; lo que cambia es que a los demas se les esquiva la
+         colision. Sigue sin depender del orden de las barras. */
+      if (p.personas) return Paleta.escalaPersonas(etiquetas);
+      if (p.directores) return Paleta.escalaDirectores(etiquetas);
       if (p.registro) return Paleta.registro(p.registro).escala(etiquetas);
       if (p.orden) return (etiquetas || []).map(function (e) { return Paleta.color(e, p.orden); });
       return Paleta.escala(etiquetas);

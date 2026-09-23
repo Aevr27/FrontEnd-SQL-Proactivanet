@@ -19,11 +19,14 @@
 // permisos de DDL, solo copiar App_Code y los .ashx al sitio de IIS. ASP.NET
 // compila App_Code solo en el primer request.
 //
-// OJO: mientras esto este activo, la logica de las consultas vive en dos
-// sitios (estos textos y los procedimientos usp_Dash_*Multi). Si alguien
-// cambia los procedimientos, el tablero no se entera. Si algun dia se ejecuta
-// fix_tecnicos_separador_pipe.sql en la base, los handlers pueden volver a
-// llamar a los procedimientos y este archivo se borra.
+// OJO: los procedimientos usp_Dash_*Multi que estas consultas sustituyeron
+// siguen existiendo en la base, pero YA NO los llama nadie y sus reglas
+// dejaron de ser las del tablero: miden el rango por FechaRegistro, cuentan
+// los 'Rechazada' como resueltos, juzgan el SLA contra la firma de CIERRE y
+// no excluyen las cuentas que no son personas. Volver a llamarlos NO seria
+// volver atras un refactor, seria cambiar los numeros del tablero. El plan
+// viejo -ejecutar fix_tecnicos_separador_pipe.sql y borrar este archivo- ya
+// no aplica: ese script conserva solo dbo.fn_Dash_SplitListPipe.
 //
 // Las consultas partieron como copia literal del cuerpo de los procedimientos
 // (mismo campo b.Tecnico, mismo tope de filas). Ya NO lo son en fechas ni en
@@ -37,7 +40,10 @@
 //   - reabierto = IntentosSolucion > 1;
 //   - los 'Rechazada' no cuentan como resueltos (si como creados);
 //   - las cuentas de dbo.CatCuentaNoPersona salen de lo que habla de personas;
-//   - primera respuesta = TiempoPrimeraRespuestaHorasMin ('Nh NNm') en minutos.
+//   - primera respuesta = TiempoPrimeraRespuestaHorasMin ('Nh NNm'), pero
+//     remedida en HORARIO HABIL (lunes a viernes, 08:00-18:30): ver
+//     PrimeraRespuesta y MinutosHabilesDesdeAncla. La mediana y el p90 del
+//     tablero salen de esos minutos habiles, no de minutos de reloj.
 // El tecnico es b.Tecnico tal como lo define la vista desplegada: el asignado
 // con la vista anterior, la firma de solucion con la de 04_dashboard_sla.sql.
 // Es el mismo campo que llena el filtro (usp_Dash_Catalogos), asi que los dos
@@ -58,6 +64,50 @@ public static class DashboardQueries
     // Filtros comunes
     // ---------------------------------------------------------------------
 
+    /* LA SELECCION DE TECNICOS, de punta a punta.
+
+       Los nombres de tecnico tienen el formato "Apellidos, Nombre", asi que
+       SIEMPRE llevan una coma dentro. Eso obliga a dos reglas que antes
+       vivian separadas -el literal '|' en Filtros.Desde y en ListaPorPipe, y
+       la construccion del IN en EnLista-, y que tenian que cambiar juntas sin
+       que nada lo dijera:
+
+         1. la lista viaja separada por '|', nunca por coma (dashboard.js ya
+            la manda asi);
+         2. cada nombre se manda como su PROPIO parametro dentro de un IN, asi
+            que ninguna coma vuelve a tocar un parser de SQL ni hay forma de
+            inyectar.
+
+       Las dos son ahora de esta clase. Si alguna vez cambia el separador, se
+       cambia Separador y ya: no queda ningun '|' suelto por el archivo. */
+    public sealed class TecnicoFiltro
+    {
+        // El separador de la lista de tecnicos. NO es coma a proposito: ver
+        // el comentario de arriba.
+        public const char Separador = '|';
+
+        private readonly List<string> nombres;
+
+        public TecnicoFiltro(string lista)
+        {
+            nombres = Partir(lista, Separador);
+        }
+
+        // Los nombres ya partidos, para quien necesite la lista en si
+        // (ResolverAgentes, el catalogo del Call Center).
+        public List<string> Nombres { get { return nombres; } }
+
+        public bool Vacio { get { return nombres.Count == 0; } }
+
+        /* El "AND columna IN (@t0, @t1, ...)" de esta seleccion, con los
+           parametros ya cargados en el comando. Vacio = sin filtro, igual que
+           el NULL que recibian los procedimientos. */
+        public string Predicado(SqlCommand cmd, string columna, string prefijo)
+        {
+            return EnLista(cmd, columna, prefijo, nombres);
+        }
+    }
+
     // Filtros de un request del tablero de SLA, ya listos para inyectarse en
     // una consulta de texto.
     public sealed class Filtros
@@ -65,7 +115,10 @@ public static class DashboardQueries
         public DateTime FechaInicio;
         public DateTime FechaFin;
         public List<string> Grupos = new List<string>();
-        public List<string> Tecnicos = new List<string>();
+        public TecnicoFiltro Tecnicos = new TecnicoFiltro(null);
+        // "Sin proveedores" del tablero: fuera los grupos de GrupoProveedor.
+        // false = "Todos", que es exactamente el tablero de antes.
+        public bool SinProveedores;
 
         public static Filtros Desde(HttpRequest request)
         {
@@ -76,7 +129,8 @@ public static class DashboardQueries
             f.FechaInicio = Fecha(fi);
             f.FechaFin = Fecha(ff);
             f.Grupos = Partir(request.QueryString["grupos"], ',');
-            f.Tecnicos = Partir(request.QueryString["tecnicos"], '|');
+            f.Tecnicos = new TecnicoFiltro(request.QueryString["tecnicos"]);
+            f.SinProveedores = GrupoProveedor.Excluir(request);
             return f;
         }
     }
@@ -139,7 +193,13 @@ public static class DashboardQueries
         cmd.Parameters.Add("@FechaFin", SqlDbType.Date).Value = f.FechaFin;
 
         string comunes = EnLista(cmd, "b.Grupo", "g", f.Grupos)
-                       + EnLista(cmd, "b.Tecnico", "t", f.Tecnicos);
+                       + f.Tecnicos.Predicado(cmd, "b.Tecnico", "t");
+        // En "comunes" y no solo en porSolucion: creados y rechazados son de
+        // la misma pestana y tambien salen sin proveedores. Numerador y
+        // denominador del SLA salen de las MISMAS filas, asi que el grupo
+        // excluido sale de los dos.
+        if (f.SinProveedores)
+            comunes += GrupoProveedor.PredicadoExcluir(cmd, "b.Grupo");
 
         string solucion = "b.FechaFirmaSolucion >= @FechaInicio"
                         + " AND b.FechaFirmaSolucion < DATEADD(DAY, 1, @FechaFin)" + comunes;
@@ -195,29 +255,95 @@ public static class DashboardQueries
         return catalogoNoPersona;
     }
 
-    /* Minutos hasta la primera respuesta, del texto 'Nh NNm' de
-       dbo.Tickets.TiempoPrimeraRespuestaHorasMin. Mismo parseo que
+    /* Minutos HABILES hasta la primera respuesta.
+
+       El dato de origen es el texto 'Nh NNm' de
+       dbo.Tickets.TiempoPrimeraRespuestaHorasMin, que Proactivanet mide en
+       tiempo de CALENDARIO desde el registro. Mismo parseo que
        MinutosPrimeraRespuesta en 04_dashboard_sla.sql: el campo de horas
        enteras (TiempoPrimeraRespuesta) vale '0' en 7 de cada 10 tickets y
        seria una constante. TRY_CONVERT y las dos guardas de CHARINDEX para
        que un formato distinto de NULL y no un numero equivocado.
 
+       Sobre ese calendario se reconstruye el INSTANTE de la primera
+       respuesta -FechaRegistro + los minutos del texto- y se vuelve a medir
+       el hueco contando SOLO horario habil (ver MinutosHabilesDesdeAncla).
+       La columna sigue llamandose MinutosPrimeraRespuesta y sigue en
+       minutos, pero ya no son minutos de reloj: son minutos habiles. De ahi
+       salen la mediana y el p90 del tablero.
+
+       La base no guarda la fecha de la primera respuesta -solo el texto del
+       transcurrido-, asi que reconstruirla desde FechaRegistro es la unica
+       forma de tener los dos extremos que el horario habil necesita.
+
        Sale de dbo.Tickets y no de la vista porque la vista anterior no trae
-       la columna. CodigoTicket es la llave primaria: una fila o ninguna. */
-    private const string PrimeraRespuesta = @"
+       la columna. CodigoTicket es la llave primaria: una fila o ninguna.
+
+       NULL manda: sin texto valido no hay MinutosCalendario, sin el no hay
+       Fin, y sin Fin no hay resta. El ticket queda sin dato, igual que antes,
+       y PERCENTILE_CONT lo ignora. */
+    private static readonly string PrimeraRespuesta = @"
 OUTER APPLY (
-    SELECT MinutosPrimeraRespuesta = CASE
-        WHEN CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) > 1
-         AND CHARINDEX(N'm', tk.TiempoPrimeraRespuestaHorasMin)
-           > CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin)
-        THEN TRY_CONVERT(INT, LEFT(tk.TiempoPrimeraRespuestaHorasMin,
-                                   CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) - 1)) * 60
-           + TRY_CONVERT(INT, SUBSTRING(tk.TiempoPrimeraRespuestaHorasMin,
-                                        CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) + 2, 2))
-        ELSE NULL END
+    SELECT MinutosPrimeraRespuesta = h.HabilesFin - h.HabilesIni
     FROM dbo.Tickets tk
+    CROSS APPLY (
+        SELECT MinutosCalendario = CASE
+            WHEN CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) > 1
+             AND CHARINDEX(N'm', tk.TiempoPrimeraRespuestaHorasMin)
+               > CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin)
+            THEN TRY_CONVERT(INT, LEFT(tk.TiempoPrimeraRespuestaHorasMin,
+                                       CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) - 1)) * 60
+               + TRY_CONVERT(INT, SUBSTRING(tk.TiempoPrimeraRespuestaHorasMin,
+                                            CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) + 2, 2))
+            ELSE NULL END
+    ) AS cal
+    CROSS APPLY (
+        SELECT Inicio = b.FechaRegistro,
+               Fin = DATEADD(MINUTE, cal.MinutosCalendario, b.FechaRegistro)
+    ) AS mom
+    CROSS APPLY (
+        SELECT HabilesIni = " + MinutosHabiles("mom.Inicio") + @",
+               HabilesFin = " + MinutosHabiles("mom.Fin") + @"
+    ) AS h
     WHERE tk.CodigoTicket = b.CodigoTicket
 ) AS pr1";
+
+    /* HORARIO HABIL: lunes a viernes, 08:00 a 18:30. Sabado y domingo no
+       cuentan, y de los dias habiles solo cuenta lo que cae dentro de la
+       ventana: antes de las 08:00 y despues de las 18:30 no suma nada.
+
+       La expresion devuelve los minutos habiles acumulados DESDE UN ANCLA
+       fija -el lunes 1900-01-01- hasta el momento que se le pase. El
+       transcurrido habil entre dos instantes es la resta de sus dos
+       acumulados, sin bucles ni tabla de calendario: una semana son 5 dias
+       de 630 minutos (3150), el dia de la semana suma los dias habiles ya
+       cerrados -sabado y domingo se topan en 5- y el ultimo sumando es el
+       trozo de la ventana que el reloj ya consumio hoy.
+
+         480  = 08:00 en minutos desde medianoche
+         1110 = 18:30
+         630  = 1110 - 480, la jornada
+         3150 = 630 * 5, la semana
+
+       $M$ es el momento; MinutosHabiles() lo sustituye. El texto se extrae
+       tal cual desde tools/tests/HorasHabilesSmoke.ps1, asi que la prueba
+       mide ESTA expresion y no una copia que pueda quedarse atras. */
+    // <<MINUTOS_HABILES
+    private const string MinutosHabilesDesdeAncla = @"
+          (DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) / 7) * 3150
+        + (CASE WHEN DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) % 7 > 5 THEN 5
+                ELSE DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) % 7 END) * 630
+        + CASE
+            WHEN DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) % 7 >= 5 THEN 0
+            WHEN DATEDIFF(MINUTE, CONVERT(date, $M$), $M$) <= 480 THEN 0
+            WHEN DATEDIFF(MINUTE, CONVERT(date, $M$), $M$) >= 1110 THEN 630
+            ELSE DATEDIFF(MINUTE, CONVERT(date, $M$), $M$) - 480 END";
+    // MINUTOS_HABILES>>
+
+    private static string MinutosHabiles(string momento)
+    {
+        return MinutosHabilesDesdeAncla.Replace("$M$", momento);
+    }
 
     /* SLA, horas de resolucion y reabierto, medidos contra la FIRMA DE
        SOLUCION. Es la definicion de 04_dashboard_sla.sql, calculada aqui con
@@ -395,20 +521,7 @@ CROSS APPLY (
                 {
                     var filas = new List<Dictionary<string, object>>();
                     while (reader.Read())
-                    {
-                        var fila = new Dictionary<string, object>();
-                        for (int i = 0; i < reader.FieldCount; i++)
-                        {
-                            object valor = reader.GetValue(i);
-                            if (valor is DBNull)
-                                valor = null;
-                            else if (valor is DateTime)
-                                valor = ((DateTime)valor).ToString("yyyy-MM-ddTHH:mm:ss");
-
-                            fila[reader.GetName(i)] = valor;
-                        }
-                        filas.Add(fila);
-                    }
+                        filas.Add(SqlRowMapper.Fila(reader));
                     resultados.Add(filas);
                 } while (reader.NextResult());
             }
@@ -452,7 +565,8 @@ CROSS APPLY (
          TicketsAbiertos  = de esos, los resueltos que aun esperan el cierre */
     public static Dictionary<string, object> Kpis(Filtros f)
     {
-        const string sql = @"
+        // Texto armado: PrimeraRespuesta no es constante (lleva el horario habil).
+        string sql = @"
 ;WITH base AS
 (
     SELECT
@@ -730,7 +844,8 @@ DROP TABLE #DistribucionAgg;";
        arriba lo recien resuelto. */
     public static List<Dictionary<string, object>> Detalle(Filtros f, int top)
     {
-        const string sql = @"
+        // Texto armado: PrimeraRespuesta no es constante (lleva el horario habil).
+        string sql = @"
 SELECT TOP (@TopSeguro)
     b.CodigoTicket,
     b.FechaRegistro,
@@ -794,6 +909,57 @@ ORDER BY b.FechaFirmaSolucion DESC;";
     // escribiera distinto, el valor seleccionado no casaria con el catalogo.
     public static readonly string[] GruposCallCenter = { "Service Desk", "End User" };
 
+    // ---------------------------------------------------------------------
+    // Grupos de proveedor ("Todos / Sin proveedores" de la pestana de SLA)
+    // ---------------------------------------------------------------------
+
+    /* Un grupo es de PROVEEDOR si su nombre, sin espacios a la izquierda,
+       empieza por "Proveedor" (sin distinguir mayusculas). Es la unica regla:
+       ni el lider ni una lista de excepciones. "Vendor Managment" NO empieza
+       asi y se queda dentro a proposito: es un equipo propio que gestiona a
+       los proveedores, no un proveedor. Validado contra la vista el
+       2026-09-23: 18 grupos, ninguno con Grupo NULL ni con NBSP delante.
+
+       Vive AQUI y solo aqui: Predicados() la aplica en SQL y
+       sla_lider_grupo.ashx la aplica en C# sobre las filas del procedimiento.
+       Las dos formas tienen que decir lo mismo:
+         SQL  LTRIM(Grupo) LIKE 'Proveedor%'  (la colacion de la vista, CI_AS,
+              no distingue mayusculas)
+         C#   TrimStart(' ') + StartsWith ordinal sin mayusculas. Solo el
+              espacio, igual que LTRIM, que no quita tabuladores ni NBSP.
+       Un Grupo NULL no es proveedor en ninguna de las dos. */
+    public static class GrupoProveedor
+    {
+        public const string PrefijoProveedor = "Proveedor";
+
+        // Valor del query string que activa "Sin proveedores":
+        // ?proveedores=excluir. Cualquier otra cosa, o nada, es "Todos".
+        public const string ParametroQuery = "proveedores";
+        public const string ValorExcluir = "excluir";
+
+        public static bool Excluir(HttpRequest request)
+        {
+            return string.Equals(request.QueryString[ParametroQuery], ValorExcluir,
+                                 StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool EsGrupoProveedor(string grupo)
+        {
+            if (grupo == null) return false;
+            return grupo.TrimStart(' ').StartsWith(PrefijoProveedor,
+                                                   StringComparison.OrdinalIgnoreCase);
+        }
+
+        /* " AND (col IS NULL OR LTRIM(col) NOT LIKE @PrefProv + N'%')", con el
+           prefijo como parametro. Se llama UNA vez por comando: una segunda
+           declararia @PrefProv otra vez y SqlCommand fallaria. */
+        public static string PredicadoExcluir(SqlCommand cmd, string columna)
+        {
+            cmd.Parameters.Add("@PrefProv", SqlDbType.NVarChar, 100).Value = PrefijoProveedor;
+            return " AND (" + columna + " IS NULL OR LTRIM(" + columna + ") NOT LIKE @PrefProv + N'%')";
+        }
+    }
+
     /* Grupos y tecnicos del Call Center, para acotar los dos <select> cuando
        la barra de filtros esta en esa pestana.
 
@@ -811,7 +977,14 @@ ORDER BY b.FechaFirmaSolucion DESC;";
        que salgan con la grafia y el espaciado exactos con que estan grabados
        -el IN los encuentra igual, la colacion del servidor no distingue
        mayusculas- y para que un grupo que no exista en los datos no aparezca
-       en el desplegable. */
+       en el desplegable.
+
+       Los tecnicos se asignan a su grupo PRINCIPAL -en el que tienen mas
+       tickets-, no a cualquier grupo en el que aparezcan: la vista guarda el
+       grupo del ticket, no el del tecnico, y con un simple IN entraba al Call
+       Center cualquiera de otra area que alguna vez cerro un ticket de
+       Service Desk o End User. No hay tabla de pertenencia tecnico -> grupo;
+       el grupo con mas tickets es lo mas cercano que hay en los datos. */
     public static Dictionary<string, object> CatalogosCallCenter()
     {
         const string sql = @"
@@ -820,9 +993,19 @@ FROM dbo.vw_Dash_ProductividadBase
 WHERE Grupo IN ({0})
 ORDER BY Grupo;
 
-SELECT DISTINCT Tecnico
-FROM dbo.vw_Dash_ProductividadBase
-WHERE Tecnico IS NOT NULL AND LTRIM(RTRIM(Tecnico)) <> N''
+WITH PorGrupo AS (
+    SELECT Tecnico, Grupo, Tickets = COUNT_BIG(*)
+    FROM dbo.vw_Dash_ProductividadBase
+    WHERE Tecnico IS NOT NULL AND LTRIM(RTRIM(Tecnico)) <> N''
+    GROUP BY Tecnico, Grupo
+), Principal AS (
+    SELECT Tecnico, Grupo,
+           Orden = ROW_NUMBER() OVER (PARTITION BY Tecnico ORDER BY Tickets DESC, Grupo)
+    FROM PorGrupo
+)
+SELECT Tecnico
+FROM Principal
+WHERE Orden = 1
   AND Grupo IN ({0})
 ORDER BY Tecnico;";
 
@@ -890,5 +1073,206 @@ ORDER BY Tecnico;";
             }
         }
         return salida;
+    }
+
+    // ---------------------------------------------------------------------
+    // Call Center: el filtro de Tecnicos
+    // ---------------------------------------------------------------------
+
+    /* POR QUE HACE FALTA TRADUCIR
+       Una llamada no trae tecnico, trae la EXTENSION del conmutador
+       (dbo.Llamadas.NumeroAgente). El <select> de Tecnicos manda nombres. El
+       puente ya existe en la base y son dos tablas
+       (16_cruce_llamadas_tickets.sql):
+
+         dbo.CatAgenteTecnico       extension <-> tecnico (nombre ACTUAL). Es
+                                    el catalogo primario; solo Habilitado = 1.
+         dbo.CatAgenteTecnicoAlias  nombres VIEJOS de la misma persona, de
+                                    cuando le corrigieron el usuario. Se
+                                    consulta SOLO para los nombres que no
+                                    empataron arriba, porque la lista del
+                                    tablero sale de los nombres de los
+                                    tickets y ahi esos nombres siguen vivos.
+
+       Los procedimientos NO se tocan: se les piden los mismos result sets de
+       siempre -con su propio tope, que es un parametro que ya tenian- y aqui
+       solo se descartan las filas que no son de los tecnicos elegidos. */
+    public sealed class AgentesElegidos
+    {
+        // Extensiones, para las filas de llamadas (por NumeroAgente).
+        public readonly HashSet<int> Numeros = new HashSet<int>();
+        // Nombres PRINCIPALES, para las filas del cruce (por Tecnico). Sin
+        // distinguir mayusculas, como la colacion de la base.
+        public readonly HashSet<string> Tecnicos =
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Nadie que empatara: el filtro deja las listas vacias, y eso es
+        // correcto -el tecnico elegido no tiene extension registrada-.
+        public bool Vacio { get { return Numeros.Count == 0; } }
+    }
+
+    /* Traduce los nombres elegidos a extensiones. `grupos` acota por
+       CatAgenteTecnico.Grupo -el grupo donde el tecnico tiene mas tickets, el
+       mismo criterio que usa usp_Dash_CargaCombinada-; vacio = sin acotar.
+
+       Dos consultas y no un OR: el catalogo primario manda, y Alias solo se
+       pregunta por lo que quedo sin empatar (punto 3 del contrato de este
+       filtro). Asi un nombre que existe en las dos tablas se resuelve por
+       CatAgenteTecnico. */
+    public static AgentesElegidos ResolverAgentes(List<string> nombres, List<string> grupos)
+    {
+        var salida = new AgentesElegidos();
+        if (nombres == null || nombres.Count == 0) return salida;
+
+        var pendientes = new HashSet<string>(nombres, StringComparer.OrdinalIgnoreCase);
+
+        const string SqlPrimario = @"
+SELECT c.NumeroAgente, c.Tecnico
+FROM dbo.CatAgenteTecnico AS c
+WHERE c.Habilitado = 1
+  AND NULLIF(LTRIM(RTRIM(c.Tecnico)), N'') IS NOT NULL{0}{1}";
+
+        // Alias -> extension -> fila del catalogo primario. El nombre que se
+        // guarda es el PRINCIPAL: es el que traen las filas del cruce.
+        const string SqlAlias = @"
+SELECT c.NumeroAgente, c.Tecnico, Alias = a.Tecnico
+FROM dbo.CatAgenteTecnicoAlias AS a
+INNER JOIN dbo.CatAgenteTecnico AS c ON c.NumeroAgente = a.NumeroAgente
+WHERE c.Habilitado = 1
+  AND NULLIF(LTRIM(RTRIM(c.Tecnico)), N'') IS NOT NULL{0}{1}";
+
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+
+            using (var cmd = new SqlCommand())
+            {
+                cmd.Connection = cn;
+                cmd.CommandType = CommandType.Text;
+                cmd.CommandText = string.Format(SqlPrimario,
+                    EnLista(cmd, "c.Grupo", "gcc", grupos),
+                    EnLista(cmd, "c.Tecnico", "tc", nombres));
+                LeerAgentes(cmd, salida, pendientes, null);
+            }
+
+            if (pendientes.Count == 0) return salida;
+
+            var viejos = new List<string>(pendientes);
+            using (var cmd = new SqlCommand())
+            {
+                cmd.Connection = cn;
+                cmd.CommandType = CommandType.Text;
+                cmd.CommandText = string.Format(SqlAlias,
+                    EnLista(cmd, "c.Grupo", "gcc", grupos),
+                    EnLista(cmd, "a.Tecnico", "ta", viejos));
+                LeerAgentes(cmd, salida, pendientes, "Alias");
+            }
+        }
+
+        return salida;
+    }
+
+    // Lee NumeroAgente/Tecnico y va tachando de `pendientes` lo que empato.
+    // `columnaNombre` es la columna por la que se empato -nula en el catalogo
+    // primario, donde el empate fue contra Tecnico-.
+    private static void LeerAgentes(SqlCommand cmd, AgentesElegidos salida,
+                                    HashSet<string> pendientes, string columnaNombre)
+    {
+        using (var rd = cmd.ExecuteReader())
+        {
+            while (rd.Read())
+            {
+                if (rd.IsDBNull(0) || rd.IsDBNull(1)) continue;
+
+                salida.Numeros.Add(Convert.ToInt32(rd.GetValue(0)));
+                string principal = Convert.ToString(rd.GetValue(1));
+                salida.Tecnicos.Add(principal);
+                pendientes.Remove(columnaNombre == null
+                    ? principal
+                    : Convert.ToString(rd["Alias"]));
+            }
+        }
+    }
+
+    /* Serie diaria del equipo para los tecnicos elegidos.
+
+       Es el UNICO agregado que se repite aqui, y no hay forma de evitarlo: el
+       segundo result set de usp_Dash_CargaCombinada ya viene sumado por dia
+       para TODO el equipo, asi que no se puede acotar filtrando sus filas. Las
+       columnas y el orden son los de ese result set, y sale de la misma
+       dbo.vw_CargaTecnicoDia que usa el procedimiento. */
+    public static List<Dictionary<string, object>> SerieCargaTecnicos(
+        DateTime fechaInicio, DateTime fechaFin, ICollection<string> tecnicos)
+    {
+        var filas = new List<Dictionary<string, object>>();
+        if (tecnicos == null || tecnicos.Count == 0) return filas;
+
+        const string SQL = @"
+SELECT
+    Fecha    = v.Dia,
+    Tickets  = SUM(v.Tickets),
+    Llamadas = SUM(v.Llamadas)
+FROM dbo.vw_CargaTecnicoDia AS v
+WHERE v.Dia BETWEEN @FechaInicio AND @FechaFin{0}
+GROUP BY v.Dia
+ORDER BY v.Dia;";
+
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        using (var cmd = new SqlCommand())
+        {
+            cmd.Connection = cn;
+            cmd.CommandType = CommandType.Text;
+            cmd.Parameters.Add("@FechaInicio", SqlDbType.Date).Value = fechaInicio;
+            cmd.Parameters.Add("@FechaFin", SqlDbType.Date).Value = fechaFin;
+            cmd.CommandText = string.Format(SQL,
+                EnLista(cmd, "v.Tecnico", "tc", new List<string>(tecnicos)));
+
+            cn.Open();
+            using (var rd = cmd.ExecuteReader())
+            {
+                while (rd.Read()) filas.Add(SqlRowMapper.Fila(rd));
+            }
+        }
+
+        return filas;
+    }
+
+    // Las filas de un result set que son de los tecnicos elegidos, en el mismo
+    // orden que las devolvio el procedimiento y hasta `tope` filas. `columna`
+    // es NumeroAgente (llamadas) o Tecnico (cruce).
+    public static List<Dictionary<string, object>> SoloDeLosElegidos(
+        List<Dictionary<string, object>> filas, string columna,
+        AgentesElegidos elegidos, int tope)
+    {
+        var salida = new List<Dictionary<string, object>>();
+        if (filas == null) return salida;
+
+        foreach (var fila in filas)
+        {
+            object valor;
+            if (!fila.TryGetValue(columna, out valor) || valor == null) continue;
+
+            bool mio = (columna == "NumeroAgente")
+                ? elegidos.Numeros.Contains(Convert.ToInt32(valor))
+                : elegidos.Tecnicos.Contains(Convert.ToString(valor));
+
+            if (!mio) continue;
+            salida.Add(fila);
+            if (salida.Count >= tope) break;
+        }
+        return salida;
+    }
+
+    // Lista separada por coma del query string (grupos), para los handlers.
+    public static List<string> ListaPorComa(string valor)
+    {
+        return Partir(valor, ',');
+    }
+
+    // Lista de tecnicos del query string. El separador lo pone TecnicoFiltro,
+    // no un literal aqui: es la misma regla que usa el filtro del tablero.
+    public static List<string> ListaPorPipe(string valor)
+    {
+        return new TecnicoFiltro(valor).Nombres;
     }
 }

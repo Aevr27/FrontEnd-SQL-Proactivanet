@@ -591,7 +591,9 @@
       type: 'doughnut',
       data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 2, borderColor: '#fff' }] },
       options: {
-        responsive: false, maintainAspectRatio: false, cutout: '58%',
+        // Cuadrada de verdad: el lienzo manda el tamano (.lienzo-dona es una
+        // caja con aspect-ratio 1) y Chart.js mide lado = lado.
+        responsive: true, maintainAspectRatio: true, aspectRatio: 1, cutout: '58%',
         // La dona tambien filtra: clic en un estado = detalle de ese estado.
         onClick: function (evento, elementos, grafica) {
           if (elementos.length) {
