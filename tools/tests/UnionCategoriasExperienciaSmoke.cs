@@ -15,7 +15,8 @@
 //                                                  con los agregados en 0
 //   6) TipoAgrupado fuera de AGRUPADORES        -> tambien crea categoria
 //   7) la vista no poblo C1 / C1&C2             -> se cortan de la ruta
-//   8) Problem SIN iniciativa                   -> NO crea categoria
+//   8) titulo de iniciativa aun sin capturar    -> SI crea categoria (un
+//                                                  Problem recien creado)
 //   9) dos Problems en la misma categoria       -> los dos, una sola fila
 //
 // y, de paso, que el universo no crezca de mas.
@@ -175,7 +176,9 @@ public static class UnionSmoke
         detalle.Add(Det("P4", "/Rara/Sub/Hoja", "Rara", "/Rara/Sub", "En Análisis", "ReqOpr", 7));
         // La vista no poblo C1 ni C1&C2 (caso 7): se cortan de la ruta.
         detalle.Add(Det("P5", "/Muda/Sub/Hoja", null, null, "En Solución", "Problem", 4));
-        // Problem sin iniciativa (caso 8): no inventa categoria.
+        // Titulo de iniciativa sin capturar (caso 8): el Problem recien
+        // creado ya tiene su fila vigente en ProblemCategoria. Antes solo
+        // existia si la categoria tenia tickets; ahora existe siempre.
         detalle.Add(Det("P6", "/Vacia/Sub/Hoja", "Vacia", "/Vacia/Sub", "En Análisis", "Problem", 2, null));
         // Segundo Problem en la MISMA categoria que P2 (caso 9).
         detalle.Add(Det("P7", "/Solo/Sub/Hoja", "Solo", "/Solo/Sub", "En Análisis", "Problem", 6));
@@ -275,18 +278,23 @@ public static class UnionSmoke
         Chk("caso 7: la iniciativa llega a su fila", 1, ((IList)mudaC2["iniciativas"]).Count);
         Chk("caso 7: y suma a ini_total", 4, mudaC2["ini_total"]);
 
-        // ---- caso 8: Problem SIN iniciativa ----
-        Chk("caso 8: no crea fila C1", true, Buscar(cats, "Vacia", "C1") == null);
-        Chk("caso 8: no crea fila C2", true, Buscar(cats, "/Vacia/Sub", "C2") == null);
-        Chk("caso 8: no crea fila v2", true, Buscar(v2, "/Vacia/Sub/Hoja", null) == null);
+        // ---- caso 8: titulo de iniciativa aun sin capturar ----
+        Chk("caso 8: crea fila C1", true, Buscar(cats, "Vacia", "C1") != null);
+        var vaciaC2 = Buscar(cats, "/Vacia/Sub", "C2");
+        Chk("caso 8: crea fila C2", true, vaciaC2 != null);
+        Chk("caso 8: lleva su iniciativa", "P6", Folios(vaciaC2));
+        Chk("caso 8: suma a ini_total (activa y de agrupador)", 2, vaciaC2["ini_total"]);
+        Chk("caso 8: crea fila v2", true, Buscar(v2, "/Vacia/Sub/Hoja", null) != null);
 
         // ---- el universo no crecio de mas ----
-        // cats: C1 Con/Sin/Solo/Cerrada/Rara/Muda + C2 /Con/Sub, /Sin/Sub,
-        //       /Solo/Sub, /Cerrada/Sub, /Rara/Sub, /Muda/Sub = 12
-        Chk("categorias: exactamente las 12 esperadas", 12, cats.Count);
+        // cats: C1 Con/Sin/Solo/Cerrada/Rara/Muda/Vacia + C2 /Con/Sub,
+        //       /Sin/Sub, /Solo/Sub, /Cerrada/Sub, /Rara/Sub, /Muda/Sub,
+        //       /Vacia/Sub = 14
+        Chk("categorias: exactamente las 14 esperadas", 14, cats.Count);
         // v2: /Con/Sub/Hoja, /Sin/Sub/Hoja, /Solo/Sub/Hoja,
-        //     /Cerrada/Sub/Hoja, /Rara/Sub/Hoja, /Muda/Sub/Hoja = 6
-        Chk("categorias_v2: exactamente las 6 esperadas", 6, v2.Count);
+        //     /Cerrada/Sub/Hoja, /Rara/Sub/Hoja, /Muda/Sub/Hoja,
+        //     /Vacia/Sub/Hoja = 7
+        Chk("categorias_v2: exactamente las 7 esperadas", 7, v2.Count);
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO OK" : fallos + " FALLAS");

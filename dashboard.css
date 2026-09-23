@@ -557,6 +557,11 @@
     flex: 1; min-width: 2.5ch; text-align: center;
     font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums;
     color: var(--ctrl-ink);
+    /* Es un campo editable, pero se ve como el numero de siempre: sin caja
+       propia dentro del control (el foco lo marca .slotstep:focus-within). */
+    width: 0; height: 38px; padding: 0; margin: 0;
+    border: 0; background: transparent; box-shadow: none; outline: none;
+    font-family: inherit;
   }
   /* El acento marca el SLOT ya aplicado, no el numero preparado. Ahora se ve
      tambien en el borde, porque el control es una sola pieza. */

@@ -418,6 +418,11 @@ const perf = {
 
 // Ordena el <tbody> al hacer clic en un <th>. Las columnas class="num" se
 // comparan como numero (si no, 9 quedaria despues de 100).
+//
+// Tablas drill-down (.n1row seguida de sus .n2row): se ordenan los bloques
+// por la fila padre y, dentro de cada bloque, los hijos por la misma columna.
+// Asi un hijo nunca se separa de su padre. Una tabla plana es el caso de un
+// bloque por fila sin hijos: el orden sale igual que antes.
 function hacerOrdenable(tabla) {
   if (!tabla || !tabla.tHead || !tabla.tBodies.length) return;
   const ths = Array.from(tabla.tHead.rows[0].cells);
@@ -435,15 +440,24 @@ function hacerOrdenable(tabla) {
       const numerica = th.classList.contains('num');
       const cuerpo = tabla.tBodies[0];
       const valor = fila => (fila.cells[i] ? fila.cells[i].textContent.trim() : '');
-      Array.from(cuerpo.rows)
-        .sort((a, b) => {
-          const x = valor(a), y = valor(b);
-          const cmp = numerica
-            ? (parseFloat(x.replace(/[^\d.-]/g, '')) || 0) - (parseFloat(y.replace(/[^\d.-]/g, '')) || 0)
-            : x.localeCompare(y, 'es');
-          return asc ? cmp : -cmp;
-        })
-        .forEach(fila => cuerpo.appendChild(fila));
+      const comparar = (a, b) => {
+        const x = valor(a), y = valor(b);
+        const cmp = numerica
+          ? (parseFloat(x.replace(/[^\d.-]/g, '')) || 0) - (parseFloat(y.replace(/[^\d.-]/g, '')) || 0)
+          : x.localeCompare(y, 'es');
+        return asc ? cmp : -cmp;
+      };
+      const bloques = [];
+      Array.from(cuerpo.rows).forEach(fila => {
+        if (fila.classList.contains('n2row') && bloques.length) bloques[bloques.length - 1].hijos.push(fila);
+        else bloques.push({ padre: fila, hijos: [] });
+      });
+      bloques
+        .sort((a, b) => comparar(a.padre, b.padre))
+        .forEach(b => {
+          cuerpo.appendChild(b.padre);
+          b.hijos.sort(comparar).forEach(h => cuerpo.appendChild(h));
+        });
     });
   });
 }
@@ -1107,8 +1121,9 @@ const TableroSla = (function () {
      muestra un valor por SLOT. No cambia el significado de nada: son las
      MISMAS series diarias, sumadas por bloque.
 
-     El eje sale con N + 1 posiciones: el SLOT 0 y los SLOT 1..N, de reciente
-     a antiguo, que es como el negocio numera los SLOTs.
+     El eje sale con N + 1 posiciones, de antiguo a reciente: SLOT N ... SLOT 1
+     y, a la derecha del todo, el SLOT 0. La numeracion es la del negocio; el
+     orden es el de una linea de tiempo.
 
      El SLOT 0 es AYER: el ancla del eje, el ultimo dia COMPLETO. Es una
      posicion REAL, no una banda vacia ni una marca dibujada: lleva los
@@ -1144,13 +1159,18 @@ const TableroSla = (function () {
     // devuelve slotDeFecha y el mismo que acota slotRango, asi que el numero
     // del eje, el rango del tooltip y el filtro de fechas hablan siempre del
     // mismo periodo.
+    //
+    // El eje se lee como una linea de tiempo: el SLOT mas viejo (N) a la
+    // izquierda y el ancla -ayer- a la derecha. Solo cambia el ORDEN de las
+    // posiciones; etiqueta, rango y valores viajan juntos por indice, asi que
+    // cada numero sigue pegado a su SLOT.
     const indices = [];
-    for (let s = 1; s <= n; s++) indices.push(s);       // reciente -> viejo
+    for (let s = n; s >= 1; s--) indices.push(s);       // viejo -> reciente
     return {
-      etiquetas: ['SLOT 0', ...indices.map(s => `SLOT ${s}`)],
-      rangos: [rangoAncla(), ...indices.map(s => slotRango(s))],
+      etiquetas: [...indices.map(s => `SLOT ${s}`), 'SLOT 0'],
+      rangos: [...indices.map(s => slotRango(s)), rangoAncla()],
       series: series.map((_, j) =>
-        [ancla[j], ...indices.map(s => (cubos.get(s) || [])[j] || 0)]),
+        [...indices.map(s => (cubos.get(s) || [])[j] || 0), ancla[j]]),
     };
   }
 
@@ -1323,7 +1343,10 @@ const TableroSla = (function () {
   function renderSlotStepper() {
     // El 0 es un estado propio -SLOT apagado, manda el rango manual-, asi que
     // se pinta tal cual en vez de ensenar un 1 que nadie ha pedido.
-    document.getElementById('slot-n').textContent = String(slotsN);
+    // Mientras alguien escribe en el campo no se le pisa el texto: una carga
+    // que acabe a mitad de tecleo repintaria el numero anterior.
+    const campo = document.getElementById('slot-n');
+    if (document.activeElement !== campo) campo.value = String(slotsN);
     document.getElementById('slot-menos').disabled = slotsN <= 0;
     document.getElementById('slot-mas').disabled = slotsN >= MAX_SLOTS;
 
@@ -1343,6 +1366,15 @@ const TableroSla = (function () {
     // Con 0 el control se ve apagado: no hay periodo preparado ni aplicado.
     document.getElementById('slot-step').classList.toggle('off', slotsN === 0);
     sum.classList.toggle('off', slotsN === 0);
+  }
+
+  // Numero escrito a mano en el stepper. Solo cuentan los digitos, y lo que
+  // pase del tope se queda en el tope: 20502141 es 12. Sin digitos devuelve
+  // null y el campo vuelve al numero que habia.
+  function leerSlotsEscritos(texto) {
+    const digitos = String(texto ?? '').replace(/\D/g, '');
+    if (!digitos) return null;
+    return Math.min(Number(digitos), MAX_SLOTS);
   }
 
   // Pone en vigor el SLOT escribiendo su rango en las fechas. No recarga por su
@@ -1701,8 +1733,8 @@ const TableroSla = (function () {
     /* Granularidad del eje. Es lo unico que decide este bloque: las series de
        arriba no se tocan, solo se suman por bloque.
 
-       En modo SLOT se agrupa por SLOT, un punto por bloque, con HOY delante
-       como origen. Ese origen es tambien lo que hace legible el caso de UN
+       En modo SLOT se agrupa por SLOT, un punto por bloque, con AYER (SLOT 0)
+       como ancla al final del eje. Esa ancla es tambien lo que hace legible el caso de UN
        SOLO SLOT: dos posiciones dibujan una linea, mientras que un bloque
        suelto era un punto en mitad del lienzo. Fuera del modo SLOT, un rango
        largo -"Año" son ~250 dias- se agrupa por mes de calendario, en vez de
@@ -1762,14 +1794,14 @@ const TableroSla = (function () {
     // en vez de cambiar la config, para no tener que reconstruir la grafica al
     // pasar de vista diaria larga a corta o a SLOTs.
     estiloTendVigente = estiloTendencia(etiquetas, !!rangosBucket);
-    // El eje de SLOTs arranca pegado al eje Y. estiloTendencia centra las
-    // bandas de cualquier eje agrupado -un bloque ocupa un tramo de tiempo y
-    // su sitio natural es el centro de su banda-, pero centrar reserva media
-    // banda libre en cada extremo, y con pocas posiciones esa media banda es
-    // una franja vacia enorme delante del SLOT 0: se leia como si la grafica
-    // empezara en un punto que no esta. Aqui el primer punto ES el ancla, y
-    // tiene que verse como el principio de la serie. El agrupado por mes se
-    // queda centrado, que es como estaba.
+    // El eje de SLOTs va de borde a borde. estiloTendencia centra las bandas
+    // de cualquier eje agrupado -un bloque ocupa un tramo de tiempo y su sitio
+    // natural es el centro de su banda-, pero centrar reserva media banda
+    // libre en cada extremo, y con pocas posiciones esa media banda es una
+    // franja vacia enorme junto al SLOT 0: se leia como si la serie acabara
+    // en un punto que no esta. Aqui el ultimo punto ES el ancla (ayer), y
+    // tiene que verse como el final de la serie. El agrupado por mes se queda
+    // centrado, que es como estaba.
     if (enModoSlot()) estiloTendVigente.centrado = false;
     const estilo = estiloTendVigente;
 
@@ -3197,37 +3229,108 @@ const TableroSla = (function () {
       cap.innerHTML = avisos.length
         ? `<span class="suave">Esta tabla ${escapeHtml(avisos.join('; '))}.</span>` : '';
     }
-    if (hint) hint.textContent = filas.length ? `${FMT(filas.length)} filas` : '';
-
     if (!filas.length) {
+      if (hint) hint.textContent = '';
       cont.innerHTML = '<div class="vacio">Sin datos para el periodo seleccionado.</div>';
       return;
     }
 
-    /* Orden inicial: Cumplimiento de 100% a 0%. Solo reordena filas; los
-       valores son los del procedimiento. Sin cifra van al final, y los
-       empates conservan el orden en que llegaron (sort estable). La columna
-       nace marcada con ▼ y data-orden="desc", que es justo lo que
-       hacerOrdenable deja tras un clic: el siguiente clic pasa a ascendente. */
+    const lideres = agruparLiderGrupo(filas);
+    if (hint) hint.textContent = `${FMT(lideres.length)} líderes · ${FMT(filas.length)} grupos`;
+
+    /* Orden inicial: Cumplimiento de 100% a 0%, los lideres por su cifra
+       agregada y dentro de cada uno sus grupos por la del procedimiento. Sin
+       cifra van al final, y los empates conservan el orden en que llegaron
+       (sort estable). La columna nace marcada con ▼ y data-orden="desc", que
+       es justo lo que hacerOrdenable deja tras un clic: el siguiente clic
+       pasa a ascendente, y reordena por bloques (lider + sus grupos). */
     const iOrden = COLUMNAS_LIDER_GRUPO.findIndex(col => col.clave === ORDEN_LIDER_GRUPO);
     const clave = v => numeroLiderGrupo(v[iOrden]);
-    const ordenadas = filas.slice().sort((a, b) => {
+    const desc = (a, b) => {
       const x = clave(a), y = clave(b);
       if (x === null || y === null) return (x === null) - (y === null);
       return y - x;
+    };
+
+    /* Mismo drill-down que "Lideres (drill-down)" del Backlog: fila .n1row
+       por lider -clic abre/cierra- y .n2row por grupo, con las clases y el
+       triangulo de dashboard.css. La primera columna es Lider / Grupo; el
+       resto son las mismas celdas de antes (celdaLiderGrupo, mismas
+       pastillas). */
+    const cols = COLUMNAS_LIDER_GRUPO.map((col, i) => ({ col, i })).slice(1);
+    const celdas = v => cols.slice(1).map(({ col, i }) => celdaLiderGrupo(col, v[i])).join('');
+    let filasHtml = '';
+    lideres.sort((a, b) => desc(a.agregado, b.agregado)).forEach((l, n) => {
+      filasHtml += `<tr class="n1row" data-n1="${n}">${celdaLiderGrupo(COLUMNAS_LIDER_GRUPO[0], l.lider)}${celdas(l.agregado)}</tr>`;
+      l.grupos.slice().sort(desc).forEach(v => {
+        filasHtml += `<tr class="n2row" data-p1="${n}">${celdaLiderGrupo(COLUMNAS_LIDER_GRUPO[1], v[1])}${celdas(v)}</tr>`;
+      });
     });
 
-    const filasHtml = ordenadas.map(v => `<tr>${COLUMNAS_LIDER_GRUPO.map((col, i) =>
-      celdaLiderGrupo(col, v[i])).join('')}</tr>`).join('');
-
-    cont.innerHTML = `<table><thead><tr>${COLUMNAS_LIDER_GRUPO.map((col, i) => {
-      const clase = col.tipo === 'txt' ? '' : ' class="num"';
+    cont.innerHTML = `<table><thead><tr>${cols.map(({ col, i }) => {
+      if (i === 1) return '<th>Líder / Grupo</th>';
       return i === iOrden
-        ? `<th${clase} data-orden="desc">${col.titulo}<span class="ord">▼</span></th>`
-        : `<th${clase}>${col.titulo}</th>`;
+        ? `<th class="num" data-orden="desc">${col.titulo}<span class="ord">▼</span></th>`
+        : `<th class="num">${col.titulo}</th>`;
     }).join('')}</tr></thead>
       <tbody>${filasHtml}</tbody></table>`;
+
+    cont.querySelectorAll('.n1row').forEach(fila => {
+      fila.addEventListener('click', () => {
+        const abierto = fila.classList.toggle('open');
+        cont.querySelectorAll(`.n2row[data-p1="${fila.dataset.n1}"]`)
+          .forEach(h => h.classList.toggle('show', abierto));
+      });
+    });
     hacerOrdenable(cont.querySelector('table'));
+  }
+
+  /* Agrupa las filas del procedimiento por lider, en el orden en que llega
+     cada lider. La fila del lider se DERIVA de los conteos, no de promediar
+     porcentajes de sus grupos:
+       Total, Dentro SLA, Vencidos, Reabiertos = suma de sus grupos
+       Cumplimiento  = Dentro SLA / Total * 100
+       % Reabiertos  = Reabiertos / Total * 100
+     Los grupos siguen mostrando la cifra del procedimiento sin tocar. Si el
+     procedimiento usara otro denominador, la fila del lider no cuadraria con
+     la de sus grupos: se avisa en consola una vez por carga. */
+  function agruparLiderGrupo(filas) {
+    const IDX = {};
+    COLUMNAS_LIDER_GRUPO.forEach((col, i) => { IDX[col.clave] = i; });
+    const suma = (vs, k) => {
+      const ns = vs.map(v => numeroLiderGrupo(v[IDX[k]])).filter(n => n !== null);
+      return ns.length ? ns.reduce((a, n) => a + n, 0) : null;
+    };
+    const pct = (parte, total) => (parte !== null && total ? 100 * parte / total : null);
+
+    let descuadre = null;
+    const porLider = new Map();
+    filas.forEach(v => {
+      const lider = v[IDX.lider] ?? '';
+      if (!porLider.has(lider)) porLider.set(lider, []);
+      porLider.get(lider).push(v);
+
+      const total = numeroLiderGrupo(v[IDX.total]);
+      [['pctcumplimiento', 'dentrosla'], ['pctreabiertos', 'reabiertos']].forEach(([kPct, kParte]) => {
+        const sp = numeroLiderGrupo(v[IDX[kPct]]);
+        const propio = pct(numeroLiderGrupo(v[IDX[kParte]]), total);
+        if (!descuadre && sp !== null && propio !== null && Math.abs(sp - propio) > 0.01) {
+          descuadre = `${v[IDX.lider]} / ${v[IDX.grupo]}: ${kPct} del SP ${sp}% vs ${kParte}/Total ${propio.toFixed(2)}%`;
+        }
+      });
+    });
+    if (descuadre) {
+      console.warn(`[SLA lider/grupo] un porcentaje del SP no sale de su conteo / Total; la fila del lider puede no cuadrar. ${descuadre}`);
+    }
+
+    return [...porLider.entries()].map(([lider, grupos]) => {
+      const agregado = new Array(COLUMNAS_LIDER_GRUPO.length).fill(null);
+      agregado[IDX.lider] = lider;
+      ['total', 'dentrosla', 'vencidos', 'reabiertos'].forEach(k => { agregado[IDX[k]] = suma(grupos, k); });
+      agregado[IDX.pctcumplimiento] = pct(agregado[IDX.dentrosla], agregado[IDX.total]);
+      agregado[IDX.pctreabiertos] = pct(agregado[IDX.reabiertos], agregado[IDX.total]);
+      return { lider, grupos, agregado };
+    });
   }
 
   function estadoSlaLiderGrupo(mensaje) {
@@ -3619,6 +3722,31 @@ const TableroSla = (function () {
       slotsN--;                      // 1 -> 0 apaga el SLOT: manda el rango
       aplicarSlots();                // manual que haya escrito en las fechas
       programarCarga();
+    });
+    // El numero tambien se escribe. Mientras se teclea solo se quitan los
+    // caracteres que no son digitos; se aplica al confirmar (Enter o salir
+    // del campo), acotado a 0..MAX_SLOTS, igual que con - / +.
+    const campoSlots = document.getElementById('slot-n');
+    campoSlots.addEventListener('input', () => {
+      const limpio = campoSlots.value.replace(/\D/g, '');
+      if (limpio !== campoSlots.value) campoSlots.value = limpio;
+    });
+    campoSlots.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); campoSlots.blur(); }
+      if (e.key === 'Escape') { campoSlots.value = String(slotsN); campoSlots.blur(); }
+    });
+    campoSlots.addEventListener('focus', () => campoSlots.select());
+    campoSlots.addEventListener('change', () => {
+      const n = leerSlotsEscritos(campoSlots.value);
+      // `change` puede llegar con el foco aun en el campo, y renderSlotStepper
+      // no pisa el texto mientras hay foco: el numero final se escribe aqui.
+      // Vacio o igual al actual solo normaliza el texto ("20502141" -> "12").
+      if (n !== null && n !== slotsN) {
+        slotsN = n;
+        aplicarSlots();
+        programarCarga();
+      }
+      campoSlots.value = String(slotsN);
     });
     // Tocar una fecha a mano apaga el SLOT: si no, el rango del SLOT se
     // reescribiria encima y las fechas escritas se perderian.
