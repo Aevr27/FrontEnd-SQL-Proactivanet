@@ -929,6 +929,23 @@ const TableroSla = (function () {
     cargarTodo();
   }
 
+  /* Interruptor "Todos / Sin proveedores": UN boton, y su data-estado es el
+     estado ('todos' | 'excluir'). Vive en el DOM, como el resto de la barra:
+     sin localStorage. El texto dice el estado vigente; el title, a donde se
+     pasa con el clic. */
+  function sinProveedores() {
+    const b = document.getElementById('btn-proveedores');
+    return !!b && b.dataset.estado === 'excluir';
+  }
+
+  function ponerProveedores(excluir) {
+    const b = document.getElementById('btn-proveedores');
+    if (!b) return;
+    b.dataset.estado = excluir ? 'excluir' : 'todos';
+    b.textContent = excluir ? 'Sin proveedores' : 'Todos';
+    b.title = excluir ? 'Cambiar a Todos' : 'Cambiar a Sin proveedores';
+  }
+
   function paramsFiltros() {
     const fi = document.getElementById('f-inicio').value;
     const ff = document.getElementById('f-fin').value;
@@ -938,6 +955,10 @@ const TableroSla = (function () {
     if (fi) p.set('fecha_inicio', fi);
     if (ff) p.set('fecha_fin', ff);
     if (grupos.length) p.set('grupos', grupos.join(','));
+    // "Sin proveedores": el servidor decide que grupo es de proveedor
+    // (DashboardQueries.GrupoProveedor); aqui solo viaja el interruptor.
+    // "Todos" no manda nada, asi que su URL es la de siempre.
+    if (sinProveedores()) p.set('proveedores', 'excluir');
     // Los nombres de tecnico vienen como "Apellidos, Nombre": la coma es parte
     // del nombre, asi que la lista se separa con | y el SP la parte con | (ver
     // dbo.fn_Dash_SplitListPipe). Grupos sigue con coma: ninguno la contiene.
@@ -963,6 +984,7 @@ const TableroSla = (function () {
   function paramsLlamadas() {
     const p = paramsFiltros();
     p.delete('grupos');
+    p.delete('proveedores');   // igual que grupos: una llamada no tiene grupo
     ponerTecnicosCall(p);
     const campanas = seleccionados('f-campanas');
     if (campanas.length) p.set('campanas', campanas.join(','));
@@ -2555,7 +2577,8 @@ const TableroSla = (function () {
 
   function descripcionTopCerrados(totalCerrados, personas, mostradas) {
     const g = seleccionados('f-grupos');
-    const txt = g.length ? `Grupos: ${escapeHtml(g.join(' · '))}` : 'todos los grupos';
+    let txt = g.length ? `Grupos: ${escapeHtml(g.join(' · '))}` : 'todos los grupos';
+    if (sinProveedores()) txt += ' · sin proveedores';
     const per = `<span class="suave">${escapeHtml(periodoRanking())}</span><br>`;
     if (!personas) return `${per}0 tickets resueltos <span class="suave">· ${txt}</span>`;
     const corte = mostradas < personas
@@ -2912,6 +2935,7 @@ const TableroSla = (function () {
   function paramsCargaCombinada() {
     const p = paramsFiltros();
     p.delete('grupos');
+    p.delete('proveedores');   // Call Center: sin grupo del ticket
     ponerTecnicosCall(p);
     p.set('top', String(TOPE_CARGA));
     return p;
@@ -3697,6 +3721,7 @@ const TableroSla = (function () {
       document.getElementById('f-grupos').selectedIndex = -1;
       document.getElementById('f-tecnicos').selectedIndex = -1;
       document.getElementById('f-campanas').selectedIndex = -1;
+      ponerProveedores(false);
       // "Limpiar" deja el tablero como recien abierto: sin SLOT, sin cross
       // filter y con el mismo rango que escribe init(). Antes fijaba hoy a hoy
       // y la tendencia quedaba con un solo dia.
@@ -3760,6 +3785,11 @@ const TableroSla = (function () {
     // el <select> original, asi que basta con escucharlo aqui.
     ['f-grupos', 'f-tecnicos', 'f-campanas'].forEach(id => {
       document.getElementById(id).addEventListener('change', programarCarga);
+    });
+    // Todos / Sin proveedores: cada clic cambia al otro estado y recarga.
+    document.getElementById('btn-proveedores').addEventListener('click', () => {
+      ponerProveedores(!sinProveedores());
+      programarCarga();
     });
     renderSlotStepper();             // estado inicial: sin SLOT, rango manual
 
@@ -4156,6 +4186,9 @@ function adoptarControlesSla(idTab) {
      sus listeners; solo deja de mostrarse mientras la barra esta prestada. */
   const grupos = filtros.querySelector('.campo-grupos');
   if (grupos) grupos.hidden = esCallCenter;
+  // Todos / Sin proveedores es del grupo del ticket: mismo caso que Grupos.
+  const proveedores = filtros.querySelector('.campo-proveedores');
+  if (proveedores) proveedores.hidden = esCallCenter;
 
   /* Tecnicos: en el Call Center solo los que atienden telefono. */
   TableroSla.modoCallCenter(esCallCenter);

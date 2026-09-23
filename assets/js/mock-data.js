@@ -33,7 +33,8 @@ function mockFechaISO(d) {
 
 function crearMockSla() {
   const rnd = mockRand(240824);
-  const grupos = ['Soporte Aplicaciones','Infraestructura','Operaciones TI','Retail','Mesa de Ayuda'];
+  // 'Proveedor Mock' esta para poder probar "Sin proveedores" en local.
+  const grupos = ['Soporte Aplicaciones','Infraestructura','Operaciones TI','Retail','Mesa de Ayuda','Proveedor Mock'];
   // Mismo formato que Tickets.TecnicoSegundaLinea en la base real:
   // "Apellidos, Nombre", con coma dentro del nombre. Es justo lo que rompia el
   // filtro cuando la lista viajaba separada por comas.
@@ -271,10 +272,16 @@ function mockSla(ruta) {
   const tecnicos = lista('tecnicos', '|');
   const fi = qs.get('fecha_inicio') || '';
   const ff = qs.get('fecha_fin') || '';
-  const clave = JSON.stringify([fi, ff, grupos, tecnicos]);
+  // ?proveedores=excluir: copia SOLO para el mock de la regla del servidor
+  // (DashboardQueries.GrupoProveedor): Grupo sin espacios a la izquierda que
+  // empieza por "Proveedor", sin distinguir mayusculas; NULL no es proveedor.
+  const sinProveedores = (qs.get('proveedores') || '').toLowerCase() === 'excluir';
+  const esProveedor = g => g != null && /^ *proveedor/i.test(g);
+  const clave = JSON.stringify([fi, ff, grupos, tecnicos, sinProveedores]);
   if (!MOCK_SLA_CACHE.has(clave)) {
     const filas = MOCK_SLA.detalle.filter(x => {
       if (grupos.length && !grupos.includes(x.Grupo)) return false;
+      if (sinProveedores && esProveedor(x.Grupo)) return false;
       if (tecnicos.length && !tecnicos.includes(x.Tecnico)) return false;
       const d = mockFechaISO(x.FechaRegistro);
       if (fi && d < fi) return false;

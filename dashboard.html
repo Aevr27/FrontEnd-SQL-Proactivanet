@@ -207,6 +207,18 @@
         <label for="f-tecnicos">Tecnicos</label>
         <select id="f-tecnicos" multiple></select>
       </div>
+      <!-- Todos / Sin proveedores: UN solo boton con estado. "Todos" no manda
+           nada; "Sin proveedores" manda ?proveedores=excluir y el servidor saca
+           de TODA la pestana de SLA los grupos de proveedor (la regla vive en
+           DashboardQueries.GrupoProveedor). El estado es data-estado del boton
+           (dashboard.js, sinProveedores/ponerProveedores). Se retira en el Call
+           Center, igual que Grupos (adoptarControlesSla). -->
+      <div class="campo campo-proveedores">
+        <label id="lbl-proveedores" for="btn-proveedores">Proveedores</label>
+        <button class="btn-proveedores" id="btn-proveedores" type="button"
+                data-estado="todos" aria-describedby="lbl-proveedores"
+                title="Cambiar a Sin proveedores">Todos</button>
+      </div>
       <!-- Campanas del Call Center. Solo la lee llamadas.ashx: los demas
            handlers de esta pestana ignoran el parametro `campanas`, y en SLA
            el filtro no significa nada -un ticket no tiene cola-, asi que el

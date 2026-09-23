@@ -56,6 +56,7 @@ public class SlaLiderGrupo : IHttpHandler
             string fi, ff;
             DashboardParams.RangoFechas(context.Request, out fi, out ff);
             object grupos = DashboardParams.ListaONulo(context.Request, "grupos");
+            bool sinProveedores = DashboardQueries.GrupoProveedor.Excluir(context.Request);
 
             var firma = ParametrosDeclarados();
             var parametros = new Dictionary<string, object>();
@@ -66,7 +67,7 @@ public class SlaLiderGrupo : IHttpHandler
             var filas = new List<Dictionary<string, object>>();
             var valores = new List<object[]>();
             var columnas = new List<Dictionary<string, object>>();
-            Ejecutar(parametros, filas, valores, columnas);
+            Ejecutar(parametros, sinProveedores, filas, valores, columnas);
 
             return new Dictionary<string, object>
             {
@@ -74,6 +75,7 @@ public class SlaLiderGrupo : IHttpHandler
                 { "columnas", columnas },
                 { "valores", valores },
                 { "parametros", new List<string>(parametros.Keys) },
+                { "sinProveedores", sinProveedores },
             };
         });
     }
@@ -90,9 +92,21 @@ public class SlaLiderGrupo : IHttpHandler
        procedimiento-, sin renombrar ni recalcular nada, y "columnas" dice
        el nombre y el tipo SQL de cada posicion tal como los devuelve el
        reader. Con eso dashboard.js puede leer por nombre cuando los nombres
-       sirven y por posicion cuando no. */
+       sirven y por posicion cuando no.
+
+       "SIN PROVEEDORES". El procedimiento no sabe de proveedores y no se
+       toca: las filas de grupo de proveedor (DashboardQueries.GrupoProveedor,
+       la misma regla que aplica Predicados() al resto de la pestana) se
+       descartan aqui, de "sla_lider_grupo" y de "valores" a la vez. El
+       agregado por lider lo suma dashboard.js a partir de las filas de
+       grupo, asi que queda bien sin recalcular nada. El Grupo se busca por
+       nombre de columna y, si no aparece, en la posicion 1 -el orden del
+       procedimiento es Lider, Grupo, ...-. */
+    private const int PosicionGrupo = 1;
+
     private static void Ejecutar(
         Dictionary<string, object> parametros,
+        bool sinProveedores,
         List<Dictionary<string, object>> filas,
         List<object[]> valores,
         List<Dictionary<string, object>> columnas)
@@ -116,8 +130,23 @@ public class SlaLiderGrupo : IHttpHandler
                     });
                 }
 
+                int iGrupo = -1;
+                for (int i = 0; i < rd.FieldCount; i++)
+                {
+                    if (string.Equals(rd.GetName(i), "Grupo", StringComparison.OrdinalIgnoreCase))
+                    {
+                        iGrupo = i;
+                        break;
+                    }
+                }
+                if (iGrupo < 0 && rd.FieldCount > PosicionGrupo) iGrupo = PosicionGrupo;
+
                 while (rd.Read())
                 {
+                    if (sinProveedores && iGrupo >= 0 && !rd.IsDBNull(iGrupo)
+                        && DashboardQueries.GrupoProveedor.EsGrupoProveedor(Convert.ToString(rd.GetValue(iGrupo))))
+                        continue;
+
                     filas.Add(SqlRowMapper.Fila(rd));
                     var fila = new object[rd.FieldCount];
                     for (int i = 0; i < rd.FieldCount; i++)

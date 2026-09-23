@@ -63,6 +63,8 @@ El tablero muestra, entre otros:
 - técnicos activos;
 - grupos activos.
 
+El interruptor **Todos / Sin proveedores** (encima de «Limpiar») saca de toda la pestaña de SLA —KPIs, tendencia, productividad, distribución, detalle y la tabla por líder y grupo— los grupos de proveedor: los que, sin espacios a la izquierda, empiezan por `Proveedor` (sin distinguir mayúsculas). «Vendor Managment» no entra en la regla y se queda. El grupo excluido sale del numerador y del denominador del SLA. La regla vive solo en `DashboardQueries.GrupoProveedor` (`App_Code/DashboardQueries.cs`); viaja como `?proveedores=excluir` y «Todos» no manda nada, así que da exactamente los números de siempre. No toca la base de datos: la tabla por líder y grupo filtra en `sla_lider_grupo.ashx` las filas que devuelve `dbo.usp_Dash_SlaLiderGrupo`. En el Call Center el interruptor se retira, igual que Grupos.
+
 Los gráficos utilizan Chart.js mediante CDN. Si el servidor no tiene salida a internet, puede descargarse `chart.umd.min.js` y servirse localmente.
 
 ### Call Center y carga combinada
