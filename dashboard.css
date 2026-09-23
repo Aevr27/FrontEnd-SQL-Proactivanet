@@ -619,29 +619,39 @@
     border-color: var(--g-800);
     color: var(--btn-ink);
   }
+  /* Proveedores: UN boton con estado que ocupa su campo como una barra mas
+     -40px de alto y todo el ancho de la columna-, con la tipografia y el
+     borde de los botones de rango rapido. El texto no se parte: la columna
+     minima de la rejilla (190px) le sobra a "Sin proveedores".
+       data-estado="todos"   degradado de reposo de los botones (--grad-btn)
+       data-estado="excluir" el degradado de hover de los filtros
+                             (--grad-btn-hover), fijo mientras dure el estado */
+  .filtros .btn-proveedores {
+    height: 40px; width: 100%; padding: 0 14px;
+    border: 1px solid var(--g-700); border-radius: var(--radius-xs);
+    background: var(--grad-btn); color: var(--btn-ink);
+    font: inherit; font-size: 12px; font-weight: 700; line-height: 1;
+    white-space: nowrap; overflow: hidden; text-overflow: clip;
+    cursor: pointer;
+    transition: background .15s ease, border-color .15s ease;
+  }
+  .filtros .btn-proveedores:hover { border-color: var(--g-800); }
+  .filtros .btn-proveedores[data-estado="excluir"] {
+    background: var(--grad-btn-hover); border-color: var(--g-800);
+  }
+  .filtros .btn-proveedores:focus-visible { outline: none; box-shadow: var(--ring); }
   /* Aplicar / Limpiar: renglon propio al pie de la tarjeta, pegado a la
      derecha. Ocupa todas las columnas de la rejilla de filtros. */
-  /* En columna: el interruptor Todos / Sin proveedores va justo encima de
-     Limpiar, los dos pegados a la derecha. */
   .filtros .acciones {
     grid-column: 1 / -1;
-    display: flex; flex-direction: column; gap: 8px;
-    align-items: flex-end; justify-content: flex-end;
+    display: flex; flex-direction: row; gap: 8px;
+    align-items: center; justify-content: flex-end;
     flex-wrap: nowrap; height: auto; min-height: 40px;
     padding-top: 4px;
   }
   /* "Limpiar" a la izquierda sin tocar el orden del HTML; mas chicos que las
      barras de filtro, porque son acciones y no campos. */
-  /* Interruptor de proveedores: los botones son los del rango rapido; solo
-     cambia la etiqueta, en linea y con el estilo de las etiquetas de campo. */
-  .filtros .acciones .campo-proveedores { height: auto; align-items: center; }
-  .filtros .acciones .campo-proveedores[hidden] { display: none; }
-  .filtros .acciones .lbl-proveedores {
-    font-size: 10.5px; font-weight: 700; color: var(--ctrl-label);
-    text-transform: uppercase; letter-spacing: .5px; margin-right: 2px;
-  }
-  /* Solo los hijos directos: los botones del interruptor no son Limpiar. */
-  .filtros .acciones > .btn {
+  .filtros .acciones .btn {
     order: 2;
     flex: 0 0 auto; min-width: 0; height: 34px; padding: 0 16px;
     display: inline-flex; align-items: center; justify-content: center;
@@ -650,7 +660,7 @@
     background: var(--grad-btn); color: var(--btn-ink);
     box-shadow: inset 0 1px 2px rgba(25, 25, 25, .18);
   }
-  .filtros .acciones > .btn:hover {
+  .filtros .acciones .btn:hover {
     background: var(--grad-btn-hover); border-color: var(--g-800);
     filter: none; box-shadow: inset 0 1px 2px rgba(25, 25, 25, .18);
   }
@@ -918,11 +928,8 @@
     .filtros { padding: 14px 14px; grid-template-columns: 1fr; }
     .filtros label { min-height: 0; }
     .filtros .rango-rapido { height: auto; }
-    /* La fila de acciones va en columna (interruptor encima de Limpiar):
-       a ancho completo, y Limpiar sin crecer en alto. */
-    .filtros .acciones { align-items: stretch; }
-    .filtros .acciones > .btn { flex: 0 0 auto; width: 100%; }
-    .filtros .acciones .campo-proveedores .btn { flex: 1 1 0; min-width: 0; }
+    .filtros .acciones { flex-wrap: wrap; justify-content: stretch; }
+    .filtros .acciones .btn { flex: 1 1 140px; min-width: 0; }
     .card { padding: 14px 14px; }
     .lienzo { height: 230px; }
     .lienzo.alta { height: 270px; }

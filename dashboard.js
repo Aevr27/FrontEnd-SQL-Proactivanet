@@ -929,17 +929,21 @@ const TableroSla = (function () {
     cargarTodo();
   }
 
-  /* Interruptor "Todos / Sin proveedores". El estado vive en el DOM
-     (aria-pressed), como el resto de la barra: sin localStorage. */
+  /* Interruptor "Todos / Sin proveedores": UN boton, y su data-estado es el
+     estado ('todos' | 'excluir'). Vive en el DOM, como el resto de la barra:
+     sin localStorage. El texto dice el estado vigente; el title, a donde se
+     pasa con el clic. */
   function sinProveedores() {
-    const b = document.querySelector('#filtros-sla [data-proveedores="excluir"]');
-    return !!b && b.getAttribute('aria-pressed') === 'true';
+    const b = document.getElementById('btn-proveedores');
+    return !!b && b.dataset.estado === 'excluir';
   }
 
   function ponerProveedores(excluir) {
-    document.querySelectorAll('#filtros-sla [data-proveedores]').forEach(b => {
-      b.setAttribute('aria-pressed', String((b.dataset.proveedores === 'excluir') === excluir));
-    });
+    const b = document.getElementById('btn-proveedores');
+    if (!b) return;
+    b.dataset.estado = excluir ? 'excluir' : 'todos';
+    b.textContent = excluir ? 'Sin proveedores' : 'Todos';
+    b.title = excluir ? 'Cambiar a Todos' : 'Cambiar a Sin proveedores';
   }
 
   function paramsFiltros() {
@@ -3782,14 +3786,10 @@ const TableroSla = (function () {
     ['f-grupos', 'f-tecnicos', 'f-campanas'].forEach(id => {
       document.getElementById(id).addEventListener('change', programarCarga);
     });
-    // Todos / Sin proveedores: pulsar el que ya esta activo no recarga.
-    document.querySelectorAll('#filtros-sla [data-proveedores]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const excluir = btn.dataset.proveedores === 'excluir';
-        if (excluir === sinProveedores()) return;
-        ponerProveedores(excluir);
-        programarCarga();
-      });
+    // Todos / Sin proveedores: cada clic cambia al otro estado y recarga.
+    document.getElementById('btn-proveedores').addEventListener('click', () => {
+      ponerProveedores(!sinProveedores());
+      programarCarga();
     });
     renderSlotStepper();             // estado inicial: sin SLOT, rango manual
 
