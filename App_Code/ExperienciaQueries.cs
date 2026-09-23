@@ -710,8 +710,23 @@ public static class ExperienciaQueries
         public string Po;
         public string So;
         public string Director;
+        public bool Vigente;      // VigenteEnOrigen = 1 (ver LeerDuenos)
     }
 
+    // QUE FILAS SE LEEN
+    // -----------------
+    // TODAS, vigentes o no, porque es lo que hace dbo.vw_ProblemCategoria:
+    // su LEFT JOIN a CatCategoriaDueno no filtra VigenteEnOrigen. Cuando una
+    // categoria se desactiva, el ETL marca sus filas de dueño como no
+    // vigentes, pero la vista le sigue dando esos dueños a sus iniciativas.
+    // Con el filtro, el tablero dejaba la categoria sin dueño: la iniciativa
+    // pintaba "PO X" y desaparecia al filtrar por X (PRB 2026-000172 en
+    // /S-Precios y Promociones, las seis filas en VigenteEnOrigen = 0).
+    //
+    // Las vigentes van primero dentro de su C1: si hay de las dos, hereda y
+    // cruza la vigente. Las no vigentes resuelven dueños, pero NO alimentan
+    // los selects de Director / PO / Manager (ver ArmarCatalogos).
+    //
     // El ORDER BY no es cosmetico. Directorio se queda con la PRIMERA fila de
     // cada C1 para heredar dueños a un N2 sin fila propia -el caso de toda
     // categoria nueva-, y si ese C1 tiene hermanos con dueños distintos, sin
@@ -721,9 +736,10 @@ public static class ExperienciaQueries
     private static List<Dueno> LeerDuenos(SqlConnection cn)
     {
         const string SQL =
-            "SELECT CategoriaN2, C1, ProductOwner, ServiceOwner, DirectorPO " +
-            "FROM dbo.CatCategoriaDueno WHERE VigenteEnOrigen = 1 " +
-            "ORDER BY C1, CategoriaN2";
+            "SELECT CategoriaN2, C1, ProductOwner, ServiceOwner, DirectorPO, " +
+            "       Vigente = CASE WHEN VigenteEnOrigen = 1 THEN 1 ELSE 0 END " +
+            "FROM dbo.CatCategoriaDueno " +
+            "ORDER BY C1, CASE WHEN VigenteEnOrigen = 1 THEN 0 ELSE 1 END, CategoriaN2";
 
         var filas = new List<Dueno>();
 
@@ -738,6 +754,7 @@ public static class ExperienciaQueries
                 d.Po = Texto(rd.GetValue(2));
                 d.So = Texto(rd.GetValue(3));
                 d.Director = Texto(rd.GetValue(4));
+                d.Vigente = Entero(rd.GetValue(5)) == 1;
                 filas.Add(d);
             }
         }
@@ -1395,8 +1412,12 @@ public static class ExperienciaQueries
         // jerarquia: Director -> sus Product Owners (la que llena los dos
         // selects encadenados de arriba del tablero).
         var jerarquia = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+        // Solo filas vigentes: una categoria dada de baja resuelve sus dueños
+        // (LeerDuenos), pero no mete en los selects a un Director o PO que ya
+        // solo existe en ella.
         foreach (var d in dir.Duenos())
         {
+            if (!d.Vigente) continue;
             if (string.IsNullOrEmpty(d.Director) || string.IsNullOrEmpty(d.Po)) continue;
             SortedSet<string> pos;
             if (!jerarquia.TryGetValue(d.Director, out pos))
@@ -1413,6 +1434,7 @@ public static class ExperienciaQueries
         var jerarquiaMgr = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
         foreach (var d in dir.Duenos())
         {
+            if (!d.Vigente) continue;
             if (string.IsNullOrEmpty(d.So)) continue;
             var manager = dir.ManagerDe(d.So);
             if (string.IsNullOrEmpty(manager)) continue;

@@ -24,6 +24,9 @@
 //       de categoria y una sola iniciativa
 //   12) NBSP y espacios de sobra en la ruta y en el catalogo de dueños
 //       -> cruzan igual
+//   13) categoria dada de baja: sus filas de CatCategoriaDueno estan en
+//       VigenteEnOrigen = 0 (PRB 2026-000172). La vista le da dueños igual;
+//       el tablero tambien, pero no los mete en los selects
 //
 // y estado / agrupador con otra grafia ("EN ANALISIS", "mejora") salen con la
 // del contrato, que es con la que compara experiencia.js.
@@ -77,9 +80,15 @@ public static class DuenosSmoke
 
     static object Due(string n2, string c1, string po, string so, string director)
     {
+        return Due(n2, c1, po, so, director, true);
+    }
+
+    static object Due(string n2, string c1, string po, string so, string director, bool vigente)
+    {
         var d = Nuevo(TDue);
         Set(d, "CategoriaN2", n2); Set(d, "C1", c1);
         Set(d, "Po", po); Set(d, "So", so); Set(d, "Director", director);
+        Set(d, "Vigente", vigente);
         return d;
     }
 
@@ -193,6 +202,10 @@ public static class DuenosSmoke
         duenos.Add(Due("/Ventas/Precios", "Ventas", "PO-Precios", "SO-Precios", "Dir-X"));
         duenos.Add(Due("/Logistica/WMS" + NBSP + " ", "Logistica" + NBSP,
                        "PO-WMS ", "SO-WMS" + NBSP, "Dir-Y"));
+        // 13) Categoria dada de baja: todas sus filas en VigenteEnOrigen = 0,
+        //     con un Director que no aparece en ninguna fila vigente.
+        duenos.Add(Due("/Baja", "Baja", "PO-Baja", "SO-Caja", "Dir-Baja", false));
+        duenos.Add(Due("/Baja/Punto", "Baja", "PO-Baja", "SO-Caja", "Dir-Baja", false));
 
         // CatPersona, como la arma LeerPersonas (sin mayusculas).
         var personas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -241,6 +254,9 @@ public static class DuenosSmoke
         // 12) NBSP en la ruta de la iniciativa y en el catalogo de dueños
         detalle.Add(Det("P12", "/Logistica/WMS/Picking" + NBSP, "Logistica", "/Logistica/WMS",
                         "En Solución", "Adopcion", 4, null));
+        // 13) en la categoria dada de baja
+        detalle.Add(Det("P13", "/Baja/Punto/Precio", "Baja", "/Baja/Punto",
+                        "En Análisis", "Problem", 2, null));
 
         IList cats, v2;
         Armar(slotCat, mesCat, detalle, dir, out cats, out v2);
@@ -307,6 +323,17 @@ public static class DuenosSmoke
         Chk("12: el SO con NBSP encuentra su Manager", "Mgr-2", wmsC2["manager"]);
         Chk("12: la iniciativa, los mismos", "PO-WMS/SO-WMS/Mgr-2",
             Ini(wmsC2, "P12")["po"] + "/" + Ini(wmsC2, "P12")["so"] + "/" + Ini(wmsC2, "P12")["manager"]);
+
+        // ---- 13: categoria dada de baja ----
+        var bajaC2 = Buscar(cats, "/Baja/Punto", "C2");
+        Chk("13: la categoria dada de baja conserva su dueño", "PO-Baja/Dir-Baja",
+            bajaC2["po"] + "/" + bajaC2["director"]);
+        Chk("13: la iniciativa, el mismo", "PO-Baja/Dir-Baja",
+            Ini(bajaC2, "P13")["po"] + "/" + Ini(bajaC2, "P13")["director"]);
+        var catalogos = (IDictionary)M("ArmarCatalogos").Invoke(null, new object[] { dir });
+        Chk("13: el Director de la baja no entra en los selects", false,
+            ((IList)catalogos["directores"]).Contains("Dir-Baja"));
+        Chk("13: los vigentes si", true, ((IList)catalogos["directores"]).Contains("Dir-X"));
 
         // ---- invariante: en toda fila C2, iniciativa y categoria coinciden ----
         var dispares = 0;

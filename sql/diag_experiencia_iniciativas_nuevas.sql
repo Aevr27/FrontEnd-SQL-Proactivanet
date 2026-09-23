@@ -23,7 +23,8 @@
    Identidad de categoria: dbo.fn_NormalizaCategoria.
    Dueños de la categoria (Directorio, con la que filtra el tablero):
        N2 exacto en dbo.CatCategoriaDueno por C1&C2 normalizado; si no
-       hay, el del PRIMER N2 de su C1 en orden (C1, CategoriaN2).
+       hay, el del PRIMER N2 de su C1. Filas vigentes Y no vigentes, como
+       la vista; dentro de cada C1 van primero las vigentes.
    Manager: dbo.CatPersona.Manager del Service Owner.
    Activa:    Estado en En Analisis / En Solucion / En Monitoreo (sin
               acentos ni mayusculas).
@@ -78,8 +79,9 @@ WHERE Anio = @Anio;
 
 
 /* 2) Catalogo de dueños, normalizado y en el orden con el que lo lee el
-      tablero (ORDER BY C1, CategoriaN2): Orden = 1 es el que hereda un N2
-      sin fila propia. */
+      tablero (C1, vigentes primero, CategoriaN2): OrdenEnC1 = 1 es el que
+      hereda un N2 sin fila propia. Sin filtro de vigencia: la vista
+      tampoco lo tiene. */
 SELECT
     N2Crudo  = cd.CategoriaN2,
     N2       = dbo.fn_NormalizaCategoria(cd.CategoriaN2),
@@ -88,10 +90,11 @@ SELECT
     SO       = LTRIM(RTRIM(REPLACE(cd.ServiceOwner, NCHAR(160), ' '))),
     Director = LTRIM(RTRIM(REPLACE(cd.DirectorPO,   NCHAR(160), ' '))),
     OrdenEnC1 = ROW_NUMBER() OVER (PARTITION BY dbo.fn_NormalizaCategoria(cd.C1)
-                                   ORDER BY cd.C1, cd.CategoriaN2)
+                                   ORDER BY cd.C1,
+                                            CASE WHEN cd.VigenteEnOrigen = 1 THEN 0 ELSE 1 END,
+                                            cd.CategoriaN2)
 INTO #due
-FROM dbo.CatCategoriaDueno AS cd
-WHERE cd.VigenteEnOrigen = 1;
+FROM dbo.CatCategoriaDueno AS cd;
 
 SELECT
     Nombre  = LTRIM(RTRIM(REPLACE(cp.Nombre,  NCHAR(160), ' '))),
