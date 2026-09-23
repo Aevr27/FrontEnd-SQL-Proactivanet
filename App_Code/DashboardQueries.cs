@@ -116,6 +116,9 @@ public static class DashboardQueries
         public DateTime FechaFin;
         public List<string> Grupos = new List<string>();
         public TecnicoFiltro Tecnicos = new TecnicoFiltro(null);
+        // "Sin proveedores" del tablero: fuera los grupos de GrupoProveedor.
+        // false = "Todos", que es exactamente el tablero de antes.
+        public bool SinProveedores;
 
         public static Filtros Desde(HttpRequest request)
         {
@@ -127,6 +130,7 @@ public static class DashboardQueries
             f.FechaFin = Fecha(ff);
             f.Grupos = Partir(request.QueryString["grupos"], ',');
             f.Tecnicos = new TecnicoFiltro(request.QueryString["tecnicos"]);
+            f.SinProveedores = GrupoProveedor.Excluir(request);
             return f;
         }
     }
@@ -190,6 +194,12 @@ public static class DashboardQueries
 
         string comunes = EnLista(cmd, "b.Grupo", "g", f.Grupos)
                        + f.Tecnicos.Predicado(cmd, "b.Tecnico", "t");
+        // En "comunes" y no solo en porSolucion: creados y rechazados son de
+        // la misma pestana y tambien salen sin proveedores. Numerador y
+        // denominador del SLA salen de las MISMAS filas, asi que el grupo
+        // excluido sale de los dos.
+        if (f.SinProveedores)
+            comunes += GrupoProveedor.PredicadoExcluir(cmd, "b.Grupo");
 
         string solucion = "b.FechaFirmaSolucion >= @FechaInicio"
                         + " AND b.FechaFirmaSolucion < DATEADD(DAY, 1, @FechaFin)" + comunes;
@@ -898,6 +908,57 @@ ORDER BY b.FechaFirmaSolucion DESC;";
     // porque es el mismo texto que llena las <option> del filtro: si aqui se
     // escribiera distinto, el valor seleccionado no casaria con el catalogo.
     public static readonly string[] GruposCallCenter = { "Service Desk", "End User" };
+
+    // ---------------------------------------------------------------------
+    // Grupos de proveedor ("Todos / Sin proveedores" de la pestana de SLA)
+    // ---------------------------------------------------------------------
+
+    /* Un grupo es de PROVEEDOR si su nombre, sin espacios a la izquierda,
+       empieza por "Proveedor" (sin distinguir mayusculas). Es la unica regla:
+       ni el lider ni una lista de excepciones. "Vendor Managment" NO empieza
+       asi y se queda dentro a proposito: es un equipo propio que gestiona a
+       los proveedores, no un proveedor. Validado contra la vista el
+       2026-09-23: 18 grupos, ninguno con Grupo NULL ni con NBSP delante.
+
+       Vive AQUI y solo aqui: Predicados() la aplica en SQL y
+       sla_lider_grupo.ashx la aplica en C# sobre las filas del procedimiento.
+       Las dos formas tienen que decir lo mismo:
+         SQL  LTRIM(Grupo) LIKE 'Proveedor%'  (la colacion de la vista, CI_AS,
+              no distingue mayusculas)
+         C#   TrimStart(' ') + StartsWith ordinal sin mayusculas. Solo el
+              espacio, igual que LTRIM, que no quita tabuladores ni NBSP.
+       Un Grupo NULL no es proveedor en ninguna de las dos. */
+    public static class GrupoProveedor
+    {
+        public const string PrefijoProveedor = "Proveedor";
+
+        // Valor del query string que activa "Sin proveedores":
+        // ?proveedores=excluir. Cualquier otra cosa, o nada, es "Todos".
+        public const string ParametroQuery = "proveedores";
+        public const string ValorExcluir = "excluir";
+
+        public static bool Excluir(HttpRequest request)
+        {
+            return string.Equals(request.QueryString[ParametroQuery], ValorExcluir,
+                                 StringComparison.OrdinalIgnoreCase);
+        }
+
+        public static bool EsGrupoProveedor(string grupo)
+        {
+            if (grupo == null) return false;
+            return grupo.TrimStart(' ').StartsWith(PrefijoProveedor,
+                                                   StringComparison.OrdinalIgnoreCase);
+        }
+
+        /* " AND (col IS NULL OR LTRIM(col) NOT LIKE @PrefProv + N'%')", con el
+           prefijo como parametro. Se llama UNA vez por comando: una segunda
+           declararia @PrefProv otra vez y SqlCommand fallaria. */
+        public static string PredicadoExcluir(SqlCommand cmd, string columna)
+        {
+            cmd.Parameters.Add("@PrefProv", SqlDbType.NVarChar, 100).Value = PrefijoProveedor;
+            return " AND (" + columna + " IS NULL OR LTRIM(" + columna + ") NOT LIKE @PrefProv + N'%')";
+        }
+    }
 
     /* Grupos y tecnicos del Call Center, para acotar los dos <select> cuando
        la barra de filtros esta en esa pestana.

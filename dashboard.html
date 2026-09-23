@@ -218,6 +218,16 @@
         <select id="f-campanas" multiple></select>
       </div>
       <div class="campo acciones">
+        <!-- Todos / Sin proveedores, justo encima de Limpiar: saca de TODA la
+             pestana de SLA los grupos de proveedor (nombre que empieza por
+             "Proveedor"; la regla vive en DashboardQueries.GrupoProveedor).
+             Viaja como ?proveedores=excluir. Se retira en el Call Center,
+             igual que Grupos (adoptarControlesSla). -->
+        <div class="campo-proveedores rango-rapido" role="group" aria-labelledby="lbl-proveedores">
+          <span class="lbl-proveedores" id="lbl-proveedores">Proveedores</span>
+          <button class="btn linea chico" type="button" data-proveedores="todos" aria-pressed="true">Todos</button>
+          <button class="btn linea chico" type="button" data-proveedores="excluir" aria-pressed="false">Sin proveedores</button>
+        </div>
         <button class="btn gris" id="btn-limpiar" type="button">Limpiar</button>
       </div>
     </section>
