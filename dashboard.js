@@ -3070,33 +3070,95 @@ const TableroSla = (function () {
      "% Vencidos" viaja en el JSON pero no se muestra: con SLA evaluable es el
      complemento del cumplimiento.
 
-     Las columnas se buscan por nombre, sin acentos ni mayusculas y con el "%"
-     leido como "pct": asi "% Vencidos" no se confunde con "Vencidos" y un
-     alias con o sin tilde ("Líder"/"Lider") sale igual. */
+     DE DONDE SALE CADA CELDA. El handler manda la fila dos veces: por nombre
+     (sla_lider_grupo) y por posicion (valores, con columnas = nombre y tipo
+     de cada posicion). Leer solo por nombre dejaba las cifras en "—" en la
+     VM: las columnas calculadas del procedimiento no traen los nombres que
+     se esperaban -sin alias se llaman "" y se pisan dentro del diccionario-,
+     y solo Lider y Grupo se encontraban.
+
+     Asi que:
+       1. si TODAS las columnas se encuentran por nombre en `columnas`, se usa
+          el nombre -sin acentos ni mayusculas y con el "%" leido como "pct",
+          para que "% Vencidos" no se confunda con "Vencidos"-;
+       2. si no, y el procedimiento devolvio sus 9 columnas, se usa la
+          posicion (`pos`), que es el orden del SELECT: Lider, Grupo, Total,
+          Dentro SLA, Vencidos, % Cumplimiento, % Vencidos, Reabiertos,
+          % Reabiertos;
+       3. si tampoco, la tarjeta dice cuantas columnas llegaron en vez de
+          pintar una tabla con las cifras cambiadas de sitio. */
   const COLUMNAS_LIDER_GRUPO = [
-    { clave: 'lider',           titulo: 'Líder',        tipo: 'txt' },
-    { clave: 'grupo',           titulo: 'Grupo',        tipo: 'txt' },
-    { clave: 'total',           titulo: 'Total',        tipo: 'int' },
-    { clave: 'dentrosla',       titulo: 'Dentro SLA',   tipo: 'int' },
-    { clave: 'vencidos',        titulo: 'Vencidos',     tipo: 'int' },
-    { clave: 'pctcumplimiento', titulo: 'Cumplimiento', tipo: 'pct', sem: v => SEM(v) },
-    { clave: 'reabiertos',      titulo: 'Reabiertos',   tipo: 'int' },
-    { clave: 'pctreabiertos',   titulo: '% Reabiertos', tipo: 'pct', sem: v => SEM_REABIERTOS(v) },
+    { clave: 'lider',           pos: 0, titulo: 'Líder',        tipo: 'txt' },
+    { clave: 'grupo',           pos: 1, titulo: 'Grupo',        tipo: 'txt' },
+    { clave: 'total',           pos: 2, titulo: 'Total',        tipo: 'int' },
+    { clave: 'dentrosla',       pos: 3, titulo: 'Dentro SLA',   tipo: 'int' },
+    { clave: 'vencidos',        pos: 4, titulo: 'Vencidos',     tipo: 'int' },
+    { clave: 'pctcumplimiento', pos: 5, titulo: 'Cumplimiento', tipo: 'pct', sem: v => SEM(v) },
+    { clave: 'reabiertos',      pos: 7, titulo: 'Reabiertos',   tipo: 'int' },
+    { clave: 'pctreabiertos',   pos: 8, titulo: '% Reabiertos', tipo: 'pct', sem: v => SEM_REABIERTOS(v) },
   ];
+  const COLUMNAS_SP_LIDER_GRUPO = 9;
   const BADGE_SEM = { sv: 'bv', sa: 'ba', sr: 'br' };
 
   function claveColumna(nombre) {
-    return String(nombre).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    return String(nombre ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
       .replace(/%/g, 'pct').toLowerCase().replace(/[^a-z0-9]/g, '');
   }
 
+  /* Filas del JSON como arreglos en el orden de COLUMNAS_LIDER_GRUPO, o un
+     texto de error. Con un handler anterior -sin `valores`- se cae a la
+     lectura por nombre sobre sla_lider_grupo, que es la de antes. */
+  function filasLiderGrupo(d) {
+    const valores = d && Array.isArray(d.valores) ? d.valores : null;
+    if (!valores) {
+      const filas = (d && Array.isArray(d.sla_lider_grupo)) ? d.sla_lider_grupo : [];
+      if (!filas.length) return { filas: [] };
+      const nombres = {};
+      Object.keys(filas[0]).forEach(k => { nombres[claveColumna(k)] = k; });
+      return { filas: filas.map(x => COLUMNAS_LIDER_GRUPO.map(col =>
+        nombres[col.clave] !== undefined ? x[nombres[col.clave]] : null)) };
+    }
+    if (!valores.length) return { filas: [] };
+
+    const columnas = Array.isArray(d.columnas) ? d.columnas : [];
+    const porNombre = {};
+    columnas.forEach((c, i) => {
+      const k = claveColumna(c && c.nombre);
+      // Un nombre repetido (o vacio) no sirve para ubicar la columna.
+      porNombre[k] = (k && !(k in porNombre)) ? i : -1;
+    });
+    let indices = COLUMNAS_LIDER_GRUPO.map(col =>
+      (porNombre[col.clave] ?? -1) >= 0 ? porNombre[col.clave] : -1);
+    if (indices.some(i => i < 0)) {
+      const ancho = columnas.length || valores[0].length;
+      if (ancho !== COLUMNAS_SP_LIDER_GRUPO) {
+        return { error: `El procedimiento devolvio ${ancho} columnas; la tabla espera ${COLUMNAS_SP_LIDER_GRUPO}.` };
+      }
+      indices = COLUMNAS_LIDER_GRUPO.map(col => col.pos);
+    }
+    return { filas: valores.map(v => indices.map(i => (Array.isArray(v) ? v[i] : null))) };
+  }
+
+  /* Numero tal como lo mando SQL. JavaScriptSerializer escribe int y decimal
+     como numeros; si el procedimiento los devolviera como texto ("80.00" o
+     "80.00%") se leen igual. Cualquier otra cosa es "sin dato". */
+  function numeroLiderGrupo(v) {
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    if (typeof v !== 'string') return null;
+    const t = v.trim().replace(/%$/, '').trim();
+    return /^-?\d+(\.\d+)?$/.test(t) ? Number(t) : null;
+  }
+
   function celdaLiderGrupo(col, v) {
-    const vacio = v === null || v === undefined || v === '';
-    if (col.tipo === 'txt') return `<td class="txt">${vacio ? '—' : escapeHtml(v)}</td>`;
-    if (vacio || !isFinite(Number(v))) return '<td class="num">—</td>';
-    if (col.tipo === 'int') return `<td class="num">${FMT(v)}</td>`;
-    const texto = `${Number(v).toFixed(2)}%`;
-    const badge = BADGE_SEM[col.sem(Number(v))];
+    if (col.tipo === 'txt') {
+      const vacio = v === null || v === undefined || v === '';
+      return `<td class="txt">${vacio ? '—' : escapeHtml(v)}</td>`;
+    }
+    const n = numeroLiderGrupo(v);
+    if (n === null) return '<td class="num">—</td>';
+    if (col.tipo === 'int') return `<td class="num">${FMT(n)}</td>`;
+    const texto = `${n.toFixed(2)}%`;
+    const badge = BADGE_SEM[col.sem(n)];
     return `<td class="num">${badge ? `<span class="badge ${badge}">${texto}</span>` : texto}</td>`;
   }
 
@@ -3122,7 +3184,12 @@ const TableroSla = (function () {
     const cap = document.getElementById('cap-sla-lider-grupo');
     const hint = document.getElementById('hint-sla-lider-grupo');
     if (!cont) return;
-    const filas = (d && Array.isArray(d.sla_lider_grupo)) ? d.sla_lider_grupo : [];
+    const { filas, error } = filasLiderGrupo(d);
+
+    if (error) {
+      estadoSlaLiderGrupo(escapeHtml(error));
+      return;
+    }
 
     const avisos = avisoFiltrosLiderGrupo(d);
     if (cap) {
@@ -3136,11 +3203,8 @@ const TableroSla = (function () {
       return;
     }
 
-    const nombres = {};
-    Object.keys(filas[0]).forEach(k => { nombres[claveColumna(k)] = k; });
-
-    const filasHtml = filas.map(x => `<tr>${COLUMNAS_LIDER_GRUPO.map(col =>
-      celdaLiderGrupo(col, nombres[col.clave] !== undefined ? x[nombres[col.clave]] : null)).join('')}</tr>`).join('');
+    const filasHtml = filas.map(v => `<tr>${COLUMNAS_LIDER_GRUPO.map((col, i) =>
+      celdaLiderGrupo(col, v[i])).join('')}</tr>`).join('');
 
     cont.innerHTML = `<table><thead><tr>${COLUMNAS_LIDER_GRUPO.map(col =>
       `<th${col.tipo === 'txt' ? '' : ' class="num"'}>${col.titulo}</th>`).join('')}</tr></thead>
@@ -3160,6 +3224,25 @@ const TableroSla = (function () {
   function errorSlaLiderGrupo(err) {
     estadoSlaLiderGrupo(`No se pudo cargar la tabla: ${escapeHtml((err && err.message) || err)}`);
     console.error(err);
+  }
+
+  /* Plegado de la tarjeta. Nace PLEGADA en cada carga de la pagina -el
+     marcado ya trae aria-expanded="false" y el cuerpo oculto- y el estado
+     vive solo en el DOM: sin localStorage, igual que la barra lateral
+     (plegarLateral). Solo el boton pliega; el titulo y el numero de filas se
+     quedan a la vista. Recargar datos no toca el estado: el usuario que la
+     abrio la sigue viendo abierta al mover un filtro. */
+  function plegarSlaLiderGrupo(abrir) {
+    const boton = document.getElementById('plegar-sla-lider-grupo');
+    const cuerpo = document.getElementById('cuerpo-sla-lider-grupo');
+    if (!boton || !cuerpo) return;
+    const texto = `${abrir ? 'Ocultar' : 'Mostrar'} tabla de cumplimiento de SLA por líder y grupo`;
+    cuerpo.hidden = !abrir;
+    const card = document.getElementById('card-sla-lider-grupo');
+    if (card) card.classList.toggle('plegada', !abrir);
+    boton.setAttribute('aria-expanded', String(abrir));
+    boton.setAttribute('aria-label', texto);
+    boton.title = texto;
   }
 
   function renderTodo(motivo) {
@@ -3533,6 +3616,14 @@ const TableroSla = (function () {
       document.getElementById(id).addEventListener('change', programarCarga);
     });
     renderSlotStepper();             // estado inicial: sin SLOT, rango manual
+
+    // Tabla de SLA por lider y grupo: plegada al abrir, el boton la alterna.
+    const botonLiderGrupo = document.getElementById('plegar-sla-lider-grupo');
+    if (botonLiderGrupo) {
+      botonLiderGrupo.addEventListener('click', () =>
+        plegarSlaLiderGrupo(botonLiderGrupo.getAttribute('aria-expanded') !== 'true'));
+    }
+    plegarSlaLiderGrupo(false);
 
     escribirRango(rangoPorDefecto());
 

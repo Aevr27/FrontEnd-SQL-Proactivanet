@@ -4,9 +4,10 @@
 //
 // Devuelve TAL CUAL el result set de dbo.usp_Dash_SlaLiderGrupo, sin
 // recalcular nada: Lider, Grupo, Total, Dentro SLA, Vencidos, % Cumplimiento,
-// % Vencidos, Reabiertos y % Reabiertos salen del procedimiento, con los
-// nombres de columna que el procedimiento les pone. El tablero no muestra
-// "% Vencidos", pero aqui viaja igual: el JSON no descarta nada.
+// % Vencidos, Reabiertos y % Reabiertos salen del procedimiento, en ese orden.
+// Viajan por nombre (sla_lider_grupo) y por posicion (valores + columnas):
+// ver Ejecutar(). El tablero no muestra "% Vencidos", pero aqui viaja igual:
+// el JSON no descarta nada.
 //
 // Va en un handler APARTE de kpis.ashx a proposito, como carga_combinada.ashx:
 // si el procedimiento falla -o no existe en un servidor viejo-, dashboard.js
@@ -62,14 +63,75 @@ public class SlaLiderGrupo : IHttpHandler
             if (firma.Contains("FechaFin")) parametros["FechaFin"] = ff;
             if (firma.Contains("Grupos") && grupos != null) parametros["Grupos"] = grupos;
 
-            var filas = DashboardDb.Ejecutar(Procedimiento, parametros);
+            var filas = new List<Dictionary<string, object>>();
+            var valores = new List<object[]>();
+            var columnas = new List<Dictionary<string, object>>();
+            Ejecutar(parametros, filas, valores, columnas);
 
             return new Dictionary<string, object>
             {
                 { "sla_lider_grupo", filas },
+                { "columnas", columnas },
+                { "valores", valores },
                 { "parametros", new List<string>(parametros.Keys) },
             };
         });
+    }
+
+    /* POR QUE HAY "valores" ADEMAS DE "sla_lider_grupo".
+
+       sla_lider_grupo es la fila por nombre de columna (SqlRowMapper.Fila),
+       igual que en el resto de los handlers. Pero un diccionario no aguanta
+       dos columnas con el mismo nombre: una columna calculada SIN alias
+       tiene nombre "" y cada una pisa a la anterior, asi que las cifras del
+       procedimiento se perdian y el tablero solo veia Lider y Grupo.
+
+       "valores" es la MISMA fila por posicion -el orden del SELECT del
+       procedimiento-, sin renombrar ni recalcular nada, y "columnas" dice
+       el nombre y el tipo SQL de cada posicion tal como los devuelve el
+       reader. Con eso dashboard.js puede leer por nombre cuando los nombres
+       sirven y por posicion cuando no. */
+    private static void Ejecutar(
+        Dictionary<string, object> parametros,
+        List<Dictionary<string, object>> filas,
+        List<object[]> valores,
+        List<Dictionary<string, object>> columnas)
+    {
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        using (var cmd = new SqlCommand(Procedimiento, cn))
+        {
+            cmd.CommandType = CommandType.StoredProcedure;
+            foreach (var kv in parametros)
+                cmd.Parameters.AddWithValue("@" + kv.Key, kv.Value ?? (object)DBNull.Value);
+
+            cn.Open();
+            using (var rd = cmd.ExecuteReader())
+            {
+                for (int i = 0; i < rd.FieldCount; i++)
+                {
+                    columnas.Add(new Dictionary<string, object>
+                    {
+                        { "nombre", rd.GetName(i) },
+                        { "tipo", rd.GetDataTypeName(i) },
+                    });
+                }
+
+                while (rd.Read())
+                {
+                    filas.Add(SqlRowMapper.Fila(rd));
+                    var fila = new object[rd.FieldCount];
+                    for (int i = 0; i < rd.FieldCount; i++)
+                    {
+                        // Misma conversion que SqlRowMapper.Fila.
+                        object v = rd.GetValue(i);
+                        if (v is DBNull) v = null;
+                        else if (v is DateTime) v = ((DateTime)v).ToString("yyyy-MM-ddTHH:mm:ss");
+                        fila[i] = v;
+                    }
+                    valores.Add(fila);
+                }
+            }
+        }
     }
 
     // Nombres de los parametros del procedimiento, sin la arroba y sin

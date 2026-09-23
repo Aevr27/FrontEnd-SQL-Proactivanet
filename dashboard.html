@@ -224,11 +224,25 @@
          dbo.usp_Dash_SlaLiderGrupo tal cual, via handlers/sla_lider_grupo.ashx.
          Se pide APARTE del resto de la pestaña: si falla, solo esta tarjeta
          muestra el error y los KPIs y graficas siguen igual. No responde al
-         cross-filter de las graficas. -->
-    <section class="card" id="card-sla-lider-grupo">
-      <h3>Cumplimiento de SLA por lider y grupo<span class="hint" id="hint-sla-lider-grupo"></span></h3>
-      <div class="cap" id="cap-sla-lider-grupo"></div>
-      <div class="scroll-x tabla-alta" id="tabla-sla-lider-grupo"></div>
+         cross-filter de las graficas.
+         Nace PLEGADA: solo el boton la abre y la cierra (dashboard.js,
+         plegarSlaLiderGrupo); titulo y numero de filas quedan a la vista. -->
+    <section class="card plegada" id="card-sla-lider-grupo">
+      <h3>
+        <button class="plegar-tabla" id="plegar-sla-lider-grupo" type="button"
+                aria-controls="cuerpo-sla-lider-grupo" aria-expanded="false"
+                aria-label="Mostrar tabla de cumplimiento de SLA por líder y grupo"
+                title="Mostrar tabla de cumplimiento de SLA por líder y grupo">
+          <svg class="plegar-tabla-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M9.5 6.5 15 12l-5.5 5.5"/>
+          </svg>
+        </button>
+        Cumplimiento de SLA por líder y grupo<span class="hint" id="hint-sla-lider-grupo"></span>
+      </h3>
+      <div id="cuerpo-sla-lider-grupo" hidden>
+        <div class="cap" id="cap-sla-lider-grupo"></div>
+        <div class="scroll-x tabla-alta" id="tabla-sla-lider-grupo"></div>
+      </div>
     </section>
 
     <section class="grid2">
