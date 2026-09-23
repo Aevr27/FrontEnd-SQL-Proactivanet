@@ -1107,8 +1107,9 @@ const TableroSla = (function () {
      muestra un valor por SLOT. No cambia el significado de nada: son las
      MISMAS series diarias, sumadas por bloque.
 
-     El eje sale con N + 1 posiciones: el SLOT 0 y los SLOT 1..N, de reciente
-     a antiguo, que es como el negocio numera los SLOTs.
+     El eje sale con N + 1 posiciones, de antiguo a reciente: SLOT N ... SLOT 1
+     y, a la derecha del todo, el SLOT 0. La numeracion es la del negocio; el
+     orden es el de una linea de tiempo.
 
      El SLOT 0 es AYER: el ancla del eje, el ultimo dia COMPLETO. Es una
      posicion REAL, no una banda vacia ni una marca dibujada: lleva los
@@ -1144,13 +1145,18 @@ const TableroSla = (function () {
     // devuelve slotDeFecha y el mismo que acota slotRango, asi que el numero
     // del eje, el rango del tooltip y el filtro de fechas hablan siempre del
     // mismo periodo.
+    //
+    // El eje se lee como una linea de tiempo: el SLOT mas viejo (N) a la
+    // izquierda y el ancla -ayer- a la derecha. Solo cambia el ORDEN de las
+    // posiciones; etiqueta, rango y valores viajan juntos por indice, asi que
+    // cada numero sigue pegado a su SLOT.
     const indices = [];
-    for (let s = 1; s <= n; s++) indices.push(s);       // reciente -> viejo
+    for (let s = n; s >= 1; s--) indices.push(s);       // viejo -> reciente
     return {
-      etiquetas: ['SLOT 0', ...indices.map(s => `SLOT ${s}`)],
-      rangos: [rangoAncla(), ...indices.map(s => slotRango(s))],
+      etiquetas: [...indices.map(s => `SLOT ${s}`), 'SLOT 0'],
+      rangos: [...indices.map(s => slotRango(s)), rangoAncla()],
       series: series.map((_, j) =>
-        [ancla[j], ...indices.map(s => (cubos.get(s) || [])[j] || 0)]),
+        [...indices.map(s => (cubos.get(s) || [])[j] || 0), ancla[j]]),
     };
   }
 
@@ -1701,8 +1707,8 @@ const TableroSla = (function () {
     /* Granularidad del eje. Es lo unico que decide este bloque: las series de
        arriba no se tocan, solo se suman por bloque.
 
-       En modo SLOT se agrupa por SLOT, un punto por bloque, con HOY delante
-       como origen. Ese origen es tambien lo que hace legible el caso de UN
+       En modo SLOT se agrupa por SLOT, un punto por bloque, con AYER (SLOT 0)
+       como ancla al final del eje. Esa ancla es tambien lo que hace legible el caso de UN
        SOLO SLOT: dos posiciones dibujan una linea, mientras que un bloque
        suelto era un punto en mitad del lienzo. Fuera del modo SLOT, un rango
        largo -"Año" son ~250 dias- se agrupa por mes de calendario, en vez de
@@ -1762,14 +1768,14 @@ const TableroSla = (function () {
     // en vez de cambiar la config, para no tener que reconstruir la grafica al
     // pasar de vista diaria larga a corta o a SLOTs.
     estiloTendVigente = estiloTendencia(etiquetas, !!rangosBucket);
-    // El eje de SLOTs arranca pegado al eje Y. estiloTendencia centra las
-    // bandas de cualquier eje agrupado -un bloque ocupa un tramo de tiempo y
-    // su sitio natural es el centro de su banda-, pero centrar reserva media
-    // banda libre en cada extremo, y con pocas posiciones esa media banda es
-    // una franja vacia enorme delante del SLOT 0: se leia como si la grafica
-    // empezara en un punto que no esta. Aqui el primer punto ES el ancla, y
-    // tiene que verse como el principio de la serie. El agrupado por mes se
-    // queda centrado, que es como estaba.
+    // El eje de SLOTs va de borde a borde. estiloTendencia centra las bandas
+    // de cualquier eje agrupado -un bloque ocupa un tramo de tiempo y su sitio
+    // natural es el centro de su banda-, pero centrar reserva media banda
+    // libre en cada extremo, y con pocas posiciones esa media banda es una
+    // franja vacia enorme junto al SLOT 0: se leia como si la serie acabara
+    // en un punto que no esta. Aqui el ultimo punto ES el ancla (ayer), y
+    // tiene que verse como el final de la serie. El agrupado por mes se queda
+    // centrado, que es como estaba.
     if (enModoSlot()) estiloTendVigente.centrado = false;
     const estilo = estiloTendVigente;
 
