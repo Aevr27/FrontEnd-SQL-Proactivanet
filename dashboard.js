@@ -3098,6 +3098,7 @@ const TableroSla = (function () {
     { clave: 'pctreabiertos',   pos: 8, titulo: '% Reabiertos', tipo: 'pct', sem: v => SEM_REABIERTOS(v) },
   ];
   const COLUMNAS_SP_LIDER_GRUPO = 9;
+  const ORDEN_LIDER_GRUPO = 'pctcumplimiento';   // orden inicial, descendente
   const BADGE_SEM = { sv: 'bv', sa: 'ba', sr: 'br' };
 
   function claveColumna(nombre) {
@@ -3203,11 +3204,28 @@ const TableroSla = (function () {
       return;
     }
 
-    const filasHtml = filas.map(v => `<tr>${COLUMNAS_LIDER_GRUPO.map((col, i) =>
+    /* Orden inicial: Cumplimiento de 100% a 0%. Solo reordena filas; los
+       valores son los del procedimiento. Sin cifra van al final, y los
+       empates conservan el orden en que llegaron (sort estable). La columna
+       nace marcada con ▼ y data-orden="desc", que es justo lo que
+       hacerOrdenable deja tras un clic: el siguiente clic pasa a ascendente. */
+    const iOrden = COLUMNAS_LIDER_GRUPO.findIndex(col => col.clave === ORDEN_LIDER_GRUPO);
+    const clave = v => numeroLiderGrupo(v[iOrden]);
+    const ordenadas = filas.slice().sort((a, b) => {
+      const x = clave(a), y = clave(b);
+      if (x === null || y === null) return (x === null) - (y === null);
+      return y - x;
+    });
+
+    const filasHtml = ordenadas.map(v => `<tr>${COLUMNAS_LIDER_GRUPO.map((col, i) =>
       celdaLiderGrupo(col, v[i])).join('')}</tr>`).join('');
 
-    cont.innerHTML = `<table><thead><tr>${COLUMNAS_LIDER_GRUPO.map(col =>
-      `<th${col.tipo === 'txt' ? '' : ' class="num"'}>${col.titulo}</th>`).join('')}</tr></thead>
+    cont.innerHTML = `<table><thead><tr>${COLUMNAS_LIDER_GRUPO.map((col, i) => {
+      const clase = col.tipo === 'txt' ? '' : ' class="num"';
+      return i === iOrden
+        ? `<th${clase} data-orden="desc">${col.titulo}<span class="ord">▼</span></th>`
+        : `<th${clase}>${col.titulo}</th>`;
+    }).join('')}</tr></thead>
       <tbody>${filasHtml}</tbody></table>`;
     hacerOrdenable(cont.querySelector('table'));
   }
