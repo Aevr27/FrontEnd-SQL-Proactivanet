@@ -1495,14 +1495,33 @@ const LibroTickets = (function () {
     });
   }
 
+  /* Tope de Excel por celda: 32.767 caracteres. SheetJS lo hace cumplir al
+     escribir -"Text length must not exceed 32767 characters"- y un solo valor
+     de mas tumbaba el libro entero (REQ 2026-396620: Descripcion de 38.036).
+     Se aplica SOLO a lo que va al libro; los datos del ticket no se tocan.
+     Lo que cabe sale igual. Lo que no, se corta siempre en el mismo punto y
+     termina con un aviso, para que nadie lo lea como el texto completo; aviso
+     incluido, la celda mide exactamente el tope. El corte no parte un par
+     sustituto UTF-16 (un emoji, por ejemplo). */
+  const LIMITE_CELDA = 32767;
+  function ajustarCelda(valor) {
+    if (typeof valor !== 'string' || valor.length <= LIMITE_CELDA) return valor;
+    const aviso = ' … [recortado: ' + valor.length + ' caracteres en origen]';
+    let corte = LIMITE_CELDA - aviso.length;
+    const c = valor.charCodeAt(corte - 1);
+    if (c >= 0xD800 && c <= 0xDBFF) corte--;
+    return valor.slice(0, corte) + aviso;
+  }
+
   /* Construye el .xlsx y devuelve sus bytes. `XLSX` entra por parametro -no
      se toca window- para que la prueba pueda pasarle el mismo vendor.
 
      opciones: { titulo, subtitulo, meta, etiquetaTotal, encabezados, filas,
                  anchos, largas, colEstado, hoja } */
   function construir(XLSX, opciones) {
+    const datos = opciones.filas.map(function (f) { return f.map(ajustarCelda); });
     const compuesto = componer(opciones.titulo, opciones.subtitulo,
-      opciones.meta, opciones.encabezados, opciones.filas);
+      opciones.meta, opciones.encabezados, datos);
     const aoa = compuesto.aoa;
 
     const hoja = XLSX.utils.aoa_to_sheet(aoa);
@@ -1536,7 +1555,7 @@ const LibroTickets = (function () {
       largas: opciones.largas || [],
       colEstado: opciones.colEstado === undefined ? -1 : opciones.colEstado,
       valorEstado: function (fila) {
-        const f = opciones.filas[fila - compuesto.filaEncabezado - 1];
+        const f = datos[fila - compuesto.filaEncabezado - 1];
         return f ? f[opciones.colEstado] : '';
       },
     };
@@ -1549,7 +1568,8 @@ const LibroTickets = (function () {
     return XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
   }
 
-  return { construir: construir, estiloEstado: estiloEstado, ESTILOS: E };
+  return { construir: construir, estiloEstado: estiloEstado, ajustarCelda: ajustarCelda,
+           LIMITE_CELDA: LIMITE_CELDA, ESTILOS: E };
 })();
 /* === LIBRO XLSX (fin) === */
 
