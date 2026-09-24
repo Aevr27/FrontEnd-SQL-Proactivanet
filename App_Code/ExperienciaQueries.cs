@@ -140,11 +140,10 @@ public static class ExperienciaQueries
     // ------------------------------------------------------------------
 
     // Arma el payload completo. 'anio' acota las vistas por mes (las de slot
-    // son ventanas relativas y no llevan año). 'topeDetalle' en 0 deja
-    // tickets_detalle vacio, que es como venia el mock: el detalle de tickets
-    // son decenas de miles de filas y el tablero solo lo necesita cuando el
-    // usuario exporta.
-    public static Dictionary<string, object> Construir(int anio, int topeDetalle)
+    // son ventanas relativas y no llevan año). El detalle de tickets NO va
+    // aqui: son decenas de miles de filas que el tablero solo necesita al
+    // exportar, y las pide aparte (ExportarTickets).
+    public static Dictionary<string, object> Construir(int anio)
     {
         var hoy = DateTime.Today;
 
@@ -201,9 +200,9 @@ public static class ExperienciaQueries
             foreach (var kv in calendario)
                 salida[kv.Key] = kv.Value;
 
-            salida["tickets_detalle"] = topeDetalle > 0
-                ? LeerTicketsDetalle(cn, dir, topeDetalle)
-                : new List<object>();
+            // El año con el que se armo el modo Mes: el export lo devuelve al
+            // pedir el mes, para que el libro sea el mismo mes que se ve.
+            salida["anio"] = anio;
 
             salida["categorias"] = categorias;
             salida["categorias_v2"] = categoriasV2;
@@ -817,90 +816,192 @@ public static class ExperienciaQueries
     }
 
     // ------------------------------------------------------------------
-    // 4) Detalle de tickets (opcional)
+    // 4) Export de tickets (handlers/experiencia_exportar.ashx)
     // ------------------------------------------------------------------
 
-    // Solo se llena cuando el handler recibe ?detalle=N. El tablero lo usa
-    // unicamente para el boton de exportar y ya sabe funcionar con la lista
-    // vacia (descargarTickets() cae al archivo fisico). Sin el tope, esto
-    // multiplicaria por diez el tamaño de la respuesta.
-    private static List<object> LeerTicketsDetalle(
-        SqlConnection cn, Directorio dir, int tope)
-    {
-        const string SQL =
-            "SELECT TOP (@tope) b.CodigoTicket, b.FechaRegistro, b.Grupo, b.Estado, " +
-            "       t.Titulo, t.Descripcion, b.CategoriaV2, t.SolucionUsuario, " +
-            "       b.TipoTicket, b.TipoRelacion, b.C1, b.C1C2, b.Slot, " +
-            "       Mes = CONVERT(INT, t.Calendar_Month), " +
-            // Del 14 en adelante: columnas de dbo.vw_Tickets que solo pide el
-            // XLSX. No tocan la vista base ni el filtro, solo la proyeccion.
-            "       t.FechaEstimadaResolucion, t.TecnicoSegundaLinea, t.Subestado, " +
-            "       t.Prioridad, t.Cliente, t.Sucursal, t.Categoria, " +
-            "       t.FechaFirmaSolucion, t.FechaUltimaModificacion, t.FechaFirmaCierre, " +
-            "       t.FirmaCierreRevocacion, t.FirmaSolucion, " +
-            "       t.ResponsableUltimaModificacion, t.NotificadoPor, t.Tipo, " +
-            "       t.RegistradoPor " +
-            "FROM dbo.vw_TicketsSlotsBase AS b " +
-            "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
-            "WHERE b.Slot = 0 " +
-            "ORDER BY b.FechaRegistro DESC";
+    // Los dos periodos que sabe exportar el boton "Descargar Tickets", uno
+    // por cada valor de "Ver por" del tablero. Son la lista blanca: el
+    // handler rechaza cualquier otro valor antes de llegar aqui, y aqui se
+    // vuelve a comprobar (ConsultaExport) para que ningun llamador pueda
+    // meter otra cosa en el FROM.
+    public const string MODO_SLOT = "slot";
+    public const string MODO_MES = "mes";
 
+    // Las vistas base pasan por tres UDF escalares por ticket; un mes
+    // completo tarda mas que los 30 s por omision de SqlCommand.
+    private const int TIMEOUT_EXPORT_SEGUNDOS = 180;
+
+    // POR QUE EL EXPORT TIENE SU PROPIA CONSULTA
+    // ------------------------------------------
+    // Antes el boton pedia el payload COMPLETO del tablero con ?detalle=50000
+    // -volvia a barrer las vistas de volumen y mandaba hasta 50.000 tickets- y
+    // filtraba en el navegador. Tenia tres defectos: el SELECT estaba fijo en
+    // Slot = 0, asi que en modo Mes solo salia la parte del mes que caia en
+    // los ultimos 30 dias; el TOP (@tope) cortaba sin avisar lo mas viejo; y
+    // cada descarga costaba una carga entera del tablero.
+    //
+    // Ahora el periodo lo resuelve SQL y los dueños el servidor, y solo viajan
+    // los tickets que van a ir al libro.
+    //
+    // QUE REPRODUCE DEL TABLERO
+    // -------------------------
+    // Periodo: las MISMAS vistas base de las que salen los KPIs por categoria.
+    //   slot  dbo.vw_TicketsSlotsBase, Slot = 0     (base de vw_TBSlotCAT)
+    //   mes   dbo.vw_TicketsMesBase, Anio y Mes     (base de vw_TBMesCAT)
+    // Ninguna filtra por Aplica, igual que LeerVolumen.
+    //
+    // Dueños: el MISMO Directorio que resuelve las filas de categoria (N2
+    // exacto; si no hay, el del C1; Manager = CatPersona.Manager del SO), con
+    // b.C1 / b.C1C2 de la vista, que salen de fn_CategoriaC1 /
+    // fn_CategoriaC1C2 igual que las llaves de categoria. Un ticket queda con
+    // los dueños de su fila C2 (o de su C1 si no tiene segundo nivel), y el
+    // filtro se compara como pasaFiltroGlobal: igualdad exacta, vacio = sin
+    // restriccion. Ver FiltroDuenos.
+    //
+    // No hay TOP: el export trae el periodo entero.
+    public static List<object> ExportarTickets(string modo, int anio, int mes,
+        string director, string po, string manager, string so)
+    {
+        var sql = ConsultaExport(modo);
+        var filtro = new FiltroDuenos(director, po, manager, so);
+
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            var dir = new Directorio(LeerDuenos(cn), LeerPersonas(cn));
+            return LeerTicketsExport(cn, sql, modo == MODO_MES, anio, mes, dir, filtro);
+        }
+    }
+
+    // Las 24 columnas del libro (COLUMNAS_TICKETS en experiencia.js) mas
+    // C1 / C1C2 para resolver dueños. Es la misma proyeccion de siempre: solo
+    // cambia de que vista base sale el periodo. Las dos vistas traen
+    // CodigoTicket, FechaRegistro, Grupo, Estado, TipoRelacion, C1 y C1C2.
+    private const string EXPORT_SELECT =
+        "SELECT b.CodigoTicket, b.FechaRegistro, b.Grupo, b.Estado, " +
+        "       t.Titulo, t.Descripcion, t.SolucionUsuario, b.TipoRelacion, " +
+        "       b.C1, b.C1C2, " +
+        "       t.FechaEstimadaResolucion, t.TecnicoSegundaLinea, t.Subestado, " +
+        "       t.Prioridad, t.Cliente, t.Sucursal, t.Categoria, " +
+        "       t.FechaFirmaSolucion, t.FechaUltimaModificacion, t.FechaFirmaCierre, " +
+        "       t.FirmaCierreRevocacion, t.FirmaSolucion, " +
+        "       t.ResponsableUltimaModificacion, t.NotificadoPor, t.Tipo, " +
+        "       t.RegistradoPor ";
+
+    // El texto completo sale de aqui y de nada mas: el modo solo elige entre
+    // dos cadenas fijas. Ano y mes van como parametros.
+    private static string ConsultaExport(string modo)
+    {
+        if (modo == MODO_SLOT)
+            return EXPORT_SELECT +
+                "FROM dbo.vw_TicketsSlotsBase AS b " +
+                "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
+                "WHERE b.Slot = 0 " +
+                "ORDER BY b.FechaRegistro DESC";
+
+        if (modo == MODO_MES)
+            return EXPORT_SELECT +
+                "FROM dbo.vw_TicketsMesBase AS b " +
+                "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
+                "WHERE b.Anio = @anio AND b.Mes = @mes " +
+                "ORDER BY b.FechaRegistro DESC";
+
+        throw new ArgumentException("Modo de export no reconocido.");
+    }
+
+    // Director / PO / Manager / SO del tablero. Mismo criterio que
+    // pasaFiltroGlobal en experiencia.js: un filtro vacio no restringe y uno
+    // puesto exige el valor exacto (tambien exige que el ticket TENGA dueño:
+    // uno sin PO no pasa un filtro de PO). Los valores del select salen de
+    // nombres ya pasados por Normaliza; se vuelve a normalizar aqui para que
+    // un espacio de sobra en la URL no deje el export vacio.
+    private sealed class FiltroDuenos
+    {
+        private readonly string _director, _po, _manager, _so;
+
+        public FiltroDuenos(string director, string po, string manager, string so)
+        {
+            _director = Normaliza(director);
+            _po = Normaliza(po);
+            _manager = Normaliza(manager);
+            _so = Normaliza(so);
+        }
+
+        public bool Pasa(string director, string po, string manager, string so)
+        {
+            return Igual(_director, director) && Igual(_po, po)
+                && Igual(_manager, manager) && Igual(_so, so);
+        }
+
+        private static bool Igual(string filtro, string valor)
+        {
+            return filtro == null || string.Equals(filtro, valor, StringComparison.Ordinal);
+        }
+    }
+
+    // Un ticket, por su C1 / C1C2: los dueños de su categoria contra el
+    // filtro. Aparte del ciclo para que tools/tests/ExportarTicketsExperienciaSmoke.cs
+    // pruebe exactamente esta decision.
+    private static bool PasaExport(Directorio dir, FiltroDuenos filtro, string c1, string c1c2)
+    {
+        string po, so, director, manager;
+        dir.Resolver(c1, c1c2, out po, out so, out director, out manager);
+        return filtro.Pasa(director, po, manager, so);
+    }
+
+    private static List<object> LeerTicketsExport(SqlConnection cn, string sql,
+        bool porMes, int anio, int mes, Directorio dir, FiltroDuenos filtro)
+    {
         var filas = new List<object>();
 
-        using (var cmd = new SqlCommand(SQL, cn))
+        using (var cmd = new SqlCommand(sql, cn))
         {
-            cmd.Parameters.AddWithValue("@tope", tope);
+            cmd.CommandType = CommandType.Text;
+            cmd.CommandTimeout = TIMEOUT_EXPORT_SEGUNDOS;
+            if (porMes)
+            {
+                cmd.Parameters.Add("@anio", SqlDbType.Int).Value = anio;
+                cmd.Parameters.Add("@mes", SqlDbType.Int).Value = mes;
+            }
+
             using (var rd = cmd.ExecuteReader())
             {
                 while (rd.Read())
                 {
+                    // Primero los dueños: el ticket que no pasa no se arma.
+                    if (!PasaExport(dir, filtro, Texto(rd.GetValue(8)), Texto(rd.GetValue(9))))
+                        continue;
+
+                    // Solo las llaves de COLUMNAS_TICKETS. Categoria y Tipo
+                    // van con sufijo _origen porque son los campos crudos de
+                    // dbo.vw_Tickets, no CategoriaV2 / TipoTicket. Las fechas
+                    // llevan hora: en firma y modificacion el dia solo no
+                    // dice nada.
                     var t = new Dictionary<string, object>();
                     t["codigo"] = Texto(rd.GetValue(0));
-                    t["fecha"] = Fecha(rd.GetValue(1));
+                    t["fecha_registro"] = FechaHora(rd.GetValue(1));
                     t["grupo"] = Texto(rd.GetValue(2));
                     t["estado"] = Texto(rd.GetValue(3));
                     t["titulo"] = Texto(rd.GetValue(4));
                     t["descripcion"] = Texto(rd.GetValue(5));
-                    t["categoria_raw"] = Texto(rd.GetValue(6));
-                    t["solucion"] = Texto(rd.GetValue(7));
-                    t["tipo"] = Texto(rd.GetValue(8));
-                    t["tipo_rel"] = Texto(rd.GetValue(9));
-                    t["slot"] = Entero(rd.GetValue(12));
-                    t["mes"] = Entero(rd.GetValue(13));
-
-                    // Campos crudos de dbo.vw_Tickets para el XLSX. Categoria y
-                    // Tipo van con sufijo _origen porque 'categoria_raw' y
-                    // 'tipo' ya existen y son otra cosa (CategoriaV2 y
-                    // TipoTicket de la vista de slots). Las fechas llevan hora:
-                    // en firma y modificacion el dia solo no dice nada.
-                    t["fecha_registro"] = FechaHora(rd.GetValue(1));
-                    t["fecha_estimada_resolucion"] = FechaHora(rd.GetValue(14));
-                    t["tecnico_segunda_linea"] = Texto(rd.GetValue(15));
-                    t["subestado"] = Texto(rd.GetValue(16));
-                    t["prioridad"] = Texto(rd.GetValue(17));
-                    t["cliente"] = Texto(rd.GetValue(18));
-                    t["sucursal"] = Texto(rd.GetValue(19));
-                    t["categoria_origen"] = Texto(rd.GetValue(20));
-                    t["fecha_firma_solucion"] = FechaHora(rd.GetValue(21));
-                    t["fecha_ultima_modificacion"] = FechaHora(rd.GetValue(22));
-                    t["fecha_firma_cierre"] = FechaHora(rd.GetValue(23));
-                    t["firma_cierre_revocacion"] = Texto(rd.GetValue(24));
-                    t["firma_solucion"] = Texto(rd.GetValue(25));
-                    t["responsable_ultima_modificacion"] = Texto(rd.GetValue(26));
-                    t["notificado_por"] = Texto(rd.GetValue(27));
-                    t["tipo_origen"] = Texto(rd.GetValue(28));
-                    t["registrado_por"] = Texto(rd.GetValue(29));
-
-                    // El tablero filtra el export por Director/PO, asi que
-                    // cada ticket carga los suyos, resueltos igual que su
-                    // categoria en las demas llaves del payload.
-                    string po, so, director, manager;
-                    dir.Resolver(Texto(rd.GetValue(10)), Texto(rd.GetValue(11)),
-                                 out po, out so, out director, out manager);
-                    t["po"] = po;
-                    t["so"] = so;
-                    t["director"] = director;
-                    t["manager"] = manager;
+                    t["solucion"] = Texto(rd.GetValue(6));
+                    t["tipo_rel"] = Texto(rd.GetValue(7));
+                    t["fecha_estimada_resolucion"] = FechaHora(rd.GetValue(10));
+                    t["tecnico_segunda_linea"] = Texto(rd.GetValue(11));
+                    t["subestado"] = Texto(rd.GetValue(12));
+                    t["prioridad"] = Texto(rd.GetValue(13));
+                    t["cliente"] = Texto(rd.GetValue(14));
+                    t["sucursal"] = Texto(rd.GetValue(15));
+                    t["categoria_origen"] = Texto(rd.GetValue(16));
+                    t["fecha_firma_solucion"] = FechaHora(rd.GetValue(17));
+                    t["fecha_ultima_modificacion"] = FechaHora(rd.GetValue(18));
+                    t["fecha_firma_cierre"] = FechaHora(rd.GetValue(19));
+                    t["firma_cierre_revocacion"] = Texto(rd.GetValue(20));
+                    t["firma_solucion"] = Texto(rd.GetValue(21));
+                    t["responsable_ultima_modificacion"] = Texto(rd.GetValue(22));
+                    t["notificado_por"] = Texto(rd.GetValue(23));
+                    t["tipo_origen"] = Texto(rd.GetValue(24));
+                    t["registrado_por"] = Texto(rd.GetValue(25));
                     filas.Add(t);
                 }
             }

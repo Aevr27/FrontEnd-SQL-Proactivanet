@@ -1607,11 +1607,9 @@ const TableroSla = (function () {
           f: k.TicketsCreados != null ? balanceTexto(k.TicketsCreados, resueltos, k.TicketsRechazados ?? 0) : 'por fecha de registro' },
         /* Primera respuesta: sale del texto 'Nh NNm' de Proactivanet, no del
            campo de horas enteras, que vale 0 en 7 de cada 10 tickets. Es otra
-           metrica que las horas de resolucion.
-
-           El servidor ya la manda en HORARIO HABIL -lunes a viernes, 08:00 a
-           18:30-, asi que ni la noche ni el fin de semana inflan la cifra. La
-           cifra grande es la MEDIANA y el pie el p90: ninguno es promedio.
+           metrica que las horas de resolucion, en tiempo corrido: el soporte
+           es 24/7. La cifra grande es la MEDIANA y el pie el p90: ninguno es
+           promedio.
 
            El pie dice '90% < Xh Ym' y no 'p90': fuera de TI nadie lee un
            percentil, pero todo el mundo entiende que 9 de cada 10 quedaron
@@ -1661,7 +1659,6 @@ const TableroSla = (function () {
       const promedio = horas.length ? Math.round(100 * horas.reduce((a, b) => a + Number(b), 0) / horas.length) / 100 : null;
       const med = mediana(horas);
       // Misma mediana interpolada, sobre los tickets filtrados con dato.
-      // MinutosPrimeraRespuesta ya llega en minutos HABILES desde el servidor.
       const respuestas = f.map(r => r.MinutosPrimeraRespuesta).filter(x => x !== null && x !== undefined);
       const medRespuesta = mediana(respuestas);
       const reabPct = n ? Math.round(1000 * reabiertos / n) / 10 : null;
