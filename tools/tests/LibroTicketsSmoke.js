@@ -63,7 +63,7 @@ var PEDIDOS = ['FechaRegistro', 'FechaEstimadaResolucion', 'CodigoTicket', 'Grup
   'FechaUltimaModificacion', 'FechaFirmaCierre', 'FirmaCierreRevocacion', 'FirmaSolucion',
   'ResponsableUltimaModificacion', 'NotificadoPor', 'Tipo', 'RegistradoPor', 'TipoRelacion'];
 
-// Las llaves que escribe LeerTicketsDetalle (App_Code/ExperienciaQueries.cs):
+// Las llaves que escribe LeerTicketsExport (App_Code/ExperienciaQueries.cs):
 // si una columna apunta a una llave que el servidor no manda, saldria vacia.
 var servidor = fs.readFileSync(path.join(raiz, 'App_Code', 'ExperienciaQueries.cs'), 'utf8');
 var llavesServidor = {};
@@ -114,7 +114,7 @@ Check('son 24 columnas', '24', String(COLS.length));
 Check('los encabezados son los 24 pedidos, en su orden', PEDIDOS.join('|'), ENCABEZADOS.join('|'));
 Check('ninguna llave repetida', String(COLS.length),
   String(Object.keys(COLS.reduce(function (o, c) { o[c[0]] = 1; return o; }, {})).length));
-Check('cada llave la manda LeerTicketsDetalle', '',
+Check('cada llave la manda LeerTicketsExport', '',
   COLS.filter(function (c) { return !llavesServidor[c[0]]; }).map(function (c) { return c[0]; }).join(','));
 Check('Categoria y Tipo son los campos crudos, no CategoriaV2/TipoTicket', 'true',
   FILAS[0].indexOf('NO-EXPORTAR') < 0);
