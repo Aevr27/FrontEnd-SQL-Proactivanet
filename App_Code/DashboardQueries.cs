@@ -36,8 +36,7 @@
 //   - el rango filtra por FechaFirmaSolucion (lo que se resolvio), salvo las
 //     series de "creados", que van por FechaRegistro;
 //   - el veredicto de SLA y las horas de resolucion se miden contra la firma
-//     de solucion, no contra la de cierre; las horas de resolucion, ademas,
-//     en el mismo HORARIO HABIL que la primera respuesta;
+//     de solucion, no contra la de cierre;
 //   - reabierto = IntentosSolucion > 1;
 //   - los 'Rechazada' no cuentan como resueltos (si como creados);
 //   - las cuentas de dbo.CatCuentaNoPersona salen de lo que habla de personas;
@@ -326,9 +325,6 @@ OUTER APPLY (
          630  = 1110 - 480, la jornada
          3150 = 630 * 5, la semana
 
-       Es el UNICO horario habil del tablero: lo usan la primera respuesta
-       (PrimeraRespuesta) y las horas de resolucion (SlaPorSolucion).
-
        $M$ es el momento; MinutosHabiles() lo sustituye. El texto se extrae
        tal cual desde tools/tests/HorasHabilesSmoke.ps1, asi que la prueba
        mide ESTA expresion y no una copia que pueda quedarse atras. */
@@ -364,14 +360,9 @@ OUTER APPLY (
          SlaVencido       resuelto despues del compromiso; sin resolver y el
                           compromiso ya paso
          DentroSla        resuelto a tiempo; sin resolver y aun en tiempo
-         HorasResolucion  de registro a firma de solucion, en HORAS HABILES
-                          -el mismo horario que la primera respuesta, ver
-                          MinutosHabilesDesdeAncla-; NULL si no hay firma
-         EsReabierto      IntentosSolucion > 1
-
-       El veredicto de SLA sigue comparando las fechas tal cual: el horario
-       habil solo cambia HorasResolucion. */
-    private static readonly string SlaPorSolucion = @"
+         HorasResolucion  de registro a firma de solucion; NULL si no hay
+         EsReabierto      IntentosSolucion > 1 */
+    private const string SlaPorSolucion = @"
 CROSS APPLY (
     SELECT
         SlaEvaluable = CONVERT(bit, CASE WHEN b.FechaEstimadaResolucion IS NOT NULL THEN 1 ELSE 0 END),
@@ -388,8 +379,7 @@ CROSS APPLY (
             WHEN SYSDATETIME() <= b.FechaEstimadaResolucion THEN 1
             ELSE 0 END),
         HorasResolucion = CASE WHEN b.FechaFirmaSolucion IS NOT NULL
-            THEN ((" + MinutosHabiles("b.FechaFirmaSolucion") + @")
-                - (" + MinutosHabiles("b.FechaRegistro") + @")) / 60.0 END,
+            THEN DATEDIFF(MINUTE, b.FechaRegistro, b.FechaFirmaSolucion) / 60.0 END,
         EsReabierto = CONVERT(bit, CASE WHEN b.IntentosSolucion > 1 THEN 1 ELSE 0 END)
 ) AS s";
 
@@ -680,8 +670,7 @@ FROM conPct;";
        mes o SLOT, y un porcentaje diario no se puede promediar. */
     public static List<Dictionary<string, object>> Tendencia(Filtros f)
     {
-        // Texto armado: SlaPorSolucion no es constante (lleva el horario habil).
-        string sql = @"
+        const string sql = @"
 ;WITH cre AS
 (
     SELECT Fecha = b.FechaRegistroDia, TicketsCreados = COUNT_BIG(*)
@@ -732,8 +721,7 @@ ORDER BY COALESCE(c.Fecha, r.Fecha);";
        Solo personas (EsPersona = 1): alimenta la grafica y el ranking. */
     public static List<Dictionary<string, object>> Productividad(Filtros f)
     {
-        // Texto armado: SlaPorSolucion no es constante (lleva el horario habil).
-        string sql = @"
+        const string sql = @"
 SELECT
     b.Tecnico,
     Grupo = MAX(b.Grupo),
@@ -787,11 +775,8 @@ ORDER BY TicketsTotales DESC, b.Tecnico;";
            Los nombres de las columnas agregadas (Filas, ConSla, FueraSla,
            EnSla, Reaperturas) no coinciden a proposito con ningun alias de
            salida: asi ORDER BY Vencidos o HAVING SUM(Filas) no pueden
-           resolverse contra la columna equivocada.
-
-           Texto armado: SlaPorSolucion no es constante (lleva el horario
-           habil). */
-        string sql = @"
+           resolverse contra la columna equivocada. */
+        const string sql = @"
 SET NOCOUNT ON;
 
 SELECT
