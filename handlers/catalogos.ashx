@@ -17,11 +17,10 @@
 // versiones para poder acotar los <select> al entrar al Call Center y
 // devolverlos completos al volver a SLA.
 //
-// dbo.usp_Dash_Catalogos devuelve dos result sets de UNA columna cada uno
-// (grupos primero, tecnicos despues), tal como lo describe el comentario de
-// DashboardDb.EjecutarMultiple. Se lee el unico valor de cada fila en vez de
-// buscarlo por nombre de columna, asi el handler no depende de como se llame
-// esa columna dentro del procedimiento.
+// Las listas las arma App_Code/DashboardCatalogos.cs: Sla() llama a
+// dbo.usp_Dash_Catalogos (dos result sets de UNA columna: grupos primero,
+// tecnicos despues) y CallCenter() lee el subconjunto del Call Center. Aqui
+// solo se juntan las cuatro llaves del contrato.
 //
 // A diferencia de kpis/tendencia/productividad/distribucion/detalle, aqui SI
 // se usa el stored procedure: esos cinco pasaron a consulta de texto porque
@@ -38,43 +37,23 @@ public class Catalogos : IHttpHandler
     {
         DashboardHandler.Responder(context, delegate
         {
-            var sets = DashboardDb.EjecutarMultiple("dbo.usp_Dash_Catalogos", null);
+            var sla = DashboardCatalogos.Sla();
 
             // El subconjunto del Call Center NO sale del procedimiento: se
-            // consulta aparte (DashboardQueries.CatalogosCallCenter) contra la
+            // consulta aparte (DashboardCatalogos.CallCenter) contra la
             // misma vista que el resto del tablero, que es donde vive la
             // relacion tecnico -> grupo. Asi el procedimiento se queda como
             // esta y las listas de SLA no cambian ni un valor.
-            var call = DashboardQueries.CatalogosCallCenter();
+            var call = DashboardCatalogos.CallCenter();
 
             return new Dictionary<string, object>
             {
-                { "grupos",       ValoresDe(sets, 0) },
-                { "tecnicos",     ValoresDe(sets, 1) },
+                { "grupos",       sla["grupos"] },
+                { "tecnicos",     sla["tecnicos"] },
                 { "gruposCall",   call["grupos"] },
                 { "tecnicosCall", call["tecnicos"] },
             };
         });
-    }
-
-    // Aplana un result set de una sola columna a ["valor", "valor", ...].
-    // Cada fila trae exactamente un valor, asi que el primero es el unico y
-    // no hace falta conocer el nombre de la columna.
-    private static List<object> ValoresDe(
-        List<List<Dictionary<string, object>>> resultados, int indice)
-    {
-        var salida = new List<object>();
-        if (resultados == null || indice < 0 || indice >= resultados.Count) return salida;
-
-        foreach (var fila in resultados[indice])
-        {
-            foreach (var valor in fila.Values)
-            {
-                if (valor != null) salida.Add(valor);
-                break;
-            }
-        }
-        return salida;
     }
 
     public bool IsReusable { get { return false; } }
