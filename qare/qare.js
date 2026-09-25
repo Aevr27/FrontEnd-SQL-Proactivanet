@@ -543,7 +543,9 @@
     pintarMatriz(d.confirmacionVsQa, errores.confirmacionVsQa);
 
     var fallidos = Object.keys(errores);
-    DatosInfo.pintar($('estado'), d.dataInfo, fallidos.length ? {
+    // d.dataInfo sigue llegando pero ya no se pinta: el nodo solo queda para
+    // "Cargando…", el error y el aviso de datasets que fallaron.
+    DatosInfo.pintar($('estado'), null, fallidos.length ? {
       sufijo: ' · ⚠ sin datos de: ' + fallidos.join(', '),
       titulo: fallidos.map(function (k) { return k + ': ' + errores[k]; }).join('\n'),
     } : undefined);
