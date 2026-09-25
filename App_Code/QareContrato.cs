@@ -99,20 +99,19 @@ public static class QareContrato
         Kpis, Frecuencia, CausaRaiz, RecurrentesCategoria, ConfirmacionVsQa, TipoSolucion,
     };
 
-    /* Escala de frecuencia en el orden de la guia (seccion 2):
-       Nunca -> Ocasional -> Frecuente -> Siempre.
+    /* Escala de frecuencia, de menos a mas:
+       Primera vez -> Ocasional -> Frecuente -> Siempre.
 
        UNICO sitio del mapeo guia <-> produccion: cada nivel lleva el rotulo
-       de la guia y los literales de produccion que caen en el.
+       que se pinta y los literales de produccion que caen en el.
 
-       "Primera vez" NO es un texto de la guia: es el literal real que
-       devuelve dbo.usp_CorreoQARE_Frecuencia (diag v2, 365 dias: Primera
-       vez, Ocasional, Frecuente, Siempre; "Nunca" no aparece). Por decision
-       del usuario (2026-09-25) ocupa el lugar de "Nunca" y se rotula "Nunca".
-       La fila NO se reescribe: conserva Frecuencia = "Primera vez" tal como
-       vino de SQL y el rotulo viaja aparte, en FrecuenciaGuia. Si resulta que
-       no son lo mismo, basta con quitar "Primera vez" de esta tabla: volvera
-       a pintarse con su propio nombre, al final. */
+       La guia visual (seccion 2) dice "Nunca" para el primer nivel, pero el
+       literal real de dbo.usp_CorreoQARE_Frecuencia es "Primera vez" (diag
+       v2, 365 dias: Primera vez, Ocasional, Frecuente, Siempre; "Nunca" no
+       aparece). El usuario confirmo el 2026-09-25 que son el mismo nivel y
+       pidio rotularlo con el texto de produccion, "Primera vez". La fila no
+       se reescribe: Frecuencia sigue siendo el valor de SQL y el rotulo viaja
+       aparte, en FrecuenciaGuia. */
     public sealed class NivelFrecuencia
     {
         public readonly string Rotulo;
@@ -127,7 +126,7 @@ public static class QareContrato
 
     public static readonly NivelFrecuencia[] NivelesFrecuencia = new NivelFrecuencia[]
     {
-        new NivelFrecuencia("Nunca", "Nunca", "Primera vez"),
+        new NivelFrecuencia("Primera vez", "Primera vez"),
         new NivelFrecuencia("Ocasional", "Ocasional"),
         new NivelFrecuencia("Frecuente", "Frecuente"),
         new NivelFrecuencia("Siempre", "Siempre"),

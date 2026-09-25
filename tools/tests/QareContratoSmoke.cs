@@ -95,24 +95,28 @@ public static class QareContratoSmoke
         Chk("Posicion ASC, estable, sin Posicion al final", "a,b1,b2,c,d,sin,x", Col(pos, "K"));
 
         var frec = QareContrato.OrdenarFrecuencia(new List<Dictionary<string, object>> {
-            F("Frecuencia", "Siempre"), F("Frecuencia", null), F("Frecuencia", "nunca "),
+            F("Frecuencia", "Siempre"), F("Frecuencia", null), F("Frecuencia", "primera vez "),
             F("Frecuencia", "Frecuente"), F("Frecuencia", "Otro"), F("Frecuencia", "Ocasional") });
-        // "nunca " casa con Nunca sin que se toque su texto.
+        // "primera vez " casa con Primera vez sin que se toque su texto.
         Chk("Frecuencia en orden natural; desconocidos detras en su orden",
-            "nunca ,Ocasional,Frecuente,Siempre,null,Otro", Col(frec, "Frecuencia"));
-        Chk("desconocidos sin rotulo de la guia", "Nunca,Ocasional,Frecuente,Siempre,null,null",
+            "primera vez ,Ocasional,Frecuente,Siempre,null,Otro", Col(frec, "Frecuencia"));
+        Chk("desconocidos sin rotulo de la guia", "Primera vez,Ocasional,Frecuente,Siempre,null,null",
             Col(frec, QareContrato.ColumnaRotuloFrecuencia));
 
         // Literales REALES de produccion, en el orden en que los manda el SP
-        // (CantidadTickets DESC, diag v2): Primera vez va primero, como Nunca.
+        // (CantidadTickets DESC, diag v2): Primera vez va primero.
         var real = QareContrato.OrdenarFrecuencia(new List<Dictionary<string, object>> {
             F("Frecuencia", "Primera vez", "CantidadTickets", 2133),
             F("Frecuencia", "Ocasional", "CantidadTickets", 1193),
             F("Frecuencia", "Siempre", "CantidadTickets", 785),
             F("Frecuencia", "Frecuente", "CantidadTickets", 735) });
         Chk("produccion: orden de la guia", "Primera vez,Ocasional,Frecuente,Siempre", Col(real, "Frecuencia"));
-        Chk("produccion: Primera vez conserva su valor y se rotula Nunca",
-            "Nunca,Ocasional,Frecuente,Siempre", Col(real, QareContrato.ColumnaRotuloFrecuencia));
+        Chk("produccion: rotulos = literales de produccion",
+            "Primera vez,Ocasional,Frecuente,Siempre", Col(real, QareContrato.ColumnaRotuloFrecuencia));
+        // "Nunca" (texto de la guia) ya no es un nivel: si apareciera, iria detras con su nombre.
+        var sinNunca = QareContrato.OrdenarFrecuencia(new List<Dictionary<string, object>> {
+            F("Frecuencia", "Siempre"), F("Frecuencia", "Nunca"), F("Frecuencia", "Primera vez") });
+        Chk("Nunca ya no es un nivel", "Primera vez,Siempre,Nunca", Col(sinNunca, "Frecuencia"));
         Chk("produccion: no se pierde ninguna fila", 4, real.Count);
         Chk("Frecuencia vacia", "", Col(QareContrato.OrdenarFrecuencia(new List<Dictionary<string, object>>()), "Frecuencia"));
 
@@ -169,7 +173,7 @@ GO
 CREATE PROCEDURE dbo.usp_CorreoQARE_Frecuencia @FechaInicio DATE, @FechaFin DATE AS
 BEGIN
   IF @FechaInicio < '2001-01-01' RAISERROR('falla forzada', 16, 1);
-  SELECT * FROM (VALUES (N'Siempre', 5, 4.2), (NULL, 1, 0.8), (N'Nunca', 50, 41.7), (N'Frecuente', 20, 16.7), (N'Ocasional', 44, 36.6))
+  SELECT * FROM (VALUES (N'Siempre', 5, 4.2), (NULL, 1, 0.8), (N'Primera vez', 50, 41.7), (N'Frecuente', 20, 16.7), (N'Ocasional', 44, 36.6))
     v(Frecuencia, CantidadTickets, Porcentaje) CROSS JOIN (SELECT EcoInicio = @FechaInicio, EcoFin = @FechaFin) e;
 END;
 GO
@@ -249,7 +253,7 @@ END;";
                 filas.Count == 0 ? "sin filas" : filas[0]["EcoInicio"] + "|" + filas[0]["EcoFin"]);
         }
 
-        Chk("frecuencia natural", "Nunca,Ocasional,Frecuente,Siempre,null", Col(Lista(d["frecuencia"]), "Frecuencia"));
+        Chk("frecuencia natural", "Primera vez,Ocasional,Frecuente,Siempre,null", Col(Lista(d["frecuencia"]), "Frecuencia"));
         Chk("pareto por Posicion", "Software,Config,Red", Col(Lista(d["causaRaiz"]), "CausaRaiz"));
         Chk("pareto acumulado", "58.3,83.3,100.0", Col(Lista(d["causaRaiz"]), "PorcentajeAcumulado"));
         var rec = Lista(d["recurrentesCategoria"]);
@@ -507,8 +511,8 @@ INSERT dbo.T (CodigoTicket, FechaFirmaSolucion, QA_Frecuencia, QARe_VerificoClas
         var frec = Lista(d["frecuencia"]);
         Chk("frecuencia real: orden de la guia (el SP la manda por cantidad)",
             "Primera vez,Ocasional,Frecuente,Siempre", Col(frec, "Frecuencia"));
-        Chk("frecuencia real: Primera vez se rotula Nunca, el valor queda intacto",
-            "Nunca,Ocasional,Frecuente,Siempre", Col(frec, QareContrato.ColumnaRotuloFrecuencia));
+        Chk("frecuencia real: rotulo Primera vez, el valor queda intacto",
+            "Primera vez,Ocasional,Frecuente,Siempre", Col(frec, QareContrato.ColumnaRotuloFrecuencia));
 
         // --- Matriz: literales exactos y EsInconsistencia solo en Si + Incorrecto.
         var conf = Lista(d["confirmacionVsQa"]);

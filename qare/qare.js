@@ -156,11 +156,21 @@
     return 'En la base: "' + etiqueta(f.Frecuencia) + '"';
   }
 
+  /* Filas de la tabla de recurrentes por categoria, ya formateadas y en el
+     orden del API (Posicion ASC). Categoria completa; tickets y % tal como
+     los manda el SP. */
+  function filasRecurrentes(filas) {
+    return (filas || []).map(function (f) {
+      return { categoria: etiqueta(f.Categoria), tickets: entero(f.CantidadTickets), pct: pct(f.PorcentajeRecurrentes) };
+    });
+  }
+
   var QareDatos = {
     numero: numero, entero: entero, pct: pct, etiqueta: etiqueta, normal: normal,
     claseValidacion: claseValidacion, matriz: matriz, partirEtiqueta: partirEtiqueta,
     rangoRapido: rangoRapido, diaMexico: diaMexico, pieKpi: pieKpi,
     etiquetaFrecuencia: etiquetaFrecuencia, notaFrecuencia: notaFrecuencia,
+    filasRecurrentes: filasRecurrentes,
   };
   raiz.QareDatos = QareDatos;
 
@@ -178,7 +188,6 @@
   function esc(v) { return Escape.html(v); }
 
   var DIAS_POR_OMISION = 15;
-  var TOP_RECURRENTES = 15;
   var ALTO_FILA = 40;          // mismo alto por barra horizontal que qa.js
 
   /* Colores. Las barras de una sola serie van del azul de barra ordinaria
@@ -223,8 +232,7 @@
   }
 
   function claveApi(clave) {
-    return { frecuencia: 'frecuencia', causa: 'causaRaiz', recurrentes: 'recurrentesCategoria',
-             tipo: 'tipoSolucion' }[clave] || clave;
+    return { frecuencia: 'frecuencia', causa: 'causaRaiz', tipo: 'tipoSolucion' }[clave] || clave;
   }
 
   // -------------------------------------------------------------- KPIs
@@ -301,14 +309,42 @@
      PorcentajeAcumulado (eje derecho, 0-100 %), y la referencia del 80 %
      como una linea punteada sobre ese mismo eje. El orden es Posicion ASC,
      que es el del calculo del acumulado. */
+  /* La cifra del acumulado encima de cada punto de la linea: en un Pareto
+     lo que se busca es "donde cruza el 80 %", y sin la cifra habia que ir
+     punto por punto con el mouse. Tinta de texto, no el color de la serie. */
+  var CIFRAS_ACUMULADO = {
+    id: 'qareCifrasAcumulado',
+    afterDatasetsDraw: function (chart) {
+      var meta = chart.getDatasetMeta(1);
+      if (!meta || meta.hidden) return;
+      var datos = chart.data.datasets[1].data;
+      var ctx = chart.ctx;
+      ctx.save();
+      ctx.font = Barras.fuente(11);
+      ctx.fillStyle = TINTA.etiqueta;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      meta.data.forEach(function (punto, i) {
+        if (datos[i] === null || datos[i] === undefined) return;
+        ctx.fillText(NUM1.format(datos[i]) + ' %', punto.x, punto.y - 8);
+      });
+      ctx.restore();
+    },
+  };
+
   function pintarCausa(filas, errores) {
+    $('hint-causa').textContent = 'Pareto · referencia 80 %';
     if (sinFilas('causa', filas, errores)) return;
     destruir('causa');
     var etiquetas = filas.map(function (f) { return etiqueta(f.CausaRaiz); });
+    $('hint-causa').textContent = filas.length + ' causas · Pareto · referencia 80 %';
     graficas.causa = new DashboardBarChart({
       canvas: $('chart-causa'),
-      etiquetas: etiquetas,
+      // El nombre completo, partido en lineas cortas: sin recorte ni giro.
+      etiquetas: etiquetas.map(function (t) { return partirEtiqueta(t, 14); }),
       formato: function (v) { return NUM.format(v); },
+      // A todo el ancho, la barra del default (44px) se veia delgada.
+      barra: { maxBarThickness: 64 },
       datasets: [
         { type: 'bar', label: 'Tickets', yAxisID: 'y', order: 3, backgroundColor: Paleta.AZUL_SERIE,
           data: filas.map(function (f) { return numero(f.CantidadTickets); }) },
@@ -321,15 +357,17 @@
           borderColor: Paleta.NEUTRO, borderWidth: 1.5, borderDash: [6, 4],
           pointRadius: 0, pointHoverRadius: 0, fill: false },
       ],
+      plugins: [CIFRAS_ACUMULADO],
       opciones: {
         maintainAspectRatio: false,
-        layout: { padding: { top: 18 } },
+        layout: { padding: { top: 26, right: 8, left: 8 } },
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: true, position: 'bottom', labels: { boxWidth: 12, color: TINTA.etiqueta } },
+          legend: { display: true, position: 'bottom', labels: { boxWidth: 12, color: TINTA.etiqueta, font: { size: 12 } } },
           tooltip: {
             filter: function (item) { return item.datasetIndex !== 2; },
             callbacks: {
+              title: function (items) { return items.length ? etiquetas[items[0].dataIndex] : ''; },
               label: function (item) {
                 var f = filas[item.dataIndex];
                 return item.datasetIndex === 0
@@ -340,14 +378,14 @@
           },
         },
         scales: {
-          x: { ticks: { color: TINTA.etiqueta, autoSkip: false, maxRotation: 40,
-                        callback: function (v) { var t = this.getLabelForValue(v);
-                          return t.length > 22 ? t.slice(0, 21) + '…' : t; } },
+          x: { ticks: { color: TINTA.etiqueta, autoSkip: false, maxRotation: 0, font: { size: 11.5 } },
                grid: { display: false } },
-          y: { beginAtZero: true, ticks: { precision: 0, color: TINTA.eje }, grid: { color: TINTA.rejilla },
-               title: { display: true, text: 'Tickets', color: TINTA.eje } },
+          y: { beginAtZero: true, grace: '8%', ticks: { precision: 0, color: TINTA.eje, font: { size: 12 } },
+               grid: { color: TINTA.rejilla },
+               title: { display: true, text: 'Tickets', color: TINTA.eje, font: { size: 12 } } },
           y2: { position: 'right', min: 0, max: 100, grid: { drawOnChartArea: false },
-                ticks: { color: TINTA.eje, stepSize: 20, callback: function (v) { return v + ' %'; } } },
+                ticks: { color: TINTA.eje, stepSize: 20, font: { size: 12 }, callback: function (v) { return v + ' %'; } },
+                title: { display: true, text: '% acumulado', color: TINTA.eje, font: { size: 12 } } },
         },
       },
     }).render();
@@ -355,27 +393,30 @@
 
   function altoFilas(n, minimo) { return Math.max(minimo, n * ALTO_FILA + 48) + 'px'; }
 
-  // Seccion 4: top 15 por Posicion, categoria completa en varias lineas.
+  /* Seccion 4: tabla completa en orden de Posicion (el que manda el API).
+     Categoria entera, sin recortar; el % es PorcentajeRecurrentes, la parte
+     de los tickets recurrentes del periodo, tal cual lo da el SP. */
   function pintarRecurrentes(filas, errores) {
+    var cont = $('tabla-recurrentes');
     var hint = $('hint-recurrentes');
     hint.textContent = '';
-    if (sinFilas('recurrentes', filas, errores)) {
-      $('lienzo-recurrentes').style.height = '';
+    if (filas === null || filas === undefined) {
+      cont.innerHTML = '<div class="vacio qare-vacio-error">' +
+        esc((errores && errores.recurrentesCategoria) || 'Sin datos: el bloque no llego.') + '</div>';
       return;
     }
-    var visibles = filas.slice(0, TOP_RECURRENTES);
-    hint.textContent = filas.length > visibles.length
-      ? 'top ' + visibles.length + ' de ' + filas.length + ' categorias'
-      : visibles.length + ' categorias';
-    $('lienzo-recurrentes').style.height = altoFilas(visibles.length, 260);
-    barras('recurrentes', 'chart-recurrentes',
-      visibles.map(function (f) { return partirEtiqueta(etiqueta(f.Categoria), 34); }),
-      visibles.map(function (f) { return numero(f.CantidadTickets); }),
-      true,
-      function (item) {
-        var f = visibles[item.dataIndex];
-        return entero(f.CantidadTickets) + ' tickets · ' + pct(f.PorcentajeRecurrentes) + ' recurrentes';
-      });
+    if (!filas.length) { cont.innerHTML = '<div class="vacio">Sin datos en el rango.</div>'; return; }
+
+    var total = numero(filas[0].TotalTicketsRecurrentes);
+    hint.textContent = filas.length + ' categorias' +
+      (total === null ? '' : ' · % sobre ' + NUM.format(total) + ' tickets recurrentes');
+    cont.innerHTML = '<table class="qare-tabla-rec"><thead><tr>' +
+      '<th scope="col">Categoria</th><th scope="col" class="num">Tickets</th><th scope="col" class="num">%</th>' +
+      '</tr></thead><tbody>' +
+      filasRecurrentes(filas).map(function (r) {
+        return '<tr><td class="txt">' + esc(r.categoria) + '</td><td class="num">' + esc(r.tickets) +
+          '</td><td class="num">' + esc(r.pct) + '</td></tr>';
+      }).join('') + '</tbody></table>';
   }
 
   // Seccion 6: todas las filas, por Posicion.
@@ -472,18 +513,20 @@
 
   function enEspera() {
     pintarKpis(null, '—');
-    ['frecuencia', 'causa', 'recurrentes', 'tipo'].forEach(function (k) { mensaje(k, 'Calculando…'); });
+    ['frecuencia', 'causa', 'tipo'].forEach(function (k) { mensaje(k, 'Calculando…'); });
     $('matriz').innerHTML = '<div class="vacio">Calculando…</div>';
+    $('tabla-recurrentes').innerHTML = '<div class="vacio">Calculando…</div>';
     DatosInfo.mensaje($('estado'), 'Cargando…');
   }
 
   function fallo(err) {
     pintarKpis(null, 'n/d');
-    ['frecuencia', 'causa', 'recurrentes', 'tipo'].forEach(function (k) {
+    ['frecuencia', 'causa', 'tipo'].forEach(function (k) {
       destruir(k);
       mensaje(k, 'Error al cargar datos.', true);
     });
     $('matriz').innerHTML = '<div class="vacio qare-vacio-error">Error al cargar datos.</div>';
+    $('tabla-recurrentes').innerHTML = '<div class="vacio qare-vacio-error">Error al cargar datos.</div>';
     DatosInfo.mensaje($('estado'), 'Error al cargar datos: ' + err.message, err.message);
     $('error-msg').textContent = err.message;
     $('error').hidden = false;

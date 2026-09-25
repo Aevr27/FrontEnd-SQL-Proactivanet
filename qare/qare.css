@@ -35,10 +35,22 @@ header.top #qare-estado:empty { display: none; }
 .qare-msg[hidden] { display: none; }
 .qare-msg-error { color: var(--rojo); }
 
-/* ---- Recurrentes: el lienzo crece con las filas y el marco hace scroll
-   vertical pasadas unas diez. ---- */
-.qare-scroll { position: relative; max-height: 448px; overflow-y: auto; }
+/* ---- Pareto: a todo el ancho y mas alto que un lienzo normal. ---- */
+.lienzo.qare-lienzo-pareto { height: 420px; }
+@media (max-width: 700px) { .lienzo.qare-lienzo-pareto { height: 340px; } }
+
+/* ---- Tipo de solucion: el lienzo crece con las filas (lo fija qare.js). */
 .qare-lienzo-filas { min-height: 260px; }
+
+/* ---- Tarjeta cuyo contenido se centra en el alto que le deja su vecina
+   de fila, en vez de encogerse (la matriz junto a Frecuencia). ---- */
+.card.qare-card-centro { display: flex; flex-direction: column; }
+.qare-centro { flex: 1; display: flex; flex-direction: column; justify-content: center; }
+
+/* ---- Tabla de recurrentes por categoria ---- */
+.qare-tabla-rec th { cursor: default; }
+.qare-tabla-rec td.txt { white-space: normal; overflow-wrap: anywhere; }
+.qare-tabla-rec td.num, .qare-tabla-rec th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 /* ---- Matriz Confirmacion vs QA ---- */
 .qare-matriz td, .qare-matriz th { padding: 9px 12px; }

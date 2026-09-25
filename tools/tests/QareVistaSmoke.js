@@ -119,13 +119,29 @@ Check('pie sin numerador', 'sin dato de tickets', Q.pieKpi(null, 4106));
 Check('pie con cero', '0 de 0', Q.pieKpi(0, 0));
 
 // --- Frecuencia: rotulo de la guia, valor de la base intacto ----------------
-var primera = { Frecuencia: 'Primera vez', FrecuenciaGuia: 'Nunca', CantidadTickets: 2133, Porcentaje: 44.02 };
-Check('Primera vez se rotula con el nivel de la guia', 'Nunca', Q.etiquetaFrecuencia(primera));
-Check('el valor de la base no se toca', 'Primera vez', primera.Frecuencia);
-Check('el tooltip dice el literal de la base', 'En la base: "Primera vez"', Q.notaFrecuencia(primera));
+// El primer nivel se rotula con el literal de produccion, "Primera vez".
+var primera = { Frecuencia: 'Primera vez', FrecuenciaGuia: 'Primera vez', CantidadTickets: 2133, Porcentaje: 44.02 };
+Check('Primera vez se rotula Primera vez', 'Primera vez', Q.etiquetaFrecuencia(primera));
+Check('Primera vez sin nota (rotulo = valor de la base)', null, Q.notaFrecuencia(primera));
+// Si alguna vez rotulo y literal difieren, el tooltip lo dice.
+Check('rotulo distinto del literal: el tooltip lo dice', 'En la base: "X"',
+  Q.notaFrecuencia({ Frecuencia: 'X', FrecuenciaGuia: 'Y' }));
 Check('Ocasional sin nota', null, Q.notaFrecuencia({ Frecuencia: 'Ocasional', FrecuenciaGuia: 'Ocasional' }));
 Check('valor fuera de la escala: su propio nombre', 'Otro', Q.etiquetaFrecuencia({ Frecuencia: 'Otro' }));
 Check('valor fuera de la escala: sin nota', null, Q.notaFrecuencia({ Frecuencia: 'Otro' }));
+
+// --- tabla de recurrentes por categoria -------------------------------------
+var tabla = Q.filasRecurrentes([
+  { Posicion: 1, Categoria: '/S-Biométrico/Falla en sistema de biométrico/Usuario no encontrado', CantidadTickets: 121, TotalTicketsRecurrentes: 1520, PorcentajeRecurrentes: 7.96 },
+  { Posicion: 2, Categoria: '/S-Biométrico/Falla en sistema de biométrico/Tarjeta invalida', CantidadTickets: 79, TotalTicketsRecurrentes: 1520, PorcentajeRecurrentes: 5.2 },
+  { Posicion: 3, Categoria: null, CantidadTickets: null, PorcentajeRecurrentes: null },
+]);
+Check('tabla: orden del API, categoria completa, tickets y %', {
+  categoria: '/S-Biométrico/Falla en sistema de biométrico/Usuario no encontrado', tickets: '121', pct: '8.0 %' }, tabla[0]);
+Check('tabla: segunda fila', '79 | 5.2 %', tabla[1].tickets + ' | ' + tabla[1].pct);
+Check('tabla: nulos no rompen', '(sin valor) | n/d | n/d', tabla[2].categoria + ' | ' + tabla[2].tickets + ' | ' + tabla[2].pct);
+Check('tabla: vacia', 0, Q.filasRecurrentes([]).length);
+Check('tabla: null', 0, Q.filasRecurrentes(null).length);
 
 // --- cableado de la pestaña -------------------------------------------------
 var html = leer('dashboard.html');
@@ -143,7 +159,7 @@ var codigo = leer('qare/qare.js');
 Check('pagina envuelta en #tab-qare', true, /<div id="tab-qare" class="maintab-content active">/.test(pagina));
 var ids = {};
 (codigo.match(/\$\('([a-z0-9-]+)'\)/g) || []).forEach(function (s) { ids[s.slice(3, -2)] = true; });
-['frecuencia', 'causa', 'recurrentes', 'tipo'].forEach(function (k) { ids['msg-' + k] = true; });
+['frecuencia', 'causa', 'tipo'].forEach(function (k) { ids['msg-' + k] = true; });
 var faltan = Object.keys(ids).filter(function (id) { return pagina.indexOf('id="qare-' + id + '"') < 0; });
 Check('cada id que pide qare.js existe en qare.html', [], faltan);
 Check('pide las dos fechas al handler', true, /fecha_inicio=[\s\S]*?&fecha_fin=/.test(codigo));
