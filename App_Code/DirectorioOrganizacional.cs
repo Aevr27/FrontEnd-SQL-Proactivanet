@@ -53,7 +53,7 @@ public sealed class DirectorioOrganizacional
 
     // Espacio duro (U+00A0). Va por codigo de caracter y no como literal
     // para que ningun editor lo confunda con un espacio normal.
-    private const char NBSP = ' ';
+    private const char NBSP = '\u00A0';
 
     private readonly Dictionary<string, Dueno> _porN2;
     private readonly Dictionary<string, Dueno> _porC1;
