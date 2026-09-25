@@ -13,6 +13,10 @@
 <!-- Escape de HTML compartido. Va ANTES de los modulos: todo lo que sale de
      SQL se pega con innerHTML y tiene que entrar como texto, no como marcado. -->
 <script src="assets/js/escape.js"></script>
+<!-- Las <option> de los filtros, compartidas. Va despues de escape.js (lo
+     usa) y antes de dashboard.js y de los modulos embebidos (Backlog,
+     Experiencia), que pierden sus <script> al montarse y usan esta copia. -->
+<script src="assets/js/catalogos.js"></script>
 <!-- Paleta categorica compartida. Va antes de dashboard.js y antes de los
      modulos embebidos (Experiencia, QA), que pierden sus <script> al montarse
      aqui y usan esta copia. -->

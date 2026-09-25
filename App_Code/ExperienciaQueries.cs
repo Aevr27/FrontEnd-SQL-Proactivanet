@@ -18,8 +18,8 @@
 //   Replegar y la nota "UNA SOLA PASADA POR LAS VISTAS DE VOLUMEN").
 //   Las cuatro vistas siguen existiendo en la base, sin usarse aqui.
 //   iniciativas          dbo.vw_ProblemCategoria + dbo.Problem
-//   duenos por categoria dbo.CatCategoriaDueno (Directorio; tambien para las iniciativas)
-//   manager de cada SO   dbo.CatPersona                    (13_experiencia_usuario.sql)
+//   duenos por categoria dbo.CatCategoriaDueno  \  DirectorioOrganizacional
+//   manager de cada SO   dbo.CatPersona          /  (App_Code, compartido)
 //
 // Las tres vistas por slot y las tres por mes son la MISMA agrupacion con
 // distinta primera columna, y las dos familias derivan C1/C1&C2/Categoria V2
@@ -130,11 +130,6 @@ public static class ExperienciaQueries
     // separarse. No cambia la semantica: 0-30d, 31-60d, etc. siguen igual.
     private const int DIAS_SLOT = DashboardDataInfo.DiasSlot;
 
-    // Espacio duro. Va por codigo de caracter y no como literal para que
-    // ningun editor lo confunda con un espacio normal (mismo criterio que
-    // tools/PruebaReplegarExperiencia.cs).
-    private const char NBSP = ' ';
-
     // ------------------------------------------------------------------
     // Punto de entrada
     // ------------------------------------------------------------------
@@ -168,8 +163,6 @@ public static class ExperienciaQueries
 
             // --- iniciativas y catalogos -----------------------------------
             var detalle   = LeerIniciativas(cn, hoy);
-            var personas  = LeerPersonas(cn);
-            var duenos    = LeerDuenos(cn);
             var corte     = LeerFechaCorte(cn);
 
             // --- ensamblado -------------------------------------------------
@@ -177,10 +170,12 @@ public static class ExperienciaQueries
             // herencia N2 -> C1 una vez y reusarla sale mas barato que
             // rearmar los diccionarios en cada bloque. Va antes que las
             // iniciativas sueltas porque esas ya necesitan resolver Manager.
-            var dir = new Directorio(duenos, personas);
+            // Es el directorio compartido del sitio (App_Code/
+            // DirectorioOrganizacional.cs): la regla de herencia no vive aqui.
+            var dir = DirectorioOrganizacional.Cargar(cn);
 
             // Los dueños de cada iniciativa son los de su categoria, resueltos
-            // por el MISMO Directorio que resuelve los de las filas de
+            // por el MISMO directorio que resuelve los de las filas de
             // categoria. Ver AlinearDuenos.
             AlinearDuenos(detalle, dir);
 
@@ -453,8 +448,8 @@ public static class ExperienciaQueries
         //
         // v.ProductOwner / v.ServiceOwner / v.DirectorPO ya NO se leen: los
         // dueños de la iniciativa son los de su categoria y los resuelve
-        // AlinearDuenos con el Directorio, que es con lo que el tablero
-        // filtra. Ver la nota "UNA SOLA RESOLUCION DE DUEÑOS" ahi.
+        // AlinearDuenos con DirectorioOrganizacional, que es con lo que el
+        // tablero filtra. Ver la nota "UNA SOLA RESOLUCION DE DUEÑOS" ahi.
         const string SQL =
             "SELECT v.Codigo, v.Categoria, v.C1, v.C1C2, v.Iniciativa, v.Titulo, " +
             "       v.Estado, v.TipoAgrupado, v.TicketsReduce, v.PctDisminucion, " +
@@ -486,7 +481,8 @@ public static class ExperienciaQueries
         // denominador del % de su rama.
         //
         // Se conserva la PRIMERA fila de cada (Codigo, Categoria), el mismo
-        // criterio con el que Directorio se queda con un solo dueño por C1.
+        // criterio con el que DirectorioOrganizacional se queda con un solo
+        // dueño por C1.
         // No es un recorte: esa pareja es unica en dbo.ProblemCategoria, asi
         // que las copias son identicas en todo lo que se lee aqui.
         //
@@ -581,7 +577,7 @@ public static class ExperienciaQueries
     // Problem.TipoIniciativa, que es de donde sale aquel. Si no cae en uno de
     // los cuatro agrupadores, experiencia.js la ignora.
     private static List<object> LeerIniciativasSinCategoria(
-        SqlConnection cn, DateTime hoy, Directorio dir)
+        SqlConnection cn, DateTime hoy, DirectorioOrganizacional dir)
     {
         const string SQL =
             "SELECT p.Codigo, p.Titulo, p.TipoIniciativa, p.Estado, " +
@@ -716,94 +712,12 @@ public static class ExperienciaQueries
     }
 
     // ------------------------------------------------------------------
-    // 3) Catalogos de personas
+    // 3) Fecha de corte
     // ------------------------------------------------------------------
 
-    private sealed class Dueno
-    {
-        public string CategoriaN2;
-        public string C1;
-        public string Po;
-        public string So;
-        public string Director;
-        public bool Vigente;      // VigenteEnOrigen = 1 (ver LeerDuenos)
-    }
-
-    // QUE FILAS SE LEEN
-    // -----------------
-    // TODAS, vigentes o no, porque es lo que hace dbo.vw_ProblemCategoria:
-    // su LEFT JOIN a CatCategoriaDueno no filtra VigenteEnOrigen. Cuando una
-    // categoria se desactiva, el ETL marca sus filas de dueño como no
-    // vigentes, pero la vista le sigue dando esos dueños a sus iniciativas.
-    // Con el filtro, el tablero dejaba la categoria sin dueño: la iniciativa
-    // pintaba "PO X" y desaparecia al filtrar por X (PRB 2026-000172 en
-    // /S-Precios y Promociones, las seis filas en VigenteEnOrigen = 0).
-    //
-    // Las vigentes van primero dentro de su C1: si hay de las dos, hereda y
-    // cruza la vigente. Las no vigentes resuelven dueños, pero NO alimentan
-    // los selects de Director / PO / Manager (ver ArmarCatalogos).
-    //
-    // El ORDER BY no es cosmetico. Directorio se queda con la PRIMERA fila de
-    // cada C1 para heredar dueños a un N2 sin fila propia -el caso de toda
-    // categoria nueva-, y si ese C1 tiene hermanos con dueños distintos, sin
-    // orden la herencia dependia del plan de ejecucion.
-    //
-    // Nombres y llaves se normalizan en Directorio, no aqui.
-    private static List<Dueno> LeerDuenos(SqlConnection cn)
-    {
-        const string SQL =
-            "SELECT CategoriaN2, C1, ProductOwner, ServiceOwner, DirectorPO, " +
-            "       Vigente = CASE WHEN VigenteEnOrigen = 1 THEN 1 ELSE 0 END " +
-            "FROM dbo.CatCategoriaDueno " +
-            "ORDER BY C1, CASE WHEN VigenteEnOrigen = 1 THEN 0 ELSE 1 END, CategoriaN2";
-
-        var filas = new List<Dueno>();
-
-        using (var cmd = new SqlCommand(SQL, cn))
-        using (var rd = cmd.ExecuteReader())
-        {
-            while (rd.Read())
-            {
-                var d = new Dueno();
-                d.CategoriaN2 = Texto(rd.GetValue(0));
-                d.C1 = Texto(rd.GetValue(1));
-                d.Po = Texto(rd.GetValue(2));
-                d.So = Texto(rd.GetValue(3));
-                d.Director = Texto(rd.GetValue(4));
-                d.Vigente = Entero(rd.GetValue(5)) == 1;
-                filas.Add(d);
-            }
-        }
-
-        return filas;
-    }
-
-    // Nombre -> su manager. El tablero deriva el Manager del Service Owner
-    // (jerarquia independiente de la de Director/PO); en el modelo eso es la
-    // hoja Equipo, o sea dbo.CatPersona.
-    private static Dictionary<string, string> LeerPersonas(SqlConnection cn)
-    {
-        const string SQL =
-            "SELECT Nombre, Manager FROM dbo.CatPersona WHERE VigenteEnOrigen = 1";
-
-        var mapa = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        using (var cmd = new SqlCommand(SQL, cn))
-        using (var rd = cmd.ExecuteReader())
-        {
-            while (rd.Read())
-            {
-                // Mismo recorte que Directorio aplica a los nombres de
-                // CatCategoriaDueno: el Service Owner de la categoria tiene
-                // que encontrar su fila aqui.
-                var nombre = Normaliza(Texto(rd.GetValue(0)));
-                if (nombre == null) continue;
-                mapa[nombre] = Normaliza(Texto(rd.GetValue(1)));
-            }
-        }
-
-        return mapa;
-    }
+    // Los dueños (dbo.CatCategoriaDueno) y el Manager de cada Service Owner
+    // (dbo.CatPersona) ya no se leen aqui: los lee y los resuelve
+    // DirectorioOrganizacional, que es compartido por todo el tablero.
 
     private static DateTime? LeerFechaCorte(SqlConnection cn)
     {
@@ -850,7 +764,8 @@ public static class ExperienciaQueries
     //   mes   dbo.vw_TicketsMesBase, Anio y Mes     (base de vw_TBMesCAT)
     // Ninguna filtra por Aplica, igual que LeerVolumen.
     //
-    // Dueños: el MISMO Directorio que resuelve las filas de categoria (N2
+    // Dueños: el MISMO DirectorioOrganizacional que resuelve las filas de
+    // categoria (N2
     // exacto; si no hay, el del C1; Manager = CatPersona.Manager del SO), con
     // b.C1 / b.C1C2 de la vista, que salen de fn_CategoriaC1 /
     // fn_CategoriaC1C2 igual que las llaves de categoria. Un ticket queda con
@@ -868,7 +783,7 @@ public static class ExperienciaQueries
         using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
         {
             cn.Open();
-            var dir = new Directorio(LeerDuenos(cn), LeerPersonas(cn));
+            var dir = DirectorioOrganizacional.Cargar(cn);
             return LeerTicketsExport(cn, sql, modo == MODO_MES, anio, mes, dir, filtro);
         }
     }
@@ -942,7 +857,7 @@ public static class ExperienciaQueries
     // Un ticket, por su C1 / C1C2: los dueños de su categoria contra el
     // filtro. Aparte del ciclo para que tools/tests/ExportarTicketsExperienciaSmoke.cs
     // pruebe exactamente esta decision.
-    private static bool PasaExport(Directorio dir, FiltroDuenos filtro, string c1, string c1c2)
+    private static bool PasaExport(DirectorioOrganizacional dir, FiltroDuenos filtro, string c1, string c1c2)
     {
         string po, so, director, manager;
         dir.Resolver(c1, c1c2, out po, out so, out director, out manager);
@@ -950,7 +865,7 @@ public static class ExperienciaQueries
     }
 
     private static List<object> LeerTicketsExport(SqlConnection cn, string sql,
-        bool porMes, int anio, int mes, Directorio dir, FiltroDuenos filtro)
+        bool porMes, int anio, int mes, DirectorioOrganizacional dir, FiltroDuenos filtro)
     {
         var filas = new List<object>();
 
@@ -1014,79 +929,10 @@ public static class ExperienciaQueries
     // 5) Ensamblado: categorias
     // ------------------------------------------------------------------
 
-    // Los duenos de una categoria: primero por su C1&C2 exacto y, si no esta
-    // capturado, heredados de su C1. Es la misma regla del COALESCE de
-    // dbo.vw_ProblemCategoria, aplicada aqui a las categorias que salen de
-    // las vistas de volumen (que no pasan por esa vista).
-    private sealed class Directorio
-    {
-        private readonly Dictionary<string, Dueno> _porN2;
-        private readonly Dictionary<string, Dueno> _porC1;
-        private readonly Dictionary<string, string> _managerDe;
-
-        public Directorio(List<Dueno> duenos, Dictionary<string, string> personas)
-        {
-            _porN2 = new Dictionary<string, Dueno>(StringComparer.OrdinalIgnoreCase);
-            _porC1 = new Dictionary<string, Dueno>(StringComparer.OrdinalIgnoreCase);
-            _managerDe = personas;
-
-            // Llaves y nombres se normalizan como las rutas (Normaliza). Las
-            // rutas de categoria ya llegan asi (vistas de volumen y
-            // LeerIniciativas); el catalogo de dueños, no necesariamente:
-            // un espacio de sobra o un NBSP en CategoriaN2 -que el "=" de
-            // SQL si perdona- dejaba al N2 sin cruzar con su categoria, y
-            // en un nombre daba dos Directores/PO "distintos" en los
-            // selects, o un Service Owner sin su fila en CatPersona.
-            foreach (var d in duenos)
-            {
-                d.CategoriaN2 = Normaliza(d.CategoriaN2);
-                d.C1 = Normaliza(d.C1);
-                d.Po = Normaliza(d.Po);
-                d.So = Normaliza(d.So);
-                d.Director = Normaliza(d.Director);
-
-                if (d.CategoriaN2 != null && !_porN2.ContainsKey(d.CategoriaN2))
-                    _porN2[d.CategoriaN2] = d;
-                if (d.C1 != null && !_porC1.ContainsKey(d.C1))
-                    _porC1[d.C1] = d;
-            }
-        }
-
-        // c1c2 puede venir null (una categoria C1 no tiene N2 propio).
-        public void Resolver(string c1, string c1c2,
-                             out string po, out string so, out string director, out string manager)
-        {
-            Dueno n2 = null, raiz = null;
-            c1c2 = Normaliza(c1c2);
-            c1 = Normaliza(c1);
-            if (c1c2 != null) _porN2.TryGetValue(c1c2, out n2);
-            if (c1 != null) _porC1.TryGetValue(c1, out raiz);
-
-            po = Primero(n2 == null ? null : n2.Po, raiz == null ? null : raiz.Po);
-            so = Primero(n2 == null ? null : n2.So, raiz == null ? null : raiz.So);
-            director = Primero(n2 == null ? null : n2.Director, raiz == null ? null : raiz.Director);
-            manager = ManagerDe(so);
-        }
-
-        public string ManagerDe(string persona)
-        {
-            string m;
-            persona = Normaliza(persona);
-            if (persona != null && _managerDe.TryGetValue(persona, out m))
-                return m;
-            return null;
-        }
-
-        public IEnumerable<Dueno> Duenos()
-        {
-            return _porN2.Values;
-        }
-
-        private static string Primero(string a, string b)
-        {
-            return string.IsNullOrEmpty(a) ? b : a;
-        }
-    }
+    // Los dueños de una categoria -N2 exacto y, si no, heredados del C1- los
+    // resuelve DirectorioOrganizacional.Resolver: es la misma regla del
+    // COALESCE de dbo.vw_ProblemCategoria, aplicada aqui a las categorias que
+    // salen de las vistas de volumen (que no pasan por esa vista).
 
     // UNA SOLA RESOLUCION DE DUEÑOS
     // -----------------------------
@@ -1097,7 +943,7 @@ public static class ExperienciaQueries
     // dueños que pinta la iniciativa tienen que ser, por tanto, los mismos
     // con los que se filtra su categoria.
     //
-    // No lo eran. La categoria se resolvia aqui, con Directorio; la
+    // No lo eran. La categoria se resolvia aqui, con el directorio; la
     // iniciativa traia los de dbo.vw_ProblemCategoria. Las dos aplican la
     // misma regla (N2 exacto, si no se hereda del C1), pero la vista hereda
     // con un LEFT JOIN por C1 que abanica a TODOS los N2 hermanos, y
@@ -1111,13 +957,14 @@ public static class ExperienciaQueries
     //
     // Ahora hay una sola resolucion para todo el payload -categorias,
     // categorias_v2, iniciativas, detalle de tickets y los catalogos de los
-    // selects-: la del Directorio, con la llave C1 / C1&C2 de la propia
+    // selects-: la de DirectorioOrganizacional, con la llave C1 / C1&C2 de la
+    // propia
     // iniciativa (la misma que la pone en su fila de categoria).
     //
     // Las iniciativas sin categoria (LeerIniciativasSinCategoria) no pasan
     // por aqui: no tienen categoria de la que heredar y conservan los
     // dueños del propio Problem.
-    private static void AlinearDuenos(List<Detalle> detalle, Directorio dir)
+    private static void AlinearDuenos(List<Detalle> detalle, DirectorioOrganizacional dir)
     {
         foreach (var d in detalle)
         {
@@ -1144,7 +991,7 @@ public static class ExperienciaQueries
     private static List<object> ArmarCategorias(
         List<Volumen> slotC1, List<Volumen> slotC2,
         List<Volumen> mesC1, List<Volumen> mesC2,
-        List<Detalle> detalle, Directorio dir, int mesActual)
+        List<Detalle> detalle, DirectorioOrganizacional dir, int mesActual)
     {
         var filas = new Dictionary<string, Fila>(StringComparer.Ordinal);
 
@@ -1320,7 +1167,7 @@ public static class ExperienciaQueries
     // DENTRO de esa rama (tickets_reduce). vol_reduce_folio, en cambio, es lo
     // que reduce en total, aunque parte caiga en otra rama.
     private static List<object> Iniciativas(
-        List<Detalle> rama, Dictionary<string, int> reducePorFolio, Directorio dir)
+        List<Detalle> rama, Dictionary<string, int> reducePorFolio, DirectorioOrganizacional dir)
     {
         var porFolio = new Dictionary<string, Detalle>(StringComparer.OrdinalIgnoreCase);
         var reduceRama = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -1359,7 +1206,7 @@ public static class ExperienciaQueries
     //                     la columna por la que ordenan las tres tablas de
     //                     iniciativas
     private static Dictionary<string, object> Iniciativa(
-        Detalle d, int ticketsReduce, int volReduceFolio, Directorio dir)
+        Detalle d, int ticketsReduce, int volReduceFolio, DirectorioOrganizacional dir)
     {
         var i = new Dictionary<string, object>();
         i["folio"] = d.Folio;
@@ -1400,7 +1247,7 @@ public static class ExperienciaQueries
     // Iniciativa" a nivel de hoja.
     private static List<object> ArmarCategoriasV2(
         List<Volumen> slotCat, List<Volumen> mesCat,
-        List<Detalle> detalle, Directorio dir)
+        List<Detalle> detalle, DirectorioOrganizacional dir)
     {
         var filas = new Dictionary<string, Fila>(StringComparer.Ordinal);
 
@@ -1525,51 +1372,11 @@ public static class ExperienciaQueries
     // 7) Catalogos y calendario
     // ------------------------------------------------------------------
 
-    private static Dictionary<string, object> ArmarCatalogos(Directorio dir)
+    private static Dictionary<string, object> ArmarCatalogos(DirectorioOrganizacional dir)
     {
-        // jerarquia: Director -> sus Product Owners (la que llena los dos
-        // selects encadenados de arriba del tablero).
-        var jerarquia = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
-        // Solo filas vigentes: una categoria dada de baja resuelve sus dueños
-        // (LeerDuenos), pero no mete en los selects a un Director o PO que ya
-        // solo existe en ella.
-        foreach (var d in dir.Duenos())
-        {
-            if (!d.Vigente) continue;
-            if (string.IsNullOrEmpty(d.Director) || string.IsNullOrEmpty(d.Po)) continue;
-            SortedSet<string> pos;
-            if (!jerarquia.TryGetValue(d.Director, out pos))
-            {
-                pos = new SortedSet<string>(StringComparer.Ordinal);
-                jerarquia[d.Director] = pos;
-            }
-            pos.Add(d.Po);
-        }
-
-        // jerarquia_mgr: Manager -> sus Service Owners. Es una jerarquia
-        // aparte (sale de CatPersona, no del catalogo de categorias) y el
-        // tablero la combina con la otra por AND.
-        var jerarquiaMgr = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
-        foreach (var d in dir.Duenos())
-        {
-            if (!d.Vigente) continue;
-            if (string.IsNullOrEmpty(d.So)) continue;
-            var manager = dir.ManagerDe(d.So);
-            if (string.IsNullOrEmpty(manager)) continue;
-            SortedSet<string> sos;
-            if (!jerarquiaMgr.TryGetValue(manager, out sos))
-            {
-                sos = new SortedSet<string>(StringComparer.Ordinal);
-                jerarquiaMgr[manager] = sos;
-            }
-            sos.Add(d.So);
-        }
-
-        var salida = new Dictionary<string, object>();
-        salida["directores"] = Ordenadas(jerarquia.Keys);
-        salida["managers"] = Ordenadas(jerarquiaMgr.Keys);
-        salida["jerarquia"] = Aplanar(jerarquia);
-        salida["jerarquia_mgr"] = Aplanar(jerarquiaMgr);
+        // directores, managers, jerarquia y jerarquia_mgr: los selects de
+        // personas, armados por el directorio compartido.
+        var salida = dir.Catalogos();
 
         var agrupadores = new List<object>();
         var acolor = new Dictionary<string, object>();
@@ -1816,29 +1623,6 @@ public static class ExperienciaQueries
         return salida;
     }
 
-    private static Dictionary<string, object> Aplanar(Dictionary<string, SortedSet<string>> origen)
-    {
-        var salida = new Dictionary<string, object>();
-        foreach (var kv in origen)
-        {
-            var lista = new List<object>();
-            foreach (var v in kv.Value) lista.Add(v);
-            salida[kv.Key] = lista;
-        }
-        return salida;
-    }
-
-    private static List<object> Ordenadas(IEnumerable<string> valores)
-    {
-        var orden = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (var v in valores)
-            if (!string.IsNullOrEmpty(v)) orden.Add(v);
-
-        var salida = new List<object>();
-        foreach (var v in orden) salida.Add(v);
-        return salida;
-    }
-
     private static int Ultimo(SortedSet<int> valores)
     {
         var ultimo = 0;
@@ -1868,27 +1652,12 @@ public static class ExperienciaQueries
         return sb.ToString();
     }
 
-    // Replica de dbo.fn_NormalizaCategoria:
-    //
-    //     LTRIM(RTRIM(REPLACE(ISNULL(@c, ''), NCHAR(160), ' ')))
-    //
-    // o sea: el espacio duro pasa a espacio normal y se recortan los
-    // espacios de los extremos (LTRIM/RTRIM de T-SQL recortan ESPACIOS, no
-    // cualquier blanco, de ahi el Trim(' ') y no el Trim() pelado).
-    //
-    // Es la definicion de identidad de una categoria en todo el tablero: la
-    // columna [Categoria V2] de las vistas de volumen es exactamente esto
-    // aplicado a Tickets.Categoria, y fn_CategoriaC1 / fn_CategoriaC1C2
-    // empiezan por llamarla. Es idempotente: una ruta ya normalizada -que es
-    // el caso de casi todas- sale igual que entro.
-    //
-    // Se devuelve null en vez de cadena vacia para que el resultado encaje
-    // con Texto(), que es de donde vienen estas rutas.
+    // Replica de dbo.fn_NormalizaCategoria: la definicion de identidad de una
+    // categoria en todo el tablero (ver DirectorioOrganizacional.Normaliza,
+    // que es la unica implementacion). Aqui se usa para las rutas.
     private static string Normaliza(string ruta)
     {
-        if (ruta == null) return null;
-        var limpia = ruta.Replace(NBSP, ' ').Trim(' ');
-        return limpia.Length == 0 ? null : limpia;
+        return DirectorioOrganizacional.Normaliza(ruta);
     }
 
     private static string Texto(object v)

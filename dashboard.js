@@ -1445,9 +1445,6 @@ const TableroSla = (function () {
   let enCallCenter = false;
   let seleccionSla = null;   // lo elegido en SLA mientras la barra esta prestada
 
-  const opcionesHtml = v => v.map(
-    x => `<option value="${escapeAttr(x)}">${escapeHtml(x)}</option>`).join('');
-
   /* Reescribe las <option> de un <select> y le devuelve la seleccion que se
      le pida, quedandose solo con los valores que sigan existiendo. Responde
      si la seleccion EFECTIVA cambio, que es lo unico que obliga a recargar. */
@@ -1455,7 +1452,7 @@ const TableroSla = (function () {
     const sel = document.getElementById(id);
     if (!sel) return false;
     const antes = JSON.stringify(seleccionados(id));
-    sel.innerHTML = opcionesHtml(valores ?? []);
+    Catalogos.llenar(sel, valores ?? []);
     const quiero = new Set(deseada ?? []);
     for (const op of sel.options) op.selected = quiero.has(op.value);
     return JSON.stringify(seleccionados(id)) !== antes;

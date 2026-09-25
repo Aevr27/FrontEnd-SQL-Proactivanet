@@ -2151,11 +2151,12 @@ function renderResumenPorPO(dir){
 
 // ---- selectores encadenados ----
 const selDir=document.getElementById('selDir'), selPO=document.getElementById('selPO');
-P.directores.forEach(d=>selDir.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(d)}">${esc(d)}</option>`));
+// Las <option> salen de Catalogos (assets/js/catalogos.js); que lista va en
+// cada select y como se encadenan sigue siendo de aqui.
+selDir.insertAdjacentHTML('beforeend',Catalogos.opciones(P.directores));
 function fillPO(){
-  selPO.innerHTML='<option value="">— Todos —</option>';
   const pos = fDir? (P.jerarquia[fDir]||[]) : [...new Set(P.categorias.map(c=>c.po).filter(Boolean))].sort();
-  pos.forEach(p=>selPO.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(p)}">${esc(p)}</option>`));
+  Catalogos.llenar(selPO,pos,'— Todos —');
 }
 selDir.onchange=()=>{fDir=selDir.value;fPO='';fillPO();renderAll();};
 selPO.onchange=()=>{fPO=selPO.value;renderAll();};
@@ -2164,12 +2165,11 @@ selPO.onchange=()=>{fPO=selPO.value;renderAll();};
 // Service Owner reporta a un Manager, ver TAREA 1 / generar.py so_manager).
 // Se combinan con Director/PO via AND (pasaFiltroGlobal), no se excluyen.
 const selMgr=document.getElementById('selMgr'), selSO=document.getElementById('selSO');
-(P.managers||[]).forEach(m=>selMgr.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(m)}">${esc(m)}</option>`));
+selMgr.insertAdjacentHTML('beforeend',Catalogos.opciones(P.managers||[]));
 function fillSO(){
-  selSO.innerHTML='<option value="">— Todos —</option>';
   const sos = fMgr ? ((P.jerarquia_mgr||{})[fMgr]||[])
     : [...new Set(P.categorias.map(c=>c.so).filter(Boolean))].sort();
-  sos.forEach(s=>selSO.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(s)}">${esc(s)}</option>`));
+  Catalogos.llenar(selSO,sos,'— Todos —');
 }
 selMgr.onchange=()=>{fMgr=selMgr.value;fSO='';fillSO();renderAll();};
 selSO.onchange=()=>{fSO=selSO.value;renderAll();};
