@@ -7,14 +7,18 @@
 
    Todo sale de handlers/qare.ashx en UNA peticion por rango de fechas. El
    handler ya entrega cada bloque en el orden del contrato (Posicion ASC, y
-   Frecuencia en Nunca -> Ocasional -> Frecuente -> Siempre; ver
+   Frecuencia en el orden de la guia con su rotulo en FrecuenciaGuia; ver
    App_Code/QareContrato.cs), asi que aqui no se reordena nada: se pinta en
    el orden en que llega.
 
    Regla de datos: lo que el API no trae no se calcula aqui. Los porcentajes
    -incluido el acumulado del Pareto- son los del procedimiento, en escala
-   0-100 (la misma de usp_CorreoQA_Kpis); si alguna vez llegaran en 0-1, el
-   handler lo avisa en "avisos" en vez de corregirlo a escondidas.
+   0-100 (verificado en la VM); si alguna vez llegaran en 0-1, el handler lo
+   avisa en "avisos" en vez de corregirlo a escondidas.
+
+   Validacion QA: los literales reales son OK, Valido, Incorrecto y Sin
+   catalogo (sin acentos). claseValidacion compara sin acentos ni mayusculas
+   y no reescribe el valor: la matriz muestra el texto tal como vino.
 
    Dos partes:
      1. QareDatos: funciones PURAS (sin DOM), publicadas en window.QareDatos
@@ -110,23 +114,53 @@
     return lineas.length > 1 ? lineas : (lineas[0] || String(texto));
   }
 
-  // 'aaaa-mm-dd' de una fecha LOCAL del navegador (el usuario esta en Mexico).
-  function iso(d) {
-    var m = d.getMonth() + 1, dia = d.getDate();
-    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (dia < 10 ? '0' : '') + dia;
+  /* "Hoy" en Mexico con el MISMO reloj que el servidor: UTC menos 6 horas
+     fijas (DashboardDataInfo.HoyEnPresentacion, y los SP con
+     DATEADD(HOUR,-6,SYSUTCDATETIME())). No se usa la hora local del
+     navegador: una maquina con otra zona abriria el tablero en otro dia. */
+  var MS_DIA = 864e5;
+  var DESFASE_MEXICO = 6 * 36e5;
+
+  // Dias desde 1970-01-01 del dia de Mexico en el instante `ms`.
+  function diaMexico(ms) { return Math.floor((ms - DESFASE_MEXICO) / MS_DIA); }
+  function isoDia(n) { return new Date(n * MS_DIA).toISOString().slice(0, 10); }
+
+  /* Los `dias` dias naturales que terminan HOY, incluido: el default de los
+     SP QARE (@Ff = hoy, @Fi = @Ff - 14 para 15 dias). `ahoraMs` entra como
+     parametro para que la prueba no dependa del reloj. */
+  function rangoRapido(dias, ahoraMs) {
+    var fin = diaMexico(ahoraMs);
+    return { inicio: isoDia(fin - (dias - 1)), fin: isoDia(fin) };
   }
 
-  // Los `dias` dias completos que terminan AYER, como la ventana de QA.
-  function rangoRapido(dias, hoy) {
-    var fin = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 1);
-    var inicio = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate() - (dias - 1));
-    return { inicio: iso(inicio), fin: iso(fin) };
+  /* Pie de una tarjeta KPI: "X de Y" con el denominador que manda el SP
+     (TicketsConRespuesta*, TicketsConFrecuencia). Cada porcentaje tiene el
+     suyo, distinto del total del periodo. No se recalcula nada. */
+  function pieKpi(numerador, denominador) {
+    var n = numero(numerador), d = numero(denominador);
+    if (n === null) return 'sin dato de tickets';
+    if (d === null) return NUM.format(n) + ' tickets';
+    return NUM.format(n) + ' de ' + NUM.format(d);
+  }
+
+  /* Rotulo de una barra de Frecuencia: el de la guia (FrecuenciaGuia, que
+     pone QareContrato.NivelesFrecuencia) o, si no cae en ningun nivel, el
+     valor tal como vino de SQL. */
+  function etiquetaFrecuencia(f) {
+    return f && f.FrecuenciaGuia ? String(f.FrecuenciaGuia) : etiqueta(f && f.Frecuencia);
+  }
+
+  // Si el rotulo de la guia no es el literal de la base, el tooltip lo dice.
+  function notaFrecuencia(f) {
+    if (!f || !f.FrecuenciaGuia || normal(f.FrecuenciaGuia) === normal(f.Frecuencia)) return null;
+    return 'En la base: "' + etiqueta(f.Frecuencia) + '"';
   }
 
   var QareDatos = {
     numero: numero, entero: entero, pct: pct, etiqueta: etiqueta, normal: normal,
     claseValidacion: claseValidacion, matriz: matriz, partirEtiqueta: partirEtiqueta,
-    rangoRapido: rangoRapido, iso: iso,
+    rangoRapido: rangoRapido, diaMexico: diaMexico, pieKpi: pieKpi,
+    etiquetaFrecuencia: etiquetaFrecuencia, notaFrecuencia: notaFrecuencia,
   };
   raiz.QareDatos = QareDatos;
 
@@ -200,21 +234,21 @@
       '<div class="foot">' + esc(pie) + '</div></div>';
   }
 
+  // [titulo, porcentaje, numerador, denominador] con los nombres del SP.
   var KPIS = [
-    ['Tickets evaluados',    'TotalTicketsPeriodo',          null],
-    ['Confirmacion usuario', 'PorcentajeConfirmacion',       'TicketsConfirmados'],
-    ['Casos recurrentes',    'PorcentajeRecurrencia',        'TicketsRecurrentes'],
-    ['Casos reutilizables',  'PorcentajeCasosReutilizables', 'CasosReutilizables'],
-    ['Potencial KB',         'PorcentajePotencialKB',        'CasosPotencialKB'],
+    ['Tickets evaluados',    'TotalTicketsPeriodo',          null,                 null],
+    ['Confirmacion usuario', 'PorcentajeConfirmacion',       'TicketsConfirmados', 'TicketsConRespuestaConfirmacion'],
+    ['Casos recurrentes',    'PorcentajeRecurrencia',        'TicketsRecurrentes', 'TicketsConFrecuencia'],
+    ['Casos reutilizables',  'PorcentajeCasosReutilizables', 'CasosReutilizables', 'TicketsConRespuestaReutilizacion'],
+    ['Potencial KB',         'PorcentajePotencialKB',        'CasosPotencialKB',   'TicketsConRespuestaKB'],
   ];
 
-  // Tarjeta 1: el total. Tarjetas 2-5: porcentaje grande y tickets abajo.
+  // Tarjeta 1: el total. Tarjetas 2-5: porcentaje grande y "X de Y" abajo.
   function pintarKpis(k, relleno) {
     $('kpis').innerHTML = KPIS.map(function (d, i) {
       if (!k) return tarjeta(d[0], relleno, i === 0 ? 'Total del periodo' : '');
       if (i === 0) return tarjeta(d[0], entero(k[d[1]]), 'Total del periodo');
-      var n = numero(k[d[2]]);
-      return tarjeta(d[0], pct(k[d[1]]), n === null ? 'sin dato de tickets' : NUM.format(n) + ' tickets');
+      return tarjeta(d[0], pct(k[d[1]]), pieKpi(k[d[2]], k[d[3]]));
     }).join('');
   }
 
@@ -252,12 +286,14 @@
     $('hint-frecuencia').textContent = '';
     if (sinFilas('frecuencia', filas, errores)) return;
     barras('frecuencia', 'chart-frecuencia',
-      filas.map(function (f) { return etiqueta(f.Frecuencia); }),
+      filas.map(etiquetaFrecuencia),
       filas.map(function (f) { return numero(f.CantidadTickets); }),
       false,
       function (item) {
         var f = filas[item.dataIndex];
-        return entero(f.CantidadTickets) + ' tickets · ' + pct(f.Porcentaje);
+        var linea = entero(f.CantidadTickets) + ' tickets · ' + pct(f.Porcentaje);
+        var nota = notaFrecuencia(f);
+        return nota ? [linea, nota] : linea;
       });
   }
 
@@ -507,7 +543,7 @@
   }
 
   function ponerRango(dias) {
-    var r = rangoRapido(dias, new Date());
+    var r = rangoRapido(dias, Date.now());
     $('f-inicio').value = r.inicio;
     $('f-fin').value = r.fin;
     marcarRapido(dias);

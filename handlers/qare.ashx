@@ -8,15 +8,17 @@
 //
 // PETICION
 //   GET qare.ashx[?fecha_inicio=aaaa-mm-dd][&fecha_fin=aaaa-mm-dd]
-//   Sin fechas: los 15 dias completos que terminan ayer (dia de Mexico), la
-//   misma ventana que la pestaña de QA. Las fechas llegan a @FechaInicio /
-//   @FechaFin TAL CUAL, sin sumar ni restar dias.
+//   Sin fechas: los 15 dias naturales que terminan HOY (dia de Mexico), el
+//   mismo default que los SP. Las fechas llegan a @FechaInicio / @FechaFin
+//   TAL CUAL, sin sumar ni restar dias: los SP filtran FechaFirmaSolucion con
+//   el dia fin incluido (verificado en la VM, sql/diag_qare_contrato.sql).
 //
 // RESPUESTA 200
 //   {
 //     fechaInicio, fechaFin,          // "aaaa-mm-dd", las que se usaron
 //     kpis:                 { ...usp_CorreoQARE_KPIs... } | null,
-//     frecuencia:           [ ... ] | null,   // Nunca, Ocasional, Frecuente, Siempre
+//     frecuencia:           [ ... ] | null,   // orden de la guia; + FrecuenciaGuia
+//                                             // (ver QareContrato.NivelesFrecuencia)
 //     causaRaiz:            [ ... ] | null,   // Posicion ASC
 //     recurrentesCategoria: [ ... ] | null,   // Posicion ASC
 //     confirmacionVsQa:     [ ... ] | null,   // orden del procedimiento

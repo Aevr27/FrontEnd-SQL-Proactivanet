@@ -6,22 +6,30 @@
 // App_Code/QareQueries.cs y el endpoint en handlers/qare.ashx.
 //
 // DE DONDE SALE EL CONTRATO
-//   Los nombres de columna son los de "Documentacion_Dashboard_QARE" (guia
-//   visual de la pestaña). Los cuerpos de los procedimientos NO estan en este
-//   repositorio ni en Integracion_SQL-Proactivanet, asi que lo que ese
-//   documento no fija -tipo de los parametros, si @FechaFin es inclusivo,
-//   escala de los porcentajes- no se da por supuesto aqui: las filas viajan
-//   con TODAS las columnas que devuelva el procedimiento, sin renombrar ni
-//   recalcular nada, y si falta una de las esperadas se avisa (Avisos) en vez
-//   de rellenarla. sql/diag_qare_contrato.sql confirma lo pendiente en la VM.
+//   Columnas: "Documentacion_Dashboard_QARE" (guia visual). Todo lo demas
+//   se verifico en la VM con sql/diag_qare_contrato.sql (v2, 2026-09-25),
+//   leyendo los cuerpos reales de los seis SP:
+//     - parametros: @FechaInicio DATE = NULL, @FechaFin DATE = NULL;
+//     - fecha oficial: FechaFirmaSolucion de dbo.vw_CorreoQARECierre_Base
+//       (envoltorio de dbo.vw_CorreoQA_Base, la misma base que QA);
+//     - @FechaFin INCLUSIVO: FechaFirmaSolucion >= @Fi
+//       AND FechaFirmaSolucion < DATEADD(DAY, 1, @Ff). Probado: la suma de 7
+//       dias sueltos = el rango de esos 7 dias;
+//     - NULL/NULL: @Ff = hoy en Mexico (DATEADD(HOUR,-6,SYSUTCDATETIME())),
+//       @Fi = @Ff - 14: 15 dias naturales INCLUYENDO hoy;
+//     - porcentajes en escala 0-100 (DECIMAL(6,2)), cada uno con su propio
+//       denominador (los KPIs traen TicketsConRespuesta*/TicketsConFrecuencia);
+//     - EsInconsistencia = 1 solo si ConfirmacionUsuario = 'Sí' y
+//       ValidacionQA = 'Incorrecto'.
+//   Las filas viajan con TODAS las columnas del procedimiento y su valor
+//   intacto; si falta una de las esperadas se avisa (Avisos).
 //
 // ORDEN
 //   - Posicion ASC en Causa raiz, Recurrentes por categoria y Tipo de
 //     solucion (lo pide la guia). Estable: a igual Posicion, el orden del
 //     procedimiento; sin Posicion, al final.
-//   - Frecuencia en su orden natural Nunca -> Ocasional -> Frecuente ->
-//     Siempre, nunca alfabetico. Un valor fuera de esos cuatro no se descarta
-//     ni se renombra: va detras, en el orden en que llego.
+//   - Frecuencia en el orden de la guia, nunca alfabetico ni por cantidad
+//     (el SP ordena por CantidadTickets DESC). Ver NivelesFrecuencia.
 //   - KPIs y Confirmacion vs QA, tal como los devuelve el procedimiento.
 //
 // FILTROS
@@ -91,17 +99,47 @@ public static class QareContrato
         Kpis, Frecuencia, CausaRaiz, RecurrentesCategoria, ConfirmacionVsQa, TipoSolucion,
     };
 
-    // Orden natural de la escala de frecuencia (guia visual, seccion 2).
-    public static readonly string[] OrdenFrecuencia = new string[]
+    /* Escala de frecuencia en el orden de la guia (seccion 2):
+       Nunca -> Ocasional -> Frecuente -> Siempre.
+
+       UNICO sitio del mapeo guia <-> produccion: cada nivel lleva el rotulo
+       de la guia y los literales de produccion que caen en el.
+
+       "Primera vez" NO es un texto de la guia: es el literal real que
+       devuelve dbo.usp_CorreoQARE_Frecuencia (diag v2, 365 dias: Primera
+       vez, Ocasional, Frecuente, Siempre; "Nunca" no aparece). Por decision
+       del usuario (2026-09-25) ocupa el lugar de "Nunca" y se rotula "Nunca".
+       La fila NO se reescribe: conserva Frecuencia = "Primera vez" tal como
+       vino de SQL y el rotulo viaja aparte, en FrecuenciaGuia. Si resulta que
+       no son lo mismo, basta con quitar "Primera vez" de esta tabla: volvera
+       a pintarse con su propio nombre, al final. */
+    public sealed class NivelFrecuencia
     {
-        "Nunca", "Ocasional", "Frecuente", "Siempre",
+        public readonly string Rotulo;
+        public readonly string[] Literales;
+
+        public NivelFrecuencia(string rotulo, params string[] literales)
+        {
+            Rotulo = rotulo;
+            Literales = literales;
+        }
+    }
+
+    public static readonly NivelFrecuencia[] NivelesFrecuencia = new NivelFrecuencia[]
+    {
+        new NivelFrecuencia("Nunca", "Nunca", "Primera vez"),
+        new NivelFrecuencia("Ocasional", "Ocasional"),
+        new NivelFrecuencia("Frecuente", "Frecuente"),
+        new NivelFrecuencia("Siempre", "Siempre"),
     };
 
-    // Ventana por omision, la misma que la pestaña de QA (QaParams.DiasVentana:
-    // los 15 dias completos que terminan ayer). QARE es la pestaña
-    // complementaria de QA y asi las dos abren sobre el mismo periodo. Solo
+    // Columna que se agrega a cada fila de Frecuencia que cae en un nivel.
+    public const string ColumnaRotuloFrecuencia = "FrecuenciaGuia";
+
+    // Ventana por omision: 15 dias naturales INCLUYENDO hoy, la misma que
+    // usan los seis SP cuando reciben NULL/NULL (verificado en la VM). Solo
     // aplica si el navegador no manda fechas; el tablero siempre las manda.
-    public const int DiasVentana = QaParams.DiasVentana;
+    public const int DiasVentana = 15;
 
     // Tope defensivo del rango: evita que un parametro absurdo ponga a los
     // seis procedimientos a recorrer la historia entera.
@@ -110,21 +148,21 @@ public static class QareContrato
     // ------------------------------------------------------------ fechas
 
     /* Lee fecha_inicio / fecha_fin (aaaa-mm-dd). Las fechas se devuelven TAL
-       CUAL las eligio el usuario: no se suma ni se resta ningun dia. Si el
-       procedimiento trata @FechaFin como exclusivo, eso es cosa suya y se
-       confirma con sql/diag_qare_contrato.sql; corregirlo aqui a ciegas
-       moveria el periodo sin que el rotulo lo dijera.
+       CUAL las eligio el usuario: no se suma ni se resta ningun dia, porque
+       los SP ya tratan @FechaFin como inclusivo (el dia fin entra entero).
 
-       'hoy' entra como parametro (el handler pasa el dia de Mexico,
-       DashboardDataInfo.HoyEnPresentacion) para que la prueba no dependa del
-       reloj. */
+       Sin fechas: los 15 dias que terminan HOY, igual que el default de los
+       SP. 'hoy' entra como parametro: el handler pasa el dia de Mexico
+       (DashboardDataInfo.HoyEnPresentacion), el mismo "hoy" que calculan los
+       SP con DATEADD(HOUR,-6,SYSUTCDATETIME()), y no DateTime.Today del host
+       de IIS. Asi ademas la prueba no depende del reloj. */
     public static void Rango(string textoInicio, string textoFin, DateTime hoy,
                              out DateTime inicio, out DateTime fin)
     {
         DateTime? fi = Fecha(textoInicio, "fecha_inicio");
         DateTime? ff = Fecha(textoFin, "fecha_fin");
 
-        fin = ff ?? hoy.Date.AddDays(-1);
+        fin = ff ?? hoy.Date;
         inicio = fi ?? fin.AddDays(-(DiasVentana - 1));
 
         if (inicio > fin)
@@ -209,20 +247,26 @@ public static class QareContrato
         var salida = new List<Dictionary<string, object>>(filas.Count);
         var usadas = new bool[filas.Count];
 
-        foreach (var nivel in OrdenFrecuencia)
+        foreach (var nivel in NivelesFrecuencia)
         {
             for (int i = 0; i < filas.Count; i++)
             {
                 if (usadas[i]) continue;
-                if (string.Equals(Texto(filas[i], "Frecuencia"), nivel, StringComparison.OrdinalIgnoreCase))
+                var valor = Texto(filas[i], "Frecuencia");
+                foreach (var literal in nivel.Literales)
                 {
+                    if (!string.Equals(valor, literal, StringComparison.OrdinalIgnoreCase)) continue;
+                    // El valor de SQL no se toca; el rotulo de la guia va aparte.
+                    filas[i][ColumnaRotuloFrecuencia] = nivel.Rotulo;
                     salida.Add(filas[i]);
                     usadas[i] = true;
+                    break;
                 }
             }
         }
         // Lo que no es ninguno de los cuatro niveles (un NULL, un texto nuevo):
-        // detras y en el orden del procedimiento, con su valor intacto.
+        // detras, en el orden del procedimiento, con su valor intacto y sin
+        // rotulo de la guia.
         for (int i = 0; i < filas.Count; i++)
             if (!usadas[i]) salida.Add(filas[i]);
 

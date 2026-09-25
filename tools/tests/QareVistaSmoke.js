@@ -56,6 +56,12 @@ Check('Sin catálogo -> amarillo', 'sin', Q.claseValidacion('Sin catálogo'));
 Check('Sin catalogo -> amarillo', 'sin', Q.claseValidacion('SIN  CATALOGO'));
 Check('otro estado -> neutro, no se inventa', null, Q.claseValidacion('Pendiente'));
 Check('null -> neutro', null, Q.claseValidacion(null));
+// Literales EXACTOS de produccion (diag v2): sin acentos.
+Check('produccion: OK -> verde', 'ok', Q.claseValidacion('OK'));
+Check('produccion: Valido -> verde', 'ok', Q.claseValidacion('Valido'));
+Check('produccion: Incorrecto -> rojo', 'mal', Q.claseValidacion('Incorrecto'));
+Check('produccion: Sin catalogo -> amarillo', 'sin', Q.claseValidacion('Sin catalogo'));
+Check('Sin validacion (respaldo del SP) -> neutro', null, Q.claseValidacion('Sin validaci'));
 
 // --- matriz ----------------------------------------------------------------
 var m = Q.matriz([
@@ -75,16 +81,51 @@ Check('matriz vacia', { filas: [], columnas: [], max: 0 },
   (function (x) { return { filas: x.filas, columnas: x.columnas, max: x.max }; })(Q.matriz([])));
 Check('matriz null', 0, Q.matriz(null).filas.length);
 
+// Matriz con la forma real del SP: literales intactos y EsInconsistencia
+// presente (el tablero no la interpreta; solo no debe romper nada).
+var mr = Q.matriz([
+  { ConfirmacionUsuario: 'Sí', ValidacionQA: 'OK', CantidadTickets: 2617, PorcentajeDelTotal: 63.74, EsInconsistencia: 0 },
+  { ConfirmacionUsuario: 'Sí', ValidacionQA: 'Valido', CantidadTickets: 389, PorcentajeDelTotal: 9.47, EsInconsistencia: 0 },
+  { ConfirmacionUsuario: 'Sí', ValidacionQA: 'Incorrecto', CantidadTickets: 184, PorcentajeDelTotal: 4.48, EsInconsistencia: 1 },
+  { ConfirmacionUsuario: 'Sí', ValidacionQA: 'Sin catalogo', CantidadTickets: 193, PorcentajeDelTotal: 4.70, EsInconsistencia: 0 },
+  { ConfirmacionUsuario: 'No', ValidacionQA: 'OK', CantidadTickets: 564, PorcentajeDelTotal: 13.74, EsInconsistencia: 0 },
+]);
+Check('matriz real: filas Sí, No', ['Sí', 'No'], mr.filas);
+Check('matriz real: columnas en el orden del SP y sin reescribir', ['OK', 'Valido', 'Incorrecto', 'Sin catalogo'], mr.columnas);
+Check('matriz real: Sí/Incorrecto', 184, mr.celdas['Sí'].Incorrecto.cantidad);
+
 // --- etiquetas largas: completas, en varias lineas -------------------------
 var partida = Q.partirEtiqueta('Software > Aplicaciones corporativas > Correo electronico', 20);
 Check('categoria larga partida en lineas', true, Array.isArray(partida) && partida.length > 1);
 Check('categoria larga sin perder texto', 'Software > Aplicaciones corporativas > Correo electronico', partida.join(' '));
 Check('categoria corta queda en una linea', 'Red', Q.partirEtiqueta('Red', 20));
 
-// --- rango rapido: dias completos que terminan ayer -------------------------
-Check('15 dias al 25/09', { inicio: '2026-09-10', fin: '2026-09-24' }, Q.rangoRapido(15, new Date(2026, 8, 25, 23, 30)));
-Check('30 dias cruzando mes', { inicio: '2026-02-01', fin: '2026-03-02' }, Q.rangoRapido(30, new Date(2026, 2, 3)));
-Check('1 de enero', { inicio: '2025-12-17', fin: '2025-12-31' }, Q.rangoRapido(15, new Date(2026, 0, 1)));
+// --- rango rapido: dias naturales que terminan HOY en Mexico (UTC-6) --------
+// Instantes en UTC, para que la prueba no dependa de la zona de esta maquina.
+Check('15 dias al 25/09 (mediodia Mexico)', { inicio: '2026-09-11', fin: '2026-09-25' },
+  Q.rangoRapido(15, Date.UTC(2026, 8, 25, 18, 0)));
+Check('25/09 23:30 Mexico = 26/09 05:30 UTC: sigue siendo 25/09', { inicio: '2026-09-11', fin: '2026-09-25' },
+  Q.rangoRapido(15, Date.UTC(2026, 8, 26, 5, 30)));
+Check('26/09 00:00 Mexico = 26/09 06:00 UTC: ya es 26/09', { inicio: '2026-09-12', fin: '2026-09-26' },
+  Q.rangoRapido(15, Date.UTC(2026, 8, 26, 6, 0)));
+Check('30 dias cruzando mes', { inicio: '2026-02-02', fin: '2026-03-03' }, Q.rangoRapido(30, Date.UTC(2026, 2, 3, 18)));
+Check('1 de enero', { inicio: '2025-12-18', fin: '2026-01-01' }, Q.rangoRapido(15, Date.UTC(2026, 0, 1, 18)));
+Check('un dia = hoy..hoy', { inicio: '2026-09-25', fin: '2026-09-25' }, Q.rangoRapido(1, Date.UTC(2026, 8, 25, 18)));
+
+// --- pie de KPI: "X de Y" con el denominador del SP -------------------------
+Check('pie X de Y', '3,383 de 4,106', Q.pieKpi(3383, 4106));
+Check('pie sin denominador', '344 tickets', Q.pieKpi(344, null));
+Check('pie sin numerador', 'sin dato de tickets', Q.pieKpi(null, 4106));
+Check('pie con cero', '0 de 0', Q.pieKpi(0, 0));
+
+// --- Frecuencia: rotulo de la guia, valor de la base intacto ----------------
+var primera = { Frecuencia: 'Primera vez', FrecuenciaGuia: 'Nunca', CantidadTickets: 2133, Porcentaje: 44.02 };
+Check('Primera vez se rotula con el nivel de la guia', 'Nunca', Q.etiquetaFrecuencia(primera));
+Check('el valor de la base no se toca', 'Primera vez', primera.Frecuencia);
+Check('el tooltip dice el literal de la base', 'En la base: "Primera vez"', Q.notaFrecuencia(primera));
+Check('Ocasional sin nota', null, Q.notaFrecuencia({ Frecuencia: 'Ocasional', FrecuenciaGuia: 'Ocasional' }));
+Check('valor fuera de la escala: su propio nombre', 'Otro', Q.etiquetaFrecuencia({ Frecuencia: 'Otro' }));
+Check('valor fuera de la escala: sin nota', null, Q.notaFrecuencia({ Frecuencia: 'Otro' }));
 
 // --- cableado de la pestaña -------------------------------------------------
 var html = leer('dashboard.html');
