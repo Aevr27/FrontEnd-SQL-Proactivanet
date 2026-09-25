@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<!--
+  qare/qare.html - Modulo QARE (calidad de cierre: confirmacion, recurrencia,
+  causa raiz y tipo de solucion).
+
+  Mismo contrato que backlog/, experiencia/ y qa/: este archivo es a la vez
+  la pagina suelta y la fuente de la pestaña "QARE" de dashboard.html.
+  TableroQare (dashboard.js) trae este marcado, le quita <script> y <link>,
+  desarma el envoltorio #tab-qare y lo monta en el contenedor de la pestaña.
+
+  Todos los ids llevan el prefijo "qare-": en el tablero este marcado convive
+  con SLA, Backlog y QA en el MISMO documento. qare.js lo resuelve en $().
+
+  Consume unicamente handlers/qare.ashx. Los bloques y su origen:
+    KPIs                         dbo.usp_CorreoQARE_KPIs
+    Frecuencia del problema      dbo.usp_CorreoQARE_Frecuencia
+    Principales causas raiz      dbo.usp_CorreoQARE_CausaRaiz
+    Recurrentes por categoria    dbo.usp_CorreoQARE_RecurrentesCategoria
+    Confirmacion vs QA           dbo.usp_CorreoQARE_ConfirmacionVsQA
+    Tipo de solucion aplicada    dbo.usp_CorreoQARE_TipoSolucion
+
+  Filtros: solo el rango de fechas. Los procedimientos no reciben ningun otro
+  parametro, asi que un filtro de grupo, lider o dueño aqui no moveria nada.
+
+  Hojas: como el Backlog, QARE no tiene vocabulario visual propio (.card,
+  .kpi, .grid2, .filtros, .lienzo son los de dashboard.css y kpi.css), asi
+  que la pagina suelta enlaza ../dashboard.css y qare.css lleva solo lo
+  privado. Embebido, esos <link> se descartan y manda lo que ya cargo
+  dashboard.html.
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tickets Proactivanet — QARE</title>
+  <!-- Solo para la pagina suelta: embebida en dashboard.html cada uno de
+       estos <script>/<link> se quita y manda la copia del tablero. -->
+  <script src="../assets/vendor/chart.umd.min.js"></script>
+  <script src="../assets/js/escape.js"></script>
+  <script src="../assets/js/paleta.js"></script>
+  <script src="../assets/js/barras.js"></script>
+  <script src="../assets/js/grafica.js"></script>
+  <link rel="stylesheet" href="../assets/css/kpi.css">
+  <link rel="stylesheet" href="../assets/css/datos-info.css">
+  <script src="../assets/js/datos-info.js"></script>
+  <link rel="stylesheet" href="../dashboard.css">
+  <link rel="stylesheet" href="qare.css">
+</head>
+<body>
+<div class="wrap">
+  <div id="tab-qare" class="maintab-content active">
+
+    <header class="top">
+      <div>
+        <h1>Tickets Proactivanet — QARE</h1>
+      </div>
+      <div class="acciones-top">
+        <div class="estado" id="qare-estado"></div>
+      </div>
+    </header>
+
+    <section class="filtros" id="qare-filtros">
+      <div class="campo">
+        <label for="qare-f-inicio">Fecha inicio</label>
+        <input type="date" id="qare-f-inicio">
+      </div>
+      <div class="campo">
+        <label for="qare-f-fin">Fecha fin</label>
+        <input type="date" id="qare-f-fin">
+      </div>
+      <div class="campo">
+        <label>Rango rapido</label>
+        <!-- Los dos terminan AYER, como la ventana de QA: el dia en curso
+             todavia no esta cerrado. -->
+        <div class="rango-rapido">
+          <button class="btn linea chico" type="button" data-dias="15">15 dias</button>
+          <button class="btn linea chico" type="button" data-dias="30">30 dias</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Banda de error: arriba y sin tapar nada. Sale si la peticion entera
+         falla; si solo falla un bloque, el aviso va en su tarjeta. -->
+    <div class="qare-aviso qare-aviso-error" id="qare-error" hidden>
+      <strong>No se pudieron cargar los datos de QARE.</strong>
+      <span id="qare-error-msg"></span>
+      <button type="button" class="btn linea chico" id="qare-reintentar">Reintentar</button>
+    </div>
+    <!-- Diferencias entre lo que devolvio SQL y la guia visual (una columna
+         que no llego, un acumulado que baja...). No bloquea nada. -->
+    <div class="qare-aviso" id="qare-avisos" hidden></div>
+
+    <section class="kpis" id="qare-kpis"></section>
+
+    <section class="grid2x2">
+      <div class="card">
+        <h3>Frecuencia del problema<span class="hint" id="qare-hint-frecuencia"></span></h3>
+        <div class="lienzo">
+          <canvas id="qare-chart-frecuencia"></canvas>
+          <p class="qare-msg" id="qare-msg-frecuencia">Calculando…</p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Principales causas raiz<span class="hint" id="qare-hint-causa">Pareto · referencia 80 %</span></h3>
+        <div class="lienzo">
+          <canvas id="qare-chart-causa"></canvas>
+          <p class="qare-msg" id="qare-msg-causa">Calculando…</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="grid2x2">
+      <div class="card">
+        <h3>Problemas recurrentes por categoria<span class="hint" id="qare-hint-recurrentes"></span></h3>
+        <!-- Top 15 por Posicion; el marco muestra unas diez filas y el resto
+             con scroll vertical. El lienzo crece con las filas. -->
+        <div class="qare-scroll">
+          <div class="lienzo qare-lienzo-filas" id="qare-lienzo-recurrentes">
+            <canvas id="qare-chart-recurrentes"></canvas>
+          </div>
+          <p class="qare-msg" id="qare-msg-recurrentes">Calculando…</p>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Tipo de solucion aplicada<span class="hint" id="qare-hint-tipo"></span></h3>
+        <div class="lienzo qare-lienzo-filas" id="qare-lienzo-tipo">
+          <canvas id="qare-chart-tipo"></canvas>
+          <p class="qare-msg" id="qare-msg-tipo">Calculando…</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Confirmacion del usuario vs validacion QA<span class="hint" id="qare-hint-matriz">tickets · % del total al pasar el mouse</span></h3>
+      <div class="scroll-x" id="qare-matriz"><div class="vacio">Calculando…</div></div>
+      <div class="qare-leyenda" aria-label="Colores de la validacion QA">
+        <span><i class="qare-ok"></i>OK / Valido</span>
+        <span><i class="qare-mal"></i>Incorrecto</span>
+        <span><i class="qare-sin"></i>Sin catalogo</span>
+      </div>
+    </section>
+
+    <footer>
+      Fuente: procedimientos <b>dbo.usp_CorreoQARE_*</b> sobre dbo.vw_CorreoQARECierre_Base ·
+      <span id="qare-pie-rango"></span>
+    </footer>
+  </div>
+</div>
+
+<script src="qare.js"></script>
+</body>
+</html>

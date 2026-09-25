@@ -191,6 +191,17 @@ public sealed class DashboardDataInfo
             ZonaPresentacion);
     }
 
+    /* El dia de HOY en la zona de presentacion (Mexico, UTC-06), sacado del
+       reloj UTC y de la misma ZonaPresentacion de arriba. Existe para los
+       handlers que calculan una ventana por omision (QARE): DateTime.Today es
+       el dia del host de IIS, y si ese host corre en UTC, de 18:00 a 24:00
+       de Mexico ya seria "mañana". Es un calculo de "ahora", no un sello: no
+       toca ningun valor guardado. Los demas handlers no lo usan. */
+    public static DateTime HoyEnPresentacion()
+    {
+        return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ZonaPresentacion).Date;
+    }
+
     /* Rodante de 30 dias = termina hoy y mide un multiplo exacto de 30 dias.
        Es justo la forma que producen los dos sitios que usan la ventana:
 

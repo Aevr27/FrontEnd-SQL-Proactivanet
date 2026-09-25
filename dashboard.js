@@ -4118,6 +4118,22 @@ const TableroQa = moduloEmbebido({
   },
 });
 
+/* QARE: mismo trato que QA. El modulo publica window.TableroQareModulo al
+   arrancar y al volver a la pestaña solo se remiden sus graficas; no se
+   repite la peticion a qare.ashx. */
+const TableroQare = moduloEmbebido({
+  nombre: 'QARE',
+  base: 'qare/',
+  id: 'tab-qare',
+  pagina: 'qare.html',
+  hoja: 'qare.css',
+  guion: 'qare.js',
+  alVolver: () => {
+    const modulo = window.TableroQareModulo;
+    if (modulo) modulo.redimensionar();
+  },
+});
+
 /* =======================================================================
    Pestanas de SLA y Call Center: un solo tablero en dos vistas
    -----------------------------------------------------------------------
@@ -4210,6 +4226,7 @@ const MODULOS = {
   backlog: TableroBacklog,
   experiencia: TableroExperiencia,
   qa: TableroQa,
+  qare: TableroQare,
   call: pestanaSla('tab-call'),
   tablero: TableroExterno,
 };

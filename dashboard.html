@@ -119,6 +119,14 @@
           </button>
         </li>
         <li>
+          <button class="mnav" id="mtab-qare" data-tab="qare" type="button" title="QARE">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M5 4.5h14v15H5z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>
+            </svg>
+            <span class="mnav-txt">QARE</span>
+          </button>
+        </li>
+        <li>
           <button class="mnav" id="mtab-call" data-tab="call" type="button" title="Call Center">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M4.5 5.5 8 4l2.2 4-2 1.7a12 12 0 0 0 6.1 6.1l1.7-2 4 2.2-1.5 3.5a2 2 0 0 1-2.1 1.1C10.4 19.7 4.3 13.6 3.4 7.6a2 2 0 0 1 1.1-2.1z"/>
@@ -353,6 +361,13 @@
        abre la pestaña: dashboard.html no pide nada a qa.ashx al cargar. El
        modulo vive en qa/ y su pagina suelta sigue funcionando igual. -->
   <div id="tab-qa" class="maintab-content" role="region" aria-labelledby="mtab-qa"></div>
+
+  <!-- ===================================================== Tablero de QARE
+       Contenedor vacio, igual que Backlog y QA. TableroQare (dashboard.js)
+       trae qare/qare.html, qare.css y qare.js la primera vez que se abre la
+       pestaña: dashboard.html no pide nada a qare.ashx al cargar, y si el
+       montaje o la API fallan el resto de las pestañas no se entera. -->
+  <div id="tab-qare" class="maintab-content" role="region" aria-labelledby="mtab-qare"></div>
 
   <!-- ================================================ Call Center de Servicios TI
        Pestana propia. El bloque es el MISMO de siempre -mismos ids, mismas
