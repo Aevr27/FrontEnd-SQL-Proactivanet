@@ -133,8 +133,10 @@ public static class UnionSmoke
         T = asm.GetType("ExperienciaQueries");
         TVol = T.GetNestedType("Volumen", BindingFlags.NonPublic);
         TDet = T.GetNestedType("Detalle", BindingFlags.NonPublic);
-        TDue = T.GetNestedType("Dueno", BindingFlags.NonPublic);
-        TDir = T.GetNestedType("Directorio", BindingFlags.NonPublic);
+        // El directorio de dueños ya no es un anidado privado de
+        // ExperienciaQueries: es la clase compartida DirectorioOrganizacional.
+        TDir = asm.GetType("DirectorioOrganizacional");
+        TDue = TDir.GetNestedType("Dueno");
 
         // --- Normaliza: replica de fn_NormalizaCategoria ---
         var norm = M("Normaliza");

@@ -189,8 +189,10 @@ public static class DuenosSmoke
         T = asm.GetType("ExperienciaQueries");
         TVol = T.GetNestedType("Volumen", BindingFlags.NonPublic);
         TDet = T.GetNestedType("Detalle", BindingFlags.NonPublic);
-        TDue = T.GetNestedType("Dueno", BindingFlags.NonPublic);
-        TDir = T.GetNestedType("Directorio", BindingFlags.NonPublic);
+        // El directorio de dueños ya no es un anidado privado de
+        // ExperienciaQueries: es la clase compartida DirectorioOrganizacional.
+        TDir = asm.GetType("DirectorioOrganizacional");
+        TDue = TDir.GetNestedType("Dueno");
 
         // --- catalogo de dueños -------------------------------------------
         // Ventas tiene dos N2 con PO/SO distintos y el mismo Director. En el

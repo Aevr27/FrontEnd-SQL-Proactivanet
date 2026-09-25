@@ -1185,10 +1185,7 @@ const TableroBacklog = (function () {
 
   async function cargarCatalogos() {
     const c = await obtenerJSON('backlog_catalogos.ashx');
-    const llenar = (id, valores) => {
-      document.getElementById(id).innerHTML =
-        valores.map(v => `<option value="${escapeAttr(v)}">${escapeHtml(v)}</option>`).join('');
-    };
+    const llenar = (id, valores) => Catalogos.llenar(document.getElementById(id), valores);
     llenar('f-c1-bl', c.c1 ?? []);
     llenar('f-grupos-bl', c.grupos ?? []);
     llenar('f-lideres-bl', c.lideres ?? []);

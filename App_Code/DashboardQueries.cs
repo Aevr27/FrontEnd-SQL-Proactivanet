@@ -40,10 +40,7 @@
 //   - reabierto = IntentosSolucion > 1;
 //   - los 'Rechazada' no cuentan como resueltos (si como creados);
 //   - las cuentas de dbo.CatCuentaNoPersona salen de lo que habla de personas;
-//   - primera respuesta = TiempoPrimeraRespuestaHorasMin ('Nh NNm'), pero
-//     remedida en HORARIO HABIL (lunes a viernes, 08:00-18:30): ver
-//     PrimeraRespuesta y MinutosHabilesDesdeAncla. La mediana y el p90 del
-//     tablero salen de esos minutos habiles, no de minutos de reloj.
+//   - primera respuesta = TiempoPrimeraRespuestaHorasMin ('Nh NNm') en minutos.
 // El tecnico es b.Tecnico tal como lo define la vista desplegada: el asignado
 // con la vista anterior, la firma de solucion con la de 04_dashboard_sla.sql.
 // Es el mismo campo que llena el filtro (usp_Dash_Catalogos), asi que los dos
@@ -255,95 +252,29 @@ public static class DashboardQueries
         return catalogoNoPersona;
     }
 
-    /* Minutos HABILES hasta la primera respuesta.
-
-       El dato de origen es el texto 'Nh NNm' de
-       dbo.Tickets.TiempoPrimeraRespuestaHorasMin, que Proactivanet mide en
-       tiempo de CALENDARIO desde el registro. Mismo parseo que
+    /* Minutos hasta la primera respuesta, del texto 'Nh NNm' de
+       dbo.Tickets.TiempoPrimeraRespuestaHorasMin. Mismo parseo que
        MinutosPrimeraRespuesta en 04_dashboard_sla.sql: el campo de horas
        enteras (TiempoPrimeraRespuesta) vale '0' en 7 de cada 10 tickets y
        seria una constante. TRY_CONVERT y las dos guardas de CHARINDEX para
        que un formato distinto de NULL y no un numero equivocado.
 
-       Sobre ese calendario se reconstruye el INSTANTE de la primera
-       respuesta -FechaRegistro + los minutos del texto- y se vuelve a medir
-       el hueco contando SOLO horario habil (ver MinutosHabilesDesdeAncla).
-       La columna sigue llamandose MinutosPrimeraRespuesta y sigue en
-       minutos, pero ya no son minutos de reloj: son minutos habiles. De ahi
-       salen la mediana y el p90 del tablero.
-
-       La base no guarda la fecha de la primera respuesta -solo el texto del
-       transcurrido-, asi que reconstruirla desde FechaRegistro es la unica
-       forma de tener los dos extremos que el horario habil necesita.
-
        Sale de dbo.Tickets y no de la vista porque la vista anterior no trae
-       la columna. CodigoTicket es la llave primaria: una fila o ninguna.
-
-       NULL manda: sin texto valido no hay MinutosCalendario, sin el no hay
-       Fin, y sin Fin no hay resta. El ticket queda sin dato, igual que antes,
-       y PERCENTILE_CONT lo ignora. */
-    private static readonly string PrimeraRespuesta = @"
+       la columna. CodigoTicket es la llave primaria: una fila o ninguna. */
+    private const string PrimeraRespuesta = @"
 OUTER APPLY (
-    SELECT MinutosPrimeraRespuesta = h.HabilesFin - h.HabilesIni
+    SELECT MinutosPrimeraRespuesta = CASE
+        WHEN CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) > 1
+         AND CHARINDEX(N'm', tk.TiempoPrimeraRespuestaHorasMin)
+           > CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin)
+        THEN TRY_CONVERT(INT, LEFT(tk.TiempoPrimeraRespuestaHorasMin,
+                                   CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) - 1)) * 60
+           + TRY_CONVERT(INT, SUBSTRING(tk.TiempoPrimeraRespuestaHorasMin,
+                                        CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) + 2, 2))
+        ELSE NULL END
     FROM dbo.Tickets tk
-    CROSS APPLY (
-        SELECT MinutosCalendario = CASE
-            WHEN CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) > 1
-             AND CHARINDEX(N'm', tk.TiempoPrimeraRespuestaHorasMin)
-               > CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin)
-            THEN TRY_CONVERT(INT, LEFT(tk.TiempoPrimeraRespuestaHorasMin,
-                                       CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) - 1)) * 60
-               + TRY_CONVERT(INT, SUBSTRING(tk.TiempoPrimeraRespuestaHorasMin,
-                                            CHARINDEX(N'h', tk.TiempoPrimeraRespuestaHorasMin) + 2, 2))
-            ELSE NULL END
-    ) AS cal
-    CROSS APPLY (
-        SELECT Inicio = b.FechaRegistro,
-               Fin = DATEADD(MINUTE, cal.MinutosCalendario, b.FechaRegistro)
-    ) AS mom
-    CROSS APPLY (
-        SELECT HabilesIni = " + MinutosHabiles("mom.Inicio") + @",
-               HabilesFin = " + MinutosHabiles("mom.Fin") + @"
-    ) AS h
     WHERE tk.CodigoTicket = b.CodigoTicket
 ) AS pr1";
-
-    /* HORARIO HABIL: lunes a viernes, 08:00 a 18:30. Sabado y domingo no
-       cuentan, y de los dias habiles solo cuenta lo que cae dentro de la
-       ventana: antes de las 08:00 y despues de las 18:30 no suma nada.
-
-       La expresion devuelve los minutos habiles acumulados DESDE UN ANCLA
-       fija -el lunes 1900-01-01- hasta el momento que se le pase. El
-       transcurrido habil entre dos instantes es la resta de sus dos
-       acumulados, sin bucles ni tabla de calendario: una semana son 5 dias
-       de 630 minutos (3150), el dia de la semana suma los dias habiles ya
-       cerrados -sabado y domingo se topan en 5- y el ultimo sumando es el
-       trozo de la ventana que el reloj ya consumio hoy.
-
-         480  = 08:00 en minutos desde medianoche
-         1110 = 18:30
-         630  = 1110 - 480, la jornada
-         3150 = 630 * 5, la semana
-
-       $M$ es el momento; MinutosHabiles() lo sustituye. El texto se extrae
-       tal cual desde tools/tests/HorasHabilesSmoke.ps1, asi que la prueba
-       mide ESTA expresion y no una copia que pueda quedarse atras. */
-    // <<MINUTOS_HABILES
-    private const string MinutosHabilesDesdeAncla = @"
-          (DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) / 7) * 3150
-        + (CASE WHEN DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) % 7 > 5 THEN 5
-                ELSE DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) % 7 END) * 630
-        + CASE
-            WHEN DATEDIFF(DAY, CONVERT(date, N'19000101'), $M$) % 7 >= 5 THEN 0
-            WHEN DATEDIFF(MINUTE, CONVERT(date, $M$), $M$) <= 480 THEN 0
-            WHEN DATEDIFF(MINUTE, CONVERT(date, $M$), $M$) >= 1110 THEN 630
-            ELSE DATEDIFF(MINUTE, CONVERT(date, $M$), $M$) - 480 END";
-    // MINUTOS_HABILES>>
-
-    private static string MinutosHabiles(string momento)
-    {
-        return MinutosHabilesDesdeAncla.Replace("$M$", momento);
-    }
 
     /* SLA, horas de resolucion y reabierto, medidos contra la FIRMA DE
        SOLUCION. Es la definicion de 04_dashboard_sla.sql, calculada aqui con
@@ -362,6 +293,9 @@ OUTER APPLY (
          DentroSla        resuelto a tiempo; sin resolver y aun en tiempo
          HorasResolucion  de registro a firma de solucion; NULL si no hay
          EsReabierto      IntentosSolucion > 1 */
+    // "Ahora" en hora de Mexico: el servidor SQL va en UTC y FechaEstimadaResolucion
+    // en hora de Mexico. Con SYSDATETIME() cada ticket abierto salia vencido seis
+    // horas antes. Solo cambia el "ahora"; las fechas de la vista no se tocan.
     private const string SlaPorSolucion = @"
 CROSS APPLY (
     SELECT
@@ -370,13 +304,13 @@ CROSS APPLY (
             WHEN b.FechaEstimadaResolucion IS NULL THEN 0
             WHEN b.FechaFirmaSolucion IS NOT NULL
                 THEN CASE WHEN b.FechaFirmaSolucion > b.FechaEstimadaResolucion THEN 1 ELSE 0 END
-            WHEN SYSDATETIME() > b.FechaEstimadaResolucion THEN 1
+            WHEN DATEADD(HOUR, -6, SYSUTCDATETIME()) > b.FechaEstimadaResolucion THEN 1
             ELSE 0 END),
         DentroSla = CONVERT(bit, CASE
             WHEN b.FechaEstimadaResolucion IS NULL THEN 0
             WHEN b.FechaFirmaSolucion IS NOT NULL
                 THEN CASE WHEN b.FechaFirmaSolucion <= b.FechaEstimadaResolucion THEN 1 ELSE 0 END
-            WHEN SYSDATETIME() <= b.FechaEstimadaResolucion THEN 1
+            WHEN DATEADD(HOUR, -6, SYSUTCDATETIME()) <= b.FechaEstimadaResolucion THEN 1
             ELSE 0 END),
         HorasResolucion = CASE WHEN b.FechaFirmaSolucion IS NOT NULL
             THEN DATEDIFF(MINUTE, b.FechaRegistro, b.FechaFirmaSolucion) / 60.0 END,
@@ -565,8 +499,7 @@ CROSS APPLY (
          TicketsAbiertos  = de esos, los resueltos que aun esperan el cierre */
     public static Dictionary<string, object> Kpis(Filtros f)
     {
-        // Texto armado: PrimeraRespuesta no es constante (lleva el horario habil).
-        string sql = @"
+        const string sql = @"
 ;WITH base AS
 (
     SELECT
@@ -844,8 +777,7 @@ DROP TABLE #DistribucionAgg;";
        arriba lo recien resuelto. */
     public static List<Dictionary<string, object>> Detalle(Filtros f, int top)
     {
-        // Texto armado: PrimeraRespuesta no es constante (lleva el horario habil).
-        string sql = @"
+        const string sql = @"
 SELECT TOP (@TopSeguro)
     b.CodigoTicket,
     b.FechaRegistro,
@@ -960,120 +892,9 @@ ORDER BY b.FechaFirmaSolucion DESC;";
         }
     }
 
-    /* Grupos y tecnicos del Call Center, para acotar los dos <select> cuando
-       la barra de filtros esta en esa pestana.
-
-       Va APARTE de dbo.usp_Dash_Catalogos -que sigue sirviendo las listas
-       completas del tablero de SLA, sin tocar- y sale de la misma vista que
-       el resto de las consultas de este archivo, asi que la relacion
-       tecnico -> grupo es la que ya existe en los datos: no hay ninguna lista
-       de nombres escrita a mano.
-
-       Sin filtro de fechas, igual que el catalogo de SLA: la lista de un
-       filtro no puede encogerse por el rango que el usuario tenga puesto, o
-       el tecnico que eligio desapareceria al mover una fecha.
-
-       Los grupos se devuelven leidos de la vista y no desde la constante para
-       que salgan con la grafia y el espaciado exactos con que estan grabados
-       -el IN los encuentra igual, la colacion del servidor no distingue
-       mayusculas- y para que un grupo que no exista en los datos no aparezca
-       en el desplegable.
-
-       Los tecnicos se asignan a su grupo PRINCIPAL -en el que tienen mas
-       tickets-, no a cualquier grupo en el que aparezcan: la vista guarda el
-       grupo del ticket, no el del tecnico, y con un simple IN entraba al Call
-       Center cualquiera de otra area que alguna vez cerro un ticket de
-       Service Desk o End User. No hay tabla de pertenencia tecnico -> grupo;
-       el grupo con mas tickets es lo mas cercano que hay en los datos. */
-    public static Dictionary<string, object> CatalogosCallCenter()
-    {
-        const string sql = @"
-SELECT DISTINCT Grupo
-FROM dbo.vw_Dash_ProductividadBase
-WHERE Grupo IN ({0})
-ORDER BY Grupo;
-
-WITH PorGrupo AS (
-    SELECT Tecnico, Grupo, Tickets = COUNT_BIG(*)
-    FROM dbo.vw_Dash_ProductividadBase
-    WHERE Tecnico IS NOT NULL AND LTRIM(RTRIM(Tecnico)) <> N''
-    GROUP BY Tecnico, Grupo
-), Principal AS (
-    SELECT Tecnico, Grupo,
-           Orden = ROW_NUMBER() OVER (PARTITION BY Tecnico ORDER BY Tickets DESC, Grupo)
-    FROM PorGrupo
-)
-SELECT Tecnico
-FROM Principal
-WHERE Orden = 1
-  AND Grupo IN ({0})
-ORDER BY Tecnico;";
-
-        var resultados = new List<List<Dictionary<string, object>>>();
-
-        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
-        using (var cmd = new SqlCommand())
-        {
-            // Un parametro por grupo, como en EnLista(): los nombres no se
-            // concatenan nunca dentro del SQL.
-            var marcas = new StringBuilder();
-            for (int i = 0; i < GruposCallCenter.Length; i++)
-            {
-                var nombre = "@gcc" + i;
-                if (i > 0) marcas.Append(", ");
-                marcas.Append(nombre);
-                cmd.Parameters.Add(nombre, SqlDbType.NVarChar, 4000).Value = GruposCallCenter[i];
-            }
-
-            cmd.Connection = cn;
-            cmd.CommandType = CommandType.Text;
-            cmd.CommandText = string.Format(sql, marcas.ToString());
-
-            cn.Open();
-            using (var reader = cmd.ExecuteReader())
-            {
-                do
-                {
-                    var filas = new List<Dictionary<string, object>>();
-                    while (reader.Read())
-                    {
-                        var fila = new Dictionary<string, object>();
-                        for (int i = 0; i < reader.FieldCount; i++)
-                        {
-                            object valor = reader.GetValue(i);
-                            fila[reader.GetName(i)] = (valor is DBNull) ? null : valor;
-                        }
-                        filas.Add(fila);
-                    }
-                    resultados.Add(filas);
-                } while (reader.NextResult());
-            }
-        }
-
-        return new Dictionary<string, object>
-        {
-            { "grupos",   Columna(resultados, 0) },
-            { "tecnicos", Columna(resultados, 1) },
-        };
-    }
-
-    // Aplana un result set de una sola columna a ["valor", "valor", ...].
-    private static List<object> Columna(
-        List<List<Dictionary<string, object>>> resultados, int indice)
-    {
-        var salida = new List<object>();
-        if (resultados == null || indice < 0 || indice >= resultados.Count) return salida;
-
-        foreach (var fila in resultados[indice])
-        {
-            foreach (var valor in fila.Values)
-            {
-                if (valor != null) salida.Add(valor);
-                break;
-            }
-        }
-        return salida;
-    }
+    /* El catalogo del Call Center (grupos y tecnicos que atienden telefono)
+       vive en DashboardCatalogos.CallCenter(), con los demas catalogos de
+       los filtros. Lee esta misma vista y usa GruposCallCenter. */
 
     // ---------------------------------------------------------------------
     // Call Center: el filtro de Tecnicos

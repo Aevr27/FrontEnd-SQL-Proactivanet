@@ -1220,43 +1220,40 @@ function renderAll(){
   if(modoResumen==='director') renderResumen();
   else if(modoResumen==='po') renderResumenPorPO(fDir);
   if(modoResumen!=='oculto') renderChartEstados(cats);
-  // [Pendientes Claude #7]: se muestra con cualquier filtro de Director/PO
-  // activo; si esta corrida no trajo detalle de tickets, descargarTickets()
-  // avisa que no hay nada que exportar (ya no hay archivo fisico de respaldo).
+  // [Pendientes Claude #7]: se muestra con cualquier filtro de Director / PO /
+  // Manager / SO activo; descargarTickets() exporta con esos mismos cuatro.
   const btnDesc=document.getElementById('btnDescargaTickets');
   if(btnDesc) btnDesc.style.display=(fDir||fPO||fMgr||fSO)?'inline-block':'none';
 }
 
-// POR QUE NO BASTA CON P.tickets_detalle
-// -------------------------------------
-// handlers/experiencia.ashx solo llena tickets_detalle cuando recibe
-// ?detalle=N; por omision son 0 y devuelve la lista vacia (es el unico bloque
-// del payload que cuesta decenas de miles de filas, y el tablero -- KPIs,
-// graficas, categorias -- no lo necesita para nada). La carga inicial no pasa
-// ese parametro, asi que en la VM el arreglo siempre llega vacio y el export
-// moria en "No hay tickets".
-//
-// Ninguna otra llave trae tickets individuales: categorias y categorias_v2
-// son conteos agregados por categoria (vol_slot/vol_mes) y
-// categorias_por_folio va indexada por folio de Problem, no de ticket.
-//
-// Asi que el detalle se pide al MISMO handler, una sola vez, cuando se pulsa
-// el boton -- no en la carga del tablero, que ya pesa 1.6 MB sin el. El
-// resultado se guarda en memoria: dos descargas seguidas no vuelven a pedirlo.
-const TOPE_TICKETS = 50000;      // el mismo tope que impone el handler
-let ticketsCache = (P.tickets_detalle && P.tickets_detalle.length) ? P.tickets_detalle : null;
-let ticketsPidiendo = null;
-function pedirTickets(){
-  if(ticketsCache) return Promise.resolve(ticketsCache);
-  if(!ticketsPidiendo){
-    const url=new URL(API_URL);
-    url.searchParams.set('detalle', String(TOPE_TICKETS));
-    ticketsPidiendo=traer(url.href).then(d=>{
-      ticketsCache=(d && d.tickets_detalle) || [];
-      return ticketsCache;
-    }).catch(e=>{ ticketsPidiendo=null; throw e; });
+// EL DETALLE SE PIDE APARTE, YA FILTRADO
+// --------------------------------------
+// El payload del tablero no trae tickets individuales (son decenas de miles
+// de filas que solo sirven al exportar). Al pulsar el boton se pide a
+// handlers/experiencia_exportar.ashx el periodo que se esta viendo -SLOT 0, o
+// el mes P.mes_actual del año P.anio- y los cuatro filtros de dueños. El
+// servidor resuelve periodo y dueños con la misma logica que las filas de
+// categoria y devuelve solo los tickets que van al libro, sin tope.
+const EXPORT_URL = new URL('../handlers/experiencia_exportar.ashx', BASE).href;
+async function pedirTicketsExport(){
+  const url=new URL(EXPORT_URL);
+  const esMes=modoTiempo==='mes';
+  url.searchParams.set('modo', esMes ? 'mes' : 'slot');
+  if(esMes){
+    // El mock no trae anio: en ese caso el tablero se armo con el año en curso.
+    url.searchParams.set('anio', String(P.anio || new Date().getFullYear()));
+    url.searchParams.set('mes', String(P.mes_actual));
   }
-  return ticketsPidiendo;
+  [['director',fDir],['po',fPO],['manager',fMgr],['so',fSO]].forEach(([k,v])=>{
+    if(v) url.searchParams.set(k, v);
+  });
+  const resp=await fetch(url.href, {headers: {'Accept': 'application/json'}});
+  let datos=null;
+  try{ datos=await resp.json(); }catch(e){ /* cuerpo no JSON: se reporta abajo */ }
+  // El handler responde {error} con 400/500: se prefiere su mensaje al HTTP.
+  if(!resp.ok || !datos || datos.error)
+    throw new Error((datos && datos.error) || ('HTTP '+resp.status+' '+resp.statusText));
+  return datos;
 }
 
 // SheetJS se trae la primera vez que se pulsa el boton, no al cargar el
@@ -1498,14 +1495,33 @@ const LibroTickets = (function () {
     });
   }
 
+  /* Tope de Excel por celda: 32.767 caracteres. SheetJS lo hace cumplir al
+     escribir -"Text length must not exceed 32767 characters"- y un solo valor
+     de mas tumbaba el libro entero (REQ 2026-396620: Descripcion de 38.036).
+     Se aplica SOLO a lo que va al libro; los datos del ticket no se tocan.
+     Lo que cabe sale igual. Lo que no, se corta siempre en el mismo punto y
+     termina con un aviso, para que nadie lo lea como el texto completo; aviso
+     incluido, la celda mide exactamente el tope. El corte no parte un par
+     sustituto UTF-16 (un emoji, por ejemplo). */
+  const LIMITE_CELDA = 32767;
+  function ajustarCelda(valor) {
+    if (typeof valor !== 'string' || valor.length <= LIMITE_CELDA) return valor;
+    const aviso = ' … [recortado: ' + valor.length + ' caracteres en origen]';
+    let corte = LIMITE_CELDA - aviso.length;
+    const c = valor.charCodeAt(corte - 1);
+    if (c >= 0xD800 && c <= 0xDBFF) corte--;
+    return valor.slice(0, corte) + aviso;
+  }
+
   /* Construye el .xlsx y devuelve sus bytes. `XLSX` entra por parametro -no
      se toca window- para que la prueba pueda pasarle el mismo vendor.
 
      opciones: { titulo, subtitulo, meta, etiquetaTotal, encabezados, filas,
                  anchos, largas, colEstado, hoja } */
   function construir(XLSX, opciones) {
+    const datos = opciones.filas.map(function (f) { return f.map(ajustarCelda); });
     const compuesto = componer(opciones.titulo, opciones.subtitulo,
-      opciones.meta, opciones.encabezados, opciones.filas);
+      opciones.meta, opciones.encabezados, datos);
     const aoa = compuesto.aoa;
 
     const hoja = XLSX.utils.aoa_to_sheet(aoa);
@@ -1539,7 +1555,7 @@ const LibroTickets = (function () {
       largas: opciones.largas || [],
       colEstado: opciones.colEstado === undefined ? -1 : opciones.colEstado,
       valorEstado: function (fila) {
-        const f = opciones.filas[fila - compuesto.filaEncabezado - 1];
+        const f = datos[fila - compuesto.filaEncabezado - 1];
         return f ? f[opciones.colEstado] : '';
       },
     };
@@ -1552,12 +1568,14 @@ const LibroTickets = (function () {
     return XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
   }
 
-  return { construir: construir, estiloEstado: estiloEstado, ESTILOS: E };
+  return { construir: construir, estiloEstado: estiloEstado, ajustarCelda: ajustarCelda,
+           LIMITE_CELDA: LIMITE_CELDA, ESTILOS: E };
 })();
 /* === LIBRO XLSX (fin) === */
 
 /* === COLUMNAS XLSX (inicio) ===
-   Las 24 columnas del export, en el orden pedido: [llave de tickets_detalle,
+   Las 24 columnas del export, en el orden pedido: [llave del ticket que manda
+   experiencia_exportar.ashx,
    encabezado, ancho]. El encabezado es el nombre del campo en dbo.vw_Tickets.
    Categoria y Tipo leen las llaves *_origen (los campos crudos), no
    categoria_raw/tipo, que son CategoriaV2 y TipoTicket de la vista de slots.
@@ -1597,27 +1615,18 @@ function filaTicket(t, cols) {
 // [Pendientes Claude #7]: descarga XLSX de los tickets del periodo vigente
 // (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
 // filtrados por Director/PO/Manager/Service Owner -- los mismos cuatro que
-// habilitan el boton. El detalle se pide al handler al pulsar (ver
-// pedirTickets); el libro se arma en memoria con SheetJS
-// (vendor/xlsx.mini.min.js) y se descarga sin backend: ya no se busca
-// ningun archivo fisico en la carpeta del tablero.
+// habilitan el boton. Los tickets llegan ya filtrados del servidor (ver
+// pedirTicketsExport); el libro se arma en memoria con SheetJS
+// (vendor/xlsx.mini.min.js).
 async function descargarTickets(){
   const btn=document.getElementById('btnDescargaTickets');
   const rotulo=btn?btn.textContent:'';
   if(btn){ btn.disabled=true; btn.textContent='Preparando...'; }
   try{
-    let tickets;
-    try{ tickets=await pedirTickets(); }
+    let datos;
+    try{ datos=await pedirTicketsExport(); }
     catch(e){ console.error(e); alert('No se pudo traer el detalle de tickets: '+e.message); return; }
-    // El handler corta con TOP (@tope) ORDER BY FechaRegistro DESC: si vino
-    // justo el tope, lo que falta son los mas viejos y conviene decirlo.
-    if(tickets.length>=TOPE_TICKETS)
-      alert('El servidor devolvio el maximo de '+TOPE_TICKETS+' tickets; puede '
-           +'faltar lo mas antiguo del periodo. El archivo se genera con lo recibido.');
-    const periodoOk = t => modoTiempo==='mes' ? t.mes===P.mes_actual : t.slot===0;
-    const filtrados=tickets.filter(t=>
-      periodoOk(t) && (!fDir || t.director===fDir) && (!fPO || t.po===fPO)
-      && (!fMgr || t.manager===fMgr) && (!fSO || t.so===fSO));
+    const filtrados=datos.tickets||[];
     if(!filtrados.length){ alert('No hay tickets para el filtro y periodo actuales.'); return; }
     const cols=COLUMNAS_TICKETS;
     // Matriz (no json_to_sheet) para fijar el orden de columnas y forzar texto:
@@ -1631,11 +1640,12 @@ async function descargarTickets(){
        `cols`-; lo que cambia es la presentacion, que la arma LibroTickets: una
        cabecera de reporte, los filtros con los que se genero y la tabla con
        encabezado fijo, autofiltro y filas alternas. Los metadatos salen SOLO
-       de lo que ya tiene el tablero: el periodo vigente (el mismo que decide
-       `periodoOk`), los cuatro filtros -"Todos" cuando no hay uno puesto-, el
-       total de filas exportadas y la fecha del equipo. */
+       de lo que ya tiene el tablero y de lo que confirmo el servidor: el
+       periodo exportado (en Mes, con el año que devolvio el handler), los
+       cuatro filtros -"Todos" cuando no hay uno puesto-, el total de filas
+       exportadas y la fecha del equipo. */
     const periodo = modoTiempo==='mes'
-      ? (P.meses[P.mes_nums.indexOf(P.mes_actual)] || 'Mes actual')
+      ? ((P.meses[P.mes_nums.indexOf(P.mes_actual)] || 'Mes actual') + (datos.anio ? ' '+datos.anio : ''))
       : (P.slots[0] || '0-30 dias');
     const bytes = LibroTickets.construir(XLSX, {
       hoja: 'Tickets',
@@ -2141,11 +2151,12 @@ function renderResumenPorPO(dir){
 
 // ---- selectores encadenados ----
 const selDir=document.getElementById('selDir'), selPO=document.getElementById('selPO');
-P.directores.forEach(d=>selDir.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(d)}">${esc(d)}</option>`));
+// Las <option> salen de Catalogos (assets/js/catalogos.js); que lista va en
+// cada select y como se encadenan sigue siendo de aqui.
+selDir.insertAdjacentHTML('beforeend',Catalogos.opciones(P.directores));
 function fillPO(){
-  selPO.innerHTML='<option value="">— Todos —</option>';
   const pos = fDir? (P.jerarquia[fDir]||[]) : [...new Set(P.categorias.map(c=>c.po).filter(Boolean))].sort();
-  pos.forEach(p=>selPO.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(p)}">${esc(p)}</option>`));
+  Catalogos.llenar(selPO,pos,'— Todos —');
 }
 selDir.onchange=()=>{fDir=selDir.value;fPO='';fillPO();renderAll();};
 selPO.onchange=()=>{fPO=selPO.value;renderAll();};
@@ -2154,12 +2165,11 @@ selPO.onchange=()=>{fPO=selPO.value;renderAll();};
 // Service Owner reporta a un Manager, ver TAREA 1 / generar.py so_manager).
 // Se combinan con Director/PO via AND (pasaFiltroGlobal), no se excluyen.
 const selMgr=document.getElementById('selMgr'), selSO=document.getElementById('selSO');
-(P.managers||[]).forEach(m=>selMgr.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(m)}">${esc(m)}</option>`));
+selMgr.insertAdjacentHTML('beforeend',Catalogos.opciones(P.managers||[]));
 function fillSO(){
-  selSO.innerHTML='<option value="">— Todos —</option>';
   const sos = fMgr ? ((P.jerarquia_mgr||{})[fMgr]||[])
     : [...new Set(P.categorias.map(c=>c.so).filter(Boolean))].sort();
-  sos.forEach(s=>selSO.insertAdjacentHTML('beforeend',`<option value="${Escape.attr(s)}">${esc(s)}</option>`));
+  Catalogos.llenar(selSO,sos,'— Todos —');
 }
 selMgr.onchange=()=>{fMgr=selMgr.value;fSO='';fillSO();renderAll();};
 selSO.onchange=()=>{fSO=selSO.value;renderAll();};

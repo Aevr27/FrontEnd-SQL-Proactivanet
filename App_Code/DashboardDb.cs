@@ -73,26 +73,11 @@ public static class DashboardDb
 }
 
 // Utilidades de los handlers del tablero de Backlog.
+// Los catalogos (c1, grupos, lideres, fechas) no estan aqui: los sirve
+// DashboardCatalogos.Backlog(), que aplana cada result set con
+// DashboardCatalogos.Columna.
 public static class BacklogUtil
 {
-    // Saca una sola columna de uno de los result sets como lista plana.
-    // Los catalogos devuelven 4 result sets de una columna cada uno; asi el
-    // JSON queda como ["Grupo A","Grupo B"] en vez de [{"Grupo":"Grupo A"}].
-    public static List<object> Columna(
-        List<List<Dictionary<string, object>>> resultados, int indice, string columna)
-    {
-        var salida = new List<object>();
-        if (resultados == null || indice >= resultados.Count) return salida;
-
-        foreach (var fila in resultados[indice])
-        {
-            object valor;
-            if (fila.TryGetValue(columna, out valor) && valor != null)
-                salida.Add(valor);
-        }
-        return salida;
-    }
-
     // Los filtros del tablero viajan como listas separadas por coma
     // (multiselect). Vacio = sin filtro, que es NULL para los procedimientos.
     public static Dictionary<string, object> Filtros(HttpRequest request)

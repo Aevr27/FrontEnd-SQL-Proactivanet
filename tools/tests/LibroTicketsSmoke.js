@@ -63,7 +63,7 @@ var PEDIDOS = ['FechaRegistro', 'FechaEstimadaResolucion', 'CodigoTicket', 'Grup
   'FechaUltimaModificacion', 'FechaFirmaCierre', 'FirmaCierreRevocacion', 'FirmaSolucion',
   'ResponsableUltimaModificacion', 'NotificadoPor', 'Tipo', 'RegistradoPor', 'TipoRelacion'];
 
-// Las llaves que escribe LeerTicketsDetalle (App_Code/ExperienciaQueries.cs):
+// Las llaves que escribe LeerTicketsExport (App_Code/ExperienciaQueries.cs):
 // si una columna apunta a una llave que el servidor no manda, saldria vacia.
 var servidor = fs.readFileSync(path.join(raiz, 'App_Code', 'ExperienciaQueries.cs'), 'utf8');
 var llavesServidor = {};
@@ -114,7 +114,7 @@ Check('son 24 columnas', '24', String(COLS.length));
 Check('los encabezados son los 24 pedidos, en su orden', PEDIDOS.join('|'), ENCABEZADOS.join('|'));
 Check('ninguna llave repetida', String(COLS.length),
   String(Object.keys(COLS.reduce(function (o, c) { o[c[0]] = 1; return o; }, {})).length));
-Check('cada llave la manda LeerTicketsDetalle', '',
+Check('cada llave la manda LeerTicketsExport', '',
   COLS.filter(function (c) { return !llavesServidor[c[0]]; }).map(function (c) { return c[0]; }).join(','));
 Check('Categoria y Tipo son los campos crudos, no CategoriaV2/TipoTicket', 'true',
   FILAS[0].indexOf('NO-EXPORTAR') < 0);
@@ -205,6 +205,73 @@ Check('Pendiente lleva enfasis ambar', String(E.ESTADO_AMBAR), String(LibroTicke
 Check('Reabierto lleva enfasis rojo', String(E.ESTADO_ROJO), String(LibroTickets.estiloEstado('Reabierto')));
 Check('un estado desconocido no se pinta', 'null', String(LibroTickets.estiloEstado('Estado desconocido')));
 Check('el valor del estado no cambia', 'Reabierto', matriz[iEnc + 3][PEDIDOS.indexOf('Estado')]);
+
+// --------------------------------------------------- tope de Excel por celda
+// Regresion de REQ 2026-396620: una Descripcion de 38.036 caracteres hacia
+// que XLSX.write() tronara con "Text length must not exceed 32767
+// characters" y el libro entero no se descargaba.
+var LIMITE = LibroTickets.LIMITE_CELDA;
+Check('el tope es el de Excel', '32767', String(LIMITE));
+
+var iDesc = PEDIDOS.indexOf('Descripcion');
+var LARGA = 'en la semana del 05 al 11 se presentaron detalles ';
+while (LARGA.length < 38036) LARGA += 'renglon de bitacora pegado en el ticket; ';
+LARGA = LARGA.slice(0, 38036);
+var NORMAL = 'Descripcion normal del ticket, con acentos: Técnico, información.';
+var EXACTA = 'x'.repeat(LIMITE);
+var EMOJI = String.fromCharCode(0xD83D, 0xDE00);
+var CON_EMOJI = 'a'.repeat(LIMITE - 45) + EMOJI.repeat(40);
+
+function ticketCon(desc, f) {
+  var t = { estado: 'Pendiente', codigo: 'REQ 2026-39662' + f };
+  COLS.forEach(function (c) { if (!(c[0] in t)) t[c[0]] = c[1] + '#' + f; });
+  t.descripcion = desc;
+  return Columnas.fila(t, COLS);
+}
+var FILAS_LARGAS = [ticketCon(LARGA, 0), ticketCon(NORMAL, 1), ticketCon(EXACTA, 2)];
+var copiaAntes = JSON.stringify(FILAS_LARGAS);
+
+var bytesLargos = null, errorLargo = '';
+try {
+  bytesLargos = LibroTickets.construir(XLSX, {
+    hoja: 'Tickets', titulo: 'Tickets — Dashboard Export', subtitulo: 'Tablero de Experiencia',
+    meta: META, etiquetaTotal: 'Total de tickets', encabezados: ENCABEZADOS, filas: FILAS_LARGAS,
+    anchos: COLS.map(function (c) { return c[2]; }), largas: [iDesc],
+    colEstado: COLS.findIndex(function (c) { return c[0] === 'estado'; }),
+  });
+} catch (e) { errorLargo = e.message; }
+Check('una Descripcion de 38.036 caracteres ya no hace tronar XLSX.write()', '', errorLargo);
+Check('las filas de entrada no se modifican', 'true', JSON.stringify(FILAS_LARGAS) === copiaAntes);
+
+if (bytesLargos) {
+  var hojaL = XLSX.read(Buffer.from(bytesLargos), { type: 'buffer' }).Sheets.Tickets;
+  var matL = XLSX.utils.sheet_to_json(hojaL, { header: 1, raw: false, defval: '' });
+  var eL = -1;
+  for (var r = 0; r < matL.length; r++) if (matL[r][0] === ENCABEZADOS[0]) { eL = r; break; }
+  var celda = function (f) { return String(matL[eL + 1 + f][iDesc]); };
+  var AVISO = ' … [recortado: 38036 caracteres en origen]';
+
+  var larga = celda(0);
+  Check('la celda larga queda exactamente en el tope', String(LIMITE), String(larga.length));
+  Check('conserva el inicio del texto original', 'true', larga.indexOf(LARGA.slice(0, 1000)) === 0);
+  Check('termina con el aviso de recorte y el largo original', 'true',
+    larga.slice(-AVISO.length) === AVISO);
+  Check('el recorte es determinista', 'true',
+    LibroTickets.ajustarCelda(LARGA) === LibroTickets.ajustarCelda(LARGA) && LibroTickets.ajustarCelda(LARGA) === larga);
+  Check('una descripcion normal sale identica', NORMAL, celda(1));
+  Check('una de 32.767 exactos sale identica, sin aviso', 'true', celda(2) === EXACTA);
+  Check('siguen siendo 24 columnas', '24', String(matL[eL].length));
+  var otras = true;
+  for (var f2 = 0; f2 < FILAS_LARGAS.length; f2++)
+    for (var c2 = 0; c2 < ENCABEZADOS.length; c2++)
+      if (c2 !== iDesc && String(matL[eL + 1 + f2][c2]) !== FILAS_LARGAS[f2][c2]) otras = false;
+  Check('las demas columnas no cambian', 'true', otras);
+}
+
+var emo = LibroTickets.ajustarCelda(CON_EMOJI);
+var ultimo = emo.charCodeAt(emo.indexOf(' … [recortado') - 1);
+Check('el corte no parte un emoji a la mitad', 'false', ultimo >= 0xD800 && ultimo <= 0xDBFF);
+Check('y aun asi no pasa del tope', 'true', emo.length <= LIMITE);
 
 console.log(fallos ? ('FALLOS: ' + fallos) : 'TODO PASA');
 process.exit(fallos ? 1 : 0);
