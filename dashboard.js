@@ -372,13 +372,12 @@ function seleccionados(id) {
 
 function estadoCargando(id) { DatosInfo.mensaje(id, 'Cargando...'); }
 
-/* Pastilla de la cabecera: solo "Última actualización", sacada de kpis.meta
-   por DatosInfo (assets/js/datos-info.js). El periodo NO se pinta en ninguna
-   pestaña (periodo: false): se quito de la UI, igual que los pies de fuente.
-   El mismo nodo sirve para "Cargando...", el error y el aviso de carga
-   parcial. */
+/* Pastilla de la cabecera: "Última actualización" (y "Periodo" cuando la
+   pestaña no lo oculta), sacada de kpis.meta por DatosInfo
+   (assets/js/datos-info.js). El mismo nodo sirve para "Cargando...", el error
+   y el aviso de carga parcial. */
 function estadoOk(id, meta, opciones) {
-  DatosInfo.pintar(id, meta, { ...opciones, periodo: false });
+  DatosInfo.pintar(id, meta, opciones);
 }
 
 function estadoError(id, err) {
@@ -395,7 +394,6 @@ function estadoParcial(id, meta, fallos, opciones) {
   const nombres = fallos.map(f => f.nombre).join(', ');
   DatosInfo.pintar(id, meta, {
     ...opciones,
-    periodo: false,
     sufijo: ` · ⚠ sin datos de: ${nombres}`,
     titulo: fallos.map(f => `${f.nombre}: ${f.error && f.error.message}`).join('\n'),
   });

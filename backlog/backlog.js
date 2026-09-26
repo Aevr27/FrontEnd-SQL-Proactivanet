@@ -139,10 +139,10 @@ function seleccionados(id) {
 
 function estadoCargando(id) { DatosInfo.mensaje(id, 'Cargando...'); }
 
-// Pastilla de la cabecera: solo "Última actualización" (resumen.meta); el
-// periodo no se pinta. El mismo nodo sirve para "Cargando..." y el error.
+// Pastilla de la cabecera con el sello de resumen.meta (un corte: no trae
+// periodo). El mismo nodo sirve para "Cargando..." y el error.
 function estadoOk(id, meta, opciones) {
-  DatosInfo.pintar(id, meta, Object.assign({}, opciones, { periodo: false }));
+  DatosInfo.pintar(id, meta, opciones);
 }
 
 function estadoError(id, err) {

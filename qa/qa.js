@@ -317,12 +317,12 @@
   }
 
   function pintarTablero(datos) {
-    /* Pastilla de la cabecera: solo "Última actualización" de datos.dataInfo
-       (el fin del ultimo ETL en dbo.EtlLog, via qa.ashx). El periodo y el
-       resto de la procedencia (datos.source: origen, tickets en el rango,
-       vista, consultado) ya no se muestran; siguen llegando por
+    /* Pastilla de la cabecera: "Última actualización" y "Periodo" de
+       datos.dataInfo (el sello es el fin del ultimo ETL en dbo.EtlLog, via
+       qa.ashx). El resto de la procedencia (datos.source: origen, tickets en
+       el rango, vista, consultado) ya no se muestra; sigue llegando por
        compatibilidad. */
-    DatosInfo.pintar($('chip-fecha'), datos.dataInfo, { periodo: false });
+    DatosInfo.pintar($('chip-fecha'), datos.dataInfo);
     pintarKpis(datos.summary, datos.historico);
     pintarGrupo(datos.porGrupo || []);
     pintarTecnico(datos.porTecnico || []);

@@ -543,13 +543,12 @@
     pintarMatriz(d.confirmacionVsQa, errores.confirmacionVsQa);
 
     var fallidos = Object.keys(errores);
-    // Pastilla de la cabecera: solo "Última actualización" de d.dataInfo; el
-    // periodo no se pinta. Si fallo algun dataset se agrega el aviso.
+    // Pastilla de la cabecera: "Última actualización" y "Periodo" de
+    // d.dataInfo. Si fallo algun dataset se agrega el aviso.
     DatosInfo.pintar($('estado'), d.dataInfo, fallidos.length ? {
-      periodo: false,
       sufijo: ' · ⚠ sin datos de: ' + fallidos.join(', '),
       titulo: fallidos.map(function (k) { return k + ': ' + errores[k]; }).join('\n'),
-    } : { periodo: false });
+    } : undefined);
     fallidos.forEach(function (k) { console.error('[QARE ' + k + ']', errores[k]); });
 
     var avisos = (d.avisos || []).concat(errores.kpis ? ['KPIs: ' + errores.kpis] : []);
