@@ -139,10 +139,10 @@ function seleccionados(id) {
 
 function estadoCargando(id) { DatosInfo.mensaje(id, 'Cargando...'); }
 
-// El sello de frescura (resumen.meta) ya no se muestra: el nodo se vacia y
-// queda solo para "Cargando..." y el error. El metadato sigue llegando.
+// Pastilla de la cabecera: solo "Última actualización" (resumen.meta); el
+// periodo no se pinta. El mismo nodo sirve para "Cargando..." y el error.
 function estadoOk(id, meta, opciones) {
-  DatosInfo.pintar(id, null, opciones);
+  DatosInfo.pintar(id, meta, Object.assign({}, opciones, { periodo: false }));
 }
 
 function estadoError(id, err) {

@@ -254,9 +254,20 @@ const LIGA_DETALLE = Escape.url(P.liga_detalle);
     const m=document.getElementById('ligaModal');
     if(m){m.href=url;}
   }
-  /* El sello de frescura y periodo (DatosInfo sobre P.meta) ya no se pinta:
-     se quito de la UI. El backend sigue mandando P.meta por compatibilidad;
-     #corteFecha se queda vacio y experiencia.css lo esconde. */
+  /* Pastilla de la cabecera: solo "Última actualización" de P.meta (el
+     backend la arma en App_Code/ExperienciaQueries.cs). El periodo no se
+     pinta. El mock guardado no trae P.meta: ahi se cae a fecha_actualizacion,
+     que ya viene como dd/MM/yyyy. */
+  const cf=document.getElementById('corteFecha');
+  if(cf && P.meta){
+    DatosInfo.pintar(cf, P.meta, {periodo:false});
+  } else if(cf && P.fecha_actualizacion){
+    DatosInfo.pintar(cf, DatosInfo.armar({
+      fuente: 'Experiencia al Usuario',
+      sello: P.fecha_actualizacion,
+      origen: 'Corte guardado en data/experiencia.mock.json',
+    }), {periodo:false});
+  }
 })();
 
 // ---- filtrar categorias segun Director / PO ----

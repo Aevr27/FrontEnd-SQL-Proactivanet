@@ -543,21 +543,18 @@
     pintarMatriz(d.confirmacionVsQa, errores.confirmacionVsQa);
 
     var fallidos = Object.keys(errores);
-    // d.dataInfo sigue llegando pero ya no se pinta: el nodo solo queda para
-    // "Cargando…", el error y el aviso de datasets que fallaron.
-    DatosInfo.pintar($('estado'), null, fallidos.length ? {
+    // Pastilla de la cabecera: solo "Última actualización" de d.dataInfo; el
+    // periodo no se pinta. Si fallo algun dataset se agrega el aviso.
+    DatosInfo.pintar($('estado'), d.dataInfo, fallidos.length ? {
+      periodo: false,
       sufijo: ' · ⚠ sin datos de: ' + fallidos.join(', '),
       titulo: fallidos.map(function (k) { return k + ': ' + errores[k]; }).join('\n'),
-    } : undefined);
+    } : { periodo: false });
     fallidos.forEach(function (k) { console.error('[QARE ' + k + ']', errores[k]); });
 
     var avisos = (d.avisos || []).concat(errores.kpis ? ['KPIs: ' + errores.kpis] : []);
     $('avisos').hidden = !avisos.length;
     $('avisos').innerHTML = avisos.map(function (a) { return '<div>' + esc(a) + '</div>'; }).join('');
-
-    // Las fechas que se mandaron a @FechaInicio/@FechaFin, sin retocar.
-    $('pie-rango').textContent = 'Rango consultado: ' + (DatosInfo.fecha(d.fechaInicio) || '?') +
-      ' – ' + (DatosInfo.fecha(d.fechaFin) || '?');
   }
 
   function cargar() {

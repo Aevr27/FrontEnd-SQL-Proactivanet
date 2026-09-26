@@ -372,16 +372,13 @@ function seleccionados(id) {
 
 function estadoCargando(id) { DatosInfo.mensaje(id, 'Cargando...'); }
 
-/* Nodo de estado de la cabecera.
-
-   Ya NO se pinta el sello de frescura ni el periodo (fuente, "Última
-   actualización", "Periodo" y su tooltip de origen): se quito de la UI. El
-   metadato -kpis.meta en SLA y Call Center- sigue llegando del backend y se
-   sigue recibiendo aqui por compatibilidad, pero no se muestra. Con carga
-   completa el nodo se vacia y el CSS lo esconde; el mismo nodo sigue sirviendo
-   para "Cargando...", el error y el aviso de carga parcial. */
+/* Pastilla de la cabecera: solo "Última actualización", sacada de kpis.meta
+   por DatosInfo (assets/js/datos-info.js). El periodo NO se pinta en ninguna
+   pestaña (periodo: false): se quito de la UI, igual que los pies de fuente.
+   El mismo nodo sirve para "Cargando...", el error y el aviso de carga
+   parcial. */
 function estadoOk(id, meta, opciones) {
-  DatosInfo.pintar(id, null, opciones);
+  DatosInfo.pintar(id, meta, { ...opciones, periodo: false });
 }
 
 function estadoError(id, err) {
@@ -396,8 +393,9 @@ function estadoParcial(id, meta, fallos, opciones) {
   if (!fallos || !fallos.length) return estadoOk(id, meta, opciones);
 
   const nombres = fallos.map(f => f.nombre).join(', ');
-  DatosInfo.pintar(id, null, {
+  DatosInfo.pintar(id, meta, {
     ...opciones,
+    periodo: false,
     sufijo: ` · ⚠ sin datos de: ${nombres}`,
     titulo: fallos.map(f => `${f.nombre}: ${f.error && f.error.message}`).join('\n'),
   });
@@ -3685,9 +3683,9 @@ const TableroSla = (function () {
     Object.keys(filtro).forEach(k => { filtro[k] = null; });
     invalidarFilas();
     renderTodo();
-    /* kpis.meta trae el sello del ETL y el rango que la consulta USO. Ya no
-       se dibuja ninguno de los dos en la cabecera (ver estadoOk); la cabecera
-       solo muestra el aviso si algun dataset fallo. meta sigue viajando. */
+    /* kpis.meta trae el sello del ETL y el rango que la consulta USO. En la
+       cabecera solo se dibuja el sello (ver estadoOk); el rango ya esta en la
+       barra de filtros y sigue viajando en meta. */
     estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.meta, fallos, { periodo: false });
 
     /* Y ya con el tablero pintado, se calientan en segundo plano los SLOTs

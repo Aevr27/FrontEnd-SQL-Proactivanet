@@ -317,7 +317,12 @@
   }
 
   function pintarTablero(datos) {
-    pintarOrigen(datos);
+    /* Pastilla de la cabecera: solo "Última actualización" de datos.dataInfo
+       (el fin del ultimo ETL en dbo.EtlLog, via qa.ashx). El periodo y el
+       resto de la procedencia (datos.source: origen, tickets en el rango,
+       vista, consultado) ya no se muestran; siguen llegando por
+       compatibilidad. */
+    DatosInfo.pintar($('chip-fecha'), datos.dataInfo, { periodo: false });
     pintarKpis(datos.summary, datos.historico);
     pintarGrupo(datos.porGrupo || []);
     pintarTecnico(datos.porTecnico || []);
@@ -361,31 +366,6 @@
       });
   }
 
-  // El bloque "source" describe de donde salieron los datos y que ventana
-  // cubren. Deliberadamente no trae servidor, base ni usuario: esto lo ve el
-  // navegador.
-  function pintarOrigen(datos) {
-    var src = datos.source || {};
-    var desde = fechaCorta(src.fechaInicio);
-    var hasta = fechaCorta(src.fechaFin);
-
-    /* El sello de frescura y periodo (DatosInfo sobre datos.dataInfo) ya no
-       se pinta: se quito de la UI. qa.ashx sigue mandando dataInfo por
-       compatibilidad; #qa-chip-fecha se queda vacio. */
-
-    var partes = [];
-    partes.push('Origen: ' + (src.origen || 'no informado'));
-    if (src.ticketsRows !== null && src.ticketsRows !== undefined) {
-      partes.push(NUM.format(src.ticketsRows) + ' tickets en el rango');
-    }
-    $('sub-fuente').textContent = partes.join(' · ');
-
-    var pie = [];
-    if (src.vista) pie.push('Vista: ' + src.vista);
-    if (desde && hasta) pie.push('Rango: ' + desde + ' – ' + hasta);
-    if (src.consultadoEn) pie.push('Consultado: ' + fechaHora(src.consultadoEn));
-    $('pie-fuente').textContent = pie.join(' · ');
-  }
 
   // ----------------------------------------------------------------- KPIs
   function tarjeta(clase, titulo, valor, nota) {
