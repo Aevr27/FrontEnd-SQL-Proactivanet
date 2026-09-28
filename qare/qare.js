@@ -134,6 +134,21 @@
     return { inicio: isoDia(fin - (dias - 1)), fin: isoDia(fin) };
   }
 
+  /* Query string de qare.ashx: el rango de fechas y los filtros del Backlog
+     (c1, grupos, lideres) como listas separadas por comas, igual que
+     paramsFiltros() de backlog.js. Un filtro vacio no se manda: vacio =
+     todos, y asi la peticion sin filtros es la misma de siempre. */
+  var FILTROS_ORG = ['c1', 'grupos', 'lideres'];
+
+  function consulta(fi, ff, filtros) {
+    var partes = ['fecha_inicio=' + encodeURIComponent(fi), 'fecha_fin=' + encodeURIComponent(ff)];
+    FILTROS_ORG.forEach(function (clave) {
+      var valores = ((filtros && filtros[clave]) || []).filter(function (v) { return v !== '' && v != null; });
+      if (valores.length) partes.push(clave + '=' + encodeURIComponent(valores.join(',')));
+    });
+    return partes.join('&');
+  }
+
   /* Pie de una tarjeta KPI: "X de Y" con el denominador que manda el SP
      (TicketsConRespuesta*, TicketsConFrecuencia). Cada porcentaje tiene el
      suyo, distinto del total del periodo. No se recalcula nada. */
@@ -197,6 +212,7 @@
     rangoRapido: rangoRapido, diaMexico: diaMexico, pieKpi: pieKpi,
     etiquetaFrecuencia: etiquetaFrecuencia, notaFrecuencia: notaFrecuencia,
     ordenFrecuencia: ordenFrecuencia, ORDEN_FRECUENCIA: ORDEN_FRECUENCIA,
+    consulta: consulta, FILTROS_ORG: FILTROS_ORG,
     filasRecurrentes: filasRecurrentes,
   };
   raiz.QareDatos = QareDatos;
@@ -204,11 +220,16 @@
   // ============================================================ 2. tablero
   if (typeof document === 'undefined') return;
 
-  var API = (function () {
+  function ruta(handler) {
     var yo = document.currentScript && document.currentScript.src;
-    try { return new URL('../handlers/qare.ashx', yo).href; }
-    catch (e) { return 'handlers/qare.ashx'; }
-  })();
+    try { return new URL('../handlers/' + handler, yo).href; }
+    catch (e) { return 'handlers/' + handler; }
+  }
+  var API = ruta('qare.ashx');
+  // Las listas de Servicio / Grupos / Lideres son las del Backlog: el diag
+  // de la VM (sql/diag_qare_filtros_precheck.sql) confirmo que cubren a todos
+  // los tickets de QARE.
+  var API_CATALOGOS = ruta('backlog_catalogos.ashx');
 
   var PREFIJO = 'qare-';
   function $(id) { return document.getElementById(PREFIJO + id); }
@@ -607,9 +628,8 @@
   }
 
   // ------------------------------------------------------------ peticion
-  function pedir(fi, ff) {
-    var url = API + '?fecha_inicio=' + encodeURIComponent(fi) + '&fecha_fin=' + encodeURIComponent(ff);
-    return fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+  function pedir(qs) {
+    return fetch(API + '?' + qs, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
       .then(function (resp) {
         return resp.text().then(function (texto) {
           var datos = null;
@@ -689,9 +709,57 @@
 
     var token = ++peticion;
     enEspera();
-    pedir(fi, ff)
+    pedir(consulta(fi, ff, filtrosElegidos()))
       .then(function (d) { if (token === peticion) pintar(d); })
       .catch(function (err) { if (token === peticion) fallo(err); });
+  }
+
+  // ----------------------------------------------- filtros organizacionales
+  var SELECT_FILTRO = { c1: 'f-c1', grupos: 'f-grupos', lideres: 'f-lideres' };
+
+  function seleccionados(id) {
+    return Array.prototype.map.call($(id).selectedOptions, function (o) { return o.value; });
+  }
+
+  function filtrosElegidos() {
+    var f = {};
+    FILTROS_ORG.forEach(function (clave) { f[clave] = seleccionados(SELECT_FILTRO[clave]); });
+    return f;
+  }
+
+  /* Las listas, una vez al arrancar y sin frenar la primera carga de datos:
+     si fallan, QARE sigue funcionando sin filtros y el error va a la consola. */
+  function cargarCatalogos() {
+    return fetch(API_CATALOGOS, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error('backlog_catalogos.ashx respondio ' + resp.status + '.');
+        return resp.json();
+      })
+      .then(function (c) {
+        Catalogos.llenar($('f-c1'), (c && c.c1) || []);
+        Catalogos.llenar($('f-grupos'), (c && c.grupos) || []);
+        Catalogos.llenar($('f-lideres'), (c && c.lideres) || []);
+      })
+      .catch(function (err) { console.error('[QARE catalogos]', err); });
+  }
+
+  /* Mismo auto-aplicado que el Backlog: los cambios seguidos de los
+     multiselect se juntan en una sola peticion. */
+  var ESPERA_AUTO = 250;
+  var cargaProgramada = null;
+  function programarCarga() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = setTimeout(function () { cargaProgramada = null; cargar(); }, ESPERA_AUTO);
+  }
+
+  // "Limpiar" quita solo los tres filtros organizacionales; las fechas no.
+  // El `change` repinta el desplegable y programa la recarga.
+  function limpiarFiltros() {
+    FILTROS_ORG.forEach(function (clave) {
+      var sel = $(SELECT_FILTRO[clave]);
+      Array.prototype.forEach.call(sel.options, function (o) { o.selected = false; });
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
   }
 
   function marcarRapido(dias) {
@@ -715,6 +783,10 @@
       $(id).addEventListener('change', function () { marcarRapido(null); cargar(); });
     });
     $('reintentar').addEventListener('click', cargar);
+    FILTROS_ORG.forEach(function (clave) {
+      $(SELECT_FILTRO[clave]).addEventListener('change', programarCarga);
+    });
+    $('btn-limpiar').addEventListener('click', limpiarFiltros);
     conectarPreguntas();
     $('dicc-boton').addEventListener('click', function () {
       plegarDiccionario(this.getAttribute('aria-expanded') !== 'true');
@@ -736,7 +808,13 @@
     arrancado = true;
     Barras.aplicarDefaults();
     ponerRango(DIAS_POR_OMISION);
+    /* La capa visual de los multiselect. Como en backlog.js: embebido, el
+       Desplegable.montar(document) de dashboard.js ya corrio antes de que
+       existiera este marcado, asi que se monta aqui sobre la raiz del modulo.
+       montar() es idempotente. */
+    if (window.Desplegable) Desplegable.montar(document.getElementById('tab-qare') || document);
     conectar();
+    cargarCatalogos();
     cargar();
   }
 

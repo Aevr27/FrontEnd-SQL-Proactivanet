@@ -33,10 +33,14 @@
 //   - KPIs y Confirmacion vs QA, tal como los devuelve el procedimiento.
 //
 // FILTROS
-//   Los seis procedimientos reciben solo @FechaInicio y @FechaFin y devuelven
-//   agregados, asi que QARE no tiene filtros organizacionales: no hay nada en
-//   la fila a lo que DirectorioOrganizacional pudiera aplicarse sin cambiar
-//   los procedimientos.
+//   Rango de fechas + los tres del Backlog: Servicio (C1), Grupo y Lider.
+//   sql/16_qare_filtros_org.sql agrego @C1/@Grupos/@Lideres a los seis
+//   procedimientos, que leen de UNA fuente comun ya filtrada
+//   (dbo.tvf_CorreoQARE_Base) con C1 y Lider calculados exactamente como el
+//   Backlog (fn_CorreoBacklog_CategoriaC1 + 'Sin categoria', CatLiderGrupo +
+//   'Sin Torre'). Las listas de los desplegables son las del Backlog
+//   (backlog_catalogos.ashx). Este contrato no cambia: los filtros solo
+//   deciden que tickets entran, no que columnas salen ni en que orden.
 
 using System;
 using System.Collections.Generic;

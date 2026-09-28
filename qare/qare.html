@@ -19,8 +19,11 @@
     Confirmacion vs QA           dbo.usp_CorreoQARE_ConfirmacionVsQA
     Tipo de solucion aplicada    dbo.usp_CorreoQARE_TipoSolucion
 
-  Filtros: solo el rango de fechas. Los procedimientos no reciben ningun otro
-  parametro, asi que un filtro de grupo, lider o dueño aqui no moveria nada.
+  Filtros: el rango de fechas y los tres del Backlog -Servicio (C1), Grupos y
+  Lideres-, con sus mismas listas (handlers/backlog_catalogos.ashx) y su
+  mismo control multiselect. Los seis procedimientos los aplican en una
+  fuente comun (sql/16_qare_filtros_org.sql). "Limpiar" quita solo esos
+  tres; las fechas se quedan como estan.
 
   Hojas: como el Backlog, QARE no tiene vocabulario visual propio (.card,
   .kpi, .grid2, .filtros, .lienzo son los de dashboard.css y kpi.css), asi
@@ -38,6 +41,9 @@
        estos <script>/<link> se quita y manda la copia del tablero. -->
   <script src="../assets/vendor/chart.umd.min.js"></script>
   <script src="../assets/js/escape.js"></script>
+  <script src="../assets/js/catalogos.js"></script>
+  <script src="../assets/js/desplegable.js"></script>
+  <link rel="stylesheet" href="../assets/css/desplegable.css">
   <script src="../assets/js/paleta.js"></script>
   <script src="../assets/js/barras.js"></script>
   <script src="../assets/js/grafica.js"></script>
@@ -77,6 +83,24 @@
           <button class="btn linea chico" type="button" data-dias="15">15 dias</button>
           <button class="btn linea chico" type="button" data-dias="30">30 dias</button>
         </div>
+      </div>
+      <!-- Los tres filtros organizacionales del Backlog, con sus mismos
+           rotulos y sus mismas listas (qare.js las pide a
+           backlog_catalogos.ashx). Vacio = todos. -->
+      <div class="campo">
+        <label for="qare-f-c1">Servicio / C1 (elige varios)</label>
+        <select id="qare-f-c1" multiple></select>
+      </div>
+      <div class="campo">
+        <label for="qare-f-grupos">Grupos (elige varios)</label>
+        <select id="qare-f-grupos" multiple></select>
+      </div>
+      <div class="campo">
+        <label for="qare-f-lideres">Lideres (elige varios)</label>
+        <select id="qare-f-lideres" multiple></select>
+      </div>
+      <div class="campo acciones">
+        <button class="btn gris" id="qare-btn-limpiar" type="button">Limpiar</button>
       </div>
     </section>
 

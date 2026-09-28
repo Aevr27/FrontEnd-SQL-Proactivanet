@@ -8,10 +8,15 @@
 //
 // PETICION
 //   GET qare.ashx[?fecha_inicio=aaaa-mm-dd][&fecha_fin=aaaa-mm-dd]
+//                [&c1=...][&grupos=...][&lideres=...]
 //   Sin fechas: los 15 dias naturales que terminan HOY (dia de Mexico), el
 //   mismo default que los SP. Las fechas llegan a @FechaInicio / @FechaFin
 //   TAL CUAL, sin sumar ni restar dias: los SP filtran FechaFirmaSolucion con
 //   el dia fin incluido (verificado en la VM, sql/diag_qare_contrato.sql).
+//   c1 / grupos / lideres: los multiselect del tablero, listas separadas por
+//   comas, leidos con BacklogUtil.Filtros igual que en el Backlog (vacio =
+//   sin filtro). Llegan a los SEIS procedimientos como @C1/@Grupos/@Lideres
+//   (sql/16_qare_filtros_org.sql); ver QareQueries, FILTROS.
 //
 // RESPUESTA 200
 //   {
@@ -61,7 +66,7 @@ public class Qare : IHttpHandler
                 DashboardDataInfo.HoyEnPresentacion(),
                 out inicio, out fin);
 
-            var r = QareQueries.Consultar(inicio, fin);
+            var r = QareQueries.Consultar(inicio, fin, BacklogUtil.Filtros(context.Request));
 
             // Los bloques que fallaron: el navegador ya recibe su mensaje en
             // "errores"; el detalle completo, a la traza.

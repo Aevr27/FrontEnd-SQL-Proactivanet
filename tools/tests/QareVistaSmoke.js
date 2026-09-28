@@ -151,6 +151,26 @@ var entrada = [niv('Primera vez', 9), niv('Siempre', 1)];
 Q.ordenFrecuencia(entrada);
 Check('ordenFrecuencia no toca las filas del API', ['Primera vez', 'Siempre'], rotulos(entrada));
 
+// --- query string de qare.ashx: fechas + filtros del Backlog ---------------
+Check('sin filtros: solo las fechas (la peticion de siempre)',
+  'fecha_inicio=2026-09-01&fecha_fin=2026-09-15', Q.consulta('2026-09-01', '2026-09-15', {}));
+Check('sin objeto de filtros: solo las fechas',
+  'fecha_inicio=2026-09-01&fecha_fin=2026-09-15', Q.consulta('2026-09-01', '2026-09-15'));
+Check('listas vacias no se mandan',
+  'fecha_inicio=2026-09-01&fecha_fin=2026-09-15',
+  Q.consulta('2026-09-01', '2026-09-15', { c1: [], grupos: [], lideres: [''] }));
+Check('los tres filtros, separados por comas y codificados',
+  'fecha_inicio=2026-09-01&fecha_fin=2026-09-15&c1=S-Punto%20de%20Venta&grupos=Service%20Desk%2CSoporte%20Campo&lideres=Sin%20Torre',
+  Q.consulta('2026-09-01', '2026-09-15',
+    { c1: ['S-Punto de Venta'], grupos: ['Service Desk', 'Soporte Campo'], lideres: ['Sin Torre'] }));
+Check('solo lideres', 'fecha_inicio=a&fecha_fin=b&lideres=Jesus%20Campa%2CLaura%20Cardenas',
+  Q.consulta('a', 'b', { lideres: ['Jesus Campa', 'Laura Cardenas'] }));
+Check('mismos nombres de parametro que BacklogUtil.Filtros', ['c1', 'grupos', 'lideres'], Q.FILTROS_ORG);
+Check('BacklogUtil.Filtros lee c1/grupos/lideres', true,
+  ['"c1"', '"grupos"', '"lideres"'].every(function (k) { return leer('App_Code/DashboardDb.cs').indexOf('ListaONulo(request, ' + k + ')') >= 0; }));
+Check('qare.ashx usa BacklogUtil.Filtros', true,
+  /QareQueries\.Consultar\(inicio, fin, BacklogUtil\.Filtros\(context\.Request\)\)/.test(leer('handlers/qare.ashx')));
+
 // --- tabla de recurrentes por categoria -------------------------------------
 var tabla = Q.filasRecurrentes([
   { Posicion: 1, Categoria: '/S-Biométrico/Falla en sistema de biométrico/Usuario no encontrado', CantidadTickets: 121, TotalTicketsRecurrentes: 1520, PorcentajeRecurrentes: 7.96 },
@@ -183,7 +203,16 @@ var ids = {};
 ['frecuencia', 'causa', 'tipo'].forEach(function (k) { ids['msg-' + k] = true; });
 var faltan = Object.keys(ids).filter(function (id) { return pagina.indexOf('id="qare-' + id + '"') < 0; });
 Check('cada id que pide qare.js existe en qare.html', [], faltan);
-Check('pide las dos fechas al handler', true, /fecha_inicio=[\s\S]*?&fecha_fin=/.test(codigo));
+// Los tres selects de los filtros se piden por un mapa, no por $('...').
+['f-c1', 'f-grupos', 'f-lideres', 'btn-limpiar'].forEach(function (id) {
+  Check('existe #qare-' + id, true, pagina.indexOf('id="qare-' + id + '"') >= 0);
+});
+Check('pide las dos fechas al handler', true, /pedir\(consulta\(fi, ff, /.test(codigo));
+Check('las listas son las del Backlog', true, /ruta\('backlog_catalogos\.ashx'\)/.test(codigo));
+Check('rotulos iguales a los del Backlog', true,
+  ['Servicio / C1 (elige varios)', 'Grupos (elige varios)', 'Lideres (elige varios)'].every(function (r) {
+    return leer('backlog/backlog.html').indexOf(r) >= 0 && pagina.indexOf(r) >= 0;
+  }));
 
 console.log(fallos === 0 ? 'TODO OK' : fallos + ' FALLOS');
 process.exit(fallos === 0 ? 0 : 1);

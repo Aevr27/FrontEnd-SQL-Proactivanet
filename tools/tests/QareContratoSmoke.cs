@@ -14,6 +14,10 @@
 //          v2 en la VM: @FechaFin inclusivo, default de 15 dias hasta hoy,
 //          literales reales (Primera vez, Valido, Sin catalogo, Sí/No) y
 //          EsInconsistencia.
+//      2C) filtros Servicio / Grupo / Lider: sobre esa misma replica corre el
+//          script REAL sql/16_qare_filtros_org.sql (con las funciones del
+//          Backlog tal como estan en la VM) y el handler con c1/grupos/lideres
+//          filtra los seis bloques por igual.
 //   3) Guardas de regresion: el NBSP de DirectorioOrganizacional escapado y
 //      HoyEnPresentacion en UTC-06.
 //
@@ -546,6 +550,132 @@ INSERT dbo.T (CodigoTicket, FechaFirmaSolucion, QA_Frecuencia, QARe_VerificoClas
             "2|2", ((Dictionary<string, object>)d["kpis"])["TotalTicketsPeriodo"] + "|" + delSp);
     }
 
+    // ------------------------------------------ 2C) filtros organizacionales
+    /* Lo que el Backlog ya tiene en la VM, con los cuerpos EXACTOS que leyo
+       sql/diag_qare_filtros_precheck.sql (2026-09-28), y los grupos de la
+       replica: Service Desk -> Jesus Campa, Soporte Campo -> Laura Cardenas,
+       Grupo Nuevo sin fila en CatLiderGrupo (-> 'Sin Torre'). */
+    const string Backlog = @"
+ALTER TABLE dbo.T ADD Grupo nvarchar(200) NULL;
+GO
+EXEC sp_refreshview N'dbo.vw_CorreoQARECierre_Base';
+UPDATE dbo.T SET Grupo = CASE
+    WHEN CodigoTicket IN (N'D-00', N'D-12', N'S-3', N'S-4') THEN N'Service Desk'
+    WHEN CodigoTicket IN (N'D-23', N'D+1')                 THEN N'Soporte Campo'
+    WHEN CodigoTicket IN (N'D-1', N'S-2')                  THEN N'Grupo Nuevo' END;
+CREATE TABLE dbo.CatLiderGrupo (Grupo nvarchar(200) NOT NULL PRIMARY KEY, Lider nvarchar(200) NULL);
+INSERT dbo.CatLiderGrupo VALUES (N'Service Desk', N'Jesus Campa'), (N'Soporte Campo', N'Laura Cardenas');
+GO
+CREATE FUNCTION dbo.fn_CorreoBacklog_CategoriaC1 (@Categoria NVARCHAR(1000))
+RETURNS NVARCHAR(255)
+WITH SCHEMABINDING
+AS
+BEGIN
+    DECLARE @s NVARCHAR(1000) = LTRIM(RTRIM(REPLACE(ISNULL(@Categoria, N''), NCHAR(160), N' ')));
+    DECLARE @inicio INT, @siguiente INT;
+    IF @s = N'' RETURN NULL;
+    SET @inicio = CASE WHEN LEFT(@s, 1) = N'/' THEN 2 ELSE 1 END;
+    SET @siguiente = CHARINDEX(N'/', @s, @inicio);
+    IF @siguiente = 0 RETURN NULLIF(LTRIM(RTRIM(SUBSTRING(@s, @inicio, 1000))), N'');
+    RETURN NULLIF(LTRIM(RTRIM(SUBSTRING(@s, @inicio, @siguiente - @inicio))), N'');
+END;
+GO
+CREATE FUNCTION dbo.fn_CorreoBacklog_SplitList (@Lista NVARCHAR(MAX))
+RETURNS TABLE
+AS
+RETURN
+(
+    SELECT Valor = LTRIM(RTRIM(value))
+    FROM STRING_SPLIT(ISNULL(@Lista, N''), N',')
+    WHERE LTRIM(RTRIM(value)) <> N''
+);";
+
+    static long Suma(object bloque, string col)
+    {
+        long total = 0;
+        foreach (var f in Lista(bloque)) total += Convert.ToInt64(f[col]);
+        return total;
+    }
+
+    /* Los seis bloques de una respuesta, un numero cada uno, en este orden:
+       KPI total | Frecuencia | Causa raiz | Recurrentes | Confirmacion vs QA |
+       Tipo de solucion. */
+    static string Seis(Dictionary<string, object> d)
+    {
+        var recurrentes = Lista(d["recurrentesCategoria"]);
+        return ((Dictionary<string, object>)d["kpis"])["TotalTicketsPeriodo"] + "|" +
+               Suma(d["frecuencia"], "CantidadTickets") + "|" +
+               Suma(d["causaRaiz"], "CantidadTickets") + "|" +
+               (recurrentes.Count > 0 ? recurrentes[0]["TotalTicketsRecurrentes"] : 0) + "|" +
+               Suma(d["confirmacionVsQa"], "CantidadTickets") + "|" +
+               Suma(d["tipoSolucion"], "CantidadTickets");
+    }
+
+    static void IntegracionFiltros(string cadena, string raiz)
+    {
+        int estado;
+        const string rango = "fecha_inicio=2026-08-09&fecha_fin=2026-08-11";
+
+        // --- Antes de 16_qare_filtros_org.sql: sin filtros sigue igual (el
+        //     handler no manda @C1/@Grupos/@Lideres vacios); con filtros, los
+        //     seis SP viejos los rechazan (8144) y el handler responde error.
+        var d = Pedir(rango, out estado);
+        Chk("filtros: sin filtros y sin el script, igual que siempre", "8|8|6|5|8|5", Seis(d));
+        d = Pedir(rango + "&lideres=Jesus%20Campa", out estado);
+        Chk("filtros: sin el script, pedir un filtro da error (8144)", "500|True", estado + "|" +
+            ((string)d["error"]).Contains("8144"));
+
+        // --- Lo del Backlog y el script real.
+        using (var cn = new SqlConnection(cadena))
+        {
+            cn.Open();
+            foreach (var lote in Backlog.Split(new[] { "\nGO" }, StringSplitOptions.RemoveEmptyEntries))
+                new SqlCommand(lote, cn).ExecuteNonQuery();
+
+            var mensajes = new System.Text.StringBuilder();
+            cn.InfoMessage += (o, e) => mensajes.AppendLine(e.Message);
+            var cmd = new SqlCommand(File.ReadAllText(Path.Combine(raiz, @"sql\16_qare_filtros_org.sql")), cn);
+            cmd.CommandTimeout = 300;
+            using (var rd = cmd.ExecuteReader())
+            {
+                do { while (rd.Read()) { } } while (rd.NextResult());
+            }
+            bool aplicado = mensajes.ToString().Contains("RESULTADO: APLICADO");
+            Chk("16_qare_filtros_org.sql se aplica (todas sus pruebas cuadran)", true, aplicado);
+            if (!aplicado) Console.WriteLine(mensajes);
+        }
+
+        d = Pedir(rango, out estado);
+        Chk("filtros: sin filtros, lo mismo que antes del script", "8|8|6|5|8|5", Seis(d));
+        Chk("filtros: sin filtros, sin errores", 0, ((Dictionary<string, object>)d["errores"]).Count);
+
+        d = Pedir(rango + "&lideres=Jesus%20Campa", out estado);
+        Chk("lider: los seis bloques filtrados por igual", "4|4|2|3|4|2", Seis(d));
+        Chk("lider: 200 y sin errores", "200|0", estado + "|" + ((Dictionary<string, object>)d["errores"]).Count);
+
+        d = Pedir(rango + "&lideres=Sin%20Torre", out estado);
+        Chk("lider 'Sin Torre' = el grupo sin fila en CatLiderGrupo", "2|2|2|2|2|1", Seis(d));
+
+        d = Pedir(rango + "&grupos=Soporte%20Campo", out estado);
+        Chk("grupo: los seis bloques", "2|2|2|0|2|2", Seis(d));
+
+        d = Pedir(rango + "&c1=S-A", out estado);
+        Chk("C1 = fn_CorreoBacklog_CategoriaC1(Categoria)", "3|3|2|2|3|2", Seis(d));
+
+        d = Pedir(rango + "&c1=S-C&lideres=Jesus%20Campa", out estado);
+        Chk("C1 + lider = su cruce", "1|1|0|1|1|0", Seis(d));
+
+        d = Pedir(rango + "&lideres=Jesus%20Campa%2CLaura%20Cardenas", out estado);
+        Chk("lista de dos lideres = la suma", "6", ((Dictionary<string, object>)d["kpis"])["TotalTicketsPeriodo"]);
+
+        d = Pedir(rango + "&lideres=Nadie", out estado);
+        Chk("lider que no existe: todo en cero, sin error", "0|0|0|0|0|0|0",
+            Seis(d) + "|" + ((Dictionary<string, object>)d["errores"]).Count);
+
+        d = Pedir("fecha_inicio=2026-08-10&fecha_fin=2026-08-10&lideres=Jesus%20Campa", out estado);
+        Chk("fechas + lider: el rango sigue mandando", "2", ((Dictionary<string, object>)d["kpis"])["TotalTicketsPeriodo"]);
+    }
+
     // ------------------------------------------------------ 3) guardas
     static void Guardas(string raiz)
     {
@@ -593,6 +723,7 @@ INSERT dbo.T (CodigoTicket, FechaFirmaSolucion, QA_Frecuencia, QARe_VerificoClas
             }
             Integracion(cadena);
             IntegracionReal(cadena);
+            IntegracionFiltros(cadena, raiz);
         }
         finally
         {

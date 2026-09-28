@@ -1,8 +1,8 @@
 // Lectura de los seis procedimientos de la pestaña QARE.
 //
 // Solo acceso a datos: abre la conexion, ejecuta dbo.usp_CorreoQARE_* con
-// @FechaInicio/@FechaFin y entrega las filas a QareContrato.Preparar, que
-// las ordena y anota lo que no cuadre. Nada de presentacion y nada de HTTP:
+// @FechaInicio/@FechaFin (y los filtros que haya, ver FILTROS) y entrega
+// las filas a QareContrato.Preparar, que las ordena y anota lo que no cuadre. Nada de presentacion y nada de HTTP:
 // eso es de qare/qare.js y de handlers/qare.ashx.
 //
 // UN BLOQUE QUE FALLA NO TUMBA A LOS DEMAS
@@ -17,6 +17,15 @@
 //   Viajan como SqlDbType.Date, igual que en QaDb.KpisUnaPasada con los
 //   procedimientos hermanos usp_CorreoQA_*. No se les suma ni resta nada; ver
 //   QareContrato.Rango.
+//
+// FILTROS (Servicio / Grupo / Lider)
+//   Los de BacklogUtil.Filtros: "C1", "Grupos", "Lideres", cada uno una lista
+//   separada por comas o null. Llegan a los seis procedimientos como @C1 /
+//   @Grupos / @Lideres (sql/16_qare_filtros_org.sql), que los aplican en UNA
+//   fuente comun (dbo.tvf_CorreoQARE_Base), asi que ningun bloque puede
+//   quedar filtrado distinto de los demas. Un filtro en null NO se manda:
+//   sin filtros la llamada es la misma de siempre y sigue funcionando aunque
+//   16_qare_filtros_org.sql todavia no este aplicado en la base.
 //
 // ZONA HORARIA
 //   Aqui no hay "ahora": ningun SYSDATETIME/SYSUTCDATETIME, DateTime.Now ni
@@ -50,7 +59,17 @@ public static class QareQueries
     // Mismo tope que QaDb para sus procedimientos hermanos.
     private const int TimeoutComandoSegundos = 90;
 
+    // Nombres de los filtros, iguales a las claves de BacklogUtil.Filtros y a
+    // los parametros de los procedimientos (sin la @).
+    public static readonly string[] Filtros = { "C1", "Grupos", "Lideres" };
+
     public static QareResultado Consultar(DateTime inicio, DateTime fin)
+    {
+        return Consultar(inicio, fin, null);
+    }
+
+    public static QareResultado Consultar(DateTime inicio, DateTime fin,
+                                          IDictionary<string, object> filtros)
     {
         var cadena = DashboardDb.CadenaConexion();   // sin Web.config revienta aqui, una vez
 
@@ -59,7 +78,7 @@ public static class QareQueries
         for (int i = 0; i < bloques.Length; i++)
         {
             var procedimiento = bloques[i].Procedimiento;
-            tareas[i] = Task.Run(() => Ejecutar(cadena, procedimiento, inicio, fin));
+            tareas[i] = Task.Run(() => Ejecutar(cadena, procedimiento, inicio, fin, filtros));
         }
         try { Task.WaitAll(tareas); }
         catch (AggregateException) { /* cada tarea se revisa abajo */ }
@@ -94,7 +113,8 @@ public static class QareQueries
     }
 
     private static List<Dictionary<string, object>> Ejecutar(
-        string cadena, string procedimiento, DateTime inicio, DateTime fin)
+        string cadena, string procedimiento, DateTime inicio, DateTime fin,
+        IDictionary<string, object> filtros)
     {
         var filas = new List<Dictionary<string, object>>();
         using (var cn = new SqlConnection(cadena))
@@ -104,6 +124,12 @@ public static class QareQueries
             cmd.CommandTimeout = TimeoutComandoSegundos;
             cmd.Parameters.Add("@FechaInicio", SqlDbType.Date).Value = inicio.Date;
             cmd.Parameters.Add("@FechaFin", SqlDbType.Date).Value = fin.Date;
+            foreach (var nombre in Filtros)
+            {
+                object valor;
+                if (filtros == null || !filtros.TryGetValue(nombre, out valor) || valor == null) continue;
+                cmd.Parameters.Add("@" + nombre, SqlDbType.NVarChar, -1).Value = valor;
+            }
 
             cn.Open();
             using (var rd = cmd.ExecuteReader())
@@ -130,9 +156,11 @@ public static class QareQueries
                 return "El sitio no puede ejecutar " + bloque.Procedimiento +
                        " (error " + numero + "): falta el procedimiento o el permiso EXECUTE.";
             case 201:    // falta un parametro obligatorio
-            case 8144:   // demasiados parametros
                 return bloque.Procedimiento + " no acepta los parametros @FechaInicio/@FechaFin" +
                        " (error " + numero + ").";
+            case 8144:   // demasiados parametros: filtros sin 16_qare_filtros_org.sql aplicado
+                return bloque.Procedimiento + " no acepta los filtros @C1/@Grupos/@Lideres" +
+                       " (error " + numero + "): falta aplicar sql/16_qare_filtros_org.sql en la base.";
             case -2:
                 return bloque.Procedimiento + " tardo demasiado y se cancelo (error -2).";
             default:
