@@ -94,8 +94,13 @@
     <!-- Cada tarjeta lleva arriba una banda (.qare-ctx) con la pregunta del
          formulario QA/QARE de la que sale y, debajo, que respuestas cuenta.
          Es solo contexto: el titulo y la grafica siguen siendo los de antes.
-         Las de los KPIs las pinta qare.js (KPI_CONTEXTO). -->
+         En los KPIs la pregunta no se ve: qare.js pinta una franja fina
+         "Pregunta" y el texto sale en el globo de abajo (KPI_CONTEXTO). -->
     <section class="kpis" id="qare-kpis"></section>
+    <div class="qare-kpi-globo" id="qare-kpi-globo" role="tooltip" hidden>
+      <p class="qare-kpi-globo-preg" id="qare-kpi-globo-preg"></p>
+      <p class="qare-kpi-globo-nota" id="qare-kpi-globo-nota"></p>
+    </div>
 
     <!-- Diccionario: las seis preguntas del formulario de las que salen los
          bloques, con sus opciones (texto del documento de QARE). Nace
@@ -150,7 +155,6 @@
       <div class="card qare-seccion">
         <div class="qare-ctx">
           <p class="qare-ctx-preg"><svg class="qare-ctx-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 19h16M7 19V10M12 19V5M17 19v-6"/></svg><span>QA · ¿Con qué frecuencia ocurre?</span></p>
-          <p class="qare-ctx-nota">Orden: Siempre · Frecuente · Ocasional · Primera vez</p>
         </div>
         <h3>Frecuencia del problema<span class="hint" id="qare-hint-frecuencia"></span></h3>
         <div class="lienzo">

@@ -263,37 +263,97 @@
   }
 
   // -------------------------------------------------------------- KPIs
-  /* Banda de contexto de cada KPI: la pregunta del formulario QA/QARE de la
-     que sale y que respuestas cuenta. Mismo marcado (.qare-ctx) que las
-     tarjetas de qare.html. Solo texto fijo: no toca el dato. */
-  var ICONO = {
-    usuario:    '<circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 11l2 2 4-4"/>',
-    frecuencia: '<path d="M4 19h16M7 19V10M12 19V5M17 19v-6"/>',
-    reuso:      '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/>',
-    kb:         '<path d="M12 6.5C10.5 5.3 8.2 5 4 5v13c4.2 0 6.5.3 8 1.5 1.5-1.2 3.8-1.5 8-1.5V5c-4.2 0-6.5.3-8 1.5zM12 6.5v13"/>',
-  };
-  // Por titulo del KPI: [icono, pregunta, nota]. "Tickets evaluados" no sale
-  // de ninguna pregunta y va sin banda.
+  /* Pregunta de cada KPI: la del formulario QA/QARE de la que sale y que
+     respuestas cuenta. No se ve en la tarjeta: arriba solo va una franja
+     fina "Pregunta" (un <button>) y el texto sale en un globo al pasar el
+     mouse, al enfocarla con teclado o al tocarla. Solo texto fijo: no toca
+     el dato. Por titulo del KPI: [pregunta, nota]. "Tickets evaluados" no
+     sale de ninguna pregunta y va sin franja. */
   var KPI_CONTEXTO = {
-    'Verificación de Tickets': ['usuario',    'QARE · ¿Verificaste la correcta clasificación del ticket?',      'Considera: Sí'],
-    'Casos recurrentes':    ['frecuencia', 'QA · ¿Con qué frecuencia ocurre?',                               'Considera: Frecuente + Siempre'],
-    'Casos reutilizables':  ['reuso',      'QARE · ¿Esta solución aplica para otros casos similares?',       'Considera: Sí'],
-    'Potencial KB':         ['kb',         'QARE · ¿Se debe generar o actualizar artículo de conocimiento?', 'Considera: Sí'],
+    'Verificación de Tickets': ['QARE · ¿Verificaste la correcta clasificación del ticket?',      'Considera: Sí'],
+    'Casos recurrentes':       ['QA · ¿Con qué frecuencia ocurre?',                               'Considera: Frecuente + Siempre'],
+    'Casos reutilizables':     ['QARE · ¿Esta solución aplica para otros casos similares?',       'Considera: Sí'],
+    'Potencial KB':            ['QARE · ¿Se debe generar o actualizar artículo de conocimiento?', 'Considera: Sí'],
   };
-
-  function contexto(c) {
-    return '<div class="qare-ctx"><p class="qare-ctx-preg">' +
-      '<svg class="qare-ctx-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICONO[c[0]] + '</svg>' +
-      '<span>' + esc(c[1]) + '</span></p>' +
-      (c[2] ? '<p class="qare-ctx-nota">' + esc(c[2]) + '</p>' : '') + '</div>';
-  }
 
   function tarjeta(titulo, valor, pie) {
     var c = KPI_CONTEXTO[titulo];
-    return '<div class="kpi' + (c ? ' qare-kpi-ctx' : '') + '">' + (c ? contexto(c) : '') +
+    return '<div class="kpi' + (c ? ' qare-kpi-ctx' : '') + '">' +
+      (c ? '<button type="button" class="qare-kpi-preg" data-titulo="' + esc(titulo) + '"' +
+           ' aria-describedby="qare-kpi-globo" aria-expanded="false"' +
+           ' aria-label="Pregunta de ' + esc(titulo) + ': ' + esc(c[0] + ' ' + c[1]) + '">Pregunta</button>' : '') +
       '<div class="lbl">' + esc(titulo) + '</div>' +
       '<div class="val">' + esc(valor) + '</div>' +
       '<div class="foot">' + esc(pie) + '</div></div>';
+  }
+
+  /* Globo de la pregunta. Es UNO solo, fuera de las tarjetas (#qare-kpi-globo
+     en qare.html): .kpi recorta con overflow: hidden y se desplaza con
+     transform al pasar el mouse, y cualquiera de los dos lo cortaria. Va con
+     position: fixed bajo la franja, acotado al ancho de la ventana. */
+  var franjaAbierta = null;
+
+  function mostrarPregunta(franja) {
+    var globo = $('kpi-globo');
+    var c = KPI_CONTEXTO[franja.getAttribute('data-titulo')];
+    if (!globo || !c) return;
+    if (franjaAbierta && franjaAbierta !== franja) franjaAbierta.setAttribute('aria-expanded', 'false');
+    franjaAbierta = franja;
+    franja.setAttribute('aria-expanded', 'true');
+    $('kpi-globo-preg').textContent = c[0];
+    $('kpi-globo-nota').textContent = c[1];
+    globo.hidden = false;
+    var r = franja.getBoundingClientRect();
+    var ancho = globo.offsetWidth, margen = 8;
+    var izq = Math.min(Math.max(margen, r.left + r.width / 2 - ancho / 2),
+      document.documentElement.clientWidth - ancho - margen);
+    globo.style.left = Math.max(margen, izq) + 'px';
+    globo.style.top = (r.bottom + 6) + 'px';
+    globo.classList.add('visible');
+  }
+
+  function ocultarPregunta() {
+    var globo = $('kpi-globo');
+    if (franjaAbierta) franjaAbierta.setAttribute('aria-expanded', 'false');
+    franjaAbierta = null;
+    if (globo) { globo.classList.remove('visible'); globo.hidden = true; }
+  }
+
+  function conectarPreguntas() {
+    var kpis = $('kpis');
+    function franjaDe(e) { return e.target.closest && e.target.closest('.qare-kpi-preg'); }
+    // Mouse: entrar muestra, salir oculta. El toque no dispara esto (ver click).
+    kpis.addEventListener('pointerover', function (e) {
+      var f = franjaDe(e);
+      if (f && e.pointerType === 'mouse') mostrarPregunta(f);
+    });
+    kpis.addEventListener('pointerout', function (e) {
+      var f = franjaDe(e);
+      if (f && e.pointerType === 'mouse' && !f.contains(e.relatedTarget)) ocultarPregunta();
+    });
+    // Toque (y Enter/Espacio): alterna. Un toque fuera lo cierra.
+    kpis.addEventListener('click', function (e) {
+      var f = franjaDe(e);
+      if (!f) return;
+      e.stopPropagation();
+      // Con mouse el globo ya salio al entrar: el clic no lo cierra.
+      if (franjaAbierta === f && e.pointerType !== 'mouse') ocultarPregunta();
+      else mostrarPregunta(f);
+    });
+    // Teclado: al llegar con Tab. Solo :focus-visible, porque un toque
+    // tambien enfoca el boton y abriria el globo antes de que el click lo alterne.
+    kpis.addEventListener('focusin', function (e) {
+      var f = franjaDe(e);
+      if (f && f.matches(':focus-visible')) mostrarPregunta(f);
+    });
+    kpis.addEventListener('focusout', function (e) { if (franjaDe(e)) ocultarPregunta(); });
+    document.addEventListener('click', function (e) {
+      if (franjaAbierta && !franjaAbierta.contains(e.target)) ocultarPregunta();
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') ocultarPregunta(); });
+    // Fijo en pantalla: al desplazar o cambiar el ancho quedaria despegado.
+    window.addEventListener('scroll', ocultarPregunta, true);
+    window.addEventListener('resize', ocultarPregunta);
   }
 
   // [titulo, porcentaje, numerador, denominador] con los nombres del SP.
@@ -307,6 +367,7 @@
 
   // Tarjeta 1: el total. Tarjetas 2-5: porcentaje grande y "X de Y" abajo.
   function pintarKpis(k, relleno) {
+    ocultarPregunta();
     $('kpis').innerHTML = KPIS.map(function (d, i) {
       if (!k) return tarjeta(d[0], relleno, i === 0 ? 'Total del periodo' : '');
       if (i === 0) return tarjeta(d[0], entero(k[d[1]]), 'Total del periodo');
@@ -654,6 +715,7 @@
       $(id).addEventListener('change', function () { marcarRapido(null); cargar(); });
     });
     $('reintentar').addEventListener('click', cargar);
+    conectarPreguntas();
     $('dicc-boton').addEventListener('click', function () {
       plegarDiccionario(this.getAttribute('aria-expanded') !== 'true');
     });
