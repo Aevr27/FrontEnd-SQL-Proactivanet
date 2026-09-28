@@ -53,6 +53,7 @@ var ESTADOS_ACTIVOS = JSON.parse(mEst[1]);
 var codigo =
   'var fDir="", fPO="", fMgr="", fSO="";\n' +
   recortar('pasaFiltroGlobal') + recortar('currentCats') + recortar('filasBaseAct') +
+  recortar('pasaFiltroIniciativa') +
   '\nreturn { filtrar: function (d, p, m, s) { fDir = d; fPO = p; fMgr = m; fSO = s; },' +
   ' activas: function () { return filasBaseAct(currentCats()); } };';
 var tablero = (new Function('P', 'AGR', 'ESTADOS_ACTIVOS', codigo))(P, AGR, ESTADOS_ACTIVOS);

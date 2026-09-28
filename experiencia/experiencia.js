@@ -720,18 +720,31 @@ function filasBaseAct(cats){
       rows.push({...i,categoria:c.categoria});
     }
   }));
-  // Iniciativas activas sin ninguna categoria reconocida (no filtran por
-  // Director/PO/Manager/Service Owner, ya que no tienen categoria de la que
-  // derivar ninguno de esos campos).
-  if(!fDir && !fPO && !fMgr && !fSO){
-    (P.iniciativas_sin_categoria||[]).forEach(i=>{
-      if(AGR.includes(i.agrup) && ESTADOS_ACTIVOS.includes(i.estado) && !vistos.has(i.folio)){
-        vistos.add(i.folio);
-        rows.push(i);
-      }
-    });
-  }
+  // Iniciativas activas sin ninguna categoria reconocida. No hay categoria
+  // de la que heredar dueños, asi que el filtro global se aplica a los de la
+  // propia iniciativa (pasaFiltroIniciativa).
+  (P.iniciativas_sin_categoria||[]).forEach(i=>{
+    if(AGR.includes(i.agrup) && ESTADOS_ACTIVOS.includes(i.estado) && !vistos.has(i.folio)
+       && pasaFiltroIniciativa(i)){
+      vistos.add(i.folio);
+      rows.push(i);
+    }
+  });
   return rows;
+}
+// Filtro global para una iniciativa SIN categoria: mismos cuatro filtros y
+// mismo AND que pasaFiltroGlobal, pero sobre los dueños que trae la propia
+// iniciativa (LeerIniciativasSinCategoria: po=Problem.OwnerProblem,
+// so=Problem.OwnerServicio, director=Problem.Direccion, manager derivado del
+// SO por CatPersona). Un dueño vacio no coincide con un filtro activo; un
+// filtro vacio no restringe. Las iniciativas con categoria NO pasan por
+// aqui: siguen filtrandose por su categoria en currentCats().
+function pasaFiltroIniciativa(i){
+  if(fDir && i.director!==fDir) return false;
+  if(fPO && i.po!==fPO) return false;
+  if(fMgr && i.manager!==fMgr) return false;
+  if(fSO && i.so!==fSO) return false;
+  return true;
 }
 // Aplica el filtro cruzado de graficas (TAREA 3) de una pestaña sobre un
 // arreglo de filas, omitiendo (si se indica) una de las 3 dimensiones --
