@@ -130,6 +130,27 @@ Check('Ocasional sin nota', null, Q.notaFrecuencia({ Frecuencia: 'Ocasional', Fr
 Check('valor fuera de la escala: su propio nombre', 'Otro', Q.etiquetaFrecuencia({ Frecuencia: 'Otro' }));
 Check('valor fuera de la escala: sin nota', null, Q.notaFrecuencia({ Frecuencia: 'Otro' }));
 
+// --- Frecuencia: orden fijo de presentacion ---------------------------------
+function rotulos(filas) { return filas.map(Q.etiquetaFrecuencia); }
+function niv(n, c) { return { Frecuencia: n, FrecuenciaGuia: n, CantidadTickets: c }; }
+var FIJO = ['Siempre', 'Frecuente', 'Ocasional', 'Primera vez'];
+Check('orden fijo desde el orden del API', FIJO,
+  rotulos(Q.ordenFrecuencia([niv('Primera vez', 9), niv('Ocasional', 5), niv('Frecuente', 3), niv('Siempre', 1)])));
+Check('orden fijo aunque el API cambie de orden', FIJO,
+  rotulos(Q.ordenFrecuencia([niv('Ocasional', 5), niv('Siempre', 1), niv('Primera vez', 9), niv('Frecuente', 3)])));
+Check('orden fijo aunque los conteos inviertan el ranking', FIJO,
+  rotulos(Q.ordenFrecuencia([niv('Siempre', 900), niv('Primera vez', 1), niv('Frecuente', 50), niv('Ocasional', 70)])));
+var hueco = Q.ordenFrecuencia([niv('Primera vez', 9), niv('Siempre', 1)]);
+Check('nivel ausente conserva su lugar', FIJO, rotulos(hueco));
+Check('nivel ausente va como hueco en cero', [false, true, true, false],
+  hueco.map(function (f) { return !!f.sinDato; }));
+Check('nivel ausente: conteo 0', [1, 0, 0, 9], hueco.map(function (f) { return f.CantidadTickets; }));
+Check('valor fuera de la escala va al final', FIJO.concat(['Otro']),
+  rotulos(Q.ordenFrecuencia([{ Frecuencia: 'Otro', CantidadTickets: 2 }, niv('Siempre', 1)])));
+var entrada = [niv('Primera vez', 9), niv('Siempre', 1)];
+Q.ordenFrecuencia(entrada);
+Check('ordenFrecuencia no toca las filas del API', ['Primera vez', 'Siempre'], rotulos(entrada));
+
 // --- tabla de recurrentes por categoria -------------------------------------
 var tabla = Q.filasRecurrentes([
   { Posicion: 1, Categoria: '/S-Biométrico/Falla en sistema de biométrico/Usuario no encontrado', CantidadTickets: 121, TotalTicketsRecurrentes: 1520, PorcentajeRecurrentes: 7.96 },

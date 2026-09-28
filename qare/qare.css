@@ -77,3 +77,104 @@ header.top #qare-estado:empty { display: none; }
 .qare-ok  { background: #5aa726; }
 .qare-mal { background: #982a18; }
 .qare-sin { background: #b09512; }
+
+/* ---- Banda de contexto (.qare-ctx): la pregunta QA/QARE de la que sale
+   cada bloque, encima de su titulo. Va pegada al borde superior de la
+   tarjeta: los margenes negativos anulan el padding de .card / .kpi, asi
+   que ese padding se fija aqui (--qare-pad-*) para no depender de copiarlo.
+   Solo presentacion: el titulo y la grafica de debajo no cambian. ---- */
+.qare-seccion, .qare-kpi-ctx {
+  --qare-ctx-fondo: #f1f6fd; --qare-ctx-linea: #dfe8f5; --qare-ctx-tinta: #2657a8;
+}
+.card.qare-seccion { --qare-pad-y: 18px; --qare-pad-x: 20px; padding: var(--qare-pad-y) var(--qare-pad-x); }
+.kpi.qare-kpi-ctx  { --qare-pad-y: 16px; --qare-pad-x: 18px; padding: var(--qare-pad-y) var(--qare-pad-x); }
+@media (max-width: 700px) {
+  .card.qare-seccion { --qare-pad-y: 14px; --qare-pad-x: 14px; }
+}
+.qare-ctx {
+  margin: calc(-1 * var(--qare-pad-y)) calc(-1 * var(--qare-pad-x)) 14px;
+  padding: 10px var(--qare-pad-x) 9px;
+  background: var(--qare-ctx-fondo); border-bottom: 1px solid var(--qare-ctx-linea);
+  min-width: 0;
+}
+/* Solo la tarjeta tiene esquinas redondas arriba; el KPI ya recorta con su
+   overflow: hidden y su franja izquierda. */
+.card.qare-seccion > .qare-ctx { border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; }
+.qare-ctx p { margin: 0; }
+.qare-ctx .qare-ctx-nota { margin-top: 2px; }
+.qare-ctx-preg {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--qare-ctx-tinta);
+  overflow-wrap: anywhere;
+}
+.qare-ctx-ico {
+  flex: none; width: 15px; height: 15px; margin-top: 1px;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; opacity: .8;
+}
+.qare-ctx-nota {
+  padding-left: 22px;
+  font-size: 11.5px; line-height: 1.35; color: var(--muted);
+}
+
+/* KPI: tarjeta angosta, banda mas chica. El KPI se vuelve rejilla y la banda
+   se queda con el alto sobrante, asi rotulo, cifra y pie caen a la misma
+   altura en las cinco tarjetas aunque las preguntas ocupen distintas lineas. */
+.kpi.qare-kpi-ctx { display: grid; grid-template-rows: 1fr auto auto auto; }
+.kpi.qare-kpi-ctx .qare-ctx { margin-bottom: 12px; padding-top: 8px; padding-bottom: 8px; }
+.kpi.qare-kpi-ctx .qare-ctx-preg { font-size: 11px; }
+.kpi.qare-kpi-ctx .qare-ctx-nota { font-size: 10px; }
+/* "Tickets evaluados" no lleva banda: su contenido se centra en el alto que
+   le dan sus vecinas, en vez de quedarse arriba con un hueco debajo. */
+#qare-kpis .kpi:not(.qare-kpi-ctx) { display: flex; flex-direction: column; justify-content: center; }
+
+/* ---- Diccionario (.qare-dicc): tarjeta plegable entre los KPIs y el
+   Pareto. Plegada es una sola linea; todo el encabezado es el boton. El
+   cuerpo se abre con aria-expanded="true" del boton: la fila de la rejilla
+   pasa de 0fr a 1fr (animacion corta) y visibility lo saca del arbol de
+   accesibilidad mientras esta cerrado. ---- */
+.card.qare-dicc { padding: 0; }
+.qare-dicc-boton {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 11px 20px; border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--ink); cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 700; text-align: left;
+  transition: background .16s ease;
+}
+.qare-dicc-boton:hover { background: var(--g-50); }
+.qare-dicc-ico {
+  flex: none; width: 16px; height: 16px; color: var(--muted);
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  transition: transform .18s ease;
+}
+.qare-dicc-boton[aria-expanded="true"] { border-radius: var(--radius) var(--radius) 0 0; }
+.qare-dicc-boton[aria-expanded="true"] .qare-dicc-ico { transform: rotate(90deg); }
+
+.qare-dicc-cuerpo {
+  display: grid; grid-template-rows: 0fr; visibility: hidden;
+  transition: grid-template-rows .2s ease, visibility 0s linear .2s;
+}
+.qare-dicc-boton[aria-expanded="true"] + .qare-dicc-cuerpo {
+  grid-template-rows: 1fr; visibility: visible;
+  transition: grid-template-rows .2s ease;
+}
+.qare-dicc-interior { min-height: 0; overflow: hidden; }
+.qare-dicc-tabla { margin: 0 20px 14px; width: calc(100% - 40px); border-top: 1px solid var(--line-soft); }
+.qare-dicc-tabla th { cursor: default; background: transparent; }
+.qare-dicc-tabla th:hover { color: var(--muted); background: transparent; }
+.qare-dicc-tabla td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+.qare-dicc-tabla td:first-child { width: 58%; color: var(--ink); }
+@media (prefers-reduced-motion: reduce) {
+  .qare-dicc-cuerpo, .qare-dicc-boton[aria-expanded="true"] + .qare-dicc-cuerpo, .qare-dicc-ico { transition: none; }
+}
+/* Movil: cada pregunta con sus opciones debajo, en vez de dos columnas
+   estrechas. */
+@media (max-width: 520px) {
+  .qare-dicc-boton { padding: 11px 14px; }
+  .qare-dicc-tabla { margin: 0 14px 12px; width: calc(100% - 28px); }
+  .qare-dicc-tabla thead { display: none; }
+  .qare-dicc-tabla tr, .qare-dicc-tabla td { display: block; width: auto; }
+  .qare-dicc-tabla td:first-child { width: auto; border-bottom: 0; padding-bottom: 2px; }
+  .qare-dicc-tabla td:last-child { padding-top: 0; color: var(--muted); }
+}

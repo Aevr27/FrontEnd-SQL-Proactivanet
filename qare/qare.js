@@ -9,7 +9,8 @@
    handler ya entrega cada bloque en el orden del contrato (Posicion ASC, y
    Frecuencia en el orden de la guia con su rotulo en FrecuenciaGuia; ver
    App_Code/QareContrato.cs), asi que aqui no se reordena nada: se pinta en
-   el orden en que llega.
+   el orden en que llega. Unica excepcion, de presentacion: Frecuencia se
+   pinta en el orden fijo de ORDEN_FRECUENCIA (ver ordenFrecuencia).
 
    Regla de datos: lo que el API no trae no se calcula aqui. Los porcentajes
    -incluido el acumulado del Pareto- son los del procedimiento, en escala
@@ -156,6 +157,31 @@
     return 'En la base: "' + etiqueta(f.Frecuencia) + '"';
   }
 
+  /* Orden FIJO de las barras de Frecuencia: de lo mas recurrente a lo menos.
+     Es solo presentacion: el API sigue mandando su orden (el de la guia) y
+     no se toca. No depende de conteos ni del orden de llegada. */
+  var ORDEN_FRECUENCIA = ['Siempre', 'Frecuente', 'Ocasional', 'Primera vez'];
+
+  /* Filas de Frecuencia en ORDEN_FRECUENCIA. Un nivel que no llego (el SP
+     no devuelve filas en cero) conserva su lugar con una fila hueco
+     { sinDato: true } en vez de dejar que las demas se corran. Una fila que
+     no cae en ningun nivel va al final, en el orden del API: no se pierde. */
+  function ordenFrecuencia(filas) {
+    var lista = filas || [];
+    var usadas = [];
+    var salida = ORDEN_FRECUENCIA.map(function (nivel) {
+      for (var i = 0; i < lista.length; i++) {
+        if (!usadas[i] && normal(etiquetaFrecuencia(lista[i])) === normal(nivel)) {
+          usadas[i] = true;
+          return lista[i];
+        }
+      }
+      return { FrecuenciaGuia: nivel, CantidadTickets: 0, sinDato: true };
+    });
+    lista.forEach(function (f, i) { if (!usadas[i]) salida.push(f); });
+    return salida;
+  }
+
   /* Filas de la tabla de recurrentes por categoria, ya formateadas y en el
      orden del API (Posicion ASC). Categoria completa; tickets y % tal como
      los manda el SP. */
@@ -170,6 +196,7 @@
     claseValidacion: claseValidacion, matriz: matriz, partirEtiqueta: partirEtiqueta,
     rangoRapido: rangoRapido, diaMexico: diaMexico, pieKpi: pieKpi,
     etiquetaFrecuencia: etiquetaFrecuencia, notaFrecuencia: notaFrecuencia,
+    ordenFrecuencia: ordenFrecuencia, ORDEN_FRECUENCIA: ORDEN_FRECUENCIA,
     filasRecurrentes: filasRecurrentes,
   };
   raiz.QareDatos = QareDatos;
@@ -236,8 +263,35 @@
   }
 
   // -------------------------------------------------------------- KPIs
+  /* Banda de contexto de cada KPI: la pregunta del formulario QA/QARE de la
+     que sale y que respuestas cuenta. Mismo marcado (.qare-ctx) que las
+     tarjetas de qare.html. Solo texto fijo: no toca el dato. */
+  var ICONO = {
+    usuario:    '<circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 11l2 2 4-4"/>',
+    frecuencia: '<path d="M4 19h16M7 19V10M12 19V5M17 19v-6"/>',
+    reuso:      '<path d="M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5"/>',
+    kb:         '<path d="M12 6.5C10.5 5.3 8.2 5 4 5v13c4.2 0 6.5.3 8 1.5 1.5-1.2 3.8-1.5 8-1.5V5c-4.2 0-6.5.3-8 1.5zM12 6.5v13"/>',
+  };
+  // Por titulo del KPI: [icono, pregunta, nota]. "Tickets evaluados" no sale
+  // de ninguna pregunta y va sin banda.
+  var KPI_CONTEXTO = {
+    'Verificación de Tickets': ['usuario',    'QARE · ¿Verificaste la correcta clasificación del ticket?',      'Considera: Sí'],
+    'Casos recurrentes':    ['frecuencia', 'QA · ¿Con qué frecuencia ocurre?',                               'Considera: Frecuente + Siempre'],
+    'Casos reutilizables':  ['reuso',      'QARE · ¿Esta solución aplica para otros casos similares?',       'Considera: Sí'],
+    'Potencial KB':         ['kb',         'QARE · ¿Se debe generar o actualizar artículo de conocimiento?', 'Considera: Sí'],
+  };
+
+  function contexto(c) {
+    return '<div class="qare-ctx"><p class="qare-ctx-preg">' +
+      '<svg class="qare-ctx-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">' + ICONO[c[0]] + '</svg>' +
+      '<span>' + esc(c[1]) + '</span></p>' +
+      (c[2] ? '<p class="qare-ctx-nota">' + esc(c[2]) + '</p>' : '') + '</div>';
+  }
+
   function tarjeta(titulo, valor, pie) {
-    return '<div class="kpi"><div class="lbl">' + esc(titulo) + '</div>' +
+    var c = KPI_CONTEXTO[titulo];
+    return '<div class="kpi' + (c ? ' qare-kpi-ctx' : '') + '">' + (c ? contexto(c) : '') +
+      '<div class="lbl">' + esc(titulo) + '</div>' +
       '<div class="val">' + esc(valor) + '</div>' +
       '<div class="foot">' + esc(pie) + '</div></div>';
   }
@@ -245,7 +299,7 @@
   // [titulo, porcentaje, numerador, denominador] con los nombres del SP.
   var KPIS = [
     ['Tickets evaluados',    'TotalTicketsPeriodo',          null,                 null],
-    ['Confirmacion usuario', 'PorcentajeConfirmacion',       'TicketsConfirmados', 'TicketsConRespuestaConfirmacion'],
+    ['Verificación de Tickets', 'PorcentajeConfirmacion',       'TicketsConfirmados', 'TicketsConRespuestaConfirmacion'],
     ['Casos recurrentes',    'PorcentajeRecurrencia',        'TicketsRecurrentes', 'TicketsConFrecuencia'],
     ['Casos reutilizables',  'PorcentajeCasosReutilizables', 'CasosReutilizables', 'TicketsConRespuestaReutilizacion'],
     ['Potencial KB',         'PorcentajePotencialKB',        'CasosPotencialKB',   'TicketsConRespuestaKB'],
@@ -289,16 +343,18 @@
     }).render();
   }
 
-  // Seccion 2: columnas en el orden natural que ya trae el API.
+  // Seccion 2: columnas en el orden fijo de ORDEN_FRECUENCIA (ordenFrecuencia).
   function pintarFrecuencia(filas, errores) {
     $('hint-frecuencia').textContent = '';
     if (sinFilas('frecuencia', filas, errores)) return;
+    filas = ordenFrecuencia(filas);
     barras('frecuencia', 'chart-frecuencia',
       filas.map(etiquetaFrecuencia),
       filas.map(function (f) { return numero(f.CantidadTickets); }),
       false,
       function (item) {
         var f = filas[item.dataIndex];
+        if (f.sinDato) return 'Sin tickets en el rango';
         var linea = entero(f.CantidadTickets) + ' tickets · ' + pct(f.Porcentaje);
         var nota = notaFrecuencia(f);
         return nota ? [linea, nota] : linea;
@@ -598,6 +654,18 @@
       $(id).addEventListener('change', function () { marcarRapido(null); cargar(); });
     });
     $('reintentar').addEventListener('click', cargar);
+    $('dicc-boton').addEventListener('click', function () {
+      plegarDiccionario(this.getAttribute('aria-expanded') !== 'true');
+    });
+  }
+
+  /* Diccionario: nace plegado (el marcado ya trae aria-expanded="false") y
+     el estado vive solo en el DOM, como la tabla de SLA por lider y grupo.
+     El CSS lee aria-expanded para abrir el cuerpo; recargar datos no lo toca. */
+  function plegarDiccionario(abrir) {
+    var boton = $('dicc-boton');
+    boton.setAttribute('aria-expanded', String(abrir));
+    boton.setAttribute('aria-label', (abrir ? 'Ocultar' : 'Mostrar') + ' diccionario de preguntas QARE');
   }
 
   var arrancado = false;

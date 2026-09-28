@@ -91,12 +91,51 @@
          que no llego, un acumulado que baja...). No bloquea nada. -->
     <div class="qare-aviso" id="qare-avisos" hidden></div>
 
+    <!-- Cada tarjeta lleva arriba una banda (.qare-ctx) con la pregunta del
+         formulario QA/QARE de la que sale y, debajo, que respuestas cuenta.
+         Es solo contexto: el titulo y la grafica siguen siendo los de antes.
+         Las de los KPIs las pinta qare.js (KPI_CONTEXTO). -->
     <section class="kpis" id="qare-kpis"></section>
+
+    <!-- Diccionario: las seis preguntas del formulario de las que salen los
+         bloques, con sus opciones (texto del documento de QARE). Nace
+         plegado; todo el encabezado es el boton y qare.js solo alterna
+         aria-expanded, que es lo que el CSS lee para abrir el cuerpo. -->
+    <section class="card qare-dicc">
+      <button class="qare-dicc-boton" id="qare-dicc-boton" type="button"
+              aria-controls="qare-dicc-cuerpo" aria-expanded="false"
+              aria-label="Mostrar diccionario de preguntas QARE">
+        <svg class="qare-dicc-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M9.5 6.5 15 12l-5.5 5.5"/>
+        </svg>
+        <span>Diccionario</span>
+      </button>
+      <div class="qare-dicc-cuerpo" id="qare-dicc-cuerpo">
+        <div class="qare-dicc-interior">
+          <table class="qare-dicc-tabla">
+            <thead>
+              <tr><th scope="col">Pregunta</th><th scope="col">Opciones / Descripción</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>QARE - ¿Verificaste la correcta clasificación del ticket?</td><td>Sí / No</td></tr>
+              <tr><td>QA - ¿Con qué frecuencia ocurre?</td><td>Primera vez / Ocasional / Frecuente / Siempre</td></tr>
+              <tr><td>QARE - ¿Esta solución aplica para otros casos similares?</td><td>Sí / No</td></tr>
+              <tr><td>QARE - ¿Se debe generar o actualizar artículo de conocimiento?</td><td>Sí / No</td></tr>
+              <tr><td>QARE - ¿Cuál fue la causa del incidente/petición?</td><td>Catálogo de causas registradas</td></tr>
+              <tr><td>QARE - Tipo de solución aplicada</td><td>Catálogo de soluciones registradas</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
 
     <!-- El Pareto va solo y a todo el ancho: son una docena de causas con
          nombres largos, y en media tarjeta las barras y el eje se apretaban
          hasta no leerse. -->
-    <section class="card">
+    <section class="card qare-seccion">
+      <div class="qare-ctx">
+        <p class="qare-ctx-preg"><svg class="qare-ctx-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="6"/><path d="m20 20-4.5-4.5M8.5 13v-2M11 13V9M13.5 13v-3"/></svg><span>QARE · ¿Cuál fue la causa del incidente/petición?</span></p>
+      </div>
       <h3>Principales causas raiz<span class="hint" id="qare-hint-causa">Pareto · referencia 80 %</span></h3>
       <div class="lienzo qare-lienzo-pareto">
         <canvas id="qare-chart-causa"></canvas>
@@ -108,14 +147,22 @@
          tabla de recurrentes con Tipo de solucion (largos). La matriz se
          centra en el alto que le sobra, no encoge la tarjeta. -->
     <section class="grid2x2">
-      <div class="card">
+      <div class="card qare-seccion">
+        <div class="qare-ctx">
+          <p class="qare-ctx-preg"><svg class="qare-ctx-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 19h16M7 19V10M12 19V5M17 19v-6"/></svg><span>QA · ¿Con qué frecuencia ocurre?</span></p>
+          <p class="qare-ctx-nota">Orden: Siempre · Frecuente · Ocasional · Primera vez</p>
+        </div>
         <h3>Frecuencia del problema<span class="hint" id="qare-hint-frecuencia"></span></h3>
         <div class="lienzo">
           <canvas id="qare-chart-frecuencia"></canvas>
           <p class="qare-msg" id="qare-msg-frecuencia">Calculando…</p>
         </div>
       </div>
-      <div class="card qare-card-centro">
+      <div class="card qare-seccion qare-card-centro">
+        <div class="qare-ctx">
+          <p class="qare-ctx-preg"><svg class="qare-ctx-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M10 6h10M10 12h10M10 18h10M4 6l1 1 2-2M4 12l1 1 2-2M4 18l1 1 2-2"/></svg><span>QARE · ¿Verificaste la correcta clasificación del ticket?</span></p>
+          <p class="qare-ctx-nota">Cruce con la validación QA</p>
+        </div>
         <h3>Confirmacion del usuario vs validacion QA<span class="hint" id="qare-hint-matriz">tickets · % del total al pasar el mouse</span></h3>
         <div class="qare-centro">
           <div class="scroll-x" id="qare-matriz"><div class="vacio">Calculando…</div></div>
@@ -129,13 +176,20 @@
     </section>
 
     <section class="grid2x2">
-      <div class="card">
+      <div class="card qare-seccion">
+        <div class="qare-ctx">
+          <p class="qare-ctx-preg"><svg class="qare-ctx-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 19h16M7 19V10M12 19V5M17 19v-6"/></svg><span>QA · ¿Con qué frecuencia ocurre?</span></p>
+          <p class="qare-ctx-nota">Recurrente = Frecuente + Siempre</p>
+        </div>
         <h3>Problemas recurrentes por categoria<span class="hint" id="qare-hint-recurrentes"></span></h3>
         <!-- Tabla completa en orden de Posicion, con scroll vertical y el
              encabezado fijo (.tabla-alta, de dashboard.css). -->
         <div class="tabla-alta" id="qare-tabla-recurrentes"><div class="vacio">Calculando…</div></div>
       </div>
-      <div class="card">
+      <div class="card qare-seccion">
+        <div class="qare-ctx">
+          <p class="qare-ctx-preg"><svg class="qare-ctx-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L4 16.8V20h3.2l5.3-5.3a4 4 0 0 0 5.2-5.4l-2.4 2.4-2.1-.6-.6-2.1z"/></svg><span>QARE · Tipo de solución aplicada</span></p>
+        </div>
         <h3>Tipo de solucion aplicada<span class="hint" id="qare-hint-tipo"></span></h3>
         <div class="lienzo qare-lienzo-filas" id="qare-lienzo-tipo">
           <canvas id="qare-chart-tipo"></canvas>
