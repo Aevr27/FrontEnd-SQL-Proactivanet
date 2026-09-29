@@ -317,5 +317,129 @@ Check('tope: 32767', 32767, Q.LIMITE_CELDA);
 Check('libro: autofiltro = encabezado + filas (51 columnas, A..AY)',
   'A' + (enc + 1) + ':AY' + (enc + 3), hoja['!autofilter'] && hoja['!autofilter'].ref);
 
+// --- formato del libro: el de "Descargar Tickets" de Experiencia ----------
+// Se lee el .xlsx YA ESCRITO (el zip), no la hoja en memoria: lo que se
+// comprueba es que el retoque de styles.xml y sheet1.xml llego al archivo.
+var zip = XLSX.CFB.read(bytes, { type: 'array' });
+function parte(ruta) {
+  var f = XLSX.CFB.find(zip, ruta);
+  return f ? Buffer.from(f.content).toString('utf8') : '';
+}
+var estilos = parte('/xl/styles.xml');
+var hojaXml = parte('/xl/worksheets/sheet1.xml');
+var S = Q.LIBRO.ESTILOS;
+function s(ref) {
+  var m = hojaXml.match(new RegExp('<c r="' + ref + '"[^>]*?(?: s="(\\d+)")[^>]*>'));
+  return m ? Number(m[1]) : null;
+}
+function ref(fila0, llave) { return XLSX.utils.encode_cell({ r: fila0, c: col(llave) }); }
+var xfs = (estilos.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/) || [, '0', ''])[2].match(/<xf [^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g) || [];
+var fonts = (estilos.match(/<fonts[^>]*>([\s\S]*?)<\/fonts>/) || [, ''])[1].match(/<font>[\s\S]*?<\/font>/g) || [];
+var fills = (estilos.match(/<fills[^>]*>([\s\S]*?)<\/fills>/) || [, ''])[1].match(/<fill>[\s\S]*?<\/fill>/g) || [];
+function xfDe(i) {
+  var x = xfs[i] || '';
+  var num = function (a) { var m = x.match(new RegExp(a + '="(\\d+)"')); return m ? Number(m[1]) : -1; };
+  return { font: fonts[num('fontId')] || '', fill: fills[num('fillId')] || '', borde: num('borderId'), x: x };
+}
+
+Check('estilos: styles.xml sustituido (14 cellXfs, como LibroTickets)', 14, xfs.length);
+var enc0 = xfDe(S.ENCABEZADO);
+Check('encabezado: relleno verde del tablero FF166534', true, /fgColor rgb="FF166534"/.test(enc0.fill));
+Check('encabezado: texto blanco y negrita', true, /<b\/>/.test(enc0.font) && /FFFFFFFF/.test(enc0.font));
+Check('encabezado: borde, centrado vertical y ajuste', true,
+  enc0.borde === 1 && /vertical="center"/.test(enc0.x) && /wrapText="1"/.test(enc0.x));
+Check('encabezado: las 51 celdas con el estilo de encabezado', true,
+  Q.COLUMNAS_EXPORT.every(function (c, i) { return s(XLSX.utils.encode_cell({ r: enc, c: i })) === S.ENCABEZADO; }));
+Check('titulo: 16 pt negrita', true, /<b\/><sz val="16"\/>/.test(xfDe(S.TITULO).font) && s('A1') === S.TITULO);
+Check('titulo combinado sobre las 51 columnas', true, /<mergeCell ref="A1:AY1"\/>/.test(hojaXml));
+// Metadatos: filas 3..8 (1-based); "Total de tickets" es la 5a.
+Check('metadatos: etiquetas y valores con estilos distintos', [S.META_ETIQUETA, S.META_VALOR],
+  [s('A3'), s('B3')]);
+Check('metadatos: Total de tickets resaltado (verde, negrita)', true,
+  s('B7') === S.META_FUERTE && /<b\/>/.test(xfDe(S.META_FUERTE).font) && /FF166534/.test(xfDe(S.META_FUERTE).font));
+Check('metadatos: Total en su fila', 'Total de tickets', filas[6][0]);
+// Panel congelado justo bajo el encabezado: titulo y metadatos a la vista.
+Check('panel congelado bajo el encabezado', true,
+  new RegExp('<pane ySplit="' + (enc + 1) + '" topLeftCell="A' + (enc + 2) + '" activePane="bottomLeft" state="frozen"/>').test(hojaXml));
+Check('autofiltro en el archivo = tabla de 51 columnas', true,
+  new RegExp('<autoFilter ref="A' + (enc + 1) + ':AY' + (enc + 3) + '"/>').test(hojaXml));
+// Cuerpo: borde fino, fila alterna y columnas largas con ajuste.
+Check('cuerpo: borde fino claro', true, xfDe(S.CELDA).borde === 1 && /FFE2E6E4/.test(estilos));
+Check('cuerpo: primera fila normal, segunda zebra', [S.CELDA, S.CELDA_ZEBRA],
+  [s(ref(enc + 1, 'Grupo')), s(ref(enc + 2, 'Grupo'))]);
+Check('zebra: el gris con gota de verde de Experiencia', true, /fgColor rgb="FFF3F6F4"/.test(xfDe(S.CELDA_ZEBRA).fill));
+Check('largas: por llave, las ocho columnas de parrafo', Q.LARGAS_EXPORT.length,
+  Q.LARGAS_EXPORT.filter(function (k) { return col(k) >= 0; }).length);
+Check('largas: con ajuste de texto (y zebra en la alterna)', true,
+  Q.LARGAS_EXPORT.every(function (k) {
+    return s(ref(enc + 1, k)) === S.CELDA_LARGA && s(ref(enc + 2, k)) === S.CELDA_LARGA_ZEBRA;
+  }) && /wrapText="1"/.test(xfDe(S.CELDA_LARGA).x));
+Check('corta: sin ajuste', true, !/wrapText/.test(xfDe(S.CELDA).x));
+Check('numeros: celdas numericas conservan el tipo y llevan estilo', true,
+  BANDERAS.every(function (k) {
+    var m = hojaXml.match(new RegExp('<c r="' + ref(enc + 1, k) + '"([^>]*)>'));
+    return m && !/ t="/.test(m[1]) && / s="\d+"/.test(m[1]);
+  }));
+// Anchos: nunca mas estrechos que COLUMNAS_EXPORT; ensanchados solo para que
+// quepa la palabra mas larga del encabezado (y la etiqueta en la columna A).
+var anchos = Q.anchosExport(Q.metaExport('2026-09-01', '2026-09-15', {}, 2, 'x'));
+Check('anchos: ninguno por debajo del declarado', true,
+  Q.COLUMNAS_EXPORT.every(function (c, i) { return anchos[i] >= c[2]; }));
+Check('anchos: cabe cada palabra del encabezado', true,
+  Q.COLUMNAS_EXPORT.every(function (c, i) {
+    return c[1].split(' ').every(function (p) { return p.length + 3 <= anchos[i]; });
+  }));
+Check('anchos: solo se ensancha lo necesario', true,
+  Q.COLUMNAS_EXPORT.every(function (c, i) {
+    return anchos[i] === c[2] || anchos[i] === Math.max(
+      c[1].split(' ').reduce(function (m, p) { return Math.max(m, p.length); }, 0) + 3,
+      i === 0 ? 'Periodo (FechaFirmaSolucion)'.length + 2 : 0);
+  }));
+Check('anchos: columnas largas sin cambio (se ajustan, no se ensanchan)', true,
+  Q.LARGAS_EXPORT.every(function (k) { return anchos[col(k)] === Q.COLUMNAS_EXPORT[col(k)][2]; }));
+// SheetJS escribe wch + 0.83 (relleno de celda): se compara la parte entera.
+Check('anchos: los del archivo', anchos,
+  (hojaXml.match(/<col min="\d+" max="\d+" width="[\d.]+"/g) || []).map(function (c) {
+    return Math.floor(Number(c.match(/width="([\d.]+)"/)[1]));
+  }));
+
+// Semaforo del Estado: mismas reglas que LibroTickets; lo demas sin color.
+var estados = ['Cerrado', 'Resuelto', 'Solucionado', 'Cancelado', 'Rechazado', 'Reabierto', 'Escalado',
+  'Pendiente', 'En espera', 'En proceso', 'Asignado', 'Abierto', 'Nuevo', 'Otro', ''];
+var bytesE = Q.libroExport(XLSX, estados.map(function (e, i) {
+  return { CodigoTicket: 'E-' + i, Estado: e, Subestado: 'Cerrado', Prioridad: 'Alta', Validacion: 'Incorrecto' };
+}), Q.metaExport('2026-09-01', '2026-09-15', {}, estados.length, 'x'));
+var hojaE = (function () {
+  var z = XLSX.CFB.read(bytesE, { type: 'array' });
+  return Buffer.from(XLSX.CFB.find(z, '/xl/worksheets/sheet1.xml').content).toString('utf8');
+})();
+function sE(r, llave) {
+  var m = hojaE.match(new RegExp('<c r="' + XLSX.utils.encode_cell({ r: r, c: col(llave) }) + '"[^>]*? s="(\\d+)"'));
+  return m ? Number(m[1]) : null;
+}
+var V = S.ESTADO_VERDE, R = S.ESTADO_ROJO, A = S.ESTADO_AMBAR;
+Check('Estado: verde / rojo / ambar / sin color', [V, V, V, R, R, R, R, A, A, A, A, A, A, 'normal', 'normal'],
+  estados.map(function (e, i) {
+    var v = sE(enc + 1 + i, 'Estado');
+    return (v === S.CELDA || v === S.CELDA_ZEBRA) ? 'normal' : v;
+  }));
+Check('Subestado, Prioridad y Validacion sin semaforo', true,
+  estados.every(function (e, i) {
+    return ['Subestado', 'Prioridad', 'Validacion'].every(function (k) {
+      var v = sE(enc + 1 + i, k); return v === S.CELDA || v === S.CELDA_ZEBRA;
+    });
+  }));
+Check('estiloEstado = el de LibroTickets', true,
+  (function () {
+    var exp = leer('experiencia/experiencia.js');
+    return ['(cerrad|resuelt|solucionad|finalizad|complet)', '(cancelad|rechazad|reabiert|escalad)',
+      '(pendiente|espera|proceso|curso|asignad|abiert|nuev)'].every(function (r) {
+      return exp.indexOf(r) >= 0 && codigo.indexOf(r) >= 0;
+    });
+  })());
+Check('mismos colores que LibroTickets', true,
+  ['FF166534', 'FFE7F3EC', 'FF92400E', 'FFFDF3E3', 'FF991B1B', 'FFFCE9E9', 'FF111827', 'FF6B7280',
+   'FFF3F6F4', 'FFE2E6E4'].every(function (c) { return leer('experiencia/experiencia.js').indexOf("'" + c + "'") >= 0 && estilos.indexOf(c) >= 0; }));
+
 console.log(fallos === 0 ? 'TODO OK' : fallos + ' FALLOS');
 process.exit(fallos === 0 ? 0 : 1);

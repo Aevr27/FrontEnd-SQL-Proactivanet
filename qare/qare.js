@@ -314,6 +314,194 @@
     return 'QARE_' + fi + '_a_' + ff + (filtrado ? '_filtrado' : '') + '.xlsx';
   }
 
+  /* ---- Formato del libro: el de "Descargar Tickets" de Experiencia ----
+     Mismo metodo que LibroTickets (experiencia/experiencia.js), adaptado a
+     las 51 columnas de QARE. El vendor (xlsx.mini, build comunitaria 0.18.5)
+     escribe anchos, altos, combinaciones y autofiltro, pero IGNORA el `s` de
+     las celdas y no escribe paneles congelados. Asi que el libro se arma con
+     SheetJS como siempre -mismos valores- y despues se retocan dos piezas
+     del .xlsx ya escrito, con el mismo vendor (XLSX.CFB):
+       xl/styles.xml            se sustituye por hojaEstilos() (abajo)
+       xl/worksheets/sheet1.xml se le mete el <pane> congelado y un s="i" por
+                                celda, que apunta a esos estilos
+     Ni un valor cambia: el `s` es solo una referencia de formato.
+     Colores, fuentes, bordes y alineaciones: los MISMOS de LibroTickets. */
+  var LIBRO = (function () {
+    var VERDE = 'FF166534', VERDE_TENUE = 'FFE7F3EC';
+    var AMBAR = 'FF92400E', AMBAR_TENUE = 'FFFDF3E3';
+    var ROJO = 'FF991B1B', ROJO_TENUE = 'FFFCE9E9';
+    var TINTA = 'FF111827', TINTA_SUAVE = 'FF6B7280';
+    var ZEBRA = 'FFF3F6F4', LINEA = 'FFE2E6E4';
+
+    // Indices de cellXfs; mismo orden que `xfs` en hojaEstilos().
+    var E = {
+      BASE: 0, TITULO: 1, SUBTITULO: 2, META_ETIQUETA: 3, META_VALOR: 4,
+      META_FUERTE: 5, ENCABEZADO: 6, CELDA: 7, CELDA_ZEBRA: 8,
+      CELDA_LARGA: 9, CELDA_LARGA_ZEBRA: 10,
+      ESTADO_VERDE: 11, ESTADO_AMBAR: 12, ESTADO_ROJO: 13,
+    };
+
+    function fuente(attrs) { return '<font>' + attrs + '<name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'; }
+    function relleno(color) { return '<fill><patternFill patternType="solid"><fgColor rgb="' + color + '"/><bgColor indexed="64"/></patternFill></fill>'; }
+
+    function hojaEstilos() {
+      var fuentes = [
+        fuente('<sz val="11"/><color rgb="' + TINTA + '"/>'),              // 0 base
+        fuente('<b/><sz val="16"/><color rgb="' + TINTA + '"/>'),          // 1 titulo
+        fuente('<sz val="10"/><color rgb="' + TINTA_SUAVE + '"/>'),        // 2 subtitulo
+        fuente('<b/><sz val="10"/><color rgb="' + TINTA_SUAVE + '"/>'),    // 3 etiqueta
+        fuente('<sz val="10"/><color rgb="' + TINTA + '"/>'),              // 4 valor
+        fuente('<b/><sz val="11"/><color rgb="FFFFFFFF"/>'),               // 5 encabezado
+        fuente('<b/><sz val="10"/><color rgb="' + VERDE + '"/>'),          // 6 cifra fuerte
+        fuente('<b/><sz val="11"/><color rgb="' + VERDE + '"/>'),          // 7 estado verde
+        fuente('<b/><sz val="11"/><color rgb="' + AMBAR + '"/>'),          // 8 estado ambar
+        fuente('<b/><sz val="11"/><color rgb="' + ROJO + '"/>'),           // 9 estado rojo
+      ];
+      var rellenos = [
+        '<fill><patternFill patternType="none"/></fill>',
+        '<fill><patternFill patternType="gray125"/></fill>',
+        relleno(VERDE), relleno(ZEBRA), relleno(VERDE_TENUE),
+        relleno(AMBAR_TENUE), relleno(ROJO_TENUE),
+      ];
+      var lado = '<left style="thin"><color rgb="' + LINEA + '"/></left>'
+        + '<right style="thin"><color rgb="' + LINEA + '"/></right>'
+        + '<top style="thin"><color rgb="' + LINEA + '"/></top>'
+        + '<bottom style="thin"><color rgb="' + LINEA + '"/></bottom><diagonal/>';
+      var bordes = [
+        '<border><left/><right/><top/><bottom/><diagonal/></border>',
+        '<border>' + lado + '</border>',
+      ];
+      // [numFmt, fuente, relleno, borde, alineacion]
+      var xfs = [
+        [0, 0, 0, 0, ''],
+        [0, 1, 0, 0, '<alignment vertical="center"/>'],
+        [0, 2, 0, 0, '<alignment vertical="center"/>'],
+        [0, 3, 0, 0, '<alignment vertical="center"/>'],
+        [0, 4, 0, 0, '<alignment vertical="center"/>'],
+        [0, 6, 0, 0, '<alignment vertical="center"/>'],
+        [0, 5, 2, 1, '<alignment vertical="center" wrapText="1"/>'],
+        [0, 0, 0, 1, '<alignment vertical="top"/>'],
+        [0, 0, 3, 1, '<alignment vertical="top"/>'],
+        [0, 0, 0, 1, '<alignment vertical="top" wrapText="1"/>'],
+        [0, 0, 3, 1, '<alignment vertical="top" wrapText="1"/>'],
+        [0, 7, 4, 1, '<alignment vertical="top"/>'],
+        [0, 8, 5, 1, '<alignment vertical="top"/>'],
+        [0, 9, 6, 1, '<alignment vertical="top"/>'],
+      ];
+      var xf = xfs.map(function (x) {
+        return '<xf numFmtId="' + x[0] + '" fontId="' + x[1] + '" fillId="' + x[2] + '"'
+          + ' borderId="' + x[3] + '" xfId="0" applyFont="1" applyFill="1" applyBorder="1"'
+          + (x[4] ? ' applyAlignment="1">' + x[4] + '</xf>' : '/>');
+      }).join('');
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        + '<fonts count="' + fuentes.length + '">' + fuentes.join('') + '</fonts>'
+        + '<fills count="' + rellenos.length + '">' + rellenos.join('') + '</fills>'
+        + '<borders count="' + bordes.length + '">' + bordes.join('') + '</borders>'
+        + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        + '<cellXfs count="' + xfs.length + '">' + xf + '</cellXfs>'
+        + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+        + '<dxfs count="0"/>'
+        + '<tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleMedium4"/>'
+        + '</styleSheet>';
+    }
+
+    /* Semaforo del Estado, y SOLO del Estado, con las mismas reglas que
+       LibroTickets. Subestado, Prioridad, Validacion y las banderas van sin
+       color: no hay una escala acordada y no se inventa ninguna. Lo que no
+       se reconoce sale con el formato normal. */
+    function estiloEstado(valor) {
+      var v = String(valor || '').toLowerCase();
+      if (!v) return null;
+      if (/(cerrad|resuelt|solucionad|finalizad|complet)/.test(v)) return E.ESTADO_VERDE;
+      if (/(cancelad|rechazad|reabiert|escalad)/.test(v)) return E.ESTADO_ROJO;
+      if (/(pendiente|espera|proceso|curso|asignad|abiert|nuev)/.test(v)) return E.ESTADO_AMBAR;
+      return null;
+    }
+
+    /* El s="i" de cada celda por posicion (0-based). La hoja de QARE es:
+       fila 0 titulo, fila 1 en blanco, los metadatos desde d.filaMeta, un
+       renglon en blanco, el encabezado (d.filaEncabezado) y los tickets. */
+    function estiloDe(fila, col, d) {
+      if (fila === 0) return col === 0 ? E.TITULO : E.BASE;
+      if (fila >= d.filaMeta && fila < d.filaMeta + d.nMeta) {
+        if (col === 0) return E.META_ETIQUETA;
+        return fila === d.filaFuerte ? E.META_FUERTE : E.META_VALOR;
+      }
+      if (fila === d.filaEncabezado) return E.ENCABEZADO;
+      if (fila > d.filaEncabezado) {
+        var zebra = (fila - d.filaEncabezado) % 2 === 0;
+        if (col === d.colEstado) {
+          var propio = estiloEstado(d.valorEstado(fila));
+          if (propio !== null) return propio;
+        }
+        if (d.largas.indexOf(col) >= 0) return zebra ? E.CELDA_LARGA_ZEBRA : E.CELDA_LARGA;
+        return zebra ? E.CELDA_ZEBRA : E.CELDA;
+      }
+      return E.BASE;
+    }
+
+    function aBytes(texto) {
+      var b = new Uint8Array(texto.length);
+      for (var i = 0; i < texto.length; i++) b[i] = texto.charCodeAt(i) & 255;
+      return b;
+    }
+    function aTexto(contenido) {
+      var s = '';
+      for (var i = 0; i < contenido.length; i++) s += String.fromCharCode(contenido[i]);
+      return s;
+    }
+
+    /* Congela por debajo del encabezado de la tabla (titulo y metadatos se
+       quedan a la vista, como en Experiencia) y mete el s="i" celda por
+       celda, numeros incluidos. */
+    function retocarHoja(xml, d) {
+      var primeraDatos = d.filaEncabezado + 2;   // 1-based, tras el encabezado
+      var pane = '<sheetView workbookViewId="0">'
+        + '<pane ySplit="' + (primeraDatos - 1) + '" topLeftCell="A' + primeraDatos + '"'
+        + ' activePane="bottomLeft" state="frozen"/>'
+        + '<selection pane="bottomLeft" activeCell="A' + primeraDatos + '" sqref="A' + primeraDatos + '"/>'
+        + '</sheetView>';
+      var salida = xml.replace('<sheetView workbookViewId="0"/>', pane);
+      return salida.replace(/<c r="([A-Z]+)(\d+)"/g, function (todo, letras, numero) {
+        var col = 0;
+        for (var i = 0; i < letras.length; i++) col = col * 26 + (letras.charCodeAt(i) - 64);
+        var estilo = estiloDe(parseInt(numero, 10) - 1, col - 1, d);
+        return estilo ? todo + ' s="' + estilo + '"' : todo;
+      });
+    }
+
+    /* Libro de SheetJS ya armado -> bytes con el formato puesto. */
+    function formatear(XLSX, libro, d) {
+      var zip = XLSX.CFB.read(XLSX.write(libro, { type: 'binary', bookType: 'xlsx' }), { type: 'binary' });
+      XLSX.CFB.utils.cfb_add(zip, '/xl/styles.xml', aBytes(hojaEstilos()));
+      var hojaXml = XLSX.CFB.find(zip, '/xl/worksheets/sheet1.xml');
+      XLSX.CFB.utils.cfb_add(zip, '/xl/worksheets/sheet1.xml', aBytes(retocarHoja(aTexto(hojaXml.content), d)));
+      return XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
+    }
+
+    return { formatear: formatear, estiloEstado: estiloEstado, ESTILOS: E };
+  })();
+
+  /* Columnas de parrafo: van con ajuste de texto (wrapText) para que la hoja
+     no se haga absurdamente ancha. Se buscan por llave, no por posicion. */
+  var LARGAS_EXPORT = ['Titulo', 'Descripcion', 'SolucionUsuario', 'QA_MensajeError', 'QA_PasoAPaso',
+    'QARe_Causa', 'QARe_Evidencia', 'QARe_DescripcionSolucion'];
+
+  /* Ancho efectivo de cada columna: el de COLUMNAS_EXPORT, salvo que no
+     quepa la palabra mas larga de su encabezado (los nombres de columna son
+     una sola palabra, y el ajuste de texto solo parte en espacios) o, en la
+     columna A, la etiqueta de metadato mas larga. +3: negrita y la flecha
+     del autofiltro. Nunca se estrecha nada. */
+  function anchosExport(meta) {
+    return COLUMNAS_EXPORT.map(function (c, i) {
+      var palabra = c[1].split(' ').reduce(function (m, p) { return Math.max(m, p.length); }, 0);
+      var minimo = palabra + 3;
+      if (i === 0) meta.forEach(function (m) { minimo = Math.max(minimo, String(m[0]).length + 2); });
+      return Math.max(c[2], minimo);
+    });
+  }
+
   /* Tickets -> bytes del .xlsx. `XLSX` entra por parametro (no se toca
      window) para que la prueba le pase el mismo vendor. Lo que llega como
      texto va como texto -codigos y fechas no se reinterpretan como numero o
@@ -321,6 +509,7 @@
      0/1, IntentosSolucion, ReasignacionesGrupo, Caducada) queda numero. */
   function libroExport(XLSX, tickets, meta) {
     var aoa = [['QARE — Tickets'], []];
+    var filaMeta = aoa.length;
     meta.forEach(function (m) { aoa.push([m[0], m[1]]); });
     aoa.push([]);
     var filaEncabezado = aoa.length;
@@ -332,13 +521,38 @@
         return ajustarCelda(v === null || v === undefined ? '' : String(v));
       }));
     });
+    var ultimaCol = COLUMNAS_EXPORT.length - 1;
     var hoja = XLSX.utils.aoa_to_sheet(aoa);
-    hoja['!cols'] = COLUMNAS_EXPORT.map(function (c) { return { wch: c[2] }; });
+    hoja['!cols'] = anchosExport(meta).map(function (w) { return { wch: w }; });
+    // Alto propio solo en titulo y encabezado (tres renglones: el de
+    // UsuarioConfirmo se parte en dos o tres). Las filas de datos sin alto
+    // fijo, como en Experiencia.
+    var altos = [];
+    altos[0] = { hpt: 26 };
+    altos[filaEncabezado] = { hpt: 46 };
+    hoja['!rows'] = altos;
+    // El titulo se combina ARRIBA de la tabla; dentro de ella nada se
+    // combina, que romperia ordenar y filtrar.
+    hoja['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: ultimaCol } }];
     hoja['!autofilter'] = { ref: XLSX.utils.encode_range({
-      s: { r: filaEncabezado, c: 0 }, e: { r: aoa.length - 1, c: COLUMNAS_EXPORT.length - 1 } }) };
+      s: { r: filaEncabezado, c: 0 }, e: { r: aoa.length - 1, c: ultimaCol } }) };
     var libro = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(libro, hoja, 'Tickets QARE');
-    return XLSX.write(libro, { type: 'array', bookType: 'xlsx' });
+
+    var llaves = COLUMNAS_EXPORT.map(function (c) { return c[0]; });
+    var colEstado = llaves.indexOf('Estado');
+    return LIBRO.formatear(XLSX, libro, {
+      filaEncabezado: filaEncabezado,
+      filaMeta: filaMeta,
+      nMeta: meta.length,
+      filaFuerte: filaMeta + meta.map(function (m) { return m[0]; }).indexOf('Total de tickets'),
+      largas: LARGAS_EXPORT.map(function (k) { return llaves.indexOf(k); }),
+      colEstado: colEstado,
+      valorEstado: function (fila) {
+        var f = aoa[fila];
+        return f ? f[colEstado] : '';
+      },
+    });
   }
 
   var QareDatos = {
@@ -351,6 +565,7 @@
     filasRecurrentes: filasRecurrentes,
     COLUMNAS_EXPORT: COLUMNAS_EXPORT, LIMITE_CELDA: LIMITE_CELDA, ajustarCelda: ajustarCelda,
     metaExport: metaExport, nombreExport: nombreExport, libroExport: libroExport,
+    LARGAS_EXPORT: LARGAS_EXPORT, anchosExport: anchosExport, LIBRO: LIBRO,
   };
   raiz.QareDatos = QareDatos;
 
