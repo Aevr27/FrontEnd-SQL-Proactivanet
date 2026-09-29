@@ -317,7 +317,12 @@
   }
 
   function pintarTablero(datos) {
-    pintarOrigen(datos);
+    /* Pastilla de la cabecera: "Última actualización" y "Periodo" de
+       datos.dataInfo (el sello es el fin del ultimo ETL en dbo.EtlLog, via
+       qa.ashx). El resto de la procedencia (datos.source: origen, tickets en
+       el rango, vista, consultado) ya no se muestra; sigue llegando por
+       compatibilidad. */
+    DatosInfo.pintar($('chip-fecha'), datos.dataInfo);
     pintarKpis(datos.summary, datos.historico);
     pintarGrupo(datos.porGrupo || []);
     pintarTecnico(datos.porTecnico || []);
@@ -361,49 +366,6 @@
       });
   }
 
-  // El bloque "source" describe de donde salieron los datos y que ventana
-  // cubren. Deliberadamente no trae servidor, base ni usuario: esto lo ve el
-  // navegador.
-  function pintarOrigen(datos) {
-    var src = datos.source || {};
-    var desde = fechaCorta(src.fechaInicio);
-    var hasta = fechaCorta(src.fechaFin);
-
-    /* Sello de frescura y periodo, con el componente compartido
-       (assets/js/datos-info.js). El metadato lo arma qa.ashx -> DatosInfo():
-       el sello es el fin del ultimo ETL de tickets registrado en dbo.EtlLog,
-       la misma base y la misma definicion que publica SLA, y el periodo es la
-       ventana que la consulta USO (por omision los 15 dias del correo de QA).
-
-       Antes esta pastilla solo mostraba el rango; el unico dato de tiempo que
-       llegaba era generatedAt, que es la hora del servidor al responder y no
-       dice de cuando son los datos. Ese valor sigue en el pie de fuente como
-       "Consultado", que es lo que de verdad significa. */
-    if (datos.dataInfo) {
-      DatosInfo.pintar($('chip-fecha'), datos.dataInfo);
-    } else {
-      // Respuesta anterior a dataInfo: queda el rango, que source si trae.
-      DatosInfo.pintar($('chip-fecha'), DatosInfo.armar({
-        fuente: 'QA de categorizacion',
-        inicio: src.fechaInicio,
-        fin: src.fechaFin,
-        origen: src.vista || null,
-      }));
-    }
-
-    var partes = [];
-    partes.push('Origen: ' + (src.origen || 'no informado'));
-    if (src.ticketsRows !== null && src.ticketsRows !== undefined) {
-      partes.push(NUM.format(src.ticketsRows) + ' tickets en el rango');
-    }
-    $('sub-fuente').textContent = partes.join(' · ');
-
-    var pie = [];
-    if (src.vista) pie.push('Vista: ' + src.vista);
-    if (desde && hasta) pie.push('Rango: ' + desde + ' – ' + hasta);
-    if (src.consultadoEn) pie.push('Consultado: ' + fechaHora(src.consultadoEn));
-    $('pie-fuente').textContent = pie.join(' · ');
-  }
 
   // ----------------------------------------------------------------- KPIs
   function tarjeta(clase, titulo, valor, nota) {

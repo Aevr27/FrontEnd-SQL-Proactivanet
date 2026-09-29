@@ -1,4 +1,4 @@
-```csharp
+csharp
 <%@ WebHandler Language="C#" Class="RQ" %>
 
 using System;
@@ -45,4 +45,3 @@ public class RQ : IHttpHandler
         get { return false; }
     }
 }
-```

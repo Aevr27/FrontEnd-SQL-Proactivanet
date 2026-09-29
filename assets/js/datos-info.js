@@ -154,9 +154,11 @@
       nodo.appendChild(div);
     }
 
-    // El detalle largo (de donde sale el sello, y la limitacion si la hay) no
-    // ocupa sitio en pantalla: va al tooltip.
-    var titulo = op.titulo || [this.origen, this.nota].filter(Boolean).join(' · ');
+    // Tooltip solo cuando quien llama lo pide (el detalle de la carga
+    // parcial). El origen y la nota del metadato NO se muestran: traen
+    // nombres de tablas de la base (dbo.EtlLog...) y ya no se exponen en la
+    // UI. Siguen viajando en meta y quedan en this.origen / this.nota.
+    var titulo = op.titulo || '';
     if (titulo) nodo.title = titulo; else nodo.removeAttribute('title');
     return this;
   };

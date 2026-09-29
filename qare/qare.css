@@ -77,3 +77,125 @@ header.top #qare-estado:empty { display: none; }
 .qare-ok  { background: #5aa726; }
 .qare-mal { background: #982a18; }
 .qare-sin { background: #b09512; }
+
+/* ---- Banda de contexto (.qare-ctx): la pregunta QA/QARE de la que sale
+   cada bloque, encima de su titulo. Va pegada al borde superior de la
+   tarjeta: los margenes negativos anulan el padding de .card, asi
+   que ese padding se fija aqui (--qare-pad-*) para no depender de copiarlo.
+   Solo presentacion: el titulo y la grafica de debajo no cambian. ---- */
+.qare-seccion {
+  --qare-ctx-fondo: #f1f6fd; --qare-ctx-linea: #dfe8f5; --qare-ctx-tinta: #2657a8;
+}
+.card.qare-seccion { --qare-pad-y: 18px; --qare-pad-x: 20px; padding: var(--qare-pad-y) var(--qare-pad-x); }
+@media (max-width: 700px) {
+  .card.qare-seccion { --qare-pad-y: 14px; --qare-pad-x: 14px; }
+}
+.qare-ctx {
+  margin: calc(-1 * var(--qare-pad-y)) calc(-1 * var(--qare-pad-x)) 14px;
+  padding: 10px var(--qare-pad-x) 9px;
+  background: var(--qare-ctx-fondo); border-bottom: 1px solid var(--qare-ctx-linea);
+  min-width: 0;
+}
+.card.qare-seccion > .qare-ctx { border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; }
+.qare-ctx p { margin: 0; }
+.qare-ctx .qare-ctx-nota { margin-top: 2px; }
+.qare-ctx-preg {
+  display: flex; align-items: flex-start; gap: 7px;
+  font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--qare-ctx-tinta);
+  overflow-wrap: anywhere;
+}
+.qare-ctx-ico {
+  flex: none; width: 15px; height: 15px; margin-top: 1px;
+  fill: none; stroke: currentColor; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; opacity: .8;
+}
+.qare-ctx-nota {
+  padding-left: 22px;
+  font-size: 11.5px; line-height: 1.35; color: var(--muted);
+}
+
+/* ---- KPI: franja "Pregunta" (.qare-kpi-preg). Una linea de 13px pegada
+   al borde de arriba, en los tonos de acento del tablero; la pregunta no se
+   ve en la tarjeta, sale en el globo (.qare-kpi-globo). La tarjeta solo
+   gana 4px de padding arriba para que la franja no pise el rotulo; lo demas
+   del KPI (rotulo, cifra, pie, franja izquierda) no cambia. ---- */
+.kpi.qare-kpi-ctx { padding-top: 20px; }
+.qare-kpi-preg {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 1;
+  display: block; height: 13px; margin: 0; padding: 0; border: 0;
+  background: var(--accent-soft); color: var(--accent-deep);
+  font-family: inherit; font-size: 7.5px; font-weight: 500; line-height: 13px;
+  text-transform: uppercase; letter-spacing: .9px; text-align: center;
+  cursor: help; opacity: .85;
+  transition: background .15s ease, opacity .15s ease;
+}
+.qare-kpi-preg:hover, .qare-kpi-preg[aria-expanded="true"] { background: var(--accent-line); opacity: 1; }
+.qare-kpi-preg:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Globo: uno solo, fuera de las tarjetas y con position: fixed (lo coloca
+   qare.js bajo la franja). Nunca mas ancho que la ventana. */
+.qare-kpi-globo {
+  position: fixed; z-index: 60; top: 0; left: 0;
+  width: max-content; max-width: min(300px, calc(100vw - 16px));
+  padding: 8px 11px; border-radius: var(--radius-sm);
+  background: var(--card, #fff); border: 1px solid var(--line);
+  box-shadow: var(--shadow-md); pointer-events: none;
+}
+.qare-kpi-globo[hidden] { display: none; }
+.qare-kpi-globo.visible { animation: qare-globo-entra .12s ease-out; }
+.qare-kpi-globo p { margin: 0; }
+.qare-kpi-globo-preg { font-size: 12px; font-weight: 600; line-height: 1.35; color: var(--ink); }
+.qare-kpi-globo .qare-kpi-globo-nota { margin-top: 3px; font-size: 11px; color: var(--muted); }
+@keyframes qare-globo-entra { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .qare-kpi-globo.visible { animation: none; } }
+
+/* ---- Diccionario (.qare-dicc): tarjeta plegable entre los KPIs y el
+   Pareto. Plegada es una sola linea; todo el encabezado es el boton. El
+   cuerpo se abre con aria-expanded="true" del boton: la fila de la rejilla
+   pasa de 0fr a 1fr (animacion corta) y visibility lo saca del arbol de
+   accesibilidad mientras esta cerrado. ---- */
+.card.qare-dicc { padding: 0; }
+.qare-dicc-boton {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 11px 20px; border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--ink); cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 700; text-align: left;
+  transition: background .16s ease;
+}
+.qare-dicc-boton:hover { background: var(--g-50); }
+.qare-dicc-ico {
+  flex: none; width: 16px; height: 16px; color: var(--muted);
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  transition: transform .18s ease;
+}
+.qare-dicc-boton[aria-expanded="true"] { border-radius: var(--radius) var(--radius) 0 0; }
+.qare-dicc-boton[aria-expanded="true"] .qare-dicc-ico { transform: rotate(90deg); }
+
+.qare-dicc-cuerpo {
+  display: grid; grid-template-rows: 0fr; visibility: hidden;
+  transition: grid-template-rows .2s ease, visibility 0s linear .2s;
+}
+.qare-dicc-boton[aria-expanded="true"] + .qare-dicc-cuerpo {
+  grid-template-rows: 1fr; visibility: visible;
+  transition: grid-template-rows .2s ease;
+}
+.qare-dicc-interior { min-height: 0; overflow: hidden; }
+.qare-dicc-tabla { margin: 0 20px 14px; width: calc(100% - 40px); border-top: 1px solid var(--line-soft); }
+.qare-dicc-tabla th { cursor: default; background: transparent; }
+.qare-dicc-tabla th:hover { color: var(--muted); background: transparent; }
+.qare-dicc-tabla td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+.qare-dicc-tabla td:first-child { width: 58%; color: var(--ink); }
+@media (prefers-reduced-motion: reduce) {
+  .qare-dicc-cuerpo, .qare-dicc-boton[aria-expanded="true"] + .qare-dicc-cuerpo, .qare-dicc-ico { transition: none; }
+}
+/* Movil: cada pregunta con sus opciones debajo, en vez de dos columnas
+   estrechas. */
+@media (max-width: 520px) {
+  .qare-dicc-boton { padding: 11px 14px; }
+  .qare-dicc-tabla { margin: 0 14px 12px; width: calc(100% - 28px); }
+  .qare-dicc-tabla thead { display: none; }
+  .qare-dicc-tabla tr, .qare-dicc-tabla td { display: block; width: auto; }
+  .qare-dicc-tabla td:first-child { width: auto; border-bottom: 0; padding-bottom: 2px; }
+  .qare-dicc-tabla td:last-child { padding-top: 0; color: var(--muted); }
+}

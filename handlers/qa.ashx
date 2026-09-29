@@ -348,15 +348,15 @@ public class Qa : IHttpHandler
     //
     // Los conteos (TicketsIncorrectosAyer / SemanaAnterior) los calcula
     // QaCorreo.Kpis; aqui solo se etiquetan con su fecha. Si esa lectura
-    // devuelve las fechas se usan tal cual; si no, se derivan
-    // del fin del rango con la MISMA formula que documenta el procedimiento:
-    // ayer = fin - 1, y "semana anterior" = fin - 8 (un solo dia, el mismo dia
-    // de la semana que ayer, no un acumulado de siete).
+    // devuelve las fechas se usan tal cual; si no, se derivan del fin del
+    // rango con la MISMA formula que QaDb.SqlKpis: ayer = fin (la ventana ya
+    // termina ayer, ver QaParams.Rango), y "semana anterior" = fin - 8 (un
+    // solo dia, no un acumulado de siete).
     private static Dictionary<string, object> Historico(Dictionary<string, object> kpis, string ff)
     {
         var historico = new Dictionary<string, object>();
         historico["fechaReferencia"] = QaDb.Fecha(kpis, "FechaFin") ?? ff;
-        historico["fechaAyer"] = QaDb.Fecha(kpis, "FechaAyer") ?? Desplazar(ff, -1);
+        historico["fechaAyer"] = QaDb.Fecha(kpis, "FechaAyer") ?? ff;
         historico["incorrectosAyer"] = QaDb.Entero(kpis, "TicketsIncorrectosAyer");
         historico["fechaSemanaAnterior"] =
             QaDb.Fecha(kpis, "FechaSemanaAnterior") ?? Desplazar(ff, -8);

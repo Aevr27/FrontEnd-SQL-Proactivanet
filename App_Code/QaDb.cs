@@ -300,6 +300,11 @@ public static class QaDb
     // sin envolver la columna. Medido contra la base de QA para
     // 2026-08-25..2026-09-08: los mismos 12 y 16, en ~0,6 s.
     //
+    // "Ayer" es @FechaFin, NO @FechaFin - 1: la ventana ya termina ayer
+    // (QaParams.Rango, @FechaFin = hoy-1), asi que restarle otro dia contaba
+    // antier. Se ancla en @FechaFin para no calcular una segunda fecha de
+    // "hoy": el KPI usa exactamente el mismo dia base que el rango.
+    //
     // El agregado de la ventana (TicketsTotales / TicketsIncorrectos /
     // PorcentajeIncorrectos) se copia EXPRESION POR EXPRESION del
     // procedimiento, incluido el NULLIF que evita dividir entre cero. Esa
@@ -314,7 +319,7 @@ public static class QaDb
     private const string SqlKpis = @"
 SET NOCOUNT ON;
 
-DECLARE @Ayer DATE = DATEADD(DAY, -1, @FechaFin);
+DECLARE @Ayer DATE = @FechaFin;
 DECLARE @SemanaAnt DATE = DATEADD(DAY, -8, @FechaFin);
 
 DECLARE @AyerIni   DATETIME2(0) = CONVERT(DATETIME2(0), @Ayer);

@@ -372,18 +372,10 @@ function seleccionados(id) {
 
 function estadoCargando(id) { DatosInfo.mensaje(id, 'Cargando...'); }
 
-/* Sello de frescura y periodo de la cabecera.
-
-   El formato, el parseo de las fechas y el marcado ya no viven aqui: los pone
-   DatosInfo (assets/js/datos-info.js), el mismo componente que usan
-   Experiencia y QA. Este archivo solo le entrega el metadato que mando el
-   backend -kpis.meta en SLA y Call Center, resumen.meta en Backlog- y ese
-   metadato es el unico origen de las fechas: aqui no se calcula ninguna.
-
-   Sin metadato el rotulo se queda vacio. Antes se caia a
-   `new Date().toLocaleTimeString()`, que decia cuando se miro la pantalla y no
-   de cuando eran los datos; leerlo como "ultima actualizacion" era justo el
-   error que este cambio viene a quitar. */
+/* Pastilla de la cabecera: "Última actualización" (y "Periodo" cuando la
+   pestaña no lo oculta), sacada de kpis.meta por DatosInfo
+   (assets/js/datos-info.js). El mismo nodo sirve para "Cargando...", el error
+   y el aviso de carga parcial. */
 function estadoOk(id, meta, opciones) {
   DatosInfo.pintar(id, meta, opciones);
 }
@@ -3689,15 +3681,9 @@ const TableroSla = (function () {
     Object.keys(filtro).forEach(k => { filtro[k] = null; });
     invalidarFilas();
     renderTodo();
-    /* kpis.meta trae el sello del ETL y el rango que la consulta USO: las dos
-       cosas salen de la misma fila de kpis.ashx, asi que ninguna puede
-       discrepar de los numeros que acompana.
-
-       De la cabecera solo se pinta el sello. El rango ya esta a la vista en la
-       barra de filtros de esta misma pestaña -Fecha inicio, Fecha fin y el
-       selector de SLOT, que ademas explica la semantica de los 30 dias-, y
-       repetirlo aqui seria el mismo dato en dos sitios. El periodo sigue
-       viajando en meta; solo no se dibuja. */
+    /* kpis.meta trae el sello del ETL y el rango que la consulta USO. En la
+       cabecera solo se dibuja el sello (ver estadoOk); el rango ya esta en la
+       barra de filtros y sigue viajando en meta. */
     estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.meta, fallos, { periodo: false });
 
     /* Y ya con el tablero pintado, se calientan en segundo plano los SLOTs

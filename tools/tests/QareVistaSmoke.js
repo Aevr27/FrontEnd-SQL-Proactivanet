@@ -130,6 +130,47 @@ Check('Ocasional sin nota', null, Q.notaFrecuencia({ Frecuencia: 'Ocasional', Fr
 Check('valor fuera de la escala: su propio nombre', 'Otro', Q.etiquetaFrecuencia({ Frecuencia: 'Otro' }));
 Check('valor fuera de la escala: sin nota', null, Q.notaFrecuencia({ Frecuencia: 'Otro' }));
 
+// --- Frecuencia: orden fijo de presentacion ---------------------------------
+function rotulos(filas) { return filas.map(Q.etiquetaFrecuencia); }
+function niv(n, c) { return { Frecuencia: n, FrecuenciaGuia: n, CantidadTickets: c }; }
+var FIJO = ['Siempre', 'Frecuente', 'Ocasional', 'Primera vez'];
+Check('orden fijo desde el orden del API', FIJO,
+  rotulos(Q.ordenFrecuencia([niv('Primera vez', 9), niv('Ocasional', 5), niv('Frecuente', 3), niv('Siempre', 1)])));
+Check('orden fijo aunque el API cambie de orden', FIJO,
+  rotulos(Q.ordenFrecuencia([niv('Ocasional', 5), niv('Siempre', 1), niv('Primera vez', 9), niv('Frecuente', 3)])));
+Check('orden fijo aunque los conteos inviertan el ranking', FIJO,
+  rotulos(Q.ordenFrecuencia([niv('Siempre', 900), niv('Primera vez', 1), niv('Frecuente', 50), niv('Ocasional', 70)])));
+var hueco = Q.ordenFrecuencia([niv('Primera vez', 9), niv('Siempre', 1)]);
+Check('nivel ausente conserva su lugar', FIJO, rotulos(hueco));
+Check('nivel ausente va como hueco en cero', [false, true, true, false],
+  hueco.map(function (f) { return !!f.sinDato; }));
+Check('nivel ausente: conteo 0', [1, 0, 0, 9], hueco.map(function (f) { return f.CantidadTickets; }));
+Check('valor fuera de la escala va al final', FIJO.concat(['Otro']),
+  rotulos(Q.ordenFrecuencia([{ Frecuencia: 'Otro', CantidadTickets: 2 }, niv('Siempre', 1)])));
+var entrada = [niv('Primera vez', 9), niv('Siempre', 1)];
+Q.ordenFrecuencia(entrada);
+Check('ordenFrecuencia no toca las filas del API', ['Primera vez', 'Siempre'], rotulos(entrada));
+
+// --- query string de qare.ashx: fechas + filtros del Backlog ---------------
+Check('sin filtros: solo las fechas (la peticion de siempre)',
+  'fecha_inicio=2026-09-01&fecha_fin=2026-09-15', Q.consulta('2026-09-01', '2026-09-15', {}));
+Check('sin objeto de filtros: solo las fechas',
+  'fecha_inicio=2026-09-01&fecha_fin=2026-09-15', Q.consulta('2026-09-01', '2026-09-15'));
+Check('listas vacias no se mandan',
+  'fecha_inicio=2026-09-01&fecha_fin=2026-09-15',
+  Q.consulta('2026-09-01', '2026-09-15', { c1: [], grupos: [], lideres: [''] }));
+Check('los tres filtros, separados por comas y codificados',
+  'fecha_inicio=2026-09-01&fecha_fin=2026-09-15&c1=S-Punto%20de%20Venta&grupos=Service%20Desk%2CSoporte%20Campo&lideres=Sin%20Torre',
+  Q.consulta('2026-09-01', '2026-09-15',
+    { c1: ['S-Punto de Venta'], grupos: ['Service Desk', 'Soporte Campo'], lideres: ['Sin Torre'] }));
+Check('solo lideres', 'fecha_inicio=a&fecha_fin=b&lideres=Jesus%20Campa%2CLaura%20Cardenas',
+  Q.consulta('a', 'b', { lideres: ['Jesus Campa', 'Laura Cardenas'] }));
+Check('mismos nombres de parametro que BacklogUtil.Filtros', ['c1', 'grupos', 'lideres'], Q.FILTROS_ORG);
+Check('BacklogUtil.Filtros lee c1/grupos/lideres', true,
+  ['"c1"', '"grupos"', '"lideres"'].every(function (k) { return leer('App_Code/DashboardDb.cs').indexOf('ListaONulo(request, ' + k + ')') >= 0; }));
+Check('qare.ashx usa BacklogUtil.Filtros', true,
+  /QareQueries\.Consultar\(inicio, fin, BacklogUtil\.Filtros\(context\.Request\)\)/.test(leer('handlers/qare.ashx')));
+
 // --- tabla de recurrentes por categoria -------------------------------------
 var tabla = Q.filasRecurrentes([
   { Posicion: 1, Categoria: '/S-Biométrico/Falla en sistema de biométrico/Usuario no encontrado', CantidadTickets: 121, TotalTicketsRecurrentes: 1520, PorcentajeRecurrentes: 7.96 },
@@ -162,7 +203,16 @@ var ids = {};
 ['frecuencia', 'causa', 'tipo'].forEach(function (k) { ids['msg-' + k] = true; });
 var faltan = Object.keys(ids).filter(function (id) { return pagina.indexOf('id="qare-' + id + '"') < 0; });
 Check('cada id que pide qare.js existe en qare.html', [], faltan);
-Check('pide las dos fechas al handler', true, /fecha_inicio=[\s\S]*?&fecha_fin=/.test(codigo));
+// Los tres selects de los filtros se piden por un mapa, no por $('...').
+['f-c1', 'f-grupos', 'f-lideres', 'btn-limpiar'].forEach(function (id) {
+  Check('existe #qare-' + id, true, pagina.indexOf('id="qare-' + id + '"') >= 0);
+});
+Check('pide las dos fechas al handler', true, /pedir\(consulta\(fi, ff, /.test(codigo));
+Check('las listas son las del Backlog', true, /ruta\('backlog_catalogos\.ashx'\)/.test(codigo));
+Check('rotulos iguales a los del Backlog', true,
+  ['Servicio / C1 (elige varios)', 'Grupos (elige varios)', 'Lideres (elige varios)'].every(function (r) {
+    return leer('backlog/backlog.html').indexOf(r) >= 0 && pagina.indexOf(r) >= 0;
+  }));
 
 console.log(fallos === 0 ? 'TODO OK' : fallos + ' FALLOS');
 process.exit(fallos === 0 ? 0 : 1);

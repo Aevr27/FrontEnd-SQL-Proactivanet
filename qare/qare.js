@@ -9,7 +9,8 @@
    handler ya entrega cada bloque en el orden del contrato (Posicion ASC, y
    Frecuencia en el orden de la guia con su rotulo en FrecuenciaGuia; ver
    App_Code/QareContrato.cs), asi que aqui no se reordena nada: se pinta en
-   el orden en que llega.
+   el orden en que llega. Unica excepcion, de presentacion: Frecuencia se
+   pinta en el orden fijo de ORDEN_FRECUENCIA (ver ordenFrecuencia).
 
    Regla de datos: lo que el API no trae no se calcula aqui. Los porcentajes
    -incluido el acumulado del Pareto- son los del procedimiento, en escala
@@ -133,6 +134,21 @@
     return { inicio: isoDia(fin - (dias - 1)), fin: isoDia(fin) };
   }
 
+  /* Query string de qare.ashx: el rango de fechas y los filtros del Backlog
+     (c1, grupos, lideres) como listas separadas por comas, igual que
+     paramsFiltros() de backlog.js. Un filtro vacio no se manda: vacio =
+     todos, y asi la peticion sin filtros es la misma de siempre. */
+  var FILTROS_ORG = ['c1', 'grupos', 'lideres'];
+
+  function consulta(fi, ff, filtros) {
+    var partes = ['fecha_inicio=' + encodeURIComponent(fi), 'fecha_fin=' + encodeURIComponent(ff)];
+    FILTROS_ORG.forEach(function (clave) {
+      var valores = ((filtros && filtros[clave]) || []).filter(function (v) { return v !== '' && v != null; });
+      if (valores.length) partes.push(clave + '=' + encodeURIComponent(valores.join(',')));
+    });
+    return partes.join('&');
+  }
+
   /* Pie de una tarjeta KPI: "X de Y" con el denominador que manda el SP
      (TicketsConRespuesta*, TicketsConFrecuencia). Cada porcentaje tiene el
      suyo, distinto del total del periodo. No se recalcula nada. */
@@ -156,6 +172,31 @@
     return 'En la base: "' + etiqueta(f.Frecuencia) + '"';
   }
 
+  /* Orden FIJO de las barras de Frecuencia: de lo mas recurrente a lo menos.
+     Es solo presentacion: el API sigue mandando su orden (el de la guia) y
+     no se toca. No depende de conteos ni del orden de llegada. */
+  var ORDEN_FRECUENCIA = ['Siempre', 'Frecuente', 'Ocasional', 'Primera vez'];
+
+  /* Filas de Frecuencia en ORDEN_FRECUENCIA. Un nivel que no llego (el SP
+     no devuelve filas en cero) conserva su lugar con una fila hueco
+     { sinDato: true } en vez de dejar que las demas se corran. Una fila que
+     no cae en ningun nivel va al final, en el orden del API: no se pierde. */
+  function ordenFrecuencia(filas) {
+    var lista = filas || [];
+    var usadas = [];
+    var salida = ORDEN_FRECUENCIA.map(function (nivel) {
+      for (var i = 0; i < lista.length; i++) {
+        if (!usadas[i] && normal(etiquetaFrecuencia(lista[i])) === normal(nivel)) {
+          usadas[i] = true;
+          return lista[i];
+        }
+      }
+      return { FrecuenciaGuia: nivel, CantidadTickets: 0, sinDato: true };
+    });
+    lista.forEach(function (f, i) { if (!usadas[i]) salida.push(f); });
+    return salida;
+  }
+
   /* Filas de la tabla de recurrentes por categoria, ya formateadas y en el
      orden del API (Posicion ASC). Categoria completa; tickets y % tal como
      los manda el SP. */
@@ -170,6 +211,8 @@
     claseValidacion: claseValidacion, matriz: matriz, partirEtiqueta: partirEtiqueta,
     rangoRapido: rangoRapido, diaMexico: diaMexico, pieKpi: pieKpi,
     etiquetaFrecuencia: etiquetaFrecuencia, notaFrecuencia: notaFrecuencia,
+    ordenFrecuencia: ordenFrecuencia, ORDEN_FRECUENCIA: ORDEN_FRECUENCIA,
+    consulta: consulta, FILTROS_ORG: FILTROS_ORG,
     filasRecurrentes: filasRecurrentes,
   };
   raiz.QareDatos = QareDatos;
@@ -177,11 +220,16 @@
   // ============================================================ 2. tablero
   if (typeof document === 'undefined') return;
 
-  var API = (function () {
+  function ruta(handler) {
     var yo = document.currentScript && document.currentScript.src;
-    try { return new URL('../handlers/qare.ashx', yo).href; }
-    catch (e) { return 'handlers/qare.ashx'; }
-  })();
+    try { return new URL('../handlers/' + handler, yo).href; }
+    catch (e) { return 'handlers/' + handler; }
+  }
+  var API = ruta('qare.ashx');
+  // Las listas de Servicio / Grupos / Lideres son las del Backlog: el diag
+  // de la VM (sql/diag_qare_filtros_precheck.sql) confirmo que cubren a todos
+  // los tickets de QARE.
+  var API_CATALOGOS = ruta('backlog_catalogos.ashx');
 
   var PREFIJO = 'qare-';
   function $(id) { return document.getElementById(PREFIJO + id); }
@@ -236,16 +284,103 @@
   }
 
   // -------------------------------------------------------------- KPIs
+  /* Pregunta de cada KPI: la del formulario QA/QARE de la que sale y que
+     respuestas cuenta. No se ve en la tarjeta: arriba solo va una franja
+     fina "Pregunta" (un <button>) y el texto sale en un globo al pasar el
+     mouse, al enfocarla con teclado o al tocarla. Solo texto fijo: no toca
+     el dato. Por titulo del KPI: [pregunta, nota]. "Tickets evaluados" no
+     sale de ninguna pregunta y va sin franja. */
+  var KPI_CONTEXTO = {
+    'Verificación de Tickets': ['QARE · ¿Verificaste la correcta clasificación del ticket?',      'Considera: Sí'],
+    'Casos recurrentes':       ['QA · ¿Con qué frecuencia ocurre?',                               'Considera: Frecuente + Siempre'],
+    'Casos reutilizables':     ['QARE · ¿Esta solución aplica para otros casos similares?',       'Considera: Sí'],
+    'Potencial KB':            ['QARE · ¿Se debe generar o actualizar artículo de conocimiento?', 'Considera: Sí'],
+  };
+
   function tarjeta(titulo, valor, pie) {
-    return '<div class="kpi"><div class="lbl">' + esc(titulo) + '</div>' +
+    var c = KPI_CONTEXTO[titulo];
+    return '<div class="kpi' + (c ? ' qare-kpi-ctx' : '') + '">' +
+      (c ? '<button type="button" class="qare-kpi-preg" data-titulo="' + esc(titulo) + '"' +
+           ' aria-describedby="qare-kpi-globo" aria-expanded="false"' +
+           ' aria-label="Pregunta de ' + esc(titulo) + ': ' + esc(c[0] + ' ' + c[1]) + '">Pregunta</button>' : '') +
+      '<div class="lbl">' + esc(titulo) + '</div>' +
       '<div class="val">' + esc(valor) + '</div>' +
       '<div class="foot">' + esc(pie) + '</div></div>';
+  }
+
+  /* Globo de la pregunta. Es UNO solo, fuera de las tarjetas (#qare-kpi-globo
+     en qare.html): .kpi recorta con overflow: hidden y se desplaza con
+     transform al pasar el mouse, y cualquiera de los dos lo cortaria. Va con
+     position: fixed bajo la franja, acotado al ancho de la ventana. */
+  var franjaAbierta = null;
+
+  function mostrarPregunta(franja) {
+    var globo = $('kpi-globo');
+    var c = KPI_CONTEXTO[franja.getAttribute('data-titulo')];
+    if (!globo || !c) return;
+    if (franjaAbierta && franjaAbierta !== franja) franjaAbierta.setAttribute('aria-expanded', 'false');
+    franjaAbierta = franja;
+    franja.setAttribute('aria-expanded', 'true');
+    $('kpi-globo-preg').textContent = c[0];
+    $('kpi-globo-nota').textContent = c[1];
+    globo.hidden = false;
+    var r = franja.getBoundingClientRect();
+    var ancho = globo.offsetWidth, margen = 8;
+    var izq = Math.min(Math.max(margen, r.left + r.width / 2 - ancho / 2),
+      document.documentElement.clientWidth - ancho - margen);
+    globo.style.left = Math.max(margen, izq) + 'px';
+    globo.style.top = (r.bottom + 6) + 'px';
+    globo.classList.add('visible');
+  }
+
+  function ocultarPregunta() {
+    var globo = $('kpi-globo');
+    if (franjaAbierta) franjaAbierta.setAttribute('aria-expanded', 'false');
+    franjaAbierta = null;
+    if (globo) { globo.classList.remove('visible'); globo.hidden = true; }
+  }
+
+  function conectarPreguntas() {
+    var kpis = $('kpis');
+    function franjaDe(e) { return e.target.closest && e.target.closest('.qare-kpi-preg'); }
+    // Mouse: entrar muestra, salir oculta. El toque no dispara esto (ver click).
+    kpis.addEventListener('pointerover', function (e) {
+      var f = franjaDe(e);
+      if (f && e.pointerType === 'mouse') mostrarPregunta(f);
+    });
+    kpis.addEventListener('pointerout', function (e) {
+      var f = franjaDe(e);
+      if (f && e.pointerType === 'mouse' && !f.contains(e.relatedTarget)) ocultarPregunta();
+    });
+    // Toque (y Enter/Espacio): alterna. Un toque fuera lo cierra.
+    kpis.addEventListener('click', function (e) {
+      var f = franjaDe(e);
+      if (!f) return;
+      e.stopPropagation();
+      // Con mouse el globo ya salio al entrar: el clic no lo cierra.
+      if (franjaAbierta === f && e.pointerType !== 'mouse') ocultarPregunta();
+      else mostrarPregunta(f);
+    });
+    // Teclado: al llegar con Tab. Solo :focus-visible, porque un toque
+    // tambien enfoca el boton y abriria el globo antes de que el click lo alterne.
+    kpis.addEventListener('focusin', function (e) {
+      var f = franjaDe(e);
+      if (f && f.matches(':focus-visible')) mostrarPregunta(f);
+    });
+    kpis.addEventListener('focusout', function (e) { if (franjaDe(e)) ocultarPregunta(); });
+    document.addEventListener('click', function (e) {
+      if (franjaAbierta && !franjaAbierta.contains(e.target)) ocultarPregunta();
+    });
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') ocultarPregunta(); });
+    // Fijo en pantalla: al desplazar o cambiar el ancho quedaria despegado.
+    window.addEventListener('scroll', ocultarPregunta, true);
+    window.addEventListener('resize', ocultarPregunta);
   }
 
   // [titulo, porcentaje, numerador, denominador] con los nombres del SP.
   var KPIS = [
     ['Tickets evaluados',    'TotalTicketsPeriodo',          null,                 null],
-    ['Confirmacion usuario', 'PorcentajeConfirmacion',       'TicketsConfirmados', 'TicketsConRespuestaConfirmacion'],
+    ['Verificación de Tickets', 'PorcentajeConfirmacion',       'TicketsConfirmados', 'TicketsConRespuestaConfirmacion'],
     ['Casos recurrentes',    'PorcentajeRecurrencia',        'TicketsRecurrentes', 'TicketsConFrecuencia'],
     ['Casos reutilizables',  'PorcentajeCasosReutilizables', 'CasosReutilizables', 'TicketsConRespuestaReutilizacion'],
     ['Potencial KB',         'PorcentajePotencialKB',        'CasosPotencialKB',   'TicketsConRespuestaKB'],
@@ -253,6 +388,7 @@
 
   // Tarjeta 1: el total. Tarjetas 2-5: porcentaje grande y "X de Y" abajo.
   function pintarKpis(k, relleno) {
+    ocultarPregunta();
     $('kpis').innerHTML = KPIS.map(function (d, i) {
       if (!k) return tarjeta(d[0], relleno, i === 0 ? 'Total del periodo' : '');
       if (i === 0) return tarjeta(d[0], entero(k[d[1]]), 'Total del periodo');
@@ -289,16 +425,18 @@
     }).render();
   }
 
-  // Seccion 2: columnas en el orden natural que ya trae el API.
+  // Seccion 2: columnas en el orden fijo de ORDEN_FRECUENCIA (ordenFrecuencia).
   function pintarFrecuencia(filas, errores) {
     $('hint-frecuencia').textContent = '';
     if (sinFilas('frecuencia', filas, errores)) return;
+    filas = ordenFrecuencia(filas);
     barras('frecuencia', 'chart-frecuencia',
       filas.map(etiquetaFrecuencia),
       filas.map(function (f) { return numero(f.CantidadTickets); }),
       false,
       function (item) {
         var f = filas[item.dataIndex];
+        if (f.sinDato) return 'Sin tickets en el rango';
         var linea = entero(f.CantidadTickets) + ' tickets · ' + pct(f.Porcentaje);
         var nota = notaFrecuencia(f);
         return nota ? [linea, nota] : linea;
@@ -490,9 +628,8 @@
   }
 
   // ------------------------------------------------------------ peticion
-  function pedir(fi, ff) {
-    var url = API + '?fecha_inicio=' + encodeURIComponent(fi) + '&fecha_fin=' + encodeURIComponent(ff);
-    return fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+  function pedir(qs) {
+    return fetch(API + '?' + qs, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
       .then(function (resp) {
         return resp.text().then(function (texto) {
           var datos = null;
@@ -543,6 +680,8 @@
     pintarMatriz(d.confirmacionVsQa, errores.confirmacionVsQa);
 
     var fallidos = Object.keys(errores);
+    // Pastilla de la cabecera: "Última actualización" y "Periodo" de
+    // d.dataInfo. Si fallo algun dataset se agrega el aviso.
     DatosInfo.pintar($('estado'), d.dataInfo, fallidos.length ? {
       sufijo: ' · ⚠ sin datos de: ' + fallidos.join(', '),
       titulo: fallidos.map(function (k) { return k + ': ' + errores[k]; }).join('\n'),
@@ -552,10 +691,6 @@
     var avisos = (d.avisos || []).concat(errores.kpis ? ['KPIs: ' + errores.kpis] : []);
     $('avisos').hidden = !avisos.length;
     $('avisos').innerHTML = avisos.map(function (a) { return '<div>' + esc(a) + '</div>'; }).join('');
-
-    // Las fechas que se mandaron a @FechaInicio/@FechaFin, sin retocar.
-    $('pie-rango').textContent = 'Rango consultado: ' + (DatosInfo.fecha(d.fechaInicio) || '?') +
-      ' – ' + (DatosInfo.fecha(d.fechaFin) || '?');
   }
 
   function cargar() {
@@ -574,9 +709,57 @@
 
     var token = ++peticion;
     enEspera();
-    pedir(fi, ff)
+    pedir(consulta(fi, ff, filtrosElegidos()))
       .then(function (d) { if (token === peticion) pintar(d); })
       .catch(function (err) { if (token === peticion) fallo(err); });
+  }
+
+  // ----------------------------------------------- filtros organizacionales
+  var SELECT_FILTRO = { c1: 'f-c1', grupos: 'f-grupos', lideres: 'f-lideres' };
+
+  function seleccionados(id) {
+    return Array.prototype.map.call($(id).selectedOptions, function (o) { return o.value; });
+  }
+
+  function filtrosElegidos() {
+    var f = {};
+    FILTROS_ORG.forEach(function (clave) { f[clave] = seleccionados(SELECT_FILTRO[clave]); });
+    return f;
+  }
+
+  /* Las listas, una vez al arrancar y sin frenar la primera carga de datos:
+     si fallan, QARE sigue funcionando sin filtros y el error va a la consola. */
+  function cargarCatalogos() {
+    return fetch(API_CATALOGOS, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error('backlog_catalogos.ashx respondio ' + resp.status + '.');
+        return resp.json();
+      })
+      .then(function (c) {
+        Catalogos.llenar($('f-c1'), (c && c.c1) || []);
+        Catalogos.llenar($('f-grupos'), (c && c.grupos) || []);
+        Catalogos.llenar($('f-lideres'), (c && c.lideres) || []);
+      })
+      .catch(function (err) { console.error('[QARE catalogos]', err); });
+  }
+
+  /* Mismo auto-aplicado que el Backlog: los cambios seguidos de los
+     multiselect se juntan en una sola peticion. */
+  var ESPERA_AUTO = 250;
+  var cargaProgramada = null;
+  function programarCarga() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = setTimeout(function () { cargaProgramada = null; cargar(); }, ESPERA_AUTO);
+  }
+
+  // "Limpiar" quita solo los tres filtros organizacionales; las fechas no.
+  // El `change` repinta el desplegable y programa la recarga.
+  function limpiarFiltros() {
+    FILTROS_ORG.forEach(function (clave) {
+      var sel = $(SELECT_FILTRO[clave]);
+      Array.prototype.forEach.call(sel.options, function (o) { o.selected = false; });
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
   }
 
   function marcarRapido(dias) {
@@ -600,6 +783,23 @@
       $(id).addEventListener('change', function () { marcarRapido(null); cargar(); });
     });
     $('reintentar').addEventListener('click', cargar);
+    FILTROS_ORG.forEach(function (clave) {
+      $(SELECT_FILTRO[clave]).addEventListener('change', programarCarga);
+    });
+    $('btn-limpiar').addEventListener('click', limpiarFiltros);
+    conectarPreguntas();
+    $('dicc-boton').addEventListener('click', function () {
+      plegarDiccionario(this.getAttribute('aria-expanded') !== 'true');
+    });
+  }
+
+  /* Diccionario: nace plegado (el marcado ya trae aria-expanded="false") y
+     el estado vive solo en el DOM, como la tabla de SLA por lider y grupo.
+     El CSS lee aria-expanded para abrir el cuerpo; recargar datos no lo toca. */
+  function plegarDiccionario(abrir) {
+    var boton = $('dicc-boton');
+    boton.setAttribute('aria-expanded', String(abrir));
+    boton.setAttribute('aria-label', (abrir ? 'Ocultar' : 'Mostrar') + ' diccionario de preguntas QARE');
   }
 
   var arrancado = false;
@@ -608,7 +808,13 @@
     arrancado = true;
     Barras.aplicarDefaults();
     ponerRango(DIAS_POR_OMISION);
+    /* La capa visual de los multiselect. Como en backlog.js: embebido, el
+       Desplegable.montar(document) de dashboard.js ya corrio antes de que
+       existiera este marcado, asi que se monta aqui sobre la raiz del modulo.
+       montar() es idempotente. */
+    if (window.Desplegable) Desplegable.montar(document.getElementById('tab-qare') || document);
     conectar();
+    cargarCatalogos();
     cargar();
   }
 
