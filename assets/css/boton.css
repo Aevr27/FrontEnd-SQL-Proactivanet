@@ -1,0 +1,68 @@
+/* =========================================================================
+   assets/css/boton.css
+
+   El boton `.btn` y sus variantes: UNA sola definicion para todas las vistas
+   que lo pintan -SLA, Backlog, Call Center, QA, QARE y la consola de admin-.
+
+   Hermana de assets/css/kpi.css. Vivia dentro de dashboard.css; las
+   declaraciones bajan de alli TAL CUAL, sin cambiar un valor ni el orden
+   entre ellas.
+
+   Lo que NO vive aqui, a proposito:
+   - Los botones de contexto del panel de filtros (`.filtros .acciones .btn`,
+     `.filtros .rango-rapido .btn`, `.filtros .slotstep .btn`): son geometria
+     de ese panel y siguen en dashboard.css, despues de esta hoja.
+   - La copia de `.btn` de qa/qa.css. Parece duplicada pero NO es redundante:
+     embebida va dentro de @scope (#tab-qa), y a igual especificidad su
+     `.btn` / `.btn:hover` le gana por proximidad a `.btn.gris`, `.btn.linea`,
+     `.btn.cyan` y `.btn.morado` de aqui. Quitarla cambiaria esas variantes
+     dentro de QA (hoy QA no las usa, pero la regla existe). Ademas trae lo
+     propio de QA: `.btn:disabled`, `.btn-sec` y la transicion sin `filter`.
+   - `.btn.chico` de admin.css (5px 9px): la consola lo achica a proposito.
+   - `.btn { display: none }` de impresion: sigue en el @media print de
+     dashboard.css.
+
+   Va inmediatamente ANTES de dashboard.css en cada pagina que la enlaza. Asi
+   ninguna regla de igual especificidad cambia de ganador: todo lo que antes
+   quedaba despues de `.btn` en dashboard.css sigue quedando despues, y las
+   hojas compartidas de antes (desplegable, barra-mini, kpi, datos-info)
+   siguen quedando antes. Embebidos, los modulos pierden sus <link> y usan la
+   copia de dashboard.html.
+   ========================================================================= */
+
+.btn {
+  border: 1px solid transparent; border-radius: var(--radius-xs);
+  padding: 9px 16px; cursor: pointer;
+  font: inherit; font-size: 13px; font-weight: 700; color: var(--btn-ink);
+  background: var(--grad-btn);
+  box-shadow: 0 1px 2px rgba(25, 25, 25, .12);
+  transition: filter .15s ease, transform .06s ease, box-shadow .15s ease, background .15s ease;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--grad-btn-hover); box-shadow: 0 3px 10px -3px rgba(71, 139, 60, .45); }
+.btn:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(25, 25, 25, .12); }
+/* Todas las variantes comparten el degradado; solo cambia el peso visual. */
+.btn.gris { background: var(--grad-btn); opacity: .82; }
+.btn.gris:hover { background: var(--grad-btn-hover); opacity: 1; }
+.btn.cyan { background: var(--grad-btn); }
+.btn.morado { background: var(--grad-btn); }
+.btn.chico { padding: 6px 12px; font-size: 12px; }
+/* Boton de contorno, al estilo de "ver categorias" del tablero de referencia. */
+.btn.linea {
+  background: var(--grad-btn); color: var(--btn-ink); border-color: var(--g-700);
+  font-weight: 700; box-shadow: none;
+}
+.btn.linea:hover {
+  background: var(--grad-btn-hover); color: var(--btn-ink); border-color: var(--g-800);
+  filter: none; box-shadow: 0 2px 8px -2px rgba(71, 139, 60, .5);
+}
+.btn.linea.active, .btn.linea[aria-pressed="true"] {
+  background: var(--grad-btn-hover); color: var(--btn-ink); border-color: var(--g-800);
+}
+/* La cabecera ya es verde claro: el boton solo necesita un contorno
+   mas firme para no fundirse con el degradado de atras. */
+header.top .btn {
+  border-color: rgba(25, 25, 25, .22);
+  box-shadow: 0 1px 2px rgba(25, 25, 25, .18);
+}
+header.top .btn:hover { border-color: rgba(25, 25, 25, .38); }
