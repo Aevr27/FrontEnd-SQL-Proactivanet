@@ -199,3 +199,24 @@ header.top #qare-estado:empty { display: none; }
   .qare-dicc-tabla td:first-child { width: auto; border-bottom: 0; padding-bottom: 2px; }
   .qare-dicc-tabla td:last-child { padding-top: 0; color: var(--muted); }
 }
+
+/* ---- "⬇ Descargar QARE": la pieza de "Descargar Tickets" de Experiencia ----
+   Mismos valores que `.selrow button` de experiencia/experiencia.css (mismo
+   degradado --grad-btn, tinta --btn-ink, borde --g-700, radio 8px, relleno
+   8px 14px, 12px en negrita; hover --grad-btn-hover con borde --g-800; sin
+   sombra ni hundimiento al pulsar). Por id para ganarle a
+   `.filtros .acciones .btn` de dashboard.css, que fija alto, relleno, radio,
+   sombra y el translateY de :active. El orden (order: 2, a la derecha de
+   Limpiar) y el mostrar/ocultar (display en linea, actualizarDescarga) no
+   se tocan. */
+#qare-btn-descargar {
+  height: auto; padding: 8px 14px; border-radius: 8px;
+  border: 1px solid var(--g-700);
+  background: var(--grad-btn); color: var(--btn-ink);
+  font-size: 12px; font-weight: 700; letter-spacing: normal;
+  box-shadow: none;
+}
+#qare-btn-descargar:hover {
+  background: var(--grad-btn-hover); border-color: var(--g-800); box-shadow: none;
+}
+#qare-btn-descargar:active { transform: none; }
