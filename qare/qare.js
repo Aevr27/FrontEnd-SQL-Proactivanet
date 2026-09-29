@@ -12,6 +12,10 @@
    el orden en que llega. Unica excepcion, de presentacion: Frecuencia se
    pinta en el orden fijo de ORDEN_FRECUENCIA (ver ordenFrecuencia).
 
+   El boton "⬇ Descargar QARE" pide los tickets a handlers/qare_exportar.ashx
+   con la MISMA consulta() (rango + c1/grupos/lideres) y arma el .xlsx aqui,
+   con SheetJS cargado al pulsar (ver descargar).
+
    Regla de datos: lo que el API no trae no se calcula aqui. Los porcentajes
    -incluido el acumulado del Pareto- son los del procedimiento, en escala
    0-100 (verificado en la VM); si alguna vez llegaran en 0-1, el handler lo
@@ -206,6 +210,100 @@
     });
   }
 
+  /* ---- Descarga ("⬇ Descargar QARE") ----
+     Columnas del libro: [llave que manda qare_exportar.ashx (el orden de
+     QareExportar.Columnas), encabezado, ancho en caracteres]. Las seis
+     preguntas llevan el encabezado del TICKETS QA .xlsx de siempre (los de
+     usp_QaWeb_Detalle en sql/10_qa_web.sql). */
+  var COLUMNAS_EXPORT = [
+    ['codigo', 'CodigoTicket', 15],
+    ['fecha_firma_solucion', 'FechaFirmaSolucion', 19],
+    ['grupo', 'Grupo', 24],
+    ['lider', 'Lider', 22],
+    ['c1', 'Servicio / C1', 22],
+    ['categoria', 'Categoria', 30],
+    ['frecuencia', 'QA - ¿Con qué frecuencia ocurre?', 18],
+    ['causa', 'QARe - ¿Cuál fue la causa del incidente/petición?', 40],
+    ['verifico_clasificacion', 'QARE - ¿Verificaste la correcta clasificación del ticket?', 18],
+    ['aplica_otros_casos', 'QARe - ¿Esta solución aplica para otros casos similares?', 18],
+    ['generar_articulo', 'QARe - ¿Se debe generar o actualizar artículo de conocimiento?', 18],
+    ['tipo_solucion', 'QARe - Tipo de solución aplicada', 26],
+    ['validacion', 'Validacion QA', 14],
+    ['titulo', 'Titulo', 42],
+    ['descripcion', 'Descripcion', 60],
+    ['solucion', 'SolucionUsuario', 45],
+    ['tecnico_segunda_linea', 'TecnicoSegundaLinea', 26],
+    ['subestado', 'Subestado', 18],
+    ['prioridad', 'Prioridad', 12],
+    ['cliente', 'Cliente', 24],
+    ['sucursal', 'Sucursal', 24],
+    ['fecha_firma_cierre', 'FechaFirmaCierre', 19],
+    ['tipo_origen', 'Tipo', 14],
+    ['registrado_por', 'RegistradoPor', 26],
+  ];
+
+  /* Tope de Excel por celda: 32.767 caracteres; SheetJS se niega a escribir
+     el libro si un solo valor lo pasa. Mismo recorte que LibroTickets de
+     Experiencia: lo que no cabe termina con un aviso y no parte un par
+     sustituto UTF-16. Solo afecta al libro, no a los datos. */
+  var LIMITE_CELDA = 32767;
+  function ajustarCelda(valor) {
+    if (typeof valor !== 'string' || valor.length <= LIMITE_CELDA) return valor;
+    var aviso = ' … [recortado: ' + valor.length + ' caracteres en origen]';
+    var corte = LIMITE_CELDA - aviso.length;
+    var c = valor.charCodeAt(corte - 1);
+    if (c >= 0xD800 && c <= 0xDBFF) corte--;
+    return valor.slice(0, corte) + aviso;
+  }
+
+  function listaFiltro(filtros, clave) {
+    var v = ((filtros && filtros[clave]) || []).filter(function (x) { return x !== '' && x != null; });
+    return v.length ? v.join(', ') : 'Todos';
+  }
+
+  // Cabecera del libro: el rango que confirmo el servidor y los filtros con
+  // los que se pidio. `ahora` entra por parametro para que la prueba no
+  // dependa del reloj.
+  function metaExport(fi, ff, filtros, total, ahora) {
+    return [
+      ['Periodo (FechaFirmaSolucion)', fi + ' a ' + ff],
+      ['Servicio / C1', listaFiltro(filtros, 'c1')],
+      ['Grupos', listaFiltro(filtros, 'grupos')],
+      ['Lideres', listaFiltro(filtros, 'lideres')],
+      ['Total de tickets', NUM.format(total)],
+      ['Exportado', ahora],
+    ];
+  }
+
+  function nombreExport(fi, ff, filtros) {
+    var filtrado = FILTROS_ORG.some(function (k) { return listaFiltro(filtros, k) !== 'Todos'; });
+    return 'QARE_' + fi + '_a_' + ff + (filtrado ? '_filtrado' : '') + '.xlsx';
+  }
+
+  /* Tickets -> bytes del .xlsx. `XLSX` entra por parametro (no se toca
+     window) para que la prueba le pase el mismo vendor. Todo va como texto:
+     codigos y fechas no se reinterpretan como numero o fecha de Excel. */
+  function libroExport(XLSX, tickets, meta) {
+    var aoa = [['QARE — Tickets'], []];
+    meta.forEach(function (m) { aoa.push([m[0], m[1]]); });
+    aoa.push([]);
+    var filaEncabezado = aoa.length;
+    aoa.push(COLUMNAS_EXPORT.map(function (c) { return c[1]; }));
+    tickets.forEach(function (t) {
+      aoa.push(COLUMNAS_EXPORT.map(function (c) {
+        var v = t[c[0]];
+        return ajustarCelda(v === null || v === undefined ? '' : String(v));
+      }));
+    });
+    var hoja = XLSX.utils.aoa_to_sheet(aoa);
+    hoja['!cols'] = COLUMNAS_EXPORT.map(function (c) { return { wch: c[2] }; });
+    hoja['!autofilter'] = { ref: XLSX.utils.encode_range({
+      s: { r: filaEncabezado, c: 0 }, e: { r: aoa.length - 1, c: COLUMNAS_EXPORT.length - 1 } }) };
+    var libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Tickets QARE');
+    return XLSX.write(libro, { type: 'array', bookType: 'xlsx' });
+  }
+
   var QareDatos = {
     numero: numero, entero: entero, pct: pct, etiqueta: etiqueta, normal: normal,
     claseValidacion: claseValidacion, matriz: matriz, partirEtiqueta: partirEtiqueta,
@@ -214,6 +312,8 @@
     ordenFrecuencia: ordenFrecuencia, ORDEN_FRECUENCIA: ORDEN_FRECUENCIA,
     consulta: consulta, FILTROS_ORG: FILTROS_ORG,
     filasRecurrentes: filasRecurrentes,
+    COLUMNAS_EXPORT: COLUMNAS_EXPORT, LIMITE_CELDA: LIMITE_CELDA, ajustarCelda: ajustarCelda,
+    metaExport: metaExport, nombreExport: nombreExport, libroExport: libroExport,
   };
   raiz.QareDatos = QareDatos;
 
@@ -230,6 +330,17 @@
   // de la VM (sql/diag_qare_filtros_precheck.sql) confirmo que cubren a todos
   // los tickets de QARE.
   var API_CATALOGOS = ruta('backlog_catalogos.ashx');
+  // Tickets del boton "⬇ Descargar QARE": mismos parametros que qare.ashx.
+  var API_EXPORTAR = ruta('qare_exportar.ashx');
+  /* SheetJS: el MISMO vendor que usa Experiencia, resuelto contra este
+     script (embebido, el documento vive un nivel mas arriba). Como
+     document.currentScript solo vale mientras el script se evalua, la ruta
+     se fija aqui y no al pulsar. */
+  var XLSX_URL = (function () {
+    var yo = document.currentScript && document.currentScript.src;
+    try { return new URL('../experiencia/vendor/xlsx.mini.min.js', yo).href; }
+    catch (e) { return 'experiencia/vendor/xlsx.mini.min.js'; }
+  })();
 
   var PREFIJO = 'qare-';
   function $(id) { return document.getElementById(PREFIJO + id); }
@@ -628,8 +739,10 @@
   }
 
   // ------------------------------------------------------------ peticion
-  function pedir(qs) {
-    return fetch(API + '?' + qs, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+  // `api` por omision es qare.ashx; la descarga pasa qare_exportar.ashx.
+  function pedir(qs, api) {
+    api = api || API;
+    return fetch(api + '?' + qs, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
       .then(function (resp) {
         return resp.text().then(function (texto) {
           var datos = null;
@@ -644,7 +757,8 @@
           return datos;
         });
       }, function () {
-        throw new Error('No se pudo contactar a qare.ashx. Revisa que el sitio este publicado y en ejecucion.');
+        throw new Error('No se pudo contactar a ' + api.split('/').pop() +
+          '. Revisa que el sitio este publicado y en ejecucion.');
       });
   }
 
@@ -712,6 +826,71 @@
     pedir(consulta(fi, ff, filtrosElegidos()))
       .then(function (d) { if (token === peticion) pintar(d); })
       .catch(function (err) { if (token === peticion) fallo(err); });
+  }
+
+  // ------------------------------------------------------------ descarga
+  /* SheetJS se trae la primera vez que se pulsa el boton, no al cargar la
+     pestaña (son ~250 KB que casi ninguna visita usa). Si Experiencia ya lo
+     cargo, se reusa. */
+  var xlsxCargando = null;
+  function cargarXLSX() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (!xlsxCargando) {
+      xlsxCargando = new Promise(function (listo, fallo) {
+        var s = document.createElement('script');
+        s.src = XLSX_URL;
+        s.onload = function () { listo(window.XLSX); };
+        s.onerror = function () { xlsxCargando = null; fallo(new Error('no se pudo cargar ' + s.src)); };
+        document.head.appendChild(s);
+      });
+    }
+    return xlsxCargando;
+  }
+
+  function bajar(bytes, nombre) {
+    var url = URL.createObjectURL(new Blob([bytes],
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    var a = document.createElement('a');
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+
+  /* Los tickets del rango y los filtros que se estan viendo: la MISMA
+     consulta() que pide el tablero, a qare_exportar.ashx, que lee la misma
+     fuente filtrada que los seis SP. Sin filtros baja la poblacion entera. */
+  var descargando = false;
+  function descargar() {
+    if (descargando) return;
+    var fi = $('f-inicio').value, ff = $('f-fin').value;
+    if (!fi || !ff || fi > ff) {
+      alert('Rango de fechas invalido: la fecha inicio debe ser anterior o igual a la fecha fin.');
+      return;
+    }
+    var filtros = filtrosElegidos();
+    var btn = $('btn-descargar'), rotulo = btn.textContent;
+    descargando = true;
+    btn.disabled = true;
+    btn.textContent = 'Preparando…';
+    pedir(consulta(fi, ff, filtros), API_EXPORTAR)
+      .then(function (d) {
+        var tickets = d.tickets || [];
+        if (!tickets.length) { alert('No hay tickets QARE para el rango y los filtros actuales.'); return; }
+        return cargarXLSX().then(function (XLSX) {
+          var meta = metaExport(d.fechaInicio, d.fechaFin, filtros, tickets.length,
+            new Date().toLocaleString('es-MX'));
+          bajar(libroExport(XLSX, tickets, meta), nombreExport(d.fechaInicio, d.fechaFin, filtros));
+        });
+      })
+      .catch(function (err) {
+        console.error('[QARE descarga]', err);
+        alert('No se pudo descargar QARE: ' + err.message);
+      })
+      .then(function () {
+        descargando = false;
+        btn.disabled = false;
+        btn.textContent = rotulo;
+      });
   }
 
   // ----------------------------------------------- filtros organizacionales
@@ -787,6 +966,7 @@
       $(SELECT_FILTRO[clave]).addEventListener('change', programarCarga);
     });
     $('btn-limpiar').addEventListener('click', limpiarFiltros);
+    $('btn-descargar').addEventListener('click', descargar);
     conectarPreguntas();
     $('dicc-boton').addEventListener('click', function () {
       plegarDiccionario(this.getAttribute('aria-expanded') !== 'true');

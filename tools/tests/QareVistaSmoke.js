@@ -214,5 +214,62 @@ Check('rotulos iguales a los del Backlog', true,
     return leer('backlog/backlog.html').indexOf(r) >= 0 && pagina.indexOf(r) >= 0;
   }));
 
+// --- descarga "⬇ Descargar QARE" -----------------------------------------
+Check('boton de descarga en la cabecera, siempre visible', true,
+  /<div class="acciones-top">[\s\S]*?<button class="btn chico" id="qare-btn-descargar" type="button">⬇ Descargar QARE<\/button>/
+    .test(pagina));
+Check('el boton no nace oculto', false, /id="qare-btn-descargar"[^>]*(hidden|display:\s*none)/.test(pagina));
+Check('descarga: MISMA consulta() que el tablero, al handler de export', true,
+  /pedir\(consulta\(fi, ff, filtros\), API_EXPORTAR\)/.test(codigo));
+Check('descarga: filtros leidos igual que el tablero', true,
+  /function descargar\(\)[\s\S]*?var filtros = filtrosElegidos\(\);/.test(codigo));
+Check('handler de export', true, /ruta\('qare_exportar\.ashx'\)/.test(codigo));
+Check('SheetJS perezoso: ningun <script> del vendor en la pagina', false, /xlsx\.mini/.test(pagina));
+Check('SheetJS perezoso: solo cargarXLSX lo inyecta, desde descargar', true,
+  /s\.src = XLSX_URL;/.test(codigo) && /return cargarXLSX\(\)\.then/.test(codigo) &&
+  (codigo.match(/cargarXLSX\(\)\.then/g) || []).length === 1);
+Check('SheetJS: el vendor de Experiencia existe', true,
+  fs.existsSync(path.join(raiz, 'experiencia', 'vendor', 'xlsx.mini.min.js')));
+
+// Llaves del libro = llaves del handler, en el mismo orden.
+var cs = leer('App_Code/QareExportar.cs');
+var llavesCs = (cs.match(/public static readonly string\[\] Columnas =\s*\{([\s\S]*?)\};/) || [, ''])[1]
+  .match(/"([a-z_0-9]+)"/g).map(function (s) { return s.slice(1, -1); });
+Check('COLUMNAS_EXPORT = QareExportar.Columnas (mismo orden)', llavesCs,
+  Q.COLUMNAS_EXPORT.map(function (c) { return c[0]; }));
+
+// Nombre y cabecera: sin filtros = "Todos"; con alguno, "_filtrado".
+Check('nombre sin filtros', 'QARE_2026-09-01_a_2026-09-15.xlsx',
+  Q.nombreExport('2026-09-01', '2026-09-15', { c1: [], grupos: [''], lideres: [] }));
+Check('nombre con filtro', 'QARE_2026-09-01_a_2026-09-15_filtrado.xlsx',
+  Q.nombreExport('2026-09-01', '2026-09-15', { lideres: ['Jesus Campa'] }));
+Check('cabecera: filtros tal cual, vacio = Todos',
+  [['Periodo (FechaFirmaSolucion)', '2026-09-01 a 2026-09-15'], ['Servicio / C1', 'Todos'],
+   ['Grupos', 'Service Desk, Soporte Campo'], ['Lideres', 'Todos'], ['Total de tickets', '1,234'],
+   ['Exportado', 'x']],
+  Q.metaExport('2026-09-01', '2026-09-15', { grupos: ['Service Desk', 'Soporte Campo'] }, 1234, 'x'));
+
+// El libro, armado con el vendor REAL y leido de vuelta.
+var XLSX = require(path.join(raiz, 'experiencia', 'vendor', 'xlsx.mini.min.js'));
+var largo = new Array(40001).join('a');
+var bytes = Q.libroExport(XLSX, [
+  { codigo: '000123', fecha_firma_solucion: '2026-09-02 10:00:00', lider: 'Sin Torre', c1: 'Sin categoria',
+    frecuencia: 'Siempre', descripcion: largo, titulo: null },
+  { codigo: 'REQ-2', validacion: 'Incorrecto' },
+], Q.metaExport('2026-09-01', '2026-09-15', {}, 2, 'x'));
+var hoja = XLSX.read(bytes, { type: 'array' }).Sheets['Tickets QARE'];
+var filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '', raw: true });
+var enc = filas.findIndex(function (f) { return f[0] === 'CodigoTicket'; });
+Check('libro: encabezados = COLUMNAS_EXPORT', Q.COLUMNAS_EXPORT.map(function (c) { return c[1]; }), filas[enc]);
+Check('libro: una fila por ticket', 2, filas.length - enc - 1);
+Check('libro: codigo con ceros queda texto', '000123', filas[enc + 1][0]);
+Check('libro: Lider y C1 tal cual del servidor', 'Sin Torre|Sin categoria',
+  filas[enc + 1][3] + '|' + filas[enc + 1][4]);
+Check('libro: null sale vacio', '', filas[enc + 1][Q.COLUMNAS_EXPORT.findIndex(function (c) { return c[0] === 'titulo'; })]);
+Check('libro: celda larga recortada al tope de Excel', Q.LIMITE_CELDA,
+  filas[enc + 1][Q.COLUMNAS_EXPORT.findIndex(function (c) { return c[0] === 'descripcion'; })].length);
+Check('libro: autofiltro = encabezado + filas (24 columnas, A..X)',
+  'A' + (enc + 1) + ':X' + (enc + 3), hoja['!autofilter'] && hoja['!autofilter'].ref);
+
 console.log(fallos === 0 ? 'TODO OK' : fallos + ' FALLOS');
 process.exit(fallos === 0 ? 0 : 1);
