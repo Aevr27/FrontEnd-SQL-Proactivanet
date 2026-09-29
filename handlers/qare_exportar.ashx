@@ -4,10 +4,12 @@
 //
 // Devuelve los tickets QARE del rango y los filtros que esta viendo el
 // tablero; el XLSX lo arma el navegador. La consulta vive en
-// App_Code/QareExportar.cs y lee la MISMA fuente filtrada que los seis
+// App_Code/QareExportar.cs: el detalle sale de dbo.usp_CorreoQARE_Detalle y
+// los filtros (con C1 y Lider) de la MISMA fuente filtrada que los seis
 // dbo.usp_CorreoQARE_* (dbo.tvf_CorreoQARE_Base).
 //
-// Solo lectura: un SELECT, ningun INSERT/UPDATE/DELETE.
+// Solo lectura: un EXEC de un SP de lectura y un SELECT, ningun
+// INSERT/UPDATE/DELETE.
 //
 // PETICION (los mismos parametros que qare.ashx)
 //   GET qare_exportar.ashx[?fecha_inicio=aaaa-mm-dd][&fecha_fin=aaaa-mm-dd]
@@ -18,7 +20,9 @@
 //
 // RESPUESTA 200
 //   { "fechaInicio": "aaaa-mm-dd", "fechaFin": "aaaa-mm-dd", "total": 1234,
-//     "tickets": [ { "codigo": "...", ... } ] }   // llaves: QareExportar.Columnas
+//     "tickets": [ { "CodigoTicket": "...", ... } ] }   // llaves: QareExportar.Columnas
+//   Todo texto salvo los enteros del SP (banderas Es*/UsuarioConfirmo 0/1,
+//   IntentosSolucion, ReasignacionesGrupo) y Caducada (0/1), que van numero.
 //
 // ERRORES ({error, tipo}, como qare.ashx)
 //   400  fecha mal formada o rango invalido.

@@ -243,7 +243,7 @@ Check('SheetJS: el vendor de Experiencia existe', true,
 // Llaves del libro = llaves del handler, en el mismo orden.
 var cs = leer('App_Code/QareExportar.cs');
 var llavesCs = (cs.match(/public static readonly string\[\] Columnas =\s*\{([\s\S]*?)\};/) || [, ''])[1]
-  .match(/"([a-z_0-9]+)"/g).map(function (s) { return s.slice(1, -1); });
+  .match(/"([A-Za-z_0-9]+)"/g).map(function (s) { return s.slice(1, -1); });
 Check('COLUMNAS_EXPORT = QareExportar.Columnas (mismo orden)', llavesCs,
   Q.COLUMNAS_EXPORT.map(function (c) { return c[0]; }));
 
@@ -258,14 +258,35 @@ Check('cabecera: filtros tal cual, vacio = Todos',
    ['Exportado', 'x']],
   Q.metaExport('2026-09-01', '2026-09-15', { grupos: ['Service Desk', 'Soporte Campo'] }, 1234, 'x'));
 
+// Columnas: las del SP + C1/Lider/QARe_VerificoClasificacion de la TVF.
+function llaves() { return Q.COLUMNAS_EXPORT.map(function (c) { return c[0]; }); }
+function col(llave) { return llaves().indexOf(llave); }
+Check('51 columnas', 51, Q.COLUMNAS_EXPORT.length);
+Check('sin FechaInicio/FechaFin por fila (van en la cabecera)', [-1, -1], [col('FechaInicio'), col('FechaFin')]);
+Check('C1 y Lider junto a Grupo', ['Grupo', 'C1', 'Lider'], llaves().slice(col('Grupo'), col('Grupo') + 3));
+Check('respuesta cruda QARe_VerificoClasificacion presente', 'QARe_VerificoClasificacion',
+  (Q.COLUMNAS_EXPORT[col('QARe_VerificoClasificacion')] || [])[1]);
+Check('QARe_UsuarioConfirmo presente, con su nombre', 'QARe_UsuarioConfirmo',
+  (Q.COLUMNAS_EXPORT[col('QARe_UsuarioConfirmo')] || [])[1]);
+Check('bandera UsuarioConfirmo: llave igual, encabezado aclarado', 'UsuarioConfirmo (VerificoClasificacion = Sí)',
+  (Q.COLUMNAS_EXPORT[col('UsuarioConfirmo')] || [])[1]);
+Check('el resto de encabezados = nombre de la columna', [],
+  Q.COLUMNAS_EXPORT.filter(function (c) { return c[0] !== 'UsuarioConfirmo' && c[0] !== c[1]; }));
+Check('llaves sin repetir', Q.COLUMNAS_EXPORT.length,
+  llaves().filter(function (k, i, a) { return a.indexOf(k) === i; }).length);
+
 // El libro, armado con el vendor REAL y leido de vuelta.
 var XLSX = require(path.join(raiz, 'experiencia', 'vendor', 'xlsx.mini.min.js'));
 var largo = new Array(40001).join('a');
-var bytes = Q.libroExport(XLSX, [
-  { codigo: '000123', fecha_firma_solucion: '2026-09-02 10:00:00', lider: 'Sin Torre', c1: 'Sin categoria',
-    frecuencia: 'Siempre', descripcion: largo, titulo: null },
-  { codigo: 'REQ-2', validacion: 'Incorrecto' },
-], Q.metaExport('2026-09-01', '2026-09-15', {}, 2, 'x'));
+var BANDERAS = ['EsRecurrente', 'UsuarioConfirmo', 'EsCasoReutilizable', 'EsPotencialKB',
+  'EsInconsistenciaConfirmacionQA', 'EsOportunidadKB'];
+var t1 = { CodigoTicket: '000123', FechaFirmaSolucion: '2026-09-02 10:00:00', Lider: 'Sin Torre', C1: 'Sin categoria',
+  QA_Frecuencia: 'Siempre', Descripcion: largo, QARe_Evidencia: largo, Titulo: null,
+  QARe_VerificoClasificacion: 'Sí', QARe_UsuarioConfirmo: 'No', IntentosSolucion: 2, Caducada: 0,
+  EsRecurrente: 1, UsuarioConfirmo: 1, EsCasoReutilizable: 0, EsPotencialKB: 1,
+  EsInconsistenciaConfirmacionQA: 0, EsOportunidadKB: 0 };
+var bytes = Q.libroExport(XLSX, [t1, { CodigoTicket: 'REQ-2', Validacion: 'Incorrecto' }],
+  Q.metaExport('2026-09-01', '2026-09-15', {}, 2, 'x'));
 var hoja = XLSX.read(bytes, { type: 'array' }).Sheets['Tickets QARE'];
 var filas = XLSX.utils.sheet_to_json(hoja, { header: 1, defval: '', raw: true });
 var enc = filas.findIndex(function (f) { return f[0] === 'CodigoTicket'; });
@@ -273,12 +294,28 @@ Check('libro: encabezados = COLUMNAS_EXPORT', Q.COLUMNAS_EXPORT.map(function (c)
 Check('libro: una fila por ticket', 2, filas.length - enc - 1);
 Check('libro: codigo con ceros queda texto', '000123', filas[enc + 1][0]);
 Check('libro: Lider y C1 tal cual del servidor', 'Sin Torre|Sin categoria',
-  filas[enc + 1][3] + '|' + filas[enc + 1][4]);
-Check('libro: null sale vacio', '', filas[enc + 1][Q.COLUMNAS_EXPORT.findIndex(function (c) { return c[0] === 'titulo'; })]);
-Check('libro: celda larga recortada al tope de Excel', Q.LIMITE_CELDA,
-  filas[enc + 1][Q.COLUMNAS_EXPORT.findIndex(function (c) { return c[0] === 'descripcion'; })].length);
-Check('libro: autofiltro = encabezado + filas (24 columnas, A..X)',
-  'A' + (enc + 1) + ':X' + (enc + 3), hoja['!autofilter'] && hoja['!autofilter'].ref);
+  filas[enc + 1][col('Lider')] + '|' + filas[enc + 1][col('C1')]);
+Check('libro: cruda y QARe_UsuarioConfirmo tal cual', 'Sí|No',
+  filas[enc + 1][col('QARe_VerificoClasificacion')] + '|' + filas[enc + 1][col('QARe_UsuarioConfirmo')]);
+Check('libro: banderas 0/1 quedan numero, tal cual', [1, 1, 0, 1, 0, 0],
+  BANDERAS.map(function (k) { return filas[enc + 1][col(k)]; }));
+Check('libro: celdas de bandera son numericas (tipo n)', BANDERAS.map(function () { return 'n'; }),
+  BANDERAS.map(function (k) {
+    var ref = XLSX.utils.encode_cell({ r: enc + 1, c: col(k) });
+    return hoja[ref] && hoja[ref].t;
+  }));
+Check('libro: enteros del SP quedan numero', [2, 0],
+  [filas[enc + 1][col('IntentosSolucion')], filas[enc + 1][col('Caducada')]]);
+Check('libro: fecha queda texto', 's',
+  hoja[XLSX.utils.encode_cell({ r: enc + 1, c: col('FechaFirmaSolucion') })].t);
+Check('libro: null sale vacio', '', filas[enc + 1][col('Titulo')]);
+Check('libro: celda larga recortada al tope de Excel', [Q.LIMITE_CELDA, Q.LIMITE_CELDA],
+  [filas[enc + 1][col('Descripcion')].length, filas[enc + 1][col('QARe_Evidencia')].length]);
+Check('libro: el recorte avisa cuanto habia', true,
+  /\[recortado: 40000 caracteres en origen\]$/.test(filas[enc + 1][col('Descripcion')]));
+Check('tope: 32767', 32767, Q.LIMITE_CELDA);
+Check('libro: autofiltro = encabezado + filas (51 columnas, A..AY)',
+  'A' + (enc + 1) + ':AY' + (enc + 3), hoja['!autofilter'] && hoja['!autofilter'].ref);
 
 console.log(fallos === 0 ? 'TODO OK' : fallos + ' FALLOS');
 process.exit(fallos === 0 ? 0 : 1);

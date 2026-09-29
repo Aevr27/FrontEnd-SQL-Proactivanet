@@ -212,34 +212,68 @@
 
   /* ---- Descarga ("⬇ Descargar QARE") ----
      Columnas del libro: [llave que manda qare_exportar.ashx (el orden de
-     QareExportar.Columnas), encabezado, ancho en caracteres]. Las seis
-     preguntas llevan el encabezado del TICKETS QA .xlsx de siempre (los de
-     usp_QaWeb_Detalle en sql/10_qa_web.sql). */
+     QareExportar.Columnas), encabezado, ancho en caracteres]. La llave es
+     el nombre de la columna en dbo.usp_CorreoQARE_Detalle (C1, Lider y
+     QARe_VerificoClasificacion, en la TVF) y el encabezado es ese mismo
+     nombre, salvo UsuarioConfirmo: es la bandera 0/1 que el SP calcula de
+     QARe_VerificoClasificacion, NO de QARe_UsuarioConfirmo (otra pregunta),
+     y el encabezado lo dice para que nadie las confunda. */
   var COLUMNAS_EXPORT = [
-    ['codigo', 'CodigoTicket', 15],
-    ['fecha_firma_solucion', 'FechaFirmaSolucion', 19],
-    ['grupo', 'Grupo', 24],
-    ['lider', 'Lider', 22],
-    ['c1', 'Servicio / C1', 22],
-    ['categoria', 'Categoria', 30],
-    ['frecuencia', 'QA - ¿Con qué frecuencia ocurre?', 18],
-    ['causa', 'QARe - ¿Cuál fue la causa del incidente/petición?', 40],
-    ['verifico_clasificacion', 'QARE - ¿Verificaste la correcta clasificación del ticket?', 18],
-    ['aplica_otros_casos', 'QARe - ¿Esta solución aplica para otros casos similares?', 18],
-    ['generar_articulo', 'QARe - ¿Se debe generar o actualizar artículo de conocimiento?', 18],
-    ['tipo_solucion', 'QARe - Tipo de solución aplicada', 26],
-    ['validacion', 'Validacion QA', 14],
-    ['titulo', 'Titulo', 42],
-    ['descripcion', 'Descripcion', 60],
-    ['solucion', 'SolucionUsuario', 45],
-    ['tecnico_segunda_linea', 'TecnicoSegundaLinea', 26],
-    ['subestado', 'Subestado', 18],
-    ['prioridad', 'Prioridad', 12],
-    ['cliente', 'Cliente', 24],
-    ['sucursal', 'Sucursal', 24],
-    ['fecha_firma_cierre', 'FechaFirmaCierre', 19],
-    ['tipo_origen', 'Tipo', 14],
-    ['registrado_por', 'RegistradoPor', 26],
+    // Ticket / contexto
+    ['CodigoTicket', 'CodigoTicket', 15],
+    ['FechaRegistro', 'FechaRegistro', 19],
+    ['Tipo', 'Tipo', 14],
+    ['TipoRelacion', 'TipoRelacion', 16],
+    ['Estado', 'Estado', 16],
+    ['Subestado', 'Subestado', 18],
+    ['Prioridad', 'Prioridad', 12],
+    ['Categoria', 'Categoria', 30],
+    ['Grupo', 'Grupo', 24],
+    ['C1', 'C1', 22],
+    ['Lider', 'Lider', 22],
+    ['Tecnico', 'Tecnico', 26],
+    ['Cliente', 'Cliente', 24],
+    ['Sucursal', 'Sucursal', 24],
+    ['Tienda', 'Tienda', 24],
+    ['Titulo', 'Titulo', 42],
+    ['Descripcion', 'Descripcion', 60],
+    ['SolucionUsuario', 'SolucionUsuario', 45],
+    ['FechaEstimadaResolucion', 'FechaEstimadaResolucion', 19],
+    ['FechaFirmaSolucion', 'FechaFirmaSolucion', 19],
+    ['FechaUltimaModificacion', 'FechaUltimaModificacion', 19],
+    ['FechaFirmaCierre', 'FechaFirmaCierre', 19],
+    ['FirmaCierreRevocacion', 'FirmaCierreRevocacion', 24],
+    ['FirmaSolucion', 'FirmaSolucion', 24],
+    ['ResponsableUltimaModificacion', 'ResponsableUltimaModificacion', 26],
+    ['NotificadoPor', 'NotificadoPor', 26],
+    ['FechaEstimadaOlaUc', 'FechaEstimadaOlaUc', 19],
+    ['IntentosSolucion', 'IntentosSolucion', 10],
+    ['ReasignacionesGrupo', 'ReasignacionesGrupo', 10],
+    ['Caducada', 'Caducada', 10],
+    ['RegistradoPor', 'RegistradoPor', 26],
+    // QA
+    ['QA_MensajeError', 'QA_MensajeError', 40],
+    ['QA_Frecuencia', 'QA_Frecuencia', 18],
+    ['QA_Aplicacion', 'QA_Aplicacion', 24],
+    ['QA_PasoAPaso', 'QA_PasoAPaso', 45],
+    // QARE
+    ['QARe_Causa', 'QARe_Causa', 40],
+    ['QARe_UsuarioConfirmo', 'QARe_UsuarioConfirmo', 18],
+    ['QARe_AplicaOtrosCasos', 'QARe_AplicaOtrosCasos', 18],
+    ['QARe_GenerarArticulo', 'QARe_GenerarArticulo', 18],
+    ['QARe_VerificoClasificacion', 'QARe_VerificoClasificacion', 18],
+    ['QARe_Evidencia', 'QARe_Evidencia', 40],
+    ['QARe_DescripcionSolucion', 'QARe_DescripcionSolucion', 45],
+    ['QARe_TipoSolucion', 'QARe_TipoSolucion', 26],
+    // Validacion / banderas 0/1 del SP (numero, tal cual)
+    ['GrupoCorrecto', 'GrupoCorrecto', 24],
+    ['Validacion', 'Validacion', 14],
+    ['EsRecurrente', 'EsRecurrente', 12],
+    ['UsuarioConfirmo', 'UsuarioConfirmo (VerificoClasificacion = Sí)', 22],
+    ['EsCasoReutilizable', 'EsCasoReutilizable', 12],
+    ['EsPotencialKB', 'EsPotencialKB', 12],
+    ['EsInconsistenciaConfirmacionQA', 'EsInconsistenciaConfirmacionQA', 14],
+    ['EsOportunidadKB', 'EsOportunidadKB', 12],
   ];
 
   /* Tope de Excel por celda: 32.767 caracteres; SheetJS se niega a escribir
@@ -281,8 +315,10 @@
   }
 
   /* Tickets -> bytes del .xlsx. `XLSX` entra por parametro (no se toca
-     window) para que la prueba le pase el mismo vendor. Todo va como texto:
-     codigos y fechas no se reinterpretan como numero o fecha de Excel. */
+     window) para que la prueba le pase el mismo vendor. Lo que llega como
+     texto va como texto -codigos y fechas no se reinterpretan como numero o
+     fecha de Excel-; solo lo que el servidor manda como numero (banderas
+     0/1, IntentosSolucion, ReasignacionesGrupo, Caducada) queda numero. */
   function libroExport(XLSX, tickets, meta) {
     var aoa = [['QARE — Tickets'], []];
     meta.forEach(function (m) { aoa.push([m[0], m[1]]); });
@@ -292,6 +328,7 @@
     tickets.forEach(function (t) {
       aoa.push(COLUMNAS_EXPORT.map(function (c) {
         var v = t[c[0]];
+        if (typeof v === 'number') return v;
         return ajustarCelda(v === null || v === undefined ? '' : String(v));
       }));
     });
@@ -867,8 +904,8 @@
   }
 
   /* Los tickets del rango y los filtros que se estan viendo: la MISMA
-     consulta() que pide el tablero, a qare_exportar.ashx, que lee la misma
-     fuente filtrada que los seis SP. */
+     consulta() que pide el tablero, a qare_exportar.ashx: el detalle de
+     dbo.usp_CorreoQARE_Detalle, filtrado por la misma fuente que los seis SP. */
   var descargando = false;
   function descargar() {
     if (descargando) return;
