@@ -487,7 +487,7 @@ public static class QaParams
 
     public static void Rango(HttpRequest request, out string fechaInicio, out string fechaFin)
     {
-        var ayer = DateTime.Today.AddDays(-1);
+        var ayer = DashboardDataInfo.HoyEnPresentacion().AddDays(-1);
 
         fechaFin = FechaOpcional(request, "fecha_fin") ?? ayer.ToString("yyyy-MM-dd");
 
