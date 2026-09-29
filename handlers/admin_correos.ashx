@@ -503,11 +503,11 @@ public class AdminCorreos : IHttpHandler
         return destino;
     }
 
-    // Dia natural anterior al de hoy, segun el reloj local del servidor.
-    // Nada codificado a mano y nada que venga del navegador.
+    // Dia natural anterior al de hoy en Mexico (UTC-06, HoyEnPresentacion), no
+    // el del host de IIS. Nada codificado a mano y nada que venga del navegador.
     private static string FechaCorte()
     {
-        return DateTime.Today.AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        return DashboardDataInfo.HoyEnPresentacion().AddDays(-1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     }
 
     // ---- Ejecucion --------------------------------------------------------

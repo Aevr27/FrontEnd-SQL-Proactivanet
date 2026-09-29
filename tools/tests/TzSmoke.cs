@@ -38,7 +38,7 @@ public static class TzSmoke
         Check("Backlog 14:46:22 UTC", "2026-09-14T08:46:22", backlog.AJson()["ultimaActualizacion"]);
 
         // 2) Experiencia: FechaUltimaCargaDW UTC -> UTC-06, y conserva su periodo.
-        var hoy = DateTime.Today;
+        var hoy = DashboardDataInfo.HoyEnPresentacion();
         var exp = DashboardDataInfo.Periodo(
             "Experiencia al Usuario", new DateTime(2026, 9, 14, 17, 0, 0), ZonaSello.Utc,
             hoy.AddDays(-30), hoy, "fuente");

@@ -193,10 +193,11 @@ public sealed class DashboardDataInfo
 
     /* El dia de HOY en la zona de presentacion (Mexico, UTC-06), sacado del
        reloj UTC y de la misma ZonaPresentacion de arriba. Existe para los
-       handlers que calculan una ventana por omision (QARE): DateTime.Today es
-       el dia del host de IIS, y si ese host corre en UTC, de 18:00 a 24:00
-       de Mexico ya seria "mañana". Es un calculo de "ahora", no un sello: no
-       toca ningun valor guardado. Los demas handlers no lo usan. */
+       defaults de fecha que dependen de "hoy" (QARE, filtros comunes, QA,
+       Experiencia, Backlog historico, correos): DateTime.Today es el dia del
+       host de IIS, y si ese host corre en UTC, de 18:00 a 24:00 de Mexico ya
+       seria "mañana". Es un calculo de "ahora", no un sello: no toca ningun
+       valor guardado. Todo "hoy" / "ayer" de negocio sale de aqui. */
     public static DateTime HoyEnPresentacion()
     {
         return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ZonaPresentacion).Date;
@@ -216,7 +217,7 @@ public sealed class DashboardDataInfo
         if (!inicio.HasValue || !fin.HasValue) return TipoNinguno;
 
         var dias = (fin.Value.Date - inicio.Value.Date).Days;
-        if (fin.Value.Date == DateTime.Today && dias > 0 && dias % DiasSlot == 0)
+        if (fin.Value.Date == HoyEnPresentacion() && dias > 0 && dias % DiasSlot == 0)
             return TipoRodante30;
 
         return TipoRango;

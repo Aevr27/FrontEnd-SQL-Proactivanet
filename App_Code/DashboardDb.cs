@@ -300,7 +300,7 @@ public static class DashboardParams
 {
     public static void RangoFechas(HttpRequest request, out string fechaInicio, out string fechaFin)
     {
-        var hoy = DateTime.Today;
+        var hoy = DashboardDataInfo.HoyEnPresentacion();
         var inicioMes = new DateTime(hoy.Year, hoy.Month, 1);
 
         fechaInicio = request.QueryString["fecha_inicio"];

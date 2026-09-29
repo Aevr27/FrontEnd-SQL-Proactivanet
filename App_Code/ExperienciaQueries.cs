@@ -140,7 +140,7 @@ public static class ExperienciaQueries
     // exportar, y las pide aparte (ExportarTickets).
     public static Dictionary<string, object> Construir(int anio)
     {
-        var hoy = DateTime.Today;
+        var hoy = DashboardDataInfo.HoyEnPresentacion();
 
         using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
         {

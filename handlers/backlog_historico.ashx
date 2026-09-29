@@ -92,7 +92,7 @@ public class BacklogHistorico : IHttpHandler
                     DateTimeStyles.None, out fecha))
                 return fecha.Date;
         }
-        return DateTime.Today;
+        return DashboardDataInfo.HoyEnPresentacion();
     }
 
     private static object Granularidad(HttpRequest request)

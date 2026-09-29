@@ -46,7 +46,7 @@ public class Experiencia : IHttpHandler
 
         try
         {
-            var anio = DashboardParams.Entero(context.Request, "anio", DateTime.Today.Year);
+            var anio = DashboardParams.Entero(context.Request, "anio", DashboardDataInfo.HoyEnPresentacion().Year);
 
             var salida = ExperienciaQueries.Construir(anio);
             context.Response.Write(serializador.Serialize(salida));
