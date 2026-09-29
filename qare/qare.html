@@ -63,10 +63,6 @@
       </div>
       <div class="acciones-top">
         <div class="estado" id="qare-estado"></div>
-        <!-- Siempre visible: sin filtros descarga la poblacion QARE entera
-             del rango. Exporta el rango y los filtros que se estan viendo
-             (handlers/qare_exportar.ashx); ver descargar() en qare.js. -->
-        <button class="btn chico" id="qare-btn-descargar" type="button">⬇ Descargar QARE</button>
       </div>
     </header>
 
@@ -105,6 +101,12 @@
       </div>
       <div class="campo acciones">
         <button class="btn gris" id="qare-btn-limpiar" type="button">Limpiar</button>
+        <!-- Como "Descargar Tickets" de Experiencia: solo sale con algun
+             filtro de Servicio / Grupo / Lider puesto (actualizarDescarga en
+             qare.js). Exporta el rango y esos filtros
+             (handlers/qare_exportar.ashx). display en linea y no `hidden`:
+             .filtros .acciones .btn fija display y le ganaria al atributo. -->
+        <button class="btn" id="qare-btn-descargar" type="button" style="display:none">⬇ Descargar QARE</button>
       </div>
     </section>
 

@@ -856,9 +856,19 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
   }
 
+  /* Como "Descargar Tickets" de Experiencia: el boton solo se ve con algun
+     filtro de Servicio / Grupo / Lider puesto. Se revisa en cada `change` de
+     los tres selects (Limpiar tambien los dispara). */
+  function hayFiltroOrg() {
+    return FILTROS_ORG.some(function (clave) { return seleccionados(SELECT_FILTRO[clave]).length > 0; });
+  }
+  function actualizarDescarga() {
+    $('btn-descargar').style.display = hayFiltroOrg() ? '' : 'none';
+  }
+
   /* Los tickets del rango y los filtros que se estan viendo: la MISMA
      consulta() que pide el tablero, a qare_exportar.ashx, que lee la misma
-     fuente filtrada que los seis SP. Sin filtros baja la poblacion entera. */
+     fuente filtrada que los seis SP. */
   var descargando = false;
   function descargar() {
     if (descargando) return;
@@ -964,6 +974,7 @@
     $('reintentar').addEventListener('click', cargar);
     FILTROS_ORG.forEach(function (clave) {
       $(SELECT_FILTRO[clave]).addEventListener('change', programarCarga);
+      $(SELECT_FILTRO[clave]).addEventListener('change', actualizarDescarga);
     });
     $('btn-limpiar').addEventListener('click', limpiarFiltros);
     $('btn-descargar').addEventListener('click', descargar);

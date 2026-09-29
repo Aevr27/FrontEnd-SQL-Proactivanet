@@ -215,10 +215,19 @@ Check('rotulos iguales a los del Backlog', true,
   }));
 
 // --- descarga "⬇ Descargar QARE" -----------------------------------------
-Check('boton de descarga en la cabecera, siempre visible', true,
-  /<div class="acciones-top">[\s\S]*?<button class="btn chico" id="qare-btn-descargar" type="button">⬇ Descargar QARE<\/button>/
+Check('boton de descarga junto a Limpiar, en .acciones de los filtros', true,
+  /<div class="campo acciones">\s*<button class="btn gris" id="qare-btn-limpiar"[^>]*>Limpiar<\/button>[\s\S]*?<button class="btn" id="qare-btn-descargar" type="button" style="display:none">⬇ Descargar QARE<\/button>\s*<\/div>/
     .test(pagina));
-Check('el boton no nace oculto', false, /id="qare-btn-descargar"[^>]*(hidden|display:\s*none)/.test(pagina));
+Check('ya no esta en la cabecera', false,
+  /<div class="acciones-top">[\s\S]*?qare-btn-descargar[\s\S]*?<\/header>/.test(pagina.split('<section class="filtros"')[0]));
+Check('nace oculto, como Descargar Tickets de Experiencia', true,
+  /id="qare-btn-descargar"[^>]*style="display:none"/.test(pagina));
+Check('se muestra solo con algun filtro org', true,
+  /style\.display = hayFiltroOrg\(\) \? '' : 'none'/.test(codigo) &&
+  /return FILTROS_ORG\.some\(function \(clave\) \{ return seleccionados\(SELECT_FILTRO\[clave\]\)\.length > 0; \}\)/.test(codigo));
+Check('se recalcula en el change de los tres selects (Limpiar los dispara)', true,
+  /FILTROS_ORG\.forEach\(function \(clave\) \{[\s\S]*?addEventListener\('change', actualizarDescarga\)/.test(codigo) &&
+  /sel\.dispatchEvent\(new Event\('change'/.test(codigo));
 Check('descarga: MISMA consulta() que el tablero, al handler de export', true,
   /pedir\(consulta\(fi, ff, filtros\), API_EXPORTAR\)/.test(codigo));
 Check('descarga: filtros leidos igual que el tablero', true,
