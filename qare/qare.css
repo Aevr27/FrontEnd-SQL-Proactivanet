@@ -206,15 +206,17 @@ header.top #qare-estado:empty { display: none; }
    8px 14px, 12px en negrita; hover --grad-btn-hover con borde --g-800; sin
    sombra ni hundimiento al pulsar). Por id para ganarle a
    `.filtros .acciones .btn` de dashboard.css, que fija alto, relleno, radio,
-   sombra y el translateY de :active. El orden (order: 2, a la derecha de
-   Limpiar) y el mostrar/ocultar (display en linea, actualizarDescarga) no
-   se tocan. */
+   sombra y el translateY de :active. Va a la IZQUIERDA de Limpiar, como en
+   Experiencia (alli Limpiar es el ultimo de la fila): order 0 le gana al
+   order 1 de `.filtros .acciones .btn.gris`. El mostrar/ocultar (display en
+   linea, actualizarDescarga) no se toca. */
 #qare-btn-descargar {
   height: auto; padding: 8px 14px; border-radius: 8px;
   border: 1px solid var(--g-700);
   background: var(--grad-btn); color: var(--btn-ink);
   font-size: 12px; font-weight: 700; letter-spacing: normal;
   box-shadow: none;
+  order: 0;
 }
 #qare-btn-descargar:hover {
   background: var(--grad-btn-hover); border-color: var(--g-800); box-shadow: none;
