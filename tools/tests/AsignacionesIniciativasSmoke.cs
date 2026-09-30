@@ -11,10 +11,18 @@
 //   6) orden ordinal por categoria
 //   7) el Manager no viaja
 //
+// Y DashboardCatalogos.TiposUnicos, la limpieza de los Tipo de iniciativa
+// que lee TiposIniciativa (dbo.Problem.TipoIniciativa):
+//   8) NBSP/espacios normalizados, vacios y null fuera
+//   9) repetidos sin distinguir mayusculas: una sola grafia (la primera en
+//      orden ordinal)
+//  10) orden ordinal
+//  11) la consulta de TiposIniciativa es solo lectura (SELECT)
+//
 // Compilar y correr desde la raiz del repo:
 //   csc /nologo /target:library /out:dir.dll /r:System.dll /r:System.Data.dll ^
 //       /r:System.Web.dll /r:System.Web.Extensions.dll /r:System.Configuration.dll App_Code\*.cs
-//   csc /nologo /out:AsignacionesSmoke.exe /r:dir.dll /r:System.dll ^
+//   csc /nologo /out:AsignacionesSmoke.exe /r:dir.dll /r:System.dll /r:System.Data.dll ^
 //       tools\tests\AsignacionesIniciativasSmoke.cs
 //   AsignacionesSmoke.exe
 using System;
@@ -23,6 +31,7 @@ using System.Collections.Generic;
 public static class AsignacionesIniciativasSmoke
 {
     static int fallos = 0;
+    static readonly string NBSP = ((char)0xA0).ToString();
 
     static void Check(string caso, object esperado, object obtenido)
     {
@@ -55,7 +64,7 @@ public static class AsignacionesIniciativasSmoke
             D("/A/Dos",  "/A", "PO 2", null,   "Dir A", true),     // hereda SO x del C1 (/A/Uno)
             D("/A/Baja", "/A", "PO 9", "SO 9", "Dir 9", false),    // dada de baja
             D("/B/Tres", "/B", "PO 3", "SO z", null,    true),     // sin Director ni en el C1
-            D("/C/Cuatro  ", " /C", " PO 4 ", "SO w ", " Dir C", true),
+            D("/C/Cuatro" + NBSP + " ", " /C", NBSP + "PO 4 ", "SO w ", " Dir C", true),
         };
         var personas = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         personas["SO x"] = "Manager M";
@@ -79,6 +88,27 @@ public static class AsignacionesIniciativasSmoke
         }
         Check("3 dada de baja no sale", false, baja);
         Check("7 sin manager", false, mgr);
+
+        // ---- Tipos de iniciativa ----
+        var tipos = DashboardCatalogos.TiposUnicos(new[] {
+            "Mejora", " Problem" + NBSP, null, "", "   ", "mejora", "Adopcion", "SorIA", "MEJORA"
+        });
+        Check("8-10 tipos limpios, unicos y ordenados", "Adopcion|MEJORA|Problem|SorIA",
+            string.Join("|", tipos.ConvertAll(delegate (object o) { return (string)o; }).ToArray()));
+        Check("8 lista vacia", 0, DashboardCatalogos.TiposUnicos(new string[0]).Count);
+
+        // La consulta vive como literal en el metodo; se revisa el fuente.
+        var fuente = System.IO.File.ReadAllText(System.IO.Path.Combine("App_Code", "DashboardCatalogos.cs"));
+        var ini = fuente.IndexOf("public static List<object> TiposIniciativa(");
+        var fin = fuente.IndexOf("public static List<object> TiposUnicos(");
+        var cuerpo = (ini >= 0 && fin > ini) ? fuente.Substring(ini, fin - ini) : "";
+        Check("11 TiposIniciativa encontrado", true, cuerpo.Length > 0);
+        Check("11 solo SELECT sobre dbo.Problem", true,
+            cuerpo.Contains("SELECT DISTINCT TipoIniciativa") && cuerpo.Contains("FROM dbo.Problem"));
+        bool escribe = false;
+        foreach (var palabra in new[] { "INSERT", "UPDATE", "DELETE", "MERGE", "EXEC", "CREATE", "ALTER", "DROP" })
+            if (System.Text.RegularExpressions.Regex.IsMatch(cuerpo, @"\b" + palabra + @"\b")) escribe = true;
+        Check("11 sin escrituras", false, escribe);
 
         Console.WriteLine(fallos == 0 ? "\nTODO PASO" : "\n" + fallos + " FALLO(S)");
         return fallos == 0 ? 0 : 1;

@@ -12,21 +12,27 @@
   No esta enlazada desde dashboard.html ni desde admin/admin.html: se llega
   escribiendo la URL /admin/iniciativas.html. Sin autenticacion todavia.
 
-  ESTADO ACTUAL (primer hito):
-    - Solo "Nueva solicitud" funciona, y solo sus selects organizacionales
-      encadenados: Director -> Product Owner -> Service Owner -> Categoria.
-      Las opciones salen de handlers/admin_iniciativas_catalogos.ashx (solo
-      lectura, categorias vigentes del catalogo de dueños).
-    - No se envia ni se guarda nada: no hay boton de enviar.
+  ESTADO ACTUAL (segundo hito):
+    - Solo "Nueva solicitud" funciona:
+        Tipo de iniciativa -> Product Owner -> Service Owner -> Categoria,
+        y el Director se muestra DERIVADO de la categoria (no se elige).
+      Despues del tipo aparecen los campos de captura (Titulo y Analisis) y
+      los propios del tipo, definidos en admin/iniciativas.js
+      (DEFINICIONES_TIPO). Catalogos: handlers/admin_iniciativas_catalogos.ashx
+      (solo lectura).
+    - No se envia ni se guarda nada: no hay boton de enviar ni <form>.
     - Solicitudes / Iniciativas / Modificacion / Descargas son pestañas
       vacias, solo de navegacion.
 
   Reusa dashboard.css para variables, tipografia y .wrap / .card / .btn,
-  como admin.html; lo propio vive en iniciativas.css con prefijo .ini-.
+  como admin.html; lo propio vive en iniciativas.css con prefijo .ini-. La
+  ayuda del rotulo Titulo es GloboAyuda (assets/), el patron de las franjas
+  "Pregunta" de QARE.
 -->
 
 <link rel="stylesheet" href="../assets/css/boton.css">
 <link rel="stylesheet" href="../dashboard.css">
+<link rel="stylesheet" href="../assets/css/globo-ayuda.css">
 <link rel="stylesheet" href="iniciativas.css">
 </head>
 <body class="ini-body">
@@ -50,7 +56,7 @@
   <section class="ini-panel card" role="tabpanel" id="panel-nueva" aria-labelledby="tab-nueva">
     <div class="ini-panel-cab">
       <h2>Nueva solicitud</h2>
-      <span class="ini-hint">Paso 1 · Ubicación organizacional</span>
+      <span class="ini-hint">Vista previa · no se envía ni se guarda</span>
     </div>
 
     <p class="ini-estado" id="iniEstado" role="status" aria-live="polite"></p>
@@ -59,30 +65,57 @@
       <button type="button" class="btn" id="iniReintentar">Reintentar</button>
     </div>
 
-    <div class="ini-cascada" id="iniCascada">
-      <div class="ini-campo">
-        <label for="selDirector">Director</label>
-        <select id="selDirector" data-nivel="0" aria-describedby="motDirector" disabled></select>
-        <small class="ini-motivo" id="motDirector"></small>
+    <!-- 1. Clasificacion: lo elige quien solicita. El Director no se elige:
+         sale de la categoria. -->
+    <div class="ini-bloque">
+      <div class="ini-bloque-cab">
+        <h3>Clasificación</h3>
+        <span class="ini-origen seleccion">Selección</span>
       </div>
-      <div class="ini-campo">
-        <label for="selPo">Product Owner</label>
-        <select id="selPo" data-nivel="1" aria-describedby="motPo" disabled></select>
-        <small class="ini-motivo" id="motPo"></small>
+
+      <div class="ini-campo ini-campo-tipo">
+        <label for="selTipo">Tipo de iniciativa</label>
+        <select id="selTipo" aria-describedby="motTipo" disabled></select>
+        <small class="ini-motivo" id="motTipo"></small>
       </div>
-      <div class="ini-campo">
-        <label for="selSo">Service Owner</label>
-        <select id="selSo" data-nivel="2" aria-describedby="motSo" disabled></select>
-        <small class="ini-motivo" id="motSo"></small>
+
+      <div class="ini-cascada" id="iniCascada">
+        <div class="ini-campo">
+          <label for="selPo">Product Owner</label>
+          <select id="selPo" aria-describedby="motPo" disabled></select>
+          <small class="ini-motivo" id="motPo"></small>
+        </div>
+        <div class="ini-campo">
+          <label for="selSo">Service Owner</label>
+          <select id="selSo" aria-describedby="motSo" disabled></select>
+          <small class="ini-motivo" id="motSo"></small>
+        </div>
+        <div class="ini-campo">
+          <label for="selCategoria">Categoría</label>
+          <select id="selCategoria" aria-describedby="motCategoria" disabled></select>
+          <small class="ini-motivo" id="motCategoria"></small>
+        </div>
+        <div class="ini-campo ini-derivado">
+          <span class="ini-rotulo-derivado" id="rotDirector">Director <span class="ini-origen derivado">Derivado</span></span>
+          <output id="outDirector" aria-labelledby="rotDirector" aria-describedby="motDirector">—</output>
+          <small class="ini-motivo" id="motDirector"></small>
+        </div>
       </div>
-      <div class="ini-campo">
-        <label for="selCategoria">Categoría</label>
-        <select id="selCategoria" data-nivel="3" aria-describedby="motCategoria" disabled></select>
-        <small class="ini-motivo" id="motCategoria"></small>
-      </div>
+
+      <p class="ini-nota" id="iniOmitidas" hidden></p>
     </div>
 
-    <p class="ini-nota" id="iniOmitidas" hidden></p>
+    <!-- 2. Descripcion: lo escribe quien solicita. Aparece al elegir el
+         tipo; los campos salen de CAMPOS_COMUNES y DEFINICIONES_TIPO
+         (admin/iniciativas.js). -->
+    <div class="ini-bloque" id="iniBloqueCampos" hidden>
+      <div class="ini-bloque-cab">
+        <h3>Descripción</h3>
+        <span class="ini-origen captura">Captura</span>
+      </div>
+      <div class="ini-campos" id="iniCamposComunes"></div>
+      <div class="ini-campos" id="iniCamposTipo"></div>
+    </div>
   </section>
 
   <section class="ini-panel card" role="tabpanel" id="panel-solicitudes" aria-labelledby="tab-solicitudes" hidden>
@@ -102,6 +135,7 @@
 
 <script src="../assets/js/escape.js"></script>
 <script src="../assets/js/catalogos.js"></script>
+<script src="../assets/js/globo-ayuda.js"></script>
 <script src="iniciativas.js"></script>
 </body>
 </html>

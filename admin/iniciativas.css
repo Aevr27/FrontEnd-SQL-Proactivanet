@@ -4,7 +4,8 @@
    Estilos exclusivos de admin/iniciativas.html. dashboard.css se carga antes
    y aporta variables, tipografia y .wrap / .card / .btn; aqui solo va lo
    propio, con prefijo .ini- para no colisionar con el tablero ni con
-   admin.css (que esta pagina no carga).
+   admin.css (que esta pagina no carga). El tinte y el globo del rotulo con
+   ayuda (Titulo) son de assets/css/globo-ayuda.css, no de aqui.
    ========================================================================= */
 
 .ini-body { padding-bottom: 24px; }
@@ -67,7 +68,9 @@
   font-size: 11px; font-weight: 800; text-transform: uppercase;
   letter-spacing: .4px; color: var(--ctrl-label);
 }
-.ini-campo select {
+.ini-campo select,
+.ini-campo input[type="text"],
+.ini-campo textarea {
   font: inherit; font-size: 13px;
   width: 100%; min-width: 0;
   padding: 8px 10px;
@@ -76,8 +79,13 @@
   border: 1px solid var(--ctrl-line);
   border-radius: var(--radius-xs);
 }
-.ini-campo select:hover:not(:disabled) { border-color: var(--ctrl-line-hover); }
-.ini-campo select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ini-campo select:hover:not(:disabled),
+.ini-campo input[type="text"]:hover,
+.ini-campo textarea:hover { border-color: var(--ctrl-line-hover); }
+.ini-campo select:focus-visible,
+.ini-campo input[type="text"]:focus-visible,
+.ini-campo textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ini-campo textarea { resize: vertical; min-height: 110px; line-height: 1.45; }
 .ini-campo select:disabled {
   color: var(--muted-2);
   background: var(--bg-2);
@@ -85,3 +93,52 @@
   cursor: not-allowed;
 }
 .ini-motivo { min-height: 15px; font-size: 11.5px; color: var(--muted); }
+
+/* ---- Bloques del formulario y origen de cada dato ----
+   Tres origenes, con la misma etiqueta chica en todo el formulario:
+     .seleccion  lo elige quien solicita (selects)
+     .captura    lo escribe quien solicita
+     .derivado   lo pone el sistema; se ve pero no se edita */
+.ini-bloque + .ini-bloque { padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--line-soft); }
+.ini-bloque[hidden] { display: none; }
+.ini-bloque-cab { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.ini-bloque-cab h3 {
+  font-size: 12px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--ink-2);
+}
+.ini-origen {
+  display: inline-block; padding: 1px 7px; border-radius: var(--radius-pill);
+  font-size: 9.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+  border: 1px solid var(--line); color: var(--muted); background: var(--bg-2);
+}
+.ini-origen.captura { color: var(--accent-ink); border-color: var(--accent-line); background: var(--accent-soft); }
+.ini-origen.derivado { border-style: dashed; }
+
+.ini-campo-tipo { max-width: 380px; margin-bottom: 14px; }
+
+/* Director derivado: texto, no control. Borde punteado = no editable. */
+.ini-rotulo-derivado {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .4px; color: var(--ctrl-label);
+}
+.ini-derivado output {
+  display: block; min-height: 35px;
+  padding: 8px 10px; font-size: 13px; font-weight: 600;
+  color: var(--ink); background: var(--bg-2);
+  border: 1px dashed var(--line); border-radius: var(--radius-xs);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Campos de captura ---- */
+.ini-campos { display: grid; grid-template-columns: 1fr; gap: 14px; max-width: 900px; }
+.ini-campos + .ini-campos { margin-top: 14px; }
+.ini-campos[hidden] { display: none; }
+/* El rotulo con ayuda ocupa el ancho del campo: todo el renglon es destino. */
+.ini-campo .ini-rotulo.ayuda-destino { color: var(--accent-deep); }
+
+/* Texto solo para lectores de pantalla (la ayuda del rotulo). */
+.ini-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
