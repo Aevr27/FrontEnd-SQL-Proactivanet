@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Administracion — Iniciativas</title>
+
+<!--
+  Pagina oculta de administracion de iniciativas.
+
+  No esta enlazada desde dashboard.html ni desde admin/admin.html: se llega
+  escribiendo la URL /admin/iniciativas.html. Sin autenticacion todavia.
+
+  ESTADO ACTUAL (primer hito):
+    - Solo "Nueva solicitud" funciona, y solo sus selects organizacionales
+      encadenados: Director -> Product Owner -> Service Owner -> Categoria.
+      Las opciones salen de handlers/admin_iniciativas_catalogos.ashx (solo
+      lectura, categorias vigentes del catalogo de dueños).
+    - No se envia ni se guarda nada: no hay boton de enviar.
+    - Solicitudes / Iniciativas / Modificacion / Descargas son pestañas
+      vacias, solo de navegacion.
+
+  Reusa dashboard.css para variables, tipografia y .wrap / .card / .btn,
+  como admin.html; lo propio vive en iniciativas.css con prefijo .ini-.
+-->
+
+<link rel="stylesheet" href="../assets/css/boton.css">
+<link rel="stylesheet" href="../dashboard.css">
+<link rel="stylesheet" href="iniciativas.css">
+</head>
+<body class="ini-body">
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>Iniciativas</h1>
+      <div class="sub">Administracion de iniciativas · entorno de trabajo</div>
+    </div>
+  </header>
+
+  <nav class="ini-tabs" role="tablist" aria-label="Secciones">
+    <button type="button" class="ini-tab activa" role="tab" id="tab-nueva" aria-controls="panel-nueva" aria-selected="true">Nueva solicitud</button>
+    <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1">Solicitudes</button>
+    <button type="button" class="ini-tab" role="tab" id="tab-iniciativas" aria-controls="panel-iniciativas" aria-selected="false" tabindex="-1">Iniciativas</button>
+    <button type="button" class="ini-tab" role="tab" id="tab-modificacion" aria-controls="panel-modificacion" aria-selected="false" tabindex="-1">Modificación</button>
+    <button type="button" class="ini-tab" role="tab" id="tab-descargas" aria-controls="panel-descargas" aria-selected="false" tabindex="-1">Descargas</button>
+  </nav>
+
+  <section class="ini-panel card" role="tabpanel" id="panel-nueva" aria-labelledby="tab-nueva">
+    <div class="ini-panel-cab">
+      <h2>Nueva solicitud</h2>
+      <span class="ini-hint">Paso 1 · Ubicación organizacional</span>
+    </div>
+
+    <p class="ini-estado" id="iniEstado" role="status" aria-live="polite"></p>
+    <div class="ini-error" id="iniError" role="alert" hidden>
+      <span id="iniErrorTexto"></span>
+      <button type="button" class="btn" id="iniReintentar">Reintentar</button>
+    </div>
+
+    <div class="ini-cascada" id="iniCascada">
+      <div class="ini-campo">
+        <label for="selDirector">Director</label>
+        <select id="selDirector" data-nivel="0" aria-describedby="motDirector" disabled></select>
+        <small class="ini-motivo" id="motDirector"></small>
+      </div>
+      <div class="ini-campo">
+        <label for="selPo">Product Owner</label>
+        <select id="selPo" data-nivel="1" aria-describedby="motPo" disabled></select>
+        <small class="ini-motivo" id="motPo"></small>
+      </div>
+      <div class="ini-campo">
+        <label for="selSo">Service Owner</label>
+        <select id="selSo" data-nivel="2" aria-describedby="motSo" disabled></select>
+        <small class="ini-motivo" id="motSo"></small>
+      </div>
+      <div class="ini-campo">
+        <label for="selCategoria">Categoría</label>
+        <select id="selCategoria" data-nivel="3" aria-describedby="motCategoria" disabled></select>
+        <small class="ini-motivo" id="motCategoria"></small>
+      </div>
+    </div>
+
+    <p class="ini-nota" id="iniOmitidas" hidden></p>
+  </section>
+
+  <section class="ini-panel card" role="tabpanel" id="panel-solicitudes" aria-labelledby="tab-solicitudes" hidden>
+    <p class="ini-pendiente">Solicitudes: pendiente.</p>
+  </section>
+  <section class="ini-panel card" role="tabpanel" id="panel-iniciativas" aria-labelledby="tab-iniciativas" hidden>
+    <p class="ini-pendiente">Iniciativas: pendiente.</p>
+  </section>
+  <section class="ini-panel card" role="tabpanel" id="panel-modificacion" aria-labelledby="tab-modificacion" hidden>
+    <p class="ini-pendiente">Modificación: pendiente.</p>
+  </section>
+  <section class="ini-panel card" role="tabpanel" id="panel-descargas" aria-labelledby="tab-descargas" hidden>
+    <p class="ini-pendiente">Descargas: pendiente.</p>
+  </section>
+
+</div>
+
+<script src="../assets/js/escape.js"></script>
+<script src="../assets/js/catalogos.js"></script>
+<script src="iniciativas.js"></script>
+</body>
+</html>

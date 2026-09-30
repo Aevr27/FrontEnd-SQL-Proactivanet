@@ -189,6 +189,52 @@ public sealed class DirectorioOrganizacional
         return salida;
     }
 
+    // Una fila por categoria VIGENTE con sus tres dueños ya resueltos (N2
+    // exacto y, si falta alguno, heredado del C1: la misma regla de
+    // Resolver). Es lo que encadena los selects de admin/iniciativas.html:
+    // no hay otra relacion Director / PO / SO que la de compartir una fila
+    // de CatCategoriaDueno, y el Manager no entra (jerarquia aparte).
+    //
+    // Una categoria a la que le falte alguno de los tres aun despues de
+    // heredar no se puede alcanzar por la cascada; se cuenta en `omitidas`
+    // en vez de inventarle un dueño.
+    public Dictionary<string, object> AsignacionesVigentes()
+    {
+        var filas = new List<object>();
+        int omitidas = 0;
+
+        var orden = new List<Dueno>();
+        foreach (var d in Duenos())
+            if (d.Vigente && d.CategoriaN2 != null) orden.Add(d);
+        orden.Sort(delegate (Dueno a, Dueno b)
+        {
+            return string.CompareOrdinal(a.CategoriaN2, b.CategoriaN2);
+        });
+
+        foreach (var d in orden)
+        {
+            string po, so, director, manager;
+            Resolver(d.C1, d.CategoriaN2, out po, out so, out director, out manager);
+            if (string.IsNullOrEmpty(director) || string.IsNullOrEmpty(po) || string.IsNullOrEmpty(so))
+            {
+                omitidas++;
+                continue;
+            }
+
+            var fila = new Dictionary<string, object>();
+            fila["director"] = director;
+            fila["po"] = po;
+            fila["so"] = so;
+            fila["categoria"] = d.CategoriaN2;
+            filas.Add(fila);
+        }
+
+        var salida = new Dictionary<string, object>();
+        salida["asignaciones"] = filas;
+        salida["omitidas"] = omitidas;
+        return salida;
+    }
+
     // ------------------------------------------------------------------
     // Lectura
     // ------------------------------------------------------------------
