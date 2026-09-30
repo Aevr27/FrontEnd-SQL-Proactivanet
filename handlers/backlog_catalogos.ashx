@@ -15,7 +15,10 @@
 // dbo.usp_CorreoBacklog_Catalogos devuelve los cuatro result sets en ese
 // orden, con UNA columna cada uno. Lo lee DashboardCatalogos.Backlog()
 // (App_Code/DashboardCatalogos.cs), que toma el unico valor de cada fila en
-// vez de buscarlo por nombre de columna.
+// vez de buscarlo por nombre de columna. "grupos" no sale del procedimiento
+// sino de los grupos vigentes de dbo.CatLiderGrupo (GruposVigentes).
+//
+// QARE (qare/qare.js) pide este mismo endpoint para sus tres filtros.
 
 using System;
 using System.Collections.Generic;

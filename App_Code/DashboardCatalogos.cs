@@ -14,8 +14,9 @@
 //   Sla()         dbo.usp_Dash_Catalogos           grupos y tecnicos de SLA
 //   CallCenter()  dbo.vw_Dash_ProductividadBase    el subconjunto que atiende
 //                                                  telefono (GruposCallCenter)
-//   Backlog()     dbo.usp_CorreoBacklog_Catalogos  c1, grupos, lideres y los
-//                                                  cortes de CorreoBacklogSnapshot
+//   Backlog()     dbo.usp_CorreoBacklog_Catalogos  c1, lideres y los cortes de
+//                                                  CorreoBacklogSnapshot
+//                 dbo.CatLiderGrupo (vigentes)     grupos (tambien los de QARE)
 //
 // Los cuerpos de los dos procedimientos no estan versionados en el repo, asi
 // que no hay forma de demostrar desde aqui que dos listas "de grupos" sean la
@@ -149,16 +150,53 @@ ORDER BY Tecnico;";
 
     // Cuatro result sets de UNA columna, en este orden: c1, grupos, lideres y
     // fechas de corte (de la mas reciente a la mas vieja).
+    //
+    // Del procedimiento se usan c1, lideres y fechas. La lista de GRUPOS no:
+    // su result set 1 es mas amplio que el catalogo vigente de grupos, y el
+    // desplegable de Grupo (Backlog y QARE, que comparten este endpoint) debe
+    // ofrecer solo los de dbo.CatLiderGrupo. Ver GruposVigentes(). "Sin Torre"
+    // sigue en lideres tal como lo devuelve el procedimiento.
     public static Dictionary<string, object> Backlog()
     {
         var sets = DashboardDb.EjecutarMultiple("dbo.usp_CorreoBacklog_Catalogos", null);
         return new Dictionary<string, object>
         {
             { "c1",      Columna(sets, 0) },
-            { "grupos",  Columna(sets, 1) },
+            { "grupos",  GruposVigentes() },
             { "lideres", Columna(sets, 2) },
             { "fechas",  Columna(sets, 3) },
         };
+    }
+
+    /* Grupos del filtro de Backlog/QARE: los vigentes de dbo.CatLiderGrupo,
+       el catalogo Grupo -> Lider con el que el Backlog y la TVF de QARE ya
+       calculan el Lider (LEFT JOIN por igualdad exacta de Grupo, ver
+       sql/16_qare_filtros_org.sql). Se leen de la tabla y no de una lista
+       escrita a mano: salen con la grafia exacta con que estan grabados, y un
+       alta o baja en el catalogo aparece sin tocar el codigo.
+
+       Solo lectura; no crea ni cambia ningun objeto de la base. */
+    private static List<object> GruposVigentes()
+    {
+        const string sql = @"
+SELECT DISTINCT Grupo
+FROM dbo.CatLiderGrupo
+WHERE VigenteEnOrigen = 1
+ORDER BY Grupo;";
+
+        var filas = new List<Dictionary<string, object>>();
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        using (var cmd = new SqlCommand(sql, cn))
+        {
+            cmd.CommandType = CommandType.Text;
+            cn.Open();
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read()) filas.Add(SqlRowMapper.Fila(reader));
+            }
+        }
+
+        return Columna(new List<List<Dictionary<string, object>>> { filas }, 0);
     }
 
     // ---------------------------------------------------------------------
