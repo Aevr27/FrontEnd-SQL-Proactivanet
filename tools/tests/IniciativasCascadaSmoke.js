@@ -95,6 +95,7 @@ function Pagina(pedir, antes) {
   (new Function('window', leer('assets/js/escape.js')))(ventana);
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(ventana, ventana.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(ventana, documento);
+  (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   return { ventana: ventana, doc: documento, sel: function (id) { return documento.getElementById(id); } };

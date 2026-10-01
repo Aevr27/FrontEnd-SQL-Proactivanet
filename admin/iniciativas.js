@@ -34,7 +34,9 @@
    PIEZAS
    ------
      CatalogoIniciativas   el JSON del handler, validado
-     CascadaOrganizacional PO -> SO -> Categoria y el Director derivado
+     CascadaOrganizacional PO -> SO -> Categoria y el Director derivado, en
+                           modo 'creacion' (admin/cascada-organizacional.js,
+                           compartida con cualquier pestaña que filtre)
      SolicitudNueva        el formulario sin DOM: tipo, cascada, valores
      PaginaIniciativas     el DOM: pestañas, carga, estados, campos, ayuda
    Las cuatro se prueban en node: tools/tests/IniciativasCascadaSmoke.js.
@@ -77,7 +79,8 @@ window.Iniciativas = (function () {
   // con agregarlos aqui: la pagina los pinta y los limpia al cambiar el tipo.
   var DEFINICIONES_TIPO = {};
 
-  function igualTexto(a, b) { return a < b ? -1 : a > b ? 1 : 0; }
+  // La cascada es la compartida de admin/cascada-organizacional.js.
+  var CascadaOrganizacional = window.CascadaOrganizacional;
 
   // ---------------------------------------------------------------------
   // CatalogoIniciativas
@@ -112,101 +115,6 @@ window.Iniciativas = (function () {
   }
 
   // ---------------------------------------------------------------------
-  // CascadaOrganizacional
-  // ---------------------------------------------------------------------
-  class CascadaOrganizacional {
-    constructor(filas) {
-      this.filas = filas;
-      this.seleccion = CascadaOrganizacional.NIVELES.map(function () { return ''; });
-    }
-
-    // Filas que cumplen lo elegido en los niveles 0..hasta-1.
-    filasHasta(hasta) {
-      var niveles = CascadaOrganizacional.NIVELES, sel = this.seleccion;
-      return this.filas.filter(function (f) {
-        for (var i = 0; i < hasta; i++) {
-          if (sel[i] && f[niveles[i].clave] !== sel[i]) return false;
-        }
-        return true;
-      });
-    }
-
-    // Valores distintos del nivel, ordenados como el directorio (ordinal).
-    opciones(nivel) {
-      var clave = CascadaOrganizacional.NIVELES[nivel].clave;
-      var vistos = {}, salida = [];
-      this.filasHasta(nivel).forEach(function (f) {
-        var v = f[clave];
-        if (v && !Object.prototype.hasOwnProperty.call(vistos, v)) {
-          vistos[v] = true;
-          salida.push(v);
-        }
-      });
-      return salida.sort(igualTexto);
-    }
-
-    // Limpia el nivel `desde` y todos los de abajo.
-    limpiar(desde) {
-      for (var i = desde; i < this.seleccion.length; i++) this.seleccion[i] = '';
-    }
-
-    // Elegir limpia los niveles de abajo. Un valor que no esta entre las
-    // opciones validas no se acepta (el nivel queda vacio). Devuelve si se
-    // acepto.
-    elegir(nivel, valor) {
-      this.limpiar(nivel);
-      if (valor && this.opciones(nivel).indexOf(valor) >= 0) {
-        this.seleccion[nivel] = valor;
-        return true;
-      }
-      return false;
-    }
-
-    completa() {
-      return this.seleccion.every(function (v) { return v !== ''; });
-    }
-
-    // Director de la categoria elegida, o '' si falta elegir algo o si las
-    // filas que quedan no coinciden en uno solo (no se adivina).
-    director() {
-      if (!this.completa()) return '';
-      var directores = {};
-      this.filasHasta(this.seleccion.length).forEach(function (f) { directores[f.director] = true; });
-      var lista = Object.keys(directores);
-      return lista.length === 1 ? lista[0] : '';
-    }
-
-    // Lo que pinta cada select. `raizHabilitada`: si el primer nivel puede
-    // usarse (depende del tipo, que vive fuera de la cascada).
-    estado(raizHabilitada, motivoRaiz) {
-      var self = this;
-      return CascadaOrganizacional.NIVELES.map(function (n, i) {
-        var padre = i > 0 ? CascadaOrganizacional.NIVELES[i - 1] : null;
-        if (!padre && !raizHabilitada) {
-          return { habilitado: false, opciones: [], valor: '', motivo: motivoRaiz };
-        }
-        if (padre && !self.seleccion[i - 1]) {
-          return { habilitado: false, opciones: [], valor: '',
-                   motivo: 'Elige primero ' + padre.articulo + ' ' + padre.etiqueta + '.' };
-        }
-        var ops = self.opciones(i);
-        if (!ops.length) {
-          return { habilitado: false, opciones: [], valor: '',
-                   motivo: padre ? 'Sin valores para el ' + padre.etiqueta + ' elegido.'
-                                 : 'Sin valores en el catálogo.' };
-        }
-        return { habilitado: true, opciones: ops, valor: self.seleccion[i], motivo: '' };
-      });
-    }
-  }
-
-  CascadaOrganizacional.NIVELES = [
-    { clave: 'po',        etiqueta: 'Product Owner', articulo: 'un' },
-    { clave: 'so',        etiqueta: 'Service Owner', articulo: 'un' },
-    { clave: 'categoria', etiqueta: 'Categoría',     articulo: 'una' }
-  ];
-
-  // ---------------------------------------------------------------------
   // SolicitudNueva
   // ---------------------------------------------------------------------
   class SolicitudNueva {
@@ -215,7 +123,7 @@ window.Iniciativas = (function () {
       this.definiciones = definiciones || DEFINICIONES_TIPO;
       this.comunes = comunes || CAMPOS_COMUNES;
       this.tipo = '';
-      this.cascada = new CascadaOrganizacional(catalogo.asignaciones);
+      this.cascada = new CascadaOrganizacional(catalogo.asignaciones, 'creacion');
       this.valores = {};       // campos comunes
       this.valoresTipo = {};   // campos del tipo
     }

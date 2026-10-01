@@ -19,7 +19,8 @@
       Despues del tipo aparecen los campos de captura (Titulo y Analisis) y
       los propios del tipo, definidos en admin/iniciativas.js
       (DEFINICIONES_TIPO). Catalogos: handlers/admin_iniciativas_catalogos.ashx
-      (solo lectura).
+      (solo lectura). La cascada es admin/cascada-organizacional.js, la misma
+      (en modo 'filtro') que deben usar las pestañas de listas cuando existan.
     - No se envia ni se guarda nada: no hay boton de enviar ni <form>.
     - Solicitudes / Iniciativas / Modificacion / Descargas son pestañas
       vacias, solo de navegacion.
@@ -136,6 +137,7 @@
 <script src="../assets/js/escape.js"></script>
 <script src="../assets/js/catalogos.js"></script>
 <script src="../assets/js/globo-ayuda.js"></script>
+<script src="cascada-organizacional.js"></script>
 <script src="iniciativas.js"></script>
 </body>
 </html>
