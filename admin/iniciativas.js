@@ -29,7 +29,14 @@
      Director             el de la fila de la categoria elegida. Si las filas
                           que quedan no coinciden en uno solo, no se adivina.
    Captura (lo escribe quien solicita)
-     CAMPOS_COMUNES y DEFINICIONES_TIPO, abajo.
+     CAMPOS_COMUNES y DEFINICIONES_TIPO, abajo: 02 Informacion del problema
+     (Titulo, Descripcion, Observaciones) y 03 Impacto (Volumetria y el %
+     de disminucion de la Categoria elegida).
+   Pendiente (no se pinta como campo, ver sql/diag_admin_nueva_solicitud.sql)
+     RCA es un aviso: no hay donde guardar el documento. Codigo, fechas,
+     contadores, Estado, Subestado, Gerencia, Macroproceso, Causa, Proceso,
+     comentarios, CuentaConWA y Volumetria del ultimo mes vienen hoy del
+     Excel tal cual y su regla no esta verificada.
 
    Ni el Manager (jerarquia del Service Owner en CatPersona) ni el Lider de
    Backlog/QARE (el de un Grupo, CatLiderGrupo) entran en esta cascada.
@@ -66,25 +73,79 @@ window.Iniciativas = (function () {
   // Un campo:
   //   clave      identificador (id del control: 'campo-' + clave)
   //   etiqueta   texto del rotulo
-  //   control    'texto' | 'multilinea'
+  //   control    'texto' | 'multilinea' | 'entero' | 'porcentaje'
+  //   seccion    solo en comunes: 'info' (02) o 'impacto' (03)
+  //   destino    solo documentacion: la columna a la que iria, o null si
+  //              no esta confirmada. Nada se guarda todavia.
   //   ayuda      opcional { texto, nota? }: el rotulo entero se vuelve
   //              destino de GloboAyuda (patron "Pregunta" de QARE)
-  //   reiniciaConCascada  opcional, solo en campos de tipo: se vacia si
-  //              cambia PO, SO o Categoria (un campo que dependa de la
-  //              categoria)
+  //   reiniciaConCascada  se vacia si cambia PO, SO o Categoria (un campo
+  //              que dependa de la categoria)
+  //   requiereCategoria   ademas, bloqueado hasta elegir la Categoria
   //
-  // Comunes a todos los tipos. Salen de las columnas que toda iniciativa
-  // ya tiene en dbo.Problem: Titulo y Descripcion (el analisis de lo que se
-  // pide). Cambiar de tipo NO los borra: no dependen del tipo.
+  // Comunes a todos los tipos. Cambiar de tipo NO borra los de 02; el % de
+  // 03 si, porque cambiar de tipo vacia la cascada y con ella la Categoria.
+  //
+  // Textos de ayuda: los de la plantilla con que ya se capturan los
+  // Problems (los de Titulo y Descripcion se ven dentro de
+  // dbo.Problem.Descripcion en Experiencia) y las definiciones que dio
+  // negocio. No se redactan aqui.
   var CAMPOS_COMUNES = [
-    // Textos de ayuda: los encabezados de la plantilla con que ya se
-    // capturan Titulo y Descripcion de un Problem (se ven dentro de
-    // dbo.Problem.Descripcion en Experiencia). No se redactan aqui.
-    { clave: 'titulo', etiqueta: 'Título', control: 'texto',
+    { clave: 'titulo', etiqueta: 'Título', control: 'texto', seccion: 'info',
+      destino: 'dbo.Problem.Titulo',
       ayuda: { texto: 'Nombre descriptivo del problema que permita identificar la afectación y su causa principal.' } },
-    { clave: 'analisis', etiqueta: 'Análisis de la solicitud', control: 'multilinea',
-      ayuda: { texto: 'Detalle del síntoma o comportamiento observado que origina el problema.' } }
+    // La clave sigue siendo 'analisis' (borradores y pruebas la usan); el
+    // dato es la Descripcion del Problem.
+    { clave: 'analisis', etiqueta: 'Descripción', control: 'multilinea', seccion: 'info',
+      destino: 'dbo.Problem.Descripcion',
+      ayuda: { texto: 'Detalle del síntoma o comportamiento observado que origina el problema.' } },
+    { clave: 'observaciones', etiqueta: 'Observaciones', control: 'multilinea', seccion: 'info',
+      destino: 'dbo.Problem.Observaciones',
+      ayuda: { texto: 'Información adicional sobre cuándo, dónde y en qué condiciones se presenta la afectación.' } },
+    // Cantidad capturada por quien solicita. NO es la Volumetria del ultimo
+    // mes (dbo.Problem.VolumenUltimoMes), que no se escribe aqui. Destino
+    // sin confirmar: la candidata es dbo.Problem.VolumetriaOriginal (INT).
+    { clave: 'volumetria', etiqueta: 'Volumetría', control: 'entero', seccion: 'impacto',
+      destino: null,
+      ayuda: { texto: 'Cantidad de incidentes asociados al problema que justifican su análisis y seguimiento.',
+               nota: 'Es la cantidad que capturas tú; no es la volumetría del último mes.' } },
+    // Por categoria: dbo.ProblemCategoria.PctDisminucion es DECIMAL(9,4) y
+    // guarda FRACCION (1.0000 = 100%). Se captura en % con hasta dos
+    // decimales, que es esa misma precision. 0-100 es un tope de la
+    // pantalla, no de la base (no tiene CHECK); los multiplos de 5 no se
+    // exigen porque no estan verificados.
+    { clave: 'pct', etiqueta: '% Disminución de tickets vs categoría', control: 'porcentaje', seccion: 'impacto',
+      destino: 'dbo.ProblemCategoria.PctDisminucion (fracción)',
+      reiniciaConCascada: true, requiereCategoria: true }
   ];
+
+  // Ayuda de los rotulos fijos del HTML (no son campos de captura).
+  // Definiciones que dio negocio; el valor sigue saliendo de la cascada.
+  var AYUDA_FIJA = {
+    so: { texto: 'Responsable del servicio afectado y encargado de validar el seguimiento del problema.' },
+    categoria: { texto: 'Categoría o clasificación a la que pertenecen los incidentes considerados dentro de la volumetría del problema.' },
+    rca: { texto: 'Documento con la descripción de la causa raíz identificada que originó el problema, incluyendo el análisis realizado, los factores contribuyentes y las acciones correctivas y preventivas definidas para evitar su recurrencia.' }
+  };
+
+  // Validacion de los controles numericos. '' es valido (nada capturado).
+  // Devuelve el mensaje de error o ''.
+  var VALIDAR = {
+    entero: function (v) {
+      return v === '' || /^\d+$/.test(v) ? '' : 'Escribe un número entero, de 0 en adelante.';
+    },
+    porcentaje: function (v) {
+      if (v === '') return '';
+      return /^\d{1,3}(\.\d{1,2})?$/.test(v) && Number(v) <= 100 ? ''
+        : 'Escribe un porcentaje entre 0 y 100, con hasta dos decimales.';
+    }
+  };
+
+  // El % capturado como lo guarda ProblemCategoria.PctDisminucion
+  // (fraccion, 4 decimales), o null si no es valido.
+  function fraccionDe(pct) {
+    if (pct === '' || VALIDAR.porcentaje(pct)) return null;
+    return Math.round(Number(pct) * 100) / 10000;
+  }
 
   // Campos propios de cada Tipo de iniciativa, por nombre exacto del tipo:
   //
@@ -157,24 +218,47 @@ window.Iniciativas = (function () {
       this.tipo = (valor && this.catalogo.tieneTipo(valor)) ? valor : '';
       this.cascada.limpiar(0);
       this.valoresTipo = {};
+      this.limpiarDeCascada(this.comunes, this.valores);
       return this.tipo !== '';
     }
 
     // Un cambio en la cascada limpia los niveles de abajo (y con ellos el
-    // Director) y los campos del tipo que dependan de la categoria.
+    // Director) y los campos que dependan de la categoria.
     elegir(nivel, valor) {
       var aceptado = this.tipo ? this.cascada.elegir(nivel, valor) : false;
-      var vt = this.valoresTipo;
-      this.camposTipo().forEach(function (c) { if (c.reiniciaConCascada) delete vt[c.clave]; });
+      this.limpiarDeCascada(this.camposTipo(), this.valoresTipo);
+      this.limpiarDeCascada(this.comunes, this.valores);
       return aceptado;
     }
 
-    capturar(clave, texto) {
-      var esTipo = this.camposTipo().some(function (c) { return c.clave === clave; });
-      var esComun = this.comunes.some(function (c) { return c.clave === clave; });
-      if (esTipo) this.valoresTipo[clave] = texto;
-      else if (esComun) this.valores[clave] = texto;
+    limpiarDeCascada(campos, valores) {
+      campos.forEach(function (c) { if (c.reiniciaConCascada) delete valores[c.clave]; });
     }
+
+    // La Categoria elegida en la cascada: la UNICA fuente de la categoria.
+    categoria() { return this.cascada.seleccion[2] || ''; }
+
+    campo(clave) {
+      var todos = this.comunes.concat(this.camposTipo());
+      for (var i = 0; i < todos.length; i++) if (todos[i].clave === clave) return todos[i];
+      return null;
+    }
+
+    capturar(clave, texto) {
+      var c = this.campo(clave);
+      if (!c || (c.requiereCategoria && !this.categoria())) return;
+      if (this.comunes.indexOf(c) >= 0) this.valores[clave] = texto;
+      else this.valoresTipo[clave] = texto;
+    }
+
+    // Mensaje de error del valor capturado, o ''.
+    error(clave) {
+      var c = this.campo(clave);
+      var v = c ? (this.comunes.indexOf(c) >= 0 ? this.valores : this.valoresTipo)[clave] : '';
+      return c && VALIDAR[c.control] ? VALIDAR[c.control](String(v === undefined ? '' : v).trim()) : '';
+    }
+
+    pctFraccion() { return fraccionDe(String(this.valores.pct || '').trim()); }
 
     estado() {
       var hayTipos = this.catalogo.tipos.length > 0;
@@ -191,6 +275,9 @@ window.Iniciativas = (function () {
             : this.cascada.completa() ? 'La categoría no tiene un Director único.'
             : 'Se completa al elegir la Categoría.'
         },
+        pct: this.categoria()
+          ? { habilitado: true, motivo: 'Para la categoría elegida en Clasificación.' }
+          : { habilitado: false, motivo: 'Elige primero la Categoría en Clasificación.' },
         camposVisibles: this.tipo !== ''
       };
     }
@@ -347,6 +434,7 @@ window.Iniciativas = (function () {
         if (!self.solicitud) return;
         self.solicitud.elegirTipo(e.target.value);
         self.pintarCamposTipo();
+        self.pintarCamposComunes();
         self.pintar();
       });
       SELECTS.forEach(function (ids, i) {
@@ -356,6 +444,7 @@ window.Iniciativas = (function () {
           if (self.solicitud.camposTipo().some(function (c) { return c.reiniciaConCascada; })) {
             self.pintarCamposTipo();
           }
+          self.pintarCamposComunes();
           self.pintar();
         });
       });
@@ -377,8 +466,33 @@ window.Iniciativas = (function () {
       });
       this.$('outDirector').textContent = est.director.valor || '—';
       this.$('motDirector').textContent = est.director.motivo;
-      this.$('iniBloqueCampos').hidden = !est.camposVisibles;
-      this.$('iniCamposPendiente').hidden = est.camposVisibles;
+      this.mostrarCampos(est.camposVisibles);
+      this.pintarPct(est.pct);
+    }
+
+    // 02 y 03 se ven al elegir el tipo; antes, su aviso.
+    mostrarCampos(visibles) {
+      this.$('iniBloqueCampos').hidden = !visibles;
+      this.$('iniCamposPendiente').hidden = visibles;
+      this.$('iniBloqueImpacto').hidden = !visibles;
+      this.$('iniImpactoPendiente').hidden = visibles;
+    }
+
+    // El % se habilita con la Categoria; el aviso dice por que no, o el
+    // error de lo capturado.
+    pintarPct(e) {
+      var input = this.$('campo-pct');
+      input.disabled = !e.habilitado;
+      this.pintarMensaje('pct', e.motivo);
+    }
+
+    // Mensaje bajo un control numerico: el error si lo hay; si no, `base`.
+    pintarMensaje(clave, base) {
+      var msg = this.$('campo-' + clave + '-msg');
+      var error = this.solicitud ? this.solicitud.error(clave) : '';
+      msg.textContent = error || base || '';
+      msg.classList.toggle('ini-error-campo', !!error);
+      this.$('campo-' + clave).setAttribute('aria-invalid', error ? 'true' : 'false');
     }
 
     // Todos bloqueados con el mismo motivo (cargando / error / vacio).
@@ -392,12 +506,12 @@ window.Iniciativas = (function () {
       });
       this.$('outDirector').textContent = '—';
       this.$('motDirector').textContent = '';
-      this.$('iniBloqueCampos').hidden = true;
-      this.$('iniCamposPendiente').hidden = false;
+      this.mostrarCampos(false);
     }
 
     // ---- campos de captura ----
     ayudaDe(clave) {
+      if (Object.prototype.hasOwnProperty.call(AYUDA_FIJA, clave)) return AYUDA_FIJA[clave];
       var todos = CAMPOS_COMUNES.concat(this.solicitud ? this.solicitud.camposTipo() : []);
       for (var i = 0; i < todos.length; i++) if (todos[i].clave === clave) return todos[i].ayuda || null;
       return null;
@@ -411,21 +525,35 @@ window.Iniciativas = (function () {
         ? '<label for="' + id + '" class="ini-rotulo ayuda-destino" data-ayuda="' + Escape.attr(campo.clave) + '">' +
             Escape.html(campo.etiqueta) + '</label>'
         : '<label for="' + id + '" class="ini-rotulo">' + Escape.html(campo.etiqueta) + '</label>';
-      var describe = ayuda ? ' aria-describedby="' + id + '-ayuda"' : '';
-      var control = campo.control === 'multilinea'
-        ? '<textarea id="' + id + '" data-campo="' + Escape.attr(campo.clave) + '" rows="6"' + describe + '>' +
-            Escape.html(v) + '</textarea>'
-        : '<input type="text" id="' + id + '" data-campo="' + Escape.attr(campo.clave) + '"' + describe +
-            ' value="' + Escape.attr(v) + '">';
+      var numerico = campo.control === 'entero' || campo.control === 'porcentaje';
+      var ids = (ayuda ? [id + '-ayuda'] : []).concat(numerico ? [id + '-msg'] : []);
+      var describe = ids.length ? ' aria-describedby="' + ids.join(' ') + '"' : '';
+      var dato = ' id="' + id + '" data-campo="' + Escape.attr(campo.clave) + '"';
+      var control;
+      if (campo.control === 'multilinea') {
+        control = '<textarea' + dato + ' rows="6"' + describe + '>' + Escape.html(v) + '</textarea>';
+      } else if (campo.control === 'entero') {
+        control = '<input type="number"' + dato + describe + ' inputmode="numeric" min="0" step="1" value="' + Escape.attr(v) + '">';
+      } else if (campo.control === 'porcentaje') {
+        control = '<div class="ini-pct"><input type="number"' + dato + describe + ' inputmode="decimal" min="0" max="100" step="0.01"' +
+          (campo.requiereCategoria && !(this.solicitud && this.solicitud.categoria()) ? ' disabled' : '') +
+          ' value="' + Escape.attr(v) + '"><span class="ini-pct-sufijo" aria-hidden="true">%</span></div>';
+      } else {
+        control = '<input type="text"' + dato + describe + ' value="' + Escape.attr(v) + '">';
+      }
       var oculto = ayuda ? '<span class="ini-sr" id="' + id + '-ayuda">' + Escape.html(ayuda) + '</span>' : '';
-      return '<div class="ini-campo ini-campo-captura">' + rotulo + control + oculto + '</div>';
+      var msg = numerico ? '<small class="ini-motivo" id="' + id + '-msg" aria-live="polite"></small>' : '';
+      return '<div class="ini-campo ini-campo-captura">' + rotulo + control + msg + oculto + '</div>';
     }
 
+    // 02 Informacion del problema y 03 Impacto, cada uno en su contenedor.
     pintarCamposComunes() {
       var self = this, s = this.solicitud;
-      this.$('iniCamposComunes').innerHTML = CAMPOS_COMUNES.map(function (c) {
-        return self.htmlCampo(c, s ? s.valores[c.clave] : '');
-      }).join('');
+      [['info', 'iniCamposComunes'], ['impacto', 'iniCamposImpacto']].forEach(function (par) {
+        self.$(par[1]).innerHTML = CAMPOS_COMUNES.filter(function (c) { return c.seccion === par[0]; })
+          .map(function (c) { return self.htmlCampo(c, s ? s.valores[c.clave] : ''); }).join('');
+      });
+      if (s) this.pintarMensaje('volumetria', '');
     }
 
     pintarCamposTipo() {
@@ -440,10 +568,13 @@ window.Iniciativas = (function () {
     // pintar y no conviene colgarles eventos uno por uno.
     cablearCampos() {
       var self = this;
-      ['iniCamposComunes', 'iniCamposTipo'].forEach(function (id) {
+      ['iniCamposComunes', 'iniCamposImpacto', 'iniCamposTipo'].forEach(function (id) {
         self.$(id).addEventListener('input', function (e) {
           var clave = e.target && e.target.getAttribute && e.target.getAttribute('data-campo');
-          if (clave && self.solicitud) self.solicitud.capturar(clave, e.target.value);
+          if (!clave || !self.solicitud) return;
+          self.solicitud.capturar(clave, e.target.value);
+          if (clave === 'volumetria') self.pintarMensaje(clave, '');
+          else if (clave === 'pct') self.pintarPct(self.solicitud.estado().pct);
         });
       });
     }
@@ -521,6 +652,9 @@ window.Iniciativas = (function () {
   return {
     URL_CATALOGO: URL_CATALOGO,
     CAMPOS_COMUNES: CAMPOS_COMUNES,
+    AYUDA_FIJA: AYUDA_FIJA,
+    VALIDAR: VALIDAR,
+    fraccionDe: fraccionDe,
     DEFINICIONES_TIPO: DEFINICIONES_TIPO,
     CatalogoIniciativas: CatalogoIniciativas,
     CascadaOrganizacional: CascadaOrganizacional,

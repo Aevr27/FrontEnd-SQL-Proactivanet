@@ -272,6 +272,62 @@ Check('T12 campo comun Analisis multilinea', ['analisis', 'multilinea'],
 Check('T10 DEFINICIONES_TIPO vacio: ningun campo de tipo inventado', [], Object.keys(I.DEFINICIONES_TIPO));
 
 // ---------------------------------------------------------------------------
+// N) Campos nuevos de Nueva solicitud: solo los de fuente verificada
+// ---------------------------------------------------------------------------
+(function () {
+  function campo(clave) { return I.CAMPOS_COMUNES.filter(function (x) { return x.clave === clave; })[0]; }
+  Check('N1 campos comunes, en orden y por seccion',
+    ['titulo:info', 'analisis:info', 'observaciones:info', 'volumetria:impacto', 'pct:impacto'],
+    I.CAMPOS_COMUNES.map(function (x) { return x.clave + ':' + x.seccion; }));
+  Check('N1 Descripcion: se ve como Descripcion, la clave sigue siendo analisis, destino Problem.Descripcion',
+    ['Descripción', 'dbo.Problem.Descripcion'], [campo('analisis').etiqueta, campo('analisis').destino]);
+  Check('N2 Observaciones: multilinea, dbo.Problem.Observaciones, con su ayuda',
+    ['multilinea', 'dbo.Problem.Observaciones', 'Información adicional sobre cuándo, dónde y en qué condiciones se presenta la afectación.'],
+    [campo('observaciones').control, campo('observaciones').destino, campo('observaciones').ayuda.texto]);
+  Check('N3 Volumetria: entero y destino SIN confirmar (null)', ['entero', null],
+    [campo('volumetria').control, campo('volumetria').destino]);
+  Check('N4 %: porcentaje, por categoria, se reinicia con la cascada', ['porcentaje', true, true],
+    [campo('pct').control, campo('pct').requiereCategoria, campo('pct').reiniciaConCascada]);
+  Check('N5 ningun campo de los pendientes se inventa',
+    [], I.CAMPOS_COMUNES.map(function (x) { return x.clave; }).filter(function (k) {
+      return /codigo|fecha|estado|subestado|gerencia|macroproceso|causa|proceso|comentario|wa|ultimo|rca/i.test(k);
+    }));
+
+  var V = I.VALIDAR;
+  Check('N6 entero: vacio, 0 y enteros validos', ['', '', ''], [V.entero(''), V.entero('0'), V.entero('1250')]);
+  Check('N6 entero: negativos, decimales y texto no', [true, true, true, true],
+    [!!V.entero('-1'), !!V.entero('2.5'), !!V.entero('abc'), !!V.entero('1e3')]);
+  Check('N7 %: 0, 35, 100 y dos decimales validos', ['', '', '', ''], [V.porcentaje('0'), V.porcentaje('35'), V.porcentaje('100'), V.porcentaje('12.25')]);
+  Check('N7 %: sin regla de multiplos de 5 (no esta verificada)', '', V.porcentaje('37'));
+  Check('N7 %: mas de 100, negativo, tres decimales, texto no', [true, true, true, true],
+    [!!V.porcentaje('100.01'), !!V.porcentaje('-5'), !!V.porcentaje('1.234'), !!V.porcentaje('x')]);
+  Check('N8 % se guardaria como fraccion de PctDisminucion (1.0000 = 100%)',
+    [1, 0.35, 0.1225, 0, null, null], [I.fraccionDe('100'), I.fraccionDe('35'), I.fraccionDe('12.25'), I.fraccionDe('0'), I.fraccionDe(''), I.fraccionDe('150')]);
+
+  var n = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK));
+  n.elegirTipo('Mejora');
+  n.capturar('pct', '50');
+  Check('N9 % sin Categoria: bloqueado y no se captura', [false, 'Elige primero la Categoría en Clasificación.', undefined],
+    [n.estado().pct.habilitado, n.estado().pct.motivo, n.valores.pct]);
+  n.elegir(0, 'PO 1'); n.elegir(1, 'SO y'); n.elegir(2, '/A/Cat 2');
+  Check('N9 la Categoria sale de la cascada (no hay otro selector)', '/A/Cat 2', n.categoria());
+  n.capturar('pct', '50'); n.capturar('volumetria', '300'); n.capturar('observaciones', 'Los lunes');
+  Check('N9 con Categoria: habilitado y capturado', [true, '50', 0.5], [n.estado().pct.habilitado, n.valores.pct, n.pctFraccion()]);
+  Check('N9 Director derivado intacto', 'Dir A', n.estado().director.valor);
+  n.capturar('volumetria', '2.5');
+  Check('N10 error de volumetria', 'Escribe un número entero, de 0 en adelante.', n.error('volumetria'));
+  n.elegir(2, '/A/Cat 2');
+  Check('N11 tocar la cascada vacia el %, no Volumetria ni Observaciones',
+    [undefined, '2.5', 'Los lunes'], [n.valores.pct, n.valores.volumetria, n.valores.observaciones]);
+  n.capturar('pct', '20');
+  n.elegirTipo('Problem');
+  Check('N11 cambiar tipo vacia el % (la Categoria se va)', [undefined, '', false],
+    [n.valores.pct, n.categoria(), n.estado().pct.habilitado]);
+  Check('N12 sin valores por omision: nada capturado de inicio',
+    {}, new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK)).valores);
+})();
+
+// ---------------------------------------------------------------------------
 // G) GloboAyuda (patron "Pregunta" de QARE)
 // ---------------------------------------------------------------------------
 (function () {
@@ -432,6 +488,85 @@ pruebas.push(function () {
     Check('B10 volver al tipo: campos vacios otra vez', true,
       p.sel('iniCamposTipo').innerHTML.indexOf('id="campo-beneficio" data-campo="beneficio" value=""') >= 0);
   });
+});
+
+// N13-N20 los campos nuevos en la pagina
+pruebas.push(function () {
+  var p = Pagina(nunca);
+  var P = p.ventana.IniciativasPagina;
+  return P.cargar(pedirOk).then(function () {
+    var info = p.sel('iniCamposComunes').innerHTML, imp = p.sel('iniCamposImpacto').innerHTML;
+    Check('N13 02: Titulo, Descripcion y Observaciones', [true, true, true],
+      [info.indexOf('id="campo-titulo"') >= 0, />Descripción<\/label>/.test(info),
+       info.indexOf('<textarea id="campo-observaciones" data-campo="observaciones" rows="6" aria-describedby="campo-observaciones-ayuda">') >= 0]);
+    Check('N13 03: Volumetria y % fuera de 02', [false, true, true],
+      [info.indexOf('campo-volumetria') >= 0, imp.indexOf('id="campo-volumetria"') >= 0, imp.indexOf('id="campo-pct"') >= 0]);
+    Check('N14 Volumetria: numero entero >= 0', true,
+      imp.indexOf('<input type="number" id="campo-volumetria" data-campo="volumetria" aria-describedby="campo-volumetria-ayuda campo-volumetria-msg" inputmode="numeric" min="0" step="1" value="">') >= 0);
+    Check('N15 %: numero 0-100, paso 0.01, bloqueado sin categoria, con sufijo', [true, true],
+      [imp.indexOf('type="number" id="campo-pct" data-campo="pct" aria-describedby="campo-pct-msg" inputmode="decimal" min="0" max="100" step="0.01" disabled value="">') >= 0,
+       imp.indexOf('<span class="ini-pct-sufijo" aria-hidden="true">%</span>') >= 0]);
+    Check('N16 03 oculto sin tipo, con su aviso', [true, false], [p.sel('iniBloqueImpacto').hidden, p.sel('iniImpactoPendiente').hidden]);
+
+    elegirEn(p, 'selTipo', 'Mejora');
+    Check('N16 con tipo: 03 visible', [false, true], [p.sel('iniBloqueImpacto').hidden, p.sel('iniImpactoPendiente').hidden]);
+    Check('N17 % bloqueado hasta la Categoria', [true, 'Elige primero la Categoría en Clasificación.'],
+      [p.sel('campo-pct').disabled, p.sel('campo-pct-msg').textContent]);
+    elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO y'); elegirEn(p, 'selCategoria', '/A/Cat 2');
+    Check('N17 con Categoria: habilitado; Director intacto', [false, 'Para la categoría elegida en Clasificación.', 'Dir A'],
+      [p.sel('campo-pct').disabled, p.sel('campo-pct-msg').textContent, p.sel('outDirector').textContent]);
+
+    escribir(p, 'iniCamposImpacto', 'pct', '150');
+    Check('N18 % fuera de rango: error visible', ['Escribe un porcentaje entre 0 y 100, con hasta dos decimales.', true, 'true'],
+      [p.sel('campo-pct-msg').textContent, p.sel('campo-pct-msg').classList.contains('ini-error-campo'), p.sel('campo-pct').getAttribute('aria-invalid')]);
+    escribir(p, 'iniCamposImpacto', 'pct', '35');
+    Check('N18 % valido: sin error', ['Para la categoría elegida en Clasificación.', false, 0.35],
+      [p.sel('campo-pct-msg').textContent, p.sel('campo-pct-msg').classList.contains('ini-error-campo'), P.solicitud.pctFraccion()]);
+    escribir(p, 'iniCamposImpacto', 'volumetria', '-3');
+    Check('N19 Volumetria negativa: error', 'Escribe un número entero, de 0 en adelante.', p.sel('campo-volumetria-msg').textContent);
+    escribir(p, 'iniCamposImpacto', 'volumetria', '420');
+    escribir(p, 'iniCamposComunes', 'observaciones', 'En tienda, al cierre');
+    Check('N19 captura de 02 y 03', ['420', 'En tienda, al cierre', ''],
+      [P.solicitud.valores.volumetria, P.solicitud.valores.observaciones, p.sel('campo-volumetria-msg').textContent]);
+
+    elegirEn(p, 'selSo', 'SO x');
+    Check('N20 cambiar la cascada vacia y bloquea el %; Volumetria se queda', [undefined, true, true, '420'],
+      [P.solicitud.valores.pct, p.sel('campo-pct').disabled,
+       p.sel('iniCamposImpacto').innerHTML.indexOf('id="campo-pct" data-campo="pct"') >= 0 && /id="campo-pct"[^>]*value=""/.test(p.sel('iniCamposImpacto').innerHTML),
+       P.solicitud.valores.volumetria]);
+
+    Check('N21 ayuda de SO, Categoria y RCA (rotulos fijos)',
+      ['Responsable del servicio afectado y encargado de validar el seguimiento del problema.',
+       'Categoría o clasificación a la que pertenecen los incidentes considerados dentro de la volumetría del problema.', true],
+      [P.ayudaDe('so').texto, P.ayudaDe('categoria').texto, /^Documento con la descripción de la causa raíz/.test(P.ayudaDe('rca').texto)]);
+
+    // Ida y vuelta: el borrador nuevo tambien sobrevive.
+    p.sel('btnVolver').disparar('click');
+    p.sel('iniCamposComunes').innerHTML = ''; p.sel('iniCamposImpacto').innerHTML = '';
+    p.sel('btnSolicitar').disparar('click');
+    Check('N22 Observaciones y Volumetria repintadas desde el borrador', [true, true],
+      [p.sel('iniCamposComunes').innerHTML.indexOf('>En tienda, al cierre</textarea>') >= 0,
+       p.sel('iniCamposImpacto').innerHTML.indexOf('value="420"') >= 0]);
+  });
+});
+
+// N23 marcado: secciones, RCA sin subir nada, sin segundo selector de categoria
+pruebas.push(function () {
+  var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
+  Check('N23 secciones 01-04 en orden', ['Clasificación', 'Información del problema', 'Impacto', 'RCA'],
+    (html.match(/<h3 id="iniCab[A-Za-z]+">[^<]+<\/h3>/g) || []).map(function (h) { return h.replace(/<[^>]+>/g, ''); }));
+  Check('N24 RCA: input de archivo deshabilitado y su aviso', [true, true],
+    [/<input type="file" id="campoRca" aria-describedby="motRca" disabled>/.test(html), /falta definir dónde se guardará el documento/.test(html)]);
+  Check('N24 RCA no es un campo de texto', false, /id="campoRca"[^>]*type="text"|<textarea[^>]*rca/i.test(html));
+  Check('N25 una sola Categoria en el formulario', 1, (html.match(/id="selCategoria"/g) || []).length);
+  Check('N26 ayuda en SO y Categoria sin cambiar los ids', [true, true],
+    [/<label for="selSo" class="ini-rotulo ayuda-destino" data-ayuda="so">Service Owner<\/label>/.test(html),
+     /<label for="selCategoria" class="ini-rotulo ayuda-destino" data-ayuda="categoria">Categoría<\/label>/.test(html)]);
+  Check('N27 Product Owner sin renombrar a Owner Problem (no verificado)', [true, false],
+    [/<label for="selPo">Product Owner<\/label>/.test(html), /Owner Problem/i.test(html)]);
+  var css = leer('admin/iniciativas.css');
+  Check('N28 bajo 900px una columna, sin fijar columna ni fila', true,
+    /@media \(max-width: 900px\) \{[^}]*grid-template-columns: minmax\(0, 1fr\)[^}]*\}\s*\.ini-form > \.ini-col-clasif,\s*\.ini-form > \.ini-bloque:not\(\.ini-col-clasif\) \{ grid-column: auto; grid-row: auto; \}/.test(css));
 });
 
 // B14 error 500 con {error}

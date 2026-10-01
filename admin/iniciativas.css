@@ -124,8 +124,14 @@
   border-radius: var(--radius-sm);
 }
 .ini-col-clasif { background: var(--bg-2); }
+/* Clasificacion ocupa la columna izquierda entera; 02, 03 y 04 se apilan
+   a la derecha. */
+.ini-form > .ini-col-clasif { grid-column: 1; grid-row: 1 / span 3; }
+.ini-form > .ini-bloque:not(.ini-col-clasif) { grid-column: 2; }
 @media (max-width: 900px) {
   .ini-form { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .ini-form > .ini-col-clasif,
+  .ini-form > .ini-bloque:not(.ini-col-clasif) { grid-column: auto; grid-row: auto; }
 }
 
 /* ---- Cascada ---- */
@@ -142,6 +148,7 @@
 }
 .ini-campo select,
 .ini-campo input[type="text"],
+.ini-campo input[type="number"],
 .ini-campo textarea {
   font: inherit; font-size: 13px;
   width: 100%; min-width: 0;
@@ -153,20 +160,39 @@
 }
 .ini-campo select:hover:not(:disabled),
 .ini-campo input[type="text"]:hover,
+.ini-campo input[type="number"]:hover:not(:disabled),
 .ini-campo textarea:hover { border-color: var(--ctrl-line-hover); }
 .ini-campo select:focus-visible,
 .ini-campo input[type="text"]:focus-visible,
+.ini-campo input[type="number"]:focus-visible,
 .ini-campo textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ini-campo textarea { resize: vertical; min-height: 110px; line-height: 1.45; }
-/* El Analisis es el cuerpo de la solicitud: alto comodo para escribir. */
-.ini-col-desc .ini-campo textarea { min-height: 260px; }
-.ini-campo select:disabled {
+/* La Descripcion es el cuerpo de la solicitud: alto comodo para escribir.
+   Observaciones, mas corta. */
+.ini-col-desc #campo-analisis { min-height: 260px; }
+.ini-campo select:disabled,
+.ini-campo input[type="number"]:disabled {
   color: var(--muted-2);
   background: var(--bg-2);
   border-color: var(--line);
   cursor: not-allowed;
 }
 .ini-motivo { min-height: 15px; font-size: 11.5px; color: var(--muted); }
+.ini-motivo.ini-error-campo { color: var(--rojo); font-weight: 600; }
+.ini-campo input[aria-invalid="true"] { border-color: var(--rojo); }
+
+/* 03 Impacto: dos campos lado a lado mientras quepan. */
+.ini-campos.ini-campos-dos { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+/* % con su sufijo dentro de la barra. */
+.ini-pct { position: relative; }
+.ini-pct input { padding-right: 28px; }
+.ini-pct-sufijo {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  font-size: 13px; font-weight: 700; color: var(--muted); pointer-events: none;
+}
+/* 04 RCA: control nativo, deshabilitado mientras no haya almacenamiento. */
+.ini-col-rca input[type="file"] { width: 100%; min-width: 0; font: inherit; font-size: 12.5px; color: var(--muted); }
+.ini-origen.pendiente { border-style: dashed; color: var(--muted-2); }
 
 /* ---- Bloques del formulario y origen de cada dato ----
    Tres origenes, con la misma etiqueta chica en todo el formulario:
