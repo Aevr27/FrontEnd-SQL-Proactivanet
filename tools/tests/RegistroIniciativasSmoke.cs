@@ -17,6 +17,8 @@
 //   7) la misma suma que reducePorFolio de ArmarCategorias (vol_reduce_folio
 //      de Experiencia) para el mismo detalle
 //   8) el archivo no tiene SQL que escriba
+//   9) tipo_iniciativa: el TipoIniciativa del folio (DashboardCatalogos
+//      .TiposPorFolio, grafia del catalogo), null sin tipo; agrup no cambia
 //
 // Compilar y correr desde la raiz del repo:
 //   csc /nologo /target:library /out:exp.dll /r:System.dll /r:System.Data.dll ^
@@ -100,7 +102,24 @@ public static class RegistroSmoke
         var dRepetida = Det("PRB 1", null, "En Análisis", "Problem", 0, 0, null, null, "X", "X", "X");
         sueltas.Add(M("Iniciativa").Invoke(null, new object[] { dRepetida, 0, 0, dir }));
 
-        var salida = (Dictionary<string, object>)M("ArmarRegistro").Invoke(null, new object[] { detalle, sueltas, dir });
+        // 9) Tipos por folio como los arma TiposIniciativaPorFolio: normalizados
+        // y con la grafia de TiposUnicos ("mejora " -> "Mejora"). REQ 2 y
+        // HAR 4 sin tipo; " " no es tipo.
+        var TCat = asm.GetType("DashboardCatalogos");
+        var pares = new List<KeyValuePair<string, string>> {
+            new KeyValuePair<string, string>("PRB 1", "Problema"),
+            new KeyValuePair<string, string>("MAP 3", "mejora "),
+            new KeyValuePair<string, string>("PRB 5", "Mejora"),
+            new KeyValuePair<string, string>("HAR 4", " "),
+            new KeyValuePair<string, string>("PRB 1", "Otro"),
+        };
+        var tipos = (Dictionary<string, string>)TCat.GetMethod("TiposPorFolio").Invoke(null, new object[] { pares });
+        Check("9 TiposPorFolio: grafia unica, sin vacios, el primero gana",
+            "PRB 1=Problema,MAP 3=Mejora,PRB 5=Mejora", string.Join(",", ToPares(tipos)));
+        Check("9 mismas grafias que el catalogo TiposIniciativa", "Mejora,Problema",
+            string.Join(",", ToStr((IList)TCat.GetMethod("TiposUnicos").Invoke(null, new object[] { new[] { "Problema", "mejora ", "Mejora", " " } }))));
+
+        var salida = (Dictionary<string, object>)M("ArmarRegistro").Invoke(null, new object[] { detalle, sueltas, dir, tipos });
         var lista = (IList)salida["iniciativas"];
 
         Check("orden y cuenta: una por folio, sueltas al final, sin repetir",
@@ -144,6 +163,13 @@ public static class RegistroSmoke
                 if ((string)i["folio"] == "PRB 1") volExp = (int)i["vol_reduce_folio"];
         Check("7 mismo vol_reduce_folio que Experiencia", volExp, p1["vol_reduce_folio"]);
 
+        Check("9 tipo_iniciativa por folio", "Problema|Mejora|Mejora||",
+            p1["tipo_iniciativa"] + "|" + m3["tipo_iniciativa"] + "|" + p5["tipo_iniciativa"] + "|" + r2["tipo_iniciativa"] + "|" + h4["tipo_iniciativa"]);
+        Check("9 sin tipo = null, no texto", true, r2.ContainsKey("tipo_iniciativa") && r2["tipo_iniciativa"] == null);
+        Check("9 agrup sigue siendo TipoAgrupado", "Problem|ReqOpr", p1["agrup"] + "|" + r2["agrup"]);
+        var sinTipos = (Dictionary<string, object>)M("ArmarRegistro").Invoke(null, new object[] { detalle, new List<object>(), dir, null });
+        Check("9 sin mapa de tipos: null en todas", null, Ini((IList)sinTipos["iniciativas"], "PRB 1")["tipo_iniciativa"]);
+
         Check("listas del contrato", "En Análisis,En Solución,En Monitoreo|Problem,SorIA,Adopcion,Mejora",
             string.Join(",", ToStr((IList)salida["estados_activos"])) + "|" + string.Join(",", ToStr((IList)salida["agrupadores"])));
 
@@ -161,6 +187,12 @@ public static class RegistroSmoke
     {
         var s = new List<string>();
         foreach (Dictionary<string, object> i in lista) s.Add((string)i["folio"]);
+        return s;
+    }
+    static List<string> ToPares(Dictionary<string, string> d)
+    {
+        var s = new List<string>();
+        foreach (var kv in d) s.Add(kv.Key + "=" + kv.Value);
         return s;
     }
     static List<string> ToStr(IList lista)

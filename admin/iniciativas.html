@@ -193,6 +193,13 @@
         </div>
         <div class="campo"><label for="regEstadoSel">Estado</label><select id="regEstadoSel" disabled></select></div>
         <div class="campo"><label for="regTipo">Agrupación</label><select id="regTipo" disabled></select></div>
+        <!-- Tipo de iniciativa (dbo.Problem.TipoIniciativa), varios a la vez.
+             No es la Agrupacion de arriba (TipoAgrupado). -->
+        <div class="campo ini-multi" id="regTipoIniCampo">
+          <label for="regTipoIni">Tipo de iniciativa</label>
+          <button type="button" class="ini-multi-boton" id="regTipoIni" aria-haspopup="true" aria-expanded="false" aria-controls="regTipoIniPanel" disabled>—</button>
+          <div class="ini-multi-panel" id="regTipoIniPanel" role="group" aria-label="Tipos de iniciativa" hidden></div>
+        </div>
         <div class="campo"><label for="regDirector">Director</label><select id="regDirector" disabled></select></div>
         <div class="campo"><label for="regPo">Product Owner</label><select id="regPo" disabled></select></div>
         <div class="campo"><label for="regSo">Service Owner</label><select id="regSo" disabled></select></div>

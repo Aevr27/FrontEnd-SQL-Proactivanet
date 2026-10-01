@@ -30,6 +30,12 @@
    FILTROS
    -------
      Estado, Agrupacion   igualdad exacta con el valor de la iniciativa.
+     Tipo de iniciativa   `tipo_iniciativa` (dbo.Problem.TipoIniciativa, NO
+                          la Agrupacion/TipoAgrupado). Varios a la vez = O.
+                          Las opciones son los tipos que trae el registro.
+                          null = "Todas" = sin restriccion, todas las
+                          casillas marcadas; si quedan todas o ninguna
+                          marcadas, vuelve a null: nunca deja la lista vacia.
      Director -> Product Owner -> Service Owner -> Categoria
                           progresivos sobre las combinaciones REALES de las
                           categorias de las iniciativas (CascadaOrganizacional
@@ -147,6 +153,10 @@ window.RegistroIniciativas = (function () {
       return distintos(this.iniciativas.map(function (i) { return i.agrup; })).sort(igualTexto);
     }
 
+    tiposIniciativa() {
+      return distintos(this.iniciativas.map(function (i) { return i.tipo_iniciativa; })).sort(igualTexto);
+    }
+
     buscar(folio) {
       for (var k = 0; k < this.iniciativas.length; k++) if (this.iniciativas[k].folio === folio) return this.iniciativas[k];
       return null;
@@ -179,12 +189,27 @@ window.RegistroIniciativas = (function () {
       this.registro = registro;
       this.estado = '';
       this.tipo = '';
+      this.tiposIni = null;     // null = Todas
       this.director = '';
       this.cascada = new CascadaOrganizacional(registro.filasOrganizacionales(''), 'filtro');
     }
 
     elegirEstado(v) { this.estado = this.registro.estados().indexOf(v) >= 0 ? v : ''; }
     elegirTipo(v) { this.tipo = this.registro.tipos().indexOf(v) >= 0 ? v : ''; }
+
+    // Marca o desmarca un Tipo de iniciativa. Todas o ninguna = null.
+    alternarTipoIniciativa(v) {
+      var todos = this.registro.tiposIniciativa();
+      if (todos.indexOf(v) < 0) return;
+      var marcados = this.tiposIniciativa();
+      var k = marcados.indexOf(v);
+      if (k >= 0) marcados.splice(k, 1); else marcados.push(v);
+      this.tiposIni = marcados.length && marcados.length < todos.length
+        ? todos.filter(function (t) { return marcados.indexOf(t) >= 0; }) : null;
+    }
+    todosTiposIniciativa() { this.tiposIni = null; }
+    // Los marcados, en el orden de las opciones (todos si es "Todas").
+    tiposIniciativa() { return (this.tiposIni || this.registro.tiposIniciativa()).slice(); }
 
     // El Director acota la cascada: se rearma con las filas de ese Director
     // y lo ya elegido abajo se conserva mientras siga siendo valido.
@@ -202,18 +227,20 @@ window.RegistroIniciativas = (function () {
     limpiar() {
       this.estado = '';
       this.tipo = '';
+      this.tiposIni = null;
       this.elegirDirector('');
       this.cascada.limpiar(0);
     }
 
     activos() {
       var org = this.cascada.filtros();
-      return (this.estado ? 1 : 0) + (this.tipo ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length;
+      return (this.estado ? 1 : 0) + (this.tipo ? 1 : 0) + (this.tiposIni ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length;
     }
 
     pasa(i) {
       if (this.estado && i.estado !== this.estado) return false;
       if (this.tipo && i.agrup !== this.tipo) return false;
+      if (this.tiposIni && this.tiposIni.indexOf(i.tipo_iniciativa) < 0) return false;
       var director = this.director, org = this.cascada.filtros();
       var claves = Object.keys(org);
       if (!director && !claves.length) return true;
@@ -309,6 +336,30 @@ window.RegistroIniciativas = (function () {
         if (!self.filtro) return;
         self.filtro.elegirTipo(e.target.value); self.refrescar();
       });
+      // Tipo de iniciativa: boton que abre un panel de casillas.
+      this.$('regTipoIni').addEventListener('click', function () {
+        if (self.filtro) self.abrirTiposIni(self.$('regTipoIniPanel').hidden);
+      });
+      this.$('regTipoIniPanel').addEventListener('change', function (e) {
+        var el = e.target;
+        if (!self.filtro || !el || !el.getAttribute) return;
+        if (el.getAttribute('data-tipo-todas') !== null) self.filtro.todosTiposIniciativa();
+        else if (el.getAttribute('data-tipo-ini') !== null) self.filtro.alternarTipoIniciativa(el.getAttribute('data-tipo-ini'));
+        else return;
+        // El panel se repinta: el foco vuelve a la misma casilla.
+        var panel = self.$('regTipoIniPanel');
+        var casillas = panel.querySelectorAll ? Array.prototype.slice.call(panel.querySelectorAll('input')) : [];
+        var n = casillas.indexOf(el);
+        self.refrescar();
+        if (n >= 0 && panel.querySelectorAll) {
+          var nueva = panel.querySelectorAll('input')[n];
+          if (nueva && nueva.focus) nueva.focus();
+        }
+      });
+      this.doc.addEventListener('click', function (e) {
+        var campo = self.$('regTipoIniCampo');
+        if (!self.$('regTipoIniPanel').hidden && campo.contains && !campo.contains(e.target)) self.abrirTiposIni(false);
+      });
       this.$('regDirector').addEventListener('change', function (e) {
         if (!self.filtro) return;
         self.filtro.elegirDirector(e.target.value); self.refrescar();
@@ -342,6 +393,10 @@ window.RegistroIniciativas = (function () {
       this.$('regDetFondo').addEventListener('click', function () { self.cerrarDetalle(); });
       this.doc.addEventListener('keydown', function (e) {
         if (e.key === 'Escape' && self.abierta) self.cerrarDetalle();
+        else if (e.key === 'Escape' && !self.$('regTipoIniPanel').hidden) {
+          self.abrirTiposIni(false);
+          self.$('regTipoIni').focus();
+        }
       });
     }
 
@@ -349,6 +404,11 @@ window.RegistroIniciativas = (function () {
       if (!this.filtro) return;
       this.filtro.limpiar();
       this.refrescar();
+    }
+
+    abrirTiposIni(abrir) {
+      this.$('regTipoIniPanel').hidden = !abrir;
+      this.$('regTipoIni').setAttribute('aria-expanded', abrir ? 'true' : 'false');
     }
 
     ordenarPor(col) {
@@ -426,6 +486,10 @@ window.RegistroIniciativas = (function () {
         Catalogos.llenar(sel, [], texto || '—');
         sel.disabled = true;
       });
+      this.abrirTiposIni(false);
+      this.$('regTipoIni').textContent = texto || '—';
+      this.$('regTipoIni').disabled = true;
+      this.$('regTipoIniPanel').innerHTML = '';
     }
 
     // ---- pintado ----
@@ -443,6 +507,7 @@ window.RegistroIniciativas = (function () {
       var f = this.filtro, r = this.registro;
       this.pintarSelect('regEstadoSel', r.estados(), f.estado, 'Todos');
       this.pintarSelect('regTipo', r.tipos(), f.tipo, 'Todas');
+      this.pintarTiposIni();
       this.pintarSelect('regDirector', r.directores(), f.director, 'Todos');
       var self = this;
       f.cascada.estado(true, '').forEach(function (e, i) {
@@ -451,6 +516,27 @@ window.RegistroIniciativas = (function () {
       var n = f.activos();
       this.$('regLimpiar').hidden = n === 0;
       this.$('regFiltrosCuenta').textContent = n ? (n === 1 ? '1 filtro activo' : n + ' filtros activos') : '';
+    }
+
+    // Casillas: "Todas" arriba y un tipo por renglon. Con "Todas" se ven
+    // todas marcadas; el boton dice lo elegido.
+    pintarTiposIni() {
+      var todos = this.registro.tiposIniciativa();
+      var marcados = this.filtro.tiposIniciativa();
+      var todas = !this.filtro.tiposIni;
+      var boton = this.$('regTipoIni');
+      boton.disabled = todos.length === 0;
+      boton.textContent = todas ? '— Todas —'
+        : marcados.length === 1 ? marcados[0] : marcados.length + ' de ' + todos.length + ' tipos';
+      boton.setAttribute('title', todas ? '' : marcados.join(', '));
+      boton.classList.toggle('con-valor', !todas);
+      function casilla(attr, valor, rotulo, marcada, clase) {
+        return '<label class="ini-multi-op' + (clase ? ' ' + clase : '') + (marcada ? ' marcada' : '') + '">' +
+          '<input type="checkbox" ' + attr + '="' + Escape.attr(valor) + '"' + (marcada ? ' checked' : '') + '>' +
+          '<span>' + Escape.html(rotulo) + '</span></label>';
+      }
+      this.$('regTipoIniPanel').innerHTML = casilla('data-tipo-todas', '', 'Todas', todas, 'ini-multi-todas') +
+        todos.map(function (t) { return casilla('data-tipo-ini', t, t, marcados.indexOf(t) >= 0, ''); }).join('');
     }
 
     pintarSelect(id, opciones, valor, todos) {

@@ -262,6 +262,54 @@ WHERE VigenteEnOrigen = 1
         return salida;
     }
 
+    /* El TipoIniciativa de cada folio, para el filtro "Tipo de iniciativa"
+       del registro (ExperienciaQueries.RegistroIniciativas). La misma
+       columna y el mismo universo que TiposIniciativa; cada valor sale con la
+       grafia que publica ese catalogo, asi que las opciones del filtro son
+       valores de esa lista. Folios sin tipo no entran. Solo lectura. */
+    public static Dictionary<string, string> TiposIniciativaPorFolio(SqlConnection cn)
+    {
+        const string sql = @"
+SELECT Codigo, TipoIniciativa
+FROM dbo.Problem
+WHERE VigenteEnOrigen = 1
+  AND TipoIniciativa IS NOT NULL;";
+
+        var pares = new List<KeyValuePair<string, string>>();
+        using (var cmd = new SqlCommand(sql, cn))
+        {
+            cmd.CommandType = CommandType.Text;
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read())
+                    pares.Add(new KeyValuePair<string, string>(
+                        reader.IsDBNull(0) ? null : Convert.ToString(reader.GetValue(0)),
+                        reader.IsDBNull(1) ? null : Convert.ToString(reader.GetValue(1))));
+            }
+        }
+
+        return TiposPorFolio(pares);
+    }
+
+    // Folio -> tipo, normalizado y con la grafia de TiposUnicos. El primer
+    // tipo de un folio repetido gana. Aparte de la consulta para probarla
+    // sin SQL.
+    public static Dictionary<string, string> TiposPorFolio(IEnumerable<KeyValuePair<string, string>> pares)
+    {
+        var lista = new List<KeyValuePair<string, string>>(pares);
+        var grafia = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string t in TiposUnicos(lista.ConvertAll(p => p.Value))) grafia[t] = t;
+
+        var salida = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in lista)
+        {
+            var tipo = DirectorioOrganizacional.Normaliza(p.Value);
+            if (string.IsNullOrEmpty(p.Key) || tipo == null || salida.ContainsKey(p.Key)) continue;
+            salida[p.Key] = grafia[tipo];
+        }
+        return salida;
+    }
+
     // ---------------------------------------------------------------------
     // Utilidad
     // ---------------------------------------------------------------------

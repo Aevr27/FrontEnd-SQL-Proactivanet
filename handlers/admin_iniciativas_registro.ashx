@@ -12,6 +12,7 @@
 //                          antiguedad, po, so, director, manager,
 //                          descripcion, observaciones, titulo_problem,
 //                          activa, seguimiento, sin_categoria,
+//                          tipo_iniciativa,
 //                          categorias: [ { categoria, tickets_reduce,
 //                                          pct_dism, po, so, director } ] } ],
 //       "estados_activos": [...], "agrupadores": [...], "fecha_gen": "dd/MM/yyyy" }
@@ -21,7 +22,7 @@
 //
 // SOLO LECTURA: SELECT sobre dbo.vw_ProblemCategoria, dbo.Problem,
 // dbo.CatPrefijoProblem, dbo.ProblemCategoria, dbo.CatCategoriaDueno y
-// dbo.CatPersona. No crea ni cambia nada en la base. Sin autenticacion
+// dbo.CatPersona (y dbo.Problem.TipoIniciativa por folio). No crea ni cambia nada en la base. Sin autenticacion
 // propia todavia, como el resto de admin/.
 //
 // POR QUE NO USA DashboardHandler.Responder: el mismo motivo que

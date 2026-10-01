@@ -290,6 +290,45 @@
 .ini-filtros-cab .btn { margin-left: auto; }
 .filtros.ini-filtros select:disabled { color: var(--muted-2); background: var(--bg-2) !important; cursor: not-allowed; }
 
+/* Tipo de iniciativa: un boton con la misma barra que los select y un panel
+   de casillas debajo. El panel sale de la tarjeta de filtros, asi que esta
+   no recorta (.filtros trae overflow:hidden por su filo superior, que aqui
+   se redondea a mano). */
+.filtros.ini-filtros { overflow: visible; }
+.filtros.ini-filtros::before { border-radius: var(--radius) var(--radius) 0 0; }
+.ini-multi { position: relative; }
+.ini-multi-boton {
+  height: 40px; width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
+  padding: 0 30px 0 11px;
+  font: inherit; font-size: 13px; font-weight: 500; color: var(--ctrl-ink);
+  background: var(--ctrl-bg) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23478b3c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+  box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+.ini-multi-boton:hover:not(:disabled) { background-color: var(--ctrl-bg-2); border-color: var(--ctrl-line-hover); }
+.ini-multi-boton:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.ini-multi-boton:disabled { color: var(--muted-2); background-color: var(--bg-2); cursor: not-allowed; }
+/* Con tipos elegidos la barra se marca, como un filtro puesto. */
+.ini-multi-boton.con-valor { border-color: var(--accent); color: var(--g-900); font-weight: 700; background-color: var(--g-50); }
+.ini-multi-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20;
+  max-height: 260px; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--card); border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-md); padding: 4px;
+}
+.filtros.ini-filtros .ini-multi-op {
+  display: flex; align-items: center; gap: 8px; min-height: 0;
+  padding: 7px 9px; border-radius: 6px; cursor: pointer;
+  font-size: 12.5px; font-weight: 500; color: var(--ink-2);
+  text-transform: none; letter-spacing: 0; line-height: 1.3; overflow-wrap: anywhere;
+}
+.filtros.ini-filtros .ini-multi-op:hover { background: var(--bg-2); }
+.filtros.ini-filtros .ini-multi-op.marcada { background: var(--g-50); color: var(--g-900); font-weight: 700; }
+.filtros.ini-filtros .ini-multi-todas { border-bottom: 1px solid var(--line-soft); border-radius: 6px 6px 0 0; margin-bottom: 2px; }
+.ini-multi-op input { margin: 0; flex: none; accent-color: var(--accent); }
+
 /* ---- Lista ---- */
 .ini-lista-cab {
   display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap;

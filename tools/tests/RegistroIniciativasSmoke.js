@@ -16,6 +16,9 @@
 //      filtros, limpiar, orden por columna, "Mostrar mas".
 //   E) Detalle: abre al elegir, categorias sin duplicar, secciones, Escape,
 //      fondo y cambio de vista lo cierran.
+//   T) Tipo de iniciativa (tipo_iniciativa, no la Agrupacion): opciones del
+//      registro, Todas por omision, uno, varios (O), ninguno = Todas, junto
+//      con los demas filtros, Limpiar; el panel de casillas en el DOM.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -102,7 +105,7 @@ function Ini(folio, o) {
     fecha_retrasada: false, f_analisis: '2026-12-01', f_solucion: null, f_cierre: null,
     n_analisis: 0, n_solucion: 0, n_cierre: 0, antiguedad: 10, po: null, so: null, director: null,
     manager: null, descripcion: 'Desc ' + folio, observaciones: null,
-    activa: true, seguimiento: true, sin_categoria: false, categorias: []
+    activa: true, seguimiento: true, sin_categoria: false, tipo_iniciativa: null, categorias: []
   };
   Object.keys(o || {}).forEach(function (k) { i[k] = o[k]; });
   return i;
@@ -117,21 +120,21 @@ var DATOS = {
   fecha_gen: '01/10/2026',
   iniciativas: [
     // Dos categorias de distinto PO; retrasada.
-    Ini('PRB 2026-000001', { estado: 'En Solución', tickets_reduce: 150, vol_reduce_folio: 150, riesgo_folio: 150,
+    Ini('PRB 2026-000001', { tipo_iniciativa: 'Problema', estado: 'En Solución', tickets_reduce: 150, vol_reduce_folio: 150, riesgo_folio: 150,
       retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true, f_solucion: '2026-09-01', n_solucion: 2,
       po: 'PO 1', so: 'SO x', director: 'Dir A', manager: 'Mgr 1',
       categorias: [Cat('/A/Cat 1/Hoja', 100, 0.5, 'Dir A', 'PO 1', 'SO x'),
                    Cat('/A/Cat 3', 50, 0.25, 'Dir A', 'PO 2', 'SO x')] }),
-    Ini('MAP 2026-000002', { agrup: 'Mejora', tickets_reduce: 40, vol_reduce_folio: 40,
+    Ini('MAP 2026-000002', { tipo_iniciativa: 'Mejora continua', agrup: 'Mejora', tickets_reduce: 40, vol_reduce_folio: 40,
       po: 'PO 1', so: 'SO y', director: 'Dir A',
       categorias: [Cat('/A/Cat 2', 40, 1, 'Dir A', 'PO 1', 'SO y')] }),
     // No activa
-    Ini('HAR 2025-000003', { estado: 'Cerrado', activa: false, seguimiento: false, sem_fecha: 'verde',
+    Ini('HAR 2025-000003', { tipo_iniciativa: 'Problema', estado: 'Cerrado', activa: false, seguimiento: false, sem_fecha: 'verde',
       tickets_reduce: 30, vol_reduce_folio: 30, po: 'PO 3', so: 'SO z', director: 'Dir B',
       categorias: [Cat('/B/Cat 4', 30, 0.3, 'Dir B', 'PO 3', 'SO z')] }),
     // Activa, pero agrupacion fuera de las cuatro: no cuenta en Activas
     // (criterio de Experiencia) y retrasada no cuenta en Retrasadas.
-    Ini('REQ 2026-000004', { agrup: 'ReqOpr', seguimiento: false, retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true,
+    Ini('REQ 2026-000004', { tipo_iniciativa: 'Requerimiento', agrup: 'ReqOpr', seguimiento: false, retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true,
       f_analisis: '2026-01-01', tickets_reduce: 5, vol_reduce_folio: 5, riesgo_folio: 5,
       po: 'PO 3', so: 'SO z', director: 'Dir B',
       categorias: [Cat('/B/Cat 5', 5, 0.1, 'Dir B', 'PO 3', 'SO z')] }),
@@ -390,6 +393,121 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
+// T) Tipo de iniciativa
+// ---------------------------------------------------------------------------
+// PRB 1 y HAR 3: Problema; MAP 2: Mejora continua; REQ 4: Requerimiento;
+// PRB 5: sin tipo (solo pasa con Todas).
+pruebas.push(function () {
+  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var f = new R.FiltroRegistro(reg);
+  function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }); }
+  var TODOS = ['Mejora continua', 'Problema', 'Requerimiento'];
+
+  Check('T1 opciones: los tipo_iniciativa del registro, sin vacios', TODOS, reg.tiposIniciativa());
+  Check('T1 no son las agrupaciones', ['Mejora', 'Problem', 'ReqOpr'], reg.tipos());
+  Check('T2 por omision: Todas (null), todos marcados, sin filtro', [null, TODOS, 5, 0],
+    [f.tiposIni, f.tiposIniciativa(), pasan().length, f.activos()]);
+
+  f.alternarTipoIniciativa('Mejora continua');
+  f.alternarTipoIniciativa('Requerimiento');
+  Check('T3 solo Problema', [['Problema'], ['PRB 2026-000001', 'HAR 2025-000003'], 1],
+    [f.tiposIni, pasan(), f.activos()]);
+  f.alternarTipoIniciativa('Requerimiento');
+  Check('T4 varios = O', ['PRB 2026-000001', 'HAR 2025-000003', 'REQ 2026-000004'], pasan());
+  f.alternarTipoIniciativa('Inventado');
+  Check('T4 tipo fuera de opciones se ignora', ['Problema', 'Requerimiento'], f.tiposIni);
+
+  f.alternarTipoIniciativa('Problema');
+  f.alternarTipoIniciativa('Requerimiento');
+  Check('T5 desmarcar todos = Todas, no lista vacia', [null, 5], [f.tiposIni, pasan().length]);
+
+  f.alternarTipoIniciativa('Problema');
+  f.alternarTipoIniciativa('Problema');
+  Check('T6 volver a marcarlos todos = Todas', null, f.tiposIni);
+  f.alternarTipoIniciativa('Problema');
+  f.todosTiposIniciativa();
+  Check('T7 Todas restablece', [null, TODOS, 5], [f.tiposIni, f.tiposIniciativa(), pasan().length]);
+
+  // Junto con los demas filtros (Y entre filtros).
+  f.alternarTipoIniciativa('Mejora continua');
+  f.alternarTipoIniciativa('Requerimiento');       // solo Problema
+  f.elegirEstado('Cerrado');
+  Check('T8 + Estado', ['HAR 2025-000003'], pasan());
+  f.elegirEstado('');
+  f.elegirTipo('Problem');
+  Check('T8 + Agrupacion (otra columna)', ['PRB 2026-000001', 'HAR 2025-000003'], pasan());
+  f.elegirTipo('Mejora');
+  Check('T8 Agrupacion Mejora + tipo Problema = nada', [], pasan());
+  f.elegirTipo('');
+  f.elegirDirector('Dir A');
+  Check('T8 + Director', ['PRB 2026-000001'], pasan());
+  f.elegir(0, 'PO 2');
+  Check('T8 + PO', ['PRB 2026-000001'], pasan());
+  f.elegirDirector('');
+  f.cascada.limpiar(0);
+  f.elegir(1, 'SO z');
+  Check('T8 + SO', ['HAR 2025-000003'], pasan());
+  f.elegir(2, '/B/Cat 4');
+  Check('T8 + Categoria', ['HAR 2025-000003'], pasan());
+  Check('T8 filtros activos cuentan el tipo', 3, f.activos());
+
+  f.limpiar();
+  Check('T9 limpiar: Todas', [null, 5, 0], [f.tiposIni, pasan().length, f.activos()]);
+});
+
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  function casillas() {
+    var re = /<input type="checkbox" (data-tipo-[a-z]+)="([^"]*)"( checked)?>/g, m, s = [];
+    while ((m = re.exec(p.sel('regTipoIniPanel').innerHTML))) s.push((m[1] === 'data-tipo-todas' ? 'Todas' : m[2]) + (m[3] ? ':si' : ':no'));
+    return s;
+  }
+  function marcar(attr, valor) {
+    var el = Elemento('casilla');
+    el.setAttribute(attr, valor);
+    p.sel('regTipoIniPanel').disparar('change', { target: el });
+  }
+  Check('T10 cargando: boton bloqueado', true, p.sel('regTipoIni').disabled);
+  return esperar().then(function () {
+    Check('T10 listo: Todas por omision', ['— Todas —', false, false],
+      [p.sel('regTipoIni').textContent, p.sel('regTipoIni').disabled, p.sel('regTipoIni').classList.contains('con-valor')]);
+    Check('T10 casillas: Todas y cada tipo, todas marcadas',
+      ['Todas:si', 'Mejora continua:si', 'Problema:si', 'Requerimiento:si'], casillas());
+    Check('T11 panel cerrado al inicio', [true, 'false'], [p.sel('regTipoIniPanel').hidden, p.sel('regTipoIni').getAttribute('aria-expanded')]);
+    p.sel('regTipoIni').disparar('click');
+    Check('T11 el boton abre el panel', [false, 'true'], [p.sel('regTipoIniPanel').hidden, p.sel('regTipoIni').getAttribute('aria-expanded')]);
+
+    marcar('data-tipo-ini', 'Mejora continua');
+    marcar('data-tipo-ini', 'Requerimiento');
+    Check('T12 un tipo filtra la lista', ['PRB 2026-000001', 'HAR 2025-000003'], folios(p));
+    Check('T12 boton y casillas lo muestran', ['Problema', true, ['Todas:no', 'Mejora continua:no', 'Problema:si', 'Requerimiento:no']],
+      [p.sel('regTipoIni').textContent, p.sel('regTipoIni').classList.contains('con-valor'), casillas()]);
+    Check('T12 cuenta y Limpiar', ['1 filtro activo', false], [p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
+    Check('T12 el panel sigue abierto al elegir', false, p.sel('regTipoIniPanel').hidden);
+    marcar('data-tipo-ini', 'Requerimiento');
+    Check('T13 dos tipos (O)', [['PRB 2026-000001', 'REQ 2026-000004', 'HAR 2025-000003'], '2 de 3 tipos'],
+      [folios(p), p.sel('regTipoIni').textContent]);
+
+    elegir(p, 'regPo', 'PO 3');
+    Check('T14 junto con PO', ['REQ 2026-000004', 'HAR 2025-000003'], folios(p));
+    elegir(p, 'regEstadoSel', 'Cerrado');
+    Check('T14 ... y Estado', ['HAR 2025-000003'], folios(p));
+
+    p.sel('regLimpiar').disparar('click');
+    Check('T15 Limpiar filtros: Todas otra vez', ['— Todas —', 5, ['Todas:si', 'Mejora continua:si', 'Problema:si', 'Requerimiento:si']],
+      [p.sel('regTipoIni').textContent, folios(p).length, casillas()]);
+
+    marcar('data-tipo-ini', 'Problema');
+    Check('T16 desmarcar uno desde Todas: los otros dos; sin tipo fuera', ['REQ 2026-000004', 'MAP 2026-000002'], folios(p));
+    marcar('data-tipo-todas', '');
+    Check('T16 la casilla Todas restablece', ['— Todas —', 5, ''], [p.sel('regTipoIni').textContent, folios(p).length, p.sel('regFiltrosCuenta').textContent]);
+
+    p.doc.disparar('keydown', { key: 'Escape' });
+    Check('T17 Escape cierra el panel', [true, 'false'], [p.sel('regTipoIniPanel').hidden, p.sel('regTipoIni').getAttribute('aria-expanded')]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // V) La pagina sigue igual con el registro cargado
 // ---------------------------------------------------------------------------
 var CATALOGO = {
@@ -427,6 +545,24 @@ pruebas.push(function () {
   Check('H3 orden de scripts', true,
     /cascada-organizacional\.js[\s\S]*registro-iniciativas\.js[\s\S]*iniciativas\.js"/.test(html));
   Check('H4 sin botones de editar/descargar', false, /(Editar|Modificar|Descargar)/.test(html));
+  Check('H5 Tipo de iniciativa junto a Agrupacion, sin quitarla', true,
+    /<label for="regTipo">Agrupación<\/label>[\s\S]*<label for="regTipoIni">Tipo de iniciativa<\/label>\s*<button type="button" class="ini-multi-boton" id="regTipoIni"/.test(html));
+
+  // Sin desbordar a lo ancho: el panel cuelga del ancho de su campo, el
+  // boton mide lo que su columna y los textos largos se parten.
+  var css = leer('admin/iniciativas.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  function regla(sel) {
+    var i = css.indexOf(sel + ' {');
+    return i < 0 ? '' : css.slice(i, css.indexOf('}', i)).replace(/\s+/g, ' ');
+  }
+  var panel = regla('.ini-multi-panel'), boton = regla('.ini-multi-boton'), op = regla('.filtros.ini-filtros .ini-multi-op');
+  Check('H6 panel: del ancho de su campo, sin ancho fijo', [true, true, false],
+    [/left: 0; right: 0/.test(panel), /overflow-y: auto/.test(panel), /(^|[ ;{])(min-)?width:/.test(panel)]);
+  Check('H6 boton: 100% de la columna, texto recortado', [true, true],
+    [/width: 100%/.test(boton), /text-overflow: ellipsis/.test(boton)]);
+  Check('H6 opciones largas se parten', true, /overflow-wrap: anywhere/.test(op));
+  Check('H6 la rejilla de 560px sigue igual', true,
+    /\.filtros\.ini-filtros \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(css));
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
