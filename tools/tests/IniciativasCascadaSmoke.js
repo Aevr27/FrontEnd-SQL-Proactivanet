@@ -17,6 +17,8 @@
 //      cascada con eventos change, Director derivado, campos, ayuda del
 //      Titulo, carga, error 500, red, no JSON, 404, catalogo vacio, sin
 //      tipos, omitidas, reintento y carga vieja que llega tarde.
+//   V) Vistas: Iniciativas de inicio, el boton abre Nueva solicitud, y el
+//      borrador sobrevive Iniciativas -> Nueva -> Iniciativas -> Nueva.
 //   P) Nada se persiste: una sola peticion (GET del catalogo) y ningun
 //      envio en el codigo.
 //
@@ -501,6 +503,54 @@ pruebas.push(function () {
     Check('B14 carga vieja ignorada: sin error', true, p.sel('iniError').hidden);
     Check('B14 carga vieja ignorada: Tipo habilitado', true, !p.sel('selTipo').disabled);
   });
+});
+
+// V) Vistas y borrador
+function vistaVisible(p) {
+  return ['panel-iniciativas', 'panel-solicitudes', 'panel-nueva'].filter(function (id) { return !p.sel(id).hidden; });
+}
+function pestanaActiva(p) {
+  return ['tab-iniciativas', 'tab-solicitudes'].filter(function (id) { return p.sel(id).classList.contains('activa'); });
+}
+pruebas.push(function () {
+  var p = Pagina(nunca);
+  var P = p.ventana.IniciativasPagina;
+  Check('V1 inicio: Iniciativas', [['panel-iniciativas'], ['tab-iniciativas']], [vistaVisible(p), pestanaActiva(p)]);
+  return P.cargar(pedirOk).then(function () {
+    p.sel('btnSolicitar').disparar('click');
+    Check('V2 boton abre Nueva solicitud; pestaña Iniciativas sigue marcada',
+      [['panel-nueva'], ['tab-iniciativas']], [vistaVisible(p), pestanaActiva(p)]);
+
+    elegirEn(p, 'selTipo', 'Mejora');
+    elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO y'); elegirEn(p, 'selCategoria', '/A/Cat 2');
+    escribir(p, 'iniCamposComunes', 'titulo', 'Mi titulo');
+    escribir(p, 'iniCamposComunes', 'analisis', 'Mi analisis');
+
+    p.sel('btnVolver').disparar('click');
+    Check('V3 Volver: Iniciativas', ['panel-iniciativas'], vistaVisible(p));
+    p.sel('tab-solicitudes').disparar('click');
+    Check('V4 pestaña Solicitudes', [['panel-solicitudes'], ['tab-solicitudes']], [vistaVisible(p), pestanaActiva(p)]);
+    p.sel('tab-iniciativas').disparar('click');
+
+    // El DOM se "pierde" a proposito: lo que vuelve debe salir del borrador.
+    ['selTipo', 'selPo', 'selSo', 'selCategoria'].forEach(function (id) { p.sel(id).value = ''; });
+    p.sel('iniCamposComunes').innerHTML = '';
+    p.sel('btnSolicitar').disparar('click');
+    Check('V5 borrador: cascada intacta', ['Mejora', 'PO 1', 'SO y', '/A/Cat 2'], valores(p));
+    Check('V5 borrador: Director', 'Dir A', p.sel('outDirector').textContent);
+    var html = p.sel('iniCamposComunes').innerHTML;
+    Check('V5 borrador: Titulo y Analisis', [true, true],
+      [html.indexOf('value="Mi titulo"') >= 0, html.indexOf('>Mi analisis</textarea>') >= 0]);
+    Check('V5 borrador: habilitados como antes', [true, true, true, true], habilitados(p));
+  });
+});
+
+// V6 el HTML ya no tiene pestañas de Modificacion / Descargas / Nueva
+pruebas.push(function () {
+  var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
+  var tabs = (html.match(/role="tab"[^>]*id="([^"]+)"/g) || []).map(function (m) { return m.replace(/.*id="/, '').replace('"', ''); });
+  Check('V6 solo dos pestañas', ['tab-iniciativas', 'tab-solicitudes'], tabs);
+  Check('V6 boton con rotulo explicito', true, /Solicitar una iniciativa/.test(html));
 });
 
 // P) Nada se persiste

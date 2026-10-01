@@ -38,7 +38,54 @@
   font-size: 10.5px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .4px; color: var(--muted-2);
 }
-.ini-pendiente { color: var(--muted); font-size: 13px; }
+
+/* ---- Cabecera de vista (Iniciativas / Solicitudes) ----
+   Titulo y subtitulo a la izquierda; la accion principal arriba a la
+   derecha. En pantalla angosta el boton baja y ocupa el ancho. */
+.ini-vista-cab {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px 20px; flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.ini-vista-titulo { min-width: 0; }
+.ini-vista-titulo h2 { font-size: 18px; font-weight: 700; color: var(--ink); }
+.ini-vista-sub { margin-top: 3px; font-size: 13px; color: var(--muted); }
+
+/* "Solicitar una iniciativa": el .btn del proyecto, mas grande y con mas
+   sombra para que no pase desapercibido. Sin animacion permanente. */
+.btn.ini-cta {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 12px 22px;
+  font-size: 14px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .6px;
+  border-color: var(--g-700);
+  box-shadow: 0 4px 14px -4px rgba(71, 139, 60, .55);
+}
+.btn.ini-cta:hover { box-shadow: 0 6px 18px -4px rgba(71, 139, 60, .7); }
+.btn.ini-cta:focus-visible { outline: 3px solid var(--g-800); outline-offset: 3px; }
+.ini-cta-mas {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(255, 255, 255, .55);
+  font-size: 18px; line-height: 1; font-weight: 800;
+}
+@media (max-width: 560px) {
+  .btn.ini-cta { width: 100%; justify-content: center; white-space: normal; }
+}
+
+/* Estado vacio: la seccion existe pero aun no tiene datos. */
+.ini-vacio {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 28px 18px; text-align: center;
+  border: 1px dashed var(--line); border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  font-size: 13px; color: var(--muted);
+}
+.ini-vacio strong { color: var(--ink-2); font-size: 14px; }
+
+/* Nueva solicitud: "Volver" antes del titulo; el titulo recibe el foco. */
+.ini-panel-cab #iniNuevaTitulo:focus { outline: none; }
+.ini-panel[hidden] { display: none; }
 
 /* ---- Estados de carga / error ---- */
 .ini-estado { min-height: 18px; font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }

@@ -1,8 +1,9 @@
 /* =========================================================================
    admin/iniciativas.js
 
-   Pagina oculta de administracion de iniciativas. Segundo hito: pestañas de
-   navegacion y "Nueva solicitud" con
+   Pagina oculta de administracion de iniciativas. Tercer hito: vistas
+   Iniciativas (inicio) y Solicitudes con pestaña; "Nueva solicitud" es una
+   accion de Iniciativas, sin pestaña, con
 
        Tipo de iniciativa -> Product Owner -> Service Owner -> Categoria
                                                               -> Director (derivado)
@@ -38,7 +39,15 @@
                            modo 'creacion' (admin/cascada-organizacional.js,
                            compartida con cualquier pestaña que filtre)
      SolicitudNueva        el formulario sin DOM: tipo, cascada, valores
-     PaginaIniciativas     el DOM: pestañas, carga, estados, campos, ayuda
+     PaginaIniciativas     el DOM: vistas, carga, estados, campos, ayuda
+
+   BORRADOR
+   --------
+   SolicitudNueva ES el borrador: guarda tipo, cascada y textos. Cambiar de
+   vista solo oculta paneles; al volver a Nueva solicitud se repinta desde
+   ese objeto. El catalogo se carga una vez al abrir la pagina, asi que ir y
+   volver no lo recrea. Vive en memoria: recargar la pagina lo pierde. No se
+   guarda en el servidor.
    Las cuatro se prueban en node: tools/tests/IniciativasCascadaSmoke.js.
    ========================================================================= */
 window.Iniciativas = (function () {
@@ -182,11 +191,25 @@ window.Iniciativas = (function () {
   // ---------------------------------------------------------------------
   // PaginaIniciativas
   // ---------------------------------------------------------------------
+  // Vistas: cada una con su panel y la pestaña que se marca al mostrarla.
+  // Nueva solicitud no tiene pestaña propia: cuelga de Iniciativas.
+  var VISTAS = {
+    iniciativas: { panel: 'panel-iniciativas', pestana: 'tab-iniciativas' },
+    solicitudes: { panel: 'panel-solicitudes', pestana: 'tab-solicitudes' },
+    nueva:       { panel: 'panel-nueva',       pestana: 'tab-iniciativas' }
+  };
+  var PESTANAS = [
+    { id: 'tab-iniciativas', vista: 'iniciativas' },
+    { id: 'tab-solicitudes', vista: 'solicitudes' }
+  ];
+
   var SELECTS = [
     { sel: 'selPo',        mot: 'motPo' },
     { sel: 'selSo',        mot: 'motSo' },
     { sel: 'selCategoria', mot: 'motCategoria' }
   ];
+
+  function enfocar(el) { if (el && typeof el.focus === 'function') el.focus(); }
 
   class PaginaIniciativas {
     constructor(doc) {
@@ -194,6 +217,7 @@ window.Iniciativas = (function () {
       this.solicitud = null;
       this.cargaId = 0;      // descarta la respuesta de una carga ya superada
       this.globo = null;
+      this.vista = 'iniciativas';
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -202,6 +226,8 @@ window.Iniciativas = (function () {
     iniciar() {
       var self = this;
       this.cablearPestanas();
+      this.cablearAcciones();
+      this.mostrarVista(this.vista);
       this.cablearSelects();
       this.cablearCampos();
       this.globo = new GloboAyuda(this.$('panel-nueva'), '.ayuda-destino', function (d) {
@@ -211,30 +237,57 @@ window.Iniciativas = (function () {
       return this.cargar();
     }
 
-    // ---- pestañas: solo navegacion ----
-    activarPestana(tab) {
+    // ---- vistas: solo navegacion; no tocan el borrador ----
+    mostrarVista(nombre) {
       var self = this;
-      Array.prototype.forEach.call(this.doc.querySelectorAll('.ini-tab'), function (t) {
-        var activa = t === tab;
+      if (!VISTAS[nombre]) return;
+      this.vista = nombre;
+      Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = k !== nombre; });
+      PESTANAS.forEach(function (p) {
+        var t = self.$(p.id);
+        var activa = VISTAS[nombre].pestana === p.id;
         t.classList.toggle('activa', activa);
         t.setAttribute('aria-selected', activa ? 'true' : 'false');
         t.tabIndex = activa ? 0 : -1;
-        self.$(t.getAttribute('aria-controls')).hidden = !activa;
       });
+      if (nombre === 'nueva') this.repintarBorrador();
+      else if (this.globo) this.globo.ocultar();
+    }
+
+    // Nueva solicitud se pinta desde SolicitudNueva, no desde lo que haya
+    // quedado en el DOM.
+    repintarBorrador() {
+      if (!this.solicitud) return;
+      this.pintarCamposComunes();
+      this.pintarCamposTipo();
+      this.pintar();
     }
 
     cablearPestanas() {
       var self = this;
-      var tabs = Array.prototype.slice.call(this.doc.querySelectorAll('.ini-tab'));
-      tabs.forEach(function (t, i) {
-        t.addEventListener('click', function () { self.activarPestana(t); });
+      PESTANAS.forEach(function (p, i) {
+        var t = self.$(p.id);
+        t.addEventListener('click', function () { self.mostrarVista(p.vista); });
         t.addEventListener('keydown', function (e) {
           var paso = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
           if (!paso) return;
-          var sig = tabs[(i + paso + tabs.length) % tabs.length];
-          self.activarPestana(sig);
-          sig.focus();
+          var sig = PESTANAS[(i + paso + PESTANAS.length) % PESTANAS.length];
+          self.mostrarVista(sig.vista);
+          enfocar(self.$(sig.id));
         });
+      });
+    }
+
+    // "Solicitar una iniciativa" abre Nueva solicitud; "Volver" regresa.
+    cablearAcciones() {
+      var self = this;
+      this.$('btnSolicitar').addEventListener('click', function () {
+        self.mostrarVista('nueva');
+        enfocar(self.$('iniNuevaTitulo'));
+      });
+      this.$('btnVolver').addEventListener('click', function () {
+        self.mostrarVista('iniciativas');
+        enfocar(self.$('btnSolicitar'));
       });
     }
 
@@ -421,6 +474,7 @@ window.Iniciativas = (function () {
     CatalogoIniciativas: CatalogoIniciativas,
     CascadaOrganizacional: CascadaOrganizacional,
     SolicitudNueva: SolicitudNueva,
+    VISTAS: VISTAS,
     PaginaIniciativas: PaginaIniciativas
   };
 })();

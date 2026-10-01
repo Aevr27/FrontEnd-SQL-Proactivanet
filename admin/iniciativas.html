@@ -12,7 +12,14 @@
   No esta enlazada desde dashboard.html ni desde admin/admin.html: se llega
   escribiendo la URL /admin/iniciativas.html. Sin autenticacion todavia.
 
-  ESTADO ACTUAL (segundo hito):
+  ESTADO ACTUAL (tercer hito):
+    - Dos vistas principales con pestaña: Iniciativas (la de inicio) y
+      Solicitudes. "Nueva solicitud" NO es pestaña: es una accion de
+      Iniciativas (boton "Solicitar una iniciativa") y tiene "Volver".
+      Modificacion / Descargas / Truncas seran acciones dentro de esas vistas,
+      no pestañas.
+    - El borrador de Nueva solicitud vive en SolicitudNueva (memoria de la
+      pagina): sobrevive al ir y volver entre vistas; se pierde al recargar.
     - Solo "Nueva solicitud" funciona:
         Tipo de iniciativa -> Product Owner -> Service Owner -> Categoria,
         y el Director se muestra DERIVADO de la categoria (no se elige).
@@ -22,8 +29,8 @@
       (solo lectura). La cascada es admin/cascada-organizacional.js, la misma
       (en modo 'filtro') que deben usar las pestañas de listas cuando existan.
     - No se envia ni se guarda nada: no hay boton de enviar ni <form>.
-    - Solicitudes / Iniciativas / Modificacion / Descargas son pestañas
-      vacias, solo de navegacion.
+    - Iniciativas y Solicitudes todavia no muestran datos: estado vacio
+      "en preparacion", sin datos inventados.
 
   Reusa dashboard.css para variables, tipografia y .wrap / .card / .btn,
   como admin.html; lo propio vive en iniciativas.css con prefijo .ini-. La
@@ -41,23 +48,54 @@
 
   <header class="top">
     <div>
-      <h1>Iniciativas</h1>
+      <h1>Administración de iniciativas</h1>
       <div class="sub">Administracion de iniciativas · entorno de trabajo</div>
     </div>
   </header>
 
   <nav class="ini-tabs" role="tablist" aria-label="Secciones">
-    <button type="button" class="ini-tab activa" role="tab" id="tab-nueva" aria-controls="panel-nueva" aria-selected="true">Nueva solicitud</button>
+    <button type="button" class="ini-tab activa" role="tab" id="tab-iniciativas" aria-controls="panel-iniciativas" aria-selected="true">Iniciativas</button>
     <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1">Solicitudes</button>
-    <button type="button" class="ini-tab" role="tab" id="tab-iniciativas" aria-controls="panel-iniciativas" aria-selected="false" tabindex="-1">Iniciativas</button>
-    <button type="button" class="ini-tab" role="tab" id="tab-modificacion" aria-controls="panel-modificacion" aria-selected="false" tabindex="-1">Modificación</button>
-    <button type="button" class="ini-tab" role="tab" id="tab-descargas" aria-controls="panel-descargas" aria-selected="false" tabindex="-1">Descargas</button>
   </nav>
 
-  <section class="ini-panel card" role="tabpanel" id="panel-nueva" aria-labelledby="tab-nueva">
+  <!-- Vista de inicio. Sera el registro de iniciativas existentes; hoy solo
+       el armazon y la accion principal. -->
+  <section class="ini-panel card" role="tabpanel" id="panel-iniciativas" aria-labelledby="tab-iniciativas">
+    <div class="ini-vista-cab">
+      <div class="ini-vista-titulo">
+        <h2>Iniciativas</h2>
+        <p class="ini-vista-sub">Consulta y administra las iniciativas existentes.</p>
+      </div>
+      <button type="button" class="btn ini-cta" id="btnSolicitar">
+        <span class="ini-cta-mas" aria-hidden="true">+</span>
+        <span>Solicitar una iniciativa</span>
+      </button>
+    </div>
+    <div class="ini-vacio">
+      <strong>Registro de iniciativas en preparación</strong>
+      <span>Aquí estarán los filtros, los indicadores y la lista de iniciativas existentes.</span>
+    </div>
+  </section>
+
+  <section class="ini-panel card" role="tabpanel" id="panel-solicitudes" aria-labelledby="tab-solicitudes" hidden>
+    <div class="ini-vista-cab">
+      <div class="ini-vista-titulo">
+        <h2>Solicitudes</h2>
+        <p class="ini-vista-sub">Solicitudes de iniciativa y su revisión.</p>
+      </div>
+    </div>
+    <div class="ini-vacio">
+      <strong>Lista de solicitudes en preparación</strong>
+      <span>Aquí estarán las solicitudes enviadas y su estado.</span>
+    </div>
+  </section>
+
+  <!-- Accion de Iniciativas, no pestaña: la abre #btnSolicitar. -->
+  <section class="ini-panel card" id="panel-nueva" aria-labelledby="iniNuevaTitulo" hidden>
     <div class="ini-panel-cab">
-      <h2>Nueva solicitud</h2>
-      <span class="ini-hint">Vista previa · no se envía ni se guarda</span>
+      <button type="button" class="btn linea chico" id="btnVolver">← Volver a Iniciativas</button>
+      <h2 id="iniNuevaTitulo" tabindex="-1">Nueva solicitud</h2>
+      <span class="ini-hint">Vista previa · no se envía ni se guarda · el borrador se conserva al cambiar de vista</span>
     </div>
 
     <p class="ini-estado" id="iniEstado" role="status" aria-live="polite"></p>
@@ -117,19 +155,6 @@
       <div class="ini-campos" id="iniCamposComunes"></div>
       <div class="ini-campos" id="iniCamposTipo"></div>
     </div>
-  </section>
-
-  <section class="ini-panel card" role="tabpanel" id="panel-solicitudes" aria-labelledby="tab-solicitudes" hidden>
-    <p class="ini-pendiente">Solicitudes: pendiente.</p>
-  </section>
-  <section class="ini-panel card" role="tabpanel" id="panel-iniciativas" aria-labelledby="tab-iniciativas" hidden>
-    <p class="ini-pendiente">Iniciativas: pendiente.</p>
-  </section>
-  <section class="ini-panel card" role="tabpanel" id="panel-modificacion" aria-labelledby="tab-modificacion" hidden>
-    <p class="ini-pendiente">Modificación: pendiente.</p>
-  </section>
-  <section class="ini-panel card" role="tabpanel" id="panel-descargas" aria-labelledby="tab-descargas" hidden>
-    <p class="ini-pendiente">Descargas: pendiente.</p>
   </section>
 
 </div>
