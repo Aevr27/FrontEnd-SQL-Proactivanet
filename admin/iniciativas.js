@@ -40,6 +40,8 @@
                            compartida con cualquier pestaña que filtre)
      SolicitudNueva        el formulario sin DOM: tipo, cascada, valores
      PaginaIniciativas     el DOM: vistas, carga, estados, campos, ayuda
+     MenuLateral           plegar/desplegar la barra lateral (copia de la
+                           del tablero; sus entradas son enlaces de vuelta)
 
    BORRADOR
    --------
@@ -209,6 +211,40 @@ window.Iniciativas = (function () {
     { sel: 'selCategoria', mot: 'motCategoria' }
   ];
 
+  // ---------------------------------------------------------------------
+  // MenuLateral
+  // ---------------------------------------------------------------------
+  // Mismo comportamiento que plegarLateral() de dashboard.js: la clase
+  // .lateral-cerrada va en <html> (el hueco del <body> depende de ella) y
+  // el boton dice el estado real. Aqui no hay graficas que remedir ni
+  // modulos que montar: las entradas son enlaces al tablero.
+  class MenuLateral {
+    constructor(doc) {
+      this.raiz = doc.documentElement;
+      this.boton = doc.getElementById('lateral-plegar');
+    }
+
+    plegar(cerrar) {
+      if (!this.raiz || !this.raiz.classList) return;
+      this.raiz.classList.toggle('lateral-cerrada', cerrar);
+      if (!this.boton) return;
+      var texto = cerrar ? 'Desplegar el menu' : 'Contraer el menu';
+      this.boton.setAttribute('aria-expanded', String(!cerrar));
+      this.boton.setAttribute('aria-label', texto);
+      this.boton.title = texto;
+    }
+
+    conectar() {
+      var self = this;
+      if (this.boton) {
+        this.boton.addEventListener('click', function () {
+          self.plegar(!self.raiz.classList.contains('lateral-cerrada'));
+        });
+      }
+      return this;
+    }
+  }
+
   function enfocar(el) { if (el && typeof el.focus === 'function') el.focus(); }
 
   class PaginaIniciativas {
@@ -218,6 +254,7 @@ window.Iniciativas = (function () {
       this.cargaId = 0;      // descarta la respuesta de una carga ya superada
       this.globo = null;
       this.vista = 'iniciativas';
+      this.menu = null;
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -225,6 +262,7 @@ window.Iniciativas = (function () {
     // ---- arranque ----
     iniciar() {
       var self = this;
+      this.menu = new MenuLateral(this.doc).conectar();
       this.cablearPestanas();
       this.cablearAcciones();
       this.mostrarVista(this.vista);
@@ -475,6 +513,7 @@ window.Iniciativas = (function () {
     CascadaOrganizacional: CascadaOrganizacional,
     SolicitudNueva: SolicitudNueva,
     VISTAS: VISTAS,
+    MenuLateral: MenuLateral,
     PaginaIniciativas: PaginaIniciativas
   };
 })();

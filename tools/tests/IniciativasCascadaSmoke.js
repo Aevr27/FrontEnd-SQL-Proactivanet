@@ -553,6 +553,30 @@ pruebas.push(function () {
   Check('V6 boton con rotulo explicito', true, /Solicitar una iniciativa/.test(html));
 });
 
+// M) Barra lateral: solo enlaces de vuelta al tablero, sin Administracion
+pruebas.push(function () {
+  var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
+  var hrefs = (html.match(/class="mnav[^"]*" href="([^"]+)"/g) || []).map(function (m) { return m.replace(/.*href="/, '').replace('"', ''); });
+  Check('M1 entradas = modulos del tablero', ['../dashboard.html#sla', '../dashboard.html#backlog', '../dashboard.html#experiencia',
+    '../dashboard.html#qa', '../dashboard.html#qare', '../dashboard.html#call', '../dashboard.html#tablero'], hrefs);
+  Check('M2 sin entrada activa ni hacia admin', [false, false, false],
+    [/mnav active/.test(html), /aria-current/.test(html), /href="[^"]*admin/i.test(html)]);
+  Check('M3 el tablero no enlaza a la pagina', false, /iniciativas\.html/.test(leer('dashboard.html')));
+
+  // Documento propio: el de Pagina() ya tiene el boton cableado por iniciar().
+  var doc = Documento();
+  var raiz = doc.documentElement = Elemento('html');
+  raiz.classList.add('lateral-cerrada');
+  new I.MenuLateral(doc).conectar();
+  var boton = doc.getElementById('lateral-plegar');
+  boton.disparar('click');
+  Check('M4 desplegar', [false, 'true', 'Contraer el menu'],
+    [raiz.classList.contains('lateral-cerrada'), boton.getAttribute('aria-expanded'), boton.title]);
+  boton.disparar('click');
+  Check('M4 plegar', [true, 'false', 'Desplegar el menu'],
+    [raiz.classList.contains('lateral-cerrada'), boton.getAttribute('aria-expanded'), boton.title]);
+});
+
 // P) Nada se persiste
 pruebas.push(function () {
   var llamadas = [];

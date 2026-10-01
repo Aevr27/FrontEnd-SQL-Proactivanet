@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" class="lateral-cerrada">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -45,6 +45,96 @@
 </head>
 <body class="ini-body">
 <div class="wrap">
+
+  <!-- Barra lateral del tablero, COPIA del marcado de dashboard.html (la
+       pagina es estatica y no hay plantillas). Diferencias a proposito:
+       - Cada entrada es un enlace a ../dashboard.html#<modulo> (el tablero
+         abre el modulo del hash al cargar), no un boton con data-tab.
+       - Ninguna entrada esta activa y Administracion NO aparece: esta pagina
+         sigue sin poder alcanzarse desde el menu; la barra solo sirve para
+         volver a los modulos.
+       Plegar/desplegar: MenuLateral en admin/iniciativas.js. Si cambia la
+       lista de modulos del tablero, actualizar tambien esta copia. -->
+  <aside class="lateral" id="lateral">
+    <div class="lateral-cabecera">
+      <span class="lateral-marca">
+        <span class="lateral-sigla" aria-hidden="true">P</span>
+        <span class="lateral-nombre">Proactivanet</span>
+      </span>
+      <!-- Un solo control para plegar y desplegar. aria-expanded dice el
+           estado real; el title/aria-label cambian con el, en dashboard.js. -->
+      <button class="lateral-plegar" id="lateral-plegar" type="button"
+              aria-controls="lateral" aria-expanded="false"
+              aria-label="Desplegar el menu" title="Desplegar el menu">
+        <svg class="lateral-plegar-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M14.5 6.5 9 12l5.5 5.5"/>
+        </svg>
+      </button>
+    </div>
+
+    <nav aria-label="Volver al tablero">
+      <ul class="lateral-lista">
+        <li>
+          <a class="mnav" href="../dashboard.html#sla" title="SLA y productividad">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 19h16M7 19V10M12 19V5M17 19v-6"/>
+            </svg>
+            <span class="mnav-txt">SLA y productividad</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#backlog" title="Backlog">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>
+            </svg>
+            <span class="mnav-txt">Backlog</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#experiencia" title="Experiencia">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/>
+            </svg>
+            <span class="mnav-txt">Experiencia</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#qa" title="QA">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M9.5 3h5M10 3v6.2L5.3 17.6A2 2 0 0 0 7 20.6h10a2 2 0 0 0 1.7-3L14 9.2V3"/>
+            </svg>
+            <span class="mnav-txt">QA</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#qare" title="QARE">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M5 4.5h14v15H5z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>
+            </svg>
+            <span class="mnav-txt">QARE</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#call" title="Call Center">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4.5 5.5 8 4l2.2 4-2 1.7a12 12 0 0 0 6.1 6.1l1.7-2 4 2.2-1.5 3.5a2 2 0 0 1-2.1 1.1C10.4 19.7 4.3 13.6 3.4 7.6a2 2 0 0 1 1.1-2.1z"/>
+            </svg>
+            <span class="mnav-txt">Call Center</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#tablero" title="Tablero">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3.5 4.5h17v11h-17z"/><path d="M8 20h8M12 15.5V20"/>
+            </svg>
+            <span class="mnav-txt">Tablero</span>
+          </a>
+        </li>
+      </ul>
+    </nav>
+  </aside>
+
+  <div class="lateral-contenido">
 
   <header class="top">
     <div>
@@ -157,6 +247,7 @@
     </div>
   </section>
 
+  </div><!-- /.lateral-contenido -->
 </div>
 
 <script src="../assets/js/escape.js"></script>
