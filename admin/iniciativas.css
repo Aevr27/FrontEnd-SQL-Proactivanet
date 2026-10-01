@@ -8,7 +8,11 @@
    ayuda (Titulo) son de assets/css/globo-ayuda.css, no de aqui.
    ========================================================================= */
 
-.ini-body { padding-bottom: 24px; }
+/* dashboard.css reserva a la izquierda del <body> el hueco de la barra
+   lateral del tablero; esta pagina no tiene barra, asi que se devuelve el
+   mismo relleno que la derecha y .wrap queda centrada en la ventana. */
+.ini-body { padding-left: 18px; padding-bottom: 24px; }
+@media (max-width: 700px) { .ini-body { padding-left: 12px; } }
 
 /* ---- Pestañas ---- */
 .ini-tabs {
