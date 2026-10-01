@@ -75,9 +75,13 @@ window.Iniciativas = (function () {
   // ya tiene en dbo.Problem: Titulo y Descripcion (el analisis de lo que se
   // pide). Cambiar de tipo NO los borra: no dependen del tipo.
   var CAMPOS_COMUNES = [
+    // Textos de ayuda: los encabezados de la plantilla con que ya se
+    // capturan Titulo y Descripcion de un Problem (se ven dentro de
+    // dbo.Problem.Descripcion en Experiencia). No se redactan aqui.
     { clave: 'titulo', etiqueta: 'Título', control: 'texto',
-      ayuda: { texto: 'Escribe un título breve y claro que identifique qué se busca crear, mejorar o resolver.' } },
-    { clave: 'analisis', etiqueta: 'Análisis de la solicitud', control: 'multilinea' }
+      ayuda: { texto: 'Nombre descriptivo del problema que permita identificar la afectación y su causa principal.' } },
+    { clave: 'analisis', etiqueta: 'Análisis de la solicitud', control: 'multilinea',
+      ayuda: { texto: 'Detalle del síntoma o comportamiento observado que origina el problema.' } }
   ];
 
   // Campos propios de cada Tipo de iniciativa, por nombre exacto del tipo:
@@ -367,6 +371,7 @@ window.Iniciativas = (function () {
       this.$('outDirector').textContent = est.director.valor || '—';
       this.$('motDirector').textContent = est.director.motivo;
       this.$('iniBloqueCampos').hidden = !est.camposVisibles;
+      this.$('iniCamposPendiente').hidden = est.camposVisibles;
     }
 
     // Todos bloqueados con el mismo motivo (cargando / error / vacio).
@@ -381,6 +386,7 @@ window.Iniciativas = (function () {
       this.$('outDirector').textContent = '—';
       this.$('motDirector').textContent = '';
       this.$('iniBloqueCampos').hidden = true;
+      this.$('iniCamposPendiente').hidden = false;
     }
 
     // ---- campos de captura ----

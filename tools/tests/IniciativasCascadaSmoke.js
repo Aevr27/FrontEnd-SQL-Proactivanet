@@ -333,7 +333,8 @@ pruebas.push(function () {
     Check('B1 motivo PO', 'Elige primero un Tipo de iniciativa.', p.sel('motPo').textContent);
     Check('B1 Director vacio', ['—', 'Se completa al elegir la Categoría.'],
       [p.sel('outDirector').textContent, p.sel('motDirector').textContent]);
-    Check('B1 campos ocultos sin tipo', true, p.sel('iniBloqueCampos').hidden);
+    Check('B1 campos ocultos sin tipo, aviso visible', [true, false],
+      [p.sel('iniBloqueCampos').hidden, p.sel('iniCamposPendiente').hidden]);
     Check('B1 sin error ni omitidas', [true, true], [p.sel('iniError').hidden, p.sel('iniOmitidas').hidden]);
 
     elegirEn(p, 'selTipo', 'Inventado');
@@ -341,7 +342,8 @@ pruebas.push(function () {
 
     elegirEn(p, 'selTipo', 'Mejora');
     Check('B3 tipo habilita PO', [true, true, false, false], habilitados(p));
-    Check('B3 tipo muestra campos', false, p.sel('iniBloqueCampos').hidden);
+    Check('B3 tipo muestra campos y quita el aviso', [false, true],
+      [p.sel('iniBloqueCampos').hidden, p.sel('iniCamposPendiente').hidden]);
 
     elegirEn(p, 'selPo', 'PO 1');
     elegirEn(p, 'selSo', 'SO y');
@@ -386,7 +388,7 @@ pruebas.push(function () {
   return P.cargar(pedirOk).then(function () {
     var comunes = p.sel('iniCamposComunes').innerHTML;
     Check('B11 Titulo: input de texto', true, comunes.indexOf('<input type="text" id="campo-titulo" data-campo="titulo"') >= 0);
-    Check('B12 Analisis: textarea', true, comunes.indexOf('<textarea id="campo-analisis" data-campo="analisis" rows="6">') >= 0);
+    Check('B12 Analisis: textarea', true, comunes.indexOf('<textarea id="campo-analisis" data-campo="analisis" rows="6" aria-describedby="campo-analisis-ayuda">') >= 0);
     Check('B13 rotulo Titulo es el destino de la ayuda (clase de GloboAyuda)', true,
       comunes.indexOf('<label for="campo-titulo" class="ini-rotulo ayuda-destino" data-ayuda="titulo">Título</label>') >= 0);
     Check('B13 sin "?" ni boton de ayuda', [false, false],
@@ -396,7 +398,13 @@ pruebas.push(function () {
       comunes.indexOf('aria-describedby="campo-titulo-ayuda"') >= 0 &&
       comunes.indexOf('<span class="ini-sr" id="campo-titulo-ayuda">') >= 0);
     Check('B13 el globo recibe el texto del campo', I2.CAMPOS_COMUNES[0].ayuda, P.ayudaDe('titulo'));
-    Check('B13 Analisis sin ayuda todavia', null, P.ayudaDe('analisis'));
+    Check('B13 textos de ayuda de la plantilla de Problem',
+      ['Nombre descriptivo del problema que permita identificar la afectación y su causa principal.',
+       'Detalle del síntoma o comportamiento observado que origina el problema.'],
+      [P.ayudaDe('titulo').texto, P.ayudaDe('analisis').texto]);
+    Check('B13 rotulo Analisis tambien es destino de la ayuda', true,
+      comunes.indexOf('class="ini-rotulo ayuda-destino" data-ayuda="analisis"') >= 0 &&
+      comunes.indexOf('aria-describedby="campo-analisis-ayuda"') >= 0);
     Check('B13 globo conectado al panel', true, !!P.globo && P.globo.raiz === p.sel('panel-nueva'));
 
     Check('B10 sin tipo: sin campos propios', true, p.sel('iniCamposTipo').hidden);

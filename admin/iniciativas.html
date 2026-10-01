@@ -194,56 +194,68 @@
       <button type="button" class="btn" id="iniReintentar">Reintentar</button>
     </div>
 
-    <!-- 1. Clasificacion: lo elige quien solicita. El Director no se elige:
-         sale de la categoria. -->
-    <div class="ini-bloque">
-      <div class="ini-bloque-cab">
-        <h3>Clasificación</h3>
-        <span class="ini-origen seleccion">Selección</span>
-      </div>
+    <!-- Dos columnas, las dos a la vista (no es asistente por pasos):
+         izquierda, lo que clasifica la iniciativa; derecha, su descripcion.
+         Bajo 900px se apilan. -->
+    <div class="ini-form">
 
-      <div class="ini-campo ini-campo-tipo">
-        <label for="selTipo">Tipo de iniciativa</label>
-        <select id="selTipo" aria-describedby="motTipo" disabled></select>
-        <small class="ini-motivo" id="motTipo"></small>
-      </div>
+      <!-- 01 Clasificacion: lo elige quien solicita. El Director no se
+           elige: sale de la categoria. -->
+      <section class="ini-bloque ini-col-clasif" aria-labelledby="iniCabClasif">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">01</span>
+          <h3 id="iniCabClasif">Clasificación</h3>
+          <span class="ini-origen seleccion">Selección</span>
+        </div>
 
-      <div class="ini-cascada" id="iniCascada">
-        <div class="ini-campo">
-          <label for="selPo">Product Owner</label>
-          <select id="selPo" aria-describedby="motPo" disabled></select>
-          <small class="ini-motivo" id="motPo"></small>
+        <div class="ini-campo ini-campo-tipo">
+          <label for="selTipo">Tipo de iniciativa</label>
+          <select id="selTipo" aria-describedby="motTipo" disabled></select>
+          <small class="ini-motivo" id="motTipo"></small>
         </div>
-        <div class="ini-campo">
-          <label for="selSo">Service Owner</label>
-          <select id="selSo" aria-describedby="motSo" disabled></select>
-          <small class="ini-motivo" id="motSo"></small>
-        </div>
-        <div class="ini-campo">
-          <label for="selCategoria">Categoría</label>
-          <select id="selCategoria" aria-describedby="motCategoria" disabled></select>
-          <small class="ini-motivo" id="motCategoria"></small>
-        </div>
-        <div class="ini-campo ini-derivado">
-          <span class="ini-rotulo-derivado" id="rotDirector">Director <span class="ini-origen derivado">Derivado</span></span>
-          <output id="outDirector" aria-labelledby="rotDirector" aria-describedby="motDirector">—</output>
-          <small class="ini-motivo" id="motDirector"></small>
-        </div>
-      </div>
 
-      <p class="ini-nota" id="iniOmitidas" hidden></p>
-    </div>
+        <div class="ini-cascada" id="iniCascada">
+          <div class="ini-campo">
+            <label for="selPo">Product Owner</label>
+            <select id="selPo" aria-describedby="motPo" disabled></select>
+            <small class="ini-motivo" id="motPo"></small>
+          </div>
+          <div class="ini-campo">
+            <label for="selSo">Service Owner</label>
+            <select id="selSo" aria-describedby="motSo" disabled></select>
+            <small class="ini-motivo" id="motSo"></small>
+          </div>
+          <div class="ini-campo">
+            <label for="selCategoria">Categoría</label>
+            <select id="selCategoria" aria-describedby="motCategoria" disabled></select>
+            <small class="ini-motivo" id="motCategoria"></small>
+          </div>
+          <div class="ini-campo ini-derivado">
+            <span class="ini-rotulo-derivado" id="rotDirector">Director <span class="ini-origen derivado">Derivado</span></span>
+            <output id="outDirector" aria-labelledby="rotDirector" aria-describedby="motDirector">—</output>
+            <small class="ini-motivo" id="motDirector"></small>
+          </div>
+        </div>
 
-    <!-- 2. Descripcion: lo escribe quien solicita. Aparece al elegir el
-         tipo; los campos salen de CAMPOS_COMUNES y DEFINICIONES_TIPO
-         (admin/iniciativas.js). -->
-    <div class="ini-bloque" id="iniBloqueCampos" hidden>
-      <div class="ini-bloque-cab">
-        <h3>Descripción</h3>
-        <span class="ini-origen captura">Captura</span>
-      </div>
-      <div class="ini-campos" id="iniCamposComunes"></div>
-      <div class="ini-campos" id="iniCamposTipo"></div>
+        <p class="ini-nota" id="iniOmitidas" hidden></p>
+      </section>
+
+      <!-- 02 Descripcion: lo escribe quien solicita. La seccion siempre se
+           ve; los campos aparecen al elegir el tipo y salen de
+           CAMPOS_COMUNES y DEFINICIONES_TIPO (admin/iniciativas.js). -->
+      <section class="ini-bloque ini-col-desc" aria-labelledby="iniCabDesc">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">02</span>
+          <h3 id="iniCabDesc">Descripción</h3>
+          <span class="ini-origen captura">Captura</span>
+        </div>
+        <p class="ini-nota ini-desc-pendiente" id="iniCamposPendiente">Elige un Tipo de iniciativa para escribir la descripción.</p>
+        <div id="iniBloqueCampos" hidden>
+          <div class="ini-campos" id="iniCamposComunes"></div>
+          <div class="ini-campos" id="iniCamposTipo"></div>
+        </div>
+      </section>
+
     </div>
   </section>
 

@@ -105,19 +105,40 @@
 .ini-error[hidden] { display: none; }
 .ini-nota { margin-top: 12px; font-size: 12px; color: var(--muted); }
 
-/* ---- Cascada ---- */
-.ini-cascada {
+/* ---- Formulario en dos columnas ----
+   Izquierda, Clasificacion: angosta, fondo apenas tintado, los selects
+   uno debajo de otro siguiendo la cascada. Derecha, Descripcion: lo
+   principal, sin fondo, con todo el ancho que sobra. Bajo 900px se
+   apilan; entre 561 y 900 la cascada usa dos columnas para no estirar
+   cada select a todo el ancho. */
+.ini-form {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
 }
-@media (max-width: 1000px) { .ini-cascada { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px)  { .ini-cascada { grid-template-columns: 1fr; } }
+.ini-form > .ini-bloque {
+  min-width: 0;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+}
+.ini-col-clasif { background: var(--bg-2); }
+@media (max-width: 900px) {
+  .ini-form { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+}
+
+/* ---- Cascada ---- */
+.ini-cascada { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 561px) and (max-width: 900px) {
+  .ini-cascada { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 .ini-campo { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+/* Rotulos en el verde de texto del tablero, sin fondo. */
 .ini-campo label {
   font-size: 11px; font-weight: 800; text-transform: uppercase;
-  letter-spacing: .4px; color: var(--ctrl-label);
+  letter-spacing: .4px; color: var(--accent-ink);
 }
 .ini-campo select,
 .ini-campo input[type="text"],
@@ -137,6 +158,8 @@
 .ini-campo input[type="text"]:focus-visible,
 .ini-campo textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ini-campo textarea { resize: vertical; min-height: 110px; line-height: 1.45; }
+/* El Analisis es el cuerpo de la solicitud: alto comodo para escribir. */
+.ini-col-desc .ini-campo textarea { min-height: 260px; }
 .ini-campo select:disabled {
   color: var(--muted-2);
   background: var(--bg-2);
@@ -150,13 +173,27 @@
      .seleccion  lo elige quien solicita (selects)
      .captura    lo escribe quien solicita
      .derivado   lo pone el sistema; se ve pero no se edita */
-.ini-bloque + .ini-bloque { padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--line-soft); }
 .ini-bloque[hidden] { display: none; }
-.ini-bloque-cab { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-.ini-bloque-cab h3 {
-  font-size: 12px; font-weight: 800; text-transform: uppercase;
-  letter-spacing: 1px; color: var(--ink-2);
+.ini-bloque-cab {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
 }
+/* margin/padding/border en 0: el .card h3 de dashboard.css le pondria su
+   propia raya y margen dentro de la cabecera, que ya tiene los suyos. */
+.ini-bloque-cab h3 {
+  margin: 0; padding: 0; border: 0; display: block;
+  font-size: 14px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1.2px; color: var(--ink);
+}
+/* Numero de seccion: mas fuerte que los rotulos, sin caja. */
+.ini-paso {
+  font-size: 20px; font-weight: 800; line-height: 1;
+  color: var(--accent); font-variant-numeric: tabular-nums;
+}
+.ini-bloque-cab .ini-origen { margin-left: auto; }
+.ini-desc-pendiente { margin-top: 0; }
+.ini-desc-pendiente[hidden] { display: none; }
 .ini-origen {
   display: inline-block; padding: 1px 7px; border-radius: var(--radius-pill);
   font-size: 9.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
@@ -165,13 +202,13 @@
 .ini-origen.captura { color: var(--accent-ink); border-color: var(--accent-line); background: var(--accent-soft); }
 .ini-origen.derivado { border-style: dashed; }
 
-.ini-campo-tipo { max-width: 380px; margin-bottom: 14px; }
+.ini-campo-tipo { margin-bottom: 12px; }
 
 /* Director derivado: texto, no control. Borde punteado = no editable. */
 .ini-rotulo-derivado {
   display: flex; align-items: center; gap: 6px;
   font-size: 11px; font-weight: 800; text-transform: uppercase;
-  letter-spacing: .4px; color: var(--ctrl-label);
+  letter-spacing: .4px; color: var(--accent-ink);
 }
 .ini-derivado output {
   display: block; min-height: 35px;
@@ -182,11 +219,24 @@
 }
 
 /* ---- Campos de captura ---- */
-.ini-campos { display: grid; grid-template-columns: 1fr; gap: 14px; max-width: 900px; }
+.ini-campos { display: grid; grid-template-columns: 1fr; gap: 16px; }
 .ini-campos + .ini-campos { margin-top: 14px; }
 .ini-campos[hidden] { display: none; }
-/* El rotulo con ayuda ocupa el ancho del campo: todo el renglon es destino. */
-.ini-campo .ini-rotulo.ayuda-destino { color: var(--accent-deep); }
+/* Rotulo con ayuda (GloboAyuda): sin el tinte de fondo de globo-ayuda.css,
+   solo el texto verde como los demas. Lo que lo distingue es el cursor de
+   ayuda y un subrayado punteado; el texto de ayuda va en el globo, no
+   debajo del rotulo. */
+.ini-campo .ini-rotulo.ayuda-destino {
+  display: inline-block; align-self: flex-start;
+  padding: 0; background: none; border-radius: 0; opacity: 1;
+  color: var(--accent-ink);
+  text-decoration: underline dotted var(--accent-line);
+  text-decoration-thickness: 1.5px; text-underline-offset: 3px;
+}
+.ini-campo .ini-rotulo.ayuda-destino:hover,
+.ini-campo .ini-rotulo.ayuda-destino.abierto {
+  background: none; text-decoration-color: var(--accent);
+}
 
 /* Texto solo para lectores de pantalla (la ayuda del rotulo). */
 .ini-sr {
