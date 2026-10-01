@@ -1,9 +1,11 @@
 /* =========================================================================
    admin/iniciativas.js
 
-   Pagina oculta de administracion de iniciativas. Tercer hito: vistas
-   Iniciativas (inicio) y Solicitudes con pestaña; "Nueva solicitud" es una
-   accion de Iniciativas, sin pestaña, con
+   Pagina oculta de administracion de iniciativas. Vistas Iniciativas
+   (inicio) y Solicitudes con pestaña. Iniciativas es el registro de solo
+   lectura de admin/registro-iniciativas.js (VistaRegistro, que esta pagina
+   solo arranca). "Nueva solicitud" es una accion de Iniciativas, sin
+   pestaña, con
 
        Tipo de iniciativa -> Product Owner -> Service Owner -> Categoria
                                                               -> Director (derivado)
@@ -259,6 +261,7 @@ window.Iniciativas = (function () {
       this.globo = null;
       this.vista = 'iniciativas';
       this.menu = null;
+      this.registro = null;  // VistaRegistro (admin/registro-iniciativas.js)
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -267,6 +270,9 @@ window.Iniciativas = (function () {
     iniciar() {
       var self = this;
       this.menu = new MenuLateral(this.doc).conectar();
+      // El registro carga por su cuenta, en paralelo con el catalogo de
+      // Nueva solicitud: un fallo de uno no bloquea al otro.
+      this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
       this.cablearPestanas();
       this.cablearAcciones();
       this.mostrarVista(this.vista);
@@ -292,6 +298,7 @@ window.Iniciativas = (function () {
         t.setAttribute('aria-selected', activa ? 'true' : 'false');
         t.tabIndex = activa ? 0 : -1;
       });
+      if (nombre !== 'iniciativas' && this.registro) this.registro.cerrarDetalle();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();
     }

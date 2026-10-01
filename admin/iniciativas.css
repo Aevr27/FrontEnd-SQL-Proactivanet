@@ -243,3 +243,220 @@
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
 }
+
+/* =========================================================================
+   Registro de iniciativas (vista Iniciativas, admin/registro-iniciativas.js)
+
+   Jerarquia: cabecera -> indicadores -> filtros -> lista -> detalle en panel
+   lateral. Reusa .kpis/.kpi (assets/css/kpi.css), .filtros, .pill, .chip,
+   las tablas y .fecha-cell de dashboard.css; aqui solo lo propio.
+   ========================================================================= */
+.ini-panel [hidden] { display: none !important; }
+
+/* ---- Indicadores ---- */
+.ini-kpis { margin-bottom: 14px; }
+.ini-kpi { cursor: default; }
+/* En telefono, dos por fila: apiladas, las cuatro empujaban la lista una
+   pantalla entera hacia abajo. */
+@media (max-width: 560px) {
+  .kpis.ini-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ini-kpis .kpi { min-height: 0; padding: 12px 12px 12px 14px; }
+  .ini-kpis .kpi .lbl, .ini-kpis .kpi .foot { white-space: normal; }
+  /* Filtros tambien de dos en dos; los selects siguen a ancho de columna. */
+  .filtros.ini-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; }
+}
+.ini-kpi-cargando { border-left-color: var(--line); }
+.ini-kpi-cargando::after { opacity: 0; }
+.ini-kpi-cargando .val { color: var(--muted-2); }
+
+/* ---- Filtros ----
+   El panel .filtros del tablero, sin sombra (ya esta dentro de una tarjeta)
+   y con su cabecera ocupando la fila entera. */
+.filtros.ini-filtros {
+  box-shadow: none; border-color: var(--line-soft);
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  padding: 14px 16px 16px; gap: 10px 12px; margin-bottom: 18px;
+}
+.filtros.ini-filtros label { min-height: 0; }
+.ini-filtros-cab {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.ini-filtros-titulo {
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--ink);
+}
+.ini-filtros-cuenta { font-size: 11.5px; color: var(--accent-ink); font-weight: 700; }
+.ini-filtros-cab .btn { margin-left: auto; }
+.filtros.ini-filtros select:disabled { color: var(--muted-2); background: var(--bg-2) !important; cursor: not-allowed; }
+
+/* ---- Lista ---- */
+.ini-lista-cab {
+  display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.card .ini-lista-titulo {
+  margin: 0; padding: 0; border: 0; display: block;
+  font-size: 14px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--ink);
+}
+.ini-lista-cuenta { font-size: 12.5px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.ini-lista-ayuda { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+
+.ini-tabla-caja {
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.ini-tabla th { padding: 0; cursor: default; }
+.ini-tabla th:hover { background: #fff; }
+/* El encabezado ordena: boton a todo lo ancho de la celda. */
+.ini-orden {
+  all: unset; box-sizing: border-box; display: block; width: 100%;
+  padding: 10px 8px; cursor: pointer; white-space: nowrap;
+}
+.ini-orden:hover { color: var(--ink); background: var(--g-50); }
+.ini-orden:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ini-tabla th.num .ini-orden { text-align: right; }
+
+.ini-fila { cursor: pointer; }
+.ini-fila td { vertical-align: top; }
+.ini-folio {
+  all: unset; cursor: pointer; white-space: nowrap;
+  font-weight: 700; color: var(--accent-ink); font-variant-numeric: tabular-nums;
+  text-decoration: underline dotted var(--accent-line); text-underline-offset: 3px;
+}
+.ini-folio:hover { text-decoration-color: var(--accent); }
+.ini-folio:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+/* Titulo: dos lineas como mucho; completo en el title y en el detalle. */
+.ini-col-titulo { min-width: 220px; max-width: 420px; }
+.ini-titulo {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; color: var(--ink); font-weight: 600; line-height: 1.35;
+}
+.ini-sub { display: block; margin-top: 2px; font-size: 10.5px; color: var(--muted); font-weight: 400; }
+.ini-sin-cat { color: var(--ambr); }
+.ini-col-persona { max-width: 190px; overflow-wrap: anywhere; }
+.ini-mas {
+  display: inline-block; padding: 0 5px; border-radius: var(--radius-pill);
+  background: var(--bg-2); border: 1px solid var(--line);
+  font-size: 10px; font-weight: 700; color: var(--muted);
+}
+.ini-tenue { color: var(--muted-2); }
+.ini-chip { background: var(--g-50); color: var(--g-900); border: 1px solid var(--g-100); }
+
+/* Semaforo de la fecha: el mismo verde / ambar / rojo del tablero. */
+.ini-sem {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 7px; vertical-align: 1px; background: var(--muted-2);
+}
+.ini-sem.verde { background: var(--verde); }
+.ini-sem.ambar { background: var(--ambr); }
+.ini-sem.rojo { background: var(--rojo); }
+.ini-vencida { color: var(--rojo); }
+.ini-retraso {
+  margin-left: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; color: var(--rojo);
+}
+
+.ini-mas-caja { display: flex; justify-content: center; margin-top: 12px; }
+
+/* Bajo 760px la tabla se vuelve una lista de tarjetas: cada celda con su
+   rotulo (data-col). El encabezado se oculta; el orden queda el de omision. */
+@media (max-width: 760px) {
+  .ini-tabla-caja { border: 0; overflow: visible; }
+  .ini-tabla thead { display: none; }
+  .ini-tabla, .ini-tabla tbody { display: block; }
+  .ini-tabla tr.ini-fila {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px;
+    padding: 12px 14px; margin-bottom: 10px;
+    border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: #fff;
+  }
+  .ini-tabla tr.ini-fila td { display: block; padding: 0; border: 0; max-width: none; min-width: 0; text-align: left; }
+  .ini-tabla tr.ini-fila td::before {
+    content: attr(data-col); display: block; margin-bottom: 2px;
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted);
+  }
+  .ini-tabla tr.ini-fila td.ini-col-titulo { grid-column: 1 / -1; }
+  .ini-tabla tr.ini-fila td:first-child::before { display: none; }
+  .ini-lista-ayuda { margin-left: 0; }
+}
+
+/* ---- Detalle (panel lateral) ---- */
+.ini-det-fondo {
+  position: fixed; inset: 0; z-index: 55;   /* sobre la barra lateral (50), bajo el globo de ayuda (60) */
+  background: rgba(25, 25, 25, .28);
+}
+.ini-detalle {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 56;
+  width: min(760px, 100%);
+  display: flex; flex-direction: column;
+  background: var(--card); box-shadow: var(--shadow-lg);
+  border-left: 4px solid var(--accent);
+}
+.ini-det-fondo[hidden], .ini-detalle[hidden] { display: none; }
+html.ini-detalle-abierto { overflow: hidden; }
+.ini-det-barra {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 14px 18px; border-bottom: 1px solid var(--line);
+}
+.ini-det-rotulo {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--accent-ink);
+}
+.ini-det-barra h3 { margin: 0; font-size: 17px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ini-det-cerrar {
+  margin-left: auto; width: 34px; height: 34px;
+  border: 1px solid var(--line); border-radius: var(--radius-xs); background: #fff;
+  font-size: 20px; line-height: 1; color: var(--ink-2); cursor: pointer;
+}
+.ini-det-cerrar:hover { background: var(--g-50); border-color: var(--g-200); }
+.ini-det-cerrar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ini-det-cuerpo { flex: 1; overflow-y: auto; padding: 16px 18px 24px; }
+
+.ini-det-cab { margin-bottom: 16px; }
+.ini-det-nombre { font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.4; overflow-wrap: anywhere; }
+.ini-det-marcas { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+
+.ini-det-rejilla { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.ini-det-sec {
+  min-width: 0; padding: 12px 14px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+}
+.ini-det-ancha { margin-top: 12px; }
+.ini-det-sec h4 {
+  margin: 0 0 10px; font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .8px; color: var(--accent-ink);
+}
+.ini-det-sec h5 {
+  margin: 12px 0 4px; font-size: 11px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .4px;
+}
+.ini-det-sec h4 + h5 { margin-top: 0; }
+.ini-datos { display: grid; gap: 8px; margin: 0; }
+.ini-dato { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.ini-dato dt { font-size: 11px; color: var(--muted); }
+.ini-dato dd { margin: 0; font-size: 12.5px; color: var(--ink); overflow-wrap: anywhere; }
+.ini-datos-num dd { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ini-det-sec .ini-nota { margin-top: 8px; font-size: 11px; }
+.ini-det-sem { display: flex; align-items: center; font-size: 12.5px; color: var(--ink-2); margin-bottom: 8px; }
+.ini-det-tabla { overflow-x: auto; }
+.ini-det-tabla th { cursor: default; padding: 6px 8px; }
+.ini-det-tabla th:hover { background: #fff; color: var(--muted); }
+.ini-det-tabla tbody th {
+  text-transform: none; letter-spacing: 0; font-size: 12px;
+  color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--line-soft);
+}
+.ini-det-tabla td { padding: 6px 8px; }
+.ini-etapa-actual, .ini-etapa-actual th { background: var(--accent-soft); }
+.ini-cat-ruta { overflow-wrap: anywhere; min-width: 200px; }
+.ini-texto {
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-2);
+  max-height: 320px; overflow-y: auto;
+  padding: 8px 10px; background: var(--bg-2); border-radius: var(--radius-xs);
+}
+@media (max-width: 720px) {
+  .ini-detalle { border-left: 0; }
+  .ini-det-rejilla { grid-template-columns: minmax(0, 1fr); }
+  .ini-dato { grid-template-columns: 110px minmax(0, 1fr); }
+}

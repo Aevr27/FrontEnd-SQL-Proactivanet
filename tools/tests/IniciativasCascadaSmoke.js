@@ -98,6 +98,8 @@ function Pagina(pedir, antes) {
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(ventana, ventana.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(ventana, documento);
   (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
+  (new Function('window', 'document', 'Catalogos', 'Escape', 'fetch', leer('admin/registro-iniciativas.js')))(
+    ventana, documento, ventana.Catalogos, ventana.Escape, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   return { ventana: ventana, doc: documento, sel: function (id) { return documento.getElementById(id); } };
@@ -597,13 +599,16 @@ pruebas.push(function () {
     escribir(p, 'iniCamposComunes', 'analisis', 'y');
     return new Promise(function (ok) { setTimeout(ok, 0); });
   }).then(function () {
-    Check('P1 una sola peticion en todo el flujo: GET del catalogo',
-      [['../handlers/admin_iniciativas_catalogos.ashx', undefined]], llamadas);
-    var js = leer('admin/iniciativas.js'), html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
+    // Dos GET al abrir (registro y catalogo, en paralelo) y ninguno mas.
+    Check('P1 solo los dos GET de lectura en todo el flujo',
+      [['../handlers/admin_iniciativas_catalogos.ashx', null], ['../handlers/admin_iniciativas_registro.ashx', null]],
+      llamadas.map(function (l) { return [l[0], l[1] || null]; }).sort());
+    var js = leer('admin/iniciativas.js') + leer('admin/registro-iniciativas.js'), html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
     Check('P2 el JS no envia nada', [false, false, false, false],
       [/method\s*:/.test(js), /XMLHttpRequest/.test(js), /sendBeacon/.test(js), /['"]POST['"]/i.test(js)]);
     Check('P3 el HTML no tiene <form> ni submit', [false, false], [/<form/i.test(html), /type="submit"/i.test(html)]);
-    var ashx = leer('handlers/admin_iniciativas_catalogos.ashx').split('\n')
+    var ashx = (leer('handlers/admin_iniciativas_catalogos.ashx') + leer('handlers/admin_iniciativas_registro.ashx') +
+                leer('App_Code/ExperienciaRegistro.cs')).split('\n')
       .filter(function (l) { return !/^\s*\/\//.test(l); }).join('\n');
     Check('P4 el handler no escribe en la base', false, /\b(INSERT|UPDATE|DELETE|MERGE|EXEC|CREATE|ALTER|DROP)\b/i.test(ashx));
   });

@@ -12,7 +12,7 @@
   No esta enlazada desde dashboard.html ni desde admin/admin.html: se llega
   escribiendo la URL /admin/iniciativas.html. Sin autenticacion todavia.
 
-  ESTADO ACTUAL (tercer hito):
+  ESTADO ACTUAL (cuarto hito):
     - Dos vistas principales con pestaña: Iniciativas (la de inicio) y
       Solicitudes. "Nueva solicitud" NO es pestaña: es una accion de
       Iniciativas (boton "Solicitar una iniciativa") y tiene "Volver".
@@ -20,7 +20,12 @@
       no pestañas.
     - El borrador de Nueva solicitud vive en SolicitudNueva (memoria de la
       pagina): sobrevive al ir y volver entre vistas; se pierde al recargar.
-    - Solo "Nueva solicitud" funciona:
+    - Iniciativas es el registro de las iniciativas existentes, SOLO
+      LECTURA: indicadores, filtros, lista y detalle de la elegida. Datos:
+      handlers/admin_iniciativas_registro.ashx, que reusa la lectura y el
+      semaforo de Experiencia (App_Code/ExperienciaRegistro.cs). Vista:
+      admin/registro-iniciativas.js. Sin editar, sin descargas.
+    - "Nueva solicitud" (sin enviar ni guardar):
         Tipo de iniciativa -> Product Owner -> Service Owner -> Categoria,
         y el Director se muestra DERIVADO de la categoria (no se elige).
       Despues del tipo aparecen los campos de captura (Titulo y Analisis) y
@@ -29,8 +34,8 @@
       (solo lectura). La cascada es admin/cascada-organizacional.js, la misma
       (en modo 'filtro') que deben usar las pestañas de listas cuando existan.
     - No se envia ni se guarda nada: no hay boton de enviar ni <form>.
-    - Iniciativas y Solicitudes todavia no muestran datos: estado vacio
-      "en preparacion", sin datos inventados.
+    - Solicitudes todavia no muestra datos: estado vacio "en preparacion",
+      sin datos inventados.
 
   Reusa dashboard.css para variables, tipografia y .wrap / .card / .btn,
   como admin.html; lo propio vive en iniciativas.css con prefijo .ini-. La
@@ -40,6 +45,7 @@
 
 <link rel="stylesheet" href="../assets/css/boton.css">
 <link rel="stylesheet" href="../dashboard.css">
+<link rel="stylesheet" href="../assets/css/kpi.css">
 <link rel="stylesheet" href="../assets/css/globo-ayuda.css">
 <link rel="stylesheet" href="iniciativas.css">
 </head>
@@ -148,8 +154,8 @@
     <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1">Solicitudes</button>
   </nav>
 
-  <!-- Vista de inicio. Sera el registro de iniciativas existentes; hoy solo
-       el armazon y la accion principal. -->
+  <!-- Vista de inicio: el registro de iniciativas existentes y la accion
+       principal. -->
   <section class="ini-panel card" role="tabpanel" id="panel-iniciativas" aria-labelledby="tab-iniciativas">
     <div class="ini-vista-cab">
       <div class="ini-vista-titulo">
@@ -161,9 +167,57 @@
         <span>Solicitar una iniciativa</span>
       </button>
     </div>
-    <div class="ini-vacio">
-      <strong>Registro de iniciativas en preparación</strong>
-      <span>Aquí estarán los filtros, los indicadores y la lista de iniciativas existentes.</span>
+
+    <!-- Registro de iniciativas, SOLO LECTURA (admin/registro-iniciativas.js,
+         datos de handlers/admin_iniciativas_registro.ashx = los de
+         Experiencia). Cuatro estados excluyentes: cargando, error, sin
+         datos y listo; cargando y error nunca se ven como lista vacia. -->
+    <div class="kpis ini-kpis" id="regKpis" aria-live="polite" aria-busy="true"></div>
+
+    <p class="ini-estado" id="regCargando" role="status">Cargando iniciativas…</p>
+    <div class="ini-error" id="regError" role="alert" hidden>
+      <span><strong>No se pudo cargar el registro de iniciativas.</strong> <span id="regErrorTexto"></span></span>
+      <button type="button" class="btn" id="regReintentar">Reintentar</button>
+    </div>
+    <div class="ini-vacio" id="regSinDatos" hidden>
+      <strong>No hay iniciativas vigentes</strong>
+      <span>El origen de Experiencia no trae ninguna iniciativa vigente.</span>
+    </div>
+
+    <div id="regContenido" hidden>
+      <div class="filtros ini-filtros" role="group" aria-labelledby="regFiltrosTitulo">
+        <div class="ini-filtros-cab">
+          <span class="ini-filtros-titulo" id="regFiltrosTitulo">Filtros</span>
+          <span class="ini-filtros-cuenta" id="regFiltrosCuenta" aria-live="polite"></span>
+          <button type="button" class="btn linea chico" id="regLimpiar" hidden>Limpiar filtros</button>
+        </div>
+        <div class="campo"><label for="regEstadoSel">Estado</label><select id="regEstadoSel" disabled></select></div>
+        <div class="campo"><label for="regTipo">Agrupación</label><select id="regTipo" disabled></select></div>
+        <div class="campo"><label for="regDirector">Director</label><select id="regDirector" disabled></select></div>
+        <div class="campo"><label for="regPo">Product Owner</label><select id="regPo" disabled></select></div>
+        <div class="campo"><label for="regSo">Service Owner</label><select id="regSo" disabled></select></div>
+        <div class="campo"><label for="regCategoria">Categoría</label><select id="regCategoria" disabled></select></div>
+      </div>
+
+      <div class="ini-lista-cab">
+        <h3 class="ini-lista-titulo">Registro</h3>
+        <span class="ini-lista-cuenta" id="regCuenta" aria-live="polite"></span>
+        <span class="ini-lista-ayuda">Elige una iniciativa para ver su detalle.</span>
+      </div>
+
+      <div class="ini-vacio" id="regVacio" hidden>
+        <strong>No hay iniciativas que coincidan con los filtros seleccionados.</strong>
+        <span><button type="button" class="btn linea chico" id="regLimpiarVacio">Limpiar filtros</button></span>
+      </div>
+
+      <div class="ini-tabla-caja" id="regTablaCaja">
+        <table class="ini-tabla">
+          <caption class="ini-sr">Iniciativas registradas. Las columnas se pueden ordenar.</caption>
+          <thead id="regCabeza"></thead>
+          <tbody id="regCuerpo"></tbody>
+        </table>
+      </div>
+      <div class="ini-mas-caja"><button type="button" class="btn linea" id="regMas" hidden>Mostrar más</button></div>
     </div>
   </section>
 
@@ -262,10 +316,25 @@
   </div><!-- /.lateral-contenido -->
 </div>
 
+<!-- Detalle de una iniciativa (solo lectura): panel lateral sobre la lista.
+     Se cierra con la X, Escape o un clic en el fondo; el foco vuelve al
+     folio de la fila. Bajo 720px ocupa la pantalla. -->
+<div class="ini-det-fondo" id="regDetFondo" hidden></div>
+<aside class="ini-detalle" id="regDetalle" role="dialog" aria-modal="true" aria-labelledby="regDetTitulo" hidden>
+  <div class="ini-det-barra">
+    <span class="ini-det-rotulo">Iniciativa</span>
+    <h3 id="regDetTitulo"></h3>
+    <span class="ini-hint">Solo lectura</span>
+    <button type="button" class="ini-det-cerrar" id="regDetCerrar" aria-label="Cerrar el detalle" title="Cerrar">×</button>
+  </div>
+  <div class="ini-det-cuerpo" id="regDetCuerpo"></div>
+</aside>
+
 <script src="../assets/js/escape.js"></script>
 <script src="../assets/js/catalogos.js"></script>
 <script src="../assets/js/globo-ayuda.js"></script>
 <script src="cascada-organizacional.js"></script>
+<script src="registro-iniciativas.js"></script>
 <script src="iniciativas.js"></script>
 </body>
 </html>

@@ -103,7 +103,7 @@ using System.Data.SqlClient;
 using System.Globalization;
 using System.Text;
 
-public static class ExperienciaQueries
+public static partial class ExperienciaQueries
 {
     // Los cuatro agrupadores del tablero y su color. Son presentacion, no
     // datos: viven aqui -y no en la base- porque el mismo color tiene que
