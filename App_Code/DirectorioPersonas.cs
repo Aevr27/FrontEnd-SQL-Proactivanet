@@ -25,6 +25,15 @@
 //
 // Si una busqueda da mas de una persona (o mas de un correo distinto), NO se
 // escoge una: el estado es "ambiguo" y van todos los candidatos.
+//
+// CorreoGerente ES UNA LISTA DE DISTRIBUCION
+// ------------------------------------------
+// CatLiderGrupo tambien sirve para mandar avisos: CorreoGerente trae el
+// correo del Gerente PRIMERO y despues las copias (danielalc, t_nancyvp,
+// otros gerentes, externos...), separadas por coma y a veces por un salto
+// de linea. Aqui solo se usa el PRIMERO (PrimerCorreo), y las copias no se
+// leen: no son el gerente y no dicen nada de la jerarquia. La jerarquia de
+// una persona sale de la cascada organizacional, no de este catalogo.
 
 using System;
 using System.Collections.Generic;
@@ -120,7 +129,7 @@ public sealed class DirectorioPersonas
             l.Lider = DirectorioOrganizacional.Normaliza(l.Lider);
             l.CorreoLider = Correo(l.CorreoLider);
             l.Gerente = DirectorioOrganizacional.Normaliza(l.Gerente);
-            l.CorreoGerente = Correo(l.CorreoGerente);
+            l.CorreoGerente = Correo(PrimerCorreo(l.CorreoGerente));
         }
     }
 
@@ -359,6 +368,18 @@ public sealed class DirectorioPersonas
     {
         valor = DirectorioOrganizacional.Normaliza(valor);
         return valor == null ? null : valor.ToLower(CultureInfo.InvariantCulture);
+    }
+
+    // El primer correo de una lista de distribucion, o null. Separadores:
+    // coma, punto y coma y cualquier blanco (en la base hay listas partidas
+    // con un salto de linea en vez de coma: "minervasp@...\r\n danielalc@...").
+    // Un correo no lleva blancos, asi que cortar en ellos no parte ninguno.
+    public static string PrimerCorreo(string lista)
+    {
+        if (lista == null) return null;
+        var partes = lista.Split(new[] { ',', ';', ' ', '\t', '\r', '\n', ' ' },
+                                 StringSplitOptions.RemoveEmptyEntries);
+        return partes.Length == 0 ? null : partes[0];
     }
 
     private static bool Igual(string a, string b)

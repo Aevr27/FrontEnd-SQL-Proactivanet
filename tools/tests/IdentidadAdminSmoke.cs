@@ -173,6 +173,47 @@ public static class IdentidadAdminSmoke
         Check("mismo correo en dos tablas: 2 fuentes", 2, ((IList)Campo(personas.CorreoDeNombre("Sofia SO"), "candidatos")).Count);
         Check("gerente por CorreoGerente", "gina.gerente@soriana.com", Campo(personas.CorreoDeNombre("Gina Gerente"), "correo"));
 
+        // ---- CorreoGerente es lista: solo el primero (formas reales de la base)
+        Check("primer correo: coma y espacio", "luisglom@soriana.com",
+              DirectorioPersonas.PrimerCorreo("luisglom@soriana.com, t_nancyvp@soriana.com, danielalc@soriana.com"));
+        Check("primer correo: salto de linea sin coma", "minervasp@soriana.com",
+              DirectorioPersonas.PrimerCorreo("minervasp@soriana.com\r\n danielalc@soriana.com"));
+        Check("primer correo: espacios alrededor", "AGomez@soriana.com", DirectorioPersonas.PrimerCorreo("  AGomez@soriana.com ,x@y.com"));
+        Check("primer correo: uno solo", "a@soriana.com", DirectorioPersonas.PrimerCorreo("a@soriana.com"));
+        Check("primer correo: vacio / solo comas", true,
+              DirectorioPersonas.PrimerCorreo(" , ") == null && DirectorioPersonas.PrimerCorreo(null) == null);
+
+        var listas = new DirectorioPersonas(
+            new List<DirectorioPersonas.Persona> { P("Daniela Copia", "danielalc@soriana.com", null, null) },
+            new List<DirectorioPersonas.LiderGrupo>
+            {
+                L("Acuerdos", "Adriana Lozano", "adrianalll@soriana.com", "Luis Gerardo Lomas Malacara",
+                  "luisglom@soriana.com, t_nancyvp@soriana.com, danielalc@soriana.com"),
+                L("Basis", "Bendrix Zuir", "bendrixzr@soriana.com", "Minerva Salas Peña",
+                  "minervasp@soriana.com\r\n danielalc@soriana.com"),
+                L("Proveedor", "Laura Cardenas", "lauragcg@soriana.com", "Javier de la Cruz Hinostroza",
+                  "javierch@soriana.com, sergiotem@soriana.com, danielalc@soriana.com"),
+                L("Autocobro", "Laura Cardenas", "lauragcg@soriana.com", "Sergio Tellez Maldonado",
+                  "SERGIOTEM@soriana.com, danielalc@soriana.com"),
+            });
+        Check("lista: correo del gerente = el primero", "luisglom@soriana.com",
+              Campo(listas.CorreoDeNombre("Luis Gerardo Lomas Malacara"), "correo"));
+        Check("lista: separada por salto de linea", "minervasp@soriana.com",
+              Campo(listas.CorreoDeNombre("Minerva Salas Peña"), "correo"));
+        Check("lista: resuelto, no ambiguo", DirectorioPersonas.Resuelto,
+              Campo(listas.CorreoDeNombre("Javier de la Cruz Hinostroza"), "estado"));
+        var porPrimero = listas.BuscarPorCorreo("LUISGLOM@soriana.com ");
+        Check("lista: buscar por el primero (mayusculas, espacios) da el gerente", "Luis Gerardo Lomas Malacara|CatLiderGrupo.CorreoGerente",
+              porPrimero.Nombre + "|" + porPrimero.Fuente);
+        var copia = listas.BuscarPorCorreo("danielalc@soriana.com");
+        Check("lista: una copia NO se vuelve gerente", "Daniela Copia|1",
+              copia.Nombre + "|" + copia.Candidatos.Count);
+        var otroGerente = listas.BuscarPorCorreo("sergiotem@soriana.com");
+        Check("lista: gerente en copia de otro grupo -> solo su propio grupo", "Sergio Tellez Maldonado|1",
+              otroGerente.Nombre + "|" + otroGerente.Candidatos.Count);
+        Check("lista: la evidencia del grupo muestra solo el primero", "javierch@soriana.com",
+              Campo(((IList)listas.GruposDe("Javier de la Cruz Hinostroza"))[0], "correo_gerente"));
+
         // ---- 9: SO -> PO ---------------------------------------------------
         var org = new DirectorioOrganizacional(new List<DirectorioOrganizacional.Dueno>
         {
