@@ -2,6 +2,10 @@
 //
 // QUIEN ENTRA
 // -----------
+// TODO(TEMPORAL): HOY la lista sale de AdminWhitelistTemporal (App_Code/
+// AdminWhitelistTemporal.cs), no de Web.config; ver Configurada(). Lo de
+// abajo describe el formato, que es el mismo.
+//
 // Las cuentas Windows de la clave AdminAllowedUsers de Web.config
 // (appSettings), separadas por ";" (tambien se acepta ","):
 //
@@ -74,9 +78,13 @@ public static class AccesoAdmin
         }
     }
 
+    // TODO(TEMPORAL): mientras no haya autorizacion en base, la lista es la
+    // de AdminWhitelistTemporal y NO la de Web.config (AdminAllowedUsers se
+    // ignora: el Web.config desplegado no esta a nuestro alcance). Al pasar
+    // a autorizacion DB-backed, cambiar esta linea y borrar ese archivo.
     public static ListaAutorizados Configurada()
     {
-        return ListaAutorizados.Leer(ConfigurationManager.AppSettings[ClaveConfig]);
+        return ListaAutorizados.Leer(AdminWhitelistTemporal.Cuentas);
     }
 
     public static bool EstaAutorizado(IdentidadWindows id)

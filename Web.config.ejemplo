@@ -69,8 +69,10 @@
          dominio se ignora. Vacia o ausente: no entra nadie. Son solo
          nombres de cuenta: aqui no van contraseñas ni secretos. La
          identidad la pone IIS (Autenticacion de Windows); ver
-         App_Code/AccesoAdmin.cs. -->
-    <add key="AdminAllowedUsers"         value="SORIANA\user1;SORIANA\user2;SORIANA\user3;SORIANA\user4" />
+         App_Code/AccesoAdmin.cs.
+         TEMPORAL: por ahora esta clave SE IGNORA; la lista vigente es
+         App_Code/AdminWhitelistTemporal.cs hasta la autorizacion en base. -->
+    <add key="AdminAllowedUsers"        value="SORIANA\user1;SORIANA\user2;SORIANA\user3;SORIANA\user4" />
   </appSettings>
 
   <system.web>

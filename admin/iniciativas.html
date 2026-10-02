@@ -315,7 +315,7 @@
     <div class="ini-panel-cab">
       <button type="button" class="btn linea chico" id="btnVolver">← Volver a Iniciativas</button>
       <h2 id="iniNuevaTitulo" tabindex="-1">Nueva solicitud</h2>
-      <span class="ini-hint">Vista previa · no se envía ni se guarda · el borrador se conserva al cambiar de vista</span>
+      <span class="ini-hint">Vista previa · se valida en el servidor pero no se guarda · el borrador se conserva al cambiar de vista</span>
     </div>
 
     <p class="ini-estado" id="iniEstado" role="status" aria-live="polite"></p>
@@ -400,23 +400,31 @@
         </div>
       </section>
 
-      <!-- 04 RCA: documento adjunto. El sitio no tiene todavia donde guardar
-           archivos (dbo.Problem.RCA es NVARCHAR(50), no un documento), asi
-           que el control se ve deshabilitado y no sube nada. -->
+      <!-- 04 RCA: documento adjunto. Obligatorio solo para Problem. Se elige
+           y el servidor comprueba que llego, pero NO se guarda: no hay
+           destino SharePoint confirmado (dbo.Problem.RCA es NVARCHAR(50),
+           no un documento). -->
       <section class="ini-bloque ini-col-rca" aria-labelledby="iniCabRca">
         <div class="ini-bloque-cab">
           <span class="ini-paso" aria-hidden="true">04</span>
           <h3 id="iniCabRca">RCA</h3>
-          <span class="ini-origen pendiente">Pendiente</span>
+          <span class="ini-origen captura">Captura</span>
         </div>
         <div class="ini-campo">
-          <label for="campoRca" class="ini-rotulo ayuda-destino" data-ayuda="rca">Documento adjunto</label>
+          <label for="campoRca" class="ini-rotulo ayuda-destino" data-ayuda="rca">Documento adjunto <span class="ini-obligatorio" id="rotRcaObligatorio" hidden>obligatorio</span></label>
           <input type="file" id="campoRca" aria-describedby="motRca" disabled>
-          <small class="ini-motivo" id="motRca">Todavía no se puede adjuntar: falta definir dónde se guardará el documento.</small>
+          <small class="ini-motivo" id="motRca">Elige primero un Tipo de iniciativa.</small>
         </div>
       </section>
 
     </div>
+
+    <!-- Solo valida en el servidor; no guarda ni genera numero de solicitud. -->
+    <div class="ini-acciones">
+      <button type="button" class="btn" id="btnValidar">Validar en el servidor</button>
+      <span class="ini-hint">No se guarda ni se genera número de solicitud.</span>
+    </div>
+    <div class="ini-resultado" id="iniResultado" role="status" aria-live="polite" hidden></div>
   </section>
 
   </div><!-- /.lateral-contenido -->

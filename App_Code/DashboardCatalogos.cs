@@ -220,6 +220,9 @@ ORDER BY Grupo;";
        (DirectorioOrganizacional.Normaliza) y se deduplican sin distinguir
        mayusculas, quedandose con la primera grafia en orden ordinal.
 
+       Orden: Problem (si el catalogo lo trae) primero, el resto en orden
+       ordinal (TiposSolicitud.ProblemPrimero). Solo cambia el orden.
+
        Solo lectura, sobre la conexion que ya abrio quien llama. */
     public static List<object> TiposIniciativa(SqlConnection cn)
     {
@@ -240,7 +243,7 @@ WHERE VigenteEnOrigen = 1
             }
         }
 
-        return TiposUnicos(valores);
+        return TiposSolicitud.ProblemPrimero(TiposUnicos(valores));
     }
 
     // Normaliza, descarta vacios, deduplica sin distinguir mayusculas y

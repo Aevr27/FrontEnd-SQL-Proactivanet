@@ -9,12 +9,17 @@
 // categorias, para el universo de categorias), y espera:
 //
 //     { "tipos": ["...", ...],
+//       "tipo_problem": "Problem" | null,
 //       "asignaciones": [ { "director": "...", "po": "...", "so": "...",
 //                           "categoria": "..." }, ... ],
 //       "omitidas": 0 }
 //
 //   tipos          DashboardCatalogos.TiposIniciativa: los TipoIniciativa en
-//                  uso en dbo.Problem (vigentes).
+//                  uso en dbo.Problem (vigentes), con Problem primero si
+//                  esta.
+//   tipo_problem   el valor de esa lista que es Problem (exige RCA), o null
+//                  si el catalogo no lo trae. El navegador no lo escribe a
+//                  mano: lo toma de aqui.
 //   asignaciones   una fila por categoria vigente de dbo.CatCategoriaDueno,
 //                  con sus dueños resueltos por DirectorioOrganizacional (la
 //                  misma regla N2 -> C1 del resto del sitio).
@@ -43,7 +48,9 @@ public class AdminIniciativasCatalogos : IHttpHandler
             {
                 cn.Open();
                 var salida = DirectorioOrganizacional.Cargar(cn).AsignacionesVigentes();
-                salida["tipos"] = DashboardCatalogos.TiposIniciativa(cn);
+                var tipos = DashboardCatalogos.TiposIniciativa(cn);
+                salida["tipos"] = tipos;
+                salida["tipo_problem"] = TiposSolicitud.ValorProblem(tipos);
                 return salida;
             }
         });

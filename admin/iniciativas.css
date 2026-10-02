@@ -193,8 +193,22 @@
   position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
   font-size: 13px; font-weight: 700; color: var(--muted); pointer-events: none;
 }
-/* 04 RCA: control nativo, deshabilitado mientras no haya almacenamiento. */
+/* 04 RCA: control nativo; deshabilitado hasta elegir el tipo. */
 .ini-col-rca input[type="file"] { width: 100%; min-width: 0; font: inherit; font-size: 12.5px; color: var(--muted); }
+.ini-obligatorio { margin-left: 6px; font-size: 10px; font-weight: 700; text-transform: none; color: var(--rojo); }
+.ini-obligatorio[hidden] { display: none; }
+
+/* Validar en el servidor y su resultado, bajo el formulario. */
+.ini-acciones { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+.ini-resultado {
+  margin-top: 12px; padding: 10px 14px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  font-size: 12.5px; color: var(--ink, inherit);
+}
+.ini-resultado[hidden] { display: none; }
+.ini-resultado.ok { background: #eaf6ef; border-color: #bfe3cd; }
+.ini-resultado.mal { background: #fbeeea; border-color: #efc9bf; color: var(--rojo); }
+.ini-resultado ul { margin: 6px 0 0 18px; padding: 0; }
 .ini-origen.pendiente { border-style: dashed; color: var(--muted-2); }
 
 /* ---- Bloques del formulario y origen de cada dato ----

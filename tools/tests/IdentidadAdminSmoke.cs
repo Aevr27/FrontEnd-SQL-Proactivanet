@@ -14,6 +14,8 @@
 //   8) correo candidato t_andresvr@soriana.com
 //   9) SO con varios PO: "ambiguo", sin escoger ninguno
 //  10) correo faltante: null con estado sin_correo / no_encontrado
+//   W) TODO(TEMPORAL) whitelist de AdminWhitelistTemporal: t_andresvr si;
+//      otro usuario, anonimo/vacio y otro dominio no
 //  +)  rutas protegidas por el modulo
 //
 // Compilar y correr desde la raiz del repo:
@@ -103,7 +105,24 @@ public static class IdentidadAdminSmoke
         Check("5 sin autenticar", false, lista.Permite(anonima));
         Check("5 null", false, lista.Permite(null));
         Check("5 lista vacia: nadie", false, AccesoAdmin.ListaAutorizados.Leer(null).Permite(yo));
-        Check("5 sin Web.config: nadie", false, AccesoAdmin.EstaAutorizado(yo));
+
+        // ---- TODO(TEMPORAL): whitelist de AdminWhitelistTemporal ----------
+        // Quitar este bloque junto con App_Code/AdminWhitelistTemporal.cs
+        // cuando la autorizacion pase a la base. Es el camino real de los
+        // handlers: Exigir -> EstaAutorizado -> Configurada().
+        Check("W1 SORIANA\\t_andresvr autorizado", true, AccesoAdmin.EstaAutorizado(yo));
+        Check("W1 misma cuenta en mayusculas", true,
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"SORIANA\T_ANDRESVR", true)));
+        Check("W2 otro usuario SORIANA rechazado", false,
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"SORIANA\t_otro", true)));
+        Check("W3 anonimo (no autenticado) rechazado", false, AccesoAdmin.EstaAutorizado(anonima));
+        Check("W3 vacio rechazado", false, AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde("", true)));
+        Check("W3 null rechazado", false, AccesoAdmin.EstaAutorizado(null));
+        Check("W4 otro dominio rechazado", false,
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"OTRO\t_andresvr", true)));
+        Check("W4 sin dominio rechazado", false,
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde("t_andresvr", true)));
+        Check("W5 la temporal tiene exactamente 1 cuenta", 1, AccesoAdmin.Configurada().Total);
 
         // ---- rutas del modulo --------------------------------------------
         Check("ruta pagina", true, AccesoAdmin.EsRutaProtegida("~/admin/iniciativas.html"));

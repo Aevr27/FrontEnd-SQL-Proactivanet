@@ -10,7 +10,17 @@
        Tipo de iniciativa -> Product Owner -> Service Owner -> Categoria
                                                               -> Director (derivado)
 
-   mas los campos de captura. No envia ni guarda nada.
+   mas los campos de captura. No guarda nada: "Validar en el servidor"
+   manda la solicitud a admin_iniciativas_validar.ashx, que la revisa
+   (obligatorios, catalogo, cascada, %, capacidad de la categoria, RCA de
+   Problem) y responde, sin numero de solicitud ni alta.
+
+   REGLAS (el servidor es la autoridad; aqui solo se adelantan)
+     Todos los campos son obligatorios. RCA: obligatorio si el tipo es el
+     Problem del catalogo (tipo_problem del handler), opcional si no.
+     % de disminucion: 0 a la capacidad DISPONIBLE de la Categoria
+     (admin_iniciativas_capacidad.ashx), hasta dos decimales, sin multiplos
+     obligatorios.
 
    DE DONDE SALE CADA COSA
    -----------------------
@@ -33,7 +43,9 @@
      (Titulo, Descripcion, Observaciones) y 03 Impacto (Volumetria y el %
      de disminucion de la Categoria elegida).
    Pendiente (no se pinta como campo, ver sql/diag_admin_nueva_solicitud.sql)
-     RCA es un aviso: no hay donde guardar el documento. Codigo, fechas,
+     El RCA se elige y se valida, pero no hay donde guardarlo (destino
+     SharePoint sin confirmar) ni numero de solicitud con que nombrarlo.
+     Codigo, fechas,
      contadores, Estado, Subestado, Gerencia, Macroproceso, Causa, Proceso,
      comentarios, CuentaConWA y Volumetria del ultimo mes vienen hoy del
      Excel tal cual y su regla no esta verificada.
@@ -65,6 +77,18 @@ window.Iniciativas = (function () {
   'use strict';
 
   var URL_CATALOGO = '../handlers/admin_iniciativas_catalogos.ashx';
+  // Capacidad de la categoria (solo para mostrar) y validacion en el
+  // servidor (la autoridad; no guarda nada).
+  var URL_CAPACIDAD = '../handlers/admin_iniciativas_capacidad.ashx';
+  var URL_VALIDAR = '../handlers/admin_iniciativas_validar.ashx';
+
+  // Rotulos de los campos obligatorios, para avisar cuales faltan. Las
+  // claves son las de SolicitudNueva (Descripcion = 'analisis').
+  var ROTULOS = {
+    tipo: 'Tipo de iniciativa', po: 'Product Owner', so: 'Service Owner', categoria: 'Categoría',
+    titulo: 'Título', analisis: 'Descripción', descripcion: 'Descripción', observaciones: 'Observaciones',
+    volumetria: 'Volumetría', pct: '% Disminución', rca: 'RCA'
+  };
 
   // ---------------------------------------------------------------------
   // Campos de captura
@@ -164,10 +188,13 @@ window.Iniciativas = (function () {
   // CatalogoIniciativas
   // ---------------------------------------------------------------------
   class CatalogoIniciativas {
-    constructor(tipos, asignaciones, omitidas) {
+    // tipoProblem: el valor del catalogo que es Problem (exige RCA), tal
+    // como lo marca el servidor (tipo_problem), o ''. Aqui no se escribe.
+    constructor(tipos, asignaciones, omitidas, tipoProblem) {
       this.tipos = tipos;
       this.asignaciones = asignaciones;
       this.omitidas = omitidas;
+      this.tipoProblem = tipoProblem || '';
     }
 
     // El JSON del handler -> catalogo. Sin las dos listas lanza; filas o
@@ -186,7 +213,9 @@ window.Iniciativas = (function () {
         vistos[t] = true;
         return true;
       });
-      return new CatalogoIniciativas(tipos, filas, Number(json.omitidas) || 0);
+      // El orden de los tipos es el del servidor (Problem primero si esta).
+      var problem = typeof json.tipo_problem === 'string' && vistos[json.tipo_problem] ? json.tipo_problem : '';
+      return new CatalogoIniciativas(tipos, filas, Number(json.omitidas) || 0, problem);
     }
 
     tieneTipo(valor) { return this.tipos.indexOf(valor) >= 0; }
@@ -204,6 +233,12 @@ window.Iniciativas = (function () {
       this.cascada = new CascadaOrganizacional(catalogo.asignaciones, 'creacion');
       this.valores = {};       // campos comunes
       this.valoresTipo = {};   // campos del tipo
+      // Capacidad de la Categoria elegida, tal como la dio el servidor:
+      //   { categoria, estado: 'cargando' | 'lista' | 'error',
+      //     disponible (fraccion), determinable }
+      // Solo orienta al usuario: al validar, el servidor la recalcula.
+      this.capacidad = null;
+      this.rca = null;         // el File elegido (no se sube a ningun lado)
     }
 
     camposTipo() {
@@ -219,6 +254,7 @@ window.Iniciativas = (function () {
       this.cascada.limpiar(0);
       this.valoresTipo = {};
       this.limpiarDeCascada(this.comunes, this.valores);
+      this.capacidad = null;
       return this.tipo !== '';
     }
 
@@ -228,7 +264,39 @@ window.Iniciativas = (function () {
       var aceptado = this.tipo ? this.cascada.elegir(nivel, valor) : false;
       this.limpiarDeCascada(this.camposTipo(), this.valoresTipo);
       this.limpiarDeCascada(this.comunes, this.valores);
+      if (!this.capacidad || this.capacidad.categoria !== this.categoria()) this.capacidad = null;
       return aceptado;
+    }
+
+    // ---- RCA ----
+    // Obligatorio solo si el tipo elegido es el Problem del catalogo.
+    rcaObligatorio() { return this.tipo !== '' && this.tipo === this.catalogo.tipoProblem; }
+    elegirRca(archivo) { this.rca = archivo && archivo.size > 0 ? archivo : null; }
+
+    // ---- capacidad de la categoria ----
+    // La respuesta de una categoria que ya no es la elegida se descarta.
+    pedirCapacidad() {
+      var cat = this.categoria();
+      this.capacidad = cat ? { categoria: cat, estado: 'cargando' } : null;
+      return cat;
+    }
+
+    fijarCapacidad(cat, json) {
+      if (!cat || cat !== this.categoria()) return false;
+      var ok = json && typeof json.disponible === 'number' && typeof json.determinable === 'boolean';
+      this.capacidad = ok
+        ? { categoria: cat, estado: 'lista', disponible: json.disponible, determinable: json.determinable }
+        : { categoria: cat, estado: 'error' };
+      return true;
+    }
+
+    fallaCapacidad(cat) { return this.fijarCapacidad(cat, null); }
+
+    // Lo maximo que se puede pedir, en % con dos decimales, o null si no se
+    // sabe todavia.
+    maxPct() {
+      var c = this.capacidad;
+      return c && c.estado === 'lista' && c.determinable ? Math.round(c.disponible * 10000) / 100 : null;
     }
 
     limpiarDeCascada(campos, valores) {
@@ -255,10 +323,60 @@ window.Iniciativas = (function () {
     error(clave) {
       var c = this.campo(clave);
       var v = c ? (this.comunes.indexOf(c) >= 0 ? this.valores : this.valoresTipo)[clave] : '';
-      return c && VALIDAR[c.control] ? VALIDAR[c.control](String(v === undefined ? '' : v).trim()) : '';
+      var texto = String(v === undefined ? '' : v).trim();
+      var error = c && VALIDAR[c.control] ? VALIDAR[c.control](texto) : '';
+      if (error || clave !== 'pct' || texto === '') return error;
+      // El % contra la capacidad que dio el servidor (en diezmilesimas,
+      // para no comparar flotantes).
+      var cap = this.capacidad;
+      if (cap && cap.estado === 'lista' && !cap.determinable) return 'No se puede calcular la capacidad de esta categoría.';
+      var max = this.maxPct();
+      if (max !== null && Math.round(this.pctFraccion() * 10000) > Math.round(cap.disponible * 10000)) {
+        return 'Esta categoría solo tiene ' + max + '% disponible.';
+      }
+      return '';
     }
 
     pctFraccion() { return fraccionDe(String(this.valores.pct || '').trim()); }
+
+    // Claves obligatorias sin valor (en el orden del formulario). RCA solo
+    // si es obligatorio para el tipo.
+    faltantes() {
+      var self = this, faltan = [];
+      if (!this.tipo) faltan.push('tipo');
+      ['po', 'so', 'categoria'].forEach(function (k, i) { if (!self.cascada.seleccion[i]) faltan.push(k); });
+      this.comunes.forEach(function (c) {
+        if (String(self.valores[c.clave] === undefined ? '' : self.valores[c.clave]).trim() === '') faltan.push(c.clave);
+      });
+      if (this.rcaObligatorio() && !this.rca) faltan.push('rca');
+      return faltan;
+    }
+
+    // Lo que hay que corregir antes de mandar: faltantes y formatos.
+    erroresCliente() {
+      var self = this;
+      var errores = this.faltantes().map(function (k) {
+        return { campo: k, mensaje: k === 'rca' ? 'El RCA es obligatorio para Problem.' : 'Falta ' + ROTULOS[k] + '.' };
+      });
+      ['volumetria', 'pct'].forEach(function (k) {
+        var e = self.error(k);
+        if (e && errores.every(function (x) { return x.campo !== k; })) errores.push({ campo: k, mensaje: e });
+      });
+      return errores;
+    }
+
+    // Los campos con los nombres que espera admin_iniciativas_validar.ashx.
+    // disponible_cliente va solo como dato: el servidor no lo usa.
+    camposEnvio() {
+      var v = this.valores, sel = this.cascada.seleccion;
+      var max = this.maxPct();
+      return {
+        tipo: this.tipo, po: sel[0] || '', so: sel[1] || '', categoria: sel[2] || '',
+        titulo: v.titulo || '', descripcion: v.analisis || '', observaciones: v.observaciones || '',
+        volumetria: String(v.volumetria || '').trim(), pct: String(v.pct || '').trim(),
+        disponible_cliente: max === null ? '' : String(max)
+      };
+    }
 
     estado() {
       var hayTipos = this.catalogo.tipos.length > 0;
@@ -276,10 +394,29 @@ window.Iniciativas = (function () {
             : 'Se completa al elegir la Categoría.'
         },
         pct: this.categoria()
-          ? { habilitado: true, motivo: 'Para la categoría elegida en Clasificación.' }
-          : { habilitado: false, motivo: 'Elige primero la Categoría en Clasificación.' },
+          ? { habilitado: true, motivo: this.motivoCapacidad(), max: this.maxPct() }
+          : { habilitado: false, motivo: 'Elige primero la Categoría en Clasificación.', max: null },
+        rca: {
+          habilitado: this.tipo !== '',
+          obligatorio: this.rcaObligatorio(),
+          motivo: !this.tipo ? 'Elige primero un Tipo de iniciativa.'
+            : (this.rcaObligatorio() ? 'Obligatorio para Problem.' : 'Opcional para este tipo.') +
+              ' El archivo todavía no se guarda.'
+        },
         camposVisibles: this.tipo !== ''
       };
+    }
+
+    motivoCapacidad() {
+      var c = this.capacidad;
+      if (!c) return 'Para la categoría elegida en Clasificación.';
+      if (c.estado === 'cargando') return 'Calculando la capacidad de reducción de la categoría…';
+      if (c.estado === 'error') return 'No se pudo calcular la capacidad; el servidor la revisará al validar.';
+      if (!c.determinable) {
+        return 'Capacidad no determinable: hay iniciativas en categorías que contienen a esta o que cuelgan de ella.';
+      }
+      var max = this.maxPct();
+      return 'Capacidad de reducción · Disponible: ' + max + '%. Puedes solicitar entre 0% y ' + max + '%.';
     }
   }
 
@@ -365,6 +502,7 @@ window.Iniciativas = (function () {
       this.mostrarVista(this.vista);
       this.cablearSelects();
       this.cablearCampos();
+      this.cablearEnvio();
       this.globo = new GloboAyuda(this.$('panel-nueva'), '.ayuda-destino', function (d) {
         return self.ayudaDe(d.getAttribute('data-ayuda'));
       }).conectar();
@@ -446,8 +584,29 @@ window.Iniciativas = (function () {
           }
           self.pintarCamposComunes();
           self.pintar();
+          self.actualizarCapacidad();
         });
       });
+    }
+
+    // Pide la capacidad de la Categoria elegida, si cambio. Solo para
+    // mostrarla y acotar el %; el servidor decide al validar.
+    actualizarCapacidad() {
+      var self = this, s = this.solicitud;
+      var cat = s ? s.categoria() : '';
+      if (!cat || (s.capacidad && s.capacidad.categoria === cat)) return Promise.resolve();
+      s.pedirCapacidad();
+      this.pintarPct(s.estado().pct);
+      var pedir = this.pedir || fetch;
+      var listo = function (json) {
+        if (self.solicitud === s && s.fijarCapacidad(cat, json)) self.pintarPct(s.estado().pct);
+      };
+      return Promise.resolve()
+        .then(function () { return pedir(URL_CAPACIDAD + '?categoria=' + encodeURIComponent(cat), { cache: 'no-store' }); })
+        .then(function (r) {
+          return r.json().catch(function () { return null; }).then(function (json) { return r.ok ? json : null; });
+        })
+        .then(listo, function () { listo(null); });
     }
 
     pintarSelect(sel, mot, e) {
@@ -468,6 +627,15 @@ window.Iniciativas = (function () {
       this.$('motDirector').textContent = est.director.motivo;
       this.mostrarCampos(est.camposVisibles);
       this.pintarPct(est.pct);
+      this.pintarRca(est.rca);
+    }
+
+    pintarRca(e) {
+      var input = this.$('campoRca');
+      input.disabled = !e.habilitado;
+      input.setAttribute('aria-required', e.obligatorio ? 'true' : 'false');
+      this.$('motRca').textContent = e.motivo;
+      this.$('rotRcaObligatorio').hidden = !e.obligatorio;
     }
 
     // 02 y 03 se ven al elegir el tipo; antes, su aviso.
@@ -483,6 +651,8 @@ window.Iniciativas = (function () {
     pintarPct(e) {
       var input = this.$('campo-pct');
       input.disabled = !e.habilitado;
+      // El tope del control sigue a la capacidad; sin ella, 100.
+      input.setAttribute('max', e.max === null || e.max === undefined ? '100' : String(e.max));
       this.pintarMensaje('pct', e.motivo);
     }
 
@@ -507,6 +677,7 @@ window.Iniciativas = (function () {
       this.$('outDirector').textContent = '—';
       this.$('motDirector').textContent = '';
       this.mostrarCampos(false);
+      this.pintarRca({ habilitado: false, obligatorio: false, motivo: motivo });
     }
 
     // ---- campos de captura ----
@@ -579,6 +750,72 @@ window.Iniciativas = (function () {
       });
     }
 
+    // ---- RCA y validacion en el servidor ----
+    cablearEnvio() {
+      var self = this;
+      this.$('campoRca').addEventListener('change', function (e) {
+        if (!self.solicitud) return;
+        var archivos = e.target && e.target.files;
+        self.solicitud.elegirRca(archivos && archivos.length ? archivos[0] : null);
+      });
+      this.$('btnValidar').addEventListener('click', function () { self.validar(); });
+    }
+
+    // Primero lo que el navegador ya sabe (faltantes, formatos); si pasa, el
+    // servidor vuelve a validar TODO, con catalogo y capacidad actuales. No
+    // se guarda nada en ningun caso.
+    validar() {
+      var self = this, s = this.solicitud;
+      if (!s) return Promise.resolve();
+      var locales = s.erroresCliente();
+      if (locales.length) {
+        this.mostrarResultado(false, 'Revisa la solicitud antes de validarla:', locales);
+        return Promise.resolve();
+      }
+
+      var campos = s.camposEnvio();
+      var datos = new FormData();
+      Object.keys(campos).forEach(function (k) { datos.append(k, campos[k]); });
+      if (s.rca) datos.append('rca', s.rca, s.rca.name);
+
+      var boton = this.$('btnValidar');
+      boton.disabled = true;
+      this.mostrarResultado(null, 'Validando en el servidor…', []);
+      var pedir = this.pedir || fetch;
+      return Promise.resolve()
+        .then(function () { return pedir(URL_VALIDAR, { method: 'POST', body: datos }); })
+        .then(function (r) {
+          return r.json().catch(function () { return null; }).then(function (json) {
+            if (self.solicitud !== s) return;
+            if (json && typeof json.valida === 'boolean') {
+              self.mostrarResultado(json.valida, json.valida
+                ? 'La solicitud pasó la validación del servidor. No se guardó: falta el número de solicitud y el destino del RCA.'
+                : 'El servidor rechazó la solicitud:', Array.isArray(json.errores) ? json.errores : []);
+            } else {
+              self.mostrarResultado(false, (json && json.error) || ('El servidor respondió ' + r.status + '.'), []);
+            }
+          });
+        })
+        .catch(function () {
+          if (self.solicitud === s) self.mostrarResultado(false, 'No se pudo conectar con el servidor.', []);
+        })
+        .then(function () { boton.disabled = false; });
+    }
+
+    // valida: true / false / null (en curso). errores: [{campo, mensaje}].
+    mostrarResultado(valida, texto, errores) {
+      var caja = this.$('iniResultado');
+      caja.hidden = false;
+      caja.classList.toggle('ok', valida === true);
+      caja.classList.toggle('mal', valida === false);
+      caja.innerHTML = '<strong>' + Escape.html(texto) + '</strong>' + (errores.length
+        ? '<ul>' + errores.map(function (e) {
+            var rot = ROTULOS[e.campo] ? ROTULOS[e.campo] + ': ' : '';
+            return '<li>' + Escape.html(rot + (e.mensaje || '')) + '</li>';
+          }).join('') + '</ul>'
+        : '');
+    }
+
     mostrarError(texto) {
       this.$('iniErrorTexto').textContent = texto;
       this.$('iniError').hidden = false;
@@ -588,10 +825,12 @@ window.Iniciativas = (function () {
     // `pedir` es fetch por omision; las pruebas le pasan uno propio.
     cargar(pedir) {
       var self = this;
-      pedir = pedir || function (url) { return fetch(url, { cache: 'no-store' }); };
+      pedir = pedir || function (url, opciones) { return fetch(url, opciones || { cache: 'no-store' }); };
+      this.pedir = pedir;      // capacidad y validacion usan el mismo
       var mia = ++this.cargaId;
 
       this.solicitud = null;
+      this.$('iniResultado').hidden = true;
       if (this.globo) this.globo.ocultar();
       this.$('iniError').hidden = true;
       this.$('iniOmitidas').hidden = true;
@@ -651,6 +890,8 @@ window.Iniciativas = (function () {
 
   return {
     URL_CATALOGO: URL_CATALOGO,
+    URL_CAPACIDAD: URL_CAPACIDAD,
+    URL_VALIDAR: URL_VALIDAR,
     CAMPOS_COMUNES: CAMPOS_COMUNES,
     AYUDA_FIJA: AYUDA_FIJA,
     VALIDAR: VALIDAR,

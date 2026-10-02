@@ -513,14 +513,15 @@ pruebas.push(function () {
     Check('N17 % bloqueado hasta la Categoria', [true, 'Elige primero la Categoría en Clasificación.'],
       [p.sel('campo-pct').disabled, p.sel('campo-pct-msg').textContent]);
     elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO y'); elegirEn(p, 'selCategoria', '/A/Cat 2');
-    Check('N17 con Categoria: habilitado; Director intacto', [false, 'Para la categoría elegida en Clasificación.', 'Dir A'],
+    // pedirOk no trae capacidad: mientras tanto, "Calculando".
+    Check('N17 con Categoria: habilitado; Director intacto', [false, 'Calculando la capacidad de reducción de la categoría…', 'Dir A'],
       [p.sel('campo-pct').disabled, p.sel('campo-pct-msg').textContent, p.sel('outDirector').textContent]);
 
     escribir(p, 'iniCamposImpacto', 'pct', '150');
     Check('N18 % fuera de rango: error visible', ['Escribe un porcentaje entre 0 y 100, con hasta dos decimales.', true, 'true'],
       [p.sel('campo-pct-msg').textContent, p.sel('campo-pct-msg').classList.contains('ini-error-campo'), p.sel('campo-pct').getAttribute('aria-invalid')]);
     escribir(p, 'iniCamposImpacto', 'pct', '35');
-    Check('N18 % valido: sin error', ['Para la categoría elegida en Clasificación.', false, 0.35],
+    Check('N18 % valido: sin error', ['Calculando la capacidad de reducción de la categoría…', false, 0.35],
       [p.sel('campo-pct-msg').textContent, p.sel('campo-pct-msg').classList.contains('ini-error-campo'), P.solicitud.pctFraccion()]);
     escribir(p, 'iniCamposImpacto', 'volumetria', '-3');
     Check('N19 Volumetria negativa: error', 'Escribe un número entero, de 0 en adelante.', p.sel('campo-volumetria-msg').textContent);
@@ -555,8 +556,8 @@ pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   Check('N23 secciones 01-04 en orden', ['Clasificación', 'Información del problema', 'Impacto', 'RCA'],
     (html.match(/<h3 id="iniCab[A-Za-z]+">[^<]+<\/h3>/g) || []).map(function (h) { return h.replace(/<[^>]+>/g, ''); }));
-  Check('N24 RCA: input de archivo deshabilitado y su aviso', [true, true],
-    [/<input type="file" id="campoRca" aria-describedby="motRca" disabled>/.test(html), /falta definir dónde se guardará el documento/.test(html)]);
+  Check('N24 RCA: input de archivo, deshabilitado hasta el tipo', [true, true],
+    [/<input type="file" id="campoRca" aria-describedby="motRca" disabled>/.test(html), /Elige primero un Tipo de iniciativa\./.test(html)]);
   Check('N24 RCA no es un campo de texto', false, /id="campoRca"[^>]*type="text"|<textarea[^>]*rca/i.test(html));
   Check('N25 una sola Categoria en el formulario', 1, (html.match(/id="selCategoria"/g) || []).length);
   Check('N26 ayuda en SO y Categoria sin cambiar los ids', [true, true],
@@ -732,6 +733,166 @@ pruebas.push(function () {
     [raiz.classList.contains('lateral-cerrada'), boton.getAttribute('aria-expanded'), boton.title]);
 });
 
+// S) Solicitud: Problem primero, RCA condicional, requeridos, capacidad y
+//    validacion en el servidor (con un `pedir` que enruta por URL).
+function enrutador(capacidades, validar, registro) {
+  return function (url, opciones) {
+    registro && registro.push([url, opciones && opciones.method, opciones && opciones.body]);
+    if (url.indexOf('admin_iniciativas_capacidad.ashx') >= 0) {
+      var cat = decodeURIComponent(url.split('categoria=')[1]);
+      return Promise.resolve(capacidades[cat] ? Respuesta(200, capacidades[cat]) : Respuesta(500, { error: 'x' }));
+    }
+    if (url.indexOf('admin_iniciativas_validar.ashx') >= 0) return Promise.resolve(validar());
+    return Promise.resolve(Respuesta(200, {
+      tipos: ['Problem', 'Adopcion', 'Mejora'], tipo_problem: 'Problem', asignaciones: FILAS, omitidas: 0
+    }));
+  };
+}
+function esperar() { return new Promise(function (ok) { setTimeout(ok, 0); }); }
+
+pruebas.push(function () {
+  var cat = I.CatalogoIniciativas.desdeJson({ tipos: ['Problem', 'Adopcion'], tipo_problem: 'Problem', asignaciones: FILAS });
+  Check('S1 el orden de tipos es el del servidor (Problem primero)', ['Problem', 'Adopcion'], cat.tipos);
+  Check('S1 tipo_problem', 'Problem', cat.tipoProblem);
+  Check('S2 tipo_problem fuera de la lista se ignora', '',
+    I.CatalogoIniciativas.desdeJson({ tipos: ['Adopcion'], tipo_problem: 'Problem', asignaciones: FILAS }).tipoProblem);
+  Check('S2 sin tipo_problem: ningun tipo exige RCA', false,
+    (function () { var n = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK)); n.elegirTipo('Problem'); return n.rcaObligatorio(); })());
+
+  // RCA condicional
+  var s = new I.SolicitudNueva(cat);
+  s.elegirTipo('Problem');
+  Check('S3 Problem: RCA obligatorio', [true, 'Obligatorio para Problem. El archivo todavía no se guarda.'],
+    [s.estado().rca.obligatorio, s.estado().rca.motivo]);
+  Check('S3 Problem sin RCA: falta rca', true, s.faltantes().indexOf('rca') >= 0);
+  s.elegirRca({ name: 'x.pdf', size: 10 });
+  Check('S3 Problem con RCA: no falta', false, s.faltantes().indexOf('rca') >= 0);
+  s.elegirRca({ name: 'vacio.pdf', size: 0 });
+  Check('S3 archivo vacio no cuenta', true, s.faltantes().indexOf('rca') >= 0);
+  s.elegirTipo('Adopcion');
+  Check('S4 otro tipo: RCA opcional', [false, false], [s.rcaObligatorio(), s.faltantes().indexOf('rca') >= 0]);
+
+  // Requeridos
+  var r = new I.SolicitudNueva(cat);
+  Check('S5 todo vacio: faltan todos menos RCA (sin tipo)',
+    ['tipo', 'po', 'so', 'categoria', 'titulo', 'analisis', 'observaciones', 'volumetria', 'pct'], r.faltantes());
+  r.elegirTipo('Adopcion'); r.elegir(0, 'PO 1'); r.elegir(1, 'SO x'); r.elegir(2, '/A/Cat 1');
+  r.capturar('titulo', 'T'); r.capturar('analisis', 'D'); r.capturar('observaciones', 'O');
+  r.capturar('volumetria', '10'); r.capturar('pct', '20');
+  Check('S6 completa: sin faltantes ni errores', [[], []], [r.faltantes(), r.erroresCliente()]);
+  r.capturar('observaciones', '   ');
+  Check('S6 solo espacios cuenta como vacio', ['observaciones'], r.faltantes());
+  r.capturar('observaciones', 'O');
+  Check('S7 campos de envio (Descripcion = analisis)',
+    { tipo: 'Adopcion', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1', titulo: 'T', descripcion: 'D',
+      observaciones: 'O', volumetria: '10', pct: '20', disponible_cliente: '' }, r.camposEnvio());
+
+  // Capacidad
+  var cap = r.pedirCapacidad();
+  Check('S8 pidiendo: Calculando', 'Calculando la capacidad de reducción de la categoría…', r.estado().pct.motivo);
+  Check('S8 respuesta de otra categoria se descarta', false, r.fijarCapacidad('/A/Cat 2', { disponible: 0.1, determinable: true }));
+  r.fijarCapacidad(cap, { disponible: 0.4, determinable: true });
+  Check('S9 disponible 40%', ['Capacidad de reducción · Disponible: 40%. Puedes solicitar entre 0% y 40%.', 40],
+    [r.estado().pct.motivo, r.estado().pct.max]);
+  r.capturar('pct', '40');
+  Check('S9 40% cabe', '', r.error('pct'));
+  r.capturar('pct', '40.01');
+  Check('S10 40.01% no cabe', 'Esta categoría solo tiene 40% disponible.', r.error('pct'));
+  r.capturar('pct', '33');
+  Check('S10 33% (sin multiplos de 5) cabe', '', r.error('pct'));
+  r.fijarCapacidad(cap, { disponible: 0.3333, determinable: true });
+  r.capturar('pct', '33.33');
+  Check('S11 33.33 con 33.33 disponible: sin error de flotantes', ['', 33.33], [r.error('pct'), r.maxPct()]);
+  r.fijarCapacidad(cap, { disponible: 0, determinable: true });
+  r.capturar('pct', '0');
+  Check('S12 0% con 0 disponible cabe', '', r.error('pct'));
+  r.fijarCapacidad(cap, { disponible: 1, determinable: false });
+  Check('S13 no determinable: aviso y error', [true, 'No se puede calcular la capacidad de esta categoría.'],
+    [/Capacidad no determinable/.test(r.estado().pct.motivo), r.error('pct')]);
+  r.fallaCapacidad(cap);
+  Check('S14 error de capacidad: no bloquea, el servidor decide', ['', true],
+    [r.error('pct'), /el servidor la revisará al validar/.test(r.estado().pct.motivo)]);
+  r.elegir(2, '/A/Cat 1');
+  r.elegir(1, 'SO y');
+  Check('S15 cambiar la cascada borra la capacidad', null, r.capacidad);
+  r.elegir(2, '/A/Cat 2');
+  r.fijarCapacidad(r.pedirCapacidad(), { disponible: 0.5, determinable: true });
+  r.elegirTipo('Mejora');
+  Check('S15 cambiar el tipo borra la capacidad', null, r.capacidad);
+});
+
+// S16-S22 en la pagina: GET de capacidad, tope del %, RCA y POST de validacion
+pruebas.push(function () {
+  var llamadas = [];
+  var respuestaValidar = function () { return Respuesta(200, { valida: true, errores: [], guardada: false, numero_solicitud: null }); };
+  var p = Pagina(nunca);
+  var P = p.ventana.IniciativasPagina;
+  var pedir = enrutador({
+    '/A/Cat 1': { categoria: '/A/Cat 1', disponible: 0.4, determinable: true },
+    '/A/Cat 2': { categoria: '/A/Cat 2', disponible: 0.3, determinable: true }
+  }, function () { return respuestaValidar(); }, llamadas);
+  return P.cargar(pedir).then(function () {
+    Check('S16 selector: Problem primero', ['Problem', 'Adopcion', 'Mejora'], p.sel('selTipo').opciones());
+    Check('S16 RCA bloqueado sin tipo', [true, 'Elige primero un Tipo de iniciativa.'], [p.sel('campoRca').disabled, p.sel('motRca').textContent]);
+    elegirEn(p, 'selTipo', 'Problem');
+    Check('S17 Problem: RCA habilitado y obligatorio', [false, 'true', false],
+      [p.sel('campoRca').disabled, p.sel('campoRca').getAttribute('aria-required'), p.sel('rotRcaObligatorio').hidden]);
+    elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
+    return esperar();
+  }).then(function () {
+    Check('S18 capacidad pedida y pintada', ['Capacidad de reducción · Disponible: 40%. Puedes solicitar entre 0% y 40%.', '40'],
+      [p.sel('campo-pct-msg').textContent, p.sel('campo-pct').getAttribute('max')]);
+    escribir(p, 'iniCamposImpacto', 'pct', '50');
+    Check('S18 50% marcado en rojo', ['Esta categoría solo tiene 40% disponible.', 'true'],
+      [p.sel('campo-pct-msg').textContent, p.sel('campo-pct').getAttribute('aria-invalid')]);
+
+    // Validar con faltantes: no sale nada al servidor.
+    var antes = llamadas.length;
+    return P.validar().then(function () {
+      Check('S19 faltantes: no hay POST', antes, llamadas.length);
+      var html = p.sel('iniResultado').innerHTML;
+      Check('S19 lista lo que falta, RCA incluido', [true, true, true, true],
+        [/Título: Falta Título\./.test(html), /RCA: El RCA es obligatorio para Problem\./.test(html),
+         /% Disminución: Esta categoría solo tiene 40% disponible\./.test(html), p.sel('iniResultado').classList.contains('mal')]);
+    });
+  }).then(function () {
+    escribir(p, 'iniCamposComunes', 'titulo', 'T');
+    escribir(p, 'iniCamposComunes', 'analisis', 'D');
+    escribir(p, 'iniCamposComunes', 'observaciones', 'O');
+    escribir(p, 'iniCamposImpacto', 'volumetria', '10');
+    escribir(p, 'iniCamposImpacto', 'pct', '40');
+    var rca = p.sel('campoRca');
+    rca.files = [new File(['%PDF'], 'RCA_v7.pdf')];   // File real: FormData lo exige
+    rca.disparar('change');
+    return P.validar();
+  }).then(function () {
+    var post = llamadas.filter(function (l) { return l[1] === 'POST'; });
+    Check('S20 un solo POST, a validar', [1, '../handlers/admin_iniciativas_validar.ashx'], [post.length, post[0] && post[0][0]]);
+    var cuerpo = post[0][2];
+    Check('S20 cuerpo: campos y archivo', ['Problem', '/A/Cat 1', 'D', '40', '40', 'RCA_v7.pdf'],
+      [cuerpo.get('tipo'), cuerpo.get('categoria'), cuerpo.get('descripcion'), cuerpo.get('pct'),
+       cuerpo.get('disponible_cliente'), cuerpo.get('rca') && cuerpo.get('rca').name]);
+    Check('S20 valida: avisa que no se guardo', [true, true],
+      [/No se guardó/.test(p.sel('iniResultado').innerHTML), p.sel('iniResultado').classList.contains('ok')]);
+
+    // Concurrencia: el navegador cree 40%, pero el servidor ya ve 30% y
+    // rechaza. La pantalla muestra lo que dijo el servidor.
+    respuestaValidar = function () {
+      return Respuesta(422, { valida: false, errores: [{ campo: 'pct', mensaje: 'La categoria solo tiene 30% de capacidad disponible.' }] });
+    };
+    return P.validar();
+  }).then(function () {
+    Check('S21 rechazo del servidor manda aunque el navegador diga 40%', [true, true, true],
+      [/El servidor rechazó la solicitud/.test(p.sel('iniResultado').innerHTML),
+       /30% de capacidad disponible/.test(p.sel('iniResultado').innerHTML), p.sel('iniResultado').classList.contains('mal')]);
+    respuestaValidar = function () { return Respuesta(403, { error: 'No tienes acceso a la administracion de iniciativas.', tipo: 'AccesoDenegado' }); };
+    return P.validar();
+  }).then(function () {
+    Check('S22 403 del servidor se muestra', true, /No tienes acceso/.test(p.sel('iniResultado').innerHTML));
+    Check('S22 el boton se rehabilita', false, p.sel('btnValidar').disabled);
+  });
+});
+
 // P) Nada se persiste
 pruebas.push(function () {
   var llamadas = [];
@@ -744,16 +905,22 @@ pruebas.push(function () {
     escribir(p, 'iniCamposComunes', 'analisis', 'y');
     return new Promise(function (ok) { setTimeout(ok, 0); });
   }).then(function () {
-    // Dos GET al abrir (registro y catalogo, en paralelo) y ninguno mas.
-    Check('P1 solo los dos GET de lectura en todo el flujo',
-      [['../handlers/admin_iniciativas_catalogos.ashx', null], ['../handlers/admin_iniciativas_registro.ashx', null]],
+    // Dos GET al abrir (registro y catalogo, en paralelo) y el GET de la
+    // capacidad al elegir la Categoria. Sin "Validar", ningun POST.
+    Check('P1 solo GET de lectura en el flujo de captura',
+      [['../handlers/admin_iniciativas_capacidad.ashx?categoria=%2FA%2FCat%201', null],
+       ['../handlers/admin_iniciativas_catalogos.ashx', null], ['../handlers/admin_iniciativas_registro.ashx', null]],
       llamadas.map(function (l) { return [l[0], l[1] || null]; }).sort());
     var js = leer('admin/iniciativas.js') + leer('admin/registro-iniciativas.js'), html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
-    Check('P2 el JS no envia nada', [false, false, false, false],
-      [/method\s*:/.test(js), /XMLHttpRequest/.test(js), /sendBeacon/.test(js), /['"]POST['"]/i.test(js)]);
+    // El unico envio es el POST de validacion, que no guarda.
+    Check('P2 el unico POST es a admin_iniciativas_validar', [1, 1, true, false, false],
+      [(js.match(/method\s*:/g) || []).length, (js.match(/['"]POST['"]/gi) || []).length,
+       /pedir\(URL_VALIDAR, \{ method: 'POST'/.test(js), /XMLHttpRequest/.test(js), /sendBeacon/.test(js)]);
     Check('P3 el HTML no tiene <form> ni submit', [false, false], [/<form/i.test(html), /type="submit"/i.test(html)]);
     var ashx = (leer('handlers/admin_iniciativas_catalogos.ashx') + leer('handlers/admin_iniciativas_registro.ashx') +
-                leer('App_Code/ExperienciaRegistro.cs')).split('\n')
+                leer('handlers/admin_iniciativas_capacidad.ashx') + leer('handlers/admin_iniciativas_validar.ashx') +
+                leer('App_Code/ExperienciaRegistro.cs') + leer('App_Code/ExperienciaCapacidad.cs') +
+                leer('App_Code/IniciativaService.cs') + leer('App_Code/SolicitudIniciativa.cs')).split('\n')
       .filter(function (l) { return !/^\s*\/\//.test(l); }).join('\n');
     Check('P4 el handler no escribe en la base', false, /\b(INSERT|UPDATE|DELETE|MERGE|EXEC|CREATE|ALTER|DROP)\b/i.test(ashx));
   });
