@@ -146,6 +146,18 @@
             <span class="mnav-txt">Tablero</span>
           </button>
         </li>
+        <!-- Administracion: un ENLACE a otra pagina, no una pestaña (sin
+             data-tab, fuera de MODULOS). Oculta hasta que SesionAdmin
+             confirma que la cuenta Windows esta autorizada. Es solo UX: la
+             pagina y sus handlers se protegen en el servidor (AccesoAdmin). -->
+        <li data-solo-admin hidden>
+          <a class="mnav" id="mnav-admin" href="admin/iniciativas.html" title="Administración">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 3.5 19 6v5.5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6z"/><path d="m9 12 2 2 4-4"/>
+            </svg>
+            <span class="mnav-txt">Administración</span>
+          </a>
+        </li>
       </ul>
     </nav>
   </aside>
@@ -493,6 +505,13 @@ try {
   console.error('Fallo al activar la pestaña inicial:', e);
   try { activarTab('sla'); } catch (e2) { console.error(e2); }
 }
+</script>
+
+<!-- Entrada Administracion del menu, solo para las cuentas autorizadas.
+     Aparte y al final: si falla, el tablero no se entera. -->
+<script src="assets/js/sesion-admin.js"></script>
+<script>
+try { new SesionAdmin('').aplicar(document); } catch (e) { console.error(e); }
 </script>
 </body>
 </html>

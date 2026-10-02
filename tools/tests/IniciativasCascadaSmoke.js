@@ -703,10 +703,20 @@ pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   var hrefs = (html.match(/class="mnav[^"]*" href="([^"]+)"/g) || []).map(function (m) { return m.replace(/.*href="/, '').replace('"', ''); });
   Check('M1 entradas = modulos del tablero', ['../dashboard.html#sla', '../dashboard.html#backlog', '../dashboard.html#experiencia',
-    '../dashboard.html#qa', '../dashboard.html#qare', '../dashboard.html#call', '../dashboard.html#tablero'], hrefs);
-  Check('M2 sin entrada activa ni hacia admin', [false, false, false],
-    [/mnav active/.test(html), /aria-current/.test(html), /href="[^"]*admin/i.test(html)]);
-  Check('M3 el tablero no enlaza a la pagina', false, /iniciativas\.html/.test(leer('dashboard.html')));
+    '../dashboard.html#qa', '../dashboard.html#qare', '../dashboard.html#call', '../dashboard.html#tablero',
+    'iniciativas.html'], hrefs);
+  // Administracion: la UNICA entrada activa, y oculta hasta que SesionAdmin
+  // confirma la cuenta (data-solo-admin hidden). Es solo UX: el acceso lo
+  // decide el servidor (AccesoAdmin).
+  var activas = html.match(/class="mnav active"[^>]*>/g) || [];
+  Check('M2 una sola entrada activa: Administracion', [1, true],
+    [activas.length, /href="iniciativas\.html"[^>]*aria-current="page"/.test(activas[0] || '')]);
+  var tablero = leer('dashboard.html').replace(/<!--[\s\S]*?-->/g, '');
+  Check('M3 el tablero enlaza a la pagina solo desde una entrada oculta',
+    [true, true, true],
+    [/<li data-solo-admin hidden>\s*<a class="mnav" id="mnav-admin" href="admin\/iniciativas\.html"/.test(tablero),
+     (tablero.match(/iniciativas\.html/g) || []).length === 1,
+     /<li data-solo-admin hidden>\s*<a class="mnav active" href="iniciativas\.html"/.test(html)]);
 
   // Documento propio: el de Pagina() ya tiene el boton cableado por iniciar().
   var doc = Documento();

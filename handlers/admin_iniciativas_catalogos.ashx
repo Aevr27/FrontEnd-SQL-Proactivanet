@@ -21,8 +21,10 @@
 // La cascada se arma en el navegador filtrando las asignaciones.
 //
 // SOLO LECTURA: tres SELECT (Problem, CatCategoriaDueno y CatPersona) sobre
-// una conexion. No crea ni cambia nada en la base. Sin autenticacion propia
-// todavia, como el resto de admin/.
+// una conexion. No crea ni cambia nada en la base.
+//
+// ACCESO: solo las cuentas de AdminAllowedUsers (AccesoAdmin.Exigir); el
+// resto recibe 403 antes de tocar la base.
 
 using System;
 using System.Data.SqlClient;
@@ -32,6 +34,8 @@ public class AdminIniciativasCatalogos : IHttpHandler
 {
     public void ProcessRequest(HttpContext context)
     {
+        if (!AccesoAdmin.Exigir(context)) return;
+
         DashboardHandler.Responder(context, delegate
         {
             using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))

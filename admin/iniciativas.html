@@ -56,9 +56,9 @@
        pagina es estatica y no hay plantillas). Diferencias a proposito:
        - Cada entrada es un enlace a ../dashboard.html#<modulo> (el tablero
          abre el modulo del hash al cargar), no un boton con data-tab.
-       - Ninguna entrada esta activa y Administracion NO aparece: esta pagina
-         sigue sin poder alcanzarse desde el menu; la barra solo sirve para
-         volver a los modulos.
+       - Administracion es la entrada activa. En el tablero solo aparece para
+         las cuentas de AdminAllowedUsers (SesionAdmin); aqui igual, aunque
+         quien no esta autorizado ya no deberia llegar (AdminAccesoModulo).
        Plegar/desplegar: MenuLateral en admin/iniciativas.js. Si cambia la
        lista de modulos del tablero, actualizar tambien esta copia. -->
   <aside class="lateral" id="lateral">
@@ -136,6 +136,14 @@
             <span class="mnav-txt">Tablero</span>
           </a>
         </li>
+        <li data-solo-admin hidden>
+          <a class="mnav active" href="iniciativas.html" aria-current="page" title="Administración">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 3.5 19 6v5.5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6z"/><path d="m9 12 2 2 4-4"/>
+            </svg>
+            <span class="mnav-txt">Administración</span>
+          </a>
+        </li>
       </ul>
     </nav>
   </aside>
@@ -146,6 +154,9 @@
     <div>
       <h1>Administración de iniciativas</h1>
       <div class="sub">Administracion de iniciativas · entorno de trabajo</div>
+      <!-- "Bienvenido, <Nombre>" solo si la cuenta Windows se resuelve en
+           CatPersona / CatLiderGrupo (SesionAdmin). Si no, queda oculto. -->
+      <div class="ini-saludo" id="iniSaludo" hidden></div>
     </div>
   </header>
 
@@ -368,10 +379,14 @@
 </aside>
 
 <script src="../assets/js/escape.js"></script>
+<script src="../assets/js/sesion-admin.js"></script>
 <script src="../assets/js/catalogos.js"></script>
 <script src="../assets/js/globo-ayuda.js"></script>
 <script src="cascada-organizacional.js"></script>
 <script src="registro-iniciativas.js"></script>
 <script src="iniciativas.js"></script>
+<script>
+try { new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo')); } catch (e) { console.error(e); }
+</script>
 </body>
 </html>

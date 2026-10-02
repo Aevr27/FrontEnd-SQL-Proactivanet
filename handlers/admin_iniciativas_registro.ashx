@@ -22,8 +22,10 @@
 //
 // SOLO LECTURA: SELECT sobre dbo.vw_ProblemCategoria, dbo.Problem,
 // dbo.CatPrefijoProblem, dbo.ProblemCategoria, dbo.CatCategoriaDueno y
-// dbo.CatPersona (y dbo.Problem.TipoIniciativa por folio). No crea ni cambia nada en la base. Sin autenticacion
-// propia todavia, como el resto de admin/.
+// dbo.CatPersona (y dbo.Problem.TipoIniciativa por folio). No crea ni cambia nada en la base.
+//
+// ACCESO: solo las cuentas de AdminAllowedUsers (AccesoAdmin.Exigir); el
+// resto recibe 403 antes de tocar la base.
 //
 // POR QUE NO USA DashboardHandler.Responder: el mismo motivo que
 // experiencia.ashx. Descripcion y Observaciones de ~1000 iniciativas pueden
@@ -39,6 +41,8 @@ public class AdminIniciativasRegistro : IHttpHandler
 {
     public void ProcessRequest(HttpContext context)
     {
+        if (!AccesoAdmin.Exigir(context)) return;
+
         context.Response.ContentType = "application/json; charset=utf-8";
         context.Response.Cache.SetCacheability(HttpCacheability.NoCache);
 

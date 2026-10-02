@@ -4294,7 +4294,9 @@ function activarTab(nombre) {
     .finally(() => { montando.delete(nombre); });
 }
 
-document.querySelectorAll('.mnav').forEach(btn => {
+/* Solo las entradas con data-tab son pestañas. Administracion es un enlace
+   a otra pagina (admin/iniciativas.html) y no debe pasar por activarTab. */
+document.querySelectorAll('.mnav[data-tab]').forEach(btn => {
   btn.addEventListener('click', () => {
     activarTab(btn.dataset.tab);
     /* En pantalla estrecha la barra desplegada se monta ENCIMA del contenido

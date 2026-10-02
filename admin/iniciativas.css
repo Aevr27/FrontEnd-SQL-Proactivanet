@@ -10,6 +10,9 @@
 
 .ini-body { padding-bottom: 24px; }
 
+/* Saludo "Bienvenido, <Nombre>" bajo el titulo (SesionAdmin). */
+.ini-saludo { margin-top: 4px; font-size: 13px; font-weight: 600; color: var(--ink); }
+
 /* La barra lateral es la de dashboard.css; aqui sus entradas son enlaces
    (<a>) en vez de botones, asi que solo falta quitarles el subrayado. */
 .lateral a.mnav { text-decoration: none; }

@@ -62,6 +62,15 @@
          boton "Ver detalle". La URL lleva token, por eso vive aqui y no en
          el HTML ni en el JavaScript. Si se deja vacia, el boton no aparece. -->
     <add key="ExperienciaLigaDetalle"    value="" />
+
+    <!-- Admin -> Iniciativas (admin/iniciativas.html y los handlers
+         admin_iniciativas_*). Cuentas Windows autorizadas, DOMINIO\cuenta,
+         separadas por ";". Sin distinguir mayusculas. Una entrada sin
+         dominio se ignora. Vacia o ausente: no entra nadie. Son solo
+         nombres de cuenta: aqui no van contraseñas ni secretos. La
+         identidad la pone IIS (Autenticacion de Windows); ver
+         App_Code/AccesoAdmin.cs. -->
+    <add key="AdminAllowedUsers"         value="SORIANA\user1;SORIANA\user2;SORIANA\user3;SORIANA\user4" />
   </appSettings>
 
   <system.web>
@@ -82,6 +91,15 @@
   </system.web>
 
   <system.webServer>
+    <!-- Protege admin/iniciativas.html (estatico: ningun handler lo sirve)
+         y repite la proteccion de los handlers admin_iniciativas_*: 403 a
+         toda cuenta fuera de AdminAllowedUsers. SIN
+         preCondition="managedHandler" a proposito, para que corra tambien
+         con los archivos estaticos. La clase vive en App_Code/AccesoAdmin.cs. -->
+    <modules>
+      <add name="AdminAccesoModulo" type="AdminAccesoModulo" />
+    </modules>
+
     <defaultDocument>
       <files>
         <add value="dashboard.html" />

@@ -235,6 +235,44 @@ public sealed class DirectorioOrganizacional
         return salida;
     }
 
+    // Los Product Owners con los que un Service Owner COMPARTE alguna
+    // categoria vigente (dueños resueltos con la misma regla de Resolver).
+    // No es una jerarquia SO -> PO: solo las combinaciones que existen en
+    // dbo.CatCategoriaDueno. PO -> sus categorias, en orden ordinal. Si
+    // salen varios PO, quien llame NO debe escoger uno.
+    public SortedDictionary<string, List<string>> ProductOwnersDe(string so)
+    {
+        var salida = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
+        so = Normaliza(so);
+        if (so == null) return salida;
+
+        foreach (var d in Duenos())
+        {
+            if (!d.Vigente) continue;
+            string po, soFila, director, manager;
+            Resolver(d.C1, d.CategoriaN2, out po, out soFila, out director, out manager);
+            if (po == null || !string.Equals(soFila, so, StringComparison.OrdinalIgnoreCase)) continue;
+
+            // Un PO escrito con otra capitalizacion es el mismo PO.
+            string llave = null;
+            foreach (var k in salida.Keys)
+                if (string.Equals(k, po, StringComparison.OrdinalIgnoreCase)) { llave = k; break; }
+            if (llave == null) { llave = po; salida[llave] = new List<string>(); }
+            salida[llave].Add(d.CategoriaN2);
+        }
+
+        foreach (var lista in salida.Values) lista.Sort(string.CompareOrdinal);
+        return salida;
+    }
+
+    // La fila de una categoria N2 capturada, o null.
+    public Dueno Categoria(string n2)
+    {
+        Dueno d;
+        n2 = Normaliza(n2);
+        return n2 != null && _porN2.TryGetValue(n2, out d) ? d : null;
+    }
+
     // ------------------------------------------------------------------
     // Lectura
     // ------------------------------------------------------------------
