@@ -199,6 +199,8 @@ public static class IdentidadAdminSmoke
               DirectorioPersonas.PrimerCorreo("minervasp@soriana.com\r\n danielalc@soriana.com"));
         Check("primer correo: espacios alrededor", "AGomez@soriana.com", DirectorioPersonas.PrimerCorreo("  AGomez@soriana.com ,x@y.com"));
         Check("primer correo: uno solo", "a@soriana.com", DirectorioPersonas.PrimerCorreo("a@soriana.com"));
+        Check("primer correo: NBSP como separador", "a@soriana.com",
+              DirectorioPersonas.PrimerCorreo(" a@soriana.com b@soriana.com"));
         Check("primer correo: vacio / solo comas", true,
               DirectorioPersonas.PrimerCorreo(" , ") == null && DirectorioPersonas.PrimerCorreo(null) == null);
 

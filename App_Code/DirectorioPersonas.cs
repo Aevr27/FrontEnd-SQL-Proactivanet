@@ -377,7 +377,7 @@ public sealed class DirectorioPersonas
     public static string PrimerCorreo(string lista)
     {
         if (lista == null) return null;
-        var partes = lista.Split(new[] { ',', ';', ' ', '\t', '\r', '\n', ' ' },
+        var partes = lista.Split(new[] { ',', ';', ' ', '\t', '\r', '\n', '\u00A0' },
                                  StringSplitOptions.RemoveEmptyEntries);
         return partes.Length == 0 ? null : partes[0];
     }
