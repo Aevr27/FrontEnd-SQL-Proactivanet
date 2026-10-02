@@ -68,8 +68,9 @@ public static class TiposSolicitud
 // ---------------------------------------------------------------------
 // Identifica la SOLICITUD. NO es Problem.Codigo ("PRB 2026-00XXX"), no lo
 // sustituye y no lleva año, tipo ni prefijo: consecutivo perpetuo y unico.
-// Esta clase solo lo representa; quien lo emita (secuencia, tabla...) esta
-// por definir: REQUEST NUMBER PERSISTENCE: UNRESOLVED.
+// Esta clase solo lo representa y sabe cual sigue; QUIEN lo emite es un
+// IGeneradorNumeroSolicitud (abajo). Hoy no hay ninguno con almacen real:
+// REQUEST NUMBER PERSISTENCE: UNRESOLVED (necesita un objeto en la base).
 public sealed class NumeroSolicitud
 {
     public const int Digitos = 7;
@@ -93,9 +94,20 @@ public sealed class NumeroSolicitud
     // "#0000142": como se muestra.
     public override string ToString() { return "#" + Digitos7(); }
 
-    // Nombre permanente del RCA: el numero + la extension del original, en
-    // minusculas y solo con letras/digitos ("RCA_final_v7.PDF" -> "0000142.pdf").
-    // Sin extension util: solo el numero. El nombre original nunca se usa.
+    // El que sigue al ultimo emitido; sin ninguno emitido, el 1. Es la regla
+    // que aplicara el almacen (que ademas debe hacerlo atomico).
+    public static NumeroSolicitud Siguiente(int? ultimo)
+    {
+        var u = ultimo ?? 0;
+        if (u < 0) throw new ArgumentOutOfRangeException("ultimo");
+        if (u >= Maximo) throw new InvalidOperationException("Se agotaron los numeros de solicitud de " + Digitos + " digitos.");
+        return new NumeroSolicitud(u + 1);
+    }
+
+    // Nombre permanente del RCA: el numero + la extension del ORIGINAL, tal
+    // cual ("RCA_final_v7.docx" -> "0000142.docx"; no se fuerza .pdf ni se
+    // cambia la grafia). Solo se acepta si son letras/digitos; si no, o sin
+    // extension, solo el numero. El nombre original nunca se usa.
     public string NombreArchivoRca(string nombreOriginal)
     {
         var ext = ExtensionSegura(nombreOriginal);
@@ -110,8 +122,34 @@ public sealed class NumeroSolicitud
         if (corte >= 0) nombre = nombre.Substring(corte + 1);
         var punto = nombre.LastIndexOf('.');
         if (punto <= 0 || punto == nombre.Length - 1) return null;
-        var ext = nombre.Substring(punto + 1).Trim().ToLowerInvariant();
-        return Regex.IsMatch(ext, "^[a-z0-9]{1,10}$") ? ext : null;
+        var ext = nombre.Substring(punto + 1).Trim();
+        return Regex.IsMatch(ext, "^[A-Za-z0-9]{1,10}$") ? ext : null;
+    }
+}
+
+// Quien emite el numero. El emisor de verdad tiene que ser persistente
+// (sobrevive reinicios y despliegues), atomico entre procesos y emitir el
+// numero en la MISMA transaccion en que se guarda la solicitud: solo asi
+// "no hay otra solicitud en creacion con ese numero" es una garantia y no
+// una suposicion. Eso no existe sin un objeto nuevo en la base.
+public interface IGeneradorNumeroSolicitud
+{
+    // null = no hay emisor configurado; `motivo` dice por que.
+    NumeroSolicitud Emitir(out string motivo);
+}
+
+// El que hay hoy: no emite. NO es un contador en memoria ni en archivo a
+// proposito (se reiniciaria o se pisaria entre procesos/despliegues y no
+// queda ligado a ninguna solicitud guardada).
+public sealed class GeneradorNumeroSolicitudPendiente : IGeneradorNumeroSolicitud
+{
+    public const string Motivo =
+        "Sin almacen de solicitudes en la base: el numero de solicitud no se puede emitir todavia.";
+
+    public NumeroSolicitud Emitir(out string motivo)
+    {
+        motivo = Motivo;
+        return null;
     }
 }
 
@@ -209,6 +247,11 @@ public sealed class CatalogoSolicitud
     }
 
     public bool TieneTipo(string tipo) { return tipo != null && _tipos.Contains(tipo); }
+
+    // Cada valor por separado: existe en ALGUNA fila vigente.
+    public bool TienePo(string po) { return _asignaciones.Exists(a => a.Po == po); }
+    public bool TieneSo(string so) { return _asignaciones.Exists(a => a.So == so); }
+    public bool TieneCategoria(string c) { return _asignaciones.Exists(a => a.Categoria == c); }
 
     // La fila que casa EXACTAMENTE con lo elegido en la cascada, o null. Es
     // el mismo filtrado progresivo del navegador: PO, SO y Categoria tienen
@@ -349,6 +392,10 @@ public sealed class ValidadorIniciativa
         public decimal? PctFraccion;            // como PctDisminucion
         public string Director;                 // derivado de la combinacion
         public CapacidadCategoria.Resultado Capacidad;
+        // Solo si la solicitud es valida y hay emisor (IniciativaService
+        // .AsignarNumero); si no, null y NumeroPendiente dice por que.
+        public NumeroSolicitud Numero;
+        public string NumeroPendiente;
 
         public void Agregar(string campo, string mensaje)
         {
@@ -400,11 +447,18 @@ public sealed class ValidadorIniciativa
         var so = Limpio(s.ServiceOwner);
         var cat = Limpio(s.Categoria);
         if (po == null) r.Agregar(SolicitudIniciativa.CPo, "Falta el Product Owner.");
+        else if (!catalogo.TienePo(po)) r.Agregar(SolicitudIniciativa.CPo, "El Product Owner no esta en el catalogo vigente.");
         if (so == null) r.Agregar(SolicitudIniciativa.CSo, "Falta el Service Owner.");
+        else if (!catalogo.TieneSo(so)) r.Agregar(SolicitudIniciativa.CSo, "El Service Owner no esta en el catalogo vigente.");
         if (cat == null) r.Agregar(SolicitudIniciativa.CCategoria, "Falta la Categoria.");
+        else if (!catalogo.TieneCategoria(cat)) r.Agregar(SolicitudIniciativa.CCategoria, "La Categoria no esta en el catalogo vigente.");
 
+        // La combinacion solo se mira si cada valor existe por si mismo
+        // (para no repetir el mismo problema con dos mensajes).
         CatalogoSolicitud.Asignacion fila = null;
-        if (po != null && so != null && cat != null)
+        if (po != null && so != null && cat != null
+            && !r.TieneError(SolicitudIniciativa.CPo) && !r.TieneError(SolicitudIniciativa.CSo)
+            && !r.TieneError(SolicitudIniciativa.CCategoria))
         {
             fila = catalogo.Combinacion(po, so, cat);
             if (fila == null)

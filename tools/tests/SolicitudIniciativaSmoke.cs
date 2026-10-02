@@ -27,8 +27,33 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
 
+// Emisor de prueba: solo para probar CUANDO el servicio pide numero. No
+// persiste nada y no reemplaza al emisor real.
+public sealed class EmisorDePrueba : IGeneradorNumeroSolicitud
+{
+    private int _ultimo;
+    public int Llamadas;
+    public EmisorDePrueba(int ultimo) { _ultimo = ultimo; }
+    public NumeroSolicitud Emitir(out string motivo)
+    {
+        Llamadas++;
+        motivo = null;
+        var n = NumeroSolicitud.Siguiente(_ultimo);
+        _ultimo = n.Valor;
+        return n;
+    }
+}
+
 public static class SolicitudIniciativaSmoke
 {
+    // El constructor sin argumentos del servicio usa el emisor pendiente.
+    static bool ServicioUsaPendiente()
+    {
+        var campo = typeof(IniciativaService).GetField("_numeros",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        return campo.GetValue(new IniciativaService()) is GeneradorNumeroSolicitudPendiente;
+    }
+
     static int fallos = 0;
 
     static void Check(string caso, object esperado, object obtenido)
@@ -241,7 +266,9 @@ public static class SolicitudIniciativaSmoke
         var n = new NumeroSolicitud(142);
         Check("N1 se muestra #0000142", "#0000142", n.ToString());
         Check("N2 archivo 0000142.pdf", "0000142.pdf", n.NombreArchivoRca("RCA_final_final_v7_JuanPerez.pdf"));
-        Check("N2 extension en minusculas", "0000142.pdf", n.NombreArchivoRca(@"C:\fakepath\Rca.PDF"));
+        Check("N2 extension tal cual (sin cambiar grafia)", "0000142.PDF", n.NombreArchivoRca(@"C:\fakepath\Rca.PDF"));
+        Check("N2 .docx no se fuerza a .pdf", "0000142.docx", n.NombreArchivoRca("RCA final.docx"));
+        Check("N2 .xlsx no se fuerza a .pdf", "0000142.xlsx", n.NombreArchivoRca("analisis.v2.xlsx"));
         Check("N2 sin extension", "0000142", n.NombreArchivoRca("rca"));
         Check("N2 extension rara se descarta", "0000142", n.NombreArchivoRca("rca.p d f"));
         Check("N3 primero #0000001", "#0000001", new NumeroSolicitud(1).ToString());
@@ -249,6 +276,84 @@ public static class SolicitudIniciativaSmoke
         bool fuera = false;
         try { new NumeroSolicitud(0); } catch (ArgumentOutOfRangeException) { fuera = true; }
         Check("N4 cero no existe", true, fuera);
+
+        // ---- N5-N8) consecutivo: regla y paso de emision -------------------
+        Check("N5 sin emitidos: 0000001", "0000001", NumeroSolicitud.Siguiente(null).Digitos7());
+        Check("N5 sigue al ultimo: 142 -> #0000143", "#0000143", NumeroSolicitud.Siguiente(142).ToString());
+        Check("N5 siempre 7 digitos", "0000010|0100000|9999999",
+              NumeroSolicitud.Siguiente(9).Digitos7() + "|" + NumeroSolicitud.Siguiente(99999).Digitos7() + "|" +
+              NumeroSolicitud.Siguiente(9999998).Digitos7());
+        bool agotado = false;
+        try { NumeroSolicitud.Siguiente(9999999); } catch (InvalidOperationException) { agotado = true; }
+        Check("N5 no desborda a 8 digitos", true, agotado);
+
+        // El paso de emision del servicio, con un emisor de prueba que cuenta
+        // cuantas veces le piden (no es persistencia: solo el contrato).
+        var emisor = new EmisorDePrueba(141);
+        var invalida = V(new NameValueCollection(), false, null);
+        IniciativaService.AsignarNumero(invalida, emisor);
+        Check("N6 invalida: no pide numero", "0|null", emisor.Llamadas + "|" + (invalida.Numero == null ? "null" : "x"));
+        var valida = V(Completa("Adopcion", "/A/Cat 1", "20"), false, null);
+        IniciativaService.AsignarNumero(valida, emisor);
+        Check("N6 valida: un numero, #0000142", "1|#0000142|null",
+              emisor.Llamadas + "|" + valida.Numero + "|" + (valida.NumeroPendiente ?? "null"));
+        Check("N6 JSON lleva el numero", "#0000142", IniciativaService.ComoJson(valida)["numero_solicitud"]);
+        var hoy = V(Completa("Adopcion", "/A/Cat 1", "20"), false, null);
+        IniciativaService.AsignarNumero(hoy, new GeneradorNumeroSolicitudPendiente());
+        Check("N7 hoy (sin almacen): sin numero y con motivo", "True|" + GeneradorNumeroSolicitudPendiente.Motivo,
+              (hoy.Numero == null) + "|" + hoy.NumeroPendiente);
+        Check("N7 sigue siendo valida", true, hoy.Valida);
+        Check("N7 servicio por omision usa el pendiente", true, ServicioUsaPendiente());
+        Check("N8 el numero no sale de dbo.Problem.Codigo", false,
+              System.IO.File.ReadAllText(@"App_Code\SolicitudIniciativa.cs").Contains("Problem.Codigo FROM")
+              || System.IO.File.ReadAllText(@"App_Code\IniciativaService.cs").Contains("Codigo"));
+
+        // ---- A2) capacidad: casos del hito ----------------------------------
+        Check("A2 sin iniciativas: 100%", "1.0000", new CapacidadCategoria(new CapacidadCategoria.Compromiso[0]).Para("/A/Cat 1").Disponible);
+        var a30 = new CapacidadCategoria(new[] { K("I 1", "/A/Cat 1", 0.3000m, true) });
+        Check("A2 30%: 70%", "0.7000", a30.Para("/A/Cat 1").Disponible);
+        var a50 = new CapacidadCategoria(new[] { K("I 1", "/A/Cat 1", 0.3000m, true), K("I 2", "/A/Cat 1", 0.2000m, true) });
+        Check("A2 30+20: 50%", "0.5000", a50.Para("/A/Cat 1").Disponible);
+        Check("A2 B sigue en 100% con A al 50%", "1.0000", a50.Para("/B/Cat 3").Disponible);
+        Check("A2 pedir exactamente lo que queda (50): pasa", true, V(Completa("Adopcion", "/A/Cat 1", "50"), false, a50).Valida);
+        Check("A2 pedir 50.01: rechaza", "pct", Campos(V(Completa("Adopcion", "/A/Cat 1", "50.01"), false, a50)));
+        Check("A2 B puede pedir 100 con A al 50", true, V(Completa("Adopcion", "/B/Cat 3", "100"), false, a50).Valida);
+        var inactivas = new CapacidadCategoria(new[]
+        {
+            K("C 1", "/A/Cat 1", 0.9000m, false), K("C 2", "/A/Cat 1", 0.5000m, false), K("V 1", "/A/Cat 1", 0.1000m, true),
+        });
+        Check("A2 no consumen (cerradas/no vigentes): solo cuenta la viva", "0.9000", inactivas.Para("/A/Cat 1").Disponible);
+        var dec = new CapacidadCategoria(new[]
+        {
+            K("D 1", "/A/Cat 1", 0.3300m, true), K("D 2", "/A/Cat 1", 0.2200m, true), K("D 3", "/A/Cat 1", 0.0600m, true),
+        });
+        Check("A2 decimales 33+22+6: 39% disponible", "0.3900", dec.Para("/A/Cat 1").Disponible);
+        Check("A2 39% cabe, 39.01% no", "True|pct",
+              V(Completa("Adopcion", "/A/Cat 1", "39"), false, dec).Valida + "|" + Campos(V(Completa("Adopcion", "/A/Cat 1", "39.01"), false, dec)));
+        var dec2 = new CapacidadCategoria(new[] { K("E 1", "/A/Cat 1", 0.3333m, true), K("E 2", "/A/Cat 1", 0.3333m, true) });
+        Check("A2 33.33+33.33: 33.34% disponible y cabe exacto", "0.3334|True",
+              dec2.Para("/A/Cat 1").Disponible + "|" + V(Completa("Adopcion", "/A/Cat 1", "33.34"), false, dec2).Valida);
+
+        // ---- D2) cascada y autorizacion -------------------------------------
+        var fpo = Completa("Adopcion", "/A/Cat 1", "20"); fpo["po"] = "PO inventado";
+        Check("D2 PO fuera del catalogo", "po", Campos(V(fpo, false, null)));
+        var fso = Completa("Adopcion", "/A/Cat 1", "20"); fso["so"] = "SO inventado";
+        Check("D2 SO fuera del catalogo", "so", Campos(V(fso, false, null)));
+        var fmix = Completa("Adopcion", "/A/Cat 1", "20"); fmix["po"] = "PO 2";
+        Check("D2 valores validos que no forman fila: error de combinacion", "categoria", Campos(V(fmix, false, null)));
+        foreach (var h in new[] { "catalogos", "capacidad", "validar", "registro", "diagnostico" })
+        {
+            var ruta = @"handlers\admin_iniciativas_" + h + ".ashx";
+            var texto = System.IO.File.ReadAllText(ruta);
+            var exigir = texto.IndexOf("if (!AccesoAdmin.Exigir(context)) return;", StringComparison.Ordinal);
+            var cuerpo = texto.IndexOf("public void ProcessRequest(HttpContext context)", StringComparison.Ordinal);
+            var siguiente = texto.IndexOf(';', cuerpo);   // primera sentencia del metodo
+            Check("D3 " + h + ": Exigir es la primera sentencia", true, exigir > cuerpo && texto.IndexOf(';', exigir) == siguiente);
+            Check("D3 " + h + ": ruta protegida por el modulo", true,
+                  AccesoAdmin.EsRutaProtegida("~/handlers/admin_iniciativas_" + h + ".ashx"));
+        }
+        Check("D4 no autorizado: rechazado por el mismo camino", false,
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"SORIANA\t_otro", true)));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));
         return fallos == 0 ? 0 : 1;

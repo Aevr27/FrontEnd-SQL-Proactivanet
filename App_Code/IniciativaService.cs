@@ -29,9 +29,21 @@ public sealed class IniciativaService
     public static readonly string[] Pendientes =
     {
         "numero_solicitud: sin mecanismo de persistencia (UNRESOLVED)",
-        "rca: sin destino SharePoint confirmado; el archivo no se guarda (UNRESOLVED)",
+        "rca: sin destino de almacenamiento configurado; el archivo no se guarda (UNRESOLVED)",
         "alta: no se inserta ninguna solicitud ni iniciativa",
     };
+
+    private readonly IGeneradorNumeroSolicitud _numeros;
+
+    // Hoy el unico emisor es el pendiente (no emite). Cuando exista el
+    // objeto en la base, se pasa aqui el emisor que lo use.
+    public IniciativaService() : this(new GeneradorNumeroSolicitudPendiente()) { }
+
+    public IniciativaService(IGeneradorNumeroSolicitud numeros)
+    {
+        if (numeros == null) throw new ArgumentNullException("numeros");
+        _numeros = numeros;
+    }
 
     public Dictionary<string, object> Capacidad(string categoria)
     {
@@ -42,7 +54,9 @@ public sealed class IniciativaService
         }
     }
 
-    public ValidadorIniciativa.Resultado Validar(SolicitudIniciativa solicitud)
+    // Validar y, SOLO si es valida, pedir el numero. Una solicitud invalida
+    // nunca consume numero.
+    public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud)
     {
         using (var cn = Abrir())
         {
@@ -50,8 +64,19 @@ public sealed class IniciativaService
             var catalogo = CatalogoSolicitud.Desde(tipos,
                 DirectorioOrganizacional.Cargar(cn).AsignacionesVigentes());
             var capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
-            return new ValidadorIniciativa().Validar(solicitud, catalogo, capacidad);
+            var r = new ValidadorIniciativa().Validar(solicitud, catalogo, capacidad);
+            AsignarNumero(r, _numeros);
+            return r;
         }
+    }
+
+    // Aparte para probarlo sin SQL.
+    public static void AsignarNumero(ValidadorIniciativa.Resultado r, IGeneradorNumeroSolicitud numeros)
+    {
+        if (!r.Valida) return;
+        string motivo;
+        r.Numero = numeros.Emitir(out motivo);
+        r.NumeroPendiente = r.Numero == null ? motivo : null;
     }
 
     public static Dictionary<string, object> ComoJson(ValidadorIniciativa.Resultado r)
@@ -69,7 +94,8 @@ public sealed class IniciativaService
             { "director", r.Director },
             { "capacidad", r.Capacidad == null ? null : r.Capacidad.ComoJson() },
             { "guardada", false },
-            { "numero_solicitud", null },
+            { "numero_solicitud", r.Numero == null ? null : r.Numero.ToString() },
+            { "numero_pendiente", r.NumeroPendiente },
             { "pendientes", new List<string>(Pendientes) },
         };
     }

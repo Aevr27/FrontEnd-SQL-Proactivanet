@@ -8,7 +8,11 @@
 //             (informativo, se ignora) y el archivo "rca" (opcional salvo
 //             Problem).
 //     200  { "valida": true,  "errores": [], ..., "guardada": false,
-//            "numero_solicitud": null, "pendientes": [...] }
+//            "numero_solicitud": null, "numero_pendiente": "<motivo>",
+//            "pendientes": [...] }
+//          numero_solicitud ("#0000142") solo saldra cuando exista un emisor
+//          persistente (IGeneradorNumeroSolicitud); una solicitud invalida
+//          nunca pide numero.
 //     422  la misma forma con "valida": false y errores [{campo, mensaje}]
 //     405  si no es POST;  413  si el archivo pasa el tope de ASP.NET.
 //
@@ -49,7 +53,7 @@ public class AdminIniciativasValidar : IHttpHandler
                 return Error(context, 413, "La solicitud o el archivo adjunto son demasiado grandes.", "SolicitudDemasiadoGrande");
             }
 
-            var resultado = new IniciativaService().Validar(solicitud);
+            var resultado = new IniciativaService().Solicitar(solicitud);
             if (!resultado.Valida)
             {
                 context.Response.StatusCode = 422;

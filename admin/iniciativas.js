@@ -789,7 +789,9 @@ window.Iniciativas = (function () {
             if (self.solicitud !== s) return;
             if (json && typeof json.valida === 'boolean') {
               self.mostrarResultado(json.valida, json.valida
-                ? 'La solicitud pasó la validación del servidor. No se guardó: falta el número de solicitud y el destino del RCA.'
+                ? (typeof json.numero_solicitud === 'string' && json.numero_solicitud
+                    ? 'La solicitud pasó la validación del servidor. Número de solicitud: ' + json.numero_solicitud + '.'
+                    : 'La solicitud pasó la validación del servidor. No se guardó: falta el número de solicitud y el destino del RCA.')
                 : 'El servidor rechazó la solicitud:', Array.isArray(json.errores) ? json.errores : []);
             } else {
               self.mostrarResultado(false, (json && json.error) || ('El servidor respondió ' + r.status + '.'), []);
