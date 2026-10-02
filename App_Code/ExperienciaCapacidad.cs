@@ -37,6 +37,17 @@ public static partial class ExperienciaQueries
         return Compromisos(LeerIniciativas(cn, DashboardDataInfo.HoyEnPresentacion()));
     }
 
+    // Los cortes C1 y C1&C2 de una ruta completa, con las MISMAS replicas de
+    // dbo.fn_CategoriaC1 / fn_CategoriaC1C2 que usa Experiencia (C1DeTsql,
+    // C1C2De): son las llaves con que vw_ProblemCategoria busca los dueños.
+    // Las usa Admin (CatalogoRutasIniciativa) sin copiarlas.
+    public static void CortesDeRuta(string ruta, out string c1, out string c1c2)
+    {
+        var n = Normaliza(ruta);
+        c1 = n == null ? null : C1DeTsql(n);
+        c1c2 = n == null ? null : C1C2De(n);
+    }
+
     public static bool ConsumeCapacidad(string estado, string agrupador)
     {
         return EsActiva(estado) && EsAgrupador(agrupador);

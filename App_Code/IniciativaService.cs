@@ -14,9 +14,12 @@
 // categoria) para que dos envios simultaneos no pasen ambos; con solo
 // lectura no hay transaccion que tomar.
 //
-// SOLO LECTURA: DirectorioOrganizacional.Cargar, DashboardCatalogos
-// .TiposIniciativa y ExperienciaQueries.CompromisosCapacidad, sobre una
-// conexion.
+// SOLO LECTURA: DirectorioOrganizacional.Cargar, CatalogoRutasIniciativa
+// (dbo.Categorias), DashboardCatalogos.TiposIniciativa y ExperienciaQueries
+// .CompromisosCapacidad, sobre una conexion.
+//
+// La categoria es la RUTA COMPLETA elegida: es la llave de la capacidad
+// (cada ruta, su propio 100%).
 
 using System;
 using System.Collections.Generic;
@@ -61,8 +64,9 @@ public sealed class IniciativaService
         using (var cn = Abrir())
         {
             var tipos = DashboardCatalogos.TiposIniciativa(cn);
-            var catalogo = CatalogoSolicitud.Desde(tipos,
-                DirectorioOrganizacional.Cargar(cn).AsignacionesVigentes());
+            // La misma lista de rutas que ofrece la pantalla, leida de nuevo.
+            var rutas = CatalogoRutasIniciativa.Cargar(cn, DirectorioOrganizacional.Cargar(cn));
+            var catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
             var capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
             var r = new ValidadorIniciativa().Validar(solicitud, catalogo, capacidad);
             AsignarNumero(r, _numeros);

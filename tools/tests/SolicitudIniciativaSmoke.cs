@@ -84,6 +84,11 @@ public static class SolicitudIniciativaSmoke
             A("PO 2", "SO z", "/B/Cat 3", "Dir B"),
         });
 
+    static DirectorioOrganizacional.Dueno Due(string n2, string c1, string po, string so, string dir, bool vigente)
+    {
+        return new DirectorioOrganizacional.Dueno { CategoriaN2 = n2, C1 = c1, Po = po, So = so, Director = dir, Vigente = vigente };
+    }
+
     static NameValueCollection Completa(string tipo, string cat, string pct)
     {
         var f = new NameValueCollection();
@@ -207,19 +212,35 @@ public static class SolicitudIniciativaSmoke
         Check("K9 ruta con espacios / NBSP / mayusculas", "0.8000",
               una.Para(" /a/cat 1\u00A0").Disponible);
 
-        // granularidad: ancestro / descendiente -> no determinable
-        var hija = new CapacidadCategoria(new[] { K("H 1", "/A/Cat 1/Sub", 0.2000m, true) });
-        Check("K10 hay una en una subcategoria: no determinable", false, hija.Para("/A/Cat 1").Determinable);
-        Check("K10 rutas relacionadas", "/A/Cat 1/Sub", string.Join("|", hija.Para("/A/Cat 1").RutasRelacionadas));
-        Check("K10 rechaza aunque pida 0", "pct", Campos(V(Completa("Adopcion", "/A/Cat 1", "0"), false, hija)));
-        Check("K11 padre: no determinable", false,
-              new CapacidadCategoria(new[] { K("P 1", "/A", 0.1000m, true) }).Para("/A/Cat 1").Determinable);
-        Check("K12 prefijo de texto no es subcategoria", true,
-              new CapacidadCategoria(new[] { K("Z 1", "/A/Cat 10", 0.9000m, true) }).Para("/A/Cat 1").Determinable);
-        Check("K12 y no resta", "1.0000",
+        // ---- G) 100% = UNA ruta real: padres, hijas y hermanas no comparten --
+        // Rutas del diag G5 de la VM (/S-Autocobro/Falla en periféricos/...).
+        const string N2 = "/S-Autocobro/Falla en periféricos";
+        var autocobro = new CapacidadCategoria(new[]
+        {
+            K("HAR 2026-000027", N2 + "/Falla Electrica (Daño Perifericos)", 1.0000m, true),
+            K("MAP 2026-000023", N2 + "/Falla en báscula de seguridad", 0.8000m, true),
+            K("HAR 2026-000030", N2 + "/Falla en Scanner de mano", 1.0000m, true),
+        });
+        Check("G1 cada ruta es su propia llave: Electrica 0%", "0.0000", autocobro.Para(N2 + "/Falla Electrica (Daño Perifericos)").Disponible);
+        Check("G1 bascula 20%", "0.2000", autocobro.Para(N2 + "/Falla en báscula de seguridad").Disponible);
+        Check("G2 la N2 padre NO suma a sus hijas: 100%", "1.0000", autocobro.Para(N2).Disponible);
+        Check("G2 la N2 padre es determinable", true, autocobro.Para(N2).Determinable);
+        Check("G3 hermana sin iniciativas: 100% aunque las otras esten llenas", "1.0000",
+              autocobro.Para(N2 + "/Falla en impresora").Disponible);
+        var padre = new CapacidadCategoria(new[] { K("P 1", "/A/Cat 1", 1.0000m, true) });
+        Check("G4 el padre al 100% no consume a la hija", "1.0000", padre.Para("/A/Cat 1/Sub").Disponible);
+        var hija = new CapacidadCategoria(new[] { K("H 1", "/A/Cat 1/Sub", 1.0000m, true) });
+        Check("G5 la hija al 100% no consume al padre", "1.0000", hija.Para("/A/Cat 1").Disponible);
+        Check("G5 el padre puede pedir 100 con la hija llena", true, V(Completa("Adopcion", "/A/Cat 1", "100"), false, hija).Valida);
+        Check("G6 prefijo de texto tampoco", "1.0000",
               new CapacidadCategoria(new[] { K("Z 1", "/A/Cat 10", 0.9000m, true) }).Para("/A/Cat 1").Disponible);
-        Check("K13 subcategoria que NO consume no estorba", true,
-              new CapacidadCategoria(new[] { K("H 2", "/A/Cat 1/Sub", 0.2000m, false) }).Para("/A/Cat 1").Determinable);
+        Check("G7 la misma ruta con '/' final es OTRA cadena: no se recorta", "1.0000",
+              new CapacidadCategoria(new[] { K("T 1", "/A/Cat 1/", 0.5000m, true) }).Para("/A/Cat 1").Disponible);
+        var pasada = new CapacidadCategoria(new[] { K("X 1", "/A/Cat 1", 0.8000m, true), K("X 2", "/A/Cat 1", 0.4000m, true) });
+        Check("G8 existente > 100% en la ruta: disponible 0, no negativo", "1.2000|0.0000|True",
+              pasada.Para("/A/Cat 1").Usado + "|" + pasada.Para("/A/Cat 1").Disponible + "|" + pasada.Para("/A/Cat 1").Excedida);
+        Check("G8 su hija no compensa ni se afecta", "1.0000", pasada.Para("/A/Cat 1/Sub").Disponible);
+
 
         // ---- P) por categoria ------------------------------------------------
         var dos = new CapacidadCategoria(new[]
@@ -354,6 +375,62 @@ public static class SolicitudIniciativaSmoke
         }
         Check("D4 no autorizado: rechazado por el mismo camino", false,
               AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"SORIANA\t_otro", true)));
+
+        // ---- RC) catalogo de rutas reales (CatalogoRutasIniciativa) ---------
+        // Dueños: N2 exacto (C1&C2 de la ruta) o heredado del C1, la regla de
+        // vw_ProblemCategoria via DirectorioOrganizacional.Resolver.
+        var dir = new DirectorioOrganizacional(new List<DirectorioOrganizacional.Dueno>
+        {
+            Due("/S-A/Uno", "S-A", "PO 1", "SO x", "Dir A", true),
+            Due("/S-A/Dos", "S-A", "PO 2", "SO y", "Dir A", true),
+            Due("/S-B/Uno", "S-B", "PO 3", "SO z", "Dir B", false),     // N2 dado de baja
+            Due("/S-C/Uno", "S-C", null, "SO w", "Dir C", true),        // sin PO
+        }, new Dictionary<string, string>());
+        var cat = CatalogoRutasIniciativa.Asignaciones(new[]
+        {
+            "/S-A/Uno/Hoja 1", "/S-A/Uno/Hoja 2", "/S-A/Uno", " /S-A/Uno/Hoja 1 ", "/S-A/Dos/X/Y",
+            "/S-A/Tres/Hoja",          // N2 sin fila: hereda del C1 S-A (primera fila: PO 1)
+            "/S-B/Uno/Hoja",           // dueños solo en fila no vigente
+            "/S-C/Uno/Hoja",           // sin PO
+            "/S-Z/Nada",               // C1 sin dueños
+            null, "",
+        }, dir);
+        var rutas = (List<object>)cat["rutas"];
+        var lineas = new List<string>();
+        foreach (Dictionary<string, object> f in rutas)
+            lineas.Add(f["categoria"] + ">" + f["po"] + ">" + f["so"] + ">" + f["director"]);
+        Check("RC1 la categoria es la RUTA (no la N2), unica y normalizada",
+              "/S-A/Dos/X/Y>PO 2>SO y>Dir A|/S-A/Tres/Hoja>PO 1>SO x>Dir A|/S-A/Uno>PO 1>SO x>Dir A|" +
+              "/S-A/Uno/Hoja 1>PO 1>SO x>Dir A|/S-A/Uno/Hoja 2>PO 1>SO x>Dir A",
+              string.Join("|", lineas));
+        Check("RC2 rutas sin Director/PO/SO: contadas, no inventadas", 2, cat["rutas_sin_duenos"]);
+        Check("RC3 dueños solo en fila no vigente: contadas", 1, cat["rutas_duenos_no_vigentes"]);
+        Check("RC4 FuenteVigente: N2 exacto vigente", true, dir.FuenteVigente("S-A", "/S-A/Uno"));
+        Check("RC4 FuenteVigente: N2 no vigente", false, dir.FuenteVigente("S-B", "/S-B/Uno"));
+        Check("RC4 FuenteVigente: sin fila", false, dir.FuenteVigente("S-Z", "/S-Z/Nada"));
+        string c1, c1c2;
+        ExperienciaQueries.CortesDeRuta("/S-A/Uno/Hoja 1", out c1, out c1c2);
+        Check("RC5 cortes de la ruta (replicas de fn_CategoriaC1/C1C2)", "S-A|/S-A/Uno", c1 + "|" + c1c2);
+
+        // El validador sobre esas rutas: la N2 sola no es una opcion si no es
+        // una ruta activa del catalogo, y la combinacion se exige.
+        var catRutas = CatalogoSolicitud.Desde(new object[] { "Adopcion", "Problem" }, rutas);
+        var fr = new NameValueCollection();
+        fr["tipo"] = "Adopcion"; fr["po"] = "PO 1"; fr["so"] = "SO x"; fr["categoria"] = "/S-A/Uno/Hoja 1";
+        fr["titulo"] = "T"; fr["descripcion"] = "D"; fr["observaciones"] = "O"; fr["volumetria"] = "5"; fr["pct"] = "20";
+        var capRuta = new CapacidadCategoria(new[] { K("I 1", "/S-A/Uno/Hoja 1", 0.3000m, true), K("I 2", "/S-A/Uno", 1.0000m, true) });
+        var rv = new ValidadorIniciativa().Validar(SolicitudIniciativa.DesdeFormulario(fr, false, null), catRutas, capRuta);
+        Check("RC6 ruta valida: pasa con su propio 70% (el padre lleno no cuenta)", "True|0.7000|Dir A",
+              rv.Valida + "|" + rv.Capacidad.Disponible + "|" + rv.Director);
+        fr["categoria"] = "/S-A/Tres";
+        Check("RC7 N2 que no es ruta activa: categoria invalida", "categoria",
+              Campos(new ValidadorIniciativa().Validar(SolicitudIniciativa.DesdeFormulario(fr, false, null), catRutas, capRuta)));
+        fr["categoria"] = "/S-A/Dos/X/Y";
+        Check("RC8 ruta de otro PO/SO: combinacion invalida", "categoria",
+              Campos(new ValidadorIniciativa().Validar(SolicitudIniciativa.DesdeFormulario(fr, false, null), catRutas, capRuta)));
+        fr["categoria"] = "/S-B/Uno/Hoja";
+        Check("RC9 ruta con dueños no vigentes: no elegible", "categoria",
+              Campos(new ValidadorIniciativa().Validar(SolicitudIniciativa.DesdeFormulario(fr, false, null), catRutas, capRuta)));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));
         return fallos == 0 ? 0 : 1;

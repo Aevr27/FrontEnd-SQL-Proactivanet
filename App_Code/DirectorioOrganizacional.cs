@@ -114,6 +114,21 @@ public sealed class DirectorioOrganizacional
         manager = ManagerDe(so);
     }
 
+    // ¿La fila de CatCategoriaDueno de la que Resolver toma los dueños es
+    // vigente? La del C1&C2 exacto si existe; si no, la del C1 (la misma
+    // eleccion de Resolver). Sin ninguna, false. Lo usa Admin para no
+    // ofrecer una categoria cuyos dueños solo existen en filas dadas de baja,
+    // igual que AsignacionesVigentes solo recorre filas vigentes.
+    public bool FuenteVigente(string c1, string c1c2)
+    {
+        Dueno n2 = null, raiz = null;
+        c1c2 = Normaliza(c1c2);
+        c1 = Normaliza(c1);
+        if (c1c2 != null && _porN2.TryGetValue(c1c2, out n2)) return n2.Vigente;
+        if (c1 != null && _porC1.TryGetValue(c1, out raiz)) return raiz.Vigente;
+        return false;
+    }
+
     // El Manager de una persona segun dbo.CatPersona, o null.
     public string ManagerDe(string persona)
     {

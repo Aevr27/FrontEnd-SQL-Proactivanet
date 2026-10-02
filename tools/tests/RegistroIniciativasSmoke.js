@@ -512,7 +512,9 @@ pruebas.push(function () {
 // ---------------------------------------------------------------------------
 var CATALOGO = {
   tipos: ['Mejora'], omitidas: 0,
-  asignaciones: [{ director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1' }]
+  asignaciones: [{ director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1' }],
+  // ?rutas=1 (Nueva solicitud): la misma forma, con la ruta real.
+  rutas: [{ director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1/Hoja' }]
 };
 pruebas.push(function () {
   var p = Pagina(ok(DATOS), ok(CATALOGO));

@@ -123,7 +123,7 @@ var FILAS = [
   { director: 'Dir B', po: 'PO 1', so: 'SO w', categoria: '/B/Cat 6' }   // PO 1 con dos directores
 ];
 var TIPOS = ['Adopcion', 'Mejora', 'Problem'];
-var JSON_OK = { tipos: TIPOS, asignaciones: FILAS, omitidas: 0 };
+var JSON_OK = { tipos: TIPOS, rutas: FILAS, omitidas: 0 };
 function pedirOk() { return Promise.resolve(Respuesta(200, JSON_OK)); }
 function nunca() { return new Promise(function () {}); }
 
@@ -190,15 +190,15 @@ amb.elegir(0, 'P'); amb.elegir(1, 'S'); amb.elegir(2, 'C');
 Check('A6 dos Directores para la misma categoria: no se adivina', '', amb.director());
 
 // CatalogoIniciativas
-var cat = I.CatalogoIniciativas.desdeJson({ tipos: ['Mejora', '', 3, 'Mejora', 'Problem'], asignaciones: [
+var cat = I.CatalogoIniciativas.desdeJson({ tipos: ['Mejora', '', 3, 'Mejora', 'Problem'], rutas: [
   FILAS[0], { director: 'X', po: 'Y', so: '', categoria: 'Z' }, { director: 'X', po: 1, so: 'S', categoria: 'Z' }, null
-], omitidas: '2' });
+], rutas_sin_duenos: '1', rutas_duenos_no_vigentes: 1 });
 Check('A7 desdeJson descarta filas incompletas', 1, cat.asignaciones.length);
 Check('A7 desdeJson descarta tipos vacios, no texto y repetidos', ['Mejora', 'Problem'], cat.tipos);
-Check('A7 desdeJson omitidas', 2, cat.omitidas);
+Check('A7 desdeJson omitidas = sin dueños + dueños no vigentes', 2, cat.omitidas);
 var lanzo = 0;
 try { I.CatalogoIniciativas.desdeJson({ error: 'x' }); } catch (err) { lanzo++; }
-try { I.CatalogoIniciativas.desdeJson({ asignaciones: [] }); } catch (err) { lanzo++; }
+try { I.CatalogoIniciativas.desdeJson({ rutas: [] }); } catch (err) { lanzo++; }
 Check('A7 sin asignaciones o sin tipos lanza', 2, lanzo);
 
 // ---------------------------------------------------------------------------
@@ -261,7 +261,7 @@ Check('T11/12 cambiar tipo conserva Titulo y Analisis', { titulo: 'Mi titulo', a
 s.elegirTipo('');
 Check('T4 volver a sin tipo bloquea la cascada', false, s.estado().niveles[0].habilitado);
 
-var sinTipos = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson({ tipos: [], asignaciones: FILAS }), DEFS);
+var sinTipos = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson({ tipos: [], rutas: FILAS }), DEFS);
 Check('T1 sin tipos: select bloqueado', [false, 'Sin tipos de iniciativa en el catálogo.'],
   [sinTipos.estado().tipo.habilitado, sinTipos.estado().tipo.motivo]);
 
@@ -385,7 +385,7 @@ pruebas.push(function () {
   var p = Pagina(function (url) { urls.push(url); return pedirOk(); });
   var P = p.ventana.IniciativasPagina;
   return P.cargar(function (url) { urls.push(url); return pedirOk(); }).then(function () {
-    Check('B1 URL del handler', '../handlers/admin_iniciativas_catalogos.ashx', urls[urls.length - 1]);
+    Check('B1 URL del handler: pide las rutas reales', '../handlers/admin_iniciativas_catalogos.ashx?rutas=1', urls[urls.length - 1]);
     Check('B1 cargado: solo Tipo habilitado', [true, false, false, false], habilitados(p));
     Check('B1 tipos en el select', TIPOS, p.sel('selTipo').opciones());
     Check('B1 motivo PO', 'Elige primero un Tipo de iniciativa.', p.sel('motPo').textContent);
@@ -609,7 +609,7 @@ pruebas.push(function () {
     return P.cargar(function () { return Promise.resolve(Respuesta(404, '<html>')); });
   }).then(function () {
     Check('B14 404: mensaje', 'El servidor respondió 404.', p.sel('iniErrorTexto').textContent);
-    return P.cargar(function () { return Promise.resolve(Respuesta(200, { asignaciones: FILAS, omitidas: 0 })); });
+    return P.cargar(function () { return Promise.resolve(Respuesta(200, { rutas: FILAS, omitidas: 0 })); });
   }).then(function () {
     Check('B14 respuesta sin "tipos": error, no cascada a medias', [false, true],
       [p.sel('iniError').hidden, p.sel('selPo').disabled]);
@@ -620,13 +620,13 @@ pruebas.push(function () {
 pruebas.push(function () {
   var p = Pagina(nunca);
   var P = p.ventana.IniciativasPagina;
-  return P.cargar(function () { return Promise.resolve(Respuesta(200, { tipos: TIPOS, asignaciones: [], omitidas: 3 })); }).then(function () {
-    Check('B14 vacio: mensaje', 'No hay categorías vigentes con Director, Product Owner y Service Owner.', p.sel('iniEstado').textContent);
+  return P.cargar(function () { return Promise.resolve(Respuesta(200, { tipos: TIPOS, rutas: [], rutas_sin_duenos: 3 })); }).then(function () {
+    Check('B14 vacio: mensaje', 'No hay categorías activas con Director, Product Owner y Service Owner.', p.sel('iniEstado').textContent);
     Check('B14 vacio: todo bloqueado', [false, false, false, false], habilitados(p));
     Check('B14 vacio: no es error', true, p.sel('iniError').hidden);
     Check('B14 omitidas visible', false, p.sel('iniOmitidas').hidden);
-    Check('B14 omitidas texto', '3 categorías vigentes no aparecen: les falta Director, Product Owner o Service Owner en el catálogo de dueños.', p.sel('iniOmitidas').textContent);
-    return P.cargar(function () { return Promise.resolve(Respuesta(200, { tipos: [], asignaciones: FILAS, omitidas: 0 })); });
+    Check('B14 omitidas texto', '3 categorías activas no aparecen: no tienen Director, Product Owner y Service Owner vigentes en el catálogo de dueños.', p.sel('iniOmitidas').textContent);
+    return P.cargar(function () { return Promise.resolve(Respuesta(200, { tipos: [], rutas: FILAS, omitidas: 0 })); });
   }).then(function () {
     Check('B14 sin tipos: mensaje', 'No hay tipos de iniciativa en el catálogo.', p.sel('iniEstado').textContent);
     Check('B14 sin tipos: todo bloqueado', [false, false, false, false], habilitados(p));
@@ -744,18 +744,18 @@ function enrutador(capacidades, validar, registro) {
     }
     if (url.indexOf('admin_iniciativas_validar.ashx') >= 0) return Promise.resolve(validar());
     return Promise.resolve(Respuesta(200, {
-      tipos: ['Problem', 'Adopcion', 'Mejora'], tipo_problem: 'Problem', asignaciones: FILAS, omitidas: 0
+      tipos: ['Problem', 'Adopcion', 'Mejora'], tipo_problem: 'Problem', rutas: FILAS, omitidas: 0
     }));
   };
 }
 function esperar() { return new Promise(function (ok) { setTimeout(ok, 0); }); }
 
 pruebas.push(function () {
-  var cat = I.CatalogoIniciativas.desdeJson({ tipos: ['Problem', 'Adopcion'], tipo_problem: 'Problem', asignaciones: FILAS });
+  var cat = I.CatalogoIniciativas.desdeJson({ tipos: ['Problem', 'Adopcion'], tipo_problem: 'Problem', rutas: FILAS });
   Check('S1 el orden de tipos es el del servidor (Problem primero)', ['Problem', 'Adopcion'], cat.tipos);
   Check('S1 tipo_problem', 'Problem', cat.tipoProblem);
   Check('S2 tipo_problem fuera de la lista se ignora', '',
-    I.CatalogoIniciativas.desdeJson({ tipos: ['Adopcion'], tipo_problem: 'Problem', asignaciones: FILAS }).tipoProblem);
+    I.CatalogoIniciativas.desdeJson({ tipos: ['Adopcion'], tipo_problem: 'Problem', rutas: FILAS }).tipoProblem);
   Check('S2 sin tipo_problem: ningun tipo exige RCA', false,
     (function () { var n = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK)); n.elegirTipo('Problem'); return n.rcaObligatorio(); })());
 
@@ -909,7 +909,8 @@ pruebas.push(function () {
     // capacidad al elegir la Categoria. Sin "Validar", ningun POST.
     Check('P1 solo GET de lectura en el flujo de captura',
       [['../handlers/admin_iniciativas_capacidad.ashx?categoria=%2FA%2FCat%201', null],
-       ['../handlers/admin_iniciativas_catalogos.ashx', null], ['../handlers/admin_iniciativas_registro.ashx', null]],
+       ['../handlers/admin_iniciativas_catalogos.ashx?rutas=1', null],
+       ['../handlers/admin_iniciativas_registro.ashx', null]],
       llamadas.map(function (l) { return [l[0], l[1] || null]; }).sort());
     var js = leer('admin/iniciativas.js') + leer('admin/registro-iniciativas.js'), html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
     // El unico envio es el POST de validacion, que no guarda.

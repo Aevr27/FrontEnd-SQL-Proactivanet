@@ -226,15 +226,15 @@ public sealed class CatalogoSolicitud
         if (asignaciones != null) _asignaciones.AddRange(asignaciones);
     }
 
-    // Desde la salida de DirectorioOrganizacional.AsignacionesVigentes() (la
-    // que publica admin_iniciativas_catalogos.ashx) y los tipos.
-    public static CatalogoSolicitud Desde(IEnumerable<object> tipos, Dictionary<string, object> vigentes)
+    // Desde las filas {director, po, so, categoria} que publica
+    // admin_iniciativas_catalogos.ashx?rutas=1 (CatalogoRutasIniciativa:
+    // categoria = RUTA COMPLETA, la llave de capacidad) y los tipos.
+    public static CatalogoSolicitud Desde(IEnumerable<object> tipos, System.Collections.IEnumerable lista)
     {
         var filas = new List<Asignacion>();
-        object lista;
-        if (vigentes != null && vigentes.TryGetValue("asignaciones", out lista))
+        if (lista != null)
         {
-            foreach (Dictionary<string, object> f in (System.Collections.IEnumerable)lista)
+            foreach (Dictionary<string, object> f in lista)
             {
                 filas.Add(new Asignacion
                 {
@@ -277,12 +277,12 @@ public sealed class CatalogoSolicitud
 // su % o deja de contar, el siguiente calculo ya no la trae. No hay restas
 // acumuladas.
 //
-// La categoria se compara por RUTA EXACTA (normalizada, sin distinguir
-// mayusculas), como Experiencia compara el Tickets Reduce. Si alguna
-// iniciativa que consume esta en una ruta ANCESTRA o DESCENDIENTE de la
-// pedida (p. ej. se pide la N2 "/A/B" y hay una en "/A/B/C"), no se sabe si
-// comparten el 100%: el resultado es NO DETERMINABLE y el validador rechaza
-// (falla cerrado). CATEGORY CAPACITY GRANULARITY: UNRESOLVED.
+// LA LLAVE ES LA CATEGORIA REAL (ruta completa): CADA RUTA TIENE SU PROPIO
+// 100%. Se suma solo lo de las iniciativas con Categoria = esa ruta
+// (normalizada, sin distinguir mayusculas). Padres, hijas, hermanas y la
+// CategoriaN2 NO comparten ni restan: "/A/B/C" al 100% no toca a "/A/B" ni
+// a "/A/B/D". Si lo existente en la ruta ya pasa de 100% (dato historico,
+// no se corrige aqui), disponible = 0, nunca negativo.
 public sealed class CapacidadCategoria
 {
     public const decimal Total = 1.0000m;
@@ -300,10 +300,9 @@ public sealed class CapacidadCategoria
         public string Categoria;
         public decimal Usado;
         public decimal Disponible;
-        public bool Determinable;
+        public bool Determinable;          // false solo si no hay categoria
         public bool Excedida;              // lo usado ya pasa de 100%
         public List<string> Folios = new List<string>();
-        public List<string> RutasRelacionadas = new List<string>();
 
         public Dictionary<string, object> ComoJson()
         {
@@ -316,7 +315,6 @@ public sealed class CapacidadCategoria
                 { "determinable", Determinable },
                 { "excedida", Excedida },
                 { "folios", Folios },
-                { "rutas_relacionadas", RutasRelacionadas },
             };
         }
     }
@@ -340,16 +338,9 @@ public sealed class CapacidadCategoria
             var ruta = Ruta(c.Categoria);
             if (ruta == null) continue;
 
-            if (string.Equals(ruta, llave, StringComparison.OrdinalIgnoreCase))
-            {
-                r.Usado += c.Pct;
-                if (!string.IsNullOrEmpty(c.Folio) && !r.Folios.Contains(c.Folio)) r.Folios.Add(c.Folio);
-            }
-            else if (Contiene(llave, ruta) || Contiene(ruta, llave))
-            {
-                r.Determinable = false;
-                if (!r.RutasRelacionadas.Contains(ruta)) r.RutasRelacionadas.Add(ruta);
-            }
+            if (!string.Equals(ruta, llave, StringComparison.OrdinalIgnoreCase)) continue;
+            r.Usado += c.Pct;
+            if (!string.IsNullOrEmpty(c.Folio) && !r.Folios.Contains(c.Folio)) r.Folios.Add(c.Folio);
         }
 
         r.Excedida = r.Usado > Total;
@@ -357,19 +348,11 @@ public sealed class CapacidadCategoria
         return r;
     }
 
-    // ¿`hija` cuelga de `padre`? "/A/B" contiene "/A/B/C" y "/A/B / C", no
-    // "/A/BC".
-    private static bool Contiene(string padre, string hija)
-    {
-        if (hija.Length <= padre.Length) return false;
-        if (!hija.StartsWith(padre, StringComparison.OrdinalIgnoreCase)) return false;
-        return hija.Substring(padre.Length).TrimStart().StartsWith("/", StringComparison.Ordinal);
-    }
-
     private static string Ruta(string s)
     {
-        var n = DirectorioOrganizacional.Normaliza(s);
-        return string.IsNullOrEmpty(n) ? null : n.TrimEnd('/', ' ');
+        // Solo la normalizacion del sitio: nada de recortar "/" ni cortar
+        // niveles, que seria otra categoria.
+        return DirectorioOrganizacional.Normaliza(s);
     }
 }
 
@@ -497,8 +480,7 @@ public sealed class ValidadorIniciativa
         {
             r.Capacidad = capacidad.Para(fila.Categoria);
             if (!r.Capacidad.Determinable)
-                r.Agregar(SolicitudIniciativa.CPct,
-                    "No se puede calcular la capacidad de esta categoria: hay iniciativas en categorias que la contienen o que cuelgan de ella.");
+                r.Agregar(SolicitudIniciativa.CPct, "No se puede calcular la capacidad sin categoria.");
             else if (r.PctFraccion != null && r.PctFraccion.Value > r.Capacidad.Disponible)
                 r.Agregar(SolicitudIniciativa.CPct,
                     "La categoria solo tiene " + ComoPct(r.Capacidad.Disponible) + " de capacidad disponible.");

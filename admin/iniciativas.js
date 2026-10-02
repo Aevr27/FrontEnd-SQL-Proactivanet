@@ -29,9 +29,11 @@
                           (DashboardCatalogos.TiposIniciativa). Solo habilita
                           la cascada: en los datos no hay relacion tipo ->
                           categoria, asi que no filtra ninguna lista.
-     PO / SO / Categoria  filas vigentes de dbo.CatCategoriaDueno con sus
-                          dueños resueltos (DirectorioOrganizacional
-                          .AsignacionesVigentes). No hay arbol de personas:
+     PO / SO / Categoria  una fila por categoria REAL (ruta completa activa
+                          de dbo.Categorias) con sus dueños resueltos por la
+                          regla de siempre (C1&C2 exacto o C1;
+                          CatalogoRutasIniciativa). La ruta es la llave de la
+                          capacidad: cada una, su propio 100%. No hay arbol de personas:
                           cada select ofrece los valores de las filas que
                           cumplen TODO lo elegido arriba, asi que cualquier
                           opcion lleva a una categoria real.
@@ -76,7 +78,10 @@
 window.Iniciativas = (function () {
   'use strict';
 
-  var URL_CATALOGO = '../handlers/admin_iniciativas_catalogos.ashx';
+  // ?rutas=1: las categorias REALES (ruta completa), que son la llave de la
+  // capacidad: cada ruta tiene su propio 100%. Sin el parametro el handler
+  // da las CategoriaN2, que solo usa la Cobertura del registro.
+  var URL_CATALOGO = '../handlers/admin_iniciativas_catalogos.ashx?rutas=1';
   // Capacidad de la categoria (solo para mostrar) y validacion en el
   // servidor (la autoridad; no guarda nada).
   var URL_CAPACIDAD = '../handlers/admin_iniciativas_capacidad.ashx';
@@ -197,14 +202,16 @@ window.Iniciativas = (function () {
       this.tipoProblem = tipoProblem || '';
     }
 
-    // El JSON del handler -> catalogo. Sin las dos listas lanza; filas o
-    // tipos que no sean texto no vacio se descartan, sin corregirlos.
+    // El JSON del handler (?rutas=1) -> catalogo. La cascada va sobre
+    // `rutas` (categoria = ruta completa), NO sobre `asignaciones` (N2).
+    // Sin rutas o sin tipos lanza; filas o tipos que no sean texto no vacio
+    // se descartan, sin corregirlos.
     static desdeJson(json) {
-      if (!json || !Array.isArray(json.asignaciones) || !Array.isArray(json.tipos)) {
+      if (!json || !Array.isArray(json.rutas) || !Array.isArray(json.tipos)) {
         throw new Error('La respuesta del servidor no trae el catálogo esperado.');
       }
       var claves = ['director', 'po', 'so', 'categoria'];
-      var filas = json.asignaciones.filter(function (f) {
+      var filas = json.rutas.filter(function (f) {
         return f && claves.every(function (c) { return typeof f[c] === 'string' && f[c] !== ''; });
       });
       var vistos = {};
@@ -215,7 +222,8 @@ window.Iniciativas = (function () {
       });
       // El orden de los tipos es el del servidor (Problem primero si esta).
       var problem = typeof json.tipo_problem === 'string' && vistos[json.tipo_problem] ? json.tipo_problem : '';
-      return new CatalogoIniciativas(tipos, filas, Number(json.omitidas) || 0, problem);
+      var omitidas = (Number(json.rutas_sin_duenos) || 0) + (Number(json.rutas_duenos_no_vigentes) || 0);
+      return new CatalogoIniciativas(tipos, filas, omitidas, problem);
     }
 
     tieneTipo(valor) { return this.tipos.indexOf(valor) >= 0; }
@@ -861,13 +869,13 @@ window.Iniciativas = (function () {
           if (catalogo.omitidas > 0) {
             var n = catalogo.omitidas;
             self.$('iniOmitidas').textContent = n + (n === 1
-              ? ' categoría vigente no aparece: le falta Director, Product Owner o Service Owner en el catálogo de dueños.'
-              : ' categorías vigentes no aparecen: les falta Director, Product Owner o Service Owner en el catálogo de dueños.');
+              ? ' categoría activa no aparece: no tiene Director, Product Owner y Service Owner vigentes en el catálogo de dueños.'
+              : ' categorías activas no aparecen: no tienen Director, Product Owner y Service Owner vigentes en el catálogo de dueños.');
             self.$('iniOmitidas').hidden = false;
           }
 
           if (!catalogo.asignaciones.length) {
-            self.$('iniEstado').textContent = 'No hay categorías vigentes con Director, Product Owner y Service Owner.';
+            self.$('iniEstado').textContent = 'No hay categorías activas con Director, Product Owner y Service Owner.';
             self.bloquearTodo('Sin valores en el catálogo.');
             return;
           }
