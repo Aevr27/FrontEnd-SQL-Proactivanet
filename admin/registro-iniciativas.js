@@ -46,11 +46,36 @@
                           Problem (pasaFiltroIniciativa de Experiencia) y no
                           pasan un filtro de Categoria.
 
+   COBERTURA DE CATEGORIAS (vista secundaria, se pide al abrirla)
+   ---------------------------------------------------------------
+     Universo     las categorias VIGENTES de dbo.CatCategoriaDueno con
+                  Director, PO y SO (handlers/admin_iniciativas_catalogos.ashx,
+                  el mismo catalogo de Nueva solicitud). Las que no tienen
+                  los tres dueños las cuenta el servidor en `omitidas`.
+     Activa       `seguimiento` (estado activo y agrupacion de agrupadores):
+                  el mismo criterio del indicador Activas y de Experiencia.
+     Cubierta     al menos una iniciativa activa con una ruta cuya `n2`
+                  (la CategoriaN2 de su C1&C2, la pone el servidor) es esa
+                  categoria. Sin volumen de tickets: solo existencia.
+     Fuera        rutas de iniciativas activas cuya `n2` no es una categoria
+                  del catalogo vigente: se listan aparte, no se descartan.
+     Sin categoria  iniciativas activas sin ninguna categoria: no pueden
+                  cubrir una; solo se cuentan.
+     Filtros      los MISMOS de la lista (FiltroRegistro): Estado,
+                  Agrupacion y Tipo deciden que iniciativas cuentan; Director
+                  y la cascada deciden que categorias se ven. Al cargarse, el
+                  catalogo se suma a la cascada (Registro.catalogo): sus
+                  categorias y dueños pasan a ser opciones aunque no tengan
+                  iniciativas, y elegir una CategoriaN2 filtra la lista por
+                  las rutas que cuelgan de ella.
+
    PIEZAS
    ------
      Registro         el JSON del handler, validado
      FiltroRegistro   lo elegido y que iniciativa pasa
-     VistaRegistro    el DOM: carga, estados, KPIs, filtros, tabla, detalle
+     Cobertura        catalogo de categorias x iniciativas activas
+     VistaRegistro    el DOM: carga, estados, KPIs, filtros, tabla, detalle,
+                      y la vista Cobertura
 
    Se prueba en node: tools/tests/RegistroIniciativasSmoke.js.
    ========================================================================= */
@@ -58,6 +83,9 @@ window.RegistroIniciativas = (function () {
   'use strict';
 
   var URL_REGISTRO = '../handlers/admin_iniciativas_registro.ashx';
+  // El catalogo de categorias de Nueva solicitud. Solo se pide al abrir la
+  // Cobertura, nunca al cargar la pagina.
+  var URL_CATALOGO = '../handlers/admin_iniciativas_catalogos.ashx';
   var CascadaOrganizacional = window.CascadaOrganizacional;
 
   // Cuantas filas pinta la tabla de una vez; "Mostrar mas" agrega otras
@@ -98,6 +126,27 @@ window.RegistroIniciativas = (function () {
       this.estadosActivos = estadosActivos;
       this.agrupadores = agrupadores;
       this.fechaGen = fechaGen;
+      // Filas { director, po, so, categoria } del catalogo de categorias,
+      // solo despues de abrir la Cobertura (ver ampliar). null = sin cargar.
+      this.catalogo = null;
+    }
+
+    // Suma el catalogo a las filas organizacionales (la cascada y el filtro).
+    ampliar(filasCatalogo) { this.catalogo = filasCatalogo; }
+
+    // Las filas con las que se filtra una iniciativa: las de filasDe y, con
+    // el catalogo cargado, ademas la CategoriaN2 de cada ruta (mismos
+    // dueños), para que elegir una categoria del catalogo encuentre las
+    // iniciativas que cuelgan de ella.
+    filasDeIniciativa(i) {
+      var filas = Registro.filasDe(i);
+      if (!this.catalogo || i.sin_categoria) return filas;
+      i.categorias.forEach(function (c) {
+        if (c.n2 && c.n2 !== c.categoria) {
+          filas.push({ director: c.director || '', po: c.po || '', so: c.so || '', categoria: c.n2 });
+        }
+      });
+      return filas;
     }
 
     // Sin la lista lanza: una respuesta rara no se pinta como "0
@@ -130,10 +179,11 @@ window.RegistroIniciativas = (function () {
     }
 
     filasOrganizacionales(director) {
-      var salida = [];
+      var salida = [], self = this;
       this.iniciativas.forEach(function (i) {
-        Registro.filasDe(i).forEach(function (f) { if (!director || f.director === director) salida.push(f); });
+        self.filasDeIniciativa(i).forEach(function (f) { if (!director || f.director === director) salida.push(f); });
       });
+      (this.catalogo || []).forEach(function (f) { if (!director || f.director === director) salida.push(f); });
       return salida;
     }
 
@@ -215,6 +265,12 @@ window.RegistroIniciativas = (function () {
     // y lo ya elegido abajo se conserva mientras siga siendo valido.
     elegirDirector(v) {
       this.director = this.registro.directores().indexOf(v) >= 0 ? v : '';
+      this.rearmar();
+    }
+
+    // La cascada de nuevo sobre las filas de hoy (cambio de Director o
+    // catalogo recien sumado), conservando lo elegido mientras valga.
+    rearmar() {
       var antes = this.cascada.seleccion.slice();
       this.cascada = new CascadaOrganizacional(this.registro.filasOrganizacionales(this.director), 'filtro');
       for (var n = 0; n < antes.length; n++) {
@@ -237,22 +293,150 @@ window.RegistroIniciativas = (function () {
       return (this.estado ? 1 : 0) + (this.tipo ? 1 : 0) + (this.tiposIni ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length;
     }
 
-    pasa(i) {
+    // Estado, Agrupacion y Tipo: lo que no es organizacional.
+    pasaAtributos(i) {
       if (this.estado && i.estado !== this.estado) return false;
       if (this.tipo && i.agrup !== this.tipo) return false;
       if (this.tiposIni && this.tiposIni.indexOf(i.tipo_iniciativa) < 0) return false;
+      return true;
+    }
+
+    // Una fila { director, po, so, categoria } contra Director y cascada.
+    // `categorias`: si viene, la Categoria elegida tiene que estar en esa
+    // lista (la Cobertura pasa la ruta y su N2); si no, igualdad exacta.
+    pasaFila(f, categorias) {
       var director = this.director, org = this.cascada.filtros();
-      var claves = Object.keys(org);
-      if (!director && !claves.length) return true;
-      return Registro.filasDe(i).some(function (f) {
-        if (director && f.director !== director) return false;
-        return claves.every(function (k) { return f[k] === org[k]; });
+      if (director && f.director !== director) return false;
+      return Object.keys(org).every(function (k) {
+        if (k === 'categoria' && categorias) return categorias.indexOf(org[k]) >= 0;
+        return f[k] === org[k];
       });
+    }
+
+    pasa(i) {
+      if (!this.pasaAtributos(i)) return false;
+      if (!this.director && !Object.keys(this.cascada.filtros()).length) return true;
+      var self = this;
+      return this.registro.filasDeIniciativa(i).some(function (f) { return self.pasaFila(f); });
     }
 
     aplicar(lista) {
       var self = this;
       return lista.filter(function (i) { return self.pasa(i); });
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // Cobertura
+  // ---------------------------------------------------------------------
+  // Categorias del catalogo x iniciativas ACTIVAS del registro. No pide nada
+  // ni calcula cifras: cruza dos listas que ya llegaron hechas.
+  class Cobertura {
+    constructor(registro, filas, omitidas) {
+      this.registro = registro;
+      this.filas = filas;            // [{ director, po, so, categoria }] del catalogo
+      this.omitidas = omitidas;
+      this.enCatalogo = {};
+      var self = this;
+      filas.forEach(function (f) { self.enCatalogo[f.categoria] = true; });
+    }
+
+    // El JSON de admin_iniciativas_catalogos.ashx. Sin la lista lanza; las
+    // filas sin alguno de los cuatro textos se descartan (como en Nueva
+    // solicitud), sin corregirlas.
+    static desdeJson(json, registro) {
+      if (!json || !Array.isArray(json.asignaciones)) {
+        throw new Error('La respuesta del servidor no trae el catálogo de categorías.');
+      }
+      var claves = ['director', 'po', 'so', 'categoria'];
+      var vistas = {};
+      var filas = json.asignaciones.filter(function (f) {
+        if (!f || !claves.every(function (c) { return typeof f[c] === 'string' && f[c] !== ''; })) return false;
+        if (Object.prototype.hasOwnProperty.call(vistas, f.categoria)) return false;
+        vistas[f.categoria] = true;
+        return true;
+      }).map(function (f) { return { director: f.director, po: f.po, so: f.so, categoria: f.categoria }; });
+      return new Cobertura(registro, filas, Number(json.omitidas) || 0);
+    }
+
+    // Lo que cuenta como iniciativa activa aqui: `seguimiento`, con
+    // categoria, y que pase Estado / Agrupacion / Tipo.
+    static cuenta(i, filtro) {
+      return !!i.seguimiento && !i.sin_categoria && filtro.pasaAtributos(i);
+    }
+
+    // -> { filas, fuera, resumen } con lo elegido en `filtro`.
+    //   filas  una por categoria del catalogo que pasa Director/cascada:
+    //          { categoria, director, po, so, cubierta,
+    //            iniciativas: [{ folio, titulo, estado, agrup, rutas }] }
+    //   fuera  rutas de iniciativas activas sin categoria vigente del
+    //          catalogo: { ruta, n2, director, po, so, iniciativas }
+    calcular(filtro) {
+      var self = this;
+      var porN2 = {}, fuera = {}, ordenFuera = [], sinCategoria = 0;
+
+      function agregar(destino, i, ruta) {
+        for (var k = 0; k < destino.length; k++) {
+          if (destino[k].folio === i.folio) {
+            if (destino[k].rutas.indexOf(ruta) < 0) destino[k].rutas.push(ruta);
+            return;
+          }
+        }
+        destino.push({ folio: i.folio, titulo: i.titulo, estado: i.estado, agrup: i.agrup, rutas: [ruta] });
+      }
+
+      this.registro.iniciativas.forEach(function (i) {
+        if (i.seguimiento && i.sin_categoria && filtro.pasa(i)) sinCategoria++;
+        if (!Cobertura.cuenta(i, filtro)) return;
+        i.categorias.forEach(function (c) {
+          var ruta = c.categoria || '';
+          if (c.n2 && self.enCatalogo[c.n2]) {
+            agregar(porN2[c.n2] = porN2[c.n2] || [], i, ruta);
+            return;
+          }
+          var fila = { director: c.director || '', po: c.po || '', so: c.so || '', categoria: ruta };
+          if (!filtro.pasaFila(fila, [ruta].concat(c.n2 ? [c.n2] : []))) return;
+          if (!Object.prototype.hasOwnProperty.call(fuera, ruta)) {
+            fuera[ruta] = { ruta: ruta, n2: c.n2 || null, director: fila.director, po: fila.po, so: fila.so, iniciativas: [] };
+            ordenFuera.push(ruta);
+          }
+          agregar(fuera[ruta].iniciativas, i, ruta);
+        });
+      });
+
+      // Una categoria del catalogo pasa la Categoria elegida si es ella, o
+      // si es la N2 de la ruta elegida.
+      var rutas = this.rutasDeN2();
+      var filas = this.filas.filter(function (f) {
+        return filtro.pasaFila(f, [f.categoria].concat(rutas[f.categoria] || []));
+      }).map(function (f) {
+        var inis = (porN2[f.categoria] || []).slice().sort(function (a, b) { return igualTexto(a.folio, b.folio); });
+        return { categoria: f.categoria, director: f.director, po: f.po, so: f.so,
+                 cubierta: inis.length > 0, iniciativas: inis };
+      }).sort(function (a, b) { return igualTexto(a.categoria, b.categoria); });
+
+      var con = filas.filter(function (f) { return f.cubierta; }).length;
+      return {
+        filas: filas,
+        fuera: ordenFuera.sort(igualTexto).map(function (r) { return fuera[r]; }),
+        resumen: { categorias: filas.length, con: con, sin: filas.length - con,
+                   fuera: ordenFuera.length, sinCategoria: sinCategoria, omitidas: this.omitidas }
+      };
+    }
+
+    // N2 -> las rutas del registro que cuelgan de ella (cualquier estado:
+    // son opciones de la Categoria). Se arma una vez.
+    rutasDeN2() {
+      if (this._rutasDeN2) return this._rutasDeN2;
+      var mapa = {};
+      this.registro.iniciativas.forEach(function (i) {
+        i.categorias.forEach(function (c) {
+          if (!c.categoria || !c.n2) return;
+          var lista = mapa[c.n2] = mapa[c.n2] || [];
+          if (lista.indexOf(c.categoria) < 0) lista.push(c.categoria);
+        });
+      });
+      return (this._rutasDeN2 = mapa);
     }
   }
 
@@ -315,6 +499,12 @@ window.RegistroIniciativas = (function () {
       this.cargaId = 0;
       this.abierta = null;        // folio en el detalle
       this.origenFoco = null;
+      // Cobertura: se pide la primera vez que se abre.
+      this.modo = 'registro';     // registro | cobertura
+      this.cobertura = null;      // Cobertura, ya cargada
+      this.coberturaCarga = 0;    // descarta respuestas superadas
+      this.coberturaPromesa = null;
+      this.covFiltro = '';        // '' | con | sin
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -389,6 +579,23 @@ window.RegistroIniciativas = (function () {
         if (col) self.ordenarPor(col);
       });
 
+      // Cobertura de categorias
+      this.$('regVerRegistro').addEventListener('click', function () { self.verRegistro(); });
+      this.$('regVerCobertura').addEventListener('click', function () { self.verCobertura(); });
+      this.$('covFiltro').addEventListener('change', function (e) {
+        self.covFiltro = e.target.value === 'con' || e.target.value === 'sin' ? e.target.value : '';
+        if (self.cobertura) self.pintarCobertura();
+      });
+      this.$('covReintentar').addEventListener('click', function () { self.cargarCobertura(); });
+      ['covCuerpo', 'covFuera'].forEach(function (id) {
+        self.$(id).addEventListener('click', function (e) {
+          var el = e.target;
+          if (el && el.closest) el = el.closest('[data-folio]');
+          var folio = el && el.getAttribute && el.getAttribute('data-folio');
+          if (folio) self.abrirDetalle(folio, el);
+        });
+      });
+
       this.$('regDetCerrar').addEventListener('click', function () { self.cerrarDetalle(); });
       this.$('regDetFondo').addEventListener('click', function () { self.cerrarDetalle(); });
       this.doc.addEventListener('keydown', function (e) {
@@ -432,6 +639,11 @@ window.RegistroIniciativas = (function () {
       this.registro = null;
       this.filtro = null;
       this.cerrarDetalle();
+      // La Cobertura cuelga del registro: se vuelve a pedir al reabrirla.
+      this.cobertura = null;
+      this.coberturaPromesa = null;
+      this.coberturaCarga++;
+      this.mostrarModo('registro');
       this.estadoVista('cargando');
 
       return Promise.resolve()
@@ -497,6 +709,145 @@ window.RegistroIniciativas = (function () {
       this.limite = PAGINA;
       this.pintarFiltros();
       this.pintarTabla();
+      if (this.modo === 'cobertura' && this.cobertura) this.pintarCobertura();
+    }
+
+    // ---- Cobertura de categorias ----
+    mostrarModo(modo) {
+      this.modo = modo === 'cobertura' ? 'cobertura' : 'registro';
+      var cob = this.modo === 'cobertura', self = this;
+      this.$('regListaBloque').hidden = cob;
+      this.$('covSeccion').hidden = !cob;
+      [['regVerRegistro', !cob], ['regVerCobertura', cob]].forEach(function (par) {
+        self.$(par[0]).classList.toggle('activa', par[1]);
+        self.$(par[0]).setAttribute('aria-pressed', par[1] ? 'true' : 'false');
+      });
+    }
+
+    verRegistro() { this.mostrarModo('registro'); }
+
+    // Abre la vista; el catalogo se pide solo la primera vez.
+    verCobertura(pedir) {
+      if (!this.registro) return Promise.resolve();
+      this.mostrarModo('cobertura');
+      if (this.cobertura) { this.pintarCobertura(); return Promise.resolve(); }
+      return this.coberturaPromesa || this.cargarCobertura(pedir);
+    }
+
+    // `pedir` es fetch por omision; las pruebas le pasan uno propio.
+    cargarCobertura(pedir) {
+      var self = this, registro = this.registro;
+      if (!registro) return Promise.resolve();
+      pedir = pedir || function (url) { return fetch(url, { cache: 'no-store' }); };
+      var mia = ++this.coberturaCarga;
+      this.estadoCobertura('cargando');
+
+      this.coberturaPromesa = Promise.resolve()
+        .then(function () {
+          return Promise.resolve(pedir(URL_CATALOGO)).catch(function () {
+            throw new Error('No se pudo conectar con el servidor.');
+          });
+        })
+        .then(function (r) {
+          return r.json().catch(function () { return null; }).then(function (json) {
+            if (!r.ok) throw new Error((json && json.error) || ('El servidor respondió ' + r.status + '.'));
+            return json;
+          });
+        })
+        .then(function (json) {
+          if (mia !== self.coberturaCarga || registro !== self.registro) return;
+          self.cobertura = Cobertura.desdeJson(json, registro);
+          // Desde aqui la cascada compartida ofrece tambien las categorias
+          // y dueños del catalogo.
+          registro.ampliar(self.cobertura.filas);
+          self.filtro.rearmar();
+          self.estadoCobertura('listo');
+          self.refrescar();
+        })
+        .catch(function (err) {
+          if (mia !== self.coberturaCarga) return;
+          self.$('covErrorTexto').textContent = (err && err.message) || 'No se pudo cargar el catálogo de categorías.';
+          self.estadoCobertura('error');
+        })
+        .then(function () { if (mia === self.coberturaCarga) self.coberturaPromesa = null; });
+      return this.coberturaPromesa;
+    }
+
+    // cargando | error | listo
+    estadoCobertura(estado) {
+      this.$('covCargando').hidden = estado !== 'cargando';
+      this.$('covError').hidden = estado !== 'error';
+      this.$('covContenido').hidden = estado !== 'listo';
+      this.$('covFiltro').disabled = estado !== 'listo';
+    }
+
+    // Todas las iniciativas activas de la categoria, una por renglon: con
+    // varias no se escoge ninguna. Las rutas se ven si no son la categoria.
+    htmlIniciativasCobertura(inis, categoria) {
+      if (!inis.length) return '<span class="ini-tenue">—</span>';
+      var self = this;
+      return (inis.length > 1 ? '<span class="ini-sub ini-cov-varias">' + inis.length + ' iniciativas activas</span>' : '') +
+        '<ul class="ini-cov-lista">' + inis.map(function (i) {
+          var rutas = i.rutas.filter(function (r) { return r && r !== categoria; });
+          return '<li><button type="button" class="ini-folio" data-folio="' + Escape.attr(i.folio) + '" aria-haspopup="dialog">' +
+            Escape.html(i.folio) + '</button> ' + self.htmlEstado({ activa: true, estado: i.estado }) +
+            '<span class="ini-cov-titulo">' + Escape.html(texto(i.titulo)) + '</span>' +
+            (rutas.length ? '<span class="ini-sub ini-cat-ruta">' + rutas.map(function (r) { return Escape.html(r); }).join('<br>') + '</span>' : '') +
+            '</li>';
+        }).join('') + '</ul>';
+    }
+
+    htmlFilaCobertura(f) {
+      var pill = f.cubierta ? '<span class="pill dentro">Con iniciativa activa</span>'
+        : '<span class="pill vencido">Sin iniciativa activa</span>';
+      return '<tr class="ini-fila ini-cov-fila' + (f.cubierta ? '' : ' ini-cov-sin') + '">' +
+        '<td data-col="Categoría" class="ini-col-titulo ini-cat-ruta">' + Escape.html(f.categoria) + '</td>' +
+        '<td data-col="Director" class="ini-col-persona">' + Escape.html(texto(f.director)) + '</td>' +
+        '<td data-col="Product Owner" class="ini-col-persona">' + Escape.html(texto(f.po)) + '</td>' +
+        '<td data-col="Service Owner" class="ini-col-persona">' + Escape.html(texto(f.so)) + '</td>' +
+        '<td data-col="Estado de cobertura">' + pill + '</td>' +
+        '<td data-col="Iniciativas activas" class="ini-cov-inis">' + this.htmlIniciativasCobertura(f.iniciativas, f.categoria) + '</td>' +
+        '</tr>';
+    }
+
+    pintarCobertura() {
+      if (!this.cobertura || !this.filtro) return;
+      var r = this.cobertura.calcular(this.filtro), k = r.resumen, sel = this.covFiltro;
+      var filas = r.filas.filter(function (f) { return !sel || (sel === 'con') === f.cubierta; });
+      this.$('covFiltro').value = sel;
+
+      this.$('covCuenta').textContent = fmt(k.categorias) + (k.categorias === 1 ? ' categoría' : ' categorías') +
+        ' · ' + fmt(k.con) + ' con iniciativa activa · ' + fmt(k.sin) + ' sin iniciativa activa';
+
+      var notas = ['Categorías vigentes del catálogo de dueños. Iniciativa activa: En Análisis, En Solución o En Monitoreo, de ' +
+        this.registro.agrupadores.join(' · ') + ' (criterio de Experiencia). No mira volumen de tickets.'];
+      if (k.omitidas) notas.push(fmt(k.omitidas) + (k.omitidas === 1 ? ' categoría vigente no aparece' : ' categorías vigentes no aparecen') +
+        ': le falta Director, Product Owner o Service Owner en el catálogo.');
+      if (k.sinCategoria) notas.push(fmt(k.sinCategoria) + (k.sinCategoria === 1 ? ' iniciativa activa no tiene' : ' iniciativas activas no tienen') +
+        ' categoría: no cubren ninguna.');
+      this.$('covNota').textContent = notas.join(' ');
+
+      this.$('covVacio').hidden = filas.length > 0;
+      this.$('covTablaCaja').hidden = filas.length === 0;
+      var self = this;
+      this.$('covCuerpo').innerHTML = filas.map(function (f) { return self.htmlFilaCobertura(f); }).join('');
+
+      // Rutas con iniciativa activa que no caen en ninguna categoria vigente
+      // del catalogo: a la vista, no descartadas.
+      var fuera = this.$('covFuera');
+      fuera.hidden = r.fuera.length === 0;
+      fuera.innerHTML = r.fuera.length ? '<h4 class="ini-cov-fuera-tit">Iniciativas activas fuera del catálogo vigente (' + fmt(r.fuera.length) +
+        (r.fuera.length === 1 ? ' ruta' : ' rutas') + ')</h4>' +
+        '<p class="ini-nota">Su ruta no cuelga de una categoría vigente del catálogo de dueños (sin fila propia para su C1&amp;C2, o dada de baja). No cuentan en la cobertura de arriba.</p>' +
+        '<div class="ini-tabla-caja"><table class="ini-tabla ini-cov-tabla"><caption class="ini-sr">Rutas con iniciativa activa fuera del catálogo.</caption>' +
+        '<thead><tr><th scope="col"><span class="ini-th">Ruta</span></th><th scope="col"><span class="ini-th">Product Owner</span></th>' +
+        '<th scope="col"><span class="ini-th">Service Owner</span></th><th scope="col"><span class="ini-th">Iniciativas activas</span></th></tr></thead><tbody>' +
+        r.fuera.map(function (x) {
+          return '<tr class="ini-fila ini-cov-fila"><td data-col="Ruta" class="ini-col-titulo ini-cat-ruta">' + Escape.html(x.ruta) + '</td>' +
+            '<td data-col="Product Owner" class="ini-col-persona">' + Escape.html(texto(x.po)) + '</td>' +
+            '<td data-col="Service Owner" class="ini-col-persona">' + Escape.html(texto(x.so)) + '</td>' +
+            '<td data-col="Iniciativas activas" class="ini-cov-inis">' + self.htmlIniciativasCobertura(x.iniciativas, x.ruta) + '</td></tr>';
+        }).join('') + '</tbody></table></div>' : '';
     }
 
     filtradas() {
@@ -796,8 +1147,10 @@ window.RegistroIniciativas = (function () {
     URL_REGISTRO: URL_REGISTRO,
     PAGINA: PAGINA,
     FECHA_DEL_ESTADO: FECHA_DEL_ESTADO,
+    URL_CATALOGO: URL_CATALOGO,
     Registro: Registro,
     FiltroRegistro: FiltroRegistro,
+    Cobertura: Cobertura,
     ordenar: ordenar,
     VistaRegistro: VistaRegistro
   };

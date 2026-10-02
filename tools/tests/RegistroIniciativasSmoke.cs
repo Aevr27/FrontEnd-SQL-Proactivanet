@@ -19,6 +19,8 @@
 //   8) el archivo no tiene SQL que escriba
 //   9) tipo_iniciativa: el TipoIniciativa del folio (DashboardCatalogos
 //      .TiposPorFolio, grafia del catalogo), null sin tipo; agrup no cambia
+//  10) n2 de cada categoria: la CategoriaN2 del C1&C2 de la ruta si tiene
+//      fila propia en CatCategoriaDueno (vigente o no), null si no
 //
 // Compilar y correr desde la raiz del repo:
 //   csc /nologo /target:library /out:exp.dll /r:System.dll /r:System.Data.dll ^
@@ -172,6 +174,24 @@ public static class RegistroSmoke
 
         Check("listas del contrato", "En Análisis,En Solución,En Monitoreo|Problem,SorIA,Adopcion,Mejora",
             string.Join(",", ToStr((IList)salida["estados_activos"])) + "|" + string.Join(",", ToStr((IList)salida["agrupadores"])));
+
+        // 10) n2: directorio con fila propia para /A/Cat 1 (vigente) y para
+        // /B/Cat 4 (dada de baja); /A/Cat 3 solo hereda del C1 "A".
+        var duenos2 = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(TDue));
+        foreach (var fila in new[] { new object[] { "/A/Cat 1", "A", true }, new object[] { "/A", "A", true }, new object[] { "/B/Cat 4", "B", false } })
+        {
+            var du = Nuevo(TDue);
+            Set(du, "CategoriaN2", fila[0]); Set(du, "C1", fila[1]);
+            Set(du, "Po", "PO"); Set(du, "So", "SO"); Set(du, "Director", "Dir"); Set(du, "Vigente", fila[2]);
+            duenos2.Add(du);
+        }
+        var dir2 = Activator.CreateInstance(TDir, new object[] { duenos2, new Dictionary<string, string>() });
+        var conN2 = (Dictionary<string, object>)M("ArmarRegistro").Invoke(null, new object[] { detalle, new List<object>(), dir2, null });
+        var catsN2 = (IList)Ini((IList)conN2["iniciativas"], "PRB 1")["categorias"];
+        Check("10 ruta bajo N2 capturada", "/A/Cat 1", ((Dictionary<string, object>)catsN2[0])["n2"]);
+        Check("10 ruta sin N2 propia (hereda del C1): null", true, ((Dictionary<string, object>)catsN2[1])["n2"] == null);
+        Check("10 N2 dada de baja: se informa (la Cobertura decide)", "/B/Cat 4",
+            ((Dictionary<string, object>)((IList)Ini((IList)conN2["iniciativas"], "HAR 4")["categorias"])[0])["n2"]);
 
         // 8) Solo lectura
         var fuente = File.ReadAllText("App_Code/ExperienciaRegistro.cs");

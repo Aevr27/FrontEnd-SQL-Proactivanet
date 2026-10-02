@@ -428,6 +428,39 @@
 
 .ini-mas-caja { display: flex; justify-content: center; margin-top: 12px; }
 
+/* ---- Registro | Cobertura de categorias (mismos filtros) ---- */
+.ini-conmutador {
+  display: inline-flex; flex-wrap: wrap; gap: 4px; max-width: 100%;
+  margin-bottom: 12px; padding: 3px;
+  border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--bg-2);
+}
+.ini-conm-op {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  padding: 6px 14px; border-radius: var(--radius-pill);
+  font-size: 12.5px; font-weight: 700; color: var(--muted);
+}
+.ini-conm-op:hover { color: var(--ink); }
+.ini-conm-op.activa { background: #fff; color: var(--accent-ink); box-shadow: 0 1px 2px rgba(25, 25, 25, .12); }
+.ini-conm-op:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Encabezado fijo (no ordena): mismo relleno que .ini-orden. */
+.ini-th { display: block; padding: 10px 8px; white-space: nowrap; }
+.ini-cov-campo { margin-left: auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.ini-cov-campo label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.ini-cov-campo select {
+  height: 32px; min-width: 0; max-width: 100%; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-xs); background: #fff;
+  font: inherit; font-size: 12.5px; color: var(--ink);
+}
+.ini-cov-fila { cursor: default; }
+.ini-cov-tabla .ini-cat-ruta { min-width: 180px; max-width: 320px; }
+.ini-cov-inis { min-width: 220px; }
+.ini-cov-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ini-cov-lista li { min-width: 0; overflow-wrap: anywhere; }
+.ini-cov-titulo { display: block; margin-top: 2px; color: var(--ink); line-height: 1.35; }
+.ini-cov-varias { margin: 0 0 4px; font-weight: 700; }
+.ini-cov-fuera-tit { margin: 20px 0 0; font-size: 13px; font-weight: 800; color: var(--ink); }
+
 /* Bajo 760px la tabla se vuelve una lista de tarjetas: cada celda con su
    rotulo (data-col). El encabezado se oculta; el orden queda el de omision. */
 @media (max-width: 760px) {
@@ -445,6 +478,8 @@
     font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted);
   }
   .ini-tabla tr.ini-fila td.ini-col-titulo { grid-column: 1 / -1; }
+  .ini-tabla tr.ini-fila td.ini-cov-inis { grid-column: 1 / -1; }
+  .ini-cov-campo { margin-left: 0; width: 100%; }
   .ini-tabla tr.ini-fila td:first-child::before { display: none; }
   .ini-lista-ayuda { margin-left: 0; }
 }

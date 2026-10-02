@@ -25,6 +25,9 @@
       handlers/admin_iniciativas_registro.ashx, que reusa la lectura y el
       semaforo de Experiencia (App_Code/ExperienciaRegistro.cs). Vista:
       admin/registro-iniciativas.js. Sin editar, sin descargas.
+      Su vista secundaria "Cobertura de categorias" (mismos filtros)
+      cruza las categorias vigentes del catalogo de dueños con las
+      iniciativas activas; pide el catalogo solo al abrirse.
     - "Nueva solicitud" (sin enviar ni guardar):
         Tipo de iniciativa -> Product Owner -> Service Owner -> Categoria,
         y el Director se muestra DERIVADO de la categoria (no se elige).
@@ -217,6 +220,15 @@
         <div class="campo"><label for="regCategoria">Categoría</label><select id="regCategoria" disabled></select></div>
       </div>
 
+      <!-- Dos vistas sobre los MISMOS filtros: la lista de iniciativas y la
+           Cobertura de categorias. La Cobertura pide su catalogo la primera
+           vez que se abre (registro-iniciativas.js, VistaRegistro). -->
+      <div class="ini-conmutador" role="group" aria-label="Vista">
+        <button type="button" class="ini-conm-op activa" id="regVerRegistro" aria-pressed="true">Registro</button>
+        <button type="button" class="ini-conm-op" id="regVerCobertura" aria-pressed="false" aria-controls="covSeccion">Cobertura de categorías</button>
+      </div>
+
+      <div id="regListaBloque">
       <div class="ini-lista-cab">
         <h3 class="ini-lista-titulo">Registro</h3>
         <span class="ini-lista-cuenta" id="regCuenta" aria-live="polite"></span>
@@ -236,6 +248,52 @@
         </table>
       </div>
       <div class="ini-mas-caja"><button type="button" class="btn linea" id="regMas" hidden>Mostrar más</button></div>
+      </div>
+
+      <!-- Cobertura de categorias, SOLO LECTURA: categorias vigentes del
+           catalogo de dueños (dbo.CatCategoriaDueno) con o sin iniciativa
+           activa. Sin volumen de tickets. Cargando y error nunca se ven como
+           "todo sin iniciativa". -->
+      <section id="covSeccion" aria-labelledby="covTitulo" hidden>
+        <div class="ini-lista-cab">
+          <h3 class="ini-lista-titulo" id="covTitulo">Cobertura de categorías</h3>
+          <span class="ini-lista-cuenta" id="covCuenta" aria-live="polite"></span>
+          <div class="campo ini-cov-campo">
+            <label for="covFiltro">Cobertura</label>
+            <select id="covFiltro">
+              <option value="">— Todas —</option>
+              <option value="con">Con iniciativa activa</option>
+              <option value="sin">Sin iniciativa activa</option>
+            </select>
+          </div>
+        </div>
+        <p class="ini-estado" id="covCargando" role="status" hidden>Cargando el catálogo de categorías…</p>
+        <div class="ini-error" id="covError" role="alert" hidden>
+          <span><strong>No se pudo cargar la cobertura.</strong> <span id="covErrorTexto"></span></span>
+          <button type="button" class="btn" id="covReintentar">Reintentar</button>
+        </div>
+        <div id="covContenido" hidden>
+          <p class="ini-nota" id="covNota"></p>
+          <div class="ini-vacio" id="covVacio" hidden>
+            <strong>No hay categorías que coincidan con los filtros seleccionados.</strong>
+          </div>
+          <div class="ini-tabla-caja" id="covTablaCaja">
+            <table class="ini-tabla ini-cov-tabla">
+              <caption class="ini-sr">Categorías del catálogo y sus iniciativas activas.</caption>
+              <thead><tr>
+                <th scope="col"><span class="ini-th">Categoría</span></th>
+                <th scope="col"><span class="ini-th">Director</span></th>
+                <th scope="col"><span class="ini-th">Product Owner</span></th>
+                <th scope="col"><span class="ini-th">Service Owner</span></th>
+                <th scope="col"><span class="ini-th">Estado de cobertura</span></th>
+                <th scope="col"><span class="ini-th">Iniciativas activas</span></th>
+              </tr></thead>
+              <tbody id="covCuerpo"></tbody>
+            </table>
+          </div>
+          <div id="covFuera" hidden></div>
+        </div>
+      </section>
     </div>
   </section>
 

@@ -5,7 +5,8 @@
 // Director derivado de la categoria.
 //
 // admin/iniciativas.js lo pide una sola vez al abrir la pagina, sin query
-// string, y espera:
+// string (y admin/registro-iniciativas.js, al abrir la Cobertura de
+// categorias, para el universo de categorias), y espera:
 //
 //     { "tipos": ["...", ...],
 //       "asignaciones": [ { "director": "...", "po": "...", "so": "...",

@@ -14,7 +14,8 @@
 //                          activa, seguimiento, sin_categoria,
 //                          tipo_iniciativa,
 //                          categorias: [ { categoria, tickets_reduce,
-//                                          pct_dism, po, so, director } ] } ],
+//                                          pct_dism, po, so, director,
+//                                          n2 } ] } ],
 //       "estados_activos": [...], "agrupadores": [...], "fecha_gen": "dd/MM/yyyy" }
 //
 // Toda la logica es la de Experiencia: ExperienciaQueries.RegistroIniciativas

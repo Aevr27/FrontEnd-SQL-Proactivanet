@@ -36,6 +36,13 @@
 //   categorias     una fila por (Codigo, Categoria): tickets_reduce y
 //                  pct_dism de esa fila (como categorias_por_folio) mas los
 //                  dueños de ESA categoria, que es con lo que se filtra.
+//                  n2: la CategoriaN2 de dbo.CatCategoriaDueno bajo la que
+//                  cae la ruta (su C1&C2, la misma llave con la que
+//                  AlinearDuenos resuelve los dueños), o null si ese C1&C2 no
+//                  tiene fila propia (dueños heredados del C1, o ruta de un
+//                  solo nivel). Lo usa la Cobertura de categorias para
+//                  colgar la ruta de su categoria del catalogo; no se adivina
+//                  ninguna otra.
 //   activa         estado en ESTADOS_ACTIVOS.
 //   seguimiento    activa y con agrupador de AGRUPADORES: el criterio con el
 //                  que Experiencia cuenta Activas y Vencidas.
@@ -53,8 +60,10 @@
 // ------------------------
 // Nada de volumen de tickets (vw_TBSlotCAT / vw_TBMesCAT ni la columna
 // VolumenUltimos30 de la vista): LeerIniciativas no las pide y aqui tampoco.
-// Por eso no hay "Categorias sin iniciativa" ni volumen por categoria en esta
-// fase.
+// Por eso no hay volumen por categoria. La "Cobertura de categorias" de
+// admin/ NO es la pestaña de Experiencia (que es por volumen): cruza en el
+// navegador el catalogo de dueños con las iniciativas activas de este
+// registro por su `n2`, sin ningun SELECT nuevo.
 //
 // SOLO LECTURA: los SELECT de LeerIniciativas, LeerIniciativasSinCategoria,
 // DirectorioOrganizacional.Cargar y DashboardCatalogos.TiposIniciativaPorFolio,
@@ -128,6 +137,7 @@ public static partial class ExperienciaQueries
                 c["po"] = d.Po;
                 c["so"] = d.So;
                 c["director"] = d.Director;
+                c["n2"] = N2De(d, dir);
                 categorias.Add(c);
             }
 
@@ -162,6 +172,15 @@ public static partial class ExperienciaQueries
         salida["estados_activos"] = new List<object>(ESTADOS_ACTIVOS);
         salida["agrupadores"] = new List<object>(AGRUPADORES);
         return salida;
+    }
+
+    // La CategoriaN2 capturada para el C1&C2 de la fila (mismo corte que
+    // AlinearDuenos), o null.
+    private static string N2De(Detalle d, DirectorioOrganizacional dir)
+    {
+        var c1c2 = !string.IsNullOrEmpty(d.C1C2) ? d.C1C2 : C1C2De(d.Categoria);
+        var fila = dir.Categoria(c1c2);
+        return fila == null ? null : fila.CategoriaN2;
     }
 
     private static string TipoDe(Dictionary<string, string> tipos, string folio)
