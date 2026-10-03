@@ -28,6 +28,9 @@ public class AdminSesion : IHttpHandler
             var identidad = IdentidadWindows.DesdeContexto(context);
             var salida = new Dictionary<string, object>();
             salida["autorizado"] = AccesoAdmin.EstaAutorizado(identidad);
+            // Solo para que se note en pantalla/red que es la identidad
+            // simulada de IIS Express (IdentidadDesarrolloLocal).
+            if (identidad.DesarrolloLocal) salida["desarrollo_local"] = true;
 
             if ((bool)salida["autorizado"] && context.Request.QueryString["persona"] == "1")
             {

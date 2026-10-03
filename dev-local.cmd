@@ -9,11 +9,25 @@ REM  Web.config esta en .gitignore: no se sube nunca.
 REM
 REM    http://localhost:8081/                       tablero (dashboard.html)
 REM    http://localhost:8081/qa/qa.html             tablero de QA (suelto)
+REM
+REM  Admin -> Iniciativas en local (SOLO DESARROLLO): IIS Express no tiene
+REM  Autenticacion de Windows, asi que todo llega anonimo y Admin da 403.
+REM  Para probarlo, pasar la cuenta como segundo argumento:
+REM
+REM    dev-local.cmd 8081 SORIANA\t_andresvr
+REM
+REM  Pone ADMIN_DEV_IDENTIDAD solo para este IIS Express. La cuenta pasa por
+REM  la whitelist igual que en la VM (otra cuenta -> 403). Solo actua en
+REM  iisexpress, desde localhost y sin identidad real: ver
+REM  App_Code/IdentidadDesarrolloLocal.cs. Sin segundo argumento se borra.
 REM ---------------------------------------------------------------------
 setlocal
 
 set "PUERTO=%~1"
 if "%PUERTO%"=="" set "PUERTO=8081"
+
+set "ADMIN_DEV_IDENTIDAD=%~2"
+if defined ADMIN_DEV_IDENTIDAD echo Admin local: identidad simulada %ADMIN_DEV_IDENTIDAD% (solo IIS Express, solo localhost)
 
 set "IISEXPRESS=%ProgramFiles%\IIS Express\iisexpress.exe"
 if not exist "%IISEXPRESS%" set "IISEXPRESS=%ProgramFiles(x86)%\IIS Express\iisexpress.exe"

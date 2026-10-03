@@ -113,6 +113,54 @@ public static class AccesoAdminHttpSmoke
             }
         }
 
+        // ---- D) desarrollo local (IdentidadDesarrolloLocal) -----------------
+        // La regla: las cuatro condiciones a la vez.
+        const string EXP = "iisexpress";
+        Check("D1 iisexpress + local + anonimo + variable: simula", YO,
+              IdentidadDesarrolloLocal.Evaluar(EXP, true, false, " " + YO + " "));
+        Check("D2 en IIS (w3wp): nunca", true, IdentidadDesarrolloLocal.Evaluar("w3wp", true, false, YO) == null);
+        Check("D3 cliente remoto: nunca", true, IdentidadDesarrolloLocal.Evaluar(EXP, false, false, YO) == null);
+        Check("D4 con identidad real: nunca la reemplaza", true, IdentidadDesarrolloLocal.Evaluar(EXP, true, true, YO) == null);
+        Check("D5 sin variable: nada", true, IdentidadDesarrolloLocal.Evaluar(EXP, true, false, null) == null
+                                             && IdentidadDesarrolloLocal.Evaluar(EXP, true, false, "  ") == null);
+        Check("D6 variable sin dominio / sin cuenta: nada", true,
+              IdentidadDesarrolloLocal.Evaluar(EXP, true, false, "t_andresvr") == null
+              && IdentidadDesarrolloLocal.Evaluar(EXP, true, false, @"SORIANA\") == null
+              && IdentidadDesarrolloLocal.Evaluar(EXP, true, false, @"\t_andresvr") == null);
+        Check("D7 la simulada pasa por la whitelist: otra cuenta seguiria negada", false,
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(
+                  IdentidadDesarrolloLocal.Evaluar(EXP, true, false, @"SORIANA\t_otro"), true)));
+
+        // Con la variable PUESTA en este proceso (que no es iisexpress y cuyo
+        // request no es local): el camino normal no cambia en nada.
+        Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, YO);
+        try
+        {
+            foreach (var h in protegidos)
+            {
+                cuerpo = Correr(h, "admin_iniciativas_x.ashx", "categoria=/A", "", out estado);
+                Check("D8 variable puesta, fuera de IIS Express: " + h.GetType().Name + " anonimo sigue en 403",
+                      "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
+            }
+            cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
+            Check("D8 admin_sesion anonimo sigue sin autorizar", "{\"autorizado\":false}", cuerpo);
+            cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, @"SORIANA\t_otro", out estado);
+            Check("D9 identidad real no autorizada: 403 aunque la variable diga t_andresvr", 403, estado);
+            var sw = new StringWriter();
+            var ctxReal = Contexto("x.ashx", null, YO, sw);
+            var idReal = IdentidadWindows.DesdeContexto(ctxReal);
+            Check("D10 identidad real autorizada: es la real, no la simulada", "SORIANA\\t_andresvr|False",
+                  idReal.Original + "|" + idReal.DesarrolloLocal);
+            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, @"SORIANA\t_otro");
+            Check("D10 la variable no pisa a la identidad real", true,
+                  AccesoAdmin.EstaAutorizado(IdentidadWindows.DesdeContexto(Contexto("x.ashx", null, YO, new StringWriter()))));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, null);
+            HttpContext.Current = null;
+        }
+
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));
         return fallos == 0 ? 0 : 1;
     }
