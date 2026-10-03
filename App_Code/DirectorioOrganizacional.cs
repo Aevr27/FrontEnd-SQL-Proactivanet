@@ -114,6 +114,21 @@ public sealed class DirectorioOrganizacional
         manager = ManagerDe(so);
     }
 
+    // ¿La fila de CatCategoriaDueno de la que Resolver toma los dueños es
+    // vigente? La del C1&C2 exacto si existe; si no, la del C1 (la misma
+    // eleccion de Resolver). Sin ninguna, false. Lo usa Admin para no
+    // ofrecer una categoria cuyos dueños solo existen en filas dadas de baja,
+    // igual que AsignacionesVigentes solo recorre filas vigentes.
+    public bool FuenteVigente(string c1, string c1c2)
+    {
+        Dueno n2 = null, raiz = null;
+        c1c2 = Normaliza(c1c2);
+        c1 = Normaliza(c1);
+        if (c1c2 != null && _porN2.TryGetValue(c1c2, out n2)) return n2.Vigente;
+        if (c1 != null && _porC1.TryGetValue(c1, out raiz)) return raiz.Vigente;
+        return false;
+    }
+
     // El Manager de una persona segun dbo.CatPersona, o null.
     public string ManagerDe(string persona)
     {
@@ -187,6 +202,90 @@ public sealed class DirectorioOrganizacional
         salida["jerarquia"] = Aplanar(jerarquia);
         salida["jerarquia_mgr"] = Aplanar(jerarquiaMgr);
         return salida;
+    }
+
+    // Una fila por categoria VIGENTE con sus tres dueños ya resueltos (N2
+    // exacto y, si falta alguno, heredado del C1: la misma regla de
+    // Resolver). Es lo que encadena los selects de admin/iniciativas.html:
+    // no hay otra relacion Director / PO / SO que la de compartir una fila
+    // de CatCategoriaDueno, y el Manager no entra (jerarquia aparte).
+    //
+    // Una categoria a la que le falte alguno de los tres aun despues de
+    // heredar no se puede alcanzar por la cascada; se cuenta en `omitidas`
+    // en vez de inventarle un dueño.
+    public Dictionary<string, object> AsignacionesVigentes()
+    {
+        var filas = new List<object>();
+        int omitidas = 0;
+
+        var orden = new List<Dueno>();
+        foreach (var d in Duenos())
+            if (d.Vigente && d.CategoriaN2 != null) orden.Add(d);
+        orden.Sort(delegate (Dueno a, Dueno b)
+        {
+            return string.CompareOrdinal(a.CategoriaN2, b.CategoriaN2);
+        });
+
+        foreach (var d in orden)
+        {
+            string po, so, director, manager;
+            Resolver(d.C1, d.CategoriaN2, out po, out so, out director, out manager);
+            if (string.IsNullOrEmpty(director) || string.IsNullOrEmpty(po) || string.IsNullOrEmpty(so))
+            {
+                omitidas++;
+                continue;
+            }
+
+            var fila = new Dictionary<string, object>();
+            fila["director"] = director;
+            fila["po"] = po;
+            fila["so"] = so;
+            fila["categoria"] = d.CategoriaN2;
+            filas.Add(fila);
+        }
+
+        var salida = new Dictionary<string, object>();
+        salida["asignaciones"] = filas;
+        salida["omitidas"] = omitidas;
+        return salida;
+    }
+
+    // Los Product Owners con los que un Service Owner COMPARTE alguna
+    // categoria vigente (dueños resueltos con la misma regla de Resolver).
+    // No es una jerarquia SO -> PO: solo las combinaciones que existen en
+    // dbo.CatCategoriaDueno. PO -> sus categorias, en orden ordinal. Si
+    // salen varios PO, quien llame NO debe escoger uno.
+    public SortedDictionary<string, List<string>> ProductOwnersDe(string so)
+    {
+        var salida = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
+        so = Normaliza(so);
+        if (so == null) return salida;
+
+        foreach (var d in Duenos())
+        {
+            if (!d.Vigente) continue;
+            string po, soFila, director, manager;
+            Resolver(d.C1, d.CategoriaN2, out po, out soFila, out director, out manager);
+            if (po == null || !string.Equals(soFila, so, StringComparison.OrdinalIgnoreCase)) continue;
+
+            // Un PO escrito con otra capitalizacion es el mismo PO.
+            string llave = null;
+            foreach (var k in salida.Keys)
+                if (string.Equals(k, po, StringComparison.OrdinalIgnoreCase)) { llave = k; break; }
+            if (llave == null) { llave = po; salida[llave] = new List<string>(); }
+            salida[llave].Add(d.CategoriaN2);
+        }
+
+        foreach (var lista in salida.Values) lista.Sort(string.CompareOrdinal);
+        return salida;
+    }
+
+    // La fila de una categoria N2 capturada, o null.
+    public Dueno Categoria(string n2)
+    {
+        Dueno d;
+        n2 = Normaliza(n2);
+        return n2 != null && _porN2.TryGetValue(n2, out d) ? d : null;
     }
 
     // ------------------------------------------------------------------

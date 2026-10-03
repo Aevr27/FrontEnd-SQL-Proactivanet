@@ -93,7 +93,15 @@ todas(js, /^.*\.mtab.*$/gm).forEach(function (m) {
 
 // --- la barra sigue entrando por activarTab() ----------------------------
 comprobar('el clic de la barra llama a activarTab',
-  /querySelectorAll\('\.mnav'\)[\s\S]{0,200}activarTab\(btn\.dataset\.tab\)/.test(js), true);
+  /querySelectorAll\('\.mnav\[data-tab\]'\)[\s\S]{0,200}activarTab\(btn\.dataset\.tab\)/.test(js), true);
+
+// --- Administracion es un enlace, no una pestaña -------------------------
+// Sin data-tab y fuera del selector del clic: no pasa por activarTab (que
+// la mandaria a SLA antes de navegar). Nace oculta (SesionAdmin).
+var enlaceAdmin = (html.match(/<li data-solo-admin hidden>\s*<a class="mnav"[^>]*>/) || [''])[0];
+comprobar('Administracion: enlace oculto a admin/iniciativas.html',
+  /href="admin\/iniciativas\.html"/.test(enlaceAdmin), true);
+comprobar('Administracion: sin data-tab', /data-tab/.test(enlaceAdmin), false);
 comprobar('activarTab sigue marcando la entrada activa',
   /function activarTab[\s\S]{0,600}querySelectorAll\('\.mnav'\)/.test(js), true);
 

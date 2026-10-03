@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="es" class="lateral-cerrada">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Administracion — Iniciativas</title>
+
+<!--
+  Pagina oculta de administracion de iniciativas.
+
+  No esta enlazada desde dashboard.html ni desde admin/admin.html: se llega
+  escribiendo la URL /admin/iniciativas.html. Sin autenticacion todavia.
+
+  ESTADO ACTUAL (cuarto hito):
+    - Dos vistas principales con pestaña: Iniciativas (la de inicio) y
+      Solicitudes. "Nueva solicitud" NO es pestaña: es una accion de
+      Iniciativas (boton "Solicitar una iniciativa") y tiene "Volver".
+      Modificacion / Descargas / Truncas seran acciones dentro de esas vistas,
+      no pestañas.
+    - El borrador de Nueva solicitud vive en SolicitudNueva (memoria de la
+      pagina): sobrevive al ir y volver entre vistas; se pierde al recargar.
+    - Iniciativas es el registro de las iniciativas existentes, SOLO
+      LECTURA: indicadores, filtros, lista y detalle de la elegida. Datos:
+      handlers/admin_iniciativas_registro.ashx, que reusa la lectura y el
+      semaforo de Experiencia (App_Code/ExperienciaRegistro.cs). Vista:
+      admin/registro-iniciativas.js. Sin editar, sin descargas.
+      Su vista secundaria "Cobertura de categorias" (mismos filtros)
+      cruza las categorias vigentes del catalogo de dueños con las
+      iniciativas activas; pide el catalogo solo al abrirse.
+    - "Nueva solicitud" (sin enviar ni guardar):
+        Tipo de iniciativa -> Product Owner -> Service Owner -> Categoria,
+        y el Director se muestra DERIVADO de la categoria (no se elige).
+      Despues del tipo aparecen los campos de captura (Titulo y Analisis) y
+      los propios del tipo, definidos en admin/iniciativas.js
+      (DEFINICIONES_TIPO). Catalogos: handlers/admin_iniciativas_catalogos.ashx
+      (solo lectura). La cascada es admin/cascada-organizacional.js, la misma
+      (en modo 'filtro') que deben usar las pestañas de listas cuando existan.
+    - No se envia ni se guarda nada: no hay boton de enviar ni <form>.
+    - Solicitudes todavia no muestra datos: estado vacio "en preparacion",
+      sin datos inventados.
+
+  Reusa dashboard.css para variables, tipografia y .wrap / .card / .btn,
+  como admin.html; lo propio vive en iniciativas.css con prefijo .ini-. La
+  ayuda del rotulo Titulo es GloboAyuda (assets/), el patron de las franjas
+  "Pregunta" de QARE.
+-->
+
+<link rel="stylesheet" href="../assets/css/boton.css">
+<link rel="stylesheet" href="../dashboard.css">
+<link rel="stylesheet" href="../assets/css/kpi.css">
+<link rel="stylesheet" href="../assets/css/globo-ayuda.css">
+<link rel="stylesheet" href="iniciativas.css">
+</head>
+<body class="ini-body">
+<div class="wrap">
+
+  <!-- Barra lateral del tablero, COPIA del marcado de dashboard.html (la
+       pagina es estatica y no hay plantillas). Diferencias a proposito:
+       - Cada entrada es un enlace a ../dashboard.html#<modulo> (el tablero
+         abre el modulo del hash al cargar), no un boton con data-tab.
+       - Administracion es la entrada activa. En el tablero solo aparece para
+         las cuentas de AdminAllowedUsers (SesionAdmin); aqui igual, aunque
+         quien no esta autorizado ya no deberia llegar (AdminAccesoModulo).
+       Plegar/desplegar: MenuLateral en admin/iniciativas.js. Si cambia la
+       lista de modulos del tablero, actualizar tambien esta copia. -->
+  <aside class="lateral" id="lateral">
+    <div class="lateral-cabecera">
+      <span class="lateral-marca">
+        <span class="lateral-sigla" aria-hidden="true">P</span>
+        <span class="lateral-nombre">Proactivanet</span>
+      </span>
+      <!-- Un solo control para plegar y desplegar. aria-expanded dice el
+           estado real; el title/aria-label cambian con el, en dashboard.js. -->
+      <button class="lateral-plegar" id="lateral-plegar" type="button"
+              aria-controls="lateral" aria-expanded="false"
+              aria-label="Desplegar el menu" title="Desplegar el menu">
+        <svg class="lateral-plegar-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+          <path d="M14.5 6.5 9 12l5.5 5.5"/>
+        </svg>
+      </button>
+    </div>
+
+    <nav aria-label="Volver al tablero">
+      <ul class="lateral-lista">
+        <li>
+          <a class="mnav" href="../dashboard.html#sla" title="SLA y productividad">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 19h16M7 19V10M12 19V5M17 19v-6"/>
+            </svg>
+            <span class="mnav-txt">SLA y productividad</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#backlog" title="Backlog">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>
+            </svg>
+            <span class="mnav-txt">Backlog</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#experiencia" title="Experiencia">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".6"/>
+            </svg>
+            <span class="mnav-txt">Experiencia</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#qa" title="QA">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M9.5 3h5M10 3v6.2L5.3 17.6A2 2 0 0 0 7 20.6h10a2 2 0 0 0 1.7-3L14 9.2V3"/>
+            </svg>
+            <span class="mnav-txt">QA</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#qare" title="QARE">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M5 4.5h14v15H5z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>
+            </svg>
+            <span class="mnav-txt">QARE</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#call" title="Call Center">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4.5 5.5 8 4l2.2 4-2 1.7a12 12 0 0 0 6.1 6.1l1.7-2 4 2.2-1.5 3.5a2 2 0 0 1-2.1 1.1C10.4 19.7 4.3 13.6 3.4 7.6a2 2 0 0 1 1.1-2.1z"/>
+            </svg>
+            <span class="mnav-txt">Call Center</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#tablero" title="Tablero">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M3.5 4.5h17v11h-17z"/><path d="M8 20h8M12 15.5V20"/>
+            </svg>
+            <span class="mnav-txt">Tablero</span>
+          </a>
+        </li>
+        <li data-solo-admin hidden>
+          <a class="mnav active" href="iniciativas.html" aria-current="page" title="Administración">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 3.5 19 6v5.5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6z"/><path d="m9 12 2 2 4-4"/>
+            </svg>
+            <span class="mnav-txt">Administración</span>
+          </a>
+        </li>
+      </ul>
+    </nav>
+  </aside>
+
+  <div class="lateral-contenido">
+
+  <header class="top">
+    <div>
+      <h1>Administración de iniciativas</h1>
+      <div class="sub">Administracion de iniciativas · entorno de trabajo</div>
+      <!-- "Bienvenido, <Nombre>" solo si la cuenta Windows se resuelve en
+           CatPersona / CatLiderGrupo (SesionAdmin). Si no, queda oculto. -->
+      <div class="ini-saludo" id="iniSaludo" hidden></div>
+    </div>
+  </header>
+
+  <nav class="ini-tabs" role="tablist" aria-label="Secciones">
+    <button type="button" class="ini-tab activa" role="tab" id="tab-iniciativas" aria-controls="panel-iniciativas" aria-selected="true">Iniciativas</button>
+    <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1">Solicitudes</button>
+  </nav>
+
+  <!-- Vista de inicio: el registro de iniciativas existentes y la accion
+       principal. -->
+  <section class="ini-panel card" role="tabpanel" id="panel-iniciativas" aria-labelledby="tab-iniciativas">
+    <div class="ini-vista-cab">
+      <div class="ini-vista-titulo">
+        <h2>Iniciativas</h2>
+        <p class="ini-vista-sub">Consulta y administra las iniciativas existentes.</p>
+      </div>
+      <button type="button" class="btn ini-cta" id="btnSolicitar">
+        <span class="ini-cta-mas" aria-hidden="true">+</span>
+        <span>Solicitar una iniciativa</span>
+      </button>
+    </div>
+
+    <!-- Registro de iniciativas, SOLO LECTURA (admin/registro-iniciativas.js,
+         datos de handlers/admin_iniciativas_registro.ashx = los de
+         Experiencia). Cuatro estados excluyentes: cargando, error, sin
+         datos y listo; cargando y error nunca se ven como lista vacia. -->
+    <div class="kpis ini-kpis" id="regKpis" aria-live="polite" aria-busy="true"></div>
+
+    <p class="ini-estado" id="regCargando" role="status">Cargando iniciativas…</p>
+    <div class="ini-error" id="regError" role="alert" hidden>
+      <span><strong>No se pudo cargar el registro de iniciativas.</strong> <span id="regErrorTexto"></span></span>
+      <button type="button" class="btn" id="regReintentar">Reintentar</button>
+    </div>
+    <div class="ini-vacio" id="regSinDatos" hidden>
+      <strong>No hay iniciativas vigentes</strong>
+      <span>El origen de Experiencia no trae ninguna iniciativa vigente.</span>
+    </div>
+
+    <div id="regContenido" hidden>
+      <div class="filtros ini-filtros" role="group" aria-labelledby="regFiltrosTitulo">
+        <div class="ini-filtros-cab">
+          <span class="ini-filtros-titulo" id="regFiltrosTitulo">Filtros</span>
+          <span class="ini-filtros-cuenta" id="regFiltrosCuenta" aria-live="polite"></span>
+          <button type="button" class="btn linea chico" id="regLimpiar" hidden>Limpiar filtros</button>
+        </div>
+        <div class="campo"><label for="regEstadoSel">Estado</label><select id="regEstadoSel" disabled></select></div>
+        <div class="campo"><label for="regTipo">Agrupación</label><select id="regTipo" disabled></select></div>
+        <!-- Tipo de iniciativa (dbo.Problem.TipoIniciativa), varios a la vez.
+             No es la Agrupacion de arriba (TipoAgrupado). -->
+        <div class="campo ini-multi" id="regTipoIniCampo">
+          <label for="regTipoIni">Tipo de iniciativa</label>
+          <button type="button" class="ini-multi-boton" id="regTipoIni" aria-haspopup="true" aria-expanded="false" aria-controls="regTipoIniPanel" disabled>—</button>
+          <div class="ini-multi-panel" id="regTipoIniPanel" role="group" aria-label="Tipos de iniciativa" hidden></div>
+        </div>
+        <div class="campo"><label for="regDirector">Director</label><select id="regDirector" disabled></select></div>
+        <div class="campo"><label for="regPo">Product Owner</label><select id="regPo" disabled></select></div>
+        <div class="campo"><label for="regSo">Service Owner</label><select id="regSo" disabled></select></div>
+        <div class="campo"><label for="regCategoria">Categoría</label><select id="regCategoria" disabled></select></div>
+      </div>
+
+      <!-- Dos vistas sobre los MISMOS filtros: la lista de iniciativas y la
+           Cobertura de categorias. La Cobertura pide su catalogo la primera
+           vez que se abre (registro-iniciativas.js, VistaRegistro). -->
+      <div class="ini-conmutador" role="group" aria-label="Vista">
+        <button type="button" class="ini-conm-op activa" id="regVerRegistro" aria-pressed="true">Registro</button>
+        <button type="button" class="ini-conm-op" id="regVerCobertura" aria-pressed="false" aria-controls="covSeccion">Cobertura de categorías</button>
+      </div>
+
+      <div id="regListaBloque">
+      <div class="ini-lista-cab">
+        <h3 class="ini-lista-titulo">Registro</h3>
+        <span class="ini-lista-cuenta" id="regCuenta" aria-live="polite"></span>
+        <span class="ini-lista-ayuda">Elige una iniciativa para ver su detalle.</span>
+      </div>
+
+      <div class="ini-vacio" id="regVacio" hidden>
+        <strong>No hay iniciativas que coincidan con los filtros seleccionados.</strong>
+        <span><button type="button" class="btn linea chico" id="regLimpiarVacio">Limpiar filtros</button></span>
+      </div>
+
+      <div class="ini-tabla-caja" id="regTablaCaja">
+        <table class="ini-tabla">
+          <caption class="ini-sr">Iniciativas registradas. Las columnas se pueden ordenar.</caption>
+          <thead id="regCabeza"></thead>
+          <tbody id="regCuerpo"></tbody>
+        </table>
+      </div>
+      <div class="ini-mas-caja"><button type="button" class="btn linea" id="regMas" hidden>Mostrar más</button></div>
+      </div>
+
+      <!-- Cobertura de categorias, SOLO LECTURA: categorias vigentes del
+           catalogo de dueños (dbo.CatCategoriaDueno) con o sin iniciativa
+           activa. Sin volumen de tickets. Cargando y error nunca se ven como
+           "todo sin iniciativa". -->
+      <section id="covSeccion" aria-labelledby="covTitulo" hidden>
+        <div class="ini-lista-cab">
+          <h3 class="ini-lista-titulo" id="covTitulo">Cobertura de categorías</h3>
+          <span class="ini-lista-cuenta" id="covCuenta" aria-live="polite"></span>
+          <div class="campo ini-cov-campo">
+            <label for="covFiltro">Cobertura</label>
+            <select id="covFiltro">
+              <option value="">— Todas —</option>
+              <option value="con">Con iniciativa activa</option>
+              <option value="sin">Sin iniciativa activa</option>
+            </select>
+          </div>
+        </div>
+        <p class="ini-estado" id="covCargando" role="status" hidden>Cargando el catálogo de categorías…</p>
+        <div class="ini-error" id="covError" role="alert" hidden>
+          <span><strong>No se pudo cargar la cobertura.</strong> <span id="covErrorTexto"></span></span>
+          <button type="button" class="btn" id="covReintentar">Reintentar</button>
+        </div>
+        <div id="covContenido" hidden>
+          <p class="ini-nota" id="covNota"></p>
+          <div class="ini-vacio" id="covVacio" hidden>
+            <strong>No hay categorías que coincidan con los filtros seleccionados.</strong>
+          </div>
+          <div class="ini-tabla-caja" id="covTablaCaja">
+            <table class="ini-tabla ini-cov-tabla">
+              <caption class="ini-sr">Categorías del catálogo y sus iniciativas activas.</caption>
+              <thead><tr>
+                <th scope="col"><span class="ini-th">Categoría</span></th>
+                <th scope="col"><span class="ini-th">Director</span></th>
+                <th scope="col"><span class="ini-th">Product Owner</span></th>
+                <th scope="col"><span class="ini-th">Service Owner</span></th>
+                <th scope="col"><span class="ini-th">Estado de cobertura</span></th>
+                <th scope="col"><span class="ini-th">Iniciativas activas</span></th>
+              </tr></thead>
+              <tbody id="covCuerpo"></tbody>
+            </table>
+          </div>
+          <div id="covFuera" hidden></div>
+        </div>
+      </section>
+    </div>
+  </section>
+
+  <section class="ini-panel card" role="tabpanel" id="panel-solicitudes" aria-labelledby="tab-solicitudes" hidden>
+    <div class="ini-vista-cab">
+      <div class="ini-vista-titulo">
+        <h2>Solicitudes</h2>
+        <p class="ini-vista-sub">Solicitudes de iniciativa y su revisión.</p>
+      </div>
+    </div>
+    <div class="ini-vacio">
+      <strong>Lista de solicitudes en preparación</strong>
+      <span>Aquí estarán las solicitudes enviadas y su estado.</span>
+    </div>
+  </section>
+
+  <!-- Accion de Iniciativas, no pestaña: la abre #btnSolicitar. -->
+  <section class="ini-panel card" id="panel-nueva" aria-labelledby="iniNuevaTitulo" hidden>
+    <div class="ini-panel-cab">
+      <button type="button" class="btn linea chico" id="btnVolver">← Volver a Iniciativas</button>
+      <h2 id="iniNuevaTitulo" tabindex="-1">Nueva solicitud</h2>
+      <span class="ini-hint">Vista previa · se valida en el servidor pero no se guarda · el borrador se conserva al cambiar de vista</span>
+    </div>
+
+    <p class="ini-estado" id="iniEstado" role="status" aria-live="polite"></p>
+    <div class="ini-error" id="iniError" role="alert" hidden>
+      <span id="iniErrorTexto"></span>
+      <button type="button" class="btn" id="iniReintentar">Reintentar</button>
+    </div>
+
+    <!-- Dos columnas, todo a la vista (no es asistente por pasos):
+         izquierda, lo que clasifica la iniciativa; derecha, 02 a 04 uno
+         debajo de otro. Bajo 900px se apilan. -->
+    <div class="ini-form">
+
+      <!-- 01 Clasificacion: lo elige quien solicita. El Director no se
+           elige: sale de la categoria. -->
+      <section class="ini-bloque ini-col-clasif" aria-labelledby="iniCabClasif">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">01</span>
+          <h3 id="iniCabClasif">Clasificación</h3>
+          <span class="ini-origen seleccion">Selección</span>
+        </div>
+
+        <div class="ini-campo ini-campo-tipo">
+          <label for="selTipo">Tipo de iniciativa</label>
+          <select id="selTipo" aria-describedby="motTipo" disabled></select>
+          <small class="ini-motivo" id="motTipo"></small>
+        </div>
+
+        <div class="ini-cascada" id="iniCascada">
+          <div class="ini-campo">
+            <label for="selPo">Product Owner</label>
+            <select id="selPo" aria-describedby="motPo" disabled></select>
+            <small class="ini-motivo" id="motPo"></small>
+          </div>
+          <div class="ini-campo">
+            <label for="selSo" class="ini-rotulo ayuda-destino" data-ayuda="so">Service Owner</label>
+            <select id="selSo" aria-describedby="motSo" disabled></select>
+            <small class="ini-motivo" id="motSo"></small>
+          </div>
+          <div class="ini-campo">
+            <label for="selCategoria" class="ini-rotulo ayuda-destino" data-ayuda="categoria">Categoría</label>
+            <select id="selCategoria" aria-describedby="motCategoria" disabled></select>
+            <small class="ini-motivo" id="motCategoria"></small>
+          </div>
+          <div class="ini-campo ini-derivado">
+            <span class="ini-rotulo-derivado" id="rotDirector">Director <span class="ini-origen derivado">Derivado</span></span>
+            <output id="outDirector" aria-labelledby="rotDirector" aria-describedby="motDirector">—</output>
+            <small class="ini-motivo" id="motDirector"></small>
+          </div>
+        </div>
+
+        <p class="ini-nota" id="iniOmitidas" hidden></p>
+      </section>
+
+      <!-- 02 Informacion del problema: lo escribe quien solicita. La
+           seccion siempre se ve; los campos aparecen al elegir el tipo y
+           salen de CAMPOS_COMUNES y DEFINICIONES_TIPO (admin/iniciativas.js). -->
+      <section class="ini-bloque ini-col-desc" aria-labelledby="iniCabDesc">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">02</span>
+          <h3 id="iniCabDesc">Información del problema</h3>
+          <span class="ini-origen captura">Captura</span>
+        </div>
+        <p class="ini-nota ini-desc-pendiente" id="iniCamposPendiente">Elige un Tipo de iniciativa para escribir la descripción.</p>
+        <div id="iniBloqueCampos" hidden>
+          <div class="ini-campos" id="iniCamposComunes"></div>
+          <div class="ini-campos" id="iniCamposTipo"></div>
+        </div>
+      </section>
+
+      <!-- 03 Impacto: Volumetria (captura) y el % de disminucion de la
+           Categoria elegida en 01; no hay un segundo selector de categoria. -->
+      <section class="ini-bloque ini-col-impacto" aria-labelledby="iniCabImpacto">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">03</span>
+          <h3 id="iniCabImpacto">Impacto</h3>
+          <span class="ini-origen captura">Captura</span>
+        </div>
+        <p class="ini-nota ini-desc-pendiente" id="iniImpactoPendiente">Elige un Tipo de iniciativa para capturar el impacto.</p>
+        <div id="iniBloqueImpacto" hidden>
+          <div class="ini-campos ini-campos-dos" id="iniCamposImpacto"></div>
+        </div>
+      </section>
+
+      <!-- 04 RCA: documento adjunto. Obligatorio solo para Problem. Se elige
+           y el servidor comprueba que llego, pero NO se guarda: no hay
+           destino SharePoint confirmado (dbo.Problem.RCA es NVARCHAR(50),
+           no un documento). -->
+      <section class="ini-bloque ini-col-rca" aria-labelledby="iniCabRca">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">04</span>
+          <h3 id="iniCabRca">RCA</h3>
+          <span class="ini-origen captura">Captura</span>
+        </div>
+        <div class="ini-campo">
+          <label for="campoRca" class="ini-rotulo ayuda-destino" data-ayuda="rca">Documento adjunto <span class="ini-obligatorio" id="rotRcaObligatorio" hidden>obligatorio</span></label>
+          <input type="file" id="campoRca" aria-describedby="motRca" disabled>
+          <small class="ini-motivo" id="motRca">Elige primero un Tipo de iniciativa.</small>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- Solo valida en el servidor; no guarda ni genera numero de solicitud. -->
+    <div class="ini-acciones">
+      <button type="button" class="btn" id="btnValidar">Validar en el servidor</button>
+      <span class="ini-hint">No se guarda ni se genera número de solicitud.</span>
+    </div>
+    <div class="ini-resultado" id="iniResultado" role="status" aria-live="polite" hidden></div>
+  </section>
+
+  </div><!-- /.lateral-contenido -->
+</div>
+
+<!-- Detalle de una iniciativa (solo lectura): panel lateral sobre la lista.
+     Se cierra con la X, Escape o un clic en el fondo; el foco vuelve al
+     folio de la fila. Bajo 720px ocupa la pantalla. -->
+<div class="ini-det-fondo" id="regDetFondo" hidden></div>
+<aside class="ini-detalle" id="regDetalle" role="dialog" aria-modal="true" aria-labelledby="regDetTitulo" hidden>
+  <div class="ini-det-barra">
+    <span class="ini-det-rotulo">Iniciativa</span>
+    <h3 id="regDetTitulo"></h3>
+    <span class="ini-hint">Solo lectura</span>
+    <button type="button" class="ini-det-cerrar" id="regDetCerrar" aria-label="Cerrar el detalle" title="Cerrar">×</button>
+  </div>
+  <div class="ini-det-cuerpo" id="regDetCuerpo"></div>
+</aside>
+
+<script src="../assets/js/escape.js"></script>
+<script src="../assets/js/sesion-admin.js"></script>
+<script src="../assets/js/catalogos.js"></script>
+<script src="../assets/js/globo-ayuda.js"></script>
+<script src="cascada-organizacional.js"></script>
+<script src="registro-iniciativas.js"></script>
+<script src="iniciativas.js"></script>
+<script>
+try { new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo')); } catch (e) { console.error(e); }
+</script>
+</body>
+</html>

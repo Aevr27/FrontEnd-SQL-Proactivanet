@@ -1,0 +1,579 @@
+/* =========================================================================
+   iniciativas.css
+
+   Estilos exclusivos de admin/iniciativas.html. dashboard.css se carga antes
+   y aporta variables, tipografia y .wrap / .card / .btn; aqui solo va lo
+   propio, con prefijo .ini- para no colisionar con el tablero ni con
+   admin.css (que esta pagina no carga). El tinte y el globo del rotulo con
+   ayuda (Titulo) son de assets/css/globo-ayuda.css, no de aqui.
+   ========================================================================= */
+
+.ini-body { padding-bottom: 24px; }
+
+/* Saludo "Bienvenido, <Nombre>" bajo el titulo (SesionAdmin). */
+.ini-saludo { margin-top: 4px; font-size: 13px; font-weight: 600; color: var(--ink); }
+
+/* La barra lateral es la de dashboard.css; aqui sus entradas son enlaces
+   (<a>) en vez de botones, asi que solo falta quitarles el subrayado. */
+.lateral a.mnav { text-decoration: none; }
+
+/* ---- Pestañas ---- */
+.ini-tabs {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin: 0 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+.ini-tab {
+  font: inherit; font-size: 13px; font-weight: 700;
+  color: var(--muted);
+  background: none; border: 0; cursor: pointer;
+  padding: 9px 14px;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -1px;
+}
+.ini-tab:hover { color: var(--ink); }
+.ini-tab.activa { color: var(--accent-ink); border-bottom-color: var(--accent); }
+.ini-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ---- Panel ---- */
+.ini-panel-cab {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.ini-panel-cab h2 { font-size: 16px; font-weight: 700; color: var(--ink); }
+.ini-hint {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .4px; color: var(--muted-2);
+}
+
+/* ---- Cabecera de vista (Iniciativas / Solicitudes) ----
+   Titulo y subtitulo a la izquierda; la accion principal arriba a la
+   derecha. En pantalla angosta el boton baja y ocupa el ancho. */
+.ini-vista-cab {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 12px 20px; flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.ini-vista-titulo { min-width: 0; }
+.ini-vista-titulo h2 { font-size: 18px; font-weight: 700; color: var(--ink); }
+.ini-vista-sub { margin-top: 3px; font-size: 13px; color: var(--muted); }
+
+/* "Solicitar una iniciativa": el .btn del proyecto, mas grande y con mas
+   sombra para que no pase desapercibido. Sin animacion permanente. */
+.btn.ini-cta {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 12px 22px;
+  font-size: 14px; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .6px;
+  border-color: var(--g-700);
+  box-shadow: 0 4px 14px -4px rgba(71, 139, 60, .55);
+}
+.btn.ini-cta:hover { box-shadow: 0 6px 18px -4px rgba(71, 139, 60, .7); }
+.btn.ini-cta:focus-visible { outline: 3px solid var(--g-800); outline-offset: 3px; }
+.ini-cta-mas {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 50%;
+  background: rgba(255, 255, 255, .55);
+  font-size: 18px; line-height: 1; font-weight: 800;
+}
+@media (max-width: 560px) {
+  .btn.ini-cta { width: 100%; justify-content: center; white-space: normal; }
+}
+
+/* Estado vacio: la seccion existe pero aun no tiene datos. */
+.ini-vacio {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 28px 18px; text-align: center;
+  border: 1px dashed var(--line); border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  font-size: 13px; color: var(--muted);
+}
+.ini-vacio strong { color: var(--ink-2); font-size: 14px; }
+
+/* Nueva solicitud: "Volver" antes del titulo; el titulo recibe el foco. */
+.ini-panel-cab #iniNuevaTitulo:focus { outline: none; }
+.ini-panel[hidden] { display: none; }
+
+/* ---- Estados de carga / error ---- */
+.ini-estado { min-height: 18px; font-size: 12.5px; color: var(--muted); margin-bottom: 8px; }
+.ini-error {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  background: #fbeeea;
+  border: 1px solid #efc9bf;
+  color: var(--rojo);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px; margin-bottom: 12px;
+  font-size: 12.5px;
+}
+.ini-error[hidden] { display: none; }
+.ini-nota { margin-top: 12px; font-size: 12px; color: var(--muted); }
+
+/* ---- Formulario en dos columnas ----
+   Izquierda, Clasificacion: angosta, fondo apenas tintado, los selects
+   uno debajo de otro siguiendo la cascada. Derecha, Descripcion: lo
+   principal, sin fondo, con todo el ancho que sobra. Bajo 900px se
+   apilan; entre 561 y 900 la cascada usa dos columnas para no estirar
+   cada select a todo el ancho. */
+.ini-form {
+  display: grid;
+  grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+.ini-form > .ini-bloque {
+  min-width: 0;
+  padding: 18px 20px 20px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+}
+.ini-col-clasif { background: var(--bg-2); }
+/* Clasificacion ocupa la columna izquierda entera; 02, 03 y 04 se apilan
+   a la derecha. */
+.ini-form > .ini-col-clasif { grid-column: 1; grid-row: 1 / span 3; }
+.ini-form > .ini-bloque:not(.ini-col-clasif) { grid-column: 2; }
+@media (max-width: 900px) {
+  .ini-form { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .ini-form > .ini-col-clasif,
+  .ini-form > .ini-bloque:not(.ini-col-clasif) { grid-column: auto; grid-row: auto; }
+}
+
+/* ---- Cascada ---- */
+.ini-cascada { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
+@media (min-width: 561px) and (max-width: 900px) {
+  .ini-cascada { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+.ini-campo { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+/* Rotulos en el verde de texto del tablero, sin fondo. */
+.ini-campo label {
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .4px; color: var(--accent-ink);
+}
+.ini-campo select,
+.ini-campo input[type="text"],
+.ini-campo input[type="number"],
+.ini-campo textarea {
+  font: inherit; font-size: 13px;
+  width: 100%; min-width: 0;
+  padding: 8px 10px;
+  color: var(--ctrl-ink);
+  background: var(--ctrl-bg);
+  border: 1px solid var(--ctrl-line);
+  border-radius: var(--radius-xs);
+}
+.ini-campo select:hover:not(:disabled),
+.ini-campo input[type="text"]:hover,
+.ini-campo input[type="number"]:hover:not(:disabled),
+.ini-campo textarea:hover { border-color: var(--ctrl-line-hover); }
+.ini-campo select:focus-visible,
+.ini-campo input[type="text"]:focus-visible,
+.ini-campo input[type="number"]:focus-visible,
+.ini-campo textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ini-campo textarea { resize: vertical; min-height: 110px; line-height: 1.45; }
+/* La Descripcion es el cuerpo de la solicitud: alto comodo para escribir.
+   Observaciones, mas corta. */
+.ini-col-desc #campo-analisis { min-height: 260px; }
+.ini-campo select:disabled,
+.ini-campo input[type="number"]:disabled {
+  color: var(--muted-2);
+  background: var(--bg-2);
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+.ini-motivo { min-height: 15px; font-size: 11.5px; color: var(--muted); }
+.ini-motivo.ini-error-campo { color: var(--rojo); font-weight: 600; }
+.ini-campo input[aria-invalid="true"] { border-color: var(--rojo); }
+
+/* 03 Impacto: dos campos lado a lado mientras quepan. */
+.ini-campos.ini-campos-dos { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+/* % con su sufijo dentro de la barra. */
+.ini-pct { position: relative; }
+.ini-pct input { padding-right: 28px; }
+.ini-pct-sufijo {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  font-size: 13px; font-weight: 700; color: var(--muted); pointer-events: none;
+}
+/* 04 RCA: control nativo; deshabilitado hasta elegir el tipo. */
+.ini-col-rca input[type="file"] { width: 100%; min-width: 0; font: inherit; font-size: 12.5px; color: var(--muted); }
+.ini-obligatorio { margin-left: 6px; font-size: 10px; font-weight: 700; text-transform: none; color: var(--rojo); }
+.ini-obligatorio[hidden] { display: none; }
+
+/* Validar en el servidor y su resultado, bajo el formulario. */
+.ini-acciones { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+.ini-resultado {
+  margin-top: 12px; padding: 10px 14px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  font-size: 12.5px; color: var(--ink, inherit);
+}
+.ini-resultado[hidden] { display: none; }
+.ini-resultado.ok { background: #eaf6ef; border-color: #bfe3cd; }
+.ini-resultado.mal { background: #fbeeea; border-color: #efc9bf; color: var(--rojo); }
+.ini-resultado ul { margin: 6px 0 0 18px; padding: 0; }
+.ini-origen.pendiente { border-style: dashed; color: var(--muted-2); }
+
+/* ---- Bloques del formulario y origen de cada dato ----
+   Tres origenes, con la misma etiqueta chica en todo el formulario:
+     .seleccion  lo elige quien solicita (selects)
+     .captura    lo escribe quien solicita
+     .derivado   lo pone el sistema; se ve pero no se edita */
+.ini-bloque[hidden] { display: none; }
+.ini-bloque-cab {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 16px; padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+/* margin/padding/border en 0: el .card h3 de dashboard.css le pondria su
+   propia raya y margen dentro de la cabecera, que ya tiene los suyos. */
+.ini-bloque-cab h3 {
+  margin: 0; padding: 0; border: 0; display: block;
+  font-size: 14px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1.2px; color: var(--ink);
+}
+/* Numero de seccion: mas fuerte que los rotulos, sin caja. */
+.ini-paso {
+  font-size: 20px; font-weight: 800; line-height: 1;
+  color: var(--accent); font-variant-numeric: tabular-nums;
+}
+.ini-bloque-cab .ini-origen { margin-left: auto; }
+.ini-desc-pendiente { margin-top: 0; }
+.ini-desc-pendiente[hidden] { display: none; }
+.ini-origen {
+  display: inline-block; padding: 1px 7px; border-radius: var(--radius-pill);
+  font-size: 9.5px; font-weight: 700; letter-spacing: .4px; text-transform: uppercase;
+  border: 1px solid var(--line); color: var(--muted); background: var(--bg-2);
+}
+.ini-origen.captura { color: var(--accent-ink); border-color: var(--accent-line); background: var(--accent-soft); }
+.ini-origen.derivado { border-style: dashed; }
+
+.ini-campo-tipo { margin-bottom: 12px; }
+
+/* Director derivado: texto, no control. Borde punteado = no editable. */
+.ini-rotulo-derivado {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .4px; color: var(--accent-ink);
+}
+.ini-derivado output {
+  display: block; min-height: 35px;
+  padding: 8px 10px; font-size: 13px; font-weight: 600;
+  color: var(--ink); background: var(--bg-2);
+  border: 1px dashed var(--line); border-radius: var(--radius-xs);
+  overflow-wrap: anywhere;
+}
+
+/* ---- Campos de captura ---- */
+.ini-campos { display: grid; grid-template-columns: 1fr; gap: 16px; }
+.ini-campos + .ini-campos { margin-top: 14px; }
+.ini-campos[hidden] { display: none; }
+/* Rotulo con ayuda (GloboAyuda): sin el tinte de fondo de globo-ayuda.css,
+   solo el texto verde como los demas. Lo que lo distingue es el cursor de
+   ayuda y un subrayado punteado; el texto de ayuda va en el globo, no
+   debajo del rotulo. */
+.ini-campo .ini-rotulo.ayuda-destino {
+  display: inline-block; align-self: flex-start;
+  padding: 0; background: none; border-radius: 0; opacity: 1;
+  color: var(--accent-ink);
+  text-decoration: underline dotted var(--accent-line);
+  text-decoration-thickness: 1.5px; text-underline-offset: 3px;
+}
+.ini-campo .ini-rotulo.ayuda-destino:hover,
+.ini-campo .ini-rotulo.ayuda-destino.abierto {
+  background: none; text-decoration-color: var(--accent);
+}
+
+/* Texto solo para lectores de pantalla (la ayuda del rotulo). */
+.ini-sr {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+}
+
+/* =========================================================================
+   Registro de iniciativas (vista Iniciativas, admin/registro-iniciativas.js)
+
+   Jerarquia: cabecera -> indicadores -> filtros -> lista -> detalle en panel
+   lateral. Reusa .kpis/.kpi (assets/css/kpi.css), .filtros, .pill, .chip,
+   las tablas y .fecha-cell de dashboard.css; aqui solo lo propio.
+   ========================================================================= */
+.ini-panel [hidden] { display: none !important; }
+
+/* ---- Indicadores ---- */
+.ini-kpis { margin-bottom: 14px; }
+.ini-kpi { cursor: default; }
+/* En telefono, dos por fila: apiladas, las cuatro empujaban la lista una
+   pantalla entera hacia abajo. */
+@media (max-width: 560px) {
+  .kpis.ini-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .ini-kpis .kpi { min-height: 0; padding: 12px 12px 12px 14px; }
+  .ini-kpis .kpi .lbl, .ini-kpis .kpi .foot { white-space: normal; }
+  /* Filtros tambien de dos en dos; los selects siguen a ancho de columna. */
+  .filtros.ini-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; }
+}
+.ini-kpi-cargando { border-left-color: var(--line); }
+.ini-kpi-cargando::after { opacity: 0; }
+.ini-kpi-cargando .val { color: var(--muted-2); }
+
+/* ---- Filtros ----
+   El panel .filtros del tablero, sin sombra (ya esta dentro de una tarjeta)
+   y con su cabecera ocupando la fila entera. */
+.filtros.ini-filtros {
+  box-shadow: none; border-color: var(--line-soft);
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  padding: 14px 16px 16px; gap: 10px 12px; margin-bottom: 18px;
+}
+.filtros.ini-filtros label { min-height: 0; }
+.ini-filtros-cab {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.ini-filtros-titulo {
+  font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--ink);
+}
+.ini-filtros-cuenta { font-size: 11.5px; color: var(--accent-ink); font-weight: 700; }
+.ini-filtros-cab .btn { margin-left: auto; }
+.filtros.ini-filtros select:disabled { color: var(--muted-2); background: var(--bg-2) !important; cursor: not-allowed; }
+
+/* Tipo de iniciativa: un boton con la misma barra que los select y un panel
+   de casillas debajo. El panel sale de la tarjeta de filtros, asi que esta
+   no recorta (.filtros trae overflow:hidden por su filo superior, que aqui
+   se redondea a mano). */
+.filtros.ini-filtros { overflow: visible; }
+.filtros.ini-filtros::before { border-radius: var(--radius) var(--radius) 0 0; }
+.ini-multi { position: relative; }
+.ini-multi-boton {
+  height: 40px; width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
+  padding: 0 30px 0 11px;
+  font: inherit; font-size: 13px; font-weight: 500; color: var(--ctrl-ink);
+  background: var(--ctrl-bg) url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23478b3c' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 10px center;
+  box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: border-color .15s ease, box-shadow .15s ease, background-color .15s ease;
+}
+.ini-multi-boton:hover:not(:disabled) { background-color: var(--ctrl-bg-2); border-color: var(--ctrl-line-hover); }
+.ini-multi-boton:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.ini-multi-boton:disabled { color: var(--muted-2); background-color: var(--bg-2); cursor: not-allowed; }
+/* Con tipos elegidos la barra se marca, como un filtro puesto. */
+.ini-multi-boton.con-valor { border-color: var(--accent); color: var(--g-900); font-weight: 700; background-color: var(--g-50); }
+.ini-multi-panel {
+  position: absolute; top: calc(100% + 6px); left: 0; right: 0; z-index: 20;
+  max-height: 260px; overflow-y: auto; overscroll-behavior: contain;
+  background: var(--card); border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
+  box-shadow: var(--shadow-md); padding: 4px;
+}
+.filtros.ini-filtros .ini-multi-op {
+  display: flex; align-items: center; gap: 8px; min-height: 0;
+  padding: 7px 9px; border-radius: 6px; cursor: pointer;
+  font-size: 12.5px; font-weight: 500; color: var(--ink-2);
+  text-transform: none; letter-spacing: 0; line-height: 1.3; overflow-wrap: anywhere;
+}
+.filtros.ini-filtros .ini-multi-op:hover { background: var(--bg-2); }
+.filtros.ini-filtros .ini-multi-op.marcada { background: var(--g-50); color: var(--g-900); font-weight: 700; }
+.filtros.ini-filtros .ini-multi-todas { border-bottom: 1px solid var(--line-soft); border-radius: 6px 6px 0 0; margin-bottom: 2px; }
+.ini-multi-op input { margin: 0; flex: none; accent-color: var(--accent); }
+
+/* ---- Lista ---- */
+.ini-lista-cab {
+  display: flex; align-items: baseline; gap: 6px 12px; flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.card .ini-lista-titulo {
+  margin: 0; padding: 0; border: 0; display: block;
+  font-size: 14px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--ink);
+}
+.ini-lista-cuenta { font-size: 12.5px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.ini-lista-ayuda { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+
+.ini-tabla-caja {
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  overflow-x: auto;
+}
+.ini-tabla th { padding: 0; cursor: default; }
+.ini-tabla th:hover { background: #fff; }
+/* El encabezado ordena: boton a todo lo ancho de la celda. */
+.ini-orden {
+  all: unset; box-sizing: border-box; display: block; width: 100%;
+  padding: 10px 8px; cursor: pointer; white-space: nowrap;
+}
+.ini-orden:hover { color: var(--ink); background: var(--g-50); }
+.ini-orden:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ini-tabla th.num .ini-orden { text-align: right; }
+
+.ini-fila { cursor: pointer; }
+.ini-fila td { vertical-align: top; }
+.ini-folio {
+  all: unset; cursor: pointer; white-space: nowrap;
+  font-weight: 700; color: var(--accent-ink); font-variant-numeric: tabular-nums;
+  text-decoration: underline dotted var(--accent-line); text-underline-offset: 3px;
+}
+.ini-folio:hover { text-decoration-color: var(--accent); }
+.ini-folio:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+/* Titulo: dos lineas como mucho; completo en el title y en el detalle. */
+.ini-col-titulo { min-width: 220px; max-width: 420px; }
+.ini-titulo {
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; color: var(--ink); font-weight: 600; line-height: 1.35;
+}
+.ini-sub { display: block; margin-top: 2px; font-size: 10.5px; color: var(--muted); font-weight: 400; }
+.ini-sin-cat { color: var(--ambr); }
+.ini-col-persona { max-width: 190px; overflow-wrap: anywhere; }
+.ini-mas {
+  display: inline-block; padding: 0 5px; border-radius: var(--radius-pill);
+  background: var(--bg-2); border: 1px solid var(--line);
+  font-size: 10px; font-weight: 700; color: var(--muted);
+}
+.ini-tenue { color: var(--muted-2); }
+.ini-chip { background: var(--g-50); color: var(--g-900); border: 1px solid var(--g-100); }
+
+/* Semaforo de la fecha: el mismo verde / ambar / rojo del tablero. */
+.ini-sem {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 7px; vertical-align: 1px; background: var(--muted-2);
+}
+.ini-sem.verde { background: var(--verde); }
+.ini-sem.ambar { background: var(--ambr); }
+.ini-sem.rojo { background: var(--rojo); }
+.ini-vencida { color: var(--rojo); }
+.ini-retraso {
+  margin-left: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; color: var(--rojo);
+}
+
+.ini-mas-caja { display: flex; justify-content: center; margin-top: 12px; }
+
+/* ---- Registro | Cobertura de categorias (mismos filtros) ---- */
+.ini-conmutador {
+  display: inline-flex; flex-wrap: wrap; gap: 4px; max-width: 100%;
+  margin-bottom: 12px; padding: 3px;
+  border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--bg-2);
+}
+.ini-conm-op {
+  all: unset; box-sizing: border-box; cursor: pointer;
+  padding: 6px 14px; border-radius: var(--radius-pill);
+  font-size: 12.5px; font-weight: 700; color: var(--muted);
+}
+.ini-conm-op:hover { color: var(--ink); }
+.ini-conm-op.activa { background: #fff; color: var(--accent-ink); box-shadow: 0 1px 2px rgba(25, 25, 25, .12); }
+.ini-conm-op:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Encabezado fijo (no ordena): mismo relleno que .ini-orden. */
+.ini-th { display: block; padding: 10px 8px; white-space: nowrap; }
+.ini-cov-campo { margin-left: auto; min-width: 0; display: flex; align-items: center; gap: 8px; }
+.ini-cov-campo label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); }
+.ini-cov-campo select {
+  height: 32px; min-width: 0; max-width: 100%; padding: 0 10px;
+  border: 1px solid var(--line); border-radius: var(--radius-xs); background: #fff;
+  font: inherit; font-size: 12.5px; color: var(--ink);
+}
+.ini-cov-fila { cursor: default; }
+.ini-cov-tabla .ini-cat-ruta { min-width: 180px; max-width: 320px; }
+.ini-cov-inis { min-width: 220px; }
+.ini-cov-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ini-cov-lista li { min-width: 0; overflow-wrap: anywhere; }
+.ini-cov-titulo { display: block; margin-top: 2px; color: var(--ink); line-height: 1.35; }
+.ini-cov-varias { margin: 0 0 4px; font-weight: 700; }
+.ini-cov-fuera-tit { margin: 20px 0 0; font-size: 13px; font-weight: 800; color: var(--ink); }
+
+/* Bajo 760px la tabla se vuelve una lista de tarjetas: cada celda con su
+   rotulo (data-col). El encabezado se oculta; el orden queda el de omision. */
+@media (max-width: 760px) {
+  .ini-tabla-caja { border: 0; overflow: visible; }
+  .ini-tabla thead { display: none; }
+  .ini-tabla, .ini-tabla tbody { display: block; }
+  .ini-tabla tr.ini-fila {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 12px;
+    padding: 12px 14px; margin-bottom: 10px;
+    border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: #fff;
+  }
+  .ini-tabla tr.ini-fila td { display: block; padding: 0; border: 0; max-width: none; min-width: 0; text-align: left; }
+  .ini-tabla tr.ini-fila td::before {
+    content: attr(data-col); display: block; margin-bottom: 2px;
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--muted);
+  }
+  .ini-tabla tr.ini-fila td.ini-col-titulo { grid-column: 1 / -1; }
+  .ini-tabla tr.ini-fila td.ini-cov-inis { grid-column: 1 / -1; }
+  .ini-cov-campo { margin-left: 0; width: 100%; }
+  .ini-tabla tr.ini-fila td:first-child::before { display: none; }
+  .ini-lista-ayuda { margin-left: 0; }
+}
+
+/* ---- Detalle (panel lateral) ---- */
+.ini-det-fondo {
+  position: fixed; inset: 0; z-index: 55;   /* sobre la barra lateral (50), bajo el globo de ayuda (60) */
+  background: rgba(25, 25, 25, .28);
+}
+.ini-detalle {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 56;
+  width: min(760px, 100%);
+  display: flex; flex-direction: column;
+  background: var(--card); box-shadow: var(--shadow-lg);
+  border-left: 4px solid var(--accent);
+}
+.ini-det-fondo[hidden], .ini-detalle[hidden] { display: none; }
+html.ini-detalle-abierto { overflow: hidden; }
+.ini-det-barra {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 14px 18px; border-bottom: 1px solid var(--line);
+}
+.ini-det-rotulo {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--accent-ink);
+}
+.ini-det-barra h3 { margin: 0; font-size: 17px; font-weight: 800; color: var(--ink); font-variant-numeric: tabular-nums; }
+.ini-det-cerrar {
+  margin-left: auto; width: 34px; height: 34px;
+  border: 1px solid var(--line); border-radius: var(--radius-xs); background: #fff;
+  font-size: 20px; line-height: 1; color: var(--ink-2); cursor: pointer;
+}
+.ini-det-cerrar:hover { background: var(--g-50); border-color: var(--g-200); }
+.ini-det-cerrar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ini-det-cuerpo { flex: 1; overflow-y: auto; padding: 16px 18px 24px; }
+
+.ini-det-cab { margin-bottom: 16px; }
+.ini-det-nombre { font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.4; overflow-wrap: anywhere; }
+.ini-det-marcas { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+
+.ini-det-rejilla { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.ini-det-sec {
+  min-width: 0; padding: 12px 14px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+}
+.ini-det-ancha { margin-top: 12px; }
+.ini-det-sec h4 {
+  margin: 0 0 10px; font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .8px; color: var(--accent-ink);
+}
+.ini-det-sec h5 {
+  margin: 12px 0 4px; font-size: 11px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: .4px;
+}
+.ini-det-sec h4 + h5 { margin-top: 0; }
+.ini-datos { display: grid; gap: 8px; margin: 0; }
+.ini-dato { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.ini-dato dt { font-size: 11px; color: var(--muted); }
+.ini-dato dd { margin: 0; font-size: 12.5px; color: var(--ink); overflow-wrap: anywhere; }
+.ini-datos-num dd { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ini-det-sec .ini-nota { margin-top: 8px; font-size: 11px; }
+.ini-det-sem { display: flex; align-items: center; font-size: 12.5px; color: var(--ink-2); margin-bottom: 8px; }
+.ini-det-tabla { overflow-x: auto; }
+.ini-det-tabla th { cursor: default; padding: 6px 8px; }
+.ini-det-tabla th:hover { background: #fff; color: var(--muted); }
+.ini-det-tabla tbody th {
+  text-transform: none; letter-spacing: 0; font-size: 12px;
+  color: var(--ink-2); font-weight: 600; border-bottom: 1px solid var(--line-soft);
+}
+.ini-det-tabla td { padding: 6px 8px; }
+.ini-etapa-actual, .ini-etapa-actual th { background: var(--accent-soft); }
+.ini-cat-ruta { overflow-wrap: anywhere; min-width: 200px; }
+.ini-texto {
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-2);
+  max-height: 320px; overflow-y: auto;
+  padding: 8px 10px; background: var(--bg-2); border-radius: var(--radius-xs);
+}
+@media (max-width: 720px) {
+  .ini-detalle { border-left: 0; }
+  .ini-det-rejilla { grid-template-columns: minmax(0, 1fr); }
+  .ini-dato { grid-template-columns: 110px minmax(0, 1fr); }
+}
