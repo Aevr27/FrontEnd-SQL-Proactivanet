@@ -1763,8 +1763,10 @@ const TableroSla = (function () {
     // libre en cada extremo, y con pocas posiciones esa media banda es una
     // franja vacia enorme junto al SLOT 0: se leia como si la serie acabara
     // en un punto que no esta. Aqui el ultimo punto ES el SLOT 0, y
-    // tiene que verse como el final de la serie. El agrupado por mes se queda
-    // centrado, que es como estaba.
+    // tiene que verse como el final de la serie. Es el mismo eje que la
+    // evolucion por SLOT de Experiencia (renderEvol: linea sobre categorias
+    // sin offset), donde el SLOT 0 es un bloque mas. El agrupado por mes se
+    // queda centrado, que es como estaba.
     if (enModoSlot()) estiloTendVigente.centrado = false;
     const estilo = estiloTendVigente;
 
