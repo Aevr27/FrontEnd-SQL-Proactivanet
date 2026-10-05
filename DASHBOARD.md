@@ -88,10 +88,10 @@ Incluye:
 - backlog por líder;
 - backlog por prioridad;
 - antigüedad apilada por líder;
-- tabla resumen;
-- listado de los 10 tickets más antiguos **de cada líder**.
+- tabla resumen por antigüedad, con drill-down: cada antigüedad se despliega en los grupos que tienen tickets en ella;
+- listado de los 100 tickets más antiguos.
 
-El listado de tickets antiguos no exige una antigüedad mínima y la selección es **por líder**: de cada líder se toman sus diez tickets más viejos por fecha de registro (todos, si tiene menos de diez), así que un líder con mucho backlog viejo no tapa a los demás y un ticket de ayer entra si es de los diez más viejos de esa persona. El recorte lo hace `backlog_antiguos.ashx`, que manda sólo esas filas más `total` (cuántos tenía el corte entero) en vez del backlog completo. Los líderes se listan alfabéticamente, con `Sin Torre` al final. Permite mostrar la descripción al pasar el ratón sobre el código. El código también puede funcionar como enlace directo al ticket en Proactivanet cuando existe su GUID correspondiente.
+El listado de tickets antiguos no exige una antigüedad mínima: es **una sola lista** con los 100 tickets más viejos del corte que pasan los filtros, del más viejo al más nuevo por fecha de registro (empates por código; sin fecha al final). Para que el filtro por clic de líder o prioridad encuentre los 100 más viejos de lo filtrado, `backlog_antiguos.ashx` manda la unión de los 100 más viejos de cada líder y de cada prioridad, más `total` (cuántos tenía el corte entero), en vez del backlog completo. Permite mostrar la descripción al pasar el ratón sobre el código. El código también puede funcionar como enlace directo al ticket en Proactivanet cuando existe su GUID correspondiente.
 
 Las descripciones pueden contener HTML procedente de Outlook y ser muy grandes. Para el tablero se limita el contenido recibido y posteriormente se limpia y recorta en el navegador.
 
