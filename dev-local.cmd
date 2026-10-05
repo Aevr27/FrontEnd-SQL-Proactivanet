@@ -41,8 +41,30 @@ if not defined ADMIN_DEV_IDENTIDAD (
   echo          dev-local.cmd %PUERTO% DOMINIO\cuenta ADM
 )
 
+REM  La cuenta tiene que traer DOMINIO\cuenta. Desde Git Bash, sin comillas,
+REM  bash se come la barra (SORIANAt_andresvr) y la aplicacion la descarta en
+REM  silencio: todo llega anonimo y Admin da 403. Se corta aqui con el aviso.
+REM  (Sin bloques ( ): con la variable vacia, %VAR:...% rompe el parseo.)
+if not defined ADMIN_DEV_IDENTIDAD goto :cuentaRevisada
+set "SIN_BARRA=%ADMIN_DEV_IDENTIDAD:\=%"
+if "%SIN_BARRA%"=="%ADMIN_DEV_IDENTIDAD%" goto :cuentaInvalida
+if "%ADMIN_DEV_IDENTIDAD:~0,1%"=="\" goto :cuentaInvalida
+if "%ADMIN_DEV_IDENTIDAD:~-1%"=="\" goto :cuentaInvalida
+:cuentaRevisada
+
 set "ADMIN_DEV_ROL=%~3"
+if defined ADMIN_DEV_ROL (
+  if /I not "%ADMIN_DEV_ROL%"=="ADM" if /I not "%ADMIN_DEV_ROL%"=="MOD" (
+    echo ERROR: el rol simulado debe ser ADM o MOD; llego "%ADMIN_DEV_ROL%".
+    exit /b 1
+  )
+)
 if defined ADMIN_DEV_ROL echo Admin local: rol simulado %ADMIN_DEV_ROL% (solo con la identidad simulada; ADM o MOD)
+
+REM  Si ya hay algo escuchando en el puerto (p. ej. un IIS Express de un
+REM  arranque anterior SIN la cuenta), el nuevo no arranca y el viejo sigue
+REM  contestando 403. Se corta con el aviso.
+netstat -ano -p tcp | findstr /C:":%PUERTO% " | findstr /C:"LISTENING" >nul && goto :puertoOcupado
 
 set "IISEXPRESS=%ProgramFiles%\IIS Express\iisexpress.exe"
 if not exist "%IISEXPRESS%" set "IISEXPRESS=%ProgramFiles(x86)%\IIS Express\iisexpress.exe"
@@ -71,3 +93,15 @@ echo Sirviendo "%RAIZ%" en http://localhost:%PUERTO%/
 "%IISEXPRESS%" /path:"%RAIZ%" /port:%PUERTO% /clr:v4.0
 
 endlocal
+exit /b
+
+:cuentaInvalida
+echo ERROR: la cuenta simulada debe ser DOMINIO\cuenta; llego "%ADMIN_DEV_IDENTIDAD%".
+echo        Desde Git Bash ponla entre comillas simples:
+echo          ./dev-local.cmd %PUERTO% 'SORIANA\t_andresvr' ADM
+exit /b 1
+
+:puertoOcupado
+echo ERROR: el puerto %PUERTO% ya esta en uso (otro IIS Express?). Cierralo o usa otro puerto:
+echo          taskkill /F /IM iisexpress.exe
+exit /b 1
