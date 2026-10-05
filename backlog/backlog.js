@@ -2,8 +2,8 @@
    Tablero de Backlog — modulo propio
    -------------------------------------------------------------------------
    Extraido de dashboard.js (seccion "3. Tablero de Backlog"). La logica del
-   tablero -KPIs, graficas, filtros, cross-filter, detalle, "100 mas antiguos
-   por lider"- baja aqui TAL CUAL: no se recalculo nada, no se renombro nada
+   tablero -KPIs, graficas, filtros, cross-filter, detalle, "mas antiguos por
+   lider"- baja aqui TAL CUAL: no se recalculo nada, no se renombro nada
    y no se cambio ningun color.
 
    Funciona de dos maneras, como experiencia/ y qa/:
@@ -884,14 +884,30 @@ const TableroBacklog = (function () {
   /* Comportamiento de una tabla drill-down ya pintada: clic en una fila .n1row
      despliega o pliega sus .n2row (data-p1 = su data-n1); clic en un
      .filtrable filtra todo el tablero por su data-dim / data-valor. Lo
-     comparten "Lideres (drill-down)" y "Resumen por antiguedad". */
-  function activarDrillDown(cont) {
+     comparten "Lideres (drill-down)" y "Resumen por antiguedad".
+
+     Con `soloFlecha` la fila NO escucha clics: solo su boton .flecha-dd
+     despliega o pliega, y solo el .filtrable filtra. Las cifras y el fondo de
+     la fila no hacen nada. Es el modo de "Resumen por antiguedad". */
+  function activarDrillDown(cont, { soloFlecha = false } = {}) {
     cont.querySelectorAll('.n1row').forEach(fila => {
-      fila.addEventListener('click', e => {
-        if (e.target.classList.contains('filtrable')) return;
+      const alternar = () => {
         const abierto = fila.classList.toggle('open');
         cont.querySelectorAll(`.n2row[data-p1="${fila.dataset.n1}"]`)
           .forEach(h => h.classList.toggle('show', abierto));
+        return abierto;
+      };
+      if (soloFlecha) {
+        const flecha = fila.querySelector('.flecha-dd');
+        if (flecha) flecha.addEventListener('click', e => {
+          e.stopPropagation();
+          flecha.setAttribute('aria-expanded', String(alternar()));
+        });
+        return;
+      }
+      fila.addEventListener('click', e => {
+        if (e.target.classList.contains('filtrable')) return;
+        alternar();
       });
     });
     cont.querySelectorAll('.filtrable').forEach(el => {
@@ -992,9 +1008,10 @@ const TableroBacklog = (function () {
   /* Matriz antiguedad x lider con drill-down al estilo de "Lideres": cada
      cubo es una fila .n1row que se despliega en los grupos que tienen
      tickets en ese cubo, con su cifra bajo la columna de su lider (o de
-     'Otros' si el lider no entro en el top de la matriz). Clic en el cubo o
-     en un grupo filtra el tablero, igual que la grafica de antiguedad y que
-     la tabla de lideres. */
+     'Otros' si el lider no entro en el top de la matriz). Solo la flecha
+     despliega; solo el nombre del cubo o del grupo filtra el tablero, igual
+     que la grafica de antiguedad y que la tabla de lideres. Las cifras no
+     hacen nada. */
   function renderTablaAging() {
     const cont = document.getElementById('tabla-aging-bl');
     const filasAging = agingFiltrado();
@@ -1013,8 +1030,9 @@ const TableroBacklog = (function () {
         return `<td class="num">${v ? FMT(v) : ''}</td>`;
       }).join('');
       const sel = filtro.aging === b ? ' fila-sel' : '';
-      let html = `<tr class="n1row${sel}" data-n1="${i}"><td><b><span class="filtrable" data-dim="aging"
-          data-valor="${escapeAttr(b)}">${escapeHtml(b)}</span></b></td>${celdas}<td class="num"><b>${FMT(m.totalPorBucket.get(b))}</b></td></tr>`;
+      let html = `<tr class="n1row dd-flecha${sel}" data-n1="${i}"><td><button type="button" class="flecha-dd"
+          aria-expanded="false" aria-label="Desplegar grupos de ${escapeAttr(b)}"></button><b><span class="filtrable"
+          data-dim="aging" data-valor="${escapeAttr(b)}">${escapeHtml(b)}</span></b></td>${celdas}<td class="num"><b>${FMT(m.totalPorBucket.get(b))}</b></td></tr>`;
       for (const g of grupos.get(b) || []) {
         const col = columnaDe(g.Lider);
         const celdasG = m.lideres.map(l => `<td class="num">${l === col ? FMT(g.Tickets) : ''}</td>`).join('');
@@ -1035,7 +1053,7 @@ const TableroBacklog = (function () {
     // hacerOrdenable(): reordenar dejaria el total en medio.
     cont.innerHTML = `<table><thead><tr><th>Antiguedad / Grupo</th>${th}<th class="num">Total</th></tr></thead>`
       + `<tbody>${filas}<tr><td><b>Total</b></td>${totales}<td class="num"><b>${FMT(granTotal)}</b></td></tr></tbody></table>`;
-    activarDrillDown(cont);
+    activarDrillDown(cont, { soloFlecha: true });
     document.getElementById('cap-aging-bl').innerHTML = descripcionFiltro(granTotal);
   }
 
@@ -1080,17 +1098,29 @@ const TableroBacklog = (function () {
     return limpio.length > LARGO_TOOLTIP ? limpio.slice(0, LARGO_TOOLTIP) + '...' : limpio;
   }
 
-  /* Cuantas filas lista la seccion: los TOPE_ANTIGUOS tickets mas viejos del
-     corte que pasan los filtros del tablero, en UNA lista global del mas
-     viejo al mas nuevo. No hay edad minima: si el corte tiene menos, salen
-     todos.
+  /* La seccion lista los tickets mas viejos DE CADA LIDER, en una tarjeta por
+     lider, del mas viejo al mas nuevo. Cada tarjeta abre con
+     ANTIGUOS_INICIAL filas y su boton "Ver 25 mas" suma ANTIGUOS_PASO, solo a
+     ESA tarjeta, hasta TOPE_ANTIGUOS: 10 -> 35 -> 60 -> 85 -> 100. El tope es
+     POR LIDER, nunca global: un lider con mucho backlog viejo ya no se lleva
+     la seccion entera. No hay edad minima: si un lider tiene menos, salen los
+     que tenga.
 
      La eleccion viene preparada del servidor: backlog_antiguos.ashx manda la
      union de los TOPE_ANTIGUOS mas viejos de cada lider y de cada prioridad
-     -no el corte entero-, que es lo que hace falta para que el cross-filter
-     de aqui (lider, grupo, prioridad) encuentre los mas viejos de lo que se
-     filtra. TOPE_ANTIGUOS es el mismo numero que Tope del handler. */
+     -no el corte entero-. "Ver 25 mas" solo destapa filas que ya llegaron:
+     no vuelve a pedir nada. TOPE_ANTIGUOS es el mismo numero que Tope del
+     handler. */
   const TOPE_ANTIGUOS = 100;
+  const ANTIGUOS_INICIAL = 10;
+  const ANTIGUOS_PASO = 25;
+
+  // Filas visibles de cada lider (nombre -> n). Se vacia con cada carga de
+  // datos; un lider que no esta aqui va en ANTIGUOS_INICIAL.
+  const visiblesAntiguos = new Map();
+  // Lideres en el orden en que se pintaron sus tarjetas: el data-i del boton
+  // es el indice aqui, asi el nombre no pasa por un atributo.
+  let lideresAntiguos = [];
 
   /* De mas viejo a mas nuevo por fecha de registro. Se ordena por
      FechaRegistro y no por DiasBacklog porque la fecha es el dato de origen
@@ -1110,10 +1140,9 @@ const TableroBacklog = (function () {
     return ca < cb ? -1 : (ca > cb ? 1 : 0);
   }
 
-  /* Los tickets que lista la tabla: los que pasan el cross-filter, del mas
-     viejo al mas nuevo, cortados en `tope`. Aparte de renderAntiguos para
-     poder probarla sin DOM. Estos tickets traen Lider, Grupo y Prioridad, asi
-     que respetan esos tres filtros. */
+  /* Los tickets que pasan el cross-filter, del mas viejo al mas nuevo,
+     cortados en `tope`. Estos tickets traen Lider, Grupo y Prioridad, asi que
+     respetan esos tres filtros. */
   function antiguosVisibles(tickets, tope) {
     return (tickets ?? []).filter(t =>
       (filtro.lider === null || t.Lider === filtro.lider) &&
@@ -1123,13 +1152,42 @@ const TableroBacklog = (function () {
       .slice(0, tope);
   }
 
-  function renderAntiguos(tope = TOPE_ANTIGUOS) {
+  /* [[lider, tickets]]: los `tope` mas viejos de cada lider que pasan el
+     cross-filter, ya ordenados. Los lideres van en el orden canonico -A->Z
+     con `Sin Torre` al final, el de las leyendas (assets/js/paleta.js)-, no
+     en el que llegaron las filas: las tarjetas salen igual entre dos cargas.
+     Lo que la tabla compartida no reconozca se va al final en el orden en
+     que llego (`sort` es estable y todos empatan en Infinity). */
+  function antiguosPorLider(tickets, tope) {
+    const porLider = new Map();
+    for (const t of antiguosVisibles(tickets, Infinity)) {
+      if (!porLider.has(t.Lider)) porLider.set(t.Lider, []);
+      const lista = porLider.get(t.Lider);
+      if (lista.length < tope) lista.push(t);
+    }
+    const rango = new Map(Paleta.ordenarLideres([...porLider.keys()]).map((n, i) => [n, i]));
+    return [...porLider.keys()]
+      .sort((a, b) => (rango.get(a) ?? Infinity) - (rango.get(b) ?? Infinity))
+      .map(l => [l, porLider.get(l)]);
+  }
+
+  // Cuantas filas ensena ahora la tarjeta de `lider`, y cuantas tras un clic
+  // en "Ver 25 mas". Nunca pasa de TOPE_ANTIGUOS.
+  function visiblesDe(lider) {
+    return Math.min(visiblesAntiguos.get(lider) ?? ANTIGUOS_INICIAL, TOPE_ANTIGUOS);
+  }
+  function verMasAntiguos(lider) {
+    visiblesAntiguos.set(lider, Math.min(visiblesDe(lider) + ANTIGUOS_PASO, TOPE_ANTIGUOS));
+  }
+
+  function renderAntiguos() {
     const cont = document.getElementById('tabla-antiguos-bl');
     const cap = document.getElementById('cap-antiguos-bl');
     const d = datos.antiguos || {};
 
-    const tickets = antiguosVisibles(d.tickets, tope);
-    if (!tickets.length) {
+    const grupos = antiguosPorLider(d.tickets, TOPE_ANTIGUOS);
+    lideresAntiguos = grupos.map(g => g[0]);
+    if (!grupos.length) {
       cap.innerHTML = descripcionFiltro(0);
       cont.innerHTML = `<div class="vacio">No hay tickets en backlog para este corte y filtros.</div>`;
       return;
@@ -1138,27 +1196,50 @@ const TableroBacklog = (function () {
     // `total` es del corte ENTERO, antes del recorte del handler; si un
     // endpoint viejo no lo manda, se cae a lo que haya llegado.
     const enBacklog = d.total ?? (d.tickets ?? []).length;
-    cap.innerHTML = `Los ${FMT(tickets.length)} tickets mas antiguos `
-      + `<span class="suave">(de los ${FMT(enBacklog)} en backlog de este corte`
+    cap.innerHTML = `Los tickets mas antiguos de cada lider `
+      + `<span class="suave">(${FMT(ANTIGUOS_INICIAL)} al abrir, hasta ${FMT(TOPE_ANTIGUOS)} por lider; `
+      + `de los ${FMT(enBacklog)} en backlog de este corte`
       + `${hayFiltro() ? ', con los filtros activos' : ''}) · `
       + `del mas viejo al mas nuevo por fecha de registro</span>`;
 
-    const filas = tickets.map(t => `<tr>
-        <td class="con-hint" title="${escapeAttr(tooltipDescripcion(t.Descripcion))}">${celdaCodigo(t)}</td>
-        <td class="num"><b>${FMT(t.DiasBacklog)}</b></td>
-        <td class="fecha-cell">${String(t.FechaRegistro ?? '').slice(0, 10)}</td>
-        <td><span class="swatch" style="background:${colorLider(t.Lider)}"></span>${escapeHtml(t.Lider)}</td>
-        <td>${escapeHtml(t.Grupo)}</td>
-        <td>${escapeHtml(t.Prioridad)}</td>
-        <td>${escapeHtml(t.TecnicoSegundaLinea)}</td>
-        <td>${escapeHtml(t.Subestado)}</td>
-        <td>${escapeHtml(String(t.Titulo ?? '').slice(0, 70))}</td>
-      </tr>`).join('');
-    cont.innerHTML = `<table><thead><tr><th>Ticket</th><th class="num">Dias</th><th>Registro</th>
-        <th>Lider</th><th>Grupo</th><th>Prioridad</th><th>Tecnico</th><th>Subestado</th><th>Titulo</th></tr></thead>
-      <tbody>${filas}</tbody></table>`;
+    cont.innerHTML = grupos.map(([lider, lista], i) => {
+      const n = Math.min(visiblesDe(lider), lista.length);
+      const resto = lista.length - n;
+      const filas = lista.slice(0, n).map(t => `<tr>
+          <td class="con-hint" title="${escapeAttr(tooltipDescripcion(t.Descripcion))}">${celdaCodigo(t)}</td>
+          <td class="num"><b>${FMT(t.DiasBacklog)}</b></td>
+          <td class="fecha-cell">${String(t.FechaRegistro ?? '').slice(0, 10)}</td>
+          <td>${escapeHtml(t.Prioridad)}</td>
+          <td>${escapeHtml(t.Grupo)}</td>
+          <td>${escapeHtml(t.TecnicoSegundaLinea)}</td>
+          <td>${escapeHtml(t.Subestado)}</td>
+          <td>${escapeHtml(String(t.Titulo ?? '').slice(0, 70))}</td>
+        </tr>`).join('');
+      const boton = resto > 0
+        ? `<button type="button" class="ver-mas-antiguos" data-i="${i}">Ver ${FMT(Math.min(ANTIGUOS_PASO, resto))} m&aacute;s</button>`
+        : '';
+      return `<div class="antiguos-lider">
+          <div class="grupo-lider" style="color:${colorLider(lider)}">
+            <span class="swatch" style="background:${colorLider(lider)}"></span>${escapeHtml(lider)}
+            <span class="conteo">${FMT(n)} de ${FMT(lista.length)}</span></div>
+          <div class="scroll-x"><table><thead><tr><th>Ticket</th><th class="num">Dias</th><th>Registro</th>
+            <th>Prioridad</th><th>Grupo</th><th>Tecnico</th><th>Subestado</th><th>Titulo</th></tr></thead>
+          <tbody>${filas}</tbody></table></div>
+          <div class="pie-antiguos"><span class="suave">${FMT(n)} tickets</span>${boton}</div>
+        </div>`;
+    }).join('');
 
     cont.querySelectorAll('table').forEach(hacerOrdenable);
+    // "Ver 25 mas" solo cambia el contador de ESE lider y repinta esta
+    // seccion con lo que ya hay en memoria: ni handler, ni renderTodo().
+    cont.querySelectorAll('.ver-mas-antiguos').forEach(b => {
+      b.addEventListener('click', () => {
+        const lider = lideresAntiguos[Number(b.dataset.i)];
+        if (lider === undefined) return;
+        verMasAntiguos(lider);
+        renderAntiguos();
+      });
+    });
   }
 
   // ------------------------------------------------------------------ variacion
@@ -1293,6 +1374,8 @@ const TableroBacklog = (function () {
         (resumen.prioridad ?? []).map(x => x.Lider));
 
       Object.keys(filtro).forEach(k => { filtro[k] = null; });
+      // Datos nuevos: cada lider vuelve a sus primeras filas de antiguos.
+      visiblesAntiguos.clear();
       renderTodo();
       // El Backlog es una foto, no una ventana: su metadato viaja sin periodo
       // y su "ultima actualizacion" es la fecha de corte de
