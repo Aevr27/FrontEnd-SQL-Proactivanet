@@ -16,9 +16,13 @@
 //      filtros, limpiar, orden por columna, "Mostrar mas".
 //   E) Detalle: abre al elegir, categorias sin duplicar, secciones, Escape,
 //      fondo y cambio de vista lo cierran.
+//   S) Detalle: "Solicitar cambios" (borrador validado, sin envio ni
+//      peticion al servidor) e "Historial de cambios (N)" plegado.
 //   T) Tipo de iniciativa (tipo_iniciativa, no la Agrupacion): opciones del
-//      registro, Todas por omision, uno, varios (O), ninguno = Todas, junto
-//      con los demas filtros, Limpiar; el panel de casillas en el DOM.
+//      registro, todas marcadas por omision, uno, varios (O), ninguno = no
+//      pasa nada, "Todas" alterna marcar todo / desmarcar todo, junto con
+//      los demas filtros, Limpiar; el panel de casillas en el DOM.
+//   La Agrupacion ya no es filtro (ni select ni FiltroRegistro).
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -206,7 +210,7 @@ pruebas.push(function () {
   Check('D2 riesgo = riesgo_folio de las retrasadas que cuentan', 150, k.riesgo);
   Check('D2 tickets a reducir de las activas', 190, k.reduceActivas);
   Check('D3 estados: activos en su orden y luego los demas', ['En Análisis', 'En Solución', 'Cerrado'], reg.estados());
-  Check('D3 agrupaciones', ['Mejora', 'Problem', 'ReqOpr'], reg.tipos());
+  Check('D3 Agrupacion ya no es filtro: sin opciones en Registro', 'undefined', typeof reg.tipos);
   Check('D3 directores (incluye el del Problem sin categoria)', ['Dir A', 'Dir B'], reg.directores());
   Check('D4 sin lista lanza', true, (function () { try { R.Registro.desdeJson({}); return false; } catch (e) { return true; } })());
 
@@ -253,9 +257,10 @@ pruebas.push(function () {
   Check('D11 Estado', ['HAR 2025-000003'], pasan());
   f.elegirEstado('Inventado');
   Check('D11 Estado fuera de catalogo = sin filtro', 5, pasan().length);
-  f.elegirTipo('Mejora');
-  Check('D11 Agrupacion', ['MAP 2026-000002'], pasan());
-  Check('D12 filtros activos', 1, f.activos());
+  Check('D12 Agrupacion ya no es filtro: sin elegirTipo', 'undefined', typeof f.elegirTipo);
+  Check('D12 filtros activos', 0, f.activos());
+  // El dato sigue: decide Activas (seguimiento) y se ve en la tabla.
+  Check('D12 agrup sigue en los datos', 'ReqOpr', reg.buscar('REQ 2026-000004').agrup);
 
   var orden = R.ordenar(reg.iniciativas, null).map(function (i) { return i.folio; });
   Check('D13 orden por omision: riesgo, activas, reduce',
@@ -315,8 +320,10 @@ pruebas.push(function () {
       /data-folio="HAR 2025-000003"[\s\S]*?ini-sem verde[^>]*><\/span><span class="ini-tenue">—/.test(html));
     Check('L4 cuenta', '5 iniciativas', p.sel('regCuenta').textContent);
     Check('L4 sin "Mostrar mas"', true, p.sel('regMas').hidden);
-    Check('L5 selects llenos', [['En Análisis', 'En Solución', 'Cerrado'], ['Mejora', 'Problem', 'ReqOpr'], ['Dir A', 'Dir B'], ['PO 1', 'PO 2', 'PO 3']],
-      [p.sel('regEstadoSel').opciones(), p.sel('regTipo').opciones(), p.sel('regDirector').opciones(), p.sel('regPo').opciones()]);
+    Check('L5 selects llenos', [['En Análisis', 'En Solución', 'Cerrado'], ['Dir A', 'Dir B'], ['PO 1', 'PO 2', 'PO 3']],
+      [p.sel('regEstadoSel').opciones(), p.sel('regDirector').opciones(), p.sel('regPo').opciones()]);
+    Check('L5 el select de Agrupacion no se llena', '', p.sel('regTipo').innerHTML);
+    Check('L5 la columna Agrupacion sigue en la tabla', true, /data-col="Agrupación"><span class="chip ini-chip">Mejora/.test(html));
 
     elegir(p, 'regPo', 'PO 1');
     Check('L6 PO por select', ['PRB 2026-000001', 'MAP 2026-000002', 'PRB 2026-000005'], folios(p));
@@ -373,7 +380,9 @@ pruebas.push(function () {
     Check('E5 seguimiento: estado actual vencido y cambios', true,
       /ini-etapa-actual"><th scope="row">Solución <span class="ini-sub">estado actual<\/span><\/th><td class="fecha-cell"><b class="ini-vencida">01\/09\/2026<\/b><\/td><td class="num">2</.test(html));
     Check('E6 descripcion; observaciones vacias', [true, true], [/Desc PRB 2026-000001/.test(html), /Sin captura/.test(html)]);
-    Check('E7 sin botones de editar', false, /<button/.test(html));
+    Check('E7 sin botones de editar ni guardar', false, /<button[^>]*>[^<]*(Editar|Guardar|Modificar)/.test(html));
+    Check('E7 los unicos botones son Solicitar cambios e Historial', ['solicitar-cambios', 'historial'],
+      (html.match(/data-accion="[^"]+"/g) || []).map(function (a) { return a.slice(13, -1); }));
 
     p.doc.disparar('keydown', { key: 'Escape' });
     Check('E9 Escape cierra y devuelve el foco', [true, true, 1], [p.sel('regDetalle').hidden, p.sel('regDetFondo').hidden, origen.enfocado]);
@@ -393,6 +402,107 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
+// S) Solicitar cambios e Historial de cambios (sin persistencia)
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var S = R.SolicitudCambio;
+  Check('S1 campos: solo las tres fechas compromiso', ['f_analisis', 'f_solucion', 'f_cierre'],
+    S.campos().map(function (c) { return c.clave; }));
+  var c = new S(reg.buscar('PRB 2026-000001'));
+  Check('S2 por omision la fecha del estado actual', ['f_solucion', '2026-09-01'], [c.campo, c.actual()]);
+  Check('S2 cerrada: sin campo por omision', '', new S(reg.buscar('HAR 2025-000003')).campo);
+  Check('S3 vacia: falta fecha y motivo', ['propuesto', 'motivo'], c.validar().map(function (e) { return e.campo; }));
+  c.propuesto = '2026-09-01'; c.motivo = '  ';
+  Check('S3 misma fecha y motivo en blanco', ['La nueva fecha es igual a la actual.', 'Explica el motivo del cambio.'],
+    c.validar().map(function (e) { return e.mensaje; }));
+  c.propuesto = '2026-02-30'; c.motivo = 'Proveedor';
+  Check('S3 fecha inexistente', ['propuesto'], c.validar().map(function (e) { return e.campo; }));
+  c.campo = 'titulo';
+  Check('S3 campo no designado se rechaza', ['campo'], c.validar().map(function (e) { return e.campo; }));
+  c.campo = 'f_solucion'; c.propuesto = '2026-10-15';
+  Check('S4 valida', [], c.validar());
+  Check('S4 resumen', { folio: 'PRB 2026-000001', campo: 'f_solucion', rotulo: 'Fecha compromiso de Solución',
+    anterior: '2026-09-01', nuevo: '2026-10-15', motivo: 'Proveedor' }, c.resumen());
+
+  var peticiones = [];
+  var p = Pagina(ok(DATOS), function (url) { peticiones.push(url); return nunca(); });
+  function accion(a) {
+    var el = Elemento('b'); el.setAttribute('data-accion', a);
+    p.sel('regDetCuerpo').disparar('click', { target: el });
+  }
+  return esperar().then(function () {
+    // Lo que la pagina pide al iniciar (catalogo de Nueva solicitud) no cuenta.
+    peticiones.length = 0;
+    clicFolio(p, 'PRB 2026-000001');
+    var html = p.sel('regDetCuerpo').innerHTML;
+    Check('S5 boton Solicitar cambios en el detalle', true,
+      /<button type="button" class="btn linea chico" id="regCambioBoton" data-accion="solicitar-cambios" aria-expanded="false" aria-controls="regCambio">Solicitar cambios<\/button>/.test(html));
+    Check('S5 formulario oculto al abrir', true, /<section class="ini-det-sec ini-cambio" id="regCambio" hidden><\/section>/.test(html));
+    Check('S6 Historial plegado con su cuenta', [true, true, true],
+      [/id="regHistBoton" data-accion="historial" aria-expanded="false"/.test(html),
+       /<span>Historial de cambios \(0\)<\/span>/.test(html), /id="regHistCuerpo" hidden>/.test(html)]);
+    Check('S6 Historial va al final del detalle', true, /Descripción[\s\S]*Historial de cambios/.test(html));
+
+    accion('solicitar-cambios');
+    var form = p.sel('regCambio').innerHTML;
+    Check('S7 abre el formulario', [false, 'true', 1], [p.sel('regCambio').hidden, p.sel('regCambioBoton').getAttribute('aria-expanded'), p.sel('regCambioCampo').enfocado]);
+    Check('S7 campo y valor actual por omision', [true, true],
+      [/<option value="f_solucion" selected>Fecha compromiso de Solución/.test(form), /id="regCambioActual">01\/09\/2026</.test(form)]);
+    Check('S7 sin campos que no sean fecha', 3, (form.match(/<option value="f_/g) || []).length);
+
+    p.sel('regCambioCampo').value = 'f_analisis';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioCampo') });
+    Check('S8 cambiar de campo muestra su valor', '01/12/2026', p.sel('regCambioActual').textContent);
+
+    p.sel('regCambioNueva').value = '';
+    p.sel('regCambioMotivo').value = '';
+    accion('cambio-preparar');
+    Check('S9 invalida: errores y aria-invalid', ['ini-cambio-msg error', 'true', 'true', 'false'],
+      [p.sel('regCambioMsg').className, p.sel('regCambioNueva').getAttribute('aria-invalid'),
+       p.sel('regCambioMotivo').getAttribute('aria-invalid'), p.sel('regCambioCampo').getAttribute('aria-invalid')]);
+
+    p.sel('regCambioNueva').value = '2027-01-15';
+    p.sel('regCambioMotivo').value = 'Dependencia con proveedor';
+    accion('cambio-preparar');
+    var msg = p.sel('regCambioMsg').innerHTML;
+    Check('S10 valida: preparada, NO enviada', ['ini-cambio-msg listo', true, true],
+      [p.sel('regCambioMsg').className, /Solicitud preparada, no enviada/.test(msg), /01\/12\/2026 → 15\/01\/2027/.test(msg)]);
+    Check('S10 ninguna peticion al servidor', [], peticiones);
+    Check('S10 el registro no cambia', '2026-12-01', p.registro.registro.buscar('PRB 2026-000001').f_analisis);
+
+    accion('cambio-cancelar');
+    Check('S11 Cancelar oculta y devuelve el foco', [true, 'false', ''],
+      [p.sel('regCambio').hidden, p.sel('regCambioBoton').getAttribute('aria-expanded'), p.sel('regCambio').innerHTML]);
+    accion('solicitar-cambios');
+    accion('solicitar-cambios');
+    Check('S11 el boton tambien alterna', true, p.sel('regCambio').hidden);
+
+    accion('historial');
+    Check('S12 Historial se despliega', ['true', false], [p.sel('regHistBoton').getAttribute('aria-expanded'), p.sel('regHistCuerpo').hidden]);
+    accion('historial');
+    Check('S12 ... y se pliega', ['false', true], [p.sel('regHistBoton').getAttribute('aria-expanded'), p.sel('regHistCuerpo').hidden]);
+    accion('historial');
+    clicFolio(p, 'MAP 2026-000002');
+    accion('historial');
+    Check('S13 otra iniciativa: el historial arranca plegado', 'true', p.sel('regHistBoton').getAttribute('aria-expanded'));
+
+    // Con historial del servidor (contrato provisional) pinta sus filas.
+    var conHist = JSON.parse(JSON.stringify(DATOS));
+    conHist.iniciativas[0].historial = [
+      { campo: 'Fecha compromiso de Solución', anterior: '01/08/2026', nuevo: '01/09/2026', fecha: '15/07/2026 10:00', usuario: 'SORIANA\\usuario1' },
+      { campo: 'Fecha compromiso de Solución', anterior: '01/09/2026', nuevo: '<b>x</b>', fecha: '20/08/2026 09:30', usuario: 'SORIANA\\usuario2' }];
+    return p.registro.cargar(ok(conHist)).then(function () {
+      clicFolio(p, 'PRB 2026-000001');
+      var h = p.sel('regDetCuerpo').innerHTML;
+      Check('S14 cuenta y filas del historial', [true, 2, true, false],
+        [/Historial de cambios \(2\)/.test(h), (h.match(/<td>SORIANA\\usuario/g) || []).length, /&lt;b&gt;x&lt;\/b&gt;/.test(h), /<b>x<\/b>/.test(h)]);
+      Check('S14 sigue plegado', true, /id="regHistCuerpo" hidden>/.test(h));
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // T) Tipo de iniciativa
 // ---------------------------------------------------------------------------
 // PRB 1 y HAR 3: Problema; MAP 2: Mejora continua; REQ 4: Requerimiento;
@@ -404,9 +514,9 @@ pruebas.push(function () {
   var TODOS = ['Mejora continua', 'Problema', 'Requerimiento'];
 
   Check('T1 opciones: los tipo_iniciativa del registro, sin vacios', TODOS, reg.tiposIniciativa());
-  Check('T1 no son las agrupaciones', ['Mejora', 'Problem', 'ReqOpr'], reg.tipos());
-  Check('T2 por omision: Todas (null), todos marcados, sin filtro', [null, TODOS, 5, 0],
-    [f.tiposIni, f.tiposIniciativa(), pasan().length, f.activos()]);
+  Check('T1 no son las agrupaciones', -1, TODOS.indexOf('ReqOpr'));
+  Check('T2 por omision: todos marcados (null), sin filtro', [null, TODOS, 5, 0, true],
+    [f.tiposIni, f.tiposIniciativa(), pasan().length, f.activos(), f.todosMarcados()]);
 
   f.alternarTipoIniciativa('Mejora continua');
   f.alternarTipoIniciativa('Requerimiento');
@@ -419,14 +529,21 @@ pruebas.push(function () {
 
   f.alternarTipoIniciativa('Problema');
   f.alternarTipoIniciativa('Requerimiento');
-  Check('T5 desmarcar todos = Todas, no lista vacia', [null, 5], [f.tiposIni, pasan().length]);
+  Check('T5 desmarcar todos = ninguno: no pasa nada, cuenta como filtro', [[], [], 0, 1, false],
+    [f.tiposIni, f.tiposIniciativa(), pasan().length, f.activos(), f.todosMarcados()]);
 
   f.alternarTipoIniciativa('Problema');
-  f.alternarTipoIniciativa('Problema');
-  Check('T6 volver a marcarlos todos = Todas', null, f.tiposIni);
+  f.alternarTipoIniciativa('Mejora continua');
+  f.alternarTipoIniciativa('Requerimiento');
+  Check('T6 volver a marcarlos todos = todos (null)', [null, 5], [f.tiposIni, pasan().length]);
+
+  f.todosTiposIniciativa();
+  Check('T7 Todas con todo marcado: desmarca todo', [[], 0], [f.tiposIni, pasan().length]);
+  f.todosTiposIniciativa();
+  Check('T7 Todas con nada marcado: marca todo', [null, TODOS, 5], [f.tiposIni, f.tiposIniciativa(), pasan().length]);
   f.alternarTipoIniciativa('Problema');
   f.todosTiposIniciativa();
-  Check('T7 Todas restablece', [null, TODOS, 5], [f.tiposIni, f.tiposIniciativa(), pasan().length]);
+  Check('T7 Todas con algunos marcados: marca todo', [null, 5], [f.tiposIni, pasan().length]);
 
   // Junto con los demas filtros (Y entre filtros).
   f.alternarTipoIniciativa('Mejora continua');
@@ -434,11 +551,6 @@ pruebas.push(function () {
   f.elegirEstado('Cerrado');
   Check('T8 + Estado', ['HAR 2025-000003'], pasan());
   f.elegirEstado('');
-  f.elegirTipo('Problem');
-  Check('T8 + Agrupacion (otra columna)', ['PRB 2026-000001', 'HAR 2025-000003'], pasan());
-  f.elegirTipo('Mejora');
-  Check('T8 Agrupacion Mejora + tipo Problema = nada', [], pasan());
-  f.elegirTipo('');
   f.elegirDirector('Dir A');
   Check('T8 + Director', ['PRB 2026-000001'], pasan());
   f.elegir(0, 'PO 2');
@@ -502,6 +614,35 @@ pruebas.push(function () {
     marcar('data-tipo-todas', '');
     Check('T16 la casilla Todas restablece', ['— Todas —', 5, ''], [p.sel('regTipoIni').textContent, folios(p).length, p.sel('regFiltrosCuenta').textContent]);
 
+    marcar('data-tipo-todas', '');
+    Check('T18 Todas con todo marcado: nada marcado y nada en la lista',
+      ['Ninguno', true, ['Todas:no', 'Mejora continua:no', 'Problema:no', 'Requerimiento:no'], [], false, '1 filtro activo'],
+      [p.sel('regTipoIni').textContent, p.sel('regTipoIni').classList.contains('con-valor'), casillas(), folios(p),
+       p.sel('regVacio').hidden, p.sel('regFiltrosCuenta').textContent]);
+    marcar('data-tipo-ini', 'Problema');
+    Check('T18 desde ninguno, marcar uno', ['Problema', ['PRB 2026-000001', 'HAR 2025-000003']], [p.sel('regTipoIni').textContent, folios(p)]);
+    marcar('data-tipo-todas', '');
+    Check('T18 Todas con algunos: todo marcado otra vez', ['— Todas —', 5, ['Todas:si', 'Mejora continua:si', 'Problema:si', 'Requerimiento:si']],
+      [p.sel('regTipoIni').textContent, folios(p).length, casillas()]);
+
+    // Paginacion intacta con el filtro de tipos.
+    var muchas = JSON.parse(JSON.stringify(DATOS));
+    for (var n = 0; n < 150; n++) muchas.iniciativas.push(Ini('Y ' + (1000 + n), { tipo_iniciativa: 'Problema' }));
+    return p.registro.cargar(ok(muchas)).then(function () {
+      marcar('data-tipo-ini', 'Mejora continua');
+      marcar('data-tipo-ini', 'Requerimiento');
+      Check('T19 paginacion con tipos: 100 de 152', [100, false, '152 de 155 iniciativas · mostrando 100'],
+        [folios(p).length, p.sel('regMas').hidden, p.sel('regCuenta').textContent]);
+      p.sel('regMas').disparar('click');
+      Check('T19 Mostrar mas sigue el filtro', [152, true], [folios(p).length, p.sel('regMas').hidden]);
+      marcar('data-tipo-todas', '');
+      marcar('data-tipo-todas', '');
+      Check('T19 ninguno: lista vacia, sin Mostrar mas', [0, true], [folios(p).length, p.sel('regMas').hidden]);
+    });
+  }).then(function () {
+
+    p.sel('regTipoIni').disparar('click');
+    Check('T17 el panel abre de nuevo tras recargar', false, p.sel('regTipoIniPanel').hidden);
     p.doc.disparar('keydown', { key: 'Escape' });
     Check('T17 Escape cierra el panel', [true, 'false'], [p.sel('regTipoIniPanel').hidden, p.sel('regTipoIni').getAttribute('aria-expanded')]);
   });
@@ -547,8 +688,10 @@ pruebas.push(function () {
   Check('H3 orden de scripts', true,
     /cascada-organizacional\.js[\s\S]*registro-iniciativas\.js[\s\S]*iniciativas\.js"/.test(html));
   Check('H4 sin botones de editar/descargar', false, /(Editar|Modificar|Descargar)/.test(html));
-  Check('H5 Tipo de iniciativa junto a Agrupacion, sin quitarla', true,
-    /<label for="regTipo">Agrupación<\/label>[\s\S]*<label for="regTipoIni">Tipo de iniciativa<\/label>\s*<button type="button" class="ini-multi-boton" id="regTipoIni"/.test(html));
+  Check('H5 sin filtro de Agrupacion', [false, false], [/id="regTipo"/.test(html), /<label[^>]*>Agrupación<\/label>/.test(html)]);
+  Check('H5 Tipo de iniciativa sigue como multiselect', true,
+    /<label for="regTipoIni">Tipo de iniciativa<\/label>\s*<button type="button" class="ini-multi-boton" id="regTipoIni"/.test(html));
+  Check('H7 el detalle sigue rotulado Solo lectura', true, /<span class="ini-hint">Solo lectura<\/span>/.test(html));
 
   // Sin desbordar a lo ancho: el panel cuelga del ancho de su campo, el
   // boton mide lo que su columna y los textos largos se parten.

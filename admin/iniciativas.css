@@ -577,3 +577,49 @@ html.ini-detalle-abierto { overflow: hidden; }
   .ini-det-rejilla { grid-template-columns: minmax(0, 1fr); }
   .ini-dato { grid-template-columns: 110px minmax(0, 1fr); }
 }
+
+/* ---- Detalle: Solicitar cambios (borrador, sin envio) ---- */
+.ini-det-acciones { display: flex; gap: 8px; margin-top: 10px; }
+.ini-cambio { margin-bottom: 12px; border-color: var(--g-200); background: var(--g-50); }
+.ini-cambio-campos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 10px; }
+.ini-cambio-campos .campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ini-cambio-campos label, .ini-cambio-rot { font-size: 11px; font-weight: 700; color: var(--muted); }
+.ini-cambio-campos select, .ini-cambio-campos input, .ini-cambio-campos textarea {
+  width: 100%; padding: 6px 8px; font: inherit; font-size: 12.5px; color: var(--ink);
+  border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs); background: var(--ctrl-bg);
+}
+.ini-cambio-campos textarea { resize: vertical; }
+.ini-cambio-campos [aria-invalid="true"] { border-color: var(--rojo); }
+.ini-cambio-campos :focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.ini-cambio-actual { font-size: 12.5px; color: var(--ink); padding: 6px 0; }
+.ini-cambio-ancho { grid-column: 1 / -1; }
+.ini-cambio-msg { margin-top: 10px; font-size: 12px; }
+.ini-cambio-msg:empty { display: none; }
+.ini-cambio-msg ul { margin: 0; padding-left: 18px; }
+.ini-cambio-msg.error { color: var(--rojo); }
+.ini-cambio-msg.listo { color: var(--g-900); }
+.ini-cambio-pie { display: flex; gap: 8px; margin-top: 10px; }
+
+/* ---- Detalle: Historial de cambios, plegado (misma convencion que el
+   Diccionario de QARE: chevron que gira con aria-expanded) ---- */
+.ini-hist { padding: 0; }
+.ini-hist-boton {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 14px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--accent-ink); cursor: pointer;
+  font: inherit; font-size: 11px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .8px; text-align: left;
+}
+.ini-hist-boton:hover { background: var(--g-50); }
+.ini-hist-boton:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.ini-hist-ico {
+  flex: none; width: 16px; height: 16px; color: var(--muted);
+  fill: none; stroke: currentColor; stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  transition: transform .18s ease;
+}
+.ini-hist-boton[aria-expanded="true"] .ini-hist-ico { transform: rotate(90deg); }
+.ini-hist-cuerpo { padding: 0 14px 12px; }
+@media (max-width: 720px) {
+  .ini-cambio-campos { grid-template-columns: minmax(0, 1fr); }
+}
