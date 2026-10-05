@@ -35,6 +35,11 @@ if "%PUERTO%"=="" set "PUERTO=8081"
 
 set "ADMIN_DEV_IDENTIDAD=%~2"
 if defined ADMIN_DEV_IDENTIDAD echo Admin local: identidad simulada %ADMIN_DEV_IDENTIDAD% (solo IIS Express, solo localhost)
+if not defined ADMIN_DEV_IDENTIDAD (
+  echo AVISO: sin cuenta simulada. Admin -^> Iniciativas respondera 403 en local
+  echo        ^(IIS Express no tiene Autenticacion de Windows^). Para verlo:
+  echo          dev-local.cmd %PUERTO% DOMINIO\cuenta ADM
+)
 
 set "ADMIN_DEV_ROL=%~3"
 if defined ADMIN_DEV_ROL echo Admin local: rol simulado %ADMIN_DEV_ROL% (solo con la identidad simulada; ADM o MOD)
