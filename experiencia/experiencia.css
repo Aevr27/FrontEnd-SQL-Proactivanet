@@ -159,6 +159,13 @@ background:var(--grad-btn-hover);border-color:var(--g-800)}
    abajo, asi que necesitan mas alto que una grafica normal de tarjeta. */
 .lienzo-po{position:relative;width:100%;height:330px}
 .lienzo-po canvas{max-height:none}
+/* Vencidas / Activas por Director y por Agrupador: barras en la caja de
+   220px que tenia el treemap. El lienzo interior crece con el numero de
+   barras acostadas (renderBarrasIniciativa) y la caja se desplaza por dentro. */
+.lienzo-ini{position:relative;width:100%;height:220px;overflow-y:auto;overflow-x:hidden}
+.lienzo-ini-alto{position:relative;width:100%;height:100%}
+.lienzo-ini canvas{max-height:none}
+.lienzo-ini .ini-vacio{padding:30px;text-align:center;color:var(--muted);font-size:12px}
 /* La fila de arriba ya no son 3 tarjetas: Director + Iniciativas por Estado.
    Con Director filtrado el JS oculta la de Director y pone .g2cols, y la que
    queda toma el renglón entero. */
