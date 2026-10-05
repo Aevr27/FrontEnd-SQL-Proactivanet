@@ -6,12 +6,15 @@
 // de cada handler admin_iniciativas_* y en AdminAccesoModulo.
 //
 //   GET handlers/admin_sesion.ashx              -> { "autorizado": true|false }
+//        y, si autorizado, "rol": "ADM" | "MOD" (RolAdmin: dbo.UsuariosAdmin,
+//        o ADMIN_DEV_ROL con la identidad simulada local). Solo para que la
+//        interfaz oculte lo que no le toca; los handlers lo exigen aparte.
 //   GET handlers/admin_sesion.ashx?persona=1    -> ademas "nombre" (solo si
 //        autorizado y la cuenta se resuelve en CatPersona / CatLiderGrupo)
 //
 // Responde a cualquiera (no es una ruta protegida): solo dice si quien
 // pregunta esta autorizado. No devuelve la lista ni la cuenta Windows.
-// Sin ?persona no toca la base. Con ?persona, un fallo al buscar a la persona
+// Sin ?persona solo toca la base para el rol (y solo si esta autorizado). Con ?persona, un fallo al buscar a la persona
 // NO es un error: simplemente no va "nombre".
 
 using System;
@@ -28,6 +31,7 @@ public class AdminSesion : IHttpHandler
             var identidad = IdentidadWindows.DesdeContexto(context);
             var salida = new Dictionary<string, object>();
             salida["autorizado"] = AccesoAdmin.EstaAutorizado(identidad);
+            if ((bool)salida["autorizado"]) salida["rol"] = AccesoAdmin.Rol(context);
             // Solo para que se note en pantalla/red que es la identidad
             // simulada de IIS Express (IdentidadDesarrolloLocal).
             if (identidad.DesarrolloLocal) salida["desarrollo_local"] = true;

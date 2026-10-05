@@ -122,8 +122,14 @@ var FILAS = [
   { director: 'Dir B', po: 'PO 3', so: 'SO z', categoria: '/B/Cat 5' },
   { director: 'Dir B', po: 'PO 1', so: 'SO w', categoria: '/B/Cat 6' }   // PO 1 con dos directores
 ];
-var TIPOS = ['Adopcion', 'Mejora', 'Problem'];
-var JSON_OK = { tipos: TIPOS, rutas: FILAS, omitidas: 0 };
+// Tipo de iniciativa = dbo.CatPrefijoProblem: viaja el Prefijo, se ve la
+// Descripcion. TIPOS son los prefijos (lo que valen los <option>).
+var NOMBRES = { ADO: 'Adopción', MAP: 'Mejora aplicativo', PRB: 'Problem' };
+function Tipos(lista) {
+  return lista.map(function (t) { return { prefijo: t, nombre: NOMBRES[t] || t }; });
+}
+var TIPOS = ['ADO', 'MAP', 'PRB'];
+var JSON_OK = { tipos: Tipos(TIPOS), rutas: FILAS, omitidas: 0 };
 function pedirOk() { return Promise.resolve(Respuesta(200, JSON_OK)); }
 function nunca() { return new Promise(function () {}); }
 
@@ -190,11 +196,13 @@ amb.elegir(0, 'P'); amb.elegir(1, 'S'); amb.elegir(2, 'C');
 Check('A6 dos Directores para la misma categoria: no se adivina', '', amb.director());
 
 // CatalogoIniciativas
-var cat = I.CatalogoIniciativas.desdeJson({ tipos: ['Mejora', '', 3, 'Mejora', 'Problem'], rutas: [
+var cat = I.CatalogoIniciativas.desdeJson({ tipos: [{ prefijo: 'MAP' }, { prefijo: '' }, 3, 'MAP', { prefijo: 'MAP', nombre: 'otro' },
+  { prefijo: 'PRB', nombre: 'Problem' }, null], rutas: [
   FILAS[0], { director: 'X', po: 'Y', so: '', categoria: 'Z' }, { director: 'X', po: 1, so: 'S', categoria: 'Z' }, null
 ], rutas_sin_duenos: '1', rutas_duenos_no_vigentes: 1 });
 Check('A7 desdeJson descarta filas incompletas', 1, cat.asignaciones.length);
-Check('A7 desdeJson descarta tipos vacios, no texto y repetidos', ['Mejora', 'Problem'], cat.tipos);
+Check('A7 desdeJson descarta tipos vacios, sin prefijo y repetidos', ['MAP', 'PRB'], cat.tipos);
+Check('A7 texto: Descripcion, o el prefijo si no trae', ['MAP', 'Problem'], [cat.nombreTipo('MAP'), cat.nombreTipo('PRB')]);
 Check('A7 desdeJson omitidas = sin dueños + dueños no vigentes', 2, cat.omitidas);
 var lanzo = 0;
 try { I.CatalogoIniciativas.desdeJson({ error: 'x' }); } catch (err) { lanzo++; }
@@ -205,7 +213,7 @@ Check('A7 sin asignaciones o sin tipos lanza', 2, lanzo);
 // T) SolicitudNueva
 // ---------------------------------------------------------------------------
 var DEFS = {
-  'Mejora': { campos: [
+  'MAP': { campos: [
     { clave: 'beneficio', etiqueta: 'Beneficio', control: 'texto' },
     { clave: 'alcance', etiqueta: 'Alcance', control: 'multilinea', reiniciaConCascada: true }
   ] }
@@ -222,7 +230,7 @@ Check('T3 sin tipo: la cascada no acepta valores', false, s.elegir(0, 'PO 1'));
 
 Check('T2 tipo invalido rechazado', false, s.elegirTipo('Inventado'));
 Check('T2 y queda sin tipo', '', s.tipo);
-Check('T3 tipo valido aceptado', true, s.elegirTipo('Mejora'));
+Check('T3 tipo valido aceptado', true, s.elegirTipo('MAP'));
 est = s.estado();
 Check('T3 tipo habilita PO', true, est.niveles[0].habilitado);
 Check('T3 tipo muestra campos', true, est.camposVisibles);
@@ -252,7 +260,7 @@ Check('T6 cambiar PO limpia SO/Categoria/Director', ['PO 2', '', '', ''],
   s.cascada.seleccion.concat([s.cascada.director()]));
 
 s.elegir(1, 'SO x'); s.elegir(2, '/A/Cat 3');
-s.elegirTipo('Problem');
+s.elegirTipo('PRB');
 Check('T4 cambiar tipo limpia PO/SO/Categoria/Director', ['', '', '', ''],
   s.cascada.seleccion.concat([s.cascada.director()]));
 Check('T10 cambiar tipo limpia los campos del tipo', {}, s.valoresTipo);
@@ -305,7 +313,7 @@ Check('T10 DEFINICIONES_TIPO vacio: ningun campo de tipo inventado', [], Object.
     [1, 0.35, 0.1225, 0, null, null], [I.fraccionDe('100'), I.fraccionDe('35'), I.fraccionDe('12.25'), I.fraccionDe('0'), I.fraccionDe(''), I.fraccionDe('150')]);
 
   var n = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK));
-  n.elegirTipo('Mejora');
+  n.elegirTipo('MAP');
   n.capturar('pct', '50');
   Check('N9 % sin Categoria: bloqueado y no se captura', [false, 'Elige primero la Categoría en Clasificación.', undefined],
     [n.estado().pct.habilitado, n.estado().pct.motivo, n.valores.pct]);
@@ -320,7 +328,7 @@ Check('T10 DEFINICIONES_TIPO vacio: ningun campo de tipo inventado', [], Object.
   Check('N11 tocar la cascada vacia el %, no Volumetria ni Observaciones',
     [undefined, '2.5', 'Los lunes'], [n.valores.pct, n.valores.volumetria, n.valores.observaciones]);
   n.capturar('pct', '20');
-  n.elegirTipo('Problem');
+  n.elegirTipo('PRB');
   Check('N11 cambiar tipo vacia el % (la Categoria se va)', [undefined, '', false],
     [n.valores.pct, n.categoria(), n.estado().pct.habilitado]);
   Check('N12 sin valores por omision: nada capturado de inicio',
@@ -387,7 +395,9 @@ pruebas.push(function () {
   return P.cargar(function (url) { urls.push(url); return pedirOk(); }).then(function () {
     Check('B1 URL del handler: pide las rutas reales', '../handlers/admin_iniciativas_catalogos.ashx?rutas=1', urls[urls.length - 1]);
     Check('B1 cargado: solo Tipo habilitado', [true, false, false, false], habilitados(p));
-    Check('B1 tipos en el select', TIPOS, p.sel('selTipo').opciones());
+    Check('B1 tipos en el select (valor = prefijo)', TIPOS, p.sel('selTipo').opciones());
+    Check('B1 el select muestra la Descripcion', true,
+      /<option value="ADO">Adopción<\/option><option value="MAP">Mejora aplicativo<\/option><option value="PRB">Problem<\/option>/.test(p.sel('selTipo').innerHTML));
     Check('B1 motivo PO', 'Elige primero un Tipo de iniciativa.', p.sel('motPo').textContent);
     Check('B1 Director vacio', ['—', 'Se completa al elegir la Categoría.'],
       [p.sel('outDirector').textContent, p.sel('motDirector').textContent]);
@@ -398,7 +408,7 @@ pruebas.push(function () {
     elegirEn(p, 'selTipo', 'Inventado');
     Check('B2 tipo invalido: rechazado, cascada bloqueada', ['', false], [p.sel('selTipo').value, !p.sel('selPo').disabled]);
 
-    elegirEn(p, 'selTipo', 'Mejora');
+    elegirEn(p, 'selTipo', 'MAP');
     Check('B3 tipo habilita PO', [true, true, false, false], habilitados(p));
     Check('B3 tipo muestra campos y quita el aviso', [false, true],
       [p.sel('iniBloqueCampos').hidden, p.sel('iniCamposPendiente').hidden]);
@@ -406,19 +416,19 @@ pruebas.push(function () {
     elegirEn(p, 'selPo', 'PO 1');
     elegirEn(p, 'selSo', 'SO y');
     elegirEn(p, 'selCategoria', '/A/Cat 2');
-    Check('B5 cadena completa', ['Mejora', 'PO 1', 'SO y', '/A/Cat 2'], valores(p));
+    Check('B5 cadena completa', ['MAP', 'PO 1', 'SO y', '/A/Cat 2'], valores(p));
     Check('B8 Director derivado', 'Dir A', p.sel('outDirector').textContent);
     Check('B9 Director es texto, no select', ['', 'Derivado de la categoría.'],
       [p.sel('outDirector').innerHTML, p.sel('motDirector').textContent]);
 
     elegirEn(p, 'selSo', 'SO x');
-    Check('B7 cambiar SO limpia Categoria', ['Mejora', 'PO 1', 'SO x', ''], valores(p));
+    Check('B7 cambiar SO limpia Categoria', ['MAP', 'PO 1', 'SO x', ''], valores(p));
     Check('B7 cambiar SO limpia Director', '—', p.sel('outDirector').textContent);
     elegirEn(p, 'selCategoria', '/A/Cat 1');
     Check('B8 otra categoria recalcula Director', 'Dir A', p.sel('outDirector').textContent);
 
     elegirEn(p, 'selPo', 'PO 3');
-    Check('B6 cambiar PO limpia SO/Categoria', ['Mejora', 'PO 3', '', ''], valores(p));
+    Check('B6 cambiar PO limpia SO/Categoria', ['MAP', 'PO 3', '', ''], valores(p));
     Check('B6 cambiar PO limpia Director', '—', p.sel('outDirector').textContent);
     Check('B6 SO habilitado, Categoria bloqueada', [true, true, true, false], habilitados(p));
     Check('B6 SO sin opciones viejas', ['SO z'], p.sel('selSo').opciones());
@@ -426,8 +436,8 @@ pruebas.push(function () {
 
     elegirEn(p, 'selSo', 'SO z'); elegirEn(p, 'selCategoria', '/B/Cat 4');
     Check('B8 Director de Dir B', 'Dir B', p.sel('outDirector').textContent);
-    elegirEn(p, 'selTipo', 'Problem');
-    Check('B4 cambiar tipo limpia PO/SO/Categoria', ['Problem', '', '', ''], valores(p));
+    elegirEn(p, 'selTipo', 'PRB');
+    Check('B4 cambiar tipo limpia PO/SO/Categoria', ['PRB', '', '', ''], valores(p));
     Check('B4 cambiar tipo limpia Director', '—', p.sel('outDirector').textContent);
     Check('B4 cambiar tipo deja PO habilitado y el resto bloqueado', [true, true, false, false], habilitados(p));
 
@@ -441,7 +451,7 @@ pruebas.push(function () {
 pruebas.push(function () {
   var p = Pagina(nunca);
   var I2 = p.ventana.Iniciativas;
-  I2.DEFINICIONES_TIPO['Mejora'] = DEFS['Mejora'];
+  I2.DEFINICIONES_TIPO['MAP'] = DEFS['MAP'];
   var P = p.ventana.IniciativasPagina;
   return P.cargar(pedirOk).then(function () {
     var comunes = p.sel('iniCamposComunes').innerHTML;
@@ -466,7 +476,7 @@ pruebas.push(function () {
     Check('B13 globo conectado al panel', true, !!P.globo && P.globo.raiz === p.sel('panel-nueva'));
 
     Check('B10 sin tipo: sin campos propios', true, p.sel('iniCamposTipo').hidden);
-    elegirEn(p, 'selTipo', 'Mejora');
+    elegirEn(p, 'selTipo', 'MAP');
     Check('B10 Mejora pinta sus campos', true,
       p.sel('iniCamposTipo').innerHTML.indexOf('id="campo-beneficio"') >= 0 && !p.sel('iniCamposTipo').hidden);
     escribir(p, 'iniCamposComunes', 'titulo', 'T <b>');
@@ -480,11 +490,11 @@ pruebas.push(function () {
     Check('B10 y lo vuelve a pintar vacio', true,
       p.sel('iniCamposTipo').innerHTML.indexOf('id="campo-alcance" data-campo="alcance" rows="6"></textarea>') >= 0);
 
-    elegirEn(p, 'selTipo', 'Problem');
+    elegirEn(p, 'selTipo', 'PRB');
     Check('B10 cambiar tipo borra los campos del tipo', [{}, '', true],
       [P.solicitud.valoresTipo, p.sel('iniCamposTipo').innerHTML, p.sel('iniCamposTipo').hidden]);
     Check('B10 cambiar tipo conserva el Titulo', { titulo: 'T <b>' }, P.solicitud.valores);
-    elegirEn(p, 'selTipo', 'Mejora');
+    elegirEn(p, 'selTipo', 'MAP');
     Check('B10 volver al tipo: campos vacios otra vez', true,
       p.sel('iniCamposTipo').innerHTML.indexOf('id="campo-beneficio" data-campo="beneficio" value=""') >= 0);
   });
@@ -508,7 +518,7 @@ pruebas.push(function () {
        imp.indexOf('<span class="ini-pct-sufijo" aria-hidden="true">%</span>') >= 0]);
     Check('N16 03 oculto sin tipo, con su aviso', [true, false], [p.sel('iniBloqueImpacto').hidden, p.sel('iniImpactoPendiente').hidden]);
 
-    elegirEn(p, 'selTipo', 'Mejora');
+    elegirEn(p, 'selTipo', 'MAP');
     Check('N16 con tipo: 03 visible', [false, true], [p.sel('iniBloqueImpacto').hidden, p.sel('iniImpactoPendiente').hidden]);
     Check('N17 % bloqueado hasta la Categoria', [true, 'Elige primero la Categoría en Clasificación.'],
       [p.sel('campo-pct').disabled, p.sel('campo-pct-msg').textContent]);
@@ -583,7 +593,7 @@ pruebas.push(function () {
     Check('B14 500: todo bloqueado', [false, false, false, false], habilitados(p));
     Check('B14 500: motivo', 'No disponible: no se pudo cargar el catálogo.', p.sel('motTipo').textContent);
     Check('B14 500: sin "Cargando" y sin campos', ['', true], [p.sel('iniEstado').textContent, p.sel('iniBloqueCampos').hidden]);
-    elegirEn(p, 'selTipo', 'Mejora');
+    elegirEn(p, 'selTipo', 'MAP');
     Check('B14 500: un change sin catalogo no rompe nada', [false, false, false, false], habilitados(p));
   });
 });
@@ -620,7 +630,7 @@ pruebas.push(function () {
 pruebas.push(function () {
   var p = Pagina(nunca);
   var P = p.ventana.IniciativasPagina;
-  return P.cargar(function () { return Promise.resolve(Respuesta(200, { tipos: TIPOS, rutas: [], rutas_sin_duenos: 3 })); }).then(function () {
+  return P.cargar(function () { return Promise.resolve(Respuesta(200, { tipos: Tipos(TIPOS), rutas: [], rutas_sin_duenos: 3 })); }).then(function () {
     Check('B14 vacio: mensaje', 'No hay categorías activas con Director, Product Owner y Service Owner.', p.sel('iniEstado').textContent);
     Check('B14 vacio: todo bloqueado', [false, false, false, false], habilitados(p));
     Check('B14 vacio: no es error', true, p.sel('iniError').hidden);
@@ -667,7 +677,7 @@ pruebas.push(function () {
     Check('V2 boton abre Nueva solicitud; pestaña Iniciativas sigue marcada',
       [['panel-nueva'], ['tab-iniciativas']], [vistaVisible(p), pestanaActiva(p)]);
 
-    elegirEn(p, 'selTipo', 'Mejora');
+    elegirEn(p, 'selTipo', 'MAP');
     elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO y'); elegirEn(p, 'selCategoria', '/A/Cat 2');
     escribir(p, 'iniCamposComunes', 'titulo', 'Mi titulo');
     escribir(p, 'iniCamposComunes', 'analisis', 'Mi analisis');
@@ -682,7 +692,7 @@ pruebas.push(function () {
     ['selTipo', 'selPo', 'selSo', 'selCategoria'].forEach(function (id) { p.sel(id).value = ''; });
     p.sel('iniCamposComunes').innerHTML = '';
     p.sel('btnSolicitar').disparar('click');
-    Check('V5 borrador: cascada intacta', ['Mejora', 'PO 1', 'SO y', '/A/Cat 2'], valores(p));
+    Check('V5 borrador: cascada intacta', ['MAP', 'PO 1', 'SO y', '/A/Cat 2'], valores(p));
     Check('V5 borrador: Director', 'Dir A', p.sel('outDirector').textContent);
     var html = p.sel('iniCamposComunes').innerHTML;
     Check('V5 borrador: Titulo y Analisis', [true, true],
@@ -744,24 +754,24 @@ function enrutador(capacidades, validar, registro) {
     }
     if (url.indexOf('admin_iniciativas_validar.ashx') >= 0) return Promise.resolve(validar());
     return Promise.resolve(Respuesta(200, {
-      tipos: ['Problem', 'Adopcion', 'Mejora'], tipo_problem: 'Problem', rutas: FILAS, omitidas: 0
+      tipos: Tipos(['PRB', 'ADO', 'MAP']), tipo_problem: 'PRB', rutas: FILAS, omitidas: 0
     }));
   };
 }
 function esperar() { return new Promise(function (ok) { setTimeout(ok, 0); }); }
 
 pruebas.push(function () {
-  var cat = I.CatalogoIniciativas.desdeJson({ tipos: ['Problem', 'Adopcion'], tipo_problem: 'Problem', rutas: FILAS });
-  Check('S1 el orden de tipos es el del servidor (Problem primero)', ['Problem', 'Adopcion'], cat.tipos);
-  Check('S1 tipo_problem', 'Problem', cat.tipoProblem);
+  var cat = I.CatalogoIniciativas.desdeJson({ tipos: Tipos(['PRB', 'ADO']), tipo_problem: 'PRB', rutas: FILAS });
+  Check('S1 el orden de tipos es el del servidor (Problem primero)', ['PRB', 'ADO'], cat.tipos);
+  Check('S1 tipo_problem', 'PRB', cat.tipoProblem);
   Check('S2 tipo_problem fuera de la lista se ignora', '',
-    I.CatalogoIniciativas.desdeJson({ tipos: ['Adopcion'], tipo_problem: 'Problem', rutas: FILAS }).tipoProblem);
+    I.CatalogoIniciativas.desdeJson({ tipos: Tipos(['ADO']), tipo_problem: 'PRB', rutas: FILAS }).tipoProblem);
   Check('S2 sin tipo_problem: ningun tipo exige RCA', false,
-    (function () { var n = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK)); n.elegirTipo('Problem'); return n.rcaObligatorio(); })());
+    (function () { var n = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK)); n.elegirTipo('PRB'); return n.rcaObligatorio(); })());
 
   // RCA condicional
   var s = new I.SolicitudNueva(cat);
-  s.elegirTipo('Problem');
+  s.elegirTipo('PRB');
   Check('S3 Problem: RCA obligatorio', [true, 'Obligatorio para Problem. El archivo todavía no se guarda.'],
     [s.estado().rca.obligatorio, s.estado().rca.motivo]);
   Check('S3 Problem sin RCA: falta rca', true, s.faltantes().indexOf('rca') >= 0);
@@ -769,14 +779,14 @@ pruebas.push(function () {
   Check('S3 Problem con RCA: no falta', false, s.faltantes().indexOf('rca') >= 0);
   s.elegirRca({ name: 'vacio.pdf', size: 0 });
   Check('S3 archivo vacio no cuenta', true, s.faltantes().indexOf('rca') >= 0);
-  s.elegirTipo('Adopcion');
+  s.elegirTipo('ADO');
   Check('S4 otro tipo: RCA opcional', [false, false], [s.rcaObligatorio(), s.faltantes().indexOf('rca') >= 0]);
 
   // Requeridos
   var r = new I.SolicitudNueva(cat);
   Check('S5 todo vacio: faltan todos menos RCA (sin tipo)',
     ['tipo', 'po', 'so', 'categoria', 'titulo', 'analisis', 'observaciones', 'volumetria', 'pct'], r.faltantes());
-  r.elegirTipo('Adopcion'); r.elegir(0, 'PO 1'); r.elegir(1, 'SO x'); r.elegir(2, '/A/Cat 1');
+  r.elegirTipo('ADO'); r.elegir(0, 'PO 1'); r.elegir(1, 'SO x'); r.elegir(2, '/A/Cat 1');
   r.capturar('titulo', 'T'); r.capturar('analisis', 'D'); r.capturar('observaciones', 'O');
   r.capturar('volumetria', '10'); r.capturar('pct', '20');
   Check('S6 completa: sin faltantes ni errores', [[], []], [r.faltantes(), r.erroresCliente()]);
@@ -784,7 +794,7 @@ pruebas.push(function () {
   Check('S6 solo espacios cuenta como vacio', ['observaciones'], r.faltantes());
   r.capturar('observaciones', 'O');
   Check('S7 campos de envio (Descripcion = analisis)',
-    { tipo: 'Adopcion', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1', titulo: 'T', descripcion: 'D',
+    { tipo: 'ADO', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1', titulo: 'T', descripcion: 'D',
       observaciones: 'O', volumetria: '10', pct: '20', disponible_cliente: '' }, r.camposEnvio());
 
   // Capacidad
@@ -817,7 +827,7 @@ pruebas.push(function () {
   Check('S15 cambiar la cascada borra la capacidad', null, r.capacidad);
   r.elegir(2, '/A/Cat 2');
   r.fijarCapacidad(r.pedirCapacidad(), { disponible: 0.5, determinable: true });
-  r.elegirTipo('Mejora');
+  r.elegirTipo('MAP');
   Check('S15 cambiar el tipo borra la capacidad', null, r.capacidad);
 });
 
@@ -832,9 +842,9 @@ pruebas.push(function () {
     '/A/Cat 2': { categoria: '/A/Cat 2', disponible: 0.3, determinable: true }
   }, function () { return respuestaValidar(); }, llamadas);
   return P.cargar(pedir).then(function () {
-    Check('S16 selector: Problem primero', ['Problem', 'Adopcion', 'Mejora'], p.sel('selTipo').opciones());
+    Check('S16 selector: Problem primero', ['PRB', 'ADO', 'MAP'], p.sel('selTipo').opciones());
     Check('S16 RCA bloqueado sin tipo', [true, 'Elige primero un Tipo de iniciativa.'], [p.sel('campoRca').disabled, p.sel('motRca').textContent]);
-    elegirEn(p, 'selTipo', 'Problem');
+    elegirEn(p, 'selTipo', 'PRB');
     Check('S17 Problem: RCA habilitado y obligatorio', [false, 'true', false],
       [p.sel('campoRca').disabled, p.sel('campoRca').getAttribute('aria-required'), p.sel('rotRcaObligatorio').hidden]);
     elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
@@ -869,7 +879,7 @@ pruebas.push(function () {
     var post = llamadas.filter(function (l) { return l[1] === 'POST'; });
     Check('S20 un solo POST, a validar', [1, '../handlers/admin_iniciativas_validar.ashx'], [post.length, post[0] && post[0][0]]);
     var cuerpo = post[0][2];
-    Check('S20 cuerpo: campos y archivo', ['Problem', '/A/Cat 1', 'D', '40', '40', 'RCA_v7.pdf'],
+    Check('S20 cuerpo: campos y archivo', ['PRB', '/A/Cat 1', 'D', '40', '40', 'RCA_v7.pdf'],
       [cuerpo.get('tipo'), cuerpo.get('categoria'), cuerpo.get('descripcion'), cuerpo.get('pct'),
        cuerpo.get('disponible_cliente'), cuerpo.get('rca') && cuerpo.get('rca').name]);
     Check('S20 valida: avisa que no se guardo', [true, true],
@@ -899,7 +909,7 @@ pruebas.push(function () {
   function espia(url, opciones) { llamadas.push([url, opciones && opciones.method]); return pedirOk(); }
   var p = Pagina(espia);   // iniciar() usa el fetch por omision -> el espia
   return Promise.resolve().then(function () { return new Promise(function (ok) { setTimeout(ok, 0); }); }).then(function () {
-    elegirEn(p, 'selTipo', 'Mejora');
+    elegirEn(p, 'selTipo', 'MAP');
     elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
     escribir(p, 'iniCamposComunes', 'titulo', 'x');
     escribir(p, 'iniCamposComunes', 'analisis', 'y');

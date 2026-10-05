@@ -20,6 +20,13 @@ REM  Pone ADMIN_DEV_IDENTIDAD solo para este IIS Express. La cuenta pasa por
 REM  la whitelist igual que en la VM (otra cuenta -> 403). Solo actua en
 REM  iisexpress, desde localhost y sin identidad real: ver
 REM  App_Code/IdentidadDesarrolloLocal.cs. Sin segundo argumento se borra.
+REM
+REM  Rol simulado (tercer argumento, ADM o MOD): pone ADMIN_DEV_ROL para
+REM  probar lo que es solo de ADM sin la base de la VM. Solo vale con la
+REM  identidad simulada de arriba (nunca con Windows Auth real ni fuera de
+REM  IIS Express); la cuenta igual tiene que pasar la whitelist.
+REM
+REM    dev-local.cmd 8081 SORIANA\t_andresvr ADM
 REM ---------------------------------------------------------------------
 setlocal
 
@@ -28,6 +35,9 @@ if "%PUERTO%"=="" set "PUERTO=8081"
 
 set "ADMIN_DEV_IDENTIDAD=%~2"
 if defined ADMIN_DEV_IDENTIDAD echo Admin local: identidad simulada %ADMIN_DEV_IDENTIDAD% (solo IIS Express, solo localhost)
+
+set "ADMIN_DEV_ROL=%~3"
+if defined ADMIN_DEV_ROL echo Admin local: rol simulado %ADMIN_DEV_ROL% (solo con la identidad simulada; ADM o MOD)
 
 set "IISEXPRESS=%ProgramFiles%\IIS Express\iisexpress.exe"
 if not exist "%IISEXPRESS%" set "IISEXPRESS=%ProgramFiles(x86)%\IIS Express\iisexpress.exe"

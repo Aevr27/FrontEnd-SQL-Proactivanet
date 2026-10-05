@@ -34,7 +34,11 @@ function respuesta(status, cuerpo) {
 
 function documento() {
   var items = [{ hidden: true }, { hidden: true }];
-  return { items: items, querySelectorAll: function (sel) { return sel === '[data-solo-admin]' ? items : []; } };
+  // data-solo-adm: "+ Solicitar una iniciativa" (oculto en el marcado).
+  var adm = [{ hidden: true }];
+  return { items: items, adm: adm, querySelectorAll: function (sel) {
+    return sel === '[data-solo-admin]' ? items : sel === '[data-solo-adm]' ? adm : [];
+  } };
 }
 
 function caso(titulo, pedir, saludo) {
@@ -53,7 +57,18 @@ Promise.all([
   caso('500', respuesta(500, { error: 'x' }), true),
   caso('red caida', function () { return Promise.reject(new Error('sin red')); }, true),
   caso('json roto', respuesta(200, function () { return Promise.reject(new Error('json')); }), false),
+  caso('ADM', respuesta(200, { autorizado: true, rol: 'ADM' }), false),
+  caso('MOD', respuesta(200, { autorizado: true, rol: 'MOD' }), false),
+  caso('rol raro', respuesta(200, { autorizado: true, rol: 'adm ' }), false),
+  caso('ADM sin autorizado', respuesta(200, { autorizado: false, rol: 'ADM' }), false),
 ]).then(function (r) {
+  comprobar('ADM: rol y boton de crear visible', r[7].s.rol + '|' + r[7].doc.adm[0].hidden, 'ADM|false');
+  comprobar('MOD: entra a Admin, boton de crear oculto', r[8].doc.items[0].hidden + '|' + r[8].s.rol + '|' + r[8].doc.adm[0].hidden, 'false|MOD|true');
+  comprobar('rol que no es exacto: sin rol, oculto', r[9].s.rol + '|' + r[9].doc.adm[0].hidden, 'null|true');
+  comprobar('ADM sin autorizado: sin rol, oculto', r[10].s.rol + '|' + r[10].doc.adm[0].hidden, 'null|true');
+  comprobar('sin rol (respuesta vieja): boton oculto', r[1].doc.adm[0].hidden, true);
+  comprobar('500: boton oculto', r[4].doc.adm[0].hidden, true);
+  comprobar('red caida: boton oculto', r[5].doc.adm[0].hidden, true);
   comprobar('autorizado: muestra entrada', r[0].doc.items[0].hidden, false);
   comprobar('autorizado: muestra todas', r[0].doc.items[1].hidden, false);
   comprobar('autorizado: saludo', r[0].el.textContent, 'Bienvenido, Andres Vera');

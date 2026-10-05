@@ -34,9 +34,13 @@
                           dato `agrup` sigue llegando porque decide
                           `seguimiento` -Activas/Retrasadas- y se ve en la
                           tabla y el detalle.)
-     Tipo de iniciativa   `tipo_iniciativa` (dbo.Problem.TipoIniciativa, NO
-                          la Agrupacion/TipoAgrupado). Varios a la vez = O.
-                          Las opciones son los tipos que trae el registro.
+     Tipo de iniciativa   el catalogo dbo.CatPrefijoProblem
+                          (`tipos_iniciativa`: [{ prefijo, nombre }], TODAS
+                          sus filas, en el orden del servidor) contra el
+                          `prefijo` de cada iniciativa (dbo.Problem.Prefijo).
+                          Se ve la Descripcion; se filtra por Prefijo. NO es
+                          Problem.TipoIniciativa ni la Agrupacion. Varios a
+                          la vez = O.
                           Por omision todos marcados (tiposIni = null).
                           "Todas" alterna: con todo marcado lo desmarca todo
                           (tiposIni = [], no pasa ninguna iniciativa); con
@@ -141,11 +145,13 @@ window.RegistroIniciativas = (function () {
   // Registro
   // ---------------------------------------------------------------------
   class Registro {
-    constructor(iniciativas, estadosActivos, agrupadores, fechaGen) {
+    constructor(iniciativas, estadosActivos, agrupadores, fechaGen, tiposCatalogo) {
       this.iniciativas = iniciativas;
       this.estadosActivos = estadosActivos;
       this.agrupadores = agrupadores;
       this.fechaGen = fechaGen;
+      // [{ prefijo, nombre }] de dbo.CatPrefijoProblem (Tipo de iniciativa).
+      this.tiposCatalogo = tiposCatalogo || [];
       // Filas { director, po, so, categoria } del catalogo de categorias,
       // solo despues de abrir la Cobertura (ver ampliar). null = sin cargar.
       this.catalogo = null;
@@ -184,7 +190,21 @@ window.RegistroIniciativas = (function () {
       return new Registro(lista,
         Array.isArray(json.estados_activos) ? json.estados_activos : [],
         Array.isArray(json.agrupadores) ? json.agrupadores : [],
-        typeof json.fecha_gen === 'string' ? json.fecha_gen : '');
+        typeof json.fecha_gen === 'string' ? json.fecha_gen : '',
+        Registro.tiposDesdeJson(json.tipos_iniciativa));
+    }
+
+    // [{ prefijo, nombre }]: sin prefijo de texto se descarta; repetido, el
+    // primero; sin nombre, el prefijo. El orden es el del servidor.
+    static tiposDesdeJson(lista) {
+      var vistos = {}, salida = [];
+      (Array.isArray(lista) ? lista : []).forEach(function (t) {
+        var p = t && typeof t.prefijo === 'string' ? t.prefijo : '';
+        if (p === '' || Object.prototype.hasOwnProperty.call(vistos, p)) return;
+        vistos[p] = true;
+        salida.push({ prefijo: p, nombre: typeof t.nombre === 'string' && t.nombre !== '' ? t.nombre : p });
+      });
+      return salida;
     }
 
     // Filas { director, po, so, categoria } de una iniciativa: una por
@@ -219,8 +239,16 @@ window.RegistroIniciativas = (function () {
         .concat(todos.filter(function (e) { return activos.indexOf(e) < 0; }).sort(igualTexto));
     }
 
+    // Los prefijos del catalogo, en su orden (aunque no tengan iniciativas).
     tiposIniciativa() {
-      return distintos(this.iniciativas.map(function (i) { return i.tipo_iniciativa; })).sort(igualTexto);
+      return this.tiposCatalogo.map(function (t) { return t.prefijo; });
+    }
+
+    nombreTipo(prefijo) {
+      for (var k = 0; k < this.tiposCatalogo.length; k++) {
+        if (this.tiposCatalogo[k].prefijo === prefijo) return this.tiposCatalogo[k].nombre;
+      }
+      return prefijo;
     }
 
     buscar(folio) {
@@ -312,7 +340,7 @@ window.RegistroIniciativas = (function () {
     // Estado y Tipo: lo que no es organizacional.
     pasaAtributos(i) {
       if (this.estado && i.estado !== this.estado) return false;
-      if (this.tiposIni !== null && this.tiposIni.indexOf(i.tipo_iniciativa) < 0) return false;
+      if (this.tiposIni !== null && this.tiposIni.indexOf(i.prefijo) < 0) return false;
       return true;
     }
 
@@ -958,15 +986,17 @@ window.RegistroIniciativas = (function () {
     // Casillas: "Todas" arriba y un tipo por renglon. "Todas" va marcada
     // solo con todo marcado; el boton dice lo elegido (o que no hay nada).
     pintarTiposIni() {
-      var todos = this.registro.tiposIniciativa();
+      var reg = this.registro;
+      var todos = reg.tiposIniciativa();
       var marcados = this.filtro.tiposIniciativa();
+      var nombres = marcados.map(function (p) { return reg.nombreTipo(p); });
       var todas = this.filtro.todosMarcados();
       var boton = this.$('regTipoIni');
       boton.disabled = todos.length === 0;
       boton.textContent = todas ? '— Todas —'
         : marcados.length === 0 ? 'Ninguno'
-        : marcados.length === 1 ? marcados[0] : marcados.length + ' de ' + todos.length + ' tipos';
-      boton.setAttribute('title', todas ? '' : marcados.length ? marcados.join(', ') : 'Ningún tipo marcado: no se muestra ninguna iniciativa.');
+        : marcados.length === 1 ? nombres[0] : marcados.length + ' de ' + todos.length + ' tipos';
+      boton.setAttribute('title', todas ? '' : marcados.length ? nombres.join(', ') : 'Ningún tipo marcado: no se muestra ninguna iniciativa.');
       boton.classList.toggle('con-valor', !todas);
       function casilla(attr, valor, rotulo, marcada, clase) {
         return '<label class="ini-multi-op' + (clase ? ' ' + clase : '') + (marcada ? ' marcada' : '') + '">' +
@@ -974,7 +1004,7 @@ window.RegistroIniciativas = (function () {
           '<span>' + Escape.html(rotulo) + '</span></label>';
       }
       this.$('regTipoIniPanel').innerHTML = casilla('data-tipo-todas', '', 'Todas', todas, 'ini-multi-todas') +
-        todos.map(function (t) { return casilla('data-tipo-ini', t, t, marcados.indexOf(t) >= 0, ''); }).join('');
+        todos.map(function (t) { return casilla('data-tipo-ini', t, reg.nombreTipo(t), marcados.indexOf(t) >= 0, ''); }).join('');
     }
 
     pintarSelect(id, opciones, valor, todos) {

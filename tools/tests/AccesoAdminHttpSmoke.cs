@@ -3,11 +3,17 @@
 // identidad se pone en HttpContext.User, que es de donde la toma
 // IdentidadWindows.DesdeContexto en IIS con Autenticacion de Windows.
 //
-// Solo se ejercitan caminos que NO tocan la base:
+// Solo se ejercitan caminos que NO tocan la base de datos real; el rol
+// (dbo.UsuariosAdmin) sale de una fuente falsa (AccesoAdmin.FuenteRoles):
 //   - cualquier handler con una identidad no autorizada: 403 antes de nada;
-//   - capacidad autorizada sin ?categoria: 400 (paso Exigir, no llego a SQL);
-//   - validar autorizada con GET: 405 (paso Exigir, no llego a SQL);
-//   - admin_sesion.ashx sin ?persona: {"autorizado": ...} sin base.
+//   - capacidad ADM sin ?categoria: 400 (paso ExigirAdm, no llego a SQL);
+//   - validar ADM con GET: 405 (paso ExigirAdm, no llego a SQL);
+//   - capacidad/validar con MOD, sin fila o con la fuente fallando: 403
+//     RolInsuficiente; registro/catalogos con MOD: NO 403 (pasan al SQL);
+//   - fuera de la whitelist, aunque la tabla diga ADM: 403 AccesoDenegado
+//     sin consultar la tabla;
+//   - ADMIN_DEV_ROL solo con la identidad simulada;
+//   - admin_sesion.ashx sin ?persona: {"autorizado", "rol"}.
 //
 // Compilar y correr desde la raiz del repo (los .ashx se compilan quitando
 // la linea 1, como en csc-desde-git-bash):
@@ -20,9 +26,28 @@
 //       tools\tests\AccesoAdminHttpSmoke.cs
 //   AccesoAdminHttpSmoke.exe
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Principal;
 using System.Web;
+
+// dbo.UsuariosAdmin de mentira: cuenta (sin espacios, mayusculas) -> filas.
+sealed class FuenteFalsa : IFuenteRolesAdmin
+{
+    public readonly Dictionary<string, string[]> Filas = new Dictionary<string, string[]>();
+    public bool Falla;
+    public readonly List<string> Pedidas = new List<string>();
+
+    public FuenteFalsa Con(string cuenta, params string[] accesos) { Filas[cuenta.Trim().ToUpperInvariant()] = accesos; return this; }
+
+    public IList<string> AccesosDe(string cuenta)
+    {
+        Pedidas.Add(cuenta);
+        if (Falla) throw new InvalidOperationException("sin SQL");
+        string[] f;
+        return Filas.TryGetValue(cuenta.Trim().ToUpperInvariant(), out f) ? f : new string[0];
+    }
+}
 
 public static class AccesoAdminHttpSmoke
 {
@@ -64,6 +89,9 @@ public static class AccesoAdminHttpSmoke
         const string YO = @"SORIANA\t_andresvr";
         int estado;
         string cuerpo;
+        // Por omision YO es ADM (como en la tabla real).
+        var fuente = new FuenteFalsa().Con(YO, "ADM");
+        AccesoAdmin.FuenteRoles = fuente;
 
         // ---- Exigir directo ------------------------------------------------
         foreach (var caso in new[] { YO, @"soriana\T_ANDRESVR" })
@@ -85,18 +113,100 @@ public static class AccesoAdminHttpSmoke
 
         // ---- handlers reales -------------------------------------------------
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
-        Check("H1 admin_sesion: autorizado", "200|{\"autorizado\":true}", estado + "|" + cuerpo);
+        Check("H1 admin_sesion: autorizado, con su rol", "200|{\"autorizado\":true,\"rol\":\"ADM\"}", estado + "|" + cuerpo);
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, @"SORIANA\t_otro", out estado);
         Check("H1 admin_sesion: otra cuenta no", "200|{\"autorizado\":false}", estado + "|" + cuerpo);
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
         Check("H1 admin_sesion: anonimo no", "200|{\"autorizado\":false}", estado + "|" + cuerpo);
 
         cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
-        Check("H2 capacidad autorizada: pasa Exigir (400 por falta de categoria, sin SQL)", "400|True",
+        Check("H2 capacidad ADM: pasa ExigirAdm (400 por falta de categoria, sin SQL)", "400|True",
               estado + "|" + cuerpo.Contains("SolicitudInvalida"));
         cuerpo = Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", null, YO, out estado);
-        Check("H3 validar autorizada: pasa Exigir (405 por GET, sin SQL)", "405|True",
+        Check("H3 validar ADM: pasa ExigirAdm (405 por GET, sin SQL)", "405|True",
               estado + "|" + cuerpo.Contains("MetodoNoPermitido"));
+
+        // ---- R) rol (dbo.UsuariosAdmin) despues de la whitelist -------------
+        IHttpHandler[] soloAdm = { new AdminIniciativasCapacidad(), new AdminIniciativasValidar() };
+        IHttpHandler[] paraMod = { new AdminIniciativasRegistro(), new AdminIniciativasCatalogos() };
+        var casosNoAdm = new[]
+        {
+            new { nombre = "MOD", f = new FuenteFalsa().Con(YO, "MOD") },
+            new { nombre = "sin fila en UsuariosAdmin", f = new FuenteFalsa() },
+            new { nombre = "consulta que falla", f = new FuenteFalsa { Falla = true } },
+            new { nombre = "duplicado ADM + MOD", f = new FuenteFalsa().Con(YO, "ADM", "MOD") },
+            new { nombre = "valor raro", f = new FuenteFalsa().Con(YO, "ROOT") },
+            new { nombre = "Acceso NULL", f = new FuenteFalsa().Con(YO, new string[] { null }) },
+        };
+        foreach (var c in casosNoAdm)
+        {
+            AccesoAdmin.FuenteRoles = c.f;
+            foreach (var h in soloAdm)
+            {
+                cuerpo = Correr(h, "admin_iniciativas_x.ashx", null, YO, out estado);
+                Check("R1 " + c.nombre + ": " + h.GetType().Name + " 403 RolInsuficiente", "403|True",
+                      estado + "|" + cuerpo.Contains("\"tipo\":\"RolInsuficiente\""));
+            }
+            cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
+            Check("R1 " + c.nombre + ": admin_sesion entra como MOD", "{\"autorizado\":true,\"rol\":\"MOD\"}", cuerpo);
+        }
+
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
+        foreach (var h in paraMod)
+        {
+            try { cuerpo = Correr(h, "admin_iniciativas_x.ashx", null, YO, out estado); }
+            catch (Exception) { cuerpo = ""; estado = -1; }   // llego al SQL: no hay base aqui
+            Check("R2 MOD: " + h.GetType().Name + " no lo bloquea el rol", "True|False",
+                  (estado != 403) + "|" + cuerpo.Contains("RolInsuficiente"));
+        }
+
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "ADM", " adm ");
+        cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
+        Check("R3 duplicado ADM + ADM: sigue ADM", 400, estado);
+
+        var otroAdm = new FuenteFalsa().Con(@"SORIANA\omaralus", "ADM");
+        AccesoAdmin.FuenteRoles = otroAdm;
+        foreach (var h in soloAdm)
+        {
+            cuerpo = Correr(h, "admin_iniciativas_x.ashx", null, @"SORIANA\omaralus", out estado);
+            Check("R4 ADM en la tabla pero fuera de la whitelist: " + h.GetType().Name + " 403 AccesoDenegado", "403|True",
+                  estado + "|" + cuerpo.Contains("AccesoDenegado"));
+        }
+        cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, @"SORIANA\omaralus", out estado);
+        Check("R4 admin_sesion fuera de la whitelist: sin rol", "{\"autorizado\":false}", cuerpo);
+        Check("R4 ni siquiera se consulta la tabla", 0, otroAdm.Pedidas.Count);
+
+        var contada = new FuenteFalsa().Con(YO, "ADM");
+        AccesoAdmin.FuenteRoles = contada;
+        Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, @"  soriana\T_ANDRESVR ", out estado);
+        Check("R5 se consulta con la cuenta original (sin espacios) y pasa", "400|soriana\\T_ANDRESVR",
+              estado + "|" + (contada.Pedidas.Count > 0 ? contada.Pedidas[0] : ""));
+        Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
+        Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
+        Check("R6 sin cache: una consulta por request (rol + Exigir no repiten)", 3, contada.Pedidas.Count);
+
+        // ADMIN_DEV_ROL: la regla pura.
+        Check("R7 dev ADM con identidad simulada", "ADM", RolAdmin.RolDesarrollo(true, "ADM"));
+        Check("R7 dev MOD con identidad simulada", "MOD", RolAdmin.RolDesarrollo(true, " mod "));
+        Check("R7 dev valor raro: ignorado", true, RolAdmin.RolDesarrollo(true, "ROOT") == null
+                                                   && RolAdmin.RolDesarrollo(true, "") == null
+                                                   && RolAdmin.RolDesarrollo(true, null) == null);
+        Check("R7 dev sin identidad simulada: ignorado", true, RolAdmin.RolDesarrollo(false, "ADM") == null);
+        var noUsar = new FuenteFalsa().Con(YO, "MOD");
+        Check("R8 simulada + ADMIN_DEV_ROL=ADM: ADM sin consultar la base", "ADM|0",
+              RolAdmin.Para(YO, true, noUsar, "ADM", null) + "|" + noUsar.Pedidas.Count);
+        Check("R8 simulada + ADMIN_DEV_ROL=MOD: MOD aunque la tabla diga ADM", "MOD",
+              RolAdmin.Para(YO, true, new FuenteFalsa().Con(YO, "ADM"), "MOD", null));
+        Check("R8 simulada + valor raro: cae a la tabla", "ADM",
+              RolAdmin.Para(YO, true, new FuenteFalsa().Con(YO, "ADM"), "root", null));
+        Check("R8 identidad real + ADMIN_DEV_ROL=ADM: manda la tabla (MOD)", "MOD",
+              RolAdmin.Para(YO, false, new FuenteFalsa().Con(YO, "MOD"), "ADM", null));
+        Check("R8 anonimo: MOD", "MOD", RolAdmin.Para(IdentidadWindows.Desde(null, false), new FuenteFalsa().Con(YO, "ADM"), "ADM", null));
+        var errores = new List<Exception>();
+        Check("R8 la fuente falla: MOD y se registra", "MOD|1",
+              RolAdmin.Para(YO, false, new FuenteFalsa { Falla = true }, null, errores.Add) + "|" + errores.Count);
+        Check("R8 Resolver: vacio/null = MOD", "MOD|MOD", RolAdmin.Resolver(new string[0]) + "|" + RolAdmin.Resolver(null));
+        AccesoAdmin.FuenteRoles = fuente;
 
         IHttpHandler[] protegidos =
         {
@@ -144,6 +254,17 @@ public static class AccesoAdminHttpSmoke
             }
             cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
             Check("D8 admin_sesion anonimo sigue sin autorizar", "{\"autorizado\":false}", cuerpo);
+
+            // ADMIN_DEV_ROL puesto en este proceso (no es iisexpress): con la
+            // identidad REAL se ignora y manda la tabla.
+            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.VariableRol, "ADM");
+            AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
+            cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
+            Check("D11 ADMIN_DEV_ROL=ADM fuera de IIS Express con identidad real MOD: 403 RolInsuficiente", "403|True",
+                  estado + "|" + cuerpo.Contains("RolInsuficiente"));
+            cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, "", out estado);
+            Check("D11 ... y anonimo sigue en 403 AccesoDenegado", "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
+            AccesoAdmin.FuenteRoles = fuente;
             cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, @"SORIANA\t_otro", out estado);
             Check("D9 identidad real no autorizada: 403 aunque la variable diga t_andresvr", 403, estado);
             var sw = new StringWriter();
@@ -158,6 +279,7 @@ public static class AccesoAdminHttpSmoke
         finally
         {
             Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, null);
+            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.VariableRol, null);
             HttpContext.Current = null;
         }
 

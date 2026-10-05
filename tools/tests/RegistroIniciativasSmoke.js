@@ -18,8 +18,9 @@
 //      fondo y cambio de vista lo cierran.
 //   S) Detalle: "Solicitar cambios" (borrador validado, sin envio ni
 //      peticion al servidor) e "Historial de cambios (N)" plegado.
-//   T) Tipo de iniciativa (tipo_iniciativa, no la Agrupacion): opciones del
-//      registro, todas marcadas por omision, uno, varios (O), ninguno = no
+//   T) Tipo de iniciativa = catalogo dbo.CatPrefijoProblem (tipos_iniciativa)
+//      contra el `prefijo` de cada iniciativa; NO tipo_iniciativa ni la
+//      Agrupacion. Opciones = catalogo completo, todas marcadas por omision, uno, varios (O), ninguno = no
 //      pasa nada, "Todas" alterna marcar todo / desmarcar todo, junto con
 //      los demas filtros, Limpiar; el panel de casillas en el DOM.
 //   La Agrupacion ya no es filtro (ni select ni FiltroRegistro).
@@ -109,7 +110,7 @@ function Ini(folio, o) {
     fecha_retrasada: false, f_analisis: '2026-12-01', f_solucion: null, f_cierre: null,
     n_analisis: 0, n_solucion: 0, n_cierre: 0, antiguedad: 10, po: null, so: null, director: null,
     manager: null, descripcion: 'Desc ' + folio, observaciones: null,
-    activa: true, seguimiento: true, sin_categoria: false, tipo_iniciativa: null, categorias: []
+    activa: true, seguimiento: true, sin_categoria: false, prefijo: null, categorias: []
   };
   Object.keys(o || {}).forEach(function (k) { i[k] = o[k]; });
   return i;
@@ -122,23 +123,28 @@ var DATOS = {
   estados_activos: ['En Análisis', 'En Solución', 'En Monitoreo'],
   agrupadores: ['Problem', 'SorIA', 'Adopcion', 'Mejora'],
   fecha_gen: '01/10/2026',
+  // dbo.CatPrefijoProblem en el orden del servidor (PRB primero). ADO no
+  // tiene iniciativas y aun asi es opcion.
+  tipos_iniciativa: [{ prefijo: 'PRB', nombre: 'Problem' }, { prefijo: 'ADO', nombre: 'Adopción' },
+    { prefijo: 'HAR', nombre: 'Hardware' }, { prefijo: 'MAP', nombre: 'Mejora aplicativo' },
+    { prefijo: 'REQ', nombre: 'Requerimiento' }, { prefijo: '' }, { prefijo: 'PRB', nombre: 'Repetido' }],
   iniciativas: [
     // Dos categorias de distinto PO; retrasada.
-    Ini('PRB 2026-000001', { tipo_iniciativa: 'Problema', estado: 'En Solución', tickets_reduce: 150, vol_reduce_folio: 150, riesgo_folio: 150,
+    Ini('PRB 2026-000001', { prefijo: 'PRB', estado: 'En Solución', tickets_reduce: 150, vol_reduce_folio: 150, riesgo_folio: 150,
       retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true, f_solucion: '2026-09-01', n_solucion: 2,
       po: 'PO 1', so: 'SO x', director: 'Dir A', manager: 'Mgr 1',
       categorias: [Cat('/A/Cat 1/Hoja', 100, 0.5, 'Dir A', 'PO 1', 'SO x'),
                    Cat('/A/Cat 3', 50, 0.25, 'Dir A', 'PO 2', 'SO x')] }),
-    Ini('MAP 2026-000002', { tipo_iniciativa: 'Mejora continua', agrup: 'Mejora', tickets_reduce: 40, vol_reduce_folio: 40,
+    Ini('MAP 2026-000002', { prefijo: 'MAP', agrup: 'Mejora', tickets_reduce: 40, vol_reduce_folio: 40,
       po: 'PO 1', so: 'SO y', director: 'Dir A',
       categorias: [Cat('/A/Cat 2', 40, 1, 'Dir A', 'PO 1', 'SO y')] }),
     // No activa
-    Ini('HAR 2025-000003', { tipo_iniciativa: 'Problema', estado: 'Cerrado', activa: false, seguimiento: false, sem_fecha: 'verde',
+    Ini('HAR 2025-000003', { prefijo: 'HAR', tipo_iniciativa: 'Mejora Aplicativo', estado: 'Cerrado', activa: false, seguimiento: false, sem_fecha: 'verde',
       tickets_reduce: 30, vol_reduce_folio: 30, po: 'PO 3', so: 'SO z', director: 'Dir B',
       categorias: [Cat('/B/Cat 4', 30, 0.3, 'Dir B', 'PO 3', 'SO z')] }),
     // Activa, pero agrupacion fuera de las cuatro: no cuenta en Activas
     // (criterio de Experiencia) y retrasada no cuenta en Retrasadas.
-    Ini('REQ 2026-000004', { tipo_iniciativa: 'Requerimiento', agrup: 'ReqOpr', seguimiento: false, retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true,
+    Ini('REQ 2026-000004', { prefijo: 'REQ', agrup: 'ReqOpr', seguimiento: false, retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true,
       f_analisis: '2026-01-01', tickets_reduce: 5, vol_reduce_folio: 5, riesgo_folio: 5,
       po: 'PO 3', so: 'SO z', director: 'Dir B',
       categorias: [Cat('/B/Cat 5', 5, 0.1, 'Dir B', 'PO 3', 'SO z')] }),
@@ -505,49 +511,61 @@ pruebas.push(function () {
 // ---------------------------------------------------------------------------
 // T) Tipo de iniciativa
 // ---------------------------------------------------------------------------
-// PRB 1 y HAR 3: Problema; MAP 2: Mejora continua; REQ 4: Requerimiento;
-// PRB 5: sin tipo (solo pasa con Todas).
+// Prefijos: PRB 1 -> PRB; MAP 2 -> MAP; HAR 3 -> HAR (aunque su
+// TipoIniciativa del Excel diga "Mejora Aplicativo"); REQ 4 -> REQ; PRB 5 sin
+// prefijo (no pasa hoy: 933/933 tienen; solo pasaria con Todas). ADO: sin
+// iniciativas.
 pruebas.push(function () {
   var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
   var f = new R.FiltroRegistro(reg);
   function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }); }
-  var TODOS = ['Mejora continua', 'Problema', 'Requerimiento'];
+  function solo(pref) {
+    f.limpiar();
+    TODOS.forEach(function (t) { if (pref.indexOf(t) < 0) f.alternarTipoIniciativa(t); });
+  }
+  var TODOS = ['PRB', 'ADO', 'HAR', 'MAP', 'REQ'];
 
-  Check('T1 opciones: los tipo_iniciativa del registro, sin vacios', TODOS, reg.tiposIniciativa());
+  Check('T1 opciones = catalogo completo, en su orden, sin vacios ni repetidos', TODOS, reg.tiposIniciativa());
+  Check('T1 texto = Descripcion', ['Problem', 'Adopción', 'Hardware', 'Mejora aplicativo', 'Requerimiento', 'XYZ'],
+    TODOS.concat('XYZ').map(function (t) { return reg.nombreTipo(t); }));
   Check('T1 no son las agrupaciones', -1, TODOS.indexOf('ReqOpr'));
   Check('T2 por omision: todos marcados (null), sin filtro', [null, TODOS, 5, 0, true],
     [f.tiposIni, f.tiposIniciativa(), pasan().length, f.activos(), f.todosMarcados()]);
 
-  f.alternarTipoIniciativa('Mejora continua');
-  f.alternarTipoIniciativa('Requerimiento');
-  Check('T3 solo Problema', [['Problema'], ['PRB 2026-000001', 'HAR 2025-000003'], 1],
-    [f.tiposIni, pasan(), f.activos()]);
-  f.alternarTipoIniciativa('Requerimiento');
-  Check('T4 varios = O', ['PRB 2026-000001', 'HAR 2025-000003', 'REQ 2026-000004'], pasan());
-  f.alternarTipoIniciativa('Inventado');
-  Check('T4 tipo fuera de opciones se ignora', ['Problema', 'Requerimiento'], f.tiposIni);
+  solo(['HAR']);
+  Check('T2b filtra por Problem.Prefijo, no por TipoIniciativa', ['HAR 2025-000003'], pasan());
+  solo(['MAP']);
+  Check('T2b MAP no trae a HAR aunque su TipoIniciativa sea Mejora Aplicativo', ['MAP 2026-000002'], pasan());
+  solo(['ADO']);
+  Check('T2b tipo sin iniciativas: lista vacia', [], pasan());
+  f.limpiar();
 
-  f.alternarTipoIniciativa('Problema');
-  f.alternarTipoIniciativa('Requerimiento');
+  ['ADO', 'HAR', 'MAP', 'REQ'].forEach(function (t) { f.alternarTipoIniciativa(t); });
+  Check('T3 solo PRB (el sin prefijo queda fuera)', [['PRB'], ['PRB 2026-000001'], 1],
+    [f.tiposIni, pasan(), f.activos()]);
+  f.alternarTipoIniciativa('HAR');
+  Check('T4 varios = O', ['PRB 2026-000001', 'HAR 2025-000003'], pasan());
+  f.alternarTipoIniciativa('Inventado');
+  Check('T4 tipo fuera del catalogo se ignora', ['PRB', 'HAR'], f.tiposIni);
+
+  f.alternarTipoIniciativa('PRB');
+  f.alternarTipoIniciativa('HAR');
   Check('T5 desmarcar todos = ninguno: no pasa nada, cuenta como filtro', [[], [], 0, 1, false],
     [f.tiposIni, f.tiposIniciativa(), pasan().length, f.activos(), f.todosMarcados()]);
 
-  f.alternarTipoIniciativa('Problema');
-  f.alternarTipoIniciativa('Mejora continua');
-  f.alternarTipoIniciativa('Requerimiento');
+  TODOS.forEach(function (t) { f.alternarTipoIniciativa(t); });
   Check('T6 volver a marcarlos todos = todos (null)', [null, 5], [f.tiposIni, pasan().length]);
 
   f.todosTiposIniciativa();
   Check('T7 Todas con todo marcado: desmarca todo', [[], 0], [f.tiposIni, pasan().length]);
   f.todosTiposIniciativa();
   Check('T7 Todas con nada marcado: marca todo', [null, TODOS, 5], [f.tiposIni, f.tiposIniciativa(), pasan().length]);
-  f.alternarTipoIniciativa('Problema');
+  f.alternarTipoIniciativa('PRB');
   f.todosTiposIniciativa();
   Check('T7 Todas con algunos marcados: marca todo', [null, 5], [f.tiposIni, pasan().length]);
 
   // Junto con los demas filtros (Y entre filtros).
-  f.alternarTipoIniciativa('Mejora continua');
-  f.alternarTipoIniciativa('Requerimiento');       // solo Problema
+  solo(['PRB', 'HAR']);
   f.elegirEstado('Cerrado');
   Check('T8 + Estado', ['HAR 2025-000003'], pasan());
   f.elegirEstado('');
@@ -565,6 +583,9 @@ pruebas.push(function () {
 
   f.limpiar();
   Check('T9 limpiar: Todas', [null, 5, 0], [f.tiposIni, pasan().length, f.activos()]);
+
+  var sinCat = R.Registro.desdeJson({ iniciativas: [] });
+  Check('T9 sin catalogo: sin opciones', [], sinCat.tiposIniciativa());
 });
 
 pruebas.push(function () {
@@ -583,58 +604,59 @@ pruebas.push(function () {
   return esperar().then(function () {
     Check('T10 listo: Todas por omision', ['— Todas —', false, false],
       [p.sel('regTipoIni').textContent, p.sel('regTipoIni').disabled, p.sel('regTipoIni').classList.contains('con-valor')]);
-    Check('T10 casillas: Todas y cada tipo, todas marcadas',
-      ['Todas:si', 'Mejora continua:si', 'Problema:si', 'Requerimiento:si'], casillas());
+    Check('T10 casillas: Todas y cada prefijo del catalogo, todas marcadas',
+      ['Todas:si', 'PRB:si', 'ADO:si', 'HAR:si', 'MAP:si', 'REQ:si'], casillas());
+    Check('T10 se ve la Descripcion', [true, true],
+      [/data-tipo-ini="HAR" checked><span>Hardware<\/span>/.test(p.sel('regTipoIniPanel').innerHTML),
+       /data-tipo-ini="ADO" checked><span>Adopción<\/span>/.test(p.sel('regTipoIniPanel').innerHTML)]);
     Check('T11 panel cerrado al inicio', [true, 'false'], [p.sel('regTipoIniPanel').hidden, p.sel('regTipoIni').getAttribute('aria-expanded')]);
     p.sel('regTipoIni').disparar('click');
     Check('T11 el boton abre el panel', [false, 'true'], [p.sel('regTipoIniPanel').hidden, p.sel('regTipoIni').getAttribute('aria-expanded')]);
 
-    marcar('data-tipo-ini', 'Mejora continua');
-    marcar('data-tipo-ini', 'Requerimiento');
-    Check('T12 un tipo filtra la lista', ['PRB 2026-000001', 'HAR 2025-000003'], folios(p));
-    Check('T12 boton y casillas lo muestran', ['Problema', true, ['Todas:no', 'Mejora continua:no', 'Problema:si', 'Requerimiento:no']],
+    ['ADO', 'HAR', 'MAP', 'REQ'].forEach(function (t) { marcar('data-tipo-ini', t); });
+    Check('T12 un tipo filtra la lista', ['PRB 2026-000001'], folios(p));
+    Check('T12 boton (Descripcion) y casillas lo muestran', ['Problem', true, ['Todas:no', 'PRB:si', 'ADO:no', 'HAR:no', 'MAP:no', 'REQ:no']],
       [p.sel('regTipoIni').textContent, p.sel('regTipoIni').classList.contains('con-valor'), casillas()]);
     Check('T12 cuenta y Limpiar', ['1 filtro activo', false], [p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
     Check('T12 el panel sigue abierto al elegir', false, p.sel('regTipoIniPanel').hidden);
-    marcar('data-tipo-ini', 'Requerimiento');
-    Check('T13 dos tipos (O)', [['PRB 2026-000001', 'REQ 2026-000004', 'HAR 2025-000003'], '2 de 3 tipos'],
-      [folios(p), p.sel('regTipoIni').textContent]);
+    marcar('data-tipo-ini', 'HAR');
+    Check('T13 dos tipos (O)', [['PRB 2026-000001', 'HAR 2025-000003'], '2 de 5 tipos', 'Problem, Hardware'],
+      [folios(p), p.sel('regTipoIni').textContent, p.sel('regTipoIni').getAttribute('title')]);
 
     elegir(p, 'regPo', 'PO 3');
-    Check('T14 junto con PO', ['REQ 2026-000004', 'HAR 2025-000003'], folios(p));
+    Check('T14 junto con PO', ['HAR 2025-000003'], folios(p));
     elegir(p, 'regEstadoSel', 'Cerrado');
     Check('T14 ... y Estado', ['HAR 2025-000003'], folios(p));
 
     p.sel('regLimpiar').disparar('click');
-    Check('T15 Limpiar filtros: Todas otra vez', ['— Todas —', 5, ['Todas:si', 'Mejora continua:si', 'Problema:si', 'Requerimiento:si']],
+    Check('T15 Limpiar filtros: Todas otra vez', ['— Todas —', 5, ['Todas:si', 'PRB:si', 'ADO:si', 'HAR:si', 'MAP:si', 'REQ:si']],
       [p.sel('regTipoIni').textContent, folios(p).length, casillas()]);
 
-    marcar('data-tipo-ini', 'Problema');
-    Check('T16 desmarcar uno desde Todas: los otros dos; sin tipo fuera', ['REQ 2026-000004', 'MAP 2026-000002'], folios(p));
+    marcar('data-tipo-ini', 'PRB');
+    Check('T16 desmarcar uno desde Todas: los demas; sin prefijo fuera', ['REQ 2026-000004', 'MAP 2026-000002', 'HAR 2025-000003'], folios(p));
     marcar('data-tipo-todas', '');
     Check('T16 la casilla Todas restablece', ['— Todas —', 5, ''], [p.sel('regTipoIni').textContent, folios(p).length, p.sel('regFiltrosCuenta').textContent]);
 
     marcar('data-tipo-todas', '');
     Check('T18 Todas con todo marcado: nada marcado y nada en la lista',
-      ['Ninguno', true, ['Todas:no', 'Mejora continua:no', 'Problema:no', 'Requerimiento:no'], [], false, '1 filtro activo'],
+      ['Ninguno', true, ['Todas:no', 'PRB:no', 'ADO:no', 'HAR:no', 'MAP:no', 'REQ:no'], [], false, '1 filtro activo'],
       [p.sel('regTipoIni').textContent, p.sel('regTipoIni').classList.contains('con-valor'), casillas(), folios(p),
        p.sel('regVacio').hidden, p.sel('regFiltrosCuenta').textContent]);
-    marcar('data-tipo-ini', 'Problema');
-    Check('T18 desde ninguno, marcar uno', ['Problema', ['PRB 2026-000001', 'HAR 2025-000003']], [p.sel('regTipoIni').textContent, folios(p)]);
+    marcar('data-tipo-ini', 'HAR');
+    Check('T18 desde ninguno, marcar uno', ['Hardware', ['HAR 2025-000003']], [p.sel('regTipoIni').textContent, folios(p)]);
     marcar('data-tipo-todas', '');
-    Check('T18 Todas con algunos: todo marcado otra vez', ['— Todas —', 5, ['Todas:si', 'Mejora continua:si', 'Problema:si', 'Requerimiento:si']],
+    Check('T18 Todas con algunos: todo marcado otra vez', ['— Todas —', 5, ['Todas:si', 'PRB:si', 'ADO:si', 'HAR:si', 'MAP:si', 'REQ:si']],
       [p.sel('regTipoIni').textContent, folios(p).length, casillas()]);
 
     // Paginacion intacta con el filtro de tipos.
     var muchas = JSON.parse(JSON.stringify(DATOS));
-    for (var n = 0; n < 150; n++) muchas.iniciativas.push(Ini('Y ' + (1000 + n), { tipo_iniciativa: 'Problema' }));
+    for (var n = 0; n < 150; n++) muchas.iniciativas.push(Ini('PRB 2026-00' + (1000 + n), { prefijo: 'PRB' }));
     return p.registro.cargar(ok(muchas)).then(function () {
-      marcar('data-tipo-ini', 'Mejora continua');
-      marcar('data-tipo-ini', 'Requerimiento');
-      Check('T19 paginacion con tipos: 100 de 152', [100, false, '152 de 155 iniciativas · mostrando 100'],
+      ['ADO', 'HAR', 'MAP', 'REQ'].forEach(function (t) { marcar('data-tipo-ini', t); });
+      Check('T19 paginacion con tipos: 100 de 151', [100, false, '151 de 155 iniciativas · mostrando 100'],
         [folios(p).length, p.sel('regMas').hidden, p.sel('regCuenta').textContent]);
       p.sel('regMas').disparar('click');
-      Check('T19 Mostrar mas sigue el filtro', [152, true], [folios(p).length, p.sel('regMas').hidden]);
+      Check('T19 Mostrar mas sigue el filtro', [151, true], [folios(p).length, p.sel('regMas').hidden]);
       marcar('data-tipo-todas', '');
       marcar('data-tipo-todas', '');
       Check('T19 ninguno: lista vacia, sin Mostrar mas', [0, true], [folios(p).length, p.sel('regMas').hidden]);
@@ -652,7 +674,7 @@ pruebas.push(function () {
 // V) La pagina sigue igual con el registro cargado
 // ---------------------------------------------------------------------------
 var CATALOGO = {
-  tipos: ['Mejora'], omitidas: 0,
+  tipos: [{ prefijo: 'MAP', nombre: 'Mejora aplicativo' }], omitidas: 0,
   asignaciones: [{ director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1' }],
   // ?rutas=1 (Nueva solicitud): la misma forma, con la ruta real.
   rutas: [{ director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1/Hoja' }]
@@ -664,14 +686,14 @@ pruebas.push(function () {
       [p.sel('panel-iniciativas').hidden, p.sel('panel-solicitudes').hidden, p.sel('panel-nueva').hidden]);
     p.sel('btnSolicitar').disparar('click');
     Check('V2 el boton abre Nueva solicitud', [true, false], [p.sel('panel-iniciativas').hidden, p.sel('panel-nueva').hidden]);
-    elegir(p, 'selTipo', 'Mejora');
+    elegir(p, 'selTipo', 'MAP');
     elegir(p, 'selPo', 'PO 1');
     p.sel('btnVolver').disparar('click');
     elegir(p, 'regPo', 'PO 2');           // filtrar la lista no toca el borrador
     clicFolio(p, 'PRB 2026-000001');
     p.sel('selTipo').value = ''; p.sel('selPo').value = '';
     p.sel('btnSolicitar').disparar('click');
-    Check('V3 borrador intacto tras usar el registro', ['Mejora', 'PO 1'], [p.sel('selTipo').value, p.sel('selPo').value]);
+    Check('V3 borrador intacto tras usar el registro', ['MAP', 'PO 1'], [p.sel('selTipo').value, p.sel('selPo').value]);
     Check('V3 abrir Nueva cierra el detalle', true, p.sel('regDetalle').hidden);
     p.sel('btnVolver').disparar('click');
     Check('V4 el filtro del registro tambien se conserva', ['PRB 2026-000001'], folios(p));
@@ -684,7 +706,10 @@ pruebas.push(function () {
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   Check('H1 sin "en preparacion" en Iniciativas', false, /Registro de iniciativas en preparación/.test(html));
-  Check('H2 CTA intacto', true, /<button type="button" class="btn ini-cta" id="btnSolicitar">/.test(html));
+  Check('H2 CTA solo para ADM: oculto hasta que SesionAdmin diga rol ADM', true,
+    /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-adm hidden>/.test(html));
+  Check('H2 [hidden] gana al display del CTA', true,
+    /\.btn\.ini-cta\[hidden\] \{ display: none; \}/.test(leer('admin/iniciativas.css')));
   Check('H3 orden de scripts', true,
     /cascada-organizacional\.js[\s\S]*registro-iniciativas\.js[\s\S]*iniciativas\.js"/.test(html));
   Check('H4 sin botones de editar/descargar', false, /(Editar|Modificar|Descargar)/.test(html));

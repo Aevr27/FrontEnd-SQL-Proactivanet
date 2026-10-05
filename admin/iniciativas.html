@@ -176,7 +176,10 @@
         <h2>Iniciativas</h2>
         <p class="ini-vista-sub">Consulta y administra las iniciativas existentes.</p>
       </div>
-      <button type="button" class="btn ini-cta" id="btnSolicitar">
+      <!-- Crear iniciativas es solo de ADM: oculto hasta que admin_sesion
+           diga rol ADM (SesionAdmin, data-solo-adm). Solo UX: el servidor
+           lo exige con AccesoAdmin.ExigirAdm. -->
+      <button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-adm hidden>
         <span class="ini-cta-mas" aria-hidden="true">+</span>
         <span>Solicitar una iniciativa</span>
       </button>
@@ -206,7 +209,8 @@
           <button type="button" class="btn linea chico" id="regLimpiar" hidden>Limpiar filtros</button>
         </div>
         <div class="campo"><label for="regEstadoSel">Estado</label><select id="regEstadoSel" disabled></select></div>
-        <!-- Tipo de iniciativa (dbo.Problem.TipoIniciativa), varios a la vez.
+        <!-- Tipo de iniciativa (catalogo dbo.CatPrefijoProblem contra
+             dbo.Problem.Prefijo), varios a la vez.
              No es la Agrupacion (TipoAgrupado), que ya no es filtro: sigue
              en la tabla y el detalle. -->
         <div class="campo ini-multi" id="regTipoIniCampo">

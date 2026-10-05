@@ -29,6 +29,14 @@
 //   2. AdminAccesoModulo (abajo), registrado en <system.webServer><modules>,
 //      cubre ademas la pagina estatica admin/iniciativas.html, que ningun
 //      handler sirve. Ver Web.config.ejemplo.
+//
+// ROL (ADM / MOD) DESPUES DE ENTRAR
+// ---------------------------------
+// Pasar la whitelist solo da entrada. Lo que es exclusivo de ADM (crear
+// iniciativas) llama a ExigirAdm(): primero Exigir() y despues el rol de
+// dbo.UsuariosAdmin (RolAdmin, App_Code/RolAdmin.cs). Quien no es ADM
+// recibe 403 { "tipo": "RolInsuficiente" }. Sin fila o con la consulta
+// fallando el rol es MOD: nunca ADM por error.
 
 using System;
 using System.Collections.Generic;
@@ -105,6 +113,41 @@ public static class AccesoAdmin
     {
         if (EstaAutorizado(IdentidadWindows.DesdeContexto(context))) return true;
         Rechazar(context, true);
+        return false;
+    }
+
+    // De donde sale el rol. La real lee dbo.UsuariosAdmin; las pruebas
+    // ponen una propia para no necesitar SQL Server. Nada del sitio la
+    // cambia.
+    public static IFuenteRolesAdmin FuenteRoles = new FuenteRolesAdminSql();
+
+    // El rol de quien hace el request (ADM o MOD), resuelto cada vez. No
+    // revisa la whitelist: llamarlo despues de Exigir/EstaAutorizado.
+    public static string Rol(HttpContext context)
+    {
+        return RolAdmin.Para(IdentidadWindows.DesdeContexto(context), FuenteRoles,
+            IdentidadDesarrolloLocal.RolConfigurado(),
+            delegate (Exception ex) { DashboardHandler.Registrar("AccesoAdmin.Rol", ex); });
+    }
+
+    // Para lo que es solo de ADM: whitelist y ademas rol ADM. true si sigue;
+    // si no, ya respondio 403 y hay que salir.
+    public static bool ExigirAdm(HttpContext context)
+    {
+        if (!Exigir(context)) return false;
+        if (Rol(context) == RolAdmin.Adm) return true;
+
+        var r = context.Response;
+        r.Clear();
+        r.StatusCode = 403;
+        r.TrySkipIisCustomErrors = true;
+        r.Cache.SetCacheability(HttpCacheability.NoCache);
+        r.ContentType = "application/json; charset=utf-8";
+        r.Write(new JavaScriptSerializer().Serialize(new Dictionary<string, object>
+        {
+            { "error", "Solo un administrador (ADM) puede crear iniciativas." },
+            { "tipo", "RolInsuficiente" },
+        }));
         return false;
     }
 

@@ -11,7 +11,8 @@
 // que se MUESTRA: al enviar, admin_iniciativas_validar.ashx lo recalcula y
 // es quien decide. Regla y fuente: IniciativaService / ExperienciaCapacidad.
 //
-// SOLO LECTURA. ACCESO: AccesoAdmin.Exigir (403 antes de tocar la base).
+// SOLO LECTURA. ACCESO: AccesoAdmin.ExigirAdm (whitelist + rol ADM; 403
+// antes de tocar la base). Solo lo usa Nueva solicitud, que es de ADM.
 
 using System;
 using System.Collections.Generic;
@@ -21,7 +22,7 @@ public class AdminIniciativasCapacidad : IHttpHandler
 {
     public void ProcessRequest(HttpContext context)
     {
-        if (!AccesoAdmin.Exigir(context)) return;
+        if (!AccesoAdmin.ExigirAdm(context)) return;
 
         DashboardHandler.Responder(context, delegate
         {

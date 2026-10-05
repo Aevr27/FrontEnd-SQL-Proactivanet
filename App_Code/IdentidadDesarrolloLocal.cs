@@ -21,6 +21,12 @@
 //      "DOMINIO\cuenta". Solo la pone dev-local.cmd cuando se le pasa la
 //      cuenta como segundo argumento; no esta en Web.config ni en el repo.
 //
+// ROL SIMULADO (ADMIN_DEV_ROL, tercer argumento de dev-local.cmd)
+//   Solo se lee cuando la identidad del request YA es la simulada
+//   (IdentidadWindows.DesarrolloLocal == true, o sea, las cuatro de arriba
+//   se cumplieron). Vale ADM o MOD; otro valor se ignora. La regla esta en
+//   RolAdmin.RolDesarrollo; aqui solo se lee la variable.
+//
 // En la VM fallan al menos la 1 y la 3 (IIS + Windows Authentication), asi
 // que aunque alguien definiera la variable ahi, no hace nada.
 //
@@ -34,6 +40,7 @@ using System.Web;
 public static class IdentidadDesarrolloLocal
 {
     public const string Variable = "ADMIN_DEV_IDENTIDAD";
+    public const string VariableRol = "ADMIN_DEV_ROL";
     public const string ProcesoIisExpress = "iisexpress";
 
     private static readonly Lazy<string> _proceso = new Lazy<string>(delegate
@@ -56,6 +63,13 @@ public static class IdentidadDesarrolloLocal
         // Con dominio y cuenta, como exige la whitelist.
         if (barra <= 0 || barra == cuenta.Length - 1) return null;
         return cuenta;
+    }
+
+    // El valor crudo de ADMIN_DEV_ROL. Quien lo usa (RolAdmin) solo lo mira
+    // con identidad simulada.
+    public static string RolConfigurado()
+    {
+        return Environment.GetEnvironmentVariable(VariableRol);
     }
 
     // La del request en curso (solo se llama si IIS no autentico a nadie).

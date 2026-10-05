@@ -17,8 +17,9 @@
 //   7) la misma suma que reducePorFolio de ArmarCategorias (vol_reduce_folio
 //      de Experiencia) para el mismo detalle
 //   8) el archivo no tiene SQL que escriba
-//   9) tipo_iniciativa: el TipoIniciativa del folio (DashboardCatalogos
-//      .TiposPorFolio, grafia del catalogo), null sin tipo; agrup no cambia
+//   9) prefijo: el Problem.Prefijo del folio (DashboardCatalogos
+//      .PrefijoPorFolio), null sin prefijo; ya no hay tipo_iniciativa
+//      (Problem.TipoIniciativa no se lee ni se traduce); agrup no cambia
 //  10) n2 de cada categoria: la CategoriaN2 del C1&C2 de la ruta si tiene
 //      fila propia en CatCategoriaDueno (vigente o no), null si no
 //
@@ -104,22 +105,19 @@ public static class RegistroSmoke
         var dRepetida = Det("PRB 1", null, "En Análisis", "Problem", 0, 0, null, null, "X", "X", "X");
         sueltas.Add(M("Iniciativa").Invoke(null, new object[] { dRepetida, 0, 0, dir }));
 
-        // 9) Tipos por folio como los arma TiposIniciativaPorFolio: normalizados
-        // y con la grafia de TiposUnicos ("mejora " -> "Mejora"). REQ 2 y
-        // HAR 4 sin tipo; " " no es tipo.
+        // 9) Prefijo por folio como lo arma PrefijosPorFolio (dbo.Problem.Prefijo):
+        // sin espacios, el primero gana. REQ 2 sin prefijo; HAR 4 con " ".
         var TCat = asm.GetType("DashboardCatalogos");
         var pares = new List<KeyValuePair<string, string>> {
-            new KeyValuePair<string, string>("PRB 1", "Problema"),
-            new KeyValuePair<string, string>("MAP 3", "mejora "),
-            new KeyValuePair<string, string>("PRB 5", "Mejora"),
+            new KeyValuePair<string, string>("PRB 1", " PRB"),
+            new KeyValuePair<string, string>("MAP 3", "MAP"),
+            new KeyValuePair<string, string>("PRB 5", "PRB"),
             new KeyValuePair<string, string>("HAR 4", " "),
-            new KeyValuePair<string, string>("PRB 1", "Otro"),
+            new KeyValuePair<string, string>("PRB 1", "HAR"),
         };
-        var tipos = (Dictionary<string, string>)TCat.GetMethod("TiposPorFolio").Invoke(null, new object[] { pares });
-        Check("9 TiposPorFolio: grafia unica, sin vacios, el primero gana",
-            "PRB 1=Problema,MAP 3=Mejora,PRB 5=Mejora", string.Join(",", ToPares(tipos)));
-        Check("9 mismas grafias que el catalogo TiposIniciativa", "Mejora,Problema",
-            string.Join(",", ToStr((IList)TCat.GetMethod("TiposUnicos").Invoke(null, new object[] { new[] { "Problema", "mejora ", "Mejora", " " } }))));
+        var tipos = (Dictionary<string, string>)TCat.GetMethod("PrefijoPorFolio").Invoke(null, new object[] { pares });
+        Check("9 PrefijoPorFolio: limpio, sin vacios, el primero gana",
+            "PRB 1=PRB,MAP 3=MAP,PRB 5=PRB", string.Join(",", ToPares(tipos)));
 
         var salida = (Dictionary<string, object>)M("ArmarRegistro").Invoke(null, new object[] { detalle, sueltas, dir, tipos });
         var lista = (IList)salida["iniciativas"];
@@ -165,12 +163,13 @@ public static class RegistroSmoke
                 if ((string)i["folio"] == "PRB 1") volExp = (int)i["vol_reduce_folio"];
         Check("7 mismo vol_reduce_folio que Experiencia", volExp, p1["vol_reduce_folio"]);
 
-        Check("9 tipo_iniciativa por folio", "Problema|Mejora|Mejora||",
-            p1["tipo_iniciativa"] + "|" + m3["tipo_iniciativa"] + "|" + p5["tipo_iniciativa"] + "|" + r2["tipo_iniciativa"] + "|" + h4["tipo_iniciativa"]);
-        Check("9 sin tipo = null, no texto", true, r2.ContainsKey("tipo_iniciativa") && r2["tipo_iniciativa"] == null);
+        Check("9 prefijo por folio", "PRB|MAP|PRB||",
+            p1["prefijo"] + "|" + m3["prefijo"] + "|" + p5["prefijo"] + "|" + r2["prefijo"] + "|" + h4["prefijo"]);
+        Check("9 sin prefijo = null, no texto", true, r2.ContainsKey("prefijo") && r2["prefijo"] == null);
+        Check("9 ya no viaja tipo_iniciativa", false, p1.ContainsKey("tipo_iniciativa") || p5.ContainsKey("tipo_iniciativa"));
         Check("9 agrup sigue siendo TipoAgrupado", "Problem|ReqOpr", p1["agrup"] + "|" + r2["agrup"]);
         var sinTipos = (Dictionary<string, object>)M("ArmarRegistro").Invoke(null, new object[] { detalle, new List<object>(), dir, null });
-        Check("9 sin mapa de tipos: null en todas", null, Ini((IList)sinTipos["iniciativas"], "PRB 1")["tipo_iniciativa"]);
+        Check("9 sin mapa de prefijos: null en todas", null, Ini((IList)sinTipos["iniciativas"], "PRB 1")["prefijo"]);
 
         Check("listas del contrato", "En Análisis,En Solución,En Monitoreo|Problem,SorIA,Adopcion,Mejora",
             string.Join(",", ToStr((IList)salida["estados_activos"])) + "|" + string.Join(",", ToStr((IList)salida["agrupadores"])));

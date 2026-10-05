@@ -107,7 +107,9 @@ function Ini(folio, o) {
     fecha_retrasada: false, f_analisis: '2026-12-01', f_solucion: null, f_cierre: null,
     n_analisis: 0, n_solucion: 0, n_cierre: 0, antiguedad: 10, po: null, so: null, director: null,
     manager: null, descripcion: 'Desc ' + folio, observaciones: null,
-    activa: true, seguimiento: true, sin_categoria: false, tipo_iniciativa: 'Problema', categorias: []
+    activa: true, seguimiento: true, sin_categoria: false, categorias: [],
+    // dbo.Problem.Prefijo: el del Codigo (filtro Tipo de iniciativa).
+    prefijo: folio.split(' ')[0]
   };
   Object.keys(o || {}).forEach(function (k) { i[k] = o[k]; });
   return i;
@@ -120,21 +122,23 @@ var REGISTRO = {
   estados_activos: ['En Análisis', 'En Solución', 'En Monitoreo'],
   agrupadores: ['Problem', 'SorIA', 'Adopcion', 'Mejora'],
   fecha_gen: '02/10/2026',
+  tipos_iniciativa: [{ prefijo: 'PRB', nombre: 'Problem' }, { prefijo: 'HAR', nombre: 'Hardware' },
+    { prefijo: 'MAP', nombre: 'Mejora aplicativo' }, { prefijo: 'REQ', nombre: 'Requerimiento' }],
   iniciativas: [
     Ini('PRB 1', { estado: 'En Solución', categorias: [
       Cat('/A/Cat 1/Hoja', '/A/Cat 1', 'Dir A', 'PO 1', 'SO x'),
       Cat('/A/Cat 3', '/A/Cat 3', 'Dir A', 'PO 2', 'SO x')] }),
     // Segunda iniciativa activa en /A/Cat 1, por OTRA ruta: no se escoge una.
-    Ini('MAP 6', { agrup: 'Mejora', tipo_iniciativa: 'Mejora continua', categorias: [
+    Ini('MAP 6', { agrup: 'Mejora', categorias: [
       Cat('/A/Cat 1/Otra', '/A/Cat 1', 'Dir A', 'PO 1', 'SO x'),
       Cat('/A/Cat 1', '/A/Cat 1', 'Dir A', 'PO 1', 'SO x')] }),
-    Ini('MAP 2', { agrup: 'Mejora', tipo_iniciativa: 'Mejora continua', categorias: [
+    Ini('MAP 2', { agrup: 'Mejora', categorias: [
       Cat('/A/Cat 2', '/A/Cat 2', 'Dir A', 'PO 1', 'SO y')] }),
     // Cerrada: no cubre.
     Ini('HAR 3', { estado: 'Cerrado', activa: false, seguimiento: false, sem_fecha: 'verde', categorias: [
       Cat('/B/Cat 4', '/B/Cat 4', 'Dir B', 'PO 3', 'SO z')] }),
     // Activa con agrupacion fuera de las cuatro: no es `seguimiento`, no cubre.
-    Ini('REQ 4', { agrup: 'ReqOpr', seguimiento: false, tipo_iniciativa: 'Requerimiento', categorias: [
+    Ini('REQ 4', { agrup: 'ReqOpr', seguimiento: false, categorias: [
       Cat('/B/Cat 5', '/B/Cat 5', 'Dir B', 'PO 3', 'SO z')] }),
     // Activa sin categoria: no cubre nada, se cuenta.
     Ini('PRB 5', { sin_categoria: true, po: 'PO 1', so: 'SO w', director: 'Dir B', categorias: [] }),
@@ -146,7 +150,7 @@ var REGISTRO = {
 };
 
 var CATALOGO = {
-  tipos: ['Problema', 'Mejora continua'],
+  tipos: [{ prefijo: 'PRB', nombre: 'Problem' }, { prefijo: 'MAP', nombre: 'Mejora aplicativo' }],
   asignaciones: [
     { director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1' },
     { director: 'Dir A', po: 'PO 1', so: 'SO y', categoria: '/A/Cat 2' },
@@ -374,13 +378,13 @@ pruebas.push(function () {
     elegir(p, 'regCategoria', '');
 
     // Tipo de iniciativa: solo cuentan las del tipo elegido.
-    p.sel('regTipoIniPanel').disparar('change', { target: (function () {
-      var el = Elemento('c'); el.setAttribute('data-tipo-ini', 'Problema'); return el; })() });
-    p.sel('regTipoIniPanel').disparar('change', { target: (function () {
-      var el = Elemento('c'); el.setAttribute('data-tipo-ini', 'Requerimiento'); return el; })() });
-    // Desde "Todas", desmarcar dos deja solo Mejora continua.
+    ['PRB', 'HAR', 'REQ'].forEach(function (pref) {
+      p.sel('regTipoIniPanel').disparar('change', { target: (function () {
+        var el = Elemento('c'); el.setAttribute('data-tipo-ini', pref); return el; })() });
+    });
+    // Desde "Todas", desmarcar tres deja solo MAP (Mejora aplicativo).
     var marcados = p.vista.filtro.tiposIniciativa();
-    Check('F6 tipos marcados', ['Mejora continua'], marcados);
+    Check('F6 tipos marcados', ['MAP'], marcados);
     var f6 = filasCob(p);
     Check('F6 Tipo: /A/Cat 1 solo por MAP 6; /A/Cat 3 queda sin', [['MAP 6'], 'sin'],
       [f6[0][2], f6[2][1]]);
