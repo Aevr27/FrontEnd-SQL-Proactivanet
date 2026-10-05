@@ -1762,18 +1762,42 @@ function squarify(items,x0,y0,w0,h0){
 // opts (opcional, TAREA 3): {onClick(label), selected} -- para usar el
 // treemap como filtro interactivo (Historico/Vencidas/Activas). Sin opts se
 // comporta igual que antes (solo lectura, tooltip nombre+valor).
+//
+// El treemap se dibuja en pixeles con el tamaño que tiene el contenedor AL
+// PINTAR. Las pestañas Vencidas y Activas se pintan en renderAll() mientras
+// su panel esta oculto (display:none, 0x0): antes se caia entonces a 300x300
+// dentro de una caja de 220px de alto y los recuadros se salian, hasta que
+// "Resetear filtro de graficas" volvia a pintar ya con el panel visible.
+// Ahora, a 0x0 no se reparte nada, y un ResizeObserver vuelve a llamar a esta
+// misma funcion, con los mismos items y opts, cuando la caja cambia de
+// tamaño: al abrir la pestaña, al volver al modulo o al cambiar el ancho de
+// la ventana. Es el mismo repintado que hacia el reset, sin tocar filtros.
+const tmObservador = typeof ResizeObserver==='function'
+  ? new ResizeObserver(entradas=>entradas.forEach(e=>{
+      const el=e.target, ult=el._tmUltimo;
+      if(!ult) return;
+      if(el.clientWidth===ult.w && el.clientHeight===ult.h) return;
+      renderTreemap(el.id, ult.items, ult.opts);
+    }))
+  : null;
 function renderTreemap(containerId,items,opts){
   opts = opts || {};
   const el=document.getElementById(containerId);
   if(!el) return;
   el.innerHTML='';
+  const w=el.clientWidth, h=el.clientHeight;
+  // Lo pedido se guarda siempre, con el tamaño con que se pinto (0x0 si la
+  // caja esta oculta): es lo que el observador compara y vuelve a pintar.
+  el._tmUltimo={items, opts, w, h};
+  if(tmObservador && !el._tmObservado){ tmObservador.observe(el); el._tmObservado=true; }
   const data=items.filter(it=>it.value>0).sort((a,b)=>b.value-a.value);
   if(!data.length){
     el.innerHTML='<div class="treemap-empty">Sin datos</div>';
     return;
   }
+  // Oculta: no hay medidas reales. El observador la pinta al aparecer.
+  if(!w || !h) return;
   const total=data.reduce((s,it)=>s+it.value,0);
-  const w=el.clientWidth||300, h=el.clientHeight||300;
   const rects=squarify(data,0,0,w,h);
   /* Color de identidad, resuelto para TODOS los recuadros de golpe: es lo
      que deja esquivar que dos personas distintas caigan en el mismo tono
