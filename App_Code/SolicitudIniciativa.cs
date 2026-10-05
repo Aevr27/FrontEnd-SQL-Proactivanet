@@ -12,9 +12,16 @@
 // QUE NO HACE (a proposito, ver el hito)
 // --------------------------------------
 // No guarda nada, no genera el numero de solicitud ni sube el RCA: no hay
-// mecanismo existente para ninguno de los dos (REQUEST NUMBER PERSISTENCE y
-// RCA SHAREPOINT DESTINATION: UNRESOLVED). NumeroSolicitud solo FORMATEA un
+// mecanismo existente para ninguno de los dos (REQUEST NUMBER PERSISTENCE:
+// UNRESOLVED; RCA UPLOAD: NOT IMPLEMENTED). NumeroSolicitud solo FORMATEA un
 // numero que algun dia dara la base; no lo inventa.
+//
+// RCA: el DESTINO futuro ya esta confirmado -SharePoint, sitio
+// ProblemManagement, biblioteca "Documentos compartidos", carpeta
+// General/Archivos RCA Problems (URL en la cabecera de admin/iniciativas.js)-
+// pero es solo una dependencia: mecanismo de subida, permisos, extensiones,
+// nombre, versiones y como se persiste la referencia siguen sin decidir, y
+// dbo.Problem.RCA no se toca.
 
 using System;
 using System.Collections.Generic;

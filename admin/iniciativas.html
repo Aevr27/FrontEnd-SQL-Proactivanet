@@ -410,9 +410,12 @@
       </section>
 
       <!-- 04 RCA: documento adjunto. Obligatorio solo para Problem. Se elige
-           y el servidor comprueba que llego, pero NO se guarda: no hay
-           destino SharePoint confirmado (dbo.Problem.RCA es NVARCHAR(50),
-           no un documento). -->
+           y el servidor comprueba que llego, pero NO se guarda todavia. El
+           destino futuro ya esta confirmado -SharePoint ProblemManagement,
+           "Documentos compartidos" / General/Archivos RCA Problems- pero la
+           subida, los permisos y como se persiste la referencia siguen sin
+           decidir (dbo.Problem.RCA es NVARCHAR(50), no un documento, y no
+           se toca). Ver la cabecera de iniciativas.js. -->
       <section class="ini-bloque ini-col-rca" aria-labelledby="iniCabRca">
         <div class="ini-bloque-cab">
           <span class="ini-paso" aria-hidden="true">04</span>

@@ -47,8 +47,16 @@
      (Titulo, Descripcion, Observaciones) y 03 Impacto (Volumetria y el %
      de disminucion de la Categoria elegida).
    Pendiente (no se pinta como campo, ver sql/diag_admin_nueva_solicitud.sql)
-     El RCA se elige y se valida, pero no hay donde guardarlo (destino
-     SharePoint sin confirmar) ni numero de solicitud con que nombrarlo.
+     El RCA se elige y se valida, pero todavia no se guarda ni hay numero
+     de solicitud con que nombrarlo. Destino FUTURO confirmado (solo
+     dependencia, nada implementado): SharePoint, sitio ProblemManagement,
+     biblioteca "Documentos compartidos", carpeta General/Archivos RCA
+     Problems:
+       https://soriana0.sharepoint.com/sites/ProblemManagement/Documentos%20compartidos/Forms/AllItems.aspx?id=%2Fsites%2FProblemManagement%2FDocumentos%20compartidos%2FGeneral%2FArchivos%20RCA%20Problems
+     Siguen sin decidir: mecanismo de subida, autenticacion y permisos,
+     extensiones permitidas, convencion de nombre, duplicados/versiones,
+     como se persiste la referencia al documento y si dbo.Problem.RCA tiene
+     algun significado.
      Codigo, fechas,
      contadores, Estado, Subestado, Gerencia, Macroproceso, Causa, Proceso,
      comentarios, CuentaConWA y Volumetria del ultimo mes vienen hoy del
