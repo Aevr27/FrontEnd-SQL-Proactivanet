@@ -100,6 +100,15 @@ public static class AccesoAdmin
         return Configurada().Permite(id);
     }
 
+    // La entrada a Admin para el request en curso: el atajo de desarrollo
+    // local (AccesoDesarrolloLocal: DEBUG + request local + IIS Express) o,
+    // como siempre, la identidad Windows real contra la whitelist.
+    public static bool PuedeEntrar(HttpContext context)
+    {
+        if (AccesoDesarrolloLocal.Activo(context)) return true;   // SOLO DESARROLLO LOCAL
+        return EstaAutorizado(IdentidadWindows.DesdeContexto(context));
+    }
+
     public static bool EsRutaProtegida(string rutaRelativa)
     {
         if (string.IsNullOrEmpty(rutaRelativa)) return false;
@@ -111,7 +120,7 @@ public static class AccesoAdmin
     // ({error, tipo}, el contrato de DashboardHandler) y hay que salir.
     public static bool Exigir(HttpContext context)
     {
-        if (EstaAutorizado(IdentidadWindows.DesdeContexto(context))) return true;
+        if (PuedeEntrar(context)) return true;
         Rechazar(context, true);
         return false;
     }
@@ -125,8 +134,8 @@ public static class AccesoAdmin
     // revisa la whitelist: llamarlo despues de Exigir/EstaAutorizado.
     public static string Rol(HttpContext context)
     {
+        if (AccesoDesarrolloLocal.Activo(context)) return RolAdmin.Adm;   // SOLO DESARROLLO LOCAL
         return RolAdmin.Para(IdentidadWindows.DesdeContexto(context), FuenteRoles,
-            IdentidadDesarrolloLocal.RolConfigurado(),
             delegate (Exception ex) { DashboardHandler.Registrar("AccesoAdmin.Rol", ex); });
     }
 
@@ -191,7 +200,7 @@ public sealed class AdminAccesoModulo : IHttpModule
             var ctx = ((HttpApplication)sender).Context;
             var ruta = ctx.Request.AppRelativeCurrentExecutionFilePath;
             if (!AccesoAdmin.EsRutaProtegida(ruta)) return;
-            if (AccesoAdmin.EstaAutorizado(IdentidadWindows.DesdeContexto(ctx))) return;
+            if (AccesoAdmin.PuedeEntrar(ctx)) return;
 
             var esHandler = ruta.EndsWith(".ashx", StringComparison.OrdinalIgnoreCase);
             AccesoAdmin.Rechazar(ctx, esHandler);

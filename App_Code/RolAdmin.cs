@@ -2,8 +2,7 @@
 //
 // ORDEN (cada request, sin cache)
 // -------------------------------
-//   1. Identidad: IdentidadWindows (IIS Windows Auth, o la simulada de
-//      IdentidadDesarrolloLocal en IIS Express local).
+//   1. Identidad: IdentidadWindows (IIS Windows Auth).
 //   2. Entrada: AccesoAdmin.Exigir (whitelist temporal). Sin pasarla no hay
 //      rol que resolver: 403.
 //   3. Rol: dbo.UsuariosAdmin.Acceso de esa cuenta (esta clase).
@@ -22,14 +21,9 @@
 // espacios a los lados y sin distinguir mayusculas ("SORIANA\cuenta"; el
 // diagnostico de la VM confirmo que la tabla guarda ese formato).
 //
-// DESARROLLO LOCAL (ADMIN_DEV_ROL)
-// --------------------------------
-// Solo si la identidad del request ES la simulada (DesarrolloLocal == true:
-// ya cumplio las cuatro condiciones de IdentidadDesarrolloLocal) y la
-// variable dice exactamente ADM o MOD. Entonces no se consulta la base (en
-// local no se alcanza). Con identidad real, fuera de IIS Express o sin
-// identidad simulada, la variable no se mira. La whitelist se exige antes,
-// igual que siempre.
+// DESARROLLO LOCAL: no pasa por aqui. AccesoAdmin.Rol devuelve ADM antes de
+// llamar a esta clase cuando AccesoDesarrolloLocal.Activo (DEBUG + request
+// local + IIS Express). Ver App_Code/AccesoDesarrolloLocal.cs.
 //
 // La fuente de roles es una interfaz para probar sin SQL Server
 // (tools/tests/IdentidadAdminSmoke.cs y AccesoAdminHttpSmoke.cs).
@@ -92,35 +86,17 @@ public static class RolAdmin
         return hay ? Adm : Mod;
     }
 
-    // ADMIN_DEV_ROL valido: "ADM" o "MOD" (sin espacios ni mayusculas de
-    // por medio), solo con identidad simulada. Cualquier otra cosa: null.
-    public static string RolDesarrollo(bool desarrolloLocal, string configurado)
-    {
-        if (!desarrolloLocal) return null;
-        var v = Limpio(configurado);
-        return v == Adm || v == Mod ? v : null;
-    }
-
     // La regla completa, sin HttpContext. `registrar` recibe el error de la
     // fuente (puede ser null).
-    public static string Para(IdentidadWindows id, IFuenteRolesAdmin fuente, string rolDesarrolloConfigurado,
-                              Action<Exception> registrar)
+    public static string Para(IdentidadWindows id, IFuenteRolesAdmin fuente, Action<Exception> registrar)
     {
         if (id == null || !id.Autenticada) return Mod;
-        return Para(id.Original, id.DesarrolloLocal, fuente, rolDesarrolloConfigurado, registrar);
+        return Para(id.Original, fuente, registrar);
     }
 
-    // El nucleo, con la bandera explicita para probarlo. En el sitio,
-    // `desarrolloLocal` es SIEMPRE IdentidadWindows.DesarrolloLocal, que solo
-    // pone DesdeContexto cuando se cumplen las cuatro condiciones.
-    public static string Para(string cuenta, bool desarrolloLocal, IFuenteRolesAdmin fuente,
-                              string rolDesarrolloConfigurado, Action<Exception> registrar)
+    public static string Para(string cuenta, IFuenteRolesAdmin fuente, Action<Exception> registrar)
     {
         if (string.IsNullOrWhiteSpace(cuenta)) return Mod;
-
-        var dev = RolDesarrollo(desarrolloLocal, rolDesarrolloConfigurado);
-        if (dev != null) return dev;
-
         if (fuente == null) return Mod;
         try
         {

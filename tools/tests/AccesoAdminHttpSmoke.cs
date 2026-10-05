@@ -12,7 +12,8 @@
 //     RolInsuficiente; registro/catalogos con MOD: NO 403 (pasan al SQL);
 //   - fuera de la whitelist, aunque la tabla diga ADM: 403 AccesoDenegado
 //     sin consultar la tabla;
-//   - ADMIN_DEV_ROL solo con la identidad simulada;
+//   - el atajo de desarrollo local (AccesoDesarrolloLocal) solo con DEBUG +
+//     request local + IIS Express; aqui nunca se activa;
 //   - admin_sesion.ashx sin ?persona: {"autorizado", "rol"}.
 //
 // Compilar y correr desde la raiz del repo (los .ashx se compilan quitando
@@ -185,26 +186,10 @@ public static class AccesoAdminHttpSmoke
         Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
         Check("R6 sin cache: una consulta por request (rol + Exigir no repiten)", 3, contada.Pedidas.Count);
 
-        // ADMIN_DEV_ROL: la regla pura.
-        Check("R7 dev ADM con identidad simulada", "ADM", RolAdmin.RolDesarrollo(true, "ADM"));
-        Check("R7 dev MOD con identidad simulada", "MOD", RolAdmin.RolDesarrollo(true, " mod "));
-        Check("R7 dev valor raro: ignorado", true, RolAdmin.RolDesarrollo(true, "ROOT") == null
-                                                   && RolAdmin.RolDesarrollo(true, "") == null
-                                                   && RolAdmin.RolDesarrollo(true, null) == null);
-        Check("R7 dev sin identidad simulada: ignorado", true, RolAdmin.RolDesarrollo(false, "ADM") == null);
-        var noUsar = new FuenteFalsa().Con(YO, "MOD");
-        Check("R8 simulada + ADMIN_DEV_ROL=ADM: ADM sin consultar la base", "ADM|0",
-              RolAdmin.Para(YO, true, noUsar, "ADM", null) + "|" + noUsar.Pedidas.Count);
-        Check("R8 simulada + ADMIN_DEV_ROL=MOD: MOD aunque la tabla diga ADM", "MOD",
-              RolAdmin.Para(YO, true, new FuenteFalsa().Con(YO, "ADM"), "MOD", null));
-        Check("R8 simulada + valor raro: cae a la tabla", "ADM",
-              RolAdmin.Para(YO, true, new FuenteFalsa().Con(YO, "ADM"), "root", null));
-        Check("R8 identidad real + ADMIN_DEV_ROL=ADM: manda la tabla (MOD)", "MOD",
-              RolAdmin.Para(YO, false, new FuenteFalsa().Con(YO, "MOD"), "ADM", null));
-        Check("R8 anonimo: MOD", "MOD", RolAdmin.Para(IdentidadWindows.Desde(null, false), new FuenteFalsa().Con(YO, "ADM"), "ADM", null));
+        Check("R8 anonimo: MOD", "MOD", RolAdmin.Para(IdentidadWindows.Desde(null, false), new FuenteFalsa().Con(YO, "ADM"), null));
         var errores = new List<Exception>();
         Check("R8 la fuente falla: MOD y se registra", "MOD|1",
-              RolAdmin.Para(YO, false, new FuenteFalsa { Falla = true }, null, errores.Add) + "|" + errores.Count);
+              RolAdmin.Para(YO, new FuenteFalsa { Falla = true }, errores.Add) + "|" + errores.Count);
         Check("R8 Resolver: vacio/null = MOD", "MOD|MOD", RolAdmin.Resolver(new string[0]) + "|" + RolAdmin.Resolver(null));
         AccesoAdmin.FuenteRoles = fuente;
 
@@ -223,65 +208,40 @@ public static class AccesoAdminHttpSmoke
             }
         }
 
-        // ---- D) desarrollo local (IdentidadDesarrolloLocal) -----------------
-        // La regla: las cuatro condiciones a la vez.
+        // ---- L) atajo de desarrollo local (AccesoDesarrolloLocal) ----------
+        // La regla: DEBUG + request local + IIS Express, las tres.
         const string EXP = "iisexpress";
-        Check("D1 iisexpress + local + anonimo + variable: simula", YO,
-              IdentidadDesarrolloLocal.Evaluar(EXP, true, false, " " + YO + " "));
-        Check("D2 en IIS (w3wp): nunca", true, IdentidadDesarrolloLocal.Evaluar("w3wp", true, false, YO) == null);
-        Check("D3 cliente remoto: nunca", true, IdentidadDesarrolloLocal.Evaluar(EXP, false, false, YO) == null);
-        Check("D4 con identidad real: nunca la reemplaza", true, IdentidadDesarrolloLocal.Evaluar(EXP, true, true, YO) == null);
-        Check("D5 sin variable: nada", true, IdentidadDesarrolloLocal.Evaluar(EXP, true, false, null) == null
-                                             && IdentidadDesarrolloLocal.Evaluar(EXP, true, false, "  ") == null);
-        Check("D6 variable sin dominio / sin cuenta: nada", true,
-              IdentidadDesarrolloLocal.Evaluar(EXP, true, false, "t_andresvr") == null
-              && IdentidadDesarrolloLocal.Evaluar(EXP, true, false, @"SORIANA\") == null
-              && IdentidadDesarrolloLocal.Evaluar(EXP, true, false, @"\t_andresvr") == null);
-        Check("D7 la simulada pasa por la whitelist: otra cuenta seguiria negada", false,
-              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(
-                  IdentidadDesarrolloLocal.Evaluar(EXP, true, false, @"SORIANA\t_otro"), true)));
+        Check("L1 local + DEBUG + IIS Express: ADM", true, AccesoDesarrolloLocal.Evaluar(true, true, EXP));
+        Check("L1 nombre del proceso sin distinguir mayusculas", true, AccesoDesarrolloLocal.Evaluar(true, true, "IISExpress"));
+        Check("L2 no local (remoto): autorizacion normal", false, AccesoDesarrolloLocal.Evaluar(true, false, EXP));
+        Check("L3 sin DEBUG (Release): autorizacion normal", false, AccesoDesarrolloLocal.Evaluar(false, true, EXP));
+        Check("L4 IIS de la VM (w3wp) aunque sea local y DEBUG: normal", false, AccesoDesarrolloLocal.Evaluar(true, true, "w3wp"));
+        Check("L4 sin proceso conocido: normal", false, AccesoDesarrolloLocal.Evaluar(true, true, null));
+        Check("L5 nada de lo anterior: normal", false, AccesoDesarrolloLocal.Evaluar(false, false, "w3wp"));
 
-        // Con la variable PUESTA en este proceso (que no es iisexpress y cuyo
-        // request no es local): el camino normal no cambia en nada.
-        Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, YO);
-        try
+        // Este proceso no es IIS Express y el request armado no es local: en
+        // cualquier build (DEBUG o no) los handlers siguen la regla normal.
+        Console.WriteLine("      (build de App_Code con DEBUG = " + AccesoDesarrolloLocal.CompiladoEnDebug + ")");
+        Check("L6 este request no activa el atajo", false, AccesoDesarrolloLocal.Activo(Contexto("x.ashx", null, "", new StringWriter())));
+        foreach (var h in protegidos)
         {
-            foreach (var h in protegidos)
-            {
-                cuerpo = Correr(h, "admin_iniciativas_x.ashx", "categoria=/A", "", out estado);
-                Check("D8 variable puesta, fuera de IIS Express: " + h.GetType().Name + " anonimo sigue en 403",
-                      "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
-            }
-            cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
-            Check("D8 admin_sesion anonimo sigue sin autorizar", "{\"autorizado\":false}", cuerpo);
+            cuerpo = Correr(h, "admin_iniciativas_x.ashx", "categoria=/A", "", out estado);
+            Check("L6 anonimo no local: " + h.GetType().Name + " 403 AccesoDenegado", "403|True",
+                  estado + "|" + cuerpo.Contains("AccesoDenegado"));
+        }
+        cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
+        Check("L6 admin_sesion anonimo no local: sin autorizar ni marca de desarrollo", "{\"autorizado\":false}", cuerpo);
+        Check("L6 null: no activa", false, AccesoDesarrolloLocal.Activo(null));
 
-            // ADMIN_DEV_ROL puesto en este proceso (no es iisexpress): con la
-            // identidad REAL se ignora y manda la tabla.
-            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.VariableRol, "ADM");
-            AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
-            cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
-            Check("D11 ADMIN_DEV_ROL=ADM fuera de IIS Express con identidad real MOD: 403 RolInsuficiente", "403|True",
-                  estado + "|" + cuerpo.Contains("RolInsuficiente"));
-            cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, "", out estado);
-            Check("D11 ... y anonimo sigue en 403 AccesoDenegado", "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
-            AccesoAdmin.FuenteRoles = fuente;
-            cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, @"SORIANA\t_otro", out estado);
-            Check("D9 identidad real no autorizada: 403 aunque la variable diga t_andresvr", 403, estado);
-            var sw = new StringWriter();
-            var ctxReal = Contexto("x.ashx", null, YO, sw);
-            var idReal = IdentidadWindows.DesdeContexto(ctxReal);
-            Check("D10 identidad real autorizada: es la real, no la simulada", "SORIANA\\t_andresvr|False",
-                  idReal.Original + "|" + idReal.DesarrolloLocal);
-            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, @"SORIANA\t_otro");
-            Check("D10 la variable no pisa a la identidad real", true,
-                  AccesoAdmin.EstaAutorizado(IdentidadWindows.DesdeContexto(Contexto("x.ashx", null, YO, new StringWriter()))));
-        }
-        finally
-        {
-            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, null);
-            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.VariableRol, null);
-            HttpContext.Current = null;
-        }
+        // En un build sin DEBUG, Activo ni siquiera tiene la logica: el
+        // fuente lo deja dentro de #if DEBUG con #else return false.
+        var fuenteDev = File.ReadAllText(Path.Combine("App_Code", "AccesoDesarrolloLocal.cs")).Replace("\r\n", "\n");
+        var activo = fuenteDev.Substring(fuenteDev.IndexOf("public static bool Activo("));
+        activo = activo.Substring(0, activo.IndexOf("\n    }") + 6);
+        Check("L7 Activo: #if DEBUG ... #else return false", true,
+              activo.Contains("#if DEBUG") && activo.Contains("#else\n        return false;\n#endif"));
+        Check("L7 sin host/URL/query/cookie/header en la regla", false,
+              System.Text.RegularExpressions.Regex.IsMatch(activo, @"Url|Host|QueryString|Cookies|Headers|Form|Params|ServerVariables"));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));
         return fallos == 0 ? 0 : 1;
