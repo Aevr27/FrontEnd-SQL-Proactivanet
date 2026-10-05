@@ -29,7 +29,10 @@
 
    FILTROS
    -------
-     Estado               igualdad exacta con el valor de la iniciativa.
+     Estado               varios a la vez (O), igual que Tipo de
+                          iniciativa: opciones = los estados que trae el
+                          registro (activos primero); todos marcados por
+                          omision; "Todos" alterna; ninguno = lista vacia.
                           (La Agrupacion/TipoAgrupado YA NO es filtro: el
                           dato `agrup` sigue llegando porque decide
                           `seguimiento` -Activas/Retrasadas- y se ve en la
@@ -82,6 +85,7 @@
    PIEZAS
    ------
      Registro         el JSON del handler, validado
+     SeleccionVarios  varios valores de una lista (Estado, Tipo)
      FiltroRegistro   lo elegido y que iniciativa pasa
      Cobertura        catalogo de categorias x iniciativas activas
      SolicitudCambio  borrador de "Solicitar cambios" de una iniciativa
@@ -276,35 +280,63 @@ window.RegistroIniciativas = (function () {
   }
 
   // ---------------------------------------------------------------------
+  // SeleccionVarios: varios valores de una lista de opciones
+  // ---------------------------------------------------------------------
+  // marcados: null = todos (sin restriccion); [] = ninguno (no pasa nada);
+  // si no, los marcados en el orden de las opciones. "Todas/Todos" alterna:
+  // con todo marcado desmarca todo; con cualquier otra cosa marca todo.
+  // Marcar a mano el ultimo que faltaba vuelve a null. `opciones` es una
+  // funcion: la lista puede crecer (p. ej. el registro se recarga).
+  class SeleccionVarios {
+    constructor(opciones) {
+      this.opciones = opciones;
+      this.marcados = null;
+    }
+
+    alternar(v) {
+      var todos = this.opciones();
+      if (todos.indexOf(v) < 0) return;
+      var marcados = this.lista();
+      var k = marcados.indexOf(v);
+      if (k >= 0) marcados.splice(k, 1); else marcados.push(v);
+      this.marcados = marcados.length === todos.length ? null
+        : todos.filter(function (t) { return marcados.indexOf(t) >= 0; });
+    }
+    todas() { this.marcados = this.marcados === null ? [] : null; }
+    // Solo `v`; vacio o fuera de las opciones = todos.
+    solo(v) { this.marcados = v && this.opciones().indexOf(v) >= 0 ? [v] : null; }
+    limpiar() { this.marcados = null; }
+    todosMarcados() { return this.marcados === null; }
+    activo() { return this.marcados !== null; }
+    // Los marcados, en el orden de las opciones (todos si es null).
+    lista() { return (this.marcados === null ? this.opciones() : this.marcados).slice(); }
+    pasa(v) { return this.marcados === null || this.marcados.indexOf(v) >= 0; }
+  }
+
+  // ---------------------------------------------------------------------
   // FiltroRegistro
   // ---------------------------------------------------------------------
   class FiltroRegistro {
     constructor(registro) {
       this.registro = registro;
-      this.estado = '';
-      this.tiposIni = null;     // null = todos marcados; [] = ninguno
+      this.estados = new SeleccionVarios(function () { return registro.estados(); });
+      this.tipos = new SeleccionVarios(function () { return registro.tiposIniciativa(); });
       this.director = '';
       this.cascada = new CascadaOrganizacional(registro.filasOrganizacionales(''), 'filtro');
     }
 
-    elegirEstado(v) { this.estado = this.registro.estados().indexOf(v) >= 0 ? v : ''; }
+    // Estado: solo `v` ('' = todos). Para varios, alternarEstado.
+    elegirEstado(v) { this.estados.solo(v); }
+    alternarEstado(v) { this.estados.alternar(v); }
+    todosEstados() { this.estados.todas(); }
+    estadosMarcados() { return this.estados.lista(); }
 
-    // Marca o desmarca un Tipo de iniciativa. Todos marcados = null; puede
-    // quedar ninguno ([]), y entonces no pasa ninguna iniciativa.
-    alternarTipoIniciativa(v) {
-      var todos = this.registro.tiposIniciativa();
-      if (todos.indexOf(v) < 0) return;
-      var marcados = this.tiposIniciativa();
-      var k = marcados.indexOf(v);
-      if (k >= 0) marcados.splice(k, 1); else marcados.push(v);
-      this.tiposIni = marcados.length === todos.length ? null
-        : todos.filter(function (t) { return marcados.indexOf(t) >= 0; });
-    }
-    // "Todas": con todo marcado desmarca todo; si no, marca todo.
-    todosTiposIniciativa() { this.tiposIni = this.tiposIni === null ? [] : null; }
-    todosMarcados() { return this.tiposIni === null; }
-    // Los marcados, en el orden de las opciones (todos si es null).
-    tiposIniciativa() { return (this.tiposIni === null ? this.registro.tiposIniciativa() : this.tiposIni).slice(); }
+    // Tipo de iniciativa (prefijo).
+    get tiposIni() { return this.tipos.marcados; }
+    alternarTipoIniciativa(v) { this.tipos.alternar(v); }
+    todosTiposIniciativa() { this.tipos.todas(); }
+    todosMarcados() { return this.tipos.todosMarcados(); }
+    tiposIniciativa() { return this.tipos.lista(); }
 
     // El Director acota la cascada: se rearma con las filas de ese Director
     // y lo ya elegido abajo se conserva mientras siga siendo valido.
@@ -326,21 +358,21 @@ window.RegistroIniciativas = (function () {
     elegir(nivel, v) { return this.cascada.elegir(nivel, v); }
 
     limpiar() {
-      this.estado = '';
-      this.tiposIni = null;
+      this.estados.limpiar();
+      this.tipos.limpiar();
       this.elegirDirector('');
       this.cascada.limpiar(0);
     }
 
     activos() {
       var org = this.cascada.filtros();
-      return (this.estado ? 1 : 0) + (this.tiposIni !== null ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length;
+      return (this.estados.activo() ? 1 : 0) + (this.tipos.activo() ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length;
     }
 
     // Estado y Tipo: lo que no es organizacional.
     pasaAtributos(i) {
-      if (this.estado && i.estado !== this.estado) return false;
-      if (this.tiposIni !== null && this.tiposIni.indexOf(i.prefijo) < 0) return false;
+      if (!this.estados.pasa(i.estado)) return false;
+      if (!this.tipos.pasa(i.prefijo)) return false;
       return true;
     }
 
@@ -532,6 +564,23 @@ window.RegistroIniciativas = (function () {
   // ---------------------------------------------------------------------
   var SELECTS_ORG = ['regPo', 'regSo', 'regCategoria'];
 
+  // Los filtros de varios valores: un boton que abre un panel de casillas.
+  // Mismo comportamiento; cambian los ids, los atributos y los textos.
+  var MULTIS = {
+    estado: {
+      boton: 'regEstado', panel: 'regEstadoPanel', campo: 'regEstadoCampo',
+      attrUno: 'data-estado-ini', attrTodas: 'data-estado-todas',
+      rotuloTodas: 'Todos', textoTodas: '— Todos —', plural: 'estados',
+      ninguno: 'Ningún estado marcado: no se muestra ninguna iniciativa.'
+    },
+    tipo: {
+      boton: 'regTipoIni', panel: 'regTipoIniPanel', campo: 'regTipoIniCampo',
+      attrUno: 'data-tipo-ini', attrTodas: 'data-tipo-todas',
+      rotuloTodas: 'Todas', textoTodas: '— Todas —', plural: 'tipos',
+      ninguno: 'Ningún tipo marcado: no se muestra ninguna iniciativa.'
+    }
+  };
+
   // Lo que hoy se puede pedir cambiar de una iniciativa: SOLO las tres
   // fechas compromiso (las de FECHA_DEL_ESTADO). Otros campos se agregan
   // aqui cuando se designen explicitamente; no se adivinan.
@@ -627,33 +676,35 @@ window.RegistroIniciativas = (function () {
     // ---- eventos ----
     cablear() {
       var self = this;
-      this.$('regEstadoSel').addEventListener('change', function (e) {
-        if (!self.filtro) return;
-        self.filtro.elegirEstado(e.target.value); self.refrescar();
-      });
-      // Tipo de iniciativa: boton que abre un panel de casillas.
-      this.$('regTipoIni').addEventListener('click', function () {
-        if (self.filtro) self.abrirTiposIni(self.$('regTipoIniPanel').hidden);
-      });
-      this.$('regTipoIniPanel').addEventListener('change', function (e) {
-        var el = e.target;
-        if (!self.filtro || !el || !el.getAttribute) return;
-        if (el.getAttribute('data-tipo-todas') !== null) self.filtro.todosTiposIniciativa();
-        else if (el.getAttribute('data-tipo-ini') !== null) self.filtro.alternarTipoIniciativa(el.getAttribute('data-tipo-ini'));
-        else return;
-        // El panel se repinta: el foco vuelve a la misma casilla.
-        var panel = self.$('regTipoIniPanel');
-        var casillas = panel.querySelectorAll ? Array.prototype.slice.call(panel.querySelectorAll('input')) : [];
-        var n = casillas.indexOf(el);
-        self.refrescar();
-        if (n >= 0 && panel.querySelectorAll) {
-          var nueva = panel.querySelectorAll('input')[n];
-          if (nueva && nueva.focus) nueva.focus();
-        }
+      // Estado y Tipo de iniciativa: boton que abre un panel de casillas.
+      Object.keys(MULTIS).forEach(function (clave) {
+        var m = MULTIS[clave];
+        self.$(m.boton).addEventListener('click', function () {
+          if (self.filtro) self.abrirMulti(clave, self.$(m.panel).hidden);
+        });
+        self.$(m.panel).addEventListener('change', function (e) {
+          var el = e.target;
+          if (!self.filtro || !el || !el.getAttribute) return;
+          var sel = self.seleccion(clave);
+          if (el.getAttribute(m.attrTodas) !== null) sel.todas();
+          else if (el.getAttribute(m.attrUno) !== null) sel.alternar(el.getAttribute(m.attrUno));
+          else return;
+          // El panel se repinta: el foco vuelve a la misma casilla.
+          var panel = self.$(m.panel);
+          var casillas = panel.querySelectorAll ? Array.prototype.slice.call(panel.querySelectorAll('input')) : [];
+          var n = casillas.indexOf(el);
+          self.refrescar();
+          if (n >= 0 && panel.querySelectorAll) {
+            var nueva = panel.querySelectorAll('input')[n];
+            if (nueva && nueva.focus) nueva.focus();
+          }
+        });
       });
       this.doc.addEventListener('click', function (e) {
-        var campo = self.$('regTipoIniCampo');
-        if (!self.$('regTipoIniPanel').hidden && campo.contains && !campo.contains(e.target)) self.abrirTiposIni(false);
+        Object.keys(MULTIS).forEach(function (clave) {
+          var m = MULTIS[clave], campo = self.$(m.campo);
+          if (!self.$(m.panel).hidden && campo.contains && !campo.contains(e.target)) self.abrirMulti(clave, false);
+        });
       });
       this.$('regDirector').addEventListener('change', function (e) {
         if (!self.filtro) return;
@@ -714,11 +765,14 @@ window.RegistroIniciativas = (function () {
       this.$('regDetCerrar').addEventListener('click', function () { self.cerrarDetalle(); });
       this.$('regDetFondo').addEventListener('click', function () { self.cerrarDetalle(); });
       this.doc.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && self.abierta) self.cerrarDetalle();
-        else if (e.key === 'Escape' && !self.$('regTipoIniPanel').hidden) {
-          self.abrirTiposIni(false);
-          self.$('regTipoIni').focus();
-        }
+        if (e.key !== 'Escape') return;
+        if (self.abierta) { self.cerrarDetalle(); return; }
+        Object.keys(MULTIS).forEach(function (clave) {
+          var m = MULTIS[clave];
+          if (self.$(m.panel).hidden) return;
+          self.abrirMulti(clave, false);
+          self.$(m.boton).focus();
+        });
       });
     }
 
@@ -728,10 +782,22 @@ window.RegistroIniciativas = (function () {
       this.refrescar();
     }
 
-    abrirTiposIni(abrir) {
-      this.$('regTipoIniPanel').hidden = !abrir;
-      this.$('regTipoIni').setAttribute('aria-expanded', abrir ? 'true' : 'false');
+    // Abrir uno cierra el otro.
+    abrirMulti(clave, abrir) {
+      var self = this;
+      Object.keys(MULTIS).forEach(function (k) {
+        var m = MULTIS[k], este = k === clave && abrir;
+        if (k !== clave && !abrir) return;
+        self.$(m.panel).hidden = !este;
+        self.$(m.boton).setAttribute('aria-expanded', este ? 'true' : 'false');
+      });
     }
+
+    seleccion(clave) { return clave === 'estado' ? this.filtro.estados : this.filtro.tipos; }
+
+    // El texto de una opcion: la Descripcion del catalogo para Tipo; el
+    // propio valor para Estado.
+    rotuloMulti(clave, v) { return clave === 'tipo' ? this.registro.nombreTipo(v) : v; }
 
     ordenarPor(col) {
       if (!COLUMNAS[col]) return;
@@ -808,15 +874,18 @@ window.RegistroIniciativas = (function () {
 
     bloquearFiltros(texto) {
       var self = this;
-      ['regEstadoSel', 'regDirector'].concat(SELECTS_ORG).forEach(function (id) {
+      ['regDirector'].concat(SELECTS_ORG).forEach(function (id) {
         var sel = self.$(id);
         Catalogos.llenar(sel, [], texto || '—');
         sel.disabled = true;
       });
-      this.abrirTiposIni(false);
-      this.$('regTipoIni').textContent = texto || '—';
-      this.$('regTipoIni').disabled = true;
-      this.$('regTipoIniPanel').innerHTML = '';
+      Object.keys(MULTIS).forEach(function (clave) {
+        var m = MULTIS[clave];
+        self.abrirMulti(clave, false);
+        self.$(m.boton).textContent = texto || '—';
+        self.$(m.boton).disabled = true;
+        self.$(m.panel).innerHTML = '';
+      });
     }
 
     // ---- pintado ----
@@ -971,8 +1040,8 @@ window.RegistroIniciativas = (function () {
 
     pintarFiltros() {
       var f = this.filtro, r = this.registro;
-      this.pintarSelect('regEstadoSel', r.estados(), f.estado, 'Todos');
-      this.pintarTiposIni();
+      this.pintarMulti('estado');
+      this.pintarMulti('tipo');
       this.pintarSelect('regDirector', r.directores(), f.director, 'Todos');
       var self = this;
       f.cascada.estado(true, '').forEach(function (e, i) {
@@ -983,28 +1052,29 @@ window.RegistroIniciativas = (function () {
       this.$('regFiltrosCuenta').textContent = n ? (n === 1 ? '1 filtro activo' : n + ' filtros activos') : '';
     }
 
-    // Casillas: "Todas" arriba y un tipo por renglon. "Todas" va marcada
-    // solo con todo marcado; el boton dice lo elegido (o que no hay nada).
-    pintarTiposIni() {
-      var reg = this.registro;
-      var todos = reg.tiposIniciativa();
-      var marcados = this.filtro.tiposIniciativa();
-      var nombres = marcados.map(function (p) { return reg.nombreTipo(p); });
-      var todas = this.filtro.todosMarcados();
-      var boton = this.$('regTipoIni');
+    // Casillas: "Todas/Todos" arriba y una opcion por renglon. Esa casilla
+    // va marcada solo con todo marcado; el boton dice lo elegido (o que no
+    // hay nada).
+    pintarMulti(clave) {
+      var m = MULTIS[clave], sel = this.seleccion(clave), self = this;
+      var todos = sel.opciones();
+      var marcados = sel.lista();
+      var nombres = marcados.map(function (v) { return self.rotuloMulti(clave, v); });
+      var todas = sel.todosMarcados();
+      var boton = this.$(m.boton);
       boton.disabled = todos.length === 0;
-      boton.textContent = todas ? '— Todas —'
+      boton.textContent = todas ? m.textoTodas
         : marcados.length === 0 ? 'Ninguno'
-        : marcados.length === 1 ? nombres[0] : marcados.length + ' de ' + todos.length + ' tipos';
-      boton.setAttribute('title', todas ? '' : marcados.length ? nombres.join(', ') : 'Ningún tipo marcado: no se muestra ninguna iniciativa.');
+        : marcados.length === 1 ? nombres[0] : marcados.length + ' de ' + todos.length + ' ' + m.plural;
+      boton.setAttribute('title', todas ? '' : marcados.length ? nombres.join(', ') : m.ninguno);
       boton.classList.toggle('con-valor', !todas);
       function casilla(attr, valor, rotulo, marcada, clase) {
         return '<label class="ini-multi-op' + (clase ? ' ' + clase : '') + (marcada ? ' marcada' : '') + '">' +
           '<input type="checkbox" ' + attr + '="' + Escape.attr(valor) + '"' + (marcada ? ' checked' : '') + '>' +
           '<span>' + Escape.html(rotulo) + '</span></label>';
       }
-      this.$('regTipoIniPanel').innerHTML = casilla('data-tipo-todas', '', 'Todas', todas, 'ini-multi-todas') +
-        todos.map(function (t) { return casilla('data-tipo-ini', t, reg.nombreTipo(t), marcados.indexOf(t) >= 0, ''); }).join('');
+      this.$(m.panel).innerHTML = casilla(m.attrTodas, '', m.rotuloTodas, todas, 'ini-multi-todas') +
+        todos.map(function (t) { return casilla(m.attrUno, t, self.rotuloMulti(clave, t), marcados.indexOf(t) >= 0, ''); }).join('');
     }
 
     pintarSelect(id, opciones, valor, todos) {
@@ -1376,6 +1446,7 @@ window.RegistroIniciativas = (function () {
     FECHA_DEL_ESTADO: FECHA_DEL_ESTADO,
     URL_CATALOGO: URL_CATALOGO,
     Registro: Registro,
+    SeleccionVarios: SeleccionVarios,
     FiltroRegistro: FiltroRegistro,
     Cobertura: Cobertura,
     SolicitudCambio: SolicitudCambio,

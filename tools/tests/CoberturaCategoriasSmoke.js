@@ -390,10 +390,10 @@ pruebas.push(function () {
       [f6[0][2], f6[2][1]]);
     p.vista.filtro.todosTiposIniciativa(); p.vista.refrescar();
 
-    elegir(p, 'regEstadoSel', 'En Solución');
+    p.vista.filtro.elegirEstado('En Solución'); p.vista.refrescar();
     Check('F7 Estado: solo cuentan las de ese estado', ['con', 'sin', 'con'],
       filasCob(p).slice(0, 3).map(function (x) { return x[1]; }));
-    elegir(p, 'regEstadoSel', '');
+    p.vista.filtro.elegirEstado(''); p.vista.refrescar();
 
     elegir(p, 'covFiltro', 'sin');
     Check('F8 filtro Cobertura: sin', ['/B/Cat 4', '/B/Cat 5', '/C/Sola'], categoriasCob(p));

@@ -208,7 +208,12 @@
           <span class="ini-filtros-cuenta" id="regFiltrosCuenta" aria-live="polite"></span>
           <button type="button" class="btn linea chico" id="regLimpiar" hidden>Limpiar filtros</button>
         </div>
-        <div class="campo"><label for="regEstadoSel">Estado</label><select id="regEstadoSel" disabled></select></div>
+        <!-- Estado, varios a la vez (mismo control que Tipo de iniciativa). -->
+        <div class="campo ini-multi" id="regEstadoCampo">
+          <label for="regEstado">Estado</label>
+          <button type="button" class="ini-multi-boton" id="regEstado" aria-haspopup="true" aria-expanded="false" aria-controls="regEstadoPanel" disabled>—</button>
+          <div class="ini-multi-panel" id="regEstadoPanel" role="group" aria-label="Estados" hidden></div>
+        </div>
         <!-- Tipo de iniciativa (catalogo dbo.CatPrefijoProblem contra
              dbo.Problem.Prefijo), varios a la vez.
              No es la Agrupacion (TipoAgrupado), que ya no es filtro: sigue

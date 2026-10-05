@@ -18,6 +18,10 @@
 //      fondo y cambio de vista lo cierran.
 //   S) Detalle: "Solicitar cambios" (borrador validado, sin envio ni
 //      peticion al servidor) e "Historial de cambios (N)" plegado.
+//   S2) Estado: varios a la vez, mismo control y reglas que Tipo
+//      (SeleccionVarios): todos por omision, "Todos" alterna, ninguno =
+//      lista vacia, O entre estados, Y con los demas filtros, Limpiar,
+//      un solo panel abierto a la vez.
 //   T) Tipo de iniciativa = catalogo dbo.CatPrefijoProblem (tipos_iniciativa)
 //      contra el `prefijo` de cada iniciativa; NO tipo_iniciativa ni la
 //      Agrupacion. Opciones = catalogo completo, todas marcadas por omision, uno, varios (O), ninguno = no
@@ -191,6 +195,25 @@ function kpis(p) {
   return s;
 }
 function elegir(p, id, v) { p.sel(id).value = v; p.sel(id).disparar('change'); }
+// Casillas de un panel multi: "Todos/Todas" + una por opcion, :si/:no.
+function casillasDe(p, panel) {
+  var re = /<input type="checkbox" (data-[a-z]+-(?:todas|ini))="([^"]*)"( checked)?>/g, m, s = [];
+  while ((m = re.exec(p.sel(panel).innerHTML))) s.push((/todas$/.test(m[1]) ? 'Todos' : m[2]) + (m[3] ? ':si' : ':no'));
+  return s;
+}
+function marcarEn(p, panel, attr, valor) {
+  var el = Elemento('casilla');
+  el.setAttribute(attr, valor);
+  p.sel(panel).disparar('change', { target: el });
+}
+// Deja marcado solo el estado `v` (o todos con '') por el panel, como lo
+// haria alguien con el raton.
+function soloEstado(p, v) {
+  for (var n = 0; n < 3 && p.sel('regEstado').textContent !== (v ? 'Ninguno' : '— Todos —'); n++) {
+    marcarEn(p, 'regEstadoPanel', 'data-estado-todas', '');
+  }
+  if (v) marcarEn(p, 'regEstadoPanel', 'data-estado-ini', v);
+}
 function clicFolio(p, folio) {
   var boton = Elemento('boton');
   boton.setAttribute('data-folio', folio);
@@ -326,8 +349,8 @@ pruebas.push(function () {
       /data-folio="HAR 2025-000003"[\s\S]*?ini-sem verde[^>]*><\/span><span class="ini-tenue">—/.test(html));
     Check('L4 cuenta', '5 iniciativas', p.sel('regCuenta').textContent);
     Check('L4 sin "Mostrar mas"', true, p.sel('regMas').hidden);
-    Check('L5 selects llenos', [['En Análisis', 'En Solución', 'Cerrado'], ['Dir A', 'Dir B'], ['PO 1', 'PO 2', 'PO 3']],
-      [p.sel('regEstadoSel').opciones(), p.sel('regDirector').opciones(), p.sel('regPo').opciones()]);
+    Check('L5 filtros llenos', [['Todos:si', 'En Análisis:si', 'En Solución:si', 'Cerrado:si'], ['Dir A', 'Dir B'], ['PO 1', 'PO 2', 'PO 3']],
+      [casillasDe(p, 'regEstadoPanel'), p.sel('regDirector').opciones(), p.sel('regPo').opciones()]);
     Check('L5 el select de Agrupacion no se llena', '', p.sel('regTipo').innerHTML);
     Check('L5 la columna Agrupacion sigue en la tabla', true, /data-col="Agrupación"><span class="chip ini-chip">Mejora/.test(html));
 
@@ -341,7 +364,7 @@ pruebas.push(function () {
     elegir(p, 'regCategoria', '/A/Cat 2');
     Check('L7 PO -> SO -> Categoria', ['MAP 2026-000002'], folios(p));
 
-    elegir(p, 'regEstadoSel', 'Cerrado');
+    soloEstado(p, 'Cerrado');
     Check('L8 sin coincidencias: aviso, sin tabla', [false, true, ''], [p.sel('regVacio').hidden, p.sel('regTablaCaja').hidden, p.sel('regCuenta').textContent]);
     Check('L8 indicadores en 0 (dato real, no error)', ['0', '0', '0', '0'], kpis(p));
     p.sel('regLimpiarVacio').disparar('click');
@@ -404,6 +427,106 @@ pruebas.push(function () {
     Check('E12 cambiar de vista cierra el detalle', true, p.sel('regDetalle').hidden);
     clicFolio(p, 'NO EXISTE');
     Check('E13 folio desconocido no abre', true, p.sel('regDetalle').hidden);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// S2) Estado: varios a la vez (SeleccionVarios), como Tipo de iniciativa
+// ---------------------------------------------------------------------------
+// Estados: PRB 1 En Solución; MAP 2, REQ 4, PRB 5 En Análisis; HAR 3 Cerrado.
+pruebas.push(function () {
+  var S = new R.SeleccionVarios(function () { return ['a', 'b', 'c']; });
+  Check('S2-1 SeleccionVarios: todos por omision', [null, ['a', 'b', 'c'], true, false, true],
+    [S.marcados, S.lista(), S.todosMarcados(), S.activo(), S.pasa('z')]);
+  S.alternar('b');
+  Check('S2-1 desmarcar uno', [['a', 'c'], true, false], [S.marcados, S.pasa('a'), S.pasa('b')]);
+  S.alternar('b');
+  Check('S2-1 marcar el que faltaba vuelve a todos', null, S.marcados);
+  S.todas();
+  Check('S2-1 Todas con todo: ninguno', [[], false], [S.marcados, S.pasa('a')]);
+  S.todas();
+  Check('S2-1 Todas con nada: todos', null, S.marcados);
+  S.solo('c');
+  Check('S2-1 solo', ['c'], S.marcados);
+  S.solo('zz');
+  Check('S2-1 solo fuera de opciones = todos', null, S.marcados);
+
+  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var f = new R.FiltroRegistro(reg);
+  function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }); }
+  var TODOS = ['En Análisis', 'En Solución', 'Cerrado'];
+  Check('S2-2 por omision: todos los estados, sin filtro', [TODOS, 5, 0], [f.estadosMarcados(), pasan().length, f.activos()]);
+  f.alternarEstado('En Análisis');
+  Check('S2-3 sin En Análisis', ['PRB 2026-000001', 'HAR 2025-000003'], pasan());
+  f.alternarEstado('En Solución');
+  Check('S2-3 solo Cerrado', [['Cerrado'], ['HAR 2025-000003'], 1], [f.estadosMarcados(), pasan(), f.activos()]);
+  f.alternarEstado('En Solución');
+  Check('S2-4 varios estados = O', ['PRB 2026-000001', 'HAR 2025-000003'], pasan());
+  f.todosEstados();
+  Check('S2-5 Todos con algunos: todos', [5, 0], [pasan().length, f.activos()]);
+  f.todosEstados();
+  Check('S2-5 Todos con todo: ninguno, lista vacia', [[], [], 1], [f.estadosMarcados(), pasan(), f.activos()]);
+  f.todosEstados();
+  f.alternarEstado('Cerrado');
+  f.alternarTipoIniciativa('PRB');
+  Check('S2-6 Estado (sin Cerrado) Y Tipo (sin PRB)', [['MAP 2026-000002', 'REQ 2026-000004'], 2], [pasan(), f.activos()]);
+  f.limpiar();
+  Check('S2-7 Limpiar: todos', [TODOS, 5, 0], [f.estadosMarcados(), pasan().length, f.activos()]);
+  f.elegirEstado('Cerrado');
+  Check('S2-8 elegirEstado = solo ese', ['HAR 2025-000003'], pasan());
+  f.elegirEstado('');
+  Check('S2-8 elegirEstado vacio = todos', 5, pasan().length);
+
+  var p = Pagina(ok(DATOS));
+  function folios2() { return folios(p); }
+  Check('S2-9 cargando: boton bloqueado', true, p.sel('regEstado').disabled);
+  return esperar().then(function () {
+    Check('S2-9 listo: Todos por omision', ['— Todos —', false, false],
+      [p.sel('regEstado').textContent, p.sel('regEstado').disabled, p.sel('regEstado').classList.contains('con-valor')]);
+    Check('S2-9 casillas: Todos y cada estado (activos primero)',
+      ['Todos:si', 'En Análisis:si', 'En Solución:si', 'Cerrado:si'], casillasDe(p, 'regEstadoPanel'));
+    Check('S2-10 panel cerrado al inicio', [true, 'false'], [p.sel('regEstadoPanel').hidden, p.sel('regEstado').getAttribute('aria-expanded')]);
+    p.sel('regEstado').disparar('click');
+    Check('S2-10 el boton abre el panel', [false, 'true'], [p.sel('regEstadoPanel').hidden, p.sel('regEstado').getAttribute('aria-expanded')]);
+    p.sel('regTipoIni').disparar('click');
+    Check('S2-10 abrir Tipo cierra Estado (uno a la vez)', [true, 'false', false],
+      [p.sel('regEstadoPanel').hidden, p.sel('regEstado').getAttribute('aria-expanded'), p.sel('regTipoIniPanel').hidden]);
+    p.sel('regEstado').disparar('click');
+    Check('S2-10 ... y al reves', [false, true], [p.sel('regEstadoPanel').hidden, p.sel('regTipoIniPanel').hidden]);
+
+    marcarEn(p, 'regEstadoPanel', 'data-estado-todas', '');
+    Check('S2-11 Todos con todo marcado: ninguno, lista vacia',
+      ['Ninguno', true, ['Todos:no', 'En Análisis:no', 'En Solución:no', 'Cerrado:no'], [], false, '1 filtro activo'],
+      [p.sel('regEstado').textContent, p.sel('regEstado').classList.contains('con-valor'), casillasDe(p, 'regEstadoPanel'),
+       folios2(), p.sel('regVacio').hidden, p.sel('regFiltrosCuenta').textContent]);
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'Cerrado');
+    Check('S2-12 un estado', ['Cerrado', ['HAR 2025-000003']], [p.sel('regEstado').textContent, folios2()]);
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'En Solución');
+    Check('S2-12 dos estados (O)', ['2 de 3 estados', 'En Solución, Cerrado', ['PRB 2026-000001', 'HAR 2025-000003']],
+      [p.sel('regEstado').textContent, p.sel('regEstado').getAttribute('title'), folios2()]);
+    Check('S2-12 el panel sigue abierto al elegir', false, p.sel('regEstadoPanel').hidden);
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'En Análisis');
+    Check('S2-13 marcar el que faltaba: Todos otra vez', ['— Todos —', 5, ''],
+      [p.sel('regEstado').textContent, folios2().length, p.sel('regFiltrosCuenta').textContent]);
+
+    soloEstado(p, 'En Análisis');
+    elegir(p, 'regPo', 'PO 1');
+    Check('S2-14 Estado Y PO', ['MAP 2026-000002', 'PRB 2026-000005'], folios2());
+    p.sel('regLimpiar').disparar('click');
+    Check('S2-15 Limpiar filtros: Todos', ['— Todos —', 5, ['Todos:si', 'En Análisis:si', 'En Solución:si', 'Cerrado:si']],
+      [p.sel('regEstado').textContent, folios2().length, casillasDe(p, 'regEstadoPanel')]);
+
+    p.doc.disparar('keydown', { key: 'Escape' });
+    Check('S2-16 Escape cierra el panel de Estado', [true, 'false', 1],
+      [p.sel('regEstadoPanel').hidden, p.sel('regEstado').getAttribute('aria-expanded'), p.sel('regEstado').enfocado]);
+    p.sel('regEstado').disparar('click');
+    p.doc.disparar('click', { target: Elemento('fuera') });
+    Check('S2-16 clic fuera lo cierra', true, p.sel('regEstadoPanel').hidden);
+
+    var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
+    Check('S2-17 marcado: el select viejo ya no esta; boton multi en su lugar', [false, true],
+      [/id="regEstadoSel"/.test(html),
+       /<div class="campo ini-multi" id="regEstadoCampo">\s*<label for="regEstado">Estado<\/label>\s*<button type="button" class="ini-multi-boton" id="regEstado"/.test(html)]);
   });
 });
 
@@ -625,7 +748,7 @@ pruebas.push(function () {
 
     elegir(p, 'regPo', 'PO 3');
     Check('T14 junto con PO', ['HAR 2025-000003'], folios(p));
-    elegir(p, 'regEstadoSel', 'Cerrado');
+    soloEstado(p, 'Cerrado');
     Check('T14 ... y Estado', ['HAR 2025-000003'], folios(p));
 
     p.sel('regLimpiar').disparar('click');
