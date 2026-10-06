@@ -131,6 +131,14 @@
           </button>
         </li>
         <li>
+          <button class="mnav" id="mtab-analisis" data-tab="analisis" type="button" title="Análisis de servicios">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M7.5 12.5v-2M10.5 12.5v-4M13.5 12.5v-3"/>
+            </svg>
+            <span class="mnav-txt">Análisis de servicios</span>
+          </button>
+        </li>
+        <li>
           <button class="mnav" id="mtab-call" data-tab="call" type="button" title="Call Center">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M4.5 5.5 8 4l2.2 4-2 1.7a12 12 0 0 0 6.1 6.1l1.7-2 4 2.2-1.5 3.5a2 2 0 0 1-2.1 1.1C10.4 19.7 4.3 13.6 3.4 7.6a2 2 0 0 1 1.1-2.1z"/>
@@ -378,6 +386,13 @@
        pestaña: dashboard.html no pide nada a qare.ashx al cargar, y si el
        montaje o la API fallan el resto de las pestañas no se entera. -->
   <div id="tab-qare" class="maintab-content" role="region" aria-labelledby="mtab-qare"></div>
+
+  <!-- ================================================ Analisis de servicios
+       Contenedor vacio, como QARE. TableroAnalisis (dashboard.js) trae
+       analisis/analisis.html, analisis.css y analisis.js la primera vez que se
+       abre la pestaña; analisis.js pide la lista de servicios y, al pulsar
+       Analizar, los tickets a handlers/analisis.ashx (47_analisis_servicios.sql). -->
+  <div id="tab-analisis" class="maintab-content" role="region" aria-labelledby="mtab-analisis"></div>
 
   <!-- ================================================ Call Center de Servicios TI
        Pestana propia. El bloque es el MISMO de siempre -mismos ids, mismas

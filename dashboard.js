@@ -4078,6 +4078,23 @@ const TableroQare = moduloEmbebido({
   },
 });
 
+/* Analisis de servicios: mismo trato que QARE. El modulo publica
+   window.TableroAnalisisModulo al arrancar y al volver a la pestaña solo se
+   redibujan sus graficas si cambio el ancho; no se repite ninguna peticion a
+   analisis.ashx (el analisis se pide con el boton Analizar). */
+const TableroAnalisis = moduloEmbebido({
+  nombre: 'Análisis de servicios',
+  base: 'analisis/',
+  id: 'tab-analisis',
+  pagina: 'analisis.html',
+  hoja: 'analisis.css',
+  guion: 'analisis.js',
+  alVolver: () => {
+    const modulo = window.TableroAnalisisModulo;
+    if (modulo) modulo.redimensionar();
+  },
+});
+
 /* =======================================================================
    Pestanas de SLA y Call Center: un solo tablero en dos vistas
    -----------------------------------------------------------------------
@@ -4171,6 +4188,7 @@ const MODULOS = {
   experiencia: TableroExperiencia,
   qa: TableroQa,
   qare: TableroQare,
+  analisis: TableroAnalisis,
   call: pestanaSla('tab-call'),
   tablero: TableroExterno,
 };
