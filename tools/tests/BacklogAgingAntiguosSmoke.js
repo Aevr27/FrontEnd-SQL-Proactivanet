@@ -536,5 +536,14 @@ T.poner({ resumen: { aging: [] }, antiguos: { tickets: [], total: 0 } });
 T.renderAntiguos();
 Check('sin tickets: mensaje vacio', true, /class="vacio"/.test(nodos['tabla-antiguos-bl'].innerHTML));
 
+// Las cifras del cubo se comportan como la flecha, no como texto: no se
+// seleccionan, no se subrayan y al pasar el raton encienden la flecha.
+var css = fs.readFileSync(path.join(raiz, 'backlog', 'backlog.css'), 'utf8');
+var reglaCifra = (/\.n1row\.dd-flecha \.dd-cifra \{([^}]*)\}/.exec(css) || [])[1] || '';
+Check('cifras: user-select none', true, /(^|[^-])user-select:\s*none/.test(reglaCifra));
+Check('cifras: cursor de mano', true, /cursor:\s*pointer/.test(reglaCifra));
+Check('cifras: sin subrayado', false, /\.dd-cifra[^{]*\{[^}]*text-decoration/.test(css));
+Check('cifras: hover enciende la flecha', true, /:has\(\.dd-cifra:hover\) \.flecha-dd/.test(css));
+
 console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\nTodo PASS');
 process.exit(fallos ? 1 : 0);

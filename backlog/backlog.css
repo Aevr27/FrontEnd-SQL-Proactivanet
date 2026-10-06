@@ -102,9 +102,11 @@ header.top #estado-carga-bl:empty { display: none; }
 .flecha-dd::before { content: "\25B8"; }
 .n1row.open .flecha-dd::before { content: "\25BE"; }
 .flecha-dd:hover, .flecha-dd:focus-visible { color: var(--accent); }
-/* Las cifras del cubo despliegan igual que la flecha: blanco mas grande. */
-.n1row.dd-flecha .dd-cifra { cursor: pointer; }
-.n1row.dd-flecha .dd-cifra:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
+/* Las cifras del cubo son una extension de la flecha, no texto ni enlace:
+   no se seleccionan (ni con doble clic), no se subrayan, y al pasar el raton
+   se enciende la flecha de su fila, que es lo que van a accionar. */
+.n1row.dd-flecha .dd-cifra { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.n1row.dd-flecha:has(.dd-cifra:hover) .flecha-dd { color: var(--accent); }
 
 /* ---- Tickets mas antiguos: una tarjeta por lider ---- */
 .antiguos-lider {
