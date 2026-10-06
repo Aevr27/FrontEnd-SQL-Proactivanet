@@ -92,7 +92,7 @@ header.top #estado-carga-bl:empty { display: none; }
    La fila .n1row de esta tabla no escucha clics (activarDrillDown con
    soloFlecha): la flecha es un boton de verdad y la del ::before de
    dashboard.css se apaga para que no salgan dos. Sin cursor de mano en la
-   fila: ni las cifras ni el fondo hacen nada. */
+   fila: el fondo no hace nada; las cifras (.dd-cifra) despliegan. */
 .n1row.dd-flecha { cursor: default; }
 .n1row.dd-flecha td:first-child::before { content: none; }
 .flecha-dd {
@@ -102,6 +102,9 @@ header.top #estado-carga-bl:empty { display: none; }
 .flecha-dd::before { content: "\25B8"; }
 .n1row.open .flecha-dd::before { content: "\25BE"; }
 .flecha-dd:hover, .flecha-dd:focus-visible { color: var(--accent); }
+/* Las cifras del cubo despliegan igual que la flecha: blanco mas grande. */
+.n1row.dd-flecha .dd-cifra { cursor: pointer; }
+.n1row.dd-flecha .dd-cifra:hover { text-decoration: underline dotted; text-underline-offset: 3px; }
 
 /* ---- Tickets mas antiguos: una tarjeta por lider ---- */
 .antiguos-lider {

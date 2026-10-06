@@ -5,8 +5,9 @@
 //     grupos que tienen tickets en el, la suma de sus grupos es el total del
 //     cubo, ningun grupo sale en un cubo que no es el suyo, y los filtros
 //     (lider, grupo, antiguedad) siguen recortando la tabla;
-//     Solo la flecha despliega, solo el nombre filtra; cifras y fondo de la
-//     fila no hacen nada, y filtrar no pide nada a la red;
+//     La flecha y las cifras del cubo (cada lider y el Total) despliegan, solo
+//     el nombre filtra, el fondo de la fila no hace nada, y nada de eso pide
+//     algo a la red;
 //   - "Tickets mas antiguos": una tarjeta por lider con sus mas viejos por
 //     FechaRegistro (empates por codigo, sin fecha al final), 10 al abrir y
 //     "Ver 25 mas" por lider -10, 35, 60, 85, 100- sin pasar de 100, sin red,
@@ -167,7 +168,7 @@ var codigo =
   recortar('visiblesDe') + recortar('verMasAntiguos') + recortar('renderAntiguos') +
   '\nreturn { filtro: filtro, poner: function (d) { datos = d; },' +
   ' repintados: function () { return repintados; }, visibles: visiblesAntiguos,' +
-  ' alternarFiltro: alternarFiltro,' +
+  ' alternarFiltro: alternarFiltro, activarDrillDown: activarDrillDown,' +
   ' gruposPorAging: gruposPorAging, renderTablaAging: renderTablaAging,' +
   ' antiguosVisibles: antiguosVisibles, antiguosPorLider: antiguosPorLider,' +
   ' renderAntiguos: renderAntiguos, masViejoPrimero: masViejoPrimero };';
@@ -251,8 +252,8 @@ limpiarFiltro(); T.poner({ resumen: { aging: [] }, antiguos: {} }); T.renderTabl
 Check('sin datos: mensaje vacio', true, /class="vacio"/.test(nodos['tabla-aging-bl'].innerHTML));
 
 // --------------------------------------- Resumen por antiguedad: clics
-// Solo la flecha despliega, solo el nombre filtra; las cifras y el fondo de
-// la fila no hacen nada. Filtrar repinta en memoria: ningun fetch.
+// La flecha y las cifras despliegan (misma accion), solo el nombre filtra, el
+// fondo de la fila no hace nada. Filtrar repinta en memoria: ningun fetch.
 limpiarFiltro();
 T.poner({ resumen: { aging: aging }, antiguos: {} });
 T.renderTablaAging();
@@ -278,28 +279,94 @@ clic(flecha0);
 Check('flecha otra vez: pliega', 0, abiertos(0));
 Check('flecha otra vez: aria-expanded=false', 'false', flecha0.getAttribute('aria-expanded'));
 
+// Cifras del cubo: las de cada lider y la del Total. Hacen lo MISMO que la
+// flecha: desplegar / plegar, nunca filtrar.
 var celdasNum = f0.querySelectorAll('td').filter(function (td) { return td.classList.contains('num'); });
-Check('la fila tiene cifras', true, celdasNum.length > 0);
-celdasNum.forEach(function (td) { clic(td); });
-celdasNum.forEach(function (td) { td.querySelectorAll('b').forEach(clic); });
-Check('cifras: no despliegan', 0, abiertos(0));
-Check('cifras: no filtran', null, T.filtro.aging);
-Check('cifras: no repintan', rep0, T.repintados());
-clic(f0);
-f0.querySelectorAll('td').forEach(clic);
+var cifrasLider = celdasNum.slice(0, -1).filter(function (td) { return td.classList.contains('dd-cifra'); });
+var celdaTotal = celdasNum[celdasNum.length - 1];
+var vaciasLider = celdasNum.slice(0, -1).filter(function (td) { return !td.classList.contains('dd-cifra'); });
+Check('la fila tiene cifras de lider', true, cifrasLider.length > 0);
+Check('Total del cubo marcado .dd-cifra', true, celdaTotal.classList.contains('dd-cifra'));
+// Celda de lider sin tickets: sin .dd-cifra (es fondo) y vacia en el HTML.
+var filasCuboHtml = tablaAg.innerHTML.split('<tr class="n1row').slice(1).map(function (x) { return x.slice(0, x.indexOf('</tr>')); });
+Check('fila de cubo: toda cifra lleva .dd-cifra; sin cifra, celda vacia', true,
+  filasCuboHtml.every(function (x) { return !/<td class="num">[^<]/.test(x); }));
+// Un lider sin tickets en un cubo: su celda va vacia, sin .dd-cifra.
+T.poner({ resumen: { aging: [{ Aging: '1-7 dias', AgingSort: 2, Lider: 'Ana', Grupo: 'Ana / G0', Tickets: 3 },
+  { Aging: '+1 mes', AgingSort: 5, Lider: 'Beto', Grupo: 'Beto / G0', Tickets: 4 }] }, antiguos: {} });
+T.renderTablaAging();
+var celdasMini = nodos['tabla-aging-bl'].querySelectorAll('.n1row')[0].querySelectorAll('td');
+Check('lider sin tickets en el cubo: celda sin .dd-cifra', 'true|false|true',
+  [1, 2, 3].map(function (k) { return celdasMini[k].classList.contains('dd-cifra'); }).join('|'));
+T.poner({ resumen: { aging: aging }, antiguos: {} });
+T.renderTablaAging();
+tablaAg = nodos['tabla-aging-bl']; f0 = filaCubo(0); flecha0 = f0.querySelector('.flecha-dd'); nombre0 = f0.querySelector('.filtrable');
+celdasNum = f0.querySelectorAll('td').filter(function (td) { return td.classList.contains('num'); });
+cifrasLider = celdasNum.slice(0, -1).filter(function (td) { return td.classList.contains('dd-cifra'); });
+celdaTotal = celdasNum[celdasNum.length - 1];
+vaciasLider = celdasNum.slice(0, -1).filter(function (td) { return !td.classList.contains('dd-cifra'); });
+function probarCifra(nombre, td, blanco) {
+  clic(blanco || td);
+  Check(nombre + ': despliega los grupos del cubo', hijosCubo(0).length, abiertos(0));
+  Check(nombre + ': fila .open y aria-expanded=true', 'true|true', f0.classList.contains('open') + '|' + flecha0.getAttribute('aria-expanded'));
+  Check(nombre + ': no filtra', null, T.filtro.aging);
+  Check(nombre + ': no repinta el tablero', rep0, T.repintados());
+  Check(nombre + ': ningun fetch', red0, pedidos);
+  Check(nombre + ': solo ese cubo', 0, abiertos(1));
+  clic(blanco || td);
+  Check(nombre + ' otra vez: pliega', 0, abiertos(0));
+  Check(nombre + ' otra vez: aria-expanded=false', 'false', flecha0.getAttribute('aria-expanded'));
+  Check(nombre + ' otra vez: no filtra', null, T.filtro.aging);
+}
+probarCifra('cifra de lider (primera)', cifrasLider[0]);
+probarCifra('cifra de lider (ultima)', cifrasLider[cifrasLider.length - 1]);
+probarCifra('cifra Total', celdaTotal);
+probarCifra('cifra Total, clic sobre su <b>', celdaTotal, celdaTotal.querySelector('b'));
+// Flecha y cifra comparten estado: abrir con una, cerrar con la otra.
+clic(flecha0); clic(celdaTotal);
+Check('flecha abre, cifra cierra', '0|false', abiertos(0) + '|' + flecha0.getAttribute('aria-expanded'));
+clic(cifrasLider[0]); clic(flecha0);
+Check('cifra abre, flecha cierra', '0|false', abiertos(0) + '|' + flecha0.getAttribute('aria-expanded'));
+// En todas las filas de cubo, cada Total despliega SU cubo.
+tablaAg.querySelectorAll('.n1row').forEach(function (f, k) {
+  var c = f.querySelectorAll('.dd-cifra');
+  clic(c[c.length - 1]);
+  Check('[' + f.querySelector('.filtrable').dataset.valor + '] su Total despliega su cubo', hijosCubo(k).length, abiertos(k));
+  clic(c[c.length - 1]);
+});
+
+// Fondo: la fila, la celda del nombre fuera de la etiqueta y las celdas
+// vacias de lider no hacen nada.
+// Cada clic por separado: dos clics seguidos se anularian entre si.
+[['la fila', f0], ['la celda del nombre', f0.querySelectorAll('td')[0]]].concat(
+  vaciasLider.map(function (td) { return ['celda vacia de lider', td]; })).forEach(function (par) {
+  clic(par[1]);
+  Check('fondo (' + par[0] + '): no despliega ni filtra', '0|null|false', abiertos(0) + '|' + T.filtro.aging + '|' + f0.classList.contains('open'));
+});
 Check('fondo de la fila: no despliega', 0, abiertos(0));
 Check('fondo de la fila: no filtra', null, T.filtro.aging);
 Check('fondo de la fila: no repinta', rep0, T.repintados());
+Check('la fila .n1row no tiene listener propio (no toda la fila es clicable)', 0,
+  tablaAg.querySelectorAll('.n1row').filter(function (f) { return f.oyentes.length > 0; }).length);
 var filaTotal = tablaAg.querySelectorAll('tr').filter(function (tr) {
   return !tr.classList.contains('n1row') && !tr.classList.contains('n2row') && tr.parent.tagName === 'tbody'; })[0];
 clic(filaTotal);
-Check('fila de total: no filtra', null, T.filtro.aging);
+filaTotal.querySelectorAll('td').forEach(clic);
+Check('fila de total general: no filtra ni despliega', 'null|0', T.filtro.aging + '|' + abiertos(0));
+// Las cifras de los grupos desplegados no son .dd-cifra: no pliegan el cubo.
+clic(flecha0);
+hijosCubo(0)[0].querySelectorAll('td').filter(function (td) { return td.classList.contains('num'); }).forEach(clic);
+Check('cifras de un grupo: el cubo sigue abierto, sin filtro', hijosCubo(0).length + '|null',
+  abiertos(0) + '|' + T.filtro.aging);
+clic(flecha0);
 
 clic(nombre0);
 Check('nombre del cubo: filtra todo el tablero por ese cubo', cubo0, T.filtro.aging);
 Check('nombre del cubo: repinta una vez, en memoria', rep0 + 1, T.repintados());
 Check('nombre del cubo: ningun fetch', red0, pedidos);
 Check('nombre del cubo: no despliega', 0, abiertos(0));
+Check('nombre del cubo: tampoco abre la fila filtrada', false,
+  nodos['tabla-aging-bl'].querySelectorAll('.n1row')[0].classList.contains('open'));
 var tablaAg2 = nodos['tabla-aging-bl'];
 Check('filtro activo: queda una fila de cubo, marcada', 'fila-sel',
   tablaAg2.querySelectorAll('.n1row').length === 1 && tablaAg2.querySelectorAll('.n1row')[0].classList.contains('fila-sel') ? 'fila-sel' : 'no');
@@ -309,8 +376,30 @@ Check('quitar filtro: ningun fetch', red0, pedidos);
 // El grupo dentro del cubo sigue filtrando por grupo.
 T.renderTablaAging();
 var nombreGrupo = nodos['tabla-aging-bl'].querySelectorAll('.n2row')[0].querySelector('.filtrable');
+var redG = pedidos;
 clic(nombreGrupo);
 Check('nombre de grupo en el drill-down: filtra por grupo', nombreGrupo.dataset.valor, T.filtro.grupo);
+Check('nombre de grupo: no toca el filtro de antiguedad', null, T.filtro.aging);
+Check('nombre de grupo: ningun fetch', redG, pedidos);
+limpiarFiltro();
+
+// "Lideres (drill-down)" sigue igual: sin soloFlecha, toda la fila .n1row
+// despliega y el nombre filtra sin desplegar. Mismo activarDrillDown real.
+var lid = documento.getElementById('tabla-lideres-prueba');
+lid.innerHTML = '<table><tbody><tr class="n1row" data-n1="0"><td><span class="swatch"></span>' +
+  '<span class="filtrable" data-dim="lider" data-valor="Ana">Ana</span></td><td class="num">7</td></tr>' +
+  '<tr class="n2row" data-p1="0"><td><span class="filtrable" data-dim="grupo" data-valor="Ana / G0">Ana / G0</span></td>' +
+  '<td class="num">7</td></tr></tbody></table>';
+T.activarDrillDown(lid);
+var filaL = lid.querySelector('.n1row'), hijoL = lid.querySelector('.n2row');
+clic(filaL.querySelectorAll('td')[1]);
+Check('Lideres: clic en una cifra despliega (como antes)', true, hijoL.classList.contains('show'));
+clic(filaL);
+Check('Lideres: clic en el fondo pliega (como antes)', false, hijoL.classList.contains('show'));
+var repL = T.repintados();
+clic(filaL.querySelector('.filtrable'));
+Check('Lideres: el nombre filtra por lider', 'Ana', T.filtro.lider);
+Check('Lideres: el nombre repinta en memoria', repL + 1, T.repintados());
 limpiarFiltro();
 
 // renderTodo y alternarFiltro reales: repintan, no piden nada.

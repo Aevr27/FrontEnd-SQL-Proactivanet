@@ -886,9 +886,11 @@ const TableroBacklog = (function () {
      .filtrable filtra todo el tablero por su data-dim / data-valor. Lo
      comparten "Lideres (drill-down)" y "Resumen por antiguedad".
 
-     Con `soloFlecha` la fila NO escucha clics: solo su boton .flecha-dd
-     despliega o pliega, y solo el .filtrable filtra. Las cifras y el fondo de
-     la fila no hacen nada. Es el modo de "Resumen por antiguedad". */
+     Con `soloFlecha` la fila NO escucha clics: despliegan o pliegan su boton
+     .flecha-dd y sus cifras marcadas .dd-cifra -un blanco mas grande para la
+     MISMA accion que la flecha, nunca un filtro-, y solo el .filtrable
+     filtra. El fondo de la fila no hace nada. Es el modo de "Resumen por
+     antiguedad". */
   function activarDrillDown(cont, { soloFlecha = false } = {}) {
     cont.querySelectorAll('.n1row').forEach(fila => {
       const alternar = () => {
@@ -899,10 +901,13 @@ const TableroBacklog = (function () {
       };
       if (soloFlecha) {
         const flecha = fila.querySelector('.flecha-dd');
-        if (flecha) flecha.addEventListener('click', e => {
+        const desplegar = e => {
           e.stopPropagation();
-          flecha.setAttribute('aria-expanded', String(alternar()));
-        });
+          const abierto = alternar();
+          if (flecha) flecha.setAttribute('aria-expanded', String(abierto));
+        };
+        if (flecha) flecha.addEventListener('click', desplegar);
+        fila.querySelectorAll('.dd-cifra').forEach(c => c.addEventListener('click', desplegar));
         return;
       }
       fila.addEventListener('click', e => {
@@ -1008,10 +1013,10 @@ const TableroBacklog = (function () {
   /* Matriz antiguedad x lider con drill-down al estilo de "Lideres": cada
      cubo es una fila .n1row que se despliega en los grupos que tienen
      tickets en ese cubo, con su cifra bajo la columna de su lider (o de
-     'Otros' si el lider no entro en el top de la matriz). Solo la flecha
-     despliega; solo el nombre del cubo o del grupo filtra el tablero, igual
-     que la grafica de antiguedad y que la tabla de lideres. Las cifras no
-     hacen nada. */
+     'Otros' si el lider no entro en el top de la matriz). La flecha y las
+     cifras del cubo (.dd-cifra, tambien el Total) despliegan; solo el nombre
+     del cubo o del grupo filtra el tablero, igual que la grafica de
+     antiguedad y que la tabla de lideres. Una celda vacia es fondo. */
   function renderTablaAging() {
     const cont = document.getElementById('tabla-aging-bl');
     const filasAging = agingFiltrado();
@@ -1027,12 +1032,12 @@ const TableroBacklog = (function () {
     const filas = m.buckets.map((b, i) => {
       const celdas = m.lideres.map(l => {
         const v = m.valores.get(`${b}|${l}`) ?? 0;
-        return `<td class="num">${v ? FMT(v) : ''}</td>`;
+        return v ? `<td class="num dd-cifra">${FMT(v)}</td>` : '<td class="num"></td>';
       }).join('');
       const sel = filtro.aging === b ? ' fila-sel' : '';
       let html = `<tr class="n1row dd-flecha${sel}" data-n1="${i}"><td><button type="button" class="flecha-dd"
           aria-expanded="false" aria-label="Desplegar grupos de ${escapeAttr(b)}"></button><b><span class="filtrable"
-          data-dim="aging" data-valor="${escapeAttr(b)}">${escapeHtml(b)}</span></b></td>${celdas}<td class="num"><b>${FMT(m.totalPorBucket.get(b))}</b></td></tr>`;
+          data-dim="aging" data-valor="${escapeAttr(b)}">${escapeHtml(b)}</span></b></td>${celdas}<td class="num dd-cifra"><b>${FMT(m.totalPorBucket.get(b))}</b></td></tr>`;
       for (const g of grupos.get(b) || []) {
         const col = columnaDe(g.Lider);
         const celdasG = m.lideres.map(l => `<td class="num">${l === col ? FMT(g.Tickets) : ''}</td>`).join('');
