@@ -11,13 +11,13 @@
 //   6) orden ordinal por categoria
 //   7) el Manager no viaja
 //
-// Y DashboardCatalogos.TiposUnicos, la limpieza de los Tipo de iniciativa
-// que lee TiposIniciativa (dbo.Problem.TipoIniciativa):
-//   8) NBSP/espacios normalizados, vacios y null fuera
-//   9) repetidos sin distinguir mayusculas: una sola grafia (la primera en
-//      orden ordinal)
-//  10) orden ordinal
-//  11) la consulta de TiposIniciativa es solo lectura (SELECT)
+// Y el catalogo de Tipo de iniciativa (dbo.CatPrefijoProblem):
+//   8) DashboardCatalogos.PrefijosOrdenados: prefijo sin espacios, vacios y
+//      null fuera, sin Descripcion -> el prefijo como texto
+//   9) repetidos sin distinguir mayusculas: se queda el primero
+//  10) Problem (PRB) primero, el resto por Descripcion
+//  11) las consultas de PrefijosIniciativa y PrefijosPorFolio son solo
+//      lectura (SELECT) y no leen Problem.TipoIniciativa
 //
 // Compilar y correr desde la raiz del repo:
 //   csc /nologo /target:library /out:dir.dll /r:System.dll /r:System.Data.dll ^
@@ -89,22 +89,35 @@ public static class AsignacionesIniciativasSmoke
         Check("3 dada de baja no sale", false, baja);
         Check("7 sin manager", false, mgr);
 
-        // ---- Tipos de iniciativa ----
-        var tipos = DashboardCatalogos.TiposUnicos(new[] {
-            "Mejora", " Problem" + NBSP, null, "", "   ", "mejora", "Adopcion", "SorIA", "MEJORA"
+        // ---- Tipos de iniciativa (dbo.CatPrefijoProblem) ----
+        var tipos = DashboardCatalogos.PrefijosOrdenados(new[] {
+            new KeyValuePair<string, string>("SOR", "SorIA"),
+            new KeyValuePair<string, string>(" HAR" + NBSP, "Hardware"),
+            new KeyValuePair<string, string>(null, "x"),
+            new KeyValuePair<string, string>("", "x"),
+            new KeyValuePair<string, string>("har", "Repetido"),
+            new KeyValuePair<string, string>("PRB", "Problem"),
+            new KeyValuePair<string, string>("ADO", " Adopción "),
+            new KeyValuePair<string, string>("S2L", null),
         });
-        Check("8-10 tipos limpios, unicos y ordenados", "Adopcion|MEJORA|Problem|SorIA",
-            string.Join("|", tipos.ConvertAll(delegate (object o) { return (string)o; }).ToArray()));
-        Check("8 lista vacia", 0, DashboardCatalogos.TiposUnicos(new string[0]).Count);
+        var lista = new List<string>();
+        foreach (Dictionary<string, object> t in tipos) lista.Add(t["prefijo"] + "=" + t["nombre"]);
+        Check("8-10 prefijos limpios, unicos, PRB primero y por Descripcion",
+            "PRB=Problem|ADO=Adopción|HAR=Hardware|S2L=S2L|SOR=SorIA", string.Join("|", lista.ToArray()));
+        Check("8 lista vacia", 0, DashboardCatalogos.PrefijosOrdenados(new KeyValuePair<string, string>[0]).Count);
+        Check("8 llaves", "PRB|ADO|HAR|S2L|SOR",
+            string.Join("|", DashboardCatalogos.Llaves(tipos).ConvertAll(delegate (object o) { return (string)o; }).ToArray()));
 
-        // La consulta vive como literal en el metodo; se revisa el fuente.
+        // Las consultas viven como literal en el metodo; se revisa el fuente.
         var fuente = System.IO.File.ReadAllText(System.IO.Path.Combine("App_Code", "DashboardCatalogos.cs"));
-        var ini = fuente.IndexOf("public static List<object> TiposIniciativa(");
-        var fin = fuente.IndexOf("public static List<object> TiposUnicos(");
+        var ini = fuente.IndexOf("public static List<object> PrefijosIniciativa(");
+        var fin = fuente.IndexOf("// Dos columnas de texto -> pares");
         var cuerpo = (ini >= 0 && fin > ini) ? fuente.Substring(ini, fin - ini) : "";
-        Check("11 TiposIniciativa encontrado", true, cuerpo.Length > 0);
-        Check("11 solo SELECT sobre dbo.Problem", true,
-            cuerpo.Contains("SELECT DISTINCT TipoIniciativa") && cuerpo.Contains("FROM dbo.Problem"));
+        Check("11 PrefijosIniciativa..PrefijosPorFolio encontrado", true, cuerpo.Length > 0);
+        Check("11 SELECT sobre dbo.CatPrefijoProblem y dbo.Problem.Prefijo", true,
+            cuerpo.Contains("SELECT Prefijo, Descripcion") && cuerpo.Contains("FROM dbo.CatPrefijoProblem")
+            && cuerpo.Contains("SELECT Codigo, Prefijo") && cuerpo.Contains("FROM dbo.Problem"));
+        Check("11 no lee Problem.TipoIniciativa (no se traduce)", false, cuerpo.Contains("TipoIniciativa\n") || cuerpo.Contains("SELECT DISTINCT TipoIniciativa") || cuerpo.Contains("Codigo, TipoIniciativa"));
         bool escribe = false;
         foreach (var palabra in new[] { "INSERT", "UPDATE", "DELETE", "MERGE", "EXEC", "CREATE", "ALTER", "DROP" })
             if (System.Text.RegularExpressions.Regex.IsMatch(cuerpo, @"\b" + palabra + @"\b")) escribe = true;

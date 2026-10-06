@@ -11,7 +11,7 @@
 //                      "Prioridad": "...", ... }, ... ],
 //       "total": 1234 }
 //
-// AQUI NO SE FILTRA POR ANTIGUEDAD, SE RECORTA POR LIDER.
+// AQUI NO SE FILTRA POR ANTIGUEDAD, SE RECORTA POR FECHA DE REGISTRO.
 //
 // Antes se le pasaba @DiasMinimo = 120 al procedimiento -"mas de 4 meses"-, y
 // la tabla se quedaba VACIA cuando el corte no tenia ningun ticket tan viejo,
@@ -19,21 +19,28 @@
 // que haya". No hay umbral de edad: @DiasMinimo va en NULL y el procedimiento
 // devuelve el corte entero.
 //
-// La eleccion es cronologica y POR LIDER. De cada lider se quedan sus
-// TopePorLider tickets mas viejos, que es esto:
+// La tabla pinta UNA lista global: los Tope (100) tickets mas viejos del
+// corte que pasan los filtros, del mas viejo al mas nuevo. Pero el tablero
+// tiene ademas un cross-filter por clic -lider, prioridad, grupo- que se
+// aplica en el navegador sobre lo que llego. Si aqui se mandaran solo los
+// 100 mas viejos globales, filtrar por un lider dejaria los suyos que caen
+// en ese top (a veces ninguno), no SUS 100 mas viejos.
 //
-//     ROW_NUMBER() OVER (PARTITION BY Lider ORDER BY FechaRegistro ASC) <= 10
+// Por eso viaja la UNION de:
+//
+//     ROW_NUMBER() OVER (PARTITION BY Lider     ORDER BY FechaRegistro) <= 100
+//     ROW_NUMBER() OVER (PARTITION BY Prioridad ORDER BY FechaRegistro) <= 100
 //
 // hecho en C# y no en T-SQL porque usp_CorreoBacklog_Datos lo comparte el
-// correo diario de direccion y no se toca. Un lider con 100 tickets aporta
-// sus 10 mas viejos; uno con 3 aporta los 3. Que los 10 de alguien sean
-// recientes no importa: son los suyos, y no se comparan contra los de otro.
+// correo diario de direccion y no se toca. El top global ya esta dentro (un
+// ticket entre los 100 mas viejos de todos lo esta entre los 100 de su
+// lider), y un clic en un lider o en una prioridad encuentra sus 100 mas
+// viejos completos. Un grupo cuelga de su lider, asi que sus tickets que
+// llegan son siempre los mas viejos del grupo (puede que menos de 100).
 //
-// Antes el recorte era GLOBAL y lo hacia dashboard.js: se traia el corte
-// entero al navegador -miles de filas- y se pintaban los 10 mas viejos de
-// todos, asi que un lider con mucho backlog viejo tapaba a los demas y la
-// respuesta movia dos ordenes de magnitud mas de lo que se veia. Ahora solo
-// viajan las filas que la tabla puede pintar.
+// No se manda el corte entero: son miles de filas y la respuesta moveria
+// dos ordenes de magnitud mas de lo que se ve; el tope es 100 x (lideres +
+// prioridades) filas.
 //
 // FechaRegistro es la fecha que YA definia "mas antiguo" en este endpoint, y
 // se conserva: es el dato de origen -DiasBacklog es un derivado del corte- y
@@ -72,11 +79,10 @@ public class BacklogAntiguos : IHttpHandler
     // mas no cambia nada de lo que se ve.
     private const int MaxDescripcion = 300;
 
-    // Cuantos tickets por lider. Es el mismo numero que TOPE_ANTIGUOS en
-    // dashboard.js -el que la tabla pinta por lider-; el de aqui es el que
-    // decide que viaja por la red, asi que si se cambia uno, se cambian los
-    // dos.
-    private const int TopePorLider = 10;
+    // Cuantos tickets pinta la tabla. Es el mismo numero que TOPE_ANTIGUOS en
+    // backlog/backlog.js; el de aqui decide que viaja por la red (por lider y
+    // por prioridad), asi que si se cambia uno, se cambian los dos.
+    private const int Tope = 100;
 
     public void ProcessRequest(HttpContext context)
     {
@@ -85,7 +91,7 @@ public class BacklogAntiguos : IHttpHandler
             var parametros = BacklogUtil.Filtros(context.Request);
             parametros["FechaCorte"] = BacklogUtil.FechaCorte(context.Request);
             // NULL = todos los del corte: no hay umbral de edad. De ahi
-            // salen los mas viejos de CADA lider, ya aqui; ver la nota de
+            // salen los mas viejos por lider y prioridad, ya aqui; ver la nota de
             // arriba.
             parametros["DiasMinimo"] = null;
             parametros["MaxDescripcion"] = MaxDescripcion;
@@ -94,9 +100,9 @@ public class BacklogAntiguos : IHttpHandler
             var total = tickets.Count;
 
             // El recorte va ANTES de AgregarIds: asi la consulta del mapeo de
-            // Ids pide los codigos que de verdad se van a pintar -decenas- y
+            // Ids pide los codigos que de verdad se van a pintar -cientos- y
             // no los del corte entero.
-            var masViejos = MasViejosPorLider(tickets);
+            var masViejos = MasViejos(tickets);
             AgregarIds(masViejos);
 
             return new Dictionary<string, object>
@@ -107,55 +113,52 @@ public class BacklogAntiguos : IHttpHandler
         });
     }
 
-    /* Los TopePorLider tickets mas viejos DE CADA LIDER, por FechaRegistro.
-       Es el ROW_NUMBER() OVER (PARTITION BY Lider ORDER BY FechaRegistro) de
+    /* La union de los Tope tickets mas viejos de cada lider y de cada
+       prioridad, ordenada del mas viejo al mas nuevo. Es el ROW_NUMBER() de
        la nota de arriba, escrito aqui porque el procedimiento se comparte con
        el correo diario y no se toca.
 
-       El orden dentro de cada lider es estable -List.Sort no lo es- porque
-       los empates los rompe la posicion original: dos tickets con la misma
-       fecha salen siempre en el mismo orden, asi que la tabla no baila entre
-       dos cargas iguales. Una fila sin fecha se va al final de su lider.
-
-       Los lideres salen en el orden en que los trajo el procedimiento; como
-       se LISTAN lo decide dashboard.js, que los ordena alfabeticamente con
-       `Sin Torre` al final. */
-    private static List<Dictionary<string, object>> MasViejosPorLider(
+       El orden es total y estable: fecha, luego CodigoTicket y, si aun
+       empatan, la posicion original. Dos cargas iguales salen en el mismo
+       orden. Una fila sin fecha va detras de todas las que la tienen. */
+    private static List<Dictionary<string, object>> MasViejos(
         List<Dictionary<string, object>> tickets)
     {
-        var porLider = new Dictionary<string, List<int>>(StringComparer.OrdinalIgnoreCase);
-        var orden = new List<string>();
-
-        for (int i = 0; i < tickets.Count; i++)
+        var indices = new List<int>();
+        for (int i = 0; i < tickets.Count; i++) indices.Add(i);
+        indices.Sort(delegate(int a, int b)
         {
-            object lider;
-            string clave = tickets[i].TryGetValue("Lider", out lider) && lider != null
-                ? lider.ToString() : "";
+            int cmp = ComparaFecha(tickets[a], tickets[b]);
+            if (cmp == 0) cmp = string.CompareOrdinal(Texto(tickets[a], "CodigoTicket"), Texto(tickets[b], "CodigoTicket"));
+            return cmp != 0 ? cmp : a.CompareTo(b);
+        });
 
-            List<int> indices;
-            if (!porLider.TryGetValue(clave, out indices))
-            {
-                indices = new List<int>();
-                porLider[clave] = indices;
-                orden.Add(clave);
-            }
-            indices.Add(i);
-        }
-
+        // Ya en orden: el primer Tope de cada lider y de cada prioridad.
+        var porLider = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var porPrioridad = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         var salida = new List<Dictionary<string, object>>();
-        foreach (var clave in orden)
+        foreach (int i in indices)
         {
-            var indices = porLider[clave];
-            indices.Sort(delegate(int a, int b)
-            {
-                int cmp = ComparaFecha(tickets[a], tickets[b]);
-                return cmp != 0 ? cmp : a.CompareTo(b);
-            });
-
-            int tope = Math.Min(TopePorLider, indices.Count);
-            for (int i = 0; i < tope; i++) salida.Add(tickets[indices[i]]);
+            bool entraLider = Contar(porLider, Texto(tickets[i], "Lider"));
+            bool entraPrioridad = Contar(porPrioridad, Texto(tickets[i], "Prioridad"));
+            if (entraLider || entraPrioridad) salida.Add(tickets[i]);
         }
         return salida;
+    }
+
+    // Suma uno a la clave y dice si todavia esta dentro del Tope.
+    private static bool Contar(Dictionary<string, int> cuenta, string clave)
+    {
+        int n;
+        cuenta.TryGetValue(clave, out n);
+        cuenta[clave] = n + 1;
+        return n < Tope;
+    }
+
+    private static string Texto(Dictionary<string, object> fila, string campo)
+    {
+        object v;
+        return fila.TryGetValue(campo, out v) && v != null && !(v is DBNull) ? v.ToString() : "";
     }
 
     // Mas viejo primero por FechaRegistro. Un ticket sin fecha -o con un valor

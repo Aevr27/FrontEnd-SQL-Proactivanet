@@ -12,9 +12,16 @@
 // QUE NO HACE (a proposito, ver el hito)
 // --------------------------------------
 // No guarda nada, no genera el numero de solicitud ni sube el RCA: no hay
-// mecanismo existente para ninguno de los dos (REQUEST NUMBER PERSISTENCE y
-// RCA SHAREPOINT DESTINATION: UNRESOLVED). NumeroSolicitud solo FORMATEA un
+// mecanismo existente para ninguno de los dos (REQUEST NUMBER PERSISTENCE:
+// UNRESOLVED; RCA UPLOAD: NOT IMPLEMENTED). NumeroSolicitud solo FORMATEA un
 // numero que algun dia dara la base; no lo inventa.
+//
+// RCA: el DESTINO futuro ya esta confirmado -SharePoint, sitio
+// ProblemManagement, biblioteca "Documentos compartidos", carpeta
+// General/Archivos RCA Problems (URL en la cabecera de admin/iniciativas.js)-
+// pero es solo una dependencia: mecanismo de subida, permisos, extensiones,
+// nombre, versiones y como se persiste la referencia siguen sin decidir, y
+// dbo.Problem.RCA no se toca.
 
 using System;
 using System.Collections.Generic;
@@ -24,19 +31,21 @@ using System.Text;
 using System.Text.RegularExpressions;
 
 // ---------------------------------------------------------------------
-// Tipo de iniciativa: el caso especial "Problem"
+// Tipo de iniciativa: el caso especial Problem (prefijo PRB)
 // ---------------------------------------------------------------------
-// Los tipos salen del catalogo real (DashboardCatalogos.TiposIniciativa);
-// aqui no hay lista de tipos. Solo se reconoce Problem, que es el unico con
-// reglas propias: va primero en el selector y exige RCA. Si el catalogo no
-// lo trae, no se agrega.
+// Los tipos son las filas de dbo.CatPrefijoProblem
+// (DashboardCatalogos.PrefijosIniciativa) y el valor que viaja es el
+// PREFIJO; aqui no hay lista de tipos. Solo se reconoce Problem -la fila
+// PRB, Descripcion "Problem"-, que es el unico con reglas propias: va
+// primero en el selector y exige RCA. Si el catalogo no la trae, no se
+// agrega.
 public static class TiposSolicitud
 {
-    public const string Problem = "Problem";
+    public const string PrefijoProblem = "PRB";
 
-    public static bool EsProblem(string tipo)
+    public static bool EsProblem(string prefijo)
     {
-        return tipo != null && string.Equals(tipo.Trim(), Problem, StringComparison.OrdinalIgnoreCase);
+        return prefijo != null && string.Equals(prefijo.Trim(), PrefijoProblem, StringComparison.OrdinalIgnoreCase);
     }
 
     // La misma lista con Problem (si esta) movido al principio; el resto en
@@ -54,7 +63,7 @@ public static class TiposSolicitud
         return primero;
     }
 
-    // El valor del catalogo que es Problem (con su grafia), o null.
+    // El prefijo del catalogo que es Problem (con su grafia), o null.
     public static string ValorProblem(IEnumerable<object> tipos)
     {
         foreach (var t in tipos)

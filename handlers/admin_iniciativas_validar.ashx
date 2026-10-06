@@ -21,7 +21,9 @@
 // (que llego y no esta vacio); no se guarda en ningun lado porque no hay
 // destino confirmado.
 //
-// ACCESO: AccesoAdmin.Exigir (403 antes de leer nada).
+// ACCESO: AccesoAdmin.ExigirAdm: whitelist y ademas rol ADM de
+// dbo.UsuariosAdmin (403 antes de leer nada). Crear es solo de ADM; MOD
+// recibe 403 { tipo: "RolInsuficiente" }.
 
 using System;
 using System.Collections.Generic;
@@ -31,7 +33,7 @@ public class AdminIniciativasValidar : IHttpHandler
 {
     public void ProcessRequest(HttpContext context)
     {
-        if (!AccesoAdmin.Exigir(context)) return;
+        if (!AccesoAdmin.ExigirAdm(context)) return;
 
         DashboardHandler.Responder(context, delegate
         {

@@ -174,7 +174,7 @@
       <p style="font-size:12px;color:var(--muted);margin-bottom:10px">
         Iniciativas con <b>tickets en riesgo por retraso</b>, con fechas y responsables.</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-        <p style="font-size:11px;color:var(--muted);margin:0">Clic en un bloque o barra para filtrar la tabla; clic de nuevo para quitar ese filtro. Las 3 gráficas se recalculan entre sí.</p>
+        <p style="font-size:11px;color:var(--muted);margin:0">Clic en una barra para filtrar la tabla; clic de nuevo para quitar ese filtro. Las 3 gráficas se recalculan entre sí.</p>
         <button id="btnResetGrafVen">↺ Resetear filtro de gráficas</button>
       </div>
       <div class="grid3" style="margin-bottom:16px">
@@ -184,10 +184,10 @@
             <select id="selDimVen" style="font-size:11px;padding:4px 6px">
               <option value="director">Director</option><option value="po">Product Owner</option></select>
           </div>
-          <div id="chartVenDim" class="treemap" style="height:220px"></div>
+          <div class="lienzo-ini"><div class="lienzo-ini-alto"><canvas id="chartVenDim"></canvas></div><div class="ini-vacio" hidden>Sin datos</div></div>
         </div>
         <div class="card"><h3>Vencidas por Agrupador</h3>
-          <div id="chartVenAgrup" class="treemap" style="height:220px"></div></div>
+          <div class="lienzo-ini"><div class="lienzo-ini-alto"><canvas id="chartVenAgrup"></canvas></div><div class="ini-vacio" hidden>Sin datos</div></div></div>
         <div class="card"><h3>Vencidas por Estado</h3>
           <canvas id="chartVenEstado" style="max-height:220px"></canvas></div>
       </div>
@@ -204,7 +204,7 @@
       <p style="font-size:12px;color:var(--muted);margin-bottom:10px">
         Listado completo de <b>iniciativas activas</b> (deduplicadas por folio), incluidas las que no tienen categoría asignada.</p>
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px">
-        <p style="font-size:11px;color:var(--muted);margin:0">Clic en un bloque o barra para filtrar la tabla; clic de nuevo para quitar ese filtro. Las 3 gráficas se recalculan entre sí.</p>
+        <p style="font-size:11px;color:var(--muted);margin:0">Clic en una barra para filtrar la tabla; clic de nuevo para quitar ese filtro. Las 3 gráficas se recalculan entre sí.</p>
         <button id="btnResetGrafAct">↺ Resetear filtro de gráficas</button>
       </div>
       <div class="grid3" style="margin-bottom:16px">
@@ -214,10 +214,10 @@
             <select id="selDimAct" style="font-size:11px;padding:4px 6px">
               <option value="director">Director</option><option value="po">Product Owner</option></select>
           </div>
-          <div id="chartActDim" class="treemap" style="height:220px"></div>
+          <div class="lienzo-ini"><div class="lienzo-ini-alto"><canvas id="chartActDim"></canvas></div><div class="ini-vacio" hidden>Sin datos</div></div>
         </div>
         <div class="card"><h3>Activas por Agrupador</h3>
-          <div id="chartActAgrup" class="treemap" style="height:220px"></div></div>
+          <div class="lienzo-ini"><div class="lienzo-ini-alto"><canvas id="chartActAgrup"></canvas></div><div class="ini-vacio" hidden>Sin datos</div></div></div>
         <div class="card"><h3>Activas por Estado</h3>
           <canvas id="chartActEstado" style="max-height:220px"></canvas></div>
       </div>

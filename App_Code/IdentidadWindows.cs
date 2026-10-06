@@ -3,9 +3,8 @@
 // La UNICA fuente es HttpContext.Current.User.Identity.Name, que IIS llena con
 // la autenticacion de Windows (Negotiate) del sitio: "SORIANA\t_andresvr".
 // No hay login propio, ni contraseñas, ni tokens: si IIS no autentico al
-// usuario, aqui no hay identidad y punto. UNICA excepcion, solo en IIS
-// Express local y con opt-in explicito: IdentidadDesarrolloLocal (nunca
-// reemplaza una identidad real y la cuenta simulada pasa por la whitelist).
+// usuario, aqui no hay identidad y punto. (El atajo de desarrollo local no
+// inventa identidad: ver AccesoDesarrolloLocal, que vive en AccesoAdmin.)
 //
 // DOS VALORES, DOS USOS
 // ---------------------
@@ -69,24 +68,9 @@ public sealed class IdentidadWindows
 
     public static IdentidadWindows DesdeContexto(HttpContext ctx)
     {
-        if (ctx == null) return Anonima;
-        var real = ctx.User == null || ctx.User.Identity == null
-            ? Anonima
-            : Desde(ctx.User.Identity.Name, ctx.User.Identity.IsAuthenticated);
-        if (real.Autenticada) return real;
-
-        // DESARROLLO LOCAL: solo IIS Express + loopback + sin identidad real
-        // + ADMIN_DEV_IDENTIDAD (ver IdentidadDesarrolloLocal). La cuenta
-        // simulada pasa por la whitelist como cualquier otra.
-        var simulada = IdentidadDesarrolloLocal.Para(ctx);
-        if (simulada == null) return real;
-        var dev = Desde(simulada, true);
-        dev.DesarrolloLocal = dev.Autenticada;
-        return dev;
+        if (ctx == null || ctx.User == null || ctx.User.Identity == null) return Anonima;
+        return Desde(ctx.User.Identity.Name, ctx.User.Identity.IsAuthenticated);
     }
-
-    // true solo si la identidad es la simulada de desarrollo local.
-    public bool DesarrolloLocal { get; private set; }
 
     // Constructor para pruebas y para el resto de la aplicacion.
     public static IdentidadWindows Desde(string nombre, bool autenticada)

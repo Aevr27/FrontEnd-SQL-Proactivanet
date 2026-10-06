@@ -231,7 +231,7 @@ async function obtenerJSON(ruta) {
 /* -----------------------------------------------------------------------
    Cache de corta vida para los agregados del tablero de SLA.
 
-   Motivo: el stepper de SLOT reescribe el rango a 0-30N dias, asi que bajar
+   Motivo: el stepper de SLOT reescribe el rango a 30(N+1)+1 dias, asi que bajar
    de SLOT 3 a SLOT 2 vuelve a pedir un periodo que se acaba de traer entero.
    Los agregados son caros (kpis, distribucion y productividad rondan varios
    segundos en rangos largos) y no cambian de un minuto a otro: el ETL corre
@@ -998,17 +998,10 @@ const TableroSla = (function () {
   const DIAS_RANKING = 7;
 
   function rangoRanking() {
-    // Con SLOT aplicado el ranking usa el periodo HISTORICO seleccionado, para
-    // que el numero signifique lo mismo en la grafica y en la tabla: del
-    // inicio del SLOT mas antiguo (N) al final del SLOT 1, que es hoy. Con
-    // N = 2 son los SLOT 1 y 2, o sea 0-60d. El SLOT 0 no entra en la cuenta:
-    // es el ancla del eje, no un periodo, y su dia ya esta dentro del SLOT 1.
-    if (enModoSlot()) {
-      return {
-        inicio: slotRango(slotsAplicados).inicio,
-        fin: slotRango(1).fin,
-      };
-    }
+    // Con SLOT aplicado el ranking usa el periodo seleccionado, para que el
+    // numero signifique lo mismo en la grafica y en la tabla: del inicio del
+    // SLOT mas antiguo (N) al final del SLOT 0, que es ayer.
+    if (enModoSlot()) return rangoSlots(slotsAplicados);
     const fin = new Date();
     fin.setDate(fin.getDate() - 1);          // ayer: ultimo dia completo
     const inicio = new Date(fin);
@@ -1027,35 +1020,30 @@ const TableroSla = (function () {
   }
 
   // ------------------------------------------------------------------- SLOT
-  // El SLOT numera periodos historicos rodantes hacia atras, y el numero
-  // crece cuanto mas viejo es el periodo. El 0 no es un periodo de 30 dias:
-  // es el ancla del eje, AYER -el ultimo dia completo-.
+  // El SLOT numera periodos rodantes hacia atras, y el numero crece cuanto
+  // mas viejo es el periodo. Se cuentan desde AYER -el ultimo dia completo-,
+  // no desde hoy: hoy va a medias (el dia sigue corriendo) y su valor no es
+  // comparable con el de un dia cerrado. Es la misma razon por la que el
+  // ranking lleva desde siempre su ventana solo hasta ayer.
   //
-  //   SLOT 0 = ayer, un solo dia (ancla, no es un periodo)
-  //   SLOT 1 = 0-30 dias atras
-  //   SLOT 2 = 31-60 dias atras
-  //   SLOT 3 = 61-90 dias atras
-  //   SLOT k = 30(k-1)+1 .. 30k dias atras   (k >= 2)
+  //   SLOT 0 = ayer-30 .. ayer          (dias 1..31 atras desde hoy)
+  //   SLOT 1 = ayer-60 .. ayer-31       (dias 32..61)
+  //   SLOT 2 = ayer-90 .. ayer-61       (dias 62..91)
+  //   SLOT k = ayer-30(k+1) .. ayer-(30k+1)   (k >= 1)
   //
-  // Los SLOTs historicos reparten el rango sin hueco ni solape ENTRE ELLOS:
-  // el dia 30 es el ultimo del SLOT 1 y el 31 el primero del SLOT 2. El 1
-  // mide 31 dias -de hoy al dia 30- y los demas 30.
+  // Los dos extremos de cada SLOT estan dentro (igual que fecha_inicio y
+  // fecha_fin en el servidor) y los SLOTs reparten el rango sin hueco ni
+  // solape: cada uno empieza el dia siguiente al ultimo del SLOT mas
+  // reciente. El 0 mide 31 dias -de ayer a ayer-30, ambos dentro- y los
+  // demas 30. Hoy no cae en ningun SLOT.
   //
-  // El SLOT 0 no participa de ese reparto y no le quita nada al SLOT 1: no es
-  // un bucket, es la REFERENCIA con la que arranca la linea de tiempo, el
-  // ultimo dia cerrado. Que su fecha caiga tambien dentro del SLOT 1 es
-  // deliberado -es el borde donde empieza el periodo-, y no dibuja dos veces
-  // el mismo dato: el SLOT 0 pinta el valor de ayer y el SLOT 1 el agregado
-  // de sus 31 dias, que son dos observaciones distintas.
+  // Antes el SLOT 0 era solo AYER, un dia suelto frente a los 30 de las demas
+  // posiciones: en el hover se leia "ayer → ayer" y su punto quedaba pegado
+  // al cero. Ahora es un periodo como los demas.
   //
-  // El SLOT 0 es ademas la unica posicion que vale UN dia frente a los 30 de
-  // las demas, asi que su valor es siempre mucho menor; el tooltip da el
-  // rango de cada punto para que se lea por lo que es.
-  //
-  // El selector pide N periodos HISTORICOS: N = 1 es el SLOT 1, N = 3 son los
-  // SLOT 1, 2 y 3. La grafica dibuja siempre N + 1 posiciones, porque a los N
-  // SLOTs les precede el ancla. Su unico efecto sobre los datos es escribir
-  // el rango de fechas.
+  // El selector pide N: la grafica dibuja N + 1 posiciones, SLOT N .. SLOT 0.
+  // Su unico efecto sobre los datos es escribir el rango de fechas, del
+  // inicio del SLOT N al fin del SLOT 0 (ayer).
   // A partir de aqui la vista diaria deja de ser legible y la tendencia pasa
   // a bloques de un mes. Es el mismo tope con el que estiloTendencia ya dejaba
   // de dibujar marcadores: por encima, la grafica ya no ensenaba una sola
@@ -1063,40 +1051,33 @@ const TableroSla = (function () {
   const TOPE_DIARIO = 120;
 
   const DIAS_SLOT = 30;
-  const MAX_SLOTS = 12;              // hasta 360 dias hacia atras
+  const MAX_SLOTS = 12;              // SLOT 0..12: hasta 391 dias hacia atras
   // Preparado en el stepper vs. vigente en los datos que hay en pantalla. Son
   // distintos mientras el usuario mueve el numero y todavia no aplica.
   let slotsN = 0;                    // 0 = sin SLOT, manda el rango manual
   let slotsAplicados = 0;
 
-  // Rango de calendario del SLOT k (k >= 1), con los dos extremos dentro. El
-  // SLOT 1 termina hoy (dia 0) y cada SLOT empieza justo donde acaba el
-  // anterior: el dia mas reciente del SLOT k es el 30(k-1)+1 y el mas viejo
-  // el 30k. Los N SLOTs cubren por tanto los dias 0..30N, sin dejar ni
-  // repetir uno.
+  // Rango de calendario del SLOT k (k >= 0), con los dos extremos dentro,
+  // contado en dias atras desde hoy. El SLOT 0 va del dia 31 al 1 (ayer-30 ..
+  // ayer); el SLOT k >= 1 del 30(k+1)+1 al 30k+2. El fin de cada SLOT es el
+  // dia anterior al inicio del SLOT mas reciente, asi que los SLOTs 0..N
+  // cubren los dias 1..30(N+1)+1 sin dejar ni repetir uno. slotDeFecha es su
+  // inversa exacta.
   function slotRango(k) {
     const fin = new Date();
-    fin.setDate(fin.getDate() - (k <= 1 ? 0 : (k - 1) * DIAS_SLOT + 1));
+    fin.setDate(fin.getDate() - (k <= 0 ? 1 : k * DIAS_SLOT + 2));
     const inicio = new Date();
-    inicio.setDate(inicio.getDate() - k * DIAS_SLOT);
+    inicio.setDate(inicio.getDate() - ((k + 1) * DIAS_SLOT + 1));
     return { inicio: formatoFecha(inicio), fin: formatoFecha(fin) };
   }
 
-  // El ancla del eje -el SLOT 0-: AYER y solo ayer. Es el ultimo dia
-  // COMPLETO, y por eso ancla aqui y no hoy: hoy va a medias -el dia sigue
-  // corriendo-, asi que su valor es una fraccion del de un dia cerrado y el
-  // primer punto de la grafica se leia como un cero pegado al eje. Es la
-  // misma razon por la que el ranking lleva desde siempre su ventana hasta
-  // ayer (ver rangoRanking).
-  //
-  // No agrega nada: es un dia suelto con su valor real. Lleva par inicio/fin
-  // como los bloques para que el tooltip lo describa igual.
-  function rangoAncla() {
-    const ayer = new Date();
-    ayer.setDate(ayer.getDate() - 1);
-    const iso = formatoFecha(ayer);
-    return { inicio: iso, fin: iso };
+  // Periodo ACUMULADO de N SLOTs: del inicio del SLOT N al fin del SLOT 0
+  // (ayer). Es lo que se escribe en las fechas al aplicar, lo que calienta la
+  // cache y lo que mide el ranking: un solo sitio para que no se desincronicen.
+  function rangoSlots(n) {
+    return { inicio: slotRango(n).inicio, fin: slotRango(0).fin };
   }
+
   // Hay SLOT en vigor solo cuando el usuario aplico uno: el numero preparado en
   // el stepper no cuenta hasta que se pulsa "Aplicar filtros".
   function enModoSlot() {
@@ -1105,9 +1086,9 @@ const TableroSla = (function () {
 
   // Dias completos entre una fecha aaaa-mm-dd y hoy: 0 es hoy, 1 es ayer. -1
   // si no es una fecha o si esta en el futuro. Se compara a mediodia para que
-  // el cambio de horario de verano no corra un dia. La usan slotDeFecha, para
-  // saber a que bloque va una fecha, y agruparPorSlot, para reconocer el dia
-  // de hoy: duplicar esta aritmetica es justo como se acaban desincronizando.
+  // el cambio de horario de verano no corra un dia. La usa slotDeFecha, para
+  // saber a que bloque va una fecha: duplicar esta aritmetica es justo como
+  // se acaban desincronizando.
   function diasAtras(iso) {
     const t = String(iso || '').slice(0, 10).split('-');
     if (t.length !== 3) return -1;
@@ -1119,51 +1100,29 @@ const TableroSla = (function () {
   }
 
   // A que SLOT cae una fecha aaaa-mm-dd, contando los dias completos que la
-  // separan de hoy. Es la inversa exacta de slotRango: el dia 30 todavia es
-  // SLOT 1 (0-30d) y el 31 ya es SLOT 2 (31-60d), de ahi el techo en vez del
-  // suelo. Los dias 0..30 caen todos en el 1 -ceil(0/30) seria 0, y el 0 no es
-  // un bucket sino el ancla-, y a partir de ahi cada bloque de 30 sube un
-  // numero. Una fecha invalida o futura sigue devolviendo -1.
+  // separan de AYER (dias atras desde hoy menos uno). Es la inversa exacta de
+  // slotRango: ayer-30 todavia es SLOT 0 y ayer-31 ya es SLOT 1, de ahi el
+  // techo en vez del suelo. Hoy, una fecha futura o una invalida devuelven -1:
+  // no pertenecen a ningun SLOT.
   function slotDeFecha(iso) {
     const dias = diasAtras(iso);
-    if (dias < 0) return -1;
-    return Math.max(1, Math.ceil(dias / DIAS_SLOT));
+    if (dias < 1) return -1;
+    return Math.max(0, Math.ceil((dias - 1) / DIAS_SLOT) - 1);
   }
 
-  /* Suma las series diarias por SLOT y antepone el ancla. Con varios SLOTs la
-     grafica diaria se vuelve ilegible (8 SLOTs son ~240 puntos), asi que se
-     muestra un valor por SLOT. No cambia el significado de nada: son las
-     MISMAS series diarias, sumadas por bloque.
+  /* Suma las series diarias por SLOT. Con varios SLOTs la grafica diaria se
+     vuelve ilegible (8 SLOTs son ~240 puntos), asi que se muestra un valor
+     por SLOT. No cambia el significado de nada: son las MISMAS series
+     diarias, sumadas por bloque, y cada dia va a UN solo bloque.
 
      El eje sale con N + 1 posiciones, de antiguo a reciente: SLOT N ... SLOT 1
-     y, a la derecha del todo, el SLOT 0. La numeracion es la del negocio; el
-     orden es el de una linea de tiempo.
-
-     El SLOT 0 es AYER: el ancla del eje, el ultimo dia COMPLETO. Es una
-     posicion REAL, no una banda vacia ni una marca dibujada: lleva los
-     tickets de ese dia, los que ya venian en la serie diaria. Es lo que da un
-     segundo punto con N = 1 -antes habia que partir el bloque en tramos para
-     que la grafica ensenara una linea- sin inventar ni un dato: si ayer no
-     hubo tickets, el punto vale cero porque ese es su valor.
-
-     No ancla en hoy porque hoy va a medias: su valor no es comparable con el
-     de un dia cerrado y el primer punto se leia como un cero pegado al eje.
-     Es el mismo motivo por el que el ranking lleva desde siempre su ventana
-     solo hasta ayer.
-
-     Ese dia sigue contando ademas dentro del SLOT 1, que arranca en el dia 0.
-     No es contarlo dos veces: el SLOT 0 dibuja el valor de UN dia y el SLOT 1
-     el agregado de sus 31, dos observaciones distintas. La fecha compartida es
-     el borde donde empieza el primer periodo, que es justo lo que el ancla
-     senala. */
+     y, a la derecha del todo, el SLOT 0 -los 31 dias que acaban ayer-. La
+     numeracion es la del negocio; el orden es el de una linea de tiempo. */
   function agruparPorSlot(fechas, series, n) {
     const cubos = new Map();          // numero de SLOT -> {suma por serie}
-    const ancla = series.map(() => 0); // el SLOT 0: solo el dia de ayer
     fechas.forEach((f, i) => {
-      const d = diasAtras(f);
-      if (d === 1) series.forEach((serie, j) => { ancla[j] += Number(serie[i]) || 0; });
       const s = slotDeFecha(f);
-      if (s < 1 || s > n) return;     // fuera del periodo pedido: no se cuenta
+      if (s < 0 || s > n) return;     // fuera del periodo pedido: no se cuenta
       if (!cubos.has(s)) cubos.set(s, series.map(() => 0));
       const acc = cubos.get(s);
       series.forEach((serie, j) => { acc[j] += Number(serie[i]) || 0; });
@@ -1175,16 +1134,15 @@ const TableroSla = (function () {
     // mismo periodo.
     //
     // El eje se lee como una linea de tiempo: el SLOT mas viejo (N) a la
-    // izquierda y el ancla -ayer- a la derecha. Solo cambia el ORDEN de las
-    // posiciones; etiqueta, rango y valores viajan juntos por indice, asi que
-    // cada numero sigue pegado a su SLOT.
+    // izquierda y el 0 -el que acaba ayer- a la derecha. Solo cambia el ORDEN
+    // de las posiciones; etiqueta, rango y valores viajan juntos por indice,
+    // asi que cada numero sigue pegado a su SLOT.
     const indices = [];
-    for (let s = n; s >= 1; s--) indices.push(s);       // viejo -> reciente
+    for (let s = n; s >= 0; s--) indices.push(s);       // viejo -> reciente
     return {
-      etiquetas: [...indices.map(s => `SLOT ${s}`), 'SLOT 0'],
-      rangos: [...indices.map(s => slotRango(s)), rangoAncla()],
-      series: series.map((_, j) =>
-        [...indices.map(s => (cubos.get(s) || [])[j] || 0), ancla[j]]),
+      etiquetas: indices.map(s => `SLOT ${s}`),
+      rangos: indices.map(s => slotRango(s)),
+      series: series.map((_, j) => indices.map(s => (cubos.get(s) || [])[j] || 0)),
     };
   }
 
@@ -1341,15 +1299,12 @@ const TableroSla = (function () {
     };
   }
 
-  // Resumen del periodo que pide el numero: "SLOT 1-3 · 0-90d". Nombra los
-  // SLOTs HISTORICOS que se van a ver -siempre desde el 1- en vez de
-  // contarlos, para que el texto se lea igual que el eje, y da su ventana con
-  // la misma notacion de antiguedad con la que el negocio define un SLOT.
-  // El SLOT 0 no se nombra: es el ancla del eje, no un periodo, y su dia ya
-  // esta contado dentro del SLOT 1.
+  // Resumen del periodo que pide el numero: "SLOT 0-3 · 121 dias hasta
+  // ayer". Nombra los SLOTs que se van a ver -siempre desde el 0- en vez de
+  // contarlos, para que el texto se lea igual que el eje, y da cuantos dias
+  // cubren: los mismos que escribe rangoSlots en las fechas.
   function resumenSlots(n) {
-    const cuales = n === 1 ? 'SLOT 1' : `SLOT 1-${n}`;
-    return `${cuales} · 0-${n * DIAS_SLOT}d`;
+    return `SLOT 0-${n} · ${(n + 1) * DIAS_SLOT + 1} días hasta ayer`;
   }
 
   // Pinta el stepper. No recarga nada: se llama tanto desde renderTodo como
@@ -1397,7 +1352,7 @@ const TableroSla = (function () {
   function aplicarSlots() {
     slotsAplicados = slotsN;
     if (slotsN > 0) {
-      escribirRango({ inicio: slotRango(slotsN).inicio, fin: slotRango(1).fin });
+      escribirRango(rangoSlots(slotsN));
     }
     // Repintar aqui y no solo desde renderTodo: si la carga falla, el control
     // no puede quedarse anunciando el periodo anterior.
@@ -1741,10 +1696,10 @@ const TableroSla = (function () {
     /* Granularidad del eje. Es lo unico que decide este bloque: las series de
        arriba no se tocan, solo se suman por bloque.
 
-       En modo SLOT se agrupa por SLOT, un punto por bloque, con AYER (SLOT 0)
-       como ancla al final del eje. Esa ancla es tambien lo que hace legible el caso de UN
-       SOLO SLOT: dos posiciones dibujan una linea, mientras que un bloque
-       suelto era un punto en mitad del lienzo. Fuera del modo SLOT, un rango
+       En modo SLOT se agrupa por SLOT, un punto por bloque, con el SLOT 0
+       -los 31 dias que acaban ayer- al final del eje. Con N = 1 son dos
+       posiciones (SLOT 1 y SLOT 0), que dibujan una linea, mientras que un
+       bloque suelto era un punto en mitad del lienzo. Fuera del modo SLOT, un rango
        largo -"Año" son ~250 dias- se agrupa por mes de calendario, en vez de
        pintar un punto por dia: es el mismo criterio de Experiencia, cuya
        evolucion siempre trabaja con una docena de bloques (SLOT o mes). Por
@@ -1807,9 +1762,11 @@ const TableroSla = (function () {
     // natural es el centro de su banda-, pero centrar reserva media banda
     // libre en cada extremo, y con pocas posiciones esa media banda es una
     // franja vacia enorme junto al SLOT 0: se leia como si la serie acabara
-    // en un punto que no esta. Aqui el ultimo punto ES el ancla (ayer), y
-    // tiene que verse como el final de la serie. El agrupado por mes se queda
-    // centrado, que es como estaba.
+    // en un punto que no esta. Aqui el ultimo punto ES el SLOT 0, y
+    // tiene que verse como el final de la serie. Es el mismo eje que la
+    // evolucion por SLOT de Experiencia (renderEvol: linea sobre categorias
+    // sin offset), donde el SLOT 0 es un bloque mas. El agrupado por mes se
+    // queda centrado, que es como estaba.
     if (enModoSlot()) estiloTendVigente.centrado = false;
     const estilo = estiloTendVigente;
 
@@ -3503,16 +3460,17 @@ const TableroSla = (function () {
   }
 
   /* El rango del SLOT k escrito sobre unos parametros ya armados. Es la misma
-     cuenta que hace aplicarSlots() -del inicio del SLOT k al fin del 1, o sea
-     el periodo ACUMULADO, no el tramo suelto de 30 dias-, pero sin tocar los
+     cuenta que hace aplicarSlots() -rangoSlots: del inicio del SLOT k al fin
+     del 0, o sea el periodo ACUMULADO, no el tramo suelto de 30 dias-, pero sin tocar los
      <input>: el tablero visible no se entera.
 
      URLSearchParams.set conserva la posicion de una clave que ya existe, asi
      que la querystring sale con las claves en el mismo orden que la de un
      clic real. De ahi que solo se llame con fechas ya presentes. */
   function conRangoDeSlot(p, k) {
-    p.set('fecha_inicio', slotRango(k).inicio);
-    p.set('fecha_fin', slotRango(1).fin);
+    const r = rangoSlots(k);
+    p.set('fecha_inicio', r.inicio);
+    p.set('fecha_fin', r.fin);
     return p;
   }
 

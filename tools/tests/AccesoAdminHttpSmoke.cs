@@ -3,11 +3,18 @@
 // identidad se pone en HttpContext.User, que es de donde la toma
 // IdentidadWindows.DesdeContexto en IIS con Autenticacion de Windows.
 //
-// Solo se ejercitan caminos que NO tocan la base:
+// Solo se ejercitan caminos que NO tocan la base de datos real; el rol
+// (dbo.UsuariosAdmin) sale de una fuente falsa (AccesoAdmin.FuenteRoles):
 //   - cualquier handler con una identidad no autorizada: 403 antes de nada;
-//   - capacidad autorizada sin ?categoria: 400 (paso Exigir, no llego a SQL);
-//   - validar autorizada con GET: 405 (paso Exigir, no llego a SQL);
-//   - admin_sesion.ashx sin ?persona: {"autorizado": ...} sin base.
+//   - capacidad ADM sin ?categoria: 400 (paso ExigirAdm, no llego a SQL);
+//   - validar ADM con GET: 405 (paso ExigirAdm, no llego a SQL);
+//   - capacidad/validar con MOD, sin fila o con la fuente fallando: 403
+//     RolInsuficiente; registro/catalogos con MOD: NO 403 (pasan al SQL);
+//   - fuera de la whitelist, aunque la tabla diga ADM: 403 AccesoDenegado
+//     sin consultar la tabla;
+//   - el atajo de desarrollo local (AccesoDesarrolloLocal) solo con DEBUG +
+//     request local + IIS Express; aqui nunca se activa;
+//   - admin_sesion.ashx sin ?persona: {"autorizado", "rol"}.
 //
 // Compilar y correr desde la raiz del repo (los .ashx se compilan quitando
 // la linea 1, como en csc-desde-git-bash):
@@ -20,9 +27,28 @@
 //       tools\tests\AccesoAdminHttpSmoke.cs
 //   AccesoAdminHttpSmoke.exe
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Principal;
 using System.Web;
+
+// dbo.UsuariosAdmin de mentira: cuenta (sin espacios, mayusculas) -> filas.
+sealed class FuenteFalsa : IFuenteRolesAdmin
+{
+    public readonly Dictionary<string, string[]> Filas = new Dictionary<string, string[]>();
+    public bool Falla;
+    public readonly List<string> Pedidas = new List<string>();
+
+    public FuenteFalsa Con(string cuenta, params string[] accesos) { Filas[cuenta.Trim().ToUpperInvariant()] = accesos; return this; }
+
+    public IList<string> AccesosDe(string cuenta)
+    {
+        Pedidas.Add(cuenta);
+        if (Falla) throw new InvalidOperationException("sin SQL");
+        string[] f;
+        return Filas.TryGetValue(cuenta.Trim().ToUpperInvariant(), out f) ? f : new string[0];
+    }
+}
 
 public static class AccesoAdminHttpSmoke
 {
@@ -64,6 +90,9 @@ public static class AccesoAdminHttpSmoke
         const string YO = @"SORIANA\t_andresvr";
         int estado;
         string cuerpo;
+        // Por omision YO es ADM (como en la tabla real).
+        var fuente = new FuenteFalsa().Con(YO, "ADM");
+        AccesoAdmin.FuenteRoles = fuente;
 
         // ---- Exigir directo ------------------------------------------------
         foreach (var caso in new[] { YO, @"soriana\T_ANDRESVR" })
@@ -85,18 +114,84 @@ public static class AccesoAdminHttpSmoke
 
         // ---- handlers reales -------------------------------------------------
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
-        Check("H1 admin_sesion: autorizado", "200|{\"autorizado\":true}", estado + "|" + cuerpo);
+        Check("H1 admin_sesion: autorizado, con su rol", "200|{\"autorizado\":true,\"rol\":\"ADM\"}", estado + "|" + cuerpo);
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, @"SORIANA\t_otro", out estado);
         Check("H1 admin_sesion: otra cuenta no", "200|{\"autorizado\":false}", estado + "|" + cuerpo);
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
         Check("H1 admin_sesion: anonimo no", "200|{\"autorizado\":false}", estado + "|" + cuerpo);
 
         cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
-        Check("H2 capacidad autorizada: pasa Exigir (400 por falta de categoria, sin SQL)", "400|True",
+        Check("H2 capacidad ADM: pasa ExigirAdm (400 por falta de categoria, sin SQL)", "400|True",
               estado + "|" + cuerpo.Contains("SolicitudInvalida"));
         cuerpo = Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", null, YO, out estado);
-        Check("H3 validar autorizada: pasa Exigir (405 por GET, sin SQL)", "405|True",
+        Check("H3 validar ADM: pasa ExigirAdm (405 por GET, sin SQL)", "405|True",
               estado + "|" + cuerpo.Contains("MetodoNoPermitido"));
+
+        // ---- R) rol (dbo.UsuariosAdmin) despues de la whitelist -------------
+        IHttpHandler[] soloAdm = { new AdminIniciativasCapacidad(), new AdminIniciativasValidar() };
+        IHttpHandler[] paraMod = { new AdminIniciativasRegistro(), new AdminIniciativasCatalogos() };
+        var casosNoAdm = new[]
+        {
+            new { nombre = "MOD", f = new FuenteFalsa().Con(YO, "MOD") },
+            new { nombre = "sin fila en UsuariosAdmin", f = new FuenteFalsa() },
+            new { nombre = "consulta que falla", f = new FuenteFalsa { Falla = true } },
+            new { nombre = "duplicado ADM + MOD", f = new FuenteFalsa().Con(YO, "ADM", "MOD") },
+            new { nombre = "valor raro", f = new FuenteFalsa().Con(YO, "ROOT") },
+            new { nombre = "Acceso NULL", f = new FuenteFalsa().Con(YO, new string[] { null }) },
+        };
+        foreach (var c in casosNoAdm)
+        {
+            AccesoAdmin.FuenteRoles = c.f;
+            foreach (var h in soloAdm)
+            {
+                cuerpo = Correr(h, "admin_iniciativas_x.ashx", null, YO, out estado);
+                Check("R1 " + c.nombre + ": " + h.GetType().Name + " 403 RolInsuficiente", "403|True",
+                      estado + "|" + cuerpo.Contains("\"tipo\":\"RolInsuficiente\""));
+            }
+            cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
+            Check("R1 " + c.nombre + ": admin_sesion entra como MOD", "{\"autorizado\":true,\"rol\":\"MOD\"}", cuerpo);
+        }
+
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
+        foreach (var h in paraMod)
+        {
+            try { cuerpo = Correr(h, "admin_iniciativas_x.ashx", null, YO, out estado); }
+            catch (Exception) { cuerpo = ""; estado = -1; }   // llego al SQL: no hay base aqui
+            Check("R2 MOD: " + h.GetType().Name + " no lo bloquea el rol", "True|False",
+                  (estado != 403) + "|" + cuerpo.Contains("RolInsuficiente"));
+        }
+
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "ADM", " adm ");
+        cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
+        Check("R3 duplicado ADM + ADM: sigue ADM", 400, estado);
+
+        var otroAdm = new FuenteFalsa().Con(@"SORIANA\omaralus", "ADM");
+        AccesoAdmin.FuenteRoles = otroAdm;
+        foreach (var h in soloAdm)
+        {
+            cuerpo = Correr(h, "admin_iniciativas_x.ashx", null, @"SORIANA\omaralus", out estado);
+            Check("R4 ADM en la tabla pero fuera de la whitelist: " + h.GetType().Name + " 403 AccesoDenegado", "403|True",
+                  estado + "|" + cuerpo.Contains("AccesoDenegado"));
+        }
+        cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, @"SORIANA\omaralus", out estado);
+        Check("R4 admin_sesion fuera de la whitelist: sin rol", "{\"autorizado\":false}", cuerpo);
+        Check("R4 ni siquiera se consulta la tabla", 0, otroAdm.Pedidas.Count);
+
+        var contada = new FuenteFalsa().Con(YO, "ADM");
+        AccesoAdmin.FuenteRoles = contada;
+        Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, @"  soriana\T_ANDRESVR ", out estado);
+        Check("R5 se consulta con la cuenta original (sin espacios) y pasa", "400|soriana\\T_ANDRESVR",
+              estado + "|" + (contada.Pedidas.Count > 0 ? contada.Pedidas[0] : ""));
+        Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
+        Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
+        Check("R6 sin cache: una consulta por request (rol + Exigir no repiten)", 3, contada.Pedidas.Count);
+
+        Check("R8 anonimo: MOD", "MOD", RolAdmin.Para(IdentidadWindows.Desde(null, false), new FuenteFalsa().Con(YO, "ADM"), null));
+        var errores = new List<Exception>();
+        Check("R8 la fuente falla: MOD y se registra", "MOD|1",
+              RolAdmin.Para(YO, new FuenteFalsa { Falla = true }, errores.Add) + "|" + errores.Count);
+        Check("R8 Resolver: vacio/null = MOD", "MOD|MOD", RolAdmin.Resolver(new string[0]) + "|" + RolAdmin.Resolver(null));
+        AccesoAdmin.FuenteRoles = fuente;
 
         IHttpHandler[] protegidos =
         {
@@ -113,53 +208,40 @@ public static class AccesoAdminHttpSmoke
             }
         }
 
-        // ---- D) desarrollo local (IdentidadDesarrolloLocal) -----------------
-        // La regla: las cuatro condiciones a la vez.
+        // ---- L) atajo de desarrollo local (AccesoDesarrolloLocal) ----------
+        // La regla: DEBUG + request local + IIS Express, las tres.
         const string EXP = "iisexpress";
-        Check("D1 iisexpress + local + anonimo + variable: simula", YO,
-              IdentidadDesarrolloLocal.Evaluar(EXP, true, false, " " + YO + " "));
-        Check("D2 en IIS (w3wp): nunca", true, IdentidadDesarrolloLocal.Evaluar("w3wp", true, false, YO) == null);
-        Check("D3 cliente remoto: nunca", true, IdentidadDesarrolloLocal.Evaluar(EXP, false, false, YO) == null);
-        Check("D4 con identidad real: nunca la reemplaza", true, IdentidadDesarrolloLocal.Evaluar(EXP, true, true, YO) == null);
-        Check("D5 sin variable: nada", true, IdentidadDesarrolloLocal.Evaluar(EXP, true, false, null) == null
-                                             && IdentidadDesarrolloLocal.Evaluar(EXP, true, false, "  ") == null);
-        Check("D6 variable sin dominio / sin cuenta: nada", true,
-              IdentidadDesarrolloLocal.Evaluar(EXP, true, false, "t_andresvr") == null
-              && IdentidadDesarrolloLocal.Evaluar(EXP, true, false, @"SORIANA\") == null
-              && IdentidadDesarrolloLocal.Evaluar(EXP, true, false, @"\t_andresvr") == null);
-        Check("D7 la simulada pasa por la whitelist: otra cuenta seguiria negada", false,
-              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(
-                  IdentidadDesarrolloLocal.Evaluar(EXP, true, false, @"SORIANA\t_otro"), true)));
+        Check("L1 local + DEBUG + IIS Express: ADM", true, AccesoDesarrolloLocal.Evaluar(true, true, EXP));
+        Check("L1 nombre del proceso sin distinguir mayusculas", true, AccesoDesarrolloLocal.Evaluar(true, true, "IISExpress"));
+        Check("L2 no local (remoto): autorizacion normal", false, AccesoDesarrolloLocal.Evaluar(true, false, EXP));
+        Check("L3 sin DEBUG (Release): autorizacion normal", false, AccesoDesarrolloLocal.Evaluar(false, true, EXP));
+        Check("L4 IIS de la VM (w3wp) aunque sea local y DEBUG: normal", false, AccesoDesarrolloLocal.Evaluar(true, true, "w3wp"));
+        Check("L4 sin proceso conocido: normal", false, AccesoDesarrolloLocal.Evaluar(true, true, null));
+        Check("L5 nada de lo anterior: normal", false, AccesoDesarrolloLocal.Evaluar(false, false, "w3wp"));
 
-        // Con la variable PUESTA en este proceso (que no es iisexpress y cuyo
-        // request no es local): el camino normal no cambia en nada.
-        Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, YO);
-        try
+        // Este proceso no es IIS Express y el request armado no es local: en
+        // cualquier build (DEBUG o no) los handlers siguen la regla normal.
+        Console.WriteLine("      (build de App_Code con DEBUG = " + AccesoDesarrolloLocal.CompiladoEnDebug + ")");
+        Check("L6 este request no activa el atajo", false, AccesoDesarrolloLocal.Activo(Contexto("x.ashx", null, "", new StringWriter())));
+        foreach (var h in protegidos)
         {
-            foreach (var h in protegidos)
-            {
-                cuerpo = Correr(h, "admin_iniciativas_x.ashx", "categoria=/A", "", out estado);
-                Check("D8 variable puesta, fuera de IIS Express: " + h.GetType().Name + " anonimo sigue en 403",
-                      "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
-            }
-            cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
-            Check("D8 admin_sesion anonimo sigue sin autorizar", "{\"autorizado\":false}", cuerpo);
-            cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, @"SORIANA\t_otro", out estado);
-            Check("D9 identidad real no autorizada: 403 aunque la variable diga t_andresvr", 403, estado);
-            var sw = new StringWriter();
-            var ctxReal = Contexto("x.ashx", null, YO, sw);
-            var idReal = IdentidadWindows.DesdeContexto(ctxReal);
-            Check("D10 identidad real autorizada: es la real, no la simulada", "SORIANA\\t_andresvr|False",
-                  idReal.Original + "|" + idReal.DesarrolloLocal);
-            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, @"SORIANA\t_otro");
-            Check("D10 la variable no pisa a la identidad real", true,
-                  AccesoAdmin.EstaAutorizado(IdentidadWindows.DesdeContexto(Contexto("x.ashx", null, YO, new StringWriter()))));
+            cuerpo = Correr(h, "admin_iniciativas_x.ashx", "categoria=/A", "", out estado);
+            Check("L6 anonimo no local: " + h.GetType().Name + " 403 AccesoDenegado", "403|True",
+                  estado + "|" + cuerpo.Contains("AccesoDenegado"));
         }
-        finally
-        {
-            Environment.SetEnvironmentVariable(IdentidadDesarrolloLocal.Variable, null);
-            HttpContext.Current = null;
-        }
+        cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
+        Check("L6 admin_sesion anonimo no local: sin autorizar ni marca de desarrollo", "{\"autorizado\":false}", cuerpo);
+        Check("L6 null: no activa", false, AccesoDesarrolloLocal.Activo(null));
+
+        // En un build sin DEBUG, Activo ni siquiera tiene la logica: el
+        // fuente lo deja dentro de #if DEBUG con #else return false.
+        var fuenteDev = File.ReadAllText(Path.Combine("App_Code", "AccesoDesarrolloLocal.cs")).Replace("\r\n", "\n");
+        var activo = fuenteDev.Substring(fuenteDev.IndexOf("public static bool Activo("));
+        activo = activo.Substring(0, activo.IndexOf("\n    }") + 6);
+        Check("L7 Activo: #if DEBUG ... #else return false", true,
+              activo.Contains("#if DEBUG") && activo.Contains("#else\n        return false;\n#endif"));
+        Check("L7 sin host/URL/query/cookie/header en la regla", false,
+              System.Text.RegularExpressions.Regex.IsMatch(activo, @"Url|Host|QueryString|Cookies|Headers|Form|Params|ServerVariables"));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));
         return fallos == 0 ? 0 : 1;

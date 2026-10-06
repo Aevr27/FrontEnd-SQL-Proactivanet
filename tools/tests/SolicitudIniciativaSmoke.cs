@@ -76,7 +76,7 @@ public static class SolicitudIniciativaSmoke
     }
 
     static readonly CatalogoSolicitud Catalogo = new CatalogoSolicitud(
-        new object[] { "Problem", "Adopcion", "Hardware" },
+        new object[] { "PRB", "ADO", "HAR" },
         new[]
         {
             A("PO 1", "SO x", "/A/Cat 1", "Dir A"),
@@ -119,28 +119,48 @@ public static class SolicitudIniciativaSmoke
 
     public static int Main()
     {
-        // ---- T) tipo --------------------------------------------------------
-        var tipos = TiposSolicitud.ProblemPrimero(DashboardCatalogos.TiposUnicos(
-            new[] { "Requerimiento", "Problem", "Adopcion", "Mejora Aplicativo", "Hardware" }));
-        Check("T1 Problem primero", "Problem", tipos[0]);
-        Check("T2 el resto en el orden del catalogo",
-              "Problem|Adopcion|Hardware|Mejora Aplicativo|Requerimiento", string.Join("|", tipos));
-        Check("T3 sin Problem: no se inventa", "Adopcion|Mejora",
-              string.Join("|", TiposSolicitud.ProblemPrimero(new object[] { "Adopcion", "Mejora" })));
-        Check("T4 grafia del catalogo intacta", " PROBLEM|Adopcion",
-              string.Join("|", TiposSolicitud.ProblemPrimero(new object[] { "Adopcion", " PROBLEM" })));
-        Check("T5 ValorProblem", "Problem", TiposSolicitud.ValorProblem(tipos));
-        Check("T5 ValorProblem sin Problem", true, TiposSolicitud.ValorProblem(new object[] { "Adopcion" }) == null);
+        // ---- T) tipo = Prefijo de dbo.CatPrefijoProblem ---------------------
+        var catTipos = DashboardCatalogos.PrefijosOrdenados(new[] {
+            new KeyValuePair<string, string>("REQ", "Requerimiento"),
+            new KeyValuePair<string, string>("PRB", "Problem"),
+            new KeyValuePair<string, string>("ADO", "Adopción"),
+            new KeyValuePair<string, string>(" MAP ", "Mejora aplicativo"),
+            new KeyValuePair<string, string>("HAR", "Hardware"),
+            new KeyValuePair<string, string>("RTI", "Requerimiento de TI a TI"),
+        });
+        var tipos = DashboardCatalogos.Llaves(catTipos);
+        Check("T1 PRB primero", "PRB", tipos[0]);
+        Check("T2 el resto por Descripcion", "PRB|ADO|HAR|MAP|REQ|RTI", string.Join("|", tipos));
+        Check("T3 sin PRB: no se inventa", "ADO|MAP",
+              string.Join("|", TiposSolicitud.ProblemPrimero(new object[] { "ADO", "MAP" })));
+        Check("T4 grafia del catalogo intacta", " prb|ADO",
+              string.Join("|", TiposSolicitud.ProblemPrimero(new object[] { "ADO", " prb" })));
+        Check("T5 ValorProblem = el prefijo PRB", "PRB", TiposSolicitud.ValorProblem(tipos));
+        Check("T5 ValorProblem sin PRB", true, TiposSolicitud.ValorProblem(new object[] { "ADO" }) == null);
+        Check("T6 la Descripcion 'Problem' no es la llave", false, TiposSolicitud.EsProblem("Problem"));
         Check("T6 'Problema' no es Problem", false, TiposSolicitud.EsProblem("Problema"));
+        var porFolio = DashboardCatalogos.PrefijoPorFolio(new[] {
+            new KeyValuePair<string, string>("PRB 1", " PRB "),
+            new KeyValuePair<string, string>("PRB 1", "HAR"),
+            new KeyValuePair<string, string>("X 2", null),
+            new KeyValuePair<string, string>("", "PRB"),
+        });
+        Check("T7 prefijo por folio: limpio, el primero gana, vacios fuera", "1|PRB", porFolio.Count + "|" + porFolio["PRB 1"]);
+        Check("T8 la Descripcion no se acepta como tipo (el servidor pide el prefijo)", "tipo",
+              Campos(V(Completa("Problem", "/A/Cat 1", "20"), true, null)));
+        Check("T8 prefijo que no esta en el catalogo: rechazado", "tipo",
+              Campos(V(Completa("XYZ", "/A/Cat 1", "20"), false, null)));
+        Check("T8 prefijo en minusculas: no es la llave", "tipo",
+              Campos(V(Completa("ado", "/A/Cat 1", "20"), false, null)));
 
         // ---- R) requeridos --------------------------------------------------
-        var ok = V(Completa("Adopcion", "/A/Cat 1", "20"), false, null);
+        var ok = V(Completa("ADO", "/A/Cat 1", "20"), false, null);
         Check("R0 completa valida", true, ok.Valida);
         Check("R0 director derivado", "Dir A", ok.Director);
         Check("R0 fraccion", "0.2000", ok.PctFraccion);
         foreach (var campo in new[] { "tipo", "po", "so", "categoria", "titulo", "descripcion", "observaciones", "volumetria", "pct" })
         {
-            var f = Completa("Adopcion", "/A/Cat 1", "20");
+            var f = Completa("ADO", "/A/Cat 1", "20");
             f[campo] = "   ";
             var r = V(f, false, null);
             Check("R1 falta " + campo + " -> invalida", false, r.Valida);
@@ -151,9 +171,9 @@ public static class SolicitudIniciativaSmoke
         // ---- C) catalogo y cascada -------------------------------------------
         var fc = Completa("Inventado", "/A/Cat 1", "20");
         Check("C1 tipo fuera de catalogo", "tipo", Campos(V(fc, false, null)));
-        fc = Completa("Adopcion", "/A/Cat 1", "20"); fc["so"] = "SO y";
+        fc = Completa("ADO", "/A/Cat 1", "20"); fc["so"] = "SO y";
         Check("C2 PO/SO/Categoria sin fila vigente", "categoria", Campos(V(fc, false, null)));
-        fc = Completa("Adopcion", "/A/Cat 9", "20");
+        fc = Completa("ADO", "/A/Cat 9", "20");
         Check("C3 categoria inexistente", "categoria", Campos(V(fc, false, null)));
 
         // ---- V) formatos -----------------------------------------------------
@@ -163,7 +183,7 @@ public static class SolicitudIniciativaSmoke
             Check("V2 % invalido '" + malo + "'", true, ValidadorIniciativa.Fraccion(malo) == null);
         Check("V3 33.33% -> 0.3333", "0.3333", ValidadorIniciativa.Fraccion("33.33"));
         Check("V3 1% -> 0.0100 (sin multiplos de 5)", "0.0100", ValidadorIniciativa.Fraccion("1"));
-        var fv = Completa("Adopcion", "/A/Cat 1", "20"); fv["volumetria"] = "12.5";
+        var fv = Completa("ADO", "/A/Cat 1", "20"); fv["volumetria"] = "12.5";
         Check("V4 volumetria decimal", "volumetria", Campos(V(fv, false, null)));
         fv["volumetria"] = "99999999999";
         Check("V4 volumetria fuera de INT", "volumetria", Campos(V(fv, false, null)));
@@ -171,13 +191,13 @@ public static class SolicitudIniciativaSmoke
         Check("V4 volumetria 0 valida", true, V(fv, false, null).Valida);
 
         // ---- A) RCA ----------------------------------------------------------
-        var prbSin = V(Completa("Problem", "/A/Cat 1", "20"), false, null);
+        var prbSin = V(Completa("PRB", "/A/Cat 1", "20"), false, null);
         Check("A1 Problem sin RCA -> INVALID", "rca", Campos(prbSin));
         Check("A1 rca_obligatorio", true, prbSin.RcaObligatorio);
-        Check("A2 Problem con RCA -> VALID", true, V(Completa("Problem", "/A/Cat 1", "20"), true, null).Valida);
-        Check("A3 otro tipo sin RCA -> VALID", true, V(Completa("Hardware", "/A/Cat 1", "20"), false, null).Valida);
-        Check("A4 otro tipo con RCA -> VALID", true, V(Completa("Hardware", "/A/Cat 1", "20"), true, null).Valida);
-        Check("A5 otro tipo: RCA opcional", false, V(Completa("Hardware", "/A/Cat 1", "20"), false, null).RcaObligatorio);
+        Check("A2 Problem con RCA -> VALID", true, V(Completa("PRB", "/A/Cat 1", "20"), true, null).Valida);
+        Check("A3 otro tipo sin RCA -> VALID", true, V(Completa("HAR", "/A/Cat 1", "20"), false, null).Valida);
+        Check("A4 otro tipo con RCA -> VALID", true, V(Completa("HAR", "/A/Cat 1", "20"), true, null).Valida);
+        Check("A5 otro tipo: RCA opcional", false, V(Completa("HAR", "/A/Cat 1", "20"), false, null).RcaObligatorio);
 
         // ---- K) capacidad ----------------------------------------------------
         Check("K1 sin iniciativas: 100%", "1.0000", new CapacidadCategoria(null).Para("/A/Cat 1").Disponible);
@@ -198,11 +218,11 @@ public static class SolicitudIniciativaSmoke
         });
         Check("K4 20+20+20+40: usado 100%", "1.0000", llena.Para("/A/Cat 1").Usado);
         Check("K4 20+20+20+40: disponible 0%", "0.0000", llena.Para("/A/Cat 1").Disponible);
-        Check("K5 40% con 40% disponible: valida", true, V(Completa("Adopcion", "/A/Cat 1", "40"), false, tres).Valida);
-        Check("K5 40.01% con 40% disponible: error en pct", "pct", Campos(V(Completa("Adopcion", "/A/Cat 1", "40.01"), false, tres)));
-        Check("K5 50% con 40%: error en pct", "pct", Campos(V(Completa("Adopcion", "/A/Cat 1", "50"), false, tres)));
-        Check("K5 0% con 0% disponible: valida", true, V(Completa("Adopcion", "/A/Cat 1", "0"), false, llena).Valida);
-        Check("K5 1% con 0% disponible: error", "pct", Campos(V(Completa("Adopcion", "/A/Cat 1", "1"), false, llena)));
+        Check("K5 40% con 40% disponible: valida", true, V(Completa("ADO", "/A/Cat 1", "40"), false, tres).Valida);
+        Check("K5 40.01% con 40% disponible: error en pct", "pct", Campos(V(Completa("ADO", "/A/Cat 1", "40.01"), false, tres)));
+        Check("K5 50% con 40%: error en pct", "pct", Campos(V(Completa("ADO", "/A/Cat 1", "50"), false, tres)));
+        Check("K5 0% con 0% disponible: valida", true, V(Completa("ADO", "/A/Cat 1", "0"), false, llena).Valida);
+        Check("K5 1% con 0% disponible: error", "pct", Campos(V(Completa("ADO", "/A/Cat 1", "1"), false, llena)));
         var exceso = new CapacidadCategoria(new[] { K("X 1", "/A/Cat 1", 0.7000m, true), K("X 2", "/A/Cat 1", 0.5000m, true) });
         Check("K6 lo existente pasa de 100%: disponible 0", "0.0000|True", exceso.Para("/A/Cat 1").Disponible + "|" + exceso.Para("/A/Cat 1").Excedida);
         var noConsume = new CapacidadCategoria(new[] { K("C 1", "/A/Cat 1", 0.5000m, false), K("C 2", "/A/Cat 1", 0.2000m, true) });
@@ -231,7 +251,7 @@ public static class SolicitudIniciativaSmoke
         Check("G4 el padre al 100% no consume a la hija", "1.0000", padre.Para("/A/Cat 1/Sub").Disponible);
         var hija = new CapacidadCategoria(new[] { K("H 1", "/A/Cat 1/Sub", 1.0000m, true) });
         Check("G5 la hija al 100% no consume al padre", "1.0000", hija.Para("/A/Cat 1").Disponible);
-        Check("G5 el padre puede pedir 100 con la hija llena", true, V(Completa("Adopcion", "/A/Cat 1", "100"), false, hija).Valida);
+        Check("G5 el padre puede pedir 100 con la hija llena", true, V(Completa("ADO", "/A/Cat 1", "100"), false, hija).Valida);
         Check("G6 prefijo de texto tampoco", "1.0000",
               new CapacidadCategoria(new[] { K("Z 1", "/A/Cat 10", 0.9000m, true) }).Para("/A/Cat 1").Disponible);
         Check("G7 la misma ruta con '/' final es OTRA cadena: no se recorta", "1.0000",
@@ -250,8 +270,8 @@ public static class SolicitudIniciativaSmoke
         });
         Check("P1 Categoria A: 60% disponible", "0.6000", dos.Para("/A/Cat 1").Disponible);
         Check("P2 Categoria B: 30% disponible", "0.3000", dos.Para("/B/Cat 3").Disponible);
-        Check("P3 A puede pedir 60% aunque B use 70%", true, V(Completa("Adopcion", "/A/Cat 1", "60"), false, dos).Valida);
-        Check("P4 B no puede pedir 31%", "pct", Campos(V(Completa("Adopcion", "/B/Cat 3", "31"), false, dos)));
+        Check("P3 A puede pedir 60% aunque B use 70%", true, V(Completa("ADO", "/A/Cat 1", "60"), false, dos).Valida);
+        Check("P4 B no puede pedir 31%", "pct", Campos(V(Completa("ADO", "/B/Cat 3", "31"), false, dos)));
         Check("P5 otra categoria de A sin iniciativas: 100%", "1.0000", dos.Para("/A/Cat 2").Disponible);
 
         // ---- X) concurrencia -------------------------------------------------
@@ -263,7 +283,7 @@ public static class SolicitudIniciativaSmoke
             K("PRB 1", "/A/Cat 1", 0.2000m, true), K("PRB 2", "/A/Cat 1", 0.2000m, true),
             K("PRB 3", "/A/Cat 1", 0.2000m, true), K("PRB 9", "/A/Cat 1", 0.1000m, true),
         });
-        var fx = Completa("Adopcion", "/A/Cat 1", "40");
+        var fx = Completa("ADO", "/A/Cat 1", "40");
         fx["disponible_cliente"] = "40";
         Check("X1 con el estado de cuando abrio: pasaba", true, V(fx, false, antes).Valida);
         var rx = V(fx, false, despues);
@@ -314,12 +334,12 @@ public static class SolicitudIniciativaSmoke
         var invalida = V(new NameValueCollection(), false, null);
         IniciativaService.AsignarNumero(invalida, emisor);
         Check("N6 invalida: no pide numero", "0|null", emisor.Llamadas + "|" + (invalida.Numero == null ? "null" : "x"));
-        var valida = V(Completa("Adopcion", "/A/Cat 1", "20"), false, null);
+        var valida = V(Completa("ADO", "/A/Cat 1", "20"), false, null);
         IniciativaService.AsignarNumero(valida, emisor);
         Check("N6 valida: un numero, #0000142", "1|#0000142|null",
               emisor.Llamadas + "|" + valida.Numero + "|" + (valida.NumeroPendiente ?? "null"));
         Check("N6 JSON lleva el numero", "#0000142", IniciativaService.ComoJson(valida)["numero_solicitud"]);
-        var hoy = V(Completa("Adopcion", "/A/Cat 1", "20"), false, null);
+        var hoy = V(Completa("ADO", "/A/Cat 1", "20"), false, null);
         IniciativaService.AsignarNumero(hoy, new GeneradorNumeroSolicitudPendiente());
         Check("N7 hoy (sin almacen): sin numero y con motivo", "True|" + GeneradorNumeroSolicitudPendiente.Motivo,
               (hoy.Numero == null) + "|" + hoy.NumeroPendiente);
@@ -336,9 +356,9 @@ public static class SolicitudIniciativaSmoke
         var a50 = new CapacidadCategoria(new[] { K("I 1", "/A/Cat 1", 0.3000m, true), K("I 2", "/A/Cat 1", 0.2000m, true) });
         Check("A2 30+20: 50%", "0.5000", a50.Para("/A/Cat 1").Disponible);
         Check("A2 B sigue en 100% con A al 50%", "1.0000", a50.Para("/B/Cat 3").Disponible);
-        Check("A2 pedir exactamente lo que queda (50): pasa", true, V(Completa("Adopcion", "/A/Cat 1", "50"), false, a50).Valida);
-        Check("A2 pedir 50.01: rechaza", "pct", Campos(V(Completa("Adopcion", "/A/Cat 1", "50.01"), false, a50)));
-        Check("A2 B puede pedir 100 con A al 50", true, V(Completa("Adopcion", "/B/Cat 3", "100"), false, a50).Valida);
+        Check("A2 pedir exactamente lo que queda (50): pasa", true, V(Completa("ADO", "/A/Cat 1", "50"), false, a50).Valida);
+        Check("A2 pedir 50.01: rechaza", "pct", Campos(V(Completa("ADO", "/A/Cat 1", "50.01"), false, a50)));
+        Check("A2 B puede pedir 100 con A al 50", true, V(Completa("ADO", "/B/Cat 3", "100"), false, a50).Valida);
         var inactivas = new CapacidadCategoria(new[]
         {
             K("C 1", "/A/Cat 1", 0.9000m, false), K("C 2", "/A/Cat 1", 0.5000m, false), K("V 1", "/A/Cat 1", 0.1000m, true),
@@ -350,26 +370,31 @@ public static class SolicitudIniciativaSmoke
         });
         Check("A2 decimales 33+22+6: 39% disponible", "0.3900", dec.Para("/A/Cat 1").Disponible);
         Check("A2 39% cabe, 39.01% no", "True|pct",
-              V(Completa("Adopcion", "/A/Cat 1", "39"), false, dec).Valida + "|" + Campos(V(Completa("Adopcion", "/A/Cat 1", "39.01"), false, dec)));
+              V(Completa("ADO", "/A/Cat 1", "39"), false, dec).Valida + "|" + Campos(V(Completa("ADO", "/A/Cat 1", "39.01"), false, dec)));
         var dec2 = new CapacidadCategoria(new[] { K("E 1", "/A/Cat 1", 0.3333m, true), K("E 2", "/A/Cat 1", 0.3333m, true) });
         Check("A2 33.33+33.33: 33.34% disponible y cabe exacto", "0.3334|True",
-              dec2.Para("/A/Cat 1").Disponible + "|" + V(Completa("Adopcion", "/A/Cat 1", "33.34"), false, dec2).Valida);
+              dec2.Para("/A/Cat 1").Disponible + "|" + V(Completa("ADO", "/A/Cat 1", "33.34"), false, dec2).Valida);
 
         // ---- D2) cascada y autorizacion -------------------------------------
-        var fpo = Completa("Adopcion", "/A/Cat 1", "20"); fpo["po"] = "PO inventado";
+        var fpo = Completa("ADO", "/A/Cat 1", "20"); fpo["po"] = "PO inventado";
         Check("D2 PO fuera del catalogo", "po", Campos(V(fpo, false, null)));
-        var fso = Completa("Adopcion", "/A/Cat 1", "20"); fso["so"] = "SO inventado";
+        var fso = Completa("ADO", "/A/Cat 1", "20"); fso["so"] = "SO inventado";
         Check("D2 SO fuera del catalogo", "so", Campos(V(fso, false, null)));
-        var fmix = Completa("Adopcion", "/A/Cat 1", "20"); fmix["po"] = "PO 2";
+        var fmix = Completa("ADO", "/A/Cat 1", "20"); fmix["po"] = "PO 2";
         Check("D2 valores validos que no forman fila: error de combinacion", "categoria", Campos(V(fmix, false, null)));
         foreach (var h in new[] { "catalogos", "capacidad", "validar", "registro", "diagnostico" })
         {
             var ruta = @"handlers\admin_iniciativas_" + h + ".ashx";
             var texto = System.IO.File.ReadAllText(ruta);
-            var exigir = texto.IndexOf("if (!AccesoAdmin.Exigir(context)) return;", StringComparison.Ordinal);
+            // Crear (capacidad, validar) es solo de ADM: ExigirAdm (que corre
+            // Exigir primero). Lo que MOD tambien usa: Exigir.
+            var soloAdm = h == "capacidad" || h == "validar";
+            var linea = soloAdm ? "if (!AccesoAdmin.ExigirAdm(context)) return;" : "if (!AccesoAdmin.Exigir(context)) return;";
+            var exigir = texto.IndexOf(linea, StringComparison.Ordinal);
             var cuerpo = texto.IndexOf("public void ProcessRequest(HttpContext context)", StringComparison.Ordinal);
             var siguiente = texto.IndexOf(';', cuerpo);   // primera sentencia del metodo
-            Check("D3 " + h + ": Exigir es la primera sentencia", true, exigir > cuerpo && texto.IndexOf(';', exigir) == siguiente);
+            Check("D3 " + h + ": " + (soloAdm ? "ExigirAdm" : "Exigir") + " es la primera sentencia", true,
+                  exigir > cuerpo && texto.IndexOf(';', exigir) == siguiente);
             Check("D3 " + h + ": ruta protegida por el modulo", true,
                   AccesoAdmin.EsRutaProtegida("~/handlers/admin_iniciativas_" + h + ".ashx"));
         }
@@ -414,9 +439,9 @@ public static class SolicitudIniciativaSmoke
 
         // El validador sobre esas rutas: la N2 sola no es una opcion si no es
         // una ruta activa del catalogo, y la combinacion se exige.
-        var catRutas = CatalogoSolicitud.Desde(new object[] { "Adopcion", "Problem" }, rutas);
+        var catRutas = CatalogoSolicitud.Desde(new object[] { "ADO", "PRB" }, rutas);
         var fr = new NameValueCollection();
-        fr["tipo"] = "Adopcion"; fr["po"] = "PO 1"; fr["so"] = "SO x"; fr["categoria"] = "/S-A/Uno/Hoja 1";
+        fr["tipo"] = "ADO"; fr["po"] = "PO 1"; fr["so"] = "SO x"; fr["categoria"] = "/S-A/Uno/Hoja 1";
         fr["titulo"] = "T"; fr["descripcion"] = "D"; fr["observaciones"] = "O"; fr["volumetria"] = "5"; fr["pct"] = "20";
         var capRuta = new CapacidadCategoria(new[] { K("I 1", "/S-A/Uno/Hoja 1", 0.3000m, true), K("I 2", "/S-A/Uno", 1.0000m, true) });
         var rv = new ValidadorIniciativa().Validar(SolicitudIniciativa.DesdeFormulario(fr, false, null), catRutas, capRuta);

@@ -15,7 +15,8 @@
 // lectura no hay transaccion que tomar.
 //
 // SOLO LECTURA: DirectorioOrganizacional.Cargar, CatalogoRutasIniciativa
-// (dbo.Categorias), DashboardCatalogos.TiposIniciativa y ExperienciaQueries
+// (dbo.Categorias), DashboardCatalogos.PrefijosIniciativa
+// (dbo.CatPrefijoProblem) y ExperienciaQueries
 // .CompromisosCapacidad, sobre una conexion.
 //
 // La categoria es la RUTA COMPLETA elegida: es la llave de la capacidad
@@ -63,7 +64,9 @@ public sealed class IniciativaService
     {
         using (var cn = Abrir())
         {
-            var tipos = DashboardCatalogos.TiposIniciativa(cn);
+            // Tipo = Prefijo de dbo.CatPrefijoProblem: lo que no este ahi se
+            // rechaza ("no esta en el catalogo").
+            var tipos = DashboardCatalogos.Llaves(DashboardCatalogos.PrefijosIniciativa(cn));
             // La misma lista de rutas que ofrece la pantalla, leida de nuevo.
             var rutas = CatalogoRutasIniciativa.Cargar(cn, DirectorioOrganizacional.Cargar(cn));
             var catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);

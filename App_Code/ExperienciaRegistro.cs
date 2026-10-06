@@ -46,11 +46,14 @@
 //   activa         estado en ESTADOS_ACTIVOS.
 //   seguimiento    activa y con agrupador de AGRUPADORES: el criterio con el
 //                  que Experiencia cuenta Activas y Vencidas.
-//   tipo_iniciativa  dbo.Problem.TipoIniciativa del folio
-//                  (DashboardCatalogos.TiposIniciativaPorFolio, la grafia del
-//                  catalogo TiposIniciativa), o null. NO es `agrup`: ese es
-//                  TipoAgrupado. Lectura aparte para no tocar el SELECT de
-//                  Experiencia.
+//   prefijo        dbo.Problem.Prefijo del folio
+//                  (DashboardCatalogos.PrefijosPorFolio), o null. Es la llave
+//                  del filtro "Tipo de iniciativa" (catalogo
+//                  dbo.CatPrefijoProblem, que sale aparte en
+//                  `tipos_iniciativa`: [{ prefijo, nombre }]). NO es
+//                  Problem.TipoIniciativa (no son uno a uno; no se traduce)
+//                  ni `agrup` (TipoAgrupado). Lecturas aparte para no tocar
+//                  el SELECT de Experiencia.
 //
 // Los datos del folio (titulo, agrup, estado, fechas) son los de su PRIMERA
 // fila, el mismo criterio que Iniciativas() usa para deduplicar por folio
@@ -66,7 +69,8 @@
 // registro por su `n2`, sin ningun SELECT nuevo.
 //
 // SOLO LECTURA: los SELECT de LeerIniciativas, LeerIniciativasSinCategoria,
-// DirectorioOrganizacional.Cargar y DashboardCatalogos.TiposIniciativaPorFolio,
+// DirectorioOrganizacional.Cargar, DashboardCatalogos.PrefijosPorFolio y
+// DashboardCatalogos.PrefijosIniciativa,
 // sobre una conexion.
 
 using System;
@@ -88,9 +92,10 @@ public static partial class ExperienciaQueries
             var dir = DirectorioOrganizacional.Cargar(cn);
             AlinearDuenos(detalle, dir);
             var sueltas = LeerIniciativasSinCategoria(cn, hoy, dir);
-            var tipos = DashboardCatalogos.TiposIniciativaPorFolio(cn);
+            var prefijos = DashboardCatalogos.PrefijosPorFolio(cn);
 
-            var salida = ArmarRegistro(detalle, sueltas, dir, tipos);
+            var salida = ArmarRegistro(detalle, sueltas, dir, prefijos);
+            salida["tipos_iniciativa"] = DashboardCatalogos.PrefijosIniciativa(cn);
             salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
             return salida;
         }
@@ -100,7 +105,7 @@ public static partial class ExperienciaQueries
     // la pruebe sin SQL, con filas armadas a mano.
     private static Dictionary<string, object> ArmarRegistro(
         List<Detalle> detalle, List<object> sueltas, DirectorioOrganizacional dir,
-        Dictionary<string, string> tipos)
+        Dictionary<string, string> prefijos)
     {
         var porFolio = new Dictionary<string, List<Detalle>>(StringComparer.OrdinalIgnoreCase);
         var orden = new List<string>();
@@ -146,7 +151,7 @@ public static partial class ExperienciaQueries
             i["activa"] = primera.Activa;
             i["seguimiento"] = primera.Activa && EsAgrupador(primera.Agrup);
             i["sin_categoria"] = false;
-            i["tipo_iniciativa"] = TipoDe(tipos, folio);
+            i["prefijo"] = PrefijoDe(prefijos, folio);
             i["categorias"] = categorias;
             iniciativas.Add(i);
         }
@@ -162,7 +167,7 @@ public static partial class ExperienciaQueries
             i["activa"] = activa;
             i["seguimiento"] = activa && EsAgrupador(i["agrup"] as string);
             i["sin_categoria"] = true;
-            i["tipo_iniciativa"] = TipoDe(tipos, folio);
+            i["prefijo"] = PrefijoDe(prefijos, folio);
             i["categorias"] = new List<object>();
             iniciativas.Add(i);
         }
@@ -183,9 +188,9 @@ public static partial class ExperienciaQueries
         return fila == null ? null : fila.CategoriaN2;
     }
 
-    private static string TipoDe(Dictionary<string, string> tipos, string folio)
+    private static string PrefijoDe(Dictionary<string, string> prefijos, string folio)
     {
-        string t;
-        return tipos != null && tipos.TryGetValue(folio, out t) ? t : null;
+        string p;
+        return prefijos != null && prefijos.TryGetValue(folio, out p) ? p : null;
     }
 }

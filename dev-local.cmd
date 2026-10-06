@@ -11,23 +11,22 @@ REM    http://localhost:8081/                       tablero (dashboard.html)
 REM    http://localhost:8081/qa/qa.html             tablero de QA (suelto)
 REM
 REM  Admin -> Iniciativas en local (SOLO DESARROLLO): IIS Express no tiene
-REM  Autenticacion de Windows, asi que todo llega anonimo y Admin da 403.
-REM  Para probarlo, pasar la cuenta como segundo argumento:
+REM  Autenticacion de Windows. Con <compilation debug="true"> en Web.config,
+REM  abriendo desde esta misma maquina, Admin trata el request como ADM sin
+REM  credenciales ni argumentos (App_Code/AccesoDesarrolloLocal.cs). En la VM
+REM  (IIS, w3wp.exe) eso no aplica.
 REM
-REM    dev-local.cmd 8081 SORIANA\t_andresvr
-REM
-REM  Pone ADMIN_DEV_IDENTIDAD solo para este IIS Express. La cuenta pasa por
-REM  la whitelist igual que en la VM (otra cuenta -> 403). Solo actua en
-REM  iisexpress, desde localhost y sin identidad real: ver
-REM  App_Code/IdentidadDesarrolloLocal.cs. Sin segundo argumento se borra.
+REM    dev-local.cmd 8081   ->   http://localhost:8081/admin/iniciativas.html
 REM ---------------------------------------------------------------------
 setlocal
 
 set "PUERTO=%~1"
 if "%PUERTO%"=="" set "PUERTO=8081"
 
-set "ADMIN_DEV_IDENTIDAD=%~2"
-if defined ADMIN_DEV_IDENTIDAD echo Admin local: identidad simulada %ADMIN_DEV_IDENTIDAD% (solo IIS Express, solo localhost)
+REM  Si ya hay algo escuchando en el puerto (p. ej. un IIS Express de un
+REM  arranque anterior), el nuevo no arranca y sigue contestando el viejo,
+REM  con el codigo de antes. Se corta con el aviso.
+netstat -ano -p tcp | findstr /C:":%PUERTO% " | findstr /C:"LISTENING" >nul && goto :puertoOcupado
 
 set "IISEXPRESS=%ProgramFiles%\IIS Express\iisexpress.exe"
 if not exist "%IISEXPRESS%" set "IISEXPRESS=%ProgramFiles(x86)%\IIS Express\iisexpress.exe"
@@ -53,6 +52,13 @@ set "RAIZ=%~dp0"
 if "%RAIZ:~-1%"=="\" set "RAIZ=%RAIZ:~0,-1%"
 
 echo Sirviendo "%RAIZ%" en http://localhost:%PUERTO%/
+echo Admin local: http://localhost:%PUERTO%/admin/iniciativas.html (ADM solo con debug="true", desde esta maquina)
 "%IISEXPRESS%" /path:"%RAIZ%" /port:%PUERTO% /clr:v4.0
 
 endlocal
+exit /b
+
+:puertoOcupado
+echo ERROR: el puerto %PUERTO% ya esta en uso (otro IIS Express?). Cierralo o usa otro puerto:
+echo          taskkill /F /IM iisexpress.exe
+exit /b 1

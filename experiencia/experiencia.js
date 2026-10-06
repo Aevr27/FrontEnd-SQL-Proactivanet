@@ -1760,20 +1760,46 @@ function squarify(items,x0,y0,w0,h0){
   return rects;
 }
 // opts (opcional, TAREA 3): {onClick(label), selected} -- para usar el
-// treemap como filtro interactivo (Historico/Vencidas/Activas). Sin opts se
-// comporta igual que antes (solo lectura, tooltip nombre+valor).
+// treemap como filtro interactivo. Sin opts se comporta igual que antes
+// (solo lectura, tooltip nombre+valor). Vencidas y Activas ya no lo usan:
+// sus graficas de Director/PO y Agrupador son barras (renderBarrasIniciativa);
+// el treemap y su observador se quedan intactos para quien lo vuelva a usar.
+//
+// El treemap se dibuja en pixeles con el tamaño que tiene el contenedor AL
+// PINTAR. Las pestañas Vencidas y Activas se pintan en renderAll() mientras
+// su panel esta oculto (display:none, 0x0): antes se caia entonces a 300x300
+// dentro de una caja de 220px de alto y los recuadros se salian, hasta que
+// "Resetear filtro de graficas" volvia a pintar ya con el panel visible.
+// Ahora, a 0x0 no se reparte nada, y un ResizeObserver vuelve a llamar a esta
+// misma funcion, con los mismos items y opts, cuando la caja cambia de
+// tamaño: al abrir la pestaña, al volver al modulo o al cambiar el ancho de
+// la ventana. Es el mismo repintado que hacia el reset, sin tocar filtros.
+const tmObservador = typeof ResizeObserver==='function'
+  ? new ResizeObserver(entradas=>entradas.forEach(e=>{
+      const el=e.target, ult=el._tmUltimo;
+      if(!ult) return;
+      if(el.clientWidth===ult.w && el.clientHeight===ult.h) return;
+      renderTreemap(el.id, ult.items, ult.opts);
+    }))
+  : null;
 function renderTreemap(containerId,items,opts){
   opts = opts || {};
   const el=document.getElementById(containerId);
   if(!el) return;
   el.innerHTML='';
+  const w=el.clientWidth, h=el.clientHeight;
+  // Lo pedido se guarda siempre, con el tamaño con que se pinto (0x0 si la
+  // caja esta oculta): es lo que el observador compara y vuelve a pintar.
+  el._tmUltimo={items, opts, w, h};
+  if(tmObservador && !el._tmObservado){ tmObservador.observe(el); el._tmObservado=true; }
   const data=items.filter(it=>it.value>0).sort((a,b)=>b.value-a.value);
   if(!data.length){
     el.innerHTML='<div class="treemap-empty">Sin datos</div>';
     return;
   }
+  // Oculta: no hay medidas reales. El observador la pinta al aparecer.
+  if(!w || !h) return;
   const total=data.reduce((s,it)=>s+it.value,0);
-  const w=el.clientWidth||300, h=el.clientHeight||300;
   const rects=squarify(data,0,0,w,h);
   /* Color de identidad, resuelto para TODOS los recuadros de golpe: es lo
      que deja esquivar que dos personas distintas caigan en el mismo tono
@@ -1935,6 +1961,96 @@ function renderBarrasFiltroEstado(tab, conteo, seleccionado){
       scales:{y:{beginAtZero:true,ticks:{precision:0}}}},
   }).render();
 }
+/* "<Vencidas|Activas> por Director / Product Owner" y "... por Agrupador":
+   barras, ya no treemap. Es SOLO presentacion: recibe los mismos
+   [{label, value}] que recibia renderTreemap -mismos conteos, mismo filtro
+   (`selected`) y mismo `onClick(label)` que llama a toggleFiltroGraf-, asi
+   que el cross-filter, el reset y las tablas no cambian.
+
+   - Orden: de mayor a menor, como el treemap repartia el area; los ceros
+     fuera.
+   - Color: el mismo criterio que el treemap. `lider: true` -la dimension es
+     una persona- pide el color por NOMBRE completo a la tabla compartida
+     (escalaDirectores / escalaPersonas); sin esa marca -Agrupador- va el
+     reparto por posicion de la paleta categorica. Lo no seleccionado se
+     apaga con el mismo `+'40'` que las barras de Estado de este panel.
+   - `horizontal: true` (Director / PO): barras acostadas con el nombre
+     partido en dos renglones en el eje y completo en el tooltip, para que
+     los nombres largos se lean. El clic resuelve la etiqueta por INDICE en
+     `datos`, nunca por el texto partido del eje.
+   - Tamaño: la caja .lienzo-ini es la misma de 220px que tenia el treemap.
+     Si hay mas personas de las que caben a un renglon legible, el lienzo
+     interior crece por numero de barras y la caja se desplaza por dentro;
+     las tarjetas de la fila no cambian de alto.
+   - Panel oculto: Chart.js mide 0x0 al crearse dentro de display:none y se
+     redimensiona solo cuando la caja aparece (su propio ResizeObserver con
+     `responsive`), igual que las barras de Estado de al lado. */
+const chartsIniciativa = {};
+const ALTO_FILA_INI = 28;    // px por barra acostada: dos renglones de 10px
+function partirNombreEje(s, max){
+  const palabras=String(s??'').split(/\s+/).filter(Boolean);
+  const lineas=[''];
+  palabras.forEach(p=>{
+    const k=lineas.length-1;
+    if(!lineas[k]) lineas[k]=p;
+    else if((lineas[k]+' '+p).length<=max) lineas[k]+=' '+p;
+    else lineas.push(p);
+  });
+  if(lineas.length<=2) return lineas.length===1 ? lineas[0] : lineas;
+  const segunda=lineas.slice(1).join(' ');
+  return [lineas[0], segunda.length>max ? segunda.slice(0,max-1)+'…' : segunda];
+}
+function renderBarrasIniciativa(canvasId, items, opts){
+  opts = opts || {};
+  const el=document.getElementById(canvasId);
+  if(!el) return null;
+  if(chartsIniciativa[canvasId]){ chartsIniciativa[canvasId].destroy(); chartsIniciativa[canvasId]=null; }
+  const datos=items.filter(it=>it.value>0).sort((a,b)=>b.value-a.value);
+  const caja=el.closest('.lienzo-ini');
+  const vacio=caja ? caja.querySelector('.ini-vacio') : null;
+  if(vacio) vacio.hidden = datos.length>0;
+  el.style.display = datos.length ? '' : 'none';
+  if(!datos.length) return null;
+
+  const nombres=datos.map(it=>it.label);
+  const base = opts.lider
+    ? (opts.director ? Paleta.escalaDirectores(nombres) : Paleta.escalaPersonas(nombres))
+    : nombres.map((_,i)=>PALETA_CATEGORICA[i%PALETA_CATEGORICA.length]);
+  const apagar = c => /^#[0-9a-f]{6}$/i.test(c) ? c+'40' : c;
+  const colores = base.map((c,i)=>(!opts.selected || nombres[i]===opts.selected) ? c : apagar(c));
+  const total=datos.reduce((s,it)=>s+it.value,0);
+
+  const interior=el.parentNode;
+  if(interior && interior.classList.contains('lienzo-ini-alto')){
+    interior.style.height = opts.horizontal ? `max(100%, ${datos.length*ALTO_FILA_INI+24}px)` : '100%';
+  }
+  const ejeCategoria = { grid:{display:false}, ticks:{autoSkip:false, font:{size:10}} };
+  const ejeValor = { beginAtZero:true, ticks:{precision:0, callback:v=>FMT(v)} };
+  chartsIniciativa[canvasId]=new DashboardBarChart({
+    canvas: el,
+    etiquetas: opts.horizontal ? nombres.map(n=>partirNombreEje(n,18)) : nombres,
+    datos: datos.map(it=>it.value),
+    colores,
+    formato: FMT,
+    opciones:{
+      indexAxis: opts.horizontal ? 'y' : 'x',
+      maintainAspectRatio:false,
+      plugins:{legend:{display:false},
+        tooltip:{callbacks:{
+          title:it=>datos[it[0].dataIndex] ? datos[it[0].dataIndex].label : '',
+          label:c=>`${FMT(c.raw)} iniciativas · ${PCT(total>0 ? c.raw/total : 0)} del total`}}},
+      onClick:(evt,elements)=>{
+        if(!elements.length || !opts.onClick) return;
+        const it=datos[elements[0].index];
+        if(it) opts.onClick(it.label);
+      },
+      onHover:(evt,elements)=>{evt.native.target.style.cursor=elements.length?'pointer':'default';},
+      scales: opts.horizontal ? {x:ejeValor, y:ejeCategoria} : {x:ejeCategoria, y:ejeValor},
+    },
+  }).render();
+  return chartsIniciativa[canvasId];
+}
+
 // Renderiza las 3 graficas del panel cross-filter de una pestaña (ven/act).
 // Cada grafica se calcula sobre las filas ya filtradas por las OTRAS 2
 // selecciones (no la propia), para poder seguir eligiendo/cambiando de
@@ -1948,18 +2064,18 @@ function renderPanelGraf(tab, cats){
   const rowsDim=aplicarFiltroGraf(baseRows, est, 'dim');
   const conteoDim={};
   rowsDim.forEach(r=>{ const v=r[est.dim]||'(Sin dato)'; conteoDim[v]=(conteoDim[v]||0)+1; });
-  // La dimension de este treemap es SIEMPRE una persona -Director o Product
+  // La dimension de esta grafica es SIEMPRE una persona -Director o Product
   // Owner-, asi que el color es identidad y sale de la tabla compartida.
   registrarDimension(Object.keys(conteoDim));
-  renderTreemap('chart'+cap1(tab)+'Dim',
+  renderBarrasIniciativa('chart'+cap1(tab)+'Dim',
     Object.entries(conteoDim).map(([label,value])=>({label,value})),
-    {selected:est.dimVal, lider:true, director:est.dim==='director',
+    {selected:est.dimVal, lider:true, director:est.dim==='director', horizontal:true,
      onClick:val=>toggleFiltroGraf(tab,'dimVal',val)});
 
   const rowsAgrup=aplicarFiltroGraf(baseRows, est, 'agrup');
   const conteoAgrup={};
   rowsAgrup.forEach(r=>{ conteoAgrup[r.agrup]=(conteoAgrup[r.agrup]||0)+1; });
-  renderTreemap('chart'+cap1(tab)+'Agrup',
+  renderBarrasIniciativa('chart'+cap1(tab)+'Agrup',
     Object.entries(conteoAgrup).map(([label,value])=>({label,value})),
     {selected:est.agrup, onClick:val=>toggleFiltroGraf(tab,'agrup',val)});
 

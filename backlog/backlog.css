@@ -87,3 +87,40 @@ header.top #estado-carga-bl:empty { display: none; }
 .enlace-ticket { color: var(--accent); text-decoration: none; font-weight: 600; }
 .enlace-ticket:hover { text-decoration: underline; }
 .enlace-ticket::after { content: '\2197'; font-size: 0.72em; margin-left: 3px; opacity: 0.55; }
+
+/* ---- Resumen por antiguedad: solo la flecha despliega ----
+   La fila .n1row de esta tabla no escucha clics (activarDrillDown con
+   soloFlecha): la flecha es un boton de verdad y la del ::before de
+   dashboard.css se apaga para que no salgan dos. Sin cursor de mano en la
+   fila: el fondo no hace nada; las cifras (.dd-cifra) despliegan. */
+.n1row.dd-flecha { cursor: default; }
+.n1row.dd-flecha td:first-child::before { content: none; }
+.flecha-dd {
+  border: 0; background: none; padding: 0 6px 0 0; margin: 0;
+  font: inherit; color: var(--muted); cursor: pointer; line-height: 1;
+}
+.flecha-dd::before { content: "\25B8"; }
+.n1row.open .flecha-dd::before { content: "\25BE"; }
+.flecha-dd:hover, .flecha-dd:focus-visible { color: var(--accent); }
+/* Las cifras del cubo son una extension de la flecha, no texto ni enlace:
+   no se seleccionan (ni con doble clic), no se subrayan, y al pasar el raton
+   se enciende la flecha de su fila, que es lo que van a accionar. */
+.n1row.dd-flecha .dd-cifra { cursor: pointer; user-select: none; -webkit-user-select: none; }
+.n1row.dd-flecha:has(.dd-cifra:hover) .flecha-dd { color: var(--accent); }
+
+/* ---- Tickets mas antiguos: una tarjeta por lider ---- */
+.antiguos-lider {
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  padding: 4px 12px 10px; margin-bottom: 12px; background: var(--card);
+}
+.antiguos-lider .grupo-lider { margin: 8px 0 6px; }
+.antiguos-lider table { font-size: 12px; }
+.pie-antiguos {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 6px; margin-top: 8px; font-size: 11.5px;
+}
+.ver-mas-antiguos {
+  border: 1px solid var(--line-soft); background: var(--card); color: var(--accent);
+  border-radius: var(--radius); padding: 4px 12px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.ver-mas-antiguos:hover { border-color: var(--accent); }

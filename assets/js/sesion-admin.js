@@ -3,6 +3,9 @@
    Pregunta a handlers/admin_sesion.ashx y:
      - muestra los elementos marcados con data-solo-admin (la entrada
        Administracion del menu) si la cuenta Windows esta autorizada;
+     - muestra los marcados con data-solo-adm (p. ej. "+ Solicitar una
+       iniciativa") solo si ademas el servidor dice rol "ADM"
+       (dbo.UsuariosAdmin). MOD, sin rol o cualquier fallo: ocultos;
      - con { persona: true }, pinta "Bienvenido, <Nombre>" en el elemento
        que se le pase, solo si el servidor resolvio el nombre.
 
@@ -31,9 +34,11 @@
         .then(function (json) {
           var nombre = json && typeof json.nombre === 'string' && json.nombre.trim()
             ? json.nombre.trim() : null;
-          return { autorizado: !!(json && json.autorizado === true), nombre: nombre };
+          var autorizado = !!(json && json.autorizado === true);
+          var rol = autorizado && (json.rol === 'ADM' || json.rol === 'MOD') ? json.rol : null;
+          return { autorizado: autorizado, nombre: nombre, rol: rol };
         })
-        .catch(function () { return { autorizado: false, nombre: null }; });
+        .catch(function () { return { autorizado: false, nombre: null, rol: null }; });
     }
 
     // Muestra/oculta [data-solo-admin] dentro de raiz y, si se pasa,
@@ -43,6 +48,9 @@
       return this.consultar({ persona: !!saludo }).then(function (s) {
         doc.querySelectorAll('[data-solo-admin]').forEach(function (el) {
           el.hidden = !s.autorizado;
+        });
+        doc.querySelectorAll('[data-solo-adm]').forEach(function (el) {
+          el.hidden = s.rol !== 'ADM';
         });
         if (saludo) {
           saludo.textContent = s.autorizado && s.nombre ? 'Bienvenido, ' + s.nombre : '';

@@ -17,8 +17,8 @@
 //   Backlog()     dbo.usp_CorreoBacklog_Catalogos  c1, lideres y los cortes de
 //                                                  CorreoBacklogSnapshot
 //                 dbo.CatLiderGrupo (vigentes)     grupos (tambien los de QARE)
-//   TiposIniciativa()  dbo.Problem.TipoIniciativa  tipos en uso (Admin /
-//                                                  Iniciativas)
+//   PrefijosIniciativa()  dbo.CatPrefijoProblem   Tipo de iniciativa de
+//                                                  Admin / Iniciativas
 //
 // Los cuerpos de los dos procedimientos no estan versionados en el repo, asi
 // que no hay forma de demostrar desde aqui que dos listas "de grupos" sean la
@@ -202,82 +202,107 @@ ORDER BY Grupo;";
     }
 
     // ---------------------------------------------------------------------
-    // Admin / Iniciativas: tipos de iniciativa
+    // Admin / Iniciativas: tipos de iniciativa = dbo.CatPrefijoProblem
     // ---------------------------------------------------------------------
 
-    /* Los "Tipo Iniciativa" con los que ya existen iniciativas vigentes:
-       dbo.Problem.TipoIniciativa, la columna que el loader llena desde la
-       hoja DBProblems (la que tiene la validacion de lista en el Excel). Es
-       la misma columna que Experiencia lee para las iniciativas sin
-       categoria (ExperienciaQueries.LeerIniciativasSinCategoria).
+    /* El catalogo de "Tipo de iniciativa" de Admin (Nueva solicitud y filtro
+       del registro): dbo.CatPrefijoProblem. Llave = Prefijo (el que lleva el
+       Codigo: "PRB 2026-000001"); texto = Descripcion.
 
-       No hay tabla catalogo de tipos en la base todavia (adm.TipoIniciativa
-       es del diseño, no existe), asi que la lista es la de los valores EN
-       USO: un tipo de la lista del Excel que ninguna iniciativa vigente use
-       no aparece. No se escribe ninguna lista a mano.
+       NO es dbo.Problem.TipoIniciativa. El diagnostico de la VM
+       (sql/diag_admin_roles_tipos_historial.sql, 2026-10-05) mostro que
+       Prefijo y TipoIniciativa no son uno a uno (71 de 933 vigentes
+       difieren) y que sus textos no coinciden con Descripcion. Aqui no se
+       traduce uno al otro, y Experiencia sigue leyendo lo suyo.
 
-       Los valores se normalizan como las categorias
-       (DirectorioOrganizacional.Normaliza) y se deduplican sin distinguir
-       mayusculas, quedandose con la primera grafia en orden ordinal.
-
-       Orden: Problem (si el catalogo lo trae) primero, el resto en orden
-       ordinal (TiposSolicitud.ProblemPrimero). Solo cambia el orden.
-
-       Solo lectura, sobre la conexion que ya abrio quien llama. */
-    public static List<object> TiposIniciativa(SqlConnection cn)
+       Salen TODAS las filas, aunque ningun Problem use ese prefijo. Orden:
+       Problem (PRB) primero y el resto por Descripcion. Solo lectura, sobre
+       la conexion que ya abrio quien llama. */
+    public static List<object> PrefijosIniciativa(SqlConnection cn)
     {
         const string sql = @"
-SELECT DISTINCT TipoIniciativa
-FROM dbo.Problem
-WHERE VigenteEnOrigen = 1
-  AND TipoIniciativa IS NOT NULL;";
+SELECT Prefijo, Descripcion
+FROM dbo.CatPrefijoProblem;";
 
-        var valores = new List<string>();
-        using (var cmd = new SqlCommand(sql, cn))
-        {
-            cmd.CommandType = CommandType.Text;
-            using (var reader = cmd.ExecuteReader())
-            {
-                while (reader.Read())
-                    valores.Add(reader.IsDBNull(0) ? null : Convert.ToString(reader.GetValue(0)));
-            }
-        }
-
-        return TiposSolicitud.ProblemPrimero(TiposUnicos(valores));
+        return PrefijosOrdenados(Pares(cn, sql));
     }
 
-    // Normaliza, descarta vacios, deduplica sin distinguir mayusculas y
-    // ordena (ordinal). Aparte de la consulta para poder probarla sin SQL.
-    public static List<object> TiposUnicos(IEnumerable<string> valores)
+    // Lo de arriba sin SQL -> [{ "prefijo", "nombre" }]. El prefijo va sin
+    // espacios a los lados; vacio se descarta; repetido (sin distinguir
+    // mayusculas) se queda el primero. Sin Descripcion, el texto es el
+    // propio prefijo.
+    public static List<object> PrefijosOrdenados(IEnumerable<KeyValuePair<string, string>> pares)
     {
-        var orden = new List<string>();
-        foreach (var v in valores)
-        {
-            var n = DirectorioOrganizacional.Normaliza(v);
-            if (n != null) orden.Add(n);
-        }
-        orden.Sort(string.CompareOrdinal);
-
         var vistos = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var filas = new List<KeyValuePair<string, string>>();
+        foreach (var p in pares)
+        {
+            var prefijo = p.Key == null ? null : p.Key.Trim();
+            if (string.IsNullOrEmpty(prefijo) || !vistos.Add(prefijo)) continue;
+            var nombre = p.Value == null ? null : p.Value.Trim();
+            filas.Add(new KeyValuePair<string, string>(prefijo, string.IsNullOrEmpty(nombre) ? prefijo : nombre));
+        }
+
+        filas.Sort(delegate (KeyValuePair<string, string> a, KeyValuePair<string, string> b)
+        {
+            var pa = TiposSolicitud.EsProblem(a.Key) ? 0 : 1;
+            var pb = TiposSolicitud.EsProblem(b.Key) ? 0 : 1;
+            if (pa != pb) return pa - pb;
+            var c = string.Compare(a.Value, b.Value, StringComparison.OrdinalIgnoreCase);
+            return c != 0 ? c : string.CompareOrdinal(a.Key, b.Key);
+        });
+
         var salida = new List<object>();
-        foreach (var v in orden)
-            if (vistos.Add(v)) salida.Add(v);
+        foreach (var f in filas)
+            salida.Add(new Dictionary<string, object> { { "prefijo", f.Key }, { "nombre", f.Value } });
         return salida;
     }
 
-    /* El TipoIniciativa de cada folio, para el filtro "Tipo de iniciativa"
-       del registro (ExperienciaQueries.RegistroIniciativas). La misma
-       columna y el mismo universo que TiposIniciativa; cada valor sale con la
-       grafia que publica ese catalogo, asi que las opciones del filtro son
-       valores de esa lista. Folios sin tipo no entran. Solo lectura. */
-    public static Dictionary<string, string> TiposIniciativaPorFolio(SqlConnection cn)
+    // Solo las llaves (Prefijo) de PrefijosOrdenados, en su orden: lo que el
+    // servidor acepta como Tipo de iniciativa.
+    public static List<object> Llaves(IEnumerable<object> prefijos)
+    {
+        var salida = new List<object>();
+        foreach (var o in prefijos ?? new object[0])
+        {
+            var d = o as IDictionary<string, object>;
+            var p = d == null ? null : d["prefijo"] as string;
+            if (!string.IsNullOrEmpty(p)) salida.Add(p);
+        }
+        return salida;
+    }
+
+    /* El Prefijo de cada folio vigente (dbo.Problem.Prefijo, que coincide
+       con el Codigo en 933/933), para filtrar el registro por el catalogo
+       de arriba. Solo lectura. */
+    public static Dictionary<string, string> PrefijosPorFolio(SqlConnection cn)
     {
         const string sql = @"
-SELECT Codigo, TipoIniciativa
+SELECT Codigo, Prefijo
 FROM dbo.Problem
 WHERE VigenteEnOrigen = 1
-  AND TipoIniciativa IS NOT NULL;";
+  AND Prefijo IS NOT NULL;";
 
+        return PrefijoPorFolio(Pares(cn, sql));
+    }
+
+    // Folio -> prefijo sin espacios a los lados; el primero de un folio
+    // repetido gana; folio o prefijo vacios se descartan.
+    public static Dictionary<string, string> PrefijoPorFolio(IEnumerable<KeyValuePair<string, string>> pares)
+    {
+        var salida = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in pares)
+        {
+            var prefijo = p.Value == null ? null : p.Value.Trim();
+            if (string.IsNullOrEmpty(p.Key) || string.IsNullOrEmpty(prefijo) || salida.ContainsKey(p.Key)) continue;
+            salida[p.Key] = prefijo;
+        }
+        return salida;
+    }
+
+    // Dos columnas de texto -> pares (NULL -> null).
+    private static List<KeyValuePair<string, string>> Pares(SqlConnection cn, string sql)
+    {
         var pares = new List<KeyValuePair<string, string>>();
         using (var cmd = new SqlCommand(sql, cn))
         {
@@ -290,27 +315,7 @@ WHERE VigenteEnOrigen = 1
                         reader.IsDBNull(1) ? null : Convert.ToString(reader.GetValue(1))));
             }
         }
-
-        return TiposPorFolio(pares);
-    }
-
-    // Folio -> tipo, normalizado y con la grafia de TiposUnicos. El primer
-    // tipo de un folio repetido gana. Aparte de la consulta para probarla
-    // sin SQL.
-    public static Dictionary<string, string> TiposPorFolio(IEnumerable<KeyValuePair<string, string>> pares)
-    {
-        var lista = new List<KeyValuePair<string, string>>(pares);
-        var grafia = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (string t in TiposUnicos(lista.ConvertAll(p => p.Value))) grafia[t] = t;
-
-        var salida = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var p in lista)
-        {
-            var tipo = DirectorioOrganizacional.Normaliza(p.Value);
-            if (string.IsNullOrEmpty(p.Key) || tipo == null || salida.ContainsKey(p.Key)) continue;
-            salida[p.Key] = grafia[tipo];
-        }
-        return salida;
+        return pares;
     }
 
     // ---------------------------------------------------------------------

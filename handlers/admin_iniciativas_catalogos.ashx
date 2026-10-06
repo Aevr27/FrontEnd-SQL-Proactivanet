@@ -10,19 +10,20 @@
 //       categorias REALES (ruta completa) que se pueden elegir. La ruta es
 //       la llave de capacidad: cada una con su propio 100%.
 //
-//     { "tipos": ["...", ...],
-//       "tipo_problem": "Problem" | null,
+//     { "tipos": [ { "prefijo": "PRB", "nombre": "Problem" }, ... ],
+//       "tipo_problem": "PRB" | null,
 //       "asignaciones": [ { "director", "po", "so", "categoria" (N2) }, ... ],
 //       "omitidas": 0,
 //       "rutas": [ { "director", "po", "so", "categoria" (ruta) }, ... ],   (?rutas=1)
 //       "rutas_sin_duenos": 0, "rutas_duenos_no_vigentes": 0 }               (?rutas=1)
 //
-//   tipos          DashboardCatalogos.TiposIniciativa: los TipoIniciativa en
-//                  uso en dbo.Problem (vigentes), con Problem primero si
-//                  esta.
-//   tipo_problem   el valor de esa lista que es Problem (exige RCA), o null
-//                  si el catalogo no lo trae. El navegador no lo escribe a
-//                  mano: lo toma de aqui.
+//   tipos          DashboardCatalogos.PrefijosIniciativa: TODAS las filas de
+//                  dbo.CatPrefijoProblem (llave Prefijo, texto
+//                  Descripcion), con Problem (PRB) primero. NO es
+//                  dbo.Problem.TipoIniciativa.
+//   tipo_problem   el prefijo de esa lista que es Problem (exige RCA), o
+//                  null si el catalogo no lo trae. El navegador no lo
+//                  escribe a mano: lo toma de aqui.
 //   asignaciones   una fila por categoria vigente de dbo.CatCategoriaDueno,
 //                  con sus dueños resueltos por DirectorioOrganizacional (la
 //                  misma regla N2 -> C1 del resto del sitio).
@@ -35,7 +36,7 @@
 // pueden pasar el MaxJsonLength de 2 MB de ese helper (mismo motivo que
 // admin_iniciativas_registro.ashx). Errores con el mismo {error, tipo} y 500.
 //
-// SOLO LECTURA (Problem, CatCategoriaDueno, CatPersona y, con ?rutas=1,
+// SOLO LECTURA (CatPrefijoProblem, CatCategoriaDueno, CatPersona y, con ?rutas=1,
 // Categorias). No crea ni cambia nada en la base.
 //
 // ACCESO: AccesoAdmin.Exigir; el resto recibe 403 antes de tocar la base.
@@ -65,9 +66,9 @@ public class AdminIniciativasCatalogos : IHttpHandler
                 cn.Open();
                 var dir = DirectorioOrganizacional.Cargar(cn);
                 var salida = dir.AsignacionesVigentes();
-                var tipos = DashboardCatalogos.TiposIniciativa(cn);
+                var tipos = DashboardCatalogos.PrefijosIniciativa(cn);
                 salida["tipos"] = tipos;
-                salida["tipo_problem"] = TiposSolicitud.ValorProblem(tipos);
+                salida["tipo_problem"] = TiposSolicitud.ValorProblem(DashboardCatalogos.Llaves(tipos));
                 if (context.Request.QueryString["rutas"] == "1")
                 {
                     foreach (var kv in CatalogoRutasIniciativa.Cargar(cn, dir)) salida[kv.Key] = kv.Value;

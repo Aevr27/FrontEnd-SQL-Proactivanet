@@ -12,18 +12,20 @@
 //                          antiguedad, po, so, director, manager,
 //                          descripcion, observaciones, titulo_problem,
 //                          activa, seguimiento, sin_categoria,
-//                          tipo_iniciativa,
+//                          prefijo,
 //                          categorias: [ { categoria, tickets_reduce,
 //                                          pct_dism, po, so, director,
 //                                          n2 } ] } ],
-//       "estados_activos": [...], "agrupadores": [...], "fecha_gen": "dd/MM/yyyy" }
+//       "estados_activos": [...], "agrupadores": [...], "fecha_gen": "dd/MM/yyyy",
+//       "tipos_iniciativa": [ { prefijo, nombre } ] }   (dbo.CatPrefijoProblem)
 //
 // Toda la logica es la de Experiencia: ExperienciaQueries.RegistroIniciativas
 // (App_Code/ExperienciaRegistro.cs) reusa sus lecturas y su semaforo.
 //
 // SOLO LECTURA: SELECT sobre dbo.vw_ProblemCategoria, dbo.Problem,
 // dbo.CatPrefijoProblem, dbo.ProblemCategoria, dbo.CatCategoriaDueno y
-// dbo.CatPersona (y dbo.Problem.TipoIniciativa por folio). No crea ni cambia nada en la base.
+// dbo.CatPersona (y dbo.Problem.Prefijo por folio + dbo.CatPrefijoProblem para el
+// filtro de Tipo de iniciativa). No crea ni cambia nada en la base.
 //
 // ACCESO: solo las cuentas de AdminAllowedUsers (AccesoAdmin.Exigir); el
 // resto recibe 403 antes de tocar la base.

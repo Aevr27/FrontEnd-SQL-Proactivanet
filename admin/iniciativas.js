@@ -25,8 +25,10 @@
    DE DONDE SALE CADA COSA
    -----------------------
    Seleccion (lo elige quien solicita)
-     Tipo de iniciativa   dbo.Problem.TipoIniciativa en uso
-                          (DashboardCatalogos.TiposIniciativa). Solo habilita
+     Tipo de iniciativa   las filas de dbo.CatPrefijoProblem
+                          (DashboardCatalogos.PrefijosIniciativa): se ve la
+                          Descripcion y viaja el Prefijo, que es lo que valida
+                          el servidor y el prefijo del codigo. Solo habilita
                           la cascada: en los datos no hay relacion tipo ->
                           categoria, asi que no filtra ninguna lista.
      PO / SO / Categoria  una fila por categoria REAL (ruta completa activa
@@ -45,8 +47,16 @@
      (Titulo, Descripcion, Observaciones) y 03 Impacto (Volumetria y el %
      de disminucion de la Categoria elegida).
    Pendiente (no se pinta como campo, ver sql/diag_admin_nueva_solicitud.sql)
-     El RCA se elige y se valida, pero no hay donde guardarlo (destino
-     SharePoint sin confirmar) ni numero de solicitud con que nombrarlo.
+     El RCA se elige y se valida, pero todavia no se guarda ni hay numero
+     de solicitud con que nombrarlo. Destino FUTURO confirmado (solo
+     dependencia, nada implementado): SharePoint, sitio ProblemManagement,
+     biblioteca "Documentos compartidos", carpeta General/Archivos RCA
+     Problems:
+       https://soriana0.sharepoint.com/sites/ProblemManagement/Documentos%20compartidos/Forms/AllItems.aspx?id=%2Fsites%2FProblemManagement%2FDocumentos%20compartidos%2FGeneral%2FArchivos%20RCA%20Problems
+     Siguen sin decidir: mecanismo de subida, autenticacion y permisos,
+     extensiones permitidas, convencion de nombre, duplicados/versiones,
+     como se persiste la referencia al documento y si dbo.Problem.RCA tiene
+     algun significado.
      Codigo, fechas,
      contadores, Estado, Subestado, Gerencia, Macroproceso, Causa, Proceso,
      comentarios, CuentaConWA y Volumetria del ultimo mes vienen hoy del
@@ -193,19 +203,22 @@ window.Iniciativas = (function () {
   // CatalogoIniciativas
   // ---------------------------------------------------------------------
   class CatalogoIniciativas {
-    // tipoProblem: el valor del catalogo que es Problem (exige RCA), tal
-    // como lo marca el servidor (tipo_problem), o ''. Aqui no se escribe.
-    constructor(tipos, asignaciones, omitidas, tipoProblem) {
+    // tipos: los PREFIJOS, en el orden del servidor; nombres: prefijo ->
+    // Descripcion (lo que se ve). tipoProblem: el prefijo que es Problem
+    // (exige RCA), tal como lo marca el servidor (tipo_problem), o ''. Aqui
+    // no se escribe.
+    constructor(tipos, asignaciones, omitidas, tipoProblem, nombres) {
       this.tipos = tipos;
       this.asignaciones = asignaciones;
       this.omitidas = omitidas;
       this.tipoProblem = tipoProblem || '';
+      this.nombres = nombres || {};
     }
 
     // El JSON del handler (?rutas=1) -> catalogo. La cascada va sobre
     // `rutas` (categoria = ruta completa), NO sobre `asignaciones` (N2).
-    // Sin rutas o sin tipos lanza; filas o tipos que no sean texto no vacio
-    // se descartan, sin corregirlos.
+    // Sin rutas o sin tipos lanza; filas que no sean texto no vacio y tipos
+    // sin `prefijo` de texto se descartan, sin corregirlos.
     static desdeJson(json) {
       if (!json || !Array.isArray(json.rutas) || !Array.isArray(json.tipos)) {
         throw new Error('La respuesta del servidor no trae el catálogo esperado.');
@@ -214,19 +227,23 @@ window.Iniciativas = (function () {
       var filas = json.rutas.filter(function (f) {
         return f && claves.every(function (c) { return typeof f[c] === 'string' && f[c] !== ''; });
       });
-      var vistos = {};
-      var tipos = json.tipos.filter(function (t) {
-        if (typeof t !== 'string' || t === '' || vistos[t]) return false;
-        vistos[t] = true;
-        return true;
+      var vistos = {}, nombres = {};
+      var tipos = [];
+      json.tipos.forEach(function (t) {
+        var p = t && typeof t.prefijo === 'string' ? t.prefijo : '';
+        if (p === '' || Object.prototype.hasOwnProperty.call(vistos, p)) return;
+        vistos[p] = true;
+        nombres[p] = typeof t.nombre === 'string' && t.nombre !== '' ? t.nombre : p;
+        tipos.push(p);
       });
       // El orden de los tipos es el del servidor (Problem primero si esta).
       var problem = typeof json.tipo_problem === 'string' && vistos[json.tipo_problem] ? json.tipo_problem : '';
       var omitidas = (Number(json.rutas_sin_duenos) || 0) + (Number(json.rutas_duenos_no_vigentes) || 0);
-      return new CatalogoIniciativas(tipos, filas, omitidas, problem);
+      return new CatalogoIniciativas(tipos, filas, omitidas, problem, nombres);
     }
 
     tieneTipo(valor) { return this.tipos.indexOf(valor) >= 0; }
+    nombreTipo(valor) { return Object.prototype.hasOwnProperty.call(this.nombres, valor) ? this.nombres[valor] : valor; }
   }
 
   // ---------------------------------------------------------------------
@@ -391,7 +408,7 @@ window.Iniciativas = (function () {
       var director = this.cascada.director();
       return {
         tipo: hayTipos
-          ? { habilitado: true, opciones: this.catalogo.tipos, valor: this.tipo, motivo: '' }
+          ? { habilitado: true, opciones: this.catalogo.tipos, valor: this.tipo, motivo: '', etiquetas: this.catalogo.nombres }
           : { habilitado: false, opciones: [], valor: '', motivo: 'Sin tipos de iniciativa en el catálogo.' },
         niveles: this.cascada.estado(this.tipo !== '',
           hayTipos ? 'Elige primero un Tipo de iniciativa.' : 'Sin tipos de iniciativa en el catálogo.'),
@@ -618,7 +635,16 @@ window.Iniciativas = (function () {
     }
 
     pintarSelect(sel, mot, e) {
-      Catalogos.llenar(sel, e.opciones, e.habilitado ? '— Elige —' : '—');
+      if (e.etiquetas) {
+        // Valor (prefijo) y texto (Descripcion) distintos.
+        sel.innerHTML = '<option value="">' + Escape.html(e.habilitado ? '— Elige —' : '—') + '</option>' +
+          e.opciones.map(function (v) {
+            var t = Object.prototype.hasOwnProperty.call(e.etiquetas, v) ? e.etiquetas[v] : v;
+            return '<option value="' + Escape.attr(v) + '">' + Escape.html(t) + '</option>';
+          }).join('');
+      } else {
+        Catalogos.llenar(sel, e.opciones, e.habilitado ? '— Elige —' : '—');
+      }
       sel.value = e.valor;
       sel.disabled = !e.habilitado;
       mot.textContent = e.motivo;

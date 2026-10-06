@@ -176,7 +176,10 @@
         <h2>Iniciativas</h2>
         <p class="ini-vista-sub">Consulta y administra las iniciativas existentes.</p>
       </div>
-      <button type="button" class="btn ini-cta" id="btnSolicitar">
+      <!-- Crear iniciativas es solo de ADM: oculto hasta que admin_sesion
+           diga rol ADM (SesionAdmin, data-solo-adm). Solo UX: el servidor
+           lo exige con AccesoAdmin.ExigirAdm. -->
+      <button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-adm hidden>
         <span class="ini-cta-mas" aria-hidden="true">+</span>
         <span>Solicitar una iniciativa</span>
       </button>
@@ -205,10 +208,16 @@
           <span class="ini-filtros-cuenta" id="regFiltrosCuenta" aria-live="polite"></span>
           <button type="button" class="btn linea chico" id="regLimpiar" hidden>Limpiar filtros</button>
         </div>
-        <div class="campo"><label for="regEstadoSel">Estado</label><select id="regEstadoSel" disabled></select></div>
-        <div class="campo"><label for="regTipo">Agrupación</label><select id="regTipo" disabled></select></div>
-        <!-- Tipo de iniciativa (dbo.Problem.TipoIniciativa), varios a la vez.
-             No es la Agrupacion de arriba (TipoAgrupado). -->
+        <!-- Estado, varios a la vez (mismo control que Tipo de iniciativa). -->
+        <div class="campo ini-multi" id="regEstadoCampo">
+          <label for="regEstado">Estado</label>
+          <button type="button" class="ini-multi-boton" id="regEstado" aria-haspopup="true" aria-expanded="false" aria-controls="regEstadoPanel" disabled>—</button>
+          <div class="ini-multi-panel" id="regEstadoPanel" role="group" aria-label="Estados" hidden></div>
+        </div>
+        <!-- Tipo de iniciativa (catalogo dbo.CatPrefijoProblem contra
+             dbo.Problem.Prefijo), varios a la vez.
+             No es la Agrupacion (TipoAgrupado), que ya no es filtro: sigue
+             en la tabla y el detalle. -->
         <div class="campo ini-multi" id="regTipoIniCampo">
           <label for="regTipoIni">Tipo de iniciativa</label>
           <button type="button" class="ini-multi-boton" id="regTipoIni" aria-haspopup="true" aria-expanded="false" aria-controls="regTipoIniPanel" disabled>—</button>
@@ -401,9 +410,12 @@
       </section>
 
       <!-- 04 RCA: documento adjunto. Obligatorio solo para Problem. Se elige
-           y el servidor comprueba que llego, pero NO se guarda: no hay
-           destino SharePoint confirmado (dbo.Problem.RCA es NVARCHAR(50),
-           no un documento). -->
+           y el servidor comprueba que llego, pero NO se guarda todavia. El
+           destino futuro ya esta confirmado -SharePoint ProblemManagement,
+           "Documentos compartidos" / General/Archivos RCA Problems- pero la
+           subida, los permisos y como se persiste la referencia siguen sin
+           decidir (dbo.Problem.RCA es NVARCHAR(50), no un documento, y no
+           se toca). Ver la cabecera de iniciativas.js. -->
       <section class="ini-bloque ini-col-rca" aria-labelledby="iniCabRca">
         <div class="ini-bloque-cab">
           <span class="ini-paso" aria-hidden="true">04</span>
