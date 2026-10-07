@@ -83,9 +83,10 @@ CREATE TABLE dbo.ProblemFechaEvento
     -- Baseline rows only state "value at go-live": no previous value is claimed.
     CONSTRAINT CK_ProblemFechaEvento_Base CHECK (
         Operacion <> 'B' OR (ValorAnterior IS NULL AND ValorNuevo IS NOT NULL)),
-    -- Person / request only when the writer declared itself as Admin.
-    CONSTRAINT CK_ProblemFechaEvento_Admin CHECK (
-        Origen = 'ADMIN' OR (Usuario IS NULL AND SolicitudId IS NULL))
+    -- Excel/loader rows never carry a person or request; Admin rows MUST carry the user.
+    CONSTRAINT CK_ProblemFechaEvento_Atribucion CHECK (
+        (Origen = 'NO_DECLARADO' AND Usuario IS NULL AND SolicitudId IS NULL)
+        OR (Origen = 'ADMIN' AND Usuario IS NOT NULL))
 );
 
 CREATE NONCLUSTERED INDEX IX_ProblemFechaEvento_Codigo
@@ -101,8 +102,8 @@ CREATE NONCLUSTERED INDEX IX_ProblemFechaEvento_Codigo
 | `Operacion` | `char(1)` | `I`: captured on an INSERT into `Problem`. `U`: captured on an UPDATE. `B`: one-time baseline row (§5). It lets the UI tell "created with this date" apart from "changed". |
 | `Reconstruido` | computed `bit` | The explicit "not observed, reconstructed" flag the UI checks. It is computed from `Operacion`, so it can never disagree with it. It is **non-persisted** on purpose: persisted or indexed computed columns impose SET-option requirements on every writer session, and the loader's session options are unknown. |
 | `Origen` | `varchar(12)` | `ADMIN` only when the writer declared it through `SESSION_CONTEXT`. Everything else is `NO_DECLARADO`, which honestly means "the trigger cannot tell who wrote this". See §7. |
-| `Usuario` | `nvarchar(256)` | The person (`DOMAIN\account`), **only** when declared by Admin. Never guessed. |
-| `SolicitudId` | `int` | The Admin request number, **only** when declared by Admin. There is no FK because `adm.Solicitud` does not exist. It is `int` to match the proposed `NumeroSolicitud`. Until that flow exists the value is always NULL. |
+| `Usuario` | `nvarchar(256)` | The authenticated web user (`DOMAIN\account`) whose Admin action caused the change. **Required** when `Origen = 'ADMIN'`, **always NULL** for Excel/loader rows (§7). Never guessed. |
+| `SolicitudId` | `int` | The Admin request/approval number, once that workflow exists. NULL for Excel/loader rows. There is no FK because `adm.Solicitud` does not exist. It is `int` to match the proposed `NumeroSolicitud`. |
 | `LoginBD` | `nvarchar(128)` | The database principal that ran the statement (`ORIGINAL_LOGIN()`). This is the only writer identity the database can actually prove. It is technical evidence, not a person. Its usefulness depends on U6. |
 | `FechaRegistro` | `datetime2(3)` UTC | When the change hit `Problem`. UTC, like the other DW stamps; Admin converts it for display. |
 
@@ -199,6 +200,7 @@ How it meets the requirements:
 - **No duplicates.** There is one row per `(Codigo, Campo)` per statement, and only when the value differs.
 - **Comparison is at `date` granularity.** This is consistent whether the source type is `date`, `datetime` or `datetime2`. A time-only change (00:00 → 13:00 on the same day) produces **no** event, which is intentional because the business value is the day. P0-6 checks that non-midnight times do not exist today (U2). If the column turns out to be a character type, **stop**: the design must change, because `CONVERT` could fail and abort the load.
 - **Failure surface is minimal.** By construction no constraint can fail: `Campo` and `Origen` are constants; the transition CHECK is guaranteed by the `WHERE`; `B` is never written by the trigger; `Usuario`/`SolicitudId` are only non-NULL when `ADMIN`; `TRY_CONVERT` is used for `SolicitudId`; and the FK holds because `Codigo` comes from `inserted`. There are no external calls, no dynamic SQL and no result sets.
+  **One deliberate exception, Admin path only:** if a writer declares `ADMIN` but not `pfe_usuario`, `CK_ProblemFechaEvento_Atribucion` fails and that Admin UPDATE rolls back. An unattributed web change is refused instead of being recorded anonymously. The loader never declares `ADMIN`, so this cannot affect it.
 - **PK changes.** Updating `Codigo` itself would appear as an `I` on the new code. The loader matches rows by `Codigo` and is not expected to change it. Changing a code that has history is also blocked by the new FK, just as V3 already blocks it for categories.
 - **Permissions.** `dbo` owns both objects, so ownership chaining applies: the loader's login needs **no** new permission on `ProblemFechaEvento`.
 
@@ -252,28 +254,40 @@ deletes, revisit then.
 
 ---
 
-## 7. Origen / Usuario / SolicitudId / Reconstruido
+## 7. Attribution: Origen / Usuario / SolicitudId / LoginBD / Reconstruido
 
-| Field | Today (loader, manual SQL) | Future Admin approval flow | One-time baseline |
+Two kinds of origin, with different attribution rules **on purpose**:
+
+| Field | Excel / loader (today) | Web / Admin (future) | One-time baseline |
 |---|---|---|---|
 | `Origen` | `NO_DECLARADO` | `ADMIN` | `NO_DECLARADO` |
-| `Usuario` | NULL | `DOMAIN\account` from the approving request | NULL |
-| `SolicitudId` | NULL | request number | NULL |
+| `Usuario` | NULL, by design | **required**: the authenticated web user who performed/requested the change | NULL |
+| `SolicitudId` | NULL | the real request/approval number, once that workflow exists | NULL |
+| `LoginBD` | the database login that ran the load | the web app's database login | the login that ran the deploy |
 | `Reconstruido` | 0 | 0 | 1 |
-| `LoginBD` | the loader's SQL login | the web app's SQL login | the login that ran the deploy |
 
-- **The current Excel/loader path cannot provide a user or request.** The Excel sheet has no "changed by" column, the loader does not set any context (V4), and the trigger cannot see who edited the spreadsheet. So for every event captured from the loader, `Usuario` and `SolicitudId` stay **NULL**, and the UI shows "not recorded". Nothing is inferred from `LoginBD`, `APP_NAME()` or `HOST_NAME()`.
-- `Origen` is not set to `EXCEL` for those rows. The trigger cannot prove that the loader was the writer: a manual UPDATE in SSMS looks the same. `NO_DECLARADO` is the truthful value. `LoginBD` adds verifiable technical context; whether it actually separates loader from web from humans depends on U6.
-- **Future Admin flow (not built, depends on `adm.Solicitud` approval):** the approval stored procedure (never the C# code) sets the context, updates `Problem`, and clears the context, all inside a TRY/CATCH:
+**Excel / loader changes: honest, not anonymous by accident.**
+- These date changes are agreed in meetings, with the responsible person's boss present, and then typed into the Excel file by hand. The business does **not** need an individual requester for them, and the pipeline has none to give: the Excel sheet has no "changed by" column, the loader sets no context (V4), and the trigger cannot see who edited the spreadsheet.
+- So `Usuario` and `SolicitudId` stay **NULL**, and the CHECK in §1 forbids filling them for these rows. NULL here means "not applicable to this workflow", not "lost". No requester is invented, and nothing is inferred from `LoginBD`, `APP_NAME()` or `HOST_NAME()`.
+- `Origen` is `NO_DECLARADO` rather than `EXCEL`, because the trigger cannot prove that the loader was the writer: a manual UPDATE in SSMS looks the same. If the existing pipeline ever genuinely provides a user or a request id, it can be declared through the same mechanism, and that would need its own approval.
+- `LoginBD` still records which database login executed the operation. This is technical evidence, not a person. Whether it separates the loader from manual edits depends on U6.
+
+**Web / Admin changes: attribution required.**
+- When someone requests a date extension through the website, the event must say who did it. `Usuario` is the **authenticated** application user, taken server-side from the Windows identity the site already resolves (`DOMAIN\account`), and **never** from a value sent by the browser. `SolicitudId` links the event to the request/approval record once `adm.Solicitud` exists.
+- If the person who requested and the person who approved differ, `Usuario` records whoever performed the action that changed `Problem`. The other person is reachable through `SolicitudId` in the request record, so no second person column is added now.
+- This is enforced, not just a convention: `ADMIN` without `Usuario` is rejected by the CHECK (§4 exception), so an unattributed web change cannot slip into the history.
+- **Mechanism (not built; depends on `adm.Solicitud` approval):** the approval stored procedure (never the C# code directly) declares the context, updates `Problem`, and clears the context, all inside a TRY/CATCH:
   ```sql
   EXEC sys.sp_set_session_context @key = N'pfe_origen',    @value = 'ADMIN';
-  EXEC sys.sp_set_session_context @key = N'pfe_usuario',   @value = @usuario;
-  EXEC sys.sp_set_session_context @key = N'pfe_solicitud', @value = @numeroSolicitud;
+  EXEC sys.sp_set_session_context @key = N'pfe_usuario',   @value = @usuario;          -- authenticated web user
+  EXEC sys.sp_set_session_context @key = N'pfe_solicitud', @value = @numeroSolicitud;  -- NULL until the workflow exists
   UPDATE dbo.Problem SET FechaSolucion = @nueva WHERE Codigo = @codigo;
   -- then set the three keys back to NULL (also in CATCH)
   ```
-  The context is cleared explicitly because pooled connections are reused, so the next statement on the same connection must not inherit `ADMIN`. A test covers this (T15). The key names are free today (V4).
+  The context is cleared explicitly because pooled connections are reused, so the next statement on the same connection must not inherit `ADMIN` (T15b). The key names are free today (V4).
 - Admin never inserts into `ProblemFechaEvento` directly. If it also inserted, every change would be recorded twice.
+
+**Built to grow.** The table and trigger already carry `Origen`, `Usuario` and `SolicitudId`. When date-extension requests move to the website, richer attribution only requires the approval procedure to declare its context: the table, the trigger and the existing Excel rows stay as they are. Either way, this is an audit/evidence trail of date changes. It never replaces or drives the current dates in `dbo.Problem`.
 
 ---
 
@@ -447,6 +461,8 @@ Setup: create a scratch initiative by scripting an existing row's INSERT (SSMS
 | T14 | run `usp_CargarExperiencia` twice with the same staging data | 2nd run: 0 rows. 1st run: only the real differences between staging and test data |
 | T15 | change one date in staging, run the loader | exactly 1 `U` row, `Origen = NO_DECLARADO`, `Usuario`/`SolicitudId` NULL, `LoginBD` = loader login; loader result and duration unchanged |
 | T15b | `sp_set_session_context` ADMIN + user + 123, UPDATE one date, clear the context, UPDATE again on the same connection | 1st row `ADMIN`/user/123; 2nd row `NO_DECLARADO`/NULL/NULL |
+| T15e | declare ADMIN **without** `pfe_usuario`, UPDATE one date | the UPDATE fails on `CK_ProblemFechaEvento_Atribucion`; `Problem` unchanged, 0 rows |
+| T15f | declare ADMIN + user, no `pfe_solicitud` | 1 row: `ADMIN`, user, `SolicitudId` NULL (allowed until the request workflow exists) |
 | T15c | `DELETE` a TST row that has history | fails on the FK (documented behavior); a TST row with no history deletes fine |
 | T15d | verify the loader has no `OUTPUT` without `INTO` | the loader runs without Msg 334 |
 | T16 | rollback step 1: loader runs, 0 new rows, table intact. Step 2: table gone, `Problem` and loader unaffected | — |
@@ -469,7 +485,7 @@ Cleanup: delete the TST events and then the TST rows (test environment only).
   WHERE e.Codigo = @codigo
   ORDER BY e.IdEvento;
   ```
-- **Handler** (`admin_iniciativas_registro` detail) maps each row to the existing contract `{campo, anterior, nuevo, fecha, usuario}` plus `operacion`, `reconstruido`, `origen`, `solicitud`, `numero`. `fecha` = `FechaRegistro` converted from UTC to the project's UTC-6 display. `usuario` = `Usuario`, or "no registrado" when NULL (never `LoginBD` shown as a person).
+- **Handler** (`admin_iniciativas_registro` detail) maps each row to the existing contract `{campo, anterior, nuevo, fecha, usuario}` plus `operacion`, `reconstruido`, `origen`, `solicitud`, `numero`. `fecha` = `FechaRegistro` converted from UTC to the project's UTC-6 display. `usuario` = `Usuario` for `ADMIN` rows. For `NO_DECLARADO` rows it is a fixed label such as "Excel (acordado en reunión)", not "unknown", and `LoginBD` is never shown as a person.
 - **Frontend** (`htmlHistorial`) only renders, in chronological order (`IdEvento`): baseline rows as "valor al iniciar el historial (reconstruido)", `I` rows as "fecha inicial", and `U` rows as "Cambio n". It adds a fixed note "historial registrado desde <go-live>".
 - **Admin never:** fills gaps, infers intermediate values, reads `NroCambioFecha*` or `FechaOriginal*` to build events, deduplicates, writes to `ProblemFechaEvento`, or uses any history value to set or overwrite a `Problem` date.
 - **Known conflict, not solved here:** if Admin someday changes a date and the Excel still has the old one, the next load reverts it. The history will show both rows (`ADMIN` then `NO_DECLARADO`). This makes the conflict visible but does not resolve which source wins, which is a separate decision.
@@ -490,7 +506,8 @@ Cleanup: delete the TST events and then the TST rows (test environment only).
 - [ ] New trigger `dbo.trg_Problem_FechaEvento` AFTER INSERT, UPDATE, as written in §4. No DELETE branch.
 - [ ] Comparison at `date` granularity (time-only changes ignored).
 - [ ] Consequence accepted: deleting a `Problem` row that has history will fail.
-- [ ] `Origen = NO_DECLARADO`, with `Usuario`/`SolicitudId` NULL, for everything except a future Admin SP that declares itself through `SESSION_CONTEXT`.
+- [ ] Excel/loader rows: `Origen = NO_DECLARADO`, `Usuario`/`SolicitudId` always NULL (no individual requester, by design), `LoginBD` recorded.
+- [ ] Web/Admin rows: `Origen = ADMIN`, `Usuario` = authenticated web user (**required**, enforced by CHECK), `SolicitudId` once the workflow exists, `LoginBD` recorded.
 - [ ] Baseline: load it (current non-NULL values only, `Reconstruido=1`, including non-current rows) **or** skip it.
 - [ ] `NroCambioFecha*` and `FechaOriginal*` are not used to build events.
 - [ ] Display numbering rule: only `date→date` updates count as "Cambio n".
