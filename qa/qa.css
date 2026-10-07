@@ -346,6 +346,12 @@ code {
 .tabla .num { text-align: right; font-variant-numeric: tabular-nums; }
 .tabla .recorte { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Codigo enlazado a Proactivanet: mismo estilo que .enlace-ticket de
+   backlog/backlog.css, que no se carga en esta pestana. */
+.enlace-ticket { color: var(--accent); text-decoration: none; font-weight: 600; }
+.enlace-ticket:hover { text-decoration: underline; }
+.enlace-ticket::after { content: '\2197'; font-size: 0.72em; margin-left: 3px; opacity: 0.55; }
+
 /* Valor nulo del API: se muestra tal cual, en gris, sin sustituirlo por un dato inventado. */
 .nulo { color: var(--muted); font-style: italic; }
 

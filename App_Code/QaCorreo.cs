@@ -61,6 +61,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Web;
 using System.Web.Caching;
+using System.Web.Script.Serialization;
 
 // Cuanto tarda cada paso de una peticion. Solo duraciones y conteos de filas:
 // ningun dato de la conexion, del servidor ni de los tickets. Se publica en la
@@ -566,6 +567,80 @@ public static class QaCorreo
         int toma = tamano == 0 ? filas.Count - salto
                                : Math.Min(tamano, filas.Count - salto);
         return filas.GetRange(salto, toma);
+    }
+
+    // Copia de las filas de la pagina con IdProactivanet: el Id interno (GUID)
+    // con el que qa.js enlaza el Codigo al formulario de la incidencia, igual
+    // que celdaCodigo en backlog/backlog.js. usp_CorreoQA_Detalle no lo trae y
+    // no se toca; el GUID sale de dbo.TicketProactivanetId por
+    // dbo.usp_TicketIds_Obtener, el mismo mapeo que lee backlog_antiguos.ashx.
+    //
+    // Se copian las filas porque las de Detalle viven en la cache y las
+    // comparten las peticiones concurrentes: no se les escribe encima.
+    //
+    // Es un extra, no un requisito: si el mapeo no tiene el ticket -o la
+    // consulta falla por lo que sea- la clave se queda en null y el codigo se
+    // pinta como texto plano. El detalle se devuelve igual.
+    public static List<Dictionary<string, object>> AgregarIds(
+        List<Dictionary<string, object>> filas)
+    {
+        var salida = new List<Dictionary<string, object>>(filas.Count);
+        var codigos = new List<string>();
+
+        foreach (var f in filas)
+        {
+            var copia = new Dictionary<string, object>(f);
+            copia["IdProactivanet"] = null;
+            salida.Add(copia);
+
+            object codigo;
+            if (copia.TryGetValue(ColCodigo, out codigo) && codigo != null && !(codigo is DBNull))
+                codigos.Add(codigo.ToString());
+        }
+
+        if (codigos.Count == 0)
+            return salida;
+
+        var mapa = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            var parametros = new Dictionary<string, object>();
+            parametros["Codigos"] = new JavaScriptSerializer().Serialize(codigos);
+
+            foreach (var fila in QaDb.Ejecutar("dbo.usp_TicketIds_Obtener", parametros))
+            {
+                object cod, id;
+                if (!fila.TryGetValue("CodigoTicket", out cod) || cod == null) continue;
+                if (!fila.TryGetValue("IdProactivanet", out id) || id == null) continue;
+                mapa[cod.ToString()] = id.ToString();
+            }
+        }
+        catch (Exception ex)
+        {
+            // Como en backlog_antiguos.ashx: solo tipo y mensaje, a la traza de
+            // ASP.NET (trace.axd), nunca al navegador.
+            var ctx = HttpContext.Current;
+            if (ctx != null)
+            {
+                ctx.Trace.Warn("qa",
+                    "No se pudo leer el mapeo de Id de Proactivanet (" +
+                    ex.GetType().Name + ": " + ex.Message + "). Los tickets se " +
+                    "devuelven sin enlace.");
+            }
+            return salida;
+        }
+
+        foreach (var t in salida)
+        {
+            object codigo;
+            if (!t.TryGetValue(ColCodigo, out codigo) || codigo == null || codigo is DBNull) continue;
+
+            string id;
+            if (mapa.TryGetValue(codigo.ToString(), out id))
+                t["IdProactivanet"] = id;
+        }
+
+        return salida;
     }
 
     // ============================================================ agregados
