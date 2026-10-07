@@ -1,74 +1,95 @@
 # PROPOSAL — `dbo.ProblemFechaEvento` (date-change history) — NOT EXECUTED, NOT APPROVED
 
-Status: **proposal only**. None of these objects exist in the database. Nothing
-here has been run anywhere. Markdown on purpose: it cannot be executed by
-accident. Every SQL block that changes the database is labelled
-**NOT EXECUTED** and contains a `{{TIPO_CODIGO}}` placeholder that makes it fail
-if pasted as-is (see §1).
+> **`ProblemFechaEvento` is an append-only evidence trail for initiative date
+> changes. It does not replace the current dates in `dbo.Problem` and exists
+> specifically so the initiative detail History of Changes panel can show
+> evidence of deadline/date extensions and other date transitions.**
 
-Purpose: evidence for the **History of Changes** section of the initiative
-detail panel (Initiative list → click name → right-side detail → History of
-changes). The current dates stay in `dbo.Problem` and remain the only source of
-the current value. The history table is append-only evidence and never feeds
-back into `dbo.Problem`.
+Status: **proposal only**. None of these objects exist in the database, and
+nothing in this document has been run anywhere. It is written in Markdown on
+purpose, so it cannot be executed by accident. Every SQL block that would change
+the database is labelled **NOT EXECUTED**, and the table DDL contains a
+`{{TIPO_CODIGO}}` placeholder, so it fails if pasted as-is (see §2).
 
 ---
 
-## 0. Facts vs assumptions
+## Central rule
 
-### Verified (VM, `sql/diag_admin_historial_fechas.sql`, 2026-10-07)
-
-| # | Fact |
-|---|---|
-| V1 | SQL Server 16.0.4255.1 (2022, Developer Edition), database compatibility level **150**. `IS DISTINCT FROM` needs level 160, so it is not used. |
-| V2 | `PK_Problem` is clustered on **`Codigo`** only. `dbo.Problem` has no identity column. |
-| V3 | `FK_ProblemCategoria_Problem` already references `dbo.Problem`. That means TRUNCATE on `Problem` already fails today, and changing or deleting a `Codigo` that has categories is already blocked. |
-| V4 | Of the SQL modules containing the text `dbo.Problem`, only `usp_CargarExperiencia` writes it, with **UPDATE and INSERT**: no MERGE, DELETE or TRUNCATE. No module uses `SESSION_CONTEXT` or `CONTEXT_INFO`. |
-| V5 | `dbo.Problem` has **0 triggers** (enabled or disabled). |
-| V6 | The source is a hand-typed Excel sheet (`DBProblems`). `NroCambioFecha*` are typed by hand (0 formulas) and inconsistent: counter 0 while original ≠ current in 14 Solución / 42 Cierre rows, and shifted-column garbage (e.g. PRB 2026-000177, counter 46289). `FechaOriginal*` is filled in only about 175 of 939 rows, and Análisis has no original at all. |
-| V7 | Dates appear as `2026-10-21 00:00:00` in the N6 output, so they are stored as a date/time type with midnight times. **The exact type is not verified.** |
-| V8 | Admin does not write to `dbo.Problem` today. "Solicitar cambios" is a browser-only draft with no submission, and `adm.Solicitud` does not exist (it is only proposed in `PROPUESTA_numero_solicitud.md`, not approved). |
-| V9 | Frontend contract already waiting: `admin/registro-iniciativas.js` `htmlHistorial` expects `historial: [{campo, anterior, nuevo, fecha, usuario}]`. Today it always arrives empty. |
-
-### Not verified (must be checked before any DDL; see §13 P0)
-
-| # | Open item | Why it matters |
+| | `dbo.Problem` | `dbo.ProblemFechaEvento` |
 |---|---|---|
-| U1 | Exact data type, length and **collation** of `Problem.Codigo` | The FK column must match it exactly. |
-| U2 | Exact data type of `FechaAnalisis/FechaSolucion/FechaCierre`, and whether any non-midnight times exist | This decides the comparison rule (§4). |
-| U3 | **`cargar_experiencia.py`**: does it only fill staging and call `usp_CargarExperiencia`, or does it also write `dbo.Problem` directly (bcp, `BULK INSERT`, `SqlBulkCopy`, `to_sql`, plain UPDATE/DELETE)? The copy that used to be in Downloads is gone, so this is **NOT closed**. | See §8. |
-| U4 | Whether `usp_CargarExperiencia` (or any writer) uses `OUTPUT` **without `INTO`** on `dbo.Problem` | **SQL Server rejects that statement once the table has an enabled trigger (Msg 334). This is the one way the trigger can break the loader outright.** |
-| U5 | H3 searched only for the literal `dbo.Problem`. A module that writes `Problem`, `[dbo].[Problem]` or `[Problem]` would not have been detected. | P0 repeats the search with a broader pattern. |
-| U6 | Which SQL logins the loader and the web app use | This decides whether `LoginBD` (§7) actually tells writers apart. |
-| U7 | Whether a SQL Agent job, or anything outside the database, writes `Problem` | Same reason as U3. |
-| U8 | Delete rule of `FK_ProblemCategoria_Problem` | This is context for the DELETE decision (§6). |
+| Role | **Source of truth** for the *current* `FechaAnalisis`, `FechaSolucion`, `FechaCierre` | **Evidence only**: one row per actual change of one of those dates |
+| Who writes it | Today `usp_CargarExperiencia` (Excel). Later, possibly an Admin approval procedure. | Only the trigger on `dbo.Problem` (and, if approved, the one-time baseline) |
+| Who reads it | Every view, the normal initiative view, Experiencia, Admin | Only the History of Changes section of the initiative detail panel (initiative list → click the name → right-side panel) |
+| Can it change? | Yes, normally | **Never updated, never deleted** (§9) |
+
+The history never drives, recalculates or overwrites a current date. If the two
+ever seem to disagree, `dbo.Problem` is right by definition.
+
+Example. Current value: `FechaSolucion = 24/07/2026`. History:
+
+```
+FechaSolucion  27/06/2026 → 15/07/2026   (Cambio 1)
+FechaSolucion  15/07/2026 → 24/07/2026   (Cambio 2)
+```
 
 ---
 
-## 1. Table schema
+## 1. Facts vs open items
+
+### Verified
+
+| # | Fact | Source |
+|---|---|---|
+| V1 | SQL Server 16.0.4255.1 (2022), compatibility level **150**. `IS DISTINCT FROM` needs level 160, so it is not used. | diag H1, 2026-10-07 |
+| V2 | `PK_Problem` is clustered on **`Codigo`** only. There is no identity column. | diag H2/H2b |
+| V3 | `FK_ProblemCategoria_Problem` already references `dbo.Problem`. That makes TRUNCATE of `Problem` impossible today. | diag H2c |
+| V4 | Among the SQL modules whose text contains `dbo.Problem`, only `usp_CargarExperiencia` writes it, using **UPDATE and INSERT** (no MERGE, DELETE or TRUNCATE). No module uses `SESSION_CONTEXT` or `CONTEXT_INFO`. | diag H3 |
+| V5 | `dbo.Problem` has **0 triggers**. | diag H4 |
+| V6 | `NroCambioFecha*` are typed by hand and unreliable: counter 0 while original ≠ current (14 Solución / 42 Cierre), corrupted values such as `46289`/`46292` (PRB 2026-000177), and shifted columns. `FechaOriginal*` is present in only about 175 of 939 rows, and Análisis has none. | Excel V3.1 + diag N5/N6 |
+| V7 | Admin's identity source is `IdentidadWindows` (`App_Code/IdentidadWindows.cs`). It is built only from `HttpContext.User.Identity.Name`, which IIS fills through Windows authentication. `Original` (`DOMAIN\account`) is documented there as the security identity "that should go into any future log". Without IIS authentication it is anonymous, and identity is never invented. | code |
+| V8 | Admin does not write `dbo.Problem` today. "Solicitar cambios" is a browser-only draft (`SolicitudCambio` in `admin/registro-iniciativas.js`) with fields: field, current value, new date and a **required `motivo`**. It is not submitted anywhere. `adm.Solicitud` does not exist; it is only proposed in `PROPUESTA_numero_solicitud.md`. | code |
+| V9 | The panel already expects `historial: [{campo, anterior, nuevo, fecha, usuario}]` (`htmlHistorial`). It always arrives empty today. | code |
+
+### Open, must be closed before the test environment (none is closed yet)
+
+| # | Item | Why it blocks | How to close |
+|---|---|---|---|
+| O1 | Exact type, length and **collation** of `Problem.Codigo` | The FK column must match it exactly. It fills `{{TIPO_CODIGO}}`. | P0-1 |
+| O2 | Exact types of `FechaAnalisis/FechaSolucion/FechaCierre`, and whether non-midnight times exist | Decides whether the comparison and conversion are safe. **A character type would stop this design.** The N6 output shows `2026-10-21 00:00:00`, but the type has not been confirmed. | P0-1, P0-6 |
+| O3 | `OUTPUT` without `INTO` on `dbo.Problem`, in the loader or any other writer | **SQL Server rejects that statement once the table has an enabled trigger (Msg 334). The load would fail.** | P0-3 (SQL side) + Python review (O4) |
+| O4 | **`cargar_experiencia.py`** writing `dbo.Problem` directly (bcp, `BULK INSERT`, `SqlBulkCopy`, `to_sql`, executemany UPDATE/DELETE) instead of only filling staging and calling the procedure | Bulk paths that bypass triggers would leave silent gaps; a DELETE would fail once history exists. The local copy is gone, so this is **not verified**. | Manual review of the current file |
+| O5 | Other unknown writers: modules referencing `Problem` without the `dbo.` prefix (missed by H3), SQL Agent job steps, external scripts | Same reasons as O3 and O4 | P0-3, P0-7, ask the owners |
+| O6 | Which database login(s) the loader and the web application use | Decides how informative `LoginBD` is (§7). The web connection string uses a SQL login; the loader's login is unknown. | Ask the owners / P0-5 while a load runs |
+| O7 | Delete/update rule of `FK_ProblemCategoria_Problem` | Context for §8 only | P0-4 |
+
+---
+
+## 2. Table schema
+
+One row = **one actual transition of one date field** of one initiative.
 
 ```sql
 -- NOT EXECUTED. Proposal only. {{TIPO_CODIGO}} must be replaced with the exact
--- type + collation of dbo.Problem.Codigo from P0-1 (e.g. nvarchar(20) COLLATE ...).
+-- type + collation of dbo.Problem.Codigo from P0-1.
 CREATE TABLE dbo.ProblemFechaEvento
 (
     IdEvento      int IDENTITY(1,1) NOT NULL
                   CONSTRAINT PK_ProblemFechaEvento PRIMARY KEY CLUSTERED,
     Codigo        {{TIPO_CODIGO}}   NOT NULL
                   CONSTRAINT FK_ProblemFechaEvento_Problem
-                  REFERENCES dbo.Problem (Codigo),          -- NO ACTION (see §6)
+                  REFERENCES dbo.Problem (Codigo),          -- no cascade: intentional (§8)
     Campo         varchar(13)       NOT NULL
                   CONSTRAINT CK_ProblemFechaEvento_Campo
                   CHECK (Campo IN ('FechaAnalisis', 'FechaSolucion', 'FechaCierre')),
-    ValorAnterior date              NULL,
-    ValorNuevo    date              NULL,
+    FechaAnterior date              NULL,
+    FechaNueva    date              NULL,
     Operacion     char(1)           NOT NULL
                   CONSTRAINT CK_ProblemFechaEvento_Operacion
                   CHECK (Operacion IN ('I', 'U', 'B')),     -- Insert / Update / Baseline
     Reconstruido  AS CAST(CASE WHEN Operacion = 'B' THEN 1 ELSE 0 END AS bit),
     Origen        varchar(12)       NOT NULL
                   CONSTRAINT CK_ProblemFechaEvento_Origen
-                  CHECK (Origen IN ('ADMIN', 'NO_DECLARADO')),
+                  CHECK (Origen IN ('NO_DECLARADO', 'ADMIN')),
     Usuario       nvarchar(256)     NULL,
     SolicitudId   int               NULL,
     LoginBD       nvarchar(128)     NOT NULL
@@ -76,14 +97,14 @@ CREATE TABLE dbo.ProblemFechaEvento
     FechaRegistro datetime2(3)      NOT NULL
                   CONSTRAINT DF_ProblemFechaEvento_FechaRegistro DEFAULT (SYSUTCDATETIME()),
 
-    -- A row is a real transition: never NULL->NULL, never X->X.
+    -- A real transition: never NULL->NULL, never X->X.
     CONSTRAINT CK_ProblemFechaEvento_Transicion CHECK (
-        (ValorAnterior IS NOT NULL OR ValorNuevo IS NOT NULL)
-        AND (ValorAnterior IS NULL OR ValorNuevo IS NULL OR ValorAnterior <> ValorNuevo)),
-    -- Baseline rows only state "value at go-live": no previous value is claimed.
+        (FechaAnterior IS NOT NULL OR FechaNueva IS NOT NULL)
+        AND (FechaAnterior IS NULL OR FechaNueva IS NULL OR FechaAnterior <> FechaNueva)),
+    -- Baseline only states "value known at initialization"; it never claims a previous value.
     CONSTRAINT CK_ProblemFechaEvento_Base CHECK (
-        Operacion <> 'B' OR (ValorAnterior IS NULL AND ValorNuevo IS NOT NULL)),
-    -- Excel/loader rows never carry a person or request; Admin rows MUST carry the user.
+        Operacion <> 'B' OR (FechaAnterior IS NULL AND FechaNueva IS NOT NULL)),
+    -- Excel/undeclared rows carry no person or request; Admin rows must carry the user.
     CONSTRAINT CK_ProblemFechaEvento_Atribucion CHECK (
         (Origen = 'NO_DECLARADO' AND Usuario IS NULL AND SolicitudId IS NULL)
         OR (Origen = 'ADMIN' AND Usuario IS NOT NULL))
@@ -93,64 +114,54 @@ CREATE NONCLUSTERED INDEX IX_ProblemFechaEvento_Codigo
     ON dbo.ProblemFechaEvento (Codigo, IdEvento);
 ```
 
-| Column | Type | Purpose / justification |
+| Column | Type | Meaning |
 |---|---|---|
-| `IdEvento` | `int IDENTITY` | Persisted event order and the stable row id. The display number is derived from it (§3). Expected volume is a few thousand rows per year, so `int` is enough. |
-| `Codigo` | = `Problem.Codigo` | The initiative, through the verified PK (V2). Type and collation must be copied exactly (U1). |
-| `Campo` | `varchar(13)` | Which date changed. It stores the actual column name, so no translation table is needed. |
-| `ValorAnterior` / `ValorNuevo` | `date` | The value before and after. NULLs cover `NULL→date`, `date→date` and `date→NULL`. `date` is used because the business value is a calendar day (see §4 on time components). |
-| `Operacion` | `char(1)` | `I`: captured on an INSERT into `Problem`. `U`: captured on an UPDATE. `B`: one-time baseline row (§5). It lets the UI tell "created with this date" apart from "changed". |
-| `Reconstruido` | computed `bit` | The explicit "not observed, reconstructed" flag the UI checks. It is computed from `Operacion`, so it can never disagree with it. It is **non-persisted** on purpose: persisted or indexed computed columns impose SET-option requirements on every writer session, and the loader's session options are unknown. |
-| `Origen` | `varchar(12)` | `ADMIN` only when the writer declared it through `SESSION_CONTEXT`. Everything else is `NO_DECLARADO`, which honestly means "the trigger cannot tell who wrote this". See §7. |
-| `Usuario` | `nvarchar(256)` | The authenticated web user (`DOMAIN\account`) whose Admin action caused the change. **Required** when `Origen = 'ADMIN'`, **always NULL** for Excel/loader rows (§7). Never guessed. |
-| `SolicitudId` | `int` | The Admin request/approval number, once that workflow exists. NULL for Excel/loader rows. There is no FK because `adm.Solicitud` does not exist. It is `int` to match the proposed `NumeroSolicitud`. |
-| `LoginBD` | `nvarchar(128)` | The database principal that ran the statement (`ORIGINAL_LOGIN()`). This is the only writer identity the database can actually prove. It is technical evidence, not a person. Its usefulness depends on U6. |
-| `FechaRegistro` | `datetime2(3)` UTC | When the change hit `Problem`. UTC, like the other DW stamps; Admin converts it for display. |
+| `IdEvento` | `int IDENTITY` | Row id and **persisted chronological order**. Display order and the "Cambio n" numbering derive from it (§4). At a few thousand rows a year, `int` is enough. |
+| `Codigo` | = `Problem.Codigo` | The initiative, through the verified PK (V2). |
+| `Campo` | `varchar(13)` | Which date changed. It stores the real column name. |
+| `FechaAnterior` / `FechaNueva` | `date` | **The scheduled date value** before and after the change. NULLs express `NULL→date` and `date→NULL`. Stored at day level (§5). |
+| `Operacion` | `char(1)` | `I`: captured when the `Problem` row was inserted. `U`: captured on an update. `B`: one-time baseline. |
+| `Reconstruido` | computed `bit` | 1 only for `B`. It is an explicit "known at initialization, not an observed change" flag that can never disagree with `Operacion`. It is non-persisted, so it adds no SET-option requirements for writers. |
+| `Origen` | `varchar(12)` | Which path declared the change (§7). |
+| `Usuario` | `nvarchar(256)` | The **authenticated application user**, Admin only (§7). |
+| `SolicitudId` | `int` | The **application request/approval id**, Admin only, once that workflow exists. There is no FK because the table does not exist yet. |
+| `LoginBD` | `nvarchar(128)` | The **database login** that executed the SQL (`ORIGINAL_LOGIN()`). It is technical evidence, not a person. |
+| `FechaRegistro` | `datetime2(3)` UTC | **When the system captured the change.** It answers "when was this recorded?", not "what was the initiative scheduled for?". Admin converts it to UTC-6 for display. |
 
-Not included, on purpose: the legacy `NroCambioFecha*` counter (§3, §10),
-`FechaOriginal*` (§5), a "fuente/archivo" date (the loader does not provide one,
-so it is not verified), a generic table/column name (§9), and an FK on
-`SolicitudId` (its table does not exist).
+There is deliberately **no** change-number column, no `NroCambioFecha*`, no
+`FechaOriginal*`, no `Motivo` (§11), and no generic table/column-name columns.
 
 ---
 
-## 2. What each transition looks like
+## 3. Transitions → rows
 
-| Situation | Row(s) written |
+| Operation on `dbo.Problem` | Rows written |
 |---|---|
-| `UPDATE` sets `FechaSolucion` 27/06 → 15/07 | `Campo=FechaSolucion, Anterior=2026-06-27, Nuevo=2026-07-15, Operacion=U` |
-| later 15/07 → 24/07 | a second row `Anterior=2026-07-15, Nuevo=2026-07-24, U` |
-| NULL → date | `Anterior=NULL, Nuevo=date, U` |
-| date → NULL | `Anterior=date, Nuevo=NULL, U` |
-| A → B → A | two rows. Reverting is a real change and is never deduplicated. |
-| one UPDATE changes 2 of the 3 dates | two rows (one per field), same statement |
-| value written but unchanged | no row |
-
-`dbo.Problem` is never modified by this mechanism.
-
----
-
-## 3. Event numbering
-
-- `NroCambioFecha*` are **not** read, copied or trusted (V6).
-- Nothing is stored as a "change number". It is derived on read from persisted order:
-
-```sql
-NumeroCambio = CASE WHEN Operacion = 'U' AND ValorAnterior IS NOT NULL AND ValorNuevo IS NOT NULL
-                    THEN COUNT(CASE WHEN Operacion = 'U' AND ValorAnterior IS NOT NULL AND ValorNuevo IS NOT NULL THEN 1 END)
-                         OVER (PARTITION BY Codigo, Campo ORDER BY IdEvento ROWS UNBOUNDED PRECEDING)
-               END
-```
-
-  Only `date → date` updates count as a "change of commitment". `I` and `B` rows
-  are the initial value. `NULL → date` and `date → NULL` are shown but not numbered.
-  This counting rule is a **business decision to confirm** (approval checklist).
-- The order is by `IdEvento`, not `FechaRegistro`. Rows from one statement share a
-  timestamp, but there is never more than one row per `(Codigo, Campo)` per statement.
+| `FechaSolucion` 27/06 → 15/07 | 1: `FechaSolucion, 2026-06-27 → 2026-07-15, U` |
+| later 15/07 → 24/07 | 1 more: `2026-07-15 → 2026-07-24, U` |
+| `NULL → date` | 1: `FechaAnterior NULL` |
+| `date → NULL` | 1: `FechaNueva NULL` |
+| one statement changes `FechaSolucion` **and** `FechaCierre` | **2** (one per field) |
+| A → B → A | 2. A reversal is a real change and is never deduplicated. |
+| value rewritten but unchanged (the loader rewrites every column) | 0 |
+| only the time of day changes, same calendar day | 0 |
+| only unrelated columns change | 0 |
 
 ---
 
-## 4. Trigger
+## 4. Numbering: derived by the UI, not stored
+
+- `NroCambioFechaAnalisis/Solucion/Cierre` remain legacy source metadata. They are **not read** to build history and are **not used** as the change number (V6).
+- There is no change number in the database. The panel numbers the events while rendering, from the events it received in `IdEvento` order, separately for each `Campo`:
+  - `B` → **"Línea base"**. It is never "Cambio 1".
+  - `I` → **"Fecha inicial"** (the date the initiative was created with).
+  - `U` with both dates present → **"Cambio 1", "Cambio 2", …**, counted in order per field.
+  - `U` `NULL → date` → "Fecha asignada"; `U` `date → NULL` → "Fecha retirada". These are shown but not counted as changes.
+- These labels and the counting rule are a **display decision to confirm** (checklist). Changing them later needs no database change.
+
+---
+
+## 5. Trigger on `dbo.Problem`
 
 ```sql
 -- NOT EXECUTED. Proposal only.
@@ -161,12 +172,11 @@ AS
 BEGIN
     SET NOCOUNT ON;
 
-    -- Nothing affected, or none of the three columns is in the statement.
-    -- (For INSERT, UPDATE() is true for every column.)
     IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
+    -- None of the three columns is in the statement. (For INSERT, UPDATE() is true for all.)
     IF NOT (UPDATE(FechaAnalisis) OR UPDATE(FechaSolucion) OR UPDATE(FechaCierre)) RETURN;
 
-    -- Declared context (only a future Admin SP sets it; see §7).
+    -- Declared context (only a future Admin procedure sets it; §7, §11).
     DECLARE @esAdmin bit =
         CASE WHEN CONVERT(varchar(12), SESSION_CONTEXT(N'pfe_origen')) = 'ADMIN' THEN 1 ELSE 0 END;
     DECLARE @usuario nvarchar(256) =
@@ -175,8 +185,8 @@ BEGIN
         CASE WHEN @esAdmin = 1 THEN TRY_CONVERT(int, SESSION_CONTEXT(N'pfe_solicitud')) END;
 
     INSERT dbo.ProblemFechaEvento
-           (Codigo, Campo, ValorAnterior, ValorNuevo, Operacion, Origen, Usuario, SolicitudId)
-    SELECT i.Codigo, v.Campo, v.Anterior, v.Nuevo,
+           (Codigo, Campo, FechaAnterior, FechaNueva, Operacion, Origen, Usuario, SolicitudId)
+    SELECT i.Codigo, v.Campo, v.Anterior, v.Nueva,
            CASE WHEN d.Codigo IS NULL THEN 'I' ELSE 'U' END,
            CASE WHEN @esAdmin = 1 THEN 'ADMIN' ELSE 'NO_DECLARADO' END,
            @usuario, @solicitud
@@ -186,42 +196,55 @@ BEGIN
         ('FechaAnalisis', CONVERT(date, d.FechaAnalisis), CONVERT(date, i.FechaAnalisis)),
         ('FechaSolucion', CONVERT(date, d.FechaSolucion), CONVERT(date, i.FechaSolucion)),
         ('FechaCierre',   CONVERT(date, d.FechaCierre),   CONVERT(date, i.FechaCierre))
-    ) AS v (Campo, Anterior, Nuevo)
-    WHERE EXISTS (SELECT v.Anterior EXCEPT SELECT v.Nuevo);   -- NULL-safe "is distinct"
+    ) AS v (Campo, Anterior, Nueva)
+    WHERE EXISTS (SELECT v.Anterior EXCEPT SELECT v.Nueva);   -- NULL-safe "is distinct" (level 150)
 END;
 ```
 
-How it meets the requirements:
+How the trigger meets each requirement:
 
-- **Set-based, multi-row.** One INSERT…SELECT over `inserted`/`deleted`, with no cursor and no per-row logic.
-- **inserted vs deleted.** They are joined on the PK `Codigo` (V2). For an INSERT, `deleted` is empty, so `Anterior` is NULL and `Operacion='I'`.
-- **Real changes only.** `EXISTS (SELECT a EXCEPT SELECT b)` is true for `NULL↔date` and `date↔other date`, and false for `NULL=NULL` and `X=X`. This is the level-150 replacement for `IS DISTINCT FROM`.
-- **Unrelated columns.** If the statement does not mention the dates, the trigger exits early. If it does mention them (the loader rewrites all columns), unchanged values fail the `EXCEPT` test and produce no row.
-- **No duplicates.** There is one row per `(Codigo, Campo)` per statement, and only when the value differs.
-- **Comparison is at `date` granularity.** This is consistent whether the source type is `date`, `datetime` or `datetime2`. A time-only change (00:00 → 13:00 on the same day) produces **no** event, which is intentional because the business value is the day. P0-6 checks that non-midnight times do not exist today (U2). If the column turns out to be a character type, **stop**: the design must change, because `CONVERT` could fail and abort the load.
-- **Failure surface is minimal.** By construction no constraint can fail: `Campo` and `Origen` are constants; the transition CHECK is guaranteed by the `WHERE`; `B` is never written by the trigger; `Usuario`/`SolicitudId` are only non-NULL when `ADMIN`; `TRY_CONVERT` is used for `SolicitudId`; and the FK holds because `Codigo` comes from `inserted`. There are no external calls, no dynamic SQL and no result sets.
-  **One deliberate exception, Admin path only:** if a writer declares `ADMIN` but not `pfe_usuario`, `CK_ProblemFechaEvento_Atribucion` fails and that Admin UPDATE rolls back. An unattributed web change is refused instead of being recorded anonymously. The loader never declares `ADMIN`, so this cannot affect it.
-- **PK changes.** Updating `Codigo` itself would appear as an `I` on the new code. The loader matches rows by `Codigo` and is not expected to change it. Changing a code that has history is also blocked by the new FK, just as V3 already blocks it for categories.
-- **Permissions.** `dbo` owns both objects, so ownership chaining applies: the loader's login needs **no** new permission on `ProblemFechaEvento`.
+- **`AFTER INSERT, UPDATE`, set-based, multi-row.** A single INSERT…SELECT over all of `inserted`. There is no cursor and no per-row logic.
+- **`inserted` vs `deleted`.** Rows are joined on the PK `Codigo` (V2). For an INSERT, `deleted` is empty, so `FechaAnterior` is NULL and `Operacion = 'I'`.
+- **Only real changes, NULL-safe.** `EXISTS (SELECT a EXCEPT SELECT b)` is true for `NULL↔date` and for `date↔other date`, and false for `NULL=NULL` and `X=X`. This is the level-150 replacement for `IS DISTINCT FROM`.
+- **Day level.** Both sides are converted to `date`, so a time-only change produces nothing. This is valid only if O2 confirms a date/time type.
+- **Unrelated columns.** If the statement does not mention the dates, the trigger exits early. If it mentions them without changing them (the loader's broad UPDATE), the `EXCEPT` filter produces 0 rows.
+- **No duplicates.** At most one row per `(Codigo, Campo)` per statement.
+- **Code changes.** An UPDATE of `Codigo` itself would show up as an `I` on the new code. The loader matches rows by `Codigo`. Changing a code that has history is blocked by the FK, as V3 already does for categories.
+- **Permissions.** `dbo` owns both tables, so ownership chaining applies: the loader's login needs **no** new permission.
+
+**Failure behavior. It is not claimed that the trigger cannot fail.** A trigger error rolls back the statement that fired it, which here means the loader's UPDATE or INSERT. The design avoids the *expected* constraint failures on the loader path:
+- `Campo`, `Operacion` and `Origen` are constants.
+- The transition CHECK is guaranteed by the `WHERE`.
+- `B` is never written by the trigger.
+- `Usuario` and `SolicitudId` stay NULL unless the context says `ADMIN`.
+- `TRY_CONVERT` is used for `SolicitudId`.
+- The FK value comes from `inserted`.
+
+What remains possible:
+- Msg 334, if any writer uses `OUTPUT` without `INTO` (O3).
+- Conversion errors, if the date columns are not a date/time type (O2).
+- Ordinary engine conditions: lock waits or deadlocks, `tempdb` or log space, a disabled or dropped history table.
+- **Deliberately**, on the Admin path only: `ADMIN` declared without a user fails `CK_ProblemFechaEvento_Atribucion`, so an unattributed web change is refused.
+
+**The test plan must prove that a normal loader run succeeds with the trigger enabled (T14, T15).**
 
 ---
 
-## 5. INSERT and the one-time baseline
+## 6. INSERT and the optional baseline
 
-**New record going forward** (a normal INSERT by the loader or anyone else):
-- Each of the 3 dates that is **not NULL** produces one row: `Anterior=NULL, Nuevo=value, Operacion='I', Origen` as declared. Dates that are NULL produce nothing.
-- So an initiative born with only `FechaAnalisis` (as 2026 initiatives do, see V7/N6) gets exactly one row.
+**New `Problem` row going forward:** each date that is **not NULL** produces one `I` row (`FechaAnterior` NULL). Dates that are NULL produce nothing. An initiative born with only `FechaAnalisis` (as in diag N6) gets exactly one row.
 
-**Legacy baseline (one-time, separate approval, optional):**
-- What it can honestly support: "on go-live day, the current value of field X was Y". Nothing else.
-- For each existing `Problem` row and each date that is **not NULL**: insert `Anterior=NULL, Nuevo=current, Operacion='B'` (so `Reconstruido=1`), `Origen='NO_DECLARADO'`. Rows whose date is NULL get nothing.
-- It does **not** use `FechaOriginal*`. Writing `original → current` would look like one direct change when an unknown number of intermediate changes happened. Those values are hand-typed and missing in about 80% of rows (V6). `FechaOriginal*` stays a normal attribute of `Problem`, readable as such.
-- It does **not** use `NroCambioFecha*` (§10).
-- Value: the timeline becomes self-contained, with a first line such as "value when history started: 24/07/2026 (reconstructed)". Even **without** the baseline, the first real change after go-live still records the old value in `ValorAnterior`, so the baseline is a convenience, not a requirement. **Recommendation: load it** (it is cheap and clearly flagged). It can be skipped with no loss of real evidence.
+**One-time legacy baseline: optional, separate approval, and not a change.**
+- It records only what is genuinely known at initialization: the current non-NULL value of each date. Rows have `Operacion = 'B'`, `Reconstruido = 1`, `Origen = 'NO_DECLARADO'`, and `FechaAnterior` NULL (enforced by a CHECK).
+- It does **not** use `FechaOriginal*`: writing `original → current` would look like a single direct change when an unknown number of intermediate changes happened.
+- It does **not** use `NroCambioFecha*`.
+- The UI shows it as **"Línea base"**, never as "Cambio 1" (§4).
+- Its value is limited: the first real change after go-live already records the old value in `FechaAnterior`. The baseline only gives initiatives that never change a visible starting point. Skipping it loses no real evidence. **Recommendation: load it, clearly labelled.**
+- It covers all rows, including those with `VigenteEnOrigen = 0`. Confirm this in the checklist.
 
 ```sql
--- NOT EXECUTED. Proposal only. Runs inside the deployment transaction (§13), BEFORE the trigger exists.
-INSERT dbo.ProblemFechaEvento (Codigo, Campo, ValorAnterior, ValorNuevo, Operacion, Origen)
+-- NOT EXECUTED. Proposal only. Runs in the deployment transaction (§14), BEFORE the trigger exists.
+INSERT dbo.ProblemFechaEvento (Codigo, Campo, FechaAnterior, FechaNueva, Operacion, Origen)
 SELECT p.Codigo, v.Campo, NULL, v.Valor, 'B', 'NO_DECLARADO'
 FROM dbo.Problem AS p WITH (TABLOCKX, HOLDLOCK)
 CROSS APPLY (VALUES
@@ -232,142 +255,181 @@ CROSS APPLY (VALUES
 WHERE v.Valor IS NOT NULL;
 ```
 
-The baseline covers all rows, including `VigenteEnOrigen = 0`, so that a row
-that becomes current again still has its anchor. Confirm this in the checklist.
-
 ---
 
-## 6. DELETE
+## 7. Attribution: `Origen`, `Usuario`, `SolicitudId`, `LoginBD`
 
-**Recommendation: no DELETE branch.** The reasons:
-- There is no verified deleter (V4). TRUNCATE is impossible today (V3).
-- With the proposed FK (NO ACTION), a `Problem` row that **has** history cannot be deleted. The delete fails, and the evidence is protected.
-- A `Problem` row with **no** history can only be one whose three dates were always NULL. Deleting it would create no date transition, so there is nothing to log.
-- So a DELETE branch could never write a meaningful row. It would only add code paths to test.
+These four fields stay conceptually separate:
 
-Consequence to accept: if the loader or `cargar_experiencia.py` ever deletes
-rows from `Problem` (U3), that delete will **fail** for initiatives with history.
-This is the same behavior `FK_ProblemCategoria_Problem` already enforces for rows
-with categories. The alternatives are worse: `ON DELETE CASCADE` silently destroys
-evidence, and having no FK allows orphans. If business someday needs physical
-deletes, revisit then.
+- `Usuario` = the authenticated **application** user.
+- `LoginBD` = the **database** login that executed the SQL.
+- `SolicitudId` = the **application** request/approval id.
+- `Origen` = which path declared the change.
 
----
-
-## 7. Attribution: Origen / Usuario / SolicitudId / LoginBD / Reconstruido
-
-Two kinds of origin, with different attribution rules **on purpose**:
-
-| Field | Excel / loader (today) | Web / Admin (future) | One-time baseline |
+| Field | Excel / loader (today) | Web / Admin (future) | Baseline |
 |---|---|---|---|
 | `Origen` | `NO_DECLARADO` | `ADMIN` | `NO_DECLARADO` |
-| `Usuario` | NULL, by design | **required**: the authenticated web user who performed/requested the change | NULL |
-| `SolicitudId` | NULL | the real request/approval number, once that workflow exists | NULL |
-| `LoginBD` | the database login that ran the load | the web app's database login | the login that ran the deploy |
-| `Reconstruido` | 0 | 0 | 1 |
+| `Usuario` | NULL, by design | **required**: authenticated web user | NULL |
+| `SolicitudId` | NULL | the real request/approval id, when that workflow exists | NULL |
+| `LoginBD` | the login that ran the load | the web app's login | the login that ran the deploy |
 
-**Excel / loader changes: honest, not anonymous by accident.**
-- These date changes are agreed in meetings, with the responsible person's boss present, and then typed into the Excel file by hand. The business does **not** need an individual requester for them, and the pipeline has none to give: the Excel sheet has no "changed by" column, the loader sets no context (V4), and the trigger cannot see who edited the spreadsheet.
-- So `Usuario` and `SolicitudId` stay **NULL**, and the CHECK in §1 forbids filling them for these rows. NULL here means "not applicable to this workflow", not "lost". No requester is invented, and nothing is inferred from `LoginBD`, `APP_NAME()` or `HOST_NAME()`.
-- `Origen` is `NO_DECLARADO` rather than `EXCEL`, because the trigger cannot prove that the loader was the writer: a manual UPDATE in SSMS looks the same. If the existing pipeline ever genuinely provides a user or a request id, it can be declared through the same mechanism, and that would need its own approval.
-- `LoginBD` still records which database login executed the operation. This is technical evidence, not a person. Whether it separates the loader from manual edits depends on U6.
+**Excel / loader path.**
+- Date changes in this workflow are agreed in meetings, with the responsible person's boss present, and typed into the Excel file by hand. No individual requester is needed for them, and **none is fabricated**.
+- The pipeline cannot provide one anyway: the sheet has no "changed by" column, the loader sets no context (V4), and the trigger cannot see who edited the file.
+- So `Usuario` and `SolicitudId` stay NULL, and the CHECK forbids filling them on these rows.
+- `Origen` is **`NO_DECLARADO`, not `EXCEL`**, because nothing verified lets the trigger prove that the writer was the loader: a manual UPDATE from SSMS looks identical. Two ways to get an accurate `EXCEL` value exist, and neither is adopted here:
+  - (a) `usp_CargarExperiencia` declares `pfe_origen = 'EXCEL'`. This is a one-line change to the loader, which this proposal deliberately does not touch; it would need its own approval.
+  - (b) The trigger maps a dedicated loader login to `EXCEL`. This works only if O6 proves the login is used exclusively by the loader, and it hardcodes a login name.
 
-**Web / Admin changes: attribution required.**
-- When someone requests a date extension through the website, the event must say who did it. `Usuario` is the **authenticated** application user, taken server-side from the Windows identity the site already resolves (`DOMAIN\account`), and **never** from a value sent by the browser. `SolicitudId` links the event to the request/approval record once `adm.Solicitud` exists.
-- If the person who requested and the person who approved differ, `Usuario` records whoever performed the action that changed `Problem`. The other person is reachable through `SolicitudId` in the request record, so no second person column is added now.
-- This is enforced, not just a convention: `ADMIN` without `Usuario` is rejected by the CHECK (§4 exception), so an unattributed web change cannot slip into the history.
-- **Mechanism (not built; depends on `adm.Solicitud` approval):** the approval stored procedure (never the C# code directly) declares the context, updates `Problem`, and clears the context, all inside a TRY/CATCH:
+  Either one would add `'EXCEL'` to `CK_ProblemFechaEvento_Origen` later.
+- `LoginBD` still records the database login, as technical evidence.
+- The panel labels these rows honestly, for example "Sin solicitante registrado (carga de Excel u otra vía directa)". It never shows "desconocido" as a person, and never shows `LoginBD` as a person.
+
+**Web / Admin path (future; attribution required).**
+- `Usuario` = `IdentidadWindows.Original` (`DOMAIN\account`) of the request being served, resolved server-side from IIS Windows authentication (V7). It is **never** taken from a value the browser sends. If the identity is not authenticated, the change must not be made at all.
+- `SolicitudId` = the id of the request/approval record once that entity exists. Until then it is NULL, which the CHECK allows.
+- `LoginBD` = the web app's database login.
+- If the requester and the approver are different people, `Usuario` records whoever performed the action that changed `Problem`. The other person is reachable through `SolicitudId` in the request record, so no second person column is added.
+- **Mechanism** (safest option given V4/V7; not built). The procedure that applies an approved change declares the context, updates `Problem`, then clears the context. It also clears it in its `CATCH` block:
   ```sql
   EXEC sys.sp_set_session_context @key = N'pfe_origen',    @value = 'ADMIN';
-  EXEC sys.sp_set_session_context @key = N'pfe_usuario',   @value = @usuario;          -- authenticated web user
-  EXEC sys.sp_set_session_context @key = N'pfe_solicitud', @value = @numeroSolicitud;  -- NULL until the workflow exists
+  EXEC sys.sp_set_session_context @key = N'pfe_usuario',   @value = @usuario;          -- IdentidadWindows.Original, passed by the server
+  EXEC sys.sp_set_session_context @key = N'pfe_solicitud', @value = @solicitudId;      -- NULL until the workflow exists
   UPDATE dbo.Problem SET FechaSolucion = @nueva WHERE Codigo = @codigo;
   -- then set the three keys back to NULL (also in CATCH)
   ```
-  The context is cleared explicitly because pooled connections are reused, so the next statement on the same connection must not inherit `ADMIN` (T15b). The key names are free today (V4).
-- Admin never inserts into `ProblemFechaEvento` directly. If it also inserted, every change would be recorded twice.
+  Pooled connections are reused, so the next statement must not inherit `ADMIN` (T15b). The key names are free today (V4).
+- Admin never inserts into `ProblemFechaEvento` itself. If it did, every change would be recorded twice.
 
-**Built to grow.** The table and trigger already carry `Origen`, `Usuario` and `SolicitudId`. When date-extension requests move to the website, richer attribution only requires the approval procedure to declare its context: the table, the trigger and the existing Excel rows stay as they are. Either way, this is an audit/evidence trail of date changes. It never replaces or drives the current dates in `dbo.Problem`.
-
----
-
-## 8. Loader safety (`usp_CargarExperiencia`, `cargar_experiencia.py`)
-
-Expected impact, assuming the P0 checks pass:
-- Each load's UPDATE (about 940 rows) and INSERT also run the trigger, which reads `inserted`/`deleted` and inserts a few rows. The cost is milliseconds, inside the same transaction. A load in which nothing changed writes **0** rows.
-- The loader's code, results and `@@ROWCOUNT` do not change (`SET NOCOUNT ON`, and the trigger returns no result sets).
-- If the trigger fails, the loader's statement rolls back. This is why the trigger is designed so that it cannot fail (§4).
-
-Risks that are **not closed**:
-1. **`OUTPUT` without `INTO` on `dbo.Problem`** (U4). This would make the loader fail with Msg 334 as soon as the trigger exists. P0-3 checks the SQL side; the Python side needs a manual review.
-2. **`cargar_experiencia.py` writing `Problem` directly** (U3). **This is open. It has not been verified.**
-   - bcp, `BULK INSERT` or `SqlBulkCopy` without `FIRE_TRIGGERS` **skip the trigger**. Changes would be missed silently, the load would not break, and the history would have gaps.
-   - pyodbc `executemany`/`fast_executemany` and pandas `to_sql` issue normal INSERT/UPDATE statements. The trigger fires and the rows get `Origen=NO_DECLARADO`.
-   - A DELETE on `Problem` from Python fails once history exists (§6).
-   - What to do: the user reviews the current `cargar_experiencia.py` and searches for `Problem`, `bulk`, `BULK INSERT`, `bcp`, `fast_executemany`, `to_sql`, `DELETE`, `TRUNCATE` and `OUTPUT`. Any hit on `Problem` (as opposed to staging) blocks the move to production until it is reviewed.
-3. Writers outside `sys.sql_modules`, such as SQL Agent job steps or other scripts (U5, U7). P0-3 and P0-7 cover part of this.
+**Designed for richer attribution later.** The table and trigger already carry `Usuario` and `SolicitudId`. When date extensions move to the website, only the applying procedure has to declare its context; the table, the trigger and the existing Excel rows stay as they are.
 
 ---
 
-## 9. Alternatives
+## 8. DELETE: no trigger branch; deletion is blocked by design
 
-| Option | Verdict |
-|---|---|
-| **Capture inside the loader** (compare staging with `Problem` before the UPDATE) | It requires changing `usp_CargarExperiencia`, which we keep untouched. It only sees changes made through the loader: Admin and manual SQL would each need their own capture code, and an UPDATE that forgets it creates a gap. It would be the fallback only if a writer turns out to DELETE and re-INSERT rows. |
-| **System-versioned temporal table on `Problem`** | It requires `ALTER TABLE dbo.Problem`, the most-read table. The loader rewrites all 35 columns on every load, so even with the same values a new history version is written for every row on every load (about 940 per load). The date changes would then have to be found by diffing whole rows. Schema changes would also require switching versioning off. Too much volume for too little signal. |
-| **Generic audit** (`Tabla, Columna, Anterior, Nuevo` as text or `sql_variant`, or CDC / SQL Audit) | Loses the data type, makes queries harder, and records many columns nobody asked for. CDC needs SQL Agent and records every row the loader touches. It overlaps with the planned `adm.SolicitudEvento` workflow log. Premature. |
-| **Trigger + dedicated table (proposed)** | Zero changes to `Problem` and to the loader. It catches every writer that fires triggers, filters down to the 3 columns and to real changes only (the key point given the loader's broad UPDATEs), and it is small enough to review line by line. Its cost is hidden logic, which is mitigated by this document and by naming. |
+- The current loader does not DELETE, TRUNCATE or MERGE `dbo.Problem` (V4), and TRUNCATE is already impossible (V3). There is no DELETE logic in the trigger.
+- **Intentional audit protection:** `FK_ProblemFechaEvento_Problem` has **no cascade**. Once a `Problem` row has any history event, **deleting that row is rejected by the FK**. This is deliberate: the evidence cannot disappear with the row. It is not a side effect.
+- A `Problem` row without history (all three dates always NULL) can still be deleted, and there is nothing date-related to log for it.
+- Consequence: if any writer (O4, O5) ever deletes rows from `Problem`, those deletes will fail for initiatives that have history. `ON DELETE CASCADE` was rejected because it would destroy evidence; having no FK was rejected because it would allow orphans.
 
 ---
 
-## 10. Legacy limitations (explicit)
+## 9. Append-only
 
-Three separate layers:
+Once a history event exists it is **never updated and never deleted**. `dbo.Problem` keeps changing independently.
 
-1. **Genuinely available in existing data:** the current dates in `Problem`, the hand-typed `FechaOriginalSolucion`/`FechaOriginalCierre` (partial, unverified), and the hand-typed `NroCambioFecha*` counters (unreliable). These are attributes of `Problem`, not history.
-2. **One-time reconstructed baseline:** "value at go-live" per field, flagged `Reconstruido=1`. That is all.
-3. **Trustworthy history:** every `I`/`U` row from the go-live timestamp onward.
-
-**What cannot be recovered:** intermediate values before go-live were never persisted anywhere, so the example `27/06 → 15/07 → 24/07` cannot be rebuilt for existing initiatives. The legacy counters are **not** turned into events. The free-text "Histórico de comentarios" is **not** parsed. The UI must say "history recorded since dd/mm/yyyy" so that an empty or short list is not read as "never changed".
-
----
-
-## 11. FK, indexes, constraints (minimal)
-
-- `PK_ProblemFechaEvento` clustered on `IdEvento`: append-only inserts and order.
-- `FK_ProblemFechaEvento_Problem` → `dbo.Problem(Codigo)`, NO ACTION (§6).
-- `IX_ProblemFechaEvento_Codigo (Codigo, IdEvento)` is the only secondary index. It serves the Admin read (`WHERE Codigo = @c ORDER BY IdEvento`) and the FK check on any key change.
-- CHECKs: `Campo`, `Operacion`, `Origen`, transition, baseline shape, admin-only metadata. All are evaluated on constants or on values the trigger already guarantees.
-- **No filtered index and no indexed computed column.** These impose SET-option requirements on every DML session that touches the table, and the loader's session options are unknown.
-- Not added: an append-only enforcement trigger. It is enforced through permissions instead: the web login gets only `SELECT`, and nobody gets INSERT/UPDATE/DELETE grants.
-
----
-
-## 12. Rollback
+This is enforced in two layers:
+1. **Permissions.** Nobody receives INSERT, UPDATE or DELETE on the table. The web login gets only `SELECT` (a separate approval). Inserts happen only through the trigger, via ownership chaining.
+2. **Guard trigger** on the history table itself. It is small, and it is justified by this explicit requirement:
 
 ```sql
 -- NOT EXECUTED. Proposal only.
--- Step 1 (soft rollback: stops capture, keeps evidence; the loader is back to exactly today's behavior)
-DROP TRIGGER IF EXISTS dbo.trg_Problem_FechaEvento;
-
--- Step 2 (full rollback: ONLY after deciding what to do with the rows collected so far)
---   Optional preservation first, e.g.:
---   SELECT * INTO dbo.ProblemFechaEvento_respaldo_YYYYMMDD FROM dbo.ProblemFechaEvento;
-DROP TABLE IF EXISTS dbo.ProblemFechaEvento;   -- also drops its PK, FK, CHECKs, defaults, index
+CREATE TRIGGER dbo.trg_ProblemFechaEvento_SoloAgregar
+ON dbo.ProblemFechaEvento
+INSTEAD OF UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50001, 'dbo.ProblemFechaEvento is append-only: events cannot be updated or deleted.', 1;
+END;
 ```
 
-- **What happens to collected history:** step 1 alone keeps every row. Step 2 **deletes all of it permanently**. Rows captured since go-live **cannot be regenerated**, because the old values are gone from `Problem`. Taking the backup copy is therefore recommended before step 2. Baseline rows can be regenerated, but only with the values current at that time.
-- `dbo.Problem` is never altered, so it needs nothing to roll back. It does need one ordering rule: **roll back the Admin read code first** (or ship it so it tolerates the table being missing), and only then drop the table. Otherwise the detail panel errors.
-- If the trigger is dropped and recreated later, the period in between has no history. The UI's "recorded since" line must be honest about it, so record the outage dates.
+Limits, stated honestly:
+- A `db_owner` or `sysadmin` can still disable the guard, or run TRUNCATE (which does not fire DML triggers) or DROP. Those are deliberate administrative acts, not accidents.
+- In the **test environment only**, cleaning up test events requires `DISABLE TRIGGER dbo.trg_ProblemFechaEvento_SoloAgregar ON dbo.ProblemFechaEvento`, then the cleanup, then `ENABLE`.
 
 ---
 
-## 13. Deployment order
+## 10. Loader safety (`usp_CargarExperiencia`, `cargar_experiencia.py`)
 
-**P0 — read-only pre-flight on the VM** (SELECT only; may be run directly):
+Expected impact, if O1–O6 come back clean:
+- On each load, the trigger compares the roughly 940 rows the loader UPDATEs plus its INSERTs, and writes one row for each date that actually differs. When nothing changed, it writes **0** rows.
+- It runs inside the loader's statement, in the same transaction. The extra cost should be milliseconds; T15 measures it.
+- The loader's code, results and row counts do not change (`SET NOCOUNT ON`, no result sets).
+- The loader needs no new permission.
+
+**Not closed. Each item blocks the move to the test environment until there is evidence:**
+1. O3: `OUTPUT` without `INTO` (Msg 334).
+2. O4: `cargar_experiencia.py` writing `dbo.Problem` directly. bcp, `BULK INSERT` and `SqlBulkCopy` without `FIRE_TRIGGERS` **skip** the trigger (silent gaps). pyodbc/pandas row inserts and updates fire it normally. A DELETE fails once history exists (§8).
+3. O5: other writers.
+4. O1/O2: exact types and collation.
+5. O6: logins.
+
+---
+
+## 11. Future date-extension workflow (prepared for, not designed here)
+
+```
+Authenticated user → requests a date extension → review/approval → procedure updates dbo.Problem → trigger writes the event
+```
+
+- What is ready: `Origen = ADMIN`, the required `Usuario`, `SolicitudId` and `LoginBD`, plus the context mechanism (§7).
+- What is **not** decided here: the request/approval entity, its states, who approves, and how a rejected request looks. These belong to the Admin workflow design and must build on what exists: `SolicitudCambio` (V8), `IdentidadWindows` and roles (`UsuariosAdmin`), and the `adm.*` proposal.
+- **No `Motivo` column in `ProblemFechaEvento`.** The reason is already a required field of the request draft (V8), so it belongs to the request/approval entity and is reachable through `SolicitudId`. This table records *what changed and when*; the request records *why and who asked*. Excel rows have no reason in the pipeline anyway.
+- Separate, unsolved issue: if Admin changes a date that the Excel file still holds at its old value, the next load reverts it. The history will show both events (`ADMIN`, then `NO_DECLARADO`). It makes the conflict visible; it does not decide which source wins.
+
+---
+
+## 12. Alternatives
+
+| Option | Verdict |
+|---|---|
+| **Capture inside the loader** (compare staging with `Problem` before the UPDATE) | Requires changing `usp_CargarExperiencia`, which this proposal deliberately leaves untouched. It sees only the loader: Admin and manual SQL would each need their own capture, and any path that forgets it creates gaps. It is the fallback only if O4/O5 reveal a writer that deletes and re-inserts rows. |
+| **Temporal (system-versioned) table on `Problem`** | Requires `ALTER TABLE` on the most-read table. Because the loader rewrites all 35 columns of every row on every load, it would write about 940 history versions per load even when nothing changed, and the date changes would have to be found by diffing whole rows. Schema changes would also require turning versioning off. Too much noise. |
+| **Generic audit** (`Tabla/Columna/Anterior/Nuevo` as text, CDC, SQL Audit) | Loses the data type and records many columns nobody needs. CDC needs SQL Agent and logs every row the loader touches. It overlaps the planned workflow log. Premature. |
+| **Trigger + dedicated table (proposed)** | No change to `Problem` or to the loader. It captures every writer that fires triggers and filters down to the three dates and real day-level changes, which matters because the loader's UPDATEs are broad. Its cost is hidden logic, which this document and the naming mitigate. |
+
+---
+
+## 13. Legacy limitations
+
+| Layer | What it contains | Trust |
+|---|---|---|
+| Existing data | The current dates in `Problem`; the hand-typed `FechaOriginal*` (partial); the hand-typed `NroCambioFecha*` (unreliable) | Current dates: authoritative. The rest: legacy attributes of `Problem`, **never turned into events** |
+| Baseline (optional) | "Value known at initialization", per field, `Reconstruido = 1` | Labelled "Línea base", not a change |
+| Captured history | Every `I`/`U` event from the go-live timestamp onward | Trustworthy evidence |
+
+Intermediate values from before go-live were never persisted, so they **cannot be reconstructed**. For example, `27/06 → 15/07 → 24/07` cannot be rebuilt for an existing initiative. The free-text "Histórico de comentarios" is not parsed. The panel always shows "Historial registrado desde dd/mm/aaaa", so a short or empty list is never read as "never changed".
+
+---
+
+## 14. FK, indexes, constraints (minimal)
+
+- `PK_ProblemFechaEvento`, clustered on `IdEvento`.
+- `FK_ProblemFechaEvento_Problem` → `dbo.Problem(Codigo)`, no cascade (§8).
+- `IX_ProblemFechaEvento_Codigo (Codigo, IdEvento)`: the Admin read and FK checks. It is the only secondary index.
+- CHECKs: `Campo`, `Operacion`, `Origen`, transition, baseline shape, attribution.
+- Guard trigger `trg_ProblemFechaEvento_SoloAgregar` (§9).
+- No filtered index and no indexed computed column. These impose SET-option requirements on every writer session, and the loader's settings are unknown.
+
+---
+
+## 15. Rollback
 
 ```sql
--- P0-1 exact types / collation (fills {{TIPO_CODIGO}}, answers U1/U2)
+-- NOT EXECUTED. Proposal only.
+-- Step 1 (soft): stops capture, keeps all evidence; the loader is back to exactly today's behavior.
+DROP TRIGGER IF EXISTS dbo.trg_Problem_FechaEvento;
+
+-- Step 2 (full): ONLY after deciding what to do with the rows collected so far.
+--   Optional preservation first:
+--   SELECT * INTO dbo.ProblemFechaEvento_respaldo_YYYYMMDD FROM dbo.ProblemFechaEvento;
+DROP TABLE IF EXISTS dbo.ProblemFechaEvento;   -- also drops its guard trigger, PK, FK, CHECKs, defaults, index
+```
+
+- Step 1 keeps every row. Step 2 **permanently deletes the history**. Events captured after go-live **cannot be regenerated**, because the old values no longer exist in `Problem`. That is why the backup copy is recommended. Baseline rows could be regenerated, but only with the values current at that later time.
+- `dbo.Problem` is never altered, so it needs nothing to roll back.
+- Order: **first remove the Admin history read** (or ship it so it tolerates a missing table), then drop the table.
+- Record the dates of any period when the trigger was off, so the panel's "recorded since" line stays honest.
+
+---
+
+## 16. Deployment order
+
+**P0: read-only pre-flight on the VM** (SELECT only; may be run directly):
+
+```sql
+-- P0-1 exact types / collation (O1, O2; fills {{TIPO_CODIGO}})
 SELECT c.name, t.name AS tipo, c.max_length, c.precision, c.scale, c.is_nullable, c.collation_name
 FROM sys.columns c JOIN sys.types t ON t.user_type_id = c.user_type_id
 WHERE c.object_id = OBJECT_ID('dbo.Problem')
@@ -375,11 +437,9 @@ WHERE c.object_id = OBJECT_ID('dbo.Problem')
 SELECT BaseCollation = DATABASEPROPERTYEX(DB_NAME(), 'Collation');
 
 -- P0-2 names are free
-SELECT name, type_desc FROM sys.objects
-WHERE name IN ('ProblemFechaEvento', 'trg_Problem_FechaEvento')
-   OR name LIKE '%ProblemFechaEvento%';
+SELECT name, type_desc FROM sys.objects WHERE name LIKE '%ProblemFechaEvento%';
 
--- P0-3 every module mentioning Problem in any spelling, with OUTPUT/DELETE flags (U4, U5)
+-- P0-3 every module mentioning Problem in any spelling (O3, O5)
 SELECT OBJECT_SCHEMA_NAME(m.object_id) AS esquema, OBJECT_NAME(m.object_id) AS objeto, o.type_desc,
        UsaOutput = CASE WHEN m.definition LIKE '%OUTPUT%' THEN 1 ELSE 0 END,
        UsaDelete = CASE WHEN m.definition LIKE '%DELETE%' THEN 1 ELSE 0 END,
@@ -388,134 +448,137 @@ FROM sys.sql_modules m JOIN sys.objects o ON o.object_id = m.object_id
 WHERE m.definition LIKE '%Problem%'
 ORDER BY objeto;
 
--- P0-4 FK delete/update rule already in place (U8)
+-- P0-4 existing FK rules on Problem (O7)
 SELECT name, delete_referential_action_desc, update_referential_action_desc
 FROM sys.foreign_keys WHERE referenced_object_id = OBJECT_ID('dbo.Problem');
 
--- P0-5 session SET options of currently connected sessions (informative, for the loader if it is running)
+-- P0-5 logins / SET options of live sessions (O6; run while a load is running if possible)
 SELECT session_id, login_name, program_name, quoted_identifier, ansi_nulls, arithabort
 FROM sys.dm_exec_sessions WHERE is_user_process = 1;
 
--- P0-6 non-midnight times (U2). Run ONLY if P0-1 says datetime/datetime2/smalldatetime;
--- CAST(date AS time) is an error, and if the type is date this check is unnecessary.
+-- P0-6 non-midnight times (O2). ONLY if P0-1 says datetime/datetime2/smalldatetime;
+-- CAST(date AS time) is an error, and for a date type this check is unnecessary.
 SELECT ConHoraAnalisis = SUM(CASE WHEN CAST(FechaAnalisis AS time) <> '00:00' THEN 1 ELSE 0 END),
        ConHoraSolucion = SUM(CASE WHEN CAST(FechaSolucion AS time) <> '00:00' THEN 1 ELSE 0 END),
        ConHoraCierre   = SUM(CASE WHEN CAST(FechaCierre   AS time) <> '00:00' THEN 1 ELSE 0 END)
 FROM dbo.Problem;
 
--- P0-7 Agent job steps touching Problem / the loader (U7; needs msdb read, skip if denied)
+-- P0-7 SQL Agent job steps touching Problem / the loader (O5; needs msdb read, skip if denied)
 SELECT j.name, s.step_name, s.subsystem
 FROM msdb.dbo.sysjobs j JOIN msdb.dbo.sysjobsteps s ON s.job_id = j.job_id
 WHERE s.command LIKE '%Problem%' OR s.command LIKE '%CargarExperiencia%';
 ```
 
-Plus a manual review of `cargar_experiencia.py` (§8.2) and the answer to "which
-login does the loader use, and which does the web use?" (U6).
+For P0-3, any hit with `UsaOutput = 1` must be read to confirm whether its `OUTPUT` targets `Problem` without `INTO`. In addition: a manual review of `cargar_experiencia.py`, searching for `Problem`, `bulk`, `BULK INSERT`, `bcp`, `SqlBulkCopy`, `fast_executemany`, `to_sql`, `DELETE`, `TRUNCATE` and `OUTPUT`, plus asking for the loader's and the web's database logins.
 
 **Then:**
-1. Approval of this proposal (checklist below).
-2. **Test environment** (a restored copy of `Tickets_Proactivanet`, or a separate test database; *which one is to be decided*): create the table, run the baseline (if approved), create the trigger, run T1–T16, run the rollback (T16), redeploy.
-3. Measure `usp_CargarExperiencia` duration in test before and after the trigger.
+1. Approval of this proposal (checklist).
+2. **Test environment** (a restored copy, or a separate database, to be decided): create the table, index and guard trigger; run the baseline (if approved); create the `Problem` trigger; run T1–T16; test the rollback; redeploy.
+3. Compare `usp_CargarExperiencia` duration before and after, in test.
 4. **Production**, at a time when no load is running, as one transaction:
    ```sql
    -- NOT EXECUTED. Shape only.
    SET XACT_ABORT ON;
    BEGIN TRAN;
-       -- CREATE TABLE + IX (§1)                         [batch 1]
-       -- baseline INSERT with TABLOCKX, HOLDLOCK (§5)  [same batch; omit if baseline rejected]
+       -- CREATE TABLE + IX (§2)                          [batch 1]
+       -- baseline INSERT WITH (TABLOCKX, HOLDLOCK) (§6)  [batch 1; omit if baseline rejected]
    GO
-       -- CREATE TRIGGER (§4)                           [must be its own batch]
+       -- CREATE TRIGGER dbo.trg_ProblemFechaEvento_SoloAgregar (§9)   [own batch]
+   GO
+       -- CREATE TRIGGER dbo.trg_Problem_FechaEvento (§5)              [own batch]
    GO
    COMMIT;
    ```
-   The exclusive lock on `Problem` from the baseline is held until COMMIT, so no write can slip in between the baseline and the trigger. On about 940 rows it lasts milliseconds. If anything fails, `XACT_ABORT` rolls the whole transaction back.
-5. Smoke test right after: `COUNT(*)` must equal the baseline count; the trigger must be enabled (`sys.triggers`).
-6. Next normal Excel load: check that the number of new `I`/`U` rows matches the dates that actually changed in the Excel, and spot-check 2–3 codes.
-7. Grant `SELECT` on `dbo.ProblemFechaEvento` to the web login (a separate, small change with its own OK), or expose it through a read-only SP.
-8. Deploy the Admin read (§15) to `claude-branch`, verify on the VM, then `main`.
+   The exclusive lock on `Problem` taken by the baseline is held until COMMIT, so no write can land between the baseline and the trigger. On about 940 rows it lasts milliseconds. Any error rolls back everything.
+5. Smoke test: the event count equals the baseline count; both triggers appear enabled in `sys.triggers`.
+6. Next normal Excel load: the number of new `I`/`U` events matches the dates that actually changed in the Excel file. Spot-check 2–3 codes.
+7. Separate approval: `GRANT SELECT` on the table to the web login, or a read-only procedure.
+8. Separate approval later: the Admin history read (§17), on `claude-branch` → VM → `main`.
 
 ---
 
-## 14. Testing plan (test environment only)
+## 17. Admin read behavior (History of Changes panel)
 
-Setup: create a scratch initiative by scripting an existing row's INSERT (SSMS
-"Script as INSERT", so no column names are invented here) with
-`Codigo = 'TST 2099-000001'` (and `…02`, `…03` for the insert cases). `@n0` = `SELECT MAX(IdEvento)` before each test.
-"Rows" = new rows in `ProblemFechaEvento` after that test.
-
-| # | Action | Expected rows |
-|---|---|---|
-| T1 | INSERT with all 3 dates NULL | 0 |
-| T2 | INSERT with `FechaAnalisis` only | 1: `FechaAnalisis, NULL→d, I` |
-| T3 | INSERT with all 3 dates | 3, `I` |
-| T4 | `UPDATE … SET Titulo = Titulo + ''` (unrelated column only) | 0 (early exit) |
-| T5 | `UPDATE … SET FechaAnalisis = FechaAnalisis, Titulo = 'x'` (same value) | 0 |
-| T6 | change `FechaAnalisis` d1→d2 | 1, `U` |
-| T7 | change `FechaSolucion` NULL→d | 1, `U`, `Anterior NULL` |
-| T8 | change `FechaCierre` d→NULL | 1, `U`, `Nuevo NULL` |
-| T9 | one UPDATE changes Solución and Cierre | 2, same `FechaRegistro` |
-| T10 | A→B then B→A | 2 |
-| T11 | time-only change (only if datetime type) | 0 |
-| T12 | `UPDATE … SET FechaSolucion = DATEADD(day,1,FechaSolucion) WHERE Codigo LIKE 'TST%' AND FechaSolucion IS NOT NULL` | = number of matching rows; then revert gives the same number again |
-| T13 | multi-row UPDATE over **all** rows setting every date to itself | 0 |
-| T14 | run `usp_CargarExperiencia` twice with the same staging data | 2nd run: 0 rows. 1st run: only the real differences between staging and test data |
-| T15 | change one date in staging, run the loader | exactly 1 `U` row, `Origen = NO_DECLARADO`, `Usuario`/`SolicitudId` NULL, `LoginBD` = loader login; loader result and duration unchanged |
-| T15b | `sp_set_session_context` ADMIN + user + 123, UPDATE one date, clear the context, UPDATE again on the same connection | 1st row `ADMIN`/user/123; 2nd row `NO_DECLARADO`/NULL/NULL |
-| T15e | declare ADMIN **without** `pfe_usuario`, UPDATE one date | the UPDATE fails on `CK_ProblemFechaEvento_Atribucion`; `Problem` unchanged, 0 rows |
-| T15f | declare ADMIN + user, no `pfe_solicitud` | 1 row: `ADMIN`, user, `SolicitudId` NULL (allowed until the request workflow exists) |
-| T15c | `DELETE` a TST row that has history | fails on the FK (documented behavior); a TST row with no history deletes fine |
-| T15d | verify the loader has no `OUTPUT` without `INTO` | the loader runs without Msg 334 |
-| T16 | rollback step 1: loader runs, 0 new rows, table intact. Step 2: table gone, `Problem` and loader unaffected | — |
-
-Cleanup: delete the TST events and then the TST rows (test environment only).
-
----
-
-## 15. Admin integration (read-only)
-
-- **Current date:** stays as it is today, from `dbo.Problem` (`FechaAnalisis/Solucion/Cierre`), unchanged.
-- **History:** a new read, keyed by the `Codigo` of the open detail, executed only when the detail opens (lazily, the same pattern as the catalogs):
+- **Current dates:** from `dbo.Problem`, exactly as today. The normal initiative view does not change.
+- **History:** a read keyed by the open detail's `Codigo`, run when the detail opens:
   ```sql
-  SELECT e.IdEvento, e.Campo, e.ValorAnterior, e.ValorNuevo, e.Operacion, e.Reconstruido,
-         e.Origen, e.Usuario, e.SolicitudId, e.FechaRegistro,
-         NumeroCambio = CASE WHEN e.Operacion = 'U' AND e.ValorAnterior IS NOT NULL AND e.ValorNuevo IS NOT NULL
-                             THEN COUNT(CASE WHEN e.Operacion = 'U' AND e.ValorAnterior IS NOT NULL AND e.ValorNuevo IS NOT NULL THEN 1 END)
-                                  OVER (PARTITION BY e.Campo ORDER BY e.IdEvento ROWS UNBOUNDED PRECEDING) END
+  SELECT e.IdEvento, e.Campo, e.FechaAnterior, e.FechaNueva, e.Operacion, e.Reconstruido,
+         e.Origen, e.Usuario, e.SolicitudId, e.FechaRegistro
   FROM dbo.ProblemFechaEvento e
   WHERE e.Codigo = @codigo
   ORDER BY e.IdEvento;
   ```
-- **Handler** (`admin_iniciativas_registro` detail) maps each row to the existing contract `{campo, anterior, nuevo, fecha, usuario}` plus `operacion`, `reconstruido`, `origen`, `solicitud`, `numero`. `fecha` = `FechaRegistro` converted from UTC to the project's UTC-6 display. `usuario` = `Usuario` for `ADMIN` rows. For `NO_DECLARADO` rows it is a fixed label such as "Excel (acordado en reunión)", not "unknown", and `LoginBD` is never shown as a person.
-- **Frontend** (`htmlHistorial`) only renders, in chronological order (`IdEvento`): baseline rows as "valor al iniciar el historial (reconstruido)", `I` rows as "fecha inicial", and `U` rows as "Cambio n". It adds a fixed note "historial registrado desde <go-live>".
-- **Admin never:** fills gaps, infers intermediate values, reads `NroCambioFecha*` or `FechaOriginal*` to build events, deduplicates, writes to `ProblemFechaEvento`, or uses any history value to set or overwrite a `Problem` date.
-- **Known conflict, not solved here:** if Admin someday changes a date and the Excel still has the old one, the next load reverts it. The history will show both rows (`ADMIN` then `NO_DECLARADO`). This makes the conflict visible but does not resolve which source wins, which is a separate decision.
+- **Handler** (`admin_iniciativas_registro`, detail): passes the rows through in that order and maps them to the existing contract `{campo, anterior, nuevo, fecha, usuario}` plus `operacion`, `reconstruido`, `origen`, `solicitud`. `fecha` = `FechaRegistro` converted to UTC-6. `usuario` = `Usuario` (`ADMIN` rows only). `LoginBD` is not sent to the UI.
+- **Panel** (`htmlHistorial`): renders chronologically, applies the labels from §4 ("Línea base", "Fecha inicial", "Cambio n", …), and shows "Historial registrado desde …".
+- **Admin must never:**
+  - reconstruct missing history;
+  - invent previous dates;
+  - read `NroCambioFecha*` or `FechaOriginal*` to build events;
+  - use the history to calculate or show the current date;
+  - write history rows;
+  - overwrite any `Problem` date from the history.
+
+---
+
+## 18. Testing plan (test environment only)
+
+Setup: a scratch initiative built by scripting an existing row's INSERT (SSMS "Script as INSERT", so no column names are invented here), with `Codigo = 'TST 2099-000001'` (plus `…02`, `…03`). "Rows" = new rows in `ProblemFechaEvento` after each step.
+
+| # | Action | Expected |
+|---|---|---|
+| T1 | INSERT with all 3 dates NULL | 0 rows |
+| T2 | INSERT with `FechaAnalisis` only | 1: `FechaAnalisis`, NULL→d, `I` |
+| T3 | INSERT with all 3 dates | 3, `I` |
+| T4 | UPDATE of an unrelated column only | 0 (early exit) |
+| T5 | UPDATE setting a date to itself, plus an unrelated column | 0 |
+| T6 | `FechaAnalisis` d1→d2 | 1, `U` |
+| T7 | `FechaSolucion` NULL→d | 1, `U`, `FechaAnterior` NULL |
+| T8 | `FechaCierre` d→NULL | 1, `U`, `FechaNueva` NULL |
+| T9 | one UPDATE changing Solución **and** Cierre | 2, same `FechaRegistro` |
+| T10 | A→B, then B→A | 2 |
+| T11 | time-only change (only if a datetime type) | 0 |
+| T12 | multi-row UPDATE: `FechaSolucion = DATEADD(day,1,…)` on all TST rows that have one | rows = number of affected rows; the revert produces the same number again |
+| T13 | multi-row UPDATE over **all** rows setting each date to itself | 0 |
+| T14 | `usp_CargarExperiencia` twice with the same staging data | **both runs succeed**; the 2nd run writes 0 rows |
+| T15 | change one date in staging, run the loader | **succeeds**; exactly 1 `U`, `NO_DECLARADO`, `Usuario`/`SolicitudId` NULL, `LoginBD` = loader login; duration within noise of the run without the trigger |
+| T15b | context ADMIN + user + 123 → UPDATE; clear the context → UPDATE on the same connection | 1st: `ADMIN`/user/123; 2nd: `NO_DECLARADO`/NULL/NULL |
+| T15c | context ADMIN **without** user → UPDATE | fails on `CK_ProblemFechaEvento_Atribucion`; `Problem` unchanged; 0 rows |
+| T15d | context ADMIN + user, no request id | 1 row, `SolicitudId` NULL |
+| T15e | DELETE a TST `Problem` row that has history | **rejected by the FK**; a row without history deletes normally |
+| T15f | UPDATE / DELETE on `ProblemFechaEvento` | both rejected by the guard (50001) |
+| T15g | baseline script on the test copy | count = non-NULL dates; every row is `B`, `Reconstruido = 1`, `FechaAnterior` NULL |
+| T16 | rollback step 1: a load runs normally, 0 new rows, table intact. Step 2: table gone; `Problem` and the loader unaffected | as described |
+
+Cleanup (test environment only): disable the guard, delete the TST events and then the TST rows, re-enable the guard.
 
 ---
 
 ## Approval checklist
 
-**Gate before the test environment**
-- [ ] P0 run on the VM; `{{TIPO_CODIGO}}` filled in from P0-1; date type is a date/time type (not character).
-- [ ] P0-3: no `OUTPUT` without `INTO`, and no unknown writers of `Problem`.
-- [ ] `cargar_experiencia.py` reviewed: it does not write `dbo.Problem` directly (or every finding has been resolved).
-- [ ] Which logins the loader and the web use (decides the value of `LoginBD`).
-- [ ] Test environment chosen (restored copy or separate database).
+**Before the test environment**
+- [ ] O1/O2: P0-1 (and P0-6 if applicable) run; `{{TIPO_CODIGO}}` filled; dates confirmed as a date/time type.
+- [ ] O3: no `OUTPUT` without `INTO` targeting `dbo.Problem`.
+- [ ] O4: `cargar_experiencia.py` reviewed: no direct writes to `dbo.Problem` (or each finding resolved).
+- [ ] O5: no unknown writers (P0-3, P0-7, owners asked).
+- [ ] O6: the loader's and the web's database logins identified.
+- [ ] Test environment selected.
 
-**Design being approved**
-- [ ] New table `dbo.ProblemFechaEvento` with exactly the §1 columns, PK, FK NO ACTION to `Problem(Codigo)`, CHECKs, and 1 index.
-- [ ] New trigger `dbo.trg_Problem_FechaEvento` AFTER INSERT, UPDATE, as written in §4. No DELETE branch.
-- [ ] Comparison at `date` granularity (time-only changes ignored).
-- [ ] Consequence accepted: deleting a `Problem` row that has history will fail.
-- [ ] Excel/loader rows: `Origen = NO_DECLARADO`, `Usuario`/`SolicitudId` always NULL (no individual requester, by design), `LoginBD` recorded.
-- [ ] Web/Admin rows: `Origen = ADMIN`, `Usuario` = authenticated web user (**required**, enforced by CHECK), `SolicitudId` once the workflow exists, `LoginBD` recorded.
-- [ ] Baseline: load it (current non-NULL values only, `Reconstruido=1`, including non-current rows) **or** skip it.
-- [ ] `NroCambioFecha*` and `FechaOriginal*` are not used to build events.
-- [ ] Display numbering rule: only `date→date` updates count as "Cambio n".
-- [ ] `dbo.Problem` and `usp_CargarExperiencia` are not modified.
+**Design**
+- [ ] Table schema (§2): one row per field transition, `FechaAnterior`/`FechaNueva` separate from `FechaRegistro`.
+- [ ] Trigger behavior (§5): `AFTER INSERT, UPDATE`, set-based, `EXCEPT` comparison, no claim that it cannot fail.
+- [ ] Append-only (§9): no updates or deletes, permissions plus guard trigger.
+- [ ] Day-level comparison: time-only changes ignored.
+- [ ] Baseline (§6): load it ("Línea base", current non-NULL values, including non-current rows) **or** skip it.
+- [ ] `NroCambioFecha*` and `FechaOriginal*` excluded from history; "Cambio n" derived by the UI (§4 labels).
+- [ ] Intentional FK-based delete prevention accepted (§8).
+- [ ] Excel attribution (§7): `NO_DECLARADO`, no `Usuario` or `SolicitudId`, `LoginBD` recorded; `EXCEL` deferred.
+- [ ] Future web attribution requirement (§7, §11): `ADMIN` + required authenticated `Usuario` + `SolicitudId` when the workflow exists + `LoginBD`; no `Motivo` column.
+- [ ] `dbo.Problem` and `usp_CargarExperiencia` remain unmodified.
 
-**Moving from test to production**
-- [ ] T1–T16 pass; loader duration unchanged within noise.
-- [ ] Deployment window with no load running; single transaction as in §13.
-- [ ] Rollback understood: dropping the trigger keeps the history; dropping the table **permanently loses** the post-go-live history (back it up first); remove the Admin read before dropping the table.
-- [ ] Separate small OK for `GRANT SELECT` to the web login (or a read SP).
-- [ ] Separate OK later for the Admin read code (handler + `htmlHistorial`).
+**Test → production**
+- [ ] T1–T16 pass.
+- [ ] The loader works normally with the trigger enabled (T14, T15).
+- [ ] No unexpected performance or regression issue (load duration compared).
+- [ ] Deployment (§16) and rollback (§15) reviewed, including the permanent loss on step 2.
+- [ ] Separate approval for the web login's `SELECT`.
+- [ ] Separate approval later for the Admin history-read code.
