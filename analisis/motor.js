@@ -406,7 +406,11 @@
             version: version, corte: corte, corteEstimado: corteEstimado,
             parametros: {
                 servicio: uno('Servicio'), desde: uno('Desde'), hasta: uno('Hasta'), rutas: p.Ruta || [],
-                rutasFuera: p.RutaFuera || [], grupos: p.Grupo || [], titulos: p.Titulo || []
+                rutasFuera: p.RutaFuera || [], grupos: p.Grupo || [], titulos: p.Titulo || [],
+                // Los que la consulta dejo fuera (45 v2 y el tablero): el bot
+                // y las cuentas que no son persona. null en salidas anteriores.
+                excluidosBot: uno('ExcluidosBot') != null ? numero(uno('ExcluidosBot')) : null,
+                excluidosCuenta: uno('ExcluidosCuenta') != null ? numero(uno('ExcluidosCuenta')) : null
             },
             rutas: por.rutas ? por.rutas.filas : null, grupos: por.grupos ? por.grupos.filas : null,
             fuera: por.fuera ? por.fuera.filas : null,
@@ -863,7 +867,9 @@
         var lote = filasFirma.length ? filasFirma[0] : null, mov = filasMov.length ? filasMov[0] : null;
         var hallazgos = [];
         hallazgos.push(miles(nU) + ' tickets del servicio entre ' + textoDia(U[0].fReg) + ' y ' + textoDia(U[nU - 1].fReg) +
-                       (soloGrupo.length && porRuta.length ? '; otros ' + miles(soloGrupo.length) + ' llegaron solo por el grupo y se ven aparte.' : '.'));
+                       (soloGrupo.length && porRuta.length ? '; otros ' + miles(soloGrupo.length) + ' llegaron solo por el grupo y se ven aparte.' : '.') +
+                       (p.excluidosBot || p.excluidosCuenta ? ' No cuentan ' + miles(p.excluidosBot || 0) + ' del bot (grupo SorIA) ni ' +
+                        miles(p.excluidosCuenta || 0) + ' cerrados por cuentas que no son persona.' : ''));
         if (nDias) hallazgos.push('Promedio de ' + numTxt(mediaDia) + ' tickets por día completo; el día con más fue el ' + textoDia(maxDia.dia) +
                                   ' (' + DIAS_LARGO[dow(maxDia.dia)].toLowerCase() + ') con ' + maxDia.n + '.');
         var dmax = dsem.indexOf(Math.max.apply(null, dsem.filter(function (x) { return x != null; })));
@@ -897,6 +903,8 @@
                 ['Días completos medidos', miles(nDias)],
                 ['Tickets analizados (por la ruta)', miles(porRuta.length || nU)],
                 ['Tickets que llegaron solo por el grupo', miles(soloGrupo.length)],
+                ['Fuera: atendidos por el bot (grupo SorIA)', p.excluidosBot == null ? 'no se midió (salida anterior al 45 v2)' : miles(p.excluidosBot)],
+                ['Fuera: cerrados por cuentas que no son persona', p.excluidosCuenta == null ? 'no se midió (salida anterior al 45 v2)' : miles(p.excluidosCuenta)],
                 ['Rutas pedidas', p.rutas.join('; ') || '(de la salida del 44)'],
                 ['Rutas que se quitaron', p.rutasFuera.join('; ')],
                 ['Grupos pedidos', p.grupos.join('; ')],
