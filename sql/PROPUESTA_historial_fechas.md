@@ -70,7 +70,7 @@ FechaSolucion  15/07/2026 → 24/07/2026   (Cambio 2)
 | V8 | Admin does not write `dbo.Problem` today. "Solicitar cambios" is a browser-only draft (`SolicitudCambio` in `admin/registro-iniciativas.js`) with fields: field, current value, new date and a **required `motivo`**. It is not submitted anywhere. `adm.Solicitud` does not exist; it is only proposed in `PROPUESTA_numero_solicitud.md`. | code |
 | V9 | The panel already expects `historial: [{campo, anterior, nuevo, fecha, usuario}]` (`htmlHistorial`). It always arrives empty today. | code |
 | V10 | `cargar_experiencia.py` (copy reviewed 2026-10-07, `Downloads\cargar_experiencia 1.py`, 410 lines) writes **only staging**: for each sheet it runs `DELETE FROM stg.<tabla>`, then a parameterized `INSERT INTO stg.<tabla>` with `fast_executemany` into `stg.Problems`, `stg.Iniciativas`, `stg.CatPersona` and `stg.CatCategoriaDueno`. Then it calls `{CALL dbo.usp_CargarExperiencia (?)}` with the simulation flag (0/1), reads every result set the procedure returns, and commits. The script never names `dbo.Problem` in a write. It uses no bcp, `BULK INSERT`, `SqlBulkCopy`, `to_sql`, MERGE or `OUTPUT`, and it sets no session context. Dates are sent as raw text and converted in SQL by `dbo.fn_ExpFecha`. | code |
-| V11 | **Authentication modes** (only the structure and mode were used; no credentials are reproduced). The loader connects through `conectar()` in `etl_proactivanet.py` with `autocommit=False`. When `sql.autenticacion_windows` is true it uses `Trusted_Connection=yes`, and `usuario`/`password` are ignored. Both ETL configs provided on 2026-10-07 have `autenticacion_windows: true`: one points to `AZVMBDCENTRALQA` (the same server as the web), the other to `AZAUDITPRECIOS`. So the loader runs as **the Windows account of whoever runs the script** (a person, or the account of a scheduled task). The web connection string (`Web.config`, local copy) uses **SQL authentication** (`User ID=…`), so the web runs as a SQL login. Staging and the procedure call each end with an explicit `commit()`, so trigger rows commit or roll back together with the `Problem` changes. | config + code |
+| V11 | **Authentication modes** (only the structure and mode were used; no credentials are reproduced). The loader connects through `conectar()` in `etl_proactivanet.py` with `autocommit=False`. When `sql.autenticacion_windows` is true it uses `Trusted_Connection=yes`, and `usuario`/`password` are ignored. Both ETL configs provided on 2026-10-07 have `autenticacion_windows: true`: one points to `AZVMBDCENTRALQA` (the same server as the web), the other to `AZAUDITPRECIOS`. So the loader runs as **the Windows account of whoever runs the script**. There is **no dedicated loader machine or account**: it is normally run by a coworker, and it can also be run from the project owner's VM by anyone whose Windows account has the required database permissions. The web connection string (`Web.config`, local copy) uses **SQL authentication** (`User ID=…`), so the web runs as a SQL login. Staging and the procedure call each end with an explicit `commit()`, so trigger rows commit or roll back together with the `Problem` changes. | config + code |
 
 ### Open, must be closed before the test environment (none is closed yet)
 
@@ -79,9 +79,9 @@ FechaSolucion  15/07/2026 → 24/07/2026   (Cambio 2)
 | O1 | Exact type, length and **collation** of `Problem.Codigo` | The FK column must match it exactly. It fills `{{TIPO_CODIGO}}`. | P0-1 |
 | O2 | Exact types of `FechaAnalisis/FechaSolucion/FechaCierre`, and whether non-midnight times exist | Decides whether the comparison and conversion are safe. **A character type would stop this design.** The N6 output shows `2026-10-21 00:00:00`, but the type has not been confirmed. | P0-1, P0-6 |
 | O3 | `OUTPUT` without `INTO` on `dbo.Problem`, in the loader or any other writer | **SQL Server rejects that statement once the table has an enabled trigger (Msg 334). The load would fail.** | P0-3 (SQL side) + Python review (O4) |
-| O4 | ~~`cargar_experiencia.py` writing `dbo.Problem` directly~~ **Closed by code review (V10)**, with one caveat: confirm that the reviewed copy is the one actually run. The machine that runs the loads should have the same 410-line file, with `volcar()` writing only to `stg.*`. | A different deployed version could bypass the trigger | Compare the deployed file with the reviewed copy (hash or diff) |
+| O4 | ~~`cargar_experiencia.py` writing `dbo.Problem` directly~~ **Closed by code review (V10)**, with one caveat: confirm that the reviewed copy is the one actually run. Every copy used to run loads (the coworker's and the owner's VM) should be the same 410-line file, with `volcar()` writing only to `stg.*`. | A different version could bypass the trigger | Compare each copy in use with the reviewed one (hash or diff) |
 | O5 | Other unknown writers: modules referencing `Problem` without the `dbo.` prefix (missed by H3), SQL Agent job steps, external scripts | Same reasons as O3 and O4 | P0-3, P0-7, ask the owners |
-| O6 | Which database login(s) the loader and the web application use. **Answered by evidence (V11), with one confirmation left:** the loader uses Windows authentication (operator account); the web uses a SQL login. Remaining: confirm that the runner's `config.json` is the `AZVMBDCENTRALQA` one with `autenticacion_windows: true`, and that the VM's deployed `Web.config` still uses SQL authentication (its template also allows `Integrated Security=True`). | Decides what `LoginBD` shows (§7) | Look at both files on their machines; do not copy credentials |
+| O6 | ~~Which database login(s) the loader and the web application use~~ **Answered (V11).** Loader: Windows authentication, so `LoginBD` = the Windows identity of whoever runs the load (it varies; there is no dedicated loader identity). Web: SQL login. Only one confirmation left: that the VM's deployed `Web.config` still uses SQL authentication (its template also allows `Integrated Security=True`). | Decides what `LoginBD` shows (§7) | Look at the deployed `Web.config`; do not copy credentials |
 | O7 | Delete/update rule of `FK_ProblemCategoria_Problem` | Context for §8 only | P0-4 |
 
 ---
@@ -238,7 +238,7 @@ How the trigger meets each requirement:
 - **Unrelated columns.** If the statement does not mention the dates, the trigger exits early. If it mentions them without changing them (the loader's broad UPDATE), the `EXCEPT` filter produces 0 rows.
 - **No duplicates.** At most one row per `(Codigo, Campo)` per statement.
 - **Code changes.** An UPDATE of `Codigo` itself would show up as an `I` on the new code. The loader matches rows by `Codigo`. Changing a code that has history is blocked by the FK, as V3 already does for categories.
-- **Permissions.** `dbo` owns both tables, so ownership chaining applies: the loader's login needs **no** new permission.
+- **Permissions.** `dbo` owns both tables, so ownership chaining applies: whoever runs the loader needs **no** new permission.
 
 **Failure behavior. It is not claimed that the trigger cannot fail.** A trigger error rolls back the statement that fired it, which here means the loader's UPDATE or INSERT. The design avoids the *expected* constraint failures on the loader path:
 - `Campo`, `Operacion` and `Origen` are constants.
@@ -299,7 +299,7 @@ These four fields stay conceptually separate:
 | `Origen` | `NO_DECLARADO` | `ADMIN` | `NO_DECLARADO` |
 | `Usuario` | NULL, by design | **required** (non-blank): authenticated web user; no user = reject | NULL |
 | `SolicitudId` | NULL | **optional for now**: the real request/approval id when that workflow exists; absence is not a failure | NULL |
-| `LoginBD` | the login that ran the load | the web app's login | the login that ran the deploy |
+| `LoginBD` | Windows identity of whoever ran the load | the web app's login | the login that ran the deploy |
 
 **Excel / loader path.**
 - Date changes in this workflow are agreed in meetings, with the responsible person's boss present, and typed into the Excel file by hand. No individual requester is needed for them, and **none is fabricated**.
@@ -307,10 +307,10 @@ These four fields stay conceptually separate:
 - So `Usuario` and `SolicitudId` stay NULL, and the CHECK forbids filling them on these rows.
 - `Origen` is **`NO_DECLARADO`, not `EXCEL`**, because nothing verified lets the trigger prove that the writer was the loader: a manual UPDATE from SSMS looks identical. Two ways to get an accurate `EXCEL` value exist, and neither is adopted here:
   - (a) `usp_CargarExperiencia` declares `pfe_origen = 'EXCEL'`. This is a one-line change to the loader, which this proposal deliberately does not touch; it would need its own approval.
-  - (b) The trigger maps a dedicated loader login to `EXCEL`. **Discarded by V11:** the loader runs under people's own Windows accounts, not a dedicated login, so a login cannot prove that the writer was the loader.
+  - (b) Classifying `EXCEL` from the login: **discarded**. There is no dedicated loader identity (V11). The load runs under the Windows account of whichever person executes it, and those same accounts can also write manually, so the login must never be used to infer `Origen`.
 
   Either one would add `'EXCEL'` to `CK_ProblemFechaEvento_Origen` later.
-- `LoginBD` still records the database login, as technical evidence. The loader uses Windows authentication (V11), so for Excel rows that login is the **operator who ran the load** (`DOMAIN\account`), not the person who requested or agreed the change. That is why it is never shown as a requester.
+- `LoginBD` still records the database login, as technical evidence. The loader uses Windows authentication (V11), so for Excel rows that login is the **Windows identity of whoever ran the load** (`DOMAIN\account`; it changes depending on who ran it), not the person who requested or agreed the change. That is why it is never shown as a requester.
 - What `LoginBD` can and cannot separate (V11):
   - It **can** separate web writes (a SQL login) from loader or manual writes (Windows accounts).
   - It **cannot** separate a load run by a person from a manual SSMS UPDATE by that same person: both appear under the same Windows account.
@@ -385,7 +385,7 @@ Expected impact, if O1–O6 come back clean:
 2. O4: **closed by code review (V10)**. The script writes only `stg.*` and then calls the procedure; nothing bypasses the trigger. Remaining: confirm the deployed copy matches the reviewed one.
 3. O5: other writers.
 4. O1/O2: exact types and collation.
-5. O6: logins. Loader = Windows authentication (the operator's account); web = SQL login (V11). Confirm on the deployed files.
+5. O6: answered (V11). Loader = Windows identity of whoever runs it; web = SQL login. Confirm the deployed `Web.config`.
 
 ---
 
@@ -572,7 +572,7 @@ Setup: a scratch initiative built by scripting an existing row's INSERT (SSMS "S
 | T12 | multi-row UPDATE: `FechaSolucion = DATEADD(day,1,…)` on all TST rows that have one | rows = number of affected rows; the revert produces the same number again |
 | T13 | multi-row UPDATE over **all** rows setting each date to itself | 0 |
 | T14 | `usp_CargarExperiencia` twice with the same staging data | **both runs succeed**; the 2nd run writes 0 rows |
-| T15 | change one date in staging, run the loader | **succeeds**; exactly 1 `U`, `NO_DECLARADO`, `Usuario`/`SolicitudId` NULL, `LoginBD` = loader login; duration within noise of the run without the trigger |
+| T15 | change one date in staging, run the loader | **succeeds**; exactly 1 `U`, `NO_DECLARADO`, `Usuario`/`SolicitudId` NULL, `LoginBD` = the Windows account that ran the test load; duration within noise of the run without the trigger |
 | T15h | `cargar_experiencia.py --simulacion` (procedure called with 1) | succeeds; **0** rows persisted, whatever the procedure does internally |
 | T15b | context ADMIN + user + 123 → UPDATE; clear the context → UPDATE on the same connection | 1st: `ADMIN`/user/123; 2nd: `NO_DECLARADO`/NULL/NULL |
 | T15c | context ADMIN with **no user** (NULL), and again with a **blank** user `'  '` → UPDATE a date | **both rejected** by `CK_ProblemFechaEvento_Atribucion`; `Problem` unchanged; 0 rows |
@@ -593,7 +593,7 @@ Cleanup (test environment only): disable the guard, delete the TST events and th
 - [ ] O3: no `OUTPUT` without `INTO` targeting `dbo.Problem`.
 - [x] O4: `cargar_experiencia.py` reviewed (V10): it writes only `stg.*` and calls `usp_CargarExperiencia`; no direct writes to `dbo.Problem`. Still to do: confirm the deployed copy is the same file.
 - [ ] O5: no unknown writers (P0-3, P0-7, owners asked).
-- [ ] O6: logins. Evidence (V11): loader = Windows account of the operator, web = SQL login. Confirm the runner's `config.json` and the VM's `Web.config`.
+- [x] O6: logins (V11). Loader = Windows identity of whoever runs it (no dedicated identity; never used to classify `Origen`); web = SQL login. Still to do: confirm the VM's deployed `Web.config`.
 - [ ] Test environment selected.
 
 **Design**
