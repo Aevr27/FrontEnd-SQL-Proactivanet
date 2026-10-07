@@ -44,7 +44,7 @@ function todas(texto, re) {
 var botones = todas(html, /<button[^>]*class="mnav[^"]*"[^>]*>/g).map(function (m) { return m[0]; });
 var nombres = botones.map(function (b) { return (b.match(/data-tab="([^"]+)"/) || [])[1]; });
 
-comprobar('la barra trae los siete modulos', nombres.length, 7);
+comprobar('la barra trae los ocho modulos', nombres.length, 8);
 comprobar('ninguna entrada se quedo sin data-tab', nombres.filter(Boolean).length, nombres.length);
 
 // --- una sola entrada marcada como la actual -----------------------------

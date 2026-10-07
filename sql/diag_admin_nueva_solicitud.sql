@@ -83,22 +83,34 @@ SELECT DISTINCT Codigo, ProductOwner, ServiceOwner, DirectorPO
 INTO #Due
 FROM dbo.vw_ProblemCategoria WHERE VigenteEnOrigen = 1;
 
+-- SQL Server no admite subconsultas dentro de SUM (Msg 130): las banderas
+-- se calculan por fila en la tabla derivada y se suman afuera.
 SELECT N3 = 'Problem vs dueños de la categoria',
        ConCategoria = COUNT(*),
-       OwnerProblem_Lleno = SUM(CASE WHEN p.OwnerProblem IS NOT NULL THEN 1 ELSE 0 END),
-       OwnerProblem_EsPO = SUM(CASE WHEN EXISTS (SELECT 1 FROM #Due d WHERE d.Codigo = p.Codigo
-                                AND LTRIM(RTRIM(d.ProductOwner)) = LTRIM(RTRIM(p.OwnerProblem))) THEN 1 ELSE 0 END),
-       OwnerServicio_Lleno = SUM(CASE WHEN p.OwnerServicio IS NOT NULL THEN 1 ELSE 0 END),
-       OwnerServicio_EsSO = SUM(CASE WHEN EXISTS (SELECT 1 FROM #Due d WHERE d.Codigo = p.Codigo
-                                 AND LTRIM(RTRIM(d.ServiceOwner)) = LTRIM(RTRIM(p.OwnerServicio))) THEN 1 ELSE 0 END),
-       Direccion_Llena = SUM(CASE WHEN p.Direccion IS NOT NULL THEN 1 ELSE 0 END),
-       Direccion_EsDirectorPO = SUM(CASE WHEN EXISTS (SELECT 1 FROM #Due d WHERE d.Codigo = p.Codigo
-                                    AND LTRIM(RTRIM(d.DirectorPO)) = LTRIM(RTRIM(p.Direccion))) THEN 1 ELSE 0 END),
+       OwnerProblem_Lleno = SUM(f.OwnerProblem_Lleno),
+       OwnerProblem_EsPO = SUM(f.OwnerProblem_EsPO),
+       OwnerServicio_Lleno = SUM(f.OwnerServicio_Lleno),
+       OwnerServicio_EsSO = SUM(f.OwnerServicio_EsSO),
+       Direccion_Llena = SUM(f.Direccion_Llena),
+       Direccion_EsDirectorPO = SUM(f.Direccion_EsDirectorPO),
+       Direccion_EsPersona = SUM(f.Direccion_EsPersona)
+FROM (
+    SELECT
+       OwnerProblem_Lleno = CASE WHEN p.OwnerProblem IS NOT NULL THEN 1 ELSE 0 END,
+       OwnerProblem_EsPO = CASE WHEN EXISTS (SELECT 1 FROM #Due d WHERE d.Codigo = p.Codigo
+                                AND LTRIM(RTRIM(d.ProductOwner)) = LTRIM(RTRIM(p.OwnerProblem))) THEN 1 ELSE 0 END,
+       OwnerServicio_Lleno = CASE WHEN p.OwnerServicio IS NOT NULL THEN 1 ELSE 0 END,
+       OwnerServicio_EsSO = CASE WHEN EXISTS (SELECT 1 FROM #Due d WHERE d.Codigo = p.Codigo
+                                 AND LTRIM(RTRIM(d.ServiceOwner)) = LTRIM(RTRIM(p.OwnerServicio))) THEN 1 ELSE 0 END,
+       Direccion_Llena = CASE WHEN p.Direccion IS NOT NULL THEN 1 ELSE 0 END,
+       Direccion_EsDirectorPO = CASE WHEN EXISTS (SELECT 1 FROM #Due d WHERE d.Codigo = p.Codigo
+                                    AND LTRIM(RTRIM(d.DirectorPO)) = LTRIM(RTRIM(p.Direccion))) THEN 1 ELSE 0 END,
        -- Direccion como persona del catalogo Equipo, o como texto de area?
-       Direccion_EsPersona = SUM(CASE WHEN EXISTS (SELECT 1 FROM dbo.CatPersona c
-                                 WHERE LTRIM(RTRIM(c.Nombre)) = LTRIM(RTRIM(p.Direccion))) THEN 1 ELSE 0 END)
-FROM dbo.Problem AS p
-WHERE p.VigenteEnOrigen = 1 AND EXISTS (SELECT 1 FROM #Due d WHERE d.Codigo = p.Codigo);
+       Direccion_EsPersona = CASE WHEN EXISTS (SELECT 1 FROM dbo.CatPersona c
+                                 WHERE LTRIM(RTRIM(c.Nombre)) = LTRIM(RTRIM(p.Direccion))) THEN 1 ELSE 0 END
+    FROM dbo.Problem AS p
+    WHERE p.VigenteEnOrigen = 1 AND EXISTS (SELECT 1 FROM #Due d WHERE d.Codigo = p.Codigo)
+) AS f;
 
 SELECT TOP (20) N3b = 'OwnerProblem distinto del PO', p.Codigo, p.OwnerProblem, d.ProductOwner,
        p.OwnerServicio, d.ServiceOwner, p.Direccion, d.DirectorPO

@@ -238,12 +238,18 @@ FROM dbo.Categorias WHERE LEN(RutaCompleta) > 450;
 -- D4) Problem.Categoria (texto de cabecera) contra su detalle: si la
 --     cabecera repite una de las rutas del detalle, Admin puede llenarla con
 --     la primera; si es otra cosa, se deja como captura libre.
+--     SQL Server no admite subconsultas dentro de SUM (Msg 130): la bandera
+--     se calcula por fila en la tabla derivada y se suma afuera.
 SELECT D4 = 'Problem.Categoria vs detalle',
-       ConCabecera = SUM(CASE WHEN p.Categoria IS NOT NULL THEN 1 ELSE 0 END),
-       CabeceraEnDetalle = SUM(CASE WHEN EXISTS (SELECT 1 FROM dbo.ProblemCategoria AS pc
+       ConCabecera = SUM(f.ConCabecera),
+       CabeceraEnDetalle = SUM(f.CabeceraEnDetalle)
+FROM (
+    SELECT ConCabecera = CASE WHEN p.Categoria IS NOT NULL THEN 1 ELSE 0 END,
+           CabeceraEnDetalle = CASE WHEN EXISTS (SELECT 1 FROM dbo.ProblemCategoria AS pc
                                                  WHERE pc.Codigo = p.Codigo AND pc.Categoria = p.Categoria)
-                                    THEN 1 ELSE 0 END)
-FROM dbo.Problem AS p WHERE p.VigenteEnOrigen = 1;
+                                    THEN 1 ELSE 0 END
+    FROM dbo.Problem AS p WHERE p.VigenteEnOrigen = 1
+) AS f;
 
 /* -------------------------------------------------------------------------------------
    F) Permisos de ESTA cuenta (correr con la del sitio)

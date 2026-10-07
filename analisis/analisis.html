@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<!--
+  analisis/analisis.html - Modulo "Analisis de servicios".
+
+  Mismo contrato que backlog/, experiencia/, qa/ y qare/: este archivo es a
+  la vez la pagina suelta y la fuente de la pestaña "Análisis de servicios"
+  de dashboard.html. TableroAnalisis (dashboard.js) trae este marcado, le
+  quita <script> y <link>, desarma el envoltorio #tab-analisis y lo monta en
+  el contenedor de la pestaña.
+
+  Todos los ids llevan el prefijo "an-": en el tablero este marcado convive
+  con las demas pestañas en el MISMO documento.
+
+  Que hace: el service owner escoge su servicio (una agrupacion de rutas y
+  grupos, ver 47_analisis_servicios.sql) y un periodo; analisis.js pide los
+  tickets a handlers/analisis.ashx y los analiza en el navegador con
+  analisis/motor.js, el mismo motor de la pagina de claude.ai: cuando
+  llegan, en que sitios, por que motivo y como se atienden. Descarga el
+  Excel de siete hojas (con la descripcion de cada ticket) y deja probar
+  reglas de motivo y armar el script SQL que las guarda.
+
+  Hojas: como QARE, sin vocabulario visual propio (.card, .kpi, .filtros,
+  .btn son los de dashboard.css, kpi.css y boton.css); analisis.css lleva
+  solo lo privado. Embebido, estos <link> se descartan.
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tickets Proactivanet — Análisis de servicios</title>
+  <!-- Solo para la pagina suelta: embebida en dashboard.html cada uno de
+       estos <link> se quita y manda la copia del tablero. -->
+  <link rel="stylesheet" href="../assets/css/kpi.css">
+  <link rel="stylesheet" href="../assets/css/boton.css">
+  <link rel="stylesheet" href="../dashboard.css">
+  <link rel="stylesheet" href="analisis.css">
+</head>
+<body>
+<div class="wrap">
+  <div id="tab-analisis" class="maintab-content active">
+
+    <header class="top">
+      <div>
+        <h1>Análisis de servicios</h1>
+        <div class="sub">Qué atacar con iniciativas o problems: cuándo llegan los tickets, en qué sitios, por qué motivo y cómo se atienden.</div>
+      </div>
+      <div class="acciones-top">
+        <div class="estado" id="an-estado" role="status"></div>
+      </div>
+    </header>
+
+    <section class="filtros" id="an-filtros">
+      <div class="campo">
+        <label for="an-servicio">Servicio</label>
+        <select id="an-servicio"><option value="">Cargando servicios…</option></select>
+      </div>
+      <div class="campo">
+        <label for="an-desde">Desde</label>
+        <input type="date" id="an-desde">
+      </div>
+      <div class="campo">
+        <label for="an-hasta">Hasta (incluido)</label>
+        <input type="date" id="an-hasta">
+      </div>
+      <div class="campo">
+        <label>Periodo rápido</label>
+        <div class="rango-rapido">
+          <button class="btn linea chico" type="button" data-meses="3">3 meses</button>
+          <button class="btn linea chico" type="button" data-meses="6">6 meses</button>
+          <button class="btn linea chico" type="button" data-meses="12">12 meses</button>
+        </div>
+      </div>
+      <div class="campo acciones">
+        <button class="btn" id="an-analizar" type="button">Analizar</button>
+        <button class="btn gris" id="an-excel" type="button" disabled>⬇ Descargar Excel</button>
+      </div>
+    </section>
+
+    <div class="an-aviso an-aviso-error" id="an-error" hidden>
+      <strong>No se pudo traer el análisis.</strong>
+      <span id="an-error-msg"></span>
+    </div>
+    <ul class="an-avisos" id="an-avisos" hidden></ul>
+
+    <!-- Antes del primer analisis: que es cada servicio. -->
+    <section class="card" id="an-intro">
+      <h3>Escoge un servicio y un periodo</h3>
+      <p class="nota" id="an-intro-desc">El análisis lee los tickets directo de la base y los clasifica con las reglas de motivo del servicio. Un periodo largo de un servicio grande puede tardar un poco.</p>
+      <div class="an-servicios" id="an-lista"></div>
+    </section>
+
+    <div id="an-resultado" hidden>
+      <div class="an-cab">
+        <h2 id="an-titulo"></h2>
+        <p class="an-sub" id="an-sub"></p>
+      </div>
+      <section class="kpis" id="an-kpis"></section>
+      <section class="card">
+        <h3>Hallazgos</h3>
+        <ul class="an-hallazgos" id="an-hallazgos"></ul>
+      </section>
+      <section class="card an-hojas">
+        <div class="an-pestanas" role="tablist" id="an-pestanas" aria-label="Hojas del análisis"></div>
+        <div class="an-panel" id="an-panel" role="tabpanel" tabindex="0"></div>
+      </section>
+    </div>
+
+    <div id="an-tip" class="an-tip" hidden></div>
+  </div>
+</div>
+<script src="analisis.js"></script>
+</body>
+</html>
