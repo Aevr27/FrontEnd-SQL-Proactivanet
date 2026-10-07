@@ -14,6 +14,9 @@
        analisis/motor.js, el MISMO motor de la pagina de claude.ai
        (analisis_servicio/motor.js en el repositorio; la prueba revisa que las
        dos copias sean iguales);
+     - leer el JSON, preparar y analizar corren en un Web Worker
+       (analisis/trabajo.js) para no congelar la pagina; si no arranca, el
+       mismo archivo corre aqui;
      - el Excel lo arma ExcelJS (analisis/vendor/exceljs.min.js, copia local:
        el tablero corre en una VM sin salida a CDN), cargado al pulsar.
 
@@ -38,6 +41,7 @@
   var API = junto('../handlers/analisis.ashx', 'handlers/analisis.ashx');
   var MOTOR_URL = junto('motor.js', 'analisis/motor.js');
   var EXCEL_URL = junto('vendor/exceljs.min.js', 'analisis/vendor/exceljs.min.js');
+  var TRABAJO_URL = junto('trabajo.js', 'analisis/trabajo.js');
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -57,10 +61,70 @@
   var motorListo = null;
   function motor() { return motorListo || (motorListo = cargarScript(MOTOR_URL, 'Motor').then(function () { return window.Motor; })); }
 
+  /* ------------------------------------------------------------ trabajo pesado */
+  // Leer el JSON, preparar y analizar corren en un Worker (trabajo.js) para que
+  // la pagina no se congele con un servicio grande. Si el Worker no arranca o
+  // se cae, el mismo trabajo.js corre aqui, en la pagina, como antes. Aqui
+  // tambien se sigue usando motor.js para pintar, el editor y el Excel.
+  function Analizador() {
+    var yo = this;
+    this.pendientes = {}; this.n = 0; this.local = null; this.cuerpo = null;
+    try { this.worker = typeof Worker === 'function' ? new Worker(TRABAJO_URL) : null; } catch (e) { this.worker = null; }
+    if (!this.worker) return;
+    this.worker.onmessage = function (e) {
+      var m = e.data, p = yo.pendientes[m.id];
+      if (!p) return;
+      if (m.aviso) { p.avisar(m.aviso); return; }
+      delete yo.pendientes[m.id];
+      if (m.error) p.mal(new Error(m.error)); else p.ok(m.ok);
+    };
+    this.worker.onerror = function (e) { if (e.preventDefault) e.preventDefault(); yo.sinWorker(); };
+  }
+  Analizador.prototype.sinWorker = function () {
+    if (this.worker) this.worker.terminate();
+    this.worker = null;
+    var p = this.pendientes; this.pendientes = {};
+    Object.keys(p).forEach(function (id) { var e = new Error('sin worker'); e.sinWorker = true; p[id].mal(e); });
+  };
+  // cuerpo: el ArrayBuffer de analisis.ashx. Se copia al Worker (no se
+  // transfiere) para poder repetir aqui si el Worker se cae.
+  Analizador.prototype.cargar = function (cuerpo, avisar) { this.cuerpo = cuerpo; return this.pedir('cargar', { cuerpo: cuerpo }, avisar); };
+  Analizador.prototype.analizar = function (servicio, avisar) { return this.pedir('analizar', { servicio: servicio }, avisar); };
+  Analizador.prototype.pedir = function (tipo, args, avisar) {
+    var yo = this;
+    if (!this.worker) return this.aqui(tipo, args, avisar);
+    return new Promise(function (ok, mal) {
+      var id = ++yo.n;
+      yo.pendientes[id] = { ok: ok, mal: mal, avisar: avisar };
+      args.id = id; args.tipo = tipo;
+      yo.worker.postMessage(args);
+    }).catch(function (e) {
+      if (!e.sinWorker) throw e;
+      // Lo que el Worker tenia cargado se perdio con el: se vuelve a cargar aqui.
+      var antes = tipo === 'analizar' && !(yo.local && yo.local.datos) ? yo.aqui('cargar', { cuerpo: yo.cuerpo }, avisar) : Promise.resolve();
+      return antes.then(function () { return yo.aqui(tipo, args, avisar); });
+    });
+  };
+  Analizador.prototype.aqui = function (tipo, args, avisar) {
+    var yo = this;
+    return Promise.all([motor(), cargarScript(TRABAJO_URL, 'AnalisisTrabajo')]).then(function () {
+      if (!yo.local) yo.local = new window.AnalisisTrabajo(window.Motor);
+      // El aviso se pinta antes de que el trabajo ocupe la pagina.
+      avisar(tipo === 'cargar' ? 'Preparando tickets…' : 'Analizando…');
+      return new Promise(function (ok) { setTimeout(ok, 20); });
+    }).then(function () {
+      var nada = function () {};
+      return tipo === 'cargar' ? yo.local.cargar(args.cuerpo, nada) : yo.local.analizar(args.servicio, nada);
+    });
+  };
+  var analizador = new Analizador();
+
   /* ------------------------------------------------------------ estado */
   var servicios = [];            // lista de usp_Analisis_Servicios
-  var respuesta = null;          // lo ultimo que devolvio analisis.ashx
-  var datos = null;              // Motor.preparar(...)
+  var respuesta = null;          // lo ultimo que devolvio analisis.ashx, sin los tickets
+  var nTickets = 0;              // tickets que dejo Motor.preparar(...)
+  var turno = 0;                 // cada "Analizar" deja viejo al anterior
+  var medicion = null;           // ms de cada paso de la ultima carga
   var reglasBase = [];           // las de la base
   var reglasPrueba = null;       // las del editor, si se estan probando
   var motivosEquipo = [];
@@ -118,28 +182,37 @@
     var nombre = (servicios.filter(function (s) { return s.Servicio === clave; })[0] || {}).Nombre || clave;
     estado('Trayendo los tickets de ' + nombre + '…');
     var url = API + '?servicio=' + encodeURIComponent(clave) + '&desde=' + encodeURIComponent($('desde').value) + '&hasta=' + encodeURIComponent($('hasta').value);
-    var t0 = Date.now();
+    var t0 = Date.now(), mio = ++turno, med = {};
+    // El JSON no se lee aqui: el cuerpo pasa entero al Worker. Solo una
+    // respuesta de error (corta) se lee en la pagina.
     Promise.all([motor(), fetch(url, { cache: 'no-store' }).then(function (r) {
-      return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; });
+      if (r.ok) return r.arrayBuffer();
+      return r.json().then(function (j) { throw new Error(j.error || ('HTTP ' + r.status)); });
     })]).then(function (x) {
-      var M = x[0]; respuesta = x[1];
-      estado('Analizando…');
-      return new Promise(function (ok) { setTimeout(ok, 20); }).then(function () {
-        datos = M.preparar(M.bloquesDeTablero(respuesta));
-        if (datos.error) throw new Error(datos.error);
-        reglasBase = M.reglasDeTablero(respuesta);
+      if (mio !== turno) return;
+      med.descarga = Date.now() - t0;
+      var avisar = function (txt) { if (mio === turno) estado(txt); };
+      return analizador.cargar(x[1], avisar).then(function (c) {
+        if (mio !== turno) return;
+        respuesta = c.respuesta; nTickets = c.tickets;
+        med.lectura = c.ms.lectura; med.preparacion = c.ms.preparacion;
+        reglasBase = c.reglas;
         reglasPrueba = null;
         var me = parametro('MotivosEquipo');
         try { motivosEquipo = JSON.parse(me || '[]'); } catch (e) { motivosEquipo = []; }
-        correrAnalisis();
-        estado(M.miles(datos.tickets.length) + ' tickets en ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s.', 'ok');
-        $('excel').disabled = false;
-        $('intro').hidden = true; $('resultado').hidden = false;
+        return correrAnalisis(avisar, med).then(function (listo) {
+          if (!listo || mio !== turno) return;
+          med.total = Date.now() - t0; med.enWorker = !!analizador.worker; medicion = med;
+          estado(window.Motor.miles(nTickets) + ' tickets en ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s.', 'ok');
+          $('excel').disabled = false;
+          $('intro').hidden = true; $('resultado').hidden = false;
+        });
       });
     }).catch(function (e) {
+      if (mio !== turno) return;
       estado('');
       error(e.message + (/HTTP 5/.test(e.message) ? ' Revisa que 47_analisis_servicios.sql este corrido.' : ''));
-    }).then(function () { $('analizar').disabled = false; });
+    }).then(function () { if (mio === turno) $('analizar').disabled = false; });
   }
 
   function parametro(clave) {
@@ -155,11 +228,19 @@
                   .map(function (r) { return { clave: r[ic], valor: r[iv] }; });
   }
 
-  function correrAnalisis() {
-    var M = window.Motor;
-    resultado = M.analizar(datos, { nombre: parametro('Servicio') || respuesta.servicio, reglas: reglasPrueba || reglasBase, motivosEquipo: motivosEquipo },
-                           { conTextos: true });
-    pintar();
+  // Corre el analisis (en el Worker) y pinta. Resuelve true si pinto; false si
+  // mientras tanto se pidio otro analisis.
+  function correrAnalisis(avisar, med) {
+    var mio = turno;
+    return analizador.analizar({ nombre: parametro('Servicio') || respuesta.servicio, reglas: reglasPrueba || reglasBase, motivosEquipo: motivosEquipo },
+                               avisar || function () {}).then(function (a) {
+      if (mio !== turno) return false;
+      var t0 = Date.now();
+      resultado = a.resultado;
+      pintar();
+      if (med) { med.analisis = a.ms.analisis; med.pintado = Date.now() - t0; }
+      return true;
+    });
   }
 
   /* ------------------------------------------------------------ pintar */
@@ -363,12 +444,21 @@
     return r.reglas;
   }
   function conectarEditor() {
+    // Mientras se trae otro servicio (Analizar deshabilitado) el editor espera.
     $('probar').addEventListener('click', function () {
+      if ($('analizar').disabled) return;
       var r = leerEditor(); if (!r) return;
-      reglasPrueba = r; correrAnalisis();
-      var e = $('estado-ed'); e.className = 'an-estado-ed ok'; e.textContent = r.length + ' reglas aplicadas aquí; la base no cambió.';
+      reglasPrueba = r;
+      $('probar').disabled = true;
+      correrAnalisis().then(function (listo) {
+        if (!listo) return;
+        var e = $('estado-ed'); e.className = 'an-estado-ed ok'; e.textContent = r.length + ' reglas aplicadas aquí; la base no cambió.';
+      }).catch(function (x) { error(x.message); }).then(function () { if ($('probar')) $('probar').disabled = false; });
     });
-    $('base').addEventListener('click', function () { reglasPrueba = null; correrAnalisis(); });
+    $('base').addEventListener('click', function () {
+      if ($('analizar').disabled) return;
+      reglasPrueba = null; correrAnalisis().catch(function (x) { error(x.message); });
+    });
     $('generar').addEventListener('click', function () {
       var M = window.Motor, r = leerEditor(); if (!r) return;
       var s = servicios.filter(function (x) { return x.Servicio === respuesta.servicio; })[0] || {};
@@ -461,7 +551,9 @@
     if (Math.abs(ancho() - anchoPintado) > 20) { anchoPintado = ancho(); pintarPanel(); }
   }
   window.addEventListener('resize', function () { clearTimeout(redimensionar.t); redimensionar.t = setTimeout(redimensionar, 200); });
-  window.TableroAnalisisModulo = { redimensionar: redimensionar };
+  // medicion(): ms de descarga, lectura, preparacion, analisis y pintado de la
+  // ultima carga, para revisarlos desde la consola sin llenarla de mensajes.
+  window.TableroAnalisisModulo = { redimensionar: redimensionar, medicion: function () { return medicion; } };
 
   ponerMeses(6);
   pedirServicios();

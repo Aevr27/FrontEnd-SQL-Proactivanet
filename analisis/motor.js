@@ -424,8 +424,21 @@
 
     var CAMPOS = { D: 'título y descripción', S: 'solución', DS: 'título, descripción o solución' };
 
+    // Normalizar es lo mas caro del analisis y el texto de un ticket no cambia
+    // entre una corrida y otra ("Probar reglas" reclasifica los mismos
+    // tickets): se guarda por ticket y se rehace solo si su texto cambio.
+    var NORMALIZADOS = typeof WeakMap === 'function' ? new WeakMap() : null;
+    function textosNormalizados(t) {
+        var n = NORMALIZADOS && NORMALIZADOS.get(t);
+        if (n && n.titulo === t.titulo && n.descripcion === t.descripcion && n.solucion === t.solucion) return n;
+        var d = normalizar(t.titulo + ' ' + t.descripcion), s = normalizar(t.solucion);
+        n = { titulo: t.titulo, descripcion: t.descripcion, solucion: t.solucion, d: d, s: s, ds: d + '|' + s };
+        if (NORMALIZADOS) NORMALIZADOS.set(t, n);
+        return n;
+    }
+
     function clasificar(t, reglas) {
-        var d = normalizar(t.titulo + ' ' + t.descripcion), s = normalizar(t.solucion), ds = d + '|' + s;
+        var n = textosNormalizados(t), d = n.d, s = n.s, ds = n.ds;
         for (var i = 0; i < reglas.length; i++) {
             var r = reglas[i], texto = r.campo === 'S' ? s : r.campo === 'D' ? d : ds;
             for (var j = 0; j < r.frases.length; j++) {
