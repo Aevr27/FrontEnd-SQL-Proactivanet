@@ -1,12 +1,13 @@
-# PROPOSAL — `dbo.ProblemFechaEvento` (date-change history) — NOT EXECUTED, NOT APPROVED
+# PROPOSAL — `dbo.ProblemFechaEvento` (date-change history) — DESIGN DECISIONS LOCKED, NOT EXECUTED
 
 > **`ProblemFechaEvento` is an append-only evidence trail for initiative date
 > changes. It does not replace the current dates in `dbo.Problem` and exists
 > specifically so the initiative detail History of Changes panel can show
 > evidence of deadline/date extensions and other date transitions.**
 
-Status: **proposal only**. None of these objects exist in the database, and
-nothing in this document has been run anywhere. It is written in Markdown on
+Status: **the design decisions are locked (see "Locked decisions" below); the DDL is
+NOT EXECUTED and is gated on the open verification items O1–O7.** None of these
+objects exist in the database, and nothing in this document has been run anywhere. It is written in Markdown on
 purpose, so it cannot be executed by accident. Every SQL block that would change
 the database is labelled **NOT EXECUTED**, and the table DDL contains a
 `{{TIPO_CODIGO}}` placeholder, so it fails if pasted as-is (see §2).
@@ -18,12 +19,15 @@ the database is labelled **NOT EXECUTED**, and the table DDL contains a
 | | `dbo.Problem` | `dbo.ProblemFechaEvento` |
 |---|---|---|
 | Role | **Source of truth** for the *current* `FechaAnalisis`, `FechaSolucion`, `FechaCierre` | **Evidence only**: one row per actual change of one of those dates |
-| Who writes it | Today `usp_CargarExperiencia` (Excel). Later, possibly an Admin approval procedure. | Only the trigger on `dbo.Problem` (and, if approved, the one-time baseline) |
+| Who writes it | Today `usp_CargarExperiencia` (Excel). Later, possibly an Admin approval procedure. | Only the trigger on `dbo.Problem`, plus the one-time baseline (approved) |
 | Who reads it | Every view, the normal initiative view, Experiencia, Admin | Only the History of Changes section of the initiative detail panel (initiative list → click the name → right-side panel) |
 | Can it change? | Yes, normally | **Never updated, never deleted** (§9) |
 
-The history never drives, recalculates or overwrites a current date. If the two
-ever seem to disagree, `dbo.Problem` is right by definition.
+`dbo.Problem.FechaAnalisis`, `dbo.Problem.FechaSolucion` and
+`dbo.Problem.FechaCierre` remain the **only** current-date values used by the
+normal initiative view. The history never drives, recalculates or overwrites a
+current date. If the two ever seem to disagree, `dbo.Problem` is right by
+definition.
 
 Example. Current value: `FechaSolucion = 24/07/2026`. History:
 
@@ -31,6 +35,22 @@ Example. Current value: `FechaSolucion = 24/07/2026`. History:
 FechaSolucion  27/06/2026 → 15/07/2026   (Cambio 1)
 FechaSolucion  15/07/2026 → 24/07/2026   (Cambio 2)
 ```
+
+---
+
+## Locked decisions
+
+| # | Decision |
+|---|---|
+| D1 | **Baseline: approved.** It is loaded once at activation. It holds only the current non-NULL date values known at that moment, marked `Operacion = 'B'` / `Reconstruido = 1`. It is never presented as a change. It never uses `FechaOriginal*` or `NroCambioFecha*`. It means "the value known when the history started", **not** "the initiative's original date". |
+| D2 | **Labels** (UI presentation only): `Línea base` = the legacy starting snapshot (`B`). `Fecha inicial` = a date present when a new `Problem` row is INSERTed after deployment (`I`). `Fecha asignada` = `NULL → date`. `Cambio n` = `date → different date`. `Fecha retirada` = `date → NULL`. |
+| D3 | **Numbering.** Only `date → different date` transitions receive a sequential "Cambio n", counted separately for each field in `IdEvento` order. The number is not stored in the database and is never derived from `NroCambioFecha*`. |
+| D4 | **Excel/loader attribution.** `Origen = NO_DECLARADO`. `Usuario` and `SolicitudId` are NULL, and no requester is fabricated. `LoginBD` is recorded. |
+| D5 | **Admin/web attribution.** `Origen = ADMIN`. `Usuario` is **required**: with no user, the change is **rejected**, not recorded anonymously. `SolicitudId` is **optional for now**, and its absence is **not** a failure. `LoginBD` is recorded. |
+| D6 | **Delete.** A `Problem` row that has history cannot be physically deleted (FK with no cascade). There is no DELETE history branch. This is an intentional audit/evidence protection. |
+| D7 | **Append-only.** Permissions plus a guard trigger. A `db_owner` can still bypass or disable it. Cleanup in the test environment disables the guard first. |
+| D8 | **Current-date source unchanged.** Only `dbo.Problem` feeds the normal view. The history is evidence only. |
+| D9 | **No `Motivo` column.** The reason for an extension belongs to the future request/approval entity and is reached through `SolicitudId`. |
 
 ---
 
@@ -104,10 +124,11 @@ CREATE TABLE dbo.ProblemFechaEvento
     -- Baseline only states "value known at initialization"; it never claims a previous value.
     CONSTRAINT CK_ProblemFechaEvento_Base CHECK (
         Operacion <> 'B' OR (FechaAnterior IS NULL AND FechaNueva IS NOT NULL)),
-    -- Excel/undeclared rows carry no person or request; Admin rows must carry the user.
+    -- Excel/undeclared rows carry no person or request.
+    -- Admin rows MUST carry a non-blank user (no user = reject); SolicitudId is optional for now.
     CONSTRAINT CK_ProblemFechaEvento_Atribucion CHECK (
         (Origen = 'NO_DECLARADO' AND Usuario IS NULL AND SolicitudId IS NULL)
-        OR (Origen = 'ADMIN' AND Usuario IS NOT NULL))
+        OR (Origen = 'ADMIN' AND LEN(LTRIM(RTRIM(Usuario))) > 0))
 );
 
 CREATE NONCLUSTERED INDEX IX_ProblemFechaEvento_Codigo
@@ -123,8 +144,8 @@ CREATE NONCLUSTERED INDEX IX_ProblemFechaEvento_Codigo
 | `Operacion` | `char(1)` | `I`: captured when the `Problem` row was inserted. `U`: captured on an update. `B`: one-time baseline. |
 | `Reconstruido` | computed `bit` | 1 only for `B`. It is an explicit "known at initialization, not an observed change" flag that can never disagree with `Operacion`. It is non-persisted, so it adds no SET-option requirements for writers. |
 | `Origen` | `varchar(12)` | Which path declared the change (§7). |
-| `Usuario` | `nvarchar(256)` | The **authenticated application user**, Admin only (§7). |
-| `SolicitudId` | `int` | The **application request/approval id**, Admin only, once that workflow exists. There is no FK because the table does not exist yet. |
+| `Usuario` | `nvarchar(256)` | The authenticated **application** user. **Required (non-blank) on `ADMIN` rows**; always NULL on `NO_DECLARADO` rows (§7). |
+| `SolicitudId` | `int` | The **application** request/approval id. **Optional** on `ADMIN` rows until that workflow exists; always NULL on `NO_DECLARADO` rows. There is no FK because the table does not exist yet. |
 | `LoginBD` | `nvarchar(128)` | The **database login** that executed the SQL (`ORIGINAL_LOGIN()`). It is technical evidence, not a person. |
 | `FechaRegistro` | `datetime2(3)` UTC | **When the system captured the change.** It answers "when was this recorded?", not "what was the initiative scheduled for?". Admin converts it to UTC-6 for display. |
 
@@ -149,15 +170,20 @@ There is deliberately **no** change-number column, no `NroCambioFecha*`, no
 
 ---
 
-## 4. Numbering: derived by the UI, not stored
+## 4. Labels and numbering (locked; UI presentation only)
 
 - `NroCambioFechaAnalisis/Solucion/Cierre` remain legacy source metadata. They are **not read** to build history and are **not used** as the change number (V6).
-- There is no change number in the database. The panel numbers the events while rendering, from the events it received in `IdEvento` order, separately for each `Campo`:
-  - `B` → **"Línea base"**. It is never "Cambio 1".
-  - `I` → **"Fecha inicial"** (the date the initiative was created with).
-  - `U` with both dates present → **"Cambio 1", "Cambio 2", …**, counted in order per field.
-  - `U` `NULL → date` → "Fecha asignada"; `U` `date → NULL` → "Fecha retirada". These are shown but not counted as changes.
-- These labels and the counting rule are a **display decision to confirm** (checklist). Changing them later needs no database change.
+- The database stores no change number. The panel labels the events while rendering them, in `IdEvento` order, separately for each `Campo`:
+
+| Stored event | Label | Numbered? |
+|---|---|---|
+| `Operacion = 'B'` (legacy baseline) | **Línea base**: the value known when the history started. It is not the original date and not a change. | no |
+| `Operacion = 'I'` (date present on a new `Problem` INSERT after deployment) | **Fecha inicial** | no |
+| `Operacion = 'U'`, `NULL → date` | **Fecha asignada** | no |
+| `Operacion = 'U'`, `date → different date` | **Cambio n** (1, 2, … per field) | **yes, only this one** |
+| `Operacion = 'U'`, `date → NULL` | **Fecha retirada** | no |
+
+- A baseline event is never shown as "Fecha inicial" or "Cambio 1".
 
 ---
 
@@ -216,7 +242,7 @@ How the trigger meets each requirement:
 - `Campo`, `Operacion` and `Origen` are constants.
 - The transition CHECK is guaranteed by the `WHERE`.
 - `B` is never written by the trigger.
-- `Usuario` and `SolicitudId` stay NULL unless the context says `ADMIN`.
+- `Usuario` and `SolicitudId` stay NULL unless the context says `ADMIN`. A missing `SolicitudId` never causes a failure.
 - `TRY_CONVERT` is used for `SolicitudId`.
 - The FK value comes from `inserted`.
 
@@ -224,23 +250,23 @@ What remains possible:
 - Msg 334, if any writer uses `OUTPUT` without `INTO` (O3).
 - Conversion errors, if the date columns are not a date/time type (O2).
 - Ordinary engine conditions: lock waits or deadlocks, `tempdb` or log space, a disabled or dropped history table.
-- **Deliberately**, on the Admin path only: `ADMIN` declared without a user fails `CK_ProblemFechaEvento_Atribucion`, so an unattributed web change is refused.
+- **Deliberately**, on the Admin path only: `ADMIN` declared with no user, or a blank one, fails `CK_ProblemFechaEvento_Atribucion`. The whole UPDATE rolls back, so an unattributed web change is **rejected**, not recorded anonymously (D5).
 
 **The test plan must prove that a normal loader run succeeds with the trigger enabled (T14, T15).**
 
 ---
 
-## 6. INSERT and the optional baseline
+## 6. INSERT and the baseline (approved)
 
-**New `Problem` row going forward:** each date that is **not NULL** produces one `I` row (`FechaAnterior` NULL). Dates that are NULL produce nothing. An initiative born with only `FechaAnalisis` (as in diag N6) gets exactly one row.
+**New `Problem` row inserted after deployment:** each date that is **not NULL** produces one `I` row (`FechaAnterior` NULL), shown as **"Fecha inicial"**. Dates that are NULL produce nothing. An initiative born with only `FechaAnalisis` (as in diag N6) gets exactly one row. This is a captured event, distinct from the reconstructed legacy baseline.
 
-**One-time legacy baseline: optional, separate approval, and not a change.**
+**One-time legacy baseline: APPROVED (D1), and not a change.**
 - It records only what is genuinely known at initialization: the current non-NULL value of each date. Rows have `Operacion = 'B'`, `Reconstruido = 1`, `Origen = 'NO_DECLARADO'`, and `FechaAnterior` NULL (enforced by a CHECK).
 - It does **not** use `FechaOriginal*`: writing `original → current` would look like a single direct change when an unknown number of intermediate changes happened.
 - It does **not** use `NroCambioFecha*`.
-- The UI shows it as **"Línea base"**, never as "Cambio 1" (§4).
-- Its value is limited: the first real change after go-live already records the old value in `FechaAnterior`. The baseline only gives initiatives that never change a visible starting point. Skipping it loses no real evidence. **Recommendation: load it, clearly labelled.**
-- It covers all rows, including those with `VigenteEnOrigen = 0`. Confirm this in the checklist.
+- The UI shows it as **"Línea base"**, never as "Fecha inicial" or "Cambio 1" (§4).
+- Meaning: "the value known when the history started". It is **not** the initiative's original date. Changes made before activation are unknown and are not implied.
+- It covers all `Problem` rows, including those with `VigenteEnOrigen = 0`, so a row that becomes current again still has its starting snapshot.
 
 ```sql
 -- NOT EXECUTED. Proposal only. Runs in the deployment transaction (§14), BEFORE the trigger exists.
@@ -269,8 +295,8 @@ These four fields stay conceptually separate:
 | Field | Excel / loader (today) | Web / Admin (future) | Baseline |
 |---|---|---|---|
 | `Origen` | `NO_DECLARADO` | `ADMIN` | `NO_DECLARADO` |
-| `Usuario` | NULL, by design | **required**: authenticated web user | NULL |
-| `SolicitudId` | NULL | the real request/approval id, when that workflow exists | NULL |
+| `Usuario` | NULL, by design | **required** (non-blank): authenticated web user; no user = reject | NULL |
+| `SolicitudId` | NULL | **optional for now**: the real request/approval id when that workflow exists; absence is not a failure | NULL |
 | `LoginBD` | the login that ran the load | the web app's login | the login that ran the deploy |
 
 **Excel / loader path.**
@@ -287,7 +313,8 @@ These four fields stay conceptually separate:
 
 **Web / Admin path (future; attribution required).**
 - `Usuario` = `IdentidadWindows.Original` (`DOMAIN\account`) of the request being served, resolved server-side from IIS Windows authentication (V7). It is **never** taken from a value the browser sends. If the identity is not authenticated, the change must not be made at all.
-- `SolicitudId` = the id of the request/approval record once that entity exists. Until then it is NULL, which the CHECK allows.
+- `SolicitudId` = the id of the request/approval record once that entity exists. It is **optional for now**: an Admin change without it is recorded normally, with `SolicitudId` NULL. Its absence is **not** a failure.
+- **No user = reject.** The applying procedure must check, before touching `Problem`, that the identity is authenticated and that `Usuario` is non-blank, and raise an error otherwise. The CHECK on the table is the second line of defense: if `ADMIN` is declared with a missing or blank user, the UPDATE fails and rolls back.
 - `LoginBD` = the web app's database login.
 - If the requester and the approver are different people, `Usuario` records whoever performed the action that changed `Problem`. The other person is reachable through `SolicitudId` in the request record, so no second person column is added.
 - **Mechanism** (safest option given V4/V7; not built). The procedure that applies an approved change declares the context, updates `Problem`, then clears the context. It also clears it in its `CATCH` block:
@@ -386,7 +413,7 @@ Authenticated user → requests a date extension → review/approval → procedu
 | Layer | What it contains | Trust |
 |---|---|---|
 | Existing data | The current dates in `Problem`; the hand-typed `FechaOriginal*` (partial); the hand-typed `NroCambioFecha*` (unreliable) | Current dates: authoritative. The rest: legacy attributes of `Problem`, **never turned into events** |
-| Baseline (optional) | "Value known at initialization", per field, `Reconstruido = 1` | Labelled "Línea base", not a change |
+| Baseline (approved) | "Value known when the history started", per field, `Reconstruido = 1` | Labelled "Línea base"; not a change, not the original date |
 | Captured history | Every `I`/`U` event from the go-live timestamp onward | Trustworthy evidence |
 
 Intermediate values from before go-live were never persisted, so they **cannot be reconstructed**. For example, `27/06 → 15/07 → 24/07` cannot be rebuilt for an existing initiative. The free-text "Histórico de comentarios" is not parsed. The panel always shows "Historial registrado desde dd/mm/aaaa", so a short or empty list is never read as "never changed".
@@ -473,7 +500,7 @@ For P0-3, any hit with `UsaOutput = 1` must be read to confirm whether its `OUTP
 
 **Then:**
 1. Approval of this proposal (checklist).
-2. **Test environment** (a restored copy, or a separate database, to be decided): create the table, index and guard trigger; run the baseline (if approved); create the `Problem` trigger; run T1–T16; test the rollback; redeploy.
+2. **Test environment** (a restored copy, or a separate database, to be decided): create the table, index and guard trigger; run the baseline; create the `Problem` trigger; run T1–T16; test the rollback; redeploy.
 3. Compare `usp_CargarExperiencia` duration before and after, in test.
 4. **Production**, at a time when no load is running, as one transaction:
    ```sql
@@ -481,7 +508,7 @@ For P0-3, any hit with `UsaOutput = 1` must be read to confirm whether its `OUTP
    SET XACT_ABORT ON;
    BEGIN TRAN;
        -- CREATE TABLE + IX (§2)                          [batch 1]
-       -- baseline INSERT WITH (TABLOCKX, HOLDLOCK) (§6)  [batch 1; omit if baseline rejected]
+       -- baseline INSERT WITH (TABLOCKX, HOLDLOCK) (§6)  [batch 1]
    GO
        -- CREATE TRIGGER dbo.trg_ProblemFechaEvento_SoloAgregar (§9)   [own batch]
    GO
@@ -509,7 +536,7 @@ For P0-3, any hit with `UsaOutput = 1` must be read to confirm whether its `OUTP
   ORDER BY e.IdEvento;
   ```
 - **Handler** (`admin_iniciativas_registro`, detail): passes the rows through in that order and maps them to the existing contract `{campo, anterior, nuevo, fecha, usuario}` plus `operacion`, `reconstruido`, `origen`, `solicitud`. `fecha` = `FechaRegistro` converted to UTC-6. `usuario` = `Usuario` (`ADMIN` rows only). `LoginBD` is not sent to the UI.
-- **Panel** (`htmlHistorial`): renders chronologically, applies the labels from §4 ("Línea base", "Fecha inicial", "Cambio n", …), and shows "Historial registrado desde …".
+- **Panel** (`htmlHistorial`): renders chronologically, applies the locked labels from §4 ("Línea base", "Fecha inicial", "Fecha asignada", "Cambio n", "Fecha retirada"), and shows "Historial registrado desde …".
 - **Admin must never:**
   - reconstruct missing history;
   - invent previous dates;
@@ -542,11 +569,11 @@ Setup: a scratch initiative built by scripting an existing row's INSERT (SSMS "S
 | T14 | `usp_CargarExperiencia` twice with the same staging data | **both runs succeed**; the 2nd run writes 0 rows |
 | T15 | change one date in staging, run the loader | **succeeds**; exactly 1 `U`, `NO_DECLARADO`, `Usuario`/`SolicitudId` NULL, `LoginBD` = loader login; duration within noise of the run without the trigger |
 | T15b | context ADMIN + user + 123 → UPDATE; clear the context → UPDATE on the same connection | 1st: `ADMIN`/user/123; 2nd: `NO_DECLARADO`/NULL/NULL |
-| T15c | context ADMIN **without** user → UPDATE | fails on `CK_ProblemFechaEvento_Atribucion`; `Problem` unchanged; 0 rows |
-| T15d | context ADMIN + user, no request id | 1 row, `SolicitudId` NULL |
+| T15c | context ADMIN with **no user** (NULL), and again with a **blank** user `'  '` → UPDATE a date | **both rejected** by `CK_ProblemFechaEvento_Atribucion`; `Problem` unchanged; 0 rows |
+| T15d | context ADMIN + user, **no request id** → UPDATE a date | **allowed**: 1 row, `ADMIN`, user, `SolicitudId` NULL |
 | T15e | DELETE a TST `Problem` row that has history | **rejected by the FK**; a row without history deletes normally |
 | T15f | UPDATE / DELETE on `ProblemFechaEvento` | both rejected by the guard (50001) |
-| T15g | baseline script on the test copy | count = non-NULL dates; every row is `B`, `Reconstruido = 1`, `FechaAnterior` NULL |
+| T15g | baseline script on the test copy | count = non-NULL dates; every row is `B`, `Reconstruido = 1`, `FechaAnterior` NULL; none uses `FechaOriginal*`/`NroCambioFecha*` values |
 | T16 | rollback step 1: a load runs normally, 0 new rows, table intact. Step 2: table gone; `Problem` and the loader unaffected | as described |
 
 Cleanup (test environment only): disable the guard, delete the TST events and then the TST rows, re-enable the guard.
@@ -566,13 +593,15 @@ Cleanup (test environment only): disable the guard, delete the TST events and th
 **Design**
 - [ ] Table schema (§2): one row per field transition, `FechaAnterior`/`FechaNueva` separate from `FechaRegistro`.
 - [ ] Trigger behavior (§5): `AFTER INSERT, UPDATE`, set-based, `EXCEPT` comparison, no claim that it cannot fail.
-- [ ] Append-only (§9): no updates or deletes, permissions plus guard trigger.
+- [x] Append-only (D7, §9): permissions plus guard trigger; `db_owner` can bypass it; the test cleanup disables the guard first.
 - [ ] Day-level comparison: time-only changes ignored.
-- [ ] Baseline (§6): load it ("Línea base", current non-NULL values, including non-current rows) **or** skip it.
-- [ ] `NroCambioFecha*` and `FechaOriginal*` excluded from history; "Cambio n" derived by the UI (§4 labels).
-- [ ] Intentional FK-based delete prevention accepted (§8).
-- [ ] Excel attribution (§7): `NO_DECLARADO`, no `Usuario` or `SolicitudId`, `LoginBD` recorded; `EXCEL` deferred.
-- [ ] Future web attribution requirement (§7, §11): `ADMIN` + required authenticated `Usuario` + `SolicitudId` when the workflow exists + `LoginBD`; no `Motivo` column.
+- [x] Baseline (D1, §6): **approved**: current non-NULL values only, `B`/`Reconstruido = 1`, shown as "Línea base", including non-current rows.
+- [x] Labels and numbering (D2, D3, §4): locked; "Cambio n" only for date → different date, UI only.
+- [x] `NroCambioFecha*` and `FechaOriginal*` excluded from history.
+- [x] Intentional FK-based delete prevention (D6, §8).
+- [x] Excel attribution (D4, §7): `NO_DECLARADO`, no `Usuario` or `SolicitudId`, `LoginBD` recorded; `EXCEL` deferred.
+- [x] Web attribution (D5, §7): `ADMIN` + **required** non-blank `Usuario` (no user = reject) + **optional** `SolicitudId` + `LoginBD`.
+- [x] No `Motivo` column (D9, §11).
 - [ ] `dbo.Problem` and `usp_CargarExperiencia` remain unmodified.
 
 **Test → production**
