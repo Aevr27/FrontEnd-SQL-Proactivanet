@@ -69,6 +69,8 @@ FechaSolucion  15/07/2026 → 24/07/2026   (Cambio 2)
 | V7 | Admin's identity source is `IdentidadWindows` (`App_Code/IdentidadWindows.cs`). It is built only from `HttpContext.User.Identity.Name`, which IIS fills through Windows authentication. `Original` (`DOMAIN\account`) is documented there as the security identity "that should go into any future log". Without IIS authentication it is anonymous, and identity is never invented. | code |
 | V8 | Admin does not write `dbo.Problem` today. "Solicitar cambios" is a browser-only draft (`SolicitudCambio` in `admin/registro-iniciativas.js`) with fields: field, current value, new date and a **required `motivo`**. It is not submitted anywhere. `adm.Solicitud` does not exist; it is only proposed in `PROPUESTA_numero_solicitud.md`. | code |
 | V9 | The panel already expects `historial: [{campo, anterior, nuevo, fecha, usuario}]` (`htmlHistorial`). It always arrives empty today. | code |
+| V10 | `cargar_experiencia.py` (copy reviewed 2026-10-07, `Downloads\cargar_experiencia 1.py`, 410 lines) writes **only staging**: for each sheet it runs `DELETE FROM stg.<tabla>`, then a parameterized `INSERT INTO stg.<tabla>` with `fast_executemany` into `stg.Problems`, `stg.Iniciativas`, `stg.CatPersona` and `stg.CatCategoriaDueno`. Then it calls `{CALL dbo.usp_CargarExperiencia (?)}` with the simulation flag (0/1), reads every result set the procedure returns, and commits. The script never names `dbo.Problem` in a write. It uses no bcp, `BULK INSERT`, `SqlBulkCopy`, `to_sql`, MERGE or `OUTPUT`, and it sets no session context. Dates are sent as raw text and converted in SQL by `dbo.fn_ExpFecha`. | code |
+| V11 | The loader connects through `conectar()` in `etl_proactivanet.py`, with `autocommit=False`. Staging and the procedure call each end with an explicit `commit()`, so trigger rows commit or roll back together with the `Problem` changes. The login comes from the `sql` block of the ETL's `config.json`: `autenticacion_windows` (default `True`) means `Trusted_Connection`, i.e. **the Windows account of whoever runs the script**; otherwise the SQL user `usuario`. The repo copy of `config.json` has `autenticacion_windows: true`, but it points to another server, so it may not be the copy actually used. | code |
 
 ### Open, must be closed before the test environment (none is closed yet)
 
@@ -77,9 +79,9 @@ FechaSolucion  15/07/2026 → 24/07/2026   (Cambio 2)
 | O1 | Exact type, length and **collation** of `Problem.Codigo` | The FK column must match it exactly. It fills `{{TIPO_CODIGO}}`. | P0-1 |
 | O2 | Exact types of `FechaAnalisis/FechaSolucion/FechaCierre`, and whether non-midnight times exist | Decides whether the comparison and conversion are safe. **A character type would stop this design.** The N6 output shows `2026-10-21 00:00:00`, but the type has not been confirmed. | P0-1, P0-6 |
 | O3 | `OUTPUT` without `INTO` on `dbo.Problem`, in the loader or any other writer | **SQL Server rejects that statement once the table has an enabled trigger (Msg 334). The load would fail.** | P0-3 (SQL side) + Python review (O4) |
-| O4 | **`cargar_experiencia.py`** writing `dbo.Problem` directly (bcp, `BULK INSERT`, `SqlBulkCopy`, `to_sql`, executemany UPDATE/DELETE) instead of only filling staging and calling the procedure | Bulk paths that bypass triggers would leave silent gaps; a DELETE would fail once history exists. The local copy is gone, so this is **not verified**. | Manual review of the current file |
+| O4 | ~~`cargar_experiencia.py` writing `dbo.Problem` directly~~ **Closed by code review (V10)**, with one caveat: confirm that the reviewed copy is the one actually run. The machine that runs the loads should have the same 410-line file, with `volcar()` writing only to `stg.*`. | A different deployed version could bypass the trigger | Compare the deployed file with the reviewed copy (hash or diff) |
 | O5 | Other unknown writers: modules referencing `Problem` without the `dbo.` prefix (missed by H3), SQL Agent job steps, external scripts | Same reasons as O3 and O4 | P0-3, P0-7, ask the owners |
-| O6 | Which database login(s) the loader and the web application use | Decides how informative `LoginBD` is (§7). The web connection string uses a SQL login; the loader's login is unknown. | Ask the owners / P0-5 while a load runs |
+| O6 | Which database login(s) the loader and the web application use. **Partly answered (V11):** the loader uses the Windows account of the person running it, **if** the `config.json` actually used keeps `autenticacion_windows: true`; the web uses the SQL login from `Web.config`. | Decides what `LoginBD` shows (§7). With Windows authentication, Excel rows will carry the **operator who ran the load**, not the requester. That is consistent with D4, provided `LoginBD` is never displayed as a requester. | Check the `sql` block of the `config.json` on the machine that runs the loader (do not copy the password) |
 | O7 | Delete/update rule of `FK_ProblemCategoria_Problem` | Context for §8 only | P0-4 |
 
 ---
@@ -308,7 +310,7 @@ These four fields stay conceptually separate:
   - (b) The trigger maps a dedicated loader login to `EXCEL`. This works only if O6 proves the login is used exclusively by the loader, and it hardcodes a login name.
 
   Either one would add `'EXCEL'` to `CK_ProblemFechaEvento_Origen` later.
-- `LoginBD` still records the database login, as technical evidence.
+- `LoginBD` still records the database login, as technical evidence. If the loader uses Windows authentication (V11), that login is the **operator who ran the load**, not the person who requested or agreed the change. That is why it is never shown as a requester.
 - The panel labels these rows honestly, for example "Sin solicitante registrado (carga de Excel u otra vía directa)". It never shows "desconocido" as a person, and never shows `LoginBD` as a person.
 
 **Web / Admin path (future; attribution required).**
@@ -377,10 +379,10 @@ Expected impact, if O1–O6 come back clean:
 
 **Not closed. Each item blocks the move to the test environment until there is evidence:**
 1. O3: `OUTPUT` without `INTO` (Msg 334).
-2. O4: `cargar_experiencia.py` writing `dbo.Problem` directly. bcp, `BULK INSERT` and `SqlBulkCopy` without `FIRE_TRIGGERS` **skip** the trigger (silent gaps). pyodbc/pandas row inserts and updates fire it normally. A DELETE fails once history exists (§8).
+2. O4: **closed by code review (V10)**. The script writes only `stg.*` and then calls the procedure; nothing bypasses the trigger. Remaining: confirm the deployed copy matches the reviewed one.
 3. O5: other writers.
 4. O1/O2: exact types and collation.
-5. O6: logins.
+5. O6: logins. The loader likely uses the operator's Windows account (V11); confirm with the `config.json` actually used.
 
 ---
 
@@ -568,6 +570,7 @@ Setup: a scratch initiative built by scripting an existing row's INSERT (SSMS "S
 | T13 | multi-row UPDATE over **all** rows setting each date to itself | 0 |
 | T14 | `usp_CargarExperiencia` twice with the same staging data | **both runs succeed**; the 2nd run writes 0 rows |
 | T15 | change one date in staging, run the loader | **succeeds**; exactly 1 `U`, `NO_DECLARADO`, `Usuario`/`SolicitudId` NULL, `LoginBD` = loader login; duration within noise of the run without the trigger |
+| T15h | `cargar_experiencia.py --simulacion` (procedure called with 1) | succeeds; **0** rows persisted, whatever the procedure does internally |
 | T15b | context ADMIN + user + 123 → UPDATE; clear the context → UPDATE on the same connection | 1st: `ADMIN`/user/123; 2nd: `NO_DECLARADO`/NULL/NULL |
 | T15c | context ADMIN with **no user** (NULL), and again with a **blank** user `'  '` → UPDATE a date | **both rejected** by `CK_ProblemFechaEvento_Atribucion`; `Problem` unchanged; 0 rows |
 | T15d | context ADMIN + user, **no request id** → UPDATE a date | **allowed**: 1 row, `ADMIN`, user, `SolicitudId` NULL |
@@ -585,9 +588,9 @@ Cleanup (test environment only): disable the guard, delete the TST events and th
 **Before the test environment**
 - [ ] O1/O2: P0-1 (and P0-6 if applicable) run; `{{TIPO_CODIGO}}` filled; dates confirmed as a date/time type.
 - [ ] O3: no `OUTPUT` without `INTO` targeting `dbo.Problem`.
-- [ ] O4: `cargar_experiencia.py` reviewed: no direct writes to `dbo.Problem` (or each finding resolved).
+- [x] O4: `cargar_experiencia.py` reviewed (V10): it writes only `stg.*` and calls `usp_CargarExperiencia`; no direct writes to `dbo.Problem`. Still to do: confirm the deployed copy is the same file.
 - [ ] O5: no unknown writers (P0-3, P0-7, owners asked).
-- [ ] O6: the loader's and the web's database logins identified.
+- [ ] O6: the loader's and the web's database logins identified (loader: probably the operator's Windows account; confirm in the `config.json` actually used).
 - [ ] Test environment selected.
 
 **Design**
