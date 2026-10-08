@@ -73,6 +73,17 @@ Check('3g año 2026, hoy 2026-02-01: solo enero', '2026-01-01..2026-01-31', anio
 Check('3h año pasado siempre completo', '2025-01-01..2025-12-31', anio(2026, 10, 8, '2025'));
 Check('3i año futuro es error', 'ERROR', anio(2026, 10, 8, '2027'));
 Check('3j año 2028, hoy 2028-03-31 -> febrero bisiesto', '2028-01-01..2028-02-29', anio(2028, 3, 31, '2028'));
+Check('3n año 2024, hoy 2024-02-15 (bisiesto) -> solo enero', '2024-01-01..2024-01-31', anio(2024, 2, 15, '2024'));
+Check('3o año 2024, hoy 2024-03-15 -> hasta el 29-feb', '2024-01-01..2024-02-29', anio(2024, 3, 15, '2024'));
+// Lo que manda Año pasa las mismas reglas que el handler aplica a modo=rango
+// (aaaa-mm-dd, inicio <= fin, <= 366 dias): se revalida como Rango personalizado.
+[[2026, 10, 8, '2026'], [2026, 12, 1, '2026'], [2026, 1, 15, '2025'], [2024, 3, 15, '2024']].forEach(function (c) {
+  var a = P('anio', hoy(c[0], c[1], c[2]), c[3]);
+  var r = P('rango', hoy(c[0], c[1], c[2]), null, a.params.fechaInicio, a.params.fechaFin);
+  Check('3p año ' + c[3] + ' (hoy ' + c.slice(0, 3).join('-') + ') es un modo=rango valido',
+    { modo: 'rango', fechaInicio: a.params.fechaInicio, fechaFin: a.params.fechaFin, error: undefined },
+    { modo: a.params.modo, fechaInicio: r.params && r.params.fechaInicio, fechaFin: r.params && r.params.fechaFin, error: r.error });
+});
 Check('3k fin de Año = fin de Mes pasado (año en curso)',
   P('mes', hoy(2026, 10, 8)).fin, P('anio', hoy(2026, 10, 8), '2026').fin);
 Check('3l año usa modo=rango', 'rango', P('anio', hoy(2026, 10, 8), '2026').params.modo);
