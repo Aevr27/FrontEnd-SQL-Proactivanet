@@ -76,6 +76,50 @@ FROM (SELECT CodigoTicket FROM dbo.vw_Tickets
       GROUP BY CodigoTicket HAVING COUNT(*) > 1) AS r;
 
 
+/* 5) Selector de periodo de "Descargar" -------------------------------
+   Mes pasado = modo mes (Anio/Mes). Año y Rango = modo rango: misma vista,
+   b.FechaRegistro >= inicio AND < fin + 1 dia. */
+DECLARE @MpIni DATE = DATEADD(MONTH, -1, DATEFROMPARTS(YEAR(GETDATE()), MONTH(GETDATE()), 1));
+DECLARE @MpFin DATE = EOMONTH(@MpIni);
+
+-- 5a) Mes pasado por Anio/Mes = mismo mes por fecha, y nada fuera de sus dias.
+SELECT Prueba          = '5a MES PASADO',
+       Inicio          = @MpIni, Fin = @MpFin,
+       PorAnioMes      = (SELECT COUNT(*) FROM dbo.vw_TicketsMesBase
+                          WHERE Anio = YEAR(@MpIni) AND Mes = MONTH(@MpIni)),
+       PorFecha        = (SELECT COUNT(*) FROM dbo.vw_TicketsMesBase
+                          WHERE FechaRegistro >= @MpIni AND FechaRegistro < DATEADD(DAY, 1, @MpFin)),
+       FueraDeSusDias  = (SELECT COUNT(*) FROM dbo.vw_TicketsMesBase
+                          WHERE Anio = YEAR(@MpIni) AND Mes = MONTH(@MpIni)
+                            AND (FechaRegistro < @MpIni OR FechaRegistro >= DATEADD(DAY, 1, @MpFin))),
+       Primero         = (SELECT MIN(FechaRegistro) FROM dbo.vw_TicketsMesBase
+                          WHERE Anio = YEAR(@MpIni) AND Mes = MONTH(@MpIni)),
+       Ultimo          = (SELECT MAX(FechaRegistro) FROM dbo.vw_TicketsMesBase
+                          WHERE Anio = YEAR(@MpIni) AND Mes = MONTH(@MpIni));
+
+-- 5b) Año en curso: rango 1-ene..31-dic = suma de sus meses por Anio.
+SELECT Prueba          = '5b AÑO',
+       PorRango        = (SELECT COUNT(*) FROM dbo.vw_TicketsMesBase
+                          WHERE FechaRegistro >= DATEFROMPARTS(YEAR(GETDATE()), 1, 1)
+                            AND FechaRegistro <  DATEFROMPARTS(YEAR(GETDATE()) + 1, 1, 1)),
+       PorAnio         = (SELECT COUNT(*) FROM dbo.vw_TicketsMesBase WHERE Anio = YEAR(GETDATE())),
+       MesesConDatos   = (SELECT COUNT(DISTINCT Mes) FROM dbo.vw_TicketsMesBase WHERE Anio = YEAR(GETDATE())),
+       PrimerMesVista  = (SELECT MIN(FechaRegistro) FROM dbo.vw_TicketsMesBase);
+
+-- 5c) Rango 15-ago..20-sep del año en curso: bordes incluidos, el 21 no.
+DECLARE @RIni DATE = DATEFROMPARTS(YEAR(GETDATE()), 8, 15);
+DECLARE @RFin DATE = DATEFROMPARTS(YEAR(GETDATE()), 9, 20);
+SELECT Prueba          = '5c RANGO',
+       Tickets         = COUNT(*),
+       Primero         = MIN(b.FechaRegistro),
+       Ultimo          = MAX(b.FechaRegistro),
+       DelDia15        = SUM(CASE WHEN CAST(b.FechaRegistro AS DATE) = @RIni THEN 1 ELSE 0 END),
+       DelDia20        = SUM(CASE WHEN CAST(b.FechaRegistro AS DATE) = @RFin THEN 1 ELSE 0 END)
+FROM dbo.vw_TicketsMesBase AS b
+INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket
+WHERE b.FechaRegistro >= @RIni AND b.FechaRegistro < DATEADD(DAY, 1, @RFin);
+
+
 /* ---------------------------------------------------------------------
    ESPERADO
      KpiTablero excluye las filas sin [Categoria V2], igual que LeerVolumen
@@ -90,6 +134,12 @@ FROM (SELECT CodigoTicket FROM dbo.vw_Tickets
      3  dos filas con conteos distintos: el export con anio=@Anio trae la
         primera, nunca la suma
      4  Repetidos = 0
+     5a PorAnioMes = PorFecha; FueraDeSusDias = 0; Primero el dia 1,
+        Ultimo el ultimo dia del mes pasado
+     5b PorRango = PorAnio (Anio sale de FechaRegistro). PrimerMesVista
+        dice desde cuando hay datos: un año anterior a eso sale vacio/parcial
+     5c Primero >= el 15 y Ultimo < el 21; DelDia15 y DelDia20 > 0 si hubo
+        tickets esos dias. Tickets = "total" del handler sin filtros
 
    URLS PARA EL HANDLER (sustituir host; comparar "total" con el KPI-1
    del tablero con el mismo filtro y el mismo "Ver por"):
@@ -98,6 +148,11 @@ FROM (SELECT CodigoTicket FROM dbo.vw_Tickets
      .../handlers/experiencia_exportar.ashx?modo=slot&po=Nubia%20Rivera%20Vargas
      .../handlers/experiencia_exportar.ashx?modo=mes&anio=2026&mes=8
      .../handlers/experiencia_exportar.ashx?modo=mes&anio=2025&mes=8
+     .../handlers/experiencia_exportar.ashx?modo=mes&anio=2026&mes=9      (Mes pasado)
+     .../handlers/experiencia_exportar.ashx?modo=rango&fechaInicio=2026-01-01&fechaFin=2026-12-31
+     .../handlers/experiencia_exportar.ashx?modo=rango&fechaInicio=2026-08-15&fechaFin=2026-09-20
+     .../handlers/experiencia_exportar.ashx?modo=rango&fechaInicio=2026-09-21&fechaFin=2026-09-20 -> 400
+     .../handlers/experiencia_exportar.ashx?modo=rango&fechaInicio=2025-01-01&fechaFin=2026-01-02 -> 400
      .../handlers/experiencia_exportar.ashx?modo=nope          -> 400
      .../handlers/experiencia_exportar.ashx?modo=mes&mes=13    -> 400
    --------------------------------------------------------------------- */

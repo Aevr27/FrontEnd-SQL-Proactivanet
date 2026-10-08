@@ -438,7 +438,8 @@ public class Qa : IHttpHandler
         var filtradas = QaCorreo.Filtrar(filas, validacion, grupo, tecnico, grupoCorrecto);
 
         long total = filtradas.Count;
-        var filasPagina = QaCorreo.Paginar(filtradas, pagina, tamano);
+        // El mapeo de Id se pide solo para la pagina que se va a pintar.
+        var filasPagina = QaCorreo.AgregarIds(QaCorreo.Paginar(filtradas, pagina, tamano));
 
         var filtros = new Dictionary<string, object>();
         filtros["validacion"] = validacion;

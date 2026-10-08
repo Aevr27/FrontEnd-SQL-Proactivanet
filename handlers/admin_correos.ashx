@@ -1,18 +1,18 @@
 <%@ WebHandler Language="C#" Class="AdminCorreos" %>
 
-// Ejecucion REAL de los tres flujos de correo de la consola de
+// Ejecucion REAL de los cuatro flujos de correo de la consola de
 // administracion (admin/admin.html). Es el UNICO punto de la aplicacion que lanza
 // powershell.exe: la prueba de concepto que hubo aqui al lado
-// (admin_prueba_powershell.ashx + tools/test.ps1) se retiro una vez que estos
-// tres flujos quedaron funcionando.
+// (admin_prueba_powershell.ashx + tools/test.ps1) se retiro una vez que los
+// tres primeros flujos quedaron funcionando.
 //
 // NO es un ejecutor generico de comandos:
 //
 //   - Los nombres de los .ps1 estan fijos en este archivo. El navegador solo
-//     manda un identificador de flujo (qa | backlog | servicios); no puede
-//     mandar una ruta, un ejecutable ni un comando.
+//     manda un identificador de flujo (qa | backlog | servicios | qa-qare);
+//     no puede mandar una ruta, un ejecutable ni un comando.
 //   - La carpeta de los scripts se lee de Web.config (appSettings, clave
-//     unica AdminScriptsDir), nunca del request. Los tres .ps1 viven juntos
+//     unica AdminScriptsDir), nunca del request. Los .ps1 viven juntos
 //     en esa carpeta, fuera del sitio web, y NO se copian aqui.
 //   - Los unicos parametros variables son los del flujo de servicios
 //     (-Servicio / -Servicios / -Todos), y cada nombre se valida contra la
@@ -26,10 +26,16 @@
 //     copia temporal del .json de ESE flujo (config_correo_qa.json,
 //     config_correo_backlog_direccion.json o config_correo_servicio.json) con
 //     modo_prueba=true y destinatario_prueba = las direcciones validadas, y se
-//     le pasa al script con -RutaCorreo, que los tres aceptan. El archivo
+//     le pasa al script con -RutaCorreo, que esos tres aceptan. El archivo
 //     temporal vive en la carpeta de los scripts (fuera del sitio web) y se
 //     borra siempre al terminar. El navegador nunca ve el contenido de esa
 //     configuracion.
+//   - qa-qare (Enviar_CorreoQA_QARE_Oficial2.ps1) NO tiene bloque param():
+//     no acepta -RutaCorreo ni ningun otro argumento. Se lanza sin
+//     argumentos y una peticion con destinatarios temporales se rechaza en
+//     vez de ignorarlos en silencio. Lee config.json y
+//     config_correo_qa_qare.json de SU carpeta (hace Set-Location ahi), asi
+//     que los dos .json tienen que estar junto al .ps1 en AdminScriptsDir.
 //   - -FechaCorte se calcula SOLO en el servidor (dia anterior a hoy) y solo
 //     lo recibe el flujo de servicios. El navegador no puede influir en ella.
 //   - Solo POST ejecuta. GET devuelve metadatos (servicios y fecha de corte)
@@ -60,7 +66,12 @@
 //   Enviar_CorreoQA.ps1 no atrapa sus errores: se apoya en
 //   $ErrorActionPreference = 'Stop', asi que un fallo termina el proceso con
 //   codigo 1 y el detalle sale por la salida de error, no por un log.
-//   En los tres casos el criterio es el mismo: exito solo con codigo 0.
+//   Enviar_CorreoQA_QARE_Oficial2.ps1 igual que QA: $ErrorActionPreference =
+//   'Stop' sin try/catch global, asi que un throw (falta un .json, SQL sin
+//   filas, SMTP) sale con codigo 1 y el detalle va a la salida de error.
+//   Ojo: con "enviar_correo": false en su .json termina con 0 SIN mandar
+//   nada ("Envio desactivado." en la salida).
+//   En los cuatro casos el criterio es el mismo: exito solo con codigo 0.
 //
 // REQUISITOS DEL ENTORNO (lo que hay que darle a la identidad del App Pool)
 //   - Permiso de ESCRITURA en la carpeta de los scripts: los tres crean y
@@ -116,6 +127,11 @@ public class AdminCorreos : IHttpHandler
         public string Script;        // nombre del .ps1, fijo en el codigo
         public string ConfigCorreo;  // su .json, plantilla de la copia temporal
         public bool   PideServicio;
+        public bool   AceptaRutaCorreo;  // el .ps1 tiene -RutaCorreo
+        // Archivos que el .ps1 lee de su carpeta y sin los que falla al
+        // arrancar. Se comprueban junto con el script para que la tarjeta
+        // diga "no disponible" antes de pulsar ENVIAR.
+        public string[] Requiere;
     }
 
     private static readonly Flujo[] FLUJOS =
@@ -124,19 +140,30 @@ public class AdminCorreos : IHttpHandler
             Id = "qa", Titulo = "Correo QA",
             Script = "Enviar_CorreoQA.ps1",
             ConfigCorreo = "config_correo_qa.json",
-            PideServicio = false
+            PideServicio = false,
+            AceptaRutaCorreo = true
         },
         new Flujo {
             Id = "backlog", Titulo = "Correo Backlog",
             Script = "Enviar_CorreoBacklog_direccion.ps1",
             ConfigCorreo = "config_correo_backlog_direccion.json",
-            PideServicio = false
+            PideServicio = false,
+            AceptaRutaCorreo = true
         },
         new Flujo {
             Id = "servicios", Titulo = "Servicios",
             Script = "Enviar_CorreoServicio.ps1",
             ConfigCorreo = "config_correo_servicio.json",
-            PideServicio = true
+            PideServicio = true,
+            AceptaRutaCorreo = true
+        },
+        new Flujo {
+            Id = "qa-qare", Titulo = "Correo QA + QARE",
+            Script = "Enviar_CorreoQA_QARE_Oficial2.ps1",
+            ConfigCorreo = "config_correo_qa_qare.json",
+            PideServicio = false,
+            AceptaRutaCorreo = false,
+            Requiere = new[] { "config.json", "config_correo_qa_qare.json" }
         },
     };
 
@@ -183,6 +210,10 @@ public class AdminCorreos : IHttpHandler
             // -FechaCorte, en cambio, sigue siendo exclusivo de servicios: qa
             // y backlog no lo aceptan.
             var personalizados = ValidarDestinatarios(context.Request.Form["destinatarios"]);
+            if (personalizados.Count > 0 && !flujo.AceptaRutaCorreo)
+                throw new ArgumentException(
+                    "El flujo \"" + flujo.Id + "\" no admite destinatarios temporales: " +
+                    "su script no tiene -RutaCorreo y usa siempre su distribucion configurada.");
             if (personalizados.Count > 0)
             {
                 configTemporal = CrearConfigTemporal(
@@ -232,6 +263,7 @@ public class AdminCorreos : IHttpHandler
                 { "disponible",   ruta != null },
                 { "problema",     problema ?? string.Empty },
                 { "pideServicio", f.PideServicio },
+                { "aceptaDestinatarios", f.AceptaRutaCorreo },
             };
         }
 
@@ -253,7 +285,7 @@ public class AdminCorreos : IHttpHandler
                 return f;
 
         throw new ArgumentException(
-            "Flujo no reconocido. Solo se permiten: qa, backlog, servicios.");
+            "Flujo no reconocido. Solo se permiten: qa, backlog, servicios, qa-qare.");
     }
 
     // Carpeta configurada + nombre fijo del script. Se comprueba que exista
@@ -265,7 +297,7 @@ public class AdminCorreos : IHttpHandler
         if (string.IsNullOrWhiteSpace(carpeta))
             throw new ConfigurationErrorsException(
                 "Falta la clave <appSettings> \"" + ClaveDirScripts + "\" en Web.config: " +
-                "es la carpeta donde viven los tres .ps1 de correo.");
+                "es la carpeta donde viven los .ps1 de correo.");
 
         carpeta = carpeta.Trim();
         if (!Directory.Exists(carpeta))
@@ -276,6 +308,17 @@ public class AdminCorreos : IHttpHandler
         if (!File.Exists(ruta))
             throw new FileNotFoundException(
                 "No se encontro " + flujo.Script + " en la carpeta configurada.", ruta);
+
+        if (flujo.Requiere != null)
+        {
+            foreach (var archivo in flujo.Requiere)
+            {
+                if (!File.Exists(Path.Combine(carpeta, archivo)))
+                    throw new FileNotFoundException(
+                        "No se encontro " + archivo + " junto a " + flujo.Script +
+                        " en la carpeta configurada.", archivo);
+            }
+        }
 
         return ruta;
     }

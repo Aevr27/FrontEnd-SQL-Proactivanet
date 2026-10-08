@@ -740,10 +740,21 @@ public static partial class ExperienciaQueries
     // meter otra cosa en el FROM.
     public const string MODO_SLOT = "slot";
     public const string MODO_MES = "mes";
+    // Periodo cerrado que elige el usuario en el selector de "Descargar"
+    // (Año o Rango personalizado): dias calendario inicio..fin, ambos
+    // incluidos. "Mes pasado" no lo usa: va por MODO_MES.
+    public const string MODO_RANGO = "rango";
+
+    // Tope del rango: un año bisiesto completo. Un periodo mas largo
+    // multiplica el costo de las UDF de la vista base sin que nadie lo pida.
+    public const int DIAS_MAX_RANGO = 366;
 
     // Las vistas base pasan por tres UDF escalares por ticket; un mes
     // completo tarda mas que los 30 s por omision de SqlCommand.
     private const int TIMEOUT_EXPORT_SEGUNDOS = 180;
+    // Un año entero son ~12 meses de ese mismo costo. Cabe en el
+    // executionTimeout de 900 s de Web.config.
+    private const int TIMEOUT_EXPORT_RANGO_SEGUNDOS = 600;
 
     // POR QUE EL EXPORT TIENE SU PROPIA CONSULTA
     // ------------------------------------------
@@ -779,13 +790,58 @@ public static partial class ExperienciaQueries
     {
         var sql = ConsultaExport(modo);
         var filtro = new FiltroDuenos(director, po, manager, so);
+        bool porMes = modo == MODO_MES;
 
         using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
         {
             cn.Open();
             var dir = DirectorioOrganizacional.Cargar(cn);
-            return LeerTicketsExport(cn, sql, modo == MODO_MES, anio, mes, dir, filtro);
+            return LeerTicketsExport(cn, sql, TIMEOUT_EXPORT_SEGUNDOS, cmd =>
+            {
+                if (!porMes) return;
+                cmd.Parameters.Add("@anio", SqlDbType.Int).Value = anio;
+                cmd.Parameters.Add("@mes", SqlDbType.Int).Value = mes;
+            }, dir, filtro);
         }
+    }
+
+    // MODO_RANGO: tickets con FechaRegistro dentro de los dias inicio..fin
+    // (los dos incluidos; solo cuenta la parte de fecha). En SQL va como
+    // intervalo semiabierto [inicio, fin + 1 dia) para que entre todo el
+    // ultimo dia, hasta 23:59:59.997, sin depender de la precision de la
+    // columna. El handler ya valido inicio <= fin y el tope; aqui se vuelve
+    // a comprobar para que ningun llamador se lo salte.
+    public static List<object> ExportarTicketsRango(DateTime inicio, DateTime fin,
+        string director, string po, string manager, string so)
+    {
+        DateTime desde, hasta;
+        LimitesRango(inicio, fin, out desde, out hasta);
+        var sql = ConsultaExport(MODO_RANGO);
+        var filtro = new FiltroDuenos(director, po, manager, so);
+
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            var dir = DirectorioOrganizacional.Cargar(cn);
+            return LeerTicketsExport(cn, sql, TIMEOUT_EXPORT_RANGO_SEGUNDOS, cmd =>
+            {
+                cmd.Parameters.Add("@desde", SqlDbType.DateTime).Value = desde;
+                cmd.Parameters.Add("@hasta", SqlDbType.DateTime).Value = hasta;
+            }, dir, filtro);
+        }
+    }
+
+    // [desde, hasta) del rango inicio..fin en dias completos. Aparte para que
+    // tools/tests/ExportarTicketsExperienciaSmoke.cs pruebe los bordes.
+    private static void LimitesRango(DateTime inicio, DateTime fin, out DateTime desde, out DateTime hasta)
+    {
+        desde = inicio.Date;
+        var ultimo = fin.Date;
+        if (ultimo < desde)
+            throw new ArgumentException("La fecha inicio es posterior a la fecha fin.");
+        if ((ultimo - desde).TotalDays + 1 > DIAS_MAX_RANGO)
+            throw new ArgumentException("El rango pasa del tope de dias.");
+        hasta = ultimo.AddDays(1);
     }
 
     // Las 24 columnas del libro (COLUMNAS_TICKETS en experiencia.js) mas
@@ -819,6 +875,15 @@ public static partial class ExperienciaQueries
                 "FROM dbo.vw_TicketsMesBase AS b " +
                 "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
                 "WHERE b.Anio = @anio AND b.Mes = @mes " +
+                "ORDER BY b.FechaRegistro DESC";
+
+        // Misma vista base que MES (la que cubre todos los meses), pero por
+        // fecha de registro: un rango no tiene por que empezar el dia 1.
+        if (modo == MODO_RANGO)
+            return EXPORT_SELECT +
+                "FROM dbo.vw_TicketsMesBase AS b " +
+                "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
+                "WHERE b.FechaRegistro >= @desde AND b.FechaRegistro < @hasta " +
                 "ORDER BY b.FechaRegistro DESC";
 
         throw new ArgumentException("Modo de export no reconocido.");
@@ -864,20 +929,16 @@ public static partial class ExperienciaQueries
         return filtro.Pasa(director, po, manager, so);
     }
 
-    private static List<object> LeerTicketsExport(SqlConnection cn, string sql,
-        bool porMes, int anio, int mes, DirectorioOrganizacional dir, FiltroDuenos filtro)
+    private static List<object> LeerTicketsExport(SqlConnection cn, string sql, int timeoutSegundos,
+        Action<SqlCommand> parametros, DirectorioOrganizacional dir, FiltroDuenos filtro)
     {
         var filas = new List<object>();
 
         using (var cmd = new SqlCommand(sql, cn))
         {
             cmd.CommandType = CommandType.Text;
-            cmd.CommandTimeout = TIMEOUT_EXPORT_SEGUNDOS;
-            if (porMes)
-            {
-                cmd.Parameters.Add("@anio", SqlDbType.Int).Value = anio;
-                cmd.Parameters.Add("@mes", SqlDbType.Int).Value = mes;
-            }
+            cmd.CommandTimeout = timeoutSegundos;
+            parametros(cmd);
 
             using (var rd = cmd.ExecuteReader())
             {

@@ -711,6 +711,19 @@
     });
   }
 
+  // Formulario de la incidencia en Proactivanet: la misma URL que celdaCodigo
+  // de backlog/backlog.js. qa.ashx manda IdProactivanet (GUID) leido de
+  // dbo.TicketProactivanetId; si es null, el codigo queda como texto plano.
+  var URL_TICKET_PROACTIVANET =
+    'https://soriana.proactivanet.com/proactivanet/servicedesk/incidents/formIncidents/formIncidents.paw?id=';
+
+  function celdaCodigo(t) {
+    var codigo = esc(t['Código']);
+    if (!t.IdProactivanet) return codigo;
+    var href = URL_TICKET_PROACTIVANET + encodeURIComponent(t.IdProactivanet);
+    return '<a class="enlace-ticket" href="' + href + '" target="_blank" rel="noopener">' + codigo + '</a>';
+  }
+
   function pintarDetalle(datos) {
     var filas = datos.rows || [];
     estado.total = datos.total || 0;
@@ -746,7 +759,7 @@
       var clase = validacion === 'Incorrecto' ? 'badge badge-rojo' : 'badge badge-gris';
 
       return '<tr>' +
-        '<td>' + esc(t['Código']) + '</td>' +
+        '<td>' + celdaCodigo(t) + '</td>' +
         '<td>' + esc(fechaHora(t['Fecha de registro'])) + '</td>' +
         '<td class="recorte" title="' + esc(t['Título']) + '">' + esc(recortar(t['Título'], 70)) + '</td>' +
         '<td>' + esc(t['Grupo']) + '</td>' +
