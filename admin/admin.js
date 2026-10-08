@@ -1,13 +1,14 @@
 /* =========================================================================
    admin.js — consola de administracion
 
-   Las tres tarjetas de correo (QA, Backlog, Servicios) SI ejecutan:
+   Las cuatro tarjetas de correo (QA, Backlog, Servicios, QA + QARE) SI
+   ejecutan:
    el boton ENVIAR hace POST a handlers/admin_correos.ashx, que lanza
    powershell.exe sobre el .ps1 correspondiente desde su propia carpeta.
 
    Lo que este archivo NO hace, a proposito:
      - no decide que script se ejecuta: solo manda el identificador del
-       flujo (qa | backlog | servicios); los nombres de los .ps1 y sus
+       flujo (qa | backlog | servicios | qa-qare); los nombres de los .ps1 y sus
        carpetas viven en el handler y en Web.config;
      - no calcula la fecha de corte: la trae del servidor, que es quien se
        la pasa al script;
@@ -26,15 +27,18 @@
 
 'use strict';
 
-/* Endpoint unico de la consola. Solo acepta los tres flujos de abajo. */
+/* Endpoint unico de la consola. Solo acepta los flujos de abajo. */
 var ENDPOINT = '../handlers/admin_correos.ashx';
 
 /* -------------------------------------------------------------------------
-   Los tres flujos de correo.
+   Los flujos de correo.
 
    `id` es lo unico que viaja al servidor. `script` es informativo: el
    handler tiene el nombre fijo por su cuenta y no acepta rutas del
    navegador.
+
+   `sinDestinatarios`: el .ps1 no tiene -RutaCorreo, asi que la tarjeta no
+   ofrece destinatarios personalizados (el handler los rechazaria).
    ------------------------------------------------------------------------- */
 var TRABAJOS_CORREO = [
   {
@@ -61,6 +65,15 @@ var TRABAJOS_CORREO = [
     script: 'Enviar_CorreoServicio.ps1',
     adjuntos: 0,
     destacado: true
+  },
+  {
+    id: 'qa-qare',
+    icono: '📧',
+    titulo: 'Correo QA + QARE',
+    descripcion: 'Reporte combinado de calidad y QARE con sus destinatarios y adjuntos oficiales.',
+    script: 'Enviar_CorreoQA_QARE_Oficial2.ps1',
+    adjuntos: 3,
+    sinDestinatarios: true
   }
 ];
 
@@ -68,42 +81,6 @@ var TRABAJOS_CORREO = [
    servicios, fecha de corte calculada alli y disponibilidad de cada script.
    Hasta que llegan, la tarjeta de Servicios se muestra cargando. */
 var META = { fechaCorte: '', servicios: [], flujos: {}, cargado: false, error: '' };
-
-/* Las cuatro utilidades. Ninguna esta conectada: todas abren el mismo aviso. */
-var HERRAMIENTAS = [
-  {
-    id: 'diagnostico',
-    icono: '🔌',
-    titulo: 'Diagnostico de conexion',
-    descripcion: 'Comprobar el estado de la conexion con SQL Server.',
-    estado: 'No habilitado',
-    accion: 'Ejecutar diagnostico'
-  },
-  {
-    id: 'base-datos',
-    icono: '🗄️',
-    titulo: 'Base de datos',
-    descripcion: 'Ver el estado de las cargas y los cortes guardados.',
-    estado: 'No habilitado',
-    accion: 'Abrir'
-  },
-  {
-    id: 'reporte',
-    icono: '📄',
-    titulo: 'Generar reporte',
-    descripcion: 'Producir un reporte fuera del calendario habitual.',
-    estado: 'No habilitado',
-    accion: 'Generar'
-  },
-  {
-    id: 'configuracion',
-    icono: '⚙️',
-    titulo: 'Configuracion',
-    descripcion: 'Parametros de la consola y de los envios programados.',
-    estado: 'No habilitado',
-    accion: 'Configurar'
-  }
-];
 
 /* Tope de destinatarios temporales. Es el mismo que valida el handler; aqui
    solo sirve para avisar antes de mandar. */
@@ -202,7 +179,7 @@ function bloqueCabecera(t) {
     '</div>';
 }
 
-/* Modo de destinatarios. Lo usan las TRES tarjetas: los tres .ps1 aceptan
+/* Modo de destinatarios. Lo usan QA, Backlog y Servicios: sus tres .ps1 aceptan
    -RutaCorreo y su configuracion tiene modo_prueba/destinatario_prueba, asi
    que el handler puede sustituir la distribucion por unas direcciones sueltas
    en cualquiera de los tres flujos.
@@ -211,6 +188,13 @@ function bloqueCabecera(t) {
    copia temporal y la borra al terminar. Las direcciones viven en el estado de
    la pagina mientras este abierta; no se guardan en ningun sitio. */
 function bloqueDestinatarios(t) {
+  if (t.sinDestinatarios) {
+    return '<div class="serv-bloque">' +
+        '<h4>Destinatarios</h4>' +
+        '<div class="serv-nota-fecha">Se usa la distribucion oficial configurada. ' +
+          'Este flujo no admite destinatarios temporales. La pagina no la muestra.</div>' +
+      '</div>';
+  }
   var e = estados[t.id];
   var personalizados = (e.modoDestinatarios === 'personalizados');
 
@@ -260,7 +244,8 @@ function motivoNoListo(t) {
     if (!META.fechaCorte)    { return 'Sin fecha de corte del servidor'; }
   }
 
-  /* Los destinatarios personalizados son de los tres flujos. */
+  /* Los destinatarios personalizados: solo en los flujos que los admiten
+     (en qa-qare el modo nunca sale de 'normal'). */
   if (e.modoDestinatarios === 'personalizados') {
     var dirs = listaDestinatarios(e.destinatarios);
     if (!dirs.length) { return 'Faltan los destinatarios personalizados'; }
@@ -361,7 +346,7 @@ function bloqueEjecucion(t) {
     '</div>';
 }
 
-/* ---- Tarjeta compacta (Correo QA / Correo Backlog) --------------------- */
+/* ---- Tarjeta compacta (Correo QA / Correo Backlog / Correo QA + QARE) -- */
 
 function plantillaTrabajo(t) {
   var e = estados[t.id];
@@ -515,26 +500,6 @@ function pintarTodo() {
            ' data-estado="inicial"></article>';
   }).join('');
   TRABAJOS_CORREO.forEach(pintarTrabajo);
-
-  var grid2 = document.getElementById('grid-herramientas');
-  grid2.innerHTML = HERRAMIENTAS.map(function (h) {
-    return '<article class="job" data-herramienta="' + esc(h.id) + '">' +
-        '<div class="job-cab">' +
-          '<div class="job-icono" aria-hidden="true">' + esc(h.icono) + '</div>' +
-          '<div class="job-tit">' +
-            '<h3>' + esc(h.titulo) + '</h3>' +
-            '<p>' + esc(h.descripcion) + '</p>' +
-          '</div>' +
-        '</div>' +
-        '<div class="job-estado">' +
-          '<span class="job-punto" aria-hidden="true"></span>' +
-          '<span>' + esc(h.estado) + '</span>' +
-        '</div>' +
-        '<div class="job-pie">' +
-          '<button class="btn" type="button">' + esc(h.accion) + '</button>' +
-        '</div>' +
-      '</article>';
-  }).join('');
 }
 
 /* ---- Transiciones ------------------------------------------------------ */
@@ -701,23 +666,6 @@ function enviarTrabajo(t) {
   });
 }
 
-/* ---- Modal ------------------------------------------------------------ */
-
-var modalFondo, modalTitulo, modalTexto, focoPrevio;
-
-function abrirModal(titulo, texto) {
-  modalTitulo.textContent = titulo;
-  modalTexto.textContent = texto;
-  focoPrevio = document.activeElement;
-  modalFondo.hidden = false;
-  document.getElementById('modal-cerrar').focus();
-}
-
-function cerrarModal() {
-  modalFondo.hidden = true;
-  if (focoPrevio && focoPrevio.focus) { focoPrevio.focus(); }
-}
-
 /* ---- Arranque --------------------------------------------------------- */
 
 function trabajoDeEvento(ev) {
@@ -728,7 +676,7 @@ function trabajoDeEvento(ev) {
 
 function iniciar() {
   TRABAJOS_CORREO.forEach(function (t) {
-    /* El modo de destinatarios es de las tres tarjetas. Los destinatarios
+    /* El modo de destinatarios es de cada tarjeta. Los destinatarios
        temporales no se guardan en ningun lado: viven en esta variable
        mientras la pagina este abierta. */
     estados[t.id] = {
@@ -743,10 +691,6 @@ function iniciar() {
   });
 
   pintarTodo();
-
-  modalFondo  = document.getElementById('modal-fondo');
-  modalTitulo = document.getElementById('modal-titulo');
-  modalTexto  = document.getElementById('modal-texto');
 
   var gridCorreos = document.getElementById('grid-correos');
 
@@ -809,27 +753,6 @@ function iniciar() {
 
     e.destinatarios = campo.value;
     refrescarEstado(trabajo);
-  });
-
-  document.getElementById('grid-herramientas').addEventListener('click', function (ev) {
-    var boton = ev.target.closest('button');
-    if (!boton) { return; }
-    var tarjeta = boton.closest('[data-herramienta]');
-    var h = HERRAMIENTAS.filter(function (x) { return x.id === tarjeta.dataset.herramienta; })[0];
-    if (!h) { return; }
-    abrirModal(
-      h.titulo,
-      'Esta accion administrativa todavia no esta habilitada. Las herramientas ' +
-      'de esta seccion siguen siendo solo visuales.'
-    );
-  });
-
-  document.getElementById('modal-cerrar').addEventListener('click', cerrarModal);
-  modalFondo.addEventListener('click', function (ev) {
-    if (ev.target === modalFondo) { cerrarModal(); }
-  });
-  document.addEventListener('keydown', function (ev) {
-    if (ev.key === 'Escape' && !modalFondo.hidden) { cerrarModal(); }
   });
 
   cargarMetadatos();
