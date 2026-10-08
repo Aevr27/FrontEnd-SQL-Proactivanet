@@ -58,13 +58,25 @@ Check('2d mes pasado, hoy 2028-03-31 -> febrero bisiesto',
   { params: { modo: 'mes', anio: '2028', mes: '2' }, inicio: '2028-02-01', fin: '2028-02-29' },
   sinEtiqueta(P('mes', hoy(2028, 3, 31))));
 
-// 3) Año 2026 -> 1-ene..31-dic, no 12 meses moviles.
-Check('3 año 2026',
-  { params: { modo: 'rango', fechaInicio: '2026-01-01', fechaFin: '2026-12-31' }, inicio: '2026-01-01', fin: '2026-12-31' },
-  sinEtiqueta(P('anio', hoy(2026, 10, 8), '2026')));
-Check('3b año no depende de hoy', P('anio', hoy(2026, 10, 8), '2025').params,
-  P('anio', hoy(2026, 3, 2), '2025').params);
-Check('3c año invalido', true, !!P('anio', hoy(2026, 10, 8), 'abc').error);
+// 3) Año: 1-ene hasta el ultimo mes cerrado, nunca el mes en curso.
+function anio(y, m, d, sel) {
+  var r = P('anio', hoy(y, m, d), sel);
+  return r.error ? 'ERROR' : r.params.fechaInicio + '..' + r.params.fechaFin;
+}
+Check('3 año 2026, hoy 2026-10-08', '2026-01-01..2026-09-30', anio(2026, 10, 8, '2026'));
+Check('3b año 2026, hoy 2026-10-31', '2026-01-01..2026-09-30', anio(2026, 10, 31, '2026'));
+Check('3c año 2026, hoy 2026-12-01', '2026-01-01..2026-11-30', anio(2026, 12, 1, '2026'));
+Check('3d año 2026, hoy 2026-12-31', '2026-01-01..2026-11-30', anio(2026, 12, 31, '2026'));
+Check('3e año 2025, hoy 2026-01-15 (enero: año anterior completo)', '2025-01-01..2025-12-31', anio(2026, 1, 15, '2025'));
+Check('3f año 2026, hoy 2026-01-15: sin meses cerrados', 'ERROR', anio(2026, 1, 15, '2026'));
+Check('3g año 2026, hoy 2026-02-01: solo enero', '2026-01-01..2026-01-31', anio(2026, 2, 1, '2026'));
+Check('3h año pasado siempre completo', '2025-01-01..2025-12-31', anio(2026, 10, 8, '2025'));
+Check('3i año futuro es error', 'ERROR', anio(2026, 10, 8, '2027'));
+Check('3j año 2028, hoy 2028-03-31 -> febrero bisiesto', '2028-01-01..2028-02-29', anio(2028, 3, 31, '2028'));
+Check('3k fin de Año = fin de Mes pasado (año en curso)',
+  P('mes', hoy(2026, 10, 8)).fin, P('anio', hoy(2026, 10, 8), '2026').fin);
+Check('3l año usa modo=rango', 'rango', P('anio', hoy(2026, 10, 8), '2026').params.modo);
+Check('3m año invalido', true, !!P('anio', hoy(2026, 10, 8), 'abc').error);
 
 // 4) Rango personalizado: exactamente lo elegido.
 Check('4 rango 15-ago..20-sep',
