@@ -146,6 +146,15 @@ public static class ExportarSmoke
             new object[] { slotC1, slotC2, mesC1, mesC2, Lista(TDet), dir, MES });
     }
 
+    static string Limites(DateTime inicio, DateTime fin)
+    {
+        var args = new object[] { inicio, fin, null, null };
+        try { M("LimitesRango").Invoke(null, args); }
+        catch (TargetInvocationException e) { return "THROW:" + e.InnerException.GetType().Name; }
+        return ((DateTime)args[2]).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture) + "|" +
+               ((DateTime)args[3]).ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+    }
+
     static string Consulta(string modo)
     {
         try { return (string)M("ConsultaExport").Invoke(null, new object[] { modo }); }
@@ -178,6 +187,32 @@ public static class ExportarSmoke
         Chk("A modo en mayusculas no pasa", "THROW:ArgumentException", Consulta("SLOT"));
         Chk("A modo inyectado no pasa", "THROW:ArgumentException", Consulta("slot; DROP TABLE x"));
         Chk("A modo nulo no pasa", "THROW:ArgumentException", Consulta(null));
+
+        // ---------------------------------------------------------- A2) rango
+        // Año y Rango personalizado: misma vista base de MES, por fecha de
+        // registro y semiabierto [desde, hasta). Mes pasado va por modo mes.
+        var rango = Consulta("rango");
+        Chk("A2 rango: vista base de MES", true, rango.Contains("FROM dbo.vw_TicketsMesBase AS b"));
+        Chk("A2 rango: semiabierto por FechaRegistro", true,
+            rango.Contains("WHERE b.FechaRegistro >= @desde AND b.FechaRegistro < @hasta "));
+        Chk("A2 rango: sin Slot, sin Anio/Mes, sin TOP", false,
+            rango.Contains("Slot") || rango.Contains("@anio") || rango.Contains("@mes") || rango.Contains("TOP"));
+        Chk("A2 2026-09-01..30 (mes pasado del 8 y del 31-oct)",
+            "2026-09-01 00:00:00|2026-10-01 00:00:00", Limites(new DateTime(2026, 9, 1), new DateTime(2026, 9, 30)));
+        Chk("A2 anio 2026: 1-ene..31-dic entero",
+            "2026-01-01 00:00:00|2027-01-01 00:00:00", Limites(new DateTime(2026, 1, 1), new DateTime(2026, 12, 31)));
+        Chk("A2 15-ago..20-sep: el 20 entra completo",
+            "2026-08-15 00:00:00|2026-09-21 00:00:00", Limites(new DateTime(2026, 8, 15), new DateTime(2026, 9, 20)));
+        Chk("A2 la hora de entrada no mueve los bordes",
+            "2026-08-15 00:00:00|2026-09-21 00:00:00", Limites(new DateTime(2026, 8, 15, 13, 0, 0), new DateTime(2026, 9, 20, 1, 0, 0)));
+        Chk("A2 un solo dia", "2026-09-20 00:00:00|2026-09-21 00:00:00",
+            Limites(new DateTime(2026, 9, 20), new DateTime(2026, 9, 20)));
+        Chk("A2 inicio > fin truena", "THROW:ArgumentException",
+            Limites(new DateTime(2026, 9, 21), new DateTime(2026, 9, 20)));
+        Chk("A2 366 dias (2028 bisiesto) pasa", "2028-01-01 00:00:00|2029-01-01 00:00:00",
+            Limites(new DateTime(2028, 1, 1), new DateTime(2028, 12, 31)));
+        Chk("A2 367 dias truena", "THROW:ArgumentException",
+            Limites(new DateTime(2025, 1, 1), new DateTime(2026, 1, 2)));
 
         // ---------------------------------------------------------- catalogo
         // Ventas: dos N2 con dueños distintos, mismo Director; Caja va primero

@@ -1235,21 +1235,80 @@ function renderAll(){
 // EL DETALLE SE PIDE APARTE, YA FILTRADO
 // --------------------------------------
 // El payload del tablero no trae tickets individuales (son decenas de miles
-// de filas que solo sirven al exportar). Al pulsar el boton se pide a
-// handlers/experiencia_exportar.ashx el periodo que se esta viendo -SLOT 0, o
-// el mes P.mes_actual del año P.anio- y los cuatro filtros de dueños. El
-// servidor resuelve periodo y dueños con la misma logica que las filas de
-// categoria y devuelve solo los tickets que van al libro, sin tope.
+// de filas que solo sirven al exportar). Al pulsar el boton se elige un
+// periodo CERRADO en #descargaBk -Mes pasado, Año o Rango personalizado; ver
+// periodoDescarga- y se pide a handlers/experiencia_exportar.ashx ese periodo
+// con los cuatro filtros de dueños. El servidor filtra por fecha en SQL y
+// resuelve dueños con la misma logica que las filas de categoria; devuelve
+// solo los tickets que van al libro, sin tope. Ya no depende de "Ver por":
+// el export del periodo que se esta viendo (modo slot) sigue en el handler,
+// pero el boton no lo pide.
 const EXPORT_URL = new URL('../handlers/experiencia_exportar.ashx', BASE).href;
-async function pedirTicketsExport(){
-  const url=new URL(EXPORT_URL);
-  const esMes=modoTiempo==='mes';
-  url.searchParams.set('modo', esMes ? 'mes' : 'slot');
-  if(esMes){
-    // El mock no trae anio: en ese caso el tablero se armo con el año en curso.
-    url.searchParams.set('anio', String(P.anio || new Date().getFullYear()));
-    url.searchParams.set('mes', String(P.mes_actual));
+
+/* === PERIODO DESCARGA (inicio) ===
+   Sin document ni P: todo entra por parametro, para que
+   tools/tests/PeriodoDescargaSmoke.js lo ejecute tal cual con cualquier "hoy".
+   Devuelve {params, inicio, fin, etiqueta} -params va tal cual a la URL del
+   handler; inicio/fin son los dias aaaa-mm-dd que debe cubrir el libro, los
+   dos incluidos- o {error}. */
+var DESCARGA_MESES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio',
+  'Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+var DESCARGA_DIAS_MAX = 366;   // = ExperienciaQueries.DIAS_MAX_RANGO
+function diaLocalISO(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+function periodoDescarga(opcion, hoy, anio, desde, hasta) {
+  if (opcion === 'mes') {
+    // El mes calendario anterior al de hoy, completo: el 8 y el 31 de octubre
+    // dan septiembre; en enero, diciembre del año anterior. El dia 0 del mes
+    // en curso es el ultimo del anterior. Va por modo=mes, el mismo export
+    // por Anio/Mes ya validado contra el KPI del tablero.
+    var ini = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    var fin = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
+    return {
+      params: { modo: 'mes', anio: String(ini.getFullYear()), mes: String(ini.getMonth() + 1) },
+      inicio: diaLocalISO(ini), fin: diaLocalISO(fin),
+      etiqueta: DESCARGA_MESES[ini.getMonth()] + ' ' + ini.getFullYear(),
+    };
   }
+  if (opcion === 'anio') {
+    // Año calendario completo, no 12 meses moviles.
+    var y = Number(anio);
+    if (!Number.isInteger(y) || y < 2000 || y > 2100) return { error: 'Elige un año válido.' };
+    return {
+      params: { modo: 'rango', fechaInicio: y + '-01-01', fechaFin: y + '-12-31' },
+      inicio: y + '-01-01', fin: y + '-12-31', etiqueta: 'Año ' + y,
+    };
+  }
+  if (opcion === 'rango') {
+    var re = /^\d{4}-\d{2}-\d{2}$/;
+    if (!re.test(desde || '') || !re.test(hasta || '')) return { error: 'Indica las dos fechas: Desde y Hasta.' };
+    if (desde > hasta) return { error: 'La fecha Desde no puede ser posterior a Hasta.' };
+    var a = desde.split('-').map(Number), b = hasta.split('-').map(Number);
+    var dias = (Date.UTC(b[0], b[1] - 1, b[2]) - Date.UTC(a[0], a[1] - 1, a[2])) / 86400000 + 1;
+    if (dias > DESCARGA_DIAS_MAX) return { error: 'El rango no puede pasar de ' + DESCARGA_DIAS_MAX + ' días.' };
+    return {
+      params: { modo: 'rango', fechaInicio: desde, fechaFin: hasta },
+      inicio: desde, fin: hasta, etiqueta: desde + ' a ' + hasta,
+    };
+  }
+  return { error: 'Elige una opción.' };
+}
+// Tickets cuya fecha de registro (aaaa-mm-dd hh:mm:ss) cae fuera de los dias
+// inicio..fin. El servidor ya filtra; esto comprueba, con lo que llego, que
+// el libro no lleve ni un ticket de otro periodo.
+function fueraDePeriodo(tickets, inicio, fin) {
+  return tickets.filter(function (t) {
+    var dia = String(t.fecha_registro || '').slice(0, 10);
+    return !(dia >= inicio && dia <= fin);
+  }).length;
+}
+/* === PERIODO DESCARGA (fin) === */
+
+async function pedirTicketsExport(periodo){
+  const url=new URL(EXPORT_URL);
+  Object.keys(periodo.params).forEach(k=>url.searchParams.set(k, periodo.params[k]));
   [['director',fDir],['po',fPO],['manager',fMgr],['so',fSO]].forEach(([k,v])=>{
     if(v) url.searchParams.set(k, v);
   });
@@ -1618,22 +1677,57 @@ function filaTicket(t, cols) {
 }
 /* === COLUMNAS XLSX (fin) === */
 
-// [Pendientes Claude #7]: descarga XLSX de los tickets del periodo vigente
-// (SLOT 0 o mes actual, segun modoTiempo -- lo mismo que muestra KPI-1)
-// filtrados por Director/PO/Manager/Service Owner -- los mismos cuatro que
-// habilitan el boton. Los tickets llegan ya filtrados del servidor (ver
-// pedirTicketsExport); el libro se arma en memoria con SheetJS
-// (vendor/xlsx.mini.min.js).
-async function descargarTickets(){
+// Selector de periodo (#descargaBk). El boton de la cabecera solo lo abre;
+// la descarga sale de "Descargar" dentro, con el periodo de periodoDescarga.
+function abrirSelectorDescarga(){
+  const hoy=new Date();
+  const mes=periodoDescarga('mes', hoy);
+  document.getElementById('descargaMesTxt').textContent='('+mes.etiqueta+')';
+  const sel=document.getElementById('descargaAnio');
+  if(!sel.options.length){
+    for(let y=hoy.getFullYear(); y>=hoy.getFullYear()-5; y--) sel.add(new Option(String(y), String(y)));
+  }
+  const desde=document.getElementById('descargaDesde'), hasta=document.getElementById('descargaHasta');
+  if(!desde.value) desde.value=mes.inicio;
+  if(!hasta.value) hasta.value=mes.fin;
+  document.getElementById('descargaError').textContent='';
+  document.getElementById('descargaBk').classList.add('show');
+}
+function cerrarSelectorDescarga(){ document.getElementById('descargaBk').classList.remove('show'); }
+function confirmarDescarga(){
+  const marcada=document.querySelector('input[name="descargaOpcion"]:checked');
+  const periodo=periodoDescarga(marcada?marcada.value:'', new Date(),
+    document.getElementById('descargaAnio').value,
+    document.getElementById('descargaDesde').value,
+    document.getElementById('descargaHasta').value);
+  const err=document.getElementById('descargaError');
+  if(periodo.error){ err.textContent=periodo.error; return; }
+  err.textContent='';
+  cerrarSelectorDescarga();
+  descargarTickets(periodo);
+}
+
+// [Pendientes Claude #7]: descarga XLSX de los tickets del periodo cerrado
+// elegido en el selector (periodoDescarga) filtrados por Director/PO/
+// Manager/Service Owner -- los mismos cuatro que habilitan el boton. Los
+// tickets llegan ya filtrados del servidor (ver pedirTicketsExport); el libro
+// se arma en memoria con SheetJS (vendor/xlsx.mini.min.js).
+async function descargarTickets(periodoElegido){
   const btn=document.getElementById('btnDescargaTickets');
   const rotulo=btn?btn.textContent:'';
   if(btn){ btn.disabled=true; btn.textContent='Preparando...'; }
   try{
     let datos;
-    try{ datos=await pedirTicketsExport(); }
+    try{ datos=await pedirTicketsExport(periodoElegido); }
     catch(e){ console.error(e); alert('No se pudo traer el detalle de tickets: '+e.message); return; }
     const filtrados=datos.tickets||[];
-    if(!filtrados.length){ alert('No hay tickets para el filtro y periodo actuales.'); return; }
+    if(!filtrados.length){ alert('No hay tickets para el filtro y el periodo '+periodoElegido.etiqueta+'.'); return; }
+    // Red de seguridad: ni un ticket fuera de los dias pedidos llega al libro.
+    const fuera=fueraDePeriodo(filtrados, periodoElegido.inicio, periodoElegido.fin);
+    if(fuera){
+      alert('La descarga trajo '+FMT(fuera)+' tickets fuera de '+periodoElegido.inicio+' a '+periodoElegido.fin+'; no se genera el archivo.');
+      return;
+    }
     const cols=COLUMNAS_TICKETS;
     // Matriz (no json_to_sheet) para fijar el orden de columnas y forzar texto:
     // los codigos y fechas no deben reinterpretarse como numero o fecha Excel.
@@ -1650,9 +1744,7 @@ async function descargarTickets(){
        periodo exportado (en Mes, con el año que devolvio el handler), los
        cuatro filtros -"Todos" cuando no hay uno puesto-, el total de filas
        exportadas y la fecha del equipo. */
-    const periodo = modoTiempo==='mes'
-      ? ((P.meses[P.mes_nums.indexOf(P.mes_actual)] || 'Mes actual') + (datos.anio ? ' '+datos.anio : ''))
-      : (P.slots[0] || '0-30 dias');
+    const periodo = periodoElegido.etiqueta+' ('+periodoElegido.inicio+' a '+periodoElegido.fin+')';
     const bytes = LibroTickets.construir(XLSX, {
       hoja: 'Tickets',
       titulo: 'Tickets — Dashboard Export',
@@ -2341,7 +2433,13 @@ document.getElementById('btnDesmarcarTodasHist').onclick=()=>{
 };
 document.getElementById('btnGraficarHist').onclick=graficarHist;
 const btnDescargaTickets=document.getElementById('btnDescargaTickets');
-if(btnDescargaTickets) btnDescargaTickets.onclick=descargarTickets;
+if(btnDescargaTickets) btnDescargaTickets.onclick=abrirSelectorDescarga;
+document.getElementById('btnConfirmarDescarga').onclick=confirmarDescarga;
+document.getElementById('descargaClose').onclick=cerrarSelectorDescarga;
+document.getElementById('descargaBk').onclick=e=>{if(e.target.id==='descargaBk')cerrarSelectorDescarga();};
+// Tocar el año o una fecha marca su opcion: lo que se ve es lo que se baja.
+document.getElementById('descargaAnio').onchange=()=>{document.querySelector('input[name="descargaOpcion"][value="anio"]').checked=true;};
+['descargaDesde','descargaHasta'].forEach(id=>{document.getElementById(id).onchange=()=>{document.querySelector('input[name="descargaOpcion"][value="rango"]').checked=true;};});
 const selModo=document.getElementById('selModo');
 if(selModo) selModo.onchange=()=>{modoTiempo=selModo.value;renderAll();};
 

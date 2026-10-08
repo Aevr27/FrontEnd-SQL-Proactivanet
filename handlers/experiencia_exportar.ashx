@@ -12,16 +12,23 @@
 //
 // Parametros (GET):
 //
-//     modo=slot|mes   obligatorio. Lista blanca: cualquier otro valor es 400.
-//     anio=2026       solo modo mes; el P.anio del tablero. 2000..2100.
-//     mes=9           solo modo mes; el P.mes_actual del tablero. 1..12.
+//     modo=slot|mes|rango
+//                     obligatorio. Lista blanca: cualquier otro valor es 400.
+//     anio=2026       solo modo mes. 2000..2100.
+//     mes=9           solo modo mes. 1..12. El selector de "Descargar" lo usa
+//                     para "Mes pasado" (el mes calendario cerrado anterior).
+//     fechaInicio=2026-08-15, fechaFin=2026-09-20
+//                     solo modo rango; aaaa-mm-dd, los dos dias incluidos.
+//                     inicio <= fin y como mucho DIAS_MAX_RANGO dias. Lo usan
+//                     "Año" (1-ene..31-dic) y "Rango personalizado".
 //     director=, po=, manager=, so=
 //                     opcionales; vacio = sin restriccion. Viajan como
 //                     valores a comparar en memoria, nunca como SQL.
 //
 // Respuesta:
 //
-//     { "modo": "mes", "anio": 2026, "mes": 9, "total": 1234,
+//     { "modo": "mes", "anio": 2026, "mes": 9,
+//       "fechaInicio": null, "fechaFin": null, "total": 1234,
 //       "tickets": [ { "codigo": "...", "fecha_registro": "...", ... } ] }
 //
 // Errores con la misma forma que experiencia.ashx ({error, tipo}): 400 si
@@ -66,8 +73,9 @@ public class ExperienciaExportar : IHttpHandler
             var q = context.Request.QueryString;
 
             var modo = (q["modo"] ?? "").Trim().ToLowerInvariant();
-            if (modo != ExperienciaQueries.MODO_SLOT && modo != ExperienciaQueries.MODO_MES)
-                throw new ParametroInvalido("El parametro 'modo' debe ser 'slot' o 'mes'.");
+            if (modo != ExperienciaQueries.MODO_SLOT && modo != ExperienciaQueries.MODO_MES
+                && modo != ExperienciaQueries.MODO_RANGO)
+                throw new ParametroInvalido("El parametro 'modo' debe ser 'slot', 'mes' o 'rango'.");
 
             int anio = 0, mes = 0;
             if (modo == ExperienciaQueries.MODO_MES)
@@ -76,18 +84,35 @@ public class ExperienciaExportar : IHttpHandler
                 mes = EnteroEnRango(q["mes"], "mes", 1, 12);
             }
 
+            DateTime inicio = DateTime.MinValue, fin = DateTime.MinValue;
+            if (modo == ExperienciaQueries.MODO_RANGO)
+            {
+                inicio = Fecha(q["fechaInicio"], "fechaInicio");
+                fin = Fecha(q["fechaFin"], "fechaFin");
+                if (inicio > fin)
+                    throw new ParametroInvalido("La fecha inicio no puede ser posterior a la fecha fin.");
+                if ((fin - inicio).TotalDays + 1 > ExperienciaQueries.DIAS_MAX_RANGO)
+                    throw new ParametroInvalido(string.Format(CultureInfo.InvariantCulture,
+                        "El rango no puede pasar de {0} dias.", ExperienciaQueries.DIAS_MAX_RANGO));
+            }
+
             var director = Filtro(q["director"], "director");
             var po = Filtro(q["po"], "po");
             var manager = Filtro(q["manager"], "manager");
             var so = Filtro(q["so"], "so");
 
-            var tickets = ExperienciaQueries.ExportarTickets(modo, anio, mes, director, po, manager, so);
+            var tickets = modo == ExperienciaQueries.MODO_RANGO
+                ? ExperienciaQueries.ExportarTicketsRango(inicio, fin, director, po, manager, so)
+                : ExperienciaQueries.ExportarTickets(modo, anio, mes, director, po, manager, so);
+            bool esRango = modo == ExperienciaQueries.MODO_RANGO;
 
             var salida = new Dictionary<string, object>
             {
                 { "modo", modo },
                 { "anio", modo == ExperienciaQueries.MODO_MES ? (object)anio : null },
                 { "mes", modo == ExperienciaQueries.MODO_MES ? (object)mes : null },
+                { "fechaInicio", esRango ? (object)Dia(inicio) : null },
+                { "fechaFin", esRango ? (object)Dia(fin) : null },
                 { "total", tickets.Count },
                 { "tickets", tickets },
             };
@@ -127,6 +152,24 @@ public class ExperienciaExportar : IHttpHandler
                 "El parametro '{0}' debe ser un entero entre {1} y {2}.", nombre, min, max));
         }
         return valor;
+    }
+
+    // aaaa-mm-dd exacto; cualquier otra forma (hora, otro orden) es 400.
+    private static DateTime Fecha(string texto, string nombre)
+    {
+        DateTime valor;
+        if (!DateTime.TryParseExact((texto ?? "").Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                DateTimeStyles.None, out valor)
+            || valor.Year < 2000 || valor.Year > 2100)
+        {
+            throw new ParametroInvalido("El parametro '" + nombre + "' debe ser una fecha aaaa-mm-dd.");
+        }
+        return valor;
+    }
+
+    private static string Dia(DateTime d)
+    {
+        return d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
     }
 
     // Vacio o solo espacios = sin filtro (null).

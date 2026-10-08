@@ -128,12 +128,12 @@ cursor:pointer;font-size:12px;font-weight:700}
 /* Botones de accion que viven en los paneles, fuera de la cabecera: sin regla
    propia salian con el gris del navegador o con verdes sueltos en el HTML.
    Misma pieza verde que .selrow button. */
-#btnResetGrafVen,#btnResetGrafAct,#btnMarcarTodasHist,#btnDesmarcarTodasHist,#btnGraficarHist{
+#btnResetGrafVen,#btnResetGrafAct,#btnMarcarTodasHist,#btnDesmarcarTodasHist,#btnGraficarHist,#btnConfirmarDescarga{
 padding:8px 14px;border-radius:8px;border:1px solid var(--g-700);
 background:var(--grad-btn);color:var(--btn-ink);
 cursor:pointer;font-size:12px;font-weight:700}
 #btnResetGrafVen:hover,#btnResetGrafAct:hover,#btnMarcarTodasHist:hover,
-#btnDesmarcarTodasHist:hover,#btnGraficarHist:hover{
+#btnDesmarcarTodasHist:hover,#btnGraficarHist:hover,#btnConfirmarDescarga:hover{
 background:var(--grad-btn-hover);border-color:var(--g-800)}
 /* `.kpis` y `.kpi` viven en ../assets/css/kpi.css, junto con la copia que
    tenian dashboard.css y qa.css. Esta se habia quedado con la pista en
@@ -224,4 +224,11 @@ tbody tr:hover{background:var(--g-50)}
 .modal-bk.show{display:flex;align-items:flex-start;justify-content:center}
 .modal{background:#fff;border-radius:14px;max-width:1150px;width:100%;max-height:88vh;overflow:auto;padding:22px 24px;margin-top:20px}
 .modal h2{font-size:16px;margin-bottom:4px}.modal .close{float:right;cursor:pointer;font-size:22px;color:var(--muted);line-height:1}
+/* Selector de periodo de "Descargar Tickets" (#descargaBk). */
+.descarga .op{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:13px;color:var(--ink);cursor:pointer}
+.descarga .op .sub{font-size:12px;color:var(--muted)}
+.descarga select,.descarga input[type=date]{padding:5px 8px;border-radius:8px;border:1px solid var(--g-200);font-size:13px;color:var(--ink);background:#fff}
+.descarga .rango{display:flex;gap:12px;flex-wrap:wrap;margin:8px 0 0 24px;font-size:12px;color:var(--ink-2)}
+.descarga .err{min-height:16px;margin-top:10px;font-size:12px;color:#b91c1c}
+.descarga .acciones{text-align:right;margin-top:6px}
 footer{text-align:center;color:var(--muted);font-size:11px;margin-top:20px;padding:12px}

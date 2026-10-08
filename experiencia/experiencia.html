@@ -345,6 +345,26 @@
   </tr></thead><tbody id="catPopupBody"></tbody></table>
 </div></div>
 
+<!-- Selector de periodo de "Descargar Tickets": siempre un periodo cerrado,
+     no el que se esta viendo. La logica vive en periodoDescarga()
+     (experiencia.js). -->
+<div class="modal-bk" id="descargaBk" style="z-index:60"><div class="modal descarga" style="max-width:420px">
+  <span class="close" id="descargaClose">&times;</span>
+  <h2 style="font-size:15px">Descargar Experiencia</h2>
+  <div style="font-size:12px;color:var(--muted);margin-top:4px">Tickets por fecha de registro, con los filtros de dueños actuales.</div>
+  <label class="op"><input type="radio" name="descargaOpcion" value="mes" checked> Mes pasado
+    <span id="descargaMesTxt" class="sub"></span></label>
+  <label class="op"><input type="radio" name="descargaOpcion" value="anio"> Año
+    <select id="descargaAnio"></select></label>
+  <label class="op"><input type="radio" name="descargaOpcion" value="rango"> Rango personalizado</label>
+  <div class="rango">
+    <label>Desde: <input type="date" id="descargaDesde"></label>
+    <label>Hasta: <input type="date" id="descargaHasta"></label>
+  </div>
+  <div id="descargaError" class="err"></div>
+  <div class="acciones"><button id="btnConfirmarDescarga">⬇ Descargar</button></div>
+</div></div>
+
 <div class="modal-bk" id="histChartPopupBk" style="z-index:70"><div class="modal" style="max-width:96vw;width:96vw;max-height:94vh">
   <span class="close" id="histChartPopupClose">&times;</span>
   <h2 id="histChartPopupTitle" style="font-size:15px">Histórico de Tickets</h2>
