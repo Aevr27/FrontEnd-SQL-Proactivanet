@@ -1258,7 +1258,7 @@ function diaLocalISO(d) {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
     String(d.getDate()).padStart(2, '0');
 }
-function periodoDescarga(opcion, hoy, anio, desde, hasta) {
+function periodoDescarga(opcion, hoy, desde, hasta) {
   if (opcion === 'mes') {
     // El mes calendario anterior al de hoy, completo: el 8 y el 31 de octubre
     // dan septiembre; en enero, diciembre del año anterior. El dia 0 del mes
@@ -1273,16 +1273,13 @@ function periodoDescarga(opcion, hoy, anio, desde, hasta) {
     };
   }
   if (opcion === 'anio') {
-    // Desde el 1-ene hasta el ultimo mes CERRADO, nunca el mes en curso: el
-    // ultimo dia del mes anterior a hoy (el mismo fin que "Mes pasado"). Un
-    // año ya terminado sale completo (1-ene..31-dic). En enero el ultimo mes
-    // cerrado es diciembre del año anterior, asi que el año en curso aun no
-    // tiene nada que bajar y el selector arranca en el anterior.
-    var y = Number(anio);
-    if (!Number.isInteger(y) || y < 2000 || y > 2100) return { error: 'Elige un año válido.' };
+    // El año en curso, sin elegir: del 1-ene al ultimo mes CERRADO, nunca el
+    // mes en curso -el ultimo dia del mes anterior a hoy, el mismo fin que
+    // "Mes pasado"-. En enero el año en curso aun no tiene mes cerrado: el
+    // ultimo es diciembre del anterior, asi que sale ese año completo.
     var cierre = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
-    if (y > cierre.getFullYear()) return { error: 'El año ' + y + ' aún no tiene meses cerrados.' };
-    var finAnio = y < cierre.getFullYear() ? y + '-12-31' : diaLocalISO(cierre);
+    var y = cierre.getFullYear();
+    var finAnio = diaLocalISO(cierre);
     return {
       params: { modo: 'rango', fechaInicio: y + '-01-01', fechaFin: finAnio },
       inicio: y + '-01-01', fin: finAnio, etiqueta: 'Año ' + y,
@@ -1690,13 +1687,8 @@ function abrirSelectorDescarga(){
   const hoy=new Date();
   const mes=periodoDescarga('mes', hoy);
   document.getElementById('descargaMesTxt').textContent='('+mes.etiqueta+')';
-  const sel=document.getElementById('descargaAnio');
-  if(!sel.options.length){
-    // Desde el año del ultimo mes cerrado (en enero, el anterior): ver
-    // periodoDescarga('anio').
-    const ultimo=Number(mes.params.anio);
-    for(let y=ultimo; y>=ultimo-5; y--) sel.add(new Option(String(y), String(y)));
-  }
+  const anio=periodoDescarga('anio', hoy);
+  document.getElementById('descargaAnioTxt').textContent='('+anio.inicio+' a '+anio.fin+')';
   const desde=document.getElementById('descargaDesde'), hasta=document.getElementById('descargaHasta');
   if(!desde.value) desde.value=mes.inicio;
   if(!hasta.value) hasta.value=mes.fin;
@@ -1707,7 +1699,6 @@ function cerrarSelectorDescarga(){ document.getElementById('descargaBk').classLi
 function confirmarDescarga(){
   const marcada=document.querySelector('input[name="descargaOpcion"]:checked');
   const periodo=periodoDescarga(marcada?marcada.value:'', new Date(),
-    document.getElementById('descargaAnio').value,
     document.getElementById('descargaDesde').value,
     document.getElementById('descargaHasta').value);
   const err=document.getElementById('descargaError');
@@ -2447,8 +2438,7 @@ if(btnDescargaTickets) btnDescargaTickets.onclick=abrirSelectorDescarga;
 document.getElementById('btnConfirmarDescarga').onclick=confirmarDescarga;
 document.getElementById('descargaClose').onclick=cerrarSelectorDescarga;
 document.getElementById('descargaBk').onclick=e=>{if(e.target.id==='descargaBk')cerrarSelectorDescarga();};
-// Tocar el año o una fecha marca su opcion: lo que se ve es lo que se baja.
-document.getElementById('descargaAnio').onchange=()=>{document.querySelector('input[name="descargaOpcion"][value="anio"]').checked=true;};
+// Tocar una fecha marca su opcion: lo que se ve es lo que se baja.
 ['descargaDesde','descargaHasta'].forEach(id=>{document.getElementById(id).onchange=()=>{document.querySelector('input[name="descargaOpcion"][value="rango"]').checked=true;};});
 const selModo=document.getElementById('selModo');
 if(selModo) selModo.onchange=()=>{modoTiempo=selModo.value;renderAll();};

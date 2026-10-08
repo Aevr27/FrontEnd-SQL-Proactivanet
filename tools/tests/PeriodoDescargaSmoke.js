@@ -59,47 +59,43 @@ Check('2d mes pasado, hoy 2028-03-31 -> febrero bisiesto',
   sinEtiqueta(P('mes', hoy(2028, 3, 31))));
 
 // 3) Año: 1-ene hasta el ultimo mes cerrado, nunca el mes en curso.
-function anio(y, m, d, sel) {
-  var r = P('anio', hoy(y, m, d), sel);
+function anio(y, m, d) {
+  var r = P('anio', hoy(y, m, d));
   return r.error ? 'ERROR' : r.params.fechaInicio + '..' + r.params.fechaFin;
 }
-Check('3 año 2026, hoy 2026-10-08', '2026-01-01..2026-09-30', anio(2026, 10, 8, '2026'));
-Check('3b año 2026, hoy 2026-10-31', '2026-01-01..2026-09-30', anio(2026, 10, 31, '2026'));
-Check('3c año 2026, hoy 2026-12-01', '2026-01-01..2026-11-30', anio(2026, 12, 1, '2026'));
-Check('3d año 2026, hoy 2026-12-31', '2026-01-01..2026-11-30', anio(2026, 12, 31, '2026'));
-Check('3e año 2025, hoy 2026-01-15 (enero: año anterior completo)', '2025-01-01..2025-12-31', anio(2026, 1, 15, '2025'));
-Check('3f año 2026, hoy 2026-01-15: sin meses cerrados', 'ERROR', anio(2026, 1, 15, '2026'));
-Check('3g año 2026, hoy 2026-02-01: solo enero', '2026-01-01..2026-01-31', anio(2026, 2, 1, '2026'));
-Check('3h año pasado siempre completo', '2025-01-01..2025-12-31', anio(2026, 10, 8, '2025'));
-Check('3i año futuro es error', 'ERROR', anio(2026, 10, 8, '2027'));
-Check('3j año 2028, hoy 2028-03-31 -> febrero bisiesto', '2028-01-01..2028-02-29', anio(2028, 3, 31, '2028'));
-Check('3n año 2024, hoy 2024-02-15 (bisiesto) -> solo enero', '2024-01-01..2024-01-31', anio(2024, 2, 15, '2024'));
-Check('3o año 2024, hoy 2024-03-15 -> hasta el 29-feb', '2024-01-01..2024-02-29', anio(2024, 3, 15, '2024'));
+Check('3 hoy 2026-10-08', '2026-01-01..2026-09-30', anio(2026, 10, 8));
+Check('3b hoy 2026-10-31', '2026-01-01..2026-09-30', anio(2026, 10, 31));
+Check('3c hoy 2026-12-01', '2026-01-01..2026-11-30', anio(2026, 12, 1));
+Check('3d hoy 2026-12-31', '2026-01-01..2026-11-30', anio(2026, 12, 31));
+Check('3e hoy 2026-01-15 (enero: año anterior completo)', '2025-01-01..2025-12-31', anio(2026, 1, 15));
+Check('3g hoy 2026-02-01: solo enero', '2026-01-01..2026-01-31', anio(2026, 2, 1));
+Check('3j hoy 2028-03-31 -> febrero bisiesto', '2028-01-01..2028-02-29', anio(2028, 3, 31));
+Check('3n hoy 2024-02-15 (bisiesto) -> solo enero', '2024-01-01..2024-01-31', anio(2024, 2, 15));
+Check('3o hoy 2024-03-15 -> hasta el 29-feb', '2024-01-01..2024-02-29', anio(2024, 3, 15));
 // Lo que manda Año pasa las mismas reglas que el handler aplica a modo=rango
 // (aaaa-mm-dd, inicio <= fin, <= 366 dias): se revalida como Rango personalizado.
 [[2026, 10, 8, '2026'], [2026, 12, 1, '2026'], [2026, 1, 15, '2025'], [2024, 3, 15, '2024']].forEach(function (c) {
-  var a = P('anio', hoy(c[0], c[1], c[2]), c[3]);
-  var r = P('rango', hoy(c[0], c[1], c[2]), null, a.params.fechaInicio, a.params.fechaFin);
+  var a = P('anio', hoy(c[0], c[1], c[2]));
+  var r = P('rango', hoy(c[0], c[1], c[2]), a.params.fechaInicio, a.params.fechaFin);
   Check('3p año ' + c[3] + ' (hoy ' + c.slice(0, 3).join('-') + ') es un modo=rango valido',
     { modo: 'rango', fechaInicio: a.params.fechaInicio, fechaFin: a.params.fechaFin, error: undefined },
     { modo: a.params.modo, fechaInicio: r.params && r.params.fechaInicio, fechaFin: r.params && r.params.fechaFin, error: r.error });
 });
 Check('3k fin de Año = fin de Mes pasado (año en curso)',
-  P('mes', hoy(2026, 10, 8)).fin, P('anio', hoy(2026, 10, 8), '2026').fin);
-Check('3l año usa modo=rango', 'rango', P('anio', hoy(2026, 10, 8), '2026').params.modo);
-Check('3m año invalido', true, !!P('anio', hoy(2026, 10, 8), 'abc').error);
+  P('mes', hoy(2026, 10, 8)).fin, P('anio', hoy(2026, 10, 8)).fin);
+Check('3l año usa modo=rango', 'rango', P('anio', hoy(2026, 10, 8)).params.modo);
 
 // 4) Rango personalizado: exactamente lo elegido.
 Check('4 rango 15-ago..20-sep',
   { params: { modo: 'rango', fechaInicio: '2026-08-15', fechaFin: '2026-09-20' }, inicio: '2026-08-15', fin: '2026-09-20' },
-  sinEtiqueta(P('rango', hoy(2026, 10, 8), null, '2026-08-15', '2026-09-20')));
+  sinEtiqueta(P('rango', hoy(2026, 10, 8), '2026-08-15', '2026-09-20')));
 Check('4b un solo dia vale', '2026-09-20',
-  P('rango', hoy(2026, 10, 8), null, '2026-09-20', '2026-09-20').params.fechaFin);
-Check('4c inicio > fin es error', true, !!P('rango', hoy(2026, 10, 8), null, '2026-09-21', '2026-09-20').error);
-Check('4d fecha vacia es error', true, !!P('rango', hoy(2026, 10, 8), null, '', '2026-09-20').error);
+  P('rango', hoy(2026, 10, 8), '2026-09-20', '2026-09-20').params.fechaFin);
+Check('4c inicio > fin es error', true, !!P('rango', hoy(2026, 10, 8), '2026-09-21', '2026-09-20').error);
+Check('4d fecha vacia es error', true, !!P('rango', hoy(2026, 10, 8), '', '2026-09-20').error);
 Check('4e 366 dias (2028 bisiesto) vale', undefined,
-  P('rango', hoy(2026, 10, 8), null, '2028-01-01', '2028-12-31').error);
-Check('4f 367 dias es error', true, !!P('rango', hoy(2026, 10, 8), null, '2025-01-01', '2026-01-02').error);
+  P('rango', hoy(2026, 10, 8), '2028-01-01', '2028-12-31').error);
+Check('4f 367 dias es error', true, !!P('rango', hoy(2026, 10, 8), '2025-01-01', '2026-01-02').error);
 
 // Red de seguridad del libro: bordes incluidos, un segundo fuera no.
 var tickets = [
