@@ -350,9 +350,11 @@ SQL_CABECERA = r"""/* ==========================================================
 
    Cada fila entra como Operacion 'U', Origen 'NO_DECLARADO', Usuario y
    SolicitudId NULL; LoginBD = quien corre el script (default de la tabla).
-   NO crea linea base ('B') ni triggers. Se niega a insertar si ya existe
-   el trigger de captura en dbo.Problem: despues de eso el historial ya no
-   es solo de esta importacion.
+   NO crea linea base ('B') ni triggers. Se niega a insertar si algun
+   trigger de dbo.Problem hace referencia a dbo.ProblemFechaEvento en su
+   codigo (sys.sql_expression_dependencies; los comentarios no cuentan): con
+   captura viva el historial ya no seria solo de esta importacion. Otros
+   triggers de dbo.Problem (p. ej. trg_Problem_EstadoEvento) no lo detienen.
 
    Se puede volver a correr con un Excel mas nuevo: por cada Codigo+Campo
    compara lo que ya hay con la cadena del Excel, en orden. Si lo que hay es
@@ -371,7 +373,11 @@ DECLARE @Confirmar bit = 0;                      -- 1 = COMMIT
 /* ---------- 0. Destino (solo lectura) ---------- */
 SELECT Seccion = '0 destino',
        TablaExiste    = CASE WHEN OBJECT_ID(N'dbo.ProblemFechaEvento', N'U') IS NULL THEN 0 ELSE 1 END,
-       TriggerCaptura = (SELECT COUNT(*) FROM sys.triggers WHERE parent_id = OBJECT_ID(N'dbo.Problem')),
+       TriggersProblem = (SELECT COUNT(*) FROM sys.triggers WHERE parent_id = OBJECT_ID(N'dbo.Problem')),
+       TriggerCaptura  = (SELECT COUNT(*) FROM sys.triggers AS tr
+                          JOIN sys.sql_expression_dependencies AS d ON d.referencing_id = tr.object_id
+                          WHERE tr.parent_id = OBJECT_ID(N'dbo.Problem')
+                            AND d.referenced_id = OBJECT_ID(N'dbo.ProblemFechaEvento')),
        FilasHoy       = (SELECT COUNT_BIG(*) FROM dbo.ProblemFechaEvento);
 
 /* ---------- 1. Staging (temporal) ---------- */
@@ -471,9 +477,12 @@ BEGIN
     SELECT Seccion = '4 omitida', Motivo = 'Falta @ModoFechaRegistro (COMENTARIO o IMPORTACION). Nada se inserto.';
     RETURN;
 END;
-IF EXISTS (SELECT 1 FROM sys.triggers WHERE parent_id = OBJECT_ID(N'dbo.Problem'))
+IF EXISTS (SELECT 1 FROM sys.triggers AS tr
+           JOIN sys.sql_expression_dependencies AS d ON d.referencing_id = tr.object_id
+           WHERE tr.parent_id = OBJECT_ID(N'dbo.Problem')
+             AND d.referenced_id = OBJECT_ID(N'dbo.ProblemFechaEvento'))
 BEGIN
-    SELECT Seccion = '4 omitida', Motivo = 'Ya hay trigger en dbo.Problem: el backfill ya no aplica. Nada se inserto.';
+    SELECT Seccion = '4 omitida', Motivo = 'Un trigger de dbo.Problem escribe o lee dbo.ProblemFechaEvento: el backfill ya no aplica. Nada se inserto.';
     RETURN;
 END;
 
