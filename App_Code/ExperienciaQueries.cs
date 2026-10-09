@@ -20,6 +20,9 @@
 //   iniciativas          dbo.vw_ProblemCategoria + dbo.Problem
 //   duenos por categoria dbo.CatCategoriaDueno  \  DirectorioOrganizacional
 //   manager de cada SO   dbo.CatPersona          /  (App_Code, compartido)
+//   efectividad          dbo.ExpEfectividad + dbo.ExpEfectividadCorrida
+//                        (60_efectividad_iniciativas.sql: ya calculada;
+//                        el script no esta en este repositorio)
 //
 // Las tres vistas por slot y las tres por mes son la MISMA agrupacion con
 // distinta primera columna, y las dos familias derivan C1/C1&C2/Categoria V2
@@ -180,6 +183,7 @@ public static partial class ExperienciaQueries
             AlinearDuenos(detalle, dir);
 
             var sueltas = LeerIniciativasSinCategoria(cn, hoy, dir);
+            var efectividad = LeerEfectividad(cn, detalle);
 
             var calendario = ArmarCalendario(hoy, mesC1, anio);
             var mesActual = Convert.ToInt32(calendario["mes_actual"], CultureInfo.InvariantCulture);
@@ -203,6 +207,7 @@ public static partial class ExperienciaQueries
             salida["categorias_v2"] = categoriasV2;
             salida["categorias_por_folio"] = porFolio;
             salida["iniciativas_sin_categoria"] = sueltas;
+            salida["efectividad"] = efectividad;
 
             foreach (var kv in ArmarCatalogos(dir))
                 salida[kv.Key] = kv.Value;
@@ -709,6 +714,108 @@ public static partial class ExperienciaQueries
         for (int i = 0; i < AGRUPADORES.Length; i++)
             if (string.Equals(AGRUPADORES[i], agrup, StringComparison.OrdinalIgnoreCase))
                 d.Agrup = AGRUPADORES[i];
+    }
+
+    // ------------------------------------------------------------------
+    // 2b) Efectividad de las iniciativas
+    // ------------------------------------------------------------------
+
+    // El KPI "% Efectividad Reducción". El calculo NO se hace aqui: lo deja
+    // en dbo.ExpEfectividad el procedimiento del 60
+    // (60_efectividad_iniciativas.sql), una vez al dia. Aqui solo se leen las
+    // filas que cuentan -las medidas y las que estan en medicion- con lo
+    // minimo para que experiencia.js sume Logro / Compromiso de las que pasan
+    // sus filtros (efectividadDe).
+    //
+    // Cada fila lleva el C1 y el C1&C2 de SU iniciativa en el tablero, los de
+    // 'detalle' por folio y ruta del Excel: son las llaves con las que
+    // ArmarCategorias cuelga la iniciativa de sus categorias, asi que la
+    // tarjeta se filtra igual que las demas. La ruta que se CUENTA
+    // (categoria) puede ser otra -la traducida por dbo.CatRutaEquivalente-,
+    // pero la iniciativa se filtra por donde el tablero la pinta. Si la fila
+    // no esta en 'detalle', los cortes salen de la ruta del Excel.
+    //
+    // Sin el 60 instalado, sin calculo, o sin permiso de lectura (para
+    // OBJECT_ID es lo mismo), devuelve null y la tarjeta dice S/D, como antes.
+    // Las columnas que se leen son las del 60 segun el tablero de referencia;
+    // su DDL no esta en este repositorio. Si no coinciden, la falla va a la
+    // traza y la tarjeta queda en S/D: como el sello de DashboardDataInfo, es
+    // un dato de mas que no puede tumbar el resto del tablero.
+    private static Dictionary<string, object> LeerEfectividad(SqlConnection cn, List<Detalle> detalle)
+    {
+        try
+        {
+            using (var cmd = new SqlCommand(
+                "SELECT CASE WHEN OBJECT_ID(N'dbo.ExpEfectividad', N'U') IS NOT NULL " +
+                "             AND OBJECT_ID(N'dbo.ExpEfectividadCorrida', N'U') IS NOT NULL THEN 1 ELSE 0 END", cn))
+            {
+                if (Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 0) return null;
+            }
+
+            // El dia del calculo ya viene en la zona del negocio (el 60 lo saca
+            // de UTC-06), no la hora del servidor.
+            string calculado;
+            using (var cmd = new SqlCommand("SELECT TOP (1) Hoy FROM dbo.ExpEfectividadCorrida ORDER BY Id DESC", cn))
+            {
+                calculado = Fecha(cmd.ExecuteScalar());
+            }
+            if (calculado == null) return null;
+
+            // Espacio duro de separador, como en LeerIniciativas: no puede venir
+            // dentro de una ruta normalizada.
+            const string SEP = " ";
+            var porFolioRuta = new Dictionary<string, Detalle>(StringComparer.OrdinalIgnoreCase);
+            foreach (var d in detalle)
+            {
+                if (d.Folio == null || d.Categoria == null) continue;
+                var k = d.Folio + SEP + d.Categoria;
+                if (!porFolioRuta.ContainsKey(k)) porFolioRuta[k] = d;
+            }
+
+            const string SQL =
+                "SELECT Codigo, CategoriaExcel, Categoria, Orden, Compromiso, Logro, SeMideDesde " +
+                "FROM dbo.ExpEfectividad " +
+                "WHERE Orden IN (14, 15) " +
+                "ORDER BY Codigo, Categoria";
+
+            var filas = new List<object>();
+            using (var cmd = new SqlCommand(SQL, cn))
+            {
+                cmd.CommandType = CommandType.Text;
+                using (var rd = cmd.ExecuteReader())
+                {
+                    while (rd.Read())
+                    {
+                        var folio = Texto(rd.GetValue(0));
+                        var excel = Normaliza(Texto(rd.GetValue(1)));
+                        Detalle d;
+                        porFolioRuta.TryGetValue((folio ?? "") + SEP + (excel ?? ""), out d);
+
+                        var f = new Dictionary<string, object>();
+                        f["folio"] = folio;
+                        f["categoria"] = Texto(rd.GetValue(2));
+                        f["c1"] = d != null && !string.IsNullOrEmpty(d.C1) ? d.C1 : C1De(excel);
+                        f["c1c2"] = d != null && !string.IsNullOrEmpty(d.C1C2) ? d.C1C2 : C1C2De(excel);
+                        // 15 medida, 14 en medicion: los codigos del 41 / 60.
+                        f["medida"] = Entero(rd.GetValue(3)) == 15;
+                        f["comp"] = Math.Round(Doble(rd.GetValue(4)), 4);
+                        f["logro"] = Math.Round(Doble(rd.GetValue(5)), 4);
+                        f["se_mide_desde"] = Fecha(rd.GetValue(6));
+                        filas.Add(f);
+                    }
+                }
+            }
+
+            var e = new Dictionary<string, object>();
+            e["calculado"] = calculado;
+            e["filas"] = filas;
+            return e;
+        }
+        catch (Exception ex)
+        {
+            DashboardHandler.Registrar("ExperienciaQueries.Efectividad", ex);
+            return null;
+        }
     }
 
     // ------------------------------------------------------------------

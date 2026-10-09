@@ -339,13 +339,59 @@ function renderKPIs(cats, det){
       })(),s:null},
     {l:'% Tickets con Iniciativa',v:PCT(pctIni),f:FMT(ini)+' con iniciativa',s:SEM(pctIni)},
     {l:'% Tickets en Tiempo',v:PCT(pctTiempo),f:FMT(ret)+' en riesgo',s:SEM(pctTiempo)},
-    {l:'% Efectividad Reducción',v:'S/D',f:'sin datos disponibles',s:null},
+    tarjetaEfectividad(detReal),
     {l:'Categorías sin Iniciativa',v:FMT(nSin),f:`oportunidades · ${FMT(volSin)} tickets sin iniciativa`,s:null},
     {l:'Iniciativas Retrasadas',v:FMT(nVen),f:FMT(ret)+' tickets en riesgo',s:null},
   ];
   document.getElementById('kpis-exp').innerHTML=cards.map(c=>
     `<div class="kpi ${c.s?('s'+c.s):''}"><div class="lbl">${c.l}</div>
      <div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
+}
+
+// ---- [KPI-4] % Efectividad Reducción ----
+// El cálculo lo deja hecho la base (60_efectividad_iniciativas.sql, una vez
+// al día) en P.efectividad.filas: una fila por iniciativa y categoría, medida
+// (ya pasaron 90 días de su FechaCierre) o en medición. Aquí solo se suman
+// las medidas que pasan el filtro: KPI = Σ logro / Σ compromiso, con el
+// semáforo de las demás tarjetas.
+//
+// El filtro es el de las demás tarjetas: una fila pasa si su C1&C2, o su C1,
+// es una de las categorías de detReal, que es donde ArmarCategorias cuelga
+// su iniciativa. Sin filtros pasan todas: la tarjeta da lo mismo que el 60.
+const MES_CORTO=['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+function diaMes(s){
+  const p=(s||'').split('-');
+  return p.length===3 ? p[2]+'-'+MES_CORTO[+p[1]-1] : '—';
+}
+function efectividadDe(detReal){
+  const E=P.efectividad;
+  if(!E || !Array.isArray(E.filas)) return null;
+  const sinFiltro=!fDir && !fPO && !fMgr && !fSO;
+  const nodos=new Set(detReal.map(c=>c.categoria));
+  let comp=0, logro=0, primera=null;
+  const medidas=new Set(), enMedicion=new Set();
+  E.filas.forEach(r=>{
+    if(!sinFiltro && !nodos.has(r.c1c2) && !nodos.has(r.c1)) return;
+    if(r.medida){ comp+=r.comp||0; logro+=r.logro||0; medidas.add(r.folio); return; }
+    enMedicion.add(r.folio);
+    if(r.se_mide_desde && (!primera || r.se_mide_desde<primera)) primera=r.se_mide_desde;
+  });
+  return {comp, logro, kpi: comp>0 ? logro/comp : null,
+          medidas: medidas.size, enMedicion: enMedicion.size, primera, calculado: E.calculado};
+}
+function tarjetaEfectividad(detReal){
+  const l='% Efectividad Reducción';
+  const e=efectividadDe(detReal);
+  if(!e) return {l, v:'S/D', f:'sin datos disponibles', s:null};
+  const al=e.calculado ? ' · al '+fdate(e.calculado).slice(0,5) : '';
+  if(e.kpi===null){
+    const f=e.enMedicion>0
+      ? `${FMT(e.enMedicion)} en medición, la primera el ${diaMes(e.primera)}`
+      : 'sin iniciativas medidas';
+    return {l, v:'S/D', f:f+al, s:null};
+  }
+  const med=FMT(e.medidas)+(e.medidas===1?' medida':' medidas');
+  return {l, v:PCT(e.kpi), f:`${med} · ${FMT(e.enMedicion)} en medición${al}`, s:SEM(e.kpi)};
 }
 
 // ---- Evolucion por SLOT o por MES [GRAF-1] (antiguo->reciente) ----

@@ -616,17 +616,87 @@ pruebas.push(function () {
     accion('historial');
     Check('S13 otra iniciativa: el historial arranca plegado', 'true', p.sel('regHistBoton').getAttribute('aria-expanded'));
 
-    // Con historial del servidor (contrato provisional) pinta sus filas.
+    // Con historial del servidor (App_Code/HistorialFechas.cs) pinta sus
+    // filas menos la Linea base ('B'); N = solo los "Cambio n".
     var conHist = JSON.parse(JSON.stringify(DATOS));
+    conHist.historial_estado = 'ok';
+    conHist.historial_desde = '09/10/2026';
     conHist.iniciativas[0].historial = [
-      { campo: 'Fecha compromiso de Solución', anterior: '01/08/2026', nuevo: '01/09/2026', fecha: '15/07/2026 10:00', usuario: 'SORIANA\\usuario1' },
-      { campo: 'Fecha compromiso de Solución', anterior: '01/09/2026', nuevo: '<b>x</b>', fecha: '20/08/2026 09:30', usuario: 'SORIANA\\usuario2' }];
+      { id: 1, campo: 'FechaSolucion', anterior: '2026-08-01', nuevo: '2026-09-01', operacion: 'U', origen: 'NO_DECLARADO',
+        usuario: null, fecha: '15/07/2026 10:00', reconstruido: true },
+      { id: 2, campo: 'FechaAnalisis', anterior: null, nuevo: '2026-07-01', operacion: 'B', origen: 'NO_DECLARADO',
+        usuario: null, fecha: '09/10/2026 11:41', reconstruido: false },
+      { id: 3, campo: 'FechaSolucion', anterior: '2026-09-01', nuevo: '2026-09-15', operacion: 'U', origen: 'ADMIN',
+        usuario: 'SORIANA\\usuario<b>x</b>', fecha: '20/10/2026 09:30', reconstruido: false },
+      { id: 4, campo: 'FechaCierre', anterior: '2026-11-01', nuevo: '2026-11-15', operacion: 'U', origen: 'ADMIN',
+        usuario: 'SORIANA\\otro', fecha: '21/10/2026 09:00', reconstruido: false },
+      { id: 5, campo: 'FechaCierre', anterior: '2026-11-15', nuevo: '2026-11-10', operacion: 'U', origen: 'ADMIN',
+        usuario: 'SORIANA\\otro', fecha: '22/10/2026 09:00', reconstruido: false }];
     return p.registro.cargar(ok(conHist)).then(function () {
       clicFolio(p, 'PRB 2026-000001');
       var h = p.sel('regDetCuerpo').innerHTML;
-      Check('S14 cuenta y filas del historial', [true, 2, true, false],
-        [/Historial de cambios \(2\)/.test(h), (h.match(/<td>SORIANA\\usuario/g) || []).length, /&lt;b&gt;x&lt;\/b&gt;/.test(h), /<b>x<\/b>/.test(h)]);
+      Check('S14 N cuenta solo los cambios (la base no suma)', true, /Historial de cambios \(3\)/.test(h));
+      Check('S14 rotulos en orden, sin Linea base', ['Cambio 1', 'Cambio 2', 'Cambio 1', 'Adelanto (no cuenta)'],
+        (h.match(/<td>(<b>)?(Cambio \d|Línea base|Adelanto \(no cuenta\))/g) || []).map(function (x) { return x.replace(/<\/?(td|b)>/g, ''); }));
+      Check('S14 la base no se pinta: 4 filas', [false, 4],
+        [/Línea base/.test(h), (h.match(/<tr><td>/g) || []).length]);
+      Check('S14 Cierre: extension en negrita, adelanto sin negrita', [true, true],
+        [/<td><b>Cambio 1<\/b><\/td><td>01\/11\/2026<\/td><td>15\/11\/2026<\/td>/.test(h),
+         /<td>Adelanto \(no cuenta\)<\/td><td>15\/11\/2026<\/td><td>10\/11\/2026<\/td>/.test(h)]);
+      Check('S14 reconstruida con fecha aproximada; Admin con usuario escapado', [true, true, false, true],
+        [/<td>≈ 15\/07\/2026<\/td>/.test(h), /SORIANA\\usuario&lt;b&gt;x&lt;\/b&gt;/.test(h), /usuario<b>x<\/b>/.test(h),
+         /<td>No declarado<\/td>/.test(h)]);
+      Check('S14 nota: desde, aproximadas y regla de Cierre', [true, true, true],
+        [/Registro automático desde el 09\/10\/2026/.test(h), /Reconstruido de los comentarios del Excel/.test(h),
+         /en Cierre solo cuentan las extensiones/.test(h)]);
       Check('S14 sigue plegado', true, /id="regHistCuerpo" hidden>/.test(h));
+
+      // Sin filas: el texto depende de historial_estado.
+      var estados = ['sin_tabla', 'error', 'ok'].map(function (e) {
+        var d = JSON.parse(JSON.stringify(DATOS));
+        d.historial_estado = e;
+        d.historial_desde = e === 'ok' ? '09/10/2026' : null;
+        return d;
+      });
+      var textos = [];
+      return estados.reduce(function (c, d) {
+        return c.then(function () {
+          return p.registro.cargar(ok(d)).then(function () {
+            clicFolio(p, 'PRB 2026-000001');
+            textos.push(p.sel('regDetCuerpo').innerHTML);
+          });
+        });
+      }, Promise.resolve()).then(function () {
+        Check('S15 sin filas: no instalado / no se pudo leer / sin movimientos', [true, true, true, true],
+          [/todavía no está instalado/.test(textos[0]), /No se pudo leer el historial/.test(textos[1]),
+           /Sin movimientos de fecha registrados desde el 09\/10\/2026/.test(textos[2]),
+           textos.every(function (t) { return /Historial de cambios \(0\)/.test(t); })]);
+
+        // Solo Linea base: estado vacio, no la tabla. 'I' (Fecha inicial)
+        // si se pinta.
+        var soloBase = JSON.parse(JSON.stringify(DATOS));
+        soloBase.historial_estado = 'ok';
+        soloBase.historial_desde = '09/10/2026';
+        soloBase.iniciativas[0].historial = ['FechaAnalisis', 'FechaCierre'].map(function (c, k) {
+          return { id: k + 1, campo: c, anterior: null, nuevo: '2026-12-01', operacion: 'B', origen: 'NO_DECLARADO',
+                   usuario: null, fecha: '09/10/2026 11:41', reconstruido: false };
+        });
+        soloBase.iniciativas[1].historial = [
+          { id: 3, campo: 'FechaAnalisis', anterior: null, nuevo: '2026-11-20', operacion: 'I', origen: 'NO_DECLARADO',
+            usuario: null, fecha: '12/10/2026 08:00', reconstruido: false }];
+        return p.registro.cargar(ok(soloBase)).then(function () {
+          clicFolio(p, 'PRB 2026-000001');
+          var b = p.sel('regDetCuerpo').innerHTML;
+          Check('S16 solo Linea base: vacio, sin tabla, N = 0', [true, false, false, true],
+            [/Sin movimientos de fecha registrados desde el 09\/10\/2026/.test(b), /Línea base/.test(b),
+             /<th scope="col">Movimiento<\/th>/.test(b), /Historial de cambios \(0\)/.test(b)]);
+          clicFolio(p, 'MAP 2026-000002');
+          var ini = p.sel('regDetCuerpo').innerHTML;
+          Check('S16 Fecha inicial sigue visible y no cuenta', [true, true, true],
+            [/<td>Fecha inicial<\/td><td>—<\/td><td>20\/11\/2026<\/td>/.test(ini), /<th scope="col">Movimiento<\/th>/.test(ini),
+             /Historial de cambios \(0\)/.test(ini)]);
+        });
+      });
     });
   });
 });
@@ -856,6 +926,29 @@ pruebas.push(function () {
   Check('H6 opciones largas se parten', true, /overflow-wrap: anywhere/.test(op));
   Check('H6 la rejilla de 560px sigue igual', true,
     /\.filtros\.ini-filtros \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/.test(css));
+});
+
+// ---------------------------------------------------------------------------
+// HF) Rotulos del historial de fechas (etiquetarHistorial)
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  function rot(lista) { return R.etiquetarHistorial(lista).map(function (f) { return f.etiqueta + (f.cuenta ? '*' : ''); }); }
+  function u(campo, a, n) { return { campo: campo, anterior: a, nuevo: n, operacion: 'U' }; }
+  Check('HF1 base, inicial, asignada, retirada no cuentan',
+    ['Línea base', 'Fecha inicial', 'Fecha asignada', 'Fecha retirada'],
+    rot([{ campo: 'FechaAnalisis', anterior: null, nuevo: '2026-01-01', operacion: 'B' },
+         { campo: 'FechaAnalisis', anterior: null, nuevo: '2026-01-01', operacion: 'I' },
+         u('FechaSolucion', null, '2026-02-01'), u('FechaSolucion', '2026-02-01', null)]));
+  Check('HF2 Analisis y Solucion cuentan adelantos y extensiones; n por campo',
+    ['Cambio 1*', 'Cambio 1*', 'Cambio 2*', 'Cambio 2*'],
+    rot([u('FechaAnalisis', '2026-03-01', '2026-02-01'), u('FechaSolucion', '2026-03-01', '2026-04-01'),
+         u('FechaAnalisis', '2026-02-01', '2026-05-01'), u('FechaSolucion', '2026-04-01', '2026-03-15')]));
+  Check('HF3 Cierre: solo las extensiones cuentan',
+    ['Cambio 1*', 'Adelanto (no cuenta)', 'Cambio 2*'],
+    rot([u('FechaCierre', '2026-03-01', '2026-04-01'), u('FechaCierre', '2026-04-01', '2026-03-20'),
+         u('FechaCierre', '2026-03-20', '2026-05-01')]));
+  Check('HF4 fila sin operacion o vacia: — y no cuenta', ['—', '—'], rot([{ campo: 'FechaCierre' }, null]));
+  Check('HF5 sin lista: vacio', 0, R.etiquetarHistorial(undefined).length);
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

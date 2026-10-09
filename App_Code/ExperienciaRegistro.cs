@@ -69,8 +69,8 @@
 // registro por su `n2`, sin ningun SELECT nuevo.
 //
 // SOLO LECTURA: los SELECT de LeerIniciativas, LeerIniciativasSinCategoria,
-// DirectorioOrganizacional.Cargar, DashboardCatalogos.PrefijosPorFolio y
-// DashboardCatalogos.PrefijosIniciativa,
+// DirectorioOrganizacional.Cargar, DashboardCatalogos.PrefijosPorFolio,
+// DashboardCatalogos.PrefijosIniciativa y HistorialFechas.Leer,
 // sobre una conexion.
 
 using System;
@@ -96,6 +96,15 @@ public static partial class ExperienciaQueries
 
             var salida = ArmarRegistro(detalle, sueltas, dir, prefijos);
             salida["tipos_iniciativa"] = DashboardCatalogos.PrefijosIniciativa(cn);
+
+            // Historial de fechas por folio (App_Code/HistorialFechas.cs). Si
+            // no se puede leer, cada iniciativa sale sin historial y
+            // historial_estado lo dice; el registro no cambia.
+            var historial = HistorialFechas.Leer(cn);
+            foreach (Dictionary<string, object> i in (List<object>)salida["iniciativas"])
+                i["historial"] = historial.Para(i["folio"] as string);
+            salida["historial_estado"] = historial.Estado;
+            salida["historial_desde"] = historial.Desde;
             salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
             return salida;
         }

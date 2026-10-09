@@ -15,7 +15,12 @@
 //                          prefijo,
 //                          categorias: [ { categoria, tickets_reduce,
 //                                          pct_dism, po, so, director,
-//                                          n2 } ] } ],
+//                                          n2 } ],
+//                          historial: [ { id, campo, anterior, nuevo,
+//                                         operacion, origen, usuario,
+//                                         solicitud, fecha, reconstruido } ] } ],
+//       "historial_estado": "ok" | "sin_tabla" | "error",
+//       "historial_desde": "dd/MM/yyyy" | null,       (App_Code/HistorialFechas.cs)
 //       "estados_activos": [...], "agrupadores": [...], "fecha_gen": "dd/MM/yyyy",
 //       "tipos_iniciativa": [ { prefijo, nombre } ] }   (dbo.CatPrefijoProblem)
 //
@@ -25,7 +30,8 @@
 // SOLO LECTURA: SELECT sobre dbo.vw_ProblemCategoria, dbo.Problem,
 // dbo.CatPrefijoProblem, dbo.ProblemCategoria, dbo.CatCategoriaDueno y
 // dbo.CatPersona (y dbo.Problem.Prefijo por folio + dbo.CatPrefijoProblem para el
-// filtro de Tipo de iniciativa). No crea ni cambia nada en la base.
+// filtro de Tipo de iniciativa) y dbo.ProblemFechaEvento (historial de fechas).
+// No crea ni cambia nada en la base.
 //
 // ACCESO: solo las cuentas de AdminAllowedUsers (AccesoAdmin.Exigir); el
 // resto recibe 403 antes de tocar la base.
