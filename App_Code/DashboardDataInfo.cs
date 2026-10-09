@@ -203,6 +203,14 @@ public sealed class DashboardDataInfo
         return TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ZonaPresentacion).Date;
     }
 
+    /* Un instante guardado en UTC, en la zona de presentacion. Para valores
+       que no son el sello de DashboardDataInfo pero se guardan igual (p. ej.
+       dbo.ProblemFechaEvento.FechaRegistro, DEFAULT SYSUTCDATETIME()). */
+    public static DateTime UtcAPresentacion(DateTime utc)
+    {
+        return TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), ZonaPresentacion);
+    }
+
     /* Rodante de 30 dias = termina hoy y mide un multiplo exacto de 30 dias.
        Es justo la forma que producen los dos sitios que usan la ventana:
 

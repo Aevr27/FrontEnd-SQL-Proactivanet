@@ -100,10 +100,16 @@
      la base (ni su numero #0000001). Campos que se pueden pedir cambiar:
      solo las fechas compromiso (CAMPOS_CAMBIO); los demas se agregaran
      cuando se designen explicitamente.
-     "Historial de cambios (N)" nace plegado. Pinta `historial` si el
-     servidor lo trae ([{ campo, anterior, nuevo, fecha, usuario }],
-     contrato provisional); hoy no lo trae y N = 0. Los NroCambioFecha* del
-     Excel solo se cuentan en Seguimiento: no tienen detalle que mostrar.
+     "Historial de cambios (N)" nace plegado. Pinta `historial`, las filas
+     de dbo.ProblemFechaEvento de la iniciativa en orden de IdEvento
+     (App_Code/HistorialFechas.cs): { id, campo, anterior, nuevo, operacion,
+     origen, usuario, solicitud, fecha, reconstruido }. Los rotulos los pone
+     etiquetarHistorial (sql/PROPUESTA_historial_fechas.md seccion 4): Linea
+     base, Fecha inicial, Fecha asignada, Fecha retirada y "Cambio n", que es
+     lo unico que cuenta y lo que da N. En FechaCierre solo cuentan las
+     extensiones (nueva > anterior): un adelanto se muestra sin numero
+     (regla del 2026-10-09). Los NroCambioFecha* del Excel siguen en
+     Seguimiento tal cual.
 
    Se prueba en node: tools/tests/RegistroIniciativasSmoke.js.
    ========================================================================= */
@@ -191,11 +197,16 @@ window.RegistroIniciativas = (function () {
         if (!Array.isArray(i.categorias)) i.categorias = [];
         return i;
       });
-      return new Registro(lista,
+      var r = new Registro(lista,
         Array.isArray(json.estados_activos) ? json.estados_activos : [],
         Array.isArray(json.agrupadores) ? json.agrupadores : [],
         typeof json.fecha_gen === 'string' ? json.fecha_gen : '',
         Registro.tiposDesdeJson(json.tipos_iniciativa));
+      // Historial de fechas: 'ok' | 'sin_tabla' | 'error', o '' si el
+      // servidor no lo manda; y desde cuando se captura (dd/MM/yyyy).
+      r.historialEstado = typeof json.historial_estado === 'string' ? json.historial_estado : '';
+      r.historialDesde = typeof json.historial_desde === 'string' ? json.historial_desde : '';
+      return r;
     }
 
     // [{ prefijo, nombre }]: sin prefijo de texto se descarta; repetido, el
@@ -589,6 +600,38 @@ window.RegistroIniciativas = (function () {
     { clave: 'f_solucion', rotulo: 'Fecha compromiso de Solución' },
     { clave: 'f_cierre', rotulo: 'Fecha compromiso de Cierre' }
   ];
+
+  // Historial de fechas: el nombre corto de cada columna de dbo.Problem.
+  var CAMPOS_HISTORIAL = { FechaAnalisis: 'Análisis', FechaSolucion: 'Solución', FechaCierre: 'Cierre' };
+
+  // Rotulo de cada fila del historial, en el orden en que llegan (IdEvento).
+  // Solo "Cambio n" cuenta; n corre por campo. En Cierre un adelanto
+  // (nueva < anterior) no cuenta. Sin `operacion` la fila no es del
+  // contrato: se rotula "—" y no cuenta.
+  function etiquetarHistorial(lista) {
+    var n = {};
+    return (Array.isArray(lista) ? lista : []).map(function (h) {
+      var e = '—', cuenta = false;
+      if (!h || !h.operacion) {
+        e = '—';
+      } else if (h.operacion === 'B') {
+        e = 'Línea base';
+      } else if (h.operacion === 'I') {
+        e = 'Fecha inicial';
+      } else if (!h.anterior && h.nuevo) {
+        e = 'Fecha asignada';
+      } else if (h.anterior && !h.nuevo) {
+        e = 'Fecha retirada';
+      } else if (h.campo === 'FechaCierre' && String(h.nuevo) < String(h.anterior)) {
+        e = 'Adelanto (no cuenta)';
+      } else {
+        n[h.campo] = (n[h.campo] || 0) + 1;
+        e = 'Cambio ' + n[h.campo];
+        cuenta = true;
+      }
+      return { fila: h || {}, etiqueta: e, cuenta: cuenta };
+    });
+  }
 
   function campoCambio(clave) {
     for (var k = 0; k < CAMPOS_CAMBIO.length; k++) if (CAMPOS_CAMBIO[k].clave === clave) return CAMPOS_CAMBIO[k];
@@ -1319,21 +1362,46 @@ window.RegistroIniciativas = (function () {
     }
 
     htmlHistorial(i) {
-      var lista = Array.isArray(i.historial) ? i.historial : [];
-      var cuerpo = lista.length
-        ? '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Fecha</th><th scope="col">Campo</th>' +
-            '<th scope="col">Anterior</th><th scope="col">Nuevo</th><th scope="col">Usuario</th></tr></thead><tbody>' +
-            lista.map(function (h) {
-              return '<tr><td>' + Escape.html(texto(h.fecha)) + '</td><td>' + Escape.html(texto(h.campo)) + '</td>' +
-                '<td>' + Escape.html(texto(h.anterior)) + '</td><td>' + Escape.html(texto(h.nuevo)) + '</td>' +
-                '<td>' + Escape.html(texto(h.usuario)) + '</td></tr>';
-            }).join('') + '</tbody></table></div>'
-        : '<p class="ini-nota">Sin cambios registrados. El historial empezará a guardarse cuando exista su almacenamiento en la base; ' +
+      var filas = etiquetarHistorial(i.historial);
+      var cambios = filas.filter(function (f) { return f.cuenta; }).length;
+      var estado = this.registro ? this.registro.historialEstado : '';
+      var desde = this.registro ? this.registro.historialDesde : '';
+      var hayReconstruidas = filas.some(function (f) { return f.fila.reconstruido; });
+      var cuerpo;
+      if (filas.length) {
+        cuerpo = '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Registrado</th><th scope="col">Fecha</th>' +
+            '<th scope="col">Movimiento</th><th scope="col">Anterior</th><th scope="col">Nueva</th><th scope="col">Quién</th>' +
+            '</tr></thead><tbody>' +
+            filas.map(function (f) {
+              var h = f.fila;
+              var cuando = h.reconstruido ? '≈ ' + String(h.fecha || '').slice(0, 10) : texto(h.fecha);
+              var quien = h.usuario ? h.usuario : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
+              return '<tr><td>' + Escape.html(cuando) + '</td>' +
+                '<td>' + Escape.html(CAMPOS_HISTORIAL[h.campo] || texto(h.campo)) + '</td>' +
+                '<td>' + (f.cuenta ? '<b>' + Escape.html(f.etiqueta) + '</b>' : Escape.html(f.etiqueta)) + '</td>' +
+                '<td>' + Escape.html(h.anterior ? fecha(h.anterior) : '—') + '</td>' +
+                '<td>' + Escape.html(h.nuevo ? fecha(h.nuevo) : '—') + '</td>' +
+                '<td>' + Escape.html(quien) + '</td></tr>';
+            }).join('') + '</tbody></table></div>' +
+          '<p class="ini-nota">' +
+            (desde ? 'Registro automático desde el ' + Escape.html(desde) + '. ' : '') +
+            (hayReconstruidas ? '≈ Reconstruido de los comentarios del Excel: la fecha es aproximada. ' : '') +
+            'Solo "Cambio n" cuenta como cambio; en Cierre solo cuentan las extensiones.</p>';
+      } else if (estado === 'sin_tabla') {
+        cuerpo = '<p class="ini-nota">El historial de fechas todavía no está instalado en la base.</p>';
+      } else if (estado === 'error') {
+        cuerpo = '<p class="ini-nota">No se pudo leer el historial de fechas; el resto del detalle está completo.</p>';
+      } else if (estado === 'ok') {
+        cuerpo = '<p class="ini-nota">Sin movimientos de fecha registrados' +
+          (desde ? ' desde el ' + Escape.html(desde) : '') + '.</p>';
+      } else {
+        cuerpo = '<p class="ini-nota">Sin cambios registrados. El historial empezará a guardarse cuando exista su almacenamiento en la base; ' +
           'los cambios de fecha que trae el Excel solo se cuentan (columna Cambios de Seguimiento), sin detalle.</p>';
+      }
       return '<section class="ini-det-sec ini-det-ancha ini-hist">' +
         '<button type="button" class="ini-hist-boton" id="regHistBoton" data-accion="historial" aria-expanded="false" aria-controls="regHistCuerpo">' +
           '<svg class="ini-hist-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.5 6.5 15 12l-5.5 5.5"/></svg>' +
-          '<span>Historial de cambios (' + fmt(lista.length) + ')</span></button>' +
+          '<span>Historial de cambios (' + fmt(cambios) + ')</span></button>' +
         '<div class="ini-hist-cuerpo" id="regHistCuerpo" hidden>' + cuerpo + '</div></section>';
     }
 
@@ -1451,6 +1519,7 @@ window.RegistroIniciativas = (function () {
     Cobertura: Cobertura,
     SolicitudCambio: SolicitudCambio,
     CAMPOS_CAMBIO: CAMPOS_CAMBIO,
+    etiquetarHistorial: etiquetarHistorial,
     ordenar: ordenar,
     VistaRegistro: VistaRegistro
   };
