@@ -43,7 +43,7 @@ FechaSolucion  15/07/2026 → 24/07/2026   (Cambio 2)
 | # | Decision |
 |---|---|
 | D1 | **Baseline: approved.** It is loaded once at activation. It holds only the current non-NULL date values known at that moment, marked `Operacion = 'B'` / `Reconstruido = 1`. It is never presented as a change. It never uses `FechaOriginal*` or `NroCambioFecha*`. It means "the value known when the history started", **not** "the initiative's original date". |
-| D2 | **Labels** (UI presentation only): `Línea base` = the legacy starting snapshot (`B`). `Fecha inicial` = a date present when a new `Problem` row is INSERTed after deployment (`I`). `Fecha asignada` = `NULL → date`. `Cambio n` = `date → different date`. `Fecha retirada` = `date → NULL`. |
+| D2 | **Labels** (UI presentation only): `Línea base` = the legacy starting snapshot (`B`); **revised 2026-10-09: labelled but not displayed** (§4). `Fecha inicial` = a date present when a new `Problem` row is INSERTed after deployment (`I`). `Fecha asignada` = `NULL → date`. `Cambio n` = `date → different date`. `Fecha retirada` = `date → NULL`. |
 | D3 | **Numbering.** Only `date → different date` transitions receive a sequential "Cambio n", counted separately for each field in `IdEvento` order. The number is not stored in the database and is never derived from `NroCambioFecha*`. |
 | D4 | **Excel/loader attribution.** `Origen = NO_DECLARADO`. `Usuario` and `SolicitudId` are NULL, and no requester is fabricated. `LoginBD` is recorded. |
 | D5 | **Admin/web attribution.** `Origen = ADMIN`. `Usuario` is **required**: with no user, the change is **rejected**, not recorded anonymously. `SolicitudId` is **optional for now**, and its absence is **not** a failure. `LoginBD` is recorded. |
@@ -179,13 +179,14 @@ There is deliberately **no** change-number column, no `NroCambioFecha*`, no
 
 | Stored event | Label | Numbered? |
 |---|---|---|
-| `Operacion = 'B'` (legacy baseline) | **Línea base**: the value known when the history started. It is not the original date and not a change. | no |
+| `Operacion = 'B'` (legacy baseline) | **Línea base**: the value known when the history started. It is not the original date and not a change. **Not displayed** (revised 2026-10-09). | no |
 | `Operacion = 'I'` (date present on a new `Problem` INSERT after deployment) | **Fecha inicial** | no |
 | `Operacion = 'U'`, `NULL → date` | **Fecha asignada** | no |
 | `Operacion = 'U'`, `date → different date` | **Cambio n** (1, 2, … per field) | **yes, only this one** |
 | `Operacion = 'U'`, `date → NULL` | **Fecha retirada** | no |
 
 - A baseline event is never shown as "Fecha inicial" or "Cambio 1".
+- **Revised 2026-10-09:** baseline events are hidden from the panel. They are initialization snapshots, not movements, and listing 1–3 of them per initiative made the timeline look as if something changed on the capture date. The rows stay in `ProblemFechaEvento` and the handler still sends them: the earliest `B.FechaRegistro` sets "Registro automático desde …" and the `reconstruido` flag of the Excel events. They never counted, so the button's N is unchanged. An initiative with only baseline rows shows the empty state "Sin movimientos de fecha registrados desde …".
 
 ---
 
@@ -266,7 +267,7 @@ What remains possible:
 - It records only what is genuinely known at initialization: the current non-NULL value of each date. Rows have `Operacion = 'B'`, `Reconstruido = 1`, `Origen = 'NO_DECLARADO'`, and `FechaAnterior` NULL (enforced by a CHECK).
 - It does **not** use `FechaOriginal*`: writing `original → current` would look like a single direct change when an unknown number of intermediate changes happened.
 - It does **not** use `NroCambioFecha*`.
-- The UI shows it as **"Línea base"**, never as "Fecha inicial" or "Cambio 1" (§4).
+- The UI never shows it as "Fecha inicial" or "Cambio 1"; since 2026-10-09 the panel does not show it at all (§4).
 - Meaning: "the value known when the history started". It is **not** the initiative's original date. Changes made before activation are unknown and are not implied.
 - It covers all `Problem` rows, including those with `VigenteEnOrigen = 0`, so a row that becomes current again still has its starting snapshot.
 
@@ -418,7 +419,7 @@ Authenticated user → requests a date extension → review/approval → procedu
 | Layer | What it contains | Trust |
 |---|---|---|
 | Existing data | The current dates in `Problem`; the hand-typed `FechaOriginal*` (partial); the hand-typed `NroCambioFecha*` (unreliable) | Current dates: authoritative. The rest: legacy attributes of `Problem`, **never turned into events** |
-| Baseline (approved) | "Value known when the history started", per field, `Reconstruido = 1` | Labelled "Línea base"; not a change, not the original date |
+| Baseline (approved) | "Value known when the history started", per field, `Reconstruido = 1` | Labelled "Línea base" but not displayed (2026-10-09); not a change, not the original date |
 | Captured history | Every `I`/`U` event from the go-live timestamp onward | Trustworthy evidence |
 
 Intermediate values from before go-live were never persisted, so they **cannot be reconstructed**. For example, `27/06 → 15/07 → 24/07` cannot be rebuilt for an existing initiative. The free-text "Histórico de comentarios" is not parsed. The panel always shows "Historial registrado desde dd/mm/aaaa", so a short or empty list is never read as "never changed".
@@ -541,7 +542,7 @@ For P0-3, any hit with `UsaOutput = 1` must be read to confirm whether its `OUTP
   ORDER BY e.IdEvento;
   ```
 - **Handler** (`admin_iniciativas_registro`, detail): passes the rows through in that order and maps them to the existing contract `{campo, anterior, nuevo, fecha, usuario}` plus `operacion`, `reconstruido`, `origen`, `solicitud`. `fecha` = `FechaRegistro` converted to UTC-6. `usuario` = `Usuario` (`ADMIN` rows only). `LoginBD` is not sent to the UI.
-- **Panel** (`htmlHistorial`): renders chronologically, applies the locked labels from §4 ("Línea base", "Fecha inicial", "Fecha asignada", "Cambio n", "Fecha retirada"), and shows "Historial registrado desde …".
+- **Panel** (`htmlHistorial`): renders chronologically, applies the locked labels from §4 ("Fecha inicial", "Fecha asignada", "Cambio n", "Fecha retirada"; "Línea base" rows are hidden since 2026-10-09), and shows "Historial registrado desde …".
 - **Admin must never:**
   - reconstruct missing history;
   - invent previous dates;
@@ -601,7 +602,7 @@ Cleanup (test environment only): disable the guard, delete the TST events and th
 - [ ] Trigger behavior (§5): `AFTER INSERT, UPDATE`, set-based, `EXCEPT` comparison, no claim that it cannot fail.
 - [x] Append-only (D7, §9): permissions plus guard trigger; `db_owner` can bypass it; the test cleanup disables the guard first.
 - [ ] Day-level comparison: time-only changes ignored.
-- [x] Baseline (D1, §6): **approved**: current non-NULL values only, `B`/`Reconstruido = 1`, shown as "Línea base", including non-current rows.
+- [x] Baseline (D1, §6): **approved**: current non-NULL values only, `B`/`Reconstruido = 1`, including non-current rows. Shown as "Línea base" until 2026-10-09; now hidden in the panel, kept in the table (§4).
 - [x] Labels and numbering (D2, D3, §4): locked; "Cambio n" only for date → different date, UI only.
 - [x] `NroCambioFecha*` and `FechaOriginal*` excluded from history.
 - [x] Intentional FK-based delete prevention (D6, §8).

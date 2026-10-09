@@ -108,8 +108,11 @@
      base, Fecha inicial, Fecha asignada, Fecha retirada y "Cambio n", que es
      lo unico que cuenta y lo que da N. En FechaCierre solo cuentan las
      extensiones (nueva > anterior): un adelanto se muestra sin numero
-     (regla del 2026-10-09). Los NroCambioFecha* del Excel siguen en
-     Seguimiento tal cual.
+     (regla del 2026-10-09). La Linea base se rotula pero no se pinta
+     (2026-10-09): es la foto del inicio de captura, no un movimiento; el
+     servidor la sigue mandando porque de ella salen `desde` y
+     `reconstruido`. Los NroCambioFecha* del Excel siguen en Seguimiento
+     tal cual.
 
    Se prueba en node: tools/tests/RegistroIniciativasSmoke.js.
    ========================================================================= */
@@ -1362,7 +1365,9 @@ window.RegistroIniciativas = (function () {
     }
 
     htmlHistorial(i) {
-      var filas = etiquetarHistorial(i.historial);
+      // La linea base ('B') no es un movimiento: no se pinta. Se rotula antes
+      // de filtrar y nunca cuenta, asi que N es el mismo con o sin ella.
+      var filas = etiquetarHistorial(i.historial).filter(function (f) { return f.fila.operacion !== 'B'; });
       var cambios = filas.filter(function (f) { return f.cuenta; }).length;
       var estado = this.registro ? this.registro.historialEstado : '';
       var desde = this.registro ? this.registro.historialDesde : '';

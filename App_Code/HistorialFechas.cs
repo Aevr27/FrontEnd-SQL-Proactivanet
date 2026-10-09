@@ -13,6 +13,8 @@
 // cada folio en i["historial"]. Los rotulos (Linea base, Fecha inicial,
 // Cambio n...) y la regla de conteo (en Cierre solo cuentan las extensiones)
 // los pone el navegador: admin/registro-iniciativas.js, htmlHistorial.
+// Las filas 'B' viajan igual aunque el panel no las pinta: de ellas salen
+// Desde y `reconstruido` (abajo).
 //
 // INICIO DE CAPTURA: el FechaRegistro de la linea base, que se escribio en
 // la misma transaccion que creo el trigger. Un 'U' anterior a ese instante
