@@ -75,10 +75,17 @@ IF @tabla = 1
 SELECT Seccion = '1 partida', TablaExiste = @tabla, TriggerYaExiste = @yaExiste,
        OtrosTriggersQueEscriben = @otroEscribe, FilasHoy = @filas, FilasNoImportacion = ISNULL(@filasOtras, 0),
        TriggersEnProblem = (SELECT COUNT(*) FROM sys.triggers WHERE parent_id = OBJECT_ID(N'dbo.Problem')),
-       -- Otros modulos que usen las mismas llaves de SESSION_CONTEXT (pfe_*): debe ser 0.
-       OtrosConLlavesPfe = (SELECT COUNT(*) FROM sys.sql_modules AS m
-                            WHERE m.definition LIKE N'%pfe[_]origen%' OR m.definition LIKE N'%pfe[_]usuario%'
-                               OR m.definition LIKE N'%pfe[_]solicitud%');
+       -- Modulos que LEEN las llaves pfe_* (trg_Problem_EstadoEvento las lee igual,
+       -- a proposito): informativo.
+       LeenLlavesPfe = (SELECT COUNT(*) FROM sys.sql_modules AS m
+                        WHERE m.definition LIKE N'%pfe[_]origen%' OR m.definition LIKE N'%pfe[_]usuario%'
+                           OR m.definition LIKE N'%pfe[_]solicitud%'),
+       -- Modulos que ademas las FIJAN (sp_set_session_context): debe ser 0. Solo
+       -- el futuro procedimiento de Admin deberia fijarlas.
+       FijanLlavesPfe = (SELECT COUNT(*) FROM sys.sql_modules AS m
+                            WHERE (m.definition LIKE N'%pfe[_]origen%' OR m.definition LIKE N'%pfe[_]usuario%'
+                                   OR m.definition LIKE N'%pfe[_]solicitud%')
+                              AND m.definition LIKE N'%sp[_]set[_]session[_]context%');
 
 IF @LineaBase IS NULL OR @LineaBase NOT IN ('NINGUNA', 'SIN_HISTORIAL')
 BEGIN
@@ -87,8 +94,9 @@ BEGIN
 END;
 IF @tabla = 0 OR @yaExiste = 1 OR @otroEscribe > 0 OR ISNULL(@filasOtras, 0) > 0
    OR EXISTS (SELECT 1 FROM sys.sql_modules AS m
-              WHERE m.definition LIKE N'%pfe[_]origen%' OR m.definition LIKE N'%pfe[_]usuario%'
-                 OR m.definition LIKE N'%pfe[_]solicitud%')
+              WHERE (m.definition LIKE N'%pfe[_]origen%' OR m.definition LIKE N'%pfe[_]usuario%'
+                     OR m.definition LIKE N'%pfe[_]solicitud%')
+                AND m.definition LIKE N'%sp[_]set[_]session[_]context%')
 BEGIN
     SELECT Seccion = 'omitido', Motivo = 'El punto de partida no es el esperado (ver 1 partida). No se cambio nada.';
     RETURN;
