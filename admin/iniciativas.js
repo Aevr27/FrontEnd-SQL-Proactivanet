@@ -73,6 +73,9 @@
                            compartida con cualquier pestaña que filtre)
      SolicitudNueva        el formulario sin DOM: tipo, cascada, valores
      PaginaIniciativas     el DOM: vistas, carga, estados, campos, ayuda
+                           (y arranca VistaCrearAdmin, el alta directa de
+                           ADM de admin/iniciativa-admin.js: otra vista,
+                           otro borrador, sin las reglas de esta)
      MenuLateral           plegar/desplegar la barra lateral (copia de la
                            del tablero; sus entradas son enlaces de vuelta)
 
@@ -453,8 +456,14 @@ window.Iniciativas = (function () {
   var VISTAS = {
     iniciativas: { panel: 'panel-iniciativas', pestana: 'tab-iniciativas' },
     solicitudes: { panel: 'panel-solicitudes', pestana: 'tab-solicitudes' },
-    nueva:       { panel: 'panel-nueva',       pestana: 'tab-iniciativas' }
+    nueva:       { panel: 'panel-nueva',       pestana: 'tab-iniciativas' },
+    // Alta directa de ADM (admin/iniciativa-admin.js): otra accion de
+    // Iniciativas, separada de Nueva solicitud. Solo con rol ADM.
+    crear:       { panel: 'panel-crear-admin', pestana: 'tab-iniciativas' }
   };
+  var VISTAS_SOLO_ADM = { crear: true };
+  // Nueva solicitud: ADM o MOD. Sin rol resuelto, no abre (falla cerrado).
+  var VISTAS_ADM_MOD = { nueva: true };
   var PESTANAS = [
     { id: 'tab-iniciativas', vista: 'iniciativas' },
     { id: 'tab-solicitudes', vista: 'solicitudes' }
@@ -511,6 +520,37 @@ window.Iniciativas = (function () {
       this.vista = 'iniciativas';
       this.menu = null;
       this.registro = null;  // VistaRegistro (admin/registro-iniciativas.js)
+      this.crearAdmin = null; // VistaCrearAdmin (admin/iniciativa-admin.js)
+      // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
+      // sin rol no se abre nada de ADM.
+      this.rol = null;
+    }
+
+    // Solo UX, como SesionAdmin: decide que acciones de ADM se pintan. El
+    // alta y la edicion de ADM no llaman al servidor en esta fase.
+    fijarRol(rol) {
+      if (this.denegada) return;
+      this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
+      if (this.registro && this.registro.fijarRol) this.registro.fijarRol(this.rol);
+      if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') || (VISTAS_ADM_MOD[this.vista] && !this.rol)) {
+        this.mostrarVista('iniciativas');
+      }
+    }
+
+    // VIEWER (o sin respuesta de admin_sesion): la pagina no muestra nada
+    // de Admin. Solo UX y defensa extra: la pagina la niega
+    // AdminAccesoModulo si esta registrado en Web.config, y cada handler
+    // admin_iniciativas_* responde 403 a un VIEWER de todos modos.
+    // Irreversible en esta carga de pagina.
+    denegar() {
+      var self = this;
+      this.denegada = true;
+      this.rol = null;
+      if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
+      if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle();
+      Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = true; });
+      this.$('iniTabs').hidden = true;
+      this.$('iniDenegado').hidden = false;
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -522,6 +562,7 @@ window.Iniciativas = (function () {
       // El registro carga por su cuenta, en paralelo con el catalogo de
       // Nueva solicitud: un fallo de uno no bloquea al otro.
       this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
+      if (window.IniciativaAdmin) this.crearAdmin = new window.IniciativaAdmin.VistaCrearAdmin(this.doc);
       this.cablearPestanas();
       this.cablearAcciones();
       this.mostrarVista(this.vista);
@@ -538,7 +579,9 @@ window.Iniciativas = (function () {
     // ---- vistas: solo navegacion; no tocan el borrador ----
     mostrarVista(nombre) {
       var self = this;
-      if (!VISTAS[nombre]) return;
+      if (!VISTAS[nombre] || this.denegada) return;
+      if (VISTAS_SOLO_ADM[nombre] && (this.rol !== 'ADM' || !this.crearAdmin)) return;
+      if (VISTAS_ADM_MOD[nombre] && this.rol !== 'ADM' && this.rol !== 'MOD') return;
       this.vista = nombre;
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = k !== nombre; });
       PESTANAS.forEach(function (p) {
@@ -587,6 +630,14 @@ window.Iniciativas = (function () {
       this.$('btnVolver').addEventListener('click', function () {
         self.mostrarVista('iniciativas');
         enfocar(self.$('btnSolicitar'));
+      });
+      this.$('btnCrearAdmin').addEventListener('click', function () {
+        self.mostrarVista('crear');
+        if (self.vista === 'crear') enfocar(self.$('admCrearTitulo'));
+      });
+      this.$('btnVolverAdmin').addEventListener('click', function () {
+        self.mostrarVista('iniciativas');
+        enfocar(self.$('btnCrearAdmin'));
       });
     }
 
@@ -891,6 +942,9 @@ window.Iniciativas = (function () {
           if (mia !== self.cargaId) return;
           var catalogo = CatalogoIniciativas.desdeJson(json);
           self.$('iniEstado').textContent = '';
+          // El alta de ADM usa el mismo catalogo aunque no haya categorias:
+          // la categoria es opcional ahi.
+          if (self.crearAdmin) self.crearAdmin.fijarCatalogo(catalogo);
 
           if (catalogo.omitidas > 0) {
             var n = catalogo.omitidas;
@@ -917,6 +971,7 @@ window.Iniciativas = (function () {
         .catch(function (err) {
           if (mia !== self.cargaId) return;
           self.solicitud = null;
+          if (self.crearAdmin) self.crearAdmin.fijarCatalogo(null);
           self.$('iniEstado').textContent = '';
           self.bloquearTodo('No disponible: no se pudo cargar el catálogo.');
           self.mostrarError((err && err.message) || 'No se pudo cargar el catálogo.');
@@ -937,6 +992,8 @@ window.Iniciativas = (function () {
     CascadaOrganizacional: CascadaOrganizacional,
     SolicitudNueva: SolicitudNueva,
     VISTAS: VISTAS,
+    VISTAS_SOLO_ADM: VISTAS_SOLO_ADM,
+    VISTAS_ADM_MOD: VISTAS_ADM_MOD,
     MenuLateral: MenuLateral,
     PaginaIniciativas: PaginaIniciativas
   };

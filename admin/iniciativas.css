@@ -640,3 +640,22 @@ html.ini-detalle-abierto { overflow: hidden; }
 @media (max-width: 720px) {
   .ini-cambio-campos { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Gestion directa de ADM (admin/iniciativa-admin.js): PROTOTIPO sin
+   persistencia. El aviso de prototipo nunca se confunde con un guardado
+   (.ini-resultado.ok no se usa ahi). "Incompleta" es una marca derivada. */
+.ini-prototipo-aviso {
+  margin: 8px 0 12px; padding: 8px 12px; font-size: 12px; color: var(--ink-2);
+  border: 1px dashed var(--line); border-radius: var(--radius-xs); background: var(--bg-2);
+}
+.ini-prototipo-marca { display: block; margin-bottom: 4px; }
+.ini-incompleta {
+  margin: 8px 0; padding: 6px 10px; font-size: 12px; color: var(--ink);
+  border-left: 3px solid var(--ambr); background: var(--bg-2); border-radius: var(--radius-xs);
+}
+.ini-incompleta-nota { color: var(--muted); }
+.ini-ed-pct { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 4px; }
+.ini-ed-pct input { width: 90px; }
+.ini-ed-pct .ini-cat-ruta { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ini-ed-otros { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.ini-ed-otros ul { margin: 6px 0 0 18px; padding: 0; }

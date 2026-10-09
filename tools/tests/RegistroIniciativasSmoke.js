@@ -164,7 +164,9 @@ var DATOS = {
   ]
 };
 
-function Pagina(pedirRegistro, pedirCatalogo) {
+// rol: 'ADM' por omision (las pruebas de siempre); null = aun sin rol; 'MOD'.
+function Pagina(pedirRegistro, pedirCatalogo, rol) {
+  if (rol === undefined) rol = 'ADM';
   var ventana = Elemento('window');
   var documento = Documento();
   function pedir(url) {
@@ -181,7 +183,12 @@ function Pagina(pedirRegistro, pedirCatalogo) {
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   return {
     ventana: ventana, doc: documento, sel: function (id) { return documento.getElementById(id); },
-    registro: ventana.IniciativasPagina.registro
+    registro: (function () {
+      // Las pruebas de siempre describen las opciones COMPLETAS (ADM); las
+      // de MOD / sin rol estan en la parte AL.
+      if (rol) ventana.IniciativasPagina.fijarRol(rol);
+      return ventana.IniciativasPagina.registro;
+    })()
   };
 }
 function ok(json) { return function () { return Promise.resolve(Respuesta(200, json)); }; }
@@ -227,6 +234,9 @@ function visibles(p) {
   return ['regCargando', 'regError', 'regSinDatos', 'regContenido'].filter(function (id) { return !p.sel(id).hidden; });
 }
 
+// Opciones completas (ADM) en las pruebas sin DOM de siempre.
+function Adm(reg) { reg.fijarAlcance(true); return reg; }
+
 var base = Pagina(nunca);
 var R = base.ventana.RegistroIniciativas;
 var pruebas = [];
@@ -235,7 +245,7 @@ var pruebas = [];
 // D) Sin DOM
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
-  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   Check('D1 entrada sin folio descartada', 5, reg.iniciativas.length);
   var k = R.Registro.indicadores(reg.iniciativas);
   Check('D2 indicadores: total/activas/retrasadas/no activas', [5, 3, 1, 1], [k.total, k.activas, k.retrasadas, k.noActivas]);
@@ -454,7 +464,7 @@ pruebas.push(function () {
   S.solo('zz');
   Check('S2-1 solo fuera de opciones = todos', null, S.marcados);
 
-  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   var f = new R.FiltroRegistro(reg);
   function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }); }
   var TODOS = ['En Análisis', 'En Solución', 'Cerrado'];
@@ -537,7 +547,7 @@ pruebas.push(function () {
 // S) Solicitar cambios e Historial de cambios (sin persistencia)
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
-  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   var S = R.SolicitudCambio;
   Check('S1 campos: solo las tres fechas compromiso', ['f_analisis', 'f_solucion', 'f_cierre'],
     S.campos().map(function (c) { return c.clave; }));
@@ -712,7 +722,7 @@ pruebas.push(function () {
 // prefijo (no pasa hoy: 933/933 tienen; solo pasaria con Todas). ADO: sin
 // iniciativas.
 pruebas.push(function () {
-  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   var f = new R.FiltroRegistro(reg);
   function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }); }
   function solo(pref) {
@@ -780,7 +790,7 @@ pruebas.push(function () {
   f.limpiar();
   Check('T9 limpiar: Todas', [null, 5, 0], [f.tiposIni, pasan().length, f.activos()]);
 
-  var sinCat = R.Registro.desdeJson({ iniciativas: [] });
+  var sinCat = Adm(R.Registro.desdeJson({ iniciativas: [] }));
   Check('T9 sin catalogo: sin opciones', [], sinCat.tiposIniciativa());
 });
 
@@ -902,8 +912,8 @@ pruebas.push(function () {
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   Check('H1 sin "en preparacion" en Iniciativas', false, /Registro de iniciativas en preparación/.test(html));
-  Check('H2 CTA solo para ADM: oculto hasta que SesionAdmin diga rol ADM', true,
-    /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-adm hidden>/.test(html));
+  Check('H2 Solicitar para ADM y MOD: oculto hasta que SesionAdmin diga autorizado', true,
+    /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-admin hidden>/.test(html));
   Check('H2 [hidden] gana al display del CTA', true,
     /\.btn\.ini-cta\[hidden\] \{ display: none; \}/.test(leer('admin/iniciativas.css')));
   Check('H3 orden de scripts', true,
@@ -979,7 +989,7 @@ function esperarBusqueda() { return new Promise(function (ok) { setTimeout(ok, R
 function teclear(p, v) { p.sel('regBuscar').value = v; p.sel('regBuscar').disparar('input'); }
 
 pruebas.push(function () {
-  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS_BUSQUEDA)));
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS_BUSQUEDA))));
   var f = new R.FiltroRegistro(reg);
   function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }).sort(); }
   function con(v) { f.buscar(v); return pasan(); }
@@ -1096,6 +1106,132 @@ pruebas.push(function () {
     return p.registro.cargar(ok(DATOS_BUSQUEDA));
   }).then(function () {
     Check('BV10 recarga: la busqueda escrita se conserva', [4, '1 filtro activo'], [folios(p).length, p.sel('regFiltrosCuenta').textContent]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AL) Opciones de Director / PO / SO segun el rol
+//     ADM: todas (incluidos dueños heredados de registros viejos).
+//     MOD o sin rol: solo nombres del catalogo vigente de dueños
+//     (asignaciones = DirectorioOrganizacional.AsignacionesVigentes, ya con
+//     la herencia C1 -> N2 resuelta en el servidor). VIEWER no llega aqui:
+//     Admin le responde 403 (AccesoAdminHttpSmoke.cs, parte V).
+// ---------------------------------------------------------------------------
+var DATOS_AL = {
+  estados_activos: DATOS.estados_activos, agrupadores: DATOS.agrupadores, fecha_gen: '09/10/2026',
+  tipos_iniciativa: [{ prefijo: 'PRB', nombre: 'Problem' }, { prefijo: 'MAP', nombre: 'Mejora aplicativo' }],
+  iniciativas: [
+    Ini('PRB 2026-000001', { prefijo: 'PRB', po: 'PO 1', so: 'SO x', director: 'Dir A',
+      categorias: [Cat('/A/Cat 1/Hoja', 10, 0.5, 'Dir A', 'PO 1', 'SO x')] }),
+    // Su categoria resuelve dueños que solo existen en filas dadas de baja.
+    Ini('MAP 2026-000002', { prefijo: 'MAP', po: 'PO Viejo', so: 'SO Viejo', director: 'Dir Viejo',
+      categorias: [Cat('/Z/Baja', 5, 1, 'Dir Viejo', 'PO Viejo', 'SO Viejo')] }),
+    // Sin categoria: dueños capturados en el Problem (OwnerProblem...).
+    Ini('PRB 2026-000003', { prefijo: 'PRB', sin_categoria: true, categorias: [],
+      po: 'Javier Tapia / Yadira Acosta', so: 'Pendiente de asignacion', director: 'Dir B' }),
+    // PO del catalogo pero SO heredado del C1 (resuelto en el servidor).
+    Ini('PRB 2026-000004', { prefijo: 'PRB', po: 'PO 3', so: 'SO z', director: 'Dir B',
+      categorias: [Cat('/B/Cat 5', 3, 0.1, 'Dir B', 'PO 3', 'SO z')] })
+  ]
+};
+// Catalogo vigente: la fila /B/Cat 5 tiene su SO HEREDADO del C1 (/B/Cat 4);
+// el servidor ya la manda resuelta, campo por campo.
+var CATALOGO_AL = { tipos: [], asignaciones: [
+  { director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1' },
+  { director: 'Dir A', po: 'PO 2', so: 'SO y', categoria: '/A/Cat 2' },
+  { director: 'Dir B', po: 'PO 3', so: 'SO z', categoria: '/B/Cat 4' },
+  { director: 'Dir B', po: 'PO 3', so: 'SO z', categoria: '/B/Cat 5' }
+], omitidas: 0 };
+var LEGADO = ['PO Viejo', 'SO Viejo', 'Dir Viejo', 'Javier Tapia / Yadira Acosta', 'Pendiente de asignacion'];
+function conLegado(lista) { return lista.filter(function (v) { return LEGADO.indexOf(v) >= 0; }); }
+function copiaAL() { return JSON.parse(JSON.stringify(DATOS_AL)); }
+function catalogoAL(url) {
+  if (/rutas=1/.test(url)) return nunca();       // el de Nueva solicitud: no se usa aqui
+  return Promise.resolve(Respuesta(200, JSON.parse(JSON.stringify(CATALOGO_AL))));
+}
+
+pruebas.push(function () {
+  var reg = R.Registro.desdeJson(copiaAL());
+  Check('AL1 sin rol y sin catalogo: sin opciones (falla cerrado)', [[], 'catalogo'], [reg.directores(), reg.alcance]);
+  reg.ampliar(CATALOGO_AL.asignaciones);
+  var f = new R.FiltroRegistro(reg);
+  var po = f.cascada.estado(true, '')[0].opciones, so = f.cascada.estado(true, '')[1].opciones;
+  Check('AL2 MOD: directores solo del catalogo', ['Dir A', 'Dir B'], reg.directores());
+  Check('AL2 MOD: PO y SO solo del catalogo', [['PO 1', 'PO 2', 'PO 3'], ['SO x', 'SO y', 'SO z']], [po, so]);
+  Check('AL2 MOD: ningun nombre heredado de registros viejos', [], conLegado(reg.directores().concat(po, so)));
+  Check('AL3 herencia C1 -> N2: el SO heredado (SO z) sigue como opcion de PO 3', true,
+    (function () { f.elegir(0, 'PO 3'); return f.cascada.estado(true, '')[1].opciones.indexOf('SO z') >= 0; })());
+  Check('AL3 ... y la categoria de la iniciativa con dueños del catalogo tambien', true,
+    f.cascada.estado(true, '')[2].opciones.indexOf('/B/Cat 5') >= 0);
+
+  // Ninguna iniciativa se pierde; filtrar sigue usando sus propias filas.
+  f.limpiar();
+  Check('AL4 MOD sin filtros: las 4 iniciativas siguen en la lista (incluidas las de dueños viejos)', 4, f.aplicar(reg.iniciativas).length);
+  f.buscar('000003');
+  Check('AL4 la de dueños del Problem se encuentra por codigo', ['PRB 2026-000003'], f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }));
+  f.limpiar();
+  f.elegir(0, 'PO 1');
+  Check('AL5 MOD filtra por un PO del catalogo', ['PRB 2026-000001'], f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }));
+  Check('AL5 un PO viejo no se acepta como filtro', false, f.elegir(0, 'PO Viejo'));
+
+  // Padre -> hijo y reinicio de dependientes.
+  f.limpiar();
+  f.elegirDirector('Dir A');
+  Check('AL6 Director acota PO', ['PO 1', 'PO 2'], f.cascada.estado(true, '')[0].opciones);
+  f.elegir(0, 'PO 2');
+  f.elegirDirector('Dir B');
+  Check('AL6 cambiar Director reinicia un PO que ya no vale', '', f.cascada.seleccion[0]);
+  f.elegirDirector('Dir Viejo');
+  Check('AL6 un Director viejo no se acepta', '', f.director);
+
+  // ADM: lo de siempre, con los nombres viejos.
+  var adm = R.Registro.desdeJson(copiaAL());
+  adm.fijarAlcance(true);
+  var fa = new R.FiltroRegistro(adm);
+  Check('AL7 ADM sin catalogo: conserva los nombres viejos', ['Dir A', 'Dir B', 'Dir Viejo'], adm.directores());
+  Check('AL7 ADM: PO incluye los del Problem y los de filas dadas de baja', ['Javier Tapia / Yadira Acosta', 'PO 1', 'PO 3', 'PO Viejo'],
+    fa.cascada.estado(true, '')[0].opciones);
+  fa.elegir(0, 'PO Viejo');
+  Check('AL7 ADM encuentra la iniciativa por el PO viejo', ['MAP 2026-000002'], fa.aplicar(adm.iniciativas).map(function (i) { return i.folio; }));
+  adm.ampliar(CATALOGO_AL.asignaciones);
+  Check('AL7 ADM con catalogo: suma, no quita', ['Dir A', 'Dir B', 'Dir Viejo'], adm.directores());
+
+  Check('AL8 los datos de las iniciativas no cambian', JSON.stringify(copiaAL().iniciativas.map(function (i) { return [i.folio, i.po, i.so, i.director]; })),
+    JSON.stringify(reg.iniciativas.map(function (i) { return [i.folio, i.po, i.so, i.director]; })));
+});
+
+// La pagina: MOD pide el catalogo al cargar y pinta solo esos nombres.
+pruebas.push(function () {
+  var pedidos = [];
+  var p = Pagina(ok(copiaAL()), function (url) { pedidos.push(url); return catalogoAL(url); }, 'MOD');
+  return esperar().then(esperar).then(function () {
+    var cat = pedidos.filter(function (u) { return !/rutas=1/.test(u); }).length;
+    Check('AL9 MOD: el catalogo se pide al cargar (sin abrir la Cobertura)', 1, cat);
+    var todos = p.sel('regDirector').opciones().concat(p.sel('regPo').opciones(), p.sel('regSo').opciones());
+    Check('AL9 MOD: selects sin nombres viejos', [], conLegado(todos));
+    Check('AL9 MOD: Director del catalogo', ['Dir A', 'Dir B'], p.sel('regDirector').opciones());
+    Check('AL9 MOD: las 4 iniciativas en la tabla', 4, folios(p).length);
+    // Un ADM confirmado despues ve todo; volver a MOD lo quita y reinicia.
+    p.ventana.IniciativasPagina.fijarRol('ADM');
+    Check('AL10 ADM: aparecen los nombres viejos', true, p.sel('regPo').opciones().indexOf('PO Viejo') >= 0);
+    elegir(p, 'regPo', 'PO Viejo');
+    Check('AL10 ADM filtra por el PO viejo', ['MAP 2026-000002'], folios(p));
+    p.ventana.IniciativasPagina.fijarRol('MOD');
+    Check('AL10 de vuelta a MOD: sin nombres viejos y el filtro viejo se suelta', [[], 4],
+      [conLegado(p.sel('regPo').opciones()), folios(p).length]);
+  });
+});
+
+// Sin rol todavia y con el catalogo fallando: sin opciones, lista intacta.
+pruebas.push(function () {
+  var p = Pagina(ok(copiaAL()), function (url) {
+    if (/rutas=1/.test(url)) return nunca();
+    return Promise.resolve(Respuesta(500, { error: 'x' }));
+  }, null);
+  return esperar().then(esperar).then(function () {
+    Check('AL11 sin rol + catalogo con error: ningun dueño ofrecido', [[], [], []],
+      [p.sel('regDirector').opciones(), p.sel('regPo').opciones(), p.sel('regSo').opciones()]);
+    Check('AL11 ... y las iniciativas siguen en la lista', 4, folios(p).length);
   });
 });
 

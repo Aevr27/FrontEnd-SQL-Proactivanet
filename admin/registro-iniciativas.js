@@ -53,6 +53,25 @@
                           progresivos sobre las combinaciones REALES de las
                           categorias de las iniciativas (CascadaOrganizacional
                           en modo 'filtro', admin/cascada-organizacional.js).
+                          OPCIONES SEGUN EL ROL (Registro.alcance):
+                            ADM ('completo')   todo lo de antes, incluidos
+                              los dueños capturados en el Problem de las
+                              iniciativas sin categoria (OwnerProblem /
+                              OwnerServicio / Direccion) y los que solo
+                              resuelven filas dadas de baja de
+                              CatCategoriaDueno: sirven para investigar.
+                            MOD / sin rol todavia ('catalogo')  solo
+                              nombres del catalogo vigente de dueños
+                              (asignaciones de admin_iniciativas_catalogos,
+                              DirectorioOrganizacional.AsignacionesVigentes,
+                              con su herencia C1 -> N2 por campo). Se pide
+                              el catalogo al cargar; sin el, sin opciones
+                              (falla cerrado). Las iniciativas sin categoria
+                              no aportan opciones, y una fila de iniciativa
+                              solo aporta si sus tres dueños estan en el
+                              catalogo. NINGUNA iniciativa se oculta: solo
+                              cambia que nombres se ofrecen para filtrar.
+                          (VIEWER no llega aqui: 403 en todo Admin.)
                           Una iniciativa pasa si UNA de sus categorias cumple
                           todo lo elegido a la vez. Las que no tienen
                           categoria se comparan con los dueños del propio
@@ -89,6 +108,9 @@
      FiltroRegistro   lo elegido y que iniciativa pasa
      Cobertura        catalogo de categorias x iniciativas activas
      SolicitudCambio  borrador de "Solicitar cambios" de una iniciativa
+     ("Modificar" y la marca Incompleta del detalle son de
+     admin/iniciativa-admin.js: EdicionAdmin e Incompleta; prototipo sin
+     persistencia, solo con rol ADM.)
      VistaRegistro    el DOM: carga, estados, KPIs, filtros, tabla, detalle,
                       y la vista Cobertura
 
@@ -214,10 +236,31 @@ window.RegistroIniciativas = (function () {
       // Filas { director, po, so, categoria } del catalogo de categorias,
       // solo despues de abrir la Cobertura (ver ampliar). null = sin cargar.
       this.catalogo = null;
+      // 'catalogo' (por omision: MOD o rol aun desconocido) | 'completo'
+      // (ADM). Ver la cabecera, FILTROS.
+      this.alcance = 'catalogo';
+      this.nombresCatalogo = null;   // { director: {}, po: {}, so: {} }
     }
 
     // Suma el catalogo a las filas organizacionales (la cascada y el filtro).
-    ampliar(filasCatalogo) { this.catalogo = filasCatalogo; }
+    ampliar(filasCatalogo) {
+      this.catalogo = filasCatalogo;
+      var n = { director: {}, po: {}, so: {} };
+      (filasCatalogo || []).forEach(function (f) {
+        Object.keys(n).forEach(function (k) { if (f[k]) n[k][f[k]] = true; });
+      });
+      this.nombresCatalogo = n;
+    }
+
+    fijarAlcance(completo) { this.alcance = completo ? 'completo' : 'catalogo'; }
+    alcanceCompleto() { return this.alcance === 'completo'; }
+
+    // Con alcance 'catalogo', una fila de iniciativa solo aporta opciones si
+    // sus tres dueños son nombres del catalogo vigente.
+    filaDelCatalogo(f) {
+      var n = this.nombresCatalogo;
+      return !!n && !!n.director[f.director] && !!n.po[f.po] && !!n.so[f.so];
+    }
 
     // Las filas con las que se filtra una iniciativa: las de filasDe y, con
     // el catalogo cargado, ademas la CategoriaN2 de cada ruta (mismos
@@ -282,10 +325,17 @@ window.RegistroIniciativas = (function () {
       });
     }
 
+    // Las filas que dan las OPCIONES de Director / PO / SO / Categoria (no
+    // las que deciden si una iniciativa pasa: esas son filasDeIniciativa).
     filasOrganizacionales(director) {
-      var salida = [], self = this;
+      var salida = [], self = this, completo = this.alcanceCompleto();
+      if (!completo && !this.catalogo) return salida;   // sin catalogo, sin opciones
       this.iniciativas.forEach(function (i) {
-        self.filasDeIniciativa(i).forEach(function (f) { if (!director || f.director === director) salida.push(f); });
+        if (!completo && i.sin_categoria) return;       // dueños del Problem: solo ADM
+        self.filasDeIniciativa(i).forEach(function (f) {
+          if (!completo && !self.filaDelCatalogo(f)) return;
+          if (!director || f.director === director) salida.push(f);
+        });
       });
       (this.catalogo || []).forEach(function (f) { if (!director || f.director === director) salida.push(f); });
       return salida;
@@ -766,6 +816,35 @@ window.RegistroIniciativas = (function () {
       this.coberturaPromesa = null;
       this.covFiltro = '';        // '' | con | sin
       this.busquedaPendiente = null; // espera de la caja de busqueda
+      // 'ADM' | 'MOD' | null (fijarRol). Solo ADM ve "Modificar"; null
+      // hasta que SesionAdmin responda.
+      this.rol = null;
+      this.edicion = null;        // EdicionAdmin del detalle abierto (prototipo)
+    }
+
+    // Solo UX: la edicion de ADM no llama al servidor en esta fase.
+    fijarRol(rol) {
+      this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
+      this.aplicarAlcance();
+      if (!this.abierta) return;
+      if (this.rol !== 'ADM') this.abrirEdicion(false);
+      var acciones = this.$('regDetAcciones');
+      if (acciones) acciones.innerHTML = this.htmlAcciones();
+    }
+
+    puedeEditar() { return this.rol === 'ADM' && !!window.IniciativaAdmin; }
+
+    // Opciones de los filtros segun el rol: ADM todo; cualquier otro (o sin
+    // rol todavia), solo el catalogo vigente, que se pide si falta.
+    aplicarAlcance() {
+      var r = this.registro;
+      if (!r) return;
+      var completo = this.rol === 'ADM';
+      if (r.alcanceCompleto() === completo && (completo || r.catalogo || this.coberturaPromesa)) return;
+      r.fijarAlcance(completo);
+      if (this.filtro) this.filtro.rearmar();
+      this.refrescar();
+      if (!completo && !r.catalogo && !this.coberturaPromesa) this.cargarCobertura();
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -878,6 +957,17 @@ window.RegistroIniciativas = (function () {
       this.$('regDetCuerpo').addEventListener('change', function (e) {
         if (e.target && e.target.id === 'regCambioCampo') self.elegirCampoCambio(e.target.value);
       });
+      // Edicion de ADM (prototipo): solo actualiza el borrador en memoria.
+      this.$('regDetCuerpo').addEventListener('input', function (e) {
+        var t = e.target, ed = self.edicion;
+        if (!t || !t.getAttribute || !ed) return;
+        var clave = t.getAttribute('data-edicion');
+        var n = t.getAttribute('data-edicion-pct');
+        if (clave) ed.capturar(clave, t.value);
+        else if (n !== null && n !== undefined) ed.capturarPct(Number(n), t.value);
+        else return;
+        self.pintarVistaEdicion();
+      });
       this.$('regDetCerrar').addEventListener('click', function () { self.cerrarDetalle(); });
       this.$('regDetFondo').addEventListener('click', function () { self.cerrarDetalle(); });
       this.doc.addEventListener('keydown', function (e) {
@@ -970,6 +1060,7 @@ window.RegistroIniciativas = (function () {
         .then(function (json) {
           if (mia !== self.cargaId) return;
           self.registro = Registro.desdeJson(json);
+          self.registro.fijarAlcance(self.rol === 'ADM');
           self.filtro = new FiltroRegistro(self.registro);
           // Un Reintentar no borra lo ya escrito en la caja.
           self.filtro.buscar(self.$('regBuscar').value || '');
@@ -977,6 +1068,8 @@ window.RegistroIniciativas = (function () {
           self.limite = PAGINA;
           self.estadoVista(self.registro.iniciativas.length ? 'listo' : 'sinDatos');
           self.refrescar();
+          // Fuera de ADM las opciones salen del catalogo: se pide ya.
+          if (!self.registro.alcanceCompleto()) self.cargarCobertura(pedir);
         })
         .catch(function (err) {
           if (mia !== self.cargaId) return;
@@ -1359,6 +1452,7 @@ window.RegistroIniciativas = (function () {
       this.cambio = new SolicitudCambio(i);
       this.cambioAbierto = false;
       this.histAbierto = false;
+      this.edicion = null;
       this.$('regDetCuerpo').innerHTML = this.htmlDetalle(i);
       this.$('regDetFondo').hidden = false;
       this.$('regDetalle').hidden = false;
@@ -1372,6 +1466,7 @@ window.RegistroIniciativas = (function () {
       var estaba = !!this.abierta;
       this.abierta = null;
       this.cambio = null;
+      this.edicion = null;
       this.$('regDetalle').hidden = true;
       this.$('regDetFondo').hidden = true;
       this.marcarRaiz(false);
@@ -1392,6 +1487,68 @@ window.RegistroIniciativas = (function () {
       else if (accion === 'cambio-cancelar') this.abrirCambio(false);
       else if (accion === 'cambio-preparar') this.prepararCambio();
       else if (accion === 'historial') this.plegarHistorial();
+      else if (accion === 'editar-admin') this.abrirEdicion(!this.edicion);
+      else if (accion === 'edicion-cancelar') this.abrirEdicion(false);
+      else if (accion === 'edicion-revisar') this.revisarEdicion();
+    }
+
+    // ---- Modificar (ADM): PROTOTIPO, no guarda ----
+    // Abre el detalle de la iniciativa con "Modificar" ya desplegado.
+    modificar(folio, origen) {
+      if (!this.puedeEditar()) return false;
+      this.abrirDetalle(folio, origen);
+      if (this.abierta !== folio) return false;
+      this.abrirEdicion(true);
+      return !!this.edicion;
+    }
+
+    pintarVistaEdicion() {
+      var caja = this.$('regEdVista');
+      if (caja && this.edicion) caja.innerHTML = window.IniciativaAdmin.htmlVistaPrevia(this.edicion);
+    }
+
+    // Abrir arranca un borrador nuevo desde la iniciativa abierta; solo ADM.
+    abrirEdicion(abrir) {
+      var i = this.registro && this.registro.buscar(this.abierta);
+      var caja = this.$('regEdicion');
+      if (!i || !caja) return;
+      abrir = !!abrir && this.puedeEditar();
+      this.edicion = abrir ? new window.IniciativaAdmin.EdicionAdmin(i) : null;
+      caja.innerHTML = abrir ? window.IniciativaAdmin.htmlEdicion(this.edicion, { tipo: this.registro.nombreTipo(i.prefijo) }) : '';
+      caja.hidden = !abrir;
+      if (abrir) this.pintarVistaEdicion();
+      var boton = this.$('regEditarBoton');
+      if (boton) boton.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+      var foco = abrir ? this.$('regEd-titulo') : boton;
+      if (foco && foco.focus) foco.focus();
+    }
+
+    revisarEdicion() {
+      if (!this.edicion) return null;
+      var r = this.edicion.revisar();
+      var msg = this.$('regEdMsg');
+      msg.className = 'ini-cambio-msg ' + (r.listo ? 'listo' : 'error');
+      msg.innerHTML = window.IniciativaAdmin.htmlRevision(r, r.listo ? 'Cambios revisados, no guardados.' : 'Corrige los cambios:');
+      return r;
+    }
+
+    // Botones de la cabecera del detalle. Modificar solo con rol ADM.
+    htmlAcciones() {
+      return '<button type="button" class="btn linea chico" id="regCambioBoton" data-accion="solicitar-cambios"' +
+          ' aria-expanded="false" aria-controls="regCambio">Solicitar cambios</button>' +
+        (this.puedeEditar()
+          ? ' <button type="button" class="btn linea chico" id="regEditarBoton" data-accion="editar-admin"' +
+            ' aria-expanded="false" aria-controls="regEdicion">Modificar</button>'
+          : '');
+    }
+
+    // Marca derivada "Incompleta" (admin/iniciativa-admin.js): en una
+    // iniciativa existente solo Categoria y %. No se guarda en ningun lado.
+    htmlIncompleta(i) {
+      var A = window.IniciativaAdmin;
+      if (!A) return '';
+      return A.htmlFaltantes(A.Incompleta.faltantes(A.Incompleta.datosDeRegistro(i), false),
+        'Marca calculada; en iniciativas existentes solo se revisan Categoría y %.');
     }
 
     // Abrir arranca un borrador nuevo sobre la iniciativa abierta.
@@ -1537,10 +1694,11 @@ window.RegistroIniciativas = (function () {
           (i.agrup ? ' <span class="chip ini-chip">' + Escape.html(i.agrup) + '</span>' : '') +
           (i.activa && i.fecha_retrasada ? ' <span class="pill vencido">Retrasada</span>' : '') +
         '</div>' +
-        '<div class="ini-det-acciones"><button type="button" class="btn linea chico" id="regCambioBoton" data-accion="solicitar-cambios"' +
-          ' aria-expanded="false" aria-controls="regCambio">Solicitar cambios</button></div>' +
+        this.htmlIncompleta(i) +
+        '<div class="ini-det-acciones" id="regDetAcciones">' + this.htmlAcciones() + '</div>' +
         '</div>' +
-        '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>';
+        '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>' +
+        '<section class="ini-det-sec ini-cambio ini-edicion" id="regEdicion" hidden></section>';
 
       var ident = '<dl class="ini-datos">' +
         dato('Código', i.folio) +

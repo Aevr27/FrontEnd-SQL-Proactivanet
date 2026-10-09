@@ -184,6 +184,9 @@ function Pagina(respCatalogo) {
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   var vista = ventana.IniciativasPagina.registro;
+  // Estas pruebas describen las opciones COMPLETAS (las de ADM). Las de MOD,
+  // solo catalogo, estan en RegistroIniciativasSmoke (parte AL).
+  ventana.IniciativasPagina.fijarRol('ADM');
   return {
     ventana: ventana, doc: documento, vista: vista, pedidos: pedidos,
     sel: function (id) { return documento.getElementById(id); },

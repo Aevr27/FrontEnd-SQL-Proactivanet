@@ -102,6 +102,11 @@ function Pagina(pedir, antes) {
     ventana, documento, ventana.Catalogos, ventana.Escape, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
+  // Nueva solicitud es de ADM y MOD y no abre sin rol (falla cerrado). Las
+  // pruebas de siempre corren como MOD, el rol mas bajo que la usa; la parte
+  // RS prueba ADM, sin rol y lo que MOD no puede abrir.
+  var rol = arguments.length >= 3 ? arguments[2] : 'MOD';
+  if (rol) ventana.IniciativasPagina.fijarRol(rol);
   return { ventana: ventana, doc: documento, sel: function (id) { return documento.getElementById(id); } };
 }
 
@@ -934,6 +939,54 @@ pruebas.push(function () {
                 leer('App_Code/IniciativaService.cs') + leer('App_Code/SolicitudIniciativa.cs')).split('\n')
       .filter(function (l) { return !/^\s*\/\//.test(l); }).join('\n');
     Check('P4 el handler no escribe en la base', false, /\b(INSERT|UPDATE|DELETE|MERGE|EXEC|CREATE|ALTER|DROP)\b/i.test(ashx));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RS) Roles de Nueva solicitud: ADM y MOD la abren; sin rol no (falla
+//     cerrado); MOD nunca abre la creacion directa; el RCA de Problem sigue
+//     obligatorio para quien solicita.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var conProblem = { tipos: Tipos(TIPOS), rutas: FILAS, tipo_problem: 'PRB' };
+  var sinRol = Pagina(nunca, null, null), adm = Pagina(nunca, null, 'ADM'), mod = Pagina(nunca, null, 'MOD');
+  var cargas = [sinRol, adm, mod].map(function (p) {
+    return p.ventana.IniciativasPagina.cargar(function () { return Promise.resolve(Respuesta(200, conProblem)); });
+  });
+  return Promise.all(cargas).then(function () {
+    sinRol.sel('btnSolicitar').disparar('click');
+    Check('RS1 sin rol: Solicitar no abre', ['panel-iniciativas'], vistaVisible(sinRol));
+    adm.sel('btnSolicitar').disparar('click');
+    Check('RS2 ADM: abre Nueva solicitud', ['panel-nueva'], vistaVisible(adm));
+    mod.sel('btnSolicitar').disparar('click');
+    Check('RS3 MOD: abre Nueva solicitud', ['panel-nueva'], vistaVisible(mod));
+
+    var P = mod.ventana.IniciativasPagina;
+    P.mostrarVista('iniciativas');
+    mod.sel('btnCrearAdmin').disparar('click');
+    P.mostrarVista('crear');
+    Check('RS4 MOD: la creacion directa no abre (boton ni llamada directa)', ['iniciativas', true],
+      [P.vista, mod.sel('panel-crear-admin').hidden]);
+
+    P.mostrarVista('nueva');
+    var s = P.solicitud;
+    s.elegirTipo('PRB');
+    Check('RS5 MOD: PRB exige RCA en la solicitud (regla sin cambio)', [true, true],
+      [s.rcaObligatorio(), s.faltantes().indexOf('rca') >= 0]);
+    s.elegirTipo('MAP');
+    Check('RS5 ... y otro tipo no', false, s.faltantes().indexOf('rca') >= 0);
+
+    P.fijarRol(null);
+    Check('RS6 perder el rol con la solicitud abierta vuelve a Iniciativas', ['panel-iniciativas'], vistaVisible(mod));
+    var A = adm.ventana.IniciativasPagina;
+    A.fijarRol('MOD');
+    Check('RS6 ADM -> MOD conserva Nueva solicitud abierta', ['panel-nueva'], vistaVisible(adm));
+
+    var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
+    Check('RS7 Solicitar visible con autorizado (ADM o MOD): data-solo-admin', true,
+      /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-admin hidden>/.test(html));
+    Check('RS7 Crear sigue solo ADM: data-solo-adm', true,
+      /id="btnCrearAdmin" data-solo-adm hidden[\s>]/.test(html));
   });
 });
 
