@@ -2415,8 +2415,14 @@ const selDir=document.getElementById('selDir'), selPO=document.getElementById('s
 // Las <option> salen de Catalogos (assets/js/catalogos.js); que lista va en
 // cada select y como se encadenan sigue siendo de aqui.
 selDir.insertAdjacentHTML('beforeend',Catalogos.opciones(P.directores));
+// Estos dos valores aparecen en el catalogo de origen, pero no representan
+// personas. Ocultarlos solo en los filtros; el payload y sus asignaciones no
+// se modifican.
+const PO_NO_PERSONAS = new Set(['basis', 'draft']);
+function poEsPersona(po){ return !PO_NO_PERSONAS.has(String(po||'').trim().toLocaleLowerCase()); }
 function fillPO(){
-  const pos = fDir? (P.jerarquia[fDir]||[]) : [...new Set(P.categorias.map(c=>c.po).filter(Boolean))].sort();
+  const pos = (fDir? (P.jerarquia[fDir]||[]) : [...new Set(P.categorias.map(c=>c.po).filter(Boolean))].sort())
+    .filter(poEsPersona);
   Catalogos.llenar(selPO,pos,'— Todos —');
 }
 selDir.onchange=()=>{fDir=selDir.value;fPO='';fillPO();renderAll();};
