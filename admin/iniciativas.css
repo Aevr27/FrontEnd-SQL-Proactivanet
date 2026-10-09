@@ -333,6 +333,22 @@
 .ini-filtros-cuenta { font-size: 11.5px; color: var(--accent-ink); font-weight: 700; }
 .ini-filtros-cab .btn { margin-left: auto; }
 .filtros.ini-filtros select:disabled { color: var(--muted-2); background: var(--bg-2) !important; cursor: not-allowed; }
+/* Busqueda: fila entera, la misma barra que los select del panel. */
+.ini-buscar { grid-column: 1 / -1; }
+.ini-buscar input[type="search"] {
+  height: 40px; width: 100%; min-width: 0;
+  border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
+  padding: 0 11px;
+  font: inherit; font-size: 13px; font-weight: 500;
+  color: var(--ctrl-ink); background: var(--ctrl-bg);
+  box-shadow: inset 0 1px 2px rgba(25, 25, 25, .05);
+}
+.ini-buscar input[type="search"]:hover:not(:disabled) { background: var(--ctrl-bg-2); border-color: var(--ctrl-line-hover); }
+.ini-buscar input[type="search"]:focus {
+  outline: none; border-color: var(--accent); background: var(--ctrl-bg-2);
+  box-shadow: var(--ring), inset 0 1px 2px rgba(25, 25, 25, .05);
+}
+.ini-buscar input[type="search"]:disabled { color: var(--muted-2); background: var(--bg-2); cursor: not-allowed; }
 
 /* Tipo de iniciativa: un boton con la misma barra que los select y un panel
    de casillas debajo. El panel sale de la tarjeta de filtros, asi que esta

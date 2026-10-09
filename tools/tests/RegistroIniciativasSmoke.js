@@ -28,6 +28,9 @@
 //      pasa nada, "Todas" alterna marcar todo / desmarcar todo, junto con
 //      los demas filtros, Limpiar; el panel de casillas en el DOM.
 //   La Agrupacion ya no es filtro (ni select ni FiltroRegistro).
+//   B) Busqueda por folio o titulo: parcial, sin mayusculas, separadores,
+//      ceros ni acentos; combinada con los demas filtros, sin tocar la
+//      Cobertura; espera entre teclas, Enter, Limpiar y recarga en el DOM.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -949,6 +952,151 @@ pruebas.push(function () {
          u('FechaCierre', '2026-03-20', '2026-05-01')]));
   Check('HF4 fila sin operacion o vacia: — y no cuenta', ['—', '—'], rot([{ campo: 'FechaCierre' }, null]));
   Check('HF5 sin lista: vacio', 0, R.etiquetarHistorial(undefined).length);
+});
+
+// ---------------------------------------------------------------------------
+// B) Busqueda por folio o titulo: un paso mas de FiltroRegistro.aplicar,
+//    sobre lo que dejan los demas filtros. Parcial ('12' trae todo folio
+//    con 12), sin importar mayusculas, separadores ni ceros a la izquierda;
+//    titulo sin mayusculas ni acentos. No toca la Cobertura.
+// ---------------------------------------------------------------------------
+var DATOS_BUSQUEDA = (function () {
+  var d = JSON.parse(JSON.stringify(DATOS));
+  d.iniciativas.push(
+    Ini('PRB 2026-000012', { prefijo: 'PRB', titulo: 'Reducción de incidentes de red', po: 'PO 1', so: 'SO x', director: 'Dir A',
+      categorias: [Cat('/A/Cat 1/Hoja', 10, 0.1, 'Dir A', 'PO 1', 'SO x')] }),
+    Ini('MAP 2026-000120', { prefijo: 'MAP', titulo: 'MIGRACIÓN de correo', po: 'PO 3', so: 'SO z', director: 'Dir B',
+      categorias: [Cat('/B/Cat 4', 20, 0.2, 'Dir B', 'PO 3', 'SO z')] }),
+    Ini('REQ 2026-001234', { prefijo: 'REQ', titulo: 'Alta de usuarios', po: 'PO 3', so: 'SO z', director: 'Dir B',
+      categorias: [Cat('/B/Cat 5', 1, 0.1, 'Dir B', 'PO 3', 'SO z')] }),
+    Ini('PRB 2025-000012', { prefijo: 'PRB', titulo: 'Caída del portal', estado: 'Cerrado', activa: false, seguimiento: false,
+      po: 'PO 1', so: 'SO x', director: 'Dir A',
+      categorias: [Cat('/A/Cat 3', 2, 0.1, 'Dir A', 'PO 2', 'SO x')] }));
+  return d;
+})();
+var CON_12 = ['MAP 2026-000120', 'PRB 2025-000012', 'PRB 2026-000012', 'REQ 2026-001234'];
+function esperarBusqueda() { return new Promise(function (ok) { setTimeout(ok, R.BUSQUEDA_ESPERA + 50); }); }
+function teclear(p, v) { p.sel('regBuscar').value = v; p.sel('regBuscar').disparar('input'); }
+
+pruebas.push(function () {
+  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS_BUSQUEDA)));
+  var f = new R.FiltroRegistro(reg);
+  function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }).sort(); }
+  function con(v) { f.buscar(v); return pasan(); }
+
+  Check('B1 sin busqueda: las 9, sin filtro activo', [9, 0, false], [pasan().length, f.activos(), f.busquedaActiva()]);
+  Check('B1 solo espacios = sin busqueda', [9, 0], [con('   ').length, f.activos()]);
+  Check('B2 "12": todo folio con 12 en su numero', CON_12, con('12'));
+  Check('B2 "12" cuenta como un filtro', 1, f.activos());
+  Check('B2 "1": parcial de un digito', ['MAP 2026-000120', 'PRB 2025-000012', 'PRB 2026-000001', 'PRB 2026-000012', 'REQ 2026-001234'], con('1'));
+  Check('B2 "0012": parcial con ceros', CON_12, con('0012'));
+  Check('B3 folio completo', ['PRB 2026-000012'], con('PRB 2026-000012'));
+  Check('B3 minusculas y guion', ['PRB 2026-000012'], con('prb-2026-000012'));
+  Check('B3 sin separadores', ['PRB 2026-000012'], con('PRB2026000012'));
+  Check('B3 otro ancho de secuencia (7 digitos)', ['PRB 2026-000012'], con('PRB-2026-0000012'));
+  Check('B3 ano y secuencia: parcial (secuencias de 2026 que empiezan en 12)', ['MAP 2026-000120', 'PRB 2026-000012', 'REQ 2026-001234'], con('2026-0000012'));
+  Check('B3 sufijo con ceros "0000012" = "12"', CON_12, con('0000012'));
+  Check('B3 folio parcial "prb 2025"', ['PRB 2025-000012'], con('prb 2025'));
+  Check('B3 prefijo "map"', ['MAP 2026-000002', 'MAP 2026-000120'], con('map'));
+  Check('B4 nombre sin acento ni mayusculas', ['PRB 2026-000012'], con('reduccion'));
+  Check('B4 nombre con acento contra titulo en mayusculas', ['MAP 2026-000120'], con('migración'));
+  Check('B4 nombre parcial a mitad de titulo', ['PRB 2026-000012'], con('INCIDENTES   de'));
+  Check('B4 sin coincidencias', [], con('zzz'));
+
+  f.buscar('12');
+  f.estados.solo('Cerrado');
+  Check('B5 Estado Cerrado Y "12"', [['PRB 2025-000012'], 2], [pasan(), f.activos()]);
+  f.todosEstados();
+  f.alternarTipoIniciativa('PRB');
+  Check('B5 Tipo sin PRB Y "12"', ['MAP 2026-000120', 'REQ 2026-001234'], pasan());
+  f.limpiar();
+  f.buscar('12');
+  f.elegirDirector('Dir A');
+  Check('B5 Director Y "12"', ['PRB 2025-000012', 'PRB 2026-000012'], pasan());
+  f.elegirDirector('');
+  f.elegir(0, 'PO 3');
+  Check('B5 PO Y "12"', ['MAP 2026-000120', 'REQ 2026-001234'], pasan());
+  f.elegir(1, 'SO z');
+  f.elegir(2, '/B/Cat 5');
+  Check('B5 PO -> SO -> Categoria Y "12"', [['REQ 2026-001234'], 4], [pasan(), f.activos()]);
+  Check('B5 la busqueda no cambia las opciones de la cascada', ['PO 1', 'PO 2', 'PO 3'],
+    f.cascada.estado(true, '')[0].opciones);
+
+  // La Cobertura usa pasa / pasaAtributos: la busqueda no la toca.
+  f.limpiar();
+  f.buscar('zzz');
+  Check('B6 pasa() y pasaAtributos() ignoran la busqueda', [true, true, []],
+    [reg.iniciativas.every(function (i) { return f.pasa(i); }), reg.iniciativas.every(function (i) { return f.pasaAtributos(i); }), pasan()]);
+
+  f.limpiar();
+  Check('B7 Limpiar borra la busqueda', [9, 0, '', false], [pasan().length, f.activos(), f.textoBuscado, f.busquedaActiva()]);
+});
+
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS_BUSQUEDA));
+  var todos;
+  return esperar().then(function () {
+    todos = folios(p);
+    Check('BV1 caja habilitada y visible al cargar', [false, false, 9], [p.sel('regBuscar').disabled, p.sel('regBuscarCampo').hidden, todos.length]);
+
+    teclear(p, '12');
+    Check('BV2 no repinta en cada tecla', 9, folios(p).length);
+    return esperarBusqueda();
+  }).then(function () {
+    Check('BV2 "12" tras la espera, en el orden de la lista', todos.filter(function (f) { return CON_12.indexOf(f) >= 0; }), folios(p));
+    Check('BV2 cuenta y filtros activos', ['4 de 9 iniciativas', '1 filtro activo', false],
+      [p.sel('regCuenta').textContent, p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
+
+    elegir(p, 'regPo', 'PO 1');
+    // PRB 2025-000012 tiene 12 pero su categoria es de PO 2: fuera.
+    Check('BV3 PO 1 Y "12": la busqueda sigue', ['PRB 2026-000012'], folios(p));
+    Check('BV3 dos filtros activos', '2 filtros activos', p.sel('regFiltrosCuenta').textContent);
+
+    teclear(p, 'zzz');
+    return esperarBusqueda();
+  }).then(function () {
+    Check('BV4 sin coincidencias con otro filtro: aviso', [false, true, 'No hay iniciativas que coincidan con «zzz» y los filtros seleccionados.'],
+      [p.sel('regVacio').hidden, p.sel('regTablaCaja').hidden, p.sel('regVacioTexto').textContent]);
+    elegir(p, 'regPo', '');
+    Check('BV4 sin coincidencias solo con la busqueda', 'No hay iniciativas que coincidan con «zzz».', p.sel('regVacioTexto').textContent);
+
+    // Enter: aplica sin esperar y con un solo resultado abre el detalle.
+    p.sel('regBuscar').value = 'PRB-2026-0000012';
+    p.sel('regBuscar').disparar('keydown', { key: 'Enter', target: p.sel('regBuscar') });
+    Check('BV5 Enter con un resultado abre su detalle', [['PRB 2026-000012'], false, 'PRB 2026-000012'],
+      [folios(p), p.sel('regDetFondo').hidden, p.sel('regDetTitulo').textContent]);
+    p.registro.cerrarDetalle();
+
+    p.sel('regBuscar').value = '12';
+    p.sel('regBuscar').disparar('keydown', { key: 'Enter', target: p.sel('regBuscar') });
+    Check('BV6 Enter con varios: solo filtra', [4, true], [folios(p).length, p.sel('regDetFondo').hidden]);
+
+    // Cobertura: la caja se oculta y no cuenta; al volver, sigue igual.
+    p.registro.verCobertura(nunca);
+    Check('BV7 Cobertura: caja oculta, sin contarla', [true, '', true],
+      [p.sel('regBuscarCampo').hidden, p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
+    p.registro.verRegistro();
+    Check('BV7 de vuelta al Registro: busqueda intacta', [false, '1 filtro activo', 4],
+      [p.sel('regBuscarCampo').hidden, p.sel('regFiltrosCuenta').textContent, folios(p).length]);
+
+    p.sel('regLimpiar').disparar('click');
+    Check('BV8 Limpiar filtros vacia la caja y la lista vuelve', ['', 9, ''],
+      [p.sel('regBuscar').value, folios(p).length, p.sel('regFiltrosCuenta').textContent]);
+
+    // Una tecla pendiente no revive la busqueda despues de Limpiar.
+    teclear(p, '12');
+    p.sel('regLimpiar').disparar('click');
+    return esperarBusqueda();
+  }).then(function () {
+    Check('BV9 Limpiar cancela la espera pendiente', [9, ''], [folios(p).length, p.sel('regBuscar').value]);
+    teclear(p, '12');
+    return esperarBusqueda();
+  }).then(function () {
+    // Reintentar (nueva carga) conserva lo escrito.
+    return p.registro.cargar(ok(DATOS_BUSQUEDA));
+  }).then(function () {
+    Check('BV10 recarga: la busqueda escrita se conserva', [4, '1 filtro activo'], [folios(p).length, p.sel('regFiltrosCuenta').textContent]);
+  });
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

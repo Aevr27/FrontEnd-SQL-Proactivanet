@@ -129,6 +129,10 @@ window.RegistroIniciativas = (function () {
   // tantas. El filtro y el orden van siempre sobre el registro completo.
   var PAGINA = 100;
 
+  // La busqueda espera esto (ms) tras la ultima tecla antes de repintar la
+  // lista; Enter la aplica en el acto.
+  var BUSQUEDA_ESPERA = 150;
+
   // La fecha comprometida de cada estado activo: la misma correspondencia de
   // Semaforo (ExperienciaQueries) y de fdateSem (experiencia.js). Solo
   // decide QUE fecha se pinta; si esta vencida lo dice fecha_retrasada.
@@ -153,6 +157,48 @@ window.RegistroIniciativas = (function () {
   }
   function fecha(s) { return s ? String(s).split('-').reverse().join('/') : '—'; }
   function texto(v) { return v === null || v === undefined || v === '' ? '—' : v; }
+
+  // ---------------------------------------------------------------------
+  // Busqueda por folio o titulo
+  // ---------------------------------------------------------------------
+  // Sin mayusculas ni acentos, espacios colapsados.
+  function plano(v) {
+    return String(v === null || v === undefined ? '' : v).normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+  // Dos llaves de un folio para que no importen separadores ni ceros:
+  //   compacta   solo letras y digitos:     'PRB 2026-000012' -> 'prb2026000012'
+  //   canonica   tramos sin ceros a la izq: 'PRB 2026-000012' -> 'prb 2026 12'
+  // Asi 'prb-2026-000012', '000012' y '12' entran por la compacta y
+  // 'PRB-2026-0000012' o '2026-0000012' (otro ancho de secuencia) por la
+  // canonica. Coincidencia parcial: '12' trae todo folio con 12 en sus
+  // digitos.
+  function claveCompacta(v) { return plano(v).replace(/[^a-z0-9]/g, ''); }
+  function claveCanonica(v) {
+    return (plano(v).match(/[a-z]+|[0-9]+/g) || []).map(function (t) {
+      return /^[0-9]/.test(t) ? t.replace(/^0+(?=[0-9])/, '') : t;
+    }).join(' ');
+  }
+
+  class Busqueda {
+    constructor(textoBuscado) {
+      this.texto = typeof textoBuscado === 'string' ? textoBuscado : '';
+      this.nombre = plano(this.texto);
+      this.compacta = claveCompacta(this.texto);
+      this.canonica = claveCanonica(this.texto);
+    }
+
+    activa() { return this.nombre !== ''; }
+
+    // Folio completo o parcial (separadores y ceros a la izquierda dan
+    // igual) o parte del titulo.
+    pasa(i) {
+      if (!this.activa()) return true;
+      if (this.compacta && claveCompacta(i.folio).indexOf(this.compacta) >= 0) return true;
+      if (this.canonica && claveCanonica(i.folio).indexOf(this.canonica) >= 0) return true;
+      return plano(i.titulo).indexOf(this.nombre) >= 0;
+    }
+  }
 
   // ---------------------------------------------------------------------
   // Registro
@@ -337,7 +383,13 @@ window.RegistroIniciativas = (function () {
       this.tipos = new SeleccionVarios(function () { return registro.tiposIniciativa(); });
       this.director = '';
       this.cascada = new CascadaOrganizacional(registro.filasOrganizacionales(''), 'filtro');
+      this.busqueda = new Busqueda('');
     }
+
+    // Folio o titulo. Solo acota la lista (aplicar), no la Cobertura.
+    buscar(v) { this.busqueda = new Busqueda(v); }
+    get textoBuscado() { return this.busqueda.texto; }
+    busquedaActiva() { return this.busqueda.activa(); }
 
     // Estado: solo `v` ('' = todos). Para varios, alternarEstado.
     elegirEstado(v) { this.estados.solo(v); }
@@ -376,11 +428,13 @@ window.RegistroIniciativas = (function () {
       this.tipos.limpiar();
       this.elegirDirector('');
       this.cascada.limpiar(0);
+      this.buscar('');
     }
 
     activos() {
       var org = this.cascada.filtros();
-      return (this.estados.activo() ? 1 : 0) + (this.tipos.activo() ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length;
+      return (this.estados.activo() ? 1 : 0) + (this.tipos.activo() ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length +
+        (this.busquedaActiva() ? 1 : 0);
     }
 
     // Estado y Tipo: lo que no es organizacional.
@@ -409,9 +463,11 @@ window.RegistroIniciativas = (function () {
       return this.registro.filasDeIniciativa(i).some(function (f) { return self.pasaFila(f); });
     }
 
+    // La lista: los filtros y, sobre lo que queda, la busqueda. La
+    // Cobertura no pasa por aqui (usa pasa / pasaAtributos / pasaFila).
     aplicar(lista) {
       var self = this;
-      return lista.filter(function (i) { return self.pasa(i); });
+      return lista.filter(function (i) { return self.pasa(i) && self.busqueda.pasa(i); });
     }
   }
 
@@ -709,6 +765,7 @@ window.RegistroIniciativas = (function () {
       this.coberturaCarga = 0;    // descarta respuestas superadas
       this.coberturaPromesa = null;
       this.covFiltro = '';        // '' | con | sin
+      this.busquedaPendiente = null; // espera de la caja de busqueda
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -761,6 +818,19 @@ window.RegistroIniciativas = (function () {
           if (!self.filtro) return;
           self.filtro.elegir(nivel, e.target.value); self.refrescar();
         });
+      });
+      // Busqueda: repinta un momento despues de la ultima tecla; Enter la
+      // aplica ya y, si queda una sola iniciativa, abre su detalle.
+      this.$('regBuscar').addEventListener('input', function () {
+        clearTimeout(self.busquedaPendiente);
+        self.busquedaPendiente = setTimeout(function () { self.aplicarBusqueda(); }, BUSQUEDA_ESPERA);
+      });
+      this.$('regBuscar').addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        if (e.preventDefault) e.preventDefault();
+        self.aplicarBusqueda();
+        var lista = self.filtradas();
+        if (lista.length === 1) self.abrirDetalle(lista[0].folio, self.$('regBuscar'));
       });
       this.$('regLimpiar').addEventListener('click', function () { self.limpiarFiltros(); });
       this.$('regLimpiarVacio').addEventListener('click', function () { self.limpiarFiltros(); });
@@ -824,7 +894,19 @@ window.RegistroIniciativas = (function () {
 
     limpiarFiltros() {
       if (!this.filtro) return;
+      clearTimeout(this.busquedaPendiente);
+      this.$('regBuscar').value = '';
       this.filtro.limpiar();
+      this.refrescar();
+    }
+
+    // Lo escrito en la caja pasa al filtro, solo si cambio.
+    aplicarBusqueda() {
+      clearTimeout(this.busquedaPendiente);
+      if (!this.filtro) return;
+      var v = this.$('regBuscar').value || '';
+      if (v === this.filtro.textoBuscado) return;
+      this.filtro.buscar(v);
       this.refrescar();
     }
 
@@ -889,6 +971,8 @@ window.RegistroIniciativas = (function () {
           if (mia !== self.cargaId) return;
           self.registro = Registro.desdeJson(json);
           self.filtro = new FiltroRegistro(self.registro);
+          // Un Reintentar no borra lo ya escrito en la caja.
+          self.filtro.buscar(self.$('regBuscar').value || '');
           self.orden = null;
           self.limite = PAGINA;
           self.estadoVista(self.registro.iniciativas.length ? 'listo' : 'sinDatos');
@@ -948,6 +1032,9 @@ window.RegistroIniciativas = (function () {
       var cob = this.modo === 'cobertura', self = this;
       this.$('regListaBloque').hidden = cob;
       this.$('covSeccion').hidden = !cob;
+      // La busqueda solo acota la lista: en la Cobertura no se ve ni cuenta.
+      this.$('regBuscarCampo').hidden = cob;
+      if (this.filtro) this.pintarCuentaFiltros();
       [['regVerRegistro', !cob], ['regVerCobertura', cob]].forEach(function (par) {
         self.$(par[0]).classList.toggle('activa', par[1]);
         self.$(par[0]).setAttribute('aria-pressed', par[1] ? 'true' : 'false');
@@ -1093,7 +1180,13 @@ window.RegistroIniciativas = (function () {
       f.cascada.estado(true, '').forEach(function (e, i) {
         self.pintarSelect(SELECTS_ORG[i], e.opciones, e.valor, i === 2 ? 'Todas' : 'Todos');
       });
-      var n = f.activos();
+      this.$('regBuscar').disabled = false;
+      this.pintarCuentaFiltros();
+    }
+
+    pintarCuentaFiltros() {
+      var f = this.filtro;
+      var n = f.activos() - (this.modo === 'cobertura' && f.busquedaActiva() ? 1 : 0);
       this.$('regLimpiar').hidden = n === 0;
       this.$('regFiltrosCuenta').textContent = n ? (n === 1 ? '1 filtro activo' : n + ' filtros activos') : '';
     }
@@ -1230,6 +1323,7 @@ window.RegistroIniciativas = (function () {
 
       var vacio = lista.length === 0;
       this.$('regVacio').hidden = !vacio;
+      if (vacio) this.$('regVacioTexto').textContent = this.textoVacio();
       this.$('regTablaCaja').hidden = vacio;
 
       var orden = ordenar(lista, this.orden);
@@ -1244,6 +1338,15 @@ window.RegistroIniciativas = (function () {
       var quedan = lista.length - visibles.length;
       this.$('regMas').hidden = quedan <= 0;
       this.$('regMas').textContent = 'Mostrar ' + fmt(Math.min(PAGINA, quedan)) + ' más';
+    }
+
+    textoVacio() {
+      var f = this.filtro;
+      if (!f.busquedaActiva()) return 'No hay iniciativas que coincidan con los filtros seleccionados.';
+      var buscado = '«' + f.textoBuscado.trim() + '»';
+      return f.activos() > 1
+        ? 'No hay iniciativas que coincidan con ' + buscado + ' y los filtros seleccionados.'
+        : 'No hay iniciativas que coincidan con ' + buscado + '.';
     }
 
     // ---- detalle ----
@@ -1516,6 +1619,8 @@ window.RegistroIniciativas = (function () {
   return {
     URL_REGISTRO: URL_REGISTRO,
     PAGINA: PAGINA,
+    BUSQUEDA_ESPERA: BUSQUEDA_ESPERA,
+    Busqueda: Busqueda,
     FECHA_DEL_ESTADO: FECHA_DEL_ESTADO,
     URL_CATALOGO: URL_CATALOGO,
     Registro: Registro,

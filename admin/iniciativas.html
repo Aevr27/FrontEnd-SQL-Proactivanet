@@ -208,6 +208,13 @@
           <span class="ini-filtros-cuenta" id="regFiltrosCuenta" aria-live="polite"></span>
           <button type="button" class="btn linea chico" id="regLimpiar" hidden>Limpiar filtros</button>
         </div>
+        <!-- Busqueda por codigo o titulo, SOBRE lo que dejan los demas
+             filtros (registro-iniciativas.js, Busqueda). Solo la lista: en la
+             Cobertura se oculta. -->
+        <div class="campo ini-buscar" id="regBuscarCampo">
+          <label for="regBuscar">Buscar por código o nombre</label>
+          <input type="search" id="regBuscar" placeholder="PRB 2026-000012, 12 o parte del nombre" autocomplete="off" spellcheck="false" disabled>
+        </div>
         <!-- Estado, varios a la vez (mismo control que Tipo de iniciativa). -->
         <div class="campo ini-multi" id="regEstadoCampo">
           <label for="regEstado">Estado</label>
@@ -245,7 +252,7 @@
       </div>
 
       <div class="ini-vacio" id="regVacio" hidden>
-        <strong>No hay iniciativas que coincidan con los filtros seleccionados.</strong>
+        <strong id="regVacioTexto">No hay iniciativas que coincidan con los filtros seleccionados.</strong>
         <span><button type="button" class="btn linea chico" id="regLimpiarVacio">Limpiar filtros</button></span>
       </div>
 
