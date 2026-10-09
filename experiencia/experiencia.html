@@ -286,7 +286,7 @@
       <tr><td><b>Volumen Actual</b></td><td>Total de tickets del SLOT 0 (últimos 30 días) o del mes calendario actual, según el modo elegido.</td></tr>
       <tr><td><b>% Tickets con Iniciativa</b></td><td>Tickets cubiertos por iniciativas <b>activas</b> (En Análisis, En Solución, En Monitoreo) ÷ volumen actual. Las <b>cerradas no cuentan</b> como cobertura vigente, y <b>ReqOpr tampoco</b>.</td></tr>
       <tr><td><b>% Tickets en Tiempo</b></td><td>1 − (tickets en riesgo por retraso ÷ tickets con iniciativa).</td></tr>
-      <tr><td><b>% Efectividad Reducción</b></td><td>De las iniciativas <b>cerradas</b>: tickets realmente reducidos ÷ compromiso de reducción.</td></tr>
+      <tr><td><b>% Efectividad Reducción</b></td><td>De las iniciativas <b>En Monitoreo o Cerradas</b> que ya cumplieron <b>90 días desde su fecha de cierre</b>: tickets reducidos ÷ compromiso. El compromiso es su <b>% de disminución × los tickets por mes de la categoría en los 90 días antes de crearse</b>; lo reducido es lo esperado (esa base, ajustada por cómo se movió el resto del volumen) menos lo que llegó en los 90 días después del cierre, sin pasar del compromiso. Lo calcula la base una vez al día y respeta los filtros. Dice <b>S/D</b> mientras ninguna cumple los 90 días, y cuándo se mide la primera.</td></tr>
       <tr><td><b>Categorías sin Iniciativa</b></td><td>Categorías con volumen pero sin iniciativas activas (oportunidad).</td></tr>
       <tr><td><b>Iniciativas Retrasadas</b></td><td>Iniciativas con tickets en riesgo por retraso en su ejecución.</td></tr>
     </table>
