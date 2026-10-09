@@ -20,8 +20,8 @@
 //      abriera el sitio desde la propia VM (o hubiera un proxy local), aqui no
 //      entra.
 //
-// Fuera de este caso NADA cambia: identidad Windows real -> whitelist
-// temporal (AdminWhitelistTemporal) -> dbo.UsuariosAdmin -> rol.
+// Fuera de este caso NADA cambia: identidad Windows real ->
+// dbo.UsuariosAdmin -> rol (la whitelist temporal ya no interviene).
 //
 // PARA QUITARLO: borrar este archivo y las llamadas a
 // AccesoDesarrolloLocal.Activo en AccesoAdmin.cs y admin_sesion.ashx.

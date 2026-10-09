@@ -169,6 +169,15 @@ public class AdminCorreos : IHttpHandler
 
     public void ProcessRequest(HttpContext context)
     {
+        // ACCESO: solo ADM (AccesoAdmin.ExigirAdm: whitelist + rol ADM en
+        // dbo.UsuariosAdmin), ANTES de leer el request: sin eso no se
+        // devuelven metadatos ni se lanza powershell.exe. MOD recibe 403
+        // RolInsuficiente; VIEWER, fuera de la whitelist, anonimo o con la
+        // consulta de rol fallando, 403 AccesoDenegado. Es ADM y no MOD
+        // porque ejecuta scripts que mandan correo real y ningun flujo de
+        // MOD (solicitud/revision de iniciativas) usa esta consola.
+        if (!AccesoAdmin.ExigirAdm(context, "Solo un administrador (ADM) puede usar la consola de correos.")) return;
+
         DashboardHandler.Responder(context, delegate
         {
             var metodo = context.Request.HttpMethod;

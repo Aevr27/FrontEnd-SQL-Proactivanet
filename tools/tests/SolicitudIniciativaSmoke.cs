@@ -386,10 +386,11 @@ public static class SolicitudIniciativaSmoke
         {
             var ruta = @"handlers\admin_iniciativas_" + h + ".ashx";
             var texto = System.IO.File.ReadAllText(ruta);
-            // Crear (capacidad, validar) es solo de ADM: ExigirAdm (que corre
-            // Exigir primero). Lo que MOD tambien usa: Exigir.
-            var soloAdm = h == "capacidad" || h == "validar";
-            var linea = soloAdm ? "if (!AccesoAdmin.ExigirAdm(context)) return;" : "if (!AccesoAdmin.Exigir(context)) return;";
+            // Los cinco son de ADM y MOD: Exigir. Nueva solicitud (capacidad,
+            // validar) dejo de ser solo ADM el 2026-10-09; lo solo-ADM
+            // (consola de correos) se prueba en AccesoAdminHttpSmoke.
+            var soloAdm = false;
+            var linea = "if (!AccesoAdmin.Exigir(context)) return;";
             var exigir = texto.IndexOf(linea, StringComparison.Ordinal);
             var cuerpo = texto.IndexOf("public void ProcessRequest(HttpContext context)", StringComparison.Ordinal);
             var siguiente = texto.IndexOf(';', cuerpo);   // primera sentencia del metodo
@@ -398,8 +399,10 @@ public static class SolicitudIniciativaSmoke
             Check("D3 " + h + ": ruta protegida por el modulo", true,
                   AccesoAdmin.EsRutaProtegida("~/handlers/admin_iniciativas_" + h + ".ashx"));
         }
-        Check("D4 no autorizado: rechazado por el mismo camino", false,
-              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"SORIANA\t_otro", true)));
+        // La puerta es el rol de la base (AccesoAdmin.PuedeEntrar): sin fila
+        // no hay rol que entre. Las rutas HTTP completas, en AccesoAdminHttpSmoke.
+        Check("D4 sin fila en UsuariosAdmin: VIEWER, no entra", "VIEWER|False",
+              RolAdmin.Resolver(new string[0]) + "|" + RolAdmin.EsElevado(RolAdmin.Resolver(new string[0])));
 
         // ---- RC) catalogo de rutas reales (CatalogoRutasIniciativa) ---------
         // Dueños: N2 exacto (C1&C2 de la ruta) o heredado del C1, la regla de

@@ -1,5 +1,12 @@
 // Autorizacion del modulo Admin -> Iniciativas.
 //
+// REGLA VIGENTE (2026-10-09): la PUERTA es el rol de dbo.UsuariosAdmin
+// (RolAdmin): ADM o MOD entran, todo lo demas (VIEWER, sin fila, valor
+// raro, consulta fallida, sin identidad Windows) no. La whitelist de abajo
+// YA NO es puerta: EstaAutorizado/Configurada siguen existiendo pero
+// PuedeEntrar no las llama. En local manda el atajo AccesoDesarrolloLocal,
+// igual que antes. Lo que sigue describe la whitelist como referencia.
+//
 // QUIEN ENTRA
 // -----------
 // TODO(TEMPORAL): HOY la lista sale de AdminWhitelistTemporal (App_Code/
@@ -30,13 +37,18 @@
 //      cubre ademas la pagina estatica admin/iniciativas.html, que ningun
 //      handler sirve. Ver Web.config.ejemplo.
 //
-// ROL (ADM / MOD) DESPUES DE ENTRAR
-// ---------------------------------
-// Pasar la whitelist solo da entrada. Lo que es exclusivo de ADM (crear
-// iniciativas) llama a ExigirAdm(): primero Exigir() y despues el rol de
-// dbo.UsuariosAdmin (RolAdmin, App_Code/RolAdmin.cs). Quien no es ADM
-// recibe 403 { "tipo": "RolInsuficiente" }. Sin fila o con la consulta
-// fallando el rol es MOD: nunca ADM por error.
+// ROL (ADM / MOD / VIEWER)
+// ------------------------
+// Entrar exige un rol ADM o MOD en dbo.UsuariosAdmin (RolAdmin,
+// App_Code/RolAdmin.cs) para la identidad Windows del request. Sin fila,
+// con un valor que no es ADM ni MOD, sin identidad o con la consulta
+// fallando, el rol es VIEWER y Exigir() responde 403 AccesoDenegado (falla
+// cerrado). Lo que es exclusivo de ADM (la consola de
+// correos; la creacion directa cuando tenga handler) llama a ExigirAdm():
+// quien entra como MOD recibe 403 { "tipo": "RolInsuficiente" }. Nueva
+// solicitud (validar, capacidad) es de ADM y MOD: Exigir(). El rol se
+// consulta una vez por request (HttpContext.Items); sin identidad
+// autenticada no se consulta.
 
 using System;
 using System.Collections.Generic;
@@ -86,10 +98,9 @@ public static class AccesoAdmin
         }
     }
 
-    // TODO(TEMPORAL): mientras no haya autorizacion en base, la lista es la
-    // de AdminWhitelistTemporal y NO la de Web.config (AdminAllowedUsers se
-    // ignora: el Web.config desplegado no esta a nuestro alcance). Al pasar
-    // a autorizacion DB-backed, cambiar esta linea y borrar ese archivo.
+    // TODO(TEMPORAL): la lista es la de AdminWhitelistTemporal y NO la de
+    // Web.config (AdminAllowedUsers se ignora). Desde 2026-10-09 NO decide
+    // la entrada (PuedeEntrar ya no la usa); se conserva sin cambios.
     public static ListaAutorizados Configurada()
     {
         return ListaAutorizados.Leer(AdminWhitelistTemporal.Cuentas);
@@ -101,12 +112,15 @@ public static class AccesoAdmin
     }
 
     // La entrada a Admin para el request en curso: el atajo de desarrollo
-    // local (AccesoDesarrolloLocal: DEBUG + request local + IIS Express) o,
-    // como siempre, la identidad Windows real contra la whitelist.
+    // local (AccesoDesarrolloLocal: DEBUG + request local + IIS Express),
+    // SIN CAMBIOS; o la identidad Windows real con rol ADM o MOD en
+    // dbo.UsuariosAdmin. El rol de la base manda: la whitelist temporal ya
+    // no deja fuera a un ADM/MOD ni deja entrar a nadie por su nombre.
+    // VIEWER (sin fila, valor raro, error, anonimo) no entra.
     public static bool PuedeEntrar(HttpContext context)
     {
         if (AccesoDesarrolloLocal.Activo(context)) return true;   // SOLO DESARROLLO LOCAL
-        return EstaAutorizado(IdentidadWindows.DesdeContexto(context));
+        return RolAdmin.EsElevado(Rol(context));
     }
 
     public static bool EsRutaProtegida(string rutaRelativa)
@@ -130,18 +144,28 @@ public static class AccesoAdmin
     // cambia.
     public static IFuenteRolesAdmin FuenteRoles = new FuenteRolesAdminSql();
 
-    // El rol de quien hace el request (ADM o MOD), resuelto cada vez. No
-    // revisa la whitelist: llamarlo despues de Exigir/EstaAutorizado.
+    private const string ClaveRolRequest = "AccesoAdmin.Rol";
+
+    // El rol de quien hace el request (ADM, MOD o VIEWER), resuelto una vez
+    // por request (HttpContext.Items: el modulo, Exigir y ExigirAdm no
+    // repiten la consulta) y nunca guardado entre requests. Sin identidad
+    // autenticada no consulta la base: VIEWER (RolAdmin.Para).
     public static string Rol(HttpContext context)
     {
         if (AccesoDesarrolloLocal.Activo(context)) return RolAdmin.Adm;   // SOLO DESARROLLO LOCAL
-        return RolAdmin.Para(IdentidadWindows.DesdeContexto(context), FuenteRoles,
+        var guardado = context == null ? null : context.Items[ClaveRolRequest] as string;
+        if (guardado != null) return guardado;
+        var rol = RolAdmin.Para(IdentidadWindows.DesdeContexto(context), FuenteRoles,
             delegate (Exception ex) { DashboardHandler.Registrar("AccesoAdmin.Rol", ex); });
+        if (context != null) context.Items[ClaveRolRequest] = rol;
+        return rol;
     }
 
     // Para lo que es solo de ADM: whitelist y ademas rol ADM. true si sigue;
-    // si no, ya respondio 403 y hay que salir.
-    public static bool ExigirAdm(HttpContext context)
+    // si no, ya respondio 403 y hay que salir. `mensaje` cambia solo el
+    // texto del 403 RolInsuficiente (p. ej. la consola de correos); la regla
+    // es la misma.
+    public static bool ExigirAdm(HttpContext context, string mensaje = null)
     {
         if (!Exigir(context)) return false;
         if (Rol(context) == RolAdmin.Adm) return true;
@@ -154,7 +178,7 @@ public static class AccesoAdmin
         r.ContentType = "application/json; charset=utf-8";
         r.Write(new JavaScriptSerializer().Serialize(new Dictionary<string, object>
         {
-            { "error", "Solo un administrador (ADM) puede crear iniciativas." },
+            { "error", mensaje ?? "Solo un administrador (ADM) puede crear iniciativas." },
             { "tipo", "RolInsuficiente" },
         }));
         return false;

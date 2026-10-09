@@ -2,6 +2,10 @@
 // TODO(TEMPORAL) - WHITELIST DE PRUEBA DE ADMIN -> INICIATIVAS
 // =====================================================================
 //
+// DESDE 2026-10-09 YA NO ES PUERTA: AccesoAdmin.PuedeEntrar decide solo con
+// el rol de dbo.UsuariosAdmin (y el atajo de desarrollo local). La lista se
+// conserva sin cambios; lo de abajo describe como funcionaba.
+//
 // ESTE ARCHIVO ES TEMPORAL Y SE ELIMINA cuando la autorizacion de Admin
 // pase a ser DB-backed (hito posterior; la tabla todavia NO existe y no se
 // crea aqui).

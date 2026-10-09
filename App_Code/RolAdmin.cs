@@ -1,21 +1,28 @@
-// Rol dentro de Admin -> Iniciativas: ADM o MOD.
+// Rol dentro de Admin -> Iniciativas: ADM, MOD o VIEWER.
 //
 // ORDEN (cada request, sin cache)
 // -------------------------------
 //   1. Identidad: IdentidadWindows (IIS Windows Auth).
-//   2. Entrada: AccesoAdmin.Exigir (whitelist temporal). Sin pasarla no hay
-//      rol que resolver: 403.
-//   3. Rol: dbo.UsuariosAdmin.Acceso de esa cuenta (esta clase).
-//   4. Permiso: AccesoAdmin.ExigirAdm para lo que es solo de ADM (crear
-//      iniciativas: admin_iniciativas_validar y admin_iniciativas_capacidad).
+//   2. (Ya no hay whitelist en el camino desde 2026-10-09; ver AccesoAdmin.)
+//   3. Rol: dbo.UsuariosAdmin.Acceso de esa cuenta (esta clase). Sin
+//      identidad autenticada no se consulta: VIEWER.
+//   4. Entrada: AccesoAdmin.Exigir deja pasar solo ADM o MOD; VIEWER recibe
+//      403 en la pagina y en todo handler admin_iniciativas_*.
+//   5. Permiso: AccesoAdmin.ExigirAdm para lo que es solo de ADM (hoy la
+//      consola de correos, admin_correos; y la creacion directa cuando tenga
+//      handler). Nueva solicitud (admin_iniciativas_validar y
+//      admin_iniciativas_capacidad) es de ADM y MOD: Exigir.
 //
 // REGLA (falla hacia el MENOR privilegio)
 // ---------------------------------------
-//   ADM  solo si la cuenta tiene al menos una fila en dbo.UsuariosAdmin y
-//        TODAS sus filas dicen Acceso = 'ADM' (la tabla no tiene llave
-//        unica: un duplicado con 'MOD' u otro valor no da ADM).
-//   MOD  todo lo demas: sin fila, valor raro, consulta que falla, sin
-//        identidad. Nunca se concede ADM por un error.
+//   ADM     solo si la cuenta tiene al menos una fila en dbo.UsuariosAdmin y
+//           TODAS sus filas dicen Acceso = 'ADM' (la tabla no tiene llave
+//           unica: un duplicado con 'MOD' no da ADM).
+//   MOD     hay filas, todas son ADM o MOD y al menos una es MOD.
+//   VIEWER  todo lo demas: sin fila, algun valor que no es ADM ni MOD
+//           (NULL incluido), consulta que falla, sin identidad. VIEWER no
+//           entra a Admin. Nunca se concede ADM ni MOD por un error ni por
+//           falta de fila (antes, sin fila se caia a MOD: quitado).
 //
 // La cuenta se compara con IdentidadWindows.Original contra Usuario, sin
 // espacios a los lados y sin distinguir mayusculas ("SORIANA\cuenta"; el
@@ -35,7 +42,7 @@ using System.Data.SqlClient;
 using System.Globalization;
 
 // Los valores de Acceso de las filas de una cuenta, tal como estan. Lanza si
-// no puede leerlos (eso cuenta como MOD, no como ADM).
+// no puede leerlos (eso cuenta como VIEWER: sin acceso).
 public interface IFuenteRolesAdmin
 {
     IList<string> AccesosDe(string cuenta);
@@ -72,32 +79,46 @@ public static class RolAdmin
 {
     public const string Adm = "ADM";
     public const string Mod = "MOD";
+    public const string Viewer = "VIEWER";
 
-    // ADM solo si hay filas y todas son ADM.
+    // ADM o MOD: los unicos roles que entran a Admin.
+    public static bool EsElevado(string rol)
+    {
+        return string.Equals(rol, Adm, StringComparison.Ordinal)
+            || string.Equals(rol, Mod, StringComparison.Ordinal);
+    }
+
+    // Sin filas o con algun valor que no sea ADM/MOD: VIEWER. Todas ADM:
+    // ADM. Si no (ADM y MOD, o solo MOD): MOD.
     public static string Resolver(IEnumerable<string> accesos)
     {
-        if (accesos == null) return Mod;
+        if (accesos == null) return Viewer;
         var hay = false;
+        var todasAdm = true;
         foreach (var a in accesos)
         {
             hay = true;
-            if (!string.Equals(Limpio(a), Adm, StringComparison.Ordinal)) return Mod;
+            var v = Limpio(a);
+            if (string.Equals(v, Adm, StringComparison.Ordinal)) continue;
+            if (string.Equals(v, Mod, StringComparison.Ordinal)) { todasAdm = false; continue; }
+            return Viewer;
         }
-        return hay ? Adm : Mod;
+        if (!hay) return Viewer;
+        return todasAdm ? Adm : Mod;
     }
 
     // La regla completa, sin HttpContext. `registrar` recibe el error de la
     // fuente (puede ser null).
     public static string Para(IdentidadWindows id, IFuenteRolesAdmin fuente, Action<Exception> registrar)
     {
-        if (id == null || !id.Autenticada) return Mod;
+        if (id == null || !id.Autenticada) return Viewer;
         return Para(id.Original, fuente, registrar);
     }
 
     public static string Para(string cuenta, IFuenteRolesAdmin fuente, Action<Exception> registrar)
     {
-        if (string.IsNullOrWhiteSpace(cuenta)) return Mod;
-        if (fuente == null) return Mod;
+        if (string.IsNullOrWhiteSpace(cuenta)) return Viewer;
+        if (fuente == null) return Viewer;
         try
         {
             return Resolver(fuente.AccesosDe(cuenta.Trim()));
@@ -105,7 +126,7 @@ public static class RolAdmin
         catch (Exception ex)
         {
             if (registrar != null) registrar(ex);
-            return Mod;
+            return Viewer;
         }
     }
 

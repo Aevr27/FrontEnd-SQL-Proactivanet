@@ -6,6 +6,9 @@
 // de cada handler admin_iniciativas_* y en AdminAccesoModulo.
 //
 //   GET handlers/admin_sesion.ashx              -> { "autorizado": true|false }
+//        autorizado = AccesoAdmin.PuedeEntrar: rol ADM o MOD en la base. Un
+//        VIEWER (sin fila en dbo.UsuariosAdmin, valor raro o consulta que
+//        falla) sale false y sin rol: el menu no muestra Administracion.
 //        y, si autorizado, "rol": "ADM" | "MOD" (RolAdmin: dbo.UsuariosAdmin;
 //        ADM fijo con el atajo de desarrollo local, AccesoDesarrolloLocal).
 //        Solo para que la interfaz oculte lo que no le toca; los handlers lo
