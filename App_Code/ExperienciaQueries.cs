@@ -455,9 +455,20 @@ public static partial class ExperienciaQueries
         // dueños de la iniciativa son los de su categoria y los resuelve
         // AlinearDuenos con DirectorioOrganizacional, que es con lo que el
         // tablero filtra. Ver la nota "UNA SOLA RESOLUCION DE DUEÑOS" ahi.
-        const string SQL =
+        // TICKETS REDUCE: el calculado en la base (dbo.ExpTicketsReduce, del
+        // 65_tickets_reduce_en_base.sql: % x tickets de la ruta en los
+        // últimos 30 días), no el del Excel, que traía un volumen viejo o 0
+        // (el 64 del 2026-10-09). Si la tabla aún no está instalada, o la
+        // cuenta no la puede leer (para OBJECT_ID es lo mismo), se usa el del
+        // Excel como antes. Una fila que el cálculo todavía no tiene (cargada
+        // después) también cae al del Excel.
+        var calculado = TieneTicketsReduceCalculado(cn);
+        var SQL =
             "SELECT v.Codigo, v.Categoria, v.C1, v.C1C2, v.Iniciativa, v.Titulo, " +
-            "       v.Estado, v.TipoAgrupado, v.TicketsReduce, v.PctDisminucion, " +
+            "       v.Estado, v.TipoAgrupado, " +
+            (calculado ? "CASE WHEN tr.Codigo IS NOT NULL THEN tr.TicketsReduce ELSE v.TicketsReduce END, "
+                       : "v.TicketsReduce, ") +
+            "       v.PctDisminucion, " +
             "       v.FechaAnalisis, v.FechaSolucion, v.FechaCierre, " +
             "       v.NroCambioFechaAnalisis, v.NroCambioFechaSolucion, v.NroCambioFechaCierre, " +
             "       p.Descripcion, p.Observaciones, p.FechaCreacion, " +
@@ -465,6 +476,7 @@ public static partial class ExperienciaQueries
             "FROM dbo.vw_ProblemCategoria AS v " +
             "INNER JOIN dbo.Problem AS p ON p.Codigo = v.Codigo " +
             "LEFT JOIN dbo.CatPrefijoProblem AS cp ON cp.Prefijo = p.Prefijo " +
+            (calculado ? "LEFT JOIN dbo.ExpTicketsReduce AS tr ON tr.Codigo = v.Codigo AND tr.Categoria = v.Categoria " : "") +
             "WHERE v.VigenteEnOrigen = 1";
 
         var filas = new List<Detalle>();
@@ -571,6 +583,16 @@ public static partial class ExperienciaQueries
         }
 
         return filas;
+    }
+
+    // Detecta si está disponible el cálculo de Tickets Reduce (script 65).
+    private static bool TieneTicketsReduceCalculado(SqlConnection cn)
+    {
+        using (var cmd = new SqlCommand(
+            "SELECT CASE WHEN OBJECT_ID(N'dbo.ExpTicketsReduce', N'U') IS NOT NULL THEN 1 ELSE 0 END", cn))
+        {
+            return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+        }
     }
 
     // Iniciativas que todavia no tienen ninguna categoria asignada. El script
