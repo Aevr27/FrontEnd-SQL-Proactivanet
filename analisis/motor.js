@@ -518,7 +518,9 @@
         return String(v).length > 60 ? '(texto libre)' : String(v);
     }
 
-    // datos = preparar(...), servicio = {nombre, reglas, motivosEquipo}
+    // datos = preparar(...), servicio = {nombre, reglas, motivosEquipo, cedis}
+    // servicio.cedis (opcional): { '5549': 'Salinas Victoria secos', ... }. Con el, la
+    // hoja Sitios trae la tabla del CEDIS que menciona el texto.
     // opciones.conTextos: el Detalle lleva titulo, descripcion y solucion (la pestaña
     // del tablero, que es interna; la pagina de claude.ai no los lleva).
     function analizar(datos, servicio, opciones) {
@@ -709,6 +711,32 @@
                 'Motivos de equipo: ' + equipo.join(', ') + '. ' + miles(eq.length) + ' tickets; ' +
                 pctTxt(frac(eq.filter(function (t) { return t.gapEquipo != null && t.gapEquipo <= 30; }).length, eq.length)) +
                 ' tienen otro de equipo del mismo sitio en los 30 días anteriores.'));
+        }
+        // El CEDIS que menciona el texto: en Logistica el campo de la tienda trae a la
+        // persona, y en Gestion de Inventarios el sitio es la tienda que recibe; el texto
+        // dice "determinante 5549" o "cedis 5548 tultitlan". Solo con servicio.cedis.
+        var mapaCedis = servicio.cedis || null;
+        if (mapaCedis && Object.keys(mapaCedis).length) {
+            var conCedis = U.filter(function (t) {
+                var x = normalizar(t.titulo + ' ' + t.descripcion), re = /\b(\d{4})\b/g, m;
+                t.cedis = null;
+                while ((m = re.exec(x))) { if (mapaCedis[m[1]]) { t.cedis = m[1]; break; } }
+                return t.cedis != null;
+            });
+            var porCedis = Array.from(agrupar(conCedis, function (t) { return t.cedis; }).entries())
+                .sort(function (a, b) { return b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1); });
+            H.Sitios.push(tabla('cedis', 'CEDIS que menciona el texto',
+                [{ n: 'CEDIS', t: 'txt' }, { n: 'Nombre', t: 'txt' }, { n: 'Tickets', t: 'int' }, { n: '% de los que dicen su CEDIS', t: 'pct' },
+                 { n: 'Motivo principal', t: 'txt' }, { n: '% del motivo', t: 'pct' }, { n: 'Segundo motivo', t: 'txt' },
+                 { n: 'TTR mediana (días)', t: 'num1' }, { n: 'Cumple SLA', t: 'pct' }],
+                porCedis.map(function (e) {
+                    var l = e[1], pm = principal(l, function (t) { return t.motivo; }), r = resumenAtencion(l, corte);
+                    return [e[0], mapaCedis[e[0]], l.length, frac(l.length, conCedis.length), pm.valor, pm.pct,
+                            pm.segundo ? pm.segundo[0] : '', r.ttrMed, r.cumple];
+                }),
+                'Sale del título o la descripción: el primer número que esté en la lista de CEDIS del servicio (' +
+                Object.keys(mapaCedis).length + '). ' + miles(conCedis.length) + ' de ' + miles(nU) + ' tickets (' +
+                pctTxt(frac(conCedis.length, nU)) + ') lo dicen; los demás no dicen de qué CEDIS son.'));
         }
 
         /* ================================================== Motivos */
