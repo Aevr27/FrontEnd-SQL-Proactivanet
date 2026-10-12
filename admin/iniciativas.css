@@ -704,10 +704,11 @@ html.ini-detalle-abierto { overflow: hidden; }
 }
 .ini-cd-detalle h4 { margin: 0 0 8px; font-size: 14px; overflow-wrap: anywhere; }
 
-/* Alta de categoria (admin/categorias-alta.js). */
-.ini-ca-aplica { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 0; padding: 8px 12px;
-  border: 1px solid var(--line); border-radius: var(--radius-xs); font-size: 12px; }
-.ini-ca-aplica legend { font-weight: 700; padding: 0 4px; }
-.ini-ca-aplica label { display: inline-flex; align-items: center; gap: 6px; }
-.ini-ca-json { margin: 6px 0; padding: 8px 10px; max-height: 260px; overflow: auto; font-size: 11.5px;
-  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-xs); white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Crear iniciativa: camino del problema (nuevo / existente) y campos que
+   se ocultan con hidden (PO / SO). .ini-campo y .ini-form tienen display
+   propio, que le ganaria al atributo. */
+.ini-ruta-problema { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0 0 12px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: var(--radius-xs); font-size: 12.5px; }
+.ini-ruta-problema legend { font-weight: 700; padding: 0 4px; }
+.ini-ruta-problema label { display: inline-flex; align-items: center; gap: 6px; }
+.ini-campo[hidden], .ini-form[hidden] { display: none; }

@@ -457,13 +457,18 @@ window.Iniciativas = (function () {
     iniciativas: { panel: 'panel-iniciativas', pestana: 'tab-iniciativas' },
     solicitudes: { panel: 'panel-solicitudes', pestana: 'tab-solicitudes' },
     nueva:       { panel: 'panel-nueva',       pestana: 'tab-iniciativas' },
-    // Administracion (solo ADM): alta directa, dueños y alta de categorias.
+    // Administracion (solo ADM): alta directa de iniciativas. Las
+    // categorias se crean en el sitio de Proactivanet, no aqui.
     administracion: { panel: 'panel-administracion', pestana: 'tab-administracion' },
     // Alta directa de ADM (admin/iniciativa-admin.js): accion de
     // Administracion, separada de Nueva solicitud. Solo con rol ADM.
     crear:       { panel: 'panel-crear-admin', pestana: 'tab-administracion' }
   };
   var VISTAS_SOLO_ADM = { administracion: true, crear: true };
+  // Dueños de categoria (PO / SO): flujo aparte, oculto por ahora. Con false
+  // la seccion #cdSeccion queda oculta y su catalogo (?duenos=1) no se pide.
+  // admin/categorias-duenos.js y el handler siguen intactos.
+  var DUENOS_VISIBLES = false;
   // Nueva solicitud: ADM o MOD. Sin rol resuelto, no abre (falla cerrado).
   var VISTAS_ADM_MOD = { nueva: true };
   var PESTANAS = [
@@ -524,8 +529,7 @@ window.Iniciativas = (function () {
       this.menu = null;
       this.registro = null;  // VistaRegistro (admin/registro-iniciativas.js)
       this.crearAdmin = null; // VistaCrearAdmin (admin/iniciativa-admin.js)
-      this.duenos = null;     // VistaDuenos (admin/categorias-duenos.js), perezosa
-      this.altaCategoria = null; // VistaAlta (admin/categorias-alta.js), perezosa
+      this.duenos = null;     // VistaDuenos (admin/categorias-duenos.js), perezosa; null si DUENOS_VISIBLES = false
       // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
       // sin rol no se abre nada de ADM.
       this.rol = null;
@@ -582,8 +586,8 @@ window.Iniciativas = (function () {
       // Nueva solicitud: un fallo de uno no bloquea al otro.
       this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
       if (window.IniciativaAdmin) this.crearAdmin = new window.IniciativaAdmin.VistaCrearAdmin(this.doc);
-      if (window.CategoriasDuenos) this.duenos = new window.CategoriasDuenos.VistaDuenos(this.doc);
-      if (window.CategoriasAlta) this.altaCategoria = new window.CategoriasAlta.VistaAlta(this.doc);
+      if (DUENOS_VISIBLES && window.CategoriasDuenos) this.duenos = new window.CategoriasDuenos.VistaDuenos(this.doc);
+      if (this.$('cdSeccion')) this.$('cdSeccion').hidden = !DUENOS_VISIBLES;
       this.aplicarPestanas();
       this.cablearPestanas();
       this.cablearAcciones();
@@ -618,7 +622,6 @@ window.Iniciativas = (function () {
       if (nombre !== 'iniciativas' && this.registro) this.registro.cerrarDetalle();
       // El catalogo de dueños se pide la primera vez que se abre la pestaña.
       if (nombre === 'administracion' && this.duenos) this.duenos.abrir();
-      if (nombre === 'administracion' && this.altaCategoria) this.altaCategoria.abrir();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();
     }
@@ -1026,6 +1029,7 @@ window.Iniciativas = (function () {
     VISTAS: VISTAS,
     VISTAS_SOLO_ADM: VISTAS_SOLO_ADM,
     VISTAS_ADM_MOD: VISTAS_ADM_MOD,
+    DUENOS_VISIBLES: DUENOS_VISIBLES,
     MenuLateral: MenuLateral,
     PaginaIniciativas: PaginaIniciativas
   };

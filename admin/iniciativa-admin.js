@@ -586,8 +586,14 @@ window.IniciativaAdmin = (function () {
   // ---------------------------------------------------------------------
   // VistaCrearAdmin: el panel "Crear iniciativa (Admin)"
   // ---------------------------------------------------------------------
+  // admPo / admSo estan ocultos en el HTML (dueños: flujo aparte), pero la
+  // cascada en modo 'filtro' sigue contando sus tres niveles.
   var SELECTS_CREAR = ['admPo', 'admSo', 'admCategoria'];
   var CAMPOS_CREAR = ['titulo', 'descripcion', 'observaciones', 'volumetria', 'pct'];
+  // Camino del problema. 'nuevo' = el formulario de siempre. 'existente'
+  // todavia no tiene fuente de busqueda ni contrato: solo avisa que falta y
+  // no revisa ni valida en el servidor.
+  var RUTAS_PROBLEMA = ['nuevo', 'existente'];
 
   class VistaCrearAdmin {
     // pedir: fetch por omision; las pruebas pasan uno propio.
@@ -598,9 +604,30 @@ window.IniciativaAdmin = (function () {
       this.archivoRca = null;  // el File elegido: viaja al servidor, que no lo guarda
       this.enviando = false;
       this.cableado = false;
+      this.ruta = 'nuevo';
     }
 
     $(id) { return this.doc.getElementById(id); }
+
+    // Cambia de camino sin tocar el borrador: volver a 'nuevo' lo conserva.
+    elegirRuta(ruta) {
+      if (RUTAS_PROBLEMA.indexOf(ruta) < 0) return false;
+      this.ruta = ruta;
+      this.pintarRuta();
+      return true;
+    }
+
+    pintarRuta() {
+      var existente = this.ruta === 'existente';
+      this.$('admRutaNuevo').checked = !existente;
+      this.$('admRutaExistente').checked = existente;
+      this.$('admExistentePendiente').hidden = !existente;
+      this.$('admForm').hidden = existente;
+      this.$('admFaltantes').hidden = existente;
+      this.$('admRevisar').disabled = existente;
+      this.$('admGuardar').disabled = existente || this.enviando;
+      if (existente) this.$('admResultado').hidden = true;
+    }
 
     // Un catalogo nuevo arranca un borrador nuevo; null = sin catalogo.
     fijarCatalogo(catalogo) {
@@ -608,6 +635,7 @@ window.IniciativaAdmin = (function () {
       this.cablear();
       this.pintar();
       this.$('admResultado').hidden = true;
+      this.pintarRuta();
     }
 
     cablear() {
@@ -639,6 +667,9 @@ window.IniciativaAdmin = (function () {
         self.archivoRca = a && a.length && a[0].size > 0 ? a[0] : null;
         self.borrador.elegirRca(a && a.length ? a[0] : null);
         self.pintarFaltantes();
+      });
+      ['admRutaNuevo', 'admRutaExistente'].forEach(function (id) {
+        self.$(id).addEventListener('change', function (e) { if (e.target.checked) self.elegirRuta(e.target.value); });
       });
       this.$('admRevisar').addEventListener('click', function () { self.revisar(); });
       this.$('admGuardar').addEventListener('click', function () { self.guardar(); });
@@ -680,7 +711,7 @@ window.IniciativaAdmin = (function () {
     }
 
     revisar() {
-      if (!this.borrador) return null;
+      if (!this.borrador || this.ruta !== 'nuevo') return null;
       var r = this.borrador.revisar();
       var caja = this.$('admResultado');
       caja.hidden = false;
@@ -693,7 +724,7 @@ window.IniciativaAdmin = (function () {
     // "Validar en el servidor (no guarda)": lo que se ve es SIEMPRE la
     // respuesta real; si el borrador ya tiene errores locales, no se envia.
     guardar() {
-      if (!this.borrador || this.enviando) return Promise.resolve(null);
+      if (!this.borrador || this.enviando || this.ruta !== 'nuevo') return Promise.resolve(null);
       var local = this.revisar();
       if (!local.listo) return Promise.resolve(null);
       var self = this, boton = this.$('admGuardar'), caja = this.$('admResultado');
@@ -708,7 +739,7 @@ window.IniciativaAdmin = (function () {
         caja.classList.add(claseRespuesta(r));
         caja.innerHTML = htmlRespuesta(r);
         self.enviando = false;
-        boton.disabled = false;
+        boton.disabled = self.ruta !== 'nuevo';
         return r;
       });
     }
@@ -727,6 +758,7 @@ window.IniciativaAdmin = (function () {
     BorradorAdmin: BorradorAdmin,
     EdicionAdmin: EdicionAdmin,
     VistaCrearAdmin: VistaCrearAdmin,
+    RUTAS_PROBLEMA: RUTAS_PROBLEMA,
     htmlFaltantes: htmlFaltantes,
     htmlRevision: htmlRevision,
     htmlEdicion: htmlEdicion,

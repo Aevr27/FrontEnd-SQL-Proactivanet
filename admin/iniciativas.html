@@ -15,8 +15,8 @@
   ACCESO (en el servidor, ver App_Code/AccesoAdmin.cs): rol ADM o MOD en
   dbo.UsuariosAdmin para la identidad Windows del request. AdminAccesoModulo
   protege esta pagina si esta registrado en Web.config (ver
-  Web.config.ejemplo); los handlers admin_iniciativas_* y
-  admin_categorias_alta llaman a Exigir o ExigirAdm.
+  Web.config.ejemplo); los handlers admin_iniciativas_* llaman a Exigir o
+  ExigirAdm.
   Ocultar pestañas o botones aqui es solo UX.
 
   ESTADO ACTUAL (cuarto hito):
@@ -50,6 +50,12 @@
       handlers/admin_iniciativas_gestion.ashx (ExigirAdm), que responde 501
       PersistenciaNoHabilitada; nada se guarda. Lo que falta se marca
       "Incompleta" (derivada, sin columna). admin/iniciativa-admin.js.
+    - Sin alta de categorias: se crean en el sitio de Proactivanet. El
+      modulo admin/categorias-alta.js y handlers/admin_categorias_alta.ashx
+      siguen en el repo, sin entrada en esta pagina.
+    - Dueños (Product Owner / Service Owner) ocultos por ahora en
+      Administracion y en "Crear iniciativa": flujo aparte. Ver
+      DUENOS_VISIBLES en admin/iniciativas.js.
     - Solicitudes todavia no muestra datos: estado vacio "en preparacion",
       sin datos inventados.
 
@@ -355,15 +361,15 @@
   </section>
 
   <!-- Administracion (solo ADM): gestion directa, separada del flujo de
-       solicitud. Tres entradas: alta directa de iniciativas (abre
-       panel-crear-admin), dueños de categoria (admin/categorias-duenos.js,
-       carga perezosa al abrir la pestaña) y alta de categorias en
-       Proactivanet (admin/categorias-alta.js, sin llamada externa). -->
+       solicitud. Alta directa de iniciativas (abre panel-crear-admin) y
+       dueños de categoria (admin/categorias-duenos.js), estos OCULTOS por
+       ahora (DUENOS_VISIBLES en admin/iniciativas.js). Las categorias se
+       crean en el sitio de Proactivanet: aqui no hay alta de categorias. -->
   <section class="ini-panel card" role="tabpanel" id="panel-administracion" aria-labelledby="tab-administracion" hidden>
     <div class="ini-vista-cab">
       <div class="ini-vista-titulo">
         <h2>Administración</h2>
-        <p class="ini-vista-sub">Gestión directa de iniciativas y categorías (solo ADM).</p>
+        <p class="ini-vista-sub">Gestión directa de iniciativas (solo ADM).</p>
       </div>
     </div>
 
@@ -381,43 +387,12 @@
       </section>
     </div>
 
-    <!-- Alta de categoria en Proactivanet (admin/categorias-alta.js): valida
-         contra el espejo local y muestra el cuerpo de POST /api/Categories
-         que se mandaria. NO llama a Proactivanet. No es el mapeo de dueños. -->
-    <section class="ini-adm-bloque" id="caSeccion" aria-labelledby="caTitulo">
-      <div class="ini-lista-cab">
-        <h3 class="ini-lista-titulo" id="caTitulo">Alta de categoría en Proactivanet</h3>
-      </div>
-      <p class="ini-prototipo-aviso" role="note"><strong>Sin envío a Proactivanet.</strong> «Validar alta (no envía)» revisa contra el catálogo local y muestra lo que se enviaría; no crea la categoría. Asignar dueños es otra operación (abajo).</p>
-      <div class="ini-cambio-campos">
-        <div class="campo"><label for="ca-padre">Categoría padre (ruta)</label>
-          <input type="text" id="ca-padre" list="caPadres" autocomplete="off" spellcheck="false" placeholder="/C1/C2 · vacío = C1 nuevo">
-          <datalist id="caPadres"></datalist>
-          <small class="ini-sub" id="caRutasEstado"></small></div>
-        <div class="campo"><label for="ca-nombre">Nombre <span class="ini-obligatorio">obligatorio</span></label>
-          <input type="text" id="ca-nombre" autocomplete="off"></div>
-        <div class="campo"><label for="ca-descripcion">Descripción</label><input type="text" id="ca-descripcion" autocomplete="off"></div>
-        <div class="campo"><label for="ca-orden">Orden</label><input type="number" id="ca-orden" step="1" inputmode="numeric"></div>
-      </div>
-      <fieldset class="ini-ca-aplica"><legend>Aplica a</legend>
-        <label><input type="checkbox" id="ca-incidentes"> Incidentes</label>
-        <label><input type="checkbox" id="ca-problemas"> Problemas</label>
-        <label><input type="checkbox" id="ca-cambios"> Cambios (RFC)</label>
-        <label><input type="checkbox" id="ca-kb"> Base de conocimiento</label>
-      </fieldset>
-      <p class="ini-nota">Ruta resultante: <output id="caRuta">—</output></p>
-      <div class="ini-acciones">
-        <button type="button" class="btn" id="caValidar">Validar alta (no envía)</button>
-        <span class="ini-hint">No se envía nada a Proactivanet.</span>
-      </div>
-      <div class="ini-resultado" id="caResultado" role="status" aria-live="polite" hidden></div>
-    </section>
-
     <!-- Dueños de categoria (admin/categorias-duenos.js, VistaDuenos):
          lectura de dbo.CatCategoriaDueno por ?duenos=1 y propuesta con
          vista previa; "Guardar (no disponible)" deshabilitado hasta tener
-         contrato. -->
-    <section class="ini-adm-bloque" id="cdSeccion" aria-labelledby="cdTitulo">
+         contrato. OCULTA por ahora (flujo aparte): iniciativas.js la deja
+         hidden y no pide el catalogo mientras DUENOS_VISIBLES sea false. -->
+    <section class="ini-adm-bloque" id="cdSeccion" aria-labelledby="cdTitulo" hidden>
       <div class="ini-lista-cab">
         <h3 class="ini-lista-titulo" id="cdTitulo">Dueños de categoría</h3>
         <span class="ini-lista-cuenta" id="cdCuenta" aria-live="polite"></span>
@@ -593,7 +568,24 @@
 
     <p class="ini-prototipo-aviso" role="note"><strong>Persistencia no habilitada.</strong> «Validar en el servidor (no guarda)» solo valida: no guarda nada ni genera código hasta que el contrato de base esté aprobado.</p>
 
-    <div class="ini-form">
+    <!-- Dos caminos para el problema de la iniciativa (VistaCrearAdmin.elegirRuta).
+         "nuevo" es el formulario de siempre, con todos sus campos. "existente"
+         todavia no tiene fuente de busqueda de problemas ni contrato (autollenado,
+         varias categorias con su volumetria y su %): solo dice que falta, sin
+         datos inventados, y no valida ni envia nada. -->
+    <fieldset class="ini-ruta-problema" id="admRutaProblema">
+      <legend>Problema de la iniciativa</legend>
+      <label><input type="radio" name="admRuta" id="admRutaNuevo" value="nuevo" checked> Crear un problema nuevo</label>
+      <label><input type="radio" name="admRuta" id="admRutaExistente" value="existente"> Ligar a un problema existente</label>
+    </fieldset>
+    <div class="ini-prototipo-aviso" id="admExistentePendiente" role="note" hidden>
+      <strong>No disponible todavía.</strong> Buscar y elegir un problema existente, autollenar sus datos y
+      asignar varias categorías, cada una con su volumetría de tickets y su % de disminución, necesita
+      una fuente de búsqueda de problemas y un contrato de datos aprobados. Nada se busca, valida ni guarda
+      en este camino.
+    </div>
+
+    <div class="ini-form" id="admForm">
       <section class="ini-bloque ini-col-clasif" aria-labelledby="admCabClasif">
         <div class="ini-bloque-cab">
           <span class="ini-paso" aria-hidden="true">01</span>
@@ -607,8 +599,11 @@
           <label for="admTipo">Tipo de iniciativa <span class="ini-obligatorio">obligatorio</span></label>
           <select id="admTipo" disabled></select>
         </div>
-        <div class="ini-campo"><label for="admPo">Product Owner</label><select id="admPo" disabled></select></div>
-        <div class="ini-campo"><label for="admSo">Service Owner</label><select id="admSo" disabled></select></div>
+        <!-- PO / SO ocultos por ahora (flujo aparte). Siguen en el DOM porque
+             la cascada en modo 'filtro' los usa; sin elegir, la Categoria
+             ofrece todas y el servidor los recibe vacios (opcionales). -->
+        <div class="ini-campo" hidden><label for="admPo">Product Owner</label><select id="admPo" disabled></select></div>
+        <div class="ini-campo" hidden><label for="admSo">Service Owner</label><select id="admSo" disabled></select></div>
         <div class="ini-campo"><label for="admCategoria">Categoría</label><select id="admCategoria" disabled></select></div>
         <div class="ini-campo ini-derivado">
           <span class="ini-rotulo-derivado" id="rotAdmDirector">Director <span class="ini-origen derivado">Derivado</span></span>
@@ -687,7 +682,6 @@
 <script src="cascada-organizacional.js"></script>
 <script src="iniciativa-admin.js"></script>
 <script src="categorias-duenos.js"></script>
-<script src="categorias-alta.js"></script>
 <script src="registro-iniciativas.js"></script>
 <script src="iniciativas.js"></script>
 <script>

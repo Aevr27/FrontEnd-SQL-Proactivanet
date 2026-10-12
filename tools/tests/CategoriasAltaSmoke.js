@@ -1,8 +1,10 @@
 /* =========================================================================
    tools/tests/CategoriasAltaSmoke.js
 
-   Prueba en node de admin/categorias-alta.js (Administracion -> Alta de
-   categoria en Proactivanet), sin navegador ni servidor ni red.
+   Prueba en node de admin/categorias-alta.js, sin navegador ni servidor ni
+   red. El alta de categorias YA NO tiene entrada en admin/iniciativas.html
+   (las categorias se crean en el sitio de Proactivanet); el modulo sigue en
+   el repo, sin uso, y aqui se prueba suelto.
 
    Casos:
      F) FormularioAlta: errores locales, ruta resultante, lo que viaja.
@@ -12,8 +14,9 @@
         exito; 422 / 403 / 503 / red.
      U) El modulo solo habla con admin_categorias_alta.ashx (nunca con
         Proactivanet).
-     S) Con la pagina real: la lista de padres se pide solo al abrir
-        Administracion con rol ADM.
+     H) La pagina ya no tiene la seccion, el boton ni el <script>.
+     S) Con la pagina real: abrir Administracion (ADM) no pide nada al
+        handler de alta, aunque el modulo este cargado.
 
    Correr: node tools/tests/CategoriasAltaSmoke.js
    ========================================================================= */
@@ -181,11 +184,15 @@ pruebas.push(function () {
       [r.estado, r.creada, caja().classList.contains('ok'), /creada con éxito|Categoría creada/.test(caja().innerHTML)]);
   });
 });
-// H) Rotulos de la pagina: el boton dice que no envia.
+// H) La pagina ya no ofrece el alta de categorias.
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
-  Check('H1 boton "Validar alta (no envía)" y aviso con el mismo nombre', [true, true],
-    [/<button type="button" class="btn" id="caValidar">Validar alta \(no envía\)<\/button>/.test(html), /«Validar alta \(no envía\)»/.test(html)]);
+  Check('H1 sin seccion, boton ni campos del alta', [false, false, false, false],
+    [/id="caSeccion"/.test(html), /id="caValidar"/.test(html), /id="ca-nombre"/.test(html), /Alta de categor/.test(html)]);
+  Check('H2 sin <script src="categorias-alta.js">', false, /<script src="categorias-alta\.js">/.test(html));
+  Check('H3 Administracion ya no dice "y categorías"', false, /Gestión directa de iniciativas y categorías/.test(html));
+  var js = leer('admin/iniciativas.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  Check('H4 iniciativas.js no arranca VistaAlta', false, /CategoriasAlta|altaCategoria/.test(js));
 });
 pruebas.push(function () {
   var t = Vista([Respuesta(500, { error: 'El servidor de SQL rechazo la consulta (error 53).' }), Respuesta(200, { rutas: ['/X'] })]);
@@ -234,7 +241,7 @@ pruebas.push(function () {
     doc.getElementById('tab-administracion').disparar('click');
     return esperar();
   }).then(function () {
-    Check('S3 ADM: abrir Administracion pide los padres una vez', ['administracion', 1], [pg.vista, altas()]);
+    Check('S3 ADM: abrir Administracion no pide nada al handler de alta', ['administracion', 0], [pg.vista, altas()]);
   });
 });
 

@@ -21,6 +21,10 @@
 //   M) Marca Incompleta en el detalle (para cualquier rol).
 //   P) Nada se persiste: solo los dos GET de siempre, ninguna escritura en
 //      el codigo nuevo.
+//   R) Camino del problema en Crear: "nuevo" (el formulario de siempre) y
+//      "existente" (solo aviso de dependencia: no revisa, no valida, no pide
+//      nada). PO / SO ocultos en Crear; Administracion sin alta de
+//      categorias ni dueños a la vista.
 //   G) "Validar en el servidor (no guarda)" en Crear y Modificar: 501 es
 //      solo validacion (nunca exito); 422, 403, 503, red, 500 y un 501 o
 //      200 malformados, cada uno con su mensaje y sin decir "guardado".
@@ -630,6 +634,64 @@ pruebas.push(function () {
     return a.indexOf(c) === i && conDisplay && !oculta;
   });
   Check('D3 ninguna clase con display propio pierde el hidden', [], sinRegla);
+});
+
+// R) Camino del problema + PO/SO ocultos + Administracion sin alta ni dueños
+pruebas.push(function () {
+  var html = leer('admin/iniciativas.html');
+  var sinCom = html.replace(/<!--[\s\S]*?-->/g, '');
+  var crear = sinCom.slice(sinCom.indexOf('id="panel-crear-admin"'), sinCom.indexOf('id="regDetFondo"'));
+  Check('R1 PO y SO de Crear siguen en el DOM pero ocultos', [true, true],
+    [/<div class="ini-campo" hidden><label for="admPo">Product Owner<\/label><select id="admPo" disabled><\/select><\/div>/.test(crear),
+     /<div class="ini-campo" hidden><label for="admSo">Service Owner<\/label><select id="admSo" disabled><\/select><\/div>/.test(crear)]);
+  Check('R1 Categoria de Crear sigue visible', true,
+    /<div class="ini-campo"><label for="admCategoria">Categoría<\/label>/.test(crear));
+  Check('R2 dos caminos; "nuevo" marcado por omision', [true, true, true],
+    [/<input type="radio" name="admRuta" id="admRutaNuevo" value="nuevo" checked>/.test(crear),
+     /<input type="radio" name="admRuta" id="admRutaExistente" value="existente">/.test(crear),
+     /id="admExistentePendiente" role="note" hidden>/.test(crear)]);
+  Check('R2 el camino "nuevo" conserva todos los campos de captura', true,
+    ['admTipo', 'admCategoria', 'adm-titulo', 'adm-descripcion', 'adm-observaciones', 'adm-volumetria', 'adm-pct', 'admRca']
+      .every(function (id) { return crear.indexOf('id="' + id + '"') > 0; }));
+  var adm = sinCom.slice(sinCom.indexOf('id="panel-administracion"'), sinCom.indexOf('id="panel-nueva"'));
+  Check('R3 Administracion: sin alta de categorias; dueños nace oculta', [false, false, true],
+    [/caSeccion|caValidar|Alta de categor/.test(adm), /categorias-alta\.js/.test(sinCom),
+     /id="cdSeccion" aria-labelledby="cdTitulo" hidden>/.test(adm)]);
+  var css = leer('admin/iniciativas.css');
+  Check('R3 hidden le gana al display de .ini-campo y .ini-form', true,
+    /\.ini-campo\[hidden\], \.ini-form\[hidden\] \{ display: none; \}/.test(css));
+
+  var p = Pagina();
+  return esperar().then(function () {
+    var pg = p.pagina, v = pg.crearAdmin;
+    pg.fijarRol('ADM');
+    pg.mostrarVista('administracion');
+    Check('R4 abrir Administracion: dueños oculto, sin pedir ?duenos=1', [true, false],
+      [p.sel('cdSeccion').hidden, p.pedidos.some(function (x) { return /duenos=1/.test(x.url); })]);
+    pg.mostrarVista('crear');
+    Check('R5 por omision "nuevo": formulario a la vista, aviso oculto, botones activos', ['nuevo', false, true, false, false],
+      [v.ruta, p.sel('admForm').hidden, p.sel('admExistentePendiente').hidden, p.sel('admRevisar').disabled, p.sel('admGuardar').disabled]);
+    elegir(p, 'admTipo', 'ADO');
+    escribir(p, 'adm-titulo', 'Borrador que no se pierde');
+    var antes = p.pedidos.length;
+    var r = p.sel('admRutaExistente');
+    r.value = 'existente'; r.checked = true; r.disparar('change');
+    Check('R6 "existente": aviso visible, formulario y faltantes ocultos, botones apagados', ['existente', true, false, true, true, true],
+      [v.ruta, p.sel('admForm').hidden, p.sel('admExistentePendiente').hidden, p.sel('admFaltantes').hidden,
+       p.sel('admRevisar').disabled, p.sel('admGuardar').disabled]);
+    Check('R7 "existente": revisar no hace nada', null, v.revisar());
+    return v.guardar().then(function (g) {
+      Check('R7 "existente": guardar no envia nada', [null, antes], [g, p.pedidos.length]);
+      Check('R8 elegirRuta rechaza valores desconocidos', [false, 'existente'], [v.elegirRuta('otro'), v.ruta]);
+      var n = p.sel('admRutaNuevo');
+      n.value = 'nuevo'; n.checked = true; n.disparar('change');
+      Check('R9 volver a "nuevo" conserva el borrador y reactiva', ['nuevo', 'ADO', 'Borrador que no se pierde', false, false],
+        [v.ruta, v.borrador.tipo, v.borrador.valores.titulo, p.sel('admForm').hidden, p.sel('admRevisar').disabled]);
+      Check('R10 lo que viaja sigue mandando po/so vacios (opcionales en el servidor)', [['po', ''], ['so', '']],
+        v.borrador.paraEnviar().filter(function (x) { return x[0] === 'po' || x[0] === 'so'; }));
+      Check('R11 RUTAS_PROBLEMA exportado', ['nuevo', 'existente'], A.RUTAS_PROBLEMA);
+    });
+  });
 });
 
 // G) Guardar = validar en el servidor (admin_iniciativas_gestion.ashx). Nunca exito.

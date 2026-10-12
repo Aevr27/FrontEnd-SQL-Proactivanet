@@ -16,8 +16,9 @@
         nombres de CatPersona; vista previa con dependientes; nunca guardado.
      V) VistaDuenos: carga perezosa una sola vez; cargando / error /
         reintentar / listo; "Guardar (no disponible)" deshabilitado; sin peticiones de escritura.
-     S) Rol: el catalogo de dueños se pide solo al abrir Administracion (ADM),
-        con la pagina real (admin/iniciativas.js).
+     S) Con la pagina real (admin/iniciativas.js): la seccion esta OCULTA
+        por ahora (DUENOS_VISIBLES = false) y el catalogo de dueños no se
+        pide ni al abrir Administracion con ADM.
 
    Correr: node tools/tests/CategoriasDuenosSmoke.js
    ========================================================================= */
@@ -252,10 +253,12 @@ pruebas.push(function () {
     pg.fijarRol('ADM');
     doc.getElementById('tab-administracion').disparar('click');
     return esperar().then(function () {
-    Check('S3 ADM: abrir Administracion pide el catalogo de dueños una vez', ['administracion', 1], [pg.vista, duenos()]);
+    Check('S3 ADM: abrir Administracion no pide el catalogo de dueños (oculto)', ['administracion', 0], [pg.vista, duenos()]);
+    Check('S3 la seccion de dueños queda oculta y el flag apagado', [true, false],
+      [doc.getElementById('cdSeccion').hidden, v.Iniciativas.DUENOS_VISIBLES]);
     doc.getElementById('tab-iniciativas').disparar('click');
     doc.getElementById('tab-administracion').disparar('click');
-    return esperar().then(function () { Check('S4 volver a abrirla no lo repite', 1, duenos()); });
+    return esperar().then(function () { Check('S4 volver a abrirla tampoco lo pide', 0, duenos()); });
     });
   });
 });
@@ -264,6 +267,8 @@ pruebas.push(function () {
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   var css = leer('admin/iniciativas.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  Check('C0 la seccion de dueños nace oculta en el HTML', true,
+    /<section class="ini-adm-bloque" id="cdSeccion" aria-labelledby="cdTitulo" hidden>/.test(html));
   Check('C1 la tabla de dueños va dentro de .ini-cd-caja', true,
     /<div class="ini-tabla-caja ini-cd-caja" id="cdTablaCaja">\s*<table class="ini-tabla">[\s\S]*?<tbody id="cdCuerpo">/.test(html));
   Check('C2 caja: alto maximo y scroll vertical propio', true,
