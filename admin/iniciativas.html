@@ -435,7 +435,9 @@
             <input type="search" id="cdBuscar" autocomplete="off" spellcheck="false"></div>
         </div>
         <div class="ini-vacio" id="cdVacio" hidden><strong>No hay categorías que coincidan.</strong></div>
-        <div class="ini-tabla-caja">
+        <!-- ini-cd-caja: caja de alto fijo con scroll propio y encabezado fijo
+             (iniciativas.css), para que las ~340 filas no empujen la pagina. -->
+        <div class="ini-tabla-caja ini-cd-caja" id="cdTablaCaja">
           <table class="ini-tabla">
             <caption class="ini-sr">Categorías N2 y sus dueños: propios, heredados del C1 o faltantes.</caption>
             <thead><tr>

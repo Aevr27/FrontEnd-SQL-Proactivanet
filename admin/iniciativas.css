@@ -689,6 +689,15 @@ html.ini-detalle-abierto { overflow: hidden; }
 .cd-baja td { color: var(--muted-2); }
 .cd-cambia td { background: var(--accent-soft); }
 .cd-hallazgos { font-weight: 700; color: var(--ambr); cursor: help; }
+/* Tabla de dueños: ~340 filas en una caja de unas 10 filas de alto, con
+   scroll propio y el encabezado fijo (el mismo trato que .tabla-alta de SLA).
+   Todas las filas siguen ahi; solo se desplazan. Tambien bajo 760px, donde
+   la tabla pasa a tarjetas: la regla de esa media query quitaba el scroll. */
+.ini-tabla-caja.ini-cd-caja { max-height: 440px; overflow-y: auto; }
+.ini-cd-caja thead th { position: sticky; top: 0; z-index: 1; background: #fff; box-shadow: inset 0 -1px 0 var(--line-soft); }
+@media (max-width: 760px) {
+  .ini-tabla-caja.ini-cd-caja { overflow-y: auto; }
+}
 .ini-cd-detalle {
   margin-top: 14px; padding: 12px 14px; border: 1px solid var(--accent-line);
   border-radius: var(--radius-xs); background: var(--card);

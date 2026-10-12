@@ -260,6 +260,20 @@ pruebas.push(function () {
   });
 });
 
+// C) La tabla vive en una caja de alto fijo con scroll y encabezado fijo.
+pruebas.push(function () {
+  var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
+  var css = leer('admin/iniciativas.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  Check('C1 la tabla de dueños va dentro de .ini-cd-caja', true,
+    /<div class="ini-tabla-caja ini-cd-caja" id="cdTablaCaja">\s*<table class="ini-tabla">[\s\S]*?<tbody id="cdCuerpo">/.test(html));
+  Check('C2 caja: alto maximo y scroll vertical propio', true,
+    /\.ini-tabla-caja\.ini-cd-caja \{ max-height: 440px; overflow-y: auto; \}/.test(css));
+  Check('C3 encabezado fijo con fondo', true,
+    /\.ini-cd-caja thead th \{ position: sticky; top: 0;[^}]*background: #fff;/.test(css));
+  Check('C4 bajo 760px conserva el scroll', true,
+    /@media \(max-width: 760px\) \{\s*\.ini-tabla-caja\.ini-cd-caja \{ overflow-y: auto; \}/.test(css));
+});
+
 pruebas.reduce(function (c, p) { return c.then(p); }, Promise.resolve())
   .then(function () {
     console.log('');
