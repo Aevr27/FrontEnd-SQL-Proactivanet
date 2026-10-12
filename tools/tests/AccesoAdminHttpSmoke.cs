@@ -140,6 +140,12 @@ public static class AccesoAdminHttpSmoke
         cuerpo = Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", null, YO, out estado);
         Check("H3 validar ADM: pasa Exigir (405 por GET, sin SQL)", "405|True",
               estado + "|" + cuerpo.Contains("MetodoNoPermitido"));
+        cuerpo = Correr(new AdminIniciativasCatalogos(), "admin_iniciativas_catalogos.ashx", "duenos=1", YO, out estado);
+        Check("H3 catalogos?duenos=1 ADM: pasa ExigirAdm (sin 403)", "False|False",
+              (estado == 403) + "|" + cuerpo.Contains("RolInsuficiente"));
+        cuerpo = Correr(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", null, YO, out estado);
+        Check("H3 gestion ADM: pasa ExigirAdm (405 por GET, sin SQL)", "405|True",
+              estado + "|" + cuerpo.Contains("MetodoNoPermitido"));
 
         // ---- R) rol (dbo.UsuariosAdmin) despues de la whitelist -------------
         // Los dos handlers de Nueva solicitud (ADM y MOD).
@@ -148,7 +154,7 @@ public static class AccesoAdminHttpSmoke
         IHttpHandler[] todosAdmin =
         {
             new AdminIniciativasCatalogos(), new AdminIniciativasCapacidad(), new AdminIniciativasValidar(),
-            new AdminIniciativasRegistro(), new AdminIniciativasDiagnostico(),
+            new AdminIniciativasRegistro(), new AdminIniciativasDiagnostico(), new AdminIniciativasGestion(), new AdminCategoriasAlta(),
         };
         var casosMod = new[]
         {
@@ -169,6 +175,18 @@ public static class AccesoAdminHttpSmoke
             cuerpo = Correr(new AdminCorreos(), "admin_correos.ashx", null, YO, out estado);
             Check("R1 " + c.nombre + ": lo solo-ADM (correos) sigue 403 RolInsuficiente", "403|True",
                   estado + "|" + cuerpo.Contains("RolInsuficiente"));
+            cuerpo = Correr(new AdminCategoriasAlta(), "admin_categorias_alta.ashx", null, YO, out estado);
+            Check("R1 " + c.nombre + ": alta de categoria 403 RolInsuficiente (antes de leer la base)", "403|True",
+                  estado + "|" + cuerpo.Contains("RolInsuficiente"));
+            cuerpo = Correr(new AdminIniciativasCatalogos(), "admin_iniciativas_catalogos.ashx", "duenos=1", YO, out estado);
+            Check("R1 " + c.nombre + ": catalogos?duenos=1 (gestion de duenos) 403 RolInsuficiente", "403|True",
+                  estado + "|" + cuerpo.Contains("RolInsuficiente"));
+            cuerpo = Correr(new AdminIniciativasCatalogos(), "admin_iniciativas_catalogos.ashx", "rutas=1", YO, out estado);
+            Check("R1 " + c.nombre + ": catalogos?rutas=1 sigue abierto a MOD (sin 403)", "False|False",
+                  (estado == 403) + "|" + cuerpo.Contains("RolInsuficiente"));
+            cuerpo = Correr(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", null, YO, out estado);
+            Check("R1 " + c.nombre + ": crear/modificar directo (gestion) 403 RolInsuficiente", "403|True|False",
+                  estado + "|" + cuerpo.Contains("RolInsuficiente") + "|" + cuerpo.Contains("MetodoNoPermitido"));
             cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
             Check("R1 " + c.nombre + ": admin_sesion entra como MOD", "{\"autorizado\":true,\"rol\":\"MOD\"}", cuerpo);
         }
@@ -283,7 +301,7 @@ public static class AccesoAdminHttpSmoke
         IHttpHandler[] protegidos =
         {
             new AdminIniciativasCatalogos(), new AdminIniciativasCapacidad(), new AdminIniciativasValidar(),
-            new AdminIniciativasRegistro(), new AdminIniciativasDiagnostico(),
+            new AdminIniciativasRegistro(), new AdminIniciativasDiagnostico(), new AdminIniciativasGestion(), new AdminCategoriasAlta(),
         };
         foreach (var h in protegidos)
         {
@@ -392,9 +410,12 @@ public static class AccesoAdminHttpSmoke
         Check("D2 PuedeEntrar ya no usa la whitelist", false, puede.Contains("EstaAutorizado") || puede.Contains("Configurada"));
         var rolFn = fuenteAcceso.Substring(fuenteAcceso.IndexOf("public static string Rol(HttpContext context)"));
         rolFn = rolFn.Substring(0, rolFn.IndexOf("\n    }") + 6);
-        Check("D3 Rol: el atajo local da ADM antes de tocar la base", true,
-              rolFn.IndexOf("AccesoDesarrolloLocal.Activo(context)) return RolAdmin.Adm;") > 0 &&
-              rolFn.IndexOf("AccesoDesarrolloLocal.Activo") < rolFn.IndexOf("RolAdmin.Para("));
+        Check("D3 Rol: el rol de desarrollo local (whitelist) va antes de tocar la base", true,
+              rolFn.IndexOf("AccesoDesarrolloLocal.Rol(context)") > 0 &&
+              rolFn.IndexOf("if (local != null) return local;") > 0 &&
+              rolFn.IndexOf("AccesoDesarrolloLocal.Rol(context)") < rolFn.IndexOf("RolAdmin.Para("));
+        Check("D3 Rol: ya no hay ADM fijo para todo request local", false,
+              fuenteAcceso.Contains("AccesoDesarrolloLocal.Activo(context)) return RolAdmin.Adm;"));
         Check("D4 la whitelist sigue existiendo (solo t_andresvr) y se sigue leyendo bien", "SORIANA\\t_andresvr|1|0",
               AdminWhitelistTemporal.Cuentas + "|" + AccesoAdmin.Configurada().Total + "|" + AccesoAdmin.Configurada().Ignoradas);
 
@@ -420,6 +441,62 @@ public static class AccesoAdminHttpSmoke
         Check("L4 sin proceso conocido: normal", false, AccesoDesarrolloLocal.Evaluar(true, true, null));
         Check("L5 nada de lo anterior: normal", false, AccesoDesarrolloLocal.Evaluar(false, false, "w3wp"));
 
+        // ---- W) whitelist de desarrollo local (AccesoDesarrolloLocal.RolPara) --
+        // La regla completa sin HttpContext: entorno (DEBUG + loopback + IIS
+        // Express, arriba) Y la cuenta de desarrollo en AdminWhitelistTemporal.
+        var lista = AccesoAdmin.Configurada();
+        Func<string, IdentidadWindows> dev = delegate (string n)
+        {
+            return AccesoDesarrolloLocal.IdentidadPara(IdentidadWindows.Desde(null, false), n);
+        };
+        // 1) la cuenta de la whitelist entra en el entorno de desarrollo
+        Check("W1 entorno + SORIANA\\t_andresvr: ADM", "ADM", AccesoDesarrolloLocal.RolPara(true, dev(YO), lista, null));
+        Check("W1 mayusculas/espacios no importan", "ADM", AccesoDesarrolloLocal.RolPara(true, dev(@"  soriana\T_ANDRESVR "), lista, ""));
+        Check("W1 ADMIN_DEV_ROL=MOD: MOD", "MOD", AccesoDesarrolloLocal.RolPara(true, dev(YO), lista, "mod"));
+        // 2) otra cuenta local NO entra sola
+        foreach (var otra in new[] { @"SORIANA\omaralus", @"SORIANA\danielalc", @"SORIANA\t_otro", @"OTRO\t_andresvr", "t_andresvr", "", null })
+            Check("W2 entorno + " + (otra == null ? "(sin variable)" : otra.Length == 0 ? "(vacia)" : otra) + ": sin atajo",
+                  null, AccesoDesarrolloLocal.RolPara(true, dev(otra), lista, "ADM"));
+        Check("W2 ADMIN_DEV_ROL raro (VIEWER/ADMIN): sin atajo", "|",
+              AccesoDesarrolloLocal.RolPara(true, dev(YO), lista, "VIEWER") + "|" + AccesoDesarrolloLocal.RolPara(true, dev(YO), lista, "ADMIN"));
+        Check("W2 sin whitelist: sin atajo", null, AccesoDesarrolloLocal.RolPara(true, dev(YO), null, null));
+        var real = AccesoDesarrolloLocal.IdentidadPara(IdentidadWindows.Desde(@"SORIANA\t_otro", true), YO);
+        Check("W2 identidad real autenticada manda sobre la declarada", @"soriana\t_otro", real.Dominio + "\\" + real.Usuario);
+        Check("W2 real de otra cuenta + variable de la whitelist: sin atajo", null, AccesoDesarrolloLocal.RolPara(true, real, lista, null));
+        // 3) fuera del entorno (VM, produccion, remoto, Release) la whitelist no da nada
+        var fueras = new[] {
+            new object[] { true,  false, EXP,    "remoto" },
+            new object[] { false, true,  EXP,    "Release" },
+            new object[] { true,  true,  "w3wp", "IIS de la VM (w3wp)" },
+            new object[] { false, false, "w3wp", "produccion" } };
+        foreach (var e in fueras)
+            Check("W3 " + e[3] + " + SORIANA\\t_andresvr: sin atajo", null,
+                  AccesoDesarrolloLocal.RolPara(AccesoDesarrolloLocal.Evaluar((bool)e[0], (bool)e[1], (string)e[2]), dev(YO), lista, "ADM"));
+        // 3b) por HTTP, fuera del entorno local: la cuenta de la whitelist sin
+        // fila en dbo.UsuariosAdmin NO entra (la base manda); con fila MOD
+        // entra con SU rol, no con el de desarrollo.
+        AccesoAdmin.FuenteRoles = new FuenteFalsa();
+        cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
+        Check("W3 whitelist sin fila en UsuariosAdmin: admin_sesion no autoriza", "{\"autorizado\":false}", cuerpo);
+        foreach (var h in protegidos)
+        {
+            cuerpo = Correr(h, "admin_iniciativas_x.ashx", "categoria=/A", YO, out estado);
+            Check("W3 whitelist sin fila: " + h.GetType().Name + " 403 AccesoDenegado", "403|True",
+                  estado + "|" + cuerpo.Contains("AccesoDenegado"));
+        }
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
+        cuerpo = Correr(new AdminCorreos(), "admin_correos.ashx", null, YO, out estado);
+        Check("W3 whitelist con fila MOD: el rol de la base manda (403 RolInsuficiente)", "403|True",
+              estado + "|" + cuerpo.Contains("RolInsuficiente"));
+        AccesoAdmin.FuenteRoles = fuente;
+        // 4) lo del cliente no cuenta: ningun header/query/cookie activa nada
+        var fuenteRol = File.ReadAllText(Path.Combine("App_Code", "AccesoDesarrolloLocal.cs")).Replace("\r\n", "\n");
+        Check("W4 la regla no lee host/URL/query/cookie/header/form", false,
+              System.Text.RegularExpressions.Regex.IsMatch(fuenteRol,
+                  @"\.(Url|Host|QueryString|Cookies|Headers|Form|Params|ServerVariables|UserAgent|UserHostAddress)\b"));
+        Check("W4 la cuenta declarada sale del entorno del PROCESO", true,
+              fuenteRol.Contains("Environment.GetEnvironmentVariable(variable)") && fuenteRol.Contains("Entorno(VariableIdentidad)"));
+
         // Este proceso no es IIS Express y el request armado no es local: en
         // cualquier build (DEBUG o no) los handlers siguen la regla normal.
         Console.WriteLine("      (build de App_Code con DEBUG = " + AccesoDesarrolloLocal.CompiladoEnDebug + ")");
@@ -439,8 +516,15 @@ public static class AccesoAdminHttpSmoke
         var fuenteDev = File.ReadAllText(Path.Combine("App_Code", "AccesoDesarrolloLocal.cs")).Replace("\r\n", "\n");
         var activo = fuenteDev.Substring(fuenteDev.IndexOf("public static bool Activo("));
         activo = activo.Substring(0, activo.IndexOf("\n    }") + 6);
-        Check("L7 Activo: #if DEBUG ... #else return false", true,
-              activo.Contains("#if DEBUG") && activo.Contains("#else\n        return false;\n#endif"));
+        Check("L7 Activo = Rol(ctx) != null", true, activo.Contains("return Rol(ctx) != null;"));
+        var rolDev = fuenteDev.Substring(fuenteDev.IndexOf("public static string Rol(HttpContext ctx)"));
+        rolDev = rolDev.Substring(0, rolDev.IndexOf("\n    }") + 6);
+        Check("L7 Rol: #if DEBUG ... #else return null", true,
+              rolDev.Contains("#if DEBUG") && rolDev.Contains("#else\n        return null;\n#endif"));
+        Check("L7 Rol: entorno primero, despues la whitelist", true,
+              rolDev.IndexOf("Evaluar(true, local, Proceso.Value)") > 0 &&
+              rolDev.IndexOf("Evaluar(true, local, Proceso.Value)") < rolDev.IndexOf("AccesoAdmin.Configurada()"));
+        activo = rolDev;
         Check("L7 sin host/URL/query/cookie/header en la regla", false,
               System.Text.RegularExpressions.Regex.IsMatch(activo, @"Url|Host|QueryString|Cookies|Headers|Form|Params|ServerVariables"));
 

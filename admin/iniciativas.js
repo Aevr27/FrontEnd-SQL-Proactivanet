@@ -457,16 +457,19 @@ window.Iniciativas = (function () {
     iniciativas: { panel: 'panel-iniciativas', pestana: 'tab-iniciativas' },
     solicitudes: { panel: 'panel-solicitudes', pestana: 'tab-solicitudes' },
     nueva:       { panel: 'panel-nueva',       pestana: 'tab-iniciativas' },
-    // Alta directa de ADM (admin/iniciativa-admin.js): otra accion de
-    // Iniciativas, separada de Nueva solicitud. Solo con rol ADM.
-    crear:       { panel: 'panel-crear-admin', pestana: 'tab-iniciativas' }
+    // Administracion (solo ADM): alta directa, dueños y alta de categorias.
+    administracion: { panel: 'panel-administracion', pestana: 'tab-administracion' },
+    // Alta directa de ADM (admin/iniciativa-admin.js): accion de
+    // Administracion, separada de Nueva solicitud. Solo con rol ADM.
+    crear:       { panel: 'panel-crear-admin', pestana: 'tab-administracion' }
   };
-  var VISTAS_SOLO_ADM = { crear: true };
+  var VISTAS_SOLO_ADM = { administracion: true, crear: true };
   // Nueva solicitud: ADM o MOD. Sin rol resuelto, no abre (falla cerrado).
   var VISTAS_ADM_MOD = { nueva: true };
   var PESTANAS = [
     { id: 'tab-iniciativas', vista: 'iniciativas' },
-    { id: 'tab-solicitudes', vista: 'solicitudes' }
+    { id: 'tab-solicitudes', vista: 'solicitudes' },
+    { id: 'tab-administracion', vista: 'administracion', soloAdm: true }
   ];
 
   var SELECTS = [
@@ -521,6 +524,8 @@ window.Iniciativas = (function () {
       this.menu = null;
       this.registro = null;  // VistaRegistro (admin/registro-iniciativas.js)
       this.crearAdmin = null; // VistaCrearAdmin (admin/iniciativa-admin.js)
+      this.duenos = null;     // VistaDuenos (admin/categorias-duenos.js), perezosa
+      this.altaCategoria = null; // VistaAlta (admin/categorias-alta.js), perezosa
       // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
       // sin rol no se abre nada de ADM.
       this.rol = null;
@@ -531,6 +536,7 @@ window.Iniciativas = (function () {
     fijarRol(rol) {
       if (this.denegada) return;
       this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
+      this.aplicarPestanas();
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(this.rol);
       if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') || (VISTAS_ADM_MOD[this.vista] && !this.rol)) {
         this.mostrarVista('iniciativas');
@@ -555,6 +561,18 @@ window.Iniciativas = (function () {
 
     $(id) { return this.doc.getElementById(id); }
 
+    // Las pestañas de solo ADM se ven solo con rol ADM (ademas de
+    // data-solo-adm de SesionAdmin: aqui manda el rol que fijo la pagina).
+    pestanaVisible(p) { return !p.soloAdm || this.rol === 'ADM'; }
+
+    aplicarPestanas() {
+      var self = this;
+      PESTANAS.forEach(function (p) {
+        var t = self.$(p.id);
+        if (t) t.hidden = !self.pestanaVisible(p);
+      });
+    }
+
     // ---- arranque ----
     iniciar() {
       var self = this;
@@ -563,6 +581,9 @@ window.Iniciativas = (function () {
       // Nueva solicitud: un fallo de uno no bloquea al otro.
       this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
       if (window.IniciativaAdmin) this.crearAdmin = new window.IniciativaAdmin.VistaCrearAdmin(this.doc);
+      if (window.CategoriasDuenos) this.duenos = new window.CategoriasDuenos.VistaDuenos(this.doc);
+      if (window.CategoriasAlta) this.altaCategoria = new window.CategoriasAlta.VistaAlta(this.doc);
+      this.aplicarPestanas();
       this.cablearPestanas();
       this.cablearAcciones();
       this.mostrarVista(this.vista);
@@ -580,7 +601,9 @@ window.Iniciativas = (function () {
     mostrarVista(nombre) {
       var self = this;
       if (!VISTAS[nombre] || this.denegada) return;
-      if (VISTAS_SOLO_ADM[nombre] && (this.rol !== 'ADM' || !this.crearAdmin)) return;
+      if (VISTAS_SOLO_ADM[nombre] && this.rol !== 'ADM') return;
+      // El alta necesita su modulo (admin/iniciativa-admin.js); Administracion no.
+      if (nombre === 'crear' && !this.crearAdmin) return;
       if (VISTAS_ADM_MOD[nombre] && this.rol !== 'ADM' && this.rol !== 'MOD') return;
       this.vista = nombre;
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = k !== nombre; });
@@ -592,6 +615,9 @@ window.Iniciativas = (function () {
         t.tabIndex = activa ? 0 : -1;
       });
       if (nombre !== 'iniciativas' && this.registro) this.registro.cerrarDetalle();
+      // El catalogo de dueños se pide la primera vez que se abre la pestaña.
+      if (nombre === 'administracion' && this.duenos) this.duenos.abrir();
+      if (nombre === 'administracion' && this.altaCategoria) this.altaCategoria.abrir();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();
     }
@@ -613,7 +639,12 @@ window.Iniciativas = (function () {
         t.addEventListener('keydown', function (e) {
           var paso = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
           if (!paso) return;
-          var sig = PESTANAS[(i + paso + PESTANAS.length) % PESTANAS.length];
+          // Salta las pestañas ocultas (Administracion sin rol ADM).
+          var n = i, sig = p;
+          do {
+            n = (n + paso + PESTANAS.length) % PESTANAS.length;
+            sig = PESTANAS[n];
+          } while (sig !== p && !self.pestanaVisible(sig));
           self.mostrarVista(sig.vista);
           enfocar(self.$(sig.id));
         });
@@ -636,7 +667,7 @@ window.Iniciativas = (function () {
         if (self.vista === 'crear') enfocar(self.$('admCrearTitulo'));
       });
       this.$('btnVolverAdmin').addEventListener('click', function () {
-        self.mostrarVista('iniciativas');
+        self.mostrarVista('administracion');
         enfocar(self.$('btnCrearAdmin'));
       });
     }

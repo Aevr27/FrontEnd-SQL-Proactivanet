@@ -3,9 +3,10 @@
 // REGLA VIGENTE (2026-10-09): la PUERTA es el rol de dbo.UsuariosAdmin
 // (RolAdmin): ADM o MOD entran, todo lo demas (VIEWER, sin fila, valor
 // raro, consulta fallida, sin identidad Windows) no. La whitelist de abajo
-// YA NO es puerta: EstaAutorizado/Configurada siguen existiendo pero
-// PuedeEntrar no las llama. En local manda el atajo AccesoDesarrolloLocal,
-// igual que antes. Lo que sigue describe la whitelist como referencia.
+// YA NO es puerta en el sitio desplegado: PuedeEntrar no la llama. Solo la
+// usa el atajo de desarrollo local (AccesoDesarrolloLocal: DEBUG + loopback
+// + IIS Express + la cuenta de ADMIN_DEV_IDENTIDAD en la whitelist). Lo que
+// sigue describe la whitelist como referencia.
 //
 // QUIEN ENTRA
 // -----------
@@ -100,7 +101,7 @@ public static class AccesoAdmin
 
     // TODO(TEMPORAL): la lista es la de AdminWhitelistTemporal y NO la de
     // Web.config (AdminAllowedUsers se ignora). Desde 2026-10-09 NO decide
-    // la entrada (PuedeEntrar ya no la usa); se conserva sin cambios.
+    // la entrada en el sitio desplegado; solo la lee AccesoDesarrolloLocal.
     public static ListaAutorizados Configurada()
     {
         return ListaAutorizados.Leer(AdminWhitelistTemporal.Cuentas);
@@ -112,8 +113,8 @@ public static class AccesoAdmin
     }
 
     // La entrada a Admin para el request en curso: el atajo de desarrollo
-    // local (AccesoDesarrolloLocal: DEBUG + request local + IIS Express),
-    // SIN CAMBIOS; o la identidad Windows real con rol ADM o MOD en
+    // local (AccesoDesarrolloLocal: DEBUG + request local + IIS Express +
+    // cuenta de desarrollo en la whitelist); o la identidad Windows real con rol ADM o MOD en
     // dbo.UsuariosAdmin. El rol de la base manda: la whitelist temporal ya
     // no deja fuera a un ADM/MOD ni deja entrar a nadie por su nombre.
     // VIEWER (sin fila, valor raro, error, anonimo) no entra.
@@ -152,7 +153,8 @@ public static class AccesoAdmin
     // autenticada no consulta la base: VIEWER (RolAdmin.Para).
     public static string Rol(HttpContext context)
     {
-        if (AccesoDesarrolloLocal.Activo(context)) return RolAdmin.Adm;   // SOLO DESARROLLO LOCAL
+        var local = AccesoDesarrolloLocal.Rol(context);   // SOLO DESARROLLO LOCAL (whitelist)
+        if (local != null) return local;
         var guardado = context == null ? null : context.Items[ClaveRolRequest] as string;
         if (guardado != null) return guardado;
         var rol = RolAdmin.Para(IdentidadWindows.DesdeContexto(context), FuenteRoles,

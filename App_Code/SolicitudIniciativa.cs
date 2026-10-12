@@ -262,6 +262,15 @@ public sealed class CatalogoSolicitud
     public bool TieneSo(string so) { return _asignaciones.Exists(a => a.So == so); }
     public bool TieneCategoria(string c) { return _asignaciones.Exists(a => a.Categoria == c); }
 
+    // Las filas que cumplen lo elegido, con cada nivel OPCIONAL (null = sin
+    // elegir), como la cascada en modo 'filtro'. La usa el alta directa de
+    // ADM (ValidadorGestionAdmin), que acepta la cascada incompleta.
+    public List<Asignacion> Filas(string po, string so, string categoria)
+    {
+        return _asignaciones.FindAll(a => (po == null || a.Po == po) && (so == null || a.So == so)
+                                          && (categoria == null || a.Categoria == categoria));
+    }
+
     // La fila que casa EXACTAMENTE con lo elegido en la cascada, o null. Es
     // el mismo filtrado progresivo del navegador: PO, SO y Categoria tienen
     // que salir juntos de una fila vigente (no hay jerarquia que validar).

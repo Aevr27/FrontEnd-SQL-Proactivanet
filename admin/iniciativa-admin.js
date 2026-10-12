@@ -60,8 +60,12 @@ window.IniciativaAdmin = (function () {
 
   // Texto fijo de la marca de prototipo: se repite en cada resultado para
   // que nunca se lea como un guardado.
-  var AVISO_PROTOTIPO = 'Prototipo: no se guardó nada y no se generó código. ' +
-    'La persistencia se conectará cuando el contrato de base esté aprobado.';
+  var AVISO_PROTOTIPO = 'No se guardó nada y no se generó código: la persistencia no está habilitada ' +
+    '(contrato de base pendiente).';
+
+  // Validacion en el servidor de crear y modificar (solo ADM). NO guarda:
+  // con datos validos responde 501 PersistenciaNoHabilitada.
+  var URL_GESTION = '../handlers/admin_iniciativas_gestion.ashx';
 
   // ---------------------------------------------------------------------
   // Incompleta
@@ -129,6 +133,62 @@ window.IniciativaAdmin = (function () {
   };
 
   // ---------------------------------------------------------------------
+  // RespuestaGestion: lo que contesto admin_iniciativas_gestion.ashx
+  // ---------------------------------------------------------------------
+  // Nunca hay un estado de exito: el handler no guarda. Cinco estados
+  // excluyentes, para no confundir un dato invalido con la persistencia
+  // apagada ni con un fallo de red:
+  //   no_habilitada  501: valida en el servidor, NO guardada
+  //   invalida       422: errores por campo
+  //   denegado       403: sin rol ADM (o sin acceso)
+  //   no_disponible  503: no se pudo leer el catalogo; no se sabe si es valida
+  //   error          cualquier otra cosa (red, 500, respuesta ilegible)
+  var RespuestaGestion = {
+    desde: function (estado, json) {
+      json = json && typeof json === 'object' ? json : null;
+      var tipo = json && json.tipo;
+      var e = estado === 501 && tipo === 'PersistenciaNoHabilitada' && json.valida === true && json.guardada === false ? 'no_habilitada'
+        : estado === 422 && json && json.valida === false ? 'invalida'
+        : estado === 403 ? 'denegado'
+        : estado === 503 ? 'no_disponible'
+        : 'error';
+      return {
+        estado: e,
+        guardada: false,
+        errores: e === 'invalida' && Array.isArray(json.errores) ? json.errores : [],
+        advertencias: json && Array.isArray(json.advertencias) ? json.advertencias : [],
+        cambios: json && Array.isArray(json.cambios) ? json.cambios : [],
+        faltantes: json && Array.isArray(json.faltantes) ? json.faltantes : [],
+        bloqueos: json && Array.isArray(json.bloqueos) ? json.bloqueos : [],
+        mensaje: (json && (json.persistencia_motivo || json.error)) ||
+          (estado ? 'El servidor respondió ' + estado + '.' : 'No se pudo contactar al servidor.')
+      };
+    },
+    titulo: function (r) {
+      return {
+        no_habilitada: 'Validado en el servidor. No se guardó: la persistencia no está habilitada.',
+        invalida: 'El servidor rechazó los datos:',
+        denegado: 'Sin permiso: solo un administrador (ADM) puede hacerlo.',
+        no_disponible: 'No se pudo validar en el servidor (catálogo no disponible). No se guardó nada.',
+        error: 'No se pudo completar la validación. No se guardó nada.'
+      }[r.estado];
+    }
+  };
+
+  // POST multipart al handler; pares: [[clave, valor], ...] (valor puede
+  // ser un File). pedir: fetch por omision.
+  function enviarGestion(pares, pedir) {
+    var datos = new FormData();
+    pares.forEach(function (p) { datos.append(p[0], p[1]); });
+    pedir = pedir || function (url, op) { return fetch(url, op); };
+    return Promise.resolve()
+      .then(function () { return pedir(URL_GESTION, { method: 'POST', body: datos, cache: 'no-store' }); })
+      .then(function (r) {
+        return r.json().catch(function () { return null; }).then(function (json) { return RespuestaGestion.desde(r.status, json); });
+      }, function () { return RespuestaGestion.desde(0, null); });
+  }
+
+  // ---------------------------------------------------------------------
   // BorradorAdmin: alta directa de ADM, sin DOM
   // ---------------------------------------------------------------------
   // catalogo: CatalogoIniciativas de admin/iniciativas.js (tipos, nombres,
@@ -193,6 +253,15 @@ window.IniciativaAdmin = (function () {
     }
 
     faltantes() { return Incompleta.faltantes(this.datos(), this.esProblem()); }
+
+    // Lo que viaja al servidor (accion=crear). El archivo del RCA lo pone la
+    // vista: aqui solo hay su nombre.
+    paraEnviar() {
+      var v = this.valores, sel = this.cascada.seleccion;
+      return [['accion', 'crear'], ['tipo', this.tipo], ['po', sel[0] || ''], ['so', sel[1] || ''],
+        ['categoria', sel[2] || ''], ['titulo', v.titulo], ['descripcion', v.descripcion],
+        ['observaciones', v.observaciones], ['volumetria', String(v.volumetria).trim()], ['pct', String(v.pct).trim()]];
+    }
 
     // Lo que veria quien revisa el borrador. NO es un guardado.
     revisar() {
@@ -302,6 +371,19 @@ window.IniciativaAdmin = (function () {
       return salida;
     }
 
+    // Lo que viaja al servidor (accion=modificar): SOLO lo que cambio; el
+    // servidor vuelve a comparar contra la iniciativa actual.
+    paraEnviar() {
+      var self = this, pares = [['accion', 'modificar'], ['folio', this.iniciativa.folio]];
+      ['titulo', 'descripcion', 'observaciones'].forEach(function (k) {
+        if (self.valores[k] !== self.original[k]) pares.push([k, self.valores[k]]);
+      });
+      this.valores.pct.forEach(function (p, n) {
+        if (p.valor !== self.original.pct[n].valor) pares.push(['pct_categoria', p.categoria], ['pct_valor', p.valor]);
+      });
+      return pares;
+    }
+
     erroresFormato() {
       var errores = [];
       this.valores.pct.forEach(function (p) {
@@ -405,6 +487,28 @@ window.IniciativaAdmin = (function () {
     return partes.join('');
   }
 
+  // Respuesta del servidor (RespuestaGestion). Clase 'aviso' o 'mal',
+  // NUNCA 'ok': nada se guardo.
+  function claseRespuesta(r) { return r.estado === 'no_habilitada' ? 'aviso' : 'mal'; }
+
+  function htmlRespuesta(r) {
+    var lista = function (xs, f) { return xs.length ? '<ul>' + xs.map(f).join('') + '</ul>' : ''; };
+    var texto = function (v) { return v === '' || v === null || v === undefined ? '(vacío)' : String(v); };
+    var partes = ['<strong class="ini-prototipo-marca">' + Escape.html(RespuestaGestion.titulo(r)) + '</strong>'];
+    partes.push(lista(r.errores, function (e) { return '<li>' + Escape.html(e.mensaje) + '</li>'; }));
+    if (r.estado === 'no_habilitada') {
+      if (r.cambios.length) {
+        partes.push('<p>Cambios validados (no guardados):</p>' + lista(r.cambios, function (c) {
+          return '<li>' + Escape.html(c.rotulo) + ': ' + Escape.html(texto(c.anterior)) + ' → ' + Escape.html(texto(c.nuevo)) + '</li>';
+        }));
+      }
+      partes.push(r.faltantes.length ? htmlFaltantes(r.faltantes, 'Según el servidor.') : '<p>Sin datos faltantes.</p>');
+    }
+    partes.push(lista(r.advertencias, function (a) { return '<li>' + Escape.html(a) + '</li>'; }));
+    if (r.estado !== 'invalida') partes.push('<p class="ini-prototipo-aviso">' + Escape.html(r.mensaje) + '</p>');
+    return partes.join('');
+  }
+
   // Formulario de edicion dentro del detalle del registro.
   // contexto: { tipo } (nombre del tipo, del catalogo del registro).
   function htmlEdicion(ed, contexto) {
@@ -433,8 +537,8 @@ window.IniciativaAdmin = (function () {
       (i.estado ? ' · ' + Escape.html(i.estado) : '') + ' (solo lectura)</p>';
     var legado = ed.notasLegado().map(function (n) { return '<p class="ini-nota">' + Escape.html(n) + '</p>'; }).join('');
     return '<h4>Modificar iniciativa</h4>' +
-      '<p class="ini-prototipo-aviso">Prototipo: los cambios se revisan aquí pero no se guardan. ' +
-        'Además, mientras el Excel siga cargando, la carga reemplazaría estos campos.</p>' +
+      '<p class="ini-prototipo-aviso">Guardar valida en el servidor, pero la persistencia no está habilitada: ' +
+        'no se guarda nada todavía. Además, mientras el Excel siga cargando, la carga reemplazaría estos campos.</p>' +
       ctx + legado +
       htmlFaltantes(ed.faltantesOriginales(), 'Ya faltaba antes de modificar.') +
       '<div class="ini-cambio-campos">' + editables.map(control).join('') + pct + '</div>' +
@@ -447,10 +551,10 @@ window.IniciativaAdmin = (function () {
       '<div class="ini-cambio-msg" id="regEdMsg" role="status" aria-live="polite"></div>' +
       '<div class="ini-cambio-pie">' +
         '<button type="button" class="btn chico" data-accion="edicion-revisar">Revisar cambios</button> ' +
-        '<button type="button" class="btn chico" disabled aria-describedby="regEdGuardarNota">Guardar</button> ' +
+        '<button type="button" class="btn chico" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">Guardar</button> ' +
         '<button type="button" class="btn linea chico" data-accion="edicion-cancelar">Cancelar</button>' +
       '</div>' +
-      '<small class="ini-sub" id="regEdGuardarNota">Guardar se habilitará con la persistencia aprobada.</small>';
+      '<small class="ini-sub" id="regEdGuardarNota">Valida en el servidor (solo ADM); no guarda mientras la persistencia no esté habilitada.</small>';
   }
 
   // Vista previa en vivo de "Modificar": que cambia y que faltantes
@@ -481,9 +585,13 @@ window.IniciativaAdmin = (function () {
   var CAMPOS_CREAR = ['titulo', 'descripcion', 'observaciones', 'volumetria', 'pct'];
 
   class VistaCrearAdmin {
-    constructor(doc) {
+    // pedir: fetch por omision; las pruebas pasan uno propio.
+    constructor(doc, pedir) {
       this.doc = doc;
+      this.pedir = pedir || null;
       this.borrador = null;
+      this.archivoRca = null;  // el File elegido: viaja al servidor, que no lo guarda
+      this.enviando = false;
       this.cableado = false;
     }
 
@@ -523,10 +631,12 @@ window.IniciativaAdmin = (function () {
       this.$('admRca').addEventListener('change', function (e) {
         if (!self.borrador) return;
         var a = e.target && e.target.files;
+        self.archivoRca = a && a.length && a[0].size > 0 ? a[0] : null;
         self.borrador.elegirRca(a && a.length ? a[0] : null);
         self.pintarFaltantes();
       });
       this.$('admRevisar').addEventListener('click', function () { self.revisar(); });
+      this.$('admGuardar').addEventListener('click', function () { self.guardar(); });
     }
 
     pintar() {
@@ -574,10 +684,38 @@ window.IniciativaAdmin = (function () {
       caja.innerHTML = htmlRevision(r, r.listo ? 'Borrador revisado, no guardado.' : 'Corrige el borrador:');
       return r;
     }
+
+    // Valida en el servidor. Lo que se ve es SIEMPRE la respuesta real; si
+    // el borrador ya tiene errores locales, no se envia.
+    guardar() {
+      if (!this.borrador || this.enviando) return Promise.resolve(null);
+      var local = this.revisar();
+      if (!local.listo) return Promise.resolve(null);
+      var self = this, boton = this.$('admGuardar'), caja = this.$('admResultado');
+      var pares = this.borrador.paraEnviar();
+      if (this.archivoRca) pares.push(['rca', this.archivoRca]);
+      this.enviando = true;
+      boton.disabled = true;
+      caja.hidden = false;
+      caja.classList.remove('ok', 'mal', 'aviso');
+      caja.innerHTML = '<span>Validando en el servidor…</span>';
+      return enviarGestion(pares, this.pedir).then(function (r) {
+        caja.classList.add(claseRespuesta(r));
+        caja.innerHTML = htmlRespuesta(r);
+        self.enviando = false;
+        boton.disabled = false;
+        return r;
+      });
+    }
   }
 
   return {
     AVISO_PROTOTIPO: AVISO_PROTOTIPO,
+    URL_GESTION: URL_GESTION,
+    RespuestaGestion: RespuestaGestion,
+    enviarGestion: enviarGestion,
+    claseRespuesta: claseRespuesta,
+    htmlRespuesta: htmlRespuesta,
     CAMPOS_INCOMPLETA: CAMPOS_INCOMPLETA,
     CAMPOS_EDICION: CAMPOS_EDICION,
     Incompleta: Incompleta,

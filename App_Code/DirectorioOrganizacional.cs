@@ -280,6 +280,17 @@ public sealed class DirectorioOrganizacional
         return salida;
     }
 
+    // La fila de la que hereda un N2 de ese C1 lo que no tiene capturado
+    // (la primera de su C1, ver LeerDuenos), o null. Es la misma que usa
+    // Resolver; solo se expone para que Admin diga DE DONDE sale un dueño
+    // heredado. No cambia ninguna regla.
+    public Dueno FuenteDeC1(string c1)
+    {
+        Dueno d;
+        c1 = Normaliza(c1);
+        return c1 != null && _porC1.TryGetValue(c1, out d) ? d : null;
+    }
+
     // La fila de una categoria N2 capturada, o null.
     public Dueno Categoria(string n2)
     {

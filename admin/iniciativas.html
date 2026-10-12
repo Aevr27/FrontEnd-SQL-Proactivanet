@@ -180,6 +180,9 @@
   <nav class="ini-tabs" id="iniTabs" role="tablist" aria-label="Secciones">
     <button type="button" class="ini-tab activa" role="tab" id="tab-iniciativas" aria-controls="panel-iniciativas" aria-selected="true">Iniciativas</button>
     <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1">Solicitudes</button>
+    <!-- Solo ADM (data-solo-adm y PaginaIniciativas.fijarRol). Solo UX: los
+         handlers de escritura de ADM exigen AccesoAdmin.ExigirAdm. -->
+    <button type="button" class="ini-tab" role="tab" id="tab-administracion" aria-controls="panel-administracion" aria-selected="false" tabindex="-1" data-solo-adm hidden>Administración</button>
   </nav>
 
   <!-- Vista de inicio: el registro de iniciativas existentes y la accion
@@ -198,15 +201,6 @@
       <button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-admin hidden>
         <span class="ini-cta-mas" aria-hidden="true">+</span>
         <span>Solicitar una iniciativa</span>
-      </button>
-      <!-- Alta directa de ADM (admin/iniciativa-admin.js), SEPARADA de la
-           solicitud: acepta cualquier tipo con datos faltantes. Prototipo:
-           no guarda. Oculto salvo rol ADM (solo UX). Se distingue de la
-           solicitud por el estilo de linea y por el title. -->
-      <button type="button" class="btn linea ini-cta" id="btnCrearAdmin" data-solo-adm hidden
-              title="Creación directa (ADM): sin solicitud ni aprobación">
-        <span class="ini-cta-mas" aria-hidden="true">+</span>
-        <span>Crear iniciativa</span>
       </button>
     </div>
 
@@ -351,6 +345,108 @@
     </div>
   </section>
 
+  <!-- Administracion (solo ADM): gestion directa, separada del flujo de
+       solicitud. Tres entradas: alta directa de iniciativas (abre
+       panel-crear-admin), dueños de categoria (admin/categorias-duenos.js,
+       carga perezosa al abrir la pestaña) y alta de categorias en
+       Proactivanet (admin/categorias-alta.js, sin llamada externa). -->
+  <section class="ini-panel card" role="tabpanel" id="panel-administracion" aria-labelledby="tab-administracion" hidden>
+    <div class="ini-vista-cab">
+      <div class="ini-vista-titulo">
+        <h2>Administración</h2>
+        <p class="ini-vista-sub">Gestión directa de iniciativas y categorías (solo ADM).</p>
+      </div>
+    </div>
+
+    <div class="ini-adm-secciones">
+      <section class="ini-adm-seccion" aria-labelledby="admSecCrear">
+        <h3 id="admSecCrear">Crear iniciativa</h3>
+        <p class="ini-nota">Alta directa, sin solicitud ni aprobación. Acepta datos incompletos: lo que falte se marca <b>Incompleta</b>.</p>
+        <!-- Alta directa de ADM (admin/iniciativa-admin.js), SEPARADA de la
+             solicitud. Oculto salvo rol ADM (solo UX). -->
+        <button type="button" class="btn ini-cta" id="btnCrearAdmin" data-solo-adm hidden
+                title="Creación directa (ADM): sin solicitud ni aprobación">
+          <span class="ini-cta-mas" aria-hidden="true">+</span>
+          <span>Crear iniciativa</span>
+        </button>
+      </section>
+    </div>
+
+    <!-- Alta de categoria en Proactivanet (admin/categorias-alta.js): valida
+         contra el espejo local y muestra el cuerpo de POST /api/Categories
+         que se mandaria. NO llama a Proactivanet. No es el mapeo de dueños. -->
+    <section class="ini-adm-bloque" id="caSeccion" aria-labelledby="caTitulo">
+      <div class="ini-lista-cab">
+        <h3 class="ini-lista-titulo" id="caTitulo">Alta de categoría en Proactivanet</h3>
+      </div>
+      <p class="ini-prototipo-aviso" role="note"><strong>Sin envío a Proactivanet.</strong> «Validar alta» revisa contra el catálogo local y muestra lo que se enviaría; no crea la categoría. Asignar dueños es otra operación (abajo).</p>
+      <div class="ini-cambio-campos">
+        <div class="campo"><label for="ca-padre">Categoría padre (ruta)</label>
+          <input type="text" id="ca-padre" list="caPadres" autocomplete="off" spellcheck="false" placeholder="/C1/C2 · vacío = C1 nuevo">
+          <datalist id="caPadres"></datalist>
+          <small class="ini-sub" id="caRutasEstado"></small></div>
+        <div class="campo"><label for="ca-nombre">Nombre <span class="ini-obligatorio">obligatorio</span></label>
+          <input type="text" id="ca-nombre" autocomplete="off"></div>
+        <div class="campo"><label for="ca-descripcion">Descripción</label><input type="text" id="ca-descripcion" autocomplete="off"></div>
+        <div class="campo"><label for="ca-orden">Orden</label><input type="number" id="ca-orden" step="1" inputmode="numeric"></div>
+      </div>
+      <fieldset class="ini-ca-aplica"><legend>Aplica a</legend>
+        <label><input type="checkbox" id="ca-incidentes"> Incidentes</label>
+        <label><input type="checkbox" id="ca-problemas"> Problemas</label>
+        <label><input type="checkbox" id="ca-cambios"> Cambios (RFC)</label>
+        <label><input type="checkbox" id="ca-kb"> Base de conocimiento</label>
+      </fieldset>
+      <p class="ini-nota">Ruta resultante: <output id="caRuta">—</output></p>
+      <div class="ini-acciones">
+        <button type="button" class="btn" id="caValidar">Validar alta</button>
+        <span class="ini-hint">No se envía nada a Proactivanet.</span>
+      </div>
+      <div class="ini-resultado" id="caResultado" role="status" aria-live="polite" hidden></div>
+    </section>
+
+    <!-- Dueños de categoria (admin/categorias-duenos.js, VistaDuenos):
+         lectura de dbo.CatCategoriaDueno por ?duenos=1 y propuesta con
+         vista previa; Guardar deshabilitado hasta tener contrato. -->
+    <section class="ini-adm-bloque" id="cdSeccion" aria-labelledby="cdTitulo">
+      <div class="ini-lista-cab">
+        <h3 class="ini-lista-titulo" id="cdTitulo">Dueños de categoría</h3>
+        <span class="ini-lista-cuenta" id="cdCuenta" aria-live="polite"></span>
+      </div>
+      <p class="ini-estado" id="cdCargando" role="status" hidden>Cargando el catálogo de dueños…</p>
+      <div class="ini-error" id="cdError" role="alert" hidden>
+        <span><strong>No se pudo cargar el catálogo de dueños.</strong> <span id="cdErrorTexto"></span></span>
+        <button type="button" class="btn" id="cdReintentar">Reintentar</button>
+      </div>
+      <div id="cdContenido" hidden>
+        <p class="ini-nota" id="cdResumen"></p>
+        <div class="filtros ini-filtros">
+          <div class="campo"><label for="cdFiltro">Mostrar</label><select id="cdFiltro"></select></div>
+          <div class="campo ini-buscar"><label for="cdBuscar">Buscar categoría, C1 o dueño</label>
+            <input type="search" id="cdBuscar" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="ini-vacio" id="cdVacio" hidden><strong>No hay categorías que coincidan.</strong></div>
+        <div class="ini-tabla-caja">
+          <table class="ini-tabla">
+            <caption class="ini-sr">Categorías N2 y sus dueños: propios, heredados del C1 o faltantes.</caption>
+            <thead><tr>
+              <th scope="col"><span class="ini-th">Categoría (N2)</span></th>
+              <th scope="col"><span class="ini-th">C1</span></th>
+              <th scope="col"><span class="ini-th">Product Owner</span></th>
+              <th scope="col"><span class="ini-th">Service Owner</span></th>
+              <th scope="col"><span class="ini-th">Director PO</span></th>
+              <th scope="col"><span class="ini-th">Hallazgos</span></th>
+            </tr></thead>
+            <tbody id="cdCuerpo"></tbody>
+          </table>
+        </div>
+        <div class="ini-cd-detalle" id="cdDetalle" role="region" aria-labelledby="cdDetTitulo" hidden>
+          <h4 id="cdDetTitulo"></h4>
+          <div id="cdDetCuerpo"></div>
+        </div>
+      </div>
+    </section>
+  </section>
+
   <!-- Accion de Iniciativas, no pestaña: la abre #btnSolicitar. -->
   <section class="ini-panel card" id="panel-nueva" aria-labelledby="iniNuevaTitulo" hidden>
     <div class="ini-panel-cab">
@@ -477,12 +573,12 @@
        falte se avisa como "Incompleta". No llama al servidor. -->
   <section class="ini-panel card" id="panel-crear-admin" aria-labelledby="admCrearTitulo" hidden>
     <div class="ini-panel-cab">
-      <button type="button" class="btn linea chico" id="btnVolverAdmin">← Volver a Iniciativas</button>
+      <button type="button" class="btn linea chico" id="btnVolverAdmin">← Volver a Administración</button>
       <h2 id="admCrearTitulo" tabindex="-1">Crear iniciativa</h2>
       <span class="ini-hint">Gestión directa · sin solicitud ni aprobación</span>
     </div>
 
-    <p class="ini-prototipo-aviso" role="note"><strong>Prototipo.</strong> Esta vista no guarda nada, no llama al servidor y no genera código. La persistencia se conectará cuando el contrato de base esté aprobado.</p>
+    <p class="ini-prototipo-aviso" role="note"><strong>Persistencia no habilitada.</strong> «Guardar iniciativa» valida en el servidor, pero no guarda nada ni genera código hasta que el contrato de base esté aprobado.</p>
 
     <div class="ini-form">
       <section class="ini-bloque ini-col-clasif" aria-labelledby="admCabClasif">
@@ -526,7 +622,7 @@
           <div class="ini-campo ini-campo-captura"><label for="adm-volumetria">Volumetría</label><input type="number" id="adm-volumetria" inputmode="numeric" min="0" step="1"></div>
           <div class="ini-campo ini-campo-captura"><label for="adm-pct">% Disminución de tickets vs categoría</label>
             <div class="ini-pct"><input type="number" id="adm-pct" inputmode="decimal" min="0" max="100" step="0.01"><span class="ini-pct-sufijo" aria-hidden="true">%</span></div>
-            <small class="ini-motivo">Sin tope de capacidad en esta vista: lo revisará la persistencia.</small>
+            <small class="ini-motivo">Sin tope en esta vista: al guardar, el servidor avisa si excede la capacidad de la categoría (no bloquea).</small>
           </div>
         </div>
       </section>
@@ -548,8 +644,8 @@
 
     <div class="ini-acciones">
       <button type="button" class="btn" id="admRevisar">Revisar borrador</button>
-      <button type="button" class="btn" id="admGuardar" disabled aria-describedby="admGuardarNota">Guardar iniciativa</button>
-      <span class="ini-hint" id="admGuardarNota">Guardar se habilitará con la persistencia aprobada.</span>
+      <button type="button" class="btn" id="admGuardar" aria-describedby="admGuardarNota">Guardar iniciativa</button>
+      <span class="ini-hint" id="admGuardarNota">Valida en el servidor; no guarda mientras la persistencia no esté habilitada.</span>
     </div>
     <div class="ini-resultado" id="admResultado" role="status" aria-live="polite" hidden></div>
   </section>
@@ -577,6 +673,8 @@
 <script src="../assets/js/globo-ayuda.js"></script>
 <script src="cascada-organizacional.js"></script>
 <script src="iniciativa-admin.js"></script>
+<script src="categorias-duenos.js"></script>
+<script src="categorias-alta.js"></script>
 <script src="registro-iniciativas.js"></script>
 <script src="iniciativas.js"></script>
 <script>

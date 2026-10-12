@@ -957,7 +957,8 @@ window.RegistroIniciativas = (function () {
       this.$('regDetCuerpo').addEventListener('change', function (e) {
         if (e.target && e.target.id === 'regCambioCampo') self.elegirCampoCambio(e.target.value);
       });
-      // Edicion de ADM (prototipo): solo actualiza el borrador en memoria.
+      // Edicion de ADM: actualiza el borrador en memoria; Guardar lo valida
+      // en el servidor (no guarda).
       this.$('regDetCuerpo').addEventListener('input', function (e) {
         var t = e.target, ed = self.edicion;
         if (!t || !t.getAttribute || !ed) return;
@@ -1490,6 +1491,7 @@ window.RegistroIniciativas = (function () {
       else if (accion === 'editar-admin') this.abrirEdicion(!this.edicion);
       else if (accion === 'edicion-cancelar') this.abrirEdicion(false);
       else if (accion === 'edicion-revisar') this.revisarEdicion();
+      else if (accion === 'edicion-guardar') this.guardarEdicion();
     }
 
     // ---- Modificar (ADM): PROTOTIPO, no guarda ----
@@ -1530,6 +1532,32 @@ window.RegistroIniciativas = (function () {
       msg.className = 'ini-cambio-msg ' + (r.listo ? 'listo' : 'error');
       msg.innerHTML = window.IniciativaAdmin.htmlRevision(r, r.listo ? 'Cambios revisados, no guardados.' : 'Corrige los cambios:');
       return r;
+    }
+
+    // Guardar: valida en el servidor (admin_iniciativas_gestion.ashx). No
+    // guarda: la respuesta real se pinta tal cual, nunca como exito. Sin
+    // cambios o con errores de formato locales no se envia.
+    guardarEdicion(pedir) {
+      var ed = this.edicion;
+      if (!ed || !this.puedeEditar() || this.edicionEnviando) return Promise.resolve(null);
+      var local = this.revisarEdicion();
+      if (!local.listo || !local.cambios.length) {
+        if (local.listo) this.$('regEdMsg').innerHTML = '<strong class="ini-prototipo-marca">Sin cambios: no hay nada que validar.</strong>';
+        return Promise.resolve(null);
+      }
+      var self = this, A = window.IniciativaAdmin, folio = this.abierta;
+      this.edicionEnviando = true;
+      this.$('regEdMsg').className = 'ini-cambio-msg';
+      this.$('regEdMsg').innerHTML = '<span>Validando en el servidor…</span>';
+      return A.enviarGestion(ed.paraEnviar(), pedir || function (url, op) { return fetch(url, op); }).then(function (r) {
+        self.edicionEnviando = false;
+        // El detalle pudo cerrarse o cambiar mientras tanto.
+        if (self.edicion !== ed || self.abierta !== folio) return r;
+        var caja = self.$('regEdMsg');
+        caja.className = 'ini-cambio-msg ' + (r.estado === 'no_habilitada' ? 'aviso' : 'error');
+        caja.innerHTML = A.htmlRespuesta(r);
+        return r;
+      });
     }
 
     // Botones de la cabecera del detalle. Modificar solo con rol ADM.

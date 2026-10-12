@@ -710,7 +710,7 @@ pruebas.push(function () {
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   var tabs = (html.match(/role="tab"[^>]*id="([^"]+)"/g) || []).map(function (m) { return m.replace(/.*id="/, '').replace('"', ''); });
-  Check('V6 solo dos pestañas', ['tab-iniciativas', 'tab-solicitudes'], tabs);
+  Check('V6 tres pestañas (Administracion solo ADM)', ['tab-iniciativas', 'tab-solicitudes', 'tab-administracion'], tabs);
   Check('V6 boton con rotulo explicito', true, /Solicitar una iniciativa/.test(html));
 });
 

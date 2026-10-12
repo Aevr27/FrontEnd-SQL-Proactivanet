@@ -11,17 +11,37 @@ REM    http://localhost:8081/                       tablero (dashboard.html)
 REM    http://localhost:8081/qa/qa.html             tablero de QA (suelto)
 REM
 REM  Admin -> Iniciativas en local (SOLO DESARROLLO): IIS Express no tiene
-REM  Autenticacion de Windows. Con <compilation debug="true"> en Web.config,
-REM  abriendo desde esta misma maquina, Admin trata el request como ADM sin
-REM  credenciales ni argumentos (App_Code/AccesoDesarrolloLocal.cs). En la VM
-REM  (IIS, w3wp.exe) eso no aplica.
+REM  Autenticacion de Windows. La cuenta de desarrollo va en
+REM  ADMIN_DEV_IDENTIDAD (segundo argumento; por omision SORIANA\t_andresvr)
+REM  y tiene que estar en App_Code/AdminWhitelistTemporal.cs. Ademas hace
+REM  falta <compilation debug="true"> en Web.config y abrir desde esta misma
+REM  maquina (App_Code/AccesoDesarrolloLocal.cs). Otra cuenta -> 403. En la
+REM  VM (IIS, w3wp.exe) nada de esto aplica.
+REM  Rol de desarrollo (tercer argumento, ADM o MOD; por omision ADM).
 REM
-REM    dev-local.cmd 8081   ->   http://localhost:8081/admin/iniciativas.html
+REM    dev-local.cmd 8081                          ->  t_andresvr como ADM
+REM    dev-local.cmd 8081 SORIANA\t_andresvr MOD   ->  probar lo de MOD
+REM    http://localhost:8081/admin/iniciativas.html
 REM ---------------------------------------------------------------------
 setlocal
 
 set "PUERTO=%~1"
 if "%PUERTO%"=="" set "PUERTO=8081"
+
+set "ADMIN_DEV_IDENTIDAD=%~2"
+if not defined ADMIN_DEV_IDENTIDAD set "ADMIN_DEV_IDENTIDAD=SORIANA\t_andresvr"
+
+REM  La cuenta tiene que traer DOMINIO\cuenta. Desde Git Bash, sin comillas,
+REM  bash se come la barra (SORIANAt_andresvr) y la aplicacion la descarta:
+REM  Admin da 403. Se corta aqui con el aviso.
+set "SIN_BARRA=%ADMIN_DEV_IDENTIDAD:\=%"
+if "%SIN_BARRA%"=="%ADMIN_DEV_IDENTIDAD%" goto :cuentaInvalida
+if "%ADMIN_DEV_IDENTIDAD:~0,1%"=="\" goto :cuentaInvalida
+if "%ADMIN_DEV_IDENTIDAD:~-1%"=="\" goto :cuentaInvalida
+
+set "ADMIN_DEV_ROL=%~3"
+if not defined ADMIN_DEV_ROL set "ADMIN_DEV_ROL=ADM"
+if /I not "%ADMIN_DEV_ROL%"=="ADM" if /I not "%ADMIN_DEV_ROL%"=="MOD" goto :rolInvalido
 
 REM  Si ya hay algo escuchando en el puerto (p. ej. un IIS Express de un
 REM  arranque anterior), el nuevo no arranca y sigue contestando el viejo,
@@ -52,11 +72,22 @@ set "RAIZ=%~dp0"
 if "%RAIZ:~-1%"=="\" set "RAIZ=%RAIZ:~0,-1%"
 
 echo Sirviendo "%RAIZ%" en http://localhost:%PUERTO%/
-echo Admin local: http://localhost:%PUERTO%/admin/iniciativas.html (ADM solo con debug="true", desde esta maquina)
+echo Admin local: http://localhost:%PUERTO%/admin/iniciativas.html
+echo   cuenta %ADMIN_DEV_IDENTIDAD% como %ADMIN_DEV_ROL% (solo si esta en la whitelist, debug="true" y desde esta maquina)
 "%IISEXPRESS%" /path:"%RAIZ%" /port:%PUERTO% /clr:v4.0
 
 endlocal
 exit /b
+
+:cuentaInvalida
+echo ERROR: la cuenta de desarrollo debe ser DOMINIO\cuenta; llego "%ADMIN_DEV_IDENTIDAD%".
+echo        Desde Git Bash ponla entre comillas simples:
+echo          ./dev-local.cmd %PUERTO% 'SORIANA\t_andresvr' ADM
+exit /b 1
+
+:rolInvalido
+echo ERROR: el rol de desarrollo debe ser ADM o MOD; llego "%ADMIN_DEV_ROL%".
+exit /b 1
 
 :puertoOcupado
 echo ERROR: el puerto %PUERTO% ya esta en uso (otro IIS Express?). Cierralo o usa otro puerto:

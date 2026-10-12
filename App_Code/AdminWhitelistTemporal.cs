@@ -2,9 +2,13 @@
 // TODO(TEMPORAL) - WHITELIST DE PRUEBA DE ADMIN -> INICIATIVAS
 // =====================================================================
 //
-// DESDE 2026-10-09 YA NO ES PUERTA: AccesoAdmin.PuedeEntrar decide solo con
-// el rol de dbo.UsuariosAdmin (y el atajo de desarrollo local). La lista se
-// conserva sin cambios; lo de abajo describe como funcionaba.
+// USO ACTUAL: SOLO DESARROLLO LOCAL. Desde 2026-10-09 el sitio desplegado
+// decide la entrada solo con el rol de dbo.UsuariosAdmin; esta lista ya no
+// deja entrar ni deja fuera a nadie en la VM ni en produccion. La lee
+// AccesoDesarrolloLocal: en IIS Express (DEBUG + loopback + iisexpress)
+// la cuenta de desarrollo (ADMIN_DEV_IDENTIDAD, la pone dev-local.cmd)
+// tiene que estar aqui para entrar a Admin sin Windows Auth. Otra cuenta
+// local no entra. Lo de abajo describe como funcionaba como puerta.
 //
 // ESTE ARCHIVO ES TEMPORAL Y SE ELIMINA cuando la autorizacion de Admin
 // pase a ser DB-backed (hito posterior; la tabla todavia NO existe y no se

@@ -236,7 +236,7 @@ pruebas.push(function () {
   Check('B5 ... y queda incompleta, con RCA entre los faltantes',
     [true, ['categoria', 'titulo', 'descripcion', 'observaciones', 'volumetria', 'pct', 'rca']], [r.incompleta, claves(r.faltantes)]);
   Check('B6 nunca codigo ni guardado; siempre el aviso de prototipo', [null, false, true],
-    [r.codigo, r.guardado, /no se guardó nada/.test(r.aviso)]);
+    [r.codigo, r.guardado, /No se guardó nada/.test(r.aviso)]);
 
   b.elegirTipo('ADO');
   Check('B7 otro tipo sin RCA: el RCA no falta', false, claves(b.faltantes()).indexOf('rca') >= 0);
@@ -307,7 +307,7 @@ pruebas.push(function () {
     p.sel('admRevisar').disparar('click');
     var res = p.sel('admResultado');
     Check('C7 Revisar: "no guardado" + aviso de prototipo, nunca clase ok', [false, true, true, false],
-      [res.hidden, /no guardado/.test(res.innerHTML), /no se guardó nada/.test(res.innerHTML), res.classList.contains('ok')]);
+      [res.hidden, /no guardado/.test(res.innerHTML), /No se guardó nada/.test(res.innerHTML), res.classList.contains('ok')]);
     Check('C8 el codigo no se inventa', 'Se asigna al guardar (regla pendiente)',
       (/<output id="admCodigo"[^>]*>([^<]*)<\/output>/.exec(leer('admin/iniciativas.html')) || [])[1]);
   });
@@ -330,8 +330,8 @@ pruebas.push(function () {
     Check('E4 ADM con el detalle abierto: aparece el boton', true, />Modificar<\/button>/.test(p.sel('regDetAcciones').innerHTML));
     accion(p, 'editar-admin');
     var html = p.sel('regEdicion').innerHTML;
-    Check('E5 abre el formulario con aviso de prototipo y Guardar deshabilitado', [false, true, true],
-      [p.sel('regEdicion').hidden, /Prototipo/.test(html), /<button type="button" class="btn chico" disabled/.test(html)]);
+    Check('E5 abre el formulario: aviso de persistencia no habilitada y Guardar que valida en el servidor', [false, true, true],
+      [p.sel('regEdicion').hidden, /la persistencia no está habilitada/.test(html), /data-accion="edicion-guardar"/.test(html)]);
     Check('E6 lista lo que no es editable, con motivo', true,
       /Fechas compromiso/.test(html) && /pendiente de contrato/.test(html) && /solo lectura/.test(html));
 
@@ -343,7 +343,7 @@ pruebas.push(function () {
     Check('E8 vaciar Descripcion NO marca incompleta a una existente', [true, false, []],
       [r.listo, r.incompleta, claves(r.faltantes)]);
     Check('E9 nunca guardado; el mensaje lo dice', [false, true],
-      [r.guardado, /no guardados/.test(p.sel('regEdMsg').innerHTML) && /no se guardó nada/.test(p.sel('regEdMsg').innerHTML)]);
+      [r.guardado, /no guardados/.test(p.sel('regEdMsg').innerHTML) && /No se guardó nada/.test(p.sel('regEdMsg').innerHTML)]);
     editar(p, 'data-edicion-pct', '0', '');
     r = reg.revisarEdicion();
     Check('E8b vaciar un % si la marca incompleta (no bloquea)', [true, true, ['pct']],
@@ -406,17 +406,20 @@ pruebas.push(function () {
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   var cab = html.slice(html.indexOf('id="panel-iniciativas"'), html.indexOf('id="regKpis"'));
-  Check('CB1 los dos botones en la cabecera de Iniciativas, Solicitar primero', true,
-    cab.indexOf('id="btnSolicitar"') > 0 && cab.indexOf('id="btnCrearAdmin"') > cab.indexOf('id="btnSolicitar"'));
+  var adm = html.slice(html.indexOf('id="panel-administracion"'), html.indexOf('id="panel-nueva"'));
+  Check('CB1 Solicitar en la cabecera de Iniciativas; Crear en Administracion, no en Iniciativas', true,
+    cab.indexOf('id="btnSolicitar"') > 0 && cab.indexOf('id="btnCrearAdmin"') < 0 && adm.indexOf('id="btnCrearAdmin"') > 0);
   var boton = (/<button[^>]*id="btnCrearAdmin"[\s\S]*?<\/button>/.exec(html) || [''])[0];
   Check('CB1 rotulo "+ Crear iniciativa"', true,
     /<span class="ini-cta-mas" aria-hidden="true">\+<\/span>\s*<span>Crear iniciativa<\/span>/.test(boton));
-  Check('CB1 se distingue de Solicitar (linea vs relleno) y dice que es directa', true,
-    /class="btn linea ini-cta"/.test(boton) && /title="Creación directa \(ADM\)/.test(boton) &&
+  Check('CB1 dice que es directa (vive en otra pestaña que Solicitar)', true,
+    /title="Creación directa \(ADM\)/.test(boton) &&
     /<button type="button" class="btn ini-cta" id="btnSolicitar"/.test(html));
   var tabs = [], re = /<button[^>]*role="tab"[^>]*id="([^"]+)"[^>]*>([^<]*)<\/button>/g, m;
   while ((m = re.exec(html))) tabs.push(m[1] + ':' + m[2]);
-  Check('CB2 siguen exactamente dos pestañas', ['tab-iniciativas:Iniciativas', 'tab-solicitudes:Solicitudes'], tabs);
+  Check('CB2 tres pestañas: Iniciativas | Solicitudes | Administracion', ['tab-iniciativas:Iniciativas', 'tab-solicitudes:Solicitudes', 'tab-administracion:Administración'], tabs);
+  Check('CB2 Administracion oculta hasta rol ADM', true,
+    /<button[^>]*id="tab-administracion"[^>]*data-solo-adm hidden>/.test(html));
 
   // Visibilidad con el SesionAdmin real: solo [data-solo-adm] y rol ADM.
   var ventana = {};
@@ -503,8 +506,8 @@ pruebas.push(function () {
     Check('MD2 ... y pintados en los controles', [true, true, true],
       [/value="T PRB 2026-000001"/.test(html), />Desc PRB 2026-000001<\/textarea>/.test(html), /data-edicion-pct="1" value="25"/.test(html)]);
     Check('MD3 contexto de solo lectura: codigo, tipo y estado', true, /Código PRB 2026-000001 · Problem · En Análisis \(solo lectura\)/.test(html));
-    Check('MD3 Guardar deshabilitado y aviso de prototipo + carga del Excel', [true, true],
-      [/<button type="button" class="btn chico" disabled/.test(html), /la carga reemplazaría estos campos/.test(html)]);
+    Check('MD3 Guardar valida en el servidor; aviso de persistencia + carga del Excel', [true, true],
+      [/data-accion="edicion-guardar"/.test(html), /la carga reemplazaría estos campos/.test(html)]);
     Check('MD4 vista previa inicial: sin cambios', true, /Sin cambios\./.test(p.sel('regEdVista').innerHTML));
 
     editar(p, 'data-edicion', 'titulo', 'Titulo nuevo');
@@ -561,14 +564,178 @@ pruebas.push(function () {
 
 pruebas.push(function () {
   var src = leer('admin/iniciativa-admin.js');
-  Check('P3 iniciativa-admin.js no llama al servidor', false, /\b(fetch|XMLHttpRequest|sendBeacon)\b|method\s*:/.test(src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')));
+  var codigo = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  Check('P3 iniciativa-admin.js solo habla con admin_iniciativas_gestion.ashx, por POST',
+    [1, ['\'../handlers/admin_iniciativas_gestion.ashx\''], ["method: 'POST'"], false],
+    [(codigo.match(/\bfetch\(/g) || []).length, codigo.match(/'\.\.\/handlers\/[^']+'/g), codigo.match(/method: '[A-Z]+'/g),
+     /XMLHttpRequest|sendBeacon/.test(codigo)]);
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   Check('P4 boton de alta ADM oculto hasta rol ADM', true,
-    /<button type="button" class="btn linea ini-cta" id="btnCrearAdmin" data-solo-adm hidden[\s>]/.test(html));
-  Check('P5 Guardar iniciativa deshabilitado', true, /<button type="button" class="btn" id="admGuardar" disabled/.test(html));
+    /<button type="button" class="btn ini-cta" id="btnCrearAdmin" data-solo-adm hidden[\s>]/.test(html));
+  Check('P5 Guardar iniciativa habilitado (valida en el servidor) y dice que no guarda', [true, true],
+    [/<button type="button" class="btn" id="admGuardar" aria-describedby/.test(html), /no guarda mientras la persistencia no esté habilitada/.test(html)]);
   Check('P6 sin <form> en la pagina', false, /<form\b/.test(html));
   Check('P7 orden: iniciativa-admin.js antes del registro', true,
     /iniciativa-admin\.js[\s\S]*registro-iniciativas\.js[\s\S]*iniciativas\.js"/.test(html));
+});
+
+// T) Pestaña Administracion: solo ADM; Crear cuelga de ella.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var pg = p.pagina, tab = p.sel('tab-administracion');
+    Check('T1 sin rol: pestaña oculta y no abre', [true, 'iniciativas', true],
+      [tab.hidden, (pg.mostrarVista('administracion'), pg.vista), p.sel('panel-administracion').hidden]);
+    pg.fijarRol('MOD');
+    tab.disparar('click');
+    Check('T2 MOD: pestaña oculta y el clic no abre', [true, 'iniciativas'], [tab.hidden, pg.vista]);
+    p.sel('tab-solicitudes').disparar('keydown', { key: 'ArrowRight' });
+    Check('T3 MOD: la flecha salta la pestaña oculta', 'iniciativas', pg.vista);
+    pg.fijarRol('ADM');
+    tab.disparar('click');
+    Check('T4 ADM: pestaña visible y abre su panel', [false, 'administracion', false, true],
+      [tab.hidden, pg.vista, p.sel('panel-administracion').hidden, p.sel('panel-iniciativas').hidden]);
+    p.sel('btnCrearAdmin').disparar('click');
+    Check('T5 Crear se abre desde Administracion y marca su pestaña', ['crear', true],
+      [pg.vista, tab.classList.contains('activa')]);
+    p.sel('btnVolverAdmin').disparar('click');
+    Check('T6 Volver regresa a Administracion', 'administracion', pg.vista);
+    pg.fijarRol('MOD');
+    Check('T7 perder ADM en Administracion vuelve a Iniciativas y oculta la pestaña', ['iniciativas', true, true],
+      [pg.vista, tab.hidden, p.sel('panel-administracion').hidden]);
+  });
+});
+
+// D) El aviso de acceso denegado se oculta de verdad: .ini-vacio pone
+// display:flex, que le ganaria al atributo hidden (se veia con rol ADM).
+pruebas.push(function () {
+  var css = leer('admin/iniciativas.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  var html = leer('admin/iniciativas.html');
+  Check('D1 #iniDenegado es .ini-vacio y arranca oculto', true,
+    /<div class="ini-vacio" id="iniDenegado" role="alert" hidden>/.test(html));
+  Check('D2 .ini-vacio[hidden] { display: none }', true, /\.ini-vacio\[hidden\]\s*\{\s*display:\s*none;?\s*\}/.test(css));
+  // Toda clase con display propio que se usa con hidden fuera de un panel.
+  var fuera = html.replace(/<!--[\s\S]*?-->/g, '').match(/<[a-z]+ class="(ini-[a-z-]+)"[^>]*\shidden[\s>]/g) || [];
+  var sinRegla = fuera.map(function (t) { return /class="(ini-[a-z-]+)"/.exec(t)[1]; }).filter(function (c, i, a) {
+    var conDisplay = new RegExp('\.' + c + '\s*\{[^}]*display:').test(css);
+    var oculta = new RegExp('\.' + c + '\[hidden\]').test(css);
+    return a.indexOf(c) === i && conDisplay && !oculta;
+  });
+  Check('D3 ninguna clase con display propio pierde el hidden', [], sinRegla);
+});
+
+// G) Guardar = validar en el servidor (admin_iniciativas_gestion.ashx). Nunca exito.
+function RespuestaHttp(estado, json) {
+  return { status: estado, ok: estado >= 200 && estado < 300,
+    json: function () { return json === undefined ? Promise.reject(new Error('no json')) : Promise.resolve(json); } };
+}
+function Servidor(estado, json) {
+  var s = { pedidos: [], pedir: function (url, op) {
+    var campos = [];
+    if (op && op.body && op.body.forEach) op.body.forEach(function (v, k) { campos.push([k, typeof v === 'string' ? v : '(archivo)']); });
+    s.pedidos.push({ url: url, metodo: op && op.method, campos: campos });
+    return estado === 0 ? Promise.reject(new Error('red')) : Promise.resolve(RespuestaHttp(estado, json));
+  } };
+  return s;
+}
+var NO_HABILITADA = { valida: true, guardada: false, tipo: 'PersistenciaNoHabilitada', persistencia: 'no_habilitada',
+  persistencia_motivo: 'Persistencia no habilitada: la validación pasó, pero no se guardó nada.', errores: [], advertencias: ['aviso X'],
+  cambios: [{ clave: 'titulo', rotulo: 'Título', anterior: 'T PRB 2026-000001', nuevo: 'Nuevo' }], faltantes: [], bloqueos: ['b1'] };
+
+pruebas.push(function () {
+  var R = base.ventana.IniciativaAdmin.RespuestaGestion;
+  Check('G1 estados de la respuesta', ['no_habilitada', 'invalida', 'denegado', 'no_disponible', 'error', 'error', 'error'], [
+    R.desde(501, NO_HABILITADA).estado,
+    R.desde(422, { valida: false, errores: [{ campo: 'tipo', mensaje: 'm' }] }).estado,
+    R.desde(403, { tipo: 'RolInsuficiente' }).estado,
+    R.desde(503, { tipo: 'ValidacionNoDisponible' }).estado,
+    R.desde(500, { error: 'x' }).estado,
+    R.desde(0, null).estado,
+    // un 200 (o cualquier cosa que dijera guardada) NO es no_habilitada ni exito
+    R.desde(200, { valida: true, guardada: true }).estado
+  ]);
+  Check('G1 501 con guardada:true no se acepta', 'error',
+    R.desde(501, { valida: true, guardada: true, tipo: 'PersistenciaNoHabilitada' }).estado);
+  Check('G2 nunca guardada', true, [501, 422, 403, 503, 500, 0, 200].every(function (e) { return R.desde(e, NO_HABILITADA).guardada === false; }));
+});
+
+pruebas.push(function () {
+  var p = Pagina(), srv;
+  return esperar().then(function () {
+    var reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.modificar('PRB 2026-000001');
+    srv = Servidor(501, NO_HABILITADA);
+    return reg.guardarEdicion(srv.pedir).then(function (r) {
+      Check('G3 sin cambios no se envia', [null, 0, true], [r, srv.pedidos.length, /Sin cambios/.test(p.sel('regEdMsg').innerHTML)]);
+      editar(p, 'data-edicion-pct', '0', '150');
+      return reg.guardarEdicion(srv.pedir);
+    }).then(function (r) {
+      Check('G4 error de formato local no se envia', [null, 0], [r, srv.pedidos.length]);
+      editar(p, 'data-edicion-pct', '0', '50');
+      editar(p, 'data-edicion', 'titulo', 'Nuevo');
+      return reg.guardarEdicion(srv.pedir);
+    }).then(function (r) {
+      var msg = p.sel('regEdMsg');
+      Check('G5 envia POST solo lo cambiado', ['../handlers/admin_iniciativas_gestion.ashx', 'POST',
+        [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['titulo', 'Nuevo']]],
+        [srv.pedidos[0].url, srv.pedidos[0].metodo, srv.pedidos[0].campos]);
+      Check('G6 501: "validado, no se guardó", clase aviso, nunca exito', ['no_habilitada', true, true, false, true],
+        [r.estado, /No se guardó: la persistencia no está habilitada/.test(msg.innerHTML), msg.className.indexOf('aviso') >= 0,
+         /con éxito|Guardado\b|Guardada\b/.test(msg.innerHTML), /aviso X/.test(msg.innerHTML)]);
+      srv = Servidor(422, { valida: false, tipo: 'ValidacionFallida', errores: [{ campo: 'pct', mensaje: '/X: no está ligada' }] });
+      return reg.guardarEdicion(srv.pedir);
+    }).then(function (r) {
+      var msg = p.sel('regEdMsg');
+      Check('G7 422: errores del servidor, clase error, sin hablar de persistencia', ['invalida', true, true, true, false],
+        [r.estado, /El servidor rechazó/.test(msg.innerHTML), /no está ligada/.test(msg.innerHTML),
+         msg.className.indexOf('error') >= 0, /persistencia no está habilitada/.test(msg.innerHTML)]);
+      return reg.guardarEdicion(Servidor(403, { error: 'Solo ADM', tipo: 'RolInsuficiente' }).pedir);
+    }).then(function (r) {
+      Check('G8 403: sin permiso', ['denegado', true], [r.estado, /Sin permiso/.test(p.sel('regEdMsg').innerHTML)]);
+      return reg.guardarEdicion(Servidor(503, { error: 'error 53', tipo: 'ValidacionNoDisponible' }).pedir);
+    }).then(function (r) {
+      Check('G9 503: no se pudo validar (no dice validado)', ['no_disponible', true, false],
+        [r.estado, /No se pudo validar en el servidor/.test(p.sel('regEdMsg').innerHTML),
+         /Validado en el servidor/.test(p.sel('regEdMsg').innerHTML)]);
+      return reg.guardarEdicion(Servidor(0).pedir);
+    }).then(function (r) {
+      Check('G10 red caida: error, no se guardo', ['error', true], [r.estado, /No se guardó nada/.test(p.sel('regEdMsg').innerHTML)]);
+      p.pagina.fijarRol('MOD');
+      srv = Servidor(501, NO_HABILITADA);
+      return reg.guardarEdicion(srv.pedir);
+    }).then(function (r) {
+      Check('G11 MOD: ni se envia', [null, 0], [r, srv.pedidos.length]);
+    });
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), srv;
+  return esperar().then(function () {
+    var pg = p.pagina;
+    pg.fijarRol('ADM');
+    p.sel('tab-administracion').disparar('click');
+    p.sel('btnCrearAdmin').disparar('click');
+    srv = Servidor(501, { valida: true, guardada: false, tipo: 'PersistenciaNoHabilitada', persistencia_motivo: 'no habilitada',
+      errores: [], advertencias: [], cambios: [], faltantes: [{ clave: 'titulo', rotulo: 'Título' }] });
+    pg.crearAdmin.pedir = srv.pedir;
+    return pg.crearAdmin.guardar();
+  }).then(function (r) {
+    Check('G12 sin tipo: no se envia (bloqueante local)', [null, 0], [r, srv.pedidos.length]);
+    elegir(p, 'admTipo', 'ADO');
+    elegir(p, 'admCategoria', '/A/Cat 2');
+    escribir(p, 'adm-pct', '15');
+    return p.pagina.crearAdmin.guardar();
+  }).then(function (r) {
+    var caja = p.sel('admResultado'), campos = {};
+    srv.pedidos[0].campos.forEach(function (c) { campos[c[0]] = c[1]; });
+    Check('G13 envia accion=crear con la cascada parcial', ['crear', 'ADO', '', '/A/Cat 2', '15'],
+      [campos.accion, campos.tipo, campos.po, campos.categoria, campos.pct]);
+    Check('G14 501: aviso, faltantes del servidor, nunca ok', ['no_habilitada', true, false, true, true],
+      [r.estado, caja.classList.contains('aviso'), caja.classList.contains('ok'), /Incompleta/.test(caja.innerHTML), /No se guardó/.test(caja.innerHTML)]);
+    Check('G15 Guardar se reactiva', false, p.sel('admGuardar').disabled);
+  });
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
