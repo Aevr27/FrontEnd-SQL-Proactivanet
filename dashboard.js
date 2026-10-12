@@ -167,6 +167,15 @@ function dimensionesActivas(filtro) {
   return Object.entries(filtro).filter(([, v]) => v !== null);
 }
 
+// "Prioridad: Alta · SLA: Vencido": que filtros por clic estan puestos, con
+// el rotulo de cada dimension. Escapado: va a innerHTML (pie de los KPIs).
+// '' sin filtros. Lo prueba tools/tests/FrescuraDatosSmoke.js.
+function textoFiltroClic(filtro, etiquetas) {
+  return dimensionesActivas(filtro)
+    .map(([d, v]) => `${escapeHtml(etiquetas[d] || d)}: ${escapeHtml(v)}`)
+    .join(' · ');
+}
+
 // Fila de tarjetas de KPI. t = { l: etiqueta, v: valor, f: pie, s: semaforo }.
 function htmlTarjetasKpi(tarjetas) {
   return tarjetas.map(t => `
@@ -377,7 +386,17 @@ function estadoCargando(id) { DatosInfo.mensaje(id, 'Cargando...'); }
    (assets/js/datos-info.js). El mismo nodo sirve para "Cargando...", el error
    y el aviso de carga parcial. */
 function estadoOk(id, meta, opciones) {
-  DatosInfo.pintar(id, meta, opciones);
+  DatosInfo.pintar(id, meta, conAvisoSimulados(opciones));
+}
+
+/* Con MOCK_DATA (assets/js/mock-data.js; false en el repo, true solo en una
+   prueba local) los datos son simulados y no traen sello: la pastilla lo
+   dice, para que una captura de pantalla local no pase por dato real. Sin
+   MOCK_DATA no cambia nada. */
+function conAvisoSimulados(opciones) {
+  if (!(window.MockData && window.MockData.MOCK_DATA)) return opciones;
+  const op = opciones || {};
+  return { ...op, sufijo: (op.sufijo || '') + ' · Datos simulados (MOCK_DATA), no reales' };
 }
 
 function estadoError(id, err) {
@@ -392,11 +411,11 @@ function estadoParcial(id, meta, fallos, opciones) {
   if (!fallos || !fallos.length) return estadoOk(id, meta, opciones);
 
   const nombres = fallos.map(f => f.nombre).join(', ');
-  DatosInfo.pintar(id, meta, {
+  DatosInfo.pintar(id, meta, conAvisoSimulados({
     ...opciones,
     sufijo: ` · ⚠ sin datos de: ${nombres}`,
     titulo: fallos.map(f => `${f.nombre}: ${f.error && f.error.message}`).join('\n'),
-  });
+  }));
   fallos.forEach(f => console.error(`[${f.nombre}]`, f.error));
 }
 
@@ -1606,7 +1625,9 @@ const TableroSla = (function () {
       const respuestas = f.map(r => r.MinutosPrimeraRespuesta).filter(x => x !== null && x !== undefined);
       const medRespuesta = mediana(respuestas);
       const reabPct = n ? Math.round(1000 * reabiertos / n) / 10 : null;
-      const deN = `filtrado: ${FMT(n)} de ${FMT(cargadas)} cargados`;
+      // Que clic filtra, para que se sepa que quitar (clic de nuevo en la
+      // misma barra o rebanada) sin buscarlo en las graficas.
+      const deN = `por clic: ${textoFiltroClic(filtro, ETIQUETA_DIM)} · ${FMT(n)} de ${FMT(cargadas)} cargados`;
 
       tarjetas = [
         { l: 'Resueltos (filtrado)', v: FMT(n), f: deN },
@@ -3817,6 +3838,40 @@ const TableroExterno = (() => {
 
     montarDesplegables(doc);
     recolorearLegacy(doc);
+    marcarInstantaneaLegacy(doc);
+  }
+
+  /* Observabilidad y Orquestacion del marco NO son datos en vivo: son una
+     foto que el generador escribe dentro del HTML. Su unica fecha real es la
+     del pie que el propio generador pone en cada panel ("Generado el
+     dd/mm/aaaa · ..."), que queda al final de la pagina. Aqui se repite esa
+     MISMA fecha en la cabecera del panel, con el formato de la pastilla del
+     resto del tablero, para que no se confunda con datos actualizados. Sin
+     pie o sin fecha legible no se pinta nada: nunca se inventa una. Lo prueba
+     tools/tests/FrescuraDatosSmoke.js. */
+  function fechaGeneradoLegacy(texto) {
+    const m = /Generado el (\d{2}\/\d{2}\/\d{4})/.exec(String(texto || ''));
+    return m ? m[1] : null;
+  }
+
+  function marcarInstantaneaLegacy(doc) {
+    ['tab-observabilidad', 'tab-orquestacion'].forEach(id => {
+      const panel = doc.getElementById(id);
+      if (!panel || panel.querySelector('[data-instantanea]')) return;
+      const pie = panel.querySelector('footer');
+      const fecha = fechaGeneradoLegacy(pie && pie.textContent);
+      const cabecera = panel.querySelector('header.top');
+      if (!fecha || !cabecera) return;
+      const linea = doc.createElement('div');
+      linea.className = 'sub';
+      linea.setAttribute('data-instantanea', '');
+      linea.style.fontSize = '11px';
+      linea.style.opacity = '.85';
+      linea.textContent = 'Instantánea generada el ' + fecha + ' · no se actualiza en vivo';
+      const sub = cabecera.querySelector('.sub');
+      if (sub) sub.insertAdjacentElement('afterend', linea);
+      else cabecera.appendChild(linea);
+    });
   }
 
   /* Observabilidad y Orquestacion, que es lo que se ve de este documento, aun

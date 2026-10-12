@@ -66,7 +66,7 @@ try {
   errApi = err;
   try {
     DATOS = await traer(MOCK_URL);
-    avisar('<b>Datos de respaldo.</b> El endpoint ' + API_URL + ' no respondio (' +
+    avisar('<b>Datos de respaldo, no en vivo.</b> El endpoint ' + API_URL + ' no respondio (' +
            String(errApi) + '), se esta mostrando el corte guardado en ' + MOCK_URL + '.',
            {bg:'#fef3c7', bd:'#d97706', fg:'#78350f'});
   } catch (err2) {
@@ -254,21 +254,32 @@ const LIGA_DETALLE = Escape.url(P.liga_detalle);
     const m=document.getElementById('ligaModal');
     if(m){m.href=url;}
   }
-  /* Pastilla de la cabecera: "Última actualización" y "Periodo" de P.meta
-     (el backend lo arma en App_Code/ExperienciaQueries.cs). El mock guardado
-     no trae P.meta: ahi se cae a fecha_actualizacion, que ya viene como
-     dd/MM/yyyy. */
-  const cf=document.getElementById('corteFecha');
-  if(cf && P.meta){
-    DatosInfo.pintar(cf, P.meta);
-  } else if(cf && P.fecha_actualizacion){
+  pintarCorteExperiencia(document.getElementById('corteFecha'), P, !!errApi);
+})();
+
+/* Pastilla de la cabecera: "Última actualización" y "Periodo" de P.meta
+   (el backend lo arma en App_Code/ExperienciaQueries.cs). El mock guardado
+   no trae P.meta: ahi se cae a fecha_actualizacion, que ya viene como
+   dd/MM/yyyy. `respaldo` = el handler no respondio y P es el corte guardado:
+   la pastilla lo dice en vez de "Última actualización", para que una fecha
+   vieja no se lea como dato en vivo aunque el aviso de arriba quede fuera de
+   la vista. Sin fecha no se inventa ninguna. Lo prueba
+   tools/tests/FrescuraDatosSmoke.js. */
+function pintarCorteExperiencia(cf, P, respaldo){
+  if(!cf) return;
+  const opciones = respaldo ? { rotuloSello: 'Datos de respaldo, no en vivo · Corte' } : undefined;
+  if(P.meta){
+    DatosInfo.pintar(cf, P.meta, opciones);
+  } else if(P.fecha_actualizacion){
     DatosInfo.pintar(cf, DatosInfo.armar({
       fuente: 'Experiencia al Usuario',
       sello: P.fecha_actualizacion,
       origen: 'Corte guardado en data/experiencia.mock.json',
-    }));
+    }), opciones);
+  } else if(respaldo){
+    DatosInfo.mensaje(cf, 'Datos de respaldo, no en vivo · sin fecha de corte');
   }
-})();
+}
 
 // ---- filtrar categorias segun Director / PO ----
 function currentCats(){

@@ -1,84 +1,100 @@
-# Tableros HTML — SLA, Productividad y Backlog
+# Tableros HTML — SLA, Productividad, Backlog y demás pestañas
 
 Tableros web para consultar información de tickets de Proactivanet desde SQL Server. Funcionan en **IIS con ASP.NET** y no requieren Python en el servidor.
 
+> Este documento describe lo que hace el **código de este repositorio** (rama `claude-branch`). Lo que depende de cada servidor —qué versión está copiada, qué trae su `Web.config`, si los procedimientos existen en la base, cada cuánto corre el ETL— se indica como tal y hay que comprobarlo en el propio servidor.
+
 ## 1. Arquitectura
 
-El sistema está dividido en dos páginas que visualmente funcionan como pestañas:
+Una sola página, `dashboard.html`, con una barra lateral de pestañas (registro `MODULOS` en `dashboard.js`):
 
-- `dashboard.html` — SLA y productividad.
-- `backlog.html` — Backlog.
+| Pestaña | Dónde vive | Cómo se monta |
+|---|---|---|
+| SLA y productividad | `dashboard.html` / `dashboard.js` | propia de la página |
+| Backlog | `backlog/` | `moduloEmbebido()`: se trae su HTML, su hoja y su script la primera vez que se abre |
+| Experiencia | `experiencia/` | `moduloEmbebido()` |
+| QA | `qa/` | `moduloEmbebido()` |
+| QARE | `qare/` | `moduloEmbebido()` |
+| Análisis de servicios | `analisis/` | `moduloEmbebido()` |
+| Call Center | `dashboard.html` / `dashboard.js` | comparte la barra de filtros de SLA (`adoptarControlesSla`) |
+| Tablero | `assets/Tablero_Experiencia.html` | `<iframe>` (ver §2.4) |
 
-Cada página mantiene sus propios filtros y lógica de carga. Separarlas evita duplicar barras de filtros y lógica JavaScript, y permite compartir el tablero de Backlog mediante su propia URL.
+La entrada **Administración** es un enlace a `admin/iniciativas.html`, no una pestaña; solo se ve si `handlers/admin_sesion.ashx` dice que la cuenta está autorizada, y la autorización real está en el servidor (`App_Code/AccesoAdmin.cs`).
+
+Cada carpeta de módulo sigue funcionando también como página suelta (`backlog/backlog.html`, `experiencia/experiencia.html`, ...).
 
 ### Componentes
 
-- **`04_dashboard_sla.sql`** — crea `dbo.vw_Dash_ProductividadBase` y los procedimientos `dbo.usp_Dash_*Multi`.
-- **`07_correo_backlog.sql`** — objetos utilizados por el tablero de Backlog y por el correo diario.
-- **`08_ids_proactivanet.sql`** — objetos utilizados para relacionar códigos de ticket con sus GUID internos.
-- **`14_llamadas_callcenter.sql`**, **`15_dashboard_llamadas.sql`** y **`16_cruce_llamadas_tickets.sql`** — objetos utilizados por los bloques de Call Center y de carga combinada.
-- **`*.ashx` + `App_Code/DashboardDb.cs`** — API ASP.NET/C# consumida por los tableros.
+- **`handlers/*.ashx` + `App_Code/`** — API ASP.NET/C# consumida por los tableros (`dashboard.js` pide a `handlers/`).
+- **`assets/`** — piezas compartidas (`datos-info.js`, `escape.js`, `desplegable.js`, `mock-data.js`, ...) y `assets/vendor/chart.umd.min.js`.
 - **`Web.config.ejemplo`** — plantilla de configuración de IIS y conexión a SQL Server.
-- **`dashboard.html`** — interfaz de SLA y productividad.
-- **`backlog.html`** — interfaz de Backlog.
+- **`sql/`** — solo algunos scripts del tablero (QA, Call Center, QARE, diagnósticos de lectura). Los scripts base (`04_dashboard_sla.sql`, `07_correo_backlog.sql`, `08_ids_proactivanet.sql`, `16_cruce_llamadas_tickets.sql`, ...) **no están en este repositorio**: viven en el de integración (Integracion_SQL-Proactivanet).
 
 IIS compila `App_Code/` automáticamente durante la primera solicitud. No hay un proyecto de Visual Studio ni es necesario ejecutar `dotnet build`.
 
 ## 2. Dashboard de SLA y productividad
 
-`dashboard.html` contiene:
+La pestaña de SLA contiene:
 
-- filtros por fecha;
-- filtros por grupo;
-- filtros por técnico;
+- filtros por fecha (inicio, fin, rango rápido y «Últimos SLOTs»);
+- filtros por grupo y por técnico (selección múltiple; sin selección se incluyen todos);
+- interruptor **Todos / Sin proveedores**;
 - tarjetas KPI;
-- tendencia diaria;
-- productividad por técnico;
-- distribución por estado;
-- distribución por prioridad;
-- distribución por antigüedad (aging);
-- tabla de detalle.
+- cumplimiento de SLA por líder y grupo (tabla plegada);
+- entra vs sale y productividad por técnico;
+- cumplimiento de SLA en el tiempo, dónde se pierde el SLA, prioridad de lo resuelto;
+- reabiertos por grupo y en el tiempo;
+- personas con más tickets resueltos.
 
-Los filtros de grupos y técnicos permiten seleccionar múltiples valores. Cuando no se selecciona ninguno, se incluyen todos.
+El rango mide **lo resuelto** en el periodo (fecha de solución; los «creados» van por fecha de registro).
 
 ### Filtros de fecha
 
-Se puede utilizar un rango libre o accesos rápidos como:
+Rango libre o accesos rápidos: **7 días** y **Año** en SLA; **7 días** y **Mes** en el Call Center. El stepper **Últimos SLOTs** (0 a 12) reescribe el rango a bloques de 30 días; 0 lo apaga.
 
-- Hoy
-- Últimos 7 días
-- Este mes
-- Año actual
+**Limpiar** quita Grupos, Técnicos, Campañas y «Sin proveedores», apaga el SLOT, quita los filtros por clic en las gráficas, vuelve al mes en curso y vuelve a pedir los datos al servidor (vacía la caché de 60 s de los agregados de SLA). El botón lo dice en su texto emergente.
 
 ### KPIs y gráficos
 
-El tablero muestra, entre otros:
+Sin filtros por clic, los KPIs salen del servidor: resueltos, creados, tiempo de 1ª respuesta, cumplimiento SLA, vencidos SLA, horas de resolución (mediana y 90 %), reabiertos, automatizado, técnicos activos y reasignaciones promedio.
 
-- tickets totales;
-- tickets abiertos;
-- tickets cerrados;
-- cumplimiento de SLA;
-- tickets vencidos de SLA;
-- horas promedio de resolución;
-- técnicos activos;
-- grupos activos.
+Al hacer clic en una barra o rebanada (prioridad, SLA) se activa un **filtro por clic**: las gráficas y los KPIs se recalculan sobre las filas de detalle cargadas. El pie de «Resueltos (filtrado)» dice qué filtro por clic está puesto (por ejemplo `por clic: Prioridad: Alta · 120 de 900 cargados`); otro clic en la misma barra lo quita.
 
-El interruptor **Todos / Sin proveedores** (encima de «Limpiar») saca de toda la pestaña de SLA —KPIs, tendencia, productividad, distribución, detalle y la tabla por líder y grupo— los grupos de proveedor: los que, sin espacios a la izquierda, empiezan por `Proveedor` (sin distinguir mayúsculas). «Vendor Managment» no entra en la regla y se queda. El grupo excluido sale del numerador y del denominador del SLA. La regla vive solo en `DashboardQueries.GrupoProveedor` (`App_Code/DashboardQueries.cs`); viaja como `?proveedores=excluir` y «Todos» no manda nada, así que da exactamente los números de siempre. No toca la base de datos: la tabla por líder y grupo filtra en `sla_lider_grupo.ashx` las filas que devuelve `dbo.usp_Dash_SlaLiderGrupo`. En el Call Center el interruptor se retira, igual que Grupos.
+El interruptor **Todos / Sin proveedores** saca de toda la pestaña de SLA —KPIs, tendencia, productividad, distribución, detalle y la tabla por líder y grupo— los grupos de proveedor: los que, sin espacios a la izquierda, empiezan por `Proveedor` (sin distinguir mayúsculas). «Vendor Managment» no entra en la regla y se queda. El grupo excluido sale del numerador y del denominador del SLA. La regla vive solo en `DashboardQueries.GrupoProveedor` (`App_Code/DashboardQueries.cs`); viaja como `?proveedores=excluir` y «Todos» no manda nada, así que da exactamente los números de siempre. No toca la base de datos: la tabla por líder y grupo filtra en `sla_lider_grupo.ashx` las filas que devuelve `dbo.usp_Dash_SlaLiderGrupo`. En el Call Center el interruptor se retira, igual que Grupos.
 
-Los gráficos utilizan Chart.js mediante CDN. Si el servidor no tiene salida a internet, puede descargarse `chart.umd.min.js` y servirse localmente.
+Los gráficos usan Chart.js servido **localmente** desde `assets/vendor/chart.umd.min.js` (no hace falta salida a internet).
 
 ### Call Center y carga combinada
 
-En la misma pestaña, y con los mismos filtros de fecha, se muestran dos bloques adicionales:
+Es su **propia pestaña** (Call Center), con la misma barra de filtros que SLA: Grupos y «Sin proveedores» se retiran y aparece Campañas.
 
 - **Call Center** — tarjetas y gráficos de llamadas, servidos por `llamadas.ashx`. El filtro de grupo no se aplica: una llamada no tiene grupo resolutor. El de técnico solo acota «Atención por agente»: el handler traduce el nombre a extensiones con `dbo.CatAgenteTecnico` (y `dbo.CatAgenteTecnicoAlias` para nombres viejos) y descarta las filas del resto. Los procedimientos no cambian.
-- **Carga combinada** — tickets y llamadas por técnico en la misma fila, servido por `carga_combinada.ashx`. Solo incluye a los técnicos con extensión telefónica registrada en `dbo.CatAgenteTecnico`; los filtros de grupo y técnico lo acotan. Los tickets se cuentan por fecha de firma de solución y las llamadas únicamente si fueron contestadas.
+- **Carga combinada** — tickets y llamadas por técnico en la misma fila, servido por `carga_combinada.ashx`. Solo incluye a los técnicos con extensión telefónica registrada en `dbo.CatAgenteTecnico`; el filtro de técnico lo acota. Los tickets se cuentan por fecha de firma de solución y las llamadas únicamente si fueron contestadas.
 
-Ambos bloques requieren que se hayan ejecutado `14_llamadas_callcenter.sql`, `15_dashboard_llamadas.sql` y `16_cruce_llamadas_tickets.sql` (repo Integracion_SQL, rama `feature/tablero-sla-productividad`). El filtro de técnico no necesita ningún script nuevo: usa los catálogos que ya crea el 16. Si faltan, el resto del tablero sigue funcionando y el bloque de carga combinada se desactiva indicando el motivo.
+Ambos bloques requieren que se hayan ejecutado `14_llamadas_callcenter.sql`, `15_dashboard_llamadas.sql` (en `sql/`) y `16_cruce_llamadas_tickets.sql` (repo Integracion_SQL, rama `feature/tablero-sla-productividad`). El filtro de técnico no necesita ningún script nuevo: usa los catálogos que ya crea el 16. Si faltan, el resto del tablero sigue funcionando y el bloque de carga combinada se desactiva indicando el motivo.
+
+### 2.4. Origen y frescura de los datos
+
+Lo que hace el código; si un handler responde o no, y la fecha que muestra, depende del servidor.
+
+| Pestaña | Origen | Qué fecha muestra |
+|---|---|---|
+| SLA, Call Center | `handlers/*.ashx` contra SQL en cada carga (los agregados de SLA se reutilizan hasta 60 s en el navegador; «Limpiar» los descarta) | «Última actualización»: sello del ETL que manda el servidor en `kpis.meta` |
+| Backlog | `handlers/backlog_*.ashx` | «Última actualización»: la fecha de corte con la que respondió el servidor (un corte, sin periodo) |
+| Experiencia | `handlers/experiencia.ashx`; **si no responde**, `experiencia/data/experiencia.mock.json` (corte guardado a mano) | En vivo: sello y periodo del servidor. Respaldo: aviso «Datos de respaldo, no en vivo» arriba y la pastilla dice «Datos de respaldo, no en vivo · Corte: dd/mm/aaaa» con la fecha guardada en el propio archivo |
+| QA, QARE | `handlers/qa.ashx`, `handlers/qare.ashx` | sello (y periodo) de `dataInfo` |
+| Análisis de servicios | `handlers/analisis.ashx` | no muestra sello de frescura |
+| Tablero (Observabilidad, Orquestación) | `assets/Tablero_Experiencia.html`, un archivo **generado** (TableroExperiencia_v3.7.exe) con los datos dentro; no consulta SQL | «Instantánea generada el dd/mm/aaaa · no se actualiza en vivo» en la cabecera de cada panel, copiada del pie «Generado el ...» que pone el generador. Si el archivo no trae esa fecha, no se muestra ninguna |
+
+Además:
+
+- `observabilidad/` y `orquestacion/` son páginas sueltas, **sin enlace** desde la navegación. Leen `data/*.mock.json` (el JSON que traía el monolito) y su pie es texto fijo. No son datos en vivo.
+- `MOCK_DATA` (`assets/js/mock-data.js`) debe ser `false` en el repositorio. Con `true` (solo pruebas locales) SLA, Call Center y Backlog usan datos simulados y la pastilla lo dice («Datos simulados (MOCK_DATA), no reales»).
+- Ninguna fecha de frescura se calcula en el navegador: si el servidor o el archivo no la traen, la pastilla queda vacía.
 
 ## 3. Dashboard de Backlog
 
-`backlog.html` utiliza los datos de `dbo.CorreoBacklogSnapshot` mediante los procedimientos `usp_CorreoBacklog_*`.
+`backlog/backlog.html` utiliza los datos de `dbo.CorreoBacklogSnapshot` mediante los procedimientos `usp_CorreoBacklog_*`.
 
 Incluye:
 
@@ -90,6 +106,8 @@ Incluye:
 - antigüedad apilada por líder;
 - tabla resumen por antigüedad, con drill-down: cada antigüedad se despliega en los grupos que tienen tickets en ella;
 - tickets más antiguos por líder.
+
+**Limpiar** quita Servicio / C1, Grupos y Líderes, vuelve a la ventana de 30 días agrupada por día y quita los filtros por clic en las gráficas. La fecha de corte se conserva.
 
 El listado de tickets antiguos no exige una antigüedad mínima: es **una tarjeta por líder** con sus tickets más viejos que pasan los filtros, del más viejo al más nuevo por fecha de registro (empates por código; sin fecha al final). Cada tarjeta abre con 10 y su botón «Ver 25 más» destapa 25 más solo para ese líder, hasta 100 (10 → 35 → 60 → 85 → 100), con lo ya cargado: no vuelve a pedir nada al servidor. Para que el filtro por clic de líder o prioridad encuentre los más viejos de lo filtrado, `backlog_antiguos.ashx` manda la unión de los 100 más viejos de cada líder y de cada prioridad, más `total` (cuántos tenía el corte entero), en vez del backlog completo. Permite mostrar la descripción al pasar el ratón sobre el código. El código también puede funcionar como enlace directo al ticket en Proactivanet cuando existe su GUID correspondiente.
 
@@ -103,7 +121,7 @@ El enlace utiliza el formato:
 formIncidents.paw?id=<GUID>
 ```
 
-El GUID no procede directamente del ETL. `sincronizar_ids.py` obtiene el mapeo mediante la API y lo almacena en `dbo.TicketProactivanetId`, creado por `08_ids_proactivanet.sql`.
+El GUID no procede directamente del ETL. `sincronizar_ids.py` (repositorio de integración) obtiene el mapeo mediante la API y lo almacena en `dbo.TicketProactivanetId`, creado por `08_ids_proactivanet.sql`.
 
 El servidor web únicamente consulta esa tabla; no necesita el token de Proactivanet ni acceso a internet para resolver el enlace.
 
@@ -111,7 +129,7 @@ Si un ticket todavía no tiene GUID en el mapeo, su código se muestra como text
 
 ## 4. Primera configuración de la base de datos
 
-Ejecutar sobre la base `Tickets_Proactivanet`:
+Ejecutar sobre la base `Tickets_Proactivanet`. Los scripts 04, 07, 08 y 16_cruce están en el repositorio de integración; 14 y 15, en `sql/` de este:
 
 ```powershell
 # Dashboard de SLA y productividad
@@ -131,6 +149,8 @@ sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -i 16_cruce_llamadas_tickets.s
 
 El mapeo de GUID lo llena `sincronizar_ids.py` desde el equipo donde se ejecuta el ETL. El tablero funciona aunque el mapeo todavía no esté cargado; en ese caso los códigos de ticket simplemente no tendrán enlace.
 
+Las demás pestañas (Experiencia, QA, QARE, Análisis, Administración) usan otros objetos de la base; sus instrucciones están en sus propias carpetas (`experiencia/INSTALAR_*.md`, `analisis/INSTALAR.md`) y en `sql/`.
+
 ## 5. Despliegue en IIS
 
 Los archivos `.ashx` son ASP.NET y IIS compila `App_Code/` automáticamente.
@@ -141,38 +161,32 @@ El servidor debe tener ASP.NET 4.x habilitado en IIS. La documentación original
 
 ### Archivos del sitio
 
-Copia al sitio de IIS:
+Copia al sitio de IIS el árbol del tablero, con las mismas rutas relativas:
 
 ```text
 dashboard.html
-backlog.html
-
-catalogos.ashx
-kpis.ashx
-tendencia.ashx
-productividad.ashx
-distribucion.ashx
-detalle.ashx
-diagnostico.ashx
-
-llamadas.ashx
-carga_combinada.ashx
-
-backlog_catalogos.ashx
-backlog_resumen.ashx
-backlog_historico.ashx
-backlog_antiguos.ashx
-
+dashboard.css
+dashboard.js
+assets/          (incluye Tablero_Experiencia.html y vendor/)
+backlog/
+experiencia/
+qa/
+qare/
+analisis/
+admin/
+handlers/        (todos los .ashx)
 App_Code/
 ```
 
-`llamadas.ashx` y `carga_combinada.ashx` alimentan los bloques de Call Center y de carga combinada. Si no se copian, esos bloques quedan vacíos aunque el resto del tablero funcione.
+`dashboard.js` pide los datos a `handlers/<nombre>.ashx`; si falta un handler, solo se vacía o marca error el bloque que lo usa.
 
 Copia `Web.config.ejemplo` como `Web.config` en el servidor y ajusta la conexión a SQL Server.
 
 > **Si el servidor ya tiene un `Web.config`**, no basta con copiar los archivos del sitio: hay que añadirle **a mano, una sola vez**, el bloque `<staticContent><clientCache>` de `Web.config.ejemplo` (y los tres `<location path="*/vendor">` que lo acompañan). Sin él, IIS manda los `.css` y `.js` sin `Cache-Control`, el navegador aplica su heurística y **un despliegue puede quedar invisible**: se copian los archivos nuevos y el navegador sigue pintando la hoja anterior, sin ningún aviso. Ya pasó una vez.
 >
 > Para comprobarlo: DevTools → Network, recargar sin forzar. `dashboard.css` debe traer `cache-control: no-cache` en la respuesta y salir como `304`; `assets/vendor/chart.umd.min.js` debe salir de caché.
+
+`Web.config.ejemplo` registra también el módulo `AdminAccesoModulo`, que protege `admin/iniciativas.html`. Si el `Web.config` del servidor no lo tiene, la página estática no queda protegida por el módulo (los handlers de Admin siguen exigiendo rol por su cuenta).
 
 **No copies `requirements.txt` ni `config.json` al sitio IIS.** Esos archivos pertenecen al ETL. La conexión del tablero se configura mediante `Web.config`.
 
@@ -193,7 +207,7 @@ Con autenticación integrada (`Integrated Security=SSPI`), el principal que nece
 
 Con autenticación SQL (`User ID=PROACTIVANETAD`), los permisos deben asignarse al **login de SQL Server** `[PROACTIVANETAD]`, que no es el usuario de Windows del mismo nombre. Son dos principales distintos aunque coincida el nombre.
 
-Otorgar el permiso al principal equivocado produce un síntoma engañoso: la conexión se abre correctamente, porque el login existe, pero cada llamada devuelve `The EXECUTE permission was denied`. Para evitarlo, utiliza `diagnostico.ashx` y otorga sobre el valor que reporte en `LoginQueConecta`.
+Otorgar el permiso al principal equivocado produce un síntoma engañoso: la conexión se abre correctamente, porque el login existe, pero cada llamada devuelve `The EXECUTE permission was denied`. Para evitarlo, otorga sobre el login con el que se conecta el sitio (`SELECT SUSER_SNAME()` ejecutado con esa misma cadena de conexión).
 
 La opción recomendada es otorgar `EXECUTE` sobre el esquema `dbo`:
 
@@ -201,7 +215,7 @@ La opción recomendada es otorgar `EXECUTE` sobre el esquema `dbo`:
 GRANT EXECUTE ON SCHEMA::dbo TO [Principal];
 ```
 
-También pueden otorgarse permisos únicamente sobre los procedimientos necesarios:
+También pueden otorgarse permisos únicamente sobre los procedimientos necesarios. La lista de abajo cubre SLA y Backlog; **no es completa**: Call Center, Experiencia, QA, QARE, Análisis y Administración usan más procedimientos (ver los handlers y `App_Code/`).
 
 ```sql
 GRANT EXECUTE ON dbo.usp_Dash_Catalogos                  TO [Principal];
@@ -243,12 +257,14 @@ Revisa primero:
 5. Que la identidad correcta tenga permisos `EXECUTE` en SQL Server.
 6. Que los scripts SQL requeridos se hayan ejecutado.
 
+Si la pestaña Experiencia muestra «Datos de respaldo, no en vivo», `handlers/experiencia.ashx` no respondió: lo que se ve es el corte guardado, no la base.
+
 ### Probar un endpoint directamente
 
 Por ejemplo:
 
 ```text
-https://tableroproactivanet.soriana.com/catalogos.ashx
+https://<sitio>/handlers/catalogos.ashx
 ```
 
 Una respuesta con los catálogos indica que la conexión y permisos básicos funcionan.
@@ -265,36 +281,7 @@ Si IIS devuelve una página HTML de error en lugar de JSON, revisa primero la co
 
 ### Diagnóstico de permisos
 
-Puedes consultar:
-
-```text
-https://tableroproactivanet.soriana.com/diagnostico.ashx
-```
-
-El endpoint muestra la identidad con la que se conecta el sitio y el estado de permisos de ejecución de los procedimientos, sin exponer la contraseña de la conexión.
-
-La respuesta tiene esta forma:
-
-```json
-{
-  "conexion": {
-    "LoginQueConecta": "PROACTIVANETAD",
-    "TipoDeLogin": "SQL Server",
-    "UsuarioEnLaBase": "PROACTIVANETAD",
-    "BaseDeDatos": "Tickets_Proactivanet",
-    "EsDbOwner": 0,
-    "Ejec_Catalogos": 0,
-    "Ejec_Kpis": 0
-  }
-}
-```
-
-Los valores `Ejec_*` indican si el principal tiene el permiso correspondiente:
-
-- `1` — tiene permiso.
-- `0` — falta permiso.
-
-Los `GRANT` deben otorgarse al principal que aparece en `LoginQueConecta`.
+Este repositorio **no** incluye un `diagnostico.ashx` general. Para saber con qué login se conecta el sitio y qué permisos tiene, consulta en SQL Server con esa misma cadena de conexión (`SELECT SUSER_SNAME(), USER_NAME(), HAS_PERMS_BY_NAME('dbo.usp_Dash_KpisMulti','OBJECT','EXECUTE')`) y otorga los `GRANT` a ese login.
 
 ### Errores frecuentes
 
@@ -315,4 +302,5 @@ Los errores de ASP.NET también pueden consultarse en el Visor de eventos de Win
 - Los procedimientos `usp_Dash_*Multi` son los utilizados por los filtros múltiples del tablero y conviven con los procedimientos anteriores de productividad.
 - El tablero no requiere Python ni el token de Proactivanet en el servidor IIS.
 - El ETL y el servidor web pueden ejecutarse en máquinas diferentes.
-- El correo de Backlog comparte parte de la infraestructura SQL utilizada por `backlog.html`.
+- El correo de Backlog comparte parte de la infraestructura SQL utilizada por la pestaña de Backlog.
+- Administración (`admin/`): crear y modificar iniciativas y el alta de categorías **solo validan** en el servidor; la persistencia no está implementada (`PersistenciaGestionAdmin.Habilitada` e `IntegracionCategoriasProactivanet.Habilitada` son constantes `false`).

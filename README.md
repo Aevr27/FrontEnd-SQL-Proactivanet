@@ -1,7 +1,18 @@
-# Integracion_SQL-Proactivanet
+# FrontEnd-SQL-Proactivanet
 
-Pipeline y tableros para integrar datos de Proactivanet con SQL Server y
-exponerlos mediante Power BI y tableros HTML/ASP.NET.
+Tableros web (HTML + ASP.NET en IIS) sobre la base `Tickets_Proactivanet`,
+que alimenta el pipeline de integración de Proactivanet con SQL Server.
+
+> **Alcance de este repositorio.** Aquí están solo los tableros: `dashboard.html`,
+> las carpetas de cada pestaña, `handlers/`, `App_Code/`, `assets/` y algunos
+> scripts en `sql/`. El ETL (`etl_proactivanet.py`, `descubrir_campos.py`,
+> `generar_sql.py`, `01_esquema_proactivanet.sql`, `requirements.txt`,
+> `config.ejemplo.json`), los scripts SQL base del tablero y los documentos
+> `AUTENTICACION.md`, `CORREO_BACKLOG.md` y `CORREO_QA.md` viven en el
+> repositorio de integración (Integracion_SQL-Proactivanet). Las secciones
+> **Arquitectura**, **ETL**, **Base de datos**, **Instalación**,
+> **Programación** y **Power BI** describen ese pipeline como contexto; sus
+> archivos no están aquí.
 
 ## Arquitectura
 
@@ -30,7 +41,7 @@ incremental mantiene actualizados los tickets modificados durante los últimos
 
 ## Componentes principales
 
-### ETL
+### ETL (repositorio de integración)
 
 - `etl_proactivanet.py` — proceso principal de extracción y carga.
 - `descubrir_campos.py` — valida el mapeo de campos contra la respuesta real de
@@ -41,25 +52,30 @@ incremental mantiene actualizados los tickets modificados durante los últimos
   datos.
 - `requirements.txt` — dependencias de Python.
 
-### Tableros web
+### Tableros web (este repositorio)
 
-- `dashboard.html` — tablero de SLA y productividad.
-- `backlog.html` — tablero de Backlog.
-- `*.ashx` — endpoints ASP.NET utilizados por los tableros.
+- `dashboard.html` / `dashboard.js` / `dashboard.css` — la página única con la
+  barra lateral de pestañas: SLA y productividad, Backlog, Experiencia, QA,
+  QARE, Análisis de servicios, Call Center y Tablero.
+- `backlog/`, `experiencia/`, `qa/`, `qare/`, `analisis/` — cada pestaña
+  embebida; también abren como página suelta.
+- `assets/Tablero_Experiencia.html` — archivo generado (Observabilidad y
+  Orquestación) que se muestra en la pestaña Tablero dentro de un `<iframe>`;
+  es una instantánea, no consulta SQL.
+- `admin/` — Administración de iniciativas (`admin/iniciativas.html`, enlazada
+  desde la barra lateral solo para cuentas autorizadas) y la consola de
+  correos (`admin/admin.html`, sin enlace). Crear y modificar iniciativas y el
+  alta de categorías **solo validan**: la persistencia no está implementada.
+- `handlers/*.ashx` — endpoints ASP.NET utilizados por los tableros.
 - `App_Code/` — código C# utilizado por IIS.
+- `assets/` — piezas compartidas de JS/CSS y `vendor/` (Chart.js local).
 - `Web.config.ejemplo` — plantilla de configuración de IIS.
+- `tools/tests/` — pruebas de humo (node y C#); no se despliegan.
 
 Los tableros funcionan en IIS con ASP.NET y no requieren Python en el servidor.
 
-El tablero de SLA y productividad incluye filtros, KPIs, gráficos y una tabla
-de detalle.
-
-El tablero de Backlog incluye KPIs, tendencias, información por líder y
-prioridad, antigüedad de tickets y un listado de tickets antiguos.
-
-Los dos tableros utilizan páginas HTML separadas porque cada uno requiere
-filtros y datos diferentes, pero visualmente funcionan como pestañas dentro de
-la misma interfaz.
+Qué pestaña lee datos en vivo, cuál muestra una instantánea o un respaldo y
+qué fecha de actualización enseña cada una está en `DASHBOARD.md`, §2.4.
 
 Para información detallada sobre el funcionamiento y despliegue de los
 tableros, consulta `DASHBOARD.md`.
@@ -182,12 +198,13 @@ El sitio web utiliza ASP.NET y archivos `.ashx`. IIS compila la carpeta
 `App_Code/` automáticamente; no existe un proyecto de Visual Studio ni es
 necesario ejecutar `dotnet build`.
 
-Para desplegar el tablero se necesitan, entre otros:
+Para desplegar el tablero se necesitan, entre otros (lista completa en
+`DASHBOARD.md`, §5):
 
 ```text
-dashboard.html
-backlog.html
-*.ashx
+dashboard.html, dashboard.css, dashboard.js
+assets/  backlog/  experiencia/  qa/  qare/  analisis/  admin/
+handlers/
 App_Code/
 Web.config
 ```
@@ -218,11 +235,17 @@ histórico de tickets.
 
 ## Documentación adicional
 
-- `DASHBOARD.md` — funcionamiento, despliegue y troubleshooting de los
-  tableros IIS.
-- `AUTENTICACION.md` — autenticación y diagnóstico de la API.
-- `CORREO_BACKLOG.md` — proceso relacionado con el correo de Backlog.
-- `CORREO_QA.md` — proceso relacionado con el correo de QA.
+En este repositorio:
+
+- `DASHBOARD.md` — funcionamiento, origen de los datos, despliegue y
+  troubleshooting de los tableros IIS.
+- `experiencia/INSTALAR_EFECTIVIDAD.md`, `experiencia/INSTALAR_TICKETS_REDUCE.md`
+  y `analisis/INSTALAR.md` — instalación de esas pestañas.
+- `sql/PROPUESTA_*.md` — propuestas de base de datos **sin aprobar ni
+  ejecutar**.
+
+En el repositorio de integración: `AUTENTICACION.md`, `CORREO_BACKLOG.md` y
+`CORREO_QA.md`.
 
 ## Seguridad
 
@@ -243,21 +266,22 @@ Los archivos locales y configuraciones sensibles están excluidos mediante
 
 ```text
 .
-├── dashboard.html
-├── backlog.html
-├── API.html
-├── *.ashx
+├── dashboard.html / dashboard.css / dashboard.js
+├── dev-local.cmd          (IIS Express local)
+├── admin/
+├── analisis/
+├── assets/
+├── backlog/
+├── experiencia/
+├── observabilidad/        (página suelta, sin enlace; lee data/*.mock.json)
+├── orquestacion/          (página suelta, sin enlace; lee data/*.mock.json)
+├── qa/
+├── qare/
+├── handlers/              (*.ashx)
 ├── App_Code/
-├── *.py
-├── *.sql
-├── Envio_correos/
-├── *.ps1
-├── config.ejemplo.json
+├── sql/
+├── tools/                 (pruebas y utilidades; no se despliega)
 ├── Web.config.ejemplo
-├── requirements.txt
 ├── README.md
-├── DASHBOARD.md
-├── AUTENTICACION.md
-├── CORREO_BACKLOG.md
-└── CORREO_QA.md
+└── DASHBOARD.md
 ```
