@@ -77,6 +77,8 @@
        del tablero, con la misma nota: solo para la pagina suelta. -->
   <link rel="stylesheet" href="../assets/css/datos-info.css">
   <script src="../assets/js/datos-info.js"></script>
+  <link rel="stylesheet" href="../assets/css/kpis-fijos.css">
+  <script src="../assets/js/kpis-fijos.js"></script>
   <!-- Datos simulados (MOCK_DATA). mock-data.js cubre los cuatro
        backlog_*.ashx, asi que con el flag en true esta pagina se puede abrir
        sin base de datos, igual que la pestaña del tablero. El enganche lo lee
@@ -98,6 +100,7 @@
         <h1>Tickets Proactivanet — Backlog</h1>
       </div>
       <div class="acciones-top">
+        <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="kpis-bl" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
         <div class="estado" id="estado-carga-bl"></div>
       </div>
     </header>

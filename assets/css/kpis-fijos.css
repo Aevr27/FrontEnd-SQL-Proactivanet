@@ -1,0 +1,52 @@
+/* =========================================================================
+   assets/css/kpis-fijos.css
+
+   "Fijar KPIs" (assets/js/kpis-fijos.js): la rejilla .kpis de la pestaña
+   activa se queda pegada arriba de la ventana al hacer scroll.
+
+   - Es la MISMA rejilla, no una copia: position sticky. Pega dentro de su
+     pestaña (#tab-*; en Analisis, dentro de #an-resultado) y se suelta al
+     acabarse esta. La ventana es lo unico que hace scroll: no hay
+     contenedor con scroll propio en medio.
+   - No hay barra superior fija: la navegacion es la barra lateral (z-index
+     50, encima de esto cuando se despliega en pantalla estrecha). Por eso el
+     tope es 0 y el aire lo da el padding.
+   - Sin la clase, nada de esto aplica: la rejilla queda exactamente igual.
+     Con la clase, el padding de arriba se compensa con un margin negativo,
+     asi que en reposo ocupa el mismo sitio y nada salta al activarla.
+   - El fondo es el de la pagina, para que lo que pasa por debajo no se
+     transparente entre las tarjetas.
+   ========================================================================= */
+
+.kpis.kpis-fijas {
+  position: sticky; top: 0; z-index: 20;
+  padding-top: 8px; margin-top: -8px;
+  padding-bottom: 8px; margin-bottom: calc(var(--gap-bloque, 16px) - 8px);
+  background: var(--bg, #f4f6f1);
+}
+/* Analisis antes del primer resultado (rejilla vacia): sin franja. */
+.kpis.kpis-fijas:empty { padding: 0; margin-top: 0; margin-bottom: var(--gap-bloque, 16px); }
+
+/* Pantalla estrecha o baja: la rejilla de varias filas taparia casi toda la
+   ventana. Fijada, pasa a UNA fila que se desliza de lado (solo horizontal:
+   nunca un scroll vertical dentro de otro). Soltada, vuelve a su rejilla. */
+@media (max-width: 900px), (max-height: 720px) {
+  .kpis.kpis-fijas {
+    grid-auto-flow: column;
+    grid-template-columns: none;
+    grid-auto-columns: minmax(170px, 1fr);
+    overflow-x: auto; overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+  }
+  .kpis.kpis-fijas > .kpi { scroll-snap-align: start; }
+}
+
+/* El boton de la cabecera: el .btn.linea.chico de boton.css (aria-pressed ya
+   lo pinta como activo); aqui solo que no se parta en dos lineas. */
+.kpis-fijar { white-space: nowrap; }
+
+@media print {
+  .kpis.kpis-fijas { position: static; padding: 0; margin-top: 0; background: none; }
+  .kpis-fijar { display: none !important; }
+}

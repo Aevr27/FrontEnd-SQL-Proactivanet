@@ -33,6 +33,8 @@
        estos <link> se quita y manda la copia del tablero. -->
   <link rel="stylesheet" href="../assets/css/kpi.css">
   <link rel="stylesheet" href="../assets/css/boton.css">
+  <link rel="stylesheet" href="../assets/css/kpis-fijos.css">
+  <script src="../assets/js/kpis-fijos.js"></script>
   <link rel="stylesheet" href="../dashboard.css">
   <link rel="stylesheet" href="analisis.css">
 </head>
@@ -46,6 +48,7 @@
         <div class="sub">Qué atacar con iniciativas o problems: cuándo llegan los tickets, en qué sitios, por qué motivo y cómo se atienden.</div>
       </div>
       <div class="acciones-top">
+        <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="an-kpis" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
         <div class="estado" id="an-estado" role="status"></div>
       </div>
     </header>
