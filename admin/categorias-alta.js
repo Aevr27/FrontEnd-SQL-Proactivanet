@@ -3,7 +3,7 @@
 
    Pestaña "Administración" de admin/iniciativas.html (solo ADM), seccion
    "Alta de categoría en Proactivanet". PREPARACION SIN LLAMADA EXTERNA:
-   "Validar alta" manda el formulario a handlers/admin_categorias_alta.ashx,
+   "Validar alta (no envía)" manda el formulario a handlers/admin_categorias_alta.ashx,
    que valida contra el espejo local (dbo.Categorias) y devuelve el cuerpo
    que se MANDARIA a POST /api/Categories, con los bloqueos. Ni ese handler
    ni este archivo hablan con Proactivanet: nada se crea.
@@ -92,9 +92,10 @@ window.CategoriasAlta = (function () {
     },
     titulo: function (r) {
       return {
-        no_habilitada: 'Validada contra el catálogo local. No se creó: la integración con Proactivanet no está habilitada.',
-        invalida: 'El servidor rechazó los datos:',
-        denegado: 'Sin permiso: solo un administrador (ADM) puede hacerlo.',
+        no_habilitada: 'Solo validación: válida contra el catálogo local, pero NO se envió a Proactivanet. ' +
+          'No se creó: la integración con Proactivanet no está habilitada.',
+        invalida: 'El servidor rechazó los datos (no se envió nada):',
+        denegado: 'Sin permiso: solo un administrador (ADM) puede hacerlo. No se validó ni se envió nada.',
         no_disponible: 'No se pudo validar (catálogo local no disponible). No se envió nada.',
         error: 'No se pudo completar la validación. No se envió nada.'
       }[r.estado];
@@ -110,7 +111,8 @@ window.CategoriasAlta = (function () {
       partes.push('<p>Lo que se enviaría (no se envió): <code>' + Escape.html(r.envio.metodo + ' ' + r.envio.ruta) + '</code></p>' +
         '<pre class="ini-ca-json">' + Escape.html(JSON.stringify(r.envio.cuerpo, null, 2)) + '</pre>');
     }
-    if (r.estado !== 'invalida') partes.push('<p class="ini-prototipo-aviso">' + Escape.html(r.mensaje) + '</p>');
+    // En un 422 los errores ya lo explican; sin errores, el mensaje del servidor.
+    if (r.estado !== 'invalida' || !r.errores.length) partes.push('<p class="ini-prototipo-aviso">' + Escape.html(r.mensaje) + '</p>');
     if (r.estado === 'no_habilitada' && r.bloqueos.length) {
       partes.push('<details class="ini-ed-otros"><summary>Qué falta para poder crearla</summary>' + lista(r.bloqueos) + '</details>');
     }

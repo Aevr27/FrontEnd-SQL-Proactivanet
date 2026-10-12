@@ -24,8 +24,8 @@
 //   503  no se pudo leer el catalogo o el registro: { error, tipo:
 //        "ValidacionNoDisponible" }. No dice que sea valida.
 //   400  accion desconocida;  405 si no es POST;  413 cuerpo demasiado grande.
-//   403  AccesoAdmin.ExigirAdm: VIEWER, anonimo, fuera de la whitelist,
-//        consulta de rol fallida (AccesoDenegado) y MOD (RolInsuficiente),
+//   403  AccesoAdmin.ExigirAdm: VIEWER, anonimo, consulta de rol fallida
+//        (AccesoDenegado) y MOD (RolInsuficiente),
 //        antes de leer nada.
 //
 // SOLO LECTURA. No escribe en dbo.Problem, dbo.ProblemCategoria ni en el

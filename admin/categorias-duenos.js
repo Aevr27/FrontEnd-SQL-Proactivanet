@@ -4,7 +4,7 @@
    Pestaña "Administración" de admin/iniciativas.html (solo ADM), seccion
    "Dueños de categoría": consultar los dueños de cada categoria (dbo.CatCategoriaDueno)
    y PREPARAR cambios con vista previa. PROTOTIPO: nada se guarda ni se
-   envia; "Guardar" esta deshabilitado. Solo con rol ADM (como el alta de
+   envia; "Guardar (no disponible)" esta deshabilitado. Solo con rol ADM (como el alta de
    ADM); el handler de lectura (?duenos=1) exige AccesoAdmin.ExigirAdm y,
    cuando exista la escritura, su handler tambien.
 
@@ -480,11 +480,11 @@ window.CategoriasDuenos = (function () {
         '<div class="ini-cambio-msg" id="cdMsg" role="status" aria-live="polite"></div>' +
         '<div class="ini-cambio-pie">' +
           '<button type="button" class="btn chico" data-cd-accion="revisar"' + (p.habilitada() ? '' : ' disabled') + '>Revisar propuesta</button> ' +
-          '<button type="button" class="btn chico" disabled aria-describedby="cdGuardarNota">Guardar</button> ' +
+          '<button type="button" class="btn chico" disabled aria-describedby="cdGuardarNota">Guardar (no disponible)</button> ' +
           '<button type="button" class="btn linea chico" data-cd-accion="descartar">Descartar cambios</button> ' +
           '<button type="button" class="btn linea chico" data-cd-accion="cerrar">Cerrar</button>' +
         '</div>' +
-        '<small class="ini-sub" id="cdGuardarNota">Guardar se habilitará con la persistencia aprobada.</small>';
+        '<small class="ini-sub" id="cdGuardarNota">Solo vista previa: guardar se habilitará con la persistencia aprobada.</small>';
       this.pintarVista();
     }
 

@@ -9,8 +9,15 @@
 <!--
   Pagina oculta de administracion de iniciativas.
 
-  No esta enlazada desde dashboard.html ni desde admin/admin.html: se llega
-  escribiendo la URL /admin/iniciativas.html. Sin autenticacion todavia.
+  Se llega desde la entrada "Administracion" de la barra lateral de
+  dashboard.html (visible solo si SesionAdmin dice autorizado) o escribiendo
+  la URL /admin/iniciativas.html. No esta enlazada desde admin/admin.html.
+  ACCESO (en el servidor, ver App_Code/AccesoAdmin.cs): rol ADM o MOD en
+  dbo.UsuariosAdmin para la identidad Windows del request. AdminAccesoModulo
+  protege esta pagina si esta registrado en Web.config (ver
+  Web.config.ejemplo); los handlers admin_iniciativas_* y
+  admin_categorias_alta llaman a Exigir o ExigirAdm.
+  Ocultar pestañas o botones aqui es solo UX.
 
   ESTADO ACTUAL (cuarto hito):
     - Dos vistas principales con pestaña: Iniciativas (la de inicio) y
@@ -39,9 +46,10 @@
     - No se envia ni se guarda nada: no hay boton de enviar ni <form>.
     - "Crear iniciativa" (btnCrearAdmin -> panel-crear-admin) y la edicion de ADM
       en el detalle: gestion directa, separada de Nueva solicitud, solo con
-      rol ADM. PROTOTIPO: no llaman al servidor ni guardan; "Guardar" esta
-      deshabilitado. Lo que falta se marca "Incompleta" (derivada, sin
-      columna). admin/iniciativa-admin.js.
+      rol ADM. SOLO VALIDACION: "Validar en el servidor (no guarda)" llama a
+      handlers/admin_iniciativas_gestion.ashx (ExigirAdm), que responde 501
+      PersistenciaNoHabilitada; nada se guarda. Lo que falta se marca
+      "Incompleta" (derivada, sin columna). admin/iniciativa-admin.js.
     - Solicitudes todavia no muestra datos: estado vacio "en preparacion",
       sin datos inventados.
 
@@ -64,9 +72,10 @@
        pagina es estatica y no hay plantillas). Diferencias a proposito:
        - Cada entrada es un enlace a ../dashboard.html#<modulo> (el tablero
          abre el modulo del hash al cargar), no un boton con data-tab.
-       - Administracion es la entrada activa. En el tablero solo aparece para
-         las cuentas de AdminAllowedUsers (SesionAdmin); aqui igual, aunque
-         quien no esta autorizado ya no deberia llegar (AdminAccesoModulo).
+       - Administracion es la entrada activa. En el tablero solo aparece si
+         SesionAdmin dice autorizado (rol ADM o MOD en dbo.UsuariosAdmin);
+         aqui igual, aunque quien no esta autorizado ya no deberia llegar
+         (AdminAccesoModulo).
        Plegar/desplegar: MenuLateral en admin/iniciativas.js. Si cambia la
        lista de modulos del tablero, actualizar tambien esta copia. -->
   <aside class="lateral" id="lateral">
@@ -379,7 +388,7 @@
       <div class="ini-lista-cab">
         <h3 class="ini-lista-titulo" id="caTitulo">Alta de categoría en Proactivanet</h3>
       </div>
-      <p class="ini-prototipo-aviso" role="note"><strong>Sin envío a Proactivanet.</strong> «Validar alta» revisa contra el catálogo local y muestra lo que se enviaría; no crea la categoría. Asignar dueños es otra operación (abajo).</p>
+      <p class="ini-prototipo-aviso" role="note"><strong>Sin envío a Proactivanet.</strong> «Validar alta (no envía)» revisa contra el catálogo local y muestra lo que se enviaría; no crea la categoría. Asignar dueños es otra operación (abajo).</p>
       <div class="ini-cambio-campos">
         <div class="campo"><label for="ca-padre">Categoría padre (ruta)</label>
           <input type="text" id="ca-padre" list="caPadres" autocomplete="off" spellcheck="false" placeholder="/C1/C2 · vacío = C1 nuevo">
@@ -398,7 +407,7 @@
       </fieldset>
       <p class="ini-nota">Ruta resultante: <output id="caRuta">—</output></p>
       <div class="ini-acciones">
-        <button type="button" class="btn" id="caValidar">Validar alta</button>
+        <button type="button" class="btn" id="caValidar">Validar alta (no envía)</button>
         <span class="ini-hint">No se envía nada a Proactivanet.</span>
       </div>
       <div class="ini-resultado" id="caResultado" role="status" aria-live="polite" hidden></div>
@@ -406,7 +415,8 @@
 
     <!-- Dueños de categoria (admin/categorias-duenos.js, VistaDuenos):
          lectura de dbo.CatCategoriaDueno por ?duenos=1 y propuesta con
-         vista previa; Guardar deshabilitado hasta tener contrato. -->
+         vista previa; "Guardar (no disponible)" deshabilitado hasta tener
+         contrato. -->
     <section class="ini-adm-bloque" id="cdSeccion" aria-labelledby="cdTitulo">
       <div class="ini-lista-cab">
         <h3 class="ini-lista-titulo" id="cdTitulo">Dueños de categoría</h3>
@@ -568,9 +578,10 @@
   </section>
 
   <!-- Accion de Iniciativas, no pestaña: la abre #btnCrearAdmin. Alta
-       directa de ADM, PROTOTIPO sin persistencia (admin/iniciativa-admin.js,
+       directa de ADM, SOLO VALIDACION sin persistencia (admin/iniciativa-admin.js,
        VistaCrearAdmin). Ningun campo es obligatorio salvo el Tipo; lo que
-       falte se avisa como "Incompleta". No llama al servidor. -->
+       falte se avisa como "Incompleta". "Validar en el servidor (no guarda)"
+       llama a admin_iniciativas_gestion.ashx, que responde 501 sin guardar. -->
   <section class="ini-panel card" id="panel-crear-admin" aria-labelledby="admCrearTitulo" hidden>
     <div class="ini-panel-cab">
       <button type="button" class="btn linea chico" id="btnVolverAdmin">← Volver a Administración</button>
@@ -578,7 +589,7 @@
       <span class="ini-hint">Gestión directa · sin solicitud ni aprobación</span>
     </div>
 
-    <p class="ini-prototipo-aviso" role="note"><strong>Persistencia no habilitada.</strong> «Guardar iniciativa» valida en el servidor, pero no guarda nada ni genera código hasta que el contrato de base esté aprobado.</p>
+    <p class="ini-prototipo-aviso" role="note"><strong>Persistencia no habilitada.</strong> «Validar en el servidor (no guarda)» solo valida: no guarda nada ni genera código hasta que el contrato de base esté aprobado.</p>
 
     <div class="ini-form">
       <section class="ini-bloque ini-col-clasif" aria-labelledby="admCabClasif">
@@ -588,7 +599,7 @@
         </div>
         <div class="ini-campo">
           <span class="ini-rotulo-derivado" id="rotAdmCodigo">Código</span>
-          <output id="admCodigo" aria-labelledby="rotAdmCodigo">Se asigna al guardar (regla pendiente)</output>
+          <output id="admCodigo" aria-labelledby="rotAdmCodigo">Sin código: no se asigna todavía (regla pendiente)</output>
         </div>
         <div class="ini-campo">
           <label for="admTipo">Tipo de iniciativa <span class="ini-obligatorio">obligatorio</span></label>
@@ -622,7 +633,7 @@
           <div class="ini-campo ini-campo-captura"><label for="adm-volumetria">Volumetría</label><input type="number" id="adm-volumetria" inputmode="numeric" min="0" step="1"></div>
           <div class="ini-campo ini-campo-captura"><label for="adm-pct">% Disminución de tickets vs categoría</label>
             <div class="ini-pct"><input type="number" id="adm-pct" inputmode="decimal" min="0" max="100" step="0.01"><span class="ini-pct-sufijo" aria-hidden="true">%</span></div>
-            <small class="ini-motivo">Sin tope en esta vista: al guardar, el servidor avisa si excede la capacidad de la categoría (no bloquea).</small>
+            <small class="ini-motivo">Sin tope en esta vista: al validar, el servidor avisa si excede la capacidad de la categoría (no bloquea).</small>
           </div>
         </div>
       </section>
@@ -644,8 +655,8 @@
 
     <div class="ini-acciones">
       <button type="button" class="btn" id="admRevisar">Revisar borrador</button>
-      <button type="button" class="btn" id="admGuardar" aria-describedby="admGuardarNota">Guardar iniciativa</button>
-      <span class="ini-hint" id="admGuardarNota">Valida en el servidor; no guarda mientras la persistencia no esté habilitada.</span>
+      <button type="button" class="btn" id="admGuardar" aria-describedby="admGuardarNota">Validar en el servidor (no guarda)</button>
+      <span class="ini-hint" id="admGuardarNota">Solo valida en el servidor; no guarda mientras la persistencia no esté habilitada.</span>
     </div>
     <div class="ini-resultado" id="admResultado" role="status" aria-live="polite" hidden></div>
   </section>

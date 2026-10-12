@@ -21,6 +21,9 @@
 //   M) Marca Incompleta en el detalle (para cualquier rol).
 //   P) Nada se persiste: solo los dos GET de siempre, ninguna escritura en
 //      el codigo nuevo.
+//   G) "Validar en el servidor (no guarda)" en Crear y Modificar: 501 es
+//      solo validacion (nunca exito); 422, 403, 503, red, 500 y un 501 o
+//      200 malformados, cada uno con su mensaje y sin decir "guardado".
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -308,7 +311,7 @@ pruebas.push(function () {
     var res = p.sel('admResultado');
     Check('C7 Revisar: "no guardado" + aviso de prototipo, nunca clase ok', [false, true, true, false],
       [res.hidden, /no guardado/.test(res.innerHTML), /No se guardó nada/.test(res.innerHTML), res.classList.contains('ok')]);
-    Check('C8 el codigo no se inventa', 'Se asigna al guardar (regla pendiente)',
+    Check('C8 el codigo no se inventa', 'Sin código: no se asigna todavía (regla pendiente)',
       (/<output id="admCodigo"[^>]*>([^<]*)<\/output>/.exec(leer('admin/iniciativas.html')) || [])[1]);
   });
 });
@@ -332,6 +335,9 @@ pruebas.push(function () {
     var html = p.sel('regEdicion').innerHTML;
     Check('E5 abre el formulario: aviso de persistencia no habilitada y Guardar que valida en el servidor', [false, true, true],
       [p.sel('regEdicion').hidden, /la persistencia no está habilitada/.test(html), /data-accion="edicion-guardar"/.test(html)]);
+    Check('E5b el boton dice que solo valida; ningun boton "Guardar" a secas', [true, false],
+      [/data-accion="edicion-guardar"[^>]*>Validar en el servidor \(no guarda\)<\/button>/.test(html),
+       /<button[^>]*>\s*Guardar\s*<\/button>/.test(html)]);
     Check('E6 lista lo que no es editable, con motivo', true,
       /Fechas compromiso/.test(html) && /pendiente de contrato/.test(html) && /solo lectura/.test(html));
 
@@ -574,6 +580,8 @@ pruebas.push(function () {
     /<button type="button" class="btn ini-cta" id="btnCrearAdmin" data-solo-adm hidden[\s>]/.test(html));
   Check('P5 Guardar iniciativa habilitado (valida en el servidor) y dice que no guarda', [true, true],
     [/<button type="button" class="btn" id="admGuardar" aria-describedby/.test(html), /no guarda mientras la persistencia no esté habilitada/.test(html)]);
+  Check('P5b el boton de Crear se llama "Validar en el servidor (no guarda)"; sin "Guardar iniciativa"', [true, false],
+    [/id="admGuardar"[^>]*>Validar en el servidor \(no guarda\)<\/button>/.test(html), /Guardar iniciativa/.test(html)]);
   Check('P6 sin <form> en la pagina', false, /<form\b/.test(html));
   Check('P7 orden: iniciativa-admin.js antes del registro', true,
     /iniciativa-admin\.js[\s\S]*registro-iniciativas\.js[\s\S]*iniciativas\.js"/.test(html));
@@ -683,6 +691,8 @@ pruebas.push(function () {
       Check('G6 501: "validado, no se guardó", clase aviso, nunca exito', ['no_habilitada', true, true, false, true],
         [r.estado, /No se guardó: la persistencia no está habilitada/.test(msg.innerHTML), msg.className.indexOf('aviso') >= 0,
          /con éxito|Guardado\b|Guardada\b/.test(msg.innerHTML), /aviso X/.test(msg.innerHTML)]);
+      Check('G6b 501: el titulo empieza por "Solo validación"', true,
+        /<strong class="ini-prototipo-marca">Solo validación:/.test(msg.innerHTML));
       srv = Servidor(422, { valida: false, tipo: 'ValidacionFallida', errores: [{ campo: 'pct', mensaje: '/X: no está ligada' }] });
       return reg.guardarEdicion(srv.pedir);
     }).then(function (r) {
@@ -693,6 +703,9 @@ pruebas.push(function () {
       return reg.guardarEdicion(Servidor(403, { error: 'Solo ADM', tipo: 'RolInsuficiente' }).pedir);
     }).then(function (r) {
       Check('G8 403: sin permiso', ['denegado', true], [r.estado, /Sin permiso/.test(p.sel('regEdMsg').innerHTML)]);
+      Check('G8b 403: dice que no se validó ni guardó, clase error, sin "Solo validación"', [true, true, false],
+        [/No se validó ni se guardó nada/.test(p.sel('regEdMsg').innerHTML), p.sel('regEdMsg').className.indexOf('error') >= 0,
+         /Solo validación/.test(p.sel('regEdMsg').innerHTML)]);
       return reg.guardarEdicion(Servidor(503, { error: 'error 53', tipo: 'ValidacionNoDisponible' }).pedir);
     }).then(function (r) {
       Check('G9 503: no se pudo validar (no dice validado)', ['no_disponible', true, false],
@@ -701,6 +714,8 @@ pruebas.push(function () {
       return reg.guardarEdicion(Servidor(0).pedir);
     }).then(function (r) {
       Check('G10 red caida: error, no se guardo', ['error', true], [r.estado, /No se guardó nada/.test(p.sel('regEdMsg').innerHTML)]);
+      Check('G10b red caida: dice que no hubo contacto con el servidor', true,
+        /No se pudo contactar al servidor/.test(p.sel('regEdMsg').innerHTML));
       p.pagina.fijarRol('MOD');
       srv = Servidor(501, NO_HABILITADA);
       return reg.guardarEdicion(srv.pedir);
@@ -735,6 +750,61 @@ pruebas.push(function () {
     Check('G14 501: aviso, faltantes del servidor, nunca ok', ['no_habilitada', true, false, true, true],
       [r.estado, caja.classList.contains('aviso'), caja.classList.contains('ok'), /Incompleta/.test(caja.innerHTML), /No se guardó/.test(caja.innerHTML)]);
     Check('G15 Guardar se reactiva', false, p.sel('admGuardar').disabled);
+  });
+});
+
+// G16-G23) Crear: cada estado HTTP con su mensaje, siempre "no se guardó" y
+// nunca la clase ok ni un texto de exito.
+pruebas.push(function () {
+  var p = Pagina(), caja;
+  var exito = /con éxito|Guardado\b|Guardada\b|Iniciativa creada/;
+  function validar(estado, json) {
+    p.pagina.crearAdmin.pedir = Servidor(estado, json).pedir;
+    return p.pagina.crearAdmin.guardar();
+  }
+  return esperar().then(function () {
+    var pg = p.pagina;
+    pg.fijarRol('ADM');
+    p.sel('tab-administracion').disparar('click');
+    p.sel('btnCrearAdmin').disparar('click');
+    elegir(p, 'admTipo', 'ADO');
+    caja = p.sel('admResultado');
+    return validar(501, NO_HABILITADA);
+  }).then(function (r) {
+    Check('G16 Crear 501: Solo validación, no se guardó, aviso, nunca ok ni exito', ['no_habilitada', true, true, true, false, false],
+      [r.estado, /Solo validación/.test(caja.innerHTML), /NO se guardó nada/.test(caja.innerHTML), caja.classList.contains('aviso'),
+       caja.classList.contains('ok'), exito.test(caja.innerHTML)]);
+    return validar(422, { valida: false, tipo: 'ValidacionFallida', errores: [{ campo: 'tipo', mensaje: 'Tipo X no existe.' }] });
+  }).then(function (r) {
+    Check('G17 Crear 422: errores del servidor, "no se guardó", clase mal, sin "Solo validación"', ['invalida', true, true, true, false],
+      [r.estado, /Tipo X no existe/.test(caja.innerHTML), /no se guardó nada/.test(caja.innerHTML), caja.classList.contains('mal'),
+       /Solo validación/.test(caja.innerHTML)]);
+    return validar(422, { valida: false, tipo: 'ValidacionFallida', error: 'Formato no válido.', errores: [] });
+  }).then(function (r) {
+    Check('G18 Crear 422 sin lista de errores: muestra el mensaje del servidor', ['invalida', true],
+      [r.estado, /Formato no válido\./.test(caja.innerHTML)]);
+    return validar(403, { error: 'Solo un administrador (ADM) puede crear o modificar iniciativas directamente.', tipo: 'RolInsuficiente' });
+  }).then(function (r) {
+    Check('G19 Crear 403: sin permiso, no se validó ni guardó, clase mal', ['denegado', true, true, true],
+      [r.estado, /Sin permiso/.test(caja.innerHTML), /No se validó ni se guardó nada/.test(caja.innerHTML), caja.classList.contains('mal')]);
+    return validar(503, { error: 'No se pudo leer el catálogo.', tipo: 'ValidacionNoDisponible' });
+  }).then(function (r) {
+    Check('G20 Crear 503: no se pudo validar, no dice válido, clase mal', ['no_disponible', true, false, true],
+      [r.estado, /No se pudo validar en el servidor/.test(caja.innerHTML), /Solo validación|son válidos/.test(caja.innerHTML),
+       caja.classList.contains('mal')]);
+    return validar(0);
+  }).then(function (r) {
+    Check('G21 Crear red caida: no hubo contacto, no se guardó, boton reactivado', ['error', true, true, false],
+      [r.estado, /No se pudo contactar al servidor/.test(caja.innerHTML), /No se guardó nada/.test(caja.innerHTML),
+       p.sel('admGuardar').disabled]);
+    return validar(501, { valida: true, guardada: false, error: 'Not Implemented' });
+  }).then(function (r) {
+    Check('G22 Crear 501 sin tipo PersistenciaNoHabilitada: error, nunca "Solo validación"', ['error', false, true],
+      [r.estado, /Solo validación/.test(caja.innerHTML), /No se guardó nada/.test(caja.innerHTML)]);
+    return validar(200, { valida: true, guardada: true });
+  }).then(function (r) {
+    Check('G23 Crear 200 "guardada": no se acepta como exito', ['error', false, false, false],
+      [r.estado, r.guardada, caja.classList.contains('ok'), exito.test(caja.innerHTML)]);
   });
 });
 

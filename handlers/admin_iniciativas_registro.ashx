@@ -33,7 +33,7 @@
 // filtro de Tipo de iniciativa) y dbo.ProblemFechaEvento (historial de fechas).
 // No crea ni cambia nada en la base.
 //
-// ACCESO: solo las cuentas de AdminAllowedUsers (AccesoAdmin.Exigir); el
+// ACCESO: AccesoAdmin.Exigir (rol ADM o MOD en dbo.UsuariosAdmin); el
 // resto recibe 403 antes de tocar la base.
 //
 // POR QUE NO USA DashboardHandler.Responder: el mismo motivo que

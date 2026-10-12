@@ -15,7 +15,7 @@
      P) PropuestaDuenos: consistencia con lo resuelto por el servidor; solo
         nombres de CatPersona; vista previa con dependientes; nunca guardado.
      V) VistaDuenos: carga perezosa una sola vez; cargando / error /
-        reintentar / listo; Guardar deshabilitado; sin peticiones de escritura.
+        reintentar / listo; "Guardar (no disponible)" deshabilitado; sin peticiones de escritura.
      S) Rol: el catalogo de dueños se pide solo al abrir Administracion (ADM),
         con la pagina real (admin/iniciativas.js).
 
@@ -200,8 +200,10 @@ pruebas.push(function () {
     t.$('cdCuerpo').disparar('click', { target: celda });
     var det = t.$('cdDetCuerpo').innerHTML;
     Check('V5 detalle: abierto, Guardar deshabilitado, aviso de no guardado', [false, true, true],
-      [t.$('cdDetalle').hidden, /<button type="button" class="btn chico" disabled aria-describedby="cdGuardarNota">Guardar<\/button>/.test(det),
+      [t.$('cdDetalle').hidden, /<button type="button" class="btn chico" disabled aria-describedby="cdGuardarNota">Guardar \(no disponible\)<\/button>/.test(det),
        /no se guardó nada/i.test(det)]);
+    Check('V5b nota: solo vista previa; ningun boton "Guardar" a secas', [true, false],
+      [/Solo vista previa: guardar se habilitará/.test(det), /<button[^>]*>\s*Guardar\s*<\/button>/.test(det)]);
     t.$('cdFiltro').value = 'faltantes';
     t.$('cdFiltro').disparar('change', { target: t.$('cdFiltro') });
     Check('V6 filtro cambia la lista', 1, (t.$('cdCuerpo').innerHTML.match(/<tr /g) || []).length);

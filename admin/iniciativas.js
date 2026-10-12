@@ -532,7 +532,8 @@ window.Iniciativas = (function () {
     }
 
     // Solo UX, como SesionAdmin: decide que acciones de ADM se pintan. El
-    // alta y la edicion de ADM no llaman al servidor en esta fase.
+    // alta y la edicion de ADM solo validan en el servidor (501, no
+    // guardan); el handler exige ADM por su cuenta (AccesoAdmin.ExigirAdm).
     fijarRol(rol) {
       if (this.denegada) return;
       this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;

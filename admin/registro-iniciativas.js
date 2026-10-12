@@ -109,8 +109,9 @@
      Cobertura        catalogo de categorias x iniciativas activas
      SolicitudCambio  borrador de "Solicitar cambios" de una iniciativa
      ("Modificar" y la marca Incompleta del detalle son de
-     admin/iniciativa-admin.js: EdicionAdmin e Incompleta; prototipo sin
-     persistencia, solo con rol ADM.)
+     admin/iniciativa-admin.js: EdicionAdmin e Incompleta; solo con rol
+     ADM. "Validar en el servidor (no guarda)" valida en
+     admin_iniciativas_gestion.ashx, que responde 501: no hay persistencia.)
      VistaRegistro    el DOM: carga, estados, KPIs, filtros, tabla, detalle,
                       y la vista Cobertura
 
@@ -957,8 +958,8 @@ window.RegistroIniciativas = (function () {
       this.$('regDetCuerpo').addEventListener('change', function (e) {
         if (e.target && e.target.id === 'regCambioCampo') self.elegirCampoCambio(e.target.value);
       });
-      // Edicion de ADM: actualiza el borrador en memoria; Guardar lo valida
-      // en el servidor (no guarda).
+      // Edicion de ADM: actualiza el borrador en memoria; "Validar en el
+      // servidor (no guarda)" lo valida (no guarda).
       this.$('regDetCuerpo').addEventListener('input', function (e) {
         var t = e.target, ed = self.edicion;
         if (!t || !t.getAttribute || !ed) return;
@@ -1494,7 +1495,7 @@ window.RegistroIniciativas = (function () {
       else if (accion === 'edicion-guardar') this.guardarEdicion();
     }
 
-    // ---- Modificar (ADM): PROTOTIPO, no guarda ----
+    // ---- Modificar (ADM): solo valida en el servidor, no guarda ----
     // Abre el detalle de la iniciativa con "Modificar" ya desplegado.
     modificar(folio, origen) {
       if (!this.puedeEditar()) return false;
@@ -1534,8 +1535,8 @@ window.RegistroIniciativas = (function () {
       return r;
     }
 
-    // Guardar: valida en el servidor (admin_iniciativas_gestion.ashx). No
-    // guarda: la respuesta real se pinta tal cual, nunca como exito. Sin
+    // "Validar en el servidor (no guarda)" (data-accion edicion-guardar):
+    // valida en admin_iniciativas_gestion.ashx. No guarda: la respuesta real se pinta tal cual, nunca como exito. Sin
     // cambios o con errores de formato locales no se envia.
     guardarEdicion(pedir) {
       var ed = this.edicion;

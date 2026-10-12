@@ -9,9 +9,11 @@
 //   4. Entrada: AccesoAdmin.Exigir deja pasar solo ADM o MOD; VIEWER recibe
 //      403 en la pagina y en todo handler admin_iniciativas_*.
 //   5. Permiso: AccesoAdmin.ExigirAdm para lo que es solo de ADM (hoy la
-//      consola de correos, admin_correos; y la creacion directa cuando tenga
-//      handler). Nueva solicitud (admin_iniciativas_validar y
-//      admin_iniciativas_capacidad) es de ADM y MOD: Exigir.
+//      consola de correos, admin_correos; crear y modificar directo,
+//      admin_iniciativas_gestion; el alta de categoria, admin_categorias_alta;
+//      y ?duenos=1 de admin_iniciativas_catalogos). Nueva solicitud
+//      (admin_iniciativas_validar y admin_iniciativas_capacidad) es de ADM
+//      y MOD: Exigir.
 //
 // REGLA (falla hacia el MENOR privilegio)
 // ---------------------------------------
@@ -28,9 +30,11 @@
 // espacios a los lados y sin distinguir mayusculas ("SORIANA\cuenta"; el
 // diagnostico de la VM confirmo que la tabla guarda ese formato).
 //
-// DESARROLLO LOCAL: no pasa por aqui. AccesoAdmin.Rol devuelve ADM antes de
-// llamar a esta clase cuando AccesoDesarrolloLocal.Activo (DEBUG + request
-// local + IIS Express). Ver App_Code/AccesoDesarrolloLocal.cs.
+// DESARROLLO LOCAL: no pasa por aqui. AccesoAdmin.Rol devuelve el rol de
+// desarrollo (ADMIN_DEV_ROL: ADM por omision, o MOD) antes de llamar a esta
+// clase cuando AccesoDesarrolloLocal lo concede (DEBUG + request local +
+// IIS Express + cuenta de desarrollo en la whitelist). Ver
+// App_Code/AccesoDesarrolloLocal.cs.
 //
 // La fuente de roles es una interfaz para probar sin SQL Server
 // (tools/tests/IdentidadAdminSmoke.cs y AccesoAdminHttpSmoke.cs).

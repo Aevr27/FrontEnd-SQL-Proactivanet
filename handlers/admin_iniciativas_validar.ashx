@@ -21,13 +21,12 @@
 // (que llego y no esta vacio); no se guarda en ningun lado porque no hay
 // destino confirmado.
 //
-// ACCESO: AccesoAdmin.Exigir: whitelist y rol ADM o MOD de
-// dbo.UsuariosAdmin (403 AccesoDenegado antes de leer nada para VIEWER,
-// fuera de la whitelist, anonimo o consulta de rol fallida). Solicitar es de
-// ADM y MOD; su UNICO llamador es Nueva solicitud (admin/iniciativas.js) y
-// aqui solo se valida, no se guarda ni se aprueba nada. La creacion directa
-// (solo ADM) NO pasa por este handler: cuando tenga escritura, su handler
-// tiene que usar ExigirAdm.
+// ACCESO: AccesoAdmin.Exigir: rol ADM o MOD de dbo.UsuariosAdmin (403
+// AccesoDenegado antes de leer nada para VIEWER, anonimo o consulta de rol
+// fallida). Solicitar es de ADM y MOD; su UNICO llamador es Nueva solicitud
+// (admin/iniciativas.js) y aqui solo se valida, no se guarda ni se aprueba
+// nada. La creacion directa (solo ADM) NO pasa por este handler: va a
+// admin_iniciativas_gestion.ashx, que usa ExigirAdm.
 
 using System;
 using System.Collections.Generic;

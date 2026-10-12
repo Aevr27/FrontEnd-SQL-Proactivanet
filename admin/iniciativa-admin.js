@@ -2,10 +2,13 @@
    admin/iniciativa-admin.js
 
    Gestion directa de ADM sobre iniciativas: crear y editar SIN el flujo de
-   solicitud. PROTOTIPO: nada de este archivo guarda, envia ni genera
-   codigo. No hay endpoint ni contrato de base para estas escrituras
-   todavia (Paso 0 en la VM pendiente, ver sql/diag_admin_alta_edicion.sql);
-   la persistencia real es una fase aparte.
+   solicitud. SOLO VALIDACION: el boton "Validar en el servidor (no guarda)"
+   manda los datos a handlers/admin_iniciativas_gestion.ashx, que los valida
+   y responde 501 PersistenciaNoHabilitada (PersistenciaGestionAdmin.
+   Habilitada es una constante false). Nada de este archivo guarda ni genera
+   codigo: no hay contrato de base aprobado para estas escrituras (Paso 0,
+   ver sql/diag_admin_alta_edicion.sql); la persistencia real es una fase
+   aparte. Un 501 NUNCA se pinta como exito.
 
    SEPARACION DE ROLES
    -------------------
@@ -16,9 +19,9 @@
      cualquier tipo y datos incompletos, incluso Problem sin RCA. Lo que
      falta no bloquea: se avisa como INCOMPLETA.
      Los botones solo se pintan con rol ADM (SesionAdmin; sin rol, MOD o
-     cualquier fallo = ocultos). Es solo UX: como aqui no hay ninguna
-     llamada al servidor, no hay nada que autorizar todavia; cuando exista
-     la escritura, su handler debe exigir ADM (AccesoAdmin.ExigirAdm).
+     cualquier fallo = ocultos). Es solo UX: la autorizacion la hace el
+     servidor, admin_iniciativas_gestion.ashx exige ADM (AccesoAdmin.
+     ExigirAdm) y responde 403 a MOD, VIEWER o anonimo.
 
    INCOMPLETA (marca DERIVADA, sin columna)
    ----------------------------------------
@@ -37,8 +40,8 @@
    CODIGO
    ------
      No se inventa ni se asigna: la regla de generacion (prefijo + año +
-     consecutivo) sigue sin contrato aprobado. El borrador muestra
-     "se asigna al guardar".
+     consecutivo) sigue sin contrato aprobado. El borrador muestra que no
+     se asigna todavia.
 
    PIEZAS
    ------
@@ -166,9 +169,10 @@ window.IniciativaAdmin = (function () {
     },
     titulo: function (r) {
       return {
-        no_habilitada: 'Validado en el servidor. No se guardó: la persistencia no está habilitada.',
-        invalida: 'El servidor rechazó los datos:',
-        denegado: 'Sin permiso: solo un administrador (ADM) puede hacerlo.',
+        no_habilitada: 'Solo validación: los datos son válidos en el servidor, pero NO se guardó nada. ' +
+          'No se guardó: la persistencia no está habilitada.',
+        invalida: 'El servidor rechazó los datos (no se guardó nada):',
+        denegado: 'Sin permiso: solo un administrador (ADM) puede hacerlo. No se validó ni se guardó nada.',
         no_disponible: 'No se pudo validar en el servidor (catálogo no disponible). No se guardó nada.',
         error: 'No se pudo completar la validación. No se guardó nada.'
       }[r.estado];
@@ -505,7 +509,8 @@ window.IniciativaAdmin = (function () {
       partes.push(r.faltantes.length ? htmlFaltantes(r.faltantes, 'Según el servidor.') : '<p>Sin datos faltantes.</p>');
     }
     partes.push(lista(r.advertencias, function (a) { return '<li>' + Escape.html(a) + '</li>'; }));
-    if (r.estado !== 'invalida') partes.push('<p class="ini-prototipo-aviso">' + Escape.html(r.mensaje) + '</p>');
+    // En un 422 los errores ya lo explican; sin errores, el mensaje del servidor.
+    if (r.estado !== 'invalida' || !r.errores.length) partes.push('<p class="ini-prototipo-aviso">' + Escape.html(r.mensaje) + '</p>');
     return partes.join('');
   }
 
@@ -537,7 +542,7 @@ window.IniciativaAdmin = (function () {
       (i.estado ? ' · ' + Escape.html(i.estado) : '') + ' (solo lectura)</p>';
     var legado = ed.notasLegado().map(function (n) { return '<p class="ini-nota">' + Escape.html(n) + '</p>'; }).join('');
     return '<h4>Modificar iniciativa</h4>' +
-      '<p class="ini-prototipo-aviso">Guardar valida en el servidor, pero la persistencia no está habilitada: ' +
+      '<p class="ini-prototipo-aviso">«Validar en el servidor» solo valida: la persistencia no está habilitada y ' +
         'no se guarda nada todavía. Además, mientras el Excel siga cargando, la carga reemplazaría estos campos.</p>' +
       ctx + legado +
       htmlFaltantes(ed.faltantesOriginales(), 'Ya faltaba antes de modificar.') +
@@ -551,10 +556,10 @@ window.IniciativaAdmin = (function () {
       '<div class="ini-cambio-msg" id="regEdMsg" role="status" aria-live="polite"></div>' +
       '<div class="ini-cambio-pie">' +
         '<button type="button" class="btn chico" data-accion="edicion-revisar">Revisar cambios</button> ' +
-        '<button type="button" class="btn chico" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">Guardar</button> ' +
+        '<button type="button" class="btn chico" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">Validar en el servidor (no guarda)</button> ' +
         '<button type="button" class="btn linea chico" data-accion="edicion-cancelar">Cancelar</button>' +
       '</div>' +
-      '<small class="ini-sub" id="regEdGuardarNota">Valida en el servidor (solo ADM); no guarda mientras la persistencia no esté habilitada.</small>';
+      '<small class="ini-sub" id="regEdGuardarNota">Solo valida en el servidor (solo ADM); no guarda mientras la persistencia no esté habilitada.</small>';
   }
 
   // Vista previa en vivo de "Modificar": que cambia y que faltantes
@@ -685,8 +690,8 @@ window.IniciativaAdmin = (function () {
       return r;
     }
 
-    // Valida en el servidor. Lo que se ve es SIEMPRE la respuesta real; si
-    // el borrador ya tiene errores locales, no se envia.
+    // "Validar en el servidor (no guarda)": lo que se ve es SIEMPRE la
+    // respuesta real; si el borrador ya tiene errores locales, no se envia.
     guardar() {
       if (!this.borrador || this.enviando) return Promise.resolve(null);
       var local = this.revisar();

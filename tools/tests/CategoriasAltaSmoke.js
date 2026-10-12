@@ -138,19 +138,54 @@ pruebas.push(function () {
       [r.estado, caja.classList.contains('aviso'), caja.classList.contains('ok'), /No se creó/.test(caja.innerHTML),
        /POST \/api\/Categories/.test(caja.innerHTML), /&quot;PadCategories_id&quot;: null/.test(caja.innerHTML), /bloqueo 2/.test(caja.innerHTML)]);
     Check('V7 nunca dice creada con exito', false, /creada con éxito|Categoría creada/.test(caja.innerHTML));
+    Check('V7b 501: el titulo empieza por "Solo validación" y dice que no se envió', [true, true],
+      [/<strong class="ini-prototipo-marca">Solo validación:/.test(caja.innerHTML), /NO se envió a Proactivanet/.test(caja.innerHTML)]);
     return t.v.validar();
   }).then(function (r) {
     Check('V8 422: errores del servidor', ['invalida', true, true], [r.estado, /dada de baja/.test(t.$('caResultado').innerHTML), t.$('caResultado').classList.contains('mal')]);
+    Check('V8b 422: "no se envió nada", sin "Solo validación"', [true, false],
+      [/no se envió nada/.test(t.$('caResultado').innerHTML), /Solo validación/.test(t.$('caResultado').innerHTML)]);
     return t.v.validar();
   }).then(function (r) {
     Check('V9 403', ['denegado', true], [r.estado, /Sin permiso/.test(t.$('caResultado').innerHTML)]);
+    Check('V9b 403: no se validó ni envió, clase mal', [true, true],
+      [/No se validó ni se envió nada/.test(t.$('caResultado').innerHTML), t.$('caResultado').classList.contains('mal')]);
     return t.v.validar();
   }).then(function (r) {
     Check('V10 503: no dice validada', ['no_disponible', false], [r.estado, /Validada/.test(t.$('caResultado').innerHTML)]);
     return t.v.validar();
   }).then(function (r) {
     Check('V11 red caida', ['error', true, false], [r.estado, /No se envió nada/.test(t.$('caResultado').innerHTML), t.$('caValidar').disabled]);
+    Check('V11b red caida: dice que no hubo contacto con el servidor', true, /No se pudo contactar al servidor/.test(t.$('caResultado').innerHTML));
   });
+});
+// V14-V16) Respuestas malformadas o sin lista de errores.
+pruebas.push(function () {
+  var t = Vista([Respuesta(200, { rutas: ['/A'] }),
+                 Respuesta(422, { valida: false, tipo: 'ValidacionFallida', error: 'Padre no válido.', errores: [] }),
+                 Respuesta(501, { valida: true, enviada: false, creada: false, error: 'Not Implemented' }),
+                 Respuesta(200, Object.assign({}, NO_HABILITADA, { creada: true }))]);
+  var caja = function () { return t.$('caResultado'); };
+  return t.v.abrir().then(function () {
+    escribir(t, 'ca-nombre', 'Nueva');
+    return t.v.validar();
+  }).then(function (r) {
+    Check('V14 422 sin lista de errores: muestra el mensaje del servidor', ['invalida', true], [r.estado, /Padre no válido\./.test(caja().innerHTML)]);
+    return t.v.validar();
+  }).then(function (r) {
+    Check('V15 501 sin tipo IntegracionNoHabilitada: error, nunca "Solo validación", clase mal', ['error', false, true],
+      [r.estado, /Solo validación/.test(caja().innerHTML), caja().classList.contains('mal')]);
+    return t.v.validar();
+  }).then(function (r) {
+    Check('V16 200 que dijera creada: error, nunca ok ni exito', ['error', false, false, false],
+      [r.estado, r.creada, caja().classList.contains('ok'), /creada con éxito|Categoría creada/.test(caja().innerHTML)]);
+  });
+});
+// H) Rotulos de la pagina: el boton dice que no envia.
+pruebas.push(function () {
+  var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
+  Check('H1 boton "Validar alta (no envía)" y aviso con el mismo nombre', [true, true],
+    [/<button type="button" class="btn" id="caValidar">Validar alta \(no envía\)<\/button>/.test(html), /«Validar alta \(no envía\)»/.test(html)]);
 });
 pruebas.push(function () {
   var t = Vista([Respuesta(500, { error: 'El servidor de SQL rechazo la consulta (error 53).' }), Respuesta(200, { rutas: ['/X'] })]);

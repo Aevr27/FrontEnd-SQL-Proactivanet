@@ -44,7 +44,8 @@
 // SOLO LECTURA (CatPrefijoProblem, CatCategoriaDueno, CatPersona y, con ?rutas=1,
 // Categorias). No crea ni cambia nada en la base, tampoco con ?duenos=1.
 //
-// ACCESO: AccesoAdmin.Exigir; el resto recibe 403 antes de tocar la base.
+// ACCESO: AccesoAdmin.Exigir (rol ADM o MOD); ?duenos=1 ademas ExigirAdm
+// (solo ADM). El resto recibe 403 antes de tocar la base.
 
 using System;
 using System.Collections.Generic;

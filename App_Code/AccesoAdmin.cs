@@ -44,8 +44,10 @@
 // App_Code/RolAdmin.cs) para la identidad Windows del request. Sin fila,
 // con un valor que no es ADM ni MOD, sin identidad o con la consulta
 // fallando, el rol es VIEWER y Exigir() responde 403 AccesoDenegado (falla
-// cerrado). Lo que es exclusivo de ADM (la consola de
-// correos; la creacion directa cuando tenga handler) llama a ExigirAdm():
+// cerrado). Lo que es exclusivo de ADM (la consola de correos; crear y
+// modificar directo, admin_iniciativas_gestion; el alta de categoria,
+// admin_categorias_alta; los duenos de categoria, ?duenos=1 de
+// admin_iniciativas_catalogos) llama a ExigirAdm():
 // quien entra como MOD recibe 403 { "tipo": "RolInsuficiente" }. Nueva
 // solicitud (validar, capacidad) es de ADM y MOD: Exigir(). El rol se
 // consulta una vez por request (HttpContext.Items); sin identidad
@@ -163,7 +165,8 @@ public static class AccesoAdmin
         return rol;
     }
 
-    // Para lo que es solo de ADM: whitelist y ademas rol ADM. true si sigue;
+    // Para lo que es solo de ADM: Exigir (rol ADM o MOD, o el atajo de
+    // desarrollo local) y ademas rol ADM. true si sigue;
     // si no, ya respondio 403 y hay que salir. `mensaje` cambia solo el
     // texto del 403 RolInsuficiente (p. ej. la consola de correos); la regla
     // es la misma.
