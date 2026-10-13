@@ -25,6 +25,14 @@
 //      "existente" (solo aviso de dependencia: no revisa, no valida, no pide
 //      nada). PO / SO ocultos en Crear; Administracion sin alta de
 //      categorias ni dueños a la vista.
+//   CV) Crear con varias categorias: agregar solo rutas reales, sin
+//      repetir; volumetria calculada (ok, cero, sin datos, error) que se
+//      refresca al cambiar de categoria; % por categoria.
+//   EX) Ligar a un problema existente: busqueda por codigo o nombre,
+//      resultados distinguibles, elegir solo uno real, abre su Modificar.
+//   ED) Modificar: fechas, Estado/Subestado (de la lista), agregar y quitar
+//      categorias, el Codigo nunca viaja como cambio.
+//   SL) Selector: <select> hasta 20 opciones, caja con busqueda despues.
 //   G) "Validar en el servidor (no guarda)" en Crear y Modificar: 501 es
 //      solo validacion (nunca exito); 422, 403, 503, red, 500 y un 501 o
 //      200 malformados, cada uno con su mensaje y sin decir "guardado".
@@ -117,6 +125,13 @@ var CATALOGO = {
   tipo_problem: 'PRB', rutas: RUTAS, rutas_sin_duenos: 0, rutas_duenos_no_vigentes: 0
 };
 
+// Volumetria simulada por ruta (handlers/admin_iniciativas_volumetria.ashx).
+var VOLUMETRIAS = {
+  '/A/Cat 1': { ruta: '/A/Cat 1', estado: 'ok', volumetria: 418 },
+  '/A/Cat 2': { ruta: '/A/Cat 2', estado: 'cero', volumetria: 0 },
+  '/B/Cat 4': 'error'
+};
+
 function Ini(folio, o) {
   var i = {
     folio: folio, titulo: 'T ' + folio, titulo_problem: 'T ' + folio, agrup: 'Problem', estado: 'En Análisis',
@@ -153,6 +168,12 @@ function Pagina(conAdmin) {
     pedidos.push({ url: url, metodo: (opciones && opciones.method) || 'GET' });
     if (/registro/.test(url)) return Promise.resolve(Respuesta(200, JSON.parse(JSON.stringify(REGISTRO))));
     if (/catalogos/.test(url)) return Promise.resolve(Respuesta(200, CATALOGO));
+    if (/volumetria/.test(url)) {
+      var ruta = decodeURIComponent((/ruta=([^&]*)/.exec(url) || [])[1] || '');
+      var v = VOLUMETRIAS[ruta];
+      if (v === 'error') return Promise.resolve(Respuesta(503, { error: 'error 53', tipo: 'VolumetriaNoDisponible' }));
+      return Promise.resolve(Respuesta(200, { slot: 0, rutas: [v || { ruta: ruta, estado: 'cero', volumetria: 0 }] }));
+    }
     return Promise.reject(new Error('peticion inesperada ' + url));
   }
   (new Function('window', leer('assets/js/escape.js')))(ventana);
@@ -220,7 +241,7 @@ pruebas.push(function () {
   Check('I10 existente: solo Categoria y % salen del registro', ['categoria', 'pct'],
     Object.keys(A.Incompleta.datosDeRegistro(REGISTRO.iniciativas[0])));
   Check('I11 CAMPOS_REGISTRO = Categoria y %', ['categoria', 'pct'], A.Incompleta.CAMPOS_REGISTRO);
-  Check('I12 el borrador conserva la lista completa', ['categoria', 'titulo', 'descripcion', 'observaciones', 'volumetria', 'pct', 'rca'],
+  Check('I12 el borrador: la lista completa, sin Volumetria (es calculada)', ['categoria', 'titulo', 'descripcion', 'observaciones', 'pct', 'rca'],
     A.CAMPOS_INCOMPLETA.map(function (c) { return c.clave; }));
 });
 
@@ -240,27 +261,27 @@ pruebas.push(function () {
   b.elegirTipo('PRB');
   r = b.revisar();
   Check('B4 PRB vacio y sin RCA se puede preparar (no bloquea)', true, r.listo);
-  Check('B5 ... y queda incompleta, con RCA entre los faltantes',
-    [true, ['categoria', 'titulo', 'descripcion', 'observaciones', 'volumetria', 'pct', 'rca']], [r.incompleta, claves(r.faltantes)]);
+  Check('B5 ... y queda incompleta, con RCA entre los faltantes (sin categorias el % no se pide aparte)',
+    [true, ['categoria', 'titulo', 'descripcion', 'observaciones', 'rca']], [r.incompleta, claves(r.faltantes)]);
   Check('B6 nunca codigo ni guardado; siempre el aviso de prototipo', [null, false, true],
     [r.codigo, r.guardado, /No se guardó nada/.test(r.aviso)]);
 
   b.elegirTipo('ADO');
   Check('B7 otro tipo sin RCA: el RCA no falta', false, claves(b.faltantes()).indexOf('rca') >= 0);
 
-  Check('B8 la categoria se elige sin PO ni SO (todo opcional)', [true, '/B/Cat 4'], [b.elegir(2, '/B/Cat 4'), b.categoria()]);
-  Check('B9 categoria fuera del catalogo no se acepta', [false, ''], [b.elegir(2, '/Inventada'), b.categoria()]);
+  Check('B8 la categoria se agrega sin PO ni SO (todo opcional)', [true, ['/B/Cat 4']],
+    [b.agregarCategoria('/B/Cat 4').ok, b.categorias.activas().map(function (f) { return f.categoria; })]);
+  Check('B9 categoria fuera del catalogo no se acepta', [false, 1], [b.agregarCategoria('/Inventada').ok, b.categorias.filas.length]);
 
-  b.capturar('pct', '150');
-  b.capturar('volumetria', '2.5');
+  b.categorias.capturarPct(0, '150');
   r = b.revisar();
-  Check('B10 formatos invalidos si bloquean', [false, ['volumetria', 'pct']], [r.listo, claves(r.formato)]);
+  Check('B10 % invalido si bloquea', [false, ['pct']], [r.listo, claves(r.formato)]);
 
   b.elegirTipo('PRB');
-  b.elegir(2, '/A/Cat 1');
+  b.categorias.quitar(0);
+  b.agregarCategoria('/A/Cat 1');
   ['titulo', 'descripcion', 'observaciones'].forEach(function (k) { b.capturar(k, 'x'); });
-  b.capturar('volumetria', '12');
-  b.capturar('pct', '25.5');
+  b.categorias.capturarPct(0, '25.5');
   b.elegirRca({ name: 'rca.pdf', size: 10 });
   r = b.revisar();
   Check('B11 completo: listo, sin faltantes, aun sin guardar', [true, false, [], false], [r.listo, r.incompleta, r.faltantes, r.guardado]);
@@ -301,15 +322,16 @@ pruebas.push(function () {
     pg.fijarRol('ADM');
     pg.mostrarVista('crear');
     Check('C1 tipos del catalogo con su Descripcion', ['PRB', 'ADO', 'MAP'], p.sel('admTipo').opciones());
-    Check('C2 categoria habilitada sin elegir PO (cascada opcional)', [false, ['/A/Cat 1', '/A/Cat 2', '/B/Cat 4']],
-      [p.sel('admCategoria').disabled, p.sel('admCategoria').opciones()]);
+    Check('C2 selector de categoria con las rutas (3 <= 20: select normal)', [false, true, 3],
+      [p.sel('admCatAgregar').disabled, /<select id="admCatBuscar"/.test(p.sel('admCatSelector').innerHTML),
+       (p.sel('admCatSelector').innerHTML.match(/<option value="\//g) || []).length]);
     elegir(p, 'admTipo', 'PRB');
     Check('C3 aviso en vivo: incompleta, con RCA', true,
       /Incompleta/.test(p.sel('admFaltantes').innerHTML) && /RCA/.test(p.sel('admFaltantes').innerHTML));
     Check('C4 nota RCA de Problem: no bloquea', true, /sin RCA queda incompleta/.test(p.sel('admRcaNota').textContent));
     escribir(p, 'adm-titulo', 'Caída de X');
     Check('C5 escribir quita el faltante', false, /Título/.test(p.sel('admFaltantes').innerHTML));
-    elegir(p, 'admCategoria', '/B/Cat 4');
+    p.pagina.crearAdmin.agregarCategoria('/B/Cat 4');
     Check('C6 Director derivado de la categoria', 'Dir B', p.sel('admDirector').textContent);
     p.sel('admRevisar').disparar('click');
     var res = p.sel('admResultado');
@@ -342,8 +364,11 @@ pruebas.push(function () {
     Check('E5b el boton dice que solo valida; ningun boton "Guardar" a secas', [true, false],
       [/data-accion="edicion-guardar"[^>]*>Validar en el servidor \(no guarda\)<\/button>/.test(html),
        /<button[^>]*>\s*Guardar\s*<\/button>/.test(html)]);
-    Check('E6 lista lo que no es editable, con motivo', true,
-      /Fechas compromiso/.test(html) && /pendiente de contrato/.test(html) && /solo lectura/.test(html));
+    Check('E6 lista lo que no es editable, con motivo (RCA pendiente; codigo y dueños solo lectura)', true,
+      /<b>RCA<\/b> · pendiente de contrato/.test(html) && /<b>Código y Tipo de iniciativa<\/b> · solo lectura/.test(html));
+    Check('E6b fechas, Estado y categorias ya son editables', [true, true, true],
+      [/type="date" id="regEd-f_analisis" data-edicion="f_analisis" value="2026-12-01"/.test(html),
+       /Estado<\/span><p class="ini-nota">En Análisis · sin lista de valores: no se puede cambiar\./.test(html), /id="regEdCats"/.test(html)]);
 
     editar(p, 'data-edicion', 'titulo', 'Nuevo titulo');
     editar(p, 'data-edicion', 'descripcion', '');
@@ -369,7 +394,8 @@ pruebas.push(function () {
       [reg.edicion, p.sel('regEdicion').hidden, />Modificar<\/button>/.test(p.sel('regDetAcciones').innerHTML)]);
 
     var editables = A.EdicionAdmin.campos('editable').map(function (c) { return c.clave; });
-    Check('E13 editables propuestos', ['titulo', 'descripcion', 'observaciones', 'pct'], editables);
+    Check('E13 editables propuestos', ['titulo', 'descripcion', 'observaciones', 'f_analisis', 'f_solucion', 'f_cierre',
+      'estado', 'subestado', 'categorias'], editables);
     Check('E14 codigo y dueños son solo lectura', ['codigo', 'duenos', 'calculados'],
       A.EdicionAdmin.campos('solo_lectura').map(function (c) { return c.clave; }));
 
@@ -386,8 +412,8 @@ pruebas.push(function () {
     Check('M3 la lista no lleva la marca (espera E10)', false, /Incompleta/.test(p.sel('regCuerpo').innerHTML));
 
     // P) solo los GET de lectura
-    Check('P1 solo GET de registro y catalogo', true, p.pedidos.every(function (x) {
-      return x.metodo === 'GET' && /admin_iniciativas_(registro|catalogos)\.ashx/.test(x.url);
+    Check('P1 solo GET de registro, catalogo y volumetria', true, p.pedidos.every(function (x) {
+      return x.metodo === 'GET' && /admin_iniciativas_(registro|catalogos|volumetria)\.ashx/.test(x.url);
     }));
   });
 });
@@ -548,8 +574,8 @@ pruebas.push(function () {
 
     reg.modificar('PRB 2026-000002');
     html = p.sel('regEdicion').innerHTML;
-    Check('MD9 sin categoria: dueños del Problem se conservan; sin % que editar; Categoria ya faltaba', [true, true, true],
-      [/OwnerProblem, OwnerServicio, Direccion\) y se conservan/.test(html), /Sin categorías: no hay % que editar/.test(html),
+    Check('MD9 sin categoria: dueños del Problem se conservan; sin categorias todavia; Categoria ya faltaba', [true, true, true],
+      [/OwnerProblem, OwnerServicio, Direccion\) y se conservan/.test(html), /Sin categorías todavía/.test(html),
        /Incompleta<\/strong> · faltan: Categoría\./.test(html)]);
 
     p.sel('btnCrearAdmin').disparar('click');
@@ -575,8 +601,9 @@ pruebas.push(function () {
 pruebas.push(function () {
   var src = leer('admin/iniciativa-admin.js');
   var codigo = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  Check('P3 iniciativa-admin.js solo habla con admin_iniciativas_gestion.ashx, por POST',
-    [1, ['\'../handlers/admin_iniciativas_gestion.ashx\''], ["method: 'POST'"], false],
+  Check('P3 iniciativa-admin.js solo habla con gestion (POST) y volumetria (GET)',
+    [2, ['\'../handlers/admin_iniciativas_gestion.ashx\'', '\'../handlers/admin_iniciativas_volumetria.ashx\''],
+     ["method: 'GET'", "method: 'POST'"], false],
     [(codigo.match(/\bfetch\(/g) || []).length, codigo.match(/'\.\.\/handlers\/[^']+'/g), codigo.match(/method: '[A-Z]+'/g),
      /XMLHttpRequest|sendBeacon/.test(codigo)]);
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
@@ -641,17 +668,18 @@ pruebas.push(function () {
   var html = leer('admin/iniciativas.html');
   var sinCom = html.replace(/<!--[\s\S]*?-->/g, '');
   var crear = sinCom.slice(sinCom.indexOf('id="panel-crear-admin"'), sinCom.indexOf('id="regDetFondo"'));
-  Check('R1 PO y SO de Crear siguen en el DOM pero ocultos', [true, true],
-    [/<div class="ini-campo" hidden><label for="admPo">Product Owner<\/label><select id="admPo" disabled><\/select><\/div>/.test(crear),
-     /<div class="ini-campo" hidden><label for="admSo">Service Owner<\/label><select id="admSo" disabled><\/select><\/div>/.test(crear)]);
-  Check('R1 Categoria de Crear sigue visible', true,
-    /<div class="ini-campo"><label for="admCategoria">Categoría<\/label>/.test(crear));
+  Check('R1 PO y SO ya no se eligen en Crear (viajan vacios)', [false, false], [/id="admPo"/.test(crear), /id="admSo"/.test(crear)]);
+  Check('R1 Categorias de Crear: selector, agregar y tabla', [true, true, true],
+    [/id="admCatSelector"/.test(crear), /id="admCatAgregar"/.test(crear), /id="admCats"/.test(crear)]);
   Check('R2 dos caminos; "nuevo" marcado por omision', [true, true, true],
     [/<input type="radio" name="admRuta" id="admRutaNuevo" value="nuevo" checked>/.test(crear),
      /<input type="radio" name="admRuta" id="admRutaExistente" value="existente">/.test(crear),
-     /id="admExistentePendiente" role="note" hidden>/.test(crear)]);
-  Check('R2 el camino "nuevo" conserva todos los campos de captura', true,
-    ['admTipo', 'admCategoria', 'adm-titulo', 'adm-descripcion', 'adm-observaciones', 'adm-volumetria', 'adm-pct', 'admRca']
+     /id="admExistente" hidden>/.test(crear)]);
+  Check('R2 el camino "nuevo" conserva sus campos; la volumetria ya no se captura', [true, false],
+    [['admTipo', 'admCatSelector', 'adm-titulo', 'adm-descripcion', 'adm-observaciones', 'admRca']
+      .every(function (id) { return crear.indexOf('id="' + id + '"') > 0; }), /id="adm-volumetria"|id="adm-pct"/.test(crear)]);
+  Check('R2 "existente": buscador y lista', true,
+    ['admExistenteBuscar', 'admExistenteLista']
       .every(function (id) { return crear.indexOf('id="' + id + '"') > 0; }));
   var adm = sinCom.slice(sinCom.indexOf('id="panel-administracion"'), sinCom.indexOf('id="panel-nueva"'));
   Check('R3 Administracion: sin alta de categorias; dueños nace oculta', [false, false, true],
@@ -669,15 +697,15 @@ pruebas.push(function () {
     Check('R4 abrir Administracion: dueños oculto, sin pedir ?duenos=1', [true, false],
       [p.sel('cdSeccion').hidden, p.pedidos.some(function (x) { return /duenos=1/.test(x.url); })]);
     pg.mostrarVista('crear');
-    Check('R5 por omision "nuevo": formulario a la vista, aviso oculto, botones activos', ['nuevo', false, true, false, false],
-      [v.ruta, p.sel('admForm').hidden, p.sel('admExistentePendiente').hidden, p.sel('admRevisar').disabled, p.sel('admGuardar').disabled]);
+    Check('R5 por omision "nuevo": formulario a la vista, buscador oculto, botones activos', ['nuevo', false, true, false, false],
+      [v.ruta, p.sel('admForm').hidden, p.sel('admExistente').hidden, p.sel('admRevisar').disabled, p.sel('admGuardar').disabled]);
     elegir(p, 'admTipo', 'ADO');
     escribir(p, 'adm-titulo', 'Borrador que no se pierde');
     var antes = p.pedidos.length;
     var r = p.sel('admRutaExistente');
     r.value = 'existente'; r.checked = true; r.disparar('change');
-    Check('R6 "existente": aviso visible, formulario y faltantes ocultos, botones apagados', ['existente', true, false, true, true, true],
-      [v.ruta, p.sel('admForm').hidden, p.sel('admExistentePendiente').hidden, p.sel('admFaltantes').hidden,
+    Check('R6 "existente": buscador visible, formulario y faltantes ocultos, botones apagados', ['existente', true, false, true, true, true],
+      [v.ruta, p.sel('admForm').hidden, p.sel('admExistente').hidden, p.sel('admFaltantes').hidden,
        p.sel('admRevisar').disabled, p.sel('admGuardar').disabled]);
     Check('R7 "existente": revisar no hace nada', null, v.revisar());
     return v.guardar().then(function (g) {
@@ -801,14 +829,16 @@ pruebas.push(function () {
   }).then(function (r) {
     Check('G12 sin tipo: no se envia (bloqueante local)', [null, 0], [r, srv.pedidos.length]);
     elegir(p, 'admTipo', 'ADO');
-    elegir(p, 'admCategoria', '/A/Cat 2');
-    escribir(p, 'adm-pct', '15');
+    p.pagina.crearAdmin.agregarCategoria('/A/Cat 2');
+    p.pagina.crearAdmin.agregarCategoria('/A/Cat 1');
+    p.pagina.crearAdmin.borrador.categorias.capturarPct(0, '15');
     return p.pagina.crearAdmin.guardar();
   }).then(function (r) {
     var caja = p.sel('admResultado'), campos = {};
     srv.pedidos[0].campos.forEach(function (c) { campos[c[0]] = c[1]; });
-    Check('G13 envia accion=crear con la cascada parcial', ['crear', 'ADO', '', '/A/Cat 2', '15'],
-      [campos.accion, campos.tipo, campos.po, campos.categoria, campos.pct]);
+    Check('G13 envia accion=crear con dos categorias y su %', ['crear', 'ADO', '', [['cat_ruta', '/A/Cat 2'], ['cat_pct', '15'], ['cat_ruta', '/A/Cat 1'], ['cat_pct', '']]],
+      [campos.accion, campos.tipo, campos.po, srv.pedidos[0].campos.filter(function (c) { return /^cat_/.test(c[0]); })]);
+    Check('G13 la volumetria no viaja (es calculada)', false, srv.pedidos[0].campos.some(function (c) { return /volumetria/.test(c[0]); }));
     Check('G14 501: aviso, faltantes del servidor, nunca ok', ['no_habilitada', true, false, true, true],
       [r.estado, caja.classList.contains('aviso'), caja.classList.contains('ok'), /Incompleta/.test(caja.innerHTML), /No se guardó/.test(caja.innerHTML)]);
     Check('G15 Guardar se reactiva', false, p.sel('admGuardar').disabled);
@@ -867,6 +897,153 @@ pruebas.push(function () {
   }).then(function (r) {
     Check('G23 Crear 200 "guardada": no se acepta como exito', ['error', false, false, false],
       [r.estado, r.guardada, caja.classList.contains('ok'), exito.test(caja.innerHTML)]);
+  });
+});
+
+// SL) Selector
+pruebas.push(function () {
+  var S = A.Selector, veinte = [], veintiuna = [];
+  for (var n = 1; n <= 21; n++) { if (n <= 20) veinte.push('/R/' + n); veintiuna.push('/R/' + n); }
+  Check('SL1 hasta 20 opciones: select', [true, false], [/^<select id="x"/.test(S.html('x', veinte, '')), /datalist/.test(S.html('x', veinte, ''))]);
+  Check('SL2 21 opciones: caja con busqueda (input list + datalist)', [true, true],
+    [/^<input type="text" id="x" list="x-lista"/.test(S.html('x', veintiuna, '')), /<datalist id="x-lista">/.test(S.html('x', veintiuna, ''))]);
+  Check('SL3 resolver: solo una opcion real, sin mayusculas ni espacios de mas', ['/R/3', '', ''],
+    [S.resolver('  /r/3 ', veintiuna), S.resolver('/R/', veintiuna), S.resolver('', veintiuna)]);
+  Check('SL4 escapa valores', true, /value="\/A&quot;B"/.test(S.html('x', ['/A"B'], '')));
+});
+
+// CV) Crear con varias categorias + volumetria
+pruebas.push(function () {
+  var p = Pagina(), v;
+  return esperar().then(function () {
+    var pg = p.pagina;
+    pg.fijarRol('ADM');
+    pg.mostrarVista('crear');
+    v = pg.crearAdmin;
+    elegir(p, 'admTipo', 'ADO');
+    var cats = v.borrador.categorias;
+    Check('CV1 escribir algo que no es categoria no agrega nada', [false, 0, true],
+      [v.agregarCategoria('/A/Cat').ok, cats.filas.length, /no es una categoría vigente/.test(p.sel('admCatMsg').textContent)]);
+    Check('CV2 agregar una real (sin distinguir mayusculas): toma la ruta del catalogo', [true, '/A/Cat 1'],
+      [v.agregarCategoria('/a/cat 1').ok, cats.filas[0].categoria]);
+    Check('CV3 agregarla otra vez se rechaza (duplicado)', [false, 1, true],
+      [v.agregarCategoria('/A/Cat 1').ok, cats.filas.length, /ya está en la lista/.test(p.sel('admCatMsg').textContent)]);
+    Check('CV4 al agregar: consultando…', true, /Consultando…/.test(p.sel('admCats').innerHTML));
+    v.agregarCategoria('/A/Cat 2');
+    v.agregarCategoria('/B/Cat 4');
+    return esperar().then(esperar);
+  }).then(function () {
+    var html = p.sel('admCats').innerHTML;
+    Check('CV5 volumetria: ok, cero real y error (nunca 0 si fallo)', [true, true, true, false],
+      [/418 tickets \(últimos 30 días\)/.test(html), /0 tickets en los últimos 30 días/.test(html),
+       /No se pudo consultar: error 53/.test(html), /ini-vol mal[^<]*>0 tickets/.test(html)]);
+    Check('CV6 la volumetria es de solo lectura (output, sin input)', [true, false],
+      [/<output class="ini-vol/.test(html), /data-crear-vol|name="volumetria"/.test(html)]);
+    Check('CV6 % editable por categoria', 3, (html.match(/data-crear-pct="/g) || []).length);
+    Check('CV7 directores distintos: no se adivina', '—', p.sel('admDirector').textContent);
+    // cambiar de categoria: quitar /B/Cat 4 y poner otra refresca la tabla
+    var b = Elemento('b'); b.setAttribute('data-crear-cat', 'quitar'); b.setAttribute('data-indice', '2');
+    p.sel('admCats').disparar('click', { target: b });
+    Check('CV8 quitar una nueva la descarta y refresca', [2, false, 'Dir A'],
+      [v.borrador.categorias.filas.length, /error 53/.test(p.sel('admCats').innerHTML), p.sel('admDirector').textContent]);
+    var t = Elemento('t'); t.setAttribute('data-crear-pct', '0'); t.value = '40';
+    p.sel('admCats').disparar('input', { target: t });
+    Check('CV9 % por categoria en el modelo', ['40', ''], v.borrador.categorias.filas.map(function (f) { return f.valor; }));
+    Check('CV10 una sin %: Incompleta por %', true, /% Disminución/.test(p.sel('admFaltantes').innerHTML));
+    var vol = new A.VolumetriaCliente(function () { return Promise.resolve(Respuesta(200, { rutas: [{ estado: 'sin_datos', volumetria: null }] })); });
+    return vol.consultar('/X').then(function (e) {
+      Check('CV11 sin datos: se dice, no es 0', ['sin_datos', null, true],
+        [e.estado, e.valor, /Sin datos de tickets/.test(A.VolumetriaCliente.texto(e))]);
+      var caida = new A.VolumetriaCliente(function () { return Promise.reject(new Error('red')); });
+      return caida.consultar('/X');
+    }).then(function (e) {
+      Check('CV12 red caida: error, y se puede reintentar', ['error', null], [e.estado, e.valor]);
+    });
+  });
+});
+
+// EX) Ligar a un problema existente
+pruebas.push(function () {
+  var p = Pagina(), v, elegidos = [];
+  return esperar().then(function () {
+    var pg = p.pagina;
+    pg.fijarRol('ADM');
+    pg.mostrarVista('crear');
+    v = pg.crearAdmin;
+    var r = p.sel('admRutaExistente');
+    r.value = 'existente'; r.checked = true; r.disparar('change');
+    Check('EX1 sin texto: pide escribir', true, /Escribe parte del código o del nombre/.test(p.sel('admExistenteLista').innerHTML));
+    escribir(p, 'admExistenteBuscar', '2026-00000');
+    var html = p.sel('admExistenteLista').innerHTML;
+    Check('EX2 busca por codigo parcial', [true, true, true],
+      [/data-existente="PRB 2026-000001"/.test(html), /data-existente="PRB 2026-000002"/.test(html), /data-existente="MAP 2026-000003"/.test(html)]);
+    escribir(p, 'admExistenteBuscar', 'map-2026-3');
+    html = p.sel('admExistenteLista').innerHTML;
+    Check('EX3 separadores y ceros no importan; muestra estado y categorias para distinguir', [1, true, true],
+      [(html.match(/data-existente=/g) || []).length, /En Solución/.test(html), /1 categoría/.test(html)]);
+    escribir(p, 'admExistenteBuscar', 't prb 2026-000002');
+    Check('EX4 por nombre (parcial)', true, /data-existente="PRB 2026-000002"/.test(p.sel('admExistenteLista').innerHTML));
+    escribir(p, 'admExistenteBuscar', 'no existe nada asi');
+    Check('EX5 sin coincidencias: lo dice y no crea nada', true, /No hay problemas que coincidan/.test(p.sel('admExistenteLista').innerHTML));
+    Check('EX6 un folio escrito a mano que no esta en el registro no se elige', false, v.elegirExistente('PRB 2099-000001'));
+    var b = Elemento('b'); b.setAttribute('data-existente', 'PRB 2026-000001');
+    p.sel('admExistenteLista').disparar('click', { target: b });
+    var reg = p.registro;
+    Check('EX7 elegir uno real abre su Modificar en Iniciativas, con sus categorias y %', ['iniciativas', 'PRB 2026-000001', ['50', '25']],
+      [pg.vista, reg.abierta, reg.edicion.categorias.filas.map(function (f) { return f.valor; })]);
+    Check('EX8 el codigo no cambia: solo identifica', 'PRB 2026-000001', reg.edicion.paraEnviar()[1][1]);
+    elegidos.push(1);
+  });
+});
+
+// ED) Modificar: fechas, Estado, categorias
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro, pg = p.pagina;
+    reg.registro.estadosProblem = ['En Análisis', 'En Solución', 'Cerrado'];
+    reg.registro.subestadosProblem = ['En Análisis', 'Solucionado'];
+    pg.fijarRol('ADM');
+    reg.modificar('PRB 2026-000001');
+    var ed = reg.edicion;
+    editar(p, 'data-edicion', 'f_cierre', '2027-01-31');
+    editar(p, 'data-edicion', 'f_analisis', '2026-02-30');
+    var r = ed.revisar();
+    Check('ED1 fecha invalida bloquea; la valida es un cambio', [false, true],
+      [r.listo, r.cambios.some(function (c) { return c.clave === 'f_cierre' && c.nuevo === '2027-01-31'; })]);
+    editar(p, 'data-edicion', 'f_analisis', '2026-12-01');
+    editar(p, 'data-edicion', 'estado', 'Pausado');
+    Check('ED2 Estado fuera de la lista bloquea', false, ed.revisar().listo);
+    editar(p, 'data-edicion', 'estado', 'Cerrado');
+    r = ed.revisar();
+    Check('ED3 Estado de la lista: cambio', [true, true], [r.listo, r.cambios.some(function (c) { return c.clave === 'estado' && c.nuevo === 'Cerrado'; })]);
+    Check('ED3 aviso: sin reglas de transicion', true, ed.notasLegado().some(function (n) { return /transición/.test(n); }));
+    Check('ED4 sin Subestado en el registro: no se edita (no se sabe el actual)', true,
+      /El registro no trajo el Subestado/.test(p.sel('regEdicion').innerHTML));
+    Check('ED5 agregar una ruta que ya esta ligada: rechazo', false, reg.agregarCategoriaEdicion('/A/Cat 1').ok);
+    Check('ED5b las rutas para agregar vienen del catalogo que cargo la pagina', ['/A/Cat 1', '/A/Cat 2', '/B/Cat 4'], reg.rutasCatalogo);
+    Check('ED5c escribir una ruta que no existe: rechazo', false, reg.agregarCategoriaEdicion('/B/Cat').ok);
+    Check('ED6 con catalogo: agregar una nueva', [true, 3], [reg.agregarCategoriaEdicion('/b/cat 4').ok, ed.categorias.filas.length]);
+    var q = Elemento('q'); q.setAttribute('data-edicion-cat', 'quitar'); q.setAttribute('data-indice', '1');
+    p.sel('regDetCuerpo').disparar('click', { target: q });
+    Check('ED7 quitar una ligada: queda marcada, no se borra', [3, true], [ed.categorias.filas.length, ed.categorias.filas[1].quitada]);
+    var pares = ed.paraEnviar();
+    Check('ED8 lo que viaja: folio, fechas, estado, agregar y quitar', [
+      ['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['f_cierre', '2027-01-31'], ['estado', 'Cerrado'],
+      ['quitar_categoria', '/A/Cat 2'], ['agregar_categoria', '/B/Cat 4'], ['agregar_pct', '']], pares);
+    Check('ED9 el codigo nunca viaja como cambio', false, ed.cambios().some(function (c) { return c.clave === 'folio' || c.clave === 'codigo'; }));
+    var res = Elemento('r'); res.setAttribute('data-edicion-cat', 'restaurar'); res.setAttribute('data-indice', '1');
+    p.sel('regDetCuerpo').disparar('click', { target: res });
+    Check('ED10 restaurar la quitada', false, ed.categorias.filas[1].quitada);
+    Check('ED11 la agregada pide su volumetria (en curso o ya resuelta)', true, !!reg.volumetria.estado('/B/Cat 4'));
+    Check('ED12 el registro no cambia', ['En Análisis', 2], [reg.registro.buscar('PRB 2026-000001').estado,
+      reg.registro.buscar('PRB 2026-000001').categorias.length]);
+ 
+    return esperar().then(esperar).then(function () {
+      Check('ED13 ... y la pide al servidor por GET', true, p.pedidos.some(function (x) {
+        return x.metodo === 'GET' && /volumetria\.ashx\?ruta=%2FB%2FCat%204/.test(x.url); }));
+      Check('ED14 su estado se pinta (error simulado: no se pudo consultar)', true, /No se pudo consultar/.test(p.sel('regEdCats').innerHTML));
+    });
   });
 });
 

@@ -712,3 +712,28 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-ruta-problema legend { font-weight: 700; padding: 0 4px; }
 .ini-ruta-problema label { display: inline-flex; align-items: center; gap: 6px; }
 .ini-campo[hidden], .ini-form[hidden] { display: none; }
+
+/* Categorias de un problema (Crear y Modificar): agregar con selector
+   (caja con busqueda si hay mas de 20), volumetria calculada de solo
+   lectura y el % de cada una. */
+.ini-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ini-cat-agregar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+.ini-cat-agregar input[list], .ini-cat-agregar select { flex: 1; min-width: 220px; }
+.ini-cats-tabla td { vertical-align: middle; }
+.ini-cat-estado { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px;
+  font-size: 10.5px; background: var(--bg-2); color: var(--muted); }
+.ini-cat-estado.nueva { color: var(--accent-ink); }
+.ini-cat-quitada td { color: var(--muted); text-decoration: line-through; }
+.ini-cat-quitada td:last-child { text-decoration: none; }
+.ini-vol { font-size: 12px; color: var(--ink-2); }
+.ini-vol.aviso { color: var(--muted); font-style: italic; }
+.ini-vol.mal { color: var(--rojo); }
+.ini-motivo.mal { color: var(--rojo); }
+
+/* Ligar a un problema existente: buscador y resultados. */
+.ini-existente-caja { display: flex; flex-direction: column; gap: 6px; margin: 0 0 12px; }
+.ini-existente-caja[hidden] { display: none; }
+.ini-existentes { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 6px; }
+.ini-existente { width: 100%; text-align: left; padding: 8px 10px; border: 1px solid var(--line);
+  border-radius: var(--radius-xs); background: var(--card); color: var(--ink); font: inherit; font-size: 12.5px; cursor: pointer; }
+.ini-existente:hover, .ini-existente:focus-visible { border-color: var(--accent); outline: none; }

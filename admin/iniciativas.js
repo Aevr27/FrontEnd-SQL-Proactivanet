@@ -585,7 +585,18 @@ window.Iniciativas = (function () {
       // El registro carga por su cuenta, en paralelo con el catalogo de
       // Nueva solicitud: un fallo de uno no bloquea al otro.
       this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
-      if (window.IniciativaAdmin) this.crearAdmin = new window.IniciativaAdmin.VistaCrearAdmin(this.doc);
+      if (window.IniciativaAdmin) {
+        // La volumetria (GET) va por el mismo fetch de la pagina; la
+        // validacion (POST) por el suyo.
+        this.crearAdmin = new window.IniciativaAdmin.VistaCrearAdmin(this.doc, null,
+          function (url, op) { return fetch(url, op); });
+        // "Ligar a un problema existente": busca en el registro ya cargado y,
+        // al elegir uno, abre su "Modificar" en Iniciativas.
+        var reg = this.registro;
+        this.crearAdmin.fijarProblemas(
+          function () { return reg && reg.registro ? reg.registro.iniciativas : null; },
+          function (folio) { self.mostrarVista('iniciativas'); reg.modificar(folio); });
+      }
       if (DUENOS_VISIBLES && window.CategoriasDuenos) this.duenos = new window.CategoriasDuenos.VistaDuenos(this.doc);
       if (this.$('cdSeccion')) this.$('cdSeccion').hidden = !DUENOS_VISIBLES;
       this.aplicarPestanas();
@@ -980,6 +991,10 @@ window.Iniciativas = (function () {
           // El alta de ADM usa el mismo catalogo aunque no haya categorias:
           // la categoria es opcional ahi.
           if (self.crearAdmin) self.crearAdmin.fijarCatalogo(catalogo);
+          // "Modificar" agrega categorias de este mismo catalogo de rutas.
+          if (self.registro && self.registro.fijarRutasCatalogo && window.IniciativaAdmin) {
+            self.registro.fijarRutasCatalogo(window.IniciativaAdmin.BorradorAdmin.rutasDe(catalogo));
+          }
 
           if (catalogo.omitidas > 0) {
             var n = catalogo.omitidas;

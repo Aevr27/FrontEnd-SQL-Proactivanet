@@ -101,13 +101,65 @@ public static partial class ExperienciaQueries
             // no se puede leer, cada iniciativa sale sin historial y
             // historial_estado lo dice; el registro no cambia.
             var historial = HistorialFechas.Leer(cn);
+            // Subestado por folio y los valores de Estado/Subestado que ya
+            // existen (Modificar los ofrece; no hay catalogo en la base).
+            var estados = LeerEstadosProblem(cn);
             foreach (Dictionary<string, object> i in (List<object>)salida["iniciativas"])
+            {
                 i["historial"] = historial.Para(i["folio"] as string);
+                string sub;
+                i["subestado"] = estados.SubestadoPorFolio.TryGetValue(i["folio"] as string ?? "", out sub) ? sub : null;
+            }
+            salida["estados_problem"] = Ordenados(estados.Valores.Estados);
+            salida["subestados_problem"] = Ordenados(estados.Valores.Subestados);
             salida["historial_estado"] = historial.Estado;
             salida["historial_desde"] = historial.Desde;
             salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
             return salida;
         }
+    }
+
+    // Estado y Subestado de dbo.Problem vigente: el Subestado de cada folio
+    // (el registro no lo traia) y los valores distintos de cada uno, que son
+    // lo unico que Modificar acepta (no hay catalogo ni reglas de transicion
+    // en la base). SOLO LECTURA.
+    public sealed class EstadosLeidos
+    {
+        public Dictionary<string, string> SubestadoPorFolio =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public EstadosProblem Valores;
+    }
+
+    public static EstadosLeidos LeerEstadosProblem(SqlConnection cn)
+    {
+        const string SQL =
+            "SELECT p.Codigo, LTRIM(RTRIM(p.Estado)), LTRIM(RTRIM(p.Subestado)) " +
+            "FROM dbo.Problem AS p WHERE p.VigenteEnOrigen = 1";
+        var salida = new EstadosLeidos();
+        var estados = new List<string>();
+        var subestados = new List<string>();
+        using (var cmd = new SqlCommand(SQL, cn))
+        using (var rd = cmd.ExecuteReader())
+        {
+            while (rd.Read())
+            {
+                var folio = Texto(rd.GetValue(0));
+                var estado = Texto(rd.GetValue(1));
+                var sub = Texto(rd.GetValue(2));
+                if (folio != null) salida.SubestadoPorFolio[folio] = sub;
+                if (estado != null) estados.Add(estado);
+                if (sub != null) subestados.Add(sub);
+            }
+        }
+        salida.Valores = new EstadosProblem(estados, subestados);
+        return salida;
+    }
+
+    private static List<object> Ordenados(IEnumerable<string> valores)
+    {
+        var lista = new List<string>(valores);
+        lista.Sort(StringComparer.Ordinal);
+        return new List<object>(lista);
     }
 
     // Aparte de RegistroIniciativas para que tools/tests/RegistroIniciativasSmoke.cs

@@ -6,18 +6,30 @@
 // Casos:
 //   P) Persistencia: constante false; el JSON siempre dice guardada=false,
 //      persistencia=no_habilitada y codigo=null, valida o no.
-//   CF) Crear, formato: sin tipo; volumetria y % invalidos; % sin categoria.
+//   CF) Crear, formato: sin tipo; % invalido; % sin categoria; categoria
+//      repetida; pares desparejos.
 //   CC) Crear, catalogo: tipo/PO/SO/categoria fuera del catalogo; cascada
 //      incompleta valida; combinacion que no sale de ninguna fila; Director
 //      derivado solo si es uno.
 //   CI) Crear, Incompleta: faltantes en el orden de CAMPOS_INCOMPLETA; RCA
 //      solo en Problem; borrador minimo (solo tipo) es valido e incompleto.
-//   CK) Crear, capacidad excedida = advertencia, no error.
+//   CK) Crear, tope 100% por ruta = ERROR (antes advertencia en ADM); cada
+//      categoria con su %; otra ruta no resta.
+//   CM) Crear con varias categorias: cada una contra el catalogo, Director
+//      unico entre todas, Incompleta si alguna no tiene %.
 //   MF) Modificar, formato: sin folio; pares desparejos; % invalido; repetida.
 //   MM) Modificar: folio inexistente; sin cambios = error; cambios de texto
 //      (CRLF no cuenta); % de categoria no ligada = error; vaciar % deja
 //      Incompleta; capacidad sin contar la propia iniciativa.
 //   MR) IniciativaActual.DesdeRegistro con la forma del registro.
+//   MA) Modificar categorias: agregar (catalogo, ya ligada, capacidad),
+//      quitar (no ligada, quitar y cambiar a la vez), quedar sin categorias.
+//   MD) Modificar fechas compromiso y Estado/Subestado (valores existentes,
+//      sin reglas de transicion inventadas). El codigo nunca cambia.
+//   MK) Tope en Modificar: subir por encima = error; ruta ya excedida se
+//      puede bajar o dejar igual; iniciativa que no consume no tiene tope.
+//   V)  VolumetriaCategoria.Resolver: ok, cero real, sin datos, ruta vacia,
+//      llave normalizada como Experiencia.
 //
 // Compilar y correr desde la raiz del repo:
 //   csc /nologo /target:library /out:adm.dll /r:System.dll /r:System.Data.dll ^
@@ -64,10 +76,19 @@ public static class GestionIniciativaAdminSmoke
         });
 
     static PeticionCrearAdmin C(string tipo, string po = null, string so = null, string cat = null, string pct = null,
-                                string vol = null, string tit = null, string desc = null, string obs = null, bool rca = false)
+                                string tit = null, string desc = null, string obs = null, bool rca = false)
     {
-        return new PeticionCrearAdmin { Tipo = tipo, Po = po, So = so, Categoria = cat, Pct = pct, Volumetria = vol,
-                                        Titulo = tit, Descripcion = desc, Observaciones = obs, TieneRca = rca };
+        var p = PeticionCrearAdmin.Una(tipo, cat, pct);
+        p.Po = po; p.So = so; p.Titulo = tit; p.Descripcion = desc; p.Observaciones = obs; p.TieneRca = rca;
+        return p;
+    }
+
+    // Varias categorias: "ruta", "pct", "ruta", "pct"...
+    static PeticionCrearAdmin CV(string tipo, params string[] rp)
+    {
+        var p = new PeticionCrearAdmin { Tipo = tipo };
+        for (var i = 0; i < rp.Length; i += 2) p.Categorias.Add(new PctCategoria { Categoria = rp[i], Texto = rp[i + 1] });
+        return p;
     }
 
     static string Campos(ResultadoGestionAdmin r) { return string.Join(",", r.Errores.Select(e => e.Campo ?? "-").ToArray()); }
@@ -84,6 +105,8 @@ public static class GestionIniciativaAdminSmoke
         {
             { "folio", "PRB 2026-000001" }, { "titulo", "Titulo iniciativa" }, { "titulo_problem", "Titulo problem" },
             { "descripcion", "Linea 1\nLinea 2" }, { "observaciones", null }, { "sin_categoria", false },
+            { "f_analisis", "2026-10-01" }, { "f_solucion", null }, { "f_cierre", "2026-12-15" },
+            { "estado", "En An\u00e1lisis" }, { "subestado", "En An\u00e1lisis" },
             { "categorias", new List<object>
                 {
                     new Dictionary<string, object> { { "categoria", "/A/Cat 1" }, { "pct_dism", 0.5 } },
@@ -106,6 +129,20 @@ public static class GestionIniciativaAdminSmoke
         return new ValidadorGestionAdmin().Modificar(M(f), Actual(), k);
     }
 
+    static readonly EstadosProblem Estados = new EstadosProblem(
+        new[] { "En An\u00e1lisis", "En Soluci\u00f3n", "Cerrado" }, new[] { "En An\u00e1lisis", "Solucionado", "Cancelado" });
+
+    // Modificar con catalogo de rutas y estados (la forma del servicio).
+    static ResultadoGestionAdmin ModC(NameValueCollection f, params CapacidadCategoria.Compromiso[] k)
+    {
+        return new ValidadorGestionAdmin().Modificar(M(f), Actual(), k, Catalogo, Estados);
+    }
+
+    static CapacidadCategoria.Compromiso KN(string folio, string cat, decimal pct)
+    {
+        return new CapacidadCategoria.Compromiso { Folio = folio, Categoria = cat, Pct = pct, Consume = false };
+    }
+
     public static int Main()
     {
         // ---- P ----
@@ -123,12 +160,18 @@ public static class GestionIniciativaAdminSmoke
         var v = new ValidadorGestionAdmin();
         Check("CF1 sin tipo = error de tipo", "tipo", Campos(v.FormatoCrear(C(" "))));
         Check("CF1 formato no revisa catalogo", false, v.FormatoCrear(C(" ")).CatalogoRevisado);
-        Check("CF2 volumetria no entera", "volumetria", Campos(v.FormatoCrear(C("ADO", vol: "12.5"))));
-        Check("CF2 volumetria negativa", "volumetria", Campos(v.FormatoCrear(C("ADO", vol: "-1"))));
+        Check("CF2 categoria repetida (sin distinguir mayusculas)", "categorias",
+            Campos(v.FormatoCrear(CV("ADO", "/A/Cat 1", "10", "/a/cat 1", "5"))));
+        var desp = PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "cat_ruta", "/A/Cat 1"), false);
+        Check("CF2 pares cat_ruta / cat_pct desparejos", "categorias", Campos(v.FormatoCrear(desp)));
         Check("CF3 % fuera de rango", "pct", Campos(v.FormatoCrear(C("ADO", cat: "/A/Cat 1", pct: "100.01"))));
         Check("CF3 % con tres decimales", "pct", Campos(v.FormatoCrear(C("ADO", cat: "/A/Cat 1", pct: "1.234"))));
         Check("CF4 % sin categoria", "pct", Campos(v.FormatoCrear(C("ADO", pct: "10"))));
-        Check("CF5 % y volumetria validos", "", Campos(v.FormatoCrear(C("ADO", cat: "/A/Cat 1", pct: "33.5", vol: "0"))));
+        Check("CF5 % valido", "", Campos(v.FormatoCrear(C("ADO", cat: "/A/Cat 1", pct: "33.5"))));
+        var form = PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "cat_ruta", "/A/Cat 1", "cat_pct", "10",
+                                                         "cat_ruta", "/A/Cat 2", "cat_pct", ""), false);
+        Check("CF6 formulario: dos categorias, la segunda sin %", "2|/A/Cat 2|", form.Categorias.Count + "|" +
+            form.Categorias[1].Categoria + "|" + form.Categorias[1].Texto);
 
         // ---- CC ----
         Check("CC1 tipo fuera del catalogo", "tipo", Campos(Crear(C("XXX"))));
@@ -138,6 +181,7 @@ public static class GestionIniciativaAdminSmoke
         Check("CC3 solo PO (cascada incompleta) es valido", "", Campos(Crear(C("ADO", po: "PO 1"))));
         Check("CC3 solo categoria es valido", "", Campos(Crear(C("ADO", cat: "/A/Cat 2"))));
         Check("CC4 PO y categoria que no salen juntos", "categoria", Campos(Crear(C("ADO", po: "PO 2", cat: "/A/Cat 1"))));
+        Check("CC4 PO y SO que no salen juntos", "so", Campos(Crear(C("ADO", po: "PO 2", so: "SO x"))));
         Check("CC5 Director derivado de la categoria", "Dir A", Crear(C("ADO", cat: "/A/Cat 2")).Director);
         Check("CC5 categoria con dos directores: no se adivina", null, Crear(C("ADO", cat: "/B/Cat 3")).Director);
         Check("CC5 con PO elegido sale uno", "Dir C", Crear(C("ADO", po: "PO 3", cat: "/B/Cat 3")).Director);
@@ -145,22 +189,42 @@ public static class GestionIniciativaAdminSmoke
 
         // ---- CI ----
         Check("CI1 borrador minimo (solo tipo) valido", true, Crear(C("ADO")).Valida);
-        Check("CI1 ... e incompleto en el orden de CAMPOS_INCOMPLETA", "categoria,titulo,descripcion,observaciones,volumetria,pct",
-            Faltan(Crear(C("ADO"))));
+        Check("CI1 ... e incompleto en el orden de CAMPOS_INCOMPLETA (sin categorias, el % no se pide aparte)",
+            "categoria,titulo,descripcion,observaciones", Faltan(Crear(C("ADO"))));
         Check("CI2 Problem sin RCA: falta rca", true, Faltan(Crear(C("PRB"))).EndsWith(",rca"));
-        Check("CI2 Problem con RCA: no falta, pero avisa que no se sube", "categoria,titulo,descripcion,observaciones,volumetria,pct|True",
+        Check("CI2 Problem con RCA: no falta, pero avisa que no se sube", "categoria,titulo,descripcion,observaciones|True",
             Faltan(Crear(C("PRB", rca: true))) + "|" + Crear(C("PRB", rca: true)).Advertencias.Any(a => a.Contains("no se guarda")));
-        var completa = Crear(C("ADO", "PO 1", "SO x", "/A/Cat 1", "20", "100", "T", "D", "O"));
+        var completa = Crear(C("ADO", "PO 1", "SO x", "/A/Cat 1", "20", "T", "D", "O"));
         Check("CI3 completa: valida y sin faltantes", "True|", completa.Valida + "|" + Faltan(completa));
-        Check("CI4 espacios cuentan como vacio", "titulo", Faltan(Crear(C("ADO", "PO 1", "SO x", "/A/Cat 1", "20", "100", "  ", "D", "O"))));
+        Check("CI4 espacios cuentan como vacio", "titulo", Faltan(Crear(C("ADO", "PO 1", "SO x", "/A/Cat 1", "20", "  ", "D", "O"))));
+        Check("CI5 categoria sin %: falta pct", "titulo,descripcion,observaciones,pct", Faltan(Crear(C("ADO", cat: "/A/Cat 1"))));
 
         // ---- CK ----
         var exc = Crear(C("ADO", cat: "/A/Cat 1", pct: "30"), K("PRB 2026-000009", "/A/Cat 1", 0.8m));
-        Check("CK1 capacidad excedida: valida, con advertencia", "True|True", exc.Valida + "|" + exc.Advertencias.Any(a => a.Contains("capacidad")));
+        Check("CK1 tope excedido (80 + 30): ERROR en pct", "False|pct", exc.Valida + "|" + Campos(exc));
         var cabe = Crear(C("ADO", cat: "/A/Cat 1", pct: "20"), K("PRB 2026-000009", "/A/Cat 1", 0.8m));
-        Check("CK2 cabe justo: sin advertencia", 0, cabe.Advertencias.Count);
+        Check("CK2 cabe justo (80 + 20 = 100)", "True|0", cabe.Valida + "|" + cabe.Advertencias.Count);
+        var cent = Crear(C("ADO", cat: "/A/Cat 1", pct: "20.01"), K("PRB 2026-000009", "/A/Cat 1", 0.8m));
+        Check("CK2 20.01 ya no cabe", false, cent.Valida);
         var otra = Crear(C("ADO", cat: "/A/Cat 2", pct: "90"), K("PRB 2026-000009", "/A/Cat 1", 0.8m));
-        Check("CK3 otra categoria no resta", 0, otra.Advertencias.Count);
+        Check("CK3 otra categoria no resta", true, otra.Valida);
+        var noCons = Crear(C("ADO", cat: "/A/Cat 1", pct: "50"), KN("PRB 2026-000009", "/A/Cat 1", 0.8m));
+        Check("CK4 la que no consume no cuenta", true, noCons.Valida);
+        var lleno = Crear(C("ADO", cat: "/A/Cat 1", pct: "0"), K("PRB 2026-000009", "/A/Cat 1", 1.3m));
+        Check("CK5 ruta ya excedida (130%): 0% si cabe, 1% no", "True|False", lleno.Valida + "|" +
+            Crear(C("ADO", cat: "/A/Cat 1", pct: "1"), K("PRB 2026-000009", "/A/Cat 1", 1.3m)).Valida);
+
+        // ---- CM ----
+        var multi = Crear(CV("ADO", "/A/Cat 1", "10", "/A/Cat 2", "20"));
+        Check("CM1 dos categorias validas, mismo Director", "True|Dir A|", multi.Valida + "|" + multi.Director + "|" + Campos(multi));
+        var mezcla = Crear(CV("ADO", "/A/Cat 1", "10", "/B/Cat 3", "20"));
+        Check("CM2 directores distintos: no se adivina", null, mezcla.Director);
+        var mala = Crear(CV("ADO", "/A/Cat 1", "10", "/Z", "20"));
+        Check("CM3 una fuera del catalogo: error solo de esa", "categoria|True", Campos(mala) + "|" +
+            mala.Errores[0].Mensaje.StartsWith("/Z"));
+        var una = Crear(CV("ADO", "/A/Cat 1", "70", "/A/Cat 2", "50"), K("X", "/A/Cat 1", 0.4m));
+        Check("CM4 tope por ruta: solo /A/Cat 1 excede", "pct|True", Campos(una) + "|" + una.Errores[0].Mensaje.StartsWith("/A/Cat 1"));
+        Check("CM5 una sin %: incompleta por pct", true, Faltan(Crear(CV("ADO", "/A/Cat 1", "10", "/A/Cat 2", ""))).Contains("pct"));
 
         // ---- MF ----
         Check("MF1 sin folio", "folio", Campos(v.FormatoModificar(M(F("titulo", "x")))));
@@ -196,7 +260,7 @@ public static class GestionIniciativaAdminSmoke
         Check("MM12 su propio % no cuenta contra ella (60 + 40 = 100)", 0, propia.Advertencias.Count);
         var excede = Mod(F("folio", "PRB 2026-000001", "pct_categoria", "/A/Cat 1", "pct_valor", "61"),
                          K("PRB 2026-000001", "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.4m));
-        Check("MM12 61 excede: valida con advertencia", "True|1", excede.Valida + "|" + excede.Advertencias.Count);
+        Check("MM12 61 excede: ERROR (tope)", "False|pct", excede.Valida + "|" + Campos(excede));
         var jm = tit.ComoJson();
         Check("MM13 JSON de modificar: folio y no guardada", "PRB 2026-000001|False|no_habilitada", jm["folio"] + "|" + jm["guardada"] + "|" + jm["persistencia"]);
 
@@ -208,6 +272,76 @@ public static class GestionIniciativaAdminSmoke
         var sin = IniciativaActual.DesdeRegistro(new Dictionary<string, object> { { "folio", "X" }, { "sin_categoria", true } });
         var rs = new ValidadorGestionAdmin().Modificar(M(F("folio", "X", "titulo", "t")), sin, null);
         Check("MR4 sin categoria: incompleta por Categoria", "categoria", Faltan(rs));
+        Check("MR5 fechas, estado y subestado del registro", "2026-10-01||2026-12-15|En An\u00e1lisis",
+            act.FAnalisis + "|" + act.FSolucion + "|" + act.FCierre + "|" + act.Subestado);
+
+        // ---- MA ----
+        const string Fo = "PRB 2026-000001";
+        var ag = ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "15"));
+        Check("MA1 agregar una del catalogo: valida, un cambio (/A/Cat 2 sigue sin %)", "True|agregar_categoria|pct", ag.Valida + "|" + ag.Cambios[0]["clave"] + "|" + Faltan(ag));
+        Check("MA2 agregar sin catalogo (sobrecarga vieja) = error", "categorias",
+            Campos(Mod(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "15"))));
+        Check("MA3 agregar una fuera del catalogo", "categorias", Campos(ModC(F("folio", Fo, "agregar_categoria", "/Z", "agregar_pct", "1"))));
+        Check("MA4 agregar una ya ligada = error (duplicado)", "categorias",
+            Campos(ModC(F("folio", Fo, "agregar_categoria", "/a/cat 1", "agregar_pct", "1"))));
+        Check("MA5 agregar dos veces la misma", "categorias", Campos(ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "1",
+                                                                           "agregar_categoria", "/B/Cat 3", "agregar_pct", "2"))));
+        var agExc = ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "30"), K("PRB 2026-000002", "/B/Cat 3", 0.8m));
+        Check("MA6 agregar excediendo el tope = error", "categorias", Campos(agExc));
+        var agSin = ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", ""));
+        Check("MA7 agregar sin %: valida e incompleta por pct", "True|pct", agSin.Valida + "|" + Faltan(agSin));
+        var qt = ModC(F("folio", Fo, "quitar_categoria", "/A/Cat 2"));
+        Check("MA8 quitar la que no tenia %: deja de estar incompleta", "True|quitar_categoria|", qt.Valida + "|" + qt.Cambios[0]["clave"] + "|" + Faltan(qt));
+        Check("MA9 quitar una no ligada = error", "categorias", Campos(ModC(F("folio", Fo, "quitar_categoria", "/B/Cat 3"))));
+        Check("MA10 quitar y cambiar % de la misma = error", "categorias",
+            Campos(v.FormatoModificar(M(F("folio", Fo, "quitar_categoria", "/A/Cat 1", "pct_categoria", "/A/Cat 1", "pct_valor", "3")))));
+        var todas = ModC(F("folio", Fo, "quitar_categoria", "/A/Cat 1", "quitar_categoria", "/A/Cat 2"));
+        Check("MA11 quitar todas: valida, incompleta por categoria y aviso", "True|categoria|True", todas.Valida + "|" + Faltan(todas) + "|" +
+            todas.Advertencias.Any(a => a.Contains("sin categor")));
+        var cambio = ModC(F("folio", Fo, "quitar_categoria", "/A/Cat 2", "agregar_categoria", "/B/Cat 3", "agregar_pct", "5"));
+        Check("MA12 corregir categoria equivocada (quitar una, agregar otra)", "True|2", cambio.Valida + "|" + cambio.Cambios.Count);
+
+        // ---- MD ----
+        var fe = ModC(F("folio", Fo, "f_cierre", "2027-01-31"));
+        Check("MD1 cambio de fecha de cierre", "True|f_cierre|2026-12-15|2027-01-31", fe.Valida + "|" + fe.Cambios[0]["clave"] + "|" +
+            fe.Cambios[0]["anterior"] + "|" + fe.Cambios[0]["nuevo"]);
+        Check("MD2 misma fecha = sin cambios", "-", Campos(ModC(F("folio", Fo, "f_analisis", "2026-10-01"))));
+        Check("MD3 fecha invalida", "f_solucion", Campos(ModC(F("folio", Fo, "f_solucion", "2026-02-30"))));
+        Check("MD3 formato dd/mm", "f_solucion", Campos(ModC(F("folio", Fo, "f_solucion", "01/02/2026"))));
+        var fv = ModC(F("folio", Fo, "f_cierre", ""));
+        Check("MD4 vaciar una fecha: valida con aviso", "True|True", fv.Valida + "|" + fv.Advertencias.Any(a => a.Contains("sin fecha")));
+        var es = ModC(F("folio", Fo, "estado", "Cerrado", "subestado", "Solucionado"));
+        Check("MD5 Estado/Subestado existentes: dos cambios y aviso de transiciones", "True|2|True", es.Valida + "|" + es.Cambios.Count + "|" +
+            es.Advertencias.Any(a => a.Contains("transici")));
+        Check("MD6 Estado inventado = error", "estado", Campos(ModC(F("folio", Fo, "estado", "Pausado"))));
+        Check("MD6 Subestado inventado = error", "subestado", Campos(ModC(F("folio", Fo, "subestado", "Otro"))));
+        Check("MD7 sin lista de estados (sobrecarga vieja) = error", "estado", Campos(Mod(F("folio", Fo, "estado", "Cerrado"))));
+        Check("MD8 el folio solo identifica: nunca sale como cambio", false,
+            es.Cambios.Any(c => (string)c["clave"] == "folio" || (string)c["clave"] == "codigo"));
+
+        // ---- MK ----
+        var baja = ModC(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40"),
+                        K(Fo, "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.9m));
+        Check("MK1 ruta ya excedida (50 + 90): bajar 50 -> 40 se permite", true, baja.Valida);
+        var sube = ModC(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "51"),
+                        K(Fo, "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.9m));
+        Check("MK2 ... subir 50 -> 51 no", "pct", Campos(sube));
+        var cerrada = ModC(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "90"),
+                           KN(Fo, "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.9m));
+        Check("MK3 iniciativa que no consume (cerrada): sin tope", true, cerrada.Valida);
+
+        // ---- V ----
+        var slot0 = new Dictionary<string, int>(StringComparer.Ordinal) { { "/A/Cat 1", 418 }, { "/A/Cat 0", 0 } };
+        var vr = VolumetriaCategoria.Resolver(new[] { "/A/Cat 1", " /A/Cat 1 ", "/A/Otra", "", "/A/Cat 0" }, slot0)
+            .Cast<Dictionary<string, object>>().ToList();
+        Check("V1 ok con su total", "ok|418", vr[0]["estado"] + "|" + vr[0]["volumetria"]);
+        Check("V2 llave normalizada (espacios) como Experiencia", "ok|418", vr[1]["estado"] + "|" + vr[1]["volumetria"]);
+        Check("V3 sin filas pero hay datos: 0 real", "cero|0", vr[2]["estado"] + "|" + vr[2]["volumetria"]);
+        Check("V4 ruta vacia", "ruta_invalida|", vr[3]["estado"] + "|" + vr[3]["volumetria"]);
+        Check("V5 total 0 en la vista: cero", "cero|0", vr[4]["estado"] + "|" + vr[4]["volumetria"]);
+        var vacia = VolumetriaCategoria.Resolver(new[] { "/A/Cat 1" }, new Dictionary<string, int>())
+            .Cast<Dictionary<string, object>>().ToList();
+        Check("V6 SLOT 0 vacio: sin_datos, nunca 0", "sin_datos|", vacia[0]["estado"] + "|" + vacia[0]["volumetria"]);
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO PASO" : fallos + " FALLO(S)");

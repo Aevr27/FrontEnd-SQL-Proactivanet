@@ -5,7 +5,9 @@
 //   Crear(p)       catalogo (CatPrefijoProblem + rutas de dbo.Categorias con
 //                  sus duenos, igual que IniciativaService) y capacidad.
 //   Modificar(p)   la iniciativa actual de la MISMA lectura del registro
-//                  (ExperienciaQueries.RegistroIniciativas) y la capacidad.
+//                  (ExperienciaQueries.RegistroIniciativas), la capacidad,
+//                  las rutas vigentes (agregar) y los Estado/Subestado que
+//                  ya existen en dbo.Problem.
 //
 // Si la lectura falla, la excepcion sube: el handler responde que no se pudo
 // validar (503), nunca que la validacion paso.
@@ -43,7 +45,14 @@ public sealed class GestionIniciativaAdminService
         }
         using (var cn = Abrir())
         {
-            return new ValidadorGestionAdmin().Modificar(p, actual, ExperienciaQueries.CompromisosCapacidad(cn));
+            // Rutas vigentes (para agregar categorias) y los valores de
+            // Estado/Subestado que ya existen: las mismas lecturas que Crear
+            // y que el registro.
+            var tipos = DashboardCatalogos.Llaves(DashboardCatalogos.PrefijosIniciativa(cn));
+            var rutas = CatalogoRutasIniciativa.Cargar(cn, DirectorioOrganizacional.Cargar(cn));
+            var catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
+            var estados = ExperienciaQueries.LeerEstadosProblem(cn).Valores;
+            return new ValidadorGestionAdmin().Modificar(p, actual, ExperienciaQueries.CompromisosCapacidad(cn), catalogo, estados);
         }
     }
 

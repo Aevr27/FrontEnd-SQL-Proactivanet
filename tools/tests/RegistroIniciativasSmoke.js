@@ -549,7 +549,7 @@ pruebas.push(function () {
 pruebas.push(function () {
   var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   var S = R.SolicitudCambio;
-  Check('S1 campos: solo las tres fechas compromiso', ['f_analisis', 'f_solucion', 'f_cierre'],
+  Check('S1 campos designados: tres fechas, Estado, % y Otros', ['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'otros'],
     S.campos().map(function (c) { return c.clave; }));
   var c = new S(reg.buscar('PRB 2026-000001'));
   Check('S2 por omision la fecha del estado actual', ['f_solucion', '2026-09-01'], [c.campo, c.actual()]);
@@ -565,7 +565,65 @@ pruebas.push(function () {
   c.campo = 'f_solucion'; c.propuesto = '2026-10-15';
   Check('S4 valida', [], c.validar());
   Check('S4 resumen', { folio: 'PRB 2026-000001', campo: 'f_solucion', rotulo: 'Fecha compromiso de Solución',
-    anterior: '2026-09-01', nuevo: '2026-10-15', motivo: 'Proveedor' }, c.resumen());
+    anterior: '2026-09-01', nuevo: '2026-10-15', motivo: 'Proveedor', automatica: true }, c.resumen());
+
+  // SR) Estado, % de categoria y Otros; revision (aprobar / rechazar) en memoria.
+  var LISTAS = { estados: ['En Análisis', 'En Solución', 'Cerrado'], subestados: ['En Análisis', 'Solucionado'] };
+  var e = new S(reg.buscar('PRB 2026-000001'), LISTAS);
+  e.campo = 'estado'; e.motivo = 'Ya se resolvio';
+  e.propuesto = 'Pausado';
+  Check('SR1 Estado inventado se rechaza', ['propuesto'], e.validar().map(function (x) { return x.campo; }));
+  e.propuesto = 'En Solución';
+  Check('SR1 mismo Estado = sin cambio', ['propuesto'], e.validar().map(function (x) { return x.campo; }));
+  e.propuesto = 'Cerrado'; e.subestado = 'Otro';
+  Check('SR1 Subestado inventado se rechaza', ['subestado'], e.validar().map(function (x) { return x.campo; }));
+  e.subestado = 'Solucionado';
+  Check('SR2 Estado valido', [[], 'Cerrado', 'Solucionado', true], [e.validar(), e.resumen().nuevo, e.resumen().subestado, e.resumen().automatica]);
+  Check('SR2 sin lista de estados: no se puede pedir', ['propuesto'],
+    (function () { var x = new S(reg.buscar('PRB 2026-000001')); x.campo = 'estado'; x.propuesto = 'Cerrado'; x.motivo = 'm';
+      return x.validar().map(function (y) { return y.campo; }); })());
+
+  var k = new S(reg.buscar('PRB 2026-000001'), LISTAS);
+  k.campo = 'pct'; k.motivo = 'Se ajusta el alcance';
+  k.categoria = '/Z/No ligada'; k.propuesto = '10';
+  Check('SR3 % de una categoria no ligada se rechaza', ['categoria'], k.validar().map(function (x) { return x.campo; }));
+  k.categoria = '/A/Cat 3';
+  Check('SR3 valor actual de la categoria', '25', k.actual());
+  k.propuesto = '25';
+  Check('SR3 mismo % = sin cambio', ['propuesto'], k.validar().map(function (x) { return x.campo; }));
+  k.propuesto = '101';
+  Check('SR3 % fuera de rango', ['propuesto'], k.validar().map(function (x) { return x.campo; }));
+  k.propuesto = '30';
+  Check('SR4 % valido', [[], '/A/Cat 3', '30'], [k.validar(), k.resumen().categoria, k.resumen().nuevo]);
+
+  var o = new S(reg.buscar('PRB 2026-000001'), LISTAS);
+  o.campo = 'otros';
+  Check('SR5 Otros sin explicacion se rechaza', [['motivo'], 'Explica qué hay que corregir.'],
+    [o.validar().map(function (x) { return x.campo; }), o.validar()[0].mensaje]);
+  o.motivo = 'Elegi /A/Cat 3 por error; era /A/Cat 2';
+  Check('SR5 Otros valido: explicacion, no cambio automatico', [[], false, ''], [o.validar(), o.resumen().automatica, o.resumen().nuevo]);
+
+  var V = R.RevisionSolicitud;
+  var rv = new V(c.resumen(), 'SORIANA\\usuario');
+  Check('SR6 nace pendiente con su solicitante', ['pendiente', 'SORIANA\\usuario'], [rv.estado, rv.solicitante]);
+  Check('SR6 aprobar sin revisor no hace nada', [false, 'pendiente'], [rv.aprobar('').ok, rv.estado]);
+  var ap = rv.aprobar('SORIANA\\adm');
+  Check('SR7 aprobar fecha: pares de Modificar', [true, 'aprobada', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['f_solucion', '2026-10-15']]],
+    [ap.ok, rv.estado, ap.pares]);
+  Check('SR7 no se aprueba dos veces ni se rechaza despues', [false, false], [rv.aprobar('x').ok, rv.rechazar('x', 'm').ok]);
+  Check('SR8 aprobar Estado: estado y subestado', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['estado', 'Cerrado'], ['subestado', 'Solucionado']],
+    new V(e.resumen(), 'u').aprobar('a').pares);
+  Check('SR8 aprobar %: la categoria y su % (misma validacion de Modificar)',
+    [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['pct_categoria', '/A/Cat 3'], ['pct_valor', '30']],
+    new V(k.resumen(), 'u').aprobar('a').pares);
+  var ao = new V(o.resumen(), 'u').aprobar('a');
+  Check('SR9 aprobar Otros: sin pares, ADM corrige a mano', [true, null, true], [ao.ok, ao.pares, /Modificar/.test(ao.mensaje)]);
+  var rj = new V(k.resumen(), 'u');
+  Check('SR10 rechazar exige motivo', [false, 'pendiente'], [rj.rechazar('a', ' ').ok, rj.estado]);
+  var rr = rj.rechazar('a', 'No procede');
+  Check('SR10 rechazada: sin pares, no cambia nada', [true, 'rechazada', null, 'No procede'], [rr.ok, rj.estado, rr.pares, rj.motivoRechazo]);
+  Check('SR10 el registro no cambio', [0.25, 'En Solución'],
+    [reg.buscar('PRB 2026-000001').categorias[1].pct_dism, reg.buscar('PRB 2026-000001').estado]);
 
   var peticiones = [];
   var p = Pagina(ok(DATOS), function (url) { peticiones.push(url); return nunca(); });

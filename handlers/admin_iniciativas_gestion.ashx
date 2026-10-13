@@ -5,12 +5,17 @@
 // no esta habilitada (PersistenciaGestionAdmin, App_Code/GestionIniciativaAdmin.cs).
 //
 //   POST handlers/admin_iniciativas_gestion.ashx   (multipart/form-data)
-//     accion=crear      tipo, po, so, categoria, titulo, descripcion,
-//                       observaciones, volumetria, pct (en %) y el archivo
-//                       "rca" (se mira que llego; no se guarda)
-//     accion=modificar  folio, titulo, descripcion, observaciones (cada uno
-//                       solo si se envia) y pares pct_categoria / pct_valor
-//                       (las categorias YA ligadas a la iniciativa)
+//     accion=crear      tipo, po, so, titulo, descripcion, observaciones,
+//                       pares cat_ruta / cat_pct (cero o mas categorias,
+//                       cada una con su % en %) y el archivo "rca" (se mira
+//                       que llego; no se guarda). La volumetria no se
+//                       captura: es calculada (admin_iniciativas_volumetria.ashx).
+//     accion=modificar  folio (identifica; nunca cambia), titulo,
+//                       descripcion, observaciones, f_analisis, f_solucion,
+//                       f_cierre, estado, subestado (cada uno solo si se
+//                       envia), pares pct_categoria / pct_valor (las YA
+//                       ligadas), pares agregar_categoria / agregar_pct y
+//                       quitar_categoria (repetible)
 //
 //   501  valida: { "valida": true, "guardada": false,
 //                  "persistencia": "no_habilitada", "persistencia_motivo",
