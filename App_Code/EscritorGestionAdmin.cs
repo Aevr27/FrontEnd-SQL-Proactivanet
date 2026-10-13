@@ -1,0 +1,153 @@
+// Escritor de la gestion directa de ADM contra los procedimientos de la
+// migracion sql/18_gestion_admin_persistencia.sql (adm.usp_GestionAdmin_Crear
+// / _Modificar). ESA MIGRACION NO ESTA APLICADA EN LA VM: sin aprobar.
+//
+// El handler (admin_iniciativas_gestion.ashx) lo llama SOLO si
+// PersistenciaGestionAdmin.Activa() (hoy const false) y el plan no tiene
+// pendientes. Probado solo en LocalDB desechable
+// (tools/tests/GestionAdminSqlLocalDbSmoke.cs). Encenderlo exige: 18 y 19
+// aplicadas, EXECUTE en adm para la cuenta del sitio, reglas de Estado /
+// tipos de un alta y la decision de "quitar categoria" y de "tomar del
+// Excel".
+//
+// La atomicidad, el tope de 100% con candado y la generacion del Codigo
+// viven en SQL (una transaccion por guardado), no aqui: este escritor solo
+// pasa el plan y traduce los errores 51xxx de los procedimientos.
+//
+// Solo ASCII en literales (App_Code sin BOM).
+
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Data.SqlClient;
+
+// Lo que el plan NO decide (reglas sin verificar): quien llama lo declara a
+// proposito, no se deriva en silencio.
+public sealed class DatosAltaDeclarados
+{
+    public string TipoIniciativa;
+    public string TipoAgrupado;
+    public string Estado;
+}
+
+public sealed class ErrorEscrituraGestionAdmin : Exception
+{
+    public readonly int Numero;
+    public ErrorEscrituraGestionAdmin(int numero, string mensaje, Exception interna)
+        : base(mensaje, interna) { Numero = numero; }
+
+    // 51010 = tope de 100% excedido; 2627/2601 = llave repetida; 51009 = el
+    // codigo lo administra el Excel (no esta en adm.ProblemaAdmin).
+    public bool EsTope { get { return Numero == 51010; } }
+    public bool EsDelExcel { get { return Numero == 51009; } }
+    public bool EsRepetida { get { return Numero == 51003 || Numero == 51008 || Numero == 2627 || Numero == 2601; } }
+}
+
+public sealed class EscritorGestionAdminSql
+{
+    private const string TipoTabla = "adm.CategoriaPctTipo";
+
+    // Devuelve el Codigo emitido. tx: opcional (la del que llama).
+    public string Crear(SqlConnection cn, SqlTransaction tx, PlanCrearAdmin plan,
+                        DatosAltaDeclarados declarados, string usuario)
+    {
+        if (plan == null) throw new ArgumentNullException("plan");
+        if (declarados == null) throw new ArgumentNullException("declarados");
+        using (var cmd = Comando(cn, tx, "adm.usp_GestionAdmin_Crear"))
+        {
+            cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = Db(usuario);
+            cmd.Parameters.Add("@Prefijo", SqlDbType.NVarChar, 10).Value = Db(plan.Prefijo);
+            cmd.Parameters.Add("@TipoIniciativa", SqlDbType.NVarChar, 100).Value = Db(declarados.TipoIniciativa);
+            cmd.Parameters.Add("@TipoAgrupado", SqlDbType.NVarChar, 100).Value = Db(declarados.TipoAgrupado);
+            cmd.Parameters.Add("@Estado", SqlDbType.NVarChar, 100).Value = Db(declarados.Estado);
+            cmd.Parameters.Add("@Titulo", SqlDbType.NVarChar, -1).Value = Db(plan.Titulo);
+            cmd.Parameters.Add("@Descripcion", SqlDbType.NVarChar, -1).Value = Db(plan.Descripcion);
+            cmd.Parameters.Add("@Observaciones", SqlDbType.NVarChar, -1).Value = Db(plan.Observaciones);
+            Tabla(cmd, "@Categorias", plan.Categorias);
+            // Las fechas del plan son las que se guardan: el mismo "hoy".
+            cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = plan.FechaCreacion.Date;
+            var codigo = cmd.Parameters.Add("@Codigo", SqlDbType.NVarChar, 100);
+            codigo.Direction = ParameterDirection.Output;
+            Ejecutar(cmd);
+            return codigo.Value as string;
+        }
+    }
+
+    public void Modificar(SqlConnection cn, SqlTransaction tx, PlanModificarAdmin plan, string usuario)
+    {
+        if (plan == null) throw new ArgumentNullException("plan");
+        if (plan.Quitar.Count > 0)
+            throw new InvalidOperationException(PlanificadorGestionAdmin.PendienteQuitar);
+        using (var cmd = Comando(cn, tx, "adm.usp_GestionAdmin_Modificar"))
+        {
+            cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = Db(usuario);
+            cmd.Parameters.Add("@Codigo", SqlDbType.NVarChar, 100).Value = Db(plan.Codigo);
+            cmd.Parameters.Add("@TomarDelExcel", SqlDbType.Bit).Value = plan.TomarDelExcel;
+            Texto(cmd, plan, SolicitudIniciativa.CTitulo, "Titulo", -1);
+            Texto(cmd, plan, SolicitudIniciativa.CDescripcion, "Descripcion", -1);
+            Texto(cmd, plan, SolicitudIniciativa.CObservaciones, "Observaciones", -1);
+            Texto(cmd, plan, PeticionModificarAdmin.CEstado, "Estado", 100);
+            Texto(cmd, plan, PeticionModificarAdmin.CSubestado, "Subestado", 100);
+            Fecha(cmd, plan, PeticionModificarAdmin.CFAnalisis, "FAnalisis");
+            Fecha(cmd, plan, PeticionModificarAdmin.CFSolucion, "FSolucion");
+            Fecha(cmd, plan, PeticionModificarAdmin.CFCierre, "FCierre");
+            Tabla(cmd, "@Pcts", plan.Pcts);
+            Tabla(cmd, "@Agregar", plan.Agregar);
+            cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = plan.Hoy.Date;
+            Ejecutar(cmd);
+        }
+    }
+
+    private static SqlCommand Comando(SqlConnection cn, SqlTransaction tx, string proc)
+    {
+        if (cn == null) throw new ArgumentNullException("cn");
+        return new SqlCommand(proc, cn, tx) { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 };
+    }
+
+    private static void Ejecutar(SqlCommand cmd)
+    {
+        try { cmd.ExecuteNonQuery(); }
+        catch (SqlException ex)
+        {
+            if (ex.Number >= 51000 && ex.Number < 52000 || ex.Number == 2627 || ex.Number == 2601)
+                throw new ErrorEscrituraGestionAdmin(ex.Number, ex.Message, ex);
+            throw;
+        }
+    }
+
+    private static void Texto(SqlCommand cmd, PlanModificarAdmin plan, string campo, string nombre, int largo)
+    {
+        string v;
+        var cambia = plan.Problem.TryGetValue(campo, out v);
+        cmd.Parameters.Add("@Cambia" + nombre, SqlDbType.Bit).Value = cambia;
+        cmd.Parameters.Add("@" + nombre, SqlDbType.NVarChar, largo).Value = cambia ? Db(v) : DBNull.Value;
+    }
+
+    private static void Fecha(SqlCommand cmd, PlanModificarAdmin plan, string campo, string nombre)
+    {
+        string v;
+        var cambia = plan.Problem.TryGetValue(campo, out v);
+        var d = cambia ? FechasGestionAdmin.DeIso(v) : null;
+        if (cambia && !string.IsNullOrEmpty(v) && d == null)
+            throw new ArgumentException("Fecha invalida en el plan: " + campo);
+        cmd.Parameters.Add("@Cambia" + nombre, SqlDbType.Bit).Value = cambia;
+        cmd.Parameters.Add("@" + nombre, SqlDbType.Date).Value = d == null ? (object)DBNull.Value : d.Value;
+    }
+
+    private static void Tabla(SqlCommand cmd, string nombre, List<CategoriaPlan> filas)
+    {
+        var t = new DataTable();
+        t.Columns.Add("Categoria", typeof(string));
+        var pct = t.Columns.Add("Pct", typeof(decimal));
+        pct.AllowDBNull = true;
+        foreach (var f in filas) t.Rows.Add(f.Ruta, f.Pct == null ? (object)DBNull.Value : f.Pct.Value);
+        var p = cmd.Parameters.Add(nombre, SqlDbType.Structured);
+        p.TypeName = TipoTabla;
+        p.Value = t;
+    }
+
+    private static object Db(string s)
+    {
+        return string.IsNullOrEmpty(s) ? (object)DBNull.Value : s;
+    }
+}

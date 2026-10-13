@@ -1022,6 +1022,9 @@ window.Iniciativas = (function () {
           if (mia !== self.cargaId) return;
           self.solicitud = null;
           if (self.crearAdmin) self.crearAdmin.fijarCatalogo(null);
+          // Sin catalogo: "Modificar" y "Solicitar cambios" lo dicen (error),
+          // no lo pintan como lista vacia ni como "cargando".
+          if (self.registro && self.registro.fijarRutasCatalogo) self.registro.fijarRutasCatalogo(null, 'error');
           self.$('iniEstado').textContent = '';
           self.bloquearTodo('No disponible: no se pudo cargar el catálogo.');
           self.mostrarError((err && err.message) || 'No se pudo cargar el catálogo.');

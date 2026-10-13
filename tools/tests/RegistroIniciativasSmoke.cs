@@ -168,6 +168,9 @@ public static class RegistroSmoke
         Check("9 sin prefijo = null, no texto", true, r2.ContainsKey("prefijo") && r2["prefijo"] == null);
         Check("9 ya no viaja tipo_iniciativa", false, p1.ContainsKey("tipo_iniciativa") || p5.ContainsKey("tipo_iniciativa"));
         Check("9 agrup sigue siendo TipoAgrupado", "Problem|ReqOpr", p1["agrup"] + "|" + r2["agrup"]);
+        // f_creacion = dbo.Problem.FechaCreacion (ya en el SELECT); sin el
+        // dato viaja null, nunca una fecha calculada.
+        Check("11 f_creacion viaja, null si no hay", true, p1.ContainsKey("f_creacion") && p1["f_creacion"] == null);
         var sinTipos = (Dictionary<string, object>)M("ArmarRegistro").Invoke(null, new object[] { detalle, new List<object>(), dir, null });
         Check("9 sin mapa de prefijos: null en todas", null, Ini((IList)sinTipos["iniciativas"], "PRB 1")["prefijo"]);
 

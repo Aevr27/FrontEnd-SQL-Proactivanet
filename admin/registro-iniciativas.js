@@ -120,9 +120,15 @@
      El detalle sigue siendo de solo lectura: nada se edita en el lugar.
      "Solicitar cambios" abre un borrador (SolicitudCambio) que se valida en
      el navegador y NO se envia: no existe aun el registro de solicitudes en
-     la base (ni su numero #0000001). Campos que se pueden pedir cambiar:
-     solo las fechas compromiso (CAMPOS_CAMBIO); los demas se agregaran
-     cuando se designen explicitamente.
+     la base (ni su numero #0000001). Campos que se pueden pedir cambiar
+     (CAMPOS_CAMBIO): fechas compromiso, Estado/Subestado, Categorias (el %
+     de varias ligadas y agregar categorias del catalogo, sin repetir) y
+     Otros (solo explicacion). Lo demas se agregara cuando se designe.
+     SEGUIMIENTO: Fecha de creacion (f_creacion = dbo.Problem.FechaCreacion)
+     y un selector "Ver por categoria" con las categorias reales de la
+     iniciativa; al cambiarlo se repinta solo su bloque (regSegCatInfo).
+     Las fechas que muestra son las del PROBLEMA, marcadas como compartidas:
+     la base no guarda fechas por categoria.
      "Historial de cambios (N)" nace plegado. Pinta `historial`, las filas
      de dbo.ProblemFechaEvento de la iniciativa en orden de IdEvento
      (App_Code/HistorialFechas.cs): { id, campo, anterior, nuevo, operacion,
@@ -181,6 +187,22 @@ window.RegistroIniciativas = (function () {
   function fecha(s) { return s ? String(s).split('-').reverse().join('/') : '—'; }
   function texto(v) { return v === null || v === undefined || v === '' ? '—' : v; }
   function esTexto(v) { return typeof v === 'string' && v !== ''; }
+
+  // El selector compartido (IniciativaAdmin.Selector): <select> con 20
+  // opciones o menos, caja con busqueda con mas. Sin ese modulo, <select>.
+  function selectorHtml(id, opciones, valor, extra) {
+    var A = window.IniciativaAdmin;
+    if (A && A.Selector) return A.Selector.html(id, opciones, valor, extra);
+    return '<select id="' + id + '"' + (extra || '') + '><option value="">— Elige —</option>' + (opciones || []).map(function (v) {
+      return '<option value="' + Escape.attr(v) + '"' + (v === valor ? ' selected' : '') + '>' + Escape.html(v) + '</option>';
+    }).join('') + '</select>';
+  }
+  // Lo escrito en un selector -> la opcion real, o ''.
+  function resolverOpcion(texto, opciones) {
+    var A = window.IniciativaAdmin, t = String(texto || '').trim();
+    if (A && A.Selector) return A.Selector.resolver(t, opciones);
+    return (opciones || []).indexOf(t) >= 0 ? t : '';
+  }
 
   // ---------------------------------------------------------------------
   // Busqueda por folio o titulo
@@ -717,7 +739,7 @@ window.RegistroIniciativas = (function () {
     { clave: 'f_solucion', rotulo: 'Fecha compromiso de Solución', tipo: 'fecha' },
     { clave: 'f_cierre', rotulo: 'Fecha compromiso de Cierre', tipo: 'fecha' },
     { clave: 'estado', rotulo: 'Estado y Subestado', tipo: 'estado' },
-    { clave: 'pct', rotulo: '% de disminución de una categoría', tipo: 'pct' },
+    { clave: 'pct', rotulo: 'Categorías: % de disminución o agregar', tipo: 'pct' },
     { clave: 'otros', rotulo: 'Otros (explica la corrección)', tipo: 'otros' }
   ];
 
@@ -771,19 +793,29 @@ window.RegistroIniciativas = (function () {
   // envia (no hay almacen de solicitudes todavia); solo se valida.
   // ---------------------------------------------------------------------
   // opciones: { estados, subestados } (los valores que ya existen en
-  // dbo.Problem; sin lista no se puede pedir cambio de Estado).
+  // dbo.Problem; sin lista no se puede pedir cambio de Estado), rutas (el
+  // catalogo vigente: lo unico que se puede pedir agregar) y rutasEstado
+  // ('cargando' | 'error' | 'ok').
+  //
+  // Campo 'pct' (Categorias): UNA solicitud lleva varias categorias. Un %
+  // nuevo para cualquiera de las ligadas (pcts: ruta -> texto) y categorias
+  // del catalogo para agregar, cada una con su % (nuevas). Sin repetir:
+  // ni una ligada ni dos veces la misma.
   class SolicitudCambio {
     constructor(iniciativa, opciones) {
       opciones = opciones || {};
       this.iniciativa = iniciativa;
       this.estados = Array.isArray(opciones.estados) ? opciones.estados : [];
       this.subestados = Array.isArray(opciones.subestados) ? opciones.subestados : [];
+      this.rutas = Array.isArray(opciones.rutas) ? opciones.rutas : [];
+      this.rutasEstado = opciones.rutasEstado || (this.rutas.length ? 'ok' : '');
       // Por omision, la fecha del estado en el que esta (la que se suele
       // pedir extender); si no esta en uno de esos estados, ninguna.
       this.campo = FECHA_DEL_ESTADO[iniciativa.estado] || '';
-      this.propuesto = '';   // fecha, Estado o % (texto), segun el campo
+      this.propuesto = '';   // fecha o Estado (texto), segun el campo
       this.subestado = '';   // solo con campo 'estado'
-      this.categoria = '';   // solo con campo 'pct': una ruta YA ligada
+      this.pcts = {};        // solo con campo 'pct': ruta ligada -> % pedido (texto)
+      this.nuevas = [];      // solo con campo 'pct': [{ categoria, valor }] a agregar
       this.motivo = '';
     }
 
@@ -793,16 +825,65 @@ window.RegistroIniciativas = (function () {
 
     categoriasLigadas() { return (this.iniciativa.categorias || []).map(function (c) { return c.categoria; }); }
 
-    // El valor actual de lo que se pide cambiar (texto), o null.
+    // El % actual (texto) de una categoria ligada, o null.
+    pctActual(ruta) {
+      var c = (this.iniciativa.categorias || []).filter(function (x) { return x.categoria === ruta; })[0];
+      return c && typeof c.pct_dism === 'number' ? String(Math.round(c.pct_dism * 10000) / 100) : null;
+    }
+
+    // El valor actual de lo que se pide cambiar (texto), o null. En 'pct'
+    // no hay uno solo: cada categoria tiene el suyo (pctActual).
     actual() {
       var t = this.tipo(), i = this.iniciativa;
       if (t === 'fecha') return i[this.campo] ? i[this.campo] : null;
       if (t === 'estado') return i.estado ? i.estado + (i.subestado ? ' / ' + i.subestado : '') : null;
-      if (t === 'pct') {
-        var c = (i.categorias || []).filter(function (x) { return x.categoria === this.categoria; }, this)[0];
-        return c && typeof c.pct_dism === 'number' ? String(Math.round(c.pct_dism * 10000) / 100) : null;
-      }
       return null;
+    }
+
+    // % pedido para una ligada ('' = sin cambio). Una ruta no ligada no se
+    // acepta aqui: se agrega con agregarCategoria.
+    fijarPct(ruta, texto) {
+      if (this.categoriasLigadas().indexOf(ruta) < 0) return false;
+      this.pcts[ruta] = String(texto === null || texto === undefined ? '' : texto).trim();
+      return true;
+    }
+
+    // texto: lo escrito o elegido. -> { ok, mensaje, ruta }. Solo rutas del
+    // catalogo, sin repetir una ligada ni una ya agregada.
+    agregarCategoria(texto) {
+      var A = window.IniciativaAdmin;
+      if (!String(texto || '').trim()) return { ok: false, mensaje: 'Elige una categoría.' };
+      if (!this.rutas.length) {
+        return { ok: false, mensaje: this.rutasEstado === 'cargando' ? 'El catálogo de categorías todavía se está cargando.'
+          : this.rutasEstado === 'error' ? 'No se pudo cargar el catálogo de categorías.' : 'El catálogo de categorías no está disponible.' };
+      }
+      var escrito = String(texto).trim();
+      var ruta = A ? A.Selector.resolver(escrito, this.rutas) : (this.rutas.indexOf(escrito) >= 0 ? escrito : '');
+      if (!ruta) return { ok: false, mensaje: A ? A.noEnLista(escrito, this.rutas, 'una categoría') : 'Elige una categoría de la lista.' };
+      var k = plano(ruta);
+      if (this.categoriasLigadas().some(function (c) { return plano(c) === k; })) {
+        return { ok: false, ruta: ruta, mensaje: ruta + ' ya es una categoría de esta iniciativa: pide su % en la tabla.' };
+      }
+      if (this.nuevas.some(function (n) { return plano(n.categoria) === k; })) {
+        return { ok: false, ruta: ruta, mensaje: ruta + ' ya está en la lista para agregar.' };
+      }
+      this.nuevas.push({ categoria: ruta, valor: '' });
+      return { ok: true, ruta: ruta, mensaje: '' };
+    }
+
+    capturarPctNueva(n, texto) {
+      if (this.nuevas[n]) this.nuevas[n].valor = String(texto === null || texto === undefined ? '' : texto).trim();
+    }
+
+    quitarNueva(n) { return this.nuevas.splice(n, 1).length > 0; }
+
+    // -> [{ categoria, anterior, nuevo, nueva }] de lo pedido en 'pct':
+    // ligadas con % escrito y todas las nuevas.
+    cambiosCategorias() {
+      var self = this;
+      return this.categoriasLigadas().filter(function (r) { return self.pcts[r]; })
+        .map(function (r) { return { categoria: r, anterior: self.pctActual(r), nuevo: self.pcts[r], nueva: false }; })
+        .concat(this.nuevas.map(function (n) { return { categoria: n.categoria, anterior: null, nuevo: n.valor, nueva: true }; }));
     }
 
     // -> [{ campo, mensaje }]; vacia = lista para enviar (cuando se pueda).
@@ -823,13 +904,16 @@ window.RegistroIniciativas = (function () {
           errores.push({ campo: 'propuesto', mensaje: 'El Estado pedido es igual al actual.' });
         }
       } else if (t === 'pct') {
-        if (this.categoriasLigadas().indexOf(this.categoria) < 0) {
-          errores.push({ campo: 'categoria', mensaje: 'Elige una de las categorías de esta iniciativa.' });
-        } else if (!/^\d{1,3}(\.\d{1,2})?$/.test(nuevo) || Number(nuevo) > 100) {
-          errores.push({ campo: 'propuesto', mensaje: 'Escribe un porcentaje entre 0 y 100, con hasta dos decimales.' });
-        } else if (this.actual() !== null && Number(nuevo) === Number(this.actual())) {
-          errores.push({ campo: 'propuesto', mensaje: 'El % pedido es igual al actual.' });
-        }
+        var cats = this.cambiosCategorias();
+        if (!cats.length) errores.push({ campo: 'categoria', mensaje: 'Escribe el nuevo % de al menos una categoría o agrega una.' });
+        cats.forEach(function (c) {
+          if (!/^\d{1,3}(\.\d{1,2})?$/.test(c.nuevo) || Number(c.nuevo) > 100) {
+            errores.push({ campo: 'propuesto', categoria: c.categoria,
+              mensaje: c.categoria + ': escribe un porcentaje entre 0 y 100, con hasta dos decimales.' });
+          } else if (!c.nueva && c.anterior !== null && Number(c.nuevo) === Number(c.anterior)) {
+            errores.push({ campo: 'propuesto', categoria: c.categoria, mensaje: c.categoria + ': el % pedido es igual al actual.' });
+          }
+        });
       }
       if (!String(this.motivo || '').trim()) {
         errores.push({ campo: 'motivo', mensaje: t === 'otros' ? 'Explica qué hay que corregir.' : 'Explica el motivo del cambio.' });
@@ -844,7 +928,7 @@ window.RegistroIniciativas = (function () {
       var r = { folio: this.iniciativa.folio, campo: this.campo, rotulo: c ? c.rotulo : '',
                 anterior: this.actual(), nuevo: String(this.propuesto || '').trim(), motivo: String(this.motivo || '').trim() };
       if (t === 'estado') r.subestado = String(this.subestado || '').trim();
-      if (t === 'pct') r.categoria = this.categoria;
+      if (t === 'pct') { r.anterior = null; r.nuevo = ''; r.categorias = this.cambiosCategorias(); }
       if (t === 'otros') { r.nuevo = ''; r.automatica = false; }
       else if (t) r.automatica = true;
       return r;
@@ -880,8 +964,13 @@ window.RegistroIniciativas = (function () {
       else if (c && c.tipo === 'estado') {
         pares.push(['estado', s.nuevo]);
         if (s.subestado) pares.push(['subestado', s.subestado]);
-      } else if (c && c.tipo === 'pct') pares.push(['pct_categoria', s.categoria], ['pct_valor', s.nuevo]);
-      else return null;
+      } else if (c && c.tipo === 'pct' && Array.isArray(s.categorias) && s.categorias.length) {
+        // Los mismos pares que "Modificar" (CategoriasProblema.paresModificar).
+        s.categorias.forEach(function (x) {
+          if (x.nueva) pares.push(['agregar_categoria', x.categoria], ['agregar_pct', x.nuevo]);
+          else pares.push(['pct_categoria', x.categoria], ['pct_valor', x.nuevo]);
+        });
+      } else return null;
       return pares;
     }
 
@@ -935,14 +1024,26 @@ window.RegistroIniciativas = (function () {
       // Rutas del catalogo vigente (las fija la pagina al cargar el
       // catalogo): lo unico que "Modificar" puede agregar. null = sin cargar.
       this.rutasCatalogo = null;
+      this.rutasEstado = 'cargando'; // cargando | ok | error (del catalogo de rutas)
       this.volumetria = null;     // VolumetriaCliente (perezoso)
+      this.segCategoria = '';     // categoria elegida en Seguimiento
     }
 
-    fijarRutasCatalogo(rutas) {
+    // estado: 'error' si el catalogo no se pudo cargar (rutas null).
+    fijarRutasCatalogo(rutas, estado) {
       this.rutasCatalogo = Array.isArray(rutas) ? rutas : null;
+      this.rutasEstado = this.rutasCatalogo ? 'ok' : estado === 'error' ? 'error' : 'cargando';
       if (this.edicion) {
         this.edicion.categorias.fijarRutas(this.rutasCatalogo);
+        this.edicion.rutasEstado = this.rutasEstado;
         this.pintarCategoriasEdicion();
+      }
+      // Solicitar cambios abierto: solo el bloque de categorias (lo demas
+      // escrito no se toca).
+      if (this.cambio && this.cambioAbierto) {
+        this.cambio.rutas = this.rutasCatalogo || [];
+        this.cambio.rutasEstado = this.rutasEstado;
+        this.pintarCategoriasCambio();
       }
     }
 
@@ -955,7 +1056,8 @@ window.RegistroIniciativas = (function () {
 
     opcionesEstado() {
       var r = this.registro;
-      return { estados: r ? r.estadosProblem || [] : [], subestados: r ? r.subestadosProblem || [] : [] };
+      return { estados: r ? r.estadosProblem || [] : [], subestados: r ? r.subestadosProblem || [] : [],
+               rutas: this.rutasCatalogo || [], rutasEstado: this.rutasEstado };
     }
 
     // Solo UX: la edicion de ADM no llama al servidor en esta fase.
@@ -1089,6 +1191,11 @@ window.RegistroIniciativas = (function () {
         if (el && el.closest) el = el.closest('[data-accion]');
         var accion = el && el.getAttribute && el.getAttribute('data-accion');
         if (accion) { self.accionDetalle(accion); return; }
+        // Quitar una categoria agregada en "Solicitar cambios".
+        var nueva = e.target;
+        if (nueva && nueva.closest) nueva = nueva.closest('[data-cambio-quitar]');
+        var nq = nueva && nueva.getAttribute && nueva.getAttribute('data-cambio-quitar');
+        if (nq !== null && nq !== undefined && nq !== '') { self.quitarCategoriaCambio(Number(nq)); return; }
         // Quitar / Restaurar una categoria en "Modificar".
         var cat = e.target;
         if (cat && cat.closest) cat = cat.closest('[data-edicion-cat]');
@@ -1097,24 +1204,16 @@ window.RegistroIniciativas = (function () {
       });
       this.$('regDetCuerpo').addEventListener('change', function (e) {
         if (e.target && e.target.id === 'regCambioCampo') self.elegirCampoCambio(e.target.value);
-        // Selects y fechas de "Modificar" (algunos navegadores solo avisan
-        // con change).
-        else if (e.target && e.target.getAttribute && e.target.getAttribute('data-edicion') && self.edicion) {
-          self.edicion.capturar(e.target.getAttribute('data-edicion'), e.target.value);
-          self.pintarVistaEdicion();
-        }
+        else if (e.target && e.target.id === 'regSegCategoria') self.elegirCategoriaSeguimiento(e.target.value);
+        // Selects y fechas de "Modificar" y de "Solicitar cambios" (algunos
+        // navegadores solo avisan con change).
+        else self.capturarDetalle(e.target);
       });
-      // Edicion de ADM: actualiza el borrador en memoria; "Validar en el
-      // servidor (no guarda)" lo valida (no guarda).
+      // Edicion de ADM y Solicitar cambios: actualizan su borrador en
+      // memoria; nada se guarda.
       this.$('regDetCuerpo').addEventListener('input', function (e) {
-        var t = e.target, ed = self.edicion;
-        if (!t || !t.getAttribute || !ed) return;
-        var clave = t.getAttribute('data-edicion');
-        var n = t.getAttribute('data-edicion-pct');
-        if (clave) ed.capturar(clave, t.value);
-        else if (n !== null && n !== undefined) ed.capturarPct(Number(n), t.value);
-        else return;
-        self.pintarVistaEdicion();
+        if (e.target && e.target.id === 'regSegCategoria') self.elegirCategoriaSeguimiento(e.target.value);
+        else self.capturarDetalle(e.target);
       });
       this.$('regDetCerrar').addEventListener('click', function () { self.cerrarDetalle(); });
       this.$('regDetFondo').addEventListener('click', function () { self.cerrarDetalle(); });
@@ -1601,6 +1700,7 @@ window.RegistroIniciativas = (function () {
       this.cambioAbierto = false;
       this.histAbierto = false;
       this.edicion = null;
+      this.segCategoria = '';
       this.$('regDetCuerpo').innerHTML = this.htmlDetalle(i);
       this.$('regDetFondo').hidden = false;
       this.$('regDetalle').hidden = false;
@@ -1640,6 +1740,126 @@ window.RegistroIniciativas = (function () {
       else if (accion === 'edicion-revisar') this.revisarEdicion();
       else if (accion === 'edicion-guardar') this.guardarEdicion();
       else if (accion === 'edicion-cat-agregar') this.agregarCategoriaEdicion();
+      else if (accion === 'cambio-cat-agregar') this.agregarCategoriaCambio();
+    }
+
+    // Un control del detalle -> su borrador (Modificar o Solicitar cambios).
+    // -> true si lo tomo.
+    capturarDetalle(t) {
+      if (!t || !t.getAttribute) return false;
+      var ed = this.edicion, c = this.cambio;
+      var clave = t.getAttribute('data-edicion');
+      var n = t.getAttribute('data-edicion-pct');
+      var cp = t.getAttribute('data-cambio-pct');
+      var cn = t.getAttribute('data-cambio-nueva-pct');
+      if (ed && clave) ed.capturar(clave, t.value);
+      else if (ed && n !== null && n !== undefined) ed.capturarPct(Number(n), t.value);
+      else if (c && cp !== null && cp !== undefined) { c.fijarPct(c.categoriasLigadas()[Number(cp)], t.value); return true; }
+      else if (c && cn !== null && cn !== undefined) { c.capturarPctNueva(Number(cn), t.value); return true; }
+      else return false;
+      this.pintarVistaEdicion();
+      return true;
+    }
+
+    // ---- categorias de "Solicitar cambios" ----
+    agregarCategoriaCambio(texto) {
+      var c = this.cambio;
+      if (!c) return null;
+      if (texto === undefined) { var caja = this.$('regCambioCatBuscar'); texto = caja ? caja.value : ''; }
+      var r = c.agregarCategoria(texto);
+      if (r.ok) this.pintarCategoriasCambio();
+      var msg = this.$('regCambioCatMsg');
+      if (msg) {
+        msg.className = 'ini-cambio-msg' + (r.ok ? '' : ' error');
+        msg.textContent = r.ok ? '' : r.mensaje;
+      }
+      return r;
+    }
+
+    quitarCategoriaCambio(n) {
+      if (!this.cambio || !this.cambio.quitarNueva(n)) return false;
+      this.pintarCategoriasCambio();
+      return true;
+    }
+
+    // Repinta SOLO el bloque de categorias: Que cambiar, Motivo y lo demas
+    // escrito se quedan como estan.
+    pintarCategoriasCambio() {
+      var caja = this.$('regCambioGrupoPct');
+      if (caja && this.cambio) caja.innerHTML = this.htmlCategoriasCambio();
+    }
+
+    htmlCategoriasCambio() {
+      var c = this.cambio, A = window.IniciativaAdmin;
+      var ligadas = c.categoriasLigadas();
+      var tabla = ligadas.length || c.nuevas.length
+        ? '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
+            '<th scope="col" class="num">% actual</th><th scope="col">% pedido</th><th scope="col"><span class="ini-sr">Acción</span></th>' +
+          '</tr></thead><tbody>' +
+          ligadas.map(function (r, n) {
+            var act = c.pctActual(r);
+            return '<tr><td class="ini-cat-ruta">' + Escape.html(r) + '</td><td class="num">' + Escape.html(act === null ? '—' : act + '%') + '</td>' +
+              '<td><label class="ini-ed-pct"><span class="ini-sr">% pedido para ' + Escape.html(r) + '</span>' +
+              '<input type="number" min="0" max="100" step="0.01" data-cambio-pct="' + n + '" value="' + Escape.attr(c.pcts[r] || '') +
+              '" placeholder="sin cambio"> %</label></td><td></td></tr>';
+          }).join('') +
+          c.nuevas.map(function (x, n) {
+            return '<tr><td><span class="ini-cat-ruta">' + Escape.html(x.categoria) + '</span> <span class="ini-cat-estado nueva">Agregar</span></td>' +
+              '<td class="num">—</td><td><label class="ini-ed-pct"><span class="ini-sr">% para ' + Escape.html(x.categoria) + '</span>' +
+              '<input type="number" min="0" max="100" step="0.01" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) + '"> %</label></td>' +
+              '<td><button type="button" class="btn linea chico" data-cambio-quitar="' + n + '">Quitar</button></td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<p class="ini-nota">Sin categorías todavía: agrega una.</p>';
+      var agregar = c.rutas.length
+        ? '<div class="ini-cat-agregar"><label for="regCambioCatBuscar">Agregar categoría</label>' +
+            selectorHtml('regCambioCatBuscar', c.rutas, '') +
+            ' <button type="button" class="btn linea chico" data-accion="cambio-cat-agregar">Agregar</button></div>'
+        : (A ? A.htmlSinCatalogo(c.rutasEstado) : '<p class="ini-nota">El catálogo de categorías no está disponible.</p>');
+      return tabla + agregar +
+        '<div class="ini-cambio-msg" id="regCambioCatMsg" role="status" aria-live="polite"></div>' +
+        '<small class="ini-sub">Deja en blanco las que no cambian. Agregar pide sumar la categoría; ADM la revisa y la aplica.</small>';
+    }
+
+    // ---- Seguimiento: categoria elegida ----
+    // valor: lo elegido o escrito. Solo una categoria REAL de la iniciativa
+    // cambia lo que se ve; repinta solo su bloque (ni filtros ni el resto).
+    elegirCategoriaSeguimiento(valor) {
+      var i = this.registro && this.registro.buscar(this.abierta);
+      if (!i) return false;
+      var rutas = i.categorias.map(function (c) { return c.categoria; });
+      var A = window.IniciativaAdmin;
+      var ruta = A ? A.Selector.resolver(valor, rutas) : (rutas.indexOf(valor) >= 0 ? valor : '');
+      var caja = this.$('regSegCatInfo');
+      if (!ruta) {
+        if (caja && String(valor || '').trim()) {
+          caja.innerHTML = '<p class="ini-nota">' + Escape.html(A ? A.noEnLista(valor, rutas, 'una categoría')
+            : 'Elige una categoría de la lista.') + '</p>';
+        }
+        return false;
+      }
+      this.segCategoria = ruta;
+      if (caja) caja.innerHTML = this.htmlSeguimientoCategoria(i, ruta);
+      return true;
+    }
+
+    // Lo que hay de fechas para UNA categoria. La base guarda las fechas por
+    // PROBLEMA (dbo.Problem): se muestran como compartidas, nunca como
+    // propias de la categoria. Lo propio de la categoria es su % y sus
+    // tickets.
+    htmlSeguimientoCategoria(i, ruta) {
+      var c = i.categorias.filter(function (x) { return x.categoria === ruta; })[0];
+      if (!c) return '';
+      var otras = i.categorias.length - 1;
+      return '<dl class="ini-datos">' +
+          '<div class="ini-dato"><dt>% disminución</dt><dd>' + pct(c.pct_dism) + '</dd></div>' +
+          '<div class="ini-dato"><dt>Tickets a reducir</dt><dd>' + fmt(c.tickets_reduce) + '</dd></div>' +
+          '<div class="ini-dato"><dt>Análisis</dt><dd>' + Escape.html(fecha(i.f_analisis)) + '</dd></div>' +
+          '<div class="ini-dato"><dt>Solución</dt><dd>' + Escape.html(fecha(i.f_solucion)) + '</dd></div>' +
+          '<div class="ini-dato"><dt>Cierre</dt><dd>' + Escape.html(fecha(i.f_cierre)) + '</dd></div>' +
+        '</dl>' +
+        '<p class="ini-nota"><span class="ini-origen derivado">Del problema</span> Las fechas son las del problema ' +
+          '(dbo.Problem) y las comparte' + (otras > 0 ? 'n sus ' + (otras + 1) + ' categorías' : ' su única categoría') +
+          ': la base no guarda fechas por categoría.</p>';
     }
 
     // ---- categorias de "Modificar" ----
@@ -1710,7 +1930,7 @@ window.RegistroIniciativas = (function () {
       abrir = !!abrir && this.puedeEditar();
       var op = this.opcionesEstado();
       this.edicion = abrir ? new window.IniciativaAdmin.EdicionAdmin(i,
-        { rutas: this.rutasCatalogo || [], estados: op.estados, subestados: op.subestados }) : null;
+        { rutas: op.rutas, rutasEstado: op.rutasEstado, estados: op.estados, subestados: op.subestados }) : null;
       caja.innerHTML = abrir ? window.IniciativaAdmin.htmlEdicion(this.edicion,
         { tipo: this.registro.nombreTipo(i.prefijo), volumetria: this.clienteVolumetria() }) : '';
       caja.hidden = !abrir;
@@ -1806,7 +2026,7 @@ window.RegistroIniciativas = (function () {
         if (el) el.hidden = t !== g[0];
       });
       var act = c.actual();
-      this.$('regCambioActual').textContent = t === 'fecha' ? fecha(act) : t === 'pct' ? (act === null ? '—' : act + '%')
+      this.$('regCambioActual').textContent = t === 'fecha' ? fecha(act) : t === 'pct' ? '(el % de cada categoría, en la tabla)'
         : t === 'otros' ? '(explicación libre)' : texto(act);
       var rot = this.$('regCambioMotivoRot');
       if (rot) rot.textContent = t === 'otros' ? 'Explicación de la corrección' : 'Motivo';
@@ -1819,18 +2039,24 @@ window.RegistroIniciativas = (function () {
       var campo = this.$('regCambioCampo').value;
       c.campo = campoCambio(campo) ? campo : '';
       var t = c.tipo();
-      var idPropuesto = t === 'estado' ? 'regCambioEstado' : t === 'pct' ? 'regCambioPct' : 'regCambioNueva';
-      c.propuesto = t === 'otros' ? '' : (this.$(idPropuesto).value || '');
-      if (t === 'estado') c.subestado = this.$('regCambioSubestado').value || '';
-      if (t === 'pct') c.categoria = this.$('regCambioCategoria').value || '';
+      var idPropuesto = t === 'estado' ? 'regCambioEstado' : 'regCambioNueva';
+      // 'pct': los % ya estan en el borrador (capturarDetalle); 'otros' no
+      // tiene valor propuesto.
+      if (t === 'estado') {
+        // Escrito en la caja con busqueda: solo cuenta la opcion real.
+        var est = this.$(idPropuesto).value || '', sub = this.$('regCambioSubestado').value || '';
+        c.propuesto = resolverOpcion(est, c.estados) || est;
+        c.subestado = resolverOpcion(sub, c.subestados) || sub;
+      } else if (t === 'fecha') c.propuesto = this.$(idPropuesto).value || '';
+      else c.propuesto = '';
       c.motivo = this.$('regCambioMotivo').value || '';
       var errores = c.validar();
       var por = {};
       errores.forEach(function (e) { por[e.campo] = true; });
       [['campo', 'regCambioCampo'], ['propuesto', idPropuesto], ['motivo', 'regCambioMotivo'],
-       ['subestado', 'regCambioSubestado'], ['categoria', 'regCambioCategoria']].forEach(function (par) {
+       ['subestado', 'regCambioSubestado']].forEach(function (par) {
         if (t !== 'estado' && par[0] === 'subestado') return;
-        if (t !== 'pct' && par[0] === 'categoria') return;
+        if (t === 'pct' && par[0] === 'propuesto') return;
         self.$(par[1]).setAttribute('aria-invalid', por[par[0]] ? 'true' : 'false');
       });
       var msg = this.$('regCambioMsg');
@@ -1842,7 +2068,10 @@ window.RegistroIniciativas = (function () {
       var r = c.resumen();
       var detalle = t === 'fecha' ? Escape.html(fecha(r.anterior)) + ' → ' + Escape.html(fecha(r.nuevo))
         : t === 'estado' ? Escape.html(texto(r.anterior)) + ' → ' + Escape.html(r.nuevo + (r.subestado ? ' / ' + r.subestado : ''))
-        : t === 'pct' ? Escape.html(r.categoria) + ': ' + Escape.html(r.anterior === null ? '—' : r.anterior + '%') + ' → ' + Escape.html(r.nuevo + '%')
+        : t === 'pct' ? r.categorias.map(function (x) {
+            return Escape.html(x.categoria) + (x.nueva ? ' (agregar): ' + Escape.html(x.nuevo + '%')
+              : ': ' + Escape.html(x.anterior === null ? '—' : x.anterior + '%') + ' → ' + Escape.html(x.nuevo + '%'));
+          }).join('; ')
         : 'explicación para ADM; no cambia nada por sí sola';
       msg.className = 'ini-cambio-msg listo';
       msg.innerHTML = '<strong>Solicitud preparada, no enviada.</strong> ' + Escape.html(r.rotulo) + ': ' + detalle + '. ' +
@@ -1860,11 +2089,7 @@ window.RegistroIniciativas = (function () {
       var opciones = '<option value="">— Elige —</option>' + CAMPOS_CAMBIO.map(function (x) {
         return '<option value="' + Escape.attr(x.clave) + '"' + (x.clave === c.campo ? ' selected' : '') + '>' + Escape.html(x.rotulo) + '</option>';
       }).join('');
-      var lista = function (id, valores) {
-        return '<select id="' + id + '"><option value="">— Elige —</option>' + valores.map(function (v) {
-          return '<option value="' + Escape.attr(v) + '">' + Escape.html(v) + '</option>';
-        }).join('') + '</select>';
-      };
+      var lista = function (id, valores) { return selectorHtml(id, valores, ''); };
       var t = c.tipo();
       return '<h4>Solicitar cambios</h4>' +
         '<p class="ini-nota">Pide un cambio sobre esta iniciativa; aquí no se edita. Lo revisa y aplica un administrador (ADM). ' +
@@ -1879,11 +2104,8 @@ window.RegistroIniciativas = (function () {
               ? '<label for="regCambioEstado">Nuevo Estado</label>' + lista('regCambioEstado', c.estados) +
                 '<label for="regCambioSubestado">Nuevo Subestado (opcional)</label>' + lista('regCambioSubestado', c.subestados)
               : '<p class="ini-nota">Sin lista de estados: no se puede pedir este cambio.</p>') + '</div>' +
-          '<div class="campo" id="regCambioGrupoPct"' + (t === 'pct' ? '' : ' hidden') + '>' +
-            (c.categoriasLigadas().length
-              ? '<label for="regCambioCategoria">Categoría</label>' + lista('regCambioCategoria', c.categoriasLigadas()) +
-                '<label for="regCambioPct">Nuevo %</label><input type="number" id="regCambioPct" min="0" max="100" step="0.01">'
-              : '<p class="ini-nota">Sin categorías: no hay % que cambiar. Usa «Otros» para pedir que se agregue una.</p>') + '</div>' +
+          '<div class="campo ini-cambio-ancho" id="regCambioGrupoPct"' + (t === 'pct' ? '' : ' hidden') + '>' +
+            this.htmlCategoriasCambio() + '</div>' +
           '<div class="campo ini-cambio-ancho"><label for="regCambioMotivo" id="regCambioMotivoRot">' + (t === 'otros' ? 'Explicación de la corrección' : 'Motivo') +
             '</label><textarea id="regCambioMotivo" rows="3"></textarea></div>' +
         '</div>' +
@@ -2016,14 +2238,24 @@ window.RegistroIniciativas = (function () {
           '<td class="num">' + fmt(cambios) + '</td></tr>';
       }
       var semTexto = { verde: 'Sin compromiso vigente', ambar: 'En tiempo o sin fecha', rojo: 'Retrasada' }[i.sem_fecha] || '—';
+      // Fecha de creacion: dbo.Problem.FechaCreacion (f_creacion). Sin el
+      // dato (servidor anterior) se ve "—", nunca una fecha calculada.
+      var rutasCat = i.categorias.map(function (c) { return c.categoria; });
+      if (rutasCat.indexOf(this.segCategoria) < 0) this.segCategoria = rutasCat[0] || '';
+      var segCat = rutasCat.length
+        ? '<div class="ini-seg-cat"><label for="regSegCategoria">Ver por categoría</label>' +
+            selectorHtml('regSegCategoria', rutasCat, this.segCategoria) +
+            '<div id="regSegCatInfo" aria-live="polite">' + this.htmlSeguimientoCategoria(i, this.segCategoria) + '</div></div>'
+        : '<p class="ini-nota">Sin categorías: las fechas son las del problema.</p>';
       var seguimiento =
         '<p class="ini-det-sem">' + this.htmlPunto(i) + Escape.html(semTexto) + '</p>' +
+        '<dl class="ini-datos">' + dato('Fecha de creación', fecha(i.f_creacion)) + '</dl>' +
         '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Fecha</th><th scope="col">Compromiso</th>' +
           '<th scope="col" class="num">Cambios</th></tr></thead><tbody>' +
           etapa('Análisis', 'f_analisis', i.n_analisis) +
           etapa('Solución', 'f_solucion', i.n_solucion) +
           etapa('Cierre', 'f_cierre', i.n_cierre) +
-        '</tbody></table></div>';
+        '</tbody></table></div>' + segCat;
 
       function textoLargo(v) {
         return v ? '<div class="ini-texto">' + Escape.html(v) + '</div>' : '<p class="ini-nota">Sin captura.</p>';

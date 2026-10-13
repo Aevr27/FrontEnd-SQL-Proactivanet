@@ -342,6 +342,81 @@ public static class GestionIniciativaAdminSmoke
         var vacia = VolumetriaCategoria.Resolver(new[] { "/A/Cat 1" }, new Dictionary<string, int>())
             .Cast<Dictionary<string, object>>().ToList();
         Check("V6 SLOT 0 vacio: sin_datos, nunca 0", "sin_datos|", vacia[0]["estado"] + "|" + vacia[0]["volumetria"]);
+        Check("V7 Volumetria separada de TicketsReduce: la respuesta no lo trae", false,
+              vr.Any(f => f.Keys.Any(k => k.IndexOf("reduce", StringComparison.OrdinalIgnoreCase) >= 0)));
+        var sinSlot = "";
+        try { VolumetriaCategoria.Resolver(new[] { "/A/Cat 1" }, null); } catch (ArgumentNullException) { sinSlot = "lanza"; }
+        Check("V8 sin lectura del SLOT 0 (null): lanza, nunca inventa 0", "lanza", sinSlot);
+        var falla = "";
+        try { ExperienciaQueries.VolumenSlot0PorCategoria(new System.Data.SqlClient.SqlConnection()); }
+        catch (Exception) { falla = "lanza"; }
+        Check("V9 lectura que falla (conexion sin abrir): lanza (el handler responde 503), no devuelve vacio", "lanza", falla);
+
+        // ---- PL: plan de escritura (PlanGestionAdmin.cs) ----
+        var hoy = new DateTime(2026, 10, 13);
+        var pc = CV("PRB", "/A/Cat 1", "30", "/A/Cat 2", "20");
+        var pcr = Crear(pc);
+        var plc = PlanificadorGestionAdmin.Crear(pc, pcr, hoy);
+        Check("PL1 alta: FechaCreacion = hoy, FechaAnalisis = hoy + 15", "2026-10-13|2026-10-28",
+              FechasGestionAdmin.Iso(plc.FechaCreacion) + "|" + FechasGestionAdmin.Iso(plc.FechaAnalisis));
+        Check("PL2 alta multi-categoria: todas sin fechas propias (comparten las del problema)", "2|0",
+              plc.Categorias.Count + "|" + plc.Categorias.Count(c => c.FechaCreacion != null || c.FechaAnalisis != null));
+        Check("PL3 alta: % de cada categoria como fraccion", "0.3|0.2",
+              string.Join("|", plc.Categorias.Select(c => c.Pct.Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).ToArray()));
+        Check("PL4 alta: sin codigo en el plan (lo emite la base) y con pendientes de tipos/estado", "|2",
+              plc.ComoJson()["codigo"] + "|" + plc.Pendientes.Count);
+        var plInv = "";
+        try { PlanificadorGestionAdmin.Crear(C(null), Crear(C(null)), hoy); } catch (InvalidOperationException) { plInv = "rechaza"; }
+        Check("PL5 no se planea un alta invalida", "rechaza", plInv);
+        Check("PL6 31-dic + 15 cruza de anio", "2027-01-15", FechasGestionAdmin.Iso(FechasGestionAdmin.Analisis(new DateTime(2026, 12, 31))));
+
+        var fLiga = F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "10");
+        var rLiga = ModC(fLiga);
+        var plLiga = PlanificadorGestionAdmin.Modificar(M(fLiga), Actual(), rLiga, hoy);
+        Check("PL7 ligar despues: valida", true, rLiga.Valida);
+        Check("PL8 ligar despues: fechas PROPIAS hoy / hoy + 15", "2026-10-13|2026-10-28",
+              FechasGestionAdmin.Iso(plLiga.Agregar[0].FechaCreacion) + "|" + FechasGestionAdmin.Iso(plLiga.Agregar[0].FechaAnalisis));
+        Check("PL9 ligar despues: no toca fechas del problema ni las ligadas", "0|0",
+              plLiga.Problem.Count + "|" + plLiga.Pcts.Count);
+        Check("PL10 el codigo del plan es el de la iniciativa leida", Fo, plLiga.Codigo);
+
+        var fFechas = F("folio", Fo, "f_solucion", "2026-11-30", "f_cierre", "2027-01-15");
+        var rFechas = ModC(fFechas);
+        var plFechas = PlanificadorGestionAdmin.Modificar(M(fFechas), Actual(), rFechas, hoy);
+        Check("PL11 editar Solucion y Cierre: solo esos dos campos", "f_cierre=2027-01-15|f_solucion=2026-11-30",
+              string.Join("|", plFechas.Problem.OrderBy(kv => kv.Key).Select(kv => kv.Key + "=" + kv.Value).ToArray()));
+        var fIgual = F("folio", Fo, "f_cierre", "2026-12-15", "titulo", "Titulo problem");
+        Check("PL12 sin cambio real: no hay nada que guardar", "-", Campos(ModC(fIgual)));
+
+        Check("PL13 Codigo inmutable: si llega 'codigo' se rechaza", "codigo",
+              Campos(ModC(F("folio", Fo, "codigo", "PRB 2026-999999", "titulo", "x"))));
+        Check("PL14 FechaCreacion inmutable: si llega 'f_creacion' se rechaza", "f_creacion",
+              Campos(ModC(F("folio", Fo, "f_creacion", "2026-01-01", "titulo", "x"))));
+        Check("PL15 campos del plan: nunca Codigo ni FechaCreacion", false,
+              PlanificadorGestionAdmin.CamposProblem.Contains("codigo") || PlanificadorGestionAdmin.CamposProblem.Contains("f_creacion"));
+
+        Check("PL16 ligar una ya ligada: se rechaza (sin duplicar)", "categorias",
+              Campos(ModC(F("folio", Fo, "agregar_categoria", "/A/Cat 1", "agregar_pct", "10"))));
+        Check("PL17 ligar dos veces la misma en un guardado: se rechaza", "categorias,categorias",
+              Campos(ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "1",
+                                     "agregar_categoria", " /b/cat 3 ", "agregar_pct", "1"))));
+
+        Check("PL18 tope exacto: 60 de otros + 40 = 100% se permite", true,
+              Crear(CV("PRB", "/A/Cat 1", "40"), K("ADO 2026-000009", "/A/Cat 1", 0.6m)).Valida);
+        Check("PL19 tope: 60 + 40.01 se rechaza", "pct",
+              Campos(Crear(CV("PRB", "/A/Cat 1", "40.01"), K("ADO 2026-000009", "/A/Cat 1", 0.6m))));
+        Check("PL20 ligar despues con tope exacto 100% se permite", true,
+              ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "25"), K("ADO 2026-000009", "/B/Cat 3", 0.75m)).Valida);
+        Check("PL21 ligar despues por encima del tope se rechaza", "categorias",
+              Campos(ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "25.01"), K("ADO 2026-000009", "/B/Cat 3", 0.75m))));
+
+        var fQuita = F("folio", Fo, "quitar_categoria", "/A/Cat 2");
+        var plQuita = PlanificadorGestionAdmin.Modificar(M(fQuita), Actual(), ModC(fQuita), hoy);
+        Check("PL22 quitar categoria: queda como pendiente (sin regla de borrado)", "1|1", plQuita.Quitar.Count + "|" + plQuita.Pendientes.Count);
+        var escrQuita = "";
+        try { new EscritorGestionAdminSql().Modificar(new System.Data.SqlClient.SqlConnection(), null, plQuita, "u"); }
+        catch (InvalidOperationException) { escrQuita = "rechaza"; }
+        Check("PL23 el escritor no ejecuta un plan con categorias a quitar", "rechaza", escrQuita);
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO PASO" : fallos + " FALLO(S)");

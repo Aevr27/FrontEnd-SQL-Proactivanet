@@ -1047,6 +1047,222 @@ pruebas.push(function () {
   });
 });
 
+// AD) Crear (ADM): borrador incompleto con varias categorias. Nada se
+// inventa: lo que falta se nombra, incluido CUAL categoria no tiene %.
+pruebas.push(function () {
+  var cat = I.CatalogoIniciativas.desdeJson(CATALOGO);
+  var b = new A.BorradorAdmin(cat);
+  Check('AD1 vacio: no listo (sin tipo), incompleta, sin codigo ni guardado', [false, true, null, false],
+    (function (r) { return [r.listo, r.incompleta, r.codigo, r.guardado]; })(b.revisar()));
+  b.elegirTipo('ADO');
+  b.agregarCategoria('/A/Cat 1'); b.agregarCategoria('/B/Cat 4');
+  b.categorias.capturarPct(0, '20');
+  var r = b.revisar();
+  Check('AD2 con tipo y datos a medias: listo para validar, pero Incompleta', [true, true], [r.listo, r.incompleta]);
+  Check('AD3 el faltante de % dice que categoria no lo tiene', true,
+    r.faltantes.some(function (f) { return f.clave === 'pct' && /sin %: \/B\/Cat 4\)/.test(f.rotulo); }));
+  Check('AD4 los campos vacios siguen vacios (no se rellenan)', ['', '', ''],
+    [b.valores.titulo, b.valores.descripcion, b.valores.observaciones]);
+  Check('AD5 viajan las dos categorias, la incompleta con % vacio', [['cat_ruta', '/A/Cat 1'], ['cat_pct', '20'], ['cat_ruta', '/B/Cat 4'], ['cat_pct', '']],
+    b.paraEnviar().slice(7));
+  Check('AD6 agregar otra no cambia el % ya escrito', [true, '20', ''],
+    [b.agregarCategoria('/A/Cat 2').ok, b.categorias.filas[0].valor, b.categorias.filas[2].valor]);
+  Check('AD7 duplicado rechazado', [false, 3], [b.agregarCategoria(' /a/cat 2').ok, b.categorias.filas.length]);
+  Check('AD8 lo escrito que no es categoria: rechazo con parecidas, sin elegir', [false, true, 3],
+    (function (x) { return [x.ok, /Parecidas: \/A\/Cat 1 · \/A\/Cat 2/.test(x.mensaje), b.categorias.filas.length]; })(b.agregarCategoria('cat')));
+  Check('AD9 aviso de prototipo: no se guardo ni se genero codigo', true, /No se guardó nada y no se generó código/.test(r.aviso));
+});
+
+// LF) Ligar a un problema existente: varias categorias nuevas, cada una con
+// su fecha de analisis de BORRADOR; las ligadas muestran la del problema.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro, pg = p.pagina;
+    pg.fijarRol('ADM');
+    pg.mostrarVista('crear');
+    var r = p.sel('admRutaExistente');
+    r.value = 'existente'; r.checked = true; r.disparar('change');
+    var b = Elemento('b'); b.setAttribute('data-existente', 'MAP 2026-000003');
+    p.sel('admExistenteLista').disparar('click', { target: b });
+    var ed = reg.edicion;
+    var FG = p.ventana.IniciativaAdmin.FECHAS_GESTION, hoyOriginal = FG.hoy;
+    FG.hoy = function () { return '2026-10-13'; };
+    Check('LF1 elegido: su identidad real y su categoria ligada', ['MAP 2026-000003', ['/A/Cat 2']],
+      [reg.abierta, ed.categorias.filas.map(function (f) { return f.categoria; })]);
+    Check('LF2 agregar dos categorias nuevas', [true, true, 3],
+      [reg.agregarCategoriaEdicion('/A/Cat 1').ok, reg.agregarCategoriaEdicion('/B/Cat 4').ok, ed.categorias.filas.length]);
+    Check('LF3 duplicado (ligada o nueva) rechazado', [false, false, 3],
+      [reg.agregarCategoriaEdicion('/a/cat 2').ok, reg.agregarCategoriaEdicion('/A/Cat 1').ok, ed.categorias.filas.length]);
+    var html = p.sel('regEdCats').innerHTML;
+    Check('LF4 columna Fecha de analisis: ligada = del problema (compartida); nuevas = PROPIAS calculadas, sin input', [true, true, 0, 2],
+      [/Fecha de análisis<\/th>/.test(html), /01\/12\/2026<\/span> <span class="ini-origen derivado"[^>]*>Del problema/.test(html),
+       (html.match(/data-edicion-fecha="/g) || []).length, (html.match(/title="Se liga el [^"]*">Calculada<\/span>/g) || []).length]);
+    Check('LF4b cada nueva: su dia de ligado (hoy) y su analisis = hoy + 15', [true, true],
+      [/28\/10\/2026<\/span> <span class="ini-origen derivado" title="Se liga el 13\/10\/2026: análisis = ese día \+ 15 días/.test(html),
+       ed.categorias.filas.slice(1).every(function (f) { return f.fCreacion === '2026-10-13' && f.fAnalisis === '2026-10-28'; })]);
+    editar(p, 'data-edicion-pct', '1', '30');
+    Check('LF5 la ligada no toma fecha propia (usa la del problema)', ['', '2026-10-28', '2026-10-28'],
+      ed.categorias.filas.map(function (f) { return f.fAnalisis || ''; }));
+    Check('LF6 la regla cruza mes y anio', ['2027-01-15', '2026-03-16', ''],
+      [A.FECHAS_GESTION.analisisDesde('2026-12-31'), A.FECHAS_GESTION.analisisDesde('2026-03-01'), A.FECHAS_GESTION.analisisDesde('31/12/2026')]);
+    Check('LF7 fechas calculadas por categoria nueva', [{ categoria: '/A/Cat 1', f_creacion: '2026-10-13', f_analisis: '2026-10-28' },
+                                                       { categoria: '/B/Cat 4', f_creacion: '2026-10-13', f_analisis: '2026-10-28' }],
+      ed.categorias.fechasNuevas());
+    FG.hoy = function () { return '2026-11-02'; };
+    Check('LF8 una ligada otro dia lleva SU fecha; las ya agregadas no cambian', [true, ['', '2026-10-28', '2026-10-28', '2026-11-17'], ['', '30', '', '']],
+      [(function () { ed.categorias.fijarRutas(['/A/Cat 1', '/A/Cat 2', '/B/Cat 4', '/C/Cat 9']); return reg.agregarCategoriaEdicion('/C/Cat 9').ok; })(),
+       ed.categorias.filas.map(function (f) { return f.fAnalisis || ''; }), ed.categorias.filas.map(function (f) { return f.valor; })]);
+    FG.hoy = hoyOriginal;
+    var pares = ed.paraEnviar();
+    Check('LF9 las fechas de categoria NO viajan (las fija el servidor); el codigo no cambia', [false, 'MAP 2026-000003', false],
+      [pares.some(function (x) { return /fecha|f_analisis|f_creacion/.test(x[0]); }), pares[1][1], pares.some(function (x) { return x[0] === 'codigo'; })]);
+    Check('LF10 la vista previa dice la fecha calculada', true,
+      ed.cambios().some(function (c) { return /\/A\/Cat 1 · 30% · análisis 2026-10-28 \(hoy \+ 15 días\)/.test(c.nuevo); }));
+    Check('LF11 nota del modelo: ligadas comparten la del problema; nuevas, la suya (+15); sin guardar', true,
+      /las ligadas comparten la del problema \(dbo\.Problem\.FechaAnalisis\)\. Una categoría nueva tiene la suya: el día en que se liga \+ 15 días/.test(p.sel('regEdCats').innerHTML));
+    Check('LF12 el registro no cambia', ['2026-12-01', 1], [reg.registro.buscar('MAP 2026-000003').f_analisis,
+      reg.registro.buscar('MAP 2026-000003').categorias.length]);
+    Check('LF13 una nueva sin % queda incompleta en el borrador, no se rellena', '', ed.categorias.filas[2].valor);
+  });
+});
+
+// LC) Estado del catalogo de rutas: cargando y error no son "sin categorias".
+pruebas.push(function () {
+  Check('LC1 textos de estado', [true, true, true],
+    [/Cargando el catálogo/.test(A.htmlSinCatalogo('cargando')), /No se pudo cargar el catálogo/.test(A.htmlSinCatalogo('error')),
+     /no está disponible/.test(A.htmlSinCatalogo(''))]);
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.fijarRutasCatalogo(null, 'error');
+    reg.modificar('PRB 2026-000001');
+    Check('LC2 Modificar con error de catalogo: lo dice y no agrega', [true, false],
+      [/No se pudo cargar el catálogo de categorías/.test(p.sel('regEdCats').innerHTML), reg.agregarCategoriaEdicion('/A/Cat 1').ok]);
+    Check('LC3 el estado no se confunde con lista vacia', 'error', reg.rutasEstado);
+  });
+});
+
+// SC) Solicitar cambios: varias categorias en una solicitud (DOM). Solo
+// se prepara: ni peticiones ni guardado.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    p.pagina.fijarRol('MOD');
+    reg.abrirDetalle('PRB 2026-000001');
+    accion(p, 'solicitar-cambios');
+    var form = p.sel('regCambio').innerHTML;
+    elegir(p, 'regCambioCampo', 'pct');
+    Check('SC1 Categorias: tabla con las ligadas y su % actual', [false, true, true],
+      [p.sel('regCambioGrupoPct').hidden, /data-cambio-pct="0"/.test(form), /<td class="num">25%<\/td>/.test(form)]);
+    p.sel('regCambioMotivo').value = 'Se amplia el alcance';
+    var antes = p.pedidos.length;
+    editar(p, 'data-cambio-pct', '1', '30');
+    p.sel('regCambioCatBuscar').value = '/b/cat 4';
+    accion(p, 'cambio-cat-agregar');
+    var grupo = p.sel('regCambioGrupoPct').innerHTML;
+    Check('SC2 agregar del catalogo: se pinta como nueva y el % pedido de la ligada se conserva', [true, true, true],
+      [/\/B\/Cat 4<\/span> <span class="ini-cat-estado nueva">Agregar/.test(grupo), /data-cambio-pct="1" value="30"/.test(grupo),
+       /data-cambio-nueva-pct="0"/.test(grupo)]);
+    Check('SC3 solo se repinta el bloque de categorias: motivo y formulario intactos', ['Se amplia el alcance', form],
+      [p.sel('regCambioMotivo').value, p.sel('regCambio').innerHTML]);
+    p.sel('regCambioCatBuscar').value = '/A/Cat 1';
+    accion(p, 'cambio-cat-agregar');
+    Check('SC4 una ligada no se puede agregar otra vez', [true, 1], [/ya es una categoría de esta iniciativa/.test(p.sel('regCambioCatMsg').textContent), reg.cambio.nuevas.length]);
+    p.sel('regCambioCatBuscar').value = '/B/Cat 4';
+    accion(p, 'cambio-cat-agregar');
+    Check('SC4b ni una nueva dos veces', [true, 1], [/ya está en la lista para agregar/.test(p.sel('regCambioCatMsg').textContent), reg.cambio.nuevas.length]);
+    accion(p, 'cambio-preparar');
+    Check('SC5 nueva sin %: no se prepara', [true, true], [/error/.test(p.sel('regCambioMsg').className), /\/B\/Cat 4: escribe un porcentaje/.test(p.sel('regCambioMsg').innerHTML)]);
+    editar(p, 'data-cambio-nueva-pct', '0', '10');
+    accion(p, 'cambio-preparar');
+    var msg = p.sel('regCambioMsg').innerHTML;
+    Check('SC6 preparada (no enviada) con las dos categorias', [true, true, true],
+      [/Solicitud preparada, no enviada/.test(msg), /\/A\/Cat 2: 25% → 30%/.test(msg), /\/B\/Cat 4 \(agregar\): 10%/.test(msg)]);
+    Check('SC7 sin peticiones al servidor; el registro no cambia', [antes, 0.25, 2],
+      [p.pedidos.length, reg.registro.buscar('PRB 2026-000001').categorias[1].pct_dism, reg.registro.buscar('PRB 2026-000001').categorias.length]);
+    var q = Elemento('q'); q.setAttribute('data-cambio-quitar', '0');
+    p.sel('regDetCuerpo').disparar('click', { target: q });
+    Check('SC8 quitar la agregada', [0, false], [reg.cambio.nuevas.length, /data-cambio-nueva-pct/.test(p.sel('regCambioGrupoPct').innerHTML)]);
+    elegir(p, 'regCambioCampo', 'otros');
+    accion(p, 'cambio-preparar');
+    Check('SC9 Otros: solo explicacion, no cambia nada', [true, true],
+      [/Solicitud preparada, no enviada/.test(p.sel('regCambioMsg').innerHTML), /no cambia nada por sí sola/.test(p.sel('regCambioMsg').innerHTML)]);
+    Check('SC9b Otros aprobado no produce pares', null, new p.ventana.RegistroIniciativas.RevisionSolicitud(reg.cambio.resumen(), 'u').aprobar('a').pares);
+  });
+});
+
+// SG) Seguimiento: Fecha de creacion y selector de categoria.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    var datos = JSON.parse(JSON.stringify(REGISTRO));
+    datos.iniciativas[0].f_creacion = '2026-03-04';
+    return reg.cargar(function () { return Promise.resolve(Respuesta(200, datos)); }).then(function () {
+      p.pagina.fijarRol('ADM');
+      reg.abrirDetalle('PRB 2026-000001');
+      var html = p.sel('regDetCuerpo').innerHTML;
+      var seg = (/<h4>Seguimiento<\/h4>[\s\S]*?<\/section>/.exec(html) || [''])[0];
+      Check('SG1 Fecha de creacion en Seguimiento', true, /Fecha de creación<\/dt><dd>04\/03\/2026/.test(seg));
+      Check('SG2 se conservan semaforo, tabla de compromisos y contadores', [true, true, true],
+        [/ini-det-sem/.test(seg), /<th scope="col" class="num">Cambios<\/th>/.test(seg), /Análisis <span class="ini-sub">estado actual<\/span>/.test(seg)]);
+      Check('SG3 selector con las categorias reales; la primera elegida', [true, true, true],
+        [/<select id="regSegCategoria">/.test(seg), /<option value="\/A\/Cat 1" selected>/.test(seg), /<option value="\/A\/Cat 2">/.test(seg)]);
+      Check('SG4 bloque de la primera: su % y fechas del problema marcadas compartidas', [true, true, true],
+        [/% disminución<\/dt><dd>50%/.test(seg), /Del problema/.test(seg), /la base no guarda fechas por categoría/.test(seg)]);
+      var cuerpo = p.sel('regDetCuerpo').innerHTML;
+      p.sel('regBuscar').value = 'filtro escrito';
+      function segElegir(v) { var t = p.sel('regSegCategoria'); t.value = v; p.sel('regDetCuerpo').disparar('change', { target: t }); }
+      segElegir('/A/Cat 2');
+      Check('SG5 cambiar de categoria repinta solo su bloque', [true, true, 'filtro escrito', '/A/Cat 2'],
+        [/% disminución<\/dt><dd>25%/.test(p.sel('regSegCatInfo').innerHTML), p.sel('regDetCuerpo').innerHTML === cuerpo, p.sel('regBuscar').value, reg.segCategoria]);
+      Check('SG6 las fechas son las del problema (no se inventan por categoria)', [true, true],
+        [/Análisis<\/dt><dd>01\/12\/2026/.test(p.sel('regSegCatInfo').innerHTML), /las comparten sus 2 categorías/.test(p.sel('regSegCatInfo').innerHTML)]);
+      segElegir('/Z/Inventada');
+      Check('SG7 algo que no es categoria de la iniciativa: lo dice, no cambia la elegida', [true, '/A/Cat 2'],
+        [/no es una categoría vigente/.test(p.sel('regSegCatInfo').innerHTML), reg.segCategoria]);
+      reg.abrirDetalle('PRB 2026-000002');
+      var sin = p.sel('regDetCuerpo').innerHTML;
+      Check('SG8 sin categorias ni fecha de creacion: lo dice, sin inventar', [true, true],
+        [/Sin categorías: las fechas son las del problema/.test(sin), /Fecha de creación<\/dt><dd>—/.test(sin)]);
+      // Umbral: 20 categorias = <select>; 21 = caja con busqueda.
+      function con(n) {
+        var d = JSON.parse(JSON.stringify(REGISTRO)), cats = [];
+        for (var k = 1; k <= n; k++) cats.push(Cat('/R/' + k, 0.01));
+        d.iniciativas[0].categorias = cats;
+        return reg.cargar(function () { return Promise.resolve(Respuesta(200, d)); }).then(function () {
+          reg.abrirDetalle('PRB 2026-000001');
+          return p.sel('regDetCuerpo').innerHTML;
+        });
+      }
+      return con(20).then(function (h20) {
+        return con(21).then(function (h21) {
+          Check('SG9 umbral del selector: 20 select, 21 caja con busqueda', [true, false, true, true],
+            [/<select id="regSegCategoria">/.test(h20), /list="regSegCategoria-lista"/.test(h20),
+             /<input type="text" id="regSegCategoria" list="regSegCategoria-lista"/.test(h21), /<datalist id="regSegCategoria-lista">/.test(h21)]);
+          var t = p.sel('regSegCategoria');
+          t.value = '/r/21';
+          p.sel('regDetCuerpo').disparar('input', { target: t });
+          Check('SG10 escribir en la caja (sin mayusculas) elige la real', '/R/21', reg.segCategoria);
+        });
+      });
+    });
+  });
+});
+
+// PS) Las dos persistencias siguen apagadas (constantes en el servidor).
+pruebas.push(function () {
+  Check('PS1 PersistenciaGestionAdmin.Habilitada = false', true,
+    /class PersistenciaGestionAdmin[\s\S]*?public const bool Habilitada = false;/.test(leer('App_Code/GestionIniciativaAdmin.cs')));
+  Check('PS2 AltaCategoriaProactivanet.Habilitada = false', true,
+    /public const bool Habilitada = false;/.test(leer('App_Code/AltaCategoriaProactivanet.cs')));
+  Check('PS3 ningun "true" para Habilitada', false,
+    /Habilitada\s*=\s*true/.test(leer('App_Code/GestionIniciativaAdmin.cs') + leer('App_Code/AltaCategoriaProactivanet.cs')));
+});
+
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
   .then(function () {
     console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\nTODO PASO');

@@ -17,7 +17,9 @@
 //                       ligadas), pares agregar_categoria / agregar_pct y
 //                       quitar_categoria (repetible)
 //
-//   501  valida: { "valida": true, "guardada": false,
+//   501  valida: { "valida": true, "guardada": false, "plan" (lo que se
+//                  guardaria: fechas del alta, de cada categoria ligada y
+//                  "pendientes"; PlanGestionAdmin.cs),
 //                  "persistencia": "no_habilitada", "persistencia_motivo",
 //                  "bloqueos": [...], "cambios", "faltantes", "advertencias",
 //                  "codigo": null, ... , "error", "tipo": "PersistenciaNoHabilitada" }
@@ -33,8 +35,11 @@
 //        (AccesoDenegado) y MOD (RolInsuficiente),
 //        antes de leer nada.
 //
-// SOLO LECTURA. No escribe en dbo.Problem, dbo.ProblemCategoria ni en el
-// historial de fechas, no genera codigo y no sube archivos.
+// HOY SOLO LECTURA: PersistenciaGestionAdmin.Habilitada = const false, asi
+// que la rama 4 (EscritorGestionAdminSql -> adm.usp_GestionAdmin_*, de
+// sql/18) nunca corre. Con ella activa: 200 { guardada: true, codigo };
+// 409 { error, numero, tipo: TopeExcedido | CategoriaRepetida |
+// AdministradaPorExcel | EscrituraRechazada } si el procedimiento rechaza.
 
 using System;
 using System.Collections.Generic;
@@ -83,9 +88,9 @@ public class AdminIniciativasGestion : IHttpHandler
             // 2) Catalogo / registro: la autoridad. Si no se puede leer, no se
             //    dice nada de la validez.
             ResultadoGestionAdmin r;
+            var servicio = new GestionIniciativaAdminService();
             try
             {
-                var servicio = new GestionIniciativaAdminService();
                 r = crear != null ? servicio.Crear(crear) : servicio.Modificar(modificar);
             }
             catch (Exception ex)
@@ -96,10 +101,50 @@ public class AdminIniciativasGestion : IHttpHandler
             }
             if (!r.Valida) return Invalida(context, r);
 
-            // 3) Valida, pero sin persistencia: nada se guarda.
+            // 3) El plan: lo que se guardaria (fechas incluidas).
+            var hoy = DashboardDataInfo.HoyEnPresentacion();
+            var planCrear = crear != null ? PlanificadorGestionAdmin.Crear(crear, r, hoy) : null;
+            var planMod = crear == null ? PlanificadorGestionAdmin.Modificar(modificar, servicio.Actual, r, hoy) : null;
+            var pendientes = planCrear != null ? planCrear.Pendientes : planMod.Pendientes;
+            var salida = r.ComoJson();
+            salida["plan"] = planCrear != null ? planCrear.ComoJson() : planMod.ComoJson();
+
+            // 4) Escritura: SOLO con la persistencia activa (hoy const false,
+            //    PersistenciaGestionAdmin) y sin pendientes. Depende de
+            //    sql/18 y sql/19 aplicadas: sin aprobar.
+            if (PersistenciaGestionAdmin.Activa() && pendientes.Count == 0)
+            {
+                var id = IdentidadWindows.DesdeContexto(context);
+                if (!id.Autenticada || string.IsNullOrEmpty(id.Original))
+                    return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
+                try
+                {
+                    // Un alta siempre trae pendientes (tipos / estado sin
+                    // regla verificada): esta rama hoy solo puede ser Modificar.
+                    salida["codigo"] = servicio.Guardar(planCrear, planMod, null, id.Original);
+                }
+                catch (ErrorEscrituraGestionAdmin ex)
+                {
+                    DashboardHandler.Registrar("admin_iniciativas_gestion.ashx", ex);
+                    context.Response.StatusCode = 409;
+                    context.Response.TrySkipIisCustomErrors = true;
+                    return new Dictionary<string, object>
+                    {
+                        { "error", ex.Message }, { "numero", ex.Numero },
+                        { "tipo", ex.EsTope ? "TopeExcedido" : ex.EsRepetida ? "CategoriaRepetida"
+                                  : ex.EsDelExcel ? "AdministradaPorExcel" : "EscrituraRechazada" },
+                        { "guardada", false },
+                    };
+                }
+                salida["guardada"] = true;
+                salida["persistencia"] = "habilitada";
+                salida["persistencia_motivo"] = null;
+                return salida;
+            }
+
+            // 5) Valida, pero sin persistencia: nada se guarda.
             context.Response.StatusCode = 501;
             context.Response.TrySkipIisCustomErrors = true;
-            var salida = r.ComoJson();
             salida["error"] = PersistenciaGestionAdmin.Motivo;
             salida["tipo"] = "PersistenciaNoHabilitada";
             return salida;

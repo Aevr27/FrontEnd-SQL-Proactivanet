@@ -77,6 +77,10 @@ public static class PersistenciaGestionAdmin
 {
     public const bool Habilitada = false;
 
+    // Lo que consulta el handler (un metodo, para no dejar codigo
+    // "inalcanzable" con la constante en false).
+    public static bool Activa() { return Habilitada; }
+
     public const string Estado = "no_habilitada";
 
     public const string Motivo =
@@ -137,6 +141,9 @@ public sealed class PeticionModificarAdmin
     public const string CFCierre = "f_cierre";
     public const string CEstado = "estado";
     public const string CSubestado = "subestado";
+    // Inmutables: si llegan, se rechaza (el Codigo solo identifica; la
+    // fecha de creacion no se reescribe al modificar).
+    public static readonly string[] CamposInmutables = { "codigo", "f_creacion" };
 
     public string Folio;
     // null = el campo no vino (no se cambia); "" = se vacia.
@@ -154,6 +161,8 @@ public sealed class PeticionModificarAdmin
     // Las listas pct_categoria / pct_valor (o agregar_*) no venian parejas.
     public bool PctsDesparejos;
     public bool AgregarDesparejos;
+    // Campos inmutables que vinieron en el formulario (ver CamposInmutables).
+    public List<string> Inmutables = new List<string>();
 
     public static PeticionModificarAdmin DesdeFormulario(NameValueCollection f)
     {
@@ -172,6 +181,7 @@ public sealed class PeticionModificarAdmin
         p.Pcts = Pares.Leer(f, CPctCategoria, CPctValor, out p.PctsDesparejos);
         p.Agregar = Pares.Leer(f, CAgregarCategoria, CAgregarPct, out p.AgregarDesparejos);
         p.Quitar = new List<string>(f.GetValues(CQuitarCategoria) ?? new string[0]);
+        foreach (var c in CamposInmutables) if (f[c] != null) p.Inmutables.Add(c);
         return p;
     }
 }
@@ -542,6 +552,9 @@ public sealed class ValidadorGestionAdmin
         if (p == null) throw new ArgumentNullException("p");
         var r = new ResultadoGestionAdmin { Accion = "modificar", Folio = Limpio(p.Folio) };
         if (r.Folio == null) r.Agregar(PeticionModificarAdmin.CFolio, "Falta el código de la iniciativa.");
+        foreach (var c in p.Inmutables)
+            r.Agregar(c, c == "codigo" ? "El código de la iniciativa no se modifica: solo la identifica."
+                                       : "La fecha de creación no se modifica.");
         if (p.PctsDesparejos)
             r.Agregar("pct", "Los % por categoría llegaron incompletos (categoría sin valor o al revés).");
         if (p.AgregarDesparejos)

@@ -55,8 +55,23 @@
    ----------
      Mas de SELECTOR_UMBRAL (20) opciones: caja de texto con lista
      (<input list> + <datalist>), en la que se escribe para buscar; el valor
-     solo cuenta si coincide con una opcion real (resolverOpcion). Con 20 o
-     menos, un <select> normal.
+     solo cuenta si coincide con una opcion real (Selector.resolver). Con 20
+     o menos, un <select> normal. Lo escrito que no es una opcion se
+     rechaza con las parecidas (Selector.coincidencias: parte del nombre o
+     del codigo), sin elegir ninguna. Es el mismo en Crear, Modificar,
+     Solicitar cambios y Seguimiento (registro-iniciativas.js).
+
+   FECHA DE ANALISIS POR CATEGORIA (calculada)
+   -------------------------------------------
+     Regla: el analisis dura FECHAS_GESTION.diasAnalisis (15) dias
+     naturales. Una categoria NUEVA en "Modificar" (ligada despues) tiene SU
+     fecha de creacion (el dia en que se liga) y SU fecha de analisis (ese
+     dia + 15): se muestran calculadas, no se capturan, y no se copian de
+     otra. Las ligadas muestran la del problema (dbo.Problem.FechaAnalisis),
+     "Del problema". Hoy dbo.ProblemCategoria NO tiene fecha por categoria:
+     la propuesta (sql/18_gestion_admin_persistencia.sql) la agrega y
+     el servidor la fija al guardar (PlanGestionAdmin.cs). No viaja ningun
+     campo de fecha de categoria: la decide el servidor, no el navegador.
 
    PIEZAS
    ------
@@ -156,6 +171,25 @@ window.IniciativaAdmin = (function () {
     }
   };
 
+  function fechaCorta(s) { return s ? String(s).split('-').reverse().join('/') : '—'; }
+
+  // Regla de fechas (la misma de FechasGestionAdmin en PlanGestionAdmin.cs):
+  // analisis = dia de creacion/ligado + 15 dias naturales. Solo se muestra;
+  // el servidor fija la fecha al guardar con el dia de Mexico.
+  var FECHAS_GESTION = {
+    diasAnalisis: 15,
+    hoy: function () {
+      var d = new Date();
+      return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    },
+    analisisDesde: function (dia) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dia || '');
+      if (!m) return '';
+      var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + FECHAS_GESTION.diasAnalisis));
+      return d.toISOString().slice(0, 10);
+    }
+  };
+
   function pctDe(f) {
     return typeof f === 'number' && isFinite(f) ? String(Math.round(f * 10000) / 100) : '';
   }
@@ -193,8 +227,34 @@ window.IniciativaAdmin = (function () {
         if (llaveRuta(v) === k) return v;
       }
       return '';
+    },
+
+    // Las opciones que CONTIENEN lo escrito (parte del nombre o del codigo,
+    // sin mayusculas ni acentos), en su orden; hasta `max`. Solo sugiere:
+    // elegir sigue siendo resolver (coincidencia exacta).
+    coincidencias: function (texto, opciones, max) {
+      var k = plano(texto), salida = [];
+      if (!k) return salida;
+      (opciones || []).some(function (o) {
+        var v = typeof o === 'string' ? o : o.valor, t = typeof o === 'string' ? o : o.texto;
+        if (plano(v).indexOf(k) >= 0 || plano(t).indexOf(k) >= 0) salida.push(v);
+        return salida.length >= (max || 5);
+      });
+      return salida;
     }
   };
+
+  function plano(v) {
+    return String(v === null || v === undefined ? '' : v).normalize('NFD')
+      .replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  // Mensaje de "no es una opcion de la lista", con las parecidas si las hay.
+  function noEnLista(texto, opciones, que) {
+    var t = String(texto).trim(), sug = Selector.coincidencias(t, opciones, 3);
+    return 'Elige ' + que + ' de la lista: «' + t + '» no es ' + que + ' vigente.' +
+      (sug.length ? ' Parecidas: ' + sug.join(' · ') + '.' : '');
+  }
 
   // ---------------------------------------------------------------------
   // VolumetriaCliente
@@ -290,7 +350,7 @@ window.IniciativaAdmin = (function () {
       var ruta = Selector.resolver(texto, this.rutas);
       if (!ruta) {
         return { ok: false, mensaje: this.rutas.length
-          ? 'Elige una categoría de la lista: «' + String(texto).trim() + '» no es una categoría vigente.'
+          ? noEnLista(texto, this.rutas, 'una categoría')
           : 'El catálogo de categorías no está disponible.' };
       }
       var n = this.buscar(ruta);
@@ -300,7 +360,11 @@ window.IniciativaAdmin = (function () {
           ? ruta + ' está marcada para quitar: usa «Restaurar» en vez de agregarla otra vez.'
           : ruta + ' ya está en la lista.' };
       }
-      this.filas.push({ categoria: ruta, valor: '', original: null, ligada: false, quitada: false });
+      // fCreacion / fAnalisis: las PROPIAS de esta categoria ligada despues
+      // (hoy y hoy + 15), calculadas, nunca copiadas de otra fila.
+      var hoy = FECHAS_GESTION.hoy();
+      this.filas.push({ categoria: ruta, valor: '', original: null, ligada: false, quitada: false,
+                        fCreacion: hoy, fAnalisis: FECHAS_GESTION.analisisDesde(hoy) });
       return { ok: true, ruta: ruta, mensaje: '' };
     }
 
@@ -328,6 +392,13 @@ window.IniciativaAdmin = (function () {
 
     activas() { return this.filas.filter(function (f) { return !f.quitada; }); }
 
+    // Las fechas calculadas de cada categoria nueva (solo para mostrar; no
+    // viajan: el servidor las fija al guardar).
+    fechasNuevas() {
+      return this.filas.filter(function (f) { return !f.ligada; })
+        .map(function (f) { return { categoria: f.categoria, f_creacion: f.fCreacion, f_analisis: f.fAnalisis }; });
+    }
+
     erroresFormato() {
       var errores = [];
       this.activas().forEach(function (f) {
@@ -345,7 +416,8 @@ window.IniciativaAdmin = (function () {
           salida.push({ clave: 'quitar_categoria', rotulo: 'Quitar categoría', anterior: f.categoria, nuevo: '' });
         } else if (!f.ligada) {
           salida.push({ clave: 'agregar_categoria', rotulo: 'Agregar categoría', anterior: '',
-                        nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%') });
+                        nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%') +
+                          (f.fAnalisis ? ' · análisis ' + f.fAnalisis + ' (hoy + ' + FECHAS_GESTION.diasAnalisis + ' días)' : '') });
         } else if (f.valor !== f.original) {
           salida.push({ clave: 'pct', rotulo: '% Disminución · ' + f.categoria, anterior: f.original, nuevo: f.valor });
         }
@@ -380,12 +452,27 @@ window.IniciativaAdmin = (function () {
   }
 
   // Tabla de categorias (Crear y Modificar). prefijo: de los ids/atributos.
-  // vol: VolumetriaCliente o null.
-  function htmlCategorias(cats, vol, prefijo) {
+  // vol: VolumetriaCliente o null. fechas (solo Modificar): { f_analisis }
+  // del problema. Agrega la columna "Fecha de análisis": en una ligada, la
+  // del PROBLEMA (dbo.Problem.FechaAnalisis, compartida, solo lectura); en
+  // una nueva, la PROPIA calculada (dia en que se liga + 15), de solo
+  // lectura: la fija el servidor al guardar.
+  function htmlCategorias(cats, vol, prefijo, fechas) {
     if (!cats.filas.length) return '<p class="ini-nota">Sin categorías todavía.</p>';
+    function celdaFecha(f, n) {
+      if (f.ligada) {
+        return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(fechas.f_analisis)) +
+          '</span> <span class="ini-origen derivado" title="dbo.Problem.FechaAnalisis: la comparten todas las categorías del problema">Del problema</span>';
+      }
+      if (f.quitada) return '—';
+      return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(f.fAnalisis)) + '</span>' +
+        ' <span class="ini-origen derivado" title="Se liga el ' + Escape.attr(fechaCorta(f.fCreacion)) +
+        ': análisis = ese día + ' + FECHAS_GESTION.diasAnalisis + ' días. La fija el servidor al guardar.">Calculada</span>';
+    }
     return '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
       '<th scope="col">Volumetría <span class="ini-origen derivado">Calculada</span></th>' +
-      '<th scope="col">% Disminución</th><th scope="col"><span class="ini-sr">Acción</span></th></tr></thead><tbody>' +
+      '<th scope="col">% Disminución</th>' + (fechas ? '<th scope="col">Fecha de análisis</th>' : '') +
+      '<th scope="col"><span class="ini-sr">Acción</span></th></tr></thead><tbody>' +
       cats.filas.map(function (f, n) {
         var estado = f.quitada ? '<span class="ini-cat-estado">Se quitará</span>'
           : !f.ligada ? '<span class="ini-cat-estado nueva">Nueva</span>' : '';
@@ -398,7 +485,8 @@ window.IniciativaAdmin = (function () {
           : '<button type="button" class="btn linea chico" data-' + prefijo + '-cat="quitar" data-indice="' + n + '">Quitar</button>';
         return '<tr' + (f.quitada ? ' class="ini-cat-quitada"' : '') + '><td><span class="ini-cat-ruta">' +
           Escape.html(f.categoria) + '</span> ' + estado + '</td><td>' +
-          (f.quitada ? '—' : htmlVolumetria(vol ? vol.estado(f.categoria) : null)) + '</td><td>' + pct + '</td><td>' + boton + '</td></tr>';
+          (f.quitada ? '—' : htmlVolumetria(vol ? vol.estado(f.categoria) : null)) + '</td><td>' + pct + '</td>' +
+          (fechas ? '<td>' + celdaFecha(f, n) + '</td>' : '') + '<td>' + boton + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
 
@@ -525,7 +613,14 @@ window.IniciativaAdmin = (function () {
       };
     }
 
-    faltantes() { return Incompleta.faltantes(this.datos(), this.esProblem()); }
+    // Con varias categorias, el faltante de % dice CUALES no lo tienen.
+    faltantes() {
+      var sinPct = this.categorias.activas().filter(function (f) { return f.valor === ''; })
+        .map(function (f) { return f.categoria; });
+      return Incompleta.faltantes(this.datos(), this.esProblem()).map(function (f) {
+        return f.clave === 'pct' && sinPct.length ? { clave: f.clave, rotulo: f.rotulo + ' (sin %: ' + sinPct.join(', ') + ')' } : f;
+      });
+    }
 
     // Lo que viaja al servidor (accion=crear). El archivo del RCA lo pone la
     // vista. PO / SO ya no se eligen aqui: viajan vacios (opcionales).
@@ -667,6 +762,8 @@ window.IniciativaAdmin = (function () {
       var self = this;
       CAMPOS_PROBLEMA.forEach(function (k) { self.valores[k] = self.original[k]; });
       this.categorias = new CategoriasProblema(iniciativa.categorias || [], opciones.rutas);
+      // 'cargando' | 'error' | 'ok' del catalogo de rutas (para el aviso).
+      this.rutasEstado = opciones.rutasEstado || (Array.isArray(opciones.rutas) && opciones.rutas.length ? 'ok' : '');
       // Compatibilidad: valores.pct son las filas de categorias.
       this.valores.pct = this.categorias.filas;
     }
@@ -826,6 +923,14 @@ window.IniciativaAdmin = (function () {
     return partes.join('');
   }
 
+  // Sin rutas para agregar: por que (estado del catalogo). 'cargando' y
+  // 'error' nunca se ven como "no hay categorias".
+  function htmlSinCatalogo(estado) {
+    return '<p class="ini-nota">' + (estado === 'cargando' ? 'Cargando el catálogo de categorías…'
+      : estado === 'error' ? 'No se pudo cargar el catálogo de categorías: no se pueden agregar categorías.'
+      : 'El catálogo de categorías no está disponible: no se pueden agregar categorías.') + '</p>';
+  }
+
   // Bloque de categorias de "Modificar" (se repinta solo).
   function htmlCategoriasEdicion(ed, vol) {
     var rutas = ed.categorias.rutas;
@@ -833,11 +938,14 @@ window.IniciativaAdmin = (function () {
       ? '<div class="ini-cat-agregar"><label for="regEdCatBuscar">Agregar categoría</label>' +
           Selector.html('regEdCatBuscar', rutas, '') +
           ' <button type="button" class="btn linea chico" data-accion="edicion-cat-agregar">Agregar</button></div>'
-      : '<p class="ini-nota">El catálogo de categorías no está disponible: no se pueden agregar categorías.</p>';
-    return htmlCategorias(ed.categorias, vol, 'edicion') + agregar +
+      : htmlSinCatalogo(ed.rutasEstado);
+    return htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis }) + agregar +
       '<div class="ini-cambio-msg" id="regEdCatMsg" role="status" aria-live="polite"></div>' +
       '<small class="ini-sub">Destino propuesto: dbo.ProblemCategoria. Quitar = la fila deja de estar vigente; no se borra ' +
-        '(regla de baja pendiente de aprobar). La volumetría es calculada y de solo lectura.</small>';
+        '(regla de baja pendiente de aprobar). La volumetría es calculada y de solo lectura.</small>' +
+      '<small class="ini-sub">Fecha de análisis: las ligadas comparten la del problema (dbo.Problem.FechaAnalisis). ' +
+        'Una categoría nueva tiene la suya: el día en que se liga + ' + FECHAS_GESTION.diasAnalisis + ' días, sin tocar las del problema. ' +
+        'Hoy la base no tiene fecha por categoría (propuesta sin aprobar): no se guarda todavía.</small>';
   }
 
   // Formulario de edicion dentro del detalle del registro.
@@ -1176,6 +1284,7 @@ window.IniciativaAdmin = (function () {
     CAMPOS_EDICION: CAMPOS_EDICION,
     Incompleta: Incompleta,
     FORMATO: FORMATO,
+    FECHAS_GESTION: FECHAS_GESTION,
     Selector: Selector,
     VolumetriaCliente: VolumetriaCliente,
     CategoriasProblema: CategoriasProblema,
@@ -1188,6 +1297,8 @@ window.IniciativaAdmin = (function () {
     htmlRevision: htmlRevision,
     htmlEdicion: htmlEdicion,
     htmlCategoriasEdicion: htmlCategoriasEdicion,
+    htmlSinCatalogo: htmlSinCatalogo,
+    noEnLista: noEnLista,
     htmlVistaPrevia: htmlVistaPrevia,
     htmlVolumetria: htmlVolumetria
   };

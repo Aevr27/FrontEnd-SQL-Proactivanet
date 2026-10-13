@@ -583,18 +583,45 @@ pruebas.push(function () {
     (function () { var x = new S(reg.buscar('PRB 2026-000001')); x.campo = 'estado'; x.propuesto = 'Cerrado'; x.motivo = 'm';
       return x.validar().map(function (y) { return y.campo; }); })());
 
-  var k = new S(reg.buscar('PRB 2026-000001'), LISTAS);
+  // Categorias: varias en UNA solicitud (% de ligadas y agregar del catalogo).
+  var RUTAS_CAT = ['/A/Cat 1/Hoja', '/A/Cat 2', '/A/Cat 3', '/B/Cat 4'];
+  // Sin iniciativa-admin.js (otra pagina o cache viejo): coincidencia exacta.
+  var fb = new S(reg.buscar('PRB 2026-000001'), { rutas: RUTAS_CAT });
+  Check('SR3 sin IniciativaAdmin: agrega solo la ruta exacta', [false, true], [fb.agregarCategoria('/a/cat 2').ok, fb.agregarCategoria('/A/Cat 2').ok]);
+  // Desde aqui, con el Selector compartido (como en la pagina).
+  (new Function('window', 'document', 'Catalogos', 'Escape', leer('admin/iniciativa-admin.js')))(
+    base.ventana, base.doc, base.ventana.Catalogos, base.ventana.Escape);
+  var k = new S(reg.buscar('PRB 2026-000001'), { estados: LISTAS.estados, subestados: LISTAS.subestados, rutas: RUTAS_CAT });
   k.campo = 'pct'; k.motivo = 'Se ajusta el alcance';
-  k.categoria = '/Z/No ligada'; k.propuesto = '10';
-  Check('SR3 % de una categoria no ligada se rechaza', ['categoria'], k.validar().map(function (x) { return x.campo; }));
-  k.categoria = '/A/Cat 3';
-  Check('SR3 valor actual de la categoria', '25', k.actual());
-  k.propuesto = '25';
-  Check('SR3 mismo % = sin cambio', ['propuesto'], k.validar().map(function (x) { return x.campo; }));
-  k.propuesto = '101';
+  Check('SR3 sin nada pedido se rechaza', ['categoria'], k.validar().map(function (x) { return x.campo; }));
+  Check('SR3 % de una categoria no ligada no se acepta como %', [false, {}], [k.fijarPct('/Z/No ligada', '10'), k.pcts]);
+  Check('SR3 valor actual de cada categoria', ['50', '25'], [k.pctActual('/A/Cat 1/Hoja'), k.pctActual('/A/Cat 3')]);
+  k.fijarPct('/A/Cat 3', '25');
+  Check('SR3 mismo % = sin cambio', [['propuesto'], '/A/Cat 3'], [k.validar().map(function (x) { return x.campo; }), k.validar()[0].categoria]);
+  k.fijarPct('/A/Cat 3', '101');
   Check('SR3 % fuera de rango', ['propuesto'], k.validar().map(function (x) { return x.campo; }));
-  k.propuesto = '30';
-  Check('SR4 % valido', [[], '/A/Cat 3', '30'], [k.validar(), k.resumen().categoria, k.resumen().nuevo]);
+  k.fijarPct('/A/Cat 3', '30');
+  Check('SR4 % valido', [[], [{ categoria: '/A/Cat 3', anterior: '25', nuevo: '30', nueva: false }], ''],
+    [k.validar(), k.resumen().categorias, k.resumen().nuevo]);
+  // Varias: otra ligada y dos nuevas, sin repetir.
+  k.fijarPct('/A/Cat 1/Hoja', '40');
+  Check('SR4b agregar una ligada se rechaza', [false, true], [k.agregarCategoria('/a/cat 3').ok, /ya es una categoría de esta iniciativa/.test(k.agregarCategoria('/A/Cat 3').mensaje)]);
+  Check('SR4b agregar una fuera del catalogo se rechaza', false, k.agregarCategoria('/Z/Inventada').ok);
+  Check('SR4b agregar del catalogo', [true, '/A/Cat 2'], [k.agregarCategoria(' /a/cat 2 ').ok, k.nuevas[0].categoria]);
+  Check('SR4b la misma dos veces se rechaza', [false, 1], [k.agregarCategoria('/A/Cat 2').ok, k.nuevas.length]);
+  k.agregarCategoria('/B/Cat 4');
+  Check('SR4b nueva sin % se rechaza', ['propuesto', 'propuesto'], k.validar().map(function (x) { return x.campo; }));
+  k.capturarPctNueva(0, '15'); k.capturarPctNueva(1, '5');
+  Check('SR4b cuatro categorias en una solicitud', [[], ['/A/Cat 1/Hoja', '/A/Cat 3', '/A/Cat 2', '/B/Cat 4'], [false, false, true, true]],
+    [k.validar(), k.resumen().categorias.map(function (x) { return x.categoria; }), k.resumen().categorias.map(function (x) { return x.nueva; })]);
+  Check('SR4b agregar no cambia los % pedidos de las ligadas', { '/A/Cat 3': '30', '/A/Cat 1/Hoja': '40' }, k.pcts);
+  Check('SR4b quitar una nueva', [true, ['/B/Cat 4']], [k.quitarNueva(0), k.nuevas.map(function (x) { return x.categoria; })]);
+  k.agregarCategoria('/A/Cat 2'); k.capturarPctNueva(1, '15');
+  var sinCat = new S(reg.buscar('PRB 2026-000001'), { rutasEstado: 'cargando' });
+  Check('SR4c catalogo cargando: no se agrega y lo dice', [false, true],
+    [sinCat.agregarCategoria('/A/Cat 2').ok, /cargando/.test(sinCat.agregarCategoria('/A/Cat 2').mensaje)]);
+  Check('SR4c catalogo con error: no se agrega y lo dice', true,
+    /No se pudo cargar/.test(new S(reg.buscar('PRB 2026-000001'), { rutasEstado: 'error' }).agregarCategoria('/A/Cat 2').mensaje));
 
   var o = new S(reg.buscar('PRB 2026-000001'), LISTAS);
   o.campo = 'otros';
@@ -613,8 +640,10 @@ pruebas.push(function () {
   Check('SR7 no se aprueba dos veces ni se rechaza despues', [false, false], [rv.aprobar('x').ok, rv.rechazar('x', 'm').ok]);
   Check('SR8 aprobar Estado: estado y subestado', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['estado', 'Cerrado'], ['subestado', 'Solucionado']],
     new V(e.resumen(), 'u').aprobar('a').pares);
-  Check('SR8 aprobar %: la categoria y su % (misma validacion de Modificar)',
-    [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['pct_categoria', '/A/Cat 3'], ['pct_valor', '30']],
+  Check('SR8 aprobar categorias: los mismos pares de Modificar, una por categoria',
+    [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['pct_categoria', '/A/Cat 1/Hoja'], ['pct_valor', '40'],
+     ['pct_categoria', '/A/Cat 3'], ['pct_valor', '30'],
+     ['agregar_categoria', '/B/Cat 4'], ['agregar_pct', '5'], ['agregar_categoria', '/A/Cat 2'], ['agregar_pct', '15']],
     new V(k.resumen(), 'u').aprobar('a').pares);
   var ao = new V(o.resumen(), 'u').aprobar('a');
   Check('SR9 aprobar Otros: sin pares, ADM corrige a mano', [true, null, true], [ao.ok, ao.pares, /Modificar/.test(ao.mensaje)]);
