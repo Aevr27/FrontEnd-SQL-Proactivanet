@@ -684,7 +684,7 @@ window.IniciativaAdmin = (function () {
           '<strong>' + Escape.html(i.folio) + '</strong> · ' + Escape.html(tit) +
           '<span class="ini-sub">' + Escape.html(i.estado || 'Sin estado') + ' · ' +
           (i.sin_categoria || !cats ? 'sin categorías' : cats + (cats === 1 ? ' categoría' : ' categorías')) +
-          (typeof i.antiguedad === 'number' ? ' · ' + i.antiguedad + ' días' : '') +
+          (typeof i.antiguedad === 'number' ? ' · ' + Escape.html(Duracion.dias(i.antiguedad)) : '') +
           (i.titulo && i.titulo_problem && i.titulo !== i.titulo_problem ? ' · iniciativa: ' + Escape.html(i.titulo) : '') +
           '</span></button></li>';
       }).join('') + '</ul>';

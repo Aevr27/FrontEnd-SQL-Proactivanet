@@ -1224,7 +1224,7 @@ function renderModalBody(){
      <td class="num">${FMT(i.riesgo_folio)}</td>
      <td class="fecha-cell"><span class="dot" style="background:${SEMC[i.sem_fecha]}"></span>${fdateSem(i,'f_analisis')}</td>
      <td class="fecha-cell">${fdateSem(i,'f_solucion')}</td><td class="fecha-cell">${fdateSem(i,'f_cierre')}</td>
-     <td class="num">${i.antiguedad!=null?i.antiguedad+' d':'—'}</td>
+     <td class="num"${i.antiguedad!=null?` title="${Escape.attr(Duracion.dias(i.antiguedad)+' ('+i.antiguedad+' días)')}"`:''}>${i.antiguedad!=null?esc(Duracion.dias(i.antiguedad,{corto:true})):'—'}</td>
      <td><span class="tag-est">${esc(i.estado||'—')}</span></td><td>${esc(i.po||'—')}</td><td>${esc(i.so||'—')}</td></tr>`;
    }).join('') : `<tr><td colspan="11" class="empty">${verCerradas?'Esta categoría no tiene iniciativas registradas.':'Sin iniciativas activas. Marca la casilla para ver las cerradas.'}</td></tr>`;
   // click en folio -> POP-2 (Folio, Titulo, Descripcion y Observaciones del Problem)

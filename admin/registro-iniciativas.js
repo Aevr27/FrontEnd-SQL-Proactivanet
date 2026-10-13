@@ -2196,7 +2196,7 @@ window.RegistroIniciativas = (function () {
         dato('Código', i.folio) +
         dato('Agrupación', i.agrup) +
         dato('Estado', i.estado) +
-        dato('Antigüedad', fmt(i.antiguedad) + ' días') +
+        dato('Antigüedad', Duracion.dias(i.antiguedad) || '—') +
         (i.titulo_problem && i.titulo_problem !== i.titulo ? dato('Título del problema', i.titulo_problem) : '') +
         '</dl>';
 

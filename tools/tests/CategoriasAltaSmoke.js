@@ -70,6 +70,7 @@ function esperar() { return new Promise(function (ok) { setTimeout(ok, 0); }); }
 
 var ventana = {};
 (new Function('window', leer('assets/js/escape.js')))(ventana);
+(new Function('window', leer('assets/js/duracion.js')))(ventana);
 (new Function('window', 'Escape', leer('admin/categorias-alta.js')))(ventana, ventana.Escape);
 var CA = ventana.CategoriasAlta;
 
@@ -221,11 +222,12 @@ pruebas.push(function () {
   };
   var v = Elemento('window');
   (new Function('window', leer('assets/js/escape.js')))(v);
+  (new Function('window', leer('assets/js/duracion.js')))(v);
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(v, v.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(v, doc);
   (new Function('window', leer('admin/cascada-organizacional.js')))(v);
   (new Function('window', 'Escape', 'fetch', leer('admin/categorias-alta.js')))(v, v.Escape, pedir);
-  (new Function('window', 'document', 'Catalogos', 'Escape', 'fetch', leer('admin/registro-iniciativas.js')))(v, doc, v.Catalogos, v.Escape, pedir);
+  (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(v, doc, v.Catalogos, v.Escape, v.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     v, doc, v.Catalogos, v.Escape, v.GloboAyuda, pedir);
   var pg = v.IniciativasPagina;

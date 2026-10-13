@@ -174,11 +174,12 @@ function Pagina(pedirRegistro, pedirCatalogo, rol) {
     return (pedirCatalogo || nunca)(url);
   }
   (new Function('window', leer('assets/js/escape.js')))(ventana);
+  (new Function('window', leer('assets/js/duracion.js')))(ventana);
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(ventana, ventana.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(ventana, documento);
   (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
-  (new Function('window', 'document', 'Catalogos', 'Escape', 'fetch', leer('admin/registro-iniciativas.js')))(
-    ventana, documento, ventana.Catalogos, ventana.Escape, pedir);
+  (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
+    ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   return {
@@ -589,8 +590,8 @@ pruebas.push(function () {
   var fb = new S(reg.buscar('PRB 2026-000001'), { rutas: RUTAS_CAT });
   Check('SR3 sin IniciativaAdmin: agrega solo la ruta exacta', [false, true], [fb.agregarCategoria('/a/cat 2').ok, fb.agregarCategoria('/A/Cat 2').ok]);
   // Desde aqui, con el Selector compartido (como en la pagina).
-  (new Function('window', 'document', 'Catalogos', 'Escape', leer('admin/iniciativa-admin.js')))(
-    base.ventana, base.doc, base.ventana.Catalogos, base.ventana.Escape);
+  (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', leer('admin/iniciativa-admin.js')))(
+    base.ventana, base.doc, base.ventana.Catalogos, base.ventana.Escape, base.ventana.Duracion);
   var k = new S(reg.buscar('PRB 2026-000001'), { estados: LISTAS.estados, subestados: LISTAS.subestados, rutas: RUTAS_CAT });
   k.campo = 'pct'; k.motivo = 'Se ajusta el alcance';
   Check('SR3 sin nada pedido se rechaza', ['categoria'], k.validar().map(function (x) { return x.campo; }));
