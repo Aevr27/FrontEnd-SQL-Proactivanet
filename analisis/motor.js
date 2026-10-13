@@ -518,6 +518,22 @@
         return String(v).length > 60 ? '(texto libre)' : String(v);
     }
 
+    // Los textos de la pestaña traen contrasenas en claro: el Service Desk pone la
+    // nueva en la solucion ("la nueva contrasena: ...", "clave temporal ...") y Azure
+    // comparte secrets (2026-10-10: 332 en Usuarios de Red, 184 en S-Servicios TI).
+    // Se tapa la palabra que sigue a la etiqueta cuando va con ':' o '=', o cuando
+    // trae un numero o un simbolo, que es como se ve una contrasena. La etiqueta
+    // tiene que ser palabra completa: "secretaria" o "autoclave" no son etiquetas.
+    // Solo la salida (Detalle y su Excel); clasificar sigue leyendo el texto original.
+    var ETIQUETA_CLAVE = /(^|[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ])(contrase(?:ñ|n)as?(?: temporal| nueva)?|claves?(?: temporal)?|passwords?|passwd|pwd|secretos?|secrets?)(?![A-Za-zÁÉÍÓÚÜÑáéíóúüñ])(\s*[:=]?\s*)(?!contrase|clave|password|secret)(\S+)/gi;
+    function ocultarClaves(texto) {
+        if (!texto) return texto;
+        return String(texto).replace(ETIQUETA_CLAVE, function (todo, antes, etiqueta, separador, valor) {
+            var pareceClave = /[:=]/.test(separador) || /[0-9]/.test(valor) || /[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ.,;]/.test(valor);
+            return pareceClave ? antes + etiqueta + separador + '****' : todo;
+        });
+    }
+
     // datos = preparar(...), servicio = {nombre, reglas, motivosEquipo, cedis}
     // servicio.cedis (opcional): { '5549': 'Salinas Victoria secos', ... }. Con el, la
     // hoja Sitios trae la tabla del CEDIS que menciona el texto.
@@ -1006,7 +1022,7 @@
                     t.sitio ? si(t.gap != null && t.gap <= 30) : '', t.sitio ? si(t.gapMotivo != null && t.gapMotivo <= 30) : '',
                     qa(t.qa.QA_Frecuencia), qa(t.qa.QA_Aplicacion), qa(t.qa.QARe_TipoSolucion), qa(t.qa.QARe_UsuarioConfirmo),
                     qa(t.qa.QARe_AplicaOtrosCasos), qa(t.qa.QARe_GenerarArticulo), qa(t.qa.QARe_VerificoClasificacion)]
-                .concat(opciones.conTextos ? [t.titulo, t.descripcion, t.solucion] : []);
+                .concat(opciones.conTextos ? [ocultarClaves(t.titulo), ocultarClaves(t.descripcion), ocultarClaves(t.solucion)] : []);
         });
 
         return {
@@ -1314,7 +1330,7 @@
         normalizar: normalizar, clasificar: clasificar, decodificar: decodificar, bloquesDeTexto: bloquesDeTexto,
         bloqueDeCsv: bloqueDeCsv, leerArchivos: leerArchivos, preparar: preparar, analizar: analizar, armarLibro: armarLibro,
         bloquesDeTablero: bloquesDeTablero, reglasDeTablero: reglasDeTablero, criteriosDeParametros: criteriosDeParametros,
-        scriptServicio: scriptServicio,
+        scriptServicio: scriptServicio, ocultarClaves: ocultarClaves,
         generarSql: generarSql, reglasATexto: reglasATexto, textoAReglas: textoAReglas, frasesFrecuentes: frasesFrecuentes,
         tipoSitio: tipoSitio, cuantil: cuantil, textoFecha: textoFecha, textoDia: textoDia, pctTxt: pctTxt, numTxt: numTxt, miles: miles,
         SIN_CLASIFICAR: SIN_CLASIFICAR, CAMPOS: CAMPOS
