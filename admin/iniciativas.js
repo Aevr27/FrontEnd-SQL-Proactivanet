@@ -73,6 +73,9 @@
                            compartida con cualquier pestaña que filtre)
      SolicitudNueva        el formulario sin DOM: tipo, cascada, valores
      PaginaIniciativas     el DOM: vistas, carga, estados, campos, ayuda
+                           (y arranca VistaCrearAdmin, el alta directa de
+                           ADM de admin/iniciativa-admin.js: otra vista,
+                           otro borrador, sin las reglas de esta)
      MenuLateral           plegar/desplegar la barra lateral (copia de la
                            del tablero; sus entradas son enlaces de vuelta)
 
@@ -453,11 +456,25 @@ window.Iniciativas = (function () {
   var VISTAS = {
     iniciativas: { panel: 'panel-iniciativas', pestana: 'tab-iniciativas' },
     solicitudes: { panel: 'panel-solicitudes', pestana: 'tab-solicitudes' },
-    nueva:       { panel: 'panel-nueva',       pestana: 'tab-iniciativas' }
+    nueva:       { panel: 'panel-nueva',       pestana: 'tab-iniciativas' },
+    // Administracion (solo ADM): alta directa de iniciativas. Las
+    // categorias se crean en el sitio de Proactivanet, no aqui.
+    administracion: { panel: 'panel-administracion', pestana: 'tab-administracion' },
+    // Alta directa de ADM (admin/iniciativa-admin.js): accion de
+    // Administracion, separada de Nueva solicitud. Solo con rol ADM.
+    crear:       { panel: 'panel-crear-admin', pestana: 'tab-administracion' }
   };
+  var VISTAS_SOLO_ADM = { administracion: true, crear: true };
+  // Dueños de categoria (PO / SO): flujo aparte, oculto por ahora. Con false
+  // la seccion #cdSeccion queda oculta y su catalogo (?duenos=1) no se pide.
+  // admin/categorias-duenos.js y el handler siguen intactos.
+  var DUENOS_VISIBLES = false;
+  // Nueva solicitud: ADM o MOD. Sin rol resuelto, no abre (falla cerrado).
+  var VISTAS_ADM_MOD = { nueva: true };
   var PESTANAS = [
     { id: 'tab-iniciativas', vista: 'iniciativas' },
-    { id: 'tab-solicitudes', vista: 'solicitudes' }
+    { id: 'tab-solicitudes', vista: 'solicitudes' },
+    { id: 'tab-administracion', vista: 'administracion', soloAdm: true }
   ];
 
   var SELECTS = [
@@ -511,9 +528,55 @@ window.Iniciativas = (function () {
       this.vista = 'iniciativas';
       this.menu = null;
       this.registro = null;  // VistaRegistro (admin/registro-iniciativas.js)
+      this.crearAdmin = null; // VistaCrearAdmin (admin/iniciativa-admin.js)
+      this.duenos = null;     // VistaDuenos (admin/categorias-duenos.js), perezosa; null si DUENOS_VISIBLES = false
+      // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
+      // sin rol no se abre nada de ADM.
+      this.rol = null;
+    }
+
+    // Solo UX, como SesionAdmin: decide que acciones de ADM se pintan. El
+    // alta y la edicion de ADM solo validan en el servidor (501, no
+    // guardan); el handler exige ADM por su cuenta (AccesoAdmin.ExigirAdm).
+    fijarRol(rol) {
+      if (this.denegada) return;
+      this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
+      this.aplicarPestanas();
+      if (this.registro && this.registro.fijarRol) this.registro.fijarRol(this.rol);
+      if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') || (VISTAS_ADM_MOD[this.vista] && !this.rol)) {
+        this.mostrarVista('iniciativas');
+      }
+    }
+
+    // VIEWER (o sin respuesta de admin_sesion): la pagina no muestra nada
+    // de Admin. Solo UX y defensa extra: la pagina la niega
+    // AdminAccesoModulo si esta registrado en Web.config, y cada handler
+    // admin_iniciativas_* responde 403 a un VIEWER de todos modos.
+    // Irreversible en esta carga de pagina.
+    denegar() {
+      var self = this;
+      this.denegada = true;
+      this.rol = null;
+      if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
+      if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle();
+      Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = true; });
+      this.$('iniTabs').hidden = true;
+      this.$('iniDenegado').hidden = false;
     }
 
     $(id) { return this.doc.getElementById(id); }
+
+    // Las pestañas de solo ADM se ven solo con rol ADM (ademas de
+    // data-solo-adm de SesionAdmin: aqui manda el rol que fijo la pagina).
+    pestanaVisible(p) { return !p.soloAdm || this.rol === 'ADM'; }
+
+    aplicarPestanas() {
+      var self = this;
+      PESTANAS.forEach(function (p) {
+        var t = self.$(p.id);
+        if (t) t.hidden = !self.pestanaVisible(p);
+      });
+    }
 
     // ---- arranque ----
     iniciar() {
@@ -522,6 +585,21 @@ window.Iniciativas = (function () {
       // El registro carga por su cuenta, en paralelo con el catalogo de
       // Nueva solicitud: un fallo de uno no bloquea al otro.
       this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
+      if (window.IniciativaAdmin) {
+        // La volumetria (GET) va por el mismo fetch de la pagina; la
+        // validacion (POST) por el suyo.
+        this.crearAdmin = new window.IniciativaAdmin.VistaCrearAdmin(this.doc, null,
+          function (url, op) { return fetch(url, op); });
+        // "Ligar a un problema existente": busca en el registro ya cargado y,
+        // al elegir uno, abre su "Modificar" en Iniciativas.
+        var reg = this.registro;
+        this.crearAdmin.fijarProblemas(
+          function () { return reg && reg.registro ? reg.registro.iniciativas : null; },
+          function (folio) { self.mostrarVista('iniciativas'); reg.modificar(folio); });
+      }
+      if (DUENOS_VISIBLES && window.CategoriasDuenos) this.duenos = new window.CategoriasDuenos.VistaDuenos(this.doc);
+      if (this.$('cdSeccion')) this.$('cdSeccion').hidden = !DUENOS_VISIBLES;
+      this.aplicarPestanas();
       this.cablearPestanas();
       this.cablearAcciones();
       this.mostrarVista(this.vista);
@@ -538,7 +616,11 @@ window.Iniciativas = (function () {
     // ---- vistas: solo navegacion; no tocan el borrador ----
     mostrarVista(nombre) {
       var self = this;
-      if (!VISTAS[nombre]) return;
+      if (!VISTAS[nombre] || this.denegada) return;
+      if (VISTAS_SOLO_ADM[nombre] && this.rol !== 'ADM') return;
+      // El alta necesita su modulo (admin/iniciativa-admin.js); Administracion no.
+      if (nombre === 'crear' && !this.crearAdmin) return;
+      if (VISTAS_ADM_MOD[nombre] && this.rol !== 'ADM' && this.rol !== 'MOD') return;
       this.vista = nombre;
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = k !== nombre; });
       PESTANAS.forEach(function (p) {
@@ -549,6 +631,8 @@ window.Iniciativas = (function () {
         t.tabIndex = activa ? 0 : -1;
       });
       if (nombre !== 'iniciativas' && this.registro) this.registro.cerrarDetalle();
+      // El catalogo de dueños se pide la primera vez que se abre la pestaña.
+      if (nombre === 'administracion' && this.duenos) this.duenos.abrir();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();
     }
@@ -570,7 +654,12 @@ window.Iniciativas = (function () {
         t.addEventListener('keydown', function (e) {
           var paso = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
           if (!paso) return;
-          var sig = PESTANAS[(i + paso + PESTANAS.length) % PESTANAS.length];
+          // Salta las pestañas ocultas (Administracion sin rol ADM).
+          var n = i, sig = p;
+          do {
+            n = (n + paso + PESTANAS.length) % PESTANAS.length;
+            sig = PESTANAS[n];
+          } while (sig !== p && !self.pestanaVisible(sig));
           self.mostrarVista(sig.vista);
           enfocar(self.$(sig.id));
         });
@@ -587,6 +676,14 @@ window.Iniciativas = (function () {
       this.$('btnVolver').addEventListener('click', function () {
         self.mostrarVista('iniciativas');
         enfocar(self.$('btnSolicitar'));
+      });
+      this.$('btnCrearAdmin').addEventListener('click', function () {
+        self.mostrarVista('crear');
+        if (self.vista === 'crear') enfocar(self.$('admCrearTitulo'));
+      });
+      this.$('btnVolverAdmin').addEventListener('click', function () {
+        self.mostrarVista('administracion');
+        enfocar(self.$('btnCrearAdmin'));
       });
     }
 
@@ -891,6 +988,13 @@ window.Iniciativas = (function () {
           if (mia !== self.cargaId) return;
           var catalogo = CatalogoIniciativas.desdeJson(json);
           self.$('iniEstado').textContent = '';
+          // El alta de ADM usa el mismo catalogo aunque no haya categorias:
+          // la categoria es opcional ahi.
+          if (self.crearAdmin) self.crearAdmin.fijarCatalogo(catalogo);
+          // "Modificar" agrega categorias de este mismo catalogo de rutas.
+          if (self.registro && self.registro.fijarRutasCatalogo && window.IniciativaAdmin) {
+            self.registro.fijarRutasCatalogo(window.IniciativaAdmin.BorradorAdmin.rutasDe(catalogo));
+          }
 
           if (catalogo.omitidas > 0) {
             var n = catalogo.omitidas;
@@ -917,6 +1021,7 @@ window.Iniciativas = (function () {
         .catch(function (err) {
           if (mia !== self.cargaId) return;
           self.solicitud = null;
+          if (self.crearAdmin) self.crearAdmin.fijarCatalogo(null);
           self.$('iniEstado').textContent = '';
           self.bloquearTodo('No disponible: no se pudo cargar el catálogo.');
           self.mostrarError((err && err.message) || 'No se pudo cargar el catálogo.');
@@ -937,6 +1042,9 @@ window.Iniciativas = (function () {
     CascadaOrganizacional: CascadaOrganizacional,
     SolicitudNueva: SolicitudNueva,
     VISTAS: VISTAS,
+    VISTAS_SOLO_ADM: VISTAS_SOLO_ADM,
+    VISTAS_ADM_MOD: VISTAS_ADM_MOD,
+    DUENOS_VISIBLES: DUENOS_VISIBLES,
     MenuLateral: MenuLateral,
     PaginaIniciativas: PaginaIniciativas
   };

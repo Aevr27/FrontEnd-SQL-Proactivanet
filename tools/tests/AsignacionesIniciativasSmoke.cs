@@ -89,6 +89,25 @@ public static class AsignacionesIniciativasSmoke
         Check("3 dada de baja no sale", false, baja);
         Check("7 sin manager", false, mgr);
 
+        // 12) Herencia campo por campo: PO y Director heredados del C1, SO
+        //     propio. Son estos nombres resueltos los que el filtro de Admin
+        //     ofrece a MOD (registro-iniciativas.js, alcance 'catalogo').
+        var porCampo = new DirectorioOrganizacional(new List<DirectorioOrganizacional.Dueno>
+        {
+            D("/E/Fuente", "/E", "PO E", "SO E", "Dir E", true),
+            D("/E/Hija",   "/E", null,   "SO H", null,    true),
+            D("/F/Vieja",  "/F", "PO Viejo", "SO Viejo", "Dir Viejo", false),
+        }, personas).AsignacionesVigentes();
+        var hija = "";
+        var viejo = false;
+        foreach (Dictionary<string, object> f in (List<object>)porCampo["asignaciones"])
+        {
+            if ((string)f["categoria"] == "/E/Hija") hija = Fila(f);
+            if ((string)f["po"] == "PO Viejo" || (string)f["director"] == "Dir Viejo") viejo = true;
+        }
+        Check("12 PO y Director heredados, SO propio", "/E/Hija|Dir E|PO E|SO H|4", hija);
+        Check("12 dueños de una fila dada de baja no entran al catalogo", false, viejo);
+
         // ---- Tipos de iniciativa (dbo.CatPrefijoProblem) ----
         var tipos = DashboardCatalogos.PrefijosOrdenados(new[] {
             new KeyValuePair<string, string>("SOR", "SorIA"),

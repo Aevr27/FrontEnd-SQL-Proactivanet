@@ -15,7 +15,8 @@
 //       "asignaciones": [ { "director", "po", "so", "categoria" (N2) }, ... ],
 //       "omitidas": 0,
 //       "rutas": [ { "director", "po", "so", "categoria" (ruta) }, ... ],   (?rutas=1)
-//       "rutas_sin_duenos": 0, "rutas_duenos_no_vigentes": 0 }               (?rutas=1)
+//       "rutas_sin_duenos": 0, "rutas_duenos_no_vigentes": 0,                (?rutas=1)
+//       "duenos": [ ... ], "personas": [ ... ] }                             (?duenos=1)
 //
 //   tipos          DashboardCatalogos.PrefijosIniciativa: TODAS las filas de
 //                  dbo.CatPrefijoProblem (llave Prefijo, texto
@@ -29,6 +30,10 @@
 //                  misma regla N2 -> C1 del resto del sitio).
 //   rutas          CatalogoRutasIniciativa: dbo.Categorias activas con sus
 //                  dueños por la misma regla (C1&C2 exacto o C1).
+//   duenos/personas  CatalogoDuenosCategoria (?duenos=1, pantalla "Dueños
+//                  de categoria"): cada fila de CatCategoriaDueno con lo
+//                  capturado, lo resuelto y la fila de la que hereda; y los
+//                  nombres de CatPersona vigentes. Sin correos.
 //
 // La cascada se arma en el navegador filtrando las filas.
 //
@@ -37,9 +42,10 @@
 // admin_iniciativas_registro.ashx). Errores con el mismo {error, tipo} y 500.
 //
 // SOLO LECTURA (CatPrefijoProblem, CatCategoriaDueno, CatPersona y, con ?rutas=1,
-// Categorias). No crea ni cambia nada en la base.
+// Categorias). No crea ni cambia nada en la base, tampoco con ?duenos=1.
 //
-// ACCESO: AccesoAdmin.Exigir; el resto recibe 403 antes de tocar la base.
+// ACCESO: AccesoAdmin.Exigir (rol ADM o MOD); ?duenos=1 ademas ExigirAdm
+// (solo ADM). El resto recibe 403 antes de tocar la base.
 
 using System;
 using System.Collections.Generic;
@@ -52,6 +58,10 @@ public class AdminIniciativasCatalogos : IHttpHandler
     public void ProcessRequest(HttpContext context)
     {
         if (!AccesoAdmin.Exigir(context)) return;
+        // ?duenos=1 es la pantalla de gestion de duenos (Administracion):
+        // solo ADM. El resto del catalogo sigue siendo de ADM y MOD.
+        if (context.Request.QueryString["duenos"] == "1"
+            && !AccesoAdmin.ExigirAdm(context, "Solo un administrador (ADM) puede gestionar los duenos de categoria.")) return;
 
         context.Response.ContentType = "application/json; charset=utf-8";
         context.Response.Cache.SetCacheability(HttpCacheability.NoCache);
@@ -64,7 +74,10 @@ public class AdminIniciativasCatalogos : IHttpHandler
             using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
             {
                 cn.Open();
-                var dir = DirectorioOrganizacional.Cargar(cn);
+                // Lo mismo que DirectorioOrganizacional.Cargar, pero con las
+                // filas a mano: ?duenos=1 las devuelve tal como quedaron.
+                var filas = DirectorioOrganizacional.LeerDuenos(cn);
+                var dir = new DirectorioOrganizacional(filas, DirectorioOrganizacional.LeerPersonas(cn));
                 var salida = dir.AsignacionesVigentes();
                 var tipos = DashboardCatalogos.PrefijosIniciativa(cn);
                 salida["tipos"] = tipos;
@@ -72,6 +85,11 @@ public class AdminIniciativasCatalogos : IHttpHandler
                 if (context.Request.QueryString["rutas"] == "1")
                 {
                     foreach (var kv in CatalogoRutasIniciativa.Cargar(cn, dir)) salida[kv.Key] = kv.Value;
+                }
+                if (context.Request.QueryString["duenos"] == "1")
+                {
+                    var duenos = CatalogoDuenosCategoria.Armar(filas, dir, CatalogoDuenosCategoria.LeerPersonas(cn));
+                    foreach (var kv in duenos) salida[kv.Key] = kv.Value;
                 }
                 context.Response.Write(serializador.Serialize(salida));
             }

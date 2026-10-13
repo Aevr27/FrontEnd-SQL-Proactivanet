@@ -25,7 +25,7 @@
 // estado: resuelto | no_encontrado | ambiguo | sin_correo. Lo que no se
 // resuelve va null; nunca se inventa.
 //
-// ACCESO: solo AdminAllowedUsers (AccesoAdmin.Exigir), 403 al resto.
+// ACCESO: AccesoAdmin.Exigir (rol ADM o MOD en dbo.UsuariosAdmin), 403 al resto.
 // SOLO LECTURA: SELECT sobre dbo.CatPersona, dbo.CatLiderGrupo y
 // dbo.CatCategoriaDueno. No crea ni cambia nada en la base.
 

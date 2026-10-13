@@ -123,6 +123,19 @@ public static class IdentidadAdminSmoke
         Check("W4 sin dominio rechazado", false,
               AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde("t_andresvr", true)));
         Check("W5 la temporal tiene exactamente 1 cuenta", 1, AccesoAdmin.Configurada().Total);
+        Check("W5 ninguna entrada ignorada (todas con dominio)", 0, AccesoAdmin.Configurada().Ignoradas);
+        // SORIANA\omaralus se quito de la lista a proposito (2026-10-09): entra
+        // por su fila ADM de dbo.UsuariosAdmin, no por la whitelist (ver O0/O1
+        // en AccesoAdminHttpSmoke).
+        Check("W6 SORIANA\\omaralus ya no esta en la whitelist", false,
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"SORIANA\omaralus", true)));
+        Check("W6 misma cuenta en mayusculas: tampoco", false,
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"soriana\OMARALUS", true)));
+        Check("W6 otro dominio u omaralus sin dominio: rechazado", "False|False",
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"OTRO\omaralus", true)) + "|" +
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde("omaralus", true)));
+        Check("W6 omaralus sin autenticar: rechazado", false,
+              AccesoAdmin.EstaAutorizado(IdentidadWindows.Desde(@"SORIANA\omaralus", false)));
 
         // ---- rutas del modulo --------------------------------------------
         Check("ruta pagina", true, AccesoAdmin.EsRutaProtegida("~/admin/iniciativas.html"));

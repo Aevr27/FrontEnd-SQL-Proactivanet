@@ -140,9 +140,13 @@ function seleccionados(id) {
 function estadoCargando(id) { DatosInfo.mensaje(id, 'Cargando...'); }
 
 // Pastilla de la cabecera con el sello de resumen.meta (un corte: no trae
-// periodo). El mismo nodo sirve para "Cargando..." y el error.
+// periodo). El mismo nodo sirve para "Cargando..." y el error. Con MOCK_DATA
+// (solo pruebas locales) avisa que los datos son simulados, como en SLA.
 function estadoOk(id, meta, opciones) {
-  DatosInfo.pintar(id, meta, opciones);
+  const simulados = window.MockData && window.MockData.MOCK_DATA;
+  DatosInfo.pintar(id, meta, simulados
+    ? { ...(opciones || {}), sufijo: ((opciones && opciones.sufijo) || '') + ' · Datos simulados (MOCK_DATA), no reales' }
+    : opciones);
 }
 
 function estadoError(id, err) {

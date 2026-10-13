@@ -3,9 +3,11 @@
    Pregunta a handlers/admin_sesion.ashx y:
      - muestra los elementos marcados con data-solo-admin (la entrada
        Administracion del menu) si la cuenta Windows esta autorizada;
-     - muestra los marcados con data-solo-adm (p. ej. "+ Solicitar una
+     - muestra los marcados con data-solo-adm (p. ej. "+ Crear
        iniciativa") solo si ademas el servidor dice rol "ADM"
-       (dbo.UsuariosAdmin). MOD, sin rol o cualquier fallo: ocultos;
+       (dbo.UsuariosAdmin). MOD, sin rol o cualquier fallo: ocultos.
+       "Solicitar una iniciativa" va con data-solo-admin: autorizado ya
+       implica rol ADM o MOD en el servidor (AccesoAdmin.PuedeEntrar);
      - con { persona: true }, pinta "Bienvenido, <Nombre>" en el elemento
        que se le pase, solo si el servidor resolvio el nombre.
 

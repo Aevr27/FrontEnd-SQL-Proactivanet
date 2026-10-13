@@ -21,6 +21,8 @@
      en dashboard.html este <link> se quita y manda la copia de alli-. -->
 <link rel="stylesheet" href="../assets/css/datos-info.css">
 <script src="../assets/js/datos-info.js"></script>
+<link rel="stylesheet" href="../assets/css/kpis-fijos.css">
+<script src="../assets/js/kpis-fijos.js"></script>
 <script src="../assets/js/desplegable.js"></script>
 <script src="vendor/chart.umd.min.js"></script>
 <!-- Paleta categorica compartida (solo para la pagina suelta: embebida en
@@ -51,6 +53,7 @@
       <div class="sub" id="subhead">Resumen general — todos los tickets</div>
     </div>
     <div class="acciones-top">
+      <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="kpis-exp" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
       <div id="corteFecha"></div>
     </div>
   </header>
@@ -75,7 +78,8 @@
       <!-- "Limpiar", ultimo y a la derecha: mismo nombre, mismo sitio y mismo
            trato secundario que en las pestanas de SLA y de Backlog. Antes se
            llamaba "Ver resumen general" y vivia entre los desplegables. -->
-      <button id="btnReset" class="gris">Limpiar</button>
+      <button id="btnReset" class="gris"
+              title="Vuelve al resumen general: quita Director, Product Owner, Manager y Service Owner y la selección por clic en las gráficas de Vencidas y Activas. «Ver por» se conserva">Limpiar</button>
     </section>
 
   <!-- id="kpis-exp", no "kpis": dashboard.html ya tiene un #kpis en la pestaña

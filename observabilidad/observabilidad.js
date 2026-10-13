@@ -111,8 +111,9 @@ function renderObserv(){
   J.observabilidad.directores.forEach(d=>sd.insertAdjacentHTML('beforeend',`<option>${esc(d)}</option>`));
   function fillPOob(){
     const sp=document.getElementById('selPOOb');sp.innerHTML='<option value="">— Todos —</option>';
-    const pos = obDir? [...new Set(J.observabilidad.apps.filter(a=>a.director===obDir).map(a=>a.po).filter(Boolean))].sort()
-                     : J.observabilidad.product_owners;
+    const pos = (obDir? [...new Set(J.observabilidad.apps.filter(a=>a.director===obDir).map(a=>a.po).filter(Boolean))].sort()
+                      : J.observabilidad.product_owners)
+      .filter(p=>!['basis','draft'].includes(String(p||'').trim().toLocaleLowerCase()));
     pos.forEach(p=>sp.insertAdjacentHTML('beforeend',`<option>${esc(p)}</option>`));
   }
   sd.onchange=()=>{obDir=sd.value;obPO='';fillPOob();renderObserv();};

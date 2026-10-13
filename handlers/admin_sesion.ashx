@@ -6,8 +6,12 @@
 // de cada handler admin_iniciativas_* y en AdminAccesoModulo.
 //
 //   GET handlers/admin_sesion.ashx              -> { "autorizado": true|false }
+//        autorizado = AccesoAdmin.PuedeEntrar: rol ADM o MOD en la base. Un
+//        VIEWER (sin fila en dbo.UsuariosAdmin, valor raro o consulta que
+//        falla) sale false y sin rol: el menu no muestra Administracion.
 //        y, si autorizado, "rol": "ADM" | "MOD" (RolAdmin: dbo.UsuariosAdmin;
-//        ADM fijo con el atajo de desarrollo local, AccesoDesarrolloLocal).
+//        o el de ADMIN_DEV_ROL con el atajo de desarrollo local,
+//        AccesoDesarrolloLocal: cuenta de desarrollo en la whitelist).
 //        Solo para que la interfaz oculte lo que no le toca; los handlers lo
 //        exigen aparte.
 //   GET handlers/admin_sesion.ashx?persona=1    -> ademas "nombre" (solo si
@@ -34,7 +38,7 @@ public class AdminSesion : IHttpHandler
             salida["autorizado"] = AccesoAdmin.PuedeEntrar(context);
             if ((bool)salida["autorizado"]) salida["rol"] = AccesoAdmin.Rol(context);
             // Solo para que se note en pantalla/red que es el atajo de
-            // desarrollo local (DEBUG + local + IIS Express).
+            // desarrollo local (DEBUG + local + IIS Express + whitelist).
             if (AccesoDesarrolloLocal.Activo(context)) salida["desarrollo_local"] = true;
 
             if ((bool)salida["autorizado"] && context.Request.QueryString["persona"] == "1")

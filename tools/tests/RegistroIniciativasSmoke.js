@@ -28,6 +28,9 @@
 //      pasa nada, "Todas" alterna marcar todo / desmarcar todo, junto con
 //      los demas filtros, Limpiar; el panel de casillas en el DOM.
 //   La Agrupacion ya no es filtro (ni select ni FiltroRegistro).
+//   B) Busqueda por folio o titulo: parcial, sin mayusculas, separadores,
+//      ceros ni acentos; combinada con los demas filtros, sin tocar la
+//      Cobertura; espera entre teclas, Enter, Limpiar y recarga en el DOM.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -161,7 +164,9 @@ var DATOS = {
   ]
 };
 
-function Pagina(pedirRegistro, pedirCatalogo) {
+// rol: 'ADM' por omision (las pruebas de siempre); null = aun sin rol; 'MOD'.
+function Pagina(pedirRegistro, pedirCatalogo, rol) {
+  if (rol === undefined) rol = 'ADM';
   var ventana = Elemento('window');
   var documento = Documento();
   function pedir(url) {
@@ -178,7 +183,12 @@ function Pagina(pedirRegistro, pedirCatalogo) {
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   return {
     ventana: ventana, doc: documento, sel: function (id) { return documento.getElementById(id); },
-    registro: ventana.IniciativasPagina.registro
+    registro: (function () {
+      // Las pruebas de siempre describen las opciones COMPLETAS (ADM); las
+      // de MOD / sin rol estan en la parte AL.
+      if (rol) ventana.IniciativasPagina.fijarRol(rol);
+      return ventana.IniciativasPagina.registro;
+    })()
   };
 }
 function ok(json) { return function () { return Promise.resolve(Respuesta(200, json)); }; }
@@ -224,6 +234,9 @@ function visibles(p) {
   return ['regCargando', 'regError', 'regSinDatos', 'regContenido'].filter(function (id) { return !p.sel(id).hidden; });
 }
 
+// Opciones completas (ADM) en las pruebas sin DOM de siempre.
+function Adm(reg) { reg.fijarAlcance(true); return reg; }
+
 var base = Pagina(nunca);
 var R = base.ventana.RegistroIniciativas;
 var pruebas = [];
@@ -232,7 +245,7 @@ var pruebas = [];
 // D) Sin DOM
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
-  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   Check('D1 entrada sin folio descartada', 5, reg.iniciativas.length);
   var k = R.Registro.indicadores(reg.iniciativas);
   Check('D2 indicadores: total/activas/retrasadas/no activas', [5, 3, 1, 1], [k.total, k.activas, k.retrasadas, k.noActivas]);
@@ -451,7 +464,7 @@ pruebas.push(function () {
   S.solo('zz');
   Check('S2-1 solo fuera de opciones = todos', null, S.marcados);
 
-  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   var f = new R.FiltroRegistro(reg);
   function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }); }
   var TODOS = ['En Análisis', 'En Solución', 'Cerrado'];
@@ -534,9 +547,9 @@ pruebas.push(function () {
 // S) Solicitar cambios e Historial de cambios (sin persistencia)
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
-  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   var S = R.SolicitudCambio;
-  Check('S1 campos: solo las tres fechas compromiso', ['f_analisis', 'f_solucion', 'f_cierre'],
+  Check('S1 campos designados: tres fechas, Estado, % y Otros', ['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'otros'],
     S.campos().map(function (c) { return c.clave; }));
   var c = new S(reg.buscar('PRB 2026-000001'));
   Check('S2 por omision la fecha del estado actual', ['f_solucion', '2026-09-01'], [c.campo, c.actual()]);
@@ -552,7 +565,65 @@ pruebas.push(function () {
   c.campo = 'f_solucion'; c.propuesto = '2026-10-15';
   Check('S4 valida', [], c.validar());
   Check('S4 resumen', { folio: 'PRB 2026-000001', campo: 'f_solucion', rotulo: 'Fecha compromiso de Solución',
-    anterior: '2026-09-01', nuevo: '2026-10-15', motivo: 'Proveedor' }, c.resumen());
+    anterior: '2026-09-01', nuevo: '2026-10-15', motivo: 'Proveedor', automatica: true }, c.resumen());
+
+  // SR) Estado, % de categoria y Otros; revision (aprobar / rechazar) en memoria.
+  var LISTAS = { estados: ['En Análisis', 'En Solución', 'Cerrado'], subestados: ['En Análisis', 'Solucionado'] };
+  var e = new S(reg.buscar('PRB 2026-000001'), LISTAS);
+  e.campo = 'estado'; e.motivo = 'Ya se resolvio';
+  e.propuesto = 'Pausado';
+  Check('SR1 Estado inventado se rechaza', ['propuesto'], e.validar().map(function (x) { return x.campo; }));
+  e.propuesto = 'En Solución';
+  Check('SR1 mismo Estado = sin cambio', ['propuesto'], e.validar().map(function (x) { return x.campo; }));
+  e.propuesto = 'Cerrado'; e.subestado = 'Otro';
+  Check('SR1 Subestado inventado se rechaza', ['subestado'], e.validar().map(function (x) { return x.campo; }));
+  e.subestado = 'Solucionado';
+  Check('SR2 Estado valido', [[], 'Cerrado', 'Solucionado', true], [e.validar(), e.resumen().nuevo, e.resumen().subestado, e.resumen().automatica]);
+  Check('SR2 sin lista de estados: no se puede pedir', ['propuesto'],
+    (function () { var x = new S(reg.buscar('PRB 2026-000001')); x.campo = 'estado'; x.propuesto = 'Cerrado'; x.motivo = 'm';
+      return x.validar().map(function (y) { return y.campo; }); })());
+
+  var k = new S(reg.buscar('PRB 2026-000001'), LISTAS);
+  k.campo = 'pct'; k.motivo = 'Se ajusta el alcance';
+  k.categoria = '/Z/No ligada'; k.propuesto = '10';
+  Check('SR3 % de una categoria no ligada se rechaza', ['categoria'], k.validar().map(function (x) { return x.campo; }));
+  k.categoria = '/A/Cat 3';
+  Check('SR3 valor actual de la categoria', '25', k.actual());
+  k.propuesto = '25';
+  Check('SR3 mismo % = sin cambio', ['propuesto'], k.validar().map(function (x) { return x.campo; }));
+  k.propuesto = '101';
+  Check('SR3 % fuera de rango', ['propuesto'], k.validar().map(function (x) { return x.campo; }));
+  k.propuesto = '30';
+  Check('SR4 % valido', [[], '/A/Cat 3', '30'], [k.validar(), k.resumen().categoria, k.resumen().nuevo]);
+
+  var o = new S(reg.buscar('PRB 2026-000001'), LISTAS);
+  o.campo = 'otros';
+  Check('SR5 Otros sin explicacion se rechaza', [['motivo'], 'Explica qué hay que corregir.'],
+    [o.validar().map(function (x) { return x.campo; }), o.validar()[0].mensaje]);
+  o.motivo = 'Elegi /A/Cat 3 por error; era /A/Cat 2';
+  Check('SR5 Otros valido: explicacion, no cambio automatico', [[], false, ''], [o.validar(), o.resumen().automatica, o.resumen().nuevo]);
+
+  var V = R.RevisionSolicitud;
+  var rv = new V(c.resumen(), 'SORIANA\\usuario');
+  Check('SR6 nace pendiente con su solicitante', ['pendiente', 'SORIANA\\usuario'], [rv.estado, rv.solicitante]);
+  Check('SR6 aprobar sin revisor no hace nada', [false, 'pendiente'], [rv.aprobar('').ok, rv.estado]);
+  var ap = rv.aprobar('SORIANA\\adm');
+  Check('SR7 aprobar fecha: pares de Modificar', [true, 'aprobada', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['f_solucion', '2026-10-15']]],
+    [ap.ok, rv.estado, ap.pares]);
+  Check('SR7 no se aprueba dos veces ni se rechaza despues', [false, false], [rv.aprobar('x').ok, rv.rechazar('x', 'm').ok]);
+  Check('SR8 aprobar Estado: estado y subestado', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['estado', 'Cerrado'], ['subestado', 'Solucionado']],
+    new V(e.resumen(), 'u').aprobar('a').pares);
+  Check('SR8 aprobar %: la categoria y su % (misma validacion de Modificar)',
+    [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['pct_categoria', '/A/Cat 3'], ['pct_valor', '30']],
+    new V(k.resumen(), 'u').aprobar('a').pares);
+  var ao = new V(o.resumen(), 'u').aprobar('a');
+  Check('SR9 aprobar Otros: sin pares, ADM corrige a mano', [true, null, true], [ao.ok, ao.pares, /Modificar/.test(ao.mensaje)]);
+  var rj = new V(k.resumen(), 'u');
+  Check('SR10 rechazar exige motivo', [false, 'pendiente'], [rj.rechazar('a', ' ').ok, rj.estado]);
+  var rr = rj.rechazar('a', 'No procede');
+  Check('SR10 rechazada: sin pares, no cambia nada', [true, 'rechazada', null, 'No procede'], [rr.ok, rj.estado, rr.pares, rj.motivoRechazo]);
+  Check('SR10 el registro no cambio', [0.25, 'En Solución'],
+    [reg.buscar('PRB 2026-000001').categorias[1].pct_dism, reg.buscar('PRB 2026-000001').estado]);
 
   var peticiones = [];
   var p = Pagina(ok(DATOS), function (url) { peticiones.push(url); return nunca(); });
@@ -709,7 +780,7 @@ pruebas.push(function () {
 // prefijo (no pasa hoy: 933/933 tienen; solo pasaria con Todas). ADO: sin
 // iniciativas.
 pruebas.push(function () {
-  var reg = R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS)));
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   var f = new R.FiltroRegistro(reg);
   function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }); }
   function solo(pref) {
@@ -777,7 +848,7 @@ pruebas.push(function () {
   f.limpiar();
   Check('T9 limpiar: Todas', [null, 5, 0], [f.tiposIni, pasan().length, f.activos()]);
 
-  var sinCat = R.Registro.desdeJson({ iniciativas: [] });
+  var sinCat = Adm(R.Registro.desdeJson({ iniciativas: [] }));
   Check('T9 sin catalogo: sin opciones', [], sinCat.tiposIniciativa());
 });
 
@@ -899,8 +970,8 @@ pruebas.push(function () {
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   Check('H1 sin "en preparacion" en Iniciativas', false, /Registro de iniciativas en preparación/.test(html));
-  Check('H2 CTA solo para ADM: oculto hasta que SesionAdmin diga rol ADM', true,
-    /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-adm hidden>/.test(html));
+  Check('H2 Solicitar para ADM y MOD: oculto hasta que SesionAdmin diga autorizado', true,
+    /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-admin hidden>/.test(html));
   Check('H2 [hidden] gana al display del CTA', true,
     /\.btn\.ini-cta\[hidden\] \{ display: none; \}/.test(leer('admin/iniciativas.css')));
   Check('H3 orden de scripts', true,
@@ -949,6 +1020,277 @@ pruebas.push(function () {
          u('FechaCierre', '2026-03-20', '2026-05-01')]));
   Check('HF4 fila sin operacion o vacia: — y no cuenta', ['—', '—'], rot([{ campo: 'FechaCierre' }, null]));
   Check('HF5 sin lista: vacio', 0, R.etiquetarHistorial(undefined).length);
+});
+
+// ---------------------------------------------------------------------------
+// B) Busqueda por folio o titulo: un paso mas de FiltroRegistro.aplicar,
+//    sobre lo que dejan los demas filtros. Parcial ('12' trae todo folio
+//    con 12), sin importar mayusculas, separadores ni ceros a la izquierda;
+//    titulo sin mayusculas ni acentos. No toca la Cobertura.
+// ---------------------------------------------------------------------------
+var DATOS_BUSQUEDA = (function () {
+  var d = JSON.parse(JSON.stringify(DATOS));
+  d.iniciativas.push(
+    Ini('PRB 2026-000012', { prefijo: 'PRB', titulo: 'Reducción de incidentes de red', po: 'PO 1', so: 'SO x', director: 'Dir A',
+      categorias: [Cat('/A/Cat 1/Hoja', 10, 0.1, 'Dir A', 'PO 1', 'SO x')] }),
+    Ini('MAP 2026-000120', { prefijo: 'MAP', titulo: 'MIGRACIÓN de correo', po: 'PO 3', so: 'SO z', director: 'Dir B',
+      categorias: [Cat('/B/Cat 4', 20, 0.2, 'Dir B', 'PO 3', 'SO z')] }),
+    Ini('REQ 2026-001234', { prefijo: 'REQ', titulo: 'Alta de usuarios', po: 'PO 3', so: 'SO z', director: 'Dir B',
+      categorias: [Cat('/B/Cat 5', 1, 0.1, 'Dir B', 'PO 3', 'SO z')] }),
+    Ini('PRB 2025-000012', { prefijo: 'PRB', titulo: 'Caída del portal', estado: 'Cerrado', activa: false, seguimiento: false,
+      po: 'PO 1', so: 'SO x', director: 'Dir A',
+      categorias: [Cat('/A/Cat 3', 2, 0.1, 'Dir A', 'PO 2', 'SO x')] }));
+  return d;
+})();
+var CON_12 = ['MAP 2026-000120', 'PRB 2025-000012', 'PRB 2026-000012', 'REQ 2026-001234'];
+function esperarBusqueda() { return new Promise(function (ok) { setTimeout(ok, R.BUSQUEDA_ESPERA + 50); }); }
+function teclear(p, v) { p.sel('regBuscar').value = v; p.sel('regBuscar').disparar('input'); }
+
+pruebas.push(function () {
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS_BUSQUEDA))));
+  var f = new R.FiltroRegistro(reg);
+  function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }).sort(); }
+  function con(v) { f.buscar(v); return pasan(); }
+
+  Check('B1 sin busqueda: las 9, sin filtro activo', [9, 0, false], [pasan().length, f.activos(), f.busquedaActiva()]);
+  Check('B1 solo espacios = sin busqueda', [9, 0], [con('   ').length, f.activos()]);
+  Check('B2 "12": todo folio con 12 en su numero', CON_12, con('12'));
+  Check('B2 "12" cuenta como un filtro', 1, f.activos());
+  Check('B2 "1": parcial de un digito', ['MAP 2026-000120', 'PRB 2025-000012', 'PRB 2026-000001', 'PRB 2026-000012', 'REQ 2026-001234'], con('1'));
+  Check('B2 "0012": parcial con ceros', CON_12, con('0012'));
+  Check('B3 folio completo', ['PRB 2026-000012'], con('PRB 2026-000012'));
+  Check('B3 minusculas y guion', ['PRB 2026-000012'], con('prb-2026-000012'));
+  Check('B3 sin separadores', ['PRB 2026-000012'], con('PRB2026000012'));
+  Check('B3 otro ancho de secuencia (7 digitos)', ['PRB 2026-000012'], con('PRB-2026-0000012'));
+  Check('B3 ano y secuencia: parcial (secuencias de 2026 que empiezan en 12)', ['MAP 2026-000120', 'PRB 2026-000012', 'REQ 2026-001234'], con('2026-0000012'));
+  Check('B3 sufijo con ceros "0000012" = "12"', CON_12, con('0000012'));
+  Check('B3 folio parcial "prb 2025"', ['PRB 2025-000012'], con('prb 2025'));
+  Check('B3 prefijo "map"', ['MAP 2026-000002', 'MAP 2026-000120'], con('map'));
+  Check('B4 nombre sin acento ni mayusculas', ['PRB 2026-000012'], con('reduccion'));
+  Check('B4 nombre con acento contra titulo en mayusculas', ['MAP 2026-000120'], con('migración'));
+  Check('B4 nombre parcial a mitad de titulo', ['PRB 2026-000012'], con('INCIDENTES   de'));
+  Check('B4 sin coincidencias', [], con('zzz'));
+
+  f.buscar('12');
+  f.estados.solo('Cerrado');
+  Check('B5 Estado Cerrado Y "12"', [['PRB 2025-000012'], 2], [pasan(), f.activos()]);
+  f.todosEstados();
+  f.alternarTipoIniciativa('PRB');
+  Check('B5 Tipo sin PRB Y "12"', ['MAP 2026-000120', 'REQ 2026-001234'], pasan());
+  f.limpiar();
+  f.buscar('12');
+  f.elegirDirector('Dir A');
+  Check('B5 Director Y "12"', ['PRB 2025-000012', 'PRB 2026-000012'], pasan());
+  f.elegirDirector('');
+  f.elegir(0, 'PO 3');
+  Check('B5 PO Y "12"', ['MAP 2026-000120', 'REQ 2026-001234'], pasan());
+  f.elegir(1, 'SO z');
+  f.elegir(2, '/B/Cat 5');
+  Check('B5 PO -> SO -> Categoria Y "12"', [['REQ 2026-001234'], 4], [pasan(), f.activos()]);
+  Check('B5 la busqueda no cambia las opciones de la cascada', ['PO 1', 'PO 2', 'PO 3'],
+    f.cascada.estado(true, '')[0].opciones);
+
+  // La Cobertura usa pasa / pasaAtributos: la busqueda no la toca.
+  f.limpiar();
+  f.buscar('zzz');
+  Check('B6 pasa() y pasaAtributos() ignoran la busqueda', [true, true, []],
+    [reg.iniciativas.every(function (i) { return f.pasa(i); }), reg.iniciativas.every(function (i) { return f.pasaAtributos(i); }), pasan()]);
+
+  f.limpiar();
+  Check('B7 Limpiar borra la busqueda', [9, 0, '', false], [pasan().length, f.activos(), f.textoBuscado, f.busquedaActiva()]);
+});
+
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS_BUSQUEDA));
+  var todos;
+  return esperar().then(function () {
+    todos = folios(p);
+    Check('BV1 caja habilitada y visible al cargar', [false, false, 9], [p.sel('regBuscar').disabled, p.sel('regBuscarCampo').hidden, todos.length]);
+
+    teclear(p, '12');
+    Check('BV2 no repinta en cada tecla', 9, folios(p).length);
+    return esperarBusqueda();
+  }).then(function () {
+    Check('BV2 "12" tras la espera, en el orden de la lista', todos.filter(function (f) { return CON_12.indexOf(f) >= 0; }), folios(p));
+    Check('BV2 cuenta y filtros activos', ['4 de 9 iniciativas', '1 filtro activo', false],
+      [p.sel('regCuenta').textContent, p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
+
+    elegir(p, 'regPo', 'PO 1');
+    // PRB 2025-000012 tiene 12 pero su categoria es de PO 2: fuera.
+    Check('BV3 PO 1 Y "12": la busqueda sigue', ['PRB 2026-000012'], folios(p));
+    Check('BV3 dos filtros activos', '2 filtros activos', p.sel('regFiltrosCuenta').textContent);
+
+    teclear(p, 'zzz');
+    return esperarBusqueda();
+  }).then(function () {
+    Check('BV4 sin coincidencias con otro filtro: aviso', [false, true, 'No hay iniciativas que coincidan con «zzz» y los filtros seleccionados.'],
+      [p.sel('regVacio').hidden, p.sel('regTablaCaja').hidden, p.sel('regVacioTexto').textContent]);
+    elegir(p, 'regPo', '');
+    Check('BV4 sin coincidencias solo con la busqueda', 'No hay iniciativas que coincidan con «zzz».', p.sel('regVacioTexto').textContent);
+
+    // Enter: aplica sin esperar y con un solo resultado abre el detalle.
+    p.sel('regBuscar').value = 'PRB-2026-0000012';
+    p.sel('regBuscar').disparar('keydown', { key: 'Enter', target: p.sel('regBuscar') });
+    Check('BV5 Enter con un resultado abre su detalle', [['PRB 2026-000012'], false, 'PRB 2026-000012'],
+      [folios(p), p.sel('regDetFondo').hidden, p.sel('regDetTitulo').textContent]);
+    p.registro.cerrarDetalle();
+
+    p.sel('regBuscar').value = '12';
+    p.sel('regBuscar').disparar('keydown', { key: 'Enter', target: p.sel('regBuscar') });
+    Check('BV6 Enter con varios: solo filtra', [4, true], [folios(p).length, p.sel('regDetFondo').hidden]);
+
+    // Cobertura: la caja se oculta y no cuenta; al volver, sigue igual.
+    p.registro.verCobertura(nunca);
+    Check('BV7 Cobertura: caja oculta, sin contarla', [true, '', true],
+      [p.sel('regBuscarCampo').hidden, p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
+    p.registro.verRegistro();
+    Check('BV7 de vuelta al Registro: busqueda intacta', [false, '1 filtro activo', 4],
+      [p.sel('regBuscarCampo').hidden, p.sel('regFiltrosCuenta').textContent, folios(p).length]);
+
+    p.sel('regLimpiar').disparar('click');
+    Check('BV8 Limpiar filtros vacia la caja y la lista vuelve', ['', 9, ''],
+      [p.sel('regBuscar').value, folios(p).length, p.sel('regFiltrosCuenta').textContent]);
+
+    // Una tecla pendiente no revive la busqueda despues de Limpiar.
+    teclear(p, '12');
+    p.sel('regLimpiar').disparar('click');
+    return esperarBusqueda();
+  }).then(function () {
+    Check('BV9 Limpiar cancela la espera pendiente', [9, ''], [folios(p).length, p.sel('regBuscar').value]);
+    teclear(p, '12');
+    return esperarBusqueda();
+  }).then(function () {
+    // Reintentar (nueva carga) conserva lo escrito.
+    return p.registro.cargar(ok(DATOS_BUSQUEDA));
+  }).then(function () {
+    Check('BV10 recarga: la busqueda escrita se conserva', [4, '1 filtro activo'], [folios(p).length, p.sel('regFiltrosCuenta').textContent]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AL) Opciones de Director / PO / SO segun el rol
+//     ADM: todas (incluidos dueños heredados de registros viejos).
+//     MOD o sin rol: solo nombres del catalogo vigente de dueños
+//     (asignaciones = DirectorioOrganizacional.AsignacionesVigentes, ya con
+//     la herencia C1 -> N2 resuelta en el servidor). VIEWER no llega aqui:
+//     Admin le responde 403 (AccesoAdminHttpSmoke.cs, parte V).
+// ---------------------------------------------------------------------------
+var DATOS_AL = {
+  estados_activos: DATOS.estados_activos, agrupadores: DATOS.agrupadores, fecha_gen: '09/10/2026',
+  tipos_iniciativa: [{ prefijo: 'PRB', nombre: 'Problem' }, { prefijo: 'MAP', nombre: 'Mejora aplicativo' }],
+  iniciativas: [
+    Ini('PRB 2026-000001', { prefijo: 'PRB', po: 'PO 1', so: 'SO x', director: 'Dir A',
+      categorias: [Cat('/A/Cat 1/Hoja', 10, 0.5, 'Dir A', 'PO 1', 'SO x')] }),
+    // Su categoria resuelve dueños que solo existen en filas dadas de baja.
+    Ini('MAP 2026-000002', { prefijo: 'MAP', po: 'PO Viejo', so: 'SO Viejo', director: 'Dir Viejo',
+      categorias: [Cat('/Z/Baja', 5, 1, 'Dir Viejo', 'PO Viejo', 'SO Viejo')] }),
+    // Sin categoria: dueños capturados en el Problem (OwnerProblem...).
+    Ini('PRB 2026-000003', { prefijo: 'PRB', sin_categoria: true, categorias: [],
+      po: 'Javier Tapia / Yadira Acosta', so: 'Pendiente de asignacion', director: 'Dir B' }),
+    // PO del catalogo pero SO heredado del C1 (resuelto en el servidor).
+    Ini('PRB 2026-000004', { prefijo: 'PRB', po: 'PO 3', so: 'SO z', director: 'Dir B',
+      categorias: [Cat('/B/Cat 5', 3, 0.1, 'Dir B', 'PO 3', 'SO z')] })
+  ]
+};
+// Catalogo vigente: la fila /B/Cat 5 tiene su SO HEREDADO del C1 (/B/Cat 4);
+// el servidor ya la manda resuelta, campo por campo.
+var CATALOGO_AL = { tipos: [], asignaciones: [
+  { director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1' },
+  { director: 'Dir A', po: 'PO 2', so: 'SO y', categoria: '/A/Cat 2' },
+  { director: 'Dir B', po: 'PO 3', so: 'SO z', categoria: '/B/Cat 4' },
+  { director: 'Dir B', po: 'PO 3', so: 'SO z', categoria: '/B/Cat 5' }
+], omitidas: 0 };
+var LEGADO = ['PO Viejo', 'SO Viejo', 'Dir Viejo', 'Javier Tapia / Yadira Acosta', 'Pendiente de asignacion'];
+function conLegado(lista) { return lista.filter(function (v) { return LEGADO.indexOf(v) >= 0; }); }
+function copiaAL() { return JSON.parse(JSON.stringify(DATOS_AL)); }
+function catalogoAL(url) {
+  if (/rutas=1/.test(url)) return nunca();       // el de Nueva solicitud: no se usa aqui
+  return Promise.resolve(Respuesta(200, JSON.parse(JSON.stringify(CATALOGO_AL))));
+}
+
+pruebas.push(function () {
+  var reg = R.Registro.desdeJson(copiaAL());
+  Check('AL1 sin rol y sin catalogo: sin opciones (falla cerrado)', [[], 'catalogo'], [reg.directores(), reg.alcance]);
+  reg.ampliar(CATALOGO_AL.asignaciones);
+  var f = new R.FiltroRegistro(reg);
+  var po = f.cascada.estado(true, '')[0].opciones, so = f.cascada.estado(true, '')[1].opciones;
+  Check('AL2 MOD: directores solo del catalogo', ['Dir A', 'Dir B'], reg.directores());
+  Check('AL2 MOD: PO y SO solo del catalogo', [['PO 1', 'PO 2', 'PO 3'], ['SO x', 'SO y', 'SO z']], [po, so]);
+  Check('AL2 MOD: ningun nombre heredado de registros viejos', [], conLegado(reg.directores().concat(po, so)));
+  Check('AL3 herencia C1 -> N2: el SO heredado (SO z) sigue como opcion de PO 3', true,
+    (function () { f.elegir(0, 'PO 3'); return f.cascada.estado(true, '')[1].opciones.indexOf('SO z') >= 0; })());
+  Check('AL3 ... y la categoria de la iniciativa con dueños del catalogo tambien', true,
+    f.cascada.estado(true, '')[2].opciones.indexOf('/B/Cat 5') >= 0);
+
+  // Ninguna iniciativa se pierde; filtrar sigue usando sus propias filas.
+  f.limpiar();
+  Check('AL4 MOD sin filtros: las 4 iniciativas siguen en la lista (incluidas las de dueños viejos)', 4, f.aplicar(reg.iniciativas).length);
+  f.buscar('000003');
+  Check('AL4 la de dueños del Problem se encuentra por codigo', ['PRB 2026-000003'], f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }));
+  f.limpiar();
+  f.elegir(0, 'PO 1');
+  Check('AL5 MOD filtra por un PO del catalogo', ['PRB 2026-000001'], f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }));
+  Check('AL5 un PO viejo no se acepta como filtro', false, f.elegir(0, 'PO Viejo'));
+
+  // Padre -> hijo y reinicio de dependientes.
+  f.limpiar();
+  f.elegirDirector('Dir A');
+  Check('AL6 Director acota PO', ['PO 1', 'PO 2'], f.cascada.estado(true, '')[0].opciones);
+  f.elegir(0, 'PO 2');
+  f.elegirDirector('Dir B');
+  Check('AL6 cambiar Director reinicia un PO que ya no vale', '', f.cascada.seleccion[0]);
+  f.elegirDirector('Dir Viejo');
+  Check('AL6 un Director viejo no se acepta', '', f.director);
+
+  // ADM: lo de siempre, con los nombres viejos.
+  var adm = R.Registro.desdeJson(copiaAL());
+  adm.fijarAlcance(true);
+  var fa = new R.FiltroRegistro(adm);
+  Check('AL7 ADM sin catalogo: conserva los nombres viejos', ['Dir A', 'Dir B', 'Dir Viejo'], adm.directores());
+  Check('AL7 ADM: PO incluye los del Problem y los de filas dadas de baja', ['Javier Tapia / Yadira Acosta', 'PO 1', 'PO 3', 'PO Viejo'],
+    fa.cascada.estado(true, '')[0].opciones);
+  fa.elegir(0, 'PO Viejo');
+  Check('AL7 ADM encuentra la iniciativa por el PO viejo', ['MAP 2026-000002'], fa.aplicar(adm.iniciativas).map(function (i) { return i.folio; }));
+  adm.ampliar(CATALOGO_AL.asignaciones);
+  Check('AL7 ADM con catalogo: suma, no quita', ['Dir A', 'Dir B', 'Dir Viejo'], adm.directores());
+
+  Check('AL8 los datos de las iniciativas no cambian', JSON.stringify(copiaAL().iniciativas.map(function (i) { return [i.folio, i.po, i.so, i.director]; })),
+    JSON.stringify(reg.iniciativas.map(function (i) { return [i.folio, i.po, i.so, i.director]; })));
+});
+
+// La pagina: MOD pide el catalogo al cargar y pinta solo esos nombres.
+pruebas.push(function () {
+  var pedidos = [];
+  var p = Pagina(ok(copiaAL()), function (url) { pedidos.push(url); return catalogoAL(url); }, 'MOD');
+  return esperar().then(esperar).then(function () {
+    var cat = pedidos.filter(function (u) { return !/rutas=1/.test(u); }).length;
+    Check('AL9 MOD: el catalogo se pide al cargar (sin abrir la Cobertura)', 1, cat);
+    var todos = p.sel('regDirector').opciones().concat(p.sel('regPo').opciones(), p.sel('regSo').opciones());
+    Check('AL9 MOD: selects sin nombres viejos', [], conLegado(todos));
+    Check('AL9 MOD: Director del catalogo', ['Dir A', 'Dir B'], p.sel('regDirector').opciones());
+    Check('AL9 MOD: las 4 iniciativas en la tabla', 4, folios(p).length);
+    // Un ADM confirmado despues ve todo; volver a MOD lo quita y reinicia.
+    p.ventana.IniciativasPagina.fijarRol('ADM');
+    Check('AL10 ADM: aparecen los nombres viejos', true, p.sel('regPo').opciones().indexOf('PO Viejo') >= 0);
+    elegir(p, 'regPo', 'PO Viejo');
+    Check('AL10 ADM filtra por el PO viejo', ['MAP 2026-000002'], folios(p));
+    p.ventana.IniciativasPagina.fijarRol('MOD');
+    Check('AL10 de vuelta a MOD: sin nombres viejos y el filtro viejo se suelta', [[], 4],
+      [conLegado(p.sel('regPo').opciones()), folios(p).length]);
+  });
+});
+
+// Sin rol todavia y con el catalogo fallando: sin opciones, lista intacta.
+pruebas.push(function () {
+  var p = Pagina(ok(copiaAL()), function (url) {
+    if (/rutas=1/.test(url)) return nunca();
+    return Promise.resolve(Respuesta(500, { error: 'x' }));
+  }, null);
+  return esperar().then(esperar).then(function () {
+    Check('AL11 sin rol + catalogo con error: ningun dueño ofrecido', [[], [], []],
+      [p.sel('regDirector').opciones(), p.sel('regPo').opciones(), p.sel('regSo').opciones()]);
+    Check('AL11 ... y las iniciativas siguen en la lista', 4, folios(p).length);
+  });
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

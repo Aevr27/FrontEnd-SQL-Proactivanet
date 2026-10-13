@@ -1891,7 +1891,7 @@ P.directores.forEach(d=>selDir.insertAdjacentHTML('beforeend',`<option value="${
 function fillPO(){
   selPO.innerHTML='<option value="">— Todos —</option>';
   const pos = fDir? (P.jerarquia[fDir]||[]) : [...new Set(P.categorias.map(c=>c.po).filter(Boolean))].sort();
-  pos.forEach(p=>selPO.insertAdjacentHTML('beforeend',`<option value="${p}">${p}</option>`));
+  pos.filter(p=>!['basis','draft'].includes(String(p||'').trim().toLowerCase())).forEach(p=>selPO.insertAdjacentHTML('beforeend',`<option value="${p}">${p}</option>`));
 }
 selDir.onchange=()=>{fDir=selDir.value;fPO='';fillPO();renderAll();};
 selPO.onchange=()=>{fPO=selPO.value;renderAll();};
@@ -2033,7 +2033,7 @@ function renderObserv(){
     const sp=document.getElementById('selPOOb');sp.innerHTML='<option value="">— Todos —</option>';
     const pos = obDir? [...new Set(J.observabilidad.apps.filter(a=>a.director===obDir).map(a=>a.po).filter(Boolean))].sort()
                      : J.observabilidad.product_owners;
-    pos.forEach(p=>sp.insertAdjacentHTML('beforeend',`<option>${p}</option>`));
+    pos.filter(p=>!['basis','draft'].includes(String(p||'').trim().toLowerCase())).forEach(p=>sp.insertAdjacentHTML('beforeend',`<option>${p}</option>`));
   }
   sd.onchange=()=>{obDir=sd.value;obPO='';fillPOob();renderObserv();};
   document.getElementById('selPOOb').onchange=e=>{obPO=e.target.value;renderObserv();};
@@ -2151,7 +2151,7 @@ function renderOrqDirTable(){
   function fillPOor(){
     sp.innerHTML='<option value="">— Todos —</option>';
     const pos = orDir? (J.orquestacion.jerarquia[orDir]||[]) : J.orquestacion.product_owners;
-    pos.forEach(p=>sp.insertAdjacentHTML('beforeend',`<option>${p}</option>`));
+    pos.filter(p=>!['basis','draft'].includes(String(p||'').trim().toLowerCase())).forEach(p=>sp.insertAdjacentHTML('beforeend',`<option>${p}</option>`));
   }
   // filtro multi-seleccion por columna B (Candidato)
   const cont=document.getElementById('filtroCand');

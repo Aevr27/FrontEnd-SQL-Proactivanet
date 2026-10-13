@@ -49,6 +49,7 @@
      JUSTO antes de dashboard.css: es lo que ocupaba dentro de ella, y asi
      ninguna regla de igual especificidad cambia de ganador. -->
 <link rel="stylesheet" href="assets/css/boton.css">
+<link rel="stylesheet" href="assets/css/kpis-fijos.css">
 <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
@@ -186,6 +187,8 @@
           Lo que sigue pendiente vive en la pestaña de Backlog.</div>
       </div>
       <div class="acciones-top">
+        <!-- "Fijar KPIs" (assets/js/kpis-fijos.js): pega #kpis arriba al bajar. -->
+        <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="kpis" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
         <div class="estado" id="estado-carga"></div>
       </div>
     </header>
@@ -266,7 +269,10 @@
         <select id="f-campanas" multiple></select>
       </div>
       <div class="campo acciones">
-        <button class="btn gris" id="btn-limpiar" type="button">Limpiar</button>
+        <!-- El title dice lo que hace el clic (dashboard.js, init de
+             pestanaSla): no hay otro sitio donde se lea. -->
+        <button class="btn gris" id="btn-limpiar" type="button"
+                title="Quita Grupos, Técnicos, Campañas y «Sin proveedores», apaga el SLOT, quita los filtros por clic en las gráficas, vuelve al mes en curso y pide los datos de nuevo al servidor">Limpiar</button>
       </div>
     </section>
 
@@ -405,7 +411,9 @@
       <div>
         <h1>Tickets Proactivanet — Call Center</h1>
       </div>
-      <div class="acciones-top"></div>
+      <div class="acciones-top">
+        <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="kpis-llamadas" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
+      </div>
     </header>
 
     <!-- Llamadas y tickets son la misma atencion vista por dos lados, y por eso
@@ -503,6 +511,7 @@
      que los modulos embebidos: los cuatro tableros lo usan para pintar
      "Última actualización" y "Periodo" con el mismo formato. -->
 <script src="assets/js/datos-info.js"></script>
+<script src="assets/js/kpis-fijos.js"></script>
 
 <!-- Datos simulados (MOCK_DATA). Se carga antes que dashboard.js. -->
 <script src="assets/js/mock-data.js"></script>

@@ -53,6 +53,25 @@
                           progresivos sobre las combinaciones REALES de las
                           categorias de las iniciativas (CascadaOrganizacional
                           en modo 'filtro', admin/cascada-organizacional.js).
+                          OPCIONES SEGUN EL ROL (Registro.alcance):
+                            ADM ('completo')   todo lo de antes, incluidos
+                              los dueños capturados en el Problem de las
+                              iniciativas sin categoria (OwnerProblem /
+                              OwnerServicio / Direccion) y los que solo
+                              resuelven filas dadas de baja de
+                              CatCategoriaDueno: sirven para investigar.
+                            MOD / sin rol todavia ('catalogo')  solo
+                              nombres del catalogo vigente de dueños
+                              (asignaciones de admin_iniciativas_catalogos,
+                              DirectorioOrganizacional.AsignacionesVigentes,
+                              con su herencia C1 -> N2 por campo). Se pide
+                              el catalogo al cargar; sin el, sin opciones
+                              (falla cerrado). Las iniciativas sin categoria
+                              no aportan opciones, y una fila de iniciativa
+                              solo aporta si sus tres dueños estan en el
+                              catalogo. NINGUNA iniciativa se oculta: solo
+                              cambia que nombres se ofrecen para filtrar.
+                          (VIEWER no llega aqui: 403 en todo Admin.)
                           Una iniciativa pasa si UNA de sus categorias cumple
                           todo lo elegido a la vez. Las que no tienen
                           categoria se comparan con los dueños del propio
@@ -89,6 +108,10 @@
      FiltroRegistro   lo elegido y que iniciativa pasa
      Cobertura        catalogo de categorias x iniciativas activas
      SolicitudCambio  borrador de "Solicitar cambios" de una iniciativa
+     ("Modificar" y la marca Incompleta del detalle son de
+     admin/iniciativa-admin.js: EdicionAdmin e Incompleta; solo con rol
+     ADM. "Validar en el servidor (no guarda)" valida en
+     admin_iniciativas_gestion.ashx, que responde 501: no hay persistencia.)
      VistaRegistro    el DOM: carga, estados, KPIs, filtros, tabla, detalle,
                       y la vista Cobertura
 
@@ -129,6 +152,10 @@ window.RegistroIniciativas = (function () {
   // tantas. El filtro y el orden van siempre sobre el registro completo.
   var PAGINA = 100;
 
+  // La busqueda espera esto (ms) tras la ultima tecla antes de repintar la
+  // lista; Enter la aplica en el acto.
+  var BUSQUEDA_ESPERA = 150;
+
   // La fecha comprometida de cada estado activo: la misma correspondencia de
   // Semaforo (ExperienciaQueries) y de fdateSem (experiencia.js). Solo
   // decide QUE fecha se pinta; si esta vencida lo dice fecha_retrasada.
@@ -153,6 +180,49 @@ window.RegistroIniciativas = (function () {
   }
   function fecha(s) { return s ? String(s).split('-').reverse().join('/') : '—'; }
   function texto(v) { return v === null || v === undefined || v === '' ? '—' : v; }
+  function esTexto(v) { return typeof v === 'string' && v !== ''; }
+
+  // ---------------------------------------------------------------------
+  // Busqueda por folio o titulo
+  // ---------------------------------------------------------------------
+  // Sin mayusculas ni acentos, espacios colapsados.
+  function plano(v) {
+    return String(v === null || v === undefined ? '' : v).normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+  // Dos llaves de un folio para que no importen separadores ni ceros:
+  //   compacta   solo letras y digitos:     'PRB 2026-000012' -> 'prb2026000012'
+  //   canonica   tramos sin ceros a la izq: 'PRB 2026-000012' -> 'prb 2026 12'
+  // Asi 'prb-2026-000012', '000012' y '12' entran por la compacta y
+  // 'PRB-2026-0000012' o '2026-0000012' (otro ancho de secuencia) por la
+  // canonica. Coincidencia parcial: '12' trae todo folio con 12 en sus
+  // digitos.
+  function claveCompacta(v) { return plano(v).replace(/[^a-z0-9]/g, ''); }
+  function claveCanonica(v) {
+    return (plano(v).match(/[a-z]+|[0-9]+/g) || []).map(function (t) {
+      return /^[0-9]/.test(t) ? t.replace(/^0+(?=[0-9])/, '') : t;
+    }).join(' ');
+  }
+
+  class Busqueda {
+    constructor(textoBuscado) {
+      this.texto = typeof textoBuscado === 'string' ? textoBuscado : '';
+      this.nombre = plano(this.texto);
+      this.compacta = claveCompacta(this.texto);
+      this.canonica = claveCanonica(this.texto);
+    }
+
+    activa() { return this.nombre !== ''; }
+
+    // Folio completo o parcial (separadores y ceros a la izquierda dan
+    // igual) o parte del titulo.
+    pasa(i) {
+      if (!this.activa()) return true;
+      if (this.compacta && claveCompacta(i.folio).indexOf(this.compacta) >= 0) return true;
+      if (this.canonica && claveCanonica(i.folio).indexOf(this.canonica) >= 0) return true;
+      return plano(i.titulo).indexOf(this.nombre) >= 0;
+    }
+  }
 
   // ---------------------------------------------------------------------
   // Registro
@@ -168,10 +238,31 @@ window.RegistroIniciativas = (function () {
       // Filas { director, po, so, categoria } del catalogo de categorias,
       // solo despues de abrir la Cobertura (ver ampliar). null = sin cargar.
       this.catalogo = null;
+      // 'catalogo' (por omision: MOD o rol aun desconocido) | 'completo'
+      // (ADM). Ver la cabecera, FILTROS.
+      this.alcance = 'catalogo';
+      this.nombresCatalogo = null;   // { director: {}, po: {}, so: {} }
     }
 
     // Suma el catalogo a las filas organizacionales (la cascada y el filtro).
-    ampliar(filasCatalogo) { this.catalogo = filasCatalogo; }
+    ampliar(filasCatalogo) {
+      this.catalogo = filasCatalogo;
+      var n = { director: {}, po: {}, so: {} };
+      (filasCatalogo || []).forEach(function (f) {
+        Object.keys(n).forEach(function (k) { if (f[k]) n[k][f[k]] = true; });
+      });
+      this.nombresCatalogo = n;
+    }
+
+    fijarAlcance(completo) { this.alcance = completo ? 'completo' : 'catalogo'; }
+    alcanceCompleto() { return this.alcance === 'completo'; }
+
+    // Con alcance 'catalogo', una fila de iniciativa solo aporta opciones si
+    // sus tres dueños son nombres del catalogo vigente.
+    filaDelCatalogo(f) {
+      var n = this.nombresCatalogo;
+      return !!n && !!n.director[f.director] && !!n.po[f.po] && !!n.so[f.so];
+    }
 
     // Las filas con las que se filtra una iniciativa: las de filasDe y, con
     // el catalogo cargado, ademas la CategoriaN2 de cada ruta (mismos
@@ -209,6 +300,10 @@ window.RegistroIniciativas = (function () {
       // servidor no lo manda; y desde cuando se captura (dd/MM/yyyy).
       r.historialEstado = typeof json.historial_estado === 'string' ? json.historial_estado : '';
       r.historialDesde = typeof json.historial_desde === 'string' ? json.historial_desde : '';
+      // Valores de Estado/Subestado que ya existen en dbo.Problem (Modificar
+      // y Solicitar cambios solo ofrecen estos).
+      r.estadosProblem = Array.isArray(json.estados_problem) ? json.estados_problem.filter(esTexto) : [];
+      r.subestadosProblem = Array.isArray(json.subestados_problem) ? json.subestados_problem.filter(esTexto) : [];
       return r;
     }
 
@@ -236,10 +331,17 @@ window.RegistroIniciativas = (function () {
       });
     }
 
+    // Las filas que dan las OPCIONES de Director / PO / SO / Categoria (no
+    // las que deciden si una iniciativa pasa: esas son filasDeIniciativa).
     filasOrganizacionales(director) {
-      var salida = [], self = this;
+      var salida = [], self = this, completo = this.alcanceCompleto();
+      if (!completo && !this.catalogo) return salida;   // sin catalogo, sin opciones
       this.iniciativas.forEach(function (i) {
-        self.filasDeIniciativa(i).forEach(function (f) { if (!director || f.director === director) salida.push(f); });
+        if (!completo && i.sin_categoria) return;       // dueños del Problem: solo ADM
+        self.filasDeIniciativa(i).forEach(function (f) {
+          if (!completo && !self.filaDelCatalogo(f)) return;
+          if (!director || f.director === director) salida.push(f);
+        });
       });
       (this.catalogo || []).forEach(function (f) { if (!director || f.director === director) salida.push(f); });
       return salida;
@@ -337,7 +439,13 @@ window.RegistroIniciativas = (function () {
       this.tipos = new SeleccionVarios(function () { return registro.tiposIniciativa(); });
       this.director = '';
       this.cascada = new CascadaOrganizacional(registro.filasOrganizacionales(''), 'filtro');
+      this.busqueda = new Busqueda('');
     }
+
+    // Folio o titulo. Solo acota la lista (aplicar), no la Cobertura.
+    buscar(v) { this.busqueda = new Busqueda(v); }
+    get textoBuscado() { return this.busqueda.texto; }
+    busquedaActiva() { return this.busqueda.activa(); }
 
     // Estado: solo `v` ('' = todos). Para varios, alternarEstado.
     elegirEstado(v) { this.estados.solo(v); }
@@ -376,11 +484,13 @@ window.RegistroIniciativas = (function () {
       this.tipos.limpiar();
       this.elegirDirector('');
       this.cascada.limpiar(0);
+      this.buscar('');
     }
 
     activos() {
       var org = this.cascada.filtros();
-      return (this.estados.activo() ? 1 : 0) + (this.tipos.activo() ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length;
+      return (this.estados.activo() ? 1 : 0) + (this.tipos.activo() ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length +
+        (this.busquedaActiva() ? 1 : 0);
     }
 
     // Estado y Tipo: lo que no es organizacional.
@@ -409,9 +519,11 @@ window.RegistroIniciativas = (function () {
       return this.registro.filasDeIniciativa(i).some(function (f) { return self.pasaFila(f); });
     }
 
+    // La lista: los filtros y, sobre lo que queda, la busqueda. La
+    // Cobertura no pasa por aqui (usa pasa / pasaAtributos / pasaFila).
     aplicar(lista) {
       var self = this;
-      return lista.filter(function (i) { return self.pasa(i); });
+      return lista.filter(function (i) { return self.pasa(i) && self.busqueda.pasa(i); });
     }
   }
 
@@ -595,13 +707,18 @@ window.RegistroIniciativas = (function () {
     }
   };
 
-  // Lo que hoy se puede pedir cambiar de una iniciativa: SOLO las tres
-  // fechas compromiso (las de FECHA_DEL_ESTADO). Otros campos se agregan
-  // aqui cuando se designen explicitamente; no se adivinan.
+  // Lo que se puede pedir cambiar de una iniciativa (designado
+  // 2026-10-12): las tres fechas compromiso, Estado/Subestado, el % de una
+  // categoria ligada y "Otros", una EXPLICACION libre de una correccion
+  // (p. ej. "elegi mal la categoria") que no cambia nada por si sola: la
+  // corrige ADM con "Modificar". Nada mas se adivina.
   var CAMPOS_CAMBIO = [
-    { clave: 'f_analisis', rotulo: 'Fecha compromiso de Análisis' },
-    { clave: 'f_solucion', rotulo: 'Fecha compromiso de Solución' },
-    { clave: 'f_cierre', rotulo: 'Fecha compromiso de Cierre' }
+    { clave: 'f_analisis', rotulo: 'Fecha compromiso de Análisis', tipo: 'fecha' },
+    { clave: 'f_solucion', rotulo: 'Fecha compromiso de Solución', tipo: 'fecha' },
+    { clave: 'f_cierre', rotulo: 'Fecha compromiso de Cierre', tipo: 'fecha' },
+    { clave: 'estado', rotulo: 'Estado y Subestado', tipo: 'estado' },
+    { clave: 'pct', rotulo: '% de disminución de una categoría', tipo: 'pct' },
+    { clave: 'otros', rotulo: 'Otros (explica la corrección)', tipo: 'otros' }
   ];
 
   // Historial de fechas: el nombre corto de cada columna de dbo.Problem.
@@ -653,40 +770,141 @@ window.RegistroIniciativas = (function () {
   // SolicitudCambio: borrador de "Solicitar cambios". No se guarda ni se
   // envia (no hay almacen de solicitudes todavia); solo se valida.
   // ---------------------------------------------------------------------
+  // opciones: { estados, subestados } (los valores que ya existen en
+  // dbo.Problem; sin lista no se puede pedir cambio de Estado).
   class SolicitudCambio {
-    constructor(iniciativa) {
+    constructor(iniciativa, opciones) {
+      opciones = opciones || {};
       this.iniciativa = iniciativa;
+      this.estados = Array.isArray(opciones.estados) ? opciones.estados : [];
+      this.subestados = Array.isArray(opciones.subestados) ? opciones.subestados : [];
       // Por omision, la fecha del estado en el que esta (la que se suele
       // pedir extender); si no esta en uno de esos estados, ninguna.
       this.campo = FECHA_DEL_ESTADO[iniciativa.estado] || '';
-      this.propuesto = '';
+      this.propuesto = '';   // fecha, Estado o % (texto), segun el campo
+      this.subestado = '';   // solo con campo 'estado'
+      this.categoria = '';   // solo con campo 'pct': una ruta YA ligada
       this.motivo = '';
     }
 
     static campos() { return CAMPOS_CAMBIO.slice(); }
 
-    actual() { return this.campo && this.iniciativa[this.campo] ? this.iniciativa[this.campo] : null; }
+    tipo() { var c = campoCambio(this.campo); return c ? c.tipo : ''; }
+
+    categoriasLigadas() { return (this.iniciativa.categorias || []).map(function (c) { return c.categoria; }); }
+
+    // El valor actual de lo que se pide cambiar (texto), o null.
+    actual() {
+      var t = this.tipo(), i = this.iniciativa;
+      if (t === 'fecha') return i[this.campo] ? i[this.campo] : null;
+      if (t === 'estado') return i.estado ? i.estado + (i.subestado ? ' / ' + i.subestado : '') : null;
+      if (t === 'pct') {
+        var c = (i.categorias || []).filter(function (x) { return x.categoria === this.categoria; }, this)[0];
+        return c && typeof c.pct_dism === 'number' ? String(Math.round(c.pct_dism * 10000) / 100) : null;
+      }
+      return null;
+    }
 
     // -> [{ campo, mensaje }]; vacia = lista para enviar (cuando se pueda).
     validar() {
-      var errores = [];
-      if (!campoCambio(this.campo)) {
+      var errores = [], t = this.tipo(), i = this.iniciativa;
+      var nuevo = String(this.propuesto || '').trim();
+      if (!t) {
         errores.push({ campo: 'campo', mensaje: 'Elige qué quieres cambiar.' });
-      } else if (!fechaValida(this.propuesto)) {
-        errores.push({ campo: 'propuesto', mensaje: 'Escribe la nueva fecha.' });
-      } else if (this.propuesto === this.actual()) {
-        errores.push({ campo: 'propuesto', mensaje: 'La nueva fecha es igual a la actual.' });
+      } else if (t === 'fecha') {
+        if (!fechaValida(nuevo)) errores.push({ campo: 'propuesto', mensaje: 'Escribe la nueva fecha.' });
+        else if (nuevo === this.actual()) errores.push({ campo: 'propuesto', mensaje: 'La nueva fecha es igual a la actual.' });
+      } else if (t === 'estado') {
+        var sub = String(this.subestado || '').trim();
+        if (!this.estados.length) errores.push({ campo: 'propuesto', mensaje: 'No hay lista de estados: no se puede pedir este cambio.' });
+        else if (this.estados.indexOf(nuevo) < 0) errores.push({ campo: 'propuesto', mensaje: 'Elige el nuevo Estado de la lista.' });
+        else if (sub && this.subestados.indexOf(sub) < 0) errores.push({ campo: 'subestado', mensaje: 'Elige el Subestado de la lista.' });
+        else if (nuevo === (i.estado || '') && (!sub || sub === (i.subestado || ''))) {
+          errores.push({ campo: 'propuesto', mensaje: 'El Estado pedido es igual al actual.' });
+        }
+      } else if (t === 'pct') {
+        if (this.categoriasLigadas().indexOf(this.categoria) < 0) {
+          errores.push({ campo: 'categoria', mensaje: 'Elige una de las categorías de esta iniciativa.' });
+        } else if (!/^\d{1,3}(\.\d{1,2})?$/.test(nuevo) || Number(nuevo) > 100) {
+          errores.push({ campo: 'propuesto', mensaje: 'Escribe un porcentaje entre 0 y 100, con hasta dos decimales.' });
+        } else if (this.actual() !== null && Number(nuevo) === Number(this.actual())) {
+          errores.push({ campo: 'propuesto', mensaje: 'El % pedido es igual al actual.' });
+        }
       }
       if (!String(this.motivo || '').trim()) {
-        errores.push({ campo: 'motivo', mensaje: 'Explica el motivo del cambio.' });
+        errores.push({ campo: 'motivo', mensaje: t === 'otros' ? 'Explica qué hay que corregir.' : 'Explica el motivo del cambio.' });
       }
       return errores;
     }
 
+    // automatica: true si, aprobada, se puede aplicar tal cual (fecha,
+    // Estado, %); 'otros' nunca (es una explicacion).
     resumen() {
-      var c = campoCambio(this.campo);
-      return { folio: this.iniciativa.folio, campo: this.campo, rotulo: c ? c.rotulo : '',
-               anterior: this.actual(), nuevo: this.propuesto, motivo: String(this.motivo || '').trim() };
+      var c = campoCambio(this.campo), t = this.tipo();
+      var r = { folio: this.iniciativa.folio, campo: this.campo, rotulo: c ? c.rotulo : '',
+                anterior: this.actual(), nuevo: String(this.propuesto || '').trim(), motivo: String(this.motivo || '').trim() };
+      if (t === 'estado') r.subestado = String(this.subestado || '').trim();
+      if (t === 'pct') r.categoria = this.categoria;
+      if (t === 'otros') { r.nuevo = ''; r.automatica = false; }
+      else if (t) r.automatica = true;
+      return r;
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // RevisionSolicitud: lo que ADM decide sobre una solicitud. MODELO EN
+  // MEMORIA: no existe el almacen de solicitudes (adm.Solicitud, sin
+  // aprobar), asi que nada de esto se guarda ni se envia por si solo.
+  // ---------------------------------------------------------------------
+  //   pendiente -> aprobada | rechazada (una sola vez).
+  //   aprobar   devuelve los pares de "Modificar" (accion=modificar) para
+  //             aplicar la solicitud con LA MISMA validacion del servidor
+  //             (tope de 100%, fechas, Estado existente). 'otros' no tiene
+  //             pares: ADM hace la correccion a mano con "Modificar".
+  //   rechazar  exige motivo; no produce ningun cambio.
+  class RevisionSolicitud {
+    constructor(resumen, solicitante) {
+      this.solicitud = resumen;
+      this.solicitante = solicitante || null;
+      this.estado = 'pendiente';
+      this.revisor = null;
+      this.motivoRechazo = '';
+    }
+
+    pares() {
+      var s = this.solicitud;
+      if (!s || s.automatica !== true) return null;
+      var pares = [['accion', 'modificar'], ['folio', s.folio]];
+      var c = campoCambio(s.campo);
+      if (c && c.tipo === 'fecha') pares.push([s.campo, s.nuevo]);
+      else if (c && c.tipo === 'estado') {
+        pares.push(['estado', s.nuevo]);
+        if (s.subestado) pares.push(['subestado', s.subestado]);
+      } else if (c && c.tipo === 'pct') pares.push(['pct_categoria', s.categoria], ['pct_valor', s.nuevo]);
+      else return null;
+      return pares;
+    }
+
+    // -> { ok, mensaje, pares }
+    aprobar(revisor) {
+      if (this.estado !== 'pendiente') return { ok: false, mensaje: 'La solicitud ya fue ' + this.estado + '.', pares: null };
+      if (!revisor) return { ok: false, mensaje: 'Falta quién aprueba.', pares: null };
+      this.estado = 'aprobada';
+      this.revisor = revisor;
+      var pares = this.pares();
+      return { ok: true, pares: pares, mensaje: pares
+        ? 'Aprobada: el cambio se valida y se aplica como un «Modificar» de ADM.'
+        : 'Aprobada: «Otros» no cambia nada por sí sola; ADM hace la corrección con «Modificar».' };
+    }
+
+    rechazar(revisor, motivo) {
+      if (this.estado !== 'pendiente') return { ok: false, mensaje: 'La solicitud ya fue ' + this.estado + '.', pares: null };
+      if (!revisor) return { ok: false, mensaje: 'Falta quién rechaza.', pares: null };
+      if (!String(motivo || '').trim()) return { ok: false, mensaje: 'Explica por qué se rechaza.', pares: null };
+      this.estado = 'rechazada';
+      this.revisor = revisor;
+      this.motivoRechazo = String(motivo).trim();
+      return { ok: true, pares: null, mensaje: 'Rechazada: la iniciativa no cambia.' };
     }
   }
 
@@ -709,6 +927,60 @@ window.RegistroIniciativas = (function () {
       this.coberturaCarga = 0;    // descarta respuestas superadas
       this.coberturaPromesa = null;
       this.covFiltro = '';        // '' | con | sin
+      this.busquedaPendiente = null; // espera de la caja de busqueda
+      // 'ADM' | 'MOD' | null (fijarRol). Solo ADM ve "Modificar"; null
+      // hasta que SesionAdmin responda.
+      this.rol = null;
+      this.edicion = null;        // EdicionAdmin del detalle abierto (prototipo)
+      // Rutas del catalogo vigente (las fija la pagina al cargar el
+      // catalogo): lo unico que "Modificar" puede agregar. null = sin cargar.
+      this.rutasCatalogo = null;
+      this.volumetria = null;     // VolumetriaCliente (perezoso)
+    }
+
+    fijarRutasCatalogo(rutas) {
+      this.rutasCatalogo = Array.isArray(rutas) ? rutas : null;
+      if (this.edicion) {
+        this.edicion.categorias.fijarRutas(this.rutasCatalogo);
+        this.pintarCategoriasEdicion();
+      }
+    }
+
+    clienteVolumetria() {
+      if (!this.volumetria && window.IniciativaAdmin) {
+        this.volumetria = new window.IniciativaAdmin.VolumetriaCliente(function (url, op) { return fetch(url, op); });
+      }
+      return this.volumetria;
+    }
+
+    opcionesEstado() {
+      var r = this.registro;
+      return { estados: r ? r.estadosProblem || [] : [], subestados: r ? r.subestadosProblem || [] : [] };
+    }
+
+    // Solo UX: la edicion de ADM no llama al servidor en esta fase.
+    fijarRol(rol) {
+      this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
+      this.aplicarAlcance();
+      if (!this.abierta) return;
+      if (this.rol !== 'ADM') this.abrirEdicion(false);
+      var acciones = this.$('regDetAcciones');
+      if (acciones) acciones.innerHTML = this.htmlAcciones();
+    }
+
+    puedeEditar() { return this.rol === 'ADM' && !!window.IniciativaAdmin; }
+
+    // Opciones de los filtros segun el rol: ADM todo; cualquier otro (o sin
+    // rol todavia), solo el catalogo vigente, que se pide si falta.
+    aplicarAlcance() {
+      var r = this.registro;
+      if (!r) return;
+      var completo = this.rol === 'ADM';
+      if (r.alcanceCompleto() === completo && (completo || r.catalogo || this.coberturaPromesa)) return;
+      r.fijarAlcance(completo);
+      if (this.filtro) this.filtro.rearmar();
+      this.refrescar();
+      if (!completo && !r.catalogo && !this.coberturaPromesa) this.cargarCobertura();
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -762,6 +1034,19 @@ window.RegistroIniciativas = (function () {
           self.filtro.elegir(nivel, e.target.value); self.refrescar();
         });
       });
+      // Busqueda: repinta un momento despues de la ultima tecla; Enter la
+      // aplica ya y, si queda una sola iniciativa, abre su detalle.
+      this.$('regBuscar').addEventListener('input', function () {
+        clearTimeout(self.busquedaPendiente);
+        self.busquedaPendiente = setTimeout(function () { self.aplicarBusqueda(); }, BUSQUEDA_ESPERA);
+      });
+      this.$('regBuscar').addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        if (e.preventDefault) e.preventDefault();
+        self.aplicarBusqueda();
+        var lista = self.filtradas();
+        if (lista.length === 1) self.abrirDetalle(lista[0].folio, self.$('regBuscar'));
+      });
       this.$('regLimpiar').addEventListener('click', function () { self.limpiarFiltros(); });
       this.$('regLimpiarVacio').addEventListener('click', function () { self.limpiarFiltros(); });
       this.$('regMas').addEventListener('click', function () { self.limite += PAGINA; self.pintarTabla(); });
@@ -803,10 +1088,33 @@ window.RegistroIniciativas = (function () {
         var el = e.target;
         if (el && el.closest) el = el.closest('[data-accion]');
         var accion = el && el.getAttribute && el.getAttribute('data-accion');
-        if (accion) self.accionDetalle(accion);
+        if (accion) { self.accionDetalle(accion); return; }
+        // Quitar / Restaurar una categoria en "Modificar".
+        var cat = e.target;
+        if (cat && cat.closest) cat = cat.closest('[data-edicion-cat]');
+        var op = cat && cat.getAttribute && cat.getAttribute('data-edicion-cat');
+        if (op) self.accionCategoria(op, Number(cat.getAttribute('data-indice')));
       });
       this.$('regDetCuerpo').addEventListener('change', function (e) {
         if (e.target && e.target.id === 'regCambioCampo') self.elegirCampoCambio(e.target.value);
+        // Selects y fechas de "Modificar" (algunos navegadores solo avisan
+        // con change).
+        else if (e.target && e.target.getAttribute && e.target.getAttribute('data-edicion') && self.edicion) {
+          self.edicion.capturar(e.target.getAttribute('data-edicion'), e.target.value);
+          self.pintarVistaEdicion();
+        }
+      });
+      // Edicion de ADM: actualiza el borrador en memoria; "Validar en el
+      // servidor (no guarda)" lo valida (no guarda).
+      this.$('regDetCuerpo').addEventListener('input', function (e) {
+        var t = e.target, ed = self.edicion;
+        if (!t || !t.getAttribute || !ed) return;
+        var clave = t.getAttribute('data-edicion');
+        var n = t.getAttribute('data-edicion-pct');
+        if (clave) ed.capturar(clave, t.value);
+        else if (n !== null && n !== undefined) ed.capturarPct(Number(n), t.value);
+        else return;
+        self.pintarVistaEdicion();
       });
       this.$('regDetCerrar').addEventListener('click', function () { self.cerrarDetalle(); });
       this.$('regDetFondo').addEventListener('click', function () { self.cerrarDetalle(); });
@@ -824,7 +1132,19 @@ window.RegistroIniciativas = (function () {
 
     limpiarFiltros() {
       if (!this.filtro) return;
+      clearTimeout(this.busquedaPendiente);
+      this.$('regBuscar').value = '';
       this.filtro.limpiar();
+      this.refrescar();
+    }
+
+    // Lo escrito en la caja pasa al filtro, solo si cambio.
+    aplicarBusqueda() {
+      clearTimeout(this.busquedaPendiente);
+      if (!this.filtro) return;
+      var v = this.$('regBuscar').value || '';
+      if (v === this.filtro.textoBuscado) return;
+      this.filtro.buscar(v);
       this.refrescar();
     }
 
@@ -888,11 +1208,16 @@ window.RegistroIniciativas = (function () {
         .then(function (json) {
           if (mia !== self.cargaId) return;
           self.registro = Registro.desdeJson(json);
+          self.registro.fijarAlcance(self.rol === 'ADM');
           self.filtro = new FiltroRegistro(self.registro);
+          // Un Reintentar no borra lo ya escrito en la caja.
+          self.filtro.buscar(self.$('regBuscar').value || '');
           self.orden = null;
           self.limite = PAGINA;
           self.estadoVista(self.registro.iniciativas.length ? 'listo' : 'sinDatos');
           self.refrescar();
+          // Fuera de ADM las opciones salen del catalogo: se pide ya.
+          if (!self.registro.alcanceCompleto()) self.cargarCobertura(pedir);
         })
         .catch(function (err) {
           if (mia !== self.cargaId) return;
@@ -948,6 +1273,9 @@ window.RegistroIniciativas = (function () {
       var cob = this.modo === 'cobertura', self = this;
       this.$('regListaBloque').hidden = cob;
       this.$('covSeccion').hidden = !cob;
+      // La busqueda solo acota la lista: en la Cobertura no se ve ni cuenta.
+      this.$('regBuscarCampo').hidden = cob;
+      if (this.filtro) this.pintarCuentaFiltros();
       [['regVerRegistro', !cob], ['regVerCobertura', cob]].forEach(function (par) {
         self.$(par[0]).classList.toggle('activa', par[1]);
         self.$(par[0]).setAttribute('aria-pressed', par[1] ? 'true' : 'false');
@@ -1093,7 +1421,13 @@ window.RegistroIniciativas = (function () {
       f.cascada.estado(true, '').forEach(function (e, i) {
         self.pintarSelect(SELECTS_ORG[i], e.opciones, e.valor, i === 2 ? 'Todas' : 'Todos');
       });
-      var n = f.activos();
+      this.$('regBuscar').disabled = false;
+      this.pintarCuentaFiltros();
+    }
+
+    pintarCuentaFiltros() {
+      var f = this.filtro;
+      var n = f.activos() - (this.modo === 'cobertura' && f.busquedaActiva() ? 1 : 0);
       this.$('regLimpiar').hidden = n === 0;
       this.$('regFiltrosCuenta').textContent = n ? (n === 1 ? '1 filtro activo' : n + ' filtros activos') : '';
     }
@@ -1230,6 +1564,7 @@ window.RegistroIniciativas = (function () {
 
       var vacio = lista.length === 0;
       this.$('regVacio').hidden = !vacio;
+      if (vacio) this.$('regVacioTexto').textContent = this.textoVacio();
       this.$('regTablaCaja').hidden = vacio;
 
       var orden = ordenar(lista, this.orden);
@@ -1246,6 +1581,15 @@ window.RegistroIniciativas = (function () {
       this.$('regMas').textContent = 'Mostrar ' + fmt(Math.min(PAGINA, quedan)) + ' más';
     }
 
+    textoVacio() {
+      var f = this.filtro;
+      if (!f.busquedaActiva()) return 'No hay iniciativas que coincidan con los filtros seleccionados.';
+      var buscado = '«' + f.textoBuscado.trim() + '»';
+      return f.activos() > 1
+        ? 'No hay iniciativas que coincidan con ' + buscado + ' y los filtros seleccionados.'
+        : 'No hay iniciativas que coincidan con ' + buscado + '.';
+    }
+
     // ---- detalle ----
     abrirDetalle(folio, origen) {
       var i = this.registro && this.registro.buscar(folio);
@@ -1253,9 +1597,10 @@ window.RegistroIniciativas = (function () {
       this.abierta = folio;
       this.origenFoco = origen || null;
       this.$('regDetTitulo').textContent = i.folio;
-      this.cambio = new SolicitudCambio(i);
+      this.cambio = new SolicitudCambio(i, this.opcionesEstado());
       this.cambioAbierto = false;
       this.histAbierto = false;
+      this.edicion = null;
       this.$('regDetCuerpo').innerHTML = this.htmlDetalle(i);
       this.$('regDetFondo').hidden = false;
       this.$('regDetalle').hidden = false;
@@ -1269,6 +1614,7 @@ window.RegistroIniciativas = (function () {
       var estaba = !!this.abierta;
       this.abierta = null;
       this.cambio = null;
+      this.edicion = null;
       this.$('regDetalle').hidden = true;
       this.$('regDetFondo').hidden = true;
       this.marcarRaiz(false);
@@ -1289,13 +1635,155 @@ window.RegistroIniciativas = (function () {
       else if (accion === 'cambio-cancelar') this.abrirCambio(false);
       else if (accion === 'cambio-preparar') this.prepararCambio();
       else if (accion === 'historial') this.plegarHistorial();
+      else if (accion === 'editar-admin') this.abrirEdicion(!this.edicion);
+      else if (accion === 'edicion-cancelar') this.abrirEdicion(false);
+      else if (accion === 'edicion-revisar') this.revisarEdicion();
+      else if (accion === 'edicion-guardar') this.guardarEdicion();
+      else if (accion === 'edicion-cat-agregar') this.agregarCategoriaEdicion();
+    }
+
+    // ---- categorias de "Modificar" ----
+    agregarCategoriaEdicion(texto) {
+      var ed = this.edicion;
+      if (!ed) return null;
+      if (texto === undefined) { var caja = this.$('regEdCatBuscar'); texto = caja ? caja.value : ''; }
+      var r = ed.categorias.agregar(texto);
+      if (r.ok) {
+        this.pintarCategoriasEdicion();
+        this.consultarVolumetria(r.ruta);
+      }
+      var msg = this.$('regEdCatMsg');
+      if (msg) {
+        msg.className = 'ini-cambio-msg' + (r.ok ? '' : ' error');
+        msg.textContent = r.ok ? '' : r.mensaje;
+      }
+      return r;
+    }
+
+    accionCategoria(op, n) {
+      var ed = this.edicion;
+      if (!ed) return false;
+      var hecho = op === 'quitar' ? ed.categorias.quitar(n) : op === 'restaurar' ? ed.categorias.restaurar(n) : false;
+      if (hecho) this.pintarCategoriasEdicion();
+      return hecho;
+    }
+
+    pintarCategoriasEdicion() {
+      var caja = this.$('regEdCats');
+      if (caja && this.edicion) caja.innerHTML = window.IniciativaAdmin.htmlCategoriasEdicion(this.edicion, this.clienteVolumetria());
+      this.pintarVistaEdicion();
+    }
+
+    // Pide la volumetria (solo lectura) y repinta las categorias al llegar,
+    // si el mismo "Modificar" sigue abierto.
+    consultarVolumetria(ruta) {
+      var vol = this.clienteVolumetria(), self = this, ed = this.edicion;
+      if (!vol) return Promise.resolve(null);
+      return vol.consultar(ruta, function () {
+        if (self.edicion === ed) {
+          var caja = self.$('regEdCats');
+          if (caja) caja.innerHTML = window.IniciativaAdmin.htmlCategoriasEdicion(ed, vol);
+        }
+      });
+    }
+
+    // ---- Modificar (ADM): solo valida en el servidor, no guarda ----
+    // Abre el detalle de la iniciativa con "Modificar" ya desplegado.
+    modificar(folio, origen) {
+      if (!this.puedeEditar()) return false;
+      this.abrirDetalle(folio, origen);
+      if (this.abierta !== folio) return false;
+      this.abrirEdicion(true);
+      return !!this.edicion;
+    }
+
+    pintarVistaEdicion() {
+      var caja = this.$('regEdVista');
+      if (caja && this.edicion) caja.innerHTML = window.IniciativaAdmin.htmlVistaPrevia(this.edicion);
+    }
+
+    // Abrir arranca un borrador nuevo desde la iniciativa abierta; solo ADM.
+    abrirEdicion(abrir) {
+      var i = this.registro && this.registro.buscar(this.abierta);
+      var caja = this.$('regEdicion');
+      if (!i || !caja) return;
+      abrir = !!abrir && this.puedeEditar();
+      var op = this.opcionesEstado();
+      this.edicion = abrir ? new window.IniciativaAdmin.EdicionAdmin(i,
+        { rutas: this.rutasCatalogo || [], estados: op.estados, subestados: op.subestados }) : null;
+      caja.innerHTML = abrir ? window.IniciativaAdmin.htmlEdicion(this.edicion,
+        { tipo: this.registro.nombreTipo(i.prefijo), volumetria: this.clienteVolumetria() }) : '';
+      caja.hidden = !abrir;
+      if (abrir) {
+        this.pintarVistaEdicion();
+        var self = this;
+        this.edicion.categorias.filas.forEach(function (f) { self.consultarVolumetria(f.categoria); });
+      }
+      var boton = this.$('regEditarBoton');
+      if (boton) boton.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+      var foco = abrir ? this.$('regEd-titulo') : boton;
+      if (foco && foco.focus) foco.focus();
+    }
+
+    revisarEdicion() {
+      if (!this.edicion) return null;
+      var r = this.edicion.revisar();
+      var msg = this.$('regEdMsg');
+      msg.className = 'ini-cambio-msg ' + (r.listo ? 'listo' : 'error');
+      msg.innerHTML = window.IniciativaAdmin.htmlRevision(r, r.listo ? 'Cambios revisados, no guardados.' : 'Corrige los cambios:');
+      return r;
+    }
+
+    // "Validar en el servidor (no guarda)" (data-accion edicion-guardar):
+    // valida en admin_iniciativas_gestion.ashx. No guarda: la respuesta real se pinta tal cual, nunca como exito. Sin
+    // cambios o con errores de formato locales no se envia.
+    guardarEdicion(pedir) {
+      var ed = this.edicion;
+      if (!ed || !this.puedeEditar() || this.edicionEnviando) return Promise.resolve(null);
+      var local = this.revisarEdicion();
+      if (!local.listo || !local.cambios.length) {
+        if (local.listo) this.$('regEdMsg').innerHTML = '<strong class="ini-prototipo-marca">Sin cambios: no hay nada que validar.</strong>';
+        return Promise.resolve(null);
+      }
+      var self = this, A = window.IniciativaAdmin, folio = this.abierta;
+      this.edicionEnviando = true;
+      this.$('regEdMsg').className = 'ini-cambio-msg';
+      this.$('regEdMsg').innerHTML = '<span>Validando en el servidor…</span>';
+      return A.enviarGestion(ed.paraEnviar(), pedir || function (url, op) { return fetch(url, op); }).then(function (r) {
+        self.edicionEnviando = false;
+        // El detalle pudo cerrarse o cambiar mientras tanto.
+        if (self.edicion !== ed || self.abierta !== folio) return r;
+        var caja = self.$('regEdMsg');
+        caja.className = 'ini-cambio-msg ' + (r.estado === 'no_habilitada' ? 'aviso' : 'error');
+        caja.innerHTML = A.htmlRespuesta(r);
+        return r;
+      });
+    }
+
+    // Botones de la cabecera del detalle. Modificar solo con rol ADM.
+    htmlAcciones() {
+      return '<button type="button" class="btn linea chico" id="regCambioBoton" data-accion="solicitar-cambios"' +
+          ' aria-expanded="false" aria-controls="regCambio">Solicitar cambios</button>' +
+        (this.puedeEditar()
+          ? ' <button type="button" class="btn linea chico" id="regEditarBoton" data-accion="editar-admin"' +
+            ' aria-expanded="false" aria-controls="regEdicion">Modificar</button>'
+          : '');
+    }
+
+    // Marca derivada "Incompleta" (admin/iniciativa-admin.js): en una
+    // iniciativa existente solo Categoria y %. No se guarda en ningun lado.
+    htmlIncompleta(i) {
+      var A = window.IniciativaAdmin;
+      if (!A) return '';
+      return A.htmlFaltantes(A.Incompleta.faltantes(A.Incompleta.datosDeRegistro(i), false),
+        'Marca calculada; en iniciativas existentes solo se revisan Categoría y %.');
     }
 
     // Abrir arranca un borrador nuevo sobre la iniciativa abierta.
     abrirCambio(abrir) {
       var i = this.registro && this.registro.buscar(this.abierta);
       if (!i) return;
-      this.cambio = new SolicitudCambio(i);
+      this.cambio = new SolicitudCambio(i, this.opcionesEstado());
       this.cambioAbierto = abrir;
       this.$('regCambio').innerHTML = abrir ? this.htmlCambio() : '';
       this.$('regCambio').hidden = !abrir;
@@ -1307,7 +1795,21 @@ window.RegistroIniciativas = (function () {
     elegirCampoCambio(v) {
       if (!this.cambio) return;
       this.cambio.campo = campoCambio(v) ? v : '';
-      this.$('regCambioActual').textContent = fecha(this.cambio.actual());
+      this.pintarGruposCambio();
+    }
+
+    // Muestra solo los controles del tipo elegido y su valor actual.
+    pintarGruposCambio() {
+      var c = this.cambio, t = c.tipo(), self = this;
+      [['fecha', 'regCambioGrupoFecha'], ['estado', 'regCambioGrupoEstado'], ['pct', 'regCambioGrupoPct']].forEach(function (g) {
+        var el = self.$(g[1]);
+        if (el) el.hidden = t !== g[0];
+      });
+      var act = c.actual();
+      this.$('regCambioActual').textContent = t === 'fecha' ? fecha(act) : t === 'pct' ? (act === null ? '—' : act + '%')
+        : t === 'otros' ? '(explicación libre)' : texto(act);
+      var rot = this.$('regCambioMotivoRot');
+      if (rot) rot.textContent = t === 'otros' ? 'Explicación de la corrección' : 'Motivo';
     }
 
     // Valida el borrador. NO lo envia: no hay donde guardarlo todavia.
@@ -1316,12 +1818,19 @@ window.RegistroIniciativas = (function () {
       var c = this.cambio, self = this;
       var campo = this.$('regCambioCampo').value;
       c.campo = campoCambio(campo) ? campo : '';
-      c.propuesto = this.$('regCambioNueva').value || '';
+      var t = c.tipo();
+      var idPropuesto = t === 'estado' ? 'regCambioEstado' : t === 'pct' ? 'regCambioPct' : 'regCambioNueva';
+      c.propuesto = t === 'otros' ? '' : (this.$(idPropuesto).value || '');
+      if (t === 'estado') c.subestado = this.$('regCambioSubestado').value || '';
+      if (t === 'pct') c.categoria = this.$('regCambioCategoria').value || '';
       c.motivo = this.$('regCambioMotivo').value || '';
       var errores = c.validar();
       var por = {};
       errores.forEach(function (e) { por[e.campo] = true; });
-      [['campo', 'regCambioCampo'], ['propuesto', 'regCambioNueva'], ['motivo', 'regCambioMotivo']].forEach(function (par) {
+      [['campo', 'regCambioCampo'], ['propuesto', idPropuesto], ['motivo', 'regCambioMotivo'],
+       ['subestado', 'regCambioSubestado'], ['categoria', 'regCambioCategoria']].forEach(function (par) {
+        if (t !== 'estado' && par[0] === 'subestado') return;
+        if (t !== 'pct' && par[0] === 'categoria') return;
         self.$(par[1]).setAttribute('aria-invalid', por[par[0]] ? 'true' : 'false');
       });
       var msg = this.$('regCambioMsg');
@@ -1331,9 +1840,12 @@ window.RegistroIniciativas = (function () {
         return;
       }
       var r = c.resumen();
+      var detalle = t === 'fecha' ? Escape.html(fecha(r.anterior)) + ' → ' + Escape.html(fecha(r.nuevo))
+        : t === 'estado' ? Escape.html(texto(r.anterior)) + ' → ' + Escape.html(r.nuevo + (r.subestado ? ' / ' + r.subestado : ''))
+        : t === 'pct' ? Escape.html(r.categoria) + ': ' + Escape.html(r.anterior === null ? '—' : r.anterior + '%') + ' → ' + Escape.html(r.nuevo + '%')
+        : 'explicación para ADM; no cambia nada por sí sola';
       msg.className = 'ini-cambio-msg listo';
-      msg.innerHTML = '<strong>Solicitud preparada, no enviada.</strong> ' + Escape.html(r.rotulo) + ': ' +
-        Escape.html(fecha(r.anterior)) + ' → ' + Escape.html(fecha(r.nuevo)) + '. ' +
+      msg.innerHTML = '<strong>Solicitud preparada, no enviada.</strong> ' + Escape.html(r.rotulo) + ': ' + detalle + '. ' +
         'El envío y la revisión se habilitarán cuando exista el registro de solicitudes; por ahora no se guarda nada.';
     }
 
@@ -1348,14 +1860,32 @@ window.RegistroIniciativas = (function () {
       var opciones = '<option value="">— Elige —</option>' + CAMPOS_CAMBIO.map(function (x) {
         return '<option value="' + Escape.attr(x.clave) + '"' + (x.clave === c.campo ? ' selected' : '') + '>' + Escape.html(x.rotulo) + '</option>';
       }).join('');
+      var lista = function (id, valores) {
+        return '<select id="' + id + '"><option value="">— Elige —</option>' + valores.map(function (v) {
+          return '<option value="' + Escape.attr(v) + '">' + Escape.html(v) + '</option>';
+        }).join('') + '</select>';
+      };
+      var t = c.tipo();
       return '<h4>Solicitar cambios</h4>' +
-        '<p class="ini-nota">Pide un cambio sobre esta iniciativa; aquí no se edita. Por ahora solo se pueden pedir cambios de fecha compromiso.</p>' +
+        '<p class="ini-nota">Pide un cambio sobre esta iniciativa; aquí no se edita. Lo revisa y aplica un administrador (ADM). ' +
+          '«Otros» es solo una explicación (p. ej. una categoría equivocada): no cambia nada por sí sola.</p>' +
         '<div class="ini-cambio-campos">' +
           '<div class="campo"><label for="regCambioCampo">Qué cambiar</label><select id="regCambioCampo">' + opciones + '</select></div>' +
           '<div class="campo"><span class="ini-cambio-rot">Valor actual</span><span class="ini-cambio-actual" id="regCambioActual">' +
-            Escape.html(fecha(c.actual())) + '</span></div>' +
-          '<div class="campo"><label for="regCambioNueva">Nueva fecha</label><input type="date" id="regCambioNueva"></div>' +
-          '<div class="campo ini-cambio-ancho"><label for="regCambioMotivo">Motivo</label><textarea id="regCambioMotivo" rows="3"></textarea></div>' +
+            Escape.html(t === 'fecha' || !t ? fecha(c.actual()) : texto(c.actual())) + '</span></div>' +
+          '<div class="campo" id="regCambioGrupoFecha"' + (t === 'fecha' || !t ? '' : ' hidden') + '><label for="regCambioNueva">Nueva fecha</label><input type="date" id="regCambioNueva"></div>' +
+          '<div class="campo" id="regCambioGrupoEstado"' + (t === 'estado' ? '' : ' hidden') + '>' +
+            (c.estados.length
+              ? '<label for="regCambioEstado">Nuevo Estado</label>' + lista('regCambioEstado', c.estados) +
+                '<label for="regCambioSubestado">Nuevo Subestado (opcional)</label>' + lista('regCambioSubestado', c.subestados)
+              : '<p class="ini-nota">Sin lista de estados: no se puede pedir este cambio.</p>') + '</div>' +
+          '<div class="campo" id="regCambioGrupoPct"' + (t === 'pct' ? '' : ' hidden') + '>' +
+            (c.categoriasLigadas().length
+              ? '<label for="regCambioCategoria">Categoría</label>' + lista('regCambioCategoria', c.categoriasLigadas()) +
+                '<label for="regCambioPct">Nuevo %</label><input type="number" id="regCambioPct" min="0" max="100" step="0.01">'
+              : '<p class="ini-nota">Sin categorías: no hay % que cambiar. Usa «Otros» para pedir que se agregue una.</p>') + '</div>' +
+          '<div class="campo ini-cambio-ancho"><label for="regCambioMotivo" id="regCambioMotivoRot">' + (t === 'otros' ? 'Explicación de la corrección' : 'Motivo') +
+            '</label><textarea id="regCambioMotivo" rows="3"></textarea></div>' +
         '</div>' +
         '<div class="ini-cambio-msg" id="regCambioMsg" role="status" aria-live="polite"></div>' +
         '<div class="ini-cambio-pie">' +
@@ -1434,10 +1964,11 @@ window.RegistroIniciativas = (function () {
           (i.agrup ? ' <span class="chip ini-chip">' + Escape.html(i.agrup) + '</span>' : '') +
           (i.activa && i.fecha_retrasada ? ' <span class="pill vencido">Retrasada</span>' : '') +
         '</div>' +
-        '<div class="ini-det-acciones"><button type="button" class="btn linea chico" id="regCambioBoton" data-accion="solicitar-cambios"' +
-          ' aria-expanded="false" aria-controls="regCambio">Solicitar cambios</button></div>' +
+        this.htmlIncompleta(i) +
+        '<div class="ini-det-acciones" id="regDetAcciones">' + this.htmlAcciones() + '</div>' +
         '</div>' +
-        '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>';
+        '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>' +
+        '<section class="ini-det-sec ini-cambio ini-edicion" id="regEdicion" hidden></section>';
 
       var ident = '<dl class="ini-datos">' +
         dato('Código', i.folio) +
@@ -1516,6 +2047,8 @@ window.RegistroIniciativas = (function () {
   return {
     URL_REGISTRO: URL_REGISTRO,
     PAGINA: PAGINA,
+    BUSQUEDA_ESPERA: BUSQUEDA_ESPERA,
+    Busqueda: Busqueda,
     FECHA_DEL_ESTADO: FECHA_DEL_ESTADO,
     URL_CATALOGO: URL_CATALOGO,
     Registro: Registro,
@@ -1523,6 +2056,7 @@ window.RegistroIniciativas = (function () {
     FiltroRegistro: FiltroRegistro,
     Cobertura: Cobertura,
     SolicitudCambio: SolicitudCambio,
+    RevisionSolicitud: RevisionSolicitud,
     CAMPOS_CAMBIO: CAMPOS_CAMBIO,
     etiquetarHistorial: etiquetarHistorial,
     ordenar: ordenar,

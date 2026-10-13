@@ -21,9 +21,12 @@
 // (que llego y no esta vacio); no se guarda en ningun lado porque no hay
 // destino confirmado.
 //
-// ACCESO: AccesoAdmin.ExigirAdm: whitelist y ademas rol ADM de
-// dbo.UsuariosAdmin (403 antes de leer nada). Crear es solo de ADM; MOD
-// recibe 403 { tipo: "RolInsuficiente" }.
+// ACCESO: AccesoAdmin.Exigir: rol ADM o MOD de dbo.UsuariosAdmin (403
+// AccesoDenegado antes de leer nada para VIEWER, anonimo o consulta de rol
+// fallida). Solicitar es de ADM y MOD; su UNICO llamador es Nueva solicitud
+// (admin/iniciativas.js) y aqui solo se valida, no se guarda ni se aprueba
+// nada. La creacion directa (solo ADM) NO pasa por este handler: va a
+// admin_iniciativas_gestion.ashx, que usa ExigirAdm.
 
 using System;
 using System.Collections.Generic;
@@ -33,7 +36,7 @@ public class AdminIniciativasValidar : IHttpHandler
 {
     public void ProcessRequest(HttpContext context)
     {
-        if (!AccesoAdmin.ExigirAdm(context)) return;
+        if (!AccesoAdmin.Exigir(context)) return;
 
         DashboardHandler.Responder(context, delegate
         {

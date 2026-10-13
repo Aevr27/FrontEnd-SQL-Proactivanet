@@ -78,9 +78,12 @@
     return DatosInfo.fecha(iso);
   };
 
-  DatosInfo.prototype.selloTexto = function () {
+  // rotulo: el texto antes de la fecha. Por omision "Última actualización";
+  // el respaldo de Experiencia pasa el suyo para que un corte guardado no se
+  // lea como dato en vivo (opciones.rotuloSello de pintarEn).
+  DatosInfo.prototype.selloTexto = function (rotulo) {
     var s = DatosInfo.fechaHora(this.ultimaActualizacion);
-    return s ? 'Última actualización: ' + s : null;
+    return s ? (rotulo || 'Última actualización') + ': ' + s : null;
   };
 
   // Hay periodo cuando el backend manda las dos fechas y el dato es una
@@ -98,9 +101,9 @@
   };
 
   // Las dos lineas ya listas, sin los renglones que no tienen valor.
-  DatosInfo.prototype.lineas = function () {
+  DatosInfo.prototype.lineas = function (rotuloSello) {
     var salida = [];
-    var sello = this.selloTexto();
+    var sello = this.selloTexto(rotuloSello);
     var periodo = this.periodoTexto();
     if (sello) salida.push(sello);
     if (periodo) salida.push(periodo);
@@ -114,6 +117,9 @@
      opciones.sufijo   texto que se agrega al final de la primera linea (lo usa
                        el aviso de carga parcial de SLA).
      opciones.titulo   tooltip del nodo.
+     opciones.rotuloSello  texto en lugar de "Última actualización" (el
+                       respaldo de Experiencia: "Datos de respaldo, no en
+                       vivo · Corte"). La fecha sigue saliendo del metadato.
      opciones.periodo  false = no pintar el renglon de periodo aunque el
                        metadato lo traiga. Es para las pestañas que YA muestran
                        su rango en su propia barra de filtros -SLA y Call
@@ -128,7 +134,7 @@
   DatosInfo.prototype.pintarEn = function (nodo, opciones) {
     if (!nodo) return this;
     var op = opciones || {};
-    var lineas = this.lineas();
+    var lineas = this.lineas(op.rotuloSello);
 
     if (op.periodo === false) {
       var periodo = this.periodoTexto();

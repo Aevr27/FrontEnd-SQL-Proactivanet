@@ -199,7 +199,8 @@ function renderOrqDirTable(){
   const sp=document.getElementById('selPOOr');
   function fillPOor(){
     sp.innerHTML='<option value="">— Todos —</option>';
-    const pos = orDir? (J.orquestacion.jerarquia[orDir]||[]) : J.orquestacion.product_owners;
+    const pos = (orDir? (J.orquestacion.jerarquia[orDir]||[]) : J.orquestacion.product_owners)
+      .filter(p=>!['basis','draft'].includes(String(p||'').trim().toLocaleLowerCase()));
     pos.forEach(p=>sp.insertAdjacentHTML('beforeend',`<option>${esc(p)}</option>`));
   }
   // filtro multi-seleccion por columna B (Candidato)

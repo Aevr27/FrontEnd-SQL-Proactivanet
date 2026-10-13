@@ -9,8 +9,15 @@
 <!--
   Pagina oculta de administracion de iniciativas.
 
-  No esta enlazada desde dashboard.html ni desde admin/admin.html: se llega
-  escribiendo la URL /admin/iniciativas.html. Sin autenticacion todavia.
+  Se llega desde la entrada "Administracion" de la barra lateral de
+  dashboard.html (visible solo si SesionAdmin dice autorizado) o escribiendo
+  la URL /admin/iniciativas.html. No esta enlazada desde admin/admin.html.
+  ACCESO (en el servidor, ver App_Code/AccesoAdmin.cs): rol ADM o MOD en
+  dbo.UsuariosAdmin para la identidad Windows del request. AdminAccesoModulo
+  protege esta pagina si esta registrado en Web.config (ver
+  Web.config.ejemplo); los handlers admin_iniciativas_* llaman a Exigir o
+  ExigirAdm.
+  Ocultar pestañas o botones aqui es solo UX.
 
   ESTADO ACTUAL (cuarto hito):
     - Dos vistas principales con pestaña: Iniciativas (la de inicio) y
@@ -37,6 +44,18 @@
       (solo lectura). La cascada es admin/cascada-organizacional.js, la misma
       (en modo 'filtro') que deben usar las pestañas de listas cuando existan.
     - No se envia ni se guarda nada: no hay boton de enviar ni <form>.
+    - "Crear iniciativa" (btnCrearAdmin -> panel-crear-admin) y la edicion de ADM
+      en el detalle: gestion directa, separada de Nueva solicitud, solo con
+      rol ADM. SOLO VALIDACION: "Validar en el servidor (no guarda)" llama a
+      handlers/admin_iniciativas_gestion.ashx (ExigirAdm), que responde 501
+      PersistenciaNoHabilitada; nada se guarda. Lo que falta se marca
+      "Incompleta" (derivada, sin columna). admin/iniciativa-admin.js.
+    - Sin alta de categorias: se crean en el sitio de Proactivanet. El
+      modulo admin/categorias-alta.js y handlers/admin_categorias_alta.ashx
+      siguen en el repo, sin entrada en esta pagina.
+    - Dueños (Product Owner / Service Owner) ocultos por ahora en
+      Administracion y en "Crear iniciativa": flujo aparte. Ver
+      DUENOS_VISIBLES en admin/iniciativas.js.
     - Solicitudes todavia no muestra datos: estado vacio "en preparacion",
       sin datos inventados.
 
@@ -59,9 +78,10 @@
        pagina es estatica y no hay plantillas). Diferencias a proposito:
        - Cada entrada es un enlace a ../dashboard.html#<modulo> (el tablero
          abre el modulo del hash al cargar), no un boton con data-tab.
-       - Administracion es la entrada activa. En el tablero solo aparece para
-         las cuentas de AdminAllowedUsers (SesionAdmin); aqui igual, aunque
-         quien no esta autorizado ya no deberia llegar (AdminAccesoModulo).
+       - Administracion es la entrada activa. En el tablero solo aparece si
+         SesionAdmin dice autorizado (rol ADM o MOD en dbo.UsuariosAdmin);
+         aqui igual, aunque quien no esta autorizado ya no deberia llegar
+         (AdminAccesoModulo).
        Plegar/desplegar: MenuLateral en admin/iniciativas.js. Si cambia la
        lista de modulos del tablero, actualizar tambien esta copia. -->
   <aside class="lateral" id="lateral">
@@ -163,9 +183,21 @@
     </div>
   </header>
 
-  <nav class="ini-tabs" role="tablist" aria-label="Secciones">
+  <!-- Sin rol ADM/MOD (VIEWER) o sin respuesta de admin_sesion: se ve solo
+       esto (PaginaIniciativas.denegar). El servidor ya responde 403 a todo
+       handler de Admin; esto es para la pagina estatica cuando
+       AdminAccesoModulo no esta registrado. -->
+  <div class="ini-vacio" id="iniDenegado" role="alert" hidden>
+    <strong>No tienes acceso a la administración de iniciativas.</strong>
+    <span><a href="../dashboard.html">Volver al tablero</a></span>
+  </div>
+
+  <nav class="ini-tabs" id="iniTabs" role="tablist" aria-label="Secciones">
     <button type="button" class="ini-tab activa" role="tab" id="tab-iniciativas" aria-controls="panel-iniciativas" aria-selected="true">Iniciativas</button>
     <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1">Solicitudes</button>
+    <!-- Solo ADM (data-solo-adm y PaginaIniciativas.fijarRol). Solo UX: los
+         handlers de escritura de ADM exigen AccesoAdmin.ExigirAdm. -->
+    <button type="button" class="ini-tab" role="tab" id="tab-administracion" aria-controls="panel-administracion" aria-selected="false" tabindex="-1" data-solo-adm hidden>Administración</button>
   </nav>
 
   <!-- Vista de inicio: el registro de iniciativas existentes y la accion
@@ -176,10 +208,12 @@
         <h2>Iniciativas</h2>
         <p class="ini-vista-sub">Consulta y administra las iniciativas existentes.</p>
       </div>
-      <!-- Crear iniciativas es solo de ADM: oculto hasta que admin_sesion
-           diga rol ADM (SesionAdmin, data-solo-adm). Solo UX: el servidor
-           lo exige con AccesoAdmin.ExigirAdm. -->
-      <button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-adm hidden>
+      <!-- Solicitar es de ADM y MOD: oculto hasta que admin_sesion diga
+           autorizado (SesionAdmin, data-solo-admin; autorizado = whitelist
+           y rol ADM o MOD). Solo UX: el servidor lo exige con
+           AccesoAdmin.Exigir y la vista Nueva solicitud tampoco abre sin
+           rol ADM/MOD (PaginaIniciativas). -->
+      <button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-admin hidden>
         <span class="ini-cta-mas" aria-hidden="true">+</span>
         <span>Solicitar una iniciativa</span>
       </button>
@@ -207,6 +241,13 @@
           <span class="ini-filtros-titulo" id="regFiltrosTitulo">Filtros</span>
           <span class="ini-filtros-cuenta" id="regFiltrosCuenta" aria-live="polite"></span>
           <button type="button" class="btn linea chico" id="regLimpiar" hidden>Limpiar filtros</button>
+        </div>
+        <!-- Busqueda por codigo o titulo, SOBRE lo que dejan los demas
+             filtros (registro-iniciativas.js, Busqueda). Solo la lista: en la
+             Cobertura se oculta. -->
+        <div class="campo ini-buscar" id="regBuscarCampo">
+          <label for="regBuscar">Buscar por código o nombre</label>
+          <input type="search" id="regBuscar" placeholder="PRB 2026-000012, 12 o parte del nombre" autocomplete="off" spellcheck="false" disabled>
         </div>
         <!-- Estado, varios a la vez (mismo control que Tipo de iniciativa). -->
         <div class="campo ini-multi" id="regEstadoCampo">
@@ -245,7 +286,7 @@
       </div>
 
       <div class="ini-vacio" id="regVacio" hidden>
-        <strong>No hay iniciativas que coincidan con los filtros seleccionados.</strong>
+        <strong id="regVacioTexto">No hay iniciativas que coincidan con los filtros seleccionados.</strong>
         <span><button type="button" class="btn linea chico" id="regLimpiarVacio">Limpiar filtros</button></span>
       </div>
 
@@ -317,6 +358,80 @@
       <strong>Lista de solicitudes en preparación</strong>
       <span>Aquí estarán las solicitudes enviadas y su estado.</span>
     </div>
+  </section>
+
+  <!-- Administracion (solo ADM): gestion directa, separada del flujo de
+       solicitud. Alta directa de iniciativas (abre panel-crear-admin) y
+       dueños de categoria (admin/categorias-duenos.js), estos OCULTOS por
+       ahora (DUENOS_VISIBLES en admin/iniciativas.js). Las categorias se
+       crean en el sitio de Proactivanet: aqui no hay alta de categorias. -->
+  <section class="ini-panel card" role="tabpanel" id="panel-administracion" aria-labelledby="tab-administracion" hidden>
+    <div class="ini-vista-cab">
+      <div class="ini-vista-titulo">
+        <h2>Administración</h2>
+        <p class="ini-vista-sub">Gestión directa de iniciativas (solo ADM).</p>
+      </div>
+    </div>
+
+    <div class="ini-adm-secciones">
+      <section class="ini-adm-seccion" aria-labelledby="admSecCrear">
+        <h3 id="admSecCrear">Crear iniciativa</h3>
+        <p class="ini-nota">Alta directa, sin solicitud ni aprobación. Acepta datos incompletos: lo que falte se marca <b>Incompleta</b>.</p>
+        <!-- Alta directa de ADM (admin/iniciativa-admin.js), SEPARADA de la
+             solicitud. Oculto salvo rol ADM (solo UX). -->
+        <button type="button" class="btn ini-cta" id="btnCrearAdmin" data-solo-adm hidden
+                title="Creación directa (ADM): sin solicitud ni aprobación">
+          <span class="ini-cta-mas" aria-hidden="true">+</span>
+          <span>Crear iniciativa</span>
+        </button>
+      </section>
+    </div>
+
+    <!-- Dueños de categoria (admin/categorias-duenos.js, VistaDuenos):
+         lectura de dbo.CatCategoriaDueno por ?duenos=1 y propuesta con
+         vista previa; "Guardar (no disponible)" deshabilitado hasta tener
+         contrato. OCULTA por ahora (flujo aparte): iniciativas.js la deja
+         hidden y no pide el catalogo mientras DUENOS_VISIBLES sea false. -->
+    <section class="ini-adm-bloque" id="cdSeccion" aria-labelledby="cdTitulo" hidden>
+      <div class="ini-lista-cab">
+        <h3 class="ini-lista-titulo" id="cdTitulo">Dueños de categoría</h3>
+        <span class="ini-lista-cuenta" id="cdCuenta" aria-live="polite"></span>
+      </div>
+      <p class="ini-estado" id="cdCargando" role="status" hidden>Cargando el catálogo de dueños…</p>
+      <div class="ini-error" id="cdError" role="alert" hidden>
+        <span><strong>No se pudo cargar el catálogo de dueños.</strong> <span id="cdErrorTexto"></span></span>
+        <button type="button" class="btn" id="cdReintentar">Reintentar</button>
+      </div>
+      <div id="cdContenido" hidden>
+        <p class="ini-nota" id="cdResumen"></p>
+        <div class="filtros ini-filtros">
+          <div class="campo"><label for="cdFiltro">Mostrar</label><select id="cdFiltro"></select></div>
+          <div class="campo ini-buscar"><label for="cdBuscar">Buscar categoría, C1 o dueño</label>
+            <input type="search" id="cdBuscar" autocomplete="off" spellcheck="false"></div>
+        </div>
+        <div class="ini-vacio" id="cdVacio" hidden><strong>No hay categorías que coincidan.</strong></div>
+        <!-- ini-cd-caja: caja de alto fijo con scroll propio y encabezado fijo
+             (iniciativas.css), para que las ~340 filas no empujen la pagina. -->
+        <div class="ini-tabla-caja ini-cd-caja" id="cdTablaCaja">
+          <table class="ini-tabla">
+            <caption class="ini-sr">Categorías N2 y sus dueños: propios, heredados del C1 o faltantes.</caption>
+            <thead><tr>
+              <th scope="col"><span class="ini-th">Categoría (N2)</span></th>
+              <th scope="col"><span class="ini-th">C1</span></th>
+              <th scope="col"><span class="ini-th">Product Owner</span></th>
+              <th scope="col"><span class="ini-th">Service Owner</span></th>
+              <th scope="col"><span class="ini-th">Director PO</span></th>
+              <th scope="col"><span class="ini-th">Hallazgos</span></th>
+            </tr></thead>
+            <tbody id="cdCuerpo"></tbody>
+          </table>
+        </div>
+        <div class="ini-cd-detalle" id="cdDetalle" role="region" aria-labelledby="cdDetTitulo" hidden>
+          <h4 id="cdDetTitulo"></h4>
+          <div id="cdDetCuerpo"></div>
+        </div>
+      </div>
+    </section>
   </section>
 
   <!-- Accion de Iniciativas, no pestaña: la abre #btnSolicitar. -->
@@ -439,6 +554,112 @@
     <div class="ini-resultado" id="iniResultado" role="status" aria-live="polite" hidden></div>
   </section>
 
+  <!-- Accion de Iniciativas, no pestaña: la abre #btnCrearAdmin. Alta
+       directa de ADM, SOLO VALIDACION sin persistencia (admin/iniciativa-admin.js,
+       VistaCrearAdmin). Ningun campo es obligatorio salvo el Tipo; lo que
+       falte se avisa como "Incompleta". "Validar en el servidor (no guarda)"
+       llama a admin_iniciativas_gestion.ashx, que responde 501 sin guardar. -->
+  <section class="ini-panel card" id="panel-crear-admin" aria-labelledby="admCrearTitulo" hidden>
+    <div class="ini-panel-cab">
+      <button type="button" class="btn linea chico" id="btnVolverAdmin">← Volver a Administración</button>
+      <h2 id="admCrearTitulo" tabindex="-1">Crear iniciativa</h2>
+      <span class="ini-hint">Gestión directa · sin solicitud ni aprobación</span>
+    </div>
+
+    <p class="ini-prototipo-aviso" role="note"><strong>Persistencia no habilitada.</strong> «Validar en el servidor (no guarda)» solo valida: no guarda nada ni genera código hasta que el contrato de base esté aprobado.</p>
+
+    <!-- Dos caminos para el problema de la iniciativa (VistaCrearAdmin.elegirRuta).
+         "nuevo" es el formulario de alta (dbo.Problem + sus categorias).
+         "existente" busca en el registro por codigo o nombre (la misma
+         Busqueda del registro); elegir uno abre su edicion (detalle del registro), con sus datos
+         y sus categorias cargados para revisarlas o agregar otras. Nunca crea
+         un problema nuevo por lo escrito. -->
+    <fieldset class="ini-ruta-problema" id="admRutaProblema">
+      <legend>Problema de la iniciativa</legend>
+      <label><input type="radio" name="admRuta" id="admRutaNuevo" value="nuevo" checked> Crear un problema nuevo</label>
+      <label><input type="radio" name="admRuta" id="admRutaExistente" value="existente"> Ligar a un problema existente</label>
+    </fieldset>
+    <div class="ini-existente-caja" id="admExistente" hidden>
+      <label for="admExistenteBuscar">Buscar el problema por código o nombre</label>
+      <input type="search" id="admExistenteBuscar" autocomplete="off" placeholder="p. ej. PRB 2026-000012 o parte del título">
+      <small class="ini-motivo">Elige el problema real de la lista: se abre su edición, con sus datos y categorías cargados. El código no cambia.</small>
+      <div id="admExistenteLista" aria-live="polite"></div>
+    </div>
+
+    <div class="ini-form" id="admForm">
+      <section class="ini-bloque ini-col-clasif" aria-labelledby="admCabClasif">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">01</span>
+          <h3 id="admCabClasif">Clasificación</h3>
+        </div>
+        <div class="ini-campo">
+          <span class="ini-rotulo-derivado" id="rotAdmCodigo">Código</span>
+          <output id="admCodigo" aria-labelledby="rotAdmCodigo">Sin código: no se asigna todavía (regla pendiente)</output>
+        </div>
+        <div class="ini-campo">
+          <label for="admTipo">Tipo de iniciativa <span class="ini-obligatorio">obligatorio</span></label>
+          <select id="admTipo" disabled></select>
+        </div>
+        <!-- PO / SO no se eligen aqui (dueños: flujo aparte); viajan vacios y
+             el servidor los toma como opcionales. Las categorias van en 03. -->
+        <div class="ini-campo ini-derivado">
+          <span class="ini-rotulo-derivado" id="rotAdmDirector">Director <span class="ini-origen derivado">Derivado</span></span>
+          <output id="admDirector" aria-labelledby="rotAdmDirector">—</output>
+        </div>
+      </section>
+
+      <section class="ini-bloque ini-col-desc" aria-labelledby="admCabDesc">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">02</span>
+          <h3 id="admCabDesc">Información del problema</h3>
+        </div>
+        <div class="ini-campo ini-campo-captura"><label for="adm-titulo">Título</label><input type="text" id="adm-titulo"></div>
+        <div class="ini-campo ini-campo-captura"><label for="adm-descripcion">Descripción</label><textarea id="adm-descripcion" rows="5"></textarea></div>
+        <div class="ini-campo ini-campo-captura"><label for="adm-observaciones">Observaciones</label><textarea id="adm-observaciones" rows="4"></textarea></div>
+      </section>
+
+      <section class="ini-bloque ini-col-impacto" aria-labelledby="admCabImpacto">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">03</span>
+          <h3 id="admCabImpacto">Categorías e impacto</h3>
+        </div>
+        <!-- Una o mas categorias (dbo.ProblemCategoria), cada una con su %.
+             Con mas de 20 opciones el selector es una caja con busqueda; solo
+             cuenta una categoria real del catalogo. La volumetria es
+             calculada (SLOT 0 de vw_TBSlotCAT) y de solo lectura. -->
+        <div class="ini-campo">
+          <label for="admCatBuscar">Agregar categoría</label>
+          <div class="ini-cat-agregar"><span id="admCatSelector"></span>
+            <button type="button" class="btn linea chico" id="admCatAgregar" disabled>Agregar</button></div>
+          <small class="ini-motivo" id="admCatMsg" role="status" aria-live="polite"></small>
+        </div>
+        <div id="admCats" aria-live="polite"></div>
+        <small class="ini-motivo">Tope de 100% por categoría, contando las demás iniciativas activas: el servidor rechaza un % que lo exceda.</small>
+      </section>
+
+      <section class="ini-bloque ini-col-rca" aria-labelledby="admCabRca">
+        <div class="ini-bloque-cab">
+          <span class="ini-paso" aria-hidden="true">04</span>
+          <h3 id="admCabRca">RCA</h3>
+        </div>
+        <div class="ini-campo">
+          <label for="admRca">Documento adjunto</label>
+          <input type="file" id="admRca" aria-describedby="admRcaNota">
+          <small class="ini-motivo" id="admRcaNota">El archivo no se sube.</small>
+        </div>
+      </section>
+    </div>
+
+    <div id="admFaltantes" aria-live="polite"></div>
+
+    <div class="ini-acciones">
+      <button type="button" class="btn" id="admRevisar">Revisar borrador</button>
+      <button type="button" class="btn" id="admGuardar" aria-describedby="admGuardarNota">Validar en el servidor (no guarda)</button>
+      <span class="ini-hint" id="admGuardarNota">Solo valida en el servidor; no guarda mientras la persistencia no esté habilitada.</span>
+    </div>
+    <div class="ini-resultado" id="admResultado" role="status" aria-live="polite" hidden></div>
+  </section>
+
   </div><!-- /.lateral-contenido -->
 </div>
 
@@ -461,10 +682,20 @@
 <script src="../assets/js/catalogos.js"></script>
 <script src="../assets/js/globo-ayuda.js"></script>
 <script src="cascada-organizacional.js"></script>
+<script src="iniciativa-admin.js"></script>
+<script src="categorias-duenos.js"></script>
 <script src="registro-iniciativas.js"></script>
 <script src="iniciativas.js"></script>
 <script>
-try { new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo')); } catch (e) { console.error(e); }
+// El rol tambien decide los botones de ADM que se pintan dentro del detalle,
+// que no existen cuando aplicar() recorre el documento.
+try {
+  new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo')).then(function (s) {
+    if (!window.IniciativasPagina) return;
+    if (s.autorizado) window.IniciativasPagina.fijarRol(s.rol);
+    else window.IniciativasPagina.denegar();
+  });
+} catch (e) { console.error(e); }
 </script>
 </body>
 </html>
