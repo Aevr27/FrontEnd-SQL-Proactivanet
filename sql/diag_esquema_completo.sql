@@ -26,14 +26,17 @@
    - No lee datos de ninguna tabla: los conteos salen de sys.partitions.
 
    COMO CORRERLO (SSMS)
-   1. Tools > Options > Query Results > SQL Server > Results to Text >
-      "Maximum number of characters displayed in each column" = 8192.
-   2. Query > Results To > Results to File (Ctrl+Shift+F).
-   3. Elegir la base en el combo (Tickets_Proactivanet) y F5.
-   4. Repetir en cada base que quieras documentar (p. ej. la de
+   1. Query > Results To > Results to File (Ctrl+Shift+F).
+   2. Elegir la base en el combo (Tickets_Proactivanet) y F5.
+   3. Repetir en cada base que quieras documentar (p. ej. la de
       Integracion_SQL si es otra) y pasar los archivos .rpt.
+   - Results to Text corta cada columna en 256 caracteres por omision (Tools >
+     Options > Query Results > SQL Server > Results to Text; el cambio solo
+     aplica a ventanas NUEVAS). Por eso @Trozo = 250: los cuerpos salen
+     completos sin tocar esa opcion. Las secciones 1-9 casi nunca pasan de 256.
    - Si el archivo sale enorme, pon @IncluirDefiniciones = 0 y manda primero
      solo la estructura; los cuerpos se piden despues.
+   - @SoloDefiniciones = 1 salta las secciones 1-9 (para repetir solo la 10).
    - La seccion 0 dice si tienes VIEW DEFINITION. Sin ese permiso SQL Server
      OCULTA los objetos que no puedes ver, sin error: el volcado saldria
      incompleto y no se notaria.
@@ -48,7 +51,8 @@ SET CONCAT_NULL_YIELDS_NULL ON;
 SET ARITHABORT ON;
 
 DECLARE @IncluirDefiniciones bit = 1;   -- 0 = sin la seccion 10 (cuerpos)
-DECLARE @Trozo int = 4000;              -- caracteres por trozo en la seccion 10
+DECLARE @SoloDefiniciones bit = 0;      -- 1 = solo secciones 0 y 10
+DECLARE @Trozo int = 250;               -- caracteres por trozo; <= limite de Results to Text
 
 /* ---------------------------------------------------------------------- */
 PRINT '===== 0. Servidor, base y permisos =====';
@@ -65,6 +69,8 @@ SELECT  @@SERVERNAME                                        AS Servidor,
         SYSDATETIME()                                       AS Corrido;
 
 /* ---------------------------------------------------------------------- */
+IF @SoloDefiniciones = 0
+BEGIN   -- secciones 1-9
 PRINT '===== 1. Inventario de objetos =====';
 SELECT  s.name                  AS Esquema,
         o.name                  AS Objeto,
@@ -273,6 +279,7 @@ JOIN    sys.objects o ON o.object_id = d.referencing_id
 WHERE   d.referenced_database_name IS NOT NULL
    OR   d.referenced_server_name   IS NOT NULL
 ORDER BY BaseRef, ObjetoRef, ObjetoLocal;
+END     -- secciones 1-9
 
 /* ---------------------------------------------------------------------- */
 IF @IncluirDefiniciones = 1
