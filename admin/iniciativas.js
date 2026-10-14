@@ -596,6 +596,12 @@ window.Iniciativas = (function () {
         this.crearAdmin.fijarProblemas(
           function () { return reg && reg.registro ? reg.registro.iniciativas : null; },
           function (folio) { self.mostrarVista('iniciativas'); reg.modificar(folio); });
+        // Clasificacion, Agrupacion y Estado del alta: los valores que ya
+        // existen, del mismo registro.
+        this.crearAdmin.fijarValores(function () {
+          var r = reg && reg.registro;
+          return r ? { estados: r.estadosProblem, tiposIniciativa: r.valoresTipoIniciativa, tiposAgrupado: r.valoresTipoAgrupado } : null;
+        });
       }
       if (DUENOS_VISIBLES && window.CategoriasDuenos) this.duenos = new window.CategoriasDuenos.VistaDuenos(this.doc);
       if (this.$('cdSeccion')) this.$('cdSeccion').hidden = !DUENOS_VISIBLES;

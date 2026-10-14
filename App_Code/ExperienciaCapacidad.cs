@@ -53,6 +53,13 @@ public static partial class ExperienciaQueries
         return EsActiva(estado) && EsAgrupador(agrupador);
     }
 
+    // Estado en ESTADOS_ACTIVOS (la mitad "viva" de ConsumeCapacidad). Lo
+    // usa la gestion de ADM para saber si una iniciativa queda viva.
+    public static bool EstadoVivo(string estado)
+    {
+        return EsActiva(estado);
+    }
+
     private static List<CapacidadCategoria.Compromiso> Compromisos(List<Detalle> detalle)
     {
         var salida = new List<CapacidadCategoria.Compromiso>();

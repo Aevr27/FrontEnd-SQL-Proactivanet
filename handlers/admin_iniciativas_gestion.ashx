@@ -5,17 +5,27 @@
 // no esta habilitada (PersistenciaGestionAdmin, App_Code/GestionIniciativaAdmin.cs).
 //
 //   POST handlers/admin_iniciativas_gestion.ashx   (multipart/form-data)
-//     accion=crear      tipo, po, so, titulo, descripcion, observaciones,
-//                       pares cat_ruta / cat_pct (cero o mas categorias,
-//                       cada una con su % en %) y el archivo "rca" (se mira
-//                       que llego; no se guarda). La volumetria no se
-//                       captura: es calculada (admin_iniciativas_volumetria.ashx).
+//     accion=crear      tipo (prefijo), tipo_iniciativa, tipo_agrupado,
+//                       estado (declarados: no se derivan del prefijo),
+//                       f_entrega_analisis (aaaa-mm-dd; vacio = hoy), po,
+//                       so, titulo, descripcion, observaciones, pares
+//                       cat_ruta / cat_pct (cero o mas categorias, cada una
+//                       con su % en %) y el archivo "rca" (se mira que
+//                       llego; no se guarda). La volumetria no se captura:
+//                       es calculada (admin_iniciativas_volumetria.ashx).
 //     accion=modificar  folio (identifica; nunca cambia), titulo,
 //                       descripcion, observaciones, f_analisis, f_solucion,
 //                       f_cierre, estado, subestado (cada uno solo si se
 //                       envia), pares pct_categoria / pct_valor (las YA
-//                       ligadas), pares agregar_categoria / agregar_pct y
-//                       quitar_categoria (repetible)
+//                       ligadas; pct_tipo_agrupado paralelo y opcional:
+//                       declara la agrupacion de una ligada que no la
+//                       tiene), agregar_categoria / agregar_pct /
+//                       agregar_tipo_iniciativa / agregar_tipo_agrupado
+//                       (paralelos; tipos obligatorios), pares
+//                       fcat_categoria / fcat_analisis (fecha de analisis
+//                       de una ligada: la propia, o la de la iniciativa si
+//                       la categoria la hereda) y quitar_categoria
+//                       (repetible)
 //
 //   501  valida: { "valida": true, "guardada": false, "plan" (lo que se
 //                  guardaria: fechas del alta, de cada categoria ligada y
@@ -37,9 +47,10 @@
 //
 // HOY SOLO LECTURA: PersistenciaGestionAdmin.Habilitada = const false, asi
 // que la rama 4 (EscritorGestionAdminSql -> adm.usp_GestionAdmin_*, de
-// sql/18) nunca corre. Con ella activa: 200 { guardada: true, codigo };
-// 409 { error, numero, tipo: TopeExcedido | CategoriaRepetida |
-// AdministradaPorExcel | EscrituraRechazada } si el procedimiento rechaza.
+// sql/18) nunca corre. Con ella activa: 200 { guardada: true, codigo } (el
+// Codigo solo existe si la base confirmo el alta); 409 { error, numero,
+// tipo: TopeExcedido | CategoriaRepetida | DatoInvalido | CodigoNoEmitido |
+// EscrituraRechazada } si el procedimiento rechaza (nada se guarda).
 
 using System;
 using System.Collections.Generic;
@@ -111,7 +122,7 @@ public class AdminIniciativasGestion : IHttpHandler
 
             // 4) Escritura: SOLO con la persistencia activa (hoy const false,
             //    PersistenciaGestionAdmin) y sin pendientes. Depende de
-            //    sql/18 y sql/19 aplicadas: sin aprobar.
+            //    sql/18 aplicada y del cargador del Excel retirado: sin aprobar.
             if (PersistenciaGestionAdmin.Activa() && pendientes.Count == 0)
             {
                 var id = IdentidadWindows.DesdeContexto(context);
@@ -119,9 +130,7 @@ public class AdminIniciativasGestion : IHttpHandler
                     return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
                 try
                 {
-                    // Un alta siempre trae pendientes (tipos / estado sin
-                    // regla verificada): esta rama hoy solo puede ser Modificar.
-                    salida["codigo"] = servicio.Guardar(planCrear, planMod, null, id.Original);
+                    salida["codigo"] = servicio.Guardar(planCrear, planMod, id.Original);
                 }
                 catch (ErrorEscrituraGestionAdmin ex)
                 {
@@ -131,8 +140,7 @@ public class AdminIniciativasGestion : IHttpHandler
                     return new Dictionary<string, object>
                     {
                         { "error", ex.Message }, { "numero", ex.Numero },
-                        { "tipo", ex.EsTope ? "TopeExcedido" : ex.EsRepetida ? "CategoriaRepetida"
-                                  : ex.EsDelExcel ? "AdministradaPorExcel" : "EscrituraRechazada" },
+                        { "tipo", ex.Tipo },
                         { "guardada", false },
                     };
                 }

@@ -3,23 +3,31 @@
 // ValidadorGestionAdmin. Puro: sin SQL, sin IIS. Lo usa:
 //   - el handler (admin_iniciativas_gestion.ashx), para mostrar en la
 //     respuesta 501 lo que se habria guardado (nada se guarda);
-//   - EscritorGestionAdminSql (App_Code/EscritorGestionAdmin.cs), que NO esta
-//     conectado al handler: depende de objetos de BD sin aprobar
-//     (sql/18_gestion_admin_persistencia.sql).
+//   - EscritorGestionAdminSql (App_Code/EscritorGestionAdmin.cs), que el
+//     handler solo llama con PersistenciaGestionAdmin.Activa() (hoy false):
+//     depende de sql/18_gestion_admin_persistencia.sql, sin aplicar en la VM.
 //
 // FECHAS (regla del negocio: analisis = 15 dias)
 //   Alta       FechaCreacion = hoy en Mexico; FechaAnalisis = hoy + 15 dias
-//              naturales. Las categorias iniciales COMPARTEN esas fechas: no
-//              llevan fecha propia (NULL en la propuesta = "las del
-//              problema"), asi que un cambio posterior de la FechaAnalisis
-//              del problema las sigue moviendo juntas.
+//              naturales; FechaEntregaAnalisis = la del formulario (por
+//              omision hoy). Las categorias iniciales HEREDAN las fechas de
+//              la iniciativa: no llevan fecha propia (NULL), asi que un
+//              cambio posterior de la FechaAnalisis de la iniciativa las
+//              sigue moviendo juntas.
 //   Ligar      una categoria agregada despues lleva SU fecha de creacion (hoy)
-//              y SU fecha de analisis (hoy + 15). Las del problema y las de
-//              las otras categorias no se tocan.
+//              y SU fecha de analisis (hoy + 15). Las de la iniciativa y las
+//              de las otras categorias no se tocan.
+//   Editar     la fecha de analisis de una categoria con fecha PROPIA se
+//              cambia en ella (FechasCategoria); la de una categoria que
+//              HEREDA es la de la iniciativa: el cambio va a f_analisis.
 //   Convencion medida en el Excel V3.1 (DBProblems, 530 filas sin cambios
 //   de fecha): FechaAnalisis - FechaCreacion = 15 dias es la diferencia mas
 //   comun (92), pero no la unica (22: 60, 21: 49, 14: 28). Se aplica la regla
 //   de 15 dias naturales; el historico no la sigue siempre.
+//
+// TIPOS: TipoIniciativa, TipoAgrupado y Estado del alta, y los tipos de cada
+// categoria que se liga, son los DECLARADOS en el formulario (validados
+// contra los valores que ya existen). Nunca se derivan del prefijo.
 //
 // INMUTABLES al modificar: Codigo (solo identifica) y FechaCreacion.
 //
@@ -57,7 +65,10 @@ public sealed class CategoriaPlan
     public string Ruta;
     public decimal? Pct;                // fraccion, como PctDisminucion
     public decimal? PctAnterior;        // solo cambio de %
-    // Fechas PROPIAS de la categoria. null = comparte las del problema.
+    // Declarados. En una ligada: null = no cambia.
+    public string TipoIniciativa;
+    public string TipoAgrupado;
+    // Fechas PROPIAS de la categoria. null = hereda las de la iniciativa.
     public DateTime? FechaCreacion;
     public DateTime? FechaAnalisis;
 
@@ -67,6 +78,8 @@ public sealed class CategoriaPlan
         {
             { "categoria", Ruta },
             { "pct", Pct },
+            { "tipo_iniciativa", TipoIniciativa },
+            { "tipo_agrupado", TipoAgrupado },
             { "fechas_propias", FechaCreacion != null },
             { "f_creacion", FechasGestionAdmin.Iso(FechaCreacion) },
             { "f_analisis", FechasGestionAdmin.Iso(FechaAnalisis) },
@@ -74,12 +87,32 @@ public sealed class CategoriaPlan
     }
 }
 
+// Nueva fecha de analisis PROPIA de una categoria ya ligada.
+public sealed class FechaCategoriaPlan
+{
+    public string Ruta;
+    public DateTime FechaAnalisis;
+    public DateTime? Anterior;
+
+    public Dictionary<string, object> ComoJson()
+    {
+        return new Dictionary<string, object>
+        {
+            { "categoria", Ruta },
+            { "f_analisis", FechasGestionAdmin.Iso(FechaAnalisis) },
+            { "anterior", FechasGestionAdmin.Iso(Anterior) },
+        };
+    }
+}
+
 public sealed class PlanCrearAdmin
 {
     public string Prefijo;
+    public string TipoIniciativa, TipoAgrupado, Estado;
     public string Titulo, Descripcion, Observaciones;
     public DateTime FechaCreacion;
     public DateTime FechaAnalisis;
+    public DateTime FechaEntregaAnalisis;
     public List<CategoriaPlan> Categorias = new List<CategoriaPlan>();
     // Lo que el plan NO puede decidir con lo verificado: el escritor no
     // debe correr mientras haya alguno.
@@ -94,8 +127,12 @@ public sealed class PlanCrearAdmin
             { "accion", "crear" },
             { "codigo", null },
             { "prefijo", Prefijo },
+            { "tipo_iniciativa", TipoIniciativa },
+            { "tipo_agrupado", TipoAgrupado },
+            { "estado", Estado },
             { "f_creacion", FechasGestionAdmin.Iso(FechaCreacion) },
             { "f_analisis", FechasGestionAdmin.Iso(FechaAnalisis) },
+            { "f_entrega_analisis", FechasGestionAdmin.Iso(FechaEntregaAnalisis) },
             { "dias_analisis", FechasGestionAdmin.DiasAnalisis },
             { "categorias", cats },
             { "pendientes", Pendientes },
@@ -108,16 +145,12 @@ public sealed class PlanModificarAdmin
     public string Codigo;
     // El dia del guardado (Mexico): de el salen las fechas de lo que se liga.
     public DateTime Hoy;
-    // true = registrar el Codigo en adm.ProblemaAdmin (TOMADO) si hoy lo
-    // administra el Excel; desde ahi la carga del Excel ya no lo pisa. Nadie
-    // lo pone en true todavia: es una decision de negocio sin tomar. Con
-    // false, modificar un codigo del Excel se rechaza (51009).
-    public bool TomarDelExcel;
     // Campos de dbo.Problem que cambian: clave del formulario -> valor nuevo
     // ("" = se vacia). Solo los que de verdad cambian.
     public Dictionary<string, string> Problem = new Dictionary<string, string>(StringComparer.Ordinal);
     public List<CategoriaPlan> Pcts = new List<CategoriaPlan>();
     public List<CategoriaPlan> Agregar = new List<CategoriaPlan>();
+    public List<FechaCategoriaPlan> FechasCategoria = new List<FechaCategoriaPlan>();
     public List<string> Quitar = new List<string>();
     public List<string> Pendientes = new List<string>();
 
@@ -127,16 +160,18 @@ public sealed class PlanModificarAdmin
         foreach (var c in Pcts) pcts.Add(c.ComoJson());
         var agregar = new List<object>();
         foreach (var c in Agregar) agregar.Add(c.ComoJson());
+        var fechas = new List<object>();
+        foreach (var f in FechasCategoria) fechas.Add(f.ComoJson());
         var problem = new Dictionary<string, object>();
         foreach (var kv in Problem) problem[kv.Key] = kv.Value;
         return new Dictionary<string, object>
         {
             { "accion", "modificar" },
             { "codigo", Codigo },
-            { "tomar_del_excel", TomarDelExcel },
             { "problem", problem },
             { "pcts", pcts },
             { "agregar", agregar },
+            { "fechas_categoria", fechas },
             { "quitar", Quitar },
             { "dias_analisis", FechasGestionAdmin.DiasAnalisis },
             { "pendientes", Pendientes },
@@ -155,13 +190,8 @@ public static class PlanificadorGestionAdmin
         PeticionModificarAdmin.CFAnalisis, PeticionModificarAdmin.CFSolucion, PeticionModificarAdmin.CFCierre,
     };
 
-    public const string PendienteTipos =
-        "Tipo de iniciativa / TipoAgrupado de un alta: no hay regla verificada que los derive del prefijo " +
-        "(sin TipoAgrupado de AGRUPADORES la fila no consume capacidad).";
-    public const string PendienteEstado =
-        "Estado inicial de un alta: no verificado (se supone En Análisis por la fecha de análisis).";
     public const string PendienteQuitar =
-        "Quitar categorías: falta decidir borrado físico o marca propia (VigenteEnOrigen es del cargador).";
+        "Quitar categorías: falta decidir borrado físico o marca propia (VigenteEnOrigen era del cargador).";
 
     private static string Limpio(string s)
     {
@@ -179,20 +209,28 @@ public static class PlanificadorGestionAdmin
         var plan = new PlanCrearAdmin
         {
             Prefijo = Limpio(p.Tipo),
+            TipoIniciativa = Limpio(p.TipoIniciativa),
+            TipoAgrupado = Limpio(p.TipoAgrupado),
+            Estado = Limpio(p.Estado),
             Titulo = p.Titulo, Descripcion = p.Descripcion, Observaciones = p.Observaciones,
             FechaCreacion = hoy.Date,
             FechaAnalisis = FechasGestionAdmin.Analisis(hoy),
+            FechaEntregaAnalisis = FechasGestionAdmin.DeIso(Limpio(p.FEntregaAnalisis)) ?? hoy.Date,
         };
         foreach (var c in p.Categorias)
         {
             var ruta = Limpio(c.Categoria);
             if (ruta == null) continue;
             var t = Limpio(c.Texto);
-            // Iniciales: SIN fechas propias -> comparten las del problema.
-            plan.Categorias.Add(new CategoriaPlan { Ruta = ruta, Pct = t == null ? null : ValidadorIniciativa.Fraccion(t) });
+            // Iniciales: SIN fechas propias -> heredan las de la iniciativa;
+            // sus tipos son los del alta.
+            plan.Categorias.Add(new CategoriaPlan
+            {
+                Ruta = ruta, Pct = t == null ? null : ValidadorIniciativa.Fraccion(t),
+                TipoIniciativa = plan.TipoIniciativa, TipoAgrupado = plan.TipoAgrupado,
+            });
         }
-        plan.Pendientes.Add(PendienteTipos);
-        plan.Pendientes.Add(PendienteEstado);
+        // Ya no hay pendientes de tipos ni de estado: se declaran y se validan.
         return plan;
     }
 
@@ -206,13 +244,16 @@ public static class PlanificadorGestionAdmin
         // El codigo es el de la iniciativa leida, nunca uno que mande el cliente.
         var plan = new PlanModificarAdmin { Codigo = actual.Folio, Hoy = hoy.Date };
 
-        // Solo lo que el validador registro como cambio: misma decision.
-        var cambiados = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var c in r.Cambios) cambiados.Add(c["clave"] as string);
+        // Solo lo que el validador registro como cambio, con SU valor nuevo:
+        // misma decision (incluye f_analisis cuando llego como la fecha de
+        // una categoria que hereda la de la iniciativa).
+        var cambiados = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var c in r.Cambios) cambiados[c["clave"] as string ?? ""] = c["nuevo"] as string;
         foreach (var campo in CamposProblem)
         {
-            if (!cambiados.Contains(campo)) continue;
-            plan.Problem[campo] = Limpio(ValorDe(p, campo)) ?? "";
+            string nuevo;
+            if (!cambiados.TryGetValue(campo, out nuevo)) continue;
+            plan.Problem[campo] = Limpio(nuevo) ?? "";
         }
 
         foreach (var x in p.Pcts)
@@ -222,8 +263,10 @@ public static class PlanificadorGestionAdmin
             if (ligada == null) continue;
             var t = Limpio(x.Texto);
             var nuevo = t == null ? null : ValidadorIniciativa.Fraccion(t);
-            if (nuevo == ligada.Pct) continue;
-            plan.Pcts.Add(new CategoriaPlan { Ruta = ligada.Ruta, Pct = nuevo, PctAnterior = ligada.Pct });
+            // Agrupacion declarada solo para una ligada que no la tiene.
+            var agrup = Limpio(ligada.Agrup) == null ? Limpio(x.TipoAgrupado) : null;
+            if (nuevo == ligada.Pct && agrup == null) continue;
+            plan.Pcts.Add(new CategoriaPlan { Ruta = ligada.Ruta, Pct = nuevo, PctAnterior = ligada.Pct, TipoAgrupado = agrup });
         }
 
         foreach (var x in p.Agregar)
@@ -235,10 +278,25 @@ public static class PlanificadorGestionAdmin
             {
                 Ruta = ruta,
                 Pct = t == null ? null : ValidadorIniciativa.Fraccion(t),
+                TipoIniciativa = Limpio(x.TipoIniciativa),
+                TipoAgrupado = Limpio(x.TipoAgrupado),
                 // Ligada despues: fechas PROPIAS, desde el dia en que se liga.
                 FechaCreacion = hoy.Date,
                 FechaAnalisis = FechasGestionAdmin.Analisis(hoy),
             });
+        }
+
+        // Fechas de analisis por categoria: las PROPIAS se cambian en la
+        // categoria; las que heredan ya las convirtio el validador en un
+        // cambio de f_analisis (de la iniciativa), que va arriba.
+        foreach (var f in p.FechasCategoria)
+        {
+            var ligada = actual.Ligada(Limpio(f.Categoria));
+            var nueva = FechasGestionAdmin.DeIso(Limpio(f.Texto));
+            if (ligada == null || nueva == null || ligada.FAnalisisPropia == null) continue;
+            var anterior = FechasGestionAdmin.DeIso(ligada.FAnalisisPropia);
+            if (anterior == nueva) continue;
+            plan.FechasCategoria.Add(new FechaCategoriaPlan { Ruta = ligada.Ruta, FechaAnalisis = nueva.Value, Anterior = anterior });
         }
 
         foreach (var q in p.Quitar)
@@ -248,18 +306,5 @@ public static class PlanificadorGestionAdmin
         }
         if (plan.Quitar.Count > 0) plan.Pendientes.Add(PendienteQuitar);
         return plan;
-    }
-
-    private static string ValorDe(PeticionModificarAdmin p, string campo)
-    {
-        if (campo == SolicitudIniciativa.CTitulo) return p.Titulo;
-        if (campo == SolicitudIniciativa.CDescripcion) return p.Descripcion;
-        if (campo == SolicitudIniciativa.CObservaciones) return p.Observaciones;
-        if (campo == PeticionModificarAdmin.CEstado) return p.Estado;
-        if (campo == PeticionModificarAdmin.CSubestado) return p.Subestado;
-        if (campo == PeticionModificarAdmin.CFAnalisis) return p.FAnalisis;
-        if (campo == PeticionModificarAdmin.CFSolucion) return p.FSolucion;
-        if (campo == PeticionModificarAdmin.CFCierre) return p.FCierre;
-        return null;
     }
 }

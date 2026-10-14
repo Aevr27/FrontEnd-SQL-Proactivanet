@@ -10,7 +10,14 @@
 //
 // Aqui solo se lee la tabla completa (unos miles de filas) en orden de
 // IdEvento y se agrupa por Codigo; RegistroIniciativas cuelga la lista de
-// cada folio en i["historial"]. Los rotulos (Linea base, Fecha inicial,
+// cada folio en i["historial"] (eventos de la INICIATIVA, Categoria NULL) y
+// en i["historial_categorias"] (eventos de la fecha de analisis PROPIA de
+// una categoria, con su "categoria"; sql/18 + trg_ProblemCategoria_FechaEvento).
+// Las dos listas van separadas a proposito: el "Cambio n" de la iniciativa
+// no cambia por los movimientos de sus categorias. Sin la columna Categoria
+// (sql/18 sin aplicar) todo es de la iniciativa, como antes. En un evento de
+// categoria, anterior = null es el valor crudo: la categoria heredaba la
+// fecha de la iniciativa (el navegador lo explica; no se rellena aqui). Los rotulos (Linea base, Fecha inicial,
 // Cambio n...) y la regla de conteo (en Cierre solo cuentan las extensiones)
 // los pone el navegador: admin/registro-iniciativas.js, htmlHistorial.
 // Las filas 'B' viajan igual aunque el panel no las pinta: de ellas salen
@@ -25,7 +32,7 @@
 // del sitio), Estado lo dice y el resto del registro sale igual: el
 // historial es un dato de mas, no puede tumbar la pagina.
 //
-// SOLO LECTURA: un SELECT sobre dbo.ProblemFechaEvento.
+// SOLO LECTURA: un SELECT sobre dbo.ProblemFechaEvento (y COL_LENGTH).
 
 using System;
 using System.Collections.Generic;
@@ -41,6 +48,8 @@ public sealed class HistorialFechas
 
     private readonly Dictionary<string, List<object>> _porCodigo =
         new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<object>> _categoriasPorCodigo =
+        new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
 
     public string Estado { get; private set; }
     // Inicio de la captura viva, ya en zona de presentacion (dd/MM/yyyy), o null.
@@ -48,10 +57,18 @@ public sealed class HistorialFechas
 
     private HistorialFechas(string estado) { Estado = estado; }
 
+    // Eventos de la iniciativa (Categoria NULL).
     public List<object> Para(string codigo)
     {
         List<object> l;
         return codigo != null && _porCodigo.TryGetValue(codigo, out l) ? l : new List<object>();
+    }
+
+    // Eventos de las fechas propias de sus categorias, en orden de IdEvento.
+    public List<object> CategoriasPara(string codigo)
+    {
+        List<object> l;
+        return codigo != null && _categoriasPorCodigo.TryGetValue(codigo, out l) ? l : new List<object>();
     }
 
     public static HistorialFechas Leer(SqlConnection cn)
@@ -65,10 +82,16 @@ public sealed class HistorialFechas
                     return new HistorialFechas(ESTADO_SIN_TABLA);
             }
 
+            bool conCategoria;
+            using (var cmd = new SqlCommand(
+                "SELECT CASE WHEN COL_LENGTH(N'dbo.ProblemFechaEvento', N'Categoria') IS NULL THEN 0 ELSE 1 END", cn))
+                conCategoria = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+
             var filas = new List<Evento>();
             using (var cmd = new SqlCommand(
                 "SELECT IdEvento, Codigo, Campo, FechaAnterior, FechaNueva, Operacion, Origen, " +
-                "       Usuario, SolicitudId, FechaRegistro " +
+                "       Usuario, SolicitudId, FechaRegistro, " +
+                (conCategoria ? "Categoria " : "CONVERT(nvarchar(450), NULL) ") +
                 "FROM dbo.ProblemFechaEvento ORDER BY Codigo, IdEvento", cn))
             {
                 cmd.CommandType = CommandType.Text;
@@ -88,6 +111,7 @@ public sealed class HistorialFechas
                             Usuario = rd.IsDBNull(7) ? null : rd.GetString(7),
                             Solicitud = rd.IsDBNull(8) ? (int?)null : Convert.ToInt32(rd.GetValue(8), CultureInfo.InvariantCulture),
                             RegistroUtc = rd.GetDateTime(9),
+                            Categoria = rd.IsDBNull(10) ? null : rd.GetString(10),
                         });
                     }
                 }
@@ -109,7 +133,7 @@ public sealed class HistorialFechas
 
         DateTime? inicio = null;
         foreach (var e in filas)
-            if (e.Operacion == "B" && (!inicio.HasValue || e.RegistroUtc < inicio.Value))
+            if (e.Operacion == "B" && e.Categoria == null && (!inicio.HasValue || e.RegistroUtc < inicio.Value))
                 inicio = e.RegistroUtc;
         if (inicio.HasValue)
             h.Desde = DashboardDataInfo.UtcAPresentacion(inicio.Value).ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
@@ -117,11 +141,12 @@ public sealed class HistorialFechas
         foreach (var e in filas)
         {
             if (string.IsNullOrEmpty(e.Codigo)) continue;
+            var destino = e.Categoria == null ? h._porCodigo : h._categoriasPorCodigo;
             List<object> lista;
-            if (!h._porCodigo.TryGetValue(e.Codigo, out lista))
+            if (!destino.TryGetValue(e.Codigo, out lista))
             {
                 lista = new List<object>();
-                h._porCodigo[e.Codigo] = lista;
+                destino[e.Codigo] = lista;
             }
 
             var d = new Dictionary<string, object>();
@@ -136,7 +161,8 @@ public sealed class HistorialFechas
             d["solicitud"] = e.Origen == "ADMIN" ? (object)e.Solicitud : null;
             d["fecha"] = DashboardDataInfo.UtcAPresentacion(e.RegistroUtc)
                              .ToString("dd/MM/yyyy HH:mm", CultureInfo.InvariantCulture);
-            d["reconstruido"] = e.Operacion == "U" && inicio.HasValue && e.RegistroUtc < inicio.Value;
+            d["reconstruido"] = e.Categoria == null && e.Operacion == "U" && inicio.HasValue && e.RegistroUtc < inicio.Value;
+            if (e.Categoria != null) d["categoria"] = e.Categoria;
             lista.Add(d);
         }
         return h;
@@ -159,5 +185,6 @@ public sealed class HistorialFechas
         public string Usuario;
         public int? Solicitud;
         public DateTime RegistroUtc;
+        public string Categoria;   // null = evento de la iniciativa
     }
 }

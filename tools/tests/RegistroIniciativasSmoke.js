@@ -751,6 +751,7 @@ pruebas.push(function () {
         [/Registro automático desde el 09\/10\/2026/.test(h), /Reconstruido de los comentarios del Excel/.test(h),
          /en Cierre solo cuentan las extensiones/.test(h)]);
       Check('S14 sigue plegado', true, /id="regHistCuerpo" hidden>/.test(h));
+      Check('S14 sin eventos de categoria no hay seccion por categoria', false, /Fechas de análisis por categoría/.test(h));
 
       // Sin filas: el texto depende de historial_estado.
       var estados = ['sin_tabla', 'error', 'ok'].map(function (e) {
@@ -1030,6 +1031,35 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
+// S16) Historial por categoria (historial_categorias, sql/18): seccion
+// aparte; la N del encabezado sigue siendo la de la iniciativa.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var d = JSON.parse(JSON.stringify(DATOS));
+  d.historial_estado = 'ok';
+  d.historial_desde = '09/10/2026';
+  d.iniciativas[0].historial = [
+    { id: 1, campo: 'FechaAnalisis', anterior: '2026-10-28', nuevo: '2026-11-10', operacion: 'U', origen: 'ADMIN',
+      usuario: 'SORIANA\adm', fecha: '03/11/2026 09:00', reconstruido: false }];
+  d.iniciativas[0].historial_categorias = [
+    { id: 6, categoria: '/A/Cat 2', campo: 'FechaAnalisis', anterior: null, nuevo: '2026-11-17', operacion: 'I', origen: 'ADMIN',
+      usuario: 'SORIANA\adm', fecha: '02/11/2026 10:00', reconstruido: false },
+    { id: 7, categoria: '/A/Cat 2', campo: 'FechaAnalisis', anterior: '2026-11-17', nuevo: '2026-11-30', operacion: 'U', origen: 'ADMIN',
+      usuario: 'SORIANA\adm', fecha: '03/11/2026 10:00', reconstruido: false }];
+  var p = Pagina(ok(d));
+  return esperar().then(function () {
+    clicFolio(p, 'PRB 2026-000001');
+    var h = p.sel('regDetCuerpo').innerHTML;
+    Check('S16 N del encabezado: solo la iniciativa (1), aunque haya cambios de categoria', true, /Historial de cambios \(1\)/.test(h));
+    Check('S16 seccion por categoria con su propio conteo y la categoria', [true, true],
+      [/Fechas de análisis por categoría <span class="ini-sub">1 cambio<\/span>/.test(h), /<td>\/A\/Cat 2<\/td>/.test(h)]);
+    Check('S16 anterior null se explica (heredaba), no se rellena; el cambio cuenta como Cambio 1', [true, true],
+      [/<td>Fecha propia inicial<\/td><td><span class="ini-origen derivado">Heredaba la de la iniciativa<\/span><\/td><td>17\/11\/2026<\/td>/.test(h),
+       /<td><b>Cambio 1<\/b><\/td><td>17\/11\/2026<\/td><td>30\/11\/2026<\/td>/.test(h)]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // HF) Rotulos del historial de fechas (etiquetarHistorial)
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
@@ -1050,6 +1080,13 @@ pruebas.push(function () {
          u('FechaCierre', '2026-03-20', '2026-05-01')]));
   Check('HF4 fila sin operacion o vacia: — y no cuenta', ['—', '—'], rot([{ campo: 'FechaCierre' }, null]));
   Check('HF5 sin lista: vacio', 0, R.etiquetarHistorial(undefined).length);
+  function c(cat, op, a, n) { return { categoria: cat, campo: 'FechaAnalisis', anterior: a, nuevo: n, operacion: op }; }
+  Check('HF6 categorias: n corre por categoria y campo; la primera fecha propia (anterior null = heredaba) no cuenta',
+    ['Fecha propia inicial', 'Fecha propia inicial', 'Cambio 1*', 'Cambio 1*', 'Cambio 2*', 'Fecha propia asignada'],
+    rot([c('/A', 'I', null, '2026-11-17'), c('/B', 'I', null, '2026-11-20'), c('/A', 'U', '2026-11-17', '2026-11-30'),
+         c('/B', 'U', '2026-11-20', '2026-11-25'), c('/A', 'U', '2026-11-30', '2026-12-05'), c('/C', 'U', null, '2026-12-01')]));
+  Check('HF7 la numeracion de la iniciativa no cambia por las categorias (listas separadas, misma regla)',
+    ['Cambio 1*', 'Cambio 2*'], rot([u('FechaAnalisis', '2026-01-01', '2026-02-01'), u('FechaAnalisis', '2026-02-01', '2026-03-01')]));
 });
 
 // ---------------------------------------------------------------------------

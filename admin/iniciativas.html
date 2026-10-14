@@ -594,11 +594,31 @@
         </div>
         <div class="ini-campo">
           <span class="ini-rotulo-derivado" id="rotAdmCodigo">Código</span>
-          <output id="admCodigo" aria-labelledby="rotAdmCodigo">Sin código: no se asigna todavía (regla pendiente)</output>
+          <output id="admCodigo" aria-labelledby="rotAdmCodigo">Se asigna al guardar (PPP AAAA-NNNNNN, el siguiente del prefijo y año)</output>
         </div>
         <div class="ini-campo">
           <label for="admTipo">Tipo de iniciativa <span class="ini-obligatorio">obligatorio</span></label>
           <select id="admTipo" disabled></select>
+        </div>
+        <!-- Declarados: nunca se derivan del prefijo. Opciones = valores que
+             ya existen (registro: valores_tipo_iniciativa / valores_tipo_agrupado
+             / estados_problem). -->
+        <div class="ini-campo">
+          <label for="admTipoIniciativa">Clasificación (TipoIniciativa) <span class="ini-obligatorio">obligatorio</span></label>
+          <select id="admTipoIniciativa" disabled></select>
+        </div>
+        <div class="ini-campo">
+          <label for="admTipoAgrupado">Agrupación (TipoAgrupado) <span class="ini-obligatorio">obligatorio</span></label>
+          <select id="admTipoAgrupado" disabled></select>
+        </div>
+        <div class="ini-campo">
+          <label for="admEstado">Estado inicial <span class="ini-obligatorio">obligatorio</span></label>
+          <select id="admEstado" disabled></select>
+        </div>
+        <div class="ini-campo">
+          <label for="admFEntrega">Entrega del análisis</label>
+          <input type="date" id="admFEntrega" aria-describedby="admFEntregaNota" disabled>
+          <small class="ini-motivo" id="admFEntregaNota">Cuando el análisis va al jefe de quien lo crea; por omisión hoy. Creación = hoy y análisis = hoy + 15 días los fija el servidor.</small>
         </div>
         <!-- PO / SO no se eligen aqui (dueños: flujo aparte); viajan vacios y
              el servidor los toma como opcionales. Las categorias van en 03. -->

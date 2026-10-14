@@ -61,17 +61,25 @@
      del codigo), sin elegir ninguna. Es el mismo en Crear, Modificar,
      Solicitar cambios y Seguimiento (registro-iniciativas.js).
 
-   FECHA DE ANALISIS POR CATEGORIA (calculada)
-   -------------------------------------------
+   FECHA DE ANALISIS POR CATEGORIA (sql/18_gestion_admin_persistencia.sql)
+   ---------------------------------------------------------------------
      Regla: el analisis dura FECHAS_GESTION.diasAnalisis (15) dias
      naturales. Una categoria NUEVA en "Modificar" (ligada despues) tiene SU
      fecha de creacion (el dia en que se liga) y SU fecha de analisis (ese
-     dia + 15): se muestran calculadas, no se capturan, y no se copian de
-     otra. Las ligadas muestran la del problema (dbo.Problem.FechaAnalisis),
-     "Del problema". Hoy dbo.ProblemCategoria NO tiene fecha por categoria:
-     la propuesta (sql/18_gestion_admin_persistencia.sql) la agrega y
-     el servidor la fija al guardar (PlanGestionAdmin.cs). No viaja ningun
-     campo de fecha de categoria: la decide el servidor, no el navegador.
+     dia + 15): se muestran calculadas y las fija el servidor al guardar.
+     Una ligada con fecha PROPIA (f_analisis_propia del registro) la edita
+     aqui (fcat_categoria / fcat_analisis). Una ligada que HEREDA (las
+     iniciales del alta) muestra la de la iniciativa, "De la iniciativa":
+     se cambia en "Fecha compromiso de Analisis", nunca como fecha propia.
+
+   TIPOS DECLARADOS
+   ----------------
+     El alta declara Clasificacion (TipoIniciativa), Agrupacion
+     (TipoAgrupado) y Estado inicial, y la fecha de entrega del analisis
+     (por omision hoy). Una categoria que se liga declara las suyas. Nada se
+     deriva del prefijo ni se copia de las hermanas. Las opciones son los
+     valores que ya existen (valores_tipo_iniciativa / valores_tipo_agrupado
+     / estados_problem del registro).
 
    PIEZAS
    ------
@@ -330,9 +338,18 @@ window.IniciativaAdmin = (function () {
   class CategoriasProblema {
     constructor(ligadas, rutas) {
       this.rutas = Array.isArray(rutas) ? rutas : [];
+      // true en Modificar: cada categoria nueva declara Clasificacion y
+      // Agrupacion (en el alta, las del alta).
+      this.tiposPorFila = false;
       this.filas = (ligadas || []).map(function (c) {
         var v = pctDe(c.pct_dism);
-        return { categoria: c.categoria || '', valor: v, original: v, ligada: true, quitada: false };
+        // agrup: la Agrupacion actual ('' = sin declarar; agrupNueva la
+        // declara). fPropia: fecha de analisis PROPIA ('' = hereda la de la
+        // iniciativa); fPropiaNueva es la editada.
+        var propia = typeof c.f_analisis_propia === 'string' ? c.f_analisis_propia : '';
+        return { categoria: c.categoria || '', valor: v, original: v, ligada: true, quitada: false,
+                 agrup: typeof c.agrup === 'string' ? c.agrup : '', agrupNueva: '',
+                 fPropia: propia, fPropiaNueva: propia };
       });
     }
 
@@ -364,7 +381,8 @@ window.IniciativaAdmin = (function () {
       // (hoy y hoy + 15), calculadas, nunca copiadas de otra fila.
       var hoy = FECHAS_GESTION.hoy();
       this.filas.push({ categoria: ruta, valor: '', original: null, ligada: false, quitada: false,
-                        fCreacion: hoy, fAnalisis: FECHAS_GESTION.analisisDesde(hoy) });
+                        fCreacion: hoy, fAnalisis: FECHAS_GESTION.analisisDesde(hoy),
+                        tipoIniciativa: '', tipoAgrupado: '' });
       return { ok: true, ruta: ruta, mensaje: '' };
     }
 
@@ -390,6 +408,27 @@ window.IniciativaAdmin = (function () {
       if (f && !f.quitada) f.valor = String(texto === null || texto === undefined ? '' : texto).trim();
     }
 
+    // campo: 'tipo_iniciativa' | 'tipo_agrupado'. En una nueva, sus tipos;
+    // en una ligada, solo declarar la Agrupacion si no la tiene.
+    capturarTipo(n, campo, texto) {
+      var f = this.filas[n], v = String(texto === null || texto === undefined ? '' : texto).trim();
+      if (!f || f.quitada) return false;
+      if (!f.ligada && campo === 'tipo_iniciativa') f.tipoIniciativa = v;
+      else if (!f.ligada && campo === 'tipo_agrupado') f.tipoAgrupado = v;
+      else if (f.ligada && !f.agrup && campo === 'tipo_agrupado') f.agrupNueva = v;
+      else return false;
+      return true;
+    }
+
+    // Solo una ligada con fecha PROPIA (las que heredan cambian con la de la
+    // iniciativa).
+    capturarFecha(n, texto) {
+      var f = this.filas[n];
+      if (!f || !f.ligada || f.quitada || !f.fPropia) return false;
+      f.fPropiaNueva = String(texto === null || texto === undefined ? '' : texto).trim();
+      return true;
+    }
+
     activas() { return this.filas.filter(function (f) { return !f.quitada; }); }
 
     // Las fechas calculadas de cada categoria nueva (solo para mostrar; no
@@ -400,10 +439,20 @@ window.IniciativaAdmin = (function () {
     }
 
     erroresFormato() {
-      var errores = [];
+      var errores = [], porFila = this.tiposPorFila;
       this.activas().forEach(function (f) {
         var e = FORMATO.pct(f.valor);
         if (e) errores.push({ clave: 'pct', mensaje: f.categoria + ': ' + e });
+        // En Modificar cada categoria nueva declara sus tipos; en el alta
+        // las iniciales llevan los del alta.
+        if (porFila && !f.ligada) {
+          if (!f.tipoIniciativa) errores.push({ clave: 'categorias', mensaje: f.categoria + ': elige su Clasificación.' });
+          if (!f.tipoAgrupado) errores.push({ clave: 'categorias', mensaje: f.categoria + ': elige su Agrupación.' });
+        }
+        if (f.ligada && f.fPropia && f.fPropiaNueva !== f.fPropia) {
+          var ef = f.fPropiaNueva === '' ? 'la fecha de análisis de una categoría no se puede vaciar.' : FORMATO.fecha(f.fPropiaNueva);
+          if (ef) errores.push({ clave: 'fechas_categoria', mensaje: f.categoria + ': ' + ef });
+        }
       });
       return errores;
     }
@@ -417,9 +466,18 @@ window.IniciativaAdmin = (function () {
         } else if (!f.ligada) {
           salida.push({ clave: 'agregar_categoria', rotulo: 'Agregar categoría', anterior: '',
                         nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%') +
+                          (f.tipoAgrupado ? ' · ' + f.tipoAgrupado : '') +
                           (f.fAnalisis ? ' · análisis ' + f.fAnalisis + ' (hoy + ' + FECHAS_GESTION.diasAnalisis + ' días)' : '') });
-        } else if (f.valor !== f.original) {
-          salida.push({ clave: 'pct', rotulo: '% Disminución · ' + f.categoria, anterior: f.original, nuevo: f.valor });
+        } else {
+          if (f.valor !== f.original) {
+            salida.push({ clave: 'pct', rotulo: '% Disminución · ' + f.categoria, anterior: f.original, nuevo: f.valor });
+          }
+          if (f.agrupNueva) {
+            salida.push({ clave: 'tipo_agrupado', rotulo: 'Agrupación · ' + f.categoria, anterior: '', nuevo: f.agrupNueva });
+          }
+          if (f.fPropia && f.fPropiaNueva !== f.fPropia) {
+            salida.push({ clave: 'fechas_categoria', rotulo: 'Fecha de análisis · ' + f.categoria, anterior: f.fPropia, nuevo: f.fPropiaNueva });
+          }
         }
       });
       return salida;
@@ -432,13 +490,22 @@ window.IniciativaAdmin = (function () {
       return pares;
     }
 
-    // Modificar: SOLO lo que cambio.
+    // Modificar: SOLO lo que cambio. Las listas paralelas (pct_* con
+    // pct_tipo_agrupado; agregar_* con sus tipos) llevan una entrada por
+    // fila, vacia si no aplica.
     paresModificar() {
       var pares = [];
       this.filas.forEach(function (f) {
         if (f.ligada && f.quitada) pares.push(['quitar_categoria', f.categoria]);
-        else if (!f.ligada) pares.push(['agregar_categoria', f.categoria], ['agregar_pct', f.valor]);
-        else if (f.valor !== f.original) pares.push(['pct_categoria', f.categoria], ['pct_valor', f.valor]);
+        else if (!f.ligada) {
+          pares.push(['agregar_categoria', f.categoria], ['agregar_pct', f.valor],
+                     ['agregar_tipo_iniciativa', f.tipoIniciativa || ''], ['agregar_tipo_agrupado', f.tipoAgrupado || '']);
+        } else {
+          if (f.valor !== f.original || f.agrupNueva) {
+            pares.push(['pct_categoria', f.categoria], ['pct_valor', f.valor], ['pct_tipo_agrupado', f.agrupNueva || '']);
+          }
+          if (f.fPropia && f.fPropiaNueva !== f.fPropia) pares.push(['fcat_categoria', f.categoria], ['fcat_analisis', f.fPropiaNueva]);
+        }
       });
       return pares;
     }
@@ -452,26 +519,53 @@ window.IniciativaAdmin = (function () {
   }
 
   // Tabla de categorias (Crear y Modificar). prefijo: de los ids/atributos.
-  // vol: VolumetriaCliente o null. fechas (solo Modificar): { f_analisis }
-  // del problema. Agrega la columna "Fecha de análisis": en una ligada, la
-  // del PROBLEMA (dbo.Problem.FechaAnalisis, compartida, solo lectura); en
-  // una nueva, la PROPIA calculada (dia en que se liga + 15), de solo
-  // lectura: la fija el servidor al guardar.
+  // vol: VolumetriaCliente o null. fechas (solo Modificar): { f_analisis
+  // de la iniciativa, tiposIniciativa, tiposAgrupado }. Agrega dos columnas:
+  //   Agrupacion        la de la ligada (o un selector si no tiene); en una
+  //                     nueva, Clasificacion y Agrupacion a elegir.
+  //   Fecha de analisis en una ligada que HEREDA, la de la iniciativa (se
+  //                     cambia en "Fecha compromiso de Analisis"); en una
+  //                     con fecha PROPIA, editable; en una nueva, la propia
+  //                     calculada (dia en que se liga + 15), que fija el
+  //                     servidor al guardar.
   function htmlCategorias(cats, vol, prefijo, fechas) {
     if (!cats.filas.length) return '<p class="ini-nota">Sin categorías todavía.</p>';
     function celdaFecha(f, n) {
+      if (f.quitada) return '—';
+      if (f.ligada && f.fPropia) {
+        return '<label class="ini-ed-pct"><span class="ini-sr">Fecha de análisis de ' + Escape.html(f.categoria) + '</span>' +
+          '<input type="date" data-' + prefijo + '-fcat="' + n + '" value="' + Escape.attr(f.fPropiaNueva) + '"></label>' +
+          ' <span class="ini-origen" title="dbo.ProblemCategoria.FechaAnalisisCategoria: se ligó después y tiene la suya">Propia</span>';
+      }
       if (f.ligada) {
         return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(fechas.f_analisis)) +
-          '</span> <span class="ini-origen derivado" title="dbo.Problem.FechaAnalisis: la comparten todas las categorías del problema">Del problema</span>';
+          '</span> <span class="ini-origen derivado" title="Hereda la de la iniciativa (dbo.Problem.FechaAnalisis): se cambia en Fecha compromiso de Análisis">De la iniciativa</span>';
       }
-      if (f.quitada) return '—';
       return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(f.fAnalisis)) + '</span>' +
         ' <span class="ini-origen derivado" title="Se liga el ' + Escape.attr(fechaCorta(f.fCreacion)) +
         ': análisis = ese día + ' + FECHAS_GESTION.diasAnalisis + ' días. La fija el servidor al guardar.">Calculada</span>';
     }
+    function opcionesTipo(lista, valor, atributo, rotulo) {
+      return '<label class="ini-ed-tipo"><span class="ini-sr">' + Escape.html(rotulo) + '</span>' +
+        '<select ' + atributo + '><option value="">— ' + Escape.html(rotulo) + ' —</option>' +
+        (lista || []).map(function (o) {
+          return '<option value="' + Escape.attr(o) + '"' + (o === valor ? ' selected' : '') + '>' + Escape.html(o) + '</option>';
+        }).join('') + '</select></label>';
+    }
+    function celdaTipo(f, n) {
+      if (f.quitada) return '—';
+      var attr = function (campo) { return 'data-' + prefijo + '-tipo="' + n + '|' + campo + '"'; };
+      if (!f.ligada) {
+        return opcionesTipo(fechas.tiposIniciativa, f.tipoIniciativa, attr('tipo_iniciativa'), 'Clasificación') + ' ' +
+          opcionesTipo(fechas.tiposAgrupado, f.tipoAgrupado, attr('tipo_agrupado'), 'Agrupación');
+      }
+      if (f.agrup) return Escape.html(f.agrup);
+      return opcionesTipo(fechas.tiposAgrupado, f.agrupNueva, attr('tipo_agrupado'), 'Agrupación') +
+        ' <span class="ini-origen" title="Sin agrupación no se puede revisar su tope: el servidor rechaza cambiar %, estado o categorías mientras siga vacía">Sin declarar</span>';
+    }
     return '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
       '<th scope="col">Volumetría <span class="ini-origen derivado">Calculada</span></th>' +
-      '<th scope="col">% Disminución</th>' + (fechas ? '<th scope="col">Fecha de análisis</th>' : '') +
+      '<th scope="col">% Disminución</th>' + (fechas ? '<th scope="col">Agrupación</th><th scope="col">Fecha de análisis</th>' : '') +
       '<th scope="col"><span class="ini-sr">Acción</span></th></tr></thead><tbody>' +
       cats.filas.map(function (f, n) {
         var estado = f.quitada ? '<span class="ini-cat-estado">Se quitará</span>'
@@ -486,7 +580,7 @@ window.IniciativaAdmin = (function () {
         return '<tr' + (f.quitada ? ' class="ini-cat-quitada"' : '') + '><td><span class="ini-cat-ruta">' +
           Escape.html(f.categoria) + '</span> ' + estado + '</td><td>' +
           (f.quitada ? '—' : htmlVolumetria(vol ? vol.estado(f.categoria) : null)) + '</td><td>' + pct + '</td>' +
-          (fechas ? '<td>' + celdaFecha(f, n) + '</td>' : '') + '<td>' + boton + '</td></tr>';
+          (fechas ? '<td>' + celdaTipo(f, n) + '</td><td>' + celdaFecha(f, n) + '</td>' : '') + '<td>' + boton + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
 
@@ -556,6 +650,9 @@ window.IniciativaAdmin = (function () {
       this.catalogo = catalogo;
       this.tipo = '';
       this.valores = { titulo: '', descripcion: '', observaciones: '' };
+      // Declarados (no se derivan del prefijo). La fecha de entrega del
+      // analisis empieza en hoy y ADM la puede cambiar.
+      this.declarados = { tipo_iniciativa: '', tipo_agrupado: '', estado: '', f_entrega_analisis: FECHAS_GESTION.hoy() };
       this.categorias = new CategoriasProblema([], BorradorAdmin.rutasDe(catalogo));
       this.rca = null;   // nombre del archivo elegido; no se sube
     }
@@ -578,6 +675,7 @@ window.IniciativaAdmin = (function () {
 
     capturar(clave, texto) {
       if (Object.prototype.hasOwnProperty.call(this.valores, clave)) this.valores[clave] = String(texto || '');
+      else if (Object.prototype.hasOwnProperty.call(this.declarados, clave)) this.declarados[clave] = String(texto || '').trim();
     }
 
     elegirRca(archivo) { this.rca = archivo && archivo.size > 0 ? String(archivo.name || 'archivo') : null; }
@@ -596,11 +694,23 @@ window.IniciativaAdmin = (function () {
       return lista.length === 1 ? lista[0] : '';
     }
 
-    // Lo unico que impide guardar (cuando se pueda): sin tipo no hay
-    // prefijo de codigo.
-    bloqueantes() { return this.tipo ? [] : [{ clave: 'tipo', mensaje: 'Elige el Tipo de iniciativa: define el prefijo del código.' }]; }
+    // Lo que impide guardar: sin tipo no hay prefijo de codigo; sin
+    // Clasificacion, Agrupacion y Estado el servidor rechaza el alta (no se
+    // derivan del prefijo).
+    bloqueantes() {
+      var d = this.declarados, b = [];
+      if (!this.tipo) b.push({ clave: 'tipo', mensaje: 'Elige el Tipo de iniciativa: define el prefijo del código.' });
+      if (!d.tipo_iniciativa) b.push({ clave: 'tipo_iniciativa', mensaje: 'Elige la Clasificación (TipoIniciativa).' });
+      if (!d.tipo_agrupado) b.push({ clave: 'tipo_agrupado', mensaje: 'Elige la Agrupación (TipoAgrupado).' });
+      if (!d.estado) b.push({ clave: 'estado', mensaje: 'Elige el Estado inicial.' });
+      return b;
+    }
 
-    erroresFormato() { return this.categorias.erroresFormato(); }
+    erroresFormato() {
+      var e = FORMATO.fecha(this.declarados.f_entrega_analisis);
+      return (e ? [{ clave: 'f_entrega_analisis', mensaje: 'Fecha de entrega del análisis: ' + e }] : [])
+        .concat(this.categorias.erroresFormato());
+    }
 
     datos() {
       var v = this.valores, cats = this.categorias.comoRegistro();
@@ -626,7 +736,10 @@ window.IniciativaAdmin = (function () {
     // vista. PO / SO ya no se eligen aqui: viajan vacios (opcionales).
     paraEnviar() {
       var v = this.valores;
+      var d = this.declarados;
       return [['accion', 'crear'], ['tipo', this.tipo], ['po', ''], ['so', ''],
+        ['tipo_iniciativa', d.tipo_iniciativa], ['tipo_agrupado', d.tipo_agrupado], ['estado', d.estado],
+        ['f_entrega_analisis', d.f_entrega_analisis],
         ['titulo', v.titulo], ['descripcion', v.descripcion], ['observaciones', v.observaciones]]
         .concat(this.categorias.paresCrear());
     }
@@ -743,7 +856,9 @@ window.IniciativaAdmin = (function () {
       this.iniciativa = iniciativa;
       this.listas = {
         estados: Array.isArray(opciones.estados) ? opciones.estados : [],
-        subestados: Array.isArray(opciones.subestados) ? opciones.subestados : []
+        subestados: Array.isArray(opciones.subestados) ? opciones.subestados : [],
+        tiposIniciativa: Array.isArray(opciones.tiposIniciativa) ? opciones.tiposIniciativa : [],
+        tiposAgrupado: Array.isArray(opciones.tiposAgrupado) ? opciones.tiposAgrupado : []
       };
       // El Titulo editable es el del Problem (titulo_problem); `titulo`
       // puede ser el TituloIniciativa, cuya columna no se escribe aqui.
@@ -762,6 +877,7 @@ window.IniciativaAdmin = (function () {
       var self = this;
       CAMPOS_PROBLEMA.forEach(function (k) { self.valores[k] = self.original[k]; });
       this.categorias = new CategoriasProblema(iniciativa.categorias || [], opciones.rutas);
+      this.categorias.tiposPorFila = true;
       // 'cargando' | 'error' | 'ok' del catalogo de rutas (para el aviso).
       this.rutasEstado = opciones.rutasEstado || (Array.isArray(opciones.rutas) && opciones.rutas.length ? 'ok' : '');
       // Compatibilidad: valores.pct son las filas de categorias.
@@ -780,6 +896,10 @@ window.IniciativaAdmin = (function () {
     }
 
     capturarPct(indice, texto) { this.categorias.capturarPct(indice, texto); }
+
+    capturarTipo(indice, campo, texto) { return this.categorias.capturarTipo(indice, campo, texto); }
+
+    capturarFechaCategoria(indice, texto) { return this.categorias.capturarFecha(indice, texto); }
 
     // -> [{ clave, rotulo, anterior, nuevo }]
     cambios() {
@@ -939,13 +1059,15 @@ window.IniciativaAdmin = (function () {
           Selector.html('regEdCatBuscar', rutas, '') +
           ' <button type="button" class="btn linea chico" data-accion="edicion-cat-agregar">Agregar</button></div>'
       : htmlSinCatalogo(ed.rutasEstado);
-    return htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis }) + agregar +
+    return htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis,
+        tiposIniciativa: ed.listas.tiposIniciativa, tiposAgrupado: ed.listas.tiposAgrupado }) + agregar +
       '<div class="ini-cambio-msg" id="regEdCatMsg" role="status" aria-live="polite"></div>' +
       '<small class="ini-sub">Destino propuesto: dbo.ProblemCategoria. Quitar = la fila deja de estar vigente; no se borra ' +
         '(regla de baja pendiente de aprobar). La volumetría es calculada y de solo lectura.</small>' +
-      '<small class="ini-sub">Fecha de análisis: las ligadas comparten la del problema (dbo.Problem.FechaAnalisis). ' +
-        'Una categoría nueva tiene la suya: el día en que se liga + ' + FECHAS_GESTION.diasAnalisis + ' días, sin tocar las del problema. ' +
-        'Hoy la base no tiene fecha por categoría (propuesta sin aprobar): no se guarda todavía.</small>';
+      '<small class="ini-sub">Fecha de análisis: las categorías iniciales heredan la de la iniciativa y cambian con ella ' +
+        '(Fecha compromiso de Análisis). Una categoría ligada después tiene la suya: el día en que se liga + ' +
+        FECHAS_GESTION.diasAnalisis + ' días, editable aquí, sin tocar la de la iniciativa. ' +
+        'Cada categoría nueva declara su Clasificación y su Agrupación: no se copian de las otras.</small>';
   }
 
   // Formulario de edicion dentro del detalle del registro.
@@ -1055,6 +1177,9 @@ window.IniciativaAdmin = (function () {
       // hacer al elegir uno (folio -> void). Los fija la pagina.
       this.fuenteProblemas = null;
       this.alElegirExistente = null;
+      // () -> { estados, tiposIniciativa, tiposAgrupado } (valores que ya
+      // existen, del registro) o null mientras no carga.
+      this.fuenteValores = null;
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -1062,6 +1187,30 @@ window.IniciativaAdmin = (function () {
     fijarProblemas(fuente, alElegir) {
       this.fuenteProblemas = typeof fuente === 'function' ? fuente : null;
       this.alElegirExistente = typeof alElegir === 'function' ? alElegir : null;
+    }
+
+    fijarValores(fuente) {
+      this.fuenteValores = typeof fuente === 'function' ? fuente : null;
+      this.pintarDeclarados();
+    }
+
+    // Selectores de Clasificacion, Agrupacion y Estado (con lo que ya
+    // existe) y la fecha de entrega. Sin lista todavia: deshabilitados.
+    pintarDeclarados() {
+      var b = this.borrador, v = this.fuenteValores ? this.fuenteValores() : null, self = this;
+      [['admTipoIniciativa', 'tipo_iniciativa', 'tiposIniciativa'], ['admTipoAgrupado', 'tipo_agrupado', 'tiposAgrupado'],
+       ['admEstado', 'estado', 'estados']].forEach(function (c) {
+        var el = self.$(c[0]);
+        if (!el) return;
+        var lista = v && Array.isArray(v[c[2]]) ? v[c[2]] : [];
+        el.innerHTML = '<option value="">' + (lista.length ? '— Elige —' : 'Cargando…') + '</option>' + lista.map(function (o) {
+          return '<option value="' + Escape.attr(o) + '">' + Escape.html(o) + '</option>';
+        }).join('');
+        el.value = b ? b.declarados[c[1]] : '';
+        el.disabled = !b || !lista.length;
+      });
+      var fe = this.$('admFEntrega');
+      if (fe) { fe.value = b ? b.declarados.f_entrega_analisis : ''; fe.disabled = !b; }
     }
 
     elegirRuta(ruta) {
@@ -1123,6 +1272,14 @@ window.IniciativaAdmin = (function () {
         if (!self.borrador) return;
         self.borrador.elegirTipo(e.target.value);
         self.pintar();
+      });
+      [['admTipoIniciativa', 'tipo_iniciativa'], ['admTipoAgrupado', 'tipo_agrupado'], ['admEstado', 'estado'],
+       ['admFEntrega', 'f_entrega_analisis']].forEach(function (c) {
+        var el = self.$(c[0]);
+        if (!el) return;
+        el.addEventListener('change', function (e) { if (self.borrador) self.borrador.capturar(c[1], e.target.value); });
+        // El registro (de donde salen las listas) puede llegar despues.
+        el.addEventListener('focus', function () { if (el.tagName === 'SELECT' && el.options.length <= 1) self.pintarDeclarados(); });
       });
       CAMPOS_CREAR.forEach(function (k) {
         self.$('adm-' + k).addEventListener('input', function (e) {
@@ -1227,6 +1384,7 @@ window.IniciativaAdmin = (function () {
       this.$('admRcaNota').textContent = b.esProblem()
         ? 'Problem: sin RCA queda incompleta. El archivo no se sube.'
         : 'Opcional para este tipo. El archivo no se sube.';
+      this.pintarDeclarados();
       this.pintarCategorias();
       this.pintarFaltantes();
     }

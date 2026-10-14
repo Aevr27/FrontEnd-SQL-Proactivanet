@@ -1,5 +1,5 @@
 /* Copia EXACTA del lote de dbo.usp_CargarExperiencia del repo ETL (13_experiencia_usuario.sql,
-   commit 174bb51), con su comentario. Solo para pruebas en LocalDB y como base de sql/19. */
+   commit 174bb51), con su comentario. Solo para pruebas en LocalDB y como la definicion que restaura el rollback del stub ADM_03 (backend). */
 GO
 
 /* =====================================================================================

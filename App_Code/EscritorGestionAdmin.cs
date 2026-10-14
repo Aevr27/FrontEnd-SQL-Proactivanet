@@ -5,14 +5,15 @@
 // El handler (admin_iniciativas_gestion.ashx) lo llama SOLO si
 // PersistenciaGestionAdmin.Activa() (hoy const false) y el plan no tiene
 // pendientes. Probado solo en LocalDB desechable
-// (tools/tests/GestionAdminSqlLocalDbSmoke.cs). Encenderlo exige: 18 y 19
-// aplicadas, EXECUTE en adm para la cuenta del sitio, reglas de Estado /
-// tipos de un alta y la decision de "quitar categoria" y de "tomar del
-// Excel".
+// (tools/tests/GestionAdminSqlLocalDbSmoke.cs). Encenderlo exige: 18
+// aplicada, el cargador del Excel retirado (stub 51900 del backend), las
+// vistas del backend con la fecha por categoria, EXECUTE en adm para la
+// cuenta del sitio y la decision de "quitar categoria".
 //
-// La atomicidad, el tope de 100% con candado y la generacion del Codigo
-// viven en SQL (una transaccion por guardado), no aqui: este escritor solo
-// pasa el plan y traduce los errores 51xxx de los procedimientos.
+// La atomicidad, el tope de 100% con candado, la generacion del Codigo, el
+// TicketsReduce y los NroCambioFecha* viven en SQL (una transaccion por
+// guardado), no aqui: este escritor solo pasa el plan y traduce los
+// errores 51xxx de los procedimientos.
 //
 // Solo ASCII en literales (App_Code sin BOM).
 
@@ -21,49 +22,52 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 
-// Lo que el plan NO decide (reglas sin verificar): quien llama lo declara a
-// proposito, no se deriva en silencio.
-public sealed class DatosAltaDeclarados
-{
-    public string TipoIniciativa;
-    public string TipoAgrupado;
-    public string Estado;
-}
-
 public sealed class ErrorEscrituraGestionAdmin : Exception
 {
     public readonly int Numero;
     public ErrorEscrituraGestionAdmin(int numero, string mensaje, Exception interna)
         : base(mensaje, interna) { Numero = numero; }
 
-    // 51010 = tope de 100% excedido; 2627/2601 = llave repetida; 51009 = el
-    // codigo lo administra el Excel (no esta en adm.ProblemaAdmin).
+    // 51010 = tope de 100% excedido; 51003/51008/2627/2601 = repetida;
+    // 51011-51015 = tipos, estado o categoria no validos (o sin agrupacion);
+    // 51021-51025 = no se pudo emitir el Codigo.
     public bool EsTope { get { return Numero == 51010; } }
-    public bool EsDelExcel { get { return Numero == 51009; } }
     public bool EsRepetida { get { return Numero == 51003 || Numero == 51008 || Numero == 2627 || Numero == 2601; } }
+    public bool EsDatoInvalido { get { return Numero >= 51011 && Numero <= 51017; } }
+    public bool EsCodigo { get { return Numero >= 51021 && Numero <= 51025; } }
+
+    public string Tipo
+    {
+        get
+        {
+            return EsTope ? "TopeExcedido" : EsRepetida ? "CategoriaRepetida" : EsDatoInvalido ? "DatoInvalido"
+                 : EsCodigo ? "CodigoNoEmitido" : "EscrituraRechazada";
+        }
+    }
 }
 
 public sealed class EscritorGestionAdminSql
 {
-    private const string TipoTabla = "adm.CategoriaPctTipo";
+    private const string TipoCategorias = "adm.CategoriaPctTipo";
+    private const string TipoFechas = "adm.CategoriaFechaTipo";
 
-    // Devuelve el Codigo emitido. tx: opcional (la del que llama).
-    public string Crear(SqlConnection cn, SqlTransaction tx, PlanCrearAdmin plan,
-                        DatosAltaDeclarados declarados, string usuario)
+    // Devuelve el Codigo emitido (solo existe si el procedimiento confirmo).
+    // tx: opcional (la del que llama).
+    public string Crear(SqlConnection cn, SqlTransaction tx, PlanCrearAdmin plan, string usuario)
     {
         if (plan == null) throw new ArgumentNullException("plan");
-        if (declarados == null) throw new ArgumentNullException("declarados");
         using (var cmd = Comando(cn, tx, "adm.usp_GestionAdmin_Crear"))
         {
             cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = Db(usuario);
             cmd.Parameters.Add("@Prefijo", SqlDbType.NVarChar, 10).Value = Db(plan.Prefijo);
-            cmd.Parameters.Add("@TipoIniciativa", SqlDbType.NVarChar, 100).Value = Db(declarados.TipoIniciativa);
-            cmd.Parameters.Add("@TipoAgrupado", SqlDbType.NVarChar, 100).Value = Db(declarados.TipoAgrupado);
-            cmd.Parameters.Add("@Estado", SqlDbType.NVarChar, 100).Value = Db(declarados.Estado);
+            cmd.Parameters.Add("@TipoIniciativa", SqlDbType.NVarChar, 100).Value = Db(plan.TipoIniciativa);
+            cmd.Parameters.Add("@TipoAgrupado", SqlDbType.NVarChar, 100).Value = Db(plan.TipoAgrupado);
+            cmd.Parameters.Add("@Estado", SqlDbType.NVarChar, 100).Value = Db(plan.Estado);
             cmd.Parameters.Add("@Titulo", SqlDbType.NVarChar, -1).Value = Db(plan.Titulo);
             cmd.Parameters.Add("@Descripcion", SqlDbType.NVarChar, -1).Value = Db(plan.Descripcion);
             cmd.Parameters.Add("@Observaciones", SqlDbType.NVarChar, -1).Value = Db(plan.Observaciones);
-            Tabla(cmd, "@Categorias", plan.Categorias);
+            cmd.Parameters.Add("@FechaEntregaAnalisis", SqlDbType.Date).Value = plan.FechaEntregaAnalisis.Date;
+            Categorias(cmd, "@Categorias", plan.Categorias);
             // Las fechas del plan son las que se guardan: el mismo "hoy".
             cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = plan.FechaCreacion.Date;
             var codigo = cmd.Parameters.Add("@Codigo", SqlDbType.NVarChar, 100);
@@ -82,7 +86,6 @@ public sealed class EscritorGestionAdminSql
         {
             cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = Db(usuario);
             cmd.Parameters.Add("@Codigo", SqlDbType.NVarChar, 100).Value = Db(plan.Codigo);
-            cmd.Parameters.Add("@TomarDelExcel", SqlDbType.Bit).Value = plan.TomarDelExcel;
             Texto(cmd, plan, SolicitudIniciativa.CTitulo, "Titulo", -1);
             Texto(cmd, plan, SolicitudIniciativa.CDescripcion, "Descripcion", -1);
             Texto(cmd, plan, SolicitudIniciativa.CObservaciones, "Observaciones", -1);
@@ -91,8 +94,9 @@ public sealed class EscritorGestionAdminSql
             Fecha(cmd, plan, PeticionModificarAdmin.CFAnalisis, "FAnalisis");
             Fecha(cmd, plan, PeticionModificarAdmin.CFSolucion, "FSolucion");
             Fecha(cmd, plan, PeticionModificarAdmin.CFCierre, "FCierre");
-            Tabla(cmd, "@Pcts", plan.Pcts);
-            Tabla(cmd, "@Agregar", plan.Agregar);
+            Categorias(cmd, "@Pcts", plan.Pcts);
+            Categorias(cmd, "@Agregar", plan.Agregar);
+            Fechas(cmd, "@FechasCategoria", plan.FechasCategoria);
             cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = plan.Hoy.Date;
             Ejecutar(cmd);
         }
@@ -134,15 +138,28 @@ public sealed class EscritorGestionAdminSql
         cmd.Parameters.Add("@" + nombre, SqlDbType.Date).Value = d == null ? (object)DBNull.Value : d.Value;
     }
 
-    private static void Tabla(SqlCommand cmd, string nombre, List<CategoriaPlan> filas)
+    private static void Categorias(SqlCommand cmd, string nombre, List<CategoriaPlan> filas)
     {
         var t = new DataTable();
         t.Columns.Add("Categoria", typeof(string));
-        var pct = t.Columns.Add("Pct", typeof(decimal));
-        pct.AllowDBNull = true;
-        foreach (var f in filas) t.Rows.Add(f.Ruta, f.Pct == null ? (object)DBNull.Value : f.Pct.Value);
+        t.Columns.Add("Pct", typeof(decimal)).AllowDBNull = true;
+        t.Columns.Add("TipoIniciativa", typeof(string)).AllowDBNull = true;
+        t.Columns.Add("TipoAgrupado", typeof(string)).AllowDBNull = true;
+        foreach (var f in filas)
+            t.Rows.Add(f.Ruta, f.Pct == null ? (object)DBNull.Value : f.Pct.Value, Db(f.TipoIniciativa), Db(f.TipoAgrupado));
         var p = cmd.Parameters.Add(nombre, SqlDbType.Structured);
-        p.TypeName = TipoTabla;
+        p.TypeName = TipoCategorias;
+        p.Value = t;
+    }
+
+    private static void Fechas(SqlCommand cmd, string nombre, List<FechaCategoriaPlan> filas)
+    {
+        var t = new DataTable();
+        t.Columns.Add("Categoria", typeof(string));
+        t.Columns.Add("FechaAnalisis", typeof(DateTime)).AllowDBNull = true;
+        foreach (var f in filas) t.Rows.Add(f.Ruta, f.FechaAnalisis.Date);
+        var p = cmd.Parameters.Add(nombre, SqlDbType.Structured);
+        p.TypeName = TipoFechas;
         p.Value = t;
     }
 

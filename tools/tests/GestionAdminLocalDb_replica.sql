@@ -4,14 +4,21 @@
    Copiado de lo verificado:
    - dbo.Problem / dbo.ProblemCategoria: 13_experiencia_usuario.sql (repo ETL
      174bb51), columnas, PK y FK tal cual.
-   - dbo.ProblemFechaEvento: sql/PROPUESTA_historial_fechas.md seccion 2
-     (Codigo nvarchar(100), como confirmo el P0 en la VM).
+   - dbo.ProblemFechaEvento: el esquema que el P0 confirmo en la VM
+     (2026-10-08) y el volcado del 2026-10-13 (05_checks.tsv).
    - dbo.trg_Problem_FechaEvento: sql/17_historial_fechas_captura.sql.
-   - dbo.CatPrefijoProblem: solo las columnas que se usan aqui.
-   - Lo que usa dbo.usp_CargarExperiencia (para probar sql/19): esquema stg,
-     stg.*, dbo.CatPersona, dbo.CatCategoriaDueno y dbo.fn_Exp*, copiados tal
-     cual de 13_experiencia_usuario.sql (174bb51). El procedimiento mismo se
-     carga aparte: tools/tests/usp_CargarExperiencia_174bb51.sql.
+   - dbo.vw_ProblemCategoria / dbo.vw_ProblemVencido NO van aqui (son del
+     backend; este repo es publico): la prueba los carga de
+     ../backend_admin_persistencia/_origen (38 c041fe1 y 26 e0335c1, tal
+     cual) o, si esa carpeta no esta, crea un stub minimo de la primera.
+   - Lo que usa dbo.usp_CargarExperiencia (para probar el stub ADM_03):
+     esquema stg, stg.*, dbo.CatPersona, dbo.CatCategoriaDueno y dbo.fn_Exp*,
+     de 13_experiencia_usuario.sql (174bb51). El procedimiento se carga
+     aparte: tools/tests/usp_CargarExperiencia_174bb51.sql.
+   STUBS (no son las definiciones reales, solo lo minimo para que las
+   vistas compilen): dbo.fn_CategoriaC1 / fn_CategoriaC1C2 (cortan por '/'),
+   dbo.fn_ClaveNombre (mayusculas sin espacios ni acentos), dbo.vw_DuenoPorC1,
+   dbo.Categorias y dbo.Tickets (solo las columnas que se leen).
    NO se replica dbo.trg_Problem_EstadoEvento / dbo.ProblemEstadoEvento: su
    definicion desplegada no esta en ningun repo. */
 
@@ -25,7 +32,26 @@ GO
 CREATE TABLE dbo.CatPrefijoProblem
 (
     Prefijo        nvarchar(10) NOT NULL CONSTRAINT PK_CatPrefijoProblem PRIMARY KEY,
-    ControlDeFecha bit NULL
+    Descripcion    nvarchar(100) NULL,
+    ControlDeFecha bit NOT NULL CONSTRAINT DF_CatPrefijoProblem_Ctrl DEFAULT (1)
+);
+GO
+
+CREATE TABLE dbo.Categorias
+(
+    Id              nvarchar(100) NOT NULL CONSTRAINT PK_Categorias PRIMARY KEY,
+    RutaCompleta    nvarchar(500) NULL,
+    Inactiva        bit NULL,
+    VigenteEnOrigen bit NOT NULL CONSTRAINT DF_Categorias_Vig DEFAULT (1)
+);
+GO
+
+CREATE TABLE dbo.Tickets
+(
+    CodigoTicket  nvarchar(100) NOT NULL CONSTRAINT PK_Tickets PRIMARY KEY,
+    FechaRegistro datetime2(0) NULL,
+    Tipo          nvarchar(100) NULL,
+    Categoria     nvarchar(500) NULL
 );
 GO
 
@@ -124,9 +150,10 @@ CREATE TABLE dbo.ProblemFechaEvento
         AND (FechaAnterior IS NULL OR FechaNueva IS NULL OR FechaAnterior <> FechaNueva)),
     CONSTRAINT CK_ProblemFechaEvento_Base CHECK (
         Operacion <> 'B' OR (FechaAnterior IS NULL AND FechaNueva IS NOT NULL)),
+    -- Tal cual la VM (volcado 2026-10-13, 05_checks.tsv): con Usuario IS NOT NULL.
     CONSTRAINT CK_ProblemFechaEvento_Atribucion CHECK (
-        (Origen = 'NO_DECLARADO' AND Usuario IS NULL AND SolicitudId IS NULL)
-        OR (Origen = 'ADMIN' AND LEN(LTRIM(RTRIM(Usuario))) > 0))
+        [Origen]='NO_DECLARADO' AND [Usuario] IS NULL AND [SolicitudId] IS NULL
+        OR [Origen]='ADMIN' AND [Usuario] IS NOT NULL AND len(ltrim(rtrim([Usuario])))>(0))
 );
 GO
 
@@ -307,6 +334,46 @@ BEGIN
     RETURN NULL;
 END;
 GO
+GO
+
+CREATE FUNCTION dbo.fn_CategoriaC1 (@Ruta nvarchar(1000))
+RETURNS nvarchar(255)
+AS
+BEGIN
+    -- STUB: '/A/B/C' -> 'A'
+    DECLARE @s nvarchar(1000) = LTRIM(RTRIM(@Ruta));
+    IF LEFT(@s, 1) = N'/' SET @s = SUBSTRING(@s, 2, 1000);
+    RETURN CASE WHEN CHARINDEX(N'/', @s) > 0 THEN LEFT(@s, CHARINDEX(N'/', @s) - 1) ELSE @s END;
+END;
+GO
+CREATE FUNCTION dbo.fn_CategoriaC1C2 (@Ruta nvarchar(1000))
+RETURNS nvarchar(500)
+AS
+BEGIN
+    -- STUB: '/A/B/C' -> 'A/B'
+    DECLARE @s nvarchar(1000) = LTRIM(RTRIM(@Ruta));
+    IF LEFT(@s, 1) = N'/' SET @s = SUBSTRING(@s, 2, 1000);
+    DECLARE @i int = CHARINDEX(N'/', @s);
+    IF @i = 0 RETURN @s;
+    DECLARE @j int = CHARINDEX(N'/', @s, @i + 1);
+    RETURN CASE WHEN @j > 0 THEN LEFT(@s, @j - 1) ELSE @s END;
+END;
+GO
+CREATE FUNCTION dbo.fn_ClaveNombre (@Nombre nvarchar(400))
+RETURNS nvarchar(400)
+AS
+BEGIN
+    -- STUB
+    RETURN UPPER(REPLACE(REPLACE(REPLACE(@Nombre COLLATE Latin1_General_CI_AI, N' ', N''), N'á', N'a'), N'é', N'e'));
+END;
+GO
+CREATE VIEW dbo.vw_DuenoPorC1
+AS
+-- STUB: un dueno por C1.
+SELECT C1, ProductOwner = MIN(ProductOwner), ServiceOwner = MIN(ServiceOwner), DirectorPO = MIN(DirectorPO)
+FROM dbo.CatCategoriaDueno
+WHERE C1 IS NOT NULL
+GROUP BY C1;
 GO
 
 SET NOEXEC OFF;

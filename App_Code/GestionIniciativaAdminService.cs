@@ -1,9 +1,10 @@
 // Servicio de la gestion directa de ADM (App_Code/GestionIniciativaAdmin.cs):
 // arma, en el momento de cada llamada, lo que ValidadorGestionAdmin
-// necesita. SOLO LECTURA; no hay transaccion ni escritura.
+// necesita. Lectura; la escritura (Guardar) solo con la persistencia activa.
 //
 //   Crear(p)       catalogo (CatPrefijoProblem + rutas de dbo.Categorias con
-//                  sus duenos, igual que IniciativaService) y capacidad.
+//                  sus duenos, igual que IniciativaService), capacidad y los
+//                  Estado / TipoIniciativa / TipoAgrupado que ya existen.
 //   Modificar(p)   la iniciativa actual de la MISMA lectura del registro
 //                  (ExperienciaQueries.RegistroIniciativas), la capacidad,
 //                  las rutas vigentes (agregar) y los Estado/Subestado que
@@ -30,7 +31,8 @@ public sealed class GestionIniciativaAdminService
             var rutas = CatalogoRutasIniciativa.Cargar(cn, DirectorioOrganizacional.Cargar(cn));
             var catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
             var capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
-            return new ValidadorGestionAdmin().Crear(p, catalogo, capacidad, TiposSolicitud.ValorProblem(tipos));
+            var valores = ExperienciaQueries.LeerEstadosProblem(cn).Valores;
+            return new ValidadorGestionAdmin().Crear(p, catalogo, capacidad, TiposSolicitud.ValorProblem(tipos), valores);
         }
     }
 
@@ -63,14 +65,15 @@ public sealed class GestionIniciativaAdminService
 
     // ESCRITURA (solo con PersistenciaGestionAdmin.Activa(); hoy nunca). Una
     // llamada = una transaccion dentro del procedimiento de sql/18.
-    // Devuelve el Codigo (el emitido en un alta; el mismo en Modificar).
-    public string Guardar(PlanCrearAdmin crear, PlanModificarAdmin modificar, DatosAltaDeclarados declarados, string usuario)
+    // Devuelve el Codigo (el emitido en un alta, solo tras el COMMIT; el
+    // mismo en Modificar).
+    public string Guardar(PlanCrearAdmin crear, PlanModificarAdmin modificar, string usuario)
     {
         if (string.IsNullOrEmpty(usuario)) throw new ArgumentException("Sin usuario autenticado no se escribe.");
         var escritor = new EscritorGestionAdminSql();
         using (var cn = Abrir())
         {
-            if (crear != null) return escritor.Crear(cn, null, crear, declarados, usuario);
+            if (crear != null) return escritor.Crear(cn, null, crear, usuario);
             escritor.Modificar(cn, null, modificar, usuario);
             return modificar.Codigo;
         }

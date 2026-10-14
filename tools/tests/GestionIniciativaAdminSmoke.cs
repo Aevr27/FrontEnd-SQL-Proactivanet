@@ -80,6 +80,14 @@ public static class GestionIniciativaAdminSmoke
     {
         var p = PeticionCrearAdmin.Una(tipo, cat, pct);
         p.Po = po; p.So = so; p.Titulo = tit; p.Descripcion = desc; p.Observaciones = obs; p.TieneRca = rca;
+        return Declarar(p);
+    }
+
+    // Lo que el alta declara (no se deriva del prefijo): por omision valores
+    // que existen en Estados.
+    static PeticionCrearAdmin Declarar(PeticionCrearAdmin p)
+    {
+        p.TipoIniciativa = "Problem"; p.TipoAgrupado = "Problem"; p.Estado = "En An\u00e1lisis";
         return p;
     }
 
@@ -88,7 +96,7 @@ public static class GestionIniciativaAdminSmoke
     {
         var p = new PeticionCrearAdmin { Tipo = tipo };
         for (var i = 0; i < rp.Length; i += 2) p.Categorias.Add(new PctCategoria { Categoria = rp[i], Texto = rp[i + 1] });
-        return p;
+        return Declarar(p);
     }
 
     static string Campos(ResultadoGestionAdmin r) { return string.Join(",", r.Errores.Select(e => e.Campo ?? "-").ToArray()); }
@@ -96,21 +104,26 @@ public static class GestionIniciativaAdminSmoke
 
     static ResultadoGestionAdmin Crear(PeticionCrearAdmin p, params CapacidadCategoria.Compromiso[] k)
     {
-        return new ValidadorGestionAdmin().Crear(p, Catalogo, new CapacidadCategoria(k), "PRB");
+        return new ValidadorGestionAdmin().Crear(p, Catalogo, new CapacidadCategoria(k), "PRB", Estados);
     }
 
     static IniciativaActual Actual()
+    {
+        return Actual("En An\u00e1lisis", "Problem");
+    }
+
+    static IniciativaActual Actual(string estado, string agrup)
     {
         return IniciativaActual.DesdeRegistro(new Dictionary<string, object>
         {
             { "folio", "PRB 2026-000001" }, { "titulo", "Titulo iniciativa" }, { "titulo_problem", "Titulo problem" },
             { "descripcion", "Linea 1\nLinea 2" }, { "observaciones", null }, { "sin_categoria", false },
             { "f_analisis", "2026-10-01" }, { "f_solucion", null }, { "f_cierre", "2026-12-15" },
-            { "estado", "En An\u00e1lisis" }, { "subestado", "En An\u00e1lisis" },
+            { "estado", estado }, { "subestado", "En An\u00e1lisis" },
             { "categorias", new List<object>
                 {
-                    new Dictionary<string, object> { { "categoria", "/A/Cat 1" }, { "pct_dism", 0.5 } },
-                    new Dictionary<string, object> { { "categoria", "/A/Cat 2" }, { "pct_dism", null } },
+                    new Dictionary<string, object> { { "categoria", "/A/Cat 1" }, { "pct_dism", 0.5 }, { "agrup", agrup } },
+                    new Dictionary<string, object> { { "categoria", "/A/Cat 2" }, { "pct_dism", null }, { "agrup", agrup } },
                 } },
         });
     }
@@ -130,7 +143,8 @@ public static class GestionIniciativaAdminSmoke
     }
 
     static readonly EstadosProblem Estados = new EstadosProblem(
-        new[] { "En An\u00e1lisis", "En Soluci\u00f3n", "Cerrado" }, new[] { "En An\u00e1lisis", "Solucionado", "Cancelado" });
+        new[] { "En An\u00e1lisis", "En Soluci\u00f3n", "Cerrado" }, new[] { "En An\u00e1lisis", "Solucionado", "Cancelado" },
+        new[] { "Problem", "Mejora" }, new[] { "Problem", "Adopcion", "Requerimiento" });
 
     // Modificar con catalogo de rutas y estados (la forma del servicio).
     static ResultadoGestionAdmin ModC(NameValueCollection f, params CapacidadCategoria.Compromiso[] k)
@@ -162,7 +176,7 @@ public static class GestionIniciativaAdminSmoke
         Check("CF1 formato no revisa catalogo", false, v.FormatoCrear(C(" ")).CatalogoRevisado);
         Check("CF2 categoria repetida (sin distinguir mayusculas)", "categorias",
             Campos(v.FormatoCrear(CV("ADO", "/A/Cat 1", "10", "/a/cat 1", "5"))));
-        var desp = PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "cat_ruta", "/A/Cat 1"), false);
+        var desp = Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "cat_ruta", "/A/Cat 1"), false));
         Check("CF2 pares cat_ruta / cat_pct desparejos", "categorias", Campos(v.FormatoCrear(desp)));
         Check("CF3 % fuera de rango", "pct", Campos(v.FormatoCrear(C("ADO", cat: "/A/Cat 1", pct: "100.01"))));
         Check("CF3 % con tres decimales", "pct", Campos(v.FormatoCrear(C("ADO", cat: "/A/Cat 1", pct: "1.234"))));
@@ -277,18 +291,18 @@ public static class GestionIniciativaAdminSmoke
 
         // ---- MA ----
         const string Fo = "PRB 2026-000001";
-        var ag = ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "15"));
+        var ag = ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "15", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"));
         Check("MA1 agregar una del catalogo: valida, un cambio (/A/Cat 2 sigue sin %)", "True|agregar_categoria|pct", ag.Valida + "|" + ag.Cambios[0]["clave"] + "|" + Faltan(ag));
         Check("MA2 agregar sin catalogo (sobrecarga vieja) = error", "categorias",
-            Campos(Mod(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "15"))));
-        Check("MA3 agregar una fuera del catalogo", "categorias", Campos(ModC(F("folio", Fo, "agregar_categoria", "/Z", "agregar_pct", "1"))));
+            Campos(Mod(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "15", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"))));
+        Check("MA3 agregar una fuera del catalogo", "categorias", Campos(ModC(F("folio", Fo, "agregar_categoria", "/Z", "agregar_pct", "1", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"))));
         Check("MA4 agregar una ya ligada = error (duplicado)", "categorias",
-            Campos(ModC(F("folio", Fo, "agregar_categoria", "/a/cat 1", "agregar_pct", "1"))));
-        Check("MA5 agregar dos veces la misma", "categorias", Campos(ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "1",
-                                                                           "agregar_categoria", "/B/Cat 3", "agregar_pct", "2"))));
-        var agExc = ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "30"), K("PRB 2026-000002", "/B/Cat 3", 0.8m));
+            Campos(ModC(F("folio", Fo, "agregar_categoria", "/a/cat 1", "agregar_pct", "1", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"))));
+        Check("MA5 agregar dos veces la misma", "categorias", Campos(ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "1", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem",
+                                                                           "agregar_categoria", "/B/Cat 3", "agregar_pct", "2", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"))));
+        var agExc = ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "30", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"), K("PRB 2026-000002", "/B/Cat 3", 0.8m));
         Check("MA6 agregar excediendo el tope = error", "categorias", Campos(agExc));
-        var agSin = ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", ""));
+        var agSin = ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"));
         Check("MA7 agregar sin %: valida e incompleta por pct", "True|pct", agSin.Valida + "|" + Faltan(agSin));
         var qt = ModC(F("folio", Fo, "quitar_categoria", "/A/Cat 2"));
         Check("MA8 quitar la que no tenia %: deja de estar incompleta", "True|quitar_categoria|", qt.Valida + "|" + qt.Cambios[0]["clave"] + "|" + Faltan(qt));
@@ -298,7 +312,7 @@ public static class GestionIniciativaAdminSmoke
         var todas = ModC(F("folio", Fo, "quitar_categoria", "/A/Cat 1", "quitar_categoria", "/A/Cat 2"));
         Check("MA11 quitar todas: valida, incompleta por categoria y aviso", "True|categoria|True", todas.Valida + "|" + Faltan(todas) + "|" +
             todas.Advertencias.Any(a => a.Contains("sin categor")));
-        var cambio = ModC(F("folio", Fo, "quitar_categoria", "/A/Cat 2", "agregar_categoria", "/B/Cat 3", "agregar_pct", "5"));
+        var cambio = ModC(F("folio", Fo, "quitar_categoria", "/A/Cat 2", "agregar_categoria", "/B/Cat 3", "agregar_pct", "5", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"));
         Check("MA12 corregir categoria equivocada (quitar una, agregar otra)", "True|2", cambio.Valida + "|" + cambio.Cambios.Count);
 
         // ---- MD ----
@@ -326,9 +340,22 @@ public static class GestionIniciativaAdminSmoke
         var sube = ModC(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "51"),
                         K(Fo, "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.9m));
         Check("MK2 ... subir 50 -> 51 no", "pct", Campos(sube));
-        var cerrada = ModC(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "90"),
-                           KN(Fo, "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.9m));
+        var cerrada = new ValidadorGestionAdmin().Modificar(M(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "90")),
+                           Actual("Cerrado", "Problem"), new[] { KN(Fo, "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.9m) }, Catalogo, Estados);
         Check("MK3 iniciativa que no consume (cerrada): sin tope", true, cerrada.Valida);
+        var reactiva = new ValidadorGestionAdmin().Modificar(M(F("folio", Fo, "estado", "En An\u00e1lisis")),
+                           Actual("Cerrado", "Problem"), new[] { KN(Fo, "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.9m) }, Catalogo, Estados);
+        Check("MK4 reactivar (Cerrado -> En Analisis) con 50% sobre una ruta con 90% de otra: tope", "categorias", Campos(reactiva));
+        var nula = new ValidadorGestionAdmin().Modificar(M(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40")),
+                           Actual("En An\u00e1lisis", null), new[] { K(Fo, "/A/Cat 1", 0.5m) }, Catalogo, Estados);
+        Check("MK5 viva con categorias sin Agrupacion: cambiar un % pide declararla", "categorias,categorias", Campos(nula));
+        var fNula = F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40",
+                      "pct_categoria", "/A/Cat 2", "pct_valor", "", "pct_tipo_agrupado", "Problem", "pct_tipo_agrupado", "Adopcion");
+        var nulaOk = new ValidadorGestionAdmin().Modificar(M(fNula), Actual("En An\u00e1lisis", null), new[] { K(Fo, "/A/Cat 1", 0.5m) }, Catalogo, Estados);
+        Check("MK6 declarando la Agrupacion de cada una (paralela a pct_*), pasa", true, nulaOk.Valida);
+        var plNula = PlanificadorGestionAdmin.Modificar(M(fNula), Actual("En An\u00e1lisis", null), nulaOk, new DateTime(2026, 10, 13));
+        Check("MK7 el plan lleva la Agrupacion declarada de cada ligada", "/A/Cat 1=Problem|/A/Cat 2=Adopcion",
+              string.Join("|", plNula.Pcts.Select(c => c.Ruta + "=" + c.TipoAgrupado).ToArray()));
 
         // ---- V ----
         var slot0 = new Dictionary<string, int>(StringComparer.Ordinal) { { "/A/Cat 1", 418 }, { "/A/Cat 0", 0 } };
@@ -363,14 +390,16 @@ public static class GestionIniciativaAdminSmoke
               plc.Categorias.Count + "|" + plc.Categorias.Count(c => c.FechaCreacion != null || c.FechaAnalisis != null));
         Check("PL3 alta: % de cada categoria como fraccion", "0.3|0.2",
               string.Join("|", plc.Categorias.Select(c => c.Pct.Value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)).ToArray()));
-        Check("PL4 alta: sin codigo en el plan (lo emite la base) y con pendientes de tipos/estado", "|2",
+        Check("PL4 alta: sin codigo en el plan (lo emite la base) y sin pendientes (tipos y estado declarados)", "|0",
               plc.ComoJson()["codigo"] + "|" + plc.Pendientes.Count);
+        Check("PL4b alta: tipos y estado declarados en el plan y en cada categoria; entrega = hoy", "Problem|Problem|En An\u00e1lisis|2026-10-13|Problem",
+              plc.TipoIniciativa + "|" + plc.TipoAgrupado + "|" + plc.Estado + "|" + FechasGestionAdmin.Iso(plc.FechaEntregaAnalisis) + "|" + plc.Categorias[0].TipoAgrupado);
         var plInv = "";
         try { PlanificadorGestionAdmin.Crear(C(null), Crear(C(null)), hoy); } catch (InvalidOperationException) { plInv = "rechaza"; }
         Check("PL5 no se planea un alta invalida", "rechaza", plInv);
         Check("PL6 31-dic + 15 cruza de anio", "2027-01-15", FechasGestionAdmin.Iso(FechasGestionAdmin.Analisis(new DateTime(2026, 12, 31))));
 
-        var fLiga = F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "10");
+        var fLiga = F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "10", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem");
         var rLiga = ModC(fLiga);
         var plLiga = PlanificadorGestionAdmin.Modificar(M(fLiga), Actual(), rLiga, hoy);
         Check("PL7 ligar despues: valida", true, rLiga.Valida);
@@ -396,19 +425,19 @@ public static class GestionIniciativaAdminSmoke
               PlanificadorGestionAdmin.CamposProblem.Contains("codigo") || PlanificadorGestionAdmin.CamposProblem.Contains("f_creacion"));
 
         Check("PL16 ligar una ya ligada: se rechaza (sin duplicar)", "categorias",
-              Campos(ModC(F("folio", Fo, "agregar_categoria", "/A/Cat 1", "agregar_pct", "10"))));
+              Campos(ModC(F("folio", Fo, "agregar_categoria", "/A/Cat 1", "agregar_pct", "10", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"))));
         Check("PL17 ligar dos veces la misma en un guardado: se rechaza", "categorias,categorias",
-              Campos(ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "1",
-                                     "agregar_categoria", " /b/cat 3 ", "agregar_pct", "1"))));
+              Campos(ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "1", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem",
+                                     "agregar_categoria", " /b/cat 3 ", "agregar_pct", "1", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"))));
 
         Check("PL18 tope exacto: 60 de otros + 40 = 100% se permite", true,
               Crear(CV("PRB", "/A/Cat 1", "40"), K("ADO 2026-000009", "/A/Cat 1", 0.6m)).Valida);
         Check("PL19 tope: 60 + 40.01 se rechaza", "pct",
               Campos(Crear(CV("PRB", "/A/Cat 1", "40.01"), K("ADO 2026-000009", "/A/Cat 1", 0.6m))));
         Check("PL20 ligar despues con tope exacto 100% se permite", true,
-              ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "25"), K("ADO 2026-000009", "/B/Cat 3", 0.75m)).Valida);
+              ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "25", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"), K("ADO 2026-000009", "/B/Cat 3", 0.75m)).Valida);
         Check("PL21 ligar despues por encima del tope se rechaza", "categorias",
-              Campos(ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "25.01"), K("ADO 2026-000009", "/B/Cat 3", 0.75m))));
+              Campos(ModC(F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "25.01", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"), K("ADO 2026-000009", "/B/Cat 3", 0.75m))));
 
         var fQuita = F("folio", Fo, "quitar_categoria", "/A/Cat 2");
         var plQuita = PlanificadorGestionAdmin.Modificar(M(fQuita), Actual(), ModC(fQuita), hoy);
