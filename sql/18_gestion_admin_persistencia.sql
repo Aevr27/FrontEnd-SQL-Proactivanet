@@ -78,8 +78,8 @@
    - Tope 100% por ruta (regla de ExperienciaQueries.ConsumeCapacidad):
      consume la fila vigente de una iniciativa en estado vivo con
      TipoAgrupado de AGRUPADORES. Para que una fila SIN agrupacion no se
-     salte el tope, al escribirla se revisa como si consumiera
-     (conservador). Se revisa, con candado por ruta, toda fila que vaya a
+     salte el tope, se trata como si consumiera (conservador): al escribirla
+     se revisa, y al revisar a otra iniciativa se suma. Se revisa, con candado por ruta, toda fila que vaya a
      consumir y que antes no consumia (alta, ligada, reactivada, cambio de
      agrupador) o cuyo % sube. Bajar o dejar igual nunca se bloquea.
    - TicketsReduce = ROUND(VolumenUltimos30 x PctDisminucion, 0) con
@@ -260,8 +260,11 @@ BEGIN
     END;
     CLOSE c; DEALLOCATE c;
 
-    -- Consumo = ExperienciaQueries.ConsumeCapacidad: vigente en origen,
-    -- Estado vivo (CI_AI: con o sin acento) y TipoAgrupado de AGRUPADORES.
+    -- Consumo = ExperienciaQueries.ConsumeCapacidad (vigente en origen,
+    -- Estado vivo CI_AI, TipoAgrupado de AGRUPADORES) MAS las filas vivas SIN
+    -- agrupacion (NULL o vacia), que se cuentan como si consumieran: el tope
+    -- nunca se pasa por un dato que falta. Es mas estricto que el tablero
+    -- (que no las suma); ver CUTOVER (decision pendiente de igualarlos).
     DECLARE @msg nvarchar(2048);
     SELECT TOP (1) @msg = r.Categoria + N': solo tiene ' +
            CONVERT(nvarchar(20), CONVERT(decimal(9,2), 100 * CASE WHEN u.Usado >= 1 THEN 0 ELSE 1 - u.Usado END)) +
@@ -278,7 +281,8 @@ BEGIN
               = LTRIM(RTRIM(REPLACE(r.Categoria, NCHAR(160), N' ')))
           AND LTRIM(RTRIM(p.Estado)) COLLATE Latin1_General_CI_AI
               IN (N'En Analisis', N'En Solucion', N'En Monitoreo')
-          AND LTRIM(RTRIM(pc.TipoAgrupado)) IN (N'Problem', N'SorIA', N'Adopcion', N'Mejora')
+          AND (NULLIF(LTRIM(RTRIM(pc.TipoAgrupado)), N'') IS NULL
+               OR LTRIM(RTRIM(pc.TipoAgrupado)) IN (N'Problem', N'SorIA', N'Adopcion', N'Mejora'))
     ) AS u
     WHERE r.Pct IS NOT NULL
       AND r.Pct > CASE WHEN u.Usado >= 1 THEN 0 ELSE 1 - u.Usado END

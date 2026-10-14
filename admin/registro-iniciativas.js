@@ -336,6 +336,8 @@ window.RegistroIniciativas = (function () {
       // una categoria ligada pueden declarar.
       r.valoresTipoIniciativa = Array.isArray(json.valores_tipo_iniciativa) ? json.valores_tipo_iniciativa.filter(esTexto) : [];
       r.valoresTipoAgrupado = Array.isArray(json.valores_tipo_agrupado) ? json.valores_tipo_agrupado.filter(esTexto) : [];
+      // true solo si el servidor guarda (PersistenciaGestionAdmin activa).
+      r.persistenciaAdmin = json.persistencia_admin === true;
       return r;
     }
 
@@ -1952,7 +1954,8 @@ window.RegistroIniciativas = (function () {
         { rutas: op.rutas, rutasEstado: op.rutasEstado, estados: op.estados, subestados: op.subestados,
           tiposIniciativa: op.tiposIniciativa, tiposAgrupado: op.tiposAgrupado }) : null;
       caja.innerHTML = abrir ? window.IniciativaAdmin.htmlEdicion(this.edicion,
-        { tipo: this.registro.nombreTipo(i.prefijo), volumetria: this.clienteVolumetria() }) : '';
+        { tipo: this.registro.nombreTipo(i.prefijo), volumetria: this.clienteVolumetria(),
+          persiste: this.registro.persistenciaAdmin === true }) : '';
       caja.hidden = !abrir;
       if (abrir) {
         this.pintarVistaEdicion();
@@ -1977,7 +1980,7 @@ window.RegistroIniciativas = (function () {
     // "Validar en el servidor (no guarda)" (data-accion edicion-guardar):
     // valida en admin_iniciativas_gestion.ashx. No guarda: la respuesta real se pinta tal cual, nunca como exito. Sin
     // cambios o con errores de formato locales no se envia.
-    guardarEdicion(pedir) {
+    guardarEdicion(pedir, pedirRegistro) {
       var ed = this.edicion;
       if (!ed || !this.puedeEditar() || this.edicionEnviando) return Promise.resolve(null);
       var local = this.revisarEdicion();
@@ -1988,13 +1991,26 @@ window.RegistroIniciativas = (function () {
       var self = this, A = window.IniciativaAdmin, folio = this.abierta;
       this.edicionEnviando = true;
       this.$('regEdMsg').className = 'ini-cambio-msg';
-      this.$('regEdMsg').innerHTML = '<span>Validando en el servidor…</span>';
+      this.$('regEdMsg').innerHTML = '<span>' + (this.registro.persistenciaAdmin === true ? 'Guardando…' : 'Validando en el servidor…') + '</span>';
       return A.enviarGestion(ed.paraEnviar(), pedir || function (url, op) { return fetch(url, op); }).then(function (r) {
         self.edicionEnviando = false;
+        // GUARDADA: se recarga el registro (lista, categorias, capacidad e
+        // historial salen de el) y se reabre el detalle con el aviso. Nada
+        // se actualiza en el navegador por su cuenta.
+        if (r.estado === 'guardada') {
+          return self.cargar(pedirRegistro).then(function () {
+            if (self.registro && self.registro.buscar(folio)) {
+              self.abrirDetalle(folio);
+              var aviso = self.$('regDetAviso');
+              if (aviso) { aviso.hidden = false; aviso.innerHTML = A.htmlRespuesta(r); }
+            }
+            return r;
+          });
+        }
         // El detalle pudo cerrarse o cambiar mientras tanto.
         if (self.edicion !== ed || self.abierta !== folio) return r;
         var caja = self.$('regEdMsg');
-        caja.className = 'ini-cambio-msg ' + (r.estado === 'no_habilitada' ? 'aviso' : 'error');
+        caja.className = 'ini-cambio-msg ' + (r.estado === 'no_habilitada' || r.estado === 'no_confirmada' ? 'aviso' : 'error');
         caja.innerHTML = A.htmlRespuesta(r);
         return r;
       });
@@ -2234,6 +2250,7 @@ window.RegistroIniciativas = (function () {
         this.htmlIncompleta(i) +
         '<div class="ini-det-acciones" id="regDetAcciones">' + this.htmlAcciones() + '</div>' +
         '</div>' +
+        '<div class="ini-cambio-msg listo" id="regDetAviso" role="status" aria-live="polite" hidden></div>' +
         '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>' +
         '<section class="ini-det-sec ini-cambio ini-edicion" id="regEdicion" hidden></section>';
 

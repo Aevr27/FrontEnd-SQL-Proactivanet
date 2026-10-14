@@ -47,10 +47,16 @@
 //
 // HOY SOLO LECTURA: PersistenciaGestionAdmin.Habilitada = const false, asi
 // que la rama 4 (EscritorGestionAdminSql -> adm.usp_GestionAdmin_*, de
-// sql/18) nunca corre. Con ella activa: 200 { guardada: true, codigo } (el
-// Codigo solo existe si la base confirmo el alta); 409 { error, numero,
-// tipo: TopeExcedido | CategoriaRepetida | DatoInvalido | CodigoNoEmitido |
-// EscrituraRechazada } si el procedimiento rechaza (nada se guarda).
+// sql/18) nunca corre. Con ella activa:
+//   200 { guardada: true, codigo, ... } (el Codigo solo existe si la base
+//       confirmo el alta);
+//   409 { error, numero, tipo: TopeExcedido | CategoriaRepetida |
+//       DatoInvalido | CodigoNoEmitido | EscrituraRechazada, guardada: false }
+//       si el procedimiento rechaza (THROW antes del COMMIT: nada se guarda);
+//   409 { tipo: PendienteSinRegla, pendientes, guardada: false } si el plan
+//       tiene algo sin regla (quitar categoria);
+//   500 { tipo: EscrituraNoConfirmada, guardada: null } si falla otra cosa
+//       (no se sabe si se guardo).
 
 using System;
 using System.Collections.Generic;
@@ -123,14 +129,28 @@ public class AdminIniciativasGestion : IHttpHandler
             // 4) Escritura: SOLO con la persistencia activa (hoy const false,
             //    PersistenciaGestionAdmin) y sin pendientes. Depende de
             //    sql/18 aplicada y del cargador del Excel retirado: sin aprobar.
-            if (PersistenciaGestionAdmin.Activa() && pendientes.Count == 0)
+            //    Con la persistencia activa, un plan con pendientes (p. ej.
+            //    quitar categoria, sin regla) se RECHAZA (409): no es "no
+            //    habilitada" ni se guarda a medias.
+            if (PersistenciaGestionAdmin.Activa() && pendientes.Count > 0)
+            {
+                context.Response.StatusCode = 409;
+                context.Response.TrySkipIisCustomErrors = true;
+                return new Dictionary<string, object>
+                {
+                    { "error", "No se guardó nada: " + string.Join(" ", pendientes.ToArray()) },
+                    { "tipo", "PendienteSinRegla" }, { "pendientes", pendientes }, { "guardada", false },
+                };
+            }
+            if (PersistenciaGestionAdmin.Activa())
             {
                 var id = IdentidadWindows.DesdeContexto(context);
                 if (!id.Autenticada || string.IsNullOrEmpty(id.Original))
                     return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
+                string codigo;
                 try
                 {
-                    salida["codigo"] = servicio.Guardar(planCrear, planMod, id.Original);
+                    codigo = servicio.Guardar(planCrear, planMod, id.Original);
                 }
                 catch (ErrorEscrituraGestionAdmin ex)
                 {
@@ -144,6 +164,26 @@ public class AdminIniciativasGestion : IHttpHandler
                         { "guardada", false },
                     };
                 }
+                catch (Exception ex)
+                {
+                    // Conexion, permisos, tiempo agotado...: no se puede afirmar
+                    // que NO se guardo (un tiempo agotado puede llegar despues
+                    // del COMMIT). guardada = null: el navegador pide revisar
+                    // el registro antes de reintentar; nunca "no se guardo".
+                    DashboardHandler.Registrar("admin_iniciativas_gestion.ashx", ex);
+                    context.Response.StatusCode = 500;
+                    context.Response.TrySkipIisCustomErrors = true;
+                    return new Dictionary<string, object>
+                    {
+                        { "error", "No se pudo confirmar el guardado: " + DashboardHandler.MensajeSeguro(ex) +
+                                   " Revisa el registro antes de reintentar." },
+                        { "tipo", "EscrituraNoConfirmada" }, { "guardada", null },
+                    };
+                }
+                // Un alta sin Codigo devuelto no se da por guardada.
+                if (string.IsNullOrEmpty(codigo))
+                    return Error(context, 500, "La base no devolvió el código del alta: revisa el registro antes de reintentar.", "EscrituraNoConfirmada");
+                salida["codigo"] = codigo;
                 salida["guardada"] = true;
                 salida["persistencia"] = "habilitada";
                 salida["persistencia_motivo"] = null;

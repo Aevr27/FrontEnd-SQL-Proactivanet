@@ -106,6 +106,20 @@ window.IniciativaAdmin = (function () {
   // que nunca se lea como un guardado.
   var AVISO_PROTOTIPO = 'No se guardó nada y no se generó código: la persistencia no está habilitada ' +
     '(contrato de base pendiente).';
+  // La revision LOCAL nunca guarda, este o no habilitada la persistencia.
+  var AVISO_REVISION = 'No se guardó nada: es solo la revisión del borrador en el navegador.';
+
+  // Rotulos del boton que envia, segun el servidor guarde (persistencia
+  // activa: `persistencia_admin` del registro) o solo valide. Sin el dato,
+  // como si no guardara: nunca se promete un guardado.
+  var ROTULOS = {
+    guarda: { boton: 'Guardar', nota: 'Guarda en la base (solo ADM). El código lo asigna la base al guardar.',
+              aviso: 'Guardar escribe en la base. El código se asigna al guardar.' },
+    valida: { boton: 'Validar en el servidor (no guarda)', nota: 'Solo valida en el servidor; no guarda mientras la persistencia no esté habilitada.',
+              aviso: '«Validar en el servidor» solo valida: la persistencia no está habilitada y no se guarda nada todavía. ' +
+                'Además, mientras el Excel siga cargando, la carga reemplazaría estos campos.' }
+  };
+  function rotulos(persiste) { return persiste === true ? ROTULOS.guarda : ROTULOS.valida; }
 
   // Validacion en el servidor de crear y modificar (solo ADM). NO guarda:
   // con datos validos responde 501 PersistenciaNoHabilitada.
@@ -585,10 +599,14 @@ window.IniciativaAdmin = (function () {
   // ---------------------------------------------------------------------
   // RespuestaGestion: lo que contesto admin_iniciativas_gestion.ashx
   // ---------------------------------------------------------------------
-  // Nunca hay un estado de exito: el handler no guarda. Cinco estados
-  // excluyentes:
+  // Estados excluyentes. "guardada" es el UNICO que dice que algo se guardo,
+  // y solo con 200 + guardada === true (+ codigo en un alta): la respuesta
+  // de la base, nunca la de la validacion.
+  //   guardada       200: la base confirmo (PersistenciaGestionAdmin activa)
   //   no_habilitada  501: valida en el servidor, NO guardada
   //   invalida       422: errores por campo
+  //   rechazada      409: la base (o un pendiente sin regla) lo rechazo: nada guardado
+  //   no_confirmada  500 EscrituraNoConfirmada: no se sabe si se guardo
   //   denegado       403: sin rol ADM (o sin acceso)
   //   no_disponible  503: no se pudo leer el catalogo; no se sabe si es valida
   //   error          cualquier otra cosa (red, 500, respuesta ilegible)
@@ -596,28 +614,38 @@ window.IniciativaAdmin = (function () {
     desde: function (estado, json) {
       json = json && typeof json === 'object' ? json : null;
       var tipo = json && json.tipo;
-      var e = estado === 501 && tipo === 'PersistenciaNoHabilitada' && json.valida === true && json.guardada === false ? 'no_habilitada'
+      var codigo = json && typeof json.codigo === 'string' && json.codigo.trim() ? json.codigo : null;
+      // 200 sin accion, o alta sin codigo: no es exito (error).
+      var e = estado === 200 && json && json.guardada === true &&
+              (json.accion === 'modificar' || (json.accion === 'crear' && codigo)) ? 'guardada'
+        : estado === 501 && tipo === 'PersistenciaNoHabilitada' && json.valida === true && json.guardada === false ? 'no_habilitada'
         : estado === 422 && json && json.valida === false ? 'invalida'
+        : estado === 409 && json && json.guardada === false ? 'rechazada'
+        : estado === 500 && tipo === 'EscrituraNoConfirmada' ? 'no_confirmada'
         : estado === 403 ? 'denegado'
         : estado === 503 ? 'no_disponible'
         : 'error';
       return {
         estado: e,
-        guardada: false,
+        guardada: e === 'guardada',
+        codigo: e === 'guardada' ? codigo : null,
         errores: e === 'invalida' && Array.isArray(json.errores) ? json.errores : [],
         advertencias: json && Array.isArray(json.advertencias) ? json.advertencias : [],
         cambios: json && Array.isArray(json.cambios) ? json.cambios : [],
         faltantes: json && Array.isArray(json.faltantes) ? json.faltantes : [],
         bloqueos: json && Array.isArray(json.bloqueos) ? json.bloqueos : [],
-        mensaje: (json && (json.persistencia_motivo || json.error)) ||
+        mensaje: e === 'guardada' ? 'Guardado en la base.' : (json && (json.persistencia_motivo || json.error)) ||
           (estado ? 'El servidor respondió ' + estado + '.' : 'No se pudo contactar al servidor.')
       };
     },
     titulo: function (r) {
       return {
+        guardada: 'Guardado en la base' + (r.codigo ? ' · Código ' + r.codigo : '') + '.',
         no_habilitada: 'Solo validación: los datos son válidos en el servidor, pero NO se guardó nada. ' +
           'No se guardó: la persistencia no está habilitada.',
         invalida: 'El servidor rechazó los datos (no se guardó nada):',
+        rechazada: 'La base rechazó el guardado. No se guardó nada:',
+        no_confirmada: 'No se pudo confirmar si se guardó. Revisa el registro antes de reintentar.',
         denegado: 'Sin permiso: solo un administrador (ADM) puede hacerlo. No se validó ni se guardó nada.',
         no_disponible: 'No se pudo validar en el servidor (catálogo no disponible). No se guardó nada.',
         error: 'No se pudo completar la validación. No se guardó nada.'
@@ -745,9 +773,9 @@ window.IniciativaAdmin = (function () {
         formato: formato,
         incompleta: faltan.length > 0,
         faltantes: faltan,
-        codigo: null,          // nunca se inventa
-        guardado: false,       // nunca en esta fase
-        aviso: AVISO_PROTOTIPO
+        codigo: null,          // nunca se inventa: lo asigna la base
+        guardado: false,       // la revision local nunca guarda
+        aviso: AVISO_REVISION
       };
     }
   }
@@ -1014,23 +1042,26 @@ window.IniciativaAdmin = (function () {
     return partes.join('');
   }
 
-  function claseRespuesta(r) { return r.estado === 'no_habilitada' ? 'aviso' : 'mal'; }
+  function claseRespuesta(r) {
+    return r.estado === 'guardada' ? 'ok' : r.estado === 'no_habilitada' || r.estado === 'no_confirmada' ? 'aviso' : 'mal';
+  }
 
   function htmlRespuesta(r) {
     var lista = function (xs, f) { return xs.length ? '<ul>' + xs.map(f).join('') + '</ul>' : ''; };
     var texto = function (v) { return v === '' || v === null || v === undefined ? '(vacío)' : String(v); };
     var partes = ['<strong class="ini-prototipo-marca">' + Escape.html(RespuestaGestion.titulo(r)) + '</strong>'];
     partes.push(lista(r.errores, function (e) { return '<li>' + Escape.html(e.mensaje) + '</li>'; }));
-    if (r.estado === 'no_habilitada') {
+    if (r.estado === 'no_habilitada' || r.estado === 'guardada') {
       if (r.cambios.length) {
-        partes.push('<p>Cambios validados (no guardados):</p>' + lista(r.cambios, function (c) {
+        partes.push('<p>' + (r.estado === 'guardada' ? 'Cambios guardados:' : 'Cambios validados (no guardados):') + '</p>' + lista(r.cambios, function (c) {
           return '<li>' + Escape.html(c.rotulo) + ': ' + Escape.html(texto(c.anterior)) + ' → ' + Escape.html(texto(c.nuevo)) + '</li>';
         }));
       }
       partes.push(r.faltantes.length ? htmlFaltantes(r.faltantes, 'Según el servidor.') : '<p>Sin datos faltantes.</p>');
     }
     partes.push(lista(r.advertencias, function (a) { return '<li>' + Escape.html(a) + '</li>'; }));
-    if (r.estado !== 'invalida' || !r.errores.length) partes.push('<p class="ini-prototipo-aviso">' + Escape.html(r.mensaje) + '</p>');
+    if (r.estado === 'rechazada' || r.estado === 'no_confirmada') partes.push('<p>' + Escape.html(r.mensaje) + '</p>');
+    else if (r.estado !== 'guardada' && (r.estado !== 'invalida' || !r.errores.length)) partes.push('<p class="ini-prototipo-aviso">' + Escape.html(r.mensaje) + '</p>');
     return partes.join('');
   }
 
@@ -1100,8 +1131,7 @@ window.IniciativaAdmin = (function () {
       (i.estado ? ' · ' + Escape.html(i.estado) : '') + ' (solo lectura)</p>';
     var legado = ed.notasLegado().map(function (n) { return '<p class="ini-nota">' + Escape.html(n) + '</p>'; }).join('');
     return '<h4>Modificar iniciativa</h4>' +
-      '<p class="ini-prototipo-aviso">«Validar en el servidor» solo valida: la persistencia no está habilitada y ' +
-        'no se guarda nada todavía. Además, mientras el Excel siga cargando, la carga reemplazaría estos campos.</p>' +
+      '<p class="ini-prototipo-aviso">' + Escape.html(rotulos(contexto.persiste).aviso) + '</p>' +
       ctx + legado +
       htmlFaltantes(ed.faltantesOriginales(), 'Ya faltaba antes de modificar.') +
       '<h5>Problema <span class="ini-sub">dbo.Problem · el código no cambia</span></h5>' +
@@ -1117,10 +1147,10 @@ window.IniciativaAdmin = (function () {
       '<div class="ini-cambio-msg" id="regEdMsg" role="status" aria-live="polite"></div>' +
       '<div class="ini-cambio-pie">' +
         '<button type="button" class="btn chico" data-accion="edicion-revisar">Revisar cambios</button> ' +
-        '<button type="button" class="btn chico" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">Validar en el servidor (no guarda)</button> ' +
+        '<button type="button" class="btn chico" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">' + Escape.html(rotulos(contexto.persiste).boton) + '</button> ' +
         '<button type="button" class="btn linea chico" data-accion="edicion-cancelar">Cancelar</button>' +
       '</div>' +
-      '<small class="ini-sub" id="regEdGuardarNota">Solo valida en el servidor (solo ADM); no guarda mientras la persistencia no esté habilitada.</small>';
+      '<small class="ini-sub" id="regEdGuardarNota">' + Escape.html(rotulos(contexto.persiste).nota) + '</small>';
   }
 
   // Vista previa en vivo de "Modificar". Siempre dice que no se guarda.
@@ -1171,6 +1201,22 @@ window.IniciativaAdmin = (function () {
       // () -> { estados, tiposIniciativa, tiposAgrupado } (valores que ya
       // existen, del registro) o null mientras no carga.
       this.fuenteValores = null;
+      // (codigo) -> void: lo que hace la pagina tras un alta GUARDADA
+      // (recargar el registro). Solo con estado 'guardada'.
+      this.alGuardar = null;
+    }
+
+    persiste() {
+      var v = this.fuenteValores ? this.fuenteValores() : null;
+      return !!(v && v.persiste === true);
+    }
+
+    pintarRotulos() {
+      var r = rotulos(this.persiste());
+      var b = this.$('admGuardar'), n = this.$('admGuardarNota'), a = this.$('admPersistenciaAviso');
+      if (b) b.textContent = r.boton;
+      if (n) n.textContent = r.nota;
+      if (a) a.textContent = r.aviso;
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -1376,6 +1422,7 @@ window.IniciativaAdmin = (function () {
         ? 'Problem: sin RCA queda incompleta. El archivo no se sube.'
         : 'Opcional para este tipo. El archivo no se sube.';
       this.pintarDeclarados();
+      this.pintarRotulos();
       this.pintarCategorias();
       this.pintarFaltantes();
     }
@@ -1396,8 +1443,11 @@ window.IniciativaAdmin = (function () {
       return r;
     }
 
-    // "Validar en el servidor (no guarda)": lo que se ve es SIEMPRE la
-    // respuesta real; si el borrador ya tiene errores locales, no se envia.
+    // "Validar en el servidor (no guarda)" / "Guardar": lo que se ve es
+    // SIEMPRE la respuesta real; si el borrador ya tiene errores locales, no
+    // se envia. Solo con 'guardada' se limpia el borrador y se avisa a la
+    // pagina (que recarga el registro); cualquier otra respuesta deja el
+    // borrador tal cual para corregir o reintentar.
     guardar() {
       if (!this.borrador || this.enviando || this.ruta !== 'nuevo') return Promise.resolve(null);
       var local = this.revisar();
@@ -1409,8 +1459,18 @@ window.IniciativaAdmin = (function () {
       boton.disabled = true;
       caja.hidden = false;
       caja.classList.remove('ok', 'mal', 'aviso');
-      caja.innerHTML = '<span>Validando en el servidor…</span>';
+      caja.innerHTML = '<span>' + (this.persiste() ? 'Guardando…' : 'Validando en el servidor…') + '</span>';
       return enviarGestion(pares, this.pedir).then(function (r) {
+        if (r.estado === 'guardada') {
+          var cat = self.borrador.catalogo;
+          self.borrador = new BorradorAdmin(cat);
+          self.archivoRca = null;
+          CAMPOS_CREAR.forEach(function (k) { var el = self.$('adm-' + k); if (el) el.value = ''; });
+          var rca = self.$('admRca'); if (rca) rca.value = '';
+          self.pintar();
+          if (self.alGuardar) self.alGuardar(r.codigo);
+        }
+        caja.hidden = false;
         caja.classList.add(claseRespuesta(r));
         caja.innerHTML = htmlRespuesta(r);
         self.enviando = false;
@@ -1422,6 +1482,8 @@ window.IniciativaAdmin = (function () {
 
   return {
     AVISO_PROTOTIPO: AVISO_PROTOTIPO,
+    AVISO_REVISION: AVISO_REVISION,
+    ROTULOS: ROTULOS,
     URL_GESTION: URL_GESTION,
     URL_VOLUMETRIA: URL_VOLUMETRIA,
     SELECTOR_UMBRAL: SELECTOR_UMBRAL,

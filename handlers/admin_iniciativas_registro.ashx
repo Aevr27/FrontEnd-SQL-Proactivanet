@@ -60,7 +60,12 @@ public class AdminIniciativasRegistro : IHttpHandler
 
         try
         {
-            context.Response.Write(serializador.Serialize(ExperienciaQueries.RegistroIniciativas()));
+            var registro = ExperienciaQueries.RegistroIniciativas();
+            // Si "Crear iniciativa" / "Modificar" guardan o solo validan
+            // (PersistenciaGestionAdmin, const): la pagina rotula sus botones
+            // con esto y nunca promete un guardado que no ocurre.
+            registro["persistencia_admin"] = PersistenciaGestionAdmin.Activa();
+            context.Response.Write(serializador.Serialize(registro));
         }
         catch (Exception ex)
         {

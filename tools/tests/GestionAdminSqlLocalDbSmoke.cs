@@ -213,7 +213,7 @@ INSERT dbo.Categorias (Id, RutaCompleta, Inactiva, VigenteEnOrigen)
 SELECT CONVERT(nvarchar(10), ROW_NUMBER() OVER (ORDER BY r)), r, 0, 1
 FROM (VALUES (N'/S/Cat 1'), (N'/S/Cat 2'), (N'/S/Cat 3'), (N'/S/Nueva'), (N'/S/Otra'), (N'/K/Cat 1'), (N'/C/Carrera'),
              (N'/T/Vol'), (N'/R/Reac'), (N'/N/Nulo'), (N'/N/Otra'), (N'/Q/Req'), (N'/F/Falla'), (N'/V/Vence'), (N'/V/Inicial'),
-             (N'/D/Uno'), (N'/D/Dos'), (N'/D/Tres'), (N'/P/Sitio 1'), (N'/P/Sitio 2'), (N'/P/Sitio 3')) AS v (r);
+             (N'/D/Uno'), (N'/D/Dos'), (N'/D/Tres'), (N'/N/Solo'), (N'/P/Sitio 1'), (N'/P/Sitio 2'), (N'/P/Sitio 3')) AS v (r);
 INSERT dbo.Categorias (Id, RutaCompleta, Inactiva, VigenteEnOrigen) VALUES (N'99', N'/X/Vieja', 1, 0);
 -- Lo que ya trae el Excel (valores existentes de Estado / tipos).
 INSERT dbo.Problem (Codigo, TipoIniciativa, Titulo, Estado, FechaCreacion, FechaAnalisis, VigenteEnOrigen) VALUES
@@ -234,7 +234,8 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
  (N'MAP 2026-000001', N'/R/Reac',   N'Mejora', N'Mejora', 0.5000),
  (N'PRB 2025-000100', N'/N/Nulo',   N'Problem', NULL, 0.1000),
  (N'PRB 2025-000100', N'/N/Otra',   N'Problem', N'Problem', 0.1000),
- (N'REQ 2026-000001', N'/Q/Req',    N'Problem', N'Requerimiento', 0.9000);
+ (N'REQ 2026-000001', N'/Q/Req',    N'Problem', N'Requerimiento', 0.9000),
+ (N'MAP 2026-000001', N'/N/Solo',   N'Mejora', NULL, 0.7000);   -- viva y SIN agrupacion
 -- 93 tickets de /T/Vol en los ultimos 30 dias y 10 viejos (no cuentan).
 INSERT dbo.Tickets (CodigoTicket, FechaRegistro, Tipo, Categoria)
 SELECT N'T' + CONVERT(nvarchar(10), n), DATEADD(DAY, CASE WHEN n <= 93 THEN -2 ELSE -60 END, SYSUTCDATETIME()), N'Incidencia', N'/T/Vol'
@@ -512,6 +513,10 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 }
                 Check("K11 concurrencia: 10 (C12) + 60 ligada en una tx abierta; la otra (35) espera el candado y se rechaza", "True|51010|0.7000",
                       espero + "|" + resB + "|" + Celda(Uno(cn, "SELECT SUM(PctDisminucion) FROM dbo.ProblemCategoria WHERE Categoria = N'/C/Carrera'")));
+
+                Check("K12 una fila viva SIN agrupacion de otra iniciativa cuenta contra el tope: 70 + 40 -> 51010", "51010",
+                      Error(() => Crear(cn, Alta(hoy, "/N/Solo", "40"))));
+                Check("K13 ... y 70 + 30 = 100 pasa", "sin error", Error(() => Crear(cn, Alta(hoy, "/N/Solo", "30"))));
 
                 // ---------------- R: TicketsReduce ----------------
                 var cr = Crear(cn, Alta(hoy, "/T/Vol", "50", "/S/Cat 2", ""));

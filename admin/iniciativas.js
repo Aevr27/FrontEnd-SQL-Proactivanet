@@ -600,8 +600,12 @@ window.Iniciativas = (function () {
         // existen, del mismo registro.
         this.crearAdmin.fijarValores(function () {
           var r = reg && reg.registro;
-          return r ? { estados: r.estadosProblem, tiposIniciativa: r.valoresTipoIniciativa, tiposAgrupado: r.valoresTipoAgrupado } : null;
+          return r ? { estados: r.estadosProblem, tiposIniciativa: r.valoresTipoIniciativa, tiposAgrupado: r.valoresTipoAgrupado,
+                       persiste: r.persistenciaAdmin === true } : null;
         });
+        // Un alta GUARDADA recarga el registro (la lista, la busqueda de
+        // "existente" y sus valores) sin recargar la pagina.
+        this.crearAdmin.alGuardar = function () { reg.cargar(); };
       }
       if (DUENOS_VISIBLES && window.CategoriasDuenos) this.duenos = new window.CategoriasDuenos.VistaDuenos(this.doc);
       if (this.$('cdSeccion')) this.$('cdSeccion').hidden = !DUENOS_VISIBLES;

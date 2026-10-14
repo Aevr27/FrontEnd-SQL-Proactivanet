@@ -979,8 +979,91 @@ pruebas.push(function () {
       [r.estado, /Solo validación/.test(caja.innerHTML), /No se guardó nada/.test(caja.innerHTML)]);
     return validar(200, { valida: true, guardada: true });
   }).then(function (r) {
-    Check('G23 Crear 200 "guardada": no se acepta como exito', ['error', false, false, false],
+    Check('G23 Crear 200 "guardada" sin accion ni codigo: no se acepta como exito', ['error', false, false, false],
       [r.estado, r.guardada, caja.classList.contains('ok'), exito.test(caja.innerHTML)]);
+  });
+});
+
+// GS10) Modificar GUARDADO: recarga el registro (lista, categorias, capacidad
+// e historial salen de ahi) y reabre el detalle con el aviso; un 409 no
+// recarga nada y deja la edicion abierta.
+pruebas.push(function () {
+  var p = Pagina(), reg;
+  function registros() { return p.pedidos.filter(function (x) { return /registro/.test(x.url); }).length; }
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    reg.modificar('PRB 2026-000001');
+    Check('GS10a con persistencia activa el boton de Modificar dice "Guardar"', true,
+      /data-accion="edicion-guardar"[^>]*>Guardar<\/button>/.test(p.sel('regEdicion').innerHTML));
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    return reg.guardarEdicion(Servidor(409, { tipo: 'TopeExcedido', error: 'tope', guardada: false }).pedir);
+  }).then(function (r) {
+    Check('GS10b 409: rechazada, la edicion sigue abierta, sin recargar', ['rechazada', true, 1],
+      [r.estado, !!reg.edicion, registros()]);
+    return reg.guardarEdicion(Servidor(200, { accion: 'modificar', valida: true, guardada: true, codigo: 'PRB 2026-000001',
+      cambios: [{ clave: 'titulo', rotulo: 'Título', anterior: 'x', nuevo: 'Nuevo' }] }).pedir);
+  }).then(function (r) {
+    var aviso = p.sel('regDetAviso');
+    Check('GS10c guardado: recarga el registro una vez, reabre el mismo detalle (sin edicion) con el aviso', ['guardada', 2, 'PRB 2026-000001', null, false, true],
+      [r.estado, registros(), reg.abierta, reg.edicion, aviso.hidden, /Guardado en la base/.test(aviso.innerHTML)]);
+  });
+});
+
+// GS) Persistencia ACTIVA: solo 200 + guardada + accion (+ codigo en un alta)
+// es exito; 409 / 500 EscrituraNoConfirmada nunca dicen "guardado"; un alta
+// guardada limpia el borrador y avisa a la pagina; Modificar guardado recarga
+// el registro y reabre el detalle.
+pruebas.push(function () {
+  var R = base.ventana.IniciativaAdmin.RespuestaGestion;
+  Check('GS1 estados con la persistencia activa', ['guardada', 'guardada', 'error', 'rechazada', 'rechazada', 'no_confirmada'], [
+    R.desde(200, { accion: 'crear', valida: true, guardada: true, codigo: 'PRB 2026-000185' }).estado,
+    R.desde(200, { accion: 'modificar', valida: true, guardada: true, codigo: 'PRB 2026-000001' }).estado,
+    R.desde(200, { accion: 'crear', valida: true, guardada: true, codigo: '' }).estado,
+    R.desde(409, { tipo: 'TopeExcedido', error: '/A/Cat 1: solo tiene 0%', guardada: false }).estado,
+    R.desde(409, { tipo: 'PendienteSinRegla', error: 'No se guardó nada: quitar', guardada: false }).estado,
+    R.desde(500, { tipo: 'EscrituraNoConfirmada', error: 'tiempo agotado', guardada: null }).estado
+  ]);
+  var g = R.desde(200, { accion: 'crear', valida: true, guardada: true, codigo: 'PRB 2026-000185', cambios: [] });
+  var html = A.htmlRespuesta(g);
+  Check('GS2 guardada: dice el codigo, clase ok, sin aviso de "no se guardo"', [true, 'ok', false, true],
+    [/Guardado en la base · Código PRB 2026-000185/.test(html), A.claseRespuesta(g), /No se guardó/.test(html), g.guardada]);
+  var rch = R.desde(409, { tipo: 'TopeExcedido', error: '/A/Cat 1: solo tiene 0% disponible', guardada: false });
+  Check('GS3 rechazada: no se guardo, con el motivo de la base, nunca ok', [false, 'mal', true, true],
+    [rch.guardada, A.claseRespuesta(rch), /No se guardó nada/.test(A.htmlRespuesta(rch)), /solo tiene 0% disponible/.test(A.htmlRespuesta(rch))]);
+  var nc = R.desde(500, { tipo: 'EscrituraNoConfirmada', error: 'No se pudo confirmar el guardado', guardada: null });
+  Check('GS4 no confirmada: no dice ni guardado ni "no se guardo"; pide revisar', [false, false, true, 'aviso'],
+    [/Guardado en la base/.test(A.htmlRespuesta(nc)), /No se guardó nada/.test(A.htmlRespuesta(nc)),
+     /Revisa el registro antes de reintentar/.test(A.htmlRespuesta(nc)), A.claseRespuesta(nc)]);
+  Check('GS5 rotulos: sin el dato del servidor, "no guarda"; con persistencia, "Guardar"',
+    ['Validar en el servidor (no guarda)', 'Guardar'], [A.ROTULOS.valida.boton, A.ROTULOS.guarda.boton]);
+
+  var p = Pagina(), recargas = 0;
+  return esperar().then(function () {
+    var pg = p.pagina;
+    pg.fijarRol('ADM');
+    p.sel('tab-administracion').disparar('click');
+    p.sel('btnCrearAdmin').disparar('click');
+    Check('GS6 registro sin persistencia_admin: el boton de alta dice que no guarda', 'Validar en el servidor (no guarda)', p.sel('admGuardar').textContent);
+    pg.registro.registro.persistenciaAdmin = true;
+    pg.crearAdmin.pintar();
+    Check('GS7 con persistencia_admin = true: "Guardar"', 'Guardar', p.sel('admGuardar').textContent);
+    pg.crearAdmin.alGuardar = function () { recargas++; };
+    elegir(p, 'admTipo', 'ADO');
+    escribir(p, 'adm-titulo', 'Alta real');
+    pg.crearAdmin.pedir = Servidor(409, { tipo: 'TopeExcedido', error: 'tope', guardada: false }).pedir;
+    return pg.crearAdmin.guardar();
+  }).then(function (r) {
+    Check('GS8 alta rechazada: el borrador sigue (para corregir) y no se recarga nada', ['rechazada', 'Alta real', 0],
+      [r.estado, p.pagina.crearAdmin.borrador.valores.titulo, recargas]);
+    p.pagina.crearAdmin.pedir = Servidor(200, { accion: 'crear', valida: true, guardada: true, codigo: 'ADO 2026-000074', cambios: [] }).pedir;
+    return p.pagina.crearAdmin.guardar();
+  }).then(function (r) {
+    var caja = p.sel('admResultado');
+    Check('GS9 alta guardada: muestra el codigo, limpia el borrador y avisa a la pagina una vez', ['guardada', true, '', '', 1, true],
+      [r.estado, /ADO 2026-000074/.test(caja.innerHTML), p.pagina.crearAdmin.borrador.tipo, p.pagina.crearAdmin.borrador.valores.titulo,
+       recargas, caja.classList.contains('ok')]);
   });
 });
 
@@ -1156,7 +1239,7 @@ pruebas.push(function () {
   Check('AD7 duplicado rechazado', [false, 3], [b.agregarCategoria(' /a/cat 2').ok, b.categorias.filas.length]);
   Check('AD8 lo escrito que no es categoria: rechazo con parecidas, sin elegir', [false, true, 3],
     (function (x) { return [x.ok, /Parecidas: \/A\/Cat 1 · \/A\/Cat 2/.test(x.mensaje), b.categorias.filas.length]; })(b.agregarCategoria('cat')));
-  Check('AD9 aviso de prototipo: no se guardo ni se genero codigo', true, /No se guardó nada y no se generó código/.test(r.aviso));
+  Check('AD9 la revision local nunca guarda ni genera codigo', [true, null, false], [/No se guardó nada/.test(r.aviso), r.codigo, r.guardado]);
 });
 
 // LF) Ligar a un problema existente: varias categorias nuevas, cada una con
