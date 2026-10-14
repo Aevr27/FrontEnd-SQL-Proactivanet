@@ -138,7 +138,7 @@ public class AdminIniciativasGestion : IHttpHandler
                 context.Response.TrySkipIisCustomErrors = true;
                 return new Dictionary<string, object>
                 {
-                    { "error", "No se guardó nada: " + string.Join(" ", pendientes.ToArray()) },
+                    { "error", "No se guard\u00f3 nada: " + string.Join(" ", pendientes.ToArray()) },
                     { "tipo", "PendienteSinRegla" }, { "pendientes", pendientes }, { "guardada", false },
                 };
             }
@@ -182,7 +182,7 @@ public class AdminIniciativasGestion : IHttpHandler
                 }
                 // Un alta sin Codigo devuelto no se da por guardada.
                 if (string.IsNullOrEmpty(codigo))
-                    return Error(context, 500, "La base no devolvió el código del alta: revisa el registro antes de reintentar.", "EscrituraNoConfirmada");
+                    return Error(context, 500, "La base no devolvi\u00f3 el c\u00f3digo del alta: revisa el registro antes de reintentar.", "EscrituraNoConfirmada");
                 salida["codigo"] = codigo;
                 salida["guardada"] = true;
                 salida["persistencia"] = "habilitada";

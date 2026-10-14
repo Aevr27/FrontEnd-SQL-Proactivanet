@@ -30,11 +30,14 @@
 //      puede bajar o dejar igual; iniciativa que no consume no tiene tope.
 //   V)  VolumetriaCategoria.Resolver: ok, cero real, sin datos, ruta vacia,
 //      llave normalizada como Experiencia.
+//   EN) Acentos en la respuesta del servidor (faltantes, cambios, JSON) y
+//      fuentes sin BOM sin literales no ASCII; motivo de persistencia vigente.
 //
-// Compilar y correr desde la raiz del repo:
-//   csc /nologo /target:library /out:adm.dll /r:System.dll /r:System.Data.dll ^
+// Compilar y correr desde la raiz del repo. /codepage:1252 = como compila IIS
+// los archivos sin BOM (sin el, EN1-EN4 no ven el mojibake del servidor):
+//   csc /nologo /target:library /codepage:1252 /out:adm.dll /r:System.dll /r:System.Data.dll ^
 //       /r:System.Web.dll /r:System.Web.Extensions.dll /r:System.Configuration.dll App_Code\*.cs
-//   csc /nologo /out:GestionIniciativaAdminSmoke.exe /r:adm.dll /r:System.dll ^
+//   csc /nologo /out:GestionIniciativaAdminSmoke.exe /r:adm.dll /r:System.dll /r:System.Web.Extensions.dll ^
 //       tools\tests\GestionIniciativaAdminSmoke.cs
 //   GestionIniciativaAdminSmoke.exe
 using System;
@@ -155,6 +158,35 @@ public static class GestionIniciativaAdminSmoke
     static CapacidadCategoria.Compromiso KN(string folio, string cat, decimal pct)
     {
         return new CapacidadCategoria.Compromiso { Folio = folio, Categoria = cat, Pct = pct, Consume = false };
+    }
+
+    static string Rotulo(List<Dictionary<string, object>> filas, string clave)
+    {
+        foreach (var f in filas) if ((string)f["clave"] == clave) return (string)f["rotulo"];
+        return null;
+    }
+
+    // Archivo sin BOM: lineas de codigo (no comentario) con bytes > 127.
+    // Con BOM el compilador lo lee como UTF-8 y no aplica.
+    static string NoAsciiEnCodigo(params string[] archivos)
+    {
+        var malas = new List<string>();
+        foreach (var a in archivos)
+        {
+            var b = System.IO.File.ReadAllBytes(a);
+            if (b.Length >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) continue;
+            var lineas = System.Text.Encoding.GetEncoding(28591).GetString(b).Split('\n');
+            var enBloque = false;
+            for (var i = 0; i < lineas.Length; i++)
+            {
+                var l = lineas[i].Trim();
+                if (enBloque) { if (l.Contains("*/")) enBloque = false; continue; }
+                if (l.StartsWith("/*")) { enBloque = !l.Contains("*/"); continue; }
+                if (l.StartsWith("//") || l.StartsWith("<%--")) continue;
+                if (l.Any(c => c > 127)) malas.Add(a + ":" + (i + 1));
+            }
+        }
+        return string.Join(" ", malas.ToArray());
     }
 
     public static int Main()
@@ -457,6 +489,25 @@ public static class GestionIniciativaAdminSmoke
         try { new EscritorGestionAdminSql().Modificar(new System.Data.SqlClient.SqlConnection(), null, plQuita, "u"); }
         catch (InvalidOperationException) { escrQuita = "rechaza"; }
         Check("PL23 el escritor no ejecuta un plan con categorias a quitar", "rechaza", escrQuita);
+
+        // ---- EN: acentos en lo que responde el servidor ----
+        // App_Code y los .ashx sin BOM: IIS los compila como Windows-1252 y
+        // un literal UTF-8 crudo llega al navegador como "Descripci\u00c3\u00b3n".
+        // Por eso este smoke se compila con /codepage:1252 (como el servidor).
+        var enCrear = Crear(C("ADO"));
+        Check("EN1 faltante de alta: Descripcion con su acento", "Descripci\u00f3n", Rotulo(enCrear.Faltantes, "descripcion"));
+        Check("EN2 faltante de modificacion: % Disminucion con su acento", "% Disminuci\u00f3n", Rotulo(sinPct.Faltantes, "pct"));
+        var enPct = ModC(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40"));
+        Check("EN3 cambio de %: rotulo con acento y punto medio", "% Disminuci\u00f3n \u00b7 /A/Cat 1", Rotulo(enPct.Cambios, "pct"));
+        var enJson = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new object[] { enCrear.ComoJson(), enPct.ComoJson() });
+        Check("EN4 JSON como lo escribe DashboardHandler.Responder: sin mojibake y con los acentos", "False|True|True",
+            enJson.Contains("\u00c3") + "|" + enJson.Contains("Descripci\u00f3n") + "|" + enJson.Contains("Disminuci\u00f3n"));
+        Check("EN5 motivo de persistencia: sin 'retirar' como unica salida; nombra sql/18, ADM_04 y ADM_03", "False|True|True|True",
+            PersistenciaGestionAdmin.Motivo.Contains("Falta retirar") + "|" + PersistenciaGestionAdmin.Motivo.Contains("sql/18") + "|" +
+            PersistenciaGestionAdmin.Motivo.Contains("ADM_04") + "|" + PersistenciaGestionAdmin.Motivo.Contains("ADM_03"));
+        Check("EN6 fuentes de la respuesta de Admin sin BOM: ningun caracter no ASCII fuera de comentarios", "",
+            NoAsciiEnCodigo(@"App_Code\GestionIniciativaAdmin.cs", @"App_Code\PlanGestionAdmin.cs", @"App_Code\IniciativaService.cs",
+                            @"App_Code\SolicitudIniciativa.cs", @"handlers\admin_iniciativas_gestion.ashx", @"handlers\admin_iniciativas_validar.ashx"));
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO PASO" : fallos + " FALLO(S)");

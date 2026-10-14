@@ -60,8 +60,9 @@ Estado / Subestado inicial: opcionales en el alta (se validan contra los valores
 1. Diagnóstico (§D) y guardar sus definiciones (D3). Parar si D2b no es 1/1/1/0.
 2. Respaldo completo y plan de conciliación Excel ↔ SQL.
 3. Apagar el programador del cargador; conciliación final aprobada; instalar ADM_03 (backend `CUTOVER_CHECKLIST.md` §1). **Mientras el cargador siga activo, encender la persistencia está prohibido**: la siguiente carga pisaría o desactivaría lo creado.
+   *Plan transitorio decidido (2026-10-14):* el cargador sigue activo con ADM_04 instalado **después** de `sql/18` (paso 4), en lugar de ADM_03; modificar de verdad en Admin una iniciativa del Excel (algún valor editable distinto al guardar; sin cambios no cuenta) le transfiere a Admin la iniciativa entera. Verificado y bloqueos: backend `CUTOVER_CHECKLIST.md` §0-B y `ADM_04_RUNBOOK.md`. Sin ADM_04 la prohibición sigue igual: `adm.IniciativaProtegida` sola no protege nada.
 4. Aplicar `sql/18` (`aprobar_migracion = 18`).
-5. `GRANT EXECUTE ON SCHEMA::adm TO [<usuario del sitio>]`.
+5. Con su propio OK, después del `COMMIT` de 18 (la sección 8 de `sql/18` está comentada y no corre con el script): `GRANT EXECUTE ON SCHEMA::adm TO [PROACTIVANETAD]` y `DENY INSERT, UPDATE, DELETE ON adm.IniciativaProtegida TO [PROACTIVANETAD]`. Con el plan transitorio, ADM_04 va después de este paso (runbook ADM_04, pasos 3b–5).
 6. ADM_01 y ADM_02 (sus precondiciones revisan la versión).
 7. Desplegar el frontend (PR de claude-branch a main) **con el switch en false**: la página sigue diciendo "no guarda".
 8. Cambio de código aparte: `PersistenciaGestionAdmin.Habilitada = true`, desplegar.
@@ -70,7 +71,7 @@ Estado / Subestado inicial: opcionales en el alta (se validan contra los valores
 
 ## F. Rollback
 
-Orden: switch a false y deploy → `ADM_02_…_rollback` → `ADM_01_…_rollback` → `sql/18_…_rollback` → (si se decide volver al Excel) `ADM_03_…_rollback`.
+Orden: switch a false y deploy → (si está) `ADM_04_…_rollback` con el programador apagado, en la misma transacción que ADM_03 si se retira el cargador (runbook ADM_04, E32) → `ADM_02_…_rollback` → `ADM_01_…_rollback` → `sql/18_…_rollback` → (si se decide volver al Excel) `ADM_03_…_rollback`. El rollback de 18 se niega con 51093 mientras ADM_04 esté instalado.
 
 - El rollback de 18 se niega con 51091 mientras las vistas usen sus columnas, y con 51090 si ya hay fechas o eventos por categoría. **Forzarlo borra los eventos de categoría** (irrecuperables salvo el respaldo); los de la iniciativa (`Categoria IS NULL`) se quedan.
 - Las iniciativas creadas por Admin se quedan en `dbo.Problem`/`dbo.ProblemCategoria` (ningún rollback las borra).

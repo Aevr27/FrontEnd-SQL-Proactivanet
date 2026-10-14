@@ -192,7 +192,7 @@ public static class PlanificadorGestionAdmin
     };
 
     public const string PendienteQuitar =
-        "Quitar categorías: falta decidir borrado físico o marca propia (VigenteEnOrigen era del cargador).";
+        "Quitar categor\u00edas: falta decidir borrado f\u00edsico o marca propia (VigenteEnOrigen era del cargador).";
 
     private static string Limpio(string s)
     {
