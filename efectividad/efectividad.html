@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<!--
+  efectividad/efectividad.html - Modulo "Efectividad de iniciativas".
+
+  Mismo contrato que analisis/, experiencia/, qa/ y qare/: este archivo es a
+  la vez la pagina suelta y la fuente de la pestaña "Efectividad" de
+  dashboard.html. TableroEfectividad (dashboard.js) trae este marcado, le
+  quita <script> y <link>, desarma el envoltorio #tab-efectividad y lo monta
+  en el contenedor de la pestaña.
+
+  Todos los ids llevan el prefijo "ef-": en el tablero este marcado convive
+  con las demas pestañas en el MISMO documento.
+
+  Que hace: la boleta de las iniciativas. Cada iniciativa promete bajar un %
+  los tickets de sus categorias; el calculo de la base
+  (60_efectividad_iniciativas.sql, una vez al dia) compara los 90 dias de
+  antes con los 90 de despues de su cierre, corregido por lo que paso con el
+  resto del volumen, y la califica. Aqui se ve ese calculo: el % de
+  efectividad con los filtros de Experiencia, la lista de las medidas con su
+  calificacion, la boleta de cada una, cuando se califican las que estan en
+  medicion y las que no se pueden calificar y por que. No calcula nada nuevo:
+  lee handlers/efectividad.ashx.
+
+  Hojas: .card, .kpi, .filtros, .btn y .pill son de dashboard.css, kpi.css y
+  boton.css; efectividad.css lleva solo lo privado. Embebido, estos <link> se
+  descartan.
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tickets Proactivanet — Efectividad de iniciativas</title>
+  <!-- Solo para la pagina suelta: embebida en dashboard.html cada uno de
+       estos <link> se quita y manda la copia del tablero. -->
+  <link rel="stylesheet" href="../assets/css/kpi.css">
+  <link rel="stylesheet" href="../assets/css/boton.css">
+  <link rel="stylesheet" href="../dashboard.css">
+  <link rel="stylesheet" href="efectividad.css">
+</head>
+<body>
+<div class="wrap">
+  <div id="tab-efectividad" class="maintab-content active">
+
+    <header class="top">
+      <div>
+        <h1>Efectividad de iniciativas</h1>
+        <div class="sub">¿Bajaron los tickets que cada iniciativa prometió bajar? La boleta de cada una, con los filtros de Experiencia.</div>
+      </div>
+      <div class="acciones-top">
+        <div class="estado" id="ef-estado" role="status"></div>
+      </div>
+    </header>
+
+    <section class="filtros" id="ef-filtros">
+      <div class="campo">
+        <label for="ef-dir">Director</label>
+        <select id="ef-dir"><option value="">— Todos —</option></select>
+      </div>
+      <div class="campo">
+        <label for="ef-po">Product Owner</label>
+        <select id="ef-po"><option value="">— Todos —</option></select>
+      </div>
+      <div class="campo">
+        <label for="ef-mgr">Manager</label>
+        <select id="ef-mgr"><option value="">— Todos —</option></select>
+      </div>
+      <div class="campo">
+        <label for="ef-so">Service Owner</label>
+        <select id="ef-so"><option value="">— Todos —</option></select>
+      </div>
+      <div class="campo">
+        <label for="ef-tipo">Tipo</label>
+        <select id="ef-tipo"><option value="">— Todos —</option></select>
+      </div>
+      <div class="campo acciones">
+        <button class="btn linea" id="ef-limpiar" type="button">Limpiar</button>
+        <button class="btn gris" id="ef-excel" type="button" disabled>⬇ Descargar Excel</button>
+      </div>
+    </section>
+
+    <div class="ef-aviso ef-aviso-error" id="ef-error" hidden>
+      <strong>No se pudo traer la efectividad.</strong>
+      <span id="ef-error-msg"></span>
+    </div>
+
+    <section class="card" id="ef-sin-calculo" hidden>
+      <h3>Todavía no hay cálculo</h3>
+      <p class="nota">La base calcula la efectividad una vez al día (<code>60_efectividad_iniciativas.sql</code>, al final del ETL). Si no aparece, falta instalar el 60 o la cuenta del tablero no puede leer sus tablas.</p>
+    </section>
+
+    <div id="ef-contenido" hidden>
+      <section class="kpis" id="ef-kpis"></section>
+
+      <details class="card ef-como" id="ef-como">
+        <summary>¿Cómo se califica una iniciativa?</summary>
+        <ol>
+          <li><b>La promesa.</b> Cada iniciativa promete bajar un % los tickets de sus categorías. Ese % por los tickets que había antes es lo que <b>prometió</b> quitar al mes.</li>
+          <li><b>Antes.</b> Se cuentan los tickets de los 90 días anteriores a que se creara (o desde el inicio del historial, si son al menos 30 días).</li>
+          <li><b>Lo esperado.</b> Si todo el resto del volumen subió o bajó en ese tiempo, se ajusta: así no se culpa ni se premia a la iniciativa por algo que le pasó a todos.</li>
+          <li><b>Después.</b> Se cuentan los tickets de los 90 días después de su cierre. Antes de eso, está <b>en medición</b>.</li>
+          <li><b>La calificación.</b> Lo que bajó contra lo esperado, entre 0 y lo prometido. <b>Efectiva</b>: logró el 90% o más. <b>Parcial</b>: algo, pero menos. <b>Sin baja</b>: nada. Si una categoría la comparten varias iniciativas, la baja se reparte por su %.</li>
+          <li><b>El %.</b> Todo lo logrado entre todo lo prometido. <b>Rebote</b>: bajó, pero a los 180 días del cierre ya volvió a subir.</li>
+        </ol>
+      </details>
+
+      <section class="card ef-hojas">
+        <div class="ef-pestanas" role="tablist" id="ef-pestanas" aria-label="Vistas de efectividad">
+          <button type="button" role="tab" id="ef-p-medidas" data-hoja="medidas" aria-selected="true" aria-controls="ef-h-medidas">Medidas</button>
+          <button type="button" role="tab" id="ef-p-medicion" data-hoja="medicion" aria-selected="false" aria-controls="ef-h-medicion">En medición</button>
+          <button type="button" role="tab" id="ef-p-sin" data-hoja="sin" aria-selected="false" aria-controls="ef-h-sin">No se puede calificar</button>
+        </div>
+
+        <div class="ef-hoja" id="ef-h-medidas" role="tabpanel" aria-labelledby="ef-p-medidas">
+          <div class="ef-barra-hoja">
+            <input type="search" id="ef-buscar" placeholder="Buscar folio, título o categoría" aria-label="Buscar folio, título o categoría">
+            <div class="ef-leyenda" id="ef-conteo-cal"></div>
+          </div>
+          <div class="ef-tabla-wrap"><table class="ef-tabla" id="ef-t-medidas"></table></div>
+          <p class="nota">Clic en una fila para ver su boleta. Ordenadas por lo que prometieron, de mayor a menor. Tickets al mes.</p>
+        </div>
+
+        <div class="ef-hoja" id="ef-h-medicion" role="tabpanel" aria-labelledby="ef-p-medicion" hidden>
+          <h4>Cuándo se van a poder calificar</h4>
+          <div class="ef-grafica" id="ef-g-calendario"></div>
+          <div class="ef-tabla-wrap"><table class="ef-tabla" id="ef-t-medicion"></table></div>
+          <p class="nota">Una iniciativa se califica 90 días después de su cierre. Clic en una fila para ver lo que va a medirse.</p>
+        </div>
+
+        <div class="ef-hoja" id="ef-h-sin" role="tabpanel" aria-labelledby="ef-p-sin" hidden>
+          <div id="ef-sin-grupos"></div>
+        </div>
+      </section>
+    </div>
+
+    <dialog class="ef-boleta" id="ef-boleta" aria-labelledby="ef-b-titulo">
+      <div class="ef-b-cab">
+        <div>
+          <div class="ef-b-folio" id="ef-b-folio"></div>
+          <h2 id="ef-b-titulo"></h2>
+          <div class="ef-b-sub" id="ef-b-sub"></div>
+        </div>
+        <button class="btn linea chico" type="button" id="ef-b-cerrar" aria-label="Cerrar la boleta">Cerrar</button>
+      </div>
+      <div id="ef-b-cuerpo"></div>
+    </dialog>
+
+    <div id="ef-tip" class="ef-tip" hidden></div>
+  </div>
+</div>
+<script src="efectividad.js"></script>
+</body>
+</html>
