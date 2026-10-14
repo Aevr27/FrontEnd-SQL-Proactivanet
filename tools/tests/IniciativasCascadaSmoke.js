@@ -95,11 +95,12 @@ function Pagina(pedir, antes) {
   var ventana = Elemento('window');
   var documento = Documento();
   (new Function('window', leer('assets/js/escape.js')))(ventana);
+  (new Function('window', leer('assets/js/duracion.js')))(ventana);
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(ventana, ventana.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(ventana, documento);
   (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
-  (new Function('window', 'document', 'Catalogos', 'Escape', 'fetch', leer('admin/registro-iniciativas.js')))(
-    ventana, documento, ventana.Catalogos, ventana.Escape, pedir);
+  (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
+    ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   // Nueva solicitud es de ADM y MOD y no abre sin rol (falla cerrado). Las

@@ -96,6 +96,7 @@ public static partial class ExperienciaQueries
 
             var salida = ArmarRegistro(detalle, sueltas, dir, prefijos);
             salida["tipos_iniciativa"] = DashboardCatalogos.PrefijosIniciativa(cn);
+            AplicarFechasPropias(salida, LeerFechasPropias(cn));
 
             // Historial de fechas por folio (App_Code/HistorialFechas.cs). Si
             // no se puede leer, cada iniciativa sale sin historial y
@@ -107,11 +108,14 @@ public static partial class ExperienciaQueries
             foreach (Dictionary<string, object> i in (List<object>)salida["iniciativas"])
             {
                 i["historial"] = historial.Para(i["folio"] as string);
+                i["historial_categorias"] = historial.CategoriasPara(i["folio"] as string);
                 string sub;
                 i["subestado"] = estados.SubestadoPorFolio.TryGetValue(i["folio"] as string ?? "", out sub) ? sub : null;
             }
             salida["estados_problem"] = Ordenados(estados.Valores.Estados);
             salida["subestados_problem"] = Ordenados(estados.Valores.Subestados);
+            salida["valores_tipo_iniciativa"] = Ordenados(estados.Valores.TiposIniciativa);
+            salida["valores_tipo_agrupado"] = Ordenados(estados.Valores.TiposAgrupado);
             salida["historial_estado"] = historial.Estado;
             salida["historial_desde"] = historial.Desde;
             salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
@@ -151,7 +155,20 @@ public static partial class ExperienciaQueries
                 if (sub != null) subestados.Add(sub);
             }
         }
-        salida.Valores = new EstadosProblem(estados, subestados);
+        // TipoIniciativa (dbo.Problem) y TipoAgrupado (dbo.ProblemCategoria)
+        // que ya existen: lo unico que Crear / ligar aceptan declarar.
+        var tiposIni = new List<string>();
+        var tiposAgr = new List<string>();
+        using (var cmd = new SqlCommand(
+            "SELECT DISTINCT LTRIM(RTRIM(TipoIniciativa)) FROM dbo.Problem WHERE NULLIF(LTRIM(RTRIM(TipoIniciativa)), N'') IS NOT NULL; " +
+            "SELECT DISTINCT LTRIM(RTRIM(TipoAgrupado)) FROM dbo.ProblemCategoria WHERE NULLIF(LTRIM(RTRIM(TipoAgrupado)), N'') IS NOT NULL;", cn))
+        using (var rd = cmd.ExecuteReader())
+        {
+            while (rd.Read()) { var t = Texto(rd.GetValue(0)); if (t != null) tiposIni.Add(t); }
+            rd.NextResult();
+            while (rd.Read()) { var t = Texto(rd.GetValue(0)); if (t != null) tiposAgr.Add(t); }
+        }
+        salida.Valores = new EstadosProblem(estados, subestados, tiposIni, tiposAgr);
         return salida;
     }
 
@@ -160,6 +177,75 @@ public static partial class ExperienciaQueries
         var lista = new List<string>(valores);
         lista.Sort(StringComparer.Ordinal);
         return new List<object>(lista);
+    }
+
+    // Fechas por categoria (sql/18: dbo.ProblemCategoria.FechaCreacionCategoria
+    // / FechaAnalisisCategoria) y la fecha de analisis de la INICIATIVA
+    // (dbo.Problem.FechaAnalisis). Sin las columnas (sql/18 sin aplicar)
+    // ninguna categoria tiene fecha propia: todas heredan. SOLO LECTURA.
+    public sealed class FechasPropias
+    {
+        // folio -> yyyy-MM-dd de dbo.Problem.FechaAnalisis
+        public Dictionary<string, string> AnalisisIniciativa =
+            new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // folio + NBSP + ruta normalizada -> { creacion, analisis }
+        public Dictionary<string, string[]> PorCategoria =
+            new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private const string SEP_FECHAS = " ";
+
+    private static FechasPropias LeerFechasPropias(SqlConnection cn)
+    {
+        var f = new FechasPropias();
+        bool columnas;
+        using (var cmd = new SqlCommand(
+            "SELECT CASE WHEN COL_LENGTH(N'dbo.ProblemCategoria', N'FechaAnalisisCategoria') IS NULL THEN 0 ELSE 1 END", cn))
+            columnas = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+        var sql = "SELECT Codigo, FechaAnalisis FROM dbo.Problem WHERE VigenteEnOrigen = 1;" +
+            (columnas ? " SELECT Codigo, Categoria, FechaCreacionCategoria, FechaAnalisisCategoria FROM dbo.ProblemCategoria " +
+                        "WHERE VigenteEnOrigen = 1 AND FechaAnalisisCategoria IS NOT NULL;" : "");
+        using (var cmd = new SqlCommand(sql, cn))
+        using (var rd = cmd.ExecuteReader())
+        {
+            while (rd.Read())
+            {
+                var folio = Texto(rd.GetValue(0));
+                if (folio != null) f.AnalisisIniciativa[folio] = Fecha(rd.GetValue(1));
+            }
+            if (columnas && rd.NextResult())
+            {
+                while (rd.Read())
+                {
+                    var folio = Texto(rd.GetValue(0));
+                    var ruta = Normaliza(Texto(rd.GetValue(1)));
+                    if (folio == null || ruta == null) continue;
+                    f.PorCategoria[folio + SEP_FECHAS + ruta] = new[] { Fecha(rd.GetValue(2)), Fecha(rd.GetValue(3)) };
+                }
+            }
+        }
+        return f;
+    }
+
+    // Cuelga de cada categoria f_creacion_propia / f_analisis_propia (null =
+    // hereda) y deja i["f_analisis"] como la de la INICIATIVA (la primera
+    // fila podria ser una categoria con fecha propia). Aparte para probarla
+    // sin SQL.
+    private static void AplicarFechasPropias(Dictionary<string, object> salida, FechasPropias f)
+    {
+        foreach (Dictionary<string, object> i in (List<object>)salida["iniciativas"])
+        {
+            var folio = i["folio"] as string ?? "";
+            string fi;
+            if (f.AnalisisIniciativa.TryGetValue(folio, out fi)) i["f_analisis"] = fi;
+            foreach (Dictionary<string, object> c in (List<object>)i["categorias"])
+            {
+                string[] propias;
+                var hay = f.PorCategoria.TryGetValue(folio + SEP_FECHAS + (c["categoria"] as string ?? ""), out propias);
+                c["f_creacion_propia"] = hay ? propias[0] : null;
+                c["f_analisis_propia"] = hay ? propias[1] : null;
+            }
+        }
     }
 
     // Aparte de RegistroIniciativas para que tools/tests/RegistroIniciativasSmoke.cs
@@ -198,6 +284,10 @@ public static partial class ExperienciaQueries
 
                 var c = new Dictionary<string, object>();
                 c["categoria"] = d.Categoria;
+                c["agrup"] = d.Agrup;
+                // La fecha de analisis EFECTIVA de esta categoria (la de la
+                // vista: la propia si la tiene, si no la de la iniciativa).
+                c["f_analisis"] = d.FAnalisis;
                 c["tickets_reduce"] = d.TicketsReduce;
                 c["pct_dism"] = d.PctDisminucion;
                 c["po"] = d.Po;
@@ -209,6 +299,19 @@ public static partial class ExperienciaQueries
 
             var primera = filas[0];
             var i = Iniciativa(primera, total, total, dir);
+            // Con fechas de analisis por categoria, la iniciativa va
+            // retrasada si CUALQUIERA de sus categorias lo va (el semaforo
+            // de Experiencia es por categoria). Mientras todas compartan la
+            // fecha de la iniciativa, es lo mismo que la primera fila.
+            foreach (var d in filas)
+            {
+                if (!d.Retrasada || primera.Retrasada) continue;
+                i["riesgo_folio"] = total;
+                i["retrazado"] = 1;
+                i["sem_fecha"] = d.SemFecha;
+                i["fecha_retrasada"] = true;
+                break;
+            }
             i["activa"] = primera.Activa;
             i["seguimiento"] = primera.Activa && EsAgrupador(primera.Agrup);
             i["sin_categoria"] = false;

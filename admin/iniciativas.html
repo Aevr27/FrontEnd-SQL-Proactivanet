@@ -566,7 +566,9 @@
       <span class="ini-hint">Gestión directa · sin solicitud ni aprobación</span>
     </div>
 
-    <p class="ini-prototipo-aviso" role="note"><strong>Persistencia no habilitada.</strong> «Validar en el servidor (no guarda)» solo valida: no guarda nada ni genera código hasta que el contrato de base esté aprobado.</p>
+    <!-- El texto lo ajusta VistaCrearAdmin.pintarRotulos segun
+         persistencia_admin del registro; sin el dato, el de "no guarda". -->
+    <p class="ini-prototipo-aviso" role="note" id="admPersistenciaAviso">«Validar en el servidor (no guarda)» solo valida: no guarda nada ni genera código hasta que el contrato de base esté aprobado.</p>
 
     <!-- Dos caminos para el problema de la iniciativa (VistaCrearAdmin.elegirRuta).
          "nuevo" es el formulario de alta (dbo.Problem + sus categorias).
@@ -594,11 +596,31 @@
         </div>
         <div class="ini-campo">
           <span class="ini-rotulo-derivado" id="rotAdmCodigo">Código</span>
-          <output id="admCodigo" aria-labelledby="rotAdmCodigo">Sin código: no se asigna todavía (regla pendiente)</output>
+          <output id="admCodigo" aria-labelledby="rotAdmCodigo">Se asigna al guardar (PPP AAAA-NNNNNN, el siguiente del prefijo y año)</output>
         </div>
         <div class="ini-campo">
           <label for="admTipo">Tipo de iniciativa <span class="ini-obligatorio">obligatorio</span></label>
           <select id="admTipo" disabled></select>
+        </div>
+        <!-- Se piden pero pueden faltar (queda Incompleta); nunca se derivan
+             del prefijo. Opciones = valores que ya existen (registro:
+             valores_tipo_iniciativa / valores_tipo_agrupado / estados_problem). -->
+        <div class="ini-campo">
+          <label for="admTipoIniciativa">Clasificación (TipoIniciativa)</label>
+          <select id="admTipoIniciativa" disabled></select>
+        </div>
+        <div class="ini-campo">
+          <label for="admTipoAgrupado">Agrupación (TipoAgrupado)</label>
+          <select id="admTipoAgrupado" disabled></select>
+        </div>
+        <div class="ini-campo">
+          <label for="admEstado">Estado inicial</label>
+          <select id="admEstado" disabled></select>
+        </div>
+        <div class="ini-campo">
+          <label for="admFEntrega">Entrega del análisis</label>
+          <input type="date" id="admFEntrega" aria-describedby="admFEntregaNota" disabled>
+          <small class="ini-motivo" id="admFEntregaNota">Cuando el análisis va al jefe de quien lo crea; por omisión hoy. Creación = hoy y análisis = hoy + 15 días los fija el servidor.</small>
         </div>
         <!-- PO / SO no se eligen aqui (dueños: flujo aparte); viajan vacios y
              el servidor los toma como opcionales. Las categorias van en 03. -->
@@ -678,6 +700,7 @@
 </aside>
 
 <script src="../assets/js/escape.js"></script>
+<script src="../assets/js/duracion.js"></script>
 <script src="../assets/js/sesion-admin.js"></script>
 <script src="../assets/js/catalogos.js"></script>
 <script src="../assets/js/globo-ayuda.js"></script>

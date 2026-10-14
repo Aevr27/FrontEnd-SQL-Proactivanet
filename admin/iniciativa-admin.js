@@ -55,8 +55,34 @@
    ----------
      Mas de SELECTOR_UMBRAL (20) opciones: caja de texto con lista
      (<input list> + <datalist>), en la que se escribe para buscar; el valor
-     solo cuenta si coincide con una opcion real (resolverOpcion). Con 20 o
-     menos, un <select> normal.
+     solo cuenta si coincide con una opcion real (Selector.resolver). Con 20
+     o menos, un <select> normal. Lo escrito que no es una opcion se
+     rechaza con las parecidas (Selector.coincidencias: parte del nombre o
+     del codigo), sin elegir ninguna. Es el mismo en Crear, Modificar,
+     Solicitar cambios y Seguimiento (registro-iniciativas.js).
+
+   FECHA DE ANALISIS POR CATEGORIA (sql/18_gestion_admin_persistencia.sql)
+   ---------------------------------------------------------------------
+     Regla: el analisis dura FECHAS_GESTION.diasAnalisis (15) dias
+     naturales. Una categoria NUEVA en "Modificar" (ligada despues) tiene SU
+     fecha de creacion (el dia en que se liga) y SU fecha de analisis (ese
+     dia + 15): se muestran calculadas y las fija el servidor al guardar.
+     Una ligada con fecha PROPIA (f_analisis_propia del registro) la edita
+     aqui (fcat_categoria / fcat_analisis). Una ligada que HEREDA (las
+     iniciales del alta) muestra la de la iniciativa, "De la iniciativa":
+     se cambia en "Fecha compromiso de Analisis", nunca como fecha propia.
+
+   TIPOS DECLARADOS
+   ----------------
+     El alta pide Clasificacion (TipoIniciativa), Agrupacion (TipoAgrupado),
+     Estado inicial y la fecha de entrega del analisis (por omision hoy),
+     pero cualquiera puede faltar: ADM crea justo cuando falta informacion,
+     y lo que falta se marca Incompleta. Solo el Tipo (prefijo) bloquea:
+     sin el no hay Codigo. Una categoria que se liga puede llevar los suyos.
+     Nada se deriva del prefijo ni se copia de las hermanas. Sin Agrupacion,
+     el servidor revisa el tope como si la fila consumiera. Las opciones son los
+     valores que ya existen (valores_tipo_iniciativa / valores_tipo_agrupado
+     / estados_problem del registro).
 
    PIEZAS
    ------
@@ -80,6 +106,20 @@ window.IniciativaAdmin = (function () {
   // que nunca se lea como un guardado.
   var AVISO_PROTOTIPO = 'No se guardó nada y no se generó código: la persistencia no está habilitada ' +
     '(contrato de base pendiente).';
+  // La revision LOCAL nunca guarda, este o no habilitada la persistencia.
+  var AVISO_REVISION = 'No se guardó nada: es solo la revisión del borrador en el navegador.';
+
+  // Rotulos del boton que envia, segun el servidor guarde (persistencia
+  // activa: `persistencia_admin` del registro) o solo valide. Sin el dato,
+  // como si no guardara: nunca se promete un guardado.
+  var ROTULOS = {
+    guarda: { boton: 'Guardar', nota: 'Guarda en la base (solo ADM). El código lo asigna la base al guardar.',
+              aviso: 'Guardar escribe en la base. El código se asigna al guardar.' },
+    valida: { boton: 'Validar en el servidor (no guarda)', nota: 'Solo valida en el servidor; no guarda mientras la persistencia no esté habilitada.',
+              aviso: '«Validar en el servidor» solo valida: la persistencia no está habilitada y no se guarda nada todavía. ' +
+                'Además, mientras el Excel siga cargando, la carga reemplazaría estos campos.' }
+  };
+  function rotulos(persiste) { return persiste === true ? ROTULOS.guarda : ROTULOS.valida; }
 
   // Validacion en el servidor de crear y modificar (solo ADM). NO guarda:
   // con datos validos responde 501 PersistenciaNoHabilitada.
@@ -105,7 +145,11 @@ window.IniciativaAdmin = (function () {
     { clave: 'descripcion',   rotulo: 'Descripción' },
     { clave: 'observaciones', rotulo: 'Observaciones' },
     { clave: 'pct',           rotulo: '% Disminución' },
-    { clave: 'rca',           rotulo: 'RCA', soloProblem: true }
+    { clave: 'rca',           rotulo: 'RCA', soloProblem: true },
+    // Opcionales en el alta de ADM (se crea justo cuando falta informacion).
+    { clave: 'tipo_iniciativa', rotulo: 'Clasificación' },
+    { clave: 'tipo_agrupado',   rotulo: 'Agrupación' },
+    { clave: 'estado',          rotulo: 'Estado inicial' }
   ];
 
   // Lo unico que se revisa en una iniciativa EXISTENTE (ver cabecera).
@@ -156,6 +200,25 @@ window.IniciativaAdmin = (function () {
     }
   };
 
+  function fechaCorta(s) { return s ? String(s).split('-').reverse().join('/') : '—'; }
+
+  // Regla de fechas (la misma de FechasGestionAdmin en PlanGestionAdmin.cs):
+  // analisis = dia de creacion/ligado + 15 dias naturales. Solo se muestra;
+  // el servidor fija la fecha al guardar con el dia de Mexico.
+  var FECHAS_GESTION = {
+    diasAnalisis: 15,
+    hoy: function () {
+      var d = new Date();
+      return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+    },
+    analisisDesde: function (dia) {
+      var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dia || '');
+      if (!m) return '';
+      var d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3] + FECHAS_GESTION.diasAnalisis));
+      return d.toISOString().slice(0, 10);
+    }
+  };
+
   function pctDe(f) {
     return typeof f === 'number' && isFinite(f) ? String(Math.round(f * 10000) / 100) : '';
   }
@@ -193,8 +256,34 @@ window.IniciativaAdmin = (function () {
         if (llaveRuta(v) === k) return v;
       }
       return '';
+    },
+
+    // Las opciones que CONTIENEN lo escrito (parte del nombre o del codigo,
+    // sin mayusculas ni acentos), en su orden; hasta `max`. Solo sugiere:
+    // elegir sigue siendo resolver (coincidencia exacta).
+    coincidencias: function (texto, opciones, max) {
+      var k = plano(texto), salida = [];
+      if (!k) return salida;
+      (opciones || []).some(function (o) {
+        var v = typeof o === 'string' ? o : o.valor, t = typeof o === 'string' ? o : o.texto;
+        if (plano(v).indexOf(k) >= 0 || plano(t).indexOf(k) >= 0) salida.push(v);
+        return salida.length >= (max || 5);
+      });
+      return salida;
     }
   };
+
+  function plano(v) {
+    return String(v === null || v === undefined ? '' : v).normalize('NFD')
+      .replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
+  // Mensaje de "no es una opcion de la lista", con las parecidas si las hay.
+  function noEnLista(texto, opciones, que) {
+    var t = String(texto).trim(), sug = Selector.coincidencias(t, opciones, 3);
+    return 'Elige ' + que + ' de la lista: «' + t + '» no es ' + que + ' vigente.' +
+      (sug.length ? ' Parecidas: ' + sug.join(' · ') + '.' : '');
+  }
 
   // ---------------------------------------------------------------------
   // VolumetriaCliente
@@ -272,7 +361,13 @@ window.IniciativaAdmin = (function () {
       this.rutas = Array.isArray(rutas) ? rutas : [];
       this.filas = (ligadas || []).map(function (c) {
         var v = pctDe(c.pct_dism);
-        return { categoria: c.categoria || '', valor: v, original: v, ligada: true, quitada: false };
+        // agrup: la Agrupacion actual ('' = sin declarar; agrupNueva la
+        // declara). fPropia: fecha de analisis PROPIA ('' = hereda la de la
+        // iniciativa); fPropiaNueva es la editada.
+        var propia = typeof c.f_analisis_propia === 'string' ? c.f_analisis_propia : '';
+        return { categoria: c.categoria || '', valor: v, original: v, ligada: true, quitada: false,
+                 agrup: typeof c.agrup === 'string' ? c.agrup : '', agrupNueva: '',
+                 fPropia: propia, fPropiaNueva: propia };
       });
     }
 
@@ -290,7 +385,7 @@ window.IniciativaAdmin = (function () {
       var ruta = Selector.resolver(texto, this.rutas);
       if (!ruta) {
         return { ok: false, mensaje: this.rutas.length
-          ? 'Elige una categoría de la lista: «' + String(texto).trim() + '» no es una categoría vigente.'
+          ? noEnLista(texto, this.rutas, 'una categoría')
           : 'El catálogo de categorías no está disponible.' };
       }
       var n = this.buscar(ruta);
@@ -300,7 +395,12 @@ window.IniciativaAdmin = (function () {
           ? ruta + ' está marcada para quitar: usa «Restaurar» en vez de agregarla otra vez.'
           : ruta + ' ya está en la lista.' };
       }
-      this.filas.push({ categoria: ruta, valor: '', original: null, ligada: false, quitada: false });
+      // fCreacion / fAnalisis: las PROPIAS de esta categoria ligada despues
+      // (hoy y hoy + 15), calculadas, nunca copiadas de otra fila.
+      var hoy = FECHAS_GESTION.hoy();
+      this.filas.push({ categoria: ruta, valor: '', original: null, ligada: false, quitada: false,
+                        fCreacion: hoy, fAnalisis: FECHAS_GESTION.analisisDesde(hoy),
+                        tipoIniciativa: '', tipoAgrupado: '' });
       return { ok: true, ruta: ruta, mensaje: '' };
     }
 
@@ -326,13 +426,45 @@ window.IniciativaAdmin = (function () {
       if (f && !f.quitada) f.valor = String(texto === null || texto === undefined ? '' : texto).trim();
     }
 
+    // campo: 'tipo_iniciativa' | 'tipo_agrupado'. En una nueva, sus tipos;
+    // en una ligada, solo declarar la Agrupacion si no la tiene.
+    capturarTipo(n, campo, texto) {
+      var f = this.filas[n], v = String(texto === null || texto === undefined ? '' : texto).trim();
+      if (!f || f.quitada) return false;
+      if (!f.ligada && campo === 'tipo_iniciativa') f.tipoIniciativa = v;
+      else if (!f.ligada && campo === 'tipo_agrupado') f.tipoAgrupado = v;
+      else if (f.ligada && !f.agrup && campo === 'tipo_agrupado') f.agrupNueva = v;
+      else return false;
+      return true;
+    }
+
+    // Solo una ligada con fecha PROPIA (las que heredan cambian con la de la
+    // iniciativa).
+    capturarFecha(n, texto) {
+      var f = this.filas[n];
+      if (!f || !f.ligada || f.quitada || !f.fPropia) return false;
+      f.fPropiaNueva = String(texto === null || texto === undefined ? '' : texto).trim();
+      return true;
+    }
+
     activas() { return this.filas.filter(function (f) { return !f.quitada; }); }
+
+    // Las fechas calculadas de cada categoria nueva (solo para mostrar; no
+    // viajan: el servidor las fija al guardar).
+    fechasNuevas() {
+      return this.filas.filter(function (f) { return !f.ligada; })
+        .map(function (f) { return { categoria: f.categoria, f_creacion: f.fCreacion, f_analisis: f.fAnalisis }; });
+    }
 
     erroresFormato() {
       var errores = [];
       this.activas().forEach(function (f) {
         var e = FORMATO.pct(f.valor);
         if (e) errores.push({ clave: 'pct', mensaje: f.categoria + ': ' + e });
+        if (f.ligada && f.fPropia && f.fPropiaNueva !== f.fPropia) {
+          var ef = f.fPropiaNueva === '' ? 'la fecha de análisis de una categoría no se puede vaciar.' : FORMATO.fecha(f.fPropiaNueva);
+          if (ef) errores.push({ clave: 'fechas_categoria', mensaje: f.categoria + ': ' + ef });
+        }
       });
       return errores;
     }
@@ -345,9 +477,19 @@ window.IniciativaAdmin = (function () {
           salida.push({ clave: 'quitar_categoria', rotulo: 'Quitar categoría', anterior: f.categoria, nuevo: '' });
         } else if (!f.ligada) {
           salida.push({ clave: 'agregar_categoria', rotulo: 'Agregar categoría', anterior: '',
-                        nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%') });
-        } else if (f.valor !== f.original) {
-          salida.push({ clave: 'pct', rotulo: '% Disminución · ' + f.categoria, anterior: f.original, nuevo: f.valor });
+                        nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%') +
+                          (f.tipoAgrupado ? ' · ' + f.tipoAgrupado : '') +
+                          (f.fAnalisis ? ' · análisis ' + f.fAnalisis + ' (hoy + ' + FECHAS_GESTION.diasAnalisis + ' días)' : '') });
+        } else {
+          if (f.valor !== f.original) {
+            salida.push({ clave: 'pct', rotulo: '% Disminución · ' + f.categoria, anterior: f.original, nuevo: f.valor });
+          }
+          if (f.agrupNueva) {
+            salida.push({ clave: 'tipo_agrupado', rotulo: 'Agrupación · ' + f.categoria, anterior: '', nuevo: f.agrupNueva });
+          }
+          if (f.fPropia && f.fPropiaNueva !== f.fPropia) {
+            salida.push({ clave: 'fechas_categoria', rotulo: 'Fecha de análisis · ' + f.categoria, anterior: f.fPropia, nuevo: f.fPropiaNueva });
+          }
         }
       });
       return salida;
@@ -360,13 +502,22 @@ window.IniciativaAdmin = (function () {
       return pares;
     }
 
-    // Modificar: SOLO lo que cambio.
+    // Modificar: SOLO lo que cambio. Las listas paralelas (pct_* con
+    // pct_tipo_agrupado; agregar_* con sus tipos) llevan una entrada por
+    // fila, vacia si no aplica.
     paresModificar() {
       var pares = [];
       this.filas.forEach(function (f) {
         if (f.ligada && f.quitada) pares.push(['quitar_categoria', f.categoria]);
-        else if (!f.ligada) pares.push(['agregar_categoria', f.categoria], ['agregar_pct', f.valor]);
-        else if (f.valor !== f.original) pares.push(['pct_categoria', f.categoria], ['pct_valor', f.valor]);
+        else if (!f.ligada) {
+          pares.push(['agregar_categoria', f.categoria], ['agregar_pct', f.valor],
+                     ['agregar_tipo_iniciativa', f.tipoIniciativa || ''], ['agregar_tipo_agrupado', f.tipoAgrupado || '']);
+        } else {
+          if (f.valor !== f.original || f.agrupNueva) {
+            pares.push(['pct_categoria', f.categoria], ['pct_valor', f.valor], ['pct_tipo_agrupado', f.agrupNueva || '']);
+          }
+          if (f.fPropia && f.fPropiaNueva !== f.fPropia) pares.push(['fcat_categoria', f.categoria], ['fcat_analisis', f.fPropiaNueva]);
+        }
       });
       return pares;
     }
@@ -380,12 +531,54 @@ window.IniciativaAdmin = (function () {
   }
 
   // Tabla de categorias (Crear y Modificar). prefijo: de los ids/atributos.
-  // vol: VolumetriaCliente o null.
-  function htmlCategorias(cats, vol, prefijo) {
+  // vol: VolumetriaCliente o null. fechas (solo Modificar): { f_analisis
+  // de la iniciativa, tiposIniciativa, tiposAgrupado }. Agrega dos columnas:
+  //   Agrupacion        la de la ligada (o un selector si no tiene); en una
+  //                     nueva, Clasificacion y Agrupacion a elegir.
+  //   Fecha de analisis en una ligada que HEREDA, la de la iniciativa (se
+  //                     cambia en "Fecha compromiso de Analisis"); en una
+  //                     con fecha PROPIA, editable; en una nueva, la propia
+  //                     calculada (dia en que se liga + 15), que fija el
+  //                     servidor al guardar.
+  function htmlCategorias(cats, vol, prefijo, fechas) {
     if (!cats.filas.length) return '<p class="ini-nota">Sin categorías todavía.</p>';
+    function celdaFecha(f, n) {
+      if (f.quitada) return '—';
+      if (f.ligada && f.fPropia) {
+        return '<label class="ini-ed-pct"><span class="ini-sr">Fecha de análisis de ' + Escape.html(f.categoria) + '</span>' +
+          '<input type="date" data-' + prefijo + '-fcat="' + n + '" value="' + Escape.attr(f.fPropiaNueva) + '"></label>' +
+          ' <span class="ini-origen" title="dbo.ProblemCategoria.FechaAnalisisCategoria: se ligó después y tiene la suya">Propia</span>';
+      }
+      if (f.ligada) {
+        return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(fechas.f_analisis)) +
+          '</span> <span class="ini-origen derivado" title="Hereda la de la iniciativa (dbo.Problem.FechaAnalisis): se cambia en Fecha compromiso de Análisis">De la iniciativa</span>';
+      }
+      return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(f.fAnalisis)) + '</span>' +
+        ' <span class="ini-origen derivado" title="Se liga el ' + Escape.attr(fechaCorta(f.fCreacion)) +
+        ': análisis = ese día + ' + FECHAS_GESTION.diasAnalisis + ' días. La fija el servidor al guardar.">Calculada</span>';
+    }
+    function opcionesTipo(lista, valor, atributo, rotulo) {
+      return '<label class="ini-ed-tipo"><span class="ini-sr">' + Escape.html(rotulo) + '</span>' +
+        '<select ' + atributo + '><option value="">— ' + Escape.html(rotulo) + ' —</option>' +
+        (lista || []).map(function (o) {
+          return '<option value="' + Escape.attr(o) + '"' + (o === valor ? ' selected' : '') + '>' + Escape.html(o) + '</option>';
+        }).join('') + '</select></label>';
+    }
+    function celdaTipo(f, n) {
+      if (f.quitada) return '—';
+      var attr = function (campo) { return 'data-' + prefijo + '-tipo="' + n + '|' + campo + '"'; };
+      if (!f.ligada) {
+        return opcionesTipo(fechas.tiposIniciativa, f.tipoIniciativa, attr('tipo_iniciativa'), 'Clasificación') + ' ' +
+          opcionesTipo(fechas.tiposAgrupado, f.tipoAgrupado, attr('tipo_agrupado'), 'Agrupación');
+      }
+      if (f.agrup) return Escape.html(f.agrup);
+      return opcionesTipo(fechas.tiposAgrupado, f.agrupNueva, attr('tipo_agrupado'), 'Agrupación') +
+        ' <span class="ini-origen" title="Opcional. Sin agrupación, el servidor revisa su tope como si consumiera">Sin declarar</span>';
+    }
     return '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
       '<th scope="col">Volumetría <span class="ini-origen derivado">Calculada</span></th>' +
-      '<th scope="col">% Disminución</th><th scope="col"><span class="ini-sr">Acción</span></th></tr></thead><tbody>' +
+      '<th scope="col">% Disminución</th>' + (fechas ? '<th scope="col">Agrupación</th><th scope="col">Fecha de análisis</th>' : '') +
+      '<th scope="col"><span class="ini-sr">Acción</span></th></tr></thead><tbody>' +
       cats.filas.map(function (f, n) {
         var estado = f.quitada ? '<span class="ini-cat-estado">Se quitará</span>'
           : !f.ligada ? '<span class="ini-cat-estado nueva">Nueva</span>' : '';
@@ -398,17 +591,22 @@ window.IniciativaAdmin = (function () {
           : '<button type="button" class="btn linea chico" data-' + prefijo + '-cat="quitar" data-indice="' + n + '">Quitar</button>';
         return '<tr' + (f.quitada ? ' class="ini-cat-quitada"' : '') + '><td><span class="ini-cat-ruta">' +
           Escape.html(f.categoria) + '</span> ' + estado + '</td><td>' +
-          (f.quitada ? '—' : htmlVolumetria(vol ? vol.estado(f.categoria) : null)) + '</td><td>' + pct + '</td><td>' + boton + '</td></tr>';
+          (f.quitada ? '—' : htmlVolumetria(vol ? vol.estado(f.categoria) : null)) + '</td><td>' + pct + '</td>' +
+          (fechas ? '<td>' + celdaTipo(f, n) + '</td><td>' + celdaFecha(f, n) + '</td>' : '') + '<td>' + boton + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
 
   // ---------------------------------------------------------------------
   // RespuestaGestion: lo que contesto admin_iniciativas_gestion.ashx
   // ---------------------------------------------------------------------
-  // Nunca hay un estado de exito: el handler no guarda. Cinco estados
-  // excluyentes:
+  // Estados excluyentes. "guardada" es el UNICO que dice que algo se guardo,
+  // y solo con 200 + guardada === true (+ codigo en un alta): la respuesta
+  // de la base, nunca la de la validacion.
+  //   guardada       200: la base confirmo (PersistenciaGestionAdmin activa)
   //   no_habilitada  501: valida en el servidor, NO guardada
   //   invalida       422: errores por campo
+  //   rechazada      409: la base (o un pendiente sin regla) lo rechazo: nada guardado
+  //   no_confirmada  500 EscrituraNoConfirmada: no se sabe si se guardo
   //   denegado       403: sin rol ADM (o sin acceso)
   //   no_disponible  503: no se pudo leer el catalogo; no se sabe si es valida
   //   error          cualquier otra cosa (red, 500, respuesta ilegible)
@@ -416,28 +614,38 @@ window.IniciativaAdmin = (function () {
     desde: function (estado, json) {
       json = json && typeof json === 'object' ? json : null;
       var tipo = json && json.tipo;
-      var e = estado === 501 && tipo === 'PersistenciaNoHabilitada' && json.valida === true && json.guardada === false ? 'no_habilitada'
+      var codigo = json && typeof json.codigo === 'string' && json.codigo.trim() ? json.codigo : null;
+      // 200 sin accion, o alta sin codigo: no es exito (error).
+      var e = estado === 200 && json && json.guardada === true &&
+              (json.accion === 'modificar' || (json.accion === 'crear' && codigo)) ? 'guardada'
+        : estado === 501 && tipo === 'PersistenciaNoHabilitada' && json.valida === true && json.guardada === false ? 'no_habilitada'
         : estado === 422 && json && json.valida === false ? 'invalida'
+        : estado === 409 && json && json.guardada === false ? 'rechazada'
+        : estado === 500 && tipo === 'EscrituraNoConfirmada' ? 'no_confirmada'
         : estado === 403 ? 'denegado'
         : estado === 503 ? 'no_disponible'
         : 'error';
       return {
         estado: e,
-        guardada: false,
+        guardada: e === 'guardada',
+        codigo: e === 'guardada' ? codigo : null,
         errores: e === 'invalida' && Array.isArray(json.errores) ? json.errores : [],
         advertencias: json && Array.isArray(json.advertencias) ? json.advertencias : [],
         cambios: json && Array.isArray(json.cambios) ? json.cambios : [],
         faltantes: json && Array.isArray(json.faltantes) ? json.faltantes : [],
         bloqueos: json && Array.isArray(json.bloqueos) ? json.bloqueos : [],
-        mensaje: (json && (json.persistencia_motivo || json.error)) ||
+        mensaje: e === 'guardada' ? 'Guardado en la base.' : (json && (json.persistencia_motivo || json.error)) ||
           (estado ? 'El servidor respondió ' + estado + '.' : 'No se pudo contactar al servidor.')
       };
     },
     titulo: function (r) {
       return {
+        guardada: 'Guardado en la base' + (r.codigo ? ' · Código ' + r.codigo : '') + '.',
         no_habilitada: 'Solo validación: los datos son válidos en el servidor, pero NO se guardó nada. ' +
           'No se guardó: la persistencia no está habilitada.',
         invalida: 'El servidor rechazó los datos (no se guardó nada):',
+        rechazada: 'La base rechazó el guardado. No se guardó nada:',
+        no_confirmada: 'No se pudo confirmar si se guardó. Revisa el registro antes de reintentar.',
         denegado: 'Sin permiso: solo un administrador (ADM) puede hacerlo. No se validó ni se guardó nada.',
         no_disponible: 'No se pudo validar en el servidor (catálogo no disponible). No se guardó nada.',
         error: 'No se pudo completar la validación. No se guardó nada.'
@@ -468,6 +676,9 @@ window.IniciativaAdmin = (function () {
       this.catalogo = catalogo;
       this.tipo = '';
       this.valores = { titulo: '', descripcion: '', observaciones: '' };
+      // Declarados (no se derivan del prefijo). La fecha de entrega del
+      // analisis empieza en hoy y ADM la puede cambiar.
+      this.declarados = { tipo_iniciativa: '', tipo_agrupado: '', estado: '', f_entrega_analisis: FECHAS_GESTION.hoy() };
       this.categorias = new CategoriasProblema([], BorradorAdmin.rutasDe(catalogo));
       this.rca = null;   // nombre del archivo elegido; no se sube
     }
@@ -490,6 +701,7 @@ window.IniciativaAdmin = (function () {
 
     capturar(clave, texto) {
       if (Object.prototype.hasOwnProperty.call(this.valores, clave)) this.valores[clave] = String(texto || '');
+      else if (Object.prototype.hasOwnProperty.call(this.declarados, clave)) this.declarados[clave] = String(texto || '').trim();
     }
 
     elegirRca(archivo) { this.rca = archivo && archivo.size > 0 ? String(archivo.name || 'archivo') : null; }
@@ -508,11 +720,15 @@ window.IniciativaAdmin = (function () {
       return lista.length === 1 ? lista[0] : '';
     }
 
-    // Lo unico que impide guardar (cuando se pueda): sin tipo no hay
-    // prefijo de codigo.
+    // Lo unico que impide guardar: sin tipo no hay prefijo de codigo.
+    // Clasificacion, Agrupacion y Estado pueden faltar (Incompleta).
     bloqueantes() { return this.tipo ? [] : [{ clave: 'tipo', mensaje: 'Elige el Tipo de iniciativa: define el prefijo del código.' }]; }
 
-    erroresFormato() { return this.categorias.erroresFormato(); }
+    erroresFormato() {
+      var e = FORMATO.fecha(this.declarados.f_entrega_analisis);
+      return (e ? [{ clave: 'f_entrega_analisis', mensaje: 'Fecha de entrega del análisis: ' + e }] : [])
+        .concat(this.categorias.erroresFormato());
+    }
 
     datos() {
       var v = this.valores, cats = this.categorias.comoRegistro();
@@ -521,17 +737,29 @@ window.IniciativaAdmin = (function () {
         observaciones: v.observaciones,
         // Sin categorias el % no se pide aparte (ya falta "Categoría").
         pct: !cats.length ? undefined : (cats.every(function (c) { return c.pct_dism !== null; }) ? 'si' : ''),
-        rca: this.rca || ''
+        rca: this.rca || '',
+        tipo_iniciativa: this.declarados.tipo_iniciativa, tipo_agrupado: this.declarados.tipo_agrupado,
+        estado: this.declarados.estado
       };
     }
 
-    faltantes() { return Incompleta.faltantes(this.datos(), this.esProblem()); }
+    // Con varias categorias, el faltante de % dice CUALES no lo tienen.
+    faltantes() {
+      var sinPct = this.categorias.activas().filter(function (f) { return f.valor === ''; })
+        .map(function (f) { return f.categoria; });
+      return Incompleta.faltantes(this.datos(), this.esProblem()).map(function (f) {
+        return f.clave === 'pct' && sinPct.length ? { clave: f.clave, rotulo: f.rotulo + ' (sin %: ' + sinPct.join(', ') + ')' } : f;
+      });
+    }
 
     // Lo que viaja al servidor (accion=crear). El archivo del RCA lo pone la
     // vista. PO / SO ya no se eligen aqui: viajan vacios (opcionales).
     paraEnviar() {
       var v = this.valores;
+      var d = this.declarados;
       return [['accion', 'crear'], ['tipo', this.tipo], ['po', ''], ['so', ''],
+        ['tipo_iniciativa', d.tipo_iniciativa], ['tipo_agrupado', d.tipo_agrupado], ['estado', d.estado],
+        ['f_entrega_analisis', d.f_entrega_analisis],
         ['titulo', v.titulo], ['descripcion', v.descripcion], ['observaciones', v.observaciones]]
         .concat(this.categorias.paresCrear());
     }
@@ -545,9 +773,9 @@ window.IniciativaAdmin = (function () {
         formato: formato,
         incompleta: faltan.length > 0,
         faltantes: faltan,
-        codigo: null,          // nunca se inventa
-        guardado: false,       // nunca en esta fase
-        aviso: AVISO_PROTOTIPO
+        codigo: null,          // nunca se inventa: lo asigna la base
+        guardado: false,       // la revision local nunca guarda
+        aviso: AVISO_REVISION
       };
     }
   }
@@ -589,7 +817,7 @@ window.IniciativaAdmin = (function () {
           '<strong>' + Escape.html(i.folio) + '</strong> · ' + Escape.html(tit) +
           '<span class="ini-sub">' + Escape.html(i.estado || 'Sin estado') + ' · ' +
           (i.sin_categoria || !cats ? 'sin categorías' : cats + (cats === 1 ? ' categoría' : ' categorías')) +
-          (typeof i.antiguedad === 'number' ? ' · ' + i.antiguedad + ' días' : '') +
+          (typeof i.antiguedad === 'number' ? ' · ' + Escape.html(Duracion.dias(i.antiguedad)) : '') +
           (i.titulo && i.titulo_problem && i.titulo !== i.titulo_problem ? ' · iniciativa: ' + Escape.html(i.titulo) : '') +
           '</span></button></li>';
       }).join('') + '</ul>';
@@ -648,7 +876,9 @@ window.IniciativaAdmin = (function () {
       this.iniciativa = iniciativa;
       this.listas = {
         estados: Array.isArray(opciones.estados) ? opciones.estados : [],
-        subestados: Array.isArray(opciones.subestados) ? opciones.subestados : []
+        subestados: Array.isArray(opciones.subestados) ? opciones.subestados : [],
+        tiposIniciativa: Array.isArray(opciones.tiposIniciativa) ? opciones.tiposIniciativa : [],
+        tiposAgrupado: Array.isArray(opciones.tiposAgrupado) ? opciones.tiposAgrupado : []
       };
       // El Titulo editable es el del Problem (titulo_problem); `titulo`
       // puede ser el TituloIniciativa, cuya columna no se escribe aqui.
@@ -667,6 +897,8 @@ window.IniciativaAdmin = (function () {
       var self = this;
       CAMPOS_PROBLEMA.forEach(function (k) { self.valores[k] = self.original[k]; });
       this.categorias = new CategoriasProblema(iniciativa.categorias || [], opciones.rutas);
+      // 'cargando' | 'error' | 'ok' del catalogo de rutas (para el aviso).
+      this.rutasEstado = opciones.rutasEstado || (Array.isArray(opciones.rutas) && opciones.rutas.length ? 'ok' : '');
       // Compatibilidad: valores.pct son las filas de categorias.
       this.valores.pct = this.categorias.filas;
     }
@@ -683,6 +915,10 @@ window.IniciativaAdmin = (function () {
     }
 
     capturarPct(indice, texto) { this.categorias.capturarPct(indice, texto); }
+
+    capturarTipo(indice, campo, texto) { return this.categorias.capturarTipo(indice, campo, texto); }
+
+    capturarFechaCategoria(indice, texto) { return this.categorias.capturarFecha(indice, texto); }
 
     // -> [{ clave, rotulo, anterior, nuevo }]
     cambios() {
@@ -806,24 +1042,35 @@ window.IniciativaAdmin = (function () {
     return partes.join('');
   }
 
-  function claseRespuesta(r) { return r.estado === 'no_habilitada' ? 'aviso' : 'mal'; }
+  function claseRespuesta(r) {
+    return r.estado === 'guardada' ? 'ok' : r.estado === 'no_habilitada' || r.estado === 'no_confirmada' ? 'aviso' : 'mal';
+  }
 
   function htmlRespuesta(r) {
     var lista = function (xs, f) { return xs.length ? '<ul>' + xs.map(f).join('') + '</ul>' : ''; };
     var texto = function (v) { return v === '' || v === null || v === undefined ? '(vacío)' : String(v); };
     var partes = ['<strong class="ini-prototipo-marca">' + Escape.html(RespuestaGestion.titulo(r)) + '</strong>'];
     partes.push(lista(r.errores, function (e) { return '<li>' + Escape.html(e.mensaje) + '</li>'; }));
-    if (r.estado === 'no_habilitada') {
+    if (r.estado === 'no_habilitada' || r.estado === 'guardada') {
       if (r.cambios.length) {
-        partes.push('<p>Cambios validados (no guardados):</p>' + lista(r.cambios, function (c) {
+        partes.push('<p>' + (r.estado === 'guardada' ? 'Cambios guardados:' : 'Cambios validados (no guardados):') + '</p>' + lista(r.cambios, function (c) {
           return '<li>' + Escape.html(c.rotulo) + ': ' + Escape.html(texto(c.anterior)) + ' → ' + Escape.html(texto(c.nuevo)) + '</li>';
         }));
       }
       partes.push(r.faltantes.length ? htmlFaltantes(r.faltantes, 'Según el servidor.') : '<p>Sin datos faltantes.</p>');
     }
     partes.push(lista(r.advertencias, function (a) { return '<li>' + Escape.html(a) + '</li>'; }));
-    if (r.estado !== 'invalida' || !r.errores.length) partes.push('<p class="ini-prototipo-aviso">' + Escape.html(r.mensaje) + '</p>');
+    if (r.estado === 'rechazada' || r.estado === 'no_confirmada') partes.push('<p>' + Escape.html(r.mensaje) + '</p>');
+    else if (r.estado !== 'guardada' && (r.estado !== 'invalida' || !r.errores.length)) partes.push('<p class="ini-prototipo-aviso">' + Escape.html(r.mensaje) + '</p>');
     return partes.join('');
+  }
+
+  // Sin rutas para agregar: por que (estado del catalogo). 'cargando' y
+  // 'error' nunca se ven como "no hay categorias".
+  function htmlSinCatalogo(estado) {
+    return '<p class="ini-nota">' + (estado === 'cargando' ? 'Cargando el catálogo de categorías…'
+      : estado === 'error' ? 'No se pudo cargar el catálogo de categorías: no se pueden agregar categorías.'
+      : 'El catálogo de categorías no está disponible: no se pueden agregar categorías.') + '</p>';
   }
 
   // Bloque de categorias de "Modificar" (se repinta solo).
@@ -833,11 +1080,16 @@ window.IniciativaAdmin = (function () {
       ? '<div class="ini-cat-agregar"><label for="regEdCatBuscar">Agregar categoría</label>' +
           Selector.html('regEdCatBuscar', rutas, '') +
           ' <button type="button" class="btn linea chico" data-accion="edicion-cat-agregar">Agregar</button></div>'
-      : '<p class="ini-nota">El catálogo de categorías no está disponible: no se pueden agregar categorías.</p>';
-    return htmlCategorias(ed.categorias, vol, 'edicion') + agregar +
+      : htmlSinCatalogo(ed.rutasEstado);
+    return htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis,
+        tiposIniciativa: ed.listas.tiposIniciativa, tiposAgrupado: ed.listas.tiposAgrupado }) + agregar +
       '<div class="ini-cambio-msg" id="regEdCatMsg" role="status" aria-live="polite"></div>' +
       '<small class="ini-sub">Destino propuesto: dbo.ProblemCategoria. Quitar = la fila deja de estar vigente; no se borra ' +
-        '(regla de baja pendiente de aprobar). La volumetría es calculada y de solo lectura.</small>';
+        '(regla de baja pendiente de aprobar). La volumetría es calculada y de solo lectura.</small>' +
+      '<small class="ini-sub">Fecha de análisis: las categorías iniciales heredan la de la iniciativa y cambian con ella ' +
+        '(Fecha compromiso de Análisis). Una categoría ligada después tiene la suya: el día en que se liga + ' +
+        FECHAS_GESTION.diasAnalisis + ' días, editable aquí, sin tocar la de la iniciativa. ' +
+        'Clasificación y Agrupación de una categoría nueva son opcionales y no se copian de las otras.</small>';
   }
 
   // Formulario de edicion dentro del detalle del registro.
@@ -879,8 +1131,7 @@ window.IniciativaAdmin = (function () {
       (i.estado ? ' · ' + Escape.html(i.estado) : '') + ' (solo lectura)</p>';
     var legado = ed.notasLegado().map(function (n) { return '<p class="ini-nota">' + Escape.html(n) + '</p>'; }).join('');
     return '<h4>Modificar iniciativa</h4>' +
-      '<p class="ini-prototipo-aviso">«Validar en el servidor» solo valida: la persistencia no está habilitada y ' +
-        'no se guarda nada todavía. Además, mientras el Excel siga cargando, la carga reemplazaría estos campos.</p>' +
+      '<p class="ini-prototipo-aviso">' + Escape.html(rotulos(contexto.persiste).aviso) + '</p>' +
       ctx + legado +
       htmlFaltantes(ed.faltantesOriginales(), 'Ya faltaba antes de modificar.') +
       '<h5>Problema <span class="ini-sub">dbo.Problem · el código no cambia</span></h5>' +
@@ -896,10 +1147,10 @@ window.IniciativaAdmin = (function () {
       '<div class="ini-cambio-msg" id="regEdMsg" role="status" aria-live="polite"></div>' +
       '<div class="ini-cambio-pie">' +
         '<button type="button" class="btn chico" data-accion="edicion-revisar">Revisar cambios</button> ' +
-        '<button type="button" class="btn chico" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">Validar en el servidor (no guarda)</button> ' +
+        '<button type="button" class="btn chico" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">' + Escape.html(rotulos(contexto.persiste).boton) + '</button> ' +
         '<button type="button" class="btn linea chico" data-accion="edicion-cancelar">Cancelar</button>' +
       '</div>' +
-      '<small class="ini-sub" id="regEdGuardarNota">Solo valida en el servidor (solo ADM); no guarda mientras la persistencia no esté habilitada.</small>';
+      '<small class="ini-sub" id="regEdGuardarNota">' + Escape.html(rotulos(contexto.persiste).nota) + '</small>';
   }
 
   // Vista previa en vivo de "Modificar". Siempre dice que no se guarda.
@@ -947,6 +1198,25 @@ window.IniciativaAdmin = (function () {
       // hacer al elegir uno (folio -> void). Los fija la pagina.
       this.fuenteProblemas = null;
       this.alElegirExistente = null;
+      // () -> { estados, tiposIniciativa, tiposAgrupado } (valores que ya
+      // existen, del registro) o null mientras no carga.
+      this.fuenteValores = null;
+      // (codigo) -> void: lo que hace la pagina tras un alta GUARDADA
+      // (recargar el registro). Solo con estado 'guardada'.
+      this.alGuardar = null;
+    }
+
+    persiste() {
+      var v = this.fuenteValores ? this.fuenteValores() : null;
+      return !!(v && v.persiste === true);
+    }
+
+    pintarRotulos() {
+      var r = rotulos(this.persiste());
+      var b = this.$('admGuardar'), n = this.$('admGuardarNota'), a = this.$('admPersistenciaAviso');
+      if (b) b.textContent = r.boton;
+      if (n) n.textContent = r.nota;
+      if (a) a.textContent = r.aviso;
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -954,6 +1224,30 @@ window.IniciativaAdmin = (function () {
     fijarProblemas(fuente, alElegir) {
       this.fuenteProblemas = typeof fuente === 'function' ? fuente : null;
       this.alElegirExistente = typeof alElegir === 'function' ? alElegir : null;
+    }
+
+    fijarValores(fuente) {
+      this.fuenteValores = typeof fuente === 'function' ? fuente : null;
+      this.pintarDeclarados();
+    }
+
+    // Selectores de Clasificacion, Agrupacion y Estado (con lo que ya
+    // existe) y la fecha de entrega. Sin lista todavia: deshabilitados.
+    pintarDeclarados() {
+      var b = this.borrador, v = this.fuenteValores ? this.fuenteValores() : null, self = this;
+      [['admTipoIniciativa', 'tipo_iniciativa', 'tiposIniciativa'], ['admTipoAgrupado', 'tipo_agrupado', 'tiposAgrupado'],
+       ['admEstado', 'estado', 'estados']].forEach(function (c) {
+        var el = self.$(c[0]);
+        if (!el) return;
+        var lista = v && Array.isArray(v[c[2]]) ? v[c[2]] : [];
+        el.innerHTML = '<option value="">' + (lista.length ? '— Elige —' : 'Cargando…') + '</option>' + lista.map(function (o) {
+          return '<option value="' + Escape.attr(o) + '">' + Escape.html(o) + '</option>';
+        }).join('');
+        el.value = b ? b.declarados[c[1]] : '';
+        el.disabled = !b || !lista.length;
+      });
+      var fe = this.$('admFEntrega');
+      if (fe) { fe.value = b ? b.declarados.f_entrega_analisis : ''; fe.disabled = !b; }
     }
 
     elegirRuta(ruta) {
@@ -1015,6 +1309,14 @@ window.IniciativaAdmin = (function () {
         if (!self.borrador) return;
         self.borrador.elegirTipo(e.target.value);
         self.pintar();
+      });
+      [['admTipoIniciativa', 'tipo_iniciativa'], ['admTipoAgrupado', 'tipo_agrupado'], ['admEstado', 'estado'],
+       ['admFEntrega', 'f_entrega_analisis']].forEach(function (c) {
+        var el = self.$(c[0]);
+        if (!el) return;
+        el.addEventListener('change', function (e) { if (self.borrador) self.borrador.capturar(c[1], e.target.value); });
+        // El registro (de donde salen las listas) puede llegar despues.
+        el.addEventListener('focus', function () { if (el.tagName === 'SELECT' && el.options.length <= 1) self.pintarDeclarados(); });
       });
       CAMPOS_CREAR.forEach(function (k) {
         self.$('adm-' + k).addEventListener('input', function (e) {
@@ -1119,6 +1421,8 @@ window.IniciativaAdmin = (function () {
       this.$('admRcaNota').textContent = b.esProblem()
         ? 'Problem: sin RCA queda incompleta. El archivo no se sube.'
         : 'Opcional para este tipo. El archivo no se sube.';
+      this.pintarDeclarados();
+      this.pintarRotulos();
       this.pintarCategorias();
       this.pintarFaltantes();
     }
@@ -1139,8 +1443,11 @@ window.IniciativaAdmin = (function () {
       return r;
     }
 
-    // "Validar en el servidor (no guarda)": lo que se ve es SIEMPRE la
-    // respuesta real; si el borrador ya tiene errores locales, no se envia.
+    // "Validar en el servidor (no guarda)" / "Guardar": lo que se ve es
+    // SIEMPRE la respuesta real; si el borrador ya tiene errores locales, no
+    // se envia. Solo con 'guardada' se limpia el borrador y se avisa a la
+    // pagina (que recarga el registro); cualquier otra respuesta deja el
+    // borrador tal cual para corregir o reintentar.
     guardar() {
       if (!this.borrador || this.enviando || this.ruta !== 'nuevo') return Promise.resolve(null);
       var local = this.revisar();
@@ -1152,8 +1459,18 @@ window.IniciativaAdmin = (function () {
       boton.disabled = true;
       caja.hidden = false;
       caja.classList.remove('ok', 'mal', 'aviso');
-      caja.innerHTML = '<span>Validando en el servidor…</span>';
+      caja.innerHTML = '<span>' + (this.persiste() ? 'Guardando…' : 'Validando en el servidor…') + '</span>';
       return enviarGestion(pares, this.pedir).then(function (r) {
+        if (r.estado === 'guardada') {
+          var cat = self.borrador.catalogo;
+          self.borrador = new BorradorAdmin(cat);
+          self.archivoRca = null;
+          CAMPOS_CREAR.forEach(function (k) { var el = self.$('adm-' + k); if (el) el.value = ''; });
+          var rca = self.$('admRca'); if (rca) rca.value = '';
+          self.pintar();
+          if (self.alGuardar) self.alGuardar(r.codigo);
+        }
+        caja.hidden = false;
         caja.classList.add(claseRespuesta(r));
         caja.innerHTML = htmlRespuesta(r);
         self.enviando = false;
@@ -1165,6 +1482,8 @@ window.IniciativaAdmin = (function () {
 
   return {
     AVISO_PROTOTIPO: AVISO_PROTOTIPO,
+    AVISO_REVISION: AVISO_REVISION,
+    ROTULOS: ROTULOS,
     URL_GESTION: URL_GESTION,
     URL_VOLUMETRIA: URL_VOLUMETRIA,
     SELECTOR_UMBRAL: SELECTOR_UMBRAL,
@@ -1176,6 +1495,7 @@ window.IniciativaAdmin = (function () {
     CAMPOS_EDICION: CAMPOS_EDICION,
     Incompleta: Incompleta,
     FORMATO: FORMATO,
+    FECHAS_GESTION: FECHAS_GESTION,
     Selector: Selector,
     VolumetriaCliente: VolumetriaCliente,
     CategoriasProblema: CategoriasProblema,
@@ -1188,6 +1508,8 @@ window.IniciativaAdmin = (function () {
     htmlRevision: htmlRevision,
     htmlEdicion: htmlEdicion,
     htmlCategoriasEdicion: htmlCategoriasEdicion,
+    htmlSinCatalogo: htmlSinCatalogo,
+    noEnLista: noEnLista,
     htmlVistaPrevia: htmlVistaPrevia,
     htmlVolumetria: htmlVolumetria
   };

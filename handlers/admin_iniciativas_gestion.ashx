@@ -5,19 +5,31 @@
 // no esta habilitada (PersistenciaGestionAdmin, App_Code/GestionIniciativaAdmin.cs).
 //
 //   POST handlers/admin_iniciativas_gestion.ashx   (multipart/form-data)
-//     accion=crear      tipo, po, so, titulo, descripcion, observaciones,
-//                       pares cat_ruta / cat_pct (cero o mas categorias,
-//                       cada una con su % en %) y el archivo "rca" (se mira
-//                       que llego; no se guarda). La volumetria no se
-//                       captura: es calculada (admin_iniciativas_volumetria.ashx).
+//     accion=crear      tipo (prefijo), tipo_iniciativa, tipo_agrupado,
+//                       estado (declarados: no se derivan del prefijo),
+//                       f_entrega_analisis (aaaa-mm-dd; vacio = hoy), po,
+//                       so, titulo, descripcion, observaciones, pares
+//                       cat_ruta / cat_pct (cero o mas categorias, cada una
+//                       con su % en %) y el archivo "rca" (se mira que
+//                       llego; no se guarda). La volumetria no se captura:
+//                       es calculada (admin_iniciativas_volumetria.ashx).
 //     accion=modificar  folio (identifica; nunca cambia), titulo,
 //                       descripcion, observaciones, f_analisis, f_solucion,
 //                       f_cierre, estado, subestado (cada uno solo si se
 //                       envia), pares pct_categoria / pct_valor (las YA
-//                       ligadas), pares agregar_categoria / agregar_pct y
-//                       quitar_categoria (repetible)
+//                       ligadas; pct_tipo_agrupado paralelo y opcional:
+//                       declara la agrupacion de una ligada que no la
+//                       tiene), agregar_categoria / agregar_pct /
+//                       agregar_tipo_iniciativa / agregar_tipo_agrupado
+//                       (paralelos; tipos obligatorios), pares
+//                       fcat_categoria / fcat_analisis (fecha de analisis
+//                       de una ligada: la propia, o la de la iniciativa si
+//                       la categoria la hereda) y quitar_categoria
+//                       (repetible)
 //
-//   501  valida: { "valida": true, "guardada": false,
+//   501  valida: { "valida": true, "guardada": false, "plan" (lo que se
+//                  guardaria: fechas del alta, de cada categoria ligada y
+//                  "pendientes"; PlanGestionAdmin.cs),
 //                  "persistencia": "no_habilitada", "persistencia_motivo",
 //                  "bloqueos": [...], "cambios", "faltantes", "advertencias",
 //                  "codigo": null, ... , "error", "tipo": "PersistenciaNoHabilitada" }
@@ -33,8 +45,18 @@
 //        (AccesoDenegado) y MOD (RolInsuficiente),
 //        antes de leer nada.
 //
-// SOLO LECTURA. No escribe en dbo.Problem, dbo.ProblemCategoria ni en el
-// historial de fechas, no genera codigo y no sube archivos.
+// HOY SOLO LECTURA: PersistenciaGestionAdmin.Habilitada = const false, asi
+// que la rama 4 (EscritorGestionAdminSql -> adm.usp_GestionAdmin_*, de
+// sql/18) nunca corre. Con ella activa:
+//   200 { guardada: true, codigo, ... } (el Codigo solo existe si la base
+//       confirmo el alta);
+//   409 { error, numero, tipo: TopeExcedido | CategoriaRepetida |
+//       DatoInvalido | CodigoNoEmitido | EscrituraRechazada, guardada: false }
+//       si el procedimiento rechaza (THROW antes del COMMIT: nada se guarda);
+//   409 { tipo: PendienteSinRegla, pendientes, guardada: false } si el plan
+//       tiene algo sin regla (quitar categoria);
+//   500 { tipo: EscrituraNoConfirmada, guardada: null } si falla otra cosa
+//       (no se sabe si se guardo).
 
 using System;
 using System.Collections.Generic;
@@ -83,9 +105,9 @@ public class AdminIniciativasGestion : IHttpHandler
             // 2) Catalogo / registro: la autoridad. Si no se puede leer, no se
             //    dice nada de la validez.
             ResultadoGestionAdmin r;
+            var servicio = new GestionIniciativaAdminService();
             try
             {
-                var servicio = new GestionIniciativaAdminService();
                 r = crear != null ? servicio.Crear(crear) : servicio.Modificar(modificar);
             }
             catch (Exception ex)
@@ -96,10 +118,81 @@ public class AdminIniciativasGestion : IHttpHandler
             }
             if (!r.Valida) return Invalida(context, r);
 
-            // 3) Valida, pero sin persistencia: nada se guarda.
+            // 3) El plan: lo que se guardaria (fechas incluidas).
+            var hoy = DashboardDataInfo.HoyEnPresentacion();
+            var planCrear = crear != null ? PlanificadorGestionAdmin.Crear(crear, r, hoy) : null;
+            var planMod = crear == null ? PlanificadorGestionAdmin.Modificar(modificar, servicio.Actual, r, hoy) : null;
+            var pendientes = planCrear != null ? planCrear.Pendientes : planMod.Pendientes;
+            var salida = r.ComoJson();
+            salida["plan"] = planCrear != null ? planCrear.ComoJson() : planMod.ComoJson();
+
+            // 4) Escritura: SOLO con la persistencia activa (hoy const false,
+            //    PersistenciaGestionAdmin) y sin pendientes. Depende de
+            //    sql/18 aplicada y del cargador del Excel retirado: sin aprobar.
+            //    Con la persistencia activa, un plan con pendientes (p. ej.
+            //    quitar categoria, sin regla) se RECHAZA (409): no es "no
+            //    habilitada" ni se guarda a medias.
+            if (PersistenciaGestionAdmin.Activa() && pendientes.Count > 0)
+            {
+                context.Response.StatusCode = 409;
+                context.Response.TrySkipIisCustomErrors = true;
+                return new Dictionary<string, object>
+                {
+                    { "error", "No se guardó nada: " + string.Join(" ", pendientes.ToArray()) },
+                    { "tipo", "PendienteSinRegla" }, { "pendientes", pendientes }, { "guardada", false },
+                };
+            }
+            if (PersistenciaGestionAdmin.Activa())
+            {
+                var id = IdentidadWindows.DesdeContexto(context);
+                if (!id.Autenticada || string.IsNullOrEmpty(id.Original))
+                    return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
+                string codigo;
+                try
+                {
+                    codigo = servicio.Guardar(planCrear, planMod, id.Original);
+                }
+                catch (ErrorEscrituraGestionAdmin ex)
+                {
+                    DashboardHandler.Registrar("admin_iniciativas_gestion.ashx", ex);
+                    context.Response.StatusCode = 409;
+                    context.Response.TrySkipIisCustomErrors = true;
+                    return new Dictionary<string, object>
+                    {
+                        { "error", ex.Message }, { "numero", ex.Numero },
+                        { "tipo", ex.Tipo },
+                        { "guardada", false },
+                    };
+                }
+                catch (Exception ex)
+                {
+                    // Conexion, permisos, tiempo agotado...: no se puede afirmar
+                    // que NO se guardo (un tiempo agotado puede llegar despues
+                    // del COMMIT). guardada = null: el navegador pide revisar
+                    // el registro antes de reintentar; nunca "no se guardo".
+                    DashboardHandler.Registrar("admin_iniciativas_gestion.ashx", ex);
+                    context.Response.StatusCode = 500;
+                    context.Response.TrySkipIisCustomErrors = true;
+                    return new Dictionary<string, object>
+                    {
+                        { "error", "No se pudo confirmar el guardado: " + DashboardHandler.MensajeSeguro(ex) +
+                                   " Revisa el registro antes de reintentar." },
+                        { "tipo", "EscrituraNoConfirmada" }, { "guardada", null },
+                    };
+                }
+                // Un alta sin Codigo devuelto no se da por guardada.
+                if (string.IsNullOrEmpty(codigo))
+                    return Error(context, 500, "La base no devolvió el código del alta: revisa el registro antes de reintentar.", "EscrituraNoConfirmada");
+                salida["codigo"] = codigo;
+                salida["guardada"] = true;
+                salida["persistencia"] = "habilitada";
+                salida["persistencia_motivo"] = null;
+                return salida;
+            }
+
+            // 5) Valida, pero sin persistencia: nada se guarda.
             context.Response.StatusCode = 501;
             context.Response.TrySkipIisCustomErrors = true;
-            var salida = r.ComoJson();
             salida["error"] = PersistenciaGestionAdmin.Motivo;
             salida["tipo"] = "PersistenciaNoHabilitada";
             return salida;

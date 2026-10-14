@@ -407,12 +407,18 @@ SELECT r.*, N = ROW_NUMBER() OVER (PARTITION BY r.Codigo, r.Campo ORDER BY r.Ord
 INTO #C FROM #R AS r;
 
 -- Lo que ya hay en la tabla de esa misma clase de fila, en orden de IdEvento.
+-- Solo eventos de la INICIATIVA: desde sql/18 la tabla tambien guarda los de
+-- la fecha de analisis propia de una categoria (Categoria no NULL), que no
+-- son de estas cadenas. Dinamico: sin sql/18 la columna no existe.
 IF OBJECT_ID('tempdb..#E') IS NOT NULL DROP TABLE #E;
-SELECT e.Codigo, e.Campo, e.FechaAnterior, e.FechaNueva,
-       N = ROW_NUMBER() OVER (PARTITION BY e.Codigo, e.Campo ORDER BY e.IdEvento)
-INTO #E
-FROM dbo.ProblemFechaEvento AS e
-WHERE e.Operacion = 'U' AND e.Origen = 'NO_DECLARADO';
+CREATE TABLE #E (Codigo nvarchar(100) COLLATE SQL_Latin1_General_CP1_CI_AS, Campo varchar(13), FechaAnterior date, FechaNueva date, N bigint);
+DECLARE @soloIniciativa nvarchar(40) =
+    CASE WHEN COL_LENGTH(N'dbo.ProblemFechaEvento', N'Categoria') IS NULL THEN N'' ELSE N' AND e.Categoria IS NULL' END;
+DECLARE @sqlE nvarchar(max) = N'INSERT #E (Codigo, Campo, FechaAnterior, FechaNueva, N) ' +
+    N'SELECT e.Codigo, e.Campo, e.FechaAnterior, e.FechaNueva, ' +
+    N'ROW_NUMBER() OVER (PARTITION BY e.Codigo, e.Campo ORDER BY e.IdEvento) ' +
+    N'FROM dbo.ProblemFechaEvento AS e WHERE e.Operacion = ''U'' AND e.Origen = ''NO_DECLARADO''' + @soloIniciativa + N';';
+EXEC sys.sp_executesql @sqlE;
 
 /* ---------- 2. Vista previa (solo lectura) ---------- */
 -- 2a. Totales

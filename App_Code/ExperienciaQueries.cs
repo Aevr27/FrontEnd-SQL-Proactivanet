@@ -440,6 +440,7 @@ public static partial class ExperienciaQueries
         public string So;
         public string Director;
         public int Antiguedad;
+        public string FCreacion;       // dbo.Problem.FechaCreacion, yyyy-MM-dd, o null
         public bool Activa;            // estado en ESTADOS_ACTIVOS
         public bool Retrasada;         // activa y con la fecha de su estado vencida
         public string SemFecha;        // verde / ambar / rojo
@@ -573,6 +574,7 @@ public static partial class ExperienciaQueries
                     d.Descripcion = Texto(rd.GetValue(16));
                     d.Observaciones = Texto(rd.GetValue(17));
                     d.Antiguedad = DiasDesde(rd.GetValue(18), hoy);
+                    d.FCreacion = Fecha(rd.GetValue(18));
                     d.ControlFecha = Convert.ToBoolean(rd.GetValue(19));
 
                     Canonizar(d);
@@ -643,6 +645,7 @@ public static partial class ExperienciaQueries
                     d.Descripcion = Texto(rd.GetValue(10));
                     d.Observaciones = Texto(rd.GetValue(11));
                     d.Antiguedad = DiasDesde(rd.GetValue(12), hoy);
+                    d.FCreacion = Fecha(rd.GetValue(12));
                     d.So = Texto(rd.GetValue(13));
                     d.Po = Texto(rd.GetValue(14));
                     d.Director = Texto(rd.GetValue(15));
@@ -1408,6 +1411,7 @@ public static partial class ExperienciaQueries
         i["riesgo_folio"] = d.Retrasada ? volReduceFolio : 0;
         i["retrazado"] = d.Retrasada ? 1 : 0;
         i["antiguedad"] = d.Antiguedad;
+        i["f_creacion"] = d.FCreacion;
         i["f_analisis"] = d.FAnalisis;
         i["f_solucion"] = d.FSolucion;
         i["f_cierre"] = d.FCierre;

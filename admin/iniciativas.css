@@ -720,6 +720,13 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-cat-agregar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .ini-cat-agregar input[list], .ini-cat-agregar select { flex: 1; min-width: 220px; }
 .ini-cats-tabla td { vertical-align: middle; }
+/* Fecha de analisis por categoria en "Modificar": la del problema (ligadas)
+   o la del borrador (nuevas). */
+.ini-ed-fecha input { width: 150px; }
+.ini-cat-fecha { white-space: nowrap; }
+/* Seguimiento: selector de categoria y su bloque. */
+.ini-seg-cat { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.ini-seg-cat input[list], .ini-seg-cat select { max-width: 100%; }
 .ini-cat-estado { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px;
   font-size: 10.5px; background: var(--bg-2); color: var(--muted); }
 .ini-cat-estado.nueva { color: var(--accent-ink); }

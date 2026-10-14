@@ -596,6 +596,16 @@ window.Iniciativas = (function () {
         this.crearAdmin.fijarProblemas(
           function () { return reg && reg.registro ? reg.registro.iniciativas : null; },
           function (folio) { self.mostrarVista('iniciativas'); reg.modificar(folio); });
+        // Clasificacion, Agrupacion y Estado del alta: los valores que ya
+        // existen, del mismo registro.
+        this.crearAdmin.fijarValores(function () {
+          var r = reg && reg.registro;
+          return r ? { estados: r.estadosProblem, tiposIniciativa: r.valoresTipoIniciativa, tiposAgrupado: r.valoresTipoAgrupado,
+                       persiste: r.persistenciaAdmin === true } : null;
+        });
+        // Un alta GUARDADA recarga el registro (la lista, la busqueda de
+        // "existente" y sus valores) sin recargar la pagina.
+        this.crearAdmin.alGuardar = function () { reg.cargar(); };
       }
       if (DUENOS_VISIBLES && window.CategoriasDuenos) this.duenos = new window.CategoriasDuenos.VistaDuenos(this.doc);
       if (this.$('cdSeccion')) this.$('cdSeccion').hidden = !DUENOS_VISIBLES;
@@ -1022,6 +1032,9 @@ window.Iniciativas = (function () {
           if (mia !== self.cargaId) return;
           self.solicitud = null;
           if (self.crearAdmin) self.crearAdmin.fijarCatalogo(null);
+          // Sin catalogo: "Modificar" y "Solicitar cambios" lo dicen (error),
+          // no lo pintan como lista vacia ni como "cargando".
+          if (self.registro && self.registro.fijarRutasCatalogo) self.registro.fijarRutasCatalogo(null, 'error');
           self.$('iniEstado').textContent = '';
           self.bloquearTodo('No disponible: no se pudo cargar el catálogo.');
           self.mostrarError((err && err.message) || 'No se pudo cargar el catálogo.');

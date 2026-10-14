@@ -144,13 +144,18 @@ function Ini(folio, o) {
   Object.keys(o || {}).forEach(function (k) { i[k] = o[k]; });
   return i;
 }
-function Cat(ruta, pct) {
-  return { categoria: ruta, tickets_reduce: 10, pct_dism: pct, director: 'Dir A', po: 'PO 1', so: 'SO x' };
+function Cat(ruta, pct, o) {
+  var c = { categoria: ruta, tickets_reduce: 10, pct_dism: pct, director: 'Dir A', po: 'PO 1', so: 'SO x', agrup: 'Problem' };
+  Object.keys(o || {}).forEach(function (k) { c[k] = o[k]; });
+  return c;
 }
 var REGISTRO = {
   estados_activos: ['En Análisis', 'En Solución', 'En Monitoreo'],
   agrupadores: ['Problem'], fecha_gen: '09/10/2026',
   tipos_iniciativa: CATALOGO.tipos,
+  estados_problem: ['Cerrado', 'En Análisis', 'En Solución'],
+  valores_tipo_iniciativa: ['Mejora', 'Problem'],
+  valores_tipo_agrupado: ['Adopcion', 'Problem'],
   iniciativas: [
     Ini('PRB 2026-000001', { categorias: [Cat('/A/Cat 1', 0.5), Cat('/A/Cat 2', 0.25)] }),       // completa
     Ini('PRB 2026-000002', { sin_categoria: true, observaciones: null }),                        // sin categoria ni obs.
@@ -177,15 +182,16 @@ function Pagina(conAdmin) {
     return Promise.reject(new Error('peticion inesperada ' + url));
   }
   (new Function('window', leer('assets/js/escape.js')))(ventana);
+  (new Function('window', leer('assets/js/duracion.js')))(ventana);
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(ventana, ventana.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(ventana, documento);
   (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
   if (conAdmin !== false) {
-    (new Function('window', 'document', 'Catalogos', 'Escape', leer('admin/iniciativa-admin.js')))(
-      ventana, documento, ventana.Catalogos, ventana.Escape);
+    (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', leer('admin/iniciativa-admin.js')))(
+      ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion);
   }
-  (new Function('window', 'document', 'Catalogos', 'Escape', 'fetch', leer('admin/registro-iniciativas.js')))(
-    ventana, documento, ventana.Catalogos, ventana.Escape, pedir);
+  (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
+    ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   return {
@@ -241,7 +247,7 @@ pruebas.push(function () {
   Check('I10 existente: solo Categoria y % salen del registro', ['categoria', 'pct'],
     Object.keys(A.Incompleta.datosDeRegistro(REGISTRO.iniciativas[0])));
   Check('I11 CAMPOS_REGISTRO = Categoria y %', ['categoria', 'pct'], A.Incompleta.CAMPOS_REGISTRO);
-  Check('I12 el borrador: la lista completa, sin Volumetria (es calculada)', ['categoria', 'titulo', 'descripcion', 'observaciones', 'pct', 'rca'],
+  Check('I12 el borrador: la lista completa, sin Volumetria (es calculada); Clasificacion, Agrupacion y Estado como faltantes', ['categoria', 'titulo', 'descripcion', 'observaciones', 'pct', 'rca', 'tipo_iniciativa', 'tipo_agrupado', 'estado'],
     A.CAMPOS_INCOMPLETA.map(function (c) { return c.clave; }));
 });
 
@@ -252,7 +258,17 @@ pruebas.push(function () {
   var cat = I.CatalogoIniciativas.desdeJson(CATALOGO);
   var b = new A.BorradorAdmin(cat);
   var r = b.revisar();
-  Check('B1 sin tipo: bloquea solo el Tipo', [false, ['tipo']], [r.listo, claves(r.bloqueantes)]);
+  Check('B1 sin tipo: bloquea solo el Tipo (Clasificacion, Agrupacion y Estado pueden faltar)',
+    [false, ['tipo']], [r.listo, claves(r.bloqueantes)]);
+  b.elegirTipo('ADO');
+  Check('B1c sin Clasificacion, Agrupacion ni Estado: se puede validar, pero Incompleta con los tres', [true, true, true],
+    [b.revisar().listo, ['tipo_iniciativa', 'tipo_agrupado', 'estado'].every(function (k) { return claves(b.faltantes()).indexOf(k) >= 0; }),
+     b.paraEnviar().some(function (c) { return c[0] === 'tipo_agrupado' && c[1] === ''; })]);
+  b.elegirTipo('');
+  Check('B1b la entrega del analisis empieza en hoy', A.FECHAS_GESTION.hoy(), b.declarados.f_entrega_analisis);
+  b.capturar('tipo_iniciativa', 'Problem');
+  b.capturar('tipo_agrupado', ' Problem ');
+  b.capturar('estado', 'En Análisis');
 
   Check('B2 acepta cualquier tipo del catalogo', [true, true, true],
     cat.tipos.map(function (t) { return new A.BorradorAdmin(cat).elegirTipo(t); }));
@@ -287,6 +303,15 @@ pruebas.push(function () {
   Check('B11 completo: listo, sin faltantes, aun sin guardar', [true, false, [], false], [r.listo, r.incompleta, r.faltantes, r.guardado]);
   b.elegirRca({ name: 'vacio.pdf', size: 0 });
   Check('B12 archivo vacio no cuenta como RCA', ['rca'], claves(b.faltantes()));
+  b.capturar('f_entrega_analisis', '2026-02-30');
+  Check('B13 fecha de entrega invalida bloquea', [false, ['f_entrega_analisis']], [b.revisar().listo, claves(b.revisar().formato)]);
+  b.capturar('f_entrega_analisis', '2026-10-20');
+  var envio = {};
+  b.paraEnviar().forEach(function (c) { envio[c[0]] = c[1]; });
+  Check('B14 viajan los declarados (sin espacios) y la entrega', ['Problem', 'Problem', 'En Análisis', '2026-10-20'],
+    [envio.tipo_iniciativa, envio.tipo_agrupado, envio.estado, envio.f_entrega_analisis]);
+  Check('B15 en el alta, las categorias NO piden tipos por fila (llevan los del alta)', [],
+    b.categorias.erroresFormato().filter(function (e) { return e.clave === 'categorias'; }));
 });
 
 // ---------------------------------------------------------------------------
@@ -326,6 +351,11 @@ pruebas.push(function () {
       [p.sel('admCatAgregar').disabled, /<select id="admCatBuscar"/.test(p.sel('admCatSelector').innerHTML),
        (p.sel('admCatSelector').innerHTML.match(/<option value="\//g) || []).length]);
     elegir(p, 'admTipo', 'PRB');
+    Check('C2b Clasificacion, Agrupacion y Estado con los valores del registro; entrega = hoy', [['Mejora', 'Problem'], ['Adopcion', 'Problem'], ['Cerrado', 'En Análisis', 'En Solución'], A.FECHAS_GESTION.hoy()],
+      [p.sel('admTipoIniciativa').opciones(), p.sel('admTipoAgrupado').opciones(), p.sel('admEstado').opciones(), p.sel('admFEntrega').value]);
+    elegir(p, 'admTipoIniciativa', 'Problem');
+    elegir(p, 'admTipoAgrupado', 'Problem');
+    elegir(p, 'admEstado', 'En Análisis');
     Check('C3 aviso en vivo: incompleta, con RCA', true,
       /Incompleta/.test(p.sel('admFaltantes').innerHTML) && /RCA/.test(p.sel('admFaltantes').innerHTML));
     Check('C4 nota RCA de Problem: no bloquea', true, /sin RCA queda incompleta/.test(p.sel('admRcaNota').textContent));
@@ -337,7 +367,7 @@ pruebas.push(function () {
     var res = p.sel('admResultado');
     Check('C7 Revisar: "no guardado" + aviso de prototipo, nunca clase ok', [false, true, true, false],
       [res.hidden, /no guardado/.test(res.innerHTML), /No se guardó nada/.test(res.innerHTML), res.classList.contains('ok')]);
-    Check('C8 el codigo no se inventa', 'Sin código: no se asigna todavía (regla pendiente)',
+    Check('C8 el codigo no se inventa: lo asigna el servidor al guardar', 'Se asigna al guardar (PPP AAAA-NNNNNN, el siguiente del prefijo y año)',
       (/<output id="admCodigo"[^>]*>([^<]*)<\/output>/.exec(leer('admin/iniciativas.html')) || [])[1]);
   });
 });
@@ -368,7 +398,7 @@ pruebas.push(function () {
       /<b>RCA<\/b> · pendiente de contrato/.test(html) && /<b>Código y Tipo de iniciativa<\/b> · solo lectura/.test(html));
     Check('E6b fechas, Estado y categorias ya son editables', [true, true, true],
       [/type="date" id="regEd-f_analisis" data-edicion="f_analisis" value="2026-12-01"/.test(html),
-       /Estado<\/span><p class="ini-nota">En Análisis · sin lista de valores: no se puede cambiar\./.test(html), /id="regEdCats"/.test(html)]);
+       /<select id="regEd-estado" data-edicion="estado">/.test(html), /id="regEdCats"/.test(html)]);
 
     editar(p, 'data-edicion', 'titulo', 'Nuevo titulo');
     editar(p, 'data-edicion', 'descripcion', '');
@@ -507,6 +537,8 @@ pruebas.push(function () {
     p.sel('tab-iniciativas').disparar('click');
     p.sel('btnCrearAdmin').disparar('click');
     var b = pg.crearAdmin.borrador;
+    ['tipo_iniciativa', 'tipo_agrupado'].forEach(function (k) { b.capturar(k, 'Problem'); });
+    b.capturar('estado', 'En Análisis');
     Check('CB4 al volver, el borrador directo sigue (modelo y control)', ['crear', 'PRB', 'Borrador directo', 'Borrador directo'],
       [pg.vista, b.tipo, b.valores.titulo, p.sel('adm-titulo').value]);
     Check('CB4 el de la solicitud tambien, y son distintos', ['ADO', 'Borrador de solicitud', true],
@@ -829,6 +861,9 @@ pruebas.push(function () {
   }).then(function (r) {
     Check('G12 sin tipo: no se envia (bloqueante local)', [null, 0], [r, srv.pedidos.length]);
     elegir(p, 'admTipo', 'ADO');
+    elegir(p, 'admTipoIniciativa', 'Mejora');
+    elegir(p, 'admTipoAgrupado', 'Adopcion');
+    elegir(p, 'admEstado', 'En Análisis');
     p.pagina.crearAdmin.agregarCategoria('/A/Cat 2');
     p.pagina.crearAdmin.agregarCategoria('/A/Cat 1');
     p.pagina.crearAdmin.borrador.categorias.capturarPct(0, '15');
@@ -839,10 +874,57 @@ pruebas.push(function () {
     Check('G13 envia accion=crear con dos categorias y su %', ['crear', 'ADO', '', [['cat_ruta', '/A/Cat 2'], ['cat_pct', '15'], ['cat_ruta', '/A/Cat 1'], ['cat_pct', '']]],
       [campos.accion, campos.tipo, campos.po, srv.pedidos[0].campos.filter(function (c) { return /^cat_/.test(c[0]); })]);
     Check('G13 la volumetria no viaja (es calculada)', false, srv.pedidos[0].campos.some(function (c) { return /volumetria/.test(c[0]); }));
+    Check('G13b viajan Clasificacion, Agrupacion, Estado y entrega (hoy)', ['Mejora', 'Adopcion', 'En Análisis', A.FECHAS_GESTION.hoy()],
+      [campos.tipo_iniciativa, campos.tipo_agrupado, campos.estado, campos.f_entrega_analisis]);
     Check('G14 501: aviso, faltantes del servidor, nunca ok', ['no_habilitada', true, false, true, true],
       [r.estado, caja.classList.contains('aviso'), caja.classList.contains('ok'), /Incompleta/.test(caja.innerHTML), /No se guardó/.test(caja.innerHTML)]);
     Check('G15 Guardar se reactiva', false, p.sel('admGuardar').disabled);
   });
+});
+
+// ---------------------------------------------------------------------------
+// FP) Fechas propias, agrupacion por declarar y tipos por categoria (sql/18)
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var ini = Ini('PRB 2026-000009', { f_analisis: '2026-10-28', categorias: [
+    Cat('/A/Cat 1', 0.5),                                                         // inicial: hereda
+    Cat('/A/Cat 2', 0.1, { f_analisis_propia: '2026-11-17', f_creacion_propia: '2026-11-02' }),  // ligada despues
+    Cat('/B/Cat 4', 0.2, { agrup: null })                                         // sin agrupacion (Excel)
+  ] });
+  var ed = new A.EdicionAdmin(ini, { rutas: ['/A/Cat 1', '/A/Cat 2', '/B/Cat 4', '/B/Cat 5'],
+    tiposIniciativa: ['Mejora', 'Problem'], tiposAgrupado: ['Adopcion', 'Problem'] });
+  var html = A.htmlCategoriasEdicion(ed, null);
+  Check('FP1 inicial: la de la iniciativa, sin input; ligada despues: input de fecha con la propia', [true, true, 1],
+    [/28\/10\/2026<\/span> <span class="ini-origen derivado"[^>]*>De la iniciativa/.test(html),
+     /<input type="date" data-edicion-fcat="1" value="2026-11-17">/.test(html), (html.match(/data-edicion-fcat=/g) || []).length]);
+  Check('FP2 la inicial no acepta fecha propia (cambia con la de la iniciativa)', [false, true],
+    [ed.capturarFechaCategoria(0, '2026-12-01'), ed.capturarFechaCategoria(1, '2026-11-30')]);
+  Check('FP3 la fecha propia editada viaja como fcat_*; la de la iniciativa no se toca', [[['fcat_categoria', '/A/Cat 2'], ['fcat_analisis', '2026-11-30']], false],
+    [ed.paraEnviar().filter(function (x) { return /^fcat_/.test(x[0]); }), ed.paraEnviar().some(function (x) { return x[0] === 'f_analisis'; })]);
+  Check('FP4 cambio en la vista previa con el anterior crudo', true,
+    ed.cambios().some(function (c) { return c.clave === 'fechas_categoria' && c.anterior === '2026-11-17' && c.nuevo === '2026-11-30'; }));
+  ed.capturarFechaCategoria(1, '');
+  Check('FP5 vaciar la fecha propia bloquea', true, ed.erroresFormato().some(function (e) { return e.clave === 'fechas_categoria'; }));
+  ed.capturarFechaCategoria(1, '2026-11-17');
+  Check('FP6 sin agrupacion: selector para declararla; las que la tienen la muestran', [true, true],
+    [/data-edicion-tipo="2\|tipo_agrupado"/.test(html), /Sin declarar/.test(html)]);
+  Check('FP7 declarar la agrupacion de una ligada viaja con su % actual (lista paralela)', [true,
+      [['pct_categoria', '/B/Cat 4'], ['pct_valor', '20'], ['pct_tipo_agrupado', 'Adopcion']]],
+    [ed.capturarTipo(2, 'tipo_agrupado', 'Adopcion'), ed.paraEnviar().filter(function (x) { return /^pct_/.test(x[0]); })]);
+  Check('FP8 a una ligada con agrupacion no se le cambia aqui', false, ed.capturarTipo(0, 'tipo_agrupado', 'Adopcion'));
+  ed.categorias.agregar('/B/Cat 5');
+  Check('FP9 una nueva sin Clasificacion ni Agrupacion no bloquea y no los copia de las hermanas', [0, '', ''],
+    [ed.erroresFormato().filter(function (e) { return e.clave === 'categorias'; }).length,
+     ed.categorias.filas[3].tipoIniciativa, ed.categorias.filas[3].tipoAgrupado]);
+  ed.capturarTipo(3, 'tipo_iniciativa', 'Mejora');
+  ed.capturarTipo(3, 'tipo_agrupado', 'Problem');
+  Check('FP10 con sus tipos: lista, y viajan en paralelo a agregar_*', [true, [['agregar_categoria', '/B/Cat 5'], ['agregar_pct', ''],
+      ['agregar_tipo_iniciativa', 'Mejora'], ['agregar_tipo_agrupado', 'Problem']]],
+    [ed.revisar().listo, ed.paraEnviar().filter(function (x) { return /^agregar_/.test(x[0]); })]);
+  html = A.htmlCategoriasEdicion(ed, null);
+  Check('FP11 la nueva pinta Clasificacion y Agrupacion elegidas', [true, true],
+    [/data-edicion-tipo="3\|tipo_iniciativa"><option value="">— Clasificación —<\/option><option value="Mejora" selected>/.test(html),
+     /data-edicion-tipo="3\|tipo_agrupado"><option value="">— Agrupación —<\/option><option value="Adopcion">Adopcion<\/option><option value="Problem" selected>/.test(html)]);
 });
 
 // G16-G23) Crear: cada estado HTTP con su mensaje, siempre "no se guardó" y
@@ -860,6 +942,8 @@ pruebas.push(function () {
     p.sel('tab-administracion').disparar('click');
     p.sel('btnCrearAdmin').disparar('click');
     elegir(p, 'admTipo', 'ADO');
+    ['tipo_iniciativa', 'tipo_agrupado'].forEach(function (k) { p.pagina.crearAdmin.borrador.capturar(k, 'Problem'); });
+    p.pagina.crearAdmin.borrador.capturar('estado', 'En Análisis');
     caja = p.sel('admResultado');
     return validar(501, NO_HABILITADA);
   }).then(function (r) {
@@ -895,8 +979,91 @@ pruebas.push(function () {
       [r.estado, /Solo validación/.test(caja.innerHTML), /No se guardó nada/.test(caja.innerHTML)]);
     return validar(200, { valida: true, guardada: true });
   }).then(function (r) {
-    Check('G23 Crear 200 "guardada": no se acepta como exito', ['error', false, false, false],
+    Check('G23 Crear 200 "guardada" sin accion ni codigo: no se acepta como exito', ['error', false, false, false],
       [r.estado, r.guardada, caja.classList.contains('ok'), exito.test(caja.innerHTML)]);
+  });
+});
+
+// GS10) Modificar GUARDADO: recarga el registro (lista, categorias, capacidad
+// e historial salen de ahi) y reabre el detalle con el aviso; un 409 no
+// recarga nada y deja la edicion abierta.
+pruebas.push(function () {
+  var p = Pagina(), reg;
+  function registros() { return p.pedidos.filter(function (x) { return /registro/.test(x.url); }).length; }
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    reg.modificar('PRB 2026-000001');
+    Check('GS10a con persistencia activa el boton de Modificar dice "Guardar"', true,
+      /data-accion="edicion-guardar"[^>]*>Guardar<\/button>/.test(p.sel('regEdicion').innerHTML));
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    return reg.guardarEdicion(Servidor(409, { tipo: 'TopeExcedido', error: 'tope', guardada: false }).pedir);
+  }).then(function (r) {
+    Check('GS10b 409: rechazada, la edicion sigue abierta, sin recargar', ['rechazada', true, 1],
+      [r.estado, !!reg.edicion, registros()]);
+    return reg.guardarEdicion(Servidor(200, { accion: 'modificar', valida: true, guardada: true, codigo: 'PRB 2026-000001',
+      cambios: [{ clave: 'titulo', rotulo: 'Título', anterior: 'x', nuevo: 'Nuevo' }] }).pedir);
+  }).then(function (r) {
+    var aviso = p.sel('regDetAviso');
+    Check('GS10c guardado: recarga el registro una vez, reabre el mismo detalle (sin edicion) con el aviso', ['guardada', 2, 'PRB 2026-000001', null, false, true],
+      [r.estado, registros(), reg.abierta, reg.edicion, aviso.hidden, /Guardado en la base/.test(aviso.innerHTML)]);
+  });
+});
+
+// GS) Persistencia ACTIVA: solo 200 + guardada + accion (+ codigo en un alta)
+// es exito; 409 / 500 EscrituraNoConfirmada nunca dicen "guardado"; un alta
+// guardada limpia el borrador y avisa a la pagina; Modificar guardado recarga
+// el registro y reabre el detalle.
+pruebas.push(function () {
+  var R = base.ventana.IniciativaAdmin.RespuestaGestion;
+  Check('GS1 estados con la persistencia activa', ['guardada', 'guardada', 'error', 'rechazada', 'rechazada', 'no_confirmada'], [
+    R.desde(200, { accion: 'crear', valida: true, guardada: true, codigo: 'PRB 2026-000185' }).estado,
+    R.desde(200, { accion: 'modificar', valida: true, guardada: true, codigo: 'PRB 2026-000001' }).estado,
+    R.desde(200, { accion: 'crear', valida: true, guardada: true, codigo: '' }).estado,
+    R.desde(409, { tipo: 'TopeExcedido', error: '/A/Cat 1: solo tiene 0%', guardada: false }).estado,
+    R.desde(409, { tipo: 'PendienteSinRegla', error: 'No se guardó nada: quitar', guardada: false }).estado,
+    R.desde(500, { tipo: 'EscrituraNoConfirmada', error: 'tiempo agotado', guardada: null }).estado
+  ]);
+  var g = R.desde(200, { accion: 'crear', valida: true, guardada: true, codigo: 'PRB 2026-000185', cambios: [] });
+  var html = A.htmlRespuesta(g);
+  Check('GS2 guardada: dice el codigo, clase ok, sin aviso de "no se guardo"', [true, 'ok', false, true],
+    [/Guardado en la base · Código PRB 2026-000185/.test(html), A.claseRespuesta(g), /No se guardó/.test(html), g.guardada]);
+  var rch = R.desde(409, { tipo: 'TopeExcedido', error: '/A/Cat 1: solo tiene 0% disponible', guardada: false });
+  Check('GS3 rechazada: no se guardo, con el motivo de la base, nunca ok', [false, 'mal', true, true],
+    [rch.guardada, A.claseRespuesta(rch), /No se guardó nada/.test(A.htmlRespuesta(rch)), /solo tiene 0% disponible/.test(A.htmlRespuesta(rch))]);
+  var nc = R.desde(500, { tipo: 'EscrituraNoConfirmada', error: 'No se pudo confirmar el guardado', guardada: null });
+  Check('GS4 no confirmada: no dice ni guardado ni "no se guardo"; pide revisar', [false, false, true, 'aviso'],
+    [/Guardado en la base/.test(A.htmlRespuesta(nc)), /No se guardó nada/.test(A.htmlRespuesta(nc)),
+     /Revisa el registro antes de reintentar/.test(A.htmlRespuesta(nc)), A.claseRespuesta(nc)]);
+  Check('GS5 rotulos: sin el dato del servidor, "no guarda"; con persistencia, "Guardar"',
+    ['Validar en el servidor (no guarda)', 'Guardar'], [A.ROTULOS.valida.boton, A.ROTULOS.guarda.boton]);
+
+  var p = Pagina(), recargas = 0;
+  return esperar().then(function () {
+    var pg = p.pagina;
+    pg.fijarRol('ADM');
+    p.sel('tab-administracion').disparar('click');
+    p.sel('btnCrearAdmin').disparar('click');
+    Check('GS6 registro sin persistencia_admin: el boton de alta dice que no guarda', 'Validar en el servidor (no guarda)', p.sel('admGuardar').textContent);
+    pg.registro.registro.persistenciaAdmin = true;
+    pg.crearAdmin.pintar();
+    Check('GS7 con persistencia_admin = true: "Guardar"', 'Guardar', p.sel('admGuardar').textContent);
+    pg.crearAdmin.alGuardar = function () { recargas++; };
+    elegir(p, 'admTipo', 'ADO');
+    escribir(p, 'adm-titulo', 'Alta real');
+    pg.crearAdmin.pedir = Servidor(409, { tipo: 'TopeExcedido', error: 'tope', guardada: false }).pedir;
+    return pg.crearAdmin.guardar();
+  }).then(function (r) {
+    Check('GS8 alta rechazada: el borrador sigue (para corregir) y no se recarga nada', ['rechazada', 'Alta real', 0],
+      [r.estado, p.pagina.crearAdmin.borrador.valores.titulo, recargas]);
+    p.pagina.crearAdmin.pedir = Servidor(200, { accion: 'crear', valida: true, guardada: true, codigo: 'ADO 2026-000074', cambios: [] }).pedir;
+    return p.pagina.crearAdmin.guardar();
+  }).then(function (r) {
+    var caja = p.sel('admResultado');
+    Check('GS9 alta guardada: muestra el codigo, limpia el borrador y avisa a la pagina una vez', ['guardada', true, '', '', 1, true],
+      [r.estado, /ADO 2026-000074/.test(caja.innerHTML), p.pagina.crearAdmin.borrador.tipo, p.pagina.crearAdmin.borrador.valores.titulo,
+       recargas, caja.classList.contains('ok')]);
   });
 });
 
@@ -1030,7 +1197,8 @@ pruebas.push(function () {
     var pares = ed.paraEnviar();
     Check('ED8 lo que viaja: folio, fechas, estado, agregar y quitar', [
       ['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['f_cierre', '2027-01-31'], ['estado', 'Cerrado'],
-      ['quitar_categoria', '/A/Cat 2'], ['agregar_categoria', '/B/Cat 4'], ['agregar_pct', '']], pares);
+      ['quitar_categoria', '/A/Cat 2'], ['agregar_categoria', '/B/Cat 4'], ['agregar_pct', ''],
+      ['agregar_tipo_iniciativa', ''], ['agregar_tipo_agrupado', '']], pares);
     Check('ED9 el codigo nunca viaja como cambio', false, ed.cambios().some(function (c) { return c.clave === 'folio' || c.clave === 'codigo'; }));
     var res = Elemento('r'); res.setAttribute('data-edicion-cat', 'restaurar'); res.setAttribute('data-indice', '1');
     p.sel('regDetCuerpo').disparar('click', { target: res });
@@ -1045,6 +1213,223 @@ pruebas.push(function () {
       Check('ED14 su estado se pinta (error simulado: no se pudo consultar)', true, /No se pudo consultar/.test(p.sel('regEdCats').innerHTML));
     });
   });
+});
+
+// AD) Crear (ADM): borrador incompleto con varias categorias. Nada se
+// inventa: lo que falta se nombra, incluido CUAL categoria no tiene %.
+pruebas.push(function () {
+  var cat = I.CatalogoIniciativas.desdeJson(CATALOGO);
+  var b = new A.BorradorAdmin(cat);
+  Check('AD1 vacio: no listo (sin tipo), incompleta, sin codigo ni guardado', [false, true, null, false],
+    (function (r) { return [r.listo, r.incompleta, r.codigo, r.guardado]; })(b.revisar()));
+  b.elegirTipo('ADO');
+  b.capturar('tipo_iniciativa', 'Problem'); b.capturar('tipo_agrupado', 'Adopcion'); b.capturar('estado', 'En Análisis');
+  b.agregarCategoria('/A/Cat 1'); b.agregarCategoria('/B/Cat 4');
+  b.categorias.capturarPct(0, '20');
+  var r = b.revisar();
+  Check('AD2 con tipo y datos a medias: listo para validar, pero Incompleta', [true, true], [r.listo, r.incompleta]);
+  Check('AD3 el faltante de % dice que categoria no lo tiene', true,
+    r.faltantes.some(function (f) { return f.clave === 'pct' && /sin %: \/B\/Cat 4\)/.test(f.rotulo); }));
+  Check('AD4 los campos vacios siguen vacios (no se rellenan)', ['', '', ''],
+    [b.valores.titulo, b.valores.descripcion, b.valores.observaciones]);
+  Check('AD5 viajan las dos categorias, la incompleta con % vacio', [['cat_ruta', '/A/Cat 1'], ['cat_pct', '20'], ['cat_ruta', '/B/Cat 4'], ['cat_pct', '']],
+    b.paraEnviar().filter(function (c) { return /^cat_/.test(c[0]); }));
+  Check('AD6 agregar otra no cambia el % ya escrito', [true, '20', ''],
+    [b.agregarCategoria('/A/Cat 2').ok, b.categorias.filas[0].valor, b.categorias.filas[2].valor]);
+  Check('AD7 duplicado rechazado', [false, 3], [b.agregarCategoria(' /a/cat 2').ok, b.categorias.filas.length]);
+  Check('AD8 lo escrito que no es categoria: rechazo con parecidas, sin elegir', [false, true, 3],
+    (function (x) { return [x.ok, /Parecidas: \/A\/Cat 1 · \/A\/Cat 2/.test(x.mensaje), b.categorias.filas.length]; })(b.agregarCategoria('cat')));
+  Check('AD9 la revision local nunca guarda ni genera codigo', [true, null, false], [/No se guardó nada/.test(r.aviso), r.codigo, r.guardado]);
+});
+
+// LF) Ligar a un problema existente: varias categorias nuevas, cada una con
+// su fecha de analisis de BORRADOR; las ligadas muestran la del problema.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro, pg = p.pagina;
+    pg.fijarRol('ADM');
+    pg.mostrarVista('crear');
+    var r = p.sel('admRutaExistente');
+    r.value = 'existente'; r.checked = true; r.disparar('change');
+    var b = Elemento('b'); b.setAttribute('data-existente', 'MAP 2026-000003');
+    p.sel('admExistenteLista').disparar('click', { target: b });
+    var ed = reg.edicion;
+    var FG = p.ventana.IniciativaAdmin.FECHAS_GESTION, hoyOriginal = FG.hoy;
+    FG.hoy = function () { return '2026-10-13'; };
+    Check('LF1 elegido: su identidad real y su categoria ligada', ['MAP 2026-000003', ['/A/Cat 2']],
+      [reg.abierta, ed.categorias.filas.map(function (f) { return f.categoria; })]);
+    Check('LF2 agregar dos categorias nuevas', [true, true, 3],
+      [reg.agregarCategoriaEdicion('/A/Cat 1').ok, reg.agregarCategoriaEdicion('/B/Cat 4').ok, ed.categorias.filas.length]);
+    Check('LF3 duplicado (ligada o nueva) rechazado', [false, false, 3],
+      [reg.agregarCategoriaEdicion('/a/cat 2').ok, reg.agregarCategoriaEdicion('/A/Cat 1').ok, ed.categorias.filas.length]);
+    var html = p.sel('regEdCats').innerHTML;
+    Check('LF4 columna Fecha de analisis: ligada = del problema (compartida); nuevas = PROPIAS calculadas, sin input', [true, true, 0, 2],
+      [/Fecha de análisis<\/th>/.test(html), /01\/12\/2026<\/span> <span class="ini-origen derivado"[^>]*>De la iniciativa/.test(html),
+       (html.match(/data-edicion-fecha="/g) || []).length, (html.match(/title="Se liga el [^"]*">Calculada<\/span>/g) || []).length]);
+    Check('LF4b cada nueva: su dia de ligado (hoy) y su analisis = hoy + 15', [true, true],
+      [/28\/10\/2026<\/span> <span class="ini-origen derivado" title="Se liga el 13\/10\/2026: análisis = ese día \+ 15 días/.test(html),
+       ed.categorias.filas.slice(1).every(function (f) { return f.fCreacion === '2026-10-13' && f.fAnalisis === '2026-10-28'; })]);
+    editar(p, 'data-edicion-pct', '1', '30');
+    Check('LF5 la ligada no toma fecha propia (usa la del problema)', ['', '2026-10-28', '2026-10-28'],
+      ed.categorias.filas.map(function (f) { return f.fAnalisis || ''; }));
+    Check('LF6 la regla cruza mes y anio', ['2027-01-15', '2026-03-16', ''],
+      [A.FECHAS_GESTION.analisisDesde('2026-12-31'), A.FECHAS_GESTION.analisisDesde('2026-03-01'), A.FECHAS_GESTION.analisisDesde('31/12/2026')]);
+    Check('LF7 fechas calculadas por categoria nueva', [{ categoria: '/A/Cat 1', f_creacion: '2026-10-13', f_analisis: '2026-10-28' },
+                                                       { categoria: '/B/Cat 4', f_creacion: '2026-10-13', f_analisis: '2026-10-28' }],
+      ed.categorias.fechasNuevas());
+    FG.hoy = function () { return '2026-11-02'; };
+    Check('LF8 una ligada otro dia lleva SU fecha; las ya agregadas no cambian', [true, ['', '2026-10-28', '2026-10-28', '2026-11-17'], ['', '30', '', '']],
+      [(function () { ed.categorias.fijarRutas(['/A/Cat 1', '/A/Cat 2', '/B/Cat 4', '/C/Cat 9']); return reg.agregarCategoriaEdicion('/C/Cat 9').ok; })(),
+       ed.categorias.filas.map(function (f) { return f.fAnalisis || ''; }), ed.categorias.filas.map(function (f) { return f.valor; })]);
+    FG.hoy = hoyOriginal;
+    var pares = ed.paraEnviar();
+    Check('LF9 las fechas de categoria NO viajan (las fija el servidor); el codigo no cambia', [false, 'MAP 2026-000003', false],
+      [pares.some(function (x) { return /fecha|f_analisis|f_creacion/.test(x[0]); }), pares[1][1], pares.some(function (x) { return x[0] === 'codigo'; })]);
+    Check('LF10 la vista previa dice la fecha calculada', true,
+      ed.cambios().some(function (c) { return /\/A\/Cat 1 · 30% · análisis 2026-10-28 \(hoy \+ 15 días\)/.test(c.nuevo); }));
+    Check('LF11 nota del modelo: iniciales heredan la de la iniciativa; ligadas despues, la suya (+15)', true,
+      /las categorías iniciales heredan la de la iniciativa y cambian con ella \(Fecha compromiso de Análisis\)\. Una categoría ligada después tiene la suya: el día en que se liga \+ 15 días/.test(p.sel('regEdCats').innerHTML));
+    Check('LF12 el registro no cambia', ['2026-12-01', 1], [reg.registro.buscar('MAP 2026-000003').f_analisis,
+      reg.registro.buscar('MAP 2026-000003').categorias.length]);
+    Check('LF13 una nueva sin % queda incompleta en el borrador, no se rellena', '', ed.categorias.filas[2].valor);
+  });
+});
+
+// LC) Estado del catalogo de rutas: cargando y error no son "sin categorias".
+pruebas.push(function () {
+  Check('LC1 textos de estado', [true, true, true],
+    [/Cargando el catálogo/.test(A.htmlSinCatalogo('cargando')), /No se pudo cargar el catálogo/.test(A.htmlSinCatalogo('error')),
+     /no está disponible/.test(A.htmlSinCatalogo(''))]);
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.fijarRutasCatalogo(null, 'error');
+    reg.modificar('PRB 2026-000001');
+    Check('LC2 Modificar con error de catalogo: lo dice y no agrega', [true, false],
+      [/No se pudo cargar el catálogo de categorías/.test(p.sel('regEdCats').innerHTML), reg.agregarCategoriaEdicion('/A/Cat 1').ok]);
+    Check('LC3 el estado no se confunde con lista vacia', 'error', reg.rutasEstado);
+  });
+});
+
+// SC) Solicitar cambios: varias categorias en una solicitud (DOM). Solo
+// se prepara: ni peticiones ni guardado.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    p.pagina.fijarRol('MOD');
+    reg.abrirDetalle('PRB 2026-000001');
+    accion(p, 'solicitar-cambios');
+    var form = p.sel('regCambio').innerHTML;
+    elegir(p, 'regCambioCampo', 'pct');
+    Check('SC1 Categorias: tabla con las ligadas y su % actual', [false, true, true],
+      [p.sel('regCambioGrupoPct').hidden, /data-cambio-pct="0"/.test(form), /<td class="num">25%<\/td>/.test(form)]);
+    p.sel('regCambioMotivo').value = 'Se amplia el alcance';
+    var antes = p.pedidos.length;
+    editar(p, 'data-cambio-pct', '1', '30');
+    p.sel('regCambioCatBuscar').value = '/b/cat 4';
+    accion(p, 'cambio-cat-agregar');
+    var grupo = p.sel('regCambioGrupoPct').innerHTML;
+    Check('SC2 agregar del catalogo: se pinta como nueva y el % pedido de la ligada se conserva', [true, true, true],
+      [/\/B\/Cat 4<\/span> <span class="ini-cat-estado nueva">Agregar/.test(grupo), /data-cambio-pct="1" value="30"/.test(grupo),
+       /data-cambio-nueva-pct="0"/.test(grupo)]);
+    Check('SC3 solo se repinta el bloque de categorias: motivo y formulario intactos', ['Se amplia el alcance', form],
+      [p.sel('regCambioMotivo').value, p.sel('regCambio').innerHTML]);
+    p.sel('regCambioCatBuscar').value = '/A/Cat 1';
+    accion(p, 'cambio-cat-agregar');
+    Check('SC4 una ligada no se puede agregar otra vez', [true, 1], [/ya es una categoría de esta iniciativa/.test(p.sel('regCambioCatMsg').textContent), reg.cambio.nuevas.length]);
+    p.sel('regCambioCatBuscar').value = '/B/Cat 4';
+    accion(p, 'cambio-cat-agregar');
+    Check('SC4b ni una nueva dos veces', [true, 1], [/ya está en la lista para agregar/.test(p.sel('regCambioCatMsg').textContent), reg.cambio.nuevas.length]);
+    accion(p, 'cambio-preparar');
+    Check('SC5 nueva sin %: no se prepara', [true, true], [/error/.test(p.sel('regCambioMsg').className), /\/B\/Cat 4: escribe un porcentaje/.test(p.sel('regCambioMsg').innerHTML)]);
+    editar(p, 'data-cambio-nueva-pct', '0', '10');
+    accion(p, 'cambio-preparar');
+    var msg = p.sel('regCambioMsg').innerHTML;
+    Check('SC6 preparada (no enviada) con las dos categorias', [true, true, true],
+      [/Solicitud preparada, no enviada/.test(msg), /\/A\/Cat 2: 25% → 30%/.test(msg), /\/B\/Cat 4 \(agregar\): 10%/.test(msg)]);
+    Check('SC7 sin peticiones al servidor; el registro no cambia', [antes, 0.25, 2],
+      [p.pedidos.length, reg.registro.buscar('PRB 2026-000001').categorias[1].pct_dism, reg.registro.buscar('PRB 2026-000001').categorias.length]);
+    var q = Elemento('q'); q.setAttribute('data-cambio-quitar', '0');
+    p.sel('regDetCuerpo').disparar('click', { target: q });
+    Check('SC8 quitar la agregada', [0, false], [reg.cambio.nuevas.length, /data-cambio-nueva-pct/.test(p.sel('regCambioGrupoPct').innerHTML)]);
+    elegir(p, 'regCambioCampo', 'otros');
+    accion(p, 'cambio-preparar');
+    Check('SC9 Otros: solo explicacion, no cambia nada', [true, true],
+      [/Solicitud preparada, no enviada/.test(p.sel('regCambioMsg').innerHTML), /no cambia nada por sí sola/.test(p.sel('regCambioMsg').innerHTML)]);
+    Check('SC9b Otros aprobado no produce pares', null, new p.ventana.RegistroIniciativas.RevisionSolicitud(reg.cambio.resumen(), 'u').aprobar('a').pares);
+  });
+});
+
+// SG) Seguimiento: Fecha de creacion y selector de categoria.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    var datos = JSON.parse(JSON.stringify(REGISTRO));
+    datos.iniciativas[0].f_creacion = '2026-03-04';
+    return reg.cargar(function () { return Promise.resolve(Respuesta(200, datos)); }).then(function () {
+      p.pagina.fijarRol('ADM');
+      reg.abrirDetalle('PRB 2026-000001');
+      var html = p.sel('regDetCuerpo').innerHTML;
+      var seg = (/<h4>Seguimiento<\/h4>[\s\S]*?<\/section>/.exec(html) || [''])[0];
+      Check('SG1 Fecha de creacion en Seguimiento', true, /Fecha de creación<\/dt><dd>04\/03\/2026/.test(seg));
+      Check('SG2 se conservan semaforo, tabla de compromisos y contadores', [true, true, true],
+        [/ini-det-sem/.test(seg), /<th scope="col" class="num">Cambios<\/th>/.test(seg), /Análisis <span class="ini-sub">estado actual<\/span>/.test(seg)]);
+      Check('SG3 selector con las categorias reales; la primera elegida', [true, true, true],
+        [/<select id="regSegCategoria">/.test(seg), /<option value="\/A\/Cat 1" selected>/.test(seg), /<option value="\/A\/Cat 2">/.test(seg)]);
+      Check('SG4 bloque de la primera: su % y la fecha de analisis de la iniciativa (hereda)', [true, true, true],
+        [/% disminución<\/dt><dd>50%/.test(seg), /De la iniciativa/.test(seg), /Hereda las fechas de la iniciativa/.test(seg)]);
+      var cuerpo = p.sel('regDetCuerpo').innerHTML;
+      p.sel('regBuscar').value = 'filtro escrito';
+      function segElegir(v) { var t = p.sel('regSegCategoria'); t.value = v; p.sel('regDetCuerpo').disparar('change', { target: t }); }
+      segElegir('/A/Cat 2');
+      Check('SG5 cambiar de categoria repinta solo su bloque', [true, true, 'filtro escrito', '/A/Cat 2'],
+        [/% disminución<\/dt><dd>25%/.test(p.sel('regSegCatInfo').innerHTML), p.sel('regDetCuerpo').innerHTML === cuerpo, p.sel('regBuscar').value, reg.segCategoria]);
+      Check('SG6 sin fecha propia, la de analisis es la de la iniciativa (no se inventa)', [true, true],
+        [/Análisis<\/dt><dd>01\/12\/2026/.test(p.sel('regSegCatInfo').innerHTML), /Hereda las fechas de la iniciativa/.test(p.sel('regSegCatInfo').innerHTML)]);
+      segElegir('/Z/Inventada');
+      Check('SG7 algo que no es categoria de la iniciativa: lo dice, no cambia la elegida', [true, '/A/Cat 2'],
+        [/no es una categoría vigente/.test(p.sel('regSegCatInfo').innerHTML), reg.segCategoria]);
+      reg.abrirDetalle('PRB 2026-000002');
+      var sin = p.sel('regDetCuerpo').innerHTML;
+      Check('SG8 sin categorias ni fecha de creacion: lo dice, sin inventar', [true, true],
+        [/Sin categorías: las fechas son las del problema/.test(sin), /Fecha de creación<\/dt><dd>—/.test(sin)]);
+      // Umbral: 20 categorias = <select>; 21 = caja con busqueda.
+      function con(n) {
+        var d = JSON.parse(JSON.stringify(REGISTRO)), cats = [];
+        for (var k = 1; k <= n; k++) cats.push(Cat('/R/' + k, 0.01));
+        d.iniciativas[0].categorias = cats;
+        return reg.cargar(function () { return Promise.resolve(Respuesta(200, d)); }).then(function () {
+          reg.abrirDetalle('PRB 2026-000001');
+          return p.sel('regDetCuerpo').innerHTML;
+        });
+      }
+      return con(20).then(function (h20) {
+        return con(21).then(function (h21) {
+          Check('SG9 umbral del selector: 20 select, 21 caja con busqueda', [true, false, true, true],
+            [/<select id="regSegCategoria">/.test(h20), /list="regSegCategoria-lista"/.test(h20),
+             /<input type="text" id="regSegCategoria" list="regSegCategoria-lista"/.test(h21), /<datalist id="regSegCategoria-lista">/.test(h21)]);
+          var t = p.sel('regSegCategoria');
+          t.value = '/r/21';
+          p.sel('regDetCuerpo').disparar('input', { target: t });
+          Check('SG10 escribir en la caja (sin mayusculas) elige la real', '/R/21', reg.segCategoria);
+        });
+      });
+    });
+  });
+});
+
+// PS) Las dos persistencias siguen apagadas (constantes en el servidor).
+pruebas.push(function () {
+  Check('PS1 PersistenciaGestionAdmin.Habilitada = false', true,
+    /class PersistenciaGestionAdmin[\s\S]*?public const bool Habilitada = false;/.test(leer('App_Code/GestionIniciativaAdmin.cs')));
+  Check('PS2 AltaCategoriaProactivanet.Habilitada = false', true,
+    /public const bool Habilitada = false;/.test(leer('App_Code/AltaCategoriaProactivanet.cs')));
+  Check('PS3 ningun "true" para Habilitada', false,
+    /Habilitada\s*=\s*true/.test(leer('App_Code/GestionIniciativaAdmin.cs') + leer('App_Code/AltaCategoriaProactivanet.cs')));
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

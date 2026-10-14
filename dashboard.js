@@ -4087,6 +4087,19 @@ const TableroExperiencia = moduloEmbebido({
    es el de dashboard.css, que en esta pagina ya esta cargado. Por eso al
    montarla el @scope (#tab-backlog) de inyectarCss() no tapa nada del
    cascaron: no hay reglas que se pisen. */
+const TableroEfectividad = moduloEmbebido({
+  nombre: 'Efectividad de iniciativas',
+  base: 'efectividad/',
+  id: 'tab-efectividad',
+  pagina: 'efectividad.html',
+  hoja: 'efectividad.css',
+  guion: 'efectividad.js',
+  alVolver: () => {
+    const modulo = window.TableroEfectividadModulo;
+    if (modulo) modulo.redimensionar();
+  },
+});
+
 const TableroBacklog = moduloEmbebido({
   nombre: 'Backlog',
   base: 'backlog/',
@@ -4241,6 +4254,7 @@ const MODULOS = {
   sla: pestanaSla('tab-sla'),
   backlog: TableroBacklog,
   experiencia: TableroExperiencia,
+  efectividad: TableroEfectividad,
   qa: TableroQa,
   qare: TableroQare,
   analisis: TableroAnalisis,

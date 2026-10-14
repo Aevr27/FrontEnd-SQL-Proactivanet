@@ -30,6 +30,9 @@
 <!-- Escape de HTML compartido. Va ANTES de los modulos: todo lo que sale de
      SQL se pega con innerHTML y tiene que entrar como texto, no como marcado. -->
 <script src="../assets/js/escape.js"></script>
+<!-- Antiguedad en meses/semanas/dias. Solo para la pagina suelta: embebida
+     manda la copia de dashboard.html. -->
+<script src="../assets/js/duracion.js"></script>
 <!-- Las <option> de los filtros, compartidas (usa escape.js). Solo para la
      pagina suelta: embebida manda la copia de dashboard.html. -->
 <script src="../assets/js/catalogos.js"></script>
@@ -322,7 +325,7 @@
     contabiliza como «sin iniciativa» y no suma al total.</p>
 
     <h3 style="margin:14px 0 6px;color:var(--ink)">Antigüedad y # Cambios</h3>
-    <p><b>Antigüedad</b> = días desde la fecha de creación hasta hoy. <b># Cambios</b> = veces que se
+    <p><b>Antigüedad</b> = tiempo desde la fecha de creación hasta hoy, en meses, semanas y días (1 mes = 30 días; el dato exacto en días sale al pasar el cursor). <b># Cambios</b> = veces que se
     movieron las fechas de análisis/solución/cierre (disponible en Problems).</p>
   </div>
 </div></div>

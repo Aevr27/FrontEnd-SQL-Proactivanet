@@ -174,11 +174,12 @@ function Pagina(pedirRegistro, pedirCatalogo, rol) {
     return (pedirCatalogo || nunca)(url);
   }
   (new Function('window', leer('assets/js/escape.js')))(ventana);
+  (new Function('window', leer('assets/js/duracion.js')))(ventana);
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(ventana, ventana.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(ventana, documento);
   (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
-  (new Function('window', 'document', 'Catalogos', 'Escape', 'fetch', leer('admin/registro-iniciativas.js')))(
-    ventana, documento, ventana.Catalogos, ventana.Escape, pedir);
+  (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
+    ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   return {
@@ -583,18 +584,45 @@ pruebas.push(function () {
     (function () { var x = new S(reg.buscar('PRB 2026-000001')); x.campo = 'estado'; x.propuesto = 'Cerrado'; x.motivo = 'm';
       return x.validar().map(function (y) { return y.campo; }); })());
 
-  var k = new S(reg.buscar('PRB 2026-000001'), LISTAS);
+  // Categorias: varias en UNA solicitud (% de ligadas y agregar del catalogo).
+  var RUTAS_CAT = ['/A/Cat 1/Hoja', '/A/Cat 2', '/A/Cat 3', '/B/Cat 4'];
+  // Sin iniciativa-admin.js (otra pagina o cache viejo): coincidencia exacta.
+  var fb = new S(reg.buscar('PRB 2026-000001'), { rutas: RUTAS_CAT });
+  Check('SR3 sin IniciativaAdmin: agrega solo la ruta exacta', [false, true], [fb.agregarCategoria('/a/cat 2').ok, fb.agregarCategoria('/A/Cat 2').ok]);
+  // Desde aqui, con el Selector compartido (como en la pagina).
+  (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', leer('admin/iniciativa-admin.js')))(
+    base.ventana, base.doc, base.ventana.Catalogos, base.ventana.Escape, base.ventana.Duracion);
+  var k = new S(reg.buscar('PRB 2026-000001'), { estados: LISTAS.estados, subestados: LISTAS.subestados, rutas: RUTAS_CAT });
   k.campo = 'pct'; k.motivo = 'Se ajusta el alcance';
-  k.categoria = '/Z/No ligada'; k.propuesto = '10';
-  Check('SR3 % de una categoria no ligada se rechaza', ['categoria'], k.validar().map(function (x) { return x.campo; }));
-  k.categoria = '/A/Cat 3';
-  Check('SR3 valor actual de la categoria', '25', k.actual());
-  k.propuesto = '25';
-  Check('SR3 mismo % = sin cambio', ['propuesto'], k.validar().map(function (x) { return x.campo; }));
-  k.propuesto = '101';
+  Check('SR3 sin nada pedido se rechaza', ['categoria'], k.validar().map(function (x) { return x.campo; }));
+  Check('SR3 % de una categoria no ligada no se acepta como %', [false, {}], [k.fijarPct('/Z/No ligada', '10'), k.pcts]);
+  Check('SR3 valor actual de cada categoria', ['50', '25'], [k.pctActual('/A/Cat 1/Hoja'), k.pctActual('/A/Cat 3')]);
+  k.fijarPct('/A/Cat 3', '25');
+  Check('SR3 mismo % = sin cambio', [['propuesto'], '/A/Cat 3'], [k.validar().map(function (x) { return x.campo; }), k.validar()[0].categoria]);
+  k.fijarPct('/A/Cat 3', '101');
   Check('SR3 % fuera de rango', ['propuesto'], k.validar().map(function (x) { return x.campo; }));
-  k.propuesto = '30';
-  Check('SR4 % valido', [[], '/A/Cat 3', '30'], [k.validar(), k.resumen().categoria, k.resumen().nuevo]);
+  k.fijarPct('/A/Cat 3', '30');
+  Check('SR4 % valido', [[], [{ categoria: '/A/Cat 3', anterior: '25', nuevo: '30', nueva: false }], ''],
+    [k.validar(), k.resumen().categorias, k.resumen().nuevo]);
+  // Varias: otra ligada y dos nuevas, sin repetir.
+  k.fijarPct('/A/Cat 1/Hoja', '40');
+  Check('SR4b agregar una ligada se rechaza', [false, true], [k.agregarCategoria('/a/cat 3').ok, /ya es una categoría de esta iniciativa/.test(k.agregarCategoria('/A/Cat 3').mensaje)]);
+  Check('SR4b agregar una fuera del catalogo se rechaza', false, k.agregarCategoria('/Z/Inventada').ok);
+  Check('SR4b agregar del catalogo', [true, '/A/Cat 2'], [k.agregarCategoria(' /a/cat 2 ').ok, k.nuevas[0].categoria]);
+  Check('SR4b la misma dos veces se rechaza', [false, 1], [k.agregarCategoria('/A/Cat 2').ok, k.nuevas.length]);
+  k.agregarCategoria('/B/Cat 4');
+  Check('SR4b nueva sin % se rechaza', ['propuesto', 'propuesto'], k.validar().map(function (x) { return x.campo; }));
+  k.capturarPctNueva(0, '15'); k.capturarPctNueva(1, '5');
+  Check('SR4b cuatro categorias en una solicitud', [[], ['/A/Cat 1/Hoja', '/A/Cat 3', '/A/Cat 2', '/B/Cat 4'], [false, false, true, true]],
+    [k.validar(), k.resumen().categorias.map(function (x) { return x.categoria; }), k.resumen().categorias.map(function (x) { return x.nueva; })]);
+  Check('SR4b agregar no cambia los % pedidos de las ligadas', { '/A/Cat 3': '30', '/A/Cat 1/Hoja': '40' }, k.pcts);
+  Check('SR4b quitar una nueva', [true, ['/B/Cat 4']], [k.quitarNueva(0), k.nuevas.map(function (x) { return x.categoria; })]);
+  k.agregarCategoria('/A/Cat 2'); k.capturarPctNueva(1, '15');
+  var sinCat = new S(reg.buscar('PRB 2026-000001'), { rutasEstado: 'cargando' });
+  Check('SR4c catalogo cargando: no se agrega y lo dice', [false, true],
+    [sinCat.agregarCategoria('/A/Cat 2').ok, /cargando/.test(sinCat.agregarCategoria('/A/Cat 2').mensaje)]);
+  Check('SR4c catalogo con error: no se agrega y lo dice', true,
+    /No se pudo cargar/.test(new S(reg.buscar('PRB 2026-000001'), { rutasEstado: 'error' }).agregarCategoria('/A/Cat 2').mensaje));
 
   var o = new S(reg.buscar('PRB 2026-000001'), LISTAS);
   o.campo = 'otros';
@@ -613,8 +641,10 @@ pruebas.push(function () {
   Check('SR7 no se aprueba dos veces ni se rechaza despues', [false, false], [rv.aprobar('x').ok, rv.rechazar('x', 'm').ok]);
   Check('SR8 aprobar Estado: estado y subestado', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['estado', 'Cerrado'], ['subestado', 'Solucionado']],
     new V(e.resumen(), 'u').aprobar('a').pares);
-  Check('SR8 aprobar %: la categoria y su % (misma validacion de Modificar)',
-    [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['pct_categoria', '/A/Cat 3'], ['pct_valor', '30']],
+  Check('SR8 aprobar categorias: los mismos pares de Modificar, una por categoria',
+    [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['pct_categoria', '/A/Cat 1/Hoja'], ['pct_valor', '40'],
+     ['pct_categoria', '/A/Cat 3'], ['pct_valor', '30'],
+     ['agregar_categoria', '/B/Cat 4'], ['agregar_pct', '5'], ['agregar_categoria', '/A/Cat 2'], ['agregar_pct', '15']],
     new V(k.resumen(), 'u').aprobar('a').pares);
   var ao = new V(o.resumen(), 'u').aprobar('a');
   Check('SR9 aprobar Otros: sin pares, ADM corrige a mano', [true, null, true], [ao.ok, ao.pares, /Modificar/.test(ao.mensaje)]);
@@ -721,6 +751,7 @@ pruebas.push(function () {
         [/Registro automático desde el 09\/10\/2026/.test(h), /Reconstruido de los comentarios del Excel/.test(h),
          /en Cierre solo cuentan las extensiones/.test(h)]);
       Check('S14 sigue plegado', true, /id="regHistCuerpo" hidden>/.test(h));
+      Check('S14 sin eventos de categoria no hay seccion por categoria', false, /Fechas de análisis por categoría/.test(h));
 
       // Sin filas: el texto depende de historial_estado.
       var estados = ['sin_tabla', 'error', 'ok'].map(function (e) {
@@ -1000,6 +1031,35 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
+// S16) Historial por categoria (historial_categorias, sql/18): seccion
+// aparte; la N del encabezado sigue siendo la de la iniciativa.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var d = JSON.parse(JSON.stringify(DATOS));
+  d.historial_estado = 'ok';
+  d.historial_desde = '09/10/2026';
+  d.iniciativas[0].historial = [
+    { id: 1, campo: 'FechaAnalisis', anterior: '2026-10-28', nuevo: '2026-11-10', operacion: 'U', origen: 'ADMIN',
+      usuario: 'SORIANA\adm', fecha: '03/11/2026 09:00', reconstruido: false }];
+  d.iniciativas[0].historial_categorias = [
+    { id: 6, categoria: '/A/Cat 2', campo: 'FechaAnalisis', anterior: null, nuevo: '2026-11-17', operacion: 'I', origen: 'ADMIN',
+      usuario: 'SORIANA\adm', fecha: '02/11/2026 10:00', reconstruido: false },
+    { id: 7, categoria: '/A/Cat 2', campo: 'FechaAnalisis', anterior: '2026-11-17', nuevo: '2026-11-30', operacion: 'U', origen: 'ADMIN',
+      usuario: 'SORIANA\adm', fecha: '03/11/2026 10:00', reconstruido: false }];
+  var p = Pagina(ok(d));
+  return esperar().then(function () {
+    clicFolio(p, 'PRB 2026-000001');
+    var h = p.sel('regDetCuerpo').innerHTML;
+    Check('S16 N del encabezado: solo la iniciativa (1), aunque haya cambios de categoria', true, /Historial de cambios \(1\)/.test(h));
+    Check('S16 seccion por categoria con su propio conteo y la categoria', [true, true],
+      [/Fechas de análisis por categoría <span class="ini-sub">1 cambio<\/span>/.test(h), /<td>\/A\/Cat 2<\/td>/.test(h)]);
+    Check('S16 anterior null se explica (heredaba), no se rellena; el cambio cuenta como Cambio 1', [true, true],
+      [/<td>Fecha propia inicial<\/td><td><span class="ini-origen derivado">Heredaba la de la iniciativa<\/span><\/td><td>17\/11\/2026<\/td>/.test(h),
+       /<td><b>Cambio 1<\/b><\/td><td>17\/11\/2026<\/td><td>30\/11\/2026<\/td>/.test(h)]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // HF) Rotulos del historial de fechas (etiquetarHistorial)
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
@@ -1020,6 +1080,13 @@ pruebas.push(function () {
          u('FechaCierre', '2026-03-20', '2026-05-01')]));
   Check('HF4 fila sin operacion o vacia: — y no cuenta', ['—', '—'], rot([{ campo: 'FechaCierre' }, null]));
   Check('HF5 sin lista: vacio', 0, R.etiquetarHistorial(undefined).length);
+  function c(cat, op, a, n) { return { categoria: cat, campo: 'FechaAnalisis', anterior: a, nuevo: n, operacion: op }; }
+  Check('HF6 categorias: n corre por categoria y campo; la primera fecha propia (anterior null = heredaba) no cuenta',
+    ['Fecha propia inicial', 'Fecha propia inicial', 'Cambio 1*', 'Cambio 1*', 'Cambio 2*', 'Fecha propia asignada'],
+    rot([c('/A', 'I', null, '2026-11-17'), c('/B', 'I', null, '2026-11-20'), c('/A', 'U', '2026-11-17', '2026-11-30'),
+         c('/B', 'U', '2026-11-20', '2026-11-25'), c('/A', 'U', '2026-11-30', '2026-12-05'), c('/C', 'U', null, '2026-12-01')]));
+  Check('HF7 la numeracion de la iniciativa no cambia por las categorias (listas separadas, misma regla)',
+    ['Cambio 1*', 'Cambio 2*'], rot([u('FechaAnalisis', '2026-01-01', '2026-02-01'), u('FechaAnalisis', '2026-02-01', '2026-03-01')]));
 });
 
 // ---------------------------------------------------------------------------
