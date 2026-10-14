@@ -74,10 +74,13 @@
 
    TIPOS DECLARADOS
    ----------------
-     El alta declara Clasificacion (TipoIniciativa), Agrupacion
-     (TipoAgrupado) y Estado inicial, y la fecha de entrega del analisis
-     (por omision hoy). Una categoria que se liga declara las suyas. Nada se
-     deriva del prefijo ni se copia de las hermanas. Las opciones son los
+     El alta pide Clasificacion (TipoIniciativa), Agrupacion (TipoAgrupado),
+     Estado inicial y la fecha de entrega del analisis (por omision hoy),
+     pero cualquiera puede faltar: ADM crea justo cuando falta informacion,
+     y lo que falta se marca Incompleta. Solo el Tipo (prefijo) bloquea:
+     sin el no hay Codigo. Una categoria que se liga puede llevar los suyos.
+     Nada se deriva del prefijo ni se copia de las hermanas. Sin Agrupacion,
+     el servidor revisa el tope como si la fila consumiera. Las opciones son los
      valores que ya existen (valores_tipo_iniciativa / valores_tipo_agrupado
      / estados_problem del registro).
 
@@ -128,7 +131,11 @@ window.IniciativaAdmin = (function () {
     { clave: 'descripcion',   rotulo: 'Descripción' },
     { clave: 'observaciones', rotulo: 'Observaciones' },
     { clave: 'pct',           rotulo: '% Disminución' },
-    { clave: 'rca',           rotulo: 'RCA', soloProblem: true }
+    { clave: 'rca',           rotulo: 'RCA', soloProblem: true },
+    // Opcionales en el alta de ADM (se crea justo cuando falta informacion).
+    { clave: 'tipo_iniciativa', rotulo: 'Clasificación' },
+    { clave: 'tipo_agrupado',   rotulo: 'Agrupación' },
+    { clave: 'estado',          rotulo: 'Estado inicial' }
   ];
 
   // Lo unico que se revisa en una iniciativa EXISTENTE (ver cabecera).
@@ -338,9 +345,6 @@ window.IniciativaAdmin = (function () {
   class CategoriasProblema {
     constructor(ligadas, rutas) {
       this.rutas = Array.isArray(rutas) ? rutas : [];
-      // true en Modificar: cada categoria nueva declara Clasificacion y
-      // Agrupacion (en el alta, las del alta).
-      this.tiposPorFila = false;
       this.filas = (ligadas || []).map(function (c) {
         var v = pctDe(c.pct_dism);
         // agrup: la Agrupacion actual ('' = sin declarar; agrupNueva la
@@ -439,16 +443,10 @@ window.IniciativaAdmin = (function () {
     }
 
     erroresFormato() {
-      var errores = [], porFila = this.tiposPorFila;
+      var errores = [];
       this.activas().forEach(function (f) {
         var e = FORMATO.pct(f.valor);
         if (e) errores.push({ clave: 'pct', mensaje: f.categoria + ': ' + e });
-        // En Modificar cada categoria nueva declara sus tipos; en el alta
-        // las iniciales llevan los del alta.
-        if (porFila && !f.ligada) {
-          if (!f.tipoIniciativa) errores.push({ clave: 'categorias', mensaje: f.categoria + ': elige su Clasificación.' });
-          if (!f.tipoAgrupado) errores.push({ clave: 'categorias', mensaje: f.categoria + ': elige su Agrupación.' });
-        }
         if (f.ligada && f.fPropia && f.fPropiaNueva !== f.fPropia) {
           var ef = f.fPropiaNueva === '' ? 'la fecha de análisis de una categoría no se puede vaciar.' : FORMATO.fecha(f.fPropiaNueva);
           if (ef) errores.push({ clave: 'fechas_categoria', mensaje: f.categoria + ': ' + ef });
@@ -561,7 +559,7 @@ window.IniciativaAdmin = (function () {
       }
       if (f.agrup) return Escape.html(f.agrup);
       return opcionesTipo(fechas.tiposAgrupado, f.agrupNueva, attr('tipo_agrupado'), 'Agrupación') +
-        ' <span class="ini-origen" title="Sin agrupación no se puede revisar su tope: el servidor rechaza cambiar %, estado o categorías mientras siga vacía">Sin declarar</span>';
+        ' <span class="ini-origen" title="Opcional. Sin agrupación, el servidor revisa su tope como si consumiera">Sin declarar</span>';
     }
     return '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
       '<th scope="col">Volumetría <span class="ini-origen derivado">Calculada</span></th>' +
@@ -694,17 +692,9 @@ window.IniciativaAdmin = (function () {
       return lista.length === 1 ? lista[0] : '';
     }
 
-    // Lo que impide guardar: sin tipo no hay prefijo de codigo; sin
-    // Clasificacion, Agrupacion y Estado el servidor rechaza el alta (no se
-    // derivan del prefijo).
-    bloqueantes() {
-      var d = this.declarados, b = [];
-      if (!this.tipo) b.push({ clave: 'tipo', mensaje: 'Elige el Tipo de iniciativa: define el prefijo del código.' });
-      if (!d.tipo_iniciativa) b.push({ clave: 'tipo_iniciativa', mensaje: 'Elige la Clasificación (TipoIniciativa).' });
-      if (!d.tipo_agrupado) b.push({ clave: 'tipo_agrupado', mensaje: 'Elige la Agrupación (TipoAgrupado).' });
-      if (!d.estado) b.push({ clave: 'estado', mensaje: 'Elige el Estado inicial.' });
-      return b;
-    }
+    // Lo unico que impide guardar: sin tipo no hay prefijo de codigo.
+    // Clasificacion, Agrupacion y Estado pueden faltar (Incompleta).
+    bloqueantes() { return this.tipo ? [] : [{ clave: 'tipo', mensaje: 'Elige el Tipo de iniciativa: define el prefijo del código.' }]; }
 
     erroresFormato() {
       var e = FORMATO.fecha(this.declarados.f_entrega_analisis);
@@ -719,7 +709,9 @@ window.IniciativaAdmin = (function () {
         observaciones: v.observaciones,
         // Sin categorias el % no se pide aparte (ya falta "Categoría").
         pct: !cats.length ? undefined : (cats.every(function (c) { return c.pct_dism !== null; }) ? 'si' : ''),
-        rca: this.rca || ''
+        rca: this.rca || '',
+        tipo_iniciativa: this.declarados.tipo_iniciativa, tipo_agrupado: this.declarados.tipo_agrupado,
+        estado: this.declarados.estado
       };
     }
 
@@ -877,7 +869,6 @@ window.IniciativaAdmin = (function () {
       var self = this;
       CAMPOS_PROBLEMA.forEach(function (k) { self.valores[k] = self.original[k]; });
       this.categorias = new CategoriasProblema(iniciativa.categorias || [], opciones.rutas);
-      this.categorias.tiposPorFila = true;
       // 'cargando' | 'error' | 'ok' del catalogo de rutas (para el aviso).
       this.rutasEstado = opciones.rutasEstado || (Array.isArray(opciones.rutas) && opciones.rutas.length ? 'ok' : '');
       // Compatibilidad: valores.pct son las filas de categorias.
@@ -1067,7 +1058,7 @@ window.IniciativaAdmin = (function () {
       '<small class="ini-sub">Fecha de análisis: las categorías iniciales heredan la de la iniciativa y cambian con ella ' +
         '(Fecha compromiso de Análisis). Una categoría ligada después tiene la suya: el día en que se liga + ' +
         FECHAS_GESTION.diasAnalisis + ' días, editable aquí, sin tocar la de la iniciativa. ' +
-        'Cada categoría nueva declara su Clasificación y su Agrupación: no se copian de las otras.</small>';
+        'Clasificación y Agrupación de una categoría nueva son opcionales y no se copian de las otras.</small>';
   }
 
   // Formulario de edicion dentro del detalle del registro.

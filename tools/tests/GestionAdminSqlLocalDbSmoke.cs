@@ -346,17 +346,26 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 Check("C12 concurrencia: la 2a alta espera el candado del Codigo y sale con el siguiente", "True|PRB 2026-000502|PRB 2026-000503|",
                       espero + "|" + codA + "|" + codB + "|" + errB);
 
-                // ---------------- T: tipos y estado explicitos ----------------
-                Check("T1 sin Agrupacion: 51012", "51012", Error(() => Crear(cn, AltaTipo(hoy, "PRB", null, "En Análisis", "/S/Nueva", "5"))));
+                // ---------------- T: tipos y estado OPCIONALES (validados si vienen) ----------------
+                var sinNada = AltaTipo(hoy, "PRB", null, null, "/S/Cat 3", "5");
+                sinNada.TipoIniciativa = null;
+                string cSin = null;
+                Check("T1 alta sin Clasificacion, Agrupacion ni Estado: se crea (Admin crea cuando falta informacion)", "sin error",
+                      Error(() => cSin = Crear(cn, sinNada)));
+                Check("T1b quedan NULL (no se derivan del prefijo), en el Problem y en su categoria", "NULL|NULL|NULL|NULL",
+                      Filas(cn, "SELECT p.TipoIniciativa, p.Estado, pc.TipoIniciativa, pc.TipoAgrupado FROM dbo.Problem AS p " +
+                                "JOIN dbo.ProblemCategoria AS pc ON pc.Codigo = p.Codigo WHERE p.Codigo = N'" + cSin + "'"));
                 Check("T2 Agrupacion que no existe: 51012", "51012", Error(() => Crear(cn, AltaTipo(hoy, "PRB", "Inventada", "En Análisis"))));
-                var sinTipo = Alta(hoy); sinTipo.TipoIniciativa = null;
-                Check("T3 sin TipoIniciativa (no se deriva del prefijo): 51011", "51011", Error(() => Crear(cn, sinTipo)));
+                var tipoMalo = Alta(hoy); tipoMalo.TipoIniciativa = "Inventado";
+                Check("T3 TipoIniciativa que no existe: 51011", "51011", Error(() => Crear(cn, tipoMalo)));
                 Check("T4 Estado que no existe: 51013", "51013", Error(() => Crear(cn, AltaTipo(hoy, "PRB", "Problem", "Inventado"))));
                 Check("T5 categoria fuera del catalogo vigente (/X/Vieja): 51015", "51015", Error(() => Crear(cn, Alta(hoy, "/X/Vieja", "5"))));
-                var liSinTipo = Mod(c1, hoy); liSinTipo.Agregar.Add(new CategoriaPlan { Ruta = "/S/Nueva", Pct = 0.05m, TipoIniciativa = "Problem" });
-                Check("T6 ligar sin Agrupacion (no se copia de las hermanas): 51012", "51012", Error(() => Modificar(cn, liSinTipo)));
-                Check("T7 nada de T1-T6 quedo escrito", "0",
-                      Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemCategoria WHERE Categoria IN (N'/S/Nueva', N'/X/Vieja') AND Codigo LIKE N'PRB 2026-0000%'"));
+                var liSinTipo = Mod(c1, hoy); liSinTipo.Agregar.Add(new CategoriaPlan { Ruta = "/S/Cat 3", Pct = 0.05m });
+                Check("T6 ligar sin tipos: se liga con NULL (no se copian de las hermanas)", "sin error|NULL|NULL",
+                      Error(() => Modificar(cn, liSinTipo)) + "|" +
+                      Filas(cn, "SELECT TipoIniciativa, TipoAgrupado FROM dbo.ProblemCategoria WHERE Codigo = N'" + c1 + "' AND Categoria = N'/S/Cat 3'"));
+                Check("T7 nada de T2-T5 quedo escrito", "0",
+                      Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemCategoria WHERE Categoria = N'/X/Vieja'"));
 
                 // ---------------- F: falla forzada a media alta ----------------
                 var antesF = Filas(cn, "SELECT COUNT(*), (SELECT COUNT(*) FROM dbo.ProblemFechaEvento), (SELECT COUNT(*) FROM dbo.ProblemCategoria) FROM dbo.Problem");
@@ -366,7 +375,7 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 Exec(cn, "ALTER TABLE dbo.ProblemCategoria DROP CONSTRAINT CK_Prueba_Falla");
                 Check("F2 rollback completo: mismas filas en Problem, eventos y categorias", antesF,
                       Filas(cn, "SELECT COUNT(*), (SELECT COUNT(*) FROM dbo.ProblemFechaEvento), (SELECT COUNT(*) FROM dbo.ProblemCategoria) FROM dbo.Problem"));
-                Check("F3 el numero no se consumio: la siguiente alta es 000504", "PRB 2026-000504", Crear(cn, Alta(hoy, "/S/Cat 1", "1")));
+                Check("F3 el numero no se consumio: la siguiente alta es 000505 (000504 = T1)", "PRB 2026-000505", Crear(cn, Alta(hoy, "/S/Cat 1", "1")));
                 Check("F4 la sesion quedo sin atribucion (SESSION_CONTEXT limpio)", "NULL|NULL",
                       Filas(cn, "SELECT CONVERT(varchar(12), SESSION_CONTEXT(N'pfe_origen')), CONVERT(nvarchar(50), SESSION_CONTEXT(N'pfe_usuario'))"));
 
@@ -462,6 +471,10 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 Check("K3 alta con la 2a categoria excedida: 51010 y nada escrito", "51010|" + nuevaAntes,
                       Error(() => Crear(cn, Alta(hoy, "/S/Nueva", "10", "/K/Cat 1", "5"))) + "|" +
                       Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemCategoria WHERE Categoria = N'/S/Nueva'"));
+                Check("K2b sin Agrupacion (viva) se revisa como si consumiera: /K/Cat 1 lleno -> 51010", "51010",
+                      Error(() => Crear(cn, AltaTipo(hoy, "PRB", null, "En Análisis", "/K/Cat 1", "1"))));
+                Check("K2c sin Estado no consume (no esta viva): /K/Cat 1 al 1%: sin error", "sin error",
+                      Error(() => Crear(cn, AltaTipo(hoy, "PRB", null, null, "/K/Cat 1", "1"))));
                 Check("K4 alta cerrada no consume: /K/Cat 1 al 50% con estado Cerrado: sin error", "sin error",
                       Error(() => Crear(cn, AltaTipo(hoy, "PRB", "Problem", "Cerrado", "/K/Cat 1", "50"))));
                 var re = Mod("SOR 2026-000001", hoy);
@@ -470,7 +483,7 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 Check("K6 la reactivacion rechazada no cambio el estado", "Cerrado", Uno(cn, "SELECT Estado FROM dbo.Problem WHERE Codigo = N'SOR 2026-000001'"));
                 var nulo = Mod("PRB 2025-000100", hoy);
                 nulo.Pcts.Add(new CategoriaPlan { Ruta = "/N/Otra", Pct = 0.2m });
-                Check("K7 viva con una categoria sin Agrupacion: cambiar un % se rechaza (51014)", "51014", Error(() => Modificar(cn, nulo)));
+                Check("K7 viva con una categoria sin Agrupacion: cambiar el % de otra pasa (la Agrupacion es opcional)", "sin error", Error(() => Modificar(cn, nulo)));
                 var nuloOk = Mod("PRB 2025-000100", hoy);
                 nuloOk.Pcts.Add(new CategoriaPlan { Ruta = "/N/Otra", Pct = 0.2m });
                 nuloOk.Pcts.Add(new CategoriaPlan { Ruta = "/N/Nulo", Pct = 0.1m, TipoAgrupado = "Problem" });

@@ -71,16 +71,17 @@
    - Hoy = CONVERT(date, DATEADD(HOUR, -6, SYSUTCDATETIME())), la misma
      regla UTC-6 de las vistas de avisos (@Hoy solo lo pasan las pruebas y
      el sitio con su propio "hoy" de Mexico).
-   - TipoIniciativa, TipoAgrupado y Estado: explicitos, nunca derivados del
-     prefijo. Tienen que ser valores que ya existen (dbo.Problem /
-     dbo.ProblemCategoria; no hay catalogo en la base).
+   - TipoIniciativa, TipoAgrupado y Estado: OPCIONALES (Admin crea justo
+     cuando falta informacion; decision 2026-10-13). Nunca se derivan del
+     prefijo: si no vienen quedan NULL. Si vienen, tienen que ser valores
+     que ya existen (dbo.Problem / dbo.ProblemCategoria; no hay catalogo).
    - Tope 100% por ruta (regla de ExperienciaQueries.ConsumeCapacidad):
      consume la fila vigente de una iniciativa en estado vivo con
-     TipoAgrupado de AGRUPADORES. Se revisa, con candado por ruta, toda fila
-     que vaya a consumir y que antes no consumia (alta, ligada, reactivada,
-     cambio de agrupador) o cuyo % sube. Bajar o dejar igual nunca se
-     bloquea. Una iniciativa viva con TipoAgrupado NULL no puede guardar
-     cambios de %, estado o categorias (51014): primero se le declara.
+     TipoAgrupado de AGRUPADORES. Para que una fila SIN agrupacion no se
+     salte el tope, al escribirla se revisa como si consumiera
+     (conservador). Se revisa, con candado por ruta, toda fila que vaya a
+     consumir y que antes no consumia (alta, ligada, reactivada, cambio de
+     agrupador) o cuyo % sube. Bajar o dejar igual nunca se bloquea.
    - TicketsReduce = ROUND(VolumenUltimos30 x PctDisminucion, 0) con
      VolumenUltimos30 leido de dbo.vw_ProblemCategoria (regla verificada en
      QA 2026-10-01; la misma formula documentada de
@@ -346,15 +347,16 @@ BEGIN
     -- que no sea de tres letras no puede formar un Codigo valido.
     IF @Prefijo COLLATE Latin1_General_BIN NOT LIKE N'[A-Z][A-Z][A-Z]'
         THROW 51021, N'Prefijo invalido para un Codigo: se esperan tres letras (PPP AAAA-NNNNNN).', 1;
-    IF @TipoIniciativa IS NULL
-       OR NOT EXISTS (SELECT 1 FROM dbo.Problem WHERE LTRIM(RTRIM(TipoIniciativa)) = @TipoIniciativa)
-        THROW 51011, N'Tipo de iniciativa vacio o que no existe en dbo.Problem: se declara explicito.', 1;
-    IF @TipoAgrupado IS NULL
-       OR NOT EXISTS (SELECT 1 FROM dbo.ProblemCategoria WHERE LTRIM(RTRIM(TipoAgrupado)) = @TipoAgrupado)
-        THROW 51012, N'Agrupacion (TipoAgrupado) vacia o que no existe en dbo.ProblemCategoria: se declara explicita.', 1;
-    IF @Estado IS NULL
-       OR NOT EXISTS (SELECT 1 FROM dbo.Problem WHERE LTRIM(RTRIM(Estado)) = @Estado)
-        THROW 51013, N'Estado inicial vacio o que no existe en dbo.Problem.', 1;
+    -- Opcionales: si no vienen, NULL (la iniciativa queda incompleta).
+    IF @TipoIniciativa IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM dbo.Problem WHERE LTRIM(RTRIM(TipoIniciativa)) = @TipoIniciativa)
+        THROW 51011, N'Tipo de iniciativa que no existe en dbo.Problem.', 1;
+    IF @TipoAgrupado IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM dbo.ProblemCategoria WHERE LTRIM(RTRIM(TipoAgrupado)) = @TipoAgrupado)
+        THROW 51012, N'Agrupacion (TipoAgrupado) que no existe en dbo.ProblemCategoria.', 1;
+    IF @Estado IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM dbo.Problem WHERE LTRIM(RTRIM(Estado)) = @Estado)
+        THROW 51013, N'Estado inicial que no existe en dbo.Problem.', 1;
     IF EXISTS (SELECT 1 FROM @Categorias
                GROUP BY LTRIM(RTRIM(REPLACE(Categoria, NCHAR(160), N' '))) HAVING COUNT(*) > 1)
         THROW 51003, N'Una categoria viene repetida.', 1;
@@ -373,7 +375,8 @@ BEGIN
     DECLARE @entrega date = COALESCE(@FechaEntregaAnalisis, @hoyMx);
     DECLARE @vivo bit = CASE WHEN @Estado COLLATE Latin1_General_CI_AI
                                   IN (N'En Analisis', N'En Solucion', N'En Monitoreo') THEN 1 ELSE 0 END;
-    DECLARE @consume bit = CASE WHEN @vivo = 1 AND @TipoAgrupado IN (N'Problem', N'SorIA', N'Adopcion', N'Mejora')
+    -- Sin agrupacion: se revisa como si consumiera (no se salta el tope).
+    DECLARE @consume bit = CASE WHEN @vivo = 1 AND (@TipoAgrupado IS NULL OR @TipoAgrupado IN (N'Problem', N'SorIA', N'Adopcion', N'Mejora'))
                                 THEN 1 ELSE 0 END;
     DECLARE @nuevo nvarchar(100), @rc int, @max int, @raro nvarchar(100);
 
@@ -498,16 +501,14 @@ BEGIN
         THROW 51004, N'Una categoria llego vacia.', 1;
     IF EXISTS (SELECT 1 FROM (SELECT Pct FROM @Pcts UNION ALL SELECT Pct FROM @Agregar) AS x WHERE x.Pct < 0 OR x.Pct > 1)
         THROW 51005, N'El % de una categoria esta fuera de 0-100.', 1;
-    IF EXISTS (SELECT 1 FROM @Agregar WHERE NULLIF(LTRIM(RTRIM(TipoIniciativa)), N'') IS NULL)
-       OR EXISTS (SELECT 1 FROM (SELECT TipoIniciativa FROM @Agregar UNION ALL SELECT TipoIniciativa FROM @Pcts) AS x
+    IF EXISTS (SELECT 1 FROM (SELECT TipoIniciativa FROM @Agregar UNION ALL SELECT TipoIniciativa FROM @Pcts) AS x
                   WHERE NULLIF(LTRIM(RTRIM(x.TipoIniciativa)), N'') IS NOT NULL
                     AND NOT EXISTS (SELECT 1 FROM dbo.Problem AS p WHERE LTRIM(RTRIM(p.TipoIniciativa)) = LTRIM(RTRIM(x.TipoIniciativa))))
-        THROW 51011, N'Cada categoria que se liga lleva su Tipo de iniciativa, y tiene que existir en dbo.Problem.', 1;
-    IF EXISTS (SELECT 1 FROM @Agregar WHERE NULLIF(LTRIM(RTRIM(TipoAgrupado)), N'') IS NULL)
-       OR EXISTS (SELECT 1 FROM (SELECT TipoAgrupado FROM @Agregar UNION ALL SELECT TipoAgrupado FROM @Pcts) AS x
+        THROW 51011, N'Tipo de iniciativa de una categoria que no existe en dbo.Problem.', 1;
+    IF EXISTS (SELECT 1 FROM (SELECT TipoAgrupado FROM @Agregar UNION ALL SELECT TipoAgrupado FROM @Pcts) AS x
                   WHERE NULLIF(LTRIM(RTRIM(x.TipoAgrupado)), N'') IS NOT NULL
                     AND NOT EXISTS (SELECT 1 FROM dbo.ProblemCategoria AS pc WHERE LTRIM(RTRIM(pc.TipoAgrupado)) = LTRIM(RTRIM(x.TipoAgrupado))))
-        THROW 51012, N'Cada categoria que se liga lleva su Agrupacion (TipoAgrupado), y tiene que existir en dbo.ProblemCategoria.', 1;
+        THROW 51012, N'Agrupacion (TipoAgrupado) de una categoria que no existe en dbo.ProblemCategoria.', 1;
     IF @CambiaEstado = 1
        AND (NULLIF(LTRIM(RTRIM(@Estado)), N'') IS NULL
             OR NOT EXISTS (SELECT 1 FROM dbo.Problem WHERE LTRIM(RTRIM(Estado)) = LTRIM(RTRIM(@Estado))))
@@ -566,7 +567,7 @@ BEGIN
             LEFT JOIN @Pcts AS x ON pc.Categoria = LTRIM(RTRIM(REPLACE(x.Categoria, NCHAR(160), N' ')))
             WHERE pc.Codigo = @Codigo AND pc.VigenteEnOrigen = 1;
             INSERT @final (Categoria, PctAntes, PctDespues, AgrupAntes, AgrupDespues, Nueva)
-            SELECT LTRIM(RTRIM(REPLACE(x.Categoria, NCHAR(160), N' '))), NULL, x.Pct, NULL, LTRIM(RTRIM(x.TipoAgrupado)), 1
+            SELECT LTRIM(RTRIM(REPLACE(x.Categoria, NCHAR(160), N' '))), NULL, x.Pct, NULL, NULLIF(LTRIM(RTRIM(x.TipoAgrupado)), N''), 1
             FROM @Agregar AS x;
 
             DECLARE @vivoAntes bit = CASE WHEN LTRIM(RTRIM(@estadoAntes)) COLLATE Latin1_General_CI_AI
@@ -578,18 +579,18 @@ BEGIN
 
             IF @tocaCapacidad = 1 AND @vivoFinal = 1
             BEGIN
-                IF EXISTS (SELECT 1 FROM @final WHERE NULLIF(LTRIM(RTRIM(AgrupDespues)), N'') IS NULL)
-                    THROW 51014, N'La iniciativa queda viva con una categoria sin Agrupacion (TipoAgrupado): declarala antes de cambiar %, estado o categorias.', 1;
-
+                -- Una fila sin agrupacion se revisa como si consumiera
+                -- (conservador): no se salta el tope por falta del dato.
                 DECLARE @revisar adm.CategoriaPctTipo;
                 INSERT @revisar (Categoria, Pct)
                 SELECT f.Categoria, f.PctDespues
                 FROM @final AS f
-                WHERE LTRIM(RTRIM(f.AgrupDespues)) IN (N'Problem', N'SorIA', N'Adopcion', N'Mejora')
+                WHERE (NULLIF(LTRIM(RTRIM(f.AgrupDespues)), N'') IS NULL OR LTRIM(RTRIM(f.AgrupDespues)) IN (N'Problem', N'SorIA', N'Adopcion', N'Mejora'))
                   AND ISNULL(f.PctDespues, 0) > 0
                   AND (f.Nueva = 1
                        OR ISNULL(f.PctDespues, 0) > ISNULL(f.PctAntes, 0)
-                       OR NOT (@vivoAntes = 1 AND ISNULL(LTRIM(RTRIM(f.AgrupAntes)), N'') IN (N'Problem', N'SorIA', N'Adopcion', N'Mejora')));
+                       OR NOT (@vivoAntes = 1 AND (NULLIF(LTRIM(RTRIM(f.AgrupAntes)), N'') IS NULL
+                                                   OR LTRIM(RTRIM(f.AgrupAntes)) IN (N'Problem', N'SorIA', N'Adopcion', N'Mejora'))));
                 IF EXISTS (SELECT 1 FROM @revisar)
                     EXEC adm.usp_GestionAdmin_RevisarTope @Codigo = @Codigo, @Revisar = @revisar;
             END;
@@ -649,11 +650,11 @@ BEGIN
             WHERE pc.FechaAnalisisCategoria IS NOT NULL
               AND pc.FechaAnalisisCategoria <> f.FechaAnalisis;
 
-            -- Ligadas ahora: fechas PROPIAS (hoy y hoy + 15) y tipos declarados.
+            -- Ligadas ahora: fechas PROPIAS (hoy y hoy + 15) y los tipos que vengan (NULL si no).
             INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, PctDisminucion,
                                          VigenteEnOrigen, FechaCreacionCategoria, FechaAnalisisCategoria)
             SELECT @Codigo, LTRIM(RTRIM(REPLACE(x.Categoria, NCHAR(160), N' '))),
-                   LTRIM(RTRIM(x.TipoIniciativa)), LTRIM(RTRIM(x.TipoAgrupado)),
+                   NULLIF(LTRIM(RTRIM(x.TipoIniciativa)), N''), NULLIF(LTRIM(RTRIM(x.TipoAgrupado)), N''),
                    x.Pct, 1, @hoyMx, DATEADD(DAY, 15, @hoyMx)
             FROM @Agregar AS x;
 

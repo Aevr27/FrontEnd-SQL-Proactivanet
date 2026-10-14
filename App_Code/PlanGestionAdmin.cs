@@ -26,8 +26,9 @@
 //   de 15 dias naturales; el historico no la sigue siempre.
 //
 // TIPOS: TipoIniciativa, TipoAgrupado y Estado del alta, y los tipos de cada
-// categoria que se liga, son los DECLARADOS en el formulario (validados
-// contra los valores que ya existen). Nunca se derivan del prefijo.
+// categoria que se liga, son los del formulario (validados contra los
+// valores que ya existen) o null si faltan: ADM crea justo cuando falta
+// informacion. Nunca se derivan del prefijo ni se copian de las hermanas.
 //
 // INMUTABLES al modificar: Codigo (solo identifica) y FechaCreacion.
 //

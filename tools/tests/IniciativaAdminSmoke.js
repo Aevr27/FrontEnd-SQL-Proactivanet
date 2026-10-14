@@ -247,7 +247,7 @@ pruebas.push(function () {
   Check('I10 existente: solo Categoria y % salen del registro', ['categoria', 'pct'],
     Object.keys(A.Incompleta.datosDeRegistro(REGISTRO.iniciativas[0])));
   Check('I11 CAMPOS_REGISTRO = Categoria y %', ['categoria', 'pct'], A.Incompleta.CAMPOS_REGISTRO);
-  Check('I12 el borrador: la lista completa, sin Volumetria (es calculada)', ['categoria', 'titulo', 'descripcion', 'observaciones', 'pct', 'rca'],
+  Check('I12 el borrador: la lista completa, sin Volumetria (es calculada); Clasificacion, Agrupacion y Estado como faltantes', ['categoria', 'titulo', 'descripcion', 'observaciones', 'pct', 'rca', 'tipo_iniciativa', 'tipo_agrupado', 'estado'],
     A.CAMPOS_INCOMPLETA.map(function (c) { return c.clave; }));
 });
 
@@ -258,8 +258,13 @@ pruebas.push(function () {
   var cat = I.CatalogoIniciativas.desdeJson(CATALOGO);
   var b = new A.BorradorAdmin(cat);
   var r = b.revisar();
-  Check('B1 sin tipo ni declarados: bloquean Tipo, Clasificacion, Agrupacion y Estado (no se derivan del prefijo)',
-    [false, ['tipo', 'tipo_iniciativa', 'tipo_agrupado', 'estado']], [r.listo, claves(r.bloqueantes)]);
+  Check('B1 sin tipo: bloquea solo el Tipo (Clasificacion, Agrupacion y Estado pueden faltar)',
+    [false, ['tipo']], [r.listo, claves(r.bloqueantes)]);
+  b.elegirTipo('ADO');
+  Check('B1c sin Clasificacion, Agrupacion ni Estado: se puede validar, pero Incompleta con los tres', [true, true, true],
+    [b.revisar().listo, ['tipo_iniciativa', 'tipo_agrupado', 'estado'].every(function (k) { return claves(b.faltantes()).indexOf(k) >= 0; }),
+     b.paraEnviar().some(function (c) { return c[0] === 'tipo_agrupado' && c[1] === ''; })]);
+  b.elegirTipo('');
   Check('B1b la entrega del analisis empieza en hoy', A.FECHAS_GESTION.hoy(), b.declarados.f_entrega_analisis);
   b.capturar('tipo_iniciativa', 'Problem');
   b.capturar('tipo_agrupado', ' Problem ');
@@ -908,8 +913,9 @@ pruebas.push(function () {
     [ed.capturarTipo(2, 'tipo_agrupado', 'Adopcion'), ed.paraEnviar().filter(function (x) { return /^pct_/.test(x[0]); })]);
   Check('FP8 a una ligada con agrupacion no se le cambia aqui', false, ed.capturarTipo(0, 'tipo_agrupado', 'Adopcion'));
   ed.categorias.agregar('/B/Cat 5');
-  Check('FP9 una nueva sin Clasificacion ni Agrupacion bloquea (no se copian de las hermanas)', 2,
-    ed.erroresFormato().filter(function (e) { return e.clave === 'categorias'; }).length);
+  Check('FP9 una nueva sin Clasificacion ni Agrupacion no bloquea y no los copia de las hermanas', [0, '', ''],
+    [ed.erroresFormato().filter(function (e) { return e.clave === 'categorias'; }).length,
+     ed.categorias.filas[3].tipoIniciativa, ed.categorias.filas[3].tipoAgrupado]);
   ed.capturarTipo(3, 'tipo_iniciativa', 'Mejora');
   ed.capturarTipo(3, 'tipo_agrupado', 'Problem');
   Check('FP10 con sus tipos: lista, y viajan en paralelo a agregar_*', [true, [['agregar_categoria', '/B/Cat 5'], ['agregar_pct', ''],

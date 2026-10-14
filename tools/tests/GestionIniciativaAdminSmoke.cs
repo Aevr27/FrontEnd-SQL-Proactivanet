@@ -203,6 +203,12 @@ public static class GestionIniciativaAdminSmoke
 
         // ---- CI ----
         Check("CI1 borrador minimo (solo tipo) valido", true, Crear(C("ADO")).Valida);
+        var sinDecl = PeticionCrearAdmin.Una("ADO", "/A/Cat 1", "10");
+        var rSin = Crear(sinDecl);
+        Check("CI0 sin Clasificacion, Agrupacion ni Estado: valida e Incompleta con los tres", "True|tipo_iniciativa,tipo_agrupado,estado",
+              rSin.Valida + "|" + string.Join(",", Faltan(rSin).Split(',').Where(k => k.StartsWith("tipo") || k == "estado").ToArray()));
+        var plSin = PlanificadorGestionAdmin.Crear(sinDecl, rSin, new DateTime(2026, 10, 13));
+        Check("CI0b el plan los deja null (no se derivan del prefijo)", "|||", plSin.TipoIniciativa + "|" + plSin.TipoAgrupado + "|" + plSin.Estado + "|" + plSin.Categorias[0].TipoAgrupado);
         Check("CI1 ... e incompleto en el orden de CAMPOS_INCOMPLETA (sin categorias, el % no se pide aparte)",
             "categoria,titulo,descripcion,observaciones", Faltan(Crear(C("ADO"))));
         Check("CI2 Problem sin RCA: falta rca", true, Faltan(Crear(C("PRB"))).EndsWith(",rca"));
@@ -348,7 +354,10 @@ public static class GestionIniciativaAdminSmoke
         Check("MK4 reactivar (Cerrado -> En Analisis) con 50% sobre una ruta con 90% de otra: tope", "categorias", Campos(reactiva));
         var nula = new ValidadorGestionAdmin().Modificar(M(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40")),
                            Actual("En An\u00e1lisis", null), new[] { K(Fo, "/A/Cat 1", 0.5m) }, Catalogo, Estados);
-        Check("MK5 viva con categorias sin Agrupacion: cambiar un % pide declararla", "categorias,categorias", Campos(nula));
+        Check("MK5 viva con categorias sin Agrupacion: bajar un % pasa (la Agrupacion es opcional)", true, nula.Valida);
+        var nulaSube = new ValidadorGestionAdmin().Modificar(M(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "60")),
+                           Actual("En An\u00e1lisis", null), new[] { K(Fo, "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.5m) }, Catalogo, Estados);
+        Check("MK5b sin Agrupacion, subir el % se revisa como si consumiera (no se salta el tope)", "pct", Campos(nulaSube));
         var fNula = F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40",
                       "pct_categoria", "/A/Cat 2", "pct_valor", "", "pct_tipo_agrupado", "Problem", "pct_tipo_agrupado", "Adopcion");
         var nulaOk = new ValidadorGestionAdmin().Modificar(M(fNula), Actual("En An\u00e1lisis", null), new[] { K(Fo, "/A/Cat 1", 0.5m) }, Catalogo, Estados);
@@ -399,10 +408,12 @@ public static class GestionIniciativaAdminSmoke
         Check("PL5 no se planea un alta invalida", "rechaza", plInv);
         Check("PL6 31-dic + 15 cruza de anio", "2027-01-15", FechasGestionAdmin.Iso(FechasGestionAdmin.Analisis(new DateTime(2026, 12, 31))));
 
-        var fLiga = F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "10", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem");
+        var fLiga = F("folio", Fo, "agregar_categoria", "/B/Cat 3", "agregar_pct", "10");
         var rLiga = ModC(fLiga);
         var plLiga = PlanificadorGestionAdmin.Modificar(M(fLiga), Actual(), rLiga, hoy);
-        Check("PL7 ligar despues: valida", true, rLiga.Valida);
+        Check("PL7 ligar despues sin tipos: valida (son opcionales) y no se copian de las hermanas", "True||", rLiga.Valida + "|" +
+              PlanificadorGestionAdmin.Modificar(M(fLiga), Actual(), rLiga, hoy).Agregar[0].TipoIniciativa + "|" +
+              PlanificadorGestionAdmin.Modificar(M(fLiga), Actual(), rLiga, hoy).Agregar[0].TipoAgrupado);
         Check("PL8 ligar despues: fechas PROPIAS hoy / hoy + 15", "2026-10-13|2026-10-28",
               FechasGestionAdmin.Iso(plLiga.Agregar[0].FechaCreacion) + "|" + FechasGestionAdmin.Iso(plLiga.Agregar[0].FechaAnalisis));
         Check("PL9 ligar despues: no toca fechas del problema ni las ligadas", "0|0",
