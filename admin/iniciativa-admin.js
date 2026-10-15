@@ -90,8 +90,9 @@
      valores distintos del catalogo (asignaciones), completa, y elegir uno
      no filtra ni vacia el otro ni las categorias. Solo valores de la lista
      (nada escrito a mano): lo que no coincide se rechaza con las parecidas.
-     El servidor rechaza un PO / SO elegido mientras la base no tenga donde
-     guardarlo (PersistenciaGestionAdmin.GuardaDuenos): nunca se tira.
+     Se guardan en dbo.Problem.OwnerProblem / OwnerServicio (sql/20); sin
+     elegir, NULL. Si la base no tiene sql/20 (GuardaDuenos = false), el
+     servidor rechaza un PO / SO elegido: nunca se tira.
 
    PIEZAS
    ------

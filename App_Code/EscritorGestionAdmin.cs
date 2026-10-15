@@ -67,6 +67,16 @@ public sealed class EscritorGestionAdminSql
             cmd.Parameters.Add("@Descripcion", SqlDbType.NVarChar, -1).Value = Db(plan.Descripcion);
             cmd.Parameters.Add("@Observaciones", SqlDbType.NVarChar, -1).Value = Db(plan.Observaciones);
             cmd.Parameters.Add("@FechaEntregaAnalisis", SqlDbType.Date).Value = plan.FechaEntregaAnalisis.Date;
+            // PO / SO solo existen en el procedimiento desde sql/20. Con
+            // GuardaDuenos = false no se mandan (el validador ya rechazo
+            // cualquier PO / SO), asi que la version de sql/18 sigue sirviendo.
+            if (PersistenciaGestionAdmin.GuardaDuenosActiva())
+            {
+                cmd.Parameters.Add("@OwnerProblem", SqlDbType.NVarChar, 4000).Value = Db(plan.Po);
+                cmd.Parameters.Add("@OwnerServicio", SqlDbType.NVarChar, 4000).Value = Db(plan.So);
+            }
+            else if (plan.Po != null || plan.So != null)
+                throw new InvalidOperationException("PO / SO en el plan con GuardaDuenos = false: no se descartan en silencio.");
             Categorias(cmd, "@Categorias", plan.Categorias);
             // Las fechas del plan son las que se guardan: el mismo "hoy".
             cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = plan.FechaCreacion.Date;

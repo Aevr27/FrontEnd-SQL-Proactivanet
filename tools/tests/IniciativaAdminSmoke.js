@@ -1500,7 +1500,7 @@ pruebas.push(function () {
     };
     return v.guardar().then(function (g) {
       var caja = p.sel('admResultado');
-      Check('DS12 SO elegido que la base no recibe: 422, nunca "guardada", el aviso se ve', [1, 'invalida', false, true, true],
+      Check('DS12 base sin sql/20 (GuardaDuenos = false): 422, nunca "guardada", el aviso se ve', [1, 'invalida', false, true, true],
         [srv.length, g.estado, caja.classList.contains('ok'), /todavía no se guarda/.test(caja.innerHTML), v.borrador === b]);
       Check('DS12 viajo el SO elegido (no se descarto en el navegador)', true,
         srv[0].some(function (c) { return c[0] === 'so' && c[1] === 'SO z'; }));

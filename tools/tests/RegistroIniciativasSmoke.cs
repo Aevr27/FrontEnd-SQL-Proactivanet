@@ -126,6 +126,16 @@ public static class RegistroSmoke
             "PRB 1,REQ 2,MAP 3,HAR 4,PRB 5",
             string.Join(",", ToFolios(lista)));
 
+        // PO / SO capturados (dbo.Problem.OwnerProblem / OwnerServicio): van
+        // en campos propios; po / so (los de la categoria) no cambian.
+        var poAntes = Ini(lista, "PRB 1")["po"];
+        var capturados = new Dictionary<string, string[]> { { "PRB 1", new[] { "PO X", null } } };
+        M("AplicarDuenosCapturados").Invoke(null, new object[] { salida, capturados });
+        Check("DC1 capturados en campos propios; po de la categoria intacto", "PO X||True",
+            Ini(lista, "PRB 1")["po_capturado"] + "|" + Ini(lista, "PRB 1")["so_capturado"] + "|" + Equals(poAntes, Ini(lista, "PRB 1")["po"]));
+        Check("DC2 folio sin fila en Problem: null, no inventado", "True|True",
+            (Ini(lista, "REQ 2")["po_capturado"] == null) + "|" + (Ini(lista, "REQ 2")["so_capturado"] == null));
+
         var p1 = Ini(lista, "PRB 1");
         Check("1 tickets_reduce = suma", 150, p1["tickets_reduce"]);
         Check("1 vol_reduce_folio = suma", 150, p1["vol_reduce_folio"]);

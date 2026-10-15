@@ -199,10 +199,10 @@ public static class GestionIniciativaAdminSmoke
         Check("P2 valida: guardada=false, persistencia=habilitada, codigo=null", "True|False|habilitada|",
             j["valida"] + "|" + j["guardada"] + "|" + j["persistencia"] + "|" + j["codigo"]);
         Check("P3 encendida: sin el motivo de 'no habilitada'", null, j["persistencia_motivo"]);
-        Check("P4 bloqueos: solo los que siguen sin guardarse (quitar categoria, RCA, PO/SO en Crear)", "3|True|True|True",
+        Check("P4 bloqueos: solo los que siguen sin guardarse (quitar categoria, RCA); PO/SO ya se guardan", "2|True|True|False",
             ((List<string>)j["bloqueos"]).Count + "|" + ((List<string>)j["bloqueos"])[0].StartsWith("quitar categor") + "|" +
             ((List<string>)j["bloqueos"])[1].StartsWith("RCA") + "|" +
-            ((List<string>)j["bloqueos"])[2].StartsWith("Product Owner / Service Owner"));
+            ((List<string>)j["bloqueos"]).Contains(PersistenciaGestionAdmin.BloqueoDuenos));
         var ji = Crear(C(null)).ComoJson();
         Check("P5 invalida tambien: guardada=false", "False|False", ji["valida"] + "|" + ji["guardada"]);
         Check("P6 invalida: sin el motivo \"la validacion paso\"", null, ji["persistencia_motivo"]);
@@ -231,28 +231,35 @@ public static class GestionIniciativaAdminSmoke
         Check("CC2 categoria fuera del catalogo", "categoria", Campos(Crear(C("ADO", cat: "/Z"))));
         Check("CC3 los tres vacios es valido", "True|", Crear(C("ADO")).Valida + "|" + Campos(Crear(C("ADO"))));
         Check("CC3 solo categoria es valido", "", Campos(Crear(C("ADO", cat: "/A/Cat 2"))));
-        // PO / SO de la lista pero sin donde guardarse (GuardaDuenos = false):
-        // se RECHAZAN con su motivo, nunca se validan y se tiran.
-        Check("CD0 GuardaDuenos sigue en false (sql/18 no recibe PO/SO)", false, PersistenciaGestionAdmin.GuardaDuenos);
-        var soloPo = Crear(C("ADO", po: "PO 1"));
-        Check("CD1 solo PO: rechazado en po, motivo 'todavia no se guarda'", "False|po|True",
-              soloPo.Valida + "|" + Campos(soloPo) + "|" + soloPo.Errores[0].Mensaje.Contains("todav"));
-        Check("CD2 solo SO: rechazado en so", "False|so", Crear(C("ADO", so: "SO z")).Valida + "|" + Campos(Crear(C("ADO", so: "SO z"))));
-        Check("CD3 los tres de una fila: solo los motivos de PO/SO", "po,so", Campos(Crear(C("ADO", po: "PO 1", so: "SO x", cat: "/A/Cat 1"))));
-        // Sin cascada: la combinacion que no sale de ninguna fila ya no es
-        // error propio (solo los motivos de guardado).
-        Check("CD4 PO y categoria que no salen juntos: sin error de cascada", "po",
-              Campos(Crear(C("ADO", po: "PO 2", cat: "/A/Cat 1"))));
-        Check("CD4 PO y SO que no salen juntos: sin error de cascada", "po,so",
-              Campos(Crear(C("ADO", po: "PO 2", so: "SO x"))));
-        Check("CD4 ningun mensaje habla de 'salen juntos'", false,
-              Crear(C("ADO", po: "PO 3", so: "SO x", cat: "/A/Cat 2")).Errores.Any(e => e.Mensaje.Contains("juntos")));
-        Check("CD5 nombre escrito a mano (no en CatPersona/catalogo): fuera del catalogo", "po,so",
+        // PO / SO: opcionales, independientes y SIN cascada; se guardan
+        // (sql/20). Cada uno solo tiene que estar en el catalogo.
+        Check("CD0 GuardaDuenos = true (sql/20 aprobada)", true, PersistenciaGestionAdmin.GuardaDuenos);
+        Check("CD1 solo PO: valido", "True|", Crear(C("ADO", po: "PO 1")).Valida + "|" + Campos(Crear(C("ADO", po: "PO 1"))));
+        Check("CD2 solo SO: valido", "True|", Crear(C("ADO", so: "SO z")).Valida + "|" + Campos(Crear(C("ADO", so: "SO z"))));
+        Check("CD3 los tres de una fila: valido", "True|",
+              Crear(C("ADO", po: "PO 1", so: "SO x", cat: "/A/Cat 1")).Valida + "|" + Campos(Crear(C("ADO", po: "PO 1", so: "SO x", cat: "/A/Cat 1"))));
+        // La combinacion que no sale de ninguna fila del catalogo es valida.
+        Check("CD4 PO y categoria que no salen juntos: valido", "", Campos(Crear(C("ADO", po: "PO 2", cat: "/A/Cat 1"))));
+        Check("CD4 PO y SO que no salen juntos: valido", "", Campos(Crear(C("ADO", po: "PO 2", so: "SO x"))));
+        Check("CD4 PO 3 + SO x + Cat 2 (ninguna fila): valido", "", Campos(Crear(C("ADO", po: "PO 3", so: "SO x", cat: "/A/Cat 2"))));
+        Check("CD5 nombre escrito a mano (no esta en el catalogo): rechazado por catalogo", "po,so",
               Campos(Crear(C("ADO", po: "Juan Perez", so: "Alguien"))));
-        Check("CD5 ... con el mensaje de catalogo, no el de guardado", false,
-              Crear(C("ADO", po: "Juan Perez")).Errores.Any(e => e.Mensaje.Contains("todav")));
+        Check("CD5 ... el resto de la peticion no se toca: categoria valida sin error", "po",
+              Campos(Crear(C("ADO", po: "Juan Perez", cat: "/A/Cat 1"))));
         var form2 = PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "po", "  PO 1  ", "so", ""), false);
         Check("CD6 formulario: po llega tal cual, so vacio", "  PO 1  |", form2.Po + "|" + form2.So);
+        Check("CD6 PO con espacios de mas: valido (se recorta, no se cambia)", "", Campos(Crear(form2)));
+        // El plan: PO / SO recortados o null; textos solo-espacios = null.
+        var pPlan = C("ADO", po: " PO 3 ", so: "", cat: "/A/Cat 1", pct: "10", tit: "  ", desc: " D ", obs: null);
+        var plan = PlanificadorGestionAdmin.Crear(pPlan, Crear(pPlan), new DateTime(2026, 10, 15));
+        Check("CD7 plan: PO recortado, SO vacio = null", "PO 3|True", plan.Po + "|" + (plan.So == null));
+        Check("CD7 plan: titulo solo espacios = null; descripcion con texto tal cual", "True| D |True",
+              (plan.Titulo == null) + "|" + plan.Descripcion + "|" + (plan.Observaciones == null));
+        Check("CD7 plan JSON lleva po / so", "PO 3|", plan.ComoJson()["po"] + "|" + plan.ComoJson()["so"]);
+        var pVacio = C("ADO");
+        var planVacio = PlanificadorGestionAdmin.Crear(pVacio, Crear(pVacio), new DateTime(2026, 10, 15));
+        Check("CD8 solo el Tipo: plan valido, PO/SO/textos null, sin categorias", "True|True|0",
+              (planVacio.Po == null && planVacio.So == null) + "|" + (planVacio.Titulo == null) + "|" + planVacio.Categorias.Count);
         Check("CC5 Director derivado de la categoria", "Dir A", Crear(C("ADO", cat: "/A/Cat 2")).Director);
         Check("CC5 categoria con dos directores: no se adivina", null, Crear(C("ADO", cat: "/B/Cat 3")).Director);
         Check("CC5 el PO ya no elige el Director (sin cascada)", null, Crear(C("ADO", po: "PO 3", cat: "/B/Cat 3")).Director);

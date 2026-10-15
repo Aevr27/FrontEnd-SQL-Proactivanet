@@ -110,6 +110,8 @@ public sealed class PlanCrearAdmin
 {
     public string Prefijo;
     public string TipoIniciativa, TipoAgrupado, Estado;
+    // PO / SO elegidos (dbo.Problem.OwnerProblem / OwnerServicio); null = sin elegir.
+    public string Po, So;
     public string Titulo, Descripcion, Observaciones;
     public DateTime FechaCreacion;
     public DateTime FechaAnalisis;
@@ -131,6 +133,8 @@ public sealed class PlanCrearAdmin
             { "tipo_iniciativa", TipoIniciativa },
             { "tipo_agrupado", TipoAgrupado },
             { "estado", Estado },
+            { "po", Po },
+            { "so", So },
             { "f_creacion", FechasGestionAdmin.Iso(FechaCreacion) },
             { "f_analisis", FechasGestionAdmin.Iso(FechaAnalisis) },
             { "f_entrega_analisis", FechasGestionAdmin.Iso(FechaEntregaAnalisis) },
@@ -201,6 +205,8 @@ public static class PlanificadorGestionAdmin
         return s.Length == 0 ? null : s;
     }
 
+    private static string Texto(string s) { return string.IsNullOrWhiteSpace(s) ? null : s; }
+
     // r: el resultado del validador para ESTA peticion; tiene que ser valido.
     public static PlanCrearAdmin Crear(PeticionCrearAdmin p, ResultadoGestionAdmin r, DateTime hoy)
     {
@@ -213,7 +219,9 @@ public static class PlanificadorGestionAdmin
             TipoIniciativa = Limpio(p.TipoIniciativa),
             TipoAgrupado = Limpio(p.TipoAgrupado),
             Estado = Limpio(p.Estado),
-            Titulo = p.Titulo, Descripcion = p.Descripcion, Observaciones = p.Observaciones,
+            Po = Limpio(p.Po), So = Limpio(p.So),
+            // Solo espacios = NULL; con texto, tal cual (no se recorta).
+            Titulo = Texto(p.Titulo), Descripcion = Texto(p.Descripcion), Observaciones = Texto(p.Observaciones),
             FechaCreacion = hoy.Date,
             FechaAnalisis = FechasGestionAdmin.Analisis(hoy),
             FechaEntregaAnalisis = FechasGestionAdmin.DeIso(Limpio(p.FEntregaAnalisis)) ?? hoy.Date,

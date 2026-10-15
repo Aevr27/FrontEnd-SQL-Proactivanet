@@ -2272,6 +2272,15 @@ window.RegistroIniciativas = (function () {
         (i.sin_categoria ? '<p class="ini-nota">Sin categoría: los dueños son los capturados en el Problem.</p>'
           : '<p class="ini-nota">Dueños de sus categorías' + (varios ? '; varían por categoría (ver abajo).' : '.') +
             ' Manager: el del Service Owner ' + Escape.html(texto(i.so)) + '.</p>');
+      // Con categorias, los PO / SO capturados en la iniciativa (alta de
+      // Admin: dbo.Problem.OwnerProblem / OwnerServicio) van aparte: no
+      // reemplazan a los de sus categorias. Sin categoria ya son los de arriba.
+      if (!i.sin_categoria && (i.po_capturado || i.so_capturado)) {
+        org += '<dl class="ini-datos">' +
+          dato('Product Owner capturado', i.po_capturado) +
+          dato('Service Owner capturado', i.so_capturado) +
+          '</dl><p class="ini-nota">Capturados al crear la iniciativa; los filtros usan los de sus categorías.</p>';
+      }
 
       var impacto = '<dl class="ini-datos ini-datos-num">' +
         dato('Tickets a reducir', fmt(i.tickets_reduce)) +

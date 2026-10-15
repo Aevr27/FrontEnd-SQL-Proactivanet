@@ -624,8 +624,8 @@
         </div>
         <!-- PO / SO opcionales, de las listas del catalogo y SIN cascada:
              elegir uno no filtra ni vacia el otro ni las categorias (03).
-             Nada escrito a mano. La base todavia no los recibe: el servidor
-             rechaza un PO / SO elegido (GuardaDuenos en GestionIniciativaAdmin.cs). -->
+             Nada escrito a mano. Se guardan en dbo.Problem.OwnerProblem /
+             OwnerServicio (sql/20); sin elegir, NULL. -->
         <div class="ini-campo">
           <label for="admPo">Product Owner</label>
           <span id="admPoSelector"></span>
@@ -635,7 +635,7 @@
           <label for="admSo">Service Owner</label>
           <span id="admSoSelector"></span>
           <small class="ini-motivo" id="admSoMsg" role="status" aria-live="polite"></small>
-          <small class="ini-motivo">Opcionales. Todavía no se guardan: si eliges uno, el servidor no guarda el alta.</small>
+          <small class="ini-motivo">Opcionales e independientes: se guardan en la iniciativa; sin elegir quedan vacíos.</small>
         </div>
         <div class="ini-campo ini-derivado">
           <span class="ini-rotulo-derivado" id="rotAdmDirector">Director <span class="ini-origen derivado">Derivado</span></span>

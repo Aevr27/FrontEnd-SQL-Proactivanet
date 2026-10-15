@@ -402,6 +402,28 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
+// EC) PO / SO capturados en la iniciativa (alta de Admin, sql/20): con
+//     categorias van aparte de los de sus categorias; sin capturar, no se
+//     pinta nada nuevo.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var d = JSON.parse(JSON.stringify(DATOS));
+  d.iniciativas.forEach(function (i) {
+    if (i.folio === 'PRB 2026-000001') { i.po_capturado = 'PO Capturado <x>'; i.so_capturado = null; }
+  });
+  var p = Pagina(ok(d));
+  return esperar().then(function () {
+    clicFolio(p, 'PRB 2026-000001');
+    var html = p.sel('regDetCuerpo').innerHTML;
+    Check('EC1 con categorias: PO capturado aparte (escapado), SO capturado vacio = guion', [true, true, true],
+      [/Product Owner capturado<\/dt><dd>PO Capturado &lt;x&gt;</.test(html), /Service Owner capturado<\/dt><dd>—</.test(html),
+       /los filtros usan los de sus categorías/.test(html)]);
+    clicFolio(p, 'MAP 2026-000002');
+    Check('EC2 sin capturar: sin bloque nuevo', false, /capturado/.test(p.sel('regDetCuerpo').innerHTML));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // E) Detalle
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
