@@ -1,6 +1,6 @@
 // Gestion directa de ADM sobre iniciativas (Admin -> Administracion):
-// "Crear iniciativa" y "Modificar" del detalle del registro. CONTRATO Y
-// VALIDACION EN EL SERVIDOR, SIN ESCRITURA.
+// "Crear iniciativa" y "Modificar" del detalle del registro. CONTRATO,
+// VALIDACION Y ESCRITURA EN EL SERVIDOR.
 //
 //   handlers/admin_iniciativas_gestion.ashx         (HTTP, ExigirAdm)
 //       -> PeticionCrearAdmin / PeticionModificarAdmin (lo que llego)
@@ -8,21 +8,17 @@
 //                                                    estados y la iniciativa
 //                                                    actual)
 //       -> ValidadorGestionAdmin                    (las reglas, aqui, sin SQL)
-//       -> PersistenciaGestionAdmin                 (hoy: NO habilitada)
+//       -> PersistenciaGestionAdmin                 (habilitada 2026-10-14)
 //
-// POR QUE NO GUARDA TODAVIA (diseno aprobado 2026-10-13, implementado sin
-// aplicar): la escritura vive en sql/18_gestion_admin_persistencia.sql
-// (adm.usp_GestionAdmin_*: Codigo, tope con candado, TicketsReduce,
-// historial y NroCambioFecha* en UNA transaccion) y en
-// EscritorGestionAdmin.cs. Falta, en este orden y cada paso con su OK:
-//   - retirar el cargador del Excel (usp_CargarExperiencia reescribe
-//     dbo.Problem / dbo.ProblemCategoria y marca VigenteEnOrigen = 0 a lo
-//     que no viene en el libro: pisaria o desactivaria lo creado aqui);
-//   - aplicar sql/18 en la VM y las vistas del backend (fecha por categoria);
-//   - GRANT EXECUTE ON SCHEMA::adm a la cuenta del sitio.
-// Por eso PersistenciaGestionAdmin.Habilitada es una CONSTANTE false: no hay
-// llave de configuracion que la encienda por accidente. Encenderla es un
-// cambio de codigo revisado.
+// ESCRITURA (diseno aprobado 2026-10-13): vive en
+// sql/18_gestion_admin_persistencia.sql (adm.usp_GestionAdmin_*: Codigo,
+// tope con candado, TicketsReduce, historial y NroCambioFecha* en UNA
+// transaccion) y en EscritorGestionAdmin.cs. Aplicado en la VM el
+// 2026-10-14: sql/18, GRANT EXECUTE adm + DENY sobre
+// adm.IniciativaProtegida, ADM_04 (el cargador del Excel no toca los
+// Codigo que Admin crea o modifica) y ADM_01/02 (fecha por categoria).
+// PersistenciaGestionAdmin.Habilitada sigue siendo una CONSTANTE (no hay
+// llave de configuracion): apagarla es volver a false y desplegar.
 //
 // MODELO (verificado en 13_experiencia_usuario.sql y en el registro)
 //   dbo.Problem            una fila por Codigo (PK). Titulo, Descripcion,
@@ -71,25 +67,24 @@ using System.Text.RegularExpressions;
 
 public static class PersistenciaGestionAdmin
 {
-    public const bool Habilitada = false;
+    public const bool Habilitada = true;
 
     // Lo que consulta el handler (un metodo, para no dejar codigo
-    // "inalcanzable" con la constante en false).
+    // "inalcanzable" con la constante fija).
     public static bool Activa() { return Habilitada; }
 
-    public const string Estado = "no_habilitada";
+    public const string Estado = Habilitada ? "habilitada" : "no_habilitada";
 
-    public const string Motivo =
+    // Solo con la persistencia apagada (respuesta 501). Encendida: null.
+    public const string Motivo = Habilitada ? null :
         "Persistencia no habilitada: la validaci\u00f3n pas\u00f3, pero no se guard\u00f3 nada. " +
         "Faltan dos pasos, cada uno con su aprobaci\u00f3n: aplicar la migraci\u00f3n de base (sql/18) y proteger " +
         "las iniciativas de Admin frente a la carga del Excel (ADM_04) o retirar esa carga (ADM_03).";
 
+    // Lo que todavia no se guarda aunque la persistencia este encendida.
     public static readonly string[] Bloqueos =
     {
-        "carga del Excel (usp_CargarExperiencia) sin proteger (ADM_04) ni retirar (ADM_03): reescribe Problem/ProblemCategoria y desactiva lo que no viene en el libro",
-        "sql/18 (adm.usp_GestionAdmin_*) sin aplicar en la VM",
-        "vistas del backend (vw_ProblemCategoria / vw_ProblemVencido) sin la fecha por categor\u00eda",
-        "GRANT EXECUTE ON SCHEMA::adm a la cuenta del sitio pendiente",
+        "quitar categor\u00eda: sin regla aprobada; se rechaza (409) y no se guarda nada",
         "RCA: sin destino de almacenamiento; el archivo no se sube",
     };
 }

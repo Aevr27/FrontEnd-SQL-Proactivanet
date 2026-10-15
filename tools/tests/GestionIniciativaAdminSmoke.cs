@@ -4,8 +4,8 @@
 // compromisos e iniciativa actual armados a mano.
 //
 // Casos:
-//   P) Persistencia: constante false; el JSON siempre dice guardada=false,
-//      persistencia=no_habilitada y codigo=null, valida o no.
+//   P) Persistencia: constante true (2026-10-14); la validacion sola dice
+//      guardada=false, persistencia=habilitada y codigo=null, valida o no.
 //   CF) Crear, formato: sin tipo; % invalido; % sin categoria; categoria
 //      repetida; pares desparejos.
 //   CC) Crear, catalogo: tipo/PO/SO/categoria fuera del catalogo; cascada
@@ -192,12 +192,16 @@ public static class GestionIniciativaAdminSmoke
     public static int Main()
     {
         // ---- P ----
-        Check("P1 persistencia es constante false", false, PersistenciaGestionAdmin.Habilitada);
+        Check("P1 persistencia es constante true (encendida 2026-10-14)", true, PersistenciaGestionAdmin.Habilitada);
         var j = Crear(C("ADO")).ComoJson();
-        Check("P2 valida: guardada=false, persistencia=no_habilitada, codigo=null", "True|False|no_habilitada|",
+        // La validacion sola nunca guarda: guardada/codigo los pone el handler
+        // cuando la base confirma.
+        Check("P2 valida: guardada=false, persistencia=habilitada, codigo=null", "True|False|habilitada|",
             j["valida"] + "|" + j["guardada"] + "|" + j["persistencia"] + "|" + j["codigo"]);
-        Check("P3 el motivo dice que no se guardo", true, ((string)j["persistencia_motivo"]).Contains("no se guard"));
-        Check("P4 bloqueos listados", true, ((List<string>)j["bloqueos"]).Count >= 4);
+        Check("P3 encendida: sin el motivo de 'no habilitada'", null, j["persistencia_motivo"]);
+        Check("P4 bloqueos: solo los que siguen sin guardarse (quitar categoria, RCA)", "2|True|True",
+            ((List<string>)j["bloqueos"]).Count + "|" + ((List<string>)j["bloqueos"])[0].StartsWith("quitar categor") + "|" +
+            ((List<string>)j["bloqueos"])[1].StartsWith("RCA"));
         var ji = Crear(C(null)).ComoJson();
         Check("P5 invalida tambien: guardada=false", "False|False", ji["valida"] + "|" + ji["guardada"]);
         Check("P6 invalida: sin el motivo \"la validacion paso\"", null, ji["persistencia_motivo"]);
@@ -314,7 +318,7 @@ public static class GestionIniciativaAdminSmoke
                          K("PRB 2026-000001", "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.4m));
         Check("MM12 61 excede: ERROR (tope)", "False|pct", excede.Valida + "|" + Campos(excede));
         var jm = tit.ComoJson();
-        Check("MM13 JSON de modificar: folio y no guardada", "PRB 2026-000001|False|no_habilitada", jm["folio"] + "|" + jm["guardada"] + "|" + jm["persistencia"]);
+        Check("MM13 JSON de modificar: folio y no guardada", "PRB 2026-000001|False|habilitada", jm["folio"] + "|" + jm["guardada"] + "|" + jm["persistencia"]);
 
         // ---- MR ----
         var act = Actual();
@@ -502,9 +506,7 @@ public static class GestionIniciativaAdminSmoke
         var enJson = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new object[] { enCrear.ComoJson(), enPct.ComoJson() });
         Check("EN4 JSON como lo escribe DashboardHandler.Responder: sin mojibake y con los acentos", "False|True|True",
             enJson.Contains("\u00c3") + "|" + enJson.Contains("Descripci\u00f3n") + "|" + enJson.Contains("Disminuci\u00f3n"));
-        Check("EN5 motivo de persistencia: sin 'retirar' como unica salida; nombra sql/18, ADM_04 y ADM_03", "False|True|True|True",
-            PersistenciaGestionAdmin.Motivo.Contains("Falta retirar") + "|" + PersistenciaGestionAdmin.Motivo.Contains("sql/18") + "|" +
-            PersistenciaGestionAdmin.Motivo.Contains("ADM_04") + "|" + PersistenciaGestionAdmin.Motivo.Contains("ADM_03"));
+        Check("EN5 persistencia encendida: Motivo es null (solo existe con la constante en false)", null, PersistenciaGestionAdmin.Motivo);
         Check("EN6 fuentes de la respuesta de Admin sin BOM: ningun caracter no ASCII fuera de comentarios", "",
             NoAsciiEnCodigo(@"App_Code\GestionIniciativaAdmin.cs", @"App_Code\PlanGestionAdmin.cs", @"App_Code\IniciativaService.cs",
                             @"App_Code\SolicitudIniciativa.cs", @"handlers\admin_iniciativas_gestion.ashx", @"handlers\admin_iniciativas_validar.ashx"));

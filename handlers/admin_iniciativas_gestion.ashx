@@ -45,9 +45,8 @@
 //        (AccesoDenegado) y MOD (RolInsuficiente),
 //        antes de leer nada.
 //
-// HOY SOLO LECTURA: PersistenciaGestionAdmin.Habilitada = const false, asi
-// que la rama 4 (EscritorGestionAdminSql -> adm.usp_GestionAdmin_*, de
-// sql/18) nunca corre. Con ella activa:
+// PersistenciaGestionAdmin.Habilitada = const true (2026-10-14): la rama 4
+// (EscritorGestionAdminSql -> adm.usp_GestionAdmin_*, de sql/18) escribe:
 //   200 { guardada: true, codigo, ... } (el Codigo solo existe si la base
 //       confirmo el alta);
 //   409 { error, numero, tipo: TopeExcedido | CategoriaRepetida |
@@ -126,10 +125,9 @@ public class AdminIniciativasGestion : IHttpHandler
             var salida = r.ComoJson();
             salida["plan"] = planCrear != null ? planCrear.ComoJson() : planMod.ComoJson();
 
-            // 4) Escritura: SOLO con la persistencia activa (hoy const false,
-            //    PersistenciaGestionAdmin) y sin pendientes. Depende de
-            //    sql/18 aplicada y del cargador del Excel retirado: sin aprobar.
-            //    Con la persistencia activa, un plan con pendientes (p. ej.
+            // 4) Escritura: SOLO con la persistencia activa
+            //    (PersistenciaGestionAdmin) y sin pendientes. Depende de
+            //    sql/18 y ADM_04 en la VM (aplicados 2026-10-14). Con la persistencia activa, un plan con pendientes (p. ej.
             //    quitar categoria, sin regla) se RECHAZA (409): no es "no
             //    habilitada" ni se guarda a medias.
             if (PersistenciaGestionAdmin.Activa() && pendientes.Count > 0)
