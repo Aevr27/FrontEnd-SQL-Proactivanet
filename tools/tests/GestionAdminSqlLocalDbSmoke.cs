@@ -11,9 +11,11 @@
 // vw_ProblemVencido, ADM_03 stub del cargador). Si esa carpeta no esta, esos
 // casos se reportan como NO CORRIDOS (no como pasados).
 //
-// Lo que esto prueba es la migracion sobre una REPLICA: no hay
-// trg_Problem_EstadoEvento (definicion no disponible), ni datos reales, y
-// las funciones de categoria / nombres son stubs (ver la replica).
+// Lo que esto prueba es la migracion sobre una REPLICA: sin datos reales, y
+// las funciones de categoria / nombres son stubs (ver la replica). Los
+// triggers de historial (fechas y Estado) son los desplegados en la VM; el
+// de Estado (dbo.ProblemEstadoEvento) solo si la replica local lo trae: si
+// no, sus casos (E15b) salen como NO CORRIDOS.
 //
 // Casos (prefijo del rotulo):
 //   G  guardas: base con otro nombre, migracion repetida.
@@ -34,6 +36,19 @@
 //   V  vistas del backend: semaforo de Experiencia y vencidas.
 //   B  rollback de 18 (orden, datos, forzado).
 //   S  stub del cargador y su rollback.
+//   E  proteccion del cargador (ADM_04 + adm.IniciativaProtegida): el
+//      cargador 174bb51 parchado, corrido de verdad contra staging, no pisa
+//      ni da de baja iniciativas protegidas ni sus categorias; las demas
+//      siguen igual; registro atomico; fallas cerradas; concurrencia con
+//      dos conexiones; rollback. Modificar protege solo con cambio real
+//      (E31*). Cuentas como la del operador (stg de otro dueno, como en la
+//      VM: E29/E29b) y la del sitio con y sin DENY (E30/E30n). Rollback de
+//      ADM_04 + ADM_03 en una transaccion con una carga en medio (E32/E32n).
+//      Diag secciones 10 (cuentas) y 11 (hash de sql/18) (E33-E35).
+//
+// stg: en la VM es de SORIANA\edgarrad; aqui de SORIANA_edgarrad (usuario
+// sin login), porque un nombre con dominio no se puede crear sin el dominio.
+// La replica no se toca: el cambio de dueno se hace al preparar la base.
 //
 // Compilar (ver memoria csc): App_Code\*.cs + este archivo; correr con
 // cwd = raiz del repo.
@@ -52,7 +67,7 @@ public static class GestionAdminSqlLocalDbSmoke
 {
     const string Servidor = @"Server=(localdb)\MSSQLLocalDB;Integrated Security=true;";
     const string Backend = @"..\backend_admin_persistencia";
-    static int fallos = 0, noCorridas = 0;
+    static int pasadas = 0, fallos = 0, noCorridas = 0;
     static string Base;
 
     static void Check(string caso, object esperado, object obtenido)
@@ -60,7 +75,7 @@ public static class GestionAdminSqlLocalDbSmoke
         var e = Convert.ToString(esperado, CultureInfo.InvariantCulture);
         var o = Convert.ToString(obtenido, CultureInfo.InvariantCulture);
         var ok = e == o;
-        if (!ok) fallos++;
+        if (ok) pasadas++; else fallos++;
         Console.WriteLine((ok ? "PASS  " : "FAIL  ") + caso + (ok ? "" : "  esperado=" + e + "  obtenido=" + o));
     }
 
@@ -248,6 +263,10 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
         using (var cn = Abrir(db))
         {
             Lotes(cn, Leer("tools", "tests", "GestionAdminLocalDb_replica.sql"));
+            // En la VM stg es de SORIANA\edgarrad, no de dbo (diag ADM_04 sec 8,
+            // 2026-10-14): el cargador (dbo) NO encadena hacia stg. Ese nombre no
+            // se puede crear sin el dominio; un usuario sin login hace lo mismo.
+            Exec(cn, "CREATE USER [" + DuenoStg + "] WITHOUT LOGIN; ALTER AUTHORIZATION ON SCHEMA::stg TO [" + DuenoStg + "];");
             Lotes(cn, Leer("tools", "tests", "usp_CargarExperiencia_174bb51.sql"));
             // Las vistas del backend, tal cual su origen (fuera de este repo publico).
             if (HayBackend())
@@ -283,8 +302,8 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
             Preparar(Base);
             using (var cn = Abrir(Base))
             {
-                Check("G2 aplicada: columnas, FK compuesta, CHECK de nivel, trigger, 4 procedimientos, 0 tablas en adm",
-                      "1|1|1|1|1|4|0|2",
+                Check("G2 aplicada: columnas, FK compuesta, CHECK de nivel, trigger, 4 procedimientos, 1 tabla en adm (IniciativaProtegida)",
+                      "1|1|1|1|1|4|1|2",
                       Filas(cn, "SELECT CASE WHEN COL_LENGTH('dbo.ProblemCategoria','FechaAnalisisCategoria') IS NULL THEN 0 ELSE 1 END, " +
                                 "CASE WHEN COL_LENGTH('dbo.ProblemFechaEvento','Categoria') IS NULL THEN 0 ELSE 1 END, " +
                                 "CASE WHEN OBJECT_ID('dbo.FK_ProblemFechaEvento_ProblemCategoria','F') IS NULL THEN 0 ELSE 1 END, " +
@@ -588,6 +607,9 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
             // ---------------- S: stub del cargador ----------------
             Stub();
 
+            // ---------------- E: proteccion del cargador (ADM_04) ----------------
+            Proteccion(hoy);
+
             // ---------------- B: rollback de 18 ----------------
             Rollback18();
         }
@@ -604,6 +626,7 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
             catch (Exception ex) { Console.WriteLine("No se pudieron borrar los logins: " + ex.Message); }
         }
         Console.WriteLine();
+        Console.WriteLine(pasadas + " PASARON · " + fallos + " FALLARON · " + noCorridas + " NO CORRIDAS (no cuentan como pasadas)");
         Console.WriteLine((fallos == 0 ? "TODO PASO" : fallos + " FALLO(S)") + (noCorridas > 0 ? " · " + noCorridas + " NO CORRIDA(S)" : ""));
         return fallos == 0 ? 0 : 1;
     }
@@ -688,6 +711,550 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
         }
     }
 
+    // ---------------------------------------------------------------------
+    // E: proteccion del cargador (ADM_04)
+    // ---------------------------------------------------------------------
+    const string Adm04 = "ADM_04_usp_CargarExperiencia_proteccion.sql";
+    const string Adm04Rollback = "ADM_04_usp_CargarExperiencia_proteccion_rollback.sql";
+    const string Hash174bb51 = "0x3BC236C22F81E7A07A4F221A012D54669742BE96A3E31C55DFE7F848D19C67DD";
+    const string DuenoStg = "SORIANA_edgarrad";
+
+    // Staging como lo deja cargar_experiencia.py: las cuatro tablas, borradas y
+    // llenas. problems: Codigo|Titulo|Estado; iniciativas: Codigo|Categoria|Pct.
+    static void Staging(SqlConnection cn, string[] problems, string[] iniciativas)
+    {
+        Exec(cn, "DELETE stg.Problems; DELETE stg.Iniciativas; DELETE stg.CatPersona; DELETE stg.CatCategoriaDueno;");
+        foreach (var p in problems)
+        {
+            var c = p.Split('|');
+            using (var cmd = new SqlCommand("INSERT stg.Problems (Codigo, Titulo, Estado, TipoIniciativa) VALUES (@c, @t, @e, N'Problem')", cn))
+            {
+                cmd.Parameters.AddWithValue("@c", c[0]); cmd.Parameters.AddWithValue("@t", c[1]); cmd.Parameters.AddWithValue("@e", c[2]);
+                cmd.ExecuteNonQuery();
+            }
+        }
+        foreach (var i in iniciativas)
+        {
+            var c = i.Split('|');
+            using (var cmd = new SqlCommand("INSERT stg.Iniciativas (Codigo, Categoria, PctDisminucion, TipoAgrupado, TipoIniciativa) VALUES (@c, @k, @p, N'Problem', N'Problem')", cn))
+            {
+                cmd.Parameters.AddWithValue("@c", c[0]); cmd.Parameters.AddWithValue("@k", c[1]); cmd.Parameters.AddWithValue("@p", c[2]);
+                cmd.ExecuteNonQuery();
+            }
+        }
+    }
+
+    // Corre el cargador como cargar_experiencia.py y devuelve la columna
+    // ProtegidasOmitidas del primer resultado (o "sin columna").
+    static string Cargar(SqlConnection cn, SqlTransaction tx = null)
+    {
+        using (var cmd = new SqlCommand("dbo.usp_CargarExperiencia", cn, tx) { CommandType = System.Data.CommandType.StoredProcedure, CommandTimeout = 120 })
+        {
+            cmd.Parameters.AddWithValue("@Simulacion", false);
+            using (var rd = cmd.ExecuteReader())
+            {
+                string omitidas = "sin columna";
+                if (rd.Read())
+                    for (var i = 0; i < rd.FieldCount; i++)
+                        if (rd.GetName(i) == "ProtegidasOmitidas") omitidas = Celda(rd.GetValue(i));
+                while (rd.NextResult()) { }
+                return omitidas;
+            }
+        }
+    }
+
+    // Corre un script por lotes y junta las filas de todos sus resultados.
+    static string LotesFilas(SqlConnection cn, string sql)
+    {
+        var salida = new List<string>();
+        foreach (var lote in Regex.Split(sql, @"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase))
+        {
+            if (lote.Trim().Length == 0) continue;
+            using (var cmd = new SqlCommand(lote, cn) { CommandTimeout = 120 })
+            using (var rd = cmd.ExecuteReader())
+                do
+                    while (rd.Read())
+                    {
+                        var partes = new List<string>();
+                        for (var i = 0; i < rd.FieldCount; i++) partes.Add(Celda(rd.GetValue(i)));
+                        salida.Add(string.Join("|", partes));
+                    }
+                while (rd.NextResult());
+        }
+        return string.Join("\n", salida);
+    }
+
+    static string FilasDe(SqlConnection cn, string codigos)
+    {
+        return Filas(cn, "SELECT * FROM dbo.Problem WHERE Codigo IN (" + codigos + ") ORDER BY Codigo") + " // " +
+               Filas(cn, "SELECT * FROM dbo.ProblemCategoria WHERE Codigo IN (" + codigos + ") ORDER BY Codigo, Categoria");
+    }
+
+    static string Todo(SqlConnection cn)
+    {
+        return Filas(cn, "SELECT COUNT(*), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.Problem") + "/" +
+               Filas(cn, "SELECT COUNT(*), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.ProblemCategoria") + "/" +
+               Filas(cn, "SELECT COUNT(*), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.ProblemFechaEvento") + "/" +
+               (HayHistorialEstado(cn) ? Filas(cn, "SELECT COUNT(*), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.ProblemEstadoEvento") : "sin historial de Estado") + "/" +
+               Filas(cn, "SELECT COUNT(*), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM adm.IniciativaProtegida");
+    }
+
+    // dbo.ProblemEstadoEvento (y su trigger) solo estan en la replica local con
+    // lo copiado de la VM; la del repo no la trae. Sin ella, los casos de
+    // historial de Estado se reportan como NO CORRIDOS.
+    static bool HayHistorialEstado(SqlConnection cn)
+    {
+        return Uno(cn, "SELECT OBJECT_ID(N'dbo.ProblemEstadoEvento', N'U')") != null;
+    }
+
+    static PlanModificarAdmin Titulo(string codigo, DateTime hoy, string titulo)
+    {
+        var p = Mod(codigo, hoy);
+        p.Problem[SolicitudIniciativa.CTitulo] = titulo;
+        return p;
+    }
+
+    static void Proteccion(DateTime hoy)
+    {
+        if (!HayBackend()) { NoCorrida("E*", "falta " + Backend); return; }
+        using (var m = Abrir("master"))
+            Check("E1 ADM_04 no corre fuera de GestionAdminPrueba_* sin aprobar_backend = ADM_04", "True",
+                  LotesError(m, LeerBackend(Adm04)).Contains("ADM_04 SIN APROBAR"));
+
+        using (var cn = Abrir(Base))
+        {
+            Check("E2 la base parte del cargador verificado (174bb51)", Hash174bb51, HashDef(cn, "dbo.usp_CargarExperiencia"));
+            Exec(cn, "EXEC sp_rename N'adm.IniciativaProtegida', N'IniciativaProtegidaX';");
+            Check("E3 sin adm.IniciativaProtegida (sql/18), ADM_04 se niega y no toca el cargador", "True|" + Hash174bb51,
+                  LotesError(cn, LeerBackend(Adm04)).Contains("falta adm.IniciativaProtegida") + "|" + HashDef(cn, "dbo.usp_CargarExperiencia"));
+            Exec(cn, "EXEC sp_rename N'adm.IniciativaProtegidaX', N'IniciativaProtegida';");
+
+            Lotes(cn, LeerBackend(Adm04));
+            var hashAdm04 = HashDef(cn, "dbo.usp_CargarExperiencia");
+            Console.WriteLine("   hash ADM_04 = " + hashAdm04);
+            Check("E4 instalado: la definicion cambio y el rollback trae ese hash", "True|True",
+                  (hashAdm04 != Hash174bb51) + "|" + LeerBackend(Adm04Rollback).Contains(hashAdm04));
+            Check("E5 instalarlo otra vez se niega (ya no es 174bb51)", "True",
+                  LotesError(cn, LeerBackend(Adm04)).Contains("NO es la verificada"));
+            Check("E6 ADM_03 (retiro) tambien se niega sobre ADM_04: no se apilan", "True",
+                  LotesError(cn, LeerBackend("ADM_03_usp_CargarExperiencia_retirado.sql")).Contains("NO es la verificada"));
+
+            // Iniciativas del Excel (sin proteger) y categorias de prueba.
+            Exec(cn, @"
+INSERT dbo.Categorias (Id, RutaCompleta, Inactiva, VigenteEnOrigen) VALUES
+ (N'E1', N'/E/Uno', 0, 1), (N'E2', N'/E/Dos', 0, 1), (N'E3', N'/E/Tres', 0, 1), (N'E4', N'/E/Excel', 0, 1);
+INSERT dbo.Problem (Codigo, TipoIniciativa, Titulo, Estado, FechaCreacion, FechaAnalisis, VigenteEnOrigen) VALUES
+ (N'PRB 2024-000501', N'Problem', N'Excel 501', N'Cerrado', '2024-01-01', '2024-01-16', 1),
+ (N'PRB 2024-000502', N'Problem', N'Excel 502', N'Cerrado', '2024-01-01', '2024-01-16', 1),
+ (N'PRB 2024-000503', N'Problem', N'Excel 503', N'Cerrado', '2024-01-01', '2024-01-16', 1),
+ (N'PRB 2024-000504', N'Problem', N'Excel 504', N'Cerrado', '2024-01-01', '2024-01-16', 1),
+ (N'PRB 2024-000505', N'Problem', N'Excel 505', N'Cerrado', '2024-01-01', '2024-01-16', 1);
+INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, PctDisminucion) VALUES
+ (N'PRB 2024-000502', N'/E/Tres', N'Problem', N'Problem', 0.1000),
+ (N'PRB 2024-000503', N'/E/Tres', N'Problem', N'Problem', 0.1000),
+ (N'PRB 2024-000504', N'/E/Tres', N'Problem', N'Problem', 0.1000),
+ (N'PRB 2024-000504', N'/E/Uno',  N'Problem', N'Problem', 0.1000);");
+
+            // Alta de Admin con dos categorias; dos del Excel que Admin modifica.
+            var a = Crear(cn, Alta(hoy, "/E/Uno", "20", "/E/Dos", "30"));
+            Modificar(cn, Titulo("PRB 2024-000503", hoy, "Admin 503"));
+            Modificar(cn, Titulo("PRB 2024-000504", hoy, "Admin 504"));
+            Check("E7 (6) alta y modificacion quedan protegidas en su misma transaccion", "ALTA|DOM\\prueba;MODIFICACION|DOM\\prueba;MODIFICACION|DOM\\prueba",
+                  Filas(cn, "SELECT Motivo, Usuario FROM adm.IniciativaProtegida WHERE Codigo IN (N'" + a + "', N'PRB 2024-000503', N'PRB 2024-000504') " +
+                            "ORDER BY CASE Codigo WHEN N'" + a + "' THEN 0 WHEN N'PRB 2024-000503' THEN 1 ELSE 2 END"));
+            Modificar(cn, Titulo("PRB 2024-000504", hoy, "Admin 504 bis"));
+            Check("E8 una segunda modificacion no duplica ni cambia el registro", "1|MODIFICACION",
+                  Filas(cn, "SELECT COUNT(*), MIN(Motivo) FROM adm.IniciativaProtegida WHERE Codigo = N'PRB 2024-000504'"));
+
+            var prot = "N'" + a + "', N'PRB 2024-000503', N'PRB 2024-000504'";
+            var antesProt = FilasDe(cn, prot);
+            var eventosAntes = Filas(cn, "SELECT IdEvento, Codigo, Campo, FechaAnterior, FechaNueva, Operacion, Origen FROM dbo.ProblemFechaEvento ORDER BY IdEvento");
+            var hayEstado = HayHistorialEstado(cn);
+            var estadosAntes = hayEstado ? Filas(cn, "SELECT IdEvento, Codigo, EstadoAnterior, EstadoNuevo, Operacion, Origen, Usuario FROM dbo.ProblemEstadoEvento ORDER BY IdEvento") : null;
+            var maxEstado = hayEstado ? Celda(Uno(cn, "SELECT ISNULL(MAX(IdEvento), 0) FROM dbo.ProblemEstadoEvento")) : null;
+            var registroAntes = Filas(cn, "SELECT * FROM adm.IniciativaProtegida ORDER BY Codigo");
+            var maxEvento = Celda(Uno(cn, "SELECT ISNULL(MAX(IdEvento), 0) FROM dbo.ProblemFechaEvento"));
+
+            // El Excel: trae a la de Admin (con otro titulo, otro %, una categoria
+            // nueva y SIN /E/Dos), a 504 sin /E/Tres, a 501 y 505; no trae 502 ni 503.
+            Staging(cn,
+                new[] { a + "|pisado por el Excel|Cerrado", "PRB 2024-000504|pisado 504|Cerrado",
+                        "PRB 2024-000501|Excel 501 nuevo|En Solución", "PRB 2024-000505|Excel 505|Cerrado" },
+                new[] { a + "|/E/Uno|0.9", a + "|/E/Excel|0.5", "PRB 2024-000504|/E/Uno|0.9",
+                        "PRB 2024-000501|/E/Uno|0.4" });
+            var omitidas = Cargar(cn);
+            Check("E9 la carga reporta las protegidas que vinieron en el Excel", "2", omitidas);
+            Check("E10 (1)(3) protegidas en el Excel: Problem y TODAS sus categorias identicas (ni %, ni alta, ni baja)", antesProt, FilasDe(cn, prot));
+            Check("E11 (2) protegida que no viene en el Excel: sigue vigente, con su titulo", "1|Admin 503",
+                  Filas(cn, "SELECT VigenteEnOrigen, Titulo FROM dbo.Problem WHERE Codigo = N'PRB 2024-000503'"));
+            Check("E12 (3) no se le agrego la categoria del Excel ni se dio de baja /E/Dos", "0|1",
+                  Filas(cn, "SELECT (SELECT COUNT(*) FROM dbo.ProblemCategoria WHERE Codigo = N'" + a + "' AND Categoria = N'/E/Excel'), " +
+                            "(SELECT VigenteEnOrigen FROM dbo.ProblemCategoria WHERE Codigo = N'" + a + "' AND Categoria = N'/E/Dos')"));
+            Check("E13 (4) sin proteger en el Excel: se actualiza y se le agrega la categoria, como antes", "Excel 501 nuevo|En Solución|1;/E/Uno|0.4000|1",
+                  Filas(cn, "SELECT Titulo, Estado, VigenteEnOrigen FROM dbo.Problem WHERE Codigo = N'PRB 2024-000501'") + ";" +
+                  Filas(cn, "SELECT Categoria, PctDisminucion, VigenteEnOrigen FROM dbo.ProblemCategoria WHERE Codigo = N'PRB 2024-000501'"));
+            Check("E14 (5) sin proteger y fuera del Excel: baja de la iniciativa y su categoria, como antes", "0|0",
+                  Filas(cn, "SELECT (SELECT VigenteEnOrigen FROM dbo.Problem WHERE Codigo = N'PRB 2024-000502'), " +
+                            "(SELECT VigenteEnOrigen FROM dbo.ProblemCategoria WHERE Codigo = N'PRB 2024-000502')"));
+            var eventosDespues = Filas(cn, "SELECT IdEvento, Codigo, Campo, FechaAnterior, FechaNueva, Operacion, Origen FROM dbo.ProblemFechaEvento ORDER BY IdEvento");
+            Check("E15 (11) el historial previo sigue intacto y no hay eventos nuevos de protegidas", "True|0",
+                  eventosDespues.StartsWith(eventosAntes) + "|" +
+                  Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemFechaEvento WHERE Codigo IN (" + prot + ") AND IdEvento > " + maxEvento));
+            const string e15b = "E15b (11) historial de Estado (trigger real de la VM): lo previo intacto, ningun evento nuevo de protegidas, y si el de 501 (sin proteger, cambio de estado)";
+            if (!hayEstado) NoCorrida(e15b, "la replica no trae dbo.ProblemEstadoEvento");
+            else
+            {
+                var estadosDespues = Filas(cn, "SELECT IdEvento, Codigo, EstadoAnterior, EstadoNuevo, Operacion, Origen, Usuario FROM dbo.ProblemEstadoEvento ORDER BY IdEvento");
+                Check(e15b, "True|0|1",
+                      estadosDespues.StartsWith(estadosAntes) + "|" +
+                      Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemEstadoEvento WHERE Codigo IN (" + prot + ") AND IdEvento > " + maxEstado) + "|" +
+                      Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemEstadoEvento WHERE Codigo = N'PRB 2024-000501' AND IdEvento > " + maxEstado + " AND Origen = 'NO_DECLARADO'"));
+            }
+            Cargar(cn); Cargar(cn);
+            Check("E16 (10) tres corridas: el registro de protegidas y sus filas no cambian", registroAntes + " // " + antesProt,
+                  Filas(cn, "SELECT * FROM adm.IniciativaProtegida ORDER BY Codigo") + " // " + FilasDe(cn, prot));
+
+            // (7) Registrar la proteccion falla: no se guarda nada de Admin.
+            Exec(cn, "CREATE TRIGGER adm.trg_PruebaFallaProteccion ON adm.IniciativaProtegida INSTEAD OF INSERT AS THROW 50999, N'falla forzada', 1;");
+            var antesFalla = Todo(cn);
+            var codigoFalla = "sin intento";
+            var errAlta = Error(() => { codigoFalla = Crear(cn, Alta(hoy, "/E/Tres", "5")); });
+            var errMod = Error(() => Modificar(cn, Titulo("PRB 2024-000505", hoy, "Admin 505 sin proteger")));
+            Check("E17 (7) si no se puede proteger, el alta y la modificacion fallan y no queda nada", "50999|50999|" + antesFalla,
+                  errAlta + "|" + errMod + "|" + Todo(cn));
+            Exec(cn, "DROP TRIGGER adm.trg_PruebaFallaProteccion;");
+
+            // (8) La consulta de protegidas falla: el cargador no escribe nada.
+            var antesSinTabla = Todo(cn);
+            Exec(cn, "EXEC sp_rename N'adm.IniciativaProtegida', N'IniciativaProtegidaX';");
+            var errSinTabla = Error(() => Cargar(cn));
+            Exec(cn, "EXEC sp_rename N'adm.IniciativaProtegidaX', N'IniciativaProtegida';");
+            Check("E18 (8) sin la tabla de protegidas el cargador falla (208) y no escribe", "208|" + antesSinTabla, errSinTabla + "|" + Todo(cn));
+
+            // (8) El candado no se obtiene (Admin guardando > 30 s): falla cerrada.
+            using (var b = Abrir(Base))
+            {
+                Exec(b, "BEGIN TRAN; EXEC sp_getapplock @Resource = N'adm.proteccion', @LockMode = 'Shared', @LockOwner = 'Transaction';");
+                var antesCandado = Todo(cn);
+                var errCandado = Error(() => Cargar(cn));
+                Exec(b, "ROLLBACK;");
+                Check("E19 (8) sin el candado adm.proteccion en 30 s el cargador falla (51951) y no escribe", "51951|" + antesCandado, errCandado + "|" + Todo(cn));
+            }
+
+            // (9a) Admin primero: su transaccion sigue abierta cuando arranca la carga.
+            Staging(cn, new[] { "PRB 2024-000505|pisado concurrente|Cerrado" }, new string[0]);
+            using (var b = Abrir(Base))
+            {
+                var tx = b.BeginTransaction();
+                new EscritorGestionAdminSql().Modificar(b, tx, Titulo("PRB 2024-000505", hoy, "Admin 505"), @"DOM\prueba");
+                string resultado = null;
+                var hilo = new Thread(() => { using (var c = Abrir(Base)) resultado = Error(() => Cargar(c)); });
+                hilo.Start();
+                var esperaba = !hilo.Join(2000);
+                tx.Commit();
+                hilo.Join();
+                Check("E20 (9) Admin primero: la carga espera al COMMIT de Admin y luego respeta la proteccion", "True|sin error|Admin 505|1",
+                      esperaba + "|" + resultado + "|" + Uno(cn, "SELECT Titulo FROM dbo.Problem WHERE Codigo = N'PRB 2024-000505'") + "|" +
+                      Uno(cn, "SELECT COUNT(*) FROM adm.IniciativaProtegida WHERE Codigo = N'PRB 2024-000505'"));
+            }
+
+            // (9b) La carga primero: Admin espera a que termine y escribe despues.
+            Exec(cn, "INSERT dbo.Problem (Codigo, TipoIniciativa, Titulo, Estado, FechaCreacion, VigenteEnOrigen) VALUES (N'PRB 2024-000506', N'Problem', N'Excel 506', N'Cerrado', '2024-01-01', 1);");
+            Staging(cn, new[] { "PRB 2024-000506|Excel 506 carga|Cerrado" }, new string[0]);
+            using (var c = Abrir(Base))
+            {
+                var tx = c.BeginTransaction();
+                Cargar(c, tx);
+                string resultado = null;
+                var hilo = new Thread(() => { using (var b = Abrir(Base)) resultado = Error(() => Modificar(b, Titulo("PRB 2024-000506", hoy, "Admin 506"))); });
+                hilo.Start();
+                var esperaba = !hilo.Join(2000);
+                tx.Commit();
+                hilo.Join();
+                Staging(cn, new[] { "PRB 2024-000506|pisado despues|Cerrado" }, new string[0]);
+                Cargar(cn);
+                Check("E21 (9) carga primero: Admin espera, escribe despues y la siguiente carga ya no lo pisa", "True|sin error|Admin 506|1",
+                      esperaba + "|" + resultado + "|" + Uno(cn, "SELECT Titulo FROM dbo.Problem WHERE Codigo = N'PRB 2024-000506'") + "|" +
+                      Celda(Uno(cn, "SELECT VigenteEnOrigen FROM dbo.Problem WHERE Codigo = N'PRB 2024-000506'")));
+            }
+
+            // Cuenta como la del operador del Excel: EXECUTE sobre el cargador y,
+            // como stg no es de dbo, lo minimo de stg (cargar_experiencia.py
+            // borra e inserta; el cargador lee). Nada sobre dbo.Problem ni adm:
+            // OBJECT_ID no ve adm.IniciativaProtegida con ella (la version con
+            // esa guarda fallaba en cada carga); el cargador tiene que funcionar igual.
+            var loginEtl = "CargaExcel_" + DateTime.UtcNow.ToString("HHmmssfff");
+            var claveEtl = "Ce!" + Guid.NewGuid().ToString("N");
+            try
+            {
+                using (var m = Abrir("master")) Exec(m, "CREATE LOGIN [" + loginEtl + "] WITH PASSWORD = N'" + claveEtl + "', CHECK_POLICY = OFF;");
+                Exec(cn, "CREATE USER [" + loginEtl + "] FOR LOGIN [" + loginEtl + "]; GRANT EXECUTE ON dbo.usp_CargarExperiencia TO [" + loginEtl + "]; " +
+                         "GRANT SELECT, INSERT, DELETE ON SCHEMA::stg TO [" + loginEtl + "];");
+                // Sin SELECT en stg (solo EXECUTE, lo que bastaba con stg de dbo): 229 antes de escribir.
+                Exec(cn, "DENY SELECT ON SCHEMA::stg TO [" + loginEtl + "];");
+                Staging(cn, new[] { a + "|pisado sin permiso en stg|Cerrado" }, new string[0]);
+                var antesSinStg = Todo(cn);
+                string resultadoSinStg;
+                using (var e = AbrirSql(Base, loginEtl, claveEtl)) resultadoSinStg = Error(() => Cargar(e));
+                Check("E29b stg de otro dueno (como la VM): solo con EXECUTE el cargador no lee stg (229) y no escribe nada", "229|" + antesSinStg,
+                      resultadoSinStg + "|" + Todo(cn));
+                Exec(cn, "REVOKE SELECT ON SCHEMA::stg FROM [" + loginEtl + "]; GRANT SELECT ON SCHEMA::stg TO [" + loginEtl + "];");
+                Exec(cn, "INSERT dbo.Problem (Codigo, TipoIniciativa, Titulo, Estado, FechaCreacion, VigenteEnOrigen) VALUES (N'PRB 2024-000507', N'Problem', N'Excel 507', N'Cerrado', '2024-01-01', 1);");
+                Staging(cn, new[] { a + "|pisado por la cuenta del ETL|Cerrado", "PRB 2024-000507|Excel 507 por la cuenta del ETL|Cerrado" }, new string[0]);
+                var antesEtl = FilasDe(cn, prot);
+                string verObjeto, resultadoEtl;
+                using (var e = AbrirSql(Base, loginEtl, claveEtl))
+                {
+                    verObjeto = Celda(Uno(e, "SELECT OBJECT_ID(N'adm.IniciativaProtegida', N'U')"));
+                    resultadoEtl = Error(() => Cargar(e));
+                }
+                Check("E29 con EXECUTE + stg (como el operador): OBJECT_ID no ve la tabla, pero la carga corre, respeta las protegidas y carga la otra",
+                      "NULL|sin error|True|Excel 507 por la cuenta del ETL",
+                      verObjeto + "|" + resultadoEtl + "|" + (antesEtl == FilasDe(cn, prot)) + "|" +
+                      Uno(cn, "SELECT Titulo FROM dbo.Problem WHERE Codigo = N'PRB 2024-000507'"));
+            }
+            finally
+            {
+                Exec(cn, "IF USER_ID(N'" + loginEtl + "') IS NOT NULL DROP USER [" + loginEtl + "];");
+                using (var m = Abrir("master")) Exec(m, "IF SUSER_ID(N'" + loginEtl + "') IS NOT NULL DROP LOGIN [" + loginEtl + "];");
+            }
+
+            // Cuenta como la del sitio con la seccion 8 de sql/18 completa (GRANT
+            // + DENY): Admin sigue protegiendo por encadenamiento de propietario,
+            // pero a mano no se puede quitar ni cambiar una proteccion.
+            var loginSitio = "SitioDeny_" + DateTime.UtcNow.ToString("HHmmssfff");
+            var claveSitio = "Sd!" + Guid.NewGuid().ToString("N");
+            try
+            {
+                using (var m = Abrir("master")) Exec(m, "CREATE LOGIN [" + loginSitio + "] WITH PASSWORD = N'" + claveSitio + "', CHECK_POLICY = OFF;");
+                Exec(cn, "CREATE USER [" + loginSitio + "] FOR LOGIN [" + loginSitio + "]; ALTER ROLE db_datareader ADD MEMBER [" + loginSitio + "]; " +
+                         "ALTER ROLE db_datawriter ADD MEMBER [" + loginSitio + "]; GRANT EXECUTE ON SCHEMA::dbo TO [" + loginSitio + "]; " +
+                         "GRANT EXECUTE ON SCHEMA::adm TO [" + loginSitio + "]; DENY INSERT, UPDATE, DELETE ON adm.IniciativaProtegida TO [" + loginSitio + "];");
+                var antesDeny = Filas(cn, "SELECT * FROM adm.IniciativaProtegida ORDER BY Codigo");
+                string nuevo = null, borrar, cambiar, agregar;
+                using (var s = AbrirSql(Base, loginSitio, claveSitio))
+                {
+                    nuevo = Crear(s, Alta(hoy, "/E/Tres", "5"), @"DOM\sitio");
+                    borrar = Error(() => Exec(s, "DELETE adm.IniciativaProtegida WHERE Codigo = N'PRB 2024-000503';"));
+                    cambiar = Error(() => Exec(s, "UPDATE adm.IniciativaProtegida SET Motivo = 'MIGRACION' WHERE Codigo = N'PRB 2024-000503';"));
+                    agregar = Error(() => Exec(s, "INSERT adm.IniciativaProtegida (Codigo, Motivo, Usuario) VALUES (N'PRB 2024-000501', 'MIGRACION', N'x');"));
+                }
+                Check("E30 sitio con GRANT + DENY de sql/18 seccion 8: el alta se protege (encadenamiento); DELETE/UPDATE/INSERT directos se niegan (229) y nada mas cambia",
+                      "ALTA|DOM\\sitio|229|229|229|" + antesDeny,
+                      Filas(cn, "SELECT Motivo, Usuario FROM adm.IniciativaProtegida WHERE Codigo = N'" + nuevo + "'") + "|" + borrar + "|" + cambiar + "|" + agregar + "|" +
+                      Filas(cn, "SELECT * FROM adm.IniciativaProtegida WHERE Codigo <> N'" + nuevo + "' ORDER BY Codigo"));
+            }
+            finally
+            {
+                Exec(cn, "IF USER_ID(N'" + loginSitio + "') IS NOT NULL DROP USER [" + loginSitio + "];");
+                using (var m = Abrir("master")) Exec(m, "IF SUSER_ID(N'" + loginSitio + "') IS NOT NULL DROP LOGIN [" + loginSitio + "];");
+            }
+
+            // Control de E30: la MISMA cuenta sin el DENY. Si el 229 de E30 no
+            // viniera del DENY, aqui tambien saldria.
+            var loginSinDeny = "SitioSinDeny_" + DateTime.UtcNow.ToString("HHmmssfff");
+            var claveSinDeny = "Sn!" + Guid.NewGuid().ToString("N");
+            try
+            {
+                using (var m = Abrir("master")) Exec(m, "CREATE LOGIN [" + loginSinDeny + "] WITH PASSWORD = N'" + claveSinDeny + "', CHECK_POLICY = OFF;");
+                Exec(cn, "CREATE USER [" + loginSinDeny + "] FOR LOGIN [" + loginSinDeny + "]; ALTER ROLE db_datareader ADD MEMBER [" + loginSinDeny + "]; " +
+                         "ALTER ROLE db_datawriter ADD MEMBER [" + loginSinDeny + "]; GRANT EXECUTE ON SCHEMA::dbo TO [" + loginSinDeny + "]; " +
+                         "GRANT EXECUTE ON SCHEMA::adm TO [" + loginSinDeny + "];");
+                var antesSin = Filas(cn, "SELECT * FROM adm.IniciativaProtegida ORDER BY Codigo");
+                string nuevoSin, fila, upd, trasUpd, del, trasDel, ins;
+                using (var s = AbrirSql(Base, loginSinDeny, claveSinDeny))
+                {
+                    nuevoSin = Crear(s, Alta(hoy, "/E/Tres", "5"), @"DOM\sitio");
+                    fila = Filas(cn, "SELECT Motivo, Usuario, CONVERT(varchar(30), FechaAltaUtc, 126) FROM adm.IniciativaProtegida WHERE Codigo = N'" + nuevoSin + "'");
+                    upd = Error(() => Exec(s, "UPDATE adm.IniciativaProtegida SET Motivo = 'MIGRACION' WHERE Codigo = N'" + nuevoSin + "';"));
+                    trasUpd = Filas(cn, "SELECT Motivo FROM adm.IniciativaProtegida WHERE Codigo = N'" + nuevoSin + "'");
+                    del = Error(() => Exec(s, "DELETE adm.IniciativaProtegida WHERE Codigo = N'" + nuevoSin + "';"));
+                    trasDel = Celda(Uno(cn, "SELECT COUNT(*) FROM adm.IniciativaProtegida WHERE Codigo = N'" + nuevoSin + "'"));
+                    // Se deja como estaba (motivo, usuario y fecha) para no mover los casos de despues.
+                    var f = fila.Split('|');
+                    ins = Error(() => Exec(s, "INSERT adm.IniciativaProtegida (Codigo, Motivo, Usuario, FechaAltaUtc) VALUES (N'" + nuevoSin + "', N'" + f[0] + "', N'" + f[1] + "', '" + f[2] + "');"));
+                }
+                Check("E30n control de E30: la misma cuenta SIN el DENY si cambia, borra y agrega a mano (el 229 de E30 es del DENY)",
+                      "sin error|MIGRACION|sin error|0|sin error|" + fila,
+                      upd + "|" + trasUpd + "|" + del + "|" + trasDel + "|" + ins + "|" +
+                      Filas(cn, "SELECT Motivo, Usuario, CONVERT(varchar(30), FechaAltaUtc, 126) FROM adm.IniciativaProtegida WHERE Codigo = N'" + nuevoSin + "'"));
+                Check("E30n ... y las demas protegidas no se movieron", antesSin,
+                      Filas(cn, "SELECT * FROM adm.IniciativaProtegida WHERE Codigo <> N'" + nuevoSin + "' ORDER BY Codigo"));
+            }
+            finally
+            {
+                Exec(cn, "IF USER_ID(N'" + loginSinDeny + "') IS NOT NULL DROP USER [" + loginSinDeny + "];");
+                using (var m = Abrir("master")) Exec(m, "IF SUSER_ID(N'" + loginSinDeny + "') IS NOT NULL DROP LOGIN [" + loginSinDeny + "];");
+            }
+
+            // Modificar sin cambio real NO protege; con cambio real protege la
+            // iniciativa ENTERA. Llamadas directas al procedimiento (el sitio ni
+            // llega con cero cambios: GestionIniciativaAdmin.cs, "No hay cambios que guardar.").
+            Exec(cn, @"
+INSERT dbo.Problem (Codigo, TipoIniciativa, Titulo, Estado, FechaCreacion, FechaAnalisis, VigenteEnOrigen) VALUES
+ (N'PRB 2024-000508', N'Problem', N'Excel 508', N'Cerrado', '2024-01-01', '2024-01-16', 1),
+ (N'PRB 2024-000509', N'Problem', N'Excel 509', N'Cerrado', '2024-01-01', '2024-01-16', 1);
+INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, PctDisminucion) VALUES
+ (N'PRB 2024-000508', N'/E/Uno',  N'Problem', N'Problem', 0.1000),
+ (N'PRB 2024-000508', N'/E/Tres', N'Problem', N'Problem', 0.1000),
+ (N'PRB 2024-000509', N'/E/Tres', N'Problem', N'Problem', 0.2000);");
+            Func<string, string> modSql = cuerpo => Error(() => Exec(cn,
+                "DECLARE @p adm.CategoriaPctTipo, @a adm.CategoriaPctTipo, @f adm.CategoriaFechaTipo; " + cuerpo));
+            const string p509 = "N'PRB 2024-000509'", p508 = "N'PRB 2024-000508'";
+            var antes509 = FilasDe(cn, p509) + "|" + Todo(cn);
+            var r0 = modSql("EXEC adm.usp_GestionAdmin_Modificar @Usuario = N'DOM\\e31', @Codigo = " + p509 + ", @Pcts = @p, @Agregar = @a, @FechasCategoria = @f;");
+            Check("E31 Modificar SIN cambios (Cambia* = 0, tablas vacias): sin error, no toca nada y NO protege", "sin error|" + antes509 + "|0",
+                  r0 + "|" + FilasDe(cn, p509) + "|" + Todo(cn) + "|" + Celda(Uno(cn, "SELECT COUNT(*) FROM adm.IniciativaProtegida WHERE Codigo = " + p509)));
+            var r1 = modSql("INSERT @p (Categoria, Pct) VALUES (N'/E/Tres', 0.2000); " +
+                            "EXEC adm.usp_GestionAdmin_Modificar @Usuario = N'DOM\\e31', @Codigo = " + p509 + ", @CambiaTitulo = 1, @Titulo = N'Excel 509', " +
+                            "@CambiaEstado = 1, @Estado = N'Cerrado', @Pcts = @p, @Agregar = @a, @FechasCategoria = @f;");
+            Check("E31a Modificar con los MISMOS valores (titulo, estado, %): no protege", "sin error|0",
+                  r1 + "|" + Celda(Uno(cn, "SELECT COUNT(*) FROM adm.IniciativaProtegida WHERE Codigo = " + p509)));
+            var r2 = modSql("EXEC adm.usp_GestionAdmin_Modificar @Usuario = N'DOM\\e31', @Codigo = " + p509 + ", @CambiaTitulo = 1, @Titulo = N'EXCEL 509', " +
+                            "@Pcts = @p, @Agregar = @a, @FechasCategoria = @f;");
+            Check("E31b un cambio solo de mayusculas SI es cambio: protege", "sin error|EXCEL 509|MODIFICACION|DOM\\e31",
+                  r2 + "|" + Uno(cn, "SELECT Titulo FROM dbo.Problem WHERE Codigo = " + p509) + "|" +
+                  Filas(cn, "SELECT Motivo, Usuario FROM adm.IniciativaProtegida WHERE Codigo = " + p509));
+            // Cambio real solo del % de UNA categoria: la proteccion cubre la
+            // iniciativa entera; la carga siguiente no toca ni la otra categoria.
+            var r3 = modSql("INSERT @p (Categoria, Pct) VALUES (N'/E/Uno', 0.3000); " +
+                            "EXEC adm.usp_GestionAdmin_Modificar @Usuario = N'DOM\\e31', @Codigo = " + p508 + ", @Pcts = @p, @Agregar = @a, @FechasCategoria = @f;");
+            var antes508 = FilasDe(cn, p508);
+            Staging(cn, new[] { "PRB 2024-000508|pisado 508|Cerrado" },
+                        new[] { "PRB 2024-000508|/E/Uno|0.9", "PRB 2024-000508|/E/Tres|0.9", "PRB 2024-000508|/E/Dos|0.9" });
+            Cargar(cn);
+            Check("E31c cambio real solo del % de /E/Uno: protege, y la carga no toca el Problem ni NINGUNA de sus categorias (ni agrega /E/Dos)",
+                  "sin error|MODIFICACION|0.3000;0.1000|" + antes508,
+                  r3 + "|" + Celda(Uno(cn, "SELECT Motivo FROM adm.IniciativaProtegida WHERE Codigo = " + p508)) + "|" +
+                  Filas(cn, "SELECT PctDisminucion FROM dbo.ProblemCategoria WHERE Codigo = " + p508 + " ORDER BY Categoria DESC") + "|" + FilasDe(cn, p508));
+
+            Check("E22@Simulacion = 1 sigue sin escribir con el parche", "True",
+                  ((Func<bool>)(() => { var antes = Todo(cn); Exec(cn, "EXEC dbo.usp_CargarExperiencia @Simulacion = 1;"); return antes == Todo(cn); }))());
+
+            // Diagnostico de solo lectura.
+            var antesDiag = Todo(cn);
+            var diag = LotesFilas(cn, LeerBackend("ADM_04_diag_proteccion.sql"));
+            foreach (var l in diag.Split('\n')) if (l.StartsWith("7 ")) Console.WriteLine("   diag " + l);
+            Check("E26 diag: no escribe; ve ADM_04, la tabla, y al cargador y a Admin como escritores cubiertos", "True|True|True|True|True|False",
+                  (antesDiag == Todo(cn)) + "|" + diag.Contains("ADM_04 (con proteccion)|1") + "|" + diag.Contains("2 protegidas|1|TOTAL|") + "|" +
+                  diag.Contains("dbo.usp_CargarExperiencia|SQL_STORED_PROCEDURE|1|1|cargador: ADM_04") + "|" +
+                  diag.Contains("adm.usp_GestionAdmin_Modificar|SQL_STORED_PROCEDURE|1|1|Admin") + "|" +
+                  diag.Contains("cargador SIN proteccion"));
+            Check("E28 diag seccion 9: trae completas las definiciones del cargador y de los triggers de historial (la replica no tiene usp_Exp_*)", "True|True|True",
+                  diag.Contains("9 definicion|dbo.usp_CargarExperiencia|") + "|" +
+                  diag.Contains("9 definicion|dbo.trg_Problem_FechaEvento|") + "|" +
+                  diag.Contains("9 definicion|dbo.trg_ProblemCategoria_FechaEvento|"));
+
+            // Diag seccion 10 (cuentas) con cuentas de prueba sin login: la del
+            // sitio con el DENY, una con db_datawriter sin DENY, una db_owner y
+            // una como el operador del Excel (EXECUTE + stg). Solo catalogo.
+            var sufijo = DateTime.UtcNow.ToString("HHmmssfff");
+            string uDeny = "D10Deny_" + sufijo, uWriter = "D10Writer_" + sufijo, uOwner = "D10Owner_" + sufijo, uOper = "D10Oper_" + sufijo;
+            string diag10;
+            try
+            {
+                Exec(cn, "CREATE USER [" + uDeny + "] WITHOUT LOGIN; ALTER ROLE db_datawriter ADD MEMBER [" + uDeny + "]; " +
+                         "DENY INSERT, UPDATE, DELETE ON adm.IniciativaProtegida TO [" + uDeny + "]; " +
+                         "CREATE USER [" + uWriter + "] WITHOUT LOGIN; ALTER ROLE db_datawriter ADD MEMBER [" + uWriter + "]; " +
+                         "CREATE USER [" + uOwner + "] WITHOUT LOGIN; ALTER ROLE db_owner ADD MEMBER [" + uOwner + "]; " +
+                         "CREATE USER [" + uOper + "] WITHOUT LOGIN; GRANT EXECUTE ON dbo.usp_CargarExperiencia TO [" + uOper + "]; " +
+                         "GRANT SELECT, INSERT, DELETE ON SCHEMA::stg TO [" + uOper + "];");
+                var antesD10 = Todo(cn);
+                diag10 = LotesFilas(cn, LeerBackend("ADM_04_diag_proteccion.sql"));
+                Check("E33 diag seccion 10: DENY = NO; db_datawriter sin DENY = SI; db_owner = SI (puede quitarse el DENY); operador = no, corre el cargador y lee stg; no escribe",
+                      "True|True|True|True|True|True",
+                      diag10.Contains("10 cuentas|" + uDeny + "|SQL_USER|NO (DENY)|1|0|0|") + "|" +
+                      diag10.Contains("10 cuentas|" + uWriter + "|SQL_USER|SI|1|0|0|") + "|" +
+                      diag10.Contains("10 cuentas|" + uOwner + "|SQL_USER|SI (db_owner: se puede quitar el DENY)|1|1|1|") + "|" +
+                      diag10.Contains("10 cuentas|" + uOper + "|SQL_USER|no|0|1|1|0|0|0|GRANT EXECUTE dbo.usp_CargarExperiencia; GRANT DELETE SCHEMA::stg; GRANT INSERT SCHEMA::stg; GRANT SELECT SCHEMA::stg") + "|" +
+                      diag10.Contains("10 sysadmin|") + "|" + (antesD10 == Todo(cn)));
+            }
+            finally
+            {
+                foreach (var u in new[] { uDeny, uWriter, uOwner, uOper })
+                    Exec(cn, "IF USER_ID(N'" + u + "') IS NOT NULL DROP USER [" + u + "];");
+            }
+            foreach (var l in diag10.Split('\n')) if (l.StartsWith("11 ")) Console.WriteLine("   diag " + l);
+            Check("E34 diag seccion 11: los 5 objetos de sql/18 coinciden con la revision revisada", "5",
+                  Regex.Matches(diag10, @"^11 sql/18\|[^|]+\|1\|sql/18 revisado\|", RegexOptions.Multiline).Count);
+            Check("E35 diag seccion 8: stg es de otro dueno, como en la VM", "True", diag10.Contains("8 duenos de esquema|stg|" + DuenoStg));
+
+            Check("E27 la unica FK de la tabla SALE de ella hacia dbo.Problem, sin cascada (NO_ACTION/NO_ACTION); ninguna FK llega a ella; sin triggers",
+                  "1|FK_IniciativaProtegida_Problem|Problem|NO_ACTION|NO_ACTION|0|0",
+                  Filas(cn, "SELECT (SELECT COUNT(*) FROM sys.foreign_keys WHERE parent_object_id = OBJECT_ID('adm.IniciativaProtegida')), f.name, " +
+                            "OBJECT_NAME(f.referenced_object_id), f.delete_referential_action_desc, f.update_referential_action_desc, " +
+                            "(SELECT COUNT(*) FROM sys.foreign_keys WHERE referenced_object_id = OBJECT_ID('adm.IniciativaProtegida')), " +
+                            "(SELECT COUNT(*) FROM sys.triggers WHERE parent_id = OBJECT_ID('adm.IniciativaProtegida')) " +
+                            "FROM sys.foreign_keys AS f WHERE f.parent_object_id = OBJECT_ID('adm.IniciativaProtegida')"));
+
+            // Retiro / rollback.
+            Check("E23 con ADM_04 instalado, el rollback de 18 se niega aun forzado (51093, nombra al cargador)", "True|1",
+                  ((Func<string>)(() =>
+                  {
+                      Exec(cn, "EXEC sys.sp_set_session_context N'forzar_rollback_18', N'SI';");
+                      var r = LotesError(cn, Leer("sql", "18_gestion_admin_persistencia_rollback.sql")).StartsWith("51093:Rollback 18: dbo.usp_CargarExperiencia lee");
+                      Exec(cn, "EXEC sys.sp_set_session_context N'forzar_rollback_18', NULL;");
+                      return r + "|" + Uno(cn, "SELECT CASE WHEN OBJECT_ID('adm.IniciativaProtegida') IS NULL THEN 0 ELSE 1 END");
+                  }))());
+            var antesRollback = Todo(cn);
+            Check("E24 (12) rollback de ADM_04 con protegidas y sin programador_desactivado: se niega", "True|" + hashAdm04,
+                  LotesError(cn, LeerBackend(Adm04Rollback)).Contains("programador_desactivado = SI") + "|" + HashDef(cn, "dbo.usp_CargarExperiencia"));
+            Exec(cn, "EXEC sys.sp_set_session_context N'programador_desactivado', N'SI';");
+            Lotes(cn, LeerBackend(Adm04Rollback));
+            Exec(cn, "EXEC sys.sp_set_session_context N'programador_desactivado', NULL;");
+            Check("E25 (12) rollback: vuelve 174bb51 exacto y no cambia ninguna fila (ni las protegidas registradas)", Hash174bb51 + "|" + antesRollback,
+                  HashDef(cn, "dbo.usp_CargarExperiencia") + "|" + Todo(cn));
+
+            // ADM_04 -> rollback -> ADM_03 como dice el runbook: los DOS scripts
+            // reales en UNA transaccion. El ALTER deja el cargador con candado de
+            // esquema hasta el COMMIT: una carga lanzada en medio espera y luego
+            // se encuentra el stub (51900); nunca corre 174bb51 sin proteccion.
+            Lotes(cn, LeerBackend(Adm04));
+            Staging(cn, new[] { "PRB 2024-000503|pisado en el hueco|Cerrado" }, new string[0]);
+            var antesHueco = Todo(cn);
+            string resultadoHueco = null, versionDentro, terminoEnHueco;
+            var bloqueado = false;
+            using (var b = Abrir(Base))
+            {
+                var spidA = Celda(Uno(cn, "SELECT @@SPID"));
+                var spidB = Celda(Uno(b, "SELECT @@SPID"));
+                Exec(cn, "BEGIN TRAN; EXEC sys.sp_set_session_context N'programador_desactivado', N'SI';");
+                Lotes(cn, LeerBackend(Adm04Rollback));
+                var hilo = new Thread(() => resultadoHueco = Error(() => Cargar(b)));
+                hilo.Start();
+                using (var o = Abrir(Base))
+                    for (var i = 0; i < 100 && !bloqueado; i++)
+                    {
+                        bloqueado = Convert.ToInt32(Uno(o, "SELECT COUNT(*) FROM sys.dm_exec_requests WHERE session_id = " + spidB +
+                                                           " AND blocking_session_id = " + spidA)) > 0;
+                        if (!bloqueado) Thread.Sleep(100);
+                    }
+                terminoEnHueco = (!hilo.IsAlive).ToString();
+                Lotes(cn, LeerBackend("ADM_03_usp_CargarExperiencia_retirado.sql"));
+                versionDentro = Celda(Uno(cn, "SELECT CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.usp_CargarExperiencia')) LIKE N'%THROW 51900%' THEN 'ADM_03' ELSE 'OTRA' END"));
+                Exec(cn, "EXEC sys.sp_set_session_context N'programador_desactivado', NULL; COMMIT;");
+                hilo.Join();
+            }
+            Check("E32 rollback de ADM_04 + ADM_03 en UNA transaccion: la carga lanzada en medio queda bloqueada por esa sesion, no termina en el hueco, " +
+                  "recibe el stub (51900) y no escribe nada",
+                  "True|False|ADM_03|51900|" + antesHueco,
+                  bloqueado + "|" + terminoEnHueco + "|" + versionDentro + "|" + resultadoHueco + "|" + Todo(cn));
+            Lotes(cn, LeerBackend("ADM_03_usp_CargarExperiencia_retirado_rollback.sql"));
+            Check("E32 ... y el rollback de ADM_03 deja 174bb51", Hash174bb51, HashDef(cn, "dbo.usp_CargarExperiencia"));
+
+            // Control: los mismos scripts SIN la transaccion. En el hueco corre
+            // 174bb51 y pisa la protegida: el riesgo que E32 cierra es real.
+            Lotes(cn, LeerBackend(Adm04));
+            Exec(cn, "EXEC sys.sp_set_session_context N'programador_desactivado', N'SI';");
+            Lotes(cn, LeerBackend(Adm04Rollback));
+            Exec(cn, "EXEC sys.sp_set_session_context N'programador_desactivado', NULL;");
+            using (var b = Abrir(Base)) Cargar(b);
+            Check("E32n control: sin la transaccion, una carga entre el rollback y ADM_03 SI pisa la protegida", "pisado en el hueco",
+                  Uno(cn, "SELECT Titulo FROM dbo.Problem WHERE Codigo = N'PRB 2024-000503'"));
+            Exec(cn, "DELETE stg.Problems; DELETE stg.Iniciativas;");
+        }
+    }
+
     static void Rollback18()
     {
         using (var cn = Abrir(Base))
@@ -697,8 +1264,18 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                   LotesError(cn, Leer("sql", "18_gestion_admin_persistencia_rollback.sql")).StartsWith("51090"));
             Check("B2 ... y no quito nada", "1|1",
                   Filas(cn, "SELECT CASE WHEN SCHEMA_ID('adm') IS NULL THEN 0 ELSE 1 END, CASE WHEN COL_LENGTH('dbo.ProblemFechaEvento','Categoria') IS NULL THEN 0 ELSE 1 END"));
+            // Negocio antes de quitar adm.IniciativaProtegida (con filas): solo
+            // columnas que el rollback no quita.
+            const string negocio = "SELECT (SELECT COUNT(*) FROM dbo.Problem), (SELECT CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.Problem), " +
+                                   "(SELECT COUNT(*) FROM dbo.ProblemCategoria), " +
+                                   "(SELECT CHECKSUM_AGG(CHECKSUM(Codigo, Categoria, TipoIniciativa, TipoAgrupado, PctDisminucion, TicketsReduce, VigenteEnOrigen)) FROM dbo.ProblemCategoria), " +
+                                   "(SELECT COUNT(*) FROM dbo.ProblemFechaEvento WHERE Categoria IS NULL)";
+            var protegidasAntes = Uno(cn, "SELECT COUNT(*) FROM adm.IniciativaProtegida");
+            var negocioAntes = Filas(cn, negocio);
             Exec(cn, "EXEC sys.sp_set_session_context N'forzar_rollback_18', N'SI';");
             Lotes(cn, Leer("sql", "18_gestion_admin_persistencia_rollback.sql"));
+            Check("B5 quitar adm.IniciativaProtegida (" + Celda(protegidasAntes) + " filas) no toca Problem, ProblemCategoria ni el historial de la iniciativa",
+                  negocioAntes, Filas(cn, negocio.Replace("WHERE Categoria IS NULL", "")));
             Check("B3 forzado: sin adm, sin columnas, sin trigger; los eventos de la iniciativa intactos", "0|0|0|0|" + iniAntes,
                   Filas(cn, "SELECT CASE WHEN SCHEMA_ID('adm') IS NULL THEN 0 ELSE 1 END, " +
                             "CASE WHEN COL_LENGTH('dbo.ProblemFechaEvento','Categoria') IS NULL THEN 0 ELSE 1 END, " +

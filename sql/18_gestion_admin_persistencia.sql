@@ -15,6 +15,16 @@
      el cargador del Excel se RETIRA antes de encender la persistencia
      (stub aparte, en el repo del backend; no es parte de este script).
 
+   CAMBIO 2026-10-14 (plan transitorio decidido; script SIN APLICAR): el
+   cargador puede seguir corriendo durante la transicion. 1 tabla nueva,
+   adm.IniciativaProtegida: los Codigo que Admin creo o modifico (Modificar
+   solo si cambio de verdad algo editable; sin cambios no protege). Crear y
+   Modificar la llenan en SU transaccion (si no se puede registrar, no se
+   guarda nada) despues de tomar en modo Shared el candado de aplicacion
+   'adm.proteccion'. El parche del cargador (backend, ADM_04) toma el
+   mismo candado en Exclusive y no escribe sobre esos Codigo. Sin ADM_04
+   la tabla solo registra: el cargador 174bb51 la ignora.
+
    COMO CORRERLO (cuando haya OK)
    La guarda de abajo detiene el script salvo en una base de prueba
    GestionAdminPrueba_* o con la aprobacion declarada en la MISMA sesion:
@@ -225,6 +235,35 @@ CREATE TYPE adm.CategoriaFechaTipo AS TABLE
 );
 GO
 
+/* ---------- 3b. Iniciativas protegidas del cargador del Excel ----------
+   Una fila por Codigo que Admin creo ('ALTA') o modifico de verdad
+   ('MODIFICACION': algun valor editable distinto al COMMIT);
+   'MIGRACION' = alta a mano de una iniciativa del Excel (decision aparte,
+   ver CUTOVER). Nadie la borra: ni el cargador ni Admin. FK sin cascada a
+   dbo.Problem (mismo tipo y collation que dbo.Problem.Codigo). */
+IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Migracion 18: transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
+GO
+DECLARE @col sysname = (SELECT c.collation_name FROM sys.columns AS c
+                        WHERE c.object_id = OBJECT_ID('dbo.Problem') AND c.name = N'Codigo');
+DECLARE @tipo nvarchar(40) = (SELECT TYPE_NAME(c.user_type_id) + N'(' + CONVERT(nvarchar(10), c.max_length / 2) + N')'
+                              FROM sys.columns AS c
+                              WHERE c.object_id = OBJECT_ID('dbo.Problem') AND c.name = N'Codigo');
+IF @col IS NULL OR @tipo <> N'nvarchar(100)'
+    THROW 51092, N'Migracion 18: dbo.Problem.Codigo no es nvarchar(100) con collation: revisar antes de seguir.', 1;
+DECLARE @sql nvarchar(1000) = N'
+CREATE TABLE adm.IniciativaProtegida
+(
+    Codigo       nvarchar(100) COLLATE ' + @col + N' NOT NULL
+                 CONSTRAINT PK_IniciativaProtegida PRIMARY KEY CLUSTERED,
+    Motivo       varchar(12)   NOT NULL
+                 CONSTRAINT CK_IniciativaProtegida_Motivo CHECK (Motivo IN (''ALTA'', ''MODIFICACION'', ''MIGRACION'')),
+    Usuario      nvarchar(256) NOT NULL,
+    FechaAltaUtc datetime2(0)  NOT NULL CONSTRAINT DF_IniciativaProtegida_Fecha DEFAULT (SYSUTCDATETIME()),
+    CONSTRAINT FK_IniciativaProtegida_Problem FOREIGN KEY (Codigo) REFERENCES dbo.Problem (Codigo)
+);';
+EXEC (@sql);
+GO
+
 /* ---------- 4. Tope de capacidad ---------- */
 IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Migracion 18: transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
 GO
@@ -386,6 +425,12 @@ BEGIN
 
     BEGIN TRY
         BEGIN TRAN;
+            -- Primero que cualquier otro candado: el cargador del Excel
+            -- (ADM_04) lo toma en Exclusive; si esta corriendo, se espera.
+            EXEC @rc = sp_getapplock @Resource = N'adm.proteccion', @LockMode = 'Shared',
+                                     @LockOwner = 'Transaction', @LockTimeout = 15000;
+            IF @rc < 0 THROW 51026, N'La carga del Excel esta corriendo y no termino a tiempo. Intenta de nuevo.', 1;
+
             -- Tope: solo si las filas van a consumir.
             IF @consume = 1
             BEGIN
@@ -446,6 +491,9 @@ BEGIN
             FROM @Categorias AS c;
 
             EXEC adm.usp_GestionAdmin_TicketsReduce @Codigo = @nuevo, @Categorias = @Categorias;
+
+            -- En la misma transaccion: un alta guardada nunca queda sin proteger.
+            INSERT adm.IniciativaProtegida (Codigo, Motivo, Usuario) VALUES (@nuevo, 'ALTA', @Usuario);
 
             EXEC sys.sp_set_session_context @key = N'pfe_origen', @value = NULL;
             EXEC sys.sp_set_session_context @key = N'pfe_usuario', @value = NULL;
@@ -529,6 +577,12 @@ BEGIN
 
     BEGIN TRY
         BEGIN TRAN;
+            -- Igual que en Crear: antes de bloquear filas de dbo.Problem.
+            DECLARE @rcProt int;
+            EXEC @rcProt = sp_getapplock @Resource = N'adm.proteccion', @LockMode = 'Shared',
+                                         @LockOwner = 'Transaction', @LockTimeout = 15000;
+            IF @rcProt < 0 THROW 51026, N'La carga del Excel esta corriendo y no termino a tiempo. Intenta de nuevo.', 1;
+
             DECLARE @estadoAntes nvarchar(100), @estadoFinal nvarchar(100);
             SELECT @estadoAntes = p.Estado,
                    @estadoFinal = CASE WHEN @CambiaEstado = 1 THEN @Estado ELSE p.Estado END
@@ -603,6 +657,18 @@ BEGIN
             EXEC sys.sp_set_session_context @key = N'pfe_usuario', @value = @Usuario;
             EXEC sys.sp_set_session_context @key = N'pfe_solicitud', @value = NULL;
 
+            -- Lo editable como estaba (filas ya bloqueadas arriba): al final, solo
+            -- si algo de esto cambio se protege la iniciativa. Textos en binario:
+            -- un cambio de mayusculas o de espacios tambien es un cambio.
+            SELECT Titulo = CONVERT(varbinary(max), Titulo), Descripcion = CONVERT(varbinary(max), Descripcion),
+                   Observaciones = CONVERT(varbinary(max), Observaciones), Estado = CONVERT(varbinary(max), Estado),
+                   Subestado = CONVERT(varbinary(max), Subestado), FechaAnalisis, FechaSolucion, FechaCierre
+            INTO #antesP FROM dbo.Problem WHERE Codigo = @Codigo;
+            SELECT Categoria = CONVERT(varbinary(max), Categoria), PctDisminucion,
+                   TipoIniciativa = CONVERT(varbinary(max), TipoIniciativa), TipoAgrupado = CONVERT(varbinary(max), TipoAgrupado),
+                   FechaAnalisisCategoria, VigenteEnOrigen
+            INTO #antesC FROM dbo.ProblemCategoria WHERE Codigo = @Codigo;
+
             DECLARE @ultimoEvento int = (SELECT ISNULL(MAX(IdEvento), 0) FROM dbo.ProblemFechaEvento);
 
             UPDATE dbo.Problem SET
@@ -667,6 +733,28 @@ BEGIN
             IF EXISTS (SELECT 1 FROM @tr)
                 EXEC adm.usp_GestionAdmin_TicketsReduce @Codigo = @Codigo, @Categorias = @tr;
 
+            -- Modificar = Admin toma la iniciativa ENTERA (decidido 2026-10-14): el
+            -- Excel ya no la pisa. Solo si algo editable cambio de verdad: una
+            -- llamada sin cambios (o con los mismos valores) no se la quita al
+            -- Excel. Si ya estaba protegida se queda como estaba (motivo y fecha).
+            IF EXISTS (SELECT CONVERT(varbinary(max), Titulo), CONVERT(varbinary(max), Descripcion),
+                              CONVERT(varbinary(max), Observaciones), CONVERT(varbinary(max), Estado),
+                              CONVERT(varbinary(max), Subestado), FechaAnalisis, FechaSolucion, FechaCierre
+                       FROM dbo.Problem WHERE Codigo = @Codigo
+                       EXCEPT SELECT * FROM #antesP)
+               OR EXISTS (SELECT CONVERT(varbinary(max), Categoria), PctDisminucion, CONVERT(varbinary(max), TipoIniciativa),
+                                 CONVERT(varbinary(max), TipoAgrupado), FechaAnalisisCategoria, VigenteEnOrigen
+                          FROM dbo.ProblemCategoria WHERE Codigo = @Codigo
+                          EXCEPT SELECT * FROM #antesC)
+               OR EXISTS (SELECT * FROM #antesC
+                          EXCEPT SELECT CONVERT(varbinary(max), Categoria), PctDisminucion, CONVERT(varbinary(max), TipoIniciativa),
+                                        CONVERT(varbinary(max), TipoAgrupado), FechaAnalisisCategoria, VigenteEnOrigen
+                          FROM dbo.ProblemCategoria WHERE Codigo = @Codigo)
+                INSERT adm.IniciativaProtegida (Codigo, Motivo, Usuario)
+                SELECT @Codigo, 'MODIFICACION', @Usuario
+                WHERE NOT EXISTS (SELECT 1 FROM adm.IniciativaProtegida WHERE Codigo = @Codigo);
+            DROP TABLE #antesP; DROP TABLE #antesC;
+
             EXEC sys.sp_set_session_context @key = N'pfe_origen', @value = NULL;
             EXEC sys.sp_set_session_context @key = N'pfe_usuario', @value = NULL;
         COMMIT;
@@ -686,9 +774,13 @@ GO
      - ya LEE todo (dbo.ProblemFechaEvento incluida): no hace falta GRANT
        SELECT;
      - EXECUTE sobre dbo NO cubre adm: hace falta el GRANT de abajo.
-   adm no tiene tablas: no hay nada que negarle ahi.
-   Descomentar al aplicar:
+   adm.IniciativaProtegida: db_datawriter le dejaria borrarla a mano y
+   desproteger una iniciativa. Los procedimientos la escriben por
+   encadenamiento de propietario (adm y dbo son de dbo), asi que el DENY
+   no les afecta. NO corren con este script: se aplican aparte, despues
+   del COMMIT, con su propio OK (runbook ADM_04 paso 3b; CUTOVER E.5):
 GRANT EXECUTE ON SCHEMA::adm TO [PROACTIVANETAD];
+DENY INSERT, UPDATE, DELETE ON adm.IniciativaProtegida TO [PROACTIVANETAD];
 */
 
 /* ---------- 9. Cierre ---------- */
@@ -698,6 +790,7 @@ IF OBJECT_ID('adm.usp_GestionAdmin_Modificar', 'P') IS NOT NULL
    AND OBJECT_ID('adm.usp_GestionAdmin_Crear', 'P') IS NOT NULL
    AND OBJECT_ID('adm.usp_GestionAdmin_TicketsReduce', 'P') IS NOT NULL
    AND OBJECT_ID('adm.usp_GestionAdmin_RevisarTope', 'P') IS NOT NULL
+   AND OBJECT_ID('adm.IniciativaProtegida', 'U') IS NOT NULL
    AND OBJECT_ID('dbo.trg_ProblemCategoria_FechaEvento', 'TR') IS NOT NULL
    AND OBJECT_ID('dbo.FK_ProblemFechaEvento_ProblemCategoria', 'F') IS NOT NULL
    AND COL_LENGTH('dbo.ProblemCategoria', 'FechaAnalisisCategoria') IS NOT NULL

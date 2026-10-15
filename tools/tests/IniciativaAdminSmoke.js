@@ -1422,14 +1422,15 @@ pruebas.push(function () {
   });
 });
 
-// PS) Las dos persistencias siguen apagadas (constantes en el servidor).
+// PS) Persistencia de Admin encendida (2026-10-14, tras sql/18 + ADM_04 en
+//     la VM); el alta de categorias en Proactivanet sigue apagada.
 pruebas.push(function () {
-  Check('PS1 PersistenciaGestionAdmin.Habilitada = false', true,
-    /class PersistenciaGestionAdmin[\s\S]*?public const bool Habilitada = false;/.test(leer('App_Code/GestionIniciativaAdmin.cs')));
+  Check('PS1 PersistenciaGestionAdmin.Habilitada = true', true,
+    /class PersistenciaGestionAdmin[\s\S]*?public const bool Habilitada = true;/.test(leer('App_Code/GestionIniciativaAdmin.cs')));
   Check('PS2 AltaCategoriaProactivanet.Habilitada = false', true,
     /public const bool Habilitada = false;/.test(leer('App_Code/AltaCategoriaProactivanet.cs')));
-  Check('PS3 ningun "true" para Habilitada', false,
-    /Habilitada\s*=\s*true/.test(leer('App_Code/GestionIniciativaAdmin.cs') + leer('App_Code/AltaCategoriaProactivanet.cs')));
+  Check('PS3 ningun "true" para Habilitada del alta de categorias', false,
+    /Habilitada\s*=\s*true/.test(leer('App_Code/AltaCategoriaProactivanet.cs')));
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

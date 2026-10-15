@@ -1,6 +1,6 @@
 // Gestion directa de ADM sobre iniciativas (Admin -> Administracion):
-// "Crear iniciativa" y "Modificar" del detalle del registro. CONTRATO Y
-// VALIDACION EN EL SERVIDOR, SIN ESCRITURA.
+// "Crear iniciativa" y "Modificar" del detalle del registro. CONTRATO,
+// VALIDACION Y ESCRITURA EN EL SERVIDOR.
 //
 //   handlers/admin_iniciativas_gestion.ashx         (HTTP, ExigirAdm)
 //       -> PeticionCrearAdmin / PeticionModificarAdmin (lo que llego)
@@ -8,21 +8,17 @@
 //                                                    estados y la iniciativa
 //                                                    actual)
 //       -> ValidadorGestionAdmin                    (las reglas, aqui, sin SQL)
-//       -> PersistenciaGestionAdmin                 (hoy: NO habilitada)
+//       -> PersistenciaGestionAdmin                 (habilitada 2026-10-14)
 //
-// POR QUE NO GUARDA TODAVIA (diseno aprobado 2026-10-13, implementado sin
-// aplicar): la escritura vive en sql/18_gestion_admin_persistencia.sql
-// (adm.usp_GestionAdmin_*: Codigo, tope con candado, TicketsReduce,
-// historial y NroCambioFecha* en UNA transaccion) y en
-// EscritorGestionAdmin.cs. Falta, en este orden y cada paso con su OK:
-//   - retirar el cargador del Excel (usp_CargarExperiencia reescribe
-//     dbo.Problem / dbo.ProblemCategoria y marca VigenteEnOrigen = 0 a lo
-//     que no viene en el libro: pisaria o desactivaria lo creado aqui);
-//   - aplicar sql/18 en la VM y las vistas del backend (fecha por categoria);
-//   - GRANT EXECUTE ON SCHEMA::adm a la cuenta del sitio.
-// Por eso PersistenciaGestionAdmin.Habilitada es una CONSTANTE false: no hay
-// llave de configuracion que la encienda por accidente. Encenderla es un
-// cambio de codigo revisado.
+// ESCRITURA (diseno aprobado 2026-10-13): vive en
+// sql/18_gestion_admin_persistencia.sql (adm.usp_GestionAdmin_*: Codigo,
+// tope con candado, TicketsReduce, historial y NroCambioFecha* en UNA
+// transaccion) y en EscritorGestionAdmin.cs. Aplicado en la VM el
+// 2026-10-14: sql/18, GRANT EXECUTE adm + DENY sobre
+// adm.IniciativaProtegida, ADM_04 (el cargador del Excel no toca los
+// Codigo que Admin crea o modifica) y ADM_01/02 (fecha por categoria).
+// PersistenciaGestionAdmin.Habilitada sigue siendo una CONSTANTE (no hay
+// llave de configuracion): apagarla es volver a false y desplegar.
 //
 // MODELO (verificado en 13_experiencia_usuario.sql y en el registro)
 //   dbo.Problem            una fila por Codigo (PK). Titulo, Descripcion,
@@ -71,24 +67,24 @@ using System.Text.RegularExpressions;
 
 public static class PersistenciaGestionAdmin
 {
-    public const bool Habilitada = false;
+    public const bool Habilitada = true;
 
     // Lo que consulta el handler (un metodo, para no dejar codigo
-    // "inalcanzable" con la constante en false).
+    // "inalcanzable" con la constante fija).
     public static bool Activa() { return Habilitada; }
 
-    public const string Estado = "no_habilitada";
+    public const string Estado = Habilitada ? "habilitada" : "no_habilitada";
 
-    public const string Motivo =
+    // Solo con la persistencia apagada (respuesta 501). Encendida: null.
+    public const string Motivo = Habilitada ? null :
         "Persistencia no habilitada: la validaci\u00f3n pas\u00f3, pero no se guard\u00f3 nada. " +
-        "Falta retirar la carga del Excel y aplicar la migraci\u00f3n de base (sql/18) con su aprobaci\u00f3n.";
+        "Faltan dos pasos, cada uno con su aprobaci\u00f3n: aplicar la migraci\u00f3n de base (sql/18) y proteger " +
+        "las iniciativas de Admin frente a la carga del Excel (ADM_04) o retirar esa carga (ADM_03).";
 
+    // Lo que todavia no se guarda aunque la persistencia este encendida.
     public static readonly string[] Bloqueos =
     {
-        "carga del Excel (usp_CargarExperiencia) sin retirar: reescribe Problem/ProblemCategoria y desactiva lo que no viene en el libro",
-        "sql/18 (adm.usp_GestionAdmin_*) sin aplicar en la VM",
-        "vistas del backend (vw_ProblemCategoria / vw_ProblemVencido) sin la fecha por categor\u00eda",
-        "GRANT EXECUTE ON SCHEMA::adm a la cuenta del sitio pendiente",
+        "quitar categor\u00eda: sin regla aprobada; se rechaza (409) y no se guarda nada",
         "RCA: sin destino de almacenamiento; el archivo no se sube",
     };
 }
@@ -437,11 +433,11 @@ public sealed class ValidadorGestionAdmin
     // Sin Volumetria: ya no se captura (es calculada, de solo lectura).
     private static readonly string[][] CamposIncompleta =
     {
-        new[] { "categoria", "Categoría" },
-        new[] { "titulo", "Título" },
-        new[] { "descripcion", "Descripción" },
+        new[] { "categoria", "Categor\u00eda" },
+        new[] { "titulo", "T\u00edtulo" },
+        new[] { "descripcion", "Descripci\u00f3n" },
         new[] { "observaciones", "Observaciones" },
-        new[] { "pct", "% Disminución" },
+        new[] { "pct", "% Disminuci\u00f3n" },
         new[] { "rca", "RCA" },
         // Opcionales en el alta de ADM (se crea justo cuando falta
         // informacion): si no vienen, la iniciativa queda Incompleta.
@@ -462,8 +458,8 @@ public sealed class ValidadorGestionAdmin
     // Fechas compromiso de dbo.Problem que Modificar puede cambiar.
     private static readonly string[][] Fechas =
     {
-        new[] { PeticionModificarAdmin.CFAnalisis, "Fecha compromiso de Análisis" },
-        new[] { PeticionModificarAdmin.CFSolucion, "Fecha compromiso de Solución" },
+        new[] { PeticionModificarAdmin.CFAnalisis, "Fecha compromiso de An\u00e1lisis" },
+        new[] { PeticionModificarAdmin.CFSolucion, "Fecha compromiso de Soluci\u00f3n" },
         new[] { PeticionModificarAdmin.CFCierre, "Fecha compromiso de Cierre" },
     };
 
@@ -507,8 +503,8 @@ public sealed class ValidadorGestionAdmin
         if (!c.Determinable || nuevo <= c.Disponible) return null;
         if (anterior != null && nuevo <= anterior.Value) return null;
         return ruta + ": solo tiene " + ValidadorIniciativa.ComoPct(c.Disponible) +
-            " disponible sin contar esta iniciativa (tope 100% por categoría)" +
-            (c.Excedida ? "; la categoría ya pasa de 100% y solo se puede bajar o dejar igual." : ".");
+            " disponible sin contar esta iniciativa (tope 100% por categor\u00eda)" +
+            (c.Excedida ? "; la categor\u00eda ya pasa de 100% y solo se puede bajar o dejar igual." : ".");
     }
 
     // ---------------------------------------------------------------------
@@ -521,14 +517,14 @@ public sealed class ValidadorGestionAdmin
         if (p == null) throw new ArgumentNullException("p");
         var r = new ResultadoGestionAdmin { Accion = "crear" };
         if (Limpio(p.Tipo) == null)
-            r.Agregar(SolicitudIniciativa.CTipo, "Elige el Tipo de iniciativa: define el prefijo del código.");
+            r.Agregar(SolicitudIniciativa.CTipo, "Elige el Tipo de iniciativa: define el prefijo del c\u00f3digo.");
         // Clasificacion, Agrupacion y Estado: opcionales (nunca derivados del
         // prefijo); si faltan, la iniciativa queda Incompleta.
         var entrega = Limpio(p.FEntregaAnalisis);
         if (entrega != null && !EsFecha(entrega))
             r.Agregar(PeticionCrearAdmin.CFEntregaAnalisis, "Fecha de entrega del an\u00e1lisis: escribe una fecha v\u00e1lida (aaaa-mm-dd).");
         if (p.CategoriasDesparejas)
-            r.Agregar(CCategorias, "Las categorías y sus % llegaron incompletos (categoría sin % o al revés).");
+            r.Agregar(CCategorias, "Las categor\u00edas y sus % llegaron incompletos (categor\u00eda sin % o al rev\u00e9s).");
         var vistas = new HashSet<string>(StringComparer.Ordinal);
         foreach (var c in p.Categorias)
         {
@@ -536,12 +532,12 @@ public sealed class ValidadorGestionAdmin
             var pct = Limpio(c.Texto);
             if (ruta == null)
             {
-                r.Agregar(SolicitudIniciativa.CPct, pct == null ? "Una categoría llegó vacía."
-                    : "El % es por categoría: elige la Categoría o deja el % vacío.");
+                r.Agregar(SolicitudIniciativa.CPct, pct == null ? "Una categor\u00eda lleg\u00f3 vac\u00eda."
+                    : "El % es por categor\u00eda: elige la Categor\u00eda o deja el % vac\u00edo.");
                 continue;
             }
             if (!vistas.Add(Llave(ruta)))
-                r.Agregar(CCategorias, ruta + ": la categoría está repetida.");
+                r.Agregar(CCategorias, ruta + ": la categor\u00eda est\u00e1 repetida.");
             if (pct != null && ValidadorIniciativa.Fraccion(pct) == null)
                 r.Agregar(SolicitudIniciativa.CPct, ruta + ": el % debe estar entre 0 y 100, con hasta dos decimales.");
         }
@@ -569,7 +565,7 @@ public sealed class ValidadorGestionAdmin
 
         var tipo = Limpio(p.Tipo);
         if (tipo != null && !catalogo.TieneTipo(tipo))
-            r.Agregar(SolicitudIniciativa.CTipo, "El Tipo de iniciativa no está en el catálogo.");
+            r.Agregar(SolicitudIniciativa.CTipo, "El Tipo de iniciativa no est\u00e1 en el cat\u00e1logo.");
         var tipoIni = Limpio(p.TipoIniciativa);
         var agrup = Limpio(p.TipoAgrupado);
         var estado = Limpio(p.Estado);
@@ -595,12 +591,12 @@ public sealed class ValidadorGestionAdmin
         var po = Limpio(p.Po);
         var so = Limpio(p.So);
         if (po != null && !catalogo.TienePo(po))
-            r.Agregar(SolicitudIniciativa.CPo, "El Product Owner no está en el catálogo vigente.");
+            r.Agregar(SolicitudIniciativa.CPo, "El Product Owner no est\u00e1 en el cat\u00e1logo vigente.");
         if (so != null && !catalogo.TieneSo(so))
-            r.Agregar(SolicitudIniciativa.CSo, "El Service Owner no está en el catálogo vigente.");
+            r.Agregar(SolicitudIniciativa.CSo, "El Service Owner no est\u00e1 en el cat\u00e1logo vigente.");
         if (!r.TieneError(SolicitudIniciativa.CPo) && !r.TieneError(SolicitudIniciativa.CSo)
             && (po != null || so != null) && catalogo.Filas(po, so, null).Count == 0)
-            r.Agregar(SolicitudIniciativa.CSo, "Product Owner y Service Owner no salen juntos de ninguna fila vigente del catálogo.");
+            r.Agregar(SolicitudIniciativa.CSo, "Product Owner y Service Owner no salen juntos de ninguna fila vigente del cat\u00e1logo.");
 
         var directores = new HashSet<string>(StringComparer.Ordinal);
         var rutas = 0;
@@ -612,7 +608,7 @@ public sealed class ValidadorGestionAdmin
             rutas++;
             if (!catalogo.TieneCategoria(cat))
             {
-                r.Agregar(SolicitudIniciativa.CCategoria, cat + ": la categoría no está en el catálogo vigente.");
+                r.Agregar(SolicitudIniciativa.CCategoria, cat + ": la categor\u00eda no est\u00e1 en el cat\u00e1logo vigente.");
                 continue;
             }
             // Lo elegido (cada nivel opcional) tiene que salir de UNA fila,
@@ -621,7 +617,7 @@ public sealed class ValidadorGestionAdmin
                 ? new List<CatalogoSolicitud.Asignacion>() : catalogo.Filas(po, so, cat);
             if (filas.Count == 0 && (po != null || so != null))
                 r.Agregar(SolicitudIniciativa.CCategoria, cat +
-                    ": Product Owner, Service Owner y Categoría no salen juntos de ninguna fila vigente del catálogo.");
+                    ": Product Owner, Service Owner y Categor\u00eda no salen juntos de ninguna fila vigente del cat\u00e1logo.");
             foreach (var f in filas) if (!string.IsNullOrEmpty(f.Director)) directores.Add(f.Director);
 
             var fr = ValidadorIniciativa.Fraccion(Limpio(c.Texto) ?? "");
@@ -636,7 +632,7 @@ public sealed class ValidadorGestionAdmin
 
         var esProblem = tipo != null && tipoProblem != null && tipo == tipoProblem;
         if (p.TieneRca)
-            r.Advertencias.Add("El archivo del RCA se recibió pero no se guarda: no hay destino de almacenamiento aprobado.");
+            r.Advertencias.Add("El archivo del RCA se recibi\u00f3 pero no se guarda: no hay destino de almacenamiento aprobado.");
 
         // INCOMPLETA: los de CAMPOS_INCOMPLETA que faltan.
         var valores = new Dictionary<string, string>
@@ -662,14 +658,14 @@ public sealed class ValidadorGestionAdmin
     {
         if (p == null) throw new ArgumentNullException("p");
         var r = new ResultadoGestionAdmin { Accion = "modificar", Folio = Limpio(p.Folio) };
-        if (r.Folio == null) r.Agregar(PeticionModificarAdmin.CFolio, "Falta el código de la iniciativa.");
+        if (r.Folio == null) r.Agregar(PeticionModificarAdmin.CFolio, "Falta el c\u00f3digo de la iniciativa.");
         foreach (var c in p.Inmutables)
-            r.Agregar(c, c == "codigo" ? "El código de la iniciativa no se modifica: solo la identifica."
-                                       : "La fecha de creación no se modifica.");
+            r.Agregar(c, c == "codigo" ? "El c\u00f3digo de la iniciativa no se modifica: solo la identifica."
+                                       : "La fecha de creaci\u00f3n no se modifica.");
         if (p.PctsDesparejos)
-            r.Agregar("pct", "Los % por categoría llegaron incompletos (categoría sin valor o al revés).");
+            r.Agregar("pct", "Los % por categor\u00eda llegaron incompletos (categor\u00eda sin valor o al rev\u00e9s).");
         if (p.AgregarDesparejos)
-            r.Agregar(CCategorias, "Las categorías a agregar llegaron incompletas (categoría sin % o al revés).");
+            r.Agregar(CCategorias, "Las categor\u00edas a agregar llegaron incompletas (categor\u00eda sin % o al rev\u00e9s).");
         if (p.FechasDesparejas)
             r.Agregar(CFechasCategoria, "Las fechas de an\u00e1lisis por categor\u00eda llegaron incompletas (categor\u00eda sin fecha o al rev\u00e9s).");
 
@@ -677,8 +673,8 @@ public sealed class ValidadorGestionAdmin
         foreach (var x in p.Pcts)
         {
             var ruta = Limpio(x.Categoria);
-            if (ruta == null) { r.Agregar("pct", "Un % llegó sin categoría."); continue; }
-            if (!vistas.Add(Llave(ruta))) r.Agregar("pct", ruta + ": la categoría viene repetida.");
+            if (ruta == null) { r.Agregar("pct", "Un % lleg\u00f3 sin categor\u00eda."); continue; }
+            if (!vistas.Add(Llave(ruta))) r.Agregar("pct", ruta + ": la categor\u00eda viene repetida.");
             var t = Limpio(x.Texto);
             if (t != null && ValidadorIniciativa.Fraccion(t) == null)
                 r.Agregar("pct", ruta + ": el % debe estar entre 0 y 100, con hasta dos decimales.");
@@ -687,7 +683,7 @@ public sealed class ValidadorGestionAdmin
         foreach (var x in p.Agregar)
         {
             var ruta = Limpio(x.Categoria);
-            if (ruta == null) { r.Agregar(CCategorias, "Una categoría a agregar llegó vacía."); continue; }
+            if (ruta == null) { r.Agregar(CCategorias, "Una categor\u00eda a agregar lleg\u00f3 vac\u00eda."); continue; }
             if (!agregadas.Add(Llave(ruta))) r.Agregar(CCategorias, ruta + ": se quiere agregar dos veces.");
             var t = Limpio(x.Texto);
             if (t != null && ValidadorIniciativa.Fraccion(t) == null)
@@ -708,17 +704,17 @@ public sealed class ValidadorGestionAdmin
         foreach (var q in p.Quitar)
         {
             var ruta = Limpio(q);
-            if (ruta == null) { r.Agregar(CCategorias, "Una categoría a quitar llegó vacía."); continue; }
+            if (ruta == null) { r.Agregar(CCategorias, "Una categor\u00eda a quitar lleg\u00f3 vac\u00eda."); continue; }
             if (!quitadas.Add(Llave(ruta))) r.Agregar(CCategorias, ruta + ": se quiere quitar dos veces.");
             if (vistas.Contains(Llave(ruta)))
-                r.Agregar(CCategorias, ruta + ": no se puede cambiar el % y quitar la misma categoría.");
+                r.Agregar(CCategorias, ruta + ": no se puede cambiar el % y quitar la misma categor\u00eda.");
             if (agregadas.Contains(Llave(ruta)))
-                r.Agregar(CCategorias, ruta + ": no se puede agregar y quitar la misma categoría.");
+                r.Agregar(CCategorias, ruta + ": no se puede agregar y quitar la misma categor\u00eda.");
         }
         foreach (var f in Fechas)
         {
             var v = Limpio(Valor(p, f[0]));
-            if (v != null && !EsFecha(v)) r.Agregar(f[0], f[1] + ": escribe una fecha válida (aaaa-mm-dd).");
+            if (v != null && !EsFecha(v)) r.Agregar(f[0], f[1] + ": escribe una fecha v\u00e1lida (aaaa-mm-dd).");
         }
         return r;
     }
@@ -760,18 +756,18 @@ public sealed class ValidadorGestionAdmin
         if (r.Folio == null) return r;
         if (actual == null)
         {
-            r.Agregar(PeticionModificarAdmin.CFolio, "La iniciativa " + r.Folio + " no está en el registro vigente.");
+            r.Agregar(PeticionModificarAdmin.CFolio, "La iniciativa " + r.Folio + " no est\u00e1 en el registro vigente.");
             return r;
         }
 
         // ---- Problem: textos ----
         if (p.Titulo != null && Normal(p.Titulo) != Normal(actual.Titulo))
         {
-            r.Cambio("titulo", "Título", actual.Titulo, p.Titulo);
-            if (Limpio(p.Titulo) == null) r.Advertencias.Add("La iniciativa quedaría sin Título.");
+            r.Cambio("titulo", "T\u00edtulo", actual.Titulo, p.Titulo);
+            if (Limpio(p.Titulo) == null) r.Advertencias.Add("La iniciativa quedar\u00eda sin T\u00edtulo.");
         }
         if (p.Descripcion != null && Normal(p.Descripcion) != Normal(actual.Descripcion))
-            r.Cambio("descripcion", "Descripción", actual.Descripcion, p.Descripcion);
+            r.Cambio("descripcion", "Descripci\u00f3n", actual.Descripcion, p.Descripcion);
         if (p.Observaciones != null && Normal(p.Observaciones) != Normal(actual.Observaciones))
             r.Cambio("observaciones", "Observaciones", actual.Observaciones, p.Observaciones);
 
@@ -814,7 +810,7 @@ public sealed class ValidadorGestionAdmin
             var anterior = Valor(actual, f[0]) ?? "";
             if (limpio == anterior) continue;
             r.Cambio(f[0], f[1], anterior, limpio);
-            if (limpio == "") r.Advertencias.Add(f[1] + ": quedaría sin fecha.");
+            if (limpio == "") r.Advertencias.Add(f[1] + ": quedar\u00eda sin fecha.");
         }
 
         // ---- Problem: Estado / Subestado ----
@@ -834,7 +830,7 @@ public sealed class ValidadorGestionAdmin
             else { r.Cambio(PeticionModificarAdmin.CSubestado, "Subestado", actual.Subestado, s); cambiaEstado = true; }
         }
         if (cambiaEstado)
-            r.Advertencias.Add("No hay reglas de transición de Estado/Subestado verificadas: solo se revisó que el valor exista.");
+            r.Advertencias.Add("No hay reglas de transici\u00f3n de Estado/Subestado verificadas: solo se revis\u00f3 que el valor exista.");
 
         // ---- Categorias ----
         // Capacidad (la misma regla que adm.usp_GestionAdmin_Modificar; la
@@ -856,9 +852,9 @@ public sealed class ValidadorGestionAdmin
             var ruta = Limpio(q);
             if (ruta == null) continue;
             var ligada = actual.Ligada(ruta);
-            if (ligada == null) { r.Agregar(CCategorias, ruta + ": no está ligada a esta iniciativa; no hay nada que quitar."); continue; }
+            if (ligada == null) { r.Agregar(CCategorias, ruta + ": no est\u00e1 ligada a esta iniciativa; no hay nada que quitar."); continue; }
             quitar.Add(Llave(ruta));
-            r.Cambio("quitar_categoria", "Quitar categoría", ligada.Ruta, "");
+            r.Cambio("quitar_categoria", "Quitar categor\u00eda", ligada.Ruta, "");
         }
 
         // Agrupacion declarada ahora para una ligada que no la tenia.
@@ -872,7 +868,7 @@ public sealed class ValidadorGestionAdmin
             var ligada = actual.Ligada(ruta);
             if (ligada == null)
             {
-                r.Agregar("pct", ruta + ": no está ligada a esta iniciativa. Para ligarla, agrégala como categoría nueva.");
+                r.Agregar("pct", ruta + ": no est\u00e1 ligada a esta iniciativa. Para ligarla, agr\u00e9gala como categor\u00eda nueva.");
                 continue;
             }
             var agrupNueva = Limpio(x.TipoAgrupado);
@@ -896,7 +892,7 @@ public sealed class ValidadorGestionAdmin
             if (t != null && nuevo == null) continue;   // ya reportado en FormatoModificar
             if (nuevo == null) quedaSinPct = true;
             if (nuevo != ligada.Pct)
-                r.Cambio("pct", "% Disminución · " + ligada.Ruta, ComoPct(ligada.Pct), ComoPct(nuevo));
+                r.Cambio("pct", "% Disminuci\u00f3n \u00b7 " + ligada.Ruta, ComoPct(ligada.Pct), ComoPct(nuevo));
             var agrupFinal = agrupDeclarada.ContainsKey(Llave(ligada.Ruta)) ? agrupDeclarada[Llave(ligada.Ruta)] : ligada.Agrup;
             var consumiaAntes = ConsumeAlEscribir(actual.Estado, ligada.Agrup);
             if (nuevo != null && vivoFinal && ConsumeAlEscribir(estadoFinal, agrupFinal)
@@ -915,17 +911,17 @@ public sealed class ValidadorGestionAdmin
             if (ruta == null) continue;
             if (actual.Ligada(ruta) != null)
             {
-                r.Agregar(CCategorias, ruta + ": ya está ligada a esta iniciativa; cambia su % en vez de agregarla.");
+                r.Agregar(CCategorias, ruta + ": ya est\u00e1 ligada a esta iniciativa; cambia su % en vez de agregarla.");
                 continue;
             }
             if (catalogo == null)
             {
-                r.Agregar(CCategorias, "No se pudo leer el catálogo de categorías: no se puede agregar " + ruta + ".");
+                r.Agregar(CCategorias, "No se pudo leer el cat\u00e1logo de categor\u00edas: no se puede agregar " + ruta + ".");
                 continue;
             }
             if (!catalogo.TieneCategoria(ruta))
             {
-                r.Agregar(CCategorias, ruta + ": la categoría no está en el catálogo vigente.");
+                r.Agregar(CCategorias, ruta + ": la categor\u00eda no est\u00e1 en el cat\u00e1logo vigente.");
                 continue;
             }
             var ti = Limpio(x.TipoIniciativa);
@@ -939,7 +935,7 @@ public sealed class ValidadorGestionAdmin
             if (t != null && fr == null) continue;
             if (fr == null) quedaSinPct = true;
             agregadas++;
-            r.Cambio("agregar_categoria", "Agregar categoría", "", ruta + (fr == null ? " (sin %)" : " · " + ComoPct(fr) + "%") +
+            r.Cambio("agregar_categoria", "Agregar categor\u00eda", "", ruta + (fr == null ? " (sin %)" : " \u00b7 " + ComoPct(fr) + "%") +
                 (ta != null ? " \u00b7 " + ta : ""));
             if (fr != null && vivoFinal && ConsumeAlEscribir(estadoFinal, ta))
             {
@@ -985,11 +981,11 @@ public sealed class ValidadorGestionAdmin
         if (actual.SinCategoria && agregadas == 0) quedan = 0;
         if (quedan == 0)
         {
-            r.Falta("categoria", "Categoría");
+            r.Falta("categoria", "Categor\u00eda");
             if (actual.Categorias.Count > 0 && quitar.Count > 0)
-                r.Advertencias.Add("La iniciativa quedaría sin categorías.");
+                r.Advertencias.Add("La iniciativa quedar\u00eda sin categor\u00edas.");
         }
-        else if (sinPct) r.Falta("pct", "% Disminución");
+        else if (sinPct) r.Falta("pct", "% Disminuci\u00f3n");
         return r;
     }
 }

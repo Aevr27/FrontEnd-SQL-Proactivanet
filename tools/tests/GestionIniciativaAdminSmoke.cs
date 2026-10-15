@@ -4,8 +4,8 @@
 // compromisos e iniciativa actual armados a mano.
 //
 // Casos:
-//   P) Persistencia: constante false; el JSON siempre dice guardada=false,
-//      persistencia=no_habilitada y codigo=null, valida o no.
+//   P) Persistencia: constante true (2026-10-14); la validacion sola dice
+//      guardada=false, persistencia=habilitada y codigo=null, valida o no.
 //   CF) Crear, formato: sin tipo; % invalido; % sin categoria; categoria
 //      repetida; pares desparejos.
 //   CC) Crear, catalogo: tipo/PO/SO/categoria fuera del catalogo; cascada
@@ -30,11 +30,14 @@
 //      puede bajar o dejar igual; iniciativa que no consume no tiene tope.
 //   V)  VolumetriaCategoria.Resolver: ok, cero real, sin datos, ruta vacia,
 //      llave normalizada como Experiencia.
+//   EN) Acentos en la respuesta del servidor (faltantes, cambios, JSON) y
+//      fuentes sin BOM sin literales no ASCII; motivo de persistencia vigente.
 //
-// Compilar y correr desde la raiz del repo:
-//   csc /nologo /target:library /out:adm.dll /r:System.dll /r:System.Data.dll ^
+// Compilar y correr desde la raiz del repo. /codepage:1252 = como compila IIS
+// los archivos sin BOM (sin el, EN1-EN4 no ven el mojibake del servidor):
+//   csc /nologo /target:library /codepage:1252 /out:adm.dll /r:System.dll /r:System.Data.dll ^
 //       /r:System.Web.dll /r:System.Web.Extensions.dll /r:System.Configuration.dll App_Code\*.cs
-//   csc /nologo /out:GestionIniciativaAdminSmoke.exe /r:adm.dll /r:System.dll ^
+//   csc /nologo /out:GestionIniciativaAdminSmoke.exe /r:adm.dll /r:System.dll /r:System.Web.Extensions.dll ^
 //       tools\tests\GestionIniciativaAdminSmoke.cs
 //   GestionIniciativaAdminSmoke.exe
 using System;
@@ -157,15 +160,48 @@ public static class GestionIniciativaAdminSmoke
         return new CapacidadCategoria.Compromiso { Folio = folio, Categoria = cat, Pct = pct, Consume = false };
     }
 
+    static string Rotulo(List<Dictionary<string, object>> filas, string clave)
+    {
+        foreach (var f in filas) if ((string)f["clave"] == clave) return (string)f["rotulo"];
+        return null;
+    }
+
+    // Archivo sin BOM: lineas de codigo (no comentario) con bytes > 127.
+    // Con BOM el compilador lo lee como UTF-8 y no aplica.
+    static string NoAsciiEnCodigo(params string[] archivos)
+    {
+        var malas = new List<string>();
+        foreach (var a in archivos)
+        {
+            var b = System.IO.File.ReadAllBytes(a);
+            if (b.Length >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) continue;
+            var lineas = System.Text.Encoding.GetEncoding(28591).GetString(b).Split('\n');
+            var enBloque = false;
+            for (var i = 0; i < lineas.Length; i++)
+            {
+                var l = lineas[i].Trim();
+                if (enBloque) { if (l.Contains("*/")) enBloque = false; continue; }
+                if (l.StartsWith("/*")) { enBloque = !l.Contains("*/"); continue; }
+                if (l.StartsWith("//") || l.StartsWith("<%--")) continue;
+                if (l.Any(c => c > 127)) malas.Add(a + ":" + (i + 1));
+            }
+        }
+        return string.Join(" ", malas.ToArray());
+    }
+
     public static int Main()
     {
         // ---- P ----
-        Check("P1 persistencia es constante false", false, PersistenciaGestionAdmin.Habilitada);
+        Check("P1 persistencia es constante true (encendida 2026-10-14)", true, PersistenciaGestionAdmin.Habilitada);
         var j = Crear(C("ADO")).ComoJson();
-        Check("P2 valida: guardada=false, persistencia=no_habilitada, codigo=null", "True|False|no_habilitada|",
+        // La validacion sola nunca guarda: guardada/codigo los pone el handler
+        // cuando la base confirma.
+        Check("P2 valida: guardada=false, persistencia=habilitada, codigo=null", "True|False|habilitada|",
             j["valida"] + "|" + j["guardada"] + "|" + j["persistencia"] + "|" + j["codigo"]);
-        Check("P3 el motivo dice que no se guardo", true, ((string)j["persistencia_motivo"]).Contains("no se guard"));
-        Check("P4 bloqueos listados", true, ((List<string>)j["bloqueos"]).Count >= 4);
+        Check("P3 encendida: sin el motivo de 'no habilitada'", null, j["persistencia_motivo"]);
+        Check("P4 bloqueos: solo los que siguen sin guardarse (quitar categoria, RCA)", "2|True|True",
+            ((List<string>)j["bloqueos"]).Count + "|" + ((List<string>)j["bloqueos"])[0].StartsWith("quitar categor") + "|" +
+            ((List<string>)j["bloqueos"])[1].StartsWith("RCA"));
         var ji = Crear(C(null)).ComoJson();
         Check("P5 invalida tambien: guardada=false", "False|False", ji["valida"] + "|" + ji["guardada"]);
         Check("P6 invalida: sin el motivo \"la validacion paso\"", null, ji["persistencia_motivo"]);
@@ -282,7 +318,7 @@ public static class GestionIniciativaAdminSmoke
                          K("PRB 2026-000001", "/A/Cat 1", 0.5m), K("PRB 2026-000002", "/A/Cat 1", 0.4m));
         Check("MM12 61 excede: ERROR (tope)", "False|pct", excede.Valida + "|" + Campos(excede));
         var jm = tit.ComoJson();
-        Check("MM13 JSON de modificar: folio y no guardada", "PRB 2026-000001|False|no_habilitada", jm["folio"] + "|" + jm["guardada"] + "|" + jm["persistencia"]);
+        Check("MM13 JSON de modificar: folio y no guardada", "PRB 2026-000001|False|habilitada", jm["folio"] + "|" + jm["guardada"] + "|" + jm["persistencia"]);
 
         // ---- MR ----
         var act = Actual();
@@ -457,6 +493,23 @@ public static class GestionIniciativaAdminSmoke
         try { new EscritorGestionAdminSql().Modificar(new System.Data.SqlClient.SqlConnection(), null, plQuita, "u"); }
         catch (InvalidOperationException) { escrQuita = "rechaza"; }
         Check("PL23 el escritor no ejecuta un plan con categorias a quitar", "rechaza", escrQuita);
+
+        // ---- EN: acentos en lo que responde el servidor ----
+        // App_Code y los .ashx sin BOM: IIS los compila como Windows-1252 y
+        // un literal UTF-8 crudo llega al navegador como "Descripci\u00c3\u00b3n".
+        // Por eso este smoke se compila con /codepage:1252 (como el servidor).
+        var enCrear = Crear(C("ADO"));
+        Check("EN1 faltante de alta: Descripcion con su acento", "Descripci\u00f3n", Rotulo(enCrear.Faltantes, "descripcion"));
+        Check("EN2 faltante de modificacion: % Disminucion con su acento", "% Disminuci\u00f3n", Rotulo(sinPct.Faltantes, "pct"));
+        var enPct = ModC(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40"));
+        Check("EN3 cambio de %: rotulo con acento y punto medio", "% Disminuci\u00f3n \u00b7 /A/Cat 1", Rotulo(enPct.Cambios, "pct"));
+        var enJson = new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new object[] { enCrear.ComoJson(), enPct.ComoJson() });
+        Check("EN4 JSON como lo escribe DashboardHandler.Responder: sin mojibake y con los acentos", "False|True|True",
+            enJson.Contains("\u00c3") + "|" + enJson.Contains("Descripci\u00f3n") + "|" + enJson.Contains("Disminuci\u00f3n"));
+        Check("EN5 persistencia encendida: Motivo es null (solo existe con la constante en false)", null, PersistenciaGestionAdmin.Motivo);
+        Check("EN6 fuentes de la respuesta de Admin sin BOM: ningun caracter no ASCII fuera de comentarios", "",
+            NoAsciiEnCodigo(@"App_Code\GestionIniciativaAdmin.cs", @"App_Code\PlanGestionAdmin.cs", @"App_Code\IniciativaService.cs",
+                            @"App_Code\SolicitudIniciativa.cs", @"handlers\admin_iniciativas_gestion.ashx", @"handlers\admin_iniciativas_validar.ashx"));
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO PASO" : fallos + " FALLO(S)");
