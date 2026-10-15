@@ -67,6 +67,9 @@ public static class GestionAdminSqlLocalDbSmoke
 {
     const string Servidor = @"Server=(localdb)\MSSQLLocalDB;Integrated Security=true;";
     const string Backend = @"..\backend_admin_persistencia";
+    // adm.usp_GestionAdmin_Crear tras sql/20 (misma regla de hash que el diag
+    // ADM_04 seccion 11). Si sql/20 cambia, cambia esto y el diag.
+    const string HashCrearSql20 = "0x77292B7976EAF0670BE8961824D212EEEFB218343A816CE83BB6F3FE8934C297";
     static int pasadas = 0, fallos = 0, noCorridas = 0;
     static string Base;
 
@@ -112,6 +115,30 @@ public static class GestionAdminSqlLocalDbSmoke
         try { Lotes(cn, sql); return "sin error"; }
         catch (SqlException ex) { return ex.Number + ":" + ex.Message; }
         finally { using (var cmd = new SqlCommand("SET NOEXEC OFF; IF @@TRANCOUNT > 0 ROLLBACK;", cn)) cmd.ExecuteNonQuery(); }
+    }
+
+    // Corre un script que debe negarse de las dos formas en que se corre en la
+    // VM: sqlcmd -b (se para en el primer error) y SSMS (sigue con los lotes
+    // que quedan; ahi actua SET NOEXEC ON). Devuelve, por forma, si el
+    // mensaje trae 'motivo' y el @@TRANCOUNT ANTES de limpiar:
+    // "True|0|True|0" = se nego bien y no dejo transaccion abierta.
+    static string Rechazo(SqlConnection cn, string sql, string motivo)
+    {
+        var r = new List<string>();
+        foreach (var comoSsms in new[] { false, true })
+        {
+            var msg = "";
+            foreach (var lote in Regex.Split(sql, @"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase))
+            {
+                if (lote.Trim().Length == 0) continue;
+                try { using (var cmd = new SqlCommand(lote, cn) { CommandTimeout = 120 }) cmd.ExecuteNonQuery(); }
+                catch (SqlException ex) { msg += ex.Message + " "; if (!comoSsms) break; }
+            }
+            // NOEXEC OFF primero: si quedo en ON, el SELECT no correria.
+            r.Add(msg.Contains(motivo) + "|" + Celda(Uno(cn, "SET NOEXEC OFF; SELECT @@TRANCOUNT")));
+            Exec(cn, "IF @@TRANCOUNT > 0 ROLLBACK;");
+        }
+        return string.Join("|", r);
     }
 
     static object Uno(SqlConnection cn, string sql)
@@ -278,6 +305,9 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 Lotes(cn, VistaStub);
             Sembrar(cn);
             Lotes(cn, Leer("sql", "18_gestion_admin_persistencia.sql"));
+            // El escritor manda PO / SO (GuardaDuenos = true): sin sql/20 cada
+            // alta fallaria. Va como en la VM: despues de sql/18.
+            Lotes(cn, Leer("sql", "20_gestion_admin_duenos.sql"));
         }
     }
 
@@ -365,6 +395,127 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 }
                 Check("C12 concurrencia: la 2a alta espera el candado del Codigo y sale con el siguiente", "True|PRB 2026-000502|PRB 2026-000503|",
                       espero + "|" + codA + "|" + codB + "|" + errB);
+
+                // ---------------- O: PO / SO del alta (sql/20) ----------------
+                Exec(cn, "INSERT dbo.Categorias (Id, RutaCompleta, Inactiva, VigenteEnOrigen) VALUES (N'O1', N'/O/Duenos 1', 0, 1), (N'O2', N'/O/Duenos 2', 0, 1)");
+                Check("O1 sql/20 aplicada: Crear tiene @OwnerProblem y @OwnerServicio", "2",
+                      Uno(cn, "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Crear') AND name IN (N'@OwnerProblem', N'@OwnerServicio')"));
+                Check("O1b correr sql/20 otra vez se niega sin tocar nada", "True",
+                      LotesError(cn, Leer("sql", "20_gestion_admin_duenos.sql")).Contains("ya tiene @OwnerProblem"));
+                // Solo el Tipo: el plan sale del planificador real (sin titulo,
+                // sin PO / SO, sin categorias).
+                var soloTipo = PlanificadorGestionAdmin.Crear(new PeticionCrearAdmin { Tipo = "SOR", Titulo = "   " },
+                                                              new ResultadoGestionAdmin { Accion = "crear" }, hoy);
+                string oT = null;
+                Check("O2 solo el Tipo: se crea", "sin error", Error(() => oT = Crear(cn, soloTipo)));
+                Check("O2 ... codigo de la base; PO, SO, titulo, tipos y estado NULL; 0 categorias; protegida", "True|1|1|1|1|0|1",
+                      Regex.IsMatch(oT ?? "", @"^SOR 2026-[0-9]{6}$") + "|" + Filas(cn, "SELECT CASE WHEN OwnerProblem IS NULL AND OwnerServicio IS NULL THEN 1 ELSE 0 END, " +
+                                           "CASE WHEN Titulo IS NULL THEN 1 ELSE 0 END, CASE WHEN TipoIniciativa IS NULL THEN 1 ELSE 0 END, " +
+                                           "CASE WHEN Estado IS NULL THEN 1 ELSE 0 END, " +
+                                           "(SELECT COUNT(*) FROM dbo.ProblemCategoria WHERE Codigo = N'" + oT + "'), " +
+                                           "(SELECT COUNT(*) FROM adm.IniciativaProtegida WHERE Codigo = N'" + oT + "') " +
+                                           "FROM dbo.Problem WHERE Codigo = N'" + oT + "'"));
+                Func<string, string, string[], PlanCrearAdmin> conDuenos = (po, so, rp) =>
+                {
+                    var pl = AltaTipo(hoy, "SOR", "Problem", "En Análisis", rp);
+                    pl.Po = po; pl.So = so;
+                    return pl;
+                };
+                Func<string, string> duenos = cod => Filas(cn, "SELECT ISNULL(OwnerProblem, N'(null)'), ISNULL(OwnerServicio, N'(null)') FROM dbo.Problem WHERE Codigo = N'" + cod + "'");
+                var oPo = Crear(cn, conDuenos("PO Solo", null, new string[0]));
+                Check("O3 solo PO: guardado, SO NULL", "PO Solo|(null)", duenos(oPo));
+                var oSo = Crear(cn, conDuenos(null, "SO Solo", new string[0]));
+                Check("O3 solo SO: guardado, PO NULL", "(null)|SO Solo", duenos(oSo));
+                var oCat = Crear(cn, conDuenos(null, null, new[] { "/O/Duenos 1", "" }));
+                Check("O3 solo categoria: PO y SO NULL, la categoria ligada", "(null)|(null)|1",
+                      duenos(oCat) + "|" + Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemCategoria WHERE Codigo = N'" + oCat + "'"));
+                // La base no conoce cascada: cualquier combinacion se guarda tal cual.
+                var oTres = Crear(cn, conDuenos("PO Cualquiera", "SO De Otra Rama", new[] { "/O/Duenos 2", "" }));
+                Check("O4 PO + SO + categoria sin relacion entre si: guardados tal cual", "PO Cualquiera|SO De Otra Rama|1",
+                      duenos(oTres) + "|" + Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemCategoria WHERE Codigo = N'" + oTres + "'"));
+                // Directo al procedimiento (lo que el planificador ya evita):
+                // solo espacios = NULL; mas de 255 = 51027 sin dejar filas.
+                Func<string, string, string> sp = (po, so) =>
+                {
+                    using (var cmd = new SqlCommand("adm.usp_GestionAdmin_Crear", cn))
+                    {
+                        cmd.CommandType = System.Data.CommandType.StoredProcedure;
+                        cmd.Parameters.AddWithValue("@Usuario", @"DOM\prueba");
+                        cmd.Parameters.AddWithValue("@Prefijo", "SOR");
+                        foreach (var n in new[] { "@TipoIniciativa", "@TipoAgrupado", "@Estado", "@Titulo", "@Descripcion", "@Observaciones" })
+                            cmd.Parameters.AddWithValue(n, DBNull.Value);
+                        var t = cmd.Parameters.AddWithValue("@Categorias", new System.Data.DataTable { Columns = { "Categoria", { "Pct", typeof(decimal) }, "TipoIniciativa", "TipoAgrupado" } });
+                        t.SqlDbType = System.Data.SqlDbType.Structured; t.TypeName = "adm.CategoriaPctTipo";
+                        cmd.Parameters.AddWithValue("@Hoy", hoy);
+                        cmd.Parameters.Add("@OwnerProblem", System.Data.SqlDbType.NVarChar, 4000).Value = (object)po ?? DBNull.Value;
+                        cmd.Parameters.Add("@OwnerServicio", System.Data.SqlDbType.NVarChar, 4000).Value = (object)so ?? DBNull.Value;
+                        var c = cmd.Parameters.Add("@Codigo", System.Data.SqlDbType.NVarChar, 100);
+                        c.Direction = System.Data.ParameterDirection.Output;
+                        cmd.ExecuteNonQuery();
+                        return c.Value as string;
+                    }
+                };
+                var oEsp = sp("   ", "");
+                Check("O5 solo espacios / vacio en el procedimiento = NULL", "(null)|(null)", duenos(oEsp));
+                var oRec = sp("  PO Recortado ", null);
+                Check("O5 espacios de mas: se recortan, el texto no cambia", "PO Recortado|(null)", duenos(oRec));
+                var antesLargo = Uno(cn, "SELECT COUNT(*) FROM dbo.Problem");
+                Check("O6 PO de 256 caracteres: 51027", "51027", Error(() => sp(new string('x', 256), null)));
+                Check("O6 ... sin filas nuevas", antesLargo, Uno(cn, "SELECT COUNT(*) FROM dbo.Problem"));
+                // Lectura: lo guardado vuelve por el lector del registro.
+                var cap = (Dictionary<string, string[]>)Invocar("LeerDuenosCapturados", cn);
+                Check("O7 el registro devuelve lo guardado (con y sin categoria) y null si no hay", "PO Cualquiera|SO De Otra Rama|PO Solo|(null)|(null)",
+                      cap[oTres][0] + "|" + cap[oTres][1] + "|" + cap[oPo][0] + "|" + (cap[oPo][1] ?? "(null)") + "|" + (cap[oT][0] ?? "(null)"));
+                // Rollback de 20: el procedimiento vuelve al de sql/18 (hash
+                // exacto) y lo guardado se queda. Despues se reaplica.
+                var hash20 = HashDef(cn, "adm.usp_GestionAdmin_Crear");
+                Console.WriteLine("INFO  hash adm.usp_GestionAdmin_Crear con sql/20 = " + hash20);
+                // Definicion inesperada (un cambio a mano que conserva firma y
+                // nombres): las guardas por hash la rechazan sin tocarla. Se
+                // restaura con el texto original (SQL Server guarda el ALTER
+                // como CREATE: mismo hash).
+                Func<string> defCrear = () => (string)Uno(cn, "SELECT OBJECT_DEFINITION(OBJECT_ID('adm.usp_GestionAdmin_Crear'))");
+                Action<string> redefinir = d => Exec(cn, "ALTER" + d.Substring(d.IndexOf("CREATE", StringComparison.Ordinal) + 6));
+                Func<string, string> aMano = d => d.Replace("SET NOCOUNT ON;", "SET NOCOUNT ON; /* cambio a mano */");
+                const string negocioO = "SELECT COUNT(*), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.Problem";
+                var negocioAntesO = Filas(cn, negocioO);
+                var def20 = defCrear();
+                redefinir(aMano(def20));
+                var hashMano20 = HashDef(cn, "adm.usp_GestionAdmin_Crear");
+                Check("O8c rollback sobre una Crear con @OwnerProblem pero no la de sql/20: se niega, sin transaccion abierta, no la toca", "True|0|True|0|True",
+                      Rechazo(cn, Leer("sql", "20_gestion_admin_duenos_rollback.sql"), "no es la de sql/20") + "|" + (HashDef(cn, "adm.usp_GestionAdmin_Crear") == hashMano20 && hashMano20 != hash20));
+                redefinir(def20);
+                Check("O8c ... restaurada al texto de sql/20", hash20, HashDef(cn, "adm.usp_GestionAdmin_Crear"));
+                // Postcondicion: si el ALTER deja otra cosa (aqui, el script con
+                // el cuerpo cambiado en memoria), ROLLBACK y queda la de antes.
+                Func<string, string> cuerpoCambiado = t => t.Replace("SET NOCOUNT ON; SET XACT_ABORT ON;", "SET NOCOUNT ON; SET XACT_ABORT ON; /* x */");
+                Check("O8d rollback cuyo ALTER no deja la de sql/18: ROLLBACK, sin transaccion abierta, sigue la de sql/20", "True|0|True|0|" + hash20,
+                      Rechazo(cn, cuerpoCambiado(Leer("sql", "20_gestion_admin_duenos_rollback.sql")), "no quedo como el de sql/18") + "|" +
+                      HashDef(cn, "adm.usp_GestionAdmin_Crear"));
+                Lotes(cn, Leer("sql", "20_gestion_admin_duenos_rollback.sql"));
+                Check("O8 rollback: sin parametros nuevos, hash = el de sql/18 revisado (diag ADM_04 sec 11), datos intactos",
+                      "0|0x1183206C8BF1CFB33675A44D104D65F8660BCC0FF88CC63E40324DB7FBAF21E8|PO Cualquiera|SO De Otra Rama",
+                      Uno(cn, "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Crear') AND name LIKE N'@Owner%'") + "|" +
+                      HashDef(cn, "adm.usp_GestionAdmin_Crear") + "|" + duenos(oTres));
+                Check("O8b rollback otra vez se niega", "True",
+                      LotesError(cn, Leer("sql", "20_gestion_admin_duenos_rollback.sql")).Contains("sql/20 no aplicada"));
+                // Con la guarda vieja esta pasaba: protege y no tiene @OwnerProblem.
+                var def18 = defCrear();
+                var hash18 = HashDef(cn, "adm.usp_GestionAdmin_Crear");
+                redefinir(aMano(def18));
+                var hashMano18 = HashDef(cn, "adm.usp_GestionAdmin_Crear");
+                Check("O1c sql/20 sobre una Crear sin @OwnerProblem pero no la de sql/18: se niega, sin transaccion abierta, no la toca", "True|0|True|0|True|0",
+                      Rechazo(cn, Leer("sql", "20_gestion_admin_duenos.sql"), "no es la de sql/18") + "|" + (HashDef(cn, "adm.usp_GestionAdmin_Crear") == hashMano18 && hashMano18 != hash18) + "|" +
+                      Uno(cn, "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Crear') AND name LIKE N'@Owner%'"));
+                redefinir(def18);
+                Check("O1c ... restaurada al texto de sql/18", hash18, HashDef(cn, "adm.usp_GestionAdmin_Crear"));
+                Check("O1d sql/20 cuyo ALTER no deja la de sql/20: ROLLBACK, sin transaccion abierta, sigue la de sql/18", "True|0|True|0|" + hash18,
+                      Rechazo(cn, cuerpoCambiado(Leer("sql", "20_gestion_admin_duenos.sql")), "no quedo como el de sql/20") + "|" +
+                      HashDef(cn, "adm.usp_GestionAdmin_Crear"));
+                Lotes(cn, Leer("sql", "20_gestion_admin_duenos.sql"));
+                Check("O9b iniciativas intactas tras rollback, rechazos y reaplicacion", negocioAntesO, Filas(cn, negocioO));
+                Check("O9 hash de Crear con sql/20 = el esperado (diag ADM_04 sec 11 por actualizar)", HashCrearSql20, hash20);
+                Check("O9 reaplicada: mismo hash que la primera vez", hash20, HashDef(cn, "adm.usp_GestionAdmin_Crear"));
 
                 // ---------------- T: tipos y estado OPCIONALES (validados si vienen) ----------------
                 var sinNada = AltaTipo(hoy, "PRB", null, null, "/S/Cat 3", "5");
@@ -1175,8 +1326,12 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                     Exec(cn, "IF USER_ID(N'" + u + "') IS NOT NULL DROP USER [" + u + "];");
             }
             foreach (var l in diag10.Split('\n')) if (l.StartsWith("11 ")) Console.WriteLine("   diag " + l);
-            Check("E34 diag seccion 11: los 5 objetos de sql/18 coinciden con la revision revisada", "5",
-                  Regex.Matches(diag10, @"^11 sql/18\|[^|]+\|1\|sql/18 revisado\|", RegexOptions.Multiline).Count);
+            // Con sql/20, Crear ya no es la de sql/18: el diag (repo del backend,
+            // sin actualizar) la marca OTRA. Se exige que sea EXACTAMENTE la de
+            // sql/20 y que los otros 4 sigan siendo los de sql/18.
+            Check("E34 diag seccion 11: 4 objetos de sql/18 revisados + Crear = hash de sql/20", "4|True",
+                  Regex.Matches(diag10, @"^11 sql/18\|[^|]+\|1\|sql/18 revisado\|", RegexOptions.Multiline).Count + "|" +
+                  diag10.Contains("11 sql/18|adm.usp_GestionAdmin_Crear|1|OTRA: revisar|" + HashCrearSql20));
             Check("E35 diag seccion 8: stg es de otro dueno, como en la VM", "True", diag10.Contains("8 duenos de esquema|stg|" + DuenoStg));
 
             Check("E27 la unica FK de la tabla SALE de ella hacia dbo.Problem, sin cascada (NO_ACTION/NO_ACTION); ninguna FK llega a ella; sin triggers",

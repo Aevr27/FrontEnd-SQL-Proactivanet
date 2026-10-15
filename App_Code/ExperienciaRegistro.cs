@@ -97,6 +97,7 @@ public static partial class ExperienciaQueries
             var salida = ArmarRegistro(detalle, sueltas, dir, prefijos);
             salida["tipos_iniciativa"] = DashboardCatalogos.PrefijosIniciativa(cn);
             AplicarFechasPropias(salida, LeerFechasPropias(cn));
+            AplicarDuenosCapturados(salida, LeerDuenosCapturados(cn));
 
             // Historial de fechas por folio (App_Code/HistorialFechas.cs). Si
             // no se puede leer, cada iniciativa sale sin historial y
@@ -245,6 +246,37 @@ public static partial class ExperienciaQueries
                 c["f_creacion_propia"] = hay ? propias[0] : null;
                 c["f_analisis_propia"] = hay ? propias[1] : null;
             }
+        }
+    }
+
+    // PO / SO CAPTURADOS en la iniciativa (dbo.Problem.OwnerProblem /
+    // OwnerServicio; los guarda el alta de Admin desde sql/20). Van aparte de
+    // po / so, que siguen siendo los de la categoria (AlinearDuenos) y con
+    // los que filtra Experiencia: aqui no se mezclan. null = sin capturar.
+    private static Dictionary<string, string[]> LeerDuenosCapturados(SqlConnection cn)
+    {
+        var d = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        using (var cmd = new SqlCommand(
+            "SELECT Codigo, OwnerProblem, OwnerServicio FROM dbo.Problem WHERE VigenteEnOrigen = 1;", cn))
+        using (var rd = cmd.ExecuteReader())
+        {
+            while (rd.Read())
+            {
+                var folio = Texto(rd.GetValue(0));
+                if (folio != null) d[folio] = new[] { Texto(rd.GetValue(1)), Texto(rd.GetValue(2)) };
+            }
+        }
+        return d;
+    }
+
+    internal static void AplicarDuenosCapturados(Dictionary<string, object> salida, Dictionary<string, string[]> d)
+    {
+        foreach (Dictionary<string, object> i in (List<object>)salida["iniciativas"])
+        {
+            string[] v;
+            var hay = d.TryGetValue(i["folio"] as string ?? "", out v);
+            i["po_capturado"] = hay ? v[0] : null;
+            i["so_capturado"] = hay ? v[1] : null;
         }
     }
 

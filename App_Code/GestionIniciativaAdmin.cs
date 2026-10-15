@@ -36,7 +36,12 @@
 //   Crear     solo el Tipo es obligatorio (prefijo del codigo). Cero o mas
 //             categorias, cada una con su % (pares cat_ruta / cat_pct): cada
 //             ruta tiene que existir en el catalogo vigente, sin repetirse.
-//             PO / SO opcionales, como antes. Lo que falte se informa como
+//             PO / SO opcionales y SIN la cascada de Nueva solicitud: cada
+//             uno tiene que estar en el catalogo vigente (nada escrito a
+//             mano), pero PO, SO y Categoria no tienen que salir juntos de
+//             una fila. Se guardan en dbo.Problem.OwnerProblem / OwnerServicio
+//             (sql/20; NULL si no se eligen). Con GuardaDuenos = false (base
+//             sin sql/20) un PO o SO elegido se RECHAZA: nunca se tira. Lo que falte se informa como
 //             INCOMPLETA (marca derivada, sin columna), no bloquea.
 //             La Volumetria ya no se captura: es la del SLOT 0 de
 //             dbo.vw_TBSlotCAT, de solo lectura (ExperienciaVolumetria.cs).
@@ -69,6 +74,18 @@ public static class PersistenciaGestionAdmin
 {
     public const bool Habilitada = true;
 
+    // PO / SO del alta -> dbo.Problem.OwnerProblem / OwnerServicio, por los
+    // parametros que sql/20 agrega a adm.usp_GestionAdmin_Crear (aprobado
+    // 2026-10-15). true SOLO con sql/20 aplicada en la base: si no, cada alta
+    // falla ("too many arguments"). false = el escritor no los manda y el
+    // validador rechaza (422) un PO o SO elegido; nunca se tiran.
+    public const bool GuardaDuenos = true;
+    public static bool GuardaDuenosActiva() { return GuardaDuenos; }
+
+    public const string MotivoDuenos =
+        "todav\u00eda no se guarda: el alta en la base no recibe Product Owner ni Service Owner. " +
+        "D\u00e9jalo vac\u00edo para guardar (falta aplicar sql/20 en la base).";
+
     // Lo que consulta el handler (un metodo, para no dejar codigo
     // "inalcanzable" con la constante fija).
     public static bool Activa() { return Habilitada; }
@@ -87,6 +104,17 @@ public static class PersistenciaGestionAdmin
         "quitar categor\u00eda: sin regla aprobada; se rechaza (409) y no se guarda nada",
         "RCA: sin destino de almacenamiento; el archivo no se sube",
     };
+
+    // Con GuardaDuenos = false se suma este bloqueo a los de arriba.
+    public const string BloqueoDuenos =
+        "Product Owner / Service Owner en Crear: adm.usp_GestionAdmin_Crear no los recibe; se rechazan (422) y no se guarda nada";
+
+    public static List<string> BloqueosVigentes()
+    {
+        var l = new List<string>(Bloqueos);
+        if (!GuardaDuenosActiva()) l.Add(BloqueoDuenos);
+        return l;
+    }
 }
 
 public sealed class ErrorCampo
@@ -419,7 +447,7 @@ public sealed class ResultadoGestionAdmin
             { "persistencia", PersistenciaGestionAdmin.Estado },
             // El motivo dice "la validacion paso": solo si de verdad paso.
             { "persistencia_motivo", Valida ? PersistenciaGestionAdmin.Motivo : null },
-            { "bloqueos", new List<string>(PersistenciaGestionAdmin.Bloqueos) },
+            { "bloqueos", PersistenciaGestionAdmin.BloqueosVigentes() },
         };
     }
 }
@@ -594,9 +622,13 @@ public sealed class ValidadorGestionAdmin
             r.Agregar(SolicitudIniciativa.CPo, "El Product Owner no est\u00e1 en el cat\u00e1logo vigente.");
         if (so != null && !catalogo.TieneSo(so))
             r.Agregar(SolicitudIniciativa.CSo, "El Service Owner no est\u00e1 en el cat\u00e1logo vigente.");
-        if (!r.TieneError(SolicitudIniciativa.CPo) && !r.TieneError(SolicitudIniciativa.CSo)
-            && (po != null || so != null) && catalogo.Filas(po, so, null).Count == 0)
-            r.Agregar(SolicitudIniciativa.CSo, "Product Owner y Service Owner no salen juntos de ninguna fila vigente del cat\u00e1logo.");
+        // Sin la cascada de Nueva solicitud: PO, SO y Categoria no tienen que
+        // salir juntos de una fila. Elegidos de la lista pero sin donde
+        // guardarse: se rechazan, nunca se tiran en silencio.
+        if (po != null && !r.TieneError(SolicitudIniciativa.CPo) && !PersistenciaGestionAdmin.GuardaDuenosActiva())
+            r.Agregar(SolicitudIniciativa.CPo, "Product Owner: " + PersistenciaGestionAdmin.MotivoDuenos);
+        if (so != null && !r.TieneError(SolicitudIniciativa.CSo) && !PersistenciaGestionAdmin.GuardaDuenosActiva())
+            r.Agregar(SolicitudIniciativa.CSo, "Service Owner: " + PersistenciaGestionAdmin.MotivoDuenos);
 
         var directores = new HashSet<string>(StringComparer.Ordinal);
         var rutas = 0;
@@ -611,14 +643,8 @@ public sealed class ValidadorGestionAdmin
                 r.Agregar(SolicitudIniciativa.CCategoria, cat + ": la categor\u00eda no est\u00e1 en el cat\u00e1logo vigente.");
                 continue;
             }
-            // Lo elegido (cada nivel opcional) tiene que salir de UNA fila,
-            // como la cascada en modo 'filtro' del navegador.
-            var filas = r.TieneError(SolicitudIniciativa.CPo) || r.TieneError(SolicitudIniciativa.CSo)
-                ? new List<CatalogoSolicitud.Asignacion>() : catalogo.Filas(po, so, cat);
-            if (filas.Count == 0 && (po != null || so != null))
-                r.Agregar(SolicitudIniciativa.CCategoria, cat +
-                    ": Product Owner, Service Owner y Categor\u00eda no salen juntos de ninguna fila vigente del cat\u00e1logo.");
-            foreach (var f in filas) if (!string.IsNullOrEmpty(f.Director)) directores.Add(f.Director);
+            // El Director sale solo de la categoria: PO / SO no la filtran.
+            foreach (var f in catalogo.Filas(null, null, cat)) if (!string.IsNullOrEmpty(f.Director)) directores.Add(f.Director);
 
             var fr = ValidadorIniciativa.Fraccion(Limpio(c.Texto) ?? "");
             if (Limpio(c.Texto) == null) sinPct = true;

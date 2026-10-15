@@ -53,9 +53,9 @@
     - Sin alta de categorias: se crean en el sitio de Proactivanet. El
       modulo admin/categorias-alta.js y handlers/admin_categorias_alta.ashx
       siguen en el repo, sin entrada en esta pagina.
-    - Dueños (Product Owner / Service Owner) ocultos por ahora en
-      Administracion y en "Crear iniciativa": flujo aparte. Ver
-      DUENOS_VISIBLES en admin/iniciativas.js.
+    - Dueños de categoria ocultos por ahora en Administracion: flujo
+      aparte (DUENOS_VISIBLES en admin/iniciativas.js). "Crear iniciativa"
+      si pide PO / SO, opcionales y sin cascada (admin/iniciativa-admin.js).
     - Solicitudes todavia no muestra datos: estado vacio "en preparacion",
       sin datos inventados.
 
@@ -622,8 +622,21 @@
           <input type="date" id="admFEntrega" aria-describedby="admFEntregaNota" disabled>
           <small class="ini-motivo" id="admFEntregaNota">Cuando el análisis va al jefe de quien lo crea; por omisión hoy. Creación = hoy y análisis = hoy + 15 días los fija el servidor.</small>
         </div>
-        <!-- PO / SO no se eligen aqui (dueños: flujo aparte); viajan vacios y
-             el servidor los toma como opcionales. Las categorias van en 03. -->
+        <!-- PO / SO opcionales, de las listas del catalogo y SIN cascada:
+             elegir uno no filtra ni vacia el otro ni las categorias (03).
+             Nada escrito a mano. Se guardan en dbo.Problem.OwnerProblem /
+             OwnerServicio (sql/20); sin elegir, NULL. -->
+        <div class="ini-campo">
+          <label for="admPo">Product Owner</label>
+          <span id="admPoSelector"></span>
+          <small class="ini-motivo" id="admPoMsg" role="status" aria-live="polite"></small>
+        </div>
+        <div class="ini-campo">
+          <label for="admSo">Service Owner</label>
+          <span id="admSoSelector"></span>
+          <small class="ini-motivo" id="admSoMsg" role="status" aria-live="polite"></small>
+          <small class="ini-motivo">Opcionales e independientes: se guardan en la iniciativa; sin elegir quedan vacíos.</small>
+        </div>
         <div class="ini-campo ini-derivado">
           <span class="ini-rotulo-derivado" id="rotAdmDirector">Director <span class="ini-origen derivado">Derivado</span></span>
           <output id="admDirector" aria-labelledby="rotAdmDirector">—</output>

@@ -84,6 +84,16 @@
      valores que ya existen (valores_tipo_iniciativa / valores_tipo_agrupado
      / estados_problem del registro).
 
+   PRODUCT OWNER / SERVICE OWNER EN CREAR
+   --------------------------------------
+     Opcionales y SIN la cascada de Nueva solicitud: cada lista son los
+     valores distintos del catalogo (asignaciones), completa, y elegir uno
+     no filtra ni vacia el otro ni las categorias. Solo valores de la lista
+     (nada escrito a mano): lo que no coincide se rechaza con las parecidas.
+     Se guardan en dbo.Problem.OwnerProblem / OwnerServicio (sql/20); sin
+     elegir, NULL. Si la base no tiene sql/20 (GuardaDuenos = false), el
+     servidor rechaza un PO / SO elegido: nunca se tira.
+
    PIEZAS
    ------
      Incompleta          las reglas de faltantes (puras, sin DOM)
@@ -129,6 +139,9 @@ window.IniciativaAdmin = (function () {
 
   // Desde cuantas opciones un selector pasa a ser caja con busqueda.
   var SELECTOR_UMBRAL = 20;
+
+  // PO / SO de Crear: clave del borrador -> como se nombra en los avisos.
+  var DUENOS = { po: 'un Product Owner', so: 'un Service Owner' };
 
   function vacio(v) { return v === null || v === undefined || String(v).trim() === ''; }
   function llaveRuta(r) { return String(r === null || r === undefined ? '' : r).trim().toUpperCase(); }
@@ -681,6 +694,33 @@ window.IniciativaAdmin = (function () {
       this.declarados = { tipo_iniciativa: '', tipo_agrupado: '', estado: '', f_entrega_analisis: FECHAS_GESTION.hoy() };
       this.categorias = new CategoriasProblema([], BorradorAdmin.rutasDe(catalogo));
       this.rca = null;   // nombre del archivo elegido; no se sube
+      // PO / SO: lo escrito en cada caja y la opcion real que le toca
+      // ('' si no coincide con ninguna). Independientes entre si.
+      this.duenosLista = { po: BorradorAdmin.valoresDe(catalogo, 'po'), so: BorradorAdmin.valoresDe(catalogo, 'so') };
+      this.duenosTexto = { po: '', so: '' };
+      this.duenos = { po: '', so: '' };
+    }
+
+    // Los valores distintos de un campo del catalogo (po / so), ordenados.
+    static valoresDe(catalogo, campo) {
+      var vistos = {}, salida = [];
+      ((catalogo && catalogo.asignaciones) || []).forEach(function (f) {
+        var v = f[campo] === null || f[campo] === undefined ? '' : String(f[campo]).trim();
+        if (v && !vistos[llaveRuta(v)]) { vistos[llaveRuta(v)] = true; salida.push(v); }
+      });
+      return salida.sort(function (a, b) { return a.localeCompare(b, 'es'); });
+    }
+
+    // Elegir PO o SO de su lista. Vacio = sin elegir. Lo que no es una
+    // opcion real no elige nada (y se avisa). Nunca toca el otro dueño ni
+    // las categorias.
+    elegirDueno(campo, texto) {
+      if (!Object.prototype.hasOwnProperty.call(DUENOS, campo)) return { ok: false, mensaje: '' };
+      var t = String(texto === null || texto === undefined ? '' : texto).trim();
+      this.duenosTexto[campo] = t;
+      this.duenos[campo] = t ? Selector.resolver(t, this.duenosLista[campo]) : '';
+      if (t && !this.duenos[campo]) return { ok: false, mensaje: noEnLista(t, this.duenosLista[campo], DUENOS[campo]) };
+      return { ok: true, valor: this.duenos[campo] };
     }
 
     // Las rutas distintas del catalogo, en su orden.
@@ -725,9 +765,11 @@ window.IniciativaAdmin = (function () {
     bloqueantes() { return this.tipo ? [] : [{ clave: 'tipo', mensaje: 'Elige el Tipo de iniciativa: define el prefijo del código.' }]; }
 
     erroresFormato() {
-      var e = FORMATO.fecha(this.declarados.f_entrega_analisis);
+      var e = FORMATO.fecha(this.declarados.f_entrega_analisis), self = this;
+      var duenos = Object.keys(DUENOS).filter(function (k) { return self.duenosTexto[k] && !self.duenos[k]; })
+        .map(function (k) { return { clave: k, mensaje: noEnLista(self.duenosTexto[k], self.duenosLista[k], DUENOS[k]) }; });
       return (e ? [{ clave: 'f_entrega_analisis', mensaje: 'Fecha de entrega del análisis: ' + e }] : [])
-        .concat(this.categorias.erroresFormato());
+        .concat(duenos, this.categorias.erroresFormato());
     }
 
     datos() {
@@ -753,11 +795,11 @@ window.IniciativaAdmin = (function () {
     }
 
     // Lo que viaja al servidor (accion=crear). El archivo del RCA lo pone la
-    // vista. PO / SO ya no se eligen aqui: viajan vacios (opcionales).
+    // vista. PO / SO: la opcion real elegida, o vacio (opcionales).
     paraEnviar() {
       var v = this.valores;
       var d = this.declarados;
-      return [['accion', 'crear'], ['tipo', this.tipo], ['po', ''], ['so', ''],
+      return [['accion', 'crear'], ['tipo', this.tipo], ['po', this.duenos.po], ['so', this.duenos.so],
         ['tipo_iniciativa', d.tipo_iniciativa], ['tipo_agrupado', d.tipo_agrupado], ['estado', d.estado],
         ['f_entrega_analisis', d.f_entrega_analisis],
         ['titulo', v.titulo], ['descripcion', v.descripcion], ['observaciones', v.observaciones]]
@@ -1325,6 +1367,12 @@ window.IniciativaAdmin = (function () {
           self.pintarFaltantes();
         });
       });
+      // PO / SO: el control se repinta dentro de su caja; el evento sube.
+      ['po', 'so'].forEach(function (k) {
+        self.$(VistaCrearAdmin.idDueno(k) + 'Selector').addEventListener('change', function (e) {
+          if (e.target && e.target.id === VistaCrearAdmin.idDueno(k)) self.elegirDueno(k, e.target.value);
+        });
+      });
       this.$('admCatAgregar').addEventListener('click', function () { self.agregarCategoria(); });
       this.$('admCats').addEventListener('input', function (e) {
         var t = e.target, n = t && t.getAttribute && t.getAttribute('data-crear-pct');
@@ -1361,6 +1409,41 @@ window.IniciativaAdmin = (function () {
       });
       this.$('admRevisar').addEventListener('click', function () { self.revisar(); });
       this.$('admGuardar').addEventListener('click', function () { self.guardar(); });
+    }
+
+    static idDueno(k) { return k === 'po' ? 'admPo' : 'admSo'; }
+
+    // PO / SO: solo cambia ese campo; el aviso dice si no es de la lista.
+    elegirDueno(campo, texto) {
+      if (!this.borrador) return null;
+      var r = this.borrador.elegirDueno(campo, texto);
+      var msg = this.$(VistaCrearAdmin.idDueno(campo) + 'Msg');
+      if (msg) { msg.textContent = r.ok ? '' : r.mensaje; msg.className = 'ini-motivo' + (r.ok ? '' : ' mal'); }
+      return r;
+    }
+
+    // Repinta el control solo si cambia la lista (no borra lo escrito); el
+    // valor siempre es el del borrador.
+    pintarDuenos() {
+      var b = this.borrador, self = this;
+      ['po', 'so'].forEach(function (k) {
+        var id = VistaCrearAdmin.idDueno(k), caja = self.$(id + 'Selector');
+        if (!caja) return;
+        if (!b) {
+          caja.innerHTML = '<input type="text" id="' + id + '" disabled>';
+          caja.setAttribute('data-n', '');
+          return;
+        }
+        var lista = b.duenosLista[k];
+        if (caja.getAttribute('data-n') !== String(lista.length)) {
+          caja.innerHTML = Selector.html(id, lista, b.duenosTexto[k]);
+          caja.setAttribute('data-n', String(lista.length));
+        }
+        var ctl = self.$(id);
+        if (ctl) { ctl.value = b.duenosTexto[k]; ctl.disabled = lista.length === 0; }
+        var msg = self.$(id + 'Msg');
+        if (msg && !b.duenosTexto[k]) { msg.textContent = ''; msg.className = 'ini-motivo'; }
+      });
     }
 
     // "Agregar": lo escrito en el selector tiene que ser una categoria real.
@@ -1404,6 +1487,7 @@ window.IniciativaAdmin = (function () {
         this.$('admDirector').textContent = '—';
         this.$('admFaltantes').innerHTML = '';
         this.$('admCats').innerHTML = '';
+        this.pintarDuenos();
         return;
       }
       var cat = b.catalogo;
@@ -1422,6 +1506,7 @@ window.IniciativaAdmin = (function () {
         ? 'Problem: sin RCA queda incompleta. El archivo no se sube.'
         : 'Opcional para este tipo. El archivo no se sube.';
       this.pintarDeclarados();
+      this.pintarDuenos();
       this.pintarRotulos();
       this.pintarCategorias();
       this.pintarFaltantes();

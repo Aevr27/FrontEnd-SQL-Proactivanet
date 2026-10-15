@@ -700,7 +700,8 @@ pruebas.push(function () {
   var html = leer('admin/iniciativas.html');
   var sinCom = html.replace(/<!--[\s\S]*?-->/g, '');
   var crear = sinCom.slice(sinCom.indexOf('id="panel-crear-admin"'), sinCom.indexOf('id="regDetFondo"'));
-  Check('R1 PO y SO ya no se eligen en Crear (viajan vacios)', [false, false], [/id="admPo"/.test(crear), /id="admSo"/.test(crear)]);
+  Check('R1 PO y SO se eligen en Crear (caja + aviso de cada uno)', [true, true, true, true],
+    [/id="admPoSelector"/.test(crear), /id="admSoSelector"/.test(crear), /id="admPoMsg"/.test(crear), /id="admSoMsg"/.test(crear)]);
   Check('R1 Categorias de Crear: selector, agregar y tabla', [true, true, true],
     [/id="admCatSelector"/.test(crear), /id="admCatAgregar"/.test(crear), /id="admCats"/.test(crear)]);
   Check('R2 dos caminos; "nuevo" marcado por omision', [true, true, true],
@@ -747,7 +748,7 @@ pruebas.push(function () {
       n.value = 'nuevo'; n.checked = true; n.disparar('change');
       Check('R9 volver a "nuevo" conserva el borrador y reactiva', ['nuevo', 'ADO', 'Borrador que no se pierde', false, false],
         [v.ruta, v.borrador.tipo, v.borrador.valores.titulo, p.sel('admForm').hidden, p.sel('admRevisar').disabled]);
-      Check('R10 lo que viaja sigue mandando po/so vacios (opcionales en el servidor)', [['po', ''], ['so', '']],
+      Check('R10 sin elegir, po/so viajan vacios (opcionales en el servidor)', [['po', ''], ['so', '']],
         v.borrador.paraEnviar().filter(function (x) { return x[0] === 'po' || x[0] === 'so'; }));
       Check('R11 RUTAS_PROBLEMA exportado', ['nuevo', 'existente'], A.RUTAS_PROBLEMA);
     });
@@ -1431,6 +1432,80 @@ pruebas.push(function () {
     /public const bool Habilitada = false;/.test(leer('App_Code/AltaCategoriaProactivanet.cs')));
   Check('PS3 ningun "true" para Habilitada del alta de categorias', false,
     /Habilitada\s*=\s*true/.test(leer('App_Code/AltaCategoriaProactivanet.cs')));
+});
+
+// DS) PO / SO en Crear: opcionales, de las listas del catalogo, sin la
+//     cascada de Nueva solicitud y sin nombres escritos a mano.
+//     Catalogo: PO 1/SO x/Cat 1, PO 1/SO y/Cat 2, PO 3/SO z/Cat 4.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var pg = p.pagina, v = pg.crearAdmin;
+    pg.fijarRol('ADM');
+    pg.mostrarVista('crear');
+    elegir(p, 'admTipo', 'ADO');
+    var b = v.borrador;
+    function viaja() {
+      var o = {};
+      b.paraEnviar().forEach(function (x) { if (x[0] === 'po' || x[0] === 'so' || x[0] === 'cat_ruta') o[x[0]] = x[1]; });
+      return o;
+    }
+    function dueno(k, valor) { var c = p.sel(k === 'po' ? 'admPoSelector' : 'admSoSelector'); c.disparar('change', { target: { id: k === 'po' ? 'admPo' : 'admSo', value: valor } }); }
+
+    Check('DS0 listas completas, sin filtrar (PO y SO distintos del catalogo)', [['PO 1', 'PO 3'], ['SO x', 'SO y', 'SO z']],
+      [b.duenosLista.po, b.duenosLista.so]);
+    Check('DS0 pocas opciones: <select> con todas', [true, 2, true, 3],
+      [/<select id="admPo"/.test(p.sel('admPoSelector').innerHTML), (p.sel('admPoSelector').innerHTML.match(/<option value="PO/g) || []).length,
+       /<select id="admSo"/.test(p.sel('admSoSelector').innerHTML), (p.sel('admSoSelector').innerHTML.match(/<option value="SO/g) || []).length]);
+
+    Check('DS1 los tres vacios: listo, po/so vacios, sin categoria', [true, { po: '', so: '' }], [b.revisar().listo, viaja()]);
+    dueno('po', 'PO 3');
+    Check('DS2 solo PO: listo y viaja', [true, { po: 'PO 3', so: '' }], [b.revisar().listo, viaja()]);
+    dueno('po', '');
+    dueno('so', 'SO x');
+    Check('DS3 solo SO: listo y viaja', [true, { po: '', so: 'SO x' }], [b.revisar().listo, viaja()]);
+    dueno('so', '');
+    v.agregarCategoria('/A/Cat 2');
+    Check('DS4 solo categoria: listo y viaja', [true, { po: '', so: '', cat_ruta: '/A/Cat 2' }], [b.revisar().listo, viaja()]);
+    b.categorias.quitar(0);
+
+    v.agregarCategoria('/A/Cat 1');
+    dueno('po', 'PO 1'); dueno('so', 'SO x');
+    Check('DS5 los tres de una fila del catalogo', [true, { po: 'PO 1', so: 'SO x', cat_ruta: '/A/Cat 1' }], [b.revisar().listo, viaja()]);
+
+    dueno('po', 'PO 3');
+    Check('DS8 cambiar PO no vacia SO ni la categoria', { po: 'PO 3', so: 'SO x', cat_ruta: '/A/Cat 1' }, viaja());
+    Check('DS7 combinacion que la cascada rechazaria (PO 3 + SO x + Cat 1): listo, sin aviso', [true, ''],
+      [b.revisar().listo, p.sel('admPoMsg').textContent]);
+    dueno('so', 'SO z');
+    Check('DS9 cambiar SO no vacia PO ni la categoria', { po: 'PO 3', so: 'SO z', cat_ruta: '/A/Cat 1' }, viaja());
+    Check('DS9 la lista de SO no se filtra por el PO', ['SO x', 'SO y', 'SO z'], b.duenosLista.so);
+    Check('DS10 el Director sale de la categoria, no del PO', 'Dir A', p.sel('admDirector').textContent);
+
+    dueno('po', '  po 1 ');
+    Check('DS6 mayusculas y espacios de mas: elige la opcion real', 'PO 1', viaja().po);
+    dueno('po', 'Juan Pérez');
+    var r = b.revisar();
+    Check('DS6 nombre escrito a mano: no se elige, bloquea y avisa con la lista', [false, '', false, true],
+      [r.listo, viaja().po, r.formato.every(function (f) { return f.clave !== 'po'; }), /Elige un Product Owner de la lista/.test(p.sel('admPoMsg').textContent)]);
+    Check('DS6 ... y no toca SO ni la categoria', { po: '', so: 'SO z', cat_ruta: '/A/Cat 1' }, viaja());
+    dueno('po', '');
+    Check('DS6 vaciarlo quita el aviso y vuelve a estar listo', [true, ''], [b.revisar().listo, p.sel('admPoMsg').textContent]);
+
+    var srv = [];
+    v.pedir = function (url, op) {
+      var campos = []; op.body.forEach(function (val, k) { campos.push([k, val]); }); srv.push(campos);
+      return Promise.resolve(RespuestaHttp(422, { valida: false, guardada: false, codigo: null,
+        errores: [{ campo: 'so', mensaje: 'Service Owner: todavía no se guarda: el alta en la base no recibe Product Owner ni Service Owner.' }] }));
+    };
+    return v.guardar().then(function (g) {
+      var caja = p.sel('admResultado');
+      Check('DS12 base sin sql/20 (GuardaDuenos = false): 422, nunca "guardada", el aviso se ve', [1, 'invalida', false, true, true],
+        [srv.length, g.estado, caja.classList.contains('ok'), /todavía no se guarda/.test(caja.innerHTML), v.borrador === b]);
+      Check('DS12 viajo el SO elegido (no se descarto en el navegador)', true,
+        srv[0].some(function (c) { return c[0] === 'so' && c[1] === 'SO z'; }));
+    });
+  });
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
