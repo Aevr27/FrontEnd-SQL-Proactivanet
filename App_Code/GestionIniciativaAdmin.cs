@@ -237,11 +237,60 @@ public sealed class PeticionModificarAdmin
     }
 }
 
+// Regla del negocio (confirmada 2026-10-15): el Tipo de iniciativa (prefijo,
+// dbo.CatPrefijoProblem) fija la Clasificacion (TipoIniciativa) y esta la
+// Agrupacion (TipoAgrupado). Los textos son los que YA estan en dbo.Problem /
+// dbo.ProblemCategoria, no la Descripcion del catalogo ('Shift to Left' no
+// existe como TipoIniciativa). Clasificacion -> Agrupacion: sin excepciones
+// en la VM (sql/diag_admin_tipo_por_prefijo.sql T3, 2026-10-15). Un prefijo
+// sin regla deja ambos null (Incompleta). Copia en admin/iniciativa-admin.js
+// (TIPOS_POR_PREFIJO): cambiar las dos.
+public static class TiposPorPrefijo
+{
+    private static readonly Dictionary<string, string> Clasificaciones = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+    {
+        { "ADO", "Adopci\u00f3n" },
+        { "HAR", "Hardware" },
+        { "MAP", "Mejora Aplicativo" },
+        { "PRB", "Problem" },
+        { "REQ", "Requerimiento" },
+        { "RTI", "Requerimiento TI a TI" },
+        { "S2L", "Shift Left Administrador" },
+        { "SKB", "SorIA_KB" },
+        { "SOR", "SorIA" },
+    };
+
+    private static readonly Dictionary<string, string> Agrupaciones = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        { "Adopci\u00f3n", "Adopci\u00f3n" },
+        { "Hardware", "ReqOpr" },
+        { "Mejora Aplicativo", "Mejora" },
+        { "Problem", "Problem" },
+        { "Requerimiento", "ReqOpr" },
+        { "Requerimiento TI a TI", "ReqOpr" },
+        { "Shift Left Administrador", "Adopci\u00f3n" },
+        { "SorIA_KB", "SorIA" },
+        { "SorIA", "SorIA" },
+    };
+
+    public static string Clasificacion(string prefijo)
+    {
+        string v;
+        return prefijo != null && Clasificaciones.TryGetValue(prefijo.Trim(), out v) ? v : null;
+    }
+
+    public static string Agrupacion(string clasificacion)
+    {
+        string v;
+        return clasificacion != null && Agrupaciones.TryGetValue(clasificacion, out v) ? v : null;
+    }
+}
+
 public sealed class PeticionCrearAdmin
 {
     public const string CCatRuta = "cat_ruta";
     public const string CCatPct = "cat_pct";
-    // Declarados en el alta (nunca derivados del prefijo).
+    // Salen del Tipo (TiposPorPrefijo); lo que mande el formulario se ignora.
     public const string CTipoIniciativa = "tipo_iniciativa";
     public const string CTipoAgrupado = "tipo_agrupado";
     public const string CEstado = "estado";
@@ -266,12 +315,12 @@ public sealed class PeticionCrearAdmin
             Titulo = f[SolicitudIniciativa.CTitulo],
             Descripcion = f[SolicitudIniciativa.CDescripcion],
             Observaciones = f[SolicitudIniciativa.CObservaciones],
-            TipoIniciativa = f[CTipoIniciativa],
-            TipoAgrupado = f[CTipoAgrupado],
             Estado = f[CEstado],
             FEntregaAnalisis = f[CFEntregaAnalisis],
             TieneRca = tieneRca,
         };
+        p.TipoIniciativa = TiposPorPrefijo.Clasificacion(p.Tipo);
+        p.TipoAgrupado = TiposPorPrefijo.Agrupacion(p.TipoIniciativa);
         p.Categorias = Pares.Leer(f, CCatRuta, CCatPct, out p.CategoriasDesparejas);
         return p;
     }
@@ -546,8 +595,8 @@ public sealed class ValidadorGestionAdmin
         var r = new ResultadoGestionAdmin { Accion = "crear" };
         if (Limpio(p.Tipo) == null)
             r.Agregar(SolicitudIniciativa.CTipo, "Elige el Tipo de iniciativa: define el prefijo del c\u00f3digo.");
-        // Clasificacion, Agrupacion y Estado: opcionales (nunca derivados del
-        // prefijo); si faltan, la iniciativa queda Incompleta.
+        // Clasificacion y Agrupacion salen del Tipo (TiposPorPrefijo); Estado
+        // es opcional. Lo que falte deja la iniciativa Incompleta.
         var entrega = Limpio(p.FEntregaAnalisis);
         if (entrega != null && !EsFecha(entrega))
             r.Agregar(PeticionCrearAdmin.CFEntregaAnalisis, "Fecha de entrega del an\u00e1lisis: escribe una fecha v\u00e1lida (aaaa-mm-dd).");

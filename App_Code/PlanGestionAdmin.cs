@@ -25,10 +25,11 @@
 //   comun (92), pero no la unica (22: 60, 21: 49, 14: 28). Se aplica la regla
 //   de 15 dias naturales; el historico no la sigue siempre.
 //
-// TIPOS: TipoIniciativa, TipoAgrupado y Estado del alta, y los tipos de cada
-// categoria que se liga, son los del formulario (validados contra los
-// valores que ya existen) o null si faltan: ADM crea justo cuando falta
-// informacion. Nunca se derivan del prefijo ni se copian de las hermanas.
+// TIPOS: TipoIniciativa y TipoAgrupado del alta salen del Tipo (prefijo,
+// TiposPorPrefijo en PeticionCrearAdmin.DesdeFormulario); Estado del alta y
+// los tipos de cada categoria que se liga son los del formulario. Todos se
+// validan contra los valores que ya existen, o null si faltan: ADM crea
+// justo cuando falta informacion. No se copian de las hermanas.
 //
 // INMUTABLES al modificar: Codigo (solo identifica) y FechaCreacion.
 //

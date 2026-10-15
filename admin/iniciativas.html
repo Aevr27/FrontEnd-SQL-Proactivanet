@@ -602,16 +602,16 @@
           <label for="admTipo">Tipo de iniciativa <span class="ini-obligatorio">obligatorio</span></label>
           <select id="admTipo" disabled></select>
         </div>
-        <!-- Se piden pero pueden faltar (queda Incompleta); nunca se derivan
-             del prefijo. Opciones = valores que ya existen (registro:
-             valores_tipo_iniciativa / valores_tipo_agrupado / estados_problem). -->
+        <!-- Clasificacion y Agrupacion salen del Tipo (regla del negocio,
+             TiposPorPrefijo): solo se muestran. Estado se pide pero puede
+             faltar (queda Incompleta); opciones = estados_problem. -->
         <div class="ini-campo">
-          <label for="admTipoIniciativa">Clasificación (TipoIniciativa)</label>
-          <select id="admTipoIniciativa" disabled></select>
+          <span class="ini-rotulo-derivado" id="rotAdmTipoIniciativa">Clasificación</span>
+          <output id="admTipoIniciativa" aria-labelledby="rotAdmTipoIniciativa">Sale del Tipo de iniciativa</output>
         </div>
         <div class="ini-campo">
-          <label for="admTipoAgrupado">Agrupación (TipoAgrupado)</label>
-          <select id="admTipoAgrupado" disabled></select>
+          <span class="ini-rotulo-derivado" id="rotAdmTipoAgrupado">Agrupación</span>
+          <output id="admTipoAgrupado" aria-labelledby="rotAdmTipoAgrupado">Sale del Tipo de iniciativa</output>
         </div>
         <div class="ini-campo">
           <label for="admEstado">Estado inicial</label>

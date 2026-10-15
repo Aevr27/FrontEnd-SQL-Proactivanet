@@ -147,7 +147,7 @@ public static class GestionIniciativaAdminSmoke
 
     static readonly EstadosProblem Estados = new EstadosProblem(
         new[] { "En An\u00e1lisis", "En Soluci\u00f3n", "Cerrado" }, new[] { "En An\u00e1lisis", "Solucionado", "Cancelado" },
-        new[] { "Problem", "Mejora" }, new[] { "Problem", "Adopcion", "Requerimiento" });
+        new[] { "Problem", "Mejora", "Adopci\u00f3n" }, new[] { "Problem", "Adopcion", "Requerimiento", "Adopci\u00f3n" });
 
     // Modificar con catalogo de rutas y estados (la forma del servicio).
     static ResultadoGestionAdmin ModC(NameValueCollection f, params CapacidadCategoria.Compromiso[] k)
@@ -249,6 +249,26 @@ public static class GestionIniciativaAdminSmoke
         var form2 = PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "po", "  PO 1  ", "so", ""), false);
         Check("CD6 formulario: po llega tal cual, so vacio", "  PO 1  |", form2.Po + "|" + form2.So);
         Check("CD6 PO con espacios de mas: valido (se recorta, no se cambia)", "", Campos(Crear(form2)));
+        // ---- CT: Clasificacion y Agrupacion salen del Tipo (regla 2026-10-15) ----
+        var formT = PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "tipo_iniciativa", "Problem", "tipo_agrupado", "Problem"), false);
+        Check("CT1 formulario: salen del Tipo y se ignora lo que mande", "Adopci\u00f3n|Adopci\u00f3n", formT.TipoIniciativa + "|" + formT.TipoAgrupado);
+        var rT = Crear(formT);
+        Check("CT1 ... valido y sin faltantes de tipos", "True|", rT.Valida + "|" + string.Join(",", Faltan(rT).Split(',').Where(k => k.StartsWith("tipo")).ToArray()));
+        var plT = PlanificadorGestionAdmin.Crear(formT, rT, new DateTime(2026, 10, 15));
+        Check("CT2 plan: la iniciativa lleva los del Tipo", "Adopci\u00f3n|Adopci\u00f3n", plT.TipoIniciativa + "|" + plT.TipoAgrupado);
+        var formTc = PeticionCrearAdmin.DesdeFormulario(F("tipo", "PRB", "cat_ruta", "/A/Cat 1", "cat_pct", "10"), false);
+        var plTc = PlanificadorGestionAdmin.Crear(formTc, Crear(formTc), new DateTime(2026, 10, 15));
+        Check("CT2 ... y sus categorias iniciales tambien", "Problem|Problem", plTc.Categorias[0].TipoIniciativa + "|" + plTc.Categorias[0].TipoAgrupado);
+        Check("CT3 regla completa (los 9 prefijos de CatPrefijoProblem)",
+              "Adopci\u00f3n>Adopci\u00f3n,Hardware>ReqOpr,Mejora Aplicativo>Mejora,Problem>Problem,Requerimiento>ReqOpr," +
+              "Requerimiento TI a TI>ReqOpr,Shift Left Administrador>Adopci\u00f3n,SorIA_KB>SorIA,SorIA>SorIA",
+              string.Join(",", new[] { "ADO", "HAR", "MAP", "PRB", "REQ", "RTI", "S2L", "SKB", "SOR" }
+                  .Select(x => TiposPorPrefijo.Clasificacion(x) + ">" + TiposPorPrefijo.Agrupacion(TiposPorPrefijo.Clasificacion(x))).ToArray()));
+        var formX = PeticionCrearAdmin.DesdeFormulario(F("tipo", "XYZ", "tipo_iniciativa", "Problem"), false);
+        Check("CT4 prefijo sin regla (o sin Tipo): ambos null, nunca lo del formulario", "True|True|True",
+              (formX.TipoIniciativa == null && formX.TipoAgrupado == null) + "|" +
+              (PeticionCrearAdmin.DesdeFormulario(F("tipo", ""), false).TipoIniciativa == null) + "|" +
+              (TiposPorPrefijo.Clasificacion(" prb ") == "Problem"));
         // El plan: PO / SO recortados o null; textos solo-espacios = null.
         var pPlan = C("ADO", po: " PO 3 ", so: "", cat: "/A/Cat 1", pct: "10", tit: "  ", desc: " D ", obs: null);
         var plan = PlanificadorGestionAdmin.Crear(pPlan, Crear(pPlan), new DateTime(2026, 10, 15));
