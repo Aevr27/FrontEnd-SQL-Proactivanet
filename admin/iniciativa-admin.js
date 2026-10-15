@@ -74,15 +74,16 @@
 
    TIPOS DECLARADOS
    ----------------
-     El alta pide Clasificacion (TipoIniciativa), Agrupacion (TipoAgrupado),
-     Estado inicial y la fecha de entrega del analisis (por omision hoy),
-     pero cualquiera puede faltar: ADM crea justo cuando falta informacion,
-     y lo que falta se marca Incompleta. Solo el Tipo (prefijo) bloquea:
-     sin el no hay Codigo. Una categoria que se liga puede llevar los suyos.
-     Nada se deriva del prefijo ni se copia de las hermanas. Sin Agrupacion,
-     el servidor revisa el tope como si la fila consumiera. Las opciones son los
-     valores que ya existen (valores_tipo_iniciativa / valores_tipo_agrupado
-     / estados_problem del registro).
+     En el alta, Clasificacion (TipoIniciativa) y Agrupacion (TipoAgrupado)
+     salen del Tipo (prefijo) por regla del negocio (TiposPorPrefijo; se
+     muestran, no se eligen). El alta pide Estado inicial y la fecha de
+     entrega del analisis (por omision hoy), que pueden faltar: ADM crea
+     justo cuando falta informacion, y lo que falta se marca Incompleta.
+     Solo el Tipo bloquea: sin el no hay Codigo. Una categoria que se liga
+     a una existente puede llevar los suyos; nada se copia de las hermanas.
+     Sin Agrupacion, el servidor revisa el tope como si la fila consumiera.
+     Las opciones son los valores que ya existen (valores_tipo_iniciativa /
+     valores_tipo_agrupado / estados_problem del registro).
 
    PRODUCT OWNER / SERVICE OWNER EN CREAR
    --------------------------------------
@@ -164,6 +165,29 @@ window.IniciativaAdmin = (function () {
     { clave: 'tipo_agrupado',   rotulo: 'Agrupación' },
     { clave: 'estado',          rotulo: 'Estado inicial' }
   ];
+
+  // Regla del negocio (2026-10-15): el Tipo (prefijo) fija la Clasificacion
+  // y esta la Agrupacion. Copia de TiposPorPrefijo (App_Code/
+  // GestionIniciativaAdmin.cs), que es la que vale: el servidor ignora lo
+  // que mande el formulario. Cambiar las dos. Prefijo sin regla = '' (Incompleta).
+  var TIPOS_POR_PREFIJO = {
+    ADO: 'Adopción', HAR: 'Hardware', MAP: 'Mejora Aplicativo', PRB: 'Problem', REQ: 'Requerimiento',
+    RTI: 'Requerimiento TI a TI', S2L: 'Shift Left Administrador', SKB: 'SorIA_KB', SOR: 'SorIA'
+  };
+  var AGRUPACION_POR_CLASIFICACION = {
+    'Adopción': 'Adopción', 'Hardware': 'ReqOpr', 'Mejora Aplicativo': 'Mejora', 'Problem': 'Problem',
+    'Requerimiento': 'ReqOpr', 'Requerimiento TI a TI': 'ReqOpr', 'Shift Left Administrador': 'Adopción',
+    'SorIA_KB': 'SorIA', 'SorIA': 'SorIA'
+  };
+  var TiposPorPrefijo = {
+    clasificacion: function (prefijo) {
+      var p = String(prefijo || '').trim().toUpperCase();
+      return Object.prototype.hasOwnProperty.call(TIPOS_POR_PREFIJO, p) ? TIPOS_POR_PREFIJO[p] : '';
+    },
+    agrupacion: function (clasificacion) {
+      return Object.prototype.hasOwnProperty.call(AGRUPACION_POR_CLASIFICACION, clasificacion) ? AGRUPACION_POR_CLASIFICACION[clasificacion] : '';
+    }
+  };
 
   // Lo unico que se revisa en una iniciativa EXISTENTE (ver cabecera).
   var CAMPOS_REGISTRO = ['categoria', 'pct'];
@@ -689,8 +713,8 @@ window.IniciativaAdmin = (function () {
       this.catalogo = catalogo;
       this.tipo = '';
       this.valores = { titulo: '', descripcion: '', observaciones: '' };
-      // Declarados (no se derivan del prefijo). La fecha de entrega del
-      // analisis empieza en hoy y ADM la puede cambiar.
+      // Clasificacion y Agrupacion: del Tipo (elegirTipo). Estado: declarado.
+      // La fecha de entrega del analisis empieza en hoy y ADM la puede cambiar.
       this.declarados = { tipo_iniciativa: '', tipo_agrupado: '', estado: '', f_entrega_analisis: FECHAS_GESTION.hoy() };
       this.categorias = new CategoriasProblema([], BorradorAdmin.rutasDe(catalogo));
       this.rca = null;   // nombre del archivo elegido; no se sube
@@ -732,14 +756,19 @@ window.IniciativaAdmin = (function () {
       return salida;
     }
 
+    // Clasificacion y Agrupacion salen del Tipo (TiposPorPrefijo).
     elegirTipo(valor) {
       this.tipo = valor && this.catalogo.tieneTipo(valor) ? valor : '';
+      this.declarados.tipo_iniciativa = TiposPorPrefijo.clasificacion(this.tipo);
+      this.declarados.tipo_agrupado = TiposPorPrefijo.agrupacion(this.declarados.tipo_iniciativa);
       return this.tipo !== '';
     }
 
     agregarCategoria(texto) { return this.categorias.agregar(texto); }
 
+    // Clasificacion y Agrupacion no se capturan: las fija elegirTipo.
     capturar(clave, texto) {
+      if (clave === 'tipo_iniciativa' || clave === 'tipo_agrupado') return;
       if (Object.prototype.hasOwnProperty.call(this.valores, clave)) this.valores[clave] = String(texto || '');
       else if (Object.prototype.hasOwnProperty.call(this.declarados, clave)) this.declarados[clave] = String(texto || '').trim();
     }
@@ -1273,12 +1302,18 @@ window.IniciativaAdmin = (function () {
       this.pintarDeclarados();
     }
 
-    // Selectores de Clasificacion, Agrupacion y Estado (con lo que ya
-    // existe) y la fecha de entrega. Sin lista todavia: deshabilitados.
+    // Clasificacion y Agrupacion (solo lectura, del Tipo), selector de
+    // Estado (con lo que ya existe) y la fecha de entrega. Sin lista
+    // todavia: deshabilitado.
     pintarDeclarados() {
       var b = this.borrador, v = this.fuenteValores ? this.fuenteValores() : null, self = this;
-      [['admTipoIniciativa', 'tipo_iniciativa', 'tiposIniciativa'], ['admTipoAgrupado', 'tipo_agrupado', 'tiposAgrupado'],
-       ['admEstado', 'estado', 'estados']].forEach(function (c) {
+      [['admTipoIniciativa', 'tipo_iniciativa'], ['admTipoAgrupado', 'tipo_agrupado']].forEach(function (c) {
+        var el = self.$(c[0]);
+        if (!el) return;
+        el.textContent = !b || !b.tipo ? 'Sale del Tipo de iniciativa'
+          : (b.declarados[c[1]] || 'Sin regla para este Tipo (queda Incompleta)');
+      });
+      [['admEstado', 'estado', 'estados']].forEach(function (c) {
         var el = self.$(c[0]);
         if (!el) return;
         var lista = v && Array.isArray(v[c[2]]) ? v[c[2]] : [];
@@ -1352,8 +1387,7 @@ window.IniciativaAdmin = (function () {
         self.borrador.elegirTipo(e.target.value);
         self.pintar();
       });
-      [['admTipoIniciativa', 'tipo_iniciativa'], ['admTipoAgrupado', 'tipo_agrupado'], ['admEstado', 'estado'],
-       ['admFEntrega', 'f_entrega_analisis']].forEach(function (c) {
+      [['admEstado', 'estado'], ['admFEntrega', 'f_entrega_analisis']].forEach(function (c) {
         var el = self.$(c[0]);
         if (!el) return;
         el.addEventListener('change', function (e) { if (self.borrador) self.borrador.capturar(c[1], e.target.value); });
@@ -1577,6 +1611,7 @@ window.IniciativaAdmin = (function () {
     claseRespuesta: claseRespuesta,
     htmlRespuesta: htmlRespuesta,
     CAMPOS_INCOMPLETA: CAMPOS_INCOMPLETA,
+    TiposPorPrefijo: TiposPorPrefijo,
     CAMPOS_EDICION: CAMPOS_EDICION,
     Incompleta: Incompleta,
     FORMATO: FORMATO,

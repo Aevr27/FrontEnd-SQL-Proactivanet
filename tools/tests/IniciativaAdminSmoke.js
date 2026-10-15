@@ -261,10 +261,23 @@ pruebas.push(function () {
   Check('B1 sin tipo: bloquea solo el Tipo (Clasificacion, Agrupacion y Estado pueden faltar)',
     [false, ['tipo']], [r.listo, claves(r.bloqueantes)]);
   b.elegirTipo('ADO');
-  Check('B1c sin Clasificacion, Agrupacion ni Estado: se puede validar, pero Incompleta con los tres', [true, true, true],
-    [b.revisar().listo, ['tipo_iniciativa', 'tipo_agrupado', 'estado'].every(function (k) { return claves(b.faltantes()).indexOf(k) >= 0; }),
-     b.paraEnviar().some(function (c) { return c[0] === 'tipo_agrupado' && c[1] === ''; })]);
+  Check('B1c Clasificacion y Agrupacion salen del Tipo; sin Estado: se puede validar, Incompleta solo por Estado', [true, ['estado'], 'Adopción', 'Adopción'],
+    [b.revisar().listo, claves(b.faltantes()).filter(function (k) { return /^(tipo_iniciativa|tipo_agrupado|estado)$/.test(k); }),
+     b.declarados.tipo_iniciativa, b.paraEnviar().filter(function (c) { return c[0] === 'tipo_agrupado'; })[0][1]]);
+  b.capturar('tipo_iniciativa', 'Problem');
+  b.capturar('tipo_agrupado', 'Problem');
+  Check('B1d Clasificacion y Agrupacion no se capturan a mano', ['Adopción', 'Adopción'], [b.declarados.tipo_iniciativa, b.declarados.tipo_agrupado]);
+  b.elegirTipo('PRB');
+  Check('B1e otro Tipo las cambia', ['Problem', 'Problem'], [b.declarados.tipo_iniciativa, b.declarados.tipo_agrupado]);
   b.elegirTipo('');
+  Check('B1f sin Tipo: vacias', ['', ''], [b.declarados.tipo_iniciativa, b.declarados.tipo_agrupado]);
+  Check('B1g regla completa (los 9 prefijos de CatPrefijoProblem; sin regla = vacio)',
+    ['Adopción|Adopción', 'Hardware|ReqOpr', 'Mejora Aplicativo|Mejora', 'Problem|Problem', 'Requerimiento|ReqOpr',
+     'Requerimiento TI a TI|ReqOpr', 'Shift Left Administrador|Adopción', 'SorIA_KB|SorIA', 'SorIA|SorIA', '|', 'Problem|Problem'],
+    ['ADO', 'HAR', 'MAP', 'PRB', 'REQ', 'RTI', 'S2L', 'SKB', 'SOR', 'XYZ', ' prb '].map(function (p) {
+      var c = A.TiposPorPrefijo.clasificacion(p);
+      return c + '|' + A.TiposPorPrefijo.agrupacion(c);
+    }));
   Check('B1b la entrega del analisis empieza en hoy', A.FECHAS_GESTION.hoy(), b.declarados.f_entrega_analisis);
   b.capturar('tipo_iniciativa', 'Problem');
   b.capturar('tipo_agrupado', ' Problem ');
@@ -351,10 +364,8 @@ pruebas.push(function () {
       [p.sel('admCatAgregar').disabled, /<select id="admCatBuscar"/.test(p.sel('admCatSelector').innerHTML),
        (p.sel('admCatSelector').innerHTML.match(/<option value="\//g) || []).length]);
     elegir(p, 'admTipo', 'PRB');
-    Check('C2b Clasificacion, Agrupacion y Estado con los valores del registro; entrega = hoy', [['Mejora', 'Problem'], ['Adopcion', 'Problem'], ['Cerrado', 'En Análisis', 'En Solución'], A.FECHAS_GESTION.hoy()],
-      [p.sel('admTipoIniciativa').opciones(), p.sel('admTipoAgrupado').opciones(), p.sel('admEstado').opciones(), p.sel('admFEntrega').value]);
-    elegir(p, 'admTipoIniciativa', 'Problem');
-    elegir(p, 'admTipoAgrupado', 'Problem');
+    Check('C2b Clasificacion y Agrupacion del Tipo (solo lectura); Estado con los valores del registro; entrega = hoy', ['Problem', 'Problem', ['Cerrado', 'En Análisis', 'En Solución'], A.FECHAS_GESTION.hoy()],
+      [p.sel('admTipoIniciativa').textContent, p.sel('admTipoAgrupado').textContent, p.sel('admEstado').opciones(), p.sel('admFEntrega').value]);
     elegir(p, 'admEstado', 'En Análisis');
     Check('C3 aviso en vivo: incompleta, con RCA', true,
       /Incompleta/.test(p.sel('admFaltantes').innerHTML) && /RCA/.test(p.sel('admFaltantes').innerHTML));
@@ -862,8 +873,6 @@ pruebas.push(function () {
   }).then(function (r) {
     Check('G12 sin tipo: no se envia (bloqueante local)', [null, 0], [r, srv.pedidos.length]);
     elegir(p, 'admTipo', 'ADO');
-    elegir(p, 'admTipoIniciativa', 'Mejora');
-    elegir(p, 'admTipoAgrupado', 'Adopcion');
     elegir(p, 'admEstado', 'En Análisis');
     p.pagina.crearAdmin.agregarCategoria('/A/Cat 2');
     p.pagina.crearAdmin.agregarCategoria('/A/Cat 1');
@@ -875,7 +884,7 @@ pruebas.push(function () {
     Check('G13 envia accion=crear con dos categorias y su %', ['crear', 'ADO', '', [['cat_ruta', '/A/Cat 2'], ['cat_pct', '15'], ['cat_ruta', '/A/Cat 1'], ['cat_pct', '']]],
       [campos.accion, campos.tipo, campos.po, srv.pedidos[0].campos.filter(function (c) { return /^cat_/.test(c[0]); })]);
     Check('G13 la volumetria no viaja (es calculada)', false, srv.pedidos[0].campos.some(function (c) { return /volumetria/.test(c[0]); }));
-    Check('G13b viajan Clasificacion, Agrupacion, Estado y entrega (hoy)', ['Mejora', 'Adopcion', 'En Análisis', A.FECHAS_GESTION.hoy()],
+    Check('G13b viajan Clasificacion y Agrupacion (del Tipo), Estado y entrega (hoy)', ['Adopción', 'Adopción', 'En Análisis', A.FECHAS_GESTION.hoy()],
       [campos.tipo_iniciativa, campos.tipo_agrupado, campos.estado, campos.f_entrega_analisis]);
     Check('G14 501: aviso, faltantes del servidor, nunca ok', ['no_habilitada', true, false, true, true],
       [r.estado, caja.classList.contains('aviso'), caja.classList.contains('ok'), /Incompleta/.test(caja.innerHTML), /No se guardó/.test(caja.innerHTML)]);
