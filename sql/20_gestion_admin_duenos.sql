@@ -24,9 +24,16 @@
      Para deshacer: primero GuardaDuenos = false (desplegar), luego el
      rollback. Lo ya guardado en OwnerProblem / OwnerServicio se queda.
 
-   PRECONDICION (si no se cumple, no toca nada)
-     adm.usp_GestionAdmin_Crear existe, es la de sql/18 (registra ALTA en
-     adm.IniciativaProtegida) y todavia no tiene @OwnerProblem.
+   PRECONDICION (si no se cumple, ROLLBACK y no toca nada)
+     adm.usp_GestionAdmin_Crear existe y su hash es EXACTAMENTE el de sql/18
+     (0x1183206C...F21E8). Cualquier otra definicion (sql/20 ya aplicada o
+     un cambio a mano) se rechaza. Hash = SHA2_256 de OBJECT_DEFINITION sin
+     espacios, tabs ni saltos de linea (misma regla que el diag ADM_04 sec
+     11 y GestionAdminSqlLocalDbSmoke); SQL Server guarda un ALTER como
+     'CREATE PROCEDURE', asi que sql/18 y este rollback dan el mismo hash.
+   POSTCONDICION (si no se cumple, ROLLBACK)
+     hash = el de sql/20 (abajo) y parametros exactos (nombre, tipo, largo,
+     OUTPUT, READONLY, en orden).
 
    DIAG ADM_04 (repo del backend), seccion 11: despues de esto marca
      adm.usp_GestionAdmin_Crear como 'OTRA: revisar'. Es lo esperado si el
@@ -48,11 +55,17 @@ END;
 GO
 SET XACT_ABORT ON;
 BEGIN TRAN;
-DECLARE @def nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID('adm.usp_GestionAdmin_Crear'));
-IF @def IS NULL OR @def NOT LIKE N'%adm.IniciativaProtegida%' OR @def LIKE N'%@OwnerProblem%'
+DECLARE @hash varbinary(32) = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
+                            OBJECT_DEFINITION(OBJECT_ID('adm.usp_GestionAdmin_Crear', 'P')),
+                            N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+IF @hash IS NULL OR @hash <> 0x1183206C8BF1CFB33675A44D104D65F8660BCC0FF88CC63E40324DB7FBAF21E8
 BEGIN
     ROLLBACK;
-    RAISERROR (N'Migracion 20: adm.usp_GestionAdmin_Crear no es la de sql/18 (falta, no protege o ya tiene @OwnerProblem). No se toca nada.', 16, 1);
+    DECLARE @hex nvarchar(70) = ISNULL(CONVERT(nvarchar(70), @hash, 1), N'NULL: no existe o sin VIEW DEFINITION');
+    IF @hash = 0x77292B7976EAF0670BE8961824D212EEEFB218343A816CE83BB6F3FE8934C297
+        RAISERROR (N'Migracion 20: adm.usp_GestionAdmin_Crear ya tiene @OwnerProblem (hash de sql/20). No se toca nada.', 16, 1);
+    ELSE
+        RAISERROR (N'Migracion 20: adm.usp_GestionAdmin_Crear no es la de sql/18 (hash %s). No se toca nada.', 16, 1, @hex);
     SET NOEXEC ON;
 END;
 GO
@@ -223,8 +236,17 @@ END;
 GO
 IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Migracion 20: transaccion cerrada; nada que confirmar.', 16, 1); SET NOEXEC ON; END;
 GO
-IF EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Crear') AND name = N'@OwnerProblem')
-   AND EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Crear') AND name = N'@OwnerServicio')
+DECLARE @hash varbinary(32) = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
+                            OBJECT_DEFINITION(OBJECT_ID('adm.usp_GestionAdmin_Crear', 'P')),
+                            N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+DECLARE @firma nvarchar(4000) = (SELECT STRING_AGG(CONCAT(p.name, N' ', TYPE_NAME(p.user_type_id), N' ', p.max_length, N' ', p.is_output, N' ', p.is_readonly), N',')
+                                    WITHIN GROUP (ORDER BY p.parameter_id)
+                             FROM sys.parameters AS p WHERE p.object_id = OBJECT_ID('adm.usp_GestionAdmin_Crear', 'P'));
+IF @hash = 0x77292B7976EAF0670BE8961824D212EEEFB218343A816CE83BB6F3FE8934C297
+   AND @firma = N'@Usuario nvarchar 512 0 0,@Prefijo nvarchar 20 0 0,@TipoIniciativa nvarchar 200 0 0,@TipoAgrupado nvarchar 200 0 0,'
+             + N'@Estado nvarchar 200 0 0,@Titulo nvarchar -1 0 0,@Descripcion nvarchar -1 0 0,@Observaciones nvarchar -1 0 0,'
+             + N'@FechaEntregaAnalisis date 3 0 0,@Categorias CategoriaPctTipo -1 0 1,@Hoy date 3 0 0,'
+             + N'@OwnerProblem nvarchar 8000 0 0,@OwnerServicio nvarchar 8000 0 0,@Codigo nvarchar 200 1 0'
 BEGIN
     COMMIT;
     SELECT Migracion = 20, Resultado = 'APLICADA';
@@ -232,7 +254,8 @@ END
 ELSE
 BEGIN
     ROLLBACK;
-    RAISERROR (N'Migracion 20: el procedimiento no quedo con @OwnerProblem / @OwnerServicio; ROLLBACK.', 16, 1);
+    DECLARE @hex nvarchar(70) = ISNULL(CONVERT(nvarchar(70), @hash, 1), N'NULL');
+    RAISERROR (N'Migracion 20: el procedimiento no quedo como el de sql/20 (hash %s o parametros distintos); ROLLBACK.', 16, 1, @hex);
 END;
 GO
 SET NOEXEC OFF;

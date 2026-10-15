@@ -117,6 +117,30 @@ public static class GestionAdminSqlLocalDbSmoke
         finally { using (var cmd = new SqlCommand("SET NOEXEC OFF; IF @@TRANCOUNT > 0 ROLLBACK;", cn)) cmd.ExecuteNonQuery(); }
     }
 
+    // Corre un script que debe negarse de las dos formas en que se corre en la
+    // VM: sqlcmd -b (se para en el primer error) y SSMS (sigue con los lotes
+    // que quedan; ahi actua SET NOEXEC ON). Devuelve, por forma, si el
+    // mensaje trae 'motivo' y el @@TRANCOUNT ANTES de limpiar:
+    // "True|0|True|0" = se nego bien y no dejo transaccion abierta.
+    static string Rechazo(SqlConnection cn, string sql, string motivo)
+    {
+        var r = new List<string>();
+        foreach (var comoSsms in new[] { false, true })
+        {
+            var msg = "";
+            foreach (var lote in Regex.Split(sql, @"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase))
+            {
+                if (lote.Trim().Length == 0) continue;
+                try { using (var cmd = new SqlCommand(lote, cn) { CommandTimeout = 120 }) cmd.ExecuteNonQuery(); }
+                catch (SqlException ex) { msg += ex.Message + " "; if (!comoSsms) break; }
+            }
+            // NOEXEC OFF primero: si quedo en ON, el SELECT no correria.
+            r.Add(msg.Contains(motivo) + "|" + Celda(Uno(cn, "SET NOEXEC OFF; SELECT @@TRANCOUNT")));
+            Exec(cn, "IF @@TRANCOUNT > 0 ROLLBACK;");
+        }
+        return string.Join("|", r);
+    }
+
     static object Uno(SqlConnection cn, string sql)
     {
         using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 120 }) { var v = cmd.ExecuteScalar(); return v == DBNull.Value ? null : v; }
@@ -446,6 +470,28 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 // exacto) y lo guardado se queda. Despues se reaplica.
                 var hash20 = HashDef(cn, "adm.usp_GestionAdmin_Crear");
                 Console.WriteLine("INFO  hash adm.usp_GestionAdmin_Crear con sql/20 = " + hash20);
+                // Definicion inesperada (un cambio a mano que conserva firma y
+                // nombres): las guardas por hash la rechazan sin tocarla. Se
+                // restaura con el texto original (SQL Server guarda el ALTER
+                // como CREATE: mismo hash).
+                Func<string> defCrear = () => (string)Uno(cn, "SELECT OBJECT_DEFINITION(OBJECT_ID('adm.usp_GestionAdmin_Crear'))");
+                Action<string> redefinir = d => Exec(cn, "ALTER" + d.Substring(d.IndexOf("CREATE", StringComparison.Ordinal) + 6));
+                Func<string, string> aMano = d => d.Replace("SET NOCOUNT ON;", "SET NOCOUNT ON; /* cambio a mano */");
+                const string negocioO = "SELECT COUNT(*), CHECKSUM_AGG(BINARY_CHECKSUM(*)) FROM dbo.Problem";
+                var negocioAntesO = Filas(cn, negocioO);
+                var def20 = defCrear();
+                redefinir(aMano(def20));
+                var hashMano20 = HashDef(cn, "adm.usp_GestionAdmin_Crear");
+                Check("O8c rollback sobre una Crear con @OwnerProblem pero no la de sql/20: se niega, sin transaccion abierta, no la toca", "True|0|True|0|True",
+                      Rechazo(cn, Leer("sql", "20_gestion_admin_duenos_rollback.sql"), "no es la de sql/20") + "|" + (HashDef(cn, "adm.usp_GestionAdmin_Crear") == hashMano20 && hashMano20 != hash20));
+                redefinir(def20);
+                Check("O8c ... restaurada al texto de sql/20", hash20, HashDef(cn, "adm.usp_GestionAdmin_Crear"));
+                // Postcondicion: si el ALTER deja otra cosa (aqui, el script con
+                // el cuerpo cambiado en memoria), ROLLBACK y queda la de antes.
+                Func<string, string> cuerpoCambiado = t => t.Replace("SET NOCOUNT ON; SET XACT_ABORT ON;", "SET NOCOUNT ON; SET XACT_ABORT ON; /* x */");
+                Check("O8d rollback cuyo ALTER no deja la de sql/18: ROLLBACK, sin transaccion abierta, sigue la de sql/20", "True|0|True|0|" + hash20,
+                      Rechazo(cn, cuerpoCambiado(Leer("sql", "20_gestion_admin_duenos_rollback.sql")), "no quedo como el de sql/18") + "|" +
+                      HashDef(cn, "adm.usp_GestionAdmin_Crear"));
                 Lotes(cn, Leer("sql", "20_gestion_admin_duenos_rollback.sql"));
                 Check("O8 rollback: sin parametros nuevos, hash = el de sql/18 revisado (diag ADM_04 sec 11), datos intactos",
                       "0|0x1183206C8BF1CFB33675A44D104D65F8660BCC0FF88CC63E40324DB7FBAF21E8|PO Cualquiera|SO De Otra Rama",
@@ -453,7 +499,21 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                       HashDef(cn, "adm.usp_GestionAdmin_Crear") + "|" + duenos(oTres));
                 Check("O8b rollback otra vez se niega", "True",
                       LotesError(cn, Leer("sql", "20_gestion_admin_duenos_rollback.sql")).Contains("sql/20 no aplicada"));
+                // Con la guarda vieja esta pasaba: protege y no tiene @OwnerProblem.
+                var def18 = defCrear();
+                var hash18 = HashDef(cn, "adm.usp_GestionAdmin_Crear");
+                redefinir(aMano(def18));
+                var hashMano18 = HashDef(cn, "adm.usp_GestionAdmin_Crear");
+                Check("O1c sql/20 sobre una Crear sin @OwnerProblem pero no la de sql/18: se niega, sin transaccion abierta, no la toca", "True|0|True|0|True|0",
+                      Rechazo(cn, Leer("sql", "20_gestion_admin_duenos.sql"), "no es la de sql/18") + "|" + (HashDef(cn, "adm.usp_GestionAdmin_Crear") == hashMano18 && hashMano18 != hash18) + "|" +
+                      Uno(cn, "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Crear') AND name LIKE N'@Owner%'"));
+                redefinir(def18);
+                Check("O1c ... restaurada al texto de sql/18", hash18, HashDef(cn, "adm.usp_GestionAdmin_Crear"));
+                Check("O1d sql/20 cuyo ALTER no deja la de sql/20: ROLLBACK, sin transaccion abierta, sigue la de sql/18", "True|0|True|0|" + hash18,
+                      Rechazo(cn, cuerpoCambiado(Leer("sql", "20_gestion_admin_duenos.sql")), "no quedo como el de sql/20") + "|" +
+                      HashDef(cn, "adm.usp_GestionAdmin_Crear"));
                 Lotes(cn, Leer("sql", "20_gestion_admin_duenos.sql"));
+                Check("O9b iniciativas intactas tras rollback, rechazos y reaplicacion", negocioAntesO, Filas(cn, negocioO));
                 Check("O9 hash de Crear con sql/20 = el esperado (diag ADM_04 sec 11 por actualizar)", HashCrearSql20, hash20);
                 Check("O9 reaplicada: mismo hash que la primera vez", hash20, HashDef(cn, "adm.usp_GestionAdmin_Crear"));
 
