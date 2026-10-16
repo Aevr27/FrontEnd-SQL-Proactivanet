@@ -1751,6 +1751,18 @@ pruebas.push(function () {
     S(Ini('g', { estado: 'En Solución', f_analisis: '2026-12-01', f_solucion: null })),  // la fecha es la de SU estado
     S(Ini('h', {}))                                                        // sin control_fecha (servidor anterior) = con control
   ]);
+  // Sin control de fecha NO es Sin fecha ni En tiempo (ver la cabecera de
+  // registro-iniciativas.js): una REQ/RTI con fecha vigente, vencida o sin
+  // ella sigue en gris; ninguna suma al rojo de "Sin fecha".
+  Check('SF7 sin control: gris con fecha vigente, vencida o sin fecha; nunca sin_fecha ni en_tiempo',
+    ['sin_control', 'sin_control', 'sin_control'], [
+      S(Ini('r1', { prefijo: 'REQ', control_fecha: false, f_analisis: '2099-12-31' })),
+      S(Ini('r2', { prefijo: 'RTI', control_fecha: false, f_analisis: '2020-01-01', fecha_retrasada: false })),
+      S(Ini('r3', { prefijo: 'REQ', control_fecha: false, f_analisis: null }))]);
+  Check('SF7 cuenta: las sin control no inflan Sin fecha ni En tiempo',
+    { sin_fecha: 1, atrasada: 0, en_tiempo: 1, sin_control: 2 },
+    R.Registro.semaforo([Ini('1', { f_analisis: null }), Ini('2'),
+      Ini('3', { control_fecha: false, f_analisis: null }), Ini('4', { control_fecha: false })]));
   Check('SF1 cuenta: solo activas; Cerrado y otros estados no entran',
     { sin_fecha: 1, atrasada: 1, en_tiempo: 1, sin_control: 1 },
     R.Registro.semaforo([Ini('1', { f_analisis: null }), Ini('2', { fecha_retrasada: true }), Ini('3'),

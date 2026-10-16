@@ -56,6 +56,16 @@
      En tiempo             con fecha y sin vencer.
    Sin control_fecha (servidor anterior) cuenta como con control, que es el
    ISNULL(ControlDeFecha, 1) del servidor.
+   Por que "Sin control de fecha" NO se funde con "Sin fecha" (revisado
+   2026-10-16): son reglas distintas. Sin fecha = un tipo CON fecha
+   compromiso al que le falta capturarla (dato pendiente: rojo). Sin control
+   = el catalogo (CatPrefijoProblem.ControlDeFecha = 0, regla c04a23a) dice
+   que el tipo no tiene fecha que vencer: el servidor (ExperienciaQueries
+   .Semaforo) lo deja en ambar y nunca retrasado, tenga o no fecha. Fundirlas
+   pintaria de rojo y contaria como pendientes las REQ/RTI sin fecha, y las
+   que si tienen una caerian en En tiempo, prometiendo un compromiso que no
+   existe. Con cero activas sin control, el semaforo ya muestra solo tres
+   (siHay).
 
    FILTROS
    -------
