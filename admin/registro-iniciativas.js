@@ -25,28 +25,45 @@
                       de Experiencia (filasBaseAct). Incluye las sin
                       categoria. Globo de ayuda (GloboAyuda) con ese
                       criterio, armado con lo que manda el servidor.
-     Fuera de Activas Total - Activas: abiertas que no cumplen el criterio
-                      de Activas (otro estado o agrupacion fuera de las
-                      cuatro). Cerrado no esta en estados_activos, asi que
-                      toda Activa es abierta y la resta no deja nada sin
-                      clasificar.
+     Requerimientos   abiertas (no Cerrado) con agrupacion ReqOpr
+                      (AGRUPACION_REQUERIMIENTOS, comparada con plano()).
+                      `agrup` es dbo.ProblemCategoria.TipoAgrupado de su
+                      primera fila (sin categoria: dbo.Problem
+                      .TipoIniciativa). NO es Total - Activas ni el prefijo
+                      (REQ/HAR): un HAR puede ser Adopcion. Cuentan en
+                      Total, nunca en Activas (ReqOpr no es agrupador).
+                      Reemplaza a "Fuera de Activas" (2026-10-16): en la VM
+                      esas 223 eran 185 ReqOpr + 38 "Adopcion" con tilde,
+                      que el servidor ya reconoce (Canonizar). fueraActivas
+                      se sigue calculando (Total = Activas + fueraActivas),
+                      sin tarjeta.
      Atrasadas        `seguimiento` y `retrazado`, solo las que tienen
                       categoria: el criterio del KPI "Iniciativas
                       Retrasadas" de Experiencia (aqui se rotula Atrasadas). El pie suma riesgo_folio
                       ("tickets en riesgo").
      Cerradas         estado Cerrado (el mismo plano()). Otros estados no
-                      activos NO cuentan aqui: van en Total y en Fuera de
-                      Activas.
+                      activos NO cuentan aqui: van en Total.
    Total + Cerradas = todas las iniciativas del registro.
+
+   SEMAFORO (junto al titulo Registro; registro COMPLETO, como los KPIs)
+   ----------------------------------------------------------------------
+   Solo las de estado activo (`activa`): las demas no tienen fecha
+   compromiso. Cada una cae en UNA, en este orden (semaforoFecha):
+     Sin control de fecha  control_fecha === false (CatPrefijoProblem
+                           .ControlDeFecha = 0: REQ/RTI); gris, solo si hay.
+     Atrasadas             fecha_retrasada (el semaforo del servidor).
+     Sin fecha             sin la fecha compromiso de su estado.
+     En tiempo             con fecha y sin vencer.
+   Sin control_fecha (servidor anterior) cuenta como con control, que es el
+   ISNULL(ControlDeFecha, 1) del servidor.
 
    FILTROS
    -------
      Estado               varios a la vez (O), igual que Tipo de
                           iniciativa: opciones = los estados que trae el
                           registro (activos primero); al cargar, todos
-                          menos Cerrado (porOmision; cuenta como filtro y
-                          "Limpiar" lo quita); "Todos" alterna; ninguno =
-                          lista vacia.
+                          (Cerrado incluido; 2026-10-16); "Todos"
+                          alterna; ninguno = lista vacia.
                           (La Agrupacion/TipoAgrupado YA NO es filtro: el
                           dato `agrup` sigue llegando porque decide
                           `seguimiento` -Activas/Retrasadas- y se ve en la
@@ -211,7 +228,24 @@ window.RegistroIniciativas = (function () {
   }
 
   // Los cinco indicadores, en orden (ver la cabecera).
-  var ROTULOS_KPI = ['Total de iniciativas', 'Activas', 'Fuera de Activas', 'Atrasadas', 'Cerradas'];
+  var ROTULOS_KPI = ['Total de iniciativas', 'Activas', 'Requerimientos', 'Atrasadas', 'Cerradas'];
+  // La agrupacion (TipoAgrupado) de los requerimientos REQ/HAR, comparada
+  // con plano(): sin acentos, mayusculas ni espacios de mas.
+  var AGRUPACION_REQUERIMIENTOS = 'reqopr';
+
+  // El semaforo de la fecha compromiso (ver la cabecera): clave, rotulo y
+  // color del punto (.ini-sem). `siHay`: solo se pinta con alguna.
+  var SEMAFORO = [
+    { k: 'sin_fecha', l: 'Sin fecha', c: 'rojo', t: 'Activas con control de fecha y sin la fecha compromiso de su estado.' },
+    { k: 'atrasada', l: 'Atrasadas', c: 'ambar', t: 'Activas con la fecha compromiso de su estado vencida.' },
+    { k: 'en_tiempo', l: 'En tiempo', c: 'verde', t: 'Activas con fecha compromiso vigente.' },
+    { k: 'sin_control', l: 'Sin control de fecha', c: 'gris', siHay: true,
+      t: 'Activas de un tipo sin control de fecha (p. ej. REQ/RTI): no tienen fecha que vencer.' }
+  ];
+  // Color de cada categoria: el MISMO en el semaforo, el punto de la fila
+  // y el del detalle.
+  var COLOR_SEMAFORO = {};
+  SEMAFORO.forEach(function (s) { COLOR_SEMAFORO[s.k] = s.c; });
   function texto(v) { return v === null || v === undefined || v === '' ? '—' : v; }
 
   // Dias desde la creacion de la iniciativa, o null. Es `antiguedad` del
@@ -263,10 +297,8 @@ window.RegistroIniciativas = (function () {
   // Busqueda por folio o titulo
   // ---------------------------------------------------------------------
   // El estado Cerrado, comparado con plano(): lo que cuenta el indicador
-  // Cerradas y lo que el registro oculta al cargar
-  // (FiltroRegistro.porOmision).
+  // Cerradas.
   var ESTADO_CERRADO = 'cerrado';
-  var ESTADOS_OCULTOS = [ESTADO_CERRADO];
 
   // Sin mayusculas ni acentos, espacios colapsados.
   function plano(v) {
@@ -471,12 +503,13 @@ window.RegistroIniciativas = (function () {
     // fueraActivas = total - activas (ver la cabecera).
     static indicadores(lista) {
       var r = { total: 0, sinCategoria: 0, activas: 0, reduceActivas: 0, fueraActivas: 0,
-                retrasadas: 0, riesgo: 0, cerradas: 0 };
+                requerimientos: 0, retrasadas: 0, riesgo: 0, cerradas: 0 };
       lista.forEach(function (i) {
         if (esCerrada(i)) r.cerradas++;
         else {
           r.total++;
           if (i.sin_categoria) r.sinCategoria++;
+          if (Registro.esRequerimiento(i)) r.requerimientos++;
         }
         if (!i.seguimiento) return;
         r.activas++;
@@ -487,6 +520,31 @@ window.RegistroIniciativas = (function () {
         }
       });
       r.fueraActivas = r.total - r.activas;
+      return r;
+    }
+
+    // Agrupacion ReqOpr (ver la cabecera, Requerimientos). El estado lo
+    // decide quien la llama.
+    static esRequerimiento(i) { return plano(i.agrup) === AGRUPACION_REQUERIMIENTOS; }
+
+    // La categoria del semaforo de una iniciativa, o null si no esta en un
+    // estado activo (ver la cabecera, SEMAFORO).
+    static semaforoFecha(i) {
+      if (!i.activa) return null;
+      if (i.control_fecha === false) return 'sin_control';
+      if (i.fecha_retrasada) return 'atrasada';
+      return fechaCompromiso(i) ? 'en_tiempo' : 'sin_fecha';
+    }
+
+    // { sin_fecha, atrasada, en_tiempo, sin_control } sobre una lista (la
+    // vista le pasa el registro completo).
+    static semaforo(lista) {
+      var r = {};
+      SEMAFORO.forEach(function (s) { r[s.k] = 0; });
+      lista.forEach(function (i) {
+        var k = Registro.semaforoFecha(i);
+        if (k) r[k]++;
+      });
       return r;
     }
   }
@@ -596,16 +654,6 @@ window.RegistroIniciativas = (function () {
       }
       f.buscar(this.textoBuscado);
       return f;
-    }
-
-    // Vista por omision al cargar: sin las iniciativas en estado Cerrado
-    // (Estado = todos menos ese). Es un filtro de Estado normal: se ve en el
-    // boton ("3 de 4 estados"), cuenta como filtro activo y "Limpiar" o
-    // "Todos" lo quitan. Sin ningun estado Cerrado en el registro, todos.
-    porOmision() {
-      var todos = this.registro.estados();
-      var abiertos = todos.filter(function (e) { return ESTADOS_OCULTOS.indexOf(plano(e)) < 0; });
-      this.estados.marcados = abiertos.length === todos.length ? null : abiertos;
     }
 
     limpiar() {
@@ -1424,8 +1472,8 @@ window.RegistroIniciativas = (function () {
           if (mia !== self.cargaId) return;
           self.registro = Registro.desdeJson(json);
           self.registro.fijarAlcance(self.rol === 'ADM');
+          // Todas, Cerrado incluido: ningun estado preseleccionado.
           self.filtro = new FiltroRegistro(self.registro);
-          self.filtro.porOmision();
           // Un Reintentar no borra lo ya escrito en la caja.
           self.filtro.buscar(self.$('regBuscar').value || '');
           self.orden = null;
@@ -1457,6 +1505,7 @@ window.RegistroIniciativas = (function () {
         if (this.globoKpis) this.globoKpis.ocultar();
         this.kpisDe = null;
         this.$('regKpis').innerHTML = estado === 'cargando' ? this.htmlKpisCargando() : '';
+        this.$('regSemaforo').innerHTML = '';
         this.bloquearFiltros(estado === 'cargando' ? 'Cargando…' : '');
       }
     }
@@ -1708,7 +1757,8 @@ window.RegistroIniciativas = (function () {
       if (!estados.length || !agr.length) return null;
       return {
         texto: 'Iniciativas en estado ' + enumerar(estados) + ' y con agrupación ' + enumerar(agr) + '.',
-        nota: 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría.'
+        nota: 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría. ' +
+          'La agrupación se reconoce sin importar acentos ni mayúsculas (Adopción = Adopcion).'
       };
     }
 
@@ -1725,9 +1775,9 @@ window.RegistroIniciativas = (function () {
           f: k.sinCategoria ? fmt(k.sinCategoria) + ' sin categoría' : 'todas con categoría', s: '',
           t: 'Iniciativas abiertas: estado distinto de Cerrado.' },
         { l: ROTULOS_KPI[1], v: k.activas, f: fmt(k.reduceActivas) + ' tickets a reducir', s: 'sv', ayuda: ayuda },
-        { l: ROTULOS_KPI[2], v: k.fueraActivas, f: 'abiertas: Total − Activas', s: '',
-          t: 'Abiertas que no cumplen el criterio de Activas (por su estado o su agrupación).' },
-        { l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sr' : 'sv',
+        { l: ROTULOS_KPI[2], v: k.requerimientos, f: 'agrupación ReqOpr, abiertos', s: '',
+          t: 'Requerimientos (REQ/HAR): abiertos, estado distinto de Cerrado, con agrupación ReqOpr. Cuentan en Total, no en Activas.' },
+        { l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sa' : 'sv',
           t: 'Activas con la fecha de su estado vencida y con categoría (criterio de Experiencia).' },
         { l: ROTULOS_KPI[4], v: k.cerradas, f: 'estado Cerrado', s: '',
           t: 'Iniciativas en estado Cerrado.' }
@@ -1748,6 +1798,17 @@ window.RegistroIniciativas = (function () {
           '<div class="lbl">' + Escape.html(c.l) + '</div>' +
           '<div class="val">' + fmt(c.v) + '</div>' +
           '<div class="foot">' + Escape.html(c.f) + '</div></div>';
+      }).join('');
+      this.pintarSemaforo();
+    }
+
+    // Una linea compacta: punto, rotulo y cuenta por categoria.
+    pintarSemaforo() {
+      var n = Registro.semaforo(this.registro.iniciativas);
+      this.$('regSemaforo').innerHTML = SEMAFORO.filter(function (s) { return !s.siHay || n[s.k] > 0; }).map(function (s) {
+        return '<span class="ini-semaforo-op" data-semaforo="' + s.k + '" title="' + Escape.attr(s.t) + '">' +
+          '<span class="ini-sem ' + s.c + '" aria-hidden="true"></span>' + Escape.html(s.l) +
+          ' <b>' + fmt(n[s.k]) + '</b></span>';
       }).join('');
     }
 
@@ -1783,10 +1844,17 @@ window.RegistroIniciativas = (function () {
     }
 
     // Punto del semaforo + la fecha del estado actual. Atrasada
-    // (fecha_retrasada): fecha en rojo y, debajo en la misma celda, la
+    // (fecha_retrasada): fecha en ambar y, debajo en la misma celda, la
     // palabra; sin pintar la fila entera.
+    // El color del punto de una activa es el de su categoria del semaforo
+    // (COLOR_SEMAFORO: Sin fecha rojo, Atrasada ambar, En tiempo verde, Sin
+    // control gris). Solo cambia el color: la clasificacion es la misma
+    // (semaforoFecha) y los textos no se tocan. Las no activas conservan el
+    // color del servidor (sem_fecha 'verde': sin compromiso vigente).
     htmlPunto(i) {
-      var sem = i.sem_fecha === 'rojo' || i.sem_fecha === 'ambar' || i.sem_fecha === 'verde' ? i.sem_fecha : '';
+      var k = Registro.semaforoFecha(i);
+      var sem = k ? COLOR_SEMAFORO[k]
+        : i.sem_fecha === 'rojo' || i.sem_fecha === 'ambar' || i.sem_fecha === 'verde' ? i.sem_fecha : '';
       return sem ? '<span class="ini-sem ' + sem + '" aria-hidden="true"></span>' : '';
     }
 
@@ -1797,6 +1865,9 @@ window.RegistroIniciativas = (function () {
       if (i.fecha_retrasada) {
         return punto + '<b class="ini-vencida">' + Escape.html(fecha(f)) + '</b><span class="ini-retraso">Atrasada</span>';
       }
+      // Sin control de fecha (REQ/RTI) y sin fecha: lo mismo que dice el
+      // semaforo, no "Sin fecha".
+      if (!f && i.control_fecha === false) return punto + '<span class="ini-tenue">Sin control de fecha</span>';
       return punto + Escape.html(f ? fecha(f) : 'Sin fecha');
     }
 
@@ -2504,7 +2575,7 @@ window.RegistroIniciativas = (function () {
         '<p class="ini-det-nombre">' + Escape.html(texto(i.titulo)) + '</p>' +
         '<div class="ini-det-marcas">' + this.htmlEstado(i) +
           (i.agrup ? ' <span class="chip ini-chip">' + Escape.html(i.agrup) + '</span>' : '') +
-          (i.activa && i.fecha_retrasada ? ' <span class="pill vencido">Atrasada</span>' : '') +
+          (i.activa && i.fecha_retrasada ? ' <span class="pill ini-atrasada">Atrasada</span>' : '') +
         '</div>' +
         this.htmlIncompleta(i) +
         '<div class="ini-det-acciones" id="regDetAcciones">' + this.htmlAcciones() + '</div>' +

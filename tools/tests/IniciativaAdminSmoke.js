@@ -1923,7 +1923,7 @@ pruebas.push(function () {
     return reg.guardarEdicion(Servidor(200, GUARDADA).pedir,
       RegistroGuardado({ titulo: 'Nuevo', titulo_problem: 'Nuevo', estado: 'Cerrado', activa: false, seguimiento: false }));
   }).then(function (r) {
-    Check('GS24 Modificar guardado: indicadores del registro releido (Total, Activas, Fuera, Retrasadas, Cerradas)',
+    Check('GS24 Modificar guardado: indicadores del registro releido (Total, Activas, Requerimientos, Atrasadas, Cerradas)',
       [['3', '3', '0', '0', '0'], 'guardada', ['2', '2', '0', '0', '1']], [antes, r.estado, kpisDe(p)]);
     Check('GS24 ... filtros, busqueda, orden, "mostrar mas", modo y detalle intactos', [VISTA, 'PRB 2026-000001'],
       [vista(p, reg), reg.abierta]);
@@ -1951,8 +1951,8 @@ pruebas.push(function () {
     };
     return p.pagina.crearAdmin.alGuardar('ADO 2026-000074');
   }).then(function (res) {
-    Check('GS25 Crear guardado: Total sube y la nueva cae en Fuera de Activas',
-      [['3', '3', '0', '0', '0'], true, ['4', '3', '1', '0', '0']], [antes, res.ok, kpisDe(p)]);
+    Check('GS25 Crear guardado: Total sube y la nueva (fuera de seguimiento) no cuenta en Activas',
+      [['3', '3', '0', '0', '0'], true, ['4', '3', '0', '0', '0']], [antes, res.ok, kpisDe(p)]);
     Check('GS25 ... filtros, busqueda, orden, "mostrar mas", modo, detalle y borrador intactos',
       [VISTA, 'PRB 2026-000002', true, 'Borrador B'], [vista(p, reg), reg.abierta, reg.edicion === edB, edB.valores.observaciones]);
   });
