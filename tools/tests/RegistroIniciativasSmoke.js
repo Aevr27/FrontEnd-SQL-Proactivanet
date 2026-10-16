@@ -1593,7 +1593,7 @@ pruebas.push(function () {
 // R) Lista: orden de columnas, Atrasada bajo la fecha, dias desde la
 //    creacion y desglose de Fuera de Activas
 // ---------------------------------------------------------------------------
-var COLUMNAS_LISTA = ['Código', 'Título', 'Estado', 'Agrupación', 'Tickets a reducir', 'Fecha compromiso',
+var COLUMNAS_LISTA = ['Código', 'Título', 'Estado', 'Agrupación', 'Antigüedad', 'Tickets a reducir', 'Fecha compromiso',
   'Service Owner', 'Product Owner'];
 function cabeceras(p) {
   var re = /data-orden="[^"]+">([^<]+)</g, m, s = [];
@@ -1672,6 +1672,24 @@ pruebas.push(function () {
     sinOmision(p);   // HAR 3 esta Cerrado: oculto por omision
     Check('R3 sin dato de f_creacion (servidor anterior): antiguedad tal cual', 'Hace 10 días',
       (/ini-edad[^>]*>([^<]+)</.exec(celda(p, 'HAR 2025-000003', 'Código')) || [])[1]);
+
+    // Columna Antigüedad (a la izquierda de Tickets a reducir): el mismo
+    // dato en dias; meses / semanas / dias en el title y en el detalle (R4).
+    Check('R5 columna Antigüedad: en dias, — sin fecha de creacion', ['130 días', '0 días', '1 día', '—'],
+      ['PRB 2026-000001', 'MAP 2026-000002', 'REQ 2026-000004', 'PRB 2026-000005'].map(function (f) {
+        return celda(p, f, 'Antigüedad').replace(/<[^>]+>/g, '');
+      }));
+    Check('R5 title en meses / semanas / dias; sin title sin dato', [true, false],
+      [/title="4 meses, 1 semana y 3 días"/.test(celda(p, 'PRB 2026-000001', 'Antigüedad')),
+       /title=/.test(celda(p, 'PRB 2026-000005', 'Antigüedad'))]);
+    reg.ordenarPor('edad');
+    Check('R5 ordenar por Antigüedad: la mas antigua primero, sin dato al final', ['edad', 'desc', 'PRB 2026-000001', 'PRB 2026-000005'],
+      (function () {
+        var folios = (p.sel('regCuerpo').innerHTML.match(/<tr class="ini-fila" data-folio="[^"]+"/g) || [])
+          .map(function (t) { return t.replace(/.*data-folio="/, '').replace('"', ''); });
+        return [reg.orden.col, reg.orden.dir, folios[0], folios[folios.length - 1]];
+      })());
+    reg.orden = null; reg.pintarTabla();
 
     clicFolio(p, 'PRB 2026-000001');
     var det = p.sel('regDetCuerpo').innerHTML;

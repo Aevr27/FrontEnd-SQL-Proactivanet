@@ -844,6 +844,8 @@ window.RegistroIniciativas = (function () {
     agrup:   function (i) { return i.agrup || ''; },
     po:      function (i) { return duenos(i, 'po')[0] || ''; },
     so:      function (i) { return duenos(i, 'so')[0] || ''; },
+    // Dias desde la creacion; sin FechaCreacion, vacio (al final).
+    edad:    function (i) { var d = diasDesdeCreacion(i); return d === null ? '' : d; },
     reduce:  function (i) { return numero(i.tickets_reduce); },
     fecha:   function (i) { return fechaCompromiso(i); }
   };
@@ -1454,7 +1456,8 @@ window.RegistroIniciativas = (function () {
         // asc -> desc -> por omision
         this.orden = this.orden.dir === 'asc' ? { col: col, dir: 'desc' } : null;
       } else {
-        this.orden = { col: col, dir: col === 'reduce' ? 'desc' : 'asc' };
+        // Numeros: lo mas grande primero (mas tickets, la mas antigua).
+        this.orden = { col: col, dir: col === 'reduce' || col === 'edad' ? 'desc' : 'asc' };
       }
       this.pintarTabla();
     }
@@ -1828,7 +1831,8 @@ window.RegistroIniciativas = (function () {
       // los dueños al final.
       var cols = [
         { c: 'folio', t: 'Código' }, { c: 'titulo', t: 'Título' }, { c: 'estado', t: 'Estado' },
-        { c: 'agrup', t: 'Agrupación' }, { c: 'reduce', t: 'Tickets a reducir', num: true },
+        { c: 'agrup', t: 'Agrupación' }, { c: 'edad', t: 'Antigüedad', num: true },
+        { c: 'reduce', t: 'Tickets a reducir', num: true },
         { c: 'fecha', t: 'Fecha compromiso' }, { c: 'so', t: 'Service Owner' }, { c: 'po', t: 'Product Owner' }
       ];
       this.$('regCabeza').innerHTML = '<tr>' + cols.map(function (x) {
@@ -1891,6 +1895,19 @@ window.RegistroIniciativas = (function () {
       return '<span class="ini-sub ini-edad" title="' + Escape.attr(ayuda) + '">' + Escape.html(texto) + '</span>';
     }
 
+    // Columna Antigüedad: el mismo dato (diasDesdeCreacion) en dias, para
+    // comparar filas de un vistazo; el title (y la Antigüedad del detalle)
+    // lo dicen en meses / semanas / dias.
+    htmlAntiguedad(i) {
+      var dias = diasDesdeCreacion(i);
+      return dias === null ? '<span class="ini-tenue">—</span>' : Escape.html(fmt(dias) + (dias === 1 ? ' día' : ' días'));
+    }
+
+    atributosAntiguedad(i) {
+      var dias = diasDesdeCreacion(i);
+      return dias === null ? '' : ' title="' + Escape.attr(Duracion.dias(dias)) + '"';
+    }
+
     htmlFila(i) {
       var folio = Escape.attr(i.folio);
       var cats = i.sin_categoria ? '<span class="ini-sub ini-sin-cat">Sin categoría</span>'
@@ -1902,6 +1919,7 @@ window.RegistroIniciativas = (function () {
           Escape.html(texto(i.titulo)) + '</span>' + cats + '</td>' +
         '<td data-col="Estado">' + this.htmlEstado(i) + '</td>' +
         '<td data-col="Agrupación">' + (i.agrup ? '<span class="chip ini-chip">' + Escape.html(i.agrup) + '</span>' : '<span class="ini-tenue">—</span>') + '</td>' +
+        '<td data-col="Antigüedad" class="num ini-edad"' + this.atributosAntiguedad(i) + '>' + this.htmlAntiguedad(i) + '</td>' +
         '<td data-col="Tickets a reducir" class="num">' + fmt(i.tickets_reduce) + '</td>' +
         '<td data-col="Fecha compromiso" class="fecha-cell">' + this.htmlCompromiso(i) + '</td>' +
         '<td data-col="Service Owner" class="ini-col-persona">' + this.htmlDuenos(i, 'so') + '</td>' +
