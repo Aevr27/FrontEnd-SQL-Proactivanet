@@ -14,25 +14,39 @@
    sem_fecha, activa y seguimiento llegan hechos. Lo unico que se hace en el
    navegador es contar, filtrar, ordenar y pintar.
 
-   INDICADORES (sobre lo filtrado)
-   -------------------------------
-     Total        iniciativas del registro (una por folio).
-     Activas      `seguimiento`: estado en estados_activos y agrupacion en
-                  agrupadores. Es el criterio de la tabla "Activas" de
-                  Experiencia (filasBaseAct).
-     Retrasadas   `seguimiento` y `retrazado`, solo las que tienen categoria:
-                  el criterio del KPI "Iniciativas Retrasadas" de
-                  Experiencia. El pie suma riesgo_folio ("tickets en
-                  riesgo").
-     No activas   estado fuera de estados_activos. No se llama "Cerradas":
-                  Experiencia no tiene ese concepto, solo activa / no activa.
+   INDICADORES (sobre el registro COMPLETO, no sobre lo filtrado)
+   ---------------------------------------------------------------
+   Los filtros y la busqueda solo deciden la lista; los indicadores cambian
+   solo cuando cambia el registro (carga, o relectura tras guardar).
+     Total            abiertas: estado distinto de Cerrado (comparado con
+                      plano(): sin mayusculas, acentos ni espacios de mas).
+     Activas          `seguimiento`: estado en estados_activos y agrupacion
+                      en agrupadores. Es el criterio de la tabla "Activas"
+                      de Experiencia (filasBaseAct). Incluye las sin
+                      categoria. Globo de ayuda (GloboAyuda) con ese
+                      criterio, armado con lo que manda el servidor.
+     Fuera de Activas Total - Activas: abiertas que no cumplen el criterio
+                      de Activas (otro estado o agrupacion fuera de las
+                      cuatro). Cerrado no esta en estados_activos, asi que
+                      toda Activa es abierta y la resta no deja nada sin
+                      clasificar.
+     Retrasadas       `seguimiento` y `retrazado`, solo las que tienen
+                      categoria: el criterio del KPI "Iniciativas
+                      Retrasadas" de Experiencia. El pie suma riesgo_folio
+                      ("tickets en riesgo").
+     Cerradas         estado Cerrado (el mismo plano()). Otros estados no
+                      activos NO cuentan aqui: van en Total y en Fuera de
+                      Activas.
+   Total + Cerradas = todas las iniciativas del registro.
 
    FILTROS
    -------
      Estado               varios a la vez (O), igual que Tipo de
                           iniciativa: opciones = los estados que trae el
-                          registro (activos primero); todos marcados por
-                          omision; "Todos" alterna; ninguno = lista vacia.
+                          registro (activos primero); al cargar, todos
+                          menos Cerrado (porOmision; cuenta como filtro y
+                          "Limpiar" lo quita); "Todos" alterna; ninguno =
+                          lista vacia.
                           (La Agrupacion/TipoAgrupado YA NO es filtro: el
                           dato `agrup` sigue llegando porque decide
                           `seguimiento` -Activas/Retrasadas- y se ve en la
@@ -191,8 +205,31 @@ window.RegistroIniciativas = (function () {
     return typeof f === 'number' && isFinite(f) ? Math.round(f * 1000) / 10 + '%' : '—';
   }
   function fecha(s) { return s ? String(s).split('-').reverse().join('/') : '—'; }
+  // ['a', 'b', 'c'] -> 'a, b o c'
+  function enumerar(v) {
+    return v.length < 2 ? v.join('') : v.slice(0, -1).join(', ') + ' o ' + v[v.length - 1];
+  }
+
+  // Los cinco indicadores, en orden (ver la cabecera).
+  var ROTULOS_KPI = ['Total de iniciativas', 'Activas', 'Fuera de Activas', 'Retrasadas', 'Cerradas'];
   function texto(v) { return v === null || v === undefined || v === '' ? '—' : v; }
   function esTexto(v) { return typeof v === 'string' && v !== ''; }
+
+  // GET del registro -> su JSON; rechaza con el mensaje para la vista.
+  function leerRegistro(pedir) {
+    return Promise.resolve()
+      .then(function () {
+        return Promise.resolve(pedir(URL_REGISTRO)).catch(function () {
+          throw new Error('No se pudo conectar con el servidor.');
+        });
+      })
+      .then(function (r) {
+        return r.json().catch(function () { return null; }).then(function (json) {
+          if (!r.ok) throw new Error((json && json.error) || ('El servidor respondió ' + r.status + '.'));
+          return json;
+        });
+      });
+  }
 
   // El selector compartido (IniciativaAdmin.Selector): <select> con 20
   // opciones o menos, caja con busqueda con mas. Sin ese modulo, <select>.
@@ -213,11 +250,18 @@ window.RegistroIniciativas = (function () {
   // ---------------------------------------------------------------------
   // Busqueda por folio o titulo
   // ---------------------------------------------------------------------
+  // El estado Cerrado, comparado con plano(): lo que cuenta el indicador
+  // Cerradas y lo que el registro oculta al cargar
+  // (FiltroRegistro.porOmision).
+  var ESTADO_CERRADO = 'cerrado';
+  var ESTADOS_OCULTOS = [ESTADO_CERRADO];
+
   // Sin mayusculas ni acentos, espacios colapsados.
   function plano(v) {
     return String(v === null || v === undefined ? '' : v).normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
   }
+  function esCerrada(i) { return plano(i.estado) === ESTADO_CERRADO; }
   // Dos llaves de un folio para que no importen separadores ni ceros:
   //   compacta   solo letras y digitos:     'PRB 2026-000012' -> 'prb2026000012'
   //   canonica   tramos sin ceros a la izq: 'PRB 2026-000012' -> 'prb 2026 12'
@@ -410,13 +454,18 @@ window.RegistroIniciativas = (function () {
       return null;
     }
 
-    // Los cuatro indicadores sobre una lista ya filtrada.
+    // Los cinco indicadores sobre una lista de iniciativas (la vista le
+    // pasa el registro completo, no lo filtrado). total = abiertas;
+    // fueraActivas = total - activas (ver la cabecera).
     static indicadores(lista) {
-      var r = { total: lista.length, sinCategoria: 0, activas: 0, reduceActivas: 0,
-                retrasadas: 0, riesgo: 0, noActivas: 0 };
+      var r = { total: 0, sinCategoria: 0, activas: 0, reduceActivas: 0, fueraActivas: 0,
+                retrasadas: 0, riesgo: 0, cerradas: 0 };
       lista.forEach(function (i) {
-        if (i.sin_categoria) r.sinCategoria++;
-        if (!i.activa) r.noActivas++;
+        if (esCerrada(i)) r.cerradas++;
+        else {
+          r.total++;
+          if (i.sin_categoria) r.sinCategoria++;
+        }
         if (!i.seguimiento) return;
         r.activas++;
         r.reduceActivas += numero(i.tickets_reduce);
@@ -425,6 +474,7 @@ window.RegistroIniciativas = (function () {
           r.riesgo += numero(i.riesgo_folio);
         }
       });
+      r.fueraActivas = r.total - r.activas;
       return r;
     }
   }
@@ -446,7 +496,9 @@ window.RegistroIniciativas = (function () {
     alternar(v) {
       var todos = this.opciones();
       if (todos.indexOf(v) < 0) return;
-      var marcados = this.lista();
+      // Un marcado que ya no es opcion (lo conservo sobre() tras un
+      // guardado) se suelta al tocar el filtro.
+      var marcados = this.lista().filter(function (t) { return todos.indexOf(t) >= 0; });
       var k = marcados.indexOf(v);
       if (k >= 0) marcados.splice(k, 1); else marcados.push(v);
       this.marcados = marcados.length === todos.length ? null
@@ -512,6 +564,37 @@ window.RegistroIniciativas = (function () {
     }
 
     elegir(nivel, v) { return this.cascada.elegir(nivel, v); }
+
+    // El mismo filtro sobre un registro recien leido (tras un guardado).
+    // Estado y Tipo se conservan TAL CUAL, aunque un valor elegido ya no
+    // tenga iniciativas: el filtro sigue diciendo lo que el usuario eligio
+    // (y la lista queda vacia) en vez de cambiar solo. Lo marcado es una
+    // lista de inclusion: un valor que aparece por primera vez no entra.
+    // Director y cascada se conservan mientras sigan siendo opcion.
+    sobre(registro) {
+      var f = new FiltroRegistro(registro);
+      ['estados', 'tipos'].forEach(function (k) {
+        var antes = this[k].marcados;
+        f[k].marcados = antes === null ? null : antes.slice();
+      }, this);
+      f.elegirDirector(this.director);
+      var sel = this.cascada.seleccion;
+      for (var n = 0; n < sel.length; n++) {
+        if (sel[n] && !f.cascada.elegir(n, sel[n])) break;
+      }
+      f.buscar(this.textoBuscado);
+      return f;
+    }
+
+    // Vista por omision al cargar: sin las iniciativas en estado Cerrado
+    // (Estado = todos menos ese). Es un filtro de Estado normal: se ve en el
+    // boton ("3 de 4 estados"), cuenta como filtro activo y "Limpiar" o
+    // "Todos" lo quitan. Sin ningun estado Cerrado en el registro, todos.
+    porOmision() {
+      var todos = this.registro.estados();
+      var abiertos = todos.filter(function (e) { return ESTADOS_OCULTOS.indexOf(plano(e)) < 0; });
+      this.estados.marcados = abiertos.length === todos.length ? null : abiertos;
+    }
 
     limpiar() {
       this.estados.limpiar();
@@ -1028,10 +1111,15 @@ window.RegistroIniciativas = (function () {
       // Cobertura: se pide la primera vez que se abre.
       this.modo = 'registro';     // registro | cobertura
       this.cobertura = null;      // Cobertura, ya cargada
+      this.coberturaJson = null;  // su catalogo tal cual llego (actualizar)
       this.coberturaCarga = 0;    // descarta respuestas superadas
       this.coberturaPromesa = null;
       this.covFiltro = '';        // '' | con | sin
       this.busquedaPendiente = null; // espera de la caja de busqueda
+      // Indicadores: el Registro con el que se pintaron (solo se repintan
+      // si cambia) y el globo de ayuda de Activas (GloboAyuda, si esta).
+      this.kpisDe = null;
+      this.globoKpis = null;
       // 'ADM' | 'MOD' | null (fijarRol). Solo ADM ve "Modificar"; null
       // hasta que SesionAdmin responda.
       this.rol = null;
@@ -1104,7 +1192,17 @@ window.RegistroIniciativas = (function () {
     $(id) { return this.doc.getElementById(id); }
 
     iniciar() {
+      var self = this;
       this.cablear();
+      // Globo de ayuda de los indicadores: el patron "Pregunta" de QARE
+      // (assets/js/globo-ayuda.js). Escucha en #regKpis, que no se
+      // reemplaza: las tarjetas se repintan dentro.
+      var Globo = window.GloboAyuda;
+      if (Globo) {
+        this.globoKpis = new Globo(this.$('regKpis'), '.ini-kpi-ayuda', function (d) {
+          return self.ayudaKpi(d.getAttribute('data-kpi-ayuda'));
+        }).conectar();
+      }
       this.cargar();
       return this;
     }
@@ -1303,28 +1401,19 @@ window.RegistroIniciativas = (function () {
       this.cerrarDetalle();
       // La Cobertura cuelga del registro: se vuelve a pedir al reabrirla.
       this.cobertura = null;
+      this.coberturaJson = null;
       this.coberturaPromesa = null;
       this.coberturaCarga++;
       this.mostrarModo('registro');
       this.estadoVista('cargando');
 
-      return Promise.resolve()
-        .then(function () {
-          return Promise.resolve(pedir(URL_REGISTRO)).catch(function () {
-            throw new Error('No se pudo conectar con el servidor.');
-          });
-        })
-        .then(function (r) {
-          return r.json().catch(function () { return null; }).then(function (json) {
-            if (!r.ok) throw new Error((json && json.error) || ('El servidor respondió ' + r.status + '.'));
-            return json;
-          });
-        })
+      return leerRegistro(pedir)
         .then(function (json) {
           if (mia !== self.cargaId) return;
           self.registro = Registro.desdeJson(json);
           self.registro.fijarAlcance(self.rol === 'ADM');
           self.filtro = new FiltroRegistro(self.registro);
+          self.filtro.porOmision();
           // Un Reintentar no borra lo ya escrito en la caja.
           self.filtro.buscar(self.$('regBuscar').value || '');
           self.orden = null;
@@ -1353,6 +1442,8 @@ window.RegistroIniciativas = (function () {
       this.$('regContenido').hidden = !listo;
       this.$('regKpis').setAttribute('aria-busy', estado === 'cargando' ? 'true' : 'false');
       if (!listo) {
+        if (this.globoKpis) this.globoKpis.ocultar();
+        this.kpisDe = null;
         this.$('regKpis').innerHTML = estado === 'cargando' ? this.htmlKpisCargando() : '';
         this.bloquearFiltros(estado === 'cargando' ? 'Cargando…' : '');
       }
@@ -1375,8 +1466,13 @@ window.RegistroIniciativas = (function () {
     }
 
     // ---- pintado ----
+    // Un cambio de filtro vuelve a la primera pagina; repintar no.
     refrescar() {
       this.limite = PAGINA;
+      this.repintar();
+    }
+
+    repintar() {
       this.pintarFiltros();
       this.pintarTabla();
       if (this.modo === 'cobertura' && this.cobertura) this.pintarCobertura();
@@ -1430,12 +1526,17 @@ window.RegistroIniciativas = (function () {
         .then(function (json) {
           if (mia !== self.coberturaCarga || registro !== self.registro) return;
           self.cobertura = Cobertura.desdeJson(json, registro);
+          // actualizar() la rearma con este mismo catalogo sobre un registro
+          // releido.
+          self.coberturaJson = json;
           // Desde aqui la cascada compartida ofrece tambien las categorias
           // y dueños del catalogo.
           registro.ampliar(self.cobertura.filas);
           self.filtro.rearmar();
           self.estadoCobertura('listo');
-          self.refrescar();
+          // Sin volver a la primera pagina: puede llegar despues de un
+          // "mostrar mas" (o de un actualizar()).
+          self.repintar();
         })
         .catch(function (err) {
           if (mia !== self.coberturaCarga) return;
@@ -1580,27 +1681,58 @@ window.RegistroIniciativas = (function () {
     }
 
     htmlKpisCargando() {
-      return ['Total de iniciativas', 'Activas', 'Retrasadas', 'No activas'].map(function (l) {
+      return ROTULOS_KPI.map(function (l) {
         return '<div class="kpi ini-kpi-cargando"><div class="lbl">' + Escape.html(l) + '</div>' +
           '<div class="val">…</div><div class="foot">Cargando…</div></div>';
       }).join('');
     }
 
-    pintarKpis(lista) {
-      var k = Registro.indicadores(lista);
-      var agr = this.registro.agrupadores.join(' · ');
+    // Texto del globo de un indicador (data-kpi-ayuda), o null. El de
+    // Activas se arma con estados_activos y agrupadores del servidor: si
+    // el criterio cambia alli, el texto cambia solo.
+    ayudaKpi(clave) {
+      if (clave !== 'activas' || !this.registro) return null;
+      var estados = this.registro.estadosActivos, agr = this.registro.agrupadores;
+      if (!estados.length || !agr.length) return null;
+      return {
+        texto: 'Iniciativas en estado ' + enumerar(estados) + ' y con agrupación ' + enumerar(agr) + '.',
+        nota: 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría.'
+      };
+    }
+
+    // Sobre el registro COMPLETO: los filtros y la busqueda no los mueven.
+    // Solo se repintan si cambio el registro (carga o relectura).
+    pintarKpis() {
+      if (this.kpisDe === this.registro) return;
+      if (this.globoKpis) this.globoKpis.ocultar();
+      this.kpisDe = this.registro;
+      var k = Registro.indicadores(this.registro.iniciativas);
+      var ayuda = this.ayudaKpi('activas');
       var tarjetas = [
-        { l: 'Total de iniciativas', v: k.total,
-          f: k.sinCategoria ? fmt(k.sinCategoria) + ' sin categoría' : 'todas con categoría', s: '' },
-        { l: 'Activas', v: k.activas, f: fmt(k.reduceActivas) + ' tickets a reducir', s: 'sv',
-          t: 'En Análisis, En Solución o En Monitoreo, de ' + agr + ' (criterio de Experiencia).' },
-        { l: 'Retrasadas', v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sr' : 'sv',
+        { l: ROTULOS_KPI[0], v: k.total,
+          f: k.sinCategoria ? fmt(k.sinCategoria) + ' sin categoría' : 'todas con categoría', s: '',
+          t: 'Iniciativas abiertas: estado distinto de Cerrado.' },
+        { l: ROTULOS_KPI[1], v: k.activas, f: fmt(k.reduceActivas) + ' tickets a reducir', s: 'sv', ayuda: ayuda },
+        { l: ROTULOS_KPI[2], v: k.fueraActivas, f: 'abiertas: Total − Activas', s: '',
+          t: 'Abiertas que no cumplen el criterio de Activas (por su estado o su agrupación).' },
+        { l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sr' : 'sv',
           t: 'Activas con la fecha de su estado vencida y con categoría (criterio de Experiencia).' },
-        { l: 'No activas', v: k.noActivas, f: 'fuera de los estados activos', s: '',
-          t: 'Estado distinto de ' + this.registro.estadosActivos.join(', ') + '.' }
+        { l: ROTULOS_KPI[4], v: k.cerradas, f: 'estado Cerrado', s: '',
+          t: 'Iniciativas en estado Cerrado.' }
       ];
+      var conGlobo = !!this.globoKpis;
       this.$('regKpis').innerHTML = tarjetas.map(function (c) {
-        return '<div class="kpi ini-kpi ' + c.s + '"' + (c.t ? ' title="' + Escape.attr(c.t) + '"' : '') + '>' +
+        var boton = '';
+        if (c.ayuda) {
+          // La franja "Criterio" (como "Pregunta" en QARE); el texto va
+          // tambien oculto en la tarjeta para lectores de pantalla.
+          var todo = c.ayuda.texto + ' ' + c.ayuda.nota;
+          boton = '<button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="activas" aria-describedby="regKpiAyudaActivas"' +
+            ' aria-label="Criterio de ' + Escape.attr(c.l) + '"' + (conGlobo ? '' : ' title="' + Escape.attr(todo) + '"') + '>Criterio</button>' +
+            '<span class="ini-sr" id="regKpiAyudaActivas">' + Escape.html(todo) + '</span>';
+        }
+        return '<div class="kpi ini-kpi ' + c.s + (boton ? ' ini-kpi-ctx' : '') + '"' +
+          (c.t ? ' title="' + Escape.attr(c.t) + '"' : '') + '>' + boton +
           '<div class="lbl">' + Escape.html(c.l) + '</div>' +
           '<div class="val">' + fmt(c.v) + '</div>' +
           '<div class="foot">' + Escape.html(c.f) + '</div></div>';
@@ -1674,7 +1806,7 @@ window.RegistroIniciativas = (function () {
     pintarTabla() {
       if (!this.registro) return;
       var lista = this.filtradas();
-      this.pintarKpis(lista);
+      this.pintarKpis();
       this.pintarCabeza();
 
       var vacio = lista.length === 0;
@@ -1755,6 +1887,7 @@ window.RegistroIniciativas = (function () {
       else if (accion === 'edicion-cancelar') this.abrirEdicion(false);
       else if (accion === 'edicion-revisar') this.revisarEdicion();
       else if (accion === 'edicion-guardar') this.guardarEdicion();
+      else if (accion === 'recargar-guardado') this.recargarTrasGuardar(this.abierta, null, null, this.edicion);
       else if (accion === 'edicion-cat-agregar') this.agregarCategoriaEdicion();
       else if (accion === 'cambio-cat-agregar') this.agregarCategoriaCambio();
     }
@@ -1928,7 +2061,7 @@ window.RegistroIniciativas = (function () {
       });
     }
 
-    // ---- Modificar (ADM): solo valida en el servidor, no guarda ----
+    // ---- Modificar (ADM): guarda con la persistencia activa; si no, solo valida ----
     // Abre el detalle de la iniciativa con "Modificar" ya desplegado.
     modificar(folio, origen) {
       if (!this.puedeEditar()) return false;
@@ -1977,9 +2110,11 @@ window.RegistroIniciativas = (function () {
       return r;
     }
 
-    // "Validar en el servidor (no guarda)" (data-accion edicion-guardar):
-    // valida en admin_iniciativas_gestion.ashx. No guarda: la respuesta real se pinta tal cual, nunca como exito. Sin
-    // cambios o con errores de formato locales no se envia.
+    // "Guardar" (o "Validar en el servidor (no guarda)" sin persistencia;
+    // data-accion edicion-guardar): admin_iniciativas_gestion.ashx. La
+    // respuesta real se pinta tal cual; solo 'guardada' es exito. Sin
+    // cambios o con errores de formato locales no se envia. Un envio a la
+    // vez: el boton queda deshabilitado hasta la respuesta.
     guardarEdicion(pedir, pedirRegistro) {
       var ed = this.edicion;
       if (!ed || !this.puedeEditar() || this.edicionEnviando) return Promise.resolve(null);
@@ -1989,31 +2124,130 @@ window.RegistroIniciativas = (function () {
         return Promise.resolve(null);
       }
       var self = this, A = window.IniciativaAdmin, folio = this.abierta;
+      var boton = this.$('regEdGuardar');
+      var pares = ed.paraEnviar();
       this.edicionEnviando = true;
+      if (boton) boton.disabled = true;
       this.$('regEdMsg').className = 'ini-cambio-msg';
       this.$('regEdMsg').innerHTML = '<span>' + (this.registro.persistenciaAdmin === true ? 'Guardando…' : 'Validando en el servidor…') + '</span>';
-      return A.enviarGestion(ed.paraEnviar(), pedir || function (url, op) { return fetch(url, op); }).then(function (r) {
+      return A.enviarGestion(pares, pedir || function (url, op) { return fetch(url, op); }).then(function (r) {
         self.edicionEnviando = false;
-        // GUARDADA: se recarga el registro (lista, categorias, capacidad e
-        // historial salen de el) y se reabre el detalle con el aviso. Nada
-        // se actualiza en el navegador por su cuenta.
-        if (r.estado === 'guardada') {
-          return self.cargar(pedirRegistro).then(function () {
-            if (self.registro && self.registro.buscar(folio)) {
-              self.abrirDetalle(folio);
-              var aviso = self.$('regDetAviso');
-              if (aviso) { aviso.hidden = false; aviso.innerHTML = A.htmlRespuesta(r); }
-            }
-            return r;
-          });
-        }
-        // El detalle pudo cerrarse o cambiar mientras tanto.
+        if (boton) boton.disabled = false;
+        // GUARDADA: lo que se ve sale del registro releido (lista,
+        // categorias, capacidad e historial), sin recargar la pagina y sin
+        // tocar filtros, busqueda, orden, "mostrar mas" ni la vista.
+        if (r.estado === 'guardada') return self.recargarTrasGuardar(folio, r, pedirRegistro, ed).then(function () { return r; });
+        // Cualquier otra respuesta: la edicion sigue abierta con lo escrito
+        // (no se repinta) y se puede reintentar. El detalle pudo cerrarse o
+        // cambiar mientras tanto.
         if (self.edicion !== ed || self.abierta !== folio) return r;
         var caja = self.$('regEdMsg');
         caja.className = 'ini-cambio-msg ' + (r.estado === 'no_habilitada' || r.estado === 'no_confirmada' ? 'aviso' : 'error');
         caja.innerHTML = A.htmlRespuesta(r);
         return r;
+      }, function (err) {
+        self.edicionEnviando = false;
+        if (boton) boton.disabled = false;
+        throw err;
       });
+    }
+
+    // Relee el registro por la misma via que cargar() (leerRegistro, la
+    // fuente autoritativa) y lo pinta con la MISMA vista: el filtro de antes
+    // sobre los datos nuevos (sobre()), busqueda, orden, cuantas filas se
+    // ven ("mostrar mas"), registro o cobertura. La Cobertura se rearma con
+    // el catalogo ya leido (guardar una iniciativa no cambia el catalogo de
+    // categorias) sobre el registro nuevo, antes del filtro, para que la
+    // cascada conserve lo elegido del catalogo. NO toca el detalle abierto
+    // ni sus borradores: eso lo decide quien llama.
+    // Sin registro todavia (carga inicial en curso o fallida) no hay vista
+    // que conservar: cargar().
+    // -> Promise<{ ok, registro, error, superada }>; nunca rechaza. Si
+    // falla, la vista anterior queda intacta.
+    actualizar(pedir) {
+      var self = this;
+      if (!this.registro || !this.filtro) {
+        return this.cargar(pedir).then(function () {
+          return { ok: !!self.registro, registro: self.registro,
+                   error: self.registro ? null : new Error(self.$('regErrorTexto').textContent) };
+        });
+      }
+      pedir = pedir || function (url) { return fetch(url, { cache: 'no-store' }); };
+      var mia = ++this.cargaId;
+      return leerRegistro(pedir)
+        .then(function (json) {
+          if (mia !== self.cargaId) return { ok: false, superada: true };
+          var registro = Registro.desdeJson(json);
+          registro.fijarAlcance(self.rol === 'ADM');
+          var cobertura = self.coberturaJson ? Cobertura.desdeJson(self.coberturaJson, registro) : null;
+          if (cobertura) registro.ampliar(cobertura.filas);
+          var filtro = self.filtro.sobre(registro);
+          // Una Cobertura que venia en camino colgaba del registro viejo:
+          // se pide otra vez.
+          var pedirCobertura = !cobertura && (self.modo === 'cobertura' || !registro.alcanceCompleto() || !!self.coberturaPromesa);
+          self.registro = registro;
+          self.filtro = filtro;
+          self.cobertura = cobertura;
+          if (cobertura) self.estadoCobertura('listo');
+          self.estadoVista(registro.iniciativas.length ? 'listo' : 'sinDatos');
+          self.repintar();
+          if (pedirCobertura) self.cargarCobertura(pedir);
+          return { ok: true, registro: registro };
+        })
+        .catch(function (err) {
+          if (mia !== self.cargaId) return { ok: false, superada: true };
+          return { ok: false, error: err };
+        });
+    }
+
+    // Tras un guardado confirmado de `folio` (desde el borrador `ed`):
+    // actualizar() y, SOLO si el usuario sigue en ese detalle sin otro
+    // trabajo abierto (el mismo borrador, o ninguno y sin "Solicitar
+    // cambios"), lo reabre con los datos guardados y el aviso. Si cerro el
+    // detalle o abrio otra iniciativa mientras se guardaba, la lista se
+    // actualiza igual y no se reabre nada ni se toca su borrador. Si ya no
+    // pasa los filtros, el detalle sigue abierto y lo dice; los filtros no
+    // cambian. Si la relectura falla, la vista anterior queda intacta y el
+    // aviso dice que SI se guardo y que la vista no se actualizo.
+    recargarTrasGuardar(folio, r, pedir, ed) {
+      var self = this, A = window.IniciativaAdmin;
+      var guardado = r ? A.htmlRespuesta(r) : '<strong>Guardado en la base.</strong>';
+      var boton = '<button type="button" class="btn linea chico" data-accion="recargar-guardado">Actualizar</button>';
+      return this.actualizar(pedir).then(function (res) {
+        if (self.abierta !== folio) return;
+        var libre = !self.cambioAbierto && (self.edicion === ed || !self.edicion);
+        var i = res.ok ? res.registro.buscar(folio) : null;
+        if (!libre || !i) {
+          // Mismo detalle pero con otro trabajo abierto, o sin datos nuevos
+          // que pintar: no se repinta. El borrador ya guardado se cierra
+          // (lo que mostraria es lo de antes); cualquier otro se conserva.
+          if (ed && self.edicion === ed) self.abrirEdicion(false);
+          var fallo = !res.ok && !res.superada;
+          var motivo = fallo
+            ? '<p>Se guardó, pero no se pudo actualizar la vista: ' + Escape.html((res.error && res.error.message) || 'error desconocido') +
+              ' Lo que se ve aquí puede estar desactualizado.</p>' + boton
+            : res.ok && !i
+            ? '<p>La lista se actualizó, pero esta iniciativa ya no está en el registro releído: lo que se ve aquí es lo de antes.</p>'
+            : '<p>La lista se actualizó. Este panel conserva lo que tienes abierto; lo que se ve aquí puede ser lo de antes.</p>' + boton;
+          self.avisoDetalle(fallo ? 'aviso' : 'listo', guardado + motivo);
+          return;
+        }
+        var hist = self.histAbierto;
+        self.abrirDetalle(folio, self.origenFoco);
+        if (hist && self.$('regHistBoton')) self.plegarHistorial();
+        var nota = self.filtro.aplicar([i]).length ? ''
+          : '<p class="ini-nota">Con los cambios ya no coincide con los filtros o la búsqueda activos: no aparece en la lista, ' +
+            'pero sigue abierta aquí. Los filtros no se cambiaron.</p>';
+        self.avisoDetalle('listo', guardado + nota);
+      });
+    }
+
+    avisoDetalle(clase, html) {
+      var aviso = this.$('regDetAviso');
+      if (!aviso) return;
+      aviso.className = 'ini-cambio-msg ' + clase;
+      aviso.hidden = false;
+      aviso.innerHTML = html;
     }
 
     // Botones de la cabecera del detalle. Modificar solo con rol ADM.

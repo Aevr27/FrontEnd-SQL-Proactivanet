@@ -315,6 +315,21 @@
   /* Filtros tambien de dos en dos; los selects siguen a ancho de columna. */
   .filtros.ini-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; }
 }
+/* Franja "Criterio" de un indicador (hoy solo Activas): la misma franja
+   "Pregunta" de los KPIs de QARE (.qare-kpi-preg en qare/qare.css, que no
+   se toca), con su globo de GloboAyuda (assets/css/globo-ayuda.css). */
+.kpi.ini-kpi-ctx { padding-top: 20px; }
+.ini-kpi-ayuda {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 1;
+  display: block; height: 13px; margin: 0; padding: 0; border: 0;
+  background: var(--accent-soft); color: var(--accent-deep);
+  font-family: inherit; font-size: 7.5px; font-weight: 500; line-height: 13px;
+  text-transform: uppercase; letter-spacing: .9px; text-align: center;
+  cursor: help; opacity: .85;
+  transition: background .15s ease, opacity .15s ease;
+}
+.ini-kpi-ayuda:hover, .ini-kpi-ayuda.abierto { background: var(--accent-line); opacity: 1; }
+.ini-kpi-ayuda:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .ini-kpi-cargando { border-left-color: var(--line); }
 .ini-kpi-cargando::after { opacity: 0; }
 .ini-kpi-cargando .val { color: var(--muted-2); }

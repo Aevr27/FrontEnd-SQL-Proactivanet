@@ -1517,6 +1517,447 @@ pruebas.push(function () {
   });
 });
 
+// GS11-GS16) Modificar GUARDADO sin recargar la pagina: el registro se
+// relee y se pinta con la MISMA vista (filtros, busqueda, orden, "mostrar
+// mas", modo); el detalle se reabre con lo que devolvio el servidor. Los
+// errores dejan la edicion abierta con lo escrito; un envio a la vez.
+function RegistroGuardado(cambios) {
+  var json = JSON.parse(JSON.stringify(REGISTRO));
+  json.iniciativas.forEach(function (i) {
+    if (i.folio === 'PRB 2026-000001') Object.keys(cambios).forEach(function (k) { i[k] = cambios[k]; });
+  });
+  return function (url) {
+    if (/registro/.test(url)) return Promise.resolve(Respuesta(200, json));
+    if (/catalogos/.test(url)) return Promise.resolve(Respuesta(200, CATALOGO));
+    return Promise.reject(new Error('peticion inesperada ' + url));
+  };
+}
+function Diferido() {
+  var d = { pedidos: 0 };
+  d.pedir = function () {
+    d.pedidos++;
+    return new Promise(function (ok) { d.responder = function (estado, json) { ok(RespuestaHttp(estado, json)); }; });
+  };
+  return d;
+}
+var GUARDADA = { accion: 'modificar', valida: true, guardada: true, codigo: 'PRB 2026-000001',
+  cambios: [{ clave: 'titulo', rotulo: 'Título', anterior: 'T PRB 2026-000001', nuevo: 'Nuevo' }] };
+// Filtros, busqueda, orden y "mostrar mas" puestos como los dejaria el
+// usuario antes de abrir el detalle.
+function vistaFiltrada(p, reg) {
+  reg.filtro.elegirEstado('En Análisis');
+  reg.filtro.elegirDirector('Dir A');
+  p.sel('regBuscar').value = 'PRB';
+  reg.aplicarBusqueda();
+  reg.ordenarPor('folio');
+  reg.limite = 200;
+  reg.pintarTabla();
+}
+function vista(p, reg) {
+  return [reg.filtro.estados.marcados, reg.filtro.director, reg.filtro.textoBuscado, p.sel('regBuscar').value,
+          reg.orden, reg.limite, reg.modo];
+}
+var VISTA = [['En Análisis'], 'Dir A', 'PRB', 'PRB', { col: 'folio', dir: 'asc' }, 200, 'registro'];
+
+pruebas.push(function () {
+  var p = Pagina(), reg, recargas = 0, regAntes;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.ventana.location = { reload: function () { recargas++; }, assign: function () { recargas++; } };
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    vistaFiltrada(p, reg);
+    regAntes = reg.registro;
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    return reg.guardarEdicion(Servidor(200, GUARDADA).pedir, RegistroGuardado({ titulo: 'Nuevo', titulo_problem: 'Nuevo' }));
+  }).then(function (r) {
+    var aviso = p.sel('regDetAviso');
+    Check('GS11 guardado: sin recargar ni navegar; filtros, busqueda, orden, "mostrar mas" y modo intactos', ['guardada', 0, VISTA],
+      [r.estado, recargas, vista(p, reg)]);
+    Check('GS11 ... registro releido, mismo detalle abierto con lo guardado, edicion cerrada, aviso de exito',
+      [true, 'PRB 2026-000001', null, false, true, true, false],
+      [reg.registro !== regAntes, reg.abierta, reg.edicion, aviso.hidden, /Guardado en la base/.test(aviso.innerHTML),
+       /Nuevo/.test(p.sel('regDetCuerpo').innerHTML), /ya no coincide/.test(aviso.innerHTML)]);
+    Check('GS11 ... la lista muestra el titulo guardado (del servidor)', [true, 'Nuevo'],
+      [/Nuevo/.test(p.sel('regCuerpo').innerHTML), reg.registro.buscar('PRB 2026-000001').titulo]);
+    var fuentes = leer('admin/registro-iniciativas.js') + leer('admin/iniciativa-admin.js') + leer('admin/iniciativas.js');
+    Check('GS11 ningun modulo de admin/ recarga ni navega la pagina', [false, false],
+      [/location\.reload/.test(fuentes), /location\.(href\s*=|assign\(|replace\()/.test(fuentes)]);
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), reg;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    vistaFiltrada(p, reg);
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'estado', 'En Solución');
+    return reg.guardarEdicion(Servidor(200, GUARDADA).pedir, RegistroGuardado({ estado: 'En Solución' }));
+  }).then(function () {
+    var aviso = p.sel('regDetAviso');
+    Check('GS12 guardado que ya no pasa los filtros: filtros intactos, sale de la lista, el detalle sigue abierto y lo explica',
+      [VISTA, false, 'PRB 2026-000001', true, true],
+      [vista(p, reg), /PRB 2026-000001/.test(p.sel('regCuerpo').innerHTML), reg.abierta,
+       /Guardado en la base/.test(aviso.innerHTML), /ya no coincide con los filtros/.test(aviso.innerHTML)]);
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), reg, regAntes, filtroAntes;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    vistaFiltrada(p, reg);
+    regAntes = reg.registro; filtroAntes = reg.filtro;
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    return reg.guardarEdicion(Servidor(200, GUARDADA).pedir, function () { return Promise.resolve(Respuesta(500, { error: 'error 53' })); });
+  }).then(function (r) {
+    var aviso = p.sel('regDetAviso');
+    Check('GS13 guardado pero la relectura falla: dice que SI se guardo y que la vista no se actualizo; la vista anterior intacta',
+      ['guardada', true, true, true, true, true, VISTA],
+      [r.estado, /Guardado en la base/.test(aviso.innerHTML), /no se pudo actualizar la vista: error 53/.test(aviso.innerHTML),
+       /data-accion="recargar-guardado"/.test(aviso.innerHTML), reg.registro === regAntes, reg.filtro === filtroAntes, vista(p, reg)]);
+    Check('GS13 ... la edicion se cierra (lo que se ve puede estar viejo)', null, reg.edicion);
+    accion(p, 'recargar-guardado');
+    return esperar().then(esperar).then(esperar);
+  }).then(function () {
+    Check('GS13 "Actualizar" relee el registro conservando la vista y el detalle', [true, 'PRB 2026-000001', VISTA],
+      [reg.registro !== regAntes, reg.abierta, vista(p, reg)]);
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), reg, ed, html, estados = [], mensajes = [];
+  var errores = [
+    [422, { valida: false, guardada: false, errores: [{ campo: 'titulo', mensaje: 'Título demasiado largo' }] }],
+    [409, { tipo: 'TopeExcedido', error: '/A/Cat 1: solo tiene 0% disponible', numero: 51010, guardada: false }],
+    [409, { tipo: 'PendienteSinRegla', error: 'No se guardó nada: quitar categoría', guardada: false }],
+    [500, { tipo: 'EscrituraNoConfirmada', error: 'No se pudo confirmar el guardado: tiempo agotado', guardada: null }],
+    [503, { tipo: 'ValidacionNoDisponible', error: 'error 53' }],
+    [0, null]
+  ];
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    editar(p, 'data-edicion', 'observaciones', 'Obs nueva');
+    ed = reg.edicion;
+    html = p.sel('regEdicion').innerHTML;
+    return errores.reduce(function (c, e) {
+      return c.then(function () { return reg.guardarEdicion(Servidor(e[0], e[1]).pedir); }).then(function (r) {
+        mensajes.push(p.sel('regEdMsg').innerHTML);
+        estados.push([r.estado, reg.edicion === ed, ed.valores.titulo, ed.valores.observaciones,
+          p.sel('regEdicion').innerHTML === html, p.sel('regEdGuardar').disabled, /Guardado en la base/.test(mensajes[mensajes.length - 1])]);
+      });
+    }, Promise.resolve());
+  }).then(function () {
+    var fila = function (e) { return [e, true, 'Nuevo', 'Obs nueva', true, false, false]; };
+    Check('GS14 422/409/409/500/503/red: edicion abierta con lo escrito, sin repintar, boton habilitado, nunca "Guardado"',
+      ['invalida', 'rechazada', 'rechazada', 'no_confirmada', 'no_disponible', 'error'].map(fila), estados);
+    Check('GS14 ... cada uno con su mensaje real', [true, true, true, true, true],
+      [/Título demasiado largo/.test(mensajes[0]), /solo tiene 0% disponible/.test(mensajes[1]), /quitar categoría/.test(mensajes[2]),
+       /Revisa el registro antes de reintentar/.test(mensajes[3]), /No se guardó nada/.test(mensajes[4])]);
+    var srv = Servidor(200, GUARDADA);
+    return reg.guardarEdicion(srv.pedir, RegistroGuardado({ titulo: 'Nuevo', observaciones: 'Obs nueva' })).then(function (r) {
+      Check('GS14 ... reintentar guarda y viajan los mismos valores', ['guardada', true, true],
+        [r.estado, srv.pedidos[0].campos.some(function (c) { return c[0] === 'titulo' && c[1] === 'Nuevo'; }),
+         srv.pedidos[0].campos.some(function (c) { return c[0] === 'observaciones' && c[1] === 'Obs nueva'; })]);
+    });
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), reg, d = Diferido(), primera, segunda;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    primera = reg.guardarEdicion(d.pedir, RegistroGuardado({ titulo: 'Nuevo' }));
+    segunda = reg.guardarEdicion(d.pedir, RegistroGuardado({ titulo: 'Nuevo' }));
+    accion(p, 'edicion-guardar');
+    return esperar();
+  }).then(function () {
+    Check('GS15 mientras guarda: un solo POST, boton deshabilitado, "Guardando…"', [1, true, true],
+      [d.pedidos, p.sel('regEdGuardar').disabled, /Guardando/.test(p.sel('regEdMsg').innerHTML)]);
+    return segunda;
+  }).then(function (r2) {
+    Check('GS15 el segundo envio no manda nada', null, r2);
+    d.responder(409, { tipo: 'TopeExcedido', error: 'tope', guardada: false });
+    return primera;
+  }).then(function (r) {
+    Check('GS15 tras la respuesta: boton habilitado (reintento posible), un solo POST en total', ['rechazada', false, 1],
+      [r.estado, p.sel('regEdGuardar').disabled, d.pedidos]);
+  });
+});
+
+// GS16) FiltroRegistro.sobre: Estado y Tipo viajan TAL CUAL al registro
+// nuevo, aunque el valor elegido ya no tenga iniciativas (el filtro no
+// cambia solo); lo marcado es inclusion: un estado que aparece por primera
+// vez no entra. Al tocar el filtro, lo que ya no es opcion se suelta.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var f = p.registro.filtro;
+    f.elegirEstado('En Solución');               // solo MAP 2026-000003
+    f.tipos.solo('MAP');
+    f.buscar('MAP');
+    var json = JSON.parse(JSON.stringify(REGISTRO));
+    json.iniciativas[2].estado = 'Cerrado';       // 'En Solución' ya no existe; 'Cerrado' aparece por primera vez
+    var nuevo = p.ventana.RegistroIniciativas.Registro.desdeJson(json);
+    var g = f.sobre(nuevo);
+    Check('GS16 sobre(): texto, tipos y el estado elegido se conservan aunque ya no exista; el nuevo no entra; lista vacia',
+      ['MAP', ['MAP'], ['En Solución'], false, 0, true],
+      [g.textoBuscado, g.tipos.marcados, g.estados.marcados, g.estados.marcados === f.estados.marcados,
+       g.aplicar(nuevo.iniciativas).length, g.registro === nuevo]);
+    g.alternarEstado('En Análisis');
+    Check('GS16 ... al tocar el filtro, el valor que ya no es opcion se suelta', ['En Análisis'], g.estados.marcados);
+  });
+});
+
+// GS17-GS23) Carrera guardado/navegacion y vistas que se conservan.
+pruebas.push(function () {
+  var p = Pagina(), reg, d = Diferido(), guardado, regAntes;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    vistaFiltrada(p, reg);
+    regAntes = reg.registro;
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    guardado = reg.guardarEdicion(d.pedir, RegistroGuardado({ titulo: 'Nuevo', titulo_problem: 'Nuevo' }));
+    return esperar();
+  }).then(function () {
+    reg.cerrarDetalle();                          // el usuario cierra A mientras se guarda
+    d.responder(200, GUARDADA);
+    return guardado;
+  }).then(function (r) {
+    Check('GS17 A guardada tras cerrar su detalle: la lista se relee con la vista intacta y A NO se reabre',
+      ['guardada', true, 'Nuevo', VISTA, null, true, null, true],
+      [r.estado, reg.registro !== regAntes, reg.registro.buscar('PRB 2026-000001').titulo, vista(p, reg),
+       reg.abierta, p.sel('regDetalle').hidden, reg.edicion, /Nuevo/.test(p.sel('regCuerpo').innerHTML)]);
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), reg, d = Diferido(), guardado, edB;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    vistaFiltrada(p, reg);
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    guardado = reg.guardarEdicion(d.pedir, RegistroGuardado({ titulo: 'Nuevo', titulo_problem: 'Nuevo' }));
+    return esperar();
+  }).then(function () {
+    // El usuario abre B y empieza a modificarla antes de que A responda.
+    reg.modificar('PRB 2026-000002');
+    editar(p, 'data-edicion', 'observaciones', 'Borrador B');
+    edB = reg.edicion;
+    d.responder(200, GUARDADA);
+    return guardado;
+  }).then(function (r) {
+    Check('GS18 A guardada mientras B esta abierta con borrador: lista releida, vista intacta, B y su borrador intactos, sin aviso de A',
+      ['guardada', 'Nuevo', VISTA, 'PRB 2026-000002', 'PRB 2026-000002', true, 'Borrador B', false],
+      [r.estado, reg.registro.buscar('PRB 2026-000001').titulo, vista(p, reg), reg.abierta, p.sel('regDetTitulo').textContent,
+       reg.edicion === edB, edB.valores.observaciones, /Guardado en la base/.test(p.sel('regDetAviso').innerHTML)]);
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), reg, d = Diferido(), guardado, cambio;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    guardado = reg.guardarEdicion(d.pedir, RegistroGuardado({ titulo: 'Nuevo', titulo_problem: 'Nuevo' }));
+    return esperar();
+  }).then(function () {
+    // Sigue en A, pero cierra Modificar y abre "Solicitar cambios".
+    accion(p, 'edicion-cancelar');
+    accion(p, 'solicitar-cambios');
+    cambio = reg.cambio;
+    d.responder(200, GUARDADA);
+    return guardado;
+  }).then(function () {
+    var aviso = p.sel('regDetAviso');
+    Check('GS19 mismo detalle con "Solicitar cambios" abierto: no se repinta, su borrador sigue; el aviso dice que se guardo',
+      ['PRB 2026-000001', true, true, 'Nuevo', true, true],
+      [reg.abierta, reg.cambio === cambio, reg.cambioAbierto, reg.registro.buscar('PRB 2026-000001').titulo,
+       /Guardado en la base/.test(aviso.innerHTML), /conserva lo que tienes abierto/.test(aviso.innerHTML)]);
+  });
+});
+
+// Cobertura con catalogo propio (una categoria y un Director que solo
+// estan en el catalogo).
+var COBERTURA = { omitidas: 0, asignaciones: [
+  { director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1' },
+  { director: 'Dir A', po: 'PO 1', so: 'SO y', categoria: '/A/Cat 2' },
+  { director: 'Dir C', po: 'PO 9', so: 'SO 9', categoria: '/C/Cat 9' }
+] };
+function PedirCobertura(cambios, cuenta) {
+  var registro = RegistroGuardado(cambios);
+  return function (url) {
+    if (/catalogos/.test(url)) { cuenta.catalogo++; return Promise.resolve(Respuesta(200, COBERTURA)); }
+    return registro(url);
+  };
+}
+pruebas.push(function () {
+  var p = Pagina(), reg, cuenta = { catalogo: 0 };
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    return reg.verCobertura(PedirCobertura({}, cuenta));
+  }).then(function () {
+    reg.filtro.elegirDirector('Dir C');           // solo existe en el catalogo
+    reg.refrescar();
+    reg.limite = 300;
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    return reg.guardarEdicion(Servidor(200, GUARDADA).pedir, PedirCobertura({ titulo: 'Nuevo', titulo_problem: 'Nuevo' }, cuenta));
+  }).then(function (r) {
+    Check('GS20 en Cobertura: sigue en Cobertura (rearmada sin volver a pedir el catalogo), Director del catalogo y "mostrar mas" intactos',
+      ['guardada', 'cobertura', false, true, 1, 'Dir C', 300, 'Nuevo', true],
+      [r.estado, reg.modo, p.sel('covSeccion').hidden, !!reg.cobertura && reg.cobertura.registro === reg.registro, cuenta.catalogo,
+       reg.filtro.director, reg.limite, reg.registro.buscar('PRB 2026-000001').titulo, p.sel('covContenido').hidden === false]);
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), reg;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    reg.filtro.elegirEstado('En Análisis');
+    reg.refrescar();
+    reg.modificar('MAP 2026-000003');             // la unica 'En Solución'
+    editar(p, 'data-edicion', 'estado', 'En Análisis');
+    var json = JSON.parse(JSON.stringify(REGISTRO));
+    json.iniciativas[0].estado = 'Cerrado';       // otra iniciativa cambio de estado en la base (estado nuevo)
+    json.iniciativas[2].estado = 'En Análisis';
+    return reg.guardarEdicion(Servidor(200, GUARDADA).pedir, function () { return Promise.resolve(Respuesta(200, json)); });
+  }).then(function () {
+    Check('GS21 entra al estado filtrado: aparece en la lista sin nota; el filtro sigue en "En Análisis" y "Cerrado" (nuevo) no entra',
+      [['En Análisis'], true, false, false, 'En Análisis'],
+      [reg.filtro.estados.marcados, /MAP 2026-000003/.test(p.sel('regCuerpo').innerHTML), /PRB 2026-000001/.test(p.sel('regCuerpo').innerHTML),
+       /ya no coincide/.test(p.sel('regDetAviso').innerHTML), p.sel('regEstado').textContent]);
+  });
+});
+
+// Crear (Administracion): el alta guardada relee el registro sin tocar la
+// vista de Iniciativas ni un detalle abierto con borrador.
+pruebas.push(function () {
+  var p = Pagina(), reg, regAntes, edB;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    vistaFiltrada(p, reg);
+    reg.modificar('PRB 2026-000002');
+    editar(p, 'data-edicion', 'observaciones', 'Borrador B');
+    edB = reg.edicion;
+    regAntes = reg.registro;
+    return p.pagina.crearAdmin.alGuardar('ADO 2026-000074');
+  }).then(function (res) {
+    Check('GS22 alta guardada: registro releido (no cargar()); filtros, busqueda, orden, "mostrar mas", modo, detalle y borrador intactos',
+      [true, true, VISTA, 'PRB 2026-000002', true, 'Borrador B', false],
+      [res.ok, reg.registro !== regAntes, vista(p, reg), reg.abierta, reg.edicion === edB, edB.valores.observaciones, p.sel('regDetalle').hidden]);
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), reg, regAntes, filtroAntes;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    vistaFiltrada(p, reg);
+    regAntes = reg.registro; filtroAntes = reg.filtro;
+    return reg.actualizar(function () { return Promise.resolve(Respuesta(500, { error: 'error 53' })); });
+  }).then(function (res) {
+    Check('GS23 actualizar() que falla: no rechaza, dice el error y deja la vista anterior intacta (sin pantalla de error)',
+      [false, 'error 53', true, true, VISTA, true],
+      [res.ok, res.error && res.error.message, reg.registro === regAntes, reg.filtro === filtroAntes, vista(p, reg), p.sel('regError').hidden]);
+    var caja = p.sel('admResultado');
+    caja.innerHTML = '<p>Guardado ADO 2026-000074</p>';
+    reg.actualizar = function () { return Promise.resolve({ ok: false, error: new Error('error 53') }); };
+    return p.pagina.crearAdmin.alGuardar('ADO 2026-000074').then(function () {
+      Check('GS23 ... alta guardada con relectura fallida: la respuesta del alta se conserva y se agrega el aviso', [true, true],
+        [/Guardado ADO 2026-000074/.test(caja.innerHTML), /Se guardó, pero la lista de Iniciativas no se pudo actualizar: error 53/.test(caja.innerHTML)]);
+    });
+  });
+});
+
+// GS24-GS25) Indicadores tras guardar: salen del registro releido (no de
+// lo filtrado) y la vista no se toca. REGISTRO: 3 abiertas, las 3 Activas.
+function kpisDe(p) {
+  var re = /<div class="val">([^<]*)<\/div>/g, m, s = [];
+  while ((m = re.exec(p.sel('regKpis').innerHTML))) s.push(m[1]);
+  return s;
+}
+pruebas.push(function () {
+  var p = Pagina(), reg, antes;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    vistaFiltrada(p, reg);
+    antes = kpisDe(p);
+    reg.modificar('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Nuevo');
+    // La relectura trae la iniciativa cerrada (p. ej. otro cambio en la base).
+    return reg.guardarEdicion(Servidor(200, GUARDADA).pedir,
+      RegistroGuardado({ titulo: 'Nuevo', titulo_problem: 'Nuevo', estado: 'Cerrado', activa: false, seguimiento: false }));
+  }).then(function (r) {
+    Check('GS24 Modificar guardado: indicadores del registro releido (Total, Activas, Fuera, Retrasadas, Cerradas)',
+      [['3', '3', '0', '0', '0'], 'guardada', ['2', '2', '0', '0', '1']], [antes, r.estado, kpisDe(p)]);
+    Check('GS24 ... filtros, busqueda, orden, "mostrar mas", modo y detalle intactos', [VISTA, 'PRB 2026-000001'],
+      [vista(p, reg), reg.abierta]);
+  });
+});
+
+pruebas.push(function () {
+  var p = Pagina(), reg, edB, antes;
+  return esperar().then(function () {
+    reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.registro.persistenciaAdmin = true;
+    vistaFiltrada(p, reg);
+    reg.modificar('PRB 2026-000002');
+    editar(p, 'data-edicion', 'observaciones', 'Borrador B');
+    edB = reg.edicion;
+    antes = kpisDe(p);
+    // La relectura del alta trae una iniciativa mas, abierta y fuera de
+    // Activas (agrupacion que no es de las del servidor).
+    var json = JSON.parse(JSON.stringify(REGISTRO));
+    json.iniciativas.push(Ini('ADO 2026-000074', { prefijo: 'ADO', agrup: 'Adopcion', seguimiento: false }));
+    var original = reg.actualizar;
+    reg.actualizar = function () {
+      return original.call(reg, function () { return Promise.resolve(Respuesta(200, json)); });
+    };
+    return p.pagina.crearAdmin.alGuardar('ADO 2026-000074');
+  }).then(function (res) {
+    Check('GS25 Crear guardado: Total sube y la nueva cae en Fuera de Activas',
+      [['3', '3', '0', '0', '0'], true, ['4', '3', '1', '0', '0']], [antes, res.ok, kpisDe(p)]);
+    Check('GS25 ... filtros, busqueda, orden, "mostrar mas", modo, detalle y borrador intactos',
+      [VISTA, 'PRB 2026-000002', true, 'Borrador B'], [vista(p, reg), reg.abierta, reg.edicion === edB, edB.valores.observaciones]);
+  });
+});
+
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
   .then(function () {
     console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\nTODO PASO');

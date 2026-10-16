@@ -28,6 +28,12 @@
 //      pasa nada, "Todas" alterna marcar todo / desmarcar todo, junto con
 //      los demas filtros, Limpiar; el panel de casillas en el DOM.
 //   La Agrupacion ya no es filtro (ni select ni FiltroRegistro).
+//   K) Indicadores sobre el registro COMPLETO: ningun filtro ni la busqueda
+//      los mueve; Total = abiertas (estado distinto de Cerrado, sin
+//      mayusculas ni acentos), Activas = seguimiento, Fuera de Activas =
+//      Total - Activas, Retrasadas sin cambio, Cerradas = estado Cerrado;
+//      relectura con datos nuevos, cargando / error / relectura fallida sin
+//      ceros, y el globo "Criterio" de Activas.
 //   B) Busqueda por folio o titulo: parcial, sin mayusculas, separadores,
 //      ceros ni acentos; combinada con los demas filtros, sin tocar la
 //      Cobertura; espera entre teclas, Enter, Limpiar y recarga en el DOM.
@@ -219,6 +225,9 @@ function marcarEn(p, panel, attr, valor) {
 }
 // Deja marcado solo el estado `v` (o todos con '') por el panel, como lo
 // haria alguien con el raton.
+// La vista por omision oculta Cerrado (FiltroRegistro.porOmision); las
+// pruebas que no son de eso parten de todo con "Limpiar".
+function sinOmision(p) { p.sel('regLimpiar').disparar('click'); }
 function soloEstado(p, v) {
   for (var n = 0; n < 3 && p.sel('regEstado').textContent !== (v ? 'Ninguno' : '— Todos —'); n++) {
     marcarEn(p, 'regEstadoPanel', 'data-estado-todas', '');
@@ -249,7 +258,9 @@ pruebas.push(function () {
   var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   Check('D1 entrada sin folio descartada', 5, reg.iniciativas.length);
   var k = R.Registro.indicadores(reg.iniciativas);
-  Check('D2 indicadores: total/activas/retrasadas/no activas', [5, 3, 1, 1], [k.total, k.activas, k.retrasadas, k.noActivas]);
+  Check('D2 indicadores: total (abiertas)/activas/fuera de activas/retrasadas/cerradas', [4, 3, 1, 1, 1],
+    [k.total, k.activas, k.fueraActivas, k.retrasadas, k.cerradas]);
+  Check('D2 sin categoria entre las abiertas', 1, k.sinCategoria);
   Check('D2 riesgo = riesgo_folio de las retrasadas que cuentan', 150, k.riesgo);
   Check('D2 tickets a reducir de las activas', 190, k.reduceActivas);
   Check('D3 estados: activos en su orden y luego los demas', ['En Análisis', 'En Solución', 'Cerrado'], reg.estados());
@@ -349,10 +360,17 @@ pruebas.push(function () {
 pruebas.push(function () {
   var p = Pagina(ok(DATOS));
   return esperar().then(function () {
+    Check('L0 por omision sin Cerrado: 4 de 5 en la lista, indicadores del registro completo, Estado "2 de 3", un filtro activo y Limpiar visible',
+      [['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005'], ['4', '3', '1', '1', '1'], '4 de 5 iniciativas',
+       '2 de 3 estados', ['Todos:no', 'En Análisis:si', 'En Solución:si', 'Cerrado:no'], '1 filtro activo', false],
+      [folios(p), kpis(p), p.sel('regCuenta').textContent, p.sel('regEstado').textContent, casillasDe(p, 'regEstadoPanel'),
+       p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
+    sinOmision(p);
+    Check('L0 Limpiar: tambien las cerradas', 5, folios(p).length);
     Check('L1 listo: contenido visible', ['regContenido'], visibles(p));
     Check('L1 cinco filas, en el orden por omision',
       ['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005', 'HAR 2025-000003'], folios(p));
-    Check('L2 indicadores', ['5', '3', '1', '1'], kpis(p));
+    Check('L2 indicadores: Total, Activas, Fuera de Activas, Retrasadas, Cerradas', ['4', '3', '1', '1', '1'], kpis(p));
     Check('L2 pie de retrasadas', true, /150 tickets en riesgo/.test(p.sel('regKpis').innerHTML));
     var html = p.sel('regCuerpo').innerHTML;
     Check('L3 retrasada: fecha en rojo, sin pintar la fila', [true, false],
@@ -371,7 +389,7 @@ pruebas.push(function () {
     elegir(p, 'regPo', 'PO 1');
     Check('L6 PO por select', ['PRB 2026-000001', 'MAP 2026-000002', 'PRB 2026-000005'], folios(p));
     Check('L6 SO acotado', ['SO w', 'SO x', 'SO y'], p.sel('regSo').opciones());
-    Check('L6 indicadores siguen el filtro', ['3', '3', '1', '0'], kpis(p));
+    Check('L6 indicadores NO siguen el filtro', ['4', '3', '1', '1', '1'], kpis(p));
     Check('L6 cuenta con filtro', '3 de 5 iniciativas', p.sel('regCuenta').textContent);
     Check('L6 Limpiar habilitado', [false, '1 filtro activo'], [p.sel('regLimpiar').hidden, p.sel('regFiltrosCuenta').textContent]);
     elegir(p, 'regSo', 'SO y');
@@ -380,7 +398,7 @@ pruebas.push(function () {
 
     soloEstado(p, 'Cerrado');
     Check('L8 sin coincidencias: aviso, sin tabla', [false, true, ''], [p.sel('regVacio').hidden, p.sel('regTablaCaja').hidden, p.sel('regCuenta').textContent]);
-    Check('L8 indicadores en 0 (dato real, no error)', ['0', '0', '0', '0'], kpis(p));
+    Check('L8 lista vacia por filtro: los indicadores no cambian', ['4', '3', '1', '1', '1'], kpis(p));
     p.sel('regLimpiarVacio').disparar('click');
     Check('L9 limpiar', [5, true, ''], [folios(p).length, p.sel('regVacio').hidden, p.sel('regPo').value]);
 
@@ -392,6 +410,7 @@ pruebas.push(function () {
     var muchas = JSON.parse(JSON.stringify(DATOS));
     for (var n = 0; n < 230; n++) muchas.iniciativas.push(Ini('X ' + (1000 + n), { categorias: [Cat('/A/Cat 2', 1, 0.1, 'Dir A', 'PO 1', 'SO y')] }));
     return p.registro.cargar(ok(muchas)).then(function () {
+      sinOmision(p);   // una carga nueva vuelve a la vista por omision
       Check('L11 primera pagina', [100, false], [folios(p).length, p.sel('regMas').hidden]);
       Check('L11 cuenta', '235 iniciativas · mostrando 100', p.sel('regCuenta').textContent);
       p.sel('regMas').disparar('click');
@@ -517,10 +536,14 @@ pruebas.push(function () {
   function folios2() { return folios(p); }
   Check('S2-9 cargando: boton bloqueado', true, p.sel('regEstado').disabled);
   return esperar().then(function () {
-    Check('S2-9 listo: Todos por omision', ['— Todos —', false, false],
-      [p.sel('regEstado').textContent, p.sel('regEstado').disabled, p.sel('regEstado').classList.contains('con-valor')]);
-    Check('S2-9 casillas: Todos y cada estado (activos primero)',
-      ['Todos:si', 'En Análisis:si', 'En Solución:si', 'Cerrado:si'], casillasDe(p, 'regEstadoPanel'));
+    Check('S2-9 listo: por omision todos menos Cerrado', ['2 de 3 estados', 'En Análisis, En Solución', false, true],
+      [p.sel('regEstado').textContent, p.sel('regEstado').getAttribute('title'), p.sel('regEstado').disabled,
+       p.sel('regEstado').classList.contains('con-valor')]);
+    Check('S2-9 casillas: Todos y cada estado (activos primero), Cerrado sin marcar',
+      ['Todos:no', 'En Análisis:si', 'En Solución:si', 'Cerrado:no'], casillasDe(p, 'regEstadoPanel'));
+    sinOmision(p);
+    Check('S2-9 Limpiar: Todos', ['— Todos —', false, ['Todos:si', 'En Análisis:si', 'En Solución:si', 'Cerrado:si']],
+      [p.sel('regEstado').textContent, p.sel('regEstado').classList.contains('con-valor'), casillasDe(p, 'regEstadoPanel')]);
     Check('S2-10 panel cerrado al inicio', [true, 'false'], [p.sel('regEstadoPanel').hidden, p.sel('regEstado').getAttribute('aria-expanded')]);
     p.sel('regEstado').disparar('click');
     Check('S2-10 el boton abre el panel', [false, 'true'], [p.sel('regEstadoPanel').hidden, p.sel('regEstado').getAttribute('aria-expanded')]);
@@ -919,6 +942,7 @@ pruebas.push(function () {
   }
   Check('T10 cargando: boton bloqueado', true, p.sel('regTipoIni').disabled);
   return esperar().then(function () {
+    sinOmision(p);
     Check('T10 listo: Todas por omision', ['— Todas —', false, false],
       [p.sel('regTipoIni').textContent, p.sel('regTipoIni').disabled, p.sel('regTipoIni').classList.contains('con-valor')]);
     Check('T10 casillas: Todas y cada prefijo del catalogo, todas marcadas',
@@ -1193,6 +1217,7 @@ pruebas.push(function () {
   var p = Pagina(ok(DATOS_BUSQUEDA));
   var todos;
   return esperar().then(function () {
+    sinOmision(p);
     todos = folios(p);
     Check('BV1 caja habilitada y visible al cargar', [false, false, 9], [p.sel('regBuscar').disabled, p.sel('regBuscarCampo').hidden, todos.length]);
 
@@ -1252,7 +1277,9 @@ pruebas.push(function () {
     // Reintentar (nueva carga) conserva lo escrito.
     return p.registro.cargar(ok(DATOS_BUSQUEDA));
   }).then(function () {
-    Check('BV10 recarga: la busqueda escrita se conserva', [4, '1 filtro activo'], [folios(p).length, p.sel('regFiltrosCuenta').textContent]);
+    // La carga nueva vuelve a ocultar Cerrado: 3 de las 4 con '12'.
+    Check('BV10 recarga: la busqueda escrita se conserva (y vuelve la vista por omision)', [3, '2 filtros activos', '12'],
+      [folios(p).length, p.sel('regFiltrosCuenta').textContent, p.sel('regBuscar').value]);
   });
 });
 
@@ -1379,6 +1406,170 @@ pruebas.push(function () {
     Check('AL11 sin rol + catalogo con error: ningun dueño ofrecido', [[], [], []],
       [p.sel('regDirector').opciones(), p.sel('regPo').opciones(), p.sel('regSo').opciones()]);
     Check('AL11 ... y las iniciativas siguen en la lista', 4, folios(p).length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// K) Indicadores: registro completo, independientes de filtros y busqueda
+// ---------------------------------------------------------------------------
+// DATOS: 4 abiertas (PRB 1, MAP 2, REQ 4, PRB 5), 3 Activas (REQ 4 tiene
+// agrupacion fuera de las cuatro), 1 Retrasada que cuenta (PRB 1; REQ 4 y
+// PRB 5 no), 1 Cerrada (HAR 3).
+var KPI_BASE = ['4', '3', '1', '1', '1'];
+function rotulosKpi(p) {
+  var re = /<div class="lbl">([^<]*)<\/div>/g, m, s = [];
+  while ((m = re.exec(p.sel('regKpis').innerHTML))) s.push(m[1]);
+  return s;
+}
+function marcarTipo(p, v) { marcarEn(p, 'regTipoIniPanel', v ? 'data-tipo-ini' : 'data-tipo-todas', v || ''); }
+
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  return esperar().then(function () {
+    var reg = p.registro, html = p.sel('regKpis').innerHTML;
+    Check('K1 cinco indicadores, en orden', ['Total de iniciativas', 'Activas', 'Fuera de Activas', 'Retrasadas', 'Cerradas'], rotulosKpi(p));
+    Check('K1 valores con la vista por omision (sin Cerrado en la lista)', KPI_BASE, kpis(p));
+    Check('K1 pies: abiertas sin categoria, tickets, resta, riesgo, Cerrado',
+      [true, true, true, true, true],
+      [/1 sin categoría/.test(html), /190 tickets a reducir/.test(html), /abiertas: Total − Activas/.test(html),
+       /150 tickets en riesgo/.test(html), /estado Cerrado/.test(html)]);
+
+    // Cada control de la lista, uno tras otro: la lista cambia, los
+    // indicadores no (y ni siquiera se repintan).
+    var pasos = [], listas = [];
+    function paso(nombre, accion) {
+      accion();
+      listas.push(folios(p).length);
+      pasos.push(nombre + ' ' + kpis(p).join('/') + (p.sel('regKpis').innerHTML === html ? '' : ' REPINTADO'));
+    }
+    paso('Limpiar', function () { sinOmision(p); });
+    paso('solo Cerrado', function () { soloEstado(p, 'Cerrado'); });
+    paso('solo En Análisis', function () { soloEstado(p, 'En Análisis'); });
+    paso('+ Cerrado', function () { marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'Cerrado'); });
+    paso('- Cerrado', function () { marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'Cerrado'); });
+    paso('Todos', function () { soloEstado(p, ''); });
+    paso('ningun estado', function () { marcarEn(p, 'regEstadoPanel', 'data-estado-todas', ''); });
+    paso('Todos otra vez', function () { soloEstado(p, ''); });
+    paso('Tipo HAR', function () { marcarTipo(p, ''); marcarTipo(p, 'HAR'); });
+    paso('todos los tipos', function () { marcarTipo(p, ''); });
+    paso('Director Dir B', function () { elegir(p, 'regDirector', 'Dir B'); });
+    paso('PO 3', function () { elegir(p, 'regPo', 'PO 3'); });
+    paso('busqueda MAP', function () { p.sel('regBuscar').value = 'MAP'; reg.aplicarBusqueda(); });
+    paso('orden por fecha', function () { reg.ordenarPor('fecha'); });
+    paso('Limpiar otra vez', function () { sinOmision(p); });
+    Check('K2 ningun filtro, la busqueda ni el orden mueven los indicadores',
+      ['Limpiar', 'solo Cerrado', 'solo En Análisis', '+ Cerrado', '- Cerrado', 'Todos', 'ningun estado', 'Todos otra vez',
+       'Tipo HAR', 'todos los tipos', 'Director Dir B', 'PO 3', 'busqueda MAP', 'orden por fecha', 'Limpiar otra vez']
+        .map(function (n) { return n + ' ' + KPI_BASE.join('/'); }), pasos);
+    Check('K2 ... mientras la lista si cambia', [5, 1, 3, 4, 3, 5, 0, 5, 1, 5, 3, 2, 0, 0, 5], listas);
+  });
+});
+
+// Cerradas solo cuenta Cerrado (sin mayusculas, acentos ni espacios de
+// mas); otro estado no activo va a Total y a Fuera de Activas.
+pruebas.push(function () {
+  var lista = [
+    Ini('A 1', { estado: 'En Análisis', retrazado: 1, riesgo_folio: 7, categorias: [Cat('/X', 7, 1)] }),   // activa y retrasada
+    Ini('A 2', { estado: 'En Solución', agrup: 'ReqOpr', seguimiento: false, retrazado: 1 }),             // estado activo, agrupacion fuera
+    Ini('A 3', { estado: 'En Monitoreo', agrup: null, seguimiento: false }),
+    Ini('A 4', { estado: 'En Análisis', sin_categoria: true, retrazado: 1 }),                             // activa sin categoria
+    Ini('A 5', { estado: 'Cancelado', activa: false, seguimiento: false }),                              // no activa, NO cerrada
+    Ini('A 6', { estado: null, activa: false, seguimiento: false }),
+    Ini('A 7', { estado: 'Cerrado', activa: false, seguimiento: false }),
+    Ini('A 8', { estado: 'cerrado', activa: false, seguimiento: false }),
+    Ini('A 9', { estado: '  CERRADO ', activa: false, seguimiento: false }),
+    Ini('A 10', { estado: 'Cerrádo', activa: false, seguimiento: false })
+  ];
+  var k = R.Registro.indicadores(lista);
+  Check('K3 tabla: total/activas/fuera de activas/retrasadas/cerradas', [6, 2, 4, 1, 4],
+    [k.total, k.activas, k.fueraActivas, k.retrasadas, k.cerradas]);
+  Check('K3 Total = Activas + Fuera de Activas; Total + Cerradas = todas', [true, true],
+    [k.total === k.activas + k.fueraActivas, k.total + k.cerradas === lista.length]);
+  Check('K3 sin categoria y riesgo solo de lo que cuenta', [1, 7], [k.sinCategoria, k.riesgo]);
+  var vacio = R.Registro.indicadores([]);
+  Check('K3 lista vacia: todo en 0', [0, 0, 0, 0, 0], [vacio.total, vacio.activas, vacio.fueraActivas, vacio.retrasadas, vacio.cerradas]);
+});
+
+// Datos nuevos (relectura): los indicadores cambian; filtros, busqueda,
+// orden y "mostrar mas" no.
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS)), reg, antes;
+  return esperar().then(function () {
+    reg = p.registro;
+    elegir(p, 'regDirector', 'Dir A');
+    p.sel('regBuscar').value = 'PRB';
+    reg.aplicarBusqueda();
+    reg.ordenarPor('folio');
+    reg.limite = 300;
+    antes = [reg.filtro.estados.marcados, reg.filtro.director, reg.filtro.textoBuscado, reg.orden, reg.limite, reg.modo, folios(p)];
+    var json = JSON.parse(JSON.stringify(DATOS));
+    json.iniciativas[1].estado = 'cerrado';                     // MAP 2 se cierra (en minusculas)
+    json.iniciativas[1].activa = false; json.iniciativas[1].seguimiento = false;
+    json.iniciativas[2].estado = 'CERRADO';                     // HAR 3 sigue cerrada
+    json.iniciativas[3].agrup = 'Mejora';                       // REQ 4 pasa a Activas (y su retraso cuenta)
+    json.iniciativas[3].seguimiento = true;
+    return reg.actualizar(ok(json));
+  }).then(function (r) {
+    Check('K4 relectura: Total 3, Activas 3, Fuera 0, Retrasadas 2, Cerradas 2', [true, ['3', '3', '0', '2', '2']], [r.ok, kpis(p)]);
+    Check('K4 ... pie de riesgo con la nueva retrasada', true, /155 tickets en riesgo/.test(p.sel('regKpis').innerHTML));
+    Check('K4 ... filtros, busqueda, orden, "mostrar mas", modo y lista intactos',
+      antes, [reg.filtro.estados.marcados, reg.filtro.director, reg.filtro.textoBuscado, reg.orden, reg.limite, reg.modo, folios(p)]);
+    // Relectura fallida: se quedan los ultimos valores, nunca 0 ni vacio.
+    return reg.actualizar(function () { return Promise.resolve(Respuesta(500, { error: 'error 53' })); });
+  }).then(function (r) {
+    Check('K5 relectura fallida: los indicadores anteriores siguen (sin ceros)', [false, ['3', '3', '0', '2', '2']], [r.ok, kpis(p)]);
+    // Una carga nueva (Reintentar): cargando sin ceros, luego error sin indicadores.
+    var promesa = reg.cargar(function () { return Promise.resolve(Respuesta(500, { error: 'error 208' })); });
+    Check('K5 cargando: cinco tarjetas "…", ningun 0', [['…', '…', '…', '…', '…'], false],
+      [kpis(p), /<div class="val">0<\/div>/.test(p.sel('regKpis').innerHTML)]);
+    return promesa;
+  }).then(function () {
+    Check('K5 error: sin indicadores (ni ceros)', ['', ['regError']], [p.sel('regKpis').innerHTML, visibles(p)]);
+    return reg.cargar(ok({ iniciativas: [], estados_activos: [], agrupadores: [] }));
+  }).then(function () {
+    // Registro vacio NO es error: 0 es el dato real, junto a su aviso.
+    Check('K5 registro vacio: su aviso y los indicadores en 0 (dato real)', [['0', '0', '0', '0', '0'], ['regSinDatos']], [kpis(p), visibles(p)]);
+    return reg.cargar(ok(DATOS));
+  }).then(function () {
+    Check('K5 de nuevo con datos: los indicadores vuelven', KPI_BASE, kpis(p));
+  });
+});
+
+// Globo "Criterio" de Activas: el patron de QARE (GloboAyuda), con el
+// criterio armado con lo que manda el servidor.
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  return esperar().then(function () {
+    var reg = p.registro, html = p.sel('regKpis').innerHTML;
+    var texto = 'Iniciativas en estado En Análisis, En Solución o En Monitoreo y con agrupación Problem, SorIA, Adopcion o Mejora.';
+    var nota = 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría.';
+    Check('K6 texto del criterio de Activas', { texto: texto, nota: nota }, reg.ayudaKpi('activas'));
+    Check('K6 solo Activas lleva la franja "Criterio", con el texto para lectores de pantalla; los demas no', [1, true, true, null],
+      [(html.match(/class="ini-kpi-ayuda"/g) || []).length,
+       /<div class="kpi ini-kpi sv ini-kpi-ctx"><button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="activas"[^>]*>Criterio<\/button>/.test(html)
+         && /<div class="lbl">Activas<\/div>/.test(html),
+       html.indexOf('id="regKpiAyudaActivas">' + p.ventana.Escape.html(texto + ' ' + nota) + '<') > 0, reg.ayudaKpi('total')]);
+    Check('K6 con GloboAyuda no hay title duplicado en la franja', false, /class="ini-kpi-ayuda"[^>]*title=/.test(html));
+
+    // Al pasar el mouse por la franja, el globo dice el criterio.
+    var franja = Elemento('franja');
+    franja.setAttribute('data-kpi-ayuda', 'activas');
+    franja.closest = function (sel) { return sel === '.ini-kpi-ayuda' ? franja : null; };
+    p.sel('regKpis').disparar('pointerover', { target: franja, pointerType: 'mouse' });
+    var g = reg.globoKpis;
+    Check('K6 pasar el mouse: el globo sale con el criterio', [false, texto, nota, true],
+      [g.globo.hidden, g.texto.textContent, g.nota.textContent, franja.classList.contains('abierto')]);
+    sinOmision(p);
+    Check('K6 un filtro no repinta las tarjetas: el globo sigue abierto', false, g.globo.hidden);
+
+    // Otro criterio en el servidor: el texto lo sigue, sin tocar el codigo.
+    var json = JSON.parse(JSON.stringify(DATOS));
+    json.agrupadores = ['Problem', 'Mejora'];
+    return reg.actualizar(ok(json)).then(function () {
+      Check('K6 relectura: el globo abierto se cierra al repintar', true, g.globo.hidden);
+      Check('K6 el texto sale de agrupadores del servidor',
+        'Iniciativas en estado En Análisis, En Solución o En Monitoreo y con agrupación Problem o Mejora.', reg.ayudaKpi('activas').texto);
+    });
   });
 });
 
