@@ -105,6 +105,34 @@ comprobar('Administracion: sin data-tab', /data-tab/.test(enlaceAdmin), false);
 comprobar('activarTab sigue marcando la entrada activa',
   /function activarTab[\s\S]{0,600}querySelectorAll\('\.mnav'\)/.test(js), true);
 
+// --- la copia de admin/iniciativas.html sigue al tablero ------------------
+// Es marcado copiado (pagina estatica): se habia quedado sin Efectividad ni
+// Analisis de servicios. Mismas secciones, mismo orden, mismo title, cada
+// una como enlace a ../dashboard.html#<data-tab> (sin data-tab: ahi no hay
+// activarTab). Administracion sigue oculta (data-solo-admin) y es la unica
+// marcada como actual.
+var admin = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.html'), 'utf8')
+  .replace(/<!--[\s\S]*?-->/g, '');
+var navAdmin = (admin.match(/<aside class="lateral" id="lateral">[\s\S]*?<\/aside>/) || [''])[0];
+var enlaces = todas(navAdmin, /<a class="mnav[^"]*"[^>]*>/g).map(function (m) { return m[0]; });
+var deTablero = enlaces.filter(function (a) { return /href="\.\.\/dashboard\.html#/.test(a); });
+comprobar('admin: las secciones del tablero, en el mismo orden',
+  deTablero.map(function (a) { return a.match(/#([^"]+)"/)[1]; }).join(','), nombres.join(','));
+comprobar('admin: mismo title que en el tablero',
+  deTablero.map(function (a) { return (a.match(/title="([^"]+)"/) || [])[1]; }).join('|'),
+  botones.map(function (b) { return (b.match(/title="([^"]+)"/) || [])[1]; }).join('|'));
+comprobar('admin: Efectividad y Analisis de servicios presentes', [
+  /href="\.\.\/dashboard\.html#efectividad"/.test(navAdmin), /href="\.\.\/dashboard\.html#analisis"/.test(navAdmin)].join(),
+  'true,true');
+comprobar('admin: ninguna entrada con data-tab', /data-tab/.test(navAdmin), false);
+comprobar('admin: solo una mas (Administracion), oculta hasta SesionAdmin',
+  enlaces.length - deTablero.length + '|' +
+  /<li data-solo-admin hidden>\s*<a class="mnav active" href="iniciativas\.html" aria-current="page"/.test(navAdmin), '1|true');
+comprobar('admin: solo Administracion nace como actual',
+  enlaces.filter(function (a) { return /aria-current="page"|mnav active/.test(a); }).length, 1);
+comprobar('admin: data-solo-admin solo en Administracion',
+  (navAdmin.match(/data-solo-admin/g) || []).length, 1);
+
 // --- plegar es solo una clase, no un segundo cargador --------------------
 // Si plegarLateral() tocara `listo`, `montando` o init(), cambiar el ancho
 // podria remontar un modulo. Solo puede pintar y remedir.

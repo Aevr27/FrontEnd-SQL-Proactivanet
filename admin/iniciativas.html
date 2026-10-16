@@ -83,7 +83,8 @@
          aqui igual, aunque quien no esta autorizado ya no deberia llegar
          (AdminAccesoModulo).
        Plegar/desplegar: MenuLateral en admin/iniciativas.js. Si cambia la
-       lista de modulos del tablero, actualizar tambien esta copia. -->
+       lista de modulos del tablero, actualizar tambien esta copia
+       (tools/tests/BarraLateralSmoke.js compara las dos). -->
   <aside class="lateral" id="lateral">
     <div class="lateral-cabecera">
       <span class="lateral-marca">
@@ -128,6 +129,14 @@
           </a>
         </li>
         <li>
+          <a class="mnav" href="../dashboard.html#efectividad" title="Efectividad de iniciativas">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M5 19.5V13M10 19.5V9.5M15 19.5V15"/><path d="m13.5 7 2.5 2.5L20.5 5"/>
+            </svg>
+            <span class="mnav-txt">Efectividad</span>
+          </a>
+        </li>
+        <li>
           <a class="mnav" href="../dashboard.html#qa" title="QA">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M9.5 3h5M10 3v6.2L5.3 17.6A2 2 0 0 0 7 20.6h10a2 2 0 0 0 1.7-3L14 9.2V3"/>
@@ -141,6 +150,14 @@
               <path d="M5 4.5h14v15H5z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>
             </svg>
             <span class="mnav-txt">QARE</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#analisis" title="Análisis de servicios">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M7.5 12.5v-2M10.5 12.5v-4M13.5 12.5v-3"/>
+            </svg>
+            <span class="mnav-txt">Análisis de servicios</span>
           </a>
         </li>
         <li>
