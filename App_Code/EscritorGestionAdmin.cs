@@ -1,14 +1,11 @@
 // Escritor de la gestion directa de ADM contra los procedimientos de la
 // migracion sql/18_gestion_admin_persistencia.sql (adm.usp_GestionAdmin_Crear
-// / _Modificar). ESA MIGRACION NO ESTA APLICADA EN LA VM: sin aprobar.
+// / _Modificar). sql/18 (y sql/20 para PO / SO del alta) aplicadas en la VM.
 //
 // El handler (admin_iniciativas_gestion.ashx) lo llama SOLO si
-// PersistenciaGestionAdmin.Activa() (hoy const false) y el plan no tiene
-// pendientes. Probado solo en LocalDB desechable
-// (tools/tests/GestionAdminSqlLocalDbSmoke.cs). Encenderlo exige: 18
-// aplicada, el cargador del Excel retirado (stub 51900 del backend), las
-// vistas del backend con la fecha por categoria, EXECUTE en adm para la
-// cuenta del sitio y la decision de "quitar categoria".
+// PersistenciaGestionAdmin.Activa() y el plan no tiene pendientes ("quitar
+// categoria" sigue sin regla: 409). Probado en LocalDB desechable
+// (tools/tests/GestionAdminSqlLocalDbSmoke.cs: casos C, D, K, M, R...).
 //
 // La atomicidad, el tope de 100% con candado, la generacion del Codigo, el
 // TicketsReduce y los NroCambioFecha* viven en SQL (una transaccion por

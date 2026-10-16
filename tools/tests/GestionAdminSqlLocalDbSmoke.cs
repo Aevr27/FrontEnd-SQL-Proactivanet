@@ -30,6 +30,11 @@
 //   K  tope 100%: exacto, reactivacion, agrupacion NULL, no agrupador,
 //      concurrencia.
 //   R  TicketsReduce.
+//   M  Modificar de punta a punta: todos los campos en una llamada y leidos
+//      de vuelta; fallas a media transaccion (tope, categoria no ligada,
+//      estado, repetida) sin dejar nada; quitar rechazado; concurrencia al
+//      subir el %. Fecha de cierre (extender cuenta, adelantar no) y
+//      historial de Estado (dbo.ProblemEstadoEvento) con su atribucion.
 //   H  lector C# del historial (HistorialFechas) y registro (fechas propias).
 //   P  permisos con un login como el del sitio (datareader/datawriter +
 //      EXECUTE dbo/adm) y sin EXECUTE en adm.
@@ -715,6 +720,157 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 var analisisIni = (IDictionary)Campo(fp, "AnalisisIniciativa");
                 Check("H4 registro: fechas propias solo de la ligada despues; la de la iniciativa aparte", "1|2026-11-02|2026-11-30|2026-12-01",
                       Contar(porCat, cd) + "|" + string.Join("|", (string[])porCat[cd + " /D/Tres"]) + "|" + analisisIni[cd]);
+
+                // ---------------- M: Modificar de punta a punta ----------------
+                // Todo lo que "Modificar" guarda, en UNA llamada, leido de vuelta;
+                // y llamadas que fallan a media transaccion sin dejar nada.
+                Exec(cn, "INSERT dbo.Categorias (Id, RutaCompleta, Inactiva, VigenteEnOrigen) VALUES " +
+                         "(N'M1', N'/M/Uno', 0, 1), (N'M2', N'/M/Dos', 0, 1), (N'M3', N'/M/Tres', 0, 1), (N'M4', N'/M/Carrera', 0, 1);");
+                var cm = Crear(cn, Alta(hoy, "/M/Uno", "20"));
+                var mTodo = Mod(cm, new DateTime(2026, 10, 20));
+                mTodo.Problem[SolicitudIniciativa.CTitulo] = "Titulo M";
+                mTodo.Problem[SolicitudIniciativa.CDescripcion] = "Descripcion M";
+                mTodo.Problem[SolicitudIniciativa.CObservaciones] = "Observaciones M";
+                mTodo.Problem[PeticionModificarAdmin.CEstado] = "En Solución";
+                mTodo.Problem[PeticionModificarAdmin.CSubestado] = "Sub M";
+                mTodo.Problem[PeticionModificarAdmin.CFAnalisis] = "2026-11-05";
+                mTodo.Problem[PeticionModificarAdmin.CFSolucion] = "2026-12-05";
+                mTodo.Problem[PeticionModificarAdmin.CFCierre] = "2027-01-05";
+                mTodo.Pcts.Add(new CategoriaPlan { Ruta = "/M/Uno", Pct = 0.3m });
+                mTodo.Agregar.Add(Liga("/M/Dos", 0.15m));
+                Check("M1 titulo, descripcion, observaciones, estado, subestado, 3 fechas, % y categoria nueva en una llamada: sin error", "sin error",
+                      Error(() => Modificar(cn, mTodo)));
+                Check("M2 dbo.Problem leido de vuelta: cada campo guardado; Codigo y FechaCreacion intactos",
+                      cm + "|Titulo M|Descripcion M|Observaciones M|En Solución|Sub M|2026-11-05|2026-12-05|2027-01-05|2026-10-13",
+                      Filas(cn, "SELECT Codigo, Titulo, Descripcion, Observaciones, Estado, Subestado, FechaAnalisis, FechaSolucion, FechaCierre, FechaCreacion FROM dbo.Problem WHERE Codigo = N'" + cm + "'"));
+                Check("M3 categorias: % cambiado; la nueva con su %, fechas propias (hoy / hoy+15) y tipos; la inicial sigue heredando",
+                      "/M/Dos|0.1500|2026-10-20|2026-11-04|Problem|Problem;/M/Uno|0.3000|NULL|NULL|Problem|Problem",
+                      Filas(cn, "SELECT Categoria, PctDisminucion, FechaCreacionCategoria, FechaAnalisisCategoria, TipoIniciativa, TipoAgrupado FROM dbo.ProblemCategoria WHERE Codigo = N'" + cm + "' ORDER BY Categoria"));
+                Check("M4 contadores: solo el cambio de Analisis cuenta (asignar Solucion/Cierre no)", "1|0|0",
+                      Filas(cn, "SELECT NroCambioFechaAnalisis, NroCambioFechaSolucion, NroCambioFechaCierre FROM dbo.Problem WHERE Codigo = N'" + cm + "'"));
+                Check("M5 historial: 'U' de FechaAnalisis de la iniciativa y 'I' de la categoria nueva, ADMIN con el usuario",
+                      "/M/Dos|FechaAnalisis|NULL|2026-11-04|I|ADMIN|DOM\\prueba;NULL|FechaAnalisis|2026-10-28|2026-11-05|U|ADMIN|DOM\\prueba",
+                      Filas(cn, "SELECT Categoria, Campo, FechaAnterior, FechaNueva, Operacion, Origen, Usuario FROM dbo.ProblemFechaEvento WHERE Codigo = N'" + cm + "' " +
+                                "AND Campo = 'FechaAnalisis' AND NOT (Operacion = 'I' AND Categoria IS NULL) ORDER BY Categoria DESC"));
+                Check("M6 la proteccion del alta se conserva (una fila, ALTA)", "1|ALTA",
+                      Filas(cn, "SELECT COUNT(*), MIN(Motivo) FROM adm.IniciativaProtegida WHERE Codigo = N'" + cm + "'"));
+                Check("M7 lector del registro: el Subestado guardado", "Sub M",
+                      ExperienciaQueries.LeerEstadosProblem(cn).SubestadoPorFolio[cm]);
+                Check("M8 TicketsReduce de las dos categorias recalculado (sin tickets = 0)", "/M/Dos|0;/M/Uno|0",
+                      Filas(cn, "SELECT Categoria, ISNULL(TicketsReduce, 0) FROM dbo.ProblemCategoria WHERE Codigo = N'" + cm + "' ORDER BY Categoria"));
+
+                // Atomicidad: varios campos + una categoria que excede el tope
+                // (/K/Cat 1 lleno, K1). Una iniciativa del Excel aun sin proteger.
+                const string mapa = "MAP 2026-000001";
+                Func<string> fotoMap = () =>
+                    Filas(cn, "SELECT * FROM dbo.Problem WHERE Codigo = N'" + mapa + "'") + " // " +
+                    Filas(cn, "SELECT * FROM dbo.ProblemCategoria WHERE Codigo = N'" + mapa + "' ORDER BY Categoria") + " // " +
+                    Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemFechaEvento WHERE Codigo = N'" + mapa + "'") + " // " +
+                    Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemEstadoEvento WHERE Codigo = N'" + mapa + "'") + " // " +
+                    Uno(cn, "SELECT COUNT(*) FROM adm.IniciativaProtegida WHERE Codigo = N'" + mapa + "'");
+                var antesMap = fotoMap();
+                Check("M9 la iniciativa del Excel parte sin proteger", "0", Uno(cn, "SELECT COUNT(*) FROM adm.IniciativaProtegida WHERE Codigo = N'" + mapa + "'"));
+                var mTope = Mod(mapa, hoy);
+                mTope.Problem[SolicitudIniciativa.CTitulo] = "no debe quedar";
+                mTope.Problem[SolicitudIniciativa.CObservaciones] = "no debe quedar";
+                mTope.Problem[PeticionModificarAdmin.CEstado] = "En Monitoreo";
+                mTope.Problem[PeticionModificarAdmin.CFAnalisis] = "2026-12-24";
+                mTope.Pcts.Add(new CategoriaPlan { Ruta = "/R/Reac", Pct = 0.4m });
+                mTope.Agregar.Add(Liga("/K/Cat 1", 0.05m));
+                Check("M10 varios campos + una categoria sobre el tope: 51010", "51010", Error(() => Modificar(cn, mTope)));
+                Check("M10 ... nada quedo: Problem, categorias, historiales (fechas y estado) y proteccion identicos", antesMap, fotoMap());
+                Check("M10 ... la sesion quedo sin atribucion", "NULL|NULL",
+                      Celda(Uno(cn, "SELECT SESSION_CONTEXT(N'pfe_origen')")) + "|" + Celda(Uno(cn, "SELECT SESSION_CONTEXT(N'pfe_usuario')")));
+                var mAjena = Mod(mapa, hoy);
+                mAjena.Problem[SolicitudIniciativa.CTitulo] = "no debe quedar";
+                mAjena.Pcts.Add(new CategoriaPlan { Ruta = "/M/Tres", Pct = 0.1m });
+                Check("M11 titulo + % de una categoria no ligada (seleccion vieja): 51007 y nada queda", "51007|" + antesMap,
+                      Error(() => Modificar(cn, mAjena)) + "|" + fotoMap());
+                var mEstado = Mod(mapa, hoy);
+                mEstado.Problem[SolicitudIniciativa.CTitulo] = "no debe quedar";
+                mEstado.Problem[PeticionModificarAdmin.CEstado] = "Inventado";
+                Check("M12 titulo + Estado que no existe: 51013 y nada queda", "51013|" + antesMap,
+                      Error(() => Modificar(cn, mEstado)) + "|" + fotoMap());
+                var mRepetida = Mod(cm, hoy);
+                mRepetida.Problem[SolicitudIniciativa.CTitulo] = "no debe quedar";
+                mRepetida.Agregar.Add(Liga("/M/Uno", 0.1m));
+                Check("M13 agregar una categoria ya ligada: 51008 y el titulo no cambia", "51008|Titulo M",
+                      Error(() => Modificar(cn, mRepetida)) + "|" + Uno(cn, "SELECT Titulo FROM dbo.Problem WHERE Codigo = N'" + cm + "'"));
+                var mQuitar = Mod(cm, hoy);
+                mQuitar.Problem[SolicitudIniciativa.CTitulo] = "no debe quedar";
+                mQuitar.Quitar.Add("/M/Dos");
+                string quitar;
+                try { Modificar(cn, mQuitar); quitar = "sin error"; }
+                catch (InvalidOperationException) { quitar = "rechazada"; }
+                Check("M14 quitar categoria (sin regla): el escritor la rechaza antes de la base; nada cambia", "rechazada|Titulo M|2",
+                      quitar + "|" + Uno(cn, "SELECT Titulo FROM dbo.Problem WHERE Codigo = N'" + cm + "'") + "|" +
+                      Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemCategoria WHERE Codigo = N'" + cm + "' AND VigenteEnOrigen = 1"));
+
+                // Concurrencia al SUBIR el % de una ligada (K11 cubre ligar): A
+                // sube 50 -> 55 con la tx abierta; B (40 -> 50) espera el candado
+                // y se rechaza: la ruta nunca pasa de 100.
+                var ca = Crear(cn, Alta(hoy, "/M/Carrera", "50"));
+                var cb = Crear(cn, Alta(hoy, "/M/Carrera", "40"));
+                string resM = null;
+                bool esperoM;
+                using (var cnA = Abrir(Base))
+                using (var cnB = Abrir(Base))
+                {
+                    var pa = Mod(ca, hoy); pa.Pcts.Add(new CategoriaPlan { Ruta = "/M/Carrera", Pct = 0.55m });
+                    var pb = Mod(cb, hoy); pb.Pcts.Add(new CategoriaPlan { Ruta = "/M/Carrera", Pct = 0.5m });
+                    var txA = cnA.BeginTransaction();
+                    new EscritorGestionAdminSql().Modificar(cnA, txA, pa, @"DOM\a");
+                    var hilo = new Thread(() => { resM = Error(() => Modificar(cnB, pb, @"DOM\b")); });
+                    hilo.Start();
+                    esperoM = !hilo.Join(2000);
+                    txA.Commit();
+                    hilo.Join(30000);
+                }
+                Check("M15 concurrencia al subir %: B espera el candado de A y se rechaza; total 95, B sigue en 40", "True|51010|0.9500|0.4000",
+                      esperoM + "|" + resM + "|" + Celda(Uno(cn, "SELECT SUM(PctDisminucion) FROM dbo.ProblemCategoria WHERE Categoria = N'/M/Carrera'")) + "|" +
+                      Celda(Uno(cn, "SELECT PctDisminucion FROM dbo.ProblemCategoria WHERE Codigo = N'" + cb + "' AND Categoria = N'/M/Carrera'")));
+                Check("M16 Codigo intacto tras todo: una sola fila con ese Codigo, ningun Codigo nuevo por Modificar", "1",
+                      Uno(cn, "SELECT COUNT(*) FROM dbo.Problem WHERE Codigo = N'" + cm + "'"));
+
+                // Historial de Estado del M1 (En Análisis -> En Solución), por
+                // dbo.trg_Problem_EstadoEvento con la atribucion de la sesion.
+                Check("M17 Estado cambiado por Modificar: 'U' En Análisis -> En Solución, ADMIN con el usuario, sin solicitud",
+                      "En Análisis|En Solución|U|ADMIN|DOM\\prueba|NULL|0",
+                      Filas(cn, "SELECT EstadoAnterior, EstadoNuevo, Operacion, Origen, Usuario, SolicitudId, Reconstruido FROM dbo.ProblemEstadoEvento " +
+                                "WHERE Codigo = N'" + cm + "' AND Operacion = 'U'"));
+                Check("M17 ... sin cambio de Estado no hay evento nuevo (M13-M16 no lo tocaron): uno 'I' del alta y uno 'U'", "I:1;U:1",
+                      Filas(cn, "SELECT Operacion + ':' + CONVERT(varchar(10), COUNT(*)) FROM dbo.ProblemEstadoEvento WHERE Codigo = N'" + cm + "' GROUP BY Operacion ORDER BY Operacion"));
+
+                // Fecha de cierre: asignar (NULL -> 15/10), extender (15/10 ->
+                // 30/10) y adelantar (30/10 -> 20/10). Solo la extension cuenta.
+                var cc = Crear(cn, Alta(hoy, "/M/Tres", "10"));
+                Func<string, string> cierre = f =>
+                {
+                    var m = Mod(cc, hoy);
+                    m.Problem[PeticionModificarAdmin.CFCierre] = f;
+                    return Error(() => Modificar(cn, m));
+                };
+                Func<string> cierreYContador = () =>
+                    Filas(cn, "SELECT FechaCierre, NroCambioFechaCierre FROM dbo.Problem WHERE Codigo = N'" + cc + "'");
+                Func<string> eventosCierre = () =>
+                    Filas(cn, "SELECT FechaAnterior, FechaNueva, Operacion, Origen, Usuario FROM dbo.ProblemFechaEvento " +
+                              "WHERE Codigo = N'" + cc + "' AND Campo = 'FechaCierre' AND Categoria IS NULL AND Operacion = 'U' ORDER BY IdEvento");
+                Check("M18 asignar FechaCierre 2026-10-15 (antes NULL): guardada, el contador no sube", "sin error|2026-10-15|0",
+                      cierre("2026-10-15") + "|" + cierreYContador());
+                Check("M19 extender FechaCierre 2026-10-15 -> 2026-10-30: dbo.Problem la guarda y el contador sube a 1", "sin error|2026-10-30|1",
+                      cierre("2026-10-30") + "|" + cierreYContador());
+                Check("M19 ... dbo.ProblemFechaEvento: 'U' 2026-10-15 -> 2026-10-30, ADMIN con el usuario",
+                      "NULL|2026-10-15|U|ADMIN|DOM\\prueba;2026-10-15|2026-10-30|U|ADMIN|DOM\\prueba",
+                      eventosCierre());
+                Check("M20 adelantar FechaCierre 2026-10-30 -> 2026-10-20: se guarda y queda en el historial, pero el contador sigue en 1",
+                      "sin error|2026-10-20|1|2026-10-30|2026-10-20|U|ADMIN|DOM\\prueba",
+                      cierre("2026-10-20") + "|" + cierreYContador() + "|" +
+                      Filas(cn, "SELECT TOP (1) FechaAnterior, FechaNueva, Operacion, Origen, Usuario FROM dbo.ProblemFechaEvento " +
+                                "WHERE Codigo = N'" + cc + "' AND Campo = 'FechaCierre' ORDER BY IdEvento DESC"));
+                Check("M20 ... misma fecha otra vez: sin evento nuevo ni cambio del contador", "sin error|3|2026-10-20|1",
+                      cierre("2026-10-20") + "|" +
+                      Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemFechaEvento WHERE Codigo = N'" + cc + "' AND Campo = 'FechaCierre' AND Operacion = 'U'") + "|" +
+                      cierreYContador());
             }
 
             // ---------------- P: permisos como el sitio ----------------

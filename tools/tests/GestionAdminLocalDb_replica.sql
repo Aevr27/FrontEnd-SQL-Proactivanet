@@ -19,8 +19,10 @@
    vistas compilen): dbo.fn_CategoriaC1 / fn_CategoriaC1C2 (cortan por '/'),
    dbo.fn_ClaveNombre (mayusculas sin espacios ni acentos), dbo.vw_DuenoPorC1,
    dbo.Categorias y dbo.Tickets (solo las columnas que se leen).
-   NO se replica dbo.trg_Problem_EstadoEvento / dbo.ProblemEstadoEvento: su
-   definicion desplegada no esta en ningun repo. */
+   dbo.ProblemEstadoEvento + dbo.trg_Problem_EstadoEvento +
+   dbo.trg_ProblemEstadoEvento_SoloAgregar: copiados de la definicion
+   desplegada en la VM (ADM_04_diag_proteccion.sql seccion 9, 2026-10-14) y de
+   las columnas / CHECK / FK del volcado del 2026-10-13. */
 
 IF DB_NAME() NOT LIKE N'GestionAdminPrueba[_]%'
 BEGIN
@@ -187,6 +189,75 @@ BEGIN
         ('FechaCierre',   CONVERT(date, d.FechaCierre),   CONVERT(date, i.FechaCierre))
     ) AS v (Campo, Anterior, Nueva)
     WHERE EXISTS (SELECT v.Anterior EXCEPT SELECT v.Nueva);
+END;
+GO
+
+/* ---------- Historial de Estado (script 62, desplegado; copiado de la VM) ---------- */
+CREATE TABLE dbo.ProblemEstadoEvento
+(
+    IdEvento       int IDENTITY(1,1) NOT NULL CONSTRAINT PK_ProblemEstadoEvento PRIMARY KEY CLUSTERED,
+    Codigo         nvarchar(100) NOT NULL,
+    EstadoAnterior nvarchar(100) NULL,
+    EstadoNuevo    nvarchar(100) NULL,
+    Operacion      char(1)       NOT NULL CONSTRAINT CK_ProblemEstadoEvento_Operacion CHECK (Operacion IN ('B', 'U', 'I')),
+    Reconstruido   AS (CONVERT(bit, CASE WHEN Operacion = 'B' THEN 1 ELSE 0 END)),
+    Origen         varchar(12)   NOT NULL CONSTRAINT CK_ProblemEstadoEvento_Origen CHECK (Origen IN ('ADMIN', 'NO_DECLARADO')),
+    Usuario        nvarchar(256) NULL,
+    SolicitudId    int           NULL,
+    LoginBD        nvarchar(128) NOT NULL DEFAULT (ORIGINAL_LOGIN()),
+    FechaRegistro  datetime2(3)  NOT NULL DEFAULT (DATEADD(HOUR, -6, SYSUTCDATETIME())),
+    CONSTRAINT CK_ProblemEstadoEvento_Atribucion CHECK (
+        (Origen = 'NO_DECLARADO' AND Usuario IS NULL AND SolicitudId IS NULL)
+        OR (Origen = 'ADMIN' AND Usuario IS NOT NULL AND LEN(LTRIM(RTRIM(Usuario))) > 0)),
+    CONSTRAINT CK_ProblemEstadoEvento_Base CHECK (Operacion <> 'B' OR (EstadoAnterior IS NULL AND EstadoNuevo IS NOT NULL)),
+    CONSTRAINT CK_ProblemEstadoEvento_Transicion CHECK (
+        NULLIF(REPLACE(LTRIM(RTRIM(EstadoNuevo)), N' ', N''), N'') IS NOT NULL
+        OR NULLIF(REPLACE(LTRIM(RTRIM(EstadoAnterior)), N' ', N''), N'') IS NOT NULL),
+    CONSTRAINT FK_ProblemEstadoEvento_Problem FOREIGN KEY (Codigo) REFERENCES dbo.Problem (Codigo)
+);
+CREATE INDEX IX_ProblemEstadoEvento_Codigo ON dbo.ProblemEstadoEvento (Codigo, IdEvento);
+GO
+CREATE TRIGGER dbo.trg_ProblemEstadoEvento_SoloAgregar
+ON dbo.ProblemEstadoEvento
+INSTEAD OF UPDATE, DELETE
+AS
+BEGIN
+    SET NOCOUNT ON;
+    THROW 50002, 'dbo.ProblemEstadoEvento solo agrega: los eventos no se cambian ni se borran.', 1;
+END;
+GO
+CREATE TRIGGER dbo.trg_Problem_EstadoEvento
+ON dbo.Problem
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF NOT EXISTS (SELECT 1 FROM inserted) RETURN;
+    -- La sentencia no toca Estado. (En un INSERT, UPDATE() es verdad para todas.)
+    IF NOT UPDATE(Estado) RETURN;
+
+    -- El contexto que declara el sitio; las mismas llaves que el historial de
+    -- fechas (pfe_*). Sin el, es NO_DECLARADO.
+    DECLARE @esAdmin BIT =
+        CASE WHEN CONVERT(VARCHAR(12), SESSION_CONTEXT(N'pfe_origen')) = 'ADMIN' THEN 1 ELSE 0 END;
+    DECLARE @usuario NVARCHAR(256) =
+        CASE WHEN @esAdmin = 1 THEN CONVERT(NVARCHAR(256), SESSION_CONTEXT(N'pfe_usuario')) END;
+    DECLARE @solicitud INT =
+        CASE WHEN @esAdmin = 1 THEN TRY_CONVERT(INT, SESSION_CONTEXT(N'pfe_solicitud')) END;
+
+    INSERT INTO dbo.ProblemEstadoEvento (Codigo, EstadoAnterior, EstadoNuevo, Operacion, Origen, Usuario, SolicitudId)
+    SELECT i.Codigo, d.Estado, i.Estado,
+           CASE WHEN d.Codigo IS NULL THEN 'I' ELSE 'U' END,
+           CASE WHEN @esAdmin = 1 THEN 'ADMIN' ELSE 'NO_DECLARADO' END,
+           @usuario, @solicitud
+    FROM inserted AS i
+    LEFT JOIN deleted AS d ON d.Codigo = i.Codigo
+    -- Sin espacios, mayusculas ni acentos, y vacio = sin estado. EXCEPT
+    -- compara bien los NULL (sin IS DISTINCT FROM: la base esta en nivel 150).
+    CROSS APPLY (SELECT Nueva    = NULLIF(REPLACE(LTRIM(RTRIM(i.Estado)), N' ', N''), N'') COLLATE Latin1_General_CI_AI,
+                        Anterior = NULLIF(REPLACE(LTRIM(RTRIM(d.Estado)), N' ', N''), N'') COLLATE Latin1_General_CI_AI) AS k
+    WHERE EXISTS (SELECT k.Nueva EXCEPT SELECT k.Anterior);
 END;
 GO
 
