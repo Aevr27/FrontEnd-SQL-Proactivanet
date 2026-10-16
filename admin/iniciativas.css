@@ -305,6 +305,15 @@
 
 /* ---- Indicadores ---- */
 .ini-kpis { margin-bottom: 14px; }
+/* Cinco tarjetas a todo lo ancho; tres por fila en pantallas medianas y
+   dos en las chicas. */
+.kpis.ini-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@media (max-width: 1200px) {
+  .kpis.ini-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .kpis.ini-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .ini-kpi { cursor: default; }
 /* En telefono, dos por fila: apiladas, las cuatro empujaban la lista una
    pantalla entera hacia abajo. */
@@ -315,6 +324,21 @@
   /* Filtros tambien de dos en dos; los selects siguen a ancho de columna. */
   .filtros.ini-filtros { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px; }
 }
+/* Franja "Criterio" de un indicador (hoy solo Activas): la misma franja
+   "Pregunta" de los KPIs de QARE (.qare-kpi-preg en qare/qare.css, que no
+   se toca), con su globo de GloboAyuda (assets/css/globo-ayuda.css). */
+.kpi.ini-kpi-ctx { padding-top: 20px; }
+.ini-kpi-ayuda {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 1;
+  display: block; height: 13px; margin: 0; padding: 0; border: 0;
+  background: var(--accent-soft); color: var(--accent-deep);
+  font-family: inherit; font-size: 7.5px; font-weight: 500; line-height: 13px;
+  text-transform: uppercase; letter-spacing: .9px; text-align: center;
+  cursor: help; opacity: .85;
+  transition: background .15s ease, opacity .15s ease;
+}
+.ini-kpi-ayuda:hover, .ini-kpi-ayuda.abierto { background: var(--accent-line); opacity: 1; }
+.ini-kpi-ayuda:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .ini-kpi-cargando { border-left-color: var(--line); }
 .ini-kpi-cargando::after { opacity: 0; }
 .ini-kpi-cargando .val { color: var(--muted-2); }
@@ -406,7 +430,18 @@
   letter-spacing: 1px; color: var(--ink);
 }
 .ini-lista-cuenta { font-size: 12.5px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.ini-lista-ayuda { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+.ini-lista-ayuda { font-size: 11.5px; color: var(--muted); }
+/* A la derecha del titulo: el semaforo y, debajo, la ayuda. */
+.ini-lista-lado {
+  margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+  min-width: 0; text-align: right;
+}
+.ini-semaforo {
+  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px;
+  font-size: 12px; color: var(--ink-2);
+}
+.ini-semaforo-op { white-space: nowrap; font-variant-numeric: tabular-nums; cursor: default; }
+.ini-semaforo-op b { color: var(--ink); }
 
 .ini-tabla-caja {
   border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
@@ -457,11 +492,20 @@
 .ini-sem.verde { background: var(--verde); }
 .ini-sem.ambar { background: var(--ambr); }
 .ini-sem.rojo { background: var(--rojo); }
-.ini-vencida { color: var(--rojo); }
+.ini-sem.gris { background: var(--muted-2); }
+/* Atrasada = ambar, como en el semaforo. Texto en el ambar oscuro: el de
+   --ambr no se lee en letra chica sobre blanco. */
+.ini-vencida { color: #b45309; }
+/* Atrasada: segunda linea de la celda, alineada con la fecha (ancho del
+   punto .ini-sem + su margen). */
 .ini-retraso {
-  margin-left: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: .3px; color: var(--rojo);
+  display: block; margin: 2px 0 0 15px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .3px; color: #b45309;
 }
+/* Pastilla Atrasada del detalle (la .pill.vencido del tablero es roja). */
+.pill.ini-atrasada { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+/* Dias desde la creacion, bajo el codigo. */
+.ini-edad { white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .ini-mas-caja { display: flex; justify-content: center; margin-top: 12px; }
 
@@ -518,7 +562,8 @@
   .ini-tabla tr.ini-fila td.ini-cov-inis { grid-column: 1 / -1; }
   .ini-cov-campo { margin-left: 0; width: 100%; }
   .ini-tabla tr.ini-fila td:first-child::before { display: none; }
-  .ini-lista-ayuda { margin-left: 0; }
+  .ini-lista-lado { margin-left: 0; width: 100%; align-items: flex-start; text-align: left; }
+  .ini-semaforo { justify-content: flex-start; }
 }
 
 /* ---- Detalle (panel lateral) ---- */

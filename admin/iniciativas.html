@@ -282,7 +282,12 @@
       <div class="ini-lista-cab">
         <h3 class="ini-lista-titulo">Registro</h3>
         <span class="ini-lista-cuenta" id="regCuenta" aria-live="polite"></span>
-        <span class="ini-lista-ayuda">Elige una iniciativa para ver su detalle.</span>
+        <!-- Semaforo de la fecha compromiso sobre el registro COMPLETO
+             (registro-iniciativas.js, pintarSemaforo): no sigue los filtros. -->
+        <div class="ini-lista-lado">
+          <div class="ini-semaforo" id="regSemaforo" role="group" aria-label="Semáforo de fecha compromiso de las activas"></div>
+          <span class="ini-lista-ayuda">Elige una iniciativa para ver su detalle.</span>
+        </div>
       </div>
 
       <div class="ini-vacio" id="regVacio" hidden>

@@ -603,9 +603,20 @@ window.Iniciativas = (function () {
           return r ? { estados: r.estadosProblem, tiposIniciativa: r.valoresTipoIniciativa, tiposAgrupado: r.valoresTipoAgrupado,
                        persiste: r.persistenciaAdmin === true } : null;
         });
-        // Un alta GUARDADA recarga el registro (la lista, la busqueda de
-        // "existente" y sus valores) sin recargar la pagina.
-        this.crearAdmin.alGuardar = function () { reg.cargar(); };
+        // Un alta GUARDADA relee el registro (la lista, la busqueda de
+        // "existente" y sus valores) sin recargar la pagina y sin tocar la
+        // vista de Iniciativas (filtros, busqueda, orden, "mostrar mas",
+        // modo, detalle abierto): actualizar(), no cargar(). Si la relectura
+        // falla, el alta SI se guardo y se dice junto a su respuesta.
+        this.crearAdmin.alGuardar = function () {
+          return reg.actualizar().then(function (res) {
+            var caja = self.$('admResultado');
+            if (res.ok || res.superada || !caja) return res;
+            caja.innerHTML += '<p class="ini-prototipo-aviso">Se guardó, pero la lista de Iniciativas no se pudo actualizar: ' +
+              Escape.html((res.error && res.error.message) || 'error desconocido') + ' Puede no mostrarla todavía.</p>';
+            return res;
+          });
+        };
       }
       if (DUENOS_VISIBLES && window.CategoriasDuenos) this.duenos = new window.CategoriasDuenos.VistaDuenos(this.doc);
       if (this.$('cdSeccion')) this.$('cdSeccion').hidden = !DUENOS_VISIBLES;

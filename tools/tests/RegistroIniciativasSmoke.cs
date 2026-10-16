@@ -22,6 +22,11 @@
 //      (Problem.TipoIniciativa no se lee ni se traduce); agrup no cambia
 //  10) n2 de cada categoria: la CategoriaN2 del C1&C2 de la ruta si tiene
 //      fila propia en CatCategoriaDueno (vigente o no), null si no
+//  11) agrupador por Clave: "Adopcion" con tilde / mayusculas / espacios
+//      -> Adopcion en seguimiento; cerrada sigue sin ser activa; ReqOpr fuera
+//  12) control_fecha (CatPrefijoProblem.ControlDeFecha) en el registro
+//  13) ConsumeCapacidad (escritura de Admin, dato crudo): "Adopcion" con
+//      tilde / mayusculas / espacios consume; cerrada y ReqOpr no
 //
 // Compilar y correr desde la raiz del repo:
 //   csc /nologo /target:library /out:exp.dll /r:System.dll /r:System.Data.dll ^
@@ -204,6 +209,45 @@ public static class RegistroSmoke
         Check("10 ruta sin N2 propia (hereda del C1): null", true, ((Dictionary<string, object>)catsN2[1])["n2"] == null);
         Check("10 N2 dada de baja: se informa (la Cobertura decide)", "/B/Cat 4",
             ((Dictionary<string, object>)((IList)Ini((IList)conN2["iniciativas"], "HAR 4")["categorias"])[0])["n2"]);
+
+        // 11) Agrupador sin acentos ni mayusculas (Canonizar por Clave):
+        // "Adopcion" con tilde -lo que escribe el alta de Admin- es Adopcion,
+        // activa y en seguimiento. El estado sigue decidiendo: Adopcion
+        // cerrada no es activa. ReqOpr sigue fuera.
+        var dAdo = new List<object>();
+        var lAdo = (IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(TDet));
+        lAdo.Add(Det("ADO 1", "/A/Cat 1", "En Solución", " Adopción ", 10, 0.1, null, "2026-12-01", "PO 1", "SO x", "Dir A"));
+        lAdo.Add(Det("ADO 2", "/A/Cat 2", "En Análisis", "ADOPCION", 10, 0.1, "2026-12-01", null, "PO 1", "SO x", "Dir A"));
+        lAdo.Add(Det("ADO 3", "/A/Cat 3", "Cerrado", "Adopción", 10, 0.1, null, null, "PO 1", "SO x", "Dir A"));
+        lAdo.Add(Det("SOR 4", "/A/Cat 4", "En Monitoreo", "soria", 10, 0.1, null, null, "PO 1", "SO x", "Dir A"));
+        var ado = (IList)((Dictionary<string, object>)M("ArmarRegistro").Invoke(null, new object[] { lAdo, dAdo, dir, null }))["iniciativas"];
+        Func<string, string> ver = f => { var x = Ini(ado, f); return x["agrup"] + "|" + x["activa"] + "|" + x["seguimiento"]; };
+        Check("11 Adopcion con tilde y espacios -> Adopcion, en seguimiento", "Adopcion|True|True", ver("ADO 1"));
+        Check("11 ADOPCION -> Adopcion, en seguimiento", "Adopcion|True|True", ver("ADO 2"));
+        Check("11 Adopcion cerrada: canonizada pero NO activa", "Adopcion|False|False", ver("ADO 3"));
+        Check("11 soria -> SorIA", "SorIA|True|True", ver("SOR 4"));
+        Check("11 ReqOpr sigue fuera de seguimiento", "ReqOpr|False", r2["agrup"] + "|" + r2["seguimiento"]);
+
+        // 12) control_fecha: el ControlDeFecha del prefijo llega al registro.
+        var dReq = Det("REQ 9", "/B/Cat 9", "En Análisis", "ReqOpr", 1, 0.1, null, null, "PO 3", "SO z", "Dir B");
+        Set(dReq, "ControlFecha", false);
+        M("Semaforo").Invoke(null, new object[] { dReq, HOY });
+        var iReq = (Dictionary<string, object>)M("Iniciativa").Invoke(null, new object[] { dReq, 1, 1, dir });
+        Check("12 sin control de fecha: control_fecha false, nunca retrasada", "False|ambar|False",
+            iReq["control_fecha"] + "|" + iReq["sem_fecha"] + "|" + iReq["fecha_retrasada"]);
+        Check("12 con control (por omision): control_fecha true", true, p1["control_fecha"]);
+
+        // 13) Escritura de Admin (ConsumeCapacidad sobre el dato CRUDO, sin
+        // Canonizar): el alta guarda "Adopcion" con tilde y tiene que revisar
+        // el tope igual que con "Adopcion". El estado sigue decidiendo y
+        // ReqOpr no consume.
+        var consume = T.GetMethod("ConsumeCapacidad", BindingFlags.Public | BindingFlags.Static);
+        Func<string, string, object> cc = (e, a) => consume.Invoke(null, new object[] { e, a });
+        Check("13 escritura: Adopcion con tilde consume", true, cc("En Análisis", "Adopción"));
+        Check("13 escritura: ' ADOPCION ' consume", true, cc("En Solución", " ADOPCION "));
+        Check("13 escritura: Adopcion sin tilde consume", true, cc("En Monitoreo", "Adopcion"));
+        Check("13 escritura: Adopcion cerrada no consume", false, cc("Cerrado", "Adopción"));
+        Check("13 escritura: ReqOpr no consume", false, cc("En Análisis", "ReqOpr"));
 
         // 8) Solo lectura
         var fuente = File.ReadAllText("App_Code/ExperienciaRegistro.cs");

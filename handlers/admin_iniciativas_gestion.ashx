@@ -1,8 +1,9 @@
 <%@ WebHandler Language="C#" Class="AdminIniciativasGestion" %>
 
 // Gestion directa de ADM: "Crear iniciativa" (Administracion) y "Modificar"
-// (detalle del registro). VALIDA EN EL SERVIDOR Y NO GUARDA: la persistencia
-// no esta habilitada (PersistenciaGestionAdmin, App_Code/GestionIniciativaAdmin.cs).
+// (detalle del registro). Valida en el servidor y, con la persistencia
+// activa (PersistenciaGestionAdmin, App_Code/GestionIniciativaAdmin.cs),
+// guarda por adm.usp_GestionAdmin_* (ver el final de este encabezado).
 //
 //   POST handlers/admin_iniciativas_gestion.ashx   (multipart/form-data)
 //     accion=crear      tipo (prefijo), tipo_iniciativa, tipo_agrupado,
@@ -27,6 +28,7 @@
 //                       la categoria la hereda) y quitar_categoria
 //                       (repetible)
 //
+//   Con la persistencia APAGADA:
 //   501  valida: { "valida": true, "guardada": false, "plan" (lo que se
 //                  guardaria: fechas del alta, de cada categoria ligada y
 //                  "pendientes"; PlanGestionAdmin.cs),

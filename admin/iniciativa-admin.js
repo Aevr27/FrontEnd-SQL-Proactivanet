@@ -132,8 +132,8 @@ window.IniciativaAdmin = (function () {
   };
   function rotulos(persiste) { return persiste === true ? ROTULOS.guarda : ROTULOS.valida; }
 
-  // Validacion en el servidor de crear y modificar (solo ADM). NO guarda:
-  // con datos validos responde 501 PersistenciaNoHabilitada.
+  // Crear y modificar (solo ADM): con la persistencia activa guarda (200
+  // guardada); apagada, solo valida (501 PersistenciaNoHabilitada).
   var URL_GESTION = '../handlers/admin_iniciativas_gestion.ashx';
   // Volumetria por categoria (solo lectura, ADM o MOD).
   var URL_VOLUMETRIA = '../handlers/admin_iniciativas_volumetria.ashx';
@@ -1218,7 +1218,7 @@ window.IniciativaAdmin = (function () {
       '<div class="ini-cambio-msg" id="regEdMsg" role="status" aria-live="polite"></div>' +
       '<div class="ini-cambio-pie">' +
         '<button type="button" class="btn chico" data-accion="edicion-revisar">Revisar cambios</button> ' +
-        '<button type="button" class="btn chico" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">' + Escape.html(rotulos(contexto.persiste).boton) + '</button> ' +
+        '<button type="button" class="btn chico" id="regEdGuardar" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">' + Escape.html(rotulos(contexto.persiste).boton) + '</button> ' +
         '<button type="button" class="btn linea chico" data-accion="edicion-cancelar">Cancelar</button>' +
       '</div>' +
       '<small class="ini-sub" id="regEdGuardarNota">' + Escape.html(rotulos(contexto.persiste).nota) + '</small>';
