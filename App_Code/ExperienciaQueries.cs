@@ -728,6 +728,12 @@ public static partial class ExperienciaQueries
     //
     // Lo que no se reconoce sale tal cual (p. ej. "Cerrado"): el modal lo
     // cuenta por su grafia y no hay forma canonica que darle.
+    //
+    // El agrupador tambien se reconoce por Clave (2026-10-16): el alta de
+    // Admin y la captura escriben "Adopcion" con tilde en la o, y negocio
+    // confirmo que es el mismo agrupador. Con OrdinalIgnoreCase esas
+    // iniciativas -activas- quedaban fuera de Activas, de la capacidad y de
+    // la dona. EsAgrupador compara igual (la escritura de Admin).
     private static void Canonizar(Detalle d)
     {
         var estado = Clave(d.Estado);
@@ -735,9 +741,10 @@ public static partial class ExperienciaQueries
             if (Clave(ESTADOS_ACTIVOS[i]) == estado)
                 d.Estado = ESTADOS_ACTIVOS[i];
 
-        var agrup = d.Agrup == null ? null : d.Agrup.Trim();
+        if (d.Agrup == null) return;
+        var agrup = Clave(d.Agrup);
         for (int i = 0; i < AGRUPADORES.Length; i++)
-            if (string.Equals(AGRUPADORES[i], agrup, StringComparison.OrdinalIgnoreCase))
+            if (Clave(AGRUPADORES[i]) == agrup)
                 d.Agrup = AGRUPADORES[i];
     }
 
@@ -1412,6 +1419,10 @@ public static partial class ExperienciaQueries
         i["retrazado"] = d.Retrasada ? 1 : 0;
         i["antiguedad"] = d.Antiguedad;
         i["f_creacion"] = d.FCreacion;
+        // CatPrefijoProblem.ControlDeFecha del prefijo (false: REQ/RTI, sin
+        // fecha que vencer; ver Semaforo). Lo usa el semaforo del registro
+        // de Admin para no contar esas como "Sin fecha".
+        i["control_fecha"] = d.ControlFecha;
         i["f_analisis"] = d.FAnalisis;
         i["f_solucion"] = d.FSolucion;
         i["f_cierre"] = d.FCierre;
@@ -1792,11 +1803,16 @@ public static partial class ExperienciaQueries
             && !string.IsNullOrEmpty(d.Folio);
     }
 
+    // Por Clave (sin acentos, mayusculas ni espacios), como Canonizar. Las
+    // lecturas ya llegan canonizadas; quien la necesita asi es la escritura
+    // de Admin (ConsumeAlEscribir sobre el dato crudo): el alta guarda
+    // "Adopcion" con tilde y, comparada exacta, se saltaba el tope del 100%.
     private static bool EsAgrupador(string agrup)
     {
         if (agrup == null) return false;
+        var clave = Clave(agrup);
         for (int i = 0; i < AGRUPADORES.Length; i++)
-            if (string.Equals(AGRUPADORES[i], agrup, StringComparison.OrdinalIgnoreCase))
+            if (Clave(AGRUPADORES[i]) == clave)
                 return true;
         return false;
     }
