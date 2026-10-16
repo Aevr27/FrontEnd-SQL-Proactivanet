@@ -19,8 +19,12 @@
 //      tipos, omitidas, reintento y carga vieja que llega tarde.
 //   V) Vistas: Iniciativas de inicio, el boton abre Nueva solicitud, y el
 //      borrador sobrevive Iniciativas -> Nueva -> Iniciativas -> Nueva.
-//   P) Nada se persiste: una sola peticion (GET del catalogo) y ningun
-//      envio en el codigo.
+//   P) Nada se persiste: solo GET de lectura y ningun envio en el codigo.
+//   VT) Volumetria de la categoria (VolumetriaCliente de Crear /
+//      Modificar, solo lectura) y Tickets a reducir = round(vol x % / 100):
+//      redondeo, cargando / sin datos / error sin 0, respuesta tardia de
+//      otra categoria descartada, Reintentar, sin pedir dos veces la ruta.
+//   M) Barra lateral: las nueve secciones del tablero + Administracion.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -99,6 +103,10 @@ function Pagina(pedir, antes) {
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(ventana, ventana.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(ventana, documento);
   (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
+  // Como en la pagina: antes de iniciativas.js (su VolumetriaCliente y
+  // htmlVolumetria son los de la volumetria de Nueva solicitud).
+  (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', leer('admin/iniciativa-admin.js')))(
+    ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
@@ -291,15 +299,18 @@ Check('T10 DEFINICIONES_TIPO vacio: ningun campo de tipo inventado', [], Object.
 (function () {
   function campo(clave) { return I.CAMPOS_COMUNES.filter(function (x) { return x.clave === clave; })[0]; }
   Check('N1 campos comunes, en orden y por seccion',
-    ['titulo:info', 'analisis:info', 'observaciones:info', 'volumetria:impacto', 'pct:impacto'],
+    ['titulo:info', 'analisis:info', 'observaciones:info', 'volumetria:impacto', 'pct:impacto', 'tickets:impacto'],
     I.CAMPOS_COMUNES.map(function (x) { return x.clave + ':' + x.seccion; }));
   Check('N1 Descripcion: se ve como Descripcion, la clave sigue siendo analisis, destino Problem.Descripcion',
     ['Descripción', 'dbo.Problem.Descripcion'], [campo('analisis').etiqueta, campo('analisis').destino]);
   Check('N2 Observaciones: multilinea, dbo.Problem.Observaciones, con su ayuda',
     ['multilinea', 'dbo.Problem.Observaciones', 'Información adicional sobre cuándo, dónde y en qué condiciones se presenta la afectación.'],
     [campo('observaciones').control, campo('observaciones').destino, campo('observaciones').ayuda.texto]);
-  Check('N3 Volumetria: entero y destino SIN confirmar (null)', ['entero', null],
-    [campo('volumetria').control, campo('volumetria').destino]);
+  Check('N3 Volumetria: calculada (no se captura), obligatoria, por categoria, destino SIN confirmar (null)',
+    ['calculado', true, true, null], [campo('volumetria').control, campo('volumetria').obligatorio,
+      campo('volumetria').requiereCategoria, campo('volumetria').destino]);
+  Check('N3 Tickets a reducir: calculado, no obligatorio, sin destino', ['calculado', undefined, null],
+    [campo('tickets').control, campo('tickets').obligatorio, campo('tickets').destino]);
   Check('N4 %: porcentaje, por categoria, se reinicia con la cascada', ['porcentaje', true, true],
     [campo('pct').control, campo('pct').requiereCategoria, campo('pct').reiniciaConCascada]);
   Check('N5 ningun campo de los pendientes se inventa',
@@ -329,10 +340,10 @@ Check('T10 DEFINICIONES_TIPO vacio: ningun campo de tipo inventado', [], Object.
   Check('N9 con Categoria: habilitado y capturado', [true, '50', 0.5], [n.estado().pct.habilitado, n.valores.pct, n.pctFraccion()]);
   Check('N9 Director derivado intacto', 'Dir A', n.estado().director.valor);
   n.capturar('volumetria', '2.5');
-  Check('N10 error de volumetria', 'Escribe un número entero, de 0 en adelante.', n.error('volumetria'));
+  Check('N10 Volumetria no se captura: ni valor ni error de formato', [undefined, ''], [n.valores.volumetria, n.error('volumetria')]);
   n.elegir(2, '/A/Cat 2');
-  Check('N11 tocar la cascada vacia el %, no Volumetria ni Observaciones',
-    [undefined, '2.5', 'Los lunes'], [n.valores.pct, n.valores.volumetria, n.valores.observaciones]);
+  Check('N11 tocar la cascada vacia el %, no Observaciones',
+    [undefined, undefined, 'Los lunes'], [n.valores.pct, n.valores.volumetria, n.valores.observaciones]);
   n.capturar('pct', '20');
   n.elegirTipo('PRB');
   Check('N11 cambiar tipo vacia el % (la Categoria se va)', [undefined, '', false],
@@ -517,8 +528,11 @@ pruebas.push(function () {
        info.indexOf('<textarea id="campo-observaciones" data-campo="observaciones" rows="6" aria-describedby="campo-observaciones-ayuda">') >= 0]);
     Check('N13 03: Volumetria y % fuera de 02', [false, true, true],
       [info.indexOf('campo-volumetria') >= 0, imp.indexOf('id="campo-volumetria"') >= 0, imp.indexOf('id="campo-pct"') >= 0]);
-    Check('N14 Volumetria: numero entero >= 0', true,
-      imp.indexOf('<input type="number" id="campo-volumetria" data-campo="volumetria" aria-describedby="campo-volumetria-ayuda campo-volumetria-msg" inputmode="numeric" min="0" step="1" value="">') >= 0);
+    Check('N14 Volumetria y Tickets: solo lectura (Calculada), sin input', [true, true, false, false, true],
+      [imp.indexOf('<div id="campo-volumetria" role="group" aria-labelledby="campo-volumetria-rot" aria-describedby="campo-volumetria-ayuda campo-volumetria-msg">') >= 0,
+       imp.indexOf('<div id="campo-tickets" role="group" aria-labelledby="campo-tickets-rot" aria-describedby="campo-tickets-msg">') >= 0,
+       /<input[^>]*campo-volumetria/.test(imp), /<input[^>]*campo-tickets/.test(imp),
+       /<span class="ini-rotulo-derivado ayuda-destino" id="campo-volumetria-rot" data-ayuda="volumetria">Volumetría de la categoría <span class="ini-origen derivado">Calculada<\/span>/.test(imp)]);
     Check('N15 %: numero 0-100, paso 0.01, bloqueado sin categoria, con sufijo', [true, true],
       [imp.indexOf('type="number" id="campo-pct" data-campo="pct" aria-describedby="campo-pct-msg" inputmode="decimal" min="0" max="100" step="0.01" disabled value="">') >= 0,
        imp.indexOf('<span class="ini-pct-sufijo" aria-hidden="true">%</span>') >= 0]);
@@ -539,18 +553,16 @@ pruebas.push(function () {
     escribir(p, 'iniCamposImpacto', 'pct', '35');
     Check('N18 % valido: sin error', ['Calculando la capacidad de reducción de la categoría…', false, 0.35],
       [p.sel('campo-pct-msg').textContent, p.sel('campo-pct-msg').classList.contains('ini-error-campo'), P.solicitud.pctFraccion()]);
-    escribir(p, 'iniCamposImpacto', 'volumetria', '-3');
-    Check('N19 Volumetria negativa: error', 'Escribe un número entero, de 0 en adelante.', p.sel('campo-volumetria-msg').textContent);
     escribir(p, 'iniCamposImpacto', 'volumetria', '420');
     escribir(p, 'iniCamposComunes', 'observaciones', 'En tienda, al cierre');
-    Check('N19 captura de 02 y 03', ['420', 'En tienda, al cierre', ''],
+    Check('N19 Volumetria no se captura (se consulta); 02 si', [undefined, 'En tienda, al cierre', 'Consultando la volumetría de la categoría…'],
       [P.solicitud.valores.volumetria, P.solicitud.valores.observaciones, p.sel('campo-volumetria-msg').textContent]);
 
     elegirEn(p, 'selSo', 'SO x');
-    Check('N20 cambiar la cascada vacia y bloquea el %; Volumetria se queda', [undefined, true, true, '420'],
+    Check('N20 cambiar la cascada vacia y bloquea el % y suelta la Volumetria', [undefined, true, true, null],
       [P.solicitud.valores.pct, p.sel('campo-pct').disabled,
        p.sel('iniCamposImpacto').innerHTML.indexOf('id="campo-pct" data-campo="pct"') >= 0 && /id="campo-pct"[^>]*value=""/.test(p.sel('iniCamposImpacto').innerHTML),
-       P.solicitud.valores.volumetria]);
+       P.solicitud.volumen]);
 
     Check('N21 ayuda de SO, Categoria y RCA (rotulos fijos)',
       ['Responsable del servicio afectado y encargado de validar el seguimiento del problema.',
@@ -561,9 +573,10 @@ pruebas.push(function () {
     p.sel('btnVolver').disparar('click');
     p.sel('iniCamposComunes').innerHTML = ''; p.sel('iniCamposImpacto').innerHTML = '';
     p.sel('btnSolicitar').disparar('click');
-    Check('N22 Observaciones y Volumetria repintadas desde el borrador', [true, true],
+    Check('N22 Observaciones, Volumetria y Tickets repintados desde el borrador', [true, true, true],
       [p.sel('iniCamposComunes').innerHTML.indexOf('>En tienda, al cierre</textarea>') >= 0,
-       p.sel('iniCamposImpacto').innerHTML.indexOf('value="420"') >= 0]);
+       p.sel('iniCamposImpacto').innerHTML.indexOf('id="campo-volumetria"') >= 0,
+       p.sel('iniCamposImpacto').innerHTML.indexOf('id="campo-tickets"') >= 0]);
   });
 });
 
@@ -754,9 +767,18 @@ pruebas.push(function () {
 
 // S) Solicitud: Problem primero, RCA condicional, requeridos, capacidad y
 //    validacion en el servidor (con un `pedir` que enruta por URL).
-function enrutador(capacidades, validar, registro) {
+// volumenes: ruta -> fila de admin_iniciativas_volumetria.ashx, 'error'
+// (503) o una funcion que devuelve la promesa; sin entrada, 1247 tickets.
+function enrutador(capacidades, validar, registro, volumenes) {
   return function (url, opciones) {
     registro && registro.push([url, opciones && opciones.method, opciones && opciones.body]);
+    if (url.indexOf('admin_iniciativas_volumetria.ashx') >= 0) {
+      var ruta = decodeURIComponent(url.split('ruta=')[1]);
+      var v = (volumenes || {})[ruta];
+      if (typeof v === 'function') return v();
+      if (v === 'error') return Promise.resolve(Respuesta(503, { error: 'No se pudo leer la volumetría: x', tipo: 'VolumetriaNoDisponible' }));
+      return Promise.resolve(Respuesta(200, { slot: 0, dias: 30, rutas: [v || { ruta: ruta, estado: 'ok', volumetria: 1247 }] }));
+    }
     if (url.indexOf('admin_iniciativas_capacidad.ashx') >= 0) {
       var cat = decodeURIComponent(url.split('categoria=')[1]);
       return Promise.resolve(capacidades[cat] ? Respuesta(200, capacidades[cat]) : Respuesta(500, { error: 'x' }));
@@ -797,7 +819,7 @@ pruebas.push(function () {
     ['tipo', 'po', 'so', 'categoria', 'titulo', 'analisis', 'observaciones', 'volumetria', 'pct'], r.faltantes());
   r.elegirTipo('ADO'); r.elegir(0, 'PO 1'); r.elegir(1, 'SO x'); r.elegir(2, '/A/Cat 1');
   r.capturar('titulo', 'T'); r.capturar('analisis', 'D'); r.capturar('observaciones', 'O');
-  r.capturar('volumetria', '10'); r.capturar('pct', '20');
+  r.fijarVolumen(r.pedirVolumen(), { estado: 'ok', valor: 10 }); r.capturar('pct', '20');
   Check('S6 completa: sin faltantes ni errores', [[], []], [r.faltantes(), r.erroresCliente()]);
   r.capturar('observaciones', '   ');
   Check('S6 solo espacios cuenta como vacio', ['observaciones'], r.faltantes());
@@ -878,7 +900,6 @@ pruebas.push(function () {
     escribir(p, 'iniCamposComunes', 'titulo', 'T');
     escribir(p, 'iniCamposComunes', 'analisis', 'D');
     escribir(p, 'iniCamposComunes', 'observaciones', 'O');
-    escribir(p, 'iniCamposImpacto', 'volumetria', '10');
     escribir(p, 'iniCamposImpacto', 'pct', '40');
     var rca = p.sel('campoRca');
     rca.files = [new File(['%PDF'], 'RCA_v7.pdf')];   // File real: FormData lo exige
@@ -888,9 +909,11 @@ pruebas.push(function () {
     var post = llamadas.filter(function (l) { return l[1] === 'POST'; });
     Check('S20 un solo POST, a validar', [1, '../handlers/admin_iniciativas_validar.ashx'], [post.length, post[0] && post[0][0]]);
     var cuerpo = post[0][2];
-    Check('S20 cuerpo: campos y archivo', ['PRB', '/A/Cat 1', 'D', '40', '40', 'RCA_v7.pdf'],
+    Check('S20 cuerpo: campos y archivo; volumetria = la de la categoria; tickets no viajan',
+      ['PRB', '/A/Cat 1', 'D', '40', '40', 'RCA_v7.pdf', '1247', false],
       [cuerpo.get('tipo'), cuerpo.get('categoria'), cuerpo.get('descripcion'), cuerpo.get('pct'),
-       cuerpo.get('disponible_cliente'), cuerpo.get('rca') && cuerpo.get('rca').name]);
+       cuerpo.get('disponible_cliente'), cuerpo.get('rca') && cuerpo.get('rca').name, cuerpo.get('volumetria'),
+       cuerpo.has('tickets')]);
     Check('S20 valida: avisa que no se guardo', [true, true],
       [/No se guardó/.test(p.sel('iniResultado').innerHTML), p.sel('iniResultado').classList.contains('ok')]);
 
@@ -924,12 +947,14 @@ pruebas.push(function () {
     escribir(p, 'iniCamposComunes', 'analisis', 'y');
     return new Promise(function (ok) { setTimeout(ok, 0); });
   }).then(function () {
-    // Dos GET al abrir (registro y catalogo, en paralelo) y el GET de la
-    // capacidad al elegir la Categoria. Sin "Validar", ningun POST.
+    // Dos GET al abrir (registro y catalogo, en paralelo) y, al elegir la
+    // Categoria, el GET de su capacidad y el de su volumetria (el handler
+    // de Crear / Modificar, solo lectura). Sin "Validar", ningun POST.
     Check('P1 solo GET de lectura en el flujo de captura',
       [['../handlers/admin_iniciativas_capacidad.ashx?categoria=%2FA%2FCat%201', null],
        ['../handlers/admin_iniciativas_catalogos.ashx?rutas=1', null],
-       ['../handlers/admin_iniciativas_registro.ashx', null]],
+       ['../handlers/admin_iniciativas_registro.ashx', null],
+       ['../handlers/admin_iniciativas_volumetria.ashx?ruta=%2FA%2FCat%201', 'GET']],
       llamadas.map(function (l) { return [l[0], l[1] || null]; }).sort());
     var js = leer('admin/iniciativas.js') + leer('admin/registro-iniciativas.js'), html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
     // El unico envio es el POST de validacion, que no guarda.
@@ -947,7 +972,149 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
-// RS) Roles de Nueva solicitud: ADM y MOD la abren; sin rol no (falla
+// VT) Volumetria de la categoria (la de Crear / Modificar, solo lectura) y
+//     Tickets a reducir = round(volumetria x % / 100).
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var T = I.ticketsDe;
+  Check('VT1 ejemplo: 1247 x 12.5% = 155.875 -> 156', 156, T(1247, '12.5'));
+  Check('VT1 redondeo a ticket entero, mitad hacia arriba',
+    [1, 2, 0, 25, 3, 0, 1247, 0, 1],
+    [T(10, '5'), T(3, '50'), T(1, '49.99'), T(200, '12.25'), T(1000, '0.29'), T(0, '50'), T(1247, '100'), T(1247, '0'), T(1, '50')]);
+  Check('VT1 sin calculo con volumetria o % que no valen', [null, null, null, null, null, null, null],
+    [T(null, '10'), T(1247, ''), T(1247, '150'), T(1247, '12.345'), T(1247, 'x'), T(12.5, '10'), T(-1, '10')]);
+
+  var s = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK));
+  s.elegirTipo('MAP'); s.elegir(0, 'PO 1'); s.elegir(1, 'SO x'); s.elegir(2, '/A/Cat 1');
+  Check('VT2 sin consultar: ni volumetria ni tickets', [null, null, 'Consultando la volumetría de la categoría…'],
+    [s.volumetria(), s.ticketsReducir(), s.motivoVolumen()]);
+  var cat = s.pedirVolumen();
+  s.capturar('pct', '12.5');
+  Check('VT2 cargando: nada calculado (no es 0)', [null, null, 'Se calcula cuando esté la volumetría de la categoría.'],
+    [s.volumetria(), s.ticketsReducir(), s.motivoTickets()]);
+  Check('VT2 cargando: la volumetria falta con su motivo', { campo: 'volumetria', mensaje: 'Consultando la volumetría de la categoría…' },
+    s.erroresCliente().filter(function (e) { return e.campo === 'volumetria'; })[0]);
+  s.fijarVolumen(cat, { estado: 'ok', valor: 1247 });
+  Check('VT3 ok: volumetria y tickets', [1247, 156, 'Volumetría × % ÷ 100, redondeado a ticket entero.'],
+    [s.volumetria(), s.ticketsReducir(), s.motivoTickets()]);
+  Check('VT3 viaja como volumetria; tickets no viajan', ['1247', false],
+    [s.camposEnvio().volumetria, Object.prototype.hasOwnProperty.call(s.camposEnvio(), 'tickets')]);
+  s.capturar('pct', '');
+  Check('VT4 sin %: sin tickets', [null, 'Escribe el % de disminución para calcularlo.'], [s.ticketsReducir(), s.motivoTickets()]);
+  s.capturar('pct', '150');
+  Check('VT4 % fuera de rango: sin tickets', [null, 'Corrige el % de disminución para calcularlo.'], [s.ticketsReducir(), s.motivoTickets()]);
+  s.fijarCapacidad(cat, { disponible: 0.1, determinable: true });
+  s.capturar('pct', '12.5');
+  Check('VT4 % sobre la capacidad (10%): sin tickets', null, s.ticketsReducir());
+  s.capturar('pct', '10');
+  Check('VT4 % dentro de la capacidad: 1247 x 10% = 124.7 -> 125', 125, s.ticketsReducir());
+
+  // Cambiar de categoria: lo de la anterior no se presenta como actual.
+  s.elegir(1, 'SO y'); s.elegir(2, '/A/Cat 2');
+  Check('VT5 otra categoria: volumetria, % y tickets fuera', [null, null, undefined, null],
+    [s.volumen, s.volumetria(), s.valores.pct, s.ticketsReducir()]);
+  var cat2 = s.pedirVolumen();
+  Check('VT5 respuesta tardia de la anterior: se descarta', [false, 'cargando', null],
+    [s.fijarVolumen('/A/Cat 1', { estado: 'ok', valor: 1247 }), s.volumen.estado, s.volumetria()]);
+  s.fijarVolumen(cat2, { estado: 'cero', valor: 0 });
+  s.capturar('pct', '50');
+  Check('VT6 cero real: 0 y 0 tickets, no falta', [0, 0, false, '0'],
+    [s.volumetria(), s.ticketsReducir(), s.faltantes().indexOf('volumetria') >= 0, s.camposEnvio().volumetria]);
+  s.fijarVolumen(cat2, { estado: 'sin_datos', valor: null });
+  Check('VT7 sin datos: no es 0; falta con su motivo y no viaja', [null, null, true, '', false],
+    [s.volumetria(), s.ticketsReducir(), /Sin datos de tickets/.test(s.motivoVolumen()), s.camposEnvio().volumetria,
+     s.estado().volumetria.reintentar]);
+  s.fijarVolumen(cat2, { estado: 'error', valor: null, mensaje: 'El servidor respondió 503.' });
+  Check('VT8 error: sin valor, motivo con el mensaje, Reintentar', [null, 'No se pudo consultar la volumetría: El servidor respondió 503.', true],
+    [s.volumetria(), s.motivoVolumen(), s.estado().volumetria.reintentar]);
+  s.elegirTipo('ADO');
+  Check('VT9 cambiar el tipo suelta la volumetria', null, s.volumen);
+});
+
+// VT en la pagina: GET al elegir la Categoria, sin valores viejos, error y
+// Reintentar, y el VolumetriaCliente recuerda la ruta (no se pide dos veces).
+pruebas.push(function () {
+  var llamadas = [], suelta, intentos = 0;
+  var p = Pagina(nunca);
+  var P = p.ventana.IniciativasPagina;
+  var pedir = enrutador({}, function () { return Respuesta(200, { valida: true, errores: [] }); }, llamadas, {
+    '/A/Cat 2': function () { return new Promise(function (ok) { suelta = ok; }); },
+    '/A/Cat 3': function () {
+      return Promise.resolve(++intentos === 1 ? Respuesta(503, { error: 'No se pudo leer la volumetría: x' })
+        : Respuesta(200, { rutas: [{ ruta: '/A/Cat 3', estado: 'ok', volumetria: 80 }] }));
+    }
+  });
+  function vol() { return p.sel('campo-volumetria').innerHTML; }
+  function tk() { return p.sel('campo-tickets').innerHTML; }
+  function gets(ruta) {
+    return llamadas.filter(function (l) { return l[0] === '../handlers/admin_iniciativas_volumetria.ashx?ruta=' + encodeURIComponent(ruta); }).length;
+  }
+  return P.cargar(pedir).then(function () {
+    elegirEn(p, 'selTipo', 'MAP');
+    Check('VT10 sin Categoria: "—" y por que', [true, 'Elige primero la Categoría en Clasificación.', true],
+      [/>—<\/output>/.test(vol()), p.sel('campo-volumetria-msg').textContent, />—<\/output>/.test(tk())]);
+    elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
+    Check('VT11 al elegir: Consultando (htmlVolumetria), sin tickets', [true, true],
+      [/<output class="ini-vol"[^>]*>Consultando…<\/output>/.test(vol()), />—<\/output>/.test(tk())]);
+    return esperar();
+  }).then(function () {
+    Check('VT11 un GET al handler de volumetria de Crear / Modificar', [1, 'GET'],
+      [gets('/A/Cat 1'), (llamadas.filter(function (l) { return /volumetria/.test(l[0]); })[0] || [])[1]]);
+    Check('VT12 la volumetria de la categoria, de solo lectura', [true, 'Tickets de la categoría en los últimos 30 días. No se captura.'],
+      [/>1,247 tickets \(últimos 30 días\)<\/output>/.test(vol()), p.sel('campo-volumetria-msg').textContent]);
+    escribir(p, 'iniCamposImpacto', 'pct', '12.5');
+    Check('VT13 % escrito: tickets calculados al momento', [true, 'Volumetría × % ÷ 100, redondeado a ticket entero.'],
+      [/<output class="ini-vol">156 tickets<\/output>/.test(tk()), p.sel('campo-tickets-msg').textContent]);
+    escribir(p, 'iniCamposImpacto', 'pct', '150');
+    Check('VT13 % invalido: sin tickets', true, /<output class="ini-vol">—<\/output>/.test(tk()));
+    escribir(p, 'iniCamposImpacto', 'pct', '12.5');
+
+    // Cat 2 tarda: mientras, nada de Cat 1 (ni 1,247 ni 156).
+    elegirEn(p, 'selSo', 'SO y'); elegirEn(p, 'selCategoria', '/A/Cat 2');
+    Check('VT14 cambio de categoria: Consultando, sin la volumetria ni los tickets anteriores', [true, false, false, true],
+      [/Consultando…/.test(vol()), /1,247/.test(vol()), /156/.test(tk()), />—<\/output>/.test(tk())]);
+    return esperar();
+  }).then(function () {
+    Check('VT14 sigue Consultando mientras no llega', true, /Consultando…/.test(vol()));
+    suelta(Respuesta(200, { rutas: [{ ruta: '/A/Cat 2', estado: 'ok', volumetria: 300 }] }));
+    return esperar();
+  }).then(function () {
+    Check('VT15 llega la de Cat 2', true, />300 tickets \(últimos 30 días\)<\/output>/.test(vol()));
+    // Volver a Cat 1: VolumetriaCliente la recuerda (sin otro GET).
+    elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
+    return esperar();
+  }).then(function () {
+    Check('VT16 volver a una categoria ya consultada: sin otro GET', [1, true], [gets('/A/Cat 1'), /1,247 tickets/.test(vol())]);
+
+    // Cat 3 falla: error visible, nunca 0, y Reintentar.
+    elegirEn(p, 'selPo', 'PO 2'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 3');
+    return esperar();
+  }).then(function () {
+    Check('VT17 error: "No se pudo consultar" en rojo, sin 0, con Reintentar', [true, true, false, true],
+      [/<output class="ini-vol mal"[^>]*>No se pudo consultar: No se pudo leer la volumetría: x<\/output>/.test(vol()),
+       /data-reintentar="volumetria">Reintentar<\/button>/.test(vol()), /\b0 tickets/.test(vol()), />—<\/output>/.test(tk())]);
+    escribir(p, 'iniCamposComunes', 'titulo', 'T'); escribir(p, 'iniCamposComunes', 'analisis', 'D');
+    escribir(p, 'iniCamposComunes', 'observaciones', 'O'); escribir(p, 'iniCamposImpacto', 'pct', '10');
+    var antes = llamadas.length;
+    return P.validar().then(function () {
+      Check('VT18 sin volumetria: no se valida en el servidor y se dice por que', [antes, true],
+        [llamadas.length, /Volumetría: No se pudo consultar la volumetría: No se pudo leer la volumetría: x/.test(p.sel('iniResultado').innerHTML)]);
+    });
+  }).then(function () {
+    var boton = Elemento('');
+    boton.setAttribute('data-reintentar', 'volumetria');
+    p.sel('iniCamposImpacto').disparar('click', { target: boton });
+    Check('VT19 Reintentar: Consultando', true, /Consultando…/.test(vol()));
+    return esperar();
+  }).then(function () {
+    Check('VT19 Reintentar: otro GET', 2, gets('/A/Cat 3'));
+    Check('VT19 reintento ok: volumetria y tickets (80 x 10% = 8)', [true, true],
+      [/>80 tickets \(últimos 30 días\)<\/output>/.test(vol()), /<output class="ini-vol">8 tickets<\/output>/.test(tk())]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// RS) Roles de Nueva solicitud:ADM y MOD la abren; sin rol no (falla
 //     cerrado); MOD nunca abre la creacion directa; el RCA de Problem sigue
 //     obligatorio para quien solicita.
 // ---------------------------------------------------------------------------
