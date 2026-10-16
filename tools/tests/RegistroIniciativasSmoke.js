@@ -1433,7 +1433,7 @@ pruebas.push(function () {
   var p = Pagina(ok(DATOS));
   return esperar().then(function () {
     var reg = p.registro, html = p.sel('regKpis').innerHTML;
-    Check('K1 cinco indicadores, en orden', ['Total de iniciativas', 'Activas', 'Fuera de Activas', 'Retrasadas', 'Cerradas'], rotulosKpi(p));
+    Check('K1 cinco indicadores, en orden', ['Total de iniciativas', 'Activas', 'Fuera de Activas', 'Atrasadas', 'Cerradas'], rotulosKpi(p));
     Check('K1 valores con la vista por omision (sin Cerrado en la lista)', KPI_BASE, kpis(p));
     Check('K1 pies: abiertas sin categoria, tickets, resta, riesgo, Cerrado',
       [true, true, true, true, true],

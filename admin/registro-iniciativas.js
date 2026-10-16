@@ -30,9 +30,9 @@
                       cuatro). Cerrado no esta en estados_activos, asi que
                       toda Activa es abierta y la resta no deja nada sin
                       clasificar.
-     Retrasadas       `seguimiento` y `retrazado`, solo las que tienen
+     Atrasadas        `seguimiento` y `retrazado`, solo las que tienen
                       categoria: el criterio del KPI "Iniciativas
-                      Retrasadas" de Experiencia. El pie suma riesgo_folio
+                      Retrasadas" de Experiencia (aqui se rotula Atrasadas). El pie suma riesgo_folio
                       ("tickets en riesgo").
      Cerradas         estado Cerrado (el mismo plano()). Otros estados no
                       activos NO cuentan aqui: van en Total y en Fuera de
@@ -211,7 +211,7 @@ window.RegistroIniciativas = (function () {
   }
 
   // Los cinco indicadores, en orden (ver la cabecera).
-  var ROTULOS_KPI = ['Total de iniciativas', 'Activas', 'Fuera de Activas', 'Retrasadas', 'Cerradas'];
+  var ROTULOS_KPI = ['Total de iniciativas', 'Activas', 'Fuera de Activas', 'Atrasadas', 'Cerradas'];
   function texto(v) { return v === null || v === undefined || v === '' ? '—' : v; }
 
   // Dias desde la creacion de la iniciativa, o null. Es `antiguedad` del
