@@ -479,39 +479,54 @@ function tend(delta){
 function renderDet(cats){
   const byC1={};
   cats.forEach(c=>{(byC1[c.c1]=byC1[c.c1]||[]).push(c);});
-  // ordenar los grupos C1 por el volumen actual del padre (mayor a menor) - punto 1
-  const volC1=c1=>{const g=byC1[c1];const p=g.find(x=>x.nivel==='C1');
-    return p?volActualDe(p):g.reduce((s,x)=>s+volActualDe(x),0);};
+  // Cuantos subniveles (C2) tiene cada C1 en todo el payload, sin filtro.
+  const hijosDe={};
+  P.categorias.forEach(c=>{ if(c.nivel==='C2') hijosDe[c.c1]=(hijosDe[c.c1]||0)+1; });
   // Una categoria "tiene datos" si su Volumen Actual (segun modo SLOT/Mes)
   // o su Con Iniciativa es mayor a 0. Las ramas sin datos no se muestran.
   const tieneDatos=c=>volActualDe(c)>0 || (c.ini_total||0)>0;
-  let h='';
-  Object.keys(byC1).sort((a,b)=>volC1(b)-volC1(a)).forEach((c1,idx)=>{
+  // El renglon del servicio (C1) POR SUBNIVEL, con la misma regla que las
+  // tarjetas (aggCats): la suma de los subniveles que se ven. La fila C1 se
+  // usa tal cual solo si el filtro deja ver todos sus subniveles (o ninguno:
+  // ahi aggCats tambien cuenta la fila C1). La fila C1 trae el servicio
+  // entero con los dueños de su primera fila del catalogo: con un filtro, al
+  // dueño de Aplicativo de S-Basculas le contaba tambien Hardware, que es de
+  // otro (73, 2026-10-14).
+  const cabecera=c1=>{
     const grp=byC1[c1];
     const padre=grp.find(c=>c.nivel==='C1');
     const hijosTodos=grp.filter(c=>c.nivel==='C2').sort((a,b)=>volActualDe(b)-volActualDe(a));
     const hijos=hijosTodos.filter(tieneDatos);
+    const completo=!!padre && (hijosTodos.length===0 || hijosTodos.length===(hijosDe[c1]||0));
+    const suma=campo=>hijos.reduce((s,h)=>s+(h[campo]||0),0);
+    // Con la suma, el dueño que comparten los subniveles que se ven.
+    const comun=campo=>{const v=new Set(hijos.map(h=>h[campo]||'')); return v.size===1?[...v][0]:'';};
+    const iniTotal=suma('ini_total'), ret=suma('ret');
+    const agg=completo ? padre : {vol_actual:suma('vol_actual'),vol_anterior:suma('vol_anterior'),delta:suma('delta'),
+      vol_actual_mes:suma('vol_actual_mes'),vol_anterior_mes:suma('vol_anterior_mes'),delta_mes:suma('delta_mes'),
+      ini_total:iniTotal,pct_inic:0,ret:ret,
+      pct_en_tiempo: iniTotal>0 ? Math.max(0,Math.min(1,1-ret/iniTotal)) : 1,
+      po:comun('po'),so:comun('so'),categoria:c1};
+    return {padre, hijosTodos, hijos, completo, agg};
+  };
+  const cabeceras={};
+  Object.keys(byC1).forEach(c1=>{ cabeceras[c1]=cabecera(c1); });
+  // ordenar los grupos C1 por el volumen de su renglon (mayor a menor) - punto 1
+  const volC1=c1=>volActualDe(cabeceras[c1].agg);
+  let h='';
+  Object.keys(byC1).sort((a,b)=>volC1(b)-volC1(a)).forEach((c1,idx)=>{
+    const {padre, hijosTodos, hijos, completo, agg}=cabeceras[c1];
     // El nivel C1 se muestra solo si alguno de sus hijos C2 tiene datos;
     // si el C1 no tiene ningun hijo C2 (rama de un solo nivel), se evalua
     // el propio C1 como si fuera hoja.
     if(hijosTodos.length>0 ? hijos.length===0 : !tieneDatos(padre)) return;
-    // Si el C1 real no paso el filtro de Director/PO (ej. su dueno es
-    // distinto al de alguno de sus hijos C2, que si paso), no mostrar el
-    // renglon del grupo en 0 -- sumar lo que si esta filtrado en hijos,
-    // para que el renglon "padre" sea consistente con sus propios hijos.
-    const suma=campo=>hijos.reduce((s,h)=>s+(h[campo]||0),0);
-    const iniTotal=suma('ini_total'), ret=suma('ret');
-    const agg=padre||{vol_actual:suma('vol_actual'),vol_anterior:suma('vol_anterior'),delta:suma('delta'),
-      vol_actual_mes:suma('vol_actual_mes'),vol_anterior_mes:suma('vol_anterior_mes'),delta_mes:suma('delta_mes'),
-      ini_total:iniTotal,pct_inic:0,ret:ret,
-      pct_en_tiempo: iniTotal>0 ? Math.max(0,Math.min(1,1-ret/iniTotal)) : 1,
-      po:'',so:'',categoria:c1};
     const aVol=volActualDe(agg), aPrev=volAnteriorDe(agg), aDelta=deltaDe(agg);
     // "Con Iniciativa" [KPI-2]: volumen real (no tickets_reduce) de hojas C3
     // con iniciativa activa bajo esta categoria -- misma definicion que
     // volumenConIniciativa(), para que la suma de los C1 mostrados cuadre
-    // exactamente con ese KPI.
-    const aConIni=conIniVolDe({nivel:'C1', categoria:c1});
+    // exactamente con ese KPI. Con la suma, el de los subniveles que se ven.
+    const aConIni=completo ? conIniVolDe({nivel:'C1', categoria:c1})
+                           : hijos.reduce((s,x)=>s+conIniVolDe(x),0);
     const aPctInic = aVol>0 ? Math.min(aConIni/aVol,1) : 0;
     h+=`<tr class="c1row" data-g="g${idx}">
       <td><span class="catclick" data-cat="${encodeURIComponent(agg.categoria)}">${esc(c1)}</span></td>
@@ -2338,11 +2353,16 @@ function renderResumen(){
   // Sin filtro: la rejilla lleva Director + Iniciativas por Estado. Las dos
   // graficas de Product Owner viven en su propio renglon, debajo.
   document.getElementById('gridResumenCharts').classList.remove('g2cols');
-  // Agrupar por director (solo C1 para no duplicar volumen)
-  const c1=P.categorias.filter(c=>c.nivel==='C1' && pasaFiltroGlobal(c));
-  const totalGlobal=c1.reduce((s,c)=>s+volActualDe(c),0);
+  // Agrupar por director POR SUBNIVEL: las mismas filas que suman las
+  // tarjetas (aggCats: los C2 y los C1 sin hijos), cada una con su Director.
+  // Antes se sumaba la fila C1 y el servicio entero se le contaba al Director
+  // (y al PO) de su primera fila del catalogo, aunque un subnivel fuera de
+  // otro: S-Basculas Hardware iba al de Aplicativo (73, 2026-10-14). No
+  // duplica y el total es el de la tarjeta de volumen.
+  const filas=aggCats();
+  const totalGlobal=filas.reduce((s,c)=>s+volActualDe(c),0);
   const porDir={};
-  c1.forEach(c=>{const d=c.director||'(Sin director)';
+  filas.forEach(c=>{const d=c.director||'(Sin director)';
     if(!porDir[d])porDir[d]={vol:0,ini:0,ret:0};
     // "Con Iniciativa" [KPI-2]: Tickets Reduce topado al volumen, misma
     // definicion que conIniVolDe()/volumenConIniciativa(), para que la suma
@@ -2382,7 +2402,7 @@ function renderResumen(){
   }).render();
   // barras por PO (top 15) y su version "con iniciativa" (mismas filas/orden)
   const porPO={};
-  c1.forEach(c=>{const p=c.po||'(Sin PO)';
+  filas.forEach(c=>{const p=c.po||'(Sin PO)';
     if(!porPO[p])porPO[p]={vol:0,ini:0};
     porPO[p].vol+=volActualDe(c); porPO[p].ini+=conIniVolDe(c);});
   const poRows=Object.entries(porPO).map(([p,v])=>({po:p,vol:v.vol,ini:v.ini}))
@@ -2402,10 +2422,12 @@ function renderResumenPorPO(dir){
   document.getElementById('tituloBarPOIni').textContent='Volumen con Iniciativa por Product Owner de '+dir;
   document.getElementById('cardBarDir').style.display='none';
   document.getElementById('gridResumenCharts').classList.add('g2cols');
-  const c1=P.categorias.filter(c=>c.nivel==='C1' && c.director===dir && pasaFiltroGlobal(c));
-  const totalGlobal=c1.reduce((s,c)=>s+volActualDe(c),0);
+  // Por subnivel, como renderResumen(): los subniveles de este Director,
+  // aunque el servicio (la fila C1) sea de otro.
+  const filas=aggCats().filter(c=>c.director===dir);
+  const totalGlobal=filas.reduce((s,c)=>s+volActualDe(c),0);
   const porPO={};
-  c1.forEach(c=>{const p=c.po||'(Sin PO)';
+  filas.forEach(c=>{const p=c.po||'(Sin PO)';
     if(!porPO[p])porPO[p]={vol:0,ini:0,ret:0};
     porPO[p].vol+=volActualDe(c); porPO[p].ini+=conIniVolDe(c); porPO[p].ret+=c.ret;});
   const poRows=Object.entries(porPO).map(([p,v])=>({
