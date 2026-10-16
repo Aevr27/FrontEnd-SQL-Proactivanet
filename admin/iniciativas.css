@@ -473,10 +473,14 @@
 .ini-sem.ambar { background: var(--ambr); }
 .ini-sem.rojo { background: var(--rojo); }
 .ini-vencida { color: var(--rojo); }
+/* Atrasada: segunda linea de la celda, alineada con la fecha (ancho del
+   punto .ini-sem + su margen). */
 .ini-retraso {
-  margin-left: 4px; font-size: 10px; font-weight: 700; text-transform: uppercase;
+  display: block; margin: 2px 0 0 15px; font-size: 10px; font-weight: 700; text-transform: uppercase;
   letter-spacing: .3px; color: var(--rojo);
 }
+/* Dias desde la creacion, bajo el codigo. */
+.ini-edad { white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .ini-mas-caja { display: flex; justify-content: center; margin-top: 12px; }
 

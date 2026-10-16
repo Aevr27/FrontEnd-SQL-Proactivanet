@@ -37,6 +37,12 @@
 //   B) Busqueda por folio o titulo: parcial, sin mayusculas, separadores,
 //      ceros ni acentos; combinada con los demas filtros, sin tocar la
 //      Cobertura; espera entre teclas, Enter, Limpiar y recarga en el DOM.
+//   R) Lista: columnas Código, Título, Estado, Agrupación, Tickets a
+//      reducir, Fecha compromiso, Service Owner, Product Owner (cabecera y
+//      celdas); "Atrasada" bajo la fecha en la misma celda; dias desde la
+//      creacion bajo el codigo (= antiguedad del detalle; sin FechaCreacion
+//      "Sin fecha de creación"); desglose de Fuera de Activas por motivo;
+//      relectura sin tocar la vista.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -373,8 +379,8 @@ pruebas.push(function () {
     Check('L2 indicadores: Total, Activas, Fuera de Activas, Retrasadas, Cerradas', ['4', '3', '1', '1', '1'], kpis(p));
     Check('L2 pie de retrasadas', true, /150 tickets en riesgo/.test(p.sel('regKpis').innerHTML));
     var html = p.sel('regCuerpo').innerHTML;
-    Check('L3 retrasada: fecha en rojo, sin pintar la fila', [true, false],
-      [/ini-vencida">01\/09\/2026<\/b> <span class="ini-retraso">Retrasada/.test(html), /<tr class="[^"]*(vencid|rojo)/.test(html)]);
+    Check('L3 atrasada: fecha en rojo y la palabra debajo, sin pintar la fila', [true, false],
+      [/ini-vencida">01\/09\/2026<\/b><span class="ini-retraso">Atrasada/.test(html), /<tr class="[^"]*(vencid|rojo)/.test(html)]);
     Check('L3 dueños distintos: el primero y +N', true, /PO 1 <span class="ini-mas">\+1<\/span>/.test(html));
     Check('L3 sin categoria marcada', true, /Sin categoría/.test(html));
     Check('L3 no activa sin fecha compromiso', true,
@@ -1570,6 +1576,147 @@ pruebas.push(function () {
       Check('K6 el texto sale de agrupadores del servidor',
         'Iniciativas en estado En Análisis, En Solución o En Monitoreo y con agrupación Problem o Mejora.', reg.ayudaKpi('activas').texto);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R) Lista: orden de columnas, Atrasada bajo la fecha, dias desde la
+//    creacion y desglose de Fuera de Activas
+// ---------------------------------------------------------------------------
+var COLUMNAS_LISTA = ['Código', 'Título', 'Estado', 'Agrupación', 'Tickets a reducir', 'Fecha compromiso',
+  'Service Owner', 'Product Owner'];
+function cabeceras(p) {
+  var re = /data-orden="[^"]+">([^<]+)</g, m, s = [];
+  while ((m = re.exec(p.sel('regCabeza').innerHTML))) s.push(m[1]);
+  return s;
+}
+// Las celdas (data-col) de la fila de un folio, en orden.
+function fila(p, folio) {
+  var html = p.sel('regCuerpo').innerHTML;
+  var k = html.indexOf('<tr class="ini-fila" data-folio="' + folio + '"');
+  return html.slice(k, html.indexOf('</tr>', k));
+}
+function celdas(p, folio) {
+  var re = /<td data-col="([^"]+)"/g, m, s = [], h = fila(p, folio);
+  while ((m = re.exec(h))) s.push(m[1]);
+  return s;
+}
+function celda(p, folio, col) {
+  var h = fila(p, folio), k = h.indexOf('<td data-col="' + col + '"');
+  return h.slice(k, h.indexOf('</td>', k));
+}
+// Por que una abierta queda fuera de Activas, con los datos del servidor
+// (activa = estado en estados_activos; seguimiento = activa y agrupacion
+// en agrupadores). Lo mismo que se le pide a la VM para el desglose real.
+function motivoFuera(i) {
+  return !i.activa ? 'estado' : !i.seguimiento ? 'agrupacion' : '';
+}
+function plano(v) {
+  return String(v || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+}
+
+pruebas.push(function () {
+  var d = JSON.parse(JSON.stringify(DATOS));
+  d.iniciativas.forEach(function (i) {
+    if (i.folio === 'PRB 2026-000001') { i.f_creacion = '2026-06-08'; i.antiguedad = 130; }
+    if (i.folio === 'MAP 2026-000002') { i.f_creacion = '2026-10-16'; i.antiguedad = 0; }
+    if (i.folio === 'REQ 2026-000004') { i.f_creacion = '2025-10-15'; i.antiguedad = 1; }
+    // FechaCreacion NULL: el servidor manda antiguedad 0 y f_creacion null.
+    if (i.folio === 'PRB 2026-000005') { i.f_creacion = null; i.antiguedad = 0; }
+  });
+  var p = Pagina(ok(d));
+  return esperar().then(function () {
+    var reg = p.registro;
+    Check('R1 cabecera: orden pedido', COLUMNAS_LISTA, cabeceras(p));
+    Check('R1 celdas de cada fila en el mismo orden', [COLUMNAS_LISTA, COLUMNAS_LISTA, COLUMNAS_LISTA],
+      [celdas(p, 'PRB 2026-000001'), celdas(p, 'MAP 2026-000002'), celdas(p, 'PRB 2026-000005')]);
+    Check('R1 los dueños no cambian de dato: SO en Service Owner, PO (el primero +1) en Product Owner', [true, true],
+      [/>SO x<?/.test(celda(p, 'PRB 2026-000001', 'Service Owner')), /PO 1 <span class="ini-mas">\+1/.test(celda(p, 'PRB 2026-000001', 'Product Owner'))]);
+    Check('R1 ordenar por Service Owner y Product Owner sigue funcionando', [['so', 'asc'], ['po', 'asc']],
+      (function () {
+        reg.ordenarPor('so'); var a = [reg.orden.col, reg.orden.dir];
+        reg.ordenarPor('po'); var b = [reg.orden.col, reg.orden.dir];
+        reg.orden = null; reg.pintarTabla();
+        return [a, b];
+      })());
+
+    var c1 = celda(p, 'PRB 2026-000001', 'Fecha compromiso');
+    Check('R2 Atrasada: fecha y palabra en la MISMA celda, la palabra despues de la fecha', true,
+      /ini-sem rojo[^>]*><\/span><b class="ini-vencida">01\/09\/2026<\/b><span class="ini-retraso">Atrasada<\/span>$/.test(c1));
+    Check('R2 ninguna "Retrasada" en la lista', false, /Retrasada/i.test(p.sel('regCuerpo').innerHTML));
+    Check('R2 en tiempo: solo la fecha, sin indicador', false, /ini-retraso/.test(celda(p, 'MAP 2026-000002', 'Fecha compromiso')));
+    var css = leer('admin/iniciativas.css');
+    Check('R2 CSS: .ini-retraso es bloque (segunda linea), en mayusculas y rojo', [true, true, true],
+      [/\.ini-retraso \{[^}]*display: block/.test(css), /\.ini-retraso \{[^}]*text-transform: uppercase/.test(css),
+       /\.ini-retraso \{[^}]*color: var\(--rojo\)/.test(css)]);
+
+    Check('R3 dias desde la creacion bajo el codigo = antiguedad del servidor',
+      ['Hace 130 días', 'Creada hoy', 'Hace 1 día', 'Sin fecha de creación'],
+      ['PRB 2026-000001', 'MAP 2026-000002', 'REQ 2026-000004', 'PRB 2026-000005'].map(function (f) {
+        var m = /class="ini-sub ini-edad[^"]*"[^>]*>([^<]+)</.exec(celda(p, f, 'Código'));
+        return m && m[1];
+      }));
+    Check('R3 con la fecha de creacion en el title', true, /title="Días desde su creación \(08\/06\/2026\)"/.test(celda(p, 'PRB 2026-000001', 'Código')));
+    Check('R3 visible tambien si va atrasada, y fuera de la celda de compromiso', [true, false],
+      [/ini-edad/.test(celda(p, 'PRB 2026-000001', 'Código')), /ini-edad/.test(celda(p, 'PRB 2026-000001', 'Fecha compromiso'))]);
+    sinOmision(p);   // HAR 3 esta Cerrado: oculto por omision
+    Check('R3 sin dato de f_creacion (servidor anterior): antiguedad tal cual', 'Hace 10 días',
+      (/ini-edad[^>]*>([^<]+)</.exec(celda(p, 'HAR 2025-000003', 'Código')) || [])[1]);
+
+    clicFolio(p, 'PRB 2026-000001');
+    var det = p.sel('regDetCuerpo').innerHTML;
+    Check('R4 detalle: la misma cifra en Antigüedad y la pastilla Atrasada', [true, true, false],
+      [/Antigüedad<\/dt><dd>4 meses, 1 semana y 3 días</.test(det), /<span class="pill vencido">Atrasada<\/span>/.test(det), /Retrasada/.test(det)]);
+    Check('R4 detalle: semaforo rojo dice Atrasada', true, /ini-det-sem[^>]*><span class="ini-sem rojo[^>]*><\/span>Atrasada/.test(det));
+    clicFolio(p, 'PRB 2026-000005');
+    Check('R4 detalle sin FechaCreacion: Antigüedad "—", no "0 días"', true,
+      /Antigüedad<\/dt><dd>—</.test(p.sel('regDetCuerpo').innerHTML));
+
+    // Desglose de Fuera de Activas: cada una tiene motivo y suman el KPI.
+    var lista = reg.registro.iniciativas;
+    var k = R.Registro.indicadores(lista);
+    var fuera = lista.filter(function (i) { return plano(i.estado) !== 'cerrado' && !i.seguimiento; });
+    Check('R5 Fuera de Activas = abiertas con motivo (estado o agrupacion)',
+      [k.fueraActivas, [['REQ 2026-000004', 'agrupacion']]],
+      [fuera.length, fuera.map(function (i) { return [i.folio, motivoFuera(i)]; })]);
+  });
+});
+
+pruebas.push(function () {
+  // Otro estado abierto + agrupacion fuera + agrupacion vacia: los tres
+  // caen en Fuera de Activas, cada uno por su motivo.
+  var lista = [
+    Ini('A 1'),
+    Ini('A 2', { estado: 'Pendiente', activa: false, seguimiento: false }),
+    Ini('A 3', { agrup: 'ReqOpr', seguimiento: false }),
+    Ini('A 4', { agrup: null, seguimiento: false }),
+    Ini('A 5', { estado: 'Pendiente', agrup: null, activa: false, seguimiento: false }),
+    Ini('A 6', { estado: 'Cerrado', activa: false, seguimiento: false })
+  ];
+  var k = R.Registro.indicadores(lista);
+  var motivos = lista.filter(function (i) { return plano(i.estado) !== 'cerrado' && !i.seguimiento; }).map(motivoFuera);
+  Check('R6 desglose: estado, agrupacion, agrupacion vacia, ambos (cuenta por estado)',
+    [4, ['estado', 'agrupacion', 'agrupacion', 'estado']], [k.fueraActivas, motivos]);
+  Check('R6 Total = Activas + Fuera; Cerrada fuera de los dos', [5, 1, 4, 1], [k.total, k.activas, k.fueraActivas, k.cerradas]);
+});
+
+pruebas.push(function () {
+  // Relectura tras guardar: la edad y el orden de columnas siguen; la vista
+  // (filtros, orden, limite) no se toca.
+  var p = Pagina(ok(DATOS)), reg, antes;
+  return esperar().then(function () {
+    reg = p.registro;
+    reg.ordenarPor('fecha');
+    reg.limite = 300;
+    antes = [reg.filtro.estados.marcados, reg.orden, reg.limite];
+    var json = JSON.parse(JSON.stringify(DATOS));
+    json.iniciativas[0].antiguedad = 11; json.iniciativas[0].f_creacion = '2026-10-05';
+    return reg.actualizar(ok(json));
+  }).then(function (r) {
+    Check('R7 relectura: edad nueva, columnas en orden, vista intacta',
+      [true, 'Hace 11 días', COLUMNAS_LISTA, antes],
+      [r.ok, (/ini-edad[^>]*>([^<]+)</.exec(celda(p, 'PRB 2026-000001', 'Código')) || [])[1], cabeceras(p),
+       [reg.filtro.estados.marcados, reg.orden, reg.limite]]);
   });
 });
 

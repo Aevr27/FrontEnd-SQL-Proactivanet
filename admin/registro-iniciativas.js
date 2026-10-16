@@ -213,6 +213,18 @@ window.RegistroIniciativas = (function () {
   // Los cinco indicadores, en orden (ver la cabecera).
   var ROTULOS_KPI = ['Total de iniciativas', 'Activas', 'Fuera de Activas', 'Retrasadas', 'Cerradas'];
   function texto(v) { return v === null || v === undefined || v === '' ? '—' : v; }
+
+  // Dias desde la creacion de la iniciativa, o null. Es `antiguedad` del
+  // servidor (DiasDesde(dbo.Problem.FechaCreacion), ExperienciaQueries):
+  // aqui no se calcula. El servidor da 0 cuando FechaCreacion es NULL, asi
+  // que con f_creacion vacia (llega null) no hay dato; si f_creacion ni
+  // viene (servidor anterior) vale `antiguedad` tal cual. La usan la
+  // Antigüedad del detalle y la columna Código de la lista.
+  function diasDesdeCreacion(i) {
+    if (Object.prototype.hasOwnProperty.call(i, 'f_creacion') && !i.f_creacion) return null;
+    var n = i.antiguedad;
+    return typeof n === 'number' && isFinite(n) && n >= 0 ? Math.floor(n) : null;
+  }
   function esTexto(v) { return typeof v === 'string' && v !== ''; }
 
   // GET del registro -> su JSON; rechaza con el mensaje para la vista.
@@ -1741,10 +1753,12 @@ window.RegistroIniciativas = (function () {
 
     pintarCabeza() {
       var orden = this.orden;
+      // Mismo orden que las celdas de htmlFila: lo de la iniciativa primero,
+      // los dueños al final.
       var cols = [
         { c: 'folio', t: 'Código' }, { c: 'titulo', t: 'Título' }, { c: 'estado', t: 'Estado' },
-        { c: 'agrup', t: 'Agrupación' }, { c: 'po', t: 'Product Owner' }, { c: 'so', t: 'Service Owner' },
-        { c: 'reduce', t: 'Tickets a reducir', num: true }, { c: 'fecha', t: 'Fecha compromiso' }
+        { c: 'agrup', t: 'Agrupación' }, { c: 'reduce', t: 'Tickets a reducir', num: true },
+        { c: 'fecha', t: 'Fecha compromiso' }, { c: 'so', t: 'Service Owner' }, { c: 'po', t: 'Product Owner' }
       ];
       this.$('regCabeza').innerHTML = '<tr>' + cols.map(function (x) {
         var activa = orden && orden.col === x.c;
@@ -1768,8 +1782,9 @@ window.RegistroIniciativas = (function () {
       return '<span class="pill ' + clase + '">' + Escape.html(texto(i.estado)) + '</span>';
     }
 
-    // Punto del semaforo + la fecha del estado actual. Retrasada: fecha en
-    // rojo y la palabra, sin pintar la fila entera.
+    // Punto del semaforo + la fecha del estado actual. Atrasada
+    // (fecha_retrasada): fecha en rojo y, debajo en la misma celda, la
+    // palabra; sin pintar la fila entera.
     htmlPunto(i) {
       var sem = i.sem_fecha === 'rojo' || i.sem_fecha === 'ambar' || i.sem_fecha === 'verde' ? i.sem_fecha : '';
       return sem ? '<span class="ini-sem ' + sem + '" aria-hidden="true"></span>' : '';
@@ -1780,9 +1795,19 @@ window.RegistroIniciativas = (function () {
       var punto = this.htmlPunto(i);
       if (!i.activa) return punto + '<span class="ini-tenue">—</span>';
       if (i.fecha_retrasada) {
-        return punto + '<b class="ini-vencida">' + Escape.html(fecha(f)) + '</b> <span class="ini-retraso">Retrasada</span>';
+        return punto + '<b class="ini-vencida">' + Escape.html(fecha(f)) + '</b><span class="ini-retraso">Atrasada</span>';
       }
       return punto + Escape.html(f ? fecha(f) : 'Sin fecha');
+    }
+
+    // Dias desde la creacion (diasDesdeCreacion: el mismo dato que la
+    // Antigüedad del detalle), bajo el codigo. No es la fecha compromiso.
+    htmlEdad(i) {
+      var dias = diasDesdeCreacion(i);
+      if (dias === null) return '<span class="ini-sub ini-edad ini-tenue">Sin fecha de creación</span>';
+      var texto = dias === 0 ? 'Creada hoy' : 'Hace ' + fmt(dias) + (dias === 1 ? ' día' : ' días');
+      var ayuda = 'Días desde su creación' + (i.f_creacion ? ' (' + fecha(i.f_creacion) + ')' : '');
+      return '<span class="ini-sub ini-edad" title="' + Escape.attr(ayuda) + '">' + Escape.html(texto) + '</span>';
     }
 
     htmlFila(i) {
@@ -1791,15 +1816,15 @@ window.RegistroIniciativas = (function () {
         : '<span class="ini-sub">' + i.categorias.length + (i.categorias.length === 1 ? ' categoría' : ' categorías') + '</span>';
       return '<tr class="ini-fila" data-folio="' + folio + '">' +
         '<td data-col="Código"><button type="button" class="ini-folio" data-folio="' + folio + '"' +
-          ' aria-haspopup="dialog">' + Escape.html(i.folio) + '</button></td>' +
+          ' aria-haspopup="dialog">' + Escape.html(i.folio) + '</button>' + this.htmlEdad(i) + '</td>' +
         '<td data-col="Título" class="ini-col-titulo"><span class="ini-titulo" title="' + Escape.attr(i.titulo || '') + '">' +
           Escape.html(texto(i.titulo)) + '</span>' + cats + '</td>' +
         '<td data-col="Estado">' + this.htmlEstado(i) + '</td>' +
         '<td data-col="Agrupación">' + (i.agrup ? '<span class="chip ini-chip">' + Escape.html(i.agrup) + '</span>' : '<span class="ini-tenue">—</span>') + '</td>' +
-        '<td data-col="Product Owner" class="ini-col-persona">' + this.htmlDuenos(i, 'po') + '</td>' +
-        '<td data-col="Service Owner" class="ini-col-persona">' + this.htmlDuenos(i, 'so') + '</td>' +
         '<td data-col="Tickets a reducir" class="num">' + fmt(i.tickets_reduce) + '</td>' +
         '<td data-col="Fecha compromiso" class="fecha-cell">' + this.htmlCompromiso(i) + '</td>' +
+        '<td data-col="Service Owner" class="ini-col-persona">' + this.htmlDuenos(i, 'so') + '</td>' +
+        '<td data-col="Product Owner" class="ini-col-persona">' + this.htmlDuenos(i, 'po') + '</td>' +
         '</tr>';
     }
 
@@ -2479,7 +2504,7 @@ window.RegistroIniciativas = (function () {
         '<p class="ini-det-nombre">' + Escape.html(texto(i.titulo)) + '</p>' +
         '<div class="ini-det-marcas">' + this.htmlEstado(i) +
           (i.agrup ? ' <span class="chip ini-chip">' + Escape.html(i.agrup) + '</span>' : '') +
-          (i.activa && i.fecha_retrasada ? ' <span class="pill vencido">Retrasada</span>' : '') +
+          (i.activa && i.fecha_retrasada ? ' <span class="pill vencido">Atrasada</span>' : '') +
         '</div>' +
         this.htmlIncompleta(i) +
         '<div class="ini-det-acciones" id="regDetAcciones">' + this.htmlAcciones() + '</div>' +
@@ -2488,11 +2513,12 @@ window.RegistroIniciativas = (function () {
         '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>' +
         '<section class="ini-det-sec ini-cambio ini-edicion" id="regEdicion" hidden></section>';
 
+      var edad = diasDesdeCreacion(i);
       var ident = '<dl class="ini-datos">' +
         dato('Código', i.folio) +
         dato('Agrupación', i.agrup) +
         dato('Estado', i.estado) +
-        dato('Antigüedad', Duracion.dias(i.antiguedad) || '—') +
+        dato('Antigüedad', edad === null ? '—' : Duracion.dias(edad)) +
         (i.titulo_problem && i.titulo_problem !== i.titulo ? dato('Título del problema', i.titulo_problem) : '') +
         '</dl>';
 
@@ -2520,7 +2546,7 @@ window.RegistroIniciativas = (function () {
         dato('Tickets a reducir', fmt(i.tickets_reduce)) +
         dato('Tickets en riesgo', fmt(i.riesgo_folio)) +
         '</dl>' +
-        '<p class="ini-nota">Tickets a reducir: suma de sus categorías. En riesgo: los mismos tickets si va retrasada.</p>';
+        '<p class="ini-nota">Tickets a reducir: suma de sus categorías. En riesgo: los mismos tickets si va atrasada.</p>';
 
       var cats = i.categorias.length
         ? '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Categoría</th><th scope="col" class="num">% disminución</th>' +
@@ -2542,7 +2568,7 @@ window.RegistroIniciativas = (function () {
           '<td class="fecha-cell">' + (vencida ? '<b class="ini-vencida">' + Escape.html(valor) + '</b>' : Escape.html(valor)) + '</td>' +
           '<td class="num">' + fmt(cambios) + '</td></tr>';
       }
-      var semTexto = { verde: 'Sin compromiso vigente', ambar: 'En tiempo o sin fecha', rojo: 'Retrasada' }[i.sem_fecha] || '—';
+      var semTexto = { verde: 'Sin compromiso vigente', ambar: 'En tiempo o sin fecha', rojo: 'Atrasada' }[i.sem_fecha] || '—';
       // Fecha de creacion: dbo.Problem.FechaCreacion (f_creacion). Sin el
       // dato (servidor anterior) se ve "—", nunca una fecha calculada.
       var rutasCat = i.categorias.map(function (c) { return c.categoria; });
