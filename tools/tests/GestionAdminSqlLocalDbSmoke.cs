@@ -39,6 +39,11 @@
 //   P  permisos con un login como el del sitio (datareader/datawriter +
 //      EXECUTE dbo/adm) y sin EXECUTE en adm.
 //   V  vistas del backend: semaforo de Experiencia y vencidas.
+//   A  sql/21 (Agrupacion COLLATE CI_AI en el tope), en una base aparte: el
+//      defecto antes ("Adopcion" con tilde no cuenta ni se revisa), hashes,
+//      tope con tilde en alta / Modificar / RevisarTope, cerrada no
+//      consume, datos sin tocar, repetida, postcondicion, rollback exacto,
+//      mezcla rechazada, reaplicable.
 //   B  rollback de 18 (orden, datos, forzado).
 //   S  stub del cargador y su rollback.
 //   E  proteccion del cargador (ADM_04 + adm.IniciativaProtegida): el
@@ -64,6 +69,7 @@ using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -917,6 +923,9 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
             // ---------------- E: proteccion del cargador (ADM_04) ----------------
             Proteccion(hoy);
 
+            // ---------------- A: sql/21 (Agrupacion sin acentos), base propia ----------------
+            Acentos21(hoy);
+
             // ---------------- B: rollback de 18 ----------------
             Rollback18();
         }
@@ -1563,6 +1572,127 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
             Check("E32n control: sin la transaccion, una carga entre el rollback y ADM_03 SI pisa la protegida", "pisado en el hueco",
                   Uno(cn, "SELECT Titulo FROM dbo.Problem WHERE Codigo = N'PRB 2024-000503'"));
             Exec(cn, "DELETE stg.Problems; DELETE stg.Iniciativas;");
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // A: sql/21 (Agrupacion sin acentos en el tope), en su PROPIA base
+    // desechable: la principal sigue con sql/18 + sql/20, que es lo que
+    // revisan E34 y el diag ADM_04 sec 11.
+    // ---------------------------------------------------------------------
+    const string HashTopeSql18 = "0x5C43DEBA819BA2D1AC3C13E1A32E409EC5BE1729BE9991DB5D73B64C48C43898";
+    const string HashModSql18 = "0x9D98582F2D08B1599CADFDE7BEB0C86168483E311758E6F9FA3B317AD529293E";
+    const string HashTopeSql21 = "0x8F654F5AD01FD49C974F2CD707DA696FCC7F04067F213CB0E1E8C37C2FB4DFB7";
+    const string HashCrearSql21 = "0x540F83EF4AF3AB4A3D3E2E8E7B6D4DE75B7731E98085DAD11CF54B14A4478D79";
+    const string HashModSql21 = "0x4E3A69887120832C215FFAF68DFF2792BDE7272CD75B3B0FC399A424050583C3";
+
+    static string Hashes21(SqlConnection cn)
+    {
+        return HashDef(cn, "adm.usp_GestionAdmin_RevisarTope") + "|" + HashDef(cn, "adm.usp_GestionAdmin_Crear") + "|" +
+               HashDef(cn, "adm.usp_GestionAdmin_Modificar");
+    }
+
+    static void Acentos21(DateTime hoy)
+    {
+        var antes = HashTopeSql18 + "|" + HashCrearSql20 + "|" + HashModSql18;
+        var despues = HashTopeSql21 + "|" + HashCrearSql21 + "|" + HashModSql21;
+        var sql21 = Leer("sql", "21_gestion_admin_agrupacion_acentos.sql");
+        var rb21 = Leer("sql", "21_gestion_admin_agrupacion_acentos_rollback.sql");
+        using (var m = Abrir("master"))
+            Check("A0 sql/21 no corre fuera de GestionAdminPrueba_* sin aprobar_migracion = 21", "True",
+                  LotesError(m, sql21).Contains("Migracion 21 SIN APROBAR"));
+
+        var db = Base + "_a21";
+        try
+        {
+            Preparar(db);
+            using (var cn = Abrir(db))
+            {
+                // "Adopcion" con tilde (NCHAR(243)), como la guarda el alta de Admin.
+                Exec(cn, @"
+DECLARE @ado nvarchar(100) = N'Adopci' + NCHAR(243) + N'n';
+INSERT dbo.Problem (Codigo, TipoIniciativa, Titulo, Estado, FechaCreacion, FechaAnalisis, VigenteEnOrigen) VALUES
+ (N'ADO 2026-000801', @ado, N'Adopcion con tilde A', N'En Análisis', '2026-09-01', '2026-09-16', 1),
+ (N'PRB 2026-000802', N'Problem', N'Problem vivo', N'En Solución', '2026-09-01', '2026-09-16', 1),
+ (N'ADO 2026-000803', @ado, N'Adopcion con tilde B', N'En Análisis', '2026-09-01', '2026-09-16', 1);
+INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, PctDisminucion) VALUES
+ (N'ADO 2026-000801', N'/D/Uno', @ado, @ado, 0.6000),
+ (N'ADO 2026-000801', N'/D/Dos', @ado, @ado, 0.6000),
+ (N'PRB 2026-000802', N'/D/Tres', N'Problem', N'Problem', 0.6000),
+ (N'PRB 2026-000802', N'/P/Sitio 1', N'Problem', N'Problem', 0.6000),
+ (N'PRB 2026-000802', N'/P/Sitio 2', N'Problem', N'Problem', 0.6000),
+ (N'PRB 2026-000802', N'/P/Sitio 3', N'Problem', N'Problem', 0.6000),
+ (N'ADO 2026-000803', N'/P/Sitio 2', @ado, @ado, 0.3000),
+ (N'ADO 2026-000803', N'/P/Sitio 3', @ado, @ado, 0.3000);");
+                var ado = "Adopción";
+                Check("A1 la base parte de sql/18 + sql/20 (hashes del diag ADM_04 sec 11)", antes, Hashes21(cn));
+
+                // Sin sql/21: el defecto (lo que se arregla).
+                Check("A2 sin sql/21: 60% de Adopcion con tilde en /D/Uno no cuenta: +50% Problem pasa (110%)", "sin error",
+                      Error(() => Crear(cn, Alta(hoy, "/D/Uno", "50"))));
+                Check("A2b sin sql/21: alta Adopcion con tilde no revisa el tope: +50% sobre 60% Problem pasa", "sin error",
+                      Error(() => Crear(cn, AltaTipo(hoy, "PRB", ado, "En Análisis", "/D/Tres", "50"))));
+                var subeAntes = Mod("ADO 2026-000803", hoy);
+                subeAntes.Pcts.Add(new CategoriaPlan { Ruta = "/P/Sitio 2", Pct = 0.5m });
+                Check("A2c sin sql/21: subir 30% -> 50% una categoria Adopcion con tilde sobre 60% vivo pasa", "sin error",
+                      Error(() => Modificar(cn, subeAntes)));
+
+                // Postcondicion: un cuerpo distinto al esperado -> ROLLBACK.
+                Func<string, string> cuerpoCambiado = t => t.Replace("SET NOCOUNT ON; SET XACT_ABORT ON;", "SET NOCOUNT ON; SET XACT_ABORT ON; /* x */");
+                Check("A3 sql/21 cuyo ALTER no deja el hash de sql/21: ROLLBACK, sin transaccion abierta, siguen los de antes", "True|0|True|0|" + antes,
+                      Rechazo(cn, cuerpoCambiado(sql21), "no quedo como se esperaba") + "|" + Hashes21(cn));
+
+                Lotes(cn, sql21);
+                Check("A4 sql/21 aplicada: los tres procedimientos con el hash de sql/21", despues, Hashes21(cn));
+                Check("A4b parametros sin cambio (Crear sigue con @OwnerProblem/@OwnerServicio de sql/20)", "2",
+                      Uno(cn, "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Crear') AND name IN (N'@OwnerProblem', N'@OwnerServicio')"));
+
+                Check("A5 con sql/21: 60% Adopcion con tilde en /D/Dos cuenta: +50% Problem -> 51010", "51010",
+                      Error(() => Crear(cn, Alta(hoy, "/D/Dos", "50"))));
+                Check("A5b ... y +40% (100% exacto) pasa", "sin error", Error(() => Crear(cn, Alta(hoy, "/D/Dos", "40"))));
+                Check("A6 alta Adopcion con tilde revisa el tope: +50% sobre 60% Problem -> 51010", "51010",
+                      Error(() => Crear(cn, AltaTipo(hoy, "PRB", ado, "En Análisis", "/P/Sitio 1", "50"))));
+                Check("A6b alta Adopcion con tilde CERRADA no consume (el estado sigue decidiendo): sin error", "sin error",
+                      Error(() => Crear(cn, AltaTipo(hoy, "PRB", ado, "Cerrado", "/P/Sitio 1", "50"))));
+                var sube = Mod("ADO 2026-000803", hoy);
+                sube.Pcts.Add(new CategoriaPlan { Ruta = "/P/Sitio 3", Pct = 0.5m });
+                Check("A7 subir 30% -> 50% una categoria Adopcion con tilde sobre 60% vivo -> 51010, sin cambio", "51010|0.3000",
+                      Error(() => Modificar(cn, sube)) + "|" +
+                      Celda(Uno(cn, "SELECT PctDisminucion FROM dbo.ProblemCategoria WHERE Codigo = N'ADO 2026-000803' AND Categoria = N'/P/Sitio 3'")));
+                Check("A7b los datos guardados no cambiaron de grafia (sigue con tilde)", "4",
+                      Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemCategoria WHERE TipoAgrupado = N'Adopci' + NCHAR(243) + N'n' COLLATE Latin1_General_BIN2 AND Codigo IN (N'ADO 2026-000801', N'ADO 2026-000803')"));
+
+                Check("A8 correr sql/21 otra vez se niega ('ya aplicada'), sin transaccion abierta, sin tocar nada", "True|0|True|0|" + despues,
+                      Rechazo(cn, sql21, "ya aplicada") + "|" + Hashes21(cn));
+                Check("A9 rollback cuyo ALTER no deja los de antes: ROLLBACK, siguen los de sql/21", "True|0|True|0|" + despues,
+                      Rechazo(cn, cuerpoCambiado(rb21), "no quedo como se esperaba") + "|" + Hashes21(cn));
+
+                Lotes(cn, rb21);
+                Check("A10 rollback: vuelven EXACTOS los de sql/18 / sql/20", antes, Hashes21(cn));
+                Check("A10b ... y el defecto vuelve (prueba de que el rollback deshace)", "sin error",
+                      Error(() => Crear(cn, AltaTipo(hoy, "PRB", ado, "En Análisis", "/P/Sitio 1", "50"))));
+                Check("A11 rollback otra vez se niega ('no aplicada')", "True|0|True|0|" + antes,
+                      Rechazo(cn, rb21, "sql/21 no aplicada") + "|" + Hashes21(cn));
+
+                // Mezcla: solo RevisarTope con el texto de sql/21 -> los dos se niegan.
+                var loteTope = Regex.Split(sql21, @"^\s*GO\s*$", RegexOptions.Multiline)
+                    .First(l => l.Contains("ALTER PROCEDURE adm.usp_GestionAdmin_RevisarTope"));
+                Exec(cn, "BEGIN TRAN;"); Exec(cn, loteTope); Exec(cn, "COMMIT;");
+                Check("A12 mezcla (solo RevisarTope de sql/21): sql/21 se niega sin tocar nada", "True|0|True|0|" +
+                      HashTopeSql21 + "|" + HashCrearSql20 + "|" + HashModSql18,
+                      Rechazo(cn, sql21, "adm.usp_GestionAdmin_RevisarTope (hash") + "|" + Hashes21(cn));
+                Check("A12b ... y el rollback tambien", "True|0|True|0",
+                      Rechazo(cn, rb21, "no es la esperada"));
+                var loteTopeRb = Regex.Split(rb21, @"^\s*GO\s*$", RegexOptions.Multiline)
+                    .First(l => l.Contains("ALTER PROCEDURE adm.usp_GestionAdmin_RevisarTope"));
+                Exec(cn, "BEGIN TRAN;"); Exec(cn, loteTopeRb); Exec(cn, "COMMIT;");
+                Lotes(cn, sql21);
+                Check("A13 se puede volver a aplicar despues del rollback", despues, Hashes21(cn));
+            }
+        }
+        finally
+        {
+            try { Borrar(db); Console.WriteLine("   base " + db + " borrada"); } catch (Exception ex) { Console.WriteLine("No se pudo borrar " + db + ": " + ex.Message); }
         }
     }
 
