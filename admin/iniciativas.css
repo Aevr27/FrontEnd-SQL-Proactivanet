@@ -573,8 +573,8 @@
 }
 .ini-detalle {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 56;
-  /* Mas espacio horizontal para leer el detalle sin tanto scroll vertical. */
-  width: min(1100px, 96vw);
+  /* El detalle debe ocupar casi toda la pantalla, no quedarse como drawer angosto. */
+  width: min(1600px, 98vw);
   display: flex; flex-direction: column;
   background: var(--card); box-shadow: var(--shadow-lg);
   border-left: 4px solid var(--accent);
@@ -605,7 +605,14 @@ html.ini-detalle-abierto { overflow: hidden; }
 
 .ini-det-rejilla { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 @media (min-width: 1250px) {
-  .ini-det-rejilla { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  /* Las cuatro secciones principales comparten una fila; las secciones
+     largas de abajo se muestran lado a lado para reducir scroll vertical. */
+  .ini-det-cuerpo { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-content: start; gap: 12px; }
+  .ini-det-cab, #regDetAviso, #regCambio, #regEdicion { grid-column: 1 / -1; }
+  .ini-det-rejilla { display: contents; }
+  .ini-det-rejilla > .ini-det-sec { grid-column: span 1; }
+  .ini-det-cuerpo > .ini-det-ancha:not(.ini-hist) { grid-column: span 2; margin-top: 0; }
+  .ini-det-cuerpo > .ini-hist { grid-column: 1 / -1; margin-top: 0; }
 }
 .ini-det-sec {
   min-width: 0; padding: 12px 14px;
