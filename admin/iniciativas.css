@@ -573,7 +573,8 @@
 }
 .ini-detalle {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 56;
-  width: min(760px, 100%);
+  /* Mas espacio horizontal para leer el detalle sin tanto scroll vertical. */
+  width: min(1100px, 96vw);
   display: flex; flex-direction: column;
   background: var(--card); box-shadow: var(--shadow-lg);
   border-left: 4px solid var(--accent);
@@ -603,6 +604,9 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-det-marcas { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
 
 .ini-det-rejilla { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+@media (min-width: 1250px) {
+  .ini-det-rejilla { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 .ini-det-sec {
   min-width: 0; padding: 12px 14px;
   border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
