@@ -573,8 +573,8 @@
 }
 .ini-detalle {
   position: fixed; top: 0; right: 0; bottom: 0; z-index: 56;
-  /* El detalle debe ocupar casi toda la pantalla, no quedarse como drawer angosto. */
-  width: min(1600px, 98vw);
+  /* Casi toda la pantalla: del registro solo queda visible una franja. */
+  width: min(2200px, 98vw);
   display: flex; flex-direction: column;
   background: var(--card); box-shadow: var(--shadow-lg);
   border-left: 4px solid var(--accent);
@@ -605,15 +605,14 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-det-nombre { font-size: 15px; font-weight: 700; color: var(--ink); line-height: 1.4; overflow-wrap: anywhere; }
 .ini-det-marcas { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
 
-/* Dos columnas independientes: evita que una tarjeta alta deje huecos
-   debajo de las tarjetas cortas de la otra columna. */
-.ini-det-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 12px; min-width: 0; }
-.ini-det-col { display: flex; flex-direction: column; align-items: stretch; gap: 12px; min-width: 0; }
-.ini-det-col > .ini-det-sec { min-width: 0; margin-top: 0; }
-.ini-det-col > .ini-hist { margin-top: 0; }
-@media (max-width: 720px) {
-  .ini-det-layout { grid-template-columns: minmax(0, 1fr); }
-}
+/* Cuatro pilas independientes (Identificacion + Impacto, Organizacion,
+   Seguimiento, Descripcion): cada tarjeta mide lo que su contenido, sin
+   igualar alturas por fila. Columnas 4 -> 2 -> 1 segun el viewport (sigue
+   al zoom); nunca 3, porque la cuarta pila quedaria sola en otra fila. */
+.ini-det-rejilla { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.ini-det-pila { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+@media (max-width: 1219px) { .ini-det-rejilla { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 639px) { .ini-det-rejilla { grid-template-columns: minmax(0, 1fr); } }
 .ini-det-sec {
   min-width: 0; padding: 12px 14px;
   border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
@@ -653,10 +652,6 @@ html.ini-detalle-abierto { overflow: hidden; }
 }
 @media (max-width: 720px) {
   .ini-detalle { border-left: 0; }
-  .ini-det-rejilla { grid-template-columns: minmax(0, 1fr); }
-  .ini-det-rejilla > .ini-det-sec,
-  .ini-det-rejilla > .ini-det-sec:nth-child(n) { grid-column: 1; grid-row: auto; }
-  .ini-det-dato { grid-template-columns: 110px minmax(0, 1fr); }
   .ini-dato { grid-template-columns: 110px minmax(0, 1fr); }
 }
 

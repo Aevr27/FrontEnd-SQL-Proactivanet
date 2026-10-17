@@ -2693,20 +2693,18 @@ window.RegistroIniciativas = (function () {
       var desc = textoLargo(i.descripcion) +
         '<h5>Observaciones</h5>' + textoLargo(i.observaciones);
 
+      // Pilas independientes: Identificacion e Impacto (cortas) comparten
+      // columna para no dejar huecos bajo ellas junto a Seguimiento.
+      function pila(html) { return '<div class="ini-det-pila">' + html + '</div>'; }
       return cab +
-        '<div class="ini-det-layout">' +
-          '<div class="ini-det-col ini-det-col-izq">' +
-            seccion('Identificación', ident) +
-            seccion('Impacto', impacto) +
-            seccion('Categorías afectadas', cats, 'ini-det-ancha') +
-          '</div>' +
-          '<div class="ini-det-col ini-det-col-der">' +
-            seccion('Organización', org) +
-            seccion('Seguimiento', seguimiento) +
-            seccion('Descripción', desc, 'ini-det-ancha') +
-            this.htmlHistorial(i) +
-          '</div>' +
-        '</div>';
+        '<div class="ini-det-rejilla">' +
+          pila(seccion('Identificación', ident) + seccion('Impacto', impacto)) +
+          pila(seccion('Organización', org)) +
+          pila(seccion('Seguimiento', seguimiento)) +
+          pila(seccion('Descripción', desc)) +
+        '</div>' +
+        seccion('Categorías afectadas', cats, 'ini-det-ancha') +
+        this.htmlHistorial(i);
     }
   }
 

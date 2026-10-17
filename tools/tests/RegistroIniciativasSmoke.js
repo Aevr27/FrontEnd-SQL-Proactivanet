@@ -467,7 +467,7 @@ pruebas.push(function () {
     var html = p.sel('regDetCuerpo').innerHTML;
     Check('E1 abre', [false, false, 'PRB 2026-000001'], [p.sel('regDetalle').hidden, p.sel('regDetFondo').hidden, p.sel('regDetTitulo').textContent]);
     Check('E1 foco en cerrar', 1, p.sel('regDetCerrar').enfocado);
-    Check('E2 secciones', ['Identificación', 'Organización', 'Impacto', 'Seguimiento', 'Categorías afectadas', 'Descripción'],
+    Check('E2 secciones', ['Identificación', 'Impacto', 'Organización', 'Seguimiento', 'Descripción', 'Categorías afectadas'],
       (html.match(/<h4>[^<]+<\/h4>/g) || []).map(function (h) { return h.replace(/<\/?h4>/g, ''); }));
     var filasCat = html.match(/<td class="ini-cat-ruta">[^<]*<\/td>/g) || [];
     Check('E3 una fila por categoria, sin duplicar', ['/A/Cat 1/Hoja', '/A/Cat 3'],
