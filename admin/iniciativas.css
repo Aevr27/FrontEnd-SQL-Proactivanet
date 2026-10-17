@@ -737,6 +737,15 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-detalle .ini-ed-campo:focus-visible,
 #regEdCats input:focus-visible, #regEdCats select:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 .ini-detalle .ini-ed-cambiado { border-color: var(--accent); background: var(--accent-soft); }
+/* Titulo, Descripcion y Observaciones de ADM: se ven como el encabezado y
+   los bloques de texto de siempre; un borde punteado dice que un clic los
+   edita ahi mismo. */
+.ini-ed-mostrar { cursor: text; border: 1px dashed var(--ctrl-line); border-radius: var(--radius-xs); }
+.ini-ed-mostrar.ini-det-nombre { width: fit-content; max-width: 100%; padding: 2px 6px; margin-left: -7px; white-space: pre-wrap; }
+.ini-ed-mostrar:hover { border-color: var(--accent); }
+.ini-ed-mostrar:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ini-ed-mostrar.ini-ed-cambiado { border-style: solid; border-color: var(--accent); background: var(--accent-soft); }
+#regDetNombre .ini-ed-campo { font-size: 15px; font-weight: 700; }
 .ini-vencida-celda .ini-ed-campo { border-color: var(--rojo); color: var(--rojo); font-weight: 700; }
 .ini-ed-enviando .ini-ed-campo, .ini-ed-enviando #regEdCats { opacity: .6; }
 .ini-ed-pista { font-size: 11.5px; color: var(--muted); align-self: center; }

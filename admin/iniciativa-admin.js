@@ -932,6 +932,8 @@ window.IniciativaAdmin = (function () {
   var CAMPOS_PROBLEMA = ['titulo', 'descripcion', 'observaciones', 'f_analisis', 'f_solucion', 'f_cierre', 'estado', 'subestado'];
 
   function claves(lista) { return lista.map(function (f) { return f.clave; }); }
+  // Texto largo con los saltos de linea que devuelve un <textarea> (\n).
+  function lineas(v) { return typeof v === 'string' ? v.replace(/\r\n?/g, '\n') : ''; }
   function campo(clave) { return CAMPOS_EDICION.filter(function (c) { return c.clave === clave; })[0]; }
 
   // ---------------------------------------------------------------------
@@ -956,8 +958,10 @@ window.IniciativaAdmin = (function () {
       var tit = iniciativa.titulo_problem !== undefined ? iniciativa.titulo_problem : iniciativa.titulo;
       this.original = {
         titulo: tit || '',
-        descripcion: iniciativa.descripcion || '',
-        observaciones: iniciativa.observaciones || '',
+        // Un CRLF de la base no cuenta como cambio solo por pasar por el
+        // control (el navegador lo vuelve \n).
+        descripcion: lineas(iniciativa.descripcion),
+        observaciones: lineas(iniciativa.observaciones),
         f_analisis: iniciativa.f_analisis || '',
         f_solucion: iniciativa.f_solucion || '',
         f_cierre: iniciativa.f_cierre || '',
@@ -1176,7 +1180,9 @@ window.IniciativaAdmin = (function () {
     var cambiado = ed.cambios().some(function (x) { return x.clave === clave; });
     var attrs = ' data-edicion="' + clave + '" aria-label="' + Escape.attr(c.rotulo) + '" class="ini-ed-campo' +
       (cambiado ? ' ini-ed-cambiado' : '') + '"';
-    if (c.control === 'multilinea') return '<textarea id="' + id + '"' + attrs + ' rows="5">' + Escape.html(v) + '</textarea>';
+    // El "\n" inicial lo descarta el parser de HTML: un texto que empieza
+    // con salto de linea no lo pierde (ni parece cambiado).
+    if (c.control === 'multilinea') return '<textarea id="' + id + '"' + attrs + ' rows="5">\n' + Escape.html(v) + '</textarea>';
     if (c.control === 'fecha') return '<input type="date" id="' + id + '"' + attrs + ' value="' + Escape.attr(v) + '">';
     if (c.control === 'lista') {
       if (clave === 'subestado' && !ed.conoceSubestado()) {

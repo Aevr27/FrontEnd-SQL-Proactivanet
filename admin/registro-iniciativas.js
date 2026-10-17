@@ -1206,6 +1206,9 @@ window.RegistroIniciativas = (function () {
       // servidor exige ADM en cada guardado (AccesoAdmin.ExigirAdm).
       this.edicion = null;
       this.edicionEnviando = false;
+      // Texto de ADM (titulo, descripcion, observaciones) abierto como
+      // editor; los demas se ven como texto normal. null = ninguno.
+      this.editando = null;
       // Pregunta antes de descartar cambios sin guardar: (mensaje) -> bool.
       // null = window.confirm; sin forma de preguntar, no se descarta.
       this.confirmar = null;
@@ -1258,6 +1261,7 @@ window.RegistroIniciativas = (function () {
       // ADM se descarta si el rol deja de ser ADM.
       var i = this.registro && this.registro.buscar(this.abierta);
       this.soltarFoco();
+      this.editando = null;
       if (this.puedeEditar() && !this.edicion && i) { this.edicion = this.nuevaEdicion(i); this.pintarEditables(); }
       else if (!this.puedeEditar() && this.edicion) { this.edicion = null; this.edicionEnviando = false; this.pintarEditables(); }
       this.pintarModo();
@@ -1402,6 +1406,11 @@ window.RegistroIniciativas = (function () {
         if (el && el.closest) el = el.closest('[data-accion]');
         var accion = el && el.getAttribute && el.getAttribute('data-accion');
         if (accion) { self.accionDetalle(accion); return; }
+        // Un texto de ADM mostrado como texto: un clic lo vuelve editor.
+        var texto = e.target;
+        if (texto && texto.closest) texto = texto.closest('[data-editar]');
+        var clave = texto && texto.getAttribute && texto.getAttribute('data-editar');
+        if (clave) { self.editarTexto(clave); return; }
         // Quitar una categoria agregada en "Solicitar cambios".
         var nueva = e.target;
         if (nueva && nueva.closest) nueva = nueva.closest('[data-cambio-quitar]');
@@ -1426,6 +1435,19 @@ window.RegistroIniciativas = (function () {
         if (e.target && e.target.id === 'regSegCategoria') self.elegirCategoriaSeguimiento(e.target.value);
         else self.capturarDetalle(e.target);
       });
+      // Salir del editor de un texto: vuelve a verse como texto (con lo
+      // escrito, marcado si difiere de lo guardado).
+      this.$('regDetCuerpo').addEventListener('focusout', function (e) {
+        var clave = e.target && e.target.getAttribute && e.target.getAttribute('data-edicion');
+        if (clave && clave === self.editando) self.terminarTexto();
+      });
+      // Enter o espacio sobre un texto mostrado lo abre (es un boton).
+      this.$('regDetCuerpo').addEventListener('keydown', function (e) {
+        var clave = e.target && e.target.getAttribute && e.target.getAttribute('data-editar');
+        if (!clave || (e.key !== 'Enter' && e.key !== ' ')) return;
+        if (e.preventDefault) e.preventDefault();
+        self.editarTexto(clave);
+      });
       this.$('regDetCerrar').addEventListener('click', function () { self.cerrarDetalle(); });
       this.$('regDetFondo').addEventListener('click', function () { self.cerrarDetalle(); });
       // Salir de la pagina con cambios sin guardar: el navegador pregunta.
@@ -1439,6 +1461,7 @@ window.RegistroIniciativas = (function () {
       }
       this.doc.addEventListener('keydown', function (e) {
         if (e.key !== 'Escape') return;
+        if (self.abierta && self.editando) { self.terminarTexto(true); return; }
         if (self.abierta) { self.cerrarDetalle(); return; }
         Object.keys(MULTIS).forEach(function (clave) {
           var m = MULTIS[clave];
@@ -2007,6 +2030,7 @@ window.RegistroIniciativas = (function () {
       this.histAbierto = false;
       this.edicionEnviando = false;
       this.soltarFoco();
+      this.editando = null;
       this.edicion = this.puedeEditar() ? this.nuevaEdicion(i) : null;
       this.segCategoria = '';
       this.$('regDetCuerpo').innerHTML = this.htmlDetalle(i);
@@ -2281,8 +2305,7 @@ window.RegistroIniciativas = (function () {
     modificar(folio, origen) {
       if (!this.puedeEditar()) return false;
       if (!this.abrirDesdeLista(folio, origen) || !this.edicion) return false;
-      var foco = this.$('regEd-titulo');
-      if (foco && foco.focus) foco.focus();
+      this.editarTexto('titulo');
       return true;
     }
 
@@ -2292,7 +2315,7 @@ window.RegistroIniciativas = (function () {
     pintarEditables() {
       var i = this.registro && this.registro.buscar(this.abierta);
       if (!i) return;
-      var partes = { regDetIdent: this.htmlIdentificacion(i), regDetEtapas: this.htmlEtapas(i),
+      var partes = { regDetNombre: this.htmlNombre(i), regDetIdent: this.htmlIdentificacion(i), regDetEtapas: this.htmlEtapas(i),
                      regDetCats: this.htmlCategoriasDetalle(i), regDetDesc: this.htmlDescripcion(i),
                      regEdBarraCaja: this.htmlBarra() };
       var self = this;
@@ -2343,12 +2366,11 @@ window.RegistroIniciativas = (function () {
       var i = this.registro && this.registro.buscar(this.abierta);
       if (!i || this.edicionEnviando) return;
       if (abrir && !this.puedeEditar()) return;
-      if (!abrir) this.soltarFoco();
+      if (!abrir) { this.soltarFoco(); this.editando = null; }
       var habia = !!this.edicion;
       this.edicion = this.puedeEditar() ? (abrir && this.edicion ? this.edicion : this.nuevaEdicion(i)) : null;
       if (!abrir || !habia) this.pintarEditables();
-      var foco = abrir && this.edicion ? this.$('regEd-titulo') : null;
-      if (foco && foco.focus) foco.focus();
+      if (abrir && this.edicion) this.editarTexto('titulo');
     }
 
     // Revision local (sin servidor): errores de formato y cambios.
@@ -2372,6 +2394,57 @@ window.RegistroIniciativas = (function () {
       Array.prototype.forEach.call(controles, function (el) { el.disabled = si; });
       var self = this;
       ['regEdGuardar', 'regEdCancelar'].forEach(function (id) { var b = self.$(id); if (b) b.disabled = si; });
+    }
+
+    // ---- Textos de ADM: se ven como texto y se editan en su lugar ----
+    // Titulo, Descripcion y Observaciones se muestran como el encabezado y
+    // los bloques de siempre (con el valor del borrador); un clic, Enter o
+    // espacio los vuelve editor ahi mismo y al salir vuelven a verse como
+    // texto. Lo escrito vive en el borrador (EdicionAdmin): nada se pierde
+    // al salir del editor y solo "Guardar cambios" lo envia.
+
+    editarTexto(clave) {
+      if (!this.edicion || this.edicionEnviando || !this.$('regEdCaja-' + clave)) return false;
+      if (this.editando && this.editando !== clave) this.terminarTexto();
+      this.editando = clave;
+      this.pintarTexto(clave);
+      var ctl = this.$('regEd-' + clave);
+      if (ctl && ctl.focus) ctl.focus();
+      return true;
+    }
+
+    // devolverFoco: Escape deja el foco en el texto mostrado (teclado).
+    terminarTexto(devolverFoco) {
+      var clave = this.editando;
+      if (!clave) return;
+      this.editando = null;
+      this.pintarTexto(clave);
+      var vista = devolverFoco ? this.$('regEdVer-' + clave) : null;
+      if (vista && vista.focus) vista.focus();
+    }
+
+    pintarTexto(clave) {
+      var caja = this.$('regEdCaja-' + clave);
+      if (caja) caja.innerHTML = this.htmlTextoInterior(clave);
+    }
+
+    // El contenido de la caja de un texto: su editor (si es el abierto) o
+    // el valor del borrador como texto, marcado si difiere de lo guardado.
+    // Vacio o null se rotula, nunca se ve como un campo en blanco.
+    htmlTextoInterior(clave) {
+      var A = window.IniciativaAdmin, ed = this.edicion;
+      if (this.editando === clave) return A.htmlControlEdicion(ed, clave);
+      var v = ed.valores[clave] || '';
+      var cambiado = ed.cambios().some(function (c) { return c.clave === clave; });
+      var rotulo = A.CAMPOS_EDICION.filter(function (c) { return c.clave === clave; })[0].rotulo;
+      return '<div class="ini-ed-mostrar' + (clave === 'titulo' ? ' ini-det-nombre' : ' ini-texto') +
+        (cambiado ? ' ini-ed-cambiado' : '') + '" id="regEdVer-' + clave + '" role="button" tabindex="0" data-editar="' + clave +
+        '" title="Clic para editar" aria-label="' + Escape.attr(rotulo + ': ' + (v.trim() ? v : 'sin captura') + '. Clic para editar') + '">' +
+        (v.trim() ? Escape.html(v) : '<span class="ini-nota">Sin captura.</span>') + '</div>';
+    }
+
+    htmlTexto(clave) {
+      return '<div class="ini-ed-caja" id="regEdCaja-' + clave + '">' + this.htmlTextoInterior(clave) + '</div>';
     }
 
     // "Guardar cambios" (o "Validar en el servidor (no guarda)" sin
@@ -2732,8 +2805,22 @@ window.RegistroIniciativas = (function () {
     // regDetDesc, regEdBarraCaja). Sin borrador (MOD o sin rol), solo
     // lectura, como siempre.
 
-    // Identificacion. Con ADM: Titulo (el del Problem), Estado y Subestado
-    // editables; Codigo, Agrupacion y Antiguedad, solo lectura.
+    // El titulo del Problem (el que edita ADM) va en el encabezado cuando ES
+    // el titulo que se ve. En iniciativas del Excel el encabezado es el
+    // TituloIniciativa (ProblemCategoria, no se edita aqui) y el del Problem
+    // va aparte en Identificacion ("Titulo del problema").
+    tituloEnEncabezado(i) {
+      return !!this.edicion && this.edicion.original.titulo === (i.titulo || '');
+    }
+
+    htmlNombre(i) {
+      if (this.tituloEnEncabezado(i)) return this.htmlTexto('titulo');
+      return '<p class="ini-det-nombre">' + Escape.html(texto(i.titulo)) + '</p>';
+    }
+
+    // Identificacion. Con ADM: Estado y Subestado editables (y el Titulo del
+    // problema si no es el del encabezado); Codigo, Agrupacion y
+    // Antiguedad, solo lectura.
     htmlIdentificacion(i) {
       var ed = this.edicion, A = window.IniciativaAdmin;
       var edad = diasDesdeCreacion(i);
@@ -2748,8 +2835,7 @@ window.RegistroIniciativas = (function () {
           '</dl>';
       }
       return '<dl class="ini-datos">' +
-        datoDetalle(i.titulo_problem !== undefined && i.titulo_problem !== i.titulo ? 'Título del problema' : 'Título',
-          A.htmlControlEdicion(ed, 'titulo'), true) +
+        (this.tituloEnEncabezado(i) ? '' : datoDetalle('Título del problema', this.htmlTexto('titulo'), true)) +
         datoDetalle('Código', i.folio) +
         datoDetalle('Agrupación', i.agrup) +
         datoDetalle('Estado', A.htmlControlEdicion(ed, 'estado'), true) +
@@ -2803,9 +2889,9 @@ window.RegistroIniciativas = (function () {
 
     // Descripcion y Observaciones; con ADM, cada una en un textarea.
     htmlDescripcion(i) {
-      var ed = this.edicion, A = window.IniciativaAdmin;
+      var ed = this.edicion, self = this;
       function textoLargo(clave) {
-        if (ed) return A.htmlControlEdicion(ed, clave);
+        if (ed) return self.htmlTexto(clave);
         var v = i[clave];
         return v ? '<div class="ini-texto">' + Escape.html(v) + '</div>' : '<p class="ini-nota">Sin captura.</p>';
       }
@@ -2831,7 +2917,7 @@ window.RegistroIniciativas = (function () {
       function caja(id, html) { return '<div id="' + id + '">' + html + '</div>'; }
 
       var cab = '<div class="ini-det-cab">' +
-        '<p class="ini-det-nombre">' + Escape.html(texto(i.titulo)) + '</p>' +
+        caja('regDetNombre', this.htmlNombre(i)) +
         '<div class="ini-det-marcas">' + this.htmlEstado(i) +
           (i.agrup ? ' <span class="chip ini-chip">' + Escape.html(i.agrup) + '</span>' : '') +
           (i.activa && i.fecha_retrasada ? ' <span class="pill ini-atrasada">Atrasada</span>' : '') +

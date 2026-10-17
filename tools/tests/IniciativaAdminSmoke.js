@@ -417,12 +417,15 @@ pruebas.push(function () {
     Check('E6 Codigo, Agrupacion y Antiguedad siguen de solo lectura; Organizacion e Impacto sin controles', [true, true, false],
       [/<dt>Código<\/dt><dd>PRB 2026-000001<\/dd>/.test(html), /<dt>Agrupación<\/dt><dd>Problem<\/dd>/.test(html),
        /data-edicion="(codigo|duenos|tickets|manager)/.test(p.sel('regDetCuerpo').innerHTML)]);
-    Check('E6b titulo, Estado, fechas, descripcion y categorias editables en su lugar', [true, true, true, true, true, true],
-      [/id="regEd-titulo" data-edicion="titulo"[^>]*value="T PRB 2026-000001"/.test(p.sel('regDetIdent').innerHTML),
+    Check('E6b titulo (encabezado), descripcion y observaciones se VEN con su valor y se editan con un clic; Estado, fechas y categorias son controles',
+      [true, true, true, true, true, true, false],
+      [/<div class="ini-ed-mostrar ini-det-nombre" id="regEdVer-titulo"[^>]*data-editar="titulo"[^>]*>T PRB 2026-000001<\/div>/.test(p.sel('regDetNombre').innerHTML),
        /<select id="regEd-estado" data-edicion="estado"/.test(p.sel('regDetIdent').innerHTML),
        /type="date" id="regEd-f_analisis" data-edicion="f_analisis"[^>]*value="2026-12-01"/.test(p.sel('regDetEtapas').innerHTML),
-       /<textarea id="regEd-descripcion" data-edicion="descripcion"[^>]*>Desc PRB 2026-000001<\/textarea>/.test(p.sel('regDetDesc').innerHTML),
-       /<textarea id="regEd-observaciones"/.test(p.sel('regDetDesc').innerHTML), /id="regEdCats"/.test(p.sel('regDetCats').innerHTML)]);
+       /data-editar="descripcion"[^>]*>Desc PRB 2026-000001<\/div>/.test(p.sel('regDetDesc').innerHTML),
+       /data-editar="observaciones"[^>]*>Obs PRB 2026-000001<\/div>/.test(p.sel('regDetDesc').innerHTML),
+       /id="regEdCats"/.test(p.sel('regDetCats').innerHTML),
+       /<dt>Título/.test(p.sel('regDetIdent').innerHTML)]);
 
     var titulo = Elemento('control');
     titulo.setAttribute('data-edicion', 'titulo');
@@ -457,7 +460,7 @@ pruebas.push(function () {
     Check('E11b Cancelar: borrador = lo guardado, sin cambios, barra oculta, controles con los valores guardados',
       [0, 'T PRB 2026-000001', '50', true, true, true],
       [reg.edicion.cambios().length, reg.edicion.valores.titulo, reg.edicion.valores.pct[0].valor, p.sel('regEdBarra').hidden,
-       /id="regEd-titulo"[^>]*value="T PRB 2026-000001"/.test(p.sel('regDetIdent').innerHTML),
+       /data-editar="titulo"[^>]*>T PRB 2026-000001<\/div>/.test(p.sel('regDetNombre').innerHTML),
        /data-edicion-pct="0" value="50"/.test(p.sel('regDetCats').innerHTML)]);
     Check('E11c ... Solicitar cambios sigue abierto con su borrador', [true, true, false],
       [reg.cambioAbierto, reg.cambio === cambio, p.sel('regCambio').hidden]);
@@ -680,9 +683,12 @@ pruebas.push(function () {
     var ed = reg.edicion, html = p.sel('regDetCuerpo').innerHTML;
     Check('MD2 valores actuales cargados', ['T PRB 2026-000001', 'Desc PRB 2026-000001', 'Obs PRB 2026-000001', ['50', '25']],
       [ed.valores.titulo, ed.valores.descripcion, ed.valores.observaciones, ed.valores.pct.map(function (x) { return x.valor; })]);
-    Check('MD2 ... y pintados en los controles, en su tarjeta', [true, true, true],
-      [/id="regEd-titulo"[^>]*value="T PRB 2026-000001"/.test(html), />Desc PRB 2026-000001<\/textarea>/.test(html), /data-edicion-pct="1" value="25"/.test(html)]);
-    Check('MD3 el foco va al primer campo editable', true, p.sel('regEd-titulo').enfocado > 0);
+    Check('MD2 ... y a la vista en su lugar (titulo en el encabezado, textos, %)', [true, true, true],
+      [/data-editar="titulo"[^>]*>T PRB 2026-000001<\/div>/.test(html), /data-editar="descripcion"[^>]*>Desc PRB 2026-000001<\/div>/.test(html),
+       /data-edicion-pct="1" value="25"/.test(html)]);
+    Check('MD3 "Crear > existente" abre el titulo como editor, con su valor, y le da el foco', [true, 'titulo', true],
+      [/<input type="text" id="regEd-titulo"[^>]*value="T PRB 2026-000001"/.test(p.sel('regEdCaja-titulo').innerHTML), reg.editando,
+       p.sel('regEd-titulo').enfocado > 0]);
     Check('MD3 Guardar valida en el servidor; aviso de persistencia + carga del Excel', [true, true],
       [/data-accion="edicion-guardar"/.test(html), /la carga reemplazaría estos campos/.test(html)]);
     Check('MD4 vista previa inicial: sin cambios', true, /Sin cambios\./.test(p.sel('regEdVista').innerHTML));
@@ -706,8 +712,10 @@ pruebas.push(function () {
     html = p.sel('regDetCuerpo').innerHTML;
     Check('MD7 legado: titulo editable = el del Problem; % 33.33 sin redondeos; sin cambios al abrir',
       ['Titulo del Problem', '33.33', 0], [reg.edicion.valores.titulo, reg.edicion.valores.pct[0].valor, reg.edicion.cambios().length]);
-    Check('MD7 se rotula "Título del problema" y el aviso dice que el TituloIniciativa del Excel se conserva', [true, true],
-      [/<dt>Título del problema<\/dt><dd><input type="text" id="regEd-titulo"/.test(html),
+    Check('MD7 encabezado = TituloIniciativa (sin editor); el del Problem va en "Título del problema"; el aviso dice que el del Excel se conserva',
+      [true, false, true, true],
+      [/<p class="ini-det-nombre">Titulo de la iniciativa \(Excel\)<\/p>/.test(html), /id="regDetNombre"><div class="ini-ed-caja"/.test(html),
+       /<dt>Título del problema<\/dt><dd><div class="ini-ed-caja" id="regEdCaja-titulo"><div [^>]*data-editar="titulo"[^>]*>Titulo del Problem<\/div>/.test(html),
        /ProblemCategoria\.TituloIniciativa/.test(p.sel('regEdVista').innerHTML)]);
 
     reg.modificar('MAP 2026-000003');
@@ -727,6 +735,117 @@ pruebas.push(function () {
     pg.fijarRol('MOD');
     Check('MD10 MOD: la creacion directa no', 'iniciativas', pg.vista);
     Check('MD11 solo lecturas GET, ninguna escritura', true, p.pedidos.every(function (x) { return x.metodo === 'GET'; }));
+  });
+});
+
+// TX) Titulo, Descripcion y Observaciones de ADM: se VEN con su valor (el
+//     titulo como encabezado) y se editan en su lugar con un clic. Vacio o
+//     null se rotula; CRLF y saltos al inicio no cuentan como cambio; solo
+//     lo cambiado viaja; Cancelar y guardar dejan lo guardado a la vista.
+function textoMostrado(html, clave) {
+  var m = new RegExp('data-editar="' + clave + '"[^>]*>([\\s\\S]*?)</div>').exec(html || '');
+  return m ? m[1] : null;
+}
+pruebas.push(function () {
+  var p = Pagina(), reg, srv;
+  return esperar().then(function () {
+    reg = p.registro;
+    reg.registro.persistenciaAdmin = true;
+    reg.registro.iniciativas.push(
+      Ini('PRB 2026-000010', { descripcion: 'Línea 1\r\nLínea 2\r\n\r\nLínea 4', observaciones: '\nEmpieza con salto' }),
+      Ini('PRB 2026-000011', { descripcion: null, observaciones: '' }),
+      Ini('PRB 2026-000012', { titulo: 'Titulo visible (iniciativa)', titulo_problem: null }));
+
+    // MOD: los textos se ven, sin nada que editar.
+    p.pagina.fijarRol('MOD');
+    reg.abrirDetalle('PRB 2026-000010');
+    var mod = p.sel('regDetCuerpo').innerHTML;
+    Check('TX1 MOD: titulo como encabezado, textos con su valor y sin editores', [true, true, false, false],
+      [/<p class="ini-det-nombre">T PRB 2026-000010<\/p>/.test(mod), /<div class="ini-texto">Línea 1\r\nLínea 2/.test(mod),
+       /data-editar|data-edicion=/.test(mod), /<textarea|<input type="text"/.test(mod)]);
+    reg.cerrarDetalle();
+
+    p.pagina.fijarRol('ADM');
+    reg.abrirDetalle('PRB 2026-000010');
+    var html = p.sel('regDetCuerpo').innerHTML;
+    Check('TX2 ADM: titulo actual como encabezado (no un campo vacio); textos con su valor, multilinea intacto',
+      ['T PRB 2026-000010', 'Línea 1\nLínea 2\n\nLínea 4', '\nEmpieza con salto', false],
+      [textoMostrado(html, 'titulo'), textoMostrado(html, 'descripcion'), textoMostrado(html, 'observaciones'),
+       /<input type="text" id="regEd-titulo"|<textarea/.test(html)]);
+    Check('TX2b CRLF de la base y salto inicial: el borrador no ve cambios', [0, true],
+      [reg.edicion.cambios().length, p.sel('regEdBarra').hidden]);
+
+    // Clic en la descripcion: editor con el valor; el \n extra lo come el parser.
+    var vista = Elemento('vista');
+    vista.setAttribute('data-editar', 'descripcion');
+    p.sel('regDetCuerpo').disparar('click', { target: vista });
+    var caja = p.sel('regEdCaja-descripcion').innerHTML;
+    Check('TX3 clic: la descripcion se vuelve textarea con su valor, en su lugar, con foco', ['descripcion', true, true],
+      [reg.editando, /<textarea id="regEd-descripcion" data-edicion="descripcion"[^>]*>\nLínea 1\nLínea 2\n\nLínea 4<\/textarea>/.test(caja),
+       p.sel('regEd-descripcion').enfocado > 0]);
+    editar(p, 'data-edicion', 'descripcion', 'Descripción nueva\ncon dos líneas');
+    var ctl = Elemento('control');
+    ctl.setAttribute('data-edicion', 'descripcion');
+    p.sel('regDetCuerpo').disparar('focusout', { target: ctl });
+    caja = p.sel('regEdCaja-descripcion').innerHTML;
+    Check('TX4 al salir vuelve a verse como texto, con lo escrito y marcado; la barra cuenta el cambio',
+      [null, 'Descripción nueva\ncon dos líneas', true, '1 cambio sin guardar'],
+      [reg.editando, textoMostrado(caja, 'descripcion'), /ini-ed-mostrar ini-texto ini-ed-cambiado/.test(caja), p.sel('regEdSucio').textContent]);
+
+    // Enter sobre el titulo mostrado lo abre; Escape solo sale del editor.
+    var tit = Elemento('vista');
+    tit.setAttribute('data-editar', 'titulo');
+    p.sel('regDetCuerpo').disparar('keydown', { target: tit, key: 'Enter', preventDefault: function () {} });
+    Check('TX5 Enter abre el titulo con su valor', [true, 'titulo'],
+      [/<input type="text" id="regEd-titulo"[^>]*value="T PRB 2026-000010"/.test(p.sel('regEdCaja-titulo').innerHTML), reg.editando]);
+    editar(p, 'data-edicion', 'titulo', 'Titulo nuevo');
+    p.doc.disparar('keydown', { key: 'Escape' });
+    Check('TX5b Escape: sale del editor (el detalle sigue abierto) y el encabezado muestra lo escrito', [null, 'PRB 2026-000010', 'Titulo nuevo'],
+      [reg.editando, reg.abierta, textoMostrado(p.sel('regEdCaja-titulo').innerHTML, 'titulo')]);
+
+    // Cancelar: todo vuelve a lo guardado, tambien en el encabezado.
+    accion(p, 'edicion-cancelar');
+    Check('TX6 Cancelar: titulo, descripcion y observaciones guardados a la vista; sin cambios',
+      [0, 'T PRB 2026-000010', 'Línea 1\nLínea 2\n\nLínea 4', '\nEmpieza con salto'],
+      [reg.edicion.cambios().length, textoMostrado(p.sel('regDetNombre').innerHTML, 'titulo'),
+       textoMostrado(p.sel('regDetDesc').innerHTML, 'descripcion'), textoMostrado(p.sel('regDetDesc').innerHTML, 'observaciones')]);
+
+    // Guardar: solo lo cambiado viaja, por accion=modificar.
+    editar(p, 'data-edicion', 'titulo', 'Titulo guardado');
+    editar(p, 'data-edicion', 'observaciones', 'Obs guardada');
+    srv = Servidor(200, { accion: 'modificar', valida: true, guardada: true, codigo: 'PRB 2026-000010', cambios: [] });
+    return reg.guardarEdicion(srv.pedir, function (url) {
+      var json = JSON.parse(JSON.stringify(REGISTRO));
+      json.iniciativas.push(Ini('PRB 2026-000010', { titulo: 'Titulo guardado', titulo_problem: 'Titulo guardado',
+        descripcion: 'Línea 1\r\nLínea 2\r\n\r\nLínea 4', observaciones: 'Obs guardada' }));
+      if (/registro/.test(url)) return Promise.resolve(Respuesta(200, json));
+      return Promise.reject(new Error('peticion inesperada ' + url));
+    });
+  }).then(function (r) {
+    Check('TX7 guardar envia solo titulo y observaciones (la descripcion intacta no viaja)',
+      [[['accion', 'modificar'], ['folio', 'PRB 2026-000010'], ['titulo', 'Titulo guardado'], ['observaciones', 'Obs guardada']]],
+      [srv.pedidos[0].campos]);
+    Check('TX8 tras guardar: lo releido se ve como texto (encabezado y bloques), sin cambios pendientes',
+      ['guardada', 'Titulo guardado', 'Línea 1\nLínea 2\n\nLínea 4', 'Obs guardada', 0],
+      [r.estado, textoMostrado(p.sel('regDetCuerpo').innerHTML, 'titulo'), textoMostrado(p.sel('regDetCuerpo').innerHTML, 'descripcion'),
+       textoMostrado(p.sel('regDetCuerpo').innerHTML, 'observaciones'), reg.edicion.cambios().length]);
+
+    // null / vacio: se rotulan y nunca viajan como cadena vacia.
+    reg.registro.iniciativas.push(Ini('PRB 2026-000011', { descripcion: null, observaciones: '' }),
+      Ini('PRB 2026-000012', { titulo: 'Titulo visible (iniciativa)', titulo_problem: null }));
+    reg.abrirDetalle('PRB 2026-000011');
+    var html = p.sel('regDetCuerpo').innerHTML;
+    Check('TX9 descripcion null y observaciones vacias: "Sin captura." (no un campo en blanco), sin cambios',
+      ['<span class="ini-nota">Sin captura.</span>', '<span class="ini-nota">Sin captura.</span>', '', '', 0],
+      [textoMostrado(html, 'descripcion'), textoMostrado(html, 'observaciones'), reg.edicion.valores.descripcion,
+       reg.edicion.valores.observaciones, reg.edicion.cambios().length]);
+    reg.abrirDetalle('PRB 2026-000012');
+    html = p.sel('regDetCuerpo').innerHTML;
+    editar(p, 'data-edicion', 'f_cierre', '2027-01-31');
+    Check('TX10 titulo del Problem null: el encabezado sigue con el titulo visible; el del Problem dice "Sin captura." y no viaja',
+      [true, '<span class="ini-nota">Sin captura.</span>', ['f_cierre']],
+      [/<p class="ini-det-nombre">Titulo visible \(iniciativa\)<\/p>/.test(html), textoMostrado(html, 'titulo'),
+       reg.edicion.paraEnviar().slice(2).map(function (x) { return x[0]; })]);
   });
 });
 
