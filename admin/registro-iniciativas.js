@@ -2694,15 +2694,19 @@ window.RegistroIniciativas = (function () {
         '<h5>Observaciones</h5>' + textoLargo(i.observaciones);
 
       return cab +
-        '<div class="ini-det-layout"><div class="ini-det-rejilla">' +
-          seccion('Identificación', ident) +
-          seccion('Organización', org) +
-          seccion('Impacto', impacto) +
-          seccion('Seguimiento', seguimiento) +
-          seccion('Categorías afectadas', cats, 'ini-det-ancha') +
-          seccion('Descripción', desc, 'ini-det-ancha') +
-        '</div>' +
-        this.htmlHistorial(i) + '</div>';
+        '<div class="ini-det-layout">' +
+          '<div class="ini-det-col ini-det-col-izq">' +
+            seccion('Identificación', ident) +
+            seccion('Impacto', impacto) +
+            seccion('Categorías afectadas', cats, 'ini-det-ancha') +
+          '</div>' +
+          '<div class="ini-det-col ini-det-col-der">' +
+            seccion('Organización', org) +
+            seccion('Seguimiento', seguimiento) +
+            seccion('Descripción', desc, 'ini-det-ancha') +
+            this.htmlHistorial(i) +
+          '</div>' +
+        '</div>';
     }
   }
 
