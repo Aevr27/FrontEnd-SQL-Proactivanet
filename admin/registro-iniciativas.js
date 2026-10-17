@@ -1167,6 +1167,12 @@ window.RegistroIniciativas = (function () {
     }
   }
 
+  // Una fila "rotulo: valor" de los datos del detalle (html: valor ya es HTML).
+  function datoDetalle(rotulo, valor, html) {
+    return '<div class="ini-dato"><dt>' + Escape.html(rotulo) + '</dt><dd>' +
+      (html ? valor : Escape.html(texto(valor))) + '</dd></div>';
+  }
+
   class VistaRegistro {
     constructor(doc) {
       this.doc = doc;
@@ -1195,7 +1201,14 @@ window.RegistroIniciativas = (function () {
       // 'ADM' | 'MOD' | null (fijarRol). Solo ADM ve "Modificar"; null
       // hasta que SesionAdmin responda.
       this.rol = null;
-      this.edicion = null;        // EdicionAdmin del detalle abierto (prototipo)
+      // Edicion directa de ADM: el borrador (EdicionAdmin) del detalle
+      // abierto; con rol ADM existe siempre que hay detalle. Solo UX: el
+      // servidor exige ADM en cada guardado (AccesoAdmin.ExigirAdm).
+      this.edicion = null;
+      this.edicionEnviando = false;
+      // Pregunta antes de descartar cambios sin guardar: (mensaje) -> bool.
+      // null = window.confirm; sin forma de preguntar, no se descarta.
+      this.confirmar = null;
       // Rutas del catalogo vigente (las fija la pagina al cargar el
       // catalogo): lo unico que "Modificar" puede agregar. null = sin cargar.
       this.rutasCatalogo = null;
@@ -1241,9 +1254,21 @@ window.RegistroIniciativas = (function () {
       this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
       this.aplicarAlcance();
       if (!this.abierta) return;
-      if (this.rol !== 'ADM') this.abrirEdicion(false);
+      // La edicion directa aparece o se retira en su lugar; un borrador de
+      // ADM se descarta si el rol deja de ser ADM.
+      var i = this.registro && this.registro.buscar(this.abierta);
+      this.soltarFoco();
+      if (this.puedeEditar() && !this.edicion && i) { this.edicion = this.nuevaEdicion(i); this.pintarEditables(); }
+      else if (!this.puedeEditar() && this.edicion) { this.edicion = null; this.edicionEnviando = false; this.pintarEditables(); }
+      this.pintarModo();
       var acciones = this.$('regDetAcciones');
       if (acciones) acciones.innerHTML = this.htmlAcciones();
+    }
+
+    // Rotulo de la barra del detalle: lo que el usuario puede hacer aqui.
+    pintarModo() {
+      var modo = this.$('regDetModo');
+      if (modo) modo.textContent = this.edicion ? 'Edición directa (ADM)' : 'Solo lectura';
     }
 
     puedeEditar() { return this.rol === 'ADM' && !!window.IniciativaAdmin; }
@@ -1333,7 +1358,7 @@ window.RegistroIniciativas = (function () {
         if (e.preventDefault) e.preventDefault();
         self.aplicarBusqueda();
         var lista = self.filtradas();
-        if (lista.length === 1) self.abrirDetalle(lista[0].folio, self.$('regBuscar'));
+        if (lista.length === 1) self.abrirDesdeLista(lista[0].folio, self.$('regBuscar'));
       });
       this.$('regLimpiar').addEventListener('click', function () { self.limpiarFiltros(); });
       this.$('regLimpiarVacio').addEventListener('click', function () { self.limpiarFiltros(); });
@@ -1345,7 +1370,7 @@ window.RegistroIniciativas = (function () {
         var el = e.target;
         if (el && el.closest) el = el.closest('[data-folio]');
         var folio = el && el.getAttribute && el.getAttribute('data-folio');
-        if (folio) self.abrirDetalle(folio, el);
+        if (folio) self.abrirDesdeLista(folio, el);
       });
       this.$('regCabeza').addEventListener('click', function (e) {
         var el = e.target;
@@ -1367,7 +1392,7 @@ window.RegistroIniciativas = (function () {
           var el = e.target;
           if (el && el.closest) el = el.closest('[data-folio]');
           var folio = el && el.getAttribute && el.getAttribute('data-folio');
-          if (folio) self.abrirDetalle(folio, el);
+          if (folio) self.abrirDesdeLista(folio, el);
         });
       });
 
@@ -1403,6 +1428,15 @@ window.RegistroIniciativas = (function () {
       });
       this.$('regDetCerrar').addEventListener('click', function () { self.cerrarDetalle(); });
       this.$('regDetFondo').addEventListener('click', function () { self.cerrarDetalle(); });
+      // Salir de la pagina con cambios sin guardar: el navegador pregunta.
+      var ventana = this.doc.defaultView || (typeof window !== 'undefined' ? window : null);
+      if (ventana && ventana.addEventListener) {
+        ventana.addEventListener('beforeunload', function (e) {
+          if (!self.hayCambiosSinGuardar()) return;
+          if (e.preventDefault) e.preventDefault();
+          e.returnValue = '';
+        });
+      }
       this.doc.addEventListener('keydown', function (e) {
         if (e.key !== 'Escape') return;
         if (self.abierta) { self.cerrarDetalle(); return; }
@@ -1471,7 +1505,7 @@ window.RegistroIniciativas = (function () {
 
       this.registro = null;
       this.filtro = null;
-      this.cerrarDetalle();
+      this.cerrarDetalle(true);
       // La Cobertura cuelga del registro: se vuelve a pedir al reabrirla.
       this.cobertura = null;
       this.coberturaJson = null;
@@ -1971,18 +2005,34 @@ window.RegistroIniciativas = (function () {
       this.cambio = new SolicitudCambio(i, this.opcionesEstado());
       this.cambioAbierto = false;
       this.histAbierto = false;
-      this.edicion = null;
+      this.edicionEnviando = false;
+      this.soltarFoco();
+      this.edicion = this.puedeEditar() ? this.nuevaEdicion(i) : null;
       this.segCategoria = '';
       this.$('regDetCuerpo').innerHTML = this.htmlDetalle(i);
       this.$('regDetFondo').hidden = false;
       this.$('regDetalle').hidden = false;
       this.marcarRaiz(true);
+      this.pintarModo();
+      this.volumetriaEdicion();
       var cerrar = this.$('regDetCerrar');
       if (cerrar && cerrar.focus) cerrar.focus();
     }
 
-    // Siempre deja el panel oculto; el foco solo vuelve si estaba abierto.
-    cerrarDetalle() {
+    // Una fila, la busqueda o "Crear > existente" abren un detalle: con
+    // cambios sin guardar en el abierto, primero se pregunta.
+    abrirDesdeLista(folio, origen) {
+      if (this.abierta && !this.soltarCambios()) return false;
+      this.abrirDetalle(folio, origen);
+      return this.abierta === folio;
+    }
+
+    // Deja el panel oculto; el foco solo vuelve si estaba abierto. Con
+    // cambios sin guardar pregunta antes (salvo forzar: recarga del
+    // registro o acceso retirado) y, si no se descartan, no cierra.
+    // -> true si quedo cerrado.
+    cerrarDetalle(forzar) {
+      if (!forzar && this.abierta && !this.soltarCambios()) return false;
       var estaba = !!this.abierta;
       this.abierta = null;
       this.cambio = null;
@@ -1992,12 +2042,29 @@ window.RegistroIniciativas = (function () {
       this.marcarRaiz(false);
       var origen = this.origenFoco;
       this.origenFoco = null;
-      if (!estaba) return;
+      if (!estaba) return true;
       // El boton del folio de esa fila; si la fila ya no esta, nada.
       if (origen && origen.focus && origen.isConnected !== false) {
         var boton = origen.querySelector ? origen.querySelector('.ini-folio') : null;
         (boton || origen).focus();
       }
+      return true;
+    }
+
+    // Hay algo escrito que difiere de lo guardado (y no se esta enviando:
+    // lo que viaja ya no es un borrador que se pierda al cerrar).
+    hayCambiosSinGuardar() {
+      return !!(this.edicion && !this.edicionEnviando && this.edicion.cambios().length);
+    }
+
+    // -> true si se puede seguir (no hay cambios, o el usuario los descarta).
+    soltarCambios() {
+      if (!this.hayCambiosSinGuardar()) return true;
+      var preguntar = this.confirmar ||
+        (typeof window !== 'undefined' && typeof window.confirm === 'function' ? function (m) { return window.confirm(m); } : null);
+      var n = this.edicion.cambios().length;
+      return !!(preguntar && preguntar('Hay ' + n + (n === 1 ? ' cambio' : ' cambios') + ' sin guardar en ' +
+        this.abierta + '. ¿Descartarlos?'));
     }
 
     // ---- Solicitar cambios / Historial ----
@@ -2007,7 +2074,7 @@ window.RegistroIniciativas = (function () {
       else if (accion === 'cambio-cancelar') this.abrirCambio(false);
       else if (accion === 'cambio-preparar') this.prepararCambio();
       else if (accion === 'historial') this.plegarHistorial();
-      else if (accion === 'editar-admin') this.abrirEdicion(!this.edicion);
+      else if (accion === 'editar-admin') this.abrirEdicion(true);
       else if (accion === 'edicion-cancelar') this.abrirEdicion(false);
       else if (accion === 'edicion-revisar') this.revisarEdicion();
       else if (accion === 'edicion-guardar') this.guardarEdicion();
@@ -2027,6 +2094,8 @@ window.RegistroIniciativas = (function () {
       var cn = t.getAttribute('data-cambio-nueva-pct');
       var tipo = t.getAttribute('data-edicion-tipo');   // "indice|campo"
       var fcat = t.getAttribute('data-edicion-fcat');
+      // Mientras se envia, los controles estan deshabilitados; nada cambia.
+      if (ed && this.edicionEnviando && (clave || n !== null || tipo || fcat !== null)) return true;
       if (ed && clave) ed.capturar(clave, t.value);
       else if (ed && n !== null && n !== undefined) ed.capturarPct(Number(n), t.value);
       else if (ed && tipo) ed.capturarTipo(Number(tipo.split('|')[0]), tipo.split('|')[1], t.value);
@@ -2034,7 +2103,7 @@ window.RegistroIniciativas = (function () {
       else if (c && cp !== null && cp !== undefined) { c.fijarPct(c.categoriasLigadas()[Number(cp)], t.value); return true; }
       else if (c && cn !== null && cn !== undefined) { c.capturarPctNueva(Number(cn), t.value); return true; }
       else return false;
-      this.pintarVistaEdicion();
+      this.pintarEstadoEdicion(t);
       return true;
     }
 
@@ -2169,7 +2238,7 @@ window.RegistroIniciativas = (function () {
     pintarCategoriasEdicion() {
       var caja = this.$('regEdCats');
       if (caja && this.edicion) caja.innerHTML = window.IniciativaAdmin.htmlCategoriasEdicion(this.edicion, this.clienteVolumetria());
-      this.pintarVistaEdicion();
+      this.pintarEstadoEdicion();
     }
 
     // Pide la volumetria (solo lectura) y repinta las categorias al llegar,
@@ -2185,93 +2254,164 @@ window.RegistroIniciativas = (function () {
       });
     }
 
-    // ---- Modificar (ADM): guarda con la persistencia activa; si no, solo valida ----
-    // Abre el detalle de la iniciativa con "Modificar" ya desplegado.
+    // ---- Edicion directa (ADM): guarda con la persistencia activa; si no, solo valida ----
+    // Los campos editables se pintan en su lugar del detalle; la barra
+    // "Cambios sin guardar" (Guardar cambios / Cancelar) aparece solo con
+    // cambios. Todo esto es UX: el servidor exige ADM en cada envio
+    // (admin_iniciativas_gestion.ashx -> AccesoAdmin.ExigirAdm).
+
+    // Antes de repintar o cambiar de borrador: el control enfocado se
+    // desenfoca mientras su borrador sigue vigente. Si no, el navegador
+    // manda su "change" al quitarlo del DOM y el valor viejo caeria en el
+    // borrador nuevo (Cancelar no limpiaria).
+    soltarFoco() {
+      var activo = this.doc.activeElement, cuerpo = this.$('regDetCuerpo');
+      if (activo && activo.blur && cuerpo && cuerpo.contains && cuerpo.contains(activo)) activo.blur();
+    }
+
+    nuevaEdicion(i) {
+      var op = this.opcionesEstado();
+      return new window.IniciativaAdmin.EdicionAdmin(i,
+        { rutas: op.rutas, rutasEstado: op.rutasEstado, estados: op.estados, subestados: op.subestados,
+          tiposIniciativa: op.tiposIniciativa, tiposAgrupado: op.tiposAgrupado });
+    }
+
+    // Crear > existente: abre el detalle de esa iniciativa con el foco en
+    // el primer campo editable.
     modificar(folio, origen) {
       if (!this.puedeEditar()) return false;
-      this.abrirDetalle(folio, origen);
-      if (this.abierta !== folio) return false;
-      this.abrirEdicion(true);
-      return !!this.edicion;
+      if (!this.abrirDesdeLista(folio, origen) || !this.edicion) return false;
+      var foco = this.$('regEd-titulo');
+      if (foco && foco.focus) foco.focus();
+      return true;
+    }
+
+    // Repinta, desde el borrador actual, solo lo editable del detalle
+    // (Identificacion, compromisos, categorias, descripcion y la barra):
+    // Solicitar cambios, Historial y "Ver por categoria" no se tocan.
+    pintarEditables() {
+      var i = this.registro && this.registro.buscar(this.abierta);
+      if (!i) return;
+      var partes = { regDetIdent: this.htmlIdentificacion(i), regDetEtapas: this.htmlEtapas(i),
+                     regDetCats: this.htmlCategoriasDetalle(i), regDetDesc: this.htmlDescripcion(i),
+                     regEdBarraCaja: this.htmlBarra() };
+      var self = this;
+      Object.keys(partes).forEach(function (id) { var c = self.$(id); if (c) c.innerHTML = partes[id]; });
+      this.volumetriaEdicion();
+    }
+
+    // La volumetria (solo lectura) de cada categoria del borrador y el
+    // estado de la barra.
+    volumetriaEdicion() {
+      var self = this;
+      if (!this.edicion) return;
+      this.edicion.categorias.filas.forEach(function (f) { self.consultarVolumetria(f.categoria); });
+      this.pintarEstadoEdicion();
+    }
+
+    // Marca el control tocado, cuenta los cambios y muestra u oculta la
+    // barra. Sin cambios la barra se va (y su mensaje con ella).
+    pintarEstadoEdicion(t) {
+      var ed = this.edicion, barra = this.$('regEdBarra');
+      if (!ed || !barra) return;
+      var cambios = ed.cambios();
+      var clave = t && t.getAttribute ? t.getAttribute('data-edicion') : null;
+      if (clave && t.classList) t.classList.toggle('ini-ed-cambiado', cambios.some(function (c) { return c.clave === clave; }));
+      barra.hidden = !cambios.length;
+      var sucio = this.$('regEdSucio');
+      if (sucio) sucio.textContent = cambios.length === 1 ? '1 cambio sin guardar' : cambios.length + ' cambios sin guardar';
+      if (!cambios.length) {
+        var msg = this.$('regEdMsg');
+        if (msg) { msg.className = 'ini-cambio-msg'; msg.innerHTML = ''; }
+      }
+      this.pintarVistaEdicion();
     }
 
     pintarVistaEdicion() {
       var caja = this.$('regEdVista');
-      if (caja && this.edicion) caja.innerHTML = window.IniciativaAdmin.htmlVistaPrevia(this.edicion);
+      if (!caja || !this.edicion) return;
+      caja.innerHTML = window.IniciativaAdmin.htmlVistaPrevia(this.edicion) +
+        this.edicion.notasLegado().map(function (n) { return '<p class="ini-nota">' + Escape.html(n) + '</p>'; }).join('');
     }
 
-    // Abrir arranca un borrador nuevo desde la iniciativa abierta; solo ADM.
+    // abrir (accion editar-admin): con ADM el borrador ya existe; solo
+    // lleva el foco al primer campo. Cerrar = Cancelar: vuelve a lo
+    // guardado (un borrador nuevo desde el registro) y repinta solo lo
+    // editable; sin ADM, retira la edicion. Nada se pierde de Solicitar
+    // cambios ni del Historial.
     abrirEdicion(abrir) {
       var i = this.registro && this.registro.buscar(this.abierta);
-      var caja = this.$('regEdicion');
-      if (!i || !caja) return;
-      abrir = !!abrir && this.puedeEditar();
-      var op = this.opcionesEstado();
-      this.edicion = abrir ? new window.IniciativaAdmin.EdicionAdmin(i,
-        { rutas: op.rutas, rutasEstado: op.rutasEstado, estados: op.estados, subestados: op.subestados,
-          tiposIniciativa: op.tiposIniciativa, tiposAgrupado: op.tiposAgrupado }) : null;
-      caja.innerHTML = abrir ? window.IniciativaAdmin.htmlEdicion(this.edicion,
-        { tipo: this.registro.nombreTipo(i.prefijo), volumetria: this.clienteVolumetria(),
-          persiste: this.registro.persistenciaAdmin === true }) : '';
-      caja.hidden = !abrir;
-      if (abrir) {
-        this.pintarVistaEdicion();
-        var self = this;
-        this.edicion.categorias.filas.forEach(function (f) { self.consultarVolumetria(f.categoria); });
-      }
-      var boton = this.$('regEditarBoton');
-      if (boton) boton.setAttribute('aria-expanded', abrir ? 'true' : 'false');
-      var foco = abrir ? this.$('regEd-titulo') : boton;
+      if (!i || this.edicionEnviando) return;
+      if (abrir && !this.puedeEditar()) return;
+      if (!abrir) this.soltarFoco();
+      var habia = !!this.edicion;
+      this.edicion = this.puedeEditar() ? (abrir && this.edicion ? this.edicion : this.nuevaEdicion(i)) : null;
+      if (!abrir || !habia) this.pintarEditables();
+      var foco = abrir && this.edicion ? this.$('regEd-titulo') : null;
       if (foco && foco.focus) foco.focus();
     }
 
+    // Revision local (sin servidor): errores de formato y cambios.
     revisarEdicion() {
       if (!this.edicion) return null;
       var r = this.edicion.revisar();
       var msg = this.$('regEdMsg');
-      msg.className = 'ini-cambio-msg ' + (r.listo ? 'listo' : 'error');
-      msg.innerHTML = window.IniciativaAdmin.htmlRevision(r, r.listo ? 'Cambios revisados, no guardados.' : 'Corrige los cambios:');
+      msg.className = 'ini-cambio-msg ' + (r.listo ? '' : 'error');
+      msg.innerHTML = r.listo ? '' : '<strong class="ini-prototipo-marca">Corrige antes de guardar (no se envió nada):</strong><ul>' +
+        r.formato.map(function (e) { return '<li>' + Escape.html(e.mensaje) + '</li>'; }).join('') + '</ul>';
       return r;
     }
 
-    // "Guardar" (o "Validar en el servidor (no guarda)" sin persistencia;
-    // data-accion edicion-guardar): admin_iniciativas_gestion.ashx. La
-    // respuesta real se pinta tal cual; solo 'guardada' es exito. Sin
-    // cambios o con errores de formato locales no se envia. Un envio a la
-    // vez: el boton queda deshabilitado hasta la respuesta.
+    // Deshabilita lo editable y los botones de la barra mientras se envia.
+    bloquearEdicion(si) {
+      var cuerpo = this.$('regDetCuerpo');
+      if (cuerpo && cuerpo.classList) cuerpo.classList.toggle('ini-ed-enviando', si);
+      var controles = cuerpo && cuerpo.querySelectorAll
+        ? cuerpo.querySelectorAll('[data-edicion], [data-edicion-pct], [data-edicion-tipo], [data-edicion-fcat], ' +
+            '[data-edicion-cat], #regEdCatBuscar, [data-accion="edicion-cat-agregar"]') : [];
+      Array.prototype.forEach.call(controles, function (el) { el.disabled = si; });
+      var self = this;
+      ['regEdGuardar', 'regEdCancelar'].forEach(function (id) { var b = self.$(id); if (b) b.disabled = si; });
+    }
+
+    // "Guardar cambios" (o "Validar en el servidor (no guarda)" sin
+    // persistencia; data-accion edicion-guardar): el mismo POST
+    // accion=modificar de admin_iniciativas_gestion.ashx, con SOLO lo que
+    // cambio (EdicionAdmin.paraEnviar). Solo 'guardada' (200 que la base
+    // confirmo) es exito; cualquier otra respuesta deja lo escrito tal cual
+    // para corregir o reintentar. Sin cambios o con errores de formato
+    // locales no se envia. Un envio a la vez.
     guardarEdicion(pedir, pedirRegistro) {
       var ed = this.edicion;
       if (!ed || !this.puedeEditar() || this.edicionEnviando) return Promise.resolve(null);
       var local = this.revisarEdicion();
       if (!local.listo || !local.cambios.length) {
-        if (local.listo) this.$('regEdMsg').innerHTML = '<strong class="ini-prototipo-marca">Sin cambios: no hay nada que validar.</strong>';
+        if (local.listo) this.$('regEdMsg').innerHTML = '<strong class="ini-prototipo-marca">Sin cambios: no hay nada que guardar.</strong>';
         return Promise.resolve(null);
       }
       var self = this, A = window.IniciativaAdmin, folio = this.abierta;
-      var boton = this.$('regEdGuardar');
       var pares = ed.paraEnviar();
       this.edicionEnviando = true;
-      if (boton) boton.disabled = true;
+      this.bloquearEdicion(true);
       this.$('regEdMsg').className = 'ini-cambio-msg';
       this.$('regEdMsg').innerHTML = '<span>' + (this.registro.persistenciaAdmin === true ? 'Guardando…' : 'Validando en el servidor…') + '</span>';
       return A.enviarGestion(pares, pedir || function (url, op) { return fetch(url, op); }).then(function (r) {
         self.edicionEnviando = false;
-        if (boton) boton.disabled = false;
         // GUARDADA: lo que se ve sale del registro releido (lista,
         // categorias, capacidad e historial), sin recargar la pagina y sin
         // tocar filtros, busqueda, orden, "mostrar mas" ni la vista.
         if (r.estado === 'guardada') return self.recargarTrasGuardar(folio, r, pedirRegistro, ed).then(function () { return r; });
-        // Cualquier otra respuesta: la edicion sigue abierta con lo escrito
-        // (no se repinta) y se puede reintentar. El detalle pudo cerrarse o
-        // cambiar mientras tanto.
+        // Cualquier otra respuesta: lo escrito se queda (no se repinta) y se
+        // puede reintentar. El detalle pudo cerrarse o cambiar mientras tanto.
         if (self.edicion !== ed || self.abierta !== folio) return r;
+        self.bloquearEdicion(false);
         var caja = self.$('regEdMsg');
         caja.className = 'ini-cambio-msg ' + (r.estado === 'no_habilitada' || r.estado === 'no_confirmada' ? 'aviso' : 'error');
         caja.innerHTML = A.htmlRespuesta(r);
         return r;
       }, function (err) {
         self.edicionEnviando = false;
-        if (boton) boton.disabled = false;
+        if (self.edicion === ed) self.bloquearEdicion(false);
         throw err;
       });
     }
@@ -2374,13 +2514,13 @@ window.RegistroIniciativas = (function () {
       aviso.innerHTML = html;
     }
 
-    // Botones de la cabecera del detalle. Modificar solo con rol ADM.
+    // Botones de la cabecera del detalle. Con ADM no hay boton de editar:
+    // los campos editables ya lo son en su lugar (solo una pista).
     htmlAcciones() {
       return '<button type="button" class="btn linea chico" id="regCambioBoton" data-accion="solicitar-cambios"' +
           ' aria-expanded="false" aria-controls="regCambio">Solicitar cambios</button>' +
         (this.puedeEditar()
-          ? ' <button type="button" class="btn linea chico" id="regEditarBoton" data-accion="editar-admin"' +
-            ' aria-expanded="false" aria-controls="regEdicion">Modificar</button>'
+          ? ' <span class="ini-ed-pista">Edición directa (ADM): cambia los campos con borde y usa «Guardar cambios».</span>'
           : '');
     }
 
@@ -2587,17 +2727,108 @@ window.RegistroIniciativas = (function () {
       if (raiz && raiz.classList) raiz.classList.toggle('ini-detalle-abierto', abierto);
     }
 
-    htmlDetalle(i) {
-      function dato(rotulo, valor, html) {
-        return '<div class="ini-dato"><dt>' + Escape.html(rotulo) + '</dt><dd>' +
-          (html ? valor : Escape.html(texto(valor))) + '</dd></div>';
+    // ---- Partes del detalle que la edicion directa repinta en su lugar ----
+    // Cada una va en su contenedor (regDetIdent, regDetEtapas, regDetCats,
+    // regDetDesc, regEdBarraCaja). Sin borrador (MOD o sin rol), solo
+    // lectura, como siempre.
+
+    // Identificacion. Con ADM: Titulo (el del Problem), Estado y Subestado
+    // editables; Codigo, Agrupacion y Antiguedad, solo lectura.
+    htmlIdentificacion(i) {
+      var ed = this.edicion, A = window.IniciativaAdmin;
+      var edad = diasDesdeCreacion(i);
+      var antig = datoDetalle('Antigüedad', edad === null ? '—' : Duracion.dias(edad));
+      if (!ed) {
+        return '<dl class="ini-datos">' +
+          datoDetalle('Código', i.folio) +
+          datoDetalle('Agrupación', i.agrup) +
+          datoDetalle('Estado', i.estado) +
+          antig +
+          (i.titulo_problem && i.titulo_problem !== i.titulo ? datoDetalle('Título del problema', i.titulo_problem) : '') +
+          '</dl>';
       }
+      return '<dl class="ini-datos">' +
+        datoDetalle(i.titulo_problem !== undefined && i.titulo_problem !== i.titulo ? 'Título del problema' : 'Título',
+          A.htmlControlEdicion(ed, 'titulo'), true) +
+        datoDetalle('Código', i.folio) +
+        datoDetalle('Agrupación', i.agrup) +
+        datoDetalle('Estado', A.htmlControlEdicion(ed, 'estado'), true) +
+        datoDetalle('Subestado', A.htmlControlEdicion(ed, 'subestado'), true) +
+        antig +
+        '</dl>';
+    }
+
+    // Compromisos (Analisis, Solucion, Cierre). Con ADM, la fecha de cada
+    // uno es un input date (aaaa-mm-dd, la misma semantica del servidor).
+    htmlEtapas(i) {
+      var ed = this.edicion, A = window.IniciativaAdmin;
+      var actual = FECHA_DEL_ESTADO[i.estado];
+      function etapa(nombre, campo, cambios) {
+        var vencida = i.fecha_retrasada && actual === campo;
+        var valor = ed ? A.htmlControlEdicion(ed, campo)
+          : vencida ? '<b class="ini-vencida">' + Escape.html(fecha(i[campo])) + '</b>' : Escape.html(fecha(i[campo]));
+        return '<tr' + (actual === campo ? ' class="ini-etapa-actual"' : '') + '><th scope="row">' + Escape.html(nombre) +
+          (actual === campo ? ' <span class="ini-sub">estado actual</span>' : '') + '</th>' +
+          '<td class="fecha-cell' + (ed && vencida ? ' ini-vencida-celda' : '') + '">' + valor + '</td>' +
+          '<td class="num">' + fmt(cambios) + '</td></tr>';
+      }
+      return '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Fecha</th><th scope="col">Compromiso</th>' +
+          '<th scope="col" class="num">Cambios</th></tr></thead><tbody>' +
+          etapa('Análisis', 'f_analisis', i.n_analisis) +
+          etapa('Solución', 'f_solucion', i.n_solucion) +
+          etapa('Cierre', 'f_cierre', i.n_cierre) +
+        '</tbody></table></div>';
+    }
+
+    // Categorias afectadas. Con ADM: la tabla de edicion (% por categoria,
+    // agrupacion sin declarar, fecha propia, quitar / restaurar, agregar del
+    // catalogo vigente: las reglas de siempre) y, plegado, el desglose
+    // guardado con tickets y dueños.
+    htmlCategoriasDetalle(i) {
+      var varios = this.duenosVarian(i);
+      var tabla = i.categorias.length
+        ? '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Categoría</th><th scope="col" class="num">% disminución</th>' +
+            '<th scope="col" class="num">Tickets a reducir</th>' + (varios ? '<th scope="col">Product Owner</th><th scope="col">Service Owner</th>' : '') +
+          '</tr></thead><tbody>' +
+          i.categorias.map(function (c) {
+            return '<tr><td class="ini-cat-ruta">' + Escape.html(texto(c.categoria)) + '</td>' +
+              '<td class="num">' + pct(c.pct_dism) + '</td><td class="num">' + fmt(c.tickets_reduce) + '</td>' +
+              (varios ? '<td>' + Escape.html(texto(c.po)) + '</td><td>' + Escape.html(texto(c.so)) + '</td>' : '') + '</tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<p class="ini-nota">Esta iniciativa no tiene categorías asignadas.</p>';
+      if (!this.edicion) return tabla;
+      return '<div id="regEdCats">' + window.IniciativaAdmin.htmlCategoriasEdicion(this.edicion, this.clienteVolumetria()) + '</div>' +
+        (i.categorias.length ? '<details class="ini-ed-desglose"><summary>Desglose guardado: tickets a reducir y dueños</summary>' + tabla + '</details>' : '');
+    }
+
+    // Descripcion y Observaciones; con ADM, cada una en un textarea.
+    htmlDescripcion(i) {
+      var ed = this.edicion, A = window.IniciativaAdmin;
+      function textoLargo(clave) {
+        if (ed) return A.htmlControlEdicion(ed, clave);
+        var v = i[clave];
+        return v ? '<div class="ini-texto">' + Escape.html(v) + '</div>' : '<p class="ini-nota">Sin captura.</p>';
+      }
+      return textoLargo('descripcion') + '<h5>Observaciones</h5>' + textoLargo('observaciones');
+    }
+
+    // Barra "Cambios sin guardar" (solo con borrador de ADM).
+    htmlBarra() {
+      return this.edicion ? window.IniciativaAdmin.htmlBarraEdicion(this.registro && this.registro.persistenciaAdmin) : '';
+    }
+
+    duenosVarian(i) {
+      return !i.sin_categoria && (duenos(i, 'po').length > 1 || duenos(i, 'so').length > 1 || duenos(i, 'director').length > 1);
+    }
+
+    htmlDetalle(i) {
       function seccion(titulo, cuerpo, clase) {
         return '<section class="ini-det-sec' + (clase ? ' ' + clase : '') + '"><h4>' + Escape.html(titulo) + '</h4>' + cuerpo + '</section>';
       }
       function lista(valores) {
         return valores.length ? valores.map(function (v) { return Escape.html(v); }).join('<br>') : '—';
       }
+      function caja(id, html) { return '<div id="' + id + '">' + html + '</div>'; }
 
       var cab = '<div class="ini-det-cab">' +
         '<p class="ini-det-nombre">' + Escape.html(texto(i.titulo)) + '</p>' +
@@ -2609,24 +2840,14 @@ window.RegistroIniciativas = (function () {
         '<div class="ini-det-acciones" id="regDetAcciones">' + this.htmlAcciones() + '</div>' +
         '</div>' +
         '<div class="ini-cambio-msg listo" id="regDetAviso" role="status" aria-live="polite" hidden></div>' +
-        '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>' +
-        '<section class="ini-det-sec ini-cambio ini-edicion" id="regEdicion" hidden></section>';
+        '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>';
 
-      var edad = diasDesdeCreacion(i);
-      var ident = '<dl class="ini-datos">' +
-        dato('Código', i.folio) +
-        dato('Agrupación', i.agrup) +
-        dato('Estado', i.estado) +
-        dato('Antigüedad', edad === null ? '—' : Duracion.dias(edad)) +
-        (i.titulo_problem && i.titulo_problem !== i.titulo ? dato('Título del problema', i.titulo_problem) : '') +
-        '</dl>';
-
-      var varios = !i.sin_categoria && (duenos(i, 'po').length > 1 || duenos(i, 'so').length > 1 || duenos(i, 'director').length > 1);
+      var varios = this.duenosVarian(i);
       var org = '<dl class="ini-datos">' +
-        dato('Director', lista(duenos(i, 'director')), true) +
-        dato('Product Owner', lista(duenos(i, 'po')), true) +
-        dato('Service Owner', lista(duenos(i, 'so')), true) +
-        dato('Manager', i.manager) +
+        datoDetalle('Director', lista(duenos(i, 'director')), true) +
+        datoDetalle('Product Owner', lista(duenos(i, 'po')), true) +
+        datoDetalle('Service Owner', lista(duenos(i, 'so')), true) +
+        datoDetalle('Manager', i.manager) +
         '</dl>' +
         (i.sin_categoria ? '<p class="ini-nota">Sin categoría: los dueños son los capturados en el Problem.</p>'
           : '<p class="ini-nota">Dueños de sus categorías' + (varios ? '; varían por categoría (ver abajo).' : '.') +
@@ -2636,37 +2857,17 @@ window.RegistroIniciativas = (function () {
       // reemplazan a los de sus categorias. Sin categoria ya son los de arriba.
       if (!i.sin_categoria && (i.po_capturado || i.so_capturado)) {
         org += '<dl class="ini-datos">' +
-          dato('Product Owner capturado', i.po_capturado) +
-          dato('Service Owner capturado', i.so_capturado) +
+          datoDetalle('Product Owner capturado', i.po_capturado) +
+          datoDetalle('Service Owner capturado', i.so_capturado) +
           '</dl><p class="ini-nota">Capturados al crear la iniciativa; los filtros usan los de sus categorías.</p>';
       }
 
       var impacto = '<dl class="ini-datos ini-datos-num">' +
-        dato('Tickets a reducir', fmt(i.tickets_reduce)) +
-        dato('Tickets en riesgo', fmt(i.riesgo_folio)) +
+        datoDetalle('Tickets a reducir', fmt(i.tickets_reduce)) +
+        datoDetalle('Tickets en riesgo', fmt(i.riesgo_folio)) +
         '</dl>' +
         '<p class="ini-nota">Tickets a reducir: suma de sus categorías. En riesgo: los mismos tickets si va atrasada.</p>';
 
-      var cats = i.categorias.length
-        ? '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Categoría</th><th scope="col" class="num">% disminución</th>' +
-            '<th scope="col" class="num">Tickets a reducir</th>' + (varios ? '<th scope="col">Product Owner</th><th scope="col">Service Owner</th>' : '') +
-          '</tr></thead><tbody>' +
-          i.categorias.map(function (c) {
-            return '<tr><td class="ini-cat-ruta">' + Escape.html(texto(c.categoria)) + '</td>' +
-              '<td class="num">' + pct(c.pct_dism) + '</td><td class="num">' + fmt(c.tickets_reduce) + '</td>' +
-              (varios ? '<td>' + Escape.html(texto(c.po)) + '</td><td>' + Escape.html(texto(c.so)) + '</td>' : '') + '</tr>';
-          }).join('') + '</tbody></table></div>'
-        : '<p class="ini-nota">Esta iniciativa no tiene categorías asignadas.</p>';
-
-      var actual = FECHA_DEL_ESTADO[i.estado];
-      function etapa(nombre, campo, cambios) {
-        var vencida = i.fecha_retrasada && actual === campo;
-        var valor = i[campo] ? fecha(i[campo]) : '—';
-        return '<tr' + (actual === campo ? ' class="ini-etapa-actual"' : '') + '><th scope="row">' + Escape.html(nombre) +
-          (actual === campo ? ' <span class="ini-sub">estado actual</span>' : '') + '</th>' +
-          '<td class="fecha-cell">' + (vencida ? '<b class="ini-vencida">' + Escape.html(valor) + '</b>' : Escape.html(valor)) + '</td>' +
-          '<td class="num">' + fmt(cambios) + '</td></tr>';
-      }
       var semTexto = { verde: 'Sin compromiso vigente', ambar: 'En tiempo o sin fecha', rojo: 'Atrasada' }[i.sem_fecha] || '—';
       // Fecha de creacion: dbo.Problem.FechaCreacion (f_creacion). Sin el
       // dato (servidor anterior) se ve "—", nunca una fecha calculada.
@@ -2679,32 +2880,22 @@ window.RegistroIniciativas = (function () {
         : '<p class="ini-nota">Sin categorías: las fechas son las del problema.</p>';
       var seguimiento =
         '<p class="ini-det-sem">' + this.htmlPunto(i) + Escape.html(semTexto) + '</p>' +
-        '<dl class="ini-datos">' + dato('Fecha de creación', fecha(i.f_creacion)) + '</dl>' +
-        '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Fecha</th><th scope="col">Compromiso</th>' +
-          '<th scope="col" class="num">Cambios</th></tr></thead><tbody>' +
-          etapa('Análisis', 'f_analisis', i.n_analisis) +
-          etapa('Solución', 'f_solucion', i.n_solucion) +
-          etapa('Cierre', 'f_cierre', i.n_cierre) +
-        '</tbody></table></div>' + segCat;
-
-      function textoLargo(v) {
-        return v ? '<div class="ini-texto">' + Escape.html(v) + '</div>' : '<p class="ini-nota">Sin captura.</p>';
-      }
-      var desc = textoLargo(i.descripcion) +
-        '<h5>Observaciones</h5>' + textoLargo(i.observaciones);
+        '<dl class="ini-datos">' + datoDetalle('Fecha de creación', fecha(i.f_creacion)) + '</dl>' +
+        caja('regDetEtapas', this.htmlEtapas(i)) + segCat;
 
       // Pilas independientes: Identificacion e Impacto (cortas) comparten
       // columna para no dejar huecos bajo ellas junto a Seguimiento.
       function pila(html) { return '<div class="ini-det-pila">' + html + '</div>'; }
       return cab +
         '<div class="ini-det-rejilla">' +
-          pila(seccion('Identificación', ident) + seccion('Impacto', impacto)) +
+          pila(seccion('Identificación', caja('regDetIdent', this.htmlIdentificacion(i))) + seccion('Impacto', impacto)) +
           pila(seccion('Organización', org)) +
           pila(seccion('Seguimiento', seguimiento)) +
-          pila(seccion('Descripción', desc)) +
+          pila(seccion('Descripción', caja('regDetDesc', this.htmlDescripcion(i)))) +
         '</div>' +
-        seccion('Categorías afectadas', cats, 'ini-det-ancha') +
-        this.htmlHistorial(i);
+        seccion('Categorías afectadas', caja('regDetCats', this.htmlCategoriasDetalle(i)), 'ini-det-ancha') +
+        this.htmlHistorial(i) +
+        caja('regEdBarraCaja', this.htmlBarra());
     }
   }
 

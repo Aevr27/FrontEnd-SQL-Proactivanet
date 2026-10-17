@@ -42,7 +42,9 @@
 //   AccesoAdminHttpSmoke.exe
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.IO;
+using System.Reflection;
 using System.Security.Principal;
 using System.Web;
 
@@ -87,6 +89,26 @@ public static class AccesoAdminHttpSmoke
             ctx.User = new GenericPrincipal(new GenericIdentity(cuenta, cuenta.Length == 0 ? "" : "Negotiate"), new string[0]);
         HttpContext.Current = ctx;
         return ctx;
+    }
+
+    // POST multipart como el del navegador (sin IIS): el metodo y el Form se
+    // fijan por reflexion. Solo para caminos que deben cortar ANTES de leer
+    // el formulario (403): nunca llegan a la base.
+    static string CorrerPost(IHttpHandler h, string archivo, string cuenta, string[][] campos, out int estado, out string metodo)
+    {
+        var sw = new StringWriter();
+        var ctx = Contexto(archivo, null, cuenta, sw);
+        var req = ctx.Request;
+        typeof(HttpRequest).GetField("_httpMethod", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, "POST");
+        var tipoForm = typeof(HttpRequest).Assembly.GetType("System.Web.HttpValueCollection");
+        var form = (NameValueCollection)Activator.CreateInstance(tipoForm, true);
+        foreach (var c in campos) form.Add(c[0], c[1]);
+        typeof(HttpRequest).GetField("_form", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, form);
+        metodo = req.HttpMethod;
+        h.ProcessRequest(ctx);
+        estado = ctx.Response.StatusCode;
+        HttpContext.Current = null;
+        return sw.ToString();
     }
 
     static string Correr(IHttpHandler h, string archivo, string query, string cuenta, out int estado)
@@ -190,6 +212,37 @@ public static class AccesoAdminHttpSmoke
             cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
             Check("R1 " + c.nombre + ": admin_sesion entra como MOD", "{\"autorizado\":true,\"rol\":\"MOD\"}", cuerpo);
         }
+
+        // ---- X) Edicion directa (accion=modificar por POST) sin ADM ----------
+        // El detalle de Iniciativas manda el mismo POST que el antiguo
+        // "Modificar". Sin rol ADM en dbo.UsuariosAdmin el handler corta con
+        // 403 antes de leer el formulario; un "rol" que mande el navegador
+        // (campo o lo que sea) no cuenta.
+        var postModificar = new[]
+        {
+            new[] { "accion", "modificar" }, new[] { "folio", "PRB 2026-000001" }, new[] { "titulo", "Cambiado" },
+            new[] { "f_cierre", "2027-01-31" }, new[] { "rol", "ADM" }, new[] { "Acceso", "ADM" },
+        };
+        var casosPost = new[]
+        {
+            new { nombre = "MOD", cuenta = YO, f = new FuenteFalsa().Con(YO, "MOD"), tipo = "RolInsuficiente" },
+            new { nombre = "ADM + MOD", cuenta = YO, f = new FuenteFalsa().Con(YO, "ADM", "MOD"), tipo = "RolInsuficiente" },
+            new { nombre = "VIEWER (sin fila)", cuenta = YO, f = new FuenteFalsa(), tipo = "AccesoDenegado" },
+            new { nombre = "consulta de rol que falla", cuenta = YO, f = new FuenteFalsa { Falla = true }, tipo = "AccesoDenegado" },
+            new { nombre = "otra cuenta (sin fila)", cuenta = @"SORIANA\t_otro", f = new FuenteFalsa().Con(YO, "ADM"), tipo = "AccesoDenegado" },
+            new { nombre = "anonimo", cuenta = "", f = new FuenteFalsa().Con(YO, "ADM"), tipo = "AccesoDenegado" },
+        };
+        foreach (var c in casosPost)
+        {
+            AccesoAdmin.FuenteRoles = c.f;
+            string metodo;
+            cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", c.cuenta, postModificar, out estado, out metodo);
+            Check("X1 " + c.nombre + ": POST accion=modificar (con rol=ADM en el formulario) 403 " + c.tipo + ", sin validar ni guardar",
+                  "POST|403|True|False|False",
+                  metodo + "|" + estado + "|" + cuerpo.Contains("\"tipo\":\"" + c.tipo + "\"") + "|" +
+                  cuerpo.Contains("\"valida\"") + "|" + cuerpo.Contains("\"guardada\""));
+        }
+        AccesoAdmin.FuenteRoles = fuente;
 
         // ---- V) VIEWER: en la whitelist pero sin rol valido ------------------
         var casosViewer = new[]

@@ -1071,7 +1071,7 @@ pruebas.push(function () {
   Check('H5 sin filtro de Agrupacion', [false, false], [/id="regTipo"/.test(html), /<label[^>]*>Agrupación<\/label>/.test(html)]);
   Check('H5 Tipo de iniciativa sigue como multiselect', true,
     /<label for="regTipoIni">Tipo de iniciativa<\/label>\s*<button type="button" class="ini-multi-boton" id="regTipoIni"/.test(html));
-  Check('H7 el detalle sigue rotulado Solo lectura', true, /<span class="ini-hint">Solo lectura<\/span>/.test(html));
+  Check('H7 el detalle sigue rotulado Solo lectura', true, /<span class="ini-hint" id="regDetModo">Solo lectura<\/span>/.test(html));
 
   // Sin desbordar a lo ancho: el panel cuelga del ancho de su campo, el
   // boton mide lo que su columna y los textos largos se parten.

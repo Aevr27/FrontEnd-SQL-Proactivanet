@@ -679,7 +679,7 @@ window.Iniciativas = (function () {
       this.denegada = true;
       this.rol = null;
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
-      if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle();
+      if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle(true);
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = true; });
       this.$('iniTabs').hidden = true;
       this.$('iniDenegado').hidden = false;
@@ -763,6 +763,10 @@ window.Iniciativas = (function () {
       // El alta necesita su modulo (admin/iniciativa-admin.js); Administracion no.
       if (nombre === 'crear' && !this.crearAdmin) return;
       if (VISTAS_ADM_MOD[nombre] && this.rol !== 'ADM' && this.rol !== 'MOD') return;
+      // Salir del registro con cambios sin guardar en el detalle: se
+      // pregunta; si no se descartan, la pestana no cambia.
+      if (nombre !== 'iniciativas' && this.registro && this.registro.cerrarDetalle &&
+          this.registro.cerrarDetalle() === false) return;
       this.vista = nombre;
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = k !== nombre; });
       PESTANAS.forEach(function (p) {

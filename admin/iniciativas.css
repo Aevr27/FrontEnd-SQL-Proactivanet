@@ -717,9 +717,50 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-incompleta-nota { color: var(--muted); }
 .ini-ed-pct { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 4px; }
 .ini-ed-pct input { width: 90px; }
+.ini-ed-pct input[type="date"] { width: auto; }
 .ini-ed-pct .ini-cat-ruta { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ini-ed-otros { margin-top: 10px; font-size: 12px; color: var(--muted); }
 .ini-ed-otros ul { margin: 6px 0 0 18px; padding: 0; }
+
+/* Edicion directa de ADM en el detalle: los controles van en su tarjeta,
+   con el aspecto de los de "Solicitar cambios". Un campo distinto de lo
+   guardado se marca; la barra "Cambios sin guardar" se pega al pie del
+   cuerpo del detalle (que es el que hace scroll). */
+.ini-detalle .ini-ed-campo,
+#regEdCats input, #regEdCats select {
+  max-width: 100%; padding: 5px 8px; font: inherit; font-size: 12.5px; color: var(--ink);
+  border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs); background: var(--ctrl-bg);
+}
+.ini-detalle .ini-ed-campo { width: 100%; }
+.ini-detalle .ini-ed-campo[type="date"] { width: auto; min-width: 0; }
+.ini-detalle textarea.ini-ed-campo { min-height: 96px; resize: vertical; line-height: 1.5; }
+.ini-detalle .ini-ed-campo:focus-visible,
+#regEdCats input:focus-visible, #regEdCats select:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.ini-detalle .ini-ed-cambiado { border-color: var(--accent); background: var(--accent-soft); }
+.ini-vencida-celda .ini-ed-campo { border-color: var(--rojo); color: var(--rojo); font-weight: 700; }
+.ini-ed-enviando .ini-ed-campo, .ini-ed-enviando #regEdCats { opacity: .6; }
+.ini-ed-pista { font-size: 11.5px; color: var(--muted); align-self: center; }
+.ini-ed-desglose { margin-top: 10px; font-size: 12px; }
+.ini-ed-desglose summary, .ini-ed-detalle summary { cursor: pointer; color: var(--accent-ink); font-weight: 700; }
+/* Pegada el contenedor (hijo directo del cuerpo), no la barra: dentro de su
+   caja la barra no tendria por donde desplazarse. */
+#regEdBarraCaja { position: sticky; bottom: 0; z-index: 2; }
+.ini-ed-barra {
+  margin-top: 12px; padding: 10px 14px;
+  background: var(--card); border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+}
+.ini-ed-barra[hidden] { display: none; }
+.ini-ed-barra-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.ini-ed-sucio { font-size: 13px; color: var(--ink); }
+.ini-ed-sucio::before {
+  content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 8px;
+  border-radius: 50%; background: var(--ambr); vertical-align: middle;
+}
+.ini-ed-barra-botones { margin-left: auto; display: flex; gap: 8px; }
+.ini-ed-barra .ini-prototipo-aviso { margin: 8px 0 0; }
+.ini-ed-detalle { margin-top: 8px; font-size: 12px; }
+.ini-ed-detalle .ini-ed-vista { max-height: 30vh; overflow-y: auto; margin-top: 6px; }
 
 /* ---- Administracion (solo ADM) ---- */
 .ini-adm-secciones {
