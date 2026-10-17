@@ -668,6 +668,9 @@ html.ini-detalle-abierto { overflow: hidden; }
 @media (max-width: 720px) {
   .ini-detalle { border-left: 0; }
   .ini-det-rejilla { grid-template-columns: minmax(0, 1fr); }
+  .ini-det-rejilla > .ini-det-sec,
+  .ini-det-rejilla > .ini-det-sec:nth-child(n) { grid-column: 1; grid-row: auto; }
+  .ini-det-dato { grid-template-columns: 110px minmax(0, 1fr); }
   .ini-dato { grid-template-columns: 110px minmax(0, 1fr); }
 }
 
