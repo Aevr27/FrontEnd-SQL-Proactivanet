@@ -16,6 +16,12 @@
      7. Quien tiene SELECT sobre el esquema orq (la cuenta del Web.config debe
         aparecer, directa o por rol).
      8. Con el 77 puesto: las cifras de la cabecera sin filtros.
+     9. Quien ya lee orq por un rol de base (db_datareader/db_owner): esa cuenta
+        no necesita GRANT.
+    10. Que cuentas estan conectadas a esta base y desde que programa (para
+        identificar la del sitio; sin VIEW SERVER STATE solo sale la propia).
+    11. Las llaves UNIQUE de JobName y si las definiciones instaladas son las
+        del 76 entregado el 2026-10-19 (huella esperada en el comentario).
    ===================================================================================== */
 USE [Tickets_Proactivanet];
 SET NOCOUNT ON;
@@ -24,7 +30,13 @@ SET NOCOUNT ON;
 SELECT Base = DB_NAME(), Usuario = SUSER_SNAME(), UsuarioBase = USER_NAME(),
        Version = CAST(SERVERPROPERTY('ProductVersion') AS NVARCHAR(30)),
        Compatibilidad = (SELECT compatibility_level FROM sys.databases WHERE name = DB_NAME()),
-       PuedoLeerOrq = HAS_PERMS_BY_NAME(N'orq', N'SCHEMA', N'SELECT');
+       PuedoLeerOrq = HAS_PERMS_BY_NAME(N'orq', N'SCHEMA', N'SELECT'),
+       -- Sin estos dos, las secciones 1, 2, 7, 9, 10 y 11 salen RECORTADAS sin
+       -- dar error (SQL Server oculta lo que no se puede ver): con un 0 aqui,
+       -- un vacio o un NULL abajo no prueba nada. Correrlo con una cuenta que
+       -- tenga los dos (o pedirlo al DBA).
+       VerDefiniciones = HAS_PERMS_BY_NAME(NULL, N'DATABASE', N'VIEW DEFINITION'),
+       VerSesiones = HAS_PERMS_BY_NAME(NULL, NULL, N'VIEW SERVER STATE');
 
 /* 1. Objetos */
 SELECT Objeto = o.n, Existe = CASE WHEN OBJECT_ID(o.n) IS NULL THEN 0 ELSE 1 END,
@@ -101,7 +113,8 @@ IF OBJECT_ID(N'orq.ValorRelleno') IS NOT NULL
             FROM orq.ValorRelleno GROUP BY Valor COLLATE Latin1_General_CI_AI HAVING COUNT(*) > 1;');
 
 /* 6. JobName repetido entre vigentes: un decomiso con ese nombre saldria dos
-      veces en orq.vw_TableroDecomiso. Vacio = no pasa. */
+      veces en orq.vw_TableroDecomiso. Con UQ_orq_Job y UQ_orq_Decomiso del 76
+      (seccion 11) no puede pasar; si sale algo, la base no tiene esas llaves. */
 IF OBJECT_ID(N'orq.vw_Job') IS NOT NULL
     EXEC (N'SELECT JobName, Vigentes = COUNT(*) FROM orq.vw_Job WHERE VigenteEnOrigen = 1
             GROUP BY JobName HAVING COUNT(*) > 1 ORDER BY COUNT(*) DESC;');
@@ -133,3 +146,56 @@ BEGIN
     EXEC (N'SELECT Decomisos = COUNT(*), Exitosos = SUM(Exitoso), SinJob = SUM(CASE WHEN JobId IS NULL THEN 1 ELSE 0 END)
             FROM orq.vw_TableroDecomiso;');
 END;
+
+/* 9. Miembros de los roles que ya leen todo (no hace falta GRANT para ellos).
+      Sin VIEW DEFINITION la lista puede salir recortada sin error. */
+SELECT Rol = r.name, Miembro = m.name, TipoMiembro = m.type_desc,
+       ListaCompleta = CASE WHEN HAS_PERMS_BY_NAME(NULL, N'DATABASE', N'VIEW DEFINITION') = 1
+                            THEN N'si' ELSE N'NO: puede faltar gente' END
+FROM sys.database_role_members AS rm
+JOIN sys.database_principals AS r ON r.principal_id = rm.role_principal_id
+JOIN sys.database_principals AS m ON m.principal_id = rm.member_principal_id
+WHERE r.name IN (N'db_datareader', N'db_owner')
+ORDER BY r.name, m.name;
+
+/* 10. Quien esta conectado a esta base (la cuenta del sitio suele salir como
+       ".Net SqlClient Data Provider" desde el servidor de IIS). Sin VIEW SERVER
+       STATE SQL Server NO da error: devuelve solo la sesion propia. Por eso
+       cada renglon dice si la lista es completa. */
+BEGIN TRY
+    EXEC (N'SELECT DISTINCT login_name, program_name, host_name,
+                   ListaCompleta = CASE WHEN HAS_PERMS_BY_NAME(NULL, NULL, N''VIEW SERVER STATE'') = 1
+                                        THEN N''si'' ELSE N''NO: solo la sesion propia'' END
+            FROM sys.dm_exec_sessions WHERE database_id = DB_ID() AND is_user_process = 1
+            ORDER BY login_name;');
+END TRY
+BEGIN CATCH
+    SELECT Seccion10 = N'No se pudieron leer las sesiones: ' + ERROR_MESSAGE();
+END CATCH;
+
+/* 11. Llaves UNIQUE de JobName (con ellas un decomiso cruza con un solo job)
+       y huella de las definiciones: SHA-256 del texto sin retornos de carro,
+       primeros 8 bytes. Esperado con el 76 entregado el 2026-10-19 y el 77 de
+       claude-branch:
+         vw_Job E5BE644D843846CF, vw_JobResponsable A0FB285598B1FE2E,
+         usp_CargarOrquestacion 83B73A919221FC39, usp_FotoAvance E22489212BB4D319,
+         vw_TableroJob 9414A33277E555FC (CF399A69093FAAC1 = el 77 del paquete),
+         vw_TableroDecomiso 8A32FCCA5E677F8D, vw_TableroDetalle 822994950143C0DA.
+       Otra huella = otra version instalada: avisar antes de correr nada. */
+SELECT Tabla = OBJECT_SCHEMA_NAME(i.object_id) + N'.' + OBJECT_NAME(i.object_id), Indice = i.name,
+       i.is_unique, Columna = COL_NAME(ic.object_id, ic.column_id),
+       Collation = (SELECT c.collation_name FROM sys.columns AS c
+                    WHERE c.object_id = ic.object_id AND c.column_id = ic.column_id)
+FROM sys.indexes AS i
+JOIN sys.index_columns AS ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+WHERE i.object_id IN (OBJECT_ID(N'orq.Job'), OBJECT_ID(N'orq.Decomiso'), OBJECT_ID(N'orq.ValorRelleno'))
+  AND i.is_unique = 1;
+
+SELECT Objeto = o.name, Tipo = o.type_desc, o.create_date, o.modify_date,
+       -- Sin VIEW DEFINITION la definicion llega NULL y los procedimientos ni
+       -- aparecen: eso NO es otra version, es falta de permiso.
+       Huella = ISNULL(CONVERT(VARCHAR(16), HASHBYTES('SHA2_256', REPLACE(OBJECT_DEFINITION(o.object_id), NCHAR(13), N'')), 2),
+                       'SIN PERMISO')
+FROM sys.objects AS o
+WHERE o.schema_id = SCHEMA_ID(N'orq') AND o.type IN ('V', 'P')
+ORDER BY o.name;
