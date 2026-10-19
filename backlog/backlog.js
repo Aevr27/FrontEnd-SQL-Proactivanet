@@ -133,6 +133,15 @@ function htmlTarjetasKpi(tarjetas) {
     </div>`).join('');
 }
 
+// Dos cifras con su rotulo en el lugar del .val, para una tarjeta que
+// muestra dos metricas sin sumarlas (Dentro / Fuera SLA).
+function htmlParKpi(rotuloA, valorA, rotuloB, valorB) {
+  return `<span class="kpi-par">
+      <span><small>${rotuloA}</small>${FMT(valorA)}</span>
+      <span><small>${rotuloB}</small>${FMT(valorB)}</span>
+    </span>`;
+}
+
 function seleccionados(id) {
   return Array.from(document.getElementById(id).selectedOptions).map(o => o.value);
 }
@@ -404,13 +413,12 @@ const TableroBacklog = (function () {
   // ---------------------------------------------------------------------- KPIs
   function renderKpis() {
     const r = datos.resumen;
-    let total, criticos, altos, mayor30, reasignados, reabiertos, exacto;
+    let total, criticos, mayor30, reasignados, reabiertos, exacto;
 
     if (!hayFiltro()) {
       const k = r.kpis || {};
       total = k.BacklogTotal ?? 0;
       criticos = k.Criticos ?? 0;
-      altos = k.Altos ?? 0;
       mayor30 = k.Mayor30Dias ?? 0;
       reasignados = k.Reasignados ?? 0;
       reabiertos = k.Reabiertos ?? 0;
@@ -421,7 +429,6 @@ const TableroBacklog = (function () {
       const pr = porLiderGrupo(r.prioridad);
       total = pr.reduce((a, x) => a + (x.Total ?? 0), 0);
       criticos = pr.reduce((a, x) => a + (x.Critica ?? 0), 0);
-      altos = pr.reduce((a, x) => a + (x.Alta ?? 0), 0);
       mayor30 = porLiderGrupo(r.aging).filter(x => (x.AgingSort ?? 0) >= SORT_MAS_30)
         .reduce((a, x) => a + (x.Tickets ?? 0), 0);
       reasignados = porLiderGrupo(r.reasignaciones).reduce((a, x) => a + (x.Tickets ?? 0), 0);
@@ -429,13 +436,34 @@ const TableroBacklog = (function () {
       exacto = true;
     }
 
+    /* Dentro / Fuera SLA: el result set 6 del procedimiento (Lider, Grupo,
+       EstadoSLA, Tickets) es un agregado completo por (Lider, Grupo), asi que
+       su suma -sin filtro o por porLiderGrupo- es exacta, igual que la
+       columna "% Fuera SLA" de la tabla por lider. EstadoSLA trae tres
+       valores (vw_Backlog / Backfill): 'Dentro SLA', 'Fuera SLA' y
+       'Dentro SLA(Subestado)'; el tercero no se suma a ninguno de los dos
+       para no borrar la distincion, va contado en el pie. El semaforo usa los
+       cortes del correo de direccion: <=5% verde, <=15% ambar, si no rojo. */
+    const sla = { dentro: 0, fuera: 0, subestado: 0, total: 0 };
+    for (const x of porLiderGrupo(r.sla)) {
+      const n = x.Tickets ?? 0;
+      sla.total += n;
+      if (x.EstadoSLA === 'Dentro SLA') sla.dentro += n;
+      else if (x.EstadoSLA === 'Fuera SLA') sla.fuera += n;
+      else if (x.EstadoSLA === 'Dentro SLA(Subestado)') sla.subestado += n;
+    }
+    const pctFuera = sla.total > 0 ? 100 * sla.fuera / sla.total : null;
+    const semSla = pctFuera === null ? '' : (pctFuera <= 5 ? 'sv' : pctFuera <= 15 ? 'sa' : 'sr');
+    const pieSla = `${PCT(sla.fuera, sla.total)} fuera`
+      + (sla.subestado > 0 ? ` · ${FMT(sla.subestado)} dentro por subestado` : '');
+
     const corte = document.getElementById('f-corte-bl').value;
     const pie = hayFiltro() ? 'sobre lo filtrado' : (corte ? `corte ${corte}` : '');
 
     const tarjetas = [
       { l: 'Backlog', v: FMT(total), f: pie },
       { l: 'Criticos', v: FMT(criticos), f: `${PCT(criticos, total)} del backlog`, s: 'sr' },
-      { l: 'Altos', v: FMT(altos), f: `${PCT(altos, total)} del backlog`, s: 'sa' },
+      { l: 'Dentro / Fuera SLA', v: htmlParKpi('Dentro SLA', sla.dentro, 'Fuera SLA', sla.fuera), f: pieSla, s: semSla },
       { l: '+30 dias', v: FMT(mayor30), f: `${PCT(mayor30, total)} del backlog` },
       { l: 'Reasignados', v: FMT(reasignados), f: 'cambiaron de grupo al menos una vez' },
       { l: 'Reabiertos', v: FMT(reabiertos), f: 'mas de un intento de solucion' },
