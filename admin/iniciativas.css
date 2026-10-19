@@ -670,6 +670,11 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-cambio-campos :focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 .ini-cambio-actual { font-size: 12.5px; color: var(--ink); padding: 6px 0; }
 .ini-cambio-ancho { grid-column: 1 / -1; }
+/* Sin esto el display:flex de .campo le ganaba a [hidden]: los grupos de
+   Fecha, Estado y Categorias se veian todos a la vez, y una "Nueva fecha"
+   escrita con "Estado" elegido se descartaba sin aviso. */
+.ini-cambio-campos .campo[hidden], .ini-cambio-campos [hidden] { display: none; }
+.ini-cambio-sub { display: flex; flex-direction: column; gap: 4px; }
 .ini-cambio-msg { margin-top: 10px; font-size: 12px; }
 .ini-cambio-msg:empty { display: none; }
 .ini-cambio-msg ul { margin: 0; padding-left: 18px; }
