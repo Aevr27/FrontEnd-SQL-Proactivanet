@@ -108,6 +108,16 @@ header.top #estado-carga-bl:empty { display: none; }
 .n1row.dd-flecha .dd-cifra { cursor: pointer; user-select: none; -webkit-user-select: none; }
 .n1row.dd-flecha:has(.dd-cifra:hover) .flecha-dd { color: var(--accent); }
 
+/* ---- Tarjeta KPI con dos cifras (Dentro / Fuera SLA) ----
+   Va dentro del .val de assets/css/kpi.css y hereda su tamaño; cada cifra
+   lleva su propio rotulo chico encima para que no se lean como una suma. */
+.kpi .kpi-par { display: flex; gap: 18px; align-items: flex-end; }
+.kpi .kpi-par > span { display: flex; flex-direction: column; min-width: 0; }
+.kpi .kpi-par small {
+  font-size: 10px; font-weight: 700; letter-spacing: .4px; color: var(--muted);
+  text-transform: uppercase; white-space: nowrap; margin-bottom: 2px;
+}
+
 /* ---- Tickets mas antiguos: una tarjeta por lider ---- */
 .antiguos-lider {
   border: 1px solid var(--line-soft); border-radius: var(--radius);
