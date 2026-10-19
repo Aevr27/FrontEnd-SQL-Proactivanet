@@ -156,12 +156,14 @@
      VistaRegistro    el DOM: carga, estados, KPIs, filtros, tabla, detalle,
                       y la vista Cobertura
 
-   DETALLE: SOLICITAR CAMBIOS E HISTORIAL (SIN PERSISTENCIA TODAVIA)
-   ----------------------------------------------------------------
-     El detalle sigue siendo de solo lectura: nada se edita en el lugar.
-     "Solicitar cambios" abre un borrador (SolicitudCambio) que se valida en
-     el navegador y NO se envia: no existe aun el registro de solicitudes en
-     la base (ni su numero #0000001). Campos que se pueden pedir cambiar
+   DETALLE: SOLICITAR CAMBIOS E HISTORIAL
+   --------------------------------------
+     "Solicitar cambios" abre un borrador (SolicitudCambio, con su llave)
+     que se valida en el navegador. Con persistencia_solicitudes = true del
+     registro (sql/22 aplicada) se ENVIA a admin_iniciativas_solicitudes.ashx
+     (enviarCambio) y solo se dice "enviada" con el numero que da la base;
+     si no, solo se prepara. Enviar nunca cambia la iniciativa: la aplica un
+     ADM desde la cola (admin/solicitudes-cambio.js). Campos que se pueden pedir cambiar
      (CAMPOS_CAMBIO): fechas compromiso, Estado/Subestado (con, opcional,
      UNA fecha compromiso cuya etapa elige quien pide: Analisis, Solucion o
      Cierre; nunca se deduce del Estado), Categorias (el %
@@ -201,6 +203,18 @@ window.RegistroIniciativas = (function () {
   // El catalogo de categorias de Nueva solicitud. Solo se pide al abrir la
   // Cobertura, nunca al cargar la pagina.
   var URL_CATALOGO = '../handlers/admin_iniciativas_catalogos.ashx';
+  // Solicitudes de cambio (sql/22): la accion va en la URL.
+  var URL_SOLICITUDES = '../handlers/admin_iniciativas_solicitudes.ashx';
+
+  // Llave de un borrador de "Solicitar cambios": el reintento del MISMO
+  // borrador no duplica la solicitud en el servidor.
+  function nuevaLlave() {
+    var c = typeof window !== 'undefined' && window.crypto;
+    if (c && typeof c.randomUUID === 'function') return c.randomUUID();
+    var h = '';
+    for (var i = 0; i < 32; i++) h += Math.floor(Math.random() * 16).toString(16);
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-4' + h.slice(13, 16) + '-a' + h.slice(17, 20) + '-' + h.slice(20, 32);
+  }
   var CascadaOrganizacional = window.CascadaOrganizacional;
 
   // Cuantas filas pinta la tabla de una vez; "Mostrar mas" agrega otras
@@ -441,6 +455,8 @@ window.RegistroIniciativas = (function () {
       r.valoresTipoAgrupado = Array.isArray(json.valores_tipo_agrupado) ? json.valores_tipo_agrupado.filter(esTexto) : [];
       // true solo si el servidor guarda (PersistenciaGestionAdmin activa).
       r.persistenciaAdmin = json.persistencia_admin === true;
+      // "Solicitar cambios" se envia (sql/22) solo si el servidor lo dice.
+      r.persistenciaSolicitudes = json.persistencia_solicitudes === true;
       return r;
     }
 
@@ -1005,9 +1021,34 @@ window.RegistroIniciativas = (function () {
       this.pcts = {};        // solo con campo 'pct': ruta ligada -> % pedido (texto)
       this.nuevas = [];      // solo con campo 'pct': [{ categoria, valor }] a agregar
       this.motivo = '';
+      this.llave = nuevaLlave();
+      this.enviada = null;   // numero de la solicitud que dio el servidor
     }
 
     static campos() { return CAMPOS_CAMBIO.slice(); }
+
+    // Lo que va a admin_iniciativas_solicitudes.ashx?accion=enviar (despues
+    // de validar). Quien envia y su rol los pone el servidor: aqui no van.
+    // La fecha va siempre con su etapa (campo_fecha).
+    pares() {
+      var t = this.tipo(), s = this.resumen();
+      var p = [['folio', this.iniciativa.folio], ['llave', this.llave],
+               ['tipo', t === 'pct' ? 'categorias' : t === 'fecha' || t === 'estado' ? t : 'otros']];
+      if (t === 'fecha') p.push(['campo_fecha', this.campo], ['fecha_nueva', s.nuevo]);
+      if (t === 'estado') {
+        p.push(['estado_nuevo', s.nuevo]);
+        if (s.subestado) p.push(['subestado_nuevo', s.subestado]);
+        if (s.fecha) p.push(['campo_fecha', s.fecha.campo], ['fecha_nueva', s.fecha.nuevo]);
+      }
+      if (t === 'pct') {
+        s.categorias.forEach(function (c) {
+          if (c.nueva) p.push(['agregar_categoria', c.categoria], ['agregar_pct', c.nuevo]);
+          else p.push(['pct_categoria', c.categoria], ['pct_valor', c.nuevo]);
+        });
+      }
+      p.push(['motivo', s.motivo]);
+      return p;
+    }
 
     tipo() { var c = campoCambio(this.campo); return c ? c.tipo : ''; }
 
@@ -2739,9 +2780,69 @@ window.RegistroIniciativas = (function () {
               : ': ' + Escape.html(x.anterior === null ? '—' : x.anterior + '%') + ' → ' + Escape.html(x.nuevo + '%'));
           }).join('; ')
         : 'explicación para ADM; no cambia nada por sí sola';
+      if (this.registro && this.registro.persistenciaSolicitudes === true) {
+        this.enviarCambio(null, Escape.html(r.rotulo) + ': ' + detalle);
+        return;
+      }
       msg.className = 'ini-cambio-msg listo';
       msg.innerHTML = '<strong>Solicitud preparada, no enviada.</strong> ' + Escape.html(r.rotulo) + ': ' + detalle + '. ' +
         'El envío y la revisión se habilitarán cuando exista el registro de solicitudes; por ahora no se guarda nada.';
+    }
+
+    // POST accion=enviar con el borrador ya validado. "Enviada" SOLO con el
+    // numero que devuelve la base; cualquier otra respuesta lo dice tal cual
+    // y deja reintentar con la MISMA llave (no se duplica). Nunca toca la
+    // iniciativa: la aplica un ADM desde la cola.
+    enviarCambio(pedir, resumenHtml) {
+      var c = this.cambio, self = this;
+      if (!c || this.cambioEnviando || c.enviada) return Promise.resolve(null);
+      var msg = this.$('regCambioMsg'), boton = this.$('regCambioEnviar');
+      this.cambioEnviando = true;
+      if (boton) boton.disabled = true;
+      msg.className = 'ini-cambio-msg';
+      msg.innerHTML = '<span>Enviando la solicitud…</span>';
+      var datos = new FormData();
+      c.pares().forEach(function (p) { datos.append(p[0], p[1]); });
+      pedir = pedir || this.pedirSolicitud || function (url, op) { return fetch(url, op); };
+      function pintar(clase, html) {
+        if (self.cambio !== c) return;
+        var m = self.$('regCambioMsg');
+        if (!m) return;
+        m.className = 'ini-cambio-msg ' + clase;
+        m.innerHTML = html;
+      }
+      return Promise.resolve()
+        .then(function () { return pedir(URL_SOLICITUDES + '?accion=enviar', { method: 'POST', body: datos, credentials: 'same-origin' }); })
+        .then(function (resp) {
+          return Promise.resolve(resp.json()).catch(function () { return null; }).then(function (j) { return { status: resp.status, json: j || {} }; });
+        })
+        .then(function (r) {
+          self.cambioEnviando = false;
+          var j = r.json;
+          if (r.status === 200 && j.enviada === true && typeof j.id_solicitud === 'number') {
+            c.enviada = j.id_solicitud;
+            pintar('listo', '<strong>Solicitud #' + Escape.html(String(j.id_solicitud)) + ' enviada.</strong> ' + (resumenHtml || '') + '. ' +
+              (j.repetida ? 'Ya estaba enviada: no se duplicó. ' : '') +
+              'Un administrador (ADM) la revisa; la iniciativa no cambia hasta que la aplique.');
+            return r;
+          }
+          if (self.cambio === c && boton) boton.disabled = false;
+          if (r.status === 422 && Array.isArray(j.errores)) {
+            pintar('error', '<ul>' + j.errores.map(function (e) { return '<li>' + Escape.html(e.mensaje || '') + '</li>'; }).join('') + '</ul>');
+          } else if (r.status === 501) {
+            pintar('aviso', '<strong>No se envió.</strong> ' + Escape.html(j.error || 'El registro de solicitudes no está habilitado.'));
+          } else if (j.enviada === null) {
+            pintar('aviso', Escape.html(j.error || 'No se pudo confirmar el envío.') + ' Puedes reintentar: la misma solicitud no se duplica.');
+          } else {
+            pintar('error', '<strong>No se envió.</strong> ' + Escape.html(j.error || ('Respuesta ' + r.status + ' del servidor.')));
+          }
+          return r;
+        }, function () {
+          self.cambioEnviando = false;
+          if (self.cambio === c && boton) boton.disabled = false;
+          pintar('aviso', 'No se pudo contactar al servidor: no se sabe si se envió. Reintenta: la misma solicitud no se duplica.');
+          return null;
+        });
     }
 
     plegarHistorial() {
@@ -2790,7 +2891,8 @@ window.RegistroIniciativas = (function () {
         '</div>' +
         '<div class="ini-cambio-msg" id="regCambioMsg" role="status" aria-live="polite"></div>' +
         '<div class="ini-cambio-pie">' +
-          '<button type="button" class="btn chico" data-accion="cambio-preparar">Preparar solicitud</button> ' +
+          '<button type="button" class="btn chico" id="regCambioEnviar" data-accion="cambio-preparar">' +
+            (this.registro && this.registro.persistenciaSolicitudes === true ? 'Enviar solicitud' : 'Preparar solicitud') + '</button> ' +
           '<button type="button" class="btn linea chico" data-accion="cambio-cancelar">Cancelar</button>' +
         '</div>';
     }

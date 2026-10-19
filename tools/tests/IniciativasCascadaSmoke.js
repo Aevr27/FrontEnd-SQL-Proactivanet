@@ -958,9 +958,13 @@ pruebas.push(function () {
       llamadas.map(function (l) { return [l[0], l[1] || null]; }).sort());
     var js = leer('admin/iniciativas.js') + leer('admin/registro-iniciativas.js'), html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
     // El unico envio es el POST de validacion, que no guarda.
-    Check('P2 el unico POST es a admin_iniciativas_validar', [1, 1, true, false, false],
+    // Dos POST, y solo estos: la validacion de Nueva solicitud (no guarda) y
+    // el envio de "Solicitar cambios" (admin_iniciativas_solicitudes.ashx,
+    // que nunca escribe la iniciativa).
+    Check('P2 los unicos POST son a admin_iniciativas_validar y al envio de Solicitar cambios', [2, 2, true, true, false, false],
       [(js.match(/method\s*:/g) || []).length, (js.match(/['"]POST['"]/gi) || []).length,
-       /pedir\(URL_VALIDAR, \{ method: 'POST'/.test(js), /XMLHttpRequest/.test(js), /sendBeacon/.test(js)]);
+       /pedir\(URL_VALIDAR, \{ method: 'POST'/.test(js),
+       /pedir\(URL_SOLICITUDES \+ '\?accion=enviar', \{ method: 'POST'/.test(js), /XMLHttpRequest/.test(js), /sendBeacon/.test(js)]);
     Check('P3 el HTML no tiene <form> ni submit', [false, false], [/<form/i.test(html), /type="submit"/i.test(html)]);
     var ashx = (leer('handlers/admin_iniciativas_catalogos.ashx') + leer('handlers/admin_iniciativas_registro.ashx') +
                 leer('handlers/admin_iniciativas_capacidad.ashx') + leer('handlers/admin_iniciativas_validar.ashx') +

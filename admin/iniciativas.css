@@ -678,6 +678,18 @@ html.ini-detalle-abierto { overflow: hidden; }
    escrita con "Estado" elegido se descartaba sin aviso. */
 .ini-cambio-campos .campo[hidden], .ini-cambio-campos [hidden] { display: none; }
 .ini-cambio-sub { display: flex; flex-direction: column; gap: 4px; }
+/* Cola de ADM de solicitudes (admin/solicitudes-cambio.js). */
+.ini-sol-barra { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.ini-sol-barra label { font-size: 11px; font-weight: 700; color: var(--muted); }
+.ini-sol-tabla .ini-sol-fila { cursor: pointer; }
+.ini-sol-tabla .ini-sol-fila:hover { background: var(--accent-soft); }
+.ini-sol-detalle { margin-top: 14px; }
+.ini-sol-detalle h5 { margin: 12px 0 6px; }
+.ini-sol-clas { display: flex; gap: 8px; flex-wrap: wrap; }
+.ini-sol-clas label { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); }
+.ini-sol-eventos { margin: 0; padding-left: 18px; font-size: 12.5px; }
+.ini-sol-eventos li { margin-bottom: 4px; }
+.ini-sol-detalle[hidden], #solCola[hidden] { display: none; }
 .ini-cambio-msg { margin-top: 10px; font-size: 12px; }
 .ini-cambio-msg:empty { display: none; }
 .ini-cambio-msg ul { margin: 0; padding-left: 18px; }

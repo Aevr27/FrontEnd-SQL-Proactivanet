@@ -56,8 +56,8 @@
     - Dueños de categoria ocultos por ahora en Administracion: flujo
       aparte (DUENOS_VISIBLES en admin/iniciativas.js). "Crear iniciativa"
       si pide PO / SO, opcionales y sin cascada (admin/iniciativa-admin.js).
-    - Solicitudes todavia no muestra datos: estado vacio "en preparacion",
-      sin datos inventados.
+    - Solicitudes: cola de ADM de "Solicitar cambios" (admin/solicitudes-cambio.js);
+      con otro rol, solo una nota. Sin sql/22 el servidor responde 501 y se dice.
 
   Reusa dashboard.css para variables, tipografia y .wrap / .card / .btn,
   como admin.html; lo propio vive en iniciativas.css con prefijo .ini-. La
@@ -379,12 +379,29 @@
     <div class="ini-vista-cab">
       <div class="ini-vista-titulo">
         <h2>Solicitudes</h2>
-        <p class="ini-vista-sub">Solicitudes de iniciativa y su revisión.</p>
+        <p class="ini-vista-sub">Solicitudes de cambio de iniciativas y su revisión.</p>
       </div>
     </div>
-    <div class="ini-vacio">
-      <strong>Lista de solicitudes en preparación</strong>
-      <span>Aquí estarán las solicitudes enviadas y su estado.</span>
+    <!-- Cola de ADM (admin/solicitudes-cambio.js). El servidor exige ADM en
+         todo esto; con otro rol solo se ve la nota de abajo. -->
+    <div id="solCola" hidden>
+      <div class="ini-sol-barra">
+        <label for="solFiltro">Estado</label>
+        <select id="solFiltro">
+          <option value="PENDIENTE" selected>Pendientes</option>
+          <option value="APLICADA">Aplicadas</option>
+          <option value="RECHAZADA">Rechazadas</option>
+          <option value="">Todas</option>
+        </select>
+        <button type="button" class="btn linea chico" id="solActualizar">Actualizar</button>
+      </div>
+      <div class="ini-cambio-msg" id="solMsg" role="status" aria-live="polite"></div>
+      <div id="solLista"></div>
+      <section class="ini-det-sec ini-cambio ini-sol-detalle" id="solDetalle" aria-live="polite" hidden></section>
+    </div>
+    <div class="ini-vacio" id="solNoAdm">
+      <strong>La revisión de solicitudes es de ADM</strong>
+      <span>Para pedir un cambio abre la iniciativa en «Iniciativas» y usa «Solicitar cambios».</span>
     </div>
   </section>
 
@@ -751,6 +768,7 @@
 <script src="iniciativa-admin.js"></script>
 <script src="categorias-duenos.js"></script>
 <script src="registro-iniciativas.js"></script>
+<script src="solicitudes-cambio.js"></script>
 <script src="iniciativas.js"></script>
 <script>
 // El rol tambien decide los botones de ADM que se pintan dentro del detalle,

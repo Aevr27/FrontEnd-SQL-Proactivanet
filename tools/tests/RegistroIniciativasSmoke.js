@@ -659,6 +659,88 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
+// SV) Enviar la solicitud (persistencia_solicitudes = true): solo "enviada"
+// con el numero de la base; la misma llave al reintentar; sin quien envia.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var datos = JSON.parse(JSON.stringify(DATOS));
+  datos.estados_problem = ['En Análisis', 'En Solución', 'Cerrado'];
+  datos.persistencia_solicitudes = true;
+  var p = Pagina(ok(datos), function () { return nunca(); });
+  function accion(a) {
+    var el = Elemento('b'); el.setAttribute('data-accion', a);
+    p.sel('regDetCuerpo').disparar('click', { target: el });
+  }
+  function elegir(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('change', { target: p.sel(id) }); }
+  var envios = [], respuestas = [];
+  function responder(status, json) { respuestas.push(function () { return Promise.resolve({ status: status, json: function () { return Promise.resolve(json); } }); }); }
+  return esperar().then(function () {
+    p.registro.pedirSolicitud = function (url, op) {
+      var campos = {};
+      op.body.forEach(function (v, k) { campos[k] = campos[k] === undefined ? v : [].concat(campos[k], v); });
+      envios.push({ url: url, metodo: op.method, campos: campos });
+      var r = respuestas.shift();
+      return r ? r() : Promise.reject(new Error('sin red'));
+    };
+    clicFolio(p, 'PRB 2026-000001');
+    accion('solicitar-cambios');
+    Check('SV1 con el registro habilitado el boton dice Enviar', true,
+      /id="regCambioEnviar" data-accion="cambio-preparar">Enviar solicitud</.test(p.sel('regCambio').innerHTML));
+    elegir('regCambioCampo', 'estado');
+    p.sel('regCambioEstado').value = 'Cerrado';
+    elegir('regCambioEstFechaCampo', 'f_solucion');
+    p.sel('regCambioEstFechaNueva').value = '2026-11-30';
+    p.sel('regCambioMotivo').value = 'Se cierra';
+    responder(500, { enviada: null, tipo: 'EnvioNoConfirmado', error: 'Tiempo agotado.' });
+    accion('cambio-preparar');
+    return esperar().then(esperar).then(function () {
+      var e = envios[0];
+      Check('SV2 POST a ?accion=enviar con el tipo, la etapa explicita, la fecha y el motivo; sin usuario ni rol',
+        ['../handlers/admin_iniciativas_solicitudes.ashx?accion=enviar', 'POST', 'PRB 2026-000001', 'estado', 'Cerrado', 'f_solucion', '2026-11-30', 'Se cierra', true, false, false],
+        [e.url, e.metodo, e.campos.folio, e.campos.tipo, e.campos.estado_nuevo, e.campos.campo_fecha, e.campos.fecha_nueva, e.campos.motivo,
+         /^[0-9a-f-]{36}$/.test(e.campos.llave), 'usuario' in e.campos, 'rol' in e.campos]);
+      Check('SV3 sin confirmacion: aviso, NO dice enviada, se puede reintentar', ['ini-cambio-msg aviso', false, true, false],
+        [p.sel('regCambioMsg').className, /enviada/i.test(p.sel('regCambioMsg').innerHTML.replace(/no se sabe si se envió/, '')), /no se duplica/.test(p.sel('regCambioMsg').innerHTML), p.sel('regCambioEnviar').disabled]);
+      responder(200, { enviada: true, id_solicitud: 12, repetida: true });
+      accion('cambio-preparar');
+      return esperar().then(esperar);
+    }).then(function () {
+      Check('SV4 el reintento usa la MISMA llave', envios[0].campos.llave, envios[1].campos.llave);
+      Check('SV5 enviada SOLO con el numero de la base (y dice si ya estaba)', ['ini-cambio-msg listo', true, true, true],
+        [p.sel('regCambioMsg').className, /Solicitud #12 enviada/.test(p.sel('regCambioMsg').innerHTML), /no se duplicó/.test(p.sel('regCambioMsg').innerHTML),
+         /la iniciativa no cambia hasta que la aplique/.test(p.sel('regCambioMsg').innerHTML)]);
+      accion('cambio-preparar');
+      return esperar();
+    }).then(function () {
+      Check('SV6 ya enviada: otro clic no manda nada; el registro no cambio', [2, 'En Solución'],
+        [envios.length, p.registro.registro.buscar('PRB 2026-000001').estado]);
+      accion('cambio-cancelar');
+      accion('solicitar-cambios');
+      elegir('regCambioCampo', 'f_cierre');
+      p.sel('regCambioNueva').value = '2027-02-01';
+      p.sel('regCambioMotivo').value = 'otra';
+      responder(501, { enviada: false, tipo: 'PersistenciaNoHabilitada', error: 'Falta aplicar sql/22.' });
+      accion('cambio-preparar');
+      return esperar().then(esperar);
+    }).then(function () {
+      Check('SV7 borrador nuevo = llave nueva; 501 dice que no se envio', [true, 'ini-cambio-msg aviso', true],
+        [envios[2].campos.llave !== envios[0].campos.llave, p.sel('regCambioMsg').className, /No se envió/.test(p.sel('regCambioMsg').innerHTML)]);
+      responder(422, { enviada: false, errores: [{ campo: 'fecha_nueva', mensaje: 'La nueva fecha compromiso es igual a la actual.' }] });
+      accion('cambio-preparar');
+      return esperar().then(esperar);
+    }).then(function () {
+      Check('SV8 422: los errores del servidor, tal cual', ['ini-cambio-msg error', true],
+        [p.sel('regCambioMsg').className, /igual a la actual/.test(p.sel('regCambioMsg').innerHTML)]);
+      accion('cambio-preparar');   // sin respuesta preparada: la red falla
+      return esperar().then(esperar);
+    }).then(function () {
+      Check('SV9 sin red: aviso de que no se sabe, reintento posible', ['ini-cambio-msg aviso', true, false],
+        [p.sel('regCambioMsg').className, /no se sabe si se envió/.test(p.sel('regCambioMsg').innerHTML), p.sel('regCambioEnviar').disabled]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // S) Solicitar cambios e Historial de cambios (sin persistencia)
 // ---------------------------------------------------------------------------
 pruebas.push(function () {

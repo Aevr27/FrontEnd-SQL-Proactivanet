@@ -650,6 +650,7 @@ window.Iniciativas = (function () {
       this.registro = null;  // VistaRegistro (admin/registro-iniciativas.js)
       this.crearAdmin = null; // VistaCrearAdmin (admin/iniciativa-admin.js)
       this.duenos = null;     // VistaDuenos (admin/categorias-duenos.js), perezosa; null si DUENOS_VISIBLES = false
+      this.cola = null;       // ColaSolicitudes (admin/solicitudes-cambio.js): cola de ADM
       this.volumetria = null; // VolumetriaCliente de Nueva solicitud (perezoso; usa this.pedir)
       // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
       // sin rol no se abre nada de ADM.
@@ -664,6 +665,12 @@ window.Iniciativas = (function () {
       this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
       this.aplicarPestanas();
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(this.rol);
+      if (this.cola) {
+        this.cola.fijarRol(this.rol);
+        // El rol llega despues de pintar: si ya se esta en Solicitudes, la
+        // cola (o la nota) se vuelve a pintar con el rol de verdad.
+        if (this.vista === 'solicitudes') this.cola.abrir();
+      }
       if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') || (VISTAS_ADM_MOD[this.vista] && !this.rol)) {
         this.mostrarVista('iniciativas');
       }
@@ -706,6 +713,17 @@ window.Iniciativas = (function () {
       // El registro carga por su cuenta, en paralelo con el catalogo de
       // Nueva solicitud: un fallo de uno no bloquea al otro.
       this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
+      // Cola de ADM de "Solicitar cambios" (pestaña Solicitudes). Clasificar
+      // usa los valores que ya existen (del registro); aplicar relee el
+      // registro sin recargar la pagina.
+      if (window.SolicitudesCambioCola) {
+        var regCola = this.registro;
+        this.cola = new window.SolicitudesCambioCola.ColaSolicitudes(this.doc, null, function () {
+          var r = regCola && regCola.registro;
+          return r ? { iniciativa: r.valoresTipoIniciativa, agrupado: r.valoresTipoAgrupado } : {};
+        });
+        this.cola.alCambiarIniciativa = function () { if (regCola && regCola.actualizar) regCola.actualizar(); };
+      }
       if (window.IniciativaAdmin) {
         // La volumetria (GET) va por el mismo fetch de la pagina; la
         // validacion (POST) por el suyo.
@@ -779,6 +797,7 @@ window.Iniciativas = (function () {
       if (nombre !== 'iniciativas' && this.registro) this.registro.cerrarDetalle();
       // El catalogo de dueños se pide la primera vez que se abre la pestaña.
       if (nombre === 'administracion' && this.duenos) this.duenos.abrir();
+      if (nombre === 'solicitudes' && this.cola) this.cola.abrir();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();
     }
