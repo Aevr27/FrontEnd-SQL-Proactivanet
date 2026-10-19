@@ -1544,6 +1544,43 @@ pruebas.push(function () {
   });
 });
 
+// HUD) El mismo detalle para ADM, MOD y sin rol: valores guardados como
+// texto al abrir (sin editores); edicion directa solo ADM; "Solicitar
+// cambios" para todos (fase de pruebas, tambien ADM) y sin escrituras.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    [['ADM', true], ['MOD', false], [null, false]].forEach(function (caso) {
+      var rol = caso[0], adm = caso[1], n = rol || 'sin rol';
+      p.pagina.fijarRol(rol);
+      reg.abrirDetalle('PRB 2026-000001');
+      var html = p.sel('regDetCuerpo').innerHTML;
+      Check('HUD1 ' + n + ': titulo, descripcion y observaciones guardados se VEN como texto; ningun editor abierto', [true, true, true, false, null],
+        [/>T PRB 2026-000001<\/(div|p)>/.test(html), />Desc PRB 2026-000001<\/div>/.test(html), />Obs PRB 2026-000001<\/div>/.test(html),
+         /<textarea|id="regEd-titulo"/.test(html), reg.editando]);
+      Check('HUD1 ' + n + ': las mismas tarjetas del detalle (Identificacion, Organizacion, Impacto, Seguimiento, Categorias, Historial)', true,
+        ['regDetIdent', 'regDetEtapas', 'regDetCats', 'regDetDesc'].every(function (id) { return html.indexOf('id="' + id + '"') >= 0; }) &&
+        /Organización/.test(html) && /Impacto/.test(html) && /Historial de cambios/.test(html));
+      Check('HUD2 ' + n + ': edicion directa ' + (adm ? 'disponible' : 'ausente') + '; Solicitar cambios disponible',
+        [adm, adm, adm ? 'Edición directa (ADM)' : 'Solo lectura', true],
+        [!!reg.edicion, /data-editar="titulo"|data-edicion=/.test(html), p.sel('regDetModo').textContent,
+         /id="regCambioBoton" data-accion="solicitar-cambios"/.test(html)]);
+      var antes = p.pedidos.length;
+      accion(p, 'solicitar-cambios');
+      elegir(p, 'regCambioCampo', 'f_analisis');
+      p.sel('regCambioNueva').value = '2027-02-01';
+      p.sel('regCambioMotivo').value = 'Prueba ' + n;
+      accion(p, 'cambio-preparar');
+      Check('HUD3 ' + n + ': la solicitud se prepara sin peticiones y sin tocar la iniciativa', [true, antes, '2026-12-01'],
+        [/Solicitud preparada, no enviada/.test(p.sel('regCambioMsg').innerHTML), p.pedidos.length,
+         reg.registro.buscar('PRB 2026-000001').f_analisis]);
+      accion(p, 'cambio-cancelar');
+      reg.cerrarDetalle(true);
+    });
+  });
+});
+
 // SC) Solicitar cambios: varias categorias en una solicitud (DOM). Solo
 // se prepara: ni peticiones ni guardado.
 pruebas.push(function () {
