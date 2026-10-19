@@ -64,14 +64,16 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             }
             else return Error(context, 400, "Acci\u00f3n desconocida.", "AccionDesconocida");
 
+            // Lo que escribe necesita la cuenta Windows (atribucion); leer la
+            // cola solo necesita el permiso de arriba.
             var id = IdentidadWindows.DesdeContexto(context);
-            if (!id.Autenticada || string.IsNullOrEmpty(id.Original))
+            if ((accion == "enviar" || accion == "rechazar" || accion == "aplicar") && (!id.Autenticada || string.IsNullOrEmpty(id.Original)))
                 return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
             var rol = AccesoAdmin.Rol(context);
 
             if (accion == "enviar") return Enviar(context, id.Original, rol);
             if (!PersistenciaSolicitudesCambio.Activa())
-                return Error(context, 501, PersistenciaSolicitudesCambio.Motivo, "PersistenciaNoHabilitada");
+                return Error(context, 501, PersistenciaSolicitudesCambio.MotivoCola, "PersistenciaNoHabilitada");
             try
             {
                 if (accion == "listar")

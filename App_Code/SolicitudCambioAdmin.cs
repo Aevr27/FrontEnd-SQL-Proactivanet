@@ -45,6 +45,9 @@ public static class PersistenciaSolicitudesCambio
 
     public static bool Activa() { return ForzadaParaPruebas ?? Habilitada; }
 
+    public const string MotivoCola =
+        "El registro de solicitudes todav\u00eda no est\u00e1 habilitado (falta aplicar sql/22 en la base, con su aprobaci\u00f3n): no hay solicitudes que revisar.";
+
     public const string Motivo =
         "El registro de solicitudes todav\u00eda no est\u00e1 habilitado (falta aplicar sql/22 en la base, con su aprobaci\u00f3n). " +
         "La solicitud se revis\u00f3, pero no se guard\u00f3 ni se envi\u00f3.";
