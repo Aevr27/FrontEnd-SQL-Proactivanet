@@ -238,7 +238,10 @@ window.RegistroIniciativas = (function () {
   }
 
   // Los cinco indicadores, en orden (ver la cabecera).
-  var ROTULOS_KPI = ['Total de iniciativas', 'Activas', 'Requerimientos', 'Atrasadas', 'Cerradas'];
+  // Solo los rotulos visibles (2026-10-19: Activas -> Iniciativas medibles,
+  // Requerimientos -> Iniciativas con requerimientos); los calculos y las
+  // claves internas (activas, requerimientos) no cambian.
+  var ROTULOS_KPI = ['Total de iniciativas', 'Iniciativas medibles', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'];
   // La agrupacion (TipoAgrupado) de los requerimientos REQ/HAR, comparada
   // con plano(): sin acentos, mayusculas ni espacios de mas.
   var AGRUPACION_REQUERIMIENTOS = 'reqopr';
@@ -1846,9 +1849,9 @@ window.RegistroIniciativas = (function () {
           t: 'Iniciativas abiertas: estado distinto de Cerrado.' },
         { l: ROTULOS_KPI[1], v: k.activas, f: fmt(k.reduceActivas) + ' tickets a reducir', s: 'sv', ayuda: ayuda },
         { l: ROTULOS_KPI[2], v: k.requerimientos, f: 'agrupación ReqOpr, abiertos', s: '',
-          t: 'Requerimientos (REQ/HAR): abiertos, estado distinto de Cerrado, con agrupación ReqOpr. Cuentan en Total, no en Activas.' },
+          t: 'Requerimientos (REQ/HAR): abiertos, estado distinto de Cerrado, con agrupación ReqOpr. Cuentan en Total, no en Iniciativas medibles.' },
         { l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sa' : 'sv',
-          t: 'Activas con la fecha de su estado vencida y con categoría (criterio de Experiencia).' },
+          t: 'Iniciativas medibles con la fecha de su estado vencida y con categoría (criterio de Experiencia).' },
         { l: ROTULOS_KPI[4], v: k.cerradas, f: 'estado Cerrado', s: '',
           t: 'Iniciativas en estado Cerrado.' }
       ];
