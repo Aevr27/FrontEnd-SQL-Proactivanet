@@ -737,7 +737,7 @@ pruebas.push(function () {
   // contra dashboard.html.
   Check('M1 entradas = modulos del tablero', ['../dashboard.html#sla', '../dashboard.html#backlog', '../dashboard.html#experiencia',
     '../dashboard.html#efectividad', '../dashboard.html#qa', '../dashboard.html#qare', '../dashboard.html#analisis',
-    '../dashboard.html#call', '../dashboard.html#tablero', 'iniciativas.html'], hrefs);
+    '../dashboard.html#orquestacion', '../dashboard.html#call', '../dashboard.html#tablero', 'iniciativas.html'], hrefs);
   // Administracion: la UNICA entrada activa, y oculta hasta que SesionAdmin
   // confirma la cuenta (data-solo-admin hidden). Es solo UX: el acceso lo
   // decide el servidor (AccesoAdmin).

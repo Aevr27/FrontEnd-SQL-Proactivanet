@@ -1,71 +1,198 @@
 <!DOCTYPE html>
+<!--
+  orquestacion/orquestacion.html - Modulo "Orquestación".
+
+  Mismo contrato que efectividad/ y analisis/: este archivo es a la vez la
+  pagina suelta y la fuente de la pestaña "Orquestación" de dashboard.html.
+  TableroOrquestacion (dashboard.js) trae este marcado, le quita <script> y
+  <link>, desarma el envoltorio #tab-orquestacion y lo monta en el contenedor
+  de la pestaña.
+
+  Todos los ids llevan el prefijo "orq-": en el tablero este marcado convive
+  con las demas pestañas en el MISMO documento.
+
+  Que hace: el avance del inventario de jobs del Excel de orquestacion
+  ("Concentrado Análisis de Jobs"), ya cargado en la base (esquema orq). Arriba,
+  las secciones del "Dashboard Avance Registro" del Excel; abajo, la vista del
+  tablero anterior (v3.7) y la lista de jobs. No calcula reglas: lee
+  handlers/orquestacion.ashx (las vistas del 77) y solo filtra y suma.
+
+  Hojas: .card, .kpi, .filtros, .btn y .pill son de dashboard.css, kpi.css y
+  boton.css; orquestacion.css lleva solo lo privado. Embebido, estos <link> y
+  <script> se descartan (el tablero ya trae Chart.js y los compartidos).
+-->
 <html lang="es">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Orquestación</title>
-<link rel="stylesheet" href="orquestacion.css">
-<!-- Desplegable compartido: el mismo componente que el resto del tablero. -->
-<link rel="stylesheet" href="../assets/css/desplegable.css">
-<script src="../assets/js/desplegable.js"></script>
-<script src="vendor/chart.umd.min.js"></script>
-<!-- Paleta categorica compartida. -->
-<!-- Escape de HTML compartido. Va ANTES de los modulos: todo lo que sale de
-     SQL se pega con innerHTML y tiene que entrar como texto, no como marcado. -->
-<script src="../assets/js/escape.js"></script>
-<script src="../assets/js/paleta.js"></script>
-<script src="../assets/js/barras.js"></script>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tickets Proactivanet — Orquestación</title>
+  <link rel="stylesheet" href="../assets/css/kpi.css">
+  <link rel="stylesheet" href="../assets/css/boton.css">
+  <link rel="stylesheet" href="../dashboard.css">
+  <link rel="stylesheet" href="orquestacion.css">
+  <!-- Chart.js: la misma copia que carga dashboard.html (4.4.4). -->
+  <script src="../assets/vendor/chart.umd.min.js"></script>
+  <!-- Escape de HTML compartido. Va ANTES del modulo: lo que sale de SQL
+       (direcciones, N3, jobs) se pega con innerHTML y entra como texto. -->
+  <script src="../assets/js/escape.js"></script>
+  <script src="../assets/js/paleta.js"></script>
+  <script src="../assets/js/barras.js"></script>
 </head>
 <body>
 <div class="wrap">
   <div id="tab-orquestacion" class="maintab-content active">
+
     <header class="top">
-      <h1>Orquestación</h1>
-      <div class="sub" id="subheadOr">Análisis de Jobs y tareas</div>
-      <div class="selrow">
-        <div class="grp"><label>Director</label>
-          <select id="selDirOr"><option value="">— Todos —</option></select></div>
-        <div class="grp"><label>Product Owner</label>
-          <select id="selPOOr"><option value="">— Todos —</option></select></div>
-        <button id="btnResetOr">Ver resumen general</button>
-        <a id="ligaHeaderOr" href="#" target="_blank" rel="noopener"
-           style="display:none;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;
-           background:#d97706;color:var(--ink);font-size:12px;font-weight:700;text-decoration:none">
-           🔎 Consulta el Detalle</a>
+      <div>
+        <h1>Orquestación</h1>
+        <div class="sub">Avance del registro de jobs, su migración a Control-M, los decomisos y la madurez. Del Excel «Concentrado Análisis de Jobs», cargado en la base.</div>
       </div>
-      <div id="filtroCand" style="margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-        <span style="font-size:11px;font-weight:700;color:var(--g-900);letter-spacing:.4px">CANDIDATO (COL. B):</span>
+      <div class="acciones-top">
+        <div class="estado" id="orq-estado" role="status"></div>
       </div>
     </header>
-    <section class="kpis" id="kpisOr"></section>
-    <section class="grid2">
-      <div class="card">
-        <h3>Distribución de Jobs por Clasificación</h3>
-        <canvas id="chartCatJobs" style="max-height:300px"></canvas>
-        <div class="legend" id="legendCatJobs"></div>
+
+    <section class="filtros" id="orq-filtros">
+      <div class="campo">
+        <label for="orq-dir">Dirección</label>
+        <select id="orq-dir"><option value="">— Todas —</option></select>
       </div>
-      <div class="card">
-        <h3>Distribución de Jobs por Categoría</h3>
-        <canvas id="chartClasif" style="max-height:300px"></canvas>
-        <div class="legend" id="legendClasif"></div>
+      <div class="campo">
+        <label for="orq-n3">N3 (Product Owner)</label>
+        <select id="orq-n3"><option value="">— Todos —</option></select>
       </div>
+      <div class="campo">
+        <label for="orq-herr">Herramienta</label>
+        <select id="orq-herr"><option value="">— Todas —</option></select>
+      </div>
+      <div class="campo acciones">
+        <button class="btn linea" id="orq-limpiar" type="button">Limpiar</button>
+        <button class="btn gris" id="orq-excel" type="button" disabled>⬇ Descargar Excel</button>
+      </div>
+      <div class="orq-cands" id="orq-cands" role="group" aria-label="¿Es candidato?"></div>
     </section>
-    <section class="grid2">
-      <div class="card">
-        <h3>Distribución por Candidato (columna B)</h3>
-        <canvas id="chartCand" style="max-height:300px"></canvas>
-        <div class="legend" id="legendCand"></div>
-      </div>
-      <div class="card">
-        <h3>Resumen de KPIs por Director</h3>
-        <div style="overflow-x:auto;max-height:330px"><table id="tblOrqDir"><thead><tr>
-          <th>Director</th><th class="num">Jobs</th><th class="num">Tareas</th>
-          <th class="num">% Migr.</th><th class="num">Complet.</th>
-        </tr></thead><tbody id="bodyOrqDir"></tbody></table></div>
-      </div>
+
+    <div class="orq-aviso" id="orq-error" hidden>
+      <strong>No se pudo traer la orquestación.</strong>
+      <span id="orq-error-msg"></span>
+    </div>
+
+    <section class="card" id="orq-sin-datos" hidden>
+      <h3>Todavía no hay datos de orquestación</h3>
+      <p class="nota">Falta instalar <code>76_orquestacion.sql</code> y <code>77_tablero_orquestacion.sql</code>, cargar el Excel con <code>cargar_orquestacion.py</code>, o darle a la cuenta del tablero permiso de lectura sobre el esquema <code>orq</code>.</p>
     </section>
-    <footer>Generado el 02/09/2026 · Fuente: Concentrado Análisis de Jobs — bd Jobs + Jobs Nuevos.</footer>
-  </div><!-- fin tab-orquestacion -->
+
+    <div id="orq-contenido" hidden>
+
+      <h2 class="orq-seccion">Avance de registro</h2>
+      <section class="kpis" id="orq-kpis"></section>
+
+      <section class="orq-grid3">
+        <div class="card">
+          <h3>Ingreso de candidatos a Control-M</h3>
+          <div id="orq-ingreso"></div>
+        </div>
+        <div class="card">
+          <h3>Decomisos</h3>
+          <div id="orq-decomisos"></div>
+        </div>
+        <div class="card">
+          <h3>Ejecuciones al día</h3>
+          <div id="orq-ejecuciones"></div>
+        </div>
+      </section>
+
+      <section class="orq-grid2">
+        <div class="card">
+          <h3>Ejercicio de costos (al año)</h3>
+          <div id="orq-costos"></div>
+        </div>
+        <div class="card">
+          <h3>Evolución de jobs (madurez)</h3>
+          <div class="orq-tabla-wrap"><table class="orq-tabla" id="orq-t-madurez"></table></div>
+          <p class="nota">Cada medidor con su propio universo, como en el Excel. «Migrado» se mide contra los activos en Control-M.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="orq-cab-card">
+          <h3>Histórico del avance</h3>
+          <div class="campo">
+            <label for="orq-h-ind" class="orq-sr">Indicador</label>
+            <select id="orq-h-ind"></select>
+          </div>
+        </div>
+        <div class="orq-grafica"><canvas id="orq-g-historico" aria-label="Histórico del avance" role="img"></canvas></div>
+        <p class="nota">«Excel»: las fotos de la hoja Histórico Avance. «Base»: la foto que saca la base en cada carga, con las reglas corregidas. Siempre del total, sin filtros.</p>
+      </section>
+
+      <section class="card">
+        <h3>Dirección → N3</h3>
+        <div class="orq-tabla-wrap"><table class="orq-tabla" id="orq-t-dir"></table></div>
+        <p class="nota">Clic en una Dirección para ver sus N3; clic en un N3 para filtrar todo por él. Reducción: candidatos «Migrados / candidato a reducción» y reducciones exitosas (columna W). Depuración: activos «Para decomiso» y ya decomisados.</p>
+      </section>
+
+      <section class="card">
+        <h3>Completitud por campo</h3>
+        <div class="orq-tabla-wrap"><table class="orq-tabla" id="orq-t-campos"></table></div>
+        <p class="nota">«Con dato» cuenta cualquier celda llena, como el Excel. «Documentado» no cuenta el relleno («Ejecucion unica», «N/A», «Huerfanos», «Job de Replicacion»…).</p>
+      </section>
+
+      <details class="card orq-v37" id="orq-v37" open>
+        <summary><h2 class="orq-seccion">Vista del tablero anterior (v3.7)</h2></summary>
+        <section class="kpis" id="orq-kpis37"></section>
+        <section class="orq-grid2">
+          <div class="card plana">
+            <h3>Distribución de jobs por clasificación</h3>
+            <div class="orq-grafica corta"><canvas id="orq-g-clasif" aria-label="Jobs por clasificación" role="img"></canvas></div>
+            <div class="orq-leyenda" id="orq-l-clasif"></div>
+          </div>
+          <div class="card plana">
+            <h3>Distribución de jobs por herramienta</h3>
+            <div class="orq-grafica corta"><canvas id="orq-g-herr" aria-label="Jobs por herramienta" role="img"></canvas></div>
+            <div class="orq-leyenda" id="orq-l-herr"></div>
+          </div>
+        </section>
+        <section class="orq-grid2">
+          <div class="card plana">
+            <h3>Distribución por candidato</h3>
+            <div class="orq-grafica corta"><canvas id="orq-g-cand" aria-label="Jobs por candidato" role="img"></canvas></div>
+            <div class="orq-leyenda" id="orq-l-cand"></div>
+          </div>
+          <div class="card plana">
+            <h3>Resumen por Dirección</h3>
+            <div class="orq-tabla-wrap alta"><table class="orq-tabla" id="orq-t-dir37"></table></div>
+          </div>
+        </section>
+      </details>
+
+      <section class="card" id="orq-jobs">
+        <div class="orq-cab-card">
+          <h3>Jobs</h3>
+          <button class="btn linea chico" id="orq-ver-jobs" type="button">Ver la lista</button>
+        </div>
+        <div id="orq-lista" hidden>
+          <div class="orq-barra">
+            <input type="search" id="orq-buscar" placeholder="Buscar job, aplicación o responsable" aria-label="Buscar job, aplicación o responsable">
+            <div class="campo">
+              <label for="orq-ind" class="orq-sr">Mostrar</label>
+              <select id="orq-ind"></select>
+            </div>
+            <div class="orq-conteo" id="orq-conteo"></div>
+          </div>
+          <div class="orq-tabla-wrap"><table class="orq-tabla" id="orq-t-jobs"></table></div>
+          <button class="btn linea chico" id="orq-mas" type="button" hidden>Mostrar más</button>
+        </div>
+      </section>
+
+      <details class="card orq-carga" id="orq-carga">
+        <summary>Lo que encontró la última carga del Excel</summary>
+        <div id="orq-carga-cuerpo"></div>
+      </details>
+    </div>
+  </div>
 </div>
 <script src="orquestacion.js"></script>
-</body></html>
+</body>
+</html>

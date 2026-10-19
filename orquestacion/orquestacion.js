@@ -1,237 +1,850 @@
-/* Orquestacion -- logica de pagina.
- *
- * Extraido del monolitico assets/Tablero_Experiencia.html (que queda intacto
- * como version legacy/referencia). El cuerpo de este archivo son las mismas
- * lineas del monolito, sin reescribir logica. Cambios minimos, solo los que
- * exige que el modulo cargue por si solo:
- *
- * - J ya no es un const con el JSON incrustado: se lee de
- *   data/orquestacion.mock.json, que conserva la misma forma ({orquestacion,
- *   liga_detalle}) para que el codigo siga usando J.orquestacion tal cual.
- * - FMT y PCT se copian aqui porque el bloque de Orquestacion los usaba y vivian
- *   en la parte de Experiencia del monolito. Son los unicos helpers que hacian falta.
- * - chartCatJobs se declaraba en el bloque de navegacion de pestanas del monolito
- *   aunque solo lo usa Orquestacion; se trae aqui.
- * - renderOrq() se llama al final: en el monolito solo corria al hacer clic en la
- *   pestana Orquestacion; como modulo suelto tiene que pintarse al cargar.
- * Nota: fetch() no funciona sobre file://. Hay que servir la carpeta por HTTP.
- */
-(async function () {
+/* =========================================================================
+   orquestacion/orquestacion.js
 
-const MOCK_URL = 'data/orquestacion.mock.json';
+   Pestaña "Orquestación". Un solo archivo para la pagina suelta
+   (orquestacion/orquestacion.html) y para la pestaña del tablero, que monta
+   ese mismo marcado e inyecta este mismo script (TableroOrquestacion en
+   dashboard.js).
 
-let MOCK;
-try {
-  const resp = await fetch(MOCK_URL);
-  if (!resp.ok) throw new Error('HTTP ' + resp.status + ' ' + resp.statusText);
-  MOCK = await resp.json();
-} catch (err) {
-  document.body.insertAdjacentHTML('afterbegin',
-    '<div style="background:#fdf4f2;border:1px solid #982a18;color:#5c1a0e;' +
-    'border-radius:10px;padding:14px 18px;margin-bottom:14px;font-size:13px">' +
-    '<b>No se pudo cargar ' + MOCK_URL + '.</b><br>' + String(err) +
-    '<br>Si abriste el archivo con doble clic (file://), el navegador bloquea ' +
-    'fetch(). Sirve la carpeta por HTTP.' +
-    '</div>');
-  throw err;
-}
+   De donde sale cada cosa: handlers/orquestacion.ashx, que lee las vistas del
+   77 (77_tablero_orquestacion.sql) sobre el esquema orq. Cada job llega con
+   cada indicador ya resuelto en 1 o 0 (orq.vw_TableroJob): las reglas viven
+   en SQL. Aqui NO se decide si un job cuenta: solo se filtra, se suma y se
+   pinta.
 
-const J = MOCK;
+   Dos partes:
+     1. OrquestacionCalc: las cuentas, sin DOM. Las prueba node
+        (tools/tests/OrquestacionPestanaSmoke.js) con la respuesta real del
+        handler sobre una base de prueba.
+     2. La pestaña: filtros, tarjetas, tablas, graficas (Chart.js, el del
+        tablero), la lista de jobs (?detalle=1, al abrirla) y el Excel
+        (SheetJS, orquestacion/vendor/xlsx.mini.min.js, al pulsar).
 
-// Identidad de "categoria" (col A). Registro con nombre y a nivel de modulo:
-// sobrevive a los repintados, asi que una categoria no cambia de color cuando
-// el pie se reordena por volumen.
-const REG_CATEGORIA = Paleta.registro('orq-categoria');
+   Antes esta pestaña era la "Orquestación" del documento que genera
+   TableroExperiencia_v3.7.exe (pestaña "Tablero"), con datos del 2026-09-02.
+   Su vista sigue abajo ("Vista del tablero anterior"), con datos de la base.
+   ========================================================================= */
 
-// Helpers compartidos en el monolito (bloque de Experiencia); Orquestacion usa estos dos.
-/* Escape de HTML compartido (assets/js/escape.js): lo que viene del JSON
-   -categorias, candidatos, nombres de director y de Product Owner- se pega
-   con innerHTML y tiene que entrar como TEXTO, no como marcado. */
-const esc = v => Escape.html(v);
+(function (fabrica) {
+  var calc = fabrica();
+  if (typeof module !== 'undefined' && module.exports) module.exports = calc;
+  if (typeof window !== 'undefined') window.OrquestacionCalc = calc;
+})(function () {
+  'use strict';
 
-const FMT = n => Math.round(n||0).toLocaleString('es-MX');
-const PCT = n => Math.round((n||0)*100)+'%';
+  var CAMPOS = 14;
 
-/* Geometria de barra del juego COMPARTIDO (assets/js/barras.js) como DEFAULT
-   del tipo `bar`, igual que dashboard.js, experiencia.js y qa.js. Antes este
-   modulo no lo llamaba y su unica grafica de barras copiaba Barras.GRUESA y
-   Barras.RADIO dentro del dataset. Es idempotente: embebido en dashboard.html
-   el tablero ya lo llamo. */
-Barras.aplicarDefaults();
-
-/* La cifra dentro de la barra: el plugin COMPARTIDO, atado al FMT de este
-   modulo. Es la misma cifra -misma fuente, mismo contraste, misma salida
-   afuera cuando la barra es corta- que en SLA, Backlog, QA y Experiencia. */
-const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
-
-// Declarado en el monolito dentro del bloque de navegacion de pestanas, pero solo usado aqui.
-let chartCatJobs=null;
-
-// ===================== ORQUESTACION =====================
-let orDir='', orPO='', orCand=[];   // orCand: multi-seleccion de columna B
-let chartClasif=null, chartCand=null;
-function orData(){
-  const o=J.orquestacion;
-  const cel=(o.celdas||[]).filter(c=>{
-    if(orDir && c.dir!==orDir) return false;
-    if(orPO && c.po!==orPO) return false;
-    if(orCand.length && !orCand.includes(c.cand)) return false;
-    return true;
-  });
-  // agregar las celdas seleccionadas
-  const acc={n_jobs:0,n_tareas:0,migrados:0,no_candidatos:0,a_decomisar:0,
-             compl_llenas:0,compl_total:0,por_categoria:{},por_clasif:{},por_candidato:{}};
-  cel.forEach(c=>{
-    acc.n_jobs+=c.n_jobs; acc.n_tareas+=c.n_tareas; acc.migrados+=c.migrados;
-    acc.no_candidatos+=c.no_candidatos; acc.a_decomisar+=c.a_decomisar;
-    acc.compl_llenas+=c.compl_llenas; acc.compl_total+=c.compl_total;
-    for(const k in c.por_categoria) acc.por_categoria[k]=(acc.por_categoria[k]||0)+c.por_categoria[k];
-    for(const k in c.por_clasif) acc.por_clasif[k]=(acc.por_clasif[k]||0)+c.por_clasif[k];
-    for(const k in c.por_candidato) acc.por_candidato[k]=(acc.por_candidato[k]||0)+c.por_candidato[k];
-  });
-  acc.pct_migrados = acc.n_jobs? acc.migrados/acc.n_jobs : 0;
-  acc.completitud = acc.compl_total? acc.compl_llenas/acc.compl_total : 0;
-  return acc;
-}
-function renderOrq(){
-  if(!J.orquestacion){return;}
-  const o=orData();
-  const cards=[
-    {l:'Cantidad de Jobs',v:FMT(o.n_jobs),f:'jobs analizados'},
-    {l:'Cantidad de Tareas',v:FMT(o.n_tareas),f:'suma promedio diario'},
-    {l:'% Migrados',v:PCT(o.pct_migrados),f:FMT(o.migrados)+' de '+FMT(o.n_jobs)},
-    {l:'Nivel de Completitud',v:PCT(o.completitud),f:'campos R–AD llenos'},
-    {l:'Jobs No Candidatos',v:FMT(o.no_candidatos),f:'columna B = No'},
-    {l:'Jobs a Decomisar',v:FMT(o.a_decomisar),f:'columna B = Para decomiso'},
-  ];
-  document.getElementById('kpisOr').innerHTML=cards.map(c=>
-    `<div class="kpi"><div class="lbl">${c.l}</div><div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
-  /* PALETA CATEGORICA — no se define aqui: sale de assets/js/paleta.js
-     (window.Paleta), la misma que usan SLA, Backlog, QA y Experiencia.
-     Una grafica nueva con categorias la pide ahi; no se copia el arreglo.
-     La grafica de Clasificacion de abajo NO la usa: Alta/Media/Baja es
-     severidad y tiene su propia escala de estado. */
-  // [ORQ-GRAF1] BARRAS HORIZONTALES por Clasificacion (Alta, Media, Baja, Única)
-  const orden=['Alta','Media','Baja','Única'];
-  const cvals=orden.map(k=>(o.por_clasif&&o.por_clasif[k])||0);
-  // Escala de ESTADO, no de identidad: Alta/Media/Baja son severidad. Se
-  // conserva el semaforo rojo -> ambar -> verde, con neutro para "Única".
-  // La leyenda de abajo pone el nombre al lado de cada color, asi que el
-  // estado nunca depende del color a secas.
-  const ccolors=['#982a18','#d97706','#356b2c','#8a8578'];
-  const bctx=document.getElementById('chartCatJobs');
-  if(chartCatJobs)chartCatJobs.destroy();
-  /* Medidas y radio ya son el DEFAULT compartido (Barras.aplicarDefaults,
-     arriba), el mismo que usan SLA, Backlog, QA y Experiencia. Antes eran un
-     arreglo propio -tope de 24px y .72/.8 de ranura- que con cuatro
-     categorias dejaba cuatro palitos. La cifra va dentro de la barra como en
-     el resto; la leyenda de abajo sigue dando el conteo por escrito, que es
-     lo que traduce color -> clasificacion. */
-  chartCatJobs=new Chart(bctx,{type:'bar',data:{labels:orden,datasets:[
-    {data:cvals,backgroundColor:ccolors}]},
-    options:{indexAxis:'y',responsive:true,plugins:{legend:{display:false},
-      tooltip:{callbacks:{label:c=>FMT(c.raw)+' jobs'}}},
-      scales:{x:{beginAtZero:true,ticks:{callback:v=>FMT(v)}}}},
-    plugins:[ETIQUETAS_DENTRO]});
-  document.getElementById('legendCatJobs').innerHTML=orden.map((l,i)=>
-    `<span><i style="background:${ccolors[i]}"></i>${esc(l)}: ${FMT(cvals[i])}</span>`).join('');
-  // [ORQ-GRAF2] PIE por Categoria (col A)
-  const ent=Object.entries(o.por_categoria).sort((a,b)=>b[1]-a[1]);
-  const labels=ent.map(e=>e[0]), data=ent.map(e=>e[1]);
-  // Se ordena por volumen, asi que el orden cambia entre cargas: el registro
-  // reparte por orden de ALTA y le deja a cada categoria su color.
-  const colors=REG_CATEGORIA.escala(labels);
-  const pctx=document.getElementById('chartClasif');
-  if(chartClasif)chartClasif.destroy();
-  chartClasif=new Chart(pctx,{type:'pie',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'#fff'}]},
-    options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+FMT(c.raw)}}}}});
-  document.getElementById('legendClasif').innerHTML=labels.map((l,i)=>
-    `<span><i style="background:${colors[i]}"></i>${esc(l)}: ${FMT(data[i])}</span>`).join('');
-  // [ORQ-GRAF3] PIE por Candidato (col B)
-  const cOrden=(J.orquestacion.candidatos||[]).slice();
-  const candVals=cOrden.map(k=>(o.por_candidato&&o.por_candidato[k])||0);
-  // Candidatos: J.orquestacion.candidatos es un catalogo de orden fijo, asi
-  // que basta la posicion.
-  const candColors=Paleta.PALETA_CATEGORICA;
-  const kctx=document.getElementById('chartCand');
-  if(chartCand)chartCand.destroy();
-  chartCand=new Chart(kctx,{type:'pie',data:{labels:cOrden,
-    datasets:[{data:candVals,backgroundColor:cOrden.map((_,i)=>candColors[i%candColors.length]),borderWidth:2,borderColor:'#fff'}]},
-    options:{responsive:true,plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.label+': '+FMT(c.raw)}}}}});
-  document.getElementById('legendCand').innerHTML=cOrden.map((l,i)=>
-    `<span><i style="background:${candColors[i%candColors.length]}"></i>${esc(l)}: ${FMT(candVals[i])}</span>`).join('');
-  // [ORQ-TABL] tabla resumen de KPIs por director
-  renderOrqDirTable();
-  /* Misma regla que en Observabilidad: la liga viene del JSON y solo se
-     pone en el href si resuelve a http o https. Si no, el <a> se queda
-     oculto como estaba. */
-  const ligaOr=Escape.url(J.liga_detalle);
-  if(ligaOr){const h=document.getElementById('ligaHeaderOr');if(h){h.href=ligaOr;h.style.display='inline-flex';}}
-}
-function renderOrqDirTable(){
-  const cel=(J.orquestacion.celdas||[]).filter(c=>{
-    if(orCand.length && !orCand.includes(c.cand)) return false;
-    return true;
-  });
-  const pd={};
-  cel.forEach(c=>{
-    const d=c.dir||'(Sin director)';
-    if(!pd[d]) pd[d]={n_jobs:0,n_tareas:0,migrados:0,compl_llenas:0,compl_total:0};
-    pd[d].n_jobs+=c.n_jobs; pd[d].n_tareas+=c.n_tareas; pd[d].migrados+=c.migrados;
-    pd[d].compl_llenas+=c.compl_llenas; pd[d].compl_total+=c.compl_total;
-  });
-  const rows=Object.entries(pd).map(([d,v])=>({dir:d,...v,
-    pct_migrados:v.n_jobs?v.migrados/v.n_jobs:0,
-    completitud:v.compl_total?v.compl_llenas/v.compl_total:0}))
-    .sort((a,b)=>b.n_jobs-a.n_jobs);
-  const body=document.getElementById('bodyOrqDir');
-  if(!body)return;
-  body.innerHTML=rows.map(r=>
-    `<tr><td><b>${esc(r.dir)}</b></td><td class="num">${FMT(r.n_jobs)}</td>
-     <td class="num">${FMT(r.n_tareas)}</td><td class="num">${PCT(r.pct_migrados)}</td>
-     <td class="num">${PCT(r.completitud)}</td></tr>`).join('')
-    || '<tr><td colspan="5" class="empty">Sin datos</td></tr>';
-}
-(function(){
-  if(!J.orquestacion)return;
-  const sd=document.getElementById('selDirOr');
-  J.orquestacion.directores.forEach(d=>sd.insertAdjacentHTML('beforeend',`<option>${esc(d)}</option>`));
-  const sp=document.getElementById('selPOOr');
-  function fillPOor(){
-    sp.innerHTML='<option value="">— Todos —</option>';
-    const pos = (orDir? (J.orquestacion.jerarquia[orDir]||[]) : J.orquestacion.product_owners)
-      .filter(p=>!['basis','draft'].includes(String(p||'').trim().toLocaleLowerCase()));
-    pos.forEach(p=>sp.insertAdjacentHTML('beforeend',`<option>${esc(p)}</option>`));
+  // { cols: [...], filas: [[...]] } -> [ { col: valor } ]
+  function tabla(t) {
+    if (!t || !t.cols) return [];
+    var cols = t.cols;
+    return (t.filas || []).map(function (f) {
+      var o = {};
+      for (var i = 0; i < cols.length; i++) o[cols[i]] = f[i];
+      return o;
+    });
   }
-  // filtro multi-seleccion por columna B (Candidato)
-  const cont=document.getElementById('filtroCand');
-  (J.orquestacion.candidatos||[]).forEach(v=>{
-    const id='cand_'+v.replace(/[^a-zA-Z0-9]/g,'');
-    cont.insertAdjacentHTML('beforeend',
-      `<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;color:#191919;
-        background:rgba(25,25,25,.06);padding:4px 10px;border-radius:14px;cursor:pointer">
-        <input type="checkbox" class="candChk" value="${Escape.attr(v)}" id="${Escape.attr(id)}"> ${esc(v)}</label>`);
-  });
-  cont.addEventListener('change',e=>{
-    if(!e.target.classList.contains('candChk'))return;
-    orCand=[...document.querySelectorAll('.candChk:checked')].map(x=>x.value);
-    renderOrq();
-  });
-  sd.onchange=()=>{orDir=sd.value;orPO='';fillPOor();renderOrq();};
-  sp.onchange=()=>{orPO=sp.value;renderOrq();};
-  document.getElementById('btnResetOr').onclick=()=>{
-    orDir='';orPO='';orCand=[];sd.value='';
-    document.querySelectorAll('.candChk').forEach(x=>x.checked=false);
-    fillPOor();renderOrq();
+
+  function num(v) { return typeof v === 'number' && isFinite(v) ? v : 0; }
+  function div(a, b) { return b ? a / b : null; }
+  function suma(lista, campo, cuando) {
+    var s = 0;
+    for (var i = 0; i < lista.length; i++)
+      if (!cuando || cuando(lista[i])) s += num(lista[i][campo]);
+    return s;
+  }
+  function cuenta(lista, cuando) {
+    var n = 0;
+    for (var i = 0; i < lista.length; i++) if (cuando(lista[i])) n++;
+    return n;
+  }
+  function es(campo) { return function (o) { return o[campo] === 1; }; }
+
+  // ---- Filtros -------------------------------------------------------------
+  // dir y n3: los del dashboard del Excel (columnas AQ y AR: "Huérfanos" y
+  // "Sin N3" cuando vienen vacios). cand: varios valores de "¿Es candidato?";
+  // vacio no restringe.
+  function hayFiltro(f) { return !!(f && (f.dir || f.n3 || f.herr || (f.cand && f.cand.length))); }
+  function pasa(o, f) {
+    if (f.dir && o.Dir !== f.dir) return false;
+    if (f.n3 && o.N3 !== f.n3) return false;
+    if (f.herr && o.Herramienta !== f.herr) return false;
+    if (f.cand && f.cand.length && f.cand.indexOf(o.Candidato) < 0) return false;
+    return true;
+  }
+  function filtrar(jobs, f) {
+    if (!hayFiltro(f)) return jobs.slice();
+    return jobs.filter(function (o) { return pasa(o, f); });
+  }
+  // Un decomiso entra si su job paso el filtro. Sin filtro entran todos,
+  // tambien los que ya no tienen job (asi da lo mismo que la hoja Decomisos).
+  function decomisosDe(decomisos, jobsFiltrados, f) {
+    if (!hayFiltro(f)) return decomisos.slice();
+    var ids = new Set(jobsFiltrados.map(function (j) { return j.JobId; }));
+    return decomisos.filter(function (d) { return d.JobId != null && ids.has(d.JobId); });
+  }
+
+  // ---- El dashboard del Excel --------------------------------------------
+  // p: orq.Parametro. Lo capturado a mano en el Excel (ejecuciones consumidas
+  // y costo de licencia) es del total: con filtros va null.
+  function indicadores(js, decs, p, filtrado) {
+    p = p || {};
+    var r = {};
+    r.universo = js.length;
+    r.huerfanos = cuenta(js, es('EsHuerfano'));
+    r.identificados = r.universo - r.huerfanos;
+    r.completitud = div(suma(js, 'CamposLlenosExcel'), CAMPOS * r.universo);
+    r.estricta = div(suma(js, 'CamposLlenosEstricta'), CAMPOS * r.universo);
+    r.completos = cuenta(js, function (o) { return o.CamposLlenosEstricta === CAMPOS; });
+    r.activos = cuenta(js, es('Activo'));
+    r.orquestados = cuenta(js, es('OrqCompleto'));
+    r.pct_orquestados = div(r.orquestados, r.activos);
+
+    r.candidatos = cuenta(js, es('CandSi'));
+    r.migrados_exito = cuenta(js, function (o) { return o.CandSi === 1 && o.Activo === 1; });
+    r.pct_ingreso = div(r.migrados_exito, r.candidatos);
+
+    r.decomisos = decs.length;
+    r.decomisos_exitosos = cuenta(decs, es('Exitoso'));
+    r.pct_decomisos = div(r.decomisos_exitosos, r.decomisos);
+
+    r.ejec_calculada = suma(js, 'Prom', es('Activo'));
+    r.ejec_capturada = filtrado || p.EjecucionesConsumidasDia == null ? null : p.EjecucionesConsumidasDia;
+    r.pend_migrar = suma(js, 'Prom', es('PendMigrar'));
+    r.licencia = filtrado || p.CostoLicenciaActual == null ? null : p.CostoLicenciaActual;
+
+    // Esquema hibrido: los JOB por su costo anual, las tareas por el suyo.
+    r.n_job = cuenta(js, es('CostoJob'));
+    r.n_tarea = cuenta(js, es('CostoTarea'));
+    r.costo_job = r.n_job * num(p.CostoJobAnual);
+    r.costo_tarea = r.n_tarea * num(p.CostoTareaAnual);
+    r.costo_hibrido = r.costo_job + r.costo_tarea;
+    // Esquema actual por ejecuciones: lo consumido mas lo que falta migrar,
+    // cada ejecucion diaria al costo de una tarea (J11 y K11 del Excel).
+    var base = r.ejec_capturada != null ? r.ejec_capturada : r.ejec_calculada;
+    r.ejec_futuras = base + r.pend_migrar;
+    r.costo_futuro = r.ejec_futuras * num(p.CostoTareaAnual);
+    r.ejec_futuras_calc = r.ejec_calculada + r.pend_migrar;
+    r.costo_futuro_calc = r.ejec_futuras_calc * num(p.CostoTareaAnual);
+    return r;
+  }
+
+  // Formulas B15:F19 del Excel: cada medidor con su universo.
+  var MADUREZ = [
+    { id: 'migrado', nombre: 'Migrado', base: 'Activo', logro: 'MadMigrado' },
+    { id: 'optimizado', nombre: 'Optimizado', base: 'MadOptBase', logro: 'MadOpt' },
+    { id: 'alertamiento', nombre: 'Con alertamiento', base: 'MadAlertBase', logro: 'MadAlert' },
+    { id: 'redundancia', nombre: 'Sin redundancia', base: 'MadRedBase', logro: 'MadRed' },
+    { id: 'sla', nombre: 'Con SLA activo', base: 'MadSlaBase', logro: 'MadSla' },
+  ];
+  function madurez(js) {
+    return MADUREZ.map(function (m) {
+      var u = cuenta(js, es(m.base)), l = cuenta(js, es(m.logro));
+      return { id: m.id, nombre: m.nombre, universo: u, logrado: l, pct: div(l, u) };
+    });
+  }
+
+  // ---- Direccion -> N3 (columnas D a P del Excel) --------------------------
+  function nuevoGrupo(nombre) {
+    return { nombre: nombre, jobs: 0, campos: 0, estricta: 0, red_cand: 0, red_exito: 0,
+             dep_cand: 0, dep_exito: 0, nuevo_cand: 0, nuevo_orq: 0, adopcion: 0 };
+  }
+  function acumular(g, o) {
+    g.jobs++;
+    g.campos += num(o.CamposLlenosExcel);
+    g.estricta += num(o.CamposLlenosEstricta);
+    g.red_cand += o.RedCand === 1 ? 1 : 0;
+    g.red_exito += o.RedExito === 1 ? 1 : 0;
+    g.dep_cand += o.DepCand === 1 ? 1 : 0;
+    g.dep_exito += o.DepExito === 1 ? 1 : 0;
+    g.nuevo_cand += o.CandSi === 1 ? 1 : 0;
+    g.nuevo_orq += o.CandSi === 1 && o.Activo === 1 ? 1 : 0;
+    g.adopcion += o.Adopcion === 1 ? 1 : 0;
+  }
+  function cerrar(g, universo) {
+    g.pct_universo = div(g.jobs, universo);
+    g.campos_prom = div(g.campos, g.jobs);
+    g.pct_ident = div(g.campos, CAMPOS * g.jobs);
+    g.pct_estricta = div(g.estricta, CAMPOS * g.jobs);
+    g.pct_red = div(g.red_exito, g.red_cand);
+    // Depuracion: lo ya decomisado contra todo lo que se iba a depurar.
+    g.pct_dep = div(g.dep_exito, g.dep_cand + g.dep_exito);
+    return g;
+  }
+  function porDireccion(js) {
+    var dirs = new Map();
+    var total = nuevoGrupo('Total');
+    js.forEach(function (o) {
+      var d = dirs.get(o.Dir);
+      if (!d) { d = nuevoGrupo(o.Dir); d.n3s = new Map(); dirs.set(o.Dir, d); }
+      var n = d.n3s.get(o.N3);
+      if (!n) { n = nuevoGrupo(o.N3); d.n3s.set(o.N3, n); }
+      acumular(d, o); acumular(n, o); acumular(total, o);
+    });
+    var u = js.length;
+    var lista = Array.from(dirs.values()).map(function (d) {
+      d.n3s = Array.from(d.n3s.values()).map(function (n) { return cerrar(n, u); })
+        .sort(function (a, b) { return b.jobs - a.jobs || String(a.nombre).localeCompare(String(b.nombre)); });
+      return cerrar(d, u);
+    }).sort(function (a, b) { return b.jobs - a.jobs || String(a.nombre).localeCompare(String(b.nombre)); });
+    return { direcciones: lista, total: cerrar(total, u) };
+  }
+
+  // ---- Completitud por campo: Campos trae un caracter por campo ------------
+  // 0 vacio, 1 relleno ("Ejecucion unica", "N/A"...), 2 documentado.
+  function porCampo(js, campos) {
+    return (campos || []).map(function (c, i) {
+      var conDato = cuenta(js, function (o) { return o.Campos && o.Campos.charAt(i) !== '0'; });
+      var doc = cuenta(js, function (o) { return o.Campos && o.Campos.charAt(i) === '2'; });
+      return { letra: c.letra, nombre: c.nombre, con_dato: conDato, documentados: doc,
+               faltantes: js.length - conDato, pct: div(conDato, js.length), pct_doc: div(doc, js.length) };
+    });
+  }
+
+  // ---- La vista del tablero anterior (v3.7) --------------------------------
+  var CLASIF = ['Alta', 'Media', 'Baja', 'Única'];
+  function contarPor(js, campo, vacio) {
+    var m = new Map();
+    js.forEach(function (o) {
+      var k = o[campo] == null ? vacio : o[campo];
+      m.set(k, (m.get(k) || 0) + 1);
+    });
+    return Array.from(m.entries()).sort(function (a, b) { return b[1] - a[1] || String(a[0]).localeCompare(String(b[0])); });
+  }
+  function v37(js) {
+    var r = {};
+    r.n_jobs = js.length;
+    r.n_tareas = suma(js, 'Prom');
+    r.migrados = cuenta(js, function (o) { return o.Candidato === 'Migrados'; });
+    r.pct_migrados = div(r.migrados, r.n_jobs);
+    r.completitud = div(suma(js, 'CamposLlenosExcel'), CAMPOS * r.n_jobs);
+    r.no_candidatos = cuenta(js, function (o) { return o.Candidato === 'No'; });
+    r.a_decomisar = cuenta(js, function (o) { return o.Candidato === 'Para decomiso'; });
+    var pc = new Map(contarPor(js, 'Clasif', 'Sin clasificación'));
+    r.por_clasif = CLASIF.concat(['Sin clasificación']).map(function (k) { return [k, pc.get(k) || 0]; });
+    r.por_herramienta = contarPor(js, 'Herramienta', '(sin herramienta)');
+    r.por_candidato = contarPor(js, 'Candidato', '(vacío)');
+    var dirs = new Map();
+    js.forEach(function (o) {
+      var d = dirs.get(o.Dir);
+      if (!d) { d = { dir: o.Dir, n_jobs: 0, n_tareas: 0, migrados: 0, campos: 0 }; dirs.set(o.Dir, d); }
+      d.n_jobs++; d.n_tareas += num(o.Prom); d.campos += num(o.CamposLlenosExcel);
+      if (o.Candidato === 'Migrados') d.migrados++;
+    });
+    r.por_dir = Array.from(dirs.values()).map(function (d) {
+      d.pct_migrados = div(d.migrados, d.n_jobs);
+      d.completitud = div(d.campos, CAMPOS * d.n_jobs);
+      return d;
+    }).sort(function (a, b) { return b.n_jobs - a.n_jobs; });
+    return r;
+  }
+
+  // ---- Historico (orq.AvanceDiario) ----------------------------------------
+  var HISTORICO = [
+    { id: 'UniversoJobs', nombre: 'Universo de jobs' },
+    { id: 'Candidatos', nombre: 'Candidatos (¿Es candidato? = Si)' },
+    { id: 'Migrados', nombre: 'Migrados' },
+    { id: 'MigradosNuevos', nombre: 'Migrados nuevos (Si y activos)' },
+    { id: 'CandidatosDecomiso', nombre: 'Candidatos a decomiso' },
+    { id: 'TotalDecomisos', nombre: 'Decomisos exitosos' },
+    { id: 'Huerfanos', nombre: 'Huérfanos' },
+    { id: 'PendientesAdopcion', nombre: 'Pendientes de adopción' },
+    { id: 'EjecucionesDiarias', nombre: 'Ejecuciones diarias' },
+  ];
+  function historico(filas, id) {
+    var fechas = Array.from(new Set(filas.map(function (h) { return h.Fecha; }))).sort();
+    var excel = new Map(), base = new Map();
+    filas.forEach(function (h) { (h.Origen === 'Base' ? base : excel).set(h.Fecha, h[id]); });
+    return {
+      fechas: fechas,
+      excel: fechas.map(function (d) { return excel.has(d) ? excel.get(d) : null; }),
+      base: fechas.map(function (d) { return base.has(d) ? base.get(d) : null; }),
+    };
+  }
+
+  // ---- La lista de jobs ----------------------------------------------------
+  var LISTA = [
+    { id: '', nombre: 'Todos' },
+    { id: 'huerfanos', nombre: 'Huérfanos', job: es('EsHuerfano') },
+    { id: 'incompletos', nombre: 'Sin documentar completo (estricta)', job: function (o) { return o.CamposLlenosEstricta < CAMPOS; } },
+    { id: 'activos', nombre: 'Activos en Control-M', job: es('Activo') },
+    { id: 'orquestados', nombre: 'Completamente orquestados', job: es('OrqCompleto') },
+    { id: 'candidatos', nombre: 'Candidatos a migrar (Si)', job: es('CandSi') },
+    { id: 'pendientes', nombre: 'Candidatos pendientes (N/A en Control-M)', job: es('PendMigrar') },
+    { id: 'reduccion', nombre: 'Candidatos a reducción parcial', job: es('RedCand') },
+    { id: 'depuracion', nombre: 'Candidatos a depuración', job: es('DepCand') },
+    { id: 'adopcion', nombre: 'Huérfanos en adopción', job: es('Adopcion') },
+    { id: 'advertencias', nombre: 'Con advertencias de la carga', det: function (d) { return !!d.Advertencias; } },
+    { id: 'app', nombre: 'Aplicación fuera del catálogo', det: function (d) { return d.AplicacionEnCatalogo === 0; } },
+    { id: 'personas', nombre: 'Responsables fuera de la hoja Datos', det: function (d) { return d.PersonasFueraDeDatos > 0; } },
+  ];
+  function normal(s) {
+    return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  }
+  var BUSCA_EN = ['JobName', 'Aplicacion', 'Dir', 'N3', 'ServiceOwnerN2', 'Escalacion1', 'Escalacion2', 'Escalacion3', 'Herramienta'];
+  // jobs: los ya filtrados; detalle: Map JobId -> renglon de vw_TableroDetalle.
+  function lista(jobs, detalle, indicador, texto) {
+    var ind = LISTA.filter(function (l) { return l.id === (indicador || ''); })[0] || LISTA[0];
+    var t = normal(texto).trim();
+    var salida = [];
+    jobs.forEach(function (o) {
+      var d = detalle.get(o.JobId);
+      if (!d) return;
+      if (ind.job && !ind.job(o)) return;
+      if (ind.det && !ind.det(d)) return;
+      if (t && !BUSCA_EN.some(function (c) { return normal(d[c]).indexOf(t) >= 0; })) return;
+      salida.push({ job: o, det: d });
+    });
+    return salida.sort(function (a, b) { return String(a.det.JobName).localeCompare(String(b.det.JobName)); });
+  }
+
+  // Los valores de "¿Es candidato?", del mas comun al menos.
+  function candidatos(jobs) { return contarPor(jobs, 'Candidato', '(vacío)').map(function (e) { return e[0]; }); }
+  function unicos(jobs, campo) {
+    return Array.from(new Set(jobs.map(function (o) { return o[campo]; }).filter(function (v) { return v != null; })))
+      .sort(function (a, b) { return String(a).localeCompare(String(b)); });
+  }
+
+  return {
+    CAMPOS: CAMPOS, MADUREZ: MADUREZ, HISTORICO: HISTORICO, LISTA: LISTA, CLASIF: CLASIF,
+    tabla: tabla, hayFiltro: hayFiltro, filtrar: filtrar, decomisosDe: decomisosDe,
+    indicadores: indicadores, madurez: madurez, porDireccion: porDireccion, porCampo: porCampo,
+    v37: v37, historico: historico, lista: lista, candidatos: candidatos, unicos: unicos, normal: normal,
   };
-  fillPOor();
-})();
+});
 
-renderOrq();
+(function () {
+  'use strict';
+  if (typeof document === 'undefined') return;
 
-/* Capa visual de los desplegables de esta pagina (Director y Product
-   Owner). Mismo componente compartido que el resto del tablero; ver la
-   nota equivalente en observabilidad.js. */
-if (window.Desplegable) Desplegable.montar(document);
+  var PREFIJO = 'orq-';
+  function $(id) { return document.getElementById(PREFIJO + id); }
+  if (!$('kpis')) return;
+  var Calc = window.OrquestacionCalc;
 
+  // Rutas resueltas contra este script: embebido, el documento vive un nivel
+  // mas arriba. document.currentScript solo vale mientras se evalua.
+  var YO = document.currentScript && document.currentScript.src;
+  function junto(rel, respaldo) { try { return new URL(rel, YO).href; } catch (e) { return respaldo; } }
+  var API = junto('../handlers/orquestacion.ashx', 'handlers/orquestacion.ashx');
+  var XLSX_URL = junto('vendor/xlsx.mini.min.js', 'orquestacion/vendor/xlsx.mini.min.js');
+
+  /* ------------------------------------------------------------ formato */
+  // El escape compartido (assets/js/escape.js): direcciones, N3, jobs y
+  // aplicaciones se pegan con innerHTML y tienen que entrar como TEXTO.
+  function esc(v) { return Escape.html(v); }
+  var NF0 = new Intl.NumberFormat('es-MX', { maximumFractionDigits: 0 });
+  var NF1 = new Intl.NumberFormat('es-MX', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  function n0(v) { return v == null ? '—' : NF0.format(v); }
+  function n1(v) { return v == null ? '—' : NF1.format(v); }
+  function pct(v) { return v == null ? '—' : Math.round(v * 100) + '%'; }
+  function pct1(v) { return v == null ? '—' : NF1.format(v * 100) + '%'; }
+  function dinero(v) { return v == null ? '—' : '$' + NF0.format(v); }
+  function dia(s) {          // 'aaaa-mm-dd' -> 'dd/mm/aaaa'
+    var p = String(s || '').split('-');
+    return p.length >= 3 ? p[2].slice(0, 2) + '/' + p[1] + '/' + p[0] : '—';
+  }
+  function diaCorto(s) {     // 'aaaa-mm-dd' -> 'dd/mm'
+    var p = String(s || '').split('-');
+    return p.length >= 3 ? p[2].slice(0, 2) + '/' + p[1] : s;
+  }
+  function sem(v) { return v == null ? null : (v >= 0.9 ? 'v' : (v >= 0.7 ? 'a' : 'r')); }
+  function medidor(v) {
+    if (v == null) return '';
+    var x = Math.max(0, Math.min(1, v));
+    return '<span class="orq-medidor ' + (x >= 0.9 ? '' : (x >= 0.7 ? 'a' : 'r')) + '" aria-hidden="true"><i style="width:' +
+      Math.round(x * 100) + '%"></i></span>';
+  }
+
+  /* ------------------------------------------------------------ estado */
+  var datos = null;              // la respuesta del handler
+  var jobs = [], decomisos = [], historicoFilas = [];
+  var detalle = null;            // Map JobId -> renglon, al abrir la lista
+  var f = { dir: '', n3: '', herr: '', cand: [] };
+  var vista = null;              // lo ultimo que se pinto
+  var graficas = {};
+  var abiertas = new Set();      // Direcciones desplegadas en la tabla
+  var lista = { ind: '', texto: '', tope: 200 };
+
+  function estado(txt) { $('estado').textContent = txt || ''; }
+  function error(txt) { $('error').hidden = !txt; $('error-msg').textContent = txt || ''; }
+
+  function pedir(url) {
+    return fetch(url, { cache: 'no-store', credentials: 'same-origin' })
+      .then(function (r) {
+        return r.json().catch(function () { return { error: 'HTTP ' + r.status }; })
+          .then(function (j) { if (!r.ok && !j.error) j.error = 'HTTP ' + r.status; return j; });
+      })
+      .then(function (j) { if (j.error) throw new Error(j.error); return j; });
+  }
+
+  /* ------------------------------------------------------------ carga */
+  function cargar() {
+    estado('Cargando…');
+    error('');
+    pedir(API).then(function (j) {
+      datos = j;
+      if (!j.hay_datos) {
+        $('sin-datos').hidden = false;
+        $('contenido').hidden = true;
+        estado('Sin datos');
+        return;
+      }
+      jobs = Calc.tabla(j.jobs);
+      decomisos = Calc.tabla(j.decomisos);
+      historicoFilas = Calc.tabla(j.historico);
+      $('sin-datos').hidden = true;
+      $('contenido').hidden = false;
+      llenarFiltros();
+      llenarHistorico();
+      pintar();
+      pintarCarga();
+      var c = j.carga || {};
+      estado('Carga del Excel: ' + dia(c.fecha) + (c.fecha && c.fecha.length > 10 ? ' ' + c.fecha.slice(11, 16) : '') +
+        ' · ' + n0(jobs.length) + ' jobs');
+      $('excel').disabled = false;
+    }).catch(function (e) {
+      estado('');
+      error(e && e.message ? e.message : String(e));
+    });
+  }
+
+  /* ------------------------------------------------------------ filtros */
+  function opciones(sel, lista, actual, todos) {
+    var html = '<option value="">' + esc(todos) + '</option>';
+    lista.forEach(function (v) { html += '<option value="' + esc(v) + '">' + esc(v) + '</option>'; });
+    sel.innerHTML = html;
+    sel.value = lista.indexOf(actual) >= 0 ? actual : '';
+  }
+  function llenarN3() {
+    var base = f.dir ? jobs.filter(function (o) { return o.Dir === f.dir; }) : jobs;
+    opciones($('n3'), Calc.unicos(base, 'N3'), f.n3, '— Todos —');
+    f.n3 = $('n3').value;
+  }
+  function llenarFiltros() {
+    opciones($('dir'), Calc.unicos(jobs, 'Dir'), f.dir, '— Todas —');
+    opciones($('herr'), Calc.unicos(jobs, 'Herramienta'), f.herr, '— Todas —');
+    llenarN3();
+    var html = '<span class="orq-cands-t">¿Es candidato?</span>';
+    Calc.candidatos(jobs).forEach(function (v, i) {
+      html += '<label><input type="checkbox" value="' + esc(v) + '" id="orq-cand-' + i + '"' +
+        (f.cand.indexOf(v) >= 0 ? ' checked' : '') + '> ' + esc(v) + '</label>';
+    });
+    $('cands').innerHTML = html;
+  }
+  $('dir').onchange = function () { f.dir = this.value; f.n3 = ''; llenarN3(); pintar(); };
+  $('n3').onchange = function () { f.n3 = this.value; pintar(); };
+  $('herr').onchange = function () { f.herr = this.value; pintar(); };
+  $('cands').addEventListener('change', function (e) {
+    if (!e.target || e.target.type !== 'checkbox') return;
+    f.cand = Array.prototype.slice.call($('cands').querySelectorAll('input:checked')).map(function (x) { return x.value; });
+    pintar();
+  });
+  $('limpiar').onclick = function () {
+    f = { dir: '', n3: '', herr: '', cand: [] };
+    if (datos && datos.hay_datos) { llenarFiltros(); pintar(); }
+  };
+
+  /* ------------------------------------------------------------ pintado */
+  function pintar() {
+    var js = Calc.filtrar(jobs, f);
+    var decs = Calc.decomisosDe(decomisos, js, f);
+    var filtrado = Calc.hayFiltro(f);
+    vista = {
+      jobs: js, decomisos: decs, filtrado: filtrado,
+      ind: Calc.indicadores(js, decs, datos.parametros, filtrado),
+      madurez: Calc.madurez(js),
+      dir: Calc.porDireccion(js),
+      campos: Calc.porCampo(js, datos.campos),
+      v37: Calc.v37(js),
+    };
+    pintarKpis();
+    pintarIngreso();
+    pintarCostos();
+    pintarMadurez();
+    pintarDireccion();
+    pintarCampos();
+    pintarV37();
+    if (detalle) pintarLista();
+  }
+
+  function tarjeta(l, v, foot, s) {
+    return '<div class="kpi ' + (s ? 's' + s : '') + '"><div class="lbl">' + esc(l) + '</div>' +
+      '<div class="val">' + v + '</div><div class="foot">' + foot + '</div></div>';
+  }
+  function cifra(t, v, s, chica) {
+    return '<div class="orq-cifra' + (chica ? ' chica' : '') + '"><span class="t">' + esc(t) + '</span><span class="v">' + v + '</span>' +
+      (s ? '<span class="s">' + s + '</span>' : '') + '</div>';
+  }
+
+  function pintarKpis() {
+    var r = vista.ind;
+    $('kpis').innerHTML =
+      tarjeta('Universo de jobs', n0(r.universo), 'un renglón por nombre de job', null) +
+      tarjeta('Identificados', n0(r.identificados), 'con Product Owner / N3', null) +
+      tarjeta('Huérfanos', n0(r.huerfanos), 'Product Owner / N3 vacío o N/A', r.huerfanos ? 'a' : null) +
+      tarjeta('Registro completo', pct1(r.completitud),
+        'documentado (sin relleno): ' + pct1(r.estricta) + ' · ' + n0(r.completos) + ' jobs al 100%', sem(r.estricta)) +
+      tarjeta('Activos en Control-M', n0(r.activos), 'Estatus control-M = Activos', null) +
+      tarjeta('Completamente orquestados', n0(r.orquestados), pct(r.pct_orquestados) + ' del universo activo', null);
+  }
+
+  function pintarIngreso() {
+    var r = vista.ind;
+    $('ingreso').innerHTML = '<div class="orq-cifras">' +
+      cifra('Candidatos a migrar a Control-M', n0(r.candidatos), '¿Es candidato? = Si') +
+      cifra('Migrados con éxito', n0(r.migrados_exito), 'candidatos ya activos en Control-M') +
+      cifra('Avance', pct(r.pct_ingreso) + ' ' + medidor(r.pct_ingreso), null) + '</div>';
+    $('decomisos').innerHTML = '<div class="orq-cifras">' +
+      cifra('Candidatos a decomiso', n0(r.decomisos), 'renglones de la hoja Decomisos') +
+      cifra('Decomisados exitosos', n0(r.decomisos_exitosos), 'columna «Exitoso»') +
+      cifra('Avance', pct(r.pct_decomisos) + ' ' + medidor(r.pct_decomisos), null) + '</div>';
+    $('ejecuciones').innerHTML = '<div class="orq-cifras">' +
+      (r.ejec_capturada != null
+        ? cifra('Consumidas al día de hoy (capturada en el Excel)', n0(r.ejec_capturada),
+            'Calculada por la base: ' + n0(r.ejec_calculada) + ' (promedio diario de los activos)')
+        : cifra('Consumidas al día (calculada por la base)', n0(r.ejec_calculada),
+            vista.filtrado ? 'La capturada en el Excel es solo del total.' : 'Promedio diario de los activos')) +
+      cifra('Pendientes por migrar', n0(r.pend_migrar), 'promedio diario de los candidatos (Si) que están N/A en Control-M') +
+      '</div>';
+  }
+
+  function pintarCostos() {
+    var r = vista.ind, p = datos.parametros || {};
+    $('costos').innerHTML = '<div class="orq-cifras">' +
+      (r.licencia != null ? cifra('Costo actual de licenciamiento', dinero(r.licencia), 'capturado en el Excel') + '<hr class="orq-sep">' : '') +
+      cifra('Esquema híbrido: JOB', dinero(r.costo_job), n0(r.n_job) + ' jobs × ' + dinero(p.CostoJobAnual) + ' por JOB', true) +
+      cifra('Esquema híbrido: tareas', dinero(r.costo_tarea), n0(r.n_tarea) + ' tareas × ' + dinero(p.CostoTareaAnual) + ' por tarea diaria', true) +
+      cifra('Total del esquema híbrido', dinero(r.costo_hibrido),
+        'Migrados, candidatos (Si) y «Migrados / candidato a reducción», según su esquema JOB o Tarea') +
+      '<hr class="orq-sep">' +
+      cifra('Esquema actual por ejecuciones', dinero(r.costo_futuro),
+        n0(r.ejec_futuras) + ' ejecuciones (consumidas + pendientes) × ' + dinero(p.CostoTareaAnual) +
+        (r.ejec_capturada != null ? '. Con la calculada: ' + dinero(r.costo_futuro_calc) : '') + '. Sin holgura.') +
+      '</div>';
+  }
+
+  function pintarMadurez() {
+    var filas = vista.madurez.map(function (m) {
+      return '<tr><td>' + esc(m.nombre) + '</td><td class="n">' + n0(m.universo) + '</td><td class="n">' + n0(m.logrado) +
+        '</td><td class="n">' + pct(m.pct) + ' ' + medidor(m.pct) + '</td></tr>';
+    }).join('');
+    $('t-madurez').innerHTML = '<thead><tr><th scope="col">Medidor</th><th scope="col" class="n">Universo</th>' +
+      '<th scope="col" class="n">Logrado</th><th scope="col" class="n">%</th></tr></thead><tbody>' + filas + '</tbody>';
+  }
+
+  function filaDir(g, clase, extra) {
+    return '<tr class="' + clase + '">' + extra +
+      '<td class="n">' + n0(g.jobs) + '</td><td class="n">' + pct1(g.pct_universo) + '</td>' +
+      '<td class="n">' + n1(g.campos_prom) + '</td><td class="n">' + pct(g.pct_ident) + '</td>' +
+      '<td class="n">' + n0(g.red_cand) + '</td><td class="n">' + n0(g.red_exito) + '</td><td class="n">' + pct(g.pct_red) + '</td>' +
+      '<td class="n">' + n0(g.dep_cand) + '</td><td class="n">' + n0(g.dep_exito) + '</td><td class="n">' + pct(g.pct_dep) + '</td>' +
+      '<td class="n">' + n0(g.nuevo_cand) + '</td><td class="n">' + n0(g.nuevo_orq) + '</td>' +
+      '<td class="n">' + n0(g.adopcion) + '</td></tr>';
+  }
+  function pintarDireccion() {
+    var d = vista.dir;
+    var cab = '<thead><tr><th scope="col">Dirección / N3</th><th scope="col" class="n">Jobs</th><th scope="col" class="n">% universo</th>' +
+      '<th scope="col" class="n">Campos prom. (de 14)</th><th scope="col" class="n">% identificación</th>' +
+      '<th scope="col" class="n">Cand. reducción</th><th scope="col" class="n">Reducciones</th><th scope="col" class="n">%</th>' +
+      '<th scope="col" class="n">Cand. depuración</th><th scope="col" class="n">Depurados</th><th scope="col" class="n">%</th>' +
+      '<th scope="col" class="n">Nuevos a orquestar</th><th scope="col" class="n">Orquestados</th>' +
+      '<th scope="col" class="n">En adopción</th></tr></thead>';
+    var cuerpo = d.direcciones.map(function (g, i) {
+      var abierta = abiertas.has(g.nombre) || !!f.dir;
+      var html = filaDir(g, 'dir', '<td><button type="button" class="liga" data-dir="' + i + '" aria-expanded="' + abierta + '">' +
+        '<span class="flecha" aria-hidden="true">' + (abierta ? '▾' : '▸') + '</span>' + esc(g.nombre) + '</button></td>');
+      if (abierta) {
+        html += g.n3s.map(function (n, k) {
+          return filaDir(n, 'n3', '<td><button type="button" class="liga" data-dir="' + i + '" data-n3="' + k + '">' + esc(n.nombre) + '</button></td>');
+        }).join('');
+      }
+      return html;
+    }).join('');
+    $('t-dir').innerHTML = cab + '<tbody>' + (cuerpo || '<tr class="vacia"><td colspan="14">Sin jobs con estos filtros</td></tr>') +
+      (d.direcciones.length > 1 ? filaDir(d.total, 'total', '<td>Total</td>') : '') + '</tbody>';
+  }
+  $('t-dir').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('button.liga') : null;
+    if (!b || !vista) return;
+    var g = vista.dir.direcciones[+b.getAttribute('data-dir')];
+    if (!g) return;
+    if (b.hasAttribute('data-n3')) {
+      var n = g.n3s[+b.getAttribute('data-n3')];
+      f.dir = g.nombre; f.n3 = n ? n.nombre : '';
+      $('dir').value = f.dir; llenarN3(); $('n3').value = f.n3; f.n3 = $('n3').value;
+      pintar();
+      return;
+    }
+    if (abiertas.has(g.nombre)) abiertas.delete(g.nombre); else abiertas.add(g.nombre);
+    pintarDireccion();
+  });
+
+  function pintarCampos() {
+    var filas = vista.campos.map(function (c) {
+      return '<tr><td>' + esc(c.letra) + '</td><td>' + esc(c.nombre) + '</td><td class="n">' + n0(c.con_dato) +
+        '</td><td class="n">' + n0(c.faltantes) + '</td><td class="n">' + pct(c.pct) + '</td><td class="n">' + n0(c.documentados) +
+        '</td><td class="n">' + pct(c.pct_doc) + ' ' + medidor(c.pct_doc) + '</td></tr>';
+    }).join('');
+    $('t-campos').innerHTML = '<thead><tr><th scope="col">Col.</th><th scope="col">Dato requerido</th>' +
+      '<th scope="col" class="n">Con dato</th><th scope="col" class="n">Faltantes</th><th scope="col" class="n">%</th>' +
+      '<th scope="col" class="n">Documentado</th><th scope="col" class="n">%</th></tr></thead><tbody>' + filas + '</tbody>';
+  }
+
+  /* ------------------------------------------------------------ graficas */
+  function grafica(id, cfg) {
+    if (graficas[id]) graficas[id].destroy();
+    if (typeof Chart === 'undefined') return null;
+    graficas[id] = new Chart($(id), cfg);
+    return graficas[id];
+  }
+
+  function llenarHistorico() {
+    var sel = $('h-ind');
+    sel.innerHTML = Calc.HISTORICO.map(function (h) {
+      return '<option value="' + esc(h.id) + '">' + esc(h.nombre) + '</option>';
+    }).join('');
+    sel.value = 'MigradosNuevos';
+    sel.onchange = pintarHistorico;
+    pintarHistorico();
+  }
+  function pintarHistorico() {
+    var id = $('h-ind').value;
+    var s = Calc.historico(historicoFilas, id);
+    grafica('g-historico', {
+      type: 'line',
+      data: {
+        labels: s.fechas.map(diaCorto),
+        datasets: [
+          { label: 'Excel', data: s.excel, borderColor: '#65bb2b', backgroundColor: '#65bb2b', pointRadius: 2, spanGaps: true, tension: 0.15 },
+          { label: 'Base', data: s.base, borderColor: '#d97706', backgroundColor: '#d97706', pointRadius: 4, borderDash: [5, 4], spanGaps: true },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom' },
+                   tooltip: { callbacks: { label: function (c) { return c.dataset.label + ': ' + n0(c.raw); } } } },
+        scales: { y: { beginAtZero: false, ticks: { precision: 0, callback: function (v) { return n0(v); } } } },
+      },
+    });
+  }
+
+  // La vista del tablero anterior: las mismas tarjetas y graficas, con datos
+  // de la base y los filtros de arriba. Clasificacion es severidad: su escala
+  // de estado (rojo -> ambar -> verde, neutro para Unica) no sale de la paleta.
+  var COLOR_CLASIF = ['#982a18', '#d97706', '#356b2c', '#8a8578', '#c9ccc4'];
+  function pastel(id, idLeyenda, entradas, registro) {
+    var labels = entradas.map(function (e) { return e[0]; });
+    var data = entradas.map(function (e) { return e[1]; });
+    var colores = window.Paleta ? Paleta.registro(registro).escala(labels) : labels.map(function () { return '#65bb2b'; });
+    grafica(id, {
+      type: 'pie',
+      data: { labels: labels, datasets: [{ data: data, backgroundColor: colores, borderWidth: 2, borderColor: '#fff' }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: function (c) { return c.label + ': ' + n0(c.raw); } } } } },
+    });
+    $(idLeyenda).innerHTML = labels.map(function (l, i) {
+      return '<span><i style="background:' + esc(colores[i]) + '"></i>' + esc(l) + ': ' + n0(data[i]) + '</span>';
+    }).join('');
+  }
+  function pintarV37() {
+    var r = vista.v37;
+    $('kpis37').innerHTML =
+      tarjeta('Cantidad de jobs', n0(r.n_jobs), 'jobs analizados', null) +
+      tarjeta('Cantidad de tareas', n0(r.n_tareas), 'suma del promedio diario', null) +
+      tarjeta('% Migrados', pct(r.pct_migrados), n0(r.migrados) + ' de ' + n0(r.n_jobs) + ' (¿Es candidato? = Migrados)', null) +
+      tarjeta('Nivel de completitud', pct(r.completitud), 'campos W–AJ con dato', null) +
+      tarjeta('Jobs no candidatos', n0(r.no_candidatos), '¿Es candidato? = No', null) +
+      tarjeta('Jobs a decomisar', n0(r.a_decomisar), '¿Es candidato? = Para decomiso', null);
+
+    var cl = r.por_clasif;
+    if (window.Barras) Barras.aplicarDefaults();
+    grafica('g-clasif', {
+      type: 'bar',
+      data: { labels: cl.map(function (e) { return e[0]; }), datasets: [{ data: cl.map(function (e) { return e[1]; }), backgroundColor: COLOR_CLASIF }] },
+      options: { indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) { return n0(c.raw) + ' jobs'; } } } },
+        scales: { x: { beginAtZero: true, ticks: { callback: function (v) { return n0(v); } } } } },
+      plugins: window.Barras ? [Barras.etiquetasDentro(n0)] : [],
+    });
+    $('l-clasif').innerHTML = cl.map(function (e, i) {
+      return '<span><i style="background:' + COLOR_CLASIF[i] + '"></i>' + esc(e[0]) + ': ' + n0(e[1]) + '</span>';
+    }).join('');
+    pastel('g-herr', 'l-herr', r.por_herramienta, 'orq-herramienta');
+    pastel('g-cand', 'l-cand', r.por_candidato, 'orq-candidato');
+
+    $('t-dir37').innerHTML = '<thead><tr><th scope="col">Dirección</th><th scope="col" class="n">Jobs</th>' +
+      '<th scope="col" class="n">Tareas</th><th scope="col" class="n">% Migr.</th><th scope="col" class="n">Complet.</th></tr></thead><tbody>' +
+      (r.por_dir.map(function (d) {
+        return '<tr><td><b>' + esc(d.dir) + '</b></td><td class="n">' + n0(d.n_jobs) + '</td><td class="n">' + n0(d.n_tareas) +
+          '</td><td class="n">' + pct(d.pct_migrados) + '</td><td class="n">' + pct(d.completitud) + '</td></tr>';
+      }).join('') || '<tr class="vacia"><td colspan="5">Sin datos</td></tr>') + '</tbody>';
+  }
+
+  /* ------------------------------------------------------------ la lista */
+  function traerDetalle() {
+    if (detalle) return Promise.resolve(detalle);
+    return pedir(API + '?detalle=1').then(function (j) {
+      detalle = new Map();
+      Calc.tabla(j.detalle).forEach(function (d) { detalle.set(d.JobId, d); });
+      return detalle;
+    });
+  }
+  $('ind').innerHTML = Calc.LISTA.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.nombre) + '</option>'; }).join('');
+  $('ind').onchange = function () { lista.ind = this.value; lista.tope = 200; pintarLista(); };
+  $('buscar').oninput = function () { lista.texto = this.value; lista.tope = 200; pintarLista(); };
+  $('mas').onclick = function () { lista.tope += 200; pintarLista(); };
+  $('ver-jobs').onclick = function () {
+    var b = this;
+    if (!$('lista').hidden) { $('lista').hidden = true; b.textContent = 'Ver la lista'; return; }
+    b.disabled = true; b.textContent = 'Cargando…';
+    traerDetalle().then(function () {
+      $('lista').hidden = false; b.textContent = 'Ocultar la lista'; pintarLista();
+    }).catch(function (e) {
+      b.textContent = 'Ver la lista';
+      error('No se pudo traer la lista de jobs: ' + (e && e.message ? e.message : e));
+    }).then(function () { b.disabled = false; });
+  };
+  function pintarLista() {
+    if (!detalle || !vista) return;
+    var filas = Calc.lista(vista.jobs, detalle, lista.ind, lista.texto);
+    $('conteo').textContent = n0(filas.length) + ' jobs' + (filas.length > lista.tope ? ' · se muestran ' + n0(lista.tope) : '');
+    var html = filas.slice(0, lista.tope).map(function (x) {
+      var d = x.det, o = x.job;
+      return '<tr><td class="largo"><b>' + esc(d.JobName) + '</b><div class="sub">renglón ' + n0(d.FilaExcel) + '</div></td>' +
+        '<td>' + esc(d.Herramienta) + '</td><td>' + esc(d.EstatusControlM) + '</td><td>' + esc(d.EsCandidato) + '</td>' +
+        '<td class="n">' + (d.PromedioDiarioTexto ? esc(d.PromedioDiarioTexto) : n1(d.PromedioDiario)) + '</td>' +
+        '<td>' + esc(d.EsquemaConsiderado) + '</td><td class="largo">' + esc(d.Aplicacion) +
+        (d.AplicacionEnCatalogo === 0 ? '<div class="orq-adv">fuera del catálogo</div>' : '') + '</td>' +
+        '<td class="largo">' + esc(o.Dir) + '<div class="sub">' + esc(o.N3) + '</div></td>' +
+        '<td class="n">' + n0(o.CamposLlenosExcel) + ' / ' + n0(o.CamposLlenosEstricta) + '</td>' +
+        '<td class="largo">' + (d.Advertencias ? '<span class="orq-adv">' + esc(d.Advertencias) + '</span>' : '') +
+        (d.PersonasFueraDeDatos > 0 ? '<div class="orq-adv">' + n0(d.PersonasFueraDeDatos) + ' responsable(s) fuera de Datos</div>' : '') + '</td></tr>';
+    }).join('');
+    $('t-jobs').innerHTML = '<thead><tr><th scope="col">Job</th><th scope="col">Herramienta</th><th scope="col">Control-M</th>' +
+      '<th scope="col">¿Es candidato?</th><th scope="col" class="n">Prom. diario</th><th scope="col">Esquema</th>' +
+      '<th scope="col">Aplicación</th><th scope="col">Dirección / N3</th><th scope="col" class="n">Campos (Excel / doc.)</th>' +
+      '<th scope="col">Advertencias</th></tr></thead><tbody>' +
+      (html || '<tr class="vacia"><td colspan="10">Ningún job con estos filtros</td></tr>') + '</tbody>';
+    $('mas').hidden = filas.length <= lista.tope;
+  }
+
+  /* ------------------------------------------------------------ la carga */
+  function pintarCarga() {
+    var c = datos.carga || {};
+    var tipos = (c.advertencias_por_tipo || []).map(function (t) {
+      return '<tr><td>' + esc(t.hoja) + '</td><td>' + esc(t.tipo) + '</td><td class="n">' + n0(t.cuantas) + '</td></tr>';
+    }).join('');
+    $('carga-cuerpo').innerHTML = '<p class="nota">Carga ' + n0(c.numero) + ' del ' + esc(dia(c.fecha)) + ' (' + esc(c.archivo) + '): ' +
+      n0(c.jobs_en_excel) + ' jobs en el Excel, ' + n0(c.jobs_nuevos) + ' nuevos, ' + n0(c.jobs_cambiados) + ' cambiados, ' +
+      n0(c.jobs_baja) + ' que ya no vienen. El detalle de cada advertencia está en <code>orq.Advertencia</code>.</p>' +
+      '<div class="orq-tabla-wrap orq-carga-tabla"><table class="orq-tabla"><thead><tr><th scope="col">Hoja</th><th scope="col">Advertencia</th>' +
+      '<th scope="col" class="n">Cuántas</th></tr></thead><tbody>' +
+      (tipos || '<tr class="vacia"><td colspan="3">Ninguna</td></tr>') + '</tbody></table></div>';
+  }
+
+  /* ------------------------------------------------------------ Excel */
+  var xlsxListo = null;
+  function cargarXlsx() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    return xlsxListo || (xlsxListo = new Promise(function (ok, mal) {
+      var s = document.createElement('script');
+      s.src = XLSX_URL;
+      s.onload = function () { ok(window.XLSX); };
+      s.onerror = function () { xlsxListo = null; mal(new Error('no se pudo cargar ' + XLSX_URL)); };
+      document.head.appendChild(s);
+    }));
+  }
+  function hoja(XLSX, filas, anchos) {
+    var ws = XLSX.utils.aoa_to_sheet(filas);
+    if (anchos) ws['!cols'] = anchos.map(function (w) { return { wch: w }; });
+    return ws;
+  }
+  $('excel').onclick = function () {
+    var b = this;
+    b.disabled = true;
+    Promise.all([cargarXlsx(), traerDetalle()]).then(function (r) {
+      var XLSX = r[0], v = vista, i = v.ind, p = datos.parametros || {};
+      var wb = XLSX.utils.book_new();
+      var filtros = [['Dirección', f.dir || 'Todas'], ['N3', f.n3 || 'Todos'], ['Herramienta', f.herr || 'Todas'],
+                     ['¿Es candidato?', f.cand.length ? f.cand.join(', ') : 'Todos']];
+      XLSX.utils.book_append_sheet(wb, hoja(XLSX, [['Orquestación', ''], ['Carga del Excel', (datos.carga || {}).fecha || '']]
+        .concat(filtros).concat([[], ['Indicador', 'Valor'],
+          ['Universo de jobs', i.universo], ['Identificados', i.identificados], ['Huérfanos', i.huerfanos],
+          ['Registro completo (con dato)', i.completitud], ['Registro completo (documentado)', i.estricta],
+          ['Jobs documentados al 100%', i.completos], ['Activos en Control-M', i.activos],
+          ['Completamente orquestados', i.orquestados], ['% del universo activo', i.pct_orquestados],
+          ['Candidatos a migrar (Si)', i.candidatos], ['Migrados con éxito', i.migrados_exito], ['% avance', i.pct_ingreso],
+          ['Candidatos a decomiso', i.decomisos], ['Decomisados exitosos', i.decomisos_exitosos], ['% avance decomisos', i.pct_decomisos],
+          ['Ejecuciones consumidas (capturada)', i.ejec_capturada], ['Ejecuciones consumidas (calculada)', i.ejec_calculada],
+          ['Ejecuciones pendientes por migrar', i.pend_migrar], ['Costo actual de licenciamiento', i.licencia],
+          ['JOB del esquema híbrido', i.n_job], ['Costo JOB', i.costo_job], ['Tareas del esquema híbrido', i.n_tarea],
+          ['Costo tareas', i.costo_tarea], ['Total esquema híbrido', i.costo_hibrido],
+          ['Ejecuciones (consumidas + pendientes)', i.ejec_futuras], ['Costo esquema actual por ejecuciones', i.costo_futuro],
+          ['Costo por JOB al año', p.CostoJobAnual], ['Costo por tarea diaria al año', p.CostoTareaAnual]]), [42, 20]), 'Resumen');
+      XLSX.utils.book_append_sheet(wb, hoja(XLSX, [['Medidor', 'Universo', 'Logrado', '%']].concat(v.madurez.map(function (m) {
+        return [m.nombre, m.universo, m.logrado, m.pct];
+      })), [22, 10, 10, 8]), 'Madurez');
+      var dn = [['Dirección', 'N3', 'Jobs', '% universo', 'Campos prom.', '% identificación', 'Cand. reducción', 'Reducciones',
+                 '% reducción', 'Cand. depuración', 'Depurados', '% depuración', 'Nuevos a orquestar', 'Orquestados', 'En adopción']];
+      function fila(dir, n3, g) {
+        return [dir, n3, g.jobs, g.pct_universo, g.campos_prom, g.pct_ident, g.red_cand, g.red_exito, g.pct_red,
+                g.dep_cand, g.dep_exito, g.pct_dep, g.nuevo_cand, g.nuevo_orq, g.adopcion];
+      }
+      v.dir.direcciones.forEach(function (g) {
+        dn.push(fila(g.nombre, 'Total dirección', g));
+        g.n3s.forEach(function (n) { dn.push(fila(g.nombre, n.nombre, n)); });
+      });
+      dn.push(fila('Total', '', v.dir.total));
+      XLSX.utils.book_append_sheet(wb, hoja(XLSX, dn, [30, 30, 8, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 10]), 'Dirección - N3');
+      XLSX.utils.book_append_sheet(wb, hoja(XLSX, [['Col.', 'Dato requerido', 'Con dato', 'Faltantes', '%', 'Documentado', '% documentado']]
+        .concat(v.campos.map(function (c) { return [c.letra, c.nombre, c.con_dato, c.faltantes, c.pct, c.documentados, c.pct_doc]; })),
+        [6, 36, 10, 10, 8, 12, 12]), 'Completitud por campo');
+      var v7 = v.v37, h37 = [['Cantidad de jobs', v7.n_jobs], ['Cantidad de tareas', v7.n_tareas], ['% Migrados', v7.pct_migrados],
+        ['Nivel de completitud', v7.completitud], ['Jobs no candidatos', v7.no_candidatos], ['Jobs a decomisar', v7.a_decomisar], [],
+        ['Clasificación', 'Jobs']].concat(v7.por_clasif).concat([[], ['Herramienta', 'Jobs']]).concat(v7.por_herramienta)
+        .concat([[], ['¿Es candidato?', 'Jobs']]).concat(v7.por_candidato)
+        .concat([[], ['Dirección', 'Jobs', 'Tareas', '% Migrados', 'Completitud']])
+        .concat(v7.por_dir.map(function (d) { return [d.dir, d.n_jobs, d.n_tareas, d.pct_migrados, d.completitud]; }));
+      XLSX.utils.book_append_sheet(wb, hoja(XLSX, h37, [30, 10, 10, 12, 12]), 'Vista v3.7');
+      var hc = ['Fecha', 'Origen'].concat(Calc.HISTORICO.map(function (x) { return x.nombre; }));
+      XLSX.utils.book_append_sheet(wb, hoja(XLSX, [hc].concat(historicoFilas.map(function (h) {
+        return [h.Fecha, h.Origen].concat(Calc.HISTORICO.map(function (x) { return h[x.id]; }));
+      })), [11, 8, 12, 12, 12, 12, 12, 12, 12, 12, 12]), 'Histórico');
+      XLSX.utils.book_append_sheet(wb, hoja(XLSX, [['Job', 'Dirección', 'N3', '¿Es candidato?', 'Resultado', 'Estatus', 'Estado CAB',
+        'Fecha compromiso', 'Fecha real']].concat(v.decomisos.map(function (d) {
+          return [d.JobName, d.Dir, d.N3, d.Candidato, d.Resultado, d.EstatusDecomiso, d.EstadoCAB, d.FechaCompromiso, d.FechaReal];
+        })), [34, 26, 26, 16, 10, 14, 14, 12, 12]), 'Decomisos');
+      var jc = [['Job', 'Renglón del Excel', 'Herramienta', 'Estatus control-M', '¿Es candidato?', 'Promedio diario', 'Clasificación',
+                 'Esquema', 'Aplicación', 'Aplicación en catálogo', 'Dirección', 'N3', 'Service Owner N2', 'Escalación 1', 'Escalación 2',
+                 'Escalación 3', 'Criticidad', 'Proceso de negocio', 'Campos con dato', 'Campos documentados', 'Huérfano',
+                 'Activo', 'Completamente orquestado', 'Migrado', 'Optimizado', 'Con alertamiento', 'Sin redundancia',
+                 'Con SLA activo', 'Nombre del SLA', 'Responsables fuera de Datos', 'Advertencias']];
+      Calc.lista(v.jobs, detalle, '', '').forEach(function (x) {
+        var d = x.det, o = x.job;
+        jc.push([d.JobName, d.FilaExcel, d.Herramienta, d.EstatusControlM, d.EsCandidato,
+                 d.PromedioDiarioTexto || d.PromedioDiario, d.Clasificacion, d.EsquemaConsiderado, d.Aplicacion,
+                 d.AplicacionEnCatalogo === 1 ? 'Si' : (d.AplicacionEnCatalogo === 0 ? 'No' : ''), o.Dir, o.N3, d.ServiceOwnerN2,
+                 d.Escalacion1, d.Escalacion2, d.Escalacion3, d.Criticidad, d.ProcesoNegocio, o.CamposLlenosExcel,
+                 o.CamposLlenosEstricta, o.EsHuerfano ? 'Si' : 'No', o.Activo ? 'Si' : 'No', o.OrqCompleto ? 'Si' : 'No',
+                 d.Migrado, d.Optimizado, d.ConAlertamiento, d.SinRedundancia, d.ConSlaActivo, d.NombreSla,
+                 d.PersonasFueraDeDatos, d.Advertencias]);
+      });
+      XLSX.utils.book_append_sheet(wb, hoja(XLSX, jc, [34, 8, 16, 12, 16, 10, 14, 10, 24, 10, 26, 26, 26, 22, 22, 22, 10, 22,
+                                                       8, 8, 8, 8, 8, 10, 10, 10, 12, 10, 20, 8, 40]), 'Jobs');
+      XLSX.writeFile(wb, 'Orquestacion_' + (datos.hoy || '') + (Calc.hayFiltro(f) ? '_filtrado' : '') + '.xlsx');
+    }).catch(function (e2) {
+      error('No se pudo armar el Excel: ' + (e2 && e2.message ? e2.message : e2));
+    }).then(function () { b.disabled = false; });
+  };
+
+  /* ------------------------------------------------------------ tablero */
+  window.TableroOrquestacionModulo = {
+    // Las graficas que se pintaron con la pestaña oculta midieron cero.
+    redimensionar: function () {
+      Object.keys(graficas).forEach(function (k) { if (graficas[k]) graficas[k].resize(); });
+    },
+  };
+
+  cargar();
 })();

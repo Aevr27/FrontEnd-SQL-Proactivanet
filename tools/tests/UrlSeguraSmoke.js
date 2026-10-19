@@ -126,15 +126,17 @@ Check('con base file://, la relativa se rechaza', '', EFile.url('detalle.html'))
 Check('con base file://, una https sigue valiendo',
   'https://intranet/detalle', EFile.url('https://intranet/detalle'));
 
-// --- 7. Los tres modulos pasan liga_detalle por la validacion -------------
+// --- 7. Los modulos con liga_detalle la pasan por la validacion -----------
 // Se comprueba sobre el ARCHIVO REAL: si alguien revierte el href crudo,
-// esto falla.
+// esto falla. orquestacion/ ya no esta: desde el 2026-10-19 lee la base
+// (orquestacion.ashx) y no pinta ninguna liga externa.
 function leer(rel) { return fs.readFileSync(path.join(raiz, rel), 'utf8'); }
 var MODULOS = [
   ['experiencia',    path.join('experiencia', 'experiencia.js'),       'h.href=J.liga_detalle'],
-  ['observabilidad', path.join('observabilidad', 'observabilidad.js'), 'h.href=J.liga_detalle'],
-  ['orquestacion',   path.join('orquestacion', 'orquestacion.js'),     'h.href=J.liga_detalle']
+  ['observabilidad', path.join('observabilidad', 'observabilidad.js'), 'h.href=J.liga_detalle']
 ];
+Check('orquestacion: no pinta ligas externas',
+  'false', /liga_detalle|\.href\s*=/.test(leer(path.join('orquestacion', 'orquestacion.js'))) ? 'true' : 'false');
 MODULOS.forEach(function (m) {
   var txt = leer(m[1]);
   Check(m[0] + ': usa Escape.url', 'true', txt.indexOf('Escape.url(') >= 0 ? 'true' : 'false');

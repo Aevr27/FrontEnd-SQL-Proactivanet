@@ -56,11 +56,11 @@ incremental mantiene actualizados los tickets modificados durante los últimos
 
 - `dashboard.html` / `dashboard.js` / `dashboard.css` — la página única con la
   barra lateral de pestañas: SLA y productividad, Backlog, Experiencia, QA,
-  QARE, Análisis de servicios, Call Center y Tablero.
-- `backlog/`, `experiencia/`, `qa/`, `qare/`, `analisis/` — cada pestaña
+  QARE, Análisis de servicios, Orquestación, Call Center y Tablero.
+- `backlog/`, `experiencia/`, `qa/`, `qare/`, `analisis/`, `orquestacion/` — cada pestaña
   embebida; también abren como página suelta.
-- `assets/Tablero_Experiencia.html` — archivo generado (Observabilidad y
-  Orquestación) que se muestra en la pestaña Tablero dentro de un `<iframe>`;
+- `assets/Tablero_Experiencia.html` — archivo generado (Observabilidad; su
+  Orquestación y su Experiencia se esconden) que se muestra en la pestaña Tablero dentro de un `<iframe>`;
   es una instantánea, no consulta SQL.
 - `admin/` — Administración de iniciativas (`admin/iniciativas.html`, enlazada
   desde la barra lateral solo para cuentas autorizadas) y la consola de
@@ -274,7 +274,7 @@ Los archivos locales y configuraciones sensibles están excluidos mediante
 ├── backlog/
 ├── experiencia/
 ├── observabilidad/        (página suelta, sin enlace; lee data/*.mock.json)
-├── orquestacion/          (página suelta, sin enlace; lee data/*.mock.json)
+├── orquestacion/          (pestaña; lee handlers/orquestacion.ashx, vistas del sql/77)
 ├── qa/
 ├── qare/
 ├── handlers/              (*.ashx)

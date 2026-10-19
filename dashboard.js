@@ -3795,10 +3795,10 @@ const TableroSla = (function () {
 /* =======================================================================
    4. Router de pestañas principales (carga perezosa)
    ======================================================================= */
-// Experiencia / Observabilidad / Orquestacion ya no se dibujan aqui: son la
-// navegacion interna del documento independiente Tablero_Experiencia.html,
-// cargado en un <iframe> bajo la pestaña "Tablero". El modulo solo tiene que
-// pedir la carga perezosa la primera vez.
+// Observabilidad ya no se dibuja aqui: es la navegacion interna del documento
+// independiente Tablero_Experiencia.html, cargado en un <iframe> bajo la
+// pestaña "Tablero". El modulo solo tiene que pedir la carga perezosa la
+// primera vez. Experiencia y Orquestacion ya tienen pestaña propia.
 const TableroExterno = (() => {
   // Una sola marca por carga de dashboard.html. Evita que el navegador siga
   // sirviendo de cache un Tablero_Experiencia.html viejo despues de que el
@@ -3806,10 +3806,11 @@ const TableroExterno = (() => {
   // URL en cada activacion de la pestaña.
   const VERSION = Date.now();
 
-  /* La pestaña "Experiencia" del documento legacy ya la reemplazo el modulo
-     nativo de experiencia/, pero Observabilidad y Orquestacion siguen viviendo
-     ahi, asi que el marco se queda. Para que Experiencia no aparezca dos veces
-     se esconde SOLO esa pestaña legacy, desde aqui y en el evento load del
+  /* Las pestañas "Experiencia" y "Orquestación" del documento legacy ya las
+     reemplazaron los modulos nativos de experiencia/ y orquestacion/ (este,
+     el 2026-10-19, leyendo de la base), pero Observabilidad sigue viviendo
+     ahi, asi que el marco se queda. Para que no aparezcan dos veces se
+     esconden ESAS dos pestañas legacy, desde aqui y en el evento load del
      marco: el archivo assets/Tablero_Experiencia.html no se toca (lo regenera
      TableroExperiencia_v3.7.exe y cualquier edicion se perderia).
 
@@ -3817,22 +3818,29 @@ const TableroExterno = (() => {
      contentDocument es accesible. Si algun dia no lo fuera (otro host, o
      file://), el try deja el marco tal cual estaba en vez de romper la
      pestaña. */
+  const REEMPLAZADAS = ['experiencia', 'orquestacion'];
+
   function ocultarExperienciaLegacy(marco) {
     let doc;
     try { doc = marco.contentDocument; } catch (e) { return; }   // otro origen
     if (!doc) return;
 
-    const boton = doc.querySelector('.mtab[data-tab="experiencia"]');
-    const panel = doc.getElementById('tab-experiencia');
-    // display en linea gana a la regla .maintab-content.active del legacy, asi
-    // que su propio navegador de pestañas no puede volver a mostrarla.
-    if (boton) boton.style.display = 'none';
-    if (panel) panel.style.display = 'none';
+    // Experiencia era la pestaña que abria por omision: si falta su boton se
+    // supone activa, como antes.
+    let eraLaActiva = !doc.querySelector('.mtab[data-tab="experiencia"]');
+    REEMPLAZADAS.forEach(nombre => {
+      const boton = doc.querySelector(`.mtab[data-tab="${nombre}"]`);
+      const panel = doc.getElementById(`tab-${nombre}`);
+      if (boton && boton.classList.contains('active')) eraLaActiva = true;
+      // display en linea gana a la regla .maintab-content.active del legacy,
+      // asi que su propio navegador de pestañas no puede volver a mostrarla.
+      if (boton) boton.style.display = 'none';
+      if (panel) panel.style.display = 'none';
+    });
 
-    // Experiencia era la pestaña que abria por omision. Con ella escondida el
-    // marco se veria vacio, asi que se pulsa Observabilidad: su manejador es el
-    // del propio documento legacy, que ademas dispara su renderObserv().
-    const eraLaActiva = !boton || boton.classList.contains('active');
+    // Con la activa escondida el marco se veria vacio, asi que se pulsa
+    // Observabilidad: su manejador es el del propio documento legacy, que
+    // ademas dispara su renderObserv().
     const observabilidad = doc.querySelector('.mtab[data-tab="observabilidad"]');
     if (eraLaActiva && observabilidad) observabilidad.click();
 
@@ -4163,6 +4171,23 @@ const TableroAnalisis = moduloEmbebido({
   },
 });
 
+/* Orquestacion: mismo trato que Efectividad. El modulo pide
+   orquestacion.ashx una vez al montarse (y ?detalle=1 al abrir la lista de
+   jobs); al volver a la pestaña solo se remiden sus graficas de Chart.js, que
+   midieron cero si se pintaron con el contenedor oculto. */
+const TableroOrquestacion = moduloEmbebido({
+  nombre: 'Orquestación',
+  base: 'orquestacion/',
+  id: 'tab-orquestacion',
+  pagina: 'orquestacion.html',
+  hoja: 'orquestacion.css',
+  guion: 'orquestacion.js',
+  alVolver: () => {
+    const modulo = window.TableroOrquestacionModulo;
+    if (modulo) modulo.redimensionar();
+  },
+});
+
 /* =======================================================================
    Pestanas de SLA y Call Center: un solo tablero en dos vistas
    -----------------------------------------------------------------------
@@ -4258,6 +4283,7 @@ const MODULOS = {
   qa: TableroQa,
   qare: TableroQare,
   analisis: TableroAnalisis,
+  orquestacion: TableroOrquestacion,
   call: pestanaSla('tab-call'),
   tablero: TableroExterno,
 };
