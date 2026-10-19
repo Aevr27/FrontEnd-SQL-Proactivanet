@@ -1,6 +1,6 @@
 /* =========================================================================
    sql/22_solicitudes_cambio_rollback.sql - Deshace sql/22: borra las tres
-   tablas, el tipo y los tres procedimientos de solicitudes, y deja
+   tablas, los dos tipos y los cuatro procedimientos de solicitudes, y deja
    adm.usp_GestionAdmin_Modificar con el texto EXACTO de sql/21.
 
    ESTADO: PROPUESTA PARA REVISION. NO EJECUTADA EN LA VM.
@@ -16,7 +16,7 @@
    Antes de esto, apagar en el sitio el envio y la revision de solicitudes
    (si no, fallan con "objeto no existe").
 
-   PRECONDICION (si no, ROLLBACK y no toca nada): los cuatro
+   PRECONDICION (si no, ROLLBACK y no toca nada): los cinco
      procedimientos con el hash de sql/22.
    POSTCONDICION (si no, ROLLBACK): Modificar con el hash de sql/21
      0x4E3A69887120832C215FFAF68DFF2792BDE7272CD75B3B0FC399A424050583C3
@@ -37,9 +37,10 @@ SELECT v.Objeto, v.Esperado, Hash = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLAC
                    N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''))
 INTO #h22
 FROM (VALUES (N'adm.usp_GestionAdmin_Modificar', 0x8E0848187A529F6E0C2D9D8B30820F0EA19CCDEC7C7937EFB41BF33108084BA9),
-             (N'adm.usp_SolicitudCambio_Crear', 0xC72A0ABC9E5F63D4D5F41FBE5AD02E99438CE3BA376B4C968720BB0568C9EC7E),
+             (N'adm.usp_SolicitudCambio_Crear', 0x33BBF48EB2CA3F3ED42B232BDEE570E634734348AB95D0B9D48568D3B70FDC71),
              (N'adm.usp_SolicitudCambio_Rechazar', 0xFC91FF5A0C7F5F445A1EEA168C20D696DE7D3D0943499D9EC1CF604F5987EF24),
-             (N'adm.usp_SolicitudCambio_Aplicar', 0xFD5E86A0903267BC4D09271CE96D44E560785CD47F3B359798FDF5399A2B0FF4)) AS v (Objeto, Esperado);
+             (N'adm.usp_SolicitudCambio_RegistrarFallo', 0x1125E2A3BD250A4EEB68703A72A55DACE9B3B43E4DCA13D3C9BD84FA35D7DB95),
+             (N'adm.usp_SolicitudCambio_Aplicar', 0xB12230C54B32CEB5CA060D1431BB4E8F5A052A69CED25872B2F1775A62BF17C1)) AS v (Objeto, Esperado);
 DECLARE @mal nvarchar(400) = (SELECT TOP (1) Objeto + N' (hash ' + ISNULL(CONVERT(nvarchar(70), Hash, 1), N'NULL') + N')'
                               FROM #h22 WHERE Hash IS NULL OR Hash <> Esperado ORDER BY Objeto);
 DECLARE @filas int = CASE WHEN OBJECT_ID('adm.SolicitudCambio', 'U') IS NULL THEN 0
@@ -59,12 +60,14 @@ GO
 IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Rollback 22: transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
 GO
 DROP PROCEDURE adm.usp_SolicitudCambio_Aplicar;
+DROP PROCEDURE adm.usp_SolicitudCambio_RegistrarFallo;
 DROP PROCEDURE adm.usp_SolicitudCambio_Rechazar;
 DROP PROCEDURE adm.usp_SolicitudCambio_Crear;
 DROP TABLE adm.SolicitudCambioEvento;
 DROP TABLE adm.SolicitudCambioCategoria;
 DROP TABLE adm.SolicitudCambio;
 DROP TYPE adm.SolicitudCategoriaTipo;
+DROP TYPE adm.SolicitudClasificacionTipo;
 GO
 /* Modificar vuelve al texto EXACTO de sql/21. El lote empieza en su
    comentario original: un comentario dentro del lote cambiaria el hash. */
@@ -334,6 +337,7 @@ INTO #p22
 FROM (VALUES (N'adm.usp_GestionAdmin_Modificar', 0x4E3A69887120832C215FFAF68DFF2792BDE7272CD75B3B0FC399A424050583C3)) AS v (Objeto, Esperado);
 IF NOT EXISTS (SELECT 1 FROM #p22 WHERE Hash IS NULL OR Hash <> Esperado)
    AND OBJECT_ID('adm.SolicitudCambio', 'U') IS NULL AND TYPE_ID('adm.SolicitudCategoriaTipo') IS NULL
+   AND TYPE_ID('adm.SolicitudClasificacionTipo') IS NULL AND OBJECT_ID('adm.usp_SolicitudCambio_RegistrarFallo', 'P') IS NULL
 BEGIN
     COMMIT;
     SELECT Rollback_ = N'22', Resultado = 'DESHECHA';

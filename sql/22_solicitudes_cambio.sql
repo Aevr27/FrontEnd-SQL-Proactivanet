@@ -19,6 +19,7 @@
 
    QUE CREA (esquema adm, de sql/18)
      adm.SolicitudCategoriaTipo        TVP de las categorias de una solicitud
+     adm.SolicitudClasificacionTipo    TVP de la clasificacion que da ADM
      adm.SolicitudCambio               una fila por solicitud (cabecera con
                                        el antes y el despues de cada campo)
      adm.SolicitudCambioCategoria      0..N categorias: PCT (ligada) o
@@ -26,6 +27,7 @@
      adm.SolicitudCambioEvento         bitacora: solo se agrega
      adm.usp_SolicitudCambio_Crear     enviar (idempotente por llave)
      adm.usp_SolicitudCambio_Rechazar  ADM rechaza, con comentario
+     adm.usp_SolicitudCambio_RegistrarFallo  intento fallido (sigue PENDIENTE)
      adm.usp_SolicitudCambio_Aplicar   ADM aprueba = aplica, atomico, con el
                                        MISMO adm.usp_GestionAdmin_Modificar
    QUE CAMBIA
@@ -56,6 +58,14 @@
        FechaAnalisis | FechaSolucion | FechaCierre, los nombres de
        ProblemFechaEvento.Campo). Nunca se deduce del Estado.
      - Mismo usuario + misma llave = la misma solicitud (UQ + reintento).
+     - Categoria por agregar: la clasificacion (TipoIniciativa /
+       TipoAgrupado) la deriva el servidor del prefijo; si no hay regla o
+       el valor no existe en la base, se guarda SIN ella y Aplicar exige
+       que ADM la elija (51221). Nunca se aplica incompleta.
+     - Varias pendientes por iniciativa se permiten: cada una guarda su
+       "anterior"; la que llegue tarde sale desactualizada (51204).
+     - ADM puede aplicar las suyas (fase de pruebas): SolicitadoPor y
+       RevisadoPor quedan aparte.
      - Dos revisores a la vez: UPDLOCK en la solicitud; el segundo, 51202.
      - Aplicar es todo o nada: Modificar ya lo es (una transaccion,
        XACT_ABORT) y la solicitud se marca dentro de la misma.
@@ -63,6 +73,9 @@
    ERRORES NUEVOS (51001-51026 son los de sql/18)
      51201 no existe          51202 ya revisada       51204 desactualizada
      51206 Otros sin comentario                       51207 rechazo sin motivo
+     51208 RegistrarFallo dentro de otra transaccion  51209 Aplicar dentro de otra
+     51221 falta clasificacion                        51222 clasificacion de mas
+     51223 clasificacion incompleta
      51210 rol                51211 llave             51212 motivo
      51213 tipo               51214 campos del tipo   51215 etapa de fecha
      51216 accion categoria   51217 subestado         51218 misma fecha
@@ -74,7 +87,7 @@
      ningun objeto de 22, y el historial con SolicitudId (sql/17 y el
      trigger de Estado desplegado). Hash = SHA2_256 de OBJECT_DEFINITION
      sin espacios, tabs ni saltos de linea (regla de sql/20 y sql/21).
-   POSTCONDICION (si no, ROLLBACK): los cuatro procedimientos con los
+   POSTCONDICION (si no, ROLLBACK): los cinco procedimientos con los
      hashes de la seccion 5 y Modificar con 23 parametros, @SolicitudId int.
 
    DIAG ADM_04 (repo del backend), seccion 11: despues de esto marca
@@ -108,7 +121,8 @@ IF @ya = 1 OR @mal IS NOT NULL
    OR OBJECT_ID('adm.SolicitudCambioCategoria', 'U') IS NOT NULL OR OBJECT_ID('adm.SolicitudCambioEvento', 'U') IS NOT NULL
    OR TYPE_ID('adm.SolicitudCategoriaTipo') IS NOT NULL
    OR OBJECT_ID('adm.usp_SolicitudCambio_Crear', 'P') IS NOT NULL OR OBJECT_ID('adm.usp_SolicitudCambio_Rechazar', 'P') IS NOT NULL
-   OR OBJECT_ID('adm.usp_SolicitudCambio_Aplicar', 'P') IS NOT NULL
+   OR OBJECT_ID('adm.usp_SolicitudCambio_Aplicar', 'P') IS NOT NULL OR OBJECT_ID('adm.usp_SolicitudCambio_RegistrarFallo', 'P') IS NOT NULL
+   OR TYPE_ID('adm.SolicitudClasificacionTipo') IS NOT NULL
    OR OBJECT_ID('dbo.trg_Problem_FechaEvento', 'TR') IS NULL OR OBJECT_ID('dbo.trg_Problem_EstadoEvento', 'TR') IS NULL
    OR COL_LENGTH('dbo.ProblemFechaEvento', 'SolicitudId') IS NULL OR COL_LENGTH('dbo.ProblemEstadoEvento', 'SolicitudId') IS NULL
 BEGIN
@@ -131,6 +145,14 @@ CREATE TYPE adm.SolicitudCategoriaTipo AS TABLE
     Accion         varchar(7)    NOT NULL,   -- PCT (ligada) | AGREGAR (del catalogo)
     Pct            decimal(9,4)  NOT NULL,   -- fraccion 0-1, como ProblemCategoria.PctDisminucion
     TipoIniciativa nvarchar(100) NULL,       -- solo AGREGAR; NULL = sin declarar (Incompleta)
+    TipoAgrupado   nvarchar(100) NULL
+);
+-- Clasificacion que ADM da al aplicar a una categoria por agregar que llego
+-- sin ella (sin regla de prefijo o valor que no existe en la base).
+CREATE TYPE adm.SolicitudClasificacionTipo AS TABLE
+(
+    Categoria      nvarchar(450) NOT NULL,
+    TipoIniciativa nvarchar(100) NULL,
     TipoAgrupado   nvarchar(100) NULL
 );
 GO
@@ -574,14 +596,10 @@ BEGIN
         THROW 51003, N'Una categoria viene repetida.', 1;
     IF EXISTS (SELECT 1 FROM @Categorias WHERE Pct < 0 OR Pct > 1)
         THROW 51005, N'El % de una categoria esta fuera de 0-100.', 1;
-    IF EXISTS (SELECT 1 FROM @Categorias AS x
-               WHERE NULLIF(LTRIM(RTRIM(x.TipoIniciativa)), N'') IS NOT NULL
-                 AND NOT EXISTS (SELECT 1 FROM dbo.Problem AS p WHERE LTRIM(RTRIM(p.TipoIniciativa)) = LTRIM(RTRIM(x.TipoIniciativa))))
-        THROW 51011, N'Tipo de iniciativa de una categoria que no existe en dbo.Problem.', 1;
-    IF EXISTS (SELECT 1 FROM @Categorias AS x
-               WHERE NULLIF(LTRIM(RTRIM(x.TipoAgrupado)), N'') IS NOT NULL
-                 AND NOT EXISTS (SELECT 1 FROM dbo.ProblemCategoria AS pc WHERE LTRIM(RTRIM(pc.TipoAgrupado)) = LTRIM(RTRIM(x.TipoAgrupado))))
-        THROW 51012, N'Agrupacion (TipoAgrupado) de una categoria que no existe en dbo.ProblemCategoria.', 1;
+    -- La clasificacion de una categoria por agregar la deriva el servidor del
+    -- prefijo (TiposPorPrefijo). Si no hay regla o el valor no existe en la
+    -- base, la fila se guarda SIN clasificacion (ver el INSERT de abajo) y
+    -- Aplicar exige que ADM la resuelva (51221): nunca se aplica incompleta.
     IF EXISTS (SELECT 1 FROM @Categorias AS c
                WHERE c.Accion = 'AGREGAR'
                  AND NOT EXISTS (SELECT 1 FROM dbo.Categorias AS k
@@ -644,9 +662,16 @@ BEGIN
             INSERT adm.SolicitudCambioCategoria (IdSolicitud, Categoria, Accion, PctAnterior, PctNuevo, TipoIniciativa, TipoAgrupado)
             SELECT @IdSolicitud, LTRIM(RTRIM(REPLACE(x.Categoria, NCHAR(160), N' '))), x.Accion,
                    CASE WHEN x.Accion = 'PCT' THEN pc.PctDisminucion END, x.Pct,
-                   CASE WHEN x.Accion = 'AGREGAR' THEN NULLIF(LTRIM(RTRIM(x.TipoIniciativa)), N'') END,
-                   CASE WHEN x.Accion = 'AGREGAR' THEN NULLIF(LTRIM(RTRIM(x.TipoAgrupado)), N'') END
+                   CASE WHEN k.Valida = 1 THEN t.TipoIniciativa END,
+                   CASE WHEN k.Valida = 1 THEN t.TipoAgrupado END
             FROM @Categorias AS x
+            CROSS APPLY (SELECT TipoIniciativa = NULLIF(LTRIM(RTRIM(x.TipoIniciativa)), N''),
+                                TipoAgrupado   = NULLIF(LTRIM(RTRIM(x.TipoAgrupado)), N'')) AS t
+            -- Las dos o ninguna, y solo valores que ya existen (como Modificar).
+            CROSS APPLY (SELECT Valida = CASE WHEN x.Accion = 'AGREGAR' AND t.TipoIniciativa IS NOT NULL AND t.TipoAgrupado IS NOT NULL
+                                               AND EXISTS (SELECT 1 FROM dbo.Problem AS p WHERE LTRIM(RTRIM(p.TipoIniciativa)) = t.TipoIniciativa)
+                                               AND EXISTS (SELECT 1 FROM dbo.ProblemCategoria AS q WHERE LTRIM(RTRIM(q.TipoAgrupado)) = t.TipoAgrupado)
+                                              THEN 1 ELSE 0 END) AS k
             LEFT JOIN dbo.ProblemCategoria AS pc
                    ON pc.Codigo = @Codigo
                   AND pc.Categoria = LTRIM(RTRIM(REPLACE(x.Categoria, NCHAR(160), N' ')))
@@ -711,21 +736,69 @@ END;
 GO
 IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Migracion 22: transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
 GO
+/* Registra un intento de aplicar que fallo, en SU PROPIA transaccion (la
+   del intento ya se deshizo): la solicitud sigue PENDIENTE con Intentos + 1,
+   UltimoError y un evento FALLO_APLICAR (DESACTUALIZADA si @Numero = 51204).
+   Lo usan Aplicar (fallas en SQL) y el handler (fallas de la validacion de
+   la aplicacion, antes de llegar a Aplicar). */
+CREATE PROCEDURE adm.usp_SolicitudCambio_RegistrarFallo
+    @IdSolicitud int,
+    @Revisor     nvarchar(256),
+    @Numero      int,
+    @Mensaje     nvarchar(2000)
+AS
+BEGIN
+    SET NOCOUNT ON; SET XACT_ABORT ON;
+    SET @Revisor = NULLIF(LTRIM(RTRIM(@Revisor)), N'');
+    IF @Revisor IS NULL
+        THROW 51001, N'Falta el usuario autenticado: no se guarda nada sin atribucion.', 1;
+    IF @@TRANCOUNT > 0
+        THROW 51208, N'RegistrarFallo corre fuera de la transaccion que fallo.', 1;
+    DECLARE @detalle nvarchar(2000) = LEFT(CONVERT(nvarchar(12), ISNULL(@Numero, 0)) + N': ' + ISNULL(@Mensaje, N''), 2000);
+    BEGIN TRY
+        BEGIN TRAN;
+            UPDATE adm.SolicitudCambio
+               SET Intentos = Intentos + 1, UltimoError = @detalle, FechaUltimoIntentoUtc = SYSUTCDATETIME()
+             WHERE IdSolicitud = @IdSolicitud AND Estado = 'PENDIENTE';
+            IF @@ROWCOUNT = 0
+            BEGIN
+                IF NOT EXISTS (SELECT 1 FROM adm.SolicitudCambio WHERE IdSolicitud = @IdSolicitud)
+                    THROW 51201, N'La solicitud no existe.', 1;
+                THROW 51202, N'La solicitud ya fue revisada (aplicada o rechazada).', 1;
+            END;
+            INSERT adm.SolicitudCambioEvento (IdSolicitud, Evento, Usuario, Detalle)
+            VALUES (@IdSolicitud, CASE WHEN @Numero = 51204 THEN 'DESACTUALIZADA' ELSE 'FALLO_APLICAR' END, @Revisor, @detalle);
+        COMMIT;
+    END TRY
+    BEGIN CATCH
+        IF @@TRANCOUNT > 0 ROLLBACK;
+        THROW;
+    END CATCH;
+END;
+GO
+IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Migracion 22: transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
+GO
 /* Aprobar = aplicar, en UNA transaccion: la solicitud queda APLICADA solo
    si la iniciativa cambio de verdad (mismo adm.usp_GestionAdmin_Modificar
    que la edicion directa, con @SolicitudId para el historial).
    - Desactualizada (lo "anterior" ya no es lo que hay): 51204, no aplica.
-   - Cualquier falla: ROLLBACK de todo; la solicitud SIGUE PENDIENTE con
-     Intentos + 1, UltimoError y un evento FALLO_APLICAR / DESACTUALIZADA.
+   - Categoria por agregar sin clasificacion: ADM la da en @Clasificaciones
+     (solo para esas filas: 51222 si no); sin ella, 51221. Lo que ADM elige
+     queda en la fila de la solicitud.
+   - Cualquier falla: ROLLBACK de todo; la solicitud SIGUE PENDIENTE
+     (usp_SolicitudCambio_RegistrarFallo).
    - Otros: no cambia la iniciativa; se cierra con el comentario de lo que
      ADM corrigio a mano (51206 sin comentario).
    - Dos revisores a la vez: UPDLOCK; el segundo recibe 51202.
+   - Quien envio y quien aplica se guardan aparte (SolicitadoPor /
+     RevisadoPor), aunque sean la misma cuenta.
    La autorizacion (solo ADM) es del handler. */
 CREATE PROCEDURE adm.usp_SolicitudCambio_Aplicar
-    @IdSolicitud int,
-    @Revisor     nvarchar(256),
-    @Comentario  nvarchar(4000) = NULL,
-    @Hoy         date = NULL
+    @IdSolicitud     int,
+    @Revisor         nvarchar(256),
+    @Comentario      nvarchar(4000) = NULL,
+    @Clasificaciones adm.SolicitudClasificacionTipo READONLY,
+    @Hoy             date = NULL
 AS
 BEGIN
     SET NOCOUNT ON; SET XACT_ABORT ON;
@@ -733,10 +806,12 @@ BEGIN
     SET @Comentario = NULLIF(LTRIM(RTRIM(@Comentario)), N'');
     IF @Revisor IS NULL
         THROW 51001, N'Falta el usuario autenticado: no se guarda nada sin atribucion.', 1;
+    IF @@TRANCOUNT > 0
+        THROW 51209, N'Aplicar abre su propia transaccion: no se llama dentro de otra.', 1;
 
     DECLARE @codigo nvarchar(100), @tipo varchar(10), @estado varchar(10),
             @eA nvarchar(100), @eN nvarchar(100), @sA nvarchar(100), @sN nvarchar(100),
-            @campo varchar(13), @fA date, @fN date;
+            @campo varchar(13), @fA date, @fN date, @nota nvarchar(2000) = NULL;
     BEGIN TRY
         BEGIN TRAN;
             SELECT @codigo = Codigo, @tipo = Tipo, @estado = Estado,
@@ -748,6 +823,8 @@ BEGIN
             IF @estado <> 'PENDIENTE' THROW 51202, N'La solicitud ya fue revisada (aplicada o rechazada).', 1;
             IF @tipo = 'OTROS' AND @Comentario IS NULL
                 THROW 51206, N'Una solicitud Otros se cierra con el comentario de lo que se corrigio.', 1;
+            IF @tipo = 'OTROS' AND EXISTS (SELECT 1 FROM @Clasificaciones)
+                THROW 51222, N'Solo se clasifica una categoria por agregar que llego sin clasificacion.', 1;
 
             IF @tipo <> 'OTROS'
             BEGIN
@@ -771,6 +848,34 @@ BEGIN
                                                             OR ISNULL(pc.PctDisminucion, -1) <> ISNULL(c.PctAnterior, -1)))
                                   OR (c.Accion = 'AGREGAR' AND pc.Codigo IS NOT NULL)))
                     THROW 51204, N'La iniciativa cambio desde que se envio la solicitud: no se aplica. Rechazala o pide que la envien de nuevo.', 1;
+
+                -- Clasificacion de ADM: solo filas AGREGAR que llegaron sin ella.
+                IF EXISTS (SELECT 1 FROM @Clasificaciones GROUP BY LTRIM(RTRIM(REPLACE(Categoria, NCHAR(160), N' '))) HAVING COUNT(*) > 1)
+                    THROW 51003, N'Una categoria viene repetida.', 1;
+                IF EXISTS (SELECT 1 FROM @Clasificaciones
+                           WHERE NULLIF(LTRIM(RTRIM(TipoIniciativa)), N'') IS NULL OR NULLIF(LTRIM(RTRIM(TipoAgrupado)), N'') IS NULL)
+                    THROW 51223, N'La clasificacion de ADM necesita Tipo de iniciativa y Agrupacion.', 1;
+                IF EXISTS (SELECT 1 FROM @Clasificaciones AS r
+                           WHERE NOT EXISTS (SELECT 1 FROM adm.SolicitudCambioCategoria AS c
+                                             WHERE c.IdSolicitud = @IdSolicitud AND c.Accion = 'AGREGAR'
+                                               AND c.Categoria = LTRIM(RTRIM(REPLACE(r.Categoria, NCHAR(160), N' ')))
+                                               AND c.TipoIniciativa IS NULL AND c.TipoAgrupado IS NULL))
+                    THROW 51222, N'Solo se clasifica una categoria por agregar que llego sin clasificacion.', 1;
+                IF EXISTS (SELECT 1 FROM @Clasificaciones)
+                BEGIN
+                    UPDATE c SET c.TipoIniciativa = LTRIM(RTRIM(r.TipoIniciativa)), c.TipoAgrupado = LTRIM(RTRIM(r.TipoAgrupado))
+                    FROM adm.SolicitudCambioCategoria AS c
+                    INNER JOIN @Clasificaciones AS r ON c.Categoria = LTRIM(RTRIM(REPLACE(r.Categoria, NCHAR(160), N' ')))
+                    WHERE c.IdSolicitud = @IdSolicitud AND c.Accion = 'AGREGAR';
+                    SET @nota = LEFT(N'Clasificacion elegida por ADM: ' + STUFF((
+                        SELECT N'; ' + LTRIM(RTRIM(REPLACE(r2.Categoria, NCHAR(160), N' '))) + N' = '
+                             + LTRIM(RTRIM(r2.TipoIniciativa)) + N' / ' + LTRIM(RTRIM(r2.TipoAgrupado))
+                        FROM @Clasificaciones AS r2 ORDER BY r2.Categoria
+                        FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 2, N''), 2000);
+                END;
+                IF EXISTS (SELECT 1 FROM adm.SolicitudCambioCategoria
+                           WHERE IdSolicitud = @IdSolicitud AND Accion = 'AGREGAR' AND (TipoIniciativa IS NULL OR TipoAgrupado IS NULL))
+                    THROW 51221, N'Una categoria por agregar no tiene clasificacion (Tipo de iniciativa y Agrupacion): ADM debe elegirla.', 1;
 
                 DECLARE @pcts adm.CategoriaPctTipo, @agregar adm.CategoriaPctTipo, @fechasCat adm.CategoriaFechaTipo;
                 INSERT @pcts (Categoria, Pct)
@@ -800,28 +905,26 @@ BEGIN
                    UltimoError = NULL, FechaUltimoIntentoUtc = SYSUTCDATETIME()
              WHERE IdSolicitud = @IdSolicitud;
             INSERT adm.SolicitudCambioEvento (IdSolicitud, Evento, Usuario, Detalle)
-            VALUES (@IdSolicitud, 'APLICADA', @Revisor, LEFT(@Comentario, 2000));
+            VALUES (@IdSolicitud, 'APLICADA', @Revisor,
+                    LEFT(CASE WHEN @nota IS NULL THEN @Comentario
+                              WHEN @Comentario IS NULL THEN @nota
+                              ELSE @Comentario + N' | ' + @nota END, 2000));
         COMMIT;
     END TRY
     BEGIN CATCH
         IF @@TRANCOUNT > 0 ROLLBACK;
         DECLARE @num int = ERROR_NUMBER(), @msg nvarchar(2000) = LEFT(ERROR_MESSAGE(), 2000);
-        -- No existe, ya revisada o sin comentario: nada que registrar (no
-        -- es un intento de aplicar). Lo demas se registra y la solicitud
-        -- sigue PENDIENTE: nunca se pierde.
-        IF @num NOT IN (51201, 51202, 51206)
-        BEGIN
-            BEGIN TRAN;
-                UPDATE adm.SolicitudCambio
-                   SET Intentos = Intentos + 1, UltimoError = LEFT(CONVERT(nvarchar(12), @num) + N': ' + @msg, 2000),
-                       FechaUltimoIntentoUtc = SYSUTCDATETIME()
-                 WHERE IdSolicitud = @IdSolicitud AND Estado = 'PENDIENTE';
-                IF @@ROWCOUNT = 1
-                    INSERT adm.SolicitudCambioEvento (IdSolicitud, Evento, Usuario, Detalle)
-                    VALUES (@IdSolicitud, CASE WHEN @num = 51204 THEN 'DESACTUALIZADA' ELSE 'FALLO_APLICAR' END, @Revisor,
-                            LEFT(CONVERT(nvarchar(12), @num) + N': ' + @msg, 2000));
-            COMMIT;
-        END;
+        -- No existe, ya revisada, sin comentario o clasificacion mal dada por
+        -- ADM: nada que registrar (no es un intento de aplicar). Lo demas se
+        -- registra y la solicitud sigue PENDIENTE: nunca se pierde. Si el
+        -- registro mismo falla, igual se lanza el error original.
+        IF @num NOT IN (51201, 51202, 51206, 51209, 51222, 51223, 51003)
+        BEGIN TRY
+            EXEC adm.usp_SolicitudCambio_RegistrarFallo @IdSolicitud = @IdSolicitud, @Revisor = @Revisor,
+                 @Numero = @num, @Mensaje = @msg;
+        END TRY
+        BEGIN CATCH
+        END CATCH;
         THROW;
     END CATCH;
 END;
@@ -835,14 +938,15 @@ SELECT v.Objeto, v.Esperado, Hash = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLAC
                    N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''))
 INTO #p22
 FROM (VALUES (N'adm.usp_GestionAdmin_Modificar', 0x8E0848187A529F6E0C2D9D8B30820F0EA19CCDEC7C7937EFB41BF33108084BA9),
-             (N'adm.usp_SolicitudCambio_Crear', 0xC72A0ABC9E5F63D4D5F41FBE5AD02E99438CE3BA376B4C968720BB0568C9EC7E),
+             (N'adm.usp_SolicitudCambio_Crear', 0x33BBF48EB2CA3F3ED42B232BDEE570E634734348AB95D0B9D48568D3B70FDC71),
              (N'adm.usp_SolicitudCambio_Rechazar', 0xFC91FF5A0C7F5F445A1EEA168C20D696DE7D3D0943499D9EC1CF604F5987EF24),
-             (N'adm.usp_SolicitudCambio_Aplicar', 0xFD5E86A0903267BC4D09271CE96D44E560785CD47F3B359798FDF5399A2B0FF4)) AS v (Objeto, Esperado);
+             (N'adm.usp_SolicitudCambio_RegistrarFallo', 0x1125E2A3BD250A4EEB68703A72A55DACE9B3B43E4DCA13D3C9BD84FA35D7DB95),
+             (N'adm.usp_SolicitudCambio_Aplicar', 0xB12230C54B32CEB5CA060D1431BB4E8F5A052A69CED25872B2F1775A62BF17C1)) AS v (Objeto, Esperado);
 DECLARE @mal2 nvarchar(400) = (SELECT TOP (1) Objeto + N' (hash ' + ISNULL(CONVERT(nvarchar(70), Hash, 1), N'NULL') + N')'
                                FROM #p22 WHERE Hash IS NULL OR Hash <> Esperado ORDER BY Objeto);
 IF @mal2 IS NULL
    AND OBJECT_ID('adm.SolicitudCambio', 'U') IS NOT NULL AND OBJECT_ID('adm.SolicitudCambioCategoria', 'U') IS NOT NULL
-   AND OBJECT_ID('adm.SolicitudCambioEvento', 'U') IS NOT NULL AND TYPE_ID('adm.SolicitudCategoriaTipo') IS NOT NULL
+   AND OBJECT_ID('adm.SolicitudCambioEvento', 'U') IS NOT NULL AND TYPE_ID('adm.SolicitudCategoriaTipo') IS NOT NULL AND TYPE_ID('adm.SolicitudClasificacionTipo') IS NOT NULL
    AND EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Modificar')
                AND name = N'@SolicitudId' AND TYPE_NAME(user_type_id) = N'int' AND is_output = 0)
    AND (SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Modificar')) = 23

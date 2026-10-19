@@ -2,7 +2,7 @@
    sql/diag_solicitudes_cambio.sql - diagnostico de sql/22. SOLO LECTURA
    (SELECT): se puede correr en la VM sin OK, antes y despues de sql/22.
 
-   1  objetos de sql/22 y hash de los procedimientos
+   1  objetos de sql/22 (3 tablas, 2 tipos) y hash de los 5 procedimientos
    2  historial: triggers que leen pfe_solicitud y columnas SolicitudId
    3  permisos de PROACTIVANETAD (DENY de _permisos.sql, EXECUTE sobre adm)
    4  solicitudes por estado; pendientes mas viejas (respaldo antes de un
@@ -25,12 +25,13 @@ SELECT Seccion = 1, Objeto = v.Objeto,
                       THEN 'sql/22' WHEN v.Objeto = N'adm.usp_GestionAdmin_Modificar' AND CONVERT(varchar(70), HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
                   OBJECT_DEFINITION(OBJECT_ID(v.Objeto)), N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')), 1)
                       = '0x4E3A69887120832C215FFAF68DFF2792BDE7272CD75B3B0FC399A424050583C3' THEN 'sql/21 (22 sin aplicar)' ELSE 'OTRA: revisar' END
-FROM (VALUES (N'adm.SolicitudCategoriaTipo', NULL),
+FROM (VALUES (N'adm.SolicitudCategoriaTipo', NULL), (N'adm.SolicitudClasificacionTipo', NULL),
              (N'adm.SolicitudCambio', NULL), (N'adm.SolicitudCambioCategoria', NULL), (N'adm.SolicitudCambioEvento', NULL),
              (N'adm.usp_GestionAdmin_Modificar', '0x8E0848187A529F6E0C2D9D8B30820F0EA19CCDEC7C7937EFB41BF33108084BA9'),
-             (N'adm.usp_SolicitudCambio_Crear', '0xC72A0ABC9E5F63D4D5F41FBE5AD02E99438CE3BA376B4C968720BB0568C9EC7E'),
+             (N'adm.usp_SolicitudCambio_Crear', '0x33BBF48EB2CA3F3ED42B232BDEE570E634734348AB95D0B9D48568D3B70FDC71'),
              (N'adm.usp_SolicitudCambio_Rechazar', '0xFC91FF5A0C7F5F445A1EEA168C20D696DE7D3D0943499D9EC1CF604F5987EF24'),
-             (N'adm.usp_SolicitudCambio_Aplicar', '0xFD5E86A0903267BC4D09271CE96D44E560785CD47F3B359798FDF5399A2B0FF4')) AS v (Objeto, Esperado);
+             (N'adm.usp_SolicitudCambio_RegistrarFallo', '0x1125E2A3BD250A4EEB68703A72A55DACE9B3B43E4DCA13D3C9BD84FA35D7DB95'),
+             (N'adm.usp_SolicitudCambio_Aplicar', '0xB12230C54B32CEB5CA060D1431BB4E8F5A052A69CED25872B2F1775A62BF17C1')) AS v (Objeto, Esperado);
 
 -- 2. Historial: quien llena SolicitudId.
 SELECT Seccion = 2, Objeto = OBJECT_SCHEMA_NAME(m.object_id) + N'.' + OBJECT_NAME(m.object_id),
