@@ -65,6 +65,9 @@ public class AdminIniciativasRegistro : IHttpHandler
             // (PersistenciaGestionAdmin, const): la pagina rotula sus botones
             // con esto y nunca promete un guardado que no ocurre.
             registro["persistencia_admin"] = PersistenciaGestionAdmin.Activa();
+            // Lo mismo para "Solicitar cambios" (sql/22): con false la
+            // solicitud se prepara pero no se envia, y la pagina lo dice.
+            registro["persistencia_solicitudes"] = PersistenciaSolicitudesCambio.Activa();
             context.Response.Write(serializador.Serialize(registro));
         }
         catch (Exception ex)
