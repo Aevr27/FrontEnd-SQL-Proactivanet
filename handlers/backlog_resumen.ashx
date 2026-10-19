@@ -8,9 +8,11 @@
 // espera:
 //
 //     { "kpis": { "BacklogTotal": 0, "Criticos": 0, "Altos": 0,
-//                 "Mayor30Dias": 0, "Reasignados": 0, "Reabiertos": 0 },
+//                 "Mayor30Dias": 0, "Reasignados": 0, "Reabiertos": 0,
+//                 "DentroSLA": 0, "FueraSLA": 0, "TramiteCompra": 0 },
 //       "prioridad": [...], "aging": [...],
 //       "reasignaciones": [...], "reabiertos": [...], "sla": [...],
+//       "subestados": [ { "Subestado": "...", "Tickets": 0 } ],
 //       "meta": { ultimaActualizacion, periodoInicio, periodoFin, tipoPeriodo } }
 //
 // "meta" es el contrato compartido de frescura del tablero
@@ -19,11 +21,15 @@
 // unico componente. El tablero lo lee para el sello de la cabecera y no
 // depende de el para ningun numero.
 //
-// dbo.usp_CorreoBacklog_Principal devuelve seis result sets y aqui se mapean
+// dbo.usp_CorreoBacklog_Principal devuelve siete result sets y aqui se mapean
 // POR POSICION, en el orden en que el procedimiento los emite (ver los
-// comentarios "Result set N" de 07_correo_backlog.sql): kpis, prioridad,
-// aging, reasignaciones, reabiertos y SLA al final. El SLA es el ultimo, no
-// el cuarto: mapearlo en la posicion 3 le entrega a "sla" las filas de
+// comentarios "Result set N" de la definicion viva, version del 2026-10-16):
+// kpis, prioridad, aging, reasignaciones, reabiertos, SLA y, al final,
+// subestados. Subestados (Subestado, Tickets) sale agrupado SOLO por
+// Subestado, sin Lider ni Grupo: respeta los filtros de arriba -viajan como
+// parametros-, pero no el cross-filter de las graficas. Un procedimiento
+// anterior sin el septimo set devuelve "subestados" vacio, no un error.
+// El SLA es el sexto, no el cuarto: mapearlo en la posicion 3 le entrega a "sla" las filas de
 // reasignaciones, que no traen EstadoSLA, y la columna "% Fuera SLA" de la
 // tabla por lider sale en 0% para todos. Las claves de este diccionario van
 // en ese mismo orden a proposito, para que se lean contra el procedimiento.
@@ -69,6 +75,7 @@ public class BacklogResumen : IHttpHandler
                 { "reasignaciones", Filas(sets, 3) },
                 { "reabiertos",    Filas(sets, 4) },
                 { "sla",           Filas(sets, 5) },
+                { "subestados",    Filas(sets, 6) },
                 { "meta",          info.AJson() },
             };
         });

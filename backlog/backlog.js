@@ -436,26 +436,36 @@ const TableroBacklog = (function () {
       exacto = true;
     }
 
-    /* Dentro / Fuera SLA: el result set 6 del procedimiento (Lider, Grupo,
-       EstadoSLA, Tickets) es un agregado completo por (Lider, Grupo), asi que
-       su suma -sin filtro o por porLiderGrupo- es exacta, igual que la
-       columna "% Fuera SLA" de la tabla por lider. EstadoSLA trae tres
-       valores (vw_Backlog / Backfill): 'Dentro SLA', 'Fuera SLA' y
-       'Dentro SLA(Subestado)'; el tercero no se suma a ninguno de los dos
-       para no borrar la distincion, va contado en el pie. El semaforo usa los
-       cortes del correo de direccion: <=5% verde, <=15% ambar, si no rojo. */
-    const sla = { dentro: 0, fuera: 0, subestado: 0, total: 0 };
-    for (const x of porLiderGrupo(r.sla)) {
-      const n = x.Tickets ?? 0;
-      sla.total += n;
-      if (x.EstadoSLA === 'Dentro SLA') sla.dentro += n;
-      else if (x.EstadoSLA === 'Fuera SLA') sla.fuera += n;
-      else if (x.EstadoSLA === 'Dentro SLA(Subestado)') sla.subestado += n;
+    /* Dentro / Fuera SLA. Sin cross-filter salen TAL CUAL de las columnas
+       DentroSLA, FueraSLA y TramiteCompra del result set 1 (kpis). Con
+       cross-filter se suma el result set 6 (Lider, Grupo, EstadoSLA, Tickets),
+       que es un agregado completo por (Lider, Grupo), con la MISMA regla que
+       usa el procedimiento para esas columnas:
+         DentroSLA     = 'Dentro SLA' + 'Dentro SLA(Subestado)'
+         FueraSLA      = 'Fuera SLA'
+         TramiteCompra = 'Tramite de compra'
+       Tramite de compra no es ni dentro ni fuera: va en el pie. El % fuera es
+       sobre todo el backlog, como el "% Fuera SLA" del correo de direccion, y
+       el semaforo usa sus mismos cortes: <=5% verde, <=15% ambar, si no rojo. */
+    const sla = { dentro: 0, fuera: 0, tramite: 0, total: 0 };
+    if (!hayFiltro() && r.kpis && r.kpis.DentroSLA !== undefined) {
+      sla.dentro = r.kpis.DentroSLA ?? 0;
+      sla.fuera = r.kpis.FueraSLA ?? 0;
+      sla.tramite = r.kpis.TramiteCompra ?? 0;
+      sla.total = total;
+    } else {
+      for (const x of porLiderGrupo(r.sla)) {
+        const n = x.Tickets ?? 0;
+        sla.total += n;
+        if (x.EstadoSLA === 'Dentro SLA' || x.EstadoSLA === 'Dentro SLA(Subestado)') sla.dentro += n;
+        else if (x.EstadoSLA === 'Fuera SLA') sla.fuera += n;
+        else if (x.EstadoSLA === 'Tramite de compra') sla.tramite += n;
+      }
     }
     const pctFuera = sla.total > 0 ? 100 * sla.fuera / sla.total : null;
     const semSla = pctFuera === null ? '' : (pctFuera <= 5 ? 'sv' : pctFuera <= 15 ? 'sa' : 'sr');
     const pieSla = `${PCT(sla.fuera, sla.total)} fuera`
-      + (sla.subestado > 0 ? ` · ${FMT(sla.subestado)} dentro por subestado` : '');
+      + (sla.tramite > 0 ? ` · ${FMT(sla.tramite)} en tramite de compra` : '');
 
     const corte = document.getElementById('f-corte-bl').value;
     const pie = hayFiltro() ? 'sobre lo filtrado' : (corte ? `corte ${corte}` : '');
@@ -835,6 +845,66 @@ const TableroBacklog = (function () {
     }).render();
   }
 
+
+  /* Barras HORIZONTALES por subestado, de mayor a menor. Sale del result set
+     7 del procedimiento (Subestado, Tickets): las categorias y las cifras son
+     las que devuelve, sin lista fija. Ese set viene agrupado SOLO por
+     Subestado, asi que los filtros de arriba (c1 / grupos / lideres, que
+     viajan como parametros) si lo recortan, pero el cross-filter de las
+     graficas no se puede aplicar: el pie lo dice en vez de pintar una cifra
+     que parezca filtrada. Tampoco tiene clic, por lo mismo.
+
+     Subestado NULL: el corte actual no tiene, pero los cortes viejos si (sobre
+     todo los del Backfill). No se inventa un rotulo para ellos: se quedan
+     fuera de las barras y el pie dice cuantos son. */
+  function renderBarrasSubestado() {
+    const lienzo = document.getElementById('chart-subestado-bl');
+    const cap = document.getElementById('cap-subestado-bl');
+    const filas = datos.resumen.subestados || [];
+    const tieneSubestado = x => typeof x.Subestado === 'string' && x.Subestado.trim() !== '';
+
+    const ent = filas.filter(tieneSubestado)
+      .map(x => [x.Subestado, x.Tickets ?? 0])
+      .filter(e => e[1] > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'));
+    const sinSubestado = filas.filter(x => !tieneSubestado(x)).reduce((a, x) => a + (x.Tickets ?? 0), 0);
+
+    const avisos = [];
+    if (sinSubestado > 0) avisos.push(`${FMT(sinSubestado)} tickets de este corte no tienen subestado registrado y no se grafican.`);
+    if (hayFiltro()) avisos.push('No se recorta con la seleccion en las graficas: el procedimiento lo agrupa solo por subestado.');
+    cap.textContent = avisos.join(' ');
+
+    if (!ent.length) {
+      lienzo.parentElement.style.height = '';
+      return renderEmptyChart('chart-subestado-bl', 'Sin tickets en backlog para este corte y filtros.');
+    }
+
+    // Una fila por subestado: el alto crece con las categorias para que
+    // ningun rotulo se salte, con el .lienzo de siempre como piso.
+    lienzo.parentElement.style.height = `${Math.max(260, ent.length * 34 + 30)}px`;
+
+    /* Un solo color: es una sola serie y el largo de la barra ya dice todo;
+       un color por subestado afirmaria una identidad que no tiene. */
+    const etiquetas = ent.map(e => e[0]);
+    const color = Paleta.escala([0])[0];
+    graficos['chart-subestado-bl'] = new DashboardBarChart({
+      canvas: 'chart-subestado-bl',
+      etiquetas,
+      datos: ent.map(e => e[1]),
+      colores: etiquetas.map(() => color),
+      formato: FMT,
+      barra: { maxBarThickness: 26 },
+      opciones: {
+        indexAxis: 'y',
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
+        scales: {
+          x: { ...EJE_Y_CERO.y },
+          y: { grid: { display: false }, ticks: { autoSkip: false } },
+        },
+      },
+    }).render();
+  }
 
   // -------------------------------------------------- drill-down Lider -> Grupo
   function renderLideres() {
@@ -1321,6 +1391,7 @@ const TableroBacklog = (function () {
     renderBarrasLider();
     renderBarrasPrioridad();
     renderBarrasAging();
+    renderBarrasSubestado();
     renderLideres();
     renderTablaAging();
     renderAntiguos();
