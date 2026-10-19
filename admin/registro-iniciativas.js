@@ -2301,12 +2301,17 @@ window.RegistroIniciativas = (function () {
     }
 
     // Crear > existente: abre el detalle de esa iniciativa con el foco en
-    // el primer campo editable.
+    // el titulo MOSTRADO; abrir no edita (un clic, Enter o espacio si).
     modificar(folio, origen) {
       if (!this.puedeEditar()) return false;
       if (!this.abrirDesdeLista(folio, origen) || !this.edicion) return false;
-      this.editarTexto('titulo');
+      this.enfocarTexto('titulo');
       return true;
+    }
+
+    enfocarTexto(clave) {
+      var vista = this.$('regEdVer-' + clave);
+      if (vista && vista.focus) vista.focus();
     }
 
     // Repinta, desde el borrador actual, solo lo editable del detalle
@@ -2370,7 +2375,7 @@ window.RegistroIniciativas = (function () {
       var habia = !!this.edicion;
       this.edicion = this.puedeEditar() ? (abrir && this.edicion ? this.edicion : this.nuevaEdicion(i)) : null;
       if (!abrir || !habia) this.pintarEditables();
-      if (abrir && this.edicion) this.editarTexto('titulo');
+      if (abrir && this.edicion) this.enfocarTexto('titulo');
     }
 
     // Revision local (sin servidor): errores de formato y cambios.

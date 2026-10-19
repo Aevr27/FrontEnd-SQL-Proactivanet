@@ -686,9 +686,9 @@ pruebas.push(function () {
     Check('MD2 ... y a la vista en su lugar (titulo en el encabezado, textos, %)', [true, true, true],
       [/data-editar="titulo"[^>]*>T PRB 2026-000001<\/div>/.test(html), /data-editar="descripcion"[^>]*>Desc PRB 2026-000001<\/div>/.test(html),
        /data-edicion-pct="1" value="25"/.test(html)]);
-    Check('MD3 "Crear > existente" abre el titulo como editor, con su valor, y le da el foco', [true, 'titulo', true],
-      [/<input type="text" id="regEd-titulo"[^>]*value="T PRB 2026-000001"/.test(p.sel('regEdCaja-titulo').innerHTML), reg.editando,
-       p.sel('regEd-titulo').enfocado > 0]);
+    Check('MD3 "Crear > existente" NO abre editores: el titulo se ve como texto y recibe el foco', [false, null, true, false],
+      [/id="regEd-titulo"/.test(p.sel('regDetCuerpo').innerHTML), reg.editando,
+       p.sel('regEdVer-titulo').enfocado > 0, /<textarea/.test(p.sel('regDetCuerpo').innerHTML)]);
     Check('MD3 Guardar valida en el servidor; aviso de persistencia + carga del Excel', [true, true],
       [/data-accion="edicion-guardar"/.test(html), /la carga reemplazaría estos campos/.test(html)]);
     Check('MD4 vista previa inicial: sin cambios', true, /Sin cambios\./.test(p.sel('regEdVista').innerHTML));
