@@ -463,11 +463,19 @@ public static partial class ExperienciaQueries
         // cuenta no la puede leer (para OBJECT_ID es lo mismo), se usa el del
         // Excel como antes. Una fila que el cálculo todavía no tiene (cargada
         // después) también cae al del Excel.
+        //
+        // El cálculo es una FOTO del día (tr.Pct = el % con el que se
+        // calculó). Si el % de la fila ya no es ese -Admin lo cambió después
+        // y adm.usp_GestionAdmin_TicketsReduce ya recalculó
+        // ProblemCategoria.TicketsReduce con la misma regla-, la foto está
+        // vieja y se usa el de la fila hasta el siguiente cálculo.
         var calculado = TieneTicketsReduceCalculado(cn);
         var SQL =
             "SELECT v.Codigo, v.Categoria, v.C1, v.C1C2, v.Iniciativa, v.Titulo, " +
             "       v.Estado, v.TipoAgrupado, " +
-            (calculado ? "CASE WHEN tr.Codigo IS NOT NULL THEN tr.TicketsReduce ELSE v.TicketsReduce END, "
+            (calculado ? "CASE WHEN tr.Codigo IS NOT NULL " +
+                         "      AND (tr.Pct = v.PctDisminucion OR (tr.Pct IS NULL AND v.PctDisminucion IS NULL)) " +
+                         "     THEN tr.TicketsReduce ELSE v.TicketsReduce END, "
                        : "v.TicketsReduce, ") +
             "       v.PctDisminucion, " +
             "       v.FechaAnalisis, v.FechaSolucion, v.FechaCierre, " +
