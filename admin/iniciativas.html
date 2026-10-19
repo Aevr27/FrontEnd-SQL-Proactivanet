@@ -198,6 +198,12 @@
            CatPersona / CatLiderGrupo (SesionAdmin). Si no, queda oculto. -->
       <div class="ini-saludo" id="iniSaludo" hidden></div>
     </div>
+    <!-- Correo de quien mira, arriba a la derecha: solo el de
+         dbo.UsuariosAdmin.CorreoUsuario que mande el servidor (SesionAdmin,
+         admin_sesion.ashx?persona=1). Sin uno claro, queda oculto. -->
+    <div class="acciones-top">
+      <span class="ini-correo" id="iniCorreo" hidden></span>
+    </div>
   </header>
 
   <!-- Sin rol ADM/MOD (VIEWER) o sin respuesta de admin_sesion: se ve solo
@@ -750,7 +756,7 @@
 // El rol tambien decide los botones de ADM que se pintan dentro del detalle,
 // que no existen cuando aplicar() recorre el documento.
 try {
-  new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo')).then(function (s) {
+  new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo'), document.getElementById('iniCorreo')).then(function (s) {
     if (!window.IniciativasPagina) return;
     if (s.autorizado) window.IniciativasPagina.fijarRol(s.rol);
     else window.IniciativasPagina.denegar();

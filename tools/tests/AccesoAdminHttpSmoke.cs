@@ -66,6 +66,22 @@ sealed class FuenteFalsa : IFuenteRolesAdmin
     }
 }
 
+// CorreoUsuario de mentira: cuenta (mayusculas) -> filas.
+sealed class FuenteCorreoFalsa : IFuenteCorreoAdmin
+{
+    public readonly Dictionary<string, string[]> Filas = new Dictionary<string, string[]>();
+    public bool Falla;
+    public readonly List<string> Pedidas = new List<string>();
+
+    public IList<string> CorreosDe(string cuenta)
+    {
+        Pedidas.Add(cuenta);
+        if (Falla) throw new InvalidOperationException("sin SQL");
+        string[] f;
+        return Filas.TryGetValue(cuenta.Trim().ToUpperInvariant(), out f) ? f : new string[0];
+    }
+}
+
 public static class AccesoAdminHttpSmoke
 {
     static int fallos = 0;
@@ -155,6 +171,31 @@ public static class AccesoAdminHttpSmoke
         Check("H1 admin_sesion: otra cuenta no", "200|{\"autorizado\":false}", estado + "|" + cuerpo);
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
         Check("H1 admin_sesion: anonimo no", "200|{\"autorizado\":false}", estado + "|" + cuerpo);
+
+        // ---- correo de la cabecera (App_Code/CorreoAdmin.cs) ------------------
+        var correos = new FuenteCorreoFalsa();
+        correos.Filas[YO.ToUpperInvariant()] = new[] { " andresvr@soriana.com " };
+        correos.Filas[@"SORIANA\T_DOS"] = new[] { "uno@soriana.com", "otro@soriana.com" };
+        correos.Filas[@"SORIANA\T_REPETIDO"] = new[] { "Uno@Soriana.com", null, "uno@soriana.com", "" };
+        correos.Filas[@"SORIANA\T_RARO"] = new[] { "sin arroba", "<b>x</b>@a.com" };
+        Check("CO1 correo de la fila de la cuenta, sin espacios", "andresvr@soriana.com",
+              CorreoAdmin.Para(IdentidadWindows.Desde(YO, true), correos, null));
+        Check("CO1 la cuenta se busca con DOMINIO\\cuenta (Original), como el rol", YO, correos.Pedidas[0]);
+        Check("CO2 dos correos distintos: ninguno (no se elige)", "",
+              CorreoAdmin.Para(IdentidadWindows.Desde(@"SORIANA\t_dos", true), correos, null) ?? "");
+        Check("CO3 el mismo repetido (y filas vacias): ese", "Uno@Soriana.com",
+              CorreoAdmin.Para(IdentidadWindows.Desde(@"SORIANA\t_repetido", true), correos, null) ?? "");
+        Check("CO4 valores sin forma de correo o con marcado: ninguno", "",
+              CorreoAdmin.Para(IdentidadWindows.Desde(@"SORIANA\t_raro", true), correos, null) ?? "");
+        Check("CO5 sin fila: ninguno (nunca se arma con la cuenta)", "",
+              CorreoAdmin.Para(IdentidadWindows.Desde(@"SORIANA\t_nadie", true), correos, null) ?? "");
+        var pedidasAntes = correos.Pedidas.Count;
+        Check("CO6 anonimo: ninguno y sin consultar", "|" + pedidasAntes,
+              (CorreoAdmin.Para(IdentidadWindows.Desde("", false), correos, null) ?? "") + "|" + correos.Pedidas.Count);
+        correos.Falla = true;
+        var registrado = false;
+        Check("CO7 consulta que falla: ninguno y se registra", "|True",
+              (CorreoAdmin.Para(IdentidadWindows.Desde(YO, true), correos, delegate { registrado = true; }) ?? "") + "|" + registrado);
 
         cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
         Check("H2 capacidad ADM: pasa Exigir (400 por falta de categoria, sin SQL)", "400|True",

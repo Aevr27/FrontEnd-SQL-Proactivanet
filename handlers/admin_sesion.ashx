@@ -16,6 +16,8 @@
 //        exigen aparte.
 //   GET handlers/admin_sesion.ashx?persona=1    -> ademas "nombre" (solo si
 //        autorizado y la cuenta se resuelve en CatPersona / CatLiderGrupo)
+//        y "correo" (solo si autorizado y dbo.UsuariosAdmin.CorreoUsuario de
+//        la cuenta da UN correo claro: App_Code/CorreoAdmin.cs)
 //
 // Responde a cualquiera (no es una ruta protegida): solo dice si quien
 // pregunta esta autorizado. No devuelve la lista ni la cuenta Windows.
@@ -45,6 +47,11 @@ public class AdminSesion : IHttpHandler
             {
                 var nombre = NombreDe(identidad);
                 if (nombre != null) salida["nombre"] = nombre;
+                // El de dbo.UsuariosAdmin.CorreoUsuario (App_Code/CorreoAdmin.cs);
+                // sin uno claro, no se manda.
+                var correo = CorreoAdmin.Para(identidad, CorreoAdmin.Fuente,
+                    delegate (Exception ex) { DashboardHandler.Registrar("admin_sesion.ashx", ex); });
+                if (correo != null) salida["correo"] = correo;
             }
             return salida;
         });

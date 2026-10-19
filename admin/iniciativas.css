@@ -12,6 +12,9 @@
 
 /* Saludo "Bienvenido, <Nombre>" bajo el titulo (SesionAdmin). */
 .ini-saludo { margin-top: 4px; font-size: 13px; font-weight: 600; color: var(--ink); }
+/* Correo de quien mira (arriba a la derecha); [hidden] gana al inline-block. */
+.ini-correo { display: inline-block; font-size: 12.5px; font-weight: 600; color: var(--ink-2); overflow-wrap: anywhere; }
+.ini-correo[hidden] { display: none; }
 
 /* La barra lateral es la de dashboard.css; aqui sus entradas son enlaces
    (<a>) en vez de botones, asi que solo falta quitarles el subrayado. */

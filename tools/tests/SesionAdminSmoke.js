@@ -94,6 +94,37 @@ Promise.all([
     comprobar('url admin con persona', urls[1], '../handlers/admin_sesion.ashx?persona=1');
   });
 }).then(function () {
+  // Correo de la cabecera: solo el que mande el servidor, con forma de correo,
+  // y solo autorizado. Nunca se arma uno.
+  function conCorreo(cuerpo) {
+    var doc = documento(), saludo = { textContent: '', hidden: true }, correo = { textContent: 'x', hidden: false };
+    var urls = [];
+    var pedir = function (u) { urls.push(u); return respuesta(200, cuerpo)(u); };
+    return new SesionAdmin('../', pedir).aplicar(doc, saludo, correo).then(function (s) { return { s: s, el: correo, url: urls[0] }; });
+  }
+  return Promise.all([
+    conCorreo({ autorizado: true, rol: 'MOD', correo: ' andresvr@soriana.com ' }),
+    conCorreo({ autorizado: true, rol: 'ADM' }),
+    conCorreo({ autorizado: false, correo: 'andresvr@soriana.com' }),
+    conCorreo({ autorizado: true, correo: '<b>x</b>@a.com' }),
+    conCorreo({ autorizado: true, correo: 'sin arroba' }),
+    conCorreo({ autorizado: true, correo: 42 }),
+    (function () {
+      var url = null;
+      return new SesionAdmin('../', function (u) { url = u; return respuesta(200, { autorizado: true })(u); })
+        .aplicar(documento(), null, { textContent: '', hidden: true }).then(function () { return url; });
+    })(),
+  ]).then(function (r) {
+    comprobar('correo: se pinta el del servidor, sin espacios', r[0].el.textContent + '|' + r[0].el.hidden, 'andresvr@soriana.com|false');
+    comprobar('correo: pide ?persona=1', r[0].url, '../handlers/admin_sesion.ashx?persona=1');
+    comprobar('correo: sin correo del servidor, oculto y vacio (no se arma)', r[1].el.textContent + '|' + r[1].el.hidden, '|true');
+    comprobar('correo: no autorizado, oculto', r[2].el.hidden + '|' + r[2].s.correo, 'true|null');
+    comprobar('correo: con marcado, no se acepta', r[3].el.hidden, true);
+    comprobar('correo: sin forma de correo, no se acepta', r[4].el.hidden, true);
+    comprobar('correo: no texto, no se acepta', r[5].el.hidden, true);
+    comprobar('correo sin saludo tambien pide ?persona=1', r[6], '../handlers/admin_sesion.ashx?persona=1');
+  });
+}).then(function () {
   console.log(fallos === 0 ? 'OK: todo paso' : 'FALLOS: ' + fallos);
   process.exit(fallos === 0 ? 0 : 1);
 });
