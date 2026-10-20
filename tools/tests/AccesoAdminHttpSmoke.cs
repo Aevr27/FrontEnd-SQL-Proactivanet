@@ -284,6 +284,24 @@ public static class AccesoAdminHttpSmoke
                   metodo + "|" + estado + "|" + cuerpo.Contains("\"tipo\":\"" + c.tipo + "\"") + "|" +
                   cuerpo.Contains("\"valida\"") + "|" + cuerpo.Contains("\"guardada\""));
         }
+        // PO / SO con sql/24 ya vista en la base: la edicion encendida es
+        // solo de ADM; MOD y los demas siguen en 403 antes de leer nada.
+        var postDuenos = new[]
+        {
+            new[] { "accion", "modificar" }, new[] { "folio", "PRB 2026-000001" }, new[] { "po", "PO 2" }, new[] { "so", "SO y" },
+        };
+        PersistenciaGestionAdmin.AnotarSql24(true, DateTime.UtcNow);
+        foreach (var c in casosPost)
+        {
+            AccesoAdmin.FuenteRoles = c.f;
+            string metodo;
+            cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", c.cuenta, postDuenos, out estado, out metodo);
+            Check("X2 " + c.nombre + ": POST modificar PO / SO con sql/24 activa 403 " + c.tipo + ", sin validar ni guardar",
+                  "True|403|True|False|False",
+                  PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva() + "|" + estado + "|" + cuerpo.Contains("\"tipo\":\"" + c.tipo + "\"") + "|" +
+                  cuerpo.Contains("\"valida\"") + "|" + cuerpo.Contains("\"guardada\""));
+        }
+        PersistenciaGestionAdmin.OlvidarSql24ParaPruebas();
         AccesoAdmin.FuenteRoles = fuente;
 
         // ---- V) VIEWER: en la whitelist pero sin rol valido ------------------

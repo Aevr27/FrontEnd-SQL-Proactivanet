@@ -30,9 +30,11 @@
 //      puede bajar o dejar igual; iniciativa que no consume no tiene tope.
 //   V)  VolumetriaCategoria.Resolver: ok, cero real, sin datos, ruta vacia,
 //      llave normalizada como Experiencia.
-//   DQ) PO / SO capturados y quitar categoria en Modificar (sql/24): con el
-//      interruptor apagado se rechazan / quedan pendientes; forzado en
-//      pruebas, se validan contra el catalogo y entran al plan. Codigo
+//   DQ) PO / SO capturados y quitar categoria en Modificar (sql/24): la
+//      constante encendida solo surte efecto con sql/24 vista en la base
+//      (AnotarSql24, vigencia); sin ella se rechazan / quedan pendientes;
+//      encendida, se validan contra el catalogo y entran al plan. PO y SO
+//      independientes (cambiar uno no lleva el otro al plan). Codigo
 //      sigue inmutable con los campos nuevos.
 //   EN) Acentos en la respuesta del servidor (faltantes, cambios, JSON) y
 //      fuentes sin BOM sin literales no ASCII; motivo de persistencia vigente.
@@ -147,6 +149,29 @@ public static class GestionIniciativaAdminSmoke
     static ResultadoGestionAdmin ModD(NameValueCollection f)
     {
         return new ValidadorGestionAdmin().Modificar(M(f), ActualDuenos(), new CapacidadCategoria.Compromiso[0], Catalogo, Estados);
+    }
+
+    // Con los dos capturados: PO "PO 1" y SO "SO x".
+    static IniciativaActual ActualAmbos()
+    {
+        var a = Actual();
+        a.PoCapturado = "PO 1";
+        a.SoCapturado = "SO x";
+        return a;
+    }
+
+    static ResultadoGestionAdmin ModAmbos(NameValueCollection f)
+    {
+        return new ValidadorGestionAdmin().Modificar(M(f), ActualAmbos(), new CapacidadCategoria.Compromiso[0], Catalogo, Estados);
+    }
+
+    // Activa con el forzado de prueba puesto en v (y lo deja en null).
+    static bool Forzada(bool? v)
+    {
+        PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = v;
+        var activa = PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva();
+        PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null;
+        return activa;
     }
 
     static string PlanProblem(PlanModificarAdmin plan)
@@ -616,8 +641,26 @@ public static class GestionIniciativaAdminSmoke
               PlanFechas(ActualFechas("En An\u00e1lisis", "2026-09-30", null), hoy, "estado", "En Soluci\u00f3n", "f_solucion", ""));
 
         // ---- DQ: PO / SO capturados y quitar (sql/24) ----
-        Check("DQ1 interruptor sql/24 apagado (constante false; sql/23 y 24 sin aplicar)", "False|False",
+        // Constante encendida; surte efecto solo cuando DeteccionSql24 vio
+        // sql/24 en la base (aqui se anota a mano, sin base).
+        PersistenciaGestionAdmin.OlvidarSql24ParaPruebas();
+        Check("DQ1 constante encendida, pero sin revisar la base: apagada (nunca se asume sql/24)", "True|False",
               PersistenciaGestionAdmin.ModificaDuenosYQuita + "|" + PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva());
+        var ahoraSql24 = new DateTime(2026, 10, 20, 18, 0, 0, DateTimeKind.Utc);
+        PersistenciaGestionAdmin.AnotarSql24(false, ahoraSql24);
+        Check("DQ1b la base NO tiene sql/24: apagada; la revision sigue vigente (no se repite en cada peticion)", "False|True",
+              PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva() + "|" + PersistenciaGestionAdmin.Sql24Vigente(ahoraSql24.AddSeconds(30)));
+        Check("DQ1c pasada la vigencia se vuelve a revisar (aplicar sql/24 la enciende sin reciclar)", false,
+              PersistenciaGestionAdmin.Sql24Vigente(ahoraSql24 + PersistenciaGestionAdmin.VigenciaRevisionSql24));
+        PersistenciaGestionAdmin.AnotarSql24(true, ahoraSql24);
+        Check("DQ1d la base tiene sql/24: encendida; bloqueos de Modificar fuera", "True|1",
+              PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva() + "|" + PersistenciaGestionAdmin.BloqueosVigentes().Count);
+        PersistenciaGestionAdmin.AnotarSql24(false, ahoraSql24);
+        Check("DQ1e rollback de sql/24 visto en la base: se apaga otra vez (bloqueos de quitar y PO / SO)", "False|3",
+              PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva() + "|" + PersistenciaGestionAdmin.BloqueosVigentes().Count);
+        Check("DQ1f la prueba puede forzarla sin tocar lo revisado", "True|False",
+              Forzada(true) + "|" + Forzada(null));
+        PersistenciaGestionAdmin.OlvidarSql24ParaPruebas();
         var dqOff = ModD(F("folio", Fo, "po", "PO 2"));
         Check("DQ2 apagado: cambiar el PO se rechaza (422, campo po) y dice por que", "po|True",
               Campos(dqOff) + "|" + dqOff.Errores[0].Mensaje.Contains("sql/24"));
@@ -685,6 +728,34 @@ public static class GestionIniciativaAdminSmoke
                 { "folio", Fo }, { "po_capturado", "PO 9" }, { "so_capturado", null }, { "po", "PO de la categoria" },
             });
             Check("DQ22 IniciativaActual: PO / SO CAPTURADOS (no los de la categoria)", "PO 9|", desdeReg.PoCapturado + "|" + desdeReg.SoCapturado);
+
+            // PO y SO independientes, sin la cascada categoria -> PO -> SO:
+            // cambiar uno nunca toca (ni vacia) el otro.
+            var fSoloPo = F("folio", Fo, "po", "PO 3");
+            var rSoloPo = ModAmbos(fSoloPo);
+            Check("DQ23 solo PO (con SO capturado): un cambio, el plan NO lleva so (el SO se conserva)", "True|1|po=PO 3",
+                  rSoloPo.Valida + "|" + rSoloPo.Cambios.Count + "|" + PlanProblem(PlanificadorGestionAdmin.Modificar(M(fSoloPo), ActualAmbos(), rSoloPo, hoy)));
+            var fSoloSo = F("folio", Fo, "so", "SO y");
+            var rSoloSo = ModAmbos(fSoloSo);
+            Check("DQ24 solo SO (con PO capturado): el plan NO lleva po (el PO se conserva)", "True|1|so=SO y",
+                  rSoloSo.Valida + "|" + rSoloSo.Cambios.Count + "|" + PlanProblem(PlanificadorGestionAdmin.Modificar(M(fSoloSo), ActualAmbos(), rSoloSo, hoy)));
+            var fMismoPo = F("folio", Fo, "po", "PO 1", "so", "SO z");
+            var rMismoPo = ModAmbos(fMismoPo);
+            Check("DQ25 llega el PO de siempre + SO nuevo: solo cambia el SO", "True|so|so=SO z",
+                  rMismoPo.Valida + "|" + string.Join(",", rMismoPo.Cambios.Select(c => (string)c["clave"]).ToArray()) + "|" +
+                  PlanProblem(PlanificadorGestionAdmin.Modificar(M(fMismoPo), ActualAmbos(), rMismoPo, hoy)));
+            var fTitulo = F("folio", Fo, "titulo", "Solo el titulo");
+            var rTitulo = ModAmbos(fTitulo);
+            Check("DQ26 editar otro campo (titulo): PO y SO no viajan al plan ni cambian", "True|titulo=Solo el titulo",
+                  rTitulo.Valida + "|" + PlanProblem(PlanificadorGestionAdmin.Modificar(M(fTitulo), ActualAmbos(), rTitulo, hoy)));
+            Check("DQ27 PO de una ruta con otro SO (no salen de la misma fila del catalogo): se acepta igual", "True|po=PO 2|so=SO z",
+                  ModAmbos(F("folio", Fo, "po", "PO 2", "so", "SO z")).Valida + "|" +
+                  PlanProblem(PlanificadorGestionAdmin.Modificar(M(F("folio", Fo, "po", "PO 2", "so", "SO z")), ActualAmbos(),
+                      ModAmbos(F("folio", Fo, "po", "PO 2", "so", "SO z")), hoy)));
+            Check("DQ28 PO valido + SO fuera del catalogo: se rechaza todo (nada se guarda a medias)", "so",
+                  Campos(ModAmbos(F("folio", Fo, "po", "PO 2", "so", "SO inventado"))));
+            Check("DQ29 Codigo inmutable con SO: 'codigo' se rechaza aunque el SO sea valido", "codigo",
+                  Campos(ModAmbos(F("folio", Fo, "codigo", Fo, "so", "SO y"))));
         }
         finally { PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null; }
 

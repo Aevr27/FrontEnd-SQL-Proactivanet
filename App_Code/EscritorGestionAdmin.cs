@@ -2,7 +2,9 @@
 // migracion sql/18_gestion_admin_persistencia.sql (adm.usp_GestionAdmin_Crear
 // / _Modificar). sql/18 (y sql/20 para PO / SO del alta) aplicadas en la VM.
 // PO / SO y quitar en Modificar: parametros de sql/24 (SIN aplicar, despues
-// de sql/23); solo se mandan con PersistenciaGestionAdmin.ModificaDuenosYQuita.
+// de sql/23); solo se mandan con PersistenciaGestionAdmin
+// .ModificaDuenosYQuitaActiva(), es decir, cuando DeteccionSql24 (abajo) ya
+// vio sql/24 en la base.
 //
 // El handler (admin_iniciativas_gestion.ashx) lo llama SOLO si
 // PersistenciaGestionAdmin.Activa() y el plan no tiene pendientes ("quitar
@@ -41,6 +43,50 @@ public sealed class ErrorEscrituraGestionAdmin : Exception
         {
             return EsTope ? "TopeExcedido" : EsRepetida ? "CategoriaRepetida" : EsDatoInvalido ? "DatoInvalido"
                  : EsCodigo ? "CodigoNoEmitido" : "EscrituraRechazada";
+        }
+    }
+}
+
+// Si adm.usp_GestionAdmin_Modificar ya es el de sql/24 (tiene sus tres
+// parametros). Lectura de metadatos: la cuenta del sitio los ve por su
+// GRANT EXECUTE sobre adm. Lo anota en PersistenciaGestionAdmin, que lo
+// guarda VigenciaRevisionSql24; mientras siga vigente no vuelve a la base.
+// Un error al revisar cuenta como "sin sql/24" (apagada, nunca un guardado
+// que falle a medias).
+public static class DeteccionSql24
+{
+    public const string Consulta =
+        "SELECT COUNT(*) FROM sys.parameters " +
+        "WHERE object_id = OBJECT_ID(N'adm.usp_GestionAdmin_Modificar', N'P') " +
+        "AND name IN (N'@CambiaOwnerProblem', N'@CambiaOwnerServicio', N'@Quitar')";
+
+    // Con la conexion (abierta) del que llama.
+    public static bool Revisar(SqlConnection cn)
+    {
+        if (cn == null) throw new ArgumentNullException("cn");
+        var ahora = DateTime.UtcNow;
+        if (!PersistenciaGestionAdmin.Sql24Vigente(ahora))
+        {
+            bool tiene;
+            try
+            {
+                using (var cmd = new SqlCommand(Consulta, cn) { CommandTimeout = 15 })
+                    tiene = Convert.ToInt32(cmd.ExecuteScalar()) == 3;
+            }
+            catch (SqlException) { tiene = false; }
+            PersistenciaGestionAdmin.AnotarSql24(tiene, ahora);
+        }
+        return PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva();
+    }
+
+    // Abre su propia conexion solo si hace falta revisar.
+    public static bool Revisar()
+    {
+        if (PersistenciaGestionAdmin.Sql24Vigente(DateTime.UtcNow)) return PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva();
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            return Revisar(cn);
         }
     }
 }

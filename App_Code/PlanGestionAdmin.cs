@@ -37,7 +37,7 @@
 // (dbo.Problem.OwnerProblem / OwnerServicio), nunca los de la categoria.
 // Quitar (sql/24): la ligada deja de estar vigente (VigenteEnOrigen = 0),
 // la misma baja del cargador; no se borra. Sin sql/24
-// (PersistenciaGestionAdmin.ModificaDuenosYQuita = false) quitar sigue
+// (PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva() = false) quitar sigue
 // pendiente (409) y el validador ya rechazo PO / SO.
 //
 // Solo ASCII en literales (App_Code sin BOM): acentos con \uXXXX.
