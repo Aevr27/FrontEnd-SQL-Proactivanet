@@ -332,6 +332,30 @@
     background: transparent;
     margin-top: -26px;
   }
+
+  /* Selector interno de las entradas de grupo de la barra (Calidad de
+     información). Mismo "seleccionado" que .mnav.active. position/z-index
+     para quedar encima de un marco que suba con margin-top negativo. */
+  .subnav {
+    position: relative; z-index: 1;
+    display: inline-flex; gap: 4px; padding: 4px;
+    margin-bottom: var(--gap-bloque);
+    background: var(--card); border: 1px solid var(--line-soft);
+    border-radius: var(--radius-sm); box-shadow: var(--shadow);
+  }
+  .subnav[hidden] { display: none; }
+  .subnav-btn {
+    padding: 8px 16px;
+    border: none; background: transparent; cursor: pointer;
+    font: inherit; font-size: 13.5px; font-weight: 700; color: var(--muted);
+    border-radius: var(--radius-xs);
+    transition: background .16s ease, color .16s ease;
+  }
+  .subnav-btn:hover:not(.active) { color: var(--ink); background: var(--ctrl-bg-2); }
+  .subnav-btn.active {
+    background: var(--grad-btn); color: var(--btn-ink);
+    box-shadow: 0 1px 2px rgba(25, 25, 25, .08);
+  }
   /* GEOMETRIA UNICA DE LA BARRA VERDE
      ---------------------------------
      La misma pieza en las seis pestañas: SLA, Backlog y Call Center la traen
@@ -920,7 +944,7 @@
 
   @media print {
     body { background: #fff; padding: 0; }
-    .lateral, .filtros, .btn { display: none !important; }
+    .lateral, .subnav, .filtros, .btn { display: none !important; }
     /* Impresa no hay barra, asi que tampoco hay carril que reservarle. */
     body { padding-left: 0; }
     .card, .kpi, .filtros { box-shadow: none; border: 1px solid var(--line); }

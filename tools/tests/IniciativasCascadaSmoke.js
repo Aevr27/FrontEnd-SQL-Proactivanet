@@ -719,8 +719,10 @@ pruebas.push(function () {
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   var hrefs = (html.match(/class="mnav[^"]*" href="([^"]+)"/g) || []).map(function (m) { return m.replace(/.*href="/, '').replace('"', ''); });
+  // QA y QARE van en el grupo Calidad de información y el marco (tablero)
+  // es la entrada Observabilidad, como en dashboard.html.
   Check('M1 entradas = modulos del tablero', ['../dashboard.html#sla', '../dashboard.html#backlog', '../dashboard.html#experiencia',
-    '../dashboard.html#qa', '../dashboard.html#qare', '../dashboard.html#call', '../dashboard.html#tablero',
+    '../dashboard.html#calidad', '../dashboard.html#observabilidad', '../dashboard.html#call',
     'iniciativas.html'], hrefs);
   // Administracion: la UNICA entrada activa, y oculta hasta que SesionAdmin
   // confirma la cuenta (data-solo-admin hidden). Es solo UX: el acceso lo

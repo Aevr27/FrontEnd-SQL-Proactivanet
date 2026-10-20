@@ -55,12 +55,13 @@ incremental mantiene actualizados los tickets modificados durante los últimos
 ### Tableros web (este repositorio)
 
 - `dashboard.html` / `dashboard.js` / `dashboard.css` — la página única con la
-  barra lateral de pestañas: SLA y productividad, Backlog, Experiencia, QA,
-  QARE, Análisis de servicios, Call Center y Tablero.
+  barra lateral de pestañas: SLA y productividad, Backlog, Experiencia,
+  Efectividad, Calidad de información (QA y QARE), Análisis de servicios,
+  Observabilidad y Call Center.
 - `backlog/`, `experiencia/`, `qa/`, `qare/`, `analisis/` — cada pestaña
   embebida; también abren como página suelta.
 - `assets/Tablero_Experiencia.html` — archivo generado (Observabilidad y
-  Orquestación) que se muestra en la pestaña Tablero dentro de un `<iframe>`;
+  Orquestación) que se muestra en la entrada Observabilidad dentro de un `<iframe>`;
   es una instantánea, no consulta SQL.
 - `admin/` — Administración de iniciativas (`admin/iniciativas.html`, enlazada
   desde la barra lateral solo para cuentas autorizadas) y la consola de

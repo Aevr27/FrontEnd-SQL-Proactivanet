@@ -5,9 +5,10 @@
 //
 // Fija el contrato del armazon de navegacion: la barra lateral es la UNICA
 // navegacion global entre modulos, y cada entrada tiene que cuadrar con las
-// otras dos piezas que ya existian -el registro MODULOS de dashboard.js y el
-// contenedor #tab-<nombre> del marcado-. Cuando entre el septimo modulo, esta
-// prueba avisa si se olvido una de las tres.
+// otras piezas -el registro MODULOS (o GRUPOS, para Observabilidad y Calidad
+// de información, con su selector .subnav) de dashboard.js y el contenedor
+// #tab-<nombre> del marcado-. Cuando entre otro modulo, esta prueba avisa si
+// se olvido una.
 //
 // Se lee el ARCHIVO REAL, no una copia: dashboard.js no se puede cargar aqui
 // (toca document, Chart y compania al evaluarse) y dashboard.html no se puede
@@ -44,7 +45,19 @@ function todas(texto, re) {
 var botones = todas(html, /<button[^>]*class="mnav[^"]*"[^>]*>/g).map(function (m) { return m[0]; });
 var nombres = botones.map(function (b) { return (b.match(/data-tab="([^"]+)"/) || [])[1]; });
 
-comprobar('la barra trae los nueve modulos', nombres.length, 9);
+// Ocho entradas: QA y QARE van juntas en "Calidad de información" y el
+// marco (tablero) pasa a llamarse "Observabilidad".
+comprobar('la barra trae las ocho entradas', nombres.length, 8);
+comprobar('la barra, en orden', nombres.join(','),
+  'sla,backlog,experiencia,efectividad,calidad,analisis,observabilidad,call');
+comprobar('rotulos exactos de los grupos',
+  [/data-tab="observabilidad"[^>]*title="Observabilidad"/.test(html),
+   /data-tab="calidad"[^>]*title="Calidad de información"/.test(html),
+   /<span class="mnav-txt">Observabilidad<\/span>/.test(html),
+   /<span class="mnav-txt">Calidad de información<\/span>/.test(html)].join(), 'true,true,true,true');
+['qa', 'qare', 'tablero'].forEach(function (n) {
+  comprobar('"' + n + '" ya no tiene entrada propia en la barra', nombres.indexOf(n), -1);
+});
 comprobar('ninguna entrada se quedo sin data-tab', nombres.filter(Boolean).length, nombres.length);
 
 // --- una sola entrada marcada como la actual -----------------------------
@@ -60,19 +73,60 @@ botones.forEach(function (b, i) {
   comprobar('la entrada "' + nombres[i] + '" tiene title', /title="[^"]+"/.test(b), true);
 });
 
-// --- las tres piezas cuadran: barra <-> MODULOS <-> contenedor ------------
+// --- las piezas cuadran: barra <-> MODULOS/GRUPOS <-> selector <-> contenedor
 var bloque = (js.match(/const MODULOS = \{[\s\S]*?\n\};/) || [''])[0];
 comprobar('se encontro el registro MODULOS', bloque !== '', true);
 var claves = todas(bloque, /^\s{2}([a-z]+):/gm).map(function (m) { return m[1]; });
+var bloqueGrupos = (js.match(/const GRUPOS = (\{[\s\S]*?\n\});/) || [])[1];
+comprobar('se encontro el registro GRUPOS', !!bloqueGrupos, true);
+var GRUPOS = new Function('return ' + bloqueGrupos + ';')();
+
+// Selectores internos: un <nav class="subnav"> por grupo de MAS de un
+// modulo, con un boton por modulo, en el mismo orden que GRUPOS. Un grupo de
+// un solo modulo (Observabilidad, por ahora) no lleva selector.
+var subnavs = {};
+todas(html, /<nav class="subnav" data-grupo="([^"]+)"[^>]*>([\s\S]*?)<\/nav>/g).forEach(function (m) {
+  comprobar('el selector "' + m[1] + '" nace oculto', /^<nav[^>]*\shidden>/.test(m[0]), true);
+  subnavs[m[1]] = todas(m[2], /<button class="subnav-btn" id="snav-([a-z]+)" data-tab="([a-z]+)"/g)
+    .map(function (b) {
+      comprobar('id y data-tab del boton "' + b[2] + '" casan', b[1], b[2]);
+      return b[2];
+    });
+});
+var gruposConSelector = Object.keys(GRUPOS).filter(function (g) { return GRUPOS[g].length > 1; });
+comprobar('un selector por grupo de varios modulos', Object.keys(subnavs).sort().join(), gruposConSelector.sort().join());
+gruposConSelector.forEach(function (g) {
+  comprobar('selector "' + g + '" = GRUPOS.' + g, (subnavs[g] || []).join(), GRUPOS[g].join());
+});
+comprobar('Calidad de información: botones con su rotulo',
+  /data-tab="qa"[^>]*>QA<\/button>[\s\S]*?data-tab="qare"[^>]*>QARE<\/button>/.test(html), true);
 
 nombres.forEach(function (n) {
-  comprobar('"' + n + '" esta en MODULOS', claves.indexOf(n) !== -1, true);
-  comprobar('"' + n + '" tiene contenedor #tab-' + n,
-    html.indexOf('id="tab-' + n + '"') !== -1, true);
+  var esGrupo = Object.prototype.hasOwnProperty.call(GRUPOS, n);
+  comprobar('"' + n + '" esta en MODULOS o en GRUPOS (no en los dos)',
+    (claves.indexOf(n) !== -1) !== esGrupo, true);
+  (esGrupo ? GRUPOS[n] : [n]).forEach(function (m) {
+    comprobar('"' + m + '" tiene contenedor #tab-' + m,
+      html.indexOf('id="tab-' + m + '"') !== -1, true);
+  });
 });
+// Ningun modulo se queda sin camino: entrada propia, o su grupo en la barra
+// (con boton en el selector si el grupo tiene varios), y ninguno en dos.
 claves.forEach(function (n) {
-  comprobar('el modulo "' + n + '" se puede alcanzar desde la barra',
-    nombres.indexOf(n) !== -1, true);
+  var caminos = (nombres.indexOf(n) !== -1 ? 1 : 0) + Object.keys(GRUPOS).filter(function (g) {
+    return nombres.indexOf(g) !== -1 && GRUPOS[g].indexOf(n) !== -1 &&
+      (GRUPOS[g].length === 1 || (subnavs[g] || []).indexOf(n) !== -1);
+  }).length;
+  comprobar('el modulo "' + n + '" se alcanza desde la barra por un solo camino', caminos, 1);
+});
+// El contenedor de un modulo agrupado lo rotula su boton del selector, o la
+// entrada del grupo si no hay selector.
+Object.keys(GRUPOS).forEach(function (g) {
+  GRUPOS[g].forEach(function (m) {
+    var rotulo = GRUPOS[g].length > 1 ? 'snav-' + m : 'mtab-' + g;
+    comprobar('#tab-' + m + ' lo rotula #' + rotulo,
+      new RegExp('id="tab-' + m + '"[^>]*aria-labelledby="' + rotulo + '"').test(html), true);
+  });
 });
 
 // --- la navegacion vieja no quedo duplicada ------------------------------
@@ -94,6 +148,8 @@ todas(js, /^.*\.mtab.*$/gm).forEach(function (m) {
 // --- la barra sigue entrando por activarTab() ----------------------------
 comprobar('el clic de la barra llama a activarTab',
   /querySelectorAll\('\.mnav\[data-tab\]'\)[\s\S]{0,200}activarTab\(btn\.dataset\.tab\)/.test(js), true);
+comprobar('el clic del selector de grupo llama a activarTab',
+  /querySelectorAll\('\.subnav-btn\[data-tab\]'\)[\s\S]{0,200}activarTab\(btn\.dataset\.tab\)/.test(js), true);
 
 // --- Administracion es un enlace, no una pestaña -------------------------
 // Sin data-tab y fuera del selector del clic: no pasa por activarTab (que
@@ -103,7 +159,7 @@ comprobar('Administracion: enlace oculto a admin/iniciativas.html',
   /href="admin\/iniciativas\.html"/.test(enlaceAdmin), true);
 comprobar('Administracion: sin data-tab', /data-tab/.test(enlaceAdmin), false);
 comprobar('activarTab sigue marcando la entrada activa',
-  /function activarTab[\s\S]{0,600}querySelectorAll\('\.mnav'\)/.test(js), true);
+  /function activarTab[\s\S]{0,1500}querySelectorAll\('\.mnav'\)/.test(js), true);
 
 // --- plegar es solo una clase, no un segundo cargador --------------------
 // Si plegarLateral() tocara `listo`, `montando` o init(), cambiar el ancho

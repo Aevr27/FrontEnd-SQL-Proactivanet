@@ -73,7 +73,12 @@
 
        Agregar un modulo son TRES cosas y ninguna es rediseñar la barra: un
        <li> aqui con su data-tab, su entrada en MODULOS (dashboard.js) y su
-       contenedor #tab-<nombre>. La lista crece en vertical sola. -->
+       contenedor #tab-<nombre>. La lista crece en vertical sola.
+
+       Observabilidad y Calidad de información son entradas de GRUPO: su
+       data-tab es una clave de GRUPOS (dashboard.js), no de MODULOS. Si el
+       grupo tiene mas de un modulo, cada uno tiene su boton en el selector
+       .subnav de abajo. -->
   <aside class="lateral" id="lateral">
     <div class="lateral-cabecera">
       <span class="lateral-marca">
@@ -125,20 +130,16 @@
             <span class="mnav-txt">Efectividad</span>
           </button>
         </li>
+        <!-- Entrada de GRUPO: su data-tab no es un modulo sino una clave de
+             GRUPOS (dashboard.js). Abre el ultimo modulo visto del grupo -QA
+             la primera vez- y el selector .subnav de arriba del contenido
+             cambia entre QA y QARE. -->
         <li>
-          <button class="mnav" id="mtab-qa" data-tab="qa" type="button" title="QA">
-            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M9.5 3h5M10 3v6.2L5.3 17.6A2 2 0 0 0 7 20.6h10a2 2 0 0 0 1.7-3L14 9.2V3"/>
-            </svg>
-            <span class="mnav-txt">QA</span>
-          </button>
-        </li>
-        <li>
-          <button class="mnav" id="mtab-qare" data-tab="qare" type="button" title="QARE">
+          <button class="mnav" id="mtab-calidad" data-tab="calidad" type="button" title="Calidad de información">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M5 4.5h14v15H5z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>
             </svg>
-            <span class="mnav-txt">QARE</span>
+            <span class="mnav-txt">Calidad de información</span>
           </button>
         </li>
         <li>
@@ -149,20 +150,24 @@
             <span class="mnav-txt">Análisis de servicios</span>
           </button>
         </li>
+        <!-- Entrada de GRUPO, como Calidad de información. Por ahora un solo
+             modulo, el documento del marco (`tablero`), que trae Observabilidad
+             y Orquestacion con su propia navegacion interna; con un solo modulo
+             no hay selector .subnav. -->
+        <li>
+          <button class="mnav" id="mtab-observabilidad" data-tab="observabilidad" type="button" title="Observabilidad">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+            <span class="mnav-txt">Observabilidad</span>
+          </button>
+        </li>
         <li>
           <button class="mnav" id="mtab-call" data-tab="call" type="button" title="Call Center">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M4.5 5.5 8 4l2.2 4-2 1.7a12 12 0 0 0 6.1 6.1l1.7-2 4 2.2-1.5 3.5a2 2 0 0 1-2.1 1.1C10.4 19.7 4.3 13.6 3.4 7.6a2 2 0 0 1 1.1-2.1z"/>
             </svg>
             <span class="mnav-txt">Call Center</span>
-          </button>
-        </li>
-        <li>
-          <button class="mnav" id="mtab-tablero" data-tab="tablero" type="button" title="Tablero">
-            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M3.5 4.5h17v11h-17z"/><path d="M8 20h8M12 15.5V20"/>
-            </svg>
-            <span class="mnav-txt">Tablero</span>
           </button>
         </li>
         <!-- Administracion: un ENLACE a otra pagina, no una pestaña (sin
@@ -184,6 +189,18 @@
   <!-- Columna de contenido. Los contenedores #tab-* no cambiaron de id ni de
        clase: siguen siendo los mismos que enciende activarTab(). -->
   <div class="lateral-contenido">
+
+  <!-- ================================================ Selectores de grupo
+       Uno por entrada de grupo con mas de un modulo (GRUPOS, dashboard.js).
+       Fuera de los #tab-*: moduloEmbebido() da por montado un contenedor con
+       hijos, y el selector dentro lo engañaria. activarTab() muestra el del
+       grupo del modulo activo y marca su boton; los demas quedan con
+       `hidden`. Cada boton es el mismo modulo de siempre (mismo data-tab,
+       mismo hash). -->
+  <nav class="subnav" data-grupo="calidad" aria-label="Calidad de información" hidden>
+    <button class="subnav-btn" id="snav-qa" data-tab="qa" type="button">QA</button>
+    <button class="subnav-btn" id="snav-qare" data-tab="qare" type="button">QARE</button>
+  </nav>
 
   <!-- ==================================================== Tablero de SLA -->
   <div id="tab-sla" class="maintab-content active" role="region" aria-labelledby="mtab-sla">
@@ -401,14 +418,14 @@
        (dashboard.js) trae qa/qa.html, qa.css y qa.js la primera vez que se
        abre la pestaña: dashboard.html no pide nada a qa.ashx al cargar. El
        modulo vive en qa/ y su pagina suelta sigue funcionando igual. -->
-  <div id="tab-qa" class="maintab-content" role="region" aria-labelledby="mtab-qa"></div>
+  <div id="tab-qa" class="maintab-content" role="region" aria-labelledby="snav-qa"></div>
 
   <!-- ===================================================== Tablero de QARE
        Contenedor vacio, igual que Backlog y QA. TableroQare (dashboard.js)
        trae qare/qare.html, qare.css y qare.js la primera vez que se abre la
        pestaña: dashboard.html no pide nada a qare.ashx al cargar, y si el
        montaje o la API fallan el resto de las pestañas no se entera. -->
-  <div id="tab-qare" class="maintab-content" role="region" aria-labelledby="mtab-qare"></div>
+  <div id="tab-qare" class="maintab-content" role="region" aria-labelledby="snav-qare"></div>
 
   <!-- ================================================ Analisis de servicios
        Contenedor vacio, como QARE. TableroAnalisis (dashboard.js) trae
@@ -512,11 +529,11 @@
     </section>
   </div>
 
-  <div id="tab-tablero" class="maintab-content" role="region" aria-labelledby="mtab-tablero">
+  <div id="tab-tablero" class="maintab-content" role="region" aria-labelledby="mtab-observabilidad">
     <iframe id="iframe-tablero"
             class="tablero-externo"
             data-src="assets/Tablero_Experiencia.html"
-            title="Tablero"
+            title="Observabilidad"
             loading="lazy"></iframe>
   </div>
 
