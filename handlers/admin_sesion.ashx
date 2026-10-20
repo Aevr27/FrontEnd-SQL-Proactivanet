@@ -40,7 +40,7 @@ public class AdminSesion : IHttpHandler
             salida["autorizado"] = AccesoAdmin.PuedeEntrar(context);
             if ((bool)salida["autorizado"]) salida["rol"] = AccesoAdmin.Rol(context);
             // Solo para que se note en pantalla/red que es el atajo de
-            // desarrollo local (DEBUG + local + IIS Express + whitelist).
+            // desarrollo local (AdminDevOverride + DEBUG + local + IIS Express + whitelist).
             if (AccesoDesarrolloLocal.Activo(context)) salida["desarrollo_local"] = true;
 
             if ((bool)salida["autorizado"] && context.Request.QueryString["persona"] == "1")

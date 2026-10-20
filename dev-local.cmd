@@ -14,9 +14,11 @@ REM  Admin -> Iniciativas en local (SOLO DESARROLLO): IIS Express no tiene
 REM  Autenticacion de Windows. La cuenta de desarrollo va en
 REM  ADMIN_DEV_IDENTIDAD (segundo argumento; por omision SORIANA\t_andresvr)
 REM  y tiene que estar en App_Code/AdminWhitelistTemporal.cs. Ademas hace
-REM  falta <compilation debug="true"> en Web.config y abrir desde esta misma
-REM  maquina (App_Code/AccesoDesarrolloLocal.cs). Otra cuenta -> 403. En la
-REM  VM (IIS, w3wp.exe) nada de esto aplica.
+REM  falta, en el Web.config LOCAL, el interruptor (apagado por omision)
+REM      <add key="AdminDevOverride" value="true" />   (en appSettings)
+REM  y <compilation debug="true">, y abrir desde esta misma maquina
+REM  (App_Code/AccesoDesarrolloLocal.cs). Otra cuenta -> 403. En la VM (IIS,
+REM  w3wp.exe) nada de esto aplica.
 REM  Rol de desarrollo (tercer argumento, ADM o MOD; por omision ADM).
 REM
 REM    dev-local.cmd 8081                          ->  t_andresvr como ADM
@@ -73,7 +75,13 @@ if "%RAIZ:~-1%"=="\" set "RAIZ=%RAIZ:~0,-1%"
 
 echo Sirviendo "%RAIZ%" en http://localhost:%PUERTO%/
 echo Admin local: http://localhost:%PUERTO%/admin/iniciativas.html
-echo   cuenta %ADMIN_DEV_IDENTIDAD% como %ADMIN_DEV_ROL% (solo si esta en la whitelist, debug="true" y desde esta maquina)
+REM  Solo aviso: quien decide es el servidor (AccesoDesarrolloLocal).
+findstr /R /I /C:"key=\"AdminDevOverride\" *value=\"true\"" "%~dp0Web.config" >nul
+if errorlevel 1 (
+  echo   AdminDevOverride no esta en "true" en Web.config: Admin local sigue la regla normal ^(403^).
+) else (
+  echo   cuenta %ADMIN_DEV_IDENTIDAD% como %ADMIN_DEV_ROL% ^(solo si esta en la whitelist, debug="true" y desde esta maquina^)
+)
 "%IISEXPRESS%" /path:"%RAIZ%" /port:%PUERTO% /clr:v4.0
 
 endlocal

@@ -12,7 +12,14 @@
 // dbo.UsuariosAdmin. Restaura el comportamiento anterior a 9dcb71c (cuenta
 // simulada + whitelist), dentro de la puerta de entorno que puso 9dcb71c.
 //
-// EL ENTORNO: LAS TRES A LA VEZ (sin cambios)
+// EL ENTORNO: LAS CUATRO A LA VEZ
+//   0. Interruptor explicito, APAGADO por omision: la clave
+//      <add key="AdminDevOverride" value="true" /> en appSettings del
+//      Web.config LOCAL (esta en .gitignore). Ausente, vacia o cualquier
+//      otro valor ("1", "yes", "True " con basura...) = apagado. Solo se
+//      acepta "true" (sin distinguir mayusculas, sin espacios alrededor).
+//      Web.config.ejemplo NO la trae: copiar el ejemplo a la VM no la
+//      enciende; y aunque alguien la copiara alli, 1-3 la siguen cortando.
 //   1. Compilado en DEBUG. El sitio se compila en el servidor desde el
 //      fuente y ASP.NET define DEBUG solo con <compilation debug="true"> en
 //      Web.config (verificado en IIS Express). Con debug="false" el cuerpo
@@ -36,10 +43,17 @@
 // query, cookie ni formulario. Fuera de este caso NADA cambia: identidad
 // Windows real -> dbo.UsuariosAdmin -> rol; la whitelist no interviene.
 //
+// Alcance: solo el ROL de Admin del request (ADM o MOD) en esta maquina. No
+// toca la cadena de conexion ni los permisos SQL (la web sigue con su cuenta
+// de servicio), no salta validaciones de los handlers, no escribe en
+// dbo.UsuariosAdmin ni cambia el rol de nadie mas. Sin identidad Windows
+// real, lo que escribe a la base responde 403 SinUsuario igual que antes.
+//
 // PARA QUITARLO: borrar este archivo, las llamadas a AccesoDesarrolloLocal
 // en AccesoAdmin.cs y admin_sesion.ashx, y los argumentos de dev-local.cmd.
 
 using System;
+using System.Configuration;
 using System.Diagnostics;
 using System.Web;
 
@@ -48,6 +62,7 @@ public static class AccesoDesarrolloLocal
     public const string ProcesoIisExpress = "iisexpress";
     public const string VariableIdentidad = "ADMIN_DEV_IDENTIDAD";
     public const string VariableRol = "ADMIN_DEV_ROL";
+    public const string ClaveHabilitar = "AdminDevOverride";
 
 #if DEBUG
     public const bool CompiladoEnDebug = true;
@@ -55,10 +70,17 @@ public static class AccesoDesarrolloLocal
     public const bool CompiladoEnDebug = false;
 #endif
 
-    // El entorno (1-3), sin HttpContext, para probarlo con cada combinacion.
-    public static bool Evaluar(bool compiladoEnDebug, bool esLocal, string proceso)
+    // El interruptor (0): solo "true" lo enciende; todo lo demas, apagado.
+    public static bool Habilitado(string valorConfig)
     {
-        return compiladoEnDebug
+        return string.Equals((valorConfig ?? string.Empty).Trim(), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // El entorno (0-3), sin HttpContext, para probarlo con cada combinacion.
+    public static bool Evaluar(bool habilitado, bool compiladoEnDebug, bool esLocal, string proceso)
+    {
+        return habilitado
+            && compiladoEnDebug
             && esLocal
             && string.Equals(proceso, ProcesoIisExpress, StringComparison.OrdinalIgnoreCase);
     }
@@ -89,10 +111,11 @@ public static class AccesoDesarrolloLocal
     {
 #if DEBUG
         if (ctx == null) return null;
+        if (!Habilitado(Config(ClaveHabilitar))) return null;
         bool local;
         try { local = ctx.Request.IsLocal; }
         catch { local = false; }
-        if (!Evaluar(true, local, Proceso.Value)) return null;
+        if (!Evaluar(true, true, local, Proceso.Value)) return null;
         return RolPara(true,
             IdentidadPara(IdentidadWindows.DesdeContexto(ctx), Entorno(VariableIdentidad)),
             AccesoAdmin.Configurada(), Entorno(VariableRol));
@@ -113,6 +136,12 @@ public static class AccesoDesarrolloLocal
         try { return Process.GetCurrentProcess().ProcessName; }
         catch { return null; }
     });
+
+    private static string Config(string clave)
+    {
+        try { return ConfigurationManager.AppSettings[clave]; }
+        catch { return null; }
+    }
 
     private static string Entorno(string variable)
     {
