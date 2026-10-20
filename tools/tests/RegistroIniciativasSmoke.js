@@ -1824,18 +1824,19 @@ pruebas.push(function () {
       [/\.ini-retraso \{[^}]*display: block/.test(css), /\.ini-retraso \{[^}]*text-transform: uppercase/.test(css),
        /\.ini-retraso \{[^}]*color: #b45309/.test(css)]);
 
-    Check('R3 dias desde la creacion bajo el codigo = antiguedad del servidor',
-      ['Hace 130 días', 'Creada hoy', 'Hace 1 día', 'Sin fecha de creación'],
+    // La edad va SOLO en la columna Antigüedad (R5): la celda Código lleva
+    // el codigo y nada debajo (antes repetia "Hace N días").
+    Check('R3 Código: solo el boton del codigo, sin la edad debajo', [true, true, true, true],
       ['PRB 2026-000001', 'MAP 2026-000002', 'REQ 2026-000004', 'PRB 2026-000005'].map(function (f) {
-        var m = /class="ini-sub ini-edad[^"]*"[^>]*>([^<]+)</.exec(celda(p, f, 'Código'));
-        return m && m[1];
+        return new RegExp('^<td data-col="Código"><button [^>]*>' + f + '</button>$').test(celda(p, f, 'Código'));
       }));
-    Check('R3 con la fecha de creacion en el title', true, /title="Días desde su creación \(08\/06\/2026\)"/.test(celda(p, 'PRB 2026-000001', 'Código')));
-    Check('R3 visible tambien si va atrasada, y fuera de la celda de compromiso', [true, false],
-      [/ini-edad/.test(celda(p, 'PRB 2026-000001', 'Código')), /ini-edad/.test(celda(p, 'PRB 2026-000001', 'Fecha compromiso'))]);
+    Check('R3 ninguna "Hace N días" / "Creada hoy" en la lista', false,
+      /Hace \d|Creada hoy|Sin fecha de creación/.test(p.sel('regCuerpo').innerHTML));
+    Check('R3 Título conserva el conteo de categorias debajo', true,
+      /<span class="ini-sub">\d+ categorías?<\/span>$/.test(celda(p, 'PRB 2026-000001', 'Título')));
     sinOmision(p);   // HAR 3 esta Cerrado: oculto por omision
-    Check('R3 sin dato de f_creacion (servidor anterior): antiguedad tal cual', 'Hace 10 días',
-      (/ini-edad[^>]*>([^<]+)</.exec(celda(p, 'HAR 2025-000003', 'Código')) || [])[1]);
+    Check('R3 sin dato de f_creacion (servidor anterior): Antigüedad = antiguedad tal cual', '10 días',
+      celda(p, 'HAR 2025-000003', 'Antigüedad').replace(/<[^>]+>/g, ''));
 
     // Columna Antigüedad (a la izquierda de Tickets a reducir): el mismo
     // dato en dias; meses / semanas / dias en el title y en el detalle (R4).
@@ -1906,8 +1907,8 @@ pruebas.push(function () {
     return reg.actualizar(ok(json));
   }).then(function (r) {
     Check('R7 relectura: edad nueva, columnas en orden, vista intacta',
-      [true, 'Hace 11 días', COLUMNAS_LISTA, antes],
-      [r.ok, (/ini-edad[^>]*>([^<]+)</.exec(celda(p, 'PRB 2026-000001', 'Código')) || [])[1], cabeceras(p),
+      [true, '11 días', COLUMNAS_LISTA, antes],
+      [r.ok, celda(p, 'PRB 2026-000001', 'Antigüedad').replace(/<[^>]+>/g, ''), cabeceras(p),
        [reg.filtro.estados.marcados, reg.orden, reg.limite]]);
   });
 });

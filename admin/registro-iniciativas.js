@@ -2025,19 +2025,10 @@ window.RegistroIniciativas = (function () {
       return punto + Escape.html(f ? fecha(f) : 'Sin fecha');
     }
 
-    // Dias desde la creacion (diasDesdeCreacion: el mismo dato que la
-    // Antigüedad del detalle), bajo el codigo. No es la fecha compromiso.
-    htmlEdad(i) {
-      var dias = diasDesdeCreacion(i);
-      if (dias === null) return '<span class="ini-sub ini-edad ini-tenue">Sin fecha de creación</span>';
-      var texto = dias === 0 ? 'Creada hoy' : 'Hace ' + fmt(dias) + (dias === 1 ? ' día' : ' días');
-      var ayuda = 'Días desde su creación' + (i.f_creacion ? ' (' + fecha(i.f_creacion) + ')' : '');
-      return '<span class="ini-sub ini-edad" title="' + Escape.attr(ayuda) + '">' + Escape.html(texto) + '</span>';
-    }
-
-    // Columna Antigüedad: el mismo dato (diasDesdeCreacion) en dias, para
-    // comparar filas de un vistazo; el title (y la Antigüedad del detalle)
-    // lo dicen en meses / semanas / dias.
+    // Columna Antigüedad: la edad desde la creacion (diasDesdeCreacion) en
+    // dias, para comparar filas de un vistazo; la unica en la fila (el
+    // Codigo ya no la repite como "Hace N días"). El title (y la Antigüedad
+    // del detalle) lo dicen en meses / semanas / dias.
     htmlAntiguedad(i) {
       var dias = diasDesdeCreacion(i);
       return dias === null ? '<span class="ini-tenue">—</span>' : Escape.html(fmt(dias) + (dias === 1 ? ' día' : ' días'));
@@ -2054,7 +2045,7 @@ window.RegistroIniciativas = (function () {
         : '<span class="ini-sub">' + i.categorias.length + (i.categorias.length === 1 ? ' categoría' : ' categorías') + '</span>';
       return '<tr class="ini-fila" data-folio="' + folio + '">' +
         '<td data-col="Código"><button type="button" class="ini-folio" data-folio="' + folio + '"' +
-          ' aria-haspopup="dialog">' + Escape.html(i.folio) + '</button>' + this.htmlEdad(i) + '</td>' +
+          ' aria-haspopup="dialog">' + Escape.html(i.folio) + '</button></td>' +
         '<td data-col="Título" class="ini-col-titulo"><span class="ini-titulo" title="' + Escape.attr(i.titulo || '') + '">' +
           Escape.html(texto(i.titulo)) + '</span>' + cats + '</td>' +
         '<td data-col="Estado">' + this.htmlEstado(i) + '</td>' +
