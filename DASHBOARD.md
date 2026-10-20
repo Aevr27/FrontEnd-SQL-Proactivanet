@@ -13,11 +13,14 @@ Una sola página, `dashboard.html`, con una barra lateral de pestañas (registro
 | SLA y productividad | `dashboard.html` / `dashboard.js` | propia de la página |
 | Backlog | `backlog/` | `moduloEmbebido()`: se trae su HTML, su hoja y su script la primera vez que se abre |
 | Experiencia | `experiencia/` | `moduloEmbebido()` |
-| QA | `qa/` | `moduloEmbebido()` |
-| QARE | `qare/` | `moduloEmbebido()` |
+| Calidad de información › QA | `qa/` | `moduloEmbebido()` |
+| Calidad de información › QARE | `qare/` | `moduloEmbebido()` |
 | Análisis de servicios | `analisis/` | `moduloEmbebido()` |
+| Observabilidad › Observabilidad | `assets/Tablero_Experiencia.html` | `<iframe>` (ver §2.4) |
+| Observabilidad › Orquestación | `orquestacion/` | `moduloEmbebido()` |
 | Call Center | `dashboard.html` / `dashboard.js` | comparte la barra de filtros de SLA (`adoptarControlesSla`) |
-| Tablero | `assets/Tablero_Experiencia.html` | `<iframe>` (ver §2.4) |
+
+**Observabilidad** y **Calidad de información** son entradas de grupo (`GRUPOS` en `dashboard.js`): la barra muestra una sola entrada y un selector interno (`.subnav`) cambia entre sus dos módulos, que siguen siendo los mismos de `MODULOS`. Los hashes de siempre siguen valiendo (`#tablero`, `#orquestacion`, `#qa`, `#qare`); `#observabilidad` y `#calidad` abren el último módulo visto del grupo (el primero, la primera vez).
 
 La entrada **Administración** es un enlace a `admin/iniciativas.html`, no una pestaña; solo se ve si `handlers/admin_sesion.ashx` dice que la cuenta está autorizada, y la autorización real está en el servidor (`App_Code/AccesoAdmin.cs`).
 

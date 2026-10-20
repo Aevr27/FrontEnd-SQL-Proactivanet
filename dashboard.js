@@ -3796,9 +3796,10 @@ const TableroSla = (function () {
    4. Router de pestañas principales (carga perezosa)
    ======================================================================= */
 // Observabilidad ya no se dibuja aqui: es la navegacion interna del documento
-// independiente Tablero_Experiencia.html, cargado en un <iframe> bajo la
-// pestaña "Tablero". El modulo solo tiene que pedir la carga perezosa la
-// primera vez. Experiencia y Orquestacion ya tienen pestaña propia.
+// independiente Tablero_Experiencia.html, cargado en un <iframe> (modulo
+// `tablero`, boton "Observabilidad" del grupo Observabilidad). El modulo solo
+// tiene que pedir la carga perezosa la primera vez. Experiencia y
+// Orquestacion ya tienen modulo propio.
 const TableroExterno = (() => {
   // Una sola marca por carga de dashboard.html. Evita que el navegador siga
   // sirviendo de cache un Tablero_Experiencia.html viejo despues de que el
@@ -4022,7 +4023,7 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
   }
 
   // Sin @scope no hay forma de aislar la hoja sin reescribirla, asi que se cae
-  // al patron que ya usa la pestaña "Tablero": la misma pagina, en un marco.
+  // al patron que ya usa Observabilidad (`tablero`): la misma pagina, en un marco.
   function montarEnMarco(cont) {
     const marco = document.createElement('iframe');
     marco.className = 'tablero-externo';
@@ -4288,6 +4289,24 @@ const MODULOS = {
   tablero: TableroExterno,
 };
 
+/* Entradas de GRUPO de la barra lateral. Cada una junta modulos que siguen
+   siendo los de MODULOS -mismo init(), mismo contenedor #tab-<nombre>, mismo
+   hash-: el grupo solo decide que entrada de la barra se marca y que selector
+   .subnav (dashboard.html) se ve. El primero de la lista es el que abre la
+   entrada la primera vez; despues, el ultimo que se vio (`ultimoDeGrupo`,
+   solo en memoria, como el estado de la barra). Ninguna clave de aqui puede
+   ser tambien una clave de MODULOS: el hash #observabilidad o #calidad abre
+   el grupo, y #tablero, #orquestacion, #qa o #qare el modulo, como antes. */
+const GRUPOS = {
+  observabilidad: ['tablero', 'orquestacion'],
+  calidad: ['qa', 'qare'],
+};
+const ultimoDeGrupo = {};
+
+function grupoDe(nombre) {
+  return Object.keys(GRUPOS).find(g => GRUPOS[g].indexOf(nombre) !== -1) || null;
+}
+
 /* Estado del montaje. MODULOS dice que pestañas EXISTEN; estos dos dicen en
    que punto esta cada una, y arrancan vacios: ningun nombre de modulo se
    repite aqui, asi que agregar una pestaña se hace en MODULOS y en el marcado,
@@ -4312,8 +4331,11 @@ const montando = new Set();
    desde el hash, que es texto libre.
    hasOwnProperty.call en vez de Object.hasOwn: el camino de respaldo sin
    @scope (montarEnMarco) existe para navegadores viejos, y ahi Object.hasOwn
-   puede no estar. */
+   puede no estar. Un nombre de grupo se resuelve al modulo que le toca. */
 function resolverModulo(nombre) {
+  if (Object.prototype.hasOwnProperty.call(GRUPOS, nombre)) {
+    return ultimoDeGrupo[nombre] || GRUPOS[nombre][0];
+  }
   return Object.prototype.hasOwnProperty.call(MODULOS, nombre) ? nombre : 'sla';
 }
 
@@ -4321,15 +4343,20 @@ function activarTab(nombre) {
   nombre = resolverModulo(nombre);
 
   const idContenedor = 'tab-' + nombre;
+  const grupo = grupoDe(nombre);
+  if (grupo) ultimoDeGrupo[grupo] = nombre;
   /* aria-current marca la seccion en curso para un lector de pantalla; la
      clase .active sigue siendo la que pinta. Las dos dicen lo mismo y se
-     mueven juntas. */
-  document.querySelectorAll('.mnav').forEach(b => {
-    const activo = b.dataset.tab === nombre;
+     mueven juntas. En la barra se marca la entrada del modulo o, si el
+     modulo va en un grupo, la del grupo; en su selector, el modulo. */
+  const marcar = (b, activo) => {
     b.classList.toggle('active', activo);
     if (activo) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
-  });
+  };
+  document.querySelectorAll('.mnav').forEach(b => marcar(b, b.dataset.tab === (grupo || nombre)));
+  document.querySelectorAll('.subnav').forEach(n => { n.hidden = n.dataset.grupo !== grupo; });
+  document.querySelectorAll('.subnav-btn').forEach(b => marcar(b, b.dataset.tab === nombre));
   document.querySelectorAll('.maintab-content').forEach(d => d.classList.toggle('active', d.id === idContenedor));
   // Abierto con file:// el navegador trata cada archivo como origen unico y
   // replaceState puede lanzar SecurityError, que mataria el resto de
@@ -4375,6 +4402,14 @@ document.querySelectorAll('.mnav[data-tab]').forEach(btn => {
        se acaba de elegir. En escritorio no aplica y no se toca nada. */
     if (window.matchMedia('(max-width: 900px)').matches) plegarLateral(true);
   });
+});
+
+/* Selector de grupo: cada boton es un modulo de MODULOS y entra por el mismo
+   activarTab(), asi que cambiar de uno a otro y volver no monta nada dos
+   veces (`listo`/`montando`) ni repite peticiones. Un solo listener por
+   boton, puesto al cargar dashboard.js. */
+document.querySelectorAll('.subnav-btn[data-tab]').forEach(btn => {
+  btn.addEventListener('click', () => activarTab(btn.dataset.tab));
 });
 
 /* =======================================================================
