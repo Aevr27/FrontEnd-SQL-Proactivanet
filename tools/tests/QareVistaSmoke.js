@@ -187,7 +187,10 @@ Check('tabla: null', 0, Q.filasRecurrentes(null).length);
 // --- cableado de la pestaña -------------------------------------------------
 var html = leer('dashboard.html');
 var js = leer('dashboard.js');
-Check('boton de navegacion', true, /id="mtab-qare" data-tab="qare"/.test(html));
+// QARE ya no tiene entrada propia en la barra: va en el selector del grupo
+// Calidad de información (NavegacionGruposSmoke.js prueba el grupo).
+Check('boton de navegacion (selector de Calidad de información)', true,
+  /<nav class="subnav" data-grupo="calidad"[\s\S]*?id="snav-qare" data-tab="qare"[\s\S]*?<\/nav>/.test(html));
 Check('contenedor de la pestaña', true, /<div id="tab-qare" class="maintab-content"/.test(html));
 Check('registrada en MODULOS', true, /qare: TableroQare,/.test(js));
 Check('montaje perezoso con moduloEmbebido', true,
