@@ -20,6 +20,11 @@
 //   - Interruptor propio (PersistenciaSolicitudesCambio), aparte del de la
 //     edicion directa (PersistenciaGestionAdmin). Aplicar necesita los dos:
 //     escribe la iniciativa.
+//   - Tipo DATOS (sql/25, interruptor SolicitaDatos): Titulo / PO / SO
+//     CAPTURADOS de la iniciativa (nunca los de la categoria). Se aplican por
+//     las mismas claves que la edicion directa (titulo / po / so), asi que
+//     el catalogo de duenos y lo de ahora se revisan AL APLICAR. Codigo no
+//     es un dato que se pueda pedir: no hay clave ni columna para el.
 //
 // Solo ASCII en literales (App_Code sin BOM): acentos con \uXXXX.
 // Pruebas: tools/tests/SolicitudesCambioHttpSmoke.cs (sin SQL) y
@@ -51,6 +56,19 @@ public static class PersistenciaSolicitudesCambio
     public const string Motivo =
         "El registro de solicitudes todav\u00eda no est\u00e1 habilitado (falta aplicar sql/22 en la base, con su aprobaci\u00f3n). " +
         "La solicitud se revis\u00f3, pero no se guard\u00f3 ni se envi\u00f3.";
+
+    // Tipo DATOS (Titulo / PO / SO capturados): columnas y parametros de
+    // sql/25, que depende de sql/24 (y esta de sql/23). true SOLO con las
+    // tres aplicadas en la base: con false el formulario no lo ofrece, el
+    // servidor lo rechaza (422), el almacen no manda los parametros nuevos y
+    // la cola lee esas columnas como vacias (sin sql/25 no existen).
+    public const bool SolicitaDatos = false;
+    public static bool? SolicitaDatosForzadaParaPruebas;
+    public static bool SolicitaDatosActiva() { return SolicitaDatosForzadaParaPruebas ?? SolicitaDatos; }
+
+    public const string MotivoDatos =
+        "Pedir cambio de T\u00edtulo, Product Owner o Service Owner todav\u00eda no est\u00e1 habilitado " +
+        "(falta aplicar sql/23, sql/24 y sql/25 en la base). Expl\u00edcalo con \u00abOtros\u00bb.";
 }
 
 // Una categoria de la solicitud. Pct = fraccion 0-1 (como
@@ -83,11 +101,17 @@ public sealed class PeticionSolicitudCambio
     public const string CEstadoNuevo = "estado_nuevo";
     public const string CSubestadoNuevo = "subestado_nuevo";
     public const string CMotivo = "motivo";
+    // Tipo datos (sql/25): la clave PRESENTE = se pide cambiarlo (como
+    // PeticionModificarAdmin: null = no vino); vacio = que quede vacio.
+    public const string CTituloNuevo = "titulo_nuevo";
+    public const string CPoNuevo = "po_nuevo";
+    public const string CSoNuevo = "so_nuevo";
 
     // tipo del formulario -> Tipo de adm.SolicitudCambio
     private static readonly Dictionary<string, string> Tipos = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         { "fecha", "FECHA" }, { "estado", "ESTADO" }, { "categorias", "CATEGORIAS" }, { "otros", "OTROS" },
+        { "datos", "DATOS" },
     };
     // campo_fecha del formulario (los nombres del registro) -> ProblemFechaEvento.Campo
     public static readonly Dictionary<string, string> Campos = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -111,6 +135,9 @@ public sealed class PeticionSolicitudCambio
     public string EstadoNuevo;
     public string SubestadoNuevo;
     public string Motivo;
+    // DATOS: Cambia* = se pide; el valor null = que quede vacio.
+    public bool CambiaTitulo, CambiaPo, CambiaSo;
+    public string TituloNuevo, PoNuevo, SoNuevo;
     public List<CategoriaSolicitudCambio> Categorias = new List<CategoriaSolicitudCambio>();
     public List<ErrorCampo> Errores = new List<ErrorCampo>();
 
@@ -184,10 +211,26 @@ public sealed class PeticionSolicitudCambio
         foreach (var c in p.Categorias)
             if (!vistas.Add(c.Categoria)) p.Error("categoria", c.Categoria + " viene dos veces.");
 
+        // DATOS (sql/25): Titulo / PO / SO capturados. Que PO / SO sean del
+        // catalogo se revisa al APLICAR (la validacion de la edicion directa).
+        p.CambiaTitulo = f[CTituloNuevo] != null;
+        p.CambiaPo = f[CPoNuevo] != null;
+        p.CambiaSo = f[CSoNuevo] != null;
+        p.TituloNuevo = Limpio(f[CTituloNuevo]);
+        p.PoNuevo = Limpio(f[CPoNuevo]);
+        p.SoNuevo = Limpio(f[CSoNuevo]);
+        if (p.PoNuevo != null && p.PoNuevo.Length > 255) p.Error(CPoNuevo, "El Product Owner pasa de 255 caracteres.");
+        if (p.SoNuevo != null && p.SoNuevo.Length > 255) p.Error(CSoNuevo, "El Service Owner pasa de 255 caracteres.");
+        var hayDatos = p.CambiaTitulo || p.CambiaPo || p.CambiaSo;
+
         // Cada tipo trae solo lo suyo (la misma regla que la base).
         var hayFecha = campo != null || fechaTxt != null;
         var hayEstado = p.EstadoNuevo != null || p.SubestadoNuevo != null;
         var hayCats = p.Categorias.Count > 0;
+        if (tipo == "DATOS" && !PersistenciaSolicitudesCambio.SolicitaDatosActiva()) p.Error(CTipo, PersistenciaSolicitudesCambio.MotivoDatos);
+        else if (tipo == "DATOS" && !hayDatos) p.Error(CTipo, "Elige qu\u00e9 dato quieres cambiar: T\u00edtulo, Product Owner o Service Owner.");
+        if (tipo == "DATOS" && (hayFecha || hayEstado || hayCats)) p.Error(CTipo, "Una solicitud de T\u00edtulo / Product Owner / Service Owner no trae fecha, Estado ni categor\u00edas.");
+        if (tipo != null && tipo != "DATOS" && hayDatos) p.Error(CTipo, "T\u00edtulo, Product Owner y Service Owner se piden en su propio tipo de solicitud.");
         if (tipo == "FECHA" && (!hayFecha || hayEstado || hayCats)) p.Error(CTipo, "Una solicitud de fecha trae solo la etapa y la fecha nueva.");
         if (tipo == "ESTADO" && p.EstadoNuevo == null) p.Error(CEstadoNuevo, "Elige el nuevo Estado.");
         if (tipo == "ESTADO" && hayCats) p.Error(CTipo, "Una solicitud de Estado no trae categor\u00edas.");
@@ -337,6 +380,19 @@ public sealed class AlmacenSolicitudesCambioSql : IAlmacenSolicitudesCambio
             id.Direction = ParameterDirection.Output;
             var rep = cmd.Parameters.Add("@Repetida", SqlDbType.Bit);
             rep.Direction = ParameterDirection.Output;
+            // sql/25: por nombre y solo con el interruptor; sin el, el
+            // procedimiento de sql/22 no los conoce.
+            if (PersistenciaSolicitudesCambio.SolicitaDatosActiva())
+            {
+                cmd.Parameters.Add("@CambiaTitulo", SqlDbType.Bit).Value = p.CambiaTitulo;
+                cmd.Parameters.Add("@TituloNuevo", SqlDbType.NVarChar, -1).Value = p.CambiaTitulo ? Db(p.TituloNuevo) : DBNull.Value;
+                cmd.Parameters.Add("@CambiaOwnerProblem", SqlDbType.Bit).Value = p.CambiaPo;
+                cmd.Parameters.Add("@OwnerProblemNuevo", SqlDbType.NVarChar, 4000).Value = p.CambiaPo ? Db(p.PoNuevo) : DBNull.Value;
+                cmd.Parameters.Add("@CambiaOwnerServicio", SqlDbType.Bit).Value = p.CambiaSo;
+                cmd.Parameters.Add("@OwnerServicioNuevo", SqlDbType.NVarChar, 4000).Value = p.CambiaSo ? Db(p.SoNuevo) : DBNull.Value;
+            }
+            else if (p.CambiaTitulo || p.CambiaPo || p.CambiaSo)
+                throw new InvalidOperationException("Titulo / PO / SO en una solicitud sin sql/25: no se descartan en silencio.");
             Ejecutar(cmd);
             if (id.Value == null || id.Value == DBNull.Value)
                 throw new InvalidOperationException("La base no devolvio el numero de la solicitud.");
@@ -392,16 +448,31 @@ public sealed class AlmacenSolicitudesCambioSql : IAlmacenSolicitudesCambio
         }
     }
 
-    private const string Cabecera = @"
+    private const string CabeceraBase = @"
 SELECT s.IdSolicitud, s.Codigo, p.Titulo, s.Tipo, s.EstadoAnterior, s.EstadoNuevo, s.SubestadoAnterior, s.SubestadoNuevo,
        s.CampoFecha, s.FechaAnterior, s.FechaNueva, s.Motivo, s.SolicitadoPor, s.RolSolicitante, s.FechaSolicitudUtc,
        s.Estado, s.RevisadoPor, s.FechaRevisionUtc, s.ComentarioRevision, s.Intentos, s.UltimoError, s.FechaUltimoIntentoUtc,
        Categorias = (SELECT COUNT(*) FROM adm.SolicitudCambioCategoria AS c WHERE c.IdSolicitud = s.IdSolicitud),
        SinClasificar = (SELECT COUNT(*) FROM adm.SolicitudCambioCategoria AS c
                         WHERE c.IdSolicitud = s.IdSolicitud AND c.Accion = 'AGREGAR' AND (c.TipoIniciativa IS NULL OR c.TipoAgrupado IS NULL)),
-       EstadoActual = p.Estado, SubestadoActual = p.Subestado, p.FechaAnalisis, p.FechaSolucion, p.FechaCierre
+       EstadoActual = p.Estado, SubestadoActual = p.Subestado, p.FechaAnalisis, p.FechaSolucion, p.FechaCierre,
+       PoActual = p.OwnerProblem, SoActual = p.OwnerServicio,
+{0}
 FROM adm.SolicitudCambio AS s
 LEFT JOIN dbo.Problem AS p ON p.Codigo = s.Codigo";
+    // Columnas de sql/25; sin ella no existen y se leen como vacias.
+    private const string ColumnasDatos =
+        "       s.CambiaTitulo, s.TituloAnterior, s.TituloNuevo, s.CambiaOwnerProblem, s.OwnerProblemAnterior, s.OwnerProblemNuevo,\n" +
+        "       s.CambiaOwnerServicio, s.OwnerServicioAnterior, s.OwnerServicioNuevo";
+    private const string ColumnasDatosVacias =
+        "       CambiaTitulo = CONVERT(bit, 0), TituloAnterior = CONVERT(nvarchar(max), NULL), TituloNuevo = CONVERT(nvarchar(max), NULL),\n" +
+        "       CambiaOwnerProblem = CONVERT(bit, 0), OwnerProblemAnterior = CONVERT(nvarchar(255), NULL), OwnerProblemNuevo = CONVERT(nvarchar(255), NULL),\n" +
+        "       CambiaOwnerServicio = CONVERT(bit, 0), OwnerServicioAnterior = CONVERT(nvarchar(255), NULL), OwnerServicioNuevo = CONVERT(nvarchar(255), NULL)";
+
+    private static string Cabecera
+    {
+        get { return CabeceraBase.Replace("{0}", PersistenciaSolicitudesCambio.SolicitaDatosActiva() ? ColumnasDatos : ColumnasDatosVacias); }
+    }
 
     public List<Dictionary<string, object>> Listar(string estado, int maximo)
     {
@@ -508,7 +579,21 @@ FROM adm.SolicitudCambioEvento AS e WHERE e.IdSolicitud = @id ORDER BY e.IdEvent
             { "estado", Texto(r, r.GetOrdinal("EstadoActual")) }, { "subestado", Texto(r, r.GetOrdinal("SubestadoActual")) },
             { "FechaAnalisis", Iso(r, r.GetOrdinal("FechaAnalisis")) }, { "FechaSolucion", Iso(r, r.GetOrdinal("FechaSolucion")) },
             { "FechaCierre", Iso(r, r.GetOrdinal("FechaCierre")) },
+            // sql/25: lo que hay ahora de Titulo / PO / SO capturados.
+            { "titulo", Texto(r, r.GetOrdinal("Titulo")) }, { "po", Texto(r, r.GetOrdinal("PoActual")) },
+            { "so", Texto(r, r.GetOrdinal("SoActual")) },
         };
+        // DATOS (sql/25): cada dato con su bandera, su anterior y su nuevo
+        // (null = vacio). Sin sql/25 las banderas llegan en false.
+        d["cambia_titulo"] = Convert.ToBoolean(r["CambiaTitulo"]);
+        d["titulo_anterior"] = Texto(r, r.GetOrdinal("TituloAnterior"));
+        d["titulo_nuevo"] = Texto(r, r.GetOrdinal("TituloNuevo"));
+        d["cambia_po"] = Convert.ToBoolean(r["CambiaOwnerProblem"]);
+        d["po_anterior"] = Texto(r, r.GetOrdinal("OwnerProblemAnterior"));
+        d["po_nuevo"] = Texto(r, r.GetOrdinal("OwnerProblemNuevo"));
+        d["cambia_so"] = Convert.ToBoolean(r["CambiaOwnerServicio"]);
+        d["so_anterior"] = Texto(r, r.GetOrdinal("OwnerServicioAnterior"));
+        d["so_nuevo"] = Texto(r, r.GetOrdinal("OwnerServicioNuevo"));
         d["actual"] = actual;
         d["fecha_actual"] = campo != null && actual.ContainsKey(campo) ? actual[campo] : null;
         return d;
@@ -520,6 +605,22 @@ public static class SolicitudesCambio
     // El handler usa estos; las pruebas los cambian por falsos.
     public static IAlmacenSolicitudesCambio Almacen = new AlmacenSolicitudesCambioSql();
     public static Func<NameValueCollection, ValidacionAplicar> ValidarAplicacion = ValidacionAplicar.ComoEdicionDirecta;
+
+    // Los datos de DATOS (sql/25), con el nombre de su clave en el detalle.
+    private static readonly string[] Datos = { "titulo", "po", "so" };
+
+    // Un detalle armado sin sql/25 (o por las pruebas) puede no traerlas.
+    private static bool Bandera(Dictionary<string, object> d, string clave)
+    {
+        object v;
+        return d.TryGetValue(clave, out v) && v is bool && (bool)v;
+    }
+
+    private static string Valor(Dictionary<string, object> d, string clave)
+    {
+        object v;
+        return d.TryGetValue(clave, out v) ? v as string : null;
+    }
 
     // Solo lectura, para avisar a ADM ANTES de aplicar (la base lo vuelve a
     // revisar bajo candado: esto no decide nada). Misma regla que Aplicar.
@@ -533,6 +634,11 @@ public static class SolicitudesCambio
             return true;
         if (d["campo_fecha"] != null && !string.Equals(d["fecha_actual"] as string ?? "", d["fecha_anterior"] as string ?? "", StringComparison.Ordinal))
             return true;
+        // DATOS (sql/25): el texto exacto, como la comparacion en binario de Aplicar.
+        foreach (var dato in Datos)
+            if (Bandera(d, "cambia_" + dato)
+                && !string.Equals(Valor(actual, dato) ?? "", Valor(d, dato + "_anterior") ?? "", StringComparison.Ordinal))
+                return true;
         object cats;
         if (d.TryGetValue("categorias_detalle", out cats))
             foreach (Dictionary<string, object> c in (List<object>)cats)
@@ -566,6 +672,15 @@ public static class SolicitudesCambio
         {
             var clave = PeticionSolicitudCambio.Campos.First(x => x.Value == campo).Key;
             f[clave] = d["fecha_nueva"] as string;
+        }
+        // DATOS (sql/25): las claves de la edicion directa (titulo / po / so);
+        // "" = que quede vacio. Asi pasan por el MISMO validador (catalogo de
+        // duenos, ValidadorGestionAdmin.DuenoCapturado) contra lo de ahora.
+        if (tipo == "DATOS")
+        {
+            if (Bandera(d, "cambia_titulo")) f[SolicitudIniciativa.CTitulo] = Valor(d, "titulo_nuevo") ?? "";
+            if (Bandera(d, "cambia_po")) f[SolicitudIniciativa.CPo] = Valor(d, "po_nuevo") ?? "";
+            if (Bandera(d, "cambia_so")) f[SolicitudIniciativa.CSo] = Valor(d, "so_nuevo") ?? "";
         }
         object cats;
         if (d.TryGetValue("categorias_detalle", out cats))

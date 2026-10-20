@@ -118,6 +118,16 @@
                           categoria se comparan con los dueños del propio
                           Problem (pasaFiltroIniciativa de Experiencia) y no
                           pasan un filtro de Categoria.
+                          PO / SO (2026-10-20): los CAPTURADOS de la
+                          iniciativa (po_capturado / so_capturado =
+                          dbo.Problem.OwnerProblem / OwnerServicio), los
+                          mismos que muestran y ordenan las columnas; sin
+                          capturar = '' (no pasa un PO / SO elegido).
+                          Director y Categoria siguen siendo los de cada
+                          categoria. Los dueños de la categoria
+                          (CatCategoriaDueno) se ven solo en el detalle y en
+                          la Cobertura, que sigue filtrando sus categorias
+                          por sus propios dueños.
 
    COBERTURA DE CATEGORIAS (vista secundaria, se pide al abrirla)
    ---------------------------------------------------------------
@@ -413,15 +423,20 @@ window.RegistroIniciativas = (function () {
     // el catalogo cargado, ademas la CategoriaN2 de cada ruta (mismos
     // dueños), para que elegir una categoria del catalogo encuentre las
     // iniciativas que cuelgan de ella.
+    // PO / SO de estas filas son los CAPTURADOS de la iniciativa
+    // (po_capturado / so_capturado), los mismos de las columnas; Director y
+    // Categoria siguen siendo los de cada categoria.
     filasDeIniciativa(i) {
       var filas = Registro.filasDe(i);
-      if (!this.catalogo || i.sin_categoria) return filas;
-      i.categorias.forEach(function (c) {
-        if (c.n2 && c.n2 !== c.categoria) {
-          filas.push({ director: c.director || '', po: c.po || '', so: c.so || '', categoria: c.n2 });
-        }
-      });
-      return filas;
+      if (this.catalogo && !i.sin_categoria) {
+        i.categorias.forEach(function (c) {
+          if (c.n2 && c.n2 !== c.categoria) {
+            filas.push({ director: c.director || '', po: '', so: '', categoria: c.n2 });
+          }
+        });
+      }
+      var po = duenoCapturado(i, 'po'), so = duenoCapturado(i, 'so');
+      return filas.map(function (f) { return { director: f.director, po: po, so: so, categoria: f.categoria }; });
     }
 
     // Sin la lista lanza: una respuesta rara no se pinta como "0
@@ -457,6 +472,12 @@ window.RegistroIniciativas = (function () {
       r.persistenciaAdmin = json.persistencia_admin === true;
       // "Solicitar cambios" se envia (sql/22) solo si el servidor lo dice.
       r.persistenciaSolicitudes = json.persistencia_solicitudes === true;
+      // PO / SO capturados y quitar categoría en Modificar (sql/24): solo
+      // si el servidor lo dice.
+      r.edicionDuenosQuitar = json.edicion_duenos_quitar === true;
+      // "Solicitar cambios" de Título / PO / SO (sql/25): solo si el
+      // servidor lo dice.
+      r.solicitudesDatos = json.solicitudes_datos === true;
       return r;
     }
 
@@ -852,8 +873,10 @@ window.RegistroIniciativas = (function () {
   // ---------------------------------------------------------------------
   // Orden de la tabla
   // ---------------------------------------------------------------------
-  // Por omision, como las tablas de Experiencia: lo que mas tickets tiene en
-  // riesgo arriba; luego las activas, luego lo que mas reduce.
+  // Por omision (2026-10-20): por fecha de creacion (f_creacion =
+  // dbo.Problem.FechaCreacion), la mas antigua primero; sin fecha o con una
+  // que no es aaaa-mm-dd, al final. Empates por Codigo, para que el orden no
+  // dependa del que trae el servidor. Tambien desempata el orden por columna.
   function fechaCompromiso(i) {
     var campo = FECHA_DEL_ESTADO[i.estado];
     return campo ? i[campo] || '' : '';
@@ -863,18 +886,19 @@ window.RegistroIniciativas = (function () {
     titulo:  function (i) { return (i.titulo || '').toLowerCase(); },
     estado:  function (i) { return i.estado || ''; },
     agrup:   function (i) { return i.agrup || ''; },
-    po:      function (i) { return duenos(i, 'po')[0] || ''; },
-    so:      function (i) { return duenos(i, 'so')[0] || ''; },
+    po:      function (i) { return duenoCapturado(i, 'po'); },
+    so:      function (i) { return duenoCapturado(i, 'so'); },
     // Dias desde la creacion; sin FechaCreacion, vacio (al final).
     edad:    function (i) { var d = diasDesdeCreacion(i); return d === null ? '' : d; },
     reduce:  function (i) { return numero(i.tickets_reduce); },
     fecha:   function (i) { return fechaCompromiso(i); }
   };
+  function fechaCreacion(i) { return fechaValida(i.f_creacion) ? i.f_creacion : ''; }
   function ordenPorOmision(a, b) {
-    return numero(b.riesgo_folio) - numero(a.riesgo_folio)
-      || (b.activa ? 1 : 0) - (a.activa ? 1 : 0)
-      || numero(b.tickets_reduce) - numero(a.tickets_reduce)
-      || igualTexto(b.folio, a.folio);
+    var x = fechaCreacion(a), y = fechaCreacion(b);
+    if (x === '' && y !== '') return 1;
+    if (y === '' && x !== '') return -1;
+    return igualTexto(x, y) || igualTexto(a.folio, b.folio);
   }
   function ordenar(lista, orden) {
     var copia = lista.slice();
@@ -893,6 +917,13 @@ window.RegistroIniciativas = (function () {
   // del Problem).
   function duenos(i, clave) {
     return distintos(Registro.filasDe(i).map(function (f) { return f[clave]; }));
+  }
+
+  // PO / SO CAPTURADOS de la iniciativa (dbo.Problem.OwnerProblem /
+  // OwnerServicio): columnas, orden y filtro de la lista. '' = sin capturar.
+  function duenoCapturado(i, clave) {
+    var v = clave === 'po' ? i.po_capturado : clave === 'so' ? i.so_capturado : null;
+    return typeof v === 'string' ? v.trim() : '';
   }
 
   // ---------------------------------------------------------------------
@@ -930,6 +961,19 @@ window.RegistroIniciativas = (function () {
     { clave: 'pct', rotulo: 'Categorías: % de disminución o agregar', tipo: 'pct' },
     { clave: 'otros', rotulo: 'Otros (explica la corrección)', tipo: 'otros' }
   ];
+  // Título / PO / SO CAPTURADOS de la iniciativa (sql/25): solo si el
+  // servidor lo dice (solicitudes_datos); va antes de "Otros". PO / SO son
+  // los de dbo.Problem (po_capturado / so_capturado), nunca los de la
+  // categoría. El Código no se puede pedir.
+  var CAMPO_DATOS = { clave: 'datos', rotulo: 'Título, Product Owner o Service Owner', tipo: 'datos' };
+  var DATOS_CAMBIO = [
+    { clave: 'titulo', rotulo: 'Título', par: 'titulo_nuevo' },
+    { clave: 'po', rotulo: 'Product Owner capturado', par: 'po_nuevo' },
+    { clave: 'so', rotulo: 'Service Owner capturado', par: 'so_nuevo' }
+  ];
+  function camposCambio(conDatos) {
+    return conDatos ? CAMPOS_CAMBIO.slice(0, -1).concat([CAMPO_DATOS], CAMPOS_CAMBIO.slice(-1)) : CAMPOS_CAMBIO.slice();
+  }
 
   // La etapa de cada fecha compromiso, para decir SIEMPRE a cual se refiere
   // una fecha pedida (nunca se deduce del Estado).
@@ -975,7 +1019,8 @@ window.RegistroIniciativas = (function () {
   }
 
   function campoCambio(clave) {
-    for (var k = 0; k < CAMPOS_CAMBIO.length; k++) if (CAMPOS_CAMBIO[k].clave === clave) return CAMPOS_CAMBIO[k];
+    var todos = camposCambio(true);
+    for (var k = 0; k < todos.length; k++) if (todos[k].clave === clave) return todos[k];
     return null;
   }
 
@@ -1020,12 +1065,39 @@ window.RegistroIniciativas = (function () {
       this.fechaNueva = '';  // yyyy-mm-dd
       this.pcts = {};        // solo con campo 'pct': ruta ligada -> % pedido (texto)
       this.nuevas = [];      // solo con campo 'pct': [{ categoria, valor }] a agregar
+      // Solo con campo 'datos' (sql/25, opciones.datos): por dato, null = no
+      // se pide; texto = el valor pedido ('' = que quede vacio). PO / SO,
+      // de las listas del catalogo (opciones.pos / sos).
+      this.conDatos = opciones.datos === true;
+      this.pos = Array.isArray(opciones.pos) ? opciones.pos : [];
+      this.sos = Array.isArray(opciones.sos) ? opciones.sos : [];
+      this.datos = { titulo: null, po: null, so: null };
       this.motivo = '';
       this.llave = nuevaLlave();
       this.enviada = null;   // numero de la solicitud que dio el servidor
     }
 
-    static campos() { return CAMPOS_CAMBIO.slice(); }
+    // conDatos: con 'datos' (Título / PO / SO, sql/25) antes de "Otros".
+    static campos(conDatos) { return camposCambio(conDatos === true); }
+
+    // Lo de ahora de cada dato: el Título de dbo.Problem y los PO / SO
+    // CAPTURADOS (no los de la categoría).
+    datoActual(clave) {
+      var i = this.iniciativa;
+      if (clave === 'titulo') return (i.titulo_problem !== undefined && i.titulo_problem !== null ? i.titulo_problem : i.titulo) || '';
+      if (clave === 'po') return i.po_capturado || '';
+      if (clave === 'so') return i.so_capturado || '';
+      return '';
+    }
+
+    // -> [{ campo, rotulo, anterior, nuevo }] de los datos pedidos.
+    cambiosDatos() {
+      var self = this;
+      return DATOS_CAMBIO.filter(function (d) { return self.datos[d.clave] !== null && self.datos[d.clave] !== undefined; })
+        .map(function (d) {
+          return { campo: d.clave, rotulo: d.rotulo, anterior: self.datoActual(d.clave), nuevo: String(self.datos[d.clave]).trim() };
+        });
+    }
 
     // Lo que va a admin_iniciativas_solicitudes.ashx?accion=enviar (despues
     // de validar). Quien envia y su rol los pone el servidor: aqui no van.
@@ -1033,7 +1105,13 @@ window.RegistroIniciativas = (function () {
     pares() {
       var t = this.tipo(), s = this.resumen();
       var p = [['folio', this.iniciativa.folio], ['llave', this.llave],
-               ['tipo', t === 'pct' ? 'categorias' : t === 'fecha' || t === 'estado' ? t : 'otros']];
+               ['tipo', t === 'pct' ? 'categorias' : t === 'fecha' || t === 'estado' || t === 'datos' ? t : 'otros']];
+      // Solo los datos pedidos (la clave presente = se pide).
+      if (t === 'datos') {
+        s.datos.forEach(function (d) {
+          for (var k = 0; k < DATOS_CAMBIO.length; k++) if (DATOS_CAMBIO[k].clave === d.campo) p.push([DATOS_CAMBIO[k].par, d.nuevo]);
+        });
+      }
       if (t === 'fecha') p.push(['campo_fecha', this.campo], ['fecha_nueva', s.nuevo]);
       if (t === 'estado') {
         p.push(['estado_nuevo', s.nuevo]);
@@ -1149,6 +1227,25 @@ window.RegistroIniciativas = (function () {
             errores.push({ campo: 'propuesto', categoria: c.categoria, mensaje: c.categoria + ': el % pedido es igual al actual.' });
           }
         });
+      } else if (t === 'datos') {
+        var self = this, datos = this.cambiosDatos();
+        if (!this.conDatos) {
+          errores.push({ campo: 'campo', mensaje: 'Pedir cambio de Título, Product Owner o Service Owner todavía no está habilitado: explícalo con «Otros».' });
+        } else if (!datos.length) {
+          errores.push({ campo: 'datos', mensaje: 'Marca qué dato quieres cambiar: Título, Product Owner o Service Owner.' });
+        }
+        datos.forEach(function (d) {
+          var lista = d.campo === 'po' ? self.pos : d.campo === 'so' ? self.sos : null;
+          // PO / SO: de la lista del catálogo; vacío = que quede vacío. El
+          // servidor lo vuelve a revisar al aplicar.
+          if (lista && d.nuevo && lista.indexOf(d.nuevo) < 0) {
+            errores.push({ campo: 'datos', dato: d.campo, mensaje: d.rotulo + ': elige uno de la lista del catálogo.' });
+          } else if (d.nuevo === String(d.anterior || '').trim()) {
+            errores.push({ campo: 'datos', dato: d.campo, mensaje: d.rotulo + ': el valor pedido es igual al actual.' });
+          } else if (lista && d.nuevo.length > 255) {
+            errores.push({ campo: 'datos', dato: d.campo, mensaje: d.rotulo + ': pasa de 255 caracteres.' });
+          }
+        });
       }
       if (!String(this.motivo || '').trim()) {
         errores.push({ campo: 'motivo', mensaje: t === 'otros' ? 'Explica qué hay que corregir.' : 'Explica el motivo del cambio.' });
@@ -1172,6 +1269,7 @@ window.RegistroIniciativas = (function () {
         }
       }
       if (t === 'pct') { r.anterior = null; r.nuevo = ''; r.categorias = this.cambiosCategorias(); }
+      if (t === 'datos') { r.anterior = null; r.nuevo = ''; r.datos = this.cambiosDatos(); }
       if (t === 'otros') { r.nuevo = ''; r.automatica = false; }
       else if (t) r.automatica = true;
       return r;
@@ -1214,6 +1312,9 @@ window.RegistroIniciativas = (function () {
           if (x.nueva) pares.push(['agregar_categoria', x.categoria], ['agregar_pct', x.nuevo]);
           else pares.push(['pct_categoria', x.categoria], ['pct_valor', x.nuevo]);
         });
+      } else if (c && c.tipo === 'datos' && Array.isArray(s.datos) && s.datos.length) {
+        // Las claves de "Modificar" (titulo / po / so); '' = vaciar.
+        s.datos.forEach(function (d) { pares.push([d.campo, d.nuevo]); });
       } else return null;
       return pares;
     }
@@ -1320,6 +1421,24 @@ window.RegistroIniciativas = (function () {
       }
     }
 
+    // { po: [...], so: [...] } del catalogo (BorradorAdmin.valoresDe). Un
+    // borrador abierto recibe las listas sin perder lo escrito.
+    fijarDuenosCatalogo(duenos) {
+      this.duenosCatalogo = duenos && Array.isArray(duenos.po) && Array.isArray(duenos.so) ? duenos : null;
+      if (this.edicion && this.duenosCatalogo) {
+        this.edicion.listas.pos = this.duenosCatalogo.po;
+        this.edicion.listas.sos = this.duenosCatalogo.so;
+        if (this.edicion.duenosYQuitar) { this.soltarFoco(); this.pintarEditables(); }
+      }
+      // El borrador de "Solicitar cambios" tambien: sus listas de PO / SO.
+      if (this.cambio && this.duenosCatalogo) {
+        this.cambio.pos = this.duenosCatalogo.po;
+        this.cambio.sos = this.duenosCatalogo.so;
+        var grupo = this.$('regCambioGrupoDatos');
+        if (grupo && this.cambio.tipo() !== 'datos') grupo.innerHTML = this.htmlDatosCambio();
+      }
+    }
+
     clienteVolumetria() {
       if (!this.volumetria && window.IniciativaAdmin) {
         this.volumetria = new window.IniciativaAdmin.VolumetriaCliente(function (url, op) { return fetch(url, op); });
@@ -1331,7 +1450,9 @@ window.RegistroIniciativas = (function () {
       var r = this.registro;
       return { estados: r ? r.estadosProblem || [] : [], subestados: r ? r.subestadosProblem || [] : [],
                tiposIniciativa: r ? r.valoresTipoIniciativa || [] : [], tiposAgrupado: r ? r.valoresTipoAgrupado || [] : [],
-               rutas: this.rutasCatalogo || [], rutasEstado: this.rutasEstado };
+               rutas: this.rutasCatalogo || [], rutasEstado: this.rutasEstado,
+               // Solicitar cambios de Título / PO / SO (sql/25).
+               datos: !!(r && r.solicitudesDatos), pos: (this.duenosCatalogo || {}).po || [], sos: (this.duenosCatalogo || {}).so || [] };
     }
 
     // Solo UX: la edicion de ADM no llama al servidor en esta fase.
@@ -1560,6 +1681,8 @@ window.RegistroIniciativas = (function () {
       clearTimeout(this.busquedaPendiente);
       this.$('regBuscar').value = '';
       this.filtro.limpiar();
+      // Limpiar tambien quita el orden por columna (cambiar UN filtro no).
+      this.orden = null;
       this.refrescar();
     }
 
@@ -1593,11 +1716,10 @@ window.RegistroIniciativas = (function () {
     ordenarPor(col) {
       if (!COLUMNAS[col]) return;
       if (this.orden && this.orden.col === col) {
-        // asc -> desc -> por omision
+        // asc -> desc -> por omision (fecha de creacion)
         this.orden = this.orden.dir === 'asc' ? { col: col, dir: 'desc' } : null;
       } else {
-        // Numeros: lo mas grande primero (mas tickets, la mas antigua).
-        this.orden = { col: col, dir: col === 'reduce' || col === 'edad' ? 'desc' : 'asc' };
+        this.orden = { col: col, dir: 'asc' };
       }
       this.pintarTabla();
     }
@@ -1984,12 +2106,10 @@ window.RegistroIniciativas = (function () {
       }).join('') + '</tr>';
     }
 
+    // El PO / SO capturado de la iniciativa (no los de sus categorias).
     htmlDuenos(i, clave) {
-      var lista = duenos(i, clave);
-      if (!lista.length) return '<span class="ini-tenue">—</span>';
-      if (lista.length === 1) return Escape.html(lista[0]);
-      return '<span title="' + Escape.attr(lista.join('\n')) + '">' + Escape.html(lista[0]) +
-        ' <span class="ini-mas">+' + (lista.length - 1) + '</span></span>';
+      var v = duenoCapturado(i, clave);
+      return v ? Escape.html(v) : '<span class="ini-tenue">—</span>';
     }
 
     htmlEstado(i) {
@@ -2025,19 +2145,10 @@ window.RegistroIniciativas = (function () {
       return punto + Escape.html(f ? fecha(f) : 'Sin fecha');
     }
 
-    // Dias desde la creacion (diasDesdeCreacion: el mismo dato que la
-    // Antigüedad del detalle), bajo el codigo. No es la fecha compromiso.
-    htmlEdad(i) {
-      var dias = diasDesdeCreacion(i);
-      if (dias === null) return '<span class="ini-sub ini-edad ini-tenue">Sin fecha de creación</span>';
-      var texto = dias === 0 ? 'Creada hoy' : 'Hace ' + fmt(dias) + (dias === 1 ? ' día' : ' días');
-      var ayuda = 'Días desde su creación' + (i.f_creacion ? ' (' + fecha(i.f_creacion) + ')' : '');
-      return '<span class="ini-sub ini-edad" title="' + Escape.attr(ayuda) + '">' + Escape.html(texto) + '</span>';
-    }
-
-    // Columna Antigüedad: el mismo dato (diasDesdeCreacion) en dias, para
-    // comparar filas de un vistazo; el title (y la Antigüedad del detalle)
-    // lo dicen en meses / semanas / dias.
+    // Columna Antigüedad: la edad desde la creacion (diasDesdeCreacion) en
+    // dias, para comparar filas de un vistazo; la unica en la fila (el
+    // Codigo ya no la repite como "Hace N días"). El title (y la Antigüedad
+    // del detalle) lo dicen en meses / semanas / dias.
     htmlAntiguedad(i) {
       var dias = diasDesdeCreacion(i);
       return dias === null ? '<span class="ini-tenue">—</span>' : Escape.html(fmt(dias) + (dias === 1 ? ' día' : ' días'));
@@ -2054,7 +2165,7 @@ window.RegistroIniciativas = (function () {
         : '<span class="ini-sub">' + i.categorias.length + (i.categorias.length === 1 ? ' categoría' : ' categorías') + '</span>';
       return '<tr class="ini-fila" data-folio="' + folio + '">' +
         '<td data-col="Código"><button type="button" class="ini-folio" data-folio="' + folio + '"' +
-          ' aria-haspopup="dialog">' + Escape.html(i.folio) + '</button>' + this.htmlEdad(i) + '</td>' +
+          ' aria-haspopup="dialog">' + Escape.html(i.folio) + '</button></td>' +
         '<td data-col="Título" class="ini-col-titulo"><span class="ini-titulo" title="' + Escape.attr(i.titulo || '') + '">' +
           Escape.html(texto(i.titulo)) + '</span>' + cats + '</td>' +
         '<td data-col="Estado">' + this.htmlEstado(i) + '</td>' +
@@ -2388,9 +2499,11 @@ window.RegistroIniciativas = (function () {
 
     nuevaEdicion(i) {
       var op = this.opcionesEstado();
+      var duenos = this.duenosCatalogo || { po: [], so: [] };
       return new window.IniciativaAdmin.EdicionAdmin(i,
         { rutas: this.rutasAdmCatalogo || op.rutas, rutasEstado: op.rutasEstado, estados: op.estados, subestados: op.subestados,
-          tiposIniciativa: op.tiposIniciativa, tiposAgrupado: op.tiposAgrupado });
+          tiposIniciativa: op.tiposIniciativa, tiposAgrupado: op.tiposAgrupado,
+          pos: duenos.po, sos: duenos.so, duenosYQuitar: !!(this.registro && this.registro.edicionDuenosQuitar) });
     }
 
     // Crear > existente: abre el detalle de esa iniciativa con el foco en
@@ -2739,7 +2852,8 @@ window.RegistroIniciativas = (function () {
     // Muestra solo los controles del tipo elegido y su valor actual.
     pintarGruposCambio() {
       var c = this.cambio, t = c.tipo(), self = this;
-      [['fecha', 'regCambioGrupoFecha'], ['estado', 'regCambioGrupoEstado'], ['pct', 'regCambioGrupoPct']].forEach(function (g) {
+      [['fecha', 'regCambioGrupoFecha'], ['estado', 'regCambioGrupoEstado'], ['pct', 'regCambioGrupoPct'],
+       ['datos', 'regCambioGrupoDatos']].forEach(function (g) {
         var el = self.$(g[1]);
         if (el) el.hidden = t !== g[0];
       });
@@ -2747,7 +2861,7 @@ window.RegistroIniciativas = (function () {
       if (rotFecha) rotFecha.textContent = rotuloFechaNueva(t === 'fecha' ? c.campo : '');
       var act = c.actual();
       this.$('regCambioActual').textContent = t === 'fecha' ? fecha(act) : t === 'pct' ? '(el % de cada categoría, en la tabla)'
-        : t === 'otros' ? '(explicación libre)' : texto(act);
+        : t === 'datos' ? '(cada dato, abajo)' : t === 'otros' ? '(explicación libre)' : texto(act);
       var rot = this.$('regCambioMotivoRot');
       if (rot) rot.textContent = t === 'otros' ? 'Explicación de la corrección' : 'Motivo';
     }
@@ -2772,6 +2886,16 @@ window.RegistroIniciativas = (function () {
         c.fechaNueva = c.fechaCampo && fn ? fn.value || '' : '';
       } else if (t === 'fecha') c.propuesto = this.$(idPropuesto).value || '';
       else c.propuesto = '';
+      if (t === 'datos') {
+        // Marcado = se pide (vacío = que quede vacío); PO / SO, la opción real.
+        DATOS_CAMBIO.forEach(function (d) {
+          var marca = self.$('regCambioDato-' + d.clave), valor = self.$('regCambioDatoValor-' + d.clave);
+          if (!marca || !marca.checked) { c.datos[d.clave] = null; return; }
+          var v = valor ? valor.value || '' : '';
+          var lista = d.clave === 'po' ? c.pos : d.clave === 'so' ? c.sos : null;
+          c.datos[d.clave] = lista ? resolverOpcion(v, lista) || v.trim() : v;
+        });
+      }
       c.motivo = this.$('regCambioMotivo').value || '';
       var errores = c.validar();
       var por = {};
@@ -2779,9 +2903,13 @@ window.RegistroIniciativas = (function () {
       [['campo', 'regCambioCampo'], ['propuesto', idPropuesto], ['motivo', 'regCambioMotivo'],
        ['subestado', 'regCambioSubestado'], ['fechaCampo', 'regCambioEstFechaCampo'], ['fechaNueva', 'regCambioEstFechaNueva']].forEach(function (par) {
         if (t !== 'estado' && (par[0] === 'subestado' || par[0] === 'fechaCampo' || par[0] === 'fechaNueva')) return;
-        if (t === 'pct' && par[0] === 'propuesto') return;
+        if ((t === 'pct' || t === 'datos') && par[0] === 'propuesto') return;
         var el = self.$(par[1]);
         if (el) el.setAttribute('aria-invalid', por[par[0]] ? 'true' : 'false');
+      });
+      DATOS_CAMBIO.forEach(function (d) {
+        var el = self.$('regCambioDatoValor-' + d.clave);
+        if (el) el.setAttribute('aria-invalid', errores.some(function (e) { return e.dato === d.clave; }) ? 'true' : 'false');
       });
       var msg = this.$('regCambioMsg');
       if (errores.length) {
@@ -2797,6 +2925,9 @@ window.RegistroIniciativas = (function () {
         : t === 'pct' ? r.categorias.map(function (x) {
             return Escape.html(x.categoria) + (x.nueva ? ' (agregar): ' + Escape.html(x.nuevo + '%')
               : ': ' + Escape.html(x.anterior === null ? '—' : x.anterior + '%') + ' → ' + Escape.html(x.nuevo + '%'));
+          }).join('; ')
+        : t === 'datos' ? r.datos.map(function (d) {
+            return Escape.html(d.rotulo) + ': ' + Escape.html(d.anterior || '(vacío)') + ' → ' + Escape.html(d.nuevo || '(vacío)');
           }).join('; ')
         : 'explicación para ADM; no cambia nada por sí sola';
       if (this.registro && this.registro.persistenciaSolicitudes === true) {
@@ -2872,7 +3003,7 @@ window.RegistroIniciativas = (function () {
 
     htmlCambio() {
       var c = this.cambio;
-      var opciones = '<option value="">— Elige —</option>' + CAMPOS_CAMBIO.map(function (x) {
+      var opciones = '<option value="">— Elige —</option>' + camposCambio(c.conDatos).map(function (x) {
         return '<option value="' + Escape.attr(x.clave) + '"' + (x.clave === c.campo ? ' selected' : '') + '>' + Escape.html(x.rotulo) + '</option>';
       }).join('');
       var lista = function (id, valores) { return selectorHtml(id, valores, ''); };
@@ -2905,6 +3036,8 @@ window.RegistroIniciativas = (function () {
               : '<p class="ini-nota">Sin lista de estados: no se puede pedir este cambio.</p>') + '</div>' +
           '<div class="campo ini-cambio-ancho" id="regCambioGrupoPct"' + (t === 'pct' ? '' : ' hidden') + '>' +
             this.htmlCategoriasCambio() + '</div>' +
+          (c.conDatos ? '<div class="campo ini-cambio-ancho" id="regCambioGrupoDatos"' + (t === 'datos' ? '' : ' hidden') + '>' +
+            this.htmlDatosCambio() + '</div>' : '') +
           '<div class="campo ini-cambio-ancho"><label for="regCambioMotivo" id="regCambioMotivoRot">' + (t === 'otros' ? 'Explicación de la corrección' : 'Motivo') +
             '</label><textarea id="regCambioMotivo" rows="3"></textarea></div>' +
         '</div>' +
@@ -2914,6 +3047,27 @@ window.RegistroIniciativas = (function () {
             (this.registro && this.registro.persistenciaSolicitudes === true ? 'Enviar solicitud' : 'Preparar solicitud') + '</button> ' +
           '<button type="button" class="btn linea chico" data-accion="cambio-cancelar">Cancelar</button>' +
         '</div>';
+    }
+
+    // Título / PO / SO capturados (sql/25): cada uno con su casilla (marcada
+    // = se pide) y su valor actual. PO / SO de la lista del catálogo; el
+    // Código no se ofrece (no se puede cambiar).
+    htmlDatosCambio() {
+      var c = this.cambio;
+      return '<p class="ini-nota">Marca lo que quieres cambiar. Product Owner y Service Owner son los capturados en la iniciativa, ' +
+          'no los de sus categorías. Vacío = que quede vacío.</p>' +
+        DATOS_CAMBIO.map(function (d) {
+          var lista = d.clave === 'po' ? c.pos : d.clave === 'so' ? c.sos : null;
+          var id = 'regCambioDatoValor-' + d.clave;
+          var control = lista
+            ? (lista.length ? selectorHtml(id, lista, '') : '<input type="text" id="' + id + '" disabled placeholder="Sin catálogo de dueños">')
+            : '<input type="text" id="' + id + '" maxlength="4000">';
+          return '<div class="ini-cambio-sub" data-dato="' + d.clave + '">' +
+            '<label><input type="checkbox" id="regCambioDato-' + d.clave + '"> ' + Escape.html(d.rotulo) + '</label>' +
+            '<span class="ini-cambio-rot">Actual</span><span class="ini-cambio-actual">' + Escape.html(c.datoActual(d.clave) || '—') + '</span>' +
+            '<label for="' + id + '">Nuevo ' + Escape.html(d.rotulo) + '</label>' + control +
+          '</div>';
+        }).join('');
     }
 
     htmlHistorial(i) {
@@ -3033,6 +3187,11 @@ window.RegistroIniciativas = (function () {
         datoDetalle('Agrupación', i.agrup) +
         datoDetalle('Estado', A.htmlControlEdicion(ed, 'estado'), true) +
         datoDetalle('Subestado', A.htmlControlEdicion(ed, 'subestado'), true) +
+        // PO / SO de la iniciativa (sql/24): el Código sigue como texto.
+        (ed.duenosYQuitar
+          ? datoDetalle('Product Owner capturado', A.htmlControlEdicion(ed, 'po'), true) +
+            datoDetalle('Service Owner capturado', A.htmlControlEdicion(ed, 'so'), true)
+          : '') +
         antig +
         '</dl>';
     }
@@ -3138,7 +3297,7 @@ window.RegistroIniciativas = (function () {
         org += '<dl class="ini-datos">' +
           datoDetalle('Product Owner capturado', i.po_capturado) +
           datoDetalle('Service Owner capturado', i.so_capturado) +
-          '</dl><p class="ini-nota">Capturados al crear la iniciativa; los filtros usan los de sus categorías.</p>';
+          '</dl><p class="ini-nota">Capturados en la iniciativa (alta o edición de ADM): son los de las columnas y los filtros de la lista.</p>';
       }
 
       var impacto = '<dl class="ini-datos ini-datos-num">' +

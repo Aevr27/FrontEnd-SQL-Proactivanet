@@ -192,6 +192,42 @@ Copia `Web.config.ejemplo` como `Web.config` en el servidor y ajusta la conexió
 
 `Web.config.ejemplo` registra también el módulo `AdminAccesoModulo`, que protege `admin/iniciativas.html`. Si el `Web.config` del servidor no lo tiene, la página estática no queda protegida por el módulo (los handlers de Admin siguen exigiendo rol por su cuenta).
 
+### Admin en desarrollo local (`AdminDevOverride`)
+
+IIS Express no tiene Autenticación de Windows: en local todo request llega anónimo y Admin responde 403. Para probar Admin en la máquina de desarrollo existe un atajo (`App_Code/AccesoDesarrolloLocal.cs`) que da el rol de desarrollo (ADM por omisión, o MOD) a la cuenta de `ADMIN_DEV_IDENTIDAD` **solo si se cumplen todas** estas condiciones, evaluadas en el servidor:
+
+1. `<add key="AdminDevOverride" value="true" />` en `appSettings` del `Web.config` **local**. Ausente, vacía o cualquier otro valor = apagado. **Apagado por omisión**: `Web.config.ejemplo` no la trae.
+2. `<compilation debug="true">` (sin `DEBUG` el código del atajo ni se compila).
+3. `Request.IsLocal`: la dirección de la conexión es de esta máquina. No se lee `Host`, URL, query, cookie, header ni nada del navegador.
+4. El proceso es `iisexpress.exe` (en la VM el sitio corre en `w3wp.exe`).
+5. La cuenta (`ADMIN_DEV_IDENTIDAD`, entorno del proceso que pone `dev-local.cmd`) está en `App_Code/AdminWhitelistTemporal.cs`.
+
+Encenderlo en local:
+
+```text
+1. En el Web.config local (está en .gitignore), dentro de <appSettings>:
+       <add key="AdminDevOverride" value="true" />
+   y <compilation debug="true" ...>.
+2. dev-local.cmd 8081                         (t_andresvr como ADM)
+   dev-local.cmd 8081 SORIANA\t_andresvr MOD  (probar restricciones de MOD)
+   Desde Git Bash: ./dev-local.cmd 8081 'SORIANA\t_andresvr' MOD
+3. http://localhost:8081/admin/iniciativas.html
+   handlers/admin_sesion.ashx debe responder "desarrollo_local": true.
+```
+
+Para apagarlo, quitar la clave (o cualquier valor distinto de `true`) y reiniciar IIS Express.
+
+Alcance: solo el rol de Admin del request. No cambia la cadena de conexión ni los permisos SQL (la web sigue con su cuenta de servicio), no salta validaciones de los handlers ni modifica `dbo.UsuariosAdmin` ni el rol de otros usuarios. Con MOD, lo exclusivo de ADM (crear/modificar directo, correos, alta de categoría, dueños) sigue en 403 `RolInsuficiente`. Crear, modificar y enviar solicitudes los firma (`@Usuario`, bitácora) `AccesoAdmin.IdentidadEscritura`: la identidad Windows real si IIS la trae; si no, y solo con el atajo activo, la cuenta de `ADMIN_DEV_IDENTIDAD` que ya pasó por la whitelist. Nunca algo que mande el navegador. Sin ninguna de las dos: 403 `SinUsuario`.
+
+> En la VM, IIS Express (`dev-local.cmd`) es la instancia de desarrollo y usa la cadena de conexión de **su** `Web.config`: si apunta a la base real, crear y modificar escriben en la base real, firmados con esa cuenta. El sitio IIS de la VM (`w3wp.exe`) sigue la regla normal.
+
+Comprobar que en la VM no está activo:
+
+- En el `Web.config` de la VM: no debe existir `AdminDevOverride` y `compilation debug` debe ser `"false"`. Aun si alguien copiara ambas cosas, la condición 4 (`w3wp.exe`) lo corta.
+- Abrir `handlers/admin_sesion.ashx` en la VM: la respuesta **nunca** debe traer `"desarrollo_local"`. Una cuenta sin fila ADM/MOD en `dbo.UsuariosAdmin` debe ver `{"autorizado":false}`.
+
+Pruebas: `tools/tests/AccesoAdminHttpSmoke.cs` (bloques L y W; compilar en Release y con `/define:DEBUG`) y `tools/tests/AccesoDesarrolloLocalIisExpress.ps1` (IIS Express real: con la clave apagada corre I0; con `true`, I1–I4) y `tools/tests/AdminEscrituraLocalIisExpress.ps1` (POST real de crear / modificar / enviar solicitud en un sitio temporal con base inalcanzable: nunca escribe; no usa el `Web.config` local).
+
 **No copies `requirements.txt` ni `config.json` al sitio IIS.** Esos archivos pertenecen al ETL. La conexión del tablero se configura mediante `Web.config`.
 
 ### Application Pool

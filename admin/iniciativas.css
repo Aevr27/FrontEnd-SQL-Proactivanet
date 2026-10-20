@@ -804,6 +804,13 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-adm-seccion .ini-nota { margin: 0 0 10px; }
 .ini-adm-bloque { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 
+/* Cambios recientes (admin/cambios-recientes.js): compacto, secundario. */
+.ini-cr .ini-lista-cab { align-items: center; }
+.ini-cr .ini-nota { margin: 4px 0 10px; }
+.ini-cr-tabla { font-size: 12px; }
+.ini-cr-tabla td:last-child { text-align: right; white-space: nowrap; }
+.ini-cr-falta { color: var(--muted); font-style: italic; }
+
 /* Dueños de categoria (admin/categorias-duenos.js). */
 .cd-origen {
   display: inline-block; margin-left: 4px; padding: 0 6px; font-size: 10.5px; font-weight: 700;

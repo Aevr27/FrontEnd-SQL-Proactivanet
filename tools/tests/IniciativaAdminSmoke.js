@@ -160,10 +160,12 @@ var REGISTRO = {
   valores_tipo_iniciativa: ['Mejora', 'Problem'],
   valores_tipo_agrupado: ['Adopcion', 'Problem'],
   iniciativas: [
-    Ini('PRB 2026-000001', { categorias: [Cat('/A/Cat 1', 0.5), Cat('/A/Cat 2', 0.25)] }),       // completa
+    // PO / SO capturados (po_capturado / so_capturado): los de la lista.
+    Ini('PRB 2026-000001', { categorias: [Cat('/A/Cat 1', 0.5), Cat('/A/Cat 2', 0.25)],
+                             po_capturado: 'PO 1', so_capturado: 'SO x' }),                       // completa
     Ini('PRB 2026-000002', { sin_categoria: true, observaciones: null }),                        // sin categoria ni obs.
     Ini('MAP 2026-000003', { prefijo: 'MAP', estado: 'En Solución', f_solucion: null,
-                             categorias: [Cat('/A/Cat 2', null)] })                                // sin % y sin fecha
+                             categorias: [Cat('/A/Cat 2', null)], po_capturado: 'PO 1', so_capturado: 'SO y' }) // sin % y sin fecha
   ]
 };
 
@@ -471,8 +473,8 @@ pruebas.push(function () {
       [reg.edicion, /data-edicion/.test(htmlEditable(p)), p.sel('regEdBarraCaja').innerHTML, p.sel('regDetModo').textContent]);
 
     var editables = A.EdicionAdmin.campos('editable').map(function (c) { return c.clave; });
-    Check('E13 editables propuestos', ['titulo', 'descripcion', 'observaciones', 'f_analisis', 'f_solucion', 'f_cierre',
-      'estado', 'subestado', 'categorias'], editables);
+    Check('E13 editables propuestos (PO / SO capturados con sql/24; nunca codigo)', ['titulo', 'descripcion', 'observaciones', 'f_analisis', 'f_solucion', 'f_cierre',
+      'estado', 'subestado', 'po', 'so', 'categorias'], editables);
     Check('E14 codigo y dueños son solo lectura', ['codigo', 'duenos', 'calculados'],
       A.EdicionAdmin.campos('solo_lectura').map(function (c) { return c.clave; }));
 
@@ -849,6 +851,52 @@ pruebas.push(function () {
   });
 });
 
+// OG) Guardar (relectura del registro) conserva el orden por columna, los
+// filtros y la busqueda, y reacomoda la iniciativa guardada por su valor
+// nuevo; sin orden elegido sigue el de f_creacion.
+pruebas.push(function () {
+  var p = Pagina(), reg, srv;
+  function lista() {
+    return (p.sel('regCuerpo').innerHTML.match(/<tr class="ini-fila" data-folio="[^"]+"/g) || [])
+      .map(function (t) { return t.replace(/.*data-folio="/, '').replace('"', ''); });
+  }
+  function guardarTitulo(folio, titulo, fCreacion) {
+    reg.abrirDetalle(folio);
+    editar(p, 'data-edicion', 'titulo', titulo);
+    srv = Servidor(200, { accion: 'modificar', valida: true, guardada: true, codigo: folio, cambios: [] });
+    return reg.guardarEdicion(srv.pedir, function (url) {
+      var json = JSON.parse(JSON.stringify(REGISTRO));
+      json.iniciativas.forEach(function (i, n) {
+        i.f_creacion = ['2026-01-10', '2026-02-10', '2026-03-10'][n];
+        if (i.folio === folio) { i.titulo = titulo; i.titulo_problem = titulo; if (fCreacion) i.f_creacion = fCreacion; }
+      });
+      return Promise.resolve(Respuesta(200, json));
+    });
+  }
+  return esperar().then(function () {
+    reg = p.registro;
+    reg.registro.persistenciaAdmin = true;
+    p.pagina.fijarRol('ADM');
+    reg.ordenarPor('titulo');
+    elegir(p, 'regPo', 'PO 1');
+    p.sel('regBuscar').value = '2026';
+    reg.aplicarBusqueda();
+    Check('OG1 antes: titulo asc, PO 1 y busqueda', ['MAP 2026-000003', 'PRB 2026-000001'], lista());
+    return guardarTitulo('PRB 2026-000001', 'A primero');
+  }).then(function (r) {
+    Check('OG2 tras guardar: mismo orden, filtro y busqueda; la guardada sube por su titulo nuevo',
+      ['guardada', { col: 'titulo', dir: 'asc' }, 'PO 1', '2026', ['PRB 2026-000001', 'MAP 2026-000003']],
+      [r.estado, reg.orden, p.sel('regPo').value, reg.filtro.textoBuscado, lista()]);
+    reg.cerrarDetalle();
+    reg.ordenarPor('titulo'); reg.ordenarPor('titulo');         // desc -> por omision
+    elegir(p, 'regPo', '');
+    return guardarTitulo('PRB 2026-000001', 'Otro', '2026-12-01');
+  }).then(function (r) {
+    Check('OG3 sin orden elegido: tras guardar, por f_creacion (la guardada, ahora la mas reciente, al final)',
+      ['guardada', null, ['PRB 2026-000002', 'MAP 2026-000003', 'PRB 2026-000001']], [r.estado, reg.orden, lista()]);
+  });
+});
+
 // Sin iniciativa-admin.js la pagina sigue igual (otras paginas o caches viejos).
 pruebas.push(function () {
   var p = Pagina(false);
@@ -1110,6 +1158,51 @@ pruebas.push(function () {
       [r.estado, caja.classList.contains('aviso'), caja.classList.contains('ok'), /Incompleta/.test(caja.innerHTML), /No se guardó/.test(caja.innerHTML)]);
     Check('G15 Guardar se reactiva', false, p.sel('admGuardar').disabled);
   });
+});
+
+// ---------------------------------------------------------------------------
+// DQ) PO / SO capturados y quitar en la edicion directa (sql/24). Codigo
+//     nunca es editable ni viaja.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var ini = Ini('PRB 2026-000009', { po: 'PO de la categoria', so: 'SO de la categoria',
+    po_capturado: 'PO 1', so_capturado: null, categorias: [Cat('/A/Cat 1', 0.5), Cat('/A/Cat 2', 0.1)] });
+  var op = { rutas: ['/A/Cat 1', '/A/Cat 2', '/B/Cat 4'], pos: ['PO 1', 'PO 2'], sos: ['SO x', 'SO y'] };
+  var off = new A.EdicionAdmin(ini, op);
+  Check('DQ1 sin sql/24: PO / SO sin control; original = los CAPTURADOS', ['', '', 'PO 1', ''],
+    [A.htmlControlEdicion(off, 'po'), A.htmlControlEdicion(off, 'so'), off.original.po, off.original.so]);
+  off.capturar('po', 'PO 2');
+  Check('DQ2 sin sql/24: un PO cambiado (a mano) no se envia: error local', [false, true],
+    [off.revisar().listo, off.erroresFormato().some(function (e) { return e.clave === 'po' && /sql\/24/.test(e.mensaje); })]);
+  Check('DQ3 sin sql/24: el texto de quitar dice que todavia no se guarda', true,
+    /Quitar todavía no se guarda/.test(A.htmlCategoriasEdicion(off, null)));
+
+  var on = new A.EdicionAdmin(ini, Object.assign({ duenosYQuitar: true }, op));
+  Check('DQ4 con sql/24: control de lista para PO y SO con el capturado', [true, true],
+    [/id="regEd-po"/.test(A.htmlControlEdicion(on, 'po')), /id="regEd-so"/.test(A.htmlControlEdicion(on, 'so'))]);
+  on.capturar('po', ' PO 2 ');
+  on.capturar('so', 'SO y');
+  on.capturar('titulo', 'Titulo nuevo');
+  Check('DQ5 PO, SO y Titulo viajan juntos (recortados), solo lo que cambio', [true,
+      [['accion', 'modificar'], ['folio', 'PRB 2026-000009'], ['titulo', 'Titulo nuevo'], ['po', 'PO 2'], ['so', 'SO y']]],
+    [on.revisar().listo, on.paraEnviar()]);
+  Check('DQ6 cambio rotulado como capturado; nota: los de la categoria no cambian', ['Product Owner capturado', true],
+    [on.cambios().filter(function (c) { return c.clave === 'po'; })[0].rotulo,
+     on.notasLegado().some(function (n) { return /dueños de sus categorías/.test(n); })]);
+  on.capturar('po', 'Alguien Inventado');
+  Check('DQ7 PO fuera de la lista: error local', true, on.erroresFormato().some(function (e) { return e.clave === 'po'; }));
+  on.capturar('po', '');
+  Check('DQ8 vaciar el PO: permitido (viaja vacio)', [true, true],
+    [on.revisar().listo, on.paraEnviar().some(function (x) { return x[0] === 'po' && x[1] === ''; })]);
+  on.capturar('po', 'PO 1');
+  Check('DQ9 volver al capturado: ya no es cambio', false, on.cambios().some(function (c) { return c.clave === 'po'; }));
+  on.capturar('codigo', 'PRB 2026-999999');
+  Check('DQ10 Codigo: capturar no lo toma, sin control, nunca viaja', ['', false, undefined],
+    [A.htmlControlEdicion(on, 'codigo'), on.paraEnviar().some(function (x) { return x[0] === 'codigo'; }), on.valores.codigo]);
+  Check('DQ11 el folio que viaja es el de la iniciativa abierta', 'PRB 2026-000009',
+    on.paraEnviar().filter(function (x) { return x[0] === 'folio'; })[0][1]);
+  Check('DQ12 con sql/24: el texto de quitar dice solo asociacion, sin aviso de no guardado', [true, false],
+    [/solo la asociación/.test(A.htmlCategoriasEdicion(on, null)), /todavía no se guarda/.test(A.htmlCategoriasEdicion(on, null))]);
 });
 
 // ---------------------------------------------------------------------------

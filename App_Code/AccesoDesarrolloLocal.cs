@@ -12,7 +12,14 @@
 // dbo.UsuariosAdmin. Restaura el comportamiento anterior a 9dcb71c (cuenta
 // simulada + whitelist), dentro de la puerta de entorno que puso 9dcb71c.
 //
-// EL ENTORNO: LAS TRES A LA VEZ (sin cambios)
+// EL ENTORNO: LAS CUATRO A LA VEZ
+//   0. Interruptor explicito, APAGADO por omision: la clave
+//      <add key="AdminDevOverride" value="true" /> en appSettings del
+//      Web.config LOCAL (esta en .gitignore). Ausente, vacia o cualquier
+//      otro valor ("1", "yes", "True " con basura...) = apagado. Solo se
+//      acepta "true" (sin distinguir mayusculas, sin espacios alrededor).
+//      Web.config.ejemplo NO la trae: copiar el ejemplo a la VM no la
+//      enciende; y aunque alguien la copiara alli, 1-3 la siguen cortando.
 //   1. Compilado en DEBUG. El sitio se compila en el servidor desde el
 //      fuente y ASP.NET define DEBUG solo con <compilation debug="true"> en
 //      Web.config (verificado en IIS Express). Con debug="false" el cuerpo
@@ -36,10 +43,19 @@
 // query, cookie ni formulario. Fuera de este caso NADA cambia: identidad
 // Windows real -> dbo.UsuariosAdmin -> rol; la whitelist no interviene.
 //
+// Alcance: solo el ROL de Admin del request (ADM o MOD) en esta maquina. No
+// toca la cadena de conexion ni los permisos SQL (la web sigue con su cuenta
+// de servicio), no salta validaciones de los handlers, no escribe en
+// dbo.UsuariosAdmin ni cambia el rol de nadie mas. Lo que escribe a la base
+// lo firma AccesoAdmin.IdentidadEscritura: la identidad Windows real si la
+// hay; si no, la cuenta de desarrollo que el atajo ya valido (Identidad()),
+// nunca algo que mande el navegador. Sin ninguna de las dos: 403 SinUsuario.
+//
 // PARA QUITARLO: borrar este archivo, las llamadas a AccesoDesarrolloLocal
 // en AccesoAdmin.cs y admin_sesion.ashx, y los argumentos de dev-local.cmd.
 
 using System;
+using System.Configuration;
 using System.Diagnostics;
 using System.Web;
 
@@ -48,6 +64,7 @@ public static class AccesoDesarrolloLocal
     public const string ProcesoIisExpress = "iisexpress";
     public const string VariableIdentidad = "ADMIN_DEV_IDENTIDAD";
     public const string VariableRol = "ADMIN_DEV_ROL";
+    public const string ClaveHabilitar = "AdminDevOverride";
 
 #if DEBUG
     public const bool CompiladoEnDebug = true;
@@ -55,10 +72,17 @@ public static class AccesoDesarrolloLocal
     public const bool CompiladoEnDebug = false;
 #endif
 
-    // El entorno (1-3), sin HttpContext, para probarlo con cada combinacion.
-    public static bool Evaluar(bool compiladoEnDebug, bool esLocal, string proceso)
+    // El interruptor (0): solo "true" lo enciende; todo lo demas, apagado.
+    public static bool Habilitado(string valorConfig)
     {
-        return compiladoEnDebug
+        return string.Equals((valorConfig ?? string.Empty).Trim(), "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // El entorno (0-3), sin HttpContext, para probarlo con cada combinacion.
+    public static bool Evaluar(bool habilitado, bool compiladoEnDebug, bool esLocal, string proceso)
+    {
+        return habilitado
+            && compiladoEnDebug
             && esLocal
             && string.Equals(proceso, ProcesoIisExpress, StringComparison.OrdinalIgnoreCase);
     }
@@ -87,15 +111,36 @@ public static class AccesoDesarrolloLocal
     // DEBUG siempre es null.
     public static string Rol(HttpContext ctx)
     {
+        IdentidadWindows cuenta;
+        return Resolver(ctx, out cuenta);
+    }
+
+    // La cuenta a la que el atajo dio el rol (la MISMA que paso por la
+    // whitelist en Resolver), para firmar lo que se escribe cuando IIS
+    // Express no trae identidad Windows; null si el atajo no aplica. En un
+    // build sin DEBUG siempre es null.
+    public static IdentidadWindows Identidad(HttpContext ctx)
+    {
+        IdentidadWindows cuenta;
+        return Resolver(ctx, out cuenta) == null ? null : cuenta;
+    }
+
+    // Rol y cuenta salen de una sola evaluacion: no hay forma de obtener la
+    // cuenta sin haber pasado interruptor, entorno y whitelist.
+    private static string Resolver(HttpContext ctx, out IdentidadWindows cuenta)
+    {
+        cuenta = null;
 #if DEBUG
         if (ctx == null) return null;
+        if (!Habilitado(Config(ClaveHabilitar))) return null;
         bool local;
         try { local = ctx.Request.IsLocal; }
         catch { local = false; }
-        if (!Evaluar(true, local, Proceso.Value)) return null;
-        return RolPara(true,
-            IdentidadPara(IdentidadWindows.DesdeContexto(ctx), Entorno(VariableIdentidad)),
-            AccesoAdmin.Configurada(), Entorno(VariableRol));
+        if (!Evaluar(true, true, local, Proceso.Value)) return null;
+        var id = IdentidadPara(IdentidadWindows.DesdeContexto(ctx), Entorno(VariableIdentidad));
+        var rol = RolPara(true, id, AccesoAdmin.Configurada(), Entorno(VariableRol));
+        if (rol != null) cuenta = id;
+        return rol;
 #else
         return null;
 #endif
@@ -113,6 +158,12 @@ public static class AccesoDesarrolloLocal
         try { return Process.GetCurrentProcess().ProcessName; }
         catch { return null; }
     });
+
+    private static string Config(string clave)
+    {
+        try { return ConfigurationManager.AppSettings[clave]; }
+        catch { return null; }
+    }
 
     private static string Entorno(string variable)
     {

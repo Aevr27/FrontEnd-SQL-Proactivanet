@@ -21,7 +21,17 @@ window.SolicitudesCambioCola = (function () {
   'use strict';
 
   var URL = '../handlers/admin_iniciativas_solicitudes.ashx';
-  var TIPOS = { FECHA: 'Fecha compromiso', ESTADO: 'Estado y Subestado', CATEGORIAS: 'Categorías', OTROS: 'Otros (explicación)' };
+  var TIPOS = { FECHA: 'Fecha compromiso', ESTADO: 'Estado y Subestado', CATEGORIAS: 'Categorías', OTROS: 'Otros (explicación)',
+                DATOS: 'Título / Product Owner / Service Owner' };
+  // DATOS (sql/25): cada dato con su bandera; PO / SO son los CAPTURADOS de
+  // la iniciativa (no los de la categoría). null = vacío.
+  var DATOS = [
+    { clave: 'titulo', rotulo: 'Título' },
+    { clave: 'po', rotulo: 'Product Owner capturado' },
+    { clave: 'so', rotulo: 'Service Owner capturado' }
+  ];
+  function datosPedidos(s) { return DATOS.filter(function (x) { return s['cambia_' + x.clave] === true; }); }
+  function vacio(v) { return v === null || v === undefined || v === '' ? '(vacío)' : v; }
   var ESTADOS = { PENDIENTE: 'Pendiente', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada' };
   var EVENTOS = { ENVIADA: 'Enviada', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada', FALLO_APLICAR: 'Falló al aplicar', DESACTUALIZADA: 'Desactualizada' };
 
@@ -46,6 +56,11 @@ window.SolicitudesCambioCola = (function () {
         h(s.estado_nuevo) + (s.subestado_nuevo ? ' / ' + h(s.subestado_nuevo) : '') + (fechaTxt ? '; ' + fechaTxt : '');
     }
     if (s.tipo === 'CATEGORIAS') return h(s.categorias) + ' categoría' + (s.categorias === 1 ? '' : 's') + (s.sin_clasificar ? ' (' + h(s.sin_clasificar) + ' sin clasificar)' : '');
+    if (s.tipo === 'DATOS') {
+      return datosPedidos(s).map(function (x) {
+        return h(x.rotulo) + ': ' + h(vacio(s[x.clave + '_anterior'])) + ' → ' + h(vacio(s[x.clave + '_nuevo']));
+      }).join('; ');
+    }
     return 'Explicación para ADM';
   }
 
@@ -87,6 +102,12 @@ window.SolicitudesCambioCola = (function () {
     if (d.campo_fecha) {
       filas += '<tr><th scope="row">Fecha compromiso de ' + h(d.etapa) + '</th><td>' + fecha(d.fecha_anterior) + '</td><td>' + fecha(d.fecha_nueva) +
         '</td><td>' + fecha(d.fecha_actual) + '</td></tr>';
+    }
+    if (d.tipo === 'DATOS') {
+      datosPedidos(d).forEach(function (x) {
+        filas += '<tr><th scope="row">' + h(x.rotulo) + '</th><td>' + h(vacio(d[x.clave + '_anterior'])) + '</td><td>' +
+          h(vacio(d[x.clave + '_nuevo'])) + '</td><td>' + h(vacio(act[x.clave])) + '</td></tr>';
+      });
     }
     var cambios = filas ? '<table class="ini-det-tabla"><thead><tr><th scope="col">Campo</th><th scope="col">Al enviar</th>' +
       '<th scope="col">Pedido</th><th scope="col">Ahora</th></tr></thead><tbody>' + filas + '</tbody></table>' : '';

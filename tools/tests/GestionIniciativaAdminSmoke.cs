@@ -30,6 +30,10 @@
 //      puede bajar o dejar igual; iniciativa que no consume no tiene tope.
 //   V)  VolumetriaCategoria.Resolver: ok, cero real, sin datos, ruta vacia,
 //      llave normalizada como Experiencia.
+//   DQ) PO / SO capturados y quitar categoria en Modificar (sql/24): con el
+//      interruptor apagado se rechazan / quedan pendientes; forzado en
+//      pruebas, se validan contra el catalogo y entran al plan. Codigo
+//      sigue inmutable con los campos nuevos.
 //   EN) Acentos en la respuesta del servidor (faltantes, cambios, JSON) y
 //      fuentes sin BOM sin literales no ASCII; motivo de persistencia vigente.
 //
@@ -131,6 +135,46 @@ public static class GestionIniciativaAdminSmoke
         });
     }
 
+    // Con PO capturado "PO 1" y SO capturado vacio (dbo.Problem).
+    static IniciativaActual ActualDuenos()
+    {
+        var a = Actual();
+        a.PoCapturado = "PO 1";
+        a.SoCapturado = "";
+        return a;
+    }
+
+    static ResultadoGestionAdmin ModD(NameValueCollection f)
+    {
+        return new ValidadorGestionAdmin().Modificar(M(f), ActualDuenos(), new CapacidadCategoria.Compromiso[0], Catalogo, Estados);
+    }
+
+    static string PlanProblem(PlanModificarAdmin plan)
+    {
+        return string.Join("|", plan.Problem.OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => x.Key + "=" + x.Value).ToArray());
+    }
+
+    static IniciativaActual ActualFechas(string estado, string fSolucion, string fCierre)
+    {
+        return IniciativaActual.DesdeRegistro(new Dictionary<string, object>
+        {
+            { "folio", "PRB 2026-000001" }, { "titulo", "Titulo" }, { "titulo_problem", "Titulo" },
+            { "descripcion", null }, { "observaciones", null }, { "sin_categoria", true },
+            { "f_analisis", "2026-10-01" }, { "f_solucion", fSolucion }, { "f_cierre", fCierre },
+            { "estado", estado }, { "subestado", null }, { "categorias", new List<object>() },
+        });
+    }
+
+    // Lo que el plan escribe en dbo.Problem (clave=valor, ordenado).
+    static string PlanFechas(IniciativaActual a, DateTime hoy, params string[] kv)
+    {
+        var f = F(new[] { "folio", a.Folio }.Concat(kv).ToArray());
+        var r = new ValidadorGestionAdmin().Modificar(M(f), a, new CapacidadCategoria.Compromiso[0], Catalogo, Estados);
+        if (!r.Valida) return "invalida:" + Campos(r);
+        var plan = PlanificadorGestionAdmin.Modificar(M(f), a, r, hoy);
+        return string.Join("|", plan.Problem.OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => x.Key + "=" + x.Value).ToArray());
+    }
+
     static PeticionModificarAdmin M(NameValueCollection f) { return PeticionModificarAdmin.DesdeFormulario(f); }
 
     static NameValueCollection F(params string[] kv)
@@ -199,9 +243,10 @@ public static class GestionIniciativaAdminSmoke
         Check("P2 valida: guardada=false, persistencia=habilitada, codigo=null", "True|False|habilitada|",
             j["valida"] + "|" + j["guardada"] + "|" + j["persistencia"] + "|" + j["codigo"]);
         Check("P3 encendida: sin el motivo de 'no habilitada'", null, j["persistencia_motivo"]);
-        Check("P4 bloqueos: solo los que siguen sin guardarse (quitar categoria, RCA); PO/SO ya se guardan", "2|True|True|False",
+        Check("P4 bloqueos sin sql/24: quitar categoria, PO/SO en Modificar y RCA; PO/SO del alta ya se guardan", "3|True|True|True|False",
             ((List<string>)j["bloqueos"]).Count + "|" + ((List<string>)j["bloqueos"])[0].StartsWith("quitar categor") + "|" +
-            ((List<string>)j["bloqueos"])[1].StartsWith("RCA") + "|" +
+            ((List<string>)j["bloqueos"])[1].StartsWith("Product Owner / Service Owner en Modificar") + "|" +
+            ((List<string>)j["bloqueos"])[2].StartsWith("RCA") + "|" +
             ((List<string>)j["bloqueos"]).Contains(PersistenciaGestionAdmin.BloqueoDuenos));
         var ji = Crear(C(null)).ComoJson();
         Check("P5 invalida tambien: guardada=false", "False|False", ji["valida"] + "|" + ji["guardada"]);
@@ -542,6 +587,106 @@ public static class GestionIniciativaAdminSmoke
         try { new EscritorGestionAdminSql().Modificar(new System.Data.SqlClient.SqlConnection(), null, plQuita, "u"); }
         catch (InvalidOperationException) { escrQuita = "rechaza"; }
         Check("PL23 el escritor no ejecuta un plan con categorias a quitar", "rechaza", escrQuita);
+
+        // Fecha al entrar a Cerrado (FechaAlEntrar): hoy en Mexico solo si
+        // queda vacia; nunca pisa una que ya existe. En Solucion NO llena
+        // FechaSolucion (fecha compromiso del semaforo): solo lo que pida el
+        // formulario.
+        Check("PL24 entrar a En Solucion con FechaSolucion vacia: NO se llena", "estado=En Soluci\u00f3n",
+              PlanFechas(ActualFechas("En An\u00e1lisis", null, null), hoy, "estado", "En Soluci\u00f3n"));
+        Check("PL25 entrar a En Solucion con FechaSolucion ya puesta: se conserva", "estado=En Soluci\u00f3n",
+              PlanFechas(ActualFechas("En An\u00e1lisis", "2026-09-30", null), hoy, "estado", "En Soluci\u00f3n"));
+        Check("PL26 entrar a Cerrado con FechaCierre vacia: hoy", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-10-01", null), hoy, "estado", "Cerrado"));
+        Check("PL27 entrar a Cerrado con FechaCierre ya puesta: se conserva", "estado=Cerrado",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-10-01", "2026-12-15"), hoy, "estado", "Cerrado"));
+        Check("PL28 ya En Solucion (sin fecha), guardar otra cosa: no la llena", "titulo=Otro",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", null, null), hoy, "titulo", "Otro"));
+        Check("PL29 ya Cerrado (sin fecha), guardar otra cosa: no la llena", "titulo=Otro",
+              PlanFechas(ActualFechas("Cerrado", null, null), hoy, "titulo", "Otro"));
+        Check("PL30 entrar a En Solucion con FechaSolucion en el mismo guardado: se guarda la del formulario", "estado=En Soluci\u00f3n|f_solucion=2026-11-30",
+              PlanFechas(ActualFechas("En An\u00e1lisis", null, null), hoy, "estado", "En Soluci\u00f3n", "f_solucion", "2026-11-30"));
+        Check("PL31 reglas independientes: entrar a Cerrado no toca FechaSolucion vacia", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("En An\u00e1lisis", null, null), hoy, "estado", "Cerrado"));
+        Check("PL32 entrar a En Solucion (desde Cerrado): ninguna fecha automatica", "estado=En Soluci\u00f3n",
+              PlanFechas(ActualFechas("Cerrado", null, null), hoy, "estado", "En Soluci\u00f3n"));
+        Check("PL33 editar FechaSolucion sin cambiar Estado: se guarda tal cual", "f_solucion=2026-12-20",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-11-30", null), hoy, "f_solucion", "2026-12-20"));
+        Check("PL34 vaciar FechaSolucion al entrar a En Solucion: se vacia (no se rellena con hoy)", "estado=En Soluci\u00f3n|f_solucion=",
+              PlanFechas(ActualFechas("En An\u00e1lisis", "2026-09-30", null), hoy, "estado", "En Soluci\u00f3n", "f_solucion", ""));
+
+        // ---- DQ: PO / SO capturados y quitar (sql/24) ----
+        Check("DQ1 interruptor sql/24 apagado (constante false; sql/23 y 24 sin aplicar)", "False|False",
+              PersistenciaGestionAdmin.ModificaDuenosYQuita + "|" + PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva());
+        var dqOff = ModD(F("folio", Fo, "po", "PO 2"));
+        Check("DQ2 apagado: cambiar el PO se rechaza (422, campo po) y dice por que", "po|True",
+              Campos(dqOff) + "|" + dqOff.Errores[0].Mensaje.Contains("sql/24"));
+        Check("DQ3 apagado: mandar el MISMO PO no es error (no cambia nada)", "-", Campos(ModD(F("folio", Fo, "po", " PO 1 "))));
+        Check("DQ4 apagado: cambiar el SO se rechaza", "so", Campos(ModD(F("folio", Fo, "so", "SO x"))));
+        var escrPo = "";
+        var plPoOff = new PlanModificarAdmin { Codigo = Fo, Hoy = hoy };
+        plPoOff.Problem[SolicitudIniciativa.CPo] = "PO 2";
+        try { new EscritorGestionAdminSql().Modificar(new System.Data.SqlClient.SqlConnection(), null, plPoOff, "u"); }
+        catch (InvalidOperationException) { escrPo = "rechaza"; }
+        Check("DQ5 apagado: el escritor no descarta en silencio un PO del plan", "rechaza", escrPo);
+
+        PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = true;
+        try
+        {
+            var fPo = F("folio", Fo, "po", "PO 2");
+            var rPo = ModD(fPo);
+            var plPo = PlanificadorGestionAdmin.Modificar(M(fPo), ActualDuenos(), rPo, hoy);
+            Check("DQ6 PO del catalogo: valido; cambio 'Product Owner capturado' PO 1 -> PO 2; plan po=PO 2", "True|Product Owner capturado|PO 1|PO 2|po=PO 2",
+                  rPo.Valida + "|" + rPo.Cambios[0]["rotulo"] + "|" + rPo.Cambios[0]["anterior"] + "|" + rPo.Cambios[0]["nuevo"] + "|" + PlanProblem(plPo));
+            var fSo = F("folio", Fo, "so", "SO z");
+            var plSo = PlanificadorGestionAdmin.Modificar(M(fSo), ActualDuenos(), ModD(fSo), hoy);
+            Check("DQ7 SO del catalogo: plan so=SO z (el PO no se toca)", "so=SO z", PlanProblem(plSo));
+            Check("DQ8 PO fuera del catalogo: error po, nada al plan", "po", Campos(ModD(F("folio", Fo, "po", "Alguien Inventado"))));
+            Check("DQ9 SO fuera del catalogo: error so", "so", Campos(ModD(F("folio", Fo, "so", "SO inexistente"))));
+            var fVacio = F("folio", Fo, "po", "");
+            var rVacio = ModD(fVacio);
+            Check("DQ10 vaciar el PO: valido con advertencia; plan po= (vacio)", "True|True|po=",
+                  rVacio.Valida + "|" + rVacio.Advertencias.Any(a => a.Contains("Product Owner capturado")) + "|" +
+                  PlanProblem(PlanificadorGestionAdmin.Modificar(M(fVacio), ActualDuenos(), rVacio, hoy)));
+            Check("DQ11 mismo PO con espacios: sin cambio real (no hay nada que guardar)", "-", Campos(ModD(F("folio", Fo, "po", "  PO 1"))));
+            Check("DQ12 sin catalogo (firma de compatibilidad): cambiar el PO se rechaza", "po",
+                  Campos(new ValidadorGestionAdmin().Modificar(M(F("folio", Fo, "po", "PO 2")), ActualDuenos(), new CapacidadCategoria.Compromiso[0])));
+            Check("DQ13 titulo + PO + SO en un guardado: los tres al plan", "po=PO 3|so=SO y|titulo=Otro titulo",
+                  PlanProblem(PlanificadorGestionAdmin.Modificar(M(F("folio", Fo, "titulo", "Otro titulo", "po", "PO 3", "so", "SO y")), ActualDuenos(),
+                      ModD(F("folio", Fo, "titulo", "Otro titulo", "po", "PO 3", "so", "SO y")), hoy)));
+            Check("DQ14 Codigo sigue inmutable con PO: si llega 'codigo' se rechaza", "codigo",
+                  Campos(ModD(F("folio", Fo, "codigo", "PRB 2026-999999", "po", "PO 2"))));
+            Check("DQ15 el plan con PO lleva el codigo LEIDO (no uno del cliente) y nunca codigo en Problem", Fo + "|False",
+                  plPo.Codigo + "|" + plPo.Problem.ContainsKey("codigo"));
+            Check("DQ16 campos del plan: po y so si, Codigo / FechaCreacion no", "True|True|False",
+                  PlanificadorGestionAdmin.CamposProblem.Contains("po") + "|" + PlanificadorGestionAdmin.CamposProblem.Contains("so") + "|" +
+                  (PlanificadorGestionAdmin.CamposProblem.Contains("codigo") || PlanificadorGestionAdmin.CamposProblem.Contains("f_creacion")));
+
+            var plQ = PlanificadorGestionAdmin.Modificar(M(fQuita), Actual(), ModC(fQuita), hoy);
+            Check("DQ17 quitar con sql/24: al plan, SIN pendiente (el handler ya no responde 409)", "1|0|/A/Cat 2",
+                  plQ.Quitar.Count + "|" + plQ.Pendientes.Count + "|" + plQ.Quitar[0]);
+            var fRemp = F("folio", Fo, "quitar_categoria", "/A/Cat 2", "agregar_categoria", "/B/Cat 3", "agregar_pct", "5",
+                          "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem");
+            var rRemp = ModC(fRemp);
+            var plRemp = PlanificadorGestionAdmin.Modificar(M(fRemp), Actual(), rRemp, hoy);
+            Check("DQ18 reemplazar (quitar /A/Cat 2 + agregar /B/Cat 3): valido; solo la asociacion; sin pendientes",
+                  "True|/A/Cat 2|/B/Cat 3|0|0", rRemp.Valida + "|" + plRemp.Quitar[0] + "|" + plRemp.Agregar[0].Ruta + "|" +
+                  plRemp.Pendientes.Count + "|" + plRemp.Problem.Count);
+            Check("DQ19 reemplazar por encima del tope: error (quitar no libera la OTRA categoria)", "categorias",
+                  Campos(ModC(F("folio", Fo, "quitar_categoria", "/A/Cat 2", "agregar_categoria", "/B/Cat 3", "agregar_pct", "30",
+                                "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"), K("ADO 2026-000009", "/B/Cat 3", 0.75m))));
+            Check("DQ20 quitar una ruta excedida por otros: se permite (quitar nunca consume)", true,
+                  ModC(F("folio", Fo, "quitar_categoria", "/A/Cat 1"), K("ADO 2026-000009", "/A/Cat 1", 0.9m)).Valida);
+            var jOn = Crear(C("ADO")).ComoJson();
+            Check("DQ21 bloqueos con sql/24: solo RCA", "1|True",
+                  ((List<string>)jOn["bloqueos"]).Count + "|" + ((List<string>)jOn["bloqueos"])[0].StartsWith("RCA"));
+            var desdeReg = IniciativaActual.DesdeRegistro(new Dictionary<string, object>
+            {
+                { "folio", Fo }, { "po_capturado", "PO 9" }, { "so_capturado", null }, { "po", "PO de la categoria" },
+            });
+            Check("DQ22 IniciativaActual: PO / SO CAPTURADOS (no los de la categoria)", "PO 9|", desdeReg.PoCapturado + "|" + desdeReg.SoCapturado);
+        }
+        finally { PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null; }
 
         // ---- EN: acentos en lo que responde el servidor ----
         // App_Code y los .ashx sin BOM: IIS los compila como Windows-1252 y

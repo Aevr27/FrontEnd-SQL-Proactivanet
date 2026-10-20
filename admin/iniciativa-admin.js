@@ -975,19 +975,27 @@ window.IniciativaAdmin = (function () {
       destino: 'dbo.Problem.Estado (historial: trg_Problem_EstadoEvento)' },
     { clave: 'subestado', rotulo: 'Subestado', estado: 'editable', control: 'lista', lista: 'subestados',
       destino: 'dbo.Problem.Subestado' },
+    // PO / SO de la INICIATIVA (los capturados), no los de su categoría.
+    // Solo se ofrecen con sql/24 en la base (edicion_duenos_quitar).
+    { clave: 'po', rotulo: 'Product Owner capturado', estado: 'editable', control: 'lista', lista: 'pos',
+      destino: 'dbo.Problem.OwnerProblem (sql/24); los dueños de la categoría no cambian' },
+    { clave: 'so', rotulo: 'Service Owner capturado', estado: 'editable', control: 'lista', lista: 'sos',
+      destino: 'dbo.Problem.OwnerServicio (sql/24); los dueños de la categoría no cambian' },
     { clave: 'categorias', rotulo: 'Categorías y % de disminución', estado: 'editable', control: 'categorias',
       destino: 'dbo.ProblemCategoria (Categoria, PctDisminucion en fracción)' },
     { clave: 'rca', rotulo: 'RCA', estado: 'pendiente',
       motivo: 'El destino del documento (SharePoint) y su referencia siguen sin decidir.' },
     { clave: 'codigo', rotulo: 'Código y Tipo de iniciativa', estado: 'solo_lectura',
       motivo: 'Identifican la iniciativa y nunca cambian; el tipo es el prefijo del código.' },
-    { clave: 'duenos', rotulo: 'Director, Product Owner, Service Owner y Manager', estado: 'solo_lectura',
+    { clave: 'duenos', rotulo: 'Director, Product Owner, Service Owner y Manager de la categoría', estado: 'solo_lectura',
       motivo: 'Se derivan de la categoría (CatCategoriaDueno / CatPersona).' },
     { clave: 'calculados', rotulo: 'Volumetría, tickets a reducir, en riesgo, antigüedad y semáforo', estado: 'solo_lectura',
       motivo: 'Los calcula la base o el servidor.' }
   ];
 
-  var CAMPOS_PROBLEMA = ['titulo', 'descripcion', 'observaciones', 'f_analisis', 'f_solucion', 'f_cierre', 'estado', 'subestado'];
+  var CAMPOS_PROBLEMA = ['titulo', 'descripcion', 'observaciones', 'f_analisis', 'f_solucion', 'f_cierre', 'estado', 'subestado', 'po', 'so'];
+  // De una lista, recortados al comparar (como Estado / Subestado).
+  var CAMPOS_LISTA = ['estado', 'subestado', 'po', 'so'];
 
   function claves(lista) { return lista.map(function (f) { return f.clave; }); }
   // Texto largo con los saltos de linea que devuelve un <textarea> (\n).
@@ -998,9 +1006,12 @@ window.IniciativaAdmin = (function () {
   // EdicionAdmin: edicion directa de una iniciativa del registro, sin DOM
   // ---------------------------------------------------------------------
   // opciones: { rutas: [...] (catalogo vigente, para agregar),
-  //             estados: [...], subestados: [...] (los que ya existen) }.
+  //             estados: [...], subestados: [...] (los que ya existen),
+  //             pos: [...], sos: [...] (PO / SO del catalogo, los del alta),
+  //             duenosYQuitar: true solo con sql/24 en la base }.
   // Sin rutas no se puede agregar; sin listas no se puede cambiar Estado
-  // ni Subestado (el servidor tambien lo rechaza).
+  // ni Subestado (el servidor tambien lo rechaza). Sin duenosYQuitar no
+  // se ofrecen PO / SO y quitar se avisa como no guardable.
   class EdicionAdmin {
     constructor(iniciativa, opciones) {
       opciones = opciones || {};
@@ -1009,8 +1020,11 @@ window.IniciativaAdmin = (function () {
         estados: Array.isArray(opciones.estados) ? opciones.estados : [],
         subestados: Array.isArray(opciones.subestados) ? opciones.subestados : [],
         tiposIniciativa: Array.isArray(opciones.tiposIniciativa) ? opciones.tiposIniciativa : [],
-        tiposAgrupado: Array.isArray(opciones.tiposAgrupado) ? opciones.tiposAgrupado : []
+        tiposAgrupado: Array.isArray(opciones.tiposAgrupado) ? opciones.tiposAgrupado : [],
+        pos: Array.isArray(opciones.pos) ? opciones.pos : [],
+        sos: Array.isArray(opciones.sos) ? opciones.sos : []
       };
+      this.duenosYQuitar = opciones.duenosYQuitar === true;
       // El Titulo editable es el del Problem (titulo_problem); `titulo`
       // puede ser el TituloIniciativa, cuya columna no se escribe aqui.
       var tit = iniciativa.titulo_problem !== undefined ? iniciativa.titulo_problem : iniciativa.titulo;
@@ -1024,7 +1038,10 @@ window.IniciativaAdmin = (function () {
         f_solucion: iniciativa.f_solucion || '',
         f_cierre: iniciativa.f_cierre || '',
         estado: iniciativa.estado || '',
-        subestado: iniciativa.subestado || ''
+        subestado: iniciativa.subestado || '',
+        // Los CAPTURADOS (dbo.Problem), no los de la categoría (po / so).
+        po: iniciativa.po_capturado || '',
+        so: iniciativa.so_capturado || ''
       };
       this.valores = {};
       var self = this;
@@ -1057,7 +1074,7 @@ window.IniciativaAdmin = (function () {
     cambios() {
       var self = this, salida = [];
       CAMPOS_PROBLEMA.forEach(function (k) {
-        var nuevo = k.indexOf('f_') === 0 || k === 'estado' || k === 'subestado' ? self.valores[k].trim() : self.valores[k];
+        var nuevo = k.indexOf('f_') === 0 || CAMPOS_LISTA.indexOf(k) >= 0 ? self.valores[k].trim() : self.valores[k];
         if (nuevo !== self.original[k]) {
           salida.push({ clave: k, rotulo: campo(k).rotulo, anterior: self.original[k], nuevo: nuevo });
         }
@@ -1086,6 +1103,14 @@ window.IniciativaAdmin = (function () {
         if (v === self.original[par[0]]) return;
         if (!self.listas[par[1]].length) errores.push({ clave: par[0], mensaje: campo(par[0]).rotulo + ': no hay lista de valores; no se puede cambiar.' });
         else if (self.listas[par[1]].indexOf(v) < 0) errores.push({ clave: par[0], mensaje: campo(par[0]).rotulo + ': elige un valor de la lista.' });
+      });
+      // PO / SO capturados: de su lista o vacío (se vacía); sin sql/24 no
+      // se pueden cambiar (el servidor también lo rechaza).
+      [['po', 'pos'], ['so', 'sos']].forEach(function (par) {
+        var v = self.valores[par[0]].trim();
+        if (v === self.original[par[0]]) return;
+        if (!self.duenosYQuitar) errores.push({ clave: par[0], mensaje: campo(par[0]).rotulo + ': todavía no se guarda (falta sql/24 en la base).' });
+        else if (v !== '' && self.listas[par[1]].indexOf(v) < 0) errores.push({ clave: par[0], mensaje: campo(par[0]).rotulo + ': elige un valor de la lista o déjalo vacío.' });
       });
       return errores.concat(this.categorias.erroresFormato());
     }
@@ -1123,8 +1148,15 @@ window.IniciativaAdmin = (function () {
           '"). Aquí se modifica el del Problem (dbo.Problem.Titulo); el otro se conserva.');
       }
       if (i.sin_categoria) {
-        notas.push('Sin categoría: sus dueños son los capturados en el Problem (OwnerProblem, OwnerServicio, Direccion) ' +
-          'y se conservan tal cual; aquí no se modifican.');
+        notas.push(this.duenosYQuitar
+          ? 'Sin categoría: sus dueños son los capturados en el Problem (OwnerProblem, OwnerServicio, Direccion). ' +
+            'Product Owner y Service Owner se cambian aquí; Direccion se conserva.'
+          : 'Sin categoría: sus dueños son los capturados en el Problem (OwnerProblem, OwnerServicio, Direccion) ' +
+            'y se conservan tal cual; aquí no se modifican.');
+      }
+      if (this.cambios().some(function (c) { return c.clave === 'po' || c.clave === 'so'; })) {
+        notas.push('Product Owner / Service Owner capturados: solo cambian los de esta iniciativa; ' +
+          'los dueños de sus categorías (y los filtros que los usan) no cambian.');
       }
       if (this.cambios().some(function (c) { return c.clave === 'estado' || c.clave === 'subestado'; })) {
         notas.push('No hay reglas de transición de Estado/Subestado verificadas: se ofrecen los valores que ya existen en los problemas.');
@@ -1217,8 +1249,10 @@ window.IniciativaAdmin = (function () {
     return htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis,
         tiposIniciativa: ed.listas.tiposIniciativa, tiposAgrupado: ed.listas.tiposAgrupado }) + agregar +
       '<div class="ini-cambio-msg" id="regEdCatMsg" role="status" aria-live="polite"></div>' +
-      '<small class="ini-sub">Destino propuesto: dbo.ProblemCategoria. Quitar = la fila deja de estar vigente; no se borra ' +
-        '(regla de baja pendiente de aprobar). La volumetría es calculada y de solo lectura.</small>' +
+      '<small class="ini-sub">Destino: dbo.ProblemCategoria. Quitar = solo la asociación con esta iniciativa deja de estar vigente ' +
+        '(VigenteEnOrigen = 0, la misma baja del cargador); no se borra la fila, ni la categoría, ni sus dueños.' +
+        (ed.duenosYQuitar ? '' : ' Quitar todavía no se guarda: falta aplicar sql/24 en la base (el servidor lo rechaza).') +
+        ' La volumetría es calculada y de solo lectura.</small>' +
       '<small class="ini-sub">Fecha de análisis: las categorías iniciales heredan la de la iniciativa y cambian con ella ' +
         '(Fecha compromiso de Análisis). Una categoría ligada después tiene la suya: el día en que se liga + ' +
         FECHAS_GESTION.diasAnalisis + ' días, editable aquí, sin tocar la de la iniciativa. ' +
@@ -1234,6 +1268,7 @@ window.IniciativaAdmin = (function () {
   function htmlControlEdicion(ed, clave) {
     var c = campo(clave);
     if (!c || c.estado !== 'editable' || c.control === 'categorias') return '';
+    if ((clave === 'po' || clave === 'so') && !ed.duenosYQuitar) return '';
     var id = 'regEd-' + clave, v = ed.valores[clave];
     var cambiado = ed.cambios().some(function (x) { return x.clave === clave; });
     var attrs = ' data-edicion="' + clave + '" aria-label="' + Escape.attr(c.rotulo) + '" class="ini-ed-campo' +

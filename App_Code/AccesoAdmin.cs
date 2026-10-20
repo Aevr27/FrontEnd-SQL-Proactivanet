@@ -4,7 +4,7 @@
 // (RolAdmin): ADM o MOD entran, todo lo demas (VIEWER, sin fila, valor
 // raro, consulta fallida, sin identidad Windows) no. La whitelist de abajo
 // YA NO es puerta en el sitio desplegado: PuedeEntrar no la llama. Solo la
-// usa el atajo de desarrollo local (AccesoDesarrolloLocal: DEBUG + loopback
+// usa el atajo de desarrollo local (AccesoDesarrolloLocal: AdminDevOverride + DEBUG + loopback
 // + IIS Express + la cuenta de ADMIN_DEV_IDENTIDAD en la whitelist). Lo que
 // sigue describe la whitelist como referencia.
 //
@@ -115,7 +115,7 @@ public static class AccesoAdmin
     }
 
     // La entrada a Admin para el request en curso: el atajo de desarrollo
-    // local (AccesoDesarrolloLocal: DEBUG + request local + IIS Express +
+    // local (AccesoDesarrolloLocal: AdminDevOverride + DEBUG + request local + IIS Express +
     // cuenta de desarrollo en la whitelist); o la identidad Windows real con rol ADM o MOD en
     // dbo.UsuariosAdmin. El rol de la base manda: la whitelist temporal ya
     // no deja fuera a un ADM/MOD ni deja entrar a nadie por su nombre.
@@ -163,6 +163,30 @@ public static class AccesoAdmin
             delegate (Exception ex) { DashboardHandler.Registrar("AccesoAdmin.Rol", ex); });
         if (context != null) context.Items[ClaveRolRequest] = rol;
         return rol;
+    }
+
+    // Quien firma lo que se escribe (@Usuario de adm.usp_*: bitacora y
+    // atribucion), o null = nadie (el handler responde 403 SinUsuario).
+    // La identidad Windows real manda siempre; solo sin ella, y solo si el
+    // atajo de desarrollo local aplica, firma la cuenta que el atajo ya
+    // valido (AccesoDesarrolloLocal.Identidad). En la VM / produccion el
+    // atajo no existe y esto es exactamente la identidad Windows del request.
+    public static IdentidadWindows IdentidadEscritura(HttpContext context)
+    {
+        return IdentidadEscrituraPara(IdentidadWindows.DesdeContexto(context),
+            AccesoDesarrolloLocal.Identidad(context));   // SOLO DESARROLLO LOCAL
+    }
+
+    // La regla de arriba sin HttpContext, para probarla.
+    public static IdentidadWindows IdentidadEscrituraPara(IdentidadWindows real, IdentidadWindows desarrollo)
+    {
+        if (Firma(real)) return real;
+        return Firma(desarrollo) ? desarrollo : null;
+    }
+
+    private static bool Firma(IdentidadWindows id)
+    {
+        return id != null && id.Autenticada && !string.IsNullOrEmpty(id.Original);
     }
 
     // Para lo que es solo de ADM: Exigir (rol ADM o MOD, o el atajo de

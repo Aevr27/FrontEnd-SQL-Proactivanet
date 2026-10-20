@@ -426,6 +426,26 @@
       </section>
     </div>
 
+    <!-- Cambios recientes (admin/cambios-recientes.js, solo ADM): las
+         ultimas iniciativas guardadas DESDE EL DASHBOARD, mas reciente
+         primero (handlers/admin_iniciativas_recientes.ashx, ExigirAdm). No
+         es bitacora; no incluye SSMS ni la carga del Excel. "Ver" abre el
+         detalle de Iniciativas sin tocar sus filtros. -->
+    <section class="ini-adm-bloque ini-cr" id="crSeccion" aria-labelledby="crTitulo" data-solo-adm hidden>
+      <div class="ini-lista-cab">
+        <h3 class="ini-lista-titulo" id="crTitulo">Cambios recientes</h3>
+        <button type="button" class="btn linea chico" id="crActualizar">Actualizar</button>
+      </div>
+      <p class="ini-nota" id="crAlcance">Solo cambios guardados desde el Dashboard (alta, edición o solicitud aplicada). No incluye cambios hechos en SQL Server Management Studio ni por la carga del Excel.</p>
+      <p class="ini-estado" id="crCargando" role="status" hidden>Cargando cambios recientes…</p>
+      <div class="ini-error" id="crError" role="alert" hidden>
+        <span><strong>No se pudieron cargar los cambios recientes.</strong> <span id="crErrorTexto"></span></span>
+        <button type="button" class="btn" id="crReintentar">Reintentar</button>
+      </div>
+      <div class="ini-vacio" id="crVacio" hidden><strong id="crVacioTexto"></strong></div>
+      <div id="crLista" aria-live="polite" hidden></div>
+    </section>
+
     <!-- Dueños de categoria (admin/categorias-duenos.js, VistaDuenos):
          lectura de dbo.CatCategoriaDueno por ?duenos=1 y propuesta con
          vista previa; "Guardar (no disponible)" deshabilitado hasta tener
@@ -765,6 +785,7 @@
 <script src="categorias-duenos.js"></script>
 <script src="registro-iniciativas.js"></script>
 <script src="solicitudes-cambio.js"></script>
+<script src="cambios-recientes.js"></script>
 <script src="iniciativas.js"></script>
 <script>
 // El rol tambien decide los botones de ADM que se pintan dentro del detalle,

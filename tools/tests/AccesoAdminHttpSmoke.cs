@@ -21,8 +21,9 @@
 //     ese rol; en la whitelist sin rol valido no entra; anonimo nunca
 //     consulta la base;
 //   - D) el atajo local va primero en PuedeEntrar y Rol (revision del fuente);
-//   - el atajo de desarrollo local (AccesoDesarrolloLocal) solo con DEBUG +
-//     request local + IIS Express; aqui nunca se activa;
+//   - el atajo de desarrollo local (AccesoDesarrolloLocal) solo con
+//     AdminDevOverride=true + DEBUG + request local + IIS Express; aqui
+//     nunca se activa;
 //   - admin_sesion.ashx sin ?persona: {"autorizado", "rol"}.
 //   - C) admin_correos.ashx (consola de correos, lanza powershell.exe): solo
 //     ADM. Se ejercita con GET (metadatos: nunca lanza nada); el permiso se
@@ -37,7 +38,7 @@
 //   (handlers admin_* sin su linea 1 -> h\*.cs)
 //   csc /nologo /target:library /out:hnd.dll /r:adm.dll /r:System.dll /r:System.Data.dll ^
 //       /r:System.Web.dll /r:System.Web.Extensions.dll h\*.cs
-//   csc /nologo /out:AccesoAdminHttpSmoke.exe /r:adm.dll /r:hnd.dll /r:System.dll /r:System.Web.dll ^
+//   csc /nologo /out:AccesoAdminHttpSmoke.exe /r:adm.dll /r:hnd.dll /r:System.dll /r:System.Web.dll /r:System.Configuration.dll ^
 //       tools\tests\AccesoAdminHttpSmoke.cs
 //   AccesoAdminHttpSmoke.exe
 using System;
@@ -525,15 +526,21 @@ public static class AccesoAdminHttpSmoke
         AccesoAdmin.FuenteRoles = fuente;
 
         // ---- L) atajo de desarrollo local (AccesoDesarrolloLocal) ----------
-        // La regla: DEBUG + request local + IIS Express, las tres.
+        // La regla: AdminDevOverride=true + DEBUG + request local + IIS Express, las cuatro.
         const string EXP = "iisexpress";
-        Check("L1 local + DEBUG + IIS Express: ADM", true, AccesoDesarrolloLocal.Evaluar(true, true, EXP));
-        Check("L1 nombre del proceso sin distinguir mayusculas", true, AccesoDesarrolloLocal.Evaluar(true, true, "IISExpress"));
-        Check("L2 no local (remoto): autorizacion normal", false, AccesoDesarrolloLocal.Evaluar(true, false, EXP));
-        Check("L3 sin DEBUG (Release): autorizacion normal", false, AccesoDesarrolloLocal.Evaluar(false, true, EXP));
-        Check("L4 IIS de la VM (w3wp) aunque sea local y DEBUG: normal", false, AccesoDesarrolloLocal.Evaluar(true, true, "w3wp"));
-        Check("L4 sin proceso conocido: normal", false, AccesoDesarrolloLocal.Evaluar(true, true, null));
-        Check("L5 nada de lo anterior: normal", false, AccesoDesarrolloLocal.Evaluar(false, false, "w3wp"));
+        Check("L1 interruptor + local + DEBUG + IIS Express: ADM", true, AccesoDesarrolloLocal.Evaluar(true, true, true, EXP));
+        Check("L1 nombre del proceso sin distinguir mayusculas", true, AccesoDesarrolloLocal.Evaluar(true, true, true, "IISExpress"));
+        Check("L0 interruptor apagado (todo lo demas local): autorizacion normal", false, AccesoDesarrolloLocal.Evaluar(false, true, true, EXP));
+        Check("L2 no local (remoto): autorizacion normal", false, AccesoDesarrolloLocal.Evaluar(true, true, false, EXP));
+        Check("L3 sin DEBUG (Release): autorizacion normal", false, AccesoDesarrolloLocal.Evaluar(true, false, true, EXP));
+        Check("L4 IIS de la VM (w3wp) aunque sea local, DEBUG y con interruptor: normal", false, AccesoDesarrolloLocal.Evaluar(true, true, true, "w3wp"));
+        Check("L4 sin proceso conocido: normal", false, AccesoDesarrolloLocal.Evaluar(true, true, true, null));
+        Check("L5 nada de lo anterior: normal", false, AccesoDesarrolloLocal.Evaluar(false, false, false, "w3wp"));
+        // El interruptor: solo "true" (sin distinguir mayusculas, sin espacios alrededor) lo enciende.
+        foreach (var v in new[] { "true", "TRUE", " True " })
+            Check("L0 AdminDevOverride='" + v + "': encendido", true, AccesoDesarrolloLocal.Habilitado(v));
+        foreach (var v in new[] { null, "", " ", "false", "1", "yes", "on", "truee", "true;", "\"true\"" })
+            Check("L0 AdminDevOverride=" + (v == null ? "(ausente)" : "'" + v + "'") + ": apagado", false, AccesoDesarrolloLocal.Habilitado(v));
 
         // ---- W) whitelist de desarrollo local (AccesoDesarrolloLocal.RolPara) --
         // La regla completa sin HttpContext: entorno (DEBUG + loopback + IIS
@@ -559,13 +566,17 @@ public static class AccesoAdminHttpSmoke
         Check("W2 real de otra cuenta + variable de la whitelist: sin atajo", null, AccesoDesarrolloLocal.RolPara(true, real, lista, null));
         // 3) fuera del entorno (VM, produccion, remoto, Release) la whitelist no da nada
         var fueras = new[] {
-            new object[] { true,  false, EXP,    "remoto" },
-            new object[] { false, true,  EXP,    "Release" },
-            new object[] { true,  true,  "w3wp", "IIS de la VM (w3wp)" },
-            new object[] { false, false, "w3wp", "produccion" } };
+            new object[] { false, true,  true,  EXP,    "interruptor apagado (local)" },
+            new object[] { true,  true,  false, EXP,    "remoto" },
+            new object[] { true,  false, true,  EXP,    "Release" },
+            new object[] { true,  true,  true,  "w3wp", "IIS de la VM (w3wp) con interruptor" },
+            new object[] { false, false, false, "w3wp", "produccion" } };
         foreach (var e in fueras)
-            Check("W3 " + e[3] + " + SORIANA\\t_andresvr: sin atajo", null,
-                  AccesoDesarrolloLocal.RolPara(AccesoDesarrolloLocal.Evaluar((bool)e[0], (bool)e[1], (string)e[2]), dev(YO), lista, "ADM"));
+        {
+            var entorno = AccesoDesarrolloLocal.Evaluar((bool)e[0], (bool)e[1], (bool)e[2], (string)e[3]);
+            Check("W3 " + e[4] + " + SORIANA\\t_andresvr: sin atajo", null, AccesoDesarrolloLocal.RolPara(entorno, dev(YO), lista, "ADM"));
+            Check("W3 " + e[4] + " + rol MOD: sin atajo", null, AccesoDesarrolloLocal.RolPara(entorno, dev(YO), lista, "MOD"));
+        }
         // 3b) por HTTP, fuera del entorno local: la cuenta de la whitelist sin
         // fila en dbo.UsuariosAdmin NO entra (la base manda); con fila MOD
         // entra con SU rol, no con el de desarrollo.
@@ -611,16 +622,95 @@ public static class AccesoAdminHttpSmoke
         var activo = fuenteDev.Substring(fuenteDev.IndexOf("public static bool Activo("));
         activo = activo.Substring(0, activo.IndexOf("\n    }") + 6);
         Check("L7 Activo = Rol(ctx) != null", true, activo.Contains("return Rol(ctx) != null;"));
-        var rolDev = fuenteDev.Substring(fuenteDev.IndexOf("public static string Rol(HttpContext ctx)"));
+        // Rol() e Identidad() salen de Resolver(): la regla vive ahi.
+        Check("L7 Rol e Identidad delegan en Resolver", true,
+              fuenteDev.Contains("public static string Rol(HttpContext ctx)\n    {\n        IdentidadWindows cuenta;\n        return Resolver(ctx, out cuenta);") &&
+              fuenteDev.Contains("return Resolver(ctx, out cuenta) == null ? null : cuenta;"));
+        var rolDev = fuenteDev.Substring(fuenteDev.IndexOf("private static string Resolver(HttpContext ctx, out IdentidadWindows cuenta)"));
         rolDev = rolDev.Substring(0, rolDev.IndexOf("\n    }") + 6);
-        Check("L7 Rol: #if DEBUG ... #else return null", true,
+        Check("L7 Resolver: #if DEBUG ... #else return null", true,
               rolDev.Contains("#if DEBUG") && rolDev.Contains("#else\n        return null;\n#endif"));
-        Check("L7 Rol: entorno primero, despues la whitelist", true,
-              rolDev.IndexOf("Evaluar(true, local, Proceso.Value)") > 0 &&
-              rolDev.IndexOf("Evaluar(true, local, Proceso.Value)") < rolDev.IndexOf("AccesoAdmin.Configurada()"));
+        Check("L7 Resolver: la cuenta solo sale si la whitelist dio rol", true,
+              rolDev.Contains("cuenta = null;") && rolDev.Contains("if (rol != null) cuenta = id;"));
+        Check("L7 Rol: interruptor primero, despues entorno, despues la whitelist", true,
+              rolDev.IndexOf("Habilitado(Config(ClaveHabilitar))") > 0 &&
+              rolDev.IndexOf("Habilitado(Config(ClaveHabilitar))") < rolDev.IndexOf("Evaluar(true, true, local, Proceso.Value)") &&
+              rolDev.IndexOf("Evaluar(true, true, local, Proceso.Value)") < rolDev.IndexOf("AccesoAdmin.Configurada()"));
+        Check("L7 el interruptor sale del Web.config del servidor (appSettings)", true,
+              fuenteDev.Contains("ConfigurationManager.AppSettings[clave]") && fuenteDev.Contains("ClaveHabilitar = \"AdminDevOverride\""));
+        // Este proceso de prueba no trae la clave: el interruptor esta apagado.
+        Check("L8 sin AdminDevOverride en la configuracion: apagado", false,
+              AccesoDesarrolloLocal.Habilitado(System.Configuration.ConfigurationManager.AppSettings[AccesoDesarrolloLocal.ClaveHabilitar]));
+        // Copiar el ejemplo a la VM no lo enciende: fuera de comentarios no
+        // aparece la clave.
+        var ejemplo = System.Text.RegularExpressions.Regex.Replace(File.ReadAllText("Web.config.ejemplo"), "<!--.*?-->", "",
+                          System.Text.RegularExpressions.RegexOptions.Singleline);
+        Check("L8 Web.config.ejemplo no trae AdminDevOverride fuera de comentarios", false, ejemplo.Contains("AdminDevOverride"));
         activo = rolDev;
         Check("L7 sin host/URL/query/cookie/header en la regla", false,
               System.Text.RegularExpressions.Regex.IsMatch(activo, @"Url|Host|QueryString|Cookies|Headers|Form|Params|ServerVariables"));
+
+        // ---- F) quien firma la escritura (AccesoAdmin.IdentidadEscritura) ----
+        // Antes: crear/modificar en IIS Express pasaban ExigirAdm con el rol
+        // del atajo, pero firmaban con IdentidadWindows.DesdeContexto
+        // (anonima) -> 403 SinUsuario. La firma ahora es la identidad Windows
+        // real, o la cuenta que el atajo ya valido; nunca otra cosa.
+        var anon = IdentidadWindows.Desde(null, false);
+        var realOtro = IdentidadWindows.Desde(@"SORIANA\t_otro", true);
+        var cuentaDev = AccesoDesarrolloLocal.IdentidadPara(anon, YO);
+        Func<IdentidadWindows, string> txt = delegate (IdentidadWindows i) { return i == null ? "(nadie)" : i.Original; };
+        Check("F1 identidad Windows real: firma ella aunque haya cuenta de desarrollo", @"SORIANA\t_otro",
+              txt(AccesoAdmin.IdentidadEscrituraPara(realOtro, cuentaDev)));
+        Check("F2 sin Windows auth + cuenta del atajo: firma la cuenta del atajo", YO,
+              txt(AccesoAdmin.IdentidadEscrituraPara(anon, cuentaDev)));
+        Check("F3 sin Windows auth y sin atajo: nadie (403 SinUsuario)", "(nadie)",
+              txt(AccesoAdmin.IdentidadEscrituraPara(anon, null)));
+        Check("F3 null / cuenta no autenticada: nadie", "(nadie)|(nadie)",
+              txt(AccesoAdmin.IdentidadEscrituraPara(null, null)) + "|" + txt(AccesoAdmin.IdentidadEscrituraPara(anon, anon)));
+        // Con HttpContext: aqui el atajo no aplica (ni iisexpress ni local),
+        // asi que la firma es exactamente la identidad del request.
+        var ctxF = Contexto("admin_iniciativas_gestion.ashx", null, YO, new StringWriter());
+        Check("F4 request con Windows auth: firma su cuenta", YO, txt(AccesoAdmin.IdentidadEscritura(ctxF)));
+        ctxF = Contexto("admin_iniciativas_gestion.ashx", "ADMIN_DEV_IDENTIDAD=SORIANA%5Ct_andresvr", "", new StringWriter());
+        Check("F4 anonimo (con la cuenta en la query): nadie y sin cuenta del atajo", "(nadie)|(nadie)",
+              txt(AccesoAdmin.IdentidadEscritura(ctxF)) + "|" + txt(AccesoDesarrolloLocal.Identidad(ctxF)));
+        Check("F4 Identidad(null): nadie", "(nadie)", txt(AccesoDesarrolloLocal.Identidad(null)));
+        HttpContext.Current = null;
+        // El POST real de modificar con ADM de la base (produccion): pasa
+        // ExigirAdm y la firma, y corta en el formato (422), sin SQL.
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "ADM");
+        string metodoF;
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", YO,
+                            new[] { new[] { "accion", "modificar" }, new[] { "folio", "" } }, out estado, out metodoF);
+        Check("F5 POST modificar ADM con Windows auth: pasa rol y firma (422 de formato, sin SinUsuario)", "422|True|False",
+              estado + "|" + cuerpo.Contains("ValidacionFallida") + "|" + cuerpo.Contains("SinUsuario"));
+        // Anonimo y MOD siguen cortando en ExigirAdm, antes de la firma.
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", "",
+                            new[] { new[] { "accion", "crear" } }, out estado, out metodoF);
+        Check("F6 POST crear anonimo (sin atajo): 403 AccesoDenegado", "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", YO,
+                            new[] { new[] { "accion", "crear" } }, out estado, out metodoF);
+        Check("F6 POST crear MOD: 403 RolInsuficiente (sin cambios)", "403|True", estado + "|" + cuerpo.Contains("RolInsuficiente"));
+        AccesoAdmin.FuenteRoles = fuente;
+        // Fuente: los handlers que escriben firman con IdentidadEscritura, y
+        // gestion lo resuelve antes de leer el catalogo.
+        var gestion = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_gestion.ashx")).Replace("\r\n", "\n");
+        var solicitudes = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx")).Replace("\r\n", "\n");
+        Check("F7 gestion: firma con AccesoAdmin.IdentidadEscritura, no con IdentidadWindows.DesdeContexto", "True|False|True",
+              gestion.Contains("firma = AccesoAdmin.IdentidadEscritura(context);") + "|" + gestion.Contains("IdentidadWindows.DesdeContexto") + "|" +
+              gestion.Contains("servicio.Guardar(planCrear, planMod, firma.Original)"));
+        Check("F7 gestion: ExigirAdm, luego firma, luego el catalogo", true,
+              gestion.IndexOf("AccesoAdmin.ExigirAdm(") < gestion.IndexOf("AccesoAdmin.IdentidadEscritura(context)") &&
+              gestion.IndexOf("AccesoAdmin.IdentidadEscritura(context)") < gestion.IndexOf("new GestionIniciativaAdminService()"));
+        Check("F7 solicitudes: firma con AccesoAdmin.IdentidadEscritura", "True|False",
+              solicitudes.Contains("AccesoAdmin.IdentidadEscritura(context)") + "|" + solicitudes.Contains("IdentidadWindows.DesdeContexto"));
+        var fuenteAccF = File.ReadAllText(Path.Combine("App_Code", "AccesoAdmin.cs")).Replace("\r\n", "\n");
+        var firmaFn = fuenteAccF.Substring(fuenteAccF.IndexOf("public static IdentidadWindows IdentidadEscrituraPara("));
+        firmaFn = firmaFn.Substring(0, firmaFn.IndexOf("\n    }") + 6);
+        Check("F8 la real va primero; la de desarrollo solo sin real", true,
+              firmaFn.IndexOf("if (Firma(real)) return real;") > 0 &&
+              firmaFn.IndexOf("if (Firma(real)) return real;") < firmaFn.IndexOf("Firma(desarrollo)"));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));
         return fallos == 0 ? 0 : 1;

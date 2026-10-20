@@ -6,11 +6,16 @@
 #
 # Requisitos: IIS Express instalado y Web.config local con
 # <compilation debug="true"> (si no, el atajo no existe y la prueba avisa).
+# El interruptor AdminDevOverride (appSettings del Web.config local) decide
+# que casos corren: apagado -> I0; "true" -> I1-I4. Correrla con los dos
+# valores para cubrir todo (la prueba NO toca Web.config).
 #
 # Corre desde la raiz del repo:
 #   powershell -ExecutionPolicy Bypass -File tools\tests\AccesoDesarrolloLocalIisExpress.ps1 [-Puerto 8097]
 #
 # Casos:
+#   I0 AdminDevOverride apagado: dev-local.cmd con la cuenta de la whitelist
+#      como ADM NO entra (regla normal: anonimo -> VIEWER -> 403).
 #   I1 dev-local.cmd sin cuenta (SORIANA\t_andresvr por omision): entra como ADM.
 #   I2 dev-local.cmd con MOD: entra como MOD; lo solo-ADM da 403 RolInsuficiente.
 #   I3 dev-local.cmd con otra cuenta local: NO entra (403 en handlers).
@@ -33,6 +38,11 @@ if (-not (Test-Path $cfg) -or -not (Select-String -Path $cfg -Pattern 'compilati
     'SKIP  Web.config local sin <compilation debug="true">: el atajo no se compila.'
     exit 2
 }
+# El interruptor, leido como XML (un <add> comentado no cuenta), con la misma
+# regla que el servidor: solo "true".
+$override = @(([xml](Get-Content $cfg -Raw)).configuration.appSettings.add |
+    Where-Object { $_.key -eq 'AdminDevOverride' -and "$($_.value)".Trim() -eq 'true' }).Count -gt 0
+"      (AdminDevOverride encendido en Web.config local: $override)"
 $iis = Join-Path $env:ProgramFiles 'IIS Express\iisexpress.exe'
 if (-not (Test-Path $iis)) { $iis = Join-Path ${env:ProgramFiles(x86)} 'IIS Express\iisexpress.exe' }
 if (-not (Test-Path $iis)) { 'SKIP  no hay IIS Express'; exit 2 }
@@ -91,6 +101,21 @@ $falsos = @{
 $qFalso = 'ADMIN_DEV_IDENTIDAD=SORIANA%5Ct_andresvr&ADMIN_DEV_ROL=ADM'
 
 try {
+  if (-not $override) {
+    # ---- I0 interruptor apagado: la whitelist sola no basta --------------
+    Arrancar ''
+    foreach ($caso in @(@{ n = 'limpio'; h = @{}; q = '' }, @{ n = 'con headers/query/cookie falsos'; h = $falsos; q = "?$qFalso" })) {
+        $r = Pedir ('handlers/admin_sesion.ashx' + $caso.q) $caso.h
+        Check "I0 apagado ($($caso.n)): admin_sesion no autoriza" '200|{"autorizado":false}' "$($r.Estado)|$($r.Cuerpo)"
+        $r = Pedir ('handlers/admin_iniciativas_capacidad.ashx' + $caso.q) $caso.h
+        Check "I0 apagado ($($caso.n)): capacidad 403 AccesoDenegado" '403|True' "$($r.Estado)|$($r.Cuerpo.Contains('AccesoDenegado'))"
+        $r = Pedir ('handlers/admin_iniciativas_gestion.ashx' + $caso.q) $caso.h
+        Check "I0 apagado ($($caso.n)): gestion (crear/modificar) 403" 403 $r.Estado
+        $r = Pedir ('handlers/admin_correos.ashx' + $caso.q) $caso.h
+        Check "I0 apagado ($($caso.n)): admin_correos 403" 403 $r.Estado
+    }
+    'SKIP  I1-I4: encender AdminDevOverride en Web.config local y volver a correr'
+  } else {
     # ---- I1 la cuenta de la whitelist, por omision ----------------------
     Arrancar ''
     $r = Pedir 'handlers/admin_sesion.ashx' @{}
@@ -99,6 +124,8 @@ try {
     Check 'I1 capacidad: pasa Exigir (400 sin categoria, sin SQL)' '400|True' "$($r.Estado)|$($r.Cuerpo.Contains('SolicitudInvalida'))"
     $r = Pedir 'handlers/admin_correos.ashx' @{}
     Check 'I1 admin_correos (solo ADM): no 403' 'True' ($r.Estado -ne 403)
+    $r = Pedir 'handlers/admin_iniciativas_gestion.ashx' @{}
+    Check 'I1 gestion (crear/modificar directo) ADM: pasa ExigirAdm (405 por GET)' 405 $r.Estado
     $r = Pedir 'admin/iniciativas.html' @{}
     Check 'I1 pagina: 200' 200 $r.Estado
 
@@ -110,6 +137,8 @@ try {
     Check 'I2 admin_correos con MOD: 403 RolInsuficiente' '403|True' "$($r.Estado)|$($r.Cuerpo.Contains('RolInsuficiente'))"
     $r = Pedir 'handlers/admin_iniciativas_capacidad.ashx' @{}
     Check 'I2 capacidad con MOD: pasa Exigir (400)' 400 $r.Estado
+    $r = Pedir 'handlers/admin_iniciativas_gestion.ashx' @{}
+    Check 'I2 gestion (crear/modificar directo) con MOD: 403 RolInsuficiente' '403|True' "$($r.Estado)|$($r.Cuerpo.Contains('RolInsuficiente'))"
 
     # ---- I3 otra cuenta local: no entra sola ----------------------------
     foreach ($otra in 'SORIANA\omaralus', 'SORIANA\t_otro') {
@@ -132,6 +161,7 @@ try {
         $r = Pedir ('handlers/admin_iniciativas_registro.ashx' + $caso.q) $caso.h
         Check "I4 sin ADMIN_DEV_IDENTIDAD ($($caso.n)): registro 403 AccesoDenegado" '403|True' "$($r.Estado)|$($r.Cuerpo.Contains('AccesoDenegado'))"
     }
+  }
 }
 finally {
     Parar

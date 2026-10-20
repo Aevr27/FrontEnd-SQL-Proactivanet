@@ -68,6 +68,11 @@ public class AdminIniciativasRegistro : IHttpHandler
             // Lo mismo para "Solicitar cambios" (sql/22): con false la
             // solicitud se prepara pero no se envia, y la pagina lo dice.
             registro["persistencia_solicitudes"] = PersistenciaSolicitudesCambio.Activa();
+            // Solicitar cambios de Titulo / PO / SO (tipo datos, sql/25).
+            registro["solicitudes_datos"] = PersistenciaSolicitudesCambio.SolicitaDatosActiva();
+            // Modificar con PO / SO capturados y quitar categoria (sql/24):
+            // sin esto la pagina no los ofrece (el servidor los rechazaria).
+            registro["edicion_duenos_quitar"] = PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva();
             context.Response.Write(serializador.Serialize(registro));
         }
         catch (Exception ex)

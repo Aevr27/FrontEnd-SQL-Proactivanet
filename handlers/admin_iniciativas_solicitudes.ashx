@@ -7,10 +7,13 @@
 //   (accion siempre en la URL: ?accion=...)
 //   POST accion=enviar     Exigir (ADM o MOD; ADM tambien, fase de pruebas)
 //        folio, llave (GUID por borrador: el reintento no duplica), tipo
-//        (fecha | estado | categorias | otros), campo_fecha (f_analisis |
+//        (fecha | estado | categorias | otros | datos), campo_fecha (f_analisis |
 //        f_solucion | f_cierre) + fecha_nueva (aaaa-mm-dd), estado_nuevo,
 //        subestado_nuevo, pares pct_categoria / pct_valor (ligadas, en %),
 //        agregar_categoria / agregar_pct (del catalogo, en %), motivo.
+//        tipo datos (sql/25, PersistenciaSolicitudesCambio.SolicitaDatos):
+//        titulo_nuevo / po_nuevo / so_nuevo, la clave PRESENTE = se pide
+//        (vacia = que quede vacio); PO / SO del catalogo se revisan al aplicar.
 //        -> 200 { enviada: true, id_solicitud, repetida }
 //           422 { errores } formato;  4xx de la base (ErrorSolicitudCambio)
 //           501 { tipo: PersistenciaNoHabilitada } sin sql/22: nada se guarda
@@ -64,9 +67,11 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             }
             else return Error(context, 400, "Acci\u00f3n desconocida.", "AccionDesconocida");
 
-            // Lo que escribe necesita la cuenta Windows (atribucion); leer la
-            // cola solo necesita el permiso de arriba.
-            var id = IdentidadWindows.DesdeContexto(context);
+            // Lo que escribe necesita quien firme (atribucion): la cuenta
+            // Windows o, solo en desarrollo local, la del atajo
+            // (AccesoAdmin.IdentidadEscritura). Leer la cola solo necesita el
+            // permiso de arriba.
+            var id = AccesoAdmin.IdentidadEscritura(context) ?? IdentidadWindows.Desde(null, false);
             if ((accion == "enviar" || accion == "rechazar" || accion == "aplicar") && (!id.Autenticada || string.IsNullOrEmpty(id.Original)))
                 return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
             var rol = AccesoAdmin.Rol(context);

@@ -73,6 +73,17 @@
          TEMPORAL: por ahora esta clave SE IGNORA; la lista vigente es
          App_Code/AdminWhitelistTemporal.cs hasta la autorizacion en base. -->
     <add key="AdminAllowedUsers"        value="SORIANA\user1;SORIANA\user2;SORIANA\user3;SORIANA\user4" />
+
+    <!-- SOLO DESARROLLO LOCAL (IIS Express sin Autenticacion de Windows):
+         Admin -> Iniciativas como ADM/MOD para la cuenta de
+         ADMIN_DEV_IDENTIDAD de dev-local.cmd. APAGADO por omision: la clave
+         NO va en este ejemplo ni en la VM. Para encenderla, en el Web.config
+         LOCAL agregar dentro de appSettings
+             add key="AdminDevOverride" value="true"
+         (como elemento XML) y ademas compilation debug="true". Aunque
+         llegara a un servidor, no hace nada fuera de iisexpress.exe, en
+         Release (debug="false") ni desde otra maquina. Ver
+         App_Code/AccesoDesarrolloLocal.cs. -->
   </appSettings>
 
   <system.web>
