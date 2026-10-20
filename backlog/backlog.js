@@ -133,6 +133,15 @@ function htmlTarjetasKpi(tarjetas) {
     </div>`).join('');
 }
 
+// Dos cifras con su rotulo en el lugar del .val, para una tarjeta que
+// muestra dos metricas sin sumarlas (Dentro / Fuera SLA).
+function htmlParKpi(rotuloA, valorA, rotuloB, valorB) {
+  return `<span class="kpi-par">
+      <span><small>${rotuloA}</small>${FMT(valorA)}</span>
+      <span><small>${rotuloB}</small>${FMT(valorB)}</span>
+    </span>`;
+}
+
 function seleccionados(id) {
   return Array.from(document.getElementById(id).selectedOptions).map(o => o.value);
 }
@@ -404,13 +413,12 @@ const TableroBacklog = (function () {
   // ---------------------------------------------------------------------- KPIs
   function renderKpis() {
     const r = datos.resumen;
-    let total, criticos, altos, mayor30, reasignados, reabiertos, exacto;
+    let total, criticos, mayor30, reasignados, reabiertos, exacto;
 
     if (!hayFiltro()) {
       const k = r.kpis || {};
       total = k.BacklogTotal ?? 0;
       criticos = k.Criticos ?? 0;
-      altos = k.Altos ?? 0;
       mayor30 = k.Mayor30Dias ?? 0;
       reasignados = k.Reasignados ?? 0;
       reabiertos = k.Reabiertos ?? 0;
@@ -421,7 +429,6 @@ const TableroBacklog = (function () {
       const pr = porLiderGrupo(r.prioridad);
       total = pr.reduce((a, x) => a + (x.Total ?? 0), 0);
       criticos = pr.reduce((a, x) => a + (x.Critica ?? 0), 0);
-      altos = pr.reduce((a, x) => a + (x.Alta ?? 0), 0);
       mayor30 = porLiderGrupo(r.aging).filter(x => (x.AgingSort ?? 0) >= SORT_MAS_30)
         .reduce((a, x) => a + (x.Tickets ?? 0), 0);
       reasignados = porLiderGrupo(r.reasignaciones).reduce((a, x) => a + (x.Tickets ?? 0), 0);
@@ -429,13 +436,44 @@ const TableroBacklog = (function () {
       exacto = true;
     }
 
+    /* Dentro / Fuera SLA. Sin cross-filter salen TAL CUAL de las columnas
+       DentroSLA, FueraSLA y TramiteCompra del result set 1 (kpis). Con
+       cross-filter se suma el result set 6 (Lider, Grupo, EstadoSLA, Tickets),
+       que es un agregado completo por (Lider, Grupo), con la MISMA regla que
+       usa el procedimiento para esas columnas:
+         DentroSLA     = 'Dentro SLA' + 'Dentro SLA(Subestado)'
+         FueraSLA      = 'Fuera SLA'
+         TramiteCompra = 'Tramite de compra'
+       Tramite de compra no es ni dentro ni fuera: va en el pie. El % fuera es
+       sobre todo el backlog, como el "% Fuera SLA" del correo de direccion, y
+       el semaforo usa sus mismos cortes: <=5% verde, <=15% ambar, si no rojo. */
+    const sla = { dentro: 0, fuera: 0, tramite: 0, total: 0 };
+    if (!hayFiltro() && r.kpis && r.kpis.DentroSLA !== undefined) {
+      sla.dentro = r.kpis.DentroSLA ?? 0;
+      sla.fuera = r.kpis.FueraSLA ?? 0;
+      sla.tramite = r.kpis.TramiteCompra ?? 0;
+      sla.total = total;
+    } else {
+      for (const x of porLiderGrupo(r.sla)) {
+        const n = x.Tickets ?? 0;
+        sla.total += n;
+        if (x.EstadoSLA === 'Dentro SLA' || x.EstadoSLA === 'Dentro SLA(Subestado)') sla.dentro += n;
+        else if (x.EstadoSLA === 'Fuera SLA') sla.fuera += n;
+        else if (x.EstadoSLA === 'Tramite de compra') sla.tramite += n;
+      }
+    }
+    const pctFuera = sla.total > 0 ? 100 * sla.fuera / sla.total : null;
+    const semSla = pctFuera === null ? '' : (pctFuera <= 5 ? 'sv' : pctFuera <= 15 ? 'sa' : 'sr');
+    const pieSla = `${PCT(sla.fuera, sla.total)} fuera`
+      + (sla.tramite > 0 ? ` · ${FMT(sla.tramite)} en tramite de compra` : '');
+
     const corte = document.getElementById('f-corte-bl').value;
     const pie = hayFiltro() ? 'sobre lo filtrado' : (corte ? `corte ${corte}` : '');
 
     const tarjetas = [
       { l: 'Backlog', v: FMT(total), f: pie },
       { l: 'Criticos', v: FMT(criticos), f: `${PCT(criticos, total)} del backlog`, s: 'sr' },
-      { l: 'Altos', v: FMT(altos), f: `${PCT(altos, total)} del backlog`, s: 'sa' },
+      { l: 'Dentro / Fuera SLA', v: htmlParKpi('Dentro SLA', sla.dentro, 'Fuera SLA', sla.fuera), f: pieSla, s: semSla },
       { l: '+30 dias', v: FMT(mayor30), f: `${PCT(mayor30, total)} del backlog` },
       { l: 'Reasignados', v: FMT(reasignados), f: 'cambiaron de grupo al menos una vez' },
       { l: 'Reabiertos', v: FMT(reabiertos), f: 'mas de un intento de solucion' },
@@ -807,6 +845,66 @@ const TableroBacklog = (function () {
     }).render();
   }
 
+
+  /* Barras HORIZONTALES por subestado, de mayor a menor. Sale del result set
+     7 del procedimiento (Subestado, Tickets): las categorias y las cifras son
+     las que devuelve, sin lista fija. Ese set viene agrupado SOLO por
+     Subestado, asi que los filtros de arriba (c1 / grupos / lideres, que
+     viajan como parametros) si lo recortan, pero el cross-filter de las
+     graficas no se puede aplicar: el pie lo dice en vez de pintar una cifra
+     que parezca filtrada. Tampoco tiene clic, por lo mismo.
+
+     Subestado NULL: el corte actual no tiene, pero los cortes viejos si (sobre
+     todo los del Backfill). No se inventa un rotulo para ellos: se quedan
+     fuera de las barras y el pie dice cuantos son. */
+  function renderBarrasSubestado() {
+    const lienzo = document.getElementById('chart-subestado-bl');
+    const cap = document.getElementById('cap-subestado-bl');
+    const filas = datos.resumen.subestados || [];
+    const tieneSubestado = x => typeof x.Subestado === 'string' && x.Subestado.trim() !== '';
+
+    const ent = filas.filter(tieneSubestado)
+      .map(x => [x.Subestado, x.Tickets ?? 0])
+      .filter(e => e[1] > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'es'));
+    const sinSubestado = filas.filter(x => !tieneSubestado(x)).reduce((a, x) => a + (x.Tickets ?? 0), 0);
+
+    const avisos = [];
+    if (sinSubestado > 0) avisos.push(`${FMT(sinSubestado)} tickets de este corte no tienen subestado registrado y no se grafican.`);
+    if (hayFiltro()) avisos.push('No se recorta con la seleccion en las graficas: el procedimiento lo agrupa solo por subestado.');
+    cap.textContent = avisos.join(' ');
+
+    if (!ent.length) {
+      lienzo.parentElement.style.height = '';
+      return renderEmptyChart('chart-subestado-bl', 'Sin tickets en backlog para este corte y filtros.');
+    }
+
+    // Una fila por subestado: el alto crece con las categorias para que
+    // ningun rotulo se salte, con el .lienzo de siempre como piso.
+    lienzo.parentElement.style.height = `${Math.max(260, ent.length * 34 + 30)}px`;
+
+    /* Un solo color: es una sola serie y el largo de la barra ya dice todo;
+       un color por subestado afirmaria una identidad que no tiene. */
+    const etiquetas = ent.map(e => e[0]);
+    const color = Paleta.escala([0])[0];
+    graficos['chart-subestado-bl'] = new DashboardBarChart({
+      canvas: 'chart-subestado-bl',
+      etiquetas,
+      datos: ent.map(e => e[1]),
+      colores: etiquetas.map(() => color),
+      formato: FMT,
+      barra: { maxBarThickness: 26 },
+      opciones: {
+        indexAxis: 'y',
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => `Tickets: ${FMT(c.raw)}` } } },
+        scales: {
+          x: { ...EJE_Y_CERO.y },
+          y: { grid: { display: false }, ticks: { autoSkip: false } },
+        },
+      },
+    }).render();
+  }
 
   // -------------------------------------------------- drill-down Lider -> Grupo
   function renderLideres() {
@@ -1293,6 +1391,7 @@ const TableroBacklog = (function () {
     renderBarrasLider();
     renderBarrasPrioridad();
     renderBarrasAging();
+    renderBarrasSubestado();
     renderLideres();
     renderTablaAging();
     renderAntiguos();
