@@ -20,8 +20,11 @@
 //      guardado, atomico ante tope, errores 51007 / 51018 / 51008.
 //   P  cuenta del sitio (EXECUTE AS PROACTIVANETAD): owners y quitar por
 //      encadenamiento de propietario.
+//   S  DeteccionSql24 (lo que enciende la edicion en el sitio): sin sql/24
+//      apagada, con sql/24 encendida (tambien como la cuenta del sitio),
+//      y por ese camino real cambiar solo PO o solo SO conserva el otro.
 //   B  rollback: Modificar vuelve EXACTO a sql/23; los datos se quedan;
-//      volver a aplicar.
+//      la deteccion la apaga; volver a aplicar.
 //
 // Compilar (ver memoria csc): App_Code\*.cs en adm.dll y este archivo con
 // /r:adm.dll /r:System.Core.dll /r:System.Data.dll; correr con cwd = raiz.
@@ -90,6 +93,23 @@ public static class ModificarDuenosQuitarSqlLocalDbSmoke
     {
         return Uno("SELECT CONVERT(varchar(70), HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(OBJECT_DEFINITION(OBJECT_ID('" + objeto +
                    "')), N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')), 1)");
+    }
+    // Lo que el sitio decide (DeteccionSql24 sobre la base, sin el forzado
+    // de prueba); comoSitio = EXECUTE AS PROACTIVANETAD.
+    static bool Detecta(bool comoSitio)
+    {
+        var forzada = PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas;
+        PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null;
+        PersistenciaGestionAdmin.OlvidarSql24ParaPruebas();
+        try
+        {
+            using (var cn = Abrir(Base))
+            {
+                if (comoSitio) Exec(cn, "EXECUTE AS USER = N'PROACTIVANETAD';");
+                return DeteccionSql24.Revisar(cn);
+            }
+        }
+        finally { PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = forzada; }
     }
     static string Parametros() { return Uno("SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_GestionAdmin_Modificar')"); }
 
@@ -224,7 +244,9 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
             {
                 Check("G2 con sql/22 sola (sin sql/23): se niega pidiendo sql/23; Modificar sigue siendo el de sql/22", "True|" + Modificar22 + "|23",
                       LotesError(cn, sql24).Contains("Aplica sql/23 antes") + "|" + Hash("adm.usp_GestionAdmin_Modificar") + "|" + Parametros());
+                Check("S1 sql/22 sola: la deteccion la deja apagada (sitio y cuenta del sitio)", "False|False", Detecta(false) + "|" + Detecta(true));
                 Lotes(cn, sql23);
+                Check("S2 con sql/23 sin sql/24: sigue apagada", "False|False", Detecta(false) + "|" + Detecta(true));
                 Check("G3 rollback de 24 antes de aplicarla: se niega sin tocar nada", "True|" + Modificar23,
                       LotesError(cn, rb24).Contains("no es la de sql/24") + "|" + Hash("adm.usp_GestionAdmin_Modificar"));
                 var r24 = LotesError(cn, sql24);
@@ -282,6 +304,27 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                   Uno("SELECT COUNT(*) FROM dbo.CatCategoriaDueno") + "|" + Uno("SELECT COUNT(*) FROM dbo.Categorias"));
             Check("D11 PO / SO capturados: ni el contenido de CatCategoriaDueno ni el de ProblemCategoria cambian", sumaAntes, Uno(SumaCat));
             Check("D12 PO / SO capturados: otra iniciativa (PRB 2) conserva sus owners", otraAntes, Owners("PRB 2026-000002"));
+
+            // ---------------- S: el camino real del sitio ----------------
+            Check("S3 con sql/24: la deteccion la enciende (tambien como PROACTIVANETAD, por su GRANT EXECUTE)", "True|True",
+                  Detecta(false) + "|" + Detecta(true));
+            PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null;
+            Check("S4 sin forzado, tras detectar: activa", true, Detecta(false) && PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva());
+            var antesS = Owners("PRB 2026-000001");
+            Modificar(Plan("PRB 2026-000001", SolicitudIniciativa.CPo, "PO S5"), @"SORIANA\adm5");
+            Check("S5 solo PO por el camino real: el SO se conserva; el registro lo ve igual al refrescar",
+                  "PO S5|" + antesS.Split('|')[1] + "|PO S5|" + antesS.Split('|')[1],
+                  Owners("PRB 2026-000001") + "|" + RegistroCapturados("PRB 2026-000001"));
+            Modificar(Plan("PRB 2026-000001", SolicitudIniciativa.CSo, "SO S6"), @"SORIANA\adm5");
+            Check("S6 solo SO por el camino real: el PO se conserva", "PO S5|SO S6|PO S5|SO S6",
+                  Owners("PRB 2026-000001") + "|" + RegistroCapturados("PRB 2026-000001"));
+            Modificar(Plan("PRB 2026-000001", SolicitudIniciativa.CTitulo, "Uno S7"), @"SORIANA\adm5");
+            Check("S7 editar otro campo: PO y SO intactos; el Codigo sigue igual (una sola fila con ese Codigo)", "Uno S7|PO S5|SO S6|1",
+                  Uno("SELECT Titulo FROM dbo.Problem WHERE Codigo = N'PRB 2026-000001'") + "|" + Owners("PRB 2026-000001") + "|" +
+                  Uno("SELECT COUNT(*) FROM dbo.Problem WHERE Codigo = N'PRB 2026-000001'"));
+            Modificar(Plan("PRB 2026-000001", SolicitudIniciativa.CPo, "PO recortado", SolicitudIniciativa.CSo, "SO nuevo"), @"SORIANA\adm5");
+            Check("S8 los dos en un guardado (deja PRB 1 como lo esperan los casos Q)", "PO recortado|SO nuevo", Owners("PRB 2026-000001"));
+            PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = true;
 
             // ---------------- Q: quitar ----------------
             Check("Q0 tope: PRB 2 no puede ligar /A/Cat 1 al 75% con PRB 1 al 30% (51010)", "51010",
@@ -349,11 +392,12 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                 Check("B2 los datos se quedan (owners y bajas)", "NULL|SO sitio|/A/Cat 1=0,/A/Cat 2=1,/B/Cat 4=1",
                       Owners("PRB 2026-000002") + "|" + Vigentes("PRB 2026-000002"));
                 PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = true;
-                Check("B3 con 24 deshecha y el interruptor encendido: el guardado falla con 349 (por eso se apaga ANTES)", "349",
+                Check("B3 con 24 deshecha y el interruptor encendido: el guardado falla con 349 (hasta que la deteccion lo vea: vigencia de 1 min)", "349",
                       Error(() => Modificar(Plan("PRB 2026-000002", SolicitudIniciativa.CPo, "x"), @"SORIANA\adm9")));
-                PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = false;
+                PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null;
+                Check("B3b tras el rollback la deteccion la apaga sola (sin cambiar codigo)", false, Detecta(false));
                 Modificar(Plan("PRB 2026-000002", SolicitudIniciativa.CTitulo, "Dos tras rollback"), @"SORIANA\adm9");
-                Check("B4 con el interruptor apagado el sitio sigue guardando sobre sql/23", "Dos tras rollback",
+                Check("B4 apagada por la deteccion, el sitio sigue guardando sobre sql/23", "Dos tras rollback",
                       Uno("SELECT Titulo FROM dbo.Problem WHERE Codigo = N'PRB 2026-000002'"));
                 Lotes(cn, sql24);
                 Check("B5 volver a aplicar sql/24 despues del rollback", h24 + "|28", Hash("adm.usp_GestionAdmin_Modificar") + "|" + Parametros());
@@ -367,6 +411,7 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
         finally
         {
             PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null;
+            PersistenciaGestionAdmin.OlvidarSql24ParaPruebas();
             try { Borrar(Base); Borrar(guarda); } catch (Exception ex) { Console.WriteLine("(no se pudo borrar la base: " + ex.Message + ")"); }
         }
         Console.WriteLine(pasados + " pasaron, " + fallos + " fallaron");

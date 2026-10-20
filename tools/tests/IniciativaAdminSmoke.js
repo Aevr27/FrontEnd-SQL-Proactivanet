@@ -1203,6 +1203,29 @@ pruebas.push(function () {
     on.paraEnviar().filter(function (x) { return x[0] === 'folio'; })[0][1]);
   Check('DQ12 con sql/24: el texto de quitar dice solo asociacion, sin aviso de no guardado', [true, false],
     [/solo la asociación/.test(A.htmlCategoriasEdicion(on, null)), /todavía no se guarda/.test(A.htmlCategoriasEdicion(on, null))]);
+
+  // PO y SO independientes (sin cascada): cambiar uno nunca toca el otro.
+  var ambos = Ini('PRB 2026-000010', { po_capturado: 'PO 1', so_capturado: 'SO x', categorias: [Cat('/A/Cat 1', 0.5)] });
+  var soloPo = new A.EdicionAdmin(ambos, Object.assign({ duenosYQuitar: true }, op));
+  soloPo.capturar('po', 'PO 2');
+  Check('DQ13 solo PO: viaja po, NO so; el SO del borrador sigue siendo el capturado', [true, [['accion', 'modificar'], ['folio', 'PRB 2026-000010'], ['po', 'PO 2']], 'SO x'],
+    [soloPo.revisar().listo, soloPo.paraEnviar(), soloPo.valores.so]);
+  var soloSo = new A.EdicionAdmin(ambos, Object.assign({ duenosYQuitar: true }, op));
+  soloSo.capturar('so', 'SO y');
+  Check('DQ14 solo SO: viaja so, NO po; el PO sigue siendo el capturado', [[['accion', 'modificar'], ['folio', 'PRB 2026-000010'], ['so', 'SO y']], 'PO 1'],
+    [soloSo.paraEnviar(), soloSo.valores.po]);
+  var otro = new A.EdicionAdmin(ambos, Object.assign({ duenosYQuitar: true }, op));
+  otro.capturar('titulo', 'Solo el titulo');
+  Check('DQ15 editar otro campo: PO y SO no viajan (se conservan)', [['accion', 'modificar'], ['folio', 'PRB 2026-000010'], ['titulo', 'Solo el titulo']],
+    otro.paraEnviar());
+  // Un capturado que ya no esta en el catalogo: se muestra elegido (no se
+  // vacia el control) y no es error mientras no se cambie.
+  var fuera = new A.EdicionAdmin(Ini('PRB 2026-000011', { po_capturado: 'PO dado de baja', so_capturado: 'SO x', categorias: [] }),
+    Object.assign({ duenosYQuitar: true }, op));
+  fuera.capturar('so', 'SO y');
+  Check('DQ16 PO capturado fuera del catalogo: el control lo trae elegido; cambiar el SO no lo toca ni da error',
+    [true, true, [['accion', 'modificar'], ['folio', 'PRB 2026-000011'], ['so', 'SO y']]],
+    [/PO dado de baja/.test(A.htmlControlEdicion(fuera, 'po')), fuera.revisar().listo, fuera.paraEnviar()]);
 });
 
 // ---------------------------------------------------------------------------

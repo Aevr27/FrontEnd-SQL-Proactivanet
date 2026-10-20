@@ -9,7 +9,8 @@
 //   Modificar(p)   la iniciativa actual de la MISMA lectura del registro
 //                  (ExperienciaQueries.RegistroIniciativas), la capacidad,
 //                  las rutas vigentes (agregar) y los Estado/Subestado que
-//                  ya existen en dbo.Problem.
+//                  ya existen en dbo.Problem; antes, si la base tiene
+//                  sql/24 (DeteccionSql24: PO / SO y quitar).
 //
 // Si la lectura falla, la excepcion sube: el handler responde que no se pudo
 // validar (503), nunca que la validacion paso.
@@ -52,6 +53,9 @@ public sealed class GestionIniciativaAdminService
         Actual = actual;
         using (var cn = Abrir())
         {
+            // PO / SO y quitar: solo si la base ya tiene sql/24 (antes de
+            // validar, para que validador, plan y escritor digan lo mismo).
+            DeteccionSql24.Revisar(cn);
             // Rutas vigentes (para agregar categorias) y los valores de
             // Estado/Subestado que ya existen: las mismas lecturas que Crear
             // y que el registro.

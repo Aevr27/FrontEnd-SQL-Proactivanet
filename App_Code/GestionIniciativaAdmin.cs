@@ -89,13 +89,44 @@ public static class PersistenciaGestionAdmin
     // Modificar: PO / SO CAPTURADOS de la iniciativa (dbo.Problem.OwnerProblem
     // / OwnerServicio) y quitar categorias (VigenteEnOrigen = 0). Los
     // parametros @CambiaOwner* / @Quitar solo existen desde sql/24, que
-    // depende de sql/23: true SOLO con las dos aplicadas en la base (si no,
-    // cada guardado con esos campos falla). false = el escritor no los manda,
-    // el validador rechaza (422) un PO / SO cambiado y quitar sigue en 409.
-    public const bool ModificaDuenosYQuita = false;
-    // Solo para las pruebas (sin tocar la constante). null = la constante.
+    // depende de sql/23. Encendida (2026-10-20), pero SOLO surte efecto
+    // cuando la base ya tiene sql/24: DeteccionSql24 (EscritorGestionAdmin.cs)
+    // lo revisa en sys.parameters y lo anota aqui (AnotarSql24). Sin sql/24,
+    // o sin haberlo podido revisar, sigue apagada: el escritor no manda esos
+    // parametros, el validador rechaza (422) un PO / SO cambiado y quitar
+    // sigue en 409. Desplegar antes de aplicar sql/23 y sql/24 no rompe nada.
+    // false = apagada aunque la base tenga sql/24.
+    public const bool ModificaDuenosYQuita = true;
+    // Solo para las pruebas (sin tocar la constante ni la base). null = lo de abajo.
     public static bool? ModificaDuenosYQuitaForzadaParaPruebas;
-    public static bool ModificaDuenosYQuitaActiva() { return ModificaDuenosYQuitaForzadaParaPruebas ?? ModificaDuenosYQuita; }
+    public static bool ModificaDuenosYQuitaActiva()
+    {
+        return ModificaDuenosYQuitaForzadaParaPruebas ?? (ModificaDuenosYQuita && sql24EnBase == true);
+    }
+
+    // Lo que DeteccionSql24 vio en la base (null = todavia no se reviso) y
+    // cuando. Se vuelve a revisar pasada la vigencia: aplicar sql/24 la
+    // enciende y su rollback la apaga sin reciclar el sitio.
+    public static readonly TimeSpan VigenciaRevisionSql24 = TimeSpan.FromMinutes(1);
+    private static readonly object candadoSql24 = new object();
+    private static bool? sql24EnBase;
+    private static DateTime sql24RevisadaUtc;
+
+    public static void AnotarSql24(bool tiene, DateTime ahoraUtc)
+    {
+        lock (candadoSql24) { sql24EnBase = tiene; sql24RevisadaUtc = ahoraUtc; }
+    }
+
+    public static bool Sql24Vigente(DateTime ahoraUtc)
+    {
+        lock (candadoSql24) { return sql24EnBase != null && ahoraUtc - sql24RevisadaUtc < VigenciaRevisionSql24; }
+    }
+
+    // Solo para las pruebas: como recien arrancado (sin revisar).
+    public static void OlvidarSql24ParaPruebas()
+    {
+        lock (candadoSql24) { sql24EnBase = null; sql24RevisadaUtc = DateTime.MinValue; }
+    }
 
     public const string MotivoModificaDuenos =
         "todav\u00eda no se guarda: la edici\u00f3n en la base no recibe Product Owner ni Service Owner " +
@@ -123,7 +154,7 @@ public static class PersistenciaGestionAdmin
     public const string BloqueoDuenos =
         "Product Owner / Service Owner en Crear: adm.usp_GestionAdmin_Crear no los recibe; se rechazan (422) y no se guarda nada";
 
-    // Con ModificaDuenosYQuita = false se suman estos.
+    // Con ModificaDuenosYQuitaActiva() = false (sin sql/24) se suman estos.
     public const string BloqueoQuitar =
         "quitar categor\u00eda: adm.usp_GestionAdmin_Modificar no la recibe sin sql/24; se rechaza (409) y no se guarda nada";
     public const string BloqueoDuenosModificar =

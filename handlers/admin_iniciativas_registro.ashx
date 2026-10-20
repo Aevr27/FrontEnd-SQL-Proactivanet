@@ -72,7 +72,15 @@ public class AdminIniciativasRegistro : IHttpHandler
             registro["solicitudes_datos"] = PersistenciaSolicitudesCambio.SolicitaDatosActiva();
             // Modificar con PO / SO capturados y quitar categoria (sql/24):
             // sin esto la pagina no los ofrece (el servidor los rechazaria).
-            registro["edicion_duenos_quitar"] = PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva();
+            // Se revisa en la base (DeteccionSql24); si no se puede, apagado.
+            bool duenosYQuitar;
+            try { duenosYQuitar = DeteccionSql24.Revisar(); }
+            catch (Exception ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_registro.ashx", ex);
+                duenosYQuitar = false;
+            }
+            registro["edicion_duenos_quitar"] = duenosYQuitar;
             context.Response.Write(serializador.Serialize(registro));
         }
         catch (Exception ex)
