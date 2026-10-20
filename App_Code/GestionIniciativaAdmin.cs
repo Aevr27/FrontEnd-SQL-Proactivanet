@@ -86,6 +86,21 @@ public static class PersistenciaGestionAdmin
         "todav\u00eda no se guarda: el alta en la base no recibe Product Owner ni Service Owner. " +
         "D\u00e9jalo vac\u00edo para guardar (falta aplicar sql/20 en la base).";
 
+    // Modificar: PO / SO CAPTURADOS de la iniciativa (dbo.Problem.OwnerProblem
+    // / OwnerServicio) y quitar categorias (VigenteEnOrigen = 0). Los
+    // parametros @CambiaOwner* / @Quitar solo existen desde sql/24, que
+    // depende de sql/23: true SOLO con las dos aplicadas en la base (si no,
+    // cada guardado con esos campos falla). false = el escritor no los manda,
+    // el validador rechaza (422) un PO / SO cambiado y quitar sigue en 409.
+    public const bool ModificaDuenosYQuita = false;
+    // Solo para las pruebas (sin tocar la constante). null = la constante.
+    public static bool? ModificaDuenosYQuitaForzadaParaPruebas;
+    public static bool ModificaDuenosYQuitaActiva() { return ModificaDuenosYQuitaForzadaParaPruebas ?? ModificaDuenosYQuita; }
+
+    public const string MotivoModificaDuenos =
+        "todav\u00eda no se guarda: la edici\u00f3n en la base no recibe Product Owner ni Service Owner " +
+        "(falta aplicar sql/23 y sql/24). D\u00e9jalo como estaba para guardar lo dem\u00e1s.";
+
     // Lo que consulta el handler (un metodo, para no dejar codigo
     // "inalcanzable" con la constante fija).
     public static bool Activa() { return Habilitada; }
@@ -101,7 +116,6 @@ public static class PersistenciaGestionAdmin
     // Lo que todavia no se guarda aunque la persistencia este encendida.
     public static readonly string[] Bloqueos =
     {
-        "quitar categor\u00eda: sin regla aprobada; se rechaza (409) y no se guarda nada",
         "RCA: sin destino de almacenamiento; el archivo no se sube",
     };
 
@@ -109,9 +123,17 @@ public static class PersistenciaGestionAdmin
     public const string BloqueoDuenos =
         "Product Owner / Service Owner en Crear: adm.usp_GestionAdmin_Crear no los recibe; se rechazan (422) y no se guarda nada";
 
+    // Con ModificaDuenosYQuita = false se suman estos.
+    public const string BloqueoQuitar =
+        "quitar categor\u00eda: adm.usp_GestionAdmin_Modificar no la recibe sin sql/24; se rechaza (409) y no se guarda nada";
+    public const string BloqueoDuenosModificar =
+        "Product Owner / Service Owner en Modificar: adm.usp_GestionAdmin_Modificar no los recibe sin sql/24; se rechazan (422)";
+
     public static List<string> BloqueosVigentes()
     {
-        var l = new List<string>(Bloqueos);
+        var l = new List<string>();
+        if (!ModificaDuenosYQuitaActiva()) { l.Add(BloqueoQuitar); l.Add(BloqueoDuenosModificar); }
+        l.AddRange(Bloqueos);
         if (!GuardaDuenosActiva()) l.Add(BloqueoDuenos);
         return l;
     }
@@ -194,6 +216,10 @@ public sealed class PeticionModificarAdmin
     public string FCierre;
     public string Estado;
     public string Subestado;
+    // PO / SO CAPTURADOS de la iniciativa (sql/24; claves po / so como en
+    // Crear). null = no vino (no se cambia); "" = se vacia.
+    public string Po;
+    public string So;
     public List<PctCategoria> Pcts = new List<PctCategoria>();
     public List<PctCategoria> Agregar = new List<PctCategoria>();
     // Fecha de analisis por categoria ligada: Texto = aaaa-mm-dd.
@@ -219,6 +245,8 @@ public sealed class PeticionModificarAdmin
             FCierre = f[CFCierre],
             Estado = f[CEstado],
             Subestado = f[CSubestado],
+            Po = f[SolicitudIniciativa.CPo],
+            So = f[SolicitudIniciativa.CSo],
         };
         p.Pcts = Pares.Leer(f, CPctCategoria, CPctValor, out p.PctsDesparejos);
         p.Agregar = Pares.Leer(f, CAgregarCategoria, CAgregarPct, out p.AgregarDesparejos);
@@ -358,6 +386,10 @@ public sealed class IniciativaActual
     public string FCierre;
     public string Estado;
     public string Subestado;       // null si el registro no lo trajo
+    // PO / SO CAPTURADOS (dbo.Problem.OwnerProblem / OwnerServicio:
+    // po_capturado / so_capturado del registro), no los de la categoria.
+    public string PoCapturado;     // "" si no tiene
+    public string SoCapturado;
     public bool SinCategoria;
     public List<Categoria> Categorias = new List<Categoria>();
 
@@ -375,6 +407,8 @@ public sealed class IniciativaActual
             FCierre = Texto(i, "f_cierre"),
             Estado = Texto(i, "estado"),
             Subestado = i.ContainsKey("subestado") ? Texto(i, "subestado") : null,
+            PoCapturado = Texto(i, "po_capturado"),
+            SoCapturado = Texto(i, "so_capturado"),
             SinCategoria = i.ContainsKey("sin_categoria") && i["sin_categoria"] is bool && (bool)i["sin_categoria"],
         };
         object cats;
@@ -817,6 +851,39 @@ public sealed class ValidadorGestionAdmin
             : "sus due\u00f1os salen de una fila de due\u00f1os dada de baja."));
     }
 
+    // PO / SO de la INICIATIVA (no los de la categoria): solo si cambia; de
+    // la misma lista que el alta (CatalogoSolicitud.TienePo / TieneSo);
+    // vacio = se vacia. Sin sql/24 se rechaza: nunca se tira en silencio.
+    private static void DuenoCapturado(ResultadoGestionAdmin r, string pedido, string actual, string clave,
+                                       string rotulo, CatalogoSolicitud catalogo)
+    {
+        if (pedido == null) return;
+        var nuevo = Limpio(pedido);
+        var antes = Limpio(actual);
+        if ((nuevo ?? "") == (antes ?? "")) return;
+        if (!PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva())
+        {
+            r.Agregar(clave, rotulo + ": " + PersistenciaGestionAdmin.MotivoModificaDuenos);
+            return;
+        }
+        if (nuevo != null)
+        {
+            if (catalogo == null)
+            {
+                r.Agregar(clave, "No se pudo leer el cat\u00e1logo de due\u00f1os: no se puede cambiar el " + rotulo + ".");
+                return;
+            }
+            var enCatalogo = clave == SolicitudIniciativa.CPo ? catalogo.TienePo(nuevo) : catalogo.TieneSo(nuevo);
+            if (!enCatalogo)
+            {
+                r.Agregar(clave, "El " + rotulo + " no est\u00e1 en el cat\u00e1logo vigente.");
+                return;
+            }
+        }
+        r.Cambio(clave, rotulo + " capturado", antes ?? "", nuevo ?? "");
+        if (nuevo == null) r.Advertencias.Add(rotulo + " capturado: quedar\u00eda vac\u00edo.");
+    }
+
     private static string Valor(PeticionModificarAdmin p, string clave)
     {
         if (clave == PeticionModificarAdmin.CFAnalisis) return p.FAnalisis;
@@ -868,6 +935,10 @@ public sealed class ValidadorGestionAdmin
             r.Cambio("descripcion", "Descripci\u00f3n", actual.Descripcion, p.Descripcion);
         if (p.Observaciones != null && Normal(p.Observaciones) != Normal(actual.Observaciones))
             r.Cambio("observaciones", "Observaciones", actual.Observaciones, p.Observaciones);
+
+        // ---- Problem: PO / SO capturados (sql/24) ----
+        DuenoCapturado(r, p.Po, actual.PoCapturado, SolicitudIniciativa.CPo, "Product Owner", catalogo);
+        DuenoCapturado(r, p.So, actual.SoCapturado, SolicitudIniciativa.CSo, "Service Owner", catalogo);
 
         // ---- Fechas de analisis por categoria ----
         // PROPIA (ligada despues): se cambia en la categoria. Si la categoria

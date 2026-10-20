@@ -49,6 +49,10 @@
 //      En tiempo (verde), Sin control de fecha (gris, solo si hay); solo
 //      activas, registro completo; filtros/busqueda/orden no lo mueven;
 //      relectura lo actualiza; cargando y error lo vacian.
+//   O)  Orden: por omision f_creacion ascendente (sin fecha o invalida al
+//      final, empates por Codigo); el orden por columna sobrevive a cada
+//      filtro, la busqueda y la relectura (y reacomoda lo cambiado); clic
+//      asc -> desc -> por omision; Limpiar filtros quita el orden.
 //   Al cargar se ve TODO (Cerrado incluido): ya no hay vista por omision
 //   que oculte Cerrado (L0, S2-9, BV10).
 //
@@ -157,28 +161,30 @@ var DATOS = {
     { prefijo: 'REQ', nombre: 'Requerimiento' }, { prefijo: '' }, { prefijo: 'PRB', nombre: 'Repetido' }],
   iniciativas: [
     // Dos categorias de distinto PO; retrasada.
-    Ini('PRB 2026-000001', { prefijo: 'PRB', estado: 'En Solución', tickets_reduce: 150, vol_reduce_folio: 150, riesgo_folio: 150,
+    // f_creacion: el orden por omision (la mas antigua primero) queda
+    // PRB 1, REQ 4, MAP 2, PRB 5, HAR 3.
+    Ini('PRB 2026-000001', { prefijo: 'PRB', f_creacion: '2026-01-10', estado: 'En Solución', tickets_reduce: 150, vol_reduce_folio: 150, riesgo_folio: 150,
       retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true, f_solucion: '2026-09-01', n_solucion: 2,
-      po: 'PO 1', so: 'SO x', director: 'Dir A', manager: 'Mgr 1',
+      po: 'PO 1', so: 'SO x', director: 'Dir A', manager: 'Mgr 1', po_capturado: 'PO 1', so_capturado: 'SO x',
       categorias: [Cat('/A/Cat 1/Hoja', 100, 0.5, 'Dir A', 'PO 1', 'SO x'),
                    Cat('/A/Cat 3', 50, 0.25, 'Dir A', 'PO 2', 'SO x')] }),
-    Ini('MAP 2026-000002', { prefijo: 'MAP', agrup: 'Mejora', tickets_reduce: 40, vol_reduce_folio: 40,
-      po: 'PO 1', so: 'SO y', director: 'Dir A',
+    Ini('MAP 2026-000002', { prefijo: 'MAP', f_creacion: '2026-03-10', agrup: 'Mejora', tickets_reduce: 40, vol_reduce_folio: 40,
+      po: 'PO 1', so: 'SO y', director: 'Dir A', po_capturado: 'PO 1', so_capturado: 'SO y',
       categorias: [Cat('/A/Cat 2', 40, 1, 'Dir A', 'PO 1', 'SO y')] }),
     // No activa
-    Ini('HAR 2025-000003', { prefijo: 'HAR', tipo_iniciativa: 'Mejora Aplicativo', estado: 'Cerrado', activa: false, seguimiento: false, sem_fecha: 'verde',
-      tickets_reduce: 30, vol_reduce_folio: 30, po: 'PO 3', so: 'SO z', director: 'Dir B',
+    Ini('HAR 2025-000003', { prefijo: 'HAR', f_creacion: '2026-05-10', tipo_iniciativa: 'Mejora Aplicativo', estado: 'Cerrado', activa: false, seguimiento: false, sem_fecha: 'verde',
+      tickets_reduce: 30, vol_reduce_folio: 30, po: 'PO 3', so: 'SO z', director: 'Dir B', po_capturado: 'PO 3', so_capturado: 'SO z',
       categorias: [Cat('/B/Cat 4', 30, 0.3, 'Dir B', 'PO 3', 'SO z')] }),
     // Activa, pero agrupacion fuera de las cuatro: no cuenta en Activas
     // (criterio de Experiencia) y retrasada no cuenta en Retrasadas.
-    Ini('REQ 2026-000004', { prefijo: 'REQ', agrup: 'ReqOpr', seguimiento: false, retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true,
+    Ini('REQ 2026-000004', { prefijo: 'REQ', f_creacion: '2026-02-10', agrup: 'ReqOpr', seguimiento: false, retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true,
       f_analisis: '2026-01-01', tickets_reduce: 5, vol_reduce_folio: 5, riesgo_folio: 5,
-      po: 'PO 3', so: 'SO z', director: 'Dir B',
+      po: 'PO 3', so: 'SO z', director: 'Dir B', po_capturado: 'PO 3', so_capturado: 'SO z',
       categorias: [Cat('/B/Cat 5', 5, 0.1, 'Dir B', 'PO 3', 'SO z')] }),
     // Sin categoria: dueños del Problem; retrasada pero no cuenta en
     // Retrasadas (Experiencia solo las cuenta por categoria).
-    Ini('PRB 2026-000005', { sin_categoria: true, retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true,
-      f_analisis: '2026-02-01', po: 'PO 1', so: 'SO w', director: 'Dir B', categorias: [] }),
+    Ini('PRB 2026-000005', { f_creacion: '2026-04-10', sin_categoria: true, retrazado: 1, sem_fecha: 'rojo', fecha_retrasada: true,
+      f_analisis: '2026-02-01', po: 'PO 1', so: 'SO w', director: 'Dir B', po_capturado: 'PO 1', so_capturado: 'SO w', categorias: [] }),
     // Entrada invalida: se descarta
     { titulo: 'sin folio' }
   ]
@@ -286,23 +292,28 @@ pruebas.push(function () {
   function pasan() { return f.aplicar(reg.iniciativas).map(function (i) { return i.folio; }); }
   Check('D5 sin filtros pasan todas', 5, pasan().length);
 
-  // PO 2 solo esta en la SEGUNDA categoria de PRB 1: pasa por esa fila.
-  f.elegir(0, 'PO 2');
-  Check('D6 PO por cualquier categoria', ['PRB 2026-000001'], pasan());
+  // PO / SO del filtro = los CAPTURADOS de la iniciativa (po_capturado /
+  // so_capturado), no los de sus categorias. PO 2 solo es dueño de la
+  // SEGUNDA categoria de PRB 1 (capturado: PO 1): ya no es opcion ni la
+  // encuentra.
+  Check('D6 PO de una categoria que nadie capturo no es opcion', false, f.elegir(0, 'PO 2'));
+  Check('D6 ... y no filtra', 5, pasan().length);
   f.elegir(0, 'PO 1');
-  Check('D6 PO 1: con categoria y sin categoria (dueños del Problem)',
+  Check('D6 PO 1: los que lo capturaron, con y sin categoria',
     ['PRB 2026-000001', 'MAP 2026-000002', 'PRB 2026-000005'], pasan());
   var e = f.cascada.estado(true, '');
-  Check('D7 progresivo: SO de PO 1', ['SO w', 'SO x', 'SO y'], e[1].opciones);
-  Check('D7 progresivo: Categorias de PO 1', ['/A/Cat 1/Hoja', '/A/Cat 2'], e[2].opciones);
+  Check('D7 progresivo: SO capturados con PO 1', ['SO w', 'SO x', 'SO y'], e[1].opciones);
+  // PRB 1 capturo PO 1: TODAS sus categorias quedan bajo PO 1 (tambien
+  // /A/Cat 3, cuya categoria es de PO 2).
+  Check('D7 progresivo: Categorias de PO 1', ['/A/Cat 1/Hoja', '/A/Cat 2', '/A/Cat 3'], e[2].opciones);
   f.elegir(1, 'SO y');
   Check('D7 PO 1 + SO y', ['MAP 2026-000002'], pasan());
   Check('D7 categorias de PO 1 + SO y', ['/A/Cat 2'], f.cascada.estado(true, '')[2].opciones);
-  // La misma fila debe cumplir todo: PO 2 + /A/Cat 1/Hoja no existe.
+  // La misma fila debe cumplir todo: PO 3 + /A/Cat 2 no existe.
   f.limpiar();
-  f.elegir(0, 'PO 2');
-  Check('D8 combinacion inexistente no se ofrece', ['/A/Cat 3'], f.cascada.estado(true, '')[2].opciones);
-  Check('D8 valor fuera de opciones no se acepta', false, f.elegir(2, '/A/Cat 1/Hoja'));
+  f.elegir(0, 'PO 3');
+  Check('D8 combinacion inexistente no se ofrece', ['/B/Cat 4', '/B/Cat 5'], f.cascada.estado(true, '')[2].opciones);
+  Check('D8 valor fuera de opciones no se acepta', false, f.elegir(2, '/A/Cat 2'));
 
   f.limpiar();
   f.elegir(2, '/A/Cat 2');
@@ -331,7 +342,7 @@ pruebas.push(function () {
   Check('D12 agrup sigue en los datos', 'ReqOpr', reg.buscar('REQ 2026-000004').agrup);
 
   var orden = R.ordenar(reg.iniciativas, null).map(function (i) { return i.folio; });
-  Check('D13 orden por omision: riesgo, activas, reduce',
+  Check('D13 orden por omision: fecha de creacion, la mas antigua primero',
     ['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005', 'HAR 2025-000003'], orden);
   Check('D13 orden por folio asc', 'HAR 2025-000003', R.ordenar(reg.iniciativas, { col: 'folio', dir: 'asc' })[0].folio);
 });
@@ -389,13 +400,17 @@ pruebas.push(function () {
     var html = p.sel('regCuerpo').innerHTML;
     Check('L3 atrasada: fecha en rojo y la palabra debajo, sin pintar la fila', [true, false],
       [/ini-vencida">01\/09\/2026<\/b><span class="ini-retraso">Atrasada/.test(html), /<tr class="[^"]*(vencid|rojo)/.test(html)]);
-    Check('L3 dueños distintos: el primero y +N', true, /PO 1 <span class="ini-mas">\+1<\/span>/.test(html));
+    // PO / SO de la columna: el CAPTURADO de la iniciativa (uno), aunque sus
+    // categorias tengan dueños distintos (PRB 1: PO 1 y PO 2).
+    Check('L3 PO de la columna: el capturado, sin +N de categorias', [true, false],
+      [/data-folio="PRB 2026-000001"[\s\S]*?data-col="Product Owner" class="ini-col-persona">PO 1<\/td>/.test(html), /ini-mas/.test(html)]);
     Check('L3 sin categoria marcada', true, /Sin categoría/.test(html));
     Check('L3 no activa sin fecha compromiso', true,
       /data-folio="HAR 2025-000003"[\s\S]*?ini-sem verde[^>]*><\/span><span class="ini-tenue">—/.test(html));
     Check('L4 cuenta', '5 iniciativas', p.sel('regCuenta').textContent);
     Check('L4 sin "Mostrar mas"', true, p.sel('regMas').hidden);
-    Check('L5 filtros llenos', [['Todos:si', 'En Análisis:si', 'En Solución:si', 'Cerrado:si'], ['Dir A', 'Dir B'], ['PO 1', 'PO 2', 'PO 3']],
+    // PO: los capturados (PO 2 solo es dueño de una categoria: no sale).
+    Check('L5 filtros llenos', [['Todos:si', 'En Análisis:si', 'En Solución:si', 'Cerrado:si'], ['Dir A', 'Dir B'], ['PO 1', 'PO 3']],
       [casillasDe(p, 'regEstadoPanel'), p.sel('regDirector').opciones(), p.sel('regPo').opciones()]);
     Check('L5 el select de Agrupacion no se llena', '', p.sel('regTipo').innerHTML);
     Check('L5 la columna Agrupacion sigue en la tabla', true, /data-col="Agrupación"><span class="chip ini-chip">Mejora/.test(html));
@@ -443,6 +458,7 @@ pruebas.push(function () {
   var d = JSON.parse(JSON.stringify(DATOS));
   d.iniciativas.forEach(function (i) {
     if (i.folio === 'PRB 2026-000001') { i.po_capturado = 'PO Capturado <x>'; i.so_capturado = null; }
+    if (i.folio === 'MAP 2026-000002') { i.po_capturado = null; i.so_capturado = null; }
   });
   var p = Pagina(ok(d));
   return esperar().then(function () {
@@ -450,9 +466,86 @@ pruebas.push(function () {
     var html = p.sel('regDetCuerpo').innerHTML;
     Check('EC1 con categorias: PO capturado aparte (escapado), SO capturado vacio = guion', [true, true, true],
       [/Product Owner capturado<\/dt><dd>PO Capturado &lt;x&gt;</.test(html), /Service Owner capturado<\/dt><dd>—</.test(html),
-       /los filtros usan los de sus categorías/.test(html)]);
+       /alta o edición de ADM\): son los de las columnas y los filtros de la lista/.test(html)]);
     clicFolio(p, 'MAP 2026-000002');
     Check('EC2 sin capturar: sin bloque nuevo', false, /capturado/.test(p.sel('regDetCuerpo').innerHTML));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PC) Columnas, orden y filtro PO / SO de la lista = los CAPTURADOS de la
+//     iniciativa (po_capturado / so_capturado = dbo.Problem.OwnerProblem /
+//     OwnerServicio), no los de sus categorias. Tras guardar (actualizar),
+//     la lista muestra y filtra lo recien leido; las categorias no cambian.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var d = JSON.parse(JSON.stringify(DATOS));
+  d.iniciativas.forEach(function (i) {
+    // Capturado distinto de los dueños de su categoria (PO 1 / SO y).
+    if (i.folio === 'MAP 2026-000002') { i.po_capturado = 'PO Nuevo'; i.so_capturado = 'SO Nuevo'; }
+    // Sin capturar (null y solo espacios).
+    if (i.folio === 'REQ 2026-000004') { i.po_capturado = null; i.so_capturado = '   '; }
+  });
+  var p = Pagina(ok(d));
+  var reg;
+  function porFolio(f) { return reg.registro.buscar(f); }
+  return esperar().then(function () {
+    reg = p.registro;
+    sinOmision(p);
+    Check('PC1 columnas: el capturado, no el de la categoria', [true, true, false],
+      [/>PO Nuevo$/.test(celda(p, 'MAP 2026-000002', 'Product Owner')), />SO Nuevo$/.test(celda(p, 'MAP 2026-000002', 'Service Owner')),
+       />PO 1$/.test(celda(p, 'MAP 2026-000002', 'Product Owner'))]);
+    Check('PC2 sin capturar: guion en las dos columnas', [true, true],
+      [/ini-tenue">—<\/span>$/.test(celda(p, 'REQ 2026-000004', 'Product Owner')), /ini-tenue">—<\/span>$/.test(celda(p, 'REQ 2026-000004', 'Service Owner'))]);
+    Check('PC3 opciones de PO / SO: los capturados (sin vacios)', [['PO 1', 'PO 3', 'PO Nuevo'], ['SO Nuevo', 'SO w', 'SO x', 'SO z']],
+      [p.sel('regPo').opciones(), p.sel('regSo').opciones()]);
+    elegir(p, 'regPo', 'PO Nuevo');
+    Check('PC4 filtrar por el PO capturado la encuentra', ['MAP 2026-000002'], folios(p));
+    elegir(p, 'regPo', 'PO 1');
+    Check('PC4 el PO de su categoria (PO 1) ya no la trae', ['PRB 2026-000001', 'PRB 2026-000005'], folios(p));
+    elegir(p, 'regPo', 'PO 3');
+    Check('PC5 sin capturar no pasa un PO elegido', ['HAR 2025-000003'], folios(p));
+    elegir(p, 'regPo', '');
+    elegir(p, 'regSo', 'SO Nuevo');
+    Check('PC5 SO capturado filtra igual', ['MAP 2026-000002'], folios(p));
+    sinOmision(p);
+    Check('PC5 sin filtro, las sin capturar siguen en la lista', 5, folios(p).length);
+
+    // Lo que se ve en la columna = lo que filtra, en cada fila.
+    var coinciden = reg.registro.iniciativas.every(function (i) {
+      var f = new R.FiltroRegistro(reg.registro);
+      var po = (i.po_capturado || '').trim();
+      if (!po) return true;
+      f.elegir(0, po);
+      return f.aplicar(reg.registro.iniciativas).some(function (x) { return x.folio === i.folio; }) &&
+        new RegExp('>' + po + '$').test(celda(p, i.folio, 'Product Owner'));
+    });
+    Check('PC6 cada PO de la columna es una opcion del filtro que encuentra su fila', true, coinciden);
+
+    reg.ordenarPor('po');
+    Check('PC7 ordenar por Product Owner: por el capturado, sin capturar al final',
+      ['PRB 2026-000001', 'PRB 2026-000005', 'HAR 2025-000003', 'MAP 2026-000002', 'REQ 2026-000004'], folios(p));
+    reg.ordenarPor('po'); reg.ordenarPor('po');
+
+    // Guardado de ADM (otro PO / SO capturado) y relectura.
+    elegir(p, 'regPo', 'PO Nuevo');
+    var json = JSON.parse(JSON.stringify(d));
+    json.iniciativas.forEach(function (i) {
+      if (i.folio === 'MAP 2026-000002') { i.po_capturado = 'PO 3'; i.so_capturado = 'SO z'; }
+    });
+    return reg.actualizar(ok(json));
+  }).then(function () {
+    Check('PC8 tras guardar: la columna muestra lo guardado', [true, true],
+      [/>PO 3$/.test(celda(p, 'MAP 2026-000002', 'Product Owner')), />SO z$/.test(celda(p, 'MAP 2026-000002', 'Service Owner'))]);
+    Check('PC8 el PO viejo ya no es opcion (el filtro se suelta) y el nuevo la encuentra', [false, ['HAR 2025-000003', 'MAP 2026-000002']],
+      [p.sel('regPo').opciones().indexOf('PO Nuevo') >= 0, (elegir(p, 'regPo', 'PO 3'), folios(p).sort())]);
+    var map = porFolio('MAP 2026-000002'), prb = porFolio('PRB 2026-000001');
+    Check('PC9 los dueños de su categoria no cambian', ['PO 1', 'SO y', 'Dir A'], [map.categorias[0].po, map.categorias[0].so, map.categorias[0].director]);
+    Check('PC9 otra iniciativa no cambia', ['PO 1', 'SO x', 'PO 1', 'PO 2'],
+      [prb.po_capturado, prb.so_capturado, prb.categorias[0].po, prb.categorias[1].po]);
+    clicFolio(p, 'MAP 2026-000002');
+    Check('PC10 el detalle sigue mostrando los dueños de la categoria aparte', [true, true],
+      [/Product Owner<\/dt><dd>PO 1</.test(p.sel('regDetCuerpo').innerHTML), /Product Owner capturado<\/dt><dd>PO 3</.test(p.sel('regDetCuerpo').innerHTML)]);
   });
 });
 
@@ -736,6 +829,101 @@ pruebas.push(function () {
     }).then(function () {
       Check('SV9 sin red: aviso de que no se sabe, reintento posible', ['ini-cambio-msg aviso', true, false],
         [p.sel('regCambioMsg').className, /no se sabe si se envió/.test(p.sel('regCambioMsg').innerHTML), p.sel('regCambioEnviar').disabled]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SD) Solicitar cambios de Título / PO / SO capturados (sql/25,
+// solicitudes_datos): solo si el servidor lo dice; PO / SO son los de la
+// iniciativa (po_capturado / so_capturado), de la lista del catálogo; el
+// Código nunca se pide.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var S = R.SolicitudCambio;
+  Check('SD1 campos(true): Título / PO / SO antes de Otros; campos() sigue sin ellos',
+    [['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'datos', 'otros'], ['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'otros']],
+    [S.campos(true).map(function (c) { return c.clave; }), S.campos().map(function (c) { return c.clave; })]);
+  var ini = Ini('PRB 2026-000001', { titulo: 'Uno', titulo_problem: 'Uno', po: 'PO de la categoria', so: 'SO de la categoria',
+                                     po_capturado: 'PO 1', so_capturado: null });
+  var LISTAS = { datos: true, pos: ['PO 1', 'PO 2'], sos: ['SO x'] };
+  var c = new S(ini, LISTAS);
+  c.campo = 'datos'; c.motivo = 'Cambio de responsable';
+  Check('SD2 datos sin marcar ninguno: error', ['datos'], c.validar().map(function (e) { return e.campo; }));
+  Check('SD3 lo de ahora: Título del Problem y PO / SO CAPTURADOS (no los de la categoría)', ['Uno', 'PO 1', ''],
+    [c.datoActual('titulo'), c.datoActual('po'), c.datoActual('so')]);
+  c.datos.po = 'PO inventado';
+  Check('SD4 PO fuera del catálogo: error', ['po'], c.validar().map(function (e) { return e.dato; }));
+  c.datos.po = 'PO 1';
+  Check('SD5 mismo PO: sin cambio', ['po'], c.validar().map(function (e) { return e.dato; }));
+  c.datos.po = 'PO 2'; c.datos.titulo = '  Uno nuevo '; c.datos.so = '';
+  Check('SD6 SO vacío cuando ya está vacío = sin cambio', ['so'], c.validar().map(function (e) { return e.dato; }));
+  c.datos.so = 'SO x';
+  Check('SD7 válida y el resumen dice anterior → nuevo de cada dato', [[], [['titulo', 'Uno', 'Uno nuevo'], ['po', 'PO 1', 'PO 2'], ['so', '', 'SO x']], true],
+    [c.validar(), c.resumen().datos.map(function (d) { return [d.campo, d.anterior, d.nuevo]; }), c.resumen().automatica]);
+  Check('SD8 pares de envío: tipo datos y solo las claves pedidas; sin código ni po de la categoría',
+    [['folio', 'PRB 2026-000001'], ['tipo', 'datos'], ['titulo_nuevo', 'Uno nuevo'], ['po_nuevo', 'PO 2'], ['so_nuevo', 'SO x'], ['motivo', 'Cambio de responsable']],
+    c.pares().filter(function (x) { return x[0] !== 'llave'; }));
+  c.datos.titulo = null; c.datos.so = null;
+  Check('SD9 sin marcar = no viaja', ['po_nuevo'], c.pares().map(function (x) { return x[0]; }).filter(function (k) { return /_nuevo$/.test(k); }));
+  var rev = new R.RevisionSolicitud(c.resumen(), 'SORIANA\\t_mod');
+  Check('SD10 aprobar: los pares de Modificar (po), con el folio leído', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['po', 'PO 2']],
+    rev.aprobar('SORIANA\\t_adm').pares);
+  var apagado = new S(ini, { pos: ['PO 2'] });
+  apagado.campo = 'datos'; apagado.datos.po = 'PO 2'; apagado.motivo = 'm';
+  Check('SD11 sin solicitudes_datos (sql/25 sin aplicar): datos se rechaza y remite a Otros', [['campo'], true],
+    [apagado.validar().map(function (e) { return e.campo; }), /Otros/.test(apagado.validar()[0].mensaje)]);
+
+  // UI: opción, grupo, casillas y envío.
+  var d = JSON.parse(JSON.stringify(DATOS));
+  d.persistencia_solicitudes = true; d.solicitudes_datos = true;
+  d.iniciativas.forEach(function (i) { if (i.folio === 'PRB 2026-000001') { i.po_capturado = 'PO 1'; i.so_capturado = null; } });
+  var p = Pagina(ok(d), function () { return nunca(); });
+  function accion(a) {
+    var el = Elemento('b'); el.setAttribute('data-accion', a);
+    p.sel('regDetCuerpo').disparar('click', { target: el });
+  }
+  function elegirEn(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('change', { target: p.sel(id) }); }
+  var envios = [];
+  return esperar().then(function () {
+    p.registro.fijarDuenosCatalogo({ po: ['PO 1', 'PO 2'], so: ['SO x'] });
+    p.registro.pedirSolicitud = function (url, op) {
+      var campos = {};
+      op.body.forEach(function (v, k) { campos[k] = v; });
+      envios.push(campos);
+      return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ enviada: true, id_solicitud: 30, repetida: false }); } });
+    };
+    clicFolio(p, 'PRB 2026-000001');
+    accion('solicitar-cambios');
+    var html = p.sel('regCambio').innerHTML;
+    var grupo = html.slice(html.indexOf('id="regCambioGrupoDatos"'));
+    Check('SD12 con solicitudes_datos: la opción va antes de Otros; el grupo con el PO capturado y sin Código',
+      [true, true, true, false, false],
+      [/<option value="datos">Título, Product Owner o Service Owner<\/option><option value="otros">/.test(html),
+       /id="regCambioGrupoDatos" hidden/.test(html),
+       /Product Owner capturado<\/label><span class="ini-cambio-rot">Actual<\/span><span class="ini-cambio-actual">PO 1</.test(grupo),
+       /regCambioDato-codigo|Código/.test(grupo), /PO de la categoria/.test(grupo)]);
+    elegirEn('regCambioCampo', 'datos');
+    Check('SD13 elegir datos: solo su grupo', [false, true, true],
+      [p.sel('regCambioGrupoDatos').hidden, p.sel('regCambioGrupoFecha').hidden, p.sel('regCambioGrupoPct').hidden]);
+    p.sel('regCambioDato-po').checked = true; p.sel('regCambioDatoValor-po').value = 'PO 2';
+    p.sel('regCambioDato-titulo').checked = false; p.sel('regCambioDatoValor-titulo').value = 'no se marca';
+    p.sel('regCambioMotivo').value = 'Nuevo responsable';
+    accion('cambio-preparar');
+    return esperar().then(esperar);
+  }).then(function () {
+    Check('SD14 envío: tipo datos, solo po_nuevo (lo no marcado no viaja), sin codigo; enviada con el número de la base',
+      ['datos', 'PO 2', false, false, false, true],
+      [envios[0] && envios[0].tipo, envios[0] && envios[0].po_nuevo, !!envios[0] && 'titulo_nuevo' in envios[0], !!envios[0] && 'so_nuevo' in envios[0],
+       !!envios[0] && 'codigo' in envios[0], /Solicitud #30 enviada/.test(p.sel('regCambioMsg').innerHTML)]);
+    Check('SD15 el registro no cambia al enviar', 'PO 1', p.registro.registro.buscar('PRB 2026-000001').po_capturado);
+    var sin = Pagina(ok(DATOS), function () { return nunca(); });
+    return esperar().then(function () {
+      clicFolio(sin, 'PRB 2026-000001');
+      var el = Elemento('b'); el.setAttribute('data-accion', 'solicitar-cambios');
+      sin.sel('regDetCuerpo').disparar('click', { target: el });
+      Check('SD16 sin solicitudes_datos: ni la opción ni el grupo', [false, false],
+        [/value="datos"/.test(sin.sel('regCambio').innerHTML), /regCambioGrupoDatos/.test(sin.sel('regCambio').innerHTML)]);
     });
   });
 });
@@ -1208,7 +1396,7 @@ pruebas.push(function () {
     elegir(p, 'selTipo', 'MAP');
     elegir(p, 'selPo', 'PO 1');
     p.sel('btnVolver').disparar('click');
-    elegir(p, 'regPo', 'PO 2');           // filtrar la lista no toca el borrador
+    elegir(p, 'regSo', 'SO x');           // filtrar la lista no toca el borrador
     clicFolio(p, 'PRB 2026-000001');
     p.sel('selTipo').value = ''; p.sel('selPo').value = '';
     p.sel('btnSolicitar').disparar('click');
@@ -1323,13 +1511,16 @@ var DATOS_BUSQUEDA = (function () {
   var d = JSON.parse(JSON.stringify(DATOS));
   d.iniciativas.push(
     Ini('PRB 2026-000012', { prefijo: 'PRB', titulo: 'Reducción de incidentes de red', po: 'PO 1', so: 'SO x', director: 'Dir A',
+      po_capturado: 'PO 1', so_capturado: 'SO x',
       categorias: [Cat('/A/Cat 1/Hoja', 10, 0.1, 'Dir A', 'PO 1', 'SO x')] }),
     Ini('MAP 2026-000120', { prefijo: 'MAP', titulo: 'MIGRACIÓN de correo', po: 'PO 3', so: 'SO z', director: 'Dir B',
+      po_capturado: 'PO 3', so_capturado: 'SO z',
       categorias: [Cat('/B/Cat 4', 20, 0.2, 'Dir B', 'PO 3', 'SO z')] }),
     Ini('REQ 2026-001234', { prefijo: 'REQ', titulo: 'Alta de usuarios', po: 'PO 3', so: 'SO z', director: 'Dir B',
+      po_capturado: 'PO 3', so_capturado: 'SO z',
       categorias: [Cat('/B/Cat 5', 1, 0.1, 'Dir B', 'PO 3', 'SO z')] }),
     Ini('PRB 2025-000012', { prefijo: 'PRB', titulo: 'Caída del portal', estado: 'Cerrado', activa: false, seguimiento: false,
-      po: 'PO 1', so: 'SO x', director: 'Dir A',
+      po: 'PO 1', so: 'SO x', director: 'Dir A', po_capturado: 'PO 2', so_capturado: 'SO x',
       categorias: [Cat('/A/Cat 3', 2, 0.1, 'Dir A', 'PO 2', 'SO x')] }));
   return d;
 })();
@@ -1408,7 +1599,7 @@ pruebas.push(function () {
       [p.sel('regCuenta').textContent, p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
 
     elegir(p, 'regPo', 'PO 1');
-    // PRB 2025-000012 tiene 12 pero su categoria es de PO 2: fuera.
+    // PRB 2025-000012 tiene 12 pero capturo PO 2: fuera.
     Check('BV3 PO 1 Y "12": la busqueda sigue', ['PRB 2026-000012'], folios(p));
     Check('BV3 dos filtros activos', '2 filtros activos', p.sel('regFiltrosCuenta').textContent);
 
@@ -1473,16 +1664,19 @@ var DATOS_AL = {
   estados_activos: DATOS.estados_activos, agrupadores: DATOS.agrupadores, fecha_gen: '09/10/2026',
   tipos_iniciativa: [{ prefijo: 'PRB', nombre: 'Problem' }, { prefijo: 'MAP', nombre: 'Mejora aplicativo' }],
   iniciativas: [
-    Ini('PRB 2026-000001', { prefijo: 'PRB', po: 'PO 1', so: 'SO x', director: 'Dir A',
+    Ini('PRB 2026-000001', { prefijo: 'PRB', po: 'PO 1', so: 'SO x', director: 'Dir A', po_capturado: 'PO 1', so_capturado: 'SO x',
       categorias: [Cat('/A/Cat 1/Hoja', 10, 0.5, 'Dir A', 'PO 1', 'SO x')] }),
-    // Su categoria resuelve dueños que solo existen en filas dadas de baja.
+    // Su categoria resuelve dueños que solo existen en filas dadas de baja;
+    // capturo nombres que tampoco estan en el catalogo vigente.
     Ini('MAP 2026-000002', { prefijo: 'MAP', po: 'PO Viejo', so: 'SO Viejo', director: 'Dir Viejo',
+      po_capturado: 'PO Viejo', so_capturado: 'SO Viejo',
       categorias: [Cat('/Z/Baja', 5, 1, 'Dir Viejo', 'PO Viejo', 'SO Viejo')] }),
     // Sin categoria: dueños capturados en el Problem (OwnerProblem...).
     Ini('PRB 2026-000003', { prefijo: 'PRB', sin_categoria: true, categorias: [],
-      po: 'Javier Tapia / Yadira Acosta', so: 'Pendiente de asignacion', director: 'Dir B' }),
+      po: 'Javier Tapia / Yadira Acosta', so: 'Pendiente de asignacion', director: 'Dir B',
+      po_capturado: 'Javier Tapia / Yadira Acosta', so_capturado: 'Pendiente de asignacion' }),
     // PO del catalogo pero SO heredado del C1 (resuelto en el servidor).
-    Ini('PRB 2026-000004', { prefijo: 'PRB', po: 'PO 3', so: 'SO z', director: 'Dir B',
+    Ini('PRB 2026-000004', { prefijo: 'PRB', po: 'PO 3', so: 'SO z', director: 'Dir B', po_capturado: 'PO 3', so_capturado: 'SO z',
       categorias: [Cat('/B/Cat 5', 3, 0.1, 'Dir B', 'PO 3', 'SO z')] })
   ]
 };
@@ -1804,8 +1998,8 @@ pruebas.push(function () {
     Check('R1 cabecera: orden pedido', COLUMNAS_LISTA, cabeceras(p));
     Check('R1 celdas de cada fila en el mismo orden', [COLUMNAS_LISTA, COLUMNAS_LISTA, COLUMNAS_LISTA],
       [celdas(p, 'PRB 2026-000001'), celdas(p, 'MAP 2026-000002'), celdas(p, 'PRB 2026-000005')]);
-    Check('R1 los dueños no cambian de dato: SO en Service Owner, PO (el primero +1) en Product Owner', [true, true],
-      [/>SO x<?/.test(celda(p, 'PRB 2026-000001', 'Service Owner')), /PO 1 <span class="ini-mas">\+1/.test(celda(p, 'PRB 2026-000001', 'Product Owner'))]);
+    Check('R1 los dueños no cambian de dato: SO capturado en Service Owner, PO capturado en Product Owner', [true, true],
+      [/>SO x$/.test(celda(p, 'PRB 2026-000001', 'Service Owner')), />PO 1$/.test(celda(p, 'PRB 2026-000001', 'Product Owner'))]);
     Check('R1 ordenar por Service Owner y Product Owner sigue funcionando', [['so', 'asc'], ['po', 'asc']],
       (function () {
         reg.ordenarPor('so'); var a = [reg.orden.col, reg.orden.dir];
@@ -1847,6 +2041,14 @@ pruebas.push(function () {
     Check('R5 title en meses / semanas / dias; sin title sin dato', [true, false],
       [/title="4 meses, 1 semana y 3 días"/.test(celda(p, 'PRB 2026-000001', 'Antigüedad')),
        /title=/.test(celda(p, 'PRB 2026-000005', 'Antigüedad'))]);
+    function ordenEdad() {
+      var folios = (p.sel('regCuerpo').innerHTML.match(/<tr class="ini-fila" data-folio="[^"]+"/g) || [])
+        .map(function (t) { return t.replace(/.*data-folio="/, '').replace('"', ''); });
+      return [reg.orden.col, reg.orden.dir, folios[0], folios[folios.length - 1]];
+    }
+    reg.ordenarPor('edad');
+    Check('R5 Antigüedad, primer clic: ascendente (la mas reciente primero), sin dato al final', ['edad', 'asc', 'MAP 2026-000002', 'PRB 2026-000005'],
+      ordenEdad());
     reg.ordenarPor('edad');
     Check('R5 ordenar por Antigüedad: la mas antigua primero, sin dato al final', ['edad', 'desc', 'PRB 2026-000001', 'PRB 2026-000005'],
       (function () {
@@ -2052,6 +2254,116 @@ pruebas.push(function () {
     marcarTipo(p, ''); marcarTipo(p, 'PRB');
     reg.ordenarPor('agrup');
     Check('RQ2 filtros, busqueda y orden no mueven (ni repintan) las tarjetas', [base, true], [kpis(p), p.sel('regKpis').innerHTML === html]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// O) Orden por omision (f_creacion) y orden por columna
+// ---------------------------------------------------------------------------
+function clicColumna(p, col) {
+  var th = Elemento('th');
+  th.setAttribute('data-orden', col);
+  p.sel('regCabeza').disparar('click', { target: th });
+}
+function ariaDe(p, col) {
+  var m = new RegExp('aria-sort="([a-z]+)"><button type="button" class="ini-orden" data-orden="' + col + '"').exec(p.sel('regCabeza').innerHTML);
+  return m ? m[1] : null;
+}
+var POR_CREACION = ['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005', 'HAR 2025-000003'];
+
+pruebas.push(function () {
+  var lista = [
+    { folio: 'C 3', f_creacion: '2026-03-01' }, { folio: 'Z 9', f_creacion: null },
+    { folio: 'B 2', f_creacion: '2026-03-01' }, { folio: 'X 7', f_creacion: '2026-13-40' },
+    { folio: 'A 1', f_creacion: '2025-12-31' }, { folio: 'Y 8', f_creacion: 'ayer' },
+    { folio: 'W 6' }, { folio: 'V 5', f_creacion: '' }, { folio: 'D 4', f_creacion: '2026-10-20' }
+  ];
+  var esperado = ['A 1', 'B 2', 'C 3', 'D 4', 'V 5', 'W 6', 'X 7', 'Y 8', 'Z 9'];
+  var orden = function (l, o) { return R.ordenar(l, o).map(function (i) { return i.folio; }); };
+  Check('O1 por omision: f_creacion ascendente, la mas antigua primero', ['A 1', 'B 2', 'C 3', 'D 4'], orden(lista, null).slice(0, 4));
+  Check('O2 sin fecha, vacia o invalida (2026-13-40, "ayer"): al final', ['V 5', 'W 6', 'X 7', 'Y 8', 'Z 9'], orden(lista, null).slice(4));
+  Check('O3 empates (misma fecha, o todas sin fecha): por Codigo, sin depender del orden de llegada',
+    [esperado, esperado], [orden(lista, null), orden(lista.slice().reverse(), null)]);
+  Check('O3b una columna con empate desempata por fecha de creacion', ['A 1', 'B 2', 'C 3'],
+    orden([lista[0], lista[2], lista[4]].map(function (i) { return { folio: i.folio, f_creacion: i.f_creacion, estado: 'X' }; }),
+          { col: 'estado', dir: 'asc' }));
+});
+
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS)), reg;
+  return esperar().then(function () {
+    reg = p.registro;
+    Check('O4 al cargar: orden por omision (f_creacion), sin columna marcada', [POR_CREACION, null, 'none'],
+      [folios(p), reg.orden, ariaDe(p, 'folio')]);
+
+    // asc -> desc -> por omision, en cualquier columna.
+    clicColumna(p, 'folio');
+    Check('O5 primer clic: ascendente', [{ col: 'folio', dir: 'asc' }, 'ascending', 'HAR 2025-000003'], [reg.orden, ariaDe(p, 'folio'), folios(p)[0]]);
+    clicColumna(p, 'folio');
+    Check('O5 segundo clic: descendente', [{ col: 'folio', dir: 'desc' }, 'descending', 'REQ 2026-000004'], [reg.orden, ariaDe(p, 'folio'), folios(p)[0]]);
+    clicColumna(p, 'folio');
+    Check('O5 tercer clic: vuelve al orden por omision', [null, 'none', POR_CREACION], [reg.orden, ariaDe(p, 'folio'), folios(p)]);
+    clicColumna(p, 'reduce');
+    Check('O5 columna numerica: tambien empieza ascendente', [{ col: 'reduce', dir: 'asc' }, 'ascending'], [reg.orden, ariaDe(p, 'reduce')]);
+    clicColumna(p, 'folio');
+    Check('O5 otra columna: empieza otra vez en ascendente', [{ col: 'folio', dir: 'asc' }, 'none'], [reg.orden, ariaDe(p, 'reduce')]);
+
+    // Cada filtro y la busqueda conservan el orden elegido.
+    clicColumna(p, 'folio');                                   // desc
+    elegir(p, 'regPo', 'PO 1');
+    Check('O6 cambiar un filtro (PO) conserva el orden', [{ col: 'folio', dir: 'desc' }, ['PRB 2026-000005', 'PRB 2026-000001', 'MAP 2026-000002']],
+      [reg.orden, folios(p)]);
+    p.sel('regBuscar').value = 'PRB';
+    reg.aplicarBusqueda();
+    Check('O6 la busqueda conserva el orden', [{ col: 'folio', dir: 'desc' }, ['PRB 2026-000005', 'PRB 2026-000001']], [reg.orden, folios(p)]);
+    elegir(p, 'regPo', '');
+    Check('O6 quitar un filtro conserva el orden', [{ col: 'folio', dir: 'desc' }, ['PRB 2026-000005', 'PRB 2026-000001']], [reg.orden, folios(p)]);
+    p.sel('regBuscar').value = '';
+    reg.aplicarBusqueda();
+    soloEstado(p, 'En Análisis');
+    Check('O6 filtro de estado conserva el orden', [{ col: 'folio', dir: 'desc' }, ['REQ 2026-000004', 'PRB 2026-000005', 'MAP 2026-000002']],
+      [reg.orden, folios(p)]);
+    marcarTipo(p, ''); marcarTipo(p, 'REQ'); marcarTipo(p, 'MAP');
+    Check('O6 filtro de tipo conserva el orden', [{ col: 'folio', dir: 'desc' }, ['REQ 2026-000004', 'MAP 2026-000002']], [reg.orden, folios(p)]);
+
+    // Limpiar filtros: tambien quita el orden por columna.
+    p.sel('regBuscar').value = 'PRB';
+    reg.aplicarBusqueda();
+    p.sel('regLimpiar').disparar('click');
+    Check('O7 Limpiar filtros: sin filtros ni busqueda y orden por omision', [null, '', 0, POR_CREACION, 'none'],
+      [reg.orden, p.sel('regBuscar').value, reg.filtro.activos(), folios(p), ariaDe(p, 'folio')]);
+    clicColumna(p, 'titulo');
+    soloEstado(p, 'Cerrado');
+    elegir(p, 'regPo', 'PO 1');
+    p.sel('regLimpiarVacio').disparar('click');
+    Check('O7 Limpiar desde "sin coincidencias": tambien', [null, POR_CREACION], [reg.orden, folios(p)]);
+  });
+});
+
+// Relectura (lo que corre tras guardar): el orden elegido sigue y lo
+// cambiado se reacomoda; sin orden elegido, el de f_creacion.
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS)), reg;
+  return esperar().then(function () {
+    reg = p.registro;
+    elegir(p, 'regDirector', 'Dir A');
+    clicColumna(p, 'titulo');
+    Check('O8 antes: titulo asc con filtro Dir A', ['MAP 2026-000002', 'PRB 2026-000001'], folios(p));
+    var json = JSON.parse(JSON.stringify(DATOS));
+    json.iniciativas[0].titulo = 'A primera';                   // PRB 1 cambia de titulo
+    return reg.actualizar(ok(json));
+  }).then(function (r) {
+    Check('O8 relectura: mismo orden y filtro; PRB 1 se reacomoda por su titulo nuevo',
+      [true, { col: 'titulo', dir: 'asc' }, 'Dir A', ['PRB 2026-000001', 'MAP 2026-000002']],
+      [r.ok, reg.orden, reg.filtro.director, folios(p)]);
+    clicColumna(p, 'titulo'); clicColumna(p, 'titulo');       // desc -> por omision
+    elegir(p, 'regDirector', '');
+    var json = JSON.parse(JSON.stringify(DATOS));
+    json.iniciativas[0].f_creacion = '2026-06-01';              // PRB 1 pasa a la mas reciente
+    return reg.actualizar(ok(json));
+  }).then(function () {
+    Check('O9 relectura sin orden elegido: por f_creacion con los datos nuevos',
+      [null, ['REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005', 'HAR 2025-000003', 'PRB 2026-000001']], [reg.orden, folios(p)]);
   });
 });
 

@@ -100,6 +100,8 @@ function copia(x) { return JSON.parse(JSON.stringify(x)); }
 // ---------------------------------------------------------------------------
 // Datos
 // ---------------------------------------------------------------------------
+// po_capturado / so_capturado: los PO / SO de la iniciativa (dbo.Problem),
+// con los que la LISTA filtra; la Cobertura usa los de cada categoria.
 function Ini(folio, o) {
   var i = {
     folio: folio, titulo: 'T ' + folio, titulo_problem: 'T ' + folio, agrup: 'Problem', estado: 'En Análisis',
@@ -125,27 +127,27 @@ var REGISTRO = {
   tipos_iniciativa: [{ prefijo: 'PRB', nombre: 'Problem' }, { prefijo: 'HAR', nombre: 'Hardware' },
     { prefijo: 'MAP', nombre: 'Mejora aplicativo' }, { prefijo: 'REQ', nombre: 'Requerimiento' }],
   iniciativas: [
-    Ini('PRB 1', { estado: 'En Solución', categorias: [
+    Ini('PRB 1', { po_capturado: 'PO 1', so_capturado: 'SO x', estado: 'En Solución', categorias: [
       Cat('/A/Cat 1/Hoja', '/A/Cat 1', 'Dir A', 'PO 1', 'SO x'),
       Cat('/A/Cat 3', '/A/Cat 3', 'Dir A', 'PO 2', 'SO x')] }),
     // Segunda iniciativa activa en /A/Cat 1, por OTRA ruta: no se escoge una.
-    Ini('MAP 6', { agrup: 'Mejora', categorias: [
+    Ini('MAP 6', { po_capturado: 'PO 1', so_capturado: 'SO x', agrup: 'Mejora', categorias: [
       Cat('/A/Cat 1/Otra', '/A/Cat 1', 'Dir A', 'PO 1', 'SO x'),
       Cat('/A/Cat 1', '/A/Cat 1', 'Dir A', 'PO 1', 'SO x')] }),
-    Ini('MAP 2', { agrup: 'Mejora', categorias: [
+    Ini('MAP 2', { po_capturado: 'PO 1', so_capturado: 'SO y', agrup: 'Mejora', categorias: [
       Cat('/A/Cat 2', '/A/Cat 2', 'Dir A', 'PO 1', 'SO y')] }),
     // Cerrada: no cubre.
-    Ini('HAR 3', { estado: 'Cerrado', activa: false, seguimiento: false, sem_fecha: 'verde', categorias: [
+    Ini('HAR 3', { po_capturado: 'PO 3', so_capturado: 'SO z', estado: 'Cerrado', activa: false, seguimiento: false, sem_fecha: 'verde', categorias: [
       Cat('/B/Cat 4', '/B/Cat 4', 'Dir B', 'PO 3', 'SO z')] }),
     // Activa con agrupacion fuera de las cuatro: no es `seguimiento`, no cubre.
-    Ini('REQ 4', { agrup: 'ReqOpr', seguimiento: false, categorias: [
+    Ini('REQ 4', { po_capturado: 'PO 3', so_capturado: 'SO z', agrup: 'ReqOpr', seguimiento: false, categorias: [
       Cat('/B/Cat 5', '/B/Cat 5', 'Dir B', 'PO 3', 'SO z')] }),
     // Activa sin categoria: no cubre nada, se cuenta.
-    Ini('PRB 5', { sin_categoria: true, po: 'PO 1', so: 'SO w', director: 'Dir B', categorias: [] }),
+    Ini('PRB 5', { po_capturado: 'PO 1', so_capturado: 'SO w', sin_categoria: true, po: 'PO 1', so: 'SO w', director: 'Dir B', categorias: [] }),
     // Activa con ruta cuyo C1&C2 no tiene N2 propia: fuera del catalogo.
-    Ini('PRB 7', { categorias: [Cat('/D/Sin N2/X', null, 'Dir A', 'PO 1', 'SO x')] }),
+    Ini('PRB 7', { po_capturado: 'PO 1', so_capturado: 'SO x', categorias: [Cat('/D/Sin N2/X', null, 'Dir A', 'PO 1', 'SO x')] }),
     // Activa bajo una N2 que existe pero ya no esta vigente: tambien fuera.
-    Ini('PRB 8', { categorias: [Cat('/E/Baja/Y', '/E/Baja', 'Dir B', 'PO 3', 'SO z')] })
+    Ini('PRB 8', { po_capturado: 'PO 3', so_capturado: 'SO z', categorias: [Cat('/E/Baja/Y', '/E/Baja', 'Dir B', 'PO 3', 'SO z')] })
   ]
 };
 

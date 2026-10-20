@@ -677,6 +677,7 @@ window.Iniciativas = (function () {
       this.crearAdmin = null; // VistaCrearAdmin (admin/iniciativa-admin.js)
       this.duenos = null;     // VistaDuenos (admin/categorias-duenos.js), perezosa; null si DUENOS_VISIBLES = false
       this.cola = null;       // ColaSolicitudes (admin/solicitudes-cambio.js): cola de ADM
+      this.recientes = null;  // VistaCambiosRecientes (admin/cambios-recientes.js): solo ADM
       this.volumetria = null; // VolumetriaCliente de Nueva solicitud (perezoso; usa this.pedir)
       // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
       // sin rol no se abre nada de ADM.
@@ -749,6 +750,20 @@ window.Iniciativas = (function () {
           return r ? { iniciativa: r.valoresTipoIniciativa, agrupado: r.valoresTipoAgrupado } : {};
         });
         this.cola.alCambiarIniciativa = function () { if (regCola && regCola.actualizar) regCola.actualizar(); };
+      }
+      // Cambios recientes (pestaña Administracion, solo ADM). Titulo y estado
+      // del registro ya cargado; "Ver" abre el mismo detalle de Iniciativas
+      // (abrirDesdeLista: pregunta si hay cambios sin guardar) y "Actualizar
+      // registro" usa actualizar(), que conserva filtros, busqueda y orden.
+      if (window.CambiosRecientes) {
+        var regRec = this.registro;
+        this.recientes = new window.CambiosRecientes.VistaCambiosRecientes(this.doc, null,
+          function () { return regRec ? regRec.registro : null; },
+          function (folio) {
+            self.mostrarVista('iniciativas');
+            if (self.vista === 'iniciativas') regRec.abrirDesdeLista(folio);
+          },
+          function () { return regRec.actualizar(); });
       }
       if (window.IniciativaAdmin) {
         // La volumetria (GET) va por el mismo fetch de la pagina; la
@@ -823,6 +838,8 @@ window.Iniciativas = (function () {
       if (nombre !== 'iniciativas' && this.registro) this.registro.cerrarDetalle();
       // El catalogo de dueños se pide la primera vez que se abre la pestaña.
       if (nombre === 'administracion' && this.duenos) this.duenos.abrir();
+      // Cada vez que se abre Administracion (rol ADM ya revisado arriba).
+      if (nombre === 'administracion' && this.recientes) this.recientes.abrir();
       if (nombre === 'solicitudes' && this.cola) this.cola.abrir();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();
@@ -1250,6 +1267,11 @@ window.Iniciativas = (function () {
           if (self.registro && self.registro.fijarRutasCatalogo && window.IniciativaAdmin) {
             var BA = window.IniciativaAdmin.BorradorAdmin;
             self.registro.fijarRutasCatalogo(BA.rutasDe(catalogo), undefined, catalogo.rutasAdm ? BA.rutasAdmDe(catalogo) : null);
+          }
+          // ... y sus PO / SO capturados salen de la misma lista que el alta.
+          if (self.registro && self.registro.fijarDuenosCatalogo && window.IniciativaAdmin) {
+            var B = window.IniciativaAdmin.BorradorAdmin;
+            self.registro.fijarDuenosCatalogo({ po: B.valoresDe(catalogo, 'po'), so: B.valoresDe(catalogo, 'so') });
           }
 
           if (catalogo.omitidas > 0) {

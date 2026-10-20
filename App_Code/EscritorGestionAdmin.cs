@@ -1,6 +1,8 @@
 // Escritor de la gestion directa de ADM contra los procedimientos de la
 // migracion sql/18_gestion_admin_persistencia.sql (adm.usp_GestionAdmin_Crear
 // / _Modificar). sql/18 (y sql/20 para PO / SO del alta) aplicadas en la VM.
+// PO / SO y quitar en Modificar: parametros de sql/24 (SIN aplicar, despues
+// de sql/23); solo se mandan con PersistenciaGestionAdmin.ModificaDuenosYQuita.
 //
 // El handler (admin_iniciativas_gestion.ashx) lo llama SOLO si
 // PersistenciaGestionAdmin.Activa() y el plan no tiene pendientes ("quitar
@@ -87,8 +89,11 @@ public sealed class EscritorGestionAdminSql
     public void Modificar(SqlConnection cn, SqlTransaction tx, PlanModificarAdmin plan, string usuario)
     {
         if (plan == null) throw new ArgumentNullException("plan");
-        if (plan.Quitar.Count > 0)
+        var conSql24 = PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva();
+        if (plan.Quitar.Count > 0 && !conSql24)
             throw new InvalidOperationException(PlanificadorGestionAdmin.PendienteQuitar);
+        if (!conSql24 && (plan.Problem.ContainsKey(SolicitudIniciativa.CPo) || plan.Problem.ContainsKey(SolicitudIniciativa.CSo)))
+            throw new InvalidOperationException("PO / SO en el plan de Modificar sin sql/24: no se descartan en silencio.");
         using (var cmd = Comando(cn, tx, "adm.usp_GestionAdmin_Modificar"))
         {
             cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = Db(usuario);
@@ -105,6 +110,16 @@ public sealed class EscritorGestionAdminSql
             Categorias(cmd, "@Agregar", plan.Agregar);
             Fechas(cmd, "@FechasCategoria", plan.FechasCategoria);
             cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = plan.Hoy.Date;
+            // sql/24: por nombre y solo con el interruptor; sin el, el
+            // procedimiento de sql/22 / 23 no los conoce.
+            if (conSql24)
+            {
+                Texto(cmd, plan, SolicitudIniciativa.CPo, "OwnerProblem", 4000);
+                Texto(cmd, plan, SolicitudIniciativa.CSo, "OwnerServicio", 4000);
+                var quitar = new List<CategoriaPlan>();
+                foreach (var ruta in plan.Quitar) quitar.Add(new CategoriaPlan { Ruta = ruta });
+                Categorias(cmd, "@Quitar", quitar);
+            }
             Ejecutar(cmd);
         }
     }

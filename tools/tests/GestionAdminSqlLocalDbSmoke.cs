@@ -765,6 +765,54 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 Check("M8 TicketsReduce de las dos categorias recalculado (sin tickets = 0)", "/M/Dos|0;/M/Uno|0",
                       Filas(cn, "SELECT Categoria, ISNULL(TicketsReduce, 0) FROM dbo.ProblemCategoria WHERE Codigo = N'" + cm + "' ORDER BY Categoria"));
 
+                // ---------------- MF: fecha al entrar a Cerrado ----------------
+                // El plan del planificador (no uno armado a mano) por el mismo
+                // procedimiento: entrar a Cerrado llena FechaCierre vacia con el
+                // "hoy" del plan y nunca pisa una existente; asignar no suma a
+                // NroCambioFecha*. Entrar a En Solucion NO llena FechaSolucion
+                // (fecha compromiso): solo se guarda la que pide el formulario.
+                Exec(cn, "INSERT dbo.Categorias (Id, RutaCompleta, Inactiva, VigenteEnOrigen) VALUES (N'MF1', N'/MF/Uno', 0, 1);");
+                var cf = Crear(cn, Alta(hoy, "/MF/Uno", "10"));
+                Func<string, DateTime, string, PlanModificarAdmin> aEstadoCon = (estado, dia, fSolucion) =>
+                {
+                    var fila = Filas(cn, "SELECT Estado, FechaSolucion, FechaCierre FROM dbo.Problem WHERE Codigo = N'" + cf + "'").Split('|');
+                    Func<string, object> f = v => v == "NULL" ? null : v;
+                    var a = IniciativaActual.DesdeRegistro(new Dictionary<string, object>
+                    {
+                        { "folio", cf }, { "estado", fila[0] }, { "f_solucion", f(fila[1]) }, { "f_cierre", f(fila[2]) },
+                        { "categorias", new List<object>() },
+                    });
+                    var r = new ResultadoGestionAdmin { Accion = "modificar", Folio = cf };
+                    if (estado != null) r.Cambio(PeticionModificarAdmin.CEstado, "Estado", a.Estado, estado);
+                    else if (fSolucion == null) r.Cambio(SolicitudIniciativa.CTitulo, "Título", null, "Titulo MF " + dia.Day);
+                    if (fSolucion != null) r.Cambio(PeticionModificarAdmin.CFSolucion, "Fecha compromiso de Solución", a.FSolucion, fSolucion);
+                    var form = new System.Collections.Specialized.NameValueCollection { { "folio", cf } };
+                    return PlanificadorGestionAdmin.Modificar(PeticionModificarAdmin.DesdeFormulario(form), a, r, dia);
+                };
+                Func<string, DateTime, PlanModificarAdmin> aEstado = (estado, dia) => aEstadoCon(estado, dia, null);
+                Func<string> fechasMf = () => Filas(cn, "SELECT Estado, FechaSolucion, FechaCierre, NroCambioFechaSolucion, NroCambioFechaCierre FROM dbo.Problem WHERE Codigo = N'" + cf + "'");
+                Func<string> eventosMf = () => Filas(cn, "SELECT Campo, FechaAnterior, FechaNueva FROM dbo.ProblemFechaEvento WHERE Codigo = N'" + cf + "' AND Campo IN ('FechaSolucion', 'FechaCierre') AND Categoria IS NULL AND Operacion = 'U' ORDER BY IdEvento");
+                Check("MF0 alta: En Analisis, sin FechaSolucion ni FechaCierre", "En Análisis|NULL|NULL|0|0", fechasMf());
+                Check("MF1 entrar a En Solucion con FechaSolucion NULL: sin error", "sin error",
+                      Error(() => Modificar(cn, aEstado("En Solución", new DateTime(2026, 10, 21)))));
+                Check("MF1 ... FechaSolucion sigue NULL (no se llena con hoy); FechaCierre NULL; contadores en 0",
+                      "En Solución|NULL|NULL|0|0", fechasMf());
+                Check("MF1 ... ningun evento de fecha", "", eventosMf());
+                Modificar(cn, aEstadoCon(null, new DateTime(2026, 10, 22), "2026-11-30"));
+                Check("MF2 FechaSolucion pedida por el formulario: se guarda; asignar no cuenta", "En Solución|2026-11-30|NULL|0|0", fechasMf());
+                Check("MF2 ... el trigger registra la asignacion NULL -> fecha", "FechaSolucion|NULL|2026-11-30", eventosMf());
+                Modificar(cn, aEstado("Cerrado", new DateTime(2026, 10, 25)));
+                Check("MF3 entrar a Cerrado con FechaCierre NULL: hoy; FechaSolucion intacta", "Cerrado|2026-11-30|2026-10-25|0|0", fechasMf());
+                Check("MF3 ... el trigger registra la asignacion de FechaCierre", "FechaSolucion|NULL|2026-11-30;FechaCierre|NULL|2026-10-25", eventosMf());
+                Modificar(cn, aEstado(null, new DateTime(2026, 10, 26)));
+                Check("MF4 guardar otra cosa ya Cerrado: la fecha no se toca", "Cerrado|2026-11-30|2026-10-25|0|0", fechasMf());
+                Modificar(cn, aEstado("En Solución", new DateTime(2026, 10, 30)));
+                Modificar(cn, aEstado("Cerrado", new DateTime(2026, 11, 2)));
+                Check("MF5 volver a entrar a En Solucion y a Cerrado con fechas puestas: ninguna se pisa", "Cerrado|2026-11-30|2026-10-25|0|0", fechasMf());
+                Check("MF5 ... sin eventos de fecha nuevos", "FechaSolucion|NULL|2026-11-30;FechaCierre|NULL|2026-10-25", eventosMf());
+                Modificar(cn, aEstadoCon(null, new DateTime(2026, 11, 3), "2026-12-15"));
+                Check("MF6 cambiar FechaSolucion a mano (fecha -> fecha): se guarda y cuenta como cambio", "Cerrado|2026-12-15|2026-10-25|1|0", fechasMf());
+
                 // Atomicidad: varios campos + una categoria que excede el tope
                 // (/K/Cat 1 lleno, K1). Una iniciativa del Excel aun sin proteger.
                 const string mapa = "MAP 2026-000001";

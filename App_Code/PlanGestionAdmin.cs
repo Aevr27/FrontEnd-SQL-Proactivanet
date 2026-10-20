@@ -33,6 +33,13 @@
 //
 // INMUTABLES al modificar: Codigo (solo identifica) y FechaCreacion.
 //
+// PO / SO al modificar (sql/24): los CAPTURADOS de la iniciativa
+// (dbo.Problem.OwnerProblem / OwnerServicio), nunca los de la categoria.
+// Quitar (sql/24): la ligada deja de estar vigente (VigenteEnOrigen = 0),
+// la misma baja del cargador; no se borra. Sin sql/24
+// (PersistenciaGestionAdmin.ModificaDuenosYQuita = false) quitar sigue
+// pendiente (409) y el validador ya rechazo PO / SO.
+//
 // Solo ASCII en literales (App_Code sin BOM): acentos con \uXXXX.
 
 using System;
@@ -194,10 +201,11 @@ public static class PlanificadorGestionAdmin
         SolicitudIniciativa.CTitulo, SolicitudIniciativa.CDescripcion, SolicitudIniciativa.CObservaciones,
         PeticionModificarAdmin.CEstado, PeticionModificarAdmin.CSubestado,
         PeticionModificarAdmin.CFAnalisis, PeticionModificarAdmin.CFSolucion, PeticionModificarAdmin.CFCierre,
+        SolicitudIniciativa.CPo, SolicitudIniciativa.CSo,
     };
 
     public const string PendienteQuitar =
-        "Quitar categor\u00edas: falta decidir borrado f\u00edsico o marca propia (VigenteEnOrigen era del cargador).";
+        "Quitar categor\u00edas: la base todav\u00eda no las recibe (falta aplicar sql/23 y sql/24).";
 
     private static string Limpio(string s)
     {
@@ -207,6 +215,47 @@ public static class PlanificadorGestionAdmin
     }
 
     private static string Texto(string s) { return string.IsNullOrWhiteSpace(s) ? null : s; }
+
+    // Fecha al ENTRAR a un estado (2026-10-20): pasar a Cerrado llena
+    // FechaCierre con hoy (Mexico, plan.Hoy), SOLO si la fecha queda vacia
+    // tras el guardado (ni la tenia ni la trae el formulario). Una fecha que
+    // ya existe nunca se pisa. Solo en la transicion: guardar algo que ya
+    // estaba Cerrado no toca nada (el Estado ni entra al plan si no cambia).
+    // Va por @CambiaFCierre como cualquier edicion: el trigger de sql/17
+    // registra el evento (NULL -> fecha es "asignar": no suma a
+    // NroCambioFecha*).
+    // En Solucion NO llena FechaSolucion: es la fecha COMPROMISO del
+    // semaforo (con hoy saldria Atrasada al dia siguiente). Diferido hasta
+    // revisar si hace falta una fecha real de solucion.
+    public const string EstadoCerrado = "Cerrado";
+
+    private static void FechaAlEntrar(PlanModificarAdmin plan, IniciativaActual actual,
+                                      string estado, string campo, string vigente)
+    {
+        string nuevoEstado, pedida;
+        if (!plan.Problem.TryGetValue(PeticionModificarAdmin.CEstado, out nuevoEstado)) return;
+        if (!MismoEstado(nuevoEstado, estado) || MismoEstado(actual.Estado, estado)) return;
+        var queda = plan.Problem.TryGetValue(campo, out pedida) ? pedida : vigente;
+        if (Limpio(queda) != null) return;
+        plan.Problem[campo] = FechasGestionAdmin.Iso(plan.Hoy);
+    }
+
+    // Sin mayusculas, acentos ni espacios de mas (como Clave de
+    // ExperienciaQueries para el semaforo).
+    private static bool MismoEstado(string a, string b)
+    {
+        return Plano(a) == Plano(b);
+    }
+
+    private static string Plano(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return "";
+        var normal = s.Trim().ToUpperInvariant().Normalize(System.Text.NormalizationForm.FormD);
+        var sb = new System.Text.StringBuilder(normal.Length);
+        foreach (var c in normal)
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark) sb.Append(c);
+        return sb.ToString();
+    }
 
     // r: el resultado del validador para ESTA peticion; tiene que ser valido.
     public static PlanCrearAdmin Crear(PeticionCrearAdmin p, ResultadoGestionAdmin r, DateTime hoy)
@@ -265,6 +314,7 @@ public static class PlanificadorGestionAdmin
             if (!cambiados.TryGetValue(campo, out nuevo)) continue;
             plan.Problem[campo] = Limpio(nuevo) ?? "";
         }
+        FechaAlEntrar(plan, actual, EstadoCerrado, PeticionModificarAdmin.CFCierre, actual.FCierre);
 
         foreach (var x in p.Pcts)
         {
@@ -314,7 +364,7 @@ public static class PlanificadorGestionAdmin
             var ligada = actual.Ligada(Limpio(q));
             if (ligada != null) plan.Quitar.Add(ligada.Ruta);
         }
-        if (plan.Quitar.Count > 0) plan.Pendientes.Add(PendienteQuitar);
+        if (plan.Quitar.Count > 0 && !PersistenciaGestionAdmin.ModificaDuenosYQuitaActiva()) plan.Pendientes.Add(PendienteQuitar);
         return plan;
     }
 }

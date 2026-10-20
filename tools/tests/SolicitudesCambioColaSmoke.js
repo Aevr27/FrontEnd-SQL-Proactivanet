@@ -76,6 +76,19 @@ Check('R6 Otros: se cierra como atendida, con comentario obligatorio', [true, tr
 Check('R7 lista: intentos fallidos a la vista; resumen con la etapa', [true, true],
   [/1 intento</.test(C.htmlLista([Pendiente({ intentos: 1, ultimo_error: 'x' })])),
    /Fecha compromiso de Solución: 15\/11\/2026 → 05\/12\/2026/.test(C.resumen(Pendiente()))]);
+// DATOS (sql/25): Titulo / PO / SO capturados, solo los pedidos.
+var datos = Pendiente({ tipo: 'DATOS', campo_fecha: null, estado_anterior: null, estado_nuevo: null,
+  cambia_titulo: true, titulo_anterior: 'Uno', titulo_nuevo: 'Uno <nuevo>', cambia_po: true, po_anterior: 'PO viejo', po_nuevo: null,
+  cambia_so: false, so_anterior: null, so_nuevo: null, actual: { estado: 'En Solución', titulo: 'Uno', po: 'PO viejo', so: 'SO x' } });
+Check('R8 DATOS en la lista: rotulo del tipo y solo lo pedido; vacio dicho como (vacío); escapado',
+  [true, 'Título: Uno → Uno &lt;nuevo&gt;; Product Owner capturado: PO viejo → (vacío)', false],
+  [/Título \/ Product Owner \/ Service Owner/.test(C.htmlLista([datos])), C.resumen(datos), /Service Owner capturado/.test(C.resumen(datos))]);
+html = C.htmlDetalle(datos, {});
+Check('R8 DATOS en el detalle: al enviar / pedido / ahora por dato pedido; SO no pedido no aparece; aplicar disponible',
+  [true, true, false, true],
+  [/<th scope="row">Título<\/th><td>Uno<\/td><td>Uno &lt;nuevo&gt;<\/td><td>Uno<\/td>/.test(html),
+   /<th scope="row">Product Owner capturado<\/th><td>PO viejo<\/td><td>\(vacío\)<\/td><td>PO viejo<\/td>/.test(html),
+   /Service Owner capturado/.test(html), /data-sol-accion="aplicar">Aplicar solicitud/.test(html)]);
 
 // ---- flujos -----------------------------------------------------------------
 var doc = Documento(), pedidos = [], respuestas = [];
