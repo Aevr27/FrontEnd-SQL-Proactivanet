@@ -11,8 +11,9 @@ en esta rama el 2026-10-19. Diferencias con el paquete:
   `../assets/vendor/chart.umd.min.js`, el mismo del tablero.
 - `App_Code/OrquestacionQueries.cs` sin BOM, con los acentos de los literales
   como `\uXXXX` (como el resto de App_Code), y `orq.Parametro.Valor` sale como
-  número aunque la columna sea texto (antes los costos daban 0 y las
-  ejecuciones futuras se concatenaban: "17" + 5 = "175").
+  número aunque la columna sea texto (antes las ejecuciones futuras se
+  concatenaban: "17" + 5 = "175"). Los costos de `orq.Parametro` no se leen
+  ni se muestran: son información reservada.
 - `sql/77_tablero_orquestacion.sql`: la columna `Campos` usa `OUTER APPLY TOP (1)`
   en vez de `LEFT JOIN` a `orq.ValorRelleno`. Mismo resultado salvo cuando el
   relleno trae dos valores iguales bajo `Latin1_General_CI_AI`

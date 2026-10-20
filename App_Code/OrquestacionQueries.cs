@@ -16,7 +16,8 @@
 //                 OBJECT_ID es lo mismo) o no hay ninguna carga aplicada.
 //     carga       la ultima carga aplicada (orq.CargaLote) y sus advertencias
 //                 por tipo.
-//     parametros  los costos y las ejecuciones capturadas (orq.Parametro).
+//     parametros  las ejecuciones capturadas (orq.Parametro). Los costos de
+//                 orq.Parametro NO se leen: ver LeerParametros.
 //     jobs        orq.vw_TableroJob, en columnas: { cols: [...], filas: [[...]] }
 //                 (10 mil jobs: los nombres de campo una sola vez).
 //     decomisos   orq.vw_TableroDecomiso, igual.
@@ -165,10 +166,16 @@ public static class OrquestacionQueries
         return c;
     }
 
+    // Solo las claves de esta lista salen de la base. orq.Parametro guarda
+    // tambien los costos de licenciamiento (CostoTareaAnual, CostoJobAnual,
+    // CostoLicenciaActual), que son informacion reservada: no se pintan ni se
+    // exportan, y por eso tampoco se leen. Si se filtraran solo en el
+    // navegador, cualquiera los veria en la respuesta del handler.
     private static Dictionary<string, object> LeerParametros(SqlConnection cn)
     {
         var p = new Dictionary<string, object>();
-        using (var cmd = new SqlCommand("SELECT Clave, Valor FROM orq.Parametro", cn))
+        using (var cmd = new SqlCommand(
+            "SELECT Clave, Valor FROM orq.Parametro WHERE Clave IN (N'EjecucionesConsumidasDia')", cn))
         using (var rd = cmd.ExecuteReader())
             while (rd.Read())
                 p[rd.GetString(0)] = Numero(Valor(rd.GetValue(1)));

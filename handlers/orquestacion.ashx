@@ -11,8 +11,8 @@
 //       -> { "hay_datos": bool,
 //            "carga": { numero, archivo, fecha, jobs_en_excel, advertencias,
 //                       advertencias_por_tipo: [ { hoja, tipo, cuantas } ] },
-//            "parametros": { CostoTareaAnual, CostoJobAnual, CostoLicenciaActual,
-//                            EjecucionesConsumidasDia },
+//            "parametros": { EjecucionesConsumidasDia },   (sin costos: ver
+//                            OrquestacionQueries.LeerParametros)
 //            "jobs":      { cols: [...], filas: [[...]] }   (orq.vw_TableroJob)
 //            "decomisos": { cols, filas }                    (orq.vw_TableroDecomiso)
 //            "historico": { cols, filas }                    (orq.AvanceDiario)

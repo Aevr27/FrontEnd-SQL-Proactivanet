@@ -28,10 +28,10 @@ Check('decomisos / exitosos', [2, 1], [i.decomisos, i.decomisos_exitosos]);
 Check('ejecuciones calculadas (activos)', 15, i.ejec_calculada);
 Check('ejecuciones capturadas (parametro de texto)', 17, i.ejec_capturada);
 Check('pendientes por migrar', 5, i.pend_migrar);
-Check('esquema hibrido JOB / Tarea', [1, 2], [i.n_job, i.n_tarea]);
-Check('costo hibrido', 1200.5, i.costo_hibrido);
 Check('ejecuciones futuras (17 + 5), numero y no texto', 22, i.ejec_futuras);
-Check('costo futuro', 2200, i.costo_futuro);
+// Los costos son reservados: el handler no los manda y nada los calcula.
+Check('parametros sin costos', ['EjecucionesConsumidasDia'], Object.keys(r.parametros).sort());
+Check('indicadores sin costos', [], Object.keys(i).filter(function (k) { return /costo|licencia/i.test(k); }));
 Check('completos (14 documentados)', 0, i.completos);
 
 var f = { dir: 'Dir Uno', n3: '', herr: '', cand: [] };

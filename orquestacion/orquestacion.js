@@ -85,8 +85,9 @@
   }
 
   // ---- El dashboard del Excel --------------------------------------------
-  // p: orq.Parametro. Lo capturado a mano en el Excel (ejecuciones consumidas
-  // y costo de licencia) es del total: con filtros va null.
+  // p: orq.Parametro. Lo capturado a mano en el Excel (ejecuciones consumidas)
+  // es del total: con filtros va null. Los costos NO llegan aqui: el servidor
+  // no los lee (OrquestacionQueries.LeerParametros), son informacion reservada.
   function indicadores(js, decs, p, filtrado) {
     p = p || {};
     var r = {};
@@ -111,21 +112,9 @@
     r.ejec_calculada = suma(js, 'Prom', es('Activo'));
     r.ejec_capturada = filtrado || p.EjecucionesConsumidasDia == null ? null : p.EjecucionesConsumidasDia;
     r.pend_migrar = suma(js, 'Prom', es('PendMigrar'));
-    r.licencia = filtrado || p.CostoLicenciaActual == null ? null : p.CostoLicenciaActual;
-
-    // Esquema hibrido: los JOB por su costo anual, las tareas por el suyo.
-    r.n_job = cuenta(js, es('CostoJob'));
-    r.n_tarea = cuenta(js, es('CostoTarea'));
-    r.costo_job = r.n_job * num(p.CostoJobAnual);
-    r.costo_tarea = r.n_tarea * num(p.CostoTareaAnual);
-    r.costo_hibrido = r.costo_job + r.costo_tarea;
-    // Esquema actual por ejecuciones: lo consumido mas lo que falta migrar,
-    // cada ejecucion diaria al costo de una tarea (J11 y K11 del Excel).
+    // Lo consumido mas lo que falta migrar.
     var base = r.ejec_capturada != null ? r.ejec_capturada : r.ejec_calculada;
     r.ejec_futuras = base + r.pend_migrar;
-    r.costo_futuro = r.ejec_futuras * num(p.CostoTareaAnual);
-    r.ejec_futuras_calc = r.ejec_calculada + r.pend_migrar;
-    r.costo_futuro_calc = r.ejec_futuras_calc * num(p.CostoTareaAnual);
     return r;
   }
 
@@ -339,7 +328,6 @@
   function n1(v) { return v == null ? '—' : NF1.format(v); }
   function pct(v) { return v == null ? '—' : Math.round(v * 100) + '%'; }
   function pct1(v) { return v == null ? '—' : NF1.format(v * 100) + '%'; }
-  function dinero(v) { return v == null ? '—' : '$' + NF0.format(v); }
   function dia(s) {          // 'aaaa-mm-dd' -> 'dd/mm/aaaa'
     var p = String(s || '').split('-');
     return p.length >= 3 ? p[2].slice(0, 2) + '/' + p[1] + '/' + p[0] : '—';
@@ -460,7 +448,6 @@
     };
     pintarKpis();
     pintarIngreso();
-    pintarCostos();
     pintarMadurez();
     pintarDireccion();
     pintarCampos();
@@ -506,21 +493,6 @@
         : cifra('Consumidas al día (calculada por la base)', n0(r.ejec_calculada),
             vista.filtrado ? 'La capturada en el Excel es solo del total.' : 'Promedio diario de los activos')) +
       cifra('Pendientes por migrar', n0(r.pend_migrar), 'promedio diario de los candidatos (Si) que están N/A en Control-M') +
-      '</div>';
-  }
-
-  function pintarCostos() {
-    var r = vista.ind, p = datos.parametros || {};
-    $('costos').innerHTML = '<div class="orq-cifras">' +
-      (r.licencia != null ? cifra('Costo actual de licenciamiento', dinero(r.licencia), 'capturado en el Excel') + '<hr class="orq-sep">' : '') +
-      cifra('Esquema híbrido: JOB', dinero(r.costo_job), n0(r.n_job) + ' jobs × ' + dinero(p.CostoJobAnual) + ' por JOB', true) +
-      cifra('Esquema híbrido: tareas', dinero(r.costo_tarea), n0(r.n_tarea) + ' tareas × ' + dinero(p.CostoTareaAnual) + ' por tarea diaria', true) +
-      cifra('Total del esquema híbrido', dinero(r.costo_hibrido),
-        'Migrados, candidatos (Si) y «Migrados / candidato a reducción», según su esquema JOB o Tarea') +
-      '<hr class="orq-sep">' +
-      cifra('Esquema actual por ejecuciones', dinero(r.costo_futuro),
-        n0(r.ejec_futuras) + ' ejecuciones (consumidas + pendientes) × ' + dinero(p.CostoTareaAnual) +
-        (r.ejec_capturada != null ? '. Con la calculada: ' + dinero(r.costo_futuro_calc) : '') + '. Sin holgura.') +
       '</div>';
   }
 
@@ -764,7 +736,7 @@
     var b = this;
     b.disabled = true;
     Promise.all([cargarXlsx(), traerDetalle()]).then(function (r) {
-      var XLSX = r[0], v = vista, i = v.ind, p = datos.parametros || {};
+      var XLSX = r[0], v = vista, i = v.ind;
       var wb = XLSX.utils.book_new();
       var filtros = [['Dirección', f.dir || 'Todas'], ['N3', f.n3 || 'Todos'], ['Herramienta', f.herr || 'Todas'],
                      ['¿Es candidato?', f.cand.length ? f.cand.join(', ') : 'Todos']];
@@ -777,11 +749,8 @@
           ['Candidatos a migrar (Si)', i.candidatos], ['Migrados con éxito', i.migrados_exito], ['% avance', i.pct_ingreso],
           ['Candidatos a decomiso', i.decomisos], ['Decomisados exitosos', i.decomisos_exitosos], ['% avance decomisos', i.pct_decomisos],
           ['Ejecuciones consumidas (capturada)', i.ejec_capturada], ['Ejecuciones consumidas (calculada)', i.ejec_calculada],
-          ['Ejecuciones pendientes por migrar', i.pend_migrar], ['Costo actual de licenciamiento', i.licencia],
-          ['JOB del esquema híbrido', i.n_job], ['Costo JOB', i.costo_job], ['Tareas del esquema híbrido', i.n_tarea],
-          ['Costo tareas', i.costo_tarea], ['Total esquema híbrido', i.costo_hibrido],
-          ['Ejecuciones (consumidas + pendientes)', i.ejec_futuras], ['Costo esquema actual por ejecuciones', i.costo_futuro],
-          ['Costo por JOB al año', p.CostoJobAnual], ['Costo por tarea diaria al año', p.CostoTareaAnual]]), [42, 20]), 'Resumen');
+          ['Ejecuciones pendientes por migrar', i.pend_migrar],
+          ['Ejecuciones (consumidas + pendientes)', i.ejec_futuras]]), [42, 20]), 'Resumen');
       XLSX.utils.book_append_sheet(wb, hoja(XLSX, [['Medidor', 'Universo', 'Logrado', '%']].concat(v.madurez.map(function (m) {
         return [m.nombre, m.universo, m.logrado, m.pct];
       })), [22, 10, 10, 8]), 'Madurez');

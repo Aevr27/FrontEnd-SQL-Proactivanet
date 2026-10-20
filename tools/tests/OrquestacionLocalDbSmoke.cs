@@ -52,9 +52,12 @@ public static class OrquestacionLocalDbSmoke
         Check("carga: advertencias por tipo, solo del lote 2", 2, ((ICollection)carga["advertencias_por_tipo"]).Count);
 
         var p = (Dictionary<string, object>)r["parametros"];
-        Check("parametro texto -> numero (CostoTareaAnual)", "System.Double", p["CostoTareaAnual"].GetType().FullName);
-        Check("parametro con decimales", 1000.5, p["CostoJobAnual"]);
-        Check("EjecucionesConsumidasDia numero", "System.Double", p["EjecucionesConsumidasDia"].GetType().FullName);
+        // El stub SI trae los tres costos en orq.Parametro: no deben salir.
+        Check("parametro texto -> numero (EjecucionesConsumidasDia)", "System.Double", p["EjecucionesConsumidasDia"].GetType().FullName);
+        Check("parametros: solo EjecucionesConsumidasDia", 1, p.Count);
+        Check("CostoTareaAnual no sale", false, p.ContainsKey("CostoTareaAnual"));
+        Check("CostoJobAnual no sale", false, p.ContainsKey("CostoJobAnual"));
+        Check("CostoLicenciaActual no sale", false, p.ContainsKey("CostoLicenciaActual"));
 
         Check("jobs: solo los vigentes", 5, Filas(r["jobs"]));
         Check("decomisos: solo los vigentes", 2, Filas(r["decomisos"]));
