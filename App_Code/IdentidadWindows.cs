@@ -3,8 +3,9 @@
 // La UNICA fuente es HttpContext.Current.User.Identity.Name, que IIS llena con
 // la autenticacion de Windows (Negotiate) del sitio: "SORIANA\t_andresvr".
 // No hay login propio, ni contraseñas, ni tokens: si IIS no autentico al
-// usuario, aqui no hay identidad y punto. (El atajo de desarrollo local no
-// inventa identidad: ver AccesoDesarrolloLocal, que vive en AccesoAdmin.)
+// usuario, aqui no hay identidad y punto. (Esta clase no inventa identidad.
+// Solo en desarrollo local, AccesoAdmin.IdentidadEscritura firma con la
+// cuenta que AccesoDesarrolloLocal ya valido; ver ese archivo.)
 //
 // DOS VALORES, DOS USOS
 // ---------------------

@@ -622,10 +622,16 @@ public static class AccesoAdminHttpSmoke
         var activo = fuenteDev.Substring(fuenteDev.IndexOf("public static bool Activo("));
         activo = activo.Substring(0, activo.IndexOf("\n    }") + 6);
         Check("L7 Activo = Rol(ctx) != null", true, activo.Contains("return Rol(ctx) != null;"));
-        var rolDev = fuenteDev.Substring(fuenteDev.IndexOf("public static string Rol(HttpContext ctx)"));
+        // Rol() e Identidad() salen de Resolver(): la regla vive ahi.
+        Check("L7 Rol e Identidad delegan en Resolver", true,
+              fuenteDev.Contains("public static string Rol(HttpContext ctx)\n    {\n        IdentidadWindows cuenta;\n        return Resolver(ctx, out cuenta);") &&
+              fuenteDev.Contains("return Resolver(ctx, out cuenta) == null ? null : cuenta;"));
+        var rolDev = fuenteDev.Substring(fuenteDev.IndexOf("private static string Resolver(HttpContext ctx, out IdentidadWindows cuenta)"));
         rolDev = rolDev.Substring(0, rolDev.IndexOf("\n    }") + 6);
-        Check("L7 Rol: #if DEBUG ... #else return null", true,
+        Check("L7 Resolver: #if DEBUG ... #else return null", true,
               rolDev.Contains("#if DEBUG") && rolDev.Contains("#else\n        return null;\n#endif"));
+        Check("L7 Resolver: la cuenta solo sale si la whitelist dio rol", true,
+              rolDev.Contains("cuenta = null;") && rolDev.Contains("if (rol != null) cuenta = id;"));
         Check("L7 Rol: interruptor primero, despues entorno, despues la whitelist", true,
               rolDev.IndexOf("Habilitado(Config(ClaveHabilitar))") > 0 &&
               rolDev.IndexOf("Habilitado(Config(ClaveHabilitar))") < rolDev.IndexOf("Evaluar(true, true, local, Proceso.Value)") &&
@@ -643,6 +649,68 @@ public static class AccesoAdminHttpSmoke
         activo = rolDev;
         Check("L7 sin host/URL/query/cookie/header en la regla", false,
               System.Text.RegularExpressions.Regex.IsMatch(activo, @"Url|Host|QueryString|Cookies|Headers|Form|Params|ServerVariables"));
+
+        // ---- F) quien firma la escritura (AccesoAdmin.IdentidadEscritura) ----
+        // Antes: crear/modificar en IIS Express pasaban ExigirAdm con el rol
+        // del atajo, pero firmaban con IdentidadWindows.DesdeContexto
+        // (anonima) -> 403 SinUsuario. La firma ahora es la identidad Windows
+        // real, o la cuenta que el atajo ya valido; nunca otra cosa.
+        var anon = IdentidadWindows.Desde(null, false);
+        var realOtro = IdentidadWindows.Desde(@"SORIANA\t_otro", true);
+        var cuentaDev = AccesoDesarrolloLocal.IdentidadPara(anon, YO);
+        Func<IdentidadWindows, string> txt = delegate (IdentidadWindows i) { return i == null ? "(nadie)" : i.Original; };
+        Check("F1 identidad Windows real: firma ella aunque haya cuenta de desarrollo", @"SORIANA\t_otro",
+              txt(AccesoAdmin.IdentidadEscrituraPara(realOtro, cuentaDev)));
+        Check("F2 sin Windows auth + cuenta del atajo: firma la cuenta del atajo", YO,
+              txt(AccesoAdmin.IdentidadEscrituraPara(anon, cuentaDev)));
+        Check("F3 sin Windows auth y sin atajo: nadie (403 SinUsuario)", "(nadie)",
+              txt(AccesoAdmin.IdentidadEscrituraPara(anon, null)));
+        Check("F3 null / cuenta no autenticada: nadie", "(nadie)|(nadie)",
+              txt(AccesoAdmin.IdentidadEscrituraPara(null, null)) + "|" + txt(AccesoAdmin.IdentidadEscrituraPara(anon, anon)));
+        // Con HttpContext: aqui el atajo no aplica (ni iisexpress ni local),
+        // asi que la firma es exactamente la identidad del request.
+        var ctxF = Contexto("admin_iniciativas_gestion.ashx", null, YO, new StringWriter());
+        Check("F4 request con Windows auth: firma su cuenta", YO, txt(AccesoAdmin.IdentidadEscritura(ctxF)));
+        ctxF = Contexto("admin_iniciativas_gestion.ashx", "ADMIN_DEV_IDENTIDAD=SORIANA%5Ct_andresvr", "", new StringWriter());
+        Check("F4 anonimo (con la cuenta en la query): nadie y sin cuenta del atajo", "(nadie)|(nadie)",
+              txt(AccesoAdmin.IdentidadEscritura(ctxF)) + "|" + txt(AccesoDesarrolloLocal.Identidad(ctxF)));
+        Check("F4 Identidad(null): nadie", "(nadie)", txt(AccesoDesarrolloLocal.Identidad(null)));
+        HttpContext.Current = null;
+        // El POST real de modificar con ADM de la base (produccion): pasa
+        // ExigirAdm y la firma, y corta en el formato (422), sin SQL.
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "ADM");
+        string metodoF;
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", YO,
+                            new[] { new[] { "accion", "modificar" }, new[] { "folio", "" } }, out estado, out metodoF);
+        Check("F5 POST modificar ADM con Windows auth: pasa rol y firma (422 de formato, sin SinUsuario)", "422|True|False",
+              estado + "|" + cuerpo.Contains("ValidacionFallida") + "|" + cuerpo.Contains("SinUsuario"));
+        // Anonimo y MOD siguen cortando en ExigirAdm, antes de la firma.
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", "",
+                            new[] { new[] { "accion", "crear" } }, out estado, out metodoF);
+        Check("F6 POST crear anonimo (sin atajo): 403 AccesoDenegado", "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", YO,
+                            new[] { new[] { "accion", "crear" } }, out estado, out metodoF);
+        Check("F6 POST crear MOD: 403 RolInsuficiente (sin cambios)", "403|True", estado + "|" + cuerpo.Contains("RolInsuficiente"));
+        AccesoAdmin.FuenteRoles = fuente;
+        // Fuente: los handlers que escriben firman con IdentidadEscritura, y
+        // gestion lo resuelve antes de leer el catalogo.
+        var gestion = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_gestion.ashx")).Replace("\r\n", "\n");
+        var solicitudes = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx")).Replace("\r\n", "\n");
+        Check("F7 gestion: firma con AccesoAdmin.IdentidadEscritura, no con IdentidadWindows.DesdeContexto", "True|False|True",
+              gestion.Contains("firma = AccesoAdmin.IdentidadEscritura(context);") + "|" + gestion.Contains("IdentidadWindows.DesdeContexto") + "|" +
+              gestion.Contains("servicio.Guardar(planCrear, planMod, firma.Original)"));
+        Check("F7 gestion: ExigirAdm, luego firma, luego el catalogo", true,
+              gestion.IndexOf("AccesoAdmin.ExigirAdm(") < gestion.IndexOf("AccesoAdmin.IdentidadEscritura(context)") &&
+              gestion.IndexOf("AccesoAdmin.IdentidadEscritura(context)") < gestion.IndexOf("new GestionIniciativaAdminService()"));
+        Check("F7 solicitudes: firma con AccesoAdmin.IdentidadEscritura", "True|False",
+              solicitudes.Contains("AccesoAdmin.IdentidadEscritura(context)") + "|" + solicitudes.Contains("IdentidadWindows.DesdeContexto"));
+        var fuenteAccF = File.ReadAllText(Path.Combine("App_Code", "AccesoAdmin.cs")).Replace("\r\n", "\n");
+        var firmaFn = fuenteAccF.Substring(fuenteAccF.IndexOf("public static IdentidadWindows IdentidadEscrituraPara("));
+        firmaFn = firmaFn.Substring(0, firmaFn.IndexOf("\n    }") + 6);
+        Check("F8 la real va primero; la de desarrollo solo sin real", true,
+              firmaFn.IndexOf("if (Firma(real)) return real;") > 0 &&
+              firmaFn.IndexOf("if (Firma(real)) return real;") < firmaFn.IndexOf("Firma(desarrollo)"));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));
         return fallos == 0 ? 0 : 1;

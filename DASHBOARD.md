@@ -217,14 +217,16 @@ Encenderlo en local:
 
 Para apagarlo, quitar la clave (o cualquier valor distinto de `true`) y reiniciar IIS Express.
 
-Alcance: solo el rol de Admin del request. No cambia la cadena de conexión ni los permisos SQL (la web sigue con su cuenta de servicio), no salta validaciones de los handlers ni modifica `dbo.UsuariosAdmin` ni el rol de otros usuarios. Con MOD, lo exclusivo de ADM (crear/modificar directo, correos, alta de categoría, dueños) sigue en 403 `RolInsuficiente`. Escribir a la base sigue exigiendo identidad Windows real (403 `SinUsuario`).
+Alcance: solo el rol de Admin del request. No cambia la cadena de conexión ni los permisos SQL (la web sigue con su cuenta de servicio), no salta validaciones de los handlers ni modifica `dbo.UsuariosAdmin` ni el rol de otros usuarios. Con MOD, lo exclusivo de ADM (crear/modificar directo, correos, alta de categoría, dueños) sigue en 403 `RolInsuficiente`. Crear, modificar y enviar solicitudes los firma (`@Usuario`, bitácora) `AccesoAdmin.IdentidadEscritura`: la identidad Windows real si IIS la trae; si no, y solo con el atajo activo, la cuenta de `ADMIN_DEV_IDENTIDAD` que ya pasó por la whitelist. Nunca algo que mande el navegador. Sin ninguna de las dos: 403 `SinUsuario`.
+
+> En la VM, IIS Express (`dev-local.cmd`) es la instancia de desarrollo y usa la cadena de conexión de **su** `Web.config`: si apunta a la base real, crear y modificar escriben en la base real, firmados con esa cuenta. El sitio IIS de la VM (`w3wp.exe`) sigue la regla normal.
 
 Comprobar que en la VM no está activo:
 
 - En el `Web.config` de la VM: no debe existir `AdminDevOverride` y `compilation debug` debe ser `"false"`. Aun si alguien copiara ambas cosas, la condición 4 (`w3wp.exe`) lo corta.
 - Abrir `handlers/admin_sesion.ashx` en la VM: la respuesta **nunca** debe traer `"desarrollo_local"`. Una cuenta sin fila ADM/MOD en `dbo.UsuariosAdmin` debe ver `{"autorizado":false}`.
 
-Pruebas: `tools/tests/AccesoAdminHttpSmoke.cs` (bloques L y W; compilar en Release y con `/define:DEBUG`) y `tools/tests/AccesoDesarrolloLocalIisExpress.ps1` (IIS Express real: con la clave apagada corre I0; con `true`, I1–I4).
+Pruebas: `tools/tests/AccesoAdminHttpSmoke.cs` (bloques L y W; compilar en Release y con `/define:DEBUG`) y `tools/tests/AccesoDesarrolloLocalIisExpress.ps1` (IIS Express real: con la clave apagada corre I0; con `true`, I1–I4) y `tools/tests/AdminEscrituraLocalIisExpress.ps1` (POST real de crear / modificar / enviar solicitud en un sitio temporal con base inalcanzable: nunca escribe; no usa el `Web.config` local).
 
 **No copies `requirements.txt` ni `config.json` al sitio IIS.** Esos archivos pertenecen al ETL. La conexión del tablero se configura mediante `Web.config`.
 

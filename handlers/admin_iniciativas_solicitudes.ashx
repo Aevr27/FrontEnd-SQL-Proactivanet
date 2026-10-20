@@ -67,9 +67,11 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             }
             else return Error(context, 400, "Acci\u00f3n desconocida.", "AccionDesconocida");
 
-            // Lo que escribe necesita la cuenta Windows (atribucion); leer la
-            // cola solo necesita el permiso de arriba.
-            var id = IdentidadWindows.DesdeContexto(context);
+            // Lo que escribe necesita quien firme (atribucion): la cuenta
+            // Windows o, solo en desarrollo local, la del atajo
+            // (AccesoAdmin.IdentidadEscritura). Leer la cola solo necesita el
+            // permiso de arriba.
+            var id = AccesoAdmin.IdentidadEscritura(context) ?? IdentidadWindows.Desde(null, false);
             if ((accion == "enviar" || accion == "rechazar" || accion == "aplicar") && (!id.Autenticada || string.IsNullOrEmpty(id.Original)))
                 return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
             var rol = AccesoAdmin.Rol(context);

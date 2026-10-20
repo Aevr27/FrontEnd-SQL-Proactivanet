@@ -165,6 +165,30 @@ public static class AccesoAdmin
         return rol;
     }
 
+    // Quien firma lo que se escribe (@Usuario de adm.usp_*: bitacora y
+    // atribucion), o null = nadie (el handler responde 403 SinUsuario).
+    // La identidad Windows real manda siempre; solo sin ella, y solo si el
+    // atajo de desarrollo local aplica, firma la cuenta que el atajo ya
+    // valido (AccesoDesarrolloLocal.Identidad). En la VM / produccion el
+    // atajo no existe y esto es exactamente la identidad Windows del request.
+    public static IdentidadWindows IdentidadEscritura(HttpContext context)
+    {
+        return IdentidadEscrituraPara(IdentidadWindows.DesdeContexto(context),
+            AccesoDesarrolloLocal.Identidad(context));   // SOLO DESARROLLO LOCAL
+    }
+
+    // La regla de arriba sin HttpContext, para probarla.
+    public static IdentidadWindows IdentidadEscrituraPara(IdentidadWindows real, IdentidadWindows desarrollo)
+    {
+        if (Firma(real)) return real;
+        return Firma(desarrollo) ? desarrollo : null;
+    }
+
+    private static bool Firma(IdentidadWindows id)
+    {
+        return id != null && id.Autenticada && !string.IsNullOrEmpty(id.Original);
+    }
+
     // Para lo que es solo de ADM: Exigir (rol ADM o MOD, o el atajo de
     // desarrollo local) y ademas rol ADM. true si sigue;
     // si no, ya respondio 403 y hay que salir. `mensaje` cambia solo el

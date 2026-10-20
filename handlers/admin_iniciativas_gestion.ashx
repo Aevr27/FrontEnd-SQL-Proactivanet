@@ -45,7 +45,8 @@
 //   400  accion desconocida;  405 si no es POST;  413 cuerpo demasiado grande.
 //   403  AccesoAdmin.ExigirAdm: VIEWER, anonimo, consulta de rol fallida
 //        (AccesoDenegado) y MOD (RolInsuficiente),
-//        antes de leer nada.
+//        antes de leer nada. SinUsuario: con la persistencia activa y nadie
+//        que firme (AccesoAdmin.IdentidadEscritura), tambien antes de leer.
 //
 // PersistenciaGestionAdmin.Habilitada = const true (2026-10-14): la rama 4
 // (EscritorGestionAdminSql -> adm.usp_GestionAdmin_*, de sql/18) escribe:
@@ -74,6 +75,17 @@ public class AdminIniciativasGestion : IHttpHandler
             var req = context.Request;
             if (!string.Equals(req.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
                 return Error(context, 405, "Usa POST.", "MetodoNoPermitido");
+
+            // Quien firma la escritura, antes de leer nada: la identidad
+            // Windows o, solo en desarrollo local, la cuenta del atajo
+            // (AccesoAdmin.IdentidadEscritura). Sin firma no se guarda.
+            IdentidadWindows firma = null;
+            if (PersistenciaGestionAdmin.Activa())
+            {
+                firma = AccesoAdmin.IdentidadEscritura(context);
+                if (firma == null)
+                    return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
+            }
 
             string accion;
             PeticionCrearAdmin crear = null;
@@ -144,13 +156,10 @@ public class AdminIniciativasGestion : IHttpHandler
             }
             if (PersistenciaGestionAdmin.Activa())
             {
-                var id = IdentidadWindows.DesdeContexto(context);
-                if (!id.Autenticada || string.IsNullOrEmpty(id.Original))
-                    return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
                 string codigo;
                 try
                 {
-                    codigo = servicio.Guardar(planCrear, planMod, id.Original);
+                    codigo = servicio.Guardar(planCrear, planMod, firma.Original);
                 }
                 catch (ErrorEscrituraGestionAdmin ex)
                 {

@@ -46,8 +46,10 @@
 // Alcance: solo el ROL de Admin del request (ADM o MOD) en esta maquina. No
 // toca la cadena de conexion ni los permisos SQL (la web sigue con su cuenta
 // de servicio), no salta validaciones de los handlers, no escribe en
-// dbo.UsuariosAdmin ni cambia el rol de nadie mas. Sin identidad Windows
-// real, lo que escribe a la base responde 403 SinUsuario igual que antes.
+// dbo.UsuariosAdmin ni cambia el rol de nadie mas. Lo que escribe a la base
+// lo firma AccesoAdmin.IdentidadEscritura: la identidad Windows real si la
+// hay; si no, la cuenta de desarrollo que el atajo ya valido (Identidad()),
+// nunca algo que mande el navegador. Sin ninguna de las dos: 403 SinUsuario.
 //
 // PARA QUITARLO: borrar este archivo, las llamadas a AccesoDesarrolloLocal
 // en AccesoAdmin.cs y admin_sesion.ashx, y los argumentos de dev-local.cmd.
@@ -109,6 +111,25 @@ public static class AccesoDesarrolloLocal
     // DEBUG siempre es null.
     public static string Rol(HttpContext ctx)
     {
+        IdentidadWindows cuenta;
+        return Resolver(ctx, out cuenta);
+    }
+
+    // La cuenta a la que el atajo dio el rol (la MISMA que paso por la
+    // whitelist en Resolver), para firmar lo que se escribe cuando IIS
+    // Express no trae identidad Windows; null si el atajo no aplica. En un
+    // build sin DEBUG siempre es null.
+    public static IdentidadWindows Identidad(HttpContext ctx)
+    {
+        IdentidadWindows cuenta;
+        return Resolver(ctx, out cuenta) == null ? null : cuenta;
+    }
+
+    // Rol y cuenta salen de una sola evaluacion: no hay forma de obtener la
+    // cuenta sin haber pasado interruptor, entorno y whitelist.
+    private static string Resolver(HttpContext ctx, out IdentidadWindows cuenta)
+    {
+        cuenta = null;
 #if DEBUG
         if (ctx == null) return null;
         if (!Habilitado(Config(ClaveHabilitar))) return null;
@@ -116,9 +137,10 @@ public static class AccesoDesarrolloLocal
         try { local = ctx.Request.IsLocal; }
         catch { local = false; }
         if (!Evaluar(true, true, local, Proceso.Value)) return null;
-        return RolPara(true,
-            IdentidadPara(IdentidadWindows.DesdeContexto(ctx), Entorno(VariableIdentidad)),
-            AccesoAdmin.Configurada(), Entorno(VariableRol));
+        var id = IdentidadPara(IdentidadWindows.DesdeContexto(ctx), Entorno(VariableIdentidad));
+        var rol = RolPara(true, id, AccesoAdmin.Configurada(), Entorno(VariableRol));
+        if (rol != null) cuenta = id;
+        return rol;
 #else
         return null;
 #endif
