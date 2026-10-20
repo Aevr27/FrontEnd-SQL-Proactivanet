@@ -2,8 +2,9 @@
 // arma, en el momento de cada llamada, lo que ValidadorGestionAdmin
 // necesita. Lectura; la escritura (Guardar) solo con la persistencia activa.
 //
-//   Crear(p)       catalogo (CatPrefijoProblem + rutas de dbo.Categorias con
-//                  sus duenos, igual que IniciativaService), capacidad y los
+//   Crear(p)       catalogo (CatPrefijoProblem + rutas de dbo.Categorias:
+//                  TODAS las activas para ADM aunque les falten duenos,
+//                  CatalogoAdm), capacidad y los
 //                  Estado / TipoIniciativa / TipoAgrupado que ya existen.
 //   Modificar(p)   la iniciativa actual de la MISMA lectura del registro
 //                  (ExperienciaQueries.RegistroIniciativas), la capacidad,
@@ -28,8 +29,7 @@ public sealed class GestionIniciativaAdminService
         using (var cn = Abrir())
         {
             var tipos = DashboardCatalogos.Llaves(DashboardCatalogos.PrefijosIniciativa(cn));
-            var rutas = CatalogoRutasIniciativa.Cargar(cn, DirectorioOrganizacional.Cargar(cn));
-            var catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
+            var catalogo = CatalogoAdm(cn, tipos);
             var capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
             var valores = ExperienciaQueries.LeerEstadosProblem(cn).Valores;
             return new ValidadorGestionAdmin().Crear(p, catalogo, capacidad, TiposSolicitud.ValorProblem(tipos), valores);
@@ -56,8 +56,7 @@ public sealed class GestionIniciativaAdminService
             // Estado/Subestado que ya existen: las mismas lecturas que Crear
             // y que el registro.
             var tipos = DashboardCatalogos.Llaves(DashboardCatalogos.PrefijosIniciativa(cn));
-            var rutas = CatalogoRutasIniciativa.Cargar(cn, DirectorioOrganizacional.Cargar(cn));
-            var catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
+            var catalogo = CatalogoAdm(cn, tipos);
             var estados = ExperienciaQueries.LeerEstadosProblem(cn).Valores;
             return new ValidadorGestionAdmin().Modificar(p, actual, ExperienciaQueries.CompromisosCapacidad(cn), catalogo, estados);
         }
@@ -77,6 +76,20 @@ public sealed class GestionIniciativaAdminService
             escritor.Modificar(cn, null, modificar, usuario);
             return modificar.Codigo;
         }
+    }
+
+    // El catalogo de ADM: PO / SO de las rutas con sus tres dueños vigentes
+    // (los mismos que Nueva solicitud) y, como categorias, TODAS las rutas
+    // activas y unicas aunque les falten dueños (ElegiblesAdm). Es lo mismo
+    // que ADM ve en admin_iniciativas_catalogos.ashx (rutas_adm).
+    private static CatalogoSolicitud CatalogoAdm(SqlConnection cn, List<object> tipos)
+    {
+        var dir = DirectorioOrganizacional.Cargar(cn);
+        var activas = CatalogoRutasIniciativa.LeerRutasActivas(cn);
+        var rutas = CatalogoRutasIniciativa.Asignaciones(activas, dir);
+        var adm = CatalogoRutasIniciativa.ElegiblesAdm(activas, dir);
+        return CatalogoSolicitud.ParaAdm(tipos, (System.Collections.IEnumerable)rutas["rutas"],
+            (System.Collections.IEnumerable)adm["rutas_adm"]);
     }
 
     private static SqlConnection Abrir()

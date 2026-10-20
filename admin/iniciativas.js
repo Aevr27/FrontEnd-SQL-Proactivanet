@@ -237,12 +237,17 @@ window.Iniciativas = (function () {
     // Descripcion (lo que se ve). tipoProblem: el prefijo que es Problem
     // (exige RCA), tal como lo marca el servidor (tipo_problem), o ''. Aqui
     // no se escribe.
-    constructor(tipos, asignaciones, omitidas, tipoProblem, nombres) {
+    // rutasAdm: SOLO con rol ADM (rutas_adm del handler): TODAS las rutas
+    // activas, cada una { categoria, director, po, so } con '' en el dueño
+    // que falte. null si el servidor no las mando (MOD): Crear / Modificar
+    // de ADM las usan para elegir categoria; la cascada, nunca.
+    constructor(tipos, asignaciones, omitidas, tipoProblem, nombres, rutasAdm) {
       this.tipos = tipos;
       this.asignaciones = asignaciones;
       this.omitidas = omitidas;
       this.tipoProblem = tipoProblem || '';
       this.nombres = nombres || {};
+      this.rutasAdm = Array.isArray(rutasAdm) ? rutasAdm : null;
     }
 
     // El JSON del handler (?rutas=1) -> catalogo. La cascada va sobre
@@ -269,7 +274,28 @@ window.Iniciativas = (function () {
       // El orden de los tipos es el del servidor (Problem primero si esta).
       var problem = typeof json.tipo_problem === 'string' && vistos[json.tipo_problem] ? json.tipo_problem : '';
       var omitidas = (Number(json.rutas_sin_duenos) || 0) + (Number(json.rutas_duenos_no_vigentes) || 0);
-      return new CatalogoIniciativas(tipos, filas, omitidas, problem, nombres);
+      return new CatalogoIniciativas(tipos, filas, omitidas, problem, nombres, CatalogoIniciativas.rutasAdmDe(json));
+    }
+
+    // rutas_adm -> [{ categoria, director, po, so }] o null si no vino. Solo
+    // se exige la categoria (texto no vacio): un dueño que falta queda ''.
+    // Sin repetir (misma llave que el servidor: sin mayusculas ni espacios).
+    static rutasAdmDe(json) {
+      if (!json || !Array.isArray(json.rutas_adm)) return null;
+      var vistas = {}, salida = [];
+      json.rutas_adm.forEach(function (f) {
+        var cat = f && typeof f.categoria === 'string' ? f.categoria.trim() : '';
+        var k = cat.toLowerCase();
+        if (!cat || vistas[k]) return;
+        vistas[k] = true;
+        salida.push({
+          categoria: cat,
+          director: typeof f.director === 'string' ? f.director : '',
+          po: typeof f.po === 'string' ? f.po : '',
+          so: typeof f.so === 'string' ? f.so : ''
+        });
+      });
+      return salida;
     }
 
     tieneTipo(valor) { return this.tipos.indexOf(valor) >= 0; }
@@ -1218,9 +1244,12 @@ window.Iniciativas = (function () {
           // El alta de ADM usa el mismo catalogo aunque no haya categorias:
           // la categoria es opcional ahi.
           if (self.crearAdmin) self.crearAdmin.fijarCatalogo(catalogo);
-          // "Modificar" agrega categorias de este mismo catalogo de rutas.
+          // "Modificar" agrega categorias de este mismo catalogo: las de ADM
+          // (todas las activas) si vinieron; "Solicitar cambios", las de la
+          // cascada, como siempre.
           if (self.registro && self.registro.fijarRutasCatalogo && window.IniciativaAdmin) {
-            self.registro.fijarRutasCatalogo(window.IniciativaAdmin.BorradorAdmin.rutasDe(catalogo));
+            var BA = window.IniciativaAdmin.BorradorAdmin;
+            self.registro.fijarRutasCatalogo(BA.rutasDe(catalogo), undefined, catalogo.rutasAdm ? BA.rutasAdmDe(catalogo) : null);
           }
 
           if (catalogo.omitidas > 0) {

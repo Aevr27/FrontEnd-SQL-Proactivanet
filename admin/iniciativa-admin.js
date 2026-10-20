@@ -60,6 +60,9 @@
      rechaza con las parecidas (Selector.coincidencias: parte del nombre o
      del codigo), sin elegir ninguna. Es el mismo en Crear, Modificar,
      Solicitar cambios y Seguimiento (registro-iniciativas.js).
+     EXCEPCION: la categoria de Crear y Modificar (ADM) usa el desplegable
+     del filtro Grupos de SLA (assets/js/desplegable.js sobre un <select>
+     real: Selector.desplegable + Selector.montar), con su buscador.
 
    FECHA DE ANALISIS POR CATEGORIA (sql/18_gestion_admin_persistencia.sql)
    ---------------------------------------------------------------------
@@ -281,6 +284,28 @@ window.IniciativaAdmin = (function () {
       return '<select id="' + id + '"' + extra + '><option value="">— Elige —</option>' + ops.map(function (o) {
         return '<option value="' + Escape.attr(o.valor) + '"' + (o.valor === valor ? ' selected' : '') + '>' + Escape.html(o.texto) + '</option>';
       }).join('') + '</select>';
+    },
+
+    // Siempre un <select> real (sin datalist, sin umbral), con la ruta
+    // completa como texto: es el que Selector.montar viste con el
+    // desplegable de SLA. Sin assets/js/desplegable.js queda el <select>
+    // nativo, que sigue funcionando igual.
+    desplegable: function (id, opciones, valor, extra) {
+      var ops = (opciones || []).map(function (o) { return typeof o === 'string' ? { valor: o, texto: o } : o; });
+      return '<select id="' + id + '" class="ini-dd-categoria"' + (extra || '') + '><option value="">— Elige —</option>' +
+        ops.map(function (o) {
+          return '<option value="' + Escape.attr(o.valor) + '"' + (o.valor === valor ? ' selected' : '') + '>' + Escape.html(o.texto) + '</option>';
+        }).join('') + '</select>';
+    },
+
+    // Monta el desplegable de SLA (window.Desplegable) sobre los <select>
+    // de Selector.desplegable dentro de `raiz`. Idempotente; sin el modulo
+    // no hace nada.
+    montar: function (raiz) {
+      if (!raiz || !raiz.querySelectorAll || !window.Desplegable || !window.Desplegable.montar) return false;
+      if (!raiz.querySelectorAll('select.ini-dd-categoria').length) return false;
+      window.Desplegable.montar(raiz);
+      return true;
     },
 
     // Lo escrito -> la opcion REAL que coincide (sin mayusculas ni espacios
@@ -716,7 +741,9 @@ window.IniciativaAdmin = (function () {
       // Clasificacion y Agrupacion: del Tipo (elegirTipo). Estado: declarado.
       // La fecha de entrega del analisis empieza en hoy y ADM la puede cambiar.
       this.declarados = { tipo_iniciativa: '', tipo_agrupado: '', estado: '', f_entrega_analisis: FECHAS_GESTION.hoy() };
-      this.categorias = new CategoriasProblema([], BorradorAdmin.rutasDe(catalogo));
+      // ADM elige entre TODAS las rutas activas (rutas_adm) aunque les
+      // falten dueños; sin ellas, las de la cascada.
+      this.categorias = new CategoriasProblema([], BorradorAdmin.rutasAdmDe(catalogo));
       this.rca = null;   // nombre del archivo elegido; no se sube
       // PO / SO: lo escrito en cada caja y la opcion real que le toca
       // ('' si no coincide con ninguna). Independientes entre si.
@@ -756,6 +783,34 @@ window.IniciativaAdmin = (function () {
       return salida;
     }
 
+    // Las rutas que ADM puede elegir: rutasAdm (todas las activas, con o
+    // sin dueños) si el servidor las mando; si no, las de la cascada.
+    static rutasAdmDe(catalogo) {
+      if (!catalogo || !Array.isArray(catalogo.rutasAdm)) return BorradorAdmin.rutasDe(catalogo);
+      var vistas = {}, salida = [];
+      catalogo.rutasAdm.forEach(function (f) {
+        if (f.categoria && !vistas[f.categoria]) { vistas[f.categoria] = true; salida.push(f.categoria); }
+      });
+      return salida;
+    }
+
+    // Los dueños que le FALTAN a una ruta en el catalogo de dueños
+    // (['Director', 'Product Owner', 'Service Owner'] o parte), [] si los
+    // tiene o si no es una ruta conocida. Solo informa: no se inventan.
+    static duenosFaltantes(catalogo, ruta) {
+      var k = llaveRuta(ruta), fila = null;
+      (catalogo && Array.isArray(catalogo.rutasAdm) ? catalogo.rutasAdm : []).some(function (f) {
+        if (llaveRuta(f.categoria) === k) { fila = f; return true; }
+        return false;
+      });
+      if (!fila) return [];
+      var faltan = [];
+      if (!fila.director) faltan.push('Director');
+      if (!fila.po) faltan.push('Product Owner');
+      if (!fila.so) faltan.push('Service Owner');
+      return faltan;
+    }
+
     // Clasificacion y Agrupacion salen del Tipo (TiposPorPrefijo).
     elegirTipo(valor) {
       this.tipo = valor && this.catalogo.tieneTipo(valor) ? valor : '';
@@ -782,7 +837,10 @@ window.IniciativaAdmin = (function () {
       var rutas = {};
       this.categorias.activas().forEach(function (f) { rutas[llaveRuta(f.categoria)] = true; });
       var vistos = {};
-      (this.catalogo.asignaciones || []).forEach(function (f) {
+      // Con rutasAdm, el Director resuelto de cada ruta (aunque le falte PO
+      // o SO); sin ellas, el de la cascada.
+      var filas = Array.isArray(this.catalogo.rutasAdm) ? this.catalogo.rutasAdm : (this.catalogo.asignaciones || []);
+      filas.forEach(function (f) {
         if (rutas[llaveRuta(f.categoria)] && f.director) vistos[f.director] = true;
       });
       var lista = Object.keys(vistos);
@@ -1153,7 +1211,7 @@ window.IniciativaAdmin = (function () {
     var rutas = ed.categorias.rutas;
     var agregar = rutas.length
       ? '<div class="ini-cat-agregar"><label for="regEdCatBuscar">Agregar categoría</label>' +
-          Selector.html('regEdCatBuscar', rutas, '') +
+          Selector.desplegable('regEdCatBuscar', rutas, '') +
           ' <button type="button" class="btn linea chico" data-accion="edicion-cat-agregar">Agregar</button></div>'
       : htmlSinCatalogo(ed.rutasEstado);
     return htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis,
@@ -1479,10 +1537,13 @@ window.IniciativaAdmin = (function () {
       if (texto === undefined) texto = this.$('admCatBuscar').value;
       var r = this.borrador.agregarCategoria(texto);
       var msg = this.$('admCatMsg');
-      msg.textContent = r.ok ? '' : r.mensaje;
+      var faltan = r.ok ? BorradorAdmin.duenosFaltantes(this.borrador.catalogo, r.ruta) : [];
+      msg.textContent = !r.ok ? r.mensaje : faltan.length
+        ? r.ruta + ': sin ' + faltan.join(', ') + ' en el catálogo de dueños. Se puede guardar; no se inventan.' : '';
       msg.className = 'ini-motivo' + (r.ok ? '' : ' mal');
       if (r.ok) {
         this.$('admCatBuscar').value = '';
+        if (window.Desplegable) window.Desplegable.repintar();
         this.consultarVolumetria(r.ruta);
         this.pintarCategorias();
         this.pintarFaltantes();
@@ -1509,7 +1570,7 @@ window.IniciativaAdmin = (function () {
       if (!b) {
         Catalogos.llenar(tipo, [], '—');
         tipo.disabled = true;
-        selector.innerHTML = '<input type="text" id="admCatBuscar" disabled>';
+        selector.innerHTML = '<select id="admCatBuscar" disabled><option value="">—</option></select>';
         this.$('admCatAgregar').disabled = true;
         this.$('admDirector').textContent = '—';
         this.$('admFaltantes').innerHTML = '';
@@ -1525,8 +1586,9 @@ window.IniciativaAdmin = (function () {
       tipo.disabled = cat.tipos.length === 0;
       // Solo se repinta si cambian las opciones: no borra lo escrito.
       if (selector.getAttribute('data-n') !== String(b.categorias.rutas.length)) {
-        selector.innerHTML = Selector.html('admCatBuscar', b.categorias.rutas, '');
+        selector.innerHTML = Selector.desplegable('admCatBuscar', b.categorias.rutas, '');
         selector.setAttribute('data-n', String(b.categorias.rutas.length));
+        Selector.montar(selector);
       }
       this.$('admCatAgregar').disabled = b.categorias.rutas.length === 0;
       this.$('admRcaNota').textContent = b.esProblem()

@@ -228,6 +228,11 @@ public sealed class CatalogoSolicitud
 
     private readonly HashSet<string> _tipos = new HashSet<string>(StringComparer.Ordinal);
     private readonly List<Asignacion> _asignaciones = new List<Asignacion>();
+    // SOLO ADM (ParaAdm): rutas activas aunque les falten dueños
+    // (CatalogoRutasIniciativa.ElegiblesAdm), con lo que se resolvio o null.
+    // Solo amplian TieneCategoria / RutaAdm: PO, SO y la cascada siguen
+    // saliendo de _asignaciones, asi que Nueva solicitud no cambia.
+    private readonly Dictionary<string, Asignacion> _rutasAdm = new Dictionary<string, Asignacion>(StringComparer.Ordinal);
 
     public CatalogoSolicitud(IEnumerable<object> tipos, IEnumerable<Asignacion> asignaciones)
     {
@@ -255,12 +260,44 @@ public sealed class CatalogoSolicitud
         return new CatalogoSolicitud(tipos, filas);
     }
 
+    // El de la gestion directa de ADM: lo mismo que Desde MAS las rutas de
+    // `listaAdm` ({categoria, director, po, so}, dueños null si faltan).
+    public static CatalogoSolicitud ParaAdm(IEnumerable<object> tipos, System.Collections.IEnumerable lista,
+                                            System.Collections.IEnumerable listaAdm)
+    {
+        var c = Desde(tipos, lista);
+        if (listaAdm != null)
+        {
+            foreach (Dictionary<string, object> f in listaAdm)
+            {
+                var cat = f["categoria"] as string;
+                if (string.IsNullOrEmpty(cat) || c._rutasAdm.ContainsKey(cat)) continue;
+                c._rutasAdm[cat] = new Asignacion
+                {
+                    Po = f["po"] as string, So = f["so"] as string, Categoria = cat, Director = f["director"] as string
+                };
+            }
+        }
+        return c;
+    }
+
     public bool TieneTipo(string tipo) { return tipo != null && _tipos.Contains(tipo); }
 
     // Cada valor por separado: existe en ALGUNA fila vigente.
     public bool TienePo(string po) { return _asignaciones.Exists(a => a.Po == po); }
     public bool TieneSo(string so) { return _asignaciones.Exists(a => a.So == so); }
-    public bool TieneCategoria(string c) { return _asignaciones.Exists(a => a.Categoria == c); }
+    public bool TieneCategoria(string c)
+    {
+        return _asignaciones.Exists(a => a.Categoria == c) || (c != null && _rutasAdm.ContainsKey(c));
+    }
+
+    // La ruta ADM (con sus dueños tal como se resolvieron, null si faltan),
+    // o null si no es una ruta ADM.
+    public Asignacion RutaAdm(string c)
+    {
+        Asignacion a;
+        return c != null && _rutasAdm.TryGetValue(c, out a) ? a : null;
+    }
 
     // Las filas que cumplen lo elegido, con cada nivel OPCIONAL (null = sin
     // elegir), como la cascada en modo 'filtro'. La usa el alta directa de

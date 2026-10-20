@@ -843,6 +843,19 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .ini-cat-agregar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
 .ini-cat-agregar input[list], .ini-cat-agregar select { flex: 1; min-width: 220px; }
+/* Categoria de Crear / Modificar (ADM): el desplegable del filtro Grupos de
+   SLA (assets/css/desplegable.css), con el alto de esa barra. El <select>
+   real se queda escondido como alli (las reglas de select de arriba no lo
+   deben volver a mostrar). Las rutas largas se parten en el menu para que
+   se lea la jerarquia completa, no un "..." en el ultimo nivel. */
+#admCatSelector { flex: 1; min-width: 220px; display: flex; }
+.ini-cat-agregar .dd { display: flex; flex: 1; width: 100%; min-width: 220px; --dd-alto: 40px; }
+.ini-cat-agregar .dd > select {
+  width: 1px; min-width: 0; height: 1px; padding: 0; border: 0; flex: none;
+}
+.ini-cat-agregar .dd .dd-opcion span { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+/* Deshabilitado (guardando, sin catalogo): el boton tampoco abre. */
+.ini-cat-agregar .dd:has(> select:disabled) .dd-boton { opacity: .55; pointer-events: none; }
 .ini-cats-tabla td { vertical-align: middle; }
 /* Fecha de analisis por categoria en "Modificar": la del problema (ligadas)
    o la del borrador (nuevas). */

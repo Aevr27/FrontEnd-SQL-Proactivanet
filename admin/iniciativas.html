@@ -69,6 +69,8 @@
 <link rel="stylesheet" href="../dashboard.css">
 <link rel="stylesheet" href="../assets/css/kpi.css">
 <link rel="stylesheet" href="../assets/css/globo-ayuda.css">
+<!-- El desplegable del filtro Grupos de SLA: categoria de Crear / Modificar. -->
+<link rel="stylesheet" href="../assets/css/desplegable.css">
 <link rel="stylesheet" href="iniciativas.css">
 </head>
 <body class="ini-body">
@@ -698,8 +700,9 @@
           <h3 id="admCabImpacto">Categorías e impacto</h3>
         </div>
         <!-- Una o mas categorias (dbo.ProblemCategoria), cada una con su %.
-             Con mas de 20 opciones el selector es una caja con busqueda; solo
-             cuenta una categoria real del catalogo. La volumetria es
+             El selector es el desplegable del filtro Grupos de SLA (con
+             buscador) sobre TODAS las rutas activas, aunque les falten
+             dueños; solo cuenta una categoria real del catalogo. La volumetria es
              calculada (SLOT 0 de vw_TBSlotCAT) y de solo lectura. -->
         <div class="ini-campo">
           <label for="admCatBuscar">Agregar categoría</label>
@@ -756,6 +759,7 @@
 <script src="../assets/js/sesion-admin.js"></script>
 <script src="../assets/js/catalogos.js"></script>
 <script src="../assets/js/globo-ayuda.js"></script>
+<script src="../assets/js/desplegable.js"></script>
 <script src="cascada-organizacional.js"></script>
 <script src="iniciativa-admin.js"></script>
 <script src="categorias-duenos.js"></script>
