@@ -44,8 +44,11 @@
                           que quedan no coinciden en uno solo, no se adivina.
    Captura (lo escribe quien solicita)
      CAMPOS_COMUNES y DEFINICIONES_TIPO, abajo: 02 Informacion del problema
-     (Titulo, Descripcion, Observaciones) y 03 Impacto (Volumetria y el %
-     de disminucion de la Categoria elegida).
+     (Titulo, Descripcion, Observaciones) y 03 Impacto: el % de
+     disminucion de la Categoria elegida (captura) y, calculados de solo
+     lectura, la Volumetria de esa categoria (VolumetriaCliente de
+     admin/iniciativa-admin.js, la misma de Crear / Modificar: ultimos 30
+     dias) y los Tickets a reducir = round(volumetria x % / 100).
    Pendiente (no se pinta como campo, ver sql/diag_admin_nueva_solicitud.sql)
      El RCA se elige y se valida, pero todavia no se guarda ni hay numero
      de solicitud con que nombrarlo. Destino FUTURO confirmado (solo
@@ -105,7 +108,7 @@ window.Iniciativas = (function () {
   var ROTULOS = {
     tipo: 'Tipo de iniciativa', po: 'Product Owner', so: 'Service Owner', categoria: 'Categoría',
     titulo: 'Título', analisis: 'Descripción', descripcion: 'Descripción', observaciones: 'Observaciones',
-    volumetria: 'Volumetría', pct: '% Disminución', rca: 'RCA'
+    volumetria: 'Volumetría', pct: '% Disminución', tickets: 'Tickets a reducir', rca: 'RCA'
   };
 
   // ---------------------------------------------------------------------
@@ -115,7 +118,10 @@ window.Iniciativas = (function () {
   // Un campo:
   //   clave      identificador (id del control: 'campo-' + clave)
   //   etiqueta   texto del rotulo
-  //   control    'texto' | 'multilinea' | 'entero' | 'porcentaje'
+  //   control    'texto' | 'multilinea' | 'entero' | 'porcentaje' |
+  //              'calculado' (solo lectura: lo pone SolicitudNueva.calculado,
+  //              no se captura)
+  //   obligatorio  solo en 'calculado': sin valor cuenta como faltante
   //   seccion    solo en comunes: 'info' (02) o 'impacto' (03)
   //   destino    solo documentacion: la columna a la que iria, o null si
   //              no esta confirmada. Nada se guarda todavia.
@@ -144,13 +150,17 @@ window.Iniciativas = (function () {
     { clave: 'observaciones', etiqueta: 'Observaciones', control: 'multilinea', seccion: 'info',
       destino: 'dbo.Problem.Observaciones',
       ayuda: { texto: 'Información adicional sobre cuándo, dónde y en qué condiciones se presenta la afectación.' } },
-    // Cantidad capturada por quien solicita. NO es la Volumetria del ultimo
-    // mes (dbo.Problem.VolumenUltimoMes), que no se escribe aqui. Destino
-    // sin confirmar: la candidata es dbo.Problem.VolumetriaOriginal (INT).
-    { clave: 'volumetria', etiqueta: 'Volumetría', control: 'entero', seccion: 'impacto',
-      destino: null,
+    // La volumetria de la Categoria elegida: YA NO se captura. Es la misma
+    // de Crear / Modificar / Solicitar cambios: VolumetriaCliente
+    // (admin/iniciativa-admin.js) -> admin_iniciativas_volumetria.ashx ->
+    // App_Code/ExperienciaVolumetria.cs (Total general del SLOT 0 de
+    // vw_TBSlotCAT: los ultimos 30 dias). Viaja como `volumetria` al
+    // validador, que sigue exigiendo un entero >= 0 y no la guarda. Destino
+    // sin confirmar. NO es Tickets Reduce (dbo.ExpTicketsReduce).
+    { clave: 'volumetria', etiqueta: 'Volumetría de la categoría', control: 'calculado', seccion: 'impacto',
+      destino: null, obligatorio: true, requiereCategoria: true,
       ayuda: { texto: 'Cantidad de incidentes asociados al problema que justifican su análisis y seguimiento.',
-               nota: 'Es la cantidad que capturas tú; no es la volumetría del último mes.' } },
+               nota: 'Se calcula: tickets de la categoría elegida en los últimos 30 días. No se captura.' } },
     // Por categoria: dbo.ProblemCategoria.PctDisminucion es DECIMAL(9,4) y
     // guarda FRACCION (1.0000 = 100%). Se captura en % con hasta dos
     // decimales, que es esa misma precision. 0-100 es un tope de la
@@ -158,7 +168,13 @@ window.Iniciativas = (function () {
     // exigen porque no estan verificados.
     { clave: 'pct', etiqueta: '% Disminución de tickets vs categoría', control: 'porcentaje', seccion: 'impacto',
       destino: 'dbo.ProblemCategoria.PctDisminucion (fracción)',
-      reiniciaConCascada: true, requiereCategoria: true }
+      reiniciaConCascada: true, requiereCategoria: true },
+    // Vista previa: round(volumetria x % / 100), ticket entero
+    // (SolicitudNueva.ticketsReducir). No viaja ni se guarda: el validador
+    // no tiene ese campo y el Tickets Reduce del registro sigue saliendo de
+    // dbo.ExpTicketsReduce con su ventana movil.
+    { clave: 'tickets', etiqueta: 'Tickets a reducir', control: 'calculado', seccion: 'impacto',
+      destino: null, requiereCategoria: true }
   ];
 
   // Ayuda de los rotulos fijos del HTML (no son campos de captura).
@@ -187,6 +203,17 @@ window.Iniciativas = (function () {
   function fraccionDe(pct) {
     if (pct === '' || VALIDAR.porcentaje(pct)) return null;
     return Math.round(Number(pct) * 100) / 10000;
+  }
+
+  // Tickets a reducir: round(volumetria x pct / 100) a ticket entero, la
+  // mitad hacia arriba (el ROUND(..., 0) de SQL con positivos). En
+  // centesimas de % y con enteros, para no redondear flotantes:
+  // 1247 x 12.5% = 155.875 -> 156. null si falta o no vale alguno.
+  function ticketsDe(volumetria, pct) {
+    if (typeof volumetria !== 'number' || !isFinite(volumetria) || volumetria < 0 || volumetria % 1) return null;
+    pct = String(pct === null || pct === undefined ? '' : pct).trim();
+    if (pct === '' || VALIDAR.porcentaje(pct)) return null;
+    return Math.floor((volumetria * Math.round(Number(pct) * 100) + 5000) / 10000);
   }
 
   // Campos propios de cada Tipo de iniciativa, por nombre exacto del tipo:
@@ -266,6 +293,11 @@ window.Iniciativas = (function () {
       //     disponible (fraccion), determinable }
       // Solo orienta al usuario: al validar, el servidor la recalcula.
       this.capacidad = null;
+      // Volumetria de la Categoria elegida, como la da VolumetriaCliente:
+      //   { categoria, estado: 'cargando' | 'ok' | 'cero' | 'sin_datos' |
+      //     'ruta_invalida' | 'error', valor, mensaje }
+      // Atada a su categoria: la de otra (vieja o que llega tarde) no se usa.
+      this.volumen = null;
       this.rca = null;         // el File elegido (no se sube a ningun lado)
     }
 
@@ -283,6 +315,7 @@ window.Iniciativas = (function () {
       this.valoresTipo = {};
       this.limpiarDeCascada(this.comunes, this.valores);
       this.capacidad = null;
+      this.volumen = null;
       return this.tipo !== '';
     }
 
@@ -293,6 +326,7 @@ window.Iniciativas = (function () {
       this.limpiarDeCascada(this.camposTipo(), this.valoresTipo);
       this.limpiarDeCascada(this.comunes, this.valores);
       if (!this.capacidad || this.capacidad.categoria !== this.categoria()) this.capacidad = null;
+      if (!this.volumen || this.volumen.categoria !== this.categoria()) this.volumen = null;
       return aceptado;
     }
 
@@ -327,6 +361,77 @@ window.Iniciativas = (function () {
       return c && c.estado === 'lista' && c.determinable ? Math.round(c.disponible * 10000) / 100 : null;
     }
 
+    // ---- volumetria de la categoria ----
+    // Misma regla que la capacidad: la respuesta de una categoria que ya no
+    // es la elegida se descarta.
+    pedirVolumen() {
+      var cat = this.categoria();
+      this.volumen = cat ? { categoria: cat, estado: 'cargando', valor: null, mensaje: '' } : null;
+      return cat;
+    }
+
+    // e: lo que resolvio VolumetriaCliente.consultar ({ estado, valor, mensaje }).
+    fijarVolumen(cat, e) {
+      if (!cat || cat !== this.categoria()) return false;
+      this.volumen = {
+        categoria: cat,
+        estado: e && typeof e.estado === 'string' ? e.estado : 'error',
+        valor: e && typeof e.valor === 'number' ? e.valor : null,
+        mensaje: (e && e.mensaje) || ''
+      };
+      return true;
+    }
+
+    // La de la Categoria elegida, o null (sin categoria, o de otra).
+    volumenActual() {
+      var v = this.volumen, cat = this.categoria();
+      return cat && v && v.categoria === cat ? v : null;
+    }
+
+    // Tickets (entero >= 0) o null mientras no haya un dato real: cargando,
+    // sin datos, ruta invalida o error NO son 0. 'cero' si (lo dijo el
+    // servidor).
+    volumetria() {
+      var v = this.volumenActual();
+      if (!v) return null;
+      if (v.estado === 'cero') return 0;
+      return v.estado === 'ok' && typeof v.valor === 'number' && isFinite(v.valor) && v.valor >= 0 ? Math.round(v.valor) : null;
+    }
+
+    // round(volumetria x % / 100), o null si falta la volumetria o el % no
+    // es valido (formato o capacidad: error('pct')).
+    ticketsReducir() {
+      var pct = String(this.valores.pct === undefined ? '' : this.valores.pct).trim();
+      if (pct === '' || this.error('pct')) return null;
+      return ticketsDe(this.volumetria(), pct);
+    }
+
+    // Valor de un campo 'calculado', o null.
+    calculado(clave) {
+      if (clave === 'volumetria') return this.volumetria();
+      if (clave === 'tickets') return this.ticketsReducir();
+      return null;
+    }
+
+    motivoVolumen() {
+      if (!this.categoria()) return 'Elige primero la Categoría en Clasificación.';
+      var v = this.volumenActual();
+      if (!v || v.estado === 'cargando') return 'Consultando la volumetría de la categoría…';
+      if (v.estado === 'ok' || v.estado === 'cero') return 'Tickets de la categoría en los últimos 30 días. No se captura.';
+      if (v.estado === 'sin_datos') return 'Sin datos de tickets cargados para los últimos 30 días: no se puede calcular.';
+      if (v.estado === 'ruta_invalida') return 'La categoría no es válida para calcular la volumetría.';
+      return 'No se pudo consultar la volumetría' + (v.mensaje ? ': ' + v.mensaje : '.');
+    }
+
+    motivoTickets() {
+      if (!this.categoria()) return 'Elige primero la Categoría en Clasificación.';
+      if (this.volumetria() === null) return 'Se calcula cuando esté la volumetría de la categoría.';
+      var pct = String(this.valores.pct === undefined ? '' : this.valores.pct).trim();
+      if (pct === '') return 'Escribe el % de disminución para calcularlo.';
+      if (this.error('pct')) return 'Corrige el % de disminución para calcularlo.';
+      return 'Volumetría × % ÷ 100, redondeado a ticket entero.';
+    }
+
     limpiarDeCascada(campos, valores) {
       campos.forEach(function (c) { if (c.reiniciaConCascada) delete valores[c.clave]; });
     }
@@ -342,7 +447,7 @@ window.Iniciativas = (function () {
 
     capturar(clave, texto) {
       var c = this.campo(clave);
-      if (!c || (c.requiereCategoria && !this.categoria())) return;
+      if (!c || c.control === 'calculado' || (c.requiereCategoria && !this.categoria())) return;
       if (this.comunes.indexOf(c) >= 0) this.valores[clave] = texto;
       else this.valoresTipo[clave] = texto;
     }
@@ -374,6 +479,10 @@ window.Iniciativas = (function () {
       if (!this.tipo) faltan.push('tipo');
       ['po', 'so', 'categoria'].forEach(function (k, i) { if (!self.cascada.seleccion[i]) faltan.push(k); });
       this.comunes.forEach(function (c) {
+        if (c.control === 'calculado') {
+          if (c.obligatorio && self.calculado(c.clave) === null) faltan.push(c.clave);
+          return;
+        }
         if (String(self.valores[c.clave] === undefined ? '' : self.valores[c.clave]).trim() === '') faltan.push(c.clave);
       });
       if (this.rcaObligatorio() && !this.rca) faltan.push('rca');
@@ -384,6 +493,9 @@ window.Iniciativas = (function () {
     erroresCliente() {
       var self = this;
       var errores = this.faltantes().map(function (k) {
+        // Con Categoria, la volumetria no "falta": no esta disponible, y se
+        // dice por que (consultando, sin datos, error).
+        if (k === 'volumetria' && self.categoria()) return { campo: k, mensaje: self.motivoVolumen() };
         return { campo: k, mensaje: k === 'rca' ? 'El RCA es obligatorio para Problem.' : 'Falta ' + ROTULOS[k] + '.' };
       });
       ['volumetria', 'pct'].forEach(function (k) {
@@ -395,13 +507,15 @@ window.Iniciativas = (function () {
 
     // Los campos con los nombres que espera admin_iniciativas_validar.ashx.
     // disponible_cliente va solo como dato: el servidor no lo usa.
+    // volumetria: la de la categoria (volumetria()), '' si no hay. Los
+    // tickets a reducir no viajan: el validador no tiene ese campo.
     camposEnvio() {
       var v = this.valores, sel = this.cascada.seleccion;
-      var max = this.maxPct();
+      var max = this.maxPct(), vol = this.volumetria();
       return {
         tipo: this.tipo, po: sel[0] || '', so: sel[1] || '', categoria: sel[2] || '',
         titulo: v.titulo || '', descripcion: v.analisis || '', observaciones: v.observaciones || '',
-        volumetria: String(v.volumetria || '').trim(), pct: String(v.pct || '').trim(),
+        volumetria: vol === null ? '' : String(vol), pct: String(v.pct || '').trim(),
         disponible_cliente: max === null ? '' : String(max)
       };
     }
@@ -424,6 +538,12 @@ window.Iniciativas = (function () {
         pct: this.categoria()
           ? { habilitado: true, motivo: this.motivoCapacidad(), max: this.maxPct() }
           : { habilitado: false, motivo: 'Elige primero la Categoría en Clasificación.', max: null },
+        // e: la forma de VolumetriaCliente (null sin categoria: '—').
+        volumetria: {
+          e: this.volumenActual(), motivo: this.motivoVolumen(),
+          reintentar: !!(this.volumenActual() && this.volumenActual().estado === 'error')
+        },
+        tickets: { valor: this.ticketsReducir(), motivo: this.motivoTickets() },
         rca: {
           habilitado: this.tipo !== '',
           obligatorio: this.rcaObligatorio(),
@@ -530,6 +650,8 @@ window.Iniciativas = (function () {
       this.registro = null;  // VistaRegistro (admin/registro-iniciativas.js)
       this.crearAdmin = null; // VistaCrearAdmin (admin/iniciativa-admin.js)
       this.duenos = null;     // VistaDuenos (admin/categorias-duenos.js), perezosa; null si DUENOS_VISIBLES = false
+      this.cola = null;       // ColaSolicitudes (admin/solicitudes-cambio.js): cola de ADM
+      this.volumetria = null; // VolumetriaCliente de Nueva solicitud (perezoso; usa this.pedir)
       // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
       // sin rol no se abre nada de ADM.
       this.rol = null;
@@ -543,6 +665,12 @@ window.Iniciativas = (function () {
       this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
       this.aplicarPestanas();
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(this.rol);
+      if (this.cola) {
+        this.cola.fijarRol(this.rol);
+        // El rol llega despues de pintar: si ya se esta en Solicitudes, la
+        // cola (o la nota) se vuelve a pintar con el rol de verdad.
+        if (this.vista === 'solicitudes') this.cola.abrir();
+      }
       if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') || (VISTAS_ADM_MOD[this.vista] && !this.rol)) {
         this.mostrarVista('iniciativas');
       }
@@ -558,7 +686,7 @@ window.Iniciativas = (function () {
       this.denegada = true;
       this.rol = null;
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
-      if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle();
+      if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle(true);
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = true; });
       this.$('iniTabs').hidden = true;
       this.$('iniDenegado').hidden = false;
@@ -585,6 +713,17 @@ window.Iniciativas = (function () {
       // El registro carga por su cuenta, en paralelo con el catalogo de
       // Nueva solicitud: un fallo de uno no bloquea al otro.
       this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
+      // Cola de ADM de "Solicitar cambios" (pestaña Solicitudes). Clasificar
+      // usa los valores que ya existen (del registro); aplicar relee el
+      // registro sin recargar la pagina.
+      if (window.SolicitudesCambioCola) {
+        var regCola = this.registro;
+        this.cola = new window.SolicitudesCambioCola.ColaSolicitudes(this.doc, null, function () {
+          var r = regCola && regCola.registro;
+          return r ? { iniciativa: r.valoresTipoIniciativa, agrupado: r.valoresTipoAgrupado } : {};
+        });
+        this.cola.alCambiarIniciativa = function () { if (regCola && regCola.actualizar) regCola.actualizar(); };
+      }
       if (window.IniciativaAdmin) {
         // La volumetria (GET) va por el mismo fetch de la pagina; la
         // validacion (POST) por el suyo.
@@ -642,6 +781,10 @@ window.Iniciativas = (function () {
       // El alta necesita su modulo (admin/iniciativa-admin.js); Administracion no.
       if (nombre === 'crear' && !this.crearAdmin) return;
       if (VISTAS_ADM_MOD[nombre] && this.rol !== 'ADM' && this.rol !== 'MOD') return;
+      // Salir del registro con cambios sin guardar en el detalle: se
+      // pregunta; si no se descartan, la pestana no cambia.
+      if (nombre !== 'iniciativas' && this.registro && this.registro.cerrarDetalle &&
+          this.registro.cerrarDetalle() === false) return;
       this.vista = nombre;
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = k !== nombre; });
       PESTANAS.forEach(function (p) {
@@ -654,6 +797,7 @@ window.Iniciativas = (function () {
       if (nombre !== 'iniciativas' && this.registro) this.registro.cerrarDetalle();
       // El catalogo de dueños se pide la primera vez que se abre la pestaña.
       if (nombre === 'administracion' && this.duenos) this.duenos.abrir();
+      if (nombre === 'solicitudes' && this.cola) this.cola.abrir();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();
     }
@@ -728,7 +872,32 @@ window.Iniciativas = (function () {
           self.pintarCamposComunes();
           self.pintar();
           self.actualizarCapacidad();
+          self.actualizarVolumen();
         });
+      });
+    }
+
+    // Pide la volumetria de la Categoria elegida con el VolumetriaCliente
+    // de Crear / Modificar (admin/iniciativa-admin.js; recuerda por ruta y
+    // no recuerda errores). Mientras llega se ve "Consultando…", nunca la
+    // de la categoria anterior; la que llegue tarde de otra se descarta.
+    actualizarVolumen() {
+      var self = this, s = this.solicitud;
+      var cat = s ? s.categoria() : '';
+      if (!cat || (s.volumen && s.volumen.categoria === cat && s.volumen.estado !== 'error')) return Promise.resolve();
+      s.pedirVolumen();
+      this.pintarCalculados();
+      var A = window.IniciativaAdmin;
+      if (!A || !A.VolumetriaCliente) {
+        s.fijarVolumen(cat, { estado: 'error', mensaje: 'falta admin/iniciativa-admin.js.' });
+        this.pintarCalculados();
+        return Promise.resolve();
+      }
+      if (!this.volumetria) {
+        this.volumetria = new A.VolumetriaCliente(function (url, op) { return (self.pedir || fetch)(url, op); });
+      }
+      return this.volumetria.consultar(cat).then(function (e) {
+        if (self.solicitud === s && s.fijarVolumen(cat, e)) self.pintarCalculados();
       });
     }
 
@@ -779,7 +948,24 @@ window.Iniciativas = (function () {
       this.$('motDirector').textContent = est.director.motivo;
       this.mostrarCampos(est.camposVisibles);
       this.pintarPct(est.pct);
+      this.pintarCalculados();
       this.pintarRca(est.rca);
+    }
+
+    // Volumetria (con el mismo htmlVolumetria de Crear / Modificar) y
+    // Tickets a reducir: solo lectura, desde SolicitudNueva.
+    pintarCalculados() {
+      var s = this.solicitud, vol = this.$('campo-volumetria'), tk = this.$('campo-tickets');
+      if (!s || !vol || !tk) return;
+      var est = s.estado(), A = window.IniciativaAdmin;
+      vol.innerHTML = (A && A.htmlVolumetria ? A.htmlVolumetria(est.volumetria.e)
+        : '<output class="ini-vol">' + Escape.html(est.volumetria.e ? est.volumetria.e.estado : '—') + '</output>') +
+        (est.volumetria.reintentar ? ' <button type="button" class="btn linea chico" data-reintentar="volumetria">Reintentar</button>' : '');
+      this.$('campo-volumetria-msg').textContent = est.volumetria.motivo;
+      var n = est.tickets.valor;
+      tk.innerHTML = '<output class="ini-vol">' +
+        Escape.html(n === null ? '—' : n.toLocaleString('es-MX') + (n === 1 ? ' ticket' : ' tickets')) + '</output>';
+      this.$('campo-tickets-msg').textContent = est.tickets.motivo;
     }
 
     pintarRca(e) {
@@ -853,6 +1039,19 @@ window.Iniciativas = (function () {
       var describe = ids.length ? ' aria-describedby="' + ids.join(' ') + '"' : '';
       var dato = ' id="' + id + '" data-campo="' + Escape.attr(campo.clave) + '"';
       var control;
+      if (campo.control === 'calculado') {
+        // Solo lectura, como el Director derivado: rotulo + caja punteada +
+        // motivo. El contenido lo pone pintarCalculados.
+        var idRot = id + '-rot';
+        var ref = ' aria-describedby="' + (ayuda ? id + '-ayuda ' : '') + id + '-msg"';
+        return '<div class="ini-campo ini-derivado">' +
+          '<span class="ini-rotulo-derivado' + (ayuda ? ' ayuda-destino' : '') + '" id="' + idRot + '"' +
+          (ayuda ? ' data-ayuda="' + Escape.attr(campo.clave) + '"' : '') + '>' + Escape.html(campo.etiqueta) +
+          ' <span class="ini-origen derivado">Calculada</span></span>' +
+          '<div id="' + id + '" role="group" aria-labelledby="' + idRot + '"' + ref + '><output class="ini-vol">—</output></div>' +
+          '<small class="ini-motivo" id="' + id + '-msg" aria-live="polite"></small>' +
+          (ayuda ? '<span class="ini-sr" id="' + id + '-ayuda">' + Escape.html(ayuda) + '</span>' : '') + '</div>';
+      }
       if (campo.control === 'multilinea') {
         control = '<textarea' + dato + ' rows="6"' + describe + '>' + Escape.html(v) + '</textarea>';
       } else if (campo.control === 'entero') {
@@ -876,7 +1075,7 @@ window.Iniciativas = (function () {
         self.$(par[1]).innerHTML = CAMPOS_COMUNES.filter(function (c) { return c.seccion === par[0]; })
           .map(function (c) { return self.htmlCampo(c, s ? s.valores[c.clave] : ''); }).join('');
       });
-      if (s) this.pintarMensaje('volumetria', '');
+      this.pintarCalculados();
     }
 
     pintarCamposTipo() {
@@ -896,9 +1095,16 @@ window.Iniciativas = (function () {
           var clave = e.target && e.target.getAttribute && e.target.getAttribute('data-campo');
           if (!clave || !self.solicitud) return;
           self.solicitud.capturar(clave, e.target.value);
-          if (clave === 'volumetria') self.pintarMensaje(clave, '');
-          else if (clave === 'pct') self.pintarPct(self.solicitud.estado().pct);
+          if (clave === 'pct') {
+            self.pintarPct(self.solicitud.estado().pct);
+            self.pintarCalculados();
+          }
         });
+      });
+      // "Reintentar" de la volumetria (solo aparece tras un error).
+      this.$('iniCamposImpacto').addEventListener('click', function (e) {
+        var t = e.target;
+        if (t && t.getAttribute && t.getAttribute('data-reintentar') === 'volumetria') self.actualizarVolumen();
       });
     }
 
@@ -1061,6 +1267,7 @@ window.Iniciativas = (function () {
     AYUDA_FIJA: AYUDA_FIJA,
     VALIDAR: VALIDAR,
     fraccionDe: fraccionDe,
+    ticketsDe: ticketsDe,
     DEFINICIONES_TIPO: DEFINICIONES_TIPO,
     CatalogoIniciativas: CatalogoIniciativas,
     CascadaOrganizacional: CascadaOrganizacional,

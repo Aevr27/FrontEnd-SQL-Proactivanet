@@ -932,6 +932,8 @@ window.IniciativaAdmin = (function () {
   var CAMPOS_PROBLEMA = ['titulo', 'descripcion', 'observaciones', 'f_analisis', 'f_solucion', 'f_cierre', 'estado', 'subestado'];
 
   function claves(lista) { return lista.map(function (f) { return f.clave; }); }
+  // Texto largo con los saltos de linea que devuelve un <textarea> (\n).
+  function lineas(v) { return typeof v === 'string' ? v.replace(/\r\n?/g, '\n') : ''; }
   function campo(clave) { return CAMPOS_EDICION.filter(function (c) { return c.clave === clave; })[0]; }
 
   // ---------------------------------------------------------------------
@@ -956,8 +958,10 @@ window.IniciativaAdmin = (function () {
       var tit = iniciativa.titulo_problem !== undefined ? iniciativa.titulo_problem : iniciativa.titulo;
       this.original = {
         titulo: tit || '',
-        descripcion: iniciativa.descripcion || '',
-        observaciones: iniciativa.observaciones || '',
+        // Un CRLF de la base no cuenta como cambio solo por pasar por el
+        // control (el navegador lo vuelve \n).
+        descripcion: lineas(iniciativa.descripcion),
+        observaciones: lineas(iniciativa.observaciones),
         f_analisis: iniciativa.f_analisis || '',
         f_solucion: iniciativa.f_solucion || '',
         f_cierre: iniciativa.f_cierre || '',
@@ -1163,65 +1167,54 @@ window.IniciativaAdmin = (function () {
         'Clasificación y Agrupación de una categoría nueva son opcionales y no se copian de las otras.</small>';
   }
 
-  // Formulario de edicion dentro del detalle del registro.
-  // contexto: { tipo, volumetria (VolumetriaCliente) }.
-  function htmlEdicion(ed, contexto) {
-    contexto = contexto || {};
-    function control(c) {
-      var id = 'regEd-' + c.clave;
-      var v = ed.valores[c.clave];
-      var rot = '<label for="' + id + '">' + Escape.html(c.rotulo) + '</label>';
-      var ctl;
-      if (c.control === 'multilinea') {
-        ctl = '<textarea id="' + id + '" data-edicion="' + c.clave + '" rows="4">' + Escape.html(v) + '</textarea>';
-      } else if (c.control === 'fecha') {
-        ctl = '<input type="date" id="' + id + '" data-edicion="' + c.clave + '" value="' + Escape.attr(v) + '">';
-      } else if (c.control === 'lista') {
-        var ops = ed.listas[c.lista].slice();
-        if (v && ops.indexOf(v) < 0) ops.unshift(v);
-        if (c.clave === 'subestado' && !ed.conoceSubestado()) {
-          return '<div class="campo"><span class="ini-cambio-rot">' + Escape.html(c.rotulo) + '</span>' +
-            '<p class="ini-nota">El registro no trajo el Subestado: no se puede editar aquí.</p></div>';
-        }
-        if (!ed.listas[c.lista].length) {
-          return '<div class="campo"><span class="ini-cambio-rot">' + Escape.html(c.rotulo) + '</span>' +
-            '<p class="ini-nota">' + Escape.html(v || '—') + ' · sin lista de valores: no se puede cambiar.</p></div>';
-        }
-        ctl = Selector.html(id, ops, v, ' data-edicion="' + c.clave + '"');
-      } else {
-        ctl = '<input type="text" id="' + id + '" data-edicion="' + c.clave + '" value="' + Escape.attr(v) + '">';
+  // Edicion directa de ADM en el detalle del registro: cada campo del
+  // Problem se pinta EN SU LUGAR (Identificacion, Seguimiento, Descripcion)
+  // con este control: id regEd-<clave>, data-edicion=<clave>, el valor del
+  // borrador y la marca ini-ed-cambiado si difiere del guardado. Estado /
+  // Subestado sin lista de valores (o Subestado que el registro no trajo):
+  // el valor en texto, no editable (el servidor tambien lo rechazaria).
+  function htmlControlEdicion(ed, clave) {
+    var c = campo(clave);
+    if (!c || c.estado !== 'editable' || c.control === 'categorias') return '';
+    var id = 'regEd-' + clave, v = ed.valores[clave];
+    var cambiado = ed.cambios().some(function (x) { return x.clave === clave; });
+    var attrs = ' data-edicion="' + clave + '" aria-label="' + Escape.attr(c.rotulo) + '" class="ini-ed-campo' +
+      (cambiado ? ' ini-ed-cambiado' : '') + '"';
+    // El "\n" inicial lo descarta el parser de HTML: un texto que empieza
+    // con salto de linea no lo pierde (ni parece cambiado).
+    if (c.control === 'multilinea') return '<textarea id="' + id + '"' + attrs + ' rows="5">\n' + Escape.html(v) + '</textarea>';
+    if (c.control === 'fecha') return '<input type="date" id="' + id + '"' + attrs + ' value="' + Escape.attr(v) + '">';
+    if (c.control === 'lista') {
+      if (clave === 'subestado' && !ed.conoceSubestado()) {
+        return '<span class="ini-nota">El registro no trajo el Subestado: no se puede editar aquí.</span>';
       }
-      return '<div class="campo' + (c.control === 'multilinea' || c.control === 'texto' ? ' ini-cambio-ancho' : '') + '">' + rot + ctl +
-        '<small class="ini-sub">Destino propuesto: ' + Escape.html(c.destino) + '</small></div>';
+      if (!ed.listas[c.lista].length) {
+        return Escape.html(v || '—') + ' <span class="ini-nota">sin lista de valores: no se puede cambiar.</span>';
+      }
+      var ops = ed.listas[c.lista].slice();
+      if (v && ops.indexOf(v) < 0) ops.unshift(v);
+      return Selector.html(id, ops, v, attrs);
     }
-    var problema = CAMPOS_EDICION.filter(function (c) { return c.estado === 'editable' && c.control !== 'categorias'; });
-    var noEditables = CAMPOS_EDICION.filter(function (c) { return c.estado !== 'editable'; });
-    var i = ed.iniciativa;
-    var ctx = '<p class="ini-nota">Código ' + Escape.html(i.folio) +
-      (contexto.tipo || i.prefijo ? ' · ' + Escape.html(contexto.tipo || i.prefijo) : '') +
-      (i.estado ? ' · ' + Escape.html(i.estado) : '') + ' (solo lectura)</p>';
-    var legado = ed.notasLegado().map(function (n) { return '<p class="ini-nota">' + Escape.html(n) + '</p>'; }).join('');
-    return '<h4>Modificar iniciativa</h4>' +
-      '<p class="ini-prototipo-aviso">' + Escape.html(rotulos(contexto.persiste).aviso) + '</p>' +
-      ctx + legado +
-      htmlFaltantes(ed.faltantesOriginales(), 'Ya faltaba antes de modificar.') +
-      '<h5>Problema <span class="ini-sub">dbo.Problem · el código no cambia</span></h5>' +
-      '<div class="ini-cambio-campos">' + problema.map(control).join('') + '</div>' +
-      '<h5>Categorías <span class="ini-sub">dbo.ProblemCategoria · cada una con su %</span></h5>' +
-      '<div id="regEdCats">' + htmlCategoriasEdicion(ed, contexto.volumetria || null) + '</div>' +
-      '<div class="ini-ed-vista" id="regEdVista" aria-live="polite">' + htmlVistaPrevia(ed) + '</div>' +
-      '<details class="ini-ed-otros"><summary>Campos no editables todavía</summary><ul>' +
-        noEditables.map(function (c) {
-          return '<li><b>' + Escape.html(c.rotulo) + '</b> · ' +
-            (c.estado === 'pendiente' ? 'pendiente de contrato' : 'solo lectura') + ': ' + Escape.html(c.motivo) + '</li>';
-        }).join('') + '</ul></details>' +
-      '<div class="ini-cambio-msg" id="regEdMsg" role="status" aria-live="polite"></div>' +
-      '<div class="ini-cambio-pie">' +
-        '<button type="button" class="btn chico" data-accion="edicion-revisar">Revisar cambios</button> ' +
-        '<button type="button" class="btn chico" id="regEdGuardar" data-accion="edicion-guardar" aria-describedby="regEdGuardarNota">' + Escape.html(rotulos(contexto.persiste).boton) + '</button> ' +
-        '<button type="button" class="btn linea chico" data-accion="edicion-cancelar">Cancelar</button>' +
+    return '<input type="text" id="' + id + '"' + attrs + ' value="' + Escape.attr(v) + '">';
+  }
+
+  // Barra "Cambios sin guardar" al pie del detalle (solo ADM). Se ve solo
+  // con cambios; Guardar y Cancelar viven aqui. persiste: la persistencia
+  // del registro (sin ella el boton solo valida y lo dice).
+  function htmlBarraEdicion(persiste) {
+    var boton = persiste === true ? 'Guardar cambios' : rotulos(false).boton;
+    return '<div class="ini-ed-barra" id="regEdBarra" role="region" aria-label="Cambios sin guardar" hidden>' +
+      '<div class="ini-ed-barra-fila">' +
+        '<strong class="ini-ed-sucio" id="regEdSucio">Cambios sin guardar</strong>' +
+        '<span class="ini-ed-barra-botones">' +
+          '<button type="button" class="btn chico" id="regEdGuardar" data-accion="edicion-guardar">' + Escape.html(boton) + '</button> ' +
+          '<button type="button" class="btn linea chico" id="regEdCancelar" data-accion="edicion-cancelar">Cancelar</button>' +
+        '</span>' +
       '</div>' +
-      '<small class="ini-sub" id="regEdGuardarNota">' + Escape.html(rotulos(contexto.persiste).nota) + '</small>';
+      (persiste === true ? '' : '<p class="ini-prototipo-aviso">' + Escape.html(rotulos(false).aviso) + '</p>') +
+      '<details class="ini-ed-detalle"><summary>Ver cambios</summary><div class="ini-ed-vista" id="regEdVista" aria-live="polite"></div></details>' +
+      '<div class="ini-cambio-msg" id="regEdMsg" role="status" aria-live="polite"></div>' +
+    '</div>';
   }
 
   // Vista previa en vivo de "Modificar". Siempre dice que no se guarda.
@@ -1232,7 +1225,7 @@ window.IniciativaAdmin = (function () {
         Escape.html(c.anterior === '' ? '(vacío)' : c.anterior) + '</td><td>' +
         Escape.html(c.nuevo === '' ? '(vacío)' : c.nuevo) + '</td></tr>';
     };
-    return '<h5>Vista previa (no se guarda)</h5>' +
+    return '<h5>Cambios sin guardar</h5>' +
       (v.cambios.length
         ? '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Campo</th><th scope="col">Actual</th>' +
           '<th scope="col">Propuesto</th></tr></thead><tbody>' + v.cambios.map(fila).join('') + '</tbody></table></div>'
@@ -1626,7 +1619,8 @@ window.IniciativaAdmin = (function () {
     RUTAS_PROBLEMA: RUTAS_PROBLEMA,
     htmlFaltantes: htmlFaltantes,
     htmlRevision: htmlRevision,
-    htmlEdicion: htmlEdicion,
+    htmlControlEdicion: htmlControlEdicion,
+    htmlBarraEdicion: htmlBarraEdicion,
     htmlCategoriasEdicion: htmlCategoriasEdicion,
     htmlSinCatalogo: htmlSinCatalogo,
     noEnLista: noEnLista,

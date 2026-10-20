@@ -9,7 +9,9 @@
        "Solicitar una iniciativa" va con data-solo-admin: autorizado ya
        implica rol ADM o MOD en el servidor (AccesoAdmin.PuedeEntrar);
      - con { persona: true }, pinta "Bienvenido, <Nombre>" en el elemento
-       que se le pase, solo si el servidor resolvio el nombre.
+       que se le pase, solo si el servidor resolvio el nombre, y el correo
+       (dbo.UsuariosAdmin.CorreoUsuario) en el otro, solo si el servidor lo
+       mando. Nunca se arma un correo aqui.
 
    ES SOLO UX. La seguridad esta en el servidor (AccesoAdmin.Exigir y
    AdminAccesoModulo): ocultar la entrada no protege nada, y mostrarla
@@ -26,7 +28,7 @@
       this.pedir = pedir || function (url) { return fetch(url, { cache: 'no-store' }); };
     }
 
-    // -> Promise<{ autorizado: bool, nombre: string|null }>. Nunca rechaza.
+    // -> Promise<{ autorizado, nombre, rol, correo }>. Nunca rechaza.
     consultar(opciones) {
       var persona = !!(opciones && opciones.persona);
       var url = this.url + (persona ? '?persona=1' : '');
@@ -38,16 +40,19 @@
             ? json.nombre.trim() : null;
           var autorizado = !!(json && json.autorizado === true);
           var rol = autorizado && (json.rol === 'ADM' || json.rol === 'MOD') ? json.rol : null;
-          return { autorizado: autorizado, nombre: nombre, rol: rol };
+          // Solo un correo con forma de correo; el servidor ya lo filtra.
+          var correo = autorizado && typeof json.correo === 'string' && /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(json.correo.trim())
+            ? json.correo.trim() : null;
+          return { autorizado: autorizado, nombre: nombre, rol: rol, correo: correo };
         })
-        .catch(function () { return { autorizado: false, nombre: null, rol: null }; });
+        .catch(function () { return { autorizado: false, nombre: null, rol: null, correo: null }; });
     }
 
-    // Muestra/oculta [data-solo-admin] dentro de raiz y, si se pasa,
-    // pinta el saludo. Devuelve la misma promesa de consultar().
-    aplicar(raiz, saludo) {
+    // Muestra/oculta [data-solo-admin] dentro de raiz y, si se pasan,
+    // pinta el saludo y el correo. Devuelve la misma promesa de consultar().
+    aplicar(raiz, saludo, correo) {
       var doc = raiz || global.document;
-      return this.consultar({ persona: !!saludo }).then(function (s) {
+      return this.consultar({ persona: !!(saludo || correo) }).then(function (s) {
         doc.querySelectorAll('[data-solo-admin]').forEach(function (el) {
           el.hidden = !s.autorizado;
         });
@@ -57,6 +62,10 @@
         if (saludo) {
           saludo.textContent = s.autorizado && s.nombre ? 'Bienvenido, ' + s.nombre : '';
           saludo.hidden = !(s.autorizado && s.nombre);
+        }
+        if (correo) {
+          correo.textContent = s.autorizado && s.correo ? s.correo : '';
+          correo.hidden = !(s.autorizado && s.correo);
         }
         return s;
       });

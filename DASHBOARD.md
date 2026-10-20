@@ -16,10 +16,11 @@ Una sola página, `dashboard.html`, con una barra lateral de pestañas (registro
 | Calidad de información › QA | `qa/` | `moduloEmbebido()` |
 | Calidad de información › QARE | `qare/` | `moduloEmbebido()` |
 | Análisis de servicios | `analisis/` | `moduloEmbebido()` |
-| Observabilidad | `assets/Tablero_Experiencia.html` (Observabilidad y Orquestación, con su navegación interna) | `<iframe>` (ver §2.4) |
+| Observabilidad › Observabilidad | `assets/Tablero_Experiencia.html` | `<iframe>` (ver §2.4) |
+| Observabilidad › Orquestación | `orquestacion/` | `moduloEmbebido()` |
 | Call Center | `dashboard.html` / `dashboard.js` | comparte la barra de filtros de SLA (`adoptarControlesSla`) |
 
-**Observabilidad** y **Calidad de información** son entradas de grupo (`GRUPOS` en `dashboard.js`): la barra muestra una sola entrada y, si el grupo tiene varios módulos, un selector interno (`.subnav`) cambia entre ellos; los módulos siguen siendo los mismos de `MODULOS`. Los hashes de siempre siguen valiendo (`#tablero`, `#qa`, `#qare`); `#observabilidad` y `#calidad` abren el último módulo visto del grupo (el primero, la primera vez).
+**Observabilidad** y **Calidad de información** son entradas de grupo (`GRUPOS` en `dashboard.js`): la barra muestra una sola entrada y un selector interno (`.subnav`) cambia entre sus dos módulos, que siguen siendo los mismos de `MODULOS`. Los hashes de siempre siguen valiendo (`#tablero`, `#orquestacion`, `#qa`, `#qare`); `#observabilidad` y `#calidad` abren el último módulo visto del grupo (el primero, la primera vez).
 
 La entrada **Administración** es un enlace a `admin/iniciativas.html`, no una pestaña; solo se ve si `handlers/admin_sesion.ashx` dice que la cuenta está autorizada, y la autorización real está en el servidor (`App_Code/AccesoAdmin.cs`).
 
@@ -86,11 +87,12 @@ Lo que hace el código; si un handler responde o no, y la fecha que muestra, dep
 | Experiencia | `handlers/experiencia.ashx`; **si no responde**, `experiencia/data/experiencia.mock.json` (corte guardado a mano) | En vivo: sello y periodo del servidor. Respaldo: aviso «Datos de respaldo, no en vivo» arriba y la pastilla dice «Datos de respaldo, no en vivo · Corte: dd/mm/aaaa» con la fecha guardada en el propio archivo |
 | QA, QARE | `handlers/qa.ashx`, `handlers/qare.ashx` | sello (y periodo) de `dataInfo` |
 | Análisis de servicios | `handlers/analisis.ashx` | no muestra sello de frescura |
-| Tablero (Observabilidad, Orquestación) | `assets/Tablero_Experiencia.html`, un archivo **generado** (TableroExperiencia_v3.7.exe) con los datos dentro; no consulta SQL | «Instantánea generada el dd/mm/aaaa · no se actualiza en vivo» en la cabecera de cada panel, copiada del pie «Generado el ...» que pone el generador. Si el archivo no trae esa fecha, no se muestra ninguna |
+| Orquestación | `handlers/orquestacion.ashx` (vistas del `sql/77_tablero_orquestacion.sql` sobre el esquema `orq` del 76) | «Carga del Excel»: `FechaFin` de la última `orq.CargaLote` aplicada |
+| Tablero (Observabilidad) | `assets/Tablero_Experiencia.html`, un archivo **generado** (TableroExperiencia_v3.7.exe) con los datos dentro; no consulta SQL | «Instantánea generada el dd/mm/aaaa · no se actualiza en vivo» en la cabecera de cada panel, copiada del pie «Generado el ...» que pone el generador. Si el archivo no trae esa fecha, no se muestra ninguna |
 
 Además:
 
-- `observabilidad/` y `orquestacion/` son páginas sueltas, **sin enlace** desde la navegación. Leen `data/*.mock.json` (el JSON que traía el monolito) y su pie es texto fijo. No son datos en vivo.
+- `observabilidad/` es página suelta, **sin enlace** desde la navegación. Lee `data/*.mock.json` (el JSON que traía el monolito) y su pie es texto fijo. No son datos en vivo. `orquestacion/` ya es pestaña y lee la base.
 - `MOCK_DATA` (`assets/js/mock-data.js`) debe ser `false` en el repositorio. Con `true` (solo pruebas locales) SLA, Call Center y Backlog usan datos simulados y la pastilla lo dice («Datos simulados (MOCK_DATA), no reales»).
 - Ninguna fecha de frescura se calcula en el navegador: si el servidor o el archivo no la traen, la pastilla queda vacía.
 

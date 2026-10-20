@@ -333,9 +333,9 @@
     margin-top: -26px;
   }
 
-  /* Selector interno de las entradas de grupo de la barra (Calidad de
-     información). Mismo "seleccionado" que .mnav.active. position/z-index
-     para quedar encima de un marco que suba con margin-top negativo. */
+  /* Selector interno de las entradas de grupo de la barra (Observabilidad,
+     Calidad de información). Mismo "seleccionado" que .mnav.active. Va por
+     encima del marco de Observabilidad, que sube 26px con su margin-top. */
   .subnav {
     position: relative; z-index: 1;
     display: inline-flex; gap: 4px; padding: 4px;

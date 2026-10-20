@@ -76,9 +76,8 @@
        contenedor #tab-<nombre>. La lista crece en vertical sola.
 
        Observabilidad y Calidad de información son entradas de GRUPO: su
-       data-tab es una clave de GRUPOS (dashboard.js), no de MODULOS. Si el
-       grupo tiene mas de un modulo, cada uno tiene su boton en el selector
-       .subnav de abajo. -->
+       data-tab es una clave de GRUPOS (dashboard.js), no de MODULOS, y cada
+       modulo del grupo tiene su boton en el selector .subnav de abajo. -->
   <aside class="lateral" id="lateral">
     <div class="lateral-cabecera">
       <span class="lateral-marca">
@@ -150,10 +149,8 @@
             <span class="mnav-txt">Análisis de servicios</span>
           </button>
         </li>
-        <!-- Entrada de GRUPO, como Calidad de información. Por ahora un solo
-             modulo, el documento del marco (`tablero`), que trae Observabilidad
-             y Orquestacion con su propia navegacion interna; con un solo modulo
-             no hay selector .subnav. -->
+        <!-- Entrada de GRUPO, como Calidad de información: Observabilidad (el
+             documento del marco, modulo `tablero`) y Orquestación. -->
         <li>
           <button class="mnav" id="mtab-observabilidad" data-tab="observabilidad" type="button" title="Observabilidad">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -191,12 +188,15 @@
   <div class="lateral-contenido">
 
   <!-- ================================================ Selectores de grupo
-       Uno por entrada de grupo con mas de un modulo (GRUPOS, dashboard.js).
-       Fuera de los #tab-*: moduloEmbebido() da por montado un contenedor con
-       hijos, y el selector dentro lo engañaria. activarTab() muestra el del
-       grupo del modulo activo y marca su boton; los demas quedan con
-       `hidden`. Cada boton es el mismo modulo de siempre (mismo data-tab,
-       mismo hash). -->
+       Uno por entrada de grupo de la barra (GRUPOS, dashboard.js). Fuera de
+       los #tab-*: moduloEmbebido() da por montado un contenedor con hijos, y
+       el selector dentro lo engañaria. activarTab() muestra el del grupo del
+       modulo activo y marca su boton; los demas quedan con `hidden`. Cada
+       boton es el mismo modulo de siempre (mismo data-tab, mismo hash). -->
+  <nav class="subnav" data-grupo="observabilidad" aria-label="Observabilidad" hidden>
+    <button class="subnav-btn" id="snav-tablero" data-tab="tablero" type="button">Observabilidad</button>
+    <button class="subnav-btn" id="snav-orquestacion" data-tab="orquestacion" type="button">Orquestación</button>
+  </nav>
   <nav class="subnav" data-grupo="calidad" aria-label="Calidad de información" hidden>
     <button class="subnav-btn" id="snav-qa" data-tab="qa" type="button">QA</button>
     <button class="subnav-btn" id="snav-qare" data-tab="qare" type="button">QARE</button>
@@ -434,6 +434,14 @@
        Analizar, los tickets a handlers/analisis.ashx (47_analisis_servicios.sql). -->
   <div id="tab-analisis" class="maintab-content" role="region" aria-labelledby="mtab-analisis"></div>
 
+  <!-- ================================================ Orquestacion
+       Contenedor vacio, como Efectividad. TableroOrquestacion (dashboard.js)
+       trae orquestacion/orquestacion.html, orquestacion.css y orquestacion.js
+       la primera vez que se abre la pestaña; orquestacion.js pide lo cargado
+       del Excel de orquestacion a handlers/orquestacion.ashx (vistas del 77).
+       La "Orquestación" del documento del marco de Observabilidad se esconde. -->
+  <div id="tab-orquestacion" class="maintab-content" role="region" aria-labelledby="snav-orquestacion"></div>
+
   <!-- ================================================ Call Center de Servicios TI
        Pestana propia. El bloque es el MISMO de siempre -mismos ids, mismas
        graficas- y lo siguen cargando y pintando las funciones de TableroSla:
@@ -529,7 +537,7 @@
     </section>
   </div>
 
-  <div id="tab-tablero" class="maintab-content" role="region" aria-labelledby="mtab-observabilidad">
+  <div id="tab-tablero" class="maintab-content" role="region" aria-labelledby="snav-tablero">
     <iframe id="iframe-tablero"
             class="tablero-externo"
             data-src="assets/Tablero_Experiencia.html"

@@ -45,8 +45,8 @@ function todas(texto, re) {
 var botones = todas(html, /<button[^>]*class="mnav[^"]*"[^>]*>/g).map(function (m) { return m[0]; });
 var nombres = botones.map(function (b) { return (b.match(/data-tab="([^"]+)"/) || [])[1]; });
 
-// Ocho entradas: QA y QARE van juntas en "Calidad de información" y el
-// marco (tablero) pasa a llamarse "Observabilidad".
+// Ocho entradas: QA y QARE van juntas en "Calidad de información" y
+// Observabilidad (tablero) y Orquestación en "Observabilidad".
 comprobar('la barra trae las ocho entradas', nombres.length, 8);
 comprobar('la barra, en orden', nombres.join(','),
   'sla,backlog,experiencia,efectividad,calidad,analisis,observabilidad,call');
@@ -55,7 +55,7 @@ comprobar('rotulos exactos de los grupos',
    /data-tab="calidad"[^>]*title="Calidad de información"/.test(html),
    /<span class="mnav-txt">Observabilidad<\/span>/.test(html),
    /<span class="mnav-txt">Calidad de información<\/span>/.test(html)].join(), 'true,true,true,true');
-['qa', 'qare', 'tablero'].forEach(function (n) {
+['qa', 'qare', 'orquestacion', 'tablero'].forEach(function (n) {
   comprobar('"' + n + '" ya no tiene entrada propia en la barra', nombres.indexOf(n), -1);
 });
 comprobar('ninguna entrada se quedo sin data-tab', nombres.filter(Boolean).length, nombres.length);
@@ -81,9 +81,8 @@ var bloqueGrupos = (js.match(/const GRUPOS = (\{[\s\S]*?\n\});/) || [])[1];
 comprobar('se encontro el registro GRUPOS', !!bloqueGrupos, true);
 var GRUPOS = new Function('return ' + bloqueGrupos + ';')();
 
-// Selectores internos: un <nav class="subnav"> por grupo de MAS de un
-// modulo, con un boton por modulo, en el mismo orden que GRUPOS. Un grupo de
-// un solo modulo (Observabilidad, por ahora) no lleva selector.
+// Selectores internos: un <nav class="subnav"> por grupo, con un boton por
+// modulo del grupo, en el mismo orden que GRUPOS.
 var subnavs = {};
 todas(html, /<nav class="subnav" data-grupo="([^"]+)"[^>]*>([\s\S]*?)<\/nav>/g).forEach(function (m) {
   comprobar('el selector "' + m[1] + '" nace oculto', /^<nav[^>]*\shidden>/.test(m[0]), true);
@@ -93,11 +92,12 @@ todas(html, /<nav class="subnav" data-grupo="([^"]+)"[^>]*>([\s\S]*?)<\/nav>/g).
       return b[2];
     });
 });
-var gruposConSelector = Object.keys(GRUPOS).filter(function (g) { return GRUPOS[g].length > 1; });
-comprobar('un selector por grupo de varios modulos', Object.keys(subnavs).sort().join(), gruposConSelector.sort().join());
-gruposConSelector.forEach(function (g) {
+comprobar('un selector por grupo', Object.keys(subnavs).sort().join(), Object.keys(GRUPOS).sort().join());
+Object.keys(GRUPOS).forEach(function (g) {
   comprobar('selector "' + g + '" = GRUPOS.' + g, (subnavs[g] || []).join(), GRUPOS[g].join());
 });
+comprobar('Observabilidad: botones con su rotulo',
+  /data-tab="tablero"[^>]*>Observabilidad<\/button>[\s\S]*?data-tab="orquestacion"[^>]*>Orquestación<\/button>/.test(html), true);
 comprobar('Calidad de información: botones con su rotulo',
   /data-tab="qa"[^>]*>QA<\/button>[\s\S]*?data-tab="qare"[^>]*>QARE<\/button>/.test(html), true);
 
@@ -110,22 +110,19 @@ nombres.forEach(function (n) {
       html.indexOf('id="tab-' + m + '"') !== -1, true);
   });
 });
-// Ningun modulo se queda sin camino: entrada propia, o su grupo en la barra
-// (con boton en el selector si el grupo tiene varios), y ninguno en dos.
+// Ningun modulo se queda sin camino: entrada propia o boton de su grupo
+// (con el grupo en la barra), y ninguno en dos sitios a la vez.
 claves.forEach(function (n) {
   var caminos = (nombres.indexOf(n) !== -1 ? 1 : 0) + Object.keys(GRUPOS).filter(function (g) {
-    return nombres.indexOf(g) !== -1 && GRUPOS[g].indexOf(n) !== -1 &&
-      (GRUPOS[g].length === 1 || (subnavs[g] || []).indexOf(n) !== -1);
+    return nombres.indexOf(g) !== -1 && GRUPOS[g].indexOf(n) !== -1 && (subnavs[g] || []).indexOf(n) !== -1;
   }).length;
   comprobar('el modulo "' + n + '" se alcanza desde la barra por un solo camino', caminos, 1);
 });
-// El contenedor de un modulo agrupado lo rotula su boton del selector, o la
-// entrada del grupo si no hay selector.
+// El contenedor de un modulo agrupado lo rotula su boton del selector.
 Object.keys(GRUPOS).forEach(function (g) {
   GRUPOS[g].forEach(function (m) {
-    var rotulo = GRUPOS[g].length > 1 ? 'snav-' + m : 'mtab-' + g;
-    comprobar('#tab-' + m + ' lo rotula #' + rotulo,
-      new RegExp('id="tab-' + m + '"[^>]*aria-labelledby="' + rotulo + '"').test(html), true);
+    comprobar('#tab-' + m + ' lo rotula #snav-' + m,
+      new RegExp('id="tab-' + m + '"[^>]*aria-labelledby="snav-' + m + '"').test(html), true);
   });
 });
 
@@ -160,6 +157,34 @@ comprobar('Administracion: enlace oculto a admin/iniciativas.html',
 comprobar('Administracion: sin data-tab', /data-tab/.test(enlaceAdmin), false);
 comprobar('activarTab sigue marcando la entrada activa',
   /function activarTab[\s\S]{0,1500}querySelectorAll\('\.mnav'\)/.test(js), true);
+
+// --- la copia de admin/iniciativas.html sigue al tablero ------------------
+// Es marcado copiado (pagina estatica): se habia quedado sin Efectividad ni
+// Analisis de servicios. Mismas secciones, mismo orden, mismo title, cada
+// una como enlace a ../dashboard.html#<data-tab> (sin data-tab: ahi no hay
+// activarTab). Administracion sigue oculta (data-solo-admin) y es la unica
+// marcada como actual.
+var admin = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.html'), 'utf8')
+  .replace(/<!--[\s\S]*?-->/g, '');
+var navAdmin = (admin.match(/<aside class="lateral" id="lateral">[\s\S]*?<\/aside>/) || [''])[0];
+var enlaces = todas(navAdmin, /<a class="mnav[^"]*"[^>]*>/g).map(function (m) { return m[0]; });
+var deTablero = enlaces.filter(function (a) { return /href="\.\.\/dashboard\.html#/.test(a); });
+comprobar('admin: las secciones del tablero, en el mismo orden',
+  deTablero.map(function (a) { return a.match(/#([^"]+)"/)[1]; }).join(','), nombres.join(','));
+comprobar('admin: mismo title que en el tablero',
+  deTablero.map(function (a) { return (a.match(/title="([^"]+)"/) || [])[1]; }).join('|'),
+  botones.map(function (b) { return (b.match(/title="([^"]+)"/) || [])[1]; }).join('|'));
+comprobar('admin: Efectividad y Analisis de servicios presentes', [
+  /href="\.\.\/dashboard\.html#efectividad"/.test(navAdmin), /href="\.\.\/dashboard\.html#analisis"/.test(navAdmin)].join(),
+  'true,true');
+comprobar('admin: ninguna entrada con data-tab', /data-tab/.test(navAdmin), false);
+comprobar('admin: solo una mas (Administracion), oculta hasta SesionAdmin',
+  enlaces.length - deTablero.length + '|' +
+  /<li data-solo-admin hidden>\s*<a class="mnav active" href="iniciativas\.html" aria-current="page"/.test(navAdmin), '1|true');
+comprobar('admin: solo Administracion nace como actual',
+  enlaces.filter(function (a) { return /aria-current="page"|mnav active/.test(a); }).length, 1);
+comprobar('admin: data-solo-admin solo en Administracion',
+  (navAdmin.match(/data-solo-admin/g) || []).length, 1);
 
 // --- plegar es solo una clase, no un segundo cargador --------------------
 // Si plegarLateral() tocara `listo`, `montando` o init(), cambiar el ancho

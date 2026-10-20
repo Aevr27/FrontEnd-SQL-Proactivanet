@@ -47,7 +47,7 @@ var GRUPOS = new Function('return ' + bloqueGrupos[1] + ';')();
 // es la resolucion del nombre, no los tableros.
 var MODULOS_FALSO = {
   sla: {}, backlog: {}, experiencia: {}, efectividad: {}, qa: {}, qare: {},
-  analisis: {}, call: {}, tablero: {},
+  analisis: {}, orquestacion: {}, call: {}, tablero: {},
 };
 
 var ultimo = {};
@@ -82,21 +82,22 @@ comprobar('undefined cae en sla', resolverModulo(undefined), 'sla');
 comprobar('null cae en sla', resolverModulo(null), 'sla');
 
 // --- los modulos de verdad se resuelven a si mismos ----------------------
-// Incluye los hashes de siempre de los modulos agrupados (#tablero, #qa,
-// #qare): los enlaces viejos siguen abriendo su modulo.
+// Incluye los hashes de siempre de los modulos agrupados (#tablero,
+// #orquestacion, #qa, #qare): los enlaces viejos siguen abriendo su modulo.
 Object.keys(MODULOS_FALSO).forEach(function (n) {
   comprobar('modulo "' + n + '" se resuelve solo', resolverModulo(n), n);
 });
 
 // --- grupos: #observabilidad y #calidad abren un modulo del grupo ---------
 comprobar('los dos grupos existen', Object.keys(GRUPOS).sort().join(','), 'calidad,observabilidad');
-// Observabilidad: por ahora solo el marco, que trae su Orquestacion dentro.
-comprobar('Observabilidad = el marco (tablero)', GRUPOS.observabilidad.join(','), 'tablero');
+comprobar('Observabilidad = Observabilidad (tablero) + Orquestacion', GRUPOS.observabilidad.join(','), 'tablero,orquestacion');
 comprobar('Calidad de informacion = QA + QARE', GRUPOS.calidad.join(','), 'qa,qare');
 comprobar('#observabilidad abre Observabilidad (tablero) la primera vez', resolverModulo('observabilidad'), 'tablero');
 comprobar('#calidad abre QA la primera vez', resolverModulo('calidad'), 'qa');
 ultimo.calidad = 'qare';
+ultimo.observabilidad = 'orquestacion';
 comprobar('#calidad abre el ultimo visto (QARE)', resolverModulo('calidad'), 'qare');
+comprobar('#observabilidad abre el ultimo visto (Orquestacion)', resolverModulo('observabilidad'), 'orquestacion');
 Object.keys(GRUPOS).forEach(function (g) {
   comprobar('el grupo "' + g + '" no pisa una clave de MODULOS',
     Object.prototype.hasOwnProperty.call(MODULOS_FALSO, g), false);

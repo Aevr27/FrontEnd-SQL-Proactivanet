@@ -42,7 +42,9 @@
 //   AccesoAdminHttpSmoke.exe
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.IO;
+using System.Reflection;
 using System.Security.Principal;
 using System.Web;
 
@@ -56,6 +58,22 @@ sealed class FuenteFalsa : IFuenteRolesAdmin
     public FuenteFalsa Con(string cuenta, params string[] accesos) { Filas[cuenta.Trim().ToUpperInvariant()] = accesos; return this; }
 
     public IList<string> AccesosDe(string cuenta)
+    {
+        Pedidas.Add(cuenta);
+        if (Falla) throw new InvalidOperationException("sin SQL");
+        string[] f;
+        return Filas.TryGetValue(cuenta.Trim().ToUpperInvariant(), out f) ? f : new string[0];
+    }
+}
+
+// CorreoUsuario de mentira: cuenta (mayusculas) -> filas.
+sealed class FuenteCorreoFalsa : IFuenteCorreoAdmin
+{
+    public readonly Dictionary<string, string[]> Filas = new Dictionary<string, string[]>();
+    public bool Falla;
+    public readonly List<string> Pedidas = new List<string>();
+
+    public IList<string> CorreosDe(string cuenta)
     {
         Pedidas.Add(cuenta);
         if (Falla) throw new InvalidOperationException("sin SQL");
@@ -87,6 +105,26 @@ public static class AccesoAdminHttpSmoke
             ctx.User = new GenericPrincipal(new GenericIdentity(cuenta, cuenta.Length == 0 ? "" : "Negotiate"), new string[0]);
         HttpContext.Current = ctx;
         return ctx;
+    }
+
+    // POST multipart como el del navegador (sin IIS): el metodo y el Form se
+    // fijan por reflexion. Solo para caminos que deben cortar ANTES de leer
+    // el formulario (403): nunca llegan a la base.
+    static string CorrerPost(IHttpHandler h, string archivo, string cuenta, string[][] campos, out int estado, out string metodo)
+    {
+        var sw = new StringWriter();
+        var ctx = Contexto(archivo, null, cuenta, sw);
+        var req = ctx.Request;
+        typeof(HttpRequest).GetField("_httpMethod", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, "POST");
+        var tipoForm = typeof(HttpRequest).Assembly.GetType("System.Web.HttpValueCollection");
+        var form = (NameValueCollection)Activator.CreateInstance(tipoForm, true);
+        foreach (var c in campos) form.Add(c[0], c[1]);
+        typeof(HttpRequest).GetField("_form", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, form);
+        metodo = req.HttpMethod;
+        h.ProcessRequest(ctx);
+        estado = ctx.Response.StatusCode;
+        HttpContext.Current = null;
+        return sw.ToString();
     }
 
     static string Correr(IHttpHandler h, string archivo, string query, string cuenta, out int estado)
@@ -133,6 +171,31 @@ public static class AccesoAdminHttpSmoke
         Check("H1 admin_sesion: otra cuenta no", "200|{\"autorizado\":false}", estado + "|" + cuerpo);
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
         Check("H1 admin_sesion: anonimo no", "200|{\"autorizado\":false}", estado + "|" + cuerpo);
+
+        // ---- correo de la cabecera (App_Code/CorreoAdmin.cs) ------------------
+        var correos = new FuenteCorreoFalsa();
+        correos.Filas[YO.ToUpperInvariant()] = new[] { " andresvr@soriana.com " };
+        correos.Filas[@"SORIANA\T_DOS"] = new[] { "uno@soriana.com", "otro@soriana.com" };
+        correos.Filas[@"SORIANA\T_REPETIDO"] = new[] { "Uno@Soriana.com", null, "uno@soriana.com", "" };
+        correos.Filas[@"SORIANA\T_RARO"] = new[] { "sin arroba", "<b>x</b>@a.com" };
+        Check("CO1 correo de la fila de la cuenta, sin espacios", "andresvr@soriana.com",
+              CorreoAdmin.Para(IdentidadWindows.Desde(YO, true), correos, null));
+        Check("CO1 la cuenta se busca con DOMINIO\\cuenta (Original), como el rol", YO, correos.Pedidas[0]);
+        Check("CO2 dos correos distintos: ninguno (no se elige)", "",
+              CorreoAdmin.Para(IdentidadWindows.Desde(@"SORIANA\t_dos", true), correos, null) ?? "");
+        Check("CO3 el mismo repetido (y filas vacias): ese", "Uno@Soriana.com",
+              CorreoAdmin.Para(IdentidadWindows.Desde(@"SORIANA\t_repetido", true), correos, null) ?? "");
+        Check("CO4 valores sin forma de correo o con marcado: ninguno", "",
+              CorreoAdmin.Para(IdentidadWindows.Desde(@"SORIANA\t_raro", true), correos, null) ?? "");
+        Check("CO5 sin fila: ninguno (nunca se arma con la cuenta)", "",
+              CorreoAdmin.Para(IdentidadWindows.Desde(@"SORIANA\t_nadie", true), correos, null) ?? "");
+        var pedidasAntes = correos.Pedidas.Count;
+        Check("CO6 anonimo: ninguno y sin consultar", "|" + pedidasAntes,
+              (CorreoAdmin.Para(IdentidadWindows.Desde("", false), correos, null) ?? "") + "|" + correos.Pedidas.Count);
+        correos.Falla = true;
+        var registrado = false;
+        Check("CO7 consulta que falla: ninguno y se registra", "|True",
+              (CorreoAdmin.Para(IdentidadWindows.Desde(YO, true), correos, delegate { registrado = true; }) ?? "") + "|" + registrado);
 
         cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
         Check("H2 capacidad ADM: pasa Exigir (400 por falta de categoria, sin SQL)", "400|True",
@@ -190,6 +253,37 @@ public static class AccesoAdminHttpSmoke
             cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
             Check("R1 " + c.nombre + ": admin_sesion entra como MOD", "{\"autorizado\":true,\"rol\":\"MOD\"}", cuerpo);
         }
+
+        // ---- X) Edicion directa (accion=modificar por POST) sin ADM ----------
+        // El detalle de Iniciativas manda el mismo POST que el antiguo
+        // "Modificar". Sin rol ADM en dbo.UsuariosAdmin el handler corta con
+        // 403 antes de leer el formulario; un "rol" que mande el navegador
+        // (campo o lo que sea) no cuenta.
+        var postModificar = new[]
+        {
+            new[] { "accion", "modificar" }, new[] { "folio", "PRB 2026-000001" }, new[] { "titulo", "Cambiado" },
+            new[] { "f_cierre", "2027-01-31" }, new[] { "rol", "ADM" }, new[] { "Acceso", "ADM" },
+        };
+        var casosPost = new[]
+        {
+            new { nombre = "MOD", cuenta = YO, f = new FuenteFalsa().Con(YO, "MOD"), tipo = "RolInsuficiente" },
+            new { nombre = "ADM + MOD", cuenta = YO, f = new FuenteFalsa().Con(YO, "ADM", "MOD"), tipo = "RolInsuficiente" },
+            new { nombre = "VIEWER (sin fila)", cuenta = YO, f = new FuenteFalsa(), tipo = "AccesoDenegado" },
+            new { nombre = "consulta de rol que falla", cuenta = YO, f = new FuenteFalsa { Falla = true }, tipo = "AccesoDenegado" },
+            new { nombre = "otra cuenta (sin fila)", cuenta = @"SORIANA\t_otro", f = new FuenteFalsa().Con(YO, "ADM"), tipo = "AccesoDenegado" },
+            new { nombre = "anonimo", cuenta = "", f = new FuenteFalsa().Con(YO, "ADM"), tipo = "AccesoDenegado" },
+        };
+        foreach (var c in casosPost)
+        {
+            AccesoAdmin.FuenteRoles = c.f;
+            string metodo;
+            cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", c.cuenta, postModificar, out estado, out metodo);
+            Check("X1 " + c.nombre + ": POST accion=modificar (con rol=ADM en el formulario) 403 " + c.tipo + ", sin validar ni guardar",
+                  "POST|403|True|False|False",
+                  metodo + "|" + estado + "|" + cuerpo.Contains("\"tipo\":\"" + c.tipo + "\"") + "|" +
+                  cuerpo.Contains("\"valida\"") + "|" + cuerpo.Contains("\"guardada\""));
+        }
+        AccesoAdmin.FuenteRoles = fuente;
 
         // ---- V) VIEWER: en la whitelist pero sin rol valido ------------------
         var casosViewer = new[]

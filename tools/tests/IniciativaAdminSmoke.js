@@ -16,8 +16,11 @@
 //   CB) Boton "+ Crear iniciativa": junto a "Solicitar", visible solo con
 //      ADM (SesionAdmin real), dos pestañas intactas y borradores que
 //      sobreviven a la navegacion.
-//   E) Modificar (antes "Editar (Admin)") en el detalle del registro: solo ADM, cambios,
-//      faltantes, formato, rol que cambia con el panel abierto.
+//   E) Edicion directa en el detalle del registro (reemplaza "Modificar"):
+//      solo ADM, campos editables en su lugar, barra "Cambios sin guardar",
+//      Cancelar, faltantes, formato, rol que cambia con el panel abierto.
+//   EC) Cambios sin guardar: cerrar, otra fila, otra pestaña y salir de la
+//      pagina preguntan; Cancelar con el foco en un campo queda limpio.
 //   M) Marca Incompleta en el detalle (para cualquier rol).
 //   P) Nada se persiste: solo los dos GET de siempre, ninguna escritura en
 //      el codigo nuevo.
@@ -384,55 +387,88 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
-// E) Modificar (antes "Editar (Admin)") + M) marca Incompleta en el detalle
+// E) Edicion directa en el detalle (antes "Modificar") + M) marca Incompleta
 // ---------------------------------------------------------------------------
+function htmlEditable(p) {
+  return ['regDetIdent', 'regDetEtapas', 'regDetCats', 'regDetDesc'].map(function (id) { return p.sel(id).innerHTML; }).join('');
+}
 pruebas.push(function () {
   var p = Pagina();
   return esperar().then(function () {
     var reg = p.registro;
     reg.abrirDetalle('PRB 2026-000001');
-    Check('E1 sin rol: sin boton de editar', false, />Modificar<\/button>/.test(p.sel('regDetCuerpo').innerHTML));
+    var det = p.sel('regDetCuerpo').innerHTML;
+    Check('E1 sin rol: solo lectura (sin controles, sin barra, sin boton Modificar)', [false, false, false, null],
+      [/data-edicion/.test(det), /id="regEdBarra"/.test(det), />Modificar<\/button>/.test(det), reg.edicion]);
     accion(p, 'editar-admin');
-    Check('E2 sin rol: la accion no abre nada', [null, true], [reg.edicion, p.sel('regEdicion').hidden]);
+    Check('E2 sin rol: la accion no abre nada', null, reg.edicion);
     Check('E3 Solicitar cambios sigue ahi', true, /Solicitar cambios/.test(p.sel('regDetCuerpo').innerHTML));
 
     p.pagina.fijarRol('ADM');
-    Check('E4 ADM con el detalle abierto: aparece el boton', true, />Modificar<\/button>/.test(p.sel('regDetAcciones').innerHTML));
-    accion(p, 'editar-admin');
-    var html = p.sel('regEdicion').innerHTML;
-    Check('E5 abre el formulario: aviso de persistencia no habilitada y Guardar que valida en el servidor', [false, true, true],
-      [p.sel('regEdicion').hidden, /la persistencia no está habilitada/.test(html), /data-accion="edicion-guardar"/.test(html)]);
-    Check('E5b el boton dice que solo valida; ningun boton "Guardar" a secas', [true, false],
-      [/data-accion="edicion-guardar"[^>]*>Validar en el servidor \(no guarda\)<\/button>/.test(html),
-       /<button[^>]*>\s*Guardar\s*<\/button>/.test(html)]);
-    Check('E6 lista lo que no es editable, con motivo (RCA pendiente; codigo y dueños solo lectura)', true,
-      /<b>RCA<\/b> · pendiente de contrato/.test(html) && /<b>Código y Tipo de iniciativa<\/b> · solo lectura/.test(html));
-    Check('E6b fechas, Estado y categorias ya son editables', [true, true, true],
-      [/type="date" id="regEd-f_analisis" data-edicion="f_analisis" value="2026-12-01"/.test(html),
-       /<select id="regEd-estado" data-edicion="estado">/.test(html), /id="regEdCats"/.test(html)]);
+    var html = htmlEditable(p), barra = p.sel('regEdBarraCaja').innerHTML;
+    Check('E4 ADM con el detalle abierto: los campos se vuelven editables en su lugar; sin boton Modificar', [true, false, true],
+      [!!reg.edicion, />Modificar<\/button>/.test(p.sel('regDetAcciones').innerHTML), /Edición directa \(ADM\)/.test(p.sel('regDetAcciones').innerHTML)]);
+    Check('E4b el rotulo del detalle deja de decir Solo lectura', 'Edición directa (ADM)', p.sel('regDetModo').textContent);
+    Check('E5 barra: Guardar que solo valida (persistencia no habilitada) y Cancelar; oculta sin cambios', [true, true, true, true, true],
+      [/data-accion="edicion-guardar"[^>]*>Validar en el servidor \(no guarda\)<\/button>/.test(barra),
+       /data-accion="edicion-cancelar"[^>]*>Cancelar<\/button>/.test(barra), /la persistencia no está habilitada/.test(barra),
+       /id="regEdBarra"[^>]*hidden/.test(barra), p.sel('regEdBarra').hidden]);
+    Check('E5b ningun boton "Guardar" a secas', false, /<button[^>]*>\s*Guardar\s*<\/button>/.test(barra));
+    Check('E6 Codigo, Agrupacion y Antiguedad siguen de solo lectura; Organizacion e Impacto sin controles', [true, true, false],
+      [/<dt>Código<\/dt><dd>PRB 2026-000001<\/dd>/.test(html), /<dt>Agrupación<\/dt><dd>Problem<\/dd>/.test(html),
+       /data-edicion="(codigo|duenos|tickets|manager)/.test(p.sel('regDetCuerpo').innerHTML)]);
+    Check('E6b titulo (encabezado), descripcion y observaciones se VEN con su valor y se editan con un clic; Estado, fechas y categorias son controles',
+      [true, true, true, true, true, true, false],
+      [/<div class="ini-ed-mostrar ini-det-nombre" id="regEdVer-titulo"[^>]*data-editar="titulo"[^>]*>T PRB 2026-000001<\/div>/.test(p.sel('regDetNombre').innerHTML),
+       /<select id="regEd-estado" data-edicion="estado"/.test(p.sel('regDetIdent').innerHTML),
+       /type="date" id="regEd-f_analisis" data-edicion="f_analisis"[^>]*value="2026-12-01"/.test(p.sel('regDetEtapas').innerHTML),
+       /data-editar="descripcion"[^>]*>Desc PRB 2026-000001<\/div>/.test(p.sel('regDetDesc').innerHTML),
+       /data-editar="observaciones"[^>]*>Obs PRB 2026-000001<\/div>/.test(p.sel('regDetDesc').innerHTML),
+       /id="regEdCats"/.test(p.sel('regDetCats').innerHTML),
+       /<dt>Título/.test(p.sel('regDetIdent').innerHTML)]);
 
-    editar(p, 'data-edicion', 'titulo', 'Nuevo titulo');
+    var titulo = Elemento('control');
+    titulo.setAttribute('data-edicion', 'titulo');
+    titulo.value = 'Nuevo titulo';
+    p.sel('regDetCuerpo').disparar('input', { target: titulo });
+    Check('E6c el control tocado queda marcado; la barra aparece con la cuenta', [true, false, '1 cambio sin guardar'],
+      [titulo.classList.contains('ini-ed-cambiado'), p.sel('regEdBarra').hidden, p.sel('regEdSucio').textContent]);
     editar(p, 'data-edicion', 'descripcion', '');
     editar(p, 'data-edicion-pct', '1', '30');
+    Check('E6d tres cambios', '3 cambios sin guardar', p.sel('regEdSucio').textContent);
     var r = reg.revisarEdicion();
     Check('E7 cambios detectados', ['titulo', 'descripcion', 'pct'], claves(r.cambios));
     Check('E8 vaciar Descripcion NO marca incompleta a una existente', [true, false, []],
       [r.listo, r.incompleta, claves(r.faltantes)]);
-    Check('E9 nunca guardado; el mensaje lo dice', [false, true],
-      [r.guardado, /no guardados/.test(p.sel('regEdMsg').innerHTML) && /No se guardó nada/.test(p.sel('regEdMsg').innerHTML)]);
+    Check('E9 la revision local nunca dice guardado', [false, false],
+      [r.guardado, /Guardado/.test(p.sel('regEdMsg').innerHTML)]);
     editar(p, 'data-edicion-pct', '0', '');
     r = reg.revisarEdicion();
     Check('E8b vaciar un % si la marca incompleta (no bloquea)', [true, true, ['pct']],
       [r.listo, r.incompleta, claves(r.faltantes)]);
     editar(p, 'data-edicion-pct', '0', '101');
     r = reg.revisarEdicion();
-    Check('E10 % fuera de rango si bloquea', [false, 'error'], [r.listo, /error/.test(p.sel('regEdMsg').className) ? 'error' : '']);
+    Check('E10 % fuera de rango si bloquea, con mensaje entendible', [false, 'error', true],
+      [r.listo, /error/.test(p.sel('regEdMsg').className) ? 'error' : '', /entre 0 y 100/.test(p.sel('regEdMsg').innerHTML)]);
     Check('E11 el registro no cambia (solo el borrador)', ['T PRB 2026-000001', 0.5],
       [reg.registro.buscar('PRB 2026-000001').titulo, reg.registro.buscar('PRB 2026-000001').categorias[0].pct_dism]);
 
+    // Cancelar: vuelve a lo guardado; Solicitar cambios abierto no se toca.
+    accion(p, 'solicitar-cambios');
+    var cambio = reg.cambio;
+    accion(p, 'edicion-cancelar');
+    Check('E11b Cancelar: borrador = lo guardado, sin cambios, barra oculta, controles con los valores guardados',
+      [0, 'T PRB 2026-000001', '50', true, true, true],
+      [reg.edicion.cambios().length, reg.edicion.valores.titulo, reg.edicion.valores.pct[0].valor, p.sel('regEdBarra').hidden,
+       /data-editar="titulo"[^>]*>T PRB 2026-000001<\/div>/.test(p.sel('regDetNombre').innerHTML),
+       /data-edicion-pct="0" value="50"/.test(p.sel('regDetCats').innerHTML)]);
+    Check('E11c ... Solicitar cambios sigue abierto con su borrador', [true, true, false],
+      [reg.cambioAbierto, reg.cambio === cambio, p.sel('regCambio').hidden]);
+    accion(p, 'cambio-cancelar');
+
     p.pagina.fijarRol('MOD');
-    Check('E12 perder ADM cierra la edicion y quita el boton', [null, true, false],
-      [reg.edicion, p.sel('regEdicion').hidden, />Modificar<\/button>/.test(p.sel('regDetAcciones').innerHTML)]);
+    Check('E12 perder ADM: sin borrador, sin controles, sin barra; el rotulo vuelve a Solo lectura', [null, false, '', 'Solo lectura'],
+      [reg.edicion, /data-edicion/.test(htmlEditable(p)), p.sel('regEdBarraCaja').innerHTML, p.sel('regDetModo').textContent]);
 
     var editables = A.EdicionAdmin.campos('editable').map(function (c) { return c.clave; });
     Check('E13 editables propuestos', ['titulo', 'descripcion', 'observaciones', 'f_analisis', 'f_solucion', 'f_cierre',
@@ -456,6 +492,64 @@ pruebas.push(function () {
     Check('P1 solo GET de registro, catalogo y volumetria', true, p.pedidos.every(function (x) {
       return x.metodo === 'GET' && /admin_iniciativas_(registro|catalogos|volumetria)\.ashx/.test(x.url);
     }));
+  });
+});
+
+// EC) Cambios sin guardar: cerrar, cambiar de iniciativa o de pestaña y
+//     salir de la pagina preguntan antes de descartar.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro, pg = p.pagina, preguntas = [], responde = false;
+    reg.confirmar = function (m) { preguntas.push(m); return responde; };
+    pg.fijarRol('ADM');
+    reg.abrirDetalle('PRB 2026-000001');
+    Check('EC1 sin cambios: cerrar no pregunta', [true, 0, null], [reg.cerrarDetalle(), preguntas.length, reg.abierta]);
+    reg.abrirDetalle('PRB 2026-000001');
+    editar(p, 'data-edicion', 'titulo', 'Otro');
+    Check('EC2 con cambios: cerrar pregunta; "no" deja todo abierto con lo escrito', [false, 1, 'PRB 2026-000001', 'Otro', false],
+      [reg.cerrarDetalle(), preguntas.length, reg.abierta, reg.edicion.valores.titulo, p.sel('regDetalle').hidden]);
+    Check('EC2 ... el mensaje dice cuantos y de cual', true, /Hay 1 cambio sin guardar en PRB 2026-000001/.test(preguntas[0]));
+    var esc = { key: 'Escape' };
+    p.doc.disparar('keydown', esc);
+    p.sel('regDetFondo').disparar('click');
+    p.sel('regDetCerrar').disparar('click');
+    Check('EC3 Escape, el fondo y la X preguntan igual (y no cierran)', [4, 'PRB 2026-000001'], [preguntas.length, reg.abierta]);
+    var fila = Elemento('fila');
+    fila.setAttribute('data-folio', 'MAP 2026-000003');
+    p.sel('regCuerpo').disparar('click', { target: fila });
+    Check('EC4 abrir otra fila pregunta; "no" se queda en la misma', [5, 'PRB 2026-000001'], [preguntas.length, reg.abierta]);
+    p.sel('tab-solicitudes').disparar('click');
+    Check('EC5 cambiar de pestaña pregunta; "no" se queda en Iniciativas con el detalle', [6, 'iniciativas', 'PRB 2026-000001'],
+      [preguntas.length, pg.vista, reg.abierta]);
+    var salida = { returnValue: undefined, preventDefault: function () { this.prevenido = true; } };
+    p.ventana.disparar('beforeunload', salida);
+    Check('EC6 salir de la pagina con cambios: el navegador avisa', [true, ''], [salida.prevenido, salida.returnValue]);
+    responde = true;
+    p.sel('regCuerpo').disparar('click', { target: fila });
+    Check('EC7 "si": se descartan y abre la otra', ['MAP 2026-000003', 0], [reg.abierta, reg.edicion.cambios().length]);
+    var limpia = { returnValue: undefined, preventDefault: function () { this.prevenido = true; } };
+    p.ventana.disparar('beforeunload', limpia);
+    Check('EC8 sin cambios: salir no avisa', undefined, limpia.prevenido);
+    reg.confirmar = null;
+    editar(p, 'data-edicion', 'titulo', 'X');
+    Check('EC9 sin forma de preguntar (sin confirm): no se descarta nada', [false, 'MAP 2026-000003'], [reg.cerrarDetalle(), reg.abierta]);
+    Check('EC10 recargar el registro o perder el acceso cierra sin preguntar', [true, null], [reg.cerrarDetalle(true), reg.abierta]);
+
+    // El navegador manda "change" del control enfocado al quitarlo del DOM:
+    // Cancelar lo desenfoca ANTES de armar el borrador nuevo.
+    reg.abrirDetalle('PRB 2026-000001');
+    var enfocado = Elemento('control');
+    enfocado.setAttribute('data-edicion', 'titulo');
+    enfocado.value = 'Escrito y enfocado';
+    enfocado.blur = function () { enfocado.desenfocado = true; p.sel('regDetCuerpo').disparar('change', { target: enfocado }); };
+    p.sel('regDetCuerpo').disparar('input', { target: enfocado });
+    p.doc.activeElement = enfocado;
+    p.sel('regDetCuerpo').contains = function (el) { return el === enfocado; };
+    accion(p, 'edicion-cancelar');
+    Check('EC11 Cancelar con el campo enfocado: se desenfoca antes y el borrador nuevo queda limpio', [true, 0, 'T PRB 2026-000001', true],
+      [enfocado.desenfocado === true, reg.edicion.cambios().length, reg.edicion.valores.titulo, p.sel('regEdBarra').hidden]);
+    p.doc.activeElement = null;
   });
 });
 
@@ -561,30 +655,40 @@ pruebas.push(function () {
   });
 });
 
-// MD) "Modificar" desde el registro: elegir, cargar valores, editar, vista
-//     previa en vivo, legado conservado, nada se guarda, solo ADM.
+// MD) Edicion directa desde el registro (y "Crear > existente"): valores
+//     cargados en su lugar, vista previa en vivo, legado conservado, nada
+//     se guarda, solo ADM.
 pruebas.push(function () {
   var p = Pagina();
   return esperar().then(function () {
-    var reg = p.registro, pg = p.pagina;
+    var reg = p.registro, pg = p.pagina, preguntas = 0;
+    reg.confirmar = function () { preguntas++; return true; };
     // Iniciativa con datos heredados: titulo de la iniciativa distinto del
     // del Problem y un % con dos decimales.
     reg.registro.iniciativas.push(Ini('PRB 2026-000009', { titulo: 'Titulo de la iniciativa (Excel)', titulo_problem: 'Titulo del Problem',
       categorias: [Cat('/A/Cat 1', 0.3333)] }));
 
     pg.fijarRol('MOD');
-    Check('MD1 MOD: Modificar no abre ni aparece', [false, null, false],
-      [reg.modificar('PRB 2026-000001'), reg.edicion, />Modificar<\/button>/.test(p.sel('regDetAcciones').innerHTML)]);
+    Check('MD1 MOD: modificar no abre edicion; el detalle de MOD no tiene controles ni barra', [false, null, false, false],
+      [reg.modificar('PRB 2026-000001'), reg.edicion, /data-edicion/.test(p.sel('regDetCuerpo').innerHTML),
+       /id="regEdBarra"/.test(p.sel('regDetCuerpo').innerHTML)]);
+    reg.abrirDetalle('PRB 2026-000001');
+    Check('MD1b MOD: el detalle sigue de solo lectura', [null, false],
+      [reg.edicion, /data-edicion/.test(p.sel('regDetCuerpo').innerHTML)]);
+    reg.cerrarDetalle();
     pg.fijarRol('ADM');
 
-    Check('MD2 ADM: Modificar abre el detalle con el formulario', [true, 'PRB 2026-000001', false],
-      [reg.modificar('PRB 2026-000001'), reg.abierta, p.sel('regEdicion').hidden]);
-    var ed = reg.edicion, html = p.sel('regEdicion').innerHTML;
+    Check('MD2 ADM: abre el detalle ya editable, sin cambios ni barra', [true, 'PRB 2026-000001', 0, true],
+      [reg.modificar('PRB 2026-000001'), reg.abierta, reg.edicion.cambios().length, p.sel('regEdBarra').hidden]);
+    var ed = reg.edicion, html = p.sel('regDetCuerpo').innerHTML;
     Check('MD2 valores actuales cargados', ['T PRB 2026-000001', 'Desc PRB 2026-000001', 'Obs PRB 2026-000001', ['50', '25']],
       [ed.valores.titulo, ed.valores.descripcion, ed.valores.observaciones, ed.valores.pct.map(function (x) { return x.valor; })]);
-    Check('MD2 ... y pintados en los controles', [true, true, true],
-      [/value="T PRB 2026-000001"/.test(html), />Desc PRB 2026-000001<\/textarea>/.test(html), /data-edicion-pct="1" value="25"/.test(html)]);
-    Check('MD3 contexto de solo lectura: codigo, tipo y estado', true, /Código PRB 2026-000001 · Problem · En Análisis \(solo lectura\)/.test(html));
+    Check('MD2 ... y a la vista en su lugar (titulo en el encabezado, textos, %)', [true, true, true],
+      [/data-editar="titulo"[^>]*>T PRB 2026-000001<\/div>/.test(html), /data-editar="descripcion"[^>]*>Desc PRB 2026-000001<\/div>/.test(html),
+       /data-edicion-pct="1" value="25"/.test(html)]);
+    Check('MD3 "Crear > existente" NO abre editores: el titulo se ve como texto y recibe el foco', [false, null, true, false],
+      [/id="regEd-titulo"/.test(p.sel('regDetCuerpo').innerHTML), reg.editando,
+       p.sel('regEdVer-titulo').enfocado > 0, /<textarea/.test(p.sel('regDetCuerpo').innerHTML)]);
     Check('MD3 Guardar valida en el servidor; aviso de persistencia + carga del Excel', [true, true],
       [/data-accion="edicion-guardar"/.test(html), /la carga reemplazaría estos campos/.test(html)]);
     Check('MD4 vista previa inicial: sin cambios', true, /Sin cambios\./.test(p.sel('regEdVista').innerHTML));
@@ -604,21 +708,26 @@ pruebas.push(function () {
 
     // Legado: se conserva tal cual y se avisa.
     reg.modificar('PRB 2026-000009');
-    html = p.sel('regEdicion').innerHTML;
+    Check('MD6b con cambios sin guardar, abrir otra pregunta antes', 1, preguntas);
+    html = p.sel('regDetCuerpo').innerHTML;
     Check('MD7 legado: titulo editable = el del Problem; % 33.33 sin redondeos; sin cambios al abrir',
       ['Titulo del Problem', '33.33', 0], [reg.edicion.valores.titulo, reg.edicion.valores.pct[0].valor, reg.edicion.cambios().length]);
-    Check('MD7 aviso: el TituloIniciativa del Excel se conserva', true,
-      /ProblemCategoria\.TituloIniciativa: &quot;Titulo de la iniciativa \(Excel\)&quot;/.test(html) || /ProblemCategoria\.TituloIniciativa/.test(html));
+    Check('MD7 encabezado = TituloIniciativa (sin editor); el del Problem va en "Título del problema"; el aviso dice que el del Excel se conserva',
+      [true, false, true, true],
+      [/<p class="ini-det-nombre">Titulo de la iniciativa \(Excel\)<\/p>/.test(html), /id="regDetNombre"><div class="ini-ed-caja"/.test(html),
+       /<dt>Título del problema<\/dt><dd><div class="ini-ed-caja" id="regEdCaja-titulo"><div [^>]*data-editar="titulo"[^>]*>Titulo del Problem<\/div>/.test(html),
+       /ProblemCategoria\.TituloIniciativa/.test(p.sel('regEdVista').innerHTML)]);
 
     reg.modificar('MAP 2026-000003');
-    Check('MD8 faltaba un %: se avisa como previo', true, /Ya faltaba antes de modificar/.test(p.sel('regEdicion').innerHTML));
+    Check('MD8 faltaba un %: la marca Incompleta del detalle lo dice', true,
+      /Incompleta<\/strong> · faltan: % Disminución/.test(p.sel('regDetCuerpo').innerHTML));
     editar(p, 'data-edicion-pct', '0', '20');
     Check('MD8 capturarlo: "Se completaría" en la vista previa', true, /Se completaría: % Disminución/.test(p.sel('regEdVista').innerHTML));
 
     reg.modificar('PRB 2026-000002');
-    html = p.sel('regEdicion').innerHTML;
+    html = p.sel('regDetCuerpo').innerHTML;
     Check('MD9 sin categoria: dueños del Problem se conservan; sin categorias todavia; Categoria ya faltaba', [true, true, true],
-      [/OwnerProblem, OwnerServicio, Direccion\) y se conservan/.test(html), /Sin categorías todavía/.test(html),
+      [/OwnerProblem, OwnerServicio, Direccion\) y se conservan/.test(p.sel('regEdVista').innerHTML), /Sin categorías todavía/.test(html),
        /Incompleta<\/strong> · faltan: Categoría\./.test(html)]);
 
     p.sel('btnCrearAdmin').disparar('click');
@@ -626,6 +735,117 @@ pruebas.push(function () {
     pg.fijarRol('MOD');
     Check('MD10 MOD: la creacion directa no', 'iniciativas', pg.vista);
     Check('MD11 solo lecturas GET, ninguna escritura', true, p.pedidos.every(function (x) { return x.metodo === 'GET'; }));
+  });
+});
+
+// TX) Titulo, Descripcion y Observaciones de ADM: se VEN con su valor (el
+//     titulo como encabezado) y se editan en su lugar con un clic. Vacio o
+//     null se rotula; CRLF y saltos al inicio no cuentan como cambio; solo
+//     lo cambiado viaja; Cancelar y guardar dejan lo guardado a la vista.
+function textoMostrado(html, clave) {
+  var m = new RegExp('data-editar="' + clave + '"[^>]*>([\\s\\S]*?)</div>').exec(html || '');
+  return m ? m[1] : null;
+}
+pruebas.push(function () {
+  var p = Pagina(), reg, srv;
+  return esperar().then(function () {
+    reg = p.registro;
+    reg.registro.persistenciaAdmin = true;
+    reg.registro.iniciativas.push(
+      Ini('PRB 2026-000010', { descripcion: 'Línea 1\r\nLínea 2\r\n\r\nLínea 4', observaciones: '\nEmpieza con salto' }),
+      Ini('PRB 2026-000011', { descripcion: null, observaciones: '' }),
+      Ini('PRB 2026-000012', { titulo: 'Titulo visible (iniciativa)', titulo_problem: null }));
+
+    // MOD: los textos se ven, sin nada que editar.
+    p.pagina.fijarRol('MOD');
+    reg.abrirDetalle('PRB 2026-000010');
+    var mod = p.sel('regDetCuerpo').innerHTML;
+    Check('TX1 MOD: titulo como encabezado, textos con su valor y sin editores', [true, true, false, false],
+      [/<p class="ini-det-nombre">T PRB 2026-000010<\/p>/.test(mod), /<div class="ini-texto">Línea 1\r\nLínea 2/.test(mod),
+       /data-editar|data-edicion=/.test(mod), /<textarea|<input type="text"/.test(mod)]);
+    reg.cerrarDetalle();
+
+    p.pagina.fijarRol('ADM');
+    reg.abrirDetalle('PRB 2026-000010');
+    var html = p.sel('regDetCuerpo').innerHTML;
+    Check('TX2 ADM: titulo actual como encabezado (no un campo vacio); textos con su valor, multilinea intacto',
+      ['T PRB 2026-000010', 'Línea 1\nLínea 2\n\nLínea 4', '\nEmpieza con salto', false],
+      [textoMostrado(html, 'titulo'), textoMostrado(html, 'descripcion'), textoMostrado(html, 'observaciones'),
+       /<input type="text" id="regEd-titulo"|<textarea/.test(html)]);
+    Check('TX2b CRLF de la base y salto inicial: el borrador no ve cambios', [0, true],
+      [reg.edicion.cambios().length, p.sel('regEdBarra').hidden]);
+
+    // Clic en la descripcion: editor con el valor; el \n extra lo come el parser.
+    var vista = Elemento('vista');
+    vista.setAttribute('data-editar', 'descripcion');
+    p.sel('regDetCuerpo').disparar('click', { target: vista });
+    var caja = p.sel('regEdCaja-descripcion').innerHTML;
+    Check('TX3 clic: la descripcion se vuelve textarea con su valor, en su lugar, con foco', ['descripcion', true, true],
+      [reg.editando, /<textarea id="regEd-descripcion" data-edicion="descripcion"[^>]*>\nLínea 1\nLínea 2\n\nLínea 4<\/textarea>/.test(caja),
+       p.sel('regEd-descripcion').enfocado > 0]);
+    editar(p, 'data-edicion', 'descripcion', 'Descripción nueva\ncon dos líneas');
+    var ctl = Elemento('control');
+    ctl.setAttribute('data-edicion', 'descripcion');
+    p.sel('regDetCuerpo').disparar('focusout', { target: ctl });
+    caja = p.sel('regEdCaja-descripcion').innerHTML;
+    Check('TX4 al salir vuelve a verse como texto, con lo escrito y marcado; la barra cuenta el cambio',
+      [null, 'Descripción nueva\ncon dos líneas', true, '1 cambio sin guardar'],
+      [reg.editando, textoMostrado(caja, 'descripcion'), /ini-ed-mostrar ini-texto ini-ed-cambiado/.test(caja), p.sel('regEdSucio').textContent]);
+
+    // Enter sobre el titulo mostrado lo abre; Escape solo sale del editor.
+    var tit = Elemento('vista');
+    tit.setAttribute('data-editar', 'titulo');
+    p.sel('regDetCuerpo').disparar('keydown', { target: tit, key: 'Enter', preventDefault: function () {} });
+    Check('TX5 Enter abre el titulo con su valor', [true, 'titulo'],
+      [/<input type="text" id="regEd-titulo"[^>]*value="T PRB 2026-000010"/.test(p.sel('regEdCaja-titulo').innerHTML), reg.editando]);
+    editar(p, 'data-edicion', 'titulo', 'Titulo nuevo');
+    p.doc.disparar('keydown', { key: 'Escape' });
+    Check('TX5b Escape: sale del editor (el detalle sigue abierto) y el encabezado muestra lo escrito', [null, 'PRB 2026-000010', 'Titulo nuevo'],
+      [reg.editando, reg.abierta, textoMostrado(p.sel('regEdCaja-titulo').innerHTML, 'titulo')]);
+
+    // Cancelar: todo vuelve a lo guardado, tambien en el encabezado.
+    accion(p, 'edicion-cancelar');
+    Check('TX6 Cancelar: titulo, descripcion y observaciones guardados a la vista; sin cambios',
+      [0, 'T PRB 2026-000010', 'Línea 1\nLínea 2\n\nLínea 4', '\nEmpieza con salto'],
+      [reg.edicion.cambios().length, textoMostrado(p.sel('regDetNombre').innerHTML, 'titulo'),
+       textoMostrado(p.sel('regDetDesc').innerHTML, 'descripcion'), textoMostrado(p.sel('regDetDesc').innerHTML, 'observaciones')]);
+
+    // Guardar: solo lo cambiado viaja, por accion=modificar.
+    editar(p, 'data-edicion', 'titulo', 'Titulo guardado');
+    editar(p, 'data-edicion', 'observaciones', 'Obs guardada');
+    srv = Servidor(200, { accion: 'modificar', valida: true, guardada: true, codigo: 'PRB 2026-000010', cambios: [] });
+    return reg.guardarEdicion(srv.pedir, function (url) {
+      var json = JSON.parse(JSON.stringify(REGISTRO));
+      json.iniciativas.push(Ini('PRB 2026-000010', { titulo: 'Titulo guardado', titulo_problem: 'Titulo guardado',
+        descripcion: 'Línea 1\r\nLínea 2\r\n\r\nLínea 4', observaciones: 'Obs guardada' }));
+      if (/registro/.test(url)) return Promise.resolve(Respuesta(200, json));
+      return Promise.reject(new Error('peticion inesperada ' + url));
+    });
+  }).then(function (r) {
+    Check('TX7 guardar envia solo titulo y observaciones (la descripcion intacta no viaja)',
+      [[['accion', 'modificar'], ['folio', 'PRB 2026-000010'], ['titulo', 'Titulo guardado'], ['observaciones', 'Obs guardada']]],
+      [srv.pedidos[0].campos]);
+    Check('TX8 tras guardar: lo releido se ve como texto (encabezado y bloques), sin cambios pendientes',
+      ['guardada', 'Titulo guardado', 'Línea 1\nLínea 2\n\nLínea 4', 'Obs guardada', 0],
+      [r.estado, textoMostrado(p.sel('regDetCuerpo').innerHTML, 'titulo'), textoMostrado(p.sel('regDetCuerpo').innerHTML, 'descripcion'),
+       textoMostrado(p.sel('regDetCuerpo').innerHTML, 'observaciones'), reg.edicion.cambios().length]);
+
+    // null / vacio: se rotulan y nunca viajan como cadena vacia.
+    reg.registro.iniciativas.push(Ini('PRB 2026-000011', { descripcion: null, observaciones: '' }),
+      Ini('PRB 2026-000012', { titulo: 'Titulo visible (iniciativa)', titulo_problem: null }));
+    reg.abrirDetalle('PRB 2026-000011');
+    var html = p.sel('regDetCuerpo').innerHTML;
+    Check('TX9 descripcion null y observaciones vacias: "Sin captura." (no un campo en blanco), sin cambios',
+      ['<span class="ini-nota">Sin captura.</span>', '<span class="ini-nota">Sin captura.</span>', '', '', 0],
+      [textoMostrado(html, 'descripcion'), textoMostrado(html, 'observaciones'), reg.edicion.valores.descripcion,
+       reg.edicion.valores.observaciones, reg.edicion.cambios().length]);
+    reg.abrirDetalle('PRB 2026-000012');
+    html = p.sel('regDetCuerpo').innerHTML;
+    editar(p, 'data-edicion', 'f_cierre', '2027-01-31');
+    Check('TX10 titulo del Problem null: el encabezado sigue con el titulo visible; el del Problem dice "Sin captura." y no viaja',
+      [true, '<span class="ini-nota">Sin captura.</span>', ['f_cierre']],
+      [/<p class="ini-det-nombre">Titulo visible \(iniciativa\)<\/p>/.test(html), textoMostrado(html, 'titulo'),
+       reg.edicion.paraEnviar().slice(2).map(function (x) { return x[0]; })]);
   });
 });
 
@@ -1005,8 +1225,9 @@ pruebas.push(function () {
     p.pagina.fijarRol('ADM');
     reg.registro.persistenciaAdmin = true;
     reg.modificar('PRB 2026-000001');
-    Check('GS10a con persistencia activa el boton de Modificar dice "Guardar"', true,
-      /data-accion="edicion-guardar"[^>]*>Guardar<\/button>/.test(p.sel('regEdicion').innerHTML));
+    Check('GS10a con persistencia activa el boton dice "Guardar cambios" y no hay aviso de solo validar', [true, false],
+      [/data-accion="edicion-guardar"[^>]*>Guardar cambios<\/button>/.test(p.sel('regDetCuerpo').innerHTML),
+       /no está habilitada/.test(p.sel('regDetCuerpo').innerHTML)]);
     editar(p, 'data-edicion', 'titulo', 'Nuevo');
     return reg.guardarEdicion(Servidor(409, { tipo: 'TopeExcedido', error: 'tope', guardada: false }).pedir);
   }).then(function (r) {
@@ -1016,8 +1237,8 @@ pruebas.push(function () {
       cambios: [{ clave: 'titulo', rotulo: 'Título', anterior: 'x', nuevo: 'Nuevo' }] }).pedir);
   }).then(function (r) {
     var aviso = p.sel('regDetAviso');
-    Check('GS10c guardado: recarga el registro una vez, reabre el mismo detalle (sin edicion) con el aviso', ['guardada', 2, 'PRB 2026-000001', null, false, true],
-      [r.estado, registros(), reg.abierta, reg.edicion, aviso.hidden, /Guardado en la base/.test(aviso.innerHTML)]);
+    Check('GS10c guardado: recarga el registro una vez, reabre el mismo detalle (borrador nuevo, sin cambios) con el aviso', ['guardada', 2, 'PRB 2026-000001', 0, false, true],
+      [r.estado, registros(), reg.abierta, reg.edicion.cambios().length, aviso.hidden, /Guardado en la base/.test(aviso.innerHTML)]);
   });
 });
 
@@ -1196,7 +1417,7 @@ pruebas.push(function () {
     Check('ED3 Estado de la lista: cambio', [true, true], [r.listo, r.cambios.some(function (c) { return c.clave === 'estado' && c.nuevo === 'Cerrado'; })]);
     Check('ED3 aviso: sin reglas de transicion', true, ed.notasLegado().some(function (n) { return /transición/.test(n); }));
     Check('ED4 sin Subestado en el registro: no se edita (no se sabe el actual)', true,
-      /El registro no trajo el Subestado/.test(p.sel('regEdicion').innerHTML));
+      /El registro no trajo el Subestado/.test(p.sel('regDetCuerpo').innerHTML));
     Check('ED5 agregar una ruta que ya esta ligada: rechazo', false, reg.agregarCategoriaEdicion('/A/Cat 1').ok);
     Check('ED5b las rutas para agregar vienen del catalogo que cargo la pagina', ['/A/Cat 1', '/A/Cat 2', '/B/Cat 4'], reg.rutasCatalogo);
     Check('ED5c escribir una ruta que no existe: rechazo', false, reg.agregarCategoriaEdicion('/B/Cat').ok);
@@ -1320,6 +1541,43 @@ pruebas.push(function () {
     Check('LC2 Modificar con error de catalogo: lo dice y no agrega', [true, false],
       [/No se pudo cargar el catálogo de categorías/.test(p.sel('regEdCats').innerHTML), reg.agregarCategoriaEdicion('/A/Cat 1').ok]);
     Check('LC3 el estado no se confunde con lista vacia', 'error', reg.rutasEstado);
+  });
+});
+
+// HUD) El mismo detalle para ADM, MOD y sin rol: valores guardados como
+// texto al abrir (sin editores); edicion directa solo ADM; "Solicitar
+// cambios" para todos (fase de pruebas, tambien ADM) y sin escrituras.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    [['ADM', true], ['MOD', false], [null, false]].forEach(function (caso) {
+      var rol = caso[0], adm = caso[1], n = rol || 'sin rol';
+      p.pagina.fijarRol(rol);
+      reg.abrirDetalle('PRB 2026-000001');
+      var html = p.sel('regDetCuerpo').innerHTML;
+      Check('HUD1 ' + n + ': titulo, descripcion y observaciones guardados se VEN como texto; ningun editor abierto', [true, true, true, false, null],
+        [/>T PRB 2026-000001<\/(div|p)>/.test(html), />Desc PRB 2026-000001<\/div>/.test(html), />Obs PRB 2026-000001<\/div>/.test(html),
+         /<textarea|id="regEd-titulo"/.test(html), reg.editando]);
+      Check('HUD1 ' + n + ': las mismas tarjetas del detalle (Identificacion, Organizacion, Impacto, Seguimiento, Categorias, Historial)', true,
+        ['regDetIdent', 'regDetEtapas', 'regDetCats', 'regDetDesc'].every(function (id) { return html.indexOf('id="' + id + '"') >= 0; }) &&
+        /Organización/.test(html) && /Impacto/.test(html) && /Historial de cambios/.test(html));
+      Check('HUD2 ' + n + ': edicion directa ' + (adm ? 'disponible' : 'ausente') + '; Solicitar cambios disponible',
+        [adm, adm, adm ? 'Edición directa (ADM)' : 'Solo lectura', true],
+        [!!reg.edicion, /data-editar="titulo"|data-edicion=/.test(html), p.sel('regDetModo').textContent,
+         /id="regCambioBoton" data-accion="solicitar-cambios"/.test(html)]);
+      var antes = p.pedidos.length;
+      accion(p, 'solicitar-cambios');
+      elegir(p, 'regCambioCampo', 'f_analisis');
+      p.sel('regCambioNueva').value = '2027-02-01';
+      p.sel('regCambioMotivo').value = 'Prueba ' + n;
+      accion(p, 'cambio-preparar');
+      Check('HUD3 ' + n + ': la solicitud se prepara sin peticiones y sin tocar la iniciativa', [true, antes, '2026-12-01'],
+        [/Solicitud preparada, no enviada/.test(p.sel('regCambioMsg').innerHTML), p.pedidos.length,
+         reg.registro.buscar('PRB 2026-000001').f_analisis]);
+      accion(p, 'cambio-cancelar');
+      reg.cerrarDetalle(true);
+    });
   });
 });
 
@@ -1575,9 +1833,9 @@ pruebas.push(function () {
     var aviso = p.sel('regDetAviso');
     Check('GS11 guardado: sin recargar ni navegar; filtros, busqueda, orden, "mostrar mas" y modo intactos', ['guardada', 0, VISTA],
       [r.estado, recargas, vista(p, reg)]);
-    Check('GS11 ... registro releido, mismo detalle abierto con lo guardado, edicion cerrada, aviso de exito',
-      [true, 'PRB 2026-000001', null, false, true, true, false],
-      [reg.registro !== regAntes, reg.abierta, reg.edicion, aviso.hidden, /Guardado en la base/.test(aviso.innerHTML),
+    Check('GS11 ... registro releido, mismo detalle abierto con lo guardado, borrador nuevo sin cambios, aviso de exito',
+      [true, 'PRB 2026-000001', 'Nuevo', 0, true, false, true, true, false],
+      [reg.registro !== regAntes, reg.abierta, reg.edicion.valores.titulo, reg.edicion.cambios().length, p.sel('regEdBarra').hidden, aviso.hidden, /Guardado en la base/.test(aviso.innerHTML),
        /Nuevo/.test(p.sel('regDetCuerpo').innerHTML), /ya no coincide/.test(aviso.innerHTML)]);
     Check('GS11 ... la lista muestra el titulo guardado (del servidor)', [true, 'Nuevo'],
       [/Nuevo/.test(p.sel('regCuerpo').innerHTML), reg.registro.buscar('PRB 2026-000001').titulo]);
@@ -1623,7 +1881,8 @@ pruebas.push(function () {
       ['guardada', true, true, true, true, true, VISTA],
       [r.estado, /Guardado en la base/.test(aviso.innerHTML), /no se pudo actualizar la vista: error 53/.test(aviso.innerHTML),
        /data-accion="recargar-guardado"/.test(aviso.innerHTML), reg.registro === regAntes, reg.filtro === filtroAntes, vista(p, reg)]);
-    Check('GS13 ... la edicion se cierra (lo que se ve puede estar viejo)', null, reg.edicion);
+    Check('GS13 ... el borrador guardado se suelta (sin cambios pendientes; lo que se ve puede estar viejo)', [0, false],
+      [reg.edicion.cambios().length, reg.hayCambiosSinGuardar()]);
     accion(p, 'recargar-guardado');
     return esperar().then(esperar).then(esperar);
   }).then(function () {
@@ -1650,12 +1909,12 @@ pruebas.push(function () {
     editar(p, 'data-edicion', 'titulo', 'Nuevo');
     editar(p, 'data-edicion', 'observaciones', 'Obs nueva');
     ed = reg.edicion;
-    html = p.sel('regEdicion').innerHTML;
+    html = p.sel('regDetCuerpo').innerHTML;
     return errores.reduce(function (c, e) {
       return c.then(function () { return reg.guardarEdicion(Servidor(e[0], e[1]).pedir); }).then(function (r) {
         mensajes.push(p.sel('regEdMsg').innerHTML);
         estados.push([r.estado, reg.edicion === ed, ed.valores.titulo, ed.valores.observaciones,
-          p.sel('regEdicion').innerHTML === html, p.sel('regEdGuardar').disabled, /Guardado en la base/.test(mensajes[mensajes.length - 1])]);
+          p.sel('regDetCuerpo').innerHTML === html, p.sel('regEdGuardar').disabled, /Guardado en la base/.test(mensajes[mensajes.length - 1])]);
       });
     }, Promise.resolve());
   }).then(function () {
@@ -1687,16 +1946,20 @@ pruebas.push(function () {
     accion(p, 'edicion-guardar');
     return esperar();
   }).then(function () {
-    Check('GS15 mientras guarda: un solo POST, boton deshabilitado, "Guardando…"', [1, true, true],
-      [d.pedidos, p.sel('regEdGuardar').disabled, /Guardando/.test(p.sel('regEdMsg').innerHTML)]);
+    Check('GS15 mientras guarda: un solo POST, Guardar y Cancelar deshabilitados, "Guardando…"', [1, true, true, true],
+      [d.pedidos, p.sel('regEdGuardar').disabled, p.sel('regEdCancelar').disabled, /Guardando/.test(p.sel('regEdMsg').innerHTML)]);
+    editar(p, 'data-edicion', 'titulo', 'Escrito mientras guarda');
+    accion(p, 'edicion-cancelar');
+    Check('GS15 ... mientras guarda no se edita ni se cancela; cerrar no pregunta (ya viaja)', ['Nuevo', true],
+      [reg.edicion.valores.titulo, !reg.hayCambiosSinGuardar()]);
     return segunda;
   }).then(function (r2) {
     Check('GS15 el segundo envio no manda nada', null, r2);
     d.responder(409, { tipo: 'TopeExcedido', error: 'tope', guardada: false });
     return primera;
   }).then(function (r) {
-    Check('GS15 tras la respuesta: boton habilitado (reintento posible), un solo POST en total', ['rechazada', false, 1],
-      [r.estado, p.sel('regEdGuardar').disabled, d.pedidos]);
+    Check('GS15 tras la respuesta: botones habilitados (reintento posible), lo escrito sigue, un solo POST en total', ['rechazada', false, false, 'Nuevo', 1],
+      [r.estado, p.sel('regEdGuardar').disabled, p.sel('regEdCancelar').disabled, reg.edicion.valores.titulo, d.pedidos]);
   });
 });
 

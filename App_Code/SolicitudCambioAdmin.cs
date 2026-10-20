@@ -1,0 +1,691 @@
+// Solicitudes de cambio de una iniciativa ("Solicitar cambios"): envio,
+// cola de ADM, detalle, rechazo y aplicacion.
+//
+//   handlers/admin_iniciativas_solicitudes.ashx   (HTTP, sin logica)
+//       -> PeticionSolicitudCambio.DesdeFormulario   (lo que llego; formato)
+//       -> IAlmacenSolicitudesCambio                 (sql/22: adm.usp_SolicitudCambio_*)
+//       -> AplicadorSolicitudCambio                  (aplicar: valida como la
+//                                                     edicion directa y luego
+//                                                     adm.usp_SolicitudCambio_Aplicar)
+//
+// REGLAS
+//   - Quien envia, su rol y quien revisa los pone el servidor
+//     (IdentidadWindows / AccesoAdmin); lo que mande el navegador con esos
+//     nombres se ignora.
+//   - Enviar nunca escribe la iniciativa. Aplicar la escribe por el mismo
+//     adm.usp_GestionAdmin_Modificar que la edicion directa, en una
+//     transaccion, solo si lo "anterior" guardado sigue siendo lo que hay.
+//   - La clasificacion de una categoria por agregar se deriva del prefijo
+//     (TiposPorPrefijo); sin regla queda vacia y ADM la elige al aplicar.
+//   - Interruptor propio (PersistenciaSolicitudesCambio), aparte del de la
+//     edicion directa (PersistenciaGestionAdmin). Aplicar necesita los dos:
+//     escribe la iniciativa.
+//
+// Solo ASCII en literales (App_Code sin BOM): acentos con \uXXXX.
+// Pruebas: tools/tests/SolicitudesCambioHttpSmoke.cs (sin SQL) y
+// tools/tests/SolicitudesCambioSqlLocalDbSmoke.cs (LocalDB desechable).
+
+using System;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.Data;
+using System.Data.SqlClient;
+using System.Globalization;
+using System.Linq;
+using System.Text.RegularExpressions;
+
+public static class PersistenciaSolicitudesCambio
+{
+    // false hasta que sql/22 y sus permisos esten aplicados en la VM (cada
+    // paso con su OK). Mientras, enviar valida y responde 501; nada se guarda.
+    public const bool Habilitada = false;
+
+    // Solo para las pruebas (sin tocar la constante). null = la constante.
+    public static bool? ForzadaParaPruebas;
+
+    public static bool Activa() { return ForzadaParaPruebas ?? Habilitada; }
+
+    public const string MotivoCola =
+        "El registro de solicitudes todav\u00eda no est\u00e1 habilitado (falta aplicar sql/22 en la base, con su aprobaci\u00f3n): no hay solicitudes que revisar.";
+
+    public const string Motivo =
+        "El registro de solicitudes todav\u00eda no est\u00e1 habilitado (falta aplicar sql/22 en la base, con su aprobaci\u00f3n). " +
+        "La solicitud se revis\u00f3, pero no se guard\u00f3 ni se envi\u00f3.";
+}
+
+// Una categoria de la solicitud. Pct = fraccion 0-1 (como
+// ProblemCategoria.PctDisminucion); Texto = lo que llego, en %.
+public sealed class CategoriaSolicitudCambio
+{
+    public string Categoria;
+    public string Accion;          // PCT | AGREGAR
+    public string Texto;
+    public decimal Pct;
+    public string TipoIniciativa;  // solo AGREGAR, derivado del prefijo
+    public string TipoAgrupado;
+}
+
+// La clasificacion que ADM da al aplicar (categoria por agregar sin ella).
+public sealed class ClasificacionSolicitud
+{
+    public string Categoria;
+    public string TipoIniciativa;
+    public string TipoAgrupado;
+}
+
+public sealed class PeticionSolicitudCambio
+{
+    public const string CFolio = "folio";
+    public const string CLlave = "llave";
+    public const string CTipo = "tipo";
+    public const string CCampoFecha = "campo_fecha";
+    public const string CFechaNueva = "fecha_nueva";
+    public const string CEstadoNuevo = "estado_nuevo";
+    public const string CSubestadoNuevo = "subestado_nuevo";
+    public const string CMotivo = "motivo";
+
+    // tipo del formulario -> Tipo de adm.SolicitudCambio
+    private static readonly Dictionary<string, string> Tipos = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        { "fecha", "FECHA" }, { "estado", "ESTADO" }, { "categorias", "CATEGORIAS" }, { "otros", "OTROS" },
+    };
+    // campo_fecha del formulario (los nombres del registro) -> ProblemFechaEvento.Campo
+    public static readonly Dictionary<string, string> Campos = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        { "f_analisis", "FechaAnalisis" }, { "f_solucion", "FechaSolucion" }, { "f_cierre", "FechaCierre" },
+    };
+    public static readonly Dictionary<string, string> Etapas = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        { "FechaAnalisis", "An\u00e1lisis" }, { "FechaSolucion", "Soluci\u00f3n" }, { "FechaCierre", "Cierre" },
+    };
+
+    private static readonly Regex Porcentaje = new Regex(@"^\d{1,3}(\.\d{1,2})?$", RegexOptions.CultureInvariant);
+    private static readonly Regex FolioForma = new Regex(@"^[A-Za-z]{3} \d{4}-\d{6}$", RegexOptions.CultureInvariant);
+
+    public string Folio;
+    public string Prefijo;
+    public Guid Llave;
+    public string Tipo;
+    public string CampoFecha;
+    public DateTime? FechaNueva;
+    public string EstadoNuevo;
+    public string SubestadoNuevo;
+    public string Motivo;
+    public List<CategoriaSolicitudCambio> Categorias = new List<CategoriaSolicitudCambio>();
+    public List<ErrorCampo> Errores = new List<ErrorCampo>();
+
+    public bool Valida { get { return Errores.Count == 0; } }
+
+    private void Error(string campo, string mensaje) { Errores.Add(new ErrorCampo { Campo = campo, Mensaje = mensaje }); }
+
+    private static string Limpio(string s)
+    {
+        if (s == null) return null;
+        s = s.Replace('\u00a0', ' ').Trim();
+        return s.Length == 0 ? null : s;
+    }
+
+    // Solo FORMATO (sin base). Lo que exista o no en la base lo revisa
+    // adm.usp_SolicitudCambio_Crear. Usuario, rol y clasificacion no se
+    // leen del formulario.
+    public static PeticionSolicitudCambio DesdeFormulario(NameValueCollection f)
+    {
+        var p = new PeticionSolicitudCambio();
+        p.Folio = Limpio(f[CFolio]);
+        if (p.Folio == null || !FolioForma.IsMatch(p.Folio)) p.Error(CFolio, "Falta el folio de la iniciativa.");
+        else p.Prefijo = p.Folio.Substring(0, 3).ToUpperInvariant();
+
+        Guid llave;
+        if (!Guid.TryParse(Limpio(f[CLlave]) ?? "", out llave) || llave == Guid.Empty)
+            p.Error(CLlave, "Falta la llave de la solicitud (vuelve a abrir \u00abSolicitar cambios\u00bb).");
+        p.Llave = llave;
+
+        string tipo;
+        if (!Tipos.TryGetValue(Limpio(f[CTipo]) ?? "", out tipo)) { p.Error(CTipo, "Elige qu\u00e9 quieres cambiar."); }
+        p.Tipo = tipo;
+
+        p.Motivo = Limpio(f[CMotivo]);
+        if (p.Motivo == null)
+            p.Error(CMotivo, tipo == "OTROS" ? "Explica qu\u00e9 hay que corregir." : "Explica el motivo del cambio.");
+        else if (p.Motivo.Length > 4000) p.Error(CMotivo, "El motivo pasa de 4000 caracteres.");
+
+        // La fecha va SIEMPRE con su etapa; nunca se deduce del Estado.
+        var campo = Limpio(f[CCampoFecha]);
+        var fechaTxt = Limpio(f[CFechaNueva]);
+        if (campo != null)
+        {
+            string c;
+            if (Campos.TryGetValue(campo, out c)) p.CampoFecha = c;
+            else p.Error(CCampoFecha, "La fecha pedida no es de An\u00e1lisis, Soluci\u00f3n ni Cierre.");
+        }
+        if (fechaTxt != null)
+        {
+            DateTime d;
+            if (DateTime.TryParseExact(fechaTxt, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d)) p.FechaNueva = d;
+            else p.Error(CFechaNueva, "Escribe la nueva fecha compromiso (aaaa-mm-dd).");
+        }
+        if (fechaTxt != null && campo == null)
+            p.Error(CCampoFecha, "Elige a qu\u00e9 etapa (An\u00e1lisis, Soluci\u00f3n o Cierre) corresponde la nueva fecha.");
+        if (campo != null && fechaTxt == null)
+            p.Error(CFechaNueva, "Escribe la nueva fecha compromiso" + (p.CampoFecha != null ? " de " + Etapas[p.CampoFecha] : "") + ".");
+
+        p.EstadoNuevo = Limpio(f[CEstadoNuevo]);
+        p.SubestadoNuevo = Limpio(f[CSubestadoNuevo]);
+        if (p.EstadoNuevo != null && p.EstadoNuevo.Length > 100) p.Error(CEstadoNuevo, "El Estado pasa de 100 caracteres.");
+        if (p.SubestadoNuevo != null && p.SubestadoNuevo.Length > 100) p.Error(CSubestadoNuevo, "El Subestado pasa de 100 caracteres.");
+
+        bool d1, d2;
+        var pcts = Pares.Leer(f, PeticionModificarAdmin.CPctCategoria, PeticionModificarAdmin.CPctValor, out d1);
+        var agregar = Pares.Leer(f, PeticionModificarAdmin.CAgregarCategoria, PeticionModificarAdmin.CAgregarPct, out d2);
+        if (d1 || d2) p.Error("categoria", "Cada categor\u00eda necesita su %.");
+        foreach (var x in pcts) p.AgregarCategoria(x, "PCT");
+        foreach (var x in agregar) p.AgregarCategoria(x, "AGREGAR");
+        var vistas = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var c in p.Categorias)
+            if (!vistas.Add(c.Categoria)) p.Error("categoria", c.Categoria + " viene dos veces.");
+
+        // Cada tipo trae solo lo suyo (la misma regla que la base).
+        var hayFecha = campo != null || fechaTxt != null;
+        var hayEstado = p.EstadoNuevo != null || p.SubestadoNuevo != null;
+        var hayCats = p.Categorias.Count > 0;
+        if (tipo == "FECHA" && (!hayFecha || hayEstado || hayCats)) p.Error(CTipo, "Una solicitud de fecha trae solo la etapa y la fecha nueva.");
+        if (tipo == "ESTADO" && p.EstadoNuevo == null) p.Error(CEstadoNuevo, "Elige el nuevo Estado.");
+        if (tipo == "ESTADO" && hayCats) p.Error(CTipo, "Una solicitud de Estado no trae categor\u00edas.");
+        if (tipo == "CATEGORIAS" && !hayCats) p.Error("categoria", "Escribe el nuevo % de al menos una categor\u00eda o agrega una.");
+        if (tipo == "CATEGORIAS" && (hayFecha || hayEstado)) p.Error(CTipo, "Una solicitud de categor\u00edas no trae Estado ni fecha.");
+        if (tipo == "OTROS" && (hayFecha || hayEstado || hayCats)) p.Error(CTipo, "\u00abOtros\u00bb es solo una explicaci\u00f3n: no trae valores.");
+        return p;
+    }
+
+    private void AgregarCategoria(PctCategoria x, string accion)
+    {
+        var ruta = Limpio(x.Categoria);
+        var texto = Limpio(x.Texto);
+        if (ruta == null) { Error("categoria", "Una categor\u00eda lleg\u00f3 vac\u00eda."); return; }
+        decimal pct;
+        if (texto == null || !Porcentaje.IsMatch(texto) || !decimal.TryParse(texto, NumberStyles.Number, CultureInfo.InvariantCulture, out pct) || pct > 100)
+        {
+            Error("categoria", ruta + ": escribe un porcentaje entre 0 y 100, con hasta dos decimales.");
+            return;
+        }
+        var c = new CategoriaSolicitudCambio { Categoria = ruta, Accion = accion, Texto = texto, Pct = Math.Round(pct / 100m, 4) };
+        if (accion == "AGREGAR" && Prefijo != null)
+        {
+            // Regla de negocio del alta (598712b): prefijo -> Clasificacion ->
+            // Agrupacion. Sin regla: vacia (ADM la elige al aplicar).
+            c.TipoIniciativa = TiposPorPrefijo.Clasificacion(Prefijo);
+            c.TipoAgrupado = TiposPorPrefijo.Agrupacion(c.TipoIniciativa);
+            if (c.TipoIniciativa == null || c.TipoAgrupado == null) { c.TipoIniciativa = null; c.TipoAgrupado = null; }
+        }
+        Categorias.Add(c);
+    }
+}
+
+// Un 51xxx (o una llave duplicada) de los procedimientos de sql/22 o de
+// Modificar, con su estado HTTP y un tipo estable para el navegador.
+public sealed class ErrorSolicitudCambio : Exception
+{
+    public readonly int Numero;
+    public ErrorSolicitudCambio(int numero, string mensaje, Exception interna) : base(mensaje, interna) { Numero = numero; }
+
+    public int EstadoHttp
+    {
+        get
+        {
+            if (Numero == 51201) return 404;
+            if (Numero == 51001 || Numero == 51210) return 403;
+            if (Numero == 51202 || Numero == 51204 || Numero == 51221 || Numero == 51010 || Numero == 51008) return 409;
+            return 422;
+        }
+    }
+
+    public string Tipo
+    {
+        get
+        {
+            switch (Numero)
+            {
+                case 51201: return "SolicitudNoExiste";
+                case 51202: return "SolicitudYaRevisada";
+                case 51204: return "SolicitudDesactualizada";
+                case 51206: case 51207: return "FaltaComentario";
+                case 51221: return "FaltaClasificacion";
+                case 51222: case 51223: return "ClasificacionInvalida";
+                case 51010: return "TopeExcedido";
+                case 51001: case 51210: return "SinAtribucion";
+                default: return "DatoInvalido";
+            }
+        }
+    }
+}
+
+public sealed class ResultadoEnvioSolicitud
+{
+    public int IdSolicitud;
+    public bool Repetida;
+}
+
+public interface IAlmacenSolicitudesCambio
+{
+    ResultadoEnvioSolicitud Enviar(PeticionSolicitudCambio p, string usuario, string rol);
+    List<Dictionary<string, object>> Listar(string estado, int maximo);
+    Dictionary<string, object> Detalle(int idSolicitud);    // null = no existe
+    void Rechazar(int idSolicitud, string revisor, string comentario);
+    void Aplicar(int idSolicitud, string revisor, string comentario, List<ClasificacionSolicitud> clasificaciones, DateTime hoy);
+    void RegistrarFallo(int idSolicitud, string revisor, int numero, string mensaje);
+}
+
+// La real: los procedimientos de sql/22 (escritura) y SELECT (lectura). El
+// sitio no puede escribir las tablas a mano (DENY de _permisos.sql).
+public sealed class AlmacenSolicitudesCambioSql : IAlmacenSolicitudesCambio
+{
+    private readonly Func<SqlConnection> abrir;
+
+    public AlmacenSolicitudesCambioSql() : this(null) { }
+    // abrir: para las pruebas (LocalDB). null = la cadena del sitio.
+    public AlmacenSolicitudesCambioSql(Func<SqlConnection> abrir)
+    {
+        this.abrir = abrir ?? delegate { return new SqlConnection(DashboardDb.CadenaConexion()); };
+    }
+
+    private SqlConnection Abrir() { var cn = abrir(); if (cn.State != ConnectionState.Open) cn.Open(); return cn; }
+
+    private static SqlCommand Proc(SqlConnection cn, string nombre)
+    {
+        return new SqlCommand(nombre, cn) { CommandType = CommandType.StoredProcedure, CommandTimeout = 60 };
+    }
+
+    private static void Ejecutar(SqlCommand cmd)
+    {
+        try { cmd.ExecuteNonQuery(); }
+        catch (SqlException ex)
+        {
+            if (ex.Number >= 51000 && ex.Number < 52000 || ex.Number == 2627 || ex.Number == 2601)
+                throw new ErrorSolicitudCambio(ex.Number, ex.Message, ex);
+            throw;
+        }
+    }
+
+    private static object Db(string s) { return string.IsNullOrEmpty(s) ? (object)DBNull.Value : s; }
+
+    public ResultadoEnvioSolicitud Enviar(PeticionSolicitudCambio p, string usuario, string rol)
+    {
+        using (var cn = Abrir())
+        using (var cmd = Proc(cn, "adm.usp_SolicitudCambio_Crear"))
+        {
+            cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = Db(usuario);
+            cmd.Parameters.Add("@Rol", SqlDbType.VarChar, 3).Value = Db(rol);
+            cmd.Parameters.Add("@Llave", SqlDbType.UniqueIdentifier).Value = p.Llave;
+            cmd.Parameters.Add("@Codigo", SqlDbType.NVarChar, 100).Value = Db(p.Folio);
+            cmd.Parameters.Add("@Tipo", SqlDbType.VarChar, 10).Value = Db(p.Tipo);
+            cmd.Parameters.Add("@EstadoNuevo", SqlDbType.NVarChar, 100).Value = Db(p.EstadoNuevo);
+            cmd.Parameters.Add("@SubestadoNuevo", SqlDbType.NVarChar, 100).Value = Db(p.SubestadoNuevo);
+            cmd.Parameters.Add("@CampoFecha", SqlDbType.VarChar, 13).Value = Db(p.CampoFecha);
+            cmd.Parameters.Add("@FechaNueva", SqlDbType.Date).Value = p.FechaNueva.HasValue ? (object)p.FechaNueva.Value.Date : DBNull.Value;
+            cmd.Parameters.Add("@Motivo", SqlDbType.NVarChar, 4000).Value = Db(p.Motivo);
+            var t = new DataTable();
+            t.Columns.Add("Categoria", typeof(string));
+            t.Columns.Add("Accion", typeof(string));
+            t.Columns.Add("Pct", typeof(decimal));
+            t.Columns.Add("TipoIniciativa", typeof(string)).AllowDBNull = true;
+            t.Columns.Add("TipoAgrupado", typeof(string)).AllowDBNull = true;
+            foreach (var c in p.Categorias) t.Rows.Add(c.Categoria, c.Accion, c.Pct, Db(c.TipoIniciativa), Db(c.TipoAgrupado));
+            var cats = cmd.Parameters.Add("@Categorias", SqlDbType.Structured);
+            cats.TypeName = "adm.SolicitudCategoriaTipo";
+            cats.Value = t;
+            var id = cmd.Parameters.Add("@IdSolicitud", SqlDbType.Int);
+            id.Direction = ParameterDirection.Output;
+            var rep = cmd.Parameters.Add("@Repetida", SqlDbType.Bit);
+            rep.Direction = ParameterDirection.Output;
+            Ejecutar(cmd);
+            if (id.Value == null || id.Value == DBNull.Value)
+                throw new InvalidOperationException("La base no devolvio el numero de la solicitud.");
+            return new ResultadoEnvioSolicitud { IdSolicitud = Convert.ToInt32(id.Value), Repetida = Convert.ToBoolean(rep.Value) };
+        }
+    }
+
+    public void Rechazar(int idSolicitud, string revisor, string comentario)
+    {
+        using (var cn = Abrir())
+        using (var cmd = Proc(cn, "adm.usp_SolicitudCambio_Rechazar"))
+        {
+            cmd.Parameters.Add("@IdSolicitud", SqlDbType.Int).Value = idSolicitud;
+            cmd.Parameters.Add("@Revisor", SqlDbType.NVarChar, 256).Value = Db(revisor);
+            cmd.Parameters.Add("@Comentario", SqlDbType.NVarChar, 4000).Value = Db(comentario);
+            Ejecutar(cmd);
+        }
+    }
+
+    public void Aplicar(int idSolicitud, string revisor, string comentario, List<ClasificacionSolicitud> clasificaciones, DateTime hoy)
+    {
+        using (var cn = Abrir())
+        using (var cmd = Proc(cn, "adm.usp_SolicitudCambio_Aplicar"))
+        {
+            cmd.Parameters.Add("@IdSolicitud", SqlDbType.Int).Value = idSolicitud;
+            cmd.Parameters.Add("@Revisor", SqlDbType.NVarChar, 256).Value = Db(revisor);
+            cmd.Parameters.Add("@Comentario", SqlDbType.NVarChar, 4000).Value = Db(comentario);
+            var t = new DataTable();
+            t.Columns.Add("Categoria", typeof(string));
+            t.Columns.Add("TipoIniciativa", typeof(string)).AllowDBNull = true;
+            t.Columns.Add("TipoAgrupado", typeof(string)).AllowDBNull = true;
+            foreach (var c in clasificaciones ?? new List<ClasificacionSolicitud>())
+                t.Rows.Add(c.Categoria, Db(c.TipoIniciativa), Db(c.TipoAgrupado));
+            var cls = cmd.Parameters.Add("@Clasificaciones", SqlDbType.Structured);
+            cls.TypeName = "adm.SolicitudClasificacionTipo";
+            cls.Value = t;
+            cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = hoy.Date;
+            Ejecutar(cmd);
+        }
+    }
+
+    public void RegistrarFallo(int idSolicitud, string revisor, int numero, string mensaje)
+    {
+        using (var cn = Abrir())
+        using (var cmd = Proc(cn, "adm.usp_SolicitudCambio_RegistrarFallo"))
+        {
+            cmd.Parameters.Add("@IdSolicitud", SqlDbType.Int).Value = idSolicitud;
+            cmd.Parameters.Add("@Revisor", SqlDbType.NVarChar, 256).Value = Db(revisor);
+            cmd.Parameters.Add("@Numero", SqlDbType.Int).Value = numero;
+            var m = mensaje ?? "";
+            cmd.Parameters.Add("@Mensaje", SqlDbType.NVarChar, 2000).Value = m.Length > 2000 ? m.Substring(0, 2000) : m;
+            Ejecutar(cmd);
+        }
+    }
+
+    private const string Cabecera = @"
+SELECT s.IdSolicitud, s.Codigo, p.Titulo, s.Tipo, s.EstadoAnterior, s.EstadoNuevo, s.SubestadoAnterior, s.SubestadoNuevo,
+       s.CampoFecha, s.FechaAnterior, s.FechaNueva, s.Motivo, s.SolicitadoPor, s.RolSolicitante, s.FechaSolicitudUtc,
+       s.Estado, s.RevisadoPor, s.FechaRevisionUtc, s.ComentarioRevision, s.Intentos, s.UltimoError, s.FechaUltimoIntentoUtc,
+       Categorias = (SELECT COUNT(*) FROM adm.SolicitudCambioCategoria AS c WHERE c.IdSolicitud = s.IdSolicitud),
+       SinClasificar = (SELECT COUNT(*) FROM adm.SolicitudCambioCategoria AS c
+                        WHERE c.IdSolicitud = s.IdSolicitud AND c.Accion = 'AGREGAR' AND (c.TipoIniciativa IS NULL OR c.TipoAgrupado IS NULL)),
+       EstadoActual = p.Estado, SubestadoActual = p.Subestado, p.FechaAnalisis, p.FechaSolucion, p.FechaCierre
+FROM adm.SolicitudCambio AS s
+LEFT JOIN dbo.Problem AS p ON p.Codigo = s.Codigo";
+
+    public List<Dictionary<string, object>> Listar(string estado, int maximo)
+    {
+        var sql = "SELECT TOP (@max) * FROM (" + Cabecera + @") AS x
+WHERE (@estado IS NULL OR x.Estado = @estado)
+ORDER BY CASE WHEN x.Estado = 'PENDIENTE' THEN 0 ELSE 1 END,
+         CASE WHEN x.Estado = 'PENDIENTE' THEN x.FechaSolicitudUtc END ASC,
+         x.FechaSolicitudUtc DESC;";
+        var salida = new List<Dictionary<string, object>>();
+        using (var cn = Abrir())
+        using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 60 })
+        {
+            cmd.Parameters.Add("@max", SqlDbType.Int).Value = Math.Max(1, Math.Min(maximo, 500));
+            cmd.Parameters.Add("@estado", SqlDbType.VarChar, 10).Value = Db(estado);
+            using (var r = cmd.ExecuteReader())
+                while (r.Read()) salida.Add(Fila(r));
+        }
+        return salida;
+    }
+
+    public Dictionary<string, object> Detalle(int idSolicitud)
+    {
+        var sql = Cabecera + @"
+WHERE s.IdSolicitud = @id;
+SELECT c.Categoria, c.Accion, c.PctAnterior, c.PctNuevo, c.TipoIniciativa, c.TipoAgrupado,
+       PctActual = pc.PctDisminucion, Ligada = CASE WHEN pc.Codigo IS NOT NULL AND pc.VigenteEnOrigen = 1 THEN 1 ELSE 0 END,
+       LigadaAlgunaVez = CASE WHEN pc.Codigo IS NOT NULL THEN 1 ELSE 0 END
+FROM adm.SolicitudCambioCategoria AS c
+INNER JOIN adm.SolicitudCambio AS s ON s.IdSolicitud = c.IdSolicitud
+LEFT JOIN dbo.ProblemCategoria AS pc ON pc.Codigo = s.Codigo AND pc.Categoria = c.Categoria
+WHERE c.IdSolicitud = @id ORDER BY c.Accion DESC, c.Categoria;
+SELECT e.IdEvento, e.Evento, e.Usuario, e.FechaUtc, e.Detalle
+FROM adm.SolicitudCambioEvento AS e WHERE e.IdSolicitud = @id ORDER BY e.IdEvento;";
+        using (var cn = Abrir())
+        using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 60 })
+        {
+            cmd.Parameters.Add("@id", SqlDbType.Int).Value = idSolicitud;
+            using (var r = cmd.ExecuteReader())
+            {
+                if (!r.Read()) return null;
+                var d = Fila(r);
+                r.NextResult();
+                var cats = new List<object>();
+                while (r.Read())
+                {
+                    cats.Add(new Dictionary<string, object>
+                    {
+                        { "categoria", Texto(r, 0) }, { "accion", Texto(r, 1) },
+                        { "pct_anterior", Pct(r, 2) }, { "pct_nuevo", Pct(r, 3) },
+                        { "tipo_iniciativa", Texto(r, 4) }, { "tipo_agrupado", Texto(r, 5) },
+                        { "pct_actual", Pct(r, 6) }, { "ligada", Convert.ToInt32(r.GetValue(7)) == 1 },
+                        { "ligada_alguna_vez", Convert.ToInt32(r.GetValue(8)) == 1 },
+                    });
+                }
+                d["categorias_detalle"] = cats;
+                r.NextResult();
+                var ev = new List<object>();
+                while (r.Read())
+                {
+                    ev.Add(new Dictionary<string, object>
+                    {
+                        { "id", Convert.ToInt32(r.GetValue(0)) }, { "evento", Texto(r, 1) }, { "usuario", Texto(r, 2) },
+                        { "fecha_utc", Utc(r, 3) }, { "detalle", Texto(r, 4) },
+                    });
+                }
+                d["eventos"] = ev;
+                d["desactualizada"] = SolicitudesCambio.Desactualizada(d);
+                return d;
+            }
+        }
+    }
+
+    private static string Texto(SqlDataReader r, int i) { return r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture); }
+    private static string Iso(SqlDataReader r, int i) { return r.IsDBNull(i) ? null : Convert.ToDateTime(r.GetValue(i)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+    private static string Utc(SqlDataReader r, int i) { return r.IsDBNull(i) ? null : Convert.ToDateTime(r.GetValue(i)).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture) + "Z"; }
+    // Fraccion 0-1 -> % en texto ("30", "12.5"), como el registro.
+    private static string Pct(SqlDataReader r, int i)
+    {
+        if (r.IsDBNull(i)) return null;
+        return (Convert.ToDecimal(r.GetValue(i)) * 100m).ToString("0.##", CultureInfo.InvariantCulture);
+    }
+
+    private static Dictionary<string, object> Fila(SqlDataReader r)
+    {
+        var campo = Texto(r, r.GetOrdinal("CampoFecha"));
+        var d = new Dictionary<string, object>
+        {
+            { "id", Convert.ToInt32(r["IdSolicitud"]) }, { "folio", Texto(r, r.GetOrdinal("Codigo")) },
+            { "titulo", Texto(r, r.GetOrdinal("Titulo")) }, { "tipo", Texto(r, r.GetOrdinal("Tipo")) },
+            { "estado_anterior", Texto(r, r.GetOrdinal("EstadoAnterior")) }, { "estado_nuevo", Texto(r, r.GetOrdinal("EstadoNuevo")) },
+            { "subestado_anterior", Texto(r, r.GetOrdinal("SubestadoAnterior")) }, { "subestado_nuevo", Texto(r, r.GetOrdinal("SubestadoNuevo")) },
+            { "campo_fecha", campo }, { "etapa", campo != null && PeticionSolicitudCambio.Etapas.ContainsKey(campo) ? PeticionSolicitudCambio.Etapas[campo] : null },
+            { "fecha_anterior", Iso(r, r.GetOrdinal("FechaAnterior")) }, { "fecha_nueva", Iso(r, r.GetOrdinal("FechaNueva")) },
+            { "motivo", Texto(r, r.GetOrdinal("Motivo")) }, { "solicitado_por", Texto(r, r.GetOrdinal("SolicitadoPor")) },
+            { "rol_solicitante", Texto(r, r.GetOrdinal("RolSolicitante")) }, { "fecha_solicitud_utc", Utc(r, r.GetOrdinal("FechaSolicitudUtc")) },
+            { "estado", Texto(r, r.GetOrdinal("Estado")) }, { "revisado_por", Texto(r, r.GetOrdinal("RevisadoPor")) },
+            { "fecha_revision_utc", Utc(r, r.GetOrdinal("FechaRevisionUtc")) }, { "comentario_revision", Texto(r, r.GetOrdinal("ComentarioRevision")) },
+            { "intentos", Convert.ToInt32(r["Intentos"]) }, { "ultimo_error", Texto(r, r.GetOrdinal("UltimoError")) },
+            { "fecha_ultimo_intento_utc", Utc(r, r.GetOrdinal("FechaUltimoIntentoUtc")) },
+            { "categorias", Convert.ToInt32(r["Categorias"]) }, { "sin_clasificar", Convert.ToInt32(r["SinClasificar"]) },
+        };
+        var actual = new Dictionary<string, object>
+        {
+            { "estado", Texto(r, r.GetOrdinal("EstadoActual")) }, { "subestado", Texto(r, r.GetOrdinal("SubestadoActual")) },
+            { "FechaAnalisis", Iso(r, r.GetOrdinal("FechaAnalisis")) }, { "FechaSolucion", Iso(r, r.GetOrdinal("FechaSolucion")) },
+            { "FechaCierre", Iso(r, r.GetOrdinal("FechaCierre")) },
+        };
+        d["actual"] = actual;
+        d["fecha_actual"] = campo != null && actual.ContainsKey(campo) ? actual[campo] : null;
+        return d;
+    }
+}
+
+public static class SolicitudesCambio
+{
+    // El handler usa estos; las pruebas los cambian por falsos.
+    public static IAlmacenSolicitudesCambio Almacen = new AlmacenSolicitudesCambioSql();
+    public static Func<NameValueCollection, ValidacionAplicar> ValidarAplicacion = ValidacionAplicar.ComoEdicionDirecta;
+
+    // Solo lectura, para avisar a ADM ANTES de aplicar (la base lo vuelve a
+    // revisar bajo candado: esto no decide nada). Misma regla que Aplicar.
+    public static bool Desactualizada(Dictionary<string, object> d)
+    {
+        if ((d["estado"] as string) != "PENDIENTE" || (d["tipo"] as string) == "OTROS") return false;
+        var actual = (Dictionary<string, object>)d["actual"];
+        if ((d["tipo"] as string) == "ESTADO"
+            && (!string.Equals(actual["estado"] as string ?? "", d["estado_anterior"] as string ?? "", StringComparison.Ordinal)
+                || !string.Equals(actual["subestado"] as string ?? "", d["subestado_anterior"] as string ?? "", StringComparison.Ordinal)))
+            return true;
+        if (d["campo_fecha"] != null && !string.Equals(d["fecha_actual"] as string ?? "", d["fecha_anterior"] as string ?? "", StringComparison.Ordinal))
+            return true;
+        object cats;
+        if (d.TryGetValue("categorias_detalle", out cats))
+            foreach (Dictionary<string, object> c in (List<object>)cats)
+            {
+                if ((c["accion"] as string) == "PCT"
+                    && (!(bool)c["ligada"] || !string.Equals(c["pct_actual"] as string ?? "", c["pct_anterior"] as string ?? "", StringComparison.Ordinal)))
+                    return true;
+                if ((c["accion"] as string) == "AGREGAR" && (bool)c["ligada_alguna_vez"]) return true;
+            }
+        return false;
+    }
+
+    // La solicitud guardada como el formulario accion=modificar de la edicion
+    // directa (los mismos nombres que PeticionModificarAdmin), para validarla
+    // con LA MISMA validacion antes de aplicar. Las categorias por agregar
+    // llevan su clasificacion (la guardada o la que da ADM). Nada viene del
+    // navegador salvo la clasificacion de ADM.
+    public static NameValueCollection ComoModificar(Dictionary<string, object> d, List<ClasificacionSolicitud> clasificaciones)
+    {
+        var f = new NameValueCollection();
+        f["accion"] = "modificar";
+        f[PeticionModificarAdmin.CFolio] = d["folio"] as string;
+        var tipo = d["tipo"] as string;
+        if (tipo == "ESTADO")
+        {
+            f[PeticionModificarAdmin.CEstado] = d["estado_nuevo"] as string;
+            if (d["subestado_nuevo"] != null) f[PeticionModificarAdmin.CSubestado] = d["subestado_nuevo"] as string;
+        }
+        var campo = d["campo_fecha"] as string;
+        if (campo != null)
+        {
+            var clave = PeticionSolicitudCambio.Campos.First(x => x.Value == campo).Key;
+            f[clave] = d["fecha_nueva"] as string;
+        }
+        object cats;
+        if (d.TryGetValue("categorias_detalle", out cats))
+            foreach (Dictionary<string, object> c in (List<object>)cats)
+            {
+                if ((c["accion"] as string) == "PCT")
+                {
+                    f.Add(PeticionModificarAdmin.CPctCategoria, c["categoria"] as string);
+                    f.Add(PeticionModificarAdmin.CPctValor, c["pct_nuevo"] as string);
+                }
+                else
+                {
+                    var ruta = c["categoria"] as string;
+                    var ti = c["tipo_iniciativa"] as string;
+                    var ta = c["tipo_agrupado"] as string;
+                    var adm = (clasificaciones ?? new List<ClasificacionSolicitud>())
+                        .FirstOrDefault(x => string.Equals((x.Categoria ?? "").Trim(), ruta, StringComparison.Ordinal));
+                    if (ti == null && ta == null && adm != null) { ti = adm.TipoIniciativa; ta = adm.TipoAgrupado; }
+                    f.Add(PeticionModificarAdmin.CAgregarCategoria, ruta);
+                    f.Add(PeticionModificarAdmin.CAgregarPct, c["pct_nuevo"] as string);
+                    f.Add(PeticionModificarAdmin.CAgregarTipoIniciativa, ti ?? "");
+                    f.Add(PeticionModificarAdmin.CAgregarTipoAgrupado, ta ?? "");
+                }
+            }
+        return f;
+    }
+}
+
+// Resultado de validar una solicitud como edicion directa.
+public sealed class ValidacionAplicar
+{
+    public bool Valida;
+    public List<ErrorCampo> Errores = new List<ErrorCampo>();
+    public List<string> Pendientes = new List<string>();
+
+    public string Mensaje()
+    {
+        var partes = Errores.Select(e => e.Mensaje).Concat(Pendientes).Where(s => !string.IsNullOrEmpty(s)).ToList();
+        return partes.Count == 0 ? "La validaci\u00f3n de la aplicaci\u00f3n no pas\u00f3." : string.Join(" ", partes.ToArray());
+    }
+
+    // La misma cadena que admin_iniciativas_gestion.ashx con accion=modificar:
+    // formato, catalogo / capacidad / Estado (GestionIniciativaAdminService)
+    // y plan sin pendientes. Lee la base; no escribe.
+    public static ValidacionAplicar ComoEdicionDirecta(NameValueCollection f)
+    {
+        var salida = new ValidacionAplicar();
+        var p = PeticionModificarAdmin.DesdeFormulario(f);
+        var formato = new ValidadorGestionAdmin().FormatoModificar(p);
+        if (!formato.Valida) { salida.Errores.AddRange(formato.Errores); return salida; }
+        var servicio = new GestionIniciativaAdminService();
+        var r = servicio.Modificar(p);
+        if (!r.Valida) { salida.Errores.AddRange(r.Errores); return salida; }
+        var plan = PlanificadorGestionAdmin.Modificar(p, servicio.Actual, r, DashboardDataInfo.HoyEnPresentacion());
+        salida.Pendientes.AddRange(plan.Pendientes);
+        salida.Valida = plan.Pendientes.Count == 0;
+        return salida;
+    }
+}
+
+// Aplicar = validar como la edicion directa + adm.usp_SolicitudCambio_Aplicar.
+// Toda falla de validacion queda registrada (la solicitud sigue PENDIENTE).
+public sealed class AplicadorSolicitudCambio
+{
+    // 51230: numero propio de "la validacion de la aplicacion no paso" (no
+    // sale de la base: lo registra RegistrarFallo).
+    public const int NumeroValidacion = 51230;
+
+    private readonly IAlmacenSolicitudesCambio almacen;
+    private readonly Func<NameValueCollection, ValidacionAplicar> validar;
+
+    public AplicadorSolicitudCambio(IAlmacenSolicitudesCambio almacen, Func<NameValueCollection, ValidacionAplicar> validar)
+    {
+        this.almacen = almacen;
+        this.validar = validar;
+    }
+
+    // -> null si se aplico; si no, lo que hay que responder (lanza
+    // ErrorSolicitudCambio para los errores de la base).
+    public Dictionary<string, object> Aplicar(int id, string revisor, string comentario,
+                                              List<ClasificacionSolicitud> clasificaciones, DateTime hoy)
+    {
+        var d = almacen.Detalle(id);
+        if (d == null) throw new ErrorSolicitudCambio(51201, "La solicitud no existe.", null);
+        if ((d["estado"] as string) != "PENDIENTE") throw new ErrorSolicitudCambio(51202, "La solicitud ya fue revisada (aplicada o rechazada).", null);
+        if ((d["tipo"] as string) != "OTROS")
+        {
+            var f = SolicitudesCambio.ComoModificar(d, clasificaciones);
+            var sinClasificar = ((List<object>)d["categorias_detalle"]).Cast<Dictionary<string, object>>()
+                .Where(c => (c["accion"] as string) == "AGREGAR" && (c["tipo_iniciativa"] == null || c["tipo_agrupado"] == null))
+                .Select(c => c["categoria"] as string)
+                .Where(ruta => !(clasificaciones ?? new List<ClasificacionSolicitud>()).Any(x => string.Equals((x.Categoria ?? "").Trim(), ruta, StringComparison.Ordinal)
+                                                                                                && !string.IsNullOrWhiteSpace(x.TipoIniciativa)
+                                                                                                && !string.IsNullOrWhiteSpace(x.TipoAgrupado)))
+                .ToList();
+            if (sinClasificar.Count > 0)
+            {
+                var msg = "Falta la clasificaci\u00f3n (Tipo de iniciativa y Agrupaci\u00f3n) de: " + string.Join(", ", sinClasificar.ToArray()) + ".";
+                almacen.RegistrarFallo(id, revisor, 51221, msg);
+                return new Dictionary<string, object> { { "error", msg }, { "tipo", "FaltaClasificacion" }, { "aplicada", false },
+                                                        { "sin_clasificar", sinClasificar }, { "estado_http", 409 } };
+            }
+            ValidacionAplicar v;
+            try { v = validar(f); }
+            catch (Exception ex)
+            {
+                // Sin catalogo no se afirma nada: no es un intento de aplicar.
+                return new Dictionary<string, object> { { "error", "No se pudo validar contra el cat\u00e1logo: " + DashboardHandler.MensajeSeguro(ex) },
+                                                        { "tipo", "ValidacionNoDisponible" }, { "aplicada", false }, { "estado_http", 503 } };
+            }
+            if (!v.Valida)
+            {
+                var msg = v.Mensaje();
+                almacen.RegistrarFallo(id, revisor, NumeroValidacion, msg);
+                var errores = v.Errores.Select(e => (object)new Dictionary<string, object> { { "campo", e.Campo }, { "mensaje", e.Mensaje } }).ToList();
+                return new Dictionary<string, object> { { "error", "No se aplic\u00f3: " + msg }, { "tipo", "ValidacionFallida" }, { "aplicada", false },
+                                                        { "errores", errores }, { "pendientes", v.Pendientes }, { "estado_http", 422 } };
+            }
+        }
+        almacen.Aplicar(id, revisor, comentario, clasificaciones, hoy);
+        return null;
+    }
+}

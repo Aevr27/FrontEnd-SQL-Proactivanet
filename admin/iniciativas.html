@@ -56,8 +56,8 @@
     - Dueños de categoria ocultos por ahora en Administracion: flujo
       aparte (DUENOS_VISIBLES en admin/iniciativas.js). "Crear iniciativa"
       si pide PO / SO, opcionales y sin cascada (admin/iniciativa-admin.js).
-    - Solicitudes todavia no muestra datos: estado vacio "en preparacion",
-      sin datos inventados.
+    - Solicitudes: cola de ADM de "Solicitar cambios" (admin/solicitudes-cambio.js);
+      con otro rol, solo una nota. Sin sql/22 el servidor responde 501 y se dice.
 
   Reusa dashboard.css para variables, tipografia y .wrap / .card / .btn,
   como admin.html; lo propio vive en iniciativas.css con prefijo .ini-. La
@@ -83,7 +83,8 @@
          aqui igual, aunque quien no esta autorizado ya no deberia llegar
          (AdminAccesoModulo).
        Plegar/desplegar: MenuLateral en admin/iniciativas.js. Si cambia la
-       lista de modulos del tablero, actualizar tambien esta copia. -->
+       lista de modulos del tablero, actualizar tambien esta copia
+       (tools/tests/BarraLateralSmoke.js compara las dos). -->
   <aside class="lateral" id="lateral">
     <div class="lateral-cabecera">
       <span class="lateral-marca">
@@ -128,11 +129,27 @@
           </a>
         </li>
         <li>
+          <a class="mnav" href="../dashboard.html#efectividad" title="Efectividad de iniciativas">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M5 19.5V13M10 19.5V9.5M15 19.5V15"/><path d="m13.5 7 2.5 2.5L20.5 5"/>
+            </svg>
+            <span class="mnav-txt">Efectividad</span>
+          </a>
+        </li>
+        <li>
           <a class="mnav" href="../dashboard.html#calidad" title="Calidad de información">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M5 4.5h14v15H5z"/><path d="m8.5 12 2.5 2.5 4.5-5"/>
             </svg>
             <span class="mnav-txt">Calidad de información</span>
+          </a>
+        </li>
+        <li>
+          <a class="mnav" href="../dashboard.html#analisis" title="Análisis de servicios">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M7.5 12.5v-2M10.5 12.5v-4M13.5 12.5v-3"/>
+            </svg>
+            <span class="mnav-txt">Análisis de servicios</span>
           </a>
         </li>
         <li>
@@ -172,6 +189,12 @@
       <!-- "Bienvenido, <Nombre>" solo si la cuenta Windows se resuelve en
            CatPersona / CatLiderGrupo (SesionAdmin). Si no, queda oculto. -->
       <div class="ini-saludo" id="iniSaludo" hidden></div>
+    </div>
+    <!-- Correo de quien mira, arriba a la derecha: solo el de
+         dbo.UsuariosAdmin.CorreoUsuario que mande el servidor (SesionAdmin,
+         admin_sesion.ashx?persona=1). Sin uno claro, queda oculto. -->
+    <div class="acciones-top">
+      <span class="ini-correo" id="iniCorreo" hidden></span>
     </div>
   </header>
 
@@ -348,12 +371,29 @@
     <div class="ini-vista-cab">
       <div class="ini-vista-titulo">
         <h2>Solicitudes</h2>
-        <p class="ini-vista-sub">Solicitudes de iniciativa y su revisión.</p>
+        <p class="ini-vista-sub">Solicitudes de cambio de iniciativas y su revisión.</p>
       </div>
     </div>
-    <div class="ini-vacio">
-      <strong>Lista de solicitudes en preparación</strong>
-      <span>Aquí estarán las solicitudes enviadas y su estado.</span>
+    <!-- Cola de ADM (admin/solicitudes-cambio.js). El servidor exige ADM en
+         todo esto; con otro rol solo se ve la nota de abajo. -->
+    <div id="solCola" hidden>
+      <div class="ini-sol-barra">
+        <label for="solFiltro">Estado</label>
+        <select id="solFiltro">
+          <option value="PENDIENTE" selected>Pendientes</option>
+          <option value="APLICADA">Aplicadas</option>
+          <option value="RECHAZADA">Rechazadas</option>
+          <option value="">Todas</option>
+        </select>
+        <button type="button" class="btn linea chico" id="solActualizar">Actualizar</button>
+      </div>
+      <div class="ini-cambio-msg" id="solMsg" role="status" aria-live="polite"></div>
+      <div id="solLista"></div>
+      <section class="ini-det-sec ini-cambio ini-sol-detalle" id="solDetalle" aria-live="polite" hidden></section>
+    </div>
+    <div class="ini-vacio" id="solNoAdm">
+      <strong>La revisión de solicitudes es de ADM</strong>
+      <span>Para pedir un cambio abre la iniciativa en «Iniciativas» y usa «Solicitar cambios».</span>
     </div>
   </section>
 
@@ -507,8 +547,10 @@
         </div>
       </section>
 
-      <!-- 03 Impacto: Volumetria (captura) y el % de disminucion de la
-           Categoria elegida en 01; no hay un segundo selector de categoria. -->
+      <!-- 03 Impacto: el % de disminucion (captura) de la Categoria elegida
+           en 01, su Volumetria (calculada, la de Crear / Modificar) y los
+           Tickets a reducir (calculados); no hay un segundo selector de
+           categoria. -->
       <section class="ini-bloque ini-col-impacto" aria-labelledby="iniCabImpacto">
         <div class="ini-bloque-cab">
           <span class="ini-paso" aria-hidden="true">03</span>
@@ -703,7 +745,7 @@
   <div class="ini-det-barra">
     <span class="ini-det-rotulo">Iniciativa</span>
     <h3 id="regDetTitulo"></h3>
-    <span class="ini-hint">Solo lectura</span>
+    <span class="ini-hint" id="regDetModo">Solo lectura</span>
     <button type="button" class="ini-det-cerrar" id="regDetCerrar" aria-label="Cerrar el detalle" title="Cerrar">×</button>
   </div>
   <div class="ini-det-cuerpo" id="regDetCuerpo"></div>
@@ -718,12 +760,13 @@
 <script src="iniciativa-admin.js"></script>
 <script src="categorias-duenos.js"></script>
 <script src="registro-iniciativas.js"></script>
+<script src="solicitudes-cambio.js"></script>
 <script src="iniciativas.js"></script>
 <script>
 // El rol tambien decide los botones de ADM que se pintan dentro del detalle,
 // que no existen cuando aplicar() recorre el documento.
 try {
-  new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo')).then(function (s) {
+  new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo'), document.getElementById('iniCorreo')).then(function (s) {
     if (!window.IniciativasPagina) return;
     if (s.autorizado) window.IniciativasPagina.fijarRol(s.rol);
     else window.IniciativasPagina.denegar();

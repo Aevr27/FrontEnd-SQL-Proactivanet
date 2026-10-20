@@ -15,12 +15,11 @@
 // Lo que se comprueba:
 //   - la entrada del grupo abre su primer modulo, y despues el ultimo visto;
 //   - en la barra se marca el grupo y en el selector el modulo;
-//   - solo se ve el selector del grupo activo, y ninguno fuera de un grupo
-//     ni en un grupo de un solo modulo (Observabilidad, por ahora);
+//   - solo se ve el selector del grupo activo, y ninguno fuera de un grupo;
 //   - ir y volver entre los dos modulos de un grupo, muchas veces, monta cada
 //     uno UNA vez (init() = 1) y solo los remide al volver;
 //   - un solo listener por boton, aunque se cambie de modulo muchas veces;
-//   - los hashes de siempre (#qa, #qare, #tablero) siguen.
+//   - los hashes de siempre (#qa, #qare, #orquestacion, #tablero) siguen.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -145,9 +144,7 @@ function contenedorActivo() { return activos('.maintab-content'); }
   documentFalso.querySelectorAll('.mnav[data-tab]').concat(documentFalso.querySelectorAll('.subnav-btn[data-tab]'))
     .forEach(function (b) { comprobar('un listener en "' + b.dataset.tab + '" (' + b.id + ')', b.oyentes.length, 1); });
 
-  comprobar('nace oculto el selector', selectorVisible(), '');
-  comprobar('solo Calidad lleva selector',
-    documentFalso.querySelectorAll('.subnav').map(function (n) { return n.dataset.grupo; }).join(), 'calidad');
+  comprobar('nacen ocultos los dos selectores', selectorVisible(), '');
 
   // --- arranque en SLA: ningun selector ------------------------------------
   api.activarTab('sla'); await esperar();
@@ -181,23 +178,30 @@ function contenedorActivo() { return activos('.maintab-content'); }
   comprobar('QA solo se remide al volver', cuenta.qa.redimensionar, 5);
   comprobar('QARE solo se remide al volver', cuenta.qare.redimensionar, 5);
 
-  // --- Observabilidad: un solo modulo, sin selector ------------------------
+  // --- Observabilidad -------------------------------------------------------
   boton('.mnav', 'observabilidad').click(); await esperar();
-  comprobar('Observabilidad: abre el marco (tablero)', contenedorActivo(), 'tab-tablero');
+  comprobar('Observabilidad: abre el marco (tablero) la primera vez', contenedorActivo(), 'tab-tablero');
   comprobar('Observabilidad: barra marca el grupo', activos('.mnav'), 'observabilidad');
-  comprobar('Observabilidad: aria-current en el grupo', boton('.mnav', 'observabilidad').atributos['aria-current'], 'page');
-  comprobar('Observabilidad: sin selector', selectorVisible(), '');
-  comprobar('Observabilidad: hash del modulo', hash.valor, '#tablero');
+  comprobar('Observabilidad: solo su selector visible', selectorVisible(), 'observabilidad');
+  comprobar('Observabilidad: selector marca Observabilidad', activos('.subnav-btn'), 'tablero');
+
+  boton('.subnav-btn', 'orquestacion').click(); await esperar();
+  comprobar('Orquestacion: contenedor', contenedorActivo(), 'tab-orquestacion');
+  comprobar('Orquestacion: barra sigue en el grupo', activos('.mnav'), 'observabilidad');
+  comprobar('Orquestacion: selector', activos('.subnav-btn'), 'orquestacion');
   for (var j = 0; j < 3; j++) {
-    boton('.mnav', 'calidad').click(); await esperar();
-    boton('.mnav', 'observabilidad').click(); await esperar();
+    boton('.subnav-btn', 'tablero').click(); await esperar();
+    boton('.subnav-btn', 'orquestacion').click(); await esperar();
   }
   comprobar('el marco se monta una sola vez', cuenta.tablero.init, 1);
+  comprobar('Orquestacion se monta una sola vez', cuenta.orquestacion.init, 1);
 
   // --- el grupo recuerda el ultimo modulo visto ----------------------------
   boton('.mnav', 'calidad').click(); await esperar();
   comprobar('volver a Calidad abre el ultimo visto (QARE)', contenedorActivo(), 'tab-qare');
-  comprobar('volver al grupo no remonta', cuenta.qare.init + cuenta.qa.init, 2);
+  boton('.mnav', 'observabilidad').click(); await esperar();
+  comprobar('volver a Observabilidad abre el ultimo visto (Orquestacion)', contenedorActivo(), 'tab-orquestacion');
+  comprobar('volver al grupo no remonta', cuenta.qare.init + cuenta.orquestacion.init, 2);
 
   // --- fuera de un grupo no queda selector ni grupo marcado ----------------
   boton('.mnav', 'backlog').click(); await esperar();
@@ -216,7 +220,7 @@ function contenedorActivo() { return activos('.maintab-content'); }
   comprobar('ningun init() repetido', claves.filter(function (n) { return cuenta[n].init > 1; }).join(','), '');
   comprobar('solo se montaron los que se abrieron',
     claves.filter(function (n) { return cuenta[n].init === 1; }).sort().join(','),
-    'backlog,qa,qare,sla,tablero');
+    'backlog,orquestacion,qa,qare,sla,tablero');
 
   console.log('');
   if (fallos) {
