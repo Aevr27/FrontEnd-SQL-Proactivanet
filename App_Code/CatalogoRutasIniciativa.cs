@@ -19,6 +19,11 @@
 // la fila de dueños de la que salen es vigente (FuenteVigente). Las demas
 // no se adivinan: se cuentan aparte.
 //
+// ADM (Crear / Modificar, ElegiblesAdm) NO pasa por ese filtro: ve TODAS
+// las rutas activas y unicas, con los dueños que se resuelvan o null si
+// faltan. Un dueño que falta no se inventa ni se hereda de otra parte: se
+// dice que falta. La cascada de Nueva solicitud (ADM y MOD) sigue igual.
+//
 // No se filtra por profundidad ni por AplicaAProblemas: ninguna regla
 // verificada dice que solo ciertas rutas admitan iniciativas.
 //
@@ -57,16 +62,7 @@ WHERE VigenteEnOrigen = 1
     // capacidad), en orden ordinal.
     public static Dictionary<string, object> Asignaciones(IEnumerable<string> rutas, DirectorioOrganizacional dir)
     {
-        var unicas = new List<string>();
-        var vistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var limpias = new List<string>();
-        foreach (var r in rutas ?? new string[0])
-        {
-            var n = DirectorioOrganizacional.Normaliza(r);
-            if (n != null) limpias.Add(n);
-        }
-        limpias.Sort(string.CompareOrdinal);
-        foreach (var n in limpias) if (vistas.Add(n)) unicas.Add(n);
+        var unicas = Unicas(rutas);
 
         var filas = new List<object>();
         int sinDuenos = 0, noVigentes = 0;
@@ -101,8 +97,68 @@ WHERE VigenteEnOrigen = 1
         };
     }
 
+    // SOLO ADM (Crear / Modificar). { "rutas_adm": [ {categoria, director,
+    // po, so} ...], "rutas_adm_sin_duenos": n }: TODAS las rutas activas,
+    // unicas con la misma identidad que Asignaciones (Normaliza + sin
+    // distinguir mayusculas), sin filtrar por dueños ni por la vigencia de su
+    // fila de dueños. Cada dueño es el que resuelve DirectorioOrganizacional
+    // (la regla de siempre) o null si no hay: no se inventa. sin_duenos
+    // cuenta las rutas a las que les falta alguno de los tres.
+    public static Dictionary<string, object> ElegiblesAdm(IEnumerable<string> rutas, DirectorioOrganizacional dir)
+    {
+        var filas = new List<object>();
+        int sinDuenos = 0;
+        foreach (var ruta in Unicas(rutas))
+        {
+            string c1, c1c2, po, so, director, manager;
+            ExperienciaQueries.CortesDeRuta(ruta, out c1, out c1c2);
+            dir.Resolver(c1, c1c2, out po, out so, out director, out manager);
+            if (string.IsNullOrEmpty(po) || string.IsNullOrEmpty(so) || string.IsNullOrEmpty(director)) sinDuenos++;
+            filas.Add(new Dictionary<string, object>
+            {
+                { "director", Vacio(director) }, { "po", Vacio(po) }, { "so", Vacio(so) }, { "categoria", ruta },
+            });
+        }
+        return new Dictionary<string, object>
+        {
+            { "rutas_adm", filas },
+            { "rutas_adm_sin_duenos", sinDuenos },
+        };
+    }
+
+    // Solo las rutas de ElegiblesAdm (lo que valida el servidor de ADM).
+    public static List<string> RutasAdm(Dictionary<string, object> elegibles)
+    {
+        var salida = new List<string>();
+        object filas;
+        if (elegibles == null || !elegibles.TryGetValue("rutas_adm", out filas) || filas == null) return salida;
+        foreach (Dictionary<string, object> f in (System.Collections.IEnumerable)filas)
+            salida.Add(f["categoria"] as string);
+        return salida;
+    }
+
     public static Dictionary<string, object> Cargar(SqlConnection cn, DirectorioOrganizacional dir)
     {
         return Asignaciones(LeerRutasActivas(cn), dir);
     }
+
+    // Rutas normalizadas, unicas sin distinguir mayusculas (la identidad de
+    // una categoria en todo el sitio), en orden ordinal: de varias grafias
+    // de la misma ruta se queda la primera en ese orden.
+    private static List<string> Unicas(IEnumerable<string> rutas)
+    {
+        var unicas = new List<string>();
+        var vistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var limpias = new List<string>();
+        foreach (var r in rutas ?? new string[0])
+        {
+            var n = DirectorioOrganizacional.Normaliza(r);
+            if (n != null) limpias.Add(n);
+        }
+        limpias.Sort(string.CompareOrdinal);
+        foreach (var n in limpias) if (vistas.Add(n)) unicas.Add(n);
+        return unicas;
+    }
+
+    private static string Vacio(string v) { return string.IsNullOrEmpty(v) ? null : v; }
 }

@@ -16,6 +16,8 @@
 //       "omitidas": 0,
 //       "rutas": [ { "director", "po", "so", "categoria" (ruta) }, ... ],   (?rutas=1)
 //       "rutas_sin_duenos": 0, "rutas_duenos_no_vigentes": 0,                (?rutas=1)
+//       "rutas_adm": [ { "director", "po", "so", "categoria" } ],          (?rutas=1, solo ADM)
+//       "rutas_adm_sin_duenos": 0,                                         (?rutas=1, solo ADM)
 //       "duenos": [ ... ], "personas": [ ... ] }                             (?duenos=1)
 //
 //   tipos          DashboardCatalogos.PrefijosIniciativa: TODAS las filas de
@@ -30,6 +32,10 @@
 //                  misma regla N2 -> C1 del resto del sitio).
 //   rutas          CatalogoRutasIniciativa: dbo.Categorias activas con sus
 //                  dueños por la misma regla (C1&C2 exacto o C1).
+//   rutas_adm      SOLO con rol ADM (Crear / Modificar): TODAS las rutas
+//                  activas y unicas, sin filtrar por dueños; cada dueño el
+//                  resuelto o null si falta (ElegiblesAdm). La cascada de
+//                  Nueva solicitud sigue sobre `rutas`.
 //   duenos/personas  CatalogoDuenosCategoria (?duenos=1, pantalla "Dueños
 //                  de categoria"): cada fila de CatCategoriaDueno con lo
 //                  capturado, lo resuelto y la fila de la que hereda; y los
@@ -84,7 +90,12 @@ public class AdminIniciativasCatalogos : IHttpHandler
                 salida["tipo_problem"] = TiposSolicitud.ValorProblem(DashboardCatalogos.Llaves(tipos));
                 if (context.Request.QueryString["rutas"] == "1")
                 {
-                    foreach (var kv in CatalogoRutasIniciativa.Cargar(cn, dir)) salida[kv.Key] = kv.Value;
+                    var activas = CatalogoRutasIniciativa.LeerRutasActivas(cn);
+                    foreach (var kv in CatalogoRutasIniciativa.Asignaciones(activas, dir)) salida[kv.Key] = kv.Value;
+                    // Solo ADM: todas las rutas activas, aunque les falten
+                    // duenos (Crear / Modificar). MOD no las recibe.
+                    if (AccesoAdmin.Rol(context) == RolAdmin.Adm)
+                        foreach (var kv in CatalogoRutasIniciativa.ElegiblesAdm(activas, dir)) salida[kv.Key] = kv.Value;
                 }
                 if (context.Request.QueryString["duenos"] == "1")
                 {

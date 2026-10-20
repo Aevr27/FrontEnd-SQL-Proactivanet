@@ -1289,17 +1289,25 @@ window.RegistroIniciativas = (function () {
       // Rutas del catalogo vigente (las fija la pagina al cargar el
       // catalogo): lo unico que "Modificar" puede agregar. null = sin cargar.
       this.rutasCatalogo = null;
+      // Las de ADM (rutas_adm: todas las activas, con o sin dueños), solo
+      // para "Modificar". null = el servidor no las mando: se usan las de
+      // arriba. "Solicitar cambios" siempre usa rutasCatalogo.
+      this.rutasAdmCatalogo = null;
       this.rutasEstado = 'cargando'; // cargando | ok | error (del catalogo de rutas)
+      // PO / SO del mismo catalogo (los que ofrece el alta): { po, so }.
+      this.duenosCatalogo = null;
       this.volumetria = null;     // VolumetriaCliente (perezoso)
       this.segCategoria = '';     // categoria elegida en Seguimiento
     }
 
     // estado: 'error' si el catalogo no se pudo cargar (rutas null).
-    fijarRutasCatalogo(rutas, estado) {
+    // rutasAdm: las de ADM para "Modificar" (opcional).
+    fijarRutasCatalogo(rutas, estado, rutasAdm) {
       this.rutasCatalogo = Array.isArray(rutas) ? rutas : null;
+      this.rutasAdmCatalogo = this.rutasCatalogo && Array.isArray(rutasAdm) ? rutasAdm : null;
       this.rutasEstado = this.rutasCatalogo ? 'ok' : estado === 'error' ? 'error' : 'cargando';
       if (this.edicion) {
-        this.edicion.categorias.fijarRutas(this.rutasCatalogo);
+        this.edicion.categorias.fijarRutas(this.rutasAdmCatalogo || this.rutasCatalogo);
         this.edicion.rutasEstado = this.rutasEstado;
         this.pintarCategoriasEdicion();
       }
@@ -2109,6 +2117,7 @@ window.RegistroIniciativas = (function () {
       this.edicion = this.puedeEditar() ? this.nuevaEdicion(i) : null;
       this.segCategoria = '';
       this.$('regDetCuerpo').innerHTML = this.htmlDetalle(i);
+      this.montarSelectorCategorias();
       this.$('regDetFondo').hidden = false;
       this.$('regDetalle').hidden = false;
       this.marcarRaiz(true);
@@ -2337,7 +2346,15 @@ window.RegistroIniciativas = (function () {
     pintarCategoriasEdicion() {
       var caja = this.$('regEdCats');
       if (caja && this.edicion) caja.innerHTML = window.IniciativaAdmin.htmlCategoriasEdicion(this.edicion, this.clienteVolumetria());
+      this.montarSelectorCategorias();
       this.pintarEstadoEdicion();
+    }
+
+    // "Agregar categoria" de Modificar con el desplegable del filtro Grupos
+    // de SLA (IniciativaAdmin.Selector.montar). Sin el modulo, <select> nativo.
+    montarSelectorCategorias() {
+      var A = window.IniciativaAdmin, caja = this.$('regEdCats');
+      if (A && A.Selector && A.Selector.montar && caja) A.Selector.montar(caja);
     }
 
     // Pide la volumetria (solo lectura) y repinta las categorias al llegar,
@@ -2349,6 +2366,7 @@ window.RegistroIniciativas = (function () {
         if (self.edicion === ed) {
           var caja = self.$('regEdCats');
           if (caja) caja.innerHTML = window.IniciativaAdmin.htmlCategoriasEdicion(ed, vol);
+          self.montarSelectorCategorias();
         }
       });
     }
@@ -2371,7 +2389,7 @@ window.RegistroIniciativas = (function () {
     nuevaEdicion(i) {
       var op = this.opcionesEstado();
       return new window.IniciativaAdmin.EdicionAdmin(i,
-        { rutas: op.rutas, rutasEstado: op.rutasEstado, estados: op.estados, subestados: op.subestados,
+        { rutas: this.rutasAdmCatalogo || op.rutas, rutasEstado: op.rutasEstado, estados: op.estados, subestados: op.subestados,
           tiposIniciativa: op.tiposIniciativa, tiposAgrupado: op.tiposAgrupado });
     }
 
@@ -2400,6 +2418,7 @@ window.RegistroIniciativas = (function () {
                      regEdBarraCaja: this.htmlBarra() };
       var self = this;
       Object.keys(partes).forEach(function (id) { var c = self.$(id); if (c) c.innerHTML = partes[id]; });
+      this.montarSelectorCategorias();
       this.volumetriaEdicion();
     }
 

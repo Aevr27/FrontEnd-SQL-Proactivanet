@@ -558,7 +558,47 @@ public static class GestionIniciativaAdminSmoke
         Check("EN5 persistencia encendida: Motivo es null (solo existe con la constante en false)", null, PersistenciaGestionAdmin.Motivo);
         Check("EN6 fuentes de la respuesta de Admin sin BOM: ningun caracter no ASCII fuera de comentarios", "",
             NoAsciiEnCodigo(@"App_Code\GestionIniciativaAdmin.cs", @"App_Code\PlanGestionAdmin.cs", @"App_Code\IniciativaService.cs",
-                            @"App_Code\SolicitudIniciativa.cs", @"handlers\admin_iniciativas_gestion.ashx", @"handlers\admin_iniciativas_validar.ashx"));
+                            @"App_Code\SolicitudIniciativa.cs", @"handlers\admin_iniciativas_gestion.ashx", @"handlers\admin_iniciativas_validar.ashx",
+                            @"App_Code\CatalogoRutasIniciativa.cs", @"App_Code\GestionIniciativaAdminService.cs",
+                            @"handlers\admin_iniciativas_catalogos.ashx"));
+
+        // ---- CA: categorias de ADM aunque les falten duenos ----
+        // CatalogoSolicitud.ParaAdm: la ruta sin duenos entra SOLO como
+        // categoria; PO / SO siguen saliendo de las filas completas.
+        var adm = CatalogoRutasIniciativa.ElegiblesAdm(new[] { "/A/Cat 1", "/Z/Sin duenos", " /z/sin duenos ", "/Z/Sin duenos" + ((char)0xA0), null, "  " },
+            new DirectorioOrganizacional(new List<DirectorioOrganizacional.Dueno>
+            {
+                new DirectorioOrganizacional.Dueno { CategoriaN2 = "/A/Cat 1", C1 = "A", Po = "PO 1", So = "SO x", Director = "Dir A", Vigente = true },
+                new DirectorioOrganizacional.Dueno { CategoriaN2 = "/Z/Sin duenos", C1 = "Z", Po = "PO Parcial", So = null, Director = null, Vigente = true },
+            }, new Dictionary<string, string>()));
+        var filasAdm = (List<object>)adm["rutas_adm"];
+        Check("CA1 ElegiblesAdm: unicas por Normaliza y sin mayusculas; vacias fuera", "2|/A/Cat 1|/Z/Sin duenos|1",
+            filasAdm.Count + "|" + ((Dictionary<string, object>)filasAdm[0])["categoria"] + "|" + ((Dictionary<string, object>)filasAdm[1])["categoria"] +
+            "|" + adm["rutas_adm_sin_duenos"]);
+        var fz = (Dictionary<string, object>)filasAdm[1];
+        Check("CA2 duenos que faltan = null (no se inventan); el que hay, tal cual", "PO Parcial|null|null",
+            fz["po"] + "|" + (fz["so"] ?? "null") + "|" + (fz["director"] ?? "null"));
+        var catAdm = CatalogoSolicitud.ParaAdm(new object[] { "PRB" }, new List<object>
+            {
+                new Dictionary<string, object> { { "po", "PO 1" }, { "so", "SO x" }, { "categoria", "/A/Cat 1" }, { "director", "Dir A" } },
+            }, filasAdm);
+        Check("CA3 ParaAdm: la ruta sin duenos es categoria valida; la cascada no la conoce", "True|True|False",
+            catAdm.TieneCategoria("/Z/Sin duenos") + "|" + catAdm.TieneCategoria("/A/Cat 1") + "|" + (catAdm.Filas(null, null, "/Z/Sin duenos").Count > 0));
+        Check("CA4 ParaAdm: el PO de una fila incompleta NO entra a la lista de PO", "False|True",
+            catAdm.TienePo("PO Parcial") + "|" + catAdm.TienePo("PO 1"));
+        var sinCap = new CapacidadCategoria(new CapacidadCategoria.Compromiso[0]);
+        var rCa = new ValidadorGestionAdmin().Crear(Declarar(PeticionCrearAdmin.Una("PRB", "/Z/Sin duenos", "10")), catAdm, sinCap, "PRB", Estados);
+        Check("CA5 Crear (ADM) con la ruta sin duenos: valida, sin Director, avisa Director y Service Owner", "True||True",
+            rCa.Valida + "|" + rCa.Director + "|" +
+            rCa.Advertencias.Any(a => a.Contains("/Z/Sin duenos") && a.Contains("Director") && a.Contains("Service Owner") && !a.Contains("Product Owner")));
+        Check("CA6 la misma alta con el catalogo de la cascada se rechaza (Nueva solicitud / antes)", "False",
+            new ValidadorGestionAdmin().Crear(Declarar(PeticionCrearAdmin.Una("PRB", "/Z/Sin duenos", "10")), Catalogo, sinCap, "PRB", Estados).Valida);
+        var conPoParcial = Declarar(PeticionCrearAdmin.Una("PRB", "/Z/Sin duenos", "10"));
+        conPoParcial.Po = "PO Parcial";
+        Check("CA7 Crear (ADM) con el PO de una fila incompleta: se rechaza (lista de PO sin cambio)", "po",
+            Campos(new ValidadorGestionAdmin().Crear(conPoParcial, catAdm, sinCap, "PRB", Estados)));
+        Check("CA8 Codigo inmutable sin distinguir mayusculas: 'Codigo' tambien se rechaza", "codigo",
+            Campos(ModC(F("folio", Fo, "Codigo", "PRB 2026-999999", "titulo", "x"))));
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO PASO" : fallos + " FALLO(S)");

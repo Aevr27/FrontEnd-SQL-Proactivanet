@@ -693,7 +693,12 @@ public sealed class ValidadorGestionAdmin
                 continue;
             }
             // El Director sale solo de la categoria: PO / SO no la filtran.
-            foreach (var f in catalogo.Filas(null, null, cat)) if (!string.IsNullOrEmpty(f.Director)) directores.Add(f.Director);
+            // Una ruta de ADM sin sus tres duenos tambien se acepta: lo que
+            // le falte se avisa, no se inventa.
+            var filasCat = catalogo.Filas(null, null, cat);
+            if (filasCat.Count == 0 && catalogo.RutaAdm(cat) != null) filasCat.Add(catalogo.RutaAdm(cat));
+            foreach (var f in filasCat) if (!string.IsNullOrEmpty(f.Director)) directores.Add(f.Director);
+            AvisarSinDuenos(r, catalogo, cat);
 
             var fr = ValidadorIniciativa.Fraccion(Limpio(c.Texto) ?? "");
             if (Limpio(c.Texto) == null) sinPct = true;
@@ -792,6 +797,24 @@ public sealed class ValidadorGestionAdmin
             if (v != null && !EsFecha(v)) r.Agregar(f[0], f[1] + ": escribe una fecha v\u00e1lida (aaaa-mm-dd).");
         }
         return r;
+    }
+
+    // Ruta de ADM a la que le falta Director, Product Owner o Service Owner
+    // en dbo.CatCategoriaDueno: se acepta y se dice que falta (nunca se
+    // inventa ni se toma de otra categoria). Las de la cascada completa no
+    // avisan nada.
+    private static void AvisarSinDuenos(ResultadoGestionAdmin r, CatalogoSolicitud catalogo, string ruta)
+    {
+        if (catalogo.Filas(null, null, ruta).Count > 0) return;
+        var a = catalogo.RutaAdm(ruta);
+        if (a == null) return;
+        var faltan = new List<string>();
+        if (string.IsNullOrEmpty(a.Director)) faltan.Add("Director");
+        if (string.IsNullOrEmpty(a.Po)) faltan.Add("Product Owner");
+        if (string.IsNullOrEmpty(a.So)) faltan.Add("Service Owner");
+        r.Advertencias.Add(ruta + ": " + (faltan.Count > 0
+            ? "sin " + string.Join(", ", faltan.ToArray()) + " en el cat\u00e1logo de due\u00f1os; no se inventa."
+            : "sus due\u00f1os salen de una fila de due\u00f1os dada de baja."));
     }
 
     private static string Valor(PeticionModificarAdmin p, string clave)
@@ -999,6 +1022,7 @@ public sealed class ValidadorGestionAdmin
                 r.Agregar(CCategorias, ruta + ": la categor\u00eda no est\u00e1 en el cat\u00e1logo vigente.");
                 continue;
             }
+            AvisarSinDuenos(r, catalogo, ruta);
             var ti = Limpio(x.TipoIniciativa);
             var ta = Limpio(x.TipoAgrupado);
             if (ti != null && (estados == null || !estados.TiposIniciativa.Contains(ti)))

@@ -1544,6 +1544,27 @@ pruebas.push(function () {
   });
 });
 
+// LA) Rutas de ADM en el registro: "Modificar" ofrece todas las activas
+// (rutas_adm), "Solicitar cambios" sigue con las de la cascada.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    p.pagina.fijarRol('ADM');
+    reg.fijarRutasCatalogo(['/A/Cat 1', '/A/Cat 2'], undefined, ['/A/Cat 1', '/A/Cat 2', '/Z/Sin duenos']);
+    reg.modificar('PRB 2026-000001');
+    Check('LA1 Modificar: el selector trae la ruta sin duenos, como <select> del desplegable', [true, true, true],
+      [reg.edicion.categorias.rutas.indexOf('/Z/Sin duenos') >= 0, /<select id="regEdCatBuscar" class="ini-dd-categoria"/.test(p.sel('regEdCats').innerHTML),
+       /\/Z\/Sin duenos/.test(p.sel('regEdCats').innerHTML)]);
+    Check('LA2 Modificar: agregar la ruta sin duenos se acepta', true, reg.agregarCategoriaEdicion('/Z/Sin duenos').ok);
+    Check('LA3 Solicitar cambios: solo las de la cascada', ['/A/Cat 1', '/A/Cat 2'], reg.opcionesEstado().rutas);
+    reg.fijarRutasCatalogo(['/A/Cat 1'], undefined, null);
+    Check('LA4 sin rutas_adm (MOD / servidor viejo): Modificar usa las de la cascada', ['/A/Cat 1'], reg.edicion.categorias.rutas);
+    reg.fijarRutasCatalogo(null, 'error', ['/Z/Sin duenos']);
+    Check('LA5 con error de catalogo las de ADM no quedan colgadas', null, reg.rutasAdmCatalogo);
+  });
+});
+
 // HUD) El mismo detalle para ADM, MOD y sin rol: valores guardados como
 // texto al abrir (sin editores); edicion directa solo ADM; "Solicitar
 // cambios" para todos (fase de pruebas, tambien ADM) y sin escrituras.
@@ -2219,6 +2240,67 @@ pruebas.push(function () {
     Check('GS25 ... filtros, busqueda, orden, "mostrar mas", modo, detalle y borrador intactos',
       [VISTA, 'PRB 2026-000002', true, 'Borrador B'], [vista(p, reg), reg.abierta, reg.edicion === edB, edB.valores.observaciones]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// CA) Categorias de ADM aunque les falten duenos (rutas_adm, solo con ADM) y
+//     el selector de SLA (assets/js/desplegable.js) en Crear / Modificar.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var conAdm = JSON.parse(JSON.stringify(CATALOGO));
+  conAdm.rutas_adm = [
+    { director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1' },
+    { director: 'Dir Z', po: null, so: 'SO z', categoria: '/Z/Sin PO' },
+    { director: null, po: null, so: null, categoria: '/Z/Sin fila' },
+    { director: null, po: null, so: null, categoria: ' /z/sin fila ' },
+    { categoria: '' }, null
+  ];
+  conAdm.rutas_adm_sin_duenos = 2;
+  var cat = I.CatalogoIniciativas.desdeJson(conAdm);
+  Check('CA1 desdeJson: rutas_adm sin repetidas ni vacias, duenos que faltan = ""',
+    [['/A/Cat 1', '/Z/Sin PO', '/Z/Sin fila'], { categoria: '/Z/Sin PO', director: 'Dir Z', po: '', so: 'SO z' }],
+    [cat.rutasAdm.map(function (f) { return f.categoria; }), cat.rutasAdm[1]]);
+  Check('CA2 la cascada (Nueva solicitud) sigue sobre `rutas`: sin las rutas sin duenos',
+    ['/A/Cat 1', '/A/Cat 2', '/B/Cat 4'], cat.asignaciones.map(function (f) { return f.categoria; }));
+  Check('CA3 sin rutas_adm (MOD): rutasAdm = null y ADM cae a las de la cascada',
+    [null, ['/A/Cat 1', '/A/Cat 2', '/B/Cat 4']],
+    [I.CatalogoIniciativas.desdeJson(CATALOGO).rutasAdm, A.BorradorAdmin.rutasAdmDe(I.CatalogoIniciativas.desdeJson(CATALOGO))]);
+  var b = new A.BorradorAdmin(cat);
+  Check('CA4 Crear (ADM) ofrece todas las rutas activas, con o sin duenos', ['/A/Cat 1', '/Z/Sin PO', '/Z/Sin fila'], b.categorias.rutas);
+  Check('CA5 PO / SO de Crear: solo de las filas completas (sin cambio)', [['PO 1', 'PO 3'], ['SO x', 'SO y', 'SO z']],
+    [b.duenosLista.po, b.duenosLista.so]);
+  Check('CA6 duenosFaltantes dice lo que falta, nunca lo inventa',
+    [['Product Owner'], ['Director', 'Product Owner', 'Service Owner'], [], []],
+    [A.BorradorAdmin.duenosFaltantes(cat, '/Z/Sin PO'), A.BorradorAdmin.duenosFaltantes(cat, '/z/sin fila'),
+     A.BorradorAdmin.duenosFaltantes(cat, '/A/Cat 1'), A.BorradorAdmin.duenosFaltantes(cat, '/No/Existe')]);
+  var r1 = b.agregarCategoria('/Z/Sin PO');
+  Check('CA7 agregar la ruta sin PO: aceptada; Director el resuelto', [true, 'Dir Z'], [r1.ok, b.director()]);
+  b.agregarCategoria('/Z/Sin fila');
+  Check('CA8 con una ruta sin Director, el Director sigue siendo el unico conocido', 'Dir Z', b.director());
+  Check('CA9 escribir una ruta fuera del catalogo sigue rechazandose', false, b.agregarCategoria('/Inventada').ok);
+
+  var html = A.Selector.desplegable('x', ['/A/Cat 1', '/Z/<b>'], '/A/Cat 1');
+  Check('CA10 Selector.desplegable: siempre <select> real (sin datalist), escapado, con "Elige" y la elegida',
+    [true, false, true, true, true],
+    [/^<select id="x" class="ini-dd-categoria">/.test(html), /datalist/.test(html), /&lt;b&gt;/.test(html),
+     /<option value="">— Elige —<\/option>/.test(html), /value="\/A\/Cat 1" selected/.test(html)]);
+  var muchas = []; for (var i = 0; i < 50; i++) muchas.push('/R/' + i);
+  Check('CA11 con mas de 20 opciones sigue siendo <select> (el buscador lo pone el desplegable)', true,
+    /^<select/.test(A.Selector.desplegable('y', muchas, '')));
+  var montadas = [], antes = base.ventana.Desplegable;
+  var raiz = { querySelectorAll: function (q) { return q === 'select.ini-dd-categoria' ? [1] : []; } };
+  base.ventana.Desplegable = undefined;
+  Check('CA12 sin desplegable.js no monta nada (queda el <select> nativo)', false, A.Selector.montar(raiz));
+  base.ventana.Desplegable = { montar: function (r) { montadas.push(r); } };
+  Check('CA13 con desplegable.js monta sobre la raiz dada (no sobre todo el documento)', [true, true],
+    [A.Selector.montar(raiz), montadas[0] === raiz]);
+  Check('CA14 raiz sin selectores de categoria: no monta', [false, 1],
+    [A.Selector.montar({ querySelectorAll: function () { return []; } }), montadas.length]);
+  base.ventana.Desplegable = antes;
+
+  var htmlPag = leer('admin/iniciativas.html');
+  Check('CA15 iniciativas.html carga el desplegable de SLA (hoja y script)', [true, true],
+    [/assets\/css\/desplegable\.css/.test(htmlPag), /assets\/js\/desplegable\.js/.test(htmlPag)]);
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
