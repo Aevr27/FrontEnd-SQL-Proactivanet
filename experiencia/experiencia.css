@@ -124,6 +124,14 @@ cursor:pointer;font-size:12px;font-weight:700}
    margin-left:auto lo empuja al extremo derecho. */
 .selrow button.gris{margin-left:auto;opacity:.82}
 .selrow button.gris:hover{opacity:1}
+/* Selector segmentado (Tipo de registro): mismo alto y borde que los
+   desplegables; la opcion activa lleva el verde de los botones. */
+.selrow .segmentado{display:inline-flex;border:1px solid var(--g-700);border-radius:8px;overflow:hidden;background:#fff}
+.selrow .segmentado button{border:0;border-radius:0;background:#fff;color:var(--ink);font-weight:600}
+.selrow .segmentado button+button{border-left:1px solid var(--g-200)}
+.selrow .segmentado button:hover{background:var(--g-50);border-color:var(--g-200)}
+.selrow .segmentado button[aria-pressed="true"]{background:var(--grad-btn);color:var(--btn-ink);font-weight:700}
+.selrow .segmentado button:focus-visible{outline:2px solid var(--g-800);outline-offset:-2px}
 
 /* Botones de accion que viven en los paneles, fuera de la cabecera: sin regla
    propia salian con el gris del navegador o con verdes sueltos en el HTML.

@@ -1194,6 +1194,14 @@ public static partial class ExperienciaQueries
         public Dictionary<int, int> Slot = new Dictionary<int, int>();
         public Dictionary<int, int> Mes = new Dictionary<int, int>();
         public int Inc, Pet, Total;   // reparto por tipo del slot 0
+        // Las mismas series que Slot / Mes, pero SOLO con los tickets de un
+        // tipo: Inc = columna [Incidencia], Pet = [Petición de Servicio] de
+        // la vista. Alimentan el selector Todos / Incidentes /
+        // Requerimientos del tablero (ver VolTipo).
+        public Dictionary<int, int> SlotInc = new Dictionary<int, int>();
+        public Dictionary<int, int> SlotPet = new Dictionary<int, int>();
+        public Dictionary<int, int> MesInc = new Dictionary<int, int>();
+        public Dictionary<int, int> MesPet = new Dictionary<int, int>();
     }
 
     private static List<object> ArmarCategorias(
@@ -1362,6 +1370,7 @@ public static partial class ExperienciaQueries
 
             c["vol_slot"] = Mapa(f.Slot);
             c["vol_mes"] = Mapa(f.Mes);
+            c["vol_tipo"] = VolTipo(f);
             c["iniciativas"] = Iniciativas(rama, reducePorFolio, dir);
 
             salida.Add(c);
@@ -1540,6 +1549,7 @@ public static partial class ExperienciaQueries
             c["categoria"] = f.Categoria;
             c["vol_slot"] = Mapa(f.Slot);
             c["vol_mes"] = Mapa(f.Mes);
+            c["vol_tipo"] = VolTipo(f);
             c["es_hoja"] = !conHijos.ContainsKey(f.Categoria);
             c["tiene_iniciativa"] = conIniciativa.ContainsKey(f.Categoria);
             c["ticket_reduce"] = red;
@@ -1686,6 +1696,9 @@ public static partial class ExperienciaQueries
             destino.TryGetValue(v.Periodo, out actual);
             destino[v.Periodo] = actual + v.Total;
 
+            Sumar(esSlot ? f.SlotInc : f.MesInc, v.Periodo, v.Inc);
+            Sumar(esSlot ? f.SlotPet : f.MesPet, v.Periodo, v.Pet);
+
             // El reparto por tipo solo interesa en el periodo vigente.
             if (esSlot && v.Periodo == 0)
             {
@@ -1823,6 +1836,43 @@ public static partial class ExperienciaQueries
             if (Clave(AGRUPADORES[i]) == clave)
                 return true;
         return false;
+    }
+
+    // Suma un valor al periodo de una serie. Un 0 no crea la llave: la serie
+    // de un tipo sin tickets queda vacia, igual que Mapa espera.
+    private static void Sumar(Dictionary<int, int> serie, int periodo, int valor)
+    {
+        if (valor == 0) return;
+        int actual;
+        serie.TryGetValue(periodo, out actual);
+        serie[periodo] = actual + valor;
+    }
+
+    // Volumen por tipo de registro de una fila, para el selector Todos /
+    // Incidentes / Requerimientos de experiencia.js:
+    //
+    //   inc  columna [Incidencia] de vw_TBSlotCAT / vw_TBMesCAT
+    //        (TipoTicket = 'Incidencia')
+    //   req  columna [Petición de Servicio]
+    //        (TipoTicket IN ('Petición de Servicio', 'Peticion de Servicio'))
+    //
+    // Es el mismo corte con el que dbo.vw_ProblemCategoria arma sus columnas
+    // Incidentes y Requerimientos. "Todos" no viaja aqui: es vol_slot /
+    // vol_mes, el [Total general] de la vista, que ademas incluye SorIA
+    // Peticiones, SorIA Incidentes y cualquier otro tipo. Nada se obtiene
+    // restando: cada serie es una columna de la vista sumada tal cual.
+    private static Dictionary<string, object> VolTipo(Fila f)
+    {
+        var inc = new Dictionary<string, object>();
+        inc["slot"] = Mapa(f.SlotInc);
+        inc["mes"] = Mapa(f.MesInc);
+        var req = new Dictionary<string, object>();
+        req["slot"] = Mapa(f.SlotPet);
+        req["mes"] = Mapa(f.MesPet);
+        var salida = new Dictionary<string, object>();
+        salida["inc"] = inc;
+        salida["req"] = req;
+        return salida;
     }
 
     private static int Periodo(Dictionary<int, int> mapa, int p)

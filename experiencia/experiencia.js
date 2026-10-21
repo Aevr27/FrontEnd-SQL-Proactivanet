@@ -226,6 +226,53 @@ function deltaDe(c){ return modoTiempo==='mes' ? c.delta_mes : c.delta; }
 function volSlotOMes(c, periodo){
   return modoTiempo==='mes' ? (c.vol_mes[String(periodo)]||0) : (c.vol_slot[String(periodo)]||0);
 }
+
+// ---- Tipo de registro: Todos / Incidentes / Requerimientos [TIPO] ----
+// El handler manda, ademas del volumen de siempre (vol_slot / vol_mes =
+// [Total general] de vw_TBSlotCAT / vw_TBMesCAT: TODOS los tipos, SorIA y
+// "Sin tipo" incluidos), dos series por categoria en vol_tipo:
+//   inc  columna [Incidencia]            (Tipo = 'Incidencia')
+//   req  columna [Petición de Servicio]  (Tipo = 'Petición de Servicio')
+// Ninguna sale de restar: cada una es su columna de la vista. Elegir un tipo
+// sustituye en cada categoria (categorias y categorias_v2) los campos de
+// volumen por los de ese tipo, y "Todos" devuelve los originales tal cual,
+// asi que todas las graficas, tablas y KPIs siguen leyendo los mismos
+// campos por los mismos helpers. Iniciativas, Tickets Reduce, retraso y
+// Efectividad no tienen tipo de ticket y no cambian.
+let tipoRegistro='todos';   // 'todos' | 'inc' | 'req'
+const TIPOS_REGISTRO={todos:'Todos', inc:'Incidentes', req:'Requerimientos'};
+const CAMPOS_VOL=['vol_slot','vol_mes','vol_actual','vol_anterior','delta',
+  'vol_actual_mes','vol_anterior_mes','delta_mes'];
+// Sin vol_tipo (el mock, o un handler anterior) el selector no se ofrece.
+const HAY_TIPOS=P.categorias.length>0
+  && P.categorias.concat(P.categorias_v2||[]).every(c=>!!c.vol_tipo);
+// Los campos de volumen de una categoria para un tipo. 'todos' son los que
+// mando el handler (guardados en c._todos). Para inc/req se recalculan de
+// la serie como ExperienciaQueries.ArmarCategorias: actual = SLOT 0 / mes
+// en curso, anterior = SLOT 1 / mes en curso - 1.
+function camposVolumenTipo(c, tipo, mesActual){
+  if(tipo==='todos') return c._todos;
+  const t=(c.vol_tipo||{})[tipo]||{};
+  const slot=t.slot||{}, mes=t.mes||{};
+  const v={vol_slot:slot, vol_mes:mes};
+  if('vol_actual' in c._todos){
+    v.vol_actual=slot['0']||0; v.vol_anterior=slot['1']||0; v.delta=v.vol_actual-v.vol_anterior;
+    v.vol_actual_mes=mes[String(mesActual)]||0; v.vol_anterior_mes=mes[String(mesActual-1)]||0;
+    v.delta_mes=v.vol_actual_mes-v.vol_anterior_mes;
+  }
+  return v;
+}
+function aplicarTipoRegistro(tipo){
+  if(!TIPOS_REGISTRO[tipo]) tipo='todos';
+  tipoRegistro=tipo;
+  P.categorias.concat(P.categorias_v2||[]).forEach(c=>{
+    if(!c._todos){
+      c._todos={};
+      CAMPOS_VOL.forEach(k=>{ if(k in c) c._todos[k]=c[k]; });
+    }
+    Object.assign(c, camposVolumenTipo(c, tipo, P.mes_actual));
+  });
+}
 // [KPI-1]/[GRAF-1]: pronostico del mes en curso = volumen real / dias
 // transcurridos del mes (segun fecha de actualizacion de tickets) * 30.
 function pronosticoMes(volReal){
@@ -579,18 +626,19 @@ function volCatV2(cv){
 // como hoja para ese periodo si NINGUNA de sus descendientes tiene volumen
 // en ese mismo periodo -- matematicamente seguro (nunca duplica volumen,
 // porque solo "activa" al padre cuando sus hijas estan en 0 para ese
-// periodo). Memoizado por modoTiempo (no depende de filtros Director/PO/
-// Manager/SO, asi que no hace falta invalidarlo en cada render).
-let _cacheHojaPeriodo={modo:null, set:null};
+// periodo). Memoizado por modoTiempo y tipoRegistro (no depende de filtros
+// Director/PO/Manager/SO, asi que no hace falta invalidarlo en cada render).
+let _cacheHojaPeriodo={modo:null, tipo:null, set:null};
 function getConDescendienteConVolumen(){
-  if(_cacheHojaPeriodo.modo===modoTiempo && _cacheHojaPeriodo.set) return _cacheHojaPeriodo.set;
+  if(_cacheHojaPeriodo.modo===modoTiempo && _cacheHojaPeriodo.tipo===tipoRegistro
+     && _cacheHojaPeriodo.set) return _cacheHojaPeriodo.set;
   const set=new Set();
   (P.categorias_v2||[]).forEach(cv=>{
     if(volCatV2(cv)<=0) return;
     const partes=cv.categoria.split('/');
     for(let i=2;i<partes.length;i++) set.add(partes.slice(0,i).join('/'));
   });
-  _cacheHojaPeriodo={modo:modoTiempo, set};
+  _cacheHojaPeriodo={modo:modoTiempo, tipo:tipoRegistro, set};
   return set;
 }
 function esHojaPeriodo(cv){
@@ -1276,6 +1324,7 @@ function renderAll(){
   else if(fDir) subPartes.push('Director: '+fDir);
   if(fSO) subPartes.push('Service Owner: '+fSO);
   else if(fMgr) subPartes.push('Manager: '+fMgr);
+  if(tipoRegistro!=='todos') subPartes.push('Solo '+TIPOS_REGISTRO[tipoRegistro]);
   const sub = subPartes.length ? subPartes.join(' · ') : 'Resumen general — todos los tickets';
   document.getElementById('subhead').textContent=sub;
   const esMes = modoTiempo==='mes';
@@ -2485,6 +2534,8 @@ document.getElementById('btnReset').onclick=()=>{
   for(const p of ['ven','act']){
     filtroGraf[p].dimVal='';filtroGraf[p].agrup='';filtroGraf[p].estado='';
   }
+  // Tambien vuelve a "Todos", la vista con la que abre el tablero.
+  if(tipoRegistro!=='todos'){ aplicarTipoRegistro('todos'); pintarTipoRegistro(); }
   renderAll();
 };
 
@@ -2527,6 +2578,21 @@ document.getElementById('descargaBk').onclick=e=>{if(e.target.id==='descargaBk')
 ['descargaDesde','descargaHasta'].forEach(id=>{document.getElementById(id).onchange=()=>{document.querySelector('input[name="descargaOpcion"][value="rango"]').checked=true;};});
 const selModo=document.getElementById('selModo');
 if(selModo) selModo.onchange=()=>{modoTiempo=selModo.value;renderAll();};
+
+// Selector Todos / Incidentes / Requerimientos [TIPO]: un solo boton activo
+// (aria-pressed). No toca Director/PO/Manager/SO, "Ver por" ni la seleccion
+// de las graficas: solo cambia el volumen que esos filtros recortan.
+const botonesTipo=[...document.querySelectorAll('#segTipoRegistro [data-tipo]')];
+function pintarTipoRegistro(){
+  botonesTipo.forEach(b=>b.setAttribute('aria-pressed', String(b.dataset.tipo===tipoRegistro)));
+}
+const grpTipo=document.getElementById('grpTipoRegistro');
+if(grpTipo) grpTipo.style.display = HAY_TIPOS ? '' : 'none';
+botonesTipo.forEach(b=>b.onclick=()=>{
+  if(b.dataset.tipo===tipoRegistro) return;
+  aplicarTipoRegistro(b.dataset.tipo); pintarTipoRegistro(); renderAll();
+});
+pintarTipoRegistro();
 
 // tabs
 RAIZ.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{

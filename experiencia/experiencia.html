@@ -72,6 +72,14 @@
         <select id="selSO"><option value="">— Todos —</option></select></div>
       <div class="grp"><label>Ver por</label>
         <select id="selModo"><option value="slot">SLOT (30 días)</option><option value="mes">Mes calendario</option></select></div>
+      <!-- Tipo de registro: un solo boton activo. Lo esconde experiencia.js
+           si el payload no trae vol_tipo (mock o handler anterior). -->
+      <div class="grp" id="grpTipoRegistro"><label id="lblTipoRegistro">Tipo de registro</label>
+        <div class="segmentado" id="segTipoRegistro" role="group" aria-labelledby="lblTipoRegistro">
+          <button type="button" data-tipo="todos" aria-pressed="true">Todos</button>
+          <button type="button" data-tipo="inc" aria-pressed="false" title="Solo tickets de tipo Incidencia">Incidentes</button>
+          <button type="button" data-tipo="req" aria-pressed="false" title="Solo tickets de tipo Petición de Servicio">Requerimientos</button>
+        </div></div>
       <button id="btnDescargaTickets" style="display:none">⬇ Descargar Tickets</button>
       <button id="btnAyuda">❓ Ayuda / Glosario</button>
       <a id="ligaHeader" href="#" target="_blank" rel="noopener"
@@ -82,7 +90,7 @@
            trato secundario que en las pestanas de SLA y de Backlog. Antes se
            llamaba "Ver resumen general" y vivia entre los desplegables. -->
       <button id="btnReset" class="gris"
-              title="Vuelve al resumen general: quita Director, Product Owner, Manager y Service Owner y la selección por clic en las gráficas de Vencidas y Activas. «Ver por» se conserva">Limpiar</button>
+              title="Vuelve al resumen general: quita Director, Product Owner, Manager y Service Owner y la selección por clic en las gráficas de Vencidas y Activas, y regresa el tipo de registro a Todos. «Ver por» se conserva">Limpiar</button>
     </section>
 
   <!-- id="kpis-exp", no "kpis": dashboard.html ya tiene un #kpis en la pestaña
