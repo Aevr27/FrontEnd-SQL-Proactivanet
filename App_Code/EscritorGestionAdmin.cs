@@ -4,7 +4,9 @@
 // PO / SO y quitar en Modificar: parametros de sql/24 (SIN aplicar, despues
 // de sql/23); solo se mandan con PersistenciaGestionAdmin
 // .ModificaDuenosYQuitaActiva(), es decir, cuando DeteccionSql24 (abajo) ya
-// vio sql/24 en la base.
+// vio sql/24 en la base. La Volumetria del alta: parametro de sql/26 (SIN
+// aplicar, despues de sql/23); solo con GuardaVolumetriaActiva(), es decir,
+// cuando DeteccionSql26 la vio.
 //
 // El handler (admin_iniciativas_gestion.ashx) lo llama SOLO si
 // PersistenciaGestionAdmin.Activa() y el plan no tiene pendientes ("quitar
@@ -91,6 +93,45 @@ public static class DeteccionSql24
     }
 }
 
+// Si adm.usp_GestionAdmin_Crear ya es el de sql/26 (tiene
+// @VolumetriaOriginal). Igual que DeteccionSql24: metadatos, vigencia, y un
+// error al revisar cuenta como "sin sql/26".
+public static class DeteccionSql26
+{
+    public const string Consulta =
+        "SELECT COUNT(*) FROM sys.parameters " +
+        "WHERE object_id = OBJECT_ID(N'adm.usp_GestionAdmin_Crear', N'P') " +
+        "AND name = N'@VolumetriaOriginal'";
+
+    public static bool Revisar(SqlConnection cn)
+    {
+        if (cn == null) throw new ArgumentNullException("cn");
+        var ahora = DateTime.UtcNow;
+        if (!PersistenciaGestionAdmin.Sql26Vigente(ahora))
+        {
+            bool tiene;
+            try
+            {
+                using (var cmd = new SqlCommand(Consulta, cn) { CommandTimeout = 15 })
+                    tiene = Convert.ToInt32(cmd.ExecuteScalar()) == 1;
+            }
+            catch (SqlException) { tiene = false; }
+            PersistenciaGestionAdmin.AnotarSql26(tiene, ahora);
+        }
+        return PersistenciaGestionAdmin.GuardaVolumetriaActiva();
+    }
+
+    public static bool Revisar()
+    {
+        if (PersistenciaGestionAdmin.Sql26Vigente(DateTime.UtcNow)) return PersistenciaGestionAdmin.GuardaVolumetriaActiva();
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            return Revisar(cn);
+        }
+    }
+}
+
 public sealed class EscritorGestionAdminSql
 {
     private const string TipoCategorias = "adm.CategoriaPctTipo";
@@ -122,6 +163,12 @@ public sealed class EscritorGestionAdminSql
             }
             else if (plan.Po != null || plan.So != null)
                 throw new InvalidOperationException("PO / SO en el plan con GuardaDuenos = false: no se descartan en silencio.");
+            // sql/26: por nombre y solo si la base lo tiene.
+            if (PersistenciaGestionAdmin.GuardaVolumetriaActiva())
+                cmd.Parameters.Add("@VolumetriaOriginal", SqlDbType.Int).Value =
+                    plan.Volumetria == null ? (object)DBNull.Value : plan.Volumetria.Value;
+            else if (plan.Volumetria != null)
+                throw new InvalidOperationException("Volumetria en el plan sin sql/26: no se descarta en silencio.");
             Categorias(cmd, "@Categorias", plan.Categorias);
             // Las fechas del plan son las que se guardan: el mismo "hoy".
             cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = plan.FechaCreacion.Date;

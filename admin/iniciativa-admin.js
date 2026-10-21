@@ -31,15 +31,29 @@
      Los botones solo se pintan con rol ADM (SesionAdmin). Es solo UX: la
      autorizacion la hace el servidor (AccesoAdmin.ExigirAdm).
 
-   VOLUMETRIA (de solo lectura)
-   ----------------------------
+   VOLUMETRIA
+   ----------
      Al elegir o cambiar una categoria se pide su volumetria a
      handlers/admin_iniciativas_volumetria.ashx: el Total general del SLOT 0
      (ultimos 30 dias) de dbo.vw_TBSlotCAT, con la consulta y la llave de
-     Experiencia (App_Code/ExperienciaVolumetria.cs). Se pinta, no se
-     captura. NO es Tickets Reduce (ese sigue en la base). Estados:
-     cargando, ok, cero (0 real), sin_datos (la vista vino vacia), error
-     (la consulta fallo: nunca se pinta como 0) y ruta_invalida.
+     Experiencia (App_Code/ExperienciaVolumetria.cs). NO es Tickets Reduce
+     (ese sigue en la base). Estados: cargando, ok, cero (0 real),
+     sin_datos (la vista vino vacia), error (la consulta fallo: nunca se
+     pinta como 0) y ruta_invalida. En Modificar es de solo lectura.
+     En Crear, si la base tiene sql/26 (volumetria_manual del registro),
+     ADM puede fijar otra por categoria (vacia = la calculada); la suma de
+     las de un alta con alguna fijada viaja como `volumetria` y se guarda
+     en dbo.Problem.VolumetriaOriginal. Sin sql/26 el campo no se ofrece.
+
+   META EN % O EN TICKETS (Crear)
+   ------------------------------
+     "Planear la meta por" elige que se escribe en cada categoria: el % de
+     disminucion o los tickets a resolver; el otro se muestra calculado con
+     la volumetria de esa categoria (MetaCategoria). Lo que ADM escribio
+     (fuente) nunca se pisa: cambiar el modo o la volumetria solo recalcula
+     el otro. Viaja y se guarda el % (dos decimales): desde tickets puede no
+     ser exacto y se dice. Tickets a reducir lo sigue calculando la base con
+     la volumetria calculada, no con la fijada.
 
    INCOMPLETA (marca DERIVADA, sin columna)
    ----------------------------------------
@@ -153,8 +167,8 @@ window.IniciativaAdmin = (function () {
   // ---------------------------------------------------------------------
   // Incompleta
   // ---------------------------------------------------------------------
-  // Los datos que el flujo de solicitud exige, salvo la Volumetria, que ya
-  // no se captura. El Tipo no esta: sin tipo no hay prefijo de codigo, asi
+  // Los datos que el flujo de solicitud exige, salvo la Volumetria (calculada;
+  // la que ADM fija en Crear es opcional). El Tipo no esta: sin tipo no hay prefijo de codigo, asi
   // que en el alta es BLOQUEANTE, no "incompleta".
   var CAMPOS_INCOMPLETA = [
     { clave: 'categoria',     rotulo: 'Categoría' },
@@ -229,6 +243,12 @@ window.IniciativaAdmin = (function () {
       if (v === '') return '';
       return /^\d{1,3}(\.\d{1,2})?$/.test(v) && Number(v) <= 100 ? ''
         : 'Escribe un porcentaje entre 0 y 100, con hasta dos decimales.';
+    },
+    // Volumetria y tickets: enteros de 0 en adelante que caben en int (la
+    // columna dbo.Problem.VolumetriaOriginal; la misma regla del servidor).
+    entero: function (v) {
+      if (v === '') return '';
+      return /^\d+$/.test(v) && Number(v) <= 2147483647 ? '' : 'Escribe un número entero, de 0 en adelante.';
     },
     fecha: function (v) {
       if (v === '') return '';
@@ -412,14 +432,56 @@ window.IniciativaAdmin = (function () {
   }
 
   // ---------------------------------------------------------------------
+  // MetaCategoria: % de disminucion <-> tickets a resolver (Crear)
+  // ---------------------------------------------------------------------
+  // Denominador: la volumetria de ESA categoria (la que ADM fijo o la
+  // calculada). Lo que viaja y se guarda es el % (dbo.ProblemCategoria.
+  // PctDisminucion, hasta dos decimales); los tickets solo se muestran.
+  // Redondeo: el de Tickets a reducir (ticketsDe de iniciativas.js y
+  // ROUND(vol x %, 0) de la base): mitad hacia arriba, en enteros para no
+  // arrastrar errores de coma flotante. Tickets -> %: tambien mitad hacia
+  // arriba, a dos decimales; si ese % no devuelve los mismos tickets (con
+  // volumetrias grandes, 0.01% es mas de un ticket) se dice, no se esconde.
+  var MetaCategoria = {
+    // vol: entero >= 0 o null; pct: texto. -> tickets enteros, o null.
+    tickets: function (vol, pct) {
+      if (typeof vol !== 'number' || !isFinite(vol) || vol < 0 || vol % 1) return null;
+      if (vacio(pct) || FORMATO.pct(String(pct).trim())) return null;
+      return Math.floor((vol * Math.round(Number(pct) * 100) + 5000) / 10000);
+    },
+    // -> { pct: texto, exacto, tickets: los que da ese % } o { error }.
+    pct: function (vol, tickets) {
+      var t = String(tickets === null || tickets === undefined ? '' : tickets).trim();
+      if (t === '') return { error: '' };
+      if (FORMATO.entero(t)) return { error: 'Tickets a resolver: escribe un número entero, de 0 en adelante.' };
+      if (typeof vol !== 'number' || !isFinite(vol) || vol < 0 || vol % 1) {
+        return { error: 'Sin volumetría no se puede pasar de tickets a %.' };
+      }
+      if (vol === 0) return { error: 'Con volumetría 0 no hay tickets que resolver: usa el %.' };
+      var n = Number(t);
+      if (n > vol) return { error: n.toLocaleString('es-MX') + ' tickets es más que la volumetría (' + vol.toLocaleString('es-MX') + '): pasaría de 100%.' };
+      var centesimos = Math.floor((2 * n * 10000 + vol) / (2 * vol));
+      var pct = String(centesimos / 100);
+      var da = MetaCategoria.tickets(vol, pct);
+      return { pct: pct, exacto: da === n, tickets: da };
+    }
+  };
+
+  // ---------------------------------------------------------------------
   // CategoriasProblema
   // ---------------------------------------------------------------------
   // ligadas: las categorias ACTUALES del problema ([{ categoria, pct_dism }]),
   // o [] en un alta. rutas: las rutas del catalogo vigente (lo unico que se
   // puede agregar). Cada fila: { categoria, valor (% en texto), original
   // (% de la base, en texto) | null si es nueva, ligada, quitada }.
+  // Una NUEVA ademas (meta de Crear, MetaCategoria): volManual (la
+  // volumetria que ADM fijo, '' = la calculada), volCalc (la calculada, o
+  // null), tickets (lo escrito en "Tickets a resolver") y fuente ('pct' |
+  // 'tickets': lo que ADM escribio; el otro se calcula y nunca pisa lo
+  // escrito). modo: que se edita en pantalla ('pct' | 'tickets').
   class CategoriasProblema {
     constructor(ligadas, rutas) {
+      this.modo = 'pct';
       this.rutas = Array.isArray(rutas) ? rutas : [];
       this.filas = (ligadas || []).map(function (c) {
         var v = pctDe(c.pct_dism);
@@ -462,7 +524,8 @@ window.IniciativaAdmin = (function () {
       var hoy = FECHAS_GESTION.hoy();
       this.filas.push({ categoria: ruta, valor: '', original: null, ligada: false, quitada: false,
                         fCreacion: hoy, fAnalisis: FECHAS_GESTION.analisisDesde(hoy),
-                        tipoIniciativa: '', tipoAgrupado: '' });
+                        tipoIniciativa: '', tipoAgrupado: '',
+                        volManual: '', volCalc: null, tickets: '', fuente: 'pct' });
       return { ok: true, ruta: ruta, mensaje: '' };
     }
 
@@ -485,7 +548,96 @@ window.IniciativaAdmin = (function () {
 
     capturarPct(n, texto) {
       var f = this.filas[n];
-      if (f && !f.quitada) f.valor = String(texto === null || texto === undefined ? '' : texto).trim();
+      if (f && !f.quitada) {
+        f.valor = String(texto === null || texto === undefined ? '' : texto).trim();
+        if (!f.ligada) f.fuente = 'pct';
+      }
+    }
+
+    // ---- meta de Crear (solo filas nuevas) ----
+    // La volumetria con la que se calcula: la fijada si es valida; vacia, la
+    // calculada; fijada pero invalida, ninguna (el error lo da erroresFormato).
+    volumen(f) {
+      if (!f) return null;
+      if (f.volManual !== undefined && f.volManual !== '') return FORMATO.entero(f.volManual) ? null : Number(f.volManual);
+      return typeof f.volCalc === 'number' ? f.volCalc : null;
+    }
+
+    // Lo que tiene un fuente 'tickets': su % sale de los tickets y de la
+    // volumetria (vacio si no se puede: erroresFormato dice por que). Un
+    // fuente 'pct' no cambia.
+    recalcular(f) {
+      if (!f || f.ligada || f.fuente !== 'tickets') return;
+      var r = MetaCategoria.pct(this.volumen(f), f.tickets);
+      f.valor = r.error === undefined ? r.pct : '';
+    }
+
+    // La volumetria calculada de cada fila nueva, de un VolumetriaCliente
+    // (ok o cero; lo demas = sin calculada).
+    sincronizarCalculadas(vol) {
+      var self = this;
+      this.filas.forEach(function (f) {
+        if (f.ligada) return;
+        var e = vol && vol.estado ? vol.estado(f.categoria) : null;
+        f.volCalc = e && (e.estado === 'ok' || e.estado === 'cero') && typeof e.valor === 'number' ? e.valor : null;
+        self.recalcular(f);
+      });
+    }
+
+    capturarVolumen(n, texto) {
+      var f = this.filas[n];
+      if (!f || f.ligada || f.quitada) return false;
+      f.volManual = String(texto === null || texto === undefined ? '' : texto).trim();
+      this.recalcular(f);
+      return true;
+    }
+
+    capturarTickets(n, texto) {
+      var f = this.filas[n];
+      if (!f || f.ligada || f.quitada) return false;
+      f.tickets = String(texto === null || texto === undefined ? '' : texto).trim();
+      f.fuente = 'tickets';
+      this.recalcular(f);
+      return true;
+    }
+
+    // Solo cambia que se edita: no convierte ni toca lo escrito.
+    elegirModo(modo) {
+      if (modo !== 'pct' && modo !== 'tickets') return false;
+      this.modo = modo;
+      return true;
+    }
+
+    // Lo que muestra la casilla de tickets: lo escrito, o los que da el %.
+    ticketsVista(f) {
+      if (f.fuente === 'tickets') return f.tickets;
+      var t = MetaCategoria.tickets(this.volumen(f), f.valor);
+      return t === null ? '' : String(t);
+    }
+
+    // El valor calculado de una fila nueva, para mostrarlo junto al que se
+    // edita. -> { texto, mal }.
+    meta(f) {
+      var vol = this.volumen(f), de = vol === null ? '' : ' de ' + vol.toLocaleString('es-MX');
+      if (f.fuente === 'tickets') {
+        var r = MetaCategoria.pct(vol, f.tickets);
+        if (r.error !== undefined) return { texto: r.error, mal: r.error !== '' };
+        return { texto: '≈ ' + r.pct + '%' + de + (r.exacto ? '' : ' · con 2 decimales son ' +
+          r.tickets.toLocaleString('es-MX') + ' tickets'), mal: false };
+      }
+      if (f.valor === '' || FORMATO.pct(f.valor)) return { texto: '', mal: false };
+      var t = MetaCategoria.tickets(vol, f.valor);
+      if (t === null) return { texto: 'Sin volumetría: no se calculan los tickets.', mal: false };
+      return { texto: '= ' + t.toLocaleString('es-MX') + ' tickets' + de, mal: false };
+    }
+
+    // La Volumetria del problema que viaja (dbo.Problem.VolumetriaOriginal):
+    // '' si ADM no fijo ninguna (como hoy: NULL); si fijo alguna, la suma de
+    // la que usa cada categoria activa (las que no tienen, no suman).
+    volumetriaProblema() {
+      var activas = this.activas().filter(function (f) { return !f.ligada; }), self = this;
+      if (!activas.some(function (f) { return f.volManual; })) return '';
+      return String(activas.reduce(function (s, f) { var v = self.volumen(f); return s + (v === null ? 0 : v); }, 0));
     }
 
     // campo: 'tipo_iniciativa' | 'tipo_agrupado'. En una nueva, sus tipos;
@@ -520,9 +672,17 @@ window.IniciativaAdmin = (function () {
 
     erroresFormato() {
       var errores = [];
+      var self = this;
       this.activas().forEach(function (f) {
         var e = FORMATO.pct(f.valor);
         if (e) errores.push({ clave: 'pct', mensaje: f.categoria + ': ' + e });
+        if (!f.ligada && f.volManual && FORMATO.entero(f.volManual)) {
+          errores.push({ clave: 'volumetria', mensaje: f.categoria + ': Volumetría: ' + FORMATO.entero(f.volManual) });
+        }
+        if (!f.ligada && f.fuente === 'tickets') {
+          var m = MetaCategoria.pct(self.volumen(f), f.tickets);
+          if (m.error) errores.push({ clave: 'tickets', mensaje: f.categoria + ': ' + m.error });
+        }
         if (f.ligada && f.fPropia && f.fPropiaNueva !== f.fPropia) {
           var ef = f.fPropiaNueva === '' ? 'la fecha de análisis de una categoría no se puede vaciar.' : FORMATO.fecha(f.fPropiaNueva);
           if (ef) errores.push({ clave: 'fechas_categoria', mensaje: f.categoria + ': ' + ef });
@@ -602,8 +762,35 @@ window.IniciativaAdmin = (function () {
   //                     con fecha PROPIA, editable; en una nueva, la propia
   //                     calculada (dia en que se liga + 15), que fija el
   //                     servidor al guardar.
-  function htmlCategorias(cats, vol, prefijo, fechas) {
+  // En Crear (prefijo 'crear', sin fechas) la meta de cada fila se escribe
+  // en % o en tickets (cats.modo) y el otro valor se muestra calculado
+  // (MetaCategoria); con volManual (sql/26 en la base) la Volumetria se
+  // puede fijar a mano: vacia = la calculada. Modificar no cambia.
+  function htmlCategorias(cats, vol, prefijo, fechas, volManual) {
     if (!cats.filas.length) return '<p class="ini-nota">Sin categorías todavía.</p>';
+    var meta = prefijo === 'crear' && !fechas, porTickets = meta && cats.modo === 'tickets';
+    function celdaVol(f, n) {
+      if (f.quitada) return '—';
+      var e = vol ? vol.estado(f.categoria) : null;
+      if (!meta || f.ligada || !volManual) return htmlVolumetria(e);
+      return '<label class="ini-ed-pct"><span class="ini-sr">Volumetría de ' + Escape.html(f.categoria) + '</span>' +
+        '<input type="number" min="0" step="1" inputmode="numeric" data-crear-vol="' + n + '" value="' + Escape.attr(f.volManual) +
+        '" placeholder="' + Escape.attr(typeof f.volCalc === 'number' ? String(f.volCalc) : '') + '"></label>' +
+        '<small class="ini-vol-calc">Calculada: ' + htmlVolumetria(e) + '</small>';
+    }
+    function celdaPct(f, n) {
+      if (f.quitada) return Escape.html(f.original === '' ? '—' : f.original + '%');
+      var m = meta && !f.ligada ? cats.meta(f) : null;
+      var salida = m ? ' <output class="ini-meta' + (m.mal ? ' mal' : '') + '" data-crear-meta="' + n + '">' + Escape.html(m.texto) + '</output>' : '';
+      if (porTickets && !f.ligada) {
+        return '<label class="ini-ed-pct"><span class="ini-sr">Tickets a resolver de ' + Escape.html(f.categoria) + '</span>' +
+          '<input type="number" min="0" step="1" inputmode="numeric" data-crear-tickets="' + n + '" value="' +
+          Escape.attr(cats.ticketsVista(f)) + '"> tickets</label>' + salida;
+      }
+      return '<label class="ini-ed-pct"><span class="ini-sr">% de ' + Escape.html(f.categoria) + '</span>' +
+        '<input type="number" min="0" max="100" step="0.01" data-' + prefijo + '-pct="' + n + '" value="' +
+        Escape.attr(f.valor) + '"> %</label>' + salida;
+    }
     function celdaFecha(f, n) {
       if (f.quitada) return '—';
       if (f.ligada && f.fPropia) {
@@ -638,22 +825,20 @@ window.IniciativaAdmin = (function () {
         ' <span class="ini-origen" title="Opcional. Sin agrupación, el servidor revisa su tope como si consumiera">Sin declarar</span>';
     }
     return '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
-      '<th scope="col">Volumetría <span class="ini-origen derivado">Calculada</span></th>' +
-      '<th scope="col">% Disminución</th>' + (fechas ? '<th scope="col">Agrupación</th><th scope="col">Fecha de análisis</th>' : '') +
+      '<th scope="col">Volumetría ' + (meta && volManual ? '<span class="ini-origen">Editable</span>'
+        : '<span class="ini-origen derivado">Calculada</span>') + '</th>' +
+      '<th scope="col">' + (porTickets ? 'Tickets a resolver' : '% Disminución') + '</th>' + (fechas ? '<th scope="col">Agrupación</th><th scope="col">Fecha de análisis</th>' : '') +
       '<th scope="col"><span class="ini-sr">Acción</span></th></tr></thead><tbody>' +
       cats.filas.map(function (f, n) {
         var estado = f.quitada ? '<span class="ini-cat-estado">Se quitará</span>'
           : !f.ligada ? '<span class="ini-cat-estado nueva">Nueva</span>' : '';
-        var pct = f.quitada ? Escape.html(f.original === '' ? '—' : f.original + '%')
-          : '<label class="ini-ed-pct"><span class="ini-sr">% de ' + Escape.html(f.categoria) + '</span>' +
-            '<input type="number" min="0" max="100" step="0.01" data-' + prefijo + '-pct="' + n + '" value="' +
-            Escape.attr(f.valor) + '"> %</label>';
+        var pct = celdaPct(f, n);
         var boton = f.quitada
           ? '<button type="button" class="btn linea chico" data-' + prefijo + '-cat="restaurar" data-indice="' + n + '">Restaurar</button>'
           : '<button type="button" class="btn linea chico" data-' + prefijo + '-cat="quitar" data-indice="' + n + '">Quitar</button>';
         return '<tr' + (f.quitada ? ' class="ini-cat-quitada"' : '') + '><td><span class="ini-cat-ruta">' +
           Escape.html(f.categoria) + '</span> ' + estado + '</td><td>' +
-          (f.quitada ? '—' : htmlVolumetria(vol ? vol.estado(f.categoria) : null)) + '</td><td>' + pct + '</td>' +
+          celdaVol(f, n) + '</td><td>' + pct + '</td>' +
           (fechas ? '<td>' + celdaTipo(f, n) + '</td><td>' + celdaFecha(f, n) + '</td>' : '') + '<td>' + boton + '</td></tr>';
       }).join('') + '</tbody></table></div>';
   }
@@ -883,14 +1068,18 @@ window.IniciativaAdmin = (function () {
 
     // Lo que viaja al servidor (accion=crear). El archivo del RCA lo pone la
     // vista. PO / SO: la opcion real elegida, o vacio (opcionales).
+    // volumetria: solo si ADM fijo alguna (la suma, volumetriaProblema); sin
+    // ella no viaja y la base guarda NULL, como siempre. El % de cada
+    // categoria es el que se ve, escrito o calculado de los tickets.
     paraEnviar() {
       var v = this.valores;
       var d = this.declarados;
+      var vol = this.categorias.volumetriaProblema();
       return [['accion', 'crear'], ['tipo', this.tipo], ['po', this.duenos.po], ['so', this.duenos.so],
         ['tipo_iniciativa', d.tipo_iniciativa], ['tipo_agrupado', d.tipo_agrupado], ['estado', d.estado],
         ['f_entrega_analisis', d.f_entrega_analisis],
         ['titulo', v.titulo], ['descripcion', v.descripcion], ['observaciones', v.observaciones]]
-        .concat(this.categorias.paresCrear());
+        .concat(vol === '' ? [] : [['volumetria', vol]], this.categorias.paresCrear());
     }
 
     // Lo que veria quien revisa el borrador. NO es un guardado.
@@ -1368,6 +1557,13 @@ window.IniciativaAdmin = (function () {
       return !!(v && v.persiste === true);
     }
 
+    // Si la base guarda una Volumetria fijada por ADM (volumetria_manual del
+    // registro, sql/26). Sin el dato, no: el campo no se ofrece.
+    volumetriaManual() {
+      var v = this.fuenteValores ? this.fuenteValores() : null;
+      return !!(v && v.volumetriaManual === true);
+    }
+
     pintarRotulos() {
       var r = rotulos(this.persiste());
       var b = this.$('admGuardar'), n = this.$('admGuardarNota'), a = this.$('admPersistenciaAviso');
@@ -1494,11 +1690,23 @@ window.IniciativaAdmin = (function () {
         });
       });
       this.$('admCatAgregar').addEventListener('click', function () { self.agregarCategoria(); });
+      // % / tickets / volumetria de una fila: solo se repinta lo CALCULADO
+      // de esa fila (nunca la casilla en la que se escribe).
       this.$('admCats').addEventListener('input', function (e) {
-        var t = e.target, n = t && t.getAttribute && t.getAttribute('data-crear-pct');
-        if (!self.borrador || n === null || n === undefined) return;
-        self.borrador.categorias.capturarPct(Number(n), t.value);
+        var t = e.target, attr = function (a) { var v = t && t.getAttribute && t.getAttribute(a); return v === null || v === undefined ? null : v; };
+        var pct = attr('data-crear-pct'), tickets = attr('data-crear-tickets'), vol = attr('data-crear-vol');
+        if (!self.borrador) return;
+        var cats = self.borrador.categorias, n = pct !== null ? pct : tickets !== null ? tickets : vol;
+        if (n === null) return;
+        if (pct !== null) cats.capturarPct(Number(n), t.value);
+        else if (tickets !== null) cats.capturarTickets(Number(n), t.value);
+        else cats.capturarVolumen(Number(n), t.value);
+        self.pintarMeta(Number(n));
         self.pintarFaltantes();
+      });
+      ['admModoPct', 'admModoTickets'].forEach(function (id) {
+        var el = self.$(id);
+        if (el) el.addEventListener('change', function (e) { if (e.target.checked) self.elegirModo(e.target.value); });
       });
       this.$('admCats').addEventListener('click', function (e) {
         var el = e.target;
@@ -1594,8 +1802,35 @@ window.IniciativaAdmin = (function () {
 
     pintarCategorias() {
       if (!this.borrador) { this.$('admCats').innerHTML = ''; return; }
-      this.$('admCats').innerHTML = htmlCategorias(this.borrador.categorias, this.volumetria, 'crear');
+      this.borrador.categorias.sincronizarCalculadas(this.volumetria);
+      this.$('admCats').innerHTML = htmlCategorias(this.borrador.categorias, this.volumetria, 'crear', undefined, this.volumetriaManual());
       this.$('admDirector').textContent = this.borrador.director() || '—';
+      this.pintarModo();
+    }
+
+    // Lo calculado de la fila n (tickets o %), en su <output>. Sin el
+    // elemento (o sin querySelector), nada.
+    pintarMeta(n) {
+      var caja = this.$('admCats'), cats = this.borrador && this.borrador.categorias, f = cats && cats.filas[n];
+      var el = f && caja && caja.querySelector ? caja.querySelector('[data-crear-meta="' + n + '"]') : null;
+      if (!el) return;
+      var m = cats.meta(f);
+      el.textContent = m.texto;
+      el.className = 'ini-meta' + (m.mal ? ' mal' : '');
+    }
+
+    // "Planear la meta por": % o tickets. Solo cambia que se edita.
+    elegirModo(modo) {
+      if (!this.borrador || !this.borrador.categorias.elegirModo(modo)) return false;
+      this.pintarCategorias();
+      return true;
+    }
+
+    pintarModo() {
+      var modo = this.borrador ? this.borrador.categorias.modo : 'pct';
+      var p = this.$('admModoPct'), t = this.$('admModoTickets');
+      if (p) { p.checked = modo === 'pct'; p.disabled = !this.borrador; }
+      if (t) { t.checked = modo === 'tickets'; t.disabled = !this.borrador; }
     }
 
     pintar() {
@@ -1708,6 +1943,7 @@ window.IniciativaAdmin = (function () {
     FECHAS_GESTION: FECHAS_GESTION,
     Selector: Selector,
     VolumetriaCliente: VolumetriaCliente,
+    MetaCategoria: MetaCategoria,
     CategoriasProblema: CategoriasProblema,
     BorradorAdmin: BorradorAdmin,
     BuscadorProblemas: BuscadorProblemas,

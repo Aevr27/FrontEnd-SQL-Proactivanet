@@ -43,8 +43,12 @@
 //             (sql/20; NULL si no se eligen). Con GuardaDuenos = false (base
 //             sin sql/20) un PO o SO elegido se RECHAZA: nunca se tira. Lo que falte se informa como
 //             INCOMPLETA (marca derivada, sin columna), no bloquea.
-//             La Volumetria ya no se captura: es la del SLOT 0 de
-//             dbo.vw_TBSlotCAT, de solo lectura (ExperienciaVolumetria.cs).
+//             La Volumetria por categoria es la del SLOT 0 de
+//             dbo.vw_TBSlotCAT (ExperienciaVolumetria.cs). ADM puede fijar
+//             otra en la pantalla; la del problema (suma) viaja como
+//             volumetria y se guarda en dbo.Problem.VolumetriaOriginal
+//             (sql/26, GuardaVolumetriaActiva); sin sql/26 se rechaza.
+//             TicketsReduce no la usa (sigue en la base).
 //   Modificar Titulo, Descripcion, Observaciones, Fechas compromiso
 //             (Analisis / Solucion / Cierre), Estado y Subestado del Problem;
 //             % de las categorias ligadas; agregar categorias (con su %) y
@@ -128,6 +132,44 @@ public static class PersistenciaGestionAdmin
         lock (candadoSql24) { sql24EnBase = null; sql24RevisadaUtc = DateTime.MinValue; }
     }
 
+    // Crear: la Volumetria que ADM fija (dbo.Problem.VolumetriaOriginal), por
+    // el parametro @VolumetriaOriginal que sql/26 agrega a
+    // adm.usp_GestionAdmin_Crear (sin aplicar; va despues de sql/23). Igual
+    // que ModificaDuenosYQuita: encendida, pero SOLO surte efecto cuando
+    // DeteccionSql26 (EscritorGestionAdmin.cs) ve el parametro en la base.
+    // Sin el, el escritor no lo manda y el validador rechaza (422) una
+    // volumetria escrita: nunca se tira. false = apagada aunque este sql/26.
+    public const bool GuardaVolumetria = true;
+    // Solo para las pruebas. null = lo de abajo.
+    public static bool? GuardaVolumetriaForzadaParaPruebas;
+    public static bool GuardaVolumetriaActiva()
+    {
+        return GuardaVolumetriaForzadaParaPruebas ?? (GuardaVolumetria && sql26EnBase == true);
+    }
+
+    private static readonly object candadoSql26 = new object();
+    private static bool? sql26EnBase;
+    private static DateTime sql26RevisadaUtc;
+
+    public static void AnotarSql26(bool tiene, DateTime ahoraUtc)
+    {
+        lock (candadoSql26) { sql26EnBase = tiene; sql26RevisadaUtc = ahoraUtc; }
+    }
+
+    public static bool Sql26Vigente(DateTime ahoraUtc)
+    {
+        lock (candadoSql26) { return sql26EnBase != null && ahoraUtc - sql26RevisadaUtc < VigenciaRevisionSql24; }
+    }
+
+    public static void OlvidarSql26ParaPruebas()
+    {
+        lock (candadoSql26) { sql26EnBase = null; sql26RevisadaUtc = DateTime.MinValue; }
+    }
+
+    public const string MotivoVolumetria =
+        "todav\u00eda no se guarda: el alta en la base no recibe la Volumetr\u00eda (falta aplicar sql/26). " +
+        "D\u00e9jala vac\u00eda para guardar lo dem\u00e1s.";
+
     public const string MotivoModificaDuenos =
         "todav\u00eda no se guarda: la edici\u00f3n en la base no recibe Product Owner ni Service Owner " +
         "(falta aplicar sql/23 y sql/24). D\u00e9jalo como estaba para guardar lo dem\u00e1s.";
@@ -160,12 +202,17 @@ public static class PersistenciaGestionAdmin
     public const string BloqueoDuenosModificar =
         "Product Owner / Service Owner en Modificar: adm.usp_GestionAdmin_Modificar no los recibe sin sql/24; se rechazan (422)";
 
+    // Con GuardaVolumetriaActiva() = false (sin sql/26) se suma este.
+    public const string BloqueoVolumetria =
+        "Volumetr\u00eda en Crear: adm.usp_GestionAdmin_Crear no la recibe sin sql/26; se rechaza (422) y no se guarda nada";
+
     public static List<string> BloqueosVigentes()
     {
         var l = new List<string>();
         if (!ModificaDuenosYQuitaActiva()) { l.Add(BloqueoQuitar); l.Add(BloqueoDuenosModificar); }
         l.AddRange(Bloqueos);
         if (!GuardaDuenosActiva()) l.Add(BloqueoDuenos);
+        if (!GuardaVolumetriaActiva()) l.Add(BloqueoVolumetria);
         return l;
     }
 }
@@ -359,6 +406,9 @@ public sealed class PeticionCrearAdmin
     public string TipoIniciativa, TipoAgrupado, Estado;
     // aaaa-mm-dd; vacio = hoy (dbo.Problem.FechaEntregaAnalisis).
     public string FEntregaAnalisis;
+    // La Volumetria que ADM fija (clave volumetria, entero >= 0; sql/26,
+    // dbo.Problem.VolumetriaOriginal). null o vacio = no la fijo (NULL).
+    public string Volumetria;
     // Una entrada por categoria elegida, con su % (texto en %; "" = sin %).
     public List<PctCategoria> Categorias = new List<PctCategoria>();
     public bool CategoriasDesparejas;
@@ -376,6 +426,7 @@ public sealed class PeticionCrearAdmin
             Observaciones = f[SolicitudIniciativa.CObservaciones],
             Estado = f[CEstado],
             FEntregaAnalisis = f[CFEntregaAnalisis],
+            Volumetria = f[SolicitudIniciativa.CVolumetria],
             TieneRca = tieneRca,
         };
         p.TipoIniciativa = TiposPorPrefijo.Clasificacion(p.Tipo);
@@ -572,7 +623,7 @@ public sealed class ValidadorGestionAdmin
     public const string CFechasCategoria = "fechas_categoria";
 
     // Los de CAMPOS_INCOMPLETA de admin/iniciativa-admin.js, mismo orden.
-    // Sin Volumetria: ya no se captura (es calculada, de solo lectura).
+    // Sin Volumetria: es calculada; la que ADM fija en Crear (sql/26) es opcional.
     private static readonly string[][] CamposIncompleta =
     {
         new[] { "categoria", "Categor\u00eda" },
@@ -629,6 +680,19 @@ public sealed class ValidadorGestionAdmin
         return f == null ? "" : (f.Value * 100m).ToString("0.##", CultureInfo.InvariantCulture);
     }
 
+    private static readonly Regex EnteroSinSigno = new Regex(@"^\d+$");
+
+    // La Volumetria de Crear: entero de 0 en adelante que cabe en int (la
+    // columna dbo.Problem.VolumetriaOriginal), la misma regla que Nueva
+    // solicitud. null = no lo es (o vino vacia).
+    public static int? Volumetria(string s)
+    {
+        int v;
+        s = Limpio(s);
+        return s != null && EnteroSinSigno.IsMatch(s)
+            && int.TryParse(s, NumberStyles.None, CultureInfo.InvariantCulture, out v) ? v : (int?)null;
+    }
+
     public static bool EsFecha(string s)
     {
         DateTime d;
@@ -665,6 +729,8 @@ public sealed class ValidadorGestionAdmin
         var entrega = Limpio(p.FEntregaAnalisis);
         if (entrega != null && !EsFecha(entrega))
             r.Agregar(PeticionCrearAdmin.CFEntregaAnalisis, "Fecha de entrega del an\u00e1lisis: escribe una fecha v\u00e1lida (aaaa-mm-dd).");
+        if (Limpio(p.Volumetria) != null && Volumetria(p.Volumetria) == null)
+            r.Agregar(SolicitudIniciativa.CVolumetria, "La Volumetr\u00eda debe ser un n\u00famero entero, de 0 en adelante.");
         if (p.CategoriasDesparejas)
             r.Agregar(CCategorias, "Las categor\u00edas y sus % llegaron incompletos (categor\u00eda sin % o al rev\u00e9s).");
         var vistas = new HashSet<string>(StringComparer.Ordinal);
@@ -743,6 +809,10 @@ public sealed class ValidadorGestionAdmin
             r.Agregar(SolicitudIniciativa.CPo, "Product Owner: " + PersistenciaGestionAdmin.MotivoDuenos);
         if (so != null && !r.TieneError(SolicitudIniciativa.CSo) && !PersistenciaGestionAdmin.GuardaDuenosActiva())
             r.Agregar(SolicitudIniciativa.CSo, "Service Owner: " + PersistenciaGestionAdmin.MotivoDuenos);
+        // Volumetria fijada por ADM: sin sql/26 no hay donde guardarla; se
+        // rechaza, nunca se cambia en silencio por la calculada.
+        if (Volumetria(p.Volumetria) != null && !PersistenciaGestionAdmin.GuardaVolumetriaActiva())
+            r.Agregar(SolicitudIniciativa.CVolumetria, "Volumetr\u00eda: " + PersistenciaGestionAdmin.MotivoVolumetria);
 
         var directores = new HashSet<string>(StringComparer.Ordinal);
         var rutas = 0;

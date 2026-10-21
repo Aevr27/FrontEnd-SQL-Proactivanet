@@ -475,6 +475,9 @@ window.RegistroIniciativas = (function () {
       // PO / SO capturados y quitar categoría en Modificar (sql/24): solo
       // si el servidor lo dice.
       r.edicionDuenosQuitar = json.edicion_duenos_quitar === true;
+      // Volumetria fijada por ADM en Crear (sql/26): solo si el servidor
+      // lo dice.
+      r.volumetriaManual = json.volumetria_manual === true;
       // "Solicitar cambios" de Título / PO / SO (sql/25): solo si el
       // servidor lo dice.
       r.solicitudesDatos = json.solicitudes_datos === true;

@@ -36,6 +36,9 @@
 //   ED) Modificar: fechas, Estado/Subestado (de la lista), agregar y quitar
 //      categorias, el Codigo nunca viaja como cambio.
 //   SL) Selector: <select> hasta 20 opciones, caja con busqueda despues.
+//   MT) Crear: meta en % o en tickets (redondeo, exactitud, division por cero,
+//      lo escrito nunca se pisa) y Volumetria fijada por ADM solo con sql/26;
+//      Modificar intacto.
 //   G) "Validar en el servidor (no guarda)" en Crear y Modificar: 501 es
 //      solo validacion (nunca exito); 422, 403, 503, red, 500 y un 501 o
 //      200 malformados, cada uno con su mensaje y sin decir "guardado".
@@ -2417,6 +2420,163 @@ pruebas.push(function () {
   var htmlPag = leer('admin/iniciativas.html');
   Check('CA15 iniciativas.html carga el desplegable de SLA (hoja y script)', [true, true],
     [/assets\/css\/desplegable\.css/.test(htmlPag), /assets\/js\/desplegable\.js/.test(htmlPag)]);
+});
+
+// MT) Crear: meta en % o en tickets y Volumetria fijada por ADM (sql/26)
+pruebas.push(function () {
+  var M = A.MetaCategoria;
+  Check('MT1 % -> tickets: redondeo mitad hacia arriba, como Tickets a reducir (ROUND)', [42, 52, 1, 4, 0, 418, 0],
+    [M.tickets(418, '10'), M.tickets(418, '12.5'), M.tickets(1000, '0.05'), M.tickets(7, '50'), M.tickets(0, '50'),
+     M.tickets(418, '100'), M.tickets(418, '0')]);
+  Check('MT2 % -> tickets sin dato o invalido: null (nunca un numero inventado)', [null, null, null, null, null, null],
+    [M.tickets(null, '10'), M.tickets(418, ''), M.tickets(418, '101'), M.tickets(418, '-1'), M.tickets(418, '1.234'), M.tickets(-5, '10')]);
+  Check('MT3 tickets -> %: dos decimales, mitad hacia arriba, y si es exacto',
+    [['10.05', true, 42], ['57.14', true, 4], ['100', true, 418], ['0', true, 0]],
+    [[M.pct(418, '42').pct, M.pct(418, '42').exacto, M.pct(418, '42').tickets], [M.pct(7, 4).pct, M.pct(7, 4).exacto, M.pct(7, 4).tickets],
+     [M.pct(418, '418').pct, M.pct(418, '418').exacto, M.pct(418, '418').tickets], [M.pct(418, '0').pct, M.pct(418, '0').exacto, M.pct(418, '0').tickets]]);
+  var grande = M.pct(200000, '1');
+  Check('MT4 volumetria grande: 0.01% es mas de un ticket; el % no es exacto y se dice cuantos da', ['0', false, 0],
+    [grande.pct, grande.exacto, grande.tickets]);
+  Check('MT5 tickets -> %: vacio sin error; formato, negativos, sin volumetria, volumetria 0 y mas de 100%: error',
+    ['', true, true, true, true, true, true],
+    [M.pct(418, '').error, /entero/.test(M.pct(418, '-3').error), /entero/.test(M.pct(418, '2.5').error),
+     /Sin volumetría/.test(M.pct(null, '5').error), /volumetría 0/.test(M.pct(0, '5').error), /más que la volumetría/.test(M.pct(1000, '1001').error),
+     /entero/.test(M.pct(418, 'diez').error)]);
+  Check('MT6 FORMATO.entero: 0 y el maximo de int; negativo, decimal, signo y mas de int no', ['', '', true, true, true, true],
+    [A.FORMATO.entero('0'), A.FORMATO.entero('2147483647'), !!A.FORMATO.entero('-1'), !!A.FORMATO.entero('1.5'),
+     !!A.FORMATO.entero('+3'), !!A.FORMATO.entero('2147483648')]);
+
+  // El modelo: lo escrito (fuente) nunca se pisa.
+  var cats = new A.CategoriasProblema([], ['/A/Cat 1', '/A/Cat 2']);
+  var calc = { '/A/CAT 1': { estado: 'ok', valor: 418 }, '/A/CAT 2': { estado: 'cero', valor: 0 } };
+  var vol = { estado: function (r) { return calc[String(r).trim().toUpperCase()] || null; } };
+  cats.agregar('/A/Cat 1');
+  cats.sincronizarCalculadas(vol);
+  var f = cats.filas[0];
+  cats.capturarPct(0, '10');
+  Check('MT7 modo %: el % escrito y los tickets calculados con la volumetria calculada', ['10', 'pct', '= 42 tickets de 418'],
+    [f.valor, f.fuente, cats.meta(f).texto]);
+  cats.elegirModo('tickets');
+  Check('MT8 cambiar a tickets no convierte ni toca lo escrito: % igual, casilla de tickets con los calculados', ['tickets', '10', 'pct', '42'],
+    [cats.modo, f.valor, f.fuente, cats.ticketsVista(f)]);
+  cats.capturarTickets(0, '100');
+  Check('MT9 escribir tickets: el % sale de ellos (100 / 418 = 23.92%) y es exacto', ['23.92', 'tickets', '100', '≈ 23.92% de 418'],
+    [f.valor, f.fuente, cats.ticketsVista(f), cats.meta(f).texto]);
+  cats.capturarVolumen(0, '1000');
+  Check('MT10 cambiar la volumetria: los tickets escritos se quedan, el % se recalcula; el modo no cambia', ['10', '100', 'tickets'],
+    [f.valor, f.tickets, cats.modo]);
+  cats.capturarVolumen(0, '');
+  Check('MT11 volumetria vacia = vuelve a la calculada', ['23.92', 418], [f.valor, cats.volumen(f)]);
+  cats.capturarVolumen(0, '-5');
+  var errs = cats.erroresFormato().map(function (e) { return e.clave; });
+  Check('MT12 volumetria invalida: sin denominador; % vacio y dos errores (volumetria y tickets), nada se manda a medias', ['', true, true],
+    [f.valor, errs.indexOf('volumetria') >= 0, errs.indexOf('tickets') >= 0]);
+  cats.capturarVolumen(0, '0');
+  Check('MT13 volumetria 0 con tickets: error de division (no Infinity ni NaN)', ['', true],
+    [f.valor, cats.erroresFormato().some(function (e) { return e.clave === 'tickets' && /volumetría 0/.test(e.mensaje); })]);
+  cats.capturarVolumen(0, '50');
+  Check('MT14 mas tickets que la volumetria: error, nunca se recorta a 100%', ['', true],
+    [f.valor, cats.erroresFormato().some(function (e) { return /más que la volumetría/.test(e.mensaje); })]);
+  cats.capturarTickets(0, '');
+  Check('MT15 borrar los tickets: el % queda vacio (Incompleta), sin error', ['', 0], [f.valor, cats.erroresFormato().length]);
+  cats.elegirModo('pct');
+  cats.capturarPct(0, '5');
+  cats.capturarVolumen(0, '2000');
+  Check('MT16 modo % con volumetria fijada: el % escrito se queda y los tickets se recalculan', ['5', 'pct', '= 100 tickets de 2,000'],
+    [f.valor, f.fuente, cats.meta(f).texto]);
+  Check('MT17 un modo que no existe no cambia nada', [false, 'pct'], [cats.elegirModo('x'), cats.modo]);
+
+  var c2 = new A.CategoriasProblema([], ['/A/Cat 1', '/A/Cat 2']);
+  c2.agregar('/A/Cat 1'); c2.agregar('/A/Cat 2'); c2.sincronizarCalculadas(vol);
+  Check('MT18 sin volumetria fijada: no viaja (la base guarda NULL, como hoy)', '', c2.volumetriaProblema());
+  c2.capturarVolumen(0, '1000');
+  Check('MT19 con una fijada: la del problema es la suma de la que usa cada categoria (1000 + 0 calculada)', '1000', c2.volumetriaProblema());
+  c2.capturarVolumen(1, '25');
+  Check('MT20 dos fijadas: 1025', '1025', c2.volumetriaProblema());
+  c2.quitar(1);
+  Check('MT21 quitar una: ya no suma', '1000', c2.volumetriaProblema());
+
+  // La pantalla, con sql/26 en la base (volumetria_manual del registro).
+  REGISTRO.volumetria_manual = true;
+  var p = Pagina(), v;
+  return esperar().then(function () {
+    delete REGISTRO.volumetria_manual;
+    var pg = p.pagina;
+    pg.fijarRol('ADM');
+    pg.mostrarVista('crear');
+    v = pg.crearAdmin;
+    elegir(p, 'admTipo', 'ADO');
+    v.agregarCategoria('/A/Cat 1');
+    return esperar().then(esperar);
+  }).then(function () {
+    var html = p.sel('admCats').innerHTML, caja = p.sel('admCats');
+    Check('MT22 con sql/26: Volumetria editable (vacia, con la calculada de referencia) y modo % activo', [true, true, true, true, false, false],
+      [/data-crear-vol="0"/.test(html), /placeholder="418"/.test(html), /Calculada: <output/.test(html), /data-crear-pct="0"/.test(html),
+       /data-crear-tickets/.test(html), p.sel('admModoPct').disabled]);
+    var salida = Elemento('out'); caja.querySelector = function (s) { return s === '[data-crear-meta="0"]' ? salida : null; };
+    var t = Elemento('t'); t.setAttribute('data-crear-pct', '0'); t.value = '10';
+    caja.disparar('input', { target: t });
+    Check('MT23 escribir el %: solo se actualiza lo calculado de esa fila (no la casilla)', ['= 42 tickets de 418', html],
+      [salida.textContent, caja.innerHTML]);
+    Check('MT24 sin volumetria fijada no viaja la volumetria (default de siempre)', false,
+      v.borrador.paraEnviar().some(function (par) { return par[0] === 'volumetria'; }));
+    var tv = Elemento('tv'); tv.setAttribute('data-crear-vol', '0'); tv.value = '1500';
+    caja.disparar('input', { target: tv });
+    var pares = v.borrador.paraEnviar();
+    Check('MT25 fijarla: viaja como volumetria y el % es el escrito', [['volumetria', '1500'], ['cat_pct', '10'], '= 150 tickets de 1,500'],
+      [pares.filter(function (x) { return x[0] === 'volumetria'; })[0], pares.filter(function (x) { return x[0] === 'cat_pct'; })[0], salida.textContent]);
+    var radio = p.sel('admModoTickets'); radio.value = 'tickets'; radio.checked = true; radio.disparar('change');
+    html = caja.innerHTML;
+    Check('MT26 modo tickets: casilla de tickets con los calculados, encabezado y radio', [true, true, false, true, false],
+      [/data-crear-tickets="0" value="150"/.test(html), /Tickets a resolver<\/th>/.test(html), /data-crear-pct="0"/.test(html),
+       p.sel('admModoTickets').checked, p.sel('admModoPct').checked]);
+    var tk = Elemento('tk'); tk.setAttribute('data-crear-tickets', '0'); tk.value = '200';
+    caja.disparar('input', { target: tk });
+    pares = v.borrador.paraEnviar();
+    Check('MT27 escribir tickets: viaja el % equivalente (200 / 1500 = 13.33%), y que es exacto', [['cat_pct', '13.33'], '≈ 13.33% de 1,500'],
+      [pares.filter(function (x) { return x[0] === 'cat_pct'; })[0], salida.textContent]);
+    tv.value = '200000'; caja.disparar('input', { target: tv });
+    tk.value = '1'; caja.disparar('input', { target: tk });
+    Check('MT27b 1 ticket de 200,000 no cabe en 2 decimales: el % es 0 y se dice cuantos da (no se esconde)', ['0', '≈ 0% de 200,000 · con 2 decimales son 0 tickets'],
+      [v.borrador.categorias.filas[0].valor, salida.textContent]);
+    tv.value = '1500'; caja.disparar('input', { target: tv });
+    tk.value = '200'; caja.disparar('input', { target: tk });
+    Check('MT28 revisar: listo (nada bloquea) y nunca guarda', [true, false], [v.borrador.revisar().listo, v.borrador.revisar().guardado]);
+    tk.value = '-1'; caja.disparar('input', { target: tk });
+    Check('MT29 tickets negativos: no se puede enviar (error), el % no se inventa', [false, '', 'ini-meta mal'],
+      [v.borrador.revisar().listo, v.borrador.categorias.filas[0].valor, salida.className]);
+  }).then(function () {
+    // Sin sql/26 (sin la bandera): la volumetria sigue siendo de solo lectura,
+    // pero la meta en tickets tambien se puede usar (solo viaja el %).
+    var p2 = Pagina(), v2;
+    return esperar().then(function () {
+      var pg = p2.pagina;
+      pg.fijarRol('ADM');
+      pg.mostrarVista('crear');
+      v2 = pg.crearAdmin;
+      elegir(p2, 'admTipo', 'ADO');
+      v2.agregarCategoria('/A/Cat 1');
+      return esperar().then(esperar);
+    }).then(function () {
+      var html = p2.sel('admCats').innerHTML;
+      Check('MT30 sin sql/26: sin casilla de volumetria (Calculada, solo lectura) y no viaja', [false, true, false],
+        [/data-crear-vol/.test(html), /derivado">Calculada<\/span><\/th>/.test(html),
+         v2.borrador.paraEnviar().some(function (par) { return par[0] === 'volumetria'; })]);
+      v2.elegirModo('tickets');
+      var tk = Elemento('tk'); tk.setAttribute('data-crear-tickets', '0'); tk.value = '42';
+      p2.sel('admCats').disparar('input', { target: tk });
+      Check('MT31 sin sql/26, tickets con la calculada: 42 / 418 = 10.05%', ['cat_pct', '10.05'],
+        v2.borrador.paraEnviar().filter(function (x) { return x[0] === 'cat_pct'; })[0]);
+      // Modificar no cambia: sin volumetria editable, sin tickets, sin meta.
+      var reg = p2.registro;
+      reg.modificar('PRB 2026-000001');
+      reg.edicion.categorias.modo = 'tickets';
+      var hEd = A.htmlCategoriasEdicion(reg.edicion, null);
+      Check('MT32 Modificar intacto: % de siempre, sin volumetria editable, tickets ni meta', [true, false, false, false, true],
+        [/data-edicion-pct="0"/.test(hEd), /data-[a-z]+-vol=/.test(hEd), /-tickets=/.test(hEd), /data-[a-z]+-meta=/.test(hEd),
+         /derivado">Calculada<\/span><\/th><th scope="col">% Disminución/.test(hEd)]);
+    });
+  });
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

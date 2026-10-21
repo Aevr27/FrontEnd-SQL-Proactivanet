@@ -120,6 +120,8 @@ public sealed class PlanCrearAdmin
     public string TipoIniciativa, TipoAgrupado, Estado;
     // PO / SO elegidos (dbo.Problem.OwnerProblem / OwnerServicio); null = sin elegir.
     public string Po, So;
+    // Volumetria fijada por ADM (dbo.Problem.VolumetriaOriginal, sql/26); null = no la fijo.
+    public int? Volumetria;
     public string Titulo, Descripcion, Observaciones;
     public DateTime FechaCreacion;
     public DateTime FechaAnalisis;
@@ -143,6 +145,7 @@ public sealed class PlanCrearAdmin
             { "estado", Estado },
             { "po", Po },
             { "so", So },
+            { "volumetria", Volumetria },
             { "f_creacion", FechasGestionAdmin.Iso(FechaCreacion) },
             { "f_analisis", FechasGestionAdmin.Iso(FechaAnalisis) },
             { "f_entrega_analisis", FechasGestionAdmin.Iso(FechaEntregaAnalisis) },
@@ -270,6 +273,7 @@ public static class PlanificadorGestionAdmin
             TipoAgrupado = Limpio(p.TipoAgrupado),
             Estado = Limpio(p.Estado),
             Po = Limpio(p.Po), So = Limpio(p.So),
+            Volumetria = ValidadorGestionAdmin.Volumetria(p.Volumetria),
             // Solo espacios = NULL; con texto, tal cual (no se recorta).
             Titulo = Texto(p.Titulo), Descripcion = Texto(p.Descripcion), Observaciones = Texto(p.Observaciones),
             FechaCreacion = hoy.Date,

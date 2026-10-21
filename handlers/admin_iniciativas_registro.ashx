@@ -81,6 +81,16 @@ public class AdminIniciativasRegistro : IHttpHandler
                 duenosYQuitar = false;
             }
             registro["edicion_duenos_quitar"] = duenosYQuitar;
+            // Crear con Volumetria fijada por ADM (sql/26, DeteccionSql26):
+            // sin esto la pagina no ofrece el campo (el servidor lo rechazaria).
+            bool volumetriaManual;
+            try { volumetriaManual = DeteccionSql26.Revisar(); }
+            catch (Exception ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_registro.ashx", ex);
+                volumetriaManual = false;
+            }
+            registro["volumetria_manual"] = volumetriaManual;
             context.Response.Write(serializador.Serialize(registro));
         }
         catch (Exception ex)

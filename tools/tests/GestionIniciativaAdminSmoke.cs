@@ -36,6 +36,11 @@
 //      encendida, se validan contra el catalogo y entran al plan. PO y SO
 //      independientes (cambiar uno no lleva el otro al plan). Codigo
 //      sigue inmutable con los campos nuevos.
+//   VQ) Volumetria fijada por ADM en Crear (sql/26): solo con sql/26 vista
+//      en la base (AnotarSql26); sin ella una volumetria escrita se rechaza
+//      (422), vacia sigue igual; formato entero >= 0 que cabe en int; entra
+//      al plan (0 es 0, no NULL); el % y las categorias no cambian;
+//      Modificar no la lee. Los demas casos corren como con sql/26.
 //   EN) Acentos en la respuesta del servidor (faltantes, cambios, JSON) y
 //      fuentes sin BOM sin literales no ASCII; motivo de persistencia vigente.
 //
@@ -260,6 +265,8 @@ public static class GestionIniciativaAdminSmoke
 
     public static int Main()
     {
+        // Los casos de siempre, como con sql/26 en la base (VQ prueba sin ella).
+        PersistenciaGestionAdmin.GuardaVolumetriaForzadaParaPruebas = true;
         // ---- P ----
         Check("P1 persistencia es constante true (encendida 2026-10-14)", true, PersistenciaGestionAdmin.Habilitada);
         var j = Crear(C("ADO")).ComoJson();
@@ -758,6 +765,60 @@ public static class GestionIniciativaAdminSmoke
                   Campos(ModAmbos(F("folio", Fo, "codigo", Fo, "so", "SO y"))));
         }
         finally { PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null; }
+
+        // ---- VQ: Volumetria fijada por ADM en Crear (sql/26) ----
+        try
+        {
+            PersistenciaGestionAdmin.GuardaVolumetriaForzadaParaPruebas = null;
+            PersistenciaGestionAdmin.OlvidarSql26ParaPruebas();
+            Check("VQ1 constante encendida, sin revisar la base: apagada (nunca se asume sql/26)", "True|False",
+                  PersistenciaGestionAdmin.GuardaVolumetria + "|" + PersistenciaGestionAdmin.GuardaVolumetriaActiva());
+            var ahoraSql26 = new DateTime(2026, 10, 21, 18, 0, 0, DateTimeKind.Utc);
+            PersistenciaGestionAdmin.AnotarSql26(false, ahoraSql26);
+            Check("VQ2 la base NO tiene sql/26: apagada, con su bloqueo; la revision sigue vigente", "False|True|True",
+                  PersistenciaGestionAdmin.GuardaVolumetriaActiva() + "|" +
+                  PersistenciaGestionAdmin.BloqueosVigentes().Contains(PersistenciaGestionAdmin.BloqueoVolumetria) + "|" +
+                  PersistenciaGestionAdmin.Sql26Vigente(ahoraSql26.AddSeconds(30)));
+            var sinSql26 = Crear(Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", "1200"), false)));
+            Check("VQ3 sin sql/26: una volumetria escrita se RECHAZA (nunca se tira ni se cambia por la calculada)", "volumetria|True",
+                  Campos(sinSql26) + "|" + sinSql26.Errores[0].Mensaje.Contains("sql/26"));
+            Check("VQ4 sin sql/26: vacia (o solo espacios) sigue valida, como hoy", "True|True",
+                  Crear(Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", ""), false))).Valida + "|" +
+                  Crear(Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", "  "), false))).Valida);
+            PersistenciaGestionAdmin.AnotarSql26(true, ahoraSql26);
+            Check("VQ5 la base tiene sql/26: encendida y sin su bloqueo; pasada la vigencia se revisa otra vez", "True|False|False",
+                  PersistenciaGestionAdmin.GuardaVolumetriaActiva() + "|" +
+                  PersistenciaGestionAdmin.BloqueosVigentes().Contains(PersistenciaGestionAdmin.BloqueoVolumetria) + "|" +
+                  PersistenciaGestionAdmin.Sql26Vigente(ahoraSql26 + PersistenciaGestionAdmin.VigenciaRevisionSql24));
+            var vVol = new ValidadorGestionAdmin();
+            Func<string, string> formato = t =>
+                Campos(vVol.FormatoCrear(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", t), false)));
+            Check("VQ6 formato: negativa, decimal, texto, signo, mas de int: error en volumetria", "volumetria|volumetria|volumetria|volumetria|volumetria",
+                  formato("-5") + "|" + formato("1.5") + "|" + formato("mil") + "|" + formato("+3") + "|" + formato("2147483648"));
+            Check("VQ7 formato: 0, con espacios y el maximo de int son validos", "||", formato("0") + "|" + formato(" 42 ") + "|" + formato("2147483647"));
+            var hoyV = new DateTime(2026, 10, 21);
+            var conVol = Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", " 1200 ", "cat_ruta", "/A/Cat 1", "cat_pct", "12.5"), false));
+            var rVol = Crear(conVol);
+            var plVol = PlanificadorGestionAdmin.Crear(conVol, rVol, hoyV);
+            Check("VQ8 con sql/26: valida, entra al plan y al JSON del plan", "True|1200|1200",
+                  rVol.Valida + "|" + plVol.Volumetria + "|" + plVol.ComoJson()["volumetria"]);
+            var sinVol = Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "cat_ruta", "/A/Cat 1", "cat_pct", "12.5"), false));
+            var plSinVol = PlanificadorGestionAdmin.Crear(sinVol, Crear(sinVol), hoyV);
+            Check("VQ9 el % y la categoria no cambian por la volumetria; sin ella, NULL (no 0)", "0.1250|0.1250|/A/Cat 1|True",
+                  plVol.Categorias[0].Pct.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                  plSinVol.Categorias[0].Pct.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                  plVol.Categorias[0].Ruta + "|" + (plSinVol.Volumetria == null));
+            var cero = Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", "0"), false));
+            Check("VQ10 volumetria 0: es 0 (un dato), no NULL", "0", PlanificadorGestionAdmin.Crear(cero, Crear(cero), hoyV).Volumetria);
+            var mod = ModC(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40", "volumetria", "999"));
+            Check("VQ11 Modificar no la lee: ni error ni cambio de volumetria", "False|False",
+                  Campos(mod).Contains("volumetria") + "|" + mod.Cambios.Any(c => (string)c["clave"] == "volumetria"));
+        }
+        finally
+        {
+            PersistenciaGestionAdmin.OlvidarSql26ParaPruebas();
+            PersistenciaGestionAdmin.GuardaVolumetriaForzadaParaPruebas = true;
+        }
 
         // ---- EN: acentos en lo que responde el servidor ----
         // App_Code y los .ashx sin BOM: IIS los compila como Windows-1252 y
