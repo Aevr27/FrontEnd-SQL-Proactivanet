@@ -21,6 +21,9 @@
 //                         "textos", "historial" } }
 //       Todos los valores van como texto (o null), igual que en la salida
 //       del 45: la pestaña los lee con el mismo motor.
+//       Va en gzip si el navegador lo acepta (la respuesta de un servicio
+//       grande pasa de 10 MB) y con Server-Timing: lo que tardo cada bloque
+//       del procedimiento, con sus filas, y armar el JSON.
 //
 // ERRORES ({error, tipo}, como qare.ashx)
 //   400  servicio o fechas mal puestos, o el servicio no existe.
@@ -29,7 +32,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
+using System.IO.Compression;
 using System.Web;
 using System.Web.Script.Serialization;
 
@@ -72,15 +77,21 @@ public class AnalisisHandler : IHttpHandler
                 DashboardDataInfo.HoyEnPresentacion(),
                 out desde, out hastaExcluido);
 
-            var bloques = AnalisisQueries.Datos(servicio, desde, hastaExcluido);
+            var medicion = new AnalisisMedicion();
+            var bloques = AnalisisQueries.Datos(servicio, desde, hastaExcluido, medicion);
 
-            context.Response.Write(json.Serialize(new Dictionary<string, object>
+            var reloj = Stopwatch.StartNew();
+            string cuerpo = json.Serialize(new Dictionary<string, object>
             {
                 { "servicio", servicio },
                 { "desde", Dia(desde) },
                 { "hasta", Dia(hastaExcluido.AddDays(-1)) },
                 { "bloques", bloques },
-            }));
+            });
+            medicion.Anotar("json", reloj.Elapsed);
+            context.Response.AppendHeader("Server-Timing", medicion.ServerTiming());
+            Comprimir(context);
+            context.Response.Write(cuerpo);
         }
         catch (AnalisisSolicitudInvalida ex)
         {
@@ -91,6 +102,19 @@ public class AnalisisHandler : IHttpHandler
             DashboardHandler.Registrar("analisis.ashx", ex);
             Error(context, json, 500, DashboardHandler.MensajeSeguro(ex), ex.GetType().Name);
         }
+    }
+
+    // gzip a mano: IIS trae apagada la compresion dinamica y un .ashx es
+    // dinamico. Si IIS tambien comprime, ve el Content-Encoding y no repite.
+    // Fastest: con 28 MB de JSON sintetico tardo 0.17 s y dejo 1/8; Optimal
+    // dejaba la mitad de eso pero tardaba el doble.
+    private static void Comprimir(HttpContext context)
+    {
+        string acepta = context.Request.Headers["Accept-Encoding"] ?? "";
+        if (acepta.IndexOf("gzip", StringComparison.OrdinalIgnoreCase) < 0) return;
+        context.Response.Filter = new GZipStream(context.Response.Filter, CompressionLevel.Fastest);
+        context.Response.AppendHeader("Content-Encoding", "gzip");
+        context.Response.AppendHeader("Vary", "Accept-Encoding");
     }
 
     private static string Dia(DateTime d)

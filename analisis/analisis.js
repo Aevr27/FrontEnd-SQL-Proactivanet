@@ -130,9 +130,69 @@
   var motivosEquipo = [];
   var resultado = null;          // Motor.analizar(...)
   var pestana = 'Resumen';
+  var enCurso = null;            // {url, nombre, control} de la carga que se esta haciendo
+  var mostrado = null;           // {nombre, desde, hasta} de lo que se ve en pantalla
 
   function estado(txt, clase) { var e = $('estado'); e.textContent = txt || ''; e.className = 'estado' + (clase ? ' ' + clase : ''); }
-  function error(txt) { $('error').hidden = !txt; $('error-msg').textContent = txt || ''; }
+  // reintentar: lo que hace el boton "Reintentar" del aviso; sin el, no sale.
+  function error(txt, reintentar) {
+    $('error').hidden = !txt; $('error-msg').textContent = txt || '';
+    $('reintentar').hidden = !(txt && reintentar);
+    $('reintentar').onclick = txt && reintentar ? function () { reintentar(); } : null;
+  }
+
+  // Mientras se trae otro servicio, lo que esta en pantalla queda atenuado y
+  // con el aviso de que es la seleccion anterior.
+  function marcarPrevio(nombre) {
+    var r = $('resultado'), p = $('previo');
+    r.classList.toggle('an-viejo', !!nombre);
+    r.setAttribute('aria-busy', String(!!nombre && !!enCurso));
+    p.hidden = !nombre || !mostrado;
+    if (nombre && mostrado) {
+      p.textContent = (enCurso ? 'Cargando ' + nombre + '… ' : 'No se pudo cargar ' + nombre + '. ') +
+                      'Lo de abajo es la selección anterior: ' + mostrado.nombre + ', del ' + mostrado.desde + ' al ' + mostrado.hasta + '.';
+    }
+  }
+
+  /* ------------------------------------------------------------ respuestas guardadas */
+  // La misma consulta (servicio, desde, hasta) no se vuelve a pedir durante
+  // unos minutos: se reusa el cuerpo ya bajado y solo se prepara y analiza de
+  // nuevo. Pocas, porque cada una pesa megas.
+  var GUARDAR_MS = 10 * 60000, GUARDAR_MAX = 3, guardadas = [];
+  function guardada(url) {
+    var ahora = Date.now();
+    guardadas = guardadas.filter(function (g) { return ahora - g.hora < GUARDAR_MS; });
+    return guardadas.filter(function (g) { return g.url === url; })[0] || null;
+  }
+  function guardar(url, cuerpo) {
+    guardadas = guardadas.filter(function (g) { return g.url !== url; });
+    guardadas.push({ url: url, cuerpo: cuerpo, hora: Date.now() });
+    if (guardadas.length > GUARDAR_MAX) guardadas.shift();
+  }
+
+  // Lo que dice el navegador de la peticion: espera del servidor, bajada,
+  // bytes en el cable y sin comprimir, y el Server-Timing de analisis.ashx.
+  // El observador las junta aunque el bufer de recursos del tablero ya este
+  // lleno (getEntriesByName no veria las nuevas).
+  var entradas = {};
+  try {
+    new PerformanceObserver(function (l) {
+      l.getEntries().forEach(function (e) { if (e.name.indexOf('analisis.ashx?servicio=') >= 0) entradas[e.name] = e; });
+    }).observe({ type: 'resource', buffered: true });
+  } catch (x) { /* sin observador: queda getEntriesByName */ }
+  function red(url) {
+    try {
+      var nom = new URL(url, location.href).href, e = entradas[nom] || performance.getEntriesByName(nom).pop();
+      if (!e) return null;
+      return {
+        esperaServidor: Math.round(e.responseStart - e.requestStart), bajada: Math.round(e.responseEnd - e.responseStart),
+        transferido: e.transferSize, cuerpoEnCable: e.encodedBodySize, sinComprimir: e.decodedBodySize,
+        servidor: (e.serverTiming || []).map(function (s) {
+          return s.name + ' ' + Math.round(s.duration) + ' ms' + (s.description ? ' (' + s.description + ')' : '');
+        })
+      };
+    } catch (x) { return null; }
+  }
 
   /* ------------------------------------------------------------ fechas */
   function dos(n) { return (n < 10 ? '0' : '') + n; }
@@ -170,28 +230,38 @@
         }).join('');
         estado(servicios.length ? '' : 'Sin servicios: falta correr 47 y el script de algún servicio.');
       })
-      .catch(function (e) { estado(''); error('No se pudo leer la lista de servicios: ' + e.message); });
+      .catch(function (e) { estado(''); error('No se pudo leer la lista de servicios: ' + e.message, function () { error(''); pedirServicios(); }); });
   }
 
   /* ------------------------------------------------------------ analizar */
-  function analizar() {
-    var clave = $('servicio').value;
-    if (!clave) return;
+  // pedido: {clave, desde, hasta}; sin el, lo que esta en los filtros. La
+  // misma consulta que ya se esta trayendo no se pide dos veces; otra
+  // distinta cancela la anterior (su respuesta ya no pintaria nada).
+  function analizar(pedido) {
+    var p = pedido && pedido.clave ? pedido : { clave: $('servicio').value, desde: $('desde').value, hasta: $('hasta').value };
+    if (!p.clave) return;
+    var url = API + '?servicio=' + encodeURIComponent(p.clave) + '&desde=' + encodeURIComponent(p.desde) + '&hasta=' + encodeURIComponent(p.hasta);
+    if (enCurso && enCurso.url === url) return;
+    if (enCurso && enCurso.control) enCurso.control.abort();
+    var nombre = (servicios.filter(function (s) { return s.Servicio === p.clave; })[0] || {}).Nombre || p.clave;
+    var control = typeof AbortController === 'function' ? new AbortController() : null;
+    var t0 = Date.now(), mio = ++turno, med = {}, previa = guardada(url);
+    enCurso = { url: url, nombre: nombre, control: control };
     error(''); $('avisos').hidden = true;
-    $('analizar').disabled = true; $('excel').disabled = true;
-    var nombre = (servicios.filter(function (s) { return s.Servicio === clave; })[0] || {}).Nombre || clave;
-    estado('Trayendo los tickets de ' + nombre + '…');
-    var url = API + '?servicio=' + encodeURIComponent(clave) + '&desde=' + encodeURIComponent($('desde').value) + '&hasta=' + encodeURIComponent($('hasta').value);
-    var t0 = Date.now(), mio = ++turno, med = {};
+    $('excel').disabled = true;
+    estado((previa ? 'Preparando de nuevo ' : 'Trayendo los tickets de ') + nombre + '…', 'cargando');
+    marcarPrevio(nombre);
     // El JSON no se lee aqui: el cuerpo pasa entero al Worker. Solo una
     // respuesta de error (corta) se lee en la pagina.
-    Promise.all([motor(), fetch(url, { cache: 'no-store' }).then(function (r) {
+    var cuerpo = previa ? Promise.resolve(previa.cuerpo) : fetch(url, { cache: 'no-store', signal: control ? control.signal : undefined }).then(function (r) {
       if (r.ok) return r.arrayBuffer();
       return r.json().then(function (j) { throw new Error(j.error || ('HTTP ' + r.status)); });
-    })]).then(function (x) {
+    });
+    Promise.all([motor(), cuerpo]).then(function (x) {
       if (mio !== turno) return;
-      med.descarga = Date.now() - t0;
-      var avisar = function (txt) { if (mio === turno) estado(txt); };
+      med.descarga = Date.now() - t0; med.bytes = x[1].byteLength; med.guardada = !!previa;
+      if (!previa) { med.url = url; guardar(url, x[1]); }
+      var avisar = function (txt) { if (mio === turno) estado(txt, 'cargando'); };
       return analizador.cargar(x[1], avisar).then(function (c) {
         if (mio !== turno) return;
         respuesta = c.respuesta; nTickets = c.tickets;
@@ -203,16 +273,24 @@
         return correrAnalisis(avisar, med).then(function (listo) {
           if (!listo || mio !== turno) return;
           med.total = Date.now() - t0; med.enWorker = !!analizador.worker; medicion = med;
-          estado(window.Motor.miles(nTickets) + ' tickets en ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s.', 'ok');
+          enCurso = null;
+          mostrado = { nombre: nombre, desde: respuesta.desde, hasta: respuesta.hasta };
+          marcarPrevio(null);
+          estado(window.Motor.miles(nTickets) + ' tickets en ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s' +
+                 (previa ? ' (con la consulta de las ' + new Date(previa.hora).toTimeString().slice(0, 5) + ')' : '') + '.', 'ok');
           $('excel').disabled = false;
           $('intro').hidden = true; $('resultado').hidden = false;
         });
       });
     }).catch(function (e) {
       if (mio !== turno) return;
+      enCurso = null;
       estado('');
-      error(e.message + (/HTTP 5/.test(e.message) ? ' Revisa que 47_analisis_servicios.sql este corrido.' : ''));
-    }).then(function () { if (mio === turno) $('analizar').disabled = false; });
+      marcarPrevio(resultado ? nombre : null);
+      if (resultado) $('excel').disabled = false;   // el Excel es el de lo que se sigue viendo
+      error(e.message + (/HTTP 5/.test(e.message) ? ' Revisa que 47_analisis_servicios.sql este corrido.' : ''),
+            function () { analizar(p); });
+    });
   }
 
   function parametro(clave) {
@@ -444,9 +522,9 @@
     return r.reglas;
   }
   function conectarEditor() {
-    // Mientras se trae otro servicio (Analizar deshabilitado) el editor espera.
+    // Mientras se trae otro servicio el editor espera.
     $('probar').addEventListener('click', function () {
-      if ($('analizar').disabled) return;
+      if (enCurso) return;
       var r = leerEditor(); if (!r) return;
       reglasPrueba = r;
       $('probar').disabled = true;
@@ -456,7 +534,7 @@
       }).catch(function (x) { error(x.message); }).then(function () { if ($('probar')) $('probar').disabled = false; });
     });
     $('base').addEventListener('click', function () {
-      if ($('analizar').disabled) return;
+      if (enCurso) return;
       reglasPrueba = null; correrAnalisis().catch(function (x) { error(x.message); });
     });
     $('generar').addEventListener('click', function () {
@@ -507,7 +585,7 @@
       bajar(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), null, nombre);
       estado('Excel listo: ' + nombre, 'ok');
     }).catch(function (e) { error('No se pudo armar el Excel: ' + e.message); estado(''); })
-      .then(function () { $('excel').disabled = false; });
+      .then(function () { if (!enCurso) $('excel').disabled = false; });
   }
 
   /* ------------------------------------------------------------ eventos */
@@ -553,7 +631,12 @@
   window.addEventListener('resize', function () { clearTimeout(redimensionar.t); redimensionar.t = setTimeout(redimensionar, 200); });
   // medicion(): ms de descarga, lectura, preparacion, analisis y pintado de la
   // ultima carga, para revisarlos desde la consola sin llenarla de mensajes.
-  window.TableroAnalisisModulo = { redimensionar: redimensionar, medicion: function () { return medicion; } };
+  // bytes: el cuerpo ya sin comprimir; red: lo que midio el navegador
+  // (transferido, sin comprimir, espera del servidor, Server-Timing por bloque).
+  window.TableroAnalisisModulo = {
+    redimensionar: redimensionar,
+    medicion: function () { if (medicion && medicion.url && !medicion.red) medicion.red = red(medicion.url); return medicion; }
+  };
 
   ponerMeses(6);
   pedirServicios();
