@@ -6,7 +6,9 @@
 // .ModificaDuenosYQuitaActiva(), es decir, cuando DeteccionSql24 (abajo) ya
 // vio sql/24 en la base. La Volumetria del alta: parametro de sql/26 (SIN
 // aplicar, despues de sql/23); solo con GuardaVolumetriaActiva(), es decir,
-// cuando DeteccionSql26 la vio.
+// cuando DeteccionSql26 la vio. El Subestado del alta: parametro de sql/27
+// (PROPUESTA, despues de sql/26); solo con GuardaSubestadoActiva(), es
+// decir, cuando DeteccionSql27 lo vio.
 //
 // El handler (admin_iniciativas_gestion.ashx) lo llama SOLO si
 // PersistenciaGestionAdmin.Activa() y el plan no tiene pendientes ("quitar
@@ -33,10 +35,11 @@ public sealed class ErrorEscrituraGestionAdmin : Exception
 
     // 51010 = tope de 100% excedido; 51003/51008/2627/2601 = repetida;
     // 51011-51015 = tipos, estado o categoria no validos (o sin agrupacion);
+    // 51029 = Subestado inicial que no existe (sql/27);
     // 51021-51025 = no se pudo emitir el Codigo.
     public bool EsTope { get { return Numero == 51010; } }
     public bool EsRepetida { get { return Numero == 51003 || Numero == 51008 || Numero == 2627 || Numero == 2601; } }
-    public bool EsDatoInvalido { get { return Numero >= 51011 && Numero <= 51017; } }
+    public bool EsDatoInvalido { get { return (Numero >= 51011 && Numero <= 51017) || Numero == 51029; } }
     public bool EsCodigo { get { return Numero >= 51021 && Numero <= 51025; } }
 
     public string Tipo
@@ -132,6 +135,45 @@ public static class DeteccionSql26
     }
 }
 
+// Si adm.usp_GestionAdmin_Crear ya es el de sql/27 (tiene @Subestado).
+// Igual que DeteccionSql26: metadatos, vigencia, y un error al revisar
+// cuenta como "sin sql/27".
+public static class DeteccionSql27
+{
+    public const string Consulta =
+        "SELECT COUNT(*) FROM sys.parameters " +
+        "WHERE object_id = OBJECT_ID(N'adm.usp_GestionAdmin_Crear', N'P') " +
+        "AND name = N'@Subestado'";
+
+    public static bool Revisar(SqlConnection cn)
+    {
+        if (cn == null) throw new ArgumentNullException("cn");
+        var ahora = DateTime.UtcNow;
+        if (!PersistenciaGestionAdmin.Sql27Vigente(ahora))
+        {
+            bool tiene;
+            try
+            {
+                using (var cmd = new SqlCommand(Consulta, cn) { CommandTimeout = 15 })
+                    tiene = Convert.ToInt32(cmd.ExecuteScalar()) == 1;
+            }
+            catch (SqlException) { tiene = false; }
+            PersistenciaGestionAdmin.AnotarSql27(tiene, ahora);
+        }
+        return PersistenciaGestionAdmin.GuardaSubestadoActiva();
+    }
+
+    public static bool Revisar()
+    {
+        if (PersistenciaGestionAdmin.Sql27Vigente(DateTime.UtcNow)) return PersistenciaGestionAdmin.GuardaSubestadoActiva();
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            return Revisar(cn);
+        }
+    }
+}
+
 public sealed class EscritorGestionAdminSql
 {
     private const string TipoCategorias = "adm.CategoriaPctTipo";
@@ -169,6 +211,11 @@ public sealed class EscritorGestionAdminSql
                     plan.Volumetria == null ? (object)DBNull.Value : plan.Volumetria.Value;
             else if (plan.Volumetria != null)
                 throw new InvalidOperationException("Volumetria en el plan sin sql/26: no se descarta en silencio.");
+            // sql/27: por nombre y solo si la base lo tiene.
+            if (PersistenciaGestionAdmin.GuardaSubestadoActiva())
+                cmd.Parameters.Add("@Subestado", SqlDbType.NVarChar, 100).Value = Db(plan.Subestado);
+            else if (plan.Subestado != null)
+                throw new InvalidOperationException("Subestado en el plan sin sql/27: no se descarta en silencio.");
             Categorias(cmd, "@Categorias", plan.Categorias);
             // Las fechas del plan son las que se guardan: el mismo "hoy".
             cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = plan.FechaCreacion.Date;

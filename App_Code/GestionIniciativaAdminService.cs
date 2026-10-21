@@ -3,7 +3,8 @@
 // necesita. Lectura; la escritura (Guardar) solo con la persistencia activa.
 //
 //   Crear(p)       antes, si la base tiene sql/26 (DeteccionSql26:
-//                  Volumetria fijada por ADM); catalogo (CatPrefijoProblem + rutas de dbo.Categorias:
+//                  Volumetria fijada por ADM) y sql/27 (DeteccionSql27:
+//                  Subestado inicial); catalogo (CatPrefijoProblem + rutas de dbo.Categorias:
 //                  TODAS las activas para ADM aunque les falten duenos,
 //                  CatalogoAdm), capacidad y los
 //                  Estado / TipoIniciativa / TipoAgrupado que ya existen.
@@ -33,6 +34,7 @@ public sealed class GestionIniciativaAdminService
             // Volumetria de ADM: solo si la base ya tiene sql/26 (antes de
             // validar: validador, plan y escritor dicen lo mismo).
             DeteccionSql26.Revisar(cn);
+            DeteccionSql27.Revisar(cn);
             var tipos = DashboardCatalogos.Llaves(DashboardCatalogos.PrefijosIniciativa(cn));
             var catalogo = CatalogoAdm(cn, tipos);
             var capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));

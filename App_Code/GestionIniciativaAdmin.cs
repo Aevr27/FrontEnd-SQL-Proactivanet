@@ -49,6 +49,10 @@
 //             volumetria y se guarda en dbo.Problem.VolumetriaOriginal
 //             (sql/26, GuardaVolumetriaActiva); sin sql/26 se rechaza.
 //             TicketsReduce no la usa (sigue en la base).
+//             Subestado inicial: opcional, uno que ya existe en dbo.Problem
+//             vigente (como Modificar); se guarda en dbo.Problem.Subestado
+//             en el mismo alta (sql/27, GuardaSubestadoActiva); sin sql/27
+//             se rechaza. No toca ni deriva el Estado.
 //   Modificar Titulo, Descripcion, Observaciones, Fechas compromiso
 //             (Analisis / Solucion / Cierre), Estado y Subestado del Problem;
 //             % de las categorias ligadas; agregar categorias (con su %) y
@@ -166,6 +170,44 @@ public static class PersistenciaGestionAdmin
         lock (candadoSql26) { sql26EnBase = null; sql26RevisadaUtc = DateTime.MinValue; }
     }
 
+    // Crear: el Subestado inicial que ADM elige (dbo.Problem.Subestado), por
+    // el parametro @Subestado que sql/27 agrega a adm.usp_GestionAdmin_Crear
+    // (sin aplicar; va despues de sql/26). Igual que GuardaVolumetria:
+    // encendida, pero SOLO surte efecto cuando DeteccionSql27
+    // (EscritorGestionAdmin.cs) ve el parametro en la base. Sin el, el
+    // escritor no lo manda y el validador rechaza (422) un Subestado
+    // elegido: nunca se tira. false = apagada aunque este sql/27.
+    public const bool GuardaSubestado = true;
+    // Solo para las pruebas. null = lo de abajo.
+    public static bool? GuardaSubestadoForzadaParaPruebas;
+    public static bool GuardaSubestadoActiva()
+    {
+        return GuardaSubestadoForzadaParaPruebas ?? (GuardaSubestado && sql27EnBase == true);
+    }
+
+    private static readonly object candadoSql27 = new object();
+    private static bool? sql27EnBase;
+    private static DateTime sql27RevisadaUtc;
+
+    public static void AnotarSql27(bool tiene, DateTime ahoraUtc)
+    {
+        lock (candadoSql27) { sql27EnBase = tiene; sql27RevisadaUtc = ahoraUtc; }
+    }
+
+    public static bool Sql27Vigente(DateTime ahoraUtc)
+    {
+        lock (candadoSql27) { return sql27EnBase != null && ahoraUtc - sql27RevisadaUtc < VigenciaRevisionSql24; }
+    }
+
+    public static void OlvidarSql27ParaPruebas()
+    {
+        lock (candadoSql27) { sql27EnBase = null; sql27RevisadaUtc = DateTime.MinValue; }
+    }
+
+    public const string MotivoSubestado =
+        "todav\u00eda no se guarda: el alta en la base no recibe el Subestado (falta aplicar sql/27). " +
+        "D\u00e9jalo sin elegir para guardar lo dem\u00e1s.";
+
     public const string MotivoVolumetria =
         "todav\u00eda no se guarda: el alta en la base no recibe la Volumetr\u00eda (falta aplicar sql/26). " +
         "D\u00e9jala vac\u00eda para guardar lo dem\u00e1s.";
@@ -206,6 +248,10 @@ public static class PersistenciaGestionAdmin
     public const string BloqueoVolumetria =
         "Volumetr\u00eda en Crear: adm.usp_GestionAdmin_Crear no la recibe sin sql/26; se rechaza (422) y no se guarda nada";
 
+    // Con GuardaSubestadoActiva() = false (sin sql/27) se suma este.
+    public const string BloqueoSubestado =
+        "Subestado en Crear: adm.usp_GestionAdmin_Crear no lo recibe sin sql/27; se rechaza (422) y no se guarda nada";
+
     public static List<string> BloqueosVigentes()
     {
         var l = new List<string>();
@@ -213,6 +259,7 @@ public static class PersistenciaGestionAdmin
         l.AddRange(Bloqueos);
         if (!GuardaDuenosActiva()) l.Add(BloqueoDuenos);
         if (!GuardaVolumetriaActiva()) l.Add(BloqueoVolumetria);
+        if (!GuardaSubestadoActiva()) l.Add(BloqueoSubestado);
         return l;
     }
 }
@@ -409,10 +456,14 @@ public sealed class PeticionCrearAdmin
     public const string CTipoIniciativa = "tipo_iniciativa";
     public const string CTipoAgrupado = "tipo_agrupado";
     public const string CEstado = "estado";
+    // Opcional; sql/27 (dbo.Problem.Subestado). La misma clave que Modificar.
+    public const string CSubestado = "subestado";
     public const string CFEntregaAnalisis = "f_entrega_analisis";
 
     public string Tipo, Po, So, Titulo, Descripcion, Observaciones;
     public string TipoIniciativa, TipoAgrupado, Estado;
+    // null o vacio = sin elegir (NULL). Nunca cambia el Estado.
+    public string Subestado;
     // aaaa-mm-dd; vacio = hoy (dbo.Problem.FechaEntregaAnalisis).
     public string FEntregaAnalisis;
     // La Volumetria que ADM fija (clave volumetria, entero >= 0; sql/26,
@@ -434,6 +485,7 @@ public sealed class PeticionCrearAdmin
             Descripcion = f[SolicitudIniciativa.CDescripcion],
             Observaciones = f[SolicitudIniciativa.CObservaciones],
             Estado = f[CEstado],
+            Subestado = f[CSubestado],
             FEntregaAnalisis = f[CFEntregaAnalisis],
             Volumetria = f[SolicitudIniciativa.CVolumetria],
             TieneRca = tieneRca,
@@ -799,6 +851,19 @@ public sealed class ValidadorGestionAdmin
                 r.Agregar(PeticionCrearAdmin.CTipoAgrupado, "La Agrupaci\u00f3n no es una de las que ya existen en las categor\u00edas.");
             if (estado != null && !existentes.Estados.Contains(estado))
                 r.Agregar(PeticionCrearAdmin.CEstado, "El Estado no es uno de los que ya existen en los problemas.");
+        }
+        // Subestado inicial: la regla de Modificar (uno que ya existe en
+        // dbo.Problem vigente). Sin lista, se rechaza. Sin sql/27 no hay
+        // donde guardarlo: se rechaza, nunca se tira. No toca el Estado.
+        var subestado = Limpio(p.Subestado);
+        if (subestado != null)
+        {
+            if (existentes == null)
+                r.Agregar(PeticionCrearAdmin.CSubestado, "No se pudo leer la lista de subestados: no se puede elegir el Subestado.");
+            else if (!existentes.Subestados.Contains(subestado))
+                r.Agregar(PeticionCrearAdmin.CSubestado, "El Subestado no es uno de los que ya existen en los problemas.");
+            else if (!PersistenciaGestionAdmin.GuardaSubestadoActiva())
+                r.Agregar(PeticionCrearAdmin.CSubestado, "Subestado: " + PersistenciaGestionAdmin.MotivoSubestado);
         }
         // El tope solo aplica si las filas van a consumir (estado vivo y
         // agrupacion de AGRUPADORES, o sin agrupacion), igual que

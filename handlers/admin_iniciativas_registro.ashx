@@ -95,6 +95,15 @@ public class AdminIniciativasRegistro : IHttpHandler
                 volumetriaManual = false;
             }
             registro["volumetria_manual"] = volumetriaManual;
+            // Crear con Subestado inicial (sql/27, DeteccionSql27): igual.
+            bool subestadoAlta;
+            try { subestadoAlta = DeteccionSql27.Revisar(); }
+            catch (Exception ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_registro.ashx", ex);
+                subestadoAlta = false;
+            }
+            registro["subestado_alta"] = subestadoAlta;
             context.Response.Write(serializador.Serialize(registro));
         }
         catch (Exception ex)

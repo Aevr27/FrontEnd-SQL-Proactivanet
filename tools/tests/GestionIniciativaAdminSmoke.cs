@@ -41,6 +41,12 @@
 //      (422), vacia sigue igual; formato entero >= 0 que cabe en int; entra
 //      al plan (0 es 0, no NULL); el % y las categorias no cambian;
 //      Modificar no la lee. Los demas casos corren como con sql/26.
+//   SQ) Subestado inicial en Crear (sql/27): solo con sql/27 vista en la
+//      base (AnotarSql27); sin ella un Subestado elegido se rechaza (422),
+//      vacio u omitido sigue igual; uno que no existe = error; sin la lista
+//      de valores = error; valido entra al plan (recortado) y al JSON; el
+//      Estado no cambia ni se valida contra el. Los demas casos corren
+//      como con sql/27.
 //   EN) Acentos en la respuesta del servidor (faltantes, cambios, JSON) y
 //      fuentes sin BOM sin literales no ASCII; motivo de persistencia vigente.
 //
@@ -267,6 +273,8 @@ public static class GestionIniciativaAdminSmoke
     {
         // Los casos de siempre, como con sql/26 en la base (VQ prueba sin ella).
         PersistenciaGestionAdmin.GuardaVolumetriaForzadaParaPruebas = true;
+        // Y como con sql/27 (SQ prueba sin ella).
+        PersistenciaGestionAdmin.GuardaSubestadoForzadaParaPruebas = true;
         // ---- P ----
         Check("P1 persistencia es constante true (encendida 2026-10-14)", true, PersistenciaGestionAdmin.Habilitada);
         var j = Crear(C("ADO")).ComoJson();
@@ -818,6 +826,72 @@ public static class GestionIniciativaAdminSmoke
         {
             PersistenciaGestionAdmin.OlvidarSql26ParaPruebas();
             PersistenciaGestionAdmin.GuardaVolumetriaForzadaParaPruebas = true;
+        }
+
+        // ---- SQ: Subestado inicial en Crear (sql/27) ----
+        try
+        {
+            Func<NameValueCollection, PeticionCrearAdmin> pet = f => Declarar(PeticionCrearAdmin.DesdeFormulario(f, false));
+            var hoyS = new DateTime(2026, 10, 21);
+            PersistenciaGestionAdmin.GuardaSubestadoForzadaParaPruebas = null;
+            PersistenciaGestionAdmin.OlvidarSql27ParaPruebas();
+            Check("SQ1 constante encendida, sin revisar la base: apagada (nunca se asume sql/27)", "True|False",
+                  PersistenciaGestionAdmin.GuardaSubestado + "|" + PersistenciaGestionAdmin.GuardaSubestadoActiva());
+            var ahoraSql27 = new DateTime(2026, 10, 21, 18, 0, 0, DateTimeKind.Utc);
+            PersistenciaGestionAdmin.AnotarSql27(false, ahoraSql27);
+            Check("SQ2 la base NO tiene sql/27: apagada, con su bloqueo; la revision sigue vigente", "False|True|True",
+                  PersistenciaGestionAdmin.GuardaSubestadoActiva() + "|" +
+                  PersistenciaGestionAdmin.BloqueosVigentes().Contains(PersistenciaGestionAdmin.BloqueoSubestado) + "|" +
+                  PersistenciaGestionAdmin.Sql27Vigente(ahoraSql27.AddSeconds(30)));
+            var sinSql27 = Crear(pet(F("tipo", "ADO", "subestado", "Solucionado")));
+            Check("SQ3 sin sql/27: un Subestado valido se RECHAZA (nunca se tira)", "subestado|True",
+                  Campos(sinSql27) + "|" + sinSql27.Errores[0].Mensaje.Contains("sql/27"));
+            Check("SQ4 sin sql/27: omitido, vacio o solo espacios sigue valido, como hoy", "True|True|True",
+                  Crear(pet(F("tipo", "ADO"))).Valida + "|" + Crear(pet(F("tipo", "ADO", "subestado", ""))).Valida + "|" +
+                  Crear(pet(F("tipo", "ADO", "subestado", "  "))).Valida);
+            PersistenciaGestionAdmin.AnotarSql27(true, ahoraSql27);
+            Check("SQ5 la base tiene sql/27: encendida y sin su bloqueo; pasada la vigencia se revisa otra vez", "True|False|False",
+                  PersistenciaGestionAdmin.GuardaSubestadoActiva() + "|" +
+                  PersistenciaGestionAdmin.BloqueosVigentes().Contains(PersistenciaGestionAdmin.BloqueoSubestado) + "|" +
+                  PersistenciaGestionAdmin.Sql27Vigente(ahoraSql27 + PersistenciaGestionAdmin.VigenciaRevisionSql24));
+            Check("SQ6 formato no lo revisa (lo decide la lista de valores)", "",
+                  Campos(new ValidadorGestionAdmin().FormatoCrear(pet(F("tipo", "ADO", "subestado", "Inventado")))));
+            var inv = Crear(pet(F("tipo", "ADO", "subestado", "Inventado")));
+            Check("SQ7 uno que no existe en los problemas: error en subestado, como Modificar", "subestado|El Subestado no es uno de los que ya existen en los problemas.",
+                  Campos(inv) + "|" + inv.Errores[0].Mensaje);
+            Check("SQ8 distingue mayusculas como Modificar (lista Ordinal)", "subestado",
+                  Campos(Crear(pet(F("tipo", "ADO", "subestado", "solucionado")))));
+            var sinLista = new ValidadorGestionAdmin().Crear(pet(F("tipo", "ADO", "subestado", "Solucionado")),
+                                                           Catalogo, new CapacidadCategoria(new CapacidadCategoria.Compromiso[0]), "PRB", null);
+            Check("SQ9 sin la lista de valores: el Subestado se rechaza (no se acepta cualquier texto)", "True",
+                  Campos(sinLista).Split(',').Contains("subestado"));
+            var ok = pet(F("tipo", "ADO", "subestado", " Solucionado ", "cat_ruta", "/A/Cat 1", "cat_pct", "10"));
+            var rOk = Crear(ok);
+            var plOk = PlanificadorGestionAdmin.Crear(ok, rOk, hoyS);
+            Check("SQ10 valido: entra al plan recortado y al JSON del plan", "True|Solucionado|Solucionado",
+                  rOk.Valida + "|" + plOk.Subestado + "|" + plOk.ComoJson()["subestado"]);
+            Check("SQ11 el Estado no cambia ni se cruza con el Subestado", "En An\u00e1lisis|En An\u00e1lisis",
+                  plOk.Estado + "|" + plOk.ComoJson()["estado"]);
+            var sinEstado = PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "subestado", "Cancelado"), false);
+            var plSinEstado = PlanificadorGestionAdmin.Crear(sinEstado, Crear(sinEstado), hoyS);
+            Check("SQ12 Subestado sin Estado: valido, Estado sigue vacio (no se deriva) e Incompleta pide el Estado", "True|True|Cancelado|True",
+                  Crear(sinEstado).Valida + "|" + (plSinEstado.Estado == null) + "|" + plSinEstado.Subestado + "|" +
+                  Faltan(Crear(sinEstado)).Split(',').Contains("estado"));
+            var omit = pet(F("tipo", "ADO"));
+            var vacioS = pet(F("tipo", "ADO", "subestado", "   "));
+            Check("SQ13 omitido o vacio: null en el plan (NULL en la base), sin faltante nuevo", "True|True|False",
+                  (PlanificadorGestionAdmin.Crear(omit, Crear(omit), hoyS).Subestado == null) + "|" +
+                  (PlanificadorGestionAdmin.Crear(vacioS, Crear(vacioS), hoyS).Subestado == null) + "|" +
+                  Faltan(Crear(omit)).Split(',').Contains("subestado"));
+            Check("SQ14 Modificar sigue con su propia regla (Subestado valido = cambio)", "True",
+                  ModC(F("folio", Fo, "subestado", "Cancelado")).Cambios.Any(c => (string)c["clave"] == "subestado"));
+            var errSql = new ErrorEscrituraGestionAdmin(51029, "x", null);
+            Check("SQ15 51029 del procedimiento = DatoInvalido", "True|DatoInvalido", errSql.EsDatoInvalido + "|" + errSql.Tipo);
+        }
+        finally
+        {
+            PersistenciaGestionAdmin.OlvidarSql27ParaPruebas();
+            PersistenciaGestionAdmin.GuardaSubestadoForzadaParaPruebas = true;
         }
 
         // ---- EN: acentos en lo que responde el servidor ----

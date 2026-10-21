@@ -8,6 +8,7 @@
 //   POST handlers/admin_iniciativas_gestion.ashx   (multipart/form-data)
 //     accion=crear      tipo (prefijo), tipo_iniciativa, tipo_agrupado,
 //                       estado (declarados: no se derivan del prefijo),
+//                       subestado (opcional; solo se guarda con sql/27),
 //                       f_entrega_analisis (aaaa-mm-dd; vacio = hoy), po,
 //                       so, titulo, descripcion, observaciones, pares
 //                       cat_ruta / cat_pct (cero o mas categorias, cada una

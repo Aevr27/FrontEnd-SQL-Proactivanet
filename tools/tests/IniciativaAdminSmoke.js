@@ -39,6 +39,8 @@
 //   MT) Crear: meta en % o en tickets (redondeo, exactitud, division por cero,
 //      lo escrito nunca se pisa) y Volumetria fijada por ADM solo con sql/26;
 //      Modificar intacto.
+//   SB) Crear: Subestado inicial solo con sql/27 (subestado_alta); opciones
+//      = subestados_problem; sin elegir no viaja; elegirlo no toca el Estado.
 //   G) "Validar en el servidor (no guarda)" en Crear y Modificar: 501 es
 //      solo validacion (nunca exito); 422, 403, 503, red, 500 y un 501 o
 //      200 malformados, cada uno con su mensaje y sin decir "guardado".
@@ -2713,6 +2715,59 @@ pruebas.push(function () {
         [p.pedidos.filter(function (x) { return x.metodo === 'POST'; }).length, /sql\/24/.test(p.sel('regEdMsg').innerHTML),
          reg.edicion === ed, ed.categorias.filas[0].tickets]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SB) Crear: Subestado inicial (sql/27)
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  // Borrador sin DOM: omitido no viaja; elegido viaja; el Estado no cambia.
+  var b = new A.BorradorAdmin(I.CatalogoIniciativas.desdeJson(CATALOGO));
+  b.elegirTipo('PRB');
+  b.capturar('estado', 'En Análisis');
+  var claves = function (pares) { return pares.map(function (x) { return x[0]; }); };
+  Check('SB1 sin elegir: subestado no viaja (la base guarda NULL, como hoy)', false, claves(b.paraEnviar()).indexOf('subestado') >= 0);
+  b.capturar('subestado', '  Solucionado ');
+  var envio = {};
+  b.paraEnviar().forEach(function (c) { envio[c[0]] = c[1]; });
+  Check('SB2 elegido: viaja recortado y el Estado sigue siendo el elegido', ['Solucionado', 'En Análisis'], [envio.subestado, envio.estado]);
+  Check('SB3 el Subestado no es faltante de Incompleta', false, b.faltantes().some(function (f) { return f.clave === 'subestado'; }));
+  b.capturar('subestado', '');
+  Check('SB4 volver a vacio: deja de viajar', false, claves(b.paraEnviar()).indexOf('subestado') >= 0);
+
+  // Pantalla SIN sql/27: el campo no se ofrece.
+  REGISTRO.subestados_problem = ['Cancelado', 'Solucionado'];
+  var p = Pagina(), p2;
+  return esperar().then(function () {
+    var pg = p.pagina;
+    pg.fijarRol('ADM');
+    pg.mostrarVista('crear');
+    elegir(p, 'admTipo', 'PRB');
+    Check('SB5 sin sql/27: el campo esta oculto y sin opciones', [true, []], [p.sel('admSubestadoCampo').hidden, p.sel('admSubestado').opciones()]);
+    elegir(p, 'admSubestado', 'Solucionado');
+    Check('SB6 sin sql/27: aunque llegue un change, no viaja', false,
+      pg.crearAdmin.borrador.paraEnviar().some(function (x) { return x[0] === 'subestado'; }));
+    // Pantalla CON sql/27.
+    REGISTRO.subestado_alta = true;
+    p2 = Pagina();
+    return esperar();
+  }).then(function () {
+    delete REGISTRO.subestado_alta;
+    delete REGISTRO.subestados_problem;
+    var pg = p2.pagina;
+    pg.fijarRol('ADM');
+    pg.mostrarVista('crear');
+    elegir(p2, 'admTipo', 'PRB');
+    Check('SB7 con sql/27: visible, opciones = subestados_problem, Estado intacto', [false, ['Cancelado', 'Solucionado'], false, ['Cerrado', 'En Análisis', 'En Solución']],
+      [p2.sel('admSubestadoCampo').hidden, p2.sel('admSubestado').opciones(), p2.sel('admSubestado').disabled, p2.sel('admEstado').opciones()]);
+    elegir(p2, 'admEstado', 'En Solución');
+    elegir(p2, 'admSubestado', 'Cancelado');
+    var envio2 = {};
+    pg.crearAdmin.borrador.paraEnviar().forEach(function (c) { envio2[c[0]] = c[1]; });
+    Check('SB8 elegir Subestado: viaja y el Estado sigue siendo el elegido (no se deriva ni se reemplaza)', ['Cancelado', 'En Solución'],
+      [envio2.subestado, envio2.estado]);
+    Check('SB9 el selector de Estado no cambio al elegir Subestado', 'En Solución', p2.sel('admEstado').value);
   });
 });
 

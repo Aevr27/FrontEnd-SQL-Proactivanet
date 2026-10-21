@@ -678,6 +678,12 @@
           <label for="admEstado">Estado inicial</label>
           <select id="admEstado" disabled></select>
         </div>
+        <!-- Subestado inicial: opcional, opciones = subestados_problem. Solo
+             se muestra si la base lo guarda (sql/27, subestado_alta). -->
+        <div class="ini-campo" id="admSubestadoCampo" hidden>
+          <label for="admSubestado">Subestado inicial</label>
+          <select id="admSubestado" disabled></select>
+        </div>
         <div class="ini-campo">
           <label for="admFEntrega">Entrega del análisis</label>
           <input type="date" id="admFEntrega" aria-describedby="admFEntregaNota" disabled>

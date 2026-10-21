@@ -478,6 +478,8 @@ window.RegistroIniciativas = (function () {
       // Volumetria fijada por ADM en Crear (sql/26): solo si el servidor
       // lo dice.
       r.volumetriaManual = json.volumetria_manual === true;
+      // Subestado inicial en Crear (sql/27): solo si el servidor lo dice.
+      r.subestadoAlta = json.subestado_alta === true;
       // "Solicitar cambios" de Título / PO / SO (sql/25): solo si el
       // servidor lo dice.
       r.solicitudesDatos = json.solicitudes_datos === true;

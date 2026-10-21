@@ -45,6 +45,13 @@
      las de un alta con alguna fijada viaja como `volumetria` y se guarda
      en dbo.Problem.VolumetriaOriginal. Sin sql/26 el campo no se ofrece.
 
+   SUBESTADO INICIAL (Crear)
+   -------------------------
+     Opcional, de los valores que ya existen (subestados_problem del
+     registro, la misma lista que Modificar). Solo se ofrece si la base
+     tiene sql/27 (subestado_alta del registro); sin elegir no viaja y la
+     base guarda NULL. Elegirlo no toca el Estado ni lo deriva.
+
    META EN % O EN TICKETS (Crear)
    ------------------------------
      "Planear la meta por" elige que se escribe en cada categoria: el % de
@@ -973,7 +980,7 @@ window.IniciativaAdmin = (function () {
       this.valores = { titulo: '', descripcion: '', observaciones: '' };
       // Clasificacion y Agrupacion: del Tipo (elegirTipo). Estado: declarado.
       // La fecha de entrega del analisis empieza en hoy y ADM la puede cambiar.
-      this.declarados = { tipo_iniciativa: '', tipo_agrupado: '', estado: '', f_entrega_analisis: FECHAS_GESTION.hoy() };
+      this.declarados = { tipo_iniciativa: '', tipo_agrupado: '', estado: '', subestado: '', f_entrega_analisis: FECHAS_GESTION.hoy() };
       // ADM elige entre TODAS las rutas activas (rutas_adm) aunque les
       // falten dueños; sin ellas, las de la cascada.
       this.categorias = new CategoriasProblema([], BorradorAdmin.rutasAdmDe(catalogo));
@@ -1119,6 +1126,7 @@ window.IniciativaAdmin = (function () {
     // volumetria: solo si ADM fijo alguna (la suma, volumetriaProblema); sin
     // ella no viaja y la base guarda NULL, como siempre. El % de cada
     // categoria es el que se ve, escrito o calculado de los tickets.
+    // subestado: solo si ADM eligio uno (sql/27); sin el no viaja.
     paraEnviar() {
       var v = this.valores;
       var d = this.declarados;
@@ -1127,7 +1135,7 @@ window.IniciativaAdmin = (function () {
         ['tipo_iniciativa', d.tipo_iniciativa], ['tipo_agrupado', d.tipo_agrupado], ['estado', d.estado],
         ['f_entrega_analisis', d.f_entrega_analisis],
         ['titulo', v.titulo], ['descripcion', v.descripcion], ['observaciones', v.observaciones]]
-        .concat(vol === '' ? [] : [['volumetria', vol]], this.categorias.paresCrear());
+        .concat(d.subestado ? [['subestado', d.subestado]] : [], vol === '' ? [] : [['volumetria', vol]], this.categorias.paresCrear());
     }
 
     // Lo que veria quien revisa el borrador. NO es un guardado.
@@ -1659,9 +1667,17 @@ window.IniciativaAdmin = (function () {
       this.pintarDeclarados();
     }
 
-    // Clasificacion y Agrupacion (solo lectura, del Tipo), selector de
-    // Estado (con lo que ya existe) y la fecha de entrega. Sin lista
-    // todavia: deshabilitado.
+    // Si la base guarda el Subestado del alta (subestado_alta del registro,
+    // sql/27). Sin el dato, no: el campo no se ofrece.
+    subestadoAlta() {
+      var v = this.fuenteValores ? this.fuenteValores() : null;
+      return !!(v && v.subestadoAlta === true);
+    }
+
+    // Clasificacion y Agrupacion (solo lectura, del Tipo), selectores de
+    // Estado y Subestado (con lo que ya existe) y la fecha de entrega. Sin
+    // lista todavia: deshabilitado. Subestado solo con sql/27; sin ella se
+    // oculta y se olvida lo elegido (no viaja).
     pintarDeclarados() {
       var b = this.borrador, v = this.fuenteValores ? this.fuenteValores() : null, self = this;
       [['admTipoIniciativa', 'tipo_iniciativa'], ['admTipoAgrupado', 'tipo_agrupado']].forEach(function (c) {
@@ -1670,7 +1686,11 @@ window.IniciativaAdmin = (function () {
         el.textContent = !b || !b.tipo ? 'Sale del Tipo de iniciativa'
           : (b.declarados[c[1]] || 'Sin regla para este Tipo (queda Incompleta)');
       });
-      [['admEstado', 'estado', 'estados']].forEach(function (c) {
+      var conSub = this.subestadoAlta();
+      var campoSub = this.$('admSubestadoCampo');
+      if (campoSub) campoSub.hidden = !conSub;
+      if (b && !conSub) b.declarados.subestado = '';
+      [['admEstado', 'estado', 'estados']].concat(conSub ? [['admSubestado', 'subestado', 'subestados']] : []).forEach(function (c) {
         var el = self.$(c[0]);
         if (!el) return;
         var lista = v && Array.isArray(v[c[2]]) ? v[c[2]] : [];
@@ -1744,10 +1764,15 @@ window.IniciativaAdmin = (function () {
         self.borrador.elegirTipo(e.target.value);
         self.pintar();
       });
-      [['admEstado', 'estado'], ['admFEntrega', 'f_entrega_analisis']].forEach(function (c) {
+      [['admEstado', 'estado'], ['admSubestado', 'subestado'], ['admFEntrega', 'f_entrega_analisis']].forEach(function (c) {
         var el = self.$(c[0]);
         if (!el) return;
-        el.addEventListener('change', function (e) { if (self.borrador) self.borrador.capturar(c[1], e.target.value); });
+        el.addEventListener('change', function (e) {
+          if (!self.borrador) return;
+          // Sin sql/27 el Subestado no se ofrece: nada que capturar.
+          if (c[1] === 'subestado' && !self.subestadoAlta()) return;
+          self.borrador.capturar(c[1], e.target.value);
+        });
         // El registro (de donde salen las listas) puede llegar despues.
         el.addEventListener('focus', function () { if (el.tagName === 'SELECT' && el.options.length <= 1) self.pintarDeclarados(); });
       });

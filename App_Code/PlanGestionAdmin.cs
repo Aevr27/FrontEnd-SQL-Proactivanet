@@ -118,6 +118,8 @@ public sealed class PlanCrearAdmin
 {
     public string Prefijo;
     public string TipoIniciativa, TipoAgrupado, Estado;
+    // Subestado elegido (dbo.Problem.Subestado, sql/27); null = sin elegir.
+    public string Subestado;
     // PO / SO elegidos (dbo.Problem.OwnerProblem / OwnerServicio); null = sin elegir.
     public string Po, So;
     // Volumetria fijada por ADM (dbo.Problem.VolumetriaOriginal, sql/26); null = no la fijo.
@@ -143,6 +145,7 @@ public sealed class PlanCrearAdmin
             { "tipo_iniciativa", TipoIniciativa },
             { "tipo_agrupado", TipoAgrupado },
             { "estado", Estado },
+            { "subestado", Subestado },
             { "po", Po },
             { "so", So },
             { "volumetria", Volumetria },
@@ -272,6 +275,7 @@ public static class PlanificadorGestionAdmin
             TipoIniciativa = Limpio(p.TipoIniciativa),
             TipoAgrupado = Limpio(p.TipoAgrupado),
             Estado = Limpio(p.Estado),
+            Subestado = Limpio(p.Subestado),
             Po = Limpio(p.Po), So = Limpio(p.So),
             Volumetria = ValidadorGestionAdmin.Volumetria(p.Volumetria),
             // Solo espacios = NULL; con texto, tal cual (no se recorta).
