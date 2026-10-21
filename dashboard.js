@@ -4014,8 +4014,12 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
 
   function cargarScript(cont) {
     return new Promise((listo, fallo) => {
+      /* La URL cambia en cada montaje, como el no-store de texto(): sin eso
+         el navegador podia servir el .js viejo contra el marcado nuevo
+         (botones sin listener) y Ctrl+F5 no lo arreglaba, porque este
+         script entra despues de la carga. Se pide una vez por pestaña. */
       const s = document.createElement('script');
-      s.src = base + guion;
+      s.src = `${base}${guion}?v=${Date.now()}`;
       s.onload = listo;
       s.onerror = () => fallo(new Error('no se pudo cargar ' + s.src));
       cont.appendChild(s);          // al final, con el marcado ya puesto
