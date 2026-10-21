@@ -180,10 +180,19 @@ function contenedorActivo() { return activos('.maintab-content'); }
 
   // --- Observabilidad -------------------------------------------------------
   boton('.mnav', 'observabilidad').click(); await esperar();
-  comprobar('Observabilidad: abre el marco (tablero) la primera vez', contenedorActivo(), 'tab-tablero');
+  comprobar('Observabilidad: abre Orquestacion la primera vez', contenedorActivo(), 'tab-orquestacion');
   comprobar('Observabilidad: barra marca el grupo', activos('.mnav'), 'observabilidad');
   comprobar('Observabilidad: solo su selector visible', selectorVisible(), 'observabilidad');
-  comprobar('Observabilidad: selector marca Observabilidad', activos('.subnav-btn'), 'tablero');
+  comprobar('Observabilidad: selector marca Orquestacion', activos('.subnav-btn'), 'orquestacion');
+  comprobar('Observabilidad: Orquestacion montada al abrir el grupo', cuenta.orquestacion.init, 1);
+  comprobar('Observabilidad: el marco espera a su clic', cuenta.tablero.init, 0);
+  comprobar('Observabilidad: hash del modulo', hash.valor, '#orquestacion');
+
+  boton('.subnav-btn', 'tablero').click(); await esperar();
+  comprobar('Marco: contenedor', contenedorActivo(), 'tab-tablero');
+  comprobar('Marco: barra sigue en el grupo', activos('.mnav'), 'observabilidad');
+  comprobar('Marco: selector', activos('.subnav-btn'), 'tablero');
+  comprobar('Marco: hash del modulo', hash.valor, '#tablero');
 
   boton('.subnav-btn', 'orquestacion').click(); await esperar();
   comprobar('Orquestacion: contenedor', contenedorActivo(), 'tab-orquestacion');

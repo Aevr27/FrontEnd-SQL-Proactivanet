@@ -97,7 +97,7 @@ Object.keys(GRUPOS).forEach(function (g) {
   comprobar('selector "' + g + '" = GRUPOS.' + g, (subnavs[g] || []).join(), GRUPOS[g].join());
 });
 comprobar('Observabilidad: botones con su rotulo',
-  /data-tab="tablero"[^>]*>Observabilidad<\/button>[\s\S]*?data-tab="orquestacion"[^>]*>Orquestación<\/button>/.test(html), true);
+  /data-tab="orquestacion"[^>]*>Orquestación<\/button>[\s\S]*?data-tab="tablero"[^>]*>Observabilidad<\/button>/.test(html), true);
 comprobar('Calidad de información: botones con su rotulo',
   /data-tab="qa"[^>]*>QA<\/button>[\s\S]*?data-tab="qare"[^>]*>QARE<\/button>/.test(html), true);
 
