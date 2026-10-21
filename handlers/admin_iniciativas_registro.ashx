@@ -67,6 +67,10 @@ public class AdminIniciativasRegistro : IHttpHandler
             registro["persistencia_admin"] = PersistenciaGestionAdmin.Activa();
             // Lo mismo para "Solicitar cambios" (sql/22): con false la
             // solicitud se prepara pero no se envia, y la pagina lo dice.
+            // Se revisa en la base (DeteccionSolicitudesCambio, tambien
+            // sql/25); si no se puede, apagado.
+            try { DeteccionSolicitudesCambio.Revisar(); }
+            catch (Exception ex) { DashboardHandler.Registrar("admin_iniciativas_registro.ashx", ex); }
             registro["persistencia_solicitudes"] = PersistenciaSolicitudesCambio.Activa();
             // Solicitar cambios de Titulo / PO / SO (tipo datos, sql/25).
             registro["solicitudes_datos"] = PersistenciaSolicitudesCambio.SolicitaDatosActiva();

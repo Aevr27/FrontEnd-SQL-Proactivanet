@@ -56,6 +56,10 @@ public class AdminIniciativasSolicitudes : IHttpHandler
 
         DashboardHandler.Responder(context, delegate
         {
+            // sql/22 / sql/25 en la base (DeteccionSolicitudesCambio), antes de
+            // validar: el tipo datos depende de ella. Si no se puede, apagado.
+            try { DeteccionSolicitudesCambio.Revisar(); }
+            catch (Exception ex) { DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex); }
             var esPost = string.Equals(req.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase);
             if (accion == "enviar" || accion == "rechazar" || accion == "aplicar")
             {
