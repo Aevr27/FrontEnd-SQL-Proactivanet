@@ -76,12 +76,16 @@
 
 .an-graficas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 900px) { .an-graficas { grid-template-columns: minmax(0, 1fr); } }
+/* Sin la quincena: el mes a un tercio y la serie diaria a dos tercios. */
+.an-graficas.an-graficas-diaria { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+@media (max-width: 900px) { .an-graficas.an-graficas-diaria { grid-template-columns: minmax(0, 1fr); } }
 .an-grafica svg { display: block; width: 100%; height: auto; }
 .an-grafica text { fill: var(--muted); font-size: 11px; font-family: inherit; }
 .an-grafica .eje { stroke: var(--line); }
 .an-grafica .ref { stroke: var(--ink-2); stroke-dasharray: 4 3; }
 .an-grafica .barra { fill: var(--g-600); }
 .an-grafica .barra.apagada { fill: var(--muted-2); }
+.an-grafica .barra.pico { fill: var(--ambr, #d97706); }
 .an-grafica .hit { fill: transparent; }
 .an-grafica .etq { fill: var(--ink-2); font-weight: 600; }
 
