@@ -1442,11 +1442,24 @@ window.RegistroIniciativas = (function () {
       }
     }
 
+    // Solo la edicion de ADM la usa: volumetria TOTAL de la categoria
+    // (el servidor la niega a cualquier otro rol).
     clienteVolumetria() {
-      if (!this.volumetria && window.IniciativaAdmin) {
-        this.volumetria = new window.IniciativaAdmin.VolumetriaCliente(function (url, op) { return fetch(url, op); });
+      var A = window.IniciativaAdmin;
+      if (!this.volumetria && A) {
+        this.volumetria = new A.VolumetriaCliente(function (url, op) { return fetch(url, op); }, A.ALCANCE_TOTAL);
       }
       return this.volumetria;
+    }
+
+    // Lo calculado (tickets o %) de la fila n de "Modificar", en su <output>.
+    pintarMetaEdicion(n) {
+      var ed = this.edicion, caja = this.$('regEdCats'), f = ed && ed.categorias.filas[n];
+      var el = f && caja && caja.querySelector ? caja.querySelector('[data-edicion-meta="' + n + '"]') : null;
+      if (!el) return;
+      var m = ed.categorias.meta(f);
+      el.textContent = m.texto;
+      el.className = 'ini-meta' + (m.mal ? ' mal' : '');
     }
 
     opcionesEstado() {
@@ -2316,10 +2329,20 @@ window.RegistroIniciativas = (function () {
       var cn = t.getAttribute('data-cambio-nueva-pct');
       var tipo = t.getAttribute('data-edicion-tipo');   // "indice|campo"
       var fcat = t.getAttribute('data-edicion-fcat');
+      var tk = t.getAttribute('data-edicion-tickets');
+      var modo = t.getAttribute('data-edicion-modo');
       // Mientras se envia, los controles estan deshabilitados; nada cambia.
-      if (ed && this.edicionEnviando && (clave || n !== null || tipo || fcat !== null)) return true;
+      if (ed && this.edicionEnviando && (clave || n !== null || tipo || fcat !== null || tk !== null || modo !== null)) return true;
+      // "Planear la meta por": solo cambia que se edita (repinta la tabla).
+      if (ed && modo !== null && modo !== undefined) {
+        if (t.checked !== false && ed.elegirModo(t.value)) { this.soltarFoco(); this.pintarCategoriasEdicion(); }
+        return true;
+      }
       if (ed && clave) ed.capturar(clave, t.value);
-      else if (ed && n !== null && n !== undefined) ed.capturarPct(Number(n), t.value);
+      // % o tickets de una fila: se repinta solo lo CALCULADO de esa fila,
+      // nunca la casilla en la que se escribe.
+      else if (ed && n !== null && n !== undefined) { ed.capturarPct(Number(n), t.value); this.pintarMetaEdicion(Number(n)); }
+      else if (ed && tk !== null && tk !== undefined) { ed.capturarTickets(Number(tk), t.value); this.pintarMetaEdicion(Number(tk)); }
       else if (ed && tipo) ed.capturarTipo(Number(tipo.split('|')[0]), tipo.split('|')[1], t.value);
       else if (ed && fcat !== null && fcat !== undefined) ed.capturarFechaCategoria(Number(fcat), t.value);
       else if (c && cp !== null && cp !== undefined) { c.fijarPct(c.categoriasLigadas()[Number(cp)], t.value); return true; }
@@ -2604,8 +2627,8 @@ window.RegistroIniciativas = (function () {
       var cuerpo = this.$('regDetCuerpo');
       if (cuerpo && cuerpo.classList) cuerpo.classList.toggle('ini-ed-enviando', si);
       var controles = cuerpo && cuerpo.querySelectorAll
-        ? cuerpo.querySelectorAll('[data-edicion], [data-edicion-pct], [data-edicion-tipo], [data-edicion-fcat], ' +
-            '[data-edicion-cat], #regEdCatBuscar, [data-accion="edicion-cat-agregar"]') : [];
+        ? cuerpo.querySelectorAll('[data-edicion], [data-edicion-pct], [data-edicion-tickets], [data-edicion-modo], [data-edicion-tipo], ' +
+            '[data-edicion-fcat], [data-edicion-cat], #regEdCatBuscar, [data-accion="edicion-cat-agregar"]') : [];
       Array.prototype.forEach.call(controles, function (el) { el.disabled = si; });
       var self = this;
       ['regEdGuardar', 'regEdCancelar'].forEach(function (id) { var b = self.$(id); if (b) b.disabled = si; });

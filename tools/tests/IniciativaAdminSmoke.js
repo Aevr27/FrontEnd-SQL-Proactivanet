@@ -1178,7 +1178,19 @@ pruebas.push(function () {
   Check('DQ2 sin sql/24: un PO cambiado (a mano) no se envia: error local', [false, true],
     [off.revisar().listo, off.erroresFormato().some(function (e) { return e.clave === 'po' && /sql\/24/.test(e.mensaje); })]);
   Check('DQ3 sin sql/24: el texto de quitar dice que todavia no se guarda', true,
-    /Quitar todavía no se guarda/.test(A.htmlCategoriasEdicion(off, null)));
+    /Quitar una categoría ligada todavía no se guarda: falta aplicar sql\/24/.test(A.htmlCategoriasEdicion(off, null)));
+  var hOff = A.htmlCategoriasEdicion(off, null);
+  Check('DQ3b sin sql/24: Quitar de una ligada sale deshabilitado (sin data-edicion-cat="quitar")', [false, 2],
+    [/data-edicion-cat="quitar"/.test(hOff), (hOff.match(/<button type="button" class="btn linea chico" disabled title="Quitar/g) || []).length]);
+  off.capturar('po', 'PO 1');
+  off.categorias.quitar(1);
+  Check('DQ3c sin sql/24: una ligada marcada para quitar (a mano) bloquea el envio con aviso; Restaurar lo libera', [false, true, true],
+    [off.revisar().listo, off.erroresFormato().some(function (e) { return e.clave === 'quitar_categoria' && /sql\/24/.test(e.mensaje) && /Restaurar/.test(e.mensaje); }),
+     (off.categorias.restaurar(1), !off.erroresFormato().some(function (e) { return e.clave === 'quitar_categoria'; }))]);
+  var onQ = new A.EdicionAdmin(ini, Object.assign({ duenosYQuitar: true }, op));
+  onQ.categorias.quitar(1);
+  Check('DQ3d con sql/24: Quitar habilitado y sin bloqueo local', [true, false],
+    [/data-edicion-cat="quitar"/.test(A.htmlCategoriasEdicion(onQ, null)), onQ.erroresFormato().some(function (e) { return e.clave === 'quitar_categoria'; })]);
 
   var on = new A.EdicionAdmin(ini, Object.assign({ duenosYQuitar: true }, op));
   Check('DQ4 con sql/24: control de lista para PO y SO con el capturado', [true, true],
@@ -1452,7 +1464,7 @@ pruebas.push(function () {
   }).then(function () {
     var html = p.sel('admCats').innerHTML;
     Check('CV5 volumetria: ok, cero real y error (nunca 0 si fallo)', [true, true, true, false],
-      [/418 tickets \(últimos 30 días\)/.test(html), /0 tickets en los últimos 30 días/.test(html),
+      [/418 tickets \(total de la categoría\)/.test(html), /0 tickets \(total de la categoría\)/.test(html),
        /No se pudo consultar: error 53/.test(html), /ini-vol mal[^<]*>0 tickets/.test(html)]);
     Check('CV6 la volumetria es de solo lectura (output, sin input)', [true, false],
       [/<output class="ini-vol/.test(html), /data-crear-vol|name="volumetria"/.test(html)]);
@@ -1559,7 +1571,7 @@ pruebas.push(function () {
  
     return esperar().then(esperar).then(function () {
       Check('ED13 ... y la pide al servidor por GET', true, p.pedidos.some(function (x) {
-        return x.metodo === 'GET' && /volumetria\.ashx\?ruta=%2FB%2FCat%204/.test(x.url); }));
+        return x.metodo === 'GET' && /volumetria\.ashx\?alcance=total&ruta=%2FB%2FCat%204/.test(x.url); }));
       Check('ED14 su estado se pinta (error simulado: no se pudo consultar)', true, /No se pudo consultar/.test(p.sel('regEdCats').innerHTML));
     });
   });
@@ -2567,14 +2579,139 @@ pruebas.push(function () {
       p2.sel('admCats').disparar('input', { target: tk });
       Check('MT31 sin sql/26, tickets con la calculada: 42 / 418 = 10.05%', ['cat_pct', '10.05'],
         v2.borrador.paraEnviar().filter(function (x) { return x[0] === 'cat_pct'; })[0]);
-      // Modificar no cambia: sin volumetria editable, sin tickets, sin meta.
+      // Modificar (ADM): % o tickets por categoria, volumetria nunca editable.
       var reg = p2.registro;
       reg.modificar('PRB 2026-000001');
+      var hPct = A.htmlCategoriasEdicion(reg.edicion, null);
       reg.edicion.categorias.modo = 'tickets';
       var hEd = A.htmlCategoriasEdicion(reg.edicion, null);
-      Check('MT32 Modificar intacto: % de siempre, sin volumetria editable, tickets ni meta', [true, false, false, false, true],
-        [/data-edicion-pct="0"/.test(hEd), /data-[a-z]+-vol=/.test(hEd), /-tickets=/.test(hEd), /data-[a-z]+-meta=/.test(hEd),
-         /derivado">Calculada<\/span><\/th><th scope="col">% Disminución/.test(hEd)]);
+      Check('MT32 Modificar: modo %, sin volumetria editable; modo tickets, casillas de tickets y meta; selector de modo',
+        [true, false, true, true, true, true],
+        [/data-edicion-pct="0"/.test(hPct), /data-[a-z]+-vol=/.test(hEd), /data-edicion-tickets="0"/.test(hEd), /data-edicion-meta=/.test(hPct),
+         /name="regEdModo" value="tickets" data-edicion-modo checked/.test(hEd), /derivado">Calculada<\/span><\/th><th scope="col">Tickets a resolver/.test(hEd)]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MV) Meta % <-> tickets con la volumetria TOTAL de la categoria (ADM):
+//     conversiones, bordes, Modificar (nuevas y ligadas), lo que guardaria la
+//     base (TicketsReduce sobre los ultimos 30 dias) y el cliente alcance=total.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var M = A.MetaCategoria;
+  Check('MV1 % -> tickets: 2.5% de 1000 = 25; 10.05% de 418 = 42; mitad hacia arriba (5% de 10 = 0.5 -> 1)', [25, 42, 1],
+    [M.tickets(1000, '2.5'), M.tickets(418, '10.05'), M.tickets(10, '5')]);
+  Check('MV2 % -> tickets, bordes: 0%, 100%, vol 0, % vacio o sin volumetria = null', [0, 1000, 0, null, null],
+    [M.tickets(1000, '0'), M.tickets(1000, '100'), M.tickets(0, '50'), M.tickets(1000, ''), M.tickets(null, '10')]);
+  var a = M.pct(1000, '25'), b = M.pct(1000, '1000'), c = M.pct(1000, '0');
+  Check('MV3 tickets -> %: 25 de 1000 = 2.5% exacto; el maximo (1000) = 100%; 0 = 0%', ['2.5', true, '100', true, '0', true],
+    [a.pct, a.exacto, b.pct, b.exacto, c.pct, c.exacto]);
+  Check('MV4 tickets -> %, rechazos: mas que la volumetria, negativos, decimales, vol 0, sin vol; vacio sin mensaje',
+    [true, true, true, true, true, ''],
+    [/más que la volumetría/.test(M.pct(1000, '1001').error), !!M.pct(1000, '-1').error, !!M.pct(1000, '2.5').error,
+     /volumetría 0/.test(M.pct(0, '5').error), /Sin volumetría/.test(M.pct(null, '5').error), M.pct(1000, '').error]);
+  var g = M.pct(30000, '1');
+  Check('MV5 redondeo con 2 decimales: 1 de 30000 = 0% (inexacto, se avisa con los que da)', ['0', false, 0], [g.pct, g.exacto, g.tickets]);
+
+  // Cliente alcance=total (Crear / Modificar de ADM).
+  var pedidosV = [];
+  var cuerpo = { '/A/Cat 1': { estado: 'ok', volumetria: 1000, ultimos30: 100 }, '/A/Cat 2': { estado: 'ok', volumetria: 400, ultimos30: 30 } };
+  var pedirV = function (url) {
+    pedidosV.push(url);
+    var ruta = decodeURIComponent((/ruta=([^&]*)/.exec(url) || [])[1] || '');
+    var f = cuerpo[ruta];
+    return Promise.resolve(Respuesta(200, { alcance: 'total', rutas: [{ ruta: ruta, estado: f.estado, volumetria: f.volumetria, ultimos30: f.ultimos30 }] }));
+  };
+  var vol = new A.VolumetriaCliente(pedirV, A.ALCANCE_TOTAL);
+  var porOmision = new A.VolumetriaCliente(pedirV);
+  return Promise.all([vol.consultar('/A/Cat 1'), vol.consultar('/A/Cat 2'), porOmision.consultar('/A/Cat 2')]).then(function (r) {
+    Check('MV6 alcance=total: pide alcance=total; por omision (Nueva solicitud / Solicitar cambios) no lo pide',
+      [true, false], [/\?alcance=total&ruta=%2FA%2FCat%201/.test(pedidosV[0]), /alcance/.test(pedidosV[2])]);
+    Check('MV7 total: valor = total de la categoria, ultimos30 aparte, texto sin "30 dias"', [1000, 100, '1,000 tickets (total de la categoría)'],
+      [r[0].valor, r[0].ultimos30, A.VolumetriaCliente.texto(r[0])]);
+    Check('MV7b por omision: el texto de siempre (ultimos 30 dias), sin ultimos30', ['400 tickets (últimos 30 días)', null],
+      [A.VolumetriaCliente.texto(r[2]), r[2].ultimos30 === undefined ? null : r[2].ultimos30]);
+
+    // Modificar: una ligada (/A/Cat 1, 50%) + una nueva (/A/Cat 2).
+    var ini = Ini('PRB 2026-000190', { categorias: [Cat('/A/Cat 1', 0.5)] });
+    var ed = new A.EdicionAdmin(ini, { rutas: ['/A/Cat 1', '/A/Cat 2'] });
+    ed.categorias.agregar('/A/Cat 2');
+    ed.categorias.elegirModo('tickets');
+    var html = A.htmlCategoriasEdicion(ed, vol);
+    var nueva = ed.categorias.filas[1], ligada = ed.categorias.filas[0];
+    Check('MV8 la volumetria total llega a cada fila (y la de 30 dias aparte)', [1000, 100, 400, 30],
+      [ligada.volCalc, ligada.vol30, nueva.volCalc, nueva.vol30]);
+    Check('MV9 modo tickets: la ligada muestra los tickets de su % (50% de 1000 = 500) con tope = volumetria', [true, true],
+      [/data-edicion-tickets="0" value="500"/.test(html), /max="1000" data-edicion-tickets="0"/.test(html)]);
+    ed.capturarTickets(1, '25');
+    Check('MV10 tickets en la nueva: % derivado 6.25 (25 / 400); lo escrito no se toca', ['6.25', '25', 'tickets'],
+      [nueva.valor, nueva.tickets, nueva.fuente]);
+    Check('MV11 viaja el % derivado como agregar_pct (solo el %)', ['agregar_pct', '6.25'],
+      ed.paraEnviar().filter(function (p) { return p[0] === 'agregar_pct'; })[0]);
+    Check('MV12 la meta avisa lo que la base guardara: ROUND(30 x 6.25%) = 2, no 25', true,
+      /la base guardará 2 en Tickets a reducir \(calcula sobre los últimos 30 días: 30\)/.test(ed.categorias.meta(nueva).texto));
+    Check('MV13 el cambio lista la meta escrita junto al %', true,
+      ed.cambios().some(function (c) { return c.clave === 'agregar_categoria' && /6\.25% \(meta: 25 tickets\)/.test(c.nuevo); }));
+    var hTk = A.htmlCategoriasEdicion(ed, vol);
+    Check('MV14 repintar no pisa lo escrito: la casilla de tickets sigue en 25', true, /data-edicion-tickets="1" value="25"/.test(hTk));
+    // Cambia la volumetria: se recalcula el % (contraparte), no los tickets.
+    vol.memo[Object.keys(vol.memo).filter(function (k) { return vol.memo[k].valor === 400; })[0]].valor = 500;
+    A.htmlCategoriasEdicion(ed, vol);
+    Check('MV15 cambia la volumetria (400 -> 500): el % se recalcula (5), los tickets se quedan (25)', ['5', '25'], [nueva.valor, nueva.tickets]);
+    ed.capturarTickets(0, '100');
+    Check('MV16 ligada en tickets: 100 de 1000 = 10%, viaja como pct_valor', ['pct_valor', '10'],
+      ed.paraEnviar().filter(function (p) { return p[0] === 'pct_valor'; })[0]);
+    ed.capturarTickets(1, '501');
+    Check('MV17 mas tickets que la volumetria: error local, no se envia', [false, true],
+      [ed.revisar().listo, ed.erroresFormato().some(function (e) { return e.clave === 'tickets' && /más que la volumetría/.test(e.mensaje); })]);
+    ed.capturarTickets(1, '');
+    Check('MV18 tickets vacios: % vacio (sin meta), sin error de tickets', ['', false],
+      [nueva.valor, ed.erroresFormato().some(function (e) { return e.clave === 'tickets'; })]);
+    ed.capturarPct(1, '12.5');
+    Check('MV19 volver a % (escribir el %): fuente pct, los tickets se derivan (12.5% de 500 = 63)', ['pct', '63'],
+      [nueva.fuente, ed.categorias.ticketsVista(nueva)]);
+    var ed0 = new A.EdicionAdmin(Ini('PRB 2026-000191', { categorias: [] }), { rutas: ['/Z'] });
+    ed0.categorias.agregar('/Z');
+    ed0.categorias.filas[0].volCalc = 0;
+    ed0.capturarTickets(0, '3');
+    Check('MV20 volumetria 0: tickets -> % se rechaza (usa el %)', true,
+      ed0.erroresFormato().some(function (e) { return /volumetría 0/.test(e.mensaje); }));
+  });
+});
+
+// MW) Registro (ADM): "Planear la meta por" y la casilla de tickets de
+//     Modificar por el DOM; Quitar sin sql/24 no llega al servidor.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro, pg = p.pagina;
+    pg.fijarRol('ADM');
+    reg.modificar('PRB 2026-000001');
+    return esperar().then(esperar).then(function () { return reg; });
+  }).then(function (reg) {
+    var ed = reg.edicion;
+    Check('MW1 Modificar pide la volumetria TOTAL (alcance=total)', true,
+      p.pedidos.some(function (x) { return /volumetria\.ashx\?alcance=total&ruta=/.test(x.url); }));
+    var radio = Elemento('m'); radio.setAttribute('data-edicion-modo', ''); radio.value = 'tickets'; radio.checked = true;
+    p.sel('regDetCuerpo').disparar('change', { target: radio });
+    Check('MW2 el radio cambia el modo y repinta con casillas de tickets', ['tickets', true],
+      [ed.categorias.modo, /data-edicion-tickets="0"/.test(p.sel('regEdCats').innerHTML)]);
+    var antes = p.sel('regEdCats').innerHTML;
+    editar(p, 'data-edicion-tickets', '0', '209');
+    Check('MW3 escribir tickets: % derivado (209 / 418 = 50%), sin repintar la tabla (la casilla no se pisa)', ['50', '209', true],
+      [ed.categorias.filas[0].valor, ed.categorias.filas[0].tickets, p.sel('regEdCats').innerHTML === antes]);
+    editar(p, 'data-edicion-tickets', '0', '100');
+    Check('MW4 ... y es un cambio de % de la ligada (100 / 418 = 23.92%)', true,
+      ed.cambios().some(function (c) { return c.clave === 'pct' && /^23\.92 \(meta: 100 tickets\)$/.test(c.nuevo); }));
+    // Quitar sin sql/24 (el registro de prueba no la trae): marcado a mano,
+    // Guardar no envia nada y lo escrito se queda.
+    ed.categorias.quitar(1);
+    var antesPost = p.pedidos.filter(function (x) { return x.metodo === 'POST'; }).length;
+    return reg.guardarEdicion().then(function () {
+      Check('MW5 sin sql/24: Guardar con una ligada quitada no envia; avisa y conserva el borrador', [antesPost, true, true, '100'],
+        [p.pedidos.filter(function (x) { return x.metodo === 'POST'; }).length, /sql\/24/.test(p.sel('regEdMsg').innerHTML),
+         reg.edicion === ed, ed.categorias.filas[0].tickets]);
     });
   });
 });

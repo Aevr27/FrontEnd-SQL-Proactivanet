@@ -43,10 +43,29 @@
 //   Si la consulta falla, la excepcion sube: el handler responde 503 y el
 //   navegador lo pinta como error, nunca como 0.
 //
+// VOLUMETRIA TOTAL (alcance=total, solo ADM: Crear y Modificar)
+// ------------------------------------------------------------
+//   La meta de una categoria en el flujo de ADM se planea sobre TODA la
+//   volumetria de la categoria, no sobre la de 30 dias. La fuente es la
+//   columna VolumenCategoria de dbo.vw_ProblemCategoria:
+//       (SELECT COUNT_BIG(*) FROM dbo.Tickets AS t WHERE t.Categoria = pc.Categoria)
+//   Esa vista solo tiene filas de categorias YA ligadas, asi que para una
+//   ruta cualquiera se usa la MISMA expresion (VolumetriaTotalCategoria),
+//   con la ruta como la guarda adm.usp_GestionAdmin_* en
+//   ProblemCategoria.Categoria (NBSP -> espacio, sin espacios a los lados).
+//   En la misma pasada sale VolumenUltimos30 con la expresion de la vista
+//   (FechaRegistro >= ahora Mexico - 30 dias): es la base con la que
+//   adm.usp_GestionAdmin_TicketsReduce calcula el TicketsReduce que se
+//   GUARDA, y la pantalla lo muestra para no esconder la diferencia.
+//   Estados: ok (> 0), cero (0 real: COUNT sobre dbo.Tickets) y
+//   ruta_invalida. Sin "sin_datos": un conteo directo no tiene ventana.
+//   El alcance por omision (SLOT 0) no cambia para nadie.
+//
 // SOLO LECTURA.
 
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.SqlClient;
 
 public static partial class ExperienciaQueries
@@ -115,6 +134,92 @@ public static class VolumetriaCategoria
             {
                 fila["estado"] = SIN_DATOS;
                 fila["volumetria"] = null;
+            }
+            salida.Add(fila);
+        }
+        return salida;
+    }
+}
+
+public static class VolumetriaTotalCategoria
+{
+    public const string ALCANCE = "total";
+
+    // Una fila por ruta pedida (n = su posicion), con las expresiones de
+    // VolumenCategoria y VolumenUltimos30 de dbo.vw_ProblemCategoria.
+    public static string Consulta(int rutas)
+    {
+        var valores = new List<string>();
+        for (var n = 0; n < rutas; n++) valores.Add("(" + n + ", @r" + n + ")");
+        return
+            "SELECT r.N, Total = COUNT_BIG(t.Categoria), " +
+            "Ultimos30 = COUNT_BIG(CASE WHEN t.FechaRegistro >= DATEADD(DAY, -30, DATEADD(HOUR, -6, SYSUTCDATETIME())) THEN 1 END) " +
+            "FROM (VALUES " + string.Join(", ", valores.ToArray()) + ") AS r (N, Ruta) " +
+            "LEFT JOIN dbo.Tickets AS t ON t.Categoria = LTRIM(RTRIM(REPLACE(r.Ruta, NCHAR(160), N' '))) " +
+            "GROUP BY r.N;";
+    }
+
+    // La ruta como la guarda ProblemCategoria.Categoria (null = vacia).
+    public static string Ruta(string ruta)
+    {
+        if (ruta == null) return null;
+        var r = ruta.Replace('\u00a0', ' ').Trim();
+        return r.Length == 0 ? null : r;
+    }
+
+    // Misma forma que VolumetriaCategoria.Resolver (ruta, llave, estado,
+    // volumetria) mas ultimos30. Si la consulta falla, la excepcion sube.
+    public static List<object> Leer(SqlConnection cn, IList<string> rutas)
+    {
+        var validas = new List<string>();
+        var indice = new int[rutas == null ? 0 : rutas.Count];
+        for (var i = 0; i < indice.Length; i++)
+        {
+            var r = Ruta(rutas[i]);
+            indice[i] = r == null ? -1 : validas.Count;
+            if (r != null) validas.Add(r);
+        }
+        var totales = new long[validas.Count];
+        var ultimos = new long[validas.Count];
+        if (validas.Count > 0)
+        {
+            using (var cmd = new SqlCommand(Consulta(validas.Count), cn) { CommandTimeout = 60 })
+            {
+                for (var n = 0; n < validas.Count; n++)
+                    cmd.Parameters.Add("@r" + n, SqlDbType.NVarChar, VolumetriaCategoria.MAX_LARGO).Value = validas[n];
+                using (var rd = cmd.ExecuteReader())
+                    while (rd.Read())
+                    {
+                        var n = Convert.ToInt32(rd.GetValue(0));
+                        totales[n] = Convert.ToInt64(rd.GetValue(1));
+                        ultimos[n] = Convert.ToInt64(rd.GetValue(2));
+                    }
+            }
+        }
+        return Armar(rutas, indice, totales, ultimos);
+    }
+
+    // Sin base (para las pruebas): los conteos ya leidos por posicion.
+    public static List<object> Armar(IList<string> rutas, int[] indice, long[] totales, long[] ultimos)
+    {
+        var salida = new List<object>();
+        for (var i = 0; i < indice.Length; i++)
+        {
+            var fila = new Dictionary<string, object> { { "ruta", rutas[i] } };
+            var n = indice[i];
+            if (n < 0)
+            {
+                fila["llave"] = null;
+                fila["estado"] = VolumetriaCategoria.RUTA_INVALIDA;
+                fila["volumetria"] = null;
+                fila["ultimos30"] = null;
+            }
+            else
+            {
+                fila["llave"] = ExperienciaQueries.LlaveCategoria(rutas[i]);
+                fila["estado"] = totales[n] > 0 ? VolumetriaCategoria.OK : VolumetriaCategoria.CERO;
+                fila["volumetria"] = totales[n];
+                fila["ultimos30"] = ultimos[n];
             }
             salida.Add(fila);
         }

@@ -304,6 +304,25 @@ public static class AccesoAdminHttpSmoke
         PersistenciaGestionAdmin.OlvidarSql24ParaPruebas();
         AccesoAdmin.FuenteRoles = fuente;
 
+        // ---- VT) volumetria TOTAL (alcance=total): solo ADM ------------------
+        // Sin ?ruta el handler responde 400 sin tocar la base: si llega a 400,
+        // paso la autorizacion. MOD conserva el SLOT 0 de siempre.
+        foreach (var c in casosPost)
+        {
+            AccesoAdmin.FuenteRoles = c.f;
+            cuerpo = Correr(new AdminIniciativasVolumetria(), "admin_iniciativas_volumetria.ashx", "alcance=total", c.cuenta, out estado);
+            Check("VT1 " + c.nombre + ": volumetria alcance=total 403 " + c.tipo, "403|True",
+                  estado + "|" + cuerpo.Contains("\"tipo\":\"" + c.tipo + "\""));
+        }
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
+        cuerpo = Correr(new AdminIniciativasVolumetria(), "admin_iniciativas_volumetria.ashx", "", YO, out estado);
+        Check("VT2 MOD sin alcance (Nueva solicitud): pasa la autorizacion (400 sin ruta, no 403)", "400|True", estado + "|" + cuerpo.Contains("ParametroInvalido"));
+        AccesoAdmin.FuenteRoles = fuente;
+        cuerpo = Correr(new AdminIniciativasVolumetria(), "admin_iniciativas_volumetria.ashx", "alcance=total", YO, out estado);
+        Check("VT3 ADM alcance=total: pasa la autorizacion (400 sin ruta)", "400|True", estado + "|" + cuerpo.Contains("ParametroInvalido"));
+        cuerpo = Correr(new AdminIniciativasVolumetria(), "admin_iniciativas_volumetria.ashx", "alcance=todo&ruta=%2FA", YO, out estado);
+        Check("VT4 alcance desconocido: 400 antes de leer la base", "400|True", estado + "|" + cuerpo.Contains("Alcance desconocido"));
+
         // ---- V) VIEWER: en la whitelist pero sin rol valido ------------------
         var casosViewer = new[]
         {

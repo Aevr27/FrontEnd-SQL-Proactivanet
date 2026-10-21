@@ -208,7 +208,7 @@ public static class PlanificadorGestionAdmin
     };
 
     public const string PendienteQuitar =
-        "Quitar categor\u00edas: la base todav\u00eda no las recibe (falta aplicar sql/23 y sql/24).";
+        "Quitar categor\u00edas: la base todav\u00eda no las recibe (falta aplicar sql/24, que requiere sql/23). Usa Restaurar para guardar lo dem\u00e1s.";
 
     private static string Limpio(string s)
     {

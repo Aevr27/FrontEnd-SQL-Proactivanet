@@ -172,7 +172,7 @@ public static class PersistenciaGestionAdmin
 
     public const string MotivoModificaDuenos =
         "todav\u00eda no se guarda: la edici\u00f3n en la base no recibe Product Owner ni Service Owner " +
-        "(falta aplicar sql/23 y sql/24). D\u00e9jalo como estaba para guardar lo dem\u00e1s.";
+        "(falta aplicar sql/24 en la base, que requiere sql/23). D\u00e9jalo como estaba para guardar lo dem\u00e1s.";
 
     // Lo que consulta el handler (un metodo, para no dejar codigo
     // "inalcanzable" con la constante fija).
@@ -389,6 +389,15 @@ public static class TiposPorPrefijo
     {
         string v;
         return clasificacion != null && Agrupaciones.TryGetValue(clasificacion, out v) ? v : null;
+    }
+
+    // Si el texto es una de las Agrupaciones de la regla, con su grafia
+    // exacta ("Adopci\u00f3n" con tilde; "Adopcion" sin ella no lo es).
+    public static bool EsAgrupacionCanonica(string agrupacion)
+    {
+        if (agrupacion == null) return false;
+        foreach (var v in Agrupaciones.Values) if (string.Equals(v, agrupacion, StringComparison.Ordinal)) return true;
+        return false;
     }
 }
 

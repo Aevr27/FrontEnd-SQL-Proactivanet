@@ -154,6 +154,8 @@ window.IniciativaAdmin = (function () {
   var URL_GESTION = '../handlers/admin_iniciativas_gestion.ashx';
   // Volumetria por categoria (solo lectura, ADM o MOD).
   var URL_VOLUMETRIA = '../handlers/admin_iniciativas_volumetria.ashx';
+  // Volumetria total de la categoria (solo ADM; VolumetriaCliente).
+  var ALCANCE_TOTAL = 'total';
 
   // Desde cuantas opciones un selector pasa a ser caja con busqueda.
   var SELECTOR_UMBRAL = 20;
@@ -371,10 +373,16 @@ window.IniciativaAdmin = (function () {
   // VolumetriaCliente
   // ---------------------------------------------------------------------
   // pedir: (url, opciones) -> Promise<Response>. Recuerda por ruta; un error
-  // no se recuerda (se puede volver a pedir).
+  // no se recuerda (se puede volver a pedir). alcance: '' (por omision) =
+  // SLOT 0, los ultimos 30 dias (Nueva solicitud, Solicitar cambios);
+  // 'total' = toda la volumetria de la categoria (VolumenCategoria de
+  // vw_ProblemCategoria), SOLO para Crear / Modificar de ADM: el servidor la
+  // niega (403) a cualquier otro rol. Con 'total' cada resultado trae
+  // ultimos30: la base del TicketsReduce que guarda la base.
   class VolumetriaCliente {
-    constructor(pedir) {
+    constructor(pedir, alcance) {
       this.pedir = pedir || function (url, op) { return fetch(url, op); };
+      this.alcance = alcance === ALCANCE_TOTAL ? ALCANCE_TOTAL : '';
       this.memo = {};
     }
 
@@ -390,7 +398,7 @@ window.IniciativaAdmin = (function () {
       var e = { estado: 'cargando', valor: null };
       this.memo[k] = e;
       if (alCambiar) alCambiar(e);
-      var url = URL_VOLUMETRIA + '?ruta=' + encodeURIComponent(String(ruta).trim());
+      var url = URL_VOLUMETRIA + '?' + (self.alcance ? 'alcance=' + self.alcance + '&' : '') + 'ruta=' + encodeURIComponent(String(ruta).trim());
       e.promesa = Promise.resolve()
         .then(function () { return self.pedir(url, { method: 'GET', cache: 'no-store' }); })
         .then(function (r) {
@@ -400,7 +408,8 @@ window.IniciativaAdmin = (function () {
               return { estado: 'error', valor: null,
                        mensaje: (json && json.error) || ('El servidor respondió ' + r.status + '.') };
             }
-            return { estado: fila.estado, valor: typeof fila.volumetria === 'number' ? fila.volumetria : null };
+            return { estado: fila.estado, valor: typeof fila.volumetria === 'number' ? fila.volumetria : null, alcance: self.alcance,
+                     ultimos30: self.alcance && typeof fila.ultimos30 === 'number' ? fila.ultimos30 : null };
           });
         }, function () { return { estado: 'error', valor: null, mensaje: 'No se pudo contactar al servidor.' }; })
         .then(function (fin) {
@@ -413,6 +422,9 @@ window.IniciativaAdmin = (function () {
 
     static texto(e) {
       if (!e) return '—';
+      if (e.alcance === ALCANCE_TOTAL && (e.estado === 'ok' || e.estado === 'cero')) {
+        return Number(e.valor).toLocaleString('es-MX') + ' tickets (total de la categoría)';
+      }
       switch (e.estado) {
         case 'cargando': return 'Consultando…';
         case 'ok': return Number(e.valor).toLocaleString('es-MX') + ' tickets (últimos 30 días)';
@@ -427,12 +439,16 @@ window.IniciativaAdmin = (function () {
   function htmlVolumetria(e) {
     var clase = !e ? '' : e.estado === 'error' || e.estado === 'ruta_invalida' ? ' mal'
       : e.estado === 'sin_datos' ? ' aviso' : '';
-    return '<output class="ini-vol' + clase + '" title="Calculada: Total general del SLOT 0 de vw_TBSlotCAT (solo lectura)">' +
+    var origen = e && e.alcance === ALCANCE_TOTAL
+      ? 'Calculada: todos los tickets de la categoría (VolumenCategoria de vw_ProblemCategoria), solo lectura' +
+        (typeof e.ultimos30 === 'number' ? '. Últimos 30 días: ' + e.ultimos30.toLocaleString('es-MX') : '')
+      : 'Calculada: Total general del SLOT 0 de vw_TBSlotCAT (solo lectura)';
+    return '<output class="ini-vol' + clase + '" title="' + Escape.attr(origen) + '">' +
       Escape.html(VolumetriaCliente.texto(e)) + '</output>';
   }
 
   // ---------------------------------------------------------------------
-  // MetaCategoria: % de disminucion <-> tickets a resolver (Crear)
+  // MetaCategoria: % de disminucion <-> tickets a resolver (Crear y Modificar de ADM)
   // ---------------------------------------------------------------------
   // Denominador: la volumetria de ESA categoria (la que ADM fijo o la
   // calculada). Lo que viaja y se guarda es el % (dbo.ProblemCategoria.
@@ -491,7 +507,9 @@ window.IniciativaAdmin = (function () {
         var propia = typeof c.f_analisis_propia === 'string' ? c.f_analisis_propia : '';
         return { categoria: c.categoria || '', valor: v, original: v, ligada: true, quitada: false,
                  agrup: typeof c.agrup === 'string' ? c.agrup : '', agrupNueva: '',
-                 fPropia: propia, fPropiaNueva: propia };
+                 fPropia: propia, fPropiaNueva: propia,
+                 // Meta en tickets tambien para una ligada (Modificar).
+                 volCalc: null, vol30: null, tickets: '', fuente: 'pct' };
       });
     }
 
@@ -525,7 +543,7 @@ window.IniciativaAdmin = (function () {
       this.filas.push({ categoria: ruta, valor: '', original: null, ligada: false, quitada: false,
                         fCreacion: hoy, fAnalisis: FECHAS_GESTION.analisisDesde(hoy),
                         tipoIniciativa: '', tipoAgrupado: '',
-                        volManual: '', volCalc: null, tickets: '', fuente: 'pct' });
+                        volManual: '', volCalc: null, vol30: null, tickets: '', fuente: 'pct' });
       return { ok: true, ruta: ruta, mensaje: '' };
     }
 
@@ -550,7 +568,7 @@ window.IniciativaAdmin = (function () {
       var f = this.filas[n];
       if (f && !f.quitada) {
         f.valor = String(texto === null || texto === undefined ? '' : texto).trim();
-        if (!f.ligada) f.fuente = 'pct';
+        f.fuente = 'pct';
       }
     }
 
@@ -567,19 +585,21 @@ window.IniciativaAdmin = (function () {
     // volumetria (vacio si no se puede: erroresFormato dice por que). Un
     // fuente 'pct' no cambia.
     recalcular(f) {
-      if (!f || f.ligada || f.fuente !== 'tickets') return;
+      if (!f || f.quitada || f.fuente !== 'tickets') return;
       var r = MetaCategoria.pct(this.volumen(f), f.tickets);
       f.valor = r.error === undefined ? r.pct : '';
     }
 
-    // La volumetria calculada de cada fila nueva, de un VolumetriaCliente
-    // (ok o cero; lo demas = sin calculada).
+    // La volumetria calculada de cada fila, de un VolumetriaCliente (ok o
+    // cero; lo demas = sin calculada). vol30: los ultimos 30 dias que trae
+    // el alcance 'total' (la base del TicketsReduce que guarda la base).
     sincronizarCalculadas(vol) {
       var self = this;
       this.filas.forEach(function (f) {
-        if (f.ligada) return;
         var e = vol && vol.estado ? vol.estado(f.categoria) : null;
-        f.volCalc = e && (e.estado === 'ok' || e.estado === 'cero') && typeof e.valor === 'number' ? e.valor : null;
+        var ok = e && (e.estado === 'ok' || e.estado === 'cero');
+        f.volCalc = ok && typeof e.valor === 'number' ? e.valor : null;
+        f.vol30 = ok && typeof e.ultimos30 === 'number' ? e.ultimos30 : null;
         self.recalcular(f);
       });
     }
@@ -594,7 +614,7 @@ window.IniciativaAdmin = (function () {
 
     capturarTickets(n, texto) {
       var f = this.filas[n];
-      if (!f || f.ligada || f.quitada) return false;
+      if (!f || f.quitada) return false;
       f.tickets = String(texto === null || texto === undefined ? '' : texto).trim();
       f.fuente = 'tickets';
       this.recalcular(f);
@@ -623,12 +643,27 @@ window.IniciativaAdmin = (function () {
         var r = MetaCategoria.pct(vol, f.tickets);
         if (r.error !== undefined) return { texto: r.error, mal: r.error !== '' };
         return { texto: '≈ ' + r.pct + '%' + de + (r.exacto ? '' : ' · con 2 decimales son ' +
-          r.tickets.toLocaleString('es-MX') + ' tickets'), mal: false };
+          r.tickets.toLocaleString('es-MX') + ' tickets') + this.notaGuardado(f, Number(f.tickets)), mal: false };
       }
       if (f.valor === '' || FORMATO.pct(f.valor)) return { texto: '', mal: false };
       var t = MetaCategoria.tickets(vol, f.valor);
       if (t === null) return { texto: 'Sin volumetría: no se calculan los tickets.', mal: false };
-      return { texto: '= ' + t.toLocaleString('es-MX') + ' tickets' + de, mal: false };
+      return { texto: '= ' + t.toLocaleString('es-MX') + ' tickets' + de + this.notaGuardado(f, t), mal: false };
+    }
+
+    // Lo que la BASE guardara en Tickets a reducir (TicketsReduce): lo
+    // calcula adm.usp_GestionAdmin_TicketsReduce con ROUND(VolumenUltimos30
+    // x %), no con la volumetria total. null si no se sabe (sin vol30).
+    ticketsGuardados(f) {
+      return typeof f.vol30 === 'number' ? MetaCategoria.tickets(f.vol30, f.valor) : null;
+    }
+
+    // Aviso cuando lo que guardara la base no es la meta escrita.
+    notaGuardado(f, objetivo) {
+      var g = this.ticketsGuardados(f);
+      if (g === null || g === objetivo) return '';
+      return ' · la base guardará ' + g.toLocaleString('es-MX') + ' en Tickets a reducir (calcula sobre los últimos 30 días: ' +
+        f.vol30.toLocaleString('es-MX') + ')';
     }
 
     // La Volumetria del problema que viaja (dbo.Problem.VolumetriaOriginal):
@@ -679,7 +714,7 @@ window.IniciativaAdmin = (function () {
         if (!f.ligada && f.volManual && FORMATO.entero(f.volManual)) {
           errores.push({ clave: 'volumetria', mensaje: f.categoria + ': Volumetría: ' + FORMATO.entero(f.volManual) });
         }
-        if (!f.ligada && f.fuente === 'tickets') {
+        if (f.fuente === 'tickets') {
           var m = MetaCategoria.pct(self.volumen(f), f.tickets);
           if (m.error) errores.push({ clave: 'tickets', mensaje: f.categoria + ': ' + m.error });
         }
@@ -694,17 +729,21 @@ window.IniciativaAdmin = (function () {
     // -> [{ clave, rotulo, anterior, nuevo }]
     cambios() {
       var salida = [];
+      // La meta escrita en tickets acompaña al % que viaja (solo el % se guarda).
+      var enTickets = function (f) {
+        return f.fuente === 'tickets' && f.valor !== '' ? ' (meta: ' + f.tickets + ' tickets)' : '';
+      };
       this.filas.forEach(function (f) {
         if (f.ligada && f.quitada) {
           salida.push({ clave: 'quitar_categoria', rotulo: 'Quitar categoría', anterior: f.categoria, nuevo: '' });
         } else if (!f.ligada) {
           salida.push({ clave: 'agregar_categoria', rotulo: 'Agregar categoría', anterior: '',
-                        nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%') +
+                        nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%' + enTickets(f)) +
                           (f.tipoAgrupado ? ' · ' + f.tipoAgrupado : '') +
                           (f.fAnalisis ? ' · análisis ' + f.fAnalisis + ' (hoy + ' + FECHAS_GESTION.diasAnalisis + ' días)' : '') });
         } else {
           if (f.valor !== f.original) {
-            salida.push({ clave: 'pct', rotulo: '% Disminución · ' + f.categoria, anterior: f.original, nuevo: f.valor });
+            salida.push({ clave: 'pct', rotulo: '% Disminución · ' + f.categoria, anterior: f.original, nuevo: f.valor + enTickets(f) });
           }
           if (f.agrupNueva) {
             salida.push({ clave: 'tipo_agrupado', rotulo: 'Agrupación · ' + f.categoria, anterior: '', nuevo: f.agrupNueva });
@@ -762,13 +801,17 @@ window.IniciativaAdmin = (function () {
   //                     con fecha PROPIA, editable; en una nueva, la propia
   //                     calculada (dia en que se liga + 15), que fija el
   //                     servidor al guardar.
-  // En Crear (prefijo 'crear', sin fechas) la meta de cada fila se escribe
-  // en % o en tickets (cats.modo) y el otro valor se muestra calculado
-  // (MetaCategoria); con volManual (sql/26 en la base) la Volumetria se
-  // puede fijar a mano: vacia = la calculada. Modificar no cambia.
+  // La meta de cada fila se escribe en % o en tickets (cats.modo) y el otro
+  // valor se muestra calculado (MetaCategoria) con la volumetria de la fila:
+  // en Crear (prefijo 'crear', sin fechas) las nuevas; en Modificar (ADM,
+  // prefijo 'edicion') tambien las ligadas. Con volManual (sql/26, solo
+  // Crear) la Volumetria se puede fijar a mano: vacia = la calculada.
+  // fechas.puedeQuitar === false (Modificar sin sql/24): "Quitar" de una
+  // ligada sale deshabilitado (la base no lo recibe; se rechazaria todo).
   function htmlCategorias(cats, vol, prefijo, fechas, volManual) {
     if (!cats.filas.length) return '<p class="ini-nota">Sin categorías todavía.</p>';
-    var meta = prefijo === 'crear' && !fechas, porTickets = meta && cats.modo === 'tickets';
+    var meta = (prefijo === 'crear' && !fechas) || prefijo === 'edicion', porTickets = meta && cats.modo === 'tickets';
+    var conMeta = function (f) { return meta && !f.quitada && (!f.ligada || prefijo === 'edicion'); };
     function celdaVol(f, n) {
       if (f.quitada) return '—';
       var e = vol ? vol.estado(f.categoria) : null;
@@ -780,11 +823,13 @@ window.IniciativaAdmin = (function () {
     }
     function celdaPct(f, n) {
       if (f.quitada) return Escape.html(f.original === '' ? '—' : f.original + '%');
-      var m = meta && !f.ligada ? cats.meta(f) : null;
-      var salida = m ? ' <output class="ini-meta' + (m.mal ? ' mal' : '') + '" data-crear-meta="' + n + '">' + Escape.html(m.texto) + '</output>' : '';
-      if (porTickets && !f.ligada) {
+      var m = conMeta(f) ? cats.meta(f) : null;
+      var salida = m ? ' <output class="ini-meta' + (m.mal ? ' mal' : '') + '" data-' + prefijo + '-meta="' + n + '">' + Escape.html(m.texto) + '</output>' : '';
+      if (porTickets && conMeta(f)) {
+        var vmax = cats.volumen(f);
         return '<label class="ini-ed-pct"><span class="ini-sr">Tickets a resolver de ' + Escape.html(f.categoria) + '</span>' +
-          '<input type="number" min="0" step="1" inputmode="numeric" data-crear-tickets="' + n + '" value="' +
+          '<input type="number" min="0" step="1" inputmode="numeric"' + (vmax === null ? '' : ' max="' + vmax + '"') +
+          ' data-' + prefijo + '-tickets="' + n + '" value="' +
           Escape.attr(cats.ticketsVista(f)) + '"> tickets</label>' + salida;
       }
       return '<label class="ini-ed-pct"><span class="ini-sr">% de ' + Escape.html(f.categoria) + '</span>' +
@@ -824,6 +869,7 @@ window.IniciativaAdmin = (function () {
       return opcionesTipo(fechas.tiposAgrupado, f.agrupNueva, attr('tipo_agrupado'), 'Agrupación') +
         ' <span class="ini-origen" title="Opcional. Sin agrupación, el servidor revisa su tope como si consumiera">Sin declarar</span>';
     }
+    var sinQuitar = fechas && fechas.puedeQuitar === false;
     return '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
       '<th scope="col">Volumetría ' + (meta && volManual ? '<span class="ini-origen">Editable</span>'
         : '<span class="ini-origen derivado">Calculada</span>') + '</th>' +
@@ -835,7 +881,9 @@ window.IniciativaAdmin = (function () {
         var pct = celdaPct(f, n);
         var boton = f.quitada
           ? '<button type="button" class="btn linea chico" data-' + prefijo + '-cat="restaurar" data-indice="' + n + '">Restaurar</button>'
-          : '<button type="button" class="btn linea chico" data-' + prefijo + '-cat="quitar" data-indice="' + n + '">Quitar</button>';
+          : sinQuitar && f.ligada
+            ? '<button type="button" class="btn linea chico" disabled title="Quitar una categoría ligada todavía no se guarda: falta aplicar sql/24 en la base">Quitar</button>'
+            : '<button type="button" class="btn linea chico" data-' + prefijo + '-cat="quitar" data-indice="' + n + '">Quitar</button>';
         return '<tr' + (f.quitada ? ' class="ini-cat-quitada"' : '') + '><td><span class="ini-cat-ruta">' +
           Escape.html(f.categoria) + '</span> ' + estado + '</td><td>' +
           celdaVol(f, n) + '</td><td>' + pct + '</td>' +
@@ -1255,6 +1303,11 @@ window.IniciativaAdmin = (function () {
 
     capturarPct(indice, texto) { this.categorias.capturarPct(indice, texto); }
 
+    // Meta en tickets (ADM): el % sale de la volumetria total de la fila.
+    capturarTickets(indice, texto) { return this.categorias.capturarTickets(indice, texto); }
+
+    elegirModo(modo) { return this.categorias.elegirModo(modo); }
+
     capturarTipo(indice, campo, texto) { return this.categorias.capturarTipo(indice, campo, texto); }
 
     capturarFechaCategoria(indice, texto) { return this.categorias.capturarFecha(indice, texto); }
@@ -1301,6 +1354,12 @@ window.IniciativaAdmin = (function () {
         if (!self.duenosYQuitar) errores.push({ clave: par[0], mensaje: campo(par[0]).rotulo + ': todavía no se guarda (falta sql/24 en la base).' });
         else if (v !== '' && self.listas[par[1]].indexOf(v) < 0) errores.push({ clave: par[0], mensaje: campo(par[0]).rotulo + ': elige un valor de la lista o déjalo vacío.' });
       });
+      // Quitar sin sql/24: la base rechazaria TODO el guardado (409
+      // PendienteSinRegla); se dice aqui, antes de enviar, y nada se pierde.
+      if (!this.duenosYQuitar && this.categorias.filas.some(function (f) { return f.ligada && f.quitada; })) {
+        errores.push({ clave: 'quitar_categoria', mensaje: 'Quitar categorías todavía no se guarda: falta aplicar sql/24 en la base. ' +
+          'Usa «Restaurar» en la categoría marcada para guardar lo demás.' });
+      }
       return errores.concat(this.categorias.erroresFormato());
     }
 
@@ -1435,13 +1494,28 @@ window.IniciativaAdmin = (function () {
           Selector.desplegable('regEdCatBuscar', rutas, '') +
           ' <button type="button" class="btn linea chico" data-accion="edicion-cat-agregar">Agregar</button></div>'
       : htmlSinCatalogo(ed.rutasEstado);
-    return htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis,
-        tiposIniciativa: ed.listas.tiposIniciativa, tiposAgrupado: ed.listas.tiposAgrupado }) + agregar +
+    // La volumetria que llego (total de la categoria) recalcula el % de las
+    // filas cuya meta se escribio en tickets; lo escrito no cambia.
+    ed.categorias.sincronizarCalculadas(vol);
+    var modo = ed.categorias.modo;
+    var radio = function (valor, texto) {
+      return '<label><input type="radio" name="regEdModo" value="' + valor + '" data-edicion-modo' +
+        (modo === valor ? ' checked' : '') + '> ' + texto + '</label>';
+    };
+    var modos = ed.categorias.filas.length
+      ? '<fieldset class="ini-campo ini-modo-meta"><legend>Planear la meta por</legend>' +
+          radio('pct', '% de disminución') + ' ' + radio('tickets', 'Tickets a resolver') +
+          '<small class="ini-motivo">Lo que escribes no cambia; el otro valor se calcula con la volumetría total de cada categoría. ' +
+          'Se guarda el % (dos decimales). Tickets a reducir lo calcula la base con los tickets de los últimos 30 días.</small></fieldset>'
+      : '';
+    return modos + htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis,
+        tiposIniciativa: ed.listas.tiposIniciativa, tiposAgrupado: ed.listas.tiposAgrupado,
+        puedeQuitar: ed.duenosYQuitar }) + agregar +
       '<div class="ini-cambio-msg" id="regEdCatMsg" role="status" aria-live="polite"></div>' +
       '<small class="ini-sub">Destino: dbo.ProblemCategoria. Quitar = solo la asociación con esta iniciativa deja de estar vigente ' +
         '(VigenteEnOrigen = 0, la misma baja del cargador); no se borra la fila, ni la categoría, ni sus dueños.' +
-        (ed.duenosYQuitar ? '' : ' Quitar todavía no se guarda: falta aplicar sql/24 en la base (el servidor lo rechaza).') +
-        ' La volumetría es calculada y de solo lectura.</small>' +
+        (ed.duenosYQuitar ? '' : ' Quitar una categoría ligada todavía no se guarda: falta aplicar sql/24 en la base; por eso su botón está deshabilitado.') +
+        ' La volumetría es el total de tickets de la categoría, calculada y de solo lectura.</small>' +
       '<small class="ini-sub">Fecha de análisis: las categorías iniciales heredan la de la iniciativa y cambian con ella ' +
         '(Fecha compromiso de Análisis). Una categoría ligada después tiene la suya: el día en que se liga + ' +
         FECHAS_GESTION.diasAnalisis + ' días, editable aquí, sin tocar la de la iniciativa. ' +
@@ -1534,7 +1608,8 @@ window.IniciativaAdmin = (function () {
     constructor(doc, pedir, pedirLectura) {
       this.doc = doc;
       this.pedir = pedir || null;
-      this.volumetria = new VolumetriaCliente(pedirLectura || null);
+      // ADM planea sobre la volumetria TOTAL de la categoria.
+      this.volumetria = new VolumetriaCliente(pedirLectura || null, ALCANCE_TOTAL);
       this.borrador = null;
       this.archivoRca = null;  // el File elegido: viaja al servidor, que no lo guarda
       this.enviando = false;
@@ -1930,6 +2005,7 @@ window.IniciativaAdmin = (function () {
     ROTULOS: ROTULOS,
     URL_GESTION: URL_GESTION,
     URL_VOLUMETRIA: URL_VOLUMETRIA,
+    ALCANCE_TOTAL: ALCANCE_TOTAL,
     SELECTOR_UMBRAL: SELECTOR_UMBRAL,
     RespuestaGestion: RespuestaGestion,
     enviarGestion: enviarGestion,

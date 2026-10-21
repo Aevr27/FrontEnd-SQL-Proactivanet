@@ -169,7 +169,37 @@ public static partial class ExperienciaQueries
             rd.NextResult();
             while (rd.Read()) { var t = Texto(rd.GetValue(0)); if (t != null) tiposAgr.Add(t); }
         }
-        salida.Valores = new EstadosProblem(estados, subestados, tiposIni, tiposAgr);
+        salida.Valores = new EstadosProblem(estados, subestados, tiposIni, AgrupacionesUnicas(tiposAgr));
+        return salida;
+    }
+
+    // Una sola grafia por Agrupacion. El DISTINCT de la base distingue
+    // acentos (CI_AS): "Adopcion" y "Adopci\u00f3n" salian las dos, y negocio
+    // confirmo que son la misma (ver Canonizar). Por Clave (sin acentos ni
+    // mayusculas) se queda la grafia de la regla (TiposPorPrefijo, con
+    // tilde) SI existe en la base; si ninguna de un grupo es la de la regla,
+    // se quedan todas tal cual (no se elige una al azar ni se ofrece una que
+    // la base no tenga: el procedimiento la rechazaria, 51012). Solo cambia
+    // lo que se OFRECE y se acepta declarar; los datos guardados no se tocan.
+    public static List<string> AgrupacionesUnicas(IEnumerable<string> valores)
+    {
+        var grupos = new Dictionary<string, List<string>>(StringComparer.Ordinal);
+        var orden = new List<string>();
+        foreach (var v in valores ?? new string[0])
+        {
+            if (string.IsNullOrEmpty(v)) continue;
+            var k = Clave(v);
+            List<string> g;
+            if (!grupos.TryGetValue(k, out g)) { g = new List<string>(); grupos[k] = g; orden.Add(k); }
+            if (!g.Contains(v)) g.Add(v);
+        }
+        var salida = new List<string>();
+        foreach (var k in orden)
+        {
+            var canonica = grupos[k].Find(TiposPorPrefijo.EsAgrupacionCanonica);
+            if (canonica != null) salida.Add(canonica);
+            else salida.AddRange(grupos[k]);
+        }
         return salida;
     }
 

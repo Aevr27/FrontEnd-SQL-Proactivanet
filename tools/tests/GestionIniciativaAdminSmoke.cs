@@ -877,6 +877,41 @@ public static class GestionIniciativaAdminSmoke
         Check("CA8 Codigo inmutable sin distinguir mayusculas: 'Codigo' tambien se rechaza", "codigo",
             Campos(ModC(F("folio", Fo, "Codigo", "PRB 2026-999999", "titulo", "x"))));
 
+        // ---- AG) Agrupacion: una sola grafia por Clave ----------------------
+        var tilde = "Adopci" + (char)0xF3 + "n";
+        Check("AG1 'Adopcion' y la de tilde: queda solo la de tilde (la de la regla)", tilde + "|Problem",
+            string.Join("|", ExperienciaQueries.AgrupacionesUnicas(new[] { "Adopcion", tilde, "Problem" }).ToArray()));
+        Check("AG2 orden indistinto y mayusculas: igual una sola", tilde,
+            string.Join("|", ExperienciaQueries.AgrupacionesUnicas(new[] { tilde, "ADOPCION", "adopcion" }).ToArray()));
+        Check("AG3 solo la sin tilde en la base: se conserva (no se ofrece una que la base no tiene)", "Adopcion",
+            string.Join("|", ExperienciaQueries.AgrupacionesUnicas(new[] { "Adopcion" }).ToArray()));
+        Check("AG4 variantes sin grafia de la regla: todas tal cual; las demas agrupaciones intactas", "Foo|FOO|Mejora|ReqOpr|SorIA",
+            string.Join("|", ExperienciaQueries.AgrupacionesUnicas(new[] { "Foo", "FOO", "Mejora", "ReqOpr", "SorIA", "Mejora" }).ToArray()));
+        var conTilde = new EstadosProblem(new[] { "En An" + (char)0xE1 + "lisis" }, new string[0], new[] { "Problem" },
+            ExperienciaQueries.AgrupacionesUnicas(new[] { "Adopcion", tilde }));
+        Check("AG5 el validador acepta declarar la de tilde y ya no la sin tilde", "True|False",
+            conTilde.TiposAgrupado.Contains(tilde) + "|" + conTilde.TiposAgrupado.Contains("Adopcion"));
+
+        // ---- VT) Volumetria total por categoria (sin base) -----------------
+        Check("VT1 ruta como la guarda ProblemCategoria: NBSP -> espacio, sin espacios a los lados; vacia = null", "/A/B C|null",
+            VolumetriaTotalCategoria.Ruta("  /A/B" + (char)0xA0 + "C ") + "|" + (VolumetriaTotalCategoria.Ruta("  ") ?? "null"));
+        var sqlTotal = VolumetriaTotalCategoria.Consulta(2);
+        Check("VT2 consulta: COUNT de dbo.Tickets por Categoria exacta (VolumenCategoria) + ultimos 30 dias Mexico (VolumenUltimos30), parametrizada",
+            "True|True|True|True",
+            sqlTotal.Contains("COUNT_BIG(t.Categoria)") + "|" + sqlTotal.Contains("DATEADD(DAY, -30, DATEADD(HOUR, -6, SYSUTCDATETIME()))") + "|" +
+            sqlTotal.Contains("(0, @r0), (1, @r1)") + "|" + sqlTotal.Contains("LEFT JOIN dbo.Tickets AS t ON t.Categoria = LTRIM(RTRIM(REPLACE(r.Ruta, NCHAR(160), N' ')))"));
+        var filasVt = VolumetriaTotalCategoria.Armar(new[] { "/A", "", "/B" }, new[] { 0, -1, 1 }, new long[] { 1234, 0 }, new long[] { 56, 0 });
+        Func<int, string, string> vt = (i, k) => Convert.ToString(((Dictionary<string, object>)filasVt[i])[k] ?? "null");
+        Check("VT3 estados: ok con total y ultimos30; ruta vacia invalida (null); 0 real = cero",
+            "ok|1234|56|ruta_invalida|null|cero|0",
+            vt(0, "estado") + "|" + vt(0, "volumetria") + "|" + vt(0, "ultimos30") + "|" + vt(1, "estado") + "|" + vt(1, "volumetria") + "|" +
+            vt(2, "estado") + "|" + vt(2, "volumetria"));
+
+        // ---- QS) Quitar sin sql/24: el motivo dice lo que falta hoy --------
+        Check("QS1 PendienteQuitar: falta sql/24 (sql/23 ya aplicada) y como guardar lo demas", "True|True|False",
+            PlanificadorGestionAdmin.PendienteQuitar.Contains("falta aplicar sql/24") + "|" + PlanificadorGestionAdmin.PendienteQuitar.Contains("Restaurar") + "|" +
+            PlanificadorGestionAdmin.PendienteQuitar.Contains("sql/23 y sql/24"));
+
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO PASO" : fallos + " FALLO(S)");
         return fallos == 0 ? 0 : 1;
