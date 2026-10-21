@@ -153,6 +153,27 @@
 
     <section class="kpis" id="kpis-bl"></section>
 
+    <!-- Por subestado, justo bajo los KPIs. Nace PLEGADA, como la tarjeta de
+         SLA por lider y grupo (mismo .plegar-tabla de dashboard.css): solo el
+         boton la abre y la cierra (backlog.js, plegarSubestado). -->
+    <section class="card plegada" id="card-subestado-bl">
+      <h3>
+        <button class="plegar-tabla" id="plegar-subestado-bl" type="button"
+                aria-controls="cuerpo-subestado-bl" aria-expanded="false"
+                aria-label="Mostrar gráfica por subestado"
+                title="Mostrar gráfica por subestado">
+          <svg class="plegar-tabla-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M9.5 6.5 15 12l-5.5 5.5"/>
+          </svg>
+        </button>
+        Por subestado
+      </h3>
+      <div id="cuerpo-subestado-bl" hidden>
+        <div class="lienzo"><canvas id="chart-subestado-bl"></canvas></div>
+        <div class="cap" id="cap-subestado-bl"></div>
+      </div>
+    </section>
+
     <section class="grid2">
       <div class="card">
         <h3>Tendencia del backlog<span class="hint" id="hint-tendencia-bl"></span></h3>
@@ -177,12 +198,6 @@
         <h3>Por antiguedad</h3>
         <div class="lienzo"><canvas id="chart-aging-bl"></canvas></div>
       </div>
-    </section>
-
-    <section class="card">
-      <h3>Por subestado</h3>
-      <div class="lienzo"><canvas id="chart-subestado-bl"></canvas></div>
-      <div class="cap" id="cap-subestado-bl"></div>
     </section>
 
     <section class="card">

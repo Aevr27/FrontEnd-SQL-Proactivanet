@@ -906,6 +906,24 @@ const TableroBacklog = (function () {
     }).render();
   }
 
+  /* Plegado de "Por subestado", igual que plegarSlaLiderGrupo de dashboard.js:
+     nace plegada, el estado vive solo en el DOM y recargar datos no lo toca.
+     Al abrir se vuelve a pintar con los datos ya cargados -sin peticion ni
+     tocar filtros-: plegada, la grafica se midio con el cuerpo oculto. */
+  function plegarSubestado(abrir) {
+    const boton = document.getElementById('plegar-subestado-bl');
+    const cuerpo = document.getElementById('cuerpo-subestado-bl');
+    if (!boton || !cuerpo) return;
+    const texto = `${abrir ? 'Ocultar' : 'Mostrar'} gráfica por subestado`;
+    cuerpo.hidden = !abrir;
+    const card = document.getElementById('card-subestado-bl');
+    if (card) card.classList.toggle('plegada', !abrir);
+    boton.setAttribute('aria-expanded', String(abrir));
+    boton.setAttribute('aria-label', texto);
+    boton.title = texto;
+    if (abrir && datos) renderBarrasSubestado();
+  }
+
   // -------------------------------------------------- drill-down Lider -> Grupo
   function renderLideres() {
     const cont = document.getElementById('tabla-lideres-bl');
@@ -1513,6 +1531,12 @@ const TableroBacklog = (function () {
       document.getElementById(id).addEventListener('change', programarCarga);
     }
     activarSubtabs(document.querySelector('#tab-backlog .tabs').parentElement, () => redimensionar(graficos));
+    const botonSubestado = document.getElementById('plegar-subestado-bl');
+    if (botonSubestado) {
+      botonSubestado.addEventListener('click', () =>
+        plegarSubestado(botonSubestado.getAttribute('aria-expanded') !== 'true'));
+    }
+    plegarSubestado(false);
 
     try {
       await cargarCatalogos();
