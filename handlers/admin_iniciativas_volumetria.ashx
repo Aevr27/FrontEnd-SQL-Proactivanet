@@ -15,6 +15,17 @@
 //       Nunca se responde 0 cuando no se pudo leer.
 //   403 AccesoAdmin.Exigir (ADM o MOD), antes de tocar la base.
 //
+//   GET ...?alcance=total&ruta=...   SOLO ADM (Crear / Modificar de ADM)
+//   200 { "alcance": "total", "rutas": [ { "ruta", "llave", "estado": ok|cero|ruta_invalida,
+//         "volumetria": total | null, "ultimos30": n | null }, ... ] }
+//       volumetria = VolumenCategoria de dbo.vw_ProblemCategoria (todos los
+//       tickets de la ruta); ultimos30 = su VolumenUltimos30, la base del
+//       TicketsReduce que guarda la base (VolumetriaTotalCategoria en
+//       App_Code/ExperienciaVolumetria.cs). Sin cache: un COUNT por ruta
+//       sobre IX_Tickets_Categoria.
+//   403 AccesoAdmin.ExigirAdm (MOD y los demas), antes de tocar la base.
+//   400 alcance desconocido. Sin alcance = SLOT 0, igual que siempre.
+//
 // La consulta, la llave y el significado de SLOT 0 son los de Experiencia:
 // ver App_Code/ExperienciaVolumetria.cs. El SLOT 0 completo se guarda
 // CACHE_MINUTOS en memoria (la vista barre dbo.Tickets con funciones
@@ -38,7 +49,10 @@ public class AdminIniciativasVolumetria : IHttpHandler
 
     public void ProcessRequest(HttpContext context)
     {
-        if (!AccesoAdmin.Exigir(context)) return;
+        var alcance = context.Request.QueryString["alcance"];
+        var total = string.Equals(alcance, VolumetriaTotalCategoria.ALCANCE, StringComparison.Ordinal);
+        if (total ? !AccesoAdmin.ExigirAdm(context, "Solo un administrador (ADM) consulta la volumetria total.")
+                  : !AccesoAdmin.Exigir(context)) return;
 
         DashboardHandler.Responder(context, delegate
         {
@@ -54,6 +68,28 @@ public class AdminIniciativasVolumetria : IHttpHandler
             foreach (var r in rutas)
                 if (r != null && r.Length > VolumetriaCategoria.MAX_LARGO)
                     return Error(context, 400, "La ruta de la categoría es demasiado larga.", "ParametroInvalido");
+
+            if (alcance != null && !total)
+                return Error(context, 400, "Alcance desconocido: usa alcance=total o ninguno.", "ParametroInvalido");
+            if (total)
+            {
+                List<object> filas;
+                try
+                {
+                    using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+                    {
+                        cn.Open();
+                        filas = VolumetriaTotalCategoria.Leer(cn, rutas);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DashboardHandler.Registrar("admin_iniciativas_volumetria.ashx", ex);
+                    return Error(context, 503,
+                        "No se pudo leer la volumetria: " + DashboardHandler.MensajeSeguro(ex), "VolumetriaNoDisponible");
+                }
+                return new Dictionary<string, object> { { "alcance", VolumetriaTotalCategoria.ALCANCE }, { "rutas", filas } };
+            }
 
             Dictionary<string, int> slot0;
             try

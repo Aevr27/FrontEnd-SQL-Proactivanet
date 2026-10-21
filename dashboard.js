@@ -4302,7 +4302,7 @@ const MODULOS = {
    ser tambien una clave de MODULOS: el hash #observabilidad o #calidad abre
    el grupo, y #tablero, #orquestacion, #qa o #qare el modulo, como antes. */
 const GRUPOS = {
-  observabilidad: ['tablero', 'orquestacion'],
+  observabilidad: ['orquestacion', 'tablero'],
   calidad: ['qa', 'qare'],
 };
 const ultimoDeGrupo = {};

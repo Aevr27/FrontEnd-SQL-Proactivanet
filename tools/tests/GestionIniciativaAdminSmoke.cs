@@ -36,6 +36,17 @@
 //      encendida, se validan contra el catalogo y entran al plan. PO y SO
 //      independientes (cambiar uno no lleva el otro al plan). Codigo
 //      sigue inmutable con los campos nuevos.
+//   VQ) Volumetria fijada por ADM en Crear (sql/26): solo con sql/26 vista
+//      en la base (AnotarSql26); sin ella una volumetria escrita se rechaza
+//      (422), vacia sigue igual; formato entero >= 0 que cabe en int; entra
+//      al plan (0 es 0, no NULL); el % y las categorias no cambian;
+//      Modificar no la lee. Los demas casos corren como con sql/26.
+//   SQ) Subestado inicial en Crear (sql/27): solo con sql/27 vista en la
+//      base (AnotarSql27); sin ella un Subestado elegido se rechaza (422),
+//      vacio u omitido sigue igual; uno que no existe = error; sin la lista
+//      de valores = error; valido entra al plan (recortado) y al JSON; el
+//      Estado no cambia ni se valida contra el. Los demas casos corren
+//      como con sql/27.
 //   EN) Acentos en la respuesta del servidor (faltantes, cambios, JSON) y
 //      fuentes sin BOM sin literales no ASCII; motivo de persistencia vigente.
 //
@@ -260,6 +271,10 @@ public static class GestionIniciativaAdminSmoke
 
     public static int Main()
     {
+        // Los casos de siempre, como con sql/26 en la base (VQ prueba sin ella).
+        PersistenciaGestionAdmin.GuardaVolumetriaForzadaParaPruebas = true;
+        // Y como con sql/27 (SQ prueba sin ella).
+        PersistenciaGestionAdmin.GuardaSubestadoForzadaParaPruebas = true;
         // ---- P ----
         Check("P1 persistencia es constante true (encendida 2026-10-14)", true, PersistenciaGestionAdmin.Habilitada);
         var j = Crear(C("ADO")).ComoJson();
@@ -759,6 +774,126 @@ public static class GestionIniciativaAdminSmoke
         }
         finally { PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null; }
 
+        // ---- VQ: Volumetria fijada por ADM en Crear (sql/26) ----
+        try
+        {
+            PersistenciaGestionAdmin.GuardaVolumetriaForzadaParaPruebas = null;
+            PersistenciaGestionAdmin.OlvidarSql26ParaPruebas();
+            Check("VQ1 constante encendida, sin revisar la base: apagada (nunca se asume sql/26)", "True|False",
+                  PersistenciaGestionAdmin.GuardaVolumetria + "|" + PersistenciaGestionAdmin.GuardaVolumetriaActiva());
+            var ahoraSql26 = new DateTime(2026, 10, 21, 18, 0, 0, DateTimeKind.Utc);
+            PersistenciaGestionAdmin.AnotarSql26(false, ahoraSql26);
+            Check("VQ2 la base NO tiene sql/26: apagada, con su bloqueo; la revision sigue vigente", "False|True|True",
+                  PersistenciaGestionAdmin.GuardaVolumetriaActiva() + "|" +
+                  PersistenciaGestionAdmin.BloqueosVigentes().Contains(PersistenciaGestionAdmin.BloqueoVolumetria) + "|" +
+                  PersistenciaGestionAdmin.Sql26Vigente(ahoraSql26.AddSeconds(30)));
+            var sinSql26 = Crear(Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", "1200"), false)));
+            Check("VQ3 sin sql/26: una volumetria escrita se RECHAZA (nunca se tira ni se cambia por la calculada)", "volumetria|True",
+                  Campos(sinSql26) + "|" + sinSql26.Errores[0].Mensaje.Contains("sql/26"));
+            Check("VQ4 sin sql/26: vacia (o solo espacios) sigue valida, como hoy", "True|True",
+                  Crear(Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", ""), false))).Valida + "|" +
+                  Crear(Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", "  "), false))).Valida);
+            PersistenciaGestionAdmin.AnotarSql26(true, ahoraSql26);
+            Check("VQ5 la base tiene sql/26: encendida y sin su bloqueo; pasada la vigencia se revisa otra vez", "True|False|False",
+                  PersistenciaGestionAdmin.GuardaVolumetriaActiva() + "|" +
+                  PersistenciaGestionAdmin.BloqueosVigentes().Contains(PersistenciaGestionAdmin.BloqueoVolumetria) + "|" +
+                  PersistenciaGestionAdmin.Sql26Vigente(ahoraSql26 + PersistenciaGestionAdmin.VigenciaRevisionSql24));
+            var vVol = new ValidadorGestionAdmin();
+            Func<string, string> formato = t =>
+                Campos(vVol.FormatoCrear(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", t), false)));
+            Check("VQ6 formato: negativa, decimal, texto, signo, mas de int: error en volumetria", "volumetria|volumetria|volumetria|volumetria|volumetria",
+                  formato("-5") + "|" + formato("1.5") + "|" + formato("mil") + "|" + formato("+3") + "|" + formato("2147483648"));
+            Check("VQ7 formato: 0, con espacios y el maximo de int son validos", "||", formato("0") + "|" + formato(" 42 ") + "|" + formato("2147483647"));
+            var hoyV = new DateTime(2026, 10, 21);
+            var conVol = Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", " 1200 ", "cat_ruta", "/A/Cat 1", "cat_pct", "12.5"), false));
+            var rVol = Crear(conVol);
+            var plVol = PlanificadorGestionAdmin.Crear(conVol, rVol, hoyV);
+            Check("VQ8 con sql/26: valida, entra al plan y al JSON del plan", "True|1200|1200",
+                  rVol.Valida + "|" + plVol.Volumetria + "|" + plVol.ComoJson()["volumetria"]);
+            var sinVol = Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "cat_ruta", "/A/Cat 1", "cat_pct", "12.5"), false));
+            var plSinVol = PlanificadorGestionAdmin.Crear(sinVol, Crear(sinVol), hoyV);
+            Check("VQ9 el % y la categoria no cambian por la volumetria; sin ella, NULL (no 0)", "0.1250|0.1250|/A/Cat 1|True",
+                  plVol.Categorias[0].Pct.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                  plSinVol.Categorias[0].Pct.Value.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" +
+                  plVol.Categorias[0].Ruta + "|" + (plSinVol.Volumetria == null));
+            var cero = Declarar(PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "volumetria", "0"), false));
+            Check("VQ10 volumetria 0: es 0 (un dato), no NULL", "0", PlanificadorGestionAdmin.Crear(cero, Crear(cero), hoyV).Volumetria);
+            var mod = ModC(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40", "volumetria", "999"));
+            Check("VQ11 Modificar no la lee: ni error ni cambio de volumetria", "False|False",
+                  Campos(mod).Contains("volumetria") + "|" + mod.Cambios.Any(c => (string)c["clave"] == "volumetria"));
+        }
+        finally
+        {
+            PersistenciaGestionAdmin.OlvidarSql26ParaPruebas();
+            PersistenciaGestionAdmin.GuardaVolumetriaForzadaParaPruebas = true;
+        }
+
+        // ---- SQ: Subestado inicial en Crear (sql/27) ----
+        try
+        {
+            Func<NameValueCollection, PeticionCrearAdmin> pet = f => Declarar(PeticionCrearAdmin.DesdeFormulario(f, false));
+            var hoyS = new DateTime(2026, 10, 21);
+            PersistenciaGestionAdmin.GuardaSubestadoForzadaParaPruebas = null;
+            PersistenciaGestionAdmin.OlvidarSql27ParaPruebas();
+            Check("SQ1 constante encendida, sin revisar la base: apagada (nunca se asume sql/27)", "True|False",
+                  PersistenciaGestionAdmin.GuardaSubestado + "|" + PersistenciaGestionAdmin.GuardaSubestadoActiva());
+            var ahoraSql27 = new DateTime(2026, 10, 21, 18, 0, 0, DateTimeKind.Utc);
+            PersistenciaGestionAdmin.AnotarSql27(false, ahoraSql27);
+            Check("SQ2 la base NO tiene sql/27: apagada, con su bloqueo; la revision sigue vigente", "False|True|True",
+                  PersistenciaGestionAdmin.GuardaSubestadoActiva() + "|" +
+                  PersistenciaGestionAdmin.BloqueosVigentes().Contains(PersistenciaGestionAdmin.BloqueoSubestado) + "|" +
+                  PersistenciaGestionAdmin.Sql27Vigente(ahoraSql27.AddSeconds(30)));
+            var sinSql27 = Crear(pet(F("tipo", "ADO", "subestado", "Solucionado")));
+            Check("SQ3 sin sql/27: un Subestado valido se RECHAZA (nunca se tira)", "subestado|True",
+                  Campos(sinSql27) + "|" + sinSql27.Errores[0].Mensaje.Contains("sql/27"));
+            Check("SQ4 sin sql/27: omitido, vacio o solo espacios sigue valido, como hoy", "True|True|True",
+                  Crear(pet(F("tipo", "ADO"))).Valida + "|" + Crear(pet(F("tipo", "ADO", "subestado", ""))).Valida + "|" +
+                  Crear(pet(F("tipo", "ADO", "subestado", "  "))).Valida);
+            PersistenciaGestionAdmin.AnotarSql27(true, ahoraSql27);
+            Check("SQ5 la base tiene sql/27: encendida y sin su bloqueo; pasada la vigencia se revisa otra vez", "True|False|False",
+                  PersistenciaGestionAdmin.GuardaSubestadoActiva() + "|" +
+                  PersistenciaGestionAdmin.BloqueosVigentes().Contains(PersistenciaGestionAdmin.BloqueoSubestado) + "|" +
+                  PersistenciaGestionAdmin.Sql27Vigente(ahoraSql27 + PersistenciaGestionAdmin.VigenciaRevisionSql24));
+            Check("SQ6 formato no lo revisa (lo decide la lista de valores)", "",
+                  Campos(new ValidadorGestionAdmin().FormatoCrear(pet(F("tipo", "ADO", "subestado", "Inventado")))));
+            var inv = Crear(pet(F("tipo", "ADO", "subestado", "Inventado")));
+            Check("SQ7 uno que no existe en los problemas: error en subestado, como Modificar", "subestado|El Subestado no es uno de los que ya existen en los problemas.",
+                  Campos(inv) + "|" + inv.Errores[0].Mensaje);
+            Check("SQ8 distingue mayusculas como Modificar (lista Ordinal)", "subestado",
+                  Campos(Crear(pet(F("tipo", "ADO", "subestado", "solucionado")))));
+            var sinLista = new ValidadorGestionAdmin().Crear(pet(F("tipo", "ADO", "subestado", "Solucionado")),
+                                                           Catalogo, new CapacidadCategoria(new CapacidadCategoria.Compromiso[0]), "PRB", null);
+            Check("SQ9 sin la lista de valores: el Subestado se rechaza (no se acepta cualquier texto)", "True",
+                  Campos(sinLista).Split(',').Contains("subestado"));
+            var ok = pet(F("tipo", "ADO", "subestado", " Solucionado ", "cat_ruta", "/A/Cat 1", "cat_pct", "10"));
+            var rOk = Crear(ok);
+            var plOk = PlanificadorGestionAdmin.Crear(ok, rOk, hoyS);
+            Check("SQ10 valido: entra al plan recortado y al JSON del plan", "True|Solucionado|Solucionado",
+                  rOk.Valida + "|" + plOk.Subestado + "|" + plOk.ComoJson()["subestado"]);
+            Check("SQ11 el Estado no cambia ni se cruza con el Subestado", "En An\u00e1lisis|En An\u00e1lisis",
+                  plOk.Estado + "|" + plOk.ComoJson()["estado"]);
+            var sinEstado = PeticionCrearAdmin.DesdeFormulario(F("tipo", "ADO", "subestado", "Cancelado"), false);
+            var plSinEstado = PlanificadorGestionAdmin.Crear(sinEstado, Crear(sinEstado), hoyS);
+            Check("SQ12 Subestado sin Estado: valido, Estado sigue vacio (no se deriva) e Incompleta pide el Estado", "True|True|Cancelado|True",
+                  Crear(sinEstado).Valida + "|" + (plSinEstado.Estado == null) + "|" + plSinEstado.Subestado + "|" +
+                  Faltan(Crear(sinEstado)).Split(',').Contains("estado"));
+            var omit = pet(F("tipo", "ADO"));
+            var vacioS = pet(F("tipo", "ADO", "subestado", "   "));
+            Check("SQ13 omitido o vacio: null en el plan (NULL en la base), sin faltante nuevo", "True|True|False",
+                  (PlanificadorGestionAdmin.Crear(omit, Crear(omit), hoyS).Subestado == null) + "|" +
+                  (PlanificadorGestionAdmin.Crear(vacioS, Crear(vacioS), hoyS).Subestado == null) + "|" +
+                  Faltan(Crear(omit)).Split(',').Contains("subestado"));
+            Check("SQ14 Modificar sigue con su propia regla (Subestado valido = cambio)", "True",
+                  ModC(F("folio", Fo, "subestado", "Cancelado")).Cambios.Any(c => (string)c["clave"] == "subestado"));
+            var errSql = new ErrorEscrituraGestionAdmin(51029, "x", null);
+            Check("SQ15 51029 del procedimiento = DatoInvalido", "True|DatoInvalido", errSql.EsDatoInvalido + "|" + errSql.Tipo);
+        }
+        finally
+        {
+            PersistenciaGestionAdmin.OlvidarSql27ParaPruebas();
+            PersistenciaGestionAdmin.GuardaSubestadoForzadaParaPruebas = true;
+        }
+
         // ---- EN: acentos en lo que responde el servidor ----
         // App_Code y los .ashx sin BOM: IIS los compila como Windows-1252 y
         // un literal UTF-8 crudo llega al navegador como "Descripci\u00c3\u00b3n".
@@ -815,6 +950,41 @@ public static class GestionIniciativaAdminSmoke
             Campos(new ValidadorGestionAdmin().Crear(conPoParcial, catAdm, sinCap, "PRB", Estados)));
         Check("CA8 Codigo inmutable sin distinguir mayusculas: 'Codigo' tambien se rechaza", "codigo",
             Campos(ModC(F("folio", Fo, "Codigo", "PRB 2026-999999", "titulo", "x"))));
+
+        // ---- AG) Agrupacion: una sola grafia por Clave ----------------------
+        var tilde = "Adopci" + (char)0xF3 + "n";
+        Check("AG1 'Adopcion' y la de tilde: queda solo la de tilde (la de la regla)", tilde + "|Problem",
+            string.Join("|", ExperienciaQueries.AgrupacionesUnicas(new[] { "Adopcion", tilde, "Problem" }).ToArray()));
+        Check("AG2 orden indistinto y mayusculas: igual una sola", tilde,
+            string.Join("|", ExperienciaQueries.AgrupacionesUnicas(new[] { tilde, "ADOPCION", "adopcion" }).ToArray()));
+        Check("AG3 solo la sin tilde en la base: se conserva (no se ofrece una que la base no tiene)", "Adopcion",
+            string.Join("|", ExperienciaQueries.AgrupacionesUnicas(new[] { "Adopcion" }).ToArray()));
+        Check("AG4 variantes sin grafia de la regla: todas tal cual; las demas agrupaciones intactas", "Foo|FOO|Mejora|ReqOpr|SorIA",
+            string.Join("|", ExperienciaQueries.AgrupacionesUnicas(new[] { "Foo", "FOO", "Mejora", "ReqOpr", "SorIA", "Mejora" }).ToArray()));
+        var conTilde = new EstadosProblem(new[] { "En An" + (char)0xE1 + "lisis" }, new string[0], new[] { "Problem" },
+            ExperienciaQueries.AgrupacionesUnicas(new[] { "Adopcion", tilde }));
+        Check("AG5 el validador acepta declarar la de tilde y ya no la sin tilde", "True|False",
+            conTilde.TiposAgrupado.Contains(tilde) + "|" + conTilde.TiposAgrupado.Contains("Adopcion"));
+
+        // ---- VT) Volumetria total por categoria (sin base) -----------------
+        Check("VT1 ruta como la guarda ProblemCategoria: NBSP -> espacio, sin espacios a los lados; vacia = null", "/A/B C|null",
+            VolumetriaTotalCategoria.Ruta("  /A/B" + (char)0xA0 + "C ") + "|" + (VolumetriaTotalCategoria.Ruta("  ") ?? "null"));
+        var sqlTotal = VolumetriaTotalCategoria.Consulta(2);
+        Check("VT2 consulta: COUNT de dbo.Tickets por Categoria exacta (VolumenCategoria) + ultimos 30 dias Mexico (VolumenUltimos30), parametrizada",
+            "True|True|True|True",
+            sqlTotal.Contains("COUNT_BIG(t.Categoria)") + "|" + sqlTotal.Contains("DATEADD(DAY, -30, DATEADD(HOUR, -6, SYSUTCDATETIME()))") + "|" +
+            sqlTotal.Contains("(0, @r0), (1, @r1)") + "|" + sqlTotal.Contains("LEFT JOIN dbo.Tickets AS t ON t.Categoria = LTRIM(RTRIM(REPLACE(r.Ruta, NCHAR(160), N' ')))"));
+        var filasVt = VolumetriaTotalCategoria.Armar(new[] { "/A", "", "/B" }, new[] { 0, -1, 1 }, new long[] { 1234, 0 }, new long[] { 56, 0 });
+        Func<int, string, string> vt = (i, k) => Convert.ToString(((Dictionary<string, object>)filasVt[i])[k] ?? "null");
+        Check("VT3 estados: ok con total y ultimos30; ruta vacia invalida (null); 0 real = cero",
+            "ok|1234|56|ruta_invalida|null|cero|0",
+            vt(0, "estado") + "|" + vt(0, "volumetria") + "|" + vt(0, "ultimos30") + "|" + vt(1, "estado") + "|" + vt(1, "volumetria") + "|" +
+            vt(2, "estado") + "|" + vt(2, "volumetria"));
+
+        // ---- QS) Quitar sin sql/24: el motivo dice lo que falta hoy --------
+        Check("QS1 PendienteQuitar: falta sql/24 (sql/23 ya aplicada) y como guardar lo demas", "True|True|False",
+            PlanificadorGestionAdmin.PendienteQuitar.Contains("falta aplicar sql/24") + "|" + PlanificadorGestionAdmin.PendienteQuitar.Contains("Restaurar") + "|" +
+            PlanificadorGestionAdmin.PendienteQuitar.Contains("sql/23 y sql/24"));
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO PASO" : fallos + " FALLO(S)");

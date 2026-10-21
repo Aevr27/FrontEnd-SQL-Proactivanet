@@ -19,6 +19,8 @@
 //      Codigo no se puede pedir ni cambiar.
 //   P  cuenta del sitio (EXECUTE AS PROACTIVANETAD): envia y aplica DATOS
 //      por encadenamiento de propietario; no escribe la tabla a mano.
+//   X  DeteccionSolicitudesCambio (sin forzar): sin sql/22, con 22 sola,
+//      con 25 y con 25 deshecha, como la cuenta del sitio.
 //   B  rollback: se niega con solicitudes DATOS; en una base sin ellas,
 //      Crear / Aplicar vuelven EXACTOS a sql/22, sin columnas; despues el
 //      rollback de 24 ya puede; volver a aplicar 25.
@@ -89,6 +91,32 @@ public static class SolicitudesDatosSqlLocalDbSmoke
     {
         return Uno(db, "SELECT CONVERT(varchar(70), HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(OBJECT_DEFINITION(OBJECT_ID('" + objeto +
                    "')), N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')), 1)");
+    }
+    // DeteccionSolicitudesCambio contra la base, como la cuenta del sitio
+    // (sitio = EXECUTE AS PROACTIVANETAD) y sin forzar los interruptores.
+    // -> "Activa|SolicitaDatosActiva".
+    static string Detectar(string db, bool sitio)
+    {
+        var f = PersistenciaSolicitudesCambio.ForzadaParaPruebas;
+        var fd = PersistenciaSolicitudesCambio.SolicitaDatosForzadaParaPruebas;
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+        PersistenciaSolicitudesCambio.SolicitaDatosForzadaParaPruebas = null;
+        PersistenciaSolicitudesCambio.OlvidarParaPruebas();
+        try
+        {
+            using (var cn = Abrir(db))
+            {
+                if (sitio) Exec(cn, "EXECUTE AS USER = N'PROACTIVANETAD';");
+                DeteccionSolicitudesCambio.Revisar(cn);
+            }
+            return PersistenciaSolicitudesCambio.Activa() + "|" + PersistenciaSolicitudesCambio.SolicitaDatosActiva();
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.OlvidarParaPruebas();
+            PersistenciaSolicitudesCambio.ForzadaParaPruebas = f;
+            PersistenciaSolicitudesCambio.SolicitaDatosForzadaParaPruebas = fd;
+        }
     }
     static string ParametrosCrear(string db) { return Uno(db, "SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID('adm.usp_SolicitudCambio_Crear')"); }
     static string Columnas25(string db)
@@ -213,8 +241,10 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
             {
                 Check("G1 otra base sin aprobar: migracion y rollback se niegan", "True|True",
                       LotesError(g, sql25).Contains("SIN APROBAR") + "|" + LotesError(g, rb25).Contains("SIN APROBAR"));
+                Check("X1 deteccion sin sql/22: Solicitar cambios y DATOS apagados", "False|False", Detectar(guarda, false));
             }
             Borrar(guarda);
+            Check("X2 deteccion con sql/22 sola (cuenta del sitio): Solicitar cambios si, DATOS no", "True|False", Detectar(Base, true));
             using (var cn = Abrir(Base))
             {
                 Check("G2 con sql/22 sola (sin 23 / 24): se niega pidiendo 23 y 24; Crear sigue siendo el de sql/22, sin columnas", "True|" + Crear22 + "|13|0",
@@ -232,6 +262,7 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                       "sin error|" + hCrear25 + "|" + hAplicar25 + "|19|9|" + Modificar24,
                       r25 + "|" + Hash(Base, "adm.usp_SolicitudCambio_Crear") + "|" + Hash(Base, "adm.usp_SolicitudCambio_Aplicar") + "|" +
                       ParametrosCrear(Base) + "|" + Columnas25(Base) + "|" + Hash(Base, "adm.usp_GestionAdmin_Modificar"));
+                Check("X3 deteccion con sql/25 (cuenta del sitio): Solicitar cambios y DATOS encendidos", "True|True", Detectar(Base, true));
                 Check("G6 aplicarla otra vez: 'ya aplicada', sin tocar nada", "True|" + hCrear25,
                       LotesError(cn, sql25).Contains("ya aplicada") + "|" + Hash(Base, "adm.usp_SolicitudCambio_Crear"));
                 Check("G7 con 25 aplicada, el rollback de 24 se niega (deshacer 25 primero)", "True|" + Modificar24,
@@ -359,6 +390,7 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                       "sin error|" + Crear22 + "|" + Aplicar22 + "|13|0|NULL",
                       rb + "|" + Hash(otra, "adm.usp_SolicitudCambio_Crear") + "|" + Hash(otra, "adm.usp_SolicitudCambio_Aplicar") + "|" +
                       ParametrosCrear(otra) + "|" + Columnas25(otra) + "|" + Uno(otra, "SELECT OBJECT_ID('adm.CK_SolicitudCambio_Datos', 'C')"));
+                Check("X4 deteccion con sql/25 deshecha: DATOS se apaga solo, Solicitar cambios sigue", "True|False", Detectar(otra, true));
                 Check("B3 el CHECK de Tipo vuelve a sus 4 valores (DATOS = 547)", "547",
                       Error(() => Exec(cn, "INSERT adm.SolicitudCambio (Codigo, Tipo, Motivo, SolicitadoPor, RolSolicitante, LlaveIdempotencia) " +
                                            "VALUES (N'PRB 2026-000002', 'DATOS', N'm', N'u', 'MOD', NEWID())")));

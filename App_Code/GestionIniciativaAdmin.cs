@@ -43,8 +43,16 @@
 //             (sql/20; NULL si no se eligen). Con GuardaDuenos = false (base
 //             sin sql/20) un PO o SO elegido se RECHAZA: nunca se tira. Lo que falte se informa como
 //             INCOMPLETA (marca derivada, sin columna), no bloquea.
-//             La Volumetria ya no se captura: es la del SLOT 0 de
-//             dbo.vw_TBSlotCAT, de solo lectura (ExperienciaVolumetria.cs).
+//             La Volumetria por categoria es la del SLOT 0 de
+//             dbo.vw_TBSlotCAT (ExperienciaVolumetria.cs). ADM puede fijar
+//             otra en la pantalla; la del problema (suma) viaja como
+//             volumetria y se guarda en dbo.Problem.VolumetriaOriginal
+//             (sql/26, GuardaVolumetriaActiva); sin sql/26 se rechaza.
+//             TicketsReduce no la usa (sigue en la base).
+//             Subestado inicial: opcional, uno que ya existe en dbo.Problem
+//             vigente (como Modificar); se guarda en dbo.Problem.Subestado
+//             en el mismo alta (sql/27, GuardaSubestadoActiva); sin sql/27
+//             se rechaza. No toca ni deriva el Estado.
 //   Modificar Titulo, Descripcion, Observaciones, Fechas compromiso
 //             (Analisis / Solucion / Cierre), Estado y Subestado del Problem;
 //             % de las categorias ligadas; agregar categorias (con su %) y
@@ -128,9 +136,85 @@ public static class PersistenciaGestionAdmin
         lock (candadoSql24) { sql24EnBase = null; sql24RevisadaUtc = DateTime.MinValue; }
     }
 
+    // Crear: la Volumetria que ADM fija (dbo.Problem.VolumetriaOriginal), por
+    // el parametro @VolumetriaOriginal que sql/26 agrega a
+    // adm.usp_GestionAdmin_Crear (sin aplicar; va despues de sql/23). Igual
+    // que ModificaDuenosYQuita: encendida, pero SOLO surte efecto cuando
+    // DeteccionSql26 (EscritorGestionAdmin.cs) ve el parametro en la base.
+    // Sin el, el escritor no lo manda y el validador rechaza (422) una
+    // volumetria escrita: nunca se tira. false = apagada aunque este sql/26.
+    public const bool GuardaVolumetria = true;
+    // Solo para las pruebas. null = lo de abajo.
+    public static bool? GuardaVolumetriaForzadaParaPruebas;
+    public static bool GuardaVolumetriaActiva()
+    {
+        return GuardaVolumetriaForzadaParaPruebas ?? (GuardaVolumetria && sql26EnBase == true);
+    }
+
+    private static readonly object candadoSql26 = new object();
+    private static bool? sql26EnBase;
+    private static DateTime sql26RevisadaUtc;
+
+    public static void AnotarSql26(bool tiene, DateTime ahoraUtc)
+    {
+        lock (candadoSql26) { sql26EnBase = tiene; sql26RevisadaUtc = ahoraUtc; }
+    }
+
+    public static bool Sql26Vigente(DateTime ahoraUtc)
+    {
+        lock (candadoSql26) { return sql26EnBase != null && ahoraUtc - sql26RevisadaUtc < VigenciaRevisionSql24; }
+    }
+
+    public static void OlvidarSql26ParaPruebas()
+    {
+        lock (candadoSql26) { sql26EnBase = null; sql26RevisadaUtc = DateTime.MinValue; }
+    }
+
+    // Crear: el Subestado inicial que ADM elige (dbo.Problem.Subestado), por
+    // el parametro @Subestado que sql/27 agrega a adm.usp_GestionAdmin_Crear
+    // (sin aplicar; va despues de sql/26). Igual que GuardaVolumetria:
+    // encendida, pero SOLO surte efecto cuando DeteccionSql27
+    // (EscritorGestionAdmin.cs) ve el parametro en la base. Sin el, el
+    // escritor no lo manda y el validador rechaza (422) un Subestado
+    // elegido: nunca se tira. false = apagada aunque este sql/27.
+    public const bool GuardaSubestado = true;
+    // Solo para las pruebas. null = lo de abajo.
+    public static bool? GuardaSubestadoForzadaParaPruebas;
+    public static bool GuardaSubestadoActiva()
+    {
+        return GuardaSubestadoForzadaParaPruebas ?? (GuardaSubestado && sql27EnBase == true);
+    }
+
+    private static readonly object candadoSql27 = new object();
+    private static bool? sql27EnBase;
+    private static DateTime sql27RevisadaUtc;
+
+    public static void AnotarSql27(bool tiene, DateTime ahoraUtc)
+    {
+        lock (candadoSql27) { sql27EnBase = tiene; sql27RevisadaUtc = ahoraUtc; }
+    }
+
+    public static bool Sql27Vigente(DateTime ahoraUtc)
+    {
+        lock (candadoSql27) { return sql27EnBase != null && ahoraUtc - sql27RevisadaUtc < VigenciaRevisionSql24; }
+    }
+
+    public static void OlvidarSql27ParaPruebas()
+    {
+        lock (candadoSql27) { sql27EnBase = null; sql27RevisadaUtc = DateTime.MinValue; }
+    }
+
+    public const string MotivoSubestado =
+        "todav\u00eda no se guarda: el alta en la base no recibe el Subestado (falta aplicar sql/27). " +
+        "D\u00e9jalo sin elegir para guardar lo dem\u00e1s.";
+
+    public const string MotivoVolumetria =
+        "todav\u00eda no se guarda: el alta en la base no recibe la Volumetr\u00eda (falta aplicar sql/26). " +
+        "D\u00e9jala vac\u00eda para guardar lo dem\u00e1s.";
+
     public const string MotivoModificaDuenos =
         "todav\u00eda no se guarda: la edici\u00f3n en la base no recibe Product Owner ni Service Owner " +
-        "(falta aplicar sql/23 y sql/24). D\u00e9jalo como estaba para guardar lo dem\u00e1s.";
+        "(falta aplicar sql/24 en la base, que requiere sql/23). D\u00e9jalo como estaba para guardar lo dem\u00e1s.";
 
     // Lo que consulta el handler (un metodo, para no dejar codigo
     // "inalcanzable" con la constante fija).
@@ -160,12 +244,22 @@ public static class PersistenciaGestionAdmin
     public const string BloqueoDuenosModificar =
         "Product Owner / Service Owner en Modificar: adm.usp_GestionAdmin_Modificar no los recibe sin sql/24; se rechazan (422)";
 
+    // Con GuardaVolumetriaActiva() = false (sin sql/26) se suma este.
+    public const string BloqueoVolumetria =
+        "Volumetr\u00eda en Crear: adm.usp_GestionAdmin_Crear no la recibe sin sql/26; se rechaza (422) y no se guarda nada";
+
+    // Con GuardaSubestadoActiva() = false (sin sql/27) se suma este.
+    public const string BloqueoSubestado =
+        "Subestado en Crear: adm.usp_GestionAdmin_Crear no lo recibe sin sql/27; se rechaza (422) y no se guarda nada";
+
     public static List<string> BloqueosVigentes()
     {
         var l = new List<string>();
         if (!ModificaDuenosYQuitaActiva()) { l.Add(BloqueoQuitar); l.Add(BloqueoDuenosModificar); }
         l.AddRange(Bloqueos);
         if (!GuardaDuenosActiva()) l.Add(BloqueoDuenos);
+        if (!GuardaVolumetriaActiva()) l.Add(BloqueoVolumetria);
+        if (!GuardaSubestadoActiva()) l.Add(BloqueoSubestado);
         return l;
     }
 }
@@ -343,6 +437,15 @@ public static class TiposPorPrefijo
         string v;
         return clasificacion != null && Agrupaciones.TryGetValue(clasificacion, out v) ? v : null;
     }
+
+    // Si el texto es una de las Agrupaciones de la regla, con su grafia
+    // exacta ("Adopci\u00f3n" con tilde; "Adopcion" sin ella no lo es).
+    public static bool EsAgrupacionCanonica(string agrupacion)
+    {
+        if (agrupacion == null) return false;
+        foreach (var v in Agrupaciones.Values) if (string.Equals(v, agrupacion, StringComparison.Ordinal)) return true;
+        return false;
+    }
 }
 
 public sealed class PeticionCrearAdmin
@@ -353,12 +456,19 @@ public sealed class PeticionCrearAdmin
     public const string CTipoIniciativa = "tipo_iniciativa";
     public const string CTipoAgrupado = "tipo_agrupado";
     public const string CEstado = "estado";
+    // Opcional; sql/27 (dbo.Problem.Subestado). La misma clave que Modificar.
+    public const string CSubestado = "subestado";
     public const string CFEntregaAnalisis = "f_entrega_analisis";
 
     public string Tipo, Po, So, Titulo, Descripcion, Observaciones;
     public string TipoIniciativa, TipoAgrupado, Estado;
+    // null o vacio = sin elegir (NULL). Nunca cambia el Estado.
+    public string Subestado;
     // aaaa-mm-dd; vacio = hoy (dbo.Problem.FechaEntregaAnalisis).
     public string FEntregaAnalisis;
+    // La Volumetria que ADM fija (clave volumetria, entero >= 0; sql/26,
+    // dbo.Problem.VolumetriaOriginal). null o vacio = no la fijo (NULL).
+    public string Volumetria;
     // Una entrada por categoria elegida, con su % (texto en %; "" = sin %).
     public List<PctCategoria> Categorias = new List<PctCategoria>();
     public bool CategoriasDesparejas;
@@ -375,7 +485,9 @@ public sealed class PeticionCrearAdmin
             Descripcion = f[SolicitudIniciativa.CDescripcion],
             Observaciones = f[SolicitudIniciativa.CObservaciones],
             Estado = f[CEstado],
+            Subestado = f[CSubestado],
             FEntregaAnalisis = f[CFEntregaAnalisis],
+            Volumetria = f[SolicitudIniciativa.CVolumetria],
             TieneRca = tieneRca,
         };
         p.TipoIniciativa = TiposPorPrefijo.Clasificacion(p.Tipo);
@@ -572,7 +684,7 @@ public sealed class ValidadorGestionAdmin
     public const string CFechasCategoria = "fechas_categoria";
 
     // Los de CAMPOS_INCOMPLETA de admin/iniciativa-admin.js, mismo orden.
-    // Sin Volumetria: ya no se captura (es calculada, de solo lectura).
+    // Sin Volumetria: es calculada; la que ADM fija en Crear (sql/26) es opcional.
     private static readonly string[][] CamposIncompleta =
     {
         new[] { "categoria", "Categor\u00eda" },
@@ -629,6 +741,19 @@ public sealed class ValidadorGestionAdmin
         return f == null ? "" : (f.Value * 100m).ToString("0.##", CultureInfo.InvariantCulture);
     }
 
+    private static readonly Regex EnteroSinSigno = new Regex(@"^\d+$");
+
+    // La Volumetria de Crear: entero de 0 en adelante que cabe en int (la
+    // columna dbo.Problem.VolumetriaOriginal), la misma regla que Nueva
+    // solicitud. null = no lo es (o vino vacia).
+    public static int? Volumetria(string s)
+    {
+        int v;
+        s = Limpio(s);
+        return s != null && EnteroSinSigno.IsMatch(s)
+            && int.TryParse(s, NumberStyles.None, CultureInfo.InvariantCulture, out v) ? v : (int?)null;
+    }
+
     public static bool EsFecha(string s)
     {
         DateTime d;
@@ -665,6 +790,8 @@ public sealed class ValidadorGestionAdmin
         var entrega = Limpio(p.FEntregaAnalisis);
         if (entrega != null && !EsFecha(entrega))
             r.Agregar(PeticionCrearAdmin.CFEntregaAnalisis, "Fecha de entrega del an\u00e1lisis: escribe una fecha v\u00e1lida (aaaa-mm-dd).");
+        if (Limpio(p.Volumetria) != null && Volumetria(p.Volumetria) == null)
+            r.Agregar(SolicitudIniciativa.CVolumetria, "La Volumetr\u00eda debe ser un n\u00famero entero, de 0 en adelante.");
         if (p.CategoriasDesparejas)
             r.Agregar(CCategorias, "Las categor\u00edas y sus % llegaron incompletos (categor\u00eda sin % o al rev\u00e9s).");
         var vistas = new HashSet<string>(StringComparer.Ordinal);
@@ -725,6 +852,19 @@ public sealed class ValidadorGestionAdmin
             if (estado != null && !existentes.Estados.Contains(estado))
                 r.Agregar(PeticionCrearAdmin.CEstado, "El Estado no es uno de los que ya existen en los problemas.");
         }
+        // Subestado inicial: la regla de Modificar (uno que ya existe en
+        // dbo.Problem vigente). Sin lista, se rechaza. Sin sql/27 no hay
+        // donde guardarlo: se rechaza, nunca se tira. No toca el Estado.
+        var subestado = Limpio(p.Subestado);
+        if (subestado != null)
+        {
+            if (existentes == null)
+                r.Agregar(PeticionCrearAdmin.CSubestado, "No se pudo leer la lista de subestados: no se puede elegir el Subestado.");
+            else if (!existentes.Subestados.Contains(subestado))
+                r.Agregar(PeticionCrearAdmin.CSubestado, "El Subestado no es uno de los que ya existen en los problemas.");
+            else if (!PersistenciaGestionAdmin.GuardaSubestadoActiva())
+                r.Agregar(PeticionCrearAdmin.CSubestado, "Subestado: " + PersistenciaGestionAdmin.MotivoSubestado);
+        }
         // El tope solo aplica si las filas van a consumir (estado vivo y
         // agrupacion de AGRUPADORES, o sin agrupacion), igual que
         // adm.usp_GestionAdmin_Crear.
@@ -743,6 +883,10 @@ public sealed class ValidadorGestionAdmin
             r.Agregar(SolicitudIniciativa.CPo, "Product Owner: " + PersistenciaGestionAdmin.MotivoDuenos);
         if (so != null && !r.TieneError(SolicitudIniciativa.CSo) && !PersistenciaGestionAdmin.GuardaDuenosActiva())
             r.Agregar(SolicitudIniciativa.CSo, "Service Owner: " + PersistenciaGestionAdmin.MotivoDuenos);
+        // Volumetria fijada por ADM: sin sql/26 no hay donde guardarla; se
+        // rechaza, nunca se cambia en silencio por la calculada.
+        if (Volumetria(p.Volumetria) != null && !PersistenciaGestionAdmin.GuardaVolumetriaActiva())
+            r.Agregar(SolicitudIniciativa.CVolumetria, "Volumetr\u00eda: " + PersistenciaGestionAdmin.MotivoVolumetria);
 
         var directores = new HashSet<string>(StringComparer.Ordinal);
         var rutas = 0;

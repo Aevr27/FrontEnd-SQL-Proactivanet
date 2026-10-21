@@ -281,8 +281,25 @@ public static class SolicitudesCambioHttpSmoke
               fm["pct_categoria"] + "|" + fm["pct_valor"] + "|" + fm["agregar_categoria"] + "|" + fm["agregar_pct"] + "|" + fm["agregar_tipo_iniciativa"]);
 
         // ---- G) DATOS: Titulo / PO / SO capturados (sql/25) ---------------------
-        Check("G1 interruptor sql/25 apagado (constante false; sql/23, 24 y 25 sin aplicar)", "False|False",
-              PersistenciaSolicitudesCambio.SolicitaDatos + "|" + PersistenciaSolicitudesCambio.SolicitaDatosActiva());
+        // Constantes encendidas (2026-10-21), pero sin DeteccionSolicitudesCambio
+        // que haya visto sql/22 / sql/25 en la base (aqui no hay base) siguen
+        // apagadas: lo prueba con LocalDB SolicitudesDatosSqlLocalDbSmoke (X).
+        PersistenciaSolicitudesCambio.OlvidarParaPruebas();
+        Check("G1 constantes encendidas; sin sql/22 / sql/25 vistos en la base, apagadas", "True|True|False|False",
+              PersistenciaSolicitudesCambio.Habilitada + "|" + PersistenciaSolicitudesCambio.SolicitaDatos + "|" +
+              PersistenciaSolicitudesCambio.SolicitaDatosActiva() + "|" + PersistenciaSolicitudesCambio.Vigente(DateTime.UtcNow));
+        var forzadaG = PersistenciaSolicitudesCambio.ForzadaParaPruebas;
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+        PersistenciaSolicitudesCambio.Anotar(true, false, DateTime.UtcNow);
+        var solo22 = PersistenciaSolicitudesCambio.Activa() + "|" + PersistenciaSolicitudesCambio.SolicitaDatosActiva();
+        PersistenciaSolicitudesCambio.Anotar(true, true, DateTime.UtcNow);
+        var con25 = PersistenciaSolicitudesCambio.Activa() + "|" + PersistenciaSolicitudesCambio.SolicitaDatosActiva();
+        PersistenciaSolicitudesCambio.Anotar(true, true, DateTime.UtcNow - PersistenciaGestionAdmin.VigenciaRevisionSql24);
+        var vencida = PersistenciaSolicitudesCambio.Vigente(DateTime.UtcNow);
+        PersistenciaSolicitudesCambio.OlvidarParaPruebas();
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = forzadaG;
+        Check("G1b deteccion: sql/22 sola enciende Solicitar cambios, no DATOS; con sql/25 las dos; la revision vence", "True|False|True|True|False",
+              solo22 + "|" + con25 + "|" + vencida);
         var envioDatos = F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "datos", "titulo_nuevo", "  Nuevo titulo ",
                            "po_nuevo", "PO 2", "motivo", "Cambio de responsable",
                            // falsificados: no hay clave para el Codigo ni para el PO de la categoria

@@ -118,8 +118,12 @@ public sealed class PlanCrearAdmin
 {
     public string Prefijo;
     public string TipoIniciativa, TipoAgrupado, Estado;
+    // Subestado elegido (dbo.Problem.Subestado, sql/27); null = sin elegir.
+    public string Subestado;
     // PO / SO elegidos (dbo.Problem.OwnerProblem / OwnerServicio); null = sin elegir.
     public string Po, So;
+    // Volumetria fijada por ADM (dbo.Problem.VolumetriaOriginal, sql/26); null = no la fijo.
+    public int? Volumetria;
     public string Titulo, Descripcion, Observaciones;
     public DateTime FechaCreacion;
     public DateTime FechaAnalisis;
@@ -141,8 +145,10 @@ public sealed class PlanCrearAdmin
             { "tipo_iniciativa", TipoIniciativa },
             { "tipo_agrupado", TipoAgrupado },
             { "estado", Estado },
+            { "subestado", Subestado },
             { "po", Po },
             { "so", So },
+            { "volumetria", Volumetria },
             { "f_creacion", FechasGestionAdmin.Iso(FechaCreacion) },
             { "f_analisis", FechasGestionAdmin.Iso(FechaAnalisis) },
             { "f_entrega_analisis", FechasGestionAdmin.Iso(FechaEntregaAnalisis) },
@@ -205,7 +211,7 @@ public static class PlanificadorGestionAdmin
     };
 
     public const string PendienteQuitar =
-        "Quitar categor\u00edas: la base todav\u00eda no las recibe (falta aplicar sql/23 y sql/24).";
+        "Quitar categor\u00edas: la base todav\u00eda no las recibe (falta aplicar sql/24, que requiere sql/23). Usa Restaurar para guardar lo dem\u00e1s.";
 
     private static string Limpio(string s)
     {
@@ -269,7 +275,9 @@ public static class PlanificadorGestionAdmin
             TipoIniciativa = Limpio(p.TipoIniciativa),
             TipoAgrupado = Limpio(p.TipoAgrupado),
             Estado = Limpio(p.Estado),
+            Subestado = Limpio(p.Subestado),
             Po = Limpio(p.Po), So = Limpio(p.So),
+            Volumetria = ValidadorGestionAdmin.Volumetria(p.Volumetria),
             // Solo espacios = NULL; con texto, tal cual (no se recorta).
             Titulo = Texto(p.Titulo), Descripcion = Texto(p.Descripcion), Observaciones = Texto(p.Observaciones),
             FechaCreacion = hoy.Date,

@@ -17,7 +17,8 @@
 //     transaccion, solo si lo "anterior" guardado sigue siendo lo que hay.
 //   - La clasificacion de una categoria por agregar se deriva del prefijo
 //     (TiposPorPrefijo); sin regla queda vacia y ADM la elige al aplicar.
-//   - Interruptor propio (PersistenciaSolicitudesCambio), aparte del de la
+//   - Interruptor propio (PersistenciaSolicitudesCambio, encendido solo si
+//     DeteccionSolicitudesCambio ve sql/22 en la base), aparte del de la
 //     edicion directa (PersistenciaGestionAdmin). Aplicar necesita los dos:
 //     escribe la iniciativa.
 //   - Tipo DATOS (sql/25, interruptor SolicitaDatos): Titulo / PO / SO
@@ -41,14 +42,17 @@ using System.Text.RegularExpressions;
 
 public static class PersistenciaSolicitudesCambio
 {
-    // false hasta que sql/22 y sus permisos esten aplicados en la VM (cada
-    // paso con su OK). Mientras, enviar valida y responde 501; nada se guarda.
-    public const bool Habilitada = false;
+    // Encendida (2026-10-21: sql/22 y sus permisos 22P aplicados en la VM),
+    // pero SOLO surte efecto cuando DeteccionSolicitudesCambio (abajo) ve los
+    // cuatro procedimientos de sql/22 en la base. Sin ellos, o sin haberlo
+    // podido revisar, sigue apagada: enviar valida y responde 501; nada se
+    // guarda. false = apagada aunque la base tenga sql/22.
+    public const bool Habilitada = true;
 
-    // Solo para las pruebas (sin tocar la constante). null = la constante.
+    // Solo para las pruebas (sin tocar la constante). null = lo de abajo.
     public static bool? ForzadaParaPruebas;
 
-    public static bool Activa() { return ForzadaParaPruebas ?? Habilitada; }
+    public static bool Activa() { return ForzadaParaPruebas ?? (Habilitada && sql22EnBase == true); }
 
     public const string MotivoCola =
         "El registro de solicitudes todav\u00eda no est\u00e1 habilitado (falta aplicar sql/22 en la base, con su aprobaci\u00f3n): no hay solicitudes que revisar.";
@@ -58,17 +62,91 @@ public static class PersistenciaSolicitudesCambio
         "La solicitud se revis\u00f3, pero no se guard\u00f3 ni se envi\u00f3.";
 
     // Tipo DATOS (Titulo / PO / SO capturados): columnas y parametros de
-    // sql/25, que depende de sql/24 (y esta de sql/23). true SOLO con las
-    // tres aplicadas en la base: con false el formulario no lo ofrece, el
-    // servidor lo rechaza (422), el almacen no manda los parametros nuevos y
-    // la cola lee esas columnas como vacias (sin sql/25 no existen).
-    public const bool SolicitaDatos = false;
+    // sql/25, que depende de sql/24 (y esta de sql/23). Encendida
+    // (2026-10-21), pero SOLO surte efecto cuando DeteccionSolicitudesCambio
+    // ve los parametros de sql/25 en adm.usp_SolicitudCambio_Crear (sql/25
+    // agrega columnas y parametros en la misma transaccion). Apagada: el
+    // formulario no lo ofrece, el servidor lo rechaza (422), el almacen no
+    // manda los parametros nuevos y la cola lee esas columnas como vacias.
+    // false = apagada aunque la base tenga sql/25.
+    public const bool SolicitaDatos = true;
     public static bool? SolicitaDatosForzadaParaPruebas;
-    public static bool SolicitaDatosActiva() { return SolicitaDatosForzadaParaPruebas ?? SolicitaDatos; }
+    public static bool SolicitaDatosActiva() { return SolicitaDatosForzadaParaPruebas ?? (SolicitaDatos && sql25EnBase == true); }
+
+    // Lo que DeteccionSolicitudesCambio vio en la base (null = todavia no se
+    // reviso) y cuando. Misma vigencia que sql/24: aplicar o revertir los
+    // scripts la enciende o la apaga sin reciclar el sitio.
+    private static readonly object candado = new object();
+    private static bool? sql22EnBase;
+    private static bool? sql25EnBase;
+    private static DateTime revisadaUtc;
+
+    public static void Anotar(bool sql22, bool sql25, DateTime ahoraUtc)
+    {
+        lock (candado) { sql22EnBase = sql22; sql25EnBase = sql25; revisadaUtc = ahoraUtc; }
+    }
+
+    public static bool Vigente(DateTime ahoraUtc)
+    {
+        lock (candado) { return sql22EnBase != null && ahoraUtc - revisadaUtc < PersistenciaGestionAdmin.VigenciaRevisionSql24; }
+    }
+
+    // Solo para las pruebas: como recien arrancado (sin revisar).
+    public static void OlvidarParaPruebas()
+    {
+        lock (candado) { sql22EnBase = null; sql25EnBase = null; revisadaUtc = DateTime.MinValue; }
+    }
 
     public const string MotivoDatos =
         "Pedir cambio de T\u00edtulo, Product Owner o Service Owner todav\u00eda no est\u00e1 habilitado " +
         "(falta aplicar sql/23, sql/24 y sql/25 en la base). Expl\u00edcalo con \u00abOtros\u00bb.";
+}
+
+// Si la base ya tiene sql/22 (los cuatro adm.usp_SolicitudCambio_*) y
+// sql/25 (sus tres @Cambia* en _Crear). Igual que DeteccionSql24: solo
+// metadatos (visibles con el EXECUTE sobre adm del sitio), vigencia, y un
+// error al revisar cuenta como "sin sql/22 ni sql/25" (apagada).
+public static class DeteccionSolicitudesCambio
+{
+    public const string Consulta =
+        "SELECT Sql22 = (SELECT COUNT(*) FROM sys.procedures WHERE object_id IN (" +
+        "OBJECT_ID(N'adm.usp_SolicitudCambio_Crear', N'P'), OBJECT_ID(N'adm.usp_SolicitudCambio_Aplicar', N'P'), " +
+        "OBJECT_ID(N'adm.usp_SolicitudCambio_Rechazar', N'P'), OBJECT_ID(N'adm.usp_SolicitudCambio_RegistrarFallo', N'P'))), " +
+        "Sql25 = (SELECT COUNT(*) FROM sys.parameters " +
+        "WHERE object_id = OBJECT_ID(N'adm.usp_SolicitudCambio_Crear', N'P') " +
+        "AND name IN (N'@CambiaTitulo', N'@CambiaOwnerProblem', N'@CambiaOwnerServicio'))";
+
+    // Con la conexion (abierta) del que llama.
+    public static void Revisar(SqlConnection cn)
+    {
+        if (cn == null) throw new ArgumentNullException("cn");
+        var ahora = DateTime.UtcNow;
+        if (PersistenciaSolicitudesCambio.Vigente(ahora)) return;
+        bool sql22 = false, sql25 = false;
+        try
+        {
+            using (var cmd = new SqlCommand(Consulta, cn) { CommandTimeout = 15 })
+            using (var rd = cmd.ExecuteReader())
+                if (rd.Read())
+                {
+                    sql22 = Convert.ToInt32(rd.GetValue(0)) == 4;
+                    sql25 = sql22 && Convert.ToInt32(rd.GetValue(1)) == 3;
+                }
+        }
+        catch (SqlException) { sql22 = false; sql25 = false; }
+        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, ahora);
+    }
+
+    // Abre su propia conexion solo si hace falta revisar.
+    public static void Revisar()
+    {
+        if (PersistenciaSolicitudesCambio.Vigente(DateTime.UtcNow)) return;
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            Revisar(cn);
+        }
+    }
 }
 
 // Una categoria de la solicitud. Pct = fraccion 0-1 (como

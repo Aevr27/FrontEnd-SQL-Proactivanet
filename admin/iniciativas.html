@@ -678,6 +678,12 @@
           <label for="admEstado">Estado inicial</label>
           <select id="admEstado" disabled></select>
         </div>
+        <!-- Subestado inicial: opcional, opciones = subestados_problem. Solo
+             se muestra si la base lo guarda (sql/27, subestado_alta). -->
+        <div class="ini-campo" id="admSubestadoCampo" hidden>
+          <label for="admSubestado">Subestado inicial</label>
+          <select id="admSubestado" disabled></select>
+        </div>
         <div class="ini-campo">
           <label for="admFEntrega">Entrega del análisis</label>
           <input type="date" id="admFEntrega" aria-describedby="admFEntregaNota" disabled>
@@ -723,13 +729,22 @@
              El selector es el desplegable del filtro Grupos de SLA (con
              buscador) sobre TODAS las rutas activas, aunque les falten
              dueños; solo cuenta una categoria real del catalogo. La volumetria es
-             calculada (SLOT 0 de vw_TBSlotCAT) y de solo lectura. -->
+             la calculada: TODOS los tickets de la categoria (VolumenCategoria de
+             vw_ProblemCategoria, alcance=total, solo ADM); con sql/26 en la base ADM
+             puede fijar otra. La meta se escribe en % o en tickets. -->
         <div class="ini-campo">
           <label for="admCatBuscar">Agregar categoría</label>
           <div class="ini-cat-agregar"><span id="admCatSelector"></span>
             <button type="button" class="btn linea chico" id="admCatAgregar" disabled>Agregar</button></div>
           <small class="ini-motivo" id="admCatMsg" role="status" aria-live="polite"></small>
         </div>
+        <fieldset class="ini-campo ini-modo-meta">
+          <legend>Planear la meta por</legend>
+          <label><input type="radio" name="admModo" id="admModoPct" value="pct" checked disabled> % de disminución</label>
+          <label><input type="radio" name="admModo" id="admModoTickets" value="tickets" disabled> Tickets a resolver</label>
+          <small class="ini-motivo">Lo que escribes no cambia; el otro valor se calcula con la volumetría total de cada categoría. Se guarda el % (dos decimales).
+            Tickets a reducir lo calcula la base con los tickets de los últimos 30 días: si no coincide con tu meta, se avisa en cada categoría.</small>
+        </fieldset>
         <div id="admCats" aria-live="polite"></div>
         <small class="ini-motivo">Tope de 100% por categoría, contando las demás iniciativas activas: el servidor rechaza un % que lo exceda.</small>
       </section>

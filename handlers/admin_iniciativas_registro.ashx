@@ -67,6 +67,10 @@ public class AdminIniciativasRegistro : IHttpHandler
             registro["persistencia_admin"] = PersistenciaGestionAdmin.Activa();
             // Lo mismo para "Solicitar cambios" (sql/22): con false la
             // solicitud se prepara pero no se envia, y la pagina lo dice.
+            // Se revisa en la base (DeteccionSolicitudesCambio, tambien
+            // sql/25); si no se puede, apagado.
+            try { DeteccionSolicitudesCambio.Revisar(); }
+            catch (Exception ex) { DashboardHandler.Registrar("admin_iniciativas_registro.ashx", ex); }
             registro["persistencia_solicitudes"] = PersistenciaSolicitudesCambio.Activa();
             // Solicitar cambios de Titulo / PO / SO (tipo datos, sql/25).
             registro["solicitudes_datos"] = PersistenciaSolicitudesCambio.SolicitaDatosActiva();
@@ -81,6 +85,25 @@ public class AdminIniciativasRegistro : IHttpHandler
                 duenosYQuitar = false;
             }
             registro["edicion_duenos_quitar"] = duenosYQuitar;
+            // Crear con Volumetria fijada por ADM (sql/26, DeteccionSql26):
+            // sin esto la pagina no ofrece el campo (el servidor lo rechazaria).
+            bool volumetriaManual;
+            try { volumetriaManual = DeteccionSql26.Revisar(); }
+            catch (Exception ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_registro.ashx", ex);
+                volumetriaManual = false;
+            }
+            registro["volumetria_manual"] = volumetriaManual;
+            // Crear con Subestado inicial (sql/27, DeteccionSql27): igual.
+            bool subestadoAlta;
+            try { subestadoAlta = DeteccionSql27.Revisar(); }
+            catch (Exception ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_registro.ashx", ex);
+                subestadoAlta = false;
+            }
+            registro["subestado_alta"] = subestadoAlta;
             context.Response.Write(serializador.Serialize(registro));
         }
         catch (Exception ex)

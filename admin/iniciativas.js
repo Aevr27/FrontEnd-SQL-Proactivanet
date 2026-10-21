@@ -780,8 +780,10 @@ window.Iniciativas = (function () {
         // existen, del mismo registro.
         this.crearAdmin.fijarValores(function () {
           var r = reg && reg.registro;
-          return r ? { estados: r.estadosProblem, tiposIniciativa: r.valoresTipoIniciativa, tiposAgrupado: r.valoresTipoAgrupado,
-                       persiste: r.persistenciaAdmin === true } : null;
+          return r ? { estados: r.estadosProblem, subestados: r.subestadosProblem,
+                       tiposIniciativa: r.valoresTipoIniciativa, tiposAgrupado: r.valoresTipoAgrupado,
+                       persiste: r.persistenciaAdmin === true, volumetriaManual: r.volumetriaManual === true,
+                       subestadoAlta: r.subestadoAlta === true } : null;
         });
         // Un alta GUARDADA relee el registro (la lista, la busqueda de
         // "existente" y sus valores) sin recargar la pagina y sin tocar la
