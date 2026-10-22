@@ -240,6 +240,14 @@
          datos de handlers/admin_iniciativas_registro.ashx = los de
          Experiencia). Cuatro estados excluyentes: cargando, error, sin
          datos y listo; cargando y error nunca se ven como lista vacia. -->
+    <!-- Las tarjetas (y el semaforo del Registro) filtran la lista con un
+         clic; otro clic las quita. Las cifras no cambian
+         (registro-iniciativas.js, FiltroRegistro.indicador). Visible solo
+         con el registro cargado. -->
+    <p class="ini-kpis-guia" id="regKpisGuia" hidden>
+      <strong>Haz clic en un indicador para filtrar las iniciativas por esa condición.</strong>
+      <span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro.</span>
+    </p>
     <div class="kpis ini-kpis" id="regKpis" aria-live="polite" aria-busy="true"></div>
 
     <p class="ini-estado" id="regCargando" role="status">Cargando iniciativas…</p>
@@ -300,7 +308,8 @@
         <h3 class="ini-lista-titulo">Registro</h3>
         <span class="ini-lista-cuenta" id="regCuenta" aria-live="polite"></span>
         <!-- Semaforo de la fecha compromiso sobre el registro COMPLETO
-             (registro-iniciativas.js, pintarSemaforo): no sigue los filtros. -->
+             (registro-iniciativas.js, pintarSemaforo): no sigue los filtros.
+             Cada categoria filtra la lista como un indicador. -->
         <div class="ini-lista-lado">
           <div class="ini-semaforo" id="regSemaforo" role="group" aria-label="Semáforo de fecha compromiso de las activas"></div>
           <span class="ini-lista-ayuda">Elige una iniciativa para ver su detalle.</span>
@@ -425,6 +434,26 @@
         </button>
       </section>
     </div>
+
+    <!-- Avisos de los dueños (admin/acuse-iniciativa.js, solo ADM): los
+         acuses "Estoy trabajando en ello" de PO / SO en iniciativas
+         Atrasadas (handlers/admin_iniciativas_acuse.ashx, sql/28). Quedan
+         guardados; listar no los marca: "Marcar como leído" es por ADM. -->
+    <section class="ini-adm-bloque ini-av" id="avSeccion" aria-labelledby="avTitulo" data-solo-adm hidden>
+      <div class="ini-lista-cab">
+        <h3 class="ini-lista-titulo" id="avTitulo">Avisos de los dueños</h3>
+        <span class="ini-lista-cuenta" id="avNoLeidas" aria-live="polite"></span>
+        <button type="button" class="btn linea chico" id="avActualizar">Actualizar</button>
+      </div>
+      <p class="ini-nota">El PO o el SO de una iniciativa atrasada avisa que está trabajando en ella. No cambia la iniciativa.</p>
+      <p class="ini-estado" id="avCargando" role="status" hidden>Cargando avisos…</p>
+      <div class="ini-error" id="avError" role="alert" hidden>
+        <span><strong>No se pudieron cargar los avisos.</strong> <span id="avErrorTexto"></span></span>
+        <button type="button" class="btn" id="avReintentar">Reintentar</button>
+      </div>
+      <div class="ini-vacio" id="avVacio" hidden><strong id="avVacioTexto"></strong></div>
+      <div id="avLista" aria-live="polite" hidden></div>
+    </section>
 
     <!-- Cambios recientes (admin/cambios-recientes.js, solo ADM): las
          ultimas iniciativas guardadas DESDE EL DASHBOARD, mas reciente
@@ -801,6 +830,7 @@
 <script src="registro-iniciativas.js"></script>
 <script src="solicitudes-cambio.js"></script>
 <script src="cambios-recientes.js"></script>
+<script src="acuse-iniciativa.js"></script>
 <script src="iniciativas.js"></script>
 <script>
 // El rol tambien decide los botones de ADM que se pintan dentro del detalle,

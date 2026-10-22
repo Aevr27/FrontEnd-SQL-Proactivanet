@@ -678,6 +678,7 @@ window.Iniciativas = (function () {
       this.duenos = null;     // VistaDuenos (admin/categorias-duenos.js), perezosa; null si DUENOS_VISIBLES = false
       this.cola = null;       // ColaSolicitudes (admin/solicitudes-cambio.js): cola de ADM
       this.recientes = null;  // VistaCambiosRecientes (admin/cambios-recientes.js): solo ADM
+      this.avisos = null;     // VistaAvisosAcuse (admin/acuse-iniciativa.js): avisos de PO/SO, solo ADM
       this.volumetria = null; // VolumetriaCliente de Nueva solicitud (perezoso; usa this.pedir)
       // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
       // sin rol no se abre nada de ADM.
@@ -740,6 +741,19 @@ window.Iniciativas = (function () {
       // El registro carga por su cuenta, en paralelo con el catalogo de
       // Nueva solicitud: un fallo de uno no bloquea al otro.
       this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
+      // Acuse del PO / SO en el detalle y avisos de ADM: un solo cliente
+      // (quien soy se pide una vez). Sin sql/28 no pintan nada.
+      if (window.AcuseIniciativa) {
+        var clienteAcuse = new window.AcuseIniciativa.ClienteAcuse(null);
+        var regAcuse = this.registro;
+        this.registro.acuse = new window.AcuseIniciativa.AcuseDetalle(this.doc, null, clienteAcuse);
+        this.avisos = new window.AcuseIniciativa.VistaAvisosAcuse(this.doc, null,
+          function () { return regAcuse ? regAcuse.registro : null; },
+          function (folio) {
+            self.mostrarVista('iniciativas');
+            if (self.vista === 'iniciativas') regAcuse.abrirDesdeLista(folio);
+          }, clienteAcuse);
+      }
       // Cola de ADM de "Solicitar cambios" (pestaña Solicitudes). Clasificar
       // usa los valores que ya existen (del registro); aplicar relee el
       // registro sin recargar la pagina.
@@ -842,6 +856,7 @@ window.Iniciativas = (function () {
       if (nombre === 'administracion' && this.duenos) this.duenos.abrir();
       // Cada vez que se abre Administracion (rol ADM ya revisado arriba).
       if (nombre === 'administracion' && this.recientes) this.recientes.abrir();
+      if (nombre === 'administracion' && this.avisos) this.avisos.abrir();
       if (nombre === 'solicitudes' && this.cola) this.cola.abrir();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();

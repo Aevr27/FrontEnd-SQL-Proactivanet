@@ -53,6 +53,10 @@
 //      final, empates por Codigo); el orden por columna sobrevive a cada
 //      filtro, la busqueda y la relectura (y reacomoda lo cambiado); clic
 //      asc -> desc -> por omision; Limpiar filtros quita el orden.
+//   KF) Indicadores y semaforo como filtro: cada tarjeta filtra con la
+//      regla con la que cuenta; otro clic lo quita; uno a la vez; cifras
+//      fijas; Y con Estado / Director / busqueda sin tocarlos; orden y
+//      primera pagina; Limpiar; relectura; Cobertura; la instruccion.
 //   Al cargar se ve TODO (Cerrado incluido): ya no hay vista por omision
 //   que oculte Cerrado (L0, S2-9, BV10).
 //
@@ -1920,7 +1924,7 @@ pruebas.push(function () {
     Check('K6 texto del criterio de Activas', { texto: texto, nota: nota }, reg.ayudaKpi('activas'));
     Check('K6 solo Activas lleva la franja "Criterio", con el texto para lectores de pantalla; los demas no', [1, true, true, null],
       [(html.match(/class="ini-kpi-ayuda"/g) || []).length,
-       /<div class="kpi ini-kpi sv ini-kpi-ctx"><button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="activas"[^>]*>Criterio<\/button>/.test(html)
+       /<div class="kpi ini-kpi sv ini-kpi-ctx[^"]*"><button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="activas"[^>]*>Criterio<\/button>/.test(html)
          && /<div class="lbl">Iniciativas medibles<\/div>/.test(html),
        html.indexOf('id="regKpiAyudaActivas">' + p.ventana.Escape.html(texto + ' ' + nota) + '<') > 0, reg.ayudaKpi('total')]);
     Check('K6 con GloboAyuda no hay title duplicado en la franja', false, /class="ini-kpi-ayuda"[^>]*title=/.test(html));
@@ -2182,7 +2186,7 @@ pruebas.push(function () {
         return (/class="ini-sem ([a-z]+)"/.exec(celda(p, f, 'Fecha compromiso')) || [])[1];
       }));
     Check('SF6 tarjeta Atrasadas en ambar (sa), no roja', true,
-      /<div class="kpi ini-kpi sa"[^>]*><div class="lbl">Atrasadas</.test(p.sel('regKpis').innerHTML));
+      /<div class="kpi ini-kpi sa[ "][^>]*><div class="lbl">Atrasadas</.test(p.sel('regKpis').innerHTML));
     sinOmision(p);
 
     var json = JSON.parse(JSON.stringify(DATOS));
@@ -2364,6 +2368,181 @@ pruebas.push(function () {
   }).then(function () {
     Check('O9 relectura sin orden elegido: por f_creacion con los datos nuevos',
       [null, ['REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005', 'HAR 2025-000003', 'PRB 2026-000001']], [reg.orden, folios(p)]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// AC) Acuse del PO / SO: abrir un detalle se lo pasa a AcuseDetalle con su
+//     contenedor (#regAcuse, nace oculto); sin modulo, nada cambia.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var p = Pagina(ok(JSON.parse(JSON.stringify(DATOS)))), reg = p.registro, llamadas = [];
+  return esperar().then(function () {
+    clicFolio(p, 'PRB 2026-000001');
+    Check('AC1 sin modulo de acuse: el detalle abre igual, con su contenedor oculto', [true, 'PRB 2026-000001'],
+      [/<div id="regAcuse" hidden><\/div>/.test(p.sel('regDetCuerpo').innerHTML), reg.abierta]);
+    reg.cerrarDetalle(true);
+    reg.acuse = { mostrar: function (i, caja) { llamadas.push([i.folio, caja && caja.id]); } };
+    clicFolio(p, 'MAP 2026-000002');
+    Check('AC2 con modulo: mostrar(iniciativa, #regAcuse) una vez por detalle abierto', [['MAP 2026-000002', 'regAcuse']], llamadas);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// KF) Indicadores y semaforo como filtro: un clic acota la lista, otro en el
+//     mismo lo quita; las cifras no se mueven; se combina en Y con los demas
+//     filtros sin tocarlos; relectura, Cobertura, foco y la instruccion.
+// ---------------------------------------------------------------------------
+function clicIndicador(p, k) {
+  var el = Elemento('indicador');
+  el.setAttribute('data-indicador', k);
+  p.sel(/^sem_/.test(k) ? 'regSemaforo' : 'regKpis').disparar('click', { target: el });
+}
+// Los indicadores marcados (aria-pressed="true"), tarjetas y semaforo.
+function pulsados(p) {
+  var re = /data-indicador="([^"]+)" aria-pressed="true"/g, m, s = [];
+  var html = p.sel('regKpis').innerHTML + p.sel('regSemaforo').innerHTML;
+  while ((m = re.exec(html))) s.push(m[1]);
+  return s;
+}
+var CINCO = ['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005', 'HAR 2025-000003'];
+
+pruebas.push(function () {
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
+  var k = R.Registro.indicadores(reg.iniciativas);
+  Check('KF0 cada tarjeta filtra con la MISMA regla con la que cuenta',
+    [k.total, k.activas, k.requerimientos, k.retrasadas, k.cerradas],
+    ['total', 'activas', 'requerimientos', 'retrasadas', 'cerradas'].map(function (c) {
+      return reg.iniciativas.filter(function (i) { return R.Registro.cumpleIndicador(c, i); }).length;
+    }));
+  var sem = R.Registro.semaforo(reg.iniciativas);
+  Check('KF0 cada categoria del semaforo filtra con la misma regla con la que cuenta',
+    [sem.sin_fecha, sem.atrasada, sem.en_tiempo, sem.sin_control],
+    ['sem_sin_fecha', 'sem_atrasada', 'sem_en_tiempo', 'sem_sin_control'].map(function (c) {
+      return reg.iniciativas.filter(function (i) { return R.Registro.cumpleIndicador(c, i); }).length;
+    }));
+  var f = new R.FiltroRegistro(reg);
+  f.alternarIndicador('inventado');
+  Check('KF0 un indicador que no existe no se elige', ['', 0], [f.indicador, f.activos()]);
+});
+
+pruebas.push(function () {
+  var p = Pagina(nunca), reg = p.registro;
+  Check('KF1 cargando: sin instruccion', true, p.sel('regKpisGuia').hidden);
+  var q = Pagina(function () { return Promise.resolve(Respuesta(500, { error: 'x' })); });
+  return esperar().then(function () {
+    Check('KF1 error: sin instruccion', true, q.sel('regKpisGuia').hidden);
+    var html = leer('admin/iniciativas.html');
+    Check('KF1 la instruccion va justo encima de las tarjetas, sin globo', true,
+      /<p class="ini-kpis-guia" id="regKpisGuia" hidden>\s*<strong>Haz clic en un indicador para filtrar las iniciativas por esa condición\.<\/strong>\s*<span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro\.<\/span>\s*<\/p>\s*<div class="kpis ini-kpis" id="regKpis"/.test(html));
+    p = Pagina(ok(JSON.parse(JSON.stringify(DATOS)))); reg = p.registro;
+    return esperar();
+  }).then(function () {
+    var cifras = kpis(p);
+    Check('KF1 listo: instruccion visible; nada elegido; cinco tarjetas filtrables', [false, [], 5],
+      [p.sel('regKpisGuia').hidden, pulsados(p), (p.sel('regKpis').innerHTML.match(/class="ini-kpi-filtro" data-indicador=/g) || []).length]);
+    var esperado = {
+      total: ['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005'],
+      activas: ['PRB 2026-000001', 'MAP 2026-000002', 'PRB 2026-000005'],
+      requerimientos: ['REQ 2026-000004'],
+      retrasadas: ['PRB 2026-000001'],
+      cerradas: ['HAR 2025-000003']
+    };
+    Object.keys(esperado).forEach(function (c) {
+      clicIndicador(p, c);
+      Check('KF2 ' + c + ': filtra la lista, la marca, cifras y semaforo iguales',
+        [esperado[c], [c], 1, cifras, 1],
+        [folios(p), pulsados(p), (p.sel('regKpis').innerHTML.match(/ini-kpi-sel/g) || []).length, kpis(p),
+         reg.filtro.activos()]);
+      clicIndicador(p, c);
+      Check('KF2 ' + c + ': otro clic lo quita', [CINCO, [], cifras, 0], [folios(p), pulsados(p), kpis(p), reg.filtro.activos()]);
+    });
+
+    clicIndicador(p, 'activas'); clicIndicador(p, 'cerradas');
+    Check('KF3 elegir otro reemplaza al anterior', [['cerradas'], ['HAR 2025-000003']], [pulsados(p), folios(p)]);
+    Check('KF3 la cuenta y el filtro lo dicen', ['1 de 5 iniciativas · indicador: Cerradas', '1 filtro activo', false],
+      [p.sel('regCuenta').textContent, p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
+    p.sel('regLimpiar').disparar('click');
+    Check('KF3 Limpiar filtros tambien lo quita', [[], CINCO], [pulsados(p), folios(p)]);
+
+    // Criterio (franja de Activas) no filtra.
+    var franja = Elemento('franja');
+    franja.setAttribute('data-kpi-ayuda', 'activas');
+    p.sel('regKpis').disparar('click', { target: franja });
+    Check('KF4 la franja Criterio no filtra', [[], CINCO], [pulsados(p), folios(p)]);
+
+    // Busqueda, orden y pagina.
+    p.sel('regBuscar').value = 'PRB'; reg.aplicarBusqueda();
+    reg.ordenarPor('folio'); reg.ordenarPor('folio');          // desc
+    reg.limite = 300;
+    clicIndicador(p, 'activas');
+    Check('KF5 con busqueda y orden: los conserva, vuelve a la primera pagina',
+      ['PRB', { col: 'folio', dir: 'desc' }, 100, ['PRB 2026-000005', 'PRB 2026-000001'], cifras, '2 filtros activos'],
+      [reg.filtro.textoBuscado, reg.orden, reg.limite, folios(p), kpis(p), p.sel('regFiltrosCuenta').textContent]);
+    clicIndicador(p, 'activas');
+    Check('KF5 quitarlo deja la busqueda y el orden', ['PRB', { col: 'folio', dir: 'desc' }, ['PRB 2026-000005', 'PRB 2026-000001'], 'PRB'],
+      [reg.filtro.textoBuscado, reg.orden, folios(p), p.sel('regBuscar').value]);
+    sinOmision(p);
+
+    // Choque con Estado: Y, sin tocar Estado; la lista vacia lo dice.
+    soloEstado(p, 'En Análisis');
+    clicIndicador(p, 'cerradas');
+    Check('KF6 Cerradas con Estado = En Análisis: lista vacia que lo explica, Estado intacto',
+      [[], false, 'No hay iniciativas que coincidan con el indicador «Cerradas» y los filtros seleccionados.', ['En Análisis'], cifras],
+      [folios(p), p.sel('regVacio').hidden, p.sel('regVacioTexto').textContent, reg.filtro.estadosMarcados(), kpis(p)]);
+    p.sel('regBuscar').value = 'zzz'; reg.aplicarBusqueda();
+    Check('KF6 con busqueda tambien la nombra', 'No hay iniciativas que coincidan con «zzz», el indicador «Cerradas» y los filtros seleccionados.',
+      p.sel('regVacioTexto').textContent);
+    p.sel('regBuscar').value = ''; reg.aplicarBusqueda();
+    clicIndicador(p, 'cerradas');
+    Check('KF6 quitarlo deja el Estado elegido', [['REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005'], ['En Análisis']],
+      [folios(p), reg.filtro.estadosMarcados()]);
+    sinOmision(p);
+
+    // Semaforo.
+    var sem0 = semaforoTexto(p);
+    clicIndicador(p, 'sem_atrasada');
+    Check('KF7 semaforo Atrasadas: su regla (no la de la tarjeta), marcado, cifras iguales',
+      [['PRB 2026-000001', 'REQ 2026-000004', 'PRB 2026-000005'], ['sem_atrasada'], sem0, cifras, '3 de 5 iniciativas · indicador: Semáforo: Atrasadas'],
+      [folios(p), pulsados(p), semaforoTexto(p), kpis(p), p.sel('regCuenta').textContent]);
+    Check('KF7 boton con clase de marcado', true,
+      /<button type="button" class="ini-semaforo-op sel" data-semaforo="atrasada" data-indicador="sem_atrasada" aria-pressed="true"/.test(p.sel('regSemaforo').innerHTML));
+    clicIndicador(p, 'sem_en_tiempo');
+    Check('KF7 En tiempo reemplaza; la tarjeta no queda marcada', [['MAP 2026-000002'], ['sem_en_tiempo']], [folios(p), pulsados(p)]);
+    clicIndicador(p, 'sem_en_tiempo');
+    clicIndicador(p, 'sem_sin_fecha');
+    Check('KF7 Sin fecha sin ninguna: vacia y lo dice', [[], 'No hay iniciativas que coincidan con el indicador «Semáforo: Sin fecha».'],
+      [folios(p), p.sel('regVacioTexto').textContent]);
+    clicIndicador(p, 'sem_sin_fecha');
+
+    // Relectura: conserva el indicador, actualiza las cifras.
+    clicIndicador(p, 'cerradas');
+    elegir(p, 'regDirector', 'Dir B');
+    var json = JSON.parse(JSON.stringify(DATOS));
+    json.iniciativas[3].estado = 'Cerrado'; json.iniciativas[3].activa = false;   // REQ 4 se cierra
+    return reg.actualizar(ok(json));
+  }).then(function (r) {
+    Check('KF8 relectura: el indicador, el Director y la marca siguen; las cifras se actualizan',
+      [true, 'cerradas', 'Dir B', ['cerradas'], ['3', '3', '0', '1', '2'], ['REQ 2026-000004', 'HAR 2025-000003']],
+      [r.ok, reg.filtro.indicador, reg.filtro.director, pulsados(p), kpis(p), folios(p)]);
+    sinOmision(p);
+    // Desde la Cobertura un clic vuelve a la lista; alli no cuenta.
+    reg.verCobertura(nunca);
+    clicIndicador(p, 'activas');
+    Check('KF9 desde la Cobertura vuelve a la lista con el filtro', ['registro', false, ['activas']],
+      [reg.modo, p.sel('regListaBloque').hidden, pulsados(p)]);
+    reg.verCobertura(nunca);
+    Check('KF9 en la Cobertura el indicador no cuenta como filtro', '', p.sel('regFiltrosCuenta').textContent);
+    reg.verRegistro();
+    clicIndicador(p, 'activas');
+    var css = leer('admin/iniciativas.css');
+    Check('KF10 CSS: boton que cubre la tarjeta, Criterio encima, foco visible, marca sin mover la franja',
+      [true, true, true, true, true],
+      [/\.ini-kpi-filtro \{[^}]*position: absolute; inset: 0; z-index: 1;/.test(css),
+       /\.ini-kpi-ayuda \{[^}]*z-index: 2;/.test(css),
+       /\.ini-kpi-filtrable:has\(> \.ini-kpi-filtro:focus-visible\) \{ outline: 2px solid var\(--accent\)/.test(css),
+       /\.kpi\.ini-kpi-sel \{[^}]*border-top-color: var\(--accent\)/.test(css) && !/\.kpi\.ini-kpi-sel \{[^}]*border-left/.test(css),
+       /\.ini-semaforo-op:focus-visible \{/.test(css)]);
   });
 });
 

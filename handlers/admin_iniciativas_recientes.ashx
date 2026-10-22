@@ -5,7 +5,8 @@
 //
 //   GET  -> 200 { estado: "ok" | "sin_columna", limite, alcance,
 //                 cambios: [ { folio, fecha_utc ("aaaa-mm-ddThh:mm:ssZ"),
-//                              usuario, accion: "alta" | "cambio" } ] }
+//                              usuario, accion: "alta" | "cambio" | "solicitud" } ] }
+//           (hasta dos eventos por folio: su alta y su ultimo cambio)
 //           (mas reciente primero; solo folios: el detalle completo lo pone
 //           la pagina con el registro que ya cargo)
 //   403 antes de leer nada: AccesoAdmin.ExigirAdm (VIEWER, anonimo, rol

@@ -7,7 +7,9 @@
    bitacora ni dice que campos cambiaron. No incluye lo hecho en SSMS ni por
    la carga del Excel (sql/23_cambios_recientes.sql).
 
-   El servidor manda solo folio, hora y usuario; titulo y estado salen del
+   Un folio puede salir dos veces: su alta y su ultimo cambio (lo unico que
+   la base guarda; App_Code/CambiosRecientesAdmin.cs).
+   El servidor manda solo folio, hora, usuario y accion; titulo y estado salen del
    registro que la pagina ya cargo (VistaRegistro), y "Ver" abre el MISMO
    detalle de Iniciativas (abrirDesdeLista): no toca filtros, busqueda,
    orden ni "mostrar mas". Un folio que no esta en el registro cargado NO
@@ -30,6 +32,14 @@ window.CambiosRecientes = (function () {
     if (isNaN(d.getTime())) return h(utc);
     function dos(n) { return (n < 10 ? '0' : '') + n; }
     return dos(d.getDate()) + '/' + dos(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + dos(d.getHours()) + ':' + dos(d.getMinutes());
+  }
+
+  // Columna "Qué". El servidor decide la accion con lo que la base guardo
+  // (App_Code/CambiosRecientesAdmin.cs); aqui solo se rotula. Una accion
+  // desconocida se muestra tal cual: no se disfraza de "Cambio".
+  var ROTULOS_ACCION = { alta: 'Alta', cambio: 'Cambio', solicitud: 'Solicitud aplicada' };
+  function rotuloAccion(a) {
+    return Object.prototype.hasOwnProperty.call(ROTULOS_ACCION, a) ? ROTULOS_ACCION[a] : (a ? String(a) : '—');
   }
 
   // cambios: [{ folio, fecha_utc, usuario, accion }]. registro: el Registro
@@ -56,7 +66,7 @@ window.CambiosRecientes = (function () {
       }
       return '<tr><td>' + (i ? '<button type="button" class="ini-folio" data-cr-folio="' + h(c.folio) + '">' + h(c.folio) + '</button>' : h(c.folio)) + '</td>' +
         '<td>' + iniciativa + '</td>' +
-        '<td>' + (c.accion === 'alta' ? 'Alta' : 'Cambio') + '</td>' +
+        '<td>' + h(rotuloAccion(c.accion)) + '</td>' +
         '<td>' + fechaHora(c.fecha_utc) + '</td>' +
         '<td>' + h(c.usuario || '—') + '</td>' +
         '<td>' + accion + '</td></tr>';

@@ -6,8 +6,22 @@
 // (sql/23_cambios_recientes.sql). Los sella adm.usp_GestionAdmin_Crear y
 // adm.usp_GestionAdmin_Modificar en la misma transaccion que el cambio, y
 // solo si algo cambio de verdad. NO cubre lo hecho en SSMS ni por la carga
-// del Excel (no pasan por esos procedimientos). No es bitacora: una fila
-// por iniciativa, el ultimo cambio.
+// del Excel (no pasan por esos procedimientos). No es bitacora: hasta DOS
+// eventos por iniciativa, los unicos que la base guarda:
+//   alta       Motivo = 'ALTA' (solo lo escribe adm.usp_GestionAdmin_Crear),
+//              a la hora FechaAltaUtc y por Usuario (el que la creo).
+//   cambio     el ultimo sello UltimoCambioUtc / UltimoCambioUsuario, si NO
+//              es el del alta (el alta sella con la misma hora, a +-1 s).
+//   solicitud  ese mismo sello cuando coincide (+-1 s y mismo usuario) con
+//              una adm.SolicitudCambio APLICADA de la iniciativa:
+//              usp_SolicitudCambio_Aplicar llama a Modificar y marca
+//              FechaRevisionUtc / RevisadoPor en la misma transaccion. Sin
+//              sql/22 (sin la tabla) todo sello es "cambio".
+// Antes (2026-10-21 a 10-22) solo salia el ultimo sello: una iniciativa
+// creada y luego editada perdia su alta y se veia como "Cambio". No se
+// inventa nada: las altas anteriores a sql/23 salen con la FechaAltaUtc y
+// el Usuario que Crear ya guardo; MIGRACION y MODIFICACION no son altas.
+// Las ediciones de en medio no existen en la base y no se muestran.
 //
 // Por que no otra columna: dbo.Problem no tiene fecha de modificacion;
 // FechaUltimaCargaDW es la carga del Excel; FechaCierre es un dato; los
@@ -28,10 +42,18 @@ using System.Globalization;
 
 public sealed class CambioRecienteAdmin
 {
+    public const string AccionAlta = "alta";
+    public const string AccionCambio = "cambio";
+    public const string AccionSolicitud = "solicitud";
+
     public string Folio;
     public DateTime FechaUtc;
     public string Usuario;
-    public bool EsAlta;      // el ultimo cambio fue el alta (Motivo ALTA, sin cambios despues)
+    // AccionAlta | AccionCambio | AccionSolicitud. null = el de EsAlta.
+    public string Accion;
+    public bool EsAlta;      // compatibilidad: true = alta cuando Accion es null
+
+    public string AccionEfectiva { get { return Accion ?? (EsAlta ? AccionAlta : AccionCambio); } }
 }
 
 public sealed class LecturaCambiosRecientes
@@ -76,34 +98,63 @@ public sealed class FuenteCambiosRecientesSql : IFuenteCambiosRecientes
                     return r;
                 }
             }
-            // Empates de hora (datetime2(3)): por Codigo, para que el orden
-            // no cambie entre lecturas. EsAlta: el sello es el del alta y no
-            // hubo otro cambio despues (el alta sella con la misma hora, a
-            // segundos de FechaAltaUtc).
+            bool conSolicitudes;
             using (var cmd = new SqlCommand(
-                "SELECT TOP (@n) Codigo, UltimoCambioUtc, UltimoCambioUsuario, " +
-                "       CASE WHEN Motivo = 'ALTA' AND DATEDIFF(SECOND, FechaAltaUtc, UltimoCambioUtc) BETWEEN -1 AND 1 THEN 1 ELSE 0 END " +
-                "FROM adm.IniciativaProtegida " +
-                "WHERE UltimoCambioUtc IS NOT NULL " +
-                "ORDER BY UltimoCambioUtc DESC, Codigo", cn))
+                "SELECT CASE WHEN OBJECT_ID(N'adm.SolicitudCambio', N'U') IS NULL THEN 0 ELSE 1 END", cn))
+                conSolicitudes = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+            using (var cmd = new SqlCommand(Consulta(conSolicitudes), cn))
             {
                 cmd.Parameters.Add("@n", SqlDbType.Int).Value = limite;
                 using (var rd = cmd.ExecuteReader())
                 {
                     while (rd.Read())
                     {
+                        var accion = rd.GetString(3);
                         r.Cambios.Add(new CambioRecienteAdmin
                         {
                             Folio = rd.GetString(0),
                             FechaUtc = rd.GetDateTime(1),
                             Usuario = rd.IsDBNull(2) ? null : rd.GetString(2),
-                            EsAlta = Convert.ToInt32(rd.GetValue(3), CultureInfo.InvariantCulture) == 1,
+                            Accion = accion,
+                            EsAlta = accion == CambioRecienteAdmin.AccionAlta,
                         });
                     }
                 }
             }
         }
         return r;
+    }
+
+    // Los eventos (ver la cabecera), el mas reciente primero. El alta usa
+    // el sello de ms cuando es el suyo (mismo instante) y si no FechaAltaUtc
+    // (datetime2(0)). Empates de hora: por Codigo y luego la accion (el
+    // alta antes que su propio cambio), para que el orden no cambie entre
+    // lecturas. Usuarios y Codigo con COLLATE DATABASE_DEFAULT: las dos
+    // tablas no tienen por que compartir intercalacion.
+    public static string Consulta(bool conSolicitudes)
+    {
+        const string mismoSelloQueAlta =
+            "p.Motivo = 'ALTA' AND p.UltimoCambioUtc IS NOT NULL AND DATEDIFF(SECOND, p.FechaAltaUtc, p.UltimoCambioUtc) BETWEEN -1 AND 1";
+        var accionSello = conSolicitudes
+            ? "CASE WHEN EXISTS (SELECT 1 FROM adm.SolicitudCambio AS s " +
+              "                  WHERE s.Codigo COLLATE DATABASE_DEFAULT = p.Codigo COLLATE DATABASE_DEFAULT " +
+              "                    AND s.Estado = 'APLICADA' " +
+              "                    AND s.RevisadoPor COLLATE DATABASE_DEFAULT = p.UltimoCambioUsuario COLLATE DATABASE_DEFAULT " +
+              "                    AND DATEDIFF(SECOND, s.FechaRevisionUtc, p.UltimoCambioUtc) BETWEEN -1 AND 1) " +
+              "     THEN 'solicitud' ELSE 'cambio' END"
+            : "'cambio'";
+        return
+            "SELECT TOP (@n) e.Codigo, e.Fecha, e.Usuario, e.Accion FROM ( " +
+            "  SELECT p.Codigo, CASE WHEN " + mismoSelloQueAlta + " THEN p.UltimoCambioUtc " +
+            "                        ELSE CONVERT(datetime2(3), p.FechaAltaUtc) END AS Fecha, " +
+            "         p.Usuario, 'alta' AS Accion " +
+            "  FROM adm.IniciativaProtegida AS p WHERE p.Motivo = 'ALTA' " +
+            "  UNION ALL " +
+            "  SELECT p.Codigo, p.UltimoCambioUtc, p.UltimoCambioUsuario, " + accionSello + " " +
+            "  FROM adm.IniciativaProtegida AS p " +
+            "  WHERE p.UltimoCambioUtc IS NOT NULL AND NOT (" + mismoSelloQueAlta + ") " +
+            ") AS e " +
+            "ORDER BY e.Fecha DESC, e.Codigo, CASE e.Accion WHEN 'alta' THEN 1 ELSE 0 END";
     }
 }
 
@@ -129,7 +180,7 @@ public static class CambiosRecientesAdmin
                 { "folio", c.Folio },
                 { "fecha_utc", c.FechaUtc.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture) + "Z" },
                 { "usuario", c.Usuario },
-                { "accion", c.EsAlta ? "alta" : "cambio" },
+                { "accion", c.AccionEfectiva },
             });
         }
         return new Dictionary<string, object>

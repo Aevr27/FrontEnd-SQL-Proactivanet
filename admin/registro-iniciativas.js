@@ -44,6 +44,22 @@
      Cerradas         estado Cerrado (el mismo plano()). Otros estados no
                       activos NO cuentan aqui: van en Total.
    Total + Cerradas = todas las iniciativas del registro.
+   Cada regla vive UNA vez (CONDICION_KPI): la usan la cuenta del
+   indicador y su filtro, asi que no pueden separarse.
+
+   INDICADORES Y SEMAFORO COMO FILTRO (2026-10-22, solo esta vista)
+   ----------------------------------------------------------------
+   Un clic en una tarjeta (o en una categoria del semaforo) acota la LISTA
+   a las iniciativas que cuenta ese indicador (FiltroRegistro.indicador,
+   Registro.cumpleIndicador); otro clic en el mismo lo quita. Uno a la vez:
+   elegir otro reemplaza al anterior. Se combina en Y con Estado, Tipo,
+   Director, cascada y busqueda; ninguno de ellos se toca (Cerradas con
+   Cerrado desmarcado en Estado = lista vacia, y lo dice). Cuenta como un
+   filtro activo y "Limpiar filtros" lo quita. Las cifras NO se mueven: se
+   siguen contando sobre el registro completo. La Cobertura no lo usa (un
+   clic estando en ella vuelve a la lista). La relectura lo conserva (sobre).
+   No hay tarjeta "Fuera de Activas" (fueraActivas) ni otra diferencia:
+   no hay nada que filtrar ahi.
 
    SEMAFORO (junto al titulo Registro; registro COMPLETO, como los KPIs)
    ----------------------------------------------------------------------
@@ -285,6 +301,30 @@ window.RegistroIniciativas = (function () {
   // y el del detalle.
   var COLOR_SEMAFORO = {};
   SEMAFORO.forEach(function (s) { COLOR_SEMAFORO[s.k] = s.c; });
+
+  // La regla de cada indicador, en el orden de ROTULOS_KPI (ver la
+  // cabecera). La cuentan Registro.indicadores y la aplica el filtro por
+  // indicador: es la MISMA funcion.
+  var CLAVES_KPI = ['total', 'activas', 'requerimientos', 'retrasadas', 'cerradas'];
+  var CONDICION_KPI = {
+    total: function (i) { return !esCerrada(i); },
+    activas: function (i) { return !!i.seguimiento; },
+    requerimientos: function (i) { return !esCerrada(i) && Registro.esRequerimiento(i); },
+    retrasadas: function (i) { return !!i.seguimiento && i.retrazado > 0 && !i.sin_categoria; },
+    cerradas: function (i) { return esCerrada(i); }
+  };
+  // Las categorias del semaforo como indicador: 'sem_' + su clave.
+  var PREFIJO_SEMAFORO = 'sem_';
+  function semaforoDeIndicador(k) {
+    for (var n = 0; n < SEMAFORO.length; n++) if (PREFIJO_SEMAFORO + SEMAFORO[n].k === k) return SEMAFORO[n];
+    return null;
+  }
+  // Rotulo de un indicador elegido; el del semaforo lo dice, porque su
+  // Atrasadas no es la regla de la tarjeta Atrasadas.
+  function rotuloIndicador(k) {
+    var n = CLAVES_KPI.indexOf(k), s = semaforoDeIndicador(k);
+    return n >= 0 ? ROTULOS_KPI[n] : s ? 'Semáforo: ' + s.l : '';
+  }
   function texto(v) { return v === null || v === undefined || v === '' ? '—' : v; }
 
   // Dias desde la creacion de la iniciativa, o null. Es `antiguedad` del
@@ -561,23 +601,38 @@ window.RegistroIniciativas = (function () {
     static indicadores(lista) {
       var r = { total: 0, sinCategoria: 0, activas: 0, reduceActivas: 0, fueraActivas: 0,
                 requerimientos: 0, retrasadas: 0, riesgo: 0, cerradas: 0 };
+      var c = CONDICION_KPI;
       lista.forEach(function (i) {
-        if (esCerrada(i)) r.cerradas++;
-        else {
+        if (c.cerradas(i)) r.cerradas++;
+        if (c.total(i)) {
           r.total++;
           if (i.sin_categoria) r.sinCategoria++;
-          if (Registro.esRequerimiento(i)) r.requerimientos++;
         }
-        if (!i.seguimiento) return;
-        r.activas++;
-        r.reduceActivas += numero(i.tickets_reduce);
-        if (i.retrazado > 0 && !i.sin_categoria) {
+        if (c.requerimientos(i)) r.requerimientos++;
+        if (c.activas(i)) {
+          r.activas++;
+          r.reduceActivas += numero(i.tickets_reduce);
+        }
+        if (c.retrasadas(i)) {
           r.retrasadas++;
           r.riesgo += numero(i.riesgo_folio);
         }
       });
       r.fueraActivas = r.total - r.activas;
       return r;
+    }
+
+    // Una tarjeta (CLAVES_KPI) o una categoria del semaforo ('sem_' + k).
+    static esIndicador(k) {
+      return Object.prototype.hasOwnProperty.call(CONDICION_KPI, k) || !!semaforoDeIndicador(k);
+    }
+
+    // Si `i` cuenta en el indicador `k`: la misma regla con la que se
+    // cuenta (CONDICION_KPI, semaforoFecha).
+    static cumpleIndicador(k, i) {
+      if (Object.prototype.hasOwnProperty.call(CONDICION_KPI, k)) return CONDICION_KPI[k](i);
+      var s = semaforoDeIndicador(k);
+      return !!s && Registro.semaforoFecha(i) === s.k;
     }
 
     // Agrupacion ReqOpr (ver la cabecera, Requerimientos). El estado lo
@@ -653,7 +708,17 @@ window.RegistroIniciativas = (function () {
       this.director = '';
       this.cascada = new CascadaOrganizacional(registro.filasOrganizacionales(''), 'filtro');
       this.busqueda = new Busqueda('');
+      // Indicador elegido con un clic ('' = ninguno; ver la cabecera). Como
+      // la busqueda, solo acota la lista (aplicar), no la Cobertura.
+      this.indicador = '';
     }
+
+    // El mismo indicador lo quita; otro lo reemplaza; uno que no existe, nada.
+    alternarIndicador(k) {
+      if (k === this.indicador) this.indicador = '';
+      else if (Registro.esIndicador(k)) this.indicador = k;
+    }
+    pasaIndicador(i) { return !this.indicador || Registro.cumpleIndicador(this.indicador, i); }
 
     // Folio o titulo. Solo acota la lista (aplicar), no la Cobertura.
     buscar(v) { this.busqueda = new Busqueda(v); }
@@ -710,6 +775,7 @@ window.RegistroIniciativas = (function () {
         if (sel[n] && !f.cascada.elegir(n, sel[n])) break;
       }
       f.buscar(this.textoBuscado);
+      f.indicador = this.indicador;
       return f;
     }
 
@@ -719,12 +785,13 @@ window.RegistroIniciativas = (function () {
       this.elegirDirector('');
       this.cascada.limpiar(0);
       this.buscar('');
+      this.indicador = '';
     }
 
     activos() {
       var org = this.cascada.filtros();
       return (this.estados.activo() ? 1 : 0) + (this.tipos.activo() ? 1 : 0) + (this.director ? 1 : 0) + Object.keys(org).length +
-        (this.busquedaActiva() ? 1 : 0);
+        (this.busquedaActiva() ? 1 : 0) + (this.indicador ? 1 : 0);
     }
 
     // Estado y Tipo: lo que no es organizacional.
@@ -753,11 +820,12 @@ window.RegistroIniciativas = (function () {
       return this.registro.filasDeIniciativa(i).some(function (f) { return self.pasaFila(f); });
     }
 
-    // La lista: los filtros y, sobre lo que queda, la busqueda. La
-    // Cobertura no pasa por aqui (usa pasa / pasaAtributos / pasaFila).
+    // La lista: los filtros y, sobre lo que queda, la busqueda y el
+    // indicador. La Cobertura no pasa por aqui (usa pasa / pasaAtributos /
+    // pasaFila).
     aplicar(lista) {
       var self = this;
-      return lista.filter(function (i) { return self.pasa(i) && self.busqueda.pasa(i); });
+      return lista.filter(function (i) { return self.pasa(i) && self.busqueda.pasa(i) && self.pasaIndicador(i); });
     }
   }
 
@@ -1377,6 +1445,7 @@ window.RegistroIniciativas = (function () {
       // Indicadores: el Registro con el que se pintaron (solo se repintan
       // si cambia) y el globo de ayuda de Activas (GloboAyuda, si esta).
       this.kpisDe = null;
+      this.kpisElegido = '';
       this.globoKpis = null;
       // 'ADM' | 'MOD' | null (fijarRol). Solo ADM ve "Modificar"; null
       // hasta que SesionAdmin responda.
@@ -1404,6 +1473,9 @@ window.RegistroIniciativas = (function () {
       this.duenosCatalogo = null;
       this.volumetria = null;     // VolumetriaCliente (perezoso)
       this.segCategoria = '';     // categoria elegida en Seguimiento
+      // Acuse del PO / SO (admin/acuse-iniciativa.js, AcuseDetalle): lo
+      // pone la pagina; null = sin acuse. Pinta en #regAcuse del detalle.
+      this.acuse = null;
     }
 
     // estado: 'error' si el catalogo no se pudo cargar (rutas null).
@@ -1588,6 +1660,17 @@ window.RegistroIniciativas = (function () {
       this.$('regLimpiar').addEventListener('click', function () { self.limpiarFiltros(); });
       this.$('regLimpiarVacio').addEventListener('click', function () { self.limpiarFiltros(); });
       this.$('regMas').addEventListener('click', function () { self.limite += PAGINA; self.pintarTabla(); });
+      // Indicadores y semaforo: un clic filtra la lista por ese indicador y
+      // otro en el mismo lo quita. Son <button>: Enter y espacio tambien. La
+      // franja "Criterio" no lleva data-indicador: no filtra.
+      ['regKpis', 'regSemaforo'].forEach(function (id) {
+        self.$(id).addEventListener('click', function (e) {
+          var el = e.target;
+          if (el && el.closest) el = el.closest('[data-indicador]');
+          var k = el && el.getAttribute && el.getAttribute('data-indicador');
+          if (k) self.elegirIndicador(k);
+        });
+      });
       this.$('regReintentar').addEventListener('click', function () { self.cargar(); });
 
       // Una fila se abre con su boton de folio o con un clic en la fila.
@@ -1714,6 +1797,22 @@ window.RegistroIniciativas = (function () {
       this.refrescar();
     }
 
+    // Clic en un indicador (ver la cabecera). Solo cambia la lista: las
+    // tarjetas se repintan con las MISMAS cifras y el foco vuelve al mismo
+    // boton. Desde la Cobertura, vuelve a la lista para que se vea.
+    elegirIndicador(k) {
+      if (!this.filtro) return;
+      this.filtro.alternarIndicador(k);
+      if (this.modo === 'cobertura') this.mostrarModo('registro');
+      this.refrescar();
+      var self = this;
+      ['regKpis', 'regSemaforo'].some(function (id) {
+        var caja = self.$(id), b = caja.querySelector ? caja.querySelector('[data-indicador="' + k + '"]') : null;
+        if (b && b.focus) b.focus();
+        return !!b;
+      });
+    }
+
     // Abrir uno cierra el otro.
     abrirMulti(clave, abrir) {
       var self = this;
@@ -1794,6 +1893,8 @@ window.RegistroIniciativas = (function () {
       this.$('regSinDatos').hidden = estado !== 'sinDatos';
       this.$('regContenido').hidden = !listo;
       this.$('regKpis').setAttribute('aria-busy', estado === 'cargando' ? 'true' : 'false');
+      // La instruccion de los indicadores solo cuando se pueden usar.
+      this.$('regKpisGuia').hidden = !listo;
       if (!listo) {
         if (this.globoKpis) this.globoKpis.ocultar();
         this.kpisDe = null;
@@ -1997,7 +2098,9 @@ window.RegistroIniciativas = (function () {
 
     pintarCuentaFiltros() {
       var f = this.filtro;
-      var n = f.activos() - (this.modo === 'cobertura' && f.busquedaActiva() ? 1 : 0);
+      // La busqueda y el indicador solo acotan la lista: en la Cobertura no
+      // cuentan.
+      var n = f.activos() - (this.modo === 'cobertura' ? (f.busquedaActiva() ? 1 : 0) + (f.indicador ? 1 : 0) : 0);
       this.$('regLimpiar').hidden = n === 0;
       this.$('regFiltrosCuenta').textContent = n ? (n === 1 ? '1 filtro activo' : n + ' filtros activos') : '';
     }
@@ -2055,24 +2158,28 @@ window.RegistroIniciativas = (function () {
       };
     }
 
-    // Sobre el registro COMPLETO: los filtros y la busqueda no los mueven.
-    // Solo se repintan si cambio el registro (carga o relectura).
+    // Sobre el registro COMPLETO: los filtros, la busqueda y el indicador
+    // elegido no los mueven. Solo se repintan si cambio el registro (carga
+    // o relectura) o el indicador elegido (su marca; las cifras son las
+    // mismas).
     pintarKpis() {
-      if (this.kpisDe === this.registro) return;
+      var elegido = this.filtro ? this.filtro.indicador : '';
+      if (this.kpisDe === this.registro && this.kpisElegido === elegido) return;
       if (this.globoKpis) this.globoKpis.ocultar();
       this.kpisDe = this.registro;
+      this.kpisElegido = elegido;
       var k = Registro.indicadores(this.registro.iniciativas);
       var ayuda = this.ayudaKpi('activas');
       var tarjetas = [
-        { l: ROTULOS_KPI[0], v: k.total,
+        { k: CLAVES_KPI[0], l: ROTULOS_KPI[0], v: k.total,
           f: k.sinCategoria ? fmt(k.sinCategoria) + ' sin categoría' : 'todas con categoría', s: '',
           t: 'Iniciativas abiertas: estado distinto de Cerrado.' },
-        { l: ROTULOS_KPI[1], v: k.activas, f: fmt(k.reduceActivas) + ' tickets a reducir', s: 'sv', ayuda: ayuda },
-        { l: ROTULOS_KPI[2], v: k.requerimientos, f: 'agrupación ReqOpr, abiertos', s: '',
+        { k: CLAVES_KPI[1], l: ROTULOS_KPI[1], v: k.activas, f: fmt(k.reduceActivas) + ' tickets a reducir', s: 'sv', ayuda: ayuda },
+        { k: CLAVES_KPI[2], l: ROTULOS_KPI[2], v: k.requerimientos, f: 'agrupación ReqOpr, abiertos', s: '',
           t: 'Requerimientos (REQ/HAR): abiertos, estado distinto de Cerrado, con agrupación ReqOpr. Cuentan en Total, no en Iniciativas medibles.' },
-        { l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sa' : 'sv',
+        { k: CLAVES_KPI[3], l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sa' : 'sv',
           t: 'Iniciativas medibles con la fecha de su estado vencida y con categoría (criterio de Experiencia).' },
-        { l: ROTULOS_KPI[4], v: k.cerradas, f: 'estado Cerrado', s: '',
+        { k: CLAVES_KPI[4], l: ROTULOS_KPI[4], v: k.cerradas, f: 'estado Cerrado', s: '',
           t: 'Iniciativas en estado Cerrado.' }
       ];
       var conGlobo = !!this.globoKpis;
@@ -2086,22 +2193,34 @@ window.RegistroIniciativas = (function () {
             ' aria-label="Criterio de ' + Escape.attr(c.l) + '"' + (conGlobo ? '' : ' title="' + Escape.attr(todo) + '"') + '>Criterio</button>' +
             '<span class="ini-sr" id="regKpiAyudaActivas">' + Escape.html(todo) + '</span>';
         }
-        return '<div class="kpi ini-kpi ' + c.s + (boton ? ' ini-kpi-ctx' : '') + '"' +
-          (c.t ? ' title="' + Escape.attr(c.t) + '"' : '') + '>' + boton +
+        // El filtro es un boton que cubre la tarjeta (debajo de "Criterio",
+        // que no filtra): sin botones anidados. Lleva el title de la
+        // tarjeta porque queda encima de ella.
+        var sel = c.k === elegido;
+        var filtro = '<button type="button" class="ini-kpi-filtro" data-indicador="' + c.k + '"' +
+          ' aria-pressed="' + (sel ? 'true' : 'false') + '" aria-label="' + Escape.attr(c.l + ': ' + fmt(c.v)) + '"' +
+          (c.t ? ' title="' + Escape.attr(c.t) + '"' : '') + '></button>';
+        return '<div class="kpi ini-kpi ' + c.s + (boton ? ' ini-kpi-ctx' : '') + ' ini-kpi-filtrable' + (sel ? ' ini-kpi-sel' : '') + '">' + boton +
           '<div class="lbl">' + Escape.html(c.l) + '</div>' +
           '<div class="val">' + fmt(c.v) + '</div>' +
-          '<div class="foot">' + Escape.html(c.f) + '</div></div>';
+          '<div class="foot">' + Escape.html(c.f) + '</div>' + filtro + '</div>';
       }).join('');
-      this.pintarSemaforo();
+      this.pintarSemaforo(elegido);
     }
 
-    // Una linea compacta: punto, rotulo y cuenta por categoria.
-    pintarSemaforo() {
+    // Una linea compacta: punto, rotulo y cuenta por categoria. Cada una es
+    // un boton que filtra la lista (indicador 'sem_' + clave). La elegida se
+    // pinta aunque se quede en cero tras una relectura, para poder quitarla.
+    pintarSemaforo(elegido) {
       var n = Registro.semaforo(this.registro.iniciativas);
-      this.$('regSemaforo').innerHTML = SEMAFORO.filter(function (s) { return !s.siHay || n[s.k] > 0; }).map(function (s) {
-        return '<span class="ini-semaforo-op" data-semaforo="' + s.k + '" title="' + Escape.attr(s.t) + '">' +
+      this.$('regSemaforo').innerHTML = SEMAFORO.filter(function (s) {
+        return !s.siHay || n[s.k] > 0 || PREFIJO_SEMAFORO + s.k === elegido;
+      }).map(function (s) {
+        var k = PREFIJO_SEMAFORO + s.k, sel = k === elegido;
+        return '<button type="button" class="ini-semaforo-op' + (sel ? ' sel' : '') + '" data-semaforo="' + s.k + '"' +
+          ' data-indicador="' + k + '" aria-pressed="' + (sel ? 'true' : 'false') + '" title="' + Escape.attr(s.t) + '">' +
           '<span class="ini-sem ' + s.c + '" aria-hidden="true"></span>' + Escape.html(s.l) +
-          ' <b>' + fmt(n[s.k]) + '</b></span>';
+          ' <b>' + fmt(n[s.k]) + '</b></button>';
       }).join('');
     }
 
@@ -2213,8 +2332,10 @@ window.RegistroIniciativas = (function () {
       this.$('regCuerpo').innerHTML = visibles.map(function (i) { return self.htmlFila(i); }).join('');
 
       var total = this.registro.iniciativas.length;
+      var indicador = this.filtro.indicador;
       this.$('regCuenta').textContent = vacio ? '' :
         (lista.length === total ? fmt(total) + ' iniciativas' : fmt(lista.length) + ' de ' + fmt(total) + ' iniciativas') +
+        (indicador ? ' · indicador: ' + rotuloIndicador(indicador) : '') +
         (visibles.length < lista.length ? ' · mostrando ' + fmt(visibles.length) : '');
       var quedan = lista.length - visibles.length;
       this.$('regMas').hidden = quedan <= 0;
@@ -2223,6 +2344,15 @@ window.RegistroIniciativas = (function () {
 
     textoVacio() {
       var f = this.filtro;
+      if (f.indicador) {
+        // Los demas filtros activos, sin la busqueda ni el indicador.
+        var otros = f.activos() - 1 - (f.busquedaActiva() ? 1 : 0);
+        var partes = (f.busquedaActiva() ? ['«' + f.textoBuscado.trim() + '»'] : [])
+          .concat(['el indicador «' + rotuloIndicador(f.indicador) + '»'])
+          .concat(otros > 0 ? ['los filtros seleccionados'] : []);
+        return 'No hay iniciativas que coincidan con ' +
+          (partes.length > 1 ? partes.slice(0, -1).join(', ') + ' y ' + partes[partes.length - 1] : partes[0]) + '.';
+      }
       if (!f.busquedaActiva()) return 'No hay iniciativas que coincidan con los filtros seleccionados.';
       var buscado = '«' + f.textoBuscado.trim() + '»';
       return f.activos() > 1
@@ -2252,6 +2382,7 @@ window.RegistroIniciativas = (function () {
       this.marcarRaiz(true);
       this.pintarModo();
       this.volumetriaEdicion();
+      if (this.acuse) this.acuse.mostrar(i, this.$('regAcuse'));
       var cerrar = this.$('regDetCerrar');
       if (cerrar && cerrar.focus) cerrar.focus();
     }
@@ -3305,6 +3436,7 @@ window.RegistroIniciativas = (function () {
         this.htmlIncompleta(i) +
         '<div class="ini-det-acciones" id="regDetAcciones">' + this.htmlAcciones() + '</div>' +
         '</div>' +
+        '<div id="regAcuse" hidden></div>' +
         '<div class="ini-cambio-msg listo" id="regDetAviso" role="status" aria-live="polite" hidden></div>' +
         '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>';
 

@@ -119,6 +119,17 @@ pruebas.push(function () {
   var otra = C.htmlLista(CAMBIOS, REG, { 'PRB 2026-000099': true });
   Check('R6 tras releer y seguir faltando: lo dice, no lo quita', [true, 3], [/Sigue sin aparecer/.test(otra), (otra.match(/<tr><td>/g) || []).length]);
   Check('R7 todo en el registro: sin boton de releer', false, /data-cr-releer/.test(C.htmlLista([CAMBIOS[0]], REG, {})));
+  // El mismo folio dos veces (su ultimo cambio y su alta) y una solicitud
+  // aplicada: cada fila con su rotulo y su "Ver".
+  var dos = C.htmlLista([
+    { folio: 'PRB 2026-000001', fecha_utc: '2026-10-21T10:00:00Z', usuario: 'SORIANA\\t_adm', accion: 'solicitud' },
+    { folio: 'PRB 2026-000001', fecha_utc: '2026-10-19T12:00:00Z', usuario: 'SORIANA\\t_otro', accion: 'alta' },
+    { folio: 'PRB 2026-000002', fecha_utc: '2026-10-18T12:00:00Z', usuario: 'SORIANA\\t_adm', accion: 'otra<x>' }
+  ], REG, {});
+  Check('R8 Solicitud aplicada, Alta del mismo folio, accion desconocida tal cual (escapada, no "Cambio")',
+    [['Solicitud aplicada', 'Alta', 'otra&lt;x&gt;'], 3],
+    [(dos.match(/<\/td><td>([^<]*)<\/td><td>\d\d\//g) || []).map(function (s) { return s.replace(/^<\/td><td>|<\/td><td>\d\d\/$/g, ''); }),
+     (dos.match(/data-cr-folio="[^"]+">Ver/g) || []).length]);
 });
 
 // ---- V: la vista ----
