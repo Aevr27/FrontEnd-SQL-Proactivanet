@@ -240,6 +240,14 @@
          datos de handlers/admin_iniciativas_registro.ashx = los de
          Experiencia). Cuatro estados excluyentes: cargando, error, sin
          datos y listo; cargando y error nunca se ven como lista vacia. -->
+    <!-- Las tarjetas (y el semaforo del Registro) filtran la lista con un
+         clic; otro clic las quita. Las cifras no cambian
+         (registro-iniciativas.js, FiltroRegistro.indicador). Visible solo
+         con el registro cargado. -->
+    <p class="ini-kpis-guia" id="regKpisGuia" hidden>
+      <strong>Haz clic en un indicador para filtrar las iniciativas por esa condición.</strong>
+      <span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro.</span>
+    </p>
     <div class="kpis ini-kpis" id="regKpis" aria-live="polite" aria-busy="true"></div>
 
     <p class="ini-estado" id="regCargando" role="status">Cargando iniciativas…</p>
@@ -300,7 +308,8 @@
         <h3 class="ini-lista-titulo">Registro</h3>
         <span class="ini-lista-cuenta" id="regCuenta" aria-live="polite"></span>
         <!-- Semaforo de la fecha compromiso sobre el registro COMPLETO
-             (registro-iniciativas.js, pintarSemaforo): no sigue los filtros. -->
+             (registro-iniciativas.js, pintarSemaforo): no sigue los filtros.
+             Cada categoria filtra la lista como un indicador. -->
         <div class="ini-lista-lado">
           <div class="ini-semaforo" id="regSemaforo" role="group" aria-label="Semáforo de fecha compromiso de las activas"></div>
           <span class="ini-lista-ayuda">Elige una iniciativa para ver su detalle.</span>

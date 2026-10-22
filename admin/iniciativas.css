@@ -307,6 +307,14 @@
 .ini-panel [hidden] { display: none !important; }
 
 /* ---- Indicadores ---- */
+/* Instruccion sobre las tarjetas: se lee sin pasar el raton, mas marcada
+   que un texto de ayuda y mas discreta que las cifras. */
+.ini-kpis-guia {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;
+  margin: 0 0 8px; padding-left: 9px; border-left: 3px solid var(--accent);
+  font-size: 12.5px; line-height: 1.4; color: var(--muted);
+}
+.ini-kpis-guia strong { font-weight: 700; color: var(--accent-ink); }
 .ini-kpis { margin-bottom: 14px; }
 /* Cinco tarjetas a todo lo ancho; tres por fila en pantallas medianas y
    dos en las chicas. */
@@ -318,6 +326,26 @@
   .kpis.ini-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .ini-kpi { cursor: default; }
+/* Tarjeta que filtra: un boton transparente la cubre (.ini-kpi-filtro);
+   la franja "Criterio" queda encima (z-index 2) y no filtra. La marca de
+   la elegida es un anillo y un tinte: no mueve nada ni tapa la franja
+   izquierda de color, que conserva su significado. */
+.ini-kpi.ini-kpi-filtrable { cursor: pointer; }
+.ini-kpi-filtro {
+  position: absolute; inset: 0; z-index: 1;
+  margin: 0; padding: 0; border: 0; border-radius: inherit;
+  background: transparent; cursor: pointer;
+}
+.ini-kpi-filtro:focus { outline: none; }
+.ini-kpi-filtrable:hover { border-top-color: var(--accent-line); border-right-color: var(--accent-line); border-bottom-color: var(--accent-line); }
+.ini-kpi-filtrable:has(> .ini-kpi-filtro:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ini-kpi-filtrable:has(> .ini-kpi-filtro:active) { transform: translateY(0); box-shadow: var(--shadow); }
+.kpi.ini-kpi-sel {
+  border-top-color: var(--accent); border-right-color: var(--accent); border-bottom-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), var(--shadow-md);
+  background: var(--accent-soft);
+}
+.kpi.ini-kpi-sel .lbl { color: var(--accent-ink); }
 /* En telefono, dos por fila: apiladas, las cuatro empujaban la lista una
    pantalla entera hacia abajo. */
 @media (max-width: 560px) {
@@ -332,7 +360,7 @@
    se toca), con su globo de GloboAyuda (assets/css/globo-ayuda.css). */
 .kpi.ini-kpi-ctx { padding-top: 20px; }
 .ini-kpi-ayuda {
-  position: absolute; top: 0; left: 0; right: 0; z-index: 1;
+  position: absolute; top: 0; left: 0; right: 0; z-index: 2;
   display: block; height: 13px; margin: 0; padding: 0; border: 0;
   background: var(--accent-soft); color: var(--accent-deep);
   font-family: inherit; font-size: 7.5px; font-weight: 500; line-height: 13px;
@@ -440,11 +468,22 @@
   min-width: 0; text-align: right;
 }
 .ini-semaforo {
-  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 14px;
+  display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px 4px;
   font-size: 12px; color: var(--ink-2);
 }
-.ini-semaforo-op { white-space: nowrap; font-variant-numeric: tabular-nums; cursor: default; }
+/* Cada categoria es un boton que filtra la lista (como las tarjetas): una
+   pastilla sin fondo que lo toma al pasar y, marcada, el anillo de la
+   tarjeta elegida. El relleno compensa el hueco que antes daba el gap. */
+.ini-semaforo-op {
+  white-space: nowrap; font-variant-numeric: tabular-nums;
+  margin: 0; padding: 2px 8px; border: 1px solid transparent; border-radius: 999px;
+  background: none; font: inherit; color: inherit; cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
 .ini-semaforo-op b { color: var(--ink); }
+.ini-semaforo-op:hover { background: var(--accent-soft); border-color: var(--accent-line); }
+.ini-semaforo-op:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ini-semaforo-op.sel { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-ink); }
 
 .ini-tabla-caja {
   border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
