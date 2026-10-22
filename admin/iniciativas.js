@@ -108,7 +108,9 @@ window.Iniciativas = (function () {
   var ROTULOS = {
     tipo: 'Tipo de iniciativa', po: 'Product Owner', so: 'Service Owner', categoria: 'Categoría',
     titulo: 'Título', analisis: 'Descripción', descripcion: 'Descripción', observaciones: 'Observaciones',
-    volumetria: 'Volumetría', pct: '% Disminución', tickets: 'Tickets a reducir', rca: 'RCA'
+    volumetria: 'Volumetría', pct: '% Disminución', tickets: 'Tickets a reducir', rca: 'RCA',
+    // Errores que solo da el servidor (admin_iniciativas_validar.ashx).
+    solicitante: 'Solicitante', token: 'Borrador'
   };
 
   // ---------------------------------------------------------------------
@@ -214,6 +216,27 @@ window.Iniciativas = (function () {
     pct = String(pct === null || pct === undefined ? '' : pct).trim();
     if (pct === '' || VALIDAR.porcentaje(pct)) return null;
     return Math.floor((volumetria * Math.round(Number(pct) * 100) + 5000) / 10000);
+  }
+
+  // Token del borrador: un GUID v4 que el servidor usa SOLO para no guardar
+  // dos veces el mismo envio (doble clic, respuesta perdida). No dice quien
+  // es nadie. crypto.getRandomValues existe tambien fuera de https (el sitio
+  // es http de intranet, donde crypto.randomUUID no esta); sin crypto, al
+  // azar comun: basta con que no se repita entre borradores.
+  function nuevoToken(cripto) {
+    var b = [];
+    var c = cripto === undefined ? (typeof window !== 'undefined' && window.crypto) : cripto;
+    if (c && typeof c.getRandomValues === 'function') {
+      var a = new Uint8Array(16);
+      c.getRandomValues(a);
+      for (var i = 0; i < 16; i++) b.push(a[i]);
+    } else {
+      for (var j = 0; j < 16; j++) b.push(Math.floor(Math.random() * 256));
+    }
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    var h = b.map(function (x) { return (x < 16 ? '0' : '') + x.toString(16); }).join('');
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-' + h.slice(12, 16) + '-' + h.slice(16, 20) + '-' + h.slice(20);
   }
 
   // Campos propios de cada Tipo de iniciativa, por nombre exacto del tipo:
@@ -325,6 +348,8 @@ window.Iniciativas = (function () {
       // Atada a su categoria: la de otra (vieja o que llega tarde) no se usa.
       this.volumen = null;
       this.rca = null;         // el File elegido (no se sube a ningun lado)
+      // Un borrador = un token: reenviarlo no crea otra solicitud.
+      this.token = nuevoToken();
     }
 
     camposTipo() {
@@ -532,7 +557,9 @@ window.Iniciativas = (function () {
     }
 
     // Los campos con los nombres que espera admin_iniciativas_validar.ashx.
-    // disponible_cliente va solo como dato: el servidor no lo usa.
+    // disponible_cliente va solo como dato: el servidor no lo usa. token:
+    // el del borrador (anti-duplicado). Nunca viajan nombre, cuenta ni
+    // correo de nadie: el servidor los resuelve.
     // volumetria: la de la categoria (volumetria()), '' si no hay. Los
     // tickets a reducir no viajan: el validador no tiene ese campo.
     camposEnvio() {
@@ -542,7 +569,7 @@ window.Iniciativas = (function () {
         tipo: this.tipo, po: sel[0] || '', so: sel[1] || '', categoria: sel[2] || '',
         titulo: v.titulo || '', descripcion: v.analisis || '', observaciones: v.observaciones || '',
         volumetria: vol === null ? '' : String(vol), pct: String(v.pct || '').trim(),
-        disponible_cliente: max === null ? '' : String(max)
+        disponible_cliente: max === null ? '' : String(max), token: this.token
       };
     }
 
@@ -689,7 +716,7 @@ window.Iniciativas = (function () {
     // alta y la edicion de ADM solo validan en el servidor (501, no
     // guardan); el handler exige ADM por su cuenta (AccesoAdmin.ExigirAdm).
     fijarRol(rol) {
-      if (this.denegada) return;
+      if (this.denegada || this.soloSolicitud) return;
       this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
       this.aplicarPestanas();
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(this.rol);
@@ -718,6 +745,24 @@ window.Iniciativas = (function () {
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = true; });
       this.$('iniTabs').hidden = true;
       this.$('iniDenegado').hidden = false;
+    }
+
+    // Cuenta SIN rol ADM/MOD con el interruptor IniciativasAbiertas
+    // (admin_sesion: solicitante y no autorizado): solo Nueva solicitud. Sin
+    // pestañas, sin registro ni "Volver" (no hay a donde). Solo UX: el
+    // servidor ya le niega todo handler que no sea de Nueva solicitud
+    // (AccesoIniciativas). Irreversible en esta carga de pagina.
+    modoSolicitante() {
+      if (this.denegada) return;
+      var self = this;
+      this.soloSolicitud = true;
+      this.rol = null;
+      if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
+      if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle(true);
+      this.$('iniTabs').hidden = true;
+      this.$('btnVolver').hidden = true;
+      Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = true; });
+      this.mostrarVista('nueva');
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -834,10 +879,12 @@ window.Iniciativas = (function () {
     mostrarVista(nombre) {
       var self = this;
       if (!VISTAS[nombre] || this.denegada) return;
+      // Modo solicitante: Nueva solicitud y nada mas.
+      if (this.soloSolicitud && nombre !== 'nueva') return;
       if (VISTAS_SOLO_ADM[nombre] && this.rol !== 'ADM') return;
       // El alta necesita su modulo (admin/iniciativa-admin.js); Administracion no.
       if (nombre === 'crear' && !this.crearAdmin) return;
-      if (VISTAS_ADM_MOD[nombre] && this.rol !== 'ADM' && this.rol !== 'MOD') return;
+      if (VISTAS_ADM_MOD[nombre] && this.rol !== 'ADM' && this.rol !== 'MOD' && !this.soloSolicitud) return;
       // Salir del registro con cambios sin guardar en el detalle: se
       // pregunta; si no se descartan, la pestana no cambia.
       if (nombre !== 'iniciativas' && this.registro && this.registro.cerrarDetalle &&
@@ -1180,8 +1227,11 @@ window.Iniciativas = (function () {
     }
 
     // Primero lo que el navegador ya sabe (faltantes, formatos); si pasa, el
-    // servidor vuelve a validar TODO, con catalogo y capacidad actuales. No
-    // se guarda nada en ningun caso.
+    // servidor vuelve a validar TODO, con catalogo y capacidad actuales, y
+    // resuelve quien solicita y el correo del PO. Si la base ya guarda
+    // solicitudes (sql/29) la guarda: guardada = true y su numero; entonces
+    // el borrador se reemplaza por uno limpio (otro token). El mismo token
+    // reenviado devuelve el mismo numero (nuevo = false), nunca otra.
     validar() {
       var self = this, s = this.solicitud;
       if (!s) return Promise.resolve();
@@ -1206,11 +1256,16 @@ window.Iniciativas = (function () {
           return r.json().catch(function () { return null; }).then(function (json) {
             if (self.solicitud !== s) return;
             if (json && typeof json.valida === 'boolean') {
-              self.mostrarResultado(json.valida, json.valida
-                ? (typeof json.numero_solicitud === 'string' && json.numero_solicitud
-                    ? 'La solicitud pasó la validación del servidor. Número de solicitud: ' + json.numero_solicitud + '.'
-                    : 'La solicitud pasó la validación del servidor. No se guardó: falta el número de solicitud y el destino del RCA.')
-                : 'El servidor rechazó la solicitud:', Array.isArray(json.errores) ? json.errores : []);
+              var guardada = json.valida && json.guardada === true &&
+                typeof json.numero_solicitud === 'string' && json.numero_solicitud;
+              self.mostrarResultado(json.valida, guardada
+                ? (json.nuevo === false
+                    ? 'Esta solicitud ya estaba guardada con el número ' + json.numero_solicitud + '. No se creó otra.'
+                    : 'Solicitud guardada. Número de solicitud: ' + json.numero_solicitud + '.') + self.textoDestinatarios(json)
+                : json.valida
+                  ? 'La solicitud pasó la validación del servidor. No se guardó: el guardado de solicitudes todavía no está habilitado.'
+                  : 'El servidor rechazó la solicitud:', Array.isArray(json.errores) ? json.errores : []);
+              if (guardada) self.nuevoBorrador();
             } else {
               self.mostrarResultado(false, (json && json.error) || ('El servidor respondió ' + r.status + '.'), []);
             }
@@ -1220,6 +1275,31 @@ window.Iniciativas = (function () {
           if (self.solicitud === s) self.mostrarResultado(false, 'No se pudo conectar con el servidor.', []);
         })
         .then(function () { boton.disabled = false; });
+    }
+
+    // " Solicitante: ... · Product Owner: ..." con lo que resolvio el
+    // servidor (nunca lo capturado).
+    textoDestinatarios(json) {
+      var partes = [];
+      var sol = json && json.solicitante;
+      if (sol && typeof sol.correo === 'string' && sol.correo) {
+        partes.push('Solicitante: ' + (typeof sol.nombre === 'string' && sol.nombre ? sol.nombre + ' <' + sol.correo + '>' : sol.correo));
+      }
+      if (json && typeof json.product_owner_correo === 'string' && json.product_owner_correo) {
+        partes.push('Product Owner: ' + json.product_owner_correo);
+      }
+      return partes.length ? ' ' + partes.join(' · ') + '.' : '';
+    }
+
+    // Tras guardar: el mismo catalogo, un borrador limpio (otro token). El
+    // resultado se queda a la vista.
+    nuevoBorrador() {
+      if (!this.solicitud) return;
+      this.solicitud = new SolicitudNueva(this.solicitud.catalogo);
+      this.$('campoRca').value = '';
+      this.pintarCamposComunes();
+      this.pintarCamposTipo();
+      this.pintar();
     }
 
     // valida: true / false / null (en curso). errores: [{campo, mensaje}].
@@ -1336,6 +1416,7 @@ window.Iniciativas = (function () {
     VALIDAR: VALIDAR,
     fraccionDe: fraccionDe,
     ticketsDe: ticketsDe,
+    nuevoToken: nuevoToken,
     DEFINICIONES_TIPO: DEFINICIONES_TIPO,
     CatalogoIniciativas: CatalogoIniciativas,
     CascadaOrganizacional: CascadaOrganizacional,

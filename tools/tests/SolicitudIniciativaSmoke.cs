@@ -386,15 +386,24 @@ public static class SolicitudIniciativaSmoke
         {
             var ruta = @"handlers\admin_iniciativas_" + h + ".ashx";
             var texto = System.IO.File.ReadAllText(ruta);
-            // Los cinco son de ADM y MOD: Exigir. Nueva solicitud (capacidad,
-            // validar) dejo de ser solo ADM el 2026-10-09; lo solo-ADM
+            // registro y diagnostico son de ADM y MOD: Exigir. Los de Nueva
+            // solicitud (catalogos, capacidad, validar) usan ExigirSolicitud
+            // (ADM/MOD, o el interruptor IniciativasAbiertas; 2026-10-22);
+            // catalogos ?duenos=1 va antes con ExigirAdm. Lo solo-ADM
             // (consola de correos) se prueba en AccesoAdminHttpSmoke.
-            var soloAdm = false;
-            var linea = "if (!AccesoAdmin.Exigir(context)) return;";
+            var deSolicitud = h == "catalogos" || h == "capacidad" || h == "validar";
+            var linea = deSolicitud ? "if (!AccesoIniciativas.ExigirSolicitud(context)) return;"
+                                    : "if (!AccesoAdmin.Exigir(context)) return;";
             var exigir = texto.IndexOf(linea, StringComparison.Ordinal);
             var cuerpo = texto.IndexOf("public void ProcessRequest(HttpContext context)", StringComparison.Ordinal);
             var siguiente = texto.IndexOf(';', cuerpo);   // primera sentencia del metodo
-            Check("D3 " + h + ": " + (soloAdm ? "ExigirAdm" : "Exigir") + " es la primera sentencia", true,
+            if (h == "catalogos")
+            {
+                var adm = texto.IndexOf("if (!AccesoAdmin.ExigirAdm(context,", cuerpo, StringComparison.Ordinal);
+                Check("D3 catalogos: ?duenos=1 ExigirAdm es la primera sentencia", true, adm > cuerpo && texto.IndexOf(';', adm) == siguiente);
+                siguiente = texto.IndexOf(';', siguiente + 1);
+            }
+            Check("D3 " + h + ": " + (deSolicitud ? "ExigirSolicitud" : "Exigir") + " es la primera sentencia", true,
                   exigir > cuerpo && texto.IndexOf(';', exigir) == siguiente);
             Check("D3 " + h + ": ruta protegida por el modulo", true,
                   AccesoAdmin.EsRutaProtegida("~/handlers/admin_iniciativas_" + h + ".ashx"));

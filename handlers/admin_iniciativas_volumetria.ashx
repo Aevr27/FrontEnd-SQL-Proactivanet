@@ -13,7 +13,9 @@
 //   405 si no es GET
 //   503 no se pudo leer la vista: { error, tipo: "VolumetriaNoDisponible" }.
 //       Nunca se responde 0 cuando no se pudo leer.
-//   403 AccesoAdmin.Exigir (ADM o MOD), antes de tocar la base.
+//   403 AccesoIniciativas.ExigirSolicitud (ADM o MOD, o cualquier cuenta
+//       Windows autenticada con el interruptor IniciativasAbiertas: Nueva
+//       solicitud la pide), antes de tocar la base.
 //
 //   GET ...?alcance=total&ruta=...   SOLO ADM (Crear / Modificar de ADM)
 //   200 { "alcance": "total", "rutas": [ { "ruta", "llave", "estado": ok|cero|ruta_invalida,
@@ -52,7 +54,7 @@ public class AdminIniciativasVolumetria : IHttpHandler
         var alcance = context.Request.QueryString["alcance"];
         var total = string.Equals(alcance, VolumetriaTotalCategoria.ALCANCE, StringComparison.Ordinal);
         if (total ? !AccesoAdmin.ExigirAdm(context, "Solo un administrador (ADM) consulta la volumetria total.")
-                  : !AccesoAdmin.Exigir(context)) return;
+                  : !AccesoIniciativas.ExigirSolicitud(context)) return;
 
         DashboardHandler.Responder(context, delegate
         {

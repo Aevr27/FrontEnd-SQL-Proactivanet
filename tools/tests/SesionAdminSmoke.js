@@ -125,6 +125,35 @@ Promise.all([
     comprobar('correo sin saludo tambien pide ?persona=1', r[6], '../handlers/admin_sesion.ashx?persona=1');
   });
 }).then(function () {
+  // Solicitante (interruptor IniciativasAbiertas): la entrada Iniciativas
+  // (data-solo-solicitante) solo para quien NO es ADM/MOD y el servidor
+  // dice solicitante: true; el saludo tambien para el.
+  function conSolicitante(cuerpo) {
+    var admin = [{ hidden: true }], sol = [{ hidden: true }], adm = [{ hidden: true }];
+    var doc = { querySelectorAll: function (sel) {
+      return sel === '[data-solo-admin]' ? admin : sel === '[data-solo-adm]' ? adm : sel === '[data-solo-solicitante]' ? sol : [];
+    } };
+    var saludo = { textContent: '', hidden: true };
+    return new SesionAdmin('../', respuesta(200, cuerpo)).aplicar(doc, saludo).then(function (s) {
+      return [s.solicitante, admin[0].hidden, sol[0].hidden, adm[0].hidden, saludo.hidden].join('|');
+    });
+  }
+  return Promise.all([
+    conSolicitante({ autorizado: false, solicitante: true, nombre: 'Juan Perez' }),
+    conSolicitante({ autorizado: false, solicitante: false, nombre: 'Juan Perez' }),
+    conSolicitante({ autorizado: false, solicitante: 'true', nombre: 'Juan Perez' }),
+    conSolicitante({ autorizado: false, nombre: 'Juan Perez' }),
+    conSolicitante({ autorizado: true, rol: 'MOD', solicitante: true }),
+    conSolicitante({ autorizado: true, rol: 'ADM' }),
+  ]).then(function (r) {
+    comprobar('solicitante: Iniciativas visible, Administracion oculta, saludo', r[0], 'true|true|false|true|false');
+    comprobar('solicitante false: todo oculto, sin saludo', r[1], 'false|true|true|true|true');
+    comprobar('solicitante "true" (texto): no cuenta', r[2], 'false|true|true|true|true');
+    comprobar('respuesta vieja sin solicitante: todo oculto', r[3], 'false|true|true|true|true');
+    comprobar('MOD: Administracion, no la entrada de solicitante', r[4], 'true|false|true|true|true');
+    comprobar('ADM: solicitante implicito, Administracion y Crear', r[5], 'true|false|true|false|true');
+  });
+}).then(function () {
   console.log(fallos === 0 ? 'OK: todo paso' : 'FALLOS: ' + fallos);
   process.exit(fallos === 0 ? 0 : 1);
 });

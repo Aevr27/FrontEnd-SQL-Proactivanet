@@ -12,8 +12,9 @@
 //      consola de correos, admin_correos; crear y modificar directo,
 //      admin_iniciativas_gestion; el alta de categoria, admin_categorias_alta;
 //      y ?duenos=1 de admin_iniciativas_catalogos). Nueva solicitud
-//      (admin_iniciativas_validar y admin_iniciativas_capacidad) es de ADM
-//      y MOD: Exigir.
+//      (admin_iniciativas_validar, _capacidad, _catalogos, _volumetria) es
+//      de ADM y MOD y, con el interruptor IniciativasAbiertas, de cualquier
+//      cuenta autenticada: AccesoIniciativas.ExigirSolicitud.
 //
 // REGLA (falla hacia el MENOR privilegio)
 // ---------------------------------------

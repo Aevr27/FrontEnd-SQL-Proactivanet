@@ -179,6 +179,19 @@
             <span class="mnav-txt">Administración</span>
           </a>
         </li>
+        <!-- Iniciativas: la misma pagina en modo "solo Nueva solicitud" para
+             una cuenta SIN rol ADM/MOD, cuando el interruptor
+             IniciativasAbiertas esta encendido (SesionAdmin: solicitante y
+             no autorizado). Oculta por omision; solo UX: el servidor lo
+             exige en la pagina y en sus handlers (AccesoIniciativas). -->
+        <li data-solo-solicitante hidden>
+          <a class="mnav" id="mnav-solicitar" href="admin/iniciativas.html" title="Solicitar una iniciativa">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M12 5v14"/><path d="M5 12h14"/>
+            </svg>
+            <span class="mnav-txt">Iniciativas</span>
+          </a>
+        </li>
       </ul>
     </nav>
   </aside>

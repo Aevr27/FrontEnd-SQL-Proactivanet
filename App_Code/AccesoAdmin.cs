@@ -37,6 +37,10 @@
 //   2. AdminAccesoModulo (abajo), registrado en <system.webServer><modules>,
 //      cubre ademas la pagina estatica admin/iniciativas.html, que ningun
 //      handler sirve. Ver Web.config.ejemplo.
+//   EXCEPCION (2026-10-22): con el interruptor IniciativasAbiertas, la
+//   pagina y los cuatro handlers de Nueva solicitud tambien dejan pasar a
+//   cualquier cuenta Windows autenticada (AccesoIniciativas.ExigirSolicitud,
+//   App_Code/AccesoIniciativas.cs). No da rol: sigue siendo VIEWER.
 //
 // ROL (ADM / MOD / VIEWER)
 // ------------------------
@@ -49,7 +53,8 @@
 // admin_categorias_alta; los duenos de categoria, ?duenos=1 de
 // admin_iniciativas_catalogos) llama a ExigirAdm():
 // quien entra como MOD recibe 403 { "tipo": "RolInsuficiente" }. Nueva
-// solicitud (validar, capacidad) es de ADM y MOD: Exigir(). El rol se
+// solicitud (catalogos, capacidad, volumetria, validar) es de ADM y MOD, y
+// de los demas solo con el interruptor: AccesoIniciativas.ExigirSolicitud. El rol se
 // consulta una vez por request (HttpContext.Items); sin identidad
 // autenticada no se consulta.
 
@@ -213,7 +218,9 @@ public static class AccesoAdmin
         return false;
     }
 
-    public static void Rechazar(HttpContext context, bool json)
+    // `mensaje` cambia solo el texto (AccesoIniciativas: la solicitud no
+    // esta abierta); el 403 y el tipo AccesoDenegado son los mismos.
+    public static void Rechazar(HttpContext context, bool json, string mensaje = null)
     {
         var r = context.Response;
         r.Clear();
@@ -221,7 +228,7 @@ public static class AccesoAdmin
         r.TrySkipIisCustomErrors = true;
         r.Cache.SetCacheability(HttpCacheability.NoCache);
 
-        const string Mensaje = "No tienes acceso a la administracion de iniciativas.";
+        var Mensaje = mensaje ?? "No tienes acceso a la administracion de iniciativas.";
         if (json)
         {
             r.ContentType = "application/json; charset=utf-8";
@@ -251,14 +258,26 @@ public sealed class AdminAccesoModulo : IHttpModule
         app.AuthorizeRequest += delegate (object sender, EventArgs e)
         {
             var ctx = ((HttpApplication)sender).Context;
-            var ruta = ctx.Request.AppRelativeCurrentExecutionFilePath;
-            if (!AccesoAdmin.EsRutaProtegida(ruta)) return;
-            if (AccesoAdmin.PuedeEntrar(ctx)) return;
-
-            var esHandler = ruta.EndsWith(".ashx", StringComparison.OrdinalIgnoreCase);
-            AccesoAdmin.Rechazar(ctx, esHandler);
+            if (Revisar(ctx, ctx.Request.AppRelativeCurrentExecutionFilePath)) return;
             ((HttpApplication)sender).CompleteRequest();
         };
+    }
+
+    // true = sigue; false = ya respondio 403 (la pagina en HTML, un handler
+    // en JSON). Aparte para probarlo sin HttpApplication.
+    public static bool Revisar(HttpContext ctx, string ruta)
+    {
+        if (!AccesoAdmin.EsRutaProtegida(ruta)) return true;
+        if (AccesoAdmin.PuedeEntrar(ctx)) return true;
+        // La pagina y los cuatro handlers de Nueva solicitud, solo con el
+        // interruptor IniciativasAbiertas (App_Code/AccesoIniciativas.cs).
+        var solicitante = AccesoIniciativas.EsRutaSolicitante(ruta);
+        if (solicitante && AccesoIniciativas.PuedeSolicitar(ctx)) return true;
+
+        var esHandler = ruta.EndsWith(".ashx", StringComparison.OrdinalIgnoreCase);
+        if (solicitante) AccesoIniciativas.Rechazar(ctx, esHandler);
+        else AccesoAdmin.Rechazar(ctx, esHandler);
+        return false;
     }
 
     public void Dispose() { }
