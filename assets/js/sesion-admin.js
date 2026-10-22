@@ -11,7 +11,7 @@
      - muestra los marcados con data-solo-solicitante (la entrada
        Iniciativas del menu) solo si el servidor dice solicitante: true y
        NO autorizado: una cuenta sin rol con el interruptor
-       IniciativasAbiertas encendido (AccesoIniciativas). ADM/MOD siguen
+       INICIATIVAS_ABIERTAS encendido (AccesoIniciativas). ADM/MOD siguen
        viendo Administracion;
      - con { persona: true }, pinta "Bienvenido, <Nombre>" en el elemento
        que se le pase, solo si el servidor resolvio el nombre, y el correo

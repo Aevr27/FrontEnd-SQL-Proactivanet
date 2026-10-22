@@ -51,7 +51,7 @@
 // Categorias). No crea ni cambia nada en la base, tampoco con ?duenos=1.
 //
 // ACCESO: AccesoIniciativas.ExigirSolicitud (rol ADM o MOD, o cualquier
-// cuenta Windows autenticada con el interruptor IniciativasAbiertas: es el
+// cuenta Windows autenticada con el interruptor INICIATIVAS_ABIERTAS: es el
 // catalogo de Nueva solicitud); ?duenos=1 ExigirAdm (solo ADM) y rutas_adm
 // solo con rol ADM. El resto recibe 403 antes de tocar la base.
 

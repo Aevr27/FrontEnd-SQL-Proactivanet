@@ -1,7 +1,7 @@
 /* =========================================================================
    sql/diag_solicitud_iniciativa_correos.sql - SOLO LECTURA (SELECT).
 
-   Antes de aplicar sql/29 y de encender IniciativasAbiertas: cuantos Product
+   Antes de aplicar sql/29 y de encender INICIATIVAS_ABIERTAS (sql/30): cuantos Product
    Owners de la cascada tienen UN correo claro en dbo.CatPersona, y si la
    base ya tiene las piezas de sql/29. No escribe nada; se puede correr en
    la VM sin aprobacion.

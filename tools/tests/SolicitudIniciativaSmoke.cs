@@ -388,7 +388,7 @@ public static class SolicitudIniciativaSmoke
             var texto = System.IO.File.ReadAllText(ruta);
             // registro y diagnostico son de ADM y MOD: Exigir. Los de Nueva
             // solicitud (catalogos, capacidad, validar) usan ExigirSolicitud
-            // (ADM/MOD, o el interruptor IniciativasAbiertas; 2026-10-22);
+            // (ADM/MOD, o el interruptor INICIATIVAS_ABIERTAS; 2026-10-22);
             // catalogos ?duenos=1 va antes con ExigirAdm. Lo solo-ADM
             // (consola de correos) se prueba en AccesoAdminHttpSmoke.
             var deSolicitud = h == "catalogos" || h == "capacidad" || h == "validar";

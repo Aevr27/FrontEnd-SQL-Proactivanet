@@ -16,7 +16,7 @@
 //        exigen aparte.
 //        "solicitante": true|false = AccesoIniciativas.PuedeSolicitar: puede
 //        abrir Nueva solicitud (ADM/MOD siempre; los demas solo con el
-//        interruptor IniciativasAbiertas de Web.config y cuenta Windows
+//        interruptor INICIATIVAS_ABIERTAS de adm.Interruptor y cuenta Windows
 //        autenticada). Con autorizado false y solicitante true, la pagina
 //        se abre en modo "solo Nueva solicitud" y el menu muestra la entrada
 //        Iniciativas en vez de Administracion. Tambien solo UX: los cuatro

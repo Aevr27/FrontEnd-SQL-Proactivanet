@@ -37,8 +37,9 @@
 //   2. AdminAccesoModulo (abajo), registrado en <system.webServer><modules>,
 //      cubre ademas la pagina estatica admin/iniciativas.html, que ningun
 //      handler sirve. Ver Web.config.ejemplo.
-//   EXCEPCION (2026-10-22): con el interruptor IniciativasAbiertas, la
-//   pagina y los cuatro handlers de Nueva solicitud tambien dejan pasar a
+//   EXCEPCION (2026-10-22): con el interruptor INICIATIVAS_ABIERTAS de la
+//   base (adm.Interruptor, sql/30; ya no Web.config), la pagina y los
+//   cuatro handlers de Nueva solicitud tambien dejan pasar a
 //   cualquier cuenta Windows autenticada (AccesoIniciativas.ExigirSolicitud,
 //   App_Code/AccesoIniciativas.cs). No da rol: sigue siendo VIEWER.
 //
@@ -270,7 +271,7 @@ public sealed class AdminAccesoModulo : IHttpModule
         if (!AccesoAdmin.EsRutaProtegida(ruta)) return true;
         if (AccesoAdmin.PuedeEntrar(ctx)) return true;
         // La pagina y los cuatro handlers de Nueva solicitud, solo con el
-        // interruptor IniciativasAbiertas (App_Code/AccesoIniciativas.cs).
+        // interruptor INICIATIVAS_ABIERTAS (App_Code/AccesoIniciativas.cs).
         var solicitante = AccesoIniciativas.EsRutaSolicitante(ruta);
         if (solicitante && AccesoIniciativas.PuedeSolicitar(ctx)) return true;
 

@@ -74,14 +74,12 @@
          App_Code/AdminWhitelistTemporal.cs hasta la autorizacion en base. -->
     <add key="AdminAllowedUsers"        value="SORIANA\user1;SORIANA\user2;SORIANA\user3;SORIANA\user4" />
 
-    <!-- Admin -> Iniciativas: deja que CUALQUIER cuenta Windows autenticada
-         (sin rol ADM/MOD en dbo.UsuariosAdmin) abra Nueva solicitud y la
-         envie. Solo esa vista y sus cuatro handlers (catalogos, capacidad,
-         volumetria, validar); el resto de Admin sigue siendo de ADM/MOD.
-         ADM y MOD entran igual con "true" o "false". Solo "true" lo
-         enciende; ausente o cualquier otro valor: apagado. Ver
-         App_Code/AccesoIniciativas.cs. -->
-    <add key="IniciativasAbiertas"      value="false" />
+    <!-- Admin -> Iniciativas, Nueva solicitud para CUALQUIER cuenta Windows
+         autenticada (sin rol ADM/MOD): YA NO se configura aqui. El
+         interruptor es la fila INICIATIVAS_ABIERTAS de adm.Interruptor en
+         la base (sql/30_interruptor_iniciativas.sql; encender/apagar con el
+         UPDATE de su cabecera). La antigua clave IniciativasAbiertas se
+         ignora: no la agregues. Ver App_Code/AccesoIniciativas.cs. -->
 
     <!-- SOLO DESARROLLO LOCAL (IIS Express sin Autenticacion de Windows):
          Admin -> Iniciativas como ADM/MOD para la cuenta de

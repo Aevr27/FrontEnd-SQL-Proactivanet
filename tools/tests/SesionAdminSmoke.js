@@ -125,7 +125,7 @@ Promise.all([
     comprobar('correo sin saludo tambien pide ?persona=1', r[6], '../handlers/admin_sesion.ashx?persona=1');
   });
 }).then(function () {
-  // Solicitante (interruptor IniciativasAbiertas): la entrada Iniciativas
+  // Solicitante (interruptor INICIATIVAS_ABIERTAS): la entrada Iniciativas
   // (data-solo-solicitante) solo para quien NO es ADM/MOD y el servidor
   // dice solicitante: true; el saludo tambien para el.
   function conSolicitante(cuerpo) {

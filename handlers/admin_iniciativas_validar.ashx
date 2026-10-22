@@ -33,7 +33,7 @@
 //
 // ACCESO: AccesoIniciativas.ExigirSolicitud: rol ADM o MOD de
 // dbo.UsuariosAdmin, o cualquier cuenta Windows autenticada si el
-// interruptor IniciativasAbiertas esta encendido (403 AccesoDenegado antes
+// interruptor INICIATIVAS_ABIERTAS esta encendido (403 AccesoDenegado antes
 // de leer nada en otro caso). Su UNICO llamador es Nueva solicitud
 // (admin/iniciativas.js); no aprueba ni crea iniciativas. La creacion
 // directa (solo ADM) NO pasa por este handler: va a
