@@ -103,6 +103,13 @@ window.Iniciativas = (function () {
   var URL_CAPACIDAD = '../handlers/admin_iniciativas_capacidad.ashx';
   var URL_VALIDAR = '../handlers/admin_iniciativas_validar.ashx';
 
+  // RCA por el sitio APAGADO (2026-10-22): todavia no hay destino de
+  // subida, asi que el bloque 04 solo dice a que correo mandarlo; no se pide
+  // ni se envia archivo (el servidor tampoco lo exige: SolicitudIniciativa.
+  // RcaEnSitio). enSitio = true vuelve a la regla de antes (obligatorio para
+  // Problem). El correo lo dio el usuario; no sale de la base.
+  var RCA = { enSitio: false, correo: 'omaralus@soriana.com' };
+
   // Rotulos de los campos obligatorios, para avisar cuales faltan. Las
   // claves son las de SolicitudNueva (Descripcion = 'analisis').
   var ROTULOS = {
@@ -383,7 +390,7 @@ window.Iniciativas = (function () {
 
     // ---- RCA ----
     // Obligatorio solo si el tipo elegido es el Problem del catalogo.
-    rcaObligatorio() { return this.tipo !== '' && this.tipo === this.catalogo.tipoProblem; }
+    rcaObligatorio() { return RCA.enSitio && this.tipo !== '' && this.tipo === this.catalogo.tipoProblem; }
     elegirRca(archivo) { this.rca = archivo && archivo.size > 0 ? archivo : null; }
 
     // ---- capacidad de la categoria ----
@@ -1081,6 +1088,8 @@ window.Iniciativas = (function () {
       input.setAttribute('aria-required', e.obligatorio ? 'true' : 'false');
       this.$('motRca').textContent = e.motivo;
       this.$('rotRcaObligatorio').hidden = !e.obligatorio;
+      this.$('iniRcaArchivo').hidden = !RCA.enSitio;
+      this.$('iniRcaCorreo').hidden = RCA.enSitio;
     }
 
     // 02 y 03 se ven al elegir el tipo; antes, su aviso.
@@ -1244,7 +1253,7 @@ window.Iniciativas = (function () {
       var campos = s.camposEnvio();
       var datos = new FormData();
       Object.keys(campos).forEach(function (k) { datos.append(k, campos[k]); });
-      if (s.rca) datos.append('rca', s.rca, s.rca.name);
+      if (RCA.enSitio && s.rca) datos.append('rca', s.rca, s.rca.name);
 
       var boton = this.$('btnValidar');
       boton.disabled = true;
@@ -1414,6 +1423,7 @@ window.Iniciativas = (function () {
     CAMPOS_COMUNES: CAMPOS_COMUNES,
     AYUDA_FIJA: AYUDA_FIJA,
     VALIDAR: VALIDAR,
+    RCA: RCA,
     fraccionDe: fraccionDe,
     ticketsDe: ticketsDe,
     nuevoToken: nuevoToken,

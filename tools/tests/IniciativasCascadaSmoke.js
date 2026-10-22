@@ -803,7 +803,17 @@ pruebas.push(function () {
   Check('S2 sin tipo_problem: ningun tipo exige RCA', false,
     (function () { var n = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK)); n.elegirTipo('PRB'); return n.rcaObligatorio(); })());
 
-  // RCA condicional
+  // RCA por correo (RCA.enSitio = false, hoy): ningun tipo lo pide.
+  Check('S2b hoy el RCA no va por el sitio; aviso al correo', [false, 'omaralus@soriana.com'], [I.RCA.enSitio, I.RCA.correo]);
+  (function () {
+    var n = new I.SolicitudNueva(cat);
+    n.elegirTipo('PRB');
+    Check('S2c RCA por correo: Problem no exige archivo', [false, false, false],
+      [n.rcaObligatorio(), n.estado().rca.obligatorio, n.faltantes().indexOf('rca') >= 0]);
+  })();
+
+  // RCA condicional (regla para cuando vuelva al sitio: RCA.enSitio = true)
+  I.RCA.enSitio = true;
   var s = new I.SolicitudNueva(cat);
   s.elegirTipo('PRB');
   Check('S3 Problem: RCA obligatorio', [true, 'Obligatorio para Problem. El archivo todavía no se guarda.'],
@@ -815,6 +825,7 @@ pruebas.push(function () {
   Check('S3 archivo vacio no cuenta', true, s.faltantes().indexOf('rca') >= 0);
   s.elegirTipo('ADO');
   Check('S4 otro tipo: RCA opcional', [false, false], [s.rcaObligatorio(), s.faltantes().indexOf('rca') >= 0]);
+  I.RCA.enSitio = false;
 
   // Requeridos
   var r = new I.SolicitudNueva(cat);
@@ -881,10 +892,11 @@ pruebas.push(function () {
   }, function () { return respuestaValidar(); }, llamadas);
   return P.cargar(pedir).then(function () {
     Check('S16 selector: Problem primero', ['PRB', 'ADO', 'MAP'], p.sel('selTipo').opciones());
-    Check('S16 RCA bloqueado sin tipo', [true, 'Elige primero un Tipo de iniciativa.'], [p.sel('campoRca').disabled, p.sel('motRca').textContent]);
+    Check('S16 RCA: archivo oculto, aviso del correo visible', [true, false, true],
+      [p.sel('iniRcaArchivo').hidden, p.sel('iniRcaCorreo').hidden, /<p class="ini-nota" id="iniRcaCorreo">Adjuntar RCA al correo <a href="mailto:omaralus@soriana\.com">omaralus@soriana\.com<\/a><\/p>/.test(leer('admin/iniciativas.html'))]);
     elegirEn(p, 'selTipo', 'PRB');
-    Check('S17 Problem: RCA habilitado y obligatorio', [false, 'true', false],
-      [p.sel('campoRca').disabled, p.sel('campoRca').getAttribute('aria-required'), p.sel('rotRcaObligatorio').hidden]);
+    Check('S17 Problem: el RCA no se exige (va por correo)', ['false', true, true, false],
+      [p.sel('campoRca').getAttribute('aria-required'), p.sel('rotRcaObligatorio').hidden, p.sel('iniRcaArchivo').hidden, p.sel('iniRcaCorreo').hidden]);
     elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
     return esperar();
   }).then(function () {
@@ -899,8 +911,8 @@ pruebas.push(function () {
     return P.validar().then(function () {
       Check('S19 faltantes: no hay POST', antes, llamadas.length);
       var html = p.sel('iniResultado').innerHTML;
-      Check('S19 lista lo que falta, RCA incluido', [true, true, true, true],
-        [/Título: Falta Título\./.test(html), /RCA: El RCA es obligatorio para Problem\./.test(html),
+      Check('S19 lista lo que falta, sin RCA (va por correo)', [true, false, true, true],
+        [/Título: Falta Título\./.test(html), /RCA/.test(html),
          /% Disminución: Esta categoría solo tiene 40% disponible\./.test(html), p.sel('iniResultado').classList.contains('mal')]);
     });
   }).then(function () {
@@ -916,10 +928,10 @@ pruebas.push(function () {
     var post = llamadas.filter(function (l) { return l[1] === 'POST'; });
     Check('S20 un solo POST, a validar', [1, '../handlers/admin_iniciativas_validar.ashx'], [post.length, post[0] && post[0][0]]);
     var cuerpo = post[0][2];
-    Check('S20 cuerpo: campos y archivo; volumetria = la de la categoria; tickets no viajan',
-      ['PRB', '/A/Cat 1', 'D', '40', '40', 'RCA_v7.pdf', '1247', false],
+    Check('S20 cuerpo: campos sin archivo (RCA por correo); volumetria = la de la categoria; tickets no viajan',
+      ['PRB', '/A/Cat 1', 'D', '40', '40', false, '1247', false],
       [cuerpo.get('tipo'), cuerpo.get('categoria'), cuerpo.get('descripcion'), cuerpo.get('pct'),
-       cuerpo.get('disponible_cliente'), cuerpo.get('rca') && cuerpo.get('rca').name, cuerpo.get('volumetria'),
+       cuerpo.get('disponible_cliente'), cuerpo.has('rca'), cuerpo.get('volumetria'),
        cuerpo.has('tickets')]);
     Check('S20 valida: avisa que no se guardo', [true, true],
       [/No se guardó/.test(p.sel('iniResultado').innerHTML), p.sel('iniResultado').classList.contains('ok')]);
@@ -1156,7 +1168,7 @@ pruebas.push(function () {
     P.mostrarVista('nueva');
     var s = P.solicitud;
     s.elegirTipo('PRB');
-    Check('RS5 MOD: PRB exige RCA en la solicitud (regla sin cambio)', [true, true],
+    Check('RS5 MOD: PRB no exige RCA en la solicitud (va por correo)', [false, false],
       [s.rcaObligatorio(), s.faltantes().indexOf('rca') >= 0]);
     s.elegirTipo('MAP');
     Check('RS5 ... y otro tipo no', false, s.faltantes().indexOf('rca') >= 0);
