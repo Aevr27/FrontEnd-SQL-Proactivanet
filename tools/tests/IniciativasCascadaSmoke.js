@@ -88,11 +88,41 @@ function Documento() {
   var doc = Elemento('document');
   doc.readyState = 'complete';
   doc.getElementById = function (id) { return els[id] || (els[id] = Elemento(id)); };
-  doc.querySelectorAll = function () { return []; };
+  // Solo con selectoresAtributo (pruebas AV): '[data-x]' devuelve los
+  // elementos con ese atributo, como lo recorre SesionAdmin.aplicar. Sin la
+  // bandera, [] como siempre (el resto de las pruebas no cambia).
+  doc.querySelectorAll = function (sel) {
+    var m = doc.selectoresAtributo && /^\[([\w-]+)\]$/.exec(sel);
+    if (!m) return [];
+    return Object.keys(els).map(function (k) { return els[k]; })
+      .filter(function (el) { return el.getAttribute(m[1]) !== null; });
+  };
   doc.createElement = function () { return Elemento(''); };
   doc.body = Elemento('body');
   doc.documentElement = { clientWidth: 1200 };
   return doc;
+}
+
+// Las secciones que SesionAdmin destapa o no: hidden y data-solo-* tal como
+// estan en el HTML (el documento falso no parsea el HTML).
+var IDS_SESION = ['avSeccion', 'crSeccion', 'tab-administracion', 'btnCrearAdmin'];
+function ComoEnElHtml(documento, html) {
+  IDS_SESION.forEach(function (id) {
+    var m = new RegExp('<[a-z]+\\b[^>]*\\bid="' + id + '"[^>]*>').exec(html);
+    if (!m) throw new Error('falta #' + id + ' en admin/iniciativas.html');
+    var el = documento.getElementById(id);
+    el.hidden = /\shidden[\s>]/.test(m[0]);
+    ['data-solo-adm', 'data-solo-admin', 'data-solo-solicitante'].forEach(function (a) {
+      if (new RegExp('\\s' + a + '[\\s>=]').test(m[0])) el.setAttribute(a, '');
+    });
+  });
+}
+
+// SesionAdmin.aplicar de verdad, con admin_sesion respondiendo ADM.
+function SesionAdm(ventana, documento) {
+  return new ventana.SesionAdmin('../', function () {
+    return Promise.resolve({ ok: true, json: function () { return { autorizado: true, rol: 'ADM', solicitante: true }; } });
+  }).aplicar(documento);
 }
 
 // Carga los scripts en una "ventana" nueva con su documento y su fetch.
@@ -110,11 +140,14 @@ function Pagina(pedir, antes) {
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
-  // Como en la pagina: acuse-iniciativa.js antes de iniciativas.js, y la
-  // seccion de avisos con su data-solo-adm del HTML.
+  // Como en la pagina: sesion-admin.js y acuse-iniciativa.js antes de
+  // iniciativas.js; las secciones de ADM con los atributos REALES del HTML.
+  (new Function('window', leer('assets/js/sesion-admin.js')))(ventana);
   (new Function('window', 'Escape', 'fetch', leer('admin/acuse-iniciativa.js')))(ventana, ventana.Escape, pedir);
-  documento.getElementById('avSeccion').setAttribute('data-solo-adm', '');
-  documento.getElementById('avSeccion').hidden = true;
+  ComoEnElHtml(documento, leer('admin/iniciativas.html'));
+  // antes(ventana, documento): ultimo ajuste antes de iniciativas.js (p. ej.
+  // readyState 'loading' para que iniciar() espere a DOMContentLoaded).
+  if (typeof antes === 'function') antes(ventana, documento);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   // Nueva solicitud es de ADM y MOD y no abre sin rol (falla cerrado). Las
@@ -1158,6 +1191,70 @@ pruebas.push(function () {
     [p.ventana.AcuseIniciativa.HABILITADO, P.registro.acuse, P.avisos, av.hidden, av.getAttribute('data-solo-adm')]);
   P.mostrarVista('administracion');
   Check('AO2 abrir Administracion como ADM no pide avisos ni la muestra', [true, null], [av.hidden, P.avisos]);
+});
+
+// AV) La seccion de avisos sigue oculta con SesionAdmin de verdad (ADM), en
+//     los dos ordenes, sin JS de la pagina y con un HTML viejo en cache. Las
+//     demas secciones de ADM si se destapan (control de que la simulacion
+//     sirve).
+function conAtributos(v, d) { d.selectoresAtributo = true; }
+pruebas.push(function () {
+  // Orden 1: la pagina inicia, luego SesionAdmin.
+  var p = Pagina(nunca, conAtributos, 'ADM');
+  return SesionAdm(p.ventana, p.doc).then(function () {
+    Check('AV1 pagina y luego sesion: avisos ocultos; Cambios recientes, pestana y Crear si (ADM)', [true, false, false, false],
+      [p.sel('avSeccion').hidden, p.sel('crSeccion').hidden, p.sel('tab-administracion').hidden, p.sel('btnCrearAdmin').hidden]);
+  });
+});
+pruebas.push(function () {
+  // Orden 2: SesionAdmin primero (la pagina espera a DOMContentLoaded).
+  var p = Pagina(nunca, function (v, d) { d.selectoresAtributo = true; d.readyState = 'loading'; }, null);
+  return SesionAdm(p.ventana, p.doc).then(function () {
+    Check('AV2 sesion antes de iniciar: avisos ocultos; Cambios recientes si', [true, false],
+      [p.sel('avSeccion').hidden, p.sel('crSeccion').hidden]);
+    p.doc.disparar('DOMContentLoaded');
+    p.ventana.IniciativasPagina.fijarRol('ADM');
+    Check('AV2 ... y despues de iniciar: siguen ocultos, sin avisos ni acuse', [true, null, null],
+      [p.sel('avSeccion').hidden, p.ventana.IniciativasPagina.avisos, p.ventana.IniciativasPagina.registro.acuse]);
+  });
+});
+pruebas.push(function () {
+  // Sin JS de la pagina (fallo al iniciar, acuse-iniciativa.js sin cargar):
+  // solo el HTML y SesionAdmin.
+  var ventana = Elemento('window'), d = Documento();
+  d.selectoresAtributo = true;
+  (new Function('window', leer('assets/js/sesion-admin.js')))(ventana);
+  ComoEnElHtml(d, leer('admin/iniciativas.html'));
+  return SesionAdm(ventana, d).then(function () {
+    Check('AV3 sin JS de la pagina: el HTML basta, avisos ocultos; Cambios recientes si', [true, false],
+      [d.getElementById('avSeccion').hidden, d.getElementById('crSeccion').hidden]);
+  });
+});
+pruebas.push(function () {
+  // HTML viejo en cache (avSeccion con data-solo-adm) y JS nuevo.
+  var viejo = leer('admin/iniciativas.html').replace('id="avSeccion" aria-labelledby="avTitulo" hidden>',
+    'id="avSeccion" aria-labelledby="avTitulo" data-solo-adm hidden>');
+  // Control: sin JS de la pagina, SesionAdmin SI destapa ese HTML viejo.
+  var ventana = Elemento('window'), d = Documento();
+  d.selectoresAtributo = true;
+  (new Function('window', leer('assets/js/sesion-admin.js')))(ventana);
+  ComoEnElHtml(d, viejo);
+  return SesionAdm(ventana, d).then(function () {
+    Check('AV4 control: con data-solo-adm y sin JS, SesionAdmin la destapa (la simulacion lo detecta)', false,
+      d.getElementById('avSeccion').hidden);
+    var p1 = Pagina(nunca, function (v, doc) { doc.selectoresAtributo = true; ComoEnElHtml(doc, viejo); }, 'ADM');
+    return SesionAdm(p1.ventana, p1.doc).then(function () {
+      Check('AV5 HTML viejo, pagina y luego sesion: el JS quita data-solo-adm, sigue oculta', [true, null],
+        [p1.sel('avSeccion').hidden, p1.sel('avSeccion').getAttribute('data-solo-adm')]);
+      var p2 = Pagina(nunca, function (v, doc) { doc.selectoresAtributo = true; doc.readyState = 'loading'; ComoEnElHtml(doc, viejo); }, null);
+      return SesionAdm(p2.ventana, p2.doc).then(function () {
+        var antes = p2.sel('avSeccion').hidden;
+        p2.doc.disparar('DOMContentLoaded');
+        Check('AV6 HTML viejo, sesion antes de iniciar: visible hasta iniciar, oculta despues', [false, true],
+          [antes, p2.sel('avSeccion').hidden]);
+      });
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
