@@ -94,10 +94,13 @@ public static class CambiosRecientesHttpSmoke
         fuente.Devolver = new LecturaCambiosRecientes();
         fuente.Devolver.Cambios.Add(new CambioRecienteAdmin { Folio = "PRB 2026-000002", FechaUtc = new DateTime(2026, 10, 20, 16, 5, 9), Usuario = @"SORIANA\t_adm", EsAlta = false });
         fuente.Devolver.Cambios.Add(new CambioRecienteAdmin { Folio = "PRB 2026-000190", FechaUtc = new DateTime(2026, 10, 20, 15, 0, 0), Usuario = @"SORIANA\t_otro", EsAlta = true });
+        fuente.Devolver.Cambios.Add(new CambioRecienteAdmin { Folio = "PRB 2026-000190", FechaUtc = new DateTime(2026, 10, 20, 14, 0, 0), Usuario = @"SORIANA\t_adm", Accion = CambioRecienteAdmin.AccionSolicitud });
         var j = Json(Correr("GET", "limite=500&usuario=SORIANA%5Cx", ADM, out estado));
         var cambios = (System.Collections.ArrayList)j["cambios"];
         var c0 = (Dictionary<string, object>)cambios[0];
         var c1 = (Dictionary<string, object>)cambios[1];
+        Check("B2b solicitud aplicada viaja como 'solicitud'; el mismo folio puede repetirse", "solicitud|PRB 2026-000190",
+              ((Dictionary<string, object>)cambios[2])["accion"] + "|" + ((Dictionary<string, object>)cambios[2])["folio"]);
         Check("B1 ADM: 200, estado ok, limite fijo 10 (la query no lo cambia), orden de la fuente", "200|ok|10|10|PRB 2026-000002,PRB 2026-000190",
               estado + "|" + j["estado"] + "|" + j["limite"] + "|" + fuente.Llamadas[fuente.Llamadas.Count - 1] + "|" + c0["folio"] + "," + c1["folio"]);
         Check("B2 fila: fecha UTC con Z, usuario del sello (no de la query), accion", "2026-10-20T16:05:09Z|SORIANA\\t_adm|cambio|alta",

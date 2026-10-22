@@ -306,21 +306,33 @@ INSERT adm.IniciativaProtegida (Codigo, Motivo, Usuario, FechaAltaUtc) VALUES
             Check("R1 orden: mas reciente primero (Aplicar, % , Subestado, alta); sin MIGRACION ni NULL",
                   "000002,000001,000004," + nuevo.Substring(9), Folios(lr));
             Check("R2 'cambio' para lo modificado, usuario del sello", "False|SORIANA\\adm6", lr.Cambios[0].EsAlta + "|" + lr.Cambios[0].Usuario);
+            Check("R2b accion: solicitud aplicada (000002), cambio directo (000001, 000004), alta (nueva)",
+                  "solicitud,cambio,cambio,alta", string.Join(",", lr.Cambios.Select(c => c.Accion).ToArray()));
+            Check("R2c historia: MODIFICACION previa (000004) nunca sale como alta; MIGRACION (000005) no sale",
+                  "0|0", lr.Cambios.Count(c => c.Folio == "PRB 2026-000004" && c.Accion == "alta") + "|" + lr.Cambios.Count(c => c.Folio == "PRB 2026-000005"));
             Check("R3 limite", "2|000002,000001", lector.Leer(2).Cambios.Count + "|" + Folios(lector.Leer(2)));
             // Orden con horas fijas (solo para probar el lector; como dbo, sin el DENY).
             using (var cn = Abrir(Base))
                 Exec(cn, "UPDATE adm.IniciativaProtegida SET UltimoCambioUtc = '2026-10-20T10:00:00', UltimoCambioUsuario = N'x' WHERE Codigo IN (N'PRB 2026-000001', N'PRB 2026-000004'); " +
                          "UPDATE adm.IniciativaProtegida SET UltimoCambioUtc = '2026-10-20T09:00:00' WHERE Codigo = N'PRB 2026-000002'; " +
-                         "UPDATE adm.IniciativaProtegida SET UltimoCambioUtc = '2026-10-20T08:00:00' WHERE Codigo = N'" + nuevo + "';");
+                         "UPDATE adm.IniciativaProtegida SET UltimoCambioUtc = '2026-10-20T08:00:00', FechaAltaUtc = '2026-10-20T07:00:00' WHERE Codigo = N'" + nuevo + "';");
             Check("R4 empate de hora: por Codigo, estable", "000001,000004,000002", string.Join(",", lector.Leer(3).Cambios.Select(c => c.Folio.Substring(9)).ToArray()));
             var j = CambiosRecientesAdmin.Json(lector.Leer(1));
             var c0 = (Dictionary<string, object>)((List<object>)j["cambios"])[0];
             Check("R5 JSON: fecha UTC con Z, accion, estado y limite", "2026-10-20T10:00:00Z|cambio|ok|10",
                   c0["fecha_utc"] + "|" + c0["accion"] + "|" + j["estado"] + "|" + j["limite"]);
+            // La nueva, editada despues de su alta: salen los DOS eventos
+            // (antes solo "cambio" y el alta se perdia). 000002 ya no
+            // coincide con la hora de su solicitud: "cambio".
+            var todos = lector.Leer(10);
+            Check("R6 alta + cambio posterior: dos filas del mismo folio, cada una con su hora y usuario",
+                  "000001:cambio,000004:cambio,000002:cambio," + nuevo.Substring(9) + ":cambio," + nuevo.Substring(9) + ":alta|SORIANA\\adm1|2026-10-20 07:00:00",
+                  string.Join(",", todos.Cambios.Select(c => c.Folio.Substring(9) + ":" + c.Accion).ToArray()) + "|" +
+                  todos.Cambios[4].Usuario + "|" + todos.Cambios[4].FechaUtc.ToString("yyyy-MM-dd HH:mm:ss"));
 
             // ---------------- P: cuenta del sitio ----------------
             var sitio = new FuenteCambiosRecientesSql(delegate { var cn = Abrir(Base); Exec(cn, "EXECUTE AS USER = N'PROACTIVANETAD';"); return cn; });
-            Check("P1 como PROACTIVANETAD: lee la lista", "ok|4", sitio.Leer(10).Estado + "|" + sitio.Leer(10).Cambios.Count);
+            Check("P1 como PROACTIVANETAD: lee la lista (incluido el cruce con adm.SolicitudCambio)", "ok|5", sitio.Leer(10).Estado + "|" + sitio.Leer(10).Cambios.Count);
             string directo;
             using (var cn = Abrir(Base))
             {
