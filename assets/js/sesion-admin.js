@@ -8,6 +8,11 @@
        (dbo.UsuariosAdmin). MOD, sin rol o cualquier fallo: ocultos.
        "Solicitar una iniciativa" va con data-solo-admin: autorizado ya
        implica rol ADM o MOD en el servidor (AccesoAdmin.PuedeEntrar);
+     - muestra los marcados con data-solo-solicitante (la entrada
+       Iniciativas del menu) solo si el servidor dice solicitante: true y
+       NO autorizado: una cuenta sin rol con el interruptor
+       IniciativasAbiertas encendido (AccesoIniciativas). ADM/MOD siguen
+       viendo Administracion;
      - con { persona: true }, pinta "Bienvenido, <Nombre>" en el elemento
        que se le pase, solo si el servidor resolvio el nombre, y el correo
        (dbo.UsuariosAdmin.CorreoUsuario) en el otro, solo si el servidor lo
@@ -28,7 +33,7 @@
       this.pedir = pedir || function (url) { return fetch(url, { cache: 'no-store' }); };
     }
 
-    // -> Promise<{ autorizado, nombre, rol, correo }>. Nunca rechaza.
+    // -> Promise<{ autorizado, solicitante, nombre, rol, correo }>. Nunca rechaza.
     consultar(opciones) {
       var persona = !!(opciones && opciones.persona);
       var url = this.url + (persona ? '?persona=1' : '');
@@ -39,13 +44,16 @@
           var nombre = json && typeof json.nombre === 'string' && json.nombre.trim()
             ? json.nombre.trim() : null;
           var autorizado = !!(json && json.autorizado === true);
+          // ADM/MOD siempre pueden solicitar; los demas solo si el servidor
+          // lo dice con un true de verdad.
+          var solicitante = autorizado || !!(json && json.solicitante === true);
           var rol = autorizado && (json.rol === 'ADM' || json.rol === 'MOD') ? json.rol : null;
           // Solo un correo con forma de correo; el servidor ya lo filtra.
           var correo = autorizado && typeof json.correo === 'string' && /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(json.correo.trim())
             ? json.correo.trim() : null;
-          return { autorizado: autorizado, nombre: nombre, rol: rol, correo: correo };
+          return { autorizado: autorizado, solicitante: solicitante, nombre: nombre, rol: rol, correo: correo };
         })
-        .catch(function () { return { autorizado: false, nombre: null, rol: null, correo: null }; });
+        .catch(function () { return { autorizado: false, solicitante: false, nombre: null, rol: null, correo: null }; });
     }
 
     // Muestra/oculta [data-solo-admin] dentro de raiz y, si se pasan,
@@ -59,9 +67,12 @@
         doc.querySelectorAll('[data-solo-adm]').forEach(function (el) {
           el.hidden = s.rol !== 'ADM';
         });
+        doc.querySelectorAll('[data-solo-solicitante]').forEach(function (el) {
+          el.hidden = !(s.solicitante && !s.autorizado);
+        });
         if (saludo) {
-          saludo.textContent = s.autorizado && s.nombre ? 'Bienvenido, ' + s.nombre : '';
-          saludo.hidden = !(s.autorizado && s.nombre);
+          saludo.textContent = s.solicitante && s.nombre ? 'Bienvenido, ' + s.nombre : '';
+          saludo.hidden = !(s.solicitante && s.nombre);
         }
         if (correo) {
           correo.textContent = s.autorizado && s.correo ? s.correo : '';

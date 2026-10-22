@@ -575,8 +575,8 @@ pruebas.push(function () {
     pg.fijarRol('ADM');
     Check('VW3 un rol que llega tarde no revierte la negacion', [null, true], [pg.rol, p.sel('panel-crear-admin').hidden]);
     var html = leer('admin/iniciativas.html');
-    Check('VW4 sin autorizar -> denegar(); autorizado -> fijarRol', true,
-      /if \(s\.autorizado\) window\.IniciativasPagina\.fijarRol\(s\.rol\);\s*else window\.IniciativasPagina\.denegar\(\);/.test(html));
+    Check('VW4 autorizado -> fijarRol; solo solicitante -> modoSolicitante(); si no -> denegar()', true,
+      /if \(s\.autorizado\) window\.IniciativasPagina\.fijarRol\(s\.rol\);\s*else if \(s\.solicitante\) window\.IniciativasPagina\.modoSolicitante\(\);\s*else window\.IniciativasPagina\.denegar\(\);/.test(html));
   });
 });
 

@@ -4,20 +4,26 @@
 // (App_Code/SolicitudIniciativa.cs).
 //
 //   Capacidad(categoria)  lo que la pantalla muestra al elegir la categoria.
-//   Validar(solicitud)    vuelve a leer catalogo y capacidad y valida. Es
+//   Solicitar(solicitud, identidad)
+//                         vuelve a leer catalogo y capacidad y valida. Es
 //                         la AUTORIDAD: si entre que se abrio el formulario
 //                         y se envio otra iniciativa consumio capacidad,
-//                         aqui ya se ve y se rechaza.
+//                         aqui ya se ve y se rechaza. Ademas resuelve el
+//                         solicitante (cuenta de IIS) y el correo del PO
+//                         contra dbo.CatPersona (DestinatariosSolicitud,
+//                         App_Code/SolicitudIniciativaAlta.cs); sin los dos,
+//                         la solicitud no es valida.
 //
-// No guarda nada. Cuando exista la persistencia, el recalculo de capacidad
-// y el alta tendran que ir en la MISMA transaccion (con bloqueo sobre la
-// categoria) para que dos envios simultaneos no pasen ambos; con solo
-// lectura no hay transaccion que tomar.
+// GUARDA solo si la base tiene sql/29 (IAlmacenSolicitudes.Disponible):
+// numero, solicitud, foto de los dos correos y evento ENVIADA en una
+// transaccion (adm.usp_SolicitudIniciativa_Crear). Sin sql/29, como antes:
+// valida y responde guardada = false. Una solicitud NO consume capacidad
+// (no toca dbo.ProblemCategoria): no hay que bloquear la categoria.
 //
-// SOLO LECTURA: DirectorioOrganizacional.Cargar, CatalogoRutasIniciativa
+// LECTURA: DirectorioOrganizacional.Cargar, CatalogoRutasIniciativa
 // (dbo.Categorias), DashboardCatalogos.PrefijosIniciativa
-// (dbo.CatPrefijoProblem) y ExperienciaQueries
-// .CompromisosCapacidad, sobre una conexion.
+// (dbo.CatPrefijoProblem), ExperienciaQueries.CompromisosCapacidad y
+// dbo.CatPersona.
 //
 // La categoria es la RUTA COMPLETA elegida: es la llave de la capacidad
 // (cada ruta, su propio 100%).
@@ -37,16 +43,37 @@ public sealed class IniciativaService
         "alta: no se inserta ninguna solicitud ni iniciativa",
     };
 
-    private readonly IGeneradorNumeroSolicitud _numeros;
+    // Con sql/29 la solicitud se guarda; el RCA y el aviso siguen sin
+    // mecanismo.
+    public static readonly string[] PendientesGuardada =
+    {
+        "rca: sin destino de almacenamiento configurado; el archivo no se guarda, solo su extension (UNRESOLVED)",
+        "aviso: no se envia correo; los correos quedan guardados para un aviso futuro (UNRESOLVED)",
+        "iniciativa: la solicitud no crea la iniciativa ni consume capacidad",
+    };
 
-    // Hoy el unico emisor es el pendiente (no emite). Cuando exista el
-    // objeto en la base, se pasa aqui el emisor que lo use.
+    public const string MotivoSinToken =
+        "Falta el identificador del borrador. Recarga la p\u00e1gina y vuelve a enviar.";
+
+    private readonly IGeneradorNumeroSolicitud _numeros;
+    private readonly IAlmacenSolicitudes _almacen;
+    private readonly IFuentePersonasAcuse _personas;
+
+    // Sin sql/29 el almacen no esta Disponible y el numero queda pendiente
+    // (GeneradorNumeroSolicitudPendiente), como antes.
     public IniciativaService() : this(new GeneradorNumeroSolicitudPendiente()) { }
 
     public IniciativaService(IGeneradorNumeroSolicitud numeros)
+        : this(numeros, SolicitudesIniciativa.Almacen, SolicitudesIniciativa.Personas) { }
+
+    public IniciativaService(IGeneradorNumeroSolicitud numeros, IAlmacenSolicitudes almacen, IFuentePersonasAcuse personas)
     {
         if (numeros == null) throw new ArgumentNullException("numeros");
+        if (almacen == null) throw new ArgumentNullException("almacen");
+        if (personas == null) throw new ArgumentNullException("personas");
         _numeros = numeros;
+        _almacen = almacen;
+        _personas = personas;
     }
 
     public Dictionary<string, object> Capacidad(string categoria)
@@ -58,10 +85,14 @@ public sealed class IniciativaService
         }
     }
 
-    // Validar y, SOLO si es valida, pedir el numero. Una solicitud invalida
-    // nunca consume numero.
-    public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud)
+    // Validar, resolver solicitante y PO y, SOLO si todo es valido, guardar
+    // (o, sin sql/29, pedir el numero al emisor pendiente). Una solicitud
+    // invalida nunca consume numero. `identidad` es la cuenta de IIS
+    // (AccesoAdmin.IdentidadEscritura); nada del formulario la sustituye.
+    public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad)
     {
+        CatalogoSolicitud catalogo;
+        CapacidadCategoria capacidad;
         using (var cn = Abrir())
         {
             // Tipo = Prefijo de dbo.CatPrefijoProblem: lo que no este ahi se
@@ -69,12 +100,63 @@ public sealed class IniciativaService
             var tipos = DashboardCatalogos.Llaves(DashboardCatalogos.PrefijosIniciativa(cn));
             // La misma lista de rutas que ofrece la pantalla, leida de nuevo.
             var rutas = CatalogoRutasIniciativa.Cargar(cn, DirectorioOrganizacional.Cargar(cn));
-            var catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
-            var capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
-            var r = new ValidadorIniciativa().Validar(solicitud, catalogo, capacidad);
+            catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
+            capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
+        }
+        return Solicitar(solicitud, identidad, catalogo, capacidad);
+    }
+
+    // Lo mismo con catalogo y capacidad ya leidos (las pruebas, sin SQL).
+    public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad,
+                                                   CatalogoSolicitud catalogo, CapacidadCategoria capacidad)
+    {
+        var r = new ValidadorIniciativa().Validar(solicitud, catalogo, capacidad);
+        r.Destinatarios = DestinatariosSolicitud.Resolver(identidad, solicitud.ProductOwner, _personas.Personas(), r);
+        if (!r.Valida) return r;
+
+        if (!_almacen.Disponible())
+        {
             AsignarNumero(r, _numeros);
             return r;
         }
+        var token = SolicitudesIniciativa.Token(solicitud.Token);
+        if (token == Guid.Empty)
+        {
+            r.Agregar(SolicitudIniciativa.CToken, MotivoSinToken);
+            return r;
+        }
+        var d = r.Destinatarios;
+        var g = _almacen.Crear(new AltaSolicitud
+        {
+            Cuenta = d.Cuenta,
+            Token = token,
+            Tipo = Limpio(solicitud.Tipo),
+            Po = Limpio(solicitud.ProductOwner),
+            So = Limpio(solicitud.ServiceOwner),
+            Categoria = Limpio(solicitud.Categoria),
+            Director = r.Director,
+            Titulo = Limpio(solicitud.Titulo),
+            Descripcion = Limpio(solicitud.Descripcion),
+            Observaciones = Limpio(solicitud.Observaciones),
+            Volumetria = int.Parse(Limpio(solicitud.Volumetria), System.Globalization.CultureInfo.InvariantCulture),
+            Pct = r.PctFraccion.Value,
+            RcaExtension = solicitud.TieneRca ? NumeroSolicitud.ExtensionSegura(solicitud.NombreRca) : null,
+            SolicitanteNombre = d.SolicitanteNombre,
+            SolicitanteCorreo = d.SolicitanteCorreo,
+            ProductOwnerCorreo = d.ProductOwnerCorreo,
+        });
+        r.Numero = g.Numero;
+        r.NumeroPendiente = null;
+        r.Guardada = true;
+        r.Nuevo = g.Nuevo;
+        return r;
+    }
+
+    private static string Limpio(string s)
+    {
+        if (s == null) return null;
+        s = s.Trim();
+        return s.Length == 0 ? null : s;
     }
 
     // Aparte para probarlo sin SQL.
@@ -88,6 +170,7 @@ public sealed class IniciativaService
 
     public static Dictionary<string, object> ComoJson(ValidadorIniciativa.Resultado r)
     {
+        var d = r.Destinatarios;
         var errores = new List<object>();
         foreach (var e in r.Errores)
             errores.Add(new Dictionary<string, object> { { "campo", e.Campo }, { "mensaje", e.Mensaje } });
@@ -100,10 +183,17 @@ public sealed class IniciativaService
             { "pct_fraccion", r.PctFraccion },
             { "director", r.Director },
             { "capacidad", r.Capacidad == null ? null : r.Capacidad.ComoJson() },
-            { "guardada", false },
+            { "guardada", r.Guardada },
+            { "nuevo", r.Guardada && r.Nuevo },
             { "numero_solicitud", r.Numero == null ? null : r.Numero.ToString() },
             { "numero_pendiente", r.NumeroPendiente },
-            { "pendientes", new List<string>(Pendientes) },
+            // Lo resuelto en el servidor (nunca lo que mando el navegador).
+            { "solicitante", d == null ? null : new Dictionary<string, object>
+                {
+                    { "nombre", d.SolicitanteNombre }, { "correo", d.SolicitanteCorreo },
+                } },
+            { "product_owner_correo", d == null ? null : d.ProductOwnerCorreo },
+            { "pendientes", new List<string>(r.Guardada ? PendientesGuardada : Pendientes) },
         };
     }
 

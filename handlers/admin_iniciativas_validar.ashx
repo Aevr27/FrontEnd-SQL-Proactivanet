@@ -1,31 +1,42 @@
 <%@ WebHandler Language="C#" Class="AdminIniciativasValidar" %>
 
-// Validacion en el SERVIDOR de una Nueva solicitud. NO la guarda.
+// Validacion en el SERVIDOR de una Nueva solicitud y, si la base tiene
+// sql/29, su ALTA (numero + foto de los correos del solicitante y del PO).
 //
 //   POST handlers/admin_iniciativas_validar.ashx   (multipart/form-data)
 //     campos: tipo, po, so, categoria, titulo, descripcion, observaciones,
-//             volumetria, pct (en %, no fraccion), disponible_cliente
-//             (informativo, se ignora) y el archivo "rca" (opcional salvo
-//             Problem).
-//     200  { "valida": true,  "errores": [], ..., "guardada": false,
-//            "numero_solicitud": null, "numero_pendiente": "<motivo>",
-//            "pendientes": [...] }
-//          numero_solicitud ("#0000142") solo saldra cuando exista un emisor
-//          persistente (IGeneradorNumeroSolicitud); una solicitud invalida
-//          nunca pide numero.
-//     422  la misma forma con "valida": false y errores [{campo, mensaje}]
+//             volumetria, pct (en %, no fraccion), token (GUID del
+//             borrador), disponible_cliente (informativo, se ignora) y el
+//             archivo "rca" (opcional salvo Problem).
+//     200  { "valida": true, "errores": [], ..., "guardada": true|false,
+//            "nuevo": true|false, "numero_solicitud": "#0000142" | null,
+//            "numero_pendiente": "<motivo>" | null,
+//            "solicitante": { "nombre", "correo" },
+//            "product_owner_correo", "pendientes": [...] }
+//          Sin sql/29: guardada = false, numero_solicitud = null (como
+//          antes). Con sql/29: guardada = true; el mismo token otra vez
+//          devuelve el MISMO numero con nuevo = false (no duplica).
+//     422  la misma forma con "valida": false y errores [{campo, mensaje}]:
+//          tambien si la cuenta no se resuelve a UNA persona con correo en
+//          dbo.CatPersona (campo "solicitante") o el PO no tiene un correo
+//          unico (campo "po"), o la base rechaza los correos (51405/51406).
+//     409  el token es de otra cuenta (51409).
+//     403  SinUsuario: no hay cuenta que firme.
 //     405  si no es POST;  413  si el archivo pasa el tope de ASP.NET.
 //
-// El catalogo y la capacidad se vuelven a leer aqui (IniciativaService):
-// lo que el navegador calculo no cuenta. El archivo del RCA solo se mira
-// (que llego y no esta vacio); no se guarda en ningun lado porque no hay
-// destino confirmado.
+// Quien solicita es la cuenta de IIS (AccesoAdmin.IdentidadEscritura):
+// ningun campo del formulario (nombre, cuenta, correo) se lee para eso. El
+// catalogo y la capacidad se vuelven a leer aqui (IniciativaService): lo
+// que el navegador calculo no cuenta. El archivo del RCA solo se mira (que
+// llego y no esta vacio); se guarda su extension, no el archivo (no hay
+// destino confirmado). No se manda ningun correo.
 //
-// ACCESO: AccesoAdmin.Exigir: rol ADM o MOD de dbo.UsuariosAdmin (403
-// AccesoDenegado antes de leer nada para VIEWER, anonimo o consulta de rol
-// fallida). Solicitar es de ADM y MOD; su UNICO llamador es Nueva solicitud
-// (admin/iniciativas.js) y aqui solo se valida, no se guarda ni se aprueba
-// nada. La creacion directa (solo ADM) NO pasa por este handler: va a
+// ACCESO: AccesoIniciativas.ExigirSolicitud: rol ADM o MOD de
+// dbo.UsuariosAdmin, o cualquier cuenta Windows autenticada si el
+// interruptor IniciativasAbiertas esta encendido (403 AccesoDenegado antes
+// de leer nada en otro caso). Su UNICO llamador es Nueva solicitud
+// (admin/iniciativas.js); no aprueba ni crea iniciativas. La creacion
+// directa (solo ADM) NO pasa por este handler: va a
 // admin_iniciativas_gestion.ashx, que usa ExigirAdm.
 
 using System;
@@ -36,7 +47,7 @@ public class AdminIniciativasValidar : IHttpHandler
 {
     public void ProcessRequest(HttpContext context)
     {
-        if (!AccesoAdmin.Exigir(context)) return;
+        if (!AccesoIniciativas.ExigirSolicitud(context)) return;
 
         DashboardHandler.Responder(context, delegate
         {
@@ -58,7 +69,30 @@ public class AdminIniciativasValidar : IHttpHandler
                 return Error(context, 413, "La solicitud o el archivo adjunto son demasiado grandes.", "SolicitudDemasiadoGrande");
             }
 
-            var resultado = new IniciativaService().Solicitar(solicitud);
+            var identidad = AccesoAdmin.IdentidadEscritura(context);
+            if (identidad == null)
+                return Error(context, 403, "Sin usuario autenticado no se puede enviar la solicitud.", "SinUsuario");
+
+            ValidadorIniciativa.Resultado resultado;
+            try
+            {
+                resultado = new IniciativaService().Solicitar(solicitud, identidad);
+            }
+            catch (ErrorSolicitud ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_validar.ashx", ex);
+                if (ex.Numero == 51409)
+                    return Error(context, 409, "Este borrador ya se envi\u00f3 con otra cuenta. Recarga la p\u00e1gina.", "TokenAjeno");
+                var campo = ex.Numero == 51405 ? DestinatariosSolicitud.CampoSolicitante
+                          : ex.Numero == 51406 ? SolicitudIniciativa.CPo : null;
+                context.Response.StatusCode = 422;
+                context.Response.TrySkipIisCustomErrors = true;
+                return new Dictionary<string, object>
+                {
+                    { "valida", false }, { "guardada", false },
+                    { "errores", new List<object> { new Dictionary<string, object> { { "campo", campo }, { "mensaje", ex.Message } } } },
+                };
+            }
             if (!resultado.Valida)
             {
                 context.Response.StatusCode = 422;

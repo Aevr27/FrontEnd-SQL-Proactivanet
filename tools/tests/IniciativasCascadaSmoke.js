@@ -745,10 +745,13 @@ pruebas.push(function () {
   Check('M2 una sola entrada activa: Administracion', [1, true],
     [activas.length, /href="iniciativas\.html"[^>]*aria-current="page"/.test(activas[0] || '')]);
   var tablero = leer('dashboard.html').replace(/<!--[\s\S]*?-->/g, '');
-  Check('M3 el tablero enlaza a la pagina solo desde una entrada oculta',
-    [true, true, true],
+  // Dos entradas, las dos ocultas: Administracion (ADM/MOD) e Iniciativas
+  // (solo solicitante: interruptor IniciativasAbiertas, sin rol).
+  Check('M3 el tablero enlaza a la pagina solo desde entradas ocultas',
+    [true, true, true, true],
     [/<li data-solo-admin hidden>\s*<a class="mnav" id="mnav-admin" href="admin\/iniciativas\.html"/.test(tablero),
-     (tablero.match(/iniciativas\.html/g) || []).length === 1,
+     /<li data-solo-solicitante hidden>\s*<a class="mnav" id="mnav-solicitar" href="admin\/iniciativas\.html"/.test(tablero),
+     (tablero.match(/iniciativas\.html/g) || []).length === 2,
      /<li data-solo-admin hidden>\s*<a class="mnav active" href="iniciativas\.html"/.test(html)]);
 
   // Documento propio: el de Pagina() ya tiene el boton cableado por iniciar().
@@ -824,9 +827,13 @@ pruebas.push(function () {
   r.capturar('observaciones', '   ');
   Check('S6 solo espacios cuenta como vacio', ['observaciones'], r.faltantes());
   r.capturar('observaciones', 'O');
+  var envio = r.camposEnvio(), tokenEnvio = envio.token;
+  delete envio.token;
   Check('S7 campos de envio (Descripcion = analisis)',
     { tipo: 'ADO', po: 'PO 1', so: 'SO x', categoria: '/A/Cat 1', titulo: 'T', descripcion: 'D',
-      observaciones: 'O', volumetria: '10', pct: '20', disponible_cliente: '' }, r.camposEnvio());
+      observaciones: 'O', volumetria: '10', pct: '20', disponible_cliente: '' }, envio);
+  Check('S7 token del borrador: GUID v4, el mismo en cada envio del borrador', [true, true],
+    [/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(tokenEnvio), r.camposEnvio().token === tokenEnvio]);
 
   // Capacidad
   var cap = r.pedirCapacidad();
@@ -957,8 +964,8 @@ pruebas.push(function () {
        ['../handlers/admin_iniciativas_volumetria.ashx?ruta=%2FA%2FCat%201', 'GET']],
       llamadas.map(function (l) { return [l[0], l[1] || null]; }).sort());
     var js = leer('admin/iniciativas.js') + leer('admin/registro-iniciativas.js'), html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
-    // El unico envio es el POST de validacion, que no guarda.
-    // Dos POST, y solo estos: la validacion de Nueva solicitud (no guarda) y
+    // Dos POST, y solo estos: el envio de Nueva solicitud (valida y, con
+    // sql/29, guarda por adm.usp_SolicitudIniciativa_Crear) y
     // el envio de "Solicitar cambios" (admin_iniciativas_solicitudes.ashx,
     // que nunca escribe la iniciativa).
     Check('P2 los unicos POST son a admin_iniciativas_validar y al envio de Solicitar cambios', [2, 2, true, true, false, false],
@@ -971,6 +978,9 @@ pruebas.push(function () {
                 leer('App_Code/ExperienciaRegistro.cs') + leer('App_Code/ExperienciaCapacidad.cs') +
                 leer('App_Code/IniciativaService.cs') + leer('App_Code/SolicitudIniciativa.cs')).split('\n')
       .filter(function (l) { return !/^\s*\/\//.test(l); }).join('\n');
+    // Ni handlers ni servicio llevan SQL de escritura: la unica escritura
+    // de Nueva solicitud es el procedimiento de sql/29, en
+    // App_Code/SolicitudIniciativaAlta.cs (AlmacenSolicitudesSql).
     Check('P4 el handler no escribe en la base', false, /\b(INSERT|UPDATE|DELETE|MERGE|EXEC|CREATE|ALTER|DROP)\b/i.test(ashx));
   });
 });
@@ -1162,6 +1172,121 @@ pruebas.push(function () {
       /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-admin hidden>/.test(html));
     Check('RS7 Crear sigue solo ADM: data-solo-adm', true,
       /id="btnCrearAdmin" data-solo-adm hidden[\s>]/.test(html));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SG) Envio guardado (sql/29) y modo solicitante (interruptor
+//     IniciativasAbiertas): el resultado dice el numero y lo que resolvio el
+//     servidor; el borrador se reemplaza (otro token); el mismo token otra
+//     vez = "ya estaba guardada". Nada de identidad viaja en el cuerpo.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var I = Pagina(nunca).ventana.Iniciativas;
+  var t1 = I.nuevoToken(), t2 = I.nuevoToken();
+  var forma = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  Check('SG1 nuevoToken: GUID v4, distintos', [true, true, true], [forma.test(t1), forma.test(t2), t1 !== t2]);
+  Check('SG1 sin crypto (null): tambien GUID v4', true, forma.test(I.nuevoToken(null)));
+  var fijo = { getRandomValues: function (a) { for (var i = 0; i < a.length; i++) a[i] = 255; return a; } };
+  Check('SG1 con getRandomValues: version y variante fijadas', 'ffffffff-ffff-4fff-bfff-ffffffffffff', I.nuevoToken(fijo));
+});
+
+// Llena un borrador valido (MAP: sin RCA) y espera la capacidad/volumetria.
+function llenarSolicitud(p) {
+  elegirEn(p, 'selTipo', 'MAP');
+  elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
+  return esperar().then(function () {
+    escribir(p, 'iniCamposComunes', 'titulo', 'T');
+    escribir(p, 'iniCamposComunes', 'analisis', 'D');
+    escribir(p, 'iniCamposComunes', 'observaciones', 'O');
+    escribir(p, 'iniCamposImpacto', 'pct', '20');
+  });
+}
+
+pruebas.push(function () {
+  var llamadas = [];
+  var respuesta = function () {
+    return Respuesta(200, { valida: true, errores: [], guardada: true, nuevo: true, numero_solicitud: '#0000007',
+      solicitante: { nombre: 'Ana Lopez', correo: 'ana@soriana.com' }, product_owner_correo: 'po1@soriana.com' });
+  };
+  var p = Pagina(nunca, null, null);
+  var P = p.ventana.IniciativasPagina;
+  var pedir = enrutador({ '/A/Cat 1': { categoria: '/A/Cat 1', disponible: 0.4, determinable: true } },
+    function () { return respuesta(); }, llamadas);
+  P.modoSolicitante();
+  Check('SG2 modo solicitante: solo Nueva solicitud, sin pestanas ni Volver', [['panel-nueva'], true, true],
+    [vistaVisible(p), p.sel('iniTabs').hidden, p.sel('btnVolver').hidden]);
+  P.mostrarVista('iniciativas'); P.mostrarVista('administracion'); P.mostrarVista('solicitudes');
+  Check('SG2 no abre otras vistas', ['panel-nueva'], vistaVisible(p));
+  P.fijarRol('ADM');
+  Check('SG2 un rol que llega despues no lo cambia', [null, true, true],
+    [P.rol, p.sel('panel-administracion').hidden, p.sel('iniTabs').hidden]);
+  P.denegar();
+  Check('SG2 denegar despues de modo solicitante: queda negado', [[], false], [vistaVisible(p), p.sel('iniDenegado').hidden]);
+
+  // Una pagina nueva en modo solicitante, ya con catalogo.
+  p = Pagina(nunca, null, null);
+  P = p.ventana.IniciativasPagina;
+  P.modoSolicitante();
+  var token1;
+  return P.cargar(pedir).then(function () {
+    Check('SG3 la vista sigue en Nueva solicitud tras cargar', ['panel-nueva'], vistaVisible(p));
+    elegirEn(p, 'selTipo', 'MAP');
+    elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
+    return esperar();
+  }).then(function () {
+    escribir(p, 'iniCamposComunes', 'titulo', 'T');
+    escribir(p, 'iniCamposComunes', 'analisis', 'D');
+    escribir(p, 'iniCamposComunes', 'observaciones', 'O');
+    escribir(p, 'iniCamposImpacto', 'pct', '20');
+    token1 = P.solicitud.token;
+    return P.validar();
+  }).then(function () {
+    var post = llamadas.filter(function (l) { return l[1] === 'POST'; });
+    var cuerpo = post[0][2];
+    Check('SG4 un POST con el token del borrador', [1, token1], [post.length, cuerpo.get('token')]);
+    Check('SG4 el cuerpo no lleva nombre, cuenta ni correos', [false, false, false, false, false, false],
+      ['solicitante', 'correo', 'usuario', 'cuenta', 'nombre', 'po_correo'].map(function (k) { return cuerpo.has(k); }));
+    var html = p.sel('iniResultado').innerHTML;
+    Check('SG5 guardada: numero y lo que resolvio el servidor', [true, true, true, true],
+      [html.indexOf('Solicitud guardada. Número de solicitud: #0000007.') >= 0, html.indexOf('ana@soriana.com') >= 0,
+       html.indexOf('po1@soriana.com') >= 0, p.sel('iniResultado').classList.contains('ok')]);
+    Check('SG5 borrador nuevo: otro token, sin tipo', [true, ''], [P.solicitud.token !== token1, P.solicitud.tipo]);
+
+    respuesta = function () {
+      return Respuesta(200, { valida: true, errores: [], guardada: true, nuevo: false, numero_solicitud: '#0000007' });
+    };
+    return P.validar();
+  }).then(function () {
+    // El borrador nuevo esta vacio: no sale nada.
+    Check('SG6 borrador vacio no se envia', 1, llamadas.filter(function (l) { return l[1] === 'POST'; }).length);
+    elegirEn(p, 'selTipo', 'MAP');
+    elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
+    return esperar();
+  }).then(function () {
+    escribir(p, 'iniCamposComunes', 'titulo', 'T');
+    escribir(p, 'iniCamposComunes', 'analisis', 'D');
+    escribir(p, 'iniCamposComunes', 'observaciones', 'O');
+    escribir(p, 'iniCamposImpacto', 'pct', '20');
+    return P.validar();
+  }).then(function () {
+    Check('SG7 nuevo=false: ya estaba guardada, no se creo otra', true,
+      p.sel('iniResultado').innerHTML.indexOf('ya estaba guardada con el número #0000007. No se creó otra.') >= 0);
+    respuesta = function () {
+      return Respuesta(422, { valida: false, guardada: false, errores: [{ campo: 'solicitante', mensaje: 'Tu cuenta no esta en CatPersona.' }] });
+    };
+    return llenarSolicitud(p).then(function () { return P.validar(); });
+  }).then(function () {
+    Check('SG8 rechazo por solicitante: rotulo Solicitante', [true, true],
+      [p.sel('iniResultado').innerHTML.indexOf('Solicitante: Tu cuenta no esta en CatPersona.') >= 0,
+       p.sel('iniResultado').classList.contains('mal')]);
+    respuesta = function () { return Respuesta(200, { valida: true, errores: [], guardada: false, numero_solicitud: null }); };
+    var tokenAntes = P.solicitud.token;
+    return P.validar().then(function () {
+      Check('SG8 rechazada: el borrador se conserva (mismo token)', tokenAntes, P.solicitud.token);
+      Check('SG9 valida sin guardar (sin sql/29): lo dice y conserva el borrador', [true, tokenAntes],
+        [p.sel('iniResultado').innerHTML.indexOf('No se guardó') >= 0, P.solicitud.token]);
+    });
   });
 });
 

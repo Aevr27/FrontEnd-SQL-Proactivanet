@@ -50,8 +50,10 @@
 // SOLO LECTURA (CatPrefijoProblem, CatCategoriaDueno, CatPersona y, con ?rutas=1,
 // Categorias). No crea ni cambia nada en la base, tampoco con ?duenos=1.
 //
-// ACCESO: AccesoAdmin.Exigir (rol ADM o MOD); ?duenos=1 ademas ExigirAdm
-// (solo ADM). El resto recibe 403 antes de tocar la base.
+// ACCESO: AccesoIniciativas.ExigirSolicitud (rol ADM o MOD, o cualquier
+// cuenta Windows autenticada con el interruptor IniciativasAbiertas: es el
+// catalogo de Nueva solicitud); ?duenos=1 ExigirAdm (solo ADM) y rutas_adm
+// solo con rol ADM. El resto recibe 403 antes de tocar la base.
 
 using System;
 using System.Collections.Generic;
@@ -63,11 +65,13 @@ public class AdminIniciativasCatalogos : IHttpHandler
 {
     public void ProcessRequest(HttpContext context)
     {
-        if (!AccesoAdmin.Exigir(context)) return;
         // ?duenos=1 es la pantalla de gestion de duenos (Administracion):
-        // solo ADM. El resto del catalogo sigue siendo de ADM y MOD.
-        if (context.Request.QueryString["duenos"] == "1"
-            && !AccesoAdmin.ExigirAdm(context, "Solo un administrador (ADM) puede gestionar los duenos de categoria.")) return;
+        // solo ADM. El resto del catalogo es el de Nueva solicitud.
+        if (context.Request.QueryString["duenos"] == "1")
+        {
+            if (!AccesoAdmin.ExigirAdm(context, "Solo un administrador (ADM) puede gestionar los duenos de categoria.")) return;
+        }
+        else if (!AccesoIniciativas.ExigirSolicitud(context)) return;
 
         context.Response.ContentType = "application/json; charset=utf-8";
         context.Response.Cache.SetCacheability(HttpCacheability.NoCache);

@@ -11,10 +11,12 @@
 //
 // QUE NO HACE (a proposito, ver el hito)
 // --------------------------------------
-// No guarda nada, no genera el numero de solicitud ni sube el RCA: no hay
-// mecanismo existente para ninguno de los dos (REQUEST NUMBER PERSISTENCE:
-// UNRESOLVED; RCA UPLOAD: NOT IMPLEMENTED). NumeroSolicitud solo FORMATEA un
-// numero que algun dia dara la base; no lo inventa.
+// Este archivo no guarda nada ni sube el RCA. El ALTA (numero + foto de los
+// correos) es de sql/29 y App_Code/SolicitudIniciativaAlta.cs, y solo
+// ocurre si la base la tiene; sin ella, como antes, solo se valida. El RCA
+// sigue sin destino (RCA UPLOAD: NOT IMPLEMENTED): se guarda su extension,
+// no el archivo. NumeroSolicitud solo FORMATEA el numero que da la base; no
+// lo inventa.
 //
 // RCA: el DESTINO futuro ya esta confirmado -SharePoint, sitio
 // ProblemManagement, biblioteca "Documentos compartidos", carpeta
@@ -181,6 +183,10 @@ public sealed class SolicitudIniciativa
     // Lo que el navegador CREIA disponible al enviar. Solo informativo: el
     // servidor nunca lo usa para decidir (ver ValidadorIniciativa).
     public const string CDisponibleCliente = "disponible_cliente";
+    // Token del borrador (GUID que genera el navegador): reenviar el mismo
+    // borrador devuelve la misma solicitud guardada (sql/29). No es
+    // identidad: quien solicita sale siempre de la cuenta de IIS.
+    public const string CToken = "token";
 
     public string Tipo;
     public string ProductOwner;
@@ -194,6 +200,7 @@ public sealed class SolicitudIniciativa
     public bool TieneRca;         // llego un archivo no vacio
     public string NombreRca;      // nombre original (solo para la extension)
     public string DisponibleCliente;
+    public string Token;
 
     public static SolicitudIniciativa DesdeFormulario(NameValueCollection f, bool tieneRca, string nombreRca)
     {
@@ -212,6 +219,7 @@ public sealed class SolicitudIniciativa
             TieneRca = tieneRca,
             NombreRca = tieneRca ? nombreRca : null,
             DisponibleCliente = f[CDisponibleCliente],
+            Token = f[CToken],
         };
     }
 }
@@ -434,6 +442,11 @@ public sealed class ValidadorIniciativa
         // .AsignarNumero); si no, null y NumeroPendiente dice por que.
         public NumeroSolicitud Numero;
         public string NumeroPendiente;
+        // Solicitante y correo del PO (DestinatariosSolicitud), y si quedo
+        // guardada (sql/29). Nuevo = false: el mismo token ya estaba.
+        public DestinatariosSolicitud Destinatarios;
+        public bool Guardada;
+        public bool Nuevo;
 
         public void Agregar(string campo, string mensaje)
         {

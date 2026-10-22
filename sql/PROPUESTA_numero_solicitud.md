@@ -1,5 +1,10 @@
 # PROPUESTA — número de solicitud de Admin (NO EJECUTADA, SIN APROBAR)
 
+> **SUPERADA (2026-10-22) por `sql/29_solicitud_iniciativa.sql`**, que toma
+> este contador y el alta atómica y agrega la foto de los correos del
+> solicitante y del PO, el token anti-duplicado, el estado inicial ENVIADA y
+> la bitácora. No correr nada de este archivo.
+
 Estado: **propuesta**. Nada de esto existe en la base. No ejecutar sin el OK
 explícito del dueño del proyecto. Es Markdown a propósito: no se puede correr
 por error como script.

@@ -14,8 +14,16 @@
 //        AccesoDesarrolloLocal: cuenta de desarrollo en la whitelist).
 //        Solo para que la interfaz oculte lo que no le toca; los handlers lo
 //        exigen aparte.
+//        "solicitante": true|false = AccesoIniciativas.PuedeSolicitar: puede
+//        abrir Nueva solicitud (ADM/MOD siempre; los demas solo con el
+//        interruptor IniciativasAbiertas de Web.config y cuenta Windows
+//        autenticada). Con autorizado false y solicitante true, la pagina
+//        se abre en modo "solo Nueva solicitud" y el menu muestra la entrada
+//        Iniciativas en vez de Administracion. Tambien solo UX: los cuatro
+//        handlers de Nueva solicitud lo exigen con ExigirSolicitud.
 //   GET handlers/admin_sesion.ashx?persona=1    -> ademas "nombre" (solo si
-//        autorizado y la cuenta se resuelve en CatPersona / CatLiderGrupo)
+//        autorizado o solicitante y la cuenta se resuelve en CatPersona /
+//        CatLiderGrupo)
 //        y "correo" (solo si autorizado y dbo.UsuariosAdmin.CorreoUsuario de
 //        la cuenta da UN correo claro: App_Code/CorreoAdmin.cs)
 //
@@ -39,14 +47,18 @@ public class AdminSesion : IHttpHandler
             var salida = new Dictionary<string, object>();
             salida["autorizado"] = AccesoAdmin.PuedeEntrar(context);
             if ((bool)salida["autorizado"]) salida["rol"] = AccesoAdmin.Rol(context);
+            salida["solicitante"] = (bool)salida["autorizado"] || AccesoIniciativas.PuedeSolicitar(context);
             // Solo para que se note en pantalla/red que es el atajo de
             // desarrollo local (AdminDevOverride + DEBUG + local + IIS Express + whitelist).
             if (AccesoDesarrolloLocal.Activo(context)) salida["desarrollo_local"] = true;
 
-            if ((bool)salida["autorizado"] && context.Request.QueryString["persona"] == "1")
+            if ((bool)salida["solicitante"] && context.Request.QueryString["persona"] == "1")
             {
                 var nombre = NombreDe(identidad);
                 if (nombre != null) salida["nombre"] = nombre;
+            }
+            if ((bool)salida["autorizado"] && context.Request.QueryString["persona"] == "1")
+            {
                 // El de dbo.UsuariosAdmin.CorreoUsuario (App_Code/CorreoAdmin.cs);
                 // sin uno claro, no se manda.
                 var correo = CorreoAdmin.Para(identidad, CorreoAdmin.Fuente,

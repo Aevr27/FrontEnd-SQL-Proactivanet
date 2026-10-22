@@ -131,8 +131,9 @@ public static class CatalogoDuenosCategoriaSmoke
         Check("9 sin escrituras en la clase", false,
               System.Text.RegularExpressions.Regex.IsMatch(fuente, @"\b(INSERT|UPDATE|DELETE|MERGE|EXEC)\b"));
         var handler = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_catalogos.ashx"));
-        Check("9 handler: solo con ?duenos=1", true,
-              handler.Contains("QueryString[\"duenos\"] == \"1\"") && handler.Contains("AccesoAdmin.Exigir(context)"));
+        Check("9 handler: ?duenos=1 solo ADM; el resto, la puerta de Nueva solicitud", true,
+              handler.Contains("QueryString[\"duenos\"] == \"1\"") && handler.Contains("AccesoAdmin.ExigirAdm(context, ")
+              && handler.Contains("AccesoIniciativas.ExigirSolicitud(context)"));
 
         Console.WriteLine(fallos == 0 ? "\nTODO PASO" : "\n" + fallos + " FALLO(S)");
         return fallos == 0 ? 0 : 1;

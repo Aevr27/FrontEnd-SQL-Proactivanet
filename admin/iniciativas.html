@@ -527,7 +527,7 @@
     <div class="ini-panel-cab">
       <button type="button" class="btn linea chico" id="btnVolver">← Volver a Iniciativas</button>
       <h2 id="iniNuevaTitulo" tabindex="-1">Nueva solicitud</h2>
-      <span class="ini-hint">Vista previa · se valida en el servidor pero no se guarda · el borrador se conserva al cambiar de vista</span>
+      <span class="ini-hint">Se valida en el servidor al enviarla · el borrador se conserva al cambiar de vista</span>
     </div>
 
     <p class="ini-estado" id="iniEstado" role="status" aria-live="polite"></p>
@@ -636,10 +636,13 @@
 
     </div>
 
-    <!-- Solo valida en el servidor; no guarda ni genera numero de solicitud. -->
+    <!-- El servidor valida y, si la base ya tiene sql/29, guarda la
+         solicitud con su numero (admin_iniciativas_validar.ashx). Quien
+         solicita y el correo del PO los resuelve el servidor; el resultado
+         dice si se guardo. -->
     <div class="ini-acciones">
-      <button type="button" class="btn" id="btnValidar">Validar en el servidor</button>
-      <span class="ini-hint">No se guarda ni se genera número de solicitud.</span>
+      <button type="button" class="btn" id="btnValidar">Enviar solicitud</button>
+      <span class="ini-hint">Tu nombre y correo, y el del Product Owner, los toma el servidor del directorio.</span>
     </div>
     <div class="ini-resultado" id="iniResultado" role="status" aria-live="polite" hidden></div>
   </section>
@@ -834,11 +837,13 @@
 <script src="iniciativas.js"></script>
 <script>
 // El rol tambien decide los botones de ADM que se pintan dentro del detalle,
-// que no existen cuando aplicar() recorre el documento.
+// que no existen cuando aplicar() recorre el documento. Sin rol ADM/MOD pero
+// con el interruptor IniciativasAbiertas (solicitante): solo Nueva solicitud.
 try {
   new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo'), document.getElementById('iniCorreo')).then(function (s) {
     if (!window.IniciativasPagina) return;
     if (s.autorizado) window.IniciativasPagina.fijarRol(s.rol);
+    else if (s.solicitante) window.IniciativasPagina.modoSolicitante();
     else window.IniciativasPagina.denegar();
   });
 } catch (e) { console.error(e); }
