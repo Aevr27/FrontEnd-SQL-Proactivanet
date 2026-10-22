@@ -191,6 +191,12 @@ public static class SolicitudIniciativaSmoke
         Check("V4 volumetria 0 valida", true, V(fv, false, null).Valida);
 
         // ---- A) RCA ----------------------------------------------------------
+        // Hoy el RCA va por correo (RcaEnSitio = false): Problem sin RCA vale.
+        Check("A0 RCA por el sitio apagado", false, SolicitudIniciativa.RcaEnSitio);
+        var prbHoy = V(Completa("PRB", "/A/Cat 1", "20"), false, null);
+        Check("A0 Problem sin RCA -> VALID, rca_obligatorio false", "True|False", prbHoy.Valida + "|" + prbHoy.RcaObligatorio);
+        // La regla para cuando vuelva al sitio:
+        SolicitudIniciativa.RcaEnSitio = true;
         var prbSin = V(Completa("PRB", "/A/Cat 1", "20"), false, null);
         Check("A1 Problem sin RCA -> INVALID", "rca", Campos(prbSin));
         Check("A1 rca_obligatorio", true, prbSin.RcaObligatorio);
@@ -198,6 +204,7 @@ public static class SolicitudIniciativaSmoke
         Check("A3 otro tipo sin RCA -> VALID", true, V(Completa("HAR", "/A/Cat 1", "20"), false, null).Valida);
         Check("A4 otro tipo con RCA -> VALID", true, V(Completa("HAR", "/A/Cat 1", "20"), true, null).Valida);
         Check("A5 otro tipo: RCA opcional", false, V(Completa("HAR", "/A/Cat 1", "20"), false, null).RcaObligatorio);
+        SolicitudIniciativa.RcaEnSitio = false;
 
         // ---- K) capacidad ----------------------------------------------------
         Check("K1 sin iniciativas: 100%", "1.0000", new CapacidadCategoria(null).Para("/A/Cat 1").Disponible);

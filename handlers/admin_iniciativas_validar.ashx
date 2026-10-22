@@ -59,7 +59,7 @@ public class AdminIniciativasValidar : IHttpHandler
             try
             {
                 var rca = req.Files[SolicitudIniciativa.CRca];
-                var hayRca = rca != null && rca.ContentLength > 0;
+                var hayRca = SolicitudIniciativa.RcaEnSitio && rca != null && rca.ContentLength > 0;
                 solicitud = SolicitudIniciativa.DesdeFormulario(req.Form, hayRca, hayRca ? rca.FileName : null);
             }
             catch (HttpException ex)

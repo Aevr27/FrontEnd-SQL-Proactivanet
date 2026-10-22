@@ -180,6 +180,11 @@ public sealed class SolicitudIniciativa
     public const string CVolumetria = "volumetria";
     public const string CPct = "pct";
     public const string CRca = "rca";
+    // RCA por el sitio APAGADO (2026-10-22): sin destino de subida, Nueva
+    // solicitud no pide ni mira el archivo; el RCA se manda por correo (el
+    // aviso de admin/iniciativas.js, RCA.correo). true vuelve a la regla de
+    // antes: obligatorio para Problem. Solo las pruebas lo cambian.
+    public static bool RcaEnSitio = false;
     // Lo que el navegador CREIA disponible al enviar. Solo informativo: el
     // servidor nunca lo usa para decidir (ver ValidadorIniciativa).
     public const string CDisponibleCliente = "disponible_cliente";
@@ -555,7 +560,7 @@ public sealed class ValidadorIniciativa
         }
 
         // ---- 04 RCA -----------------------------------------------------
-        r.RcaObligatorio = TiposSolicitud.EsProblem(tipo);
+        r.RcaObligatorio = SolicitudIniciativa.RcaEnSitio && TiposSolicitud.EsProblem(tipo);
         if (r.RcaObligatorio && !s.TieneRca)
             r.Agregar(SolicitudIniciativa.CRca, "El RCA es obligatorio para Problem.");
 

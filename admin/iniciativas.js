@@ -103,6 +103,13 @@ window.Iniciativas = (function () {
   var URL_CAPACIDAD = '../handlers/admin_iniciativas_capacidad.ashx';
   var URL_VALIDAR = '../handlers/admin_iniciativas_validar.ashx';
 
+  // RCA por el sitio APAGADO (2026-10-22): todavia no hay destino de
+  // subida, asi que el bloque 04 solo dice a que correo mandarlo; no se pide
+  // ni se envia archivo (el servidor tampoco lo exige: SolicitudIniciativa.
+  // RcaEnSitio). enSitio = true vuelve a la regla de antes (obligatorio para
+  // Problem). El correo lo dio el usuario; no sale de la base.
+  var RCA = { enSitio: false, correo: 'omaralus@soriana.com' };
+
   // Rotulos de los campos obligatorios, para avisar cuales faltan. Las
   // claves son las de SolicitudNueva (Descripcion = 'analisis').
   var ROTULOS = {
@@ -171,12 +178,14 @@ window.Iniciativas = (function () {
     { clave: 'pct', etiqueta: '% Disminución de tickets vs categoría', control: 'porcentaje', seccion: 'impacto',
       destino: 'dbo.ProblemCategoria.PctDisminucion (fracción)',
       reiniciaConCascada: true, requiereCategoria: true },
-    // Vista previa: round(volumetria x % / 100), ticket entero
-    // (SolicitudNueva.ticketsReducir). No viaja ni se guarda: el validador
-    // no tiene ese campo y el Tickets Reduce del registro sigue saliendo de
-    // dbo.ExpTicketsReduce con su ventana movil.
-    { clave: 'tickets', etiqueta: 'Tickets a reducir', control: 'calculado', seccion: 'impacto',
-      destino: null, requiereCategoria: true }
+    // La meta se escribe en % O en tickets: el que se escribio manda
+    // (SolicitudNueva.metaPor) y el otro se calcula con la volumetria de la
+    // categoria. % -> tickets: round(volumetria x % / 100), ticket entero
+    // (ticketsDe). Tickets -> %: pctDeTickets, a dos decimales. Solo viaja
+    // el % (el validador no tiene campo de tickets) y el Tickets Reduce del
+    // registro sigue saliendo de dbo.ExpTicketsReduce con su ventana movil.
+    { clave: 'tickets', etiqueta: 'Tickets a reducir', control: 'meta-tickets', seccion: 'impacto',
+      destino: null, opcional: true, reiniciaConCascada: true, requiereCategoria: true }
   ];
 
   // Ayuda de los rotulos fijos del HTML (no son campos de captura).
@@ -216,6 +225,28 @@ window.Iniciativas = (function () {
     pct = String(pct === null || pct === undefined ? '' : pct).trim();
     if (pct === '' || VALIDAR.porcentaje(pct)) return null;
     return Math.floor((volumetria * Math.round(Number(pct) * 100) + 5000) / 10000);
+  }
+
+  // Tickets a reducir -> % con dos decimales, mitad hacia arriba (la misma
+  // regla que MetaCategoria.pct de Crear, admin/iniciativa-admin.js). Con
+  // volumetrias grandes 0.01% es mas de un ticket: exacto dice si ese % da
+  // los mismos tickets. -> { pct, exacto, tickets } o { error } ('' = vacio).
+  function pctDeTickets(volumetria, tickets) {
+    var t = String(tickets === null || tickets === undefined ? '' : tickets).trim();
+    if (t === '') return { error: '' };
+    if (VALIDAR.entero(t)) return { error: VALIDAR.entero(t) };
+    if (typeof volumetria !== 'number' || !isFinite(volumetria) || volumetria < 0 || volumetria % 1) {
+      return { error: 'Sin volumetría no se puede pasar de tickets a %.' };
+    }
+    if (volumetria === 0) return { error: 'Con volumetría 0 no hay tickets que reducir: usa el %.' };
+    var n = Number(t);
+    if (n > volumetria) {
+      return { error: n.toLocaleString('es-MX') + ' tickets es más que la volumetría (' +
+        volumetria.toLocaleString('es-MX') + '): pasaría de 100%.' };
+    }
+    var pct = String(Math.floor((2 * n * 10000 + volumetria) / (2 * volumetria)) / 100);
+    var da = ticketsDe(volumetria, pct);
+    return { pct: pct, exacto: da === n, tickets: da };
   }
 
   // Token del borrador: un GUID v4 que el servidor usa SOLO para no guardar
@@ -347,6 +378,9 @@ window.Iniciativas = (function () {
       //     'ruta_invalida' | 'error', valor, mensaje }
       // Atada a su categoria: la de otra (vieja o que llega tarde) no se usa.
       this.volumen = null;
+      // Lo que se escribio de la meta: 'pct' o 'tickets'. El otro se
+      // calcula; con 'tickets', valores.pct sale de pctDeTickets.
+      this.metaPor = 'pct';
       this.rca = null;         // el File elegido (no se sube a ningun lado)
       // Un borrador = un token: reenviarlo no crea otra solicitud.
       this.token = nuevoToken();
@@ -383,7 +417,7 @@ window.Iniciativas = (function () {
 
     // ---- RCA ----
     // Obligatorio solo si el tipo elegido es el Problem del catalogo.
-    rcaObligatorio() { return this.tipo !== '' && this.tipo === this.catalogo.tipoProblem; }
+    rcaObligatorio() { return RCA.enSitio && this.tipo !== '' && this.tipo === this.catalogo.tipoProblem; }
     elegirRca(archivo) { this.rca = archivo && archivo.size > 0 ? archivo : null; }
 
     // ---- capacidad de la categoria ----
@@ -430,6 +464,7 @@ window.Iniciativas = (function () {
         valor: e && typeof e.valor === 'number' ? e.valor : null,
         mensaje: (e && e.mensaje) || ''
       };
+      this.recalcularMeta();
       return true;
     }
 
@@ -477,14 +512,37 @@ window.Iniciativas = (function () {
     motivoTickets() {
       if (!this.categoria()) return 'Elige primero la Categoría en Clasificación.';
       if (this.volumetria() === null) return 'Se calcula cuando esté la volumetría de la categoría.';
+      if (this.metaPor === 'tickets') {
+        var r = pctDeTickets(this.volumetria(), this.valores.tickets);
+        if (r.error === '') return 'Escribe los tickets o el % de disminución: el otro se calcula.';
+        if (r.error !== undefined) return r.error;
+        return '≈ ' + r.pct + '% de ' + this.volumetria().toLocaleString('es-MX') +
+          (r.exacto ? '' : ' · con 2 decimales son ' + r.tickets.toLocaleString('es-MX') + ' tickets') + '.';
+      }
       var pct = String(this.valores.pct === undefined ? '' : this.valores.pct).trim();
-      if (pct === '') return 'Escribe el % de disminución para calcularlo.';
+      if (pct === '') return 'Escribe el % de disminución o los tickets: el otro se calcula.';
       if (this.error('pct')) return 'Corrige el % de disminución para calcularlo.';
       return 'Volumetría × % ÷ 100, redondeado a ticket entero.';
     }
 
+    // Lo que muestra la casilla de tickets: lo escrito, o los que da el %.
+    ticketsVista() {
+      if (this.metaPor === 'tickets') return String(this.valores.tickets === undefined ? '' : this.valores.tickets);
+      var t = this.ticketsReducir();
+      return t === null ? '' : String(t);
+    }
+
+    // Con la meta en tickets, el % (lo que viaja) sale de los tickets y de
+    // la volumetria; vacio si no se puede (error('tickets') dice por que).
+    recalcularMeta() {
+      if (this.metaPor !== 'tickets') return;
+      var r = pctDeTickets(this.volumetria(), this.valores.tickets);
+      this.valores.pct = r.error === undefined ? r.pct : '';
+    }
+
     limpiarDeCascada(campos, valores) {
       campos.forEach(function (c) { if (c.reiniciaConCascada) delete valores[c.clave]; });
+      if (valores === this.valores) this.metaPor = 'pct';
     }
 
     // La Categoria elegida en la cascada: la UNICA fuente de la categoria.
@@ -501,6 +559,9 @@ window.Iniciativas = (function () {
       if (!c || c.control === 'calculado' || (c.requiereCategoria && !this.categoria())) return;
       if (this.comunes.indexOf(c) >= 0) this.valores[clave] = texto;
       else this.valoresTipo[clave] = texto;
+      // El que se escribe manda; el otro se calcula.
+      if (clave === 'pct') { this.metaPor = 'pct'; delete this.valores.tickets; }
+      if (clave === 'tickets') { this.metaPor = 'tickets'; this.recalcularMeta(); }
     }
 
     // Mensaje de error del valor capturado, o ''.
@@ -508,6 +569,11 @@ window.Iniciativas = (function () {
       var c = this.campo(clave);
       var v = c ? (this.comunes.indexOf(c) >= 0 ? this.valores : this.valoresTipo)[clave] : '';
       var texto = String(v === undefined ? '' : v).trim();
+      if (clave === 'tickets') {
+        if (this.metaPor !== 'tickets') return '';
+        var r = pctDeTickets(this.volumetria(), texto);
+        return r.error || (this.error('pct') ? this.error('pct') : '');
+      }
       var error = c && VALIDAR[c.control] ? VALIDAR[c.control](texto) : '';
       if (error || clave !== 'pct' || texto === '') return error;
       // El % contra la capacidad que dio el servidor (en diezmilesimas,
@@ -534,6 +600,7 @@ window.Iniciativas = (function () {
           if (c.obligatorio && self.calculado(c.clave) === null) faltan.push(c.clave);
           return;
         }
+        if (c.opcional) return;
         if (String(self.valores[c.clave] === undefined ? '' : self.valores[c.clave]).trim() === '') faltan.push(c.clave);
       });
       if (this.rcaObligatorio() && !this.rca) faltan.push('rca');
@@ -547,10 +614,15 @@ window.Iniciativas = (function () {
         // Con Categoria, la volumetria no "falta": no esta disponible, y se
         // dice por que (consultando, sin datos, error).
         if (k === 'volumetria' && self.categoria()) return { campo: k, mensaje: self.motivoVolumen() };
+        // Con la meta en tickets el % no "falta": sale de los tickets.
+        if (k === 'pct' && self.metaPor === 'tickets') {
+          return { campo: 'tickets', mensaje: self.error('tickets') || 'Falta ' + ROTULOS.tickets + ' o ' + ROTULOS.pct + '.' };
+        }
         return { campo: k, mensaje: k === 'rca' ? 'El RCA es obligatorio para Problem.' : 'Falta ' + ROTULOS[k] + '.' };
       });
-      ['volumetria', 'pct'].forEach(function (k) {
+      ['volumetria', 'pct', 'tickets'].forEach(function (k) {
         var e = self.error(k);
+        if (k === 'pct' && self.metaPor === 'tickets') return;   // lo dice 'tickets'
         if (e && errores.every(function (x) { return x.campo !== k; })) errores.push({ campo: k, mensaje: e });
       });
       return errores;
@@ -596,7 +668,10 @@ window.Iniciativas = (function () {
           e: this.volumenActual(), motivo: this.motivoVolumen(),
           reintentar: !!(this.volumenActual() && this.volumenActual().estado === 'error')
         },
-        tickets: { valor: this.ticketsReducir(), motivo: this.motivoTickets() },
+        tickets: {
+          valor: this.ticketsReducir(), vista: this.ticketsVista(), motivo: this.motivoTickets(),
+          habilitado: this.volumetria() !== null && this.volumetria() > 0, metaPor: this.metaPor
+        },
         rca: {
           habilitado: this.tipo !== '',
           obligatorio: this.rcaObligatorio(),
@@ -1069,10 +1144,13 @@ window.Iniciativas = (function () {
         : '<output class="ini-vol">' + Escape.html(est.volumetria.e ? est.volumetria.e.estado : '—') + '</output>') +
         (est.volumetria.reintentar ? ' <button type="button" class="btn linea chico" data-reintentar="volumetria">Reintentar</button>' : '');
       this.$('campo-volumetria-msg').textContent = est.volumetria.motivo;
-      var n = est.tickets.valor;
-      tk.innerHTML = '<output class="ini-vol">' +
-        Escape.html(n === null ? '—' : n.toLocaleString('es-MX') + (n === 1 ? ' ticket' : ' tickets')) + '</output>';
-      this.$('campo-tickets-msg').textContent = est.tickets.motivo;
+      // Tickets: casilla editable. Lo escrito no se toca; si manda el %,
+      // muestra los que da. Con la meta en tickets, el % muestra el calculado.
+      tk.disabled = !est.tickets.habilitado;
+      if (est.tickets.metaPor !== 'tickets' || tk.value === undefined || tk.value === null) tk.value = est.tickets.vista;
+      var pct = this.$('campo-pct');
+      if (pct && est.tickets.metaPor === 'tickets') pct.value = s.valores.pct || '';
+      this.pintarMensaje('tickets', est.tickets.motivo);
     }
 
     pintarRca(e) {
@@ -1081,6 +1159,8 @@ window.Iniciativas = (function () {
       input.setAttribute('aria-required', e.obligatorio ? 'true' : 'false');
       this.$('motRca').textContent = e.motivo;
       this.$('rotRcaObligatorio').hidden = !e.obligatorio;
+      this.$('iniRcaArchivo').hidden = !RCA.enSitio;
+      this.$('iniRcaCorreo').hidden = RCA.enSitio;
     }
 
     // 02 y 03 se ven al elegir el tipo; antes, su aviso.
@@ -1141,7 +1221,7 @@ window.Iniciativas = (function () {
         ? '<label for="' + id + '" class="ini-rotulo ayuda-destino" data-ayuda="' + Escape.attr(campo.clave) + '">' +
             Escape.html(campo.etiqueta) + '</label>'
         : '<label for="' + id + '" class="ini-rotulo">' + Escape.html(campo.etiqueta) + '</label>';
-      var numerico = campo.control === 'entero' || campo.control === 'porcentaje';
+      var numerico = campo.control === 'entero' || campo.control === 'porcentaje' || campo.control === 'meta-tickets';
       var ids = (ayuda ? [id + '-ayuda'] : []).concat(numerico ? [id + '-msg'] : []);
       var describe = ids.length ? ' aria-describedby="' + ids.join(' ') + '"' : '';
       var dato = ' id="' + id + '" data-campo="' + Escape.attr(campo.clave) + '"';
@@ -1159,7 +1239,11 @@ window.Iniciativas = (function () {
           '<small class="ini-motivo" id="' + id + '-msg" aria-live="polite"></small>' +
           (ayuda ? '<span class="ini-sr" id="' + id + '-ayuda">' + Escape.html(ayuda) + '</span>' : '') + '</div>';
       }
-      if (campo.control === 'multilinea') {
+      if (campo.control === 'meta-tickets') {
+        // Se habilita con la volumetria (pintarCalculados).
+        control = '<input type="number"' + dato + describe + ' inputmode="numeric" min="0" step="1" disabled value="' +
+          Escape.attr(v) + '">';
+      } else if (campo.control === 'multilinea') {
         control = '<textarea' + dato + ' rows="6"' + describe + '>' + Escape.html(v) + '</textarea>';
       } else if (campo.control === 'entero') {
         control = '<input type="number"' + dato + describe + ' inputmode="numeric" min="0" step="1" value="' + Escape.attr(v) + '">';
@@ -1202,7 +1286,7 @@ window.Iniciativas = (function () {
           var clave = e.target && e.target.getAttribute && e.target.getAttribute('data-campo');
           if (!clave || !self.solicitud) return;
           self.solicitud.capturar(clave, e.target.value);
-          if (clave === 'pct') {
+          if (clave === 'pct' || clave === 'tickets') {
             self.pintarPct(self.solicitud.estado().pct);
             self.pintarCalculados();
           }
@@ -1244,7 +1328,7 @@ window.Iniciativas = (function () {
       var campos = s.camposEnvio();
       var datos = new FormData();
       Object.keys(campos).forEach(function (k) { datos.append(k, campos[k]); });
-      if (s.rca) datos.append('rca', s.rca, s.rca.name);
+      if (RCA.enSitio && s.rca) datos.append('rca', s.rca, s.rca.name);
 
       var boton = this.$('btnValidar');
       boton.disabled = true;
@@ -1414,8 +1498,10 @@ window.Iniciativas = (function () {
     CAMPOS_COMUNES: CAMPOS_COMUNES,
     AYUDA_FIJA: AYUDA_FIJA,
     VALIDAR: VALIDAR,
+    RCA: RCA,
     fraccionDe: fraccionDe,
     ticketsDe: ticketsDe,
+    pctDeTickets: pctDeTickets,
     nuevoToken: nuevoToken,
     DEFINICIONES_TIPO: DEFINICIONES_TIPO,
     CatalogoIniciativas: CatalogoIniciativas,

@@ -620,14 +620,17 @@
            "Documentos compartidos" / General/Archivos RCA Problems- pero la
            subida, los permisos y como se persiste la referencia siguen sin
            decidir (dbo.Problem.RCA es NVARCHAR(50), no un documento, y no
-           se toca). Ver la cabecera de iniciativas.js. -->
+           se toca). Ver la cabecera de iniciativas.js.
+           HOY (2026-10-22) el archivo no se pide: solo el aviso de a que
+           correo mandarlo (RCA de admin/iniciativas.js). -->
       <section class="ini-bloque ini-col-rca" aria-labelledby="iniCabRca">
         <div class="ini-bloque-cab">
           <span class="ini-paso" aria-hidden="true">04</span>
           <h3 id="iniCabRca">RCA</h3>
           <span class="ini-origen captura">Captura</span>
         </div>
-        <div class="ini-campo">
+        <p class="ini-nota" id="iniRcaCorreo">Adjuntar RCA al correo <a href="mailto:omaralus@soriana.com">omaralus@soriana.com</a></p>
+        <div class="ini-campo" id="iniRcaArchivo" hidden>
           <label for="campoRca" class="ini-rotulo ayuda-destino" data-ayuda="rca">Documento adjunto <span class="ini-obligatorio" id="rotRcaObligatorio" hidden>obligatorio</span></label>
           <input type="file" id="campoRca" aria-describedby="motRca" disabled>
           <small class="ini-motivo" id="motRca">Elige primero un Tipo de iniciativa.</small>

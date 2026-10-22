@@ -358,12 +358,13 @@ pruebas.push(function () {
     pg.fijarRol('MOD');
     Check('S5 perder ADM con el panel abierto vuelve a Iniciativas', ['iniciativas', true], [pg.vista, p.sel('panel-crear-admin').hidden]);
 
-    // Nueva solicitud intacta: PRB sigue exigiendo RCA y todo lo demas.
+    // Nueva solicitud intacta: PRB exige todos los campos; el RCA va por
+    // correo (Iniciativas.RCA.enSitio = false), no se pide.
     var s = pg.solicitud;
     s.elegirTipo('PRB');
-    Check('S6 Nueva solicitud: PRB exige RCA y todos los campos', true,
-      ['tipo', 'po', 'so', 'categoria', 'titulo', 'analisis', 'observaciones', 'volumetria', 'pct', 'rca'].slice(1)
-        .every(function (k) { return s.faltantes().indexOf(k) >= 0; }));
+    Check('S6 Nueva solicitud: PRB exige todos los campos (RCA por correo, no se pide)', [true, false],
+      [['tipo', 'po', 'so', 'categoria', 'titulo', 'analisis', 'observaciones', 'volumetria', 'pct'].slice(1)
+        .every(function (k) { return s.faltantes().indexOf(k) >= 0; }), s.faltantes().indexOf('rca') >= 0]);
     Check('S7 borradores separados: el de ADM no es el de la solicitud', true, pg.crearAdmin.borrador !== s);
 
     // C) el panel

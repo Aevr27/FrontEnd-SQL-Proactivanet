@@ -309,8 +309,9 @@ Check('T10 DEFINICIONES_TIPO vacio: ningun campo de tipo inventado', [], Object.
   Check('N3 Volumetria: calculada (no se captura), obligatoria, por categoria, destino SIN confirmar (null)',
     ['calculado', true, true, null], [campo('volumetria').control, campo('volumetria').obligatorio,
       campo('volumetria').requiereCategoria, campo('volumetria').destino]);
-  Check('N3 Tickets a reducir: calculado, no obligatorio, sin destino', ['calculado', undefined, null],
-    [campo('tickets').control, campo('tickets').obligatorio, campo('tickets').destino]);
+  Check('N3 Tickets a reducir: se escribe (o se calcula del %), opcional, sin destino, se reinicia con la cascada',
+    ['meta-tickets', true, null, true],
+    [campo('tickets').control, campo('tickets').opcional, campo('tickets').destino, campo('tickets').reiniciaConCascada]);
   Check('N4 %: porcentaje, por categoria, se reinicia con la cascada', ['porcentaje', true, true],
     [campo('pct').control, campo('pct').requiereCategoria, campo('pct').reiniciaConCascada]);
   Check('N5 ningun campo de los pendientes se inventa',
@@ -528,9 +529,9 @@ pruebas.push(function () {
        info.indexOf('<textarea id="campo-observaciones" data-campo="observaciones" rows="6" aria-describedby="campo-observaciones-ayuda">') >= 0]);
     Check('N13 03: Volumetria y % fuera de 02', [false, true, true],
       [info.indexOf('campo-volumetria') >= 0, imp.indexOf('id="campo-volumetria"') >= 0, imp.indexOf('id="campo-pct"') >= 0]);
-    Check('N14 Volumetria y Tickets: solo lectura (Calculada), sin input', [true, true, false, false, true],
+    Check('N14 Volumetria solo lectura (Calculada); Tickets: casilla entera, bloqueada hasta la volumetria', [true, true, false, true, true],
       [imp.indexOf('<div id="campo-volumetria" role="group" aria-labelledby="campo-volumetria-rot" aria-describedby="campo-volumetria-ayuda campo-volumetria-msg">') >= 0,
-       imp.indexOf('<div id="campo-tickets" role="group" aria-labelledby="campo-tickets-rot" aria-describedby="campo-tickets-msg">') >= 0,
+       imp.indexOf('<input type="number" id="campo-tickets" data-campo="tickets" aria-describedby="campo-tickets-msg" inputmode="numeric" min="0" step="1" disabled value="">') >= 0,
        /<input[^>]*campo-volumetria/.test(imp), /<input[^>]*campo-tickets/.test(imp),
        /<span class="ini-rotulo-derivado ayuda-destino" id="campo-volumetria-rot" data-ayuda="volumetria">Volumetría de la categoría <span class="ini-origen derivado">Calculada<\/span>/.test(imp)]);
     Check('N15 %: numero 0-100, paso 0.01, bloqueado sin categoria, con sufijo', [true, true],
@@ -803,7 +804,17 @@ pruebas.push(function () {
   Check('S2 sin tipo_problem: ningun tipo exige RCA', false,
     (function () { var n = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK)); n.elegirTipo('PRB'); return n.rcaObligatorio(); })());
 
-  // RCA condicional
+  // RCA por correo (RCA.enSitio = false, hoy): ningun tipo lo pide.
+  Check('S2b hoy el RCA no va por el sitio; aviso al correo', [false, 'omaralus@soriana.com'], [I.RCA.enSitio, I.RCA.correo]);
+  (function () {
+    var n = new I.SolicitudNueva(cat);
+    n.elegirTipo('PRB');
+    Check('S2c RCA por correo: Problem no exige archivo', [false, false, false],
+      [n.rcaObligatorio(), n.estado().rca.obligatorio, n.faltantes().indexOf('rca') >= 0]);
+  })();
+
+  // RCA condicional (regla para cuando vuelva al sitio: RCA.enSitio = true)
+  I.RCA.enSitio = true;
   var s = new I.SolicitudNueva(cat);
   s.elegirTipo('PRB');
   Check('S3 Problem: RCA obligatorio', [true, 'Obligatorio para Problem. El archivo todavía no se guarda.'],
@@ -815,6 +826,7 @@ pruebas.push(function () {
   Check('S3 archivo vacio no cuenta', true, s.faltantes().indexOf('rca') >= 0);
   s.elegirTipo('ADO');
   Check('S4 otro tipo: RCA opcional', [false, false], [s.rcaObligatorio(), s.faltantes().indexOf('rca') >= 0]);
+  I.RCA.enSitio = false;
 
   // Requeridos
   var r = new I.SolicitudNueva(cat);
@@ -881,10 +893,11 @@ pruebas.push(function () {
   }, function () { return respuestaValidar(); }, llamadas);
   return P.cargar(pedir).then(function () {
     Check('S16 selector: Problem primero', ['PRB', 'ADO', 'MAP'], p.sel('selTipo').opciones());
-    Check('S16 RCA bloqueado sin tipo', [true, 'Elige primero un Tipo de iniciativa.'], [p.sel('campoRca').disabled, p.sel('motRca').textContent]);
+    Check('S16 RCA: archivo oculto, aviso del correo visible', [true, false, true],
+      [p.sel('iniRcaArchivo').hidden, p.sel('iniRcaCorreo').hidden, /<p class="ini-nota" id="iniRcaCorreo">Adjuntar RCA al correo <a href="mailto:omaralus@soriana\.com">omaralus@soriana\.com<\/a><\/p>/.test(leer('admin/iniciativas.html'))]);
     elegirEn(p, 'selTipo', 'PRB');
-    Check('S17 Problem: RCA habilitado y obligatorio', [false, 'true', false],
-      [p.sel('campoRca').disabled, p.sel('campoRca').getAttribute('aria-required'), p.sel('rotRcaObligatorio').hidden]);
+    Check('S17 Problem: el RCA no se exige (va por correo)', ['false', true, true, false],
+      [p.sel('campoRca').getAttribute('aria-required'), p.sel('rotRcaObligatorio').hidden, p.sel('iniRcaArchivo').hidden, p.sel('iniRcaCorreo').hidden]);
     elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
     return esperar();
   }).then(function () {
@@ -899,8 +912,8 @@ pruebas.push(function () {
     return P.validar().then(function () {
       Check('S19 faltantes: no hay POST', antes, llamadas.length);
       var html = p.sel('iniResultado').innerHTML;
-      Check('S19 lista lo que falta, RCA incluido', [true, true, true, true],
-        [/Título: Falta Título\./.test(html), /RCA: El RCA es obligatorio para Problem\./.test(html),
+      Check('S19 lista lo que falta, sin RCA (va por correo)', [true, false, true, true],
+        [/Título: Falta Título\./.test(html), /RCA/.test(html),
          /% Disminución: Esta categoría solo tiene 40% disponible\./.test(html), p.sel('iniResultado').classList.contains('mal')]);
     });
   }).then(function () {
@@ -916,10 +929,10 @@ pruebas.push(function () {
     var post = llamadas.filter(function (l) { return l[1] === 'POST'; });
     Check('S20 un solo POST, a validar', [1, '../handlers/admin_iniciativas_validar.ashx'], [post.length, post[0] && post[0][0]]);
     var cuerpo = post[0][2];
-    Check('S20 cuerpo: campos y archivo; volumetria = la de la categoria; tickets no viajan',
-      ['PRB', '/A/Cat 1', 'D', '40', '40', 'RCA_v7.pdf', '1247', false],
+    Check('S20 cuerpo: campos sin archivo (RCA por correo); volumetria = la de la categoria; tickets no viajan',
+      ['PRB', '/A/Cat 1', 'D', '40', '40', false, '1247', false],
       [cuerpo.get('tipo'), cuerpo.get('categoria'), cuerpo.get('descripcion'), cuerpo.get('pct'),
-       cuerpo.get('disponible_cliente'), cuerpo.get('rca') && cuerpo.get('rca').name, cuerpo.get('volumetria'),
+       cuerpo.get('disponible_cliente'), cuerpo.has('rca'), cuerpo.get('volumetria'),
        cuerpo.has('tickets')]);
     Check('S20 valida: avisa que no se guardo', [true, true],
       [/No se guardó/.test(p.sel('iniResultado').innerHTML), p.sel('iniResultado').classList.contains('ok')]);
@@ -1014,7 +1027,7 @@ pruebas.push(function () {
   Check('VT3 viaja como volumetria; tickets no viajan', ['1247', false],
     [s.camposEnvio().volumetria, Object.prototype.hasOwnProperty.call(s.camposEnvio(), 'tickets')]);
   s.capturar('pct', '');
-  Check('VT4 sin %: sin tickets', [null, 'Escribe el % de disminución para calcularlo.'], [s.ticketsReducir(), s.motivoTickets()]);
+  Check('VT4 sin %: sin tickets', [null, 'Escribe el % de disminución o los tickets: el otro se calcula.'], [s.ticketsReducir(), s.motivoTickets()]);
   s.capturar('pct', '150');
   Check('VT4 % fuera de rango: sin tickets', [null, 'Corrige el % de disminución para calcularlo.'], [s.ticketsReducir(), s.motivoTickets()]);
   s.fijarCapacidad(cat, { disponible: 0.1, determinable: true });
@@ -1059,17 +1072,17 @@ pruebas.push(function () {
     }
   });
   function vol() { return p.sel('campo-volumetria').innerHTML; }
-  function tk() { return p.sel('campo-tickets').innerHTML; }
+  function tk() { return p.sel('campo-tickets').value; }
   function gets(ruta) {
     return llamadas.filter(function (l) { return l[0] === '../handlers/admin_iniciativas_volumetria.ashx?ruta=' + encodeURIComponent(ruta); }).length;
   }
   return P.cargar(pedir).then(function () {
     elegirEn(p, 'selTipo', 'MAP');
     Check('VT10 sin Categoria: "—" y por que', [true, 'Elige primero la Categoría en Clasificación.', true],
-      [/>—<\/output>/.test(vol()), p.sel('campo-volumetria-msg').textContent, />—<\/output>/.test(tk())]);
+      [/>—<\/output>/.test(vol()), p.sel('campo-volumetria-msg').textContent, tk() === '' && p.sel('campo-tickets').disabled]);
     elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
     Check('VT11 al elegir: Consultando (htmlVolumetria), sin tickets', [true, true],
-      [/<output class="ini-vol"[^>]*>Consultando…<\/output>/.test(vol()), />—<\/output>/.test(tk())]);
+      [/<output class="ini-vol"[^>]*>Consultando…<\/output>/.test(vol()), tk() === '' && p.sel('campo-tickets').disabled]);
     return esperar();
   }).then(function () {
     Check('VT11 un GET al handler de volumetria de Crear / Modificar', [1, 'GET'],
@@ -1078,15 +1091,15 @@ pruebas.push(function () {
       [/>1,247 tickets \(últimos 30 días\)<\/output>/.test(vol()), p.sel('campo-volumetria-msg').textContent]);
     escribir(p, 'iniCamposImpacto', 'pct', '12.5');
     Check('VT13 % escrito: tickets calculados al momento', [true, 'Volumetría × % ÷ 100, redondeado a ticket entero.'],
-      [/<output class="ini-vol">156 tickets<\/output>/.test(tk()), p.sel('campo-tickets-msg').textContent]);
+      [tk() === '156' && !p.sel('campo-tickets').disabled, p.sel('campo-tickets-msg').textContent]);
     escribir(p, 'iniCamposImpacto', 'pct', '150');
-    Check('VT13 % invalido: sin tickets', true, /<output class="ini-vol">—<\/output>/.test(tk()));
+    Check('VT13 % invalido: sin tickets', '', tk());
     escribir(p, 'iniCamposImpacto', 'pct', '12.5');
 
     // Cat 2 tarda: mientras, nada de Cat 1 (ni 1,247 ni 156).
     elegirEn(p, 'selSo', 'SO y'); elegirEn(p, 'selCategoria', '/A/Cat 2');
     Check('VT14 cambio de categoria: Consultando, sin la volumetria ni los tickets anteriores', [true, false, false, true],
-      [/Consultando…/.test(vol()), /1,247/.test(vol()), /156/.test(tk()), />—<\/output>/.test(tk())]);
+      [/Consultando…/.test(vol()), /1,247/.test(vol()), /156/.test(tk()), tk() === '']);
     return esperar();
   }).then(function () {
     Check('VT14 sigue Consultando mientras no llega', true, /Consultando…/.test(vol()));
@@ -1106,7 +1119,7 @@ pruebas.push(function () {
   }).then(function () {
     Check('VT17 error: "No se pudo consultar" en rojo, sin 0, con Reintentar', [true, true, false, true],
       [/<output class="ini-vol mal"[^>]*>No se pudo consultar: No se pudo leer la volumetría: x<\/output>/.test(vol()),
-       /data-reintentar="volumetria">Reintentar<\/button>/.test(vol()), /\b0 tickets/.test(vol()), />—<\/output>/.test(tk())]);
+       /data-reintentar="volumetria">Reintentar<\/button>/.test(vol()), /\b0 tickets/.test(vol()), tk() === '' && p.sel('campo-tickets').disabled]);
     escribir(p, 'iniCamposComunes', 'titulo', 'T'); escribir(p, 'iniCamposComunes', 'analisis', 'D');
     escribir(p, 'iniCamposComunes', 'observaciones', 'O'); escribir(p, 'iniCamposImpacto', 'pct', '10');
     var antes = llamadas.length;
@@ -1123,7 +1136,82 @@ pruebas.push(function () {
   }).then(function () {
     Check('VT19 Reintentar: otro GET', 2, gets('/A/Cat 3'));
     Check('VT19 reintento ok: volumetria y tickets (80 x 10% = 8)', [true, true],
-      [/>80 tickets \(últimos 30 días\)<\/output>/.test(vol()), /<output class="ini-vol">8 tickets<\/output>/.test(tk())]);
+      [/>80 tickets \(últimos 30 días\)<\/output>/.test(vol()), tk() === '8']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MT) Meta en tickets: escribir los tickets calcula el % (que es lo unico que
+//     viaja); el que se escribio manda; capacidad, errores y cascada.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  Check('MT1 pctDeTickets: 156 de 1247 = 12.51% (exacto)', { pct: '12.51', exacto: true, tickets: 156 }, I.pctDeTickets(1247, '156'));
+  Check('MT1 pctDeTickets: 8 de 80 = 10%', '10', I.pctDeTickets(80, '8').pct);
+  Check('MT1 volumetria grande: 0.01% es mas de un ticket, se dice', [false, 'no exacto'],
+    (function (r) { return [r.exacto, r.tickets !== 1 ? 'no exacto' : 'exacto']; })(I.pctDeTickets(50000, '1')));
+  Check('MT2 errores: vacio, no entero, sin volumetria, volumetria 0, mas que la volumetria',
+    ['', true, true, true, true],
+    [I.pctDeTickets(100, '').error, !!I.pctDeTickets(100, '1.5').error, /Sin volumetría/.test(I.pctDeTickets(null, '3').error),
+     /volumetría 0/.test(I.pctDeTickets(0, '3').error), /pasaría de 100%/.test(I.pctDeTickets(100, '101').error)]);
+
+  var cat = I.CatalogoIniciativas.desdeJson(JSON_OK);
+  var s = new I.SolicitudNueva(cat);
+  s.elegirTipo('MAP');
+  s.elegir(0, 'PO 1'); s.elegir(1, 'SO x'); s.elegir(2, '/A/Cat 1');
+  var c = s.categoria();
+  s.fijarVolumen(c, { estado: 'ok', valor: 1247 });
+  s.capturar('tickets', '156');
+  Check('MT3 tickets escritos: el % sale de ellos y es lo que viaja (sin tickets en el cuerpo)', ['tickets', '12.51', '12.51', false],
+    [s.metaPor, s.valores.pct, s.camposEnvio().pct, Object.prototype.hasOwnProperty.call(s.camposEnvio(), 'tickets')]);
+  Check('MT3 lo escrito se muestra tal cual; el aviso dice el %', ['156', '≈ 12.51% de 1,247.'], [s.ticketsVista(), s.motivoTickets()]);
+  Check('MT3 no falta el %', false, s.faltantes().indexOf('pct') >= 0);
+  s.capturar('pct', '20');
+  Check('MT4 escribir el % vuelve a mandar el %: tickets calculados', ['pct', '249', undefined],
+    [s.metaPor, s.ticketsVista(), s.valores.tickets]);
+  s.capturar('tickets', '');
+  Check('MT5 tickets vacios: % vacio y el aviso lo pide como tickets o %', ['', true, 'tickets'],
+    [s.valores.pct, s.faltantes().indexOf('pct') >= 0,
+     (s.erroresCliente().filter(function (e) { return /Tickets a reducir o % Disminución/.test(e.mensaje); })[0] || {}).campo]);
+  s.capturar('tickets', '2000');
+  Check('MT6 mas que la volumetria: error en tickets, % vacio, no se envia', [true, '', true],
+    [/pasaría de 100%/.test(s.error('tickets')), s.valores.pct, s.erroresCliente().some(function (e) { return e.campo === 'tickets'; })]);
+  s.fijarCapacidad(c, { disponible: 0.1, determinable: true });
+  s.capturar('tickets', '156');
+  Check('MT7 el % calculado tambien respeta la capacidad (10%)', [true, true],
+    [/solo tiene 10% disponible/.test(s.error('tickets')), s.erroresCliente().some(function (e) { return e.campo === 'tickets' && /10%/.test(e.mensaje); })]);
+  s.fijarCapacidad(c, { disponible: 0.5, determinable: true });
+  s.fijarVolumen(c, { estado: 'ok', valor: 2000 });
+  Check('MT8 cambia la volumetria: lo escrito se queda, el % se recalcula', ['156', '7.8'], [s.ticketsVista(), s.valores.pct]);
+  s.elegir(1, 'SO y');
+  Check('MT9 cambiar la cascada: meta limpia y vuelve a %', ['pct', undefined, undefined], [s.metaPor, s.valores.tickets, s.valores.pct]);
+  s.elegir(1, 'SO x'); s.elegir(2, '/A/Cat 1'); s.capturar('tickets', '5');
+  s.elegirTipo('MAP');
+  Check('MT9 cambiar de tipo: meta limpia y vuelve a %', ['pct', undefined, undefined], [s.metaPor, s.valores.tickets, s.valores.pct]);
+});
+
+// MT en la pagina: escribir tickets llena el % (calculado) y el POST lleva ese %.
+pruebas.push(function () {
+  var llamadas = [];
+  var p = Pagina(nunca);
+  var P = p.ventana.IniciativasPagina;
+  var pedir = enrutador({ '/A/Cat 1': { categoria: '/A/Cat 1', disponible: 0.4, determinable: true } },
+    function () { return Respuesta(200, { valida: true, errores: [], guardada: false, numero_solicitud: null }); }, llamadas);
+  return P.cargar(pedir).then(function () {
+    elegirEn(p, 'selTipo', 'MAP');
+    elegirEn(p, 'selPo', 'PO 1'); elegirEn(p, 'selSo', 'SO x'); elegirEn(p, 'selCategoria', '/A/Cat 1');
+    return esperar();
+  }).then(function () {
+    Check('MT10 con volumetria: la casilla de tickets se habilita', false, p.sel('campo-tickets').disabled);
+    escribir(p, 'iniCamposImpacto', 'tickets', '156');
+    Check('MT10 tickets escritos: el % se llena calculado, lo escrito se queda, el aviso lo dice', ['12.51', '156', '≈ 12.51% de 1,247.'],
+      [p.sel('campo-pct').value, P.solicitud.ticketsVista(), p.sel('campo-tickets-msg').textContent]);
+    escribir(p, 'iniCamposComunes', 'titulo', 'T'); escribir(p, 'iniCamposComunes', 'analisis', 'D');
+    escribir(p, 'iniCamposComunes', 'observaciones', 'O');
+    return P.validar();
+  }).then(function () {
+    var post = llamadas.filter(function (l) { return l[1] === 'POST'; });
+    Check('MT11 el POST lleva el % calculado y no los tickets', [1, '12.51', false],
+      [post.length, post[0] && post[0][2].get('pct'), post[0] && post[0][2].has('tickets')]);
   });
 });
 
@@ -1156,7 +1244,7 @@ pruebas.push(function () {
     P.mostrarVista('nueva');
     var s = P.solicitud;
     s.elegirTipo('PRB');
-    Check('RS5 MOD: PRB exige RCA en la solicitud (regla sin cambio)', [true, true],
+    Check('RS5 MOD: PRB no exige RCA en la solicitud (va por correo)', [false, false],
       [s.rcaObligatorio(), s.faltantes().indexOf('rca') >= 0]);
     s.elegirTipo('MAP');
     Check('RS5 ... y otro tipo no', false, s.faltantes().indexOf('rca') >= 0);
