@@ -275,7 +275,8 @@
         // lo que trae usp_Analisis_Datos; si no, la fila de la lista de servicios.
         var fila = servicios.filter(function (s) { return s.Servicio === respuesta.servicio; })[0] || {};
         var sec = parametro('Secciones');
-        secciones = window.Motor.leerSecciones(sec != null ? sec : fila.Secciones);
+        // Un motor.js viejo de cache no trae leerSecciones: todo apagado, sin romper.
+        secciones = window.Motor.leerSecciones ? window.Motor.leerSecciones(sec != null ? sec : fila.Secciones) : { quincena: false, cedis: null };
         return correrAnalisis(avisar, med).then(function (listo) {
           if (!listo || mio !== turno) return;
           med.total = Date.now() - t0; med.enWorker = !!analizador.worker; medicion = med;
