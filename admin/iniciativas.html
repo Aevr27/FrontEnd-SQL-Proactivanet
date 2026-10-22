@@ -438,8 +438,13 @@
     <!-- Avisos de los dueños (admin/acuse-iniciativa.js, solo ADM): los
          acuses "Estoy trabajando en ello" de PO / SO en iniciativas
          Atrasadas (handlers/admin_iniciativas_acuse.ashx, sql/28). Quedan
-         guardados; listar no los marca: "Marcar como leído" es por ADM. -->
-    <section class="ini-adm-bloque ini-av" id="avSeccion" aria-labelledby="avTitulo" data-solo-adm hidden>
+         guardados; listar no los marca: "Marcar como leído" es por ADM.
+         OCULTO PENDIENTE DE APROBACION (2026-10-22): sin data-solo-adm, asi
+         SesionAdmin nunca la muestra, aunque falle o no cargue el JS. Solo
+         SesionAdmin la destapaba (VistaAvisosAcuse no toca su hidden).
+         Reactivar: volver a poner data-solo-adm aqui, ademas de
+         AcuseIniciativa.HABILITADO y AcusesIniciativa.Habilitado = true. -->
+    <section class="ini-adm-bloque ini-av" id="avSeccion" aria-labelledby="avTitulo" hidden>
       <div class="ini-lista-cab">
         <h3 class="ini-lista-titulo" id="avTitulo">Avisos de los dueños</h3>
         <span class="ini-lista-cuenta" id="avNoLeidas" aria-live="polite"></span>

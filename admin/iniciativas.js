@@ -862,8 +862,15 @@ window.Iniciativas = (function () {
       // Nueva solicitud: un fallo de uno no bloquea al otro.
       this.registro = new window.RegistroIniciativas.VistaRegistro(this.doc).iniciar();
       // Acuse del PO / SO en el detalle y avisos de ADM: un solo cliente
-      // (quien soy se pide una vez). Sin sql/28 no pintan nada.
-      if (window.AcuseIniciativa) {
+      // (quien soy se pide una vez). Sin sql/28 no pintan nada. Oculto
+      // pendiente de aprobacion (AcuseIniciativa.HABILITADO = false): ni se
+      // conecta, y la seccion de avisos deja de ser data-solo-adm para que
+      // SesionAdmin no la muestre.
+      if (window.AcuseIniciativa && !window.AcuseIniciativa.HABILITADO) {
+        var avSeccion = this.$('avSeccion');
+        if (avSeccion) { avSeccion.removeAttribute('data-solo-adm'); avSeccion.hidden = true; }
+      }
+      if (window.AcuseIniciativa && window.AcuseIniciativa.HABILITADO) {
         var clienteAcuse = new window.AcuseIniciativa.ClienteAcuse(null);
         var regAcuse = this.registro;
         this.registro.acuse = new window.AcuseIniciativa.AcuseDetalle(this.doc, null, clienteAcuse);

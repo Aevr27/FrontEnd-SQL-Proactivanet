@@ -47,6 +47,23 @@ sealed class IniciativasFalsas : IFuenteIniciativasAcuse
     public List<IniciativaAcuse> Duenos() { return new List<IniciativaAcuse>(Por.Values); }
 }
 
+// Trampa para el modo OCULTO: cualquier llamada a la base del acuse (sus
+// tablas de sql/28, CatPersona del acuse o el registro del acuse) cuenta y
+// LANZA. Con el acuse apagado, Toques debe quedar en 0.
+sealed class TrampaAcuse : IAlmacenAcuses, IFuentePersonasAcuse, IFuenteIniciativasAcuse
+{
+    public readonly List<string> Toques = new List<string>();
+    Exception Toque(string que) { Toques.Add(que); return new InvalidOperationException("acuse apagado: no debia llegar a " + que); }
+    public bool Disponible() { throw Toque("Almacen.Disponible"); }
+    public RegistroAcuse Registrar(string cuenta, string folio, string rol, string dueno, string estado, DateTime? fecha) { throw Toque("Almacen.Registrar"); }
+    public List<AcuseGuardado> DeIniciativa(string folio) { throw Toque("Almacen.DeIniciativa"); }
+    public BandejaAcuses Bandeja(string usuario, int limite) { throw Toque("Almacen.Bandeja"); }
+    public bool MarcarLeida(string usuario, int id) { throw Toque("Almacen.MarcarLeida"); }
+    public List<PersonaCatalogo> Personas() { throw Toque("Personas.Personas"); }
+    public IniciativaAcuse Iniciativa(string folio) { throw Toque("Iniciativas.Iniciativa"); }
+    public List<IniciativaAcuse> Duenos() { throw Toque("Iniciativas.Duenos"); }
+}
+
 sealed class AlmacenFalso : IAlmacenAcuses
 {
     public bool Hay = true;
@@ -164,6 +181,63 @@ public static class AcuseIniciativaHttpSmoke
         AcusesIniciativa.Iniciativas = inis;
         AcusesIniciativa.Almacen = alm;
         int estado;
+
+        // ---------------- Z: oculto pendiente de aprobacion ----------------
+        // Con Habilitado = false (el valor del repo) nada se lee ni se
+        // escribe: GET disponible false, POST 403 FuncionNoAprobada.
+        Check("Z0 en el repo el acuse esta OCULTO", false, AcusesIniciativa.Habilitado);
+        foreach (var q in new[] { "accion=mio", "accion=iniciativa&folio=PRB%202026-000001" })
+            Check("Z1 GET " + q + " (dueno): disponible false", "200|{\"disponible\":false}", (new Func<string>(delegate { var b = Correr("GET", q, PO, out estado); return estado + "|" + b; }))());
+        Check("Z1 GET bandeja (ADM): disponible false", "{\"disponible\":false}", Correr("GET", "accion=bandeja", SO, out estado));
+        Check("Z2 POST acusar (dueno de una Atrasada): 403 FuncionNoAprobada, nada guardado", "403|True|0",
+              Codigo("POST", "accion=acusar", PO, "folio", "PRB 2026-000001", "rol", "PO") + "|" +
+              Correr("POST", "accion=acusar", PO, out estado, "folio", "PRB 2026-000001", "rol", "PO").Contains("FuncionNoAprobada") + "|" + alm.Registros.Count);
+        Check("Z3 POST leida (ADM): 403, nada marcado", "403|0", Codigo("POST", "accion=leida", SO, "id", "1") + "|" + alm.Marcadas);
+        Check("Z4 sigue 403 AccesoDenegado para VIEWER (la puerta no cambia)", 403, Codigo("GET", "accion=mio", VIEWER));
+        Check("Z5 sigue 403 RolInsuficiente para MOD en la bandeja", true, Correr("GET", "accion=bandeja", PO, out estado).Contains("RolInsuficiente"));
+
+        // Z6: toda accion x todo tipo de usuario con la TRAMPA puesta: la
+        // respuesta es la esperada y la base del acuse no se toca ni una vez
+        // (si se tocara, la trampa lanza y ademas queda en Toques). El rol
+        // (dbo.UsuariosAdmin, RolesFalsosAcuse) si se consulta: es la puerta.
+        var trampa = new TrampaAcuse();
+        AcusesIniciativa.Almacen = trampa; AcusesIniciativa.Personas = trampa; AcusesIniciativa.Iniciativas = trampa;
+        var quienes = new[] { new[] { "anonimo", "" }, new[] { "sin usuario", null }, new[] { "VIEWER", VIEWER },
+                              new[] { "MOD (PO)", PO }, new[] { "ADM (SO)", SO }, new[] { "ADM no dueno", OTRO } };
+        var acciones = new[]
+        {
+            new[] { "GET", "accion=mio" }, new[] { "GET", "accion=iniciativa&folio=PRB%202026-000001" },
+            new[] { "GET", "accion=bandeja" }, new[] { "POST", "accion=acusar" }, new[] { "POST", "accion=leida" },
+        };
+        foreach (var q in quienes)
+            foreach (var a in acciones)
+            {
+                var adm = q[1] == SO || q[1] == OTRO;
+                var elevado = adm || q[1] == PO;
+                var soloAdm = a[1] == "accion=bandeja" || a[1] == "accion=leida";
+                string esperado;
+                if (!elevado) esperado = "403|AccesoDenegado";
+                else if (soloAdm && !adm) esperado = "403|RolInsuficiente";
+                else if (a[0] == "GET") esperado = "200|disponible_false";
+                else esperado = "403|FuncionNoAprobada";
+                var cuerpo = a[0] == "POST"
+                    ? Correr("POST", a[1], q[1], out estado, "folio", "PRB 2026-000001", "rol", "PO", "id", "1")
+                    : Correr("GET", a[1], q[1], out estado);
+                var tipo = cuerpo == "{\"disponible\":false}" ? "disponible_false"
+                         : cuerpo.Contains("\"tipo\":\"") ? cuerpo.Split(new[] { "\"tipo\":\"" }, StringSplitOptions.None)[1].Split('"')[0] : cuerpo;
+                Check("Z6 " + q[0] + " " + a[0] + " " + a[1], esperado, estado + "|" + tipo);
+            }
+        Check("Z6 la base del acuse no se toco en ninguna (Toques)", "", string.Join(",", trampa.Toques.ToArray()));
+
+        // El resto prueba la funcion como quedara al reactivarla (solo en
+        // memoria de esta prueba; el repo sigue en false).
+        AcusesIniciativa.Habilitado = true;
+        // Control: encendido, la misma trampa SI salta (Z6 no pasa por
+        // casualidad).
+        Correr("GET", "accion=mio", SO, out estado);
+        Check("Z7 control: encendido, la trampa detecta el acceso a la base del acuse", "500|True",
+              estado + "|" + trampa.Toques.Contains("Almacen.Disponible"));
+        AcusesIniciativa.Almacen = alm; AcusesIniciativa.Personas = personas; AcusesIniciativa.Iniciativas = inis;
 
         // ---------------- I: identidad (sin HTTP) ----------------
         var lp = personas.Lista;

@@ -233,11 +233,41 @@ pruebas.push(function () {
   });
 });
 
+// ---- AV7: JS viejo en cache que si conecta la bandeja ----
+// La seccion solo la destapaba SesionAdmin (data-solo-adm): VistaAvisosAcuse
+// nunca toca #avSeccion.hidden, ni con datos ni con disponible false (lo que
+// responde hoy el servidor apagado). Con el HTML sin data-solo-adm, un
+// iniciativas.js viejo que la conecte no la vuelve visible.
+pruebas.push(function () {
+  var p = Pedidos([[/accion=bandeja/, Respuesta(200, { disponible: false })]]);
+  var doc = Documento();
+  doc.getElementById('avSeccion').hidden = true;
+  return new A.VistaAvisosAcuse(doc, p.pedir, function () { return null; }, function () {}).abrir().then(function () {
+    var p2 = Pedidos([[/accion=bandeja/, Respuesta(200, { disponible: true, no_leidas: 1, limite: 50, notificaciones: [
+      { id_notificacion: 1, folio: 'PRB 2026-000001', rol: 'PO', nombre: 'X', cuenta: 'SORIANA\\xavier', fecha_utc: '2026-10-22T15:00:00Z', fecha_compromiso: null, leida: false }] })]]);
+    var doc2 = Documento();
+    doc2.getElementById('avSeccion').hidden = true;
+    return new A.VistaAvisosAcuse(doc2, p2.pedir, function () { return null; }, function () {}).abrir().then(function () {
+      Check('AV7 abrir la bandeja (servidor apagado o con datos) no destapa #avSeccion', [true, true],
+        [doc.getElementById('avSeccion').hidden, doc2.getElementById('avSeccion').hidden]);
+    });
+  });
+});
+
 // ---- H: HTML ----
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html');
-  Check('H1 seccion de avisos solo ADM, oculta, en Administracion antes de Cambios recientes', true,
-    /<section class="ini-adm-bloque ini-av" id="avSeccion" aria-labelledby="avTitulo" data-solo-adm hidden>[\s\S]*id="crSeccion"/.test(html));
+  // Oculto pendiente de aprobacion: el script lo dice y la pagina no lo conecta.
+  Check('Z1 AcuseIniciativa.HABILITADO = false (oculto pendiente de aprobacion)', false, A.HABILITADO);
+  var pag = leer('admin/iniciativas.js');
+  Check('Z2 la pagina conecta acuse y avisos SOLO con HABILITADO; si no, quita data-solo-adm de la seccion', [true, true],
+    [/if \(window\.AcuseIniciativa && window\.AcuseIniciativa\.HABILITADO\) \{\s*var clienteAcuse/.test(pag),
+     /!window\.AcuseIniciativa\.HABILITADO\) \{\s*var avSeccion = this\.\$\('avSeccion'\);\s*if \(avSeccion\) \{ avSeccion\.removeAttribute\('data-solo-adm'\); avSeccion\.hidden = true; \}/.test(pag)]);
+  // Oculto pendiente de aprobacion: SIN data-solo-adm (SesionAdmin no la
+  // destapa). Al reactivar vuelve a ser data-solo-adm hidden.
+  Check('H1 seccion de avisos oculta y SIN data-solo-adm, en Administracion antes de Cambios recientes', [true, false],
+    [/<section class="ini-adm-bloque ini-av" id="avSeccion" aria-labelledby="avTitulo" hidden>[\s\S]*id="crSeccion"/.test(html),
+     /<section[^>]*id="avSeccion"[^>]*data-solo-adm/.test(html)]);
   Check('H2 script despues de registro-iniciativas.js', true,
     html.indexOf('<script src="acuse-iniciativa.js">') > html.indexOf('<script src="registro-iniciativas.js">'));
 });

@@ -19,12 +19,19 @@
 
    El acuse no cambia la iniciativa (estado, fechas, dueños, semaforo).
    Sin sql/28 (disponible = false) no se pinta nada.
+
+   OCULTO PENDIENTE DE APROBACION (2026-10-22): HABILITADO = false. La
+   pagina (admin/iniciativas.js) no conecta AcuseDetalle ni
+   VistaAvisosAcuse y deja oculta la seccion de avisos; el servidor tambien
+   lo apaga (AcusesIniciativa.Habilitado). Reactivar: true aqui y alla.
    Se prueba en node: tools/tests/AcuseIniciativaSmoke.js.
    ========================================================================= */
 window.AcuseIniciativa = (function () {
   'use strict';
 
   var URL = '../handlers/admin_iniciativas_acuse.ashx';
+  // Oculto pendiente de aprobacion: ver la cabecera.
+  var HABILITADO = false;
   var ROLES = { PO: 'Product Owner', SO: 'Service Owner' };
 
   function h(s) { return Escape.html(s === null || s === undefined ? '' : String(s)); }
@@ -344,6 +351,7 @@ window.AcuseIniciativa = (function () {
 
   return {
     URL: URL,
+    HABILITADO: HABILITADO,
     ClienteAcuse: ClienteAcuse,
     AcuseDetalle: AcuseDetalle,
     VistaAvisosAcuse: VistaAvisosAcuse,
