@@ -491,6 +491,14 @@ public static class AcusesIniciativa
 {
     public const int LimiteBandeja = 50;
 
+    // OCULTO PENDIENTE DE APROBACION (2026-10-22): el acuse de PO / SO y los
+    // avisos de ADM no estan aprobados por direccion. Con false el handler
+    // responde { disponible: false } a todo GET y 403 FuncionNoAprobada a
+    // todo POST, sin leer ni escribir la base (sql/28 queda como esta).
+    // Reactivar: true aqui Y AcuseIniciativa.HABILITADO = true en
+    // admin/acuse-iniciativa.js. Solo las pruebas lo cambian en ejecucion.
+    public static bool Habilitado = false;
+
     // El handler usa estas; las pruebas las cambian por falsas.
     public static IAlmacenAcuses Almacen = new AlmacenAcusesSql();
     public static IFuentePersonasAcuse Personas = new FuentePersonasAcuseSql();

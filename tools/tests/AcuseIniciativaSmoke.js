@@ -236,6 +236,12 @@ pruebas.push(function () {
 // ---- H: HTML ----
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html');
+  // Oculto pendiente de aprobacion: el script lo dice y la pagina no lo conecta.
+  Check('Z1 AcuseIniciativa.HABILITADO = false (oculto pendiente de aprobacion)', false, A.HABILITADO);
+  var pag = leer('admin/iniciativas.js');
+  Check('Z2 la pagina conecta acuse y avisos SOLO con HABILITADO; si no, quita data-solo-adm de la seccion', [true, true],
+    [/if \(window\.AcuseIniciativa && window\.AcuseIniciativa\.HABILITADO\) \{\s*var clienteAcuse/.test(pag),
+     /!window\.AcuseIniciativa\.HABILITADO\) \{\s*var avSeccion = this\.\$\('avSeccion'\);\s*if \(avSeccion\) \{ avSeccion\.removeAttribute\('data-solo-adm'\); avSeccion\.hidden = true; \}/.test(pag)]);
   Check('H1 seccion de avisos solo ADM, oculta, en Administracion antes de Cambios recientes', true,
     /<section class="ini-adm-bloque ini-av" id="avSeccion" aria-labelledby="avTitulo" data-solo-adm hidden>[\s\S]*id="crSeccion"/.test(html));
   Check('H2 script despues de registro-iniciativas.js', true,

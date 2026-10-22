@@ -165,6 +165,22 @@ public static class AcuseIniciativaHttpSmoke
         AcusesIniciativa.Almacen = alm;
         int estado;
 
+        // ---------------- Z: oculto pendiente de aprobacion ----------------
+        // Con Habilitado = false (el valor del repo) nada se lee ni se
+        // escribe: GET disponible false, POST 403 FuncionNoAprobada.
+        Check("Z0 en el repo el acuse esta OCULTO", false, AcusesIniciativa.Habilitado);
+        foreach (var q in new[] { "accion=mio", "accion=iniciativa&folio=PRB%202026-000001" })
+            Check("Z1 GET " + q + " (dueno): disponible false", "200|{\"disponible\":false}", (new Func<string>(delegate { var b = Correr("GET", q, PO, out estado); return estado + "|" + b; }))());
+        Check("Z1 GET bandeja (ADM): disponible false", "{\"disponible\":false}", Correr("GET", "accion=bandeja", SO, out estado));
+        Check("Z2 POST acusar (dueno de una Atrasada): 403 FuncionNoAprobada, nada guardado", "403|True|0",
+              Codigo("POST", "accion=acusar", PO, "folio", "PRB 2026-000001", "rol", "PO") + "|" +
+              Correr("POST", "accion=acusar", PO, out estado, "folio", "PRB 2026-000001", "rol", "PO").Contains("FuncionNoAprobada") + "|" + alm.Registros.Count);
+        Check("Z3 POST leida (ADM): 403, nada marcado", "403|0", Codigo("POST", "accion=leida", SO, "id", "1") + "|" + alm.Marcadas);
+        Check("Z4 sigue 403 AccesoDenegado para VIEWER (la puerta no cambia)", 403, Codigo("GET", "accion=mio", VIEWER));
+        Check("Z5 sigue 403 RolInsuficiente para MOD en la bandeja", true, Correr("GET", "accion=bandeja", PO, out estado).Contains("RolInsuficiente"));
+        // El resto prueba la funcion como quedara al reactivarla.
+        AcusesIniciativa.Habilitado = true;
+
         // ---------------- I: identidad (sin HTTP) ----------------
         var lp = personas.Lista;
         Check("I1 cuenta -> cuenta@soriana.com -> una fila de CatPersona (correo sin mayusculas ni espacios)",

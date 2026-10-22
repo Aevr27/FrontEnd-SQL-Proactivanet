@@ -21,6 +21,9 @@
 //             notificada_utc, leida, leida_utc ] }   (listar NO marca nada)
 //   POST accion=leida  id             ExigirAdm  -> { leida: true, nueva }
 //
+//   OCULTO pendiente de aprobacion (AcusesIniciativa.Habilitado = false):
+//   GET -> { disponible: false }; POST -> 403 FuncionNoAprobada. Antes que
+//   sql/28 y sin tocar la base.
 //   Sin sql/28 en la base: GET -> { disponible: false }; POST -> 501
 //   PersistenciaNoHabilitada. 403 antes de leer nada (VIEWER, anonimo;
 //   MOD en lo que es de ADM). 405 metodo equivocado.
@@ -51,6 +54,12 @@ public class AdminIniciativasAcuse : IHttpHandler
                 if (esPost) return Error(context, 405, "Usa GET.", "MetodoNoPermitido");
             }
             else return Error(context, 400, "Acci\u00f3n desconocida.", "AccionDesconocida");
+
+            if (!AcusesIniciativa.Habilitado)
+            {
+                if (!esPost) return new Dictionary<string, object> { { "disponible", false } };
+                return Error(context, 403, "El acuse de due\u00f1os no est\u00e1 habilitado.", "FuncionNoAprobada");
+            }
 
             if (!AcusesIniciativa.Almacen.Disponible())
             {

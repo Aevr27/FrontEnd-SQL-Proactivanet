@@ -63,6 +63,7 @@ function Elemento(id) {
     },
     setAttribute: function (k, v) { atributos[k] = String(v); },
     getAttribute: function (k) { return Object.prototype.hasOwnProperty.call(atributos, k) ? atributos[k] : null; },
+    removeAttribute: function (k) { delete atributos[k]; },
     appendChild: function (h) { this.hijos.push(h); return h; },
     contains: function (otro) { return otro === this; },
     matches: function () { return false; },
@@ -109,6 +110,11 @@ function Pagina(pedir, antes) {
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
+  // Como en la pagina: acuse-iniciativa.js antes de iniciativas.js, y la
+  // seccion de avisos con su data-solo-adm del HTML.
+  (new Function('window', 'Escape', 'fetch', leer('admin/acuse-iniciativa.js')))(ventana, ventana.Escape, pedir);
+  documento.getElementById('avSeccion').setAttribute('data-solo-adm', '');
+  documento.getElementById('avSeccion').hidden = true;
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.GloboAyuda, pedir);
   // Nueva solicitud es de ADM y MOD y no abre sin rol (falla cerrado). Las
@@ -1138,6 +1144,20 @@ pruebas.push(function () {
     Check('VT19 reintento ok: volumetria y tickets (80 x 10% = 8)', [true, true],
       [/>80 tickets \(últimos 30 días\)<\/output>/.test(vol()), tk() === '8']);
   });
+});
+
+// ---------------------------------------------------------------------------
+// AO) Acuse de PO / SO OCULTO pendiente de aprobacion (HABILITADO = false):
+//     la pagina no conecta el acuse del detalle ni los avisos de ADM, y la
+//     seccion de avisos deja de ser data-solo-adm (SesionAdmin no la abre).
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var p = Pagina(nunca, null, 'ADM');
+  var P = p.ventana.IniciativasPagina, av = p.sel('avSeccion');
+  Check('AO1 sin acuse en el detalle ni avisos; seccion oculta y sin data-solo-adm', [false, null, null, true, null],
+    [p.ventana.AcuseIniciativa.HABILITADO, P.registro.acuse, P.avisos, av.hidden, av.getAttribute('data-solo-adm')]);
+  P.mostrarVista('administracion');
+  Check('AO2 abrir Administracion como ADM no pide avisos ni la muestra', [true, null], [av.hidden, P.avisos]);
 });
 
 // ---------------------------------------------------------------------------
