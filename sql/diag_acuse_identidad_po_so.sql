@@ -20,6 +20,15 @@
    DirectorioOrganizacional.Normaliza (que ademas colapsa espacios
    internos): sirve para medir, no para autorizar.
 
+   RESULTADO EN LA VM (2026-10-22, corrido por el usuario)
+     6 ADM/MOD: 2 resueltos por cuenta@soriana.com Y por CorreoUsuario
+     (jesuscamor = PO de 12 activas, edgarrad = SO de 10); los otros 4 sin
+     persona. Los 20 PO y 22 SO de activas: exactamente 1 persona con su
+     nombre cada uno (ningun ambiguo ni no_encontrado); 40 sin usuario ADM/MOD.
+   METODO ELEGIDO: cuenta@soriana.com (IdentidadWindows.CorreoCandidato) ->
+     CatPersona (exactamente 1) -> nombre = OwnerProblem / OwnerServicio
+     (App_Code/AcuseIniciativa.cs). Ver sql/PROPUESTA_acuse_po_so.md.
+
    Seccion 1: cada usuario ADM/MOD y hasta donde llega su cadena.
    Seccion 2: cada PO/SO capturado en iniciativas activas y si hay un
               usuario ADM/MOD unico que lo sea.

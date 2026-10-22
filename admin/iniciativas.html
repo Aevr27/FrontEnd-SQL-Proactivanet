@@ -435,6 +435,26 @@
       </section>
     </div>
 
+    <!-- Avisos de los dueños (admin/acuse-iniciativa.js, solo ADM): los
+         acuses "Estoy trabajando en ello" de PO / SO en iniciativas
+         Atrasadas (handlers/admin_iniciativas_acuse.ashx, sql/28). Quedan
+         guardados; listar no los marca: "Marcar como leído" es por ADM. -->
+    <section class="ini-adm-bloque ini-av" id="avSeccion" aria-labelledby="avTitulo" data-solo-adm hidden>
+      <div class="ini-lista-cab">
+        <h3 class="ini-lista-titulo" id="avTitulo">Avisos de los dueños</h3>
+        <span class="ini-lista-cuenta" id="avNoLeidas" aria-live="polite"></span>
+        <button type="button" class="btn linea chico" id="avActualizar">Actualizar</button>
+      </div>
+      <p class="ini-nota">El PO o el SO de una iniciativa atrasada avisa que está trabajando en ella. No cambia la iniciativa.</p>
+      <p class="ini-estado" id="avCargando" role="status" hidden>Cargando avisos…</p>
+      <div class="ini-error" id="avError" role="alert" hidden>
+        <span><strong>No se pudieron cargar los avisos.</strong> <span id="avErrorTexto"></span></span>
+        <button type="button" class="btn" id="avReintentar">Reintentar</button>
+      </div>
+      <div class="ini-vacio" id="avVacio" hidden><strong id="avVacioTexto"></strong></div>
+      <div id="avLista" aria-live="polite" hidden></div>
+    </section>
+
     <!-- Cambios recientes (admin/cambios-recientes.js, solo ADM): las
          ultimas iniciativas guardadas DESDE EL DASHBOARD, mas reciente
          primero (handlers/admin_iniciativas_recientes.ashx, ExigirAdm). No
@@ -810,6 +830,7 @@
 <script src="registro-iniciativas.js"></script>
 <script src="solicitudes-cambio.js"></script>
 <script src="cambios-recientes.js"></script>
+<script src="acuse-iniciativa.js"></script>
 <script src="iniciativas.js"></script>
 <script>
 // El rol tambien decide los botones de ADM que se pintan dentro del detalle,

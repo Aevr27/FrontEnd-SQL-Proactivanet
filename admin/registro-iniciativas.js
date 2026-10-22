@@ -1473,6 +1473,9 @@ window.RegistroIniciativas = (function () {
       this.duenosCatalogo = null;
       this.volumetria = null;     // VolumetriaCliente (perezoso)
       this.segCategoria = '';     // categoria elegida en Seguimiento
+      // Acuse del PO / SO (admin/acuse-iniciativa.js, AcuseDetalle): lo
+      // pone la pagina; null = sin acuse. Pinta en #regAcuse del detalle.
+      this.acuse = null;
     }
 
     // estado: 'error' si el catalogo no se pudo cargar (rutas null).
@@ -2379,6 +2382,7 @@ window.RegistroIniciativas = (function () {
       this.marcarRaiz(true);
       this.pintarModo();
       this.volumetriaEdicion();
+      if (this.acuse) this.acuse.mostrar(i, this.$('regAcuse'));
       var cerrar = this.$('regDetCerrar');
       if (cerrar && cerrar.focus) cerrar.focus();
     }
@@ -3432,6 +3436,7 @@ window.RegistroIniciativas = (function () {
         this.htmlIncompleta(i) +
         '<div class="ini-det-acciones" id="regDetAcciones">' + this.htmlAcciones() + '</div>' +
         '</div>' +
+        '<div id="regAcuse" hidden></div>' +
         '<div class="ini-cambio-msg listo" id="regDetAviso" role="status" aria-live="polite" hidden></div>' +
         '<section class="ini-det-sec ini-cambio" id="regCambio" hidden></section>';
 

@@ -1,264 +1,223 @@
-# PROPUESTA: acuse "Estoy trabajando en ello" de PO/SO (NO EJECUTADA, SIN APROBAR)
+# Acuse "Estoy trabajando en ello" de PO/SO — implementación y migración para aprobar
 
-Estado: **propuesta para revisión**. Nada de esto existe en la base ni en el
-sitio. Es Markdown a propósito, para que nadie lo corra por error como
-script. Ningún DDL/DML se ejecuta sin el OK explícito del dueño del proyecto.
+Estado:
 
-Decisiones ya aprobadas (2026-10-22):
+- **Código hecho y probado** en `claude-branch`.
+- **`sql/28_acuse_po_so.sql`: NO EJECUTADA, SIN APROBAR.** Hace falta tu OK
+  explícito para correrla en la VM. Mientras no exista en la base, el sitio
+  no muestra nada del acuse.
+- No hay deploy a la VM ni merge a `main` sin aprobación aparte.
+
+## 1. Decisiones (2026-10-22)
 
 - Solo el PO o el SO asignado a la iniciativa acusa, cada uno en su rol. Los
   dos acuses son independientes.
-- No se da acceso nuevo: solo entran quienes ya pasan la puerta de Admin
-  (ADM/MOD en `dbo.UsuariosAdmin`).
-- Puede acusar una iniciativa que esté en **Atrasada del semáforo** (no se
-  usa la regla del KPI Atrasadas).
-- El canal es una notificación persistente dentro de la app, para ADM. Esta
-  vez no hay Teams, Power Automate, correo, webhooks ni .ps1.
-- Antes de cualquier migración, esta propuesta se revisa y se aprueba.
+- Solo entran quienes ya pasan la puerta de Admin (ADM/MOD). **No se da
+  acceso nuevo.**
+- Se puede acusar una iniciativa en **Atrasadas del semáforo**. No se usa la
+  regla del KPI Atrasadas.
+- El canal es una notificación persistente para ADM, dentro de la app. Esta
+  vez no hay Teams, Power Automate, correo ni .ps1.
+- El interruptor global de visibilidad de Iniciativas no se toca. En
+  `claude-branch` no existe.
 
-## 1. Hallazgos (auditados en el código, 2026-10-22)
+## 2. Identidad: cómo se resuelve
 
-**Identidad.**
-- La única identidad es `HttpContext.User.Identity.Name` de IIS (Negotiate),
-  en `App_Code/IdentidadWindows.cs`. `Original` (`DOMINIO\cuenta`) es la
-  identidad de seguridad.
-- No hay ninguna consulta al directorio activo en el sitio (sin
-  `System.DirectoryServices`, sin LDAP).
-- Desde el equipo de desarrollo no hay dominio, así que no se pudo probar
-  si el App Pool de la VM puede consultar AD.
+Cadena (código en `App_Code/AcuseIniciativa.cs`, `IdentidadAcuse`):
 
-**PO/SO de una iniciativa.**
-- Son texto con un nombre: `dbo.Problem.OwnerProblem` y `OwnerServicio`, los
-  mismos `po_capturado` y `so_capturado` del registro.
-- No existe ninguna columna ni tabla que los relacione con una cuenta.
+1. Cuenta de IIS (`AccesoAdmin.IdentidadEscritura`, la misma que firma toda
+   escritura de Admin).
+2. `IdentidadWindows.CorreoCandidato()`: quita el dominio y arma
+   `cuenta@soriana.com`. Es lo mismo que ya hace la cabecera.
+3. `dbo.CatPersona.Correo` (vigente; sin mayúsculas ni espacios). Se exige
+   **exactamente una** fila. Si no hay ninguna: `no_encontrado`. Si hay más
+   de una: `ambiguo`.
+4. Además, **ninguna otra** fila de CatPersona puede tener el mismo nombre.
+   Si la hay: `nombre_repetido`, porque el nombre del dueño no se podría
+   atribuir a una sola persona.
+5. La persona es dueña del rol si su nombre es igual a `OwnerProblem` (PO) u
+   `OwnerServicio` (SO). La comparación ignora mayúsculas, acentos y
+   espacios de más; es el criterio del diagnóstico (`COLLATE CI_AI`).
 
-**Cadenas automáticas que ya existen:**
-- a) `IdentidadWindows.CorreoCandidato` (`cuenta@soriana.com`) contra
-  `dbo.CatPersona.Correo`, en `DirectorioPersonas`. **No es fiable:** es un
-  candidato, las cuentas `t_*` no coinciden con el correo y en la VM "casi
-  nunca resuelve" (nota del 2026-10-19).
-- b) `dbo.UsuariosAdmin.Usuario` → `CorreoUsuario` (guardado por ADM, ya se
-  lee en `App_Code/CorreoAdmin.cs`) → `CatPersona.Correo` → `CatPersona.Nombre`
-  → igual al nombre capturado.
-  - Cubre justo a quienes pueden entrar (ADM/MOD).
-  - **No se ha medido con datos reales:** hay que ver cuántos tienen
-    `CorreoUsuario`, si su correo está en `CatPersona` y si el nombre coincide
-    con el capturado.
-  - Lo mide `sql/diag_acuse_identidad_po_so.sql` (solo lectura). Lo validé en
-    LocalDB con datos de prueba; falta correrlo en la VM.
+Del navegador solo llegan `folio` y `rol`. Todo se revalida en el servidor
+en cada POST: identidad, que la iniciativa exista, que esté Atrasada y que
+la persona sea dueña de **ese** rol. Después, la base vuelve a revisar el
+dueño y el Estado dentro de la transacción.
 
-**Último eslabón inevitable.** En b) (y en cualquier cadena de directorio) el
-último paso compara dos nombres guardados en catálogos del servidor
-(`CatPersona.Nombre` y `OwnerProblem`). Nunca es un nombre que mande el
-navegador ni el `displayName` del usuario. Si no hay coincidencia, o si hay
-más de una persona con ese nombre, la respuesta es "no autorizado": falla
-cerrado. Aun así, es una autorización que depende de que los nombres estén
-bien escritos (hay acentos corruptos de origen). **Este riesgo se acepta o
-no explícitamente.**
+### Cobertura observada en la VM
 
-**Elegibilidad.**
-- La regla "Atrasada" del semáforo ya existe en el servidor:
-  `ExperienciaQueries.Semaforo` + `ExperienciaRegistro.RegistroIniciativas()`
-  (`activa`, `control_fecha`, `fecha_retrasada`).
-- `semaforoFecha` de `admin/registro-iniciativas.js` lee los mismos datos.
-- El acuse la **reusa**, no la recalcula.
+Datos de `sql/diag_acuse_identidad_po_so.sql`, corrido por el usuario el
+2026-10-22:
 
-**Notificaciones.**
-- No hay ninguna tabla de notificaciones en la app ni una convención de
-  leído/no leído.
-- `dbo.AvisoProblemsEnvio` es la bandeja de un .ps1 de correo, con otro
-  propósito y otra forma (no tiene leído/no leído ni ligas a eventos). **No se
-  reusa.**
+- **Usuarios ADM/MOD (6):** 2 se resuelven por `cuenta@soriana.com` y por
+  `CorreoUsuario` (los dos coinciden):
 
-**Interruptor global de visibilidad de Iniciativas.** No existe en
-`claude-branch` (lo busqué en `Web.config`, `App_Code` y `admin/`). Este
-trabajo no lo crea ni lo toca.
+  | Cuenta | Persona | Rol | Iniciativas activas |
+  |---|---|---|---|
+  | `SORIANA\jesuscamor` (MOD) | Jesus Campa Morones | PO | 12 |
+  | `SORIANA\edgarrad` (ADM) | Edgar Ramos Davalos | SO | 10 |
 
-## 2. Decisión de identidad pendiente (se detiene aquí)
+  Los otros 4 (`t_andresvr`, `danielalc`, `omaralus`, `t_olgado`) no
+  coinciden con ninguna persona: nunca ven el botón.
+- **PO/SO de iniciativas activas:** los 20 nombres de PO y los 22 de SO
+  tienen **exactamente una** persona con ese nombre en CatPersona. No hay
+  ninguno `ambiguo` ni `no_encontrado`. 2 están resueltos y 40 son
+  `sin_usuario_admin`: no entran a Admin.
+- **No medido:** cuántas de esas 22 iniciativas están Atrasadas hoy.
 
-Hoy no hay una resolución automática **verificada**. Lo que sigue, en orden:
+### Supuestos y riesgos que quedan
 
-1. Correr en la VM `sql/diag_acuse_identidad_po_so.sql`. Si en la
-   sección 3 la mayoría de los PO/SO de iniciativas activas salen
-   `resuelto`, la cadena b) sirve. Los casos `ambiguo` y `no_encontrado`
-   simplemente no podrán acusar.
-2. Si AD es la fuente preferida: probar en la VM, con la cuenta del App
-   Pool, `UserPrincipal.FindByIdentity(ctx, IdentityType.SamAccountName,
-   cuenta)`. Sirve si `EmailAddress` existe y coincide con
-   `CatPersona.Correo`. Reemplazaría el paso `CorreoUsuario` por un dato del
-   directorio. Hoy no hay código ni permiso verificado para esto.
-3. Si ninguna de las dos alcanza, la **alternativa** es una tabla de mapeo
-   mantenida por ADM (sección 3.4). **No se usa sin aprobarla**, y no
-   reemplaza en silencio a las otras.
+- **El correo armado es de la persona.** `cuenta@soriana.com` se trata como
+  el correo de quien inició sesión. Vale si el correo guardado en
+  CatPersona es igual a la cuenta. Las cuentas `t_*` nunca coinciden. Para
+  los dos casos de hoy está verificado.
+- **Último eslabón por nombre.** Se compara el nombre de CatPersona con el
+  nombre capturado del dueño. Ambos son datos del servidor; no es un nombre
+  del navegador ni el `displayName` del usuario. Si alguno está mal escrito,
+  la persona no puede acusar: falla cerrado, no abierto.
+- **Depende de las cargas.** CatPersona y los dueños vienen del Excel o del
+  ETL. Si cambian, cambia quién puede acusar, siempre según el dato vigente.
+- **Alcance.** Hoy son 2 personas. Ampliarlo implica dar acceso a Admin, que
+  es otra decisión.
+- **Ventana sin revalidar.** Entre la revisión del sitio y el guardado, la
+  base revalida dueño y Estado, pero no que la fecha siga vencida. Si alguien
+  mueve la fecha justo en ese instante, el acuse queda en el episodio
+  anterior. Es una ventana de milisegundos y no cambia ningún dato de la
+  iniciativa.
+- **Costo del POST.** El POST relee el registro completo
+  (`ExperienciaQueries.RegistroIniciativas`) para usar exactamente la misma
+  regla del semáforo. Es lo mismo que cuesta abrir la página, solo en un
+  clic poco frecuente.
 
-El esquema de abajo no depende de cuál se elija: guarda la cuenta, el
-nombre con el que se autorizó y la fuente.
+## 3. Qué hace la aplicación
 
-## 3. Migración propuesta: `sql/28_acuse_po_so.sql` (borrador)
+- **Detalle de la iniciativa** (`admin/acuse-iniciativa.js`, `AcuseDetalle`):
+  - Si tú eres el PO y/o el SO y está Atrasada: botón "Estoy trabajando en
+    ello (Product Owner / Service Owner)", uno por rol.
+  - Si ya acusaste ese rol para la fecha compromiso actual: "Registraste que
+    estás trabajando en ella … el dd/mm hh:mm".
+  - Tras enviar: "Registrado" o "Ya estaba registrado".
+  - Se ve la lista de acuses de la iniciativa.
+  - Doble clic = un solo envío.
+- **Administración → "Avisos de los dueños"** (solo ADM, `VistaAvisosAcuse`):
+  - Muestra la persona, el rol, la cuenta, la hora, la fecha compromiso y la
+    marca Nuevo/Leído; "Ver" abre el detalle.
+  - **Cargar la lista no marca nada.** "Marcar como leído" es explícito y
+    por administrador.
+- **Handler** `handlers/admin_iniciativas_acuse.ashx`. Va detrás de
+  `AccesoAdmin` por su prefijo: `mio`, `iniciativa` y `acusar` piden ADM o
+  MOD; `bandeja` y `leida` solo ADM.
+- **Sin sql/28:** los GET responden `disponible: false` y el POST responde
+  501. No se pinta nada.
 
-Mismo patrón que 22–27: guarda de base, precondición, una sola
-transacción, postcondición y `_rollback.sql`. **No crea ni altera nada
-existente.** Solo depende de `dbo.Problem (Codigo)` y del esquema `adm`.
+## 4. Migración final para aprobar: `sql/28_acuse_po_so.sql`
 
-### 3.1 Tablas
+**No altera nada existente.** Solo lee `dbo.Problem`. No depende de las
+migraciones 22–27.
 
-```sql
--- Un acuse = (iniciativa, rol, cuenta, fecha compromiso vencida).
-CREATE TABLE adm.AcuseIniciativa (
-    IdAcuse          int IDENTITY(1,1) NOT NULL CONSTRAINT PK_AcuseIniciativa PRIMARY KEY,
-    Codigo           nvarchar(100) COLLATE <la de dbo.Problem.Codigo> NOT NULL
-                     CONSTRAINT FK_AcuseIniciativa_Problem REFERENCES dbo.Problem (Codigo),
-    Rol              char(2)       NOT NULL CONSTRAINT CK_AcuseIniciativa_Rol CHECK (Rol IN ('PO', 'SO')),
-    Cuenta           nvarchar(256) NOT NULL CONSTRAINT CK_AcuseIniciativa_Cuenta CHECK (LEN(LTRIM(RTRIM(Cuenta))) > 0),
-                     -- IdentidadWindows.Original, la de IIS; nunca la del navegador
-    NombreDueno      nvarchar(4000) NOT NULL,   -- OwnerProblem/OwnerServicio con el que se autorizo (foto)
-    FuenteIdentidad  varchar(16)   NOT NULL
-                     CONSTRAINT CK_AcuseIniciativa_Fuente CHECK (FuenteIdentidad IN ('CORREO_USUARIO', 'DIRECTORIO', 'MAPEO_ADM')),
-    EstadoIniciativa nvarchar(100) NOT NULL,    -- foto del Estado al acusar
-    FechaCompromiso  date          NOT NULL,    -- la fecha vencida del estado (Atrasada siempre la tiene)
-    FechaUtc         datetime2(0)  NOT NULL CONSTRAINT DF_AcuseIniciativa_Fecha DEFAULT (SYSUTCDATETIME()),
-    CONSTRAINT UQ_AcuseIniciativa UNIQUE (Codigo, Rol, Cuenta, FechaCompromiso)
-);
-CREATE INDEX IX_AcuseIniciativa_Codigo ON adm.AcuseIniciativa (Codigo, FechaUtc DESC);
+### Tablas
 
--- Una notificacion para ADM por acuse (UNIQUE: nunca dos por el mismo acuse).
-CREATE TABLE adm.NotificacionAdm (
-    IdNotificacion int IDENTITY(1,1) NOT NULL CONSTRAINT PK_NotificacionAdm PRIMARY KEY,
-    Tipo           varchar(10) NOT NULL CONSTRAINT CK_NotificacionAdm_Tipo CHECK (Tipo IN ('ACUSE')),
-    IdAcuse        int NOT NULL CONSTRAINT FK_NotificacionAdm_Acuse REFERENCES adm.AcuseIniciativa (IdAcuse),
-    FechaUtc       datetime2(0) NOT NULL CONSTRAINT DF_NotificacionAdm_Fecha DEFAULT (SYSUTCDATETIME()),
-    CONSTRAINT UQ_NotificacionAdm_Acuse UNIQUE (IdAcuse)
-);
-CREATE INDEX IX_NotificacionAdm_Fecha ON adm.NotificacionAdm (FechaUtc DESC);
+| Tabla | Columnas | Reglas |
+|---|---|---|
+| `adm.AcuseIniciativa` | `IdAcuse` int IDENTITY PK; `Codigo` nvarchar(100) con la collation de `dbo.Problem.Codigo` y FK a `dbo.Problem`; `Rol` char(2) PO/SO; `Cuenta` nvarchar(256); `NombreDueno` nvarchar(4000); `FuenteIdentidad` varchar(16) = `CORREO_CANDIDATO`; `EstadoIniciativa` nvarchar(100); `FechaCompromiso` date NULL; `FechaUtc` datetime2(0) | **UNIQUE (Codigo, Rol, Cuenta, FechaCompromiso)**; NULL cuenta como un episodio más. Índice (Codigo, FechaUtc DESC). |
+| `adm.NotificacionAdm` | `IdNotificacion` IDENTITY PK; `Tipo` 'ACUSE'; `IdAcuse` FK; `FechaUtc` | **UNIQUE (IdAcuse)**: una notificación por acuse. Índice (FechaUtc DESC, Id DESC). |
+| `adm.NotificacionLectura` | `IdNotificacion` FK; `Usuario` nvarchar(256); `LeidaUtc` | PK (IdNotificacion, Usuario): leída por cada ADM. |
 
--- Leida = hay fila, por usuario ADM. Cargar la lista NO marca nada.
-CREATE TABLE adm.NotificacionLectura (
-    IdNotificacion int NOT NULL CONSTRAINT FK_NotificacionLectura_Notif REFERENCES adm.NotificacionAdm (IdNotificacion),
-    Usuario        nvarchar(256) NOT NULL,
-    LeidaUtc       datetime2(0)  NOT NULL CONSTRAINT DF_NotificacionLectura_Fecha DEFAULT (SYSUTCDATETIME()),
-    CONSTRAINT PK_NotificacionLectura PRIMARY KEY (IdNotificacion, Usuario)
-);
-```
+### Procedimientos
 
-Cómo responde cada regla:
+**`adm.usp_Acuse_Registrar`**
 
-- **PO y SO independientes:** son filas distintas (`Rol`). Si una persona es
-  PO y SO de la misma iniciativa, son dos acuses, cada uno pedido
-  explícitamente.
-- **Idempotencia:** `UQ_AcuseIniciativa`. Un doble clic o un reintento de
-  red con la misma fecha vencida devuelve el acuse existente y no crea otro
-  acuse ni otra notificación (`UQ_NotificacionAdm_Acuse`). Si la iniciativa
-  vence otra vez con **otra** fecha compromiso, es otro episodio y se puede
-  acusar de nuevo. Ese es el único "reacuse" permitido.
-- **Leído/no leído:** se guarda por ADM, porque cada administrador lleva su
-  bandeja. Solo una acción explícita ("Marcar como leída") inserta la fila;
-  listar no la inserta.
-- **El contenido no se duplica:** iniciativa, persona, rol y hora salen de
-  la unión con `AcuseIniciativa`. El título sale del registro vivo.
+- Parámetros:
+  - `@Usuario`: lo pone el servidor.
+  - `@Codigo`, `@Rol`.
+  - `@NombreDueno`, `@EstadoIniciativa`: lo que vio el sitio.
+  - `@FuenteIdentidad`.
+  - Salidas: `@IdAcuse`, `@Nuevo`, `@FechaUtc`.
+- En una transacción, con `UPDLOCK, HOLDLOCK` sobre la fila de `dbo.Problem`:
+  1. Exige que la iniciativa exista y esté vigente (51304).
+  2. Exige que el dueño del rol siga siendo el mismo (51305) y el Estado
+     también (51306).
+  3. Toma la fecha compromiso del Estado actual: En Análisis →
+     FechaAnalisis, En Solución → FechaSolucion, En Monitoreo → FechaCierre.
+  4. Si ya hay acuse del mismo episodio, lo devuelve con `@Nuevo = 0`.
+  5. Si no, inserta el acuse y su notificación.
+- Otros errores: 51301 sin usuario, 51302 rol, 51303 sin dueño.
 
-### 3.2 Procedimientos (las únicas escrituras)
+**`adm.usp_Notificacion_MarcarLeida`**
+
+- Parámetros: `@Usuario`, `@IdNotificacion`; salida `@Nueva`.
+- Es idempotente: si ya estaba leída, no hace nada.
+- Errores: 51307 la notificación no existe; 51301 sin usuario.
+
+### Permisos
+
+- La cuenta del sitio (PROACTIVANETAD) ya lee (`db_datareader`) y ya
+  ejecuta en `adm` (de sql/18). **No hace falta ningún GRANT.**
+- **DENY INSERT, UPDATE, DELETE** sobre las 3 tablas: 9 permisos. Sin eso,
+  `db_datawriter` le dejaría escribirlas a mano.
+- Va dentro de sql/28 y su postcondición los cuenta.
+
+### Cómo correrla
 
 ```sql
-adm.usp_Acuse_Registrar
-    @Usuario nvarchar(256),          -- IdentidadWindows.Original (lo pone el servidor)
-    @Codigo nvarchar(100), @Rol char(2),
-    @NombreDueno nvarchar(4000), @FuenteIdentidad varchar(16),
-    @EstadoIniciativa nvarchar(100), @FechaCompromiso date,
-    @IdAcuse int OUTPUT, @Nuevo bit OUTPUT
+EXEC sys.sp_set_session_context N'aprobar_migracion', N'28';
 ```
 
-Qué hace, en una sola transacción:
+Después, el script completo, en una sola transacción. Si los objetos ya
+existen (completos o a medias), se niega sin tocar nada.
 
-1. Bloquea la fila de `dbo.Problem` (`UPDLOCK, HOLDLOCK`) y **revalida en la
-   base** que la iniciativa exista y esté vigente.
-2. Revalida que `OwnerProblem` / `OwnerServicio` (según `@Rol`) siga siendo
-   exactamente `@NombreDueno`, que `Estado` siga siendo `@EstadoIniciativa` y
-   que la fecha del estado siga siendo `@FechaCompromiso`. Si algo cambió
-   entre la revisión del sitio y el guardado: error 5130x, nada se guarda.
-3. Si el acuse ya existe: `@Nuevo = 0` y devuelve el existente.
-4. Si no existe: inserta el acuse y su notificación.
+**Orden:** se puede aplicar antes o después del despliegue del sitio. El
+sitio la detecta en ejecución (`AlmacenAcusesSql.Disponible`) y sin ella
+muestra la función apagada.
 
-No toca ninguna columna de `dbo.Problem` ni de `ProblemCategoria`.
+### Rollback: `sql/28_acuse_po_so_rollback.sql`
 
-```sql
-adm.usp_Notificacion_MarcarLeida @Usuario nvarchar(256), @IdNotificacion int
-```
+- Se niega si hay filas, salvo con
+  `rollback_28_perder_acuses = SI`. **Los acuses, las notificaciones y las
+  lecturas se pierden:** respáldalos antes (los SELECT están en el
+  encabezado del script).
+- Quita los 2 procedimientos y las 3 tablas; los DENY se van con ellas.
+- No toca nada anterior. El sitio vuelve solo a "no disponible".
 
-Idempotente: si ya está leída, no hace nada.
+## 5. Pruebas ejecutadas (2026-10-22)
 
-Las lecturas (bandeja de ADM, acuses del detalle) se hacen con `SELECT`
-sobre las tres tablas, como ya hace la cuenta del sitio con
-`adm.IniciativaProtegida`.
-
-### 3.3 Permisos y despliegue
-
-- A la cuenta del sitio (PROACTIVANETAD):
-  - `GRANT EXECUTE` sobre los 2 procedimientos.
-  - `GRANT SELECT` sobre las 3 tablas.
-  - `DENY INSERT, UPDATE, DELETE` sobre las 3 tablas, igual que sql/18
-    sección 8: nada se escribe por fuera de los procedimientos.
-- **Orden:** sql/28 no depende de 22–27 ni los cambia. Se puede aplicar
-  antes o después del sitio nuevo.
-- **Interruptor:** el sitio detecta la migración en ejecución (como
-  `DeteccionSql26`). Sin las tablas, el acuse no aparece y el handler
-  responde `sin_tabla`. No hace falta encender nada a mano.
-- **Handler:** `handlers/admin_iniciativas_acuse.ashx`. Por su prefijo
-  queda detrás de `AccesoAdmin`, así que solo entran ADM/MOD y no se abre
-  acceso nuevo.
-  - **POST** recibe solo `folio` y `rol`. El servidor:
-    1. toma la cuenta de IIS;
-    2. resuelve a la persona con la fuente aprobada;
-    3. lee la iniciativa con `RegistroIniciativas()`, exige Atrasada del
-       semáforo y exige que el nombre del dueño de ese rol sea el de la
-       persona;
-    4. llama a `usp_Acuse_Registrar`.
-  - **GET** de la bandeja y **POST** de marcar como leída: solo ADM
-    (`ExigirAdm`).
-
-### 3.4 Alternativa, solo si la identidad automática no alcanza (NO aprobada)
-
-```sql
-CREATE TABLE adm.PersonaCuenta (
-    Cuenta  nvarchar(256) NOT NULL CONSTRAINT PK_PersonaCuenta PRIMARY KEY,   -- DOMINIO\cuenta
-    Nombre  nvarchar(255) NOT NULL,   -- tal cual en OwnerProblem / OwnerServicio
-    Vigente bit NOT NULL CONSTRAINT DF_PersonaCuenta_Vigente DEFAULT (1),
-    AltaPor nvarchar(256) NOT NULL,
-    AltaUtc datetime2(0)  NOT NULL CONSTRAINT DF_PersonaCuenta_Alta DEFAULT (SYSUTCDATETIME())
-);
-```
-
-ADM la mantendría (alta y baja con su procedimiento). Con ella,
-`FuenteIdentidad = 'MAPEO_ADM'`.
-
-### 3.5 Rollback (`sql/28_acuse_po_so_rollback.sql`)
-
-- Se niega si existe algún acuse o notificación, salvo con una bandera
-  explícita (`@BorrarAcusesYNotificaciones = 1`). Esos datos son historia que
-  no se puede reconstruir.
-- Antes de borrar, sugiere exportar las 3 tablas.
-- Con la bandera: quita permisos, procedimientos y las tablas en orden
-  (`NotificacionLectura` → `NotificacionAdm` → `AcuseIniciativa`).
-- No toca nada que existía antes. Sin las tablas, el sitio vuelve solo a
-  "sin acuse".
-- No hay historia anterior que migrar: hoy no existen acuses.
-
-## 4. Pruebas que se harán al implementar (después de la aprobación)
-
-- **LocalDB desechable** (como `CambiosRecientesSqlLocalDbSmoke`):
-  - el PO acusa en su rol y el SO por separado;
-  - el SO no puede acusar como PO;
-  - una cuenta ajena es rechazada;
-  - no elegible es rechazado;
-  - doble envío: 1 acuse y 1 notificación;
-  - el dueño o el estado cambia a mitad: nada se guarda;
+- **LocalDB desechable**, `tools/tests/AcuseIniciativaSqlLocalDbSmoke.cs`:
+  **27/27**. Cubre:
+  - guarda en otra base;
+  - detección antes y después;
+  - 5 objetos y 9 DENY;
+  - reaplicar no toca nada;
+  - acuse nuevo y duplicado (incluso con la cuenta en otras mayúsculas);
+  - PO y SO por separado;
+  - nuevo episodio y fecha NULL;
+  - errores 51301 a 51307;
+  - `dbo.Problem` sin cambios (huella de la fila completa);
+  - **8 envíos concurrentes = 1 acuse y 1 notificación**;
+  - PROACTIVANETAD no escribe a mano (229);
   - leído/no leído por ADM, y listar no marca;
-  - `dbo.Problem` sin cambios (hash de la fila antes y después);
-  - la cuenta del sitio no escribe directo (229).
-- **Handler sin SQL** (como `CambiosRecientesHttpSmoke`):
-  - MOD/ADM entra, VIEWER recibe 403;
-  - el `folio`, `rol` o cuenta que manda el navegador no sustituyen la
-    identidad;
-  - solo ADM ve la bandeja.
-- **JS** (registro): el botón aparece solo con Atrasada y siendo el dueño
-  de ese rol; tiene confirmación visible; no cambia el semáforo ni las
-  cifras.
+  - rollback que se niega con datos, que limpia con la bandera, y reaplicar.
+- **Sin SQL**, `tools/tests/AcuseIniciativaHttpSmoke.cs`: **39/39**. Cubre:
+  - la identidad: un correo, ambiguo, homónimo, `t_*`, dominio distinto,
+    acentos, mayúsculas y espacios;
+  - VIEWER 403; MOD sin bandeja;
+  - sin sql/28 (GET apagado, POST 501);
+  - roles de `mio`;
+  - el PO no acusa como SO ni al revés;
+  - ADM no dueño 403;
+  - no Atrasada, sin control de fecha → 409;
+  - campos `cuenta`/`usuario`/`nombre` del formulario ignorados;
+  - duplicado;
+  - error de la base → 409;
+  - bandeja por ADM, y listar no marca.
+- **JS** `tools/tests/AcuseIniciativaSmoke.js`: **25/25**.
+  `RegistroIniciativasSmoke` +2 (AC1–AC2): 524/524.
+- **Navegador** (banco local con un stub de fetch, sin SQL): botones en
+  una Atrasada, registro, confirmación, bandeja de ADM y "Marcar como leído".
+
+## 6. Lo que falta para encenderlo
+
+1. Tu OK y correr `sql/28_acuse_po_so.sql` en la VM.
+2. Llevar `claude-branch` a `main` (PR) y desplegar en la VM.
+3. Prueba real con `SORIANA\jesuscamor` (PO) o `SORIANA\edgarrad` (SO) en una
+   iniciativa suya que esté Atrasada, y que un ADM lo vea en "Avisos de los
+   dueños".

@@ -2372,6 +2372,23 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
+// AC) Acuse del PO / SO: abrir un detalle se lo pasa a AcuseDetalle con su
+//     contenedor (#regAcuse, nace oculto); sin modulo, nada cambia.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var p = Pagina(ok(JSON.parse(JSON.stringify(DATOS)))), reg = p.registro, llamadas = [];
+  return esperar().then(function () {
+    clicFolio(p, 'PRB 2026-000001');
+    Check('AC1 sin modulo de acuse: el detalle abre igual, con su contenedor oculto', [true, 'PRB 2026-000001'],
+      [/<div id="regAcuse" hidden><\/div>/.test(p.sel('regDetCuerpo').innerHTML), reg.abierta]);
+    reg.cerrarDetalle(true);
+    reg.acuse = { mostrar: function (i, caja) { llamadas.push([i.folio, caja && caja.id]); } };
+    clicFolio(p, 'MAP 2026-000002');
+    Check('AC2 con modulo: mostrar(iniciativa, #regAcuse) una vez por detalle abierto', [['MAP 2026-000002', 'regAcuse']], llamadas);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // KF) Indicadores y semaforo como filtro: un clic acota la lista, otro en el
 //     mismo lo quita; las cifras no se mueven; se combina en Y con los demas
 //     filtros sin tocarlos; relectura, Cobertura, foco y la instruccion.
