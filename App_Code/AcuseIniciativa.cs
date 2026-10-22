@@ -174,6 +174,11 @@ public sealed class IniciativaAcuse
     public bool FechaRetrasada;
     public string Po;            // po_capturado (dbo.Problem.OwnerProblem)
     public string So;            // so_capturado (dbo.Problem.OwnerServicio)
+    // La fecha compromiso del Estado tal como la vio la lista (null = sin
+    // fecha): f_analisis (= dbo.Problem.FechaAnalisis, AplicarFechasPropias),
+    // f_solucion o f_cierre (p.FechaSolucion / p.FechaCierre). Es el episodio
+    // que se acusa; adm.usp_Acuse_Registrar la compara con la de ahora (51308).
+    public DateTime? FechaCompromiso;
 
     // La categoria Atrasadas del semaforo (semaforoFecha en el navegador):
     // activa, con control de fecha y con la fecha del estado vencida.
@@ -197,7 +202,26 @@ public sealed class IniciativaAcuse
             FechaRetrasada = v("fecha_retrasada") is bool && (bool)v("fecha_retrasada"),
             Po = v("po_capturado") as string,
             So = v("so_capturado") as string,
+            FechaCompromiso = FechaIso(v(CampoFechaDe(v("estado") as string))),
         };
+    }
+
+    // La columna de fecha de cada estado activo (FECHA_DEL_ESTADO del
+    // navegador, Semaforo del servidor), sin acentos ni mayusculas como
+    // compara la base (COLLATE CI_AI). Otro estado: ninguna.
+    public static string CampoFechaDe(string estado)
+    {
+        var k = IdentidadAcuse.ClaveNombre(estado);
+        return k == "EN ANALISIS" ? "f_analisis" : k == "EN SOLUCION" ? "f_solucion" : k == "EN MONITOREO" ? "f_cierre" : "";
+    }
+
+    // "aaaa-mm-dd" -> fecha; vacio o invalido -> null.
+    public static DateTime? FechaIso(object v)
+    {
+        DateTime d;
+        var s = v as string;
+        return !string.IsNullOrEmpty(s) && DateTime.TryParseExact(s, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d)
+            ? (DateTime?)d : null;
     }
 }
 
@@ -282,7 +306,7 @@ public sealed class BandejaAcuses
     public List<NotificacionAcuse> Notificaciones = new List<NotificacionAcuse>();
 }
 
-// Un error que la base lanzo a proposito (51301-51307).
+// Un error que la base lanzo a proposito (51301-51308).
 public sealed class ErrorAcuse : Exception
 {
     public readonly int Numero;
@@ -292,7 +316,7 @@ public sealed class ErrorAcuse : Exception
 public interface IAlmacenAcuses
 {
     bool Disponible();
-    RegistroAcuse Registrar(string cuenta, string folio, string rol, string nombreDueno, string estado);
+    RegistroAcuse Registrar(string cuenta, string folio, string rol, string nombreDueno, string estado, DateTime? fechaCompromiso);
     List<AcuseGuardado> DeIniciativa(string folio);
     BandejaAcuses Bandeja(string usuario, int limite);
     bool MarcarLeida(string usuario, int idNotificacion);
@@ -335,10 +359,10 @@ public sealed class AlmacenAcusesSql : IAlmacenAcuses
 
     private static Exception Traducir(SqlException ex)
     {
-        return ex.Number >= 51301 && ex.Number <= 51307 ? (Exception)new ErrorAcuse(ex.Number, ex.Message) : ex;
+        return ex.Number >= 51301 && ex.Number <= 51308 ? (Exception)new ErrorAcuse(ex.Number, ex.Message) : ex;
     }
 
-    public RegistroAcuse Registrar(string cuenta, string folio, string rol, string nombreDueno, string estado)
+    public RegistroAcuse Registrar(string cuenta, string folio, string rol, string nombreDueno, string estado, DateTime? fechaCompromiso)
     {
         using (var cn = Abierta())
         using (var cmd = new SqlCommand("adm.usp_Acuse_Registrar", cn) { CommandType = CommandType.StoredProcedure })
@@ -348,6 +372,7 @@ public sealed class AlmacenAcusesSql : IAlmacenAcuses
             cmd.Parameters.Add("@Rol", SqlDbType.Char, 2).Value = (object)rol ?? DBNull.Value;
             cmd.Parameters.Add("@NombreDueno", SqlDbType.NVarChar, 4000).Value = (object)nombreDueno ?? DBNull.Value;
             cmd.Parameters.Add("@EstadoIniciativa", SqlDbType.NVarChar, 100).Value = (object)estado ?? DBNull.Value;
+            cmd.Parameters.Add("@FechaCompromiso", SqlDbType.Date).Value = fechaCompromiso.HasValue ? (object)fechaCompromiso.Value.Date : DBNull.Value;
             cmd.Parameters.Add("@FuenteIdentidad", SqlDbType.VarChar, 16).Value = IdentidadAcuse.Fuente;
             var id = cmd.Parameters.Add("@IdAcuse", SqlDbType.Int); id.Direction = ParameterDirection.Output;
             var nuevo = cmd.Parameters.Add("@Nuevo", SqlDbType.Bit); nuevo.Direction = ParameterDirection.Output;
@@ -522,8 +547,8 @@ public static class AcusesIniciativa
 
     // POST acusar. Revalida TODO con datos del servidor: identidad, que la
     // iniciativa exista, que este Atrasada en el semaforo y que la persona
-    // sea el dueño de ESE rol. Despues la base vuelve a revisar dueño y
-    // Estado en la transaccion (51305 / 51306).
+    // sea el dueño de ESE rol. Despues la base vuelve a revisar dueño,
+    // Estado y fecha compromiso en la transaccion (51305 / 51306 / 51308).
     public static ResultadoAcuse Acusar(IdentidadWindows id, string folio, string rol)
     {
         folio = folio == null ? null : folio.Trim();
@@ -548,7 +573,7 @@ public static class AcusesIniciativa
 
         try
         {
-            var g = Almacen.Registrar(yo.Cuenta, folio, rol, dueno.Trim(), i.Estado);
+            var g = Almacen.Registrar(yo.Cuenta, folio, rol, dueno.Trim(), i.Estado, i.FechaCompromiso);
             var r = new ResultadoAcuse();
             r.Cuerpo["acusado"] = true;
             r.Cuerpo["nuevo"] = g.Nuevo;
@@ -560,7 +585,7 @@ public static class AcusesIniciativa
         }
         catch (ErrorAcuse ex)
         {
-            int http = ex.Numero == 51304 ? 404 : ex.Numero == 51305 || ex.Numero == 51306 ? 409 : ex.Numero == 51301 ? 403 : 400;
+            int http = ex.Numero == 51304 ? 404 : ex.Numero == 51305 || ex.Numero == 51306 || ex.Numero == 51308 ? 409 : ex.Numero == 51301 ? 403 : 400;
             var r = ResultadoAcuse.Error(http, "Base" + ex.Numero.ToString(CultureInfo.InvariantCulture), ex.Message);
             r.Cuerpo["acusado"] = false;
             return r;

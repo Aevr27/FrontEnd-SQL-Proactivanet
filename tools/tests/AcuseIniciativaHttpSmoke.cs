@@ -50,15 +50,15 @@ sealed class IniciativasFalsas : IFuenteIniciativasAcuse
 sealed class AlmacenFalso : IAlmacenAcuses
 {
     public bool Hay = true;
-    public readonly List<string[]> Registros = new List<string[]>();      // cuenta, folio, rol, dueno, estado
+    public readonly List<string[]> Registros = new List<string[]>();      // cuenta, folio, rol, dueno, estado, fecha compromiso
     public readonly List<AcuseGuardado> Guardados = new List<AcuseGuardado>();
     public readonly Dictionary<string, DateTime> Leidas = new Dictionary<string, DateTime>();
     public int Marcadas;
     public ErrorAcuse Lanzar;
     public bool Disponible() { return Hay; }
-    public RegistroAcuse Registrar(string cuenta, string folio, string rol, string dueno, string estado)
+    public RegistroAcuse Registrar(string cuenta, string folio, string rol, string dueno, string estado, DateTime? fecha)
     {
-        Registros.Add(new[] { cuenta, folio, rol, dueno, estado });
+        Registros.Add(new[] { cuenta, folio, rol, dueno, estado, fecha.HasValue ? fecha.Value.ToString("yyyy-MM-dd") : "NULL" });
         if (Lanzar != null) throw Lanzar;
         foreach (var g in Guardados)
             if (g.Folio == folio && g.Rol == rol && string.Equals(g.Cuenta, cuenta, StringComparison.OrdinalIgnoreCase))
@@ -137,7 +137,8 @@ public static class AcuseIniciativaHttpSmoke
 
     static IniciativaAcuse Ini(string folio, string po, string so, bool atrasada, bool? control = true, string estado = "En Soluci\u00f3n")
     {
-        return new IniciativaAcuse { Folio = folio, Estado = estado, Activa = true, ControlFecha = control, FechaRetrasada = atrasada, Po = po, So = so };
+        return new IniciativaAcuse { Folio = folio, Estado = estado, Activa = true, ControlFecha = control, FechaRetrasada = atrasada, Po = po, So = so,
+                                     FechaCompromiso = new DateTime(2026, 9, 1) };
     }
 
     static IdentidadWindows Id(string cuenta) { return IdentidadWindows.Desde(cuenta, true); }
@@ -180,6 +181,19 @@ public static class AcuseIniciativaHttpSmoke
         Check("I7 dominio en mayusculas o distinto da la misma cuenta", "resuelto",
               IdentidadAcuse.Resolver(Id(@"OTRODOM\EDGARRAD"), lp).Estado);
 
+        // ---------------- F: la fecha que se evalua (foto del episodio) ----------------
+        Func<string, string, string, string, string, string> foto = delegate (string est, string fa, string fs, string fc, string esperado)
+        {
+            var d = new Dictionary<string, object> { { "folio", "X" }, { "estado", est }, { "f_analisis", fa }, { "f_solucion", fs }, { "f_cierre", fc } };
+            var f = IniciativaAcuse.DesdeRegistro(d).FechaCompromiso;
+            return f.HasValue ? f.Value.ToString("yyyy-MM-dd") : "NULL";
+        };
+        Check("F1 la fecha del Estado de la lista: Analisis/Solucion/Monitoreo (acentos y mayusculas dan igual); sin fecha, cerrado o invalida = NULL",
+              "2026-08-01|2026-09-01|2026-10-01|NULL|NULL|NULL",
+              foto("En An\u00e1lisis", "2026-08-01", "2026-09-01", "2026-10-01", null) + "|" + foto("EN SOLUCION", "2026-08-01", "2026-09-01", "2026-10-01", null) + "|" +
+              foto("En Monitoreo", "2026-08-01", "2026-09-01", "2026-10-01", null) + "|" + foto("En Soluci\u00f3n", "2026-08-01", null, null, null) + "|" +
+              foto("Cerrado", "2026-08-01", "2026-09-01", "2026-10-01", null) + "|" + foto("En An\u00e1lisis", "01/08/2026", null, null, null));
+
         // ---------------- A: quien entra ----------------
         Check("A1 VIEWER: 403 y no se consulta nada", "403|AccesoDenegado|0",
               Json(Correr("GET", "accion=mio", VIEWER, out estado))["tipo"] is string ? estado + "|" + Json(Correr("GET", "accion=mio", VIEWER, out estado))["tipo"] + "|" + alm.Registros.Count : "x");
@@ -215,8 +229,8 @@ public static class AcuseIniciativaHttpSmoke
         // ---------------- C: acusar ----------------
         j = Json(Correr("POST", "accion=acusar", PO, out estado, "folio", "PRB 2026-000001", "rol", "PO",
                         "cuenta", @"SORIANA\edgarrad", "usuario", "otro", "nombre", "Edgar Ramos Davalos"));
-        Check("C1 PO asignado y Atrasada: 200 nuevo; firma la cuenta de IIS, no la del formulario",
-              "200|True|True|PO|Jesus Campa Morones|SORIANA\\jesuscamor|PRB 2026-000001|PO|Jesus Campa Morones|En Soluci\u00f3n",
+        Check("C1 PO asignado y Atrasada: 200 nuevo; firma la cuenta de IIS, no la del formulario; manda la fecha que evaluo",
+              "200|True|True|PO|Jesus Campa Morones|SORIANA\\jesuscamor|PRB 2026-000001|PO|Jesus Campa Morones|En Soluci\u00f3n|2026-09-01",
               estado + "|" + j["acusado"] + "|" + j["nuevo"] + "|" + j["rol"] + "|" + j["nombre"] + "|" + string.Join("|", alm.Registros[0]));
         j = Json(Correr("POST", "accion=acusar", PO, out estado, "folio", "PRB 2026-000001", "rol", "PO"));
         Check("C2 doble envio: 200 nuevo=false, mismo id, un solo acuse guardado", "200|False|1|1",
@@ -246,6 +260,10 @@ public static class AcuseIniciativaHttpSmoke
         alm.Lanzar = new ErrorAcuse(51305, "El dueno de ese rol cambio: vuelve a abrir la iniciativa.");
         j = Json(Correr("POST", "accion=acusar", SO, out estado, "folio", "PRB 2026-000005", "rol", "SO"));
         Check("C13 la base ve otro due\u00f1o (51305): 409, acusado=false", "409|Base51305|False", estado + "|" + j["tipo"] + "|" + j["acusado"]);
+        alm.Lanzar = new ErrorAcuse(51308, "La fecha compromiso de la iniciativa cambio: vuelve a abrirla.");
+        j = Json(Correr("POST", "accion=acusar", SO, out estado, "folio", "PRB 2026-000005", "rol", "SO"));
+        Check("C13b la fecha compromiso cambio entre evaluar y guardar (51308): 409, acusado=false", "409|Base51308|False",
+              estado + "|" + j["tipo"] + "|" + j["acusado"]);
         alm.Lanzar = null;
         var antes = inis.Por["PRB 2026-000001"];
         Check("C14 la iniciativa no cambia (estado, due\u00f1os, semaforo)", "En Soluci\u00f3n|Jesus Campa Morones|Edgar Ramos Davalos|True",

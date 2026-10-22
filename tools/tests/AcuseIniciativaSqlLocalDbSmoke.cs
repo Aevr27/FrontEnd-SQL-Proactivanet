@@ -10,7 +10,8 @@
 //   G  migracion: guarda (otra base sin aprobar), deteccion antes/despues,
 //      5 objetos y 9 DENY, volver a aplicar no toca nada.
 //   R  registrar: nuevo, duplicado, PO/SO independientes, nuevo episodio
-//      (otra fecha), fecha NULL, dueño o Estado cambiado (51305/51306), no
+//      (otra fecha), fecha NULL, dueño o Estado cambiado (51305/51306),
+//      fecha compromiso cambiada tras evaluar o NULL contra fecha (51308), no
 //      vigente / no existe (51304), rol / usuario / dueño invalidos;
 //      dbo.Problem sin cambios; concurrencia (8 a la vez = 1 acuse).
 //   P  cuenta del sitio: registra y lee por los procedimientos, NO escribe
@@ -91,6 +92,7 @@ public static class AcuseIniciativaSqlLocalDbSmoke
     {
         return Uno("SELECT CONVERT(varchar(70), HASHBYTES('SHA2_256', (SELECT * FROM dbo.Problem WHERE Codigo = N'" + codigo + "' FOR XML RAW, BINARY BASE64)), 1)");
     }
+    static DateTime? F(string iso) { return iso == null ? (DateTime?)null : DateTime.ParseExact(iso, "yyyy-MM-dd", null); }
     static int Cuenta(string tabla) { return int.Parse(Uno("SELECT COUNT(*) FROM " + tabla)); }
 
     static AlmacenAcusesSql Sitio() { return new AlmacenAcusesSql(ComoSitio); }
@@ -145,32 +147,32 @@ public static class AcuseIniciativaSqlLocalDbSmoke
             // ---------------- R: registrar ----------------
             var h1 = Huella("PRB 2026-000001");
             var s = Sitio();
-            var r1 = s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Soluci\u00f3n");
+            var r1 = s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Soluci\u00f3n", F("2026-09-01"));
             Check("R1 nuevo: acuse + 1 notificacion; fecha compromiso = FechaSolucion (Estado En Solucion)", "True|1|1|2026-09-01|CORREO_CANDIDATO",
                   r1.Nuevo + "|" + Cuenta("adm.AcuseIniciativa") + "|" + Cuenta("adm.NotificacionAdm") + "|" +
                   Uno("SELECT CONVERT(char(10), FechaCompromiso, 126) FROM adm.AcuseIniciativa") + "|" + Uno("SELECT FuenteIdentidad FROM adm.AcuseIniciativa"));
-            var r2 = s.Registrar(@"SORIANA\JESUSCAMOR", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Soluci\u00f3n");
+            var r2 = s.Registrar(@"SORIANA\JESUSCAMOR", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Soluci\u00f3n", F("2026-09-01"));
             Check("R2 duplicado (cuenta en otras mayusculas): mismo id, nuevo=false, sin otra notificacion", "False|" + r1.IdAcuse + "|1|1",
                   r2.Nuevo + "|" + r2.IdAcuse + "|" + Cuenta("adm.AcuseIniciativa") + "|" + Cuenta("adm.NotificacionAdm"));
-            var r3 = s.Registrar(@"SORIANA\edgarrad", "PRB 2026-000001", "SO", "Edgar Ramos Davalos", "En Soluci\u00f3n");
+            var r3 = s.Registrar(@"SORIANA\edgarrad", "PRB 2026-000001", "SO", "Edgar Ramos Davalos", "En Soluci\u00f3n", F("2026-09-01"));
             Check("R3 SO independiente: otro acuse y otra notificacion", "True|2|2", r3.Nuevo + "|" + Cuenta("adm.AcuseIniciativa") + "|" + Cuenta("adm.NotificacionAdm"));
             Check("R4 dbo.Problem no cambia (huella de toda la fila)", h1, Huella("PRB 2026-000001"));
 
             Check("R5 due\u00f1o cambiado (otro OwnerProblem): 51305 y nada nuevo", "51305|2",
-                  Error(() => s.Registrar(@"SORIANA\x", "PRB 2026-000001", "PO", "Otra Persona", "En Soluci\u00f3n")) + "|" + Cuenta("adm.AcuseIniciativa"));
-            Check("R6 Estado cambiado: 51306", "51306", Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Monitoreo")));
+                  Error(() => s.Registrar(@"SORIANA\x", "PRB 2026-000001", "PO", "Otra Persona", "En Soluci\u00f3n", F("2026-09-01"))) + "|" + Cuenta("adm.AcuseIniciativa"));
+            Check("R6 Estado cambiado: 51306", "51306", Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Monitoreo", F("2026-09-01"))));
             Check("R7 no vigente / no existe: 51304", "51304|51304",
-                  Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000003", "PO", "Jesus Campa Morones", "En Monitoreo")) + "|" +
-                  Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-999999", "PO", "Jesus Campa Morones", "En Soluci\u00f3n")));
+                  Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000003", "PO", "Jesus Campa Morones", "En Monitoreo", null)) + "|" +
+                  Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-999999", "PO", "Jesus Campa Morones", "En Soluci\u00f3n", null)));
             Check("R8 sin usuario 51301; rol XX 51302; sin due\u00f1o 51303", "51301|51302|51303",
-                  Error(() => s.Registrar("  ", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Soluci\u00f3n")) + "|" +
-                  Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "XX", "Jesus Campa Morones", "En Soluci\u00f3n")) + "|" +
-                  Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "PO", " ", "En Soluci\u00f3n")));
+                  Error(() => s.Registrar("  ", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Soluci\u00f3n", F("2026-09-01"))) + "|" +
+                  Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "XX", "Jesus Campa Morones", "En Soluci\u00f3n", F("2026-09-01"))) + "|" +
+                  Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "PO", " ", "En Soluci\u00f3n", F("2026-09-01"))));
             using (var cn = Abrir(Base)) Exec(cn, "UPDATE dbo.Problem SET FechaSolucion = '2026-10-01' WHERE Codigo = N'PRB 2026-000001'");
-            var r4 = s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Soluci\u00f3n");
+            var r4 = s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000001", "PO", "Jesus Campa Morones", "En Soluci\u00f3n", F("2026-10-01"));
             Check("R9 nuevo episodio (otra fecha compromiso): se puede acusar otra vez", "True|3|3", r4.Nuevo + "|" + Cuenta("adm.AcuseIniciativa") + "|" + Cuenta("adm.NotificacionAdm"));
-            var n1 = s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000002", "PO", "Jesus Campa Morones", "En An\u00e1lisis");
-            var n2 = s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000002", "PO", "Jesus Campa Morones", "En An\u00e1lisis");
+            var n1 = s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000002", "PO", "Jesus Campa Morones", "En An\u00e1lisis", null);
+            var n2 = s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000002", "PO", "Jesus Campa Morones", "En An\u00e1lisis", null);
             Check("R10 fecha compromiso NULL (atrasada por categoria): un solo acuse", "True|False|NULL|4",
                   n1.Nuevo + "|" + n2.Nuevo + "|" + Uno("SELECT FechaCompromiso FROM adm.AcuseIniciativa WHERE Codigo = N'PRB 2026-000002'") + "|" + Cuenta("adm.AcuseIniciativa"));
 
@@ -181,7 +183,7 @@ public static class AcuseIniciativaSqlLocalDbSmoke
             {
                 try
                 {
-                    if (Sitio().Registrar(@"SORIANA\edgarrad", "PRB 2026-000001", "SO", "Edgar Ramos Davalos", "En Soluci\u00f3n").Nuevo)
+                    if (Sitio().Registrar(@"SORIANA\edgarrad", "PRB 2026-000001", "SO", "Edgar Ramos Davalos", "En Soluci\u00f3n", F("2026-10-05")).Nuevo)
                         Interlocked.Increment(ref nuevos);
                 }
                 catch (Exception ex) { lock (errores) errores.Add(ex.Message); }
@@ -190,6 +192,25 @@ public static class AcuseIniciativaSqlLocalDbSmoke
             Check("R11 concurrencia: 8 a la vez -> 1 nuevo, 1 acuse y 1 notificacion de ese episodio, sin errores", "1|1|1|0",
                   nuevos + "|" + Uno("SELECT COUNT(*) FROM adm.AcuseIniciativa WHERE Rol = 'SO' AND FechaCompromiso = '2026-10-05'") + "|" +
                   Uno("SELECT COUNT(*) FROM adm.NotificacionAdm n JOIN adm.AcuseIniciativa a ON a.IdAcuse = n.IdAcuse WHERE a.Rol = 'SO' AND a.FechaCompromiso = '2026-10-05'") + "|" + errores.Count);
+
+            // La fecha compromiso cambia ENTRE la evaluacion del sitio (foto) y
+            // el guardado: se rechaza sin escribir acuse ni notificacion.
+            var acuAntes = Cuenta("adm.AcuseIniciativa"); var notAntes = Cuenta("adm.NotificacionAdm");
+            var h12 = Huella("PRB 2026-000001");
+            using (var cn = Abrir(Base)) Exec(cn, "UPDATE dbo.Problem SET FechaSolucion = '2026-10-20' WHERE Codigo = N'PRB 2026-000001'");
+            Check("R12 la fecha cambio tras evaluar (foto 05/10, base 20/10): 51308, ni acuse ni notificacion",
+                  "51308|" + acuAntes + "|" + notAntes,
+                  Error(() => s.Registrar(@"SORIANA\edgarrad", "PRB 2026-000001", "SO", "Edgar Ramos Davalos", "En Soluci\u00f3n", F("2026-10-05"))) + "|" +
+                  Cuenta("adm.AcuseIniciativa") + "|" + Cuenta("adm.NotificacionAdm"));
+            Check("R13 NULL contra fecha y fecha contra NULL: 51308 (NULL solo coincide con NULL)", "51308|51308|" + acuAntes,
+                  Error(() => s.Registrar(@"SORIANA\edgarrad", "PRB 2026-000001", "SO", "Edgar Ramos Davalos", "En Soluci\u00f3n", null)) + "|" +
+                  Error(() => s.Registrar(@"SORIANA\jesuscamor", "PRB 2026-000002", "PO", "Jesus Campa Morones", "En An\u00e1lisis", F("2026-09-30"))) + "|" +
+                  Cuenta("adm.AcuseIniciativa"));
+            using (var cn = Abrir(Base)) Exec(cn, "UPDATE dbo.Problem SET FechaSolucion = '2026-10-05' WHERE Codigo = N'PRB 2026-000001'");
+            var r12 = s.Registrar(@"SORIANA\edgarrad", "PRB 2026-000001", "SO", "Edgar Ramos Davalos", "En Soluci\u00f3n", F("2026-10-05"));
+            Check("R14 con la foto igual a la base vuelve a pasar (el acuse ya existente, sin duplicar); dbo.Problem igual que antes",
+                  "False|" + acuAntes + "|" + notAntes + "|" + h12,
+                  r12.Nuevo + "|" + Cuenta("adm.AcuseIniciativa") + "|" + Cuenta("adm.NotificacionAdm") + "|" + Huella("PRB 2026-000001"));
 
             // ---------------- P: cuenta del sitio ----------------
             string directo;

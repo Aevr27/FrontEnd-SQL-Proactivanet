@@ -22,20 +22,22 @@
      cuenta de IIS), nunca el formulario. La identidad PO/SO (cuenta ->
      cuenta@soriana.com -> dbo.CatPersona) y la regla Atrasada del semaforo
      se deciden en el sitio (App_Code/AcuseIniciativa.cs), que manda el
-     nombre de dueño y el Estado que vio. Aqui, en la transaccion y con la
-     fila bloqueada, se comprueba que la iniciativa exista y este vigente y
-     que el dueño de ese rol y el Estado SIGAN siendo esos (si cambiaron
-     entre la revision y el guardado: error, nada se guarda). La fecha
-     compromiso se toma de dbo.Problem segun el Estado (Analisis ->
-     FechaAnalisis, Solucion -> FechaSolucion, Monitoreo -> FechaCierre);
-     puede ser NULL (va atrasada por la fecha propia de una categoria) y
-     NULL tambien es un episodio.
+     nombre de dueño, el Estado y la fecha compromiso que vio. Aqui, en la
+     transaccion y con la fila bloqueada, se comprueba que la iniciativa
+     exista y este vigente y que el dueño de ese rol, el Estado y la fecha
+     compromiso SIGAN siendo esos (si cambiaron entre la revision y el
+     guardado: error, nada se guarda). La fecha compromiso es la de
+     dbo.Problem segun el Estado (Analisis -> FechaAnalisis, Solucion ->
+     FechaSolucion, Monitoreo -> FechaCierre), la misma que la lista usa
+     para el semaforo; puede ser NULL (va atrasada por la fecha propia de
+     una categoria) y NULL tambien es un episodio: NULL = NULL coincide,
+     NULL contra una fecha no.
 
    ERRORES (THROW)
      51301 sin usuario          51302 rol distinto de PO / SO
      51303 sin nombre de dueño  51304 la iniciativa no existe o no esta vigente
      51305 el dueño de ese rol cambio      51306 el Estado cambio
-     51307 la notificacion no existe
+     51307 la notificacion no existe       51308 la fecha compromiso cambio
 
    DEPENDENCIAS
      dbo.Problem (Codigo con indice unico: ya lo referencian sql/22) y el
@@ -131,6 +133,7 @@ CREATE PROCEDURE adm.usp_Acuse_Registrar
     @Rol              char(2),
     @NombreDueno      nvarchar(4000),   -- OwnerProblem / OwnerServicio tal como lo vio el sitio
     @EstadoIniciativa nvarchar(100),    -- Estado tal como lo vio el sitio
+    @FechaCompromiso  date,             -- fecha del Estado tal como la vio el sitio (NULL = sin fecha)
     @FuenteIdentidad  varchar(16) = 'CORREO_CANDIDATO',
     @IdAcuse          int          OUTPUT,
     @Nuevo            bit          OUTPUT,
@@ -163,6 +166,13 @@ BEGIN
                 THROW 51305, N'El dueno de ese rol cambio: vuelve a abrir la iniciativa.', 1;
             IF ISNULL(@estado, N'') <> ISNULL(@EstadoIniciativa, N'')
                 THROW 51306, N'El Estado de la iniciativa cambio: vuelve a abrirla.', 1;
+            -- El episodio que el sitio evaluo (fecha del Estado) tiene que ser
+            -- el de ahora; NULL solo coincide con NULL. Sin NOT(...): con un
+            -- NULL de un lado la comparacion daria UNKNOWN y no rechazaria.
+            IF (@fecha IS NULL AND @FechaCompromiso IS NOT NULL)
+               OR (@fecha IS NOT NULL AND @FechaCompromiso IS NULL)
+               OR @fecha <> @FechaCompromiso
+                THROW 51308, N'La fecha compromiso de la iniciativa cambio: vuelve a abrirla.', 1;
 
             -- El mismo episodio (misma fecha, o NULL y NULL): se devuelve el
             -- que ya esta. Ni otro acuse ni otra notificacion.

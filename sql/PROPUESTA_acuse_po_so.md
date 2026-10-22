@@ -42,7 +42,8 @@ Cadena (código en `App_Code/AcuseIniciativa.cs`, `IdentidadAcuse`):
 Del navegador solo llegan `folio` y `rol`. Todo se revalida en el servidor
 en cada POST: identidad, que la iniciativa exista, que esté Atrasada y que
 la persona sea dueña de **ese** rol. Después, la base vuelve a revisar el
-dueño y el Estado dentro de la transacción.
+dueño, el Estado y la **fecha compromiso** que evaluó el sitio dentro de la
+transacción.
 
 ### Cobertura observada en la VM
 
@@ -79,11 +80,19 @@ Datos de `sql/diag_acuse_identidad_po_so.sql`, corrido por el usuario el
   ETL. Si cambian, cambia quién puede acusar, siempre según el dato vigente.
 - **Alcance.** Hoy son 2 personas. Ampliarlo implica dar acceso a Admin, que
   es otra decisión.
-- **Ventana sin revalidar.** Entre la revisión del sitio y el guardado, la
-  base revalida dueño y Estado, pero no que la fecha siga vencida. Si alguien
-  mueve la fecha justo en ese instante, el acuse queda en el episodio
-  anterior. Es una ventana de milisegundos y no cambia ningún dato de la
-  iniciativa.
+- **Cambio de fecha entre la revisión y el guardado (cerrado).** El sitio
+  manda la fecha compromiso del Estado tal como la vio la lista
+  (`f_analisis`, `f_solucion` o `f_cierre`; son `dbo.Problem.FechaAnalisis`,
+  `FechaSolucion` y `FechaCierre`). La base la compara, con la fila
+  bloqueada, contra la de ese momento. Si cambió, error 51308 y no se guarda
+  ni acuse ni aviso. NULL solo coincide con NULL.
+- **Lo que no se revalida en la base.** Que la iniciativa siga Atrasada por
+  la fecha **propia de una categoría** (`FechaAnalisisCategoria`). Esa regla
+  la decide el sitio con la lista, igual que el semáforo; la base no la
+  recalcula, porque eso sería una segunda regla de vencidas. Si alguien
+  cambia solo esa fecha de categoría en el instante entre la revisión y el
+  guardado, el acuse queda registrado con la fecha de la iniciativa, que no
+  cambió. No cambia ningún dato de la iniciativa.
 - **Costo del POST.** El POST relee el registro completo
   (`ExperienciaQueries.RegistroIniciativas`) para usar exactamente la misma
   regla del semáforo. Es lo mismo que cuesta abrir la página, solo en un
@@ -131,6 +140,9 @@ migraciones 22–27.
   - `@Usuario`: lo pone el servidor.
   - `@Codigo`, `@Rol`.
   - `@NombreDueno`, `@EstadoIniciativa`: lo que vio el sitio.
+  - `@FechaCompromiso` date (NULL = sin fecha): la fecha del Estado que
+    evaluó el sitio. Es obligatoria, sin valor por omisión: quien llama
+    siempre la manda.
   - `@FuenteIdentidad`.
   - Salidas: `@IdAcuse`, `@Nuevo`, `@FechaUtc`.
 - En una transacción, con `UPDLOCK, HOLDLOCK` sobre la fila de `dbo.Problem`:
@@ -139,8 +151,11 @@ migraciones 22–27.
      también (51306).
   3. Toma la fecha compromiso del Estado actual: En Análisis →
      FechaAnalisis, En Solución → FechaSolucion, En Monitoreo → FechaCierre.
-  4. Si ya hay acuse del mismo episodio, lo devuelve con `@Nuevo = 0`.
-  5. Si no, inserta el acuse y su notificación.
+  4. Exige que sea la que mandó el sitio (51308). NULL solo coincide con
+     NULL; la comparación es explícita para que un NULL nunca la deje pasar
+     como UNKNOWN.
+  5. Si ya hay acuse del mismo episodio, lo devuelve con `@Nuevo = 0`.
+  6. Si no, inserta el acuse y su notificación.
 - Otros errores: 51301 sin usuario, 51302 rol, 51303 sin dueño.
 
 **`adm.usp_Notificacion_MarcarLeida`**
@@ -182,7 +197,7 @@ muestra la función apagada.
 ## 5. Pruebas ejecutadas (2026-10-22)
 
 - **LocalDB desechable**, `tools/tests/AcuseIniciativaSqlLocalDbSmoke.cs`:
-  **27/27**. Cubre:
+  **30/30**. Cubre:
   - guarda en otra base;
   - detección antes y después;
   - 5 objetos y 9 DENY;
@@ -190,13 +205,17 @@ muestra la función apagada.
   - acuse nuevo y duplicado (incluso con la cuenta en otras mayúsculas);
   - PO y SO por separado;
   - nuevo episodio y fecha NULL;
-  - errores 51301 a 51307;
+  - errores 51301 a 51308;
+  - **regresión de la carrera**: la fecha compromiso cambia entre la
+    evaluación y el envío (foto 05/10, base 20/10) → 51308, sin acuse ni
+    aviso; NULL contra fecha y fecha contra NULL → 51308; con la foto igual
+    vuelve a pasar y `dbo.Problem` queda igual;
   - `dbo.Problem` sin cambios (huella de la fila completa);
   - **8 envíos concurrentes = 1 acuse y 1 notificación**;
   - PROACTIVANETAD no escribe a mano (229);
   - leído/no leído por ADM, y listar no marca;
   - rollback que se niega con datos, que limpia con la bandera, y reaplicar.
-- **Sin SQL**, `tools/tests/AcuseIniciativaHttpSmoke.cs`: **39/39**. Cubre:
+- **Sin SQL**, `tools/tests/AcuseIniciativaHttpSmoke.cs`: **41/41**. Cubre:
   - la identidad: un correo, ambiguo, homónimo, `t_*`, dominio distinto,
     acentos, mayúsculas y espacios;
   - VIEWER 403; MOD sin bandeja;
@@ -207,7 +226,9 @@ muestra la función apagada.
   - no Atrasada, sin control de fecha → 409;
   - campos `cuenta`/`usuario`/`nombre` del formulario ignorados;
   - duplicado;
-  - error de la base → 409;
+  - error de la base (51305 y 51308) → 409;
+  - la fecha que se manda es la del Estado de la lista (Análisis,
+    Solución o Monitoreo; sin fecha, cerrada o inválida = NULL);
   - bandeja por ADM, y listar no marca.
 - **JS** `tools/tests/AcuseIniciativaSmoke.js`: **25/25**.
   `RegistroIniciativasSmoke` +2 (AC1–AC2): 524/524.
