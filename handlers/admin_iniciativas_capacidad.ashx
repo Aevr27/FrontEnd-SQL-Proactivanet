@@ -13,7 +13,7 @@
 //
 // SOLO LECTURA. ACCESO: AccesoIniciativas.ExigirSolicitud (rol ADM o MOD en
 // dbo.UsuariosAdmin, o cualquier cuenta Windows autenticada con el
-// interruptor IniciativasAbiertas; 403 antes de tocar la base). Solo lo usa
+// interruptor INICIATIVAS_ABIERTAS; 403 antes de tocar la base). Solo lo usa
 // Nueva solicitud.
 
 using System;

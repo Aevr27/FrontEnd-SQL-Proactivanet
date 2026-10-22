@@ -838,7 +838,7 @@
 <script>
 // El rol tambien decide los botones de ADM que se pintan dentro del detalle,
 // que no existen cuando aplicar() recorre el documento. Sin rol ADM/MOD pero
-// con el interruptor IniciativasAbiertas (solicitante): solo Nueva solicitud.
+// con el interruptor INICIATIVAS_ABIERTAS (solicitante): solo Nueva solicitud.
 try {
   new SesionAdmin('../').aplicar(document, document.getElementById('iniSaludo'), document.getElementById('iniCorreo')).then(function (s) {
     if (!window.IniciativasPagina) return;

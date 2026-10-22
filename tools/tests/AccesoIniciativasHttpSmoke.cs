@@ -1,11 +1,18 @@
-// Prueba offline del interruptor IniciativasAbiertas
+// Prueba offline del interruptor INICIATIVAS_ABIERTAS de adm.Interruptor
 // (App_Code/AccesoIniciativas.cs) A TRAVES DE LOS HANDLERS reales y de
 // AdminAccesoModulo.Revisar (la pagina estatica), con un HttpContext armado
-// a mano: sin IIS y sin SQL Server. El rol (dbo.UsuariosAdmin) sale de una
-// fuente falsa; el interruptor, de AccesoIniciativas.LeerConfig.
+// a mano: sin IIS y sin SQL Server. El rol (dbo.UsuariosAdmin) y el
+// interruptor (AccesoIniciativas.Fuente) salen de fuentes falsas.
 //
-// Matriz (interruptor ENCENDIDO / APAGADO x VIEWER / ADM / MOD / anonimo):
-//   C   el valor: solo "true" (sin mayusculas ni espacios) enciende.
+// Matriz (interruptor true / false / sin fila / error de lectura x VIEWER /
+// ADM / MOD / anonimo; solo "true" es ON, los otros tres son OFF):
+//   C   el valor: solo Encendido = 1 abre; 0, sin fila, error o sin fuente
+//       cierran; el error se registra.
+//   W   Web.config ya no cuenta: el fuente no lee appSettings.
+//   T   apagar en la base vale en el SIGUIENTE request (sin reiniciar); una
+//       sola lectura por request; anonimo no la provoca.
+//   B   el navegador no decide: una query trampa (?solicitante=1,
+//       INICIATIVAS_ABIERTAS=1, rol=ADM...) no abre nada.
 //   V   cuenta comun (sin fila): ON entra a la pagina y a los 4 handlers de
 //       Nueva solicitud (400/405/no-403: paso la puerta, no llego a SQL);
 //       OFF 403 AccesoDenegado con el mensaje de "no esta abierta".
@@ -29,6 +36,22 @@ using System.IO;
 using System.Security.Principal;
 using System.Web;
 
+// El interruptor de adm.Interruptor sin SQL: valor (null = sin fila) o error.
+sealed class InterruptorFalso : IFuenteInterruptores
+{
+    public bool? Valor;
+    public bool Lanza;
+    public int Lecturas;
+    public string UltimaClave;
+    public bool? Encendido(string clave)
+    {
+        Lecturas++;
+        UltimaClave = clave;
+        if (Lanza) throw new InvalidOperationException("adm.Interruptor no se pudo leer");
+        return Valor;
+    }
+}
+
 sealed class RolesFalsos : IFuenteRolesAdmin
 {
     public readonly Dictionary<string, string[]> Filas = new Dictionary<string, string[]>();
@@ -42,8 +65,6 @@ sealed class RolesFalsos : IFuenteRolesAdmin
 public static class AccesoIniciativasHttpSmoke
 {
     static int fallos = 0, pasados = 0;
-    static int lecturasConfig = 0;
-    static string valorConfig = null;
 
     static void Check(string caso, object esperado, object obtenido)
     {
@@ -99,20 +120,42 @@ public static class AccesoIniciativasHttpSmoke
         roles.Filas[ADM.ToUpperInvariant()] = new[] { "ADM" };
         roles.Filas[MOD.ToUpperInvariant()] = new[] { "MOD" };
         AccesoAdmin.FuenteRoles = roles;
-        AccesoIniciativas.LeerConfig = delegate { lecturasConfig++; return valorConfig; };
+        var interruptor = new InterruptorFalso();
+        AccesoIniciativas.Fuente = interruptor;
         int estado;
         string cuerpo;
 
         // ---- C: el valor ------------------------------------------------
-        foreach (var v in new[] { "true", "TRUE", " True " })
-            Check("C1 '" + v + "' enciende", true, AccesoIniciativas.Habilitado(v));
-        foreach (var v in new[] { null, "", "false", "1", "yes", "si", "truee" })
-            Check("C2 '" + (v ?? "(ausente)") + "' no enciende", false, AccesoIniciativas.Habilitado(v));
-
-        foreach (var on in new[] { true, false })
         {
-            valorConfig = on ? "true" : null;
-            var E = on ? "ON " : "OFF ";
+            var f = new InterruptorFalso();
+            var errores = 0;
+            Action<Exception> reg = delegate { errores++; };
+            f.Valor = true;
+            Check("C1 Encendido = 1 abre (clave INICIATIVAS_ABIERTAS)", "True|INICIATIVAS_ABIERTAS", AccesoIniciativas.Leer(f, reg) + "|" + f.UltimaClave);
+            f.Valor = false;
+            Check("C2 Encendido = 0 cierra", false, AccesoIniciativas.Leer(f, reg));
+            f.Valor = null;
+            Check("C3 sin fila cierra", false, AccesoIniciativas.Leer(f, reg));
+            f.Valor = true; f.Lanza = true;
+            Check("C4 error de lectura cierra (aunque la fila diga 1) y se registra", "False|1", AccesoIniciativas.Leer(f, reg) + "|" + errores);
+            Check("C5 sin fuente cierra", false, AccesoIniciativas.Leer(null, reg));
+        }
+
+        // ---- W: Web.config ya no cuenta ----------------------------------
+        {
+            var t = File.ReadAllText(Path.Combine("App_Code", "AccesoIniciativas.cs"));
+            Check("W1 AccesoIniciativas no lee AppSettings ni ConfigurationManager", "False|False",
+                  t.Contains("AppSettings") + "|" + t.Contains("ConfigurationManager"));
+            Check("W2 Web.config.ejemplo ya no trae la clave IniciativasAbiertas", false,
+                  File.ReadAllText("Web.config.ejemplo").Contains("<add key=\"IniciativasAbiertas\""));
+        }
+
+        foreach (var modo in new[] { "true", "false", "sin fila", "error" })
+        {
+            var on = modo == "true";
+            interruptor.Lanza = modo == "error";
+            interruptor.Valor = modo == "false" ? (bool?)false : modo == "sin fila" ? (bool?)null : true;
+            var E = "[" + modo + "] ";
 
             // ---- V: cuenta comun ------------------------------------------
             Check(E + "V1 pagina admin/iniciativas.html", on ? "pasa" : "403|html|cerrada", Modulo("~/admin/iniciativas.html", COMUN));
@@ -178,14 +221,14 @@ public static class AccesoIniciativasHttpSmoke
             foreach (var quien in new[] { ADM, MOD })
             {
                 var q = quien == ADM ? "ADM" : "MOD";
-                var antes = lecturasConfig;
+                var antes = interruptor.Lecturas;
                 Check(E + "A1 " + q + ": pagina", "pasa", Modulo("~/admin/iniciativas.html", quien));
                 cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, quien, out estado);
                 Check(E + "A2 " + q + ": capacidad sin categoria 400", 400, estado);
                 cuerpo = Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", null, quien, out estado);
                 Check(E + "A3 " + q + ": validar GET 405", 405, estado);
                 Check(E + "A4 " + q + ": registro por el modulo", "pasa", Modulo("~/handlers/admin_iniciativas_registro.ashx", quien));
-                Check(E + "A5 " + q + ": el interruptor ni se lee", antes, lecturasConfig);
+                Check(E + "A5 " + q + ": el interruptor ni se lee", antes, interruptor.Lecturas);
                 cuerpo = Correr(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", null, quien, out estado);
                 Check(E + "A6 " + q + ": gestion (solo ADM)", quien == ADM ? "False" : "True",
                       estado == 403 && cuerpo.Contains("RolInsuficiente"));
@@ -199,6 +242,19 @@ public static class AccesoIniciativasHttpSmoke
             cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
             Check(E + "S3 anonimo: admin_sesion", "{\"autorizado\":false,\"solicitante\":false}", cuerpo);
 
+            // ---- B: el navegador no decide ---------------------------------
+            {
+                const string trampa = "solicitante=1&IniciativasAbiertas=true&INICIATIVAS_ABIERTAS=1&rol=ADM&autorizado=true";
+                cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", trampa, COMUN, out estado);
+                Check(E + "B1 capacidad con query trampa", on ? "400|False" : "403|True", estado + "|" + Denegado(cuerpo));
+                cuerpo = Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", trampa, COMUN, out estado);
+                Check(E + "B2 validar con query trampa", on ? "405|False" : "403|True", estado + "|" + Denegado(cuerpo));
+                cuerpo = Correr(new AdminIniciativasRegistro(), "admin_iniciativas_registro.ashx", trampa, COMUN, out estado);
+                Check(E + "B3 registro con query trampa: 403 siempre", "403|True", estado + "|" + Denegado(cuerpo));
+                cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", trampa, COMUN, out estado);
+                Check(E + "B4 admin_sesion con query trampa", "{\"autorizado\":false,\"solicitante\":" + (on ? "true" : "false") + "}", cuerpo);
+            }
+
             // ---- U: otros modulos del tablero -----------------------------
             foreach (var u in new[] { "~/dashboard.html", "~/handlers/kpis.ashx", "~/handlers/experiencia.ashx",
                                        "~/handlers/qa.ashx", "~/handlers/backlog_resumen.ashx", "~/experiencia/experiencia.html" })
@@ -207,6 +263,35 @@ public static class AccesoIniciativasHttpSmoke
                 Check(E + "U2 " + u + ": el modulo no la toca (anonimo)", "pasa", Modulo(u, ""));
                 Check(E + "U3 " + u + ": no es ruta de solicitante", false, AccesoIniciativas.EsRutaSolicitante(u));
             }
+        }
+
+        // ---- T: apagar sin reiniciar; una lectura por request ------------
+        interruptor.Lanza = false;
+        interruptor.Valor = true;
+        Check("T1 encendido: pagina para la cuenta comun", "pasa", Modulo("~/admin/iniciativas.html", COMUN));
+        interruptor.Valor = false;
+        Check("T2 apagado en la base: el siguiente request ya es 403", "403|html|cerrada", Modulo("~/admin/iniciativas.html", COMUN));
+        cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, COMUN, out estado);
+        Check("T3 ... y el handler tambien", "403|True", estado + "|" + Denegado(cuerpo));
+        interruptor.Valor = true;
+        Check("T4 encendido otra vez: pasa", "pasa", Modulo("~/admin/iniciativas.html", COMUN));
+        {
+            var sw = new StringWriter();
+            var ctx = Contexto("admin_iniciativas_capacidad.ashx", null, COMUN, sw);
+            var antes = interruptor.Lecturas;
+            var a = AdminAccesoModulo.Revisar(ctx, "~/handlers/admin_iniciativas_capacidad.ashx");
+            var b = AccesoIniciativas.ExigirSolicitud(ctx);
+            var c = AccesoIniciativas.PuedeSolicitar(ctx);
+            Check("T5 modulo + handler en el mismo request: una sola lectura", "True|True|True|1", a + "|" + b + "|" + c + "|" + (interruptor.Lecturas - antes));
+            interruptor.Valor = false;
+            Check("T6 dentro del MISMO request no cambia a media respuesta", true, AccesoIniciativas.PuedeSolicitar(ctx));
+            HttpContext.Current = null;
+        }
+        {
+            var antes = interruptor.Lecturas;
+            Modulo("~/admin/iniciativas.html", "");
+            Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", null, null, out estado);
+            Check("T7 anonimo / sin usuario: ni se lee", 0, interruptor.Lecturas - antes);
         }
 
         // ---- F: el fuente ----------------------------------------------

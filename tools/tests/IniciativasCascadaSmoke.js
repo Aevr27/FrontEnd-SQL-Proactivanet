@@ -746,7 +746,7 @@ pruebas.push(function () {
     [activas.length, /href="iniciativas\.html"[^>]*aria-current="page"/.test(activas[0] || '')]);
   var tablero = leer('dashboard.html').replace(/<!--[\s\S]*?-->/g, '');
   // Dos entradas, las dos ocultas: Administracion (ADM/MOD) e Iniciativas
-  // (solo solicitante: interruptor IniciativasAbiertas, sin rol).
+  // (solo solicitante: interruptor INICIATIVAS_ABIERTAS, sin rol).
   Check('M3 el tablero enlaza a la pagina solo desde entradas ocultas',
     [true, true, true, true],
     [/<li data-solo-admin hidden>\s*<a class="mnav" id="mnav-admin" href="admin\/iniciativas\.html"/.test(tablero),
@@ -1177,7 +1177,7 @@ pruebas.push(function () {
 
 // ---------------------------------------------------------------------------
 // SG) Envio guardado (sql/29) y modo solicitante (interruptor
-//     IniciativasAbiertas): el resultado dice el numero y lo que resolvio el
+//     INICIATIVAS_ABIERTAS): el resultado dice el numero y lo que resolvio el
 //     servidor; el borrador se reemplaza (otro token); el mismo token otra
 //     vez = "ya estaba guardada". Nada de identidad viaja en el cuerpo.
 // ---------------------------------------------------------------------------

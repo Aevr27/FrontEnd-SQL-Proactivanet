@@ -747,7 +747,7 @@ window.Iniciativas = (function () {
       this.$('iniDenegado').hidden = false;
     }
 
-    // Cuenta SIN rol ADM/MOD con el interruptor IniciativasAbiertas
+    // Cuenta SIN rol ADM/MOD con el interruptor INICIATIVAS_ABIERTAS
     // (admin_sesion: solicitante y no autorizado): solo Nueva solicitud. Sin
     // pestañas, sin registro ni "Volver" (no hay a donde). Solo UX: el
     // servidor ya le niega todo handler que no sea de Nueva solicitud
