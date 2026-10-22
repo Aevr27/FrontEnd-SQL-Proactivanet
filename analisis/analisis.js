@@ -128,11 +128,72 @@
   var reglasBase = [];           // las de la base
   var reglasPrueba = null;       // las del editor, si se estan probando
   var motivosEquipo = [];
+  var secciones = { quincena: false, cedis: null };   // dbo.AnalisisServicio.Secciones (47)
   var resultado = null;          // Motor.analizar(...)
   var pestana = 'Resumen';
+  var enCurso = null;            // {url, nombre, control} de la carga que se esta haciendo
+  var mostrado = null;           // {nombre, desde, hasta} de lo que se ve en pantalla
 
   function estado(txt, clase) { var e = $('estado'); e.textContent = txt || ''; e.className = 'estado' + (clase ? ' ' + clase : ''); }
-  function error(txt) { $('error').hidden = !txt; $('error-msg').textContent = txt || ''; }
+  // reintentar: lo que hace el boton "Reintentar" del aviso; sin el, no sale.
+  function error(txt, reintentar) {
+    $('error').hidden = !txt; $('error-msg').textContent = txt || '';
+    $('reintentar').hidden = !(txt && reintentar);
+    $('reintentar').onclick = txt && reintentar ? function () { reintentar(); } : null;
+  }
+
+  // Mientras se trae otro servicio, lo que esta en pantalla queda atenuado y
+  // con el aviso de que es la seleccion anterior.
+  function marcarPrevio(nombre) {
+    var r = $('resultado'), p = $('previo');
+    r.classList.toggle('an-viejo', !!nombre);
+    r.setAttribute('aria-busy', String(!!nombre && !!enCurso));
+    p.hidden = !nombre || !mostrado;
+    if (nombre && mostrado) {
+      p.textContent = (enCurso ? 'Cargando ' + nombre + '… ' : 'No se pudo cargar ' + nombre + '. ') +
+                      'Lo de abajo es la selección anterior: ' + mostrado.nombre + ', del ' + mostrado.desde + ' al ' + mostrado.hasta + '.';
+    }
+  }
+
+  /* ------------------------------------------------------------ respuestas guardadas */
+  // La misma consulta (servicio, desde, hasta) no se vuelve a pedir durante
+  // unos minutos: se reusa el cuerpo ya bajado y solo se prepara y analiza de
+  // nuevo. Pocas, porque cada una pesa megas.
+  var GUARDAR_MS = 10 * 60000, GUARDAR_MAX = 3, guardadas = [];
+  function guardada(url) {
+    var ahora = Date.now();
+    guardadas = guardadas.filter(function (g) { return ahora - g.hora < GUARDAR_MS; });
+    return guardadas.filter(function (g) { return g.url === url; })[0] || null;
+  }
+  function guardar(url, cuerpo) {
+    guardadas = guardadas.filter(function (g) { return g.url !== url; });
+    guardadas.push({ url: url, cuerpo: cuerpo, hora: Date.now() });
+    if (guardadas.length > GUARDAR_MAX) guardadas.shift();
+  }
+
+  // Lo que dice el navegador de la peticion: espera del servidor, bajada,
+  // bytes en el cable y sin comprimir, y el Server-Timing de analisis.ashx.
+  // El observador las junta aunque el bufer de recursos del tablero ya este
+  // lleno (getEntriesByName no veria las nuevas).
+  var entradas = {};
+  try {
+    new PerformanceObserver(function (l) {
+      l.getEntries().forEach(function (e) { if (e.name.indexOf('analisis.ashx?servicio=') >= 0) entradas[e.name] = e; });
+    }).observe({ type: 'resource', buffered: true });
+  } catch (x) { /* sin observador: queda getEntriesByName */ }
+  function red(url) {
+    try {
+      var nom = new URL(url, location.href).href, e = entradas[nom] || performance.getEntriesByName(nom).pop();
+      if (!e) return null;
+      return {
+        esperaServidor: Math.round(e.responseStart - e.requestStart), bajada: Math.round(e.responseEnd - e.responseStart),
+        transferido: e.transferSize, cuerpoEnCable: e.encodedBodySize, sinComprimir: e.decodedBodySize,
+        servidor: (e.serverTiming || []).map(function (s) {
+          return s.name + ' ' + Math.round(s.duration) + ' ms' + (s.description ? ' (' + s.description + ')' : '');
+        })
+      };
+    } catch (x) { return null; }
+  }
 
   /* ------------------------------------------------------------ fechas */
   function dos(n) { return (n < 10 ? '0' : '') + n; }
@@ -170,28 +231,38 @@
         }).join('');
         estado(servicios.length ? '' : 'Sin servicios: falta correr 47 y el script de algún servicio.');
       })
-      .catch(function (e) { estado(''); error('No se pudo leer la lista de servicios: ' + e.message); });
+      .catch(function (e) { estado(''); error('No se pudo leer la lista de servicios: ' + e.message, function () { error(''); pedirServicios(); }); });
   }
 
   /* ------------------------------------------------------------ analizar */
-  function analizar() {
-    var clave = $('servicio').value;
-    if (!clave) return;
+  // pedido: {clave, desde, hasta}; sin el, lo que esta en los filtros. La
+  // misma consulta que ya se esta trayendo no se pide dos veces; otra
+  // distinta cancela la anterior (su respuesta ya no pintaria nada).
+  function analizar(pedido) {
+    var p = pedido && pedido.clave ? pedido : { clave: $('servicio').value, desde: $('desde').value, hasta: $('hasta').value };
+    if (!p.clave) return;
+    var url = API + '?servicio=' + encodeURIComponent(p.clave) + '&desde=' + encodeURIComponent(p.desde) + '&hasta=' + encodeURIComponent(p.hasta);
+    if (enCurso && enCurso.url === url) return;
+    if (enCurso && enCurso.control) enCurso.control.abort();
+    var nombre = (servicios.filter(function (s) { return s.Servicio === p.clave; })[0] || {}).Nombre || p.clave;
+    var control = typeof AbortController === 'function' ? new AbortController() : null;
+    var t0 = Date.now(), mio = ++turno, med = {}, previa = guardada(url);
+    enCurso = { url: url, nombre: nombre, control: control };
     error(''); $('avisos').hidden = true;
-    $('analizar').disabled = true; $('excel').disabled = true;
-    var nombre = (servicios.filter(function (s) { return s.Servicio === clave; })[0] || {}).Nombre || clave;
-    estado('Trayendo los tickets de ' + nombre + '…');
-    var url = API + '?servicio=' + encodeURIComponent(clave) + '&desde=' + encodeURIComponent($('desde').value) + '&hasta=' + encodeURIComponent($('hasta').value);
-    var t0 = Date.now(), mio = ++turno, med = {};
+    $('excel').disabled = true;
+    estado((previa ? 'Preparando de nuevo ' : 'Trayendo los tickets de ') + nombre + '…', 'cargando');
+    marcarPrevio(nombre);
     // El JSON no se lee aqui: el cuerpo pasa entero al Worker. Solo una
     // respuesta de error (corta) se lee en la pagina.
-    Promise.all([motor(), fetch(url, { cache: 'no-store' }).then(function (r) {
+    var cuerpo = previa ? Promise.resolve(previa.cuerpo) : fetch(url, { cache: 'no-store', signal: control ? control.signal : undefined }).then(function (r) {
       if (r.ok) return r.arrayBuffer();
       return r.json().then(function (j) { throw new Error(j.error || ('HTTP ' + r.status)); });
-    })]).then(function (x) {
+    });
+    Promise.all([motor(), cuerpo]).then(function (x) {
       if (mio !== turno) return;
-      med.descarga = Date.now() - t0;
-      var avisar = function (txt) { if (mio === turno) estado(txt); };
+      med.descarga = Date.now() - t0; med.bytes = x[1].byteLength; med.guardada = !!previa;
+      if (!previa) { med.url = url; guardar(url, x[1]); }
+      var avisar = function (txt) { if (mio === turno) estado(txt, 'cargando'); };
       return analizador.cargar(x[1], avisar).then(function (c) {
         if (mio !== turno) return;
         respuesta = c.respuesta; nTickets = c.tickets;
@@ -200,19 +271,33 @@
         reglasPrueba = null;
         var me = parametro('MotivosEquipo');
         try { motivosEquipo = JSON.parse(me || '[]'); } catch (e) { motivosEquipo = []; }
+        // Sin el dato (un 47 de antes del 2026-10-21) no se prende nada. Primero
+        // lo que trae usp_Analisis_Datos; si no, la fila de la lista de servicios.
+        var fila = servicios.filter(function (s) { return s.Servicio === respuesta.servicio; })[0] || {};
+        var sec = parametro('Secciones');
+        // Un motor.js viejo de cache no trae leerSecciones: todo apagado, sin romper.
+        secciones = window.Motor.leerSecciones ? window.Motor.leerSecciones(sec != null ? sec : fila.Secciones) : { quincena: false, cedis: null };
         return correrAnalisis(avisar, med).then(function (listo) {
           if (!listo || mio !== turno) return;
           med.total = Date.now() - t0; med.enWorker = !!analizador.worker; medicion = med;
-          estado(window.Motor.miles(nTickets) + ' tickets en ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s.', 'ok');
+          enCurso = null;
+          mostrado = { nombre: nombre, desde: respuesta.desde, hasta: respuesta.hasta };
+          marcarPrevio(null);
+          estado(window.Motor.miles(nTickets) + ' tickets en ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s' +
+                 (previa ? ' (con la consulta de las ' + new Date(previa.hora).toTimeString().slice(0, 5) + ')' : '') + '.', 'ok');
           $('excel').disabled = false;
           $('intro').hidden = true; $('resultado').hidden = false;
         });
       });
     }).catch(function (e) {
       if (mio !== turno) return;
+      enCurso = null;
       estado('');
-      error(e.message + (/HTTP 5/.test(e.message) ? ' Revisa que 47_analisis_servicios.sql este corrido.' : ''));
-    }).then(function () { if (mio === turno) $('analizar').disabled = false; });
+      marcarPrevio(resultado ? nombre : null);
+      if (resultado) $('excel').disabled = false;   // el Excel es el de lo que se sigue viendo
+      error(e.message + (/HTTP 5/.test(e.message) ? ' Revisa que 47_analisis_servicios.sql este corrido.' : ''),
+            function () { analizar(p); });
+    });
   }
 
   function parametro(clave) {
@@ -232,7 +317,8 @@
   // mientras tanto se pidio otro analisis.
   function correrAnalisis(avisar, med) {
     var mio = turno;
-    return analizador.analizar({ nombre: parametro('Servicio') || respuesta.servicio, reglas: reglasPrueba || reglasBase, motivosEquipo: motivosEquipo },
+    return analizador.analizar({ nombre: parametro('Servicio') || respuesta.servicio, reglas: reglasPrueba || reglasBase, motivosEquipo: motivosEquipo,
+                                 secciones: { quincena: secciones.quincena }, cedis: secciones.cedis },
                                avisar || function () {}).then(function (a) {
       if (mio !== turno) return false;
       var t0 = Date.now();
@@ -345,22 +431,64 @@
     });
     return s + '<line class="eje" x1="' + iz + '" x2="' + iz + '" y1="' + ar + '" y2="' + (H - 6) + '"/></svg>';
   }
+  // Un dia, una barra delgada; los dias pico en ambar. Mes abajo cuando cabe.
+  var MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+  var DIAS_SEM = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  function diaria(d, op) {
+    var M = window.Motor, W = op.ancho, H = 220, iz = 40, de = 10, ar = 14, ab = 30, n = d.length;
+    var max = Math.max.apply(null, d.map(function (x) { return x.n; }).concat([0])) || 1;
+    var paso = Math.pow(10, Math.floor(Math.log10(max))), tope = Math.ceil(max / paso) * paso;
+    if (tope / paso <= 2) { paso /= 2; tope = Math.ceil(max / paso) * paso; }
+    var y = function (v) { return ar + (H - ar - ab) * (1 - v / tope); };
+    var banda = (W - iz - de) / Math.max(1, n), bw = Math.max(1, banda * 0.75);
+    var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(op.titulo) + '">';
+    for (var v = 0; v <= tope + 1e-9; v += paso) {
+      s += '<line class="eje" x1="' + iz + '" x2="' + (W - de) + '" y1="' + y(v) + '" y2="' + y(v) + '"/><text x="' + (iz - 6) + '" y="' + (y(v) + 4) + '" text-anchor="end">' + Math.round(v * 10) / 10 + '</text>';
+    }
+    var ultimaEtq = -1e9, iMax = 0;
+    d.forEach(function (x, i) {
+      var cx = iz + banda * (i + 0.5), yv = y(x.n), f = new Date(x.dia + 'T12:00:00Z');
+      if (x.n > d[iMax].n) iMax = i;
+      var tip = x.dia + ' (' + DIAS_SEM[f.getUTCDay()] + ')\n' + M.miles(x.n) + ' tickets' +
+                (x.base != null ? '\nPromedio de su día de la semana: ' + M.numTxt(x.base) : '') + (x.pico ? '\nDía pico' : '');
+      s += '<rect class="hit" x="' + (cx - banda / 2) + '" y="' + ar + '" width="' + banda + '" height="' + (H - ar - ab) + '" data-tip="' + esc(tip) + '"/>';
+      if (x.n > 0) s += '<rect class="barra' + (x.pico ? ' pico' : '') + '" pointer-events="none" x="' + (cx - bw / 2) + '" y="' + yv + '" width="' + bw + '" height="' + (y(0) - yv) + '"/>';
+      if ((i === 0 || f.getUTCDate() === 1) && cx - ultimaEtq >= 34) {
+        s += '<text x="' + cx + '" y="' + (H - ab + 16) + '" text-anchor="' + (i === 0 ? 'start' : 'middle') + '">' + MESES[f.getUTCMonth()] + '</text>';
+        ultimaEtq = cx;
+      }
+    });
+    if (n && d[iMax].n > 0) s += '<text class="etq" x="' + Math.min(W - de, Math.max(iz, iz + banda * (iMax + 0.5))) + '" y="' + (y(d[iMax].n) - 6) + '" text-anchor="middle">' + M.miles(d[iMax].n) + '</text>';
+    return s + '<line class="eje" x1="' + iz + '" x2="' + (W - de) + '" y1="' + y(0) + '" y2="' + y(0) + '"/></svg>';
+  }
   function grafica(titulo, svg, nota) {
     return '<div class="an-tabla an-grafica"><h4>' + esc(titulo) + '</h4>' + svg + (nota ? '<p class="nota">' + esc(nota) + '</p>' : '') + '</div>';
   }
   function graficasTemporal() {
-    var M = window.Motor, g = resultado.graficas, W = ancho() > 900 ? Math.floor((ancho() - 16) / 2) : ancho();
+    var M = window.Motor, g = resultado.graficas, dos = ancho() > 900;
     var meses = g.meses.map(function (m) {
       return { e: m.mes.slice(2), v: m.porDia, etq: M.numTxt(m.porDia), tip: m.mes + '\n' + M.numTxt(m.porDia) + ' tickets por día\n' + M.miles(m.tickets) + ' en el mes' };
     });
     var iMax = meses.reduce(function (b, d, i) { return d.v > (meses[b] || {}).v ? i : b; }, 0);
-    var q = g.quincena.map(function (d) {
-      return { e: (d.k > 0 ? '+' : '') + d.k, v: d.indice,
-               tip: (d.k === 0 ? 'Día de pago' : (d.k < 0 ? -d.k + ' días antes del pago' : d.k + ' días después del pago')) + '\nÍndice ' + M.numTxt(d.indice, 2) };
-    });
-    return '<div class="an-graficas">' +
-      grafica('Tickets por día, promedio de cada mes', columnas(meses, { ancho: W, titulo: 'Tickets por día por mes', etiquetar: [iMax, meses.length - 1] })) +
-      grafica('Alrededor del pago', indice(q, { ancho: W, titulo: 'Índice alrededor del pago' }), 'Días respecto al 15 o al último del mes. Arriba de 1.0, más tickets que un día normal de su día de la semana.') +
+    if (g.quincena) {
+      var W = dos ? Math.floor((ancho() - 16) / 2) : ancho();
+      var q = g.quincena.map(function (d) {
+        return { e: (d.k > 0 ? '+' : '') + d.k, v: d.indice,
+                 tip: (d.k === 0 ? 'Día de pago' : (d.k < 0 ? -d.k + ' días antes del pago' : d.k + ' días después del pago')) + '\nÍndice ' + M.numTxt(d.indice, 2) };
+      });
+      return '<div class="an-graficas">' +
+        grafica('Tickets por día, promedio de cada mes', columnas(meses, { ancho: W, titulo: 'Tickets por día por mes', etiquetar: [iMax, meses.length - 1] })) +
+        grafica('Alrededor del pago', indice(q, { ancho: W, titulo: 'Índice alrededor del pago' }), 'Días respecto al 15 o al último del mes. Arriba de 1.0, más tickets que un día normal de su día de la semana.') +
+        '</div>';
+    }
+    // Sin la quincena (el servicio no la prende): la serie de cada dia, con los picos, al doble de ancho.
+    var W1 = dos ? Math.floor((ancho() - 16) / 3) : ancho(), W2 = dos ? ancho() - 16 - W1 : ancho();
+    var diario = g.diaria || [], picos = diario.filter(function (x) { return x.pico; }).length;
+    return '<div class="an-graficas an-graficas-diaria">' +
+      grafica('Tickets por día, promedio de cada mes', columnas(meses, { ancho: W1, titulo: 'Tickets por día por mes', etiquetar: [iMax, meses.length - 1] })) +
+      grafica('Tickets de cada día', diaria(diario, { ancho: W2, titulo: 'Tickets de cada día' }),
+              'Días completos del periodo. ' + (picos ? 'En ámbar, ' + (picos === 1 ? 'el día pico' : 'los ' + picos + ' días pico') +
+              ' (al menos 2.5 veces el promedio de su día de la semana y 10 tickets más; ver la tabla de abajo).' : 'Sin días pico en el periodo.')) +
       '</div>';
   }
   function graficaMotivos() {
@@ -378,16 +506,24 @@
     $('sub').textContent = 'Del ' + respuesta.desde + ' al ' + respuesta.hasta + ' · corte ' + M.textoFecha(r.corte) + ' (hora de México) · reglas versión ' +
                            (parametro('ReglasVersion') || '?') + ' · ' + M.miles(c.tickets) + ' tickets' + (c.soloGrupo ? ' · ' + M.miles(c.soloGrupo) + ' solo por el grupo, aparte' : '');
     var mot = c.motivos.filter(function (m) { return m[0] !== M.SIN_CLASIFICAR; }).sort(function (a, b) { return b[1] - a[1]; })[0];
+    // Si casi nada trae sitio (menos del 30%), los tres de sitio no dicen nada: van otros tres.
+    var deSitio = c.pocosSitios ? [
+      ['Con sitio', M.pctTxt(c.conSitio), 'menos del ' + M.pctTxt(M.UMBRAL_SITIOS, 0) + ': no se mide por sitio'],
+      ['Reabiertos', M.pctTxt(c.reabiertos), 'se volvieron a abrir'],
+      ['Abiertos vencidos', M.miles(c.abiertosVencidos), 'sin firma y con su fecha ya pasada']
+    ] : [
+      ['Sitios', M.miles(c.sitios), M.pctTxt(c.conSitio, 0) + ' de los tickets trae sitio'],
+      ['Concentración', M.pctTxt(c.conc10), 'en el 10% de sitios con más'],
+      ['Reincidencia 30 días', M.pctTxt(c.reinc30), 'otro ticket del mismo sitio']
+    ];
     var k = [
       ['Tickets', M.miles(c.tickets), 'por la ruta del servicio'],
-      ['Por día', M.numTxt(c.porDia), 'promedio de días completos'],
-      ['Sitios', M.miles(c.sitios), 'tiendas, City Club, CEDIS y CAD'],
-      ['Concentración', M.pctTxt(c.conc10), 'en el 10% de sitios con más'],
-      ['Reincidencia 30 días', M.pctTxt(c.reinc30), 'otro ticket del mismo sitio'],
+      ['Por día', M.numTxt(c.porDia), 'promedio de días completos']
+    ].concat(deSitio).concat([
       ['Cumple SLA', M.pctTxt(c.cumple), 'de los que tienen fecha estimada'],
       ['TTR mediano', M.numTxt(c.ttrMed) + ' d', 'registro a firma de solución'],
       ['Sin clasificar', M.pctTxt(c.sinClasificar), mot ? 'principal: ' + mot[0] : 'sin reglas']
-    ];
+    ]);
     $('kpis').innerHTML = k.map(function (x) {
       return '<div class="kpi"><div class="lbl">' + esc(x[0]) + '</div><div class="val">' + esc(x[1]) + '</div><div class="foot">' + esc(x[2]) + '</div></div>';
     }).join('');
@@ -444,9 +580,9 @@
     return r.reglas;
   }
   function conectarEditor() {
-    // Mientras se trae otro servicio (Analizar deshabilitado) el editor espera.
+    // Mientras se trae otro servicio el editor espera.
     $('probar').addEventListener('click', function () {
-      if ($('analizar').disabled) return;
+      if (enCurso) return;
       var r = leerEditor(); if (!r) return;
       reglasPrueba = r;
       $('probar').disabled = true;
@@ -456,7 +592,7 @@
       }).catch(function (x) { error(x.message); }).then(function () { if ($('probar')) $('probar').disabled = false; });
     });
     $('base').addEventListener('click', function () {
-      if ($('analizar').disabled) return;
+      if (enCurso) return;
       reglasPrueba = null; correrAnalisis().catch(function (x) { error(x.message); });
     });
     $('generar').addEventListener('click', function () {
@@ -465,6 +601,7 @@
       var g = M.scriptServicio({
         clave: respuesta.servicio, nombre: parametro('Servicio') || s.Nombre, descripcion: s.Descripcion || null,
         desdeSugerido: s.DesdeSugerido || null, criterios: criterios(), reglas: r, motivosEquipo: motivosEquipo,
+        secciones: secciones,     // las de la base: el script no las apaga
         origen: 'Generado por la pestaña "Análisis de servicios" del tablero, sobre la versión ' + (parametro('ReglasVersion') || '?') + ' de las reglas.',
         fecha: M.textoFecha(Date.UTC.apply(null, (function (d) { return [d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes()]; })(new Date())))
       });
@@ -507,7 +644,7 @@
       bajar(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), null, nombre);
       estado('Excel listo: ' + nombre, 'ok');
     }).catch(function (e) { error('No se pudo armar el Excel: ' + e.message); estado(''); })
-      .then(function () { $('excel').disabled = false; });
+      .then(function () { if (!enCurso) $('excel').disabled = false; });
   }
 
   /* ------------------------------------------------------------ eventos */
@@ -553,7 +690,12 @@
   window.addEventListener('resize', function () { clearTimeout(redimensionar.t); redimensionar.t = setTimeout(redimensionar, 200); });
   // medicion(): ms de descarga, lectura, preparacion, analisis y pintado de la
   // ultima carga, para revisarlos desde la consola sin llenarla de mensajes.
-  window.TableroAnalisisModulo = { redimensionar: redimensionar, medicion: function () { return medicion; } };
+  // bytes: el cuerpo ya sin comprimir; red: lo que midio el navegador
+  // (transferido, sin comprimir, espera del servidor, Server-Timing por bloque).
+  window.TableroAnalisisModulo = {
+    redimensionar: redimensionar,
+    medicion: function () { if (medicion && medicion.url && !medicion.red) medicion.red = red(medicion.url); return medicion; }
+  };
 
   ponerMeses(6);
   pedirServicios();

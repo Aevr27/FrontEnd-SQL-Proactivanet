@@ -22,6 +22,26 @@
   padding: 8px 12px; font-size: 12.5px; color: var(--ink-2);
 }
 
+.an-aviso-error .btn { margin-left: 8px; }
+
+/* Mientras se trae otro servicio: un giro junto al estado y, si se esta
+   viendo un analisis, ese analisis atenuado con el aviso de que es el de
+   antes. */
+.estado.cargando { display: inline-flex; align-items: center; gap: 8px; }
+.estado.cargando::before {
+  content: ""; width: 14px; height: 14px; flex: none; border-radius: 50%;
+  border: 2px solid var(--g-200); border-top-color: var(--g-600);
+  animation: an-girar .8s linear infinite;
+}
+@keyframes an-girar { to { transform: rotate(360deg); } }
+.an-previo {
+  margin: 0 0 12px; padding: 8px 12px; border-radius: 8px; font-size: 12.5px;
+  background: var(--accent-soft); border: 1px solid var(--line); color: var(--ink-2);
+}
+#an-resultado.an-viejo .an-cab, #an-resultado.an-viejo .kpis,
+#an-resultado.an-viejo .an-hojas, #an-resultado.an-viejo .card { opacity: .55; transition: opacity .15s; }
+@media (prefers-reduced-motion: reduce) { .estado.cargando::before { animation-duration: 2.4s; } }
+
 .an-servicios { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-top: 12px; }
 .an-servicio {
   text-align: left; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
@@ -56,12 +76,16 @@
 
 .an-graficas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
 @media (max-width: 900px) { .an-graficas { grid-template-columns: minmax(0, 1fr); } }
+/* Sin la quincena: el mes a un tercio y la serie diaria a dos tercios. */
+.an-graficas.an-graficas-diaria { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); }
+@media (max-width: 900px) { .an-graficas.an-graficas-diaria { grid-template-columns: minmax(0, 1fr); } }
 .an-grafica svg { display: block; width: 100%; height: auto; }
 .an-grafica text { fill: var(--muted); font-size: 11px; font-family: inherit; }
 .an-grafica .eje { stroke: var(--line); }
 .an-grafica .ref { stroke: var(--ink-2); stroke-dasharray: 4 3; }
 .an-grafica .barra { fill: var(--g-600); }
 .an-grafica .barra.apagada { fill: var(--muted-2); }
+.an-grafica .barra.pico { fill: var(--ambr, #d97706); }
 .an-grafica .hit { fill: transparent; }
 .an-grafica .etq { fill: var(--ink-2); font-weight: 600; }
 

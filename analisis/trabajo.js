@@ -44,7 +44,7 @@
     };
   };
 
-  // servicio: {nombre, reglas, motivosEquipo}, como lo pide Motor.analizar.
+  // servicio: {nombre, reglas, motivosEquipo, secciones, cedis}, como lo pide Motor.analizar.
   AnalisisTrabajo.prototype.analizar = function (servicio, avisar) {
     if (!this.datos) throw new Error('No hay tickets cargados.');
     avisar('Analizando…');

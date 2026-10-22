@@ -24,7 +24,14 @@
      primer mov.   primera version del historial con Subestado "En Proceso" o
                    con tecnico asignado
      quincena      dias al pago mas cercano (15 o ultimo del mes), con el
-                   indice ajustado por el promedio de su dia de la semana
+                   indice ajustado por el promedio de su dia de la semana.
+                   Solo si el servicio la prende (secciones.quincena): salio
+                   de S-Biometrico y no le sirve a todos (2026-10-21). Sin
+                   ella, la hoja Temporal lleva la serie diaria con los picos
+     por sitio     concentracion, sitios con mas tickets, reincidencia y
+                   revision de equipo se miden solo si al menos el 30% de
+                   los tickets trae sitio (UMBRAL_SITIOS); si no, casi todo
+                   lo reporta una persona y esas tablas no dicen nada
    ===================================================================================== */
 (function (raiz, fabrica) {
     if (typeof module === 'object' && module.exports) module.exports = fabrica();
@@ -37,6 +44,7 @@
     var DIAS_LARGO = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
     var RE_COD = /^\S{2,6} \d{4}-\d+$/;
     var RE_FECHA = /^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d$/;
+    var UMBRAL_SITIOS = 0.30;      // menos de esto con sitio: no se mide por sitio (dueno, 2026-10-21)
 
     /* ------------------------------------------------------------------ utilidades */
 
@@ -534,7 +542,9 @@
         });
     }
 
-    // datos = preparar(...), servicio = {nombre, reglas, motivosEquipo, cedis}
+    // datos = preparar(...), servicio = {nombre, reglas, motivosEquipo, cedis, secciones}
+    // servicio.secciones (opcional): {quincena: true} prende el analisis alrededor del
+    // pago (hoja Temporal, su grafica y su hallazgo); sin el, no sale.
     // servicio.cedis (opcional): { '5549': 'Salinas Victoria secos', ... }. Con el, la
     // hoja Sitios trae la tabla del CEDIS que menciona el texto.
     // opciones.conTextos: el Detalle lleva titulo, descripcion y solucion (la pestaña
@@ -605,9 +615,12 @@
         });
         var antesPago = [], despuesPago = [];
         quin.forEach(function (v, k) { if (k >= -7 && k <= -1) antesPago = antesPago.concat(v); if (k >= 0 && k <= 6) despuesPago = despuesPago.concat(v); });
+        var conQuincena = !!(servicio.secciones && servicio.secciones.quincena);
 
         /* -------- sitios y reincidencia */
         var conSitio = U.filter(function (t) { return t.sitio; });
+        var pctSitio = frac(conSitio.length, nU), pocosSitios = pctSitio == null || pctSitio < UMBRAL_SITIOS;
+        var txtSitio = 'el ' + pctTxt(pctSitio) + ' de los tickets trae tienda, City Club, CEDIS o CAD';
         var porSitio = agrupar(conSitio, function (t) { return t.sitio; });
         var ultimo = new Map(), ultimoMotivo = new Map();
         conSitio.forEach(function (t) {
@@ -671,11 +684,11 @@
                   Array.from({ length: 24 }, function (_, h) { return [dos(h) + ':00', cuentaHora.get(h) || 0, frac(cuentaHora.get(h) || 0, nU)]; })),
             tabla('diames', 'Por día del mes', [{ n: 'Día', t: 'int' }, { n: 'Promedio por día', t: 'num1' }, { n: 'Meses con ese día', t: 'int' }],
                   Array.from(dmes.keys()).sort(function (a, b) { return a - b; }).map(function (k) { return [k, media(dmes.get(k)), dmes.get(k).length]; })),
-            tabla('quincena', 'Alrededor del pago (quincena)', [{ n: 'Días respecto al pago', t: 'int' }, { n: 'Índice', t: 'num2' }, { n: 'Días medidos', t: 'int' }],
+            conQuincena ? tabla('quincena', 'Alrededor del pago (quincena)', [{ n: 'Días respecto al pago', t: 'int' }, { n: 'Índice', t: 'num2' }, { n: 'Días medidos', t: 'int' }],
                   Array.from({ length: 15 }, function (_, i) { var k = i - 7, v = quin.get(k) || []; return [k, media(v), v.length]; })
                       .concat([['Semana antes (-7 a -1)', media(antesPago), antesPago.length], ['Pago y semana después (0 a +6)', media(despuesPago), despuesPago.length]]),
                   'Día 0 = día 15 o último día del mes (fechas nominales: si el pago se recorre por fin de semana, no se ajusta). ' +
-                  'Índice = tickets del día entre el promedio de su día de la semana; 1.00 es un día normal. Sin los días pico.'),
+                  'Índice = tickets del día entre el promedio de su día de la semana; 1.00 es un día normal. Sin los días pico.') : null,
             tabla('picos', 'Días pico', [{ n: 'Fecha', t: 'txt' }, { n: 'Día', t: 'txt' }, { n: 'Tickets', t: 'int' }, { n: 'Promedio de su día de la semana', t: 'num1' },
                                          { n: 'Veces el promedio', t: 'num1' }, { n: 'Sitios', t: 'int' }, { n: 'Motivo principal', t: 'txt' }, { n: '% del motivo', t: 'pct' }],
                   picos.sort(function (a, b) { return b.n - a.n; }).map(function (x) {
@@ -683,7 +696,7 @@
                       return [textoDia(x.dia), DIAS_LARGO[dow(x.dia)], x.n, b, x.n / b,
                               new Set(x.lista.filter(function (t) { return t.sitio; }).map(function (t) { return t.sitio; })).size, pm.valor, pm.pct];
                   }), 'Pico: al menos 2.5 veces el promedio de su día de la semana y 10 tickets más que ese promedio.')
-        ];
+        ].filter(Boolean);
 
         /* ================================================== Sitios */
         var cuentaTipo = porMayor(contar(U, function (t) { return t.tipoSitio; }));
@@ -693,10 +706,14 @@
             var b = conSitio.filter(function (t) { return t.gapMotivo != null && t.gapMotivo <= n; });
             return [n + ' días', frac(a.length, conSitio.length), new Set(a.map(function (t) { return t.sitio; })).size, frac(b.length, conSitio.length)];
         });
-        H.Sitios = [
-            tabla('tipo', 'Quién reporta', [{ n: 'Tipo de sitio', t: 'txt' }, { n: 'Tickets', t: 'int' }, { n: '%', t: 'pct' }],
+        var tablaTipo = tabla('tipo', 'Quién reporta', [{ n: 'Tipo de sitio', t: 'txt' }, { n: 'Tickets', t: 'int' }, { n: '%', t: 'pct' }],
                   cuentaTipo.map(function (x) { return [x[0], x[1], x[1] / nU]; }),
-                  'Sale de "Notificado por". Persona u otro y Cuenta no identifican un sitio: no entran en las tablas de abajo.'),
+                  'Sale de "Notificado por": ' + txtSitio + '. ' + (pocosSitios
+                      ? 'Es menos del ' + pctTxt(UMBRAL_SITIOS, 0) + ': casi todo lo reporta una persona, así que no se mide por sitio ' +
+                        '(concentración, sitios con más tickets, reincidencia ni revisión de equipo).'
+                      : 'Persona u otro y Cuenta no identifican un sitio: no entran en las tablas de abajo.'));
+        H.Sitios = pocosSitios ? [tablaTipo] : [
+            tablaTipo,
             tabla('conc', 'Concentración', [{ n: 'Los sitios con más tickets', t: 'txt' }, { n: 'Sitios', t: 'int' }, { n: '% de los tickets con sitio', t: 'pct' }],
                   conc.map(function (c) { return ['El ' + Math.round(100 * c.q) + '%', c.sitios, c.pct]; })
                       .concat([['Todos', cuentas.length, totalSitios ? 1 : null]]),
@@ -714,7 +731,7 @@
                                             { n: 'Con el mismo motivo', t: 'pct' }], reinc,
                   'Un ticket es reincidente si el mismo sitio abrió otro en los N días anteriores. Porcentaje sobre los ' + miles(conSitio.length) + ' tickets con sitio.')
         ];
-        if (equipo.length) {
+        if (equipo.length && !pocosSitios) {
             var porSitioEq = agrupar(eq, function (t) { return t.sitio; });
             var cand = Array.from(porSitioEq.entries()).map(function (e) {
                 var l = e[1];
@@ -918,6 +935,7 @@
 
         /* ================================================== Resumen */
         var cumpleU = resumenAtencion(U, corte), mot1 = filasMot[0], scN = (porMotivo.get(SIN_CLASIFICAR) || []).length;
+        var abiertosVencidos = U.filter(function (t) { return t.fSol == null && t.vencido; }).length;
         var rG = gPrincipal ? resumenAtencion(porGrupo.get(gPrincipal), corte) : null;
         var conc10 = conc[1];
         var r30 = reinc[2];
@@ -933,13 +951,17 @@
         var dmin = dsem.indexOf(Math.min.apply(null, dsem.filter(function (x) { return x != null; })));
         if (dmax >= 0) hallazgos.push('El día de la semana con más tickets es el ' + DIAS_LARGO[dmax].toLowerCase() + ' (' + numTxt(dsem[dmax]) + ' por día) y el de menos el ' +
                                       DIAS_LARGO[dmin].toLowerCase() + ' (' + numTxt(dsem[dmin]) + ').');
-        if (picos.length) hallazgos.push(picos.length + ' día(s) pico; el mayor, ' + textoDia(picos[0].dia) + ', con ' + picos[0].n + ' tickets de ' +
-                                         new Set(picos[0].lista.filter(function (t) { return t.sitio; }).map(function (t) { return t.sitio; })).size + ' sitios.');
-        if (antesPago.length && despuesPago.length) hallazgos.push('Alrededor del pago: la semana antes da un índice de ' + numTxt(media(antesPago), 2) +
+        // Con pocos sitios no se dice de cuantos sitios fue el pico: no significa nada.
+        if (picos.length) hallazgos.push(picos.length + ' día(s) pico; el mayor, ' + textoDia(picos[0].dia) + ', con ' + picos[0].n + ' tickets' +
+                                         (pocosSitios ? '.' : ' de ' + new Set(picos[0].lista.filter(function (t) { return t.sitio; }).map(function (t) { return t.sitio; })).size + ' sitios.'));
+        if (conQuincena && antesPago.length && despuesPago.length) hallazgos.push('Alrededor del pago: la semana antes da un índice de ' + numTxt(media(antesPago), 2) +
                                                                    ' y el día de pago y la semana después ' + numTxt(media(despuesPago), 2) + ' (1.00 = un día normal para su día de la semana).');
-        if (cuentas.length) hallazgos.push(miles(cuentas.length) + ' sitios con tickets; el 10% con más tickets (' + conc10.sitios + ') junta el ' + pctTxt(conc10.pct) + '.');
-        if (conSitio.length) hallazgos.push('Reincidencia: ' + pctTxt(r30[1]) + ' de los tickets con sitio tienen otro del mismo sitio en los 30 días anteriores; ' +
-                                            pctTxt(r30[3]) + ' con el mismo motivo.');
+        if (pocosSitios) hallazgos.push('Solo ' + txtSitio + ' (menos del ' + pctTxt(UMBRAL_SITIOS, 0) + '): casi todo lo reporta una persona, así que no se mide por sitio.');
+        else {
+            hallazgos.push(miles(cuentas.length) + ' sitios con tickets (' + txtSitio + '); el 10% con más tickets (' + conc10.sitios + ') junta el ' + pctTxt(conc10.pct) + '.');
+            hallazgos.push('Reincidencia: ' + pctTxt(r30[1]) + ' de los tickets con sitio tienen otro del mismo sitio en los 30 días anteriores; ' +
+                           pctTxt(r30[3]) + ' con el mismo motivo.');
+        }
         if (mot1) hallazgos.push('Motivo principal: ' + mot1[0] + ' (' + pctTxt(mot1[2]) + '). Sin clasificar: ' + pctTxt(scN / nU) + '.');
         if (rG) hallazgos.push(gPrincipal + ' tiene ' + pctTxt(rG.tickets / nU) + ' de los tickets: cumple el SLA en ' + pctTxt(rG.cumple) + ', con meta mediana de ' +
                                numTxt(rG.metaMed) + ' h y TTR mediano de ' + numTxt(rG.ttrMed) + ' días.');
@@ -970,14 +992,16 @@
             ]),
             tabla('kpi', 'Indicadores', [{ n: 'Indicador', t: 'txt' }, { n: 'Valor', t: 'txt' }, { n: 'Cómo se calcula', t: 'txt' }], [
                 ['Tickets por día', numTxt(mediaDia), 'Promedio de los días completos del periodo'],
+                ['Tickets con sitio', pctTxt(pctSitio), 'Los que trae tienda, City Club, CEDIS o CAD; con menos del ' + pctTxt(UMBRAL_SITIOS, 0) + ' no se mide por sitio'],
                 ['Sitios con tickets', miles(cuentas.length), 'Tiendas, City Club, CEDIS y CAD distintos'],
-                ['Concentración', pctTxt(conc10.pct), 'Parte de los tickets que junta el 10% de los sitios con más tickets'],
-                ['Reincidencia a 30 días', pctTxt(r30[1]), 'Tickets con otro del mismo sitio en los 30 días anteriores'],
+                ['Concentración', pocosSitios ? 'no se mide' : pctTxt(conc10.pct), 'Parte de los tickets que junta el 10% de los sitios con más tickets'],
+                ['Reincidencia a 30 días', pocosSitios ? 'no se mide' : pctTxt(r30[1]), 'Tickets con otro del mismo sitio en los 30 días anteriores'],
                 ['Motivo principal', mot1 ? mot1[0] + ' (' + pctTxt(mot1[2]) + ')' : 's/d', 'Por las reglas de la hoja Reglas'],
                 ['Sin clasificar', pctTxt(scN / nU), 'Tickets que ninguna regla reconoció'],
                 ['Cumple SLA', pctTxt(cumpleU.cumple), 'De los tickets con fecha estimada de resolución'],
                 ['TTR mediano', numTxt(cumpleU.ttrMed) + ' días', 'Del registro a la firma de solución, tickets resueltos'],
-                ['Reabiertos', pctTxt(cumpleU.reabiertos), 'IntentosSolucion mayor que 1']
+                ['Reabiertos', pctTxt(cumpleU.reabiertos), 'IntentosSolucion mayor que 1'],
+                ['Abiertos vencidos', miles(abiertosVencidos), 'Sin firma de solución y con la fecha estimada ya pasada al corte']
             ]),
             tabla('hallazgos', 'Hallazgos', [{ n: '#', t: 'int' }, { n: 'Hallazgo', t: 'txt' }], hallazgos.map(function (h, i) { return [i + 1, h]; }),
                   'Cada número sale de las tablas de las otras hojas.'),
@@ -1031,13 +1055,16 @@
             hallazgos: hallazgos, avisos: datos.avisos,
             graficas: {
                 meses: filasMes.map(function (f) { return { mes: f[0], tickets: f[1], porDia: f[3] }; }),
-                quincena: Array.from({ length: 15 }, function (_, i) { var k = i - 7; return { k: k, indice: media(quin.get(k) || []) }; }),
+                quincena: conQuincena ? Array.from({ length: 15 }, function (_, i) { var k = i - 7; return { k: k, indice: media(quin.get(k) || []) }; }) : null,
+                diaria: serie.map(function (x) { return { dia: textoDia(x.dia), n: x.n, pico: esPico.has(x.dia), base: dsem[dow(x.dia)] }; }),
                 motivos: filasMot.map(function (f) { return { motivo: f[0], tickets: f[1], pct: f[2] }; })
             },
             cifras: {
                 tickets: nU, soloGrupo: soloGrupo.length, sitios: cuentas.length, conc10: conc10.pct, reinc30: r30[1], reinc30Motivo: r30[3],
-                sinClasificar: scN / nU, cumple: cumpleU.cumple, ttrMed: cumpleU.ttrMed, porDia: mediaDia, antesPago: media(antesPago),
-                despuesPago: media(despuesPago), grupoPrincipal: gPrincipal, lote: lote ? lote[2] : null, primerMov: mov ? mov[4] : null,
+                sinClasificar: scN / nU, cumple: cumpleU.cumple, ttrMed: cumpleU.ttrMed, porDia: mediaDia,
+                antesPago: conQuincena ? media(antesPago) : null, despuesPago: conQuincena ? media(despuesPago) : null,
+                conSitio: pctSitio, pocosSitios: pocosSitios, reabiertos: cumpleU.reabiertos, abiertosVencidos: abiertosVencidos,
+                grupoPrincipal: gPrincipal, lote: lote ? lote[2] : null, primerMov: mov ? mov[4] : null,
                 motivos: Array.from(cuentaMotivo.entries()), reglas: Array.from(contar(U, function (t) { return t.regla; }).entries())
             },
             sinClasificar: porMotivo.get(SIN_CLASIFICAR) || []
@@ -1231,16 +1258,51 @@
 
     function litL(s) { return "N'" + String(s).replace(/'/g, "''") + "'"; }
 
+    /* Las secciones que no le sirven a todos (dbo.AnalisisServicio.Secciones,
+       47): {quincena: true} prende el analisis alrededor del pago y
+       {cedis: {'5549': 'Salinas Victoria secos'}} la tabla de los CEDIS que
+       nombra el texto. seccionesATexto da el JSON que se guarda (null si no
+       hay nada prendido, siempre en el mismo orden) y leerSecciones lo
+       vuelve a leer; lo que no entiende lo deja apagado. */
+    function seccionesATexto(s) {
+        var o = {};
+        if (s && s.quincena === true) o.quincena = true;
+        if (s && s.cedis && typeof s.cedis === 'object' && Object.keys(s.cedis).length) {
+            o.cedis = {};
+            Object.keys(s.cedis).sort().forEach(function (k) { if (s.cedis[k] != null) o.cedis[k] = String(s.cedis[k]); });
+            if (!Object.keys(o.cedis).length) delete o.cedis;
+        }
+        return Object.keys(o).length ? JSON.stringify(o) : null;
+    }
+    function leerSecciones(texto) {
+        var o = null;
+        try { o = texto ? JSON.parse(texto) : null; } catch (e) { o = null; }
+        if (!o || typeof o !== 'object' || Array.isArray(o)) o = {};
+        // Los CEDIS van como {numero: nombre}; lo que no es texto o numero se ignora.
+        var cedis = null;
+        if (o.cedis && typeof o.cedis === 'object' && !Array.isArray(o.cedis)) {
+            Object.keys(o.cedis).forEach(function (k) {
+                var v = o.cedis[k];
+                if (typeof v === 'string' && v || typeof v === 'number') (cedis = cedis || {})[k] = String(v);
+            });
+        }
+        return { quincena: o.quincena === true, cedis: cedis };
+    }
+
     /* El script que carga un servicio en las tablas del 47. Lo arma el boton
        "Generar script" de la pestaña y, para el repositorio, armar_scripts.js
        desde servicios.js: el mismo formato en los dos casos.
          s = {clave, nombre, descripcion, desdeSugerido, criterios:[{clave, valor}],
-              reglas:[{id, motivo, campo, frases}], motivosEquipo:[], origen, fecha}
+              reglas:[{id, motivo, campo, frases}], motivosEquipo:[],
+              secciones:{quincena, cedis}, origen, fecha}
        Los valores de criterios ya son patrones LIKE (no se vuelven a escapar). */
     function scriptServicio(s) {
         var errores = [], crit = (s.criterios || []).filter(function (c) { return c && c.valor; }), reglas = s.reglas || [];
         if (!/^[a-z0-9_-]{1,40}$/.test(s.clave || '')) errores.push('La clave del servicio va en minúsculas, sin espacios ni acentos (letras, números, - y _), hasta 40.');
         if (!s.nombre || !String(s.nombre).trim()) errores.push('Falta el nombre del servicio.');
+        // Los anchos de dbo.AnalisisServicio (47): mas largo, el script truena en SSMS.
+        if (s.nombre && String(s.nombre).length > 100) errores.push('El nombre del servicio pasa de 100 caracteres.');
+        if (s.descripcion && String(s.descripcion).length > 400) errores.push('La descripción pasa de 400 caracteres.');
         if (s.desdeSugerido && (!/^\d{4}-\d\d-\d\d$/.test(s.desdeSugerido) || fecha(s.desdeSugerido) == null)) errores.push('La fecha sugerida va como aaaa-mm-dd.');
         if (!crit.some(function (c) { return c.clave === 'Ruta' || c.clave === 'Grupo'; })) errores.push('Hace falta al menos una Ruta o un Grupo.');
         crit.forEach(function (c) {
@@ -1260,6 +1322,7 @@
         if (errores.length) return { errores: errores, sql: null };
 
         var k = "'" + s.clave + "'", nFrases = reglas.reduce(function (a, r) { return a + r.frases.length; }, 0);
+        var secciones = seccionesATexto(s.secciones);
         var L = [];
         L.push('/* =====================================================================================');
         L.push('   Servicio "' + s.nombre + '" (' + s.clave + ') para la pestaña "Análisis de servicios"');
@@ -1269,8 +1332,17 @@
         L.push('');
         L.push('   Reemplaza los criterios y las reglas de ESTE servicio y sube su ReglasVersion;');
         L.push('   no toca los demas servicios. Todo o nada: si algo falla, no cambia nada.');
-        L.push('   Necesita 47_analisis_servicios.sql. Lleva acentos en los textos: abrirlo como');
-        L.push('   archivo en SSMS (trae BOM) o pegarlo tal cual en una consulta nueva.');
+        // Sin secciones prendidas el script no nombra la columna Secciones: corre
+        // con el 47 de antes y, con el nuevo, deja la que el servicio ya tenga.
+        if (secciones) {
+            L.push('   Necesita 47_analisis_servicios.sql (del 2026-10-21 o despues: con la columna');
+            L.push('   Secciones). Lleva acentos en los textos: abrirlo como archivo en SSMS (trae');
+            L.push('   BOM) o pegarlo tal cual en una consulta nueva.');
+        } else {
+            L.push('   Necesita 47_analisis_servicios.sql. No toca la columna Secciones. Lleva acentos');
+            L.push('   en los textos: abrirlo como archivo en SSMS (trae BOM) o pegarlo tal cual en');
+            L.push('   una consulta nueva.');
+        }
         L.push('   ===================================================================================== */');
         L.push('');
         L.push('USE [Tickets_Proactivanet];');
@@ -1278,9 +1350,15 @@
         L.push('SET NOCOUNT ON;');
         L.push('SET XACT_ABORT ON;');
         L.push('SET NOEXEC OFF;');
-        L.push("IF OBJECT_ID('dbo.AnalisisRegla') IS NULL");
-        L.push('BEGIN');
-        L.push("    RAISERROR(N'Falta correr 47_analisis_servicios.sql: no existen las tablas.', 16, 1);");
+        if (secciones) {
+            L.push("IF OBJECT_ID('dbo.AnalisisRegla') IS NULL OR COL_LENGTH('dbo.AnalisisServicio', 'Secciones') IS NULL");
+            L.push('BEGIN');
+            L.push("    RAISERROR(N'Falta correr 47_analisis_servicios.sql: no existen las tablas o es de antes del 2026-10-21 (sin la columna Secciones).', 16, 1);");
+        } else {
+            L.push("IF OBJECT_ID('dbo.AnalisisRegla') IS NULL");
+            L.push('BEGIN');
+            L.push("    RAISERROR(N'Falta correr 47_analisis_servicios.sql: no existen las tablas.', 16, 1);");
+        }
         L.push('    SET NOEXEC ON;');
         L.push('END;');
         L.push('GO');
@@ -1292,13 +1370,15 @@
         L.push('              Nombre = ' + litL(s.nombre) + ',');
         L.push('              Descripcion = ' + (s.descripcion ? litL(s.descripcion) : 'CONVERT(NVARCHAR(400), NULL)') + ',');
         L.push('              DesdeSugerido = ' + (s.desdeSugerido ? "CONVERT(DATE, '" + s.desdeSugerido + "', 23)" : 'CONVERT(DATE, NULL)') + ',');
-        L.push('              MotivosEquipo = ' + litL(JSON.stringify(s.motivosEquipo || [])) + ') AS o');
+        L.push('              MotivosEquipo = ' + litL(JSON.stringify(s.motivosEquipo || [])) +
+               (secciones ? ',' : ') AS o'));
+        if (secciones) L.push('              Secciones = ' + litL(secciones) + ') AS o');
         L.push('ON d.Servicio = o.Servicio');
         L.push('WHEN MATCHED THEN UPDATE SET Nombre = o.Nombre, Descripcion = o.Descripcion, DesdeSugerido = o.DesdeSugerido,');
-        L.push('    MotivosEquipo = o.MotivosEquipo, ReglasVersion = d.ReglasVersion + 1, Activo = 1,');
+        L.push('    MotivosEquipo = o.MotivosEquipo, ' + (secciones ? 'Secciones = o.Secciones, ' : '') + 'ReglasVersion = d.ReglasVersion + 1, Activo = 1,');
         L.push('    FechaUltimaCargaDW = SYSDATETIME()');
-        L.push('WHEN NOT MATCHED THEN INSERT (Servicio, Nombre, Descripcion, DesdeSugerido, MotivosEquipo)');
-        L.push('    VALUES (o.Servicio, o.Nombre, o.Descripcion, o.DesdeSugerido, o.MotivosEquipo);');
+        L.push('WHEN NOT MATCHED THEN INSERT (Servicio, Nombre, Descripcion, DesdeSugerido, MotivosEquipo' + (secciones ? ', Secciones' : '') + ')');
+        L.push('    VALUES (o.Servicio, o.Nombre, o.Descripcion, o.DesdeSugerido, o.MotivosEquipo' + (secciones ? ', o.Secciones' : '') + ');');
         L.push('');
         L.push('DELETE FROM dbo.AnalisisServicioCriterio WHERE Servicio = ' + k + ';');
         L.push('INSERT INTO dbo.AnalisisServicioCriterio (Servicio, Orden, Clave, Valor) VALUES');
@@ -1330,7 +1410,8 @@
         normalizar: normalizar, clasificar: clasificar, decodificar: decodificar, bloquesDeTexto: bloquesDeTexto,
         bloqueDeCsv: bloqueDeCsv, leerArchivos: leerArchivos, preparar: preparar, analizar: analizar, armarLibro: armarLibro,
         bloquesDeTablero: bloquesDeTablero, reglasDeTablero: reglasDeTablero, criteriosDeParametros: criteriosDeParametros,
-        scriptServicio: scriptServicio, ocultarClaves: ocultarClaves,
+        scriptServicio: scriptServicio, ocultarClaves: ocultarClaves, seccionesATexto: seccionesATexto, leerSecciones: leerSecciones,
+        UMBRAL_SITIOS: UMBRAL_SITIOS,
         generarSql: generarSql, reglasATexto: reglasATexto, textoAReglas: textoAReglas, frasesFrecuentes: frasesFrecuentes,
         tipoSitio: tipoSitio, cuantil: cuantil, textoFecha: textoFecha, textoDia: textoDia, pctTxt: pctTxt, numTxt: numTxt, miles: miles,
         SIN_CLASIFICAR: SIN_CLASIFICAR, CAMPOS: CAMPOS

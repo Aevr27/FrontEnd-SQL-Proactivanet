@@ -30,6 +30,60 @@ Correr en `Tickets_Proactivanet`, en este orden, abriéndolos como archivo:
 | `57_analisis_s_gestion_de_inventarios.sql` | Da de alta S-Gestión de Inventarios (App Evolución) con sus 38 reglas. Igual que el 48. |
 | `58_analisis_s_basculas.sql` | Da de alta S-Básculas (con los grupos de los proveedores Berkel, Bizerba y Mexba) con sus 24 reglas. Igual que el 48. |
 | `59_analisis_s_autocobro.sql` | Da de alta S-Autocobro (con el grupo Autocobro y los proveedores NCR, Toshiba, LinkX y Bitu) con sus 30 reglas. Igual que el 48. |
+| `78_analisis_secciones.sql` | Según su autor (2026-10-21): prende, por servicio, lo que no le sirve a todos: la quincena solo en S-Biométrico y la tabla de los CEDIS que nombra el texto en S-Logística y S-Gestión de Inventarios. Solo cambia la columna `Secciones`, va después del 47 del 2026-10-21 y se puede volver a correr. **No está en este repositorio ni se ha visto.** |
+
+### Lo que no le sirve a todos (2026-10-21)
+
+La quincena (el análisis alrededor del pago) salió de S-Biométrico y salía
+en todos los servicios. Ahora el sitio la muestra solo si el servicio la
+prende en `dbo.AnalisisServicio.Secciones`, un JSON:
+
+    {"quincena": true, "cedis": {"5549": "Salinas Victoria secos"}}
+
+- `quincena: true` (exactamente `true`): tabla, gráfica, hallazgo e índices
+  del pago en la hoja Temporal. Sin ella, la hoja Temporal muestra la serie
+  de cada día con los días pico en ámbar (los mismos de la tabla "Días
+  pico") junto al promedio por mes.
+- `cedis`: la tabla "CEDIS que menciona el texto" de la hoja Sitios. Sale
+  solo con el mapa, nunca por el nombre del servicio.
+- Sin la columna, vacía, con JSON ilegible o con otro valor: todo apagado.
+
+El sitio la lee del parámetro `Secciones` que devuelva `usp_Analisis_Datos`
+(bloque `parametros`) y, si no viene, de la columna `Secciones` de la lista
+de `usp_Analisis_Servicios`. `AnalisisQueries.cs` pasa las dos tal cual: no
+cambia.
+
+**Estado de la base (comprobado desde aquí):** el volcado de esquema del
+2026-10-13 (`esquema_bd/02_columnas.tsv`) **no tiene** la columna
+`Secciones` en `dbo.AnalisisServicio`. Los scripts 47 del 2026-10-21 y 78 no
+están en el repositorio ni en el equipo de desarrollo. Mientras no se corran,
+**ningún servicio muestra la quincena (S-Biométrico incluido)** y la tabla de
+CEDIS no sale; lo demás funciona igual.
+
+Orden para prenderlo (lo hace el dueño de la base; aquí no se ha corrido):
+
+1. `47_analisis_servicios.sql` del 2026-10-21 (agrega `Secciones` y recrea los
+   dos procedimientos; las reglas se quedan).
+2. `78_analisis_secciones.sql`.
+3. Comprobar, de solo lectura:
+
+       SELECT COL_LENGTH('dbo.AnalisisServicio', 'Secciones') AS Columna;
+       SELECT Servicio, Secciones FROM dbo.AnalisisServicio WHERE Secciones IS NOT NULL;
+       EXEC dbo.usp_Analisis_Datos @Servicio = 'biometrico', @Desde = '2026-09-01', @Hasta = '2026-10-01';
+       -- el primer bloque debe traer una fila Clave = 'Secciones'
+
+**Pocos sitios (2026-10-21).** Si menos del 30% de los tickets trae tienda,
+City Club, CEDIS o CAD (`UMBRAL_SITIOS` en `motor.js`), la pestaña no mide
+por sitio: los indicadores Sitios, Concentración y Reincidencia cambian por
+"Con sitio", "Reabiertos" (IntentosSolucion mayor que 1) y "Abiertos
+vencidos" (sin firma de solución y con la fecha estimada antes del corte);
+la hoja Sitios deja solo "Quién reporta", con la nota de por qué. El 30%
+exacto ya mide por sitio. No depende de la base.
+
+**"Generar script" y `Secciones`.** El script que arma la pestaña solo
+escribe `Secciones` si el servicio ya trae algo prendido; entonces exige el
+47 del 2026-10-21 (si no, avisa y no cambia nada). Sin secciones el script
+es el de antes: corre con cualquier 47 y no toca la columna.
 
 **Si ya se corrió un 47 anterior** (el del 2026-10-06 en la mañana, sin las
 exclusiones de abajo), se vuelve a correr el de ahora: solo recrea los dos
@@ -146,6 +200,11 @@ y en `const MODULOS = { ... }`, debajo de `qare: TableroQare,`:
 Un periodo de 6 meses de S-Biométrico son unos 7,500 tickets y unos 12 MB
 de respuesta (con los textos); si el servidor tiene la compresión dinámica de
 IIS, viaja mucho menos.
+
+Sin base, desde la raíz del repositorio (datos sintéticos, no tocan nada):
+
+    node tools\tests\AnalisisSeccionesSitiosSmoke.js   # secciones, 30% de sitios, script, trabajo.js sin Worker, Excel
+    node tools\tests\MotorOcultarClavesSmoke.js        # contraseñas tapadas en Detalle y Excel
 
 ## 4. Un servicio nuevo o reglas nuevas
 
