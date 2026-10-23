@@ -58,6 +58,9 @@
       si pide PO / SO, opcionales y sin cascada (admin/iniciativa-admin.js).
     - Solicitudes: cola de ADM de "Solicitar cambios" (admin/solicitudes-cambio.js);
       con otro rol, solo una nota. Sin sql/22 el servidor responde 501 y se dice.
+      Conmutador "Nuevas | De cambio" (solo ADM): "Nuevas" es el registro de
+      solo lectura de las Nuevas solicitudes de sql/29 (admin/solicitudes-nuevas.js,
+      handlers/admin_iniciativas_solicitudes_nuevas.ashx); "De cambio", la de inicio.
 
   Reusa dashboard.css para variables, tipografia y .wrap / .card / .btn,
   como admin.html; lo propio vive en iniciativas.css con prefijo .ini-. La
@@ -388,9 +391,26 @@
     <div class="ini-vista-cab">
       <div class="ini-vista-titulo">
         <h2>Solicitudes</h2>
-        <p class="ini-vista-sub">Solicitudes de cambio de iniciativas y su revisión.</p>
+        <p class="ini-vista-sub">Solicitudes nuevas y de cambio de iniciativas.</p>
       </div>
     </div>
+    <!-- Nuevas | De cambio (admin/solicitudes-nuevas.js). Solo ADM (el
+         servidor lo exige); "De cambio" sigue siendo la de inicio. -->
+    <div class="ini-conmutador" id="solVistas" role="group" aria-label="Tipo de solicitud" hidden>
+      <button type="button" class="ini-conm-op" id="solVerNuevas" aria-pressed="false" aria-controls="snBloque">Nuevas</button>
+      <button type="button" class="ini-conm-op activa" id="solVerCambio" aria-pressed="true" aria-controls="solVistaCambio">De cambio</button>
+    </div>
+    <!-- Registro de solo lectura de las Nuevas solicitudes guardadas (sql/29). -->
+    <div id="snBloque" hidden>
+      <div class="ini-sol-barra">
+        <span class="ini-nota" id="snResumen"></span>
+        <button type="button" class="btn linea chico" id="snActualizar">Actualizar</button>
+      </div>
+      <div class="ini-cambio-msg" id="snMsg" role="status" aria-live="polite"></div>
+      <div id="snLista"></div>
+      <section class="ini-det-sec ini-sol-detalle" id="snDetalle" aria-live="polite" hidden></section>
+    </div>
+    <div id="solVistaCambio">
     <!-- Cola de ADM (admin/solicitudes-cambio.js). El servidor exige ADM en
          todo esto; con otro rol solo se ve la nota de abajo. -->
     <div id="solCola" hidden>
@@ -407,6 +427,7 @@
       <div class="ini-cambio-msg" id="solMsg" role="status" aria-live="polite"></div>
       <div id="solLista"></div>
       <section class="ini-det-sec ini-cambio ini-sol-detalle" id="solDetalle" aria-live="polite" hidden></section>
+    </div>
     </div>
     <div class="ini-vacio" id="solNoAdm">
       <strong>La revisión de solicitudes es de ADM</strong>
@@ -847,6 +868,7 @@
 <script src="libro-iniciativas.js"></script>
 <script src="registro-iniciativas.js"></script>
 <script src="solicitudes-cambio.js"></script>
+<script src="solicitudes-nuevas.js"></script>
 <script src="cambios-recientes.js"></script>
 <script src="acuse-iniciativa.js"></script>
 <script src="iniciativas.js"></script>

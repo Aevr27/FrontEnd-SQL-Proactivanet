@@ -779,6 +779,7 @@ window.Iniciativas = (function () {
       this.crearAdmin = null; // VistaCrearAdmin (admin/iniciativa-admin.js)
       this.duenos = null;     // VistaDuenos (admin/categorias-duenos.js), perezosa; null si DUENOS_VISIBLES = false
       this.cola = null;       // ColaSolicitudes (admin/solicitudes-cambio.js): cola de ADM
+      this.nuevas = null;     // RegistroSolicitudesNuevas (admin/solicitudes-nuevas.js): solo lectura, ADM
       this.recientes = null;  // VistaCambiosRecientes (admin/cambios-recientes.js): solo ADM
       this.avisos = null;     // VistaAvisosAcuse (admin/acuse-iniciativa.js): avisos de PO/SO, solo ADM
       this.volumetria = null; // VolumetriaCliente de Nueva solicitud (perezoso; usa this.pedir)
@@ -800,6 +801,10 @@ window.Iniciativas = (function () {
         // El rol llega despues de pintar: si ya se esta en Solicitudes, la
         // cola (o la nota) se vuelve a pintar con el rol de verdad.
         if (this.vista === 'solicitudes') this.cola.abrir();
+      }
+      if (this.nuevas) {
+        this.nuevas.fijarRol(this.rol);
+        if (this.vista === 'solicitudes') this.nuevas.abrir();
       }
       if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') || (VISTAS_ADM_MOD[this.vista] && !this.rol)) {
         this.mostrarVista('iniciativas');
@@ -891,6 +896,13 @@ window.Iniciativas = (function () {
           return r ? { iniciativa: r.valoresTipoIniciativa, agrupado: r.valoresTipoAgrupado } : {};
         });
         this.cola.alCambiarIniciativa = function () { if (regCola && regCola.actualizar) regCola.actualizar(); };
+      }
+      // "Nuevas" (misma pestaña): registro de solo lectura de sql/29. Al
+      // volver a "De cambio" se relee esa cola, como al abrir la pestaña.
+      if (window.SolicitudesNuevas) {
+        this.nuevas = new window.SolicitudesNuevas.RegistroSolicitudesNuevas(this.doc, null);
+        var colaNuevas = this.cola;
+        this.nuevas.alVerCambio = function () { if (colaNuevas && colaNuevas.rol === 'ADM') colaNuevas.listar(); };
       }
       // Cambios recientes (pestaña Administracion, solo ADM). Titulo y estado
       // del registro ya cargado; "Ver" abre el mismo detalle de Iniciativas
@@ -987,6 +999,7 @@ window.Iniciativas = (function () {
       if (nombre === 'administracion' && this.recientes) this.recientes.abrir();
       if (nombre === 'administracion' && this.avisos) this.avisos.abrir();
       if (nombre === 'solicitudes' && this.cola) this.cola.abrir();
+      if (nombre === 'solicitudes' && this.nuevas) this.nuevas.abrir();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();
     }
