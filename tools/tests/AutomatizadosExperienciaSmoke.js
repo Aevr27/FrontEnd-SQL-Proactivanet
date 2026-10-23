@@ -46,6 +46,13 @@ function limpiar(s) { return s.split(String.fromCharCode(13)).join(''); }
 var fuente = limpiar(fs.readFileSync(path.join(raiz, 'experiencia', 'experiencia.js'), 'utf8'));
 var html = limpiar(fs.readFileSync(path.join(raiz, 'experiencia', 'experiencia.html'), 'utf8'));
 
+// La Paleta real del tablero (assets/js/paleta.js), como la carga la pagina.
+var PALETA = (function () {
+  var ventana = {};
+  (new Function('window', fs.readFileSync(path.join(raiz, 'assets', 'js', 'paleta.js'), 'utf8')))(ventana);
+  return ventana.Paleta;
+})();
+
 var fallos = 0;
 function Check(caso, esperado, obtenido) {
   var ok = JSON.stringify(esperado) === JSON.stringify(obtenido);
@@ -144,9 +151,11 @@ function arnes(opciones) {
     bloque(fuente, 'const automatizados = {};', '\nfunction periodosAutomatizados(').replace('const ', 'var ') +
     ['volSlotOMes', 'pronosticoMes', 'automatizadosDe', 'hayFiltrosAutomatizados', 'periodosAutomatizados', 'pedirAutomatizados',
      'tarjetaSinAutomatizar', 'volActualDe'].map(function (n) { return recortar(fuente, n); }).join('') +
+    bloque(fuente, 'const AYUDA_SIN_AUTOMATIZAR=', '\nfunction tarjetaSinAutomatizar(').replace('const ', 'var ') +
     recortar(opciones.fuenteEvol || fuente, 'renderEvol') +
     // renderKPIs de verdad, con lo que no es de esta tarjeta de mentira.
     'var AGR=[], ESTADOS_ACTIVOS=[];\n' +
+    'var Escape={attr:function(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;");}};\n' +
     'function PCT(n){return String(Math.round((n||0)*100))+"%";} function SEM(){return null;}\n' +
     'function volumenConIniciativa(){return 0;} function hojasSinIniciativa(){return [];} function volumenSinIniciativa(){return 0;}\n' +
     'function tarjetaEfectividad(){return {l:"Ef",v:"x",f:"",s:null};}\n' +
@@ -165,10 +174,10 @@ function arnes(opciones) {
   var CHARTS = [];
   function Chart(ctx, cfg) { CHARTS.push(cfg); this.destroy = function () {}; }
   var ELEMENTOS = {};
-  var A = new Function('ELEMENTOS', 'P', 'Chart', 'CHARTS', 'traer', 'console', codigo)(
+  var A = new Function('ELEMENTOS', 'P', 'Chart', 'CHARTS', 'traer', 'console', 'Paleta', codigo)(
     ELEMENTOS, JSON.parse(JSON.stringify(PAYLOAD)), Chart, CHARTS, opciones.traer || function () {
       return Promise.reject(new Error('sin traer'));
-    }, { warn: function () {} });
+    }, { warn: function () {} }, PALETA);
   A.elementos = ELEMENTOS;
   return A;
 }
@@ -188,6 +197,15 @@ Check('G2 con barras la linea es identica', sinFunciones(antes.data.datasets[0])
 Check('G2 etiquetas identicas', antes.data.labels, con.data.labels);
 Check('G3 barras en los mismos SLOTs y orden; cero es cero, sin dato es hueco', [null, 0, 3], con.data.datasets[1].data);
 Check('G3 serie de barras por detras de la linea', ['bar', 1], [con.data.datasets[1].type, con.data.datasets[1].order]);
+// Mismo azul que las barras de Call Center: AZUL = Paleta.porIndice(0) en
+// dashboard.js, que es Paleta.AZUL_SERIE = #2563eb (assets/js/paleta.js).
+Check('G9 Call Center pinta sus barras con Paleta.porIndice(0) = #2563eb', [true, '#2563eb', '#2563eb'],
+  [/const AZUL = Paleta\.porIndice\(0\)/.test(fs.readFileSync(path.join(raiz, 'dashboard.js'), 'utf8')),
+   PALETA.porIndice(0), PALETA.AZUL_SERIE]);
+Check('G9 barras Automatizados SLA en #2563eb, sin borde de otro color', ['#2563eb', undefined],
+  [con.data.datasets[1].backgroundColor, con.data.datasets[1].borderColor]);
+Check('G9 la muestra de la leyenda es el mismo azul', true, /<i style="background:#2563eb"><\/i>Automatizados SLA/.test(A.elementos.legendEvol.innerHTML));
+Check('G9 la linea conserva sus colores', ['#p', 'rgba(47,143,107,.14)'], [con.data.datasets[0].borderColor, con.data.datasets[0].backgroundColor]);
 Check('G4 tooltip linea sin cambio', 'Volumen: 20',
   con.options.plugins.tooltip.callbacks.label({ datasetIndex: 0, dataIndex: 1, raw: 20 }));
 Check('G4 tooltip barra / hueco', ['Automatizados SLA: 0', 'Automatizados SLA: sin dato'],
@@ -255,7 +273,10 @@ Check('M5 sin filtro, automatizados en cero: el volumen tal cual', '9000', conFi
 
 // ---- K) tarjeta ---------------------------------------------------------
 var K = arnes();
-var AVISO = 'Aprox.: resueltos por bot en el periodo, no subconjunto del volumen.';
+var AYUDA = 'Aproximación: tickets registrados en el periodo menos tickets resueltos por bot en el mismo periodo. ' +
+  'Los automatizados SLA no necesariamente son un subconjunto del volumen registrado.';
+// El aviso va en el title del rotulo, nunca como texto en el pie.
+function sinAvisoEnPie(t) { return !/Aprox|subconjunto/i.test(t.f); }
 Check('K1 sin pedir / cargando: no resta', ['…', '…'], [K.tarjeta(false, 9000).v,
   (K.estado('slot', { estado: 'cargando', valores: {} }), K.tarjeta(false, 9000).v)]);
 K.estado('slot', { estado: 'error', valores: {} });
@@ -272,12 +293,17 @@ Check('K4 automatizados en cero: 9000 - 0 = 9000', '9000', K.tarjeta(false, 9000
 K.estado('slot', { estado: 'listo', valores: { 0: 1500, 1: 99 } });
 var k5 = K.tarjeta(false, 9000);
 Check('K5 9000 - 1500 = 7500 con el SLOT 0', ['Volumen sin Automatizar', '7500'], [k5.l, k5.v]);
-Check('K5 el pie da los dos terminos y que es aproximado', [true, true],
-  [/9000 − 1500 Automatizados SLA/.test(k5.f),
-   k5.f.slice(-AVISO.length) === AVISO]);
-Check('K5 el aviso va tambien en negativo y con cero automatizados', [true, true],
-  [K.tarjeta(false, 0).f.indexOf(AVISO) >= 0, (K.estado('slot', { estado: 'listo', valores: { 0: 0 } }),
-    K.tarjeta(false, 9000).f.indexOf(AVISO) >= 0)]);
+Check('K5 el pie da solo los dos terminos; el aviso va en el tooltip', ['9000 − 1500 Automatizados SLA', AYUDA],
+  [k5.f, k5.t]);
+Check('K5 el tooltip va en todos los estados y nunca en el pie', [true, true],
+  (function () {
+    var vistos = [];
+    [{ estado: 'listo', valores: { 0: 0 } }, { estado: 'listo', valores: { 0: null } }, { estado: 'error', valores: {} },
+     { estado: 'respaldo', valores: {} }, { estado: 'cargando', valores: {} }].forEach(function (e) {
+      K.estado('slot', e); vistos.push(K.tarjeta(false, 9000)); vistos.push(K.tarjeta(false, 0));
+    });
+    return [vistos.every(function (t) { return t.t === AYUDA; }), vistos.every(sinAvisoEnPie)];
+  })());
 K.estado('slot', { estado: 'listo', valores: { 0: 1500, 1: 99 } });
 Check('K5 volumen en cero tambien resta', '-1500', K.tarjeta(false, 0).v);
 var kn = K.tarjeta(false, 1000);
@@ -289,7 +315,8 @@ K.estado('mes', { estado: 'listo', valores: { 9: 7000, 10: 750 } });
 var kp = K.tarjeta(true, 4500);
 Check('K6 Mes: mes en curso, los dos con el pronostico de Volumen Actual', ['7500', true, true, true],
   [kp.v, /9000 − 1500 Automatizados SLA/.test(kp.f), /Real a la fecha: 3750/.test(kp.f), /Pronóstico/.test(kp.l)]);
-Check('K6 Mes: con el aviso', true, kp.f.indexOf(AVISO) >= 0);
+Check('K6 Mes: tooltip, sin aviso en el pie', [AYUDA, true], [kp.t, sinAvisoEnPie(kp)]);
+Check('K7 negativo: tooltip y su aviso de siempre en el pie', [AYUDA, true], [kn.t, sinAvisoEnPie(kn)]);
 Check('K6 Mes sin pronostico: los reales del mes en curso (no del mes 9)', '3750', K.tarjeta(false, 4500).v);
 
 // ---- H) Volumen Actual, la linea y la tarjeta en renderKPIs ---------------
@@ -311,13 +338,20 @@ var BASE = 'fc83739';
       sinFunciones(h.evol().data.datasets[0]), sinFunciones(a.evol().data.datasets[0]));
   });
   var kh = recortar(head, 'renderKPIs'), kw = recortar(fuente, 'renderKPIs');
-  Check('H2 renderKPIs = BASE salvo la tarjeta nueva (Volumen Actual sin cambios)',
-    kh, kw.replace('    tarjetaSinAutomatizar(vol, esPron),\n', ''));
+  // Lo unico distinto: la tarjeta nueva y el title opcional del rotulo
+  // (solo lo pinta la tarjeta que lo trae).
+  Check('H2 renderKPIs = BASE salvo la tarjeta nueva y el title opcional (Volumen Actual sin cambios)',
+    kh, kw.replace('    tarjetaSinAutomatizar(vol, esPron),\n', '')
+      .replace('<div class="lbl"${c.t?` title="${Escape.attr(c.t)}"`:\'\'}>', '<div class="lbl">'));
 })();
 var KP = arnes();
 KP.estado('slot', { estado: 'listo', valores: { 0: 1500 } });
 var html1 = KP.kpis();
-var rotulos = (html1.match(/<div class="lbl">[^<]*/g) || []).map(function (x) { return x.replace('<div class="lbl">', ''); });
+var rotulos = (html1.match(/<div class="lbl"[^>]*>[^<]*/g) || []).map(function (x) { return x.replace(/<div class="lbl"[^>]*>/, ''); });
+var titles = (html1.match(/<div class="lbl"[^>]*>/g) || []).map(function (x) { var m = / title="([^"]*)"/.exec(x); return m ? m[1] : null; });
+Check('H5 el rotulo de Volumen sin Automatizar lleva el tooltip; los demas, ninguno',
+  [null, AYUDA, null, null, null, null, null], titles);
+Check('H5 sin texto de aviso visible en la tarjeta', false, /Aprox|subconjunto/.test(html1.replace(/ title="[^"]*"/g, '')));
 Check('H3 Volumen Actual primero y Volumen sin Automatizar justo despues', ['Volumen Actual (0-30d)', 'Volumen sin Automatizar'],
   rotulos.slice(0, 2));
 Check('H3 una sola tarjeta nueva y sin la de conteo', [1, false, false],
