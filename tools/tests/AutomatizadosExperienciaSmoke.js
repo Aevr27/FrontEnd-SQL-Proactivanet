@@ -22,8 +22,9 @@
 //       barras, la leyenda dice "solo sin filtros" y la tarjeta queda en
 //       N/D diciendo por que; sin filtros vuelven barras y resta; la linea
 //       no cambia; "Ver por" no cuenta como filtro;
-//   H)  la linea de volumen es la de HEAD; renderKPIs deja "Volumen Actual"
-//       igual que HEAD y pone UNA tarjeta "Volumen sin Automatizar" justo
+//   H)  la linea de volumen es la de BASE (fc83739, el commit anterior a esta
+//       tarjeta); renderKPIs deja "Volumen Actual" igual que BASE y pone
+//       UNA tarjeta "Volumen sin Automatizar" justo
 //       despues, sin la vieja "Tickets automatizados de SLA";
 //   N)  peticiones: una por periodo, con fecha_inicio / fecha_fin; con el
 //       corte guardado no se pide nada (respaldo); una falla deja la
@@ -292,22 +293,25 @@ Check('K6 Mes: con el aviso', true, kp.f.indexOf(AVISO) >= 0);
 Check('K6 Mes sin pronostico: los reales del mes en curso (no del mes 9)', '3750', K.tarjeta(false, 4500).v);
 
 // ---- H) Volumen Actual, la linea y la tarjeta en renderKPIs ---------------
+// Linea base fija: el experiencia.js de antes de esta tarjeta. Con HEAD la
+// comparacion dejaria de servir en cuanto la tarjeta se commiteara.
+var BASE = 'fc83739';
 (function () {
   var head;
   try {
-    head = limpiar(cp.execSync('git show HEAD:experiencia/experiencia.js',
+    head = limpiar(cp.execSync('git show ' + BASE + ':experiencia/experiencia.js',
       { cwd: raiz, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
-  } catch (err) { console.log('SKIP  H sin git: no se compara contra HEAD'); return; }
+  } catch (err) { console.log('SKIP  H sin git o sin ' + BASE + ': no se compara la linea base'); return; }
   ['slot', 'mes'].forEach(function (m) {
     var a = arnes(), h = arnes({ fuenteEvol: head });
     var valores = m === 'mes' ? { 8: 1, 9: 2, 10: 3 } : { 0: 1, 1: 2, 2: 3 };
     a.modo(m); h.modo(m);
     a.estado(m, { estado: 'listo', valores: valores });
-    Check('H1 ' + m + ': linea identica a la de HEAD con las barras puestas',
+    Check('H1 ' + m + ': linea identica a la de BASE con las barras puestas',
       sinFunciones(h.evol().data.datasets[0]), sinFunciones(a.evol().data.datasets[0]));
   });
   var kh = recortar(head, 'renderKPIs'), kw = recortar(fuente, 'renderKPIs');
-  Check('H2 renderKPIs = HEAD salvo la tarjeta nueva (Volumen Actual sin cambios)',
+  Check('H2 renderKPIs = BASE salvo la tarjeta nueva (Volumen Actual sin cambios)',
     kh, kw.replace('    tarjetaSinAutomatizar(vol, esPron),\n', ''));
 })();
 var KP = arnes();
