@@ -6,7 +6,7 @@
      listar   GET ?accion=listar               las mas recientes primero
      detalle  GET ?accion=detalle&numero=      la solicitud y su historial
 
-   Conmutador "Nuevas | De cambio" (solVerNuevas / solVerCambio): "De cambio"
+   Conmutador "Iniciativas | Cambios" (solVerNuevas / solVerCambio): "Cambios"
    es la de siempre (admin/solicitudes-cambio.js, en solVistaCambio) y sigue
    siendo la de inicio; esta vista no la toca, solo la oculta o la muestra.
    Sin aprobar, rechazar, borrar ni cambiar estado.

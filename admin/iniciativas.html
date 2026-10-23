@@ -58,9 +58,9 @@
       si pide PO / SO, opcionales y sin cascada (admin/iniciativa-admin.js).
     - Solicitudes: cola de ADM de "Solicitar cambios" (admin/solicitudes-cambio.js);
       con otro rol, solo una nota. Sin sql/22 el servidor responde 501 y se dice.
-      Conmutador "Nuevas | De cambio" (solo ADM): "Nuevas" es el registro de
+      Conmutador "Iniciativas | Cambios" (solo ADM): "Iniciativas" es el registro de
       solo lectura de las Nuevas solicitudes de sql/29 (admin/solicitudes-nuevas.js,
-      handlers/admin_iniciativas_solicitudes_nuevas.ashx); "De cambio", la de inicio.
+      handlers/admin_iniciativas_solicitudes_nuevas.ashx); "Cambios", la de inicio.
 
   Reusa dashboard.css para variables, tipografia y .wrap / .card / .btn,
   como admin.html; lo propio vive en iniciativas.css con prefijo .ini-. La
@@ -394,11 +394,11 @@
         <p class="ini-vista-sub">Solicitudes nuevas y de cambio de iniciativas.</p>
       </div>
     </div>
-    <!-- Nuevas | De cambio (admin/solicitudes-nuevas.js). Solo ADM (el
-         servidor lo exige); "De cambio" sigue siendo la de inicio. -->
+    <!-- Iniciativas | Cambios (admin/solicitudes-nuevas.js). Solo ADM (el
+         servidor lo exige); "Cambios" sigue siendo la de inicio. -->
     <div class="ini-conmutador" id="solVistas" role="group" aria-label="Tipo de solicitud" hidden>
-      <button type="button" class="ini-conm-op" id="solVerNuevas" aria-pressed="false" aria-controls="snBloque">Nuevas</button>
-      <button type="button" class="ini-conm-op activa" id="solVerCambio" aria-pressed="true" aria-controls="solVistaCambio">De cambio</button>
+      <button type="button" class="ini-conm-op" id="solVerNuevas" aria-pressed="false" aria-controls="snBloque">Iniciativas</button>
+      <button type="button" class="ini-conm-op activa" id="solVerCambio" aria-pressed="true" aria-controls="solVistaCambio">Cambios</button>
     </div>
     <!-- Registro de solo lectura de las Nuevas solicitudes guardadas (sql/29). -->
     <div id="snBloque" hidden>

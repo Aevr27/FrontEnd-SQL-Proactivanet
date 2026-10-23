@@ -176,7 +176,11 @@ function Montar(rol, respuestas) {
   Check('P3 "De cambio" intacta dentro de solVistaCambio: sus ids siguen ahi', [true, true, true, true, true, true],
     [/<div id="solVistaCambio">[\s\S]*<div id="solCola" hidden>[\s\S]*id="solFiltro"[\s\S]*id="solLista"[\s\S]*id="solDetalle"[\s\S]*<\/div>\s*<\/div>\s*<div class="ini-vacio" id="solNoAdm">/.test(panel),
      /id="solActualizar"/.test(panel), /id="solMsg"/.test(panel), /<option value="PENDIENTE" selected>Pendientes<\/option>/.test(panel),
-     /id="solNoAdm"/.test(panel), /aria-pressed="true" aria-controls="solVistaCambio">De cambio/.test(panel)]);
+     /id="solNoAdm"/.test(panel), /aria-pressed="true" aria-controls="solVistaCambio">Cambios<\/button>/.test(panel)]);
+  Check('P3b rotulos del conmutador: "Iniciativas" y "Cambios" (los ids no cambian)', [true, true, false, false],
+    [/id="solVerNuevas" aria-pressed="false" aria-controls="snBloque">Iniciativas<\/button>/.test(panel),
+     /id="solVerCambio" aria-pressed="true" aria-controls="solVistaCambio">Cambios<\/button>/.test(panel),
+     />Nuevas<\/button>/.test(panel), />De cambio<\/button>/.test(panel)]);
   Check('P4 conmutador y bloque nacen ocultos (solo ADM los muestra)', [true, true],
     [/id="solVistas" role="group" aria-label="Tipo de solicitud" hidden/.test(panel), /<div id="snBloque" hidden>/.test(panel)]);
   var pag = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.js'), 'utf8').replace(/\r\n/g, '\n');
