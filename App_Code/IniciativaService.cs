@@ -89,7 +89,9 @@ public sealed class IniciativaService
     // (o, sin sql/29, pedir el numero al emisor pendiente). Una solicitud
     // invalida nunca consume numero. `identidad` es la cuenta de IIS
     // (AccesoAdmin.IdentidadEscritura); nada del formulario la sustituye.
-    public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad)
+    // `esAdm` es AccesoAdmin.Rol == ADM (EXCEPCION ADM de
+    // App_Code/SolicitudIniciativaAlta.cs); tampoco sale del formulario.
+    public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad, bool esAdm = false)
     {
         CatalogoSolicitud catalogo;
         CapacidadCategoria capacidad;
@@ -103,20 +105,27 @@ public sealed class IniciativaService
             catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
             capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
         }
-        return Solicitar(solicitud, identidad, catalogo, capacidad);
+        return Solicitar(solicitud, identidad, catalogo, capacidad, esAdm);
     }
 
     // Lo mismo con catalogo y capacidad ya leidos (las pruebas, sin SQL).
     public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad,
-                                                   CatalogoSolicitud catalogo, CapacidadCategoria capacidad)
+                                                   CatalogoSolicitud catalogo, CapacidadCategoria capacidad, bool esAdm = false)
     {
         var r = new ValidadorIniciativa().Validar(solicitud, catalogo, capacidad);
-        r.Destinatarios = DestinatariosSolicitud.Resolver(identidad, solicitud.ProductOwner, _personas.Personas(), r);
+        r.Destinatarios = DestinatariosSolicitud.Resolver(identidad, solicitud.ProductOwner, _personas.Personas(), r, esAdm);
         if (!r.Valida) return r;
 
         if (!_almacen.Disponible())
         {
             AsignarNumero(r, _numeros);
+            return r;
+        }
+        // Con sql/29 el solicitante sin correo de CatPersona no se puede
+        // guardar (y no se inventa uno): la excepcion ADM no llega al almacen.
+        if (r.Destinatarios.ExcepcionAdm)
+        {
+            r.Agregar(DestinatariosSolicitud.CampoSolicitante, DestinatariosSolicitud.MensajeExcepcionSinGuardar);
             return r;
         }
         var token = SolicitudesIniciativa.Token(solicitud.Token);
@@ -191,6 +200,7 @@ public sealed class IniciativaService
             { "solicitante", d == null ? null : new Dictionary<string, object>
                 {
                     { "nombre", d.SolicitanteNombre }, { "correo", d.SolicitanteCorreo },
+                    { "cuenta", d.Cuenta }, { "excepcion_adm", d.ExcepcionAdm },
                 } },
             { "product_owner_correo", d == null ? null : d.ProductOwnerCorreo },
             { "pendientes", new List<string>(r.Guardada ? PendientesGuardada : Pendientes) },

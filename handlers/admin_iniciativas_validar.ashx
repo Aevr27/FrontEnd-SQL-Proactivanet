@@ -31,6 +31,10 @@
 // llego y no esta vacio); se guarda su extension, no el archivo (no hay
 // destino confirmado). No se manda ningun correo.
 //
+// EXCEPCION ADM: con rol ADM (AccesoAdmin.Rol, del servidor) una cuenta que
+// no esta en CatPersona valida igual; sin sql/29 no se guarda nada y con
+// sql/29 se rechaza en "solicitante" (ver App_Code/SolicitudIniciativaAlta.cs).
+//
 // ACCESO: AccesoIniciativas.ExigirSolicitud: rol ADM o MOD de
 // dbo.UsuariosAdmin, o cualquier cuenta Windows autenticada si el
 // interruptor INICIATIVAS_ABIERTAS esta encendido (403 AccesoDenegado antes
@@ -76,7 +80,7 @@ public class AdminIniciativasValidar : IHttpHandler
             ValidadorIniciativa.Resultado resultado;
             try
             {
-                resultado = new IniciativaService().Solicitar(solicitud, identidad);
+                resultado = new IniciativaService().Solicitar(solicitud, identidad, AccesoAdmin.Rol(context) == RolAdmin.Adm);
             }
             catch (ErrorSolicitud ex)
             {
