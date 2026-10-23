@@ -38,6 +38,7 @@
   <script src="../assets/js/escape.js"></script>
   <script src="../assets/js/paleta.js"></script>
   <script src="../assets/js/barras.js"></script>
+  <script src="../assets/js/seleccion-kpi.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -173,7 +174,7 @@
               <label for="orq-ind" class="orq-sr">Mostrar</label>
               <select id="orq-ind"></select>
             </div>
-            <div class="orq-conteo" id="orq-conteo"></div>
+            <div class="orq-conteo" id="orq-conteo" aria-live="polite"></div>
           </div>
           <div class="orq-tabla-wrap"><table class="orq-tabla" id="orq-t-jobs"></table></div>
           <button class="btn linea chico" id="orq-mas" type="button" hidden>Mostrar más</button>
