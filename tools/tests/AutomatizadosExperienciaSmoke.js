@@ -155,6 +155,8 @@ function arnes(opciones) {
     recortar(opciones.fuenteEvol || fuente, 'renderEvol') +
     // renderKPIs de verdad, con lo que no es de esta tarjeta de mentira.
     'var AGR=[], ESTADOS_ACTIVOS=[];\n' +
+    // Sin SeleccionKpi: las tarjetas salen como antes del clic que filtra.
+    'var seleccionKpi=null;\n' +
     'var Escape={attr:function(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;");}};\n' +
     'function PCT(n){return String(Math.round((n||0)*100))+"%";} function SEM(){return null;}\n' +
     'function volumenConIniciativa(){return 0;} function hojasSinIniciativa(){return [];} function volumenSinIniciativa(){return 0;}\n' +
@@ -338,11 +340,23 @@ var BASE = 'fc83739';
       sinFunciones(h.evol().data.datasets[0]), sinFunciones(a.evol().data.datasets[0]));
   });
   var kh = recortar(head, 'renderKPIs'), kw = recortar(fuente, 'renderKPIs');
-  // Lo unico distinto: la tarjeta nueva y el title opcional del rotulo
-  // (solo lo pinta la tarjeta que lo trae).
-  Check('H2 renderKPIs = BASE salvo la tarjeta nueva y el title opcional (Volumen Actual sin cambios)',
+  // Lo unico distinto: la tarjeta nueva, el title opcional del rotulo
+  // (solo lo pinta la tarjeta que lo trae) y el clic que filtra de las dos
+  // tarjetas con panel (k y SeleccionKpi; sin el, la plantilla de antes).
+  var PLANTILLA_CLIC = "  const sel=seleccionKpi;\n" +
+    "  document.getElementById('kpis-exp').innerHTML=cards.map(c=>{\n" +
+    "    const filtra=!!(c.k && sel);\n" +
+    "    return `<div class=\"kpi ${c.s?('s'+c.s):''}${filtra?sel.clases(c.k):''}\"><div class=\"lbl\">${c.l}</div>\n" +
+    "     <div class=\"val\">${c.v}</div><div class=\"foot\">${c.f}</div>${filtra?sel.boton(c.k, c.l+': '+c.v):''}</div>`;\n" +
+    "  }).join('');\n";
+  var PLANTILLA_BASE = "  document.getElementById('kpis-exp').innerHTML=cards.map(c=>\n" +
+    "    `<div class=\"kpi ${c.s?('s'+c.s):''}\"><div class=\"lbl\">${c.l}</div>\n" +
+    "     <div class=\"val\">${c.v}</div><div class=\"foot\">${c.f}</div></div>`).join('');\n";
+  Check('H2 renderKPIs = BASE salvo la tarjeta nueva, el title opcional y el clic (Volumen Actual sin cambios)',
     kh, kw.replace('    tarjetaSinAutomatizar(vol, esPron),\n', '')
-      .replace('<div class="lbl"${c.t?` title="${Escape.attr(c.t)}"`:\'\'}>', '<div class="lbl">'));
+      .replace('<div class="lbl"${c.t?` title="${Escape.attr(c.t)}"`:\'\'}>', '<div class="lbl">')
+      .replace(",s:null,k:'sin'}", ',s:null}').replace(",s:null,k:'ven'}", ',s:null}')
+      .replace(PLANTILLA_CLIC, PLANTILLA_BASE));
 })();
 var KP = arnes();
 KP.estado('slot', { estado: 'listo', valores: { 0: 1500 } });
