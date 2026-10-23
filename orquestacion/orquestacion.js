@@ -440,6 +440,9 @@
   });
   $('limpiar').onclick = function () {
     f = { dir: '', n3: '', herr: '', cand: [] };
+    // Tambien la tarjeta elegida: su estado es el "Mostrar" de la lista
+    // (lista.ind), asi que vuelve a "Todos" y la marca se va con el.
+    lista.ind = ''; $('ind').value = ''; lista.tope = 200;
     if (datos && datos.hay_datos) { llenarFiltros(); pintar(); }
   };
 
@@ -498,24 +501,25 @@
   // siendo lista.ind, el del <select>: SeleccionKpi pone la mecanica, asi
   // que elegir en el desplegable tambien mueve la marca. Las cifras no
   // cambian con el clic: siguen siendo las de los filtros de arriba.
+  // La marca solo se ve con la lista a la vista: oculta (o si no se pudo
+  // traer) ninguna tarjeta queda marcada, aunque el desplegable conserve su
+  // valor para la proxima vez que se abra.
   // Registro completo es un porcentaje: no abre nada.
   var KPI_TODOS = 'universo';
   var KPI_LISTA = ['identificados', 'huerfanos', 'activos', 'orquestados'];
   var SK = window.SeleccionKpi;
   var seleccion = SK ? new SK({ valida: function (k) { return KPI_LISTA.indexOf(k) >= 0; }, limpian: [KPI_TODOS] }) : null;
   function marcarDesdeLista() {
-    if (seleccion) seleccion.clave = KPI_LISTA.indexOf(lista.ind) >= 0 ? lista.ind : '';
+    if (seleccion) seleccion.clave = !$('lista').hidden && KPI_LISTA.indexOf(lista.ind) >= 0 ? lista.ind : '';
   }
   if (SK) SK.escuchar([$('kpis')], 'data-indicador', function (k) {
     if (!vista) return;
+    // Con la lista cerrada no hay marca (marcarDesdeLista): el clic la abre
+    // con esa tarjeta, nunca la quita.
     marcarDesdeLista();
-    // Con la lista cerrada el clic la abre con esa tarjeta, nunca la quita.
-    if ($('lista').hidden) seleccion.clave = '';
     seleccion.alternar(k);
     lista.ind = seleccion.clave; $('ind').value = lista.ind; lista.tope = 200;
-    pintarKpis();
-    SK.enfocar([$('kpis')], 'data-indicador', k);
-    abrirLista();
+    abrirLista(k);
   });
 
   function pintarIngreso() {
@@ -709,22 +713,41 @@
   $('buscar').oninput = function () { lista.texto = this.value; lista.tope = 200; pintarLista(); };
   $('mas').onclick = function () { lista.tope += 200; pintarLista(); };
   $('ver-jobs').onclick = function () {
-    if (!$('lista').hidden) { $('lista').hidden = true; this.textContent = 'Ver la lista'; return; }
+    if (!$('lista').hidden) {
+      $('lista').hidden = true; this.textContent = 'Ver la lista';
+      if (vista) pintarKpis();   // oculta, ninguna tarjeta queda marcada
+      return;
+    }
     abrirLista();
   };
-  // La abre el boton y la abre el clic en una tarjeta (KPI -> lista). Ya
-  // abierta, solo se repinta.
-  function abrirLista() {
+  // La abre el boton y la abre el clic en una tarjeta (KPI -> lista, con su
+  // clave `k`). Ya abierta, solo se repinta. Al terminar se repintan
+  // las tarjetas (la marca sigue a lo que se ve) y, si vino de una tarjeta,
+  // el foco vuelve a ella y la pagina baja a la lista. Si no se pudo traer,
+  // se repintan igual: sin lista a la vista, sin marca, y no se baja.
+  var tarjetaPedida = '';
+  function abrirLista(k) {
     var b = $('ver-jobs');
-    if (!$('lista').hidden) { pintarLista(); return; }
+    if (k) tarjetaPedida = k;   // la ultima pulsada mientras carga
+    if (!$('lista').hidden) { pintarLista(); trasAbrirLista(); return; }
     if (b.disabled) return;   // ya va en camino
     b.disabled = true; b.textContent = 'Cargando…';
     traerDetalle().then(function () {
       $('lista').hidden = false; b.textContent = 'Ocultar la lista'; pintarLista();
+      trasAbrirLista();
     }).catch(function (e) {
       b.textContent = 'Ver la lista';
       error('No se pudo traer la lista de jobs: ' + (e && e.message ? e.message : e));
+      trasAbrirLista();
     }).then(function () { b.disabled = false; });
+  }
+  function trasAbrirLista() {
+    var k = tarjetaPedida;
+    tarjetaPedida = '';
+    if (vista) pintarKpis();
+    if (!k) return;
+    if (SK) SK.enfocar([$('kpis')], 'data-indicador', k);
+    if (!$('lista').hidden && $('jobs').scrollIntoView) $('jobs').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   function pintarLista() {
     if (!detalle || !vista) return;
