@@ -144,9 +144,11 @@ function arnes(opciones) {
     bloque(fuente, 'const automatizados = {};', '\nfunction periodosAutomatizados(').replace('const ', 'var ') +
     ['volSlotOMes', 'pronosticoMes', 'automatizadosDe', 'hayFiltrosAutomatizados', 'periodosAutomatizados', 'pedirAutomatizados',
      'tarjetaSinAutomatizar', 'volActualDe'].map(function (n) { return recortar(fuente, n); }).join('') +
+    bloque(fuente, 'const AYUDA_SIN_AUTOMATIZAR=', '\nfunction tarjetaSinAutomatizar(').replace('const ', 'var ') +
     recortar(opciones.fuenteEvol || fuente, 'renderEvol') +
     // renderKPIs de verdad, con lo que no es de esta tarjeta de mentira.
     'var AGR=[], ESTADOS_ACTIVOS=[];\n' +
+    'var Escape={attr:function(s){return String(s).replace(/&/g,"&amp;").replace(/"/g,"&quot;");}};\n' +
     'function PCT(n){return String(Math.round((n||0)*100))+"%";} function SEM(){return null;}\n' +
     'function volumenConIniciativa(){return 0;} function hojasSinIniciativa(){return [];} function volumenSinIniciativa(){return 0;}\n' +
     'function tarjetaEfectividad(){return {l:"Ef",v:"x",f:"",s:null};}\n' +
@@ -255,7 +257,10 @@ Check('M5 sin filtro, automatizados en cero: el volumen tal cual', '9000', conFi
 
 // ---- K) tarjeta ---------------------------------------------------------
 var K = arnes();
-var AVISO = 'Aprox.: resueltos por bot en el periodo, no subconjunto del volumen.';
+var AYUDA = 'Aproximación: tickets registrados en el periodo menos tickets resueltos por bot en el mismo periodo. ' +
+  'Los automatizados SLA no necesariamente son un subconjunto del volumen registrado.';
+// El aviso va en el title del rotulo, nunca como texto en el pie.
+function sinAvisoEnPie(t) { return !/Aprox|subconjunto/i.test(t.f); }
 Check('K1 sin pedir / cargando: no resta', ['…', '…'], [K.tarjeta(false, 9000).v,
   (K.estado('slot', { estado: 'cargando', valores: {} }), K.tarjeta(false, 9000).v)]);
 K.estado('slot', { estado: 'error', valores: {} });
@@ -272,12 +277,17 @@ Check('K4 automatizados en cero: 9000 - 0 = 9000', '9000', K.tarjeta(false, 9000
 K.estado('slot', { estado: 'listo', valores: { 0: 1500, 1: 99 } });
 var k5 = K.tarjeta(false, 9000);
 Check('K5 9000 - 1500 = 7500 con el SLOT 0', ['Volumen sin Automatizar', '7500'], [k5.l, k5.v]);
-Check('K5 el pie da los dos terminos y que es aproximado', [true, true],
-  [/9000 − 1500 Automatizados SLA/.test(k5.f),
-   k5.f.slice(-AVISO.length) === AVISO]);
-Check('K5 el aviso va tambien en negativo y con cero automatizados', [true, true],
-  [K.tarjeta(false, 0).f.indexOf(AVISO) >= 0, (K.estado('slot', { estado: 'listo', valores: { 0: 0 } }),
-    K.tarjeta(false, 9000).f.indexOf(AVISO) >= 0)]);
+Check('K5 el pie da solo los dos terminos; el aviso va en el tooltip', ['9000 − 1500 Automatizados SLA', AYUDA],
+  [k5.f, k5.t]);
+Check('K5 el tooltip va en todos los estados y nunca en el pie', [true, true],
+  (function () {
+    var vistos = [];
+    [{ estado: 'listo', valores: { 0: 0 } }, { estado: 'listo', valores: { 0: null } }, { estado: 'error', valores: {} },
+     { estado: 'respaldo', valores: {} }, { estado: 'cargando', valores: {} }].forEach(function (e) {
+      K.estado('slot', e); vistos.push(K.tarjeta(false, 9000)); vistos.push(K.tarjeta(false, 0));
+    });
+    return [vistos.every(function (t) { return t.t === AYUDA; }), vistos.every(sinAvisoEnPie)];
+  })());
 K.estado('slot', { estado: 'listo', valores: { 0: 1500, 1: 99 } });
 Check('K5 volumen en cero tambien resta', '-1500', K.tarjeta(false, 0).v);
 var kn = K.tarjeta(false, 1000);
@@ -289,7 +299,8 @@ K.estado('mes', { estado: 'listo', valores: { 9: 7000, 10: 750 } });
 var kp = K.tarjeta(true, 4500);
 Check('K6 Mes: mes en curso, los dos con el pronostico de Volumen Actual', ['7500', true, true, true],
   [kp.v, /9000 − 1500 Automatizados SLA/.test(kp.f), /Real a la fecha: 3750/.test(kp.f), /Pronóstico/.test(kp.l)]);
-Check('K6 Mes: con el aviso', true, kp.f.indexOf(AVISO) >= 0);
+Check('K6 Mes: tooltip, sin aviso en el pie', [AYUDA, true], [kp.t, sinAvisoEnPie(kp)]);
+Check('K7 negativo: tooltip y su aviso de siempre en el pie', [AYUDA, true], [kn.t, sinAvisoEnPie(kn)]);
 Check('K6 Mes sin pronostico: los reales del mes en curso (no del mes 9)', '3750', K.tarjeta(false, 4500).v);
 
 // ---- H) Volumen Actual, la linea y la tarjeta en renderKPIs ---------------
@@ -311,13 +322,20 @@ var BASE = 'fc83739';
       sinFunciones(h.evol().data.datasets[0]), sinFunciones(a.evol().data.datasets[0]));
   });
   var kh = recortar(head, 'renderKPIs'), kw = recortar(fuente, 'renderKPIs');
-  Check('H2 renderKPIs = BASE salvo la tarjeta nueva (Volumen Actual sin cambios)',
-    kh, kw.replace('    tarjetaSinAutomatizar(vol, esPron),\n', ''));
+  // Lo unico distinto: la tarjeta nueva y el title opcional del rotulo
+  // (solo lo pinta la tarjeta que lo trae).
+  Check('H2 renderKPIs = BASE salvo la tarjeta nueva y el title opcional (Volumen Actual sin cambios)',
+    kh, kw.replace('    tarjetaSinAutomatizar(vol, esPron),\n', '')
+      .replace('<div class="lbl"${c.t?` title="${Escape.attr(c.t)}"`:\'\'}>', '<div class="lbl">'));
 })();
 var KP = arnes();
 KP.estado('slot', { estado: 'listo', valores: { 0: 1500 } });
 var html1 = KP.kpis();
-var rotulos = (html1.match(/<div class="lbl">[^<]*/g) || []).map(function (x) { return x.replace('<div class="lbl">', ''); });
+var rotulos = (html1.match(/<div class="lbl"[^>]*>[^<]*/g) || []).map(function (x) { return x.replace(/<div class="lbl"[^>]*>/, ''); });
+var titles = (html1.match(/<div class="lbl"[^>]*>/g) || []).map(function (x) { var m = / title="([^"]*)"/.exec(x); return m ? m[1] : null; });
+Check('H5 el rotulo de Volumen sin Automatizar lleva el tooltip; los demas, ninguno',
+  [null, AYUDA, null, null, null, null, null], titles);
+Check('H5 sin texto de aviso visible en la tarjeta', false, /Aprox|subconjunto/.test(html1.replace(/ title="[^"]*"/g, '')));
 Check('H3 Volumen Actual primero y Volumen sin Automatizar justo despues', ['Volumen Actual (0-30d)', 'Volumen sin Automatizar'],
   rotulos.slice(0, 2));
 Check('H3 una sola tarjeta nueva y sin la de conteo', [1, false, false],

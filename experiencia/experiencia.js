@@ -507,7 +507,7 @@ function renderKPIs(cats, det){
     {l:'Iniciativas Retrasadas',v:FMT(nVen),f:FMT(ret)+' tickets en riesgo',s:null},
   ];
   document.getElementById('kpis-exp').innerHTML=cards.map(c=>
-    `<div class="kpi ${c.s?('s'+c.s):''}"><div class="lbl">${c.l}</div>
+    `<div class="kpi ${c.s?('s'+c.s):''}"><div class="lbl"${c.t?` title="${Escape.attr(c.t)}"`:''}>${c.l}</div>
      <div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
 }
 
@@ -517,7 +517,9 @@ function renderKPIs(cats, det){
 // `vol` es el mismo real que pinta "Volumen Actual"; en Mes con pronostico se
 // restan los dos valores ya pronosticados, que son los que se ven.
 //
-// Es una resta APROXIMADA, decidida asi y dicha en el pie: el volumen cuenta
+// Es una resta APROXIMADA, decidida asi y dicha en el title del rotulo
+// (AYUDA_SIN_AUTOMATIZAR: el title nativo de las tarjetas de Admin y de los
+// folios de esta pagina, sin globo nuevo): el volumen cuenta
 // tickets registrados con categoria; Automatizados SLA, los resueltos en el
 // periodo por cuentas de CatCuentaNoPersona (handlers/kpis.ashx), sin
 // importar cuando se registraron. No es un subconjunto del volumen, asi que
@@ -525,26 +527,28 @@ function renderKPIs(cats, det){
 //
 // Automatizados SLA es global: con filtros de dueño o de tipo no se resta.
 // Error, respaldo y "sin dato" nunca se toman como cero.
+const AYUDA_SIN_AUTOMATIZAR='Aproximación: tickets registrados en el periodo menos tickets resueltos por bot '
+  +'en el mismo periodo. Los automatizados SLA no necesariamente son un subconjunto del volumen registrado.';
 function tarjetaSinAutomatizar(vol, esPron){
   const l='Volumen sin Automatizar'+(esPron ? ' <span class="tag-pron">Pronóstico</span>' : '');
+  const tarjeta=(v, f)=>({l, v, f, s:null, t:AYUDA_SIN_AUTOMATIZAR});
   if(hayFiltrosAutomatizados())
-    return {l, v:'N/D', f:'No disponible con filtros: Automatizados SLA es global y no responde a los filtros activos', s:null};
+    return tarjeta('N/D', 'No disponible con filtros: Automatizados SLA es global y no responde a los filtros activos');
   const a=automatizadosDe(modoTiempo);
-  if(!a || a.estado==='cargando') return {l, v:'…', f:'consultando SLA', s:null};
+  if(!a || a.estado==='cargando') return tarjeta('…', 'consultando SLA');
   // Error y respaldo no son "sin dato": no llevan N/D, que queda para el
   // periodo que SLA devuelve sin valor.
-  if(a.estado==='error') return {l, v:'—', f:'Error al consultar SLA', s:null};
-  if(a.estado==='respaldo') return {l, v:'—', f:'Respaldo: SLA no disponible', s:null};
+  if(a.estado==='error') return tarjeta('—', 'Error al consultar SLA');
+  if(a.estado==='respaldo') return tarjeta('—', 'Respaldo: SLA no disponible');
   const auto=a.valores[String(modoTiempo==='mes' ? P.mes_actual : 0)];
-  if(auto==null) return {l, v:'N/D', f:'SLA sin dato en el periodo', s:null};
+  if(auto==null) return tarjeta('N/D', 'SLA sin dato en el periodo');
   const volMostrado=esPron ? pronosticoMes(vol) : vol;
   const autoMostrado=esPron ? pronosticoMes(auto) : auto;
   const dif=volMostrado-autoMostrado;
   const f=(dif<0 ? 'Negativo: los valores pueden no ser directamente comparables · ' : '')
     +`${FMT(volMostrado)} − ${FMT(autoMostrado)} Automatizados SLA`
-    +(esPron ? ` · Real a la fecha: ${FMT(vol-auto)}` : '')
-    +' · Aprox.: resueltos por bot en el periodo, no subconjunto del volumen.';
-  return {l, v:FMT(dif), f, s:null};
+    +(esPron ? ` · Real a la fecha: ${FMT(vol-auto)}` : '');
+  return tarjeta(FMT(dif), f);
 }
 
 // ---- [KPI-4] % Efectividad Reducción ----
