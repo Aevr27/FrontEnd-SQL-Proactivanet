@@ -1,5 +1,5 @@
 // tools/tests/AutomatizadosExperienciaSmoke.js - serie "Automatizados SLA"
-// de la Evolucion y tarjeta "Volumen sin Automatizar" de Experiencia.
+// de la Evolucion y tarjeta "Volumen - Automatizado" de Experiencia.
 //
 // Automatizados SLA es TicketsAutomatizados de handlers/kpis.ashx (la tarjeta
 // "Automatizado" de SLA), pedido por periodo de la grafica. La tarjeta es
@@ -24,8 +24,12 @@
 //       no cambia; "Ver por" no cuenta como filtro;
 //   H)  la linea de volumen es la de BASE (fc83739, el commit anterior a esta
 //       tarjeta); renderKPIs deja "Volumen Actual" igual que BASE y pone
-//       UNA tarjeta "Volumen sin Automatizar" justo
-//       despues, sin la vieja "Tickets automatizados de SLA";
+//       UNA tarjeta "Volumen - Automatizado" justo
+//       despues, sin la vieja "Tickets automatizados de SLA" ni el rotulo
+//       anterior "Volumen sin Automatizar";
+//   C)  cifra encima de cada barra Automatizados SLA: FMT con miles, 0 si,
+//       null no; si no cabe arriba (borde o linea) va dentro, y si tampoco,
+//       se omite; la linea no lleva cifras de este plugin;
 //   N)  peticiones: una por periodo, con fecha_inicio / fecha_fin; con el
 //       corte guardado no se pide nada (respaldo); una falla deja la
 //       tarjeta en error; se repinta solo si se sigue en el mismo modo.
@@ -141,7 +145,7 @@ function arnes(opciones) {
   var codigo =
     'var fDir="", fPO="", fMgr="", fSO="", tipoRegistro="todos";\n' +
     'var modoTiempo="slot", chartEvol=null, errApi=' + (opciones.errApi ? 'new Error("x")' : 'undefined') + ';\n' +
-    'var VERDE={pino:"#p",profundo:"#d",lima:"#l"}, AMBAR_SEM="#a", CIFRAS_EXTREMOS={};\n' +
+    'var VERDE={pino:"#p",profundo:"#d",lima:"#l"}, AMBAR_SEM="#a", CIFRAS_EXTREMOS={}, CIFRAS_ENCIMA_BARRAS={};\n' +
     'var document={getElementById:function(id){return ELEMENTOS[id]||(ELEMENTOS[id]={style:{},innerHTML:""});}};\n' +
     'function FMT(n){return String(Math.round(n||0));}\n' +
     'var KPIS_SLA_URL="http://x/handlers/kpis.ashx"; var REPINTADOS=[];\n' +
@@ -252,7 +256,7 @@ Check('M0 sin filtros: resta (9000 - 3)', '8997', libre.tarjeta.v);
   var r = conFiltro.apply(null, c[1]);
   Check(c[0] + ' oculta las barras y la leyenda lo dice', [1, true, false], [r.series, r.leyenda.indexOf(SOLO) >= 0, r.offset]);
   Check(c[0] + ': la linea es identica', sinFunciones(mBase.data.datasets[0]), r.linea);
-  Check(c[0] + ': KPI visible en N/D, no resta el global del filtrado', ['Volumen sin Automatizar', 'N/D', SIN_FILTROS],
+  Check(c[0] + ': KPI visible en N/D, no resta el global del filtrado', ['Volumen - Automatizado', 'N/D', SIN_FILTROS],
     [r.tarjeta.l, r.tarjeta.v, r.tarjeta.f]);
 });
 var varios = conFiltro('Dir A', 'PO X', 'Mgr', 'SO X', 'inc');
@@ -292,7 +296,7 @@ K.estado('slot', { estado: 'listo', valores: { 0: 0 } });
 Check('K4 automatizados en cero: 9000 - 0 = 9000', '9000', K.tarjeta(false, 9000).v);
 K.estado('slot', { estado: 'listo', valores: { 0: 1500, 1: 99 } });
 var k5 = K.tarjeta(false, 9000);
-Check('K5 9000 - 1500 = 7500 con el SLOT 0', ['Volumen sin Automatizar', '7500'], [k5.l, k5.v]);
+Check('K5 9000 - 1500 = 7500 con el SLOT 0', ['Volumen - Automatizado', '7500'], [k5.l, k5.v]);
 Check('K5 el pie da solo los dos terminos; el aviso va en el tooltip', ['9000 − 1500 Automatizados SLA', AYUDA],
   [k5.f, k5.t]);
 Check('K5 el tooltip va en todos los estados y nunca en el pie', [true, true],
@@ -349,16 +353,70 @@ KP.estado('slot', { estado: 'listo', valores: { 0: 1500 } });
 var html1 = KP.kpis();
 var rotulos = (html1.match(/<div class="lbl"[^>]*>[^<]*/g) || []).map(function (x) { return x.replace(/<div class="lbl"[^>]*>/, ''); });
 var titles = (html1.match(/<div class="lbl"[^>]*>/g) || []).map(function (x) { var m = / title="([^"]*)"/.exec(x); return m ? m[1] : null; });
-Check('H5 el rotulo de Volumen sin Automatizar lleva el tooltip; los demas, ninguno',
+Check('H5 el rotulo de Volumen - Automatizado lleva el tooltip; los demas, ninguno',
   [null, AYUDA, null, null, null, null, null], titles);
 Check('H5 sin texto de aviso visible en la tarjeta', false, /Aprox|subconjunto/.test(html1.replace(/ title="[^"]*"/g, '')));
-Check('H3 Volumen Actual primero y Volumen sin Automatizar justo despues', ['Volumen Actual (0-30d)', 'Volumen sin Automatizar'],
+Check('H3 Volumen Actual primero y Volumen - Automatizado justo despues', ['Volumen Actual (0-30d)', 'Volumen - Automatizado'],
   rotulos.slice(0, 2));
 Check('H3 una sola tarjeta nueva y sin la de conteo', [1, false, false],
-  [rotulos.filter(function (r) { return r === 'Volumen sin Automatizar'; }).length,
-   /Tickets automatizados de SLA/.test(html1), /tarjetaAutomatizados|Tickets automatizados de SLA/.test(fuente)]);
+  [rotulos.filter(function (r) { return r === 'Volumen - Automatizado'; }).length,
+   /Tickets automatizados de SLA/.test(html1), /tarjetaAutomatizados|Tickets automatizados de SLA|'Volumen sin Automatizar'/.test(fuente)]);
 var vals = (html1.match(/<div class="val">[^<]*/g) || []).map(function (x) { return x.replace('<div class="val">', ''); });
-Check('H4 por renderKPIs: Volumen Actual 9000 y sin Automatizar 7500', ['9000', '7500'], vals.slice(0, 2));
+Check('H4 por renderKPIs: Volumen Actual 9000 y Volumen - Automatizado 7500', ['9000', '7500'], vals.slice(0, 2));
+
+// ---- C) cifra encima de las barras ----------------------------------------
+(function () {
+  var fuenteBarras = { fuente: function (px) { return 'bold ' + px + 'px x'; }, TINTA_FUERA: '#191919',
+    tintaSobre: function (hex) { return hex === '#2563eb' ? '#fff' : '#191919'; } };
+  var FMTmx = function (n) { return Math.round(n || 0).toLocaleString('es-MX'); };
+  var crear = new Function('Barras', recortar(fuente, 'etiquetasEncimaBarras') + '\nreturn etiquetasEncimaBarras;')(fuenteBarras);
+  var plugin = crear(FMTmx);
+  // Grafica de mentira: area 0..300 de alto; barras con base en 300.
+  function pintar(barras, linea, datosLinea) {
+    var hechos = [];
+    var ctx = { save: function () {}, restore: function () {}, fillText: function (t, x, y) {
+      hechos.push({ t: t, x: x, y: y, base: ctx.textBaseline, tinta: ctx.fillStyle }); } };
+    var dsBar = { type: 'bar', data: barras.map(function (b) { return b.v; }), backgroundColor: '#2563eb' };
+    var dsLin = { label: 'Volumen', data: datosLinea || linea.map(function () { return 1; }) };
+    var metas = [
+      { type: 'line', hidden: false, data: linea.map(function (y, i) { return { x: i * 50, y: y }; }) },
+      { type: 'bar', hidden: false, data: barras.map(function (b, i) { return { x: i * 50, y: b.y, base: 300 }; }) }];
+    plugin.afterDatasetsDraw({ ctx: ctx, chartArea: { top: 0, bottom: 300 }, config: { type: 'line' },
+      data: { datasets: [dsLin, dsBar] }, getDatasetMeta: function (k) { return metas[k]; } });
+    return hechos;
+  }
+  // Linea muy por encima de las barras (y=20), barras bajas.
+  var r = pintar([{ v: 1500, y: 250 }, { v: 0, y: 300 }, { v: null, y: 300 }, { v: 12345, y: 200 }], [20, 20, 20, 20]);
+  Check('C1 una cifra por barra con dato, encima y con miles; null sin cifra', [
+    { t: '1,500', x: 0, y: 246, base: 'bottom', tinta: '#191919' },
+    { t: '0', x: 50, y: 296, base: 'bottom', tinta: '#191919' },
+    { t: '12,345', x: 150, y: 196, base: 'bottom', tinta: '#191919' }], r);
+  Check('C2 el cero se pinta y el hueco no se vuelve cero', [true, false],
+    [r.some(function (h) { return h.t === '0'; }), r.some(function (h) { return h.x === 100; })]);
+  // La linea pasa justo donde iria la cifra (punto intermedio, y=240): adentro.
+  var dentro = pintar([{ v: 10, y: 100 }, { v: 900, y: 250 }, { v: 10, y: 100 }], [20, 240, 20]);
+  Check('C3 encima chocaria con un punto de la linea: va dentro de la barra, en blanco',
+    { t: '900', x: 50, y: 254, base: 'top', tinta: '#fff' }, dentro[1]);
+  // Barra corta y punto encima: ni arriba ni dentro cabe -> se omite.
+  var omite = pintar([{ v: 10, y: 100 }, { v: 5, y: 292 }, { v: 10, y: 100 }], [20, 284, 20]);
+  Check('C4 sin hueco arriba ni dentro: sin cifra (queda el tooltip)', false,
+    omite.some(function (h) { return h.t === '5'; }));
+  // Ultimo punto de la linea en y=60: su cifra ocupa hasta ~35px alrededor.
+  // Encima de la barra (94..106) cae en esa franja; dentro (114..126), no.
+  var ext = pintar([{ v: 10, y: 290 }, { v: 700, y: 110 }], [20, 60]);
+  Check('C5 respeta la franja de la cifra del ultimo punto de la linea', { t: '700', base: 'top' },
+    { t: ext[1].t, base: ext[1].base });
+  // Con un punto intermedio a la misma altura (franja de 8px) si cabe encima.
+  var med = pintar([{ v: 10, y: 290 }, { v: 700, y: 110 }, { v: 10, y: 290 }], [20, 60, 20]);
+  Check('C5 un punto intermedio solo reserva su franja corta', 'bottom', med[1].base);
+  // Barra que toca el techo del area: no se sale, va dentro.
+  var techo = pintar([{ v: 99999, y: 5 }], [280]);
+  Check('C6 sin salirse del area por arriba', { t: '99,999', base: 'top', tinta: '#fff' },
+    { t: techo[0].t, base: techo[0].base, tinta: techo[0].tinta });
+  Check('C7 la linea no recibe cifras de este plugin: solo las 3 barras con dato', 3, r.length);
+  Check('C8 la grafica de Evolucion lleva el plugin junto a CIFRAS_EXTREMOS', true,
+    /plugins:\[CIFRAS_EXTREMOS,CIFRAS_ENCIMA_BARRAS\]/.test(recortar(fuente, 'renderEvol')));
+})();
 
 // ---- N) peticiones ------------------------------------------------------
 (async function () {
