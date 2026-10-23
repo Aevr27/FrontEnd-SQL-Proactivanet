@@ -443,8 +443,8 @@ public static class SolicitudIniciativaSmoke
         var lineas = new List<string>();
         foreach (Dictionary<string, object> f in rutas)
             lineas.Add(f["categoria"] + ">" + f["po"] + ">" + f["so"] + ">" + f["director"]);
-        Check("RC1 la categoria es la RUTA (no la N2), unica y normalizada",
-              "/S-A/Dos/X/Y>PO 2>SO y>Dir A|/S-A/Tres/Hoja>PO 1>SO x>Dir A|/S-A/Uno>PO 1>SO x>Dir A|" +
+        Check("RC1 la categoria es la RUTA (no la N2), unica y normalizada; /S-A/Uno es carpeta (tiene hojas): fuera",
+              "/S-A/Dos/X/Y>PO 2>SO y>Dir A|/S-A/Tres/Hoja>PO 1>SO x>Dir A|" +
               "/S-A/Uno/Hoja 1>PO 1>SO x>Dir A|/S-A/Uno/Hoja 2>PO 1>SO x>Dir A",
               string.Join("|", lineas));
         Check("RC2 rutas sin Director/PO/SO: contadas, no inventadas", 2, cat["rutas_sin_duenos"]);
@@ -474,6 +474,9 @@ public static class SolicitudIniciativaSmoke
               Campos(new ValidadorIniciativa().Validar(SolicitudIniciativa.DesdeFormulario(fr, false, null), catRutas, capRuta)));
         fr["categoria"] = "/S-B/Uno/Hoja";
         Check("RC9 ruta con dueños no vigentes: no elegible", "categoria",
+              Campos(new ValidadorIniciativa().Validar(SolicitudIniciativa.DesdeFormulario(fr, false, null), catRutas, capRuta)));
+        fr["categoria"] = "/S-A/Uno";
+        Check("RC10 carpeta (ruta activa con hojas) mandada a mano con su PO/SO: rechazada", "categoria",
               Campos(new ValidadorIniciativa().Validar(SolicitudIniciativa.DesdeFormulario(fr, false, null), catRutas, capRuta)));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));

@@ -280,6 +280,110 @@ function pronosticoMes(volReal){
   return Math.round(volReal / P.dias_transcurridos_mes * 30);
 }
 
+/* TICKETS AUTOMATIZADOS DE SLA
+   -------------------------------------------------------------------------
+   Es la tarjeta "Automatizado" de SLA TAL CUAL: TicketsAutomatizados de
+   handlers/kpis.ashx (DashboardQueries.Kpis), los tickets RESUELTOS en el
+   rango por una cuenta de dbo.CatCuentaNoPersona. Aqui no se calcula nada:
+   se le pide a ese handler, sin tocarlo, un rango por periodo de la grafica
+   y se lee el numero que devuelve.
+
+   Lo que eso implica, y por lo que va como serie aparte:
+     - cuenta por fecha de firma de solucion, no por fecha de registro como
+       el volumen de Experiencia;
+     - es GLOBAL: kpis.ashx no conoce CategoriaV2, asi que no le aplican
+       Director / PO / Manager / SO ni el tipo de registro;
+     - con el corte guardado (sin handler) no se pide: se mezclaria un dato
+       en vivo con uno viejo.
+
+   Rangos (los dos extremos dentro, como fecha_inicio/fecha_fin de kpis.ashx):
+     slot k  hoy-30k-29 .. hoy-30k, 30 dias cada uno, con hoy =
+             P.meta.periodoFin. Son los limites de dbo.vw_TicketsSlotsBase en
+             la VM (MIN/MAX de FechaRegistro por Slot, 2026-10-23: SLOT 0 =
+             09-24..10-23, SLOT 1 = 08-25..09-23), no el periodo de P.meta
+             (hoy-30 .. hoy, un dia de mas); se suceden sin hueco ni solape;
+     mes m   del dia 1 al ultimo dia del mes m de P.anio.
+   Sin document ni P para que tools/tests/AutomatizadosExperienciaSmoke.js
+   las corra tal cual. */
+/* === AUTOMATIZADOS SLA (inicio) === */
+var AUTOMATIZADOS_DIAS_SLOT = 30;   // = DashboardDataInfo.DiasSlot
+function isoDiaUTC(ms) {
+  var d = new Date(ms);
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getUTCDate()).padStart(2, '0');
+}
+// {inicio, fin} aaaa-mm-dd del periodo, o null si no se puede armar.
+function rangoAutomatizados(modo, periodo, hoyISO, anio) {
+  var n = Number(periodo);
+  if (modo === 'mes') {
+    var y = Number(anio);
+    if (!(n >= 1 && n <= 12) || !(y > 0)) return null;
+    return { inicio: isoDiaUTC(Date.UTC(y, n - 1, 1)), fin: isoDiaUTC(Date.UTC(y, n, 0)) };
+  }
+  var t = /^(\d{4})-(\d{2})-(\d{2})/.exec(hoyISO || '');
+  if (!t || !(n >= 0) || Math.floor(n) !== n) return null;
+  var hoy = Date.UTC(+t[1], +t[2] - 1, +t[3]);
+  var D = AUTOMATIZADOS_DIAS_SLOT, dia = 86400000;
+  return {
+    inicio: isoDiaUTC(hoy - (D * n + D - 1) * dia),
+    fin: isoDiaUTC(hoy - D * n * dia),
+  };
+}
+// El numero tal como lo da kpis.ashx. null = sin dato (la tarjeta de SLA
+// pinta N/D en ese caso); 0 es cero.
+function valorAutomatizado(fila) {
+  var v = fila ? fila.TicketsAutomatizados : null;
+  return (v === null || v === undefined || v === '' || isNaN(Number(v))) ? null : Number(v);
+}
+/* === AUTOMATIZADOS SLA (fin) === */
+
+const KPIS_SLA_URL = new URL('../handlers/kpis.ashx', BASE).href;
+// Por modo: sin llave = no pedido; {estado:'cargando'|'listo'|'error', valores}.
+const automatizados = {};
+function automatizadosDe(modo){ return automatizados[modo] || null; }
+// Algun filtro de dueño o de tipo puesto. "Ver por" SLOT/Mes no es filtro.
+// Con filtros la linea es un subconjunto y las barras (globales) no se
+// pueden comparar con ella: se ocultan y la tarjeta lo dice.
+function hayFiltrosAutomatizados(){
+  return !!(fDir || fPO || fMgr || fSO) || tipoRegistro!=='todos';
+}
+function periodosAutomatizados(modo){
+  return modo==='mes' ? P.mes_nums : P.slot_nums;
+}
+// Se pide la primera vez que se ve cada modo; al llegar se repintan solo la
+// tarjeta y la grafica, y solo si se sigue en ese modo.
+function pedirAutomatizados(modo){
+  if(automatizados[modo]) return;
+  const hoyISO = P.meta && P.meta.periodoFin;
+  const rangos = (periodosAutomatizados(modo)||[]).map(p=>[p, rangoAutomatizados(modo, p, hoyISO, P.anio)]);
+  if(errApi){
+    automatizados[modo] = {estado:'respaldo', valores:{}};
+    return;
+  }
+  if(!rangos.length || rangos.some(r=>!r[1])){
+    automatizados[modo] = {estado:'error', valores:{}};
+    return;
+  }
+  automatizados[modo] = {estado:'cargando', valores:{}};
+  Promise.all(rangos.map(([p, r])=>{
+    const url=new URL(KPIS_SLA_URL);
+    url.searchParams.set('fecha_inicio', r.inicio);
+    url.searchParams.set('fecha_fin', r.fin);
+    return traer(url.href).then(fila=>[p, valorAutomatizado(fila)]);
+  })).then(pares=>{
+    const valores={};
+    pares.forEach(([p, v])=>{ valores[String(p)]=v; });
+    automatizados[modo] = {estado:'listo', valores};
+  }, err=>{
+    console.warn('[Experiencia] automatizados SLA:', err);
+    automatizados[modo] = {estado:'error', valores:{}};
+  }).then(()=>{
+    if(modoTiempo!==modo) return;
+    const agg=aggCats();
+    renderKPIs(agg, currentCats()); renderEvol(agg);
+  });
+}
+
 /* Enlace "Consulta el Detalle" (header y modal) desde LIGADETALLE.
 
    La URL viene de fuera -AppSettings["ExperienciaLigaDetalle"], via el
@@ -395,6 +499,7 @@ function renderKPIs(cats, det){
         const base=`${cats.length} categorías · ${PCT(pct)} del total`;
         return esPron ? base+` · Real a la fecha: ${FMT(vol)}` : base;
       })(),s:null},
+    tarjetaSinAutomatizar(vol, esPron),
     {l:'% Tickets con Iniciativa',v:PCT(pctIni),f:FMT(ini)+' con iniciativa',s:SEM(pctIni)},
     {l:'% Tickets en Tiempo',v:PCT(pctTiempo),f:FMT(ret)+' en riesgo',s:SEM(pctTiempo)},
     tarjetaEfectividad(detReal),
@@ -402,8 +507,48 @@ function renderKPIs(cats, det){
     {l:'Iniciativas Retrasadas',v:FMT(nVen),f:FMT(ret)+' tickets en riesgo',s:null},
   ];
   document.getElementById('kpis-exp').innerHTML=cards.map(c=>
-    `<div class="kpi ${c.s?('s'+c.s):''}"><div class="lbl">${c.l}</div>
+    `<div class="kpi ${c.s?('s'+c.s):''}"><div class="lbl"${c.t?` title="${Escape.attr(c.t)}"`:''}>${c.l}</div>
      <div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
+}
+
+// ---- Volumen sin Automatizar ----
+// Volumen Actual - Automatizados SLA del MISMO periodo: SLOT 0 (los rangos de
+// pedirAutomatizados son los de vw_TicketsSlotsBase) o el mes en curso.
+// `vol` es el mismo real que pinta "Volumen Actual"; en Mes con pronostico se
+// restan los dos valores ya pronosticados, que son los que se ven.
+//
+// Es una resta APROXIMADA, decidida asi y dicha en el title del rotulo
+// (AYUDA_SIN_AUTOMATIZAR: el title nativo de las tarjetas de Admin y de los
+// folios de esta pagina, sin globo nuevo): el volumen cuenta
+// tickets registrados con categoria; Automatizados SLA, los resueltos en el
+// periodo por cuentas de CatCuentaNoPersona (handlers/kpis.ashx), sin
+// importar cuando se registraron. No es un subconjunto del volumen, asi que
+// puede salir negativo: se muestra con su signo y se avisa, sin recortar a 0.
+//
+// Automatizados SLA es global: con filtros de dueño o de tipo no se resta.
+// Error, respaldo y "sin dato" nunca se toman como cero.
+const AYUDA_SIN_AUTOMATIZAR='Aproximación: tickets registrados en el periodo menos tickets resueltos por bot '
+  +'en el mismo periodo. Los automatizados SLA no necesariamente son un subconjunto del volumen registrado.';
+function tarjetaSinAutomatizar(vol, esPron){
+  const l='Volumen sin Automatizar'+(esPron ? ' <span class="tag-pron">Pronóstico</span>' : '');
+  const tarjeta=(v, f)=>({l, v, f, s:null, t:AYUDA_SIN_AUTOMATIZAR});
+  if(hayFiltrosAutomatizados())
+    return tarjeta('N/D', 'No disponible con filtros: Automatizados SLA es global y no responde a los filtros activos');
+  const a=automatizadosDe(modoTiempo);
+  if(!a || a.estado==='cargando') return tarjeta('…', 'consultando SLA');
+  // Error y respaldo no son "sin dato": no llevan N/D, que queda para el
+  // periodo que SLA devuelve sin valor.
+  if(a.estado==='error') return tarjeta('—', 'Error al consultar SLA');
+  if(a.estado==='respaldo') return tarjeta('—', 'Respaldo: SLA no disponible');
+  const auto=a.valores[String(modoTiempo==='mes' ? P.mes_actual : 0)];
+  if(auto==null) return tarjeta('N/D', 'SLA sin dato en el periodo');
+  const volMostrado=esPron ? pronosticoMes(vol) : vol;
+  const autoMostrado=esPron ? pronosticoMes(auto) : auto;
+  const dif=volMostrado-autoMostrado;
+  const f=(dif<0 ? 'Negativo: los valores pueden no ser directamente comparables · ' : '')
+    +`${FMT(volMostrado)} − ${FMT(autoMostrado)} Automatizados SLA`
+    +(esPron ? ` · Real a la fecha: ${FMT(vol-auto)}` : '');
+  return tarjeta(FMT(dif), f);
 }
 
 // ---- [KPI-4] % Efectividad Reducción ----
@@ -454,10 +599,10 @@ function tarjetaEfectividad(detReal){
 
 // ---- Evolucion por SLOT o por MES [GRAF-1] (antiguo->reciente) ----
 function renderEvol(cats){
-  let labels, vals, idxPron=-1, valReal=null;
+  let labels, vals, nums, idxPron=-1, valReal=null;
   if(modoTiempo==='mes'){
     // Orden cronologico: mes 0 (Dic ant.) a la izquierda, mas reciente a la derecha.
-    const nums=[...P.mes_nums].sort((a,b)=>a-b);
+    nums=[...P.mes_nums].sort((a,b)=>a-b);
     labels=nums.map(m=>P.meses[P.mes_nums.indexOf(m)]);
     vals=nums.map(m=>cats.reduce((t,c)=>t+volSlotOMes(c,m),0));
     if(P.dias_transcurridos_mes){
@@ -466,7 +611,7 @@ function renderEvol(cats){
     }
   } else {
     // Etiquetas de SLOT: solo el rango de dias (0-30d, 31-60d, ...), sin mes.
-    const nums=[...P.slot_nums].sort((a,b)=>b-a); // antiguo->reciente (SLOT alto -> 0)
+    nums=[...P.slot_nums].sort((a,b)=>b-a); // antiguo->reciente (SLOT alto -> 0)
     labels=nums.map(s=>s===0?'0-30d':((s*30+1)+'-'+((s+1)*30)));
     vals=nums.map(s=>cats.reduce((t,c)=>t+volSlotOMes(c,s),0));
   }
@@ -475,16 +620,49 @@ function renderEvol(cats){
   // El punto de pronostico conserva el ambar: es una advertencia, no una serie.
   const pointColors=vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.profundo);
   const pointRadii=vals.map((_,i)=>i===idxPron?6:3);
-  // De cuanto volumen arranca la ventana y en cuanto acaba, sobre la linea.
-  chartEvol=new Chart(ctx,{type:'line',plugins:[CIFRAS_EXTREMOS],data:{labels,datasets:[{label:'Volumen',data:vals,
+  const datasets=[{label:'Volumen',data:vals,
     borderColor:VERDE.pino,backgroundColor:'rgba(47,143,107,.14)',fill:true,tension:.3,
     pointRadius:pointRadii,pointHoverRadius:pointRadii.map(r=>r+3),
-    pointBackgroundColor:pointColors,borderWidth:2}]},
+    pointBackgroundColor:pointColors,borderWidth:2}];
+  // Automatizados de SLA: barras en los MISMOS periodos y en el mismo orden
+  // que la linea, por detras de ella (order). Son otra cuenta (ver
+  // pedirAutomatizados), no se suman al volumen. Mientras no hay dato la
+  // grafica es exactamente la de antes. Con filtros tampoco hay barras (ver
+  // hayFiltrosAutomatizados).
+  const auto=automatizadosDe(modoTiempo);
+  const filtrado=hayFiltrosAutomatizados();
+  let autoReal=null;
+  if(auto && auto.estado==='listo' && !filtrado){
+    const barras=nums.map(p=>{ const v=auto.valores[String(p)]; return v==null?null:v; });
+    if(idxPron>=0 && barras[idxPron]!=null){ autoReal=barras[idxPron]; barras[idxPron]=pronosticoMes(autoReal); }
+    // El azul de una barra ordinaria (Paleta.AZUL_SERIE, #2563eb): el mismo
+    // de las barras de Call Center (AZUL = Paleta.porIndice(0) en dashboard.js).
+    datasets.push({type:'bar',label:'Automatizados SLA',data:barras,order:1,
+      backgroundColor:Paleta.AZUL_SERIE,maxBarThickness:28});
+  }
+  const hayBarras=datasets.length>1;
+  const leg=document.getElementById('legendEvol');
+  if(leg) leg.innerHTML='<span><i style="background:#65bb2b"></i>Volumen total</span>'
+    +`<span><i style="background:${Paleta.AZUL_SERIE}"></i>${filtrado
+      ? 'Automatizados SLA: solo sin filtros (valor global)'
+      : 'Automatizados SLA (resueltos, global)'+(
+        !auto||auto.estado==='cargando' ? ' · cargando…'
+        : auto.estado==='error' ? ' · error al consultar SLA'
+        : auto.estado==='respaldo' ? ' · respaldo: SLA no disponible' : '')}</span>`;
+  // De cuanto volumen arranca la ventana y en cuanto acaba, sobre la linea.
+  chartEvol=new Chart(ctx,{type:'line',plugins:[CIFRAS_EXTREMOS],data:{labels,datasets},
     options:{responsive:true,plugins:{legend:{display:false},
-      tooltip:{callbacks:{label:c=>c.dataIndex===idxPron
+      tooltip:{callbacks:{label:c=>c.datasetIndex===1
+        ? (c.raw==null ? 'Automatizados SLA: sin dato'
+          : c.dataIndex===idxPron
+            ? `Automatizados SLA · Pronóstico: ${FMT(c.raw)} · Real a la fecha: ${FMT(autoReal)}`
+            : `Automatizados SLA: ${FMT(c.raw)}`)
+        : c.dataIndex===idxPron
         ? `Pronóstico: ${FMT(c.raw)} · Real a la fecha: ${FMT(valReal)}`
         : `Volumen: ${FMT(c.raw)}`}}},
-      scales:{y:{beginAtZero:true,ticks:{callback:v=>FMT(v)}}}}});
+      // Con barras el eje deja medio hueco a cada lado para que la primera
+      // y la ultima no salgan cortadas a la mitad.
+      scales:{x:{offset:hayBarras},y:{beginAtZero:true,ticks:{callback:v=>FMT(v)}}}}});
 }
 
 function renderDona(cats){
@@ -1336,6 +1514,7 @@ function renderAll(){
     : 'Composición del Volumen Actual (SLOT 0)';
   const foot=document.getElementById('footModo');
   if(foot) foot.textContent = esMes ? 'Cálculo por Mes calendario.' : 'Cálculo por SLOT.';
+  pedirAutomatizados(modoTiempo);
   renderKPIs(agg, cats); renderEvol(agg); renderDona(agg);
   renderDet(cats); renderSin(cats); renderVen(cats); renderAct(cats);
   renderHeadHist(); renderHist();

@@ -951,6 +951,68 @@ public static class GestionIniciativaAdminSmoke
         Check("CA8 Codigo inmutable sin distinguir mayusculas: 'Codigo' tambien se rechaza", "codigo",
             Campos(ModC(F("folio", Fo, "Codigo", "PRB 2026-999999", "titulo", "x"))));
 
+        // ---- HJ) solo hojas: una ruta con otra activa debajo es carpeta ----
+        // CatalogoRutasIniciativa.Hojas (lo que publican Asignaciones y
+        // ElegiblesAdm). Recibe las rutas ACTIVAS (LeerRutasActivas ya quita
+        // inactivas y no vigentes: CategoriasAdmSqlLocalDbSmoke R1).
+        var cg = "/S-Datos-Maestros/Centros/Catalogación";
+        var hojas = CatalogoRutasIniciativa.Hojas(new[]
+        {
+            "/S-Datos-Maestros", "/S-Datos-Maestros/Centros", cg,
+            cg + "/Agregar Centros en Surtidos", cg + "/Catalogación no reflejada", cg + "/Creación de Modulos",
+            "/A/Uno", "/A/Uno/Hija",                 // una sola hija
+            "/A/Cat", "/A/Catalogo/Otra",            // prefijo de texto, no de jerarquia
+            "/X", "/XY/Z",                           // "/X" no es padre de "/XY/Z"
+            "/M ", "/m /Memoria",                    // normalizada y sin mayusculas: misma identidad
+            "/Sola",
+        });
+        Func<string, bool> hoja = r => hojas.Contains(r);
+        Check("HJ1 carpeta con una sola hija: fuera; la hija queda", "False|True", hoja("/A/Uno") + "|" + hoja("/A/Uno/Hija"));
+        Check("HJ2 carpetas con varias rutas debajo (cada nivel): fuera", "False|False|False",
+            hoja("/S-Datos-Maestros") + "|" + hoja("/S-Datos-Maestros/Centros") + "|" + hoja(cg));
+        Check("HJ3 hojas anidadas (4 niveles) y de un nivel: quedan", "True|True|True|True",
+            hoja(cg + "/Agregar Centros en Surtidos") + "|" + hoja(cg + "/Catalogación no reflejada") + "|" +
+            hoja(cg + "/Creación de Modulos") + "|" + hoja("/Sola"));
+        Check("HJ4 nombre parecido no hace padre: /A/Cat por /A/Catalogo/Otra, /X por /XY/Z", "True|True|True|True",
+            hoja("/A/Cat") + "|" + hoja("/A/Catalogo/Otra") + "|" + hoja("/X") + "|" + hoja("/XY/Z"));
+        Check("HJ5 la carpeta se reconoce con la identidad del sitio (espacios a los lados, mayusculas)", "False|True",
+            hoja("/M") + "|" + hoja("/m /Memoria"));
+        Check("HJ6 sin la hija activa (inactiva no llega), el padre es hoja", "True",
+            CatalogoRutasIniciativa.Hojas(new[] { "/A/Uno" }).Contains("/A/Uno").ToString());
+        Check("HJ7 catalogo vacio o nulo: lista vacia, sin excepcion", "0|0|0",
+            CatalogoRutasIniciativa.Hojas(null).Count + "|" + CatalogoRutasIniciativa.Hojas(new string[0]).Count + "|" +
+            CatalogoRutasIniciativa.Hojas(new string[] { null, "  " }).Count);
+
+        // El catalogo de ADM con carpetas: /A/Cat 1 (ligada en Actual()) y
+        // /B son carpetas; el validador de ADM solo conoce las hojas.
+        var sinDir = new DirectorioOrganizacional(new List<DirectorioOrganizacional.Dueno>(), new Dictionary<string, string>());
+        var admHojas = CatalogoRutasIniciativa.ElegiblesAdm(new[] { "/A/Cat 1", "/A/Cat 1/Sub", "/A/Cat 2", "/B", "/B/Hoja" }, sinDir);
+        Check("HJ8 ElegiblesAdm publica solo hojas (rutas_adm, en orden)", "/A/Cat 1/Sub|/A/Cat 2|/B/Hoja",
+            string.Join("|", CatalogoRutasIniciativa.RutasAdm(admHojas).ToArray()));
+        var cascadaHojas = CatalogoRutasIniciativa.Asignaciones(new[] { "/A/Cat 1", "/A/Cat 1/Sub" }, sinDir);
+        Check("HJ9 Asignaciones (cascada de Nueva solicitud): la carpeta ni se publica ni se cuenta", "0|1",
+            ((List<object>)cascadaHojas["rutas"]).Count + "|" + cascadaHojas["rutas_sin_duenos"]);
+        var catHojas = CatalogoSolicitud.ParaAdm(new object[] { "PRB" }, new List<object>(), (System.Collections.IEnumerable)admHojas["rutas_adm"]);
+        var capVacia = new CapacidadCategoria(new CapacidadCategoria.Compromiso[0]);
+        var crCarpeta = new ValidadorGestionAdmin().Crear(Declarar(PeticionCrearAdmin.Una("PRB", "/B", "10")), catHojas, capVacia, "PRB", Estados);
+        Check("HJ10 Crear con una carpeta mandada a mano: rechazada en categoria", "False|categoria",
+            crCarpeta.Valida + "|" + Campos(crCarpeta));
+        Check("HJ11 Crear con una hoja (resto valido): pasa", "True",
+            new ValidadorGestionAdmin().Crear(Declarar(PeticionCrearAdmin.Una("PRB", "/B/Hoja", "10")), catHojas, capVacia, "PRB", Estados).Valida.ToString());
+        Check("HJ12 Crear con una ruta que no existe: sigue rechazada", "categoria",
+            Campos(new ValidadorGestionAdmin().Crear(Declarar(PeticionCrearAdmin.Una("PRB", "/B/No existe", "10")), catHojas, capVacia, "PRB", Estados)));
+        Func<NameValueCollection, ResultadoGestionAdmin> modHojas = f =>
+            new ValidadorGestionAdmin().Modificar(M(f), Actual(), new CapacidadCategoria.Compromiso[0], catHojas, Estados);
+        Check("HJ13 Modificar: agregar una carpeta a mano se rechaza; una hoja pasa", "categorias|True",
+            Campos(modHojas(F("folio", Fo, "agregar_categoria", "/B", "agregar_pct", "5", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem"))) + "|" +
+            modHojas(F("folio", Fo, "agregar_categoria", "/B/Hoja", "agregar_pct", "5", "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem")).Valida);
+        var soloTitulo = modHojas(F("folio", Fo, "titulo", "Titulo nuevo"));
+        Check("HJ14 iniciativa con una carpeta YA ligada (/A/Cat 1): cambiar solo el Titulo pasa y no toca categorias", "True|titulo",
+            soloTitulo.Valida + "|" + string.Join(",", soloTitulo.Cambios.Select(c => (string)c["clave"]).ToArray()));
+        var pctCarpeta = modHojas(F("folio", Fo, "pct_categoria", "/A/Cat 1", "pct_valor", "40"));
+        Check("HJ15 su % sigue editable (la ligada no se revisa contra el catalogo: no se reasigna)", "True|pct",
+            pctCarpeta.Valida + "|" + string.Join(",", pctCarpeta.Cambios.Select(c => (string)c["clave"]).ToArray()));
+
         // ---- AG) Agrupacion: una sola grafia por Clave ----------------------
         var tilde = "Adopci" + (char)0xF3 + "n";
         Check("AG1 'Adopcion' y la de tilde: queda solo la de tilde (la de la regla)", tilde + "|Problem",

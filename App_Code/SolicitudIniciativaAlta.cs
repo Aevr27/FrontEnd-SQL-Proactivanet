@@ -14,6 +14,18 @@
 // otra fila. Lo que se guarda es el Nombre y el Correo de ESA fila. Nada
 // viene del navegador: ni nombre, ni cuenta, ni correo.
 //
+// EXCEPCION ADM (pruebas controladas): si quien envia es ADM (el rol lo
+// resuelve el servidor, AccesoAdmin.Rol; nunca el navegador) y su cuenta no
+// se resuelve a una persona (no_encontrado, ambiguo, nombre_repetido o sin
+// correo), la solicitud NO se rechaza por eso: nombre y correo quedan null
+// (no se inventan ni se elige una fila), SolicitanteEstado guarda el motivo
+// real y Cuenta la identidad Windows. Sin identidad autenticada no hay
+// excepcion. MOD y el rol derivado "solicitante" siguen con la regla
+// estricta. SOLO valida: con sql/29 no se puede guardar sin correo de
+// CatPersona (NOT NULL + 51405 en adm.usp_SolicitudIniciativa_Crear), asi
+// que IniciativaService la rechaza antes de llamar al almacen
+// (MensajeExcepcionSinGuardar).
+//
 // CORREO DEL PRODUCT OWNER: el PO elegido ya paso por ValidadorIniciativa
 // (sale con SO y Categoria de una fila vigente de la cascada,
 // CatalogoRutasIniciativa). Su correo es el de la UNICA fila vigente de
@@ -51,6 +63,10 @@ public sealed class DestinatariosSolicitud
     public string SolicitanteNombre;
     public string SolicitanteCorreo;
     public string ProductOwnerCorreo;
+    public bool ExcepcionAdm;          // ADM sin persona: valida sin nombre ni correo
+
+    public const string MensajeExcepcionSinGuardar =
+        "Como ADM puedes validar la solicitud sin estar en CatPersona, pero para guardarla la base exige el correo de una persona vigente de CatPersona. Pide que te registren.";
 
     public bool Resuelto { get { return SolicitanteCorreo != null && ProductOwnerCorreo != null; } }
 
@@ -61,9 +77,10 @@ public sealed class DestinatariosSolicitud
 
     // Resuelve y agrega a `r` los errores (campo solicitante / po). `po` es
     // el Product Owner tal como lo valido ValidadorIniciativa; si el PO ya
-    // tiene error ahi, no se busca su correo.
+    // tiene error ahi, no se busca su correo. `esAdm`: el rol ADM que ya
+    // resolvio el servidor (ver EXCEPCION ADM arriba).
     public static DestinatariosSolicitud Resolver(IdentidadWindows id, string po, IList<PersonaCatalogo> personas,
-                                                  ValidadorIniciativa.Resultado r)
+                                                  ValidadorIniciativa.Resultado r, bool esAdm = false)
     {
         personas = personas ?? new List<PersonaCatalogo>();
         var d = new DestinatariosSolicitud();
@@ -84,8 +101,11 @@ public sealed class DestinatariosSolicitud
             }
             else d.SolicitanteEstado = DirectorioPersonas.SinCorreo;
         }
-        if (d.SolicitanteCorreo == null && r != null)
-            r.Agregar(CampoSolicitante, MensajeSolicitante(d.SolicitanteEstado, id));
+        if (d.SolicitanteCorreo == null)
+        {
+            if (esAdm && d.Cuenta != null && d.SolicitanteEstado != IdentidadAcuse.SinIdentidad) d.ExcepcionAdm = true;
+            else if (r != null) r.Agregar(CampoSolicitante, MensajeSolicitante(d.SolicitanteEstado, id));
+        }
 
         if (r != null && r.TieneError(SolicitudIniciativa.CPo)) return d;
         var clave = IdentidadAcuse.ClaveNombre(po);

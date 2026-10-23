@@ -31,8 +31,10 @@
 //                  con sus dueños resueltos por DirectorioOrganizacional (la
 //                  misma regla N2 -> C1 del resto del sitio).
 //   rutas          CatalogoRutasIniciativa: dbo.Categorias activas con sus
-//                  dueños por la misma regla (C1&C2 exacto o C1).
-//   rutas_adm      SOLO con rol ADM (Crear / Modificar): TODAS las rutas
+//                  dueños por la misma regla (C1&C2 exacto o C1). Solo
+//                  HOJAS: una ruta con otra activa debajo es carpeta y no
+//                  se publica (CatalogoRutasIniciativa.Hojas).
+//   rutas_adm      SOLO con rol ADM (Crear / Modificar): TODAS las hojas
 //                  activas y unicas, sin filtrar por dueños; cada dueño el
 //                  resuelto o null si falta (ElegiblesAdm). La cascada de
 //                  Nueva solicitud sigue sobre `rutas`.
