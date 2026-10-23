@@ -462,6 +462,8 @@
 }
 .ini-lista-cuenta { font-size: 12.5px; font-weight: 700; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .ini-lista-ayuda { font-size: 11.5px; color: var(--muted); }
+/* Error de "Descargar iniciativas" (registro-iniciativas.js, descargar). */
+.ini-descarga-msg { margin: 0 0 8px; font-size: 12.5px; color: var(--rojo); }
 /* A la derecha del titulo: el semaforo y, debajo, la ayuda. */
 .ini-lista-lado {
   margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px;

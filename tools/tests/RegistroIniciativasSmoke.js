@@ -208,6 +208,7 @@ function Pagina(pedirRegistro, pedirCatalogo, rol) {
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(ventana, ventana.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(ventana, documento);
   (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
+  (new Function('window', leer('admin/libro-iniciativas.js')))(ventana);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
@@ -1423,7 +1424,12 @@ pruebas.push(function () {
     /\.btn\.ini-cta\[hidden\] \{ display: none; \}/.test(leer('admin/iniciativas.css')));
   Check('H3 orden de scripts', true,
     /cascada-organizacional\.js[\s\S]*registro-iniciativas\.js[\s\S]*iniciativas\.js"/.test(html));
-  Check('H4 sin botones de editar/descargar', false, /(Editar|Modificar|Descargar)/.test(html));
+  Check('H4 sin botones de editar', false, /(Editar|Modificar)/.test(html));
+  // Unica descarga: la del registro (XD), deshabilitada hasta que haya filas.
+  Check('H4 una sola descarga: Descargar iniciativas', ['⬇ Descargar iniciativas'],
+    (html.match(/<button[^>]*>[^<]*Descargar[^<]*<\/button>/g) || []).map(function (b) {
+      return /id="regDescargar"[^>]* disabled>/.test(b) ? b.replace(/^.*>([^<]*)<\/button>$/, '$1') : b;
+    }));
   Check('H5 sin filtro de Agrupacion', [false, false], [/id="regTipo"/.test(html), /<label[^>]*>Agrupación<\/label>/.test(html)]);
   Check('H5 Tipo de iniciativa sigue como multiselect', true,
     /<label for="regTipoIni">Tipo de iniciativa<\/label>\s*<button type="button" class="ini-multi-boton" id="regTipoIni"/.test(html));
@@ -2544,6 +2550,228 @@ pruebas.push(function () {
        /\.kpi\.ini-kpi-sel \{[^}]*border-top-color: var\(--accent\)/.test(css) && !/\.kpi\.ini-kpi-sel \{[^}]*border-left/.test(css),
        /\.ini-semaforo-op:focus-visible \{/.test(css)]);
   });
+});
+
+// ---------------------------------------------------------------------------
+// XD) "⬇ Descargar iniciativas": el .xlsx de lo filtrado, completo
+// ---------------------------------------------------------------------------
+// El libro se arma con el vendor REAL (experiencia/vendor/xlsx.mini.min.js)
+// y se vuelve a abrir con el mismo vendor para leer lo que quedo escrito.
+var XLSXV = require(path.join(raiz, 'experiencia', 'vendor', 'xlsx.mini.min.js'));
+// Descarga de prueba: guarda bytes y nombre; cuenta descargas y cargas.
+function Bajada() {
+  var b = { veces: 0, bytes: null, nombre: null, cargas: 0 };
+  b.cargar = function () { b.cargas++; return Promise.resolve(XLSXV); };
+  b.bajar = function (bytes, nombre) { b.veces++; b.bytes = bytes; b.nombre = nombre; };
+  b.libro = function () { return XLSXV.read(new Uint8Array(b.bytes), { type: 'array' }); };
+  b.hoja = function (nombre) { return XLSXV.utils.sheet_to_json(b.libro().Sheets[nombre], { defval: null }); };
+  b.parte = function (ruta) {
+    var zip = XLSXV.CFB.read(new Uint8Array(b.bytes), { type: 'array' });
+    var e = XLSXV.CFB.find(zip, ruta);
+    return e ? Buffer.from(e.content).toString('utf8') : null;
+  };
+  return b;
+}
+var HOY = new Date(2026, 9, 22);
+// `pedir` que cuenta: la descarga no debe pedir nada al servidor.
+function Contador(json) {
+  var c = { n: 0 };
+  c.pedir = function () { c.n++; return Promise.resolve(Respuesta(200, json)); };
+  return c;
+}
+function columna(filas, k) { return filas.map(function (f) { return f[k]; }); }
+
+pruebas.push(function () {
+  var cont = Contador(DATOS);
+  var p = Pagina(cont.pedir), reg = p.registro, b = Bajada();
+  return esperar().then(function () {
+    Check('XD1 boton habilitado con el registro cargado (ADM)', false, p.sel('regDescargar').disabled);
+    var antes = cont.n;
+    return reg.descargar(b.cargar, b.bajar, HOY).then(function (r) {
+      Check('XD2 descarga hecha, sin ninguna peticion al servidor', [true, 1, 0], [r, b.veces, cont.n - antes]);
+      Check('XD2 nombre con la fecha, sin filtro', 'Iniciativas_2026-10-22.xlsx', b.nombre);
+      var libro = b.libro();
+      Check('XD3 .xlsx real (zip PK) con dos hojas', [80, 75, ['Iniciativas', 'Categorías']],
+        [b.bytes[0], b.bytes[1], libro.SheetNames]);
+      var ini = b.hoja('Iniciativas'), cat = b.hoja('Categorías');
+      Check('XD3 encabezados de Iniciativas',
+        ['Código', 'Tipo de iniciativa', 'Título', 'Título del problema', 'Estado', 'Subestado', 'Agrupación', 'Medible',
+         'Product Owner', 'Service Owner', 'Director', 'Fecha de creación', 'Antigüedad (días)', 'Fecha análisis',
+         'Fecha solución', 'Fecha cierre', 'Fecha compromiso vigente', 'Semáforo', 'Categorías', 'Tickets a reducir',
+         'Tickets en riesgo', 'Descripción', 'Observaciones'],
+        XLSXV.utils.sheet_to_json(libro.Sheets.Iniciativas, { header: 1 })[0]);
+      Check('XD3 encabezados de Categorías',
+        ['Código', 'Título', 'Estado de la iniciativa', 'Categoría', 'Categoría N2', 'Agrupación', '% disminución',
+         'Tickets a reducir', 'Fecha análisis', 'Director', 'Product Owner', 'Service Owner'],
+        XLSXV.utils.sheet_to_json(libro.Sheets['Categorías'], { header: 1 })[0]);
+      Check('XD4 una fila por iniciativa, en el orden de la tabla (la entrada sin folio no sale)',
+        folios(p), columna(ini, 'Código'));
+      Check('XD5 PRB 1 con sus dos categorias; las demas con una',
+        ['PRB 2026-000001', 'PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'HAR 2025-000003'], columna(cat, 'Código'));
+      Check('XD5 rutas y % de PRB 1 (fraccion con formato %)', [['/A/Cat 1/Hoja', 0.5], ['/A/Cat 3', 0.25]],
+        cat.slice(0, 2).map(function (f) { return [f['Categoría'], f['% disminución']]; }));
+      Check('XD5 dueños de cada categoria (no los capturados)', ['PO 1', 'PO 2'], columna(cat.slice(0, 2), 'Product Owner'));
+      var sin = ini.filter(function (f) { return f['Código'] === 'PRB 2026-000005'; })[0];
+      Check('XD6 sin categoria: en Iniciativas con 0 categorias, ninguna fila inventada en Categorías',
+        [true, 0, false], [!!sin, sin && sin['Categorías'], columna(cat, 'Código').indexOf('PRB 2026-000005') >= 0]);
+      var prb1 = ini[0];
+      Check('XD7 Tickets a reducir / en riesgo = los del servidor (150), una vez', [150, 150],
+        [prb1['Tickets a reducir'], prb1['Tickets en riesgo']]);
+      var sumaIni = columna(ini, 'Tickets a reducir').reduce(function (a, v) { return a + v; }, 0);
+      var sumaCat = columna(cat, 'Tickets a reducir').reduce(function (a, v) { return a + v; }, 0);
+      Check('XD7 total de Iniciativas = total de Categorías = registro (225)', [225, 225], [sumaIni, sumaCat]);
+      Check('XD8 datos de la iniciativa', ['Problem', 'PO 1', 'SO x', 'Dir A', 'Sí', 'Atrasada', 'Desc PRB 2026-000001'],
+        [prb1['Tipo de iniciativa'], prb1['Product Owner'], prb1['Service Owner'], prb1.Director, prb1.Medible,
+         prb1['Semáforo'], prb1['Descripción']]);
+      var har = ini.filter(function (f) { return f['Código'] === 'HAR 2025-000003'; })[0];
+      Check('XD8 no activa: sin fecha compromiso vigente ni semaforo', [null, null, 'No'],
+        [har['Fecha compromiso vigente'], har['Semáforo'], har.Medible]);
+      // Fechas como fecha real de Excel: numero de serie (L = Fecha de creacion).
+      var celda = libro.Sheets.Iniciativas.L2;
+      Check('XD8 fecha de creacion: serie 46032 (2026-01-10)', ['n', 46032], [celda.t, celda.v]);
+      var estilos = b.parte('/xl/styles.xml'), h1 = b.parte('/xl/worksheets/sheet1.xml'), h2 = b.parte('/xl/worksheets/sheet2.xml');
+      Check('XD3 formato: estilos propios, encabezado congelado y autofiltro en las dos hojas',
+        [true, true, true, true, true, true],
+        [/formatCode="dd\/mm\/yyyy"/.test(estilos), /formatCode="0\.0%"/.test(estilos),
+         /<pane ySplit="1"[^>]*state="frozen"/.test(h1), /<pane ySplit="1"[^>]*state="frozen"/.test(h2),
+         /<autoFilter ref="A1:W6"/.test(h1), /<autoFilter ref="A1:L6"/.test(h2)]);
+    });
+  });
+});
+
+pruebas.push(function () {
+  var cont = Contador(DATOS);
+  var p = Pagina(cont.pedir), reg = p.registro, b = Bajada();
+  function foto() {
+    return { folios: folios(p), orden: JSON.stringify(reg.orden), limite: reg.limite, abierta: reg.abierta,
+      dir: p.sel('regDirector').value, cuenta: p.sel('regCuenta').textContent, filtros: p.sel('regFiltrosCuenta').textContent };
+  }
+  var antes;
+  return esperar().then(function () {
+    // Filtro, orden y detalle abierto: la descarga los respeta y no los toca.
+    elegir(p, 'regDirector', 'Dir A');
+    reg.ordenarPor('folio');
+    reg.ordenarPor('folio');                 // desc
+    reg.abrirDetalle('MAP 2026-000002');
+    antes = foto();
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function () {
+    Check('XD9 filtro Director: solo sus iniciativas, en el orden de la tabla (desc)',
+      ['PRB 2026-000001', 'MAP 2026-000002'], columna(b.hoja('Iniciativas'), 'Código'));
+    Check('XD9 categorias solo de esas iniciativas', ['PRB 2026-000001', 'PRB 2026-000001', 'MAP 2026-000002'],
+      columna(b.hoja('Categorías'), 'Código'));
+    Check('XD9 nombre marcado como filtrado', 'Iniciativas_2026-10-22_filtrado.xlsx', b.nombre);
+    Check('XD10 la vista queda igual: filtros, orden, pagina, detalle abierto', antes, foto());
+    // Busqueda.
+    elegir(p, 'regDirector', '');
+    p.sel('regBuscar').value = 'REQ'; reg.aplicarBusqueda();
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function () {
+    Check('XD9 busqueda REQ', ['REQ 2026-000004'], columna(b.hoja('Iniciativas'), 'Código'));
+    p.sel('regBuscar').value = ''; reg.aplicarBusqueda();
+    clicIndicador(p, 'cerradas');
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function () {
+    Check('XD9 indicador Cerradas', ['HAR 2025-000003'], columna(b.hoja('Iniciativas'), 'Código'));
+    clicIndicador(p, 'cerradas');
+    // Vacio: nada que bajar, aviso, boton deshabilitado.
+    p.sel('regBuscar').value = 'no-existe-zzz'; reg.aplicarBusqueda();
+    Check('XD11 sin resultados: boton deshabilitado', true, p.sel('regDescargar').disabled);
+    var veces = b.veces;
+    return reg.descargar(b.cargar, b.bajar, HOY).then(function (r) {
+      Check('XD11 sin resultados: no baja nada y lo dice', [false, veces, false, true],
+        [r, b.veces, p.sel('regDescargaMsg').hidden, /nada que descargar/.test(p.sel('regDescargaMsg').textContent)]);
+      Check('XD12 ninguna descarga pidio nada al servidor (solo la carga)', 1, cont.n);
+    });
+  });
+});
+
+pruebas.push(function () {
+  // 250 iniciativas: la tabla pinta 100 (PAGINA) y el libro lleva las 250.
+  var muchas = [];
+  for (var n = 1; n <= 250; n++) {
+    muchas.push(Ini('PRB 2026-' + ('00000' + n).slice(-6), { prefijo: 'PRB', f_creacion: '2026-01-01', tickets_reduce: 2,
+      categorias: [Cat('/A/X' + n, 1, 0.1, 'Dir A', 'PO 1', 'SO x'), Cat('/A/Y' + n, 1, 0.1, 'Dir A', 'PO 1', 'SO x')] }));
+  }
+  var datos = JSON.parse(JSON.stringify(DATOS));
+  datos.iniciativas = muchas;
+  var p = Pagina(ok(datos)), reg = p.registro, b = Bajada();
+  p.sel('regDescargar').textContent = '⬇ Descargar iniciativas';
+  return esperar().then(function () {
+    Check('XD13 la tabla muestra una pagina', [100, false], [folios(p).length, p.sel('regMas').hidden]);
+    // Doble clic: un solo libro.
+    var uno = reg.descargar(b.cargar, b.bajar, HOY), dos = reg.descargar(b.cargar, b.bajar, HOY);
+    Check('XD14 mientras prepara: boton deshabilitado y rotulo', [true, 'Preparando…'],
+      [p.sel('regDescargar').disabled, p.sel('regDescargar').textContent]);
+    return Promise.all([uno, dos]).then(function (r) {
+      Check('XD14 doble clic = una descarga', [[true, false], 1, 1], [r, b.veces, b.cargas]);
+      var codigos = columna(b.hoja('Iniciativas'), 'Código');
+      Check('XD13 el libro lleva las 250, cada una una vez, y sus 500 categorias', [250, 250, 500],
+        [codigos.length, Object.keys(codigos.reduce(function (o, k) { o[k] = 1; return o; }, {})).length,
+         b.hoja('Categorías').length]);
+      Check('XD14 al terminar: rotulo y boton de vuelta; pagina intacta', ['⬇ Descargar iniciativas', false, 100],
+        [p.sel('regDescargar').textContent, p.sel('regDescargar').disabled, folios(p).length]);
+    });
+  });
+});
+
+pruebas.push(function () {
+  // Error al cargar SheetJS: aviso, sin descarga, boton listo para reintentar.
+  var p = Pagina(ok(DATOS), null, 'MOD'), reg = p.registro, b = Bajada();
+  return esperar().then(function () {
+    Check('XD15 MOD tambien ve el boton habilitado', false, p.sel('regDescargar').disabled);
+    return reg.descargar(function () { return Promise.reject(new Error('no se pudo cargar x.js')); }, b.bajar, HOY);
+  }).then(function (r) {
+    Check('XD15 fallo: aviso visible, sin descarga, boton habilitado de nuevo',
+      [false, 0, false, 'No se pudo descargar el Excel: no se pudo cargar x.js', false],
+      [r, b.veces, p.sel('regDescargaMsg').hidden, p.sel('regDescargaMsg').textContent, p.sel('regDescargar').disabled]);
+  });
+});
+
+pruebas.push(function () {
+  // Sin ningun filtro: aviso antes de bajar el registro completo.
+  var p = Pagina(ok(DATOS)), reg = p.registro, b = Bajada();
+  var preguntas = [], respuesta = false;
+  reg.confirmar = function (m) { preguntas.push(m); return respuesta; };
+  return esperar().then(function () {
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function (r) {
+    Check('XD17 sin filtros: pregunta con la cifra', ['No hay filtros aplicados: se descargarán las 5 iniciativas del registro completo. ¿Continuar?'], preguntas);
+    Check('XD17 cancelar: no carga ni baja nada, sin mensaje, boton habilitado', [false, 0, 0, true, false],
+      [r, b.cargas, b.veces, p.sel('regDescargaMsg').hidden, p.sel('regDescargar').disabled]);
+    respuesta = true;
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function (r) {
+    Check('XD17 aceptar: baja las 5', [true, 1, 5], [r, b.veces, b.hoja('Iniciativas').length]);
+    preguntas = [];
+    elegir(p, 'regDirector', 'Dir A');
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function () {
+    Check('XD17 con un filtro no pregunta', [[], 2], [preguntas, b.veces]);
+    elegir(p, 'regDirector', '');
+    p.sel('regBuscar').value = 'PRB'; reg.aplicarBusqueda();
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function () {
+    Check('XD17 la busqueda cuenta como filtro: no pregunta', [[], 3], [preguntas, b.veces]);
+  });
+});
+
+pruebas.push(function () {
+  // Solo lectura y sin endpoint nuevo: el codigo de la descarga no hace
+  // fetch ni POST, y el unico origen sigue siendo el handler con ADM/MOD.
+  var libro = leer('admin/libro-iniciativas.js');
+  var reg = leer('admin/registro-iniciativas.js');
+  var desc = reg.slice(reg.indexOf('    descargar(cargar, bajar, hoy) {'), reg.indexOf('    textoVacio() {'));
+  var exp = reg.slice(reg.indexOf('  var ExportRegistro = {'), reg.indexOf('  // SheetJS: el MISMO vendor'));
+  Check('XD16 la descarga no pide nada ni escribe', [true, true, false, false, false],
+    [desc.length > 0, exp.length > 0, /fetch|XMLHttpRequest|\.ashx/.test(libro), /fetch|pedir|\.ashx|POST/.test(desc), /fetch|\.ashx|POST/.test(exp)]);
+  Check('XD16 el registro sigue exigiendo ADM/MOD antes de leer', true,
+    /if \(!AccesoAdmin\.Exigir\(context\)\) return;/.test(leer('handlers/admin_iniciativas_registro.ashx')));
+  Check('XD16 ningun handler nuevo de exportacion de iniciativas', [], fs.readdirSync(path.join(raiz, 'handlers'))
+    .filter(function (h) { return /iniciativas.*export|export.*iniciativas/i.test(h); }));
+  Check('XD16 libro-iniciativas.js antes de registro-iniciativas.js', true,
+    /libro-iniciativas\.js"><\/script>\s*<script src="registro-iniciativas\.js/.test(leer('admin/iniciativas.html')));
+  return Promise.resolve();
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

@@ -307,6 +307,10 @@
       <div class="ini-lista-cab">
         <h3 class="ini-lista-titulo">Registro</h3>
         <span class="ini-lista-cuenta" id="regCuenta" aria-live="polite"></span>
+        <!-- Excel de lo que pasa los filtros y la busqueda, completo (no solo
+             la pagina visible): registro-iniciativas.js, ExportRegistro +
+             admin/libro-iniciativas.js. Solo lectura, sin peticion nueva. -->
+        <button type="button" class="btn linea chico" id="regDescargar" disabled>⬇ Descargar iniciativas</button>
         <!-- Semaforo de la fecha compromiso sobre el registro COMPLETO
              (registro-iniciativas.js, pintarSemaforo): no sigue los filtros.
              Cada categoria filtra la lista como un indicador. -->
@@ -315,6 +319,8 @@
           <span class="ini-lista-ayuda">Elige una iniciativa para ver su detalle.</span>
         </div>
       </div>
+
+      <p class="ini-descarga-msg" id="regDescargaMsg" role="alert" hidden></p>
 
       <div class="ini-vacio" id="regVacio" hidden>
         <strong id="regVacioTexto">No hay iniciativas que coincidan con los filtros seleccionados.</strong>
@@ -838,6 +844,7 @@
 <script src="cascada-organizacional.js"></script>
 <script src="iniciativa-admin.js"></script>
 <script src="categorias-duenos.js"></script>
+<script src="libro-iniciativas.js"></script>
 <script src="registro-iniciativas.js"></script>
 <script src="solicitudes-cambio.js"></script>
 <script src="cambios-recientes.js"></script>
