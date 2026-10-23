@@ -116,7 +116,8 @@ var PESTANAS = [
   { pagina: 'qa/qa.html', tab: 'tab-qa', rejilla: 'qa-kpis' },
   { pagina: 'qare/qare.html', tab: 'tab-qare', rejilla: 'qare-kpis' },
   { pagina: 'analisis/analisis.html', tab: 'tab-analisis', rejilla: 'an-kpis' },
-  { pagina: 'orquestacion/orquestacion.html', tab: 'tab-orquestacion', rejilla: 'orq-kpis' }
+  { pagina: 'orquestacion/orquestacion.html', tab: 'tab-orquestacion', rejilla: 'orq-kpis' },
+  { pagina: 'efectividad/efectividad.html', tab: 'tab-efectividad', rejilla: 'ef-kpis' }
 ];
 function bloqueDeTab(html, tab) {
   var ini = html.indexOf('id="' + tab + '"');
@@ -141,7 +142,7 @@ Check('H2 dashboard.html carga la hoja y el script una vez', [1, 1], [
   (dash.match(/<link rel="stylesheet" href="assets\/css\/kpis-fijos\.css">/g) || []).length,
   (dash.match(/<script src="assets\/js\/kpis-fijos\.js"><\/script>/g) || []).length]);
 ['backlog/backlog.html', 'experiencia/experiencia.html', 'qa/qa.html', 'qare/qare.html', 'analisis/analisis.html',
- 'orquestacion/orquestacion.html'].forEach(function (p) {
+ 'orquestacion/orquestacion.html', 'efectividad/efectividad.html'].forEach(function (p) {
   var h = leer(p);
   Check('H3 ' + p + ' suelta: carga hoja y script', true,
     /href="\.\.\/assets\/css\/kpis-fijos\.css"/.test(h) && /src="\.\.\/assets\/js\/kpis-fijos\.js"/.test(h));
