@@ -2772,6 +2772,33 @@ pruebas.push(function () {
   });
 });
 
+// ---------------------------------------------------------------------------
+// HJ) Solo hojas: el servidor (CatalogoRutasIniciativa.Hojas) ya no manda
+//     carpetas en rutas / rutas_adm. Una iniciativa que YA tiene ligada una
+//     carpeta se abre y se edita sin reasignarla ni volver a ofrecerla.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var carpeta = '/S-Datos-Maestros/Centros/Catalogación';
+  var hojas = [carpeta + '/Agregar Centros en Surtidos', carpeta + '/Catalogación no reflejada', '/A/Cat 2'];
+  var ini = Ini('PRB 2026-000077', { categorias: [Cat(carpeta, 0.3), Cat('/A/Cat 2', 0.1)] });
+  var ed = new A.EdicionAdmin(ini, { rutas: hojas, pos: ['PO 1'], sos: ['SO x'] });
+  var h = A.htmlCategoriasEdicion(ed, null);
+  Check('HJ1 la carpeta ligada se ve en Modificar con su valor guardado', [true, carpeta],
+    [h.indexOf(carpeta) >= 0, ed.categorias.filas[0].categoria]);
+  Check('HJ2 el desplegable de agregar solo ofrece las hojas del catalogo (la carpeta no es opcion)', [false, true],
+    [h.indexOf('<option value="' + carpeta + '"') >= 0, h.indexOf('<option value="' + hojas[0] + '"') >= 0]);
+  Check('HJ3 elegir la carpeta a mano no se acepta; una hoja si', [false, true],
+    [ed.categorias.agregar(carpeta).ok, ed.categorias.agregar(hojas[0]).ok]);
+  ed.categorias.quitar(2);
+  ed.capturar('titulo', 'Titulo nuevo');
+  var envio = ed.paraEnviar();
+  Check('HJ4 cambiar solo el Titulo: no viaja nada de categorias (la carpeta no se toca)', [['accion', 'modificar'], ['folio', 'PRB 2026-000077'], ['titulo', 'Titulo nuevo']],
+    envio);
+  ed.categorias.capturarPct(0, '40');
+  Check('HJ5 su % sigue editable y viaja con la ruta guardada, tal cual', ['pct_categoria', carpeta],
+    ed.paraEnviar().filter(function (p) { return p[0] === 'pct_categoria'; })[0]);
+});
+
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
   .then(function () {
     console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\nTODO PASO');

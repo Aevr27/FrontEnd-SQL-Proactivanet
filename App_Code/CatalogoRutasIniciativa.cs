@@ -24,8 +24,16 @@
 // faltan. Un dueño que falta no se inventa ni se hereda de otra parte: se
 // dice que falta. La cascada de Nueva solicitud (ADM y MOD) sigue igual.
 //
-// No se filtra por profundidad ni por AplicaAProblemas: ninguna regla
-// verificada dice que solo ciertas rutas admitan iniciativas.
+// SOLO HOJAS (regla confirmada 2026-10-23): en Proactivanet un ticket no
+// se registra en una carpeta, hay que bajar hasta una categoria. Una ruta
+// activa con al menos una ruta activa debajo (P + "/" ...) es CARPETA y no
+// se puede elegir; sin ninguna debajo es HOJA. Sale de la jerarquia de las
+// rutas activas (Hojas), no de la profundidad, de AplicaAProblemas ni de
+// cuantos tickets o iniciativas tenga. Asignaciones y ElegiblesAdm solo
+// publican hojas, asi que el navegador y los validadores del servidor
+// (CatalogoSolicitud) usan la MISMA lista. Una iniciativa que ya tiene
+// ligada una carpeta la conserva: Modificar no revisa las ligadas contra
+// el catalogo, solo las que se agregan.
 //
 // SOLO LECTURA.
 
@@ -62,7 +70,7 @@ WHERE VigenteEnOrigen = 1
     // capacidad), en orden ordinal.
     public static Dictionary<string, object> Asignaciones(IEnumerable<string> rutas, DirectorioOrganizacional dir)
     {
-        var unicas = Unicas(rutas);
+        var unicas = Hojas(rutas);
 
         var filas = new List<object>();
         int sinDuenos = 0, noVigentes = 0;
@@ -98,7 +106,7 @@ WHERE VigenteEnOrigen = 1
     }
 
     // SOLO ADM (Crear / Modificar). { "rutas_adm": [ {categoria, director,
-    // po, so} ...], "rutas_adm_sin_duenos": n }: TODAS las rutas activas,
+    // po, so} ...], "rutas_adm_sin_duenos": n }: TODAS las HOJAS activas,
     // unicas con la misma identidad que Asignaciones (Normaliza + sin
     // distinguir mayusculas), sin filtrar por dueños ni por la vigencia de su
     // fila de dueños. Cada dueño es el que resuelve DirectorioOrganizacional
@@ -108,7 +116,7 @@ WHERE VigenteEnOrigen = 1
     {
         var filas = new List<object>();
         int sinDuenos = 0;
-        foreach (var ruta in Unicas(rutas))
+        foreach (var ruta in Hojas(rutas))
         {
             string c1, c1c2, po, so, director, manager;
             ExperienciaQueries.CortesDeRuta(ruta, out c1, out c1c2);
@@ -140,6 +148,27 @@ WHERE VigenteEnOrigen = 1
     public static Dictionary<string, object> Cargar(SqlConnection cn, DirectorioOrganizacional dir)
     {
         return Asignaciones(LeerRutasActivas(cn), dir);
+    }
+
+    // Las HOJAS de `rutas` (activas): normalizadas y unicas como Unicas,
+    // sin las que tienen otra ruta debajo. Cada prefijo hasta un "/" de cada
+    // ruta es una carpeta; el limite es el "/", asi "/A/Cat" no es carpeta
+    // por "/A/Catalogo/X" ni "/A" por "/AB". El prefijo se normaliza igual
+    // que las rutas (sin espacios / NBSP a los lados) y se compara sin
+    // distinguir mayusculas: la misma identidad de categoria del sitio.
+    public static List<string> Hojas(IEnumerable<string> rutas)
+    {
+        var unicas = Unicas(rutas);
+        var carpetas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in unicas)
+        {
+            for (var i = r.IndexOf('/', 1); i > 0; i = r.IndexOf('/', i + 1))
+            {
+                var padre = DirectorioOrganizacional.Normaliza(r.Substring(0, i));
+                if (padre != null) carpetas.Add(padre);
+            }
+        }
+        return unicas.FindAll(r => !carpetas.Contains(r));
     }
 
     // Rutas normalizadas, unicas sin distinguir mayusculas (la identidad de
