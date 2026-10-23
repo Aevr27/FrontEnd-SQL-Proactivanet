@@ -108,7 +108,7 @@ window.Iniciativas = (function () {
   // ni se envia archivo (el servidor tampoco lo exige: SolicitudIniciativa.
   // RcaEnSitio). enSitio = true vuelve a la regla de antes (obligatorio para
   // Problem). El correo lo dio el usuario; no sale de la base.
-  var RCA = { enSitio: false, correo: 'omaralus@soriana.com' };
+  var RCA = { enSitio: false, correo: 'problemTI@soriana.com' };
 
   // Rotulos de los campos obligatorios, para avisar cuales faltan. Las
   // claves son las de SolicitudNueva (Descripcion = 'analisis').

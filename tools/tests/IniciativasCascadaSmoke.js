@@ -844,7 +844,12 @@ pruebas.push(function () {
     (function () { var n = new I.SolicitudNueva(I.CatalogoIniciativas.desdeJson(JSON_OK)); n.elegirTipo('PRB'); return n.rcaObligatorio(); })());
 
   // RCA por correo (RCA.enSitio = false, hoy): ningun tipo lo pide.
-  Check('S2b hoy el RCA no va por el sitio; aviso al correo', [false, 'omaralus@soriana.com'], [I.RCA.enSitio, I.RCA.correo]);
+  Check('S2b hoy el RCA no va por el sitio; aviso al correo', [false, 'problemTI@soriana.com'], [I.RCA.enSitio, I.RCA.correo]);
+  // El correo vive en dos lugares (RCA.correo y la nota de la pagina): el mismo, y el anterior ya no.
+  var notaRca = /id="iniRcaCorreo">Adjuntar RCA al correo <a href="mailto:([^"]+)">([^<]+)<\/a>/.exec(leer('admin/iniciativas.html'));
+  Check('S2d la nota de la pagina y RCA.correo dicen el mismo correo; omaralus ya no es el destino del RCA',
+    [I.RCA.correo, I.RCA.correo, false, false],
+    [notaRca && notaRca[1], notaRca && notaRca[2], /omaralus/i.test(leer('admin/iniciativas.html')), /omaralus/i.test(leer('admin/iniciativas.js'))]);
   (function () {
     var n = new I.SolicitudNueva(cat);
     n.elegirTipo('PRB');
@@ -933,7 +938,7 @@ pruebas.push(function () {
   return P.cargar(pedir).then(function () {
     Check('S16 selector: Problem primero', ['PRB', 'ADO', 'MAP'], p.sel('selTipo').opciones());
     Check('S16 RCA: archivo oculto, aviso del correo visible', [true, false, true],
-      [p.sel('iniRcaArchivo').hidden, p.sel('iniRcaCorreo').hidden, /<p class="ini-nota" id="iniRcaCorreo">Adjuntar RCA al correo <a href="mailto:omaralus@soriana\.com">omaralus@soriana\.com<\/a><\/p>/.test(leer('admin/iniciativas.html'))]);
+      [p.sel('iniRcaArchivo').hidden, p.sel('iniRcaCorreo').hidden, /<p class="ini-nota" id="iniRcaCorreo">Adjuntar RCA al correo <a href="mailto:problemTI@soriana\.com">problemTI@soriana\.com<\/a><\/p>/.test(leer('admin/iniciativas.html'))]);
     elegirEn(p, 'selTipo', 'PRB');
     Check('S17 Problem: el RCA no se exige (va por correo)', ['false', true, true, false],
       [p.sel('campoRca').getAttribute('aria-required'), p.sel('rotRcaObligatorio').hidden, p.sel('iniRcaArchivo').hidden, p.sel('iniRcaCorreo').hidden]);
