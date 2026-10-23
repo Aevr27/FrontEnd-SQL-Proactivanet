@@ -14,7 +14,11 @@
 //      modulo), el clic en un hijo cuenta, un elemento sin el atributo no,
 //      conectar dos veces no duplica; Enter / espacio llegan como clic del
 //      <button>; enfocar() devuelve el foco al boton pulsado tras repintar.
+//   C) clases() y boton(): la tarjeta y el boton que la cubre, con las
+//      reglas de assets/css/kpi.css (y ya no en admin/iniciativas.css).
 //   S) El script no guarda nada en el navegador ni pide datos.
+//   L) Carga: una vez en dashboard.html (los modulos embebidos pierden sus
+//      <script>), y en cada pagina suelta que lo usa, antes de su modulo.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -86,6 +90,26 @@ Check('A2 la que limpia va sin aria-pressed (es una accion)', ' data-indicador="
 var o = new SeleccionKpi({ atributo: 'data-kpi' });
 Check('A3 atributo propio', ' data-kpi="a" aria-pressed="false"', o.atributos('a'));
 Check('A3 escapado', ' data-kpi="a&quot;&lt;b" aria-pressed="false"', o.atributos('a"<b'));
+
+// ---- C) clases y boton ----
+var cb = nueva(hoy); cb.alternar('activas');
+Check('C1 clases: elegida', ' kpi-filtrable kpi-sel', cb.clases('activas'));
+Check('C1 clases: no elegida', ' kpi-filtrable', cb.clases('cerradas'));
+Check('C1 clases: la que limpia nunca se marca', ' kpi-filtrable', cb.clases('total'));
+Check('C2 boton: cubre la tarjeta, con atributos y nombre accesible',
+  '<button type="button" class="kpi-filtro" data-indicador="activas" aria-pressed="true" aria-label="Activas: 12"></button>',
+  cb.boton('activas', 'Activas: 12'));
+Check('C2 boton: title opcional y escapado',
+  '<button type="button" class="kpi-filtro" data-indicador="total" aria-label="A &quot;b&quot;" title="x&lt;y"></button>',
+  cb.boton('total', 'A "b"', 'x<y'));
+var kpiCss = leer('assets/css/kpi.css'), iniCss = leer('admin/iniciativas.css');
+Check('C3 kpi.css: boton que cubre, foco visible, marca sin tocar la franja izquierda', [true, true, true, false],
+  [/\.kpi-filtro \{[^}]*position: absolute; inset: 0; z-index: 1;/.test(kpiCss),
+   /\.kpi-filtrable:has\(> \.kpi-filtro:focus-visible\) \{ outline: 2px solid/.test(kpiCss),
+   /\.kpi\.kpi-sel \{[^}]*border-top-color/.test(kpiCss),
+   /\.kpi\.kpi-sel \{[^}]*border-left/.test(kpiCss)]);
+Check('C3 la marca tambien tiñe el rotulo de QA (.kpi-tit)', true, /\.kpi\.kpi-sel \.kpi-tit/.test(kpiCss));
+Check('C4 admin/iniciativas.css ya no lleva copia', false, /kpi-filtr|kpi-sel/.test(iniCss.replace(/\/\*[\s\S]*?\*\//g, '')));
 
 // ---- D) DOM ----
 // Nodos minimos: padre, atributos, closest, querySelectorAll, foco y
@@ -168,6 +192,30 @@ var src = leer('assets/js/seleccion-kpi.js').replace(/\/\*[\s\S]*?\*\//g, '').re
 Check('S1 sin localStorage, sessionStorage, cookies ni fetch', false,
   /localStorage|sessionStorage|document\.cookie|fetch\(|XMLHttpRequest/.test(src));
 Check('S2 un solo global: window.SeleccionKpi', ['SeleccionKpi'], Object.keys(ventana));
+
+// ---- L) Carga ----
+var SCRIPT = /<script src="(?:\.\.\/)?assets\/js\/seleccion-kpi\.js"><\/script>/g;
+function veces(html) { return (html.match(SCRIPT) || []).length; }
+var tablero = leer('dashboard.html');
+Check('L1 dashboard.html lo carga una vez, antes de dashboard.js', [1, true],
+  [veces(tablero), tablero.search(SCRIPT) < tablero.indexOf('<script src="dashboard.js">')]);
+// Paginas sueltas: lo cargan una vez y antes de su modulo. Embebidas, el
+// <script> se quita (moduloEmbebido) y usan la copia del tablero.
+[['admin/iniciativas.html', 'registro-iniciativas.js'], ['orquestacion/orquestacion.html', 'orquestacion.js'],
+ ['efectividad/efectividad.html', 'efectividad.js'], ['experiencia/experiencia.html', 'experiencia.js'],
+ ['qa/qa.html', 'qa.js'], ['backlog/backlog.html', 'backlog.js']].forEach(function (x) {
+  var html = leer(x[0]);
+  Check('L2 ' + x[0] + ': una vez, antes de ' + x[1], [1, true],
+    [veces(html), html.search(SCRIPT) >= 0 && html.search(SCRIPT) < html.indexOf('<script src="' + x[1] + '">')]);
+});
+// Cada modulo que lo usa lo toma de window y no se rompe si falta.
+['orquestacion/orquestacion.js', 'efectividad/efectividad.js', 'experiencia/experiencia.js', 'qa/qa.js', 'backlog/backlog.js']
+  .forEach(function (f) {
+    var js = leer(f);
+    Check('L3 ' + f + ': window.SeleccionKpi con guarda y un solo escucha', [true, 1],
+      [/window\.SeleccionKpi\)?\s*\?/.test(js) || /var SK = window\.SeleccionKpi;[\s\S]*SK \? new SK/.test(js),
+       (js.match(/\.escuchar\(/g) || []).length]);
+  });
 
 console.log(fallos ? '\n' + fallos + ' FALLARON' : '\nTODO PASO');
 process.exit(fallos ? 1 : 0);
