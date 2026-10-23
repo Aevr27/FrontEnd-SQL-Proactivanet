@@ -1000,6 +1000,120 @@ window.RegistroIniciativas = (function () {
   }
 
   // ---------------------------------------------------------------------
+  // ExportRegistro: las dos hojas de "⬇ Descargar iniciativas"
+  // ---------------------------------------------------------------------
+  // Lo que exporta es lo que la lista muestra: las iniciativas de
+  // filtradas() (Estado, Tipo, Director, cascada, busqueda e indicador)
+  // COMPLETAS, sin "Mostrar mas", en el orden de la tabla (ordenar). No
+  // pide nada al servidor: usa el registro ya cargado
+  // (admin_iniciativas_registro.ashx, ADM/MOD). Ninguna cifra se calcula
+  // aqui: van las del servidor o las mismas reglas de la vista.
+  //
+  //   Iniciativas  una fila por folio (dbo.Problem).
+  //   Categorías   una fila por (Codigo, Categoria) de esas iniciativas
+  //                (dbo.ProblemCategoria, ya deduplicada por el servidor):
+  //                TODAS sus categorias, no solo la que paso un filtro de
+  //                Categoria (el filtro elige iniciativas, no categorias).
+  //                Las sin categoria no aportan filas ni se inventan.
+  // Tickets a reducir de la iniciativa es el del servidor (suma de sus
+  // categorias, la regla de Experiencia); no se vuelve a sumar.
+  //
+  // Columna: [encabezado, tipo (LibroIniciativas), ancho, valor(i, registro)].
+  var ROTULO_SEMAFORO = { sin_fecha: 'Sin fecha', atrasada: 'Atrasada', en_tiempo: 'En tiempo', sin_control: 'Sin control de fecha' };
+  function siNo(v) { return v ? 'Sí' : 'No'; }
+  var ExportRegistro = {
+    COLUMNAS_INICIATIVAS: [
+      ['Código', 'texto', 17, function (i) { return i.folio; }],                                 // Problem.Codigo
+      ['Tipo de iniciativa', 'texto', 18, function (i, r) { return i.prefijo ? r.nombreTipo(i.prefijo) : ''; }], // CatPrefijoProblem por Problem.Prefijo
+      ['Título', 'texto', 45, function (i) { return i.titulo; }],                                // ProblemCategoria.TituloIniciativa o Problem.Titulo
+      ['Título del problema', 'texto', 45, function (i) { return i.titulo_problem; }],           // Problem.Titulo
+      ['Estado', 'texto', 14, function (i) { return i.estado; }],
+      ['Subestado', 'texto', 16, function (i) { return i.subestado; }],                          // Problem.Subestado
+      ['Agrupación', 'texto', 13, function (i) { return i.agrup; }],                             // TipoAgrupado (sin categoria: Problem.TipoIniciativa)
+      ['Medible', 'texto', 10, function (i) { return siNo(i.seguimiento); }],                    // indicador "Iniciativas medibles"
+      ['Product Owner', 'texto', 26, function (i) { return duenoCapturado(i, 'po'); }],          // Problem.OwnerProblem
+      ['Service Owner', 'texto', 26, function (i) { return duenoCapturado(i, 'so'); }],          // Problem.OwnerServicio
+      ['Director', 'texto', 26, function (i) { return duenos(i, 'director').join('; '); }],      // de sus categorias (sin categoria: Problem.Direccion)
+      ['Fecha de creación', 'fecha', 12, function (i) { return fechaCreacion(i); }],             // Problem.FechaCreacion
+      ['Antigüedad (días)', 'entero', 11, function (i) { return diasDesdeCreacion(i); }],
+      ['Fecha análisis', 'fecha', 12, function (i) { return i.f_analisis; }],                     // Problem.FechaAnalisis
+      ['Fecha solución', 'fecha', 12, function (i) { return i.f_solucion; }],                     // FechaSolucion
+      ['Fecha cierre', 'fecha', 12, function (i) { return i.f_cierre; }],                         // FechaCierre
+      ['Fecha compromiso vigente', 'fecha', 13, function (i) { return i.activa ? fechaCompromiso(i) : ''; }],
+      ['Semáforo', 'texto', 14, function (i) { return ROTULO_SEMAFORO[Registro.semaforoFecha(i)] || ''; }],
+      ['Categorías', 'entero', 11, function (i) { return i.categorias.length; }],
+      ['Tickets a reducir', 'entero', 12, function (i) { return numero(i.tickets_reduce); }],
+      ['Tickets en riesgo', 'entero', 12, function (i) { return numero(i.riesgo_folio); }],
+      ['Descripción', 'texto', 60, function (i) { return i.descripcion; }],                       // Problem.Descripcion
+      ['Observaciones', 'texto', 60, function (i) { return i.observaciones; }]                    // Problem.Observaciones
+    ],
+    // c = la categoria, i = su iniciativa.
+    COLUMNAS_CATEGORIAS: [
+      ['Código', 'texto', 17, function (c, i) { return i.folio; }],                               // ProblemCategoria.Codigo
+      ['Título', 'texto', 45, function (c, i) { return i.titulo; }],
+      ['Estado de la iniciativa', 'texto', 14, function (c, i) { return i.estado; }],
+      ['Categoría', 'texto', 50, function (c) { return c.categoria; }],                           // ProblemCategoria.Categoria
+      ['Categoría N2', 'texto', 24, function (c) { return c.n2; }],                               // CatCategoriaDueno.CategoriaN2 de su C1&C2
+      ['Agrupación', 'texto', 13, function (c) { return c.agrup; }],                              // ProblemCategoria.TipoAgrupado
+      ['% disminución', 'pct', 12, function (c) { return c.pct_dism; }],                          // ProblemCategoria.PctDisminucion
+      ['Tickets a reducir', 'entero', 12, function (c) { return c.tickets_reduce; }],             // calculado (ExpTicketsReduce) o ProblemCategoria.TicketsReduce
+      ['Fecha análisis', 'fecha', 12, function (c) { return c.f_analisis; }],                      // la efectiva (propia o la de la iniciativa)
+      ['Director', 'texto', 26, function (c) { return c.director; }],                             // dueños de la categoria (CatCategoriaDueno)
+      ['Product Owner', 'texto', 26, function (c) { return c.po; }],
+      ['Service Owner', 'texto', 26, function (c) { return c.so; }]
+    ],
+
+    // Las hojas para LibroIniciativas.construir. `lista` ya filtrada y
+    // ordenada (la vista pasa ordenar(filtradas(), orden)).
+    hojas(lista, registro) {
+      function columnas(defs) { return defs.map(function (d) { return { t: d[0], tipo: d[1], ancho: d[2] }; }); }
+      var cI = ExportRegistro.COLUMNAS_INICIATIVAS, cC = ExportRegistro.COLUMNAS_CATEGORIAS;
+      var filasCat = [];
+      lista.forEach(function (i) {
+        i.categorias.forEach(function (c) { filasCat.push(cC.map(function (d) { return d[3](c, i); })); });
+      });
+      return [
+        { nombre: 'Iniciativas', columnas: columnas(cI),
+          filas: lista.map(function (i) { return cI.map(function (d) { return d[3](i, registro); }); }) },
+        { nombre: 'Categorías', columnas: columnas(cC), filas: filasCat }
+      ];
+    },
+
+    // Iniciativas_aaaa-mm-dd[_filtrado].xlsx; `hoy` es un Date (fecha local).
+    nombre(hoy, filtrado) {
+      function dos(n) { return (n < 10 ? '0' : '') + n; }
+      return 'Iniciativas_' + hoy.getFullYear() + '-' + dos(hoy.getMonth() + 1) + '-' + dos(hoy.getDate()) +
+        (filtrado ? '_filtrado' : '') + '.xlsx';
+    }
+  };
+
+  // SheetJS: el MISMO vendor de Experiencia y QARE, traido la primera vez
+  // que se pulsa el boton (si otra pestaña ya lo cargo, se reusa).
+  var URL_XLSX = '../experiencia/vendor/xlsx.mini.min.js';
+  var xlsxCargando = null;
+  function cargarXLSX() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (!xlsxCargando) {
+      xlsxCargando = new Promise(function (listo, fallo) {
+        var s = document.createElement('script');
+        s.src = URL_XLSX;
+        s.onload = function () { listo(window.XLSX); };
+        s.onerror = function () { xlsxCargando = null; fallo(new Error('no se pudo cargar ' + URL_XLSX)); };
+        document.head.appendChild(s);
+      });
+    }
+    return xlsxCargando;
+  }
+  function bajarArchivo(bytes, nombre) {
+    var url = URL.createObjectURL(new Blob([bytes],
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    var a = document.createElement('a');
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+
+  // ---------------------------------------------------------------------
   // VistaRegistro
   // ---------------------------------------------------------------------
   var SELECTS_ORG = ['regPo', 'regSo', 'regCategoria'];
@@ -1458,6 +1572,8 @@ window.RegistroIniciativas = (function () {
       // Texto de ADM (titulo, descripcion, observaciones) abierto como
       // editor; los demas se ven como texto normal. null = ninguno.
       this.editando = null;
+      // "Descargar iniciativas" en curso: un segundo clic no arma otro libro.
+      this.descargando = false;
       // Pregunta antes de descartar cambios sin guardar: (mensaje) -> bool.
       // null = window.confirm; sin forma de preguntar, no se descarta.
       this.confirmar = null;
@@ -1660,6 +1776,7 @@ window.RegistroIniciativas = (function () {
       this.$('regLimpiar').addEventListener('click', function () { self.limpiarFiltros(); });
       this.$('regLimpiarVacio').addEventListener('click', function () { self.limpiarFiltros(); });
       this.$('regMas').addEventListener('click', function () { self.limite += PAGINA; self.pintarTabla(); });
+      this.$('regDescargar').addEventListener('click', function () { self.descargar(); });
       // Indicadores y semaforo: un clic filtra la lista por ese indicador y
       // otro en el mismo lo quita. Son <button>: Enter y espacio tambien. La
       // franja "Criterio" no lleva data-indicador: no filtra.
@@ -2340,6 +2457,53 @@ window.RegistroIniciativas = (function () {
       var quedan = lista.length - visibles.length;
       this.$('regMas').hidden = quedan <= 0;
       this.$('regMas').textContent = 'Mostrar ' + fmt(Math.min(PAGINA, quedan)) + ' más';
+      // Sin iniciativas que exportar, el boton no se ofrece.
+      this.$('regDescargar').disabled = vacio || this.descargando;
+    }
+
+    // "⬇ Descargar iniciativas": el .xlsx de lo que hoy pasa los filtros y
+    // la busqueda, COMPLETO y en el orden de la tabla (ExportRegistro). Solo
+    // lee: no toca filtro, orden, pagina ni detalle, y no pide nada al
+    // servidor. `cargar` (-> Promise de XLSX), `bajar` (bytes, nombre) y
+    // `hoy` son para las pruebas; por omision SheetJS, un <a download> y
+    // la fecha local.
+    descargar(cargar, bajar, hoy) {
+      if (this.descargando || !this.registro || !this.filtro) return Promise.resolve(false);
+      var self = this, btn = this.$('regDescargar'), msg = this.$('regDescargaMsg');
+      var lista = ordenar(this.filtradas(), this.orden);
+      msg.hidden = true;
+      msg.textContent = '';
+      if (!lista.length) {
+        msg.textContent = 'No hay iniciativas que coincidan con los filtros: no hay nada que descargar.';
+        msg.hidden = false;
+        return Promise.resolve(false);
+      }
+      var registro = this.registro;
+      var filtrado = lista.length < registro.iniciativas.length;
+      var rotulo = btn.textContent;
+      this.descargando = true;
+      btn.disabled = true;
+      btn.textContent = 'Preparando…';
+      return Promise.resolve()
+        .then(function () { return (cargar || cargarXLSX)(); })
+        .then(function (XLSX) {
+          if (!XLSX || !window.LibroIniciativas) throw new Error('no se pudo cargar el generador de Excel.');
+          var bytes = window.LibroIniciativas.construir(XLSX, ExportRegistro.hojas(lista, registro));
+          (bajar || bajarArchivo)(bytes, ExportRegistro.nombre(hoy || new Date(), filtrado));
+          return true;
+        })
+        .catch(function (err) {
+          if (typeof console !== 'undefined') console.error('[Iniciativas descarga]', err);
+          msg.textContent = 'No se pudo descargar el Excel: ' + ((err && err.message) || 'error desconocido.');
+          msg.hidden = false;
+          return false;
+        })
+        .then(function (r) {
+          self.descargando = false;
+          btn.textContent = rotulo;
+          btn.disabled = !self.registro || self.filtradas().length === 0;
+          return r;
+        });
     }
 
     textoVacio() {
@@ -3513,6 +3677,7 @@ window.RegistroIniciativas = (function () {
     CAMPOS_CAMBIO: CAMPOS_CAMBIO,
     etiquetarHistorial: etiquetarHistorial,
     ordenar: ordenar,
+    ExportRegistro: ExportRegistro,
     VistaRegistro: VistaRegistro
   };
 })();
