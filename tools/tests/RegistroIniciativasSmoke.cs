@@ -249,6 +249,37 @@ public static class RegistroSmoke
         Check("13 escritura: Adopcion cerrada no consume", false, cc("Cerrado", "Adopción"));
         Check("13 escritura: ReqOpr no consume", false, cc("En Análisis", "ReqOpr"));
 
+        // 14) Columnas de "Descargar iniciativas" (?export=1): filas crudas de
+        // los dos SELECT -> listas con nulos como null (no 0), fecha
+        // aaaa-mm-dd, ruta normalizada y (folio, ruta) repetida una vez.
+        var probs = new List<object[]> {
+            new object[] { "PRB 1", "Ger", "Dir", "Problem", "Alta", "Alto", "Si", 1200, new DateTime(2026, 1, 15, 9, 30, 0) },
+            new object[] { "PRB 5", DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value, DBNull.Value },
+            new object[] { DBNull.Value, "sin folio", null, null, null, null, null, null, null },
+        };
+        var catsX = new List<object[]> {
+            new object[] { "PRB 1", "/A/Cat 1 ", "Incidente", "Problem", 3 },
+            new object[] { "PRB 1", "/A/Cat 1", "Repetida", "Problem", 9 },
+            new object[] { "PRB 1", "/A/Cat 3", DBNull.Value, DBNull.Value, DBNull.Value },
+            new object[] { "PRB 1", DBNull.Value, "sin ruta", null, null },
+        };
+        var xr = (Dictionary<string, object>)M("ArmarExportExtra").Invoke(null, new object[] { probs, catsX });
+        var xi = (IList)xr["iniciativas"];
+        var xc = (IList)xr["categorias"];
+        var x1 = (Dictionary<string, object>)xi[0];
+        var x5 = (Dictionary<string, object>)xi[1];
+        Check("14 export: una fila por Problem con folio", "PRB 1|PRB 5", string.Join("|", ToFolios(xi)));
+        Check("14 export: columnas de dbo.Problem", "Ger|Dir|Problem|Alta|Alto|Si|1200|2026-01-15",
+            x1["gerencia"] + "|" + x1["direccion"] + "|" + x1["tipo_iniciativa"] + "|" + x1["prioridad"] + "|" +
+            x1["impacto"] + "|" + x1["rca"] + "|" + x1["volumetria_original"] + "|" + x1["f_entrega_prb"]);
+        Check("14 export: nulos siguen null (volumetria no se vuelve 0)", "True|True|True",
+            (x5["gerencia"] == null) + "|" + (x5["volumetria_original"] == null) + "|" + (x5["f_entrega_prb"] == null));
+        var xc1 = (Dictionary<string, object>)xc[0];
+        var c3 = (Dictionary<string, object>)xc[1];
+        Check("14 export: categorias normalizadas, repetida y sin ruta fuera", "2|/A/Cat 1|Incidente|Problem|3",
+            xc.Count + "|" + xc1["categoria"] + "|" + xc1["tipo_ticket"] + "|" + xc1["tipo_iniciativa"] + "|" + xc1["mes_reduccion"]);
+        Check("14 export: mes_reduccion nulo sigue null", "True", c3["mes_reduccion"] == null);
+
         // 8) Solo lectura
         var fuente = File.ReadAllText("App_Code/ExperienciaRegistro.cs");
         var codigo = Regex.Replace(fuente, @"//[^\n]*", "");

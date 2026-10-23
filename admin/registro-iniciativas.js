@@ -18,8 +18,12 @@
    ---------------------------------------------------------------
    Los filtros y la busqueda solo deciden la lista; los indicadores cambian
    solo cuando cambia el registro (carga, o relectura tras guardar).
-     Total            abiertas: estado distinto de Cerrado (comparado con
-                      plano(): sin mayusculas, acentos ni espacios de mas).
+     Total            TODAS las iniciativas del registro, Cerradas incluidas
+                      (2026-10-23; antes eran las abiertas). Es la poblacion
+                      por omision: su clic no filtra, quita el indicador.
+                      Las abiertas (estado distinto de Cerrado, comparado
+                      con plano(): sin mayusculas, acentos ni espacios de
+                      mas) siguen contandose como `abiertas`, sin tarjeta.
      Activas          `seguimiento`: estado en estados_activos y agrupacion
                       en agrupadores. Es el criterio de la tabla "Activas"
                       de Experiencia (filasBaseAct). Incluye las sin
@@ -35,15 +39,15 @@
                       Reemplaza a "Fuera de Activas" (2026-10-16): en la VM
                       esas 223 eran 185 ReqOpr + 38 "Adopcion" con tilde,
                       que el servidor ya reconoce (Canonizar). fueraActivas
-                      se sigue calculando (Total = Activas + fueraActivas),
-                      sin tarjeta.
+                      se sigue calculando (abiertas = Activas +
+                      fueraActivas), sin tarjeta.
      Atrasadas        `seguimiento` y `retrazado`, solo las que tienen
                       categoria: el criterio del KPI "Iniciativas
                       Retrasadas" de Experiencia (aqui se rotula Atrasadas). El pie suma riesgo_folio
                       ("tickets en riesgo").
      Cerradas         estado Cerrado (el mismo plano()). Otros estados no
-                      activos NO cuentan aqui: van en Total.
-   Total + Cerradas = todas las iniciativas del registro.
+                      activos NO cuentan aqui (si en Total).
+   abiertas + Cerradas = Total = todas las iniciativas del registro.
    Cada regla vive UNA vez (CONDICION_KPI): la usan la cuenta del
    indicador y su filtro, asi que no pueden separarse.
 
@@ -52,7 +56,12 @@
    Un clic en una tarjeta (o en una categoria del semaforo) acota la LISTA
    a las iniciativas que cuenta ese indicador (FiltroRegistro.indicador,
    Registro.cumpleIndicador); otro clic en el mismo lo quita. Uno a la vez:
-   elegir otro reemplaza al anterior. Se combina en Y con Estado, Tipo,
+   elegir otro reemplaza al anterior. Total no es un filtro: su clic quita
+   el indicador elegido y la lista vuelve a todas las iniciativas que dejan
+   pasar los demas filtros (que no se tocan). La mecanica (elegir, quitar,
+   reemplazar, conservar en la relectura, atributos, escucha y foco) es la
+   compartida de assets/js/seleccion-kpi.js (SeleccionKpi); las reglas de
+   cada indicador siguen aqui. Se combina en Y con Estado, Tipo,
    Director, cascada y busqueda; ninguno de ellos se toca (Cerradas con
    Cerrado desmarcado en Estado = lista vacia, y lo dice). Cuenta como un
    filtro activo y "Limpiar filtros" lo quita. Las cifras NO se mueven: se
@@ -229,6 +238,8 @@ window.RegistroIniciativas = (function () {
   // El catalogo de categorias de Nueva solicitud. Solo se pide al abrir la
   // Cobertura, nunca al cargar la pagina.
   var URL_CATALOGO = '../handlers/admin_iniciativas_catalogos.ashx';
+  // Columnas extra del Excel: el mismo handler, solo al pulsar Descargar.
+  var URL_EXPORT = URL_REGISTRO + '?export=1';
   // Solicitudes de cambio (sql/22): la accion va en la URL.
   var URL_SOLICITUDES = '../handlers/admin_iniciativas_solicitudes.ashx';
 
@@ -242,6 +253,7 @@ window.RegistroIniciativas = (function () {
     return h.slice(0, 8) + '-' + h.slice(8, 12) + '-4' + h.slice(13, 16) + '-a' + h.slice(17, 20) + '-' + h.slice(20, 32);
   }
   var CascadaOrganizacional = window.CascadaOrganizacional;
+  var SeleccionKpi = window.SeleccionKpi;
 
   // Cuantas filas pinta la tabla de una vez; "Mostrar mas" agrega otras
   // tantas. El filtro y el orden van siempre sobre el registro completo.
@@ -305,9 +317,14 @@ window.RegistroIniciativas = (function () {
   // La regla de cada indicador, en el orden de ROTULOS_KPI (ver la
   // cabecera). La cuentan Registro.indicadores y la aplica el filtro por
   // indicador: es la MISMA funcion.
+  // Total cuenta todas (su condicion siempre se cumple) y es la clave que
+  // limpia (INDICADOR_TODAS): elegirla deja la lista sin indicador.
   var CLAVES_KPI = ['total', 'activas', 'requerimientos', 'retrasadas', 'cerradas'];
+  var INDICADOR_TODAS = 'total';
+  // El atributo que lleva la clave en cada boton (tarjetas y semaforo).
+  var ATRIBUTO_INDICADOR = 'data-indicador';
   var CONDICION_KPI = {
-    total: function (i) { return !esCerrada(i); },
+    total: function () { return true; },
     activas: function (i) { return !!i.seguimiento; },
     requerimientos: function (i) { return !esCerrada(i) && Registro.esRequerimiento(i); },
     retrasadas: function (i) { return !!i.seguimiento && i.retrazado > 0 && !i.sin_categoria; },
@@ -341,10 +358,10 @@ window.RegistroIniciativas = (function () {
   function esTexto(v) { return typeof v === 'string' && v !== ''; }
 
   // GET del registro -> su JSON; rechaza con el mensaje para la vista.
-  function leerRegistro(pedir) {
+  function leerRegistro(pedir, url) {
     return Promise.resolve()
       .then(function () {
-        return Promise.resolve(pedir(URL_REGISTRO)).catch(function () {
+        return Promise.resolve(pedir(url || URL_REGISTRO)).catch(function () {
           throw new Error('No se pudo conectar con el servidor.');
         });
       })
@@ -596,14 +613,16 @@ window.RegistroIniciativas = (function () {
     }
 
     // Los cinco indicadores sobre una lista de iniciativas (la vista le
-    // pasa el registro completo, no lo filtrado). total = abiertas;
-    // fueraActivas = total - activas (ver la cabecera).
+    // pasa el registro completo, no lo filtrado). total = todas;
+    // abiertas = no Cerradas; fueraActivas = abiertas - activas (ver la
+    // cabecera).
     static indicadores(lista) {
-      var r = { total: 0, sinCategoria: 0, activas: 0, reduceActivas: 0, fueraActivas: 0,
+      var r = { total: 0, abiertas: 0, sinCategoria: 0, activas: 0, reduceActivas: 0, fueraActivas: 0,
                 requerimientos: 0, retrasadas: 0, riesgo: 0, cerradas: 0 };
       var c = CONDICION_KPI;
       lista.forEach(function (i) {
         if (c.cerradas(i)) r.cerradas++;
+        else r.abiertas++;
         if (c.total(i)) {
           r.total++;
           if (i.sin_categoria) r.sinCategoria++;
@@ -618,7 +637,7 @@ window.RegistroIniciativas = (function () {
           r.riesgo += numero(i.riesgo_folio);
         }
       });
-      r.fueraActivas = r.total - r.activas;
+      r.fueraActivas = r.abiertas - r.activas;
       return r;
     }
 
@@ -709,15 +728,16 @@ window.RegistroIniciativas = (function () {
       this.cascada = new CascadaOrganizacional(registro.filasOrganizacionales(''), 'filtro');
       this.busqueda = new Busqueda('');
       // Indicador elegido con un clic ('' = ninguno; ver la cabecera). Como
-      // la busqueda, solo acota la lista (aplicar), no la Cobertura.
-      this.indicador = '';
+      // la busqueda, solo acota la lista (aplicar), no la Cobertura. La
+      // mecanica es SeleccionKpi; que clave existe lo dice el Registro.
+      this.seleccion = new SeleccionKpi({ valida: Registro.esIndicador, limpian: [INDICADOR_TODAS] });
     }
 
-    // El mismo indicador lo quita; otro lo reemplaza; uno que no existe, nada.
-    alternarIndicador(k) {
-      if (k === this.indicador) this.indicador = '';
-      else if (Registro.esIndicador(k)) this.indicador = k;
-    }
+    get indicador() { return this.seleccion.clave; }
+
+    // El mismo indicador lo quita; otro lo reemplaza; Total lo quita; uno
+    // que no existe, nada. -> true si cambio.
+    alternarIndicador(k) { return this.seleccion.alternar(k); }
     pasaIndicador(i) { return !this.indicador || Registro.cumpleIndicador(this.indicador, i); }
 
     // Folio o titulo. Solo acota la lista (aplicar), no la Cobertura.
@@ -775,7 +795,7 @@ window.RegistroIniciativas = (function () {
         if (sel[n] && !f.cascada.elegir(n, sel[n])) break;
       }
       f.buscar(this.textoBuscado);
-      f.indicador = this.indicador;
+      this.seleccion.copiarEn(f.seleccion);
       return f;
     }
 
@@ -785,7 +805,7 @@ window.RegistroIniciativas = (function () {
       this.elegirDirector('');
       this.cascada.limpiar(0);
       this.buscar('');
-      this.indicador = '';
+      this.seleccion.limpiar();
     }
 
     activos() {
@@ -1004,10 +1024,13 @@ window.RegistroIniciativas = (function () {
   // ---------------------------------------------------------------------
   // Lo que exporta es lo que la lista muestra: las iniciativas de
   // filtradas() (Estado, Tipo, Director, cascada, busqueda e indicador)
-  // COMPLETAS, sin "Mostrar mas", en el orden de la tabla (ordenar). No
-  // pide nada al servidor: usa el registro ya cargado
-  // (admin_iniciativas_registro.ashx, ADM/MOD). Ninguna cifra se calcula
-  // aqui: van las del servidor o las mismas reglas de la vista.
+  // COMPLETAS, sin "Mostrar mas", en el orden de la tabla (ordenar). Usa el
+  // registro ya cargado (admin_iniciativas_registro.ashx, ADM/MOD) mas UNA
+  // peticion al pulsar: ?export=1 al mismo handler, con las columnas de
+  // dbo.Problem / dbo.ProblemCategoria que el registro no trae (Gerencia,
+  // Direccion, Prioridad, TipoTicket...). Se cruzan por folio (y ruta); la
+  // carga normal del registro no las pide. Ninguna cifra se calcula aqui:
+  // van las del servidor o las mismas reglas de la vista.
   //
   //   Iniciativas  una fila por folio (dbo.Problem).
   //   Categorías   una fila por (Codigo, Categoria) de esas iniciativas
@@ -1018,7 +1041,12 @@ window.RegistroIniciativas = (function () {
   // Tickets a reducir de la iniciativa es el del servidor (suma de sus
   // categorias, la regla de Experiencia); no se vuelve a sumar.
   //
-  // Columna: [encabezado, tipo (LibroIniciativas), ancho, valor(i, registro)].
+  // Columna: [encabezado, tipo (LibroIniciativas), ancho, valor(i, registro, x)],
+  // x = la fila de ?export=1 de esa iniciativa ({} si no vino).
+  function deX(campo) { return function (a, b, x) { return x[campo]; }; }
+  // Folio + ruta como llave de las categorias de ?export=1; las rutas ya
+  // vienen normalizadas (sin espacio duro), asi que no puede confundirlas.
+  var SEP_EXTRA = '\u00a0';
   var ROTULO_SEMAFORO = { sin_fecha: 'Sin fecha', atrasada: 'Atrasada', en_tiempo: 'En tiempo', sin_control: 'Sin control de fecha' };
   function siNo(v) { return v ? 'Sí' : 'No'; }
   var ExportRegistro = {
@@ -1030,11 +1058,18 @@ window.RegistroIniciativas = (function () {
       ['Estado', 'texto', 14, function (i) { return i.estado; }],
       ['Subestado', 'texto', 16, function (i) { return i.subestado; }],                          // Problem.Subestado
       ['Agrupación', 'texto', 13, function (i) { return i.agrup; }],                             // TipoAgrupado (sin categoria: Problem.TipoIniciativa)
+      ['Tipo Iniciativa (Problem)', 'texto', 18, deX('tipo_iniciativa')],                         // Problem.TipoIniciativa
       ['Medible', 'texto', 10, function (i) { return siNo(i.seguimiento); }],                    // indicador "Iniciativas medibles"
+      ['Prioridad', 'texto', 12, deX('prioridad')],                                              // Problem.Prioridad
+      ['Impacto', 'texto', 12, deX('impacto')],                                                  // Problem.Impacto
       ['Product Owner', 'texto', 26, function (i) { return duenoCapturado(i, 'po'); }],          // Problem.OwnerProblem
       ['Service Owner', 'texto', 26, function (i) { return duenoCapturado(i, 'so'); }],          // Problem.OwnerServicio
       ['Director', 'texto', 26, function (i) { return duenos(i, 'director').join('; '); }],      // de sus categorias (sin categoria: Problem.Direccion)
+      ['Gerencia', 'texto', 26, deX('gerencia')],                                                // Problem.Gerencia
+      ['Dirección', 'texto', 26, deX('direccion')],                                              // Problem.Direccion (capturada; no es el Director)
+      ['RCA', 'texto', 10, deX('rca')],                                                          // Problem.RCA
       ['Fecha de creación', 'fecha', 12, function (i) { return fechaCreacion(i); }],             // Problem.FechaCreacion
+      ['Fecha entrega PRB', 'fecha', 12, deX('f_entrega_prb')],                                  // Problem.FechaEntregaPrb
       ['Antigüedad (días)', 'entero', 11, function (i) { return diasDesdeCreacion(i); }],
       ['Fecha análisis', 'fecha', 12, function (i) { return i.f_analisis; }],                     // Problem.FechaAnalisis
       ['Fecha solución', 'fecha', 12, function (i) { return i.f_solucion; }],                     // FechaSolucion
@@ -1042,12 +1077,13 @@ window.RegistroIniciativas = (function () {
       ['Fecha compromiso vigente', 'fecha', 13, function (i) { return i.activa ? fechaCompromiso(i) : ''; }],
       ['Semáforo', 'texto', 14, function (i) { return ROTULO_SEMAFORO[Registro.semaforoFecha(i)] || ''; }],
       ['Categorías', 'entero', 11, function (i) { return i.categorias.length; }],
+      ['Volumetría original', 'entero', 12, deX('volumetria_original')],                         // Problem.VolumetriaOriginal
       ['Tickets a reducir', 'entero', 12, function (i) { return numero(i.tickets_reduce); }],
       ['Tickets en riesgo', 'entero', 12, function (i) { return numero(i.riesgo_folio); }],
       ['Descripción', 'texto', 60, function (i) { return i.descripcion; }],                       // Problem.Descripcion
       ['Observaciones', 'texto', 60, function (i) { return i.observaciones; }]                    // Problem.Observaciones
     ],
-    // c = la categoria, i = su iniciativa.
+    // c = la categoria, i = su iniciativa, x = su fila de ?export=1.
     COLUMNAS_CATEGORIAS: [
       ['Código', 'texto', 17, function (c, i) { return i.folio; }],                               // ProblemCategoria.Codigo
       ['Título', 'texto', 45, function (c, i) { return i.titulo; }],
@@ -1055,26 +1091,51 @@ window.RegistroIniciativas = (function () {
       ['Categoría', 'texto', 50, function (c) { return c.categoria; }],                           // ProblemCategoria.Categoria
       ['Categoría N2', 'texto', 24, function (c) { return c.n2; }],                               // CatCategoriaDueno.CategoriaN2 de su C1&C2
       ['Agrupación', 'texto', 13, function (c) { return c.agrup; }],                              // ProblemCategoria.TipoAgrupado
+      ['Tipo de ticket', 'texto', 14, deX('tipo_ticket')],                                        // ProblemCategoria.TipoTicket
+      ['Tipo Iniciativa (categoría)', 'texto', 18, deX('tipo_iniciativa')],                       // ProblemCategoria.TipoIniciativa
       ['% disminución', 'pct', 12, function (c) { return c.pct_dism; }],                          // ProblemCategoria.PctDisminucion
       ['Tickets a reducir', 'entero', 12, function (c) { return c.tickets_reduce; }],             // calculado (ExpTicketsReduce) o ProblemCategoria.TicketsReduce
+      ['Mes reducción', 'entero', 10, deX('mes_reduccion')],                                     // ProblemCategoria.MesReduccion
       ['Fecha análisis', 'fecha', 12, function (c) { return c.f_analisis; }],                      // la efectiva (propia o la de la iniciativa)
       ['Director', 'texto', 26, function (c) { return c.director; }],                             // dueños de la categoria (CatCategoriaDueno)
       ['Product Owner', 'texto', 26, function (c) { return c.po; }],
       ['Service Owner', 'texto', 26, function (c) { return c.so; }]
     ],
 
+    // La respuesta de ?export=1 -> { ini: folio -> fila, cat: folio+ruta ->
+    // fila }. Sin las dos listas lanza: no se arma un Excel a medias. Folio
+    // (y ruta) repetidos: la primera fila, como el servidor.
+    indiceExtra(json) {
+      if (!json || !Array.isArray(json.iniciativas) || !Array.isArray(json.categorias)) {
+        throw new Error('la respuesta del servidor no trae las columnas del Excel.');
+      }
+      var x = { ini: {}, cat: {} };
+      function poner(mapa, k, f) { if (!Object.prototype.hasOwnProperty.call(mapa, k)) mapa[k] = f; }
+      json.iniciativas.forEach(function (f) { if (f && esTexto(f.folio)) poner(x.ini, f.folio, f); });
+      json.categorias.forEach(function (f) {
+        if (f && esTexto(f.folio) && esTexto(f.categoria)) poner(x.cat, f.folio + SEP_EXTRA + f.categoria, f);
+      });
+      return x;
+    },
+
     // Las hojas para LibroIniciativas.construir. `lista` ya filtrada y
-    // ordenada (la vista pasa ordenar(filtradas(), orden)).
-    hojas(lista, registro) {
+    // ordenada (la vista pasa ordenar(filtradas(), orden)); `extra` el
+    // indiceExtra (sin el, columnas extra vacias). Las filas salen SOLO del
+    // registro: una fila de extra que no cruza no agrega nada.
+    hojas(lista, registro, extra) {
       function columnas(defs) { return defs.map(function (d) { return { t: d[0], tipo: d[1], ancho: d[2] }; }); }
+      function de(mapa, k) { return extra && Object.prototype.hasOwnProperty.call(extra[mapa], k) ? extra[mapa][k] : {}; }
       var cI = ExportRegistro.COLUMNAS_INICIATIVAS, cC = ExportRegistro.COLUMNAS_CATEGORIAS;
       var filasCat = [];
       lista.forEach(function (i) {
-        i.categorias.forEach(function (c) { filasCat.push(cC.map(function (d) { return d[3](c, i); })); });
+        i.categorias.forEach(function (c) {
+          var x = de('cat', i.folio + SEP_EXTRA + c.categoria);
+          filasCat.push(cC.map(function (d) { return d[3](c, i, x); }));
+        });
       });
       return [
         { nombre: 'Iniciativas', columnas: columnas(cI),
-          filas: lista.map(function (i) { return cI.map(function (d) { return d[3](i, registro); }); }) },
+          filas: lista.map(function (i) { var x = de('ini', i.folio); return cI.map(function (d) { return d[3](i, registro, x); }); }) },
         { nombre: 'Categorías', columnas: columnas(cC), filas: filasCat }
       ];
     },
@@ -1778,16 +1839,10 @@ window.RegistroIniciativas = (function () {
       this.$('regMas').addEventListener('click', function () { self.limite += PAGINA; self.pintarTabla(); });
       this.$('regDescargar').addEventListener('click', function () { self.descargar(); });
       // Indicadores y semaforo: un clic filtra la lista por ese indicador y
-      // otro en el mismo lo quita. Son <button>: Enter y espacio tambien. La
-      // franja "Criterio" no lleva data-indicador: no filtra.
-      ['regKpis', 'regSemaforo'].forEach(function (id) {
-        self.$(id).addEventListener('click', function (e) {
-          var el = e.target;
-          if (el && el.closest) el = el.closest('[data-indicador]');
-          var k = el && el.getAttribute && el.getAttribute('data-indicador');
-          if (k) self.elegirIndicador(k);
-        });
-      });
+      // otro en el mismo lo quita; Total lo quita. Son <button>: Enter y
+      // espacio tambien. La franja "Criterio" no lleva data-indicador: no
+      // filtra. Escucha delegada de SeleccionKpi.
+      SeleccionKpi.escuchar(this.cajasIndicador(), ATRIBUTO_INDICADOR, function (k) { self.elegirIndicador(k); });
       this.$('regReintentar').addEventListener('click', function () { self.cargar(); });
 
       // Una fila se abre con su boton de folio o con un clic en la fila.
@@ -1914,20 +1969,25 @@ window.RegistroIniciativas = (function () {
       this.refrescar();
     }
 
+    // Las dos cajas cuyos botones son indicadores: tarjetas y semaforo.
+    cajasIndicador() { return [this.$('regKpis'), this.$('regSemaforo')]; }
+    // data-indicador y aria-pressed del boton de `k` (SeleccionKpi).
+    atributosIndicador(k) {
+      return (this.filtro ? this.filtro.seleccion : new SeleccionKpi({ limpian: [INDICADOR_TODAS] })).atributos(k);
+    }
+
     // Clic en un indicador (ver la cabecera). Solo cambia la lista: las
-    // tarjetas se repintan con las MISMAS cifras y el foco vuelve al mismo
-    // boton. Desde la Cobertura, vuelve a la lista para que se vea.
+    // tarjetas se repintan con las MISMAS cifras y el foco vuelve al boton
+    // pulsado. Desde la Cobertura, vuelve a la lista para que se vea. La
+    // cuenta de la lista (#regCuenta, aria-live) dice el indicador elegido:
+    // es el aviso para lectores de pantalla, no la rejilla entera.
     elegirIndicador(k) {
       if (!this.filtro) return;
-      this.filtro.alternarIndicador(k);
-      if (this.modo === 'cobertura') this.mostrarModo('registro');
-      this.refrescar();
-      var self = this;
-      ['regKpis', 'regSemaforo'].some(function (id) {
-        var caja = self.$(id), b = caja.querySelector ? caja.querySelector('[data-indicador="' + k + '"]') : null;
-        if (b && b.focus) b.focus();
-        return !!b;
-      });
+      var cambio = this.filtro.alternarIndicador(k);
+      var desdeCobertura = this.modo === 'cobertura';
+      if (desdeCobertura) this.mostrarModo('registro');
+      if (cambio || desdeCobertura) this.refrescar();
+      SeleccionKpi.enfocar(this.cajasIndicador(), ATRIBUTO_INDICADOR, k);
     }
 
     // Abrir uno cierra el otro.
@@ -2290,7 +2350,7 @@ window.RegistroIniciativas = (function () {
       var tarjetas = [
         { k: CLAVES_KPI[0], l: ROTULOS_KPI[0], v: k.total,
           f: k.sinCategoria ? fmt(k.sinCategoria) + ' sin categoría' : 'todas con categoría', s: '',
-          t: 'Iniciativas abiertas: estado distinto de Cerrado.' },
+          t: 'Todas las iniciativas del registro, Cerradas incluidas. Un clic quita el indicador elegido.' },
         { k: CLAVES_KPI[1], l: ROTULOS_KPI[1], v: k.activas, f: fmt(k.reduceActivas) + ' tickets a reducir', s: 'sv', ayuda: ayuda },
         { k: CLAVES_KPI[2], l: ROTULOS_KPI[2], v: k.requerimientos, f: 'agrupación ReqOpr, abiertos', s: '',
           t: 'Requerimientos (REQ/HAR): abiertos, estado distinto de Cerrado, con agrupación ReqOpr. Cuentan en Total, no en Iniciativas medibles.' },
@@ -2299,7 +2359,7 @@ window.RegistroIniciativas = (function () {
         { k: CLAVES_KPI[4], l: ROTULOS_KPI[4], v: k.cerradas, f: 'estado Cerrado', s: '',
           t: 'Iniciativas en estado Cerrado.' }
       ];
-      var conGlobo = !!this.globoKpis;
+      var conGlobo = !!this.globoKpis, self = this;
       this.$('regKpis').innerHTML = tarjetas.map(function (c) {
         var boton = '';
         if (c.ayuda) {
@@ -2312,10 +2372,11 @@ window.RegistroIniciativas = (function () {
         }
         // El filtro es un boton que cubre la tarjeta (debajo de "Criterio",
         // que no filtra): sin botones anidados. Lleva el title de la
-        // tarjeta porque queda encima de ella.
+        // tarjeta porque queda encima de ella. Total no lleva aria-pressed
+        // (SeleccionKpi: es la accion de ver todas, no un estado).
         var sel = c.k === elegido;
-        var filtro = '<button type="button" class="ini-kpi-filtro" data-indicador="' + c.k + '"' +
-          ' aria-pressed="' + (sel ? 'true' : 'false') + '" aria-label="' + Escape.attr(c.l + ': ' + fmt(c.v)) + '"' +
+        var filtro = '<button type="button" class="ini-kpi-filtro"' + self.atributosIndicador(c.k) +
+          ' aria-label="' + Escape.attr(c.l + ': ' + fmt(c.v)) + '"' +
           (c.t ? ' title="' + Escape.attr(c.t) + '"' : '') + '></button>';
         return '<div class="kpi ini-kpi ' + c.s + (boton ? ' ini-kpi-ctx' : '') + ' ini-kpi-filtrable' + (sel ? ' ini-kpi-sel' : '') + '">' + boton +
           '<div class="lbl">' + Escape.html(c.l) + '</div>' +
@@ -2329,13 +2390,13 @@ window.RegistroIniciativas = (function () {
     // un boton que filtra la lista (indicador 'sem_' + clave). La elegida se
     // pinta aunque se quede en cero tras una relectura, para poder quitarla.
     pintarSemaforo(elegido) {
-      var n = Registro.semaforo(this.registro.iniciativas);
+      var n = Registro.semaforo(this.registro.iniciativas), self = this;
       this.$('regSemaforo').innerHTML = SEMAFORO.filter(function (s) {
         return !s.siHay || n[s.k] > 0 || PREFIJO_SEMAFORO + s.k === elegido;
       }).map(function (s) {
         var k = PREFIJO_SEMAFORO + s.k, sel = k === elegido;
         return '<button type="button" class="ini-semaforo-op' + (sel ? ' sel' : '') + '" data-semaforo="' + s.k + '"' +
-          ' data-indicador="' + k + '" aria-pressed="' + (sel ? 'true' : 'false') + '" title="' + Escape.attr(s.t) + '">' +
+          self.atributosIndicador(k) + ' title="' + Escape.attr(s.t) + '">' +
           '<span class="ini-sem ' + s.c + '" aria-hidden="true"></span>' + Escape.html(s.l) +
           ' <b>' + fmt(n[s.k]) + '</b></button>';
       }).join('');
@@ -2466,8 +2527,9 @@ window.RegistroIniciativas = (function () {
     // lee: no toca filtro, orden, pagina ni detalle, y no pide nada al
     // servidor. `cargar` (-> Promise de XLSX), `bajar` (bytes, nombre) y
     // `hoy` son para las pruebas; por omision SheetJS, un <a download> y
-    // la fecha local.
-    descargar(cargar, bajar, hoy) {
+    // la fecha local. `pedir` (fetch por omision) trae ?export=1: si falla,
+    // no hay Excel (mensaje), nunca uno sin esas columnas.
+    descargar(cargar, bajar, hoy, pedir) {
       if (this.descargando || !this.registro || !this.filtro) return Promise.resolve(false);
       var self = this, btn = this.$('regDescargar'), msg = this.$('regDescargaMsg');
       var lista = ordenar(this.filtradas(), this.orden);
@@ -2494,10 +2556,16 @@ window.RegistroIniciativas = (function () {
       btn.disabled = true;
       btn.textContent = 'Preparando…';
       return Promise.resolve()
-        .then(function () { return (cargar || cargarXLSX)(); })
-        .then(function (XLSX) {
+        .then(function () {
+          return Promise.all([
+            leerRegistro(pedir || function (url) { return fetch(url, { cache: 'no-store' }); }, URL_EXPORT),
+            (cargar || cargarXLSX)()
+          ]);
+        })
+        .then(function (r) {
+          var extra = ExportRegistro.indiceExtra(r[0]), XLSX = r[1];
           if (!XLSX || !window.LibroIniciativas) throw new Error('no se pudo cargar el generador de Excel.');
-          var bytes = window.LibroIniciativas.construir(XLSX, ExportRegistro.hojas(lista, registro));
+          var bytes = window.LibroIniciativas.construir(XLSX, ExportRegistro.hojas(lista, registro, extra));
           (bajar || bajarArchivo)(bytes, ExportRegistro.nombre(hoy || new Date(), filtrado));
           return true;
         })
@@ -3677,6 +3745,7 @@ window.RegistroIniciativas = (function () {
     Busqueda: Busqueda,
     FECHA_DEL_ESTADO: FECHA_DEL_ESTADO,
     URL_CATALOGO: URL_CATALOGO,
+    URL_EXPORT: URL_EXPORT,
     Registro: Registro,
     SeleccionVarios: SeleccionVarios,
     FiltroRegistro: FiltroRegistro,

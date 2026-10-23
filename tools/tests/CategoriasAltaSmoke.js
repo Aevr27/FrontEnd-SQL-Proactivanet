@@ -227,6 +227,7 @@ pruebas.push(function () {
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(v, doc);
   (new Function('window', leer('admin/cascada-organizacional.js')))(v);
   (new Function('window', 'Escape', 'fetch', leer('admin/categorias-alta.js')))(v, v.Escape, pedir);
+  (new Function('window', leer('assets/js/seleccion-kpi.js')))(v);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(v, doc, v.Catalogos, v.Escape, v.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
     v, doc, v.Catalogos, v.Escape, v.GloboAyuda, pedir);

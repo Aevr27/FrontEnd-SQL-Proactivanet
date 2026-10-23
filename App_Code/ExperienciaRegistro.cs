@@ -405,6 +405,109 @@ public static partial class ExperienciaQueries
         return salida;
     }
 
+    // ------------------------------------------------------------------
+    // Columnas extra de "Descargar iniciativas" (admin_iniciativas_registro
+    // .ashx?export=1). Solo se piden al pulsar el boton: el registro normal
+    // no las lee ni las manda. Columnas verificadas en sys.columns
+    // (esquema_bd/02_columnas.tsv, 2026-10-13):
+    //   dbo.Problem           Gerencia, Direccion nvarchar(255);
+    //                         TipoIniciativa, Prioridad, Impacto nvarchar(100);
+    //                         RCA nvarchar(50); VolumetriaOriginal int;
+    //                         FechaEntregaPrb datetime2(0)
+    //   dbo.ProblemCategoria  TipoTicket, TipoIniciativa nvarchar(100);
+    //                         MesReduccion int
+    // Todas las vigentes (VigenteEnOrigen = 1, el mismo corte del registro):
+    // dos SELECT en una conexion, sin parametros del cliente; el navegador
+    // las cruza por folio (y ruta) con lo que ya filtro. SOLO LECTURA.
+    // ------------------------------------------------------------------
+    private const string SQL_EXPORT_EXTRA =
+        "SELECT Codigo, Gerencia, Direccion, TipoIniciativa, Prioridad, Impacto, RCA, " +
+        "       VolumetriaOriginal, FechaEntregaPrb " +
+        "FROM dbo.Problem WHERE VigenteEnOrigen = 1; " +
+        "SELECT Codigo, Categoria, TipoTicket, TipoIniciativa, MesReduccion " +
+        "FROM dbo.ProblemCategoria WHERE VigenteEnOrigen = 1;";
+
+    public static Dictionary<string, object> RegistroExportExtra()
+    {
+        var problemas = new List<object[]>();
+        var categorias = new List<object[]>();
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            using (var cmd = new SqlCommand(SQL_EXPORT_EXTRA, cn))
+            using (var rd = cmd.ExecuteReader())
+            {
+                while (rd.Read())
+                {
+                    var f = new object[9];
+                    rd.GetValues(f);
+                    problemas.Add(f);
+                }
+                if (rd.NextResult())
+                {
+                    while (rd.Read())
+                    {
+                        var f = new object[5];
+                        rd.GetValues(f);
+                        categorias.Add(f);
+                    }
+                }
+            }
+        }
+        return ArmarExportExtra(problemas, categorias);
+    }
+
+    // Filas crudas -> { iniciativas: [...], categorias: [...] }. Aparte para
+    // probarla sin SQL. La ruta se normaliza como en LeerIniciativas (es la
+    // llave con la que el registro la manda) y, si dos rutas crudas quedan
+    // iguales, se queda la primera, el mismo criterio. Un int nulo sale
+    // null, no 0: no se inventa una volumetria ni un mes.
+    private static Dictionary<string, object> ArmarExportExtra(List<object[]> problemas, List<object[]> categorias)
+    {
+        var ini = new List<object>();
+        foreach (var f in problemas)
+        {
+            var folio = Texto(f[0]);
+            if (folio == null) continue;
+            var i = new Dictionary<string, object>();
+            i["folio"] = folio;
+            i["gerencia"] = Texto(f[1]);
+            i["direccion"] = Texto(f[2]);
+            i["tipo_iniciativa"] = Texto(f[3]);
+            i["prioridad"] = Texto(f[4]);
+            i["impacto"] = Texto(f[5]);
+            i["rca"] = Texto(f[6]);
+            i["volumetria_original"] = EnteroONulo(f[7]);
+            i["f_entrega_prb"] = Fecha(f[8]);
+            ini.Add(i);
+        }
+        var cats = new List<object>();
+        var vistas = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in categorias)
+        {
+            var folio = Texto(f[0]);
+            var ruta = Normaliza(Texto(f[1]));
+            if (folio == null || ruta == null || !vistas.Add(folio + SEP_FECHAS + ruta)) continue;
+            var c = new Dictionary<string, object>();
+            c["folio"] = folio;
+            c["categoria"] = ruta;
+            c["tipo_ticket"] = Texto(f[2]);
+            c["tipo_iniciativa"] = Texto(f[3]);
+            c["mes_reduccion"] = EnteroONulo(f[4]);
+            cats.Add(c);
+        }
+        var salida = new Dictionary<string, object>();
+        salida["iniciativas"] = ini;
+        salida["categorias"] = cats;
+        return salida;
+    }
+
+    private static object EnteroONulo(object v)
+    {
+        if (v == null || v is DBNull) return null;
+        return Convert.ToInt32(v, CultureInfo.InvariantCulture);
+    }
+
     // La CategoriaN2 capturada para el C1&C2 de la fila (mismo corte que
     // AlinearDuenos), o null.
     private static string N2De(Detalle d, DirectorioOrganizacional dir)
