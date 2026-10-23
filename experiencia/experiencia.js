@@ -94,6 +94,9 @@ const PCT = n => Math.round((n||0)*100)+'%';
    de assets/js/lineas.js atado al FMT de esta pagina. Se enchufa por
    grafica en su arreglo `plugins`, igual que la cifra dentro de la barra. */
 const CIFRAS_EXTREMOS = Lineas.cifrasExtremos(FMT);
+/* Cifra ENCIMA de cada barra de una grafica mixta barra + linea (la serie
+   Automatizados SLA de la Evolucion). Ver etiquetasEncimaBarras. */
+const CIFRAS_ENCIMA_BARRAS = etiquetasEncimaBarras(FMT);
 /* =========================================================================
    PALETA DE GRAFICAS — escala verde de la cabecera.
 
@@ -511,7 +514,7 @@ function renderKPIs(cats, det){
      <div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
 }
 
-// ---- Volumen sin Automatizar ----
+// ---- Volumen - Automatizado ----
 // Volumen Actual - Automatizados SLA del MISMO periodo: SLOT 0 (los rangos de
 // pedirAutomatizados son los de vw_TicketsSlotsBase) o el mes en curso.
 // `vol` es el mismo real que pinta "Volumen Actual"; en Mes con pronostico se
@@ -530,7 +533,7 @@ function renderKPIs(cats, det){
 const AYUDA_SIN_AUTOMATIZAR='Aproximación: tickets registrados en el periodo menos tickets resueltos por bot '
   +'en el mismo periodo. Los automatizados SLA no necesariamente son un subconjunto del volumen registrado.';
 function tarjetaSinAutomatizar(vol, esPron){
-  const l='Volumen sin Automatizar'+(esPron ? ' <span class="tag-pron">Pronóstico</span>' : '');
+  const l='Volumen - Automatizado'+(esPron ? ' <span class="tag-pron">Pronóstico</span>' : '');
   const tarjeta=(v, f)=>({l, v, f, s:null, t:AYUDA_SIN_AUTOMATIZAR});
   if(hayFiltrosAutomatizados())
     return tarjeta('N/D', 'No disponible con filtros: Automatizados SLA es global y no responde a los filtros activos');
@@ -597,6 +600,78 @@ function tarjetaEfectividad(detReal){
   return {l, v:PCT(e.kpi), f:`${med} · ${FMT(e.enMedicion)} en medición${al}`, s:SEM(e.kpi)};
 }
 
+/* CIFRA ENCIMA DE CADA BARRA — plugin de Chart.js para la serie de barras de
+   una grafica mixta (Automatizados SLA en la Evolucion). Hermano de
+   Barras.etiquetasDentro y de CIFRA_PUNTA (dashboard.js): misma tipografia
+   (Barras.fuente) y tinta (Barras.TINTA_FUERA), pero la cifra va SOBRE la
+   punta, porque la barra comparte area con la linea de volumen.
+
+     - el valor es el que dibuja la barra, con el FMT de la pagina (miles
+       con coma); en el mes en curso es el pronostico, igual que la cifra
+       del ultimo punto de la linea, y el tooltip sigue dando el real;
+     - null (sin dato) no lleva cifra: ni "0" ni nada; 0 si la lleva, justo
+       sobre el eje;
+     - si encima no cabe -se saldria del area o caeria sobre un punto de la
+       linea o sobre las cifras de sus extremos (Lineas.cifrasExtremos las
+       pone hasta ~35px del punto)- se mete dentro de la barra, arriba, en la
+       tinta que contrasta con su relleno; si tampoco cabe ahi, se omite y
+       queda el tooltip. Mas vale una barra sin cifra que una cifra encima
+       de otra.
+   Solo mira datasets de tipo `bar`: la linea no se toca. */
+function etiquetasEncimaBarras(FMT){
+  var ALTO=12;          // alto de caja del texto de 12px
+  var AIRE=4;           // hueco entre la punta y la cifra
+  var FRANJA_PUNTO=8;   // reserva alrededor de un punto de la linea
+  var FRANJA_EXTREMO=40;// alrededor del primer y del ultimo punto (sus cifras)
+  return {
+    id:'cifrasEncimaBarras',
+    afterDatasetsDraw:function(chart){
+      var ctx=chart.ctx, area=chart.chartArea;
+      // Los puntos de la linea, para no encimarse con ellos.
+      var puntos=[], extremos={};
+      chart.data.datasets.forEach(function(ds, k){
+        var meta=chart.getDatasetMeta(k);
+        if(meta.hidden || (ds.type||meta.type||chart.config.type)!=='line') return;
+        var conDato=[];
+        ds.data.forEach(function(v, i){ if(v!=null) conDato.push(i); });
+        if(conDato.length){ extremos[conDato[0]]=true; extremos[conDato[conDato.length-1]]=true; }
+        meta.data.forEach(function(p, i){ if(ds.data[i]!=null) (puntos[i]=puntos[i]||[]).push(p.y); });
+      });
+      function choca(i, arriba, abajo){
+        var f=extremos[i] ? FRANJA_EXTREMO : FRANJA_PUNTO;
+        return (puntos[i]||[]).some(function(y){ return y>=arriba-f && y<=abajo+f; });
+      }
+      chart.data.datasets.forEach(function(ds, k){
+        var meta=chart.getDatasetMeta(k);
+        if(meta.hidden || (ds.type||meta.type||chart.config.type)!=='bar') return;
+        meta.data.forEach(function(bar, i){
+          var val=ds.data[i];
+          if(val==null || !isFinite(val)) return;
+          var texto=FMT(val);
+          ctx.save();
+          ctx.font=Barras.fuente(12);
+          ctx.textAlign='center';
+          var abajo=bar.y-AIRE, arriba=abajo-ALTO;
+          if(arriba>=area.top && !choca(i, arriba, abajo)){
+            ctx.textBaseline='bottom';
+            ctx.fillStyle=Barras.TINTA_FUERA;
+            ctx.fillText(texto, bar.x, abajo);
+          } else {
+            var dArriba=bar.y+AIRE, dAbajo=dArriba+ALTO;
+            var relleno=(bar.options && bar.options.backgroundColor) || ds.backgroundColor;
+            if(bar.base-bar.y>=ALTO+AIRE*2 && !choca(i, dArriba, dAbajo)){
+              ctx.textBaseline='top';
+              ctx.fillStyle=Barras.tintaSobre(relleno);
+              ctx.fillText(texto, bar.x, dArriba);
+            }
+          }
+          ctx.restore();
+        });
+      });
+    }
+  };
+}
+
 // ---- Evolucion por SLOT o por MES [GRAF-1] (antiguo->reciente) ----
 function renderEvol(cats){
   let labels, vals, nums, idxPron=-1, valReal=null;
@@ -650,7 +725,8 @@ function renderEvol(cats){
         : auto.estado==='error' ? ' · error al consultar SLA'
         : auto.estado==='respaldo' ? ' · respaldo: SLA no disponible' : '')}</span>`;
   // De cuanto volumen arranca la ventana y en cuanto acaba, sobre la linea.
-  chartEvol=new Chart(ctx,{type:'line',plugins:[CIFRAS_EXTREMOS],data:{labels,datasets},
+  // CIFRAS_ENCIMA_BARRAS solo pinta barras: sin la serie no hace nada.
+  chartEvol=new Chart(ctx,{type:'line',plugins:[CIFRAS_EXTREMOS,CIFRAS_ENCIMA_BARRAS],data:{labels,datasets},
     options:{responsive:true,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.datasetIndex===1
         ? (c.raw==null ? 'Automatizados SLA: sin dato'
