@@ -112,7 +112,7 @@ var PAYLOAD = {
 
 // ---- arnes ------------------------------------------------------------
 var COMUNES = ['pasaFiltroGlobal', 'volActualDe', 'volAnteriorDe', 'deltaDe', 'volSlotOMes', 'pronosticoMes',
-  'currentCats', 'aggCats', 'renderKPIs', 'efectividadDe', 'tarjetaEfectividad', 'renderEvol', 'renderDet',
+  'currentCats', 'aggCats', 'renderKPIs', 'efectividadDe', 'tarjetaEfectividad', 'tarjetaSinAutomatizar', 'renderEvol', 'renderDet',
   'volCatV2', 'getConDescendienteConVolumen', 'esHojaPeriodo', 'conDeCatV2', 'sinDeCatV2',
   'hojasSinIniciativa', 'volumenSinIniciativa', 'volumenConIniciativa', 'conIniVolDe', 'renderSin',
   'catV2ByPath', 'categoriasDeFolio', 'volumenCategoriasFolio'];
@@ -123,6 +123,8 @@ function arnes(src, payload, conTipos) {
     'var _cacheHojaPeriodo={modo:null, tipo:null, set:null};\n' +
     'var AGR=P.agrupadores, ESTADOS_ACTIVOS=["En Análisis","En Solución","En Monitoreo"];\n' +
     'var VERDE={pino:"",profundo:""}, AMBAR_SEM="", CIFRAS_EXTREMOS={}, ACOLOR={}, NEUTRO_SEM="";\n' +
+    // Sin respuesta de kpis.ashx: la grafica y las tarjetas de antes.
+    'function automatizadosDe(){return null;} function hayFiltrosAutomatizados(){return false;}\n' +
     'var document={getElementById:function(id){return ELEMENTOS[id]||(ELEMENTOS[id]={style:{},classList:{add:function(){},remove:function(){}}});}};\n' +
     'function FMT(n){return String(Math.round(n||0));} function PCT(n){return String(Math.round((n||0)*100))+"%";}\n' +
     'function SEM(){return "v";} function esc(s){return String(s);} function fdate(){return "";}\n' +
