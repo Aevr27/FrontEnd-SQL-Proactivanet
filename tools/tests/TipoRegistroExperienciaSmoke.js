@@ -125,7 +125,7 @@ function arnes(src, payload, conTipos) {
     'var VERDE={pino:"",profundo:""}, AMBAR_SEM="", CIFRAS_EXTREMOS={}, ACOLOR={}, NEUTRO_SEM="";\n' +
     // Sin respuesta de kpis.ashx: la grafica y las tarjetas de antes.
     'function automatizadosDe(){return null;} function hayFiltrosAutomatizados(){return false;}\n' +
-    'var AYUDA_SIN_AUTOMATIZAR="", Escape={attr:function(s){return String(s);}};\n' +
+    'var AYUDA_SIN_AUTOMATIZAR="", Escape={attr:function(s){return String(s);}}, Paleta={AZUL_SERIE:"#2563eb"};\n' +
     'var document={getElementById:function(id){return ELEMENTOS[id]||(ELEMENTOS[id]={style:{},classList:{add:function(){},remove:function(){}}});}};\n' +
     'function FMT(n){return String(Math.round(n||0));} function PCT(n){return String(Math.round((n||0)*100))+"%";}\n' +
     'function SEM(){return "v";} function esc(s){return String(s);} function fdate(){return "";}\n' +

@@ -635,14 +635,15 @@ function renderEvol(cats){
   if(auto && auto.estado==='listo' && !filtrado){
     const barras=nums.map(p=>{ const v=auto.valores[String(p)]; return v==null?null:v; });
     if(idxPron>=0 && barras[idxPron]!=null){ autoReal=barras[idxPron]; barras[idxPron]=pronosticoMes(autoReal); }
+    // El azul de una barra ordinaria (Paleta.AZUL_SERIE, #2563eb): el mismo
+    // de las barras de Call Center (AZUL = Paleta.porIndice(0) en dashboard.js).
     datasets.push({type:'bar',label:'Automatizados SLA',data:barras,order:1,
-      backgroundColor:'rgba(140,191,30,.55)',borderColor:VERDE.lima,borderWidth:1,
-      maxBarThickness:28});
+      backgroundColor:Paleta.AZUL_SERIE,maxBarThickness:28});
   }
   const hayBarras=datasets.length>1;
   const leg=document.getElementById('legendEvol');
   if(leg) leg.innerHTML='<span><i style="background:#65bb2b"></i>Volumen total</span>'
-    +`<span><i style="background:${VERDE.lima}"></i>${filtrado
+    +`<span><i style="background:${Paleta.AZUL_SERIE}"></i>${filtrado
       ? 'Automatizados SLA: solo sin filtros (valor global)'
       : 'Automatizados SLA (resueltos, global)'+(
         !auto||auto.estado==='cargando' ? ' · cargando…'

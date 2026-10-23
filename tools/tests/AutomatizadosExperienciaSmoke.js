@@ -46,6 +46,13 @@ function limpiar(s) { return s.split(String.fromCharCode(13)).join(''); }
 var fuente = limpiar(fs.readFileSync(path.join(raiz, 'experiencia', 'experiencia.js'), 'utf8'));
 var html = limpiar(fs.readFileSync(path.join(raiz, 'experiencia', 'experiencia.html'), 'utf8'));
 
+// La Paleta real del tablero (assets/js/paleta.js), como la carga la pagina.
+var PALETA = (function () {
+  var ventana = {};
+  (new Function('window', fs.readFileSync(path.join(raiz, 'assets', 'js', 'paleta.js'), 'utf8')))(ventana);
+  return ventana.Paleta;
+})();
+
 var fallos = 0;
 function Check(caso, esperado, obtenido) {
   var ok = JSON.stringify(esperado) === JSON.stringify(obtenido);
@@ -167,10 +174,10 @@ function arnes(opciones) {
   var CHARTS = [];
   function Chart(ctx, cfg) { CHARTS.push(cfg); this.destroy = function () {}; }
   var ELEMENTOS = {};
-  var A = new Function('ELEMENTOS', 'P', 'Chart', 'CHARTS', 'traer', 'console', codigo)(
+  var A = new Function('ELEMENTOS', 'P', 'Chart', 'CHARTS', 'traer', 'console', 'Paleta', codigo)(
     ELEMENTOS, JSON.parse(JSON.stringify(PAYLOAD)), Chart, CHARTS, opciones.traer || function () {
       return Promise.reject(new Error('sin traer'));
-    }, { warn: function () {} });
+    }, { warn: function () {} }, PALETA);
   A.elementos = ELEMENTOS;
   return A;
 }
@@ -190,6 +197,15 @@ Check('G2 con barras la linea es identica', sinFunciones(antes.data.datasets[0])
 Check('G2 etiquetas identicas', antes.data.labels, con.data.labels);
 Check('G3 barras en los mismos SLOTs y orden; cero es cero, sin dato es hueco', [null, 0, 3], con.data.datasets[1].data);
 Check('G3 serie de barras por detras de la linea', ['bar', 1], [con.data.datasets[1].type, con.data.datasets[1].order]);
+// Mismo azul que las barras de Call Center: AZUL = Paleta.porIndice(0) en
+// dashboard.js, que es Paleta.AZUL_SERIE = #2563eb (assets/js/paleta.js).
+Check('G9 Call Center pinta sus barras con Paleta.porIndice(0) = #2563eb', [true, '#2563eb', '#2563eb'],
+  [/const AZUL = Paleta\.porIndice\(0\)/.test(fs.readFileSync(path.join(raiz, 'dashboard.js'), 'utf8')),
+   PALETA.porIndice(0), PALETA.AZUL_SERIE]);
+Check('G9 barras Automatizados SLA en #2563eb, sin borde de otro color', ['#2563eb', undefined],
+  [con.data.datasets[1].backgroundColor, con.data.datasets[1].borderColor]);
+Check('G9 la muestra de la leyenda es el mismo azul', true, /<i style="background:#2563eb"><\/i>Automatizados SLA/.test(A.elementos.legendEvol.innerHTML));
+Check('G9 la linea conserva sus colores', ['#p', 'rgba(47,143,107,.14)'], [con.data.datasets[0].borderColor, con.data.datasets[0].backgroundColor]);
 Check('G4 tooltip linea sin cambio', 'Volumen: 20',
   con.options.plugins.tooltip.callbacks.label({ datasetIndex: 0, dataIndex: 1, raw: 20 }));
 Check('G4 tooltip barra / hueco', ['Automatizados SLA: 0', 'Automatizados SLA: sin dato'],
