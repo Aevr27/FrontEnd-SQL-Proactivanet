@@ -321,6 +321,20 @@
   var orden = { col: 'comp', dir: -1 };
   var busqueda = '';
 
+  // Tarjeta elegida con un clic (SeleccionKpi, assets/js/seleccion-kpi.js).
+  // Cuatro tarjetas son poblaciones que ya tienen su hoja: Iniciativas
+  // medidas, En medicion y No se puede calificar la abren; Rebote abre
+  // Medidas y deja solo las con rebote (i.rebote, el mismo con el que se
+  // cuenta). Son excluyentes: otra la reemplaza, la misma la quita (Rebote
+  // devuelve todas las medidas; las otras dejan la hoja como esta). Cambiar
+  // de hoja a mano tambien la quita. Las cifras no cambian: son de los
+  // filtros de dueño y tipo, como antes; la busqueda tampoco se toca.
+  // % Efectividad y Tickets evitados son cifras sin registro detras.
+  var HOJA_KPI = { medidas: 'medidas', rebote: 'medidas', medicion: 'medicion', sin: 'sin' };
+  var SK = window.SeleccionKpi;
+  var seleccion = SK ? new SK({ valida: function (k) { return Object.prototype.hasOwnProperty.call(HOJA_KPI, k); } }) : null;
+  function soloRebote() { return !!seleccion && seleccion.clave === 'rebote'; }
+
   function estado(txt) { $('estado').textContent = txt || ''; }
   function error(txt) { $('error').hidden = !txt; $('error-msg').textContent = txt || ''; }
 
@@ -386,6 +400,7 @@
   $('limpiar').onclick = function () {
     f = { dir: '', po: '', mgr: '', so: '', tipo: '' };
     busqueda = '';
+    if (seleccion) seleccion.limpiar();
     $('buscar').value = '';
     if (datos && datos.hay_calculo) { llenarSelects(); pintar(); }
   };
@@ -408,9 +423,12 @@
     $('p-sin').innerHTML = 'No se puede calificar<span class="ef-n">' + n0(r.no_calificables) + '</span>';
   }
 
-  function tarjeta(l, v, foot, s) {
-    return '<div class="kpi ' + (s ? 's' + s : '') + '"><div class="lbl">' + esc(l) + '</div>' +
-      '<div class="val">' + v + '</div><div class="foot">' + foot + '</div></div>';
+  // k: la clave de la tarjeta que abre su hoja (ver `seleccion` arriba).
+  function tarjeta(l, v, foot, s, k) {
+    var filtra = !!(k && seleccion);
+    return '<div class="kpi ' + (s ? 's' + s : '') + (filtra ? seleccion.clases(k) : '') + '"><div class="lbl">' + esc(l) + '</div>' +
+      '<div class="val">' + v + '</div><div class="foot">' + foot + '</div>' +
+      (filtra ? seleccion.boton(k, l + ': ' + v) : '') + '</div>';
   }
 
   function pintarKpis() {
@@ -420,14 +438,14 @@
       : tarjeta('% Efectividad', esc(pct(r.kpi)), n1(r.logro) + ' de ' + n1(r.comp) + ' tickets/mes', Calc.sem(r.kpi));
     $('kpis').innerHTML = kpi +
       tarjeta('Iniciativas medidas', n0(r.medidas),
-        n0(r.efectivas) + ' efectivas · ' + n0(r.parciales) + ' parciales · ' + n0(r.sin_baja) + ' sin baja', null) +
+        n0(r.efectivas) + ' efectivas · ' + n0(r.parciales) + ' parciales · ' + n0(r.sin_baja) + ' sin baja', null, 'medidas') +
       tarjeta('Tickets evitados', n0(r.evitados), 'desde su cierre, contra lo esperado', null) +
       tarjeta('Rebote', n0(r.con_rebote),
-        r.evaluables_rebote ? 'de ' + n0(r.evaluables_rebote) + ' que ya cumplen 180 días del cierre' : 'ninguna cumple aún 180 días del cierre', null) +
+        r.evaluables_rebote ? 'de ' + n0(r.evaluables_rebote) + ' que ya cumplen 180 días del cierre' : 'ninguna cumple aún 180 días del cierre', null, 'rebote') +
       tarjeta('En medición', n0(r.en_medicion),
-        r.primera ? 'la primera se califica el ' + esc(diaMes(r.primera)) : 'ninguna', null) +
+        r.primera ? 'la primera se califica el ' + esc(diaMes(r.primera)) : 'ninguna', null, 'medicion') +
       tarjeta('No se puede calificar', n0(r.no_calificables),
-        n0(r.por_corregir) + ' con datos por corregir en el Excel', null);
+        n0(r.por_corregir) + ' con datos por corregir en el Excel', null, 'sin');
   }
 
   // ---- Medidas -------------------------------------------------------------
@@ -452,7 +470,8 @@
     $('conteo-cal').innerHTML = pill('efectiva') + ' ' + n0(r.efectivas) + ' &nbsp; ' + pill('parcial') + ' ' + n0(r.parciales) +
       ' &nbsp; ' + pill('sin_baja') + ' ' + n0(r.sin_baja) + (r.con_rebote ? ' &nbsp; <span class="ef-rebote">↺ ' + n0(r.con_rebote) + ' con rebote</span>' : '');
 
-    var lista = vista.medidas.filter(function (i) { return coincide(i, busqueda.trim()); });
+    var rebote = soloRebote();
+    var lista = vista.medidas.filter(function (i) { return (!rebote || i.rebote) && coincide(i, busqueda.trim()); });
     var c = orden.col, d = orden.dir;
     lista.sort(function (a, b) {
       var x = a[c], y = b[c];
@@ -470,7 +489,9 @@
     }).join('') + '</tr></thead><tbody>';
     if (!lista.length) {
       html += '<tr class="vacia"><td colspan="' + COLS_MEDIDAS.length + '">' +
-        (vista.medidas.length ? 'Ninguna coincide con la búsqueda.' : 'No hay iniciativas medidas con estos filtros.') + '</td></tr>';
+        (!vista.medidas.length ? 'No hay iniciativas medidas con estos filtros.'
+          : rebote && !busqueda.trim() ? 'Ninguna iniciativa medida con rebote con estos filtros.'
+          : rebote ? 'Ninguna con rebote coincide con la búsqueda.' : 'Ninguna coincide con la búsqueda.') + '</td></tr>';
     }
     lista.forEach(function (i) {
       html += '<tr class="abre" tabindex="0" data-folio="' + esc(i.folio) + '">' +
@@ -555,14 +576,34 @@
   }
 
   // ---- Vistas ------------------------------------------------------------------
-  $('pestanas').addEventListener('click', function (e) {
-    var b = e.target.closest('button[data-hoja]');
-    if (!b) return;
+  function mostrarHoja(nombre) {
     Array.prototype.forEach.call($('pestanas').querySelectorAll('button[data-hoja]'), function (x) {
-      var si = x === b;
+      var si = x.getAttribute('data-hoja') === nombre;
       x.setAttribute('aria-selected', si ? 'true' : 'false');
       document.getElementById(PREFIJO + 'h-' + x.getAttribute('data-hoja')).hidden = !si;
     });
+  }
+  $('pestanas').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-hoja]');
+    if (!b) return;
+    var hoja = b.getAttribute('data-hoja');
+    mostrarHoja(hoja);
+    // Otra hoja a mano quita la tarjeta elegida (y con ella el "solo rebote").
+    if (seleccion && seleccion.clave && HOJA_KPI[seleccion.clave] !== hoja) {
+      seleccion.limpiar();
+      if (vista.resumen) { pintarKpis(); pintarMedidas(); }
+    }
+  });
+  if (SK) SK.escuchar([$('kpis')], 'data-indicador', function (k) {
+    if (!vista.resumen) return;
+    seleccion.alternar(k);
+    if (seleccion.clave) {
+      mostrarHoja(HOJA_KPI[seleccion.clave]);
+      $('pestanas').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    pintarKpis();
+    pintarMedidas();
+    SK.enfocar([$('kpis')], 'data-indicador', k);
   });
 
   /* ------------------------------------------------------------ graficas */
