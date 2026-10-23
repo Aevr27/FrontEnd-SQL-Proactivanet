@@ -2506,6 +2506,19 @@ pruebas.push(function () {
       [p.sel('regCuenta').textContent, p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
     p.sel('regLimpiar').disparar('click');
     Check('KF3 Limpiar filtros tambien lo quita', [[], CINCO], [pulsados(p), folios(p)]);
+    // Un indicador, luego a mano otro (el semaforo) y el Director: Limpiar
+    // quita todo y ninguna tarjeta ni punto del semaforo queda marcado.
+    clicIndicador(p, 'activas');
+    clicIndicador(p, 'sem_atrasada');
+    elegir(p, 'regDirector', 'Dir B');
+    Check('KF3b antes: el semaforo reemplazo a la tarjeta, con Director', [['sem_atrasada'], 'sem_atrasada', 'Dir B'],
+      [pulsados(p), reg.filtro.indicador, reg.filtro.director]);
+    p.sel('regLimpiar').disparar('click');
+    var cajas = p.sel('regKpis').innerHTML + p.sel('regSemaforo').innerHTML;
+    Check('KF3b Limpiar: sin indicador ni Director, todas, sin kpi-sel y todo aria-pressed="false"',
+      ['', '', CINCO, [], false, false, true],
+      [reg.filtro.indicador, reg.filtro.director, folios(p), pulsados(p), /kpi-sel/.test(p.sel('regKpis').innerHTML),
+       /aria-pressed="true"/.test(cajas), /aria-pressed="false"/.test(cajas)]);
 
     // Criterio (franja de Activas) no filtra.
     var franja = Elemento('franja');
@@ -2588,6 +2601,15 @@ pruebas.push(function () {
        /\.kpi\.kpi-sel \{[^}]*border-top-color: var\(--accent/.test(kpiCss) && !/\.kpi\.kpi-sel \{[^}]*border-left/.test(kpiCss),
        /\.ini-semaforo-op:focus-visible \{/.test(css),
        /ini-kpi-filtr|ini-kpi-sel/.test(css)]);
+    // La tarjeta la arma SeleccionKpi (clases + boton), la misma plantilla
+    // de las demas pestañas: sin copia a mano del boton ni de las clases.
+    var regJs = leer('admin/registro-iniciativas.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    Check('KF11 tarjetas con SeleccionKpi.boton/clases, sin plantilla propia',
+      [true, true, false, false],
+      [/seleccion\.boton\(c\.k, c\.l \+ ': ' \+ fmt\(c\.v\), c\.t\)/.test(regJs),
+       /seleccion\.clases\(c\.k\)/.test(regJs),
+       /class="kpi-filtro"/.test(regJs),
+       /' kpi-filtrable'|' kpi-sel'/.test(regJs)]);
   });
 });
 

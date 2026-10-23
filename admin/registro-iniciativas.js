@@ -1971,10 +1971,14 @@ window.RegistroIniciativas = (function () {
 
     // Las dos cajas cuyos botones son indicadores: tarjetas y semaforo.
     cajasIndicador() { return [this.$('regKpis'), this.$('regSemaforo')]; }
-    // data-indicador y aria-pressed del boton de `k` (SeleccionKpi).
-    atributosIndicador(k) {
-      return (this.filtro ? this.filtro.seleccion : new SeleccionKpi({ limpian: [INDICADOR_TODAS] })).atributos(k);
+    // La SeleccionKpi del filtro (o una vacia, antes de la primera carga):
+    // pone data-indicador, aria-pressed, las clases y el boton de cada
+    // indicador.
+    seleccionIndicador() {
+      return this.filtro ? this.filtro.seleccion : new SeleccionKpi({ limpian: [INDICADOR_TODAS] });
     }
+    // data-indicador y aria-pressed del boton de `k` (SeleccionKpi).
+    atributosIndicador(k) { return this.seleccionIndicador().atributos(k); }
 
     // Clic en un indicador (ver la cabecera). Solo cambia la lista: las
     // tarjetas se repintan con las MISMAS cifras y el foco vuelve al boton
@@ -2359,7 +2363,7 @@ window.RegistroIniciativas = (function () {
         { k: CLAVES_KPI[4], l: ROTULOS_KPI[4], v: k.cerradas, f: 'estado Cerrado', s: '',
           t: 'Iniciativas en estado Cerrado.' }
       ];
-      var conGlobo = !!this.globoKpis, self = this;
+      var conGlobo = !!this.globoKpis, seleccion = this.seleccionIndicador();
       this.$('regKpis').innerHTML = tarjetas.map(function (c) {
         var boton = '';
         if (c.ayuda) {
@@ -2373,12 +2377,11 @@ window.RegistroIniciativas = (function () {
         // El filtro es un boton que cubre la tarjeta (debajo de "Criterio",
         // que no filtra): sin botones anidados. Lleva el title de la
         // tarjeta porque queda encima de ella. Total no lleva aria-pressed
-        // (SeleccionKpi: es la accion de ver todas, no un estado).
-        var sel = c.k === elegido;
-        var filtro = '<button type="button" class="kpi-filtro"' + self.atributosIndicador(c.k) +
-          ' aria-label="' + Escape.attr(c.l + ': ' + fmt(c.v)) + '"' +
-          (c.t ? ' title="' + Escape.attr(c.t) + '"' : '') + '></button>';
-        return '<div class="kpi ini-kpi ' + c.s + (boton ? ' ini-kpi-ctx' : '') + ' kpi-filtrable' + (sel ? ' kpi-sel' : '') + '">' + boton +
+        // ni se marca (SeleccionKpi: es la accion de ver todas, no un
+        // estado). Clases y boton son los de SeleccionKpi, como en las
+        // demas pestañas.
+        var filtro = seleccion.boton(c.k, c.l + ': ' + fmt(c.v), c.t);
+        return '<div class="kpi ini-kpi ' + c.s + (boton ? ' ini-kpi-ctx' : '') + seleccion.clases(c.k) + '">' + boton +
           '<div class="lbl">' + Escape.html(c.l) + '</div>' +
           '<div class="val">' + fmt(c.v) + '</div>' +
           '<div class="foot">' + Escape.html(c.f) + '</div>' + filtro + '</div>';
