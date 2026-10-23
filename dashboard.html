@@ -567,6 +567,11 @@
      "Última actualización" y "Periodo" con el mismo formato. -->
 <script src="assets/js/datos-info.js"></script>
 <script src="assets/js/kpis-fijos.js"></script>
+<!-- La tarjeta KPI que filtra con un clic (window.SeleccionKpi). Aqui y no en
+     cada modulo: Orquestacion, Efectividad, Experiencia, QA y Backlog pierden
+     sus <script> al montarse y usan esta copia; sueltas, cargan la suya. Sus
+     estilos (.kpi-filtrable, .kpi-filtro, .kpi-sel) van en kpi.css. -->
+<script src="assets/js/seleccion-kpi.js"></script>
 
 <!-- Datos simulados (MOCK_DATA). Se carga antes que dashboard.js. -->
 <script src="assets/js/mock-data.js"></script>

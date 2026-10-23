@@ -2457,7 +2457,7 @@ pruebas.push(function () {
   }).then(function () {
     var cifras = kpis(p);
     Check('KF1 listo: instruccion visible; nada elegido; cinco tarjetas filtrables', [false, [], 5],
-      [p.sel('regKpisGuia').hidden, pulsados(p), (p.sel('regKpis').innerHTML.match(/class="ini-kpi-filtro" data-indicador=/g) || []).length]);
+      [p.sel('regKpisGuia').hidden, pulsados(p), (p.sel('regKpis').innerHTML.match(/class="kpi-filtro" data-indicador=/g) || []).length]);
     // Total no es un estado: sin aria-pressed (las otras cuatro si).
     Check('KF1 Total sin aria-pressed; las demas con aria-pressed="false"', [false, 4],
       [/data-indicador="total" aria-pressed/.test(p.sel('regKpis').innerHTML),
@@ -2472,7 +2472,7 @@ pruebas.push(function () {
       clicIndicador(p, c);
       Check('KF2 ' + c + ': filtra la lista, la marca, cifras y semaforo iguales',
         [esperado[c], [c], 1, cifras, 1],
-        [folios(p), pulsados(p), (p.sel('regKpis').innerHTML.match(/ini-kpi-sel/g) || []).length, kpis(p),
+        [folios(p), pulsados(p), (p.sel('regKpis').innerHTML.match(/kpi-sel/g) || []).length, kpis(p),
          reg.filtro.activos()]);
       clicIndicador(p, c);
       Check('KF2 ' + c + ': otro clic lo quita', [CINCO, [], cifras, 0], [folios(p), pulsados(p), kpis(p), reg.filtro.activos()]);
@@ -2577,14 +2577,17 @@ pruebas.push(function () {
     Check('KF9 en la Cobertura el indicador no cuenta como filtro', '', p.sel('regFiltrosCuenta').textContent);
     reg.verRegistro();
     clicIndicador(p, 'activas');
-    var css = leer('admin/iniciativas.css');
+    // La tarjeta que filtra vive en assets/css/kpi.css (compartida con las
+    // demas pestañas); Criterio y el semaforo siguen en iniciativas.css.
+    var css = leer('admin/iniciativas.css'), kpiCss = leer('assets/css/kpi.css');
     Check('KF10 CSS: boton que cubre la tarjeta, Criterio encima, foco visible, marca sin mover la franja',
-      [true, true, true, true, true],
-      [/\.ini-kpi-filtro \{[^}]*position: absolute; inset: 0; z-index: 1;/.test(css),
+      [true, true, true, true, true, false],
+      [/\.kpi-filtro \{[^}]*position: absolute; inset: 0; z-index: 1;/.test(kpiCss),
        /\.ini-kpi-ayuda \{[^}]*z-index: 2;/.test(css),
-       /\.ini-kpi-filtrable:has\(> \.ini-kpi-filtro:focus-visible\) \{ outline: 2px solid var\(--accent\)/.test(css),
-       /\.kpi\.ini-kpi-sel \{[^}]*border-top-color: var\(--accent\)/.test(css) && !/\.kpi\.ini-kpi-sel \{[^}]*border-left/.test(css),
-       /\.ini-semaforo-op:focus-visible \{/.test(css)]);
+       /\.kpi-filtrable:has\(> \.kpi-filtro:focus-visible\) \{ outline: 2px solid var\(--accent/.test(kpiCss),
+       /\.kpi\.kpi-sel \{[^}]*border-top-color: var\(--accent/.test(kpiCss) && !/\.kpi\.kpi-sel \{[^}]*border-left/.test(kpiCss),
+       /\.ini-semaforo-op:focus-visible \{/.test(css),
+       /ini-kpi-filtr|ini-kpi-sel/.test(css)]);
   });
 });
 

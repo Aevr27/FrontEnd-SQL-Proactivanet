@@ -113,3 +113,39 @@
 @media (max-width: 700px) {
   .kpi .val, .kpi .kpi-val { font-size: 23px; }
 }
+
+/* ---- Tarjeta que filtra (assets/js/seleccion-kpi.js) ----
+
+   Sacado de admin/iniciativas.css, donde nacio con el Registro de
+   iniciativas, al llevar el clic a otras pestañas: Orquestacion,
+   Efectividad, Experiencia, QA y Backlog. Aqui y no en cada hoja por lo
+   mismo que la tarjeta: las pestañas embebidas pierden sus <link> y esta
+   hoja ya la carga dashboard.html.
+
+   Un boton transparente cubre la tarjeta (.kpi-filtro, SeleccionKpi.boton):
+   sin botones anidados, y lo que tenga que quedar encima (la franja
+   "Criterio" de Admin) sube con su propio z-index. La marca de la elegida
+   es un anillo y un tinte: no mueve nada ni tapa la franja izquierda de
+   color, que conserva su significado de semaforo. Los var() llevan
+   respaldo porque la pagina suelta de Experiencia no define --accent-soft
+   ni --accent-line. */
+.kpi.kpi-filtrable { cursor: pointer; }
+.kpi-filtro {
+  position: absolute; inset: 0; z-index: 1;
+  margin: 0; padding: 0; border: 0; border-radius: inherit;
+  background: transparent; cursor: pointer;
+}
+.kpi-filtro:focus { outline: none; }
+.kpi-filtrable:hover {
+  border-top-color: var(--accent-line, #d3e9ac); border-right-color: var(--accent-line, #d3e9ac);
+  border-bottom-color: var(--accent-line, #d3e9ac);
+}
+.kpi-filtrable:has(> .kpi-filtro:focus-visible) { outline: 2px solid var(--accent, #65bb2b); outline-offset: 2px; }
+.kpi-filtrable:has(> .kpi-filtro:active) { transform: translateY(0); box-shadow: var(--shadow); }
+.kpi.kpi-sel {
+  border-top-color: var(--accent, #65bb2b); border-right-color: var(--accent, #65bb2b);
+  border-bottom-color: var(--accent, #65bb2b);
+  box-shadow: 0 0 0 1px var(--accent, #65bb2b), var(--shadow-md);
+  background: var(--accent-soft, #f4fae7);
+}
+.kpi.kpi-sel .lbl, .kpi.kpi-sel .kpi-tit { color: var(--accent-ink, #3a7431); }

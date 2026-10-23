@@ -2375,10 +2375,10 @@ window.RegistroIniciativas = (function () {
         // tarjeta porque queda encima de ella. Total no lleva aria-pressed
         // (SeleccionKpi: es la accion de ver todas, no un estado).
         var sel = c.k === elegido;
-        var filtro = '<button type="button" class="ini-kpi-filtro"' + self.atributosIndicador(c.k) +
+        var filtro = '<button type="button" class="kpi-filtro"' + self.atributosIndicador(c.k) +
           ' aria-label="' + Escape.attr(c.l + ': ' + fmt(c.v)) + '"' +
           (c.t ? ' title="' + Escape.attr(c.t) + '"' : '') + '></button>';
-        return '<div class="kpi ini-kpi ' + c.s + (boton ? ' ini-kpi-ctx' : '') + ' ini-kpi-filtrable' + (sel ? ' ini-kpi-sel' : '') + '">' + boton +
+        return '<div class="kpi ini-kpi ' + c.s + (boton ? ' ini-kpi-ctx' : '') + ' kpi-filtrable' + (sel ? ' kpi-sel' : '') + '">' + boton +
           '<div class="lbl">' + Escape.html(c.l) + '</div>' +
           '<div class="val">' + fmt(c.v) + '</div>' +
           '<div class="foot">' + Escape.html(c.f) + '</div>' + filtro + '</div>';
