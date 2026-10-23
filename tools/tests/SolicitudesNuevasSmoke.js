@@ -2,7 +2,11 @@
 // Solicitudes (admin/solicitudes-nuevas.js): lo que se pinta (lista,
 // detalle con historial, escape), cada respuesta dicha distinto (cargando,
 // vacio, 501 sin tablas, 403, 500 de la base, sin conexion), el conmutador
-// "Nuevas | De cambio" por rol, y que la pagina la monta sin mover "De cambio".
+// "Iniciativas | Cambios" por rol, y que la pagina la monta sin mover "Cambios".
+// W: aprobar / rechazar (sql/31): botones solo en ENVIADA con
+// revision_disponible, motivo obligatorio al rechazar, POST solo al endpoint
+// de revision (nunca al de Cambios), relee lista y detalle, cada respuesta
+// dicha distinto y un solo envio a la vez.
 //
 //   node tools\tests\SolicitudesNuevasSmoke.js   # sale 0 si todo paso
 'use strict';
@@ -11,7 +15,7 @@ var path = require('path');
 var vm = require('vm');
 
 var raiz = path.join(__dirname, '..', '..');
-var caja = { Promise: Promise, encodeURIComponent: encodeURIComponent, Date: Date, isNaN: isNaN, console: console };
+var caja = { Promise: Promise, FormData: FormData, encodeURIComponent: encodeURIComponent, Date: Date, isNaN: isNaN, console: console };
 caja.window = caja; caja.globalThis = caja;
 vm.runInNewContext(fs.readFileSync(path.join(raiz, 'assets', 'js', 'escape.js'), 'utf8'), caja);
 vm.runInNewContext(fs.readFileSync(path.join(raiz, 'admin', 'solicitudes-nuevas.js'), 'utf8'), caja);
@@ -163,6 +167,139 @@ function Montar(rol, respuestas) {
   Check('C1 clic en el numero abre el detalle', ['../handlers/admin_iniciativas_solicitudes_nuevas.ashx?accion=detalle&numero=5', false], [a.pedidas[0], a.$('snDetalle').hidden]);
   a.$('snDetalle').escuchas.click({ target: { closest: function () { return { getAttribute: function () { return 'cerrar'; } }; } } });
   Check('C2 Cerrar desde el detalle', true, a.$('snDetalle').hidden);
+
+  // ---- W: aprobar / rechazar (sql/31) -----------------------------------------
+  var URL_CAMBIOS = 'admin_iniciativas_solicitudes.ashx';
+  function campos(fd) { var c = {}; fd.forEach(function (v, k) { c[k] = v; }); return c; }
+  function Pedir(respuestas) {
+    var p = { pedidas: [], envios: [] };
+    p.fn = function (url, op) {
+      p.pedidas.push(url);
+      if (op && op.method === 'POST') p.envios.push({ url: url, campos: campos(op.body) });
+      var r = respuestas.shift();
+      return typeof r === 'function' ? r() : r;
+    };
+    return p;
+  }
+  function MontarRev(respuestas, detalle) {
+    var doc = Documento(), p = Pedir(respuestas);
+    var v = new N.RegistroSolicitudesNuevas(doc, p.fn);
+    v.fijarRol('ADM');
+    v.detalle = detalle;
+    return { v: v, p: p, $: function (id) { return doc.getElementById(id); } };
+  }
+  var LISTA = { solicitudes: [Fila(9)], total: 1, maximo: 200, revision_disponible: true };
+
+  html = N.htmlDetalle(Detalle(9, { revision_disponible: true }), true);
+  Check('W1 ENVIADA con revision: comentario, Aprobar, Rechazar y Cerrar', [true, true, true, true],
+    [/<textarea id="snComentario" rows="3" maxlength="2000">/.test(html), /data-sn-accion="aprobar">Aprobar</.test(html),
+     /data-sn-accion="rechazar">Rechazar</.test(html), /data-sn-accion="cerrar">Cerrar</.test(html)]);
+  Check('W2 sin revision_disponible (sin sql/31) o sin ADM: solo Cerrar', [false, false],
+    [/data-sn-accion="aprobar"/.test(N.htmlDetalle(Detalle(9), false)), /snComentario/.test(N.htmlDetalle(Detalle(9), false))]);
+  var aprobada = Detalle(9, { estado: 'APROBADA', revisado_por: 'SORIANA\\t_adm', fecha_revision_utc: '2026-10-23T17:05:09Z',
+    comentario_revision: '<i>ok</i>', eventos: [Detalle(9).eventos[0],
+      { id: 2, evento: 'APROBADA', estado_anterior: 'ENVIADA', estado_nuevo: 'APROBADA', usuario: 'SORIANA\\t_adm', fecha_utc: '2026-10-23T17:05:09Z', detalle: '<i>ok</i>' }] });
+  html = N.htmlDetalle(aprobada, true);
+  Check('W3 APROBADA: sin botones (final), quien, cuando, comentario escapado y aviso de Crear a mano', [false, true, true, true, false],
+    [/data-sn-accion="aprobar"|data-sn-accion="rechazar"/.test(html), /<strong>Aprobada<\/strong> por SORIANA\\t_adm el /.test(html),
+     /«&lt;i&gt;ok&lt;\/i&gt;»/.test(html), /Crea la iniciativa a mano en Administración → Crear/.test(html), /<i>ok<\/i>/.test(html)]);
+  Check('W4 historial: el evento de revision con su comentario', true,
+    /<strong>Aprobada<\/strong>[^<]*<span class="ini-sub">Enviada → Aprobada<\/span><span class="ini-sub">«&lt;i&gt;ok&lt;\/i&gt;»/.test(html));
+  html = N.htmlDetalle(Detalle(9, { estado: 'RECHAZADA', revisado_por: 'x', fecha_revision_utc: '2026-10-23T17:05:09Z', comentario_revision: 'Sin capacidad' }), true);
+  Check('W5 RECHAZADA: sin botones, con su motivo y sin aviso de Crear', [false, true, false],
+    [/data-sn-accion="rechazar"/.test(html), /<strong>Rechazada<\/strong>[\s\S]*«Sin capacidad»/.test(html), /Crea la iniciativa/.test(html)]);
+
+  // verDetalle: los botones salen solo con revision_disponible del servidor.
+  var m2 = MontarRev([Respuesta(200, Detalle(9, { revision_disponible: false })), Respuesta(200, Detalle(9, { revision_disponible: true }))], null);
+  await m2.v.verDetalle(9);
+  var sinRev = /data-sn-accion="aprobar"/.test(m2.$('snDetalle').innerHTML);
+  await m2.v.verDetalle(9);
+  Check('W6 el detalle del servidor decide: sin sql/31 no hay botones; con sql/31 si', [false, true], [sinRev, /data-sn-accion="aprobar"/.test(m2.$('snDetalle').innerHTML)]);
+  m2.v.fijarRol('MOD');
+  m2.p.pedidas.length = 0;
+  var m3 = MontarRev([Respuesta(200, Detalle(9, { revision_disponible: true }))], null);
+  m3.v.fijarRol('MOD');
+  await m3.v.verDetalle(9);
+  Check('W6b sin rol ADM: sin botones aunque el servidor tenga sql/31', false, /data-sn-accion="aprobar"/.test(m3.$('snDetalle').innerHTML));
+
+  // Rechazar sin motivo: no se manda nada.
+  var w = MontarRev([], Detalle(9, { revision_disponible: true }));
+  for (var vacio of ['', '   ']) {
+    w.$('snComentario').value = vacio;
+    var res = await w.v.rechazar();
+    Check('W7 rechazar sin motivo (\'' + vacio + '\'): no se manda y se pide el motivo', [null, 0, true],
+      [res, w.p.pedidas.length, /Escribe por qué se rechaza/.test(w.$('snDetMsg').innerHTML)]);
+  }
+  w.$('snComentario').value = new Array(2002).join('x');
+  res = await w.v.aprobar();
+  Check('W8 comentario de mas de 2000: no se manda', [null, 0, true], [res, w.p.pedidas.length, /no puede pasar de 2000/.test(w.$('snDetMsg').innerHTML)]);
+
+  // Aprobar sin comentario: POST al endpoint de revision; relee lista y detalle.
+  w = MontarRev([Respuesta(200, { aprobada: true, numero: 9, estado: 'APROBADA' }), Respuesta(200, LISTA),
+                 Respuesta(200, Detalle(9, { estado: 'APROBADA', revisado_por: 'SORIANA\\t_adm', fecha_revision_utc: '2026-10-23T17:05:09Z', revision_disponible: true }))],
+                Detalle(9, { revision_disponible: true }));
+  w.$('snComentario').value = '';
+  res = await w.v.aprobar();
+  Check('W9 aprobar: POST a ...revision.ashx?accion=aprobar con solo el numero', ['../handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx?accion=aprobar', { numero: '9' }],
+    [w.p.envios[0].url, w.p.envios[0].campos]);
+  Check('W10 despues relee lista y detalle; dice aprobada y que se crea a mano; ya sin botones', [3, true, true, 'listo', false, false],
+    [w.p.pedidas.length, /accion=listar/.test(w.p.pedidas[1]) || /accion=listar/.test(w.p.pedidas[2]), /accion=detalle&numero=9/.test(w.p.pedidas.join(' ')),
+     w.$('snDetMsg').className.split(' ').pop(), /data-sn-accion="aprobar"/.test(w.$('snDetalle').innerHTML), w.v.ocupado]);
+  Check('W10b el mensaje de exito habla de Crear a mano', true, /aprobada\.<\/strong> Crea la iniciativa a mano/.test(w.$('snDetMsg').innerHTML));
+
+  w = MontarRev([Respuesta(200, { rechazada: true }), Respuesta(200, LISTA), Respuesta(200, Detalle(9, { estado: 'RECHAZADA', revision_disponible: true }))],
+                Detalle(9, { revision_disponible: true }));
+  w.$('snComentario').value = '  No hay capacidad  ';
+  await w.v.rechazar();
+  Check('W11 rechazar: POST con numero y el motivo recortado', ['../handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx?accion=rechazar', { numero: '9', comentario: 'No hay capacidad' }, 'listo'],
+    [w.p.envios[0].url, w.p.envios[0].campos, w.$('snDetMsg').className.split(' ').pop()]);
+
+  // Respuestas que no son exito: cada una dicha distinto; siempre relee.
+  var errores = [
+    ['W12 409 ya revisada (otro ADM gano)', Respuesta(409, { error: 'La solicitud ya fue revisada (aprobada o rechazada).', tipo: 'YaRevisada', aprobada: false }), 'error', /No se aprobó\.<\/strong> La solicitud ya fue revisada/],
+    ['W13 422 del servidor', Respuesta(422, { error: 'Escribe por qué se rechaza.', tipo: 'FaltaMotivo', aprobada: false }), 'error', /No se aprobó\.<\/strong> Escribe por qué/],
+    ['W14 501 sin sql/31', Respuesta(501, { error: 'Aprobar o rechazar todavía no está habilitado', tipo: 'RevisionNoDisponible' }), 'error', /todavía no está habilitado/],
+    ['W15 403', Respuesta(403, { error: 'Solo un administrador (ADM) puede aprobar', tipo: 'RolInsuficiente' }), 'error', /Solo un administrador/],
+    ['W16 500 sin confirmar (aprobada=null): aviso de revisar antes de reintentar', Respuesta(500, { error: 'No se pudo confirmar la revisión.', tipo: 'RevisionNoConfirmada', aprobada: null }), 'aviso', /No se pudo confirmar la revisión\. Revisa la solicitud antes de reintentar/]
+  ];
+  for (var e of errores) {
+    w = MontarRev([e[1], Respuesta(200, LISTA), Respuesta(200, Detalle(9, { revision_disponible: true }))], Detalle(9, { revision_disponible: true }));
+    await w.v.aprobar();
+    Check(e[0], [e[2], true, 3, false], [w.$('snDetMsg').className.split(' ').pop(), e[3].test(w.$('snDetMsg').innerHTML), w.p.pedidas.length, w.v.ocupado]);
+  }
+  w = MontarRev([function () { return Promise.reject(new Error('red')); }], Detalle(9, { revision_disponible: true }));
+  await w.v.aprobar();
+  Check('W17 sin conexion: no se sabe; no relee a ciegas y se puede reintentar', ['aviso', true, 1, false],
+    [w.$('snDetMsg').className.split(' ').pop(), /no se sabe si se aprobó/.test(w.$('snDetMsg').innerHTML), w.p.pedidas.length, w.v.ocupado]);
+
+  // Doble clic: un solo envio.
+  var soltar2;
+  w = MontarRev([function () { return new Promise(function (ok) { soltar2 = ok; }); }, Respuesta(200, LISTA), Respuesta(200, Detalle(9, { revision_disponible: true }))],
+                Detalle(9, { revision_disponible: true }));
+  var p1 = w.v.aprobar();
+  var p2 = await w.v.aprobar();
+  var p3 = await w.v.rechazar();
+  await new Promise(function (ok) { setTimeout(ok, 0); });
+  soltar2({ status: 409, json: function () { return Promise.resolve({ aprobada: false, error: 'ya' }); } });
+  await p1;
+  Check('W18 doble clic / aprobar y rechazar a la vez: un solo POST', [null, 1], [p2, w.p.envios.length]);
+
+  // Ya revisada en pantalla: no se manda nada.
+  w = MontarRev([], Detalle(9, { estado: 'APROBADA', revision_disponible: true }));
+  Check('W19 una solicitud ya revisada no se vuelve a mandar', [null, 0], [await w.v.aprobar(), w.p.pedidas.length]);
+
+  // Clic en los botones del detalle (cableado).
+  w = MontarRev([Respuesta(200, { aprobada: true }), Respuesta(200, LISTA), Respuesta(200, Detalle(9, { revision_disponible: true }))], Detalle(9, { revision_disponible: true }));
+  w.v.cablear();
+  w.$('snComentario').value = '';
+  w.$('snDetalle').escuchas.click({ target: { closest: function () { return { getAttribute: function () { return 'aprobar'; } }; } } });
+  await new Promise(function (ok) { setTimeout(ok, 10); });
+  Check('W20 clic en Aprobar manda la aprobacion', 'accion=aprobar', (w.p.envios[0] || { url: '' }).url.split('?')[1]);
+
+  // Aislamiento: nada de esta vista va al endpoint de Cambios.
+  Check('W21 nunca se pide el endpoint de Cambios', [false, false, '../handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx'],
+    [/admin_iniciativas_solicitudes\.ashx/.test(fs.readFileSync(path.join(raiz, 'admin', 'solicitudes-nuevas.js'), 'utf8')),
+     [].concat(w.p.pedidas, m2.p.pedidas).some(function (u) { return u.indexOf(URL_CAMBIOS) >= 0; }), N.URL_REVISION]);
 
   // ---- la pagina ---------------------------------------------------------------
   // La pagina y su controlador estan en CRLF.
