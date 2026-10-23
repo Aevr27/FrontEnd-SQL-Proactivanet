@@ -2737,6 +2737,9 @@ document.getElementById('btnReset').onclick=()=>{
   }
   // Tambien vuelve a "Todos", la vista con la que abre el tablero.
   if(tipoRegistro!=='todos'){ aplicarTipoRegistro('todos'); pintarTipoRegistro(); }
+  // Y quita la tarjeta elegida (PANEL_KPI): el panel abierto se queda, como
+  // siempre; solo se va la marca. renderAll repinta las tarjetas.
+  if(seleccionKpi) seleccionKpi.limpiar();
   renderAll();
 };
 
