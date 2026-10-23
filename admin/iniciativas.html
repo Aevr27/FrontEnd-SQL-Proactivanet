@@ -241,14 +241,17 @@
          Experiencia). Cuatro estados excluyentes: cargando, error, sin
          datos y listo; cargando y error nunca se ven como lista vacia. -->
     <!-- Las tarjetas (y el semaforo del Registro) filtran la lista con un
-         clic; otro clic las quita. Las cifras no cambian
-         (registro-iniciativas.js, FiltroRegistro.indicador). Visible solo
-         con el registro cargado. -->
+         clic; otro clic las quita; Total las muestra todas. Las cifras no
+         cambian (registro-iniciativas.js, FiltroRegistro.indicador;
+         mecanica en assets/js/seleccion-kpi.js). Visible solo con el
+         registro cargado. Las tarjetas NO son aria-live: se repintan en
+         cada clic y se releerian enteras; el aviso es #regCuenta. -->
     <p class="ini-kpis-guia" id="regKpisGuia" hidden>
       <strong>Haz clic en un indicador para filtrar las iniciativas por esa condición.</strong>
       <span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro.</span>
+      <span>Total muestra todas las iniciativas.</span>
     </p>
-    <div class="kpis ini-kpis" id="regKpis" aria-live="polite" aria-busy="true"></div>
+    <div class="kpis ini-kpis" id="regKpis" aria-busy="true"></div>
 
     <p class="ini-estado" id="regCargando" role="status">Cargando iniciativas…</p>
     <div class="ini-error" id="regError" role="alert" hidden>
@@ -841,6 +844,7 @@
 <script src="../assets/js/catalogos.js"></script>
 <script src="../assets/js/globo-ayuda.js"></script>
 <script src="../assets/js/desplegable.js"></script>
+<script src="../assets/js/seleccion-kpi.js"></script>
 <script src="cascada-organizacional.js"></script>
 <script src="iniciativa-admin.js"></script>
 <script src="categorias-duenos.js"></script>

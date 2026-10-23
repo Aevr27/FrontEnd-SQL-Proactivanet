@@ -200,6 +200,7 @@ function Pagina(conAdmin) {
     (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', leer('admin/iniciativa-admin.js')))(
       ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion);
   }
+  (new Function('window', leer('assets/js/seleccion-kpi.js')))(ventana);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
@@ -2341,8 +2342,8 @@ pruebas.push(function () {
     return reg.guardarEdicion(Servidor(200, GUARDADA).pedir,
       RegistroGuardado({ titulo: 'Nuevo', titulo_problem: 'Nuevo', estado: 'Cerrado', activa: false, seguimiento: false }));
   }).then(function (r) {
-    Check('GS24 Modificar guardado: indicadores del registro releido (Total, Activas, Requerimientos, Atrasadas, Cerradas)',
-      [['3', '3', '0', '0', '0'], 'guardada', ['2', '2', '0', '0', '1']], [antes, r.estado, kpisDe(p)]);
+    Check('GS24 Modificar guardado: indicadores del registro releido (Total = todas, Activas, Requerimientos, Atrasadas, Cerradas)',
+      [['3', '3', '0', '0', '0'], 'guardada', ['3', '2', '0', '0', '1']], [antes, r.estado, kpisDe(p)]);
     Check('GS24 ... filtros, busqueda, orden, "mostrar mas", modo y detalle intactos', [VISTA, 'PRB 2026-000001'],
       [vista(p, reg), reg.abierta]);
   });

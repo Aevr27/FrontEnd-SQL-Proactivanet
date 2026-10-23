@@ -138,6 +138,7 @@ function Pagina(pedir, antes) {
   // htmlVolumetria son los de la volumetria de Nueva solicitud).
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', leer('admin/iniciativa-admin.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion);
+  (new Function('window', leer('assets/js/seleccion-kpi.js')))(ventana);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
   // Como en la pagina: sesion-admin.js y acuse-iniciativa.js antes de
