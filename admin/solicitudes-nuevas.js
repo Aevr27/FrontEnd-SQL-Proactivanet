@@ -1,27 +1,39 @@
 /* =========================================================================
-   admin/solicitudes-nuevas.js - vista "Nuevas" de la pestaña Solicitudes:
-   registro de SOLO LECTURA de las Nuevas solicitudes guardadas (sql/29).
-   handlers/admin_iniciativas_solicitudes_nuevas.ashx.
+   admin/solicitudes-nuevas.js - vista "Iniciativas" de la pestaña
+   Solicitudes: registro de las Nuevas solicitudes guardadas (sql/29) y su
+   revision por ADM (sql/31).
 
-     listar   GET ?accion=listar               las mas recientes primero
-     detalle  GET ?accion=detalle&numero=      la solicitud y su historial
+     listar    GET  handlers/admin_iniciativas_solicitudes_nuevas.ashx?accion=listar
+     detalle   GET  ...?accion=detalle&numero=      la solicitud y su historial
+     aprobar   POST handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx?accion=aprobar
+                    numero, comentario (opcional)
+     rechazar  POST ...?accion=rechazar             numero, comentario (obligatorio)
+
+   APROBADA = aprobada para que ADM cree la iniciativa a mano (Administracion
+   -> Crear); no se crea ninguna iniciativa. APROBADA y RECHAZADA son finales.
+   Los botones salen solo en una ENVIADA y solo si el servidor dice
+   revision_disponible (sql/31 en la base). "Aprobada" / "rechazada" se dice
+   SOLO con la respuesta del servidor; despues se releen lista y detalle.
+   Nunca usa el endpoint de Cambios.
 
    Conmutador "Iniciativas | Cambios" (solVerNuevas / solVerCambio): "Cambios"
    es la de siempre (admin/solicitudes-cambio.js, en solVistaCambio) y sigue
    siendo la de inicio; esta vista no la toca, solo la oculta o la muestra.
-   Sin aprobar, rechazar, borrar ni cambiar estado.
 
-   Solo UX: el servidor exige ADM (AccesoAdmin.ExigirAdm). Cada respuesta se
-   dice distinto: cargando, sin solicitudes, faltan las tablas (501), sin
-   permiso (403), la base fallo (500) y sin conexion.
+   Solo UX: el servidor exige ADM (AccesoAdmin.ExigirAdm) en los dos
+   handlers. Cada respuesta se dice distinto: cargando, sin solicitudes,
+   faltan las tablas (501), sin permiso (403), la base fallo (500) y sin
+   conexion.
    Se prueba en node: tools/tests/SolicitudesNuevasSmoke.js.
    ========================================================================= */
 window.SolicitudesNuevas = (function () {
   'use strict';
 
   var URL = '../handlers/admin_iniciativas_solicitudes_nuevas.ashx';
-  var ESTADOS = { ENVIADA: 'Enviada' };
-  var EVENTOS = { ENVIADA: 'Enviada' };
+  var URL_REVISION = '../handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx';
+  var MAXIMO_COMENTARIO = 2000;   // RevisionSolicitudesIniciativa.MaximoComentario
+  var ESTADOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada' };
+  var EVENTOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada' };
 
   function h(s) { return Escape.html(s === null || s === undefined ? '' : String(s)); }
   function nada(v) { return v === null || v === undefined || v === '' ? '—' : h(v); }
@@ -61,7 +73,9 @@ window.SolicitudesNuevas = (function () {
       : '';
   }
 
-  function htmlDetalle(d) {
+  // puedeRevisar: ADM y revision_disponible. Los botones, solo en ENVIADA.
+  function htmlDetalle(d, puedeRevisar) {
+    var revisada = d.estado === 'APROBADA' || d.estado === 'RECHAZADA';
     var filas = [
       ['Tipo de iniciativa', nada(d.tipo)],
       ['Solicitó', solicitante(d) + (d.solicitante_cuenta && d.solicitante_nombre ? '<span class="ini-sub">' + h(d.solicitante_cuenta) + '</span>' : '')],
@@ -77,15 +91,28 @@ window.SolicitudesNuevas = (function () {
     ].map(function (f) { return '<tr><th scope="row">' + f[0] + '</th><td>' + f[1] + '</td></tr>'; }).join('');
     var eventos = (d.eventos || []).map(function (e) {
       return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + nada(e.usuario) +
-        (e.estado_anterior || e.estado_nuevo ? '<span class="ini-sub">' + estado(e.estado_anterior) + ' → ' + estado(e.estado_nuevo) + '</span>' : '') + '</li>';
+        (e.estado_anterior || e.estado_nuevo ? '<span class="ini-sub">' + estado(e.estado_anterior) + ' → ' + estado(e.estado_nuevo) + '</span>' : '') +
+        (e.detalle ? '<span class="ini-sub">«' + h(e.detalle) + '»</span>' : '') + '</li>';
     }).join('');
+    var revision = revisada
+      ? '<p class="ini-nota"><strong>' + estado(d.estado) + '</strong> por ' + nada(d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
+        (d.comentario_revision ? ': «' + h(d.comentario_revision) + '»' : '') +
+        (d.estado === 'APROBADA' ? '<span class="ini-sub">Crea la iniciativa a mano en Administración → Crear.</span>' : '') + '</p>'
+      : '';
+    var acciones = d.estado === 'ENVIADA' && puedeRevisar
+      ? '<div class="ini-cambio-campos"><div class="campo ini-cambio-ancho"><label for="snComentario">Comentario (obligatorio para rechazar; opcional al aprobar)</label>' +
+        '<textarea id="snComentario" rows="3" maxlength="' + MAXIMO_COMENTARIO + '"></textarea></div></div>' +
+        '<div class="ini-cambio-pie"><button type="button" class="btn chico" data-sn-accion="aprobar">Aprobar</button> ' +
+        '<button type="button" class="btn linea chico" data-sn-accion="rechazar">Rechazar</button> ' +
+        '<button type="button" class="btn linea chico" data-sn-accion="cerrar">Cerrar</button></div>'
+      : '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-sn-accion="cerrar">Cerrar</button></div>';
     return '<h4>Solicitud ' + h(d.numero_texto) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' +
       '<table class="ini-det-tabla"><tbody>' + filas + '</tbody></table>' +
       '<h5>Descripción</h5><div class="ini-texto">' + nada(d.descripcion) + '</div>' +
-      '<h5>Observaciones</h5><div class="ini-texto">' + nada(d.observaciones) + '</div>' +
+      '<h5>Observaciones</h5><div class="ini-texto">' + nada(d.observaciones) + '</div>' + revision +
+      '<div class="ini-cambio-msg" id="snDetMsg" role="status" aria-live="polite"></div>' + acciones +
       '<h5>Historial de la solicitud</h5>' +
-      (eventos ? '<ul class="ini-sol-eventos">' + eventos + '</ul>' : '<p class="ini-nota">Sin eventos registrados.</p>') +
-      '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-sn-accion="cerrar">Cerrar</button></div>';
+      (eventos ? '<ul class="ini-sol-eventos">' + eventos + '</ul>' : '<p class="ini-nota">Sin eventos registrados.</p>');
   }
 
   // El texto de una respuesta que no es 200, segun lo que paso.
@@ -109,7 +136,8 @@ window.SolicitudesNuevas = (function () {
       this.rol = null;
       this.vista = 'cambio';     // 'nuevas' | 'cambio' (la de siempre, de inicio)
       this.detalle = null;
-      this.alVerCambio = null;   // al volver a "De cambio": la pagina relee esa cola
+      this.ocupado = false;      // una revision a la vez (doble clic)
+      this.alVerCambio = null;   // al volver a "Cambios": la pagina relee esa cola
       this.cableado = false;
     }
 
@@ -131,12 +159,15 @@ window.SolicitudesNuevas = (function () {
       });
       this.$('snDetalle').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-sn-accion]') : e.target;
-        if (el && el.getAttribute && el.getAttribute('data-sn-accion') === 'cerrar') self.cerrarDetalle();
+        var a = el && el.getAttribute && el.getAttribute('data-sn-accion');
+        if (a === 'aprobar') self.aprobar();
+        else if (a === 'rechazar') self.rechazar();
+        else if (a === 'cerrar') self.cerrarDetalle();
       });
     }
 
     // Al mostrar la pestaña (despues de ColaSolicitudes.abrir). Sin ADM: ni
-    // conmutador ni "Nuevas"; "De cambio" se queda como la pinta su modulo.
+    // conmutador ni "Iniciativas"; "Cambios" se queda como la pinta su modulo.
     abrir() {
       this.cablear();
       if (!this.$('snBloque')) return Promise.resolve(null);
@@ -221,7 +252,7 @@ window.SolicitudesNuevas = (function () {
           self.mensaje('snMsg', '', '');
           self.detalle = r.json;
           var caja = self.$('snDetalle');
-          caja.innerHTML = htmlDetalle(r.json);
+          caja.innerHTML = htmlDetalle(r.json, self.rol === 'ADM' && r.json.revision_disponible === true);
           caja.hidden = false;
           return r.json;
         }, function () {
@@ -235,8 +266,61 @@ window.SolicitudesNuevas = (function () {
       this.$('snDetalle').hidden = true;
       this.$('snDetalle').innerHTML = '';
     }
+
+    comentario() { var c = this.$('snComentario'); return c ? String(c.value || '').trim() : ''; }
+
+    aprobar() { return this.revisar('aprobar', 'aprobada'); }
+
+    rechazar() {
+      if (this.detalle && !this.comentario()) {
+        this.mensaje('snDetMsg', 'error', 'Escribe por qué se rechaza.');
+        return Promise.resolve(null);
+      }
+      return this.revisar('rechazar', 'rechazada');
+    }
+
+    // POST al endpoint de revision (nunca al de Cambios). Despues se releen
+    // lista y detalle: la verdad es la del servidor (quien gano, el estado).
+    revisar(accion, exito) {
+      var self = this, d = this.detalle;
+      if (!d || this.ocupado || d.estado !== 'ENVIADA') return Promise.resolve(null);
+      var comentario = this.comentario();
+      if (comentario.length > MAXIMO_COMENTARIO) {
+        this.mensaje('snDetMsg', 'error', 'El comentario no puede pasar de ' + MAXIMO_COMENTARIO + ' caracteres.');
+        return Promise.resolve(null);
+      }
+      var datos = new FormData();
+      datos.append('numero', String(d.numero));
+      if (comentario) datos.append('comentario', comentario);
+      this.ocupado = true;
+      this.mensaje('snDetMsg', '', '<span>' + (accion === 'aprobar' ? 'Aprobando…' : 'Rechazando…') + '</span>');
+      return Promise.resolve().then(function () {
+        return self.pedir(URL_REVISION + '?accion=' + accion, { method: 'POST', body: datos, credentials: 'same-origin' });
+      })
+        .then(leer)
+        .then(function (r) {
+          self.ocupado = false;
+          var j = r.json, ok = r.status === 200 && j[exito] === true;
+          var html = ok
+            ? (accion === 'aprobar'
+                ? '<strong>Solicitud ' + h(d.numero_texto) + ' aprobada.</strong> Crea la iniciativa a mano en Administración → Crear.'
+                : '<strong>Solicitud ' + h(d.numero_texto) + ' rechazada.</strong>')
+            : j[exito] === null ? h(j.error || 'No se pudo confirmar.') + ' Revisa la solicitud antes de reintentar.'
+            : '<strong>No se ' + (accion === 'aprobar' ? 'aprobó' : 'rechazó') + '.</strong> ' + h(j.error || ('Respuesta ' + r.status + '.'));
+          var clase = ok ? 'listo' : j[exito] === null ? 'aviso' : 'error';
+          return Promise.all([self.listar(), self.verDetalle(d.numero)]).then(function () {
+            self.mensaje('snDetMsg', clase, html);
+            return r;
+          });
+        }, function () {
+          self.ocupado = false;
+          self.mensaje('snDetMsg', 'aviso', 'No se pudo contactar al servidor: no se sabe si se ' + (accion === 'aprobar' ? 'aprobó' : 'rechazó') +
+            '. Actualiza la lista antes de reintentar.');
+          return null;
+        });
+    }
   }
 
   return { RegistroSolicitudesNuevas: RegistroSolicitudesNuevas, htmlLista: htmlLista, htmlDetalle: htmlDetalle,
-           textoError: textoError, textoTotal: textoTotal, URL: URL };
+           textoError: textoError, textoTotal: textoTotal, URL: URL, URL_REVISION: URL_REVISION };
 })();

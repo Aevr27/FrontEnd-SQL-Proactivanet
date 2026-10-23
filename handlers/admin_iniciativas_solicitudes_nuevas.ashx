@@ -52,6 +52,7 @@ public class AdminIniciativasSolicitudesNuevas : IHttpHandler
                 return new Dictionary<string, object>
                 {
                     { "solicitudes", l.Solicitudes }, { "total", l.Total }, { "maximo", RegistroSolicitudesIniciativa.Maximo },
+                    { "revision_disponible", l.RevisionDisponible },
                 };
             }
             var d = lector.Detalle(numero);

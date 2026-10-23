@@ -18,6 +18,11 @@
 // es de INSERT/UPDATE/DELETE). No cambia estado, no aprueba ni borra, y no
 // guarda nada fuera de la base: cada request lee de nuevo.
 //
+// Con sql/31 (revision) tambien lee revisor, fecha y comentario de la
+// revision y el Detalle de cada evento, y dice revision_disponible = true;
+// sin sql/31 esas columnas salen NULL (como antes). Aprobar y rechazar son
+// de RevisionSolicitudesIniciativa (otro handler, POST).
+//
 // Se prueba sin SQL en tools/tests/RegistroSolicitudesIniciativaHttpSmoke.cs
 // y contra LocalDB en tools/tests/RegistroSolicitudesIniciativaSqlLocalDbSmoke.cs.
 
@@ -37,6 +42,7 @@ public interface ILectorSolicitudesIniciativa
 public sealed class LecturaSolicitudesIniciativa
 {
     public int Total;
+    public bool RevisionDisponible;    // sql/31 en la base: se puede aprobar / rechazar
     public List<Dictionary<string, object>> Solicitudes = new List<Dictionary<string, object>>();
 }
 
@@ -68,26 +74,51 @@ public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativ
             return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
     }
 
-    private const string Columnas = @"
+    // sql/31 (revision): las 4 columnas y los 2 procedimientos. Sin ellos las
+    // columnas de la revision se leen como NULL y no se ofrece revisar.
+    public const string ConsultaRevision =
+        "SELECT CASE WHEN COL_LENGTH(N'adm.SolicitudIniciativa', N'RevisadoPor') IS NOT NULL " +
+        " AND COL_LENGTH(N'adm.SolicitudIniciativa', N'FechaRevisionUtc') IS NOT NULL " +
+        " AND COL_LENGTH(N'adm.SolicitudIniciativa', N'ComentarioRevision') IS NOT NULL " +
+        " AND COL_LENGTH(N'adm.SolicitudIniciativaEvento', N'Detalle') IS NOT NULL " +
+        " AND OBJECT_ID(N'adm.usp_SolicitudIniciativa_Aprobar', N'P') IS NOT NULL " +
+        " AND OBJECT_ID(N'adm.usp_SolicitudIniciativa_Rechazar', N'P') IS NOT NULL THEN 1 ELSE 0 END";
+
+    private static bool ConRevision(SqlConnection cn)
+    {
+        using (var cmd = new SqlCommand(ConsultaRevision, cn) { CommandTimeout = 15 })
+            return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+    }
+
+    private static string Columnas(bool revision)
+    {
+        return @"
        s.NumeroSolicitud, s.Estado, s.TipoIniciativa, s.Titulo, s.SolicitanteNombre, s.SolicitanteCorreo, s.SolicitanteCuenta,
        s.ProductOwner, s.ProductOwnerCorreo, s.ServiceOwner, s.Categoria, s.Director, s.FechaUtc,
-       Eventos = (SELECT COUNT(*) FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = s.NumeroSolicitud)";
+       Eventos = (SELECT COUNT(*) FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = s.NumeroSolicitud),
+" + (revision
+            ? "       s.RevisadoPor, s.FechaRevisionUtc, s.ComentarioRevision"
+            : "       RevisadoPor = CONVERT(nvarchar(256), NULL), FechaRevisionUtc = CONVERT(datetime2(0), NULL), ComentarioRevision = CONVERT(nvarchar(4000), NULL)");
+    }
 
     public LecturaSolicitudesIniciativa Listar(int maximo)
     {
-        var sql = "SELECT TOP (@max)" + Columnas + @"
+        var l = new LecturaSolicitudesIniciativa();
+        using (var cn = Abierta())
+        {
+            l.RevisionDisponible = ConRevision(cn);
+            var sql = "SELECT TOP (@max)" + Columnas(l.RevisionDisponible) + @"
 FROM adm.SolicitudIniciativa AS s
 ORDER BY s.NumeroSolicitud DESC;
 SELECT COUNT(*) FROM adm.SolicitudIniciativa;";
-        var l = new LecturaSolicitudesIniciativa();
-        using (var cn = Abierta())
-        using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 60 })
-        {
-            cmd.Parameters.Add("@max", SqlDbType.Int).Value = Math.Max(1, Math.Min(maximo, 500));
-            using (var r = cmd.ExecuteReader())
+            using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 60 })
             {
-                while (r.Read()) l.Solicitudes.Add(Fila(r));
-                if (r.NextResult() && r.Read()) l.Total = Convert.ToInt32(r.GetValue(0), CultureInfo.InvariantCulture);
+                cmd.Parameters.Add("@max", SqlDbType.Int).Value = Math.Max(1, Math.Min(maximo, 500));
+                using (var r = cmd.ExecuteReader())
+                {
+                    while (r.Read()) l.Solicitudes.Add(Fila(r));
+                    if (r.NextResult() && r.Read()) l.Total = Convert.ToInt32(r.GetValue(0), CultureInfo.InvariantCulture);
+                }
             }
         }
         return l;
@@ -95,40 +126,46 @@ SELECT COUNT(*) FROM adm.SolicitudIniciativa;";
 
     public Dictionary<string, object> Detalle(int numero)
     {
-        var sql = "SELECT" + Columnas + @",
+        using (var cn = Abierta())
+        {
+            var revision = ConRevision(cn);
+            var sql = "SELECT" + Columnas(revision) + @",
        s.Descripcion, s.Observaciones, s.Volumetria, s.PctDisminucion, s.RcaExtension, s.FuenteCorreos
 FROM adm.SolicitudIniciativa AS s
 WHERE s.NumeroSolicitud = @n;
-SELECT e.IdEvento, e.Evento, e.EstadoAnterior, e.EstadoNuevo, e.Usuario, e.FechaUtc
+SELECT e.IdEvento, e.Evento, e.EstadoAnterior, e.EstadoNuevo, e.Usuario, e.FechaUtc, " +
+                (revision ? "e.Detalle" : "Detalle = CONVERT(nvarchar(2000), NULL)") + @"
 FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = @n ORDER BY e.IdEvento;";
-        using (var cn = Abierta())
-        using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 30 })
-        {
-            cmd.Parameters.Add("@n", SqlDbType.Int).Value = numero;
-            using (var r = cmd.ExecuteReader())
+            using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 30 })
             {
-                if (!r.Read()) return null;
-                var d = Fila(r);
-                d["descripcion"] = Texto(r, "Descripcion");
-                d["observaciones"] = Texto(r, "Observaciones");
-                d["volumetria"] = r.IsDBNull(r.GetOrdinal("Volumetria")) ? (object)null : Convert.ToInt32(r["Volumetria"], CultureInfo.InvariantCulture);
-                d["pct"] = Pct(r, "PctDisminucion");
-                d["rca_extension"] = Texto(r, "RcaExtension");
-                d["fuente_correos"] = Texto(r, "FuenteCorreos");
-                var eventos = new List<object>();
-                if (r.NextResult())
-                    while (r.Read())
-                        eventos.Add(new Dictionary<string, object>
-                        {
-                            { "id", Convert.ToInt32(r["IdEvento"], CultureInfo.InvariantCulture) },
-                            { "evento", Texto(r, "Evento") },
-                            { "estado_anterior", Texto(r, "EstadoAnterior") },
-                            { "estado_nuevo", Texto(r, "EstadoNuevo") },
-                            { "usuario", Texto(r, "Usuario") },
-                            { "fecha_utc", Utc(r, "FechaUtc") },
-                        });
-                d["eventos"] = eventos;
-                return d;
+                cmd.Parameters.Add("@n", SqlDbType.Int).Value = numero;
+                using (var r = cmd.ExecuteReader())
+                {
+                    if (!r.Read()) return null;
+                    var d = Fila(r);
+                    d["revision_disponible"] = revision;
+                    d["descripcion"] = Texto(r, "Descripcion");
+                    d["observaciones"] = Texto(r, "Observaciones");
+                    d["volumetria"] = r.IsDBNull(r.GetOrdinal("Volumetria")) ? (object)null : Convert.ToInt32(r["Volumetria"], CultureInfo.InvariantCulture);
+                    d["pct"] = Pct(r, "PctDisminucion");
+                    d["rca_extension"] = Texto(r, "RcaExtension");
+                    d["fuente_correos"] = Texto(r, "FuenteCorreos");
+                    var eventos = new List<object>();
+                    if (r.NextResult())
+                        while (r.Read())
+                            eventos.Add(new Dictionary<string, object>
+                            {
+                                { "id", Convert.ToInt32(r["IdEvento"], CultureInfo.InvariantCulture) },
+                                { "evento", Texto(r, "Evento") },
+                                { "estado_anterior", Texto(r, "EstadoAnterior") },
+                                { "estado_nuevo", Texto(r, "EstadoNuevo") },
+                                { "usuario", Texto(r, "Usuario") },
+                                { "fecha_utc", Utc(r, "FechaUtc") },
+                                { "detalle", Texto(r, "Detalle") },
+                            });
+                    d["eventos"] = eventos;
+                    return d;
+                }
             }
         }
     }
@@ -145,6 +182,8 @@ FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = @n ORDER BY e.
             { "po", Texto(r, "ProductOwner") }, { "po_correo", Texto(r, "ProductOwnerCorreo") }, { "so", Texto(r, "ServiceOwner") },
             { "categoria", Texto(r, "Categoria") }, { "director", Texto(r, "Director") },
             { "fecha_utc", Utc(r, "FechaUtc") }, { "eventos_total", Convert.ToInt32(r["Eventos"], CultureInfo.InvariantCulture) },
+            { "revisado_por", Texto(r, "RevisadoPor") }, { "fecha_revision_utc", Utc(r, "FechaRevisionUtc") },
+            { "comentario_revision", Texto(r, "ComentarioRevision") },
         };
     }
 
