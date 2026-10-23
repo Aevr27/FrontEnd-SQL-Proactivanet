@@ -27,6 +27,16 @@
 // Toda la logica es la de Experiencia: ExperienciaQueries.RegistroIniciativas
 // (App_Code/ExperienciaRegistro.cs) reusa sus lecturas y su semaforo.
 //
+// GET ?export=1 (solo al pulsar "Descargar iniciativas"): las columnas que
+// el registro no trae y el Excel si, de todas las vigentes:
+//     { "iniciativas": [ { folio, gerencia, direccion, tipo_iniciativa,
+//                          prioridad, impacto, rca, volumetria_original,
+//                          f_entrega_prb } ],                (dbo.Problem)
+//       "categorias":  [ { folio, categoria, tipo_ticket, tipo_iniciativa,
+//                          mes_reduccion } ] }      (dbo.ProblemCategoria)
+// (ExperienciaQueries.RegistroExportExtra). El navegador las cruza con lo
+// que ya filtro; el servidor no recibe folios. export distinto de 1: 400.
+//
 // SOLO LECTURA: SELECT sobre dbo.vw_ProblemCategoria, dbo.Problem,
 // dbo.CatPrefijoProblem, dbo.ProblemCategoria, dbo.CatCategoriaDueno y
 // dbo.CatPersona (y dbo.Problem.Prefijo por folio + dbo.CatPrefijoProblem para el
@@ -60,6 +70,29 @@ public class AdminIniciativasRegistro : IHttpHandler
 
         try
         {
+            // ?export=1: SOLO las columnas extra de "Descargar iniciativas"
+            // (ExperienciaQueries.RegistroExportExtra, dos SELECT), detras
+            // del mismo AccesoAdmin.Exigir. Sin el parametro, el registro de
+            // siempre, que no las lee. Otro valor: 400.
+            var export = context.Request.QueryString["export"];
+            if (export != null)
+            {
+                if (export != "1")
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.TrySkipIisCustomErrors = true;
+                    var malo = new Dictionary<string, object>
+                    {
+                        { "error", "Parametro export invalido: solo se acepta export=1." },
+                        { "tipo", "ParametroInvalido" },
+                    };
+                    context.Response.Write(serializador.Serialize(malo));
+                    return;
+                }
+                context.Response.Write(serializador.Serialize(ExperienciaQueries.RegistroExportExtra()));
+                return;
+            }
+
             var registro = ExperienciaQueries.RegistroIniciativas();
             // Si "Crear iniciativa" / "Modificar" guardan o solo validan
             // (PersistenciaGestionAdmin, const): la pagina rotula sus botones
