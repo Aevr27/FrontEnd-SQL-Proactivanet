@@ -2729,6 +2729,34 @@ pruebas.push(function () {
 });
 
 pruebas.push(function () {
+  // Sin ningun filtro: aviso antes de bajar el registro completo.
+  var p = Pagina(ok(DATOS)), reg = p.registro, b = Bajada();
+  var preguntas = [], respuesta = false;
+  reg.confirmar = function (m) { preguntas.push(m); return respuesta; };
+  return esperar().then(function () {
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function (r) {
+    Check('XD17 sin filtros: pregunta con la cifra', ['No hay filtros aplicados: se descargarán las 5 iniciativas del registro completo. ¿Continuar?'], preguntas);
+    Check('XD17 cancelar: no carga ni baja nada, sin mensaje, boton habilitado', [false, 0, 0, true, false],
+      [r, b.cargas, b.veces, p.sel('regDescargaMsg').hidden, p.sel('regDescargar').disabled]);
+    respuesta = true;
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function (r) {
+    Check('XD17 aceptar: baja las 5', [true, 1, 5], [r, b.veces, b.hoja('Iniciativas').length]);
+    preguntas = [];
+    elegir(p, 'regDirector', 'Dir A');
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function () {
+    Check('XD17 con un filtro no pregunta', [[], 2], [preguntas, b.veces]);
+    elegir(p, 'regDirector', '');
+    p.sel('regBuscar').value = 'PRB'; reg.aplicarBusqueda();
+    return reg.descargar(b.cargar, b.bajar, HOY);
+  }).then(function () {
+    Check('XD17 la busqueda cuenta como filtro: no pregunta', [[], 3], [preguntas, b.veces]);
+  });
+});
+
+pruebas.push(function () {
   // Solo lectura y sin endpoint nuevo: el codigo de la descarga no hace
   // fetch ni POST, y el unico origen sigue siendo el handler con ADM/MOD.
   var libro = leer('admin/libro-iniciativas.js');

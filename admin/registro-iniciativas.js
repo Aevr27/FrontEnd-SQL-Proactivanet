@@ -2479,6 +2479,15 @@ window.RegistroIniciativas = (function () {
         return Promise.resolve(false);
       }
       var registro = this.registro;
+      // Sin ningun filtro (ni busqueda ni indicador) sale el registro
+      // completo (900+): se avisa antes. Cancelar no deja mensaje. Sin forma
+      // de preguntar, se sigue: es un aviso, no se pierde nada.
+      if (this.filtro.activos() === 0) {
+        var preguntar = this.confirmar ||
+          (typeof window !== 'undefined' && typeof window.confirm === 'function' ? function (m) { return window.confirm(m); } : null);
+        if (preguntar && !preguntar('No hay filtros aplicados: se descargarán las ' + fmt(lista.length) +
+            ' iniciativas del registro completo. ¿Continuar?')) return Promise.resolve(false);
+      }
       var filtrado = lista.length < registro.iniciativas.length;
       var rotulo = btn.textContent;
       this.descargando = true;
