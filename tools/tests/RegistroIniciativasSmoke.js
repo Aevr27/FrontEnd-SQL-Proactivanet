@@ -726,10 +726,10 @@ pruebas.push(function () {
     accion('solicitar-cambios');
     Check('SE1 la fecha nombra su etapa (la del campo elegido)', true,
       /<label for="regCambioNueva" id="regCambioNuevaRot">Nueva fecha compromiso de Solución<\/label>/.test(p.sel('regCambio').innerHTML));
-    elegir('regCambioCampo', 'f_cierre');
-    Check('SE1 ... y cambia con "Qué cambiar"', 'Nueva fecha compromiso de Cierre', p.sel('regCambioNuevaRot').textContent);
+    elegir('regCambioFechaCampo', 'f_cierre');
+    Check('SE1 ... y cambia con la etapa de "Fecha de compromiso"', 'Nueva fecha compromiso de Cierre', p.sel('regCambioNuevaRot').textContent);
     elegir('regCambioCampo', '');
-    Check('SE2 sin "Qué cambiar" no hay fecha suelta', true, p.sel('regCambioGrupoFecha').hidden);
+    Check('SE2 sin "Qué cambiar" no hay fecha suelta', [true, true], [p.sel('regCambioGrupoFecha').hidden, p.sel('regCambioGrupoEtapa').hidden]);
     Check('SE2 CSS: [hidden] gana al display:flex de .campo (solo se ve el grupo elegido)', true,
       /\.ini-cambio-campos \.campo\[hidden\][^{]*\{ display: none; \}/.test(leer('admin/iniciativas.css')));
 
@@ -762,15 +762,18 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
-// SB) Subestado solo ADM (2026-10-26): "Solicitar cambios" ofrece Nuevo
-// Subestado solo con rol ADM. Aunque el registro trajera la lista (el
-// servidor no la manda a otro rol), MOD no la ve y aun puede pedir el Estado.
+// SB) Subestado (2026-10-26): "Solicitar cambios" NO lo ofrece a nadie (ni
+// la opcion "Estado y Subestado", ni el actual, ni el nuevo); el Estado se
+// sigue pidiendo. ADM conserva la lista para "Modificar" (opcionesEstado);
+// MOD y sin rol, no. Que MOD no lo pueda pedir por HTTP lo prueba
+// SolicitudesCambioHttpSmoke.cs (S1-S5).
 // ---------------------------------------------------------------------------
 [['ADM', true], ['MOD', false], [null, false]].forEach(function (caso) {
   pruebas.push(function () {
     var datos = JSON.parse(JSON.stringify(DATOS));
     datos.estados_problem = ['En Análisis', 'En Solución', 'Cerrado'];
     datos.subestados_problem = ['Solucionado'];
+    datos.iniciativas[0].subestado = 'En espera';
     var p = Pagina(ok(datos), function () { return nunca(); }, caso[0]);
     var nombre = caso[0] || 'sin rol';
     function accion(a) {
@@ -779,16 +782,25 @@ pruebas.push(function () {
     }
     function elegir(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('change', { target: p.sel(id) }); }
     return esperar().then(function () {
+      Check('SB0 ' + nombre + ': la lista de Subestados ' + (caso[1] ? 'sigue para Modificar' : 'no llega'), caso[1] ? ['Solucionado'] : [],
+        p.registro.opcionesEstado().subestados);
       clicFolio(p, 'PRB 2026-000001');
       accion('solicitar-cambios');
+      var form = p.sel('regCambio').innerHTML;
+      Check('SB1 ' + nombre + ': ni la opcion "Estado y Subestado" ni campo de Subestado; la opcion es "Estado"', [false, false, true],
+        [/Subestado/.test(form), /regCambioSubestado/.test(form), /<option value="estado">Estado<\/option>/.test(form)]);
       elegir('regCambioCampo', 'estado');
-      Check('SB1 ' + nombre + ': Nuevo Subestado ' + (caso[1] ? 'se ofrece' : 'NO se ofrece'), caso[1],
-        /<label for="regCambioSubestado">Nuevo Subestado/.test(p.sel('regCambio').innerHTML));
+      Check('SB1 ' + nombre + ': el valor actual es solo el Estado (sin Subestado)', 'En Solución', p.sel('regCambioActual').textContent);
       p.sel('regCambioEstado').value = 'Cerrado';
       p.sel('regCambioMotivo').value = 'Se cierra';
+      // Aunque algo escriba un Subestado en el borrador, no viaja.
+      p.registro.cambio.subestado = 'Solucionado';
       accion('cambio-preparar');
-      Check('SB2 ' + nombre + ': el cambio de Estado se prepara igual', [true, true],
-        [/ini-cambio-msg listo/.test(p.sel('regCambioMsg').className), /En Solución → Cerrado/.test(p.sel('regCambioMsg').innerHTML)]);
+      Check('SB2 ' + nombre + ': el cambio de Estado se prepara igual, sin Subestado', [true, true, false],
+        [/ini-cambio-msg listo/.test(p.sel('regCambioMsg').className), /En Solución → Cerrado/.test(p.sel('regCambioMsg').innerHTML),
+         /Solucionado|En espera/.test(p.sel('regCambioMsg').innerHTML)]);
+      Check('SB2 ' + nombre + ': los pares de envio no llevan subestado_nuevo', false,
+        p.registro.cambio.pares().some(function (x) { return x[0] === 'subestado_nuevo'; }));
     });
   });
 });
@@ -863,7 +875,8 @@ pruebas.push(function () {
         [envios.length, p.registro.registro.buscar('PRB 2026-000001').estado]);
       accion('cambio-cancelar');
       accion('solicitar-cambios');
-      elegir('regCambioCampo', 'f_cierre');
+      elegir('regCambioCampo', 'fecha');
+      elegir('regCambioFechaCampo', 'f_cierre');
       p.sel('regCambioNueva').value = '2027-02-01';
       p.sel('regCambioMotivo').value = 'otra';
       responder(501, { enviada: false, tipo: 'PersistenciaNoHabilitada', error: 'Falta aplicar sql/22.' });
@@ -872,6 +885,9 @@ pruebas.push(function () {
     }).then(function () {
       Check('SV7 borrador nuevo = llave nueva; 501 dice que no se envio', [true, 'ini-cambio-msg aviso', true],
         [envios[2].campos.llave !== envios[0].campos.llave, p.sel('regCambioMsg').className, /No se envió/.test(p.sel('regCambioMsg').innerHTML)]);
+      Check('SV7 "Fecha de compromiso" viaja con el contrato de siempre: tipo fecha + campo_fecha de la etapa elegida',
+        ['fecha', 'f_cierre', '2027-02-01', undefined, undefined],
+        [envios[2].campos.tipo, envios[2].campos.campo_fecha, envios[2].campos.fecha_nueva, envios[2].campos.estado_nuevo, envios[2].campos.subestado_nuevo]);
       responder(422, { enviada: false, errores: [{ campo: 'fecha_nueva', mensaje: 'La nueva fecha compromiso es igual a la actual.' }] });
       accion('cambio-preparar');
       return esperar().then(esperar);
@@ -896,7 +912,7 @@ pruebas.push(function () {
 pruebas.push(function () {
   var S = R.SolicitudCambio;
   Check('SD1 campos(true): Título / PO / SO antes de Otros; campos() sigue sin ellos',
-    [['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'datos', 'otros'], ['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'otros']],
+    [['fecha', 'estado', 'pct', 'datos', 'otros'], ['fecha', 'estado', 'pct', 'otros']],
     [S.campos(true).map(function (c) { return c.clave; }), S.campos().map(function (c) { return c.clave; })]);
   var ini = Ini('PRB 2026-000001', { titulo: 'Uno', titulo_problem: 'Uno', po: 'PO de la categoria', so: 'SO de la categoria',
                                      po_capturado: 'PO 1', so_capturado: null });
@@ -988,8 +1004,43 @@ pruebas.push(function () {
 pruebas.push(function () {
   var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   var S = R.SolicitudCambio;
-  Check('S1 campos designados: tres fechas, Estado, % y Otros', ['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'otros'],
-    S.campos().map(function (c) { return c.clave; }));
+  Check('S1 campos designados: Fecha de compromiso (una sola opcion), Estado, % y Otros', [['fecha', 'estado', 'pct', 'otros'],
+    ['Fecha de compromiso', 'Estado', 'Categorías: % de disminución o agregar', 'Otros (explica la corrección)']],
+    [S.campos().map(function (c) { return c.clave; }), S.campos().map(function (c) { return c.rotulo; })]);
+  Check('S1 las tres etapas de Fecha de compromiso', [['f_analisis', 'f_solucion', 'f_cierre'],
+    ['Fecha compromiso de Análisis', 'Fecha compromiso de Solución', 'Fecha compromiso de Cierre']],
+    [S.camposFecha().map(function (c) { return c.clave; }), S.camposFecha().map(function (c) { return c.rotulo; })]);
+  // SF) Etapa por omision de "Fecha de compromiso": la del Estado actual
+  // (En Monitoreo -> Cierre, la regla de FECHA_DEL_ESTADO); Cerrado ->
+  // Cierre; otro Estado, ninguna (quien pide la elige).
+  Check('SF1 etapa por omision segun el Estado', ['f_analisis', 'f_solucion', 'f_cierre', 'f_cierre', '', '', ''],
+    ['En Análisis', 'En Solución', 'En Monitoreo', 'Cerrado', 'Pendiente', 'Cancelado', null].map(function (e) {
+      return S.etapaPorOmision(Ini('X', { estado: e }));
+    }));
+  var sf = new S(Ini('X', { estado: 'Cerrado', f_analisis: '2026-01-01', f_solucion: '2026-02-01', f_cierre: '2026-03-01' }));
+  Check('SF2 cerrada: abre sin "Qué cambiar"; al elegir Fecha de compromiso arranca en Cierre', ['', 'f_cierre', 'fecha', '2026-03-01'],
+    [new S(Ini('X', { estado: 'Cerrado' })).campo, sf.elegir('fecha'), sf.queCambiar(), sf.actual()]);
+  Check('SF3 se puede elegir cualquiera de las tres; la fecha actual es la de la etapa elegida',
+    [['f_analisis', '2026-01-01'], ['f_solucion', '2026-02-01'], ['f_cierre', '2026-03-01']],
+    ['f_analisis', 'f_solucion', 'f_cierre'].map(function (k) { sf.elegirEtapa(k); return [sf.campo, sf.actual()]; }));
+  sf.elegirEtapa('f_solucion');
+  Check('SF3 volver a elegir Fecha de compromiso conserva la etapa elegida', 'f_solucion', sf.elegir('fecha'));
+  sf.elegir('estado'); sf.elegir('fecha');
+  Check('SF3 tras otra opcion, vuelve a la del Estado actual', 'f_cierre', sf.campo);
+  var sn = new S(Ini('X', { estado: 'Pendiente' }));
+  sn.elegir('fecha'); sn.propuesto = '2027-01-01'; sn.motivo = 'm';
+  Check('SF4 Estado sin etapa por omision: nada elegido y se exige elegirla', ['fecha', 'fecha', null, ['etapa'], true],
+    [sn.campo, sn.queCambiar(), sn.actual(), sn.validar().map(function (e) { return e.campo; }), /Análisis, Solución o Cierre/.test(sn.validar()[0].mensaje)]);
+  sn.elegirEtapa('x_inventada');
+  Check('SF4 etapa inventada = sin etapa', 'fecha', sn.campo);
+  sn.elegirEtapa('f_solucion');
+  Check('SF5 con etapa: valida y viaja con el contrato de siempre (tipo fecha + campo_fecha)',
+    [[], [['tipo', 'fecha'], ['campo_fecha', 'f_solucion'], ['fecha_nueva', '2027-01-01'], ['motivo', 'm']], 'Fecha compromiso de Solución', 'Solución'],
+    [sn.validar(), sn.pares().filter(function (x) { return x[0] !== 'llave' && x[0] !== 'folio'; }), sn.resumen().rotulo, sn.resumen().etapa]);
+  Check('SF5 aprobar: el par de Modificar de esa etapa', [['accion', 'modificar'], ['folio', 'X'], ['f_solucion', '2027-01-01']],
+    new R.RevisionSolicitud(sn.resumen(), 'u').aprobar('a').pares);
+  Check('SF5 un resumen sin etapa no produce pares', null,
+    new R.RevisionSolicitud({ folio: 'X', campo: 'fecha', nuevo: '2027-01-01', automatica: true }, 'u').pares());
   var c = new S(reg.buscar('PRB 2026-000001'));
   Check('S2 por omision la fecha del estado actual', ['f_solucion', '2026-09-01'], [c.campo, c.actual()]);
   Check('S2 cerrada: sin campo por omision', '', new S(reg.buscar('HAR 2025-000003')).campo);
@@ -1014,10 +1065,10 @@ pruebas.push(function () {
   Check('SR1 Estado inventado se rechaza', ['propuesto'], e.validar().map(function (x) { return x.campo; }));
   e.propuesto = 'En Solución';
   Check('SR1 mismo Estado = sin cambio', ['propuesto'], e.validar().map(function (x) { return x.campo; }));
-  e.propuesto = 'Cerrado'; e.subestado = 'Otro';
-  Check('SR1 Subestado inventado se rechaza', ['subestado'], e.validar().map(function (x) { return x.campo; }));
-  e.subestado = 'Solucionado';
-  Check('SR2 Estado valido', [[], 'Cerrado', 'Solucionado', true], [e.validar(), e.resumen().nuevo, e.resumen().subestado, e.resumen().automatica]);
+  e.propuesto = 'Cerrado'; e.subestado = 'Solucionado';
+  Check('SR1 el borrador no usa el Subestado: ni lo valida, ni lo resume, ni lo envia', [[], undefined, false, 'En Solución'],
+    [e.validar(), e.resumen().subestado, e.pares().some(function (x) { return x[0] === 'subestado_nuevo'; }), e.actual()]);
+  Check('SR2 Estado valido', [[], 'Cerrado', true], [e.validar(), e.resumen().nuevo, e.resumen().automatica]);
   // Estado + fecha compromiso en UNA solicitud; la etapa la elige quien pide.
   var ef = new S(reg.buscar('PRB 2026-000001'), LISTAS);
   ef.campo = 'estado'; ef.propuesto = 'Cerrado'; ef.motivo = 'Se cierra con nueva fecha';
@@ -1104,7 +1155,7 @@ pruebas.push(function () {
   Check('SR7 aprobar fecha: pares de Modificar', [true, 'aprobada', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['f_solucion', '2026-10-15']]],
     [ap.ok, rv.estado, ap.pares]);
   Check('SR7 no se aprueba dos veces ni se rechaza despues', [false, false], [rv.aprobar('x').ok, rv.rechazar('x', 'm').ok]);
-  Check('SR8 aprobar Estado: estado y subestado', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['estado', 'Cerrado'], ['subestado', 'Solucionado']],
+  Check('SR8 aprobar Estado: solo el estado (sin subestado)', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['estado', 'Cerrado']],
     new V(e.resumen(), 'u').aprobar('a').pares);
   Check('SR8 aprobar categorias: los mismos pares de Modificar, una por categoria',
     [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['pct_categoria', '/A/Cat 1/Hoja'], ['pct_valor', '40'],
@@ -1142,13 +1193,32 @@ pruebas.push(function () {
     accion('solicitar-cambios');
     var form = p.sel('regCambio').innerHTML;
     Check('S7 abre el formulario', [false, 'true', 1], [p.sel('regCambio').hidden, p.sel('regCambioBoton').getAttribute('aria-expanded'), p.sel('regCambioCampo').enfocado]);
-    Check('S7 campo y valor actual por omision', [true, true],
-      [/<option value="f_solucion" selected>Fecha compromiso de Solución/.test(form), /id="regCambioActual">01\/09\/2026</.test(form)]);
-    Check('S7 sin campos que no sean fecha', 3, (form.match(/<option value="f_/g) || []).length);
+    var queCambiar = form.slice(form.indexOf('id="regCambioCampo"'), form.indexOf('</select>', form.indexOf('id="regCambioCampo"')));
+    Check('S7 "Qué cambiar": UNA opcion Fecha de compromiso (elegida), sin las tres fechas sueltas', [true, 0, 1],
+      [/<option value="fecha" selected>Fecha de compromiso<\/option>/.test(queCambiar), (queCambiar.match(/<option value="f_/g) || []).length,
+       (queCambiar.match(/Fecha/g) || []).length]);
+    Check('S7 etapa por omision = la del Estado (En Solución) y su fecha actual', [true, false, true, true],
+      [/<label for="regCambioFechaCampo">Fecha de compromiso<\/label><select id="regCambioFechaCampo">/.test(form),
+       /id="regCambioGrupoEtapa" hidden/.test(form),
+       /<option value="f_solucion" selected>Fecha compromiso de Solución<\/option>/.test(form),
+       /id="regCambioActual">01\/09\/2026</.test(form)]);
 
-    p.sel('regCambioCampo').value = 'f_analisis';
+    p.sel('regCambioFechaCampo').value = 'f_analisis';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioFechaCampo') });
+    Check('S8 cambiar de etapa muestra su fecha actual y nombra la nueva', ['01/12/2026', 'Nueva fecha compromiso de Análisis', 'f_analisis'],
+      [p.sel('regCambioActual').textContent, p.sel('regCambioNuevaRot').textContent, p.registro.cambio.campo]);
+    p.sel('regCambioFechaCampo').value = 'f_cierre';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioFechaCampo') });
+    Check('S8 Cierre sin fecha: actual vacia', ['—', 'Nueva fecha compromiso de Cierre'], [p.sel('regCambioActual').textContent, p.sel('regCambioNuevaRot').textContent]);
+    p.sel('regCambioCampo').value = 'otros';
     p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioCampo') });
-    Check('S8 cambiar de campo muestra su valor', '01/12/2026', p.sel('regCambioActual').textContent);
+    Check('S8 otra opcion oculta la etapa y la nueva fecha', [true, true], [p.sel('regCambioGrupoEtapa').hidden, p.sel('regCambioGrupoFecha').hidden]);
+    p.sel('regCambioCampo').value = 'fecha';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioCampo') });
+    Check('S8 volver a Fecha de compromiso: arranca en la del Estado', [false, 'f_solucion', '01/09/2026'],
+      [p.sel('regCambioGrupoEtapa').hidden, p.sel('regCambioFechaCampo').value, p.sel('regCambioActual').textContent]);
+    p.sel('regCambioFechaCampo').value = 'f_analisis';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioFechaCampo') });
 
     p.sel('regCambioNueva').value = '';
     p.sel('regCambioMotivo').value = '';

@@ -1724,7 +1724,8 @@ pruebas.push(function () {
          /id="regCambioBoton" data-accion="solicitar-cambios"/.test(html)]);
       var antes = p.pedidos.length;
       accion(p, 'solicitar-cambios');
-      elegir(p, 'regCambioCampo', 'f_analisis');
+      elegir(p, 'regCambioCampo', 'fecha');
+      elegir(p, 'regCambioFechaCampo', 'f_analisis');
       p.sel('regCambioNueva').value = '2027-02-01';
       p.sel('regCambioMotivo').value = 'Prueba ' + n;
       accion(p, 'cambio-preparar');
