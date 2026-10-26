@@ -196,8 +196,14 @@
 
    DETALLE: SOLICITAR CAMBIOS E HISTORIAL
    --------------------------------------
-     "Solicitar cambios" abre un borrador (SolicitudCambio, con su llave)
-     que se valida en el navegador. Con persistencia_solicitudes = true del
+     "Solicitar cambios" arma una LISTA de cambios (ListaSolicitudCambio,
+     con su llave): cada cambio se captura y valida en un SolicitudCambio,
+     "Agregar cambio a la solicitud" lo pone en la lista (Editar / Quitar)
+     y un solo Motivo va para todos. "Enviar solicitud" revisa la lista y,
+     confirmada, la manda como UNA solicitud. Hoy el servidor (sql/22 /
+     sql/25) guarda un Tipo por solicitud: viajan un cambio, Estado + una
+     fecha o Titulo / PO / SO juntos; lo demas no se envia (ni por partes).
+     Con persistencia_solicitudes = true del
      registro (sql/22 aplicada) se ENVIA a admin_iniciativas_solicitudes.ashx
      (enviarCambio) y solo se dice "enviada" con el numero que da la base;
      si no, solo se prepara. Enviar nunca cambia la iniciativa: la aplica un
@@ -205,8 +211,9 @@
      (CAMPOS_CAMBIO): "Fecha de compromiso" (una sola opcion; la etapa
      -Analisis, Solucion o Cierre- se elige en un segundo selector que
      arranca en la del Estado actual, ETAPA_SOLICITUD), Estado (solo el
-     nuevo Estado: sin fecha compromiso, que se pide con su opcion, y sin
-     Subestado, que es solo de ADM y lo cambia con "Modificar",
+     nuevo Estado: la fecha compromiso se agrega como otro cambio de la
+     lista -el atajo "¿También deseas cambiar una fecha de compromiso?"-;
+     sin Subestado, que es solo de ADM y lo cambia con "Modificar",
      2026-10-26), Categorias (el %
      de varias ligadas y agregar categorias del catalogo, sin repetir) y
      Otros (solo explicacion). Lo demas se agregara cuando se designe.
@@ -1557,6 +1564,232 @@ window.RegistroIniciativas = (function () {
   }
 
   // ---------------------------------------------------------------------
+  // ListaSolicitudCambio: "Solicitar cambios" como lista. Cada cambio se
+  // captura en un SolicitudCambio (borrador, con SUS validaciones), se
+  // agrega a la lista y el formulario queda libre para otro. Un solo Motivo
+  // para toda la solicitud; "Otros" lleva su propia explicacion.
+  // ---------------------------------------------------------------------
+  // Sin repetir lo que choca (claves): un Estado, una fecha por etapa (las
+  // tres pueden ir juntas), un bloque de Categorias (ya lleva varias), cada
+  // dato (Titulo / PO / SO) una vez y un "Otros".
+  //
+  // CONTRATO DE HOY (sql/22 + sql/25): una solicitud = UNA fila de
+  // adm.SolicitudCambio con UN Tipo. Viaja como UNA sola solicitud (una
+  // llave, todo o nada al aplicar) solo lo que ese contrato ya guarda y
+  // aplica en una transaccion:
+  //   - un solo cambio, de cualquier tipo;
+  //   - Estado + UNA fecha compromiso (tipo estado + campo_fecha);
+  //   - solo Titulo / PO / SO (tipo datos con varios datos).
+  // Lo demas se arma y se revisa pero NO se envia: nunca se parte en
+  // varias solicitudes ni se manda una tras otra (no seria atomico).
+  class ListaSolicitudCambio {
+    constructor(iniciativa, opciones) {
+      this.iniciativa = iniciativa;
+      this.opciones = opciones || {};
+      this.items = [];       // [{ campo, propuesto, pcts, nuevas, datos, explicacion }]
+      this.editando = -1;    // indice del cambio cargado en el formulario
+      this.motivo = '';
+      this.llave = nuevaLlave();
+      this.enviada = null;   // numero de la solicitud que dio el servidor
+      this.sinConfirmar = false; // se mando y no se sabe si llego
+    }
+
+    // Mientras no se sepa si llego (o ya llego) la lista no cambia: el
+    // reintento con la MISMA llave debe llevar lo mismo.
+    bloqueada() { return this.enviada !== null || this.sinConfirmar; }
+
+    nuevoBorrador() {
+      var b = new SolicitudCambio(this.iniciativa, this.opciones);
+      b.campo = '';
+      return b;
+    }
+
+    // Un cambio guardado -> un borrador con sus valores (para editarlo,
+    // validarlo de nuevo o armar el envio).
+    borrador(item) {
+      var b = new SolicitudCambio(this.iniciativa, this.opciones);
+      b.campo = item.campo;
+      b.propuesto = item.propuesto;
+      b.pcts = Object.assign({}, item.pcts);
+      b.nuevas = item.nuevas.map(function (n) { return { categoria: n.categoria, valor: n.valor }; });
+      b.datos = Object.assign({}, item.datos);
+      b.motivo = item.explicacion;
+      return b;
+    }
+
+    static desdeBorrador(b) {
+      return { campo: b.campo, propuesto: String(b.propuesto || '').trim(), pcts: Object.assign({}, b.pcts),
+               nuevas: b.nuevas.map(function (n) { return { categoria: n.categoria, valor: n.valor }; }),
+               datos: Object.assign({}, b.datos), explicacion: b.tipo() === 'otros' ? String(b.motivo || '').trim() : '' };
+    }
+
+    tipoDe(item) { var c = campoCambio(item.campo); return c ? c.tipo : ''; }
+
+    // Lo que un cambio ocupa: dos cambios con una clave en comun chocan.
+    claves(item) {
+      var t = this.tipoDe(item);
+      if (t === 'fecha') return ['fecha:' + item.campo];
+      if (t === 'datos') {
+        return DATOS_CAMBIO.filter(function (d) { return item.datos[d.clave] !== null && item.datos[d.clave] !== undefined; })
+          .map(function (d) { return 'dato:' + d.clave; });
+      }
+      return t ? [t] : [];
+    }
+
+    // El cambio de la lista (salvo `fuera`) que ya ocupa algo de `item`, o -1.
+    choca(item, fuera) {
+      var mias = this.claves(item), self = this;
+      for (var n = 0; n < this.items.length; n++) {
+        if (n === fuera) continue;
+        if (self.claves(this.items[n]).some(function (k) { return mias.indexOf(k) >= 0; })) return n;
+      }
+      return -1;
+    }
+
+    // Agrega el borrador (o reemplaza el que se esta editando). -> { ok,
+    // errores, indice }. El Motivo general no se pide aqui: se pide al enviar.
+    agregar(b) {
+      if (this.bloqueada()) return { ok: false, errores: [{ campo: 'lista', mensaje: 'La solicitud ya se envió: no se puede cambiar.' }] };
+      var t = b.tipo();
+      var errores = b.validar().filter(function (e) { return t === 'otros' || e.campo !== 'motivo'; });
+      if (errores.length) return { ok: false, errores: errores };
+      var item = ListaSolicitudCambio.desdeBorrador(b);
+      var otro = this.choca(item, this.editando);
+      if (otro >= 0) {
+        return { ok: false, indice: otro, errores: [{ campo: 'duplicado', indice: otro,
+          mensaje: 'Ya está en la lista: ' + this.texto(this.items[otro]).tipo + '. Edítalo ahí (o quítalo) en lugar de agregarlo otra vez.' }] };
+      }
+      var n = this.editando;
+      if (n >= 0 && n < this.items.length) this.items[n] = item;
+      else { this.items.push(item); n = this.items.length - 1; }
+      this.editando = -1;
+      return { ok: true, errores: [], indice: n };
+    }
+
+    // Carga el cambio n para editarlo: -> su borrador (o null).
+    editar(n) {
+      if (this.bloqueada() || !this.items[n]) return null;
+      this.editando = n;
+      return this.borrador(this.items[n]);
+    }
+
+    quitar(n) {
+      if (this.bloqueada() || !this.items[n]) return false;
+      this.items.splice(n, 1);
+      if (this.editando === n) this.editando = -1;
+      else if (this.editando > n) this.editando--;
+      return true;
+    }
+
+    // El Estado esta en la lista y queda alguna etapa sin fecha pedida: se
+    // ofrece "¿También deseas cambiar una fecha de compromiso?".
+    ofreceFecha() {
+      var self = this;
+      return this.items.some(function (x) { return self.tipoDe(x) === 'estado'; }) &&
+        Object.keys(ETAPAS_FECHA).some(function (k) { return self.choca({ campo: k }, -1) < 0; });
+    }
+
+    // Etapa con la que se abre la fecha del atajo: la del Estado actual si
+    // esta libre; si ya se pidio, ninguna (quien pide la elige).
+    etapaLibre() {
+      var e = etapaPorOmision(this.iniciativa);
+      return e && this.choca({ campo: e }, -1) < 0 ? e : '';
+    }
+
+    // Para la lista y la confirmacion: { tipo, actual, solicitado, linea }
+    // (texto; linea = "tipo: actual → solicitado").
+    texto(item) {
+      var t = this.tipoDe(item), i = this.iniciativa, b = this.borrador(item), r;
+      if (t === 'fecha') r = { tipo: 'Fecha compromiso de ' + ETAPAS_FECHA[item.campo], actual: fecha(i[item.campo]), solicitado: fecha(item.propuesto) };
+      else if (t === 'estado') r = { tipo: 'Estado', actual: texto(i.estado), solicitado: item.propuesto };
+      else if (t === 'pct') {
+        var cats = b.cambiosCategorias();
+        r = { tipo: 'Categorías',
+              actual: cats.map(function (x) { return x.categoria + ': ' + (x.nueva ? '(no ligada)' : x.anterior === null ? '—' : x.anterior + '%'); }).join('; '),
+              solicitado: cats.map(function (x) { return x.categoria + (x.nueva ? ' (agregar)' : '') + ': ' + x.nuevo + '%'; }).join('; ') };
+        r.linea = r.tipo + ': ' + cats.map(function (x) {
+          return x.categoria + (x.nueva ? ' (agregar): ' + x.nuevo + '%' : ': ' + (x.anterior === null ? '—' : x.anterior + '%') + ' → ' + x.nuevo + '%');
+        }).join('; ');
+      } else if (t === 'datos') {
+        var ds = b.cambiosDatos();
+        r = { tipo: ds.map(function (d) { return d.rotulo; }).join(', '),
+              actual: ds.map(function (d) { return d.anterior || '(vacío)'; }).join('; '),
+              solicitado: ds.map(function (d) { return d.nuevo || '(vacío)'; }).join('; ') };
+        r.linea = ds.map(function (d) { return d.rotulo + ': ' + (d.anterior || '(vacío)') + ' → ' + (d.nuevo || '(vacío)'); }).join('; ');
+      } else if (t === 'otros') {
+        r = { tipo: 'Otros (explicación)', actual: '—', solicitado: item.explicacion };
+        r.linea = r.tipo + ': ' + item.explicacion + ' (no cambia nada por sí sola)';
+      } else r = { tipo: '', actual: '', solicitado: '' };
+      if (!r.linea) r.linea = r.tipo + ': ' + r.actual + ' → ' + r.solicitado;
+      return r;
+    }
+
+    // Antes de enviar: al menos un cambio, cada uno valido otra vez y el
+    // Motivo (mismas reglas que hoy: obligatorio, hasta 4000).
+    validarEnvio() {
+      var errores = [], self = this;
+      if (!this.items.length) errores.push({ campo: 'lista', mensaje: 'Agrega al menos un cambio a la solicitud.' });
+      this.items.forEach(function (item) {
+        var t = self.tipoDe(item);
+        self.borrador(item).validar().forEach(function (e) {
+          if (t === 'otros' || e.campo !== 'motivo') errores.push({ campo: 'lista', mensaje: self.texto(item).tipo + ': ' + e.mensaje });
+        });
+      });
+      var m = String(this.motivo || '').trim();
+      if (!m) errores.push({ campo: 'motivo', mensaje: 'Explica el motivo de la solicitud.' });
+      else if (this.motivoEnvio().length > 4000) errores.push({ campo: 'motivo', mensaje: 'El motivo pasa de 4000 caracteres.' });
+      return errores;
+    }
+
+    // El motivo que viaja: el general y, con "Otros", su explicacion
+    // primero (es lo que ADM corrige a mano).
+    motivoEnvio() {
+      var otros = this.items.filter(function (x) { return x.explicacion; })[0];
+      var m = String(this.motivo || '').trim();
+      return otros ? otros.explicacion + (m ? '\n\nMotivo: ' + m : '') : m;
+    }
+
+    // -> { soportado, mensaje }: si la lista cabe en UNA solicitud de hoy.
+    contrato() {
+      var self = this, tipos = this.items.map(function (x) { return self.tipoDe(x); });
+      var n = tipos.length;
+      if (!n) return { soportado: false, mensaje: 'Agrega al menos un cambio a la solicitud.' };
+      if (n === 1) return { soportado: true, forma: 'uno' };
+      if (n === 2 && tipos.indexOf('estado') >= 0 && tipos.indexOf('fecha') >= 0) return { soportado: true, forma: 'estado+fecha' };
+      if (tipos.every(function (t) { return t === 'datos'; })) return { soportado: true, forma: 'datos' };
+      return { soportado: false, mensaje: 'El servidor todavía no admite estos ' + n + ' cambios en una sola solicitud ' +
+        '(hoy acepta un cambio, Estado con una fecha compromiso, o Título / Product Owner / Service Owner juntos). ' +
+        'No se envía nada por partes: quita cambios hasta que la lista quepa, o espera a que se habilite el envío de varios cambios.' };
+    }
+
+    // Los pares de admin_iniciativas_solicitudes.ashx?accion=enviar: UNA
+    // solicitud con la llave de la lista. null si no cabe (contrato()).
+    pares() {
+      var c = this.contrato(), self = this;
+      if (!c.soportado) return null;
+      var principal = this.items[0];
+      if (c.forma === 'estado+fecha') principal = this.items.filter(function (x) { return self.tipoDe(x) === 'estado'; })[0];
+      var b = this.borrador(principal);
+      if (c.forma === 'datos') {
+        this.items.forEach(function (x) {
+          Object.keys(x.datos).forEach(function (k) { if (x.datos[k] !== null && x.datos[k] !== undefined) b.datos[k] = x.datos[k]; });
+        });
+      }
+      b.llave = this.llave;
+      b.motivo = this.motivoEnvio();
+      var p = b.pares();
+      if (c.forma === 'estado+fecha') {
+        // Estado + fecha: el contrato de sql/22 (tipo estado con su etapa);
+        // la base guarda las dos y Aplicar las aplica juntas o ninguna.
+        var f = this.items.filter(function (x) { return self.tipoDe(x) === 'fecha'; })[0];
+        var m = p.pop();
+        p.push(['campo_fecha', f.campo], ['fecha_nueva', f.propuesto], m);
+      }
+      return p;
+    }
+  }
+
+  // ---------------------------------------------------------------------
   // RevisionSolicitud: lo que ADM decide sobre una solicitud. MODELO EN
   // MEMORIA: no existe el almacen de solicitudes (adm.Solicitud, sin
   // aprobar), asi que nada de esto se guarda ni se envia por si solo.
@@ -1638,7 +1871,9 @@ window.RegistroIniciativas = (function () {
       this.cargaId = 0;
       this.abierta = null;        // folio en el detalle
       this.origenFoco = null;
-      this.cambio = null;         // SolicitudCambio del detalle abierto
+      this.cambio = null;         // SolicitudCambio: el cambio que se captura
+      this.lista = null;          // ListaSolicitudCambio: la solicitud (varios cambios)
+      this.cambioRevisando = false; // "Enviar" pidio confirmar la lista
       this.cambioAbierto = false; // formulario de Solicitar cambios a la vista
       this.histAbierto = false;   // Historial de cambios desplegado
       // Cobertura: se pide la primera vez que se abre.
@@ -1701,6 +1936,7 @@ window.RegistroIniciativas = (function () {
       // Solicitar cambios abierto: solo el bloque de categorias (lo demas
       // escrito no se toca).
       if (this.cambio && this.cambioAbierto) {
+        if (this.lista) { this.lista.opciones.rutas = this.rutasCatalogo || []; this.lista.opciones.rutasEstado = this.rutasEstado; }
         this.cambio.rutas = this.rutasCatalogo || [];
         this.cambio.rutasEstado = this.rutasEstado;
         this.pintarCategoriasCambio();
@@ -1718,6 +1954,7 @@ window.RegistroIniciativas = (function () {
       }
       // El borrador de "Solicitar cambios" tambien: sus listas de PO / SO.
       if (this.cambio && this.duenosCatalogo) {
+        if (this.lista) { this.lista.opciones.pos = this.duenosCatalogo.po; this.lista.opciones.sos = this.duenosCatalogo.so; }
         this.cambio.pos = this.duenosCatalogo.po;
         this.cambio.sos = this.duenosCatalogo.so;
         var grupo = this.$('regCambioGrupoDatos');
@@ -1925,6 +2162,11 @@ window.RegistroIniciativas = (function () {
         if (texto && texto.closest) texto = texto.closest('[data-editar]');
         var clave = texto && texto.getAttribute && texto.getAttribute('data-editar');
         if (clave) { self.editarTexto(clave); return; }
+        // Editar / Quitar un cambio de la lista de "Solicitar cambios".
+        var item = e.target;
+        if (item && item.closest) item = item.closest('[data-cambio-item]');
+        var it = item && item.getAttribute && item.getAttribute('data-cambio-item');
+        if (it) { self.accionItemCambio(it); return; }
         // Quitar una categoria agregada en "Solicitar cambios".
         var nueva = e.target;
         if (nueva && nueva.closest) nueva = nueva.closest('[data-cambio-quitar]');
@@ -2661,6 +2903,7 @@ window.RegistroIniciativas = (function () {
       this.origenFoco = origen || null;
       this.$('regDetTitulo').textContent = i.folio;
       this.cambio = new SolicitudCambio(i, this.opcionesEstado());
+      this.lista = null;
       this.cambioAbierto = false;
       this.histAbierto = false;
       this.edicionEnviando = false;
@@ -2697,6 +2940,7 @@ window.RegistroIniciativas = (function () {
       var estaba = !!this.abierta;
       this.abierta = null;
       this.cambio = null;
+      this.lista = null;
       this.edicion = null;
       this.$('regDetalle').hidden = true;
       this.$('regDetFondo').hidden = true;
@@ -2733,7 +2977,13 @@ window.RegistroIniciativas = (function () {
       if (!this.abierta) return;
       if (accion === 'solicitar-cambios') this.abrirCambio(!this.cambioAbierto);
       else if (accion === 'cambio-cancelar') this.abrirCambio(false);
+      else if (accion === 'cambio-agregar') this.agregarCambio();
+      else if (accion === 'cambio-atajo-fecha') this.atajoFechaCambio();
+      else if (accion === 'cambio-atajo-no') this.mensajeCambio('', 'Puedes agregar otro cambio o enviar la solicitud.');
+      else if (accion === 'cambio-edicion-cancelar') this.cancelarEdicionCambio();
       else if (accion === 'cambio-preparar') this.prepararCambio();
+      else if (accion === 'cambio-confirmar') this.confirmarCambio();
+      else if (accion === 'cambio-volver') this.soltarRevision();
       else if (accion === 'historial') this.plegarHistorial();
       else if (accion === 'editar-admin') this.abrirEdicion(true);
       else if (accion === 'edicion-cancelar') this.abrirEdicion(false);
@@ -2749,6 +2999,14 @@ window.RegistroIniciativas = (function () {
     capturarDetalle(t) {
       if (!t || !t.getAttribute) return false;
       var ed = this.edicion, c = this.cambio;
+      // El Motivo general de la solicitud: de la lista, no del cambio que
+      // se captura (agregar, editar o quitar no lo borran).
+      if (this.lista && t.id === 'regCambioMotivo') {
+        // Lo que se confirma es lo que se reviso: otro Motivo, otra revision.
+        if (this.lista.motivo !== (t.value || '')) this.soltarRevision();
+        this.lista.motivo = t.value || '';
+        return true;
+      }
       var clave = t.getAttribute('data-edicion');
       var n = t.getAttribute('data-edicion-pct');
       var cp = t.getAttribute('data-cambio-pct');
@@ -3270,12 +3528,15 @@ window.RegistroIniciativas = (function () {
         'Marca calculada; en iniciativas existentes solo se revisan Categoría y %.');
     }
 
-    // Abrir arranca un borrador nuevo sobre la iniciativa abierta.
+    // Abrir arranca una solicitud nueva (lista vacia, llave nueva) sobre la
+    // iniciativa abierta. Cancelar o cerrar la descarta: nada se guarda.
     abrirCambio(abrir) {
       var i = this.registro && this.registro.buscar(this.abierta);
       if (!i) return;
+      this.lista = new ListaSolicitudCambio(i, this.opcionesEstado());
       this.cambio = new SolicitudCambio(i, this.opcionesEstado());
       this.cambioAbierto = abrir;
+      this.cambioRevisando = false;
       this.$('regCambio').innerHTML = abrir ? this.htmlCambio() : '';
       this.$('regCambio').hidden = !abrir;
       this.$('regCambioBoton').setAttribute('aria-expanded', abrir ? 'true' : 'false');
@@ -3301,7 +3562,7 @@ window.RegistroIniciativas = (function () {
     pintarGruposCambio() {
       var c = this.cambio, t = c.tipo(), self = this;
       [['fecha', 'regCambioGrupoEtapa'], ['fecha', 'regCambioGrupoFecha'], ['estado', 'regCambioGrupoEstado'], ['pct', 'regCambioGrupoPct'],
-       ['datos', 'regCambioGrupoDatos']].forEach(function (g) {
+       ['datos', 'regCambioGrupoDatos'], ['otros', 'regCambioGrupoOtros']].forEach(function (g) {
         var el = self.$(g[1]);
         if (el) el.hidden = t !== g[0];
       });
@@ -3314,13 +3575,11 @@ window.RegistroIniciativas = (function () {
       var act = c.actual();
       this.$('regCambioActual').textContent = t === 'fecha' ? fecha(act) : t === 'pct' ? '(el % de cada categoría, en la tabla)'
         : t === 'datos' ? '(cada dato, abajo)' : t === 'otros' ? '(explicación libre)' : texto(act);
-      var rot = this.$('regCambioMotivoRot');
-      if (rot) rot.textContent = t === 'otros' ? 'Explicación de la corrección' : 'Motivo';
     }
 
-    // Valida el borrador. NO lo envia: no hay donde guardarlo todavia.
-    prepararCambio() {
-      if (!this.cambio) return;
+    // Lo escrito en el formulario de captura -> el borrador (this.cambio).
+    // -> su tipo. El Motivo general NO es del borrador.
+    leerCaptura() {
       var c = this.cambio, self = this;
       var campo = this.$('regCambioCampo').value;
       if (campo === 'fecha') {
@@ -3328,14 +3587,12 @@ window.RegistroIniciativas = (function () {
         c.elegirEtapa(etapa ? etapa.value : '');
       } else c.campo = campoCambio(campo) ? campo : '';
       var t = c.tipo();
-      var idPropuesto = t === 'estado' ? 'regCambioEstado' : 'regCambioNueva';
-      // 'pct': los % ya estan en el borrador (capturarDetalle); 'otros' no
-      // tiene valor propuesto.
+      // 'pct': los % ya estan en el borrador (capturarDetalle).
       if (t === 'estado') {
         // Escrito en la caja con busqueda: solo cuenta la opcion real.
-        var est = this.$(idPropuesto).value || '';
+        var est = this.$('regCambioEstado').value || '';
         c.propuesto = resolverOpcion(est, c.estados) || est;
-      } else if (t === 'fecha') c.propuesto = this.$(idPropuesto).value || '';
+      } else if (t === 'fecha') c.propuesto = this.$('regCambioNueva').value || '';
       else c.propuesto = '';
       if (t === 'datos') {
         // Marcado = se pide (vacío = que quede vacío); PO / SO, la opción real.
@@ -3347,13 +3604,20 @@ window.RegistroIniciativas = (function () {
           c.datos[d.clave] = lista ? resolverOpcion(v, lista) || v.trim() : v;
         });
       }
-      c.motivo = this.$('regCambioMotivo').value || '';
-      var errores = c.validar();
-      var por = {};
+      // "Otros": su explicacion (va en el borrador como su motivo).
+      var otros = this.$('regCambioOtros');
+      c.motivo = t === 'otros' && otros ? otros.value || '' : '';
+      return t;
+    }
+
+    marcarCaptura(errores, t) {
+      var por = {}, self = this;
       errores.forEach(function (e) { por[e.campo] = true; });
-      [['campo', 'regCambioCampo'], ['etapa', 'regCambioFechaCampo'], ['propuesto', idPropuesto], ['motivo', 'regCambioMotivo']].forEach(function (par) {
+      var idPropuesto = t === 'estado' ? 'regCambioEstado' : 'regCambioNueva';
+      [['campo', 'regCambioCampo'], ['etapa', 'regCambioFechaCampo'], ['propuesto', idPropuesto], ['motivo', 'regCambioOtros']].forEach(function (par) {
         if (t !== 'fecha' && par[0] === 'etapa') return;
-        if ((t === 'pct' || t === 'datos') && par[0] === 'propuesto') return;
+        if ((t === 'pct' || t === 'datos' || t === 'otros') && par[0] === 'propuesto') return;
+        if (t !== 'otros' && par[0] === 'motivo') return;
         var el = self.$(par[1]);
         if (el) el.setAttribute('aria-invalid', por[par[0]] ? 'true' : 'false');
       });
@@ -3361,53 +3625,239 @@ window.RegistroIniciativas = (function () {
         var el = self.$('regCambioDatoValor-' + d.clave);
         if (el) el.setAttribute('aria-invalid', errores.some(function (e) { return e.dato === d.clave; }) ? 'true' : 'false');
       });
-      var msg = this.$('regCambioMsg');
-      if (errores.length) {
-        msg.className = 'ini-cambio-msg error';
-        msg.innerHTML = '<ul>' + errores.map(function (e) { return '<li>' + Escape.html(e.mensaje) + '</li>'; }).join('') + '</ul>';
-        return;
-      }
-      var r = c.resumen();
-      var detalle = t === 'fecha' ? Escape.html(fecha(r.anterior)) + ' → ' + Escape.html(fecha(r.nuevo))
-        : t === 'estado' ? Escape.html(texto(r.anterior)) + ' → ' + Escape.html(r.nuevo)
-        : t === 'pct' ? r.categorias.map(function (x) {
-            return Escape.html(x.categoria) + (x.nueva ? ' (agregar): ' + Escape.html(x.nuevo + '%')
-              : ': ' + Escape.html(x.anterior === null ? '—' : x.anterior + '%') + ' → ' + Escape.html(x.nuevo + '%'));
-          }).join('; ')
-        : t === 'datos' ? r.datos.map(function (d) {
-            return Escape.html(d.rotulo) + ': ' + Escape.html(d.anterior || '(vacío)') + ' → ' + Escape.html(d.nuevo || '(vacío)');
-          }).join('; ')
-        : 'explicación para ADM; no cambia nada por sí sola';
-      if (this.registro && this.registro.persistenciaSolicitudes === true) {
-        this.enviarCambio(null, Escape.html(r.rotulo) + ': ' + detalle);
-        return;
-      }
-      msg.className = 'ini-cambio-msg listo';
-      msg.innerHTML = '<strong>Solicitud preparada, no enviada.</strong> ' + Escape.html(r.rotulo) + ': ' + detalle + '. ' +
-        'El envío y la revisión se habilitarán cuando exista el registro de solicitudes; por ahora no se guarda nada.';
     }
 
-    // POST accion=enviar con el borrador ya validado. "Enviada" SOLO con el
-    // numero que devuelve la base; cualquier otra respuesta lo dice tal cual
-    // y deja reintentar con la MISMA llave (no se duplica). Nunca toca la
+    mensajeCambio(clase, html) {
+      var msg = this.$('regCambioMsg');
+      if (!msg) return;
+      msg.className = 'ini-cambio-msg' + (clase ? ' ' + clase : '');
+      msg.innerHTML = html;
+    }
+
+    // El borrador de captura -> los controles: vacios tras agregar, con sus
+    // valores al editar. El Motivo general y la lista no se tocan.
+    volcarCaptura() {
+      var c = this.cambio, t = c.tipo(), self = this, editando = !!(this.lista && this.lista.editando >= 0);
+      function poner(id, v) {
+        var el = self.$(id);
+        if (!el) return;
+        el.value = v;
+        if (el.setAttribute) el.setAttribute('aria-invalid', 'false');
+      }
+      poner('regCambioCampo', c.queCambiar());
+      poner('regCambioFechaCampo', esCampoFecha(c.campo) ? c.campo : '');
+      poner('regCambioNueva', t === 'fecha' ? c.propuesto : '');
+      poner('regCambioEstado', t === 'estado' ? c.propuesto : '');
+      poner('regCambioOtros', t === 'otros' ? c.motivo : '');
+      DATOS_CAMBIO.forEach(function (d) {
+        var marca = self.$('regCambioDato-' + d.clave), pedido = t === 'datos' && c.datos[d.clave] !== null && c.datos[d.clave] !== undefined;
+        if (marca) marca.checked = pedido;
+        poner('regCambioDatoValor-' + d.clave, pedido ? c.datos[d.clave] : '');
+      });
+      this.pintarGruposCambio();
+      this.pintarCategoriasCambio();
+      var boton = this.$('regCambioAgregar');
+      if (boton) boton.textContent = editando ? 'Actualizar cambio' : 'Agregar cambio a la solicitud';
+      var cancelar = this.$('regCambioEdCancelar');
+      if (cancelar) cancelar.hidden = !editando;
+    }
+
+    // Cualquier cambio en la lista deja sin efecto una confirmacion abierta:
+    // lo que se confirma es lo que se ve.
+    soltarRevision() {
+      if (!this.cambioRevisando) return;
+      this.cambioRevisando = false;
+      this.mensajeCambio('', '');
+    }
+
+    // "Agregar cambio a la solicitud": valida el cambio del formulario con
+    // las reglas de su tipo, lo pone en la lista (o actualiza el que se
+    // editaba) y deja el formulario libre. No envia nada.
+    agregarCambio() {
+      var l = this.lista;
+      if (!l || !this.cambio) return null;
+      var t = this.leerCaptura();
+      var r = l.agregar(this.cambio);
+      this.marcarCaptura(r.errores, t);
+      if (!r.ok) {
+        var dup = r.errores[0] && r.errores[0].campo === 'duplicado';
+        this.mensajeCambio('error', '<ul>' + r.errores.map(function (e) { return '<li>' + Escape.html(e.mensaje) + '</li>'; }).join('') + '</ul>' +
+          (dup ? '<button type="button" class="btn linea chico" data-cambio-item="editar|' + r.indice + '">Editar el que ya está</button>' : ''));
+        return r;
+      }
+      this.soltarRevision();
+      var item = l.items[r.indice];
+      this.cambio = l.nuevoBorrador();
+      this.volcarCaptura();
+      this.pintarListaCambio();
+      // Estado: atajo a una fecha compromiso en la MISMA solicitud.
+      var atajo = l.tipoDe(item) === 'estado' && l.ofreceFecha();
+      this.mensajeCambio('listo', '<strong>Agregado a la solicitud:</strong> ' + Escape.html(l.texto(item).linea) + '. ' +
+        (atajo
+          ? '<span class="ini-cambio-atajo">¿También deseas cambiar una fecha de compromiso? ' +
+              '<button type="button" class="btn linea chico" data-accion="cambio-atajo-fecha">Sí, elegir la fecha</button> ' +
+              '<button type="button" class="btn linea chico" data-accion="cambio-atajo-no">No</button></span>'
+          : 'Puedes agregar otro cambio o enviar la solicitud.'));
+      return r;
+    }
+
+    // "Sí": el Estado sigue en la lista y el formulario pasa a "Fecha de
+    // compromiso" (la etapa del Estado actual si sigue libre; si no, se elige).
+    atajoFechaCambio() {
+      var l = this.lista;
+      if (!l || l.bloqueada()) return;
+      this.cambio = l.nuevoBorrador();
+      this.cambio.elegir('fecha');
+      this.cambio.elegirEtapa(l.etapaLibre());
+      this.volcarCaptura();
+      this.mensajeCambio('', 'El Estado sigue en la lista. Elige la fecha compromiso (Análisis, Solución o Cierre), escribe la nueva y agrégala.');
+      var foco = this.$(this.cambio.campo === 'fecha' ? 'regCambioFechaCampo' : 'regCambioNueva');
+      if (foco && foco.focus) foco.focus();
+    }
+
+    // Editar / Quitar un cambio de la lista ("editar|n", "quitar|n").
+    accionItemCambio(valor) {
+      var l = this.lista, partes = String(valor || '').split('|'), n = Number(partes[1]);
+      if (!l) return false;
+      if (l.bloqueada()) { this.mensajeCambio('aviso', 'La solicitud ya se mandó: la lista no se puede cambiar.'); return false; }
+      if (partes[0] === 'editar') {
+        var b = l.editar(n);
+        if (!b) return false;
+        this.soltarRevision();
+        this.cambio = b;
+        this.volcarCaptura();
+        this.pintarListaCambio();
+        this.mensajeCambio('', 'Editando: ' + Escape.html(l.texto(l.items[n]).tipo) + '. Corrígelo y pulsa «Actualizar cambio».');
+        var foco = this.$('regCambioCampo');
+        if (foco && foco.focus) foco.focus();
+        return true;
+      }
+      if (partes[0] === 'quitar') {
+        var editaba = l.editando === n;
+        if (!l.quitar(n)) return false;
+        this.soltarRevision();
+        if (editaba) { this.cambio = l.nuevoBorrador(); this.volcarCaptura(); }
+        this.pintarListaCambio();
+        this.mensajeCambio('', 'Cambio quitado de la solicitud.');
+        return true;
+      }
+      return false;
+    }
+
+    // Deja de editar: el cambio de la lista queda como estaba.
+    cancelarEdicionCambio() {
+      if (!this.lista) return;
+      this.lista.editando = -1;
+      this.cambio = this.lista.nuevoBorrador();
+      this.volcarCaptura();
+      this.pintarListaCambio();
+      this.mensajeCambio('', '');
+    }
+
+    pintarListaCambio() {
+      var caja = this.$('regCambioLista');
+      if (caja && this.lista) caja.innerHTML = this.htmlListaCambio();
+    }
+
+    // "Cambios que deseas solicitar": tipo, valor actual, valor solicitado,
+    // Editar y Quitar. Si la lista no cabe en una solicitud de hoy, lo dice
+    // antes de que se intente enviar.
+    htmlListaCambio() {
+      var l = this.lista, dis = l.bloqueada() ? ' disabled' : '';
+      var cuerpo = l.items.length
+        ? '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Tipo de cambio</th>' +
+            '<th scope="col">Valor actual</th><th scope="col">Valor solicitado</th><th scope="col"><span class="ini-sr">Acciones</span></th>' +
+          '</tr></thead><tbody>' +
+          l.items.map(function (x, n) {
+            var tx = l.texto(x);
+            return '<tr' + (n === l.editando ? ' class="ini-cambio-editando"' : '') + '><td>' + Escape.html(tx.tipo) +
+              (n === l.editando ? ' <span class="ini-sub">(editando)</span>' : '') + '</td>' +
+              '<td>' + Escape.html(tx.actual) + '</td><td>' + Escape.html(tx.solicitado) + '</td>' +
+              '<td class="ini-cambio-acciones"><button type="button" class="btn linea chico" data-cambio-item="editar|' + n + '"' + dis + '>Editar</button> ' +
+              '<button type="button" class="btn linea chico" data-cambio-item="quitar|' + n + '"' + dis + '>Quitar</button></td></tr>';
+          }).join('') + '</tbody></table></div>'
+        : '<p class="ini-nota">Todavía no hay cambios: configura uno arriba y pulsa «Agregar cambio a la solicitud».</p>';
+      var c = l.items.length > 1 ? l.contrato() : null;
+      return '<h5>Cambios que deseas solicitar (' + fmt(l.items.length) + ')</h5>' + cuerpo +
+        (c && !c.soportado ? '<p class="ini-cambio-msg aviso">' + Escape.html(c.mensaje) + '</p>' : '');
+    }
+
+    // La lista para el mensaje (HTML escapado): "tipo: actual → nuevo; ...".
+    resumenListaHtml() {
+      var l = this.lista;
+      return l.items.map(function (x) { return Escape.html(l.texto(x).linea); }).join('; ');
+    }
+
+    // "Enviar solicitud" (o "Preparar" sin registro): al menos un cambio,
+    // todos validos, el Motivo y que la lista quepa en UNA solicitud de hoy
+    // (ListaSolicitudCambio.contrato). Con registro, primero se revisa y se
+    // confirma; sin el, solo se prepara.
+    prepararCambio() {
+      var l = this.lista;
+      if (!l) return;
+      // Sin confirmar: el reintento lleva lo mismo, con la misma llave.
+      if (l.sinConfirmar) { this.enviarCambio(null, this.resumenListaHtml()); return; }
+      if (l.enviada !== null) return;
+      var motivo = this.$('regCambioMotivo');
+      l.motivo = motivo ? motivo.value || '' : '';
+      var errores = l.validarEnvio();
+      if (motivo) motivo.setAttribute('aria-invalid', errores.some(function (e) { return e.campo === 'motivo'; }) ? 'true' : 'false');
+      if (errores.length) {
+        this.mensajeCambio('error', '<ul>' + errores.map(function (e) { return '<li>' + Escape.html(e.mensaje) + '</li>'; }).join('') + '</ul>');
+        return;
+      }
+      var c = l.contrato(), resumen = this.resumenListaHtml();
+      if (!c.soportado) {
+        this.mensajeCambio('aviso', '<strong>No se envió.</strong> ' + Escape.html(c.mensaje));
+        return;
+      }
+      if (!(this.registro && this.registro.persistenciaSolicitudes === true)) {
+        this.mensajeCambio('listo', '<strong>Solicitud preparada, no enviada.</strong> ' + resumen + '. ' +
+          'El envío y la revisión se habilitarán cuando exista el registro de solicitudes; por ahora no se guarda nada.');
+        return;
+      }
+      this.cambioRevisando = true;
+      this.mensajeCambio('revisar', '<strong>Revisa la solicitud antes de enviarla</strong> (' + fmt(l.items.length) +
+        (l.items.length === 1 ? ' cambio' : ' cambios') + '; ADM la aprueba o rechaza completa): ' + resumen + '. ' +
+        'Motivo: ' + Escape.html(String(l.motivo).trim()) + ' ' +
+        '<button type="button" class="btn chico" data-accion="cambio-confirmar">Confirmar y enviar</button> ' +
+        '<button type="button" class="btn linea chico" data-accion="cambio-volver">Seguir editando</button>');
+    }
+
+    confirmarCambio() {
+      if (!this.lista || !this.cambioRevisando) return Promise.resolve(null);
+      this.cambioRevisando = false;
+      return this.enviarCambio(null, this.resumenListaHtml());
+    }
+
+    // POST accion=enviar con la lista ya validada, como UNA solicitud.
+    // "Enviada" SOLO con el numero que devuelve la base; cualquier otra
+    // respuesta lo dice tal cual. Sin saber si llego, la lista queda fija y
+    // el reintento usa la MISMA llave (no se duplica). Nunca toca la
     // iniciativa: la aplica un ADM desde la cola.
     enviarCambio(pedir, resumenHtml) {
-      var c = this.cambio, self = this;
-      if (!c || this.cambioEnviando || c.enviada) return Promise.resolve(null);
-      var msg = this.$('regCambioMsg'), boton = this.$('regCambioEnviar');
+      var l = this.lista, self = this;
+      if (!l || this.cambioEnviando || l.enviada !== null) return Promise.resolve(null);
+      var pares = l.pares();
+      if (!pares) return Promise.resolve(null);
+      var boton = this.$('regCambioEnviar');
       this.cambioEnviando = true;
+      l.sinConfirmar = true;
       if (boton) boton.disabled = true;
-      msg.className = 'ini-cambio-msg';
-      msg.innerHTML = '<span>Enviando la solicitud…</span>';
+      this.pintarListaCambio();
+      this.mensajeCambio('', '<span>Enviando la solicitud…</span>');
       var datos = new FormData();
-      c.pares().forEach(function (p) { datos.append(p[0], p[1]); });
+      pares.forEach(function (p) { datos.append(p[0], p[1]); });
       pedir = pedir || this.pedirSolicitud || function (url, op) { return fetch(url, op); };
       function pintar(clase, html) {
-        if (self.cambio !== c) return;
-        var m = self.$('regCambioMsg');
-        if (!m) return;
-        m.className = 'ini-cambio-msg ' + clase;
-        m.innerHTML = html;
+        if (self.lista !== l) return;
+        self.mensajeCambio(clase, html);
+        self.pintarListaCambio();
+      }
+      function soltar(definitivo) {
+        self.cambioEnviando = false;
+        if (definitivo) l.sinConfirmar = false;
+        if (self.lista === l && boton) boton.disabled = false;
       }
       return Promise.resolve()
         .then(function () { return pedir(URL_SOLICITUDES + '?accion=enviar', { method: 'POST', body: datos, credentials: 'same-origin' }); })
@@ -3415,16 +3865,18 @@ window.RegistroIniciativas = (function () {
           return Promise.resolve(resp.json()).catch(function () { return null; }).then(function (j) { return { status: resp.status, json: j || {} }; });
         })
         .then(function (r) {
-          self.cambioEnviando = false;
           var j = r.json;
           if (r.status === 200 && j.enviada === true && typeof j.id_solicitud === 'number') {
-            c.enviada = j.id_solicitud;
+            self.cambioEnviando = false;
+            l.sinConfirmar = false;
+            l.enviada = j.id_solicitud;
             pintar('listo', '<strong>Solicitud #' + Escape.html(String(j.id_solicitud)) + ' enviada.</strong> ' + (resumenHtml || '') + '. ' +
               (j.repetida ? 'Ya estaba enviada: no se duplicó. ' : '') +
               'Un administrador (ADM) la revisa; la iniciativa no cambia hasta que la aplique.');
             return r;
           }
-          if (self.cambio === c && boton) boton.disabled = false;
+          // Sin confirmar (500 EnvioNoConfirmado): puede haber llegado.
+          soltar(j.enviada !== null);
           if (r.status === 422 && Array.isArray(j.errores)) {
             pintar('error', '<ul>' + j.errores.map(function (e) { return '<li>' + Escape.html(e.mensaje || '') + '</li>'; }).join('') + '</ul>');
           } else if (r.status === 501) {
@@ -3436,8 +3888,7 @@ window.RegistroIniciativas = (function () {
           }
           return r;
         }, function () {
-          self.cambioEnviando = false;
-          if (self.cambio === c && boton) boton.disabled = false;
+          soltar(false);
           pintar('aviso', 'No se pudo contactar al servidor: no se sabe si se envió. Reintenta: la misma solicitud no se duplica.');
           return null;
         });
@@ -3462,7 +3913,8 @@ window.RegistroIniciativas = (function () {
       var lista = function (id, valores) { return selectorHtml(id, valores, ''); };
       var t = c.tipo();
       return '<h4>Solicitar cambios</h4>' +
-        '<p class="ini-nota">Pide un cambio sobre esta iniciativa; aquí no se edita. Lo revisa y aplica un administrador (ADM). ' +
+        '<p class="ini-nota">Arma la lista de cambios para esta iniciativa y envíala como UNA solicitud; aquí no se edita. ' +
+          'Un administrador (ADM) la revisa y la aprueba o la rechaza completa. ' +
           '«Otros» es solo una explicación (p. ej. una categoría equivocada): no cambia nada por sí sola.</p>' +
         '<div class="ini-cambio-campos">' +
           '<div class="campo"><label for="regCambioCampo">Qué cambiar</label><select id="regCambioCampo">' + opciones + '</select></div>' +
@@ -3481,8 +3933,17 @@ window.RegistroIniciativas = (function () {
             this.htmlCategoriasCambio() + '</div>' +
           (c.conDatos ? '<div class="campo ini-cambio-ancho" id="regCambioGrupoDatos"' + (t === 'datos' ? '' : ' hidden') + '>' +
             this.htmlDatosCambio() + '</div>' : '') +
-          '<div class="campo ini-cambio-ancho"><label for="regCambioMotivo" id="regCambioMotivoRot">' + (t === 'otros' ? 'Explicación de la corrección' : 'Motivo') +
-            '</label><textarea id="regCambioMotivo" rows="3"></textarea></div>' +
+          '<div class="campo ini-cambio-ancho" id="regCambioGrupoOtros"' + (t === 'otros' ? '' : ' hidden') + '>' +
+            '<label for="regCambioOtros">Explicación de la corrección</label><textarea id="regCambioOtros" rows="2"></textarea></div>' +
+        '</div>' +
+        '<div class="ini-cambio-pie">' +
+          '<button type="button" class="btn linea chico" id="regCambioAgregar" data-accion="cambio-agregar">Agregar cambio a la solicitud</button> ' +
+          '<button type="button" class="btn linea chico" id="regCambioEdCancelar" data-accion="cambio-edicion-cancelar" hidden>Cancelar edición</button>' +
+        '</div>' +
+        '<div class="ini-cambio-lista" id="regCambioLista">' + this.htmlListaCambio() + '</div>' +
+        '<div class="ini-cambio-campos">' +
+          '<div class="campo ini-cambio-ancho"><label for="regCambioMotivo" id="regCambioMotivoRot">Motivo de la solicitud</label>' +
+            '<textarea id="regCambioMotivo" rows="3"></textarea></div>' +
         '</div>' +
         '<div class="ini-cambio-msg" id="regCambioMsg" role="status" aria-live="polite"></div>' +
         '<div class="ini-cambio-pie">' +
@@ -3794,6 +4255,7 @@ window.RegistroIniciativas = (function () {
     FiltroRegistro: FiltroRegistro,
     Cobertura: Cobertura,
     SolicitudCambio: SolicitudCambio,
+    ListaSolicitudCambio: ListaSolicitudCambio,
     RevisionSolicitud: RevisionSolicitud,
     CAMPOS_CAMBIO: CAMPOS_CAMBIO,
     etiquetarHistorial: etiquetarHistorial,

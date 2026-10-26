@@ -720,7 +720,16 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-cambio-msg.error { color: var(--rojo); }
 .ini-cambio-msg.listo { color: var(--g-900); }
 .ini-cambio-msg.aviso { color: var(--ink); padding: 8px 10px; border-left: 3px solid var(--ambr); background: var(--bg-2); }
+.ini-cambio-msg.revisar { color: var(--ink); padding: 8px 10px; border-left: 3px solid var(--accent); background: var(--bg-2); }
+.ini-cambio-msg button { margin-top: 6px; }
 .ini-cambio-pie { display: flex; gap: 8px; margin-top: 10px; }
+.ini-cambio-pie [hidden] { display: none; }
+/* La lista de "Solicitar cambios": lo que viajara como UNA solicitud. */
+.ini-cambio-lista { margin-top: 14px; }
+.ini-cambio-lista h5 { margin: 0 0 6px; }
+.ini-cambio-lista td { vertical-align: top; overflow-wrap: anywhere; }
+.ini-cambio-acciones { white-space: nowrap; }
+.ini-cambio-editando td { background: var(--bg-2); }
 
 /* ---- Detalle: Historial de cambios, plegado (misma convencion que el
    Diccionario de QARE: chevron que gira con aria-expanded) ---- */
