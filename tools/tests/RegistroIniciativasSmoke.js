@@ -1817,9 +1817,9 @@ pruebas.push(function () {
     Check('K1 cinco indicadores, en orden (Requerimientos en lugar de Fuera de Activas)',
       ['Total iniciativas activas', 'Iniciativas medibles', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'], rotulosKpi(p));
     Check('K1 valores con la vista por omision (Todas)', KPI_BASE, kpis(p));
-    Check('K1 pies: abiertas sin categoria, tickets, Requerimientos sin pie, riesgo, Cerrado; ya no la resta',
-      [true, true, false, true, true, false],
-      [/1 sin categoría/.test(html), /190 tickets a reducir/.test(html), /agrupación ReqOpr, abiertos/.test(html),
+    Check('K1 pies: abiertas sin categoria, tickets, REQ/RTI/HAR (sin el de ReqOpr), riesgo, Cerrado; ya no la resta',
+      [true, true, true, true, true, false],
+      [/1 sin categoría/.test(html), /190 tickets a reducir/.test(html), /<div class="foot">REQ, RTI y HAR<\/div>/.test(html) && !/agrupación ReqOpr, abiertos/.test(html),
        /150 tickets en riesgo/.test(html), /estado Cerrado/.test(html), /Total − Activas|Fuera de Activas/.test(html)]);
 
     // Cada control de la lista, uno tras otro: la lista cambia, los
