@@ -22,7 +22,9 @@ window.SolicitudesCambioCola = (function () {
 
   var URL = '../handlers/admin_iniciativas_solicitudes.ashx';
   var TIPOS = { FECHA: 'Fecha compromiso', ESTADO: 'Estado y Subestado', CATEGORIAS: 'Categorías', OTROS: 'Otros (explicación)',
-                DATOS: 'Título / Product Owner / Service Owner' };
+                DATOS: 'Título / Product Owner / Service Owner', VARIOS: 'Varios cambios' };
+  // VARIOS (sql/34): las fechas pedidas, cada una con su etapa.
+  function fechasVarias(s) { return Array.isArray(s.fechas_varias) ? s.fechas_varias : []; }
   // DATOS (sql/25): cada dato con su bandera; PO / SO son los CAPTURADOS de
   // la iniciativa (no los de la categoría). null = vacío.
   var DATOS = [
@@ -61,6 +63,22 @@ window.SolicitudesCambioCola = (function () {
         return h(x.rotulo) + ': ' + h(vacio(s[x.clave + '_anterior'])) + ' → ' + h(vacio(s[x.clave + '_nuevo']));
       }).join('; ');
     }
+    // VARIOS: cada cambio en su renglon del resumen; se aprueba o se
+    // rechaza la solicitud completa.
+    if (s.tipo === 'VARIOS') {
+      var partes = [];
+      if (s.estado_nuevo) {
+        partes.push('Estado: ' + h(s.estado_anterior || '—') + ' → ' + h(s.estado_nuevo) + (s.subestado_nuevo ? ' / ' + h(s.subestado_nuevo) : ''));
+      }
+      fechasVarias(s).forEach(function (x) {
+        partes.push('Fecha compromiso de ' + h(x.etapa) + ': ' + fecha(x.anterior) + ' → ' + fecha(x.nueva));
+      });
+      if (s.categorias) partes.push(h(s.categorias) + ' categoría' + (s.categorias === 1 ? '' : 's') + (s.sin_clasificar ? ' (' + h(s.sin_clasificar) + ' sin clasificar)' : ''));
+      datosPedidos(s).forEach(function (x) {
+        partes.push(h(x.rotulo) + ': ' + h(vacio(s[x.clave + '_anterior'])) + ' → ' + h(vacio(s[x.clave + '_nuevo'])));
+      });
+      return partes.join('; ');
+    }
     return 'Explicación para ADM';
   }
 
@@ -94,7 +112,7 @@ window.SolicitudesCambioCola = (function () {
     var pendiente = d.estado === 'PENDIENTE';
     var act = d.actual || {};
     var filas = '';
-    if (d.tipo === 'ESTADO') {
+    if (d.tipo === 'ESTADO' || (d.tipo === 'VARIOS' && d.estado_nuevo)) {
       filas += '<tr><th scope="row">Estado / Subestado</th><td>' + h(d.estado_anterior || '—') + (d.subestado_anterior ? ' / ' + h(d.subestado_anterior) : '') +
         '</td><td>' + h(d.estado_nuevo) + (d.subestado_nuevo ? ' / ' + h(d.subestado_nuevo) : ' <span class="ini-nota">(Subestado sin cambio)</span>') +
         '</td><td>' + h(act.estado || '—') + (act.subestado ? ' / ' + h(act.subestado) : '') + '</td></tr>';
@@ -103,7 +121,11 @@ window.SolicitudesCambioCola = (function () {
       filas += '<tr><th scope="row">Fecha compromiso de ' + h(d.etapa) + '</th><td>' + fecha(d.fecha_anterior) + '</td><td>' + fecha(d.fecha_nueva) +
         '</td><td>' + fecha(d.fecha_actual) + '</td></tr>';
     }
-    if (d.tipo === 'DATOS') {
+    fechasVarias(d).forEach(function (x) {
+      filas += '<tr><th scope="row">Fecha compromiso de ' + h(x.etapa) + '</th><td>' + fecha(x.anterior) + '</td><td>' + fecha(x.nueva) +
+        '</td><td>' + fecha(x.actual) + '</td></tr>';
+    });
+    if (d.tipo === 'DATOS' || d.tipo === 'VARIOS') {
       datosPedidos(d).forEach(function (x) {
         filas += '<tr><th scope="row">' + h(x.rotulo) + '</th><td>' + h(vacio(d[x.clave + '_anterior'])) + '</td><td>' +
           h(vacio(d[x.clave + '_nuevo'])) + '</td><td>' + h(vacio(act[x.clave])) + '</td></tr>';
@@ -127,6 +149,10 @@ window.SolicitudesCambioCola = (function () {
           (c.accion === 'AGREGAR' ? (c.ligada_alguna_vez ? 'ya ligada' : '—') : (c.ligada ? pct(c.pct_actual) : 'ya no ligada')) + '</td><td>' + clas + '</td></tr>';
       }).join('') + '</tbody></table>' : '';
     var avisos = '';
+    if (pendiente && d.tipo === 'VARIOS') {
+      avisos += '<p class="ini-cambio-msg aviso"><strong>Varios cambios, una sola decisión:</strong> aplicar aplica TODOS los cambios de arriba ' +
+        '(o ninguno, si alguno falla); rechazar no aplica ninguno.</p>';
+    }
     if (pendiente && d.desactualizada) {
       avisos += '<p class="ini-cambio-msg error"><strong>Desactualizada:</strong> la iniciativa cambió desde que se envió (compara «Al enviar» con «Ahora»). ' +
         'No se puede aplicar tal cual: recházala o pide que la envíen de nuevo.</p>';

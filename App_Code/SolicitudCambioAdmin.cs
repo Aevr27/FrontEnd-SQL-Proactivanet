@@ -26,6 +26,11 @@
 //     las mismas claves que la edicion directa (titulo / po / so), asi que
 //     el catalogo de duenos y lo de ahora se revisan AL APLICAR. Codigo no
 //     es un dato que se pueda pedir: no hay clave ni columna para el.
+//   - Tipo VARIOS (sql/34, interruptor SolicitaVarios): UNA solicitud con
+//     cualquier combinacion de Estado, las tres fechas (cada una por su
+//     etapa: f_analisis_nueva / f_solucion_nueva / f_cierre_nueva),
+//     categorias y Titulo / PO / SO. Se valida y se aplica entera con UNA
+//     llamada a Modificar (todo o nada). "Otros" no va en VARIOS.
 //
 // Solo ASCII en literales (App_Code sin BOM): acentos con \uXXXX.
 // Pruebas: tools/tests/SolicitudesCambioHttpSmoke.cs (sin SQL) y
@@ -73,17 +78,34 @@ public static class PersistenciaSolicitudesCambio
     public static bool? SolicitaDatosForzadaParaPruebas;
     public static bool SolicitaDatosActiva() { return SolicitaDatosForzadaParaPruebas ?? (SolicitaDatos && sql25EnBase == true); }
 
+    // Tipo VARIOS (varios cambios en UNA solicitud): columnas y parametros
+    // de sql/34, que depende de sql/25. Encendida, pero SOLO surte efecto
+    // cuando DeteccionSolicitudesCambio ve sql/25 y los parametros de fecha
+    // de sql/34 en adm.usp_SolicitudCambio_Crear. Apagada: el registro no la
+    // anuncia (solicitudes_varios), el servidor la rechaza (422), el almacen
+    // no manda los parametros nuevos y la cola lee esas columnas como vacias.
+    // false = apagada aunque la base tenga sql/34.
+    public const bool SolicitaVarios = true;
+    public static bool? SolicitaVariosForzadaParaPruebas;
+    public static bool SolicitaVariosActiva()
+    {
+        return SolicitaVariosForzadaParaPruebas ?? (SolicitaVarios && sql25EnBase == true && sql34EnBase == true);
+    }
+
     // Lo que DeteccionSolicitudesCambio vio en la base (null = todavia no se
     // reviso) y cuando. Misma vigencia que sql/24: aplicar o revertir los
     // scripts la enciende o la apaga sin reciclar el sitio.
     private static readonly object candado = new object();
     private static bool? sql22EnBase;
     private static bool? sql25EnBase;
+    private static bool? sql34EnBase;
     private static DateTime revisadaUtc;
 
-    public static void Anotar(bool sql22, bool sql25, DateTime ahoraUtc)
+    public static void Anotar(bool sql22, bool sql25, DateTime ahoraUtc) { Anotar(sql22, sql25, false, ahoraUtc); }
+
+    public static void Anotar(bool sql22, bool sql25, bool sql34, DateTime ahoraUtc)
     {
-        lock (candado) { sql22EnBase = sql22; sql25EnBase = sql25; revisadaUtc = ahoraUtc; }
+        lock (candado) { sql22EnBase = sql22; sql25EnBase = sql25; sql34EnBase = sql34; revisadaUtc = ahoraUtc; }
     }
 
     public static bool Vigente(DateTime ahoraUtc)
@@ -94,8 +116,12 @@ public static class PersistenciaSolicitudesCambio
     // Solo para las pruebas: como recien arrancado (sin revisar).
     public static void OlvidarParaPruebas()
     {
-        lock (candado) { sql22EnBase = null; sql25EnBase = null; revisadaUtc = DateTime.MinValue; }
+        lock (candado) { sql22EnBase = null; sql25EnBase = null; sql34EnBase = null; revisadaUtc = DateTime.MinValue; }
     }
+
+    public const string MotivoVarios =
+        "Enviar varios cambios en una sola solicitud todav\u00eda no est\u00e1 habilitado " +
+        "(falta aplicar sql/34 en la base). Env\u00edalos en solicitudes que el servidor ya acepta.";
 
     public const string MotivoDatos =
         "Pedir cambio de T\u00edtulo, Product Owner o Service Owner todav\u00eda no est\u00e1 habilitado " +
@@ -114,7 +140,10 @@ public static class DeteccionSolicitudesCambio
         "OBJECT_ID(N'adm.usp_SolicitudCambio_Rechazar', N'P'), OBJECT_ID(N'adm.usp_SolicitudCambio_RegistrarFallo', N'P'))), " +
         "Sql25 = (SELECT COUNT(*) FROM sys.parameters " +
         "WHERE object_id = OBJECT_ID(N'adm.usp_SolicitudCambio_Crear', N'P') " +
-        "AND name IN (N'@CambiaTitulo', N'@CambiaOwnerProblem', N'@CambiaOwnerServicio'))";
+        "AND name IN (N'@CambiaTitulo', N'@CambiaOwnerProblem', N'@CambiaOwnerServicio')), " +
+        "Sql34 = (SELECT COUNT(*) FROM sys.parameters " +
+        "WHERE object_id = OBJECT_ID(N'adm.usp_SolicitudCambio_Crear', N'P') " +
+        "AND name IN (N'@CambiaFAnalisis', N'@CambiaFSolucion', N'@CambiaFCierre'))";
 
     // Con la conexion (abierta) del que llama.
     public static void Revisar(SqlConnection cn)
@@ -122,7 +151,7 @@ public static class DeteccionSolicitudesCambio
         if (cn == null) throw new ArgumentNullException("cn");
         var ahora = DateTime.UtcNow;
         if (PersistenciaSolicitudesCambio.Vigente(ahora)) return;
-        bool sql22 = false, sql25 = false;
+        bool sql22 = false, sql25 = false, sql34 = false;
         try
         {
             using (var cmd = new SqlCommand(Consulta, cn) { CommandTimeout = 15 })
@@ -131,10 +160,11 @@ public static class DeteccionSolicitudesCambio
                 {
                     sql22 = Convert.ToInt32(rd.GetValue(0)) == 4;
                     sql25 = sql22 && Convert.ToInt32(rd.GetValue(1)) == 3;
+                    sql34 = sql25 && Convert.ToInt32(rd.GetValue(2)) == 3;
                 }
         }
-        catch (SqlException) { sql22 = false; sql25 = false; }
-        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, ahora);
+        catch (SqlException) { sql22 = false; sql25 = false; sql34 = false; }
+        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, sql34, ahora);
     }
 
     // Abre su propia conexion solo si hace falta revisar.
@@ -184,12 +214,22 @@ public sealed class PeticionSolicitudCambio
     public const string CTituloNuevo = "titulo_nuevo";
     public const string CPoNuevo = "po_nuevo";
     public const string CSoNuevo = "so_nuevo";
+    // Tipo varios (sql/34): cada fecha compromiso por su etapa; la clave
+    // PRESENTE = se pide (y trae su fecha). Nunca campo_fecha / fecha_nueva.
+    public const string CFAnalisisNueva = "f_analisis_nueva";
+    public const string CFSolucionNueva = "f_solucion_nueva";
+    public const string CFCierreNueva = "f_cierre_nueva";
 
     // tipo del formulario -> Tipo de adm.SolicitudCambio
     private static readonly Dictionary<string, string> Tipos = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         { "fecha", "FECHA" }, { "estado", "ESTADO" }, { "categorias", "CATEGORIAS" }, { "otros", "OTROS" },
-        { "datos", "DATOS" },
+        { "datos", "DATOS" }, { "varios", "VARIOS" },
+    };
+    // clave de VARIOS -> ProblemFechaEvento.Campo (las mismas tres etapas).
+    public static readonly Dictionary<string, string> CamposVarios = new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        { CFAnalisisNueva, "FechaAnalisis" }, { CFSolucionNueva, "FechaSolucion" }, { CFCierreNueva, "FechaCierre" },
     };
     // campo_fecha del formulario (los nombres del registro) -> ProblemFechaEvento.Campo
     public static readonly Dictionary<string, string> Campos = new Dictionary<string, string>(StringComparer.Ordinal)
@@ -216,6 +256,9 @@ public sealed class PeticionSolicitudCambio
     // DATOS: Cambia* = se pide; el valor null = que quede vacio.
     public bool CambiaTitulo, CambiaPo, CambiaSo;
     public string TituloNuevo, PoNuevo, SoNuevo;
+    // VARIOS (sql/34): Campo (FechaAnalisis | FechaSolucion | FechaCierre) ->
+    // la fecha pedida; solo las que vinieron.
+    public Dictionary<string, DateTime> FechasVarias = new Dictionary<string, DateTime>(StringComparer.Ordinal);
     public List<CategoriaSolicitudCambio> Categorias = new List<CategoriaSolicitudCambio>();
     public List<ErrorCampo> Errores = new List<ErrorCampo>();
 
@@ -311,14 +354,37 @@ public sealed class PeticionSolicitudCambio
         if (p.SoNuevo != null && p.SoNuevo.Length > 255) p.Error(CSoNuevo, "El Service Owner pasa de 255 caracteres.");
         var hayDatos = p.CambiaTitulo || p.CambiaPo || p.CambiaSo;
 
+        // VARIOS (sql/34): cada fecha por su etapa, presente = se pide, con
+        // fecha valida (dos valores para la misma clave no son una fecha).
+        foreach (var par in CamposVarios)
+        {
+            var txt = f[par.Key];
+            if (txt == null) continue;
+            DateTime d;
+            if (DateTime.TryParseExact(txt.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out d)) p.FechasVarias[par.Value] = d;
+            else p.Error(par.Key, "Escribe la nueva fecha compromiso de " + Etapas[par.Value] + " (aaaa-mm-dd).");
+        }
+        var hayFechasVarias = CamposVarios.Keys.Any(k => f[k] != null);
+
         // Cada tipo trae solo lo suyo (la misma regla que la base).
         var hayFecha = campo != null || fechaTxt != null;
         var hayEstado = p.EstadoNuevo != null || p.SubestadoNuevo != null;
         var hayCats = p.Categorias.Count > 0;
+        if (tipo != "VARIOS" && hayFechasVarias) p.Error(CTipo, "Las fechas por etapa solo van en una solicitud de varios cambios.");
+        if (tipo == "VARIOS")
+        {
+            if (!PersistenciaSolicitudesCambio.SolicitaVariosActiva()) p.Error(CTipo, PersistenciaSolicitudesCambio.MotivoVarios);
+            // Titulo / PO / SO dentro de VARIOS siguen necesitando sql/25 y su
+            // interruptor: 422 aqui, no una excepcion en el almacen.
+            else if (hayDatos && !PersistenciaSolicitudesCambio.SolicitaDatosActiva()) p.Error(CTipo, PersistenciaSolicitudesCambio.MotivoDatos);
+            if (hayFecha) p.Error(CCampoFecha, "En una solicitud de varios cambios cada fecha va con su etapa (f_analisis_nueva, f_solucion_nueva, f_cierre_nueva).");
+            if (p.SubestadoNuevo != null && p.EstadoNuevo == null) p.Error(CSubestadoNuevo, "El Subestado se pide junto con el Estado.");
+            if (p.EstadoNuevo == null && !hayFechasVarias && !hayCats && !hayDatos) p.Error(CTipo, "Agrega al menos un cambio a la solicitud.");
+        }
         if (tipo == "DATOS" && !PersistenciaSolicitudesCambio.SolicitaDatosActiva()) p.Error(CTipo, PersistenciaSolicitudesCambio.MotivoDatos);
         else if (tipo == "DATOS" && !hayDatos) p.Error(CTipo, "Elige qu\u00e9 dato quieres cambiar: T\u00edtulo, Product Owner o Service Owner.");
         if (tipo == "DATOS" && (hayFecha || hayEstado || hayCats)) p.Error(CTipo, "Una solicitud de T\u00edtulo / Product Owner / Service Owner no trae fecha, Estado ni categor\u00edas.");
-        if (tipo != null && tipo != "DATOS" && hayDatos) p.Error(CTipo, "T\u00edtulo, Product Owner y Service Owner se piden en su propio tipo de solicitud.");
+        if (tipo != null && tipo != "DATOS" && tipo != "VARIOS" && hayDatos) p.Error(CTipo, "T\u00edtulo, Product Owner y Service Owner se piden en su propio tipo de solicitud.");
         if (tipo == "FECHA" && (!hayFecha || hayEstado || hayCats)) p.Error(CTipo, "Una solicitud de fecha trae solo la etapa y la fecha nueva.");
         if (tipo == "ESTADO" && p.EstadoNuevo == null) p.Error(CEstadoNuevo, "Elige el nuevo Estado.");
         if (tipo == "ESTADO" && hayCats) p.Error(CTipo, "Una solicitud de Estado no trae categor\u00edas.");
@@ -481,6 +547,19 @@ public sealed class AlmacenSolicitudesCambioSql : IAlmacenSolicitudesCambio
             }
             else if (p.CambiaTitulo || p.CambiaPo || p.CambiaSo)
                 throw new InvalidOperationException("Titulo / PO / SO en una solicitud sin sql/25: no se descartan en silencio.");
+            // sql/34: igual, por nombre y solo con su interruptor.
+            if (PersistenciaSolicitudesCambio.SolicitaVariosActiva())
+            {
+                foreach (var etapa in new[] { "FAnalisis", "FSolucion", "FCierre" })
+                {
+                    DateTime d;
+                    var pedida = p.FechasVarias.TryGetValue("Fecha" + etapa.Substring(1), out d);
+                    cmd.Parameters.Add("@Cambia" + etapa, SqlDbType.Bit).Value = pedida;
+                    cmd.Parameters.Add("@" + etapa + "Nueva", SqlDbType.Date).Value = pedida ? (object)d.Date : DBNull.Value;
+                }
+            }
+            else if (p.FechasVarias.Count > 0 || p.Tipo == "VARIOS")
+                throw new InvalidOperationException("Una solicitud de varios cambios sin sql/34: no se parte ni se descarta en silencio.");
             Ejecutar(cmd);
             if (id.Value == null || id.Value == DBNull.Value)
                 throw new InvalidOperationException("La base no devolvio el numero de la solicitud.");
@@ -545,7 +624,8 @@ SELECT s.IdSolicitud, s.Codigo, p.Titulo, s.Tipo, s.EstadoAnterior, s.EstadoNuev
                         WHERE c.IdSolicitud = s.IdSolicitud AND c.Accion = 'AGREGAR' AND (c.TipoIniciativa IS NULL OR c.TipoAgrupado IS NULL)),
        EstadoActual = p.Estado, SubestadoActual = p.Subestado, p.FechaAnalisis, p.FechaSolucion, p.FechaCierre,
        PoActual = p.OwnerProblem, SoActual = p.OwnerServicio,
-{0}
+{0},
+{1}
 FROM adm.SolicitudCambio AS s
 LEFT JOIN dbo.Problem AS p ON p.Codigo = s.Codigo";
     // Columnas de sql/25; sin ella no existen y se leen como vacias.
@@ -557,9 +637,22 @@ LEFT JOIN dbo.Problem AS p ON p.Codigo = s.Codigo";
         "       CambiaOwnerProblem = CONVERT(bit, 0), OwnerProblemAnterior = CONVERT(nvarchar(255), NULL), OwnerProblemNuevo = CONVERT(nvarchar(255), NULL),\n" +
         "       CambiaOwnerServicio = CONVERT(bit, 0), OwnerServicioAnterior = CONVERT(nvarchar(255), NULL), OwnerServicioNuevo = CONVERT(nvarchar(255), NULL)";
 
+    // Columnas de sql/34 (fechas por etapa de VARIOS); sin ella, vacias.
+    private const string ColumnasVarios =
+        "       s.CambiaFAnalisis, s.FAnalisisAnterior, s.FAnalisisNueva, s.CambiaFSolucion, s.FSolucionAnterior, s.FSolucionNueva,\n" +
+        "       s.CambiaFCierre, s.FCierreAnterior, s.FCierreNueva";
+    private const string ColumnasVariosVacias =
+        "       CambiaFAnalisis = CONVERT(bit, 0), FAnalisisAnterior = CONVERT(date, NULL), FAnalisisNueva = CONVERT(date, NULL),\n" +
+        "       CambiaFSolucion = CONVERT(bit, 0), FSolucionAnterior = CONVERT(date, NULL), FSolucionNueva = CONVERT(date, NULL),\n" +
+        "       CambiaFCierre = CONVERT(bit, 0), FCierreAnterior = CONVERT(date, NULL), FCierreNueva = CONVERT(date, NULL)";
+
     private static string Cabecera
     {
-        get { return CabeceraBase.Replace("{0}", PersistenciaSolicitudesCambio.SolicitaDatosActiva() ? ColumnasDatos : ColumnasDatosVacias); }
+        get
+        {
+            return CabeceraBase.Replace("{0}", PersistenciaSolicitudesCambio.SolicitaDatosActiva() ? ColumnasDatos : ColumnasDatosVacias)
+                               .Replace("{1}", PersistenciaSolicitudesCambio.SolicitaVariosActiva() ? ColumnasVarios : ColumnasVariosVacias);
+        }
     }
 
     public List<Dictionary<string, object>> Listar(string estado, int maximo)
@@ -684,6 +777,21 @@ FROM adm.SolicitudCambioEvento AS e WHERE e.IdSolicitud = @id ORDER BY e.IdEvent
         d["so_nuevo"] = Texto(r, r.GetOrdinal("OwnerServicioNuevo"));
         d["actual"] = actual;
         d["fecha_actual"] = campo != null && actual.ContainsKey(campo) ? actual[campo] : null;
+        // VARIOS (sql/34): las fechas pedidas, cada una con su etapa, su
+        // anterior, su nueva y la de ahora. Sin sql/34, ninguna.
+        var fechas = new List<object>();
+        foreach (var campoVarios in new[] { "FechaAnalisis", "FechaSolucion", "FechaCierre" })
+        {
+            var col = "F" + campoVarios.Substring(5);
+            if (!Convert.ToBoolean(r["Cambia" + col])) continue;
+            fechas.Add(new Dictionary<string, object>
+            {
+                { "campo", campoVarios }, { "etapa", PeticionSolicitudCambio.Etapas[campoVarios] },
+                { "anterior", Iso(r, r.GetOrdinal(col + "Anterior")) }, { "nueva", Iso(r, r.GetOrdinal(col + "Nueva")) },
+                { "actual", actual[campoVarios] },
+            });
+        }
+        d["fechas_varias"] = fechas;
         return d;
     }
 }
@@ -710,18 +818,38 @@ public static class SolicitudesCambio
         return d.TryGetValue(clave, out v) ? v as string : null;
     }
 
+    // ESTADO siempre pide Estado; VARIOS, solo si trae uno nuevo.
+    public static bool PideEstado(Dictionary<string, object> d)
+    {
+        var tipo = d["tipo"] as string;
+        return tipo == "ESTADO" || (tipo == "VARIOS" && d["estado_nuevo"] != null);
+    }
+
+    // Las fechas por etapa de VARIOS (sql/34); un detalle sin ellas, ninguna.
+    public static List<Dictionary<string, object>> FechasVarias(Dictionary<string, object> d)
+    {
+        object v;
+        return d.TryGetValue("fechas_varias", out v) && v is List<object>
+            ? ((List<object>)v).Cast<Dictionary<string, object>>().ToList()
+            : new List<Dictionary<string, object>>();
+    }
+
     // Solo lectura, para avisar a ADM ANTES de aplicar (la base lo vuelve a
     // revisar bajo candado: esto no decide nada). Misma regla que Aplicar.
     public static bool Desactualizada(Dictionary<string, object> d)
     {
         if ((d["estado"] as string) != "PENDIENTE" || (d["tipo"] as string) == "OTROS") return false;
         var actual = (Dictionary<string, object>)d["actual"];
-        if ((d["tipo"] as string) == "ESTADO"
+        if (PideEstado(d)
             && (!string.Equals(actual["estado"] as string ?? "", d["estado_anterior"] as string ?? "", StringComparison.Ordinal)
                 || !string.Equals(actual["subestado"] as string ?? "", d["subestado_anterior"] as string ?? "", StringComparison.Ordinal)))
             return true;
         if (d["campo_fecha"] != null && !string.Equals(d["fecha_actual"] as string ?? "", d["fecha_anterior"] as string ?? "", StringComparison.Ordinal))
             return true;
+        // VARIOS (sql/34): cada fecha pedida contra la de ahora.
+        foreach (var x in FechasVarias(d))
+            if (!string.Equals(x["actual"] as string ?? "", x["anterior"] as string ?? "", StringComparison.Ordinal))
+                return true;
         // DATOS (sql/25): el texto exacto, como la comparacion en binario de Aplicar.
         foreach (var dato in Datos)
             if (Bandera(d, "cambia_" + dato)
@@ -750,7 +878,7 @@ public static class SolicitudesCambio
         f["accion"] = "modificar";
         f[PeticionModificarAdmin.CFolio] = d["folio"] as string;
         var tipo = d["tipo"] as string;
-        if (tipo == "ESTADO")
+        if (PideEstado(d))
         {
             f[PeticionModificarAdmin.CEstado] = d["estado_nuevo"] as string;
             if (d["subestado_nuevo"] != null) f[PeticionModificarAdmin.CSubestado] = d["subestado_nuevo"] as string;
@@ -761,10 +889,17 @@ public static class SolicitudesCambio
             var clave = PeticionSolicitudCambio.Campos.First(x => x.Value == campo).Key;
             f[clave] = d["fecha_nueva"] as string;
         }
-        // DATOS (sql/25): las claves de la edicion directa (titulo / po / so);
-        // "" = que quede vacio. Asi pasan por el MISMO validador (catalogo de
-        // duenos, ValidadorGestionAdmin.DuenoCapturado) contra lo de ahora.
-        if (tipo == "DATOS")
+        // VARIOS (sql/34): cada fecha pedida con la clave de su etapa.
+        foreach (var x in FechasVarias(d))
+        {
+            var clave = PeticionSolicitudCambio.Campos.First(c => c.Value == (x["campo"] as string)).Key;
+            f[clave] = x["nueva"] as string;
+        }
+        // DATOS (sql/25) y VARIOS: las claves de la edicion directa (titulo /
+        // po / so); "" = que quede vacio. Asi pasan por el MISMO validador
+        // (catalogo de duenos, ValidadorGestionAdmin.DuenoCapturado) contra lo
+        // de ahora.
+        if (tipo == "DATOS" || tipo == "VARIOS")
         {
             if (Bandera(d, "cambia_titulo")) f[SolicitudIniciativa.CTitulo] = Valor(d, "titulo_nuevo") ?? "";
             if (Bandera(d, "cambia_po")) f[SolicitudIniciativa.CPo] = Valor(d, "po_nuevo") ?? "";

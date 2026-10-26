@@ -15,6 +15,12 @@
 //        tipo datos (sql/25, PersistenciaSolicitudesCambio.SolicitaDatos):
 //        titulo_nuevo / po_nuevo / so_nuevo, la clave PRESENTE = se pide
 //        (vacia = que quede vacio); PO / SO del catalogo se revisan al aplicar.
+//        tipo varios (sql/34, PersistenciaSolicitudesCambio.SolicitaVarios):
+//        UNA solicitud con cualquier combinacion de estado_nuevo, las fechas
+//        por etapa f_analisis_nueva / f_solucion_nueva / f_cierre_nueva (la
+//        clave PRESENTE = se pide; nunca campo_fecha), los pares de
+//        categorias y titulo_nuevo / po_nuevo / so_nuevo. Sin sql/34 = 422.
+//        Aplicar la aplica entera o nada (adm.usp_SolicitudCambio_Aplicar).
 //        -> 200 { enviada: true, id_solicitud, repetida }
 //           422 { errores } formato;  4xx de la base (ErrorSolicitudCambio)
 //           501 { tipo: PersistenciaNoHabilitada } sin sql/22: nada se guarda

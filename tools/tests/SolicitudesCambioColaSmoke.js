@@ -89,6 +89,24 @@ Check('R8 DATOS en el detalle: al enviar / pedido / ahora por dato pedido; SO no
   [/<th scope="row">Título<\/th><td>Uno<\/td><td>Uno &lt;nuevo&gt;<\/td><td>Uno<\/td>/.test(html),
    /<th scope="row">Product Owner capturado<\/th><td>PO viejo<\/td><td>\(vacío\)<\/td><td>PO viejo<\/td>/.test(html),
    /Service Owner capturado/.test(html), /data-sol-accion="aplicar">Aplicar solicitud/.test(html)]);
+// VARIOS (sql/34): Estado, dos fechas por etapa, una categoria y el Titulo
+// en UNA solicitud; ADM ve cada cambio y decide sobre la solicitud entera.
+var varios = Pendiente({ tipo: 'VARIOS', campo_fecha: null, estado_anterior: 'En Solución', estado_nuevo: 'En Monitoreo',
+  fechas_varias: [{ campo: 'FechaAnalisis', etapa: 'Análisis', anterior: '2026-08-01', nueva: '2026-08-15', actual: '2026-08-01' },
+                  { campo: 'FechaCierre', etapa: 'Cierre', anterior: '2026-12-20', nueva: '2027-01-31', actual: '2026-12-20' }],
+  categorias: 1, cambia_titulo: true, titulo_anterior: 'Uno', titulo_nuevo: 'Uno varios', cambia_po: false, cambia_so: false,
+  categorias_detalle: [{ categoria: '/A/Cat 1', accion: 'PCT', pct_anterior: '30', pct_nuevo: '40', pct_actual: '30', tipo_iniciativa: null, tipo_agrupado: null, ligada: true, ligada_alguna_vez: true }],
+  actual: { estado: 'En Solución', titulo: 'Uno' } });
+Check('R9 VARIOS en la lista: rotulo y cada cambio en el resumen',
+  [true, 'Estado: En Solución → En Monitoreo; Fecha compromiso de Análisis: 01/08/2026 → 15/08/2026; Fecha compromiso de Cierre: 20/12/2026 → 31/01/2027; 1 categoría; Título: Uno → Uno varios'],
+  [/Varios cambios/.test(C.htmlLista([varios])), C.resumen(varios)]);
+html = C.htmlDetalle(varios, {});
+Check('R9 VARIOS en el detalle: una fila por cambio, categorias, aviso de todo o nada y un solo Aplicar', [true, true, true, true, true, true, 1],
+  [/<th scope="row">Estado \/ Subestado<\/th><td>En Solución<\/td><td>En Monitoreo/.test(html),
+   /<th scope="row">Fecha compromiso de Análisis<\/th><td>01\/08\/2026<\/td><td>15\/08\/2026<\/td><td>01\/08\/2026<\/td>/.test(html),
+   /<th scope="row">Fecha compromiso de Cierre<\/th><td>20\/12\/2026<\/td><td>31\/01\/2027<\/td>/.test(html),
+   /<th scope="row">Título<\/th><td>Uno<\/td><td>Uno varios<\/td>/.test(html), /\/A\/Cat 1/.test(html),
+   /aplicar aplica TODOS los cambios de arriba/.test(html), (html.match(/data-sol-accion="aplicar"/g) || []).length]);
 
 // ---- flujos -----------------------------------------------------------------
 var doc = Documento(), pedidos = [], respuestas = [];

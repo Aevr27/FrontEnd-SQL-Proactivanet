@@ -229,6 +229,54 @@ public static class SolicitudesCambioHttpSmoke
         Check("S5 sin rol resuelto (null): tambien se rechaza (falla cerrado)", "False|subestado_nuevo",
               pSub.Valida + "|" + (pSub.Errores.Count > 0 ? pSub.Errores[0].Campo : ""));
 
+        // ---- VA) VARIOS cambios en UNA solicitud (sql/34) ---------------------
+        // Sin sql/34 (interruptor apagado) no pasa: 422 y nada llega al almacen
+        // (nunca se parte en varias solicitudes). Con sql/34: una sola peticion
+        // con todo; las mismas reglas de rol (Subestado solo ADM) y de forma.
+        var varios = F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "varios", "estado_nuevo", "Cerrado",
+                       "f_analisis_nueva", "2026-12-01", "f_cierre_nueva", "2027-01-31", "titulo_nuevo", "T nuevo", "motivo", "m", "rol", "ADM");
+        PersistenciaSolicitudesCambio.SolicitaVariosForzadaParaPruebas = false;
+        alm.Llamadas.Clear();
+        cuerpo = Correr("POST", "accion=enviar", MOD, varios, out estado);
+        Check("VA1 sin sql/34: 422 que lo dice, nada se envia", "422|True|0", estado + "|" + cuerpo.Contains("sql/34") + "|" + alm.Llamadas.Count);
+        PersistenciaSolicitudesCambio.SolicitaVariosForzadaParaPruebas = true;
+        PersistenciaSolicitudesCambio.SolicitaDatosForzadaParaPruebas = true;   // VARIOS ya exige sql/25
+        try
+        {
+            cuerpo = Correr("POST", "accion=enviar", MOD, varios, out estado);
+            var pv = alm.UltimaPeticion;
+            Check("VA2 con sql/34: UNA peticion VARIOS con todo; el rol es el del servidor", "200|1|VARIOS|Cerrado|2026-12-01|2027-01-31|True|T nuevo|MOD",
+                  estado + "|" + alm.Llamadas.Count + "|" + pv.Tipo + "|" + pv.EstadoNuevo + "|" + pv.FechasVarias["FechaAnalisis"].ToString("yyyy-MM-dd") + "|" +
+                  pv.FechasVarias["FechaCierre"].ToString("yyyy-MM-dd") + "|" + pv.CambiaTitulo + "|" + pv.TituloNuevo + "|" + alm.UltimoRol);
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "varios", "estado_nuevo", "Cerrado",
+                                                           "subestado_nuevo", "Solucionado", "f_cierre_nueva", "2027-01-31", "motivo", "m", "rol", "ADM"), out estado);
+            Check("VA3 MOD cuela Subestado en VARIOS: 422 en subestado_nuevo, nada se envia", "422|True|0",
+                  estado + "|" + cuerpo.Contains("\"campo\":\"subestado_nuevo\"") + "|" + alm.Llamadas.Count);
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "varios", "estado_nuevo", "Cerrado",
+                                                           "campo_fecha", "f_cierre", "fecha_nueva", "2027-01-31", "motivo", "m"), out estado);
+            Check("VA4 VARIOS con campo_fecha (en vez de la fecha por etapa): 422", "422|0", estado + "|" + alm.Llamadas.Count);
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "fecha", "campo_fecha", "f_cierre",
+                                                           "fecha_nueva", "2027-01-31", "f_analisis_nueva", "2026-12-01", "motivo", "m"), out estado);
+            Check("VA5 una fecha por etapa en otro tipo: 422", "422|0", estado + "|" + alm.Llamadas.Count);
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "varios", "motivo", "m"), out estado);
+            Check("VA6 VARIOS sin ningun cambio: 422", "422|True|0", estado + "|" + cuerpo.Contains("al menos un cambio") + "|" + alm.Llamadas.Count);
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "varios", "f_cierre_nueva", "2027-01-31",
+                                                           "f_cierre_nueva", "2027-02-28", "motivo", "m"), out estado);
+            Check("VA7 la misma fecha dos veces en una solicitud: 422 en f_cierre_nueva", "422|True|0",
+                  estado + "|" + cuerpo.Contains("\"campo\":\"f_cierre_nueva\"") + "|" + alm.Llamadas.Count);
+            PersistenciaSolicitudesCambio.SolicitaDatosForzadaParaPruebas = false;
+            cuerpo = Correr("POST", "accion=enviar", MOD, varios, out estado);
+            Check("VA8 VARIOS con Titulo sin el interruptor de sql/25: 422 (no 500), nada se envia", "422|True|0",
+                  estado + "|" + cuerpo.Contains("sql/25") + "|" + alm.Llamadas.Count);
+            PersistenciaSolicitudesCambio.SolicitaDatosForzadaParaPruebas = null;
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.SolicitaVariosForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.SolicitaDatosForzadaParaPruebas = null;
+        }
+
         // ---- C) interruptor apagado ------------------------------------------
         PersistenciaSolicitudesCambio.ForzadaParaPruebas = false;
         alm.Llamadas.Clear();

@@ -994,6 +994,32 @@ pruebas.push(function () {
   lo.agregar(borr('estado', { propuesto: 'Cerrado' }));
   Check('SL10 Otros + Estado: no cabe en una solicitud de hoy', false, lo.contrato().soportado);
 
+  // SLV) Con sql/34 (opciones.varios): cualquier combinacion viaja como UNA
+  // solicitud tipo varios; cada fecha con la clave de su etapa; sin
+  // Subestado; "Otros" sigue yendo solo.
+  var OPV = Object.assign({}, OP, { varios: true, rutas: ['/A/Cat 2'] });
+  var lv = new L(ini, OPV);
+  var bvE = new S(ini, OPV); bvE.campo = 'estado'; bvE.propuesto = 'En Monitoreo'; bvE.subestado = 'Solucionado';
+  var bvA = new S(ini, OPV); bvA.campo = 'f_analisis'; bvA.propuesto = '2027-01-10';
+  var bvC = new S(ini, OPV); bvC.campo = 'f_cierre'; bvC.propuesto = '2026-11-15';
+  var bvP = new S(ini, OPV); bvP.campo = 'pct'; bvP.fijarPct('/A/Cat 3', '30');
+  var bvT = new S(ini, OPV); bvT.campo = 'datos'; bvT.datos.titulo = 'Título nuevo';
+  [bvE, bvA, bvC, bvP, bvT].forEach(function (b) { lv.agregar(b); });
+  lv.motivo = 'Replaneación';
+  Check('SLV1 cinco cambios (Estado, dos fechas, %, Título): UNA solicitud varios, sin campo_fecha ni Subestado',
+    [true, 'varios', [['tipo', 'varios'], ['estado_nuevo', 'En Monitoreo'], ['f_analisis_nueva', '2027-01-10'], ['f_cierre_nueva', '2026-11-15'],
+      ['pct_categoria', '/A/Cat 3'], ['pct_valor', '30'], ['titulo_nuevo', 'Título nuevo'], ['motivo', 'Replaneación']], lv.llave],
+    [lv.contrato().soportado, lv.contrato().forma, lv.pares().filter(function (x) { return x[0] !== 'llave' && x[0] !== 'folio'; }),
+     lv.pares().filter(function (x) { return x[0] === 'llave'; })[0][1]]);
+  var lvo = new L(ini, OPV);
+  var bvO = new S(ini, OPV); bvO.campo = 'otros'; bvO.motivo = 'Explicación';
+  lvo.agregar(bvE); lvo.agregar(bvO);
+  Check('SLV2 con varios, Otros + Estado sigue sin enviarse (Otros va solo)', [false, null, true],
+    [lvo.contrato().soportado, lvo.pares(), /«Otros» es una explicación y va en su propia solicitud/.test(lvo.contrato().mensaje)]);
+  var lv1 = new L(ini, OPV); lv1.agregar(bvC); lv1.motivo = 'm';
+  Check('SLV3 con varios, un solo cambio sigue con su contrato de siempre (tipo fecha)', ['uno', 'fecha'],
+    [lv1.contrato().forma, lv1.pares().filter(function (x) { return x[0] === 'tipo'; })[0][1]]);
+
   // Interfaz.
   var datos = JSON.parse(JSON.stringify(DATOS));
   datos.estados_problem = ['En Análisis', 'En Solución', 'En Monitoreo', 'Cerrado'];
@@ -1090,6 +1116,59 @@ pruebas.push(function () {
       accion('solicitar-cambios');
       Check('SL20 Cancelar descarta: al reabrir la lista esta vacia y la llave es otra', [0, true],
         [p.registro.lista.items.length, p.registro.lista.llave !== envios[0].llave]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SLW) Con solicitudes_varios (sql/34) la pagina manda Estado + dos fechas
+// como UNA peticion tipo varios; sin el, la misma lista no se envia.
+// ---------------------------------------------------------------------------
+[true, false].forEach(function (conVarios) {
+  pruebas.push(function () {
+    var datos = JSON.parse(JSON.stringify(DATOS));
+    datos.estados_problem = ['En Análisis', 'En Solución', 'En Monitoreo', 'Cerrado'];
+    datos.persistencia_solicitudes = true;
+    datos.solicitudes_varios = conVarios;
+    var p = Pagina(ok(datos), function () { return nunca(); }, 'MOD');
+    function accion(a) {
+      var el = Elemento('b'); el.setAttribute('data-accion', a);
+      p.sel('regDetCuerpo').disparar('click', { target: el });
+    }
+    function elegir(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('change', { target: p.sel(id) }); }
+    var envios = [], nombre = conVarios ? 'con varios' : 'sin varios';
+    return esperar().then(function () {
+      p.registro.pedirSolicitud = function (url, op) {
+        var campos = {};
+        op.body.forEach(function (v, k) { campos[k] = v; });
+        envios.push(campos);
+        return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ enviada: true, id_solicitud: 77, repetida: false }); } });
+      };
+      clicFolio(p, 'PRB 2026-000001');
+      accion('solicitar-cambios');
+      p.sel('regCambioMotivo').value = 'Replaneación';
+      elegir('regCambioCampo', 'estado');
+      p.sel('regCambioEstado').value = 'En Monitoreo';
+      accion('cambio-agregar');
+      [['f_cierre', '2026-11-15'], ['f_analisis', '2027-01-10']].forEach(function (f) {
+        elegir('regCambioCampo', 'fecha');
+        elegir('regCambioFechaCampo', f[0]);
+        p.sel('regCambioNueva').value = f[1];
+        accion('cambio-agregar');
+      });
+      Check('SLW1 ' + nombre + ': la lista ' + (conVarios ? 'no avisa nada' : 'avisa que hoy no cabe'), !conVarios,
+        /todavía no admite estos 3 cambios/.test(p.sel('regCambioLista').innerHTML));
+      accion('cambio-preparar');
+      accion('cambio-confirmar');
+      return esperar().then(esperar);
+    }).then(function () {
+      if (conVarios) {
+        Check('SLW2 con varios: UNA peticion tipo varios con el Estado y las dos fechas por etapa; enviada', [1, 'varios', 'En Monitoreo', '2026-11-15', '2027-01-10', false, false, true],
+          [envios.length, envios[0].tipo, envios[0].estado_nuevo, envios[0].f_cierre_nueva, envios[0].f_analisis_nueva,
+           'campo_fecha' in envios[0], 'subestado_nuevo' in envios[0], /Solicitud #77 enviada/.test(p.sel('regCambioMsg').innerHTML)]);
+      } else {
+        Check('SLW2 sin varios: nada se envia (ni por partes)', [0, true], [envios.length, /No se envió/.test(p.sel('regCambioMsg').innerHTML)]);
+      }
     });
   });
 });
