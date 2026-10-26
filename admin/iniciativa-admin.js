@@ -40,6 +40,12 @@
      (ese sigue en la base). Estados: cargando, ok, cero (0 real),
      sin_datos (la vista vino vacia), error (la consulta fallo: nunca se
      pinta como 0) y ruta_invalida. En Modificar es de solo lectura.
+     Crear y Modificar de ADM (alcance=total) muestran `ultimos30`: los
+     tickets de la categoria en los ultimos 30 dias con la expresion de
+     VolumenUltimos30 de dbo.vw_ProblemCategoria, la MISMA base con la que
+     adm.usp_GestionAdmin_TicketsReduce guarda Tickets a reducir (antes se
+     mostraba el total historico y la base calculaba sobre 30 dias:
+     74 vs 7, 2026-10-26). El total historico ya no se pinta.
      En Crear, si la base tiene sql/26 (volumetria_manual del registro),
      ADM puede fijar otra por categoria (vacia = la calculada); la suma de
      las de un alta con alguna fijada viaja como `volumetria` y se guarda
@@ -59,8 +65,10 @@
      la volumetria de esa categoria (MetaCategoria). Lo que ADM escribio
      (fuente) nunca se pisa: cambiar el modo o la volumetria solo recalcula
      el otro. Viaja y se guarda el % (dos decimales): desde tickets puede no
-     ser exacto y se dice. Tickets a reducir lo sigue calculando la base con
-     la volumetria calculada, no con la fijada.
+     ser exacto y se dice. Tickets a reducir = FLOOR(volumetria de 30 dias
+     x %): siempre hacia abajo, entero. Lo sigue calculando la base con la
+     volumetria calculada, no con la fijada (si ADM fijo otra, se avisa lo
+     que guardara la base).
 
    INCOMPLETA (marca DERIVADA, sin columna)
    ----------------------------------------
@@ -161,7 +169,8 @@ window.IniciativaAdmin = (function () {
   var URL_GESTION = '../handlers/admin_iniciativas_gestion.ashx';
   // Volumetria por categoria (solo lectura, ADM o MOD).
   var URL_VOLUMETRIA = '../handlers/admin_iniciativas_volumetria.ashx';
-  // Volumetria total de la categoria (solo ADM; VolumetriaCliente).
+  // Alcance de ADM (Crear / Modificar; VolumetriaCliente): el servidor
+  // manda el total historico y `ultimos30`; aqui solo se usa ultimos30.
   var ALCANCE_TOTAL = 'total';
 
   // Desde cuantas opciones un selector pasa a ser caja con busqueda.
@@ -382,10 +391,12 @@ window.IniciativaAdmin = (function () {
   // pedir: (url, opciones) -> Promise<Response>. Recuerda por ruta; un error
   // no se recuerda (se puede volver a pedir). alcance: '' (por omision) =
   // SLOT 0, los ultimos 30 dias (Nueva solicitud, Solicitar cambios);
-  // 'total' = toda la volumetria de la categoria (VolumenCategoria de
-  // vw_ProblemCategoria), SOLO para Crear / Modificar de ADM: el servidor la
-  // niega (403) a cualquier otro rol. Con 'total' cada resultado trae
-  // ultimos30: la base del TicketsReduce que guarda la base.
+  // 'total' = SOLO para Crear / Modificar de ADM (el servidor la niega, 403,
+  // a cualquier otro rol). Con 'total' el valor es `ultimos30` (la
+  // expresion de VolumenUltimos30 de vw_ProblemCategoria: la base del
+  // TicketsReduce que guarda la base), nunca el total historico; el estado
+  // sale de ese numero (ok > 0, cero = 0). Sin ultimos30 = error, nunca 0
+  // ni el total.
   class VolumetriaCliente {
     constructor(pedir, alcance) {
       this.pedir = pedir || function (url, op) { return fetch(url, op); };
@@ -415,8 +426,16 @@ window.IniciativaAdmin = (function () {
               return { estado: 'error', valor: null,
                        mensaje: (json && json.error) || ('El servidor respondió ' + r.status + '.') };
             }
+            if (self.alcance && fila.estado !== 'ruta_invalida') {
+              var u = fila.ultimos30;
+              if (typeof u !== 'number' || !isFinite(u) || u < 0 || u % 1) {
+                return { estado: 'error', valor: null, alcance: self.alcance,
+                         mensaje: 'el servidor no trajo los tickets de los últimos 30 días.' };
+              }
+              return { estado: u > 0 ? 'ok' : 'cero', valor: u, alcance: self.alcance, ultimos30: u };
+            }
             return { estado: fila.estado, valor: typeof fila.volumetria === 'number' ? fila.volumetria : null, alcance: self.alcance,
-                     ultimos30: self.alcance && typeof fila.ultimos30 === 'number' ? fila.ultimos30 : null };
+                     ultimos30: null };
           });
         }, function () { return { estado: 'error', valor: null, mensaje: 'No se pudo contactar al servidor.' }; })
         .then(function (fin) {
@@ -429,9 +448,6 @@ window.IniciativaAdmin = (function () {
 
     static texto(e) {
       if (!e) return '—';
-      if (e.alcance === ALCANCE_TOTAL && (e.estado === 'ok' || e.estado === 'cero')) {
-        return Number(e.valor).toLocaleString('es-MX') + ' tickets (total de la categoría)';
-      }
       switch (e.estado) {
         case 'cargando': return 'Consultando…';
         case 'ok': return Number(e.valor).toLocaleString('es-MX') + ' tickets (últimos 30 días)';
@@ -447,8 +463,8 @@ window.IniciativaAdmin = (function () {
     var clase = !e ? '' : e.estado === 'error' || e.estado === 'ruta_invalida' ? ' mal'
       : e.estado === 'sin_datos' ? ' aviso' : '';
     var origen = e && e.alcance === ALCANCE_TOTAL
-      ? 'Calculada: todos los tickets de la categoría (VolumenCategoria de vw_ProblemCategoria), solo lectura' +
-        (typeof e.ultimos30 === 'number' ? '. Últimos 30 días: ' + e.ultimos30.toLocaleString('es-MX') : '')
+      ? 'Calculada: tickets de la categoría en los últimos 30 días (VolumenUltimos30 de vw_ProblemCategoria, ' +
+        'la base de Tickets a reducir), solo lectura'
       : 'Calculada: Total general del SLOT 0 de vw_TBSlotCAT (solo lectura)';
     return '<output class="ini-vol' + clase + '" title="' + Escape.attr(origen) + '">' +
       Escape.html(VolumetriaCliente.texto(e)) + '</output>';
@@ -460,17 +476,19 @@ window.IniciativaAdmin = (function () {
   // Denominador: la volumetria de ESA categoria (la que ADM fijo o la
   // calculada). Lo que viaja y se guarda es el % (dbo.ProblemCategoria.
   // PctDisminucion, hasta dos decimales); los tickets solo se muestran.
-  // Redondeo: el de Tickets a reducir (ticketsDe de iniciativas.js y
-  // ROUND(vol x %, 0) de la base): mitad hacia arriba, en enteros para no
-  // arrastrar errores de coma flotante. Tickets -> %: tambien mitad hacia
-  // arriba, a dos decimales; si ese % no devuelve los mismos tickets (con
-  // volumetrias grandes, 0.01% es mas de un ticket) se dice, no se esconde.
+  // Redondeo (2026-10-26): SIEMPRE hacia abajo, FLOOR(vol x %), el de
+  // Tickets a reducir (ticketsDe de iniciativas.js y la propuesta sql/33
+  // de adm.usp_GestionAdmin_TicketsReduce); en enteros (centesimas de %)
+  // para no arrastrar errores de coma flotante: 7 x 9.46% = 0.66 -> 0.
+  // Tickets -> %: el menor % con dos decimales que da al menos esos
+  // tickets; si da mas (con volumetrias grandes 0.01% es mas de un ticket)
+  // se dice, no se esconde.
   var MetaCategoria = {
     // vol: entero >= 0 o null; pct: texto. -> tickets enteros, o null.
     tickets: function (vol, pct) {
       if (typeof vol !== 'number' || !isFinite(vol) || vol < 0 || vol % 1) return null;
       if (vacio(pct) || FORMATO.pct(String(pct).trim())) return null;
-      return Math.floor((vol * Math.round(Number(pct) * 100) + 5000) / 10000);
+      return Math.floor(vol * Math.round(Number(pct) * 100) / 10000);
     },
     // -> { pct: texto, exacto, tickets: los que da ese % } o { error }.
     pct: function (vol, tickets) {
@@ -483,7 +501,7 @@ window.IniciativaAdmin = (function () {
       if (vol === 0) return { error: 'Con volumetría 0 no hay tickets que resolver: usa el %.' };
       var n = Number(t);
       if (n > vol) return { error: n.toLocaleString('es-MX') + ' tickets es más que la volumetría (' + vol.toLocaleString('es-MX') + '): pasaría de 100%.' };
-      var centesimos = Math.floor((2 * n * 10000 + vol) / (2 * vol));
+      var centesimos = Math.ceil(n * 10000 / vol);
       var pct = String(centesimos / 100);
       var da = MetaCategoria.tickets(vol, pct);
       return { pct: pct, exacto: da === n, tickets: da };
@@ -659,8 +677,9 @@ window.IniciativaAdmin = (function () {
     }
 
     // Lo que la BASE guardara en Tickets a reducir (TicketsReduce): lo
-    // calcula adm.usp_GestionAdmin_TicketsReduce con ROUND(VolumenUltimos30
-    // x %), no con la volumetria total. null si no se sabe (sin vol30).
+    // calcula adm.usp_GestionAdmin_TicketsReduce sobre VolumenUltimos30
+    // (FLOOR con sql/33), no con una volumetria fijada a mano. null si no
+    // se sabe (sin vol30). Sin volumetria fijada es la misma meta mostrada.
     ticketsGuardados(f) {
       return typeof f.vol30 === 'number' ? MetaCategoria.tickets(f.vol30, f.valor) : null;
     }
@@ -1311,7 +1330,7 @@ window.IniciativaAdmin = (function () {
 
     capturarPct(indice, texto) { this.categorias.capturarPct(indice, texto); }
 
-    // Meta en tickets (ADM): el % sale de la volumetria total de la fila.
+    // Meta en tickets (ADM): el % sale de la volumetria de 30 dias de la fila.
     capturarTickets(indice, texto) { return this.categorias.capturarTickets(indice, texto); }
 
     elegirModo(modo) { return this.categorias.elegirModo(modo); }
@@ -1502,7 +1521,7 @@ window.IniciativaAdmin = (function () {
           Selector.desplegable('regEdCatBuscar', rutas, '') +
           ' <button type="button" class="btn linea chico" data-accion="edicion-cat-agregar">Agregar</button></div>'
       : htmlSinCatalogo(ed.rutasEstado);
-    // La volumetria que llego (total de la categoria) recalcula el % de las
+    // La volumetria que llego (ultimos 30 dias) recalcula el % de las
     // filas cuya meta se escribio en tickets; lo escrito no cambia.
     ed.categorias.sincronizarCalculadas(vol);
     var modo = ed.categorias.modo;
@@ -1513,8 +1532,8 @@ window.IniciativaAdmin = (function () {
     var modos = ed.categorias.filas.length
       ? '<fieldset class="ini-campo ini-modo-meta"><legend>Planear la meta por</legend>' +
           radio('pct', '% de disminución') + ' ' + radio('tickets', 'Tickets a resolver') +
-          '<small class="ini-motivo">Lo que escribes no cambia; el otro valor se calcula con la volumetría total de cada categoría. ' +
-          'Se guarda el % (dos decimales). Tickets a reducir lo calcula la base con los tickets de los últimos 30 días.</small></fieldset>'
+          '<small class="ini-motivo">Lo que escribes no cambia; el otro valor se calcula con los tickets de los últimos 30 días de cada categoría, ' +
+          'redondeando hacia abajo. Se guarda el % (dos decimales); Tickets a reducir lo calcula la base con la misma volumetría.</small></fieldset>'
       : '';
     return modos + htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis,
         tiposIniciativa: ed.listas.tiposIniciativa, tiposAgrupado: ed.listas.tiposAgrupado,
@@ -1523,7 +1542,7 @@ window.IniciativaAdmin = (function () {
       '<small class="ini-sub">Destino: dbo.ProblemCategoria. Quitar = solo la asociación con esta iniciativa deja de estar vigente ' +
         '(VigenteEnOrigen = 0, la misma baja del cargador); no se borra la fila, ni la categoría, ni sus dueños.' +
         (ed.duenosYQuitar ? '' : ' Quitar una categoría ligada todavía no se guarda: falta aplicar sql/24 en la base; por eso su botón está deshabilitado.') +
-        ' La volumetría es el total de tickets de la categoría, calculada y de solo lectura.</small>' +
+        ' La volumetría son los tickets de la categoría en los últimos 30 días, calculada y de solo lectura.</small>' +
       '<small class="ini-sub">Fecha de análisis: las categorías iniciales heredan la de la iniciativa y cambian con ella ' +
         '(Fecha compromiso de Análisis). Una categoría ligada después tiene la suya: el día en que se liga + ' +
         FECHAS_GESTION.diasAnalisis + ' días, editable aquí, sin tocar la de la iniciativa. ' +
@@ -1616,7 +1635,8 @@ window.IniciativaAdmin = (function () {
     constructor(doc, pedir, pedirLectura) {
       this.doc = doc;
       this.pedir = pedir || null;
-      // ADM planea sobre la volumetria TOTAL de la categoria.
+      // ADM planea sobre los ultimos 30 dias de la categoria (alcance=total
+      // trae ultimos30, la base de Tickets a reducir).
       this.volumetria = new VolumetriaCliente(pedirLectura || null, ALCANCE_TOTAL);
       this.borrador = null;
       this.archivoRca = null;  // el File elegido: viaja al servidor, que no lo guarda

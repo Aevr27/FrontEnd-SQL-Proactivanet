@@ -23,7 +23,9 @@
 //       volumetria = VolumenCategoria de dbo.vw_ProblemCategoria (todos los
 //       tickets de la ruta); ultimos30 = su VolumenUltimos30, la base del
 //       TicketsReduce que guarda la base (VolumetriaTotalCategoria en
-//       App_Code/ExperienciaVolumetria.cs). Sin cache: un COUNT por ruta
+//       App_Code/ExperienciaVolumetria.cs). La pantalla de ADM muestra y
+//       calcula con ultimos30 (2026-10-26); volumetria (el total) ya no se
+//       pinta. Sin cache: un COUNT por ruta
 //       sobre IX_Tickets_Categoria.
 //   403 AccesoAdmin.ExigirAdm (MOD y los demas), antes de tocar la base.
 //   400 alcance desconocido. Sin alcance = SLOT 0, igual que siempre.

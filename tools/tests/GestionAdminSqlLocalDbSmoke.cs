@@ -1539,12 +1539,21 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                     Exec(cn, "IF USER_ID(N'" + u + "') IS NOT NULL DROP USER [" + u + "];");
             }
             foreach (var l in diag10.Split('\n')) if (l.StartsWith("11 ")) Console.WriteLine("   diag " + l);
-            // Con sql/20, Crear ya no es la de sql/18: el diag (repo del backend,
-            // sin actualizar) la marca OTRA. Se exige que sea EXACTAMENTE la de
-            // sql/20 y que los otros 4 sigan siendo los de sql/18.
-            Check("E34 diag seccion 11: 4 objetos de sql/18 revisados + Crear = hash de sql/20", "4|True",
-                  Regex.Matches(diag10, @"^11 sql/18\|[^|]+\|1\|sql/18 revisado\|", RegexOptions.Multiline).Count + "|" +
-                  diag10.Contains("11 sql/18|adm.usp_GestionAdmin_Crear|1|OTRA: revisar|" + HashCrearSql20));
+            // Esta base tiene sql/18 + sql/20: el diag (con sus revisiones de
+            // sql/18, 20, 21 y 33) dice Crear = sql/20, Modificar / RevisarTope =
+            // sql/18 y TicketsReduce = sql/18, los tres 'anterior' (faltan sql/21
+            // y sql/33), y el trigger = sql/18 vigente. Las 5 filas exactas.
+            const string Ant = " (anterior: falta la siguiente migracion)|";
+            Check("E34 diag seccion 11: Crear = sql/20; Modificar, RevisarTope y TicketsReduce = sql/18 (anterior); trigger = sql/18 (vigente)",
+                  "True|True|True|True|True|5",
+                  diag10.Contains("11 sql/18-21|adm.usp_GestionAdmin_Crear|1|sql/20" + Ant + HashCrearSql20) + "|" +
+                  diag10.Contains("11 sql/18-21|adm.usp_GestionAdmin_Modificar|1|sql/18" + Ant + HashModSql18) + "|" +
+                  diag10.Contains("11 sql/18-21|adm.usp_GestionAdmin_RevisarTope|1|sql/18" + Ant + HashTopeSql18) + "|" +
+                  diag10.Contains("11 sql/18-21|adm.usp_GestionAdmin_TicketsReduce|1|sql/18" + Ant +
+                                  "0xDCDAE267E6ABE7243A823EAA02FC069983381079CB0AC9E7B46219EF9D861B46") + "|" +
+                  diag10.Contains("11 sql/18-21|dbo.trg_ProblemCategoria_FechaEvento|1|sql/18 (vigente)|" +
+                                  "0x820900AC17857D03793A807397456D27E94DCB0A845E6CAEB2D34A46515DDD03") + "|" +
+                  Regex.Matches(diag10, @"^11 sql/18-21\|", RegexOptions.Multiline).Count);
             Check("E35 diag seccion 8: stg es de otro dueno, como en la VM", "True", diag10.Contains("8 duenos de esquema|stg|" + DuenoStg));
 
             Check("E27 la unica FK de la tabla SALE de ella hacia dbo.Problem, sin cascada (NO_ACTION/NO_ACTION); ninguna FK llega a ella; sin triggers",

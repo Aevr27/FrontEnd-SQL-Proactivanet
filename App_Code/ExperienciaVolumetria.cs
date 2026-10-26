@@ -45,9 +45,10 @@
 //
 // VOLUMETRIA TOTAL (alcance=total, solo ADM: Crear y Modificar)
 // ------------------------------------------------------------
-//   La meta de una categoria en el flujo de ADM se planea sobre TODA la
-//   volumetria de la categoria, no sobre la de 30 dias. La fuente es la
-//   columna VolumenCategoria de dbo.vw_ProblemCategoria:
+//   Desde 2026-10-26 la pantalla de ADM muestra y planea con ULTIMOS30 (la
+//   base de TicketsReduce), no con el total: mostraba 74 (total) y la base
+//   guardaba sobre 7 (30 dias). El total sigue en la respuesta, sin uso en
+//   pantalla. El total es la columna VolumenCategoria de dbo.vw_ProblemCategoria:
 //       (SELECT COUNT_BIG(*) FROM dbo.Tickets AS t WHERE t.Categoria = pc.Categoria)
 //   Esa vista solo tiene filas de categorias YA ligadas, asi que para una
 //   ruta cualquiera se usa la MISMA expresion (VolumetriaTotalCategoria),
@@ -56,7 +57,8 @@
 //   En la misma pasada sale VolumenUltimos30 con la expresion de la vista
 //   (FechaRegistro >= ahora Mexico - 30 dias): es la base con la que
 //   adm.usp_GestionAdmin_TicketsReduce calcula el TicketsReduce que se
-//   GUARDA, y la pantalla lo muestra para no esconder la diferencia.
+//   GUARDA (FLOOR con la propuesta sql/33), y es lo que la pantalla muestra
+//   en Volumetria (VolumetriaCliente de admin/iniciativa-admin.js).
 //   Estados: ok (> 0), cero (0 real: COUNT sobre dbo.Tickets) y
 //   ruta_invalida. Sin "sin_datos": un conteo directo no tiene ventana.
 //   El alcance por omision (SLOT 0) no cambia para nadie.
