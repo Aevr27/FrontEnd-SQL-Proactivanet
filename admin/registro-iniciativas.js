@@ -2374,7 +2374,7 @@ window.RegistroIniciativas = (function () {
           ayuda: this.ayudaKpi(CLAVES_KPI[2]) },
         { k: CLAVES_KPI[3], l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sa' : 'sv',
           t: 'Iniciativas medibles con la fecha de su estado vencida y con categoría (criterio de Experiencia).' },
-        { k: CLAVES_KPI[4], l: ROTULOS_KPI[4], v: k.cerradas, f: 'estado Cerrado', s: '',
+        { k: CLAVES_KPI[4], l: ROTULOS_KPI[4], v: k.cerradas, f: 'Estado Cerrado', s: '',
           t: 'Iniciativas en estado Cerrado.' }
       ];
       var conGlobo = !!this.globoKpis, seleccion = this.seleccionIndicador();
