@@ -202,9 +202,12 @@
      (enviarCambio) y solo se dice "enviada" con el numero que da la base;
      si no, solo se prepara. Enviar nunca cambia la iniciativa: la aplica un
      ADM desde la cola (admin/solicitudes-cambio.js). Campos que se pueden pedir cambiar
-     (CAMPOS_CAMBIO): fechas compromiso, Estado/Subestado (con, opcional,
-     UNA fecha compromiso cuya etapa elige quien pide: Analisis, Solucion o
-     Cierre; nunca se deduce del Estado), Categorias (el %
+     (CAMPOS_CAMBIO): "Fecha de compromiso" (una sola opcion; la etapa
+     -Analisis, Solucion o Cierre- se elige en un segundo selector que
+     arranca en la del Estado actual, ETAPA_SOLICITUD), Estado (con,
+     opcional, UNA fecha compromiso cuya etapa elige quien pide; nunca se
+     deduce del Estado pedido; sin Subestado: es solo de ADM y lo cambia
+     con "Modificar", 2026-10-26), Categorias (el %
      de varias ligadas y agregar categorias del catalogo, sin repetir) y
      Otros (solo explicacion). Lo demas se agregara cuando se designe.
      SEGUIMIENTO: Fecha de creacion (f_creacion = dbo.Problem.FechaCreacion)
@@ -1208,15 +1211,24 @@ window.RegistroIniciativas = (function () {
   };
 
   // Lo que se puede pedir cambiar de una iniciativa (designado
-  // 2026-10-12): las tres fechas compromiso, Estado/Subestado, el % de una
-  // categoria ligada y "Otros", una EXPLICACION libre de una correccion
-  // (p. ej. "elegi mal la categoria") que no cambia nada por si sola: la
-  // corrige ADM con "Modificar". Nada mas se adivina.
-  var CAMPOS_CAMBIO = [
+  // 2026-10-12): las tres fechas compromiso, Estado, el % de una categoria
+  // ligada y "Otros", una EXPLICACION libre de una correccion (p. ej.
+  // "elegi mal la categoria") que no cambia nada por si sola: la corrige
+  // ADM con "Modificar". Nada mas se adivina. El Subestado no se pide
+  // (2026-10-26): es solo de ADM, que lo cambia con "Modificar".
+  var CAMPOS_FECHA = [
     { clave: 'f_analisis', rotulo: 'Fecha compromiso de Análisis', tipo: 'fecha' },
     { clave: 'f_solucion', rotulo: 'Fecha compromiso de Solución', tipo: 'fecha' },
-    { clave: 'f_cierre', rotulo: 'Fecha compromiso de Cierre', tipo: 'fecha' },
-    { clave: 'estado', rotulo: 'Estado y Subestado', tipo: 'estado' },
+    { clave: 'f_cierre', rotulo: 'Fecha compromiso de Cierre', tipo: 'fecha' }
+  ];
+  // "Qué cambiar" agrupa las tres fechas en UNA opcion (2026-10-26); la
+  // etapa se elige aparte. Solo presentacion: el borrador guarda la etapa
+  // (f_analisis | f_solucion | f_cierre) y viaja igual que antes (tipo
+  // fecha + campo_fecha). campo = 'fecha' = elegida pero sin etapa todavia.
+  var CAMPO_FECHA = { clave: 'fecha', rotulo: 'Fecha de compromiso', tipo: 'fecha' };
+  var CAMPOS_CAMBIO = [
+    CAMPO_FECHA,
+    { clave: 'estado', rotulo: 'Estado', tipo: 'estado' },
     { clave: 'pct', rotulo: 'Categorías: % de disminución o agregar', tipo: 'pct' },
     { clave: 'otros', rotulo: 'Otros (explica la corrección)', tipo: 'otros' }
   ];
@@ -1238,6 +1250,15 @@ window.RegistroIniciativas = (function () {
   // una fecha pedida (nunca se deduce del Estado).
   var ETAPAS_FECHA = { f_analisis: 'Análisis', f_solucion: 'Solución', f_cierre: 'Cierre' };
   function esCampoFecha(clave) { return Object.prototype.hasOwnProperty.call(ETAPAS_FECHA, clave); }
+  // La etapa con la que arranca "Fecha de compromiso": la de FECHA_DEL_ESTADO
+  // (En Monitoreo -> Cierre: la misma regla del semaforo, y Monitoreo es
+  // el que llena FechaCierre, PlanGestionAdmin) y, ya cerrada, la de
+  // Cierre. Otro Estado (o sin Estado): ninguna; quien pide la elige.
+  var ETAPA_SOLICITUD = { 'Cerrado': 'f_cierre' };
+  Object.keys(FECHA_DEL_ESTADO).forEach(function (e) { ETAPA_SOLICITUD[e] = FECHA_DEL_ESTADO[e]; });
+  function etapaPorOmision(i) {
+    return i && Object.prototype.hasOwnProperty.call(ETAPA_SOLICITUD, i.estado) ? ETAPA_SOLICITUD[i.estado] : '';
+  }
   function rotuloFechaNueva(clave) {
     return esCampoFecha(clave) ? 'Nueva fecha compromiso de ' + ETAPAS_FECHA[clave] : 'Nueva fecha compromiso';
   }
@@ -1278,7 +1299,7 @@ window.RegistroIniciativas = (function () {
   }
 
   function campoCambio(clave) {
-    var todos = camposCambio(true);
+    var todos = CAMPOS_FECHA.concat(camposCambio(true));
     for (var k = 0; k < todos.length; k++) if (todos[k].clave === clave) return todos[k];
     return null;
   }
@@ -1295,8 +1316,9 @@ window.RegistroIniciativas = (function () {
   // SolicitudCambio: borrador de "Solicitar cambios". No se guarda ni se
   // envia (no hay almacen de solicitudes todavia); solo se valida.
   // ---------------------------------------------------------------------
-  // opciones: { estados, subestados } (los valores que ya existen en
-  // dbo.Problem; sin lista no se puede pedir cambio de Estado), rutas (el
+  // opciones: { estados } (los valores que ya existen en dbo.Problem; sin
+  // lista no se puede pedir cambio de Estado; un `subestados` se ignora:
+  // el Subestado no se pide), rutas (el
   // catalogo vigente: lo unico que se puede pedir agregar) y rutasEstado
   // ('cargando' | 'error' | 'ok').
   //
@@ -1309,14 +1331,14 @@ window.RegistroIniciativas = (function () {
       opciones = opciones || {};
       this.iniciativa = iniciativa;
       this.estados = Array.isArray(opciones.estados) ? opciones.estados : [];
-      this.subestados = Array.isArray(opciones.subestados) ? opciones.subestados : [];
       this.rutas = Array.isArray(opciones.rutas) ? opciones.rutas : [];
       this.rutasEstado = opciones.rutasEstado || (this.rutas.length ? 'ok' : '');
-      // Por omision, la fecha del estado en el que esta (la que se suele
-      // pedir extender); si no esta en uno de esos estados, ninguna.
+      // Por omision, la fecha del estado activo en el que esta (la que se
+      // suele pedir extender); si no esta en uno de esos estados, ninguna.
+      // campo: f_analisis | f_solucion | f_cierre (Fecha de compromiso con
+      // su etapa), 'fecha' (sin etapa), estado, pct, datos u otros.
       this.campo = FECHA_DEL_ESTADO[iniciativa.estado] || '';
       this.propuesto = '';   // fecha o Estado (texto), segun el campo
-      this.subestado = '';   // solo con campo 'estado'
       // Solo con campo 'estado': una fecha compromiso pedida en la MISMA
       // solicitud. La etapa la elige quien pide ('' = ninguna); no sale del
       // Estado pedido.
@@ -1336,8 +1358,30 @@ window.RegistroIniciativas = (function () {
       this.enviada = null;   // numero de la solicitud que dio el servidor
     }
 
-    // conDatos: con 'datos' (Título / PO / SO, sql/25) antes de "Otros".
+    // Las opciones de "Qué cambiar". conDatos: con 'datos' (Título / PO /
+    // SO, sql/25) antes de "Otros".
     static campos(conDatos) { return camposCambio(conDatos === true); }
+    // Las tres etapas de "Fecha de compromiso".
+    static camposFecha() { return CAMPOS_FECHA.slice(); }
+    static etapaPorOmision(iniciativa) { return etapaPorOmision(iniciativa); }
+
+    // La opcion de "Qué cambiar" del campo: las tres fechas son 'fecha'.
+    queCambiar() { return this.tipo() === 'fecha' ? 'fecha' : this.campo; }
+
+    // Elegir en "Qué cambiar". 'fecha' conserva la etapa ya elegida o
+    // arranca en la del Estado actual (etapaPorOmision); sin ella, queda
+    // sin etapa y quien pide la elige. Una etapa suelta tambien vale.
+    elegir(clave) {
+      if (clave === 'fecha') this.campo = esCampoFecha(this.campo) ? this.campo : etapaPorOmision(this.iniciativa) || 'fecha';
+      else this.campo = campoCambio(clave) ? clave : '';
+      return this.campo;
+    }
+
+    // Elegir la etapa de "Fecha de compromiso" ('' = ninguna todavia).
+    elegirEtapa(clave) {
+      this.campo = esCampoFecha(clave) ? clave : 'fecha';
+      return this.campo;
+    }
 
     // Lo de ahora de cada dato: el Título de dbo.Problem y los PO / SO
     // CAPTURADOS (no los de la categoría).
@@ -1374,7 +1418,6 @@ window.RegistroIniciativas = (function () {
       if (t === 'fecha') p.push(['campo_fecha', this.campo], ['fecha_nueva', s.nuevo]);
       if (t === 'estado') {
         p.push(['estado_nuevo', s.nuevo]);
-        if (s.subestado) p.push(['subestado_nuevo', s.subestado]);
         if (s.fecha) p.push(['campo_fecha', s.fecha.campo], ['fecha_nueva', s.fecha.nuevo]);
       }
       if (t === 'pct') {
@@ -1401,8 +1444,8 @@ window.RegistroIniciativas = (function () {
     // no hay uno solo: cada categoria tiene el suyo (pctActual).
     actual() {
       var t = this.tipo(), i = this.iniciativa;
-      if (t === 'fecha') return i[this.campo] ? i[this.campo] : null;
-      if (t === 'estado') return i.estado ? i.estado + (i.subestado ? ' / ' + i.subestado : '') : null;
+      if (t === 'fecha') return esCampoFecha(this.campo) && i[this.campo] ? i[this.campo] : null;
+      if (t === 'estado') return i.estado || null;
       return null;
     }
 
@@ -1458,17 +1501,15 @@ window.RegistroIniciativas = (function () {
       var nuevo = String(this.propuesto || '').trim();
       if (!t) {
         errores.push({ campo: 'campo', mensaje: 'Elige qué quieres cambiar.' });
+      } else if (t === 'fecha' && !esCampoFecha(this.campo)) {
+        errores.push({ campo: 'etapa', mensaje: 'Elige qué fecha compromiso quieres cambiar: Análisis, Solución o Cierre.' });
       } else if (t === 'fecha') {
         if (!fechaValida(nuevo)) errores.push({ campo: 'propuesto', mensaje: 'Escribe la nueva fecha.' });
         else if (nuevo === this.actual()) errores.push({ campo: 'propuesto', mensaje: 'La nueva fecha es igual a la actual.' });
       } else if (t === 'estado') {
-        var sub = String(this.subestado || '').trim();
         if (!this.estados.length) errores.push({ campo: 'propuesto', mensaje: 'No hay lista de estados: no se puede pedir este cambio.' });
         else if (this.estados.indexOf(nuevo) < 0) errores.push({ campo: 'propuesto', mensaje: 'Elige el nuevo Estado de la lista.' });
-        else if (sub && this.subestados.indexOf(sub) < 0) errores.push({ campo: 'subestado', mensaje: 'Elige el Subestado de la lista.' });
-        else if (nuevo === (i.estado || '') && (!sub || sub === (i.subestado || ''))) {
-          errores.push({ campo: 'propuesto', mensaje: 'El Estado pedido es igual al actual.' });
-        }
+        else if (nuevo === (i.estado || '')) errores.push({ campo: 'propuesto', mensaje: 'El Estado pedido es igual al actual.' });
         // Fecha junto con el Estado: opcional, pero completa (etapa + fecha).
         var fc = this.fechaCampo, fn = String(this.fechaNueva || '').trim();
         if (fc && !esCampoFecha(fc)) errores.push({ campo: 'fechaCampo', mensaje: 'Elige la etapa de la fecha compromiso.' });
@@ -1520,7 +1561,6 @@ window.RegistroIniciativas = (function () {
                 anterior: this.actual(), nuevo: String(this.propuesto || '').trim(), motivo: String(this.motivo || '').trim() };
       if (t === 'fecha') r.etapa = ETAPAS_FECHA[this.campo];
       if (t === 'estado') {
-        r.subestado = String(this.subestado || '').trim();
         // La fecha pedida con el Estado, con su etapa explicita.
         if (esCampoFecha(this.fechaCampo)) {
           r.fecha = { campo: this.fechaCampo, etapa: ETAPAS_FECHA[this.fechaCampo],
@@ -1560,10 +1600,11 @@ window.RegistroIniciativas = (function () {
       if (!s || s.automatica !== true) return null;
       var pares = [['accion', 'modificar'], ['folio', s.folio]];
       var c = campoCambio(s.campo);
-      if (c && c.tipo === 'fecha') pares.push([s.campo, s.nuevo]);
-      else if (c && c.tipo === 'estado') {
+      if (c && c.tipo === 'fecha') {
+        if (!esCampoFecha(s.campo)) return null;
+        pares.push([s.campo, s.nuevo]);
+      } else if (c && c.tipo === 'estado') {
         pares.push(['estado', s.nuevo]);
-        if (s.subestado) pares.push(['subestado', s.subestado]);
         if (s.fecha && esCampoFecha(s.fecha.campo)) pares.push([s.fecha.campo, s.fecha.nuevo]);
       } else if (c && c.tipo === 'pct' && Array.isArray(s.categorias) && s.categorias.length) {
         // Los mismos pares que "Modificar" (CategoriasProblema.paresModificar).
@@ -1726,8 +1767,8 @@ window.RegistroIniciativas = (function () {
 
     opcionesEstado() {
       var r = this.registro;
-      // Subestado: solo ADM (el servidor ni lo manda a otro rol). Sin lista,
-      // "Solicitar cambios" no ofrece Nuevo Subestado.
+      // Subestado: solo ADM (el servidor ni lo manda a otro rol) y solo para
+      // "Modificar"; "Solicitar cambios" nunca lo ofrece (SolicitudCambio).
       return { estados: r ? r.estadosProblem || [] : [], subestados: r && this.verSubestado() ? r.subestadosProblem || [] : [],
                tiposIniciativa: r ? r.valoresTipoIniciativa || [] : [], tiposAgrupado: r ? r.valoresTipoAgrupado || [] : [],
                rutas: this.rutasCatalogo || [], rutasEstado: this.rutasEstado,
@@ -1917,6 +1958,7 @@ window.RegistroIniciativas = (function () {
       });
       this.$('regDetCuerpo').addEventListener('change', function (e) {
         if (e.target && e.target.id === 'regCambioCampo') self.elegirCampoCambio(e.target.value);
+        else if (e.target && e.target.id === 'regCambioFechaCampo') self.elegirEtapaCambio(e.target.value);
         else if (e.target && e.target.id === 'regCambioEstFechaCampo') self.elegirFechaConEstado(e.target.value);
         else if (e.target && e.target.id === 'regSegCategoria') self.elegirCategoriaSeguimiento(e.target.value);
         // Selects y fechas de "Modificar" y de "Solicitar cambios" (algunos
@@ -3264,7 +3306,15 @@ window.RegistroIniciativas = (function () {
 
     elegirCampoCambio(v) {
       if (!this.cambio) return;
-      this.cambio.campo = campoCambio(v) ? v : '';
+      this.cambio.elegir(v);
+      this.pintarGruposCambio();
+    }
+
+    // La etapa de "Fecha de compromiso": su fecha actual y el rotulo de la
+    // nueva siguen a la etapa elegida.
+    elegirEtapaCambio(v) {
+      if (!this.cambio || this.cambio.tipo() !== 'fecha') return;
+      this.cambio.elegirEtapa(v);
       this.pintarGruposCambio();
     }
 
@@ -3283,11 +3333,15 @@ window.RegistroIniciativas = (function () {
     // Muestra solo los controles del tipo elegido y su valor actual.
     pintarGruposCambio() {
       var c = this.cambio, t = c.tipo(), self = this;
-      [['fecha', 'regCambioGrupoFecha'], ['estado', 'regCambioGrupoEstado'], ['pct', 'regCambioGrupoPct'],
+      [['fecha', 'regCambioGrupoEtapa'], ['fecha', 'regCambioGrupoFecha'], ['estado', 'regCambioGrupoEstado'], ['pct', 'regCambioGrupoPct'],
        ['datos', 'regCambioGrupoDatos']].forEach(function (g) {
         var el = self.$(g[1]);
         if (el) el.hidden = t !== g[0];
       });
+      // El selector de etapa muestra la del borrador (la del Estado actual
+      // al elegir "Fecha de compromiso").
+      var etapa = this.$('regCambioFechaCampo');
+      if (etapa && t === 'fecha') etapa.value = esCampoFecha(c.campo) ? c.campo : '';
       var rotFecha = this.$('regCambioNuevaRot');
       if (rotFecha) rotFecha.textContent = rotuloFechaNueva(t === 'fecha' ? c.campo : '');
       var act = c.actual();
@@ -3302,17 +3356,18 @@ window.RegistroIniciativas = (function () {
       if (!this.cambio) return;
       var c = this.cambio, self = this;
       var campo = this.$('regCambioCampo').value;
-      c.campo = campoCambio(campo) ? campo : '';
+      if (campo === 'fecha') {
+        var etapa = this.$('regCambioFechaCampo');
+        c.elegirEtapa(etapa ? etapa.value : '');
+      } else c.campo = campoCambio(campo) ? campo : '';
       var t = c.tipo();
       var idPropuesto = t === 'estado' ? 'regCambioEstado' : 'regCambioNueva';
       // 'pct': los % ya estan en el borrador (capturarDetalle); 'otros' no
       // tiene valor propuesto.
       if (t === 'estado') {
         // Escrito en la caja con busqueda: solo cuenta la opcion real.
-        var caja = this.$('regCambioSubestado');
-        var est = this.$(idPropuesto).value || '', sub = caja ? caja.value || '' : '';
+        var est = this.$(idPropuesto).value || '';
         c.propuesto = resolverOpcion(est, c.estados) || est;
-        c.subestado = resolverOpcion(sub, c.subestados) || sub;
         var fc = this.$('regCambioEstFechaCampo'), fn = this.$('regCambioEstFechaNueva');
         c.fechaCampo = fc && esCampoFecha(fc.value) ? fc.value : '';
         c.fechaNueva = c.fechaCampo && fn ? fn.value || '' : '';
@@ -3332,9 +3387,10 @@ window.RegistroIniciativas = (function () {
       var errores = c.validar();
       var por = {};
       errores.forEach(function (e) { por[e.campo] = true; });
-      [['campo', 'regCambioCampo'], ['propuesto', idPropuesto], ['motivo', 'regCambioMotivo'],
-       ['subestado', 'regCambioSubestado'], ['fechaCampo', 'regCambioEstFechaCampo'], ['fechaNueva', 'regCambioEstFechaNueva']].forEach(function (par) {
-        if (t !== 'estado' && (par[0] === 'subestado' || par[0] === 'fechaCampo' || par[0] === 'fechaNueva')) return;
+      [['campo', 'regCambioCampo'], ['etapa', 'regCambioFechaCampo'], ['propuesto', idPropuesto], ['motivo', 'regCambioMotivo'],
+       ['fechaCampo', 'regCambioEstFechaCampo'], ['fechaNueva', 'regCambioEstFechaNueva']].forEach(function (par) {
+        if (t !== 'estado' && (par[0] === 'fechaCampo' || par[0] === 'fechaNueva')) return;
+        if (t !== 'fecha' && par[0] === 'etapa') return;
         if ((t === 'pct' || t === 'datos') && par[0] === 'propuesto') return;
         var el = self.$(par[1]);
         if (el) el.setAttribute('aria-invalid', por[par[0]] ? 'true' : 'false');
@@ -3351,7 +3407,7 @@ window.RegistroIniciativas = (function () {
       }
       var r = c.resumen();
       var detalle = t === 'fecha' ? Escape.html(fecha(r.anterior)) + ' → ' + Escape.html(fecha(r.nuevo))
-        : t === 'estado' ? Escape.html(texto(r.anterior)) + ' → ' + Escape.html(r.nuevo + (r.subestado ? ' / ' + r.subestado : '')) +
+        : t === 'estado' ? Escape.html(texto(r.anterior)) + ' → ' + Escape.html(r.nuevo) +
             (r.fecha ? '; Fecha compromiso de ' + Escape.html(r.fecha.etapa) + ': ' +
               Escape.html(fecha(r.fecha.anterior)) + ' → ' + Escape.html(fecha(r.fecha.nuevo)) : '')
         : t === 'pct' ? r.categorias.map(function (x) {
@@ -3436,7 +3492,12 @@ window.RegistroIniciativas = (function () {
     htmlCambio() {
       var c = this.cambio;
       var opciones = '<option value="">— Elige —</option>' + camposCambio(c.conDatos).map(function (x) {
-        return '<option value="' + Escape.attr(x.clave) + '"' + (x.clave === c.campo ? ' selected' : '') + '>' + Escape.html(x.rotulo) + '</option>';
+        return '<option value="' + Escape.attr(x.clave) + '"' + (x.clave === c.queCambiar() ? ' selected' : '') + '>' + Escape.html(x.rotulo) + '</option>';
+      }).join('');
+      // Las tres etapas de "Fecha de compromiso"; sin una por omision, nada
+      // elegido (quien pide la elige).
+      var etapas = '<option value="">— Elige —</option>' + CAMPOS_FECHA.map(function (x) {
+        return '<option value="' + x.clave + '"' + (x.clave === c.campo ? ' selected' : '') + '>' + Escape.html(x.rotulo) + '</option>';
       }).join('');
       var lista = function (id, valores) { return selectorHtml(id, valores, ''); };
       var t = c.tipo();
@@ -3445,6 +3506,8 @@ window.RegistroIniciativas = (function () {
           '«Otros» es solo una explicación (p. ej. una categoría equivocada): no cambia nada por sí sola.</p>' +
         '<div class="ini-cambio-campos">' +
           '<div class="campo"><label for="regCambioCampo">Qué cambiar</label><select id="regCambioCampo">' + opciones + '</select></div>' +
+          '<div class="campo" id="regCambioGrupoEtapa"' + (t === 'fecha' ? '' : ' hidden') + '><label for="regCambioFechaCampo">Fecha de compromiso</label>' +
+            '<select id="regCambioFechaCampo">' + etapas + '</select></div>' +
           '<div class="campo"><span class="ini-cambio-rot">Valor actual</span><span class="ini-cambio-actual" id="regCambioActual">' +
             Escape.html(t === 'fecha' || !t ? fecha(c.actual()) : texto(c.actual())) + '</span></div>' +
           // La fecha dice SIEMPRE su etapa; sin "Qué cambiar" no hay fecha.
@@ -3453,10 +3516,6 @@ window.RegistroIniciativas = (function () {
           '<div class="campo" id="regCambioGrupoEstado"' + (t === 'estado' ? '' : ' hidden') + '>' +
             (c.estados.length
               ? '<label for="regCambioEstado">Nuevo Estado</label>' + lista('regCambioEstado', c.estados) +
-                // Sin lista (rol distinto de ADM): no se ofrece.
-                (c.subestados.length
-                  ? '<label for="regCambioSubestado">Nuevo Subestado (opcional)</label>' + lista('regCambioSubestado', c.subestados)
-                  : '') +
                 // Fecha compromiso en la misma solicitud: la etapa se elige
                 // aqui, no se deduce del Estado pedido.
                 '<label for="regCambioEstFechaCampo">Fecha compromiso que también cambia (opcional)</label>' +
