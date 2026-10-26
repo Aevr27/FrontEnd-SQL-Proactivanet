@@ -204,10 +204,10 @@
      ADM desde la cola (admin/solicitudes-cambio.js). Campos que se pueden pedir cambiar
      (CAMPOS_CAMBIO): "Fecha de compromiso" (una sola opcion; la etapa
      -Analisis, Solucion o Cierre- se elige en un segundo selector que
-     arranca en la del Estado actual, ETAPA_SOLICITUD), Estado (con,
-     opcional, UNA fecha compromiso cuya etapa elige quien pide; nunca se
-     deduce del Estado pedido; sin Subestado: es solo de ADM y lo cambia
-     con "Modificar", 2026-10-26), Categorias (el %
+     arranca en la del Estado actual, ETAPA_SOLICITUD), Estado (solo el
+     nuevo Estado: sin fecha compromiso, que se pide con su opcion, y sin
+     Subestado, que es solo de ADM y lo cambia con "Modificar",
+     2026-10-26), Categorias (el %
      de varias ligadas y agregar categorias del catalogo, sin repetir) y
      Otros (solo explicacion). Lo demas se agregara cuando se designe.
      SEGUIMIENTO: Fecha de creacion (f_creacion = dbo.Problem.FechaCreacion)
@@ -1339,11 +1339,6 @@ window.RegistroIniciativas = (function () {
       // su etapa), 'fecha' (sin etapa), estado, pct, datos u otros.
       this.campo = FECHA_DEL_ESTADO[iniciativa.estado] || '';
       this.propuesto = '';   // fecha o Estado (texto), segun el campo
-      // Solo con campo 'estado': una fecha compromiso pedida en la MISMA
-      // solicitud. La etapa la elige quien pide ('' = ninguna); no sale del
-      // Estado pedido.
-      this.fechaCampo = '';  // f_analisis | f_solucion | f_cierre
-      this.fechaNueva = '';  // yyyy-mm-dd
       this.pcts = {};        // solo con campo 'pct': ruta ligada -> % pedido (texto)
       this.nuevas = [];      // solo con campo 'pct': [{ categoria, valor }] a agregar
       // Solo con campo 'datos' (sql/25, opciones.datos): por dato, null = no
@@ -1418,7 +1413,6 @@ window.RegistroIniciativas = (function () {
       if (t === 'fecha') p.push(['campo_fecha', this.campo], ['fecha_nueva', s.nuevo]);
       if (t === 'estado') {
         p.push(['estado_nuevo', s.nuevo]);
-        if (s.fecha) p.push(['campo_fecha', s.fecha.campo], ['fecha_nueva', s.fecha.nuevo]);
       }
       if (t === 'pct') {
         s.categorias.forEach(function (c) {
@@ -1510,12 +1504,6 @@ window.RegistroIniciativas = (function () {
         if (!this.estados.length) errores.push({ campo: 'propuesto', mensaje: 'No hay lista de estados: no se puede pedir este cambio.' });
         else if (this.estados.indexOf(nuevo) < 0) errores.push({ campo: 'propuesto', mensaje: 'Elige el nuevo Estado de la lista.' });
         else if (nuevo === (i.estado || '')) errores.push({ campo: 'propuesto', mensaje: 'El Estado pedido es igual al actual.' });
-        // Fecha junto con el Estado: opcional, pero completa (etapa + fecha).
-        var fc = this.fechaCampo, fn = String(this.fechaNueva || '').trim();
-        if (fc && !esCampoFecha(fc)) errores.push({ campo: 'fechaCampo', mensaje: 'Elige la etapa de la fecha compromiso.' });
-        else if (!fc && fn) errores.push({ campo: 'fechaCampo', mensaje: 'Elige a qué etapa (Análisis, Solución o Cierre) corresponde la nueva fecha.' });
-        else if (fc && !fechaValida(fn)) errores.push({ campo: 'fechaNueva', mensaje: 'Escribe la nueva fecha compromiso de ' + ETAPAS_FECHA[fc] + '.' });
-        else if (fc && fn === (i[fc] || '')) errores.push({ campo: 'fechaNueva', mensaje: 'La nueva fecha compromiso de ' + ETAPAS_FECHA[fc] + ' es igual a la actual.' });
       } else if (t === 'pct') {
         var cats = this.cambiosCategorias();
         if (!cats.length) errores.push({ campo: 'categoria', mensaje: 'Escribe el nuevo % de al menos una categoría o agrega una.' });
@@ -1560,13 +1548,6 @@ window.RegistroIniciativas = (function () {
       var r = { folio: this.iniciativa.folio, campo: this.campo, rotulo: c ? c.rotulo : '',
                 anterior: this.actual(), nuevo: String(this.propuesto || '').trim(), motivo: String(this.motivo || '').trim() };
       if (t === 'fecha') r.etapa = ETAPAS_FECHA[this.campo];
-      if (t === 'estado') {
-        // La fecha pedida con el Estado, con su etapa explicita.
-        if (esCampoFecha(this.fechaCampo)) {
-          r.fecha = { campo: this.fechaCampo, etapa: ETAPAS_FECHA[this.fechaCampo],
-                      anterior: this.iniciativa[this.fechaCampo] || null, nuevo: String(this.fechaNueva || '').trim() };
-        }
-      }
       if (t === 'pct') { r.anterior = null; r.nuevo = ''; r.categorias = this.cambiosCategorias(); }
       if (t === 'datos') { r.anterior = null; r.nuevo = ''; r.datos = this.cambiosDatos(); }
       if (t === 'otros') { r.nuevo = ''; r.automatica = false; }
@@ -1605,7 +1586,6 @@ window.RegistroIniciativas = (function () {
         pares.push([s.campo, s.nuevo]);
       } else if (c && c.tipo === 'estado') {
         pares.push(['estado', s.nuevo]);
-        if (s.fecha && esCampoFecha(s.fecha.campo)) pares.push([s.fecha.campo, s.fecha.nuevo]);
       } else if (c && c.tipo === 'pct' && Array.isArray(s.categorias) && s.categorias.length) {
         // Los mismos pares que "Modificar" (CategoriasProblema.paresModificar).
         s.categorias.forEach(function (x) {
@@ -1959,7 +1939,6 @@ window.RegistroIniciativas = (function () {
       this.$('regDetCuerpo').addEventListener('change', function (e) {
         if (e.target && e.target.id === 'regCambioCampo') self.elegirCampoCambio(e.target.value);
         else if (e.target && e.target.id === 'regCambioFechaCampo') self.elegirEtapaCambio(e.target.value);
-        else if (e.target && e.target.id === 'regCambioEstFechaCampo') self.elegirFechaConEstado(e.target.value);
         else if (e.target && e.target.id === 'regSegCategoria') self.elegirCategoriaSeguimiento(e.target.value);
         // Selects y fechas de "Modificar" y de "Solicitar cambios" (algunos
         // navegadores solo avisan con change).
@@ -3318,18 +3297,6 @@ window.RegistroIniciativas = (function () {
       this.pintarGruposCambio();
     }
 
-    // "Fecha compromiso que tambien cambia" (con Estado): muestra la fecha
-    // actual de ESA etapa y nombra la etapa en el rotulo de la nueva.
-    elegirFechaConEstado(v) {
-      var c = this.cambio;
-      if (!c) return;
-      c.fechaCampo = esCampoFecha(v) ? v : '';
-      var caja = this.$('regCambioEstFechaCaja');
-      if (caja) caja.hidden = !c.fechaCampo;
-      this.$('regCambioEstFechaActual').textContent = c.fechaCampo ? fecha(c.iniciativa[c.fechaCampo]) : '—';
-      this.$('regCambioEstFechaRot').textContent = rotuloFechaNueva(c.fechaCampo);
-    }
-
     // Muestra solo los controles del tipo elegido y su valor actual.
     pintarGruposCambio() {
       var c = this.cambio, t = c.tipo(), self = this;
@@ -3368,9 +3335,6 @@ window.RegistroIniciativas = (function () {
         // Escrito en la caja con busqueda: solo cuenta la opcion real.
         var est = this.$(idPropuesto).value || '';
         c.propuesto = resolverOpcion(est, c.estados) || est;
-        var fc = this.$('regCambioEstFechaCampo'), fn = this.$('regCambioEstFechaNueva');
-        c.fechaCampo = fc && esCampoFecha(fc.value) ? fc.value : '';
-        c.fechaNueva = c.fechaCampo && fn ? fn.value || '' : '';
       } else if (t === 'fecha') c.propuesto = this.$(idPropuesto).value || '';
       else c.propuesto = '';
       if (t === 'datos') {
@@ -3387,9 +3351,7 @@ window.RegistroIniciativas = (function () {
       var errores = c.validar();
       var por = {};
       errores.forEach(function (e) { por[e.campo] = true; });
-      [['campo', 'regCambioCampo'], ['etapa', 'regCambioFechaCampo'], ['propuesto', idPropuesto], ['motivo', 'regCambioMotivo'],
-       ['fechaCampo', 'regCambioEstFechaCampo'], ['fechaNueva', 'regCambioEstFechaNueva']].forEach(function (par) {
-        if (t !== 'estado' && (par[0] === 'fechaCampo' || par[0] === 'fechaNueva')) return;
+      [['campo', 'regCambioCampo'], ['etapa', 'regCambioFechaCampo'], ['propuesto', idPropuesto], ['motivo', 'regCambioMotivo']].forEach(function (par) {
         if (t !== 'fecha' && par[0] === 'etapa') return;
         if ((t === 'pct' || t === 'datos') && par[0] === 'propuesto') return;
         var el = self.$(par[1]);
@@ -3407,9 +3369,7 @@ window.RegistroIniciativas = (function () {
       }
       var r = c.resumen();
       var detalle = t === 'fecha' ? Escape.html(fecha(r.anterior)) + ' → ' + Escape.html(fecha(r.nuevo))
-        : t === 'estado' ? Escape.html(texto(r.anterior)) + ' → ' + Escape.html(r.nuevo) +
-            (r.fecha ? '; Fecha compromiso de ' + Escape.html(r.fecha.etapa) + ': ' +
-              Escape.html(fecha(r.fecha.anterior)) + ' → ' + Escape.html(fecha(r.fecha.nuevo)) : '')
+        : t === 'estado' ? Escape.html(texto(r.anterior)) + ' → ' + Escape.html(r.nuevo)
         : t === 'pct' ? r.categorias.map(function (x) {
             return Escape.html(x.categoria) + (x.nueva ? ' (agregar): ' + Escape.html(x.nuevo + '%')
               : ': ' + Escape.html(x.anterior === null ? '—' : x.anterior + '%') + ' → ' + Escape.html(x.nuevo + '%'));
@@ -3515,18 +3475,7 @@ window.RegistroIniciativas = (function () {
             Escape.html(rotuloFechaNueva(t === 'fecha' ? c.campo : '')) + '</label><input type="date" id="regCambioNueva"></div>' +
           '<div class="campo" id="regCambioGrupoEstado"' + (t === 'estado' ? '' : ' hidden') + '>' +
             (c.estados.length
-              ? '<label for="regCambioEstado">Nuevo Estado</label>' + lista('regCambioEstado', c.estados) +
-                // Fecha compromiso en la misma solicitud: la etapa se elige
-                // aqui, no se deduce del Estado pedido.
-                '<label for="regCambioEstFechaCampo">Fecha compromiso que también cambia (opcional)</label>' +
-                '<select id="regCambioEstFechaCampo"><option value="">— Ninguna —</option>' +
-                  Object.keys(ETAPAS_FECHA).map(function (k) {
-                    return '<option value="' + k + '">' + Escape.html(ETAPAS_FECHA[k]) + '</option>';
-                  }).join('') + '</select>' +
-                '<div class="ini-cambio-sub" id="regCambioEstFechaCaja" hidden>' +
-                  '<span class="ini-cambio-rot">Fecha actual</span><span class="ini-cambio-actual" id="regCambioEstFechaActual">—</span>' +
-                  '<label for="regCambioEstFechaNueva" id="regCambioEstFechaRot">Nueva fecha compromiso</label><input type="date" id="regCambioEstFechaNueva">' +
-                '</div>'
+              ? '<label for="regCambioEstado">Nuevo Estado</label>' + lista('regCambioEstado', c.estados)
               : '<p class="ini-nota">Sin lista de estados: no se puede pedir este cambio.</p>') + '</div>' +
           '<div class="campo ini-cambio-ancho" id="regCambioGrupoPct"' + (t === 'pct' ? '' : ' hidden') + '>' +
             this.htmlCategoriasCambio() + '</div>' +
