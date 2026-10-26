@@ -203,6 +203,9 @@
      confirmada, la manda como UNA solicitud. Hoy el servidor (sql/22 /
      sql/25) guarda un Tipo por solicitud: viajan un cambio, Estado + una
      fecha o Titulo / PO / SO juntos; lo demas no se envia (ni por partes).
+     Con sql/34 (solicitudes_varios del registro) viaja cualquier
+     combinacion (salvo "Otros", que va sola) como UNA solicitud tipo
+     varios: ADM la aplica entera o la rechaza entera.
      Con persistencia_solicitudes = true del
      registro (sql/22 aplicada) se ENVIA a admin_iniciativas_solicitudes.ashx
      (enviarCambio) y solo se dice "enviada" con el numero que da la base;
@@ -554,6 +557,9 @@ window.RegistroIniciativas = (function () {
       // "Solicitar cambios" de Título / PO / SO (sql/25): solo si el
       // servidor lo dice.
       r.solicitudesDatos = json.solicitudes_datos === true;
+      // Varios cambios en UNA solicitud (tipo varios, sql/34): solo si el
+      // servidor lo dice.
+      r.solicitudesVarios = json.solicitudes_varios === true;
       return r;
     }
 
@@ -1582,6 +1588,9 @@ window.RegistroIniciativas = (function () {
   //   - solo Titulo / PO / SO (tipo datos con varios datos).
   // Lo demas se arma y se revisa pero NO se envia: nunca se parte en
   // varias solicitudes ni se manda una tras otra (no seria atomico).
+  // Con sql/34 (opciones.varios, el registro trae solicitudes_varios) viaja
+  // cualquier combinacion como UNA solicitud tipo varios, que ADM aprueba
+  // (aplica todo) o rechaza (nada). "Otros" sigue yendo solo.
   class ListaSolicitudCambio {
     constructor(iniciativa, opciones) {
       this.iniciativa = iniciativa;
@@ -1757,6 +1766,15 @@ window.RegistroIniciativas = (function () {
       if (n === 1) return { soportado: true, forma: 'uno' };
       if (n === 2 && tipos.indexOf('estado') >= 0 && tipos.indexOf('fecha') >= 0) return { soportado: true, forma: 'estado+fecha' };
       if (tipos.every(function (t) { return t === 'datos'; })) return { soportado: true, forma: 'datos' };
+      // sql/34 (opciones.varios): cualquier combinacion en UNA solicitud
+      // VARIOS, salvo "Otros": es una explicacion, no un cambio de datos.
+      if (this.opciones.varios === true) {
+        if (tipos.indexOf('otros') >= 0) {
+          return { soportado: false, mensaje: '«Otros» es una explicación y va en su propia solicitud: quítalo de esta lista y envíalo aparte. ' +
+            'No se envía nada por partes.' };
+        }
+        return { soportado: true, forma: 'varios' };
+      }
       return { soportado: false, mensaje: 'El servidor todavía no admite estos ' + n + ' cambios en una sola solicitud ' +
         '(hoy acepta un cambio, Estado con una fecha compromiso, o Título / Product Owner / Service Owner juntos). ' +
         'No se envía nada por partes: quita cambios hasta que la lista quepa, o espera a que se habilite el envío de varios cambios.' };
@@ -1767,6 +1785,28 @@ window.RegistroIniciativas = (function () {
     pares() {
       var c = this.contrato(), self = this;
       if (!c.soportado) return null;
+      if (c.forma === 'varios') {
+        // tipo varios (sql/34): cada fecha con la clave de su etapa
+        // (f_analisis_nueva...), nunca campo_fecha; sin Subestado.
+        var v = [['folio', this.iniciativa.folio], ['llave', this.llave], ['tipo', 'varios']];
+        this.items.forEach(function (x) {
+          var t = self.tipoDe(x), bx = self.borrador(x);
+          if (t === 'estado') v.push(['estado_nuevo', x.propuesto]);
+          else if (t === 'fecha') v.push([x.campo + '_nueva', x.propuesto]);
+          else if (t === 'pct') {
+            bx.cambiosCategorias().forEach(function (k) {
+              if (k.nueva) v.push(['agregar_categoria', k.categoria], ['agregar_pct', k.nuevo]);
+              else v.push(['pct_categoria', k.categoria], ['pct_valor', k.nuevo]);
+            });
+          } else if (t === 'datos') {
+            bx.cambiosDatos().forEach(function (d) {
+              for (var k = 0; k < DATOS_CAMBIO.length; k++) if (DATOS_CAMBIO[k].clave === d.campo) v.push([DATOS_CAMBIO[k].par, d.nuevo]);
+            });
+          }
+        });
+        v.push(['motivo', this.motivoEnvio()]);
+        return v;
+      }
       var principal = this.items[0];
       if (c.forma === 'estado+fecha') principal = this.items.filter(function (x) { return self.tipoDe(x) === 'estado'; })[0];
       var b = this.borrador(principal);
@@ -1990,7 +2030,9 @@ window.RegistroIniciativas = (function () {
                tiposIniciativa: r ? r.valoresTipoIniciativa || [] : [], tiposAgrupado: r ? r.valoresTipoAgrupado || [] : [],
                rutas: this.rutasCatalogo || [], rutasEstado: this.rutasEstado,
                // Solicitar cambios de Título / PO / SO (sql/25).
-               datos: !!(r && r.solicitudesDatos), pos: (this.duenosCatalogo || {}).po || [], sos: (this.duenosCatalogo || {}).so || [] };
+               datos: !!(r && r.solicitudesDatos), pos: (this.duenosCatalogo || {}).po || [], sos: (this.duenosCatalogo || {}).so || [],
+               // Varios cambios en UNA solicitud (sql/34).
+               varios: !!(r && r.solicitudesVarios) };
     }
 
     // Solo UX: la edicion de ADM no llama al servidor en esta fase.

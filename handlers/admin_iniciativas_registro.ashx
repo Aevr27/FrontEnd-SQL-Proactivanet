@@ -111,6 +111,8 @@ public class AdminIniciativasRegistro : IHttpHandler
             registro["persistencia_solicitudes"] = PersistenciaSolicitudesCambio.Activa();
             // Solicitar cambios de Titulo / PO / SO (tipo datos, sql/25).
             registro["solicitudes_datos"] = PersistenciaSolicitudesCambio.SolicitaDatosActiva();
+            // Varios cambios en UNA solicitud (tipo varios, sql/34).
+            registro["solicitudes_varios"] = PersistenciaSolicitudesCambio.SolicitaVariosActiva();
             // Modificar con PO / SO capturados y quitar categoria (sql/24):
             // sin esto la pagina no los ofrece (el servidor los rechazaria).
             // Se revisa en la base (DeteccionSql24); si no se puede, apagado.
