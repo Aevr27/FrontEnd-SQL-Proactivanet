@@ -1728,6 +1728,7 @@ pruebas.push(function () {
       elegir(p, 'regCambioFechaCampo', 'f_analisis');
       p.sel('regCambioNueva').value = '2027-02-01';
       p.sel('regCambioMotivo').value = 'Prueba ' + n;
+      accion(p, 'cambio-agregar');
       accion(p, 'cambio-preparar');
       Check('HUD3 ' + n + ': la solicitud se prepara sin peticiones y sin tocar la iniciativa', [true, antes, '2026-12-01'],
         [/Solicitud preparada, no enviada/.test(p.sel('regCambioMsg').innerHTML), p.pedidos.length,
@@ -1768,23 +1769,35 @@ pruebas.push(function () {
     p.sel('regCambioCatBuscar').value = '/B/Cat 4';
     accion(p, 'cambio-cat-agregar');
     Check('SC4b ni una nueva dos veces', [true, 1], [/ya está en la lista para agregar/.test(p.sel('regCambioCatMsg').textContent), reg.cambio.nuevas.length]);
-    accion(p, 'cambio-preparar');
-    Check('SC5 nueva sin %: no se prepara', [true, true], [/error/.test(p.sel('regCambioMsg').className), /\/B\/Cat 4: escribe un porcentaje/.test(p.sel('regCambioMsg').innerHTML)]);
+    accion(p, 'cambio-agregar');
+    Check('SC5 nueva sin %: no se agrega', [true, true, 0], [/error/.test(p.sel('regCambioMsg').className),
+      /\/B\/Cat 4: escribe un porcentaje/.test(p.sel('regCambioMsg').innerHTML), reg.lista.items.length]);
     editar(p, 'data-cambio-nueva-pct', '0', '10');
+    accion(p, 'cambio-agregar');
     accion(p, 'cambio-preparar');
     var msg = p.sel('regCambioMsg').innerHTML;
     Check('SC6 preparada (no enviada) con las dos categorias', [true, true, true],
       [/Solicitud preparada, no enviada/.test(msg), /\/A\/Cat 2: 25% → 30%/.test(msg), /\/B\/Cat 4 \(agregar\): 10%/.test(msg)]);
     Check('SC7 sin peticiones al servidor; el registro no cambia', [antes, 0.25, 2],
       [p.pedidos.length, reg.registro.buscar('PRB 2026-000001').categorias[1].pct_dism, reg.registro.buscar('PRB 2026-000001').categorias.length]);
+    var ed = Elemento('e'); ed.setAttribute('data-cambio-item', 'editar|0');
+    p.sel('regDetCuerpo').disparar('click', { target: ed });
+    Check('SC8 Editar las categorias: vuelven al formulario', [1, '30'], [reg.cambio.nuevas.length, reg.cambio.pcts['/A/Cat 2']]);
     var q = Elemento('q'); q.setAttribute('data-cambio-quitar', '0');
     p.sel('regDetCuerpo').disparar('click', { target: q });
     Check('SC8 quitar la agregada', [0, false], [reg.cambio.nuevas.length, /data-cambio-nueva-pct/.test(p.sel('regCambioGrupoPct').innerHTML)]);
+    accion(p, 'cambio-edicion-cancelar');
+    Check('SC8 Cancelar edicion: la lista queda como estaba', 1, reg.lista.items[0].nuevas.length);
+    var qi = Elemento('qi'); qi.setAttribute('data-cambio-item', 'quitar|0');
+    p.sel('regDetCuerpo').disparar('click', { target: qi });
     elegir(p, 'regCambioCampo', 'otros');
+    p.sel('regCambioOtros').value = 'Elegi /A/Cat 2 por error';
+    accion(p, 'cambio-agregar');
     accion(p, 'cambio-preparar');
     Check('SC9 Otros: solo explicacion, no cambia nada', [true, true],
       [/Solicitud preparada, no enviada/.test(p.sel('regCambioMsg').innerHTML), /no cambia nada por sí sola/.test(p.sel('regCambioMsg').innerHTML)]);
-    Check('SC9b Otros aprobado no produce pares', null, new p.ventana.RegistroIniciativas.RevisionSolicitud(reg.cambio.resumen(), 'u').aprobar('a').pares);
+    Check('SC9b Otros aprobado no produce pares', null,
+      new p.ventana.RegistroIniciativas.RevisionSolicitud(reg.lista.borrador(reg.lista.items[0]).resumen(), 'u').aprobar('a').pares);
   });
 });
 
