@@ -57,6 +57,7 @@ function esperar() { return new Promise(function (ok) { setTimeout(ok, 0); }); }
 var ventana = {};
 (new Function('window', leer('assets/js/escape.js')))(ventana);
 (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
+(new Function('window', leer('assets/js/seleccion-kpi.js')))(ventana);
 (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
   ventana, Documento(), {}, ventana.Escape, {}, function () { return new Promise(function () {}); });
 (new Function('window', 'Escape', 'fetch', leer('admin/acuse-iniciativa.js')))(ventana, ventana.Escape, function () { throw new Error('fetch real'); });

@@ -122,6 +122,8 @@ function arnes(src, payload, conTipos) {
     'var fDir="", fPO="", fMgr="", fSO="", modoTiempo="slot", chartEvol=null;\n' +
     'var _cacheHojaPeriodo={modo:null, tipo:null, set:null};\n' +
     'var AGR=P.agrupadores, ESTADOS_ACTIVOS=["En Análisis","En Solución","En Monitoreo"];\n' +
+    // Sin SeleccionKpi: las tarjetas salen como antes del clic que filtra.
+    'var seleccionKpi=null;\n' +
     'var VERDE={pino:"",profundo:""}, AMBAR_SEM="", CIFRAS_EXTREMOS={}, CIFRAS_ENCIMA_BARRAS={}, ACOLOR={}, NEUTRO_SEM="";\n' +
     // Sin respuesta de kpis.ashx: la grafica y las tarjetas de antes.
     'function automatizadosDe(){return null;} function hayFiltrosAutomatizados(){return false;}\n' +

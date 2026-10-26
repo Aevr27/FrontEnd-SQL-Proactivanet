@@ -30,6 +30,7 @@
   <link rel="stylesheet" href="../assets/css/kpi.css">
   <link rel="stylesheet" href="../assets/css/boton.css">
   <link rel="stylesheet" href="../dashboard.css">
+  <link rel="stylesheet" href="../assets/css/kpis-fijos.css">
   <link rel="stylesheet" href="orquestacion.css">
   <!-- Chart.js: la misma copia que carga dashboard.html (4.4.4). -->
   <script src="../assets/vendor/chart.umd.min.js"></script>
@@ -38,6 +39,8 @@
   <script src="../assets/js/escape.js"></script>
   <script src="../assets/js/paleta.js"></script>
   <script src="../assets/js/barras.js"></script>
+  <script src="../assets/js/seleccion-kpi.js"></script>
+  <script src="../assets/js/kpis-fijos.js"></script>
 </head>
 <body>
 <div class="wrap">
@@ -49,6 +52,8 @@
         <div class="sub">Avance del registro de jobs, su migración a Control-M, los decomisos y la madurez. Del Excel «Concentrado Análisis de Jobs», cargado en la base.</div>
       </div>
       <div class="acciones-top">
+        <!-- "Fijar KPIs" (assets/js/kpis-fijos.js): pega #orq-kpis arriba al bajar. -->
+        <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="orq-kpis" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
         <div class="estado" id="orq-estado" role="status"></div>
       </div>
     </header>
@@ -173,7 +178,7 @@
               <label for="orq-ind" class="orq-sr">Mostrar</label>
               <select id="orq-ind"></select>
             </div>
-            <div class="orq-conteo" id="orq-conteo"></div>
+            <div class="orq-conteo" id="orq-conteo" aria-live="polite"></div>
           </div>
           <div class="orq-tabla-wrap"><table class="orq-tabla" id="orq-t-jobs"></table></div>
           <button class="btn linea chico" id="orq-mas" type="button" hidden>Mostrar más</button>

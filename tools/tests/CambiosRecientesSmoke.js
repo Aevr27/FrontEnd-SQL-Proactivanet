@@ -238,6 +238,7 @@ pruebas.push(function () {
   (new Function('window', 'Escape', leer('assets/js/catalogos.js')))(w, w.Escape);
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(w, doc);
   (new Function('window', leer('admin/cascada-organizacional.js')))(w);
+  (new Function('window', leer('assets/js/seleccion-kpi.js')))(w);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(w, doc, w.Catalogos, w.Escape, w.Duracion, pedir);
   (new Function('window', 'Escape', 'fetch', leer('admin/cambios-recientes.js')))(w, w.Escape, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(

@@ -202,6 +202,33 @@ public static class SolicitudesCambioHttpSmoke
             "pct_categoria", "/A/Cat 1", "pct_valor", "101"), out estado);
         Check("B11 % fuera de rango: 422", 422, estado);
 
+        // ---- S) Subestado solo ADM (2026-10-26) ------------------------------
+        // Quien no ve el Subestado no lo pide: subestado_nuevo de MOD = 422 y
+        // nada llega al almacen; el cambio de Estado sin Subestado sigue igual.
+        // El rol es el del servidor: un "rol=ADM" del formulario no cuenta.
+        var conSub = F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "estado", "estado_nuevo", "Cerrado",
+                       "subestado_nuevo", "Solucionado", "motivo", "m", "rol", "ADM");
+        alm.Llamadas.Clear();
+        cuerpo = Correr("POST", "accion=enviar", MOD, conSub, out estado);
+        Check("S1 MOD pide Subestado: 422 en subestado_nuevo, nada se envia", "422|True|True|0",
+              estado + "|" + cuerpo.Contains("\"campo\":\"subestado_nuevo\"") + "|" + cuerpo.Contains("Solo un administrador (ADM)") + "|" + alm.Llamadas.Count);
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "estado",
+                                                       "subestado_nuevo", "Solucionado", "motivo", "m"), out estado);
+        Check("S2 MOD pide SOLO Subestado: 422, nada se envia", "422|0", estado + "|" + alm.Llamadas.Count);
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "estado",
+                                                       "estado_nuevo", "Cerrado", "motivo", "m"), out estado);
+        Check("S3 MOD pide Estado sin Subestado: 200, sin Subestado", "200|MOD|Cerrado|null",
+              estado + "|" + alm.UltimoRol + "|" + alm.UltimaPeticion.EstadoNuevo + "|" + (alm.UltimaPeticion.SubestadoNuevo ?? "null"));
+        cuerpo = Correr("POST", "accion=enviar", ADM, conSub, out estado);
+        Check("S4 ADM pide Estado y Subestado: 200, el Subestado viaja", "200|ADM|Solucionado",
+              estado + "|" + alm.UltimoRol + "|" + alm.UltimaPeticion.SubestadoNuevo);
+        var formSub = new System.Collections.Specialized.NameValueCollection();
+        foreach (var par in conSub) formSub.Add(par[0], par[1]);
+        var pSub = PeticionSolicitudCambio.DesdeFormulario(formSub);
+        pSub.ExigirSubestadoDeAdm(null);
+        Check("S5 sin rol resuelto (null): tambien se rechaza (falla cerrado)", "False|subestado_nuevo",
+              pSub.Valida + "|" + (pSub.Errores.Count > 0 ? pSub.Errores[0].Campo : ""));
+
         // ---- C) interruptor apagado ------------------------------------------
         PersistenciaSolicitudesCambio.ForzadaParaPruebas = false;
         alm.Llamadas.Clear();

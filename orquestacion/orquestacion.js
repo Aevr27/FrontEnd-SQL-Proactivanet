@@ -92,13 +92,16 @@
     p = p || {};
     var r = {};
     r.universo = js.length;
-    r.huerfanos = cuenta(js, es('EsHuerfano'));
+    // Huerfanos, activos y orquestados cuentan con el MISMO predicado con el
+    // que filtra la lista de jobs (LISTA): el clic en su tarjeta abre esa
+    // lista y las dos cifras tienen que coincidir.
+    r.huerfanos = cuenta(js, jobDe('huerfanos'));
     r.identificados = r.universo - r.huerfanos;
     r.completitud = div(suma(js, 'CamposLlenosExcel'), CAMPOS * r.universo);
     r.estricta = div(suma(js, 'CamposLlenosEstricta'), CAMPOS * r.universo);
     r.completos = cuenta(js, function (o) { return o.CamposLlenosEstricta === CAMPOS; });
-    r.activos = cuenta(js, es('Activo'));
-    r.orquestados = cuenta(js, es('OrqCompleto'));
+    r.activos = cuenta(js, jobDe('activos'));
+    r.orquestados = cuenta(js, jobDe('orquestados'));
     r.pct_orquestados = div(r.orquestados, r.activos);
 
     r.candidatos = cuenta(js, es('CandSi'));
@@ -254,6 +257,7 @@
   // ---- La lista de jobs ----------------------------------------------------
   var LISTA = [
     { id: '', nombre: 'Todos' },
+    { id: 'identificados', nombre: 'Identificados', job: function (o) { return !es('EsHuerfano')(o); } },
     { id: 'huerfanos', nombre: 'Huérfanos', job: es('EsHuerfano') },
     { id: 'incompletos', nombre: 'Sin documentar completo (estricta)', job: function (o) { return o.CamposLlenosEstricta < CAMPOS; } },
     { id: 'activos', nombre: 'Activos en Control-M', job: es('Activo') },
@@ -267,6 +271,12 @@
     { id: 'app', nombre: 'Aplicación fuera del catálogo', det: function (d) { return d.AplicacionEnCatalogo === 0; } },
     { id: 'personas', nombre: 'Responsables fuera de la hoja Datos', det: function (d) { return d.PersonasFueraDeDatos > 0; } },
   ];
+  // El predicado por job de una entrada de LISTA (indicadores() lo usa para
+  // contar lo mismo que la lista filtra).
+  function jobDe(id) {
+    var l = LISTA.filter(function (x) { return x.id === id; })[0];
+    return l.job;
+  }
   function normal(s) {
     return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
   }
@@ -430,6 +440,9 @@
   });
   $('limpiar').onclick = function () {
     f = { dir: '', n3: '', herr: '', cand: [] };
+    // Tambien la tarjeta elegida: su estado es el "Mostrar" de la lista
+    // (lista.ind), asi que vuelve a "Todos" y la marca se va con el.
+    lista.ind = ''; $('ind').value = ''; lista.tope = 200;
     if (datos && datos.hay_datos) { llenarFiltros(); pintar(); }
   };
 
@@ -455,9 +468,12 @@
     if (detalle) pintarLista();
   }
 
-  function tarjeta(l, v, foot, s) {
-    return '<div class="kpi ' + (s ? 's' + s : '') + '"><div class="lbl">' + esc(l) + '</div>' +
-      '<div class="val">' + v + '</div><div class="foot">' + foot + '</div></div>';
+  // k: la clave de la tarjeta que abre la lista de jobs (ver "KPI -> lista").
+  function tarjeta(l, v, foot, s, k) {
+    var filtra = !!(k && seleccion);
+    return '<div class="kpi ' + (s ? 's' + s : '') + (filtra ? seleccion.clases(k) : '') + '"><div class="lbl">' + esc(l) + '</div>' +
+      '<div class="val">' + v + '</div><div class="foot">' + foot + '</div>' +
+      (filtra ? seleccion.boton(k, l + ': ' + v) : '') + '</div>';
   }
   function cifra(t, v, s, chica) {
     return '<div class="orq-cifra' + (chica ? ' chica' : '') + '"><span class="t">' + esc(t) + '</span><span class="v">' + v + '</span>' +
@@ -466,15 +482,45 @@
 
   function pintarKpis() {
     var r = vista.ind;
+    marcarDesdeLista();
     $('kpis').innerHTML =
-      tarjeta('Universo de jobs', n0(r.universo), 'un renglón por nombre de job', null) +
-      tarjeta('Identificados', n0(r.identificados), 'con Product Owner / N3', null) +
-      tarjeta('Huérfanos', n0(r.huerfanos), 'Product Owner / N3 vacío o N/A', r.huerfanos ? 'a' : null) +
+      tarjeta('Universo de jobs', n0(r.universo), 'un renglón por nombre de job', null, KPI_TODOS) +
+      tarjeta('Identificados', n0(r.identificados), 'con Product Owner / N3', null, 'identificados') +
+      tarjeta('Huérfanos', n0(r.huerfanos), 'Product Owner / N3 vacío o N/A', r.huerfanos ? 'a' : null, 'huerfanos') +
       tarjeta('Registro completo', pct1(r.completitud),
         'documentado (sin relleno): ' + pct1(r.estricta) + ' · ' + n0(r.completos) + ' jobs al 100%', sem(r.estricta)) +
-      tarjeta('Activos en Control-M', n0(r.activos), 'Estatus control-M = Activos', null) +
-      tarjeta('Completamente orquestados', n0(r.orquestados), pct(r.pct_orquestados) + ' del universo activo', null);
+      tarjeta('Activos en Control-M', n0(r.activos), 'Estatus control-M = Activos', null, 'activos') +
+      tarjeta('Completamente orquestados', n0(r.orquestados), pct(r.pct_orquestados) + ' del universo activo', null, 'orquestados');
   }
+
+  /* ------------------------------------------------------- KPI -> lista */
+  // Identificados, Huerfanos, Activos y Completamente orquestados son
+  // entradas de la lista de jobs (Calc.LISTA, con el mismo predicado con el
+  // que se cuentan): un clic abre la lista con ese "Mostrar", otro clic en
+  // la misma la devuelve a "Todos", y Universo es "Todos". El estado sigue
+  // siendo lista.ind, el del <select>: SeleccionKpi pone la mecanica, asi
+  // que elegir en el desplegable tambien mueve la marca. Las cifras no
+  // cambian con el clic: siguen siendo las de los filtros de arriba.
+  // La marca solo se ve con la lista a la vista: oculta (o si no se pudo
+  // traer) ninguna tarjeta queda marcada, aunque el desplegable conserve su
+  // valor para la proxima vez que se abra.
+  // Registro completo es un porcentaje: no abre nada.
+  var KPI_TODOS = 'universo';
+  var KPI_LISTA = ['identificados', 'huerfanos', 'activos', 'orquestados'];
+  var SK = window.SeleccionKpi;
+  var seleccion = SK ? new SK({ valida: function (k) { return KPI_LISTA.indexOf(k) >= 0; }, limpian: [KPI_TODOS] }) : null;
+  function marcarDesdeLista() {
+    if (seleccion) seleccion.clave = !$('lista').hidden && KPI_LISTA.indexOf(lista.ind) >= 0 ? lista.ind : '';
+  }
+  if (SK) SK.escuchar([$('kpis')], 'data-indicador', function (k) {
+    if (!vista) return;
+    // Con la lista cerrada no hay marca (marcarDesdeLista): el clic la abre
+    // con esa tarjeta, nunca la quita.
+    marcarDesdeLista();
+    seleccion.alternar(k);
+    lista.ind = seleccion.clave; $('ind').value = lista.ind; lista.tope = 200;
+    abrirLista(k);
+  });
 
   function pintarIngreso() {
     var r = vista.ind;
@@ -663,20 +709,46 @@
     });
   }
   $('ind').innerHTML = Calc.LISTA.map(function (l) { return '<option value="' + esc(l.id) + '">' + esc(l.nombre) + '</option>'; }).join('');
-  $('ind').onchange = function () { lista.ind = this.value; lista.tope = 200; pintarLista(); };
+  $('ind').onchange = function () { lista.ind = this.value; lista.tope = 200; if (vista) pintarKpis(); pintarLista(); };
   $('buscar').oninput = function () { lista.texto = this.value; lista.tope = 200; pintarLista(); };
   $('mas').onclick = function () { lista.tope += 200; pintarLista(); };
   $('ver-jobs').onclick = function () {
-    var b = this;
-    if (!$('lista').hidden) { $('lista').hidden = true; b.textContent = 'Ver la lista'; return; }
+    if (!$('lista').hidden) {
+      $('lista').hidden = true; this.textContent = 'Ver la lista';
+      if (vista) pintarKpis();   // oculta, ninguna tarjeta queda marcada
+      return;
+    }
+    abrirLista();
+  };
+  // La abre el boton y la abre el clic en una tarjeta (KPI -> lista, con su
+  // clave `k`). Ya abierta, solo se repinta. Al terminar se repintan
+  // las tarjetas (la marca sigue a lo que se ve) y, si vino de una tarjeta,
+  // el foco vuelve a ella y la pagina baja a la lista. Si no se pudo traer,
+  // se repintan igual: sin lista a la vista, sin marca, y no se baja.
+  var tarjetaPedida = '';
+  function abrirLista(k) {
+    var b = $('ver-jobs');
+    if (k) tarjetaPedida = k;   // la ultima pulsada mientras carga
+    if (!$('lista').hidden) { pintarLista(); trasAbrirLista(); return; }
+    if (b.disabled) return;   // ya va en camino
     b.disabled = true; b.textContent = 'Cargando…';
     traerDetalle().then(function () {
       $('lista').hidden = false; b.textContent = 'Ocultar la lista'; pintarLista();
+      trasAbrirLista();
     }).catch(function (e) {
       b.textContent = 'Ver la lista';
       error('No se pudo traer la lista de jobs: ' + (e && e.message ? e.message : e));
+      trasAbrirLista();
     }).then(function () { b.disabled = false; });
-  };
+  }
+  function trasAbrirLista() {
+    var k = tarjetaPedida;
+    tarjetaPedida = '';
+    if (vista) pintarKpis();
+    if (!k) return;
+    if (SK) SK.enfocar([$('kpis')], 'data-indicador', k);
+    if (!$('lista').hidden && $('jobs').scrollIntoView) $('jobs').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
   function pintarLista() {
     if (!detalle || !vista) return;
     var filas = Calc.lista(vista.jobs, detalle, lista.ind, lista.texto);

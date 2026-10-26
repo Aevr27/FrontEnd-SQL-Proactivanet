@@ -29,11 +29,12 @@
 //      los demas filtros, Limpiar; el panel de casillas en el DOM.
 //   La Agrupacion ya no es filtro (ni select ni FiltroRegistro).
 //   K) Indicadores sobre el registro COMPLETO: ningun filtro ni la busqueda
-//      los mueve; Total = abiertas (estado distinto de Cerrado, sin
-//      mayusculas ni acentos), Activas = seguimiento, Requerimientos =
-//      abiertas con agrupacion ReqOpr (NO Total - Activas), Atrasadas sin
-//      cambio, Cerradas = estado Cerrado (Total = Activas + fueraActivas
-//      sigue en el modelo, sin tarjeta);
+//      los mueve; Total = TODAS (Cerradas incluidas, 2026-10-23), abiertas
+//      = estado distinto de Cerrado (sin mayusculas ni acentos; sin
+//      tarjeta), Activas = seguimiento, Requerimientos = abiertas con
+//      agrupacion ReqOpr (NO abiertas - Activas), Atrasadas sin cambio,
+//      Cerradas = estado Cerrado (abiertas = Activas + fueraActivas y
+//      abiertas + Cerradas = Total siguen en el modelo, sin tarjeta);
 //      relectura con datos nuevos, cargando / error / relectura fallida sin
 //      ceros, y el globo "Criterio" de Activas.
 //   B) Busqueda por folio o titulo: parcial, sin mayusculas, separadores,
@@ -57,6 +58,9 @@
 //      regla con la que cuenta; otro clic lo quita; uno a la vez; cifras
 //      fijas; Y con Estado / Director / busqueda sin tocarlos; orden y
 //      primera pagina; Limpiar; relectura; Cobertura; la instruccion.
+//      Total (KF2T) no filtra: quita el indicador y vuelve a todas, sin
+//      tocar el Director; sin aria-pressed. Mecanica en SeleccionKpi
+//      (assets/js/seleccion-kpi.js, su prueba: SeleccionKpiSmoke.js).
 //   Al cargar se ve TODO (Cerrado incluido): ya no hay vista por omision
 //   que oculte Cerrado (L0, S2-9, BV10).
 //
@@ -209,6 +213,7 @@ function Pagina(pedirRegistro, pedirCatalogo, rol) {
   (new Function('window', 'document', leer('assets/js/globo-ayuda.js')))(ventana, documento);
   (new Function('window', leer('admin/cascada-organizacional.js')))(ventana);
   (new Function('window', leer('admin/libro-iniciativas.js')))(ventana);
+  (new Function('window', leer('assets/js/seleccion-kpi.js')))(ventana);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', 'fetch', leer('admin/registro-iniciativas.js')))(
     ventana, documento, ventana.Catalogos, ventana.Escape, ventana.Duracion, pedir);
   (new Function('window', 'document', 'Catalogos', 'Escape', 'GloboAyuda', 'fetch', leer('admin/iniciativas.js')))(
@@ -283,9 +288,9 @@ pruebas.push(function () {
   var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   Check('D1 entrada sin folio descartada', 5, reg.iniciativas.length);
   var k = R.Registro.indicadores(reg.iniciativas);
-  Check('D2 indicadores: total (abiertas)/activas/fuera de activas/retrasadas/cerradas', [4, 3, 1, 1, 1],
-    [k.total, k.activas, k.fueraActivas, k.retrasadas, k.cerradas]);
-  Check('D2 sin categoria entre las abiertas', 1, k.sinCategoria);
+  Check('D2 indicadores: total (abiertas)/abiertas/activas/fuera de activas/retrasadas/cerradas', [4, 4, 3, 1, 1, 1],
+    [k.total, k.abiertas, k.activas, k.fueraActivas, k.retrasadas, k.cerradas]);
+  Check('D2 sin categoria entre todas', 1, k.sinCategoria);
   Check('D2 riesgo = riesgo_folio de las retrasadas que cuentan', 150, k.riesgo);
   Check('D2 tickets a reducir de las activas', 190, k.reduceActivas);
   Check('D3 estados: activos en su orden y luego los demas', ['En Análisis', 'En Solución', 'Cerrado'], reg.estados());
@@ -753,6 +758,50 @@ pruebas.push(function () {
     accion('cambio-preparar');
     Check('SE5 sin etapa la fecha escrita no viaja (no se adivina)', [true, false],
       [/ini-cambio-msg listo/.test(p.sel('regCambioMsg').className), /Fecha compromiso/.test(p.sel('regCambioMsg').innerHTML)]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SB) Subestado solo ADM (2026-10-26): "Solicitar cambios" ofrece Nuevo
+// Subestado solo con rol ADM. Aunque el registro trajera la lista (el
+// servidor no la manda a otro rol), MOD no la ve y aun puede pedir el Estado.
+// ---------------------------------------------------------------------------
+[['ADM', true], ['MOD', false], [null, false]].forEach(function (caso) {
+  pruebas.push(function () {
+    var datos = JSON.parse(JSON.stringify(DATOS));
+    datos.estados_problem = ['En Análisis', 'En Solución', 'Cerrado'];
+    datos.subestados_problem = ['Solucionado'];
+    var p = Pagina(ok(datos), function () { return nunca(); }, caso[0]);
+    var nombre = caso[0] || 'sin rol';
+    function accion(a) {
+      var el = Elemento('b'); el.setAttribute('data-accion', a);
+      p.sel('regDetCuerpo').disparar('click', { target: el });
+    }
+    function elegir(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('change', { target: p.sel(id) }); }
+    return esperar().then(function () {
+      clicFolio(p, 'PRB 2026-000001');
+      accion('solicitar-cambios');
+      elegir('regCambioCampo', 'estado');
+      Check('SB1 ' + nombre + ': Nuevo Subestado ' + (caso[1] ? 'se ofrece' : 'NO se ofrece'), caso[1],
+        /<label for="regCambioSubestado">Nuevo Subestado/.test(p.sel('regCambio').innerHTML));
+      p.sel('regCambioEstado').value = 'Cerrado';
+      p.sel('regCambioMotivo').value = 'Se cierra';
+      accion('cambio-preparar');
+      Check('SB2 ' + nombre + ': el cambio de Estado se prepara igual', [true, true],
+        [/ini-cambio-msg listo/.test(p.sel('regCambioMsg').className), /En Solución → Cerrado/.test(p.sel('regCambioMsg').innerHTML)]);
+    });
+  });
+});
+
+pruebas.push(function () {
+  // Descarga con MOD: sin la columna Subestado (ADM la tiene: XD3).
+  var p = Pagina(ok(DATOS), null, 'MOD'), reg = p.registro, b = Bajada();
+  return esperar().then(function () {
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
+  }).then(function (r) {
+    var enc = XLSXV.utils.sheet_to_json(b.libro().Sheets.Iniciativas, { header: 1 })[0];
+    Check('SB3 MOD: el Excel no trae la columna Subestado; Estado y Agrupacion siguen', [true, false, true, true],
+      [r, enc.indexOf('Subestado') >= 0, enc.indexOf('Estado') >= 0, enc.indexOf('Agrupación') === enc.indexOf('Estado') + 1]);
   });
 });
 
@@ -1810,11 +1859,11 @@ pruebas.push(function () {
   return esperar().then(function () {
     var reg = p.registro, html = p.sel('regKpis').innerHTML;
     Check('K1 cinco indicadores, en orden (Requerimientos en lugar de Fuera de Activas)',
-      ['Total de iniciativas', 'Iniciativas medibles', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'], rotulosKpi(p));
+      ['Total iniciativas activas', 'Iniciativas medibles', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'], rotulosKpi(p));
     Check('K1 valores con la vista por omision (Todas)', KPI_BASE, kpis(p));
-    Check('K1 pies: abiertas sin categoria, tickets, ReqOpr, riesgo, Cerrado; ya no la resta',
+    Check('K1 pies: abiertas sin categoria, tickets, REQ/RTI/HAR (sin el de ReqOpr), riesgo, Cerrado; ya no la resta',
       [true, true, true, true, true, false],
-      [/1 sin categoría/.test(html), /190 tickets a reducir/.test(html), /agrupación ReqOpr, abiertos/.test(html),
+      [/1 sin categoría/.test(html), /190 tickets a reducir/.test(html), /<div class="foot">REQ, RTI y HAR<\/div>/.test(html) && !/agrupación ReqOpr, abiertos/.test(html),
        /150 tickets en riesgo/.test(html), /estado Cerrado/.test(html), /Total − Activas|Fuera de Activas/.test(html)]);
 
     // Cada control de la lista, uno tras otro: la lista cambia, los
@@ -1864,10 +1913,10 @@ pruebas.push(function () {
     Ini('A 10', { estado: 'Cerrádo', activa: false, seguimiento: false })
   ];
   var k = R.Registro.indicadores(lista);
-  Check('K3 tabla: total/activas/fuera de activas/retrasadas/cerradas', [6, 2, 4, 1, 4],
-    [k.total, k.activas, k.fueraActivas, k.retrasadas, k.cerradas]);
-  Check('K3 Total = Activas + Fuera de Activas; Total + Cerradas = todas', [true, true],
-    [k.total === k.activas + k.fueraActivas, k.total + k.cerradas === lista.length]);
+  Check('K3 tabla: total/abiertas/activas/fuera de activas/retrasadas/cerradas', [6, 6, 2, 4, 1, 4],
+    [k.total, k.abiertas, k.activas, k.fueraActivas, k.retrasadas, k.cerradas]);
+  Check('K3 abiertas = Activas + Fuera de Activas; Total = abiertas; Total + Cerradas = todas', [true, true, true],
+    [k.abiertas === k.activas + k.fueraActivas, k.abiertas === k.total, k.total + k.cerradas === lista.length]);
   Check('K3 sin categoria y riesgo solo de lo que cuenta', [1, 7], [k.sinCategoria, k.riesgo]);
   var vacio = R.Registro.indicadores([]);
   Check('K3 lista vacia: todo en 0', [0, 0, 0, 0, 0], [vacio.total, vacio.activas, vacio.fueraActivas, vacio.retrasadas, vacio.cerradas]);
@@ -1893,7 +1942,7 @@ pruebas.push(function () {
     json.iniciativas[3].seguimiento = true;
     return reg.actualizar(ok(json));
   }).then(function (r) {
-    Check('K4 relectura: Total 3, Activas 3, Requerimientos 0, Atrasadas 2, Cerradas 2', [true, ['3', '3', '0', '2', '2']], [r.ok, kpis(p)]);
+    Check('K4 relectura: Total 3 (abiertas), Activas 3, Requerimientos 0, Atrasadas 2, Cerradas 2', [true, ['3', '3', '0', '2', '2']], [r.ok, kpis(p)]);
     Check('K4 ... pie de riesgo con la nueva retrasada', true, /155 tickets en riesgo/.test(p.sel('regKpis').innerHTML));
     Check('K4 ... filtros, busqueda, orden, "mostrar mas", modo y lista intactos',
       antes, [reg.filtro.estados.marcados, reg.filtro.director, reg.filtro.textoBuscado, reg.orden, reg.limite, reg.modo, folios(p)]);
@@ -1925,10 +1974,9 @@ pruebas.push(function () {
   return esperar().then(function () {
     var reg = p.registro, html = p.sel('regKpis').innerHTML;
     var texto = 'Iniciativas en estado En Análisis, En Solución o En Monitoreo y con agrupación Problem, SorIA, Adopcion o Mejora.';
-    var nota = 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría. ' +
-      'La agrupación se reconoce sin importar acentos ni mayúsculas (Adopción = Adopcion).';
+    var nota = 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría.';
     Check('K6 texto del criterio de Activas', { texto: texto, nota: nota }, reg.ayudaKpi('activas'));
-    Check('K6 solo Activas lleva la franja "Criterio", con el texto para lectores de pantalla; los demas no', [1, true, true, null],
+    Check('K6 Activas y Requerimientos llevan la franja "Criterio", con el texto para lectores de pantalla; los demas no', [2, true, true, null],
       [(html.match(/class="ini-kpi-ayuda"/g) || []).length,
        /<div class="kpi ini-kpi sv ini-kpi-ctx[^"]*"><button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="activas"[^>]*>Criterio<\/button>/.test(html)
          && /<div class="lbl">Iniciativas medibles<\/div>/.test(html),
@@ -1954,6 +2002,83 @@ pruebas.push(function () {
       Check('K6 el texto sale de agrupadores del servidor',
         'Iniciativas en estado En Análisis, En Solución o En Monitoreo y con agrupación Problem o Mejora.', reg.ayudaKpi('activas').texto);
     });
+  });
+});
+
+// K7) El hover de Requerimientos es el mismo de Activas: franja "Criterio"
+// con GloboAyuda (globo-ayuda.css), no el title nativo de la tarjeta. Mismo
+// texto que tenia el title.
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  return esperar().then(function () {
+    var reg = p.registro, html = p.sel('regKpis').innerHTML;
+    var texto = 'Requerimientos (REQ/HAR): abiertos, estado distinto de Cerrado, con agrupación ReqOpr.';
+    var nota = 'Cuentan en Total, no en Iniciativas medibles.';
+    Check('K7 texto del criterio de Requerimientos', { texto: texto, nota: nota }, reg.ayudaKpi('requerimientos'));
+    Check('K7 franja Criterio como la de Activas: misma clase, aria-describedby, rotulo y texto para lectores de pantalla',
+      [true, true],
+      [/<div class="kpi ini-kpi  ini-kpi-ctx[^"]*"><button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="requerimientos" aria-describedby="regKpiAyudaRequerimientos" aria-label="Criterio de Iniciativas con requerimientos">Criterio<\/button><span class="ini-sr" id="regKpiAyudaRequerimientos">[^<]*<\/span><div class="lbl">Iniciativas con requerimientos<\/div>/.test(html),
+       html.indexOf('id="regKpiAyudaRequerimientos">' + p.ventana.Escape.html(texto + ' ' + nota) + '<') > 0]);
+    Check('K7 sin tooltip nativo: ni la tarjeta de Requerimientos ni su franja llevan title', [false, false],
+      [/data-indicador="requerimientos"[^>]*title=/.test(html), /data-kpi-ayuda="requerimientos"[^>]*title=/.test(html)]);
+
+    var franja = Elemento('franja');
+    franja.setAttribute('data-kpi-ayuda', 'requerimientos');
+    franja.closest = function (sel) { return sel === '.ini-kpi-ayuda' ? franja : null; };
+    var g = reg.globoKpis;
+    p.sel('regKpis').disparar('pointerover', { target: franja, pointerType: 'mouse' });
+    Check('K7 pasar el mouse: el mismo globo (GloboAyuda) con el criterio', [false, 'globo-ayuda', texto, nota, true],
+      [g.globo.hidden, g.globo.className.split(' ')[0], g.texto.textContent, g.nota.textContent, franja.classList.contains('abierto')]);
+    p.sel('regKpis').disparar('pointerout', { target: franja, pointerType: 'mouse', relatedTarget: null });
+    Check('K7 salir con el mouse lo oculta', true, g.globo.hidden);
+    p.sel('regKpis').disparar('click', { target: franja });
+    Check('K7 la franja no filtra', '', reg.filtro.indicador);
+  });
+});
+
+// CA) La cuenta del Registro (#regCuenta). Con Cerrado fuera del filtro de
+// Estado: "N Abiertas de T Total", N = abiertas que pasan los filtros, T =
+// el registro completo (no la pagina). Si no, la cuenta de siempre.
+pruebas.push(function () {
+  var json = JSON.parse(JSON.stringify(DATOS));
+  json.iniciativas = [Ini('A 1', { estado: 'En Análisis' }), Ini('A 2', { estado: 'Cerrado', activa: false }),
+    Ini('A 3', { estado: 'cerrado', activa: false })];
+  var f = new R.FiltroRegistro(Adm(R.Registro.desdeJson(json)));
+  Check('CA1 sin filtro de Estado: no excluye Cerrado', false, f.excluyeCerradas());
+  f.alternarEstado('Cerrado');
+  Check('CA1 otra variante de Cerrado sigue marcada (plano()): no excluye', false, f.excluyeCerradas());
+  f.alternarEstado('cerrado');
+  Check('CA1 ninguna variante de Cerrado marcada: excluye', true, f.excluyeCerradas());
+  f.limpiar();
+  Check('CA1 limpiar: ya no excluye', false, f.excluyeCerradas());
+});
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  return esperar().then(function () {
+    Check('CA2 al cargar (Cerrado incluido): la cuenta de siempre', '5 iniciativas', p.sel('regCuenta').textContent);
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'Cerrado');
+    Check('CA2 sin Cerrado: abiertas frente al total general; indicadores intactos', ['4 Abiertas de 5 Total', 4, KPI_BASE],
+      [p.sel('regCuenta').textContent, folios(p).length, kpis(p)]);
+    elegir(p, 'regPo', 'PO 1');
+    Check('CA3 con otro filtro: solo las abiertas que pasan, el total no cambia', ['3 Abiertas de 5 Total', 3],
+      [p.sel('regCuenta').textContent, folios(p).length]);
+    teclear(p, '000005');
+    return esperarBusqueda();
+  }).then(function () {
+    Check('CA3 con busqueda', '1 Abiertas de 5 Total', p.sel('regCuenta').textContent);
+    sinOmision(p);
+    Check('CA4 Limpiar filtros: la cuenta del registro completo', ['5 iniciativas', 5], [p.sel('regCuenta').textContent, folios(p).length]);
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'En Análisis');
+    Check('CA5 Cerrado incluido con otro estado fuera: la cuenta de siempre', true,
+      / de 5 iniciativas$/.test(p.sel('regCuenta').textContent));
+    sinOmision(p);
+    var muchas = JSON.parse(JSON.stringify(DATOS));
+    for (var n = 0; n < 230; n++) muchas.iniciativas.push(Ini('X ' + (1000 + n), { categorias: [Cat('/A/Cat 2', 1, 0.1, 'Dir A', 'PO 1', 'SO y')] }));
+    return p.registro.cargar(ok(muchas));
+  }).then(function () {
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'Cerrado');
+    Check('CA6 el total no es la pagina ni el limite', ['234 Abiertas de 235 Total · mostrando 100', 100],
+      [p.sel('regCuenta').textContent, folios(p).length]);
   });
 });
 
@@ -2102,7 +2227,8 @@ pruebas.push(function () {
   var motivos = lista.filter(function (i) { return plano(i.estado) !== 'cerrado' && !i.seguimiento; }).map(motivoFuera);
   Check('R6 desglose: estado, agrupacion, agrupacion vacia, ambos (cuenta por estado)',
     [4, ['estado', 'agrupacion', 'agrupacion', 'estado']], [k.fueraActivas, motivos]);
-  Check('R6 Total = Activas + Fuera; Cerrada fuera de los dos', [5, 1, 4, 1], [k.total, k.activas, k.fueraActivas, k.cerradas]);
+  Check('R6 abiertas = Activas + Fuera; Cerrada fuera de los dos y de Total', [5, 5, 1, 4, 1],
+    [k.total, k.abiertas, k.activas, k.fueraActivas, k.cerradas]);
 });
 
 pruebas.push(function () {
@@ -2241,8 +2367,8 @@ var REQ_LISTA = [
 
 pruebas.push(function () {
   var k = R.Registro.indicadores(REQ_LISTA);
-  Check('RQ1 Total 8, Activas 3, Requerimientos 3, Cerradas 1', [8, 3, 3, 1], [k.total, k.activas, k.requerimientos, k.cerradas]);
-  Check('RQ1 Requerimientos NO es Total - Activas (5)', [5, false], [k.fueraActivas, k.requerimientos === k.total - k.activas]);
+  Check('RQ1 Total 8 (abiertas), abiertas 8, Activas 3, Requerimientos 3, Cerradas 1', [8, 8, 3, 3, 1], [k.total, k.abiertas, k.activas, k.requerimientos, k.cerradas]);
+  Check('RQ1 Requerimientos NO es abiertas - Activas (5)', [5, false], [k.fueraActivas, k.requerimientos === k.abiertas - k.activas]);
   Check('RQ1 Requerimientos y Activas no se pisan', [],
     REQ_LISTA.filter(function (i) { return i.seguimiento && R.Registro.esRequerimiento(i); }).map(function (i) { return i.folio; }));
   Check('RQ1 esRequerimiento: ReqOpr sin importar mayusculas/espacios; no por prefijo ni por TipoIniciativa',
@@ -2257,7 +2383,7 @@ pruebas.push(function () {
   return esperar().then(function () {
     reg = p.registro;
     base = kpis(p);
-    Check('RQ2 tarjetas: Total 8, Activas 3, Requerimientos 3, Atrasadas 0, Cerradas 1', ['8', '3', '3', '0', '1'], base);
+    Check('RQ2 tarjetas: Total 8 (abiertas), Activas 3, Requerimientos 3, Atrasadas 0, Cerradas 1', ['8', '3', '3', '0', '1'], base);
     var html = p.sel('regKpis').innerHTML;
     soloEstado(p, 'Cerrado');
     p.sel('regBuscar').value = 'REQ'; reg.aplicarBusqueda();
@@ -2440,15 +2566,23 @@ pruebas.push(function () {
     Check('KF1 error: sin instruccion', true, q.sel('regKpisGuia').hidden);
     var html = leer('admin/iniciativas.html');
     Check('KF1 la instruccion va justo encima de las tarjetas, sin globo', true,
-      /<p class="ini-kpis-guia" id="regKpisGuia" hidden>\s*<strong>Haz clic en un indicador para filtrar las iniciativas por esa condición\.<\/strong>\s*<span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro\.<\/span>\s*<\/p>\s*<div class="kpis ini-kpis" id="regKpis"/.test(html));
+      /<p class="ini-kpis-guia" id="regKpisGuia" hidden>\s*<strong>Haz clic en un indicador para filtrar las iniciativas por esa condición\.<\/strong>\s*<span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro\.<\/span>\s*<span>Total muestra todas las iniciativas\.<\/span>\s*<\/p>\s*<div class="kpis ini-kpis" id="regKpis"/.test(html));
+    // Las tarjetas se repintan en cada clic: NO son aria-live (se releerian
+    // enteras); el aviso es la cuenta de la lista, que si lo es.
+    Check('KF1 tarjetas sin aria-live; #regCuenta aria-live; helper cargado antes del registro', [false, true, true],
+      [/id="regKpis"[^>]*aria-live/.test(html), /id="regCuenta" aria-live="polite"/.test(html),
+       /<script src="\.\.\/assets\/js\/seleccion-kpi\.js"><\/script>[\s\S]*<script src="registro-iniciativas\.js">/.test(html)]);
     p = Pagina(ok(JSON.parse(JSON.stringify(DATOS)))); reg = p.registro;
     return esperar();
   }).then(function () {
     var cifras = kpis(p);
     Check('KF1 listo: instruccion visible; nada elegido; cinco tarjetas filtrables', [false, [], 5],
-      [p.sel('regKpisGuia').hidden, pulsados(p), (p.sel('regKpis').innerHTML.match(/class="ini-kpi-filtro" data-indicador=/g) || []).length]);
+      [p.sel('regKpisGuia').hidden, pulsados(p), (p.sel('regKpis').innerHTML.match(/class="kpi-filtro" data-indicador=/g) || []).length]);
+    // Total no es un estado: sin aria-pressed (las otras cuatro si).
+    Check('KF1 Total sin aria-pressed; las demas con aria-pressed="false"', [false, 4],
+      [/data-indicador="total" aria-pressed/.test(p.sel('regKpis').innerHTML),
+       (p.sel('regKpis').innerHTML.match(/data-indicador="[a-z]+" aria-pressed="false"/g) || []).length]);
     var esperado = {
-      total: ['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005'],
       activas: ['PRB 2026-000001', 'MAP 2026-000002', 'PRB 2026-000005'],
       requerimientos: ['REQ 2026-000004'],
       retrasadas: ['PRB 2026-000001'],
@@ -2458,11 +2592,34 @@ pruebas.push(function () {
       clicIndicador(p, c);
       Check('KF2 ' + c + ': filtra la lista, la marca, cifras y semaforo iguales',
         [esperado[c], [c], 1, cifras, 1],
-        [folios(p), pulsados(p), (p.sel('regKpis').innerHTML.match(/ini-kpi-sel/g) || []).length, kpis(p),
+        [folios(p), pulsados(p), (p.sel('regKpis').innerHTML.match(/kpi-sel/g) || []).length, kpis(p),
          reg.filtro.activos()]);
       clicIndicador(p, c);
       Check('KF2 ' + c + ': otro clic lo quita', [CINCO, [], cifras, 0], [folios(p), pulsados(p), kpis(p), reg.filtro.activos()]);
     });
+
+    // Total: cuenta las abiertas, pero su clic no filtra. Sin nada elegido
+    // no cambia nada (ni la pagina); con algo elegido lo quita y la lista
+    // vuelve a todas (Cerradas incluidas).
+    Check('KF2T la cifra de Total = las abiertas; la lista sin indicador, todas', ['4', 5], [cifras[0], CINCO.length]);
+    reg.limite = 300;
+    clicIndicador(p, 'total');
+    Check('KF2T Total sin nada elegido: todas, nada marcado, ningun filtro, pagina intacta',
+      [CINCO, [], '', 0, 300, cifras], [folios(p), pulsados(p), reg.filtro.indicador, reg.filtro.activos(), reg.limite, kpis(p)]);
+    reg.limite = 100;
+    clicIndicador(p, 'retrasadas');
+    clicIndicador(p, 'total');
+    Check('KF2T Total con Atrasadas elegida: la quita y vuelve a todas (HAR cerrada incluida)',
+      [CINCO, [], '', true, '5 iniciativas'], [folios(p), pulsados(p), reg.filtro.indicador,
+        folios(p).indexOf('HAR 2025-000003') >= 0, p.sel('regCuenta').textContent]);
+    // Con un filtro independiente: Total quita solo el indicador.
+    elegir(p, 'regDirector', 'Dir B');
+    clicIndicador(p, 'cerradas');
+    clicIndicador(p, 'total');
+    Check('KF2T Total con Director Dir B: quita el indicador, el Director sigue (Cerrada incluida)',
+      ['', 'Dir B', ['REQ 2026-000004', 'PRB 2026-000005', 'HAR 2025-000003'], '1 filtro activo'],
+      [reg.filtro.indicador, reg.filtro.director, folios(p), p.sel('regFiltrosCuenta').textContent]);
+    sinOmision(p);
 
     clicIndicador(p, 'activas'); clicIndicador(p, 'cerradas');
     Check('KF3 elegir otro reemplaza al anterior', [['cerradas'], ['HAR 2025-000003']], [pulsados(p), folios(p)]);
@@ -2470,6 +2627,19 @@ pruebas.push(function () {
       [p.sel('regCuenta').textContent, p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
     p.sel('regLimpiar').disparar('click');
     Check('KF3 Limpiar filtros tambien lo quita', [[], CINCO], [pulsados(p), folios(p)]);
+    // Un indicador, luego a mano otro (el semaforo) y el Director: Limpiar
+    // quita todo y ninguna tarjeta ni punto del semaforo queda marcado.
+    clicIndicador(p, 'activas');
+    clicIndicador(p, 'sem_atrasada');
+    elegir(p, 'regDirector', 'Dir B');
+    Check('KF3b antes: el semaforo reemplazo a la tarjeta, con Director', [['sem_atrasada'], 'sem_atrasada', 'Dir B'],
+      [pulsados(p), reg.filtro.indicador, reg.filtro.director]);
+    p.sel('regLimpiar').disparar('click');
+    var cajas = p.sel('regKpis').innerHTML + p.sel('regSemaforo').innerHTML;
+    Check('KF3b Limpiar: sin indicador ni Director, todas, sin kpi-sel y todo aria-pressed="false"',
+      ['', '', CINCO, [], false, false, true],
+      [reg.filtro.indicador, reg.filtro.director, folios(p), pulsados(p), /kpi-sel/.test(p.sel('regKpis').innerHTML),
+       /aria-pressed="true"/.test(cajas), /aria-pressed="false"/.test(cajas)]);
 
     // Criterio (franja de Activas) no filtra.
     var franja = Elemento('franja');
@@ -2541,14 +2711,26 @@ pruebas.push(function () {
     Check('KF9 en la Cobertura el indicador no cuenta como filtro', '', p.sel('regFiltrosCuenta').textContent);
     reg.verRegistro();
     clicIndicador(p, 'activas');
-    var css = leer('admin/iniciativas.css');
+    // La tarjeta que filtra vive en assets/css/kpi.css (compartida con las
+    // demas pestañas); Criterio y el semaforo siguen en iniciativas.css.
+    var css = leer('admin/iniciativas.css'), kpiCss = leer('assets/css/kpi.css');
     Check('KF10 CSS: boton que cubre la tarjeta, Criterio encima, foco visible, marca sin mover la franja',
-      [true, true, true, true, true],
-      [/\.ini-kpi-filtro \{[^}]*position: absolute; inset: 0; z-index: 1;/.test(css),
+      [true, true, true, true, true, false],
+      [/\.kpi-filtro \{[^}]*position: absolute; inset: 0; z-index: 1;/.test(kpiCss),
        /\.ini-kpi-ayuda \{[^}]*z-index: 2;/.test(css),
-       /\.ini-kpi-filtrable:has\(> \.ini-kpi-filtro:focus-visible\) \{ outline: 2px solid var\(--accent\)/.test(css),
-       /\.kpi\.ini-kpi-sel \{[^}]*border-top-color: var\(--accent\)/.test(css) && !/\.kpi\.ini-kpi-sel \{[^}]*border-left/.test(css),
-       /\.ini-semaforo-op:focus-visible \{/.test(css)]);
+       /\.kpi-filtrable:has\(> \.kpi-filtro:focus-visible\) \{ outline: 2px solid var\(--accent/.test(kpiCss),
+       /\.kpi\.kpi-sel \{[^}]*border-top-color: var\(--accent/.test(kpiCss) && !/\.kpi\.kpi-sel \{[^}]*border-left/.test(kpiCss),
+       /\.ini-semaforo-op:focus-visible \{/.test(css),
+       /ini-kpi-filtr|ini-kpi-sel/.test(css)]);
+    // La tarjeta la arma SeleccionKpi (clases + boton), la misma plantilla
+    // de las demas pestañas: sin copia a mano del boton ni de las clases.
+    var regJs = leer('admin/registro-iniciativas.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    Check('KF11 tarjetas con SeleccionKpi.boton/clases, sin plantilla propia',
+      [true, true, false, false],
+      [/seleccion\.boton\(c\.k, c\.l \+ ': ' \+ fmt\(c\.v\), c\.t\)/.test(regJs),
+       /seleccion\.clases\(c\.k\)/.test(regJs),
+       /class="kpi-filtro"/.test(regJs),
+       /' kpi-filtrable'|' kpi-sel'/.test(regJs)]);
   });
 });
 
@@ -2558,9 +2740,31 @@ pruebas.push(function () {
 // El libro se arma con el vendor REAL (experiencia/vendor/xlsx.mini.min.js)
 // y se vuelve a abrir con el mismo vendor para leer lo que quedo escrito.
 var XLSXV = require(path.join(raiz, 'experiencia', 'vendor', 'xlsx.mini.min.js'));
-// Descarga de prueba: guarda bytes y nombre; cuenta descargas y cargas.
+// Respuesta de admin_iniciativas_registro.ashx?export=1 (RegistroExportExtra):
+// columnas de dbo.Problem / dbo.ProblemCategoria que el registro no trae.
+// Incluye filas que NO deben aparecer: un folio que no esta en el registro,
+// una ruta de PRB 1 que el registro no tiene y un folio repetido.
+var EXTRA = {
+  iniciativas: [
+    { folio: 'PRB 2026-000001', gerencia: 'Ger 1', direccion: 'Dirección Ops', tipo_iniciativa: 'Problem',
+      prioridad: 'Alta', impacto: 'Alto', rca: 'Sí', volumetria_original: 1200, f_entrega_prb: '2026-01-15' },
+    { folio: 'PRB 2026-000001', gerencia: 'REPETIDO' },
+    { folio: 'PRB 2026-000005', gerencia: 'Ger 5', direccion: null, tipo_iniciativa: 'Problem',
+      prioridad: 'Media', impacto: null, rca: 'No', volumetria_original: null, f_entrega_prb: null },
+    { folio: 'XXX 2026-999999', gerencia: 'Huerfana' }
+  ],
+  categorias: [
+    { folio: 'PRB 2026-000001', categoria: '/A/Cat 1/Hoja', tipo_ticket: 'Incidente', tipo_iniciativa: 'Problem', mes_reduccion: 3 },
+    { folio: 'PRB 2026-000001', categoria: '/A/Cat 3', tipo_ticket: 'Requerimiento', tipo_iniciativa: 'Mejora', mes_reduccion: null },
+    { folio: 'PRB 2026-000001', categoria: '/A/Otra', tipo_ticket: 'Incidente', tipo_iniciativa: 'Problem', mes_reduccion: 1 },
+    { folio: 'XXX 2026-999999', categoria: '/Z', tipo_ticket: 'Incidente', tipo_iniciativa: 'Problem', mes_reduccion: 1 }
+  ]
+};
+// Descarga de prueba: guarda bytes y nombre; cuenta descargas, cargas y
+// peticiones de ?export=1 (b.pedir, con b.extra como respuesta).
 function Bajada() {
-  var b = { veces: 0, bytes: null, nombre: null, cargas: 0 };
+  var b = { veces: 0, bytes: null, nombre: null, cargas: 0, pedidos: [], extra: Respuesta(200, EXTRA) };
+  b.pedir = function (url) { b.pedidos.push(url); return Promise.resolve(b.extra); };
   b.cargar = function () { b.cargas++; return Promise.resolve(XLSXV); };
   b.bajar = function (bytes, nombre) { b.veces++; b.bytes = bytes; b.nombre = nombre; };
   b.libro = function () { return XLSXV.read(new Uint8Array(b.bytes), { type: 'array' }); };
@@ -2587,22 +2791,26 @@ pruebas.push(function () {
   return esperar().then(function () {
     Check('XD1 boton habilitado con el registro cargado (ADM)', false, p.sel('regDescargar').disabled);
     var antes = cont.n;
-    return reg.descargar(b.cargar, b.bajar, HOY).then(function (r) {
-      Check('XD2 descarga hecha, sin ninguna peticion al servidor', [true, 1, 0], [r, b.veces, cont.n - antes]);
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir).then(function (r) {
+      Check('XD2 descarga hecha: sin releer el registro, UNA peticion ?export=1', [true, 1, 0, ['../handlers/admin_iniciativas_registro.ashx?export=1']],
+        [r, b.veces, cont.n - antes, b.pedidos]);
       Check('XD2 nombre con la fecha, sin filtro', 'Iniciativas_2026-10-22.xlsx', b.nombre);
       var libro = b.libro();
       Check('XD3 .xlsx real (zip PK) con dos hojas', [80, 75, ['Iniciativas', 'Categorías']],
         [b.bytes[0], b.bytes[1], libro.SheetNames]);
       var ini = b.hoja('Iniciativas'), cat = b.hoja('Categorías');
       Check('XD3 encabezados de Iniciativas',
-        ['Código', 'Tipo de iniciativa', 'Título', 'Título del problema', 'Estado', 'Subestado', 'Agrupación', 'Medible',
-         'Product Owner', 'Service Owner', 'Director', 'Fecha de creación', 'Antigüedad (días)', 'Fecha análisis',
-         'Fecha solución', 'Fecha cierre', 'Fecha compromiso vigente', 'Semáforo', 'Categorías', 'Tickets a reducir',
-         'Tickets en riesgo', 'Descripción', 'Observaciones'],
+        ['Código', 'Tipo de iniciativa', 'Título', 'Título del problema', 'Estado', 'Subestado', 'Agrupación',
+         'Tipo Iniciativa (Problem)', 'Medible', 'Prioridad', 'Impacto',
+         'Product Owner', 'Service Owner', 'Director', 'Gerencia', 'Dirección', 'RCA', 'Fecha de creación',
+         'Fecha entrega PRB', 'Antigüedad (días)', 'Fecha análisis',
+         'Fecha solución', 'Fecha cierre', 'Fecha compromiso vigente', 'Semáforo', 'Categorías', 'Volumetría original',
+         'Tickets a reducir', 'Tickets en riesgo', 'Descripción', 'Observaciones'],
         XLSXV.utils.sheet_to_json(libro.Sheets.Iniciativas, { header: 1 })[0]);
       Check('XD3 encabezados de Categorías',
-        ['Código', 'Título', 'Estado de la iniciativa', 'Categoría', 'Categoría N2', 'Agrupación', '% disminución',
-         'Tickets a reducir', 'Fecha análisis', 'Director', 'Product Owner', 'Service Owner'],
+        ['Código', 'Título', 'Estado de la iniciativa', 'Categoría', 'Categoría N2', 'Agrupación', 'Tipo de ticket',
+         'Tipo Iniciativa (categoría)', '% disminución', 'Tickets a reducir', 'Mes reducción', 'Fecha análisis',
+         'Director', 'Product Owner', 'Service Owner'],
         XLSXV.utils.sheet_to_json(libro.Sheets['Categorías'], { header: 1 })[0]);
       Check('XD4 una fila por iniciativa, en el orden de la tabla (la entrada sin folio no sale)',
         folios(p), columna(ini, 'Código'));
@@ -2626,15 +2834,15 @@ pruebas.push(function () {
       var har = ini.filter(function (f) { return f['Código'] === 'HAR 2025-000003'; })[0];
       Check('XD8 no activa: sin fecha compromiso vigente ni semaforo', [null, null, 'No'],
         [har['Fecha compromiso vigente'], har['Semáforo'], har.Medible]);
-      // Fechas como fecha real de Excel: numero de serie (L = Fecha de creacion).
-      var celda = libro.Sheets.Iniciativas.L2;
+      // Fechas como fecha real de Excel: numero de serie (R = Fecha de creacion).
+      var celda = libro.Sheets.Iniciativas.R2;
       Check('XD8 fecha de creacion: serie 46032 (2026-01-10)', ['n', 46032], [celda.t, celda.v]);
       var estilos = b.parte('/xl/styles.xml'), h1 = b.parte('/xl/worksheets/sheet1.xml'), h2 = b.parte('/xl/worksheets/sheet2.xml');
       Check('XD3 formato: estilos propios, encabezado congelado y autofiltro en las dos hojas',
         [true, true, true, true, true, true],
         [/formatCode="dd\/mm\/yyyy"/.test(estilos), /formatCode="0\.0%"/.test(estilos),
          /<pane ySplit="1"[^>]*state="frozen"/.test(h1), /<pane ySplit="1"[^>]*state="frozen"/.test(h2),
-         /<autoFilter ref="A1:W6"/.test(h1), /<autoFilter ref="A1:L6"/.test(h2)]);
+         /<autoFilter ref="A1:AE6"/.test(h1), /<autoFilter ref="A1:O6"/.test(h2)]);
     });
   });
 });
@@ -2654,7 +2862,7 @@ pruebas.push(function () {
     reg.ordenarPor('folio');                 // desc
     reg.abrirDetalle('MAP 2026-000002');
     antes = foto();
-    return reg.descargar(b.cargar, b.bajar, HOY);
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
   }).then(function () {
     Check('XD9 filtro Director: solo sus iniciativas, en el orden de la tabla (desc)',
       ['PRB 2026-000001', 'MAP 2026-000002'], columna(b.hoja('Iniciativas'), 'Código'));
@@ -2665,12 +2873,12 @@ pruebas.push(function () {
     // Busqueda.
     elegir(p, 'regDirector', '');
     p.sel('regBuscar').value = 'REQ'; reg.aplicarBusqueda();
-    return reg.descargar(b.cargar, b.bajar, HOY);
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
   }).then(function () {
     Check('XD9 busqueda REQ', ['REQ 2026-000004'], columna(b.hoja('Iniciativas'), 'Código'));
     p.sel('regBuscar').value = ''; reg.aplicarBusqueda();
     clicIndicador(p, 'cerradas');
-    return reg.descargar(b.cargar, b.bajar, HOY);
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
   }).then(function () {
     Check('XD9 indicador Cerradas', ['HAR 2025-000003'], columna(b.hoja('Iniciativas'), 'Código'));
     clicIndicador(p, 'cerradas');
@@ -2678,7 +2886,7 @@ pruebas.push(function () {
     p.sel('regBuscar').value = 'no-existe-zzz'; reg.aplicarBusqueda();
     Check('XD11 sin resultados: boton deshabilitado', true, p.sel('regDescargar').disabled);
     var veces = b.veces;
-    return reg.descargar(b.cargar, b.bajar, HOY).then(function (r) {
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir).then(function (r) {
       Check('XD11 sin resultados: no baja nada y lo dice', [false, veces, false, true],
         [r, b.veces, p.sel('regDescargaMsg').hidden, /nada que descargar/.test(p.sel('regDescargaMsg').textContent)]);
       Check('XD12 ninguna descarga pidio nada al servidor (solo la carga)', 1, cont.n);
@@ -2700,7 +2908,7 @@ pruebas.push(function () {
   return esperar().then(function () {
     Check('XD13 la tabla muestra una pagina', [100, false], [folios(p).length, p.sel('regMas').hidden]);
     // Doble clic: un solo libro.
-    var uno = reg.descargar(b.cargar, b.bajar, HOY), dos = reg.descargar(b.cargar, b.bajar, HOY);
+    var uno = reg.descargar(b.cargar, b.bajar, HOY, b.pedir), dos = reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
     Check('XD14 mientras prepara: boton deshabilitado y rotulo', [true, 'Preparando…'],
       [p.sel('regDescargar').disabled, p.sel('regDescargar').textContent]);
     return Promise.all([uno, dos]).then(function (r) {
@@ -2720,7 +2928,7 @@ pruebas.push(function () {
   var p = Pagina(ok(DATOS), null, 'MOD'), reg = p.registro, b = Bajada();
   return esperar().then(function () {
     Check('XD15 MOD tambien ve el boton habilitado', false, p.sel('regDescargar').disabled);
-    return reg.descargar(function () { return Promise.reject(new Error('no se pudo cargar x.js')); }, b.bajar, HOY);
+    return reg.descargar(function () { return Promise.reject(new Error('no se pudo cargar x.js')); }, b.bajar, HOY, b.pedir);
   }).then(function (r) {
     Check('XD15 fallo: aviso visible, sin descarga, boton habilitado de nuevo',
       [false, 0, false, 'No se pudo descargar el Excel: no se pudo cargar x.js', false],
@@ -2734,23 +2942,23 @@ pruebas.push(function () {
   var preguntas = [], respuesta = false;
   reg.confirmar = function (m) { preguntas.push(m); return respuesta; };
   return esperar().then(function () {
-    return reg.descargar(b.cargar, b.bajar, HOY);
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
   }).then(function (r) {
     Check('XD17 sin filtros: pregunta con la cifra', ['No hay filtros aplicados: se descargarán las 5 iniciativas del registro completo. ¿Continuar?'], preguntas);
     Check('XD17 cancelar: no carga ni baja nada, sin mensaje, boton habilitado', [false, 0, 0, true, false],
       [r, b.cargas, b.veces, p.sel('regDescargaMsg').hidden, p.sel('regDescargar').disabled]);
     respuesta = true;
-    return reg.descargar(b.cargar, b.bajar, HOY);
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
   }).then(function (r) {
     Check('XD17 aceptar: baja las 5', [true, 1, 5], [r, b.veces, b.hoja('Iniciativas').length]);
     preguntas = [];
     elegir(p, 'regDirector', 'Dir A');
-    return reg.descargar(b.cargar, b.bajar, HOY);
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
   }).then(function () {
     Check('XD17 con un filtro no pregunta', [[], 2], [preguntas, b.veces]);
     elegir(p, 'regDirector', '');
     p.sel('regBuscar').value = 'PRB'; reg.aplicarBusqueda();
-    return reg.descargar(b.cargar, b.bajar, HOY);
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
   }).then(function () {
     Check('XD17 la busqueda cuenta como filtro: no pregunta', [[], 3], [preguntas, b.veces]);
   });
@@ -2761,17 +2969,115 @@ pruebas.push(function () {
   // fetch ni POST, y el unico origen sigue siendo el handler con ADM/MOD.
   var libro = leer('admin/libro-iniciativas.js');
   var reg = leer('admin/registro-iniciativas.js');
-  var desc = reg.slice(reg.indexOf('    descargar(cargar, bajar, hoy) {'), reg.indexOf('    textoVacio() {'));
+  var desc = reg.slice(reg.indexOf('    descargar(cargar, bajar, hoy, pedir) {'), reg.indexOf('    textoVacio() {'));
   var exp = reg.slice(reg.indexOf('  var ExportRegistro = {'), reg.indexOf('  // SheetJS: el MISMO vendor'));
-  Check('XD16 la descarga no pide nada ni escribe', [true, true, false, false, false],
-    [desc.length > 0, exp.length > 0, /fetch|XMLHttpRequest|\.ashx/.test(libro), /fetch|pedir|\.ashx|POST/.test(desc), /fetch|\.ashx|POST/.test(exp)]);
+  // La unica peticion de la descarga: GET (fetch sin method ni body) a
+  // URL_EXPORT, el mismo handler del registro con ?export=1.
+  var llamadas = desc.match(/fetch\([^)]*\)/g) || [];
+  Check('XD16 la descarga solo lee: un GET a URL_EXPORT, nada mas', [true, true, false, ["fetch(url, { cache: 'no-store' })"], true, false, false, false],
+    [desc.length > 0, exp.length > 0, /fetch|XMLHttpRequest|\.ashx/.test(libro), llamadas, /URL_EXPORT\)/.test(desc),
+     /POST|method|body:|\.ashx/.test(desc), /fetch|\.ashx|POST/.test(exp), /export=1/.test(desc)]);
+  Check('XD16 URL_EXPORT = el handler del registro con ?export=1', true,
+    /var URL_EXPORT = URL_REGISTRO \+ '\?export=1';/.test(reg));
   Check('XD16 el registro sigue exigiendo ADM/MOD antes de leer', true,
     /if \(!AccesoAdmin\.Exigir\(context\)\) return;/.test(leer('handlers/admin_iniciativas_registro.ashx')));
+  var ashx = leer('handlers/admin_iniciativas_registro.ashx');
+  Check('XD16 ?export=1 va DESPUES de AccesoAdmin.Exigir y solo acepta 1', [true, true, true],
+    [ashx.indexOf('if (!AccesoAdmin.Exigir(context)) return;') >= 0 &&
+       ashx.indexOf('if (!AccesoAdmin.Exigir(context)) return;') < ashx.indexOf('QueryString["export"]'),
+     /if \(export != "1"\)\s*\{\s*context\.Response\.StatusCode = 400;/.test(ashx),
+     /RegistroExportExtra\(\)/.test(ashx)]);
+  var cs = leer('App_Code/ExperienciaRegistro.cs');
+  var sqlExtra = cs.slice(cs.indexOf('SQL_EXPORT_EXTRA ='), cs.indexOf('public static Dictionary<string, object> RegistroExportExtra()'));
+  Check('XD16 SQL de ?export=1: dos SELECT de vigentes, sin escribir ni parametros', [true, 2, false, false],
+    [sqlExtra.length > 0, (sqlExtra.match(/SELECT /g) || []).length,
+     /\b(INSERT|UPDATE|DELETE|MERGE|EXEC|DROP|ALTER|CREATE|TRUNCATE)\b/i.test(sqlExtra), /@/.test(sqlExtra)]);
   Check('XD16 ningun handler nuevo de exportacion de iniciativas', [], fs.readdirSync(path.join(raiz, 'handlers'))
     .filter(function (h) { return /iniciativas.*export|export.*iniciativas/i.test(h); }));
   Check('XD16 libro-iniciativas.js antes de registro-iniciativas.js', true,
     /libro-iniciativas\.js"><\/script>\s*<script src="registro-iniciativas\.js/.test(leer('admin/iniciativas.html')));
   return Promise.resolve();
+});
+
+// ---------------------------------------------------------------------------
+// XE) Columnas de ?export=1: en su hoja, cruzadas por folio / ruta, sin
+// filas nuevas; la carga normal del registro no las pide; fallos sin Excel.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var urls = [];
+  var p = Pagina(function (url) { urls.push(url); return Promise.resolve(Respuesta(200, DATOS)); }), reg = p.registro, b = Bajada();
+  return esperar().then(function () {
+    Check('XE1 cargar el registro NO pide ?export=1', [['../handlers/admin_iniciativas_registro.ashx'], []],
+      [urls, b.pedidos]);
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
+  }).then(function () {
+    var ini = b.hoja('Iniciativas'), cat = b.hoja('Categorías');
+    function de(folio) { return ini.filter(function (f) { return f['Código'] === folio; })[0]; }
+    var prb1 = de('PRB 2026-000001'), prb5 = de('PRB 2026-000005'), har = de('HAR 2025-000003');
+    var CAMPOS = ['Gerencia', 'Dirección', 'Tipo Iniciativa (Problem)', 'Prioridad', 'Impacto', 'RCA', 'Volumetría original'];
+    function campos(f) { return CAMPOS.map(function (k) { return f[k]; }); }
+    Check('XE2 Iniciativas: columnas de dbo.Problem de PRB 1 (la primera fila del folio, no la repetida)',
+      ['Ger 1', 'Dirección Ops', 'Problem', 'Alta', 'Alto', 'Sí', 1200], campos(prb1));
+    Check('XE2 Fecha entrega PRB como fecha real (2026-01-15 = 46037)', ['n', 46037], [b.libro().Sheets.Iniciativas.S2.t, b.libro().Sheets.Iniciativas.S2.v]);
+    Check('XE3 sin categoria: sus columnas de Problem si llegan; nulos vacios, sin 0', ['Ger 5', null, 'Problem', 'Media', null, 'No', null],
+      campos(prb5));
+    Check('XE3 iniciativa sin fila en ?export=1: columnas vacias, la fila sigue', [null, null, null, null, null, null, null],
+      campos(har));
+    Check('XE4 Iniciativas: mismas filas y una por codigo; la huerfana de ?export=1 no entra', [5, 5, false],
+      [ini.length, Object.keys(columna(ini, 'Código').reduce(function (o, k) { o[k] = 1; return o; }, {})).length,
+       columna(ini, 'Código').indexOf('XXX 2026-999999') >= 0]);
+    Check('XE5 Categorías: TipoTicket / TipoIniciativa / MesReduccion por (folio, ruta)',
+      [['/A/Cat 1/Hoja', 'Incidente', 'Problem', 3], ['/A/Cat 3', 'Requerimiento', 'Mejora', null]],
+      cat.slice(0, 2).map(function (f) { return [f['Categoría'], f['Tipo de ticket'], f['Tipo Iniciativa (categoría)'], f['Mes reducción']]; }));
+    Check('XE5 Categorías: las mismas 5 filas reales; /A/Otra y la huerfana no se agregan', [5, false, false],
+      [cat.length, columna(cat, 'Categoría').indexOf('/A/Otra') >= 0, columna(cat, 'Código').indexOf('XXX 2026-999999') >= 0]);
+    Check('XE5 categoria sin fila en ?export=1: vacias', [null, null, null],
+      (function (f) { return [f['Tipo de ticket'], f['Tipo Iniciativa (categoría)'], f['Mes reducción']]; })(
+        cat.filter(function (f) { return f['Código'] === 'MAP 2026-000002'; })[0]));
+    Check('XE6 sin categoria: ninguna fila en Categorías', false, columna(cat, 'Código').indexOf('PRB 2026-000005') >= 0);
+    Check('XE6 columnas de antes intactas', [150, 'PO 1', 'Atrasada', 0.5],
+      [ini[0]['Tickets a reducir'], ini[0]['Product Owner'], ini[0]['Semáforo'], cat[0]['% disminución']]);
+    // Filtro: lo extra no cambia que filas salen.
+    elegir(p, 'regDirector', 'Dir B');
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
+  }).then(function () {
+    Check('XE7 con filtro Director: solo sus iniciativas, aunque ?export=1 traiga todas',
+      ['REQ 2026-000004', 'PRB 2026-000005', 'HAR 2025-000003'], columna(b.hoja('Iniciativas'), 'Código'));
+    Check('XE7 una peticion ?export=1 por descarga (no una por iniciativa)', 2, b.pedidos.length);
+  });
+});
+
+pruebas.push(function () {
+  // Fallos de ?export=1: no hay Excel, el mensaje lo dice, el boton vuelve.
+  var p = Pagina(ok(DATOS)), reg = p.registro, b = Bajada();
+  function intento(respuesta, caso, texto) {
+    b.extra = respuesta;
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir).then(function (r) {
+      Check(caso, [false, 0, false, texto, false],
+        [r, b.veces, p.sel('regDescargaMsg').hidden, p.sel('regDescargaMsg').textContent, p.sel('regDescargar').disabled]);
+    });
+  }
+  return esperar().then(function () {
+    return intento(Respuesta(500, { error: 'Fallo la consulta.', tipo: 'SqlException' }),
+      'XE8 500 del servidor: sin Excel, su mensaje', 'No se pudo descargar el Excel: Fallo la consulta.');
+  }).then(function () {
+    return intento(Respuesta(403, { error: 'Acceso denegado.' }),
+      'XE8 403 (sin ADM/MOD): sin Excel', 'No se pudo descargar el Excel: Acceso denegado.');
+  }).then(function () {
+    return intento(Respuesta(200, { iniciativas: [] }),
+      'XE8 respuesta sin categorias: sin Excel a medias', 'No se pudo descargar el Excel: la respuesta del servidor no trae las columnas del Excel.');
+  }).then(function () {
+    b.pedir = function () { return Promise.reject(new TypeError('Failed to fetch')); };
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir).then(function (r) {
+      Check('XE8 red caida: sin Excel', [false, 0, 'No se pudo descargar el Excel: No se pudo conectar con el servidor.'],
+        [r, b.veces, p.sel('regDescargaMsg').textContent]);
+      // Sin resultados no se pide nada.
+      var pedidos = 0;
+      p.sel('regBuscar').value = 'no-existe-zzz'; reg.aplicarBusqueda();
+      return reg.descargar(b.cargar, b.bajar, HOY, function () { pedidos++; return Promise.resolve(Respuesta(200, EXTRA)); })
+        .then(function (r2) { Check('XE9 sin resultados: ni peticion ni Excel', [false, 0], [r2, pedidos]); });
+    });
+  });
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

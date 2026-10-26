@@ -9,7 +9,8 @@
 //        folio, llave (GUID por borrador: el reintento no duplica), tipo
 //        (fecha | estado | categorias | otros | datos), campo_fecha (f_analisis |
 //        f_solucion | f_cierre) + fecha_nueva (aaaa-mm-dd), estado_nuevo,
-//        subestado_nuevo, pares pct_categoria / pct_valor (ligadas, en %),
+//        subestado_nuevo (solo ADM: con otro rol 422 en subestado_nuevo),
+//        pares pct_categoria / pct_valor (ligadas, en %),
 //        agregar_categoria / agregar_pct (del catalogo, en %), motivo.
 //        tipo datos (sql/25, PersistenciaSolicitudesCambio.SolicitaDatos):
 //        titulo_nuevo / po_nuevo / so_nuevo, la clave PRESENTE = se pide
@@ -123,6 +124,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
     private static object Enviar(HttpContext context, string usuario, string rol)
     {
         var p = PeticionSolicitudCambio.DesdeFormulario(context.Request.Form);
+        p.ExigirSubestadoDeAdm(rol);
         if (!p.Valida)
         {
             context.Response.StatusCode = 422;

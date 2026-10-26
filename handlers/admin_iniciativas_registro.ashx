@@ -27,6 +27,16 @@
 // Toda la logica es la de Experiencia: ExperienciaQueries.RegistroIniciativas
 // (App_Code/ExperienciaRegistro.cs) reusa sus lecturas y su semaforo.
 //
+// GET ?export=1 (solo al pulsar "Descargar iniciativas"): las columnas que
+// el registro no trae y el Excel si, de todas las vigentes:
+//     { "iniciativas": [ { folio, gerencia, direccion, tipo_iniciativa,
+//                          prioridad, impacto, rca, volumetria_original,
+//                          f_entrega_prb } ],                (dbo.Problem)
+//       "categorias":  [ { folio, categoria, tipo_ticket, tipo_iniciativa,
+//                          mes_reduccion } ] }      (dbo.ProblemCategoria)
+// (ExperienciaQueries.RegistroExportExtra). El navegador las cruza con lo
+// que ya filtro; el servidor no recibe folios. export distinto de 1: 400.
+//
 // SOLO LECTURA: SELECT sobre dbo.vw_ProblemCategoria, dbo.Problem,
 // dbo.CatPrefijoProblem, dbo.ProblemCategoria, dbo.CatCategoriaDueno y
 // dbo.CatPersona (y dbo.Problem.Prefijo por folio + dbo.CatPrefijoProblem para el
@@ -34,7 +44,8 @@
 // No crea ni cambia nada en la base.
 //
 // ACCESO: AccesoAdmin.Exigir (rol ADM o MOD en dbo.UsuariosAdmin); el
-// resto recibe 403 antes de tocar la base.
+// resto recibe 403 antes de tocar la base. "subestado" de cada iniciativa
+// y "subestados_problem" salen solo con rol ADM.
 //
 // POR QUE NO USA DashboardHandler.Responder: el mismo motivo que
 // experiencia.ashx. Descripcion y Observaciones de ~1000 iniciativas pueden
@@ -60,7 +71,33 @@ public class AdminIniciativasRegistro : IHttpHandler
 
         try
         {
+            // ?export=1: SOLO las columnas extra de "Descargar iniciativas"
+            // (ExperienciaQueries.RegistroExportExtra, dos SELECT), detras
+            // del mismo AccesoAdmin.Exigir. Sin el parametro, el registro de
+            // siempre, que no las lee. Otro valor: 400.
+            var export = context.Request.QueryString["export"];
+            if (export != null)
+            {
+                if (export != "1")
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.TrySkipIisCustomErrors = true;
+                    var malo = new Dictionary<string, object>
+                    {
+                        { "error", "Parametro export invalido: solo se acepta export=1." },
+                        { "tipo", "ParametroInvalido" },
+                    };
+                    context.Response.Write(serializador.Serialize(malo));
+                    return;
+                }
+                context.Response.Write(serializador.Serialize(ExperienciaQueries.RegistroExportExtra()));
+                return;
+            }
+
             var registro = ExperienciaQueries.RegistroIniciativas();
+            // Subestado: solo ADM lo ve (ExperienciaQueries.OcultarSubestado).
+            // Ocultarlo en la pagina no basta: sin ADM no sale del servidor.
+            if (AccesoAdmin.Rol(context) != RolAdmin.Adm) ExperienciaQueries.OcultarSubestado(registro);
             // Si "Crear iniciativa" / "Modificar" guardan o solo validan
             // (PersistenciaGestionAdmin, const): la pagina rotula sus botones
             // con esto y nunca promete un guardado que no ocurre.

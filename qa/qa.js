@@ -183,6 +183,7 @@
   ];
 
   function kpisEnEspera(valor) {
+    estado.kpis = null;
     $('kpis').innerHTML = KPIS.map(function (k) {
       return tarjeta(k[0] + ' kpi-espera', k[1], valor, k[2]);
     }).join('');
@@ -368,15 +369,41 @@
 
 
   // ----------------------------------------------------------------- KPIs
-  function tarjeta(clase, titulo, valor, nota) {
-    return '<div class="kpi ' + clase + '">' +
+  /* "Tickets incorrectos" abre el detalle con Validacion = Incorrecto, lo
+     mismo que cuenta: un clic lo pone (sin tocar Grupo, Tecnico ni Grupo
+     correcto), otro clic lo quita y el detalle lista todos los estados del
+     rango, como la × de la etiqueta "Validacion". El estado es el de
+     siempre, estado.filtros.validacion: SeleccionKpi pone la mecanica, asi
+     que la dona y la × tambien mueven la marca. Las cifras no cambian.
+     Las demas tarjetas no abren nada: Total tickets listaria toda la vista
+     (qa.ashx solo resuelve en SQL el filtro Incorrecto), el % es un
+     cociente, y ayer / semana anterior son un dia que el detalle no sabe
+     filtrar. */
+  var KPI_INCORRECTOS = 'incorrectos';
+  var SK = window.SeleccionKpi;
+  var seleccion = SK ? new SK({ valida: function (k) { return k === KPI_INCORRECTOS; } }) : null;
+  function marcarDesdeDetalle() {
+    if (seleccion) seleccion.clave = estado.detalleAbierto && estado.filtros.validacion === 'Incorrecto' ? KPI_INCORRECTOS : '';
+  }
+
+  // k: la clave de la tarjeta que abre el detalle.
+  function tarjeta(clase, titulo, valor, nota, k) {
+    var filtra = !!(k && seleccion);
+    return '<div class="kpi ' + clase + (filtra ? seleccion.clases(k) : '') + '">' +
       '<div class="kpi-tit">' + esc(titulo) + '</div>' +
       '<div class="kpi-val">' + esc(valor) + '</div>' +
       (nota ? '<div class="kpi-nota">' + esc(nota) + '</div>' : '') +
+      (filtra ? seleccion.boton(k, titulo + ': ' + valor, 'Ver el detalle de los incorrectos') : '') +
       '</div>';
   }
 
+  function repintarKpis() {
+    if (estado.kpis) pintarKpis(estado.kpis.resumen, estado.kpis.historico);
+  }
+
   function pintarKpis(resumen, historico) {
+    estado.kpis = { resumen: resumen, historico: historico };
+    marcarDesdeDetalle();
     var total = resumen.totalTickets;
     var incorrectos = resumen.incorrectos;
     var pct = resumen.incorrectosPct;
@@ -385,7 +412,7 @@
     html += tarjeta('kpi-azul', 'Total tickets',
       total === undefined ? 'n/d' : NUM.format(total), 'Suma ultimos 15 dias');
     html += tarjeta('kpi-rojo', 'Tickets incorrectos',
-      incorrectos === undefined ? 'n/d' : NUM.format(incorrectos), 'Validacion = Incorrecto (suma 15 dias)');
+      incorrectos === undefined ? 'n/d' : NUM.format(incorrectos), 'Validacion = Incorrecto (suma 15 dias)', KPI_INCORRECTOS);
     html += tarjeta('kpi-ambar', '% incorrectos',
       pct === undefined ? 'n/d' : NUM2.format(pct) + '%', 'Sobre el total del rango');
 
@@ -684,6 +711,7 @@
   function cargarDetalle() {
     estado.detalleAbierto = true;
     pintarFiltros();
+    repintarKpis();     // la marca de "Tickets incorrectos" sigue al filtro
 
     $('detalle-cargando').hidden = false;
     $('detalle-error').hidden = true;
@@ -779,6 +807,19 @@
       estado.filtros = filtrosPorDefecto();
       estado.pagina = 1;
       cargarDetalle();
+    });
+
+    // "Tickets incorrectos" (ver KPI_INCORRECTOS).
+    if (SK) SK.escuchar([$('kpis')], 'data-indicador', function (k) {
+      if (!estado.kpis) return;
+      marcarDesdeDetalle();
+      seleccion.alternar(k);
+      estado.filtros.validacion = seleccion.clave ? 'Incorrecto' : null;
+      estado.pagina = 1;
+      cargarDetalle();
+      SK.enfocar([$('kpis')], 'data-indicador', k);
+      var card = $('btn-detalle').closest ? $('btn-detalle').closest('.card') : null;
+      if (seleccion.clave && card) card.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
     $('sel-tam').addEventListener('change', function () {

@@ -8,7 +8,12 @@
 //     (Dentro = 'Dentro SLA' + 'Dentro SLA(Subestado)');
 //   - 'Tramite de compra' no es ni dentro ni fuera: va contado en el pie;
 //   - el cross-filter por lider recorta tambien la tarjeta de SLA;
-//   - el semaforo sigue los cortes 5% / 15% del correo de direccion.
+//   - el semaforo sigue los cortes 5% / 15% del correo de direccion;
+//   - "Criticos" es la unica tarjeta que filtra (SeleccionKpi): su marca
+//     sigue a filtro.prioridad = 'Critica' (la barra Critica), las cifras
+//     no cambian, y el pie dice "sobre lo filtrado" solo con Lider o Grupo;
+//   - "Limpiar" (recarga, que reinicia el filtro) deja Criticos sin marca,
+//     tambien tras cambiar a mano la barra de prioridad.
 //
 // NO forma parte del sitio. Recorta las funciones de backlog/backlog.js -sin
 // copiarlas- y las corre con un document de mentira.
@@ -41,6 +46,13 @@ function recortar(nombre, sangria) {
   var fin = fuente.indexOf('\n' + sangria + '}\n', ini);
   return fuente.slice(ini, fin + sangria.length + 3);
 }
+// Desde `desde` hasta el cierre de la funcion `hasta` (sangria de dos).
+function tramo(desde, hasta) {
+  var ini = fuente.indexOf(desde);
+  var fn = fuente.indexOf('\n  function ' + hasta + '(', ini);
+  if (ini < 0 || fn < 0) { console.log('FAIL  ' + desde + ' / ' + hasta + ' no estan en backlog.js'); process.exit(1); }
+  return fuente.slice(ini, fuente.indexOf('\n  }\n', fn) + 5);
+}
 function linea(prefijo) {
   var ini = fuente.indexOf(prefijo);
   if (ini < 0) { console.log('FAIL  ' + prefijo + ' no esta en backlog.js'); process.exit(1); }
@@ -49,6 +61,8 @@ function linea(prefijo) {
 
 var nodos = { 'kpis-bl': { innerHTML: '' }, 'f-corte-bl': { value: '2026-10-19' } };
 var documento = { getElementById: function (id) { return nodos[id]; } };
+var ventana = {};
+(new Function('window', fs.readFileSync(path.join(raiz, 'assets', 'js', 'seleccion-kpi.js'), 'utf8')))(ventana);
 
 var codigo = [
   linea('const FMT = '), linea('const PCT = '),
@@ -56,10 +70,11 @@ var codigo = [
   linea('const SORT_MAS_30 = '),
   'let datos = null;',
   'const filtro = { lider: null, grupo: null, prioridad: null, aging: null };',
+  tramo('  const KPI_CRITICOS = ', 'marcarKpis'),
   recortar('hayFiltro', '  '), recortar('porLiderGrupo', '  '), recortar('renderKpis', '  '),
   'return { renderKpis: renderKpis, filtro: filtro, poner: function (d) { datos = d; } };',
 ].join('\n');
-var m = (new Function('document', codigo))(documento);
+var m = (new Function('document', 'window', codigo))(documento, ventana);
 
 // Cifras del corte 2026-10-19 en la VM (diag_backlog_subestados.sql sec 8):
 // Fuera SLA 3173, Tramite de compra 1042, Dentro SLA 179, Dentro SLA(Subestado)
@@ -156,6 +171,65 @@ t = tarjeta('Dentro / Fuera SLA');
 Check('sin filas: cifras en cero', '0|0', cifra(t, 'Dentro SLA') + '|' + cifra(t, 'Fuera SLA'));
 Check('sin filas: sin semaforo', true, t.indexOf('">') === 0);
 m.filtro.lider = null;
+
+// ---- "Criticos" filtra (SeleccionKpi) ------------------------------------
+function pulsada(rotulo) {
+  var r = /aria-pressed="(true|false)"/.exec(tarjeta(rotulo));
+  return r ? r[1] : '(sin boton)';
+}
+function val(rotulo) { return /<div class="val">([^<]*)<\/div>/.exec(tarjeta(rotulo))[1]; }
+m.renderKpis();
+Check('solo Criticos lleva boton que filtra', 1, (nodos['kpis-bl'].innerHTML.match(/class="kpi-filtro"/g) || []).length);
+Check('Criticos: boton con data-indicador y sin elegir', 'false', pulsada('Criticos'));
+Check('Criticos: tarjeta filtrable sin marca', true,
+  tarjeta('Criticos').indexOf('kpi-filtrable') >= 0 && tarjeta('Criticos').indexOf('kpi-sel') < 0);
+Check('Criticos: nombre accesible con la cifra', true, tarjeta('Criticos').indexOf('aria-label="Criticos: 10"') >= 0);
+Check('Backlog no filtra', '(sin boton)', pulsada('Backlog'));
+Check('pie sin filtro: el corte', true, tarjeta('Backlog').indexOf('corte 2026-10-19') >= 0);
+m.filtro.prioridad = 'Critica';
+m.renderKpis();
+Check('prioridad Critica: Criticos marcada', 'true', pulsada('Criticos'));
+Check('prioridad Critica: tarjeta con kpi-sel', true, tarjeta('Criticos').indexOf('kpi-sel') >= 0);
+Check('prioridad Critica: las cifras no cambian', [N(4522), '10'].join('|'), [val('Backlog'), val('Criticos')].join('|'));
+Check('prioridad Critica: el pie NO dice "sobre lo filtrado"', false, tarjeta('Backlog').indexOf('sobre lo filtrado') >= 0);
+m.filtro.prioridad = 'Alta';
+m.renderKpis();
+Check('otra prioridad (barra Alta): Criticos sin marca', 'false', pulsada('Criticos'));
+m.filtro.prioridad = 'Critica';
+m.filtro.lider = 'Ana';
+m.renderKpis();
+Check('con Lider: el pie dice "sobre lo filtrado"', true, tarjeta('Backlog').indexOf('sobre lo filtrado') >= 0);
+Check('con Lider y Critica: Criticos sigue marcada', 'true', pulsada('Criticos'));
+m.filtro.prioridad = null;
+m.filtro.lider = null;
+
+// ---- "Limpiar" con Criticos elegida ------------------------------------
+// Limpiar recarga (cargarTodo) y la carga, con datos nuevos, reinicia el
+// cross-filter ANTES de repintar: es la regla de siempre del Backlog. Se
+// recortan las dos piezas y se corre el reinicio sobre el filtro.
+var LIMPIAR = fuente.slice(fuente.indexOf("getElementById('btn-limpiar-bl').addEventListener('click'"),
+  fuente.indexOf('\n    });\n', fuente.indexOf("getElementById('btn-limpiar-bl')")));
+var CARGA = fuente.slice(fuente.indexOf('\n  async function cargarTodo('),
+  fuente.indexOf('\n  }\n', fuente.indexOf('\n  async function cargarTodo(')));
+var REINICIO = "Object.keys(filtro).forEach(k => { filtro[k] = null; });";
+Check('LB0 Limpiar recarga; la carga reinicia el filtro antes de repintar', [true, true],
+  [/cargarTodo\(\);\s*$/.test(LIMPIAR), CARGA.indexOf(REINICIO) >= 0 && CARGA.indexOf(REINICIO) < CARGA.indexOf('renderTodo();')]);
+var reiniciar = new Function('filtro', REINICIO);
+m.filtro.prioridad = 'Critica';
+m.renderKpis();
+Check('LB1a antes: Criticos marcada', 'true', pulsada('Criticos'));
+reiniciar(m.filtro); m.renderKpis();
+Check('LB1 Limpiar: Criticos sin marca ni kpi-sel, aria-pressed="false", cifras del corte',
+  ['false', false, N(4522), '10', true], [pulsada('Criticos'), tarjeta('Criticos').indexOf('kpi-sel') >= 0,
+    val('Backlog'), val('Criticos'), tarjeta('Backlog').indexOf('corte 2026-10-19') >= 0]);
+// Criticos y luego la barra Alta a mano (y un lider): Limpiar quita todo.
+m.filtro.prioridad = 'Critica'; m.renderKpis();
+m.filtro.prioridad = 'Alta'; m.filtro.lider = 'Ana'; m.renderKpis();
+Check('LB2a antes: barra Alta a mano tras Criticos, con lider', ['false', true],
+  [pulsada('Criticos'), tarjeta('Backlog').indexOf('sobre lo filtrado') >= 0]);
+reiniciar(m.filtro); m.renderKpis();
+Check('LB2 Limpiar: filtro vacio, Criticos sin marca, cifras del corte', JSON.stringify([[null, null, null, null], 'false', N(4522)]),
+  JSON.stringify([[m.filtro.lider, m.filtro.grupo, m.filtro.prioridad, m.filtro.aging], pulsada('Criticos'), val('Backlog')]));
 
 console.log(fallos === 0 ? '\nTODO OK' : '\n' + fallos + ' FALLO(S)');
 process.exit(fallos === 0 ? 0 : 1);

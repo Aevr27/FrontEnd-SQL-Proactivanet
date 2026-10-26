@@ -326,26 +326,9 @@
   .kpis.ini-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .ini-kpi { cursor: default; }
-/* Tarjeta que filtra: un boton transparente la cubre (.ini-kpi-filtro);
-   la franja "Criterio" queda encima (z-index 2) y no filtra. La marca de
-   la elegida es un anillo y un tinte: no mueve nada ni tapa la franja
-   izquierda de color, que conserva su significado. */
-.ini-kpi.ini-kpi-filtrable { cursor: pointer; }
-.ini-kpi-filtro {
-  position: absolute; inset: 0; z-index: 1;
-  margin: 0; padding: 0; border: 0; border-radius: inherit;
-  background: transparent; cursor: pointer;
-}
-.ini-kpi-filtro:focus { outline: none; }
-.ini-kpi-filtrable:hover { border-top-color: var(--accent-line); border-right-color: var(--accent-line); border-bottom-color: var(--accent-line); }
-.ini-kpi-filtrable:has(> .ini-kpi-filtro:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ini-kpi-filtrable:has(> .ini-kpi-filtro:active) { transform: translateY(0); box-shadow: var(--shadow); }
-.kpi.ini-kpi-sel {
-  border-top-color: var(--accent); border-right-color: var(--accent); border-bottom-color: var(--accent);
-  box-shadow: 0 0 0 1px var(--accent), var(--shadow-md);
-  background: var(--accent-soft);
-}
-.kpi.ini-kpi-sel .lbl { color: var(--accent-ink); }
+/* Tarjeta que filtra: .kpi-filtrable / .kpi-filtro / .kpi-sel, en
+   assets/css/kpi.css (compartidas con las demas pestañas). La franja
+   "Criterio" queda encima del boton (z-index 2) y no filtra. */
 /* En telefono, dos por fila: apiladas, las cuatro empujaban la lista una
    pantalla entera hacia abajo. */
 @media (max-width: 560px) {
