@@ -233,17 +233,28 @@ public static class PlanificadorGestionAdmin
     // En Solucion NO llena FechaSolucion: es la fecha COMPROMISO del
     // semaforo (con hoy saldria Atrasada al dia siguiente). Diferido hasta
     // revisar si hace falta una fecha real de solucion.
+    //
+    // La misma regla con el compromiso a 15 dias (2026-10-26, decidida por
+    // el negocio): pasar a En Analisis llena FechaSolucion y pasar a En
+    // Monitoreo llena FechaCierre con el dia de la aprobacion (plan.Hoy: el
+    // dia en que ADM guarda el cambio) + DiasCompromiso, solo si quedan
+    // vacias. OJO: solo la edicion directa pasa por aqui; una solicitud de
+    // cambio aplicada escribe en adm.usp_SolicitudCambio_Aplicar (sql/22,
+    // sql/25), que no aplica estas reglas ni la de Cerrado.
     public const string EstadoCerrado = "Cerrado";
+    public const string EstadoEnAnalisis = "En An\u00e1lisis";
+    public const string EstadoEnMonitoreo = "En Monitoreo";
+    public const int DiasCompromiso = 15;
 
     private static void FechaAlEntrar(PlanModificarAdmin plan, IniciativaActual actual,
-                                      string estado, string campo, string vigente)
+                                      string estado, string campo, string vigente, int dias = 0)
     {
         string nuevoEstado, pedida;
         if (!plan.Problem.TryGetValue(PeticionModificarAdmin.CEstado, out nuevoEstado)) return;
         if (!MismoEstado(nuevoEstado, estado) || MismoEstado(actual.Estado, estado)) return;
         var queda = plan.Problem.TryGetValue(campo, out pedida) ? pedida : vigente;
         if (Limpio(queda) != null) return;
-        plan.Problem[campo] = FechasGestionAdmin.Iso(plan.Hoy);
+        plan.Problem[campo] = FechasGestionAdmin.Iso(plan.Hoy.AddDays(dias));
     }
 
     // Sin mayusculas, acentos ni espacios de mas (como Clave de
@@ -323,6 +334,8 @@ public static class PlanificadorGestionAdmin
             plan.Problem[campo] = Limpio(nuevo) ?? "";
         }
         FechaAlEntrar(plan, actual, EstadoCerrado, PeticionModificarAdmin.CFCierre, actual.FCierre);
+        FechaAlEntrar(plan, actual, EstadoEnAnalisis, PeticionModificarAdmin.CFSolucion, actual.FSolucion, DiasCompromiso);
+        FechaAlEntrar(plan, actual, EstadoEnMonitoreo, PeticionModificarAdmin.CFCierre, actual.FCierre, DiasCompromiso);
 
         foreach (var x in p.Pcts)
         {

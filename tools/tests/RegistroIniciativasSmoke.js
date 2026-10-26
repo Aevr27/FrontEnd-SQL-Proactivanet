@@ -762,6 +762,50 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
+// SB) Subestado solo ADM (2026-10-26): "Solicitar cambios" ofrece Nuevo
+// Subestado solo con rol ADM. Aunque el registro trajera la lista (el
+// servidor no la manda a otro rol), MOD no la ve y aun puede pedir el Estado.
+// ---------------------------------------------------------------------------
+[['ADM', true], ['MOD', false], [null, false]].forEach(function (caso) {
+  pruebas.push(function () {
+    var datos = JSON.parse(JSON.stringify(DATOS));
+    datos.estados_problem = ['En Análisis', 'En Solución', 'Cerrado'];
+    datos.subestados_problem = ['Solucionado'];
+    var p = Pagina(ok(datos), function () { return nunca(); }, caso[0]);
+    var nombre = caso[0] || 'sin rol';
+    function accion(a) {
+      var el = Elemento('b'); el.setAttribute('data-accion', a);
+      p.sel('regDetCuerpo').disparar('click', { target: el });
+    }
+    function elegir(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('change', { target: p.sel(id) }); }
+    return esperar().then(function () {
+      clicFolio(p, 'PRB 2026-000001');
+      accion('solicitar-cambios');
+      elegir('regCambioCampo', 'estado');
+      Check('SB1 ' + nombre + ': Nuevo Subestado ' + (caso[1] ? 'se ofrece' : 'NO se ofrece'), caso[1],
+        /<label for="regCambioSubestado">Nuevo Subestado/.test(p.sel('regCambio').innerHTML));
+      p.sel('regCambioEstado').value = 'Cerrado';
+      p.sel('regCambioMotivo').value = 'Se cierra';
+      accion('cambio-preparar');
+      Check('SB2 ' + nombre + ': el cambio de Estado se prepara igual', [true, true],
+        [/ini-cambio-msg listo/.test(p.sel('regCambioMsg').className), /En Solución → Cerrado/.test(p.sel('regCambioMsg').innerHTML)]);
+    });
+  });
+});
+
+pruebas.push(function () {
+  // Descarga con MOD: sin la columna Subestado (ADM la tiene: XD3).
+  var p = Pagina(ok(DATOS), null, 'MOD'), reg = p.registro, b = Bajada();
+  return esperar().then(function () {
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
+  }).then(function (r) {
+    var enc = XLSXV.utils.sheet_to_json(b.libro().Sheets.Iniciativas, { header: 1 })[0];
+    Check('SB3 MOD: el Excel no trae la columna Subestado; Estado y Agrupacion siguen', [true, false, true, true],
+      [r, enc.indexOf('Subestado') >= 0, enc.indexOf('Estado') >= 0, enc.indexOf('Agrupación') === enc.indexOf('Estado') + 1]);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // SV) Enviar la solicitud (persistencia_solicitudes = true): solo "enviada"
 // con el numero de la base; la misma llave al reintentar; sin quien envia.
 // ---------------------------------------------------------------------------

@@ -1130,11 +1130,13 @@ window.RegistroIniciativas = (function () {
     // Las hojas para LibroIniciativas.construir. `lista` ya filtrada y
     // ordenada (la vista pasa ordenar(filtradas(), orden)); `extra` el
     // indiceExtra (sin el, columnas extra vacias). Las filas salen SOLO del
-    // registro: una fila de extra que no cruza no agrega nada.
-    hojas(lista, registro, extra) {
+    // registro: una fila de extra que no cruza no agrega nada. La columna
+    // Subestado sale solo con `conSubestado` (rol ADM).
+    hojas(lista, registro, extra, conSubestado) {
       function columnas(defs) { return defs.map(function (d) { return { t: d[0], tipo: d[1], ancho: d[2] }; }); }
       function de(mapa, k) { return extra && Object.prototype.hasOwnProperty.call(extra[mapa], k) ? extra[mapa][k] : {}; }
-      var cI = ExportRegistro.COLUMNAS_INICIATIVAS, cC = ExportRegistro.COLUMNAS_CATEGORIAS;
+      var cI = ExportRegistro.COLUMNAS_INICIATIVAS.filter(function (d) { return conSubestado || d[0] !== 'Subestado'; });
+      var cC = ExportRegistro.COLUMNAS_CATEGORIAS;
       var filasCat = [];
       lista.forEach(function (i) {
         i.categorias.forEach(function (c) {
@@ -1724,7 +1726,9 @@ window.RegistroIniciativas = (function () {
 
     opcionesEstado() {
       var r = this.registro;
-      return { estados: r ? r.estadosProblem || [] : [], subestados: r ? r.subestadosProblem || [] : [],
+      // Subestado: solo ADM (el servidor ni lo manda a otro rol). Sin lista,
+      // "Solicitar cambios" no ofrece Nuevo Subestado.
+      return { estados: r ? r.estadosProblem || [] : [], subestados: r && this.verSubestado() ? r.subestadosProblem || [] : [],
                tiposIniciativa: r ? r.valoresTipoIniciativa || [] : [], tiposAgrupado: r ? r.valoresTipoAgrupado || [] : [],
                rutas: this.rutasCatalogo || [], rutasEstado: this.rutasEstado,
                // Solicitar cambios de Título / PO / SO (sql/25).
@@ -1755,6 +1759,10 @@ window.RegistroIniciativas = (function () {
     }
 
     puedeEditar() { return this.rol === 'ADM' && !!window.IniciativaAdmin; }
+
+    // El Subestado se muestra solo con rol ADM (2026-10-26). Solo UX: el
+    // servidor no lo manda a otro rol (admin_iniciativas_registro.ashx).
+    verSubestado() { return this.rol === 'ADM'; }
 
     // Opciones de los filtros segun el rol: ADM todo; cualquier otro (o sin
     // rol todavia), solo el catalogo vigente, que se pide si falta.
@@ -2588,7 +2596,7 @@ window.RegistroIniciativas = (function () {
         .then(function (r) {
           var extra = ExportRegistro.indiceExtra(r[0]), XLSX = r[1];
           if (!XLSX || !window.LibroIniciativas) throw new Error('no se pudo cargar el generador de Excel.');
-          var bytes = window.LibroIniciativas.construir(XLSX, ExportRegistro.hojas(lista, registro, extra));
+          var bytes = window.LibroIniciativas.construir(XLSX, ExportRegistro.hojas(lista, registro, extra, self.verSubestado()));
           (bajar || bajarArchivo)(bytes, ExportRegistro.nombre(hoy || new Date(), filtrado));
           return true;
         })
@@ -3301,7 +3309,8 @@ window.RegistroIniciativas = (function () {
       // tiene valor propuesto.
       if (t === 'estado') {
         // Escrito en la caja con busqueda: solo cuenta la opcion real.
-        var est = this.$(idPropuesto).value || '', sub = this.$('regCambioSubestado').value || '';
+        var caja = this.$('regCambioSubestado');
+        var est = this.$(idPropuesto).value || '', sub = caja ? caja.value || '' : '';
         c.propuesto = resolverOpcion(est, c.estados) || est;
         c.subestado = resolverOpcion(sub, c.subestados) || sub;
         var fc = this.$('regCambioEstFechaCampo'), fn = this.$('regCambioEstFechaNueva');
@@ -3444,7 +3453,10 @@ window.RegistroIniciativas = (function () {
           '<div class="campo" id="regCambioGrupoEstado"' + (t === 'estado' ? '' : ' hidden') + '>' +
             (c.estados.length
               ? '<label for="regCambioEstado">Nuevo Estado</label>' + lista('regCambioEstado', c.estados) +
-                '<label for="regCambioSubestado">Nuevo Subestado (opcional)</label>' + lista('regCambioSubestado', c.subestados) +
+                // Sin lista (rol distinto de ADM): no se ofrece.
+                (c.subestados.length
+                  ? '<label for="regCambioSubestado">Nuevo Subestado (opcional)</label>' + lista('regCambioSubestado', c.subestados)
+                  : '') +
                 // Fecha compromiso en la misma solicitud: la etapa se elige
                 // aqui, no se deduce del Estado pedido.
                 '<label for="regCambioEstFechaCampo">Fecha compromiso que también cambia (opcional)</label>' +

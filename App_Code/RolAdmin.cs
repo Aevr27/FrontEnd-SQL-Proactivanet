@@ -16,6 +16,17 @@
 //      de ADM y MOD y, con el interruptor INICIATIVAS_ABIERTAS, de cualquier
 //      cuenta autenticada: AccesoIniciativas.ExigirSolicitud.
 //
+// QUE PUEDE CADA ROL (2026-10-26)
+// -------------------------------
+//   ADM  el UNICO que modifica y aprueba: crear y modificar directo, aplicar
+//        o rechazar una solicitud de cambio, aprobar o rechazar una Nueva
+//        solicitud, alta de categoria (todo con AccesoAdmin.ExigirAdm). Es
+//        el unico que ve el Subestado de una iniciativa.
+//   MOD  consulta: el rol con el que entran los Product Owner y Service
+//        Owner. Lee el registro y PIDE (solicitud de cambio, Nueva
+//        solicitud, acuse de PO / SO), pero nunca escribe una iniciativa ni
+//        aprueba nada. Su visibilidad no depende de poder escribir.
+//
 // REGLA (falla hacia el MENOR privilegio)
 // ---------------------------------------
 //   ADM     solo si la cuenta tiene al menos una fila en dbo.UsuariosAdmin y

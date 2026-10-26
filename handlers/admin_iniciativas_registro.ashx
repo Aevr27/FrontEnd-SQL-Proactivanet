@@ -44,7 +44,8 @@
 // No crea ni cambia nada en la base.
 //
 // ACCESO: AccesoAdmin.Exigir (rol ADM o MOD en dbo.UsuariosAdmin); el
-// resto recibe 403 antes de tocar la base.
+// resto recibe 403 antes de tocar la base. "subestado" de cada iniciativa
+// y "subestados_problem" salen solo con rol ADM.
 //
 // POR QUE NO USA DashboardHandler.Responder: el mismo motivo que
 // experiencia.ashx. Descripcion y Observaciones de ~1000 iniciativas pueden
@@ -94,6 +95,9 @@ public class AdminIniciativasRegistro : IHttpHandler
             }
 
             var registro = ExperienciaQueries.RegistroIniciativas();
+            // Subestado: solo ADM lo ve (ExperienciaQueries.OcultarSubestado).
+            // Ocultarlo en la pagina no basta: sin ADM no sale del servidor.
+            if (AccesoAdmin.Rol(context) != RolAdmin.Adm) ExperienciaQueries.OcultarSubestado(registro);
             // Si "Crear iniciativa" / "Modificar" guardan o solo validan
             // (PersistenciaGestionAdmin, const): la pagina rotula sus botones
             // con esto y nunca promete un guardado que no ocurre.

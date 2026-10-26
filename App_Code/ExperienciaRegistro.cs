@@ -124,6 +124,24 @@ public static partial class ExperienciaQueries
         }
     }
 
+    // El Subestado es solo de ADM (2026-10-26): admin_iniciativas_registro
+    // lo quita de la respuesta para cualquier otro rol (el subestado de
+    // cada iniciativa y la lista subestados_problem). Solo la RESPUESTA:
+    // quien lee el registro por dentro (GestionIniciativaAdminService,
+    // AcuseIniciativa) llama a RegistroIniciativas y lo sigue teniendo.
+    public static void OcultarSubestado(Dictionary<string, object> registro)
+    {
+        if (registro == null) return;
+        object lista;
+        if (registro.TryGetValue("iniciativas", out lista) && lista is List<object>)
+            foreach (var o in (List<object>)lista)
+            {
+                var i = o as Dictionary<string, object>;
+                if (i != null) i.Remove("subestado");
+            }
+        registro.Remove("subestados_problem");
+    }
+
     // Estado y Subestado de dbo.Problem vigente: el Subestado de cada folio
     // (el registro no lo traia) y los valores distintos de cada uno, que son
     // lo unico que Modificar acepta (no hay catalogo ni reglas de transicion

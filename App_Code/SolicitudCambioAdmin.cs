@@ -223,6 +223,16 @@ public sealed class PeticionSolicitudCambio
 
     private void Error(string campo, string mensaje) { Errores.Add(new ErrorCampo { Campo = campo, Mensaje = mensaje }); }
 
+    public const string MensajeSubestadoSoloAdm = "Solo un administrador (ADM) puede pedir un cambio de Subestado.";
+
+    // El Subestado es solo de ADM (2026-10-26): quien no lo ve tampoco lo
+    // pide. `rol` es el del servidor (AccesoAdmin.Rol), nunca del formulario.
+    // El cambio de Estado sin Subestado sigue igual para todos.
+    public void ExigirSubestadoDeAdm(string rol)
+    {
+        if (SubestadoNuevo != null && rol != RolAdmin.Adm) Error(CSubestadoNuevo, MensajeSubestadoSoloAdm);
+    }
+
     private static string Limpio(string s)
     {
         if (s == null) return null;
