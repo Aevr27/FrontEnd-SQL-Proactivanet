@@ -1815,7 +1815,7 @@ pruebas.push(function () {
   return esperar().then(function () {
     var reg = p.registro, html = p.sel('regKpis').innerHTML;
     Check('K1 cinco indicadores, en orden (Requerimientos en lugar de Fuera de Activas)',
-      ['Total de iniciativas', 'Iniciativas medibles', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'], rotulosKpi(p));
+      ['Total de iniciativas', 'Total iniciativas activas', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'], rotulosKpi(p));
     Check('K1 valores con la vista por omision (Todas)', KPI_BASE, kpis(p));
     Check('K1 pies: abiertas sin categoria, tickets, ReqOpr, riesgo, Cerrado; ya no la resta',
       [true, true, true, true, true, false],
@@ -1933,10 +1933,10 @@ pruebas.push(function () {
     var nota = 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría. ' +
       'La agrupación se reconoce sin importar acentos ni mayúsculas (Adopción = Adopcion).';
     Check('K6 texto del criterio de Activas', { texto: texto, nota: nota }, reg.ayudaKpi('activas'));
-    Check('K6 solo Activas lleva la franja "Criterio", con el texto para lectores de pantalla; los demas no', [1, true, true, null],
+    Check('K6 Activas y Requerimientos llevan la franja "Criterio", con el texto para lectores de pantalla; los demas no', [2, true, true, null],
       [(html.match(/class="ini-kpi-ayuda"/g) || []).length,
        /<div class="kpi ini-kpi sv ini-kpi-ctx[^"]*"><button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="activas"[^>]*>Criterio<\/button>/.test(html)
-         && /<div class="lbl">Iniciativas medibles<\/div>/.test(html),
+         && /<div class="lbl">Total iniciativas activas<\/div>/.test(html),
        html.indexOf('id="regKpiAyudaActivas">' + p.ventana.Escape.html(texto + ' ' + nota) + '<') > 0, reg.ayudaKpi('total')]);
     Check('K6 con GloboAyuda no hay title duplicado en la franja', false, /class="ini-kpi-ayuda"[^>]*title=/.test(html));
 
@@ -1959,6 +1959,83 @@ pruebas.push(function () {
       Check('K6 el texto sale de agrupadores del servidor',
         'Iniciativas en estado En Análisis, En Solución o En Monitoreo y con agrupación Problem o Mejora.', reg.ayudaKpi('activas').texto);
     });
+  });
+});
+
+// K7) El hover de Requerimientos es el mismo de Activas: franja "Criterio"
+// con GloboAyuda (globo-ayuda.css), no el title nativo de la tarjeta. Mismo
+// texto que tenia el title.
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  return esperar().then(function () {
+    var reg = p.registro, html = p.sel('regKpis').innerHTML;
+    var texto = 'Requerimientos (REQ/HAR): abiertos, estado distinto de Cerrado, con agrupación ReqOpr.';
+    var nota = 'Cuentan en Total, no en Total iniciativas activas.';
+    Check('K7 texto del criterio de Requerimientos', { texto: texto, nota: nota }, reg.ayudaKpi('requerimientos'));
+    Check('K7 franja Criterio como la de Activas: misma clase, aria-describedby, rotulo y texto para lectores de pantalla',
+      [true, true],
+      [/<div class="kpi ini-kpi  ini-kpi-ctx[^"]*"><button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="requerimientos" aria-describedby="regKpiAyudaRequerimientos" aria-label="Criterio de Iniciativas con requerimientos">Criterio<\/button><span class="ini-sr" id="regKpiAyudaRequerimientos">[^<]*<\/span><div class="lbl">Iniciativas con requerimientos<\/div>/.test(html),
+       html.indexOf('id="regKpiAyudaRequerimientos">' + p.ventana.Escape.html(texto + ' ' + nota) + '<') > 0]);
+    Check('K7 sin tooltip nativo: ni la tarjeta de Requerimientos ni su franja llevan title', [false, false],
+      [/data-indicador="requerimientos"[^>]*title=/.test(html), /data-kpi-ayuda="requerimientos"[^>]*title=/.test(html)]);
+
+    var franja = Elemento('franja');
+    franja.setAttribute('data-kpi-ayuda', 'requerimientos');
+    franja.closest = function (sel) { return sel === '.ini-kpi-ayuda' ? franja : null; };
+    var g = reg.globoKpis;
+    p.sel('regKpis').disparar('pointerover', { target: franja, pointerType: 'mouse' });
+    Check('K7 pasar el mouse: el mismo globo (GloboAyuda) con el criterio', [false, 'globo-ayuda', texto, nota, true],
+      [g.globo.hidden, g.globo.className.split(' ')[0], g.texto.textContent, g.nota.textContent, franja.classList.contains('abierto')]);
+    p.sel('regKpis').disparar('pointerout', { target: franja, pointerType: 'mouse', relatedTarget: null });
+    Check('K7 salir con el mouse lo oculta', true, g.globo.hidden);
+    p.sel('regKpis').disparar('click', { target: franja });
+    Check('K7 la franja no filtra', '', reg.filtro.indicador);
+  });
+});
+
+// CA) La cuenta del Registro (#regCuenta). Con Cerrado fuera del filtro de
+// Estado: "N Abiertas de T Total", N = abiertas que pasan los filtros, T =
+// el registro completo (no la pagina). Si no, la cuenta de siempre.
+pruebas.push(function () {
+  var json = JSON.parse(JSON.stringify(DATOS));
+  json.iniciativas = [Ini('A 1', { estado: 'En Análisis' }), Ini('A 2', { estado: 'Cerrado', activa: false }),
+    Ini('A 3', { estado: 'cerrado', activa: false })];
+  var f = new R.FiltroRegistro(Adm(R.Registro.desdeJson(json)));
+  Check('CA1 sin filtro de Estado: no excluye Cerrado', false, f.excluyeCerradas());
+  f.alternarEstado('Cerrado');
+  Check('CA1 otra variante de Cerrado sigue marcada (plano()): no excluye', false, f.excluyeCerradas());
+  f.alternarEstado('cerrado');
+  Check('CA1 ninguna variante de Cerrado marcada: excluye', true, f.excluyeCerradas());
+  f.limpiar();
+  Check('CA1 limpiar: ya no excluye', false, f.excluyeCerradas());
+});
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  return esperar().then(function () {
+    Check('CA2 al cargar (Cerrado incluido): la cuenta de siempre', '5 iniciativas', p.sel('regCuenta').textContent);
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'Cerrado');
+    Check('CA2 sin Cerrado: abiertas frente al total general; indicadores intactos', ['4 Abiertas de 5 Total', 4, KPI_BASE],
+      [p.sel('regCuenta').textContent, folios(p).length, kpis(p)]);
+    elegir(p, 'regPo', 'PO 1');
+    Check('CA3 con otro filtro: solo las abiertas que pasan, el total no cambia', ['3 Abiertas de 5 Total', 3],
+      [p.sel('regCuenta').textContent, folios(p).length]);
+    teclear(p, '000005');
+    return esperarBusqueda();
+  }).then(function () {
+    Check('CA3 con busqueda', '1 Abiertas de 5 Total', p.sel('regCuenta').textContent);
+    sinOmision(p);
+    Check('CA4 Limpiar filtros: la cuenta del registro completo', ['5 iniciativas', 5], [p.sel('regCuenta').textContent, folios(p).length]);
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'En Análisis');
+    Check('CA5 Cerrado incluido con otro estado fuera: la cuenta de siempre', true,
+      / de 5 iniciativas$/.test(p.sel('regCuenta').textContent));
+    sinOmision(p);
+    var muchas = JSON.parse(JSON.stringify(DATOS));
+    for (var n = 0; n < 230; n++) muchas.iniciativas.push(Ini('X ' + (1000 + n), { categorias: [Cat('/A/Cat 2', 1, 0.1, 'Dir A', 'PO 1', 'SO y')] }));
+    return p.registro.cargar(ok(muchas));
+  }).then(function () {
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'Cerrado');
+    Check('CA6 el total no es la pagina ni el limite', ['234 Abiertas de 235 Total · mostrando 100', 100],
+      [p.sel('regCuenta').textContent, folios(p).length]);
   });
 });
 
