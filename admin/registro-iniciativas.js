@@ -2367,12 +2367,12 @@ window.RegistroIniciativas = (function () {
       var k = Registro.indicadores(this.registro.iniciativas);
       var tarjetas = [
         { k: CLAVES_KPI[0], l: ROTULOS_KPI[0], v: k.total,
-          f: k.sinCategoria ? fmt(k.sinCategoria) + ' sin categoría' : 'todas con categoría', s: '',
+          f: k.sinCategoria ? fmt(k.sinCategoria) + ' Sin categoría' : 'Todas con categoría', s: '',
           t: 'Iniciativas abiertas: estado distinto de Cerrado. Un clic quita el indicador elegido.' },
-        { k: CLAVES_KPI[1], l: ROTULOS_KPI[1], v: k.activas, f: fmt(k.reduceActivas) + ' tickets a reducir', s: 'sv', ayuda: this.ayudaKpi(CLAVES_KPI[1]) },
+        { k: CLAVES_KPI[1], l: ROTULOS_KPI[1], v: k.activas, f: fmt(k.reduceActivas) + ' Tickets a reducir', s: 'sv', ayuda: this.ayudaKpi(CLAVES_KPI[1]) },
         { k: CLAVES_KPI[2], l: ROTULOS_KPI[2], v: k.requerimientos, f: 'REQ, RTI y HAR', s: '',
           ayuda: this.ayudaKpi(CLAVES_KPI[2]) },
-        { k: CLAVES_KPI[3], l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sa' : 'sv',
+        { k: CLAVES_KPI[3], l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' Tickets en riesgo', s: k.retrasadas ? 'sa' : 'sv',
           t: 'Iniciativas medibles con la fecha de su estado vencida y con categoría (criterio de Experiencia).' },
         { k: CLAVES_KPI[4], l: ROTULOS_KPI[4], v: k.cerradas, f: 'Estado Cerrado', s: '',
           t: 'Iniciativas en estado Cerrado.' }
