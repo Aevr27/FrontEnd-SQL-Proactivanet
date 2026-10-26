@@ -6,6 +6,10 @@
 //
 //   GET ?accion=listar              -> 200 { solicitudes: [...], total, maximo }
 //   GET ?accion=detalle&numero=N    -> 200 { ...la solicitud, eventos: [...] }
+//                                      Una ENVIADA con sql/32 (crea_iniciativa)
+//                                      trae estados_problem: las opciones del
+//                                      Estado inicial al aprobar (las de Crear);
+//                                      null si no se pudieron leer.
 //                                      400 SinSolicitud (numero invalido)
 //                                      404 SolicitudNoExiste
 //   501 RegistroNoDisponible  faltan las tablas de sql/29 (nada que leer)
@@ -52,11 +56,23 @@ public class AdminIniciativasSolicitudesNuevas : IHttpHandler
                 return new Dictionary<string, object>
                 {
                     { "solicitudes", l.Solicitudes }, { "total", l.Total }, { "maximo", RegistroSolicitudesIniciativa.Maximo },
-                    { "revision_disponible", l.RevisionDisponible },
+                    { "revision_disponible", l.RevisionDisponible }, { "crea_iniciativa", l.CreaIniciativa },
                 };
             }
             var d = lector.Detalle(numero);
             if (d == null) return Error(context, 404, "La solicitud no existe.", "SolicitudNoExiste");
+            object crea;
+            if (d.TryGetValue("estado", out crea) && crea as string == "ENVIADA"
+                && d.TryGetValue("crea_iniciativa", out crea) && crea is bool && (bool)crea)
+            {
+                try { d["estados_problem"] = RevisionSolicitudesIniciativa.EstadosIniciales(); }
+                catch (Exception ex)
+                {
+                    // Sin opciones no se ofrece aprobar; la solicitud si se muestra.
+                    DashboardHandler.Registrar("admin_iniciativas_solicitudes_nuevas.ashx", ex);
+                    d["estados_problem"] = null;
+                }
+            }
             return d;
         });
     }

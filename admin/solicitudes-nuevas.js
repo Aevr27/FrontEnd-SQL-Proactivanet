@@ -6,15 +6,18 @@
      listar    GET  handlers/admin_iniciativas_solicitudes_nuevas.ashx?accion=listar
      detalle   GET  ...?accion=detalle&numero=      la solicitud y su historial
      aprobar   POST handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx?accion=aprobar
-                    numero, comentario (opcional)
+                    numero, estado (el Estado inicial; "" = sin estado), comentario (opcional)
      rechazar  POST ...?accion=rechazar             numero, comentario (obligatorio)
 
-   APROBADA = aprobada para que ADM cree la iniciativa a mano (Administracion
-   -> Crear); no se crea ninguna iniciativa. APROBADA y RECHAZADA son finales.
-   Los botones salen solo en una ENVIADA y solo si el servidor dice
-   revision_disponible (sql/31 en la base). "Aprobada" / "rechazada" se dice
-   SOLO con la respuesta del servidor; despues se releen lista y detalle.
-   Nunca usa el endpoint de Cambios.
+   Aprobar CREA la iniciativa (sql/32: la alta de Administracion -> Crear con
+   los datos guardados de la solicitud) y el servidor devuelve su codigo.
+   ADM elige el Estado inicial (opciones = estados_problem del detalle, o
+   "sin estado": queda Incompleta, como en Crear); no hay uno por omision.
+   APROBADA y RECHAZADA son finales. Los botones salen solo en una ENVIADA y
+   solo si el servidor dice revision_disponible (sql/31); Aprobar, ademas,
+   solo con crea_iniciativa (sql/32). "Solicitud aceptada" se dice SOLO con
+   la respuesta del servidor y con SU codigo; despues se releen lista y
+   detalle. Nunca usa el endpoint de Cambios.
 
    Conmutador "Iniciativas | Cambios" (solVerNuevas / solVerCambio): "Cambios"
    es la de siempre (admin/solicitudes-cambio.js, en solVistaCambio) y sigue
@@ -34,6 +37,7 @@ window.SolicitudesNuevas = (function () {
   var MAXIMO_COMENTARIO = 2000;   // RevisionSolicitudesIniciativa.MaximoComentario
   var ESTADOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada' };
   var EVENTOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada' };
+  var SIN_ESTADO = '__sin_estado__';   // opcion explicita: Estado inicial vacio (Incompleta)
 
   function h(s) { return Escape.html(s === null || s === undefined ? '' : String(s)); }
   function nada(v) { return v === null || v === undefined || v === '' ? '—' : h(v); }
@@ -61,7 +65,8 @@ window.SolicitudesNuevas = (function () {
           '<td><button type="button" class="ini-folio" data-sn-numero="' + h(s.numero) + '">' + h(s.numero_texto) + '</button></td>' +
           '<td>' + nada(s.tipo) + '</td><td>' + nada(s.titulo) + '</td><td>' + solicitante(s) + '</td>' +
           '<td>' + nada(s.po) + '</td><td>' + nada(s.so) + '</td><td class="ini-cat-ruta">' + nada(s.categoria) + '</td>' +
-          '<td>' + fechaHora(s.fecha_utc) + '</td><td>' + estado(s.estado) + '</td></tr>';
+          '<td>' + fechaHora(s.fecha_utc) + '</td><td>' + estado(s.estado) +
+          (s.codigo_iniciativa ? '<span class="ini-sub">' + h(s.codigo_iniciativa) + '</span>' : '') + '</td></tr>';
       }).join('') + '</tbody></table>';
   }
 
@@ -87,7 +92,8 @@ window.SolicitudesNuevas = (function () {
       ['% de disminución', d.pct === null || d.pct === undefined ? '—' : h(d.pct) + '%'],
       ['RCA', d.rca_extension ? 'Adjunto .' + h(String(d.rca_extension).toLowerCase()) + ' (el archivo no se guarda)' : '—'],
       ['Enviada', fechaHora(d.fecha_utc)],
-      ['Estado', estado(d.estado)]
+      ['Estado', estado(d.estado)],
+      ['Iniciativa', d.codigo_iniciativa ? h(d.codigo_iniciativa) : '—']
     ].map(function (f) { return '<tr><th scope="row">' + f[0] + '</th><td>' + f[1] + '</td></tr>'; }).join('');
     var eventos = (d.eventos || []).map(function (e) {
       return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + nada(e.usuario) +
@@ -97,12 +103,30 @@ window.SolicitudesNuevas = (function () {
     var revision = revisada
       ? '<p class="ini-nota"><strong>' + estado(d.estado) + '</strong> por ' + nada(d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
         (d.comentario_revision ? ': «' + h(d.comentario_revision) + '»' : '') +
-        (d.estado === 'APROBADA' ? '<span class="ini-sub">Crea la iniciativa a mano en Administración → Crear.</span>' : '') + '</p>'
+        (d.estado === 'APROBADA'
+          ? (d.codigo_iniciativa
+              ? '<span class="ini-sub">Iniciativa creada con el código: ' + h(d.codigo_iniciativa) + '</span>'
+              : '<span class="ini-sub">Se aprobó antes de que aprobar creara la iniciativa: no tiene iniciativa ligada.</span>')
+          : '') + '</p>'
+      : '';
+    // Aprobar crea la iniciativa: solo con sql/32 y con las opciones del Estado inicial.
+    var estados = Array.isArray(d.estados_problem) ? d.estados_problem : null;
+    var puedeAprobar = d.crea_iniciativa === true && estados !== null;
+    var avisoAprobar = d.crea_iniciativa !== true
+      ? '<p class="ini-nota">Aprobar crea la iniciativa y todavía no está habilitado en la base (falta sql/32). Puedes rechazar.</p>'
+      : estados === null ? '<p class="ini-nota">No se pudieron leer los estados de la iniciativa: actualiza antes de aprobar.</p>' : '';
+    var campoEstado = puedeAprobar
+      ? '<div class="campo"><label for="snEstado">Estado inicial de la iniciativa (al aprobar)</label>' +
+        '<select id="snEstado"><option value="">Elige…</option>' +
+        '<option value="' + SIN_ESTADO + '">Sin estado (queda Incompleta)</option>' +
+        estados.map(function (e) { return '<option value="' + h(e) + '">' + h(e) + '</option>'; }).join('') + '</select></div>'
       : '';
     var acciones = d.estado === 'ENVIADA' && puedeRevisar
-      ? '<div class="ini-cambio-campos"><div class="campo ini-cambio-ancho"><label for="snComentario">Comentario (obligatorio para rechazar; opcional al aprobar)</label>' +
+      ? avisoAprobar + '<div class="ini-cambio-campos">' + campoEstado +
+        '<div class="campo ini-cambio-ancho"><label for="snComentario">Comentario (obligatorio para rechazar; opcional al aprobar)</label>' +
         '<textarea id="snComentario" rows="3" maxlength="' + MAXIMO_COMENTARIO + '"></textarea></div></div>' +
-        '<div class="ini-cambio-pie"><button type="button" class="btn chico" data-sn-accion="aprobar">Aprobar</button> ' +
+        '<div class="ini-cambio-pie">' +
+        (puedeAprobar ? '<button type="button" class="btn chico" data-sn-accion="aprobar">Aprobar y crear iniciativa</button> ' : '') +
         '<button type="button" class="btn linea chico" data-sn-accion="rechazar">Rechazar</button> ' +
         '<button type="button" class="btn linea chico" data-sn-accion="cerrar">Cerrar</button></div>'
       : '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-sn-accion="cerrar">Cerrar</button></div>';
@@ -269,6 +293,13 @@ window.SolicitudesNuevas = (function () {
 
     comentario() { var c = this.$('snComentario'); return c ? String(c.value || '').trim() : ''; }
 
+    // null = sin elegir; '' = "sin estado" elegido a proposito; o el Estado.
+    estadoInicial() {
+      var e = this.$('snEstado');
+      var v = e ? String(e.value || '') : '';
+      return v === '' ? null : v === SIN_ESTADO ? '' : v;
+    }
+
     aprobar() { return this.revisar('aprobar', 'aprobada'); }
 
     rechazar() {
@@ -289,11 +320,17 @@ window.SolicitudesNuevas = (function () {
         this.mensaje('snDetMsg', 'error', 'El comentario no puede pasar de ' + MAXIMO_COMENTARIO + ' caracteres.');
         return Promise.resolve(null);
       }
+      var estadoIni = accion === 'aprobar' ? this.estadoInicial() : null;
+      if (accion === 'aprobar' && estadoIni === null) {
+        this.mensaje('snDetMsg', 'error', 'Elige el Estado inicial de la iniciativa (o «Sin estado»).');
+        return Promise.resolve(null);
+      }
       var datos = new FormData();
       datos.append('numero', String(d.numero));
+      if (accion === 'aprobar') datos.append('estado', estadoIni);
       if (comentario) datos.append('comentario', comentario);
       this.ocupado = true;
-      this.mensaje('snDetMsg', '', '<span>' + (accion === 'aprobar' ? 'Aprobando…' : 'Rechazando…') + '</span>');
+      this.mensaje('snDetMsg', '', '<span>' + (accion === 'aprobar' ? 'Aprobando y creando la iniciativa…' : 'Rechazando…') + '</span>');
       return Promise.resolve().then(function () {
         return self.pedir(URL_REVISION + '?accion=' + accion, { method: 'POST', body: datos, credentials: 'same-origin' });
       })
@@ -301,13 +338,23 @@ window.SolicitudesNuevas = (function () {
         .then(function (r) {
           self.ocupado = false;
           var j = r.json, ok = r.status === 200 && j[exito] === true;
+          // Aprobar sin el codigo del servidor no es exito: nunca se inventa.
+          var sinCodigo = ok && accion === 'aprobar' && !(typeof j.codigo === 'string' && j.codigo);
+          if (sinCodigo) ok = false;
           var html = ok
             ? (accion === 'aprobar'
-                ? '<strong>Solicitud ' + h(d.numero_texto) + ' aprobada.</strong> Crea la iniciativa a mano en Administración → Crear.'
+                ? '<strong>Solicitud aceptada. Iniciativa creada con el código: ' + h(j.codigo) + '</strong>' +
+                  (j.iniciativa_nueva === false ? ' Ya estaba creada: no se creó otra.' : '') +
+                  (Array.isArray(j.faltantes) && j.faltantes.length
+                    ? '<span class="ini-sub">Queda Incompleta: falta ' + j.faltantes.map(function (f) { return h(f.rotulo || f.clave); }).join(', ') + '.</span>'
+                    : '')
                 : '<strong>Solicitud ' + h(d.numero_texto) + ' rechazada.</strong>')
+            : sinCodigo ? 'El servidor no devolvió el código de la iniciativa. Revisa la solicitud antes de reintentar.'
             : j[exito] === null ? h(j.error || 'No se pudo confirmar.') + ' Revisa la solicitud antes de reintentar.'
-            : '<strong>No se ' + (accion === 'aprobar' ? 'aprobó' : 'rechazó') + '.</strong> ' + h(j.error || ('Respuesta ' + r.status + '.'));
-          var clase = ok ? 'listo' : j[exito] === null ? 'aviso' : 'error';
+            : '<strong>No se ' + (accion === 'aprobar' ? 'aprobó' : 'rechazó') + '.</strong> ' + h(j.error || ('Respuesta ' + r.status + '.')) +
+              (Array.isArray(j.errores) && j.errores.length
+                ? '<span class="ini-sub">' + j.errores.map(function (e) { return h(e.mensaje); }).join(' ') + '</span>' : '');
+          var clase = ok ? 'listo' : (sinCodigo || j[exito] === null) ? 'aviso' : 'error';
           return Promise.all([self.listar(), self.verDetalle(d.numero)]).then(function () {
             self.mensaje('snDetMsg', clase, html);
             return r;
@@ -322,5 +369,5 @@ window.SolicitudesNuevas = (function () {
   }
 
   return { RegistroSolicitudesNuevas: RegistroSolicitudesNuevas, htmlLista: htmlLista, htmlDetalle: htmlDetalle,
-           textoError: textoError, textoTotal: textoTotal, URL: URL, URL_REVISION: URL_REVISION };
+           textoError: textoError, textoTotal: textoTotal, URL: URL, URL_REVISION: URL_REVISION, SIN_ESTADO: SIN_ESTADO };
 })();
