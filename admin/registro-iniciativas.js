@@ -18,12 +18,13 @@
    ---------------------------------------------------------------
    Los filtros y la busqueda solo deciden la lista; los indicadores cambian
    solo cuando cambia el registro (carga, o relectura tras guardar).
-     Total            TODAS las iniciativas del registro, Cerradas incluidas
-                      (2026-10-23; antes eran las abiertas). Es la poblacion
-                      por omision: su clic no filtra, quita el indicador.
-                      Las abiertas (estado distinto de Cerrado, comparado
-                      con plano(): sin mayusculas, acentos ni espacios de
-                      mas) siguen contandose como `abiertas`, sin tarjeta.
+     Total            las abiertas: estado distinto de Cerrado, comparado
+                      con plano() (sin mayusculas, acentos ni espacios de
+                      mas). Rotulo "Total iniciativas activas" (2026-10-26;
+                      del 2026-10-23 al 2026-10-26 contaba TODAS, Cerradas
+                      incluidas). Es la poblacion por omision: su clic no
+                      filtra, quita el indicador y la lista vuelve a todas.
+                      `abiertas` sigue en el modelo y vale lo mismo.
      Activas          `seguimiento`: estado en estados_activos y agrupacion
                       en agrupadores. Es el criterio de la tabla "Activas"
                       de Experiencia (filasBaseAct). Incluye las sin
@@ -49,7 +50,7 @@
                       ("tickets en riesgo").
      Cerradas         estado Cerrado (el mismo plano()). Otros estados no
                       activos NO cuentan aqui (si en Total).
-   abiertas + Cerradas = Total = todas las iniciativas del registro.
+   Total + Cerradas = todas las iniciativas del registro.
    Cada regla vive UNA vez (CONDICION_KPI): la usan la cuenta del
    indicador y su filtro, asi que no pueden separarse.
 
@@ -296,9 +297,9 @@ window.RegistroIniciativas = (function () {
   // Los cinco indicadores, en orden (ver la cabecera).
   // Solo los rotulos visibles (2026-10-19: Activas -> Iniciativas medibles,
   // Requerimientos -> Iniciativas con requerimientos; 2026-10-26:
-  // Iniciativas medibles -> Total iniciativas activas); los calculos y las
+  // Total de iniciativas -> Total iniciativas activas); los calculos y las
   // claves internas (activas, requerimientos) no cambian.
-  var ROTULOS_KPI = ['Total de iniciativas', 'Total iniciativas activas', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'];
+  var ROTULOS_KPI = ['Total iniciativas activas', 'Iniciativas medibles', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'];
   // La agrupacion (TipoAgrupado) de los requerimientos REQ/HAR, comparada
   // con plano(): sin acentos, mayusculas ni espacios de mas.
   var AGRUPACION_REQUERIMIENTOS = 'reqopr';
@@ -320,14 +321,14 @@ window.RegistroIniciativas = (function () {
   // La regla de cada indicador, en el orden de ROTULOS_KPI (ver la
   // cabecera). La cuentan Registro.indicadores y la aplica el filtro por
   // indicador: es la MISMA funcion.
-  // Total cuenta todas (su condicion siempre se cumple) y es la clave que
-  // limpia (INDICADOR_TODAS): elegirla deja la lista sin indicador.
+  // Total cuenta las abiertas (no Cerrado) y es la clave que limpia
+  // (INDICADOR_TODAS): elegirla deja la lista sin indicador.
   var CLAVES_KPI = ['total', 'activas', 'requerimientos', 'retrasadas', 'cerradas'];
   var INDICADOR_TODAS = 'total';
   // El atributo que lleva la clave en cada boton (tarjetas y semaforo).
   var ATRIBUTO_INDICADOR = 'data-indicador';
   var CONDICION_KPI = {
-    total: function () { return true; },
+    total: function (i) { return !esCerrada(i); },
     activas: function (i) { return !!i.seguimiento; },
     requerimientos: function (i) { return !esCerrada(i) && Registro.esRequerimiento(i); },
     retrasadas: function (i) { return !!i.seguimiento && i.retrazado > 0 && !i.sin_categoria; },
@@ -1067,7 +1068,7 @@ window.RegistroIniciativas = (function () {
       ['Subestado', 'texto', 16, function (i) { return i.subestado; }],                          // Problem.Subestado
       ['Agrupación', 'texto', 13, function (i) { return i.agrup; }],                             // TipoAgrupado (sin categoria: Problem.TipoIniciativa)
       ['Tipo Iniciativa (Problem)', 'texto', 18, deX('tipo_iniciativa')],                         // Problem.TipoIniciativa
-      ['Medible', 'texto', 10, function (i) { return siNo(i.seguimiento); }],                    // indicador "Total iniciativas activas"
+      ['Medible', 'texto', 10, function (i) { return siNo(i.seguimiento); }],                    // indicador "Iniciativas medibles"
       ['Prioridad', 'texto', 12, deX('prioridad')],                                              // Problem.Prioridad
       ['Impacto', 'texto', 12, deX('impacto')],                                                  // Problem.Impacto
       ['Product Owner', 'texto', 26, function (i) { return duenoCapturado(i, 'po'); }],          // Problem.OwnerProblem
@@ -2349,8 +2350,7 @@ window.RegistroIniciativas = (function () {
       if (!estados.length || !agr.length) return null;
       return {
         texto: 'Iniciativas en estado ' + enumerar(estados) + ' y con agrupación ' + enumerar(agr) + '.',
-        nota: 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría. ' +
-          'La agrupación se reconoce sin importar acentos ni mayúsculas (Adopción = Adopcion).'
+        nota: 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría.'
       };
     }
 
@@ -2368,12 +2368,12 @@ window.RegistroIniciativas = (function () {
       var tarjetas = [
         { k: CLAVES_KPI[0], l: ROTULOS_KPI[0], v: k.total,
           f: k.sinCategoria ? fmt(k.sinCategoria) + ' sin categoría' : 'todas con categoría', s: '',
-          t: 'Todas las iniciativas del registro, Cerradas incluidas. Un clic quita el indicador elegido.' },
+          t: 'Iniciativas abiertas: estado distinto de Cerrado. Un clic quita el indicador elegido.' },
         { k: CLAVES_KPI[1], l: ROTULOS_KPI[1], v: k.activas, f: fmt(k.reduceActivas) + ' tickets a reducir', s: 'sv', ayuda: this.ayudaKpi(CLAVES_KPI[1]) },
-        { k: CLAVES_KPI[2], l: ROTULOS_KPI[2], v: k.requerimientos, f: 'agrupación ReqOpr, abiertos', s: '',
+        { k: CLAVES_KPI[2], l: ROTULOS_KPI[2], v: k.requerimientos, f: '', s: '',
           ayuda: this.ayudaKpi(CLAVES_KPI[2]) },
         { k: CLAVES_KPI[3], l: ROTULOS_KPI[3], v: k.retrasadas, f: fmt(k.riesgo) + ' tickets en riesgo', s: k.retrasadas ? 'sa' : 'sv',
-          t: 'Las de ' + ROTULOS_KPI[1] + ' con la fecha de su estado vencida y con categoría (criterio de Experiencia).' },
+          t: 'Iniciativas medibles con la fecha de su estado vencida y con categoría (criterio de Experiencia).' },
         { k: CLAVES_KPI[4], l: ROTULOS_KPI[4], v: k.cerradas, f: 'estado Cerrado', s: '',
           t: 'Iniciativas en estado Cerrado.' }
       ];
