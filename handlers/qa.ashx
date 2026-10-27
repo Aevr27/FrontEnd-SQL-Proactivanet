@@ -525,13 +525,14 @@ public class Qa : IHttpHandler
         /* De que zona viene el sello. Son dos origenes distintos y no se puede
            tratarlos igual:
 
-             en vivo   dbo.EtlLog.Fin, guardado en UTC por un host que corre en
-                       UTC -> lo convierte el contrato compartido;
+             en vivo   dbo.EtlLog.Fin, ya en la hora local del SQL Server
+                       (UTC-06), el mismo sello de SLA -> se muestra tal cual
+                       (como Utc se restaban otras seis horas);
              snapshot  exportadoEn, un texto que escribio el exportador con la
                        hora que tuviera su maquina. Este servidor no sabe en
                        que zona esta, y adivinarlo seria correr seis horas un
                        dato ajeno -> se muestra tal cual. */
-        var zona = snapshot ? ZonaSello.YaLocal : ZonaSello.Utc;
+        var zona = ZonaSello.YaLocal;
 
         var info = DashboardDataInfo.Periodo(
             "QA de categorizacion",

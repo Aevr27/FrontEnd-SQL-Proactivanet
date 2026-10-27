@@ -37,10 +37,11 @@
 //   2. AdminAccesoModulo (abajo), registrado en <system.webServer><modules>,
 //      cubre ademas la pagina estatica admin/iniciativas.html, que ningun
 //      handler sirve. Ver Web.config.ejemplo.
-//   EXCEPCION (2026-10-22): con el interruptor INICIATIVAS_ABIERTAS de la
-//   base (adm.Interruptor, sql/30; ya no Web.config), la pagina y los
-//   cuatro handlers de Nueva solicitud tambien dejan pasar a
-//   cualquier cuenta Windows autenticada (AccesoIniciativas.ExigirSolicitud,
+//   EXCEPCION (2026-10-22, 2026-10-26): con el interruptor
+//   INICIATIVAS_ABIERTAS de la base (adm.Interruptor, sql/30; ya no
+//   Web.config), la pagina y los cuatro handlers de Nueva solicitud
+//   tambien dejan pasar a una cuenta Windows autenticada que sea Product
+//   Owner o Service Owner VIGENTE (AccesoIniciativas.ExigirSolicitud,
 //   App_Code/AccesoIniciativas.cs). No da rol: sigue siendo VIEWER.
 //
 // ROL (ADM / MOD / VIEWER)
@@ -54,8 +55,9 @@
 // admin_categorias_alta; los duenos de categoria, ?duenos=1 de
 // admin_iniciativas_catalogos) llama a ExigirAdm():
 // quien entra como MOD recibe 403 { "tipo": "RolInsuficiente" }. Nueva
-// solicitud (catalogos, capacidad, volumetria, validar) es de ADM y MOD, y
-// de los demas solo con el interruptor: AccesoIniciativas.ExigirSolicitud. El rol se
+// solicitud (catalogos, capacidad, volumetria, validar) es de ADM siempre,
+// de MOD solo si es PO/SO vigente, y de los demas con el interruptor y
+// siendo PO/SO vigente: AccesoIniciativas.ExigirSolicitud. El rol se
 // consulta una vez por request (HttpContext.Items); sin identidad
 // autenticada no se consulta.
 
@@ -166,9 +168,27 @@ public static class AccesoAdmin
         var guardado = context == null ? null : context.Items[ClaveRolRequest] as string;
         if (guardado != null) return guardado;
         var rol = RolAdmin.Para(IdentidadWindows.DesdeContexto(context), FuenteRoles,
-            delegate (Exception ex) { DashboardHandler.Registrar("AccesoAdmin.Rol", ex); });
+            delegate (Exception ex) { MarcarVerificacionIncompleta(context); DashboardHandler.Registrar("AccesoAdmin.Rol", ex); });
         if (context != null) context.Items[ClaveRolRequest] = rol;
         return rol;
+    }
+
+    private const string ClaveIncompletaRequest = "AccesoAdmin.VerificacionIncompleta";
+
+    // Alguna consulta de autorizacion de ESTE request fallo (rol de
+    // dbo.UsuariosAdmin, el interruptor o los dueños PO/SO): la respuesta
+    // ya fallo cerrado (VIEWER / apagado / no es PO/SO), pero no es una
+    // negativa confirmada. Solo lo lee admin_sesion para que la interfaz no
+    // confunda "no se pudo saber" con "no tiene rol". No da ni quita nada:
+    // ningun permiso lo mira. Vive en HttpContext.Items (un request).
+    public static void MarcarVerificacionIncompleta(HttpContext context)
+    {
+        if (context != null) context.Items[ClaveIncompletaRequest] = true;
+    }
+
+    public static bool VerificacionIncompleta(HttpContext context)
+    {
+        return context != null && context.Items[ClaveIncompletaRequest] is bool;
     }
 
     // Quien firma lo que se escribe (@Usuario de adm.usp_*: bitacora y
@@ -271,12 +291,14 @@ public sealed class AdminAccesoModulo : IHttpModule
         if (!AccesoAdmin.EsRutaProtegida(ruta)) return true;
         if (AccesoAdmin.PuedeEntrar(ctx)) return true;
         // La pagina y los cuatro handlers de Nueva solicitud, solo con el
-        // interruptor INICIATIVAS_ABIERTAS (App_Code/AccesoIniciativas.cs).
+        // interruptor INICIATIVAS_ABIERTAS y siendo PO/SO vigente
+        // (App_Code/AccesoIniciativas.cs).
         var solicitante = AccesoIniciativas.EsRutaSolicitante(ruta);
-        if (solicitante && AccesoIniciativas.PuedeSolicitar(ctx)) return true;
+        var motivo = solicitante ? AccesoIniciativas.Motivo(ctx) : null;
+        if (solicitante && motivo == null) return true;
 
         var esHandler = ruta.EndsWith(".ashx", StringComparison.OrdinalIgnoreCase);
-        if (solicitante) AccesoIniciativas.Rechazar(ctx, esHandler);
+        if (solicitante) AccesoIniciativas.Rechazar(ctx, esHandler, motivo);
         else AccesoAdmin.Rechazar(ctx, esHandler);
         return false;
     }

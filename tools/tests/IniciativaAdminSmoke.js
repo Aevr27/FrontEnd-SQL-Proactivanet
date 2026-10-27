@@ -441,7 +441,7 @@ pruebas.push(function () {
     Check('E6b titulo (encabezado), descripcion y observaciones se VEN con su valor y se editan con un clic; Estado, fechas y categorias son controles',
       [true, true, true, true, true, true, false],
       [/<div class="ini-ed-mostrar ini-det-nombre" id="regEdVer-titulo"[^>]*data-editar="titulo"[^>]*>T PRB 2026-000001<\/div>/.test(p.sel('regDetNombre').innerHTML),
-       /<select id="regEd-estado" data-edicion="estado"/.test(p.sel('regDetIdent').innerHTML),
+       /<select id="regEd-estado" class="ini-dd-categoria ini-ed-campo[^"]*" data-edicion="estado"/.test(p.sel('regDetIdent').innerHTML),
        /type="date" id="regEd-f_analisis" data-edicion="f_analisis"[^>]*value="2026-12-01"/.test(p.sel('regDetEtapas').innerHTML),
        /data-editar="descripcion"[^>]*>Desc PRB 2026-000001<\/div>/.test(p.sel('regDetDesc').innerHTML),
        /data-editar="observaciones"[^>]*>Obs PRB 2026-000001<\/div>/.test(p.sel('regDetDesc').innerHTML),
@@ -589,8 +589,80 @@ pruebas.push(function () {
     pg.fijarRol('ADM');
     Check('VW3 un rol que llega tarde no revierte la negacion', [null, true], [pg.rol, p.sel('panel-crear-admin').hidden]);
     var html = leer('admin/iniciativas.html');
-    Check('VW4 autorizado -> fijarRol; solo solicitante -> modoSolicitante(); si no -> denegar()', true,
-      /if \(s\.autorizado\) window\.IniciativasPagina\.fijarRol\(s\.rol\);\s*else if \(s\.solicitante\) window\.IniciativasPagina\.modoSolicitante\(\);\s*else window\.IniciativasPagina\.denegar\(\);/.test(html));
+    Check('VW4 la pagina pasa la respuesta de SesionAdmin a aplicarSesion y vigila los 403 con revisarSesion', [true, true, true],
+      [/sesion\.aplicar\(document, saludo, correo\)\.then\(function \(s\) \{\s*if \(window\.IniciativasPagina\) window\.IniciativasPagina\.aplicarSesion\(s\);/.test(html),
+       /sesion\.vigilar\(function \(s\) \{\s*if \(!window\.IniciativasPagina \|\| !window\.IniciativasPagina\.revisarSesion\(s\)\) return;\s*sesion\.pintar\(document, s, saludo, correo\);/.test(html),
+       /getElementById\('iniVerificarReintentar'\)\.addEventListener\('click', aplicarSesion\)/.test(html)]);
+  });
+});
+
+// VS) aplicarSesion / revisarSesion: la pagina segun admin_sesion, al abrir
+// y con la pagina ya abierta (un 403 de Admin). Solo UX: el servidor ya
+// niega (AccesoIniciativasHttpSmoke, parte L).
+pruebas.push(function () {
+  var SES = {
+    adm: { autorizado: true, rol: 'ADM', solicitante: true, incierto: false },
+    mod: { autorizado: true, rol: 'MOD', solicitante: false, incierto: false },
+    poso: { autorizado: false, rol: null, solicitante: true, incierto: false },
+    nada: { autorizado: false, rol: null, solicitante: false, incierto: false },
+    // Fallo la consulta del rol: el servidor dijo solicitante (PO/SO +
+    // interruptor) pero no pudo confirmar el rol.
+    incierto: { autorizado: false, rol: null, solicitante: true, incierto: true }
+  };
+  function estado(p) {
+    var pg = p.pagina;
+    return { rol: pg.rol, solo: !!pg.soloSolicitud, denegada: !!pg.denegada, tabs: p.sel('iniTabs').hidden,
+      verificar: p.sel('iniVerificar').hidden,
+      ini: p.sel('panel-iniciativas').hidden, nueva: p.sel('panel-nueva').hidden };
+  }
+  var a = Pagina(), b = Pagina(), c = Pagina(), d = Pagina(), e = Pagina(), f = Pagina();
+  return esperar().then(function () {
+    // Al abrir.
+    a.pagina.aplicarSesion(SES.incierto);
+    Check('VS1 incierto (aunque diga solicitante): ni modo solicitante ni denegar; Reintentar visible, todo oculto',
+      { rol: null, solo: false, denegada: false, tabs: true, verificar: false, ini: true, nueva: true }, estado(a));
+    a.pagina.aplicarSesion(SES.adm);
+    Check('VS2 Reintentar con respuesta confirmada ADM: vuelve la pagina entera',
+      { rol: 'ADM', solo: false, denegada: false, tabs: false, verificar: true, ini: false, nueva: true }, estado(a));
+    b.pagina.aplicarSesion(SES.poso);
+    Check('VS3 PO/SO sin rol: solo Nueva solicitud', [true, false, true], [b.pagina.soloSolicitud, b.sel('panel-nueva').hidden, b.sel('iniTabs').hidden]);
+    c.pagina.aplicarSesion(SES.nada);
+    Check('VS4 sin rol ni PO/SO: denegar', [true, false], [c.pagina.denegada, c.sel('iniDenegado').hidden]);
+    Check('VS5 revisarSesion antes de decidir: no hace nada', false, d.pagina.revisarSesion(SES.nada));
+
+    // Con la pagina abierta: ADM -> sale de UsuariosAdmin siendo PO/SO.
+    d.pagina.aplicarSesion(SES.adm);
+    d.pagina.mostrarVista('nueva');
+    var borrador = d.pagina.solicitud;
+    Check('VS6 ADM pierde el rol siendo PO/SO: repinta el menu', true, d.pagina.revisarSesion(SES.poso));
+    Check('VS6 ... pasa a solo Nueva solicitud con el MISMO borrador y sin rol',
+      [true, null, true, false, false], [d.pagina.soloSolicitud, d.pagina.rol, d.pagina.solicitud === borrador, d.sel('panel-nueva').hidden,
+        d.sel('iniAvisoSesion').hidden]);
+    Check('VS6 ... el aviso dice que ya no hay administracion', true, /Ya no tienes acceso a la administración/.test(d.sel('iniAvisoSesion').textContent));
+    Check('VS6 ... pulsar pestanas no reabre Admin', true, (d.sel('tab-iniciativas').disparar('click'), d.sel('panel-iniciativas').hidden));
+    // ... y luego deja de ser PO/SO (o se apaga el interruptor): el
+    // formulario se queda en pantalla, con el aviso.
+    d.pagina.revisarSesion(SES.nada);
+    Check('VS7 solicitante que lo pierde: no se niega la pagina ni se borra el borrador', [false, false, true],
+      [!!d.pagina.denegada, d.sel('panel-nueva').hidden, d.pagina.solicitud === borrador]);
+    Check('VS7 ... el aviso lo dice', true, /ya no está disponible para tu cuenta/.test(d.sel('iniAvisoSesion').textContent));
+
+    // ADM -> MOD sin PO/SO: se queda en Admin, sin lo de ADM ni Nueva solicitud.
+    e.pagina.aplicarSesion(SES.adm);
+    e.pagina.mostrarVista('nueva');
+    e.pagina.revisarSesion(SES.mod);
+    Check('VS8 ADM pasa a MOD sin PO/SO: rol MOD, sale de Nueva solicitud, Administracion oculta',
+      ['MOD', false, true, true], [e.pagina.rol, e.sel('panel-iniciativas').hidden, e.sel('panel-nueva').hidden, e.sel('tab-administracion').hidden]);
+    // ADM -> nada: denegar con el mensaje.
+    e.pagina.revisarSesion(SES.nada);
+    Check('VS9 pierde todo: denegar con el aviso de que ya no esta vigente', [true, false, true],
+      [e.pagina.denegada, e.sel('iniDenegado').hidden, /ya no está vigente/.test(e.sel('iniDenegadoTexto').textContent)]);
+
+    // ADM con la pagina abierta y la consulta del rol falla: no pasa a modo
+    // solicitante por un error; oculta y ofrece Reintentar.
+    f.pagina.aplicarSesion(SES.adm);
+    Check('VS10 un 403 + rol incierto: Reintentar, ni modo solicitante ni denegar', [true, false, false, false, true],
+      [f.pagina.revisarSesion(SES.incierto), f.pagina.soloSolicitud === true, f.pagina.denegada === true, f.sel('iniVerificar').hidden, f.sel('panel-iniciativas').hidden]);
   });
 });
 
@@ -622,7 +694,8 @@ pruebas.push(function () {
     var attr = function (id) {
       var tag = (new RegExp('<button[^>]*id="' + id + '"[^>]*>')).exec(html);
       return tag && / data-solo-adm[\s>]/.test(tag[0]) ? '[data-solo-adm]'
-        : tag && / data-solo-admin[\s>]/.test(tag[0]) ? '[data-solo-admin]' : '';
+        : tag && / data-solo-admin[\s>]/.test(tag[0]) ? '[data-solo-admin]'
+        : tag && / data-solo-solicitud[\s>]/.test(tag[0]) ? '[data-solo-solicitud]' : '';
     };
     var doc = { querySelectorAll: function (sel) {
       return [solicitar, crear].filter(function (b) { return attr(b.id) === sel; });
@@ -634,15 +707,17 @@ pruebas.push(function () {
   }
   function r(json) { return { ok: true, json: function () { return Promise.resolve(json); } }; }
   return Promise.all([
-    visibles(r({ autorizado: true, rol: 'ADM' })),
-    visibles(r({ autorizado: true, rol: 'MOD' })),
+    visibles(r({ autorizado: true, rol: 'ADM', solicitante: true })),
+    visibles(r({ autorizado: true, rol: 'MOD', solicitante: true })),
     visibles(r({ autorizado: false })),
-    visibles(null)
+    visibles(null),
+    visibles(r({ autorizado: true, rol: 'MOD', solicitante: false }))
   ]).then(function (v) {
     Check('CB3 ADM ve Solicitar y Crear', ['btnSolicitar', 'btnCrearAdmin'], v[0]);
-    Check('CB3 MOD ve Solicitar y no Crear', ['btnSolicitar'], v[1]);
+    Check('CB3 MOD PO/SO vigente ve Solicitar y no Crear', ['btnSolicitar'], v[1]);
     Check('CB3 VIEWER (no autorizado) no ve ninguno', [], v[2]);
     Check('CB3 sin respuesta de admin_sesion: ninguno', [], v[3]);
+    Check('CB3 MOD sin ser PO/SO no ve Solicitar ni Crear', [], v[4]);
   });
 });
 
@@ -1450,8 +1525,14 @@ pruebas.push(function () {
   var S = A.Selector, veinte = [], veintiuna = [];
   for (var n = 1; n <= 21; n++) { if (n <= 20) veinte.push('/R/' + n); veintiuna.push('/R/' + n); }
   Check('SL1 hasta 20 opciones: select', [true, false], [/^<select id="x"/.test(S.html('x', veinte, '')), /datalist/.test(S.html('x', veinte, ''))]);
-  Check('SL2 21 opciones: caja con busqueda (input list + datalist)', [true, true],
-    [/^<input type="text" id="x" list="x-lista"/.test(S.html('x', veintiuna, '')), /<datalist id="x-lista">/.test(S.html('x', veintiuna, ''))]);
+  Check('SL2 21 opciones: el mismo <select> del desplegable de SLA, sin caja de texto ni datalist', [true, false, 22],
+    [/^<select id="x" class="ini-dd-categoria">/.test(S.html('x', veintiuna, '')), /datalist|<input/.test(S.html('x', veintiuna, '')),
+     (S.html('x', veintiuna, '').match(/<option /g) || []).length]);
+  Check('SL2b un class de extra se suma a la marca (un solo atributo class)', [true, 1],
+    [/^<select id="x" class="ini-dd-categoria ini-ed-campo mia" data-edicion="po">/.test(S.html('x', veinte, '', ' data-edicion="po" class="ini-ed-campo mia"')),
+     (S.html('x', veinte, '', ' class="a"').match(/class=/g) || []).length]);
+  Check('SL2c el valor actual queda elegido; uno que no es opcion no elige nada', [true, false],
+    [/<option value="\/R\/21" selected>/.test(S.html('x', veintiuna, '/R/21')), / selected/.test(S.html('x', veintiuna, 'escrito a mano'))]);
   Check('SL3 resolver: solo una opcion real, sin mayusculas ni espacios de mas', ['/R/3', '', ''],
     [S.resolver('  /r/3 ', veintiuna), S.resolver('/R/', veintiuna), S.resolver('', veintiuna)]);
   Check('SL4 escapa valores', true, /value="\/A&quot;B"/.test(S.html('x', ['/A"B'], '')));
@@ -1831,7 +1912,7 @@ pruebas.push(function () {
       Check('SG2 se conservan semaforo, tabla de compromisos y contadores', [true, true, true],
         [/ini-det-sem/.test(seg), /<th scope="col" class="num">Cambios<\/th>/.test(seg), /Análisis <span class="ini-sub">estado actual<\/span>/.test(seg)]);
       Check('SG3 selector con las categorias reales; la primera elegida', [true, true, true],
-        [/<select id="regSegCategoria">/.test(seg), /<option value="\/A\/Cat 1" selected>/.test(seg), /<option value="\/A\/Cat 2">/.test(seg)]);
+        [/<select id="regSegCategoria" class="ini-dd-categoria">/.test(seg), /<option value="\/A\/Cat 1" selected>/.test(seg), /<option value="\/A\/Cat 2">/.test(seg)]);
       Check('SG4 bloque de la primera: su % y la fecha de analisis de la iniciativa (hereda)', [true, true, true],
         [/% disminución<\/dt><dd>50%/.test(seg), /De la iniciativa/.test(seg), /Hereda las fechas de la iniciativa/.test(seg)]);
       var cuerpo = p.sel('regDetCuerpo').innerHTML;
@@ -1849,7 +1930,7 @@ pruebas.push(function () {
       var sin = p.sel('regDetCuerpo').innerHTML;
       Check('SG8 sin categorias ni fecha de creacion: lo dice, sin inventar', [true, true],
         [/Sin categorías: las fechas son las del problema/.test(sin), /Fecha de creación<\/dt><dd>—/.test(sin)]);
-      // Umbral: 20 categorias = <select>; 21 = caja con busqueda.
+      // Sin umbral: 20 o 21 categorias, siempre el <select> del desplegable.
       function con(n) {
         var d = JSON.parse(JSON.stringify(REGISTRO)), cats = [];
         for (var k = 1; k <= n; k++) cats.push(Cat('/R/' + k, 0.01));
@@ -1861,13 +1942,16 @@ pruebas.push(function () {
       }
       return con(20).then(function (h20) {
         return con(21).then(function (h21) {
-          Check('SG9 umbral del selector: 20 select, 21 caja con busqueda', [true, false, true, true],
-            [/<select id="regSegCategoria">/.test(h20), /list="regSegCategoria-lista"/.test(h20),
-             /<input type="text" id="regSegCategoria" list="regSegCategoria-lista"/.test(h21), /<datalist id="regSegCategoria-lista">/.test(h21)]);
+          Check('SG9 sin umbral: 20 y 21 categorias son el <select> del desplegable, nunca <datalist>', [true, false, true, false],
+            [/<select id="regSegCategoria" class="ini-dd-categoria">/.test(h20), /datalist|list="regSegCategoria-lista"/.test(h20),
+             /<select id="regSegCategoria" class="ini-dd-categoria">/.test(h21), /datalist|list="regSegCategoria-lista"/.test(h21)]);
           var t = p.sel('regSegCategoria');
-          t.value = '/r/21';
-          p.sel('regDetCuerpo').disparar('input', { target: t });
-          Check('SG10 escribir en la caja (sin mayusculas) elige la real', '/R/21', reg.segCategoria);
+          t.value = '/R/21';
+          p.sel('regDetCuerpo').disparar('change', { target: t });
+          Check('SG10 elegir en el desplegable (change del <select>) fija la real', '/R/21', reg.segCategoria);
+          t.value = '/R/no existe';
+          p.sel('regDetCuerpo').disparar('change', { target: t });
+          Check('SG10b un valor que no es opcion no cambia la categoria', '/R/21', reg.segCategoria);
         });
       });
     });

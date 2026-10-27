@@ -167,30 +167,50 @@
             <span class="mnav-txt">Call Center</span>
           </button>
         </li>
-        <!-- Administracion: un ENLACE a otra pagina, no una pestaña (sin
-             data-tab, fuera de MODULOS). Oculta hasta que SesionAdmin
+        <!-- Iniciativas (ADM/MOD): un ENLACE a otra pagina, no una pestaña
+             (sin data-tab, fuera de MODULOS). Oculta hasta que SesionAdmin
              confirma que la cuenta Windows esta autorizada. Es solo UX: la
-             pagina y sus handlers se protegen en el servidor (AccesoAdmin). -->
+             pagina y sus handlers se protegen en el servidor (AccesoAdmin).
+             Mismo nombre, icono y title que la del solicitante (abajo): la
+             persona ve "Iniciativas" sea cual sea su acceso; lo que puede
+             hacer dentro lo decide el servidor. -->
         <li data-solo-admin hidden>
-          <a class="mnav" id="mnav-admin" href="admin/iniciativas.html" title="Administración">
+          <a class="mnav" id="mnav-admin" href="admin/iniciativas.html" title="Iniciativas">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M12 3.5 19 6v5.5c0 4.2-2.9 7.6-7 9-4.1-1.4-7-4.8-7-9V6z"/><path d="m9 12 2 2 4-4"/>
-            </svg>
-            <span class="mnav-txt">Administración</span>
-          </a>
-        </li>
-        <!-- Iniciativas: la misma pagina en modo "solo Nueva solicitud" para
-             una cuenta SIN rol ADM/MOD, cuando el interruptor
-             INICIATIVAS_ABIERTAS esta encendido (SesionAdmin: solicitante y
-             no autorizado). Oculta por omision; solo UX: el servidor lo
-             exige en la pagina y en sus handlers (AccesoIniciativas). -->
-        <li data-solo-solicitante hidden>
-          <a class="mnav" id="mnav-solicitar" href="admin/iniciativas.html" title="Solicitar una iniciativa">
-            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M12 5v14"/><path d="M5 12h14"/>
+              <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>
             </svg>
             <span class="mnav-txt">Iniciativas</span>
           </a>
+        </li>
+        <!-- Iniciativas (solicitante): la misma pagina en modo "solo Nueva
+             solicitud" para una cuenta SIN rol ADM/MOD que es PO/SO vigente,
+             con el interruptor INICIATIVAS_ABIERTAS encendido (SesionAdmin:
+             solicitante, no autorizado y confirmado). Excluyente con la de
+             arriba: nunca se ven las dos. Icono de documento (no un "+"
+             suelto): plegada se reconoce por el icono y el title. Oculta por
+             omision; solo UX: el servidor lo exige en la pagina y en sus
+             handlers (AccesoIniciativas). La misma entrada esta en
+             admin/iniciativas.html. -->
+        <li data-solo-solicitante hidden>
+          <a class="mnav" id="mnav-solicitar" href="admin/iniciativas.html" title="Iniciativas">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>
+            </svg>
+            <span class="mnav-txt">Iniciativas</span>
+          </a>
+        </li>
+        <!-- admin_sesion NO pudo confirmar el acceso (fallo la consulta del
+             rol, del interruptor o de los dueños): ninguna de las dos
+             entradas Iniciativas, porque un error no es "sin rol". Un clic
+             vuelve a preguntar (SesionAdmin; nada se reintenta solo mas de
+             una vez). No es un modulo: sin data-tab. -->
+        <li data-sesion-incierta hidden>
+          <button class="mnav" id="mnav-sesion-reintentar" type="button" title="No se pudo verificar tu acceso a Iniciativas. Reintentar">
+            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4v4.5H15"/>
+            </svg>
+            <span class="mnav-txt">Reintentar acceso</span>
+          </button>
         </li>
       </ul>
     </nav>
@@ -591,11 +611,23 @@ try {
 }
 </script>
 
-<!-- Entrada Administracion del menu, solo para las cuentas autorizadas.
+<!-- Entradas Iniciativas del menu (ADM/MOD o solicitante), segun SesionAdmin.
      Aparte y al final: si falla, el tablero no se entera. -->
 <script src="assets/js/sesion-admin.js"></script>
 <script>
-try { new SesionAdmin('').aplicar(document); } catch (e) { console.error(e); }
+// Reintentar (solo si admin_sesion no pudo confirmar) y volver con "Atras"
+// desde Admin (pagina restaurada de la cache del navegador: el menu podria
+// ser el de antes) vuelven a preguntar; nada mas.
+try {
+  (function () {
+    var sesion = new SesionAdmin('');
+    function aplicarSesion() { return sesion.aplicar(document); }
+    aplicarSesion();
+    var reintentar = document.getElementById('mnav-sesion-reintentar');
+    if (reintentar) reintentar.addEventListener('click', aplicarSesion);
+    window.addEventListener('pageshow', function (e) { if (e.persisted) aplicarSesion(); });
+  })();
+} catch (e) { console.error(e); }
 </script>
 </body>
 </html>

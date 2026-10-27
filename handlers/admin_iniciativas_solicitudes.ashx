@@ -14,7 +14,8 @@
 //        agregar_categoria / agregar_pct (del catalogo, en %), motivo.
 //        tipo datos (sql/25, PersistenciaSolicitudesCambio.SolicitaDatos):
 //        titulo_nuevo / po_nuevo / so_nuevo, la clave PRESENTE = se pide
-//        (vacia = que quede vacio); PO / SO del catalogo se revisan al aplicar.
+//        (presente y vacia = 422: nunca se pide dejarlo vacio); PO / SO del
+//        catalogo se revisan al aplicar.
 //        tipo varios (sql/34, PersistenciaSolicitudesCambio.SolicitaVarios):
 //        UNA solicitud con cualquier combinacion de estado_nuevo, las fechas
 //        por etapa f_analisis_nueva / f_solucion_nueva / f_cierre_nueva (la

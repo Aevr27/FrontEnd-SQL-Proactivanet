@@ -392,10 +392,26 @@ public static class SolicitudesCambioHttpSmoke
                   "200|DATOS|True|Nuevo titulo|True|PO 2|False||PRB 2026-000001",
                   estado + "|" + p.Tipo + "|" + p.CambiaTitulo + "|" + p.TituloNuevo + "|" + p.CambiaPo + "|" + p.PoNuevo + "|"
                   + p.CambiaSo + "|" + p.SoNuevo + "|" + p.Folio);
+            // Una solicitud nunca deja vacios Titulo / PO / SO: pedido y vacio
+            // (o solo espacios) = 422 y el almacen no se toca (peticion manipulada).
+            alm.Llamadas.Clear();
             cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "datos", "so_nuevo", "  ", "motivo", "m"), out estado);
+            Check("G4 SO pedido vacio (solo espacios): 422 en so_nuevo, no se envia", "422|True|0",
+                  estado + "|" + cuerpo.Contains("\"campo\":\"so_nuevo\"") + "|" + alm.Llamadas.Count);
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "datos", "titulo_nuevo", "", "motivo", "m"), out estado);
+            Check("G4b Titulo pedido vacio: 422 en titulo_nuevo, no se envia", "422|True|0",
+                  estado + "|" + cuerpo.Contains("\"campo\":\"titulo_nuevo\"") + "|" + alm.Llamadas.Count);
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "datos", "titulo_nuevo", " \u00a0 \t",
+                                                           "po_nuevo", "PO 2", "motivo", "m"), out estado);
+            Check("G4c Titulo de espacios (con NBSP y tab) junto a un PO valido: 422, nada se envia", "422|True|False|0",
+                  estado + "|" + cuerpo.Contains("\"campo\":\"titulo_nuevo\"") + "|" + cuerpo.Contains("\"campo\":\"po_nuevo\"") + "|" + alm.Llamadas.Count);
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "datos", "po_nuevo", "", "so_nuevo", "", "motivo", "m"), out estado);
+            Check("G4d PO y SO pedidos vacios: 422 en los dos, no se envia", "422|True|True|0",
+                  estado + "|" + cuerpo.Contains("\"campo\":\"po_nuevo\"") + "|" + cuerpo.Contains("\"campo\":\"so_nuevo\"") + "|" + alm.Llamadas.Count);
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "datos", "so_nuevo", "SO x", "motivo", "m"), out estado);
             p = alm.UltimaPeticion;
-            Check("G4 SO vacio = que quede vacio (bandera si, valor null)", "200|True|null|False",
-                  estado + "|" + p.CambiaSo + "|" + (p.SoNuevo ?? "null") + "|" + p.CambiaTitulo);
+            Check("G4e solo SO: viaja solo SO; Titulo y PO no se piden (null, no vacio)", "200|False|null|False|null|True|SO x",
+                  estado + "|" + p.CambiaTitulo + "|" + (p.TituloNuevo ?? "null") + "|" + p.CambiaPo + "|" + (p.PoNuevo ?? "null") + "|" + p.CambiaSo + "|" + p.SoNuevo);
             alm.Llamadas.Clear();
             cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "datos", "motivo", "m"), out estado);
             Check("G5 datos sin ningun dato: 422", "422|True|0", estado + "|" + cuerpo.Contains("\"campo\":\"tipo\"") + "|" + alm.Llamadas.Count);
@@ -429,6 +445,20 @@ public static class SolicitudesCambioHttpSmoke
             dd["cambia_so"] = true; dd["so_nuevo"] = null; dd["so_anterior"] = "SO x";
             Check("G13 SO vacio: ComoModificar manda so = \"\" (vaciar), no lo omite", "True|",
                   (SolicitudesCambio.ComoModificar(dd, null)["so"] != null) + "|" + SolicitudesCambio.ComoModificar(dd, null)["so"]);
+            // ...pero una solicitud guardada con un dato pedido y vacio (de antes
+            // de que el envio lo rechazara) NUNCA se aplica: dejaria vacio el SO.
+            alm.Llamadas.Clear(); validaciones.Clear();
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("G13b aplicar con SO pedido vacio: 422, fallo registrado, ni se valida ni se aplica", "422|Detalle:5,RegistrarFallo:51230|0|True|False",
+                  estado + "|" + string.Join(",", alm.Llamadas.ToArray()) + "|" + validaciones.Count + "|" + cuerpo.Contains("Service Owner")
+                  + "|" + cuerpo.Contains("\"aplicada\":true"));
+            dd["titulo_nuevo"] = "   ";
+            Check("G13c DatosVacios: titulo de espacios y SO null pedidos; PO con valor no", "el T\u00edtulo|el Service Owner",
+                  string.Join("|", SolicitudesCambio.DatosVacios(dd).ToArray()));
+            dd["titulo_nuevo"] = "Nuevo titulo";
+            dd["cambia_so"] = false; dd["so_nuevo"] = null; dd["so_anterior"] = null;
+            Check("G13d sin datos vacios pedidos: DatosVacios vacio", 0, SolicitudesCambio.DatosVacios(dd).Count);
+            dd["cambia_so"] = true; dd["so_nuevo"] = null; dd["so_anterior"] = "SO x";
             var otros = Pendiente("ESTADO", MOD);
             otros["cambia_titulo"] = true; otros["titulo_nuevo"] = "No";
             Check("G14 otro tipo con bandera de datos (no deberia existir: CHECK de sql/25): ComoModificar no la manda", "null",

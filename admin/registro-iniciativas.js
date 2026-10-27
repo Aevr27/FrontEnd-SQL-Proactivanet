@@ -390,8 +390,9 @@ window.RegistroIniciativas = (function () {
       });
   }
 
-  // El selector compartido (IniciativaAdmin.Selector): <select> con 20
-  // opciones o menos, caja con busqueda con mas. Sin ese modulo, <select>.
+  // El selector compartido (IniciativaAdmin.Selector): un <select> real que
+  // montarSelectores viste con el desplegable de SLA. Sin ese modulo,
+  // <select> nativo.
   function selectorHtml(id, opciones, valor, extra) {
     var A = window.IniciativaAdmin;
     if (A && A.Selector) return A.Selector.html(id, opciones, valor, extra);
@@ -1250,10 +1251,15 @@ window.RegistroIniciativas = (function () {
   // los de dbo.Problem (po_capturado / so_capturado), nunca los de la
   // categoría. El Código no se puede pedir.
   var CAMPO_DATOS = { clave: 'datos', rotulo: 'Título, Product Owner o Service Owner', tipo: 'datos' };
+  // nombre / incluir / nuevo: lo que se lee en el formulario (cada casilla
+  // junto al nombre de SU dato).
   var DATOS_CAMBIO = [
-    { clave: 'titulo', rotulo: 'Título', par: 'titulo_nuevo' },
-    { clave: 'po', rotulo: 'Product Owner capturado', par: 'po_nuevo' },
-    { clave: 'so', rotulo: 'Service Owner capturado', par: 'so_nuevo' }
+    { clave: 'titulo', rotulo: 'Título', par: 'titulo_nuevo',
+      nombre: 'Título', incluir: 'Incluir cambios al título', nuevo: 'Nuevo título' },
+    { clave: 'po', rotulo: 'Product Owner capturado', par: 'po_nuevo',
+      nombre: 'Product Owner', incluir: 'Incluir cambios al Product Owner', nuevo: 'Nuevo Product Owner' },
+    { clave: 'so', rotulo: 'Service Owner capturado', par: 'so_nuevo',
+      nombre: 'Service Owner', incluir: 'Incluir cambios al Service Owner', nuevo: 'Nuevo Service Owner' }
   ];
   function camposCambio(conDatos) {
     return conDatos ? CAMPOS_CAMBIO.slice(0, -1).concat([CAMPO_DATOS], CAMPOS_CAMBIO.slice(-1)) : CAMPOS_CAMBIO.slice();
@@ -1355,8 +1361,9 @@ window.RegistroIniciativas = (function () {
       this.pcts = {};        // solo con campo 'pct': ruta ligada -> % pedido (texto)
       this.nuevas = [];      // solo con campo 'pct': [{ categoria, valor }] a agregar
       // Solo con campo 'datos' (sql/25, opciones.datos): por dato, null = no
-      // se pide; texto = el valor pedido ('' = que quede vacio). PO / SO,
-      // de las listas del catalogo (opciones.pos / sos).
+      // se pide; texto = el valor pedido. Pedido y vacio no se acepta: una
+      // solicitud nunca deja vacios Titulo, PO ni SO. PO / SO, de las listas
+      // del catalogo (opciones.pos / sos).
       this.conDatos = opciones.datos === true;
       this.pos = Array.isArray(opciones.pos) ? opciones.pos : [];
       this.sos = Array.isArray(opciones.sos) ? opciones.sos : [];
@@ -1537,9 +1544,14 @@ window.RegistroIniciativas = (function () {
         }
         datos.forEach(function (d) {
           var lista = d.campo === 'po' ? self.pos : d.campo === 'so' ? self.sos : null;
-          // PO / SO: de la lista del catálogo; vacío = que quede vacío. El
-          // servidor lo vuelve a revisar al aplicar.
-          if (lista && d.nuevo && lista.indexOf(d.nuevo) < 0) {
+          // Marcado = se pide, y lo pedido nunca es vacío (ni solo espacios:
+          // d.nuevo ya va recortado). PO / SO: una persona de la lista del
+          // catálogo. El servidor lo vuelve a revisar al enviar y al aplicar.
+          if (!d.nuevo) {
+            errores.push({ campo: 'datos', dato: d.campo, mensaje: lista
+              ? d.rotulo + ': elige una persona de la lista; no puede quedar vacío.'
+              : d.rotulo + ': escribe el nuevo título; no puede quedar vacío.' });
+          } else if (lista && lista.indexOf(d.nuevo) < 0) {
             errores.push({ campo: 'datos', dato: d.campo, mensaje: d.rotulo + ': elige uno de la lista del catálogo.' });
           } else if (d.nuevo === String(d.anterior || '').trim()) {
             errores.push({ campo: 'datos', dato: d.campo, mensaje: d.rotulo + ': el valor pedido es igual al actual.' });
@@ -1998,7 +2010,7 @@ window.RegistroIniciativas = (function () {
         this.cambio.pos = this.duenosCatalogo.po;
         this.cambio.sos = this.duenosCatalogo.so;
         var grupo = this.$('regCambioGrupoDatos');
-        if (grupo && this.cambio.tipo() !== 'datos') grupo.innerHTML = this.htmlDatosCambio();
+        if (grupo && this.cambio.tipo() !== 'datos') { grupo.innerHTML = this.htmlDatosCambio(); this.montarDatosCambio(); }
       }
     }
 
@@ -3104,6 +3116,7 @@ window.RegistroIniciativas = (function () {
     pintarCategoriasCambio() {
       var caja = this.$('regCambioGrupoPct');
       if (caja && this.cambio) caja.innerHTML = this.htmlCategoriasCambio();
+      this.montarSelectores();
     }
 
     htmlCategoriasCambio() {
@@ -3215,9 +3228,21 @@ window.RegistroIniciativas = (function () {
 
     // "Agregar categoria" de Modificar con el desplegable del filtro Grupos
     // de SLA (IniciativaAdmin.Selector.montar). Sin el modulo, <select> nativo.
-    montarSelectorCategorias() {
-      var A = window.IniciativaAdmin, caja = this.$('regEdCats');
-      if (A && A.Selector && A.Selector.montar && caja) A.Selector.montar(caja);
+    montarSelectorCategorias() { this.montarSelectores(); }
+
+    // Viste con el desplegable de SLA los selectores de Selector.html /
+    // Selector.desplegable del detalle: Estado / Subestado / PO / SO de
+    // Modificar, sus categorias, la categoria de Seguimiento y categoria /
+    // Estado / PO / SO de Solicitar cambios. Solo esas cajas: "Que cambiar"
+    // y la etapa de fecha siguen nativos. Idempotente (los ya montados se
+    // ignoran); sin assets/js/desplegable.js queda el <select>.
+    montarSelectores() {
+      var A = window.IniciativaAdmin, self = this;
+      if (!A || !A.Selector || !A.Selector.montar) return;
+      ['regDetIdent', 'regEdCats', 'regSegCat', 'regCambioGrupoEstado', 'regCambioGrupoPct', 'regCambioGrupoDatos'].forEach(function (id) {
+        var caja = self.$(id);
+        if (caja) A.Selector.montar(caja);
+      });
     }
 
     // Pide la volumetria (solo lectura) y repinta las categorias al llegar,
@@ -3581,6 +3606,7 @@ window.RegistroIniciativas = (function () {
       this.cambioRevisando = false;
       this.$('regCambio').innerHTML = abrir ? this.htmlCambio() : '';
       this.$('regCambio').hidden = !abrir;
+      if (abrir) this.montarDatosCambio();
       this.$('regCambioBoton').setAttribute('aria-expanded', abrir ? 'true' : 'false');
       var foco = abrir ? this.$('regCambioCampo') : this.$('regCambioBoton');
       if (foco && foco.focus) foco.focus();
@@ -3637,7 +3663,8 @@ window.RegistroIniciativas = (function () {
       } else if (t === 'fecha') c.propuesto = this.$('regCambioNueva').value || '';
       else c.propuesto = '';
       if (t === 'datos') {
-        // Marcado = se pide (vacío = que quede vacío); PO / SO, la opción real.
+        // Marcado = se pide (vacío no se acepta: validar); PO / SO, la opción
+        // real del <select> (el «— Elige —» vale '').
         DATOS_CAMBIO.forEach(function (d) {
           var marca = self.$('regCambioDato-' + d.clave), valor = self.$('regCambioDatoValor-' + d.clave);
           if (!marca || !marca.checked) { c.datos[d.clave] = null; return; }
@@ -3698,6 +3725,10 @@ window.RegistroIniciativas = (function () {
       });
       this.pintarGruposCambio();
       this.pintarCategoriasCambio();
+      // Lo puesto por propiedad (Estado, PO / SO) no avisa: el desplegable
+      // vuelve a leer su <select>.
+      var A = window.IniciativaAdmin;
+      if (A && A.Selector && A.Selector.repintar) A.Selector.repintar();
       var boton = this.$('regCambioAgregar');
       if (boton) boton.textContent = editando ? 'Actualizar cambio' : 'Agregar cambio a la solicitud';
       var cancelar = this.$('regCambioEdCancelar');
@@ -3995,26 +4026,38 @@ window.RegistroIniciativas = (function () {
         '</div>';
     }
 
-    // Título / PO / SO capturados (sql/25): cada uno con su casilla (marcada
-    // = se pide) y su valor actual. PO / SO de la lista del catálogo; el
-    // Código no se ofrece (no se puede cambiar).
+    // Título / PO / SO capturados (sql/25): una tarjeta por dato con su
+    // nombre, su casilla al lado (marcada = se pide), el valor actual y el
+    // nuevo. PO / SO con el desplegable del tablero (assets/js/desplegable.js
+    // sobre un <select> real, como la categoría de Crear / Modificar:
+    // Selector.desplegable + montarDatosCambio); el Código no se ofrece.
     htmlDatosCambio() {
-      var c = this.cambio;
-      return '<p class="ini-nota">Marca lo que quieres cambiar. Product Owner y Service Owner son los capturados en la iniciativa, ' +
-          'no los de sus categorías. Vacío = que quede vacío.</p>' +
+      var c = this.cambio, A = window.IniciativaAdmin;
+      return '<p class="ini-nota">Marca solo lo que quieres cambiar; lo no marcado se queda como está. ' +
+          'Product Owner y Service Owner son los capturados en la iniciativa, no los de sus categorías.</p>' +
+        '<div class="ini-cambio-datos">' +
         DATOS_CAMBIO.map(function (d) {
           var lista = d.clave === 'po' ? c.pos : d.clave === 'so' ? c.sos : null;
-          var id = 'regCambioDatoValor-' + d.clave;
-          var control = lista
-            ? (lista.length ? selectorHtml(id, lista, '') : '<input type="text" id="' + id + '" disabled placeholder="Sin catálogo de dueños">')
-            : '<input type="text" id="' + id + '" maxlength="4000">';
-          return '<div class="ini-cambio-sub" data-dato="' + d.clave + '">' +
-            '<label><input type="checkbox" id="regCambioDato-' + d.clave + '"> ' + Escape.html(d.rotulo) + '</label>' +
-            '<span class="ini-cambio-rot">Actual</span><span class="ini-cambio-actual">' + Escape.html(c.datoActual(d.clave) || '—') + '</span>' +
-            '<label for="' + id + '">Nuevo ' + Escape.html(d.rotulo) + '</label>' + control +
+          var id = 'regCambioDatoValor-' + d.clave, marca = 'regCambioDato-' + d.clave;
+          var control = !lista ? '<input type="text" id="' + id + '" maxlength="4000">'
+            : !lista.length ? '<input type="text" id="' + id + '" disabled placeholder="Sin catálogo de dueños">'
+            : A && A.Selector && A.Selector.desplegable ? A.Selector.desplegable(id, lista, '')
+            : selectorHtml(id, lista, '');
+          return '<div class="ini-cambio-dato" data-dato="' + d.clave + '">' +
+            '<div class="ini-cambio-dato-cab">' +
+              '<span class="ini-cambio-dato-nombre" id="' + marca + '-nombre">' + Escape.html(d.nombre) + '</span>' +
+              '<label class="ini-cambio-marca"><input type="checkbox" id="' + marca + '" aria-describedby="' + marca + '-nombre"> ' +
+                '<span>' + Escape.html(d.incluir) + '</span></label>' +
+            '</div>' +
+            '<span class="ini-cambio-rot">Valor actual</span><span class="ini-cambio-actual">' + Escape.html(c.datoActual(d.clave) || '—') + '</span>' +
+            '<label for="' + id + '">' + Escape.html(d.nuevo) + '</label>' + control +
           '</div>';
-        }).join('');
+        }).join('') + '</div>';
     }
+
+    // Viste PO / SO con el desplegable del tablero (y el resto de
+    // Solicitar cambios: montarSelectores).
+    montarDatosCambio() { this.montarSelectores(); }
 
     htmlHistorial(i) {
       // La linea base ('B') no es un movimiento: no se pinta. Se rotula antes
@@ -4259,7 +4302,7 @@ window.RegistroIniciativas = (function () {
       var rutasCat = i.categorias.map(function (c) { return c.categoria; });
       if (rutasCat.indexOf(this.segCategoria) < 0) this.segCategoria = rutasCat[0] || '';
       var segCat = rutasCat.length
-        ? '<div class="ini-seg-cat"><label for="regSegCategoria">Ver por categoría</label>' +
+        ? '<div class="ini-seg-cat" id="regSegCat"><label for="regSegCategoria">Ver por categoría</label>' +
             selectorHtml('regSegCategoria', rutasCat, this.segCategoria) +
             '<div id="regSegCatInfo" aria-live="polite">' + this.htmlSeguimientoCategoria(i, this.segCategoria) + '</div></div>'
         : '<p class="ini-nota">Sin categorías: las fechas son las del problema.</p>';

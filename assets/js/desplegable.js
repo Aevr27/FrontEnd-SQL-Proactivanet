@@ -183,6 +183,9 @@ window.Desplegable = (function () {
 
     /* Refleja en el control lo que diga el <select>, venga de donde venga. */
     function pintar() {
+      // Deshabilitado el <select> (cargando, sin catalogo, guardando), el
+      // boton tampoco abre.
+      boton.disabled = select.disabled;
       var todas = filas();
       todas.forEach(function (fila) {
         var opcion = select.options[Number(fila.dataset.indice)];
@@ -388,6 +391,12 @@ window.Desplegable = (function () {
     // Catalogos que llegan despues (innerHTML / insertAdjacentHTML sobre el
     // <select>): hay que rehacer las filas.
     new MutationObserver(construir).observe(select, { childList: true });
+    // `sel.disabled = ...` por propiedad se refleja en el atributo: el boton
+    // lo sigue, y un menu abierto se cierra.
+    new MutationObserver(function () {
+      if (select.disabled) cerrar();
+      pintar();
+    }).observe(select, { attributes: true, attributeFilter: ['disabled'] });
 
     construir();
     return { envoltura: envoltura, select: select, cerrar: cerrar, pintar: pintar };
@@ -425,6 +434,9 @@ window.Desplegable = (function () {
   function montar(raiz) {
     raiz = raiz || document;
     var doc = raiz.ownerDocument || raiz;
+    // Los que salieron del DOM (su marcado se rehizo con innerHTML) ya no
+    // cuentan: ni se repintan ni se cierran.
+    controles = controles.filter(function (c) { return c.envoltura.isConnected !== false; });
     var candidatos = raiz.querySelectorAll('select:not([data-nativo]):not([data-dd-montado])');
     for (var i = 0; i < candidatos.length; i++) {
       var select = candidatos[i];

@@ -65,6 +65,14 @@ public static class TzSmoke
             "QA", "2026-09-14T14:46:22", ZonaSello.YaLocal, "fuente");
         Check("YaLocal intacto", "2026-09-14T14:46:22", yaLocal.AJson()["ultimaActualizacion"]);
 
+        // 5b) SLA / QA / QARE: dbo.EtlLog.Fin ya esta en la hora local del SQL
+        //     Server (UTC-06) y va como YaLocal: meta dice MAX(Fin) tal cual,
+        //     sin restar otras seis horas (como Utc salia 03:15).
+        var etl = DashboardDataInfo.Periodo(
+            "SLA y productividad", new DateTime(2026, 10, 26, 9, 15, 0), ZonaSello.YaLocal,
+            "2026-09-26", "2026-10-25", "dbo.EtlLog (Proactivanet tickets)");
+        Check("ETL tickets = MAX(Fin)", "2026-10-26T09:15:00", etl.AJson()["ultimaActualizacion"]);
+
         // 6) Sin sello: null, nunca la hora actual.
         var vacio = DashboardDataInfo.Corte("Backlog", null, ZonaSello.Utc, "fuente");
         Check("Sin sello", null, vacio.AJson()["ultimaActualizacion"]);

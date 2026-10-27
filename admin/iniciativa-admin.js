@@ -82,16 +82,16 @@
 
    SELECTORES
    ----------
-     Mas de SELECTOR_UMBRAL (20) opciones: caja de texto con lista
-     (<input list> + <datalist>), en la que se escribe para buscar; el valor
-     solo cuenta si coincide con una opcion real (Selector.resolver). Con 20
-     o menos, un <select> normal. Lo escrito que no es una opcion se
-     rechaza con las parecidas (Selector.coincidencias: parte del nombre o
-     del codigo), sin elegir ninguna. Es el mismo en Crear, Modificar,
-     Solicitar cambios y Seguimiento (registro-iniciativas.js).
-     EXCEPCION: la categoria de Crear y Modificar (ADM) usa el desplegable
-     del filtro Grupos de SLA (assets/js/desplegable.js sobre un <select>
-     real: Selector.desplegable + Selector.montar), con su buscador.
+     Todos son el desplegable del filtro Tecnicos / Grupos de SLA
+     (assets/js/desplegable.js sobre un <select> real: Selector.html o
+     Selector.desplegable + Selector.montar), con su buscador desde 8
+     opciones: PO / SO y categoria de Crear, Estado / Subestado / PO / SO y
+     categoria de Modificar, categoria / Estado / PO / SO de Solicitar
+     cambios y la categoria de Seguimiento (registro-iniciativas.js). Ya no
+     hay caja de texto con <datalist>: solo se elige una opcion real, nunca
+     lo escrito. El valor sigue pasando por Selector.resolver y lo que no es
+     una opcion se rechaza con las parecidas (Selector.coincidencias), como
+     antes. Sin assets/js/desplegable.js queda el <select> nativo.
 
    FECHA DE ANALISIS POR CATEGORIA (sql/18_gestion_admin_persistencia.sql)
    ---------------------------------------------------------------------
@@ -302,35 +302,31 @@ window.IniciativaAdmin = (function () {
   }
 
   // ---------------------------------------------------------------------
-  // Selector: <select> con pocas opciones, caja con busqueda con muchas
+  // Selector: siempre un <select> real con el desplegable de SLA
   // ---------------------------------------------------------------------
   var Selector = {
+    // Ya no cambia el control (antes, de aqui en adelante era <datalist>);
+    // se conserva para quien lo lea.
     UMBRAL: SELECTOR_UMBRAL,
     buscable: function (opciones) { return (opciones || []).length > SELECTOR_UMBRAL; },
 
     // id del control; opciones: [{ valor, texto }] o textos; valor actual.
+    // El mismo <select> de Selector.desplegable, con cualquier numero de
+    // opciones; un class="..." de `extra` se suma al de la marca.
     html: function (id, opciones, valor, extra) {
-      var ops = (opciones || []).map(function (o) { return typeof o === 'string' ? { valor: o, texto: o } : o; });
-      extra = extra || '';
-      if (Selector.buscable(ops)) {
-        return '<input type="text" id="' + id + '" list="' + id + '-lista" autocomplete="off" ' +
-          'placeholder="Escribe para buscar…" value="' + Escape.attr(valor || '') + '"' + extra + '>' +
-          '<datalist id="' + id + '-lista">' + ops.map(function (o) {
-            return '<option value="' + Escape.attr(o.valor) + '">' + (o.texto !== o.valor ? Escape.html(o.texto) : '') + '</option>';
-          }).join('') + '</datalist>';
-      }
-      return '<select id="' + id + '"' + extra + '><option value="">— Elige —</option>' + ops.map(function (o) {
-        return '<option value="' + Escape.attr(o.valor) + '"' + (o.valor === valor ? ' selected' : '') + '>' + Escape.html(o.texto) + '</option>';
-      }).join('') + '</select>';
+      return Selector.desplegable(id, opciones, valor, extra);
     },
 
     // Siempre un <select> real (sin datalist, sin umbral), con la ruta
     // completa como texto: es el que Selector.montar viste con el
-    // desplegable de SLA. Sin assets/js/desplegable.js queda el <select>
-    // nativo, que sigue funcionando igual.
+    // desplegable de SLA (la clase ini-dd-categoria es la marca, sea
+    // categoria, persona o estado). Sin assets/js/desplegable.js queda el
+    // <select> nativo, que sigue funcionando igual.
     desplegable: function (id, opciones, valor, extra) {
       var ops = (opciones || []).map(function (o) { return typeof o === 'string' ? { valor: o, texto: o } : o; });
-      return '<select id="' + id + '" class="ini-dd-categoria"' + (extra || '') + '><option value="">— Elige —</option>' +
+      var clase = 'ini-dd-categoria';
+      extra = (extra || '').replace(/\s+class="([^"]*)"/, function (m, c) { clase += ' ' + c; return ''; });
+      return '<select id="' + id + '" class="' + clase + '"' + extra + '><option value="">— Elige —</option>' +
         ops.map(function (o) {
           return '<option value="' + Escape.attr(o.valor) + '"' + (o.valor === valor ? ' selected' : '') + '>' + Escape.html(o.texto) + '</option>';
         }).join('') + '</select>';
@@ -344,6 +340,12 @@ window.IniciativaAdmin = (function () {
       if (!raiz.querySelectorAll('select.ini-dd-categoria').length) return false;
       window.Desplegable.montar(raiz);
       return true;
+    },
+
+    // Tras escribir `.value` por propiedad (no dispara change): el boton
+    // del desplegable dice lo que diga el <select>.
+    repintar: function () {
+      if (window.Desplegable && window.Desplegable.repintar) window.Desplegable.repintar();
     },
 
     // Lo escrito -> la opcion REAL que coincide (sin mayusculas ni espacios
@@ -1878,17 +1880,20 @@ window.IniciativaAdmin = (function () {
         var id = VistaCrearAdmin.idDueno(k), caja = self.$(id + 'Selector');
         if (!caja) return;
         if (!b) {
-          caja.innerHTML = '<input type="text" id="' + id + '" disabled>';
+          caja.innerHTML = Selector.html(id, [], '', ' disabled');
           caja.setAttribute('data-n', '');
+          Selector.montar(caja);
           return;
         }
         var lista = b.duenosLista[k];
         if (caja.getAttribute('data-n') !== String(lista.length)) {
           caja.innerHTML = Selector.html(id, lista, b.duenosTexto[k]);
           caja.setAttribute('data-n', String(lista.length));
+          Selector.montar(caja);
         }
         var ctl = self.$(id);
         if (ctl) { ctl.value = b.duenosTexto[k]; ctl.disabled = lista.length === 0; }
+        Selector.repintar();
         var msg = self.$(id + 'Msg');
         if (msg && !b.duenosTexto[k]) { msg.textContent = ''; msg.className = 'ini-motivo'; }
       });
@@ -1906,7 +1911,7 @@ window.IniciativaAdmin = (function () {
       msg.className = 'ini-motivo' + (r.ok ? '' : ' mal');
       if (r.ok) {
         this.$('admCatBuscar').value = '';
-        if (window.Desplegable) window.Desplegable.repintar();
+        Selector.repintar();
         this.consultarVolumetria(r.ruta);
         this.pintarCategorias();
         this.pintarFaltantes();

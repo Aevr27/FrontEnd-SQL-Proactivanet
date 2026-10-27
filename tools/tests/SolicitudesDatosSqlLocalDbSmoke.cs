@@ -14,7 +14,7 @@
 //      nuevos) envia y aplica igual sobre los procedimientos de sql/25.
 //   D  DATOS: enviar guarda el "anterior" sin tocar la iniciativa; aplicar
 //      cambia Titulo / PO / SO capturados (y solo eso), el registro lo ve al
-//      refrescar; vaciar; mismo valor (51224); 255 (51027); forma (51214);
+//      refrescar; pedir vaciar se rechaza al enviar; mismo valor (51224); 255 (51027); forma (51214);
 //      CHECK de la tabla; desactualizada (51204, sigue PENDIENTE); el
 //      Codigo no se puede pedir ni cambiar.
 //   P  cuenta del sitio (EXECUTE AS PROACTIVANETAD): envia y aplica DATOS
@@ -308,10 +308,16 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                   Uno("SELECT COUNT(*) FROM dbo.Problem") + "|" +
                   Uno("SELECT COUNT(*) FROM adm.SolicitudCambio WHERE Codigo NOT IN (N'PRB 2026-000001', N'PRB 2026-000002', N'PRB 2026-000003')"));
 
-            var d2 = Enviar(alm, "folio", "PRB 2026-000003", "tipo", "datos", "po_nuevo", "", "so_nuevo", "SO tres");
+            // Una solicitud nunca deja vacio el PO (ni Titulo / SO): pedir
+            // vaciarlo se rechaza al enviar, sin llegar a la base.
+            var vaciar = PeticionSolicitudCambio.DesdeFormulario(Form("folio", "PRB 2026-000003", "tipo", "datos", "po_nuevo", "", "so_nuevo", "SO tres"));
+            Check("D7a pedir vaciar el PO: formulario invalido (po_nuevo), nada se guarda", "False|1|po_nuevo|0",
+                  vaciar.Valida + "|" + vaciar.Errores.Count + "|" + vaciar.Errores[0].Campo + "|" +
+                  Uno("SELECT COUNT(*) FROM adm.SolicitudCambio WHERE Codigo = N'PRB 2026-000003'"));
+            var d2 = Enviar(alm, "folio", "PRB 2026-000003", "tipo", "datos", "so_nuevo", "SO tres");
             aplicador.Aplicar(d2, @"SORIANA\adm2", null, null, Hoy);
-            Check("D7 vaciar el PO y poner SO (iniciativa sin categoria): NULL / SO tres", "1:PO tres>NULL|Tres|NULL|SO tres|APLICADA",
-                  Fila(d2).Split('|')[3] + "|" + Problem("PRB 2026-000003") + "|" + alm.Detalle(d2)["estado"]);
+            Check("D7 solo poner SO (iniciativa sin categoria): el PO no se pide y se queda", "0|Tres|PO tres|SO tres|APLICADA",
+                  Fila(d2).Split('|')[3].Substring(0, 1) + "|" + Problem("PRB 2026-000003") + "|" + alm.Detalle(d2)["estado"]);
             Check("D8 pedir el MISMO valor (con espacios de mas): 51224, nada se guarda", "51224|2",
                   Error(() => Enviar(alm, "folio", "PRB 2026-000001", "tipo", "datos", "so_nuevo", "  SO viejo ")) + "|" +
                   Uno("SELECT COUNT(*) FROM adm.SolicitudCambio WHERE Tipo = 'DATOS'"));
