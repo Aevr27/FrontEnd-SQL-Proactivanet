@@ -288,7 +288,7 @@ pruebas.push(function () {
   var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   Check('D1 entrada sin folio descartada', 5, reg.iniciativas.length);
   var k = R.Registro.indicadores(reg.iniciativas);
-  Check('D2 indicadores: total (todas)/abiertas/activas/fuera de activas/retrasadas/cerradas', [5, 4, 3, 1, 1, 1],
+  Check('D2 indicadores: total (abiertas)/abiertas/activas/fuera de activas/retrasadas/cerradas', [4, 4, 3, 1, 1, 1],
     [k.total, k.abiertas, k.activas, k.fueraActivas, k.retrasadas, k.cerradas]);
   Check('D2 sin categoria entre todas', 1, k.sinCategoria);
   Check('D2 riesgo = riesgo_folio de las retrasadas que cuentan', 150, k.riesgo);
@@ -396,7 +396,7 @@ pruebas.push(function () {
   var p = Pagina(ok(DATOS));
   return esperar().then(function () {
     Check('L0 al cargar: Todas (Cerrado incluido), sin filtro activo, indicadores del registro completo',
-      [['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005', 'HAR 2025-000003'], ['5', '3', '1', '1', '1'], '5 iniciativas',
+      [['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005', 'HAR 2025-000003'], ['4', '3', '1', '1', '1'], '5 iniciativas',
        '— Todos —', ['Todos:si', 'En Análisis:si', 'En Solución:si', 'Cerrado:si'], '', true],
       [folios(p), kpis(p), p.sel('regCuenta').textContent, p.sel('regEstado').textContent, casillasDe(p, 'regEstadoPanel'),
        p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
@@ -405,7 +405,7 @@ pruebas.push(function () {
     Check('L1 listo: contenido visible', ['regContenido'], visibles(p));
     Check('L1 cinco filas, en el orden por omision',
       ['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005', 'HAR 2025-000003'], folios(p));
-    Check('L2 indicadores: Total, Activas, Requerimientos, Atrasadas, Cerradas', ['5', '3', '1', '1', '1'], kpis(p));
+    Check('L2 indicadores: Total, Activas, Requerimientos, Atrasadas, Cerradas', ['4', '3', '1', '1', '1'], kpis(p));
     Check('L2 pie de retrasadas', true, /150 tickets en riesgo/.test(p.sel('regKpis').innerHTML));
     var html = p.sel('regCuerpo').innerHTML;
     Check('L3 atrasada: fecha en rojo y la palabra debajo, sin pintar la fila', [true, false],
@@ -428,7 +428,7 @@ pruebas.push(function () {
     elegir(p, 'regPo', 'PO 1');
     Check('L6 PO por select', ['PRB 2026-000001', 'MAP 2026-000002', 'PRB 2026-000005'], folios(p));
     Check('L6 SO acotado', ['SO w', 'SO x', 'SO y'], p.sel('regSo').opciones());
-    Check('L6 indicadores NO siguen el filtro', ['5', '3', '1', '1', '1'], kpis(p));
+    Check('L6 indicadores NO siguen el filtro', ['4', '3', '1', '1', '1'], kpis(p));
     Check('L6 cuenta con filtro', '3 de 5 iniciativas', p.sel('regCuenta').textContent);
     Check('L6 Limpiar habilitado', [false, '1 filtro activo'], [p.sel('regLimpiar').hidden, p.sel('regFiltrosCuenta').textContent]);
     elegir(p, 'regSo', 'SO y');
@@ -437,7 +437,7 @@ pruebas.push(function () {
 
     soloEstado(p, 'Cerrado');
     Check('L8 sin coincidencias: aviso, sin tabla', [false, true, ''], [p.sel('regVacio').hidden, p.sel('regTablaCaja').hidden, p.sel('regCuenta').textContent]);
-    Check('L8 lista vacia por filtro: los indicadores no cambian', ['5', '3', '1', '1', '1'], kpis(p));
+    Check('L8 lista vacia por filtro: los indicadores no cambian', ['4', '3', '1', '1', '1'], kpis(p));
     p.sel('regLimpiarVacio').disparar('click');
     Check('L9 limpiar', [5, true, ''], [folios(p).length, p.sel('regVacio').hidden, p.sel('regPo').value]);
 
@@ -707,7 +707,7 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
-// SE) Solicitar cambios: la fecha nombra su etapa; Estado + fecha juntos
+// SE) Solicitar cambios: la fecha nombra su etapa; Estado va solo (sin fecha)
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
   var conEstados = JSON.parse(JSON.stringify(DATOS));
@@ -726,38 +726,93 @@ pruebas.push(function () {
     accion('solicitar-cambios');
     Check('SE1 la fecha nombra su etapa (la del campo elegido)', true,
       /<label for="regCambioNueva" id="regCambioNuevaRot">Nueva fecha compromiso de Solución<\/label>/.test(p.sel('regCambio').innerHTML));
-    elegir('regCambioCampo', 'f_cierre');
-    Check('SE1 ... y cambia con "Qué cambiar"', 'Nueva fecha compromiso de Cierre', p.sel('regCambioNuevaRot').textContent);
+    elegir('regCambioFechaCampo', 'f_cierre');
+    Check('SE1 ... y cambia con la etapa de "Fecha de compromiso"', 'Nueva fecha compromiso de Cierre', p.sel('regCambioNuevaRot').textContent);
     elegir('regCambioCampo', '');
-    Check('SE2 sin "Qué cambiar" no hay fecha suelta', true, p.sel('regCambioGrupoFecha').hidden);
+    Check('SE2 sin "Qué cambiar" no hay fecha suelta', [true, true], [p.sel('regCambioGrupoFecha').hidden, p.sel('regCambioGrupoEtapa').hidden]);
     Check('SE2 CSS: [hidden] gana al display:flex de .campo (solo se ve el grupo elegido)', true,
       /\.ini-cambio-campos \.campo\[hidden\][^{]*\{ display: none; \}/.test(leer('admin/iniciativas.css')));
 
     elegir('regCambioCampo', 'estado');
-    Check('SE3 con Estado: fecha opcional, sin etapa por omision, tres etapas con nombre', [false, '', true, true],
-      [p.sel('regCambioGrupoEstado').hidden, p.sel('regCambioEstFechaCampo').value,
-       /<option value="">— Ninguna —<\/option><option value="f_analisis">Análisis<\/option><option value="f_solucion">Solución<\/option><option value="f_cierre">Cierre<\/option><\/select>/.test(p.sel('regCambio').innerHTML),
-       /<div class="ini-cambio-sub" id="regCambioEstFechaCaja" hidden>/.test(p.sel('regCambio').innerHTML)]);
-    elegir('regCambioEstFechaCampo', 'f_solucion');
-    Check('SE3 elegir Solucion: muestra su fecha actual y la nombra', [false, '01/09/2026', 'Nueva fecha compromiso de Solución'],
-      [p.sel('regCambioEstFechaCaja').hidden, p.sel('regCambioEstFechaActual').textContent, p.sel('regCambioEstFechaRot').textContent]);
+    var form = p.sel('regCambio').innerHTML;
+    var grupo = form.slice(form.indexOf('id="regCambioGrupoEstado"'), form.indexOf('id="regCambioGrupoPct"'));
+    Check('SE3 con Estado: solo el nuevo Estado; ni fecha opcional ni Subestado', [false, true, false, false, false],
+      [p.sel('regCambioGrupoEstado').hidden, /<label for="regCambioEstado">Nuevo Estado<\/label>/.test(grupo),
+       /regCambioEstFecha|type="date"|f_analisis|f_solucion|f_cierre/.test(grupo), /también cambia/.test(form), /Subestado/.test(grupo)]);
+    Check('SE3 con Estado: la etapa y la nueva fecha de "Fecha de compromiso" quedan ocultas', [true, true],
+      [p.sel('regCambioGrupoEtapa').hidden, p.sel('regCambioGrupoFecha').hidden]);
 
     p.sel('regCambioEstado').value = 'Cerrado';
-    p.sel('regCambioEstFechaNueva').value = '2026-11-30';
-    p.sel('regCambioMotivo').value = 'Se cierra; la solucion se movio';
+    // Aunque quede escrita una fecha en la caja de Fecha de compromiso, con
+    // Estado no viaja.
+    p.sel('regCambioNueva').value = '2026-11-30';
+    p.sel('regCambioMotivo').value = 'Se cierra';
+    accion('cambio-agregar');
     accion('cambio-preparar');
     var msg = p.sel('regCambioMsg').innerHTML;
-    Check('SE4 Estado + fecha de Solucion en una solicitud, preparada y NO enviada', ['ini-cambio-msg listo', true, true, true],
-      [p.sel('regCambioMsg').className, /Solicitud preparada, no enviada/.test(msg), /En Solución → Cerrado/.test(msg),
-       /Fecha compromiso de Solución: 01\/09\/2026 → 30\/11\/2026/.test(msg)]);
+    Check('SE4 Estado solo, preparada y NO enviada, sin fecha', ['ini-cambio-msg listo', true, true, false],
+      [p.sel('regCambioMsg').className, /Solicitud preparada, no enviada/.test(msg), /En Solución → Cerrado/.test(msg), /Fecha compromiso|30\/11\/2026/.test(msg)]);
     Check('SE4 ninguna peticion y el registro no cambia', [[], 'En Solución', '2026-09-01'],
       [peticiones, p.registro.registro.buscar('PRB 2026-000001').estado, p.registro.registro.buscar('PRB 2026-000001').f_solucion]);
+    Check('SE5 los pares de Estado no llevan fecha', [false, false],
+      ['campo_fecha', 'fecha_nueva'].map(function (k) { return p.registro.lista.pares().some(function (x) { return x[0] === k; }); }));
+  });
+});
 
-    elegir('regCambioEstFechaCampo', '');
-    p.sel('regCambioEstFechaNueva').value = '2026-11-30';
-    accion('cambio-preparar');
-    Check('SE5 sin etapa la fecha escrita no viaja (no se adivina)', [true, false],
-      [/ini-cambio-msg listo/.test(p.sel('regCambioMsg').className), /Fecha compromiso/.test(p.sel('regCambioMsg').innerHTML)]);
+// ---------------------------------------------------------------------------
+// SB) Subestado (2026-10-26): "Solicitar cambios" NO lo ofrece a nadie (ni
+// la opcion "Estado y Subestado", ni el actual, ni el nuevo); el Estado se
+// sigue pidiendo. ADM conserva la lista para "Modificar" (opcionesEstado);
+// MOD y sin rol, no. Que MOD no lo pueda pedir por HTTP lo prueba
+// SolicitudesCambioHttpSmoke.cs (S1-S5).
+// ---------------------------------------------------------------------------
+[['ADM', true], ['MOD', false], [null, false]].forEach(function (caso) {
+  pruebas.push(function () {
+    var datos = JSON.parse(JSON.stringify(DATOS));
+    datos.estados_problem = ['En Análisis', 'En Solución', 'Cerrado'];
+    datos.subestados_problem = ['Solucionado'];
+    datos.iniciativas[0].subestado = 'En espera';
+    var p = Pagina(ok(datos), function () { return nunca(); }, caso[0]);
+    var nombre = caso[0] || 'sin rol';
+    function accion(a) {
+      var el = Elemento('b'); el.setAttribute('data-accion', a);
+      p.sel('regDetCuerpo').disparar('click', { target: el });
+    }
+    function elegir(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('change', { target: p.sel(id) }); }
+    return esperar().then(function () {
+      Check('SB0 ' + nombre + ': la lista de Subestados ' + (caso[1] ? 'sigue para Modificar' : 'no llega'), caso[1] ? ['Solucionado'] : [],
+        p.registro.opcionesEstado().subestados);
+      clicFolio(p, 'PRB 2026-000001');
+      accion('solicitar-cambios');
+      var form = p.sel('regCambio').innerHTML;
+      Check('SB1 ' + nombre + ': ni la opcion "Estado y Subestado" ni campo de Subestado; la opcion es "Estado"', [false, false, true],
+        [/Subestado/.test(form), /regCambioSubestado/.test(form), /<option value="estado">Estado<\/option>/.test(form)]);
+      elegir('regCambioCampo', 'estado');
+      Check('SB1 ' + nombre + ': el valor actual es solo el Estado (sin Subestado)', 'En Solución', p.sel('regCambioActual').textContent);
+      p.sel('regCambioEstado').value = 'Cerrado';
+      p.sel('regCambioMotivo').value = 'Se cierra';
+      // Aunque algo escriba un Subestado en el borrador, no viaja.
+      p.registro.cambio.subestado = 'Solucionado';
+      accion('cambio-agregar');
+      accion('cambio-preparar');
+      Check('SB2 ' + nombre + ': el cambio de Estado se prepara igual, sin Subestado', [true, true, false],
+        [/ini-cambio-msg listo/.test(p.sel('regCambioMsg').className), /En Solución → Cerrado/.test(p.sel('regCambioMsg').innerHTML),
+         /Solucionado|En espera/.test(p.sel('regCambioMsg').innerHTML + p.sel('regCambioLista').innerHTML)]);
+      Check('SB2 ' + nombre + ': los pares de envio no llevan subestado_nuevo', false,
+        p.registro.lista.pares().some(function (x) { return x[0] === 'subestado_nuevo'; }));
+    });
+  });
+});
+
+pruebas.push(function () {
+  // Descarga con MOD: sin la columna Subestado (ADM la tiene: XD3).
+  var p = Pagina(ok(DATOS), null, 'MOD'), reg = p.registro, b = Bajada();
+  return esperar().then(function () {
+    return reg.descargar(b.cargar, b.bajar, HOY, b.pedir);
+  }).then(function (r) {
+    var enc = XLSXV.utils.sheet_to_json(b.libro().Sheets.Iniciativas, { header: 1 })[0];
+    Check('SB3 MOD: el Excel no trae la columna Subestado; Estado y Agrupacion siguen', [true, false, true, true],
+      [r, enc.indexOf('Subestado') >= 0, enc.indexOf('Estado') >= 0, enc.indexOf('Agrupación') === enc.indexOf('Estado') + 1]);
   });
 });
 
@@ -791,19 +846,26 @@ pruebas.push(function () {
       /id="regCambioEnviar" data-accion="cambio-preparar">Enviar solicitud</.test(p.sel('regCambio').innerHTML));
     elegir('regCambioCampo', 'estado');
     p.sel('regCambioEstado').value = 'Cerrado';
-    elegir('regCambioEstFechaCampo', 'f_solucion');
-    p.sel('regCambioEstFechaNueva').value = '2026-11-30';
     p.sel('regCambioMotivo').value = 'Se cierra';
     responder(500, { enviada: null, tipo: 'EnvioNoConfirmado', error: 'Tiempo agotado.' });
+    accion('cambio-agregar');
     accion('cambio-preparar');
+    Check('SV1b "Enviar solicitud" primero muestra la lista para revisarla; nada viaja sin confirmar', [0, 'ini-cambio-msg revisar', true, true],
+      [envios.length, p.sel('regCambioMsg').className, /En Solución → Cerrado/.test(p.sel('regCambioMsg').innerHTML),
+       /data-accion="cambio-confirmar">Confirmar y enviar</.test(p.sel('regCambioMsg').innerHTML)]);
+    accion('cambio-confirmar');
+    accion('cambio-confirmar');   // doble clic: una sola peticion
     return esperar().then(esperar).then(function () {
+      Check('SV1c doble clic en Confirmar: UNA peticion', 1, envios.length);
       var e = envios[0];
-      Check('SV2 POST a ?accion=enviar con el tipo, la etapa explicita, la fecha y el motivo; sin usuario ni rol',
-        ['../handlers/admin_iniciativas_solicitudes.ashx?accion=enviar', 'POST', 'PRB 2026-000001', 'estado', 'Cerrado', 'f_solucion', '2026-11-30', 'Se cierra', true, false, false],
+      Check('SV2 POST a ?accion=enviar con el tipo, el Estado y el motivo; sin fecha, usuario ni rol',
+        ['../handlers/admin_iniciativas_solicitudes.ashx?accion=enviar', 'POST', 'PRB 2026-000001', 'estado', 'Cerrado', undefined, undefined, 'Se cierra', true, false, false],
         [e.url, e.metodo, e.campos.folio, e.campos.tipo, e.campos.estado_nuevo, e.campos.campo_fecha, e.campos.fecha_nueva, e.campos.motivo,
          /^[0-9a-f-]{36}$/.test(e.campos.llave), 'usuario' in e.campos, 'rol' in e.campos]);
       Check('SV3 sin confirmacion: aviso, NO dice enviada, se puede reintentar', ['ini-cambio-msg aviso', false, true, false],
         [p.sel('regCambioMsg').className, /enviada/i.test(p.sel('regCambioMsg').innerHTML.replace(/no se sabe si se envió/, '')), /no se duplica/.test(p.sel('regCambioMsg').innerHTML), p.sel('regCambioEnviar').disabled]);
+      Check('SV3b sin confirmar: la lista queda fija (el reintento lleva lo mismo)', [true, false, 1],
+        [p.registro.lista.bloqueada(), p.registro.accionItemCambio('quitar|0'), p.registro.lista.items.length]);
       responder(200, { enviada: true, id_solicitud: 12, repetida: true });
       accion('cambio-preparar');
       return esperar().then(esperar);
@@ -819,26 +881,294 @@ pruebas.push(function () {
         [envios.length, p.registro.registro.buscar('PRB 2026-000001').estado]);
       accion('cambio-cancelar');
       accion('solicitar-cambios');
-      elegir('regCambioCampo', 'f_cierre');
+      elegir('regCambioCampo', 'fecha');
+      elegir('regCambioFechaCampo', 'f_cierre');
       p.sel('regCambioNueva').value = '2027-02-01';
       p.sel('regCambioMotivo').value = 'otra';
       responder(501, { enviada: false, tipo: 'PersistenciaNoHabilitada', error: 'Falta aplicar sql/22.' });
+      accion('cambio-agregar');
       accion('cambio-preparar');
+      accion('cambio-confirmar');
       return esperar().then(esperar);
     }).then(function () {
       Check('SV7 borrador nuevo = llave nueva; 501 dice que no se envio', [true, 'ini-cambio-msg aviso', true],
         [envios[2].campos.llave !== envios[0].campos.llave, p.sel('regCambioMsg').className, /No se envió/.test(p.sel('regCambioMsg').innerHTML)]);
+      Check('SV7 "Fecha de compromiso" viaja con el contrato de siempre: tipo fecha + campo_fecha de la etapa elegida',
+        ['fecha', 'f_cierre', '2027-02-01', undefined, undefined],
+        [envios[2].campos.tipo, envios[2].campos.campo_fecha, envios[2].campos.fecha_nueva, envios[2].campos.estado_nuevo, envios[2].campos.subestado_nuevo]);
+      Check('SV7b 501 es definitivo: la lista se puede volver a editar', false, p.registro.lista.bloqueada());
       responder(422, { enviada: false, errores: [{ campo: 'fecha_nueva', mensaje: 'La nueva fecha compromiso es igual a la actual.' }] });
       accion('cambio-preparar');
+      accion('cambio-confirmar');
       return esperar().then(esperar);
     }).then(function () {
       Check('SV8 422: los errores del servidor, tal cual', ['ini-cambio-msg error', true],
         [p.sel('regCambioMsg').className, /igual a la actual/.test(p.sel('regCambioMsg').innerHTML)]);
-      accion('cambio-preparar');   // sin respuesta preparada: la red falla
+      accion('cambio-preparar');
+      accion('cambio-confirmar');   // sin respuesta preparada: la red falla
       return esperar().then(esperar);
     }).then(function () {
       Check('SV9 sin red: aviso de que no se sabe, reintento posible', ['ini-cambio-msg aviso', true, false],
         [p.sel('regCambioMsg').className, /no se sabe si se envió/.test(p.sel('regCambioMsg').innerHTML), p.sel('regCambioEnviar').disabled]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SL) "Solicitar cambios" como lista: varios cambios, UNA solicitud. Sin
+// repetir lo que choca; Editar sin duplicar; Quitar; el Motivo se queda;
+// atajo Estado -> Fecha de compromiso; y solo viaja lo que el contrato de
+// hoy guarda como UNA solicitud (nunca por partes ni una tras otra).
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var L = R.ListaSolicitudCambio, S = R.SolicitudCambio;
+  var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
+  var ini = reg.buscar('PRB 2026-000001');
+  var OP = { estados: ['En Análisis', 'En Solución', 'En Monitoreo', 'Cerrado'], datos: true, pos: ['PO 1', 'PO 2'], sos: ['SO x'] };
+  function borr(campo, valores) {
+    var b = new S(ini, OP);
+    b.campo = campo;
+    Object.keys(valores || {}).forEach(function (k) { b[k] = valores[k]; });
+    return b;
+  }
+  var l = new L(ini, OP);
+  Check('SL1 nace vacia: no se puede enviar y lo dice', [true, true],
+    [l.validarEnvio().some(function (e) { return /Agrega al menos un cambio/.test(e.mensaje); }), l.pares() === null]);
+  var r1 = l.agregar(borr('estado', { propuesto: 'En Monitoreo' }));
+  var r2 = l.agregar(borr('f_cierre', { propuesto: '2026-11-15' }));
+  Check('SL2 agregar no borra lo anterior; el Motivo general no se pide al agregar', [true, true, 2, ['estado', 'f_cierre']],
+    [r1.ok, r2.ok, l.items.length, l.items.map(function (x) { return x.campo; })]);
+  var r3 = l.agregar(borr('estado', { propuesto: 'Cerrado' }));
+  Check('SL3 dos cambios de Estado: no; dice cual y cual editar', [false, 'duplicado', 0, 2, true],
+    [r3.ok, r3.errores[0].campo, r3.indice, l.items.length, /Ya está en la lista: Estado/.test(r3.errores[0].mensaje)]);
+  var r4 = l.agregar(borr('f_cierre', { propuesto: '2026-12-01' }));
+  Check('SL3 la misma fecha compromiso dos veces: no', [false, 1], [r4.ok, r4.indice]);
+  var r5 = l.agregar(borr('f_analisis', { propuesto: '2027-01-10' }));
+  Check('SL4 fechas DISTINTAS en la misma solicitud: si', [true, 3], [r5.ok, l.items.length]);
+  var r6 = l.agregar(borr('f_solucion', { propuesto: '2026-09-01' }));
+  Check('SL4 cada cambio pasa por la validacion de su tipo (misma fecha = no)', [false, 'propuesto'], [r6.ok, r6.errores[0].campo]);
+
+  var e = l.editar(0);
+  Check('SL5 Editar carga el cambio en un borrador', ['estado', 'En Monitoreo', 0], [e.campo, e.propuesto, l.editando]);
+  e.propuesto = 'Cerrado';
+  var r7 = l.agregar(e);
+  Check('SL5 ... y lo actualiza en su lugar, sin duplicar', [true, 3, 'Cerrado', -1],
+    [r7.ok, l.items.length, l.items[0].propuesto, l.editando]);
+  var e2 = l.editar(1);
+  e2.campo = 'f_analisis';
+  Check('SL5 editar no puede chocar con otro de la lista', [false, 2], [l.agregar(e2).ok, l.agregar(e2).indice]);
+  l.editando = -1;
+  Check('SL6 Quitar', [true, ['estado', 'f_cierre']], [l.quitar(2), l.items.map(function (x) { return x.campo; })]);
+
+  l.motivo = 'Se reprograma';
+  Check('SL7 Estado + UNA fecha: UNA solicitud con el contrato de hoy (tipo estado + campo_fecha)',
+    [[], true, [['tipo', 'estado'], ['estado_nuevo', 'Cerrado'], ['campo_fecha', 'f_cierre'], ['fecha_nueva', '2026-11-15'], ['motivo', 'Se reprograma']], l.llave],
+    [l.validarEnvio(), l.contrato().soportado, l.pares().filter(function (x) { return x[0] !== 'llave' && x[0] !== 'folio'; }),
+     l.pares().filter(function (x) { return x[0] === 'llave'; })[0][1]]);
+  Check('SL7 sin subestado_nuevo', false, l.pares().some(function (x) { return x[0] === 'subestado_nuevo'; }));
+  l.agregar(borr('f_analisis', { propuesto: '2027-01-10' }));
+  Check('SL8 Estado + dos fechas: el servidor no lo guarda junto -> no se envia (sin pares), y lo explica', [false, null, true],
+    [l.contrato().soportado, l.pares(), /No se envía nada por partes/.test(l.contrato().mensaje)]);
+
+  // Titulo / PO / SO: cada dato una vez; varios juntos = UNA solicitud datos.
+  var ld = new L(ini, OP);
+  var bt = borr('datos'); bt.datos.titulo = 'Nuevo título';
+  var bp = borr('datos'); bp.datos.po = 'PO 2';
+  var bp2 = borr('datos'); bp2.datos.po = 'PO 1';
+  ld.motivo = 'Cambio de responsable';
+  Check('SL9 Título y PO en dos renglones; el mismo dato dos veces no', [true, true, false],
+    [ld.agregar(bt).ok, ld.agregar(bp).ok, ld.agregar(bp2).ok]);
+  Check('SL9 viajan como UNA solicitud datos', [['tipo', 'datos'], ['titulo_nuevo', 'Nuevo título'], ['po_nuevo', 'PO 2'], ['motivo', 'Cambio de responsable']],
+    ld.pares().filter(function (x) { return x[0] !== 'llave' && x[0] !== 'folio'; }));
+
+  // Otros: su explicacion es suya; el Motivo general se agrega.
+  var lo = new L(ini, OP);
+  var bo = borr('otros');
+  Check('SL10 Otros sin explicacion: no se agrega', [false, 'Explica qué hay que corregir.'], [lo.agregar(bo).ok, lo.agregar(bo).errores[0].mensaje]);
+  bo.motivo = 'Era /A/Cat 2';
+  lo.agregar(bo);
+  lo.motivo = 'Revisión de alcance';
+  Check('SL10 Otros: explicacion + Motivo, sin valores (no cambia nada por si sola)',
+    [[['tipo', 'otros'], ['motivo', 'Era /A/Cat 2\n\nMotivo: Revisión de alcance']], 'Otros (explicación)'],
+    [lo.pares().filter(function (x) { return x[0] !== 'llave' && x[0] !== 'folio'; }), lo.texto(lo.items[0]).tipo]);
+  lo.agregar(borr('estado', { propuesto: 'Cerrado' }));
+  Check('SL10 Otros + Estado: no cabe en una solicitud de hoy', false, lo.contrato().soportado);
+
+  // SLV) Con sql/34 (opciones.varios): cualquier combinacion viaja como UNA
+  // solicitud tipo varios; cada fecha con la clave de su etapa; sin
+  // Subestado; "Otros" sigue yendo solo.
+  var OPV = Object.assign({}, OP, { varios: true, rutas: ['/A/Cat 2'] });
+  var lv = new L(ini, OPV);
+  var bvE = new S(ini, OPV); bvE.campo = 'estado'; bvE.propuesto = 'En Monitoreo'; bvE.subestado = 'Solucionado';
+  var bvA = new S(ini, OPV); bvA.campo = 'f_analisis'; bvA.propuesto = '2027-01-10';
+  var bvC = new S(ini, OPV); bvC.campo = 'f_cierre'; bvC.propuesto = '2026-11-15';
+  var bvP = new S(ini, OPV); bvP.campo = 'pct'; bvP.fijarPct('/A/Cat 3', '30');
+  var bvT = new S(ini, OPV); bvT.campo = 'datos'; bvT.datos.titulo = 'Título nuevo';
+  [bvE, bvA, bvC, bvP, bvT].forEach(function (b) { lv.agregar(b); });
+  lv.motivo = 'Replaneación';
+  Check('SLV1 cinco cambios (Estado, dos fechas, %, Título): UNA solicitud varios, sin campo_fecha ni Subestado',
+    [true, 'varios', [['tipo', 'varios'], ['estado_nuevo', 'En Monitoreo'], ['f_analisis_nueva', '2027-01-10'], ['f_cierre_nueva', '2026-11-15'],
+      ['pct_categoria', '/A/Cat 3'], ['pct_valor', '30'], ['titulo_nuevo', 'Título nuevo'], ['motivo', 'Replaneación']], lv.llave],
+    [lv.contrato().soportado, lv.contrato().forma, lv.pares().filter(function (x) { return x[0] !== 'llave' && x[0] !== 'folio'; }),
+     lv.pares().filter(function (x) { return x[0] === 'llave'; })[0][1]]);
+  var lvo = new L(ini, OPV);
+  var bvO = new S(ini, OPV); bvO.campo = 'otros'; bvO.motivo = 'Explicación';
+  lvo.agregar(bvE); lvo.agregar(bvO);
+  Check('SLV2 con varios, Otros + Estado sigue sin enviarse (Otros va solo)', [false, null, true],
+    [lvo.contrato().soportado, lvo.pares(), /«Otros» es una explicación y va en su propia solicitud/.test(lvo.contrato().mensaje)]);
+  var lv1 = new L(ini, OPV); lv1.agregar(bvC); lv1.motivo = 'm';
+  Check('SLV3 con varios, un solo cambio sigue con su contrato de siempre (tipo fecha)', ['uno', 'fecha'],
+    [lv1.contrato().forma, lv1.pares().filter(function (x) { return x[0] === 'tipo'; })[0][1]]);
+
+  // Interfaz.
+  var datos = JSON.parse(JSON.stringify(DATOS));
+  datos.estados_problem = ['En Análisis', 'En Solución', 'En Monitoreo', 'Cerrado'];
+  datos.subestados_problem = ['Solucionado'];
+  datos.persistencia_solicitudes = true;
+  var p = Pagina(ok(datos), function () { return nunca(); }, 'MOD');
+  function accion(a) {
+    var el = Elemento('b'); el.setAttribute('data-accion', a);
+    p.sel('regDetCuerpo').disparar('click', { target: el });
+  }
+  function item(v) {
+    var el = Elemento('b'); el.setAttribute('data-cambio-item', v);
+    p.sel('regDetCuerpo').disparar('click', { target: el });
+  }
+  function elegir(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('change', { target: p.sel(id) }); }
+  function escribir(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('input', { target: p.sel(id) }); }
+  var envios = [];
+  return esperar().then(function () {
+    p.registro.pedirSolicitud = function (url, op) {
+      var campos = {};
+      op.body.forEach(function (v, k) { campos[k] = v; });
+      envios.push(campos);
+      return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ enviada: true, id_solicitud: 41, repetida: false }); } });
+    };
+    clicFolio(p, 'PRB 2026-000001');
+    accion('solicitar-cambios');
+    var form = p.sel('regCambio').innerHTML;
+    Check('SL11 formulario: agregar, la lista "Cambios que deseas solicitar", Motivo y Enviar; sin Subestado (MOD)', [true, true, true, true, false],
+      [/data-accion="cambio-agregar">Agregar cambio a la solicitud</.test(form), /Cambios que deseas solicitar/.test(form),
+       /id="regCambioMotivo"/.test(form), /data-accion="cambio-preparar">Enviar solicitud</.test(form), /Subestado/.test(form)]);
+    escribir('regCambioMotivo', 'Reprogramación acordada');
+    elegir('regCambioCampo', 'estado');
+    p.sel('regCambioEstado').value = 'En Monitoreo';
+    accion('cambio-agregar');
+    var msg = p.sel('regCambioMsg').innerHTML;
+    Check('SL12 agregado: en la lista con actual y solicitado; formulario limpio; ofrece el atajo de fecha', [1, true, '', '', true],
+      [p.registro.lista.items.length, /<td>Estado<\/td><td>En Solución<\/td><td>En Monitoreo<\/td>/.test(p.sel('regCambioLista').innerHTML),
+       p.sel('regCambioCampo').value, p.sel('regCambioEstado').value, /¿También deseas cambiar una fecha de compromiso\?/.test(msg)]);
+    accion('cambio-atajo-fecha');
+    Check('SL13 atajo: el Estado sigue en la lista; el formulario pasa a Fecha de compromiso (etapa del Estado actual)',
+      [1, 'fecha', 'f_solucion', false, false], [p.registro.lista.items.length, p.sel('regCambioCampo').value, p.sel('regCambioFechaCampo').value,
+        p.sel('regCambioGrupoEtapa').hidden, p.sel('regCambioGrupoFecha').hidden]);
+    elegir('regCambioFechaCampo', 'f_cierre');
+    p.sel('regCambioNueva').value = '2026-11-15';
+    accion('cambio-agregar');
+    Check('SL13 ... y al agregarla quedan los dos en la misma lista', [['estado', 'f_cierre'], true],
+      [p.registro.lista.items.map(function (x) { return x.campo; }), /Fecha compromiso de Cierre<\/td><td>—<\/td><td>15\/11\/2026/.test(p.sel('regCambioLista').innerHTML)]);
+    elegir('regCambioCampo', 'fecha');
+    elegir('regCambioFechaCampo', 'f_cierre');
+    p.sel('regCambioNueva').value = '2026-12-20';
+    accion('cambio-agregar');
+    Check('SL14 la misma fecha otra vez: mensaje claro y boton para editar la que ya esta', [2, 'ini-cambio-msg error', true, true],
+      [p.registro.lista.items.length, p.sel('regCambioMsg').className, /Ya está en la lista: Fecha compromiso de Cierre/.test(p.sel('regCambioMsg').innerHTML),
+       /data-cambio-item="editar\|1">Editar el que ya está/.test(p.sel('regCambioMsg').innerHTML)]);
+    item('editar|1');
+    Check('SL15 Editar: el cambio vuelve al formulario y el boton dice Actualizar', ['fecha', 'f_cierre', '2026-11-15', 'Actualizar cambio', false],
+      [p.sel('regCambioCampo').value, p.sel('regCambioFechaCampo').value, p.sel('regCambioNueva').value, p.sel('regCambioAgregar').textContent,
+       p.sel('regCambioEdCancelar').hidden]);
+    p.sel('regCambioNueva').value = '2026-12-20';
+    accion('cambio-agregar');
+    Check('SL15 ... y se actualiza sin duplicar; el Motivo sigue', [2, '2026-12-20', 'Reprogramación acordada', 'Reprogramación acordada', 'Agregar cambio a la solicitud'],
+      [p.registro.lista.items.length, p.registro.lista.items[1].propuesto, p.sel('regCambioMotivo').value, p.registro.lista.motivo,
+       p.sel('regCambioAgregar').textContent]);
+    elegir('regCambioCampo', 'fecha');
+    elegir('regCambioFechaCampo', 'f_analisis');
+    p.sel('regCambioNueva').value = '2027-01-10';
+    accion('cambio-agregar');
+    Check('SL16 tres cambios (Estado + dos fechas): la lista avisa que hoy no cabe en una solicitud', [3, true],
+      [p.registro.lista.items.length, /todavía no admite estos 3 cambios/.test(p.sel('regCambioLista').innerHTML)]);
+    accion('cambio-preparar');
+    accion('cambio-confirmar');
+    return esperar().then(function () {
+      Check('SL16 ... y "Enviar" no manda nada (ni por partes)', [0, 'ini-cambio-msg aviso', true],
+        [envios.length, p.sel('regCambioMsg').className, /No se envió/.test(p.sel('regCambioMsg').innerHTML)]);
+      item('quitar|2');
+      Check('SL17 Quitar la deja en Estado + una fecha; el Motivo sigue', [['estado', 'f_cierre'], 'Reprogramación acordada'],
+        [p.registro.lista.items.map(function (x) { return x.campo; }), p.registro.lista.motivo]);
+      accion('cambio-preparar');
+      Check('SL18 revision antes de enviar: la lista completa y el Motivo', [0, true, true, true],
+        [envios.length, /Estado: En Solución → En Monitoreo/.test(p.sel('regCambioMsg').innerHTML),
+         /Fecha compromiso de Cierre: — → 20\/12\/2026/.test(p.sel('regCambioMsg').innerHTML), /Motivo: Reprogramación acordada/.test(p.sel('regCambioMsg').innerHTML)]);
+      accion('cambio-confirmar');
+      accion('cambio-confirmar');
+      return esperar().then(esperar);
+    }).then(function () {
+      Check('SL19 UNA peticion con los dos cambios, sin Subestado; enviada con el numero de la base',
+        [1, 'estado', 'En Monitoreo', 'f_cierre', '2026-12-20', 'Reprogramación acordada', false, true],
+        [envios.length, envios[0].tipo, envios[0].estado_nuevo, envios[0].campo_fecha, envios[0].fecha_nueva, envios[0].motivo,
+         'subestado_nuevo' in envios[0], /Solicitud #41 enviada/.test(p.sel('regCambioMsg').innerHTML)]);
+      Check('SL19 enviada: la lista ya no se edita; el registro no cambia', [false, 2, true, 'En Solución'],
+        [p.registro.accionItemCambio('quitar|0'), p.registro.lista.items.length, /data-cambio-item="quitar\|0" disabled/.test(p.sel('regCambioLista').innerHTML),
+         p.registro.registro.buscar('PRB 2026-000001').estado]);
+      accion('cambio-cancelar');
+      accion('solicitar-cambios');
+      Check('SL20 Cancelar descarta: al reabrir la lista esta vacia y la llave es otra', [0, true],
+        [p.registro.lista.items.length, p.registro.lista.llave !== envios[0].llave]);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SLW) Con solicitudes_varios (sql/34) la pagina manda Estado + dos fechas
+// como UNA peticion tipo varios; sin el, la misma lista no se envia.
+// ---------------------------------------------------------------------------
+[true, false].forEach(function (conVarios) {
+  pruebas.push(function () {
+    var datos = JSON.parse(JSON.stringify(DATOS));
+    datos.estados_problem = ['En Análisis', 'En Solución', 'En Monitoreo', 'Cerrado'];
+    datos.persistencia_solicitudes = true;
+    datos.solicitudes_varios = conVarios;
+    var p = Pagina(ok(datos), function () { return nunca(); }, 'MOD');
+    function accion(a) {
+      var el = Elemento('b'); el.setAttribute('data-accion', a);
+      p.sel('regDetCuerpo').disparar('click', { target: el });
+    }
+    function elegir(id, v) { p.sel(id).value = v; p.sel('regDetCuerpo').disparar('change', { target: p.sel(id) }); }
+    var envios = [], nombre = conVarios ? 'con varios' : 'sin varios';
+    return esperar().then(function () {
+      p.registro.pedirSolicitud = function (url, op) {
+        var campos = {};
+        op.body.forEach(function (v, k) { campos[k] = v; });
+        envios.push(campos);
+        return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ enviada: true, id_solicitud: 77, repetida: false }); } });
+      };
+      clicFolio(p, 'PRB 2026-000001');
+      accion('solicitar-cambios');
+      p.sel('regCambioMotivo').value = 'Replaneación';
+      elegir('regCambioCampo', 'estado');
+      p.sel('regCambioEstado').value = 'En Monitoreo';
+      accion('cambio-agregar');
+      [['f_cierre', '2026-11-15'], ['f_analisis', '2027-01-10']].forEach(function (f) {
+        elegir('regCambioCampo', 'fecha');
+        elegir('regCambioFechaCampo', f[0]);
+        p.sel('regCambioNueva').value = f[1];
+        accion('cambio-agregar');
+      });
+      Check('SLW1 ' + nombre + ': la lista ' + (conVarios ? 'no avisa nada' : 'avisa que hoy no cabe'), !conVarios,
+        /todavía no admite estos 3 cambios/.test(p.sel('regCambioLista').innerHTML));
+      accion('cambio-preparar');
+      accion('cambio-confirmar');
+      return esperar().then(esperar);
+    }).then(function () {
+      if (conVarios) {
+        Check('SLW2 con varios: UNA peticion tipo varios con el Estado y las dos fechas por etapa; enviada', [1, 'varios', 'En Monitoreo', '2026-11-15', '2027-01-10', false, false, true],
+          [envios.length, envios[0].tipo, envios[0].estado_nuevo, envios[0].f_cierre_nueva, envios[0].f_analisis_nueva,
+           'campo_fecha' in envios[0], 'subestado_nuevo' in envios[0], /Solicitud #77 enviada/.test(p.sel('regCambioMsg').innerHTML)]);
+      } else {
+        Check('SLW2 sin varios: nada se envia (ni por partes)', [0, true], [envios.length, /No se envió/.test(p.sel('regCambioMsg').innerHTML)]);
+      }
     });
   });
 });
@@ -852,7 +1182,7 @@ pruebas.push(function () {
 pruebas.push(function () {
   var S = R.SolicitudCambio;
   Check('SD1 campos(true): Título / PO / SO antes de Otros; campos() sigue sin ellos',
-    [['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'datos', 'otros'], ['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'otros']],
+    [['fecha', 'estado', 'pct', 'datos', 'otros'], ['fecha', 'estado', 'pct', 'otros']],
     [S.campos(true).map(function (c) { return c.clave; }), S.campos().map(function (c) { return c.clave; })]);
   var ini = Ini('PRB 2026-000001', { titulo: 'Uno', titulo_problem: 'Uno', po: 'PO de la categoria', so: 'SO de la categoria',
                                      po_capturado: 'PO 1', so_capturado: null });
@@ -919,7 +1249,9 @@ pruebas.push(function () {
     p.sel('regCambioDato-po').checked = true; p.sel('regCambioDatoValor-po').value = 'PO 2';
     p.sel('regCambioDato-titulo').checked = false; p.sel('regCambioDatoValor-titulo').value = 'no se marca';
     p.sel('regCambioMotivo').value = 'Nuevo responsable';
+    accion('cambio-agregar');
     accion('cambio-preparar');
+    accion('cambio-confirmar');
     return esperar().then(esperar);
   }).then(function () {
     Check('SD14 envío: tipo datos, solo po_nuevo (lo no marcado no viaja), sin codigo; enviada con el número de la base',
@@ -944,8 +1276,43 @@ pruebas.push(function () {
 pruebas.push(function () {
   var reg = Adm(R.Registro.desdeJson(JSON.parse(JSON.stringify(DATOS))));
   var S = R.SolicitudCambio;
-  Check('S1 campos designados: tres fechas, Estado, % y Otros', ['f_analisis', 'f_solucion', 'f_cierre', 'estado', 'pct', 'otros'],
-    S.campos().map(function (c) { return c.clave; }));
+  Check('S1 campos designados: Fecha de compromiso (una sola opcion), Estado, % y Otros', [['fecha', 'estado', 'pct', 'otros'],
+    ['Fecha de compromiso', 'Estado', 'Categorías: % de disminución o agregar', 'Otros (explica la corrección)']],
+    [S.campos().map(function (c) { return c.clave; }), S.campos().map(function (c) { return c.rotulo; })]);
+  Check('S1 las tres etapas de Fecha de compromiso', [['f_analisis', 'f_solucion', 'f_cierre'],
+    ['Fecha compromiso de Análisis', 'Fecha compromiso de Solución', 'Fecha compromiso de Cierre']],
+    [S.camposFecha().map(function (c) { return c.clave; }), S.camposFecha().map(function (c) { return c.rotulo; })]);
+  // SF) Etapa por omision de "Fecha de compromiso": la del Estado actual
+  // (En Monitoreo -> Cierre, la regla de FECHA_DEL_ESTADO); Cerrado ->
+  // Cierre; otro Estado, ninguna (quien pide la elige).
+  Check('SF1 etapa por omision segun el Estado', ['f_analisis', 'f_solucion', 'f_cierre', 'f_cierre', '', '', ''],
+    ['En Análisis', 'En Solución', 'En Monitoreo', 'Cerrado', 'Pendiente', 'Cancelado', null].map(function (e) {
+      return S.etapaPorOmision(Ini('X', { estado: e }));
+    }));
+  var sf = new S(Ini('X', { estado: 'Cerrado', f_analisis: '2026-01-01', f_solucion: '2026-02-01', f_cierre: '2026-03-01' }));
+  Check('SF2 cerrada: abre sin "Qué cambiar"; al elegir Fecha de compromiso arranca en Cierre', ['', 'f_cierre', 'fecha', '2026-03-01'],
+    [new S(Ini('X', { estado: 'Cerrado' })).campo, sf.elegir('fecha'), sf.queCambiar(), sf.actual()]);
+  Check('SF3 se puede elegir cualquiera de las tres; la fecha actual es la de la etapa elegida',
+    [['f_analisis', '2026-01-01'], ['f_solucion', '2026-02-01'], ['f_cierre', '2026-03-01']],
+    ['f_analisis', 'f_solucion', 'f_cierre'].map(function (k) { sf.elegirEtapa(k); return [sf.campo, sf.actual()]; }));
+  sf.elegirEtapa('f_solucion');
+  Check('SF3 volver a elegir Fecha de compromiso conserva la etapa elegida', 'f_solucion', sf.elegir('fecha'));
+  sf.elegir('estado'); sf.elegir('fecha');
+  Check('SF3 tras otra opcion, vuelve a la del Estado actual', 'f_cierre', sf.campo);
+  var sn = new S(Ini('X', { estado: 'Pendiente' }));
+  sn.elegir('fecha'); sn.propuesto = '2027-01-01'; sn.motivo = 'm';
+  Check('SF4 Estado sin etapa por omision: nada elegido y se exige elegirla', ['fecha', 'fecha', null, ['etapa'], true],
+    [sn.campo, sn.queCambiar(), sn.actual(), sn.validar().map(function (e) { return e.campo; }), /Análisis, Solución o Cierre/.test(sn.validar()[0].mensaje)]);
+  sn.elegirEtapa('x_inventada');
+  Check('SF4 etapa inventada = sin etapa', 'fecha', sn.campo);
+  sn.elegirEtapa('f_solucion');
+  Check('SF5 con etapa: valida y viaja con el contrato de siempre (tipo fecha + campo_fecha)',
+    [[], [['tipo', 'fecha'], ['campo_fecha', 'f_solucion'], ['fecha_nueva', '2027-01-01'], ['motivo', 'm']], 'Fecha compromiso de Solución', 'Solución'],
+    [sn.validar(), sn.pares().filter(function (x) { return x[0] !== 'llave' && x[0] !== 'folio'; }), sn.resumen().rotulo, sn.resumen().etapa]);
+  Check('SF5 aprobar: el par de Modificar de esa etapa', [['accion', 'modificar'], ['folio', 'X'], ['f_solucion', '2027-01-01']],
+    new R.RevisionSolicitud(sn.resumen(), 'u').aprobar('a').pares);
+  Check('SF5 un resumen sin etapa no produce pares', null,
+    new R.RevisionSolicitud({ folio: 'X', campo: 'fecha', nuevo: '2027-01-01', automatica: true }, 'u').pares());
   var c = new S(reg.buscar('PRB 2026-000001'));
   Check('S2 por omision la fecha del estado actual', ['f_solucion', '2026-09-01'], [c.campo, c.actual()]);
   Check('S2 cerrada: sin campo por omision', '', new S(reg.buscar('HAR 2025-000003')).campo);
@@ -970,37 +1337,22 @@ pruebas.push(function () {
   Check('SR1 Estado inventado se rechaza', ['propuesto'], e.validar().map(function (x) { return x.campo; }));
   e.propuesto = 'En Solución';
   Check('SR1 mismo Estado = sin cambio', ['propuesto'], e.validar().map(function (x) { return x.campo; }));
-  e.propuesto = 'Cerrado'; e.subestado = 'Otro';
-  Check('SR1 Subestado inventado se rechaza', ['subestado'], e.validar().map(function (x) { return x.campo; }));
-  e.subestado = 'Solucionado';
-  Check('SR2 Estado valido', [[], 'Cerrado', 'Solucionado', true], [e.validar(), e.resumen().nuevo, e.resumen().subestado, e.resumen().automatica]);
-  // Estado + fecha compromiso en UNA solicitud; la etapa la elige quien pide.
+  e.propuesto = 'Cerrado'; e.subestado = 'Solucionado';
+  Check('SR1 el borrador no usa el Subestado: ni lo valida, ni lo resume, ni lo envia', [[], undefined, false, 'En Solución'],
+    [e.validar(), e.resumen().subestado, e.pares().some(function (x) { return x[0] === 'subestado_nuevo'; }), e.actual()]);
+  Check('SR2 Estado valido', [[], 'Cerrado', true], [e.validar(), e.resumen().nuevo, e.resumen().automatica]);
+  // Estado va solo (2026-10-26): una fecha que quedara en el borrador no
+  // se valida, no se resume, no se envia ni se aplica.
   var ef = new S(reg.buscar('PRB 2026-000001'), LISTAS);
-  ef.campo = 'estado'; ef.propuesto = 'Cerrado'; ef.motivo = 'Se cierra con nueva fecha';
-  Check('SR2b sin etapa elegida: no hay fecha en el resumen', [[], undefined], [ef.validar(), ef.resumen().fecha]);
-  ef.fechaNueva = '2026-11-30';
-  Check('SR2b fecha sin etapa se rechaza (no se deduce del Estado)', ['fechaCampo'], ef.validar().map(function (x) { return x.campo; }));
-  ef.fechaCampo = 'f_cierre_x';
-  Check('SR2b etapa inventada se rechaza', ['fechaCampo'], ef.validar().map(function (x) { return x.campo; }));
-  ef.fechaCampo = 'f_solucion'; ef.fechaNueva = '';
-  Check('SR2b etapa sin fecha se rechaza, nombrando la etapa', [['fechaNueva'], 'Escribe la nueva fecha compromiso de Solución.'],
-    [ef.validar().map(function (x) { return x.campo; }), ef.validar()[0].mensaje]);
-  ef.fechaNueva = '2026-09-01';
-  Check('SR2b misma fecha de Solucion = sin cambio', ['fechaNueva'], ef.validar().map(function (x) { return x.campo; }));
-  ef.propuesto = 'En Solución'; ef.subestado = ''; ef.fechaNueva = '2026-11-30';
-  Check('SR2b mismo Estado con fecha: sigue pidiendo un Estado distinto', ['propuesto'], ef.validar().map(function (x) { return x.campo; }));
-  ef.propuesto = 'Cerrado';
-  Check('SR2c Estado + fecha de Solucion: resumen con la etapa explicita', [[], 'Cerrado',
-    { campo: 'f_solucion', etapa: 'Solución', anterior: '2026-09-01', nuevo: '2026-11-30' }],
-    [ef.validar(), ef.resumen().nuevo, ef.resumen().fecha]);
-  Check('SR2c aprobar: estado y SOLO la fecha de la etapa elegida', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'],
-    ['estado', 'Cerrado'], ['f_solucion', '2026-11-30']], new R.RevisionSolicitud(ef.resumen(), 'u').aprobar('a').pares);
-  ef.fechaCampo = 'f_analisis'; ef.fechaNueva = '2027-01-10';
-  Check('SR2c cambiar de etapa: la fecha va a Analisis, no a Solucion ni Cierre', [{ campo: 'f_analisis', etapa: 'Análisis',
-    anterior: '2026-12-01', nuevo: '2027-01-10' }, false, false],
-    [ef.resumen().fecha, JSON.stringify(ef.resumen()).indexOf('f_solucion') >= 0, JSON.stringify(ef.resumen()).indexOf('f_cierre') >= 0]);
-  Check('SR2c el registro no cambio', ['2026-12-01', '2026-09-01', 'En Solución'],
-    [reg.buscar('PRB 2026-000001').f_analisis, reg.buscar('PRB 2026-000001').f_solucion, reg.buscar('PRB 2026-000001').estado]);
+  ef.campo = 'estado'; ef.propuesto = 'Cerrado'; ef.motivo = 'Se cierra';
+  ef.fechaCampo = 'f_solucion'; ef.fechaNueva = '2026-11-30';
+  Check('SR2b Estado sin fecha: valida, sin fecha en el resumen, ni en el envio, ni al aprobar',
+    [[], undefined, [['tipo', 'estado'], ['estado_nuevo', 'Cerrado'], ['motivo', 'Se cierra']],
+     [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['estado', 'Cerrado']]],
+    [ef.validar(), ef.resumen().fecha, ef.pares().filter(function (x) { return x[0] !== 'llave' && x[0] !== 'folio'; }),
+     new R.RevisionSolicitud(ef.resumen(), 'u').aprobar('a').pares]);
+  ef.propuesto = 'En Solución';
+  Check('SR2b mismo Estado: sigue pidiendo un Estado distinto', ['propuesto'], ef.validar().map(function (x) { return x.campo; }));
   Check('SR2 sin lista de estados: no se puede pedir', ['propuesto'],
     (function () { var x = new S(reg.buscar('PRB 2026-000001')); x.campo = 'estado'; x.propuesto = 'Cerrado'; x.motivo = 'm';
       return x.validar().map(function (y) { return y.campo; }); })());
@@ -1060,7 +1412,7 @@ pruebas.push(function () {
   Check('SR7 aprobar fecha: pares de Modificar', [true, 'aprobada', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['f_solucion', '2026-10-15']]],
     [ap.ok, rv.estado, ap.pares]);
   Check('SR7 no se aprueba dos veces ni se rechaza despues', [false, false], [rv.aprobar('x').ok, rv.rechazar('x', 'm').ok]);
-  Check('SR8 aprobar Estado: estado y subestado', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['estado', 'Cerrado'], ['subestado', 'Solucionado']],
+  Check('SR8 aprobar Estado: solo el estado (sin subestado)', [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['estado', 'Cerrado']],
     new V(e.resumen(), 'u').aprobar('a').pares);
   Check('SR8 aprobar categorias: los mismos pares de Modificar, una por categoria',
     [['accion', 'modificar'], ['folio', 'PRB 2026-000001'], ['pct_categoria', '/A/Cat 1/Hoja'], ['pct_valor', '40'],
@@ -1098,23 +1450,47 @@ pruebas.push(function () {
     accion('solicitar-cambios');
     var form = p.sel('regCambio').innerHTML;
     Check('S7 abre el formulario', [false, 'true', 1], [p.sel('regCambio').hidden, p.sel('regCambioBoton').getAttribute('aria-expanded'), p.sel('regCambioCampo').enfocado]);
-    Check('S7 campo y valor actual por omision', [true, true],
-      [/<option value="f_solucion" selected>Fecha compromiso de Solución/.test(form), /id="regCambioActual">01\/09\/2026</.test(form)]);
-    Check('S7 sin campos que no sean fecha', 3, (form.match(/<option value="f_/g) || []).length);
+    var queCambiar = form.slice(form.indexOf('id="regCambioCampo"'), form.indexOf('</select>', form.indexOf('id="regCambioCampo"')));
+    Check('S7 "Qué cambiar": UNA opcion Fecha de compromiso (elegida), sin las tres fechas sueltas', [true, 0, 1],
+      [/<option value="fecha" selected>Fecha de compromiso<\/option>/.test(queCambiar), (queCambiar.match(/<option value="f_/g) || []).length,
+       (queCambiar.match(/Fecha/g) || []).length]);
+    Check('S7 etapa por omision = la del Estado (En Solución) y su fecha actual', [true, false, true, true],
+      [/<label for="regCambioFechaCampo">Fecha de compromiso<\/label><select id="regCambioFechaCampo">/.test(form),
+       /id="regCambioGrupoEtapa" hidden/.test(form),
+       /<option value="f_solucion" selected>Fecha compromiso de Solución<\/option>/.test(form),
+       /id="regCambioActual">01\/09\/2026</.test(form)]);
 
-    p.sel('regCambioCampo').value = 'f_analisis';
+    p.sel('regCambioFechaCampo').value = 'f_analisis';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioFechaCampo') });
+    Check('S8 cambiar de etapa muestra su fecha actual y nombra la nueva', ['01/12/2026', 'Nueva fecha compromiso de Análisis', 'f_analisis'],
+      [p.sel('regCambioActual').textContent, p.sel('regCambioNuevaRot').textContent, p.registro.cambio.campo]);
+    p.sel('regCambioFechaCampo').value = 'f_cierre';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioFechaCampo') });
+    Check('S8 Cierre sin fecha: actual vacia', ['—', 'Nueva fecha compromiso de Cierre'], [p.sel('regCambioActual').textContent, p.sel('regCambioNuevaRot').textContent]);
+    p.sel('regCambioCampo').value = 'otros';
     p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioCampo') });
-    Check('S8 cambiar de campo muestra su valor', '01/12/2026', p.sel('regCambioActual').textContent);
+    Check('S8 otra opcion oculta la etapa y la nueva fecha', [true, true], [p.sel('regCambioGrupoEtapa').hidden, p.sel('regCambioGrupoFecha').hidden]);
+    p.sel('regCambioCampo').value = 'fecha';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioCampo') });
+    Check('S8 volver a Fecha de compromiso: arranca en la del Estado', [false, 'f_solucion', '01/09/2026'],
+      [p.sel('regCambioGrupoEtapa').hidden, p.sel('regCambioFechaCampo').value, p.sel('regCambioActual').textContent]);
+    p.sel('regCambioFechaCampo').value = 'f_analisis';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioFechaCampo') });
 
     p.sel('regCambioNueva').value = '';
     p.sel('regCambioMotivo').value = '';
-    accion('cambio-preparar');
-    Check('S9 invalida: errores y aria-invalid', ['ini-cambio-msg error', 'true', 'true', 'false'],
+    accion('cambio-agregar');
+    Check('S9 cambio invalido: no se agrega; errores y aria-invalid', ['ini-cambio-msg error', 'true', 'false', 0],
       [p.sel('regCambioMsg').className, p.sel('regCambioNueva').getAttribute('aria-invalid'),
-       p.sel('regCambioMotivo').getAttribute('aria-invalid'), p.sel('regCambioCampo').getAttribute('aria-invalid')]);
+       p.sel('regCambioCampo').getAttribute('aria-invalid'), p.registro.lista.items.length]);
+    accion('cambio-preparar');
+    Check('S9 lista vacia y sin motivo: no se envia ni se prepara', ['ini-cambio-msg error', true, 'true'],
+      [p.sel('regCambioMsg').className, /Agrega al menos un cambio/.test(p.sel('regCambioMsg').innerHTML),
+       p.sel('regCambioMotivo').getAttribute('aria-invalid')]);
 
     p.sel('regCambioNueva').value = '2027-01-15';
     p.sel('regCambioMotivo').value = 'Dependencia con proveedor';
+    accion('cambio-agregar');
     accion('cambio-preparar');
     var msg = p.sel('regCambioMsg').innerHTML;
     Check('S10 valida: preparada, NO enviada', ['ini-cambio-msg listo', true, true],
@@ -1802,7 +2178,7 @@ pruebas.push(function () {
 // DATOS: 4 abiertas (PRB 1, MAP 2, REQ 4, PRB 5), 3 Activas (REQ 4 tiene
 // agrupacion fuera de las cuatro), 1 Retrasada que cuenta (PRB 1; REQ 4 y
 // PRB 5 no), 1 Cerrada (HAR 3).
-var KPI_BASE = ['5', '3', '1', '1', '1'];
+var KPI_BASE = ['4', '3', '1', '1', '1'];
 function rotulosKpi(p) {
   var re = /<div class="lbl">([^<]*)<\/div>/g, m, s = [];
   while ((m = re.exec(p.sel('regKpis').innerHTML))) s.push(m[1]);
@@ -1815,11 +2191,11 @@ pruebas.push(function () {
   return esperar().then(function () {
     var reg = p.registro, html = p.sel('regKpis').innerHTML;
     Check('K1 cinco indicadores, en orden (Requerimientos en lugar de Fuera de Activas)',
-      ['Total de iniciativas', 'Iniciativas medibles', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'], rotulosKpi(p));
+      ['Total iniciativas activas', 'Iniciativas medibles', 'Iniciativas con requerimientos', 'Atrasadas', 'Cerradas'], rotulosKpi(p));
     Check('K1 valores con la vista por omision (Todas)', KPI_BASE, kpis(p));
-    Check('K1 pies: abiertas sin categoria, tickets, ReqOpr, riesgo, Cerrado; ya no la resta',
+    Check('K1 pies: abiertas sin categoria, tickets, REQ/RTI/HAR (sin el de ReqOpr), riesgo, Cerrado; ya no la resta',
       [true, true, true, true, true, false],
-      [/1 sin categoría/.test(html), /190 tickets a reducir/.test(html), /agrupación ReqOpr, abiertos/.test(html),
+      [/1 sin categoría/.test(html), /190 tickets a reducir/.test(html), /<div class="foot">REQ, RTI y HAR<\/div>/.test(html) && !/agrupación ReqOpr, abiertos/.test(html),
        /150 tickets en riesgo/.test(html), /estado Cerrado/.test(html), /Total − Activas|Fuera de Activas/.test(html)]);
 
     // Cada control de la lista, uno tras otro: la lista cambia, los
@@ -1869,10 +2245,10 @@ pruebas.push(function () {
     Ini('A 10', { estado: 'Cerrádo', activa: false, seguimiento: false })
   ];
   var k = R.Registro.indicadores(lista);
-  Check('K3 tabla: total/abiertas/activas/fuera de activas/retrasadas/cerradas', [10, 6, 2, 4, 1, 4],
+  Check('K3 tabla: total/abiertas/activas/fuera de activas/retrasadas/cerradas', [6, 6, 2, 4, 1, 4],
     [k.total, k.abiertas, k.activas, k.fueraActivas, k.retrasadas, k.cerradas]);
-  Check('K3 abiertas = Activas + Fuera de Activas; abiertas + Cerradas = Total = todas', [true, true, true],
-    [k.abiertas === k.activas + k.fueraActivas, k.abiertas + k.cerradas === k.total, k.total === lista.length]);
+  Check('K3 abiertas = Activas + Fuera de Activas; Total = abiertas; Total + Cerradas = todas', [true, true, true],
+    [k.abiertas === k.activas + k.fueraActivas, k.abiertas === k.total, k.total + k.cerradas === lista.length]);
   Check('K3 sin categoria y riesgo solo de lo que cuenta', [1, 7], [k.sinCategoria, k.riesgo]);
   var vacio = R.Registro.indicadores([]);
   Check('K3 lista vacia: todo en 0', [0, 0, 0, 0, 0], [vacio.total, vacio.activas, vacio.fueraActivas, vacio.retrasadas, vacio.cerradas]);
@@ -1898,14 +2274,14 @@ pruebas.push(function () {
     json.iniciativas[3].seguimiento = true;
     return reg.actualizar(ok(json));
   }).then(function (r) {
-    Check('K4 relectura: Total 5 (Cerradas incluidas), Activas 3, Requerimientos 0, Atrasadas 2, Cerradas 2', [true, ['5', '3', '0', '2', '2']], [r.ok, kpis(p)]);
+    Check('K4 relectura: Total 3 (abiertas), Activas 3, Requerimientos 0, Atrasadas 2, Cerradas 2', [true, ['3', '3', '0', '2', '2']], [r.ok, kpis(p)]);
     Check('K4 ... pie de riesgo con la nueva retrasada', true, /155 tickets en riesgo/.test(p.sel('regKpis').innerHTML));
     Check('K4 ... filtros, busqueda, orden, "mostrar mas", modo y lista intactos',
       antes, [reg.filtro.estados.marcados, reg.filtro.director, reg.filtro.textoBuscado, reg.orden, reg.limite, reg.modo, folios(p)]);
     // Relectura fallida: se quedan los ultimos valores, nunca 0 ni vacio.
     return reg.actualizar(function () { return Promise.resolve(Respuesta(500, { error: 'error 53' })); });
   }).then(function (r) {
-    Check('K5 relectura fallida: los indicadores anteriores siguen (sin ceros)', [false, ['5', '3', '0', '2', '2']], [r.ok, kpis(p)]);
+    Check('K5 relectura fallida: los indicadores anteriores siguen (sin ceros)', [false, ['3', '3', '0', '2', '2']], [r.ok, kpis(p)]);
     // Una carga nueva (Reintentar): cargando sin ceros, luego error sin indicadores.
     var promesa = reg.cargar(function () { return Promise.resolve(Respuesta(500, { error: 'error 208' })); });
     Check('K5 cargando: cinco tarjetas "…", ningun 0', [['…', '…', '…', '…', '…'], false],
@@ -1930,10 +2306,9 @@ pruebas.push(function () {
   return esperar().then(function () {
     var reg = p.registro, html = p.sel('regKpis').innerHTML;
     var texto = 'Iniciativas en estado En Análisis, En Solución o En Monitoreo y con agrupación Problem, SorIA, Adopcion o Mejora.';
-    var nota = 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría. ' +
-      'La agrupación se reconoce sin importar acentos ni mayúsculas (Adopción = Adopcion).';
+    var nota = 'Es el criterio de la tabla Activas de Experiencia. Incluye las que no tienen categoría.';
     Check('K6 texto del criterio de Activas', { texto: texto, nota: nota }, reg.ayudaKpi('activas'));
-    Check('K6 solo Activas lleva la franja "Criterio", con el texto para lectores de pantalla; los demas no', [1, true, true, null],
+    Check('K6 Activas y Requerimientos llevan la franja "Criterio", con el texto para lectores de pantalla; los demas no', [2, true, true, null],
       [(html.match(/class="ini-kpi-ayuda"/g) || []).length,
        /<div class="kpi ini-kpi sv ini-kpi-ctx[^"]*"><button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="activas"[^>]*>Criterio<\/button>/.test(html)
          && /<div class="lbl">Iniciativas medibles<\/div>/.test(html),
@@ -1959,6 +2334,83 @@ pruebas.push(function () {
       Check('K6 el texto sale de agrupadores del servidor',
         'Iniciativas en estado En Análisis, En Solución o En Monitoreo y con agrupación Problem o Mejora.', reg.ayudaKpi('activas').texto);
     });
+  });
+});
+
+// K7) El hover de Requerimientos es el mismo de Activas: franja "Criterio"
+// con GloboAyuda (globo-ayuda.css), no el title nativo de la tarjeta. Mismo
+// texto que tenia el title.
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  return esperar().then(function () {
+    var reg = p.registro, html = p.sel('regKpis').innerHTML;
+    var texto = 'Requerimientos (REQ/HAR): abiertos, estado distinto de Cerrado, con agrupación ReqOpr.';
+    var nota = 'Cuentan en Total, no en Iniciativas medibles.';
+    Check('K7 texto del criterio de Requerimientos', { texto: texto, nota: nota }, reg.ayudaKpi('requerimientos'));
+    Check('K7 franja Criterio como la de Activas: misma clase, aria-describedby, rotulo y texto para lectores de pantalla',
+      [true, true],
+      [/<div class="kpi ini-kpi  ini-kpi-ctx[^"]*"><button type="button" class="ini-kpi-ayuda" data-kpi-ayuda="requerimientos" aria-describedby="regKpiAyudaRequerimientos" aria-label="Criterio de Iniciativas con requerimientos">Criterio<\/button><span class="ini-sr" id="regKpiAyudaRequerimientos">[^<]*<\/span><div class="lbl">Iniciativas con requerimientos<\/div>/.test(html),
+       html.indexOf('id="regKpiAyudaRequerimientos">' + p.ventana.Escape.html(texto + ' ' + nota) + '<') > 0]);
+    Check('K7 sin tooltip nativo: ni la tarjeta de Requerimientos ni su franja llevan title', [false, false],
+      [/data-indicador="requerimientos"[^>]*title=/.test(html), /data-kpi-ayuda="requerimientos"[^>]*title=/.test(html)]);
+
+    var franja = Elemento('franja');
+    franja.setAttribute('data-kpi-ayuda', 'requerimientos');
+    franja.closest = function (sel) { return sel === '.ini-kpi-ayuda' ? franja : null; };
+    var g = reg.globoKpis;
+    p.sel('regKpis').disparar('pointerover', { target: franja, pointerType: 'mouse' });
+    Check('K7 pasar el mouse: el mismo globo (GloboAyuda) con el criterio', [false, 'globo-ayuda', texto, nota, true],
+      [g.globo.hidden, g.globo.className.split(' ')[0], g.texto.textContent, g.nota.textContent, franja.classList.contains('abierto')]);
+    p.sel('regKpis').disparar('pointerout', { target: franja, pointerType: 'mouse', relatedTarget: null });
+    Check('K7 salir con el mouse lo oculta', true, g.globo.hidden);
+    p.sel('regKpis').disparar('click', { target: franja });
+    Check('K7 la franja no filtra', '', reg.filtro.indicador);
+  });
+});
+
+// CA) La cuenta del Registro (#regCuenta). Con Cerrado fuera del filtro de
+// Estado: "N Abiertas de T Total", N = abiertas que pasan los filtros, T =
+// el registro completo (no la pagina). Si no, la cuenta de siempre.
+pruebas.push(function () {
+  var json = JSON.parse(JSON.stringify(DATOS));
+  json.iniciativas = [Ini('A 1', { estado: 'En Análisis' }), Ini('A 2', { estado: 'Cerrado', activa: false }),
+    Ini('A 3', { estado: 'cerrado', activa: false })];
+  var f = new R.FiltroRegistro(Adm(R.Registro.desdeJson(json)));
+  Check('CA1 sin filtro de Estado: no excluye Cerrado', false, f.excluyeCerradas());
+  f.alternarEstado('Cerrado');
+  Check('CA1 otra variante de Cerrado sigue marcada (plano()): no excluye', false, f.excluyeCerradas());
+  f.alternarEstado('cerrado');
+  Check('CA1 ninguna variante de Cerrado marcada: excluye', true, f.excluyeCerradas());
+  f.limpiar();
+  Check('CA1 limpiar: ya no excluye', false, f.excluyeCerradas());
+});
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  return esperar().then(function () {
+    Check('CA2 al cargar (Cerrado incluido): la cuenta de siempre', '5 iniciativas', p.sel('regCuenta').textContent);
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'Cerrado');
+    Check('CA2 sin Cerrado: abiertas frente al total general; indicadores intactos', ['4 Abiertas de 5 Total', 4, KPI_BASE],
+      [p.sel('regCuenta').textContent, folios(p).length, kpis(p)]);
+    elegir(p, 'regPo', 'PO 1');
+    Check('CA3 con otro filtro: solo las abiertas que pasan, el total no cambia', ['3 Abiertas de 5 Total', 3],
+      [p.sel('regCuenta').textContent, folios(p).length]);
+    teclear(p, '000005');
+    return esperarBusqueda();
+  }).then(function () {
+    Check('CA3 con busqueda', '1 Abiertas de 5 Total', p.sel('regCuenta').textContent);
+    sinOmision(p);
+    Check('CA4 Limpiar filtros: la cuenta del registro completo', ['5 iniciativas', 5], [p.sel('regCuenta').textContent, folios(p).length]);
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'En Análisis');
+    Check('CA5 Cerrado incluido con otro estado fuera: la cuenta de siempre', true,
+      / de 5 iniciativas$/.test(p.sel('regCuenta').textContent));
+    sinOmision(p);
+    var muchas = JSON.parse(JSON.stringify(DATOS));
+    for (var n = 0; n < 230; n++) muchas.iniciativas.push(Ini('X ' + (1000 + n), { categorias: [Cat('/A/Cat 2', 1, 0.1, 'Dir A', 'PO 1', 'SO y')] }));
+    return p.registro.cargar(ok(muchas));
+  }).then(function () {
+    marcarEn(p, 'regEstadoPanel', 'data-estado-ini', 'Cerrado');
+    Check('CA6 el total no es la pagina ni el limite', ['234 Abiertas de 235 Total · mostrando 100', 100],
+      [p.sel('regCuenta').textContent, folios(p).length]);
   });
 });
 
@@ -2107,7 +2559,7 @@ pruebas.push(function () {
   var motivos = lista.filter(function (i) { return plano(i.estado) !== 'cerrado' && !i.seguimiento; }).map(motivoFuera);
   Check('R6 desglose: estado, agrupacion, agrupacion vacia, ambos (cuenta por estado)',
     [4, ['estado', 'agrupacion', 'agrupacion', 'estado']], [k.fueraActivas, motivos]);
-  Check('R6 abiertas = Activas + Fuera; Cerrada fuera de los dos (si en Total)', [6, 5, 1, 4, 1],
+  Check('R6 abiertas = Activas + Fuera; Cerrada fuera de los dos y de Total', [5, 5, 1, 4, 1],
     [k.total, k.abiertas, k.activas, k.fueraActivas, k.cerradas]);
 });
 
@@ -2247,7 +2699,7 @@ var REQ_LISTA = [
 
 pruebas.push(function () {
   var k = R.Registro.indicadores(REQ_LISTA);
-  Check('RQ1 Total 9 (todas), abiertas 8, Activas 3, Requerimientos 3, Cerradas 1', [9, 8, 3, 3, 1], [k.total, k.abiertas, k.activas, k.requerimientos, k.cerradas]);
+  Check('RQ1 Total 8 (abiertas), abiertas 8, Activas 3, Requerimientos 3, Cerradas 1', [8, 8, 3, 3, 1], [k.total, k.abiertas, k.activas, k.requerimientos, k.cerradas]);
   Check('RQ1 Requerimientos NO es abiertas - Activas (5)', [5, false], [k.fueraActivas, k.requerimientos === k.abiertas - k.activas]);
   Check('RQ1 Requerimientos y Activas no se pisan', [],
     REQ_LISTA.filter(function (i) { return i.seguimiento && R.Registro.esRequerimiento(i); }).map(function (i) { return i.folio; }));
@@ -2263,7 +2715,7 @@ pruebas.push(function () {
   return esperar().then(function () {
     reg = p.registro;
     base = kpis(p);
-    Check('RQ2 tarjetas: Total 9 (todas), Activas 3, Requerimientos 3, Atrasadas 0, Cerradas 1', ['9', '3', '3', '0', '1'], base);
+    Check('RQ2 tarjetas: Total 8 (abiertas), Activas 3, Requerimientos 3, Atrasadas 0, Cerradas 1', ['8', '3', '3', '0', '1'], base);
     var html = p.sel('regKpis').innerHTML;
     soloEstado(p, 'Cerrado');
     p.sel('regBuscar').value = 'REQ'; reg.aplicarBusqueda();
@@ -2457,7 +2909,7 @@ pruebas.push(function () {
   }).then(function () {
     var cifras = kpis(p);
     Check('KF1 listo: instruccion visible; nada elegido; cinco tarjetas filtrables', [false, [], 5],
-      [p.sel('regKpisGuia').hidden, pulsados(p), (p.sel('regKpis').innerHTML.match(/class="ini-kpi-filtro" data-indicador=/g) || []).length]);
+      [p.sel('regKpisGuia').hidden, pulsados(p), (p.sel('regKpis').innerHTML.match(/class="kpi-filtro" data-indicador=/g) || []).length]);
     // Total no es un estado: sin aria-pressed (las otras cuatro si).
     Check('KF1 Total sin aria-pressed; las demas con aria-pressed="false"', [false, 4],
       [/data-indicador="total" aria-pressed/.test(p.sel('regKpis').innerHTML),
@@ -2472,15 +2924,16 @@ pruebas.push(function () {
       clicIndicador(p, c);
       Check('KF2 ' + c + ': filtra la lista, la marca, cifras y semaforo iguales',
         [esperado[c], [c], 1, cifras, 1],
-        [folios(p), pulsados(p), (p.sel('regKpis').innerHTML.match(/ini-kpi-sel/g) || []).length, kpis(p),
+        [folios(p), pulsados(p), (p.sel('regKpis').innerHTML.match(/kpi-sel/g) || []).length, kpis(p),
          reg.filtro.activos()]);
       clicIndicador(p, c);
       Check('KF2 ' + c + ': otro clic lo quita', [CINCO, [], cifras, 0], [folios(p), pulsados(p), kpis(p), reg.filtro.activos()]);
     });
 
-    // Total: la poblacion por omision, Cerradas incluidas. Sin nada elegido
-    // no cambia nada (ni la pagina); con algo elegido lo quita.
-    Check('KF2T la cifra de Total = todas las del registro (Cerradas incluidas)', ['5', 5], [cifras[0], CINCO.length]);
+    // Total: cuenta las abiertas, pero su clic no filtra. Sin nada elegido
+    // no cambia nada (ni la pagina); con algo elegido lo quita y la lista
+    // vuelve a todas (Cerradas incluidas).
+    Check('KF2T la cifra de Total = las abiertas; la lista sin indicador, todas', ['4', 5], [cifras[0], CINCO.length]);
     reg.limite = 300;
     clicIndicador(p, 'total');
     Check('KF2T Total sin nada elegido: todas, nada marcado, ningun filtro, pagina intacta',
@@ -2506,6 +2959,19 @@ pruebas.push(function () {
       [p.sel('regCuenta').textContent, p.sel('regFiltrosCuenta').textContent, p.sel('regLimpiar').hidden]);
     p.sel('regLimpiar').disparar('click');
     Check('KF3 Limpiar filtros tambien lo quita', [[], CINCO], [pulsados(p), folios(p)]);
+    // Un indicador, luego a mano otro (el semaforo) y el Director: Limpiar
+    // quita todo y ninguna tarjeta ni punto del semaforo queda marcado.
+    clicIndicador(p, 'activas');
+    clicIndicador(p, 'sem_atrasada');
+    elegir(p, 'regDirector', 'Dir B');
+    Check('KF3b antes: el semaforo reemplazo a la tarjeta, con Director', [['sem_atrasada'], 'sem_atrasada', 'Dir B'],
+      [pulsados(p), reg.filtro.indicador, reg.filtro.director]);
+    p.sel('regLimpiar').disparar('click');
+    var cajas = p.sel('regKpis').innerHTML + p.sel('regSemaforo').innerHTML;
+    Check('KF3b Limpiar: sin indicador ni Director, todas, sin kpi-sel y todo aria-pressed="false"',
+      ['', '', CINCO, [], false, false, true],
+      [reg.filtro.indicador, reg.filtro.director, folios(p), pulsados(p), /kpi-sel/.test(p.sel('regKpis').innerHTML),
+       /aria-pressed="true"/.test(cajas), /aria-pressed="false"/.test(cajas)]);
 
     // Criterio (franja de Activas) no filtra.
     var franja = Elemento('franja');
@@ -2565,7 +3031,7 @@ pruebas.push(function () {
     return reg.actualizar(ok(json));
   }).then(function (r) {
     Check('KF8 relectura: el indicador, el Director y la marca siguen; las cifras se actualizan',
-      [true, 'cerradas', 'Dir B', ['cerradas'], ['5', '3', '0', '1', '2'], ['REQ 2026-000004', 'HAR 2025-000003']],
+      [true, 'cerradas', 'Dir B', ['cerradas'], ['3', '3', '0', '1', '2'], ['REQ 2026-000004', 'HAR 2025-000003']],
       [r.ok, reg.filtro.indicador, reg.filtro.director, pulsados(p), kpis(p), folios(p)]);
     sinOmision(p);
     // Desde la Cobertura un clic vuelve a la lista; alli no cuenta.
@@ -2577,14 +3043,26 @@ pruebas.push(function () {
     Check('KF9 en la Cobertura el indicador no cuenta como filtro', '', p.sel('regFiltrosCuenta').textContent);
     reg.verRegistro();
     clicIndicador(p, 'activas');
-    var css = leer('admin/iniciativas.css');
+    // La tarjeta que filtra vive en assets/css/kpi.css (compartida con las
+    // demas pestañas); Criterio y el semaforo siguen en iniciativas.css.
+    var css = leer('admin/iniciativas.css'), kpiCss = leer('assets/css/kpi.css');
     Check('KF10 CSS: boton que cubre la tarjeta, Criterio encima, foco visible, marca sin mover la franja',
-      [true, true, true, true, true],
-      [/\.ini-kpi-filtro \{[^}]*position: absolute; inset: 0; z-index: 1;/.test(css),
+      [true, true, true, true, true, false],
+      [/\.kpi-filtro \{[^}]*position: absolute; inset: 0; z-index: 1;/.test(kpiCss),
        /\.ini-kpi-ayuda \{[^}]*z-index: 2;/.test(css),
-       /\.ini-kpi-filtrable:has\(> \.ini-kpi-filtro:focus-visible\) \{ outline: 2px solid var\(--accent\)/.test(css),
-       /\.kpi\.ini-kpi-sel \{[^}]*border-top-color: var\(--accent\)/.test(css) && !/\.kpi\.ini-kpi-sel \{[^}]*border-left/.test(css),
-       /\.ini-semaforo-op:focus-visible \{/.test(css)]);
+       /\.kpi-filtrable:has\(> \.kpi-filtro:focus-visible\) \{ outline: 2px solid var\(--accent/.test(kpiCss),
+       /\.kpi\.kpi-sel \{[^}]*border-top-color: var\(--accent/.test(kpiCss) && !/\.kpi\.kpi-sel \{[^}]*border-left/.test(kpiCss),
+       /\.ini-semaforo-op:focus-visible \{/.test(css),
+       /ini-kpi-filtr|ini-kpi-sel/.test(css)]);
+    // La tarjeta la arma SeleccionKpi (clases + boton), la misma plantilla
+    // de las demas pestañas: sin copia a mano del boton ni de las clases.
+    var regJs = leer('admin/registro-iniciativas.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+    Check('KF11 tarjetas con SeleccionKpi.boton/clases, sin plantilla propia',
+      [true, true, false, false],
+      [/seleccion\.boton\(c\.k, c\.l \+ ': ' \+ fmt\(c\.v\), c\.t\)/.test(regJs),
+       /seleccion\.clases\(c\.k\)/.test(regJs),
+       /class="kpi-filtro"/.test(regJs),
+       /' kpi-filtrable'|' kpi-sel'/.test(regJs)]);
   });
 });
 

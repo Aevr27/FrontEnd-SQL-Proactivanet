@@ -23,6 +23,10 @@
 // sin sql/31 esas columnas salen NULL (como antes). Aprobar y rechazar son
 // de RevisionSolicitudesIniciativa (otro handler, POST).
 //
+// Con sql/32 tambien lee CodigoIniciativa (la iniciativa que creo la
+// aprobacion; NULL en una APROBADA de antes de sql/32) y dice
+// crea_iniciativa = true; sin sql/32 sale NULL y crea_iniciativa = false.
+//
 // Se prueba sin SQL en tools/tests/RegistroSolicitudesIniciativaHttpSmoke.cs
 // y contra LocalDB en tools/tests/RegistroSolicitudesIniciativaSqlLocalDbSmoke.cs.
 
@@ -43,6 +47,7 @@ public sealed class LecturaSolicitudesIniciativa
 {
     public int Total;
     public bool RevisionDisponible;    // sql/31 en la base: se puede aprobar / rechazar
+    public bool CreaIniciativa;        // sql/32 en la base: aprobar crea la iniciativa
     public List<Dictionary<string, object>> Solicitudes = new List<Dictionary<string, object>>();
 }
 
@@ -90,7 +95,14 @@ public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativ
             return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
     }
 
-    private static string Columnas(bool revision)
+    // sql/32: la columna y el procedimiento (la misma consulta del revisor).
+    private static bool ConCodigo(SqlConnection cn)
+    {
+        using (var cmd = new SqlCommand(RevisorSolicitudesIniciativaSql.ConsultaCreaIniciativa, cn) { CommandTimeout = 15 })
+            return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+    }
+
+    private static string Columnas(bool revision, bool codigo)
     {
         return @"
        s.NumeroSolicitud, s.Estado, s.TipoIniciativa, s.Titulo, s.SolicitanteNombre, s.SolicitanteCorreo, s.SolicitanteCuenta,
@@ -98,7 +110,8 @@ public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativ
        Eventos = (SELECT COUNT(*) FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = s.NumeroSolicitud),
 " + (revision
             ? "       s.RevisadoPor, s.FechaRevisionUtc, s.ComentarioRevision"
-            : "       RevisadoPor = CONVERT(nvarchar(256), NULL), FechaRevisionUtc = CONVERT(datetime2(0), NULL), ComentarioRevision = CONVERT(nvarchar(4000), NULL)");
+            : "       RevisadoPor = CONVERT(nvarchar(256), NULL), FechaRevisionUtc = CONVERT(datetime2(0), NULL), ComentarioRevision = CONVERT(nvarchar(4000), NULL)")
+            + (codigo ? ", s.CodigoIniciativa" : ", CodigoIniciativa = CONVERT(nvarchar(100), NULL)");
     }
 
     public LecturaSolicitudesIniciativa Listar(int maximo)
@@ -107,7 +120,8 @@ public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativ
         using (var cn = Abierta())
         {
             l.RevisionDisponible = ConRevision(cn);
-            var sql = "SELECT TOP (@max)" + Columnas(l.RevisionDisponible) + @"
+            l.CreaIniciativa = l.RevisionDisponible && ConCodigo(cn);
+            var sql = "SELECT TOP (@max)" + Columnas(l.RevisionDisponible, l.CreaIniciativa) + @"
 FROM adm.SolicitudIniciativa AS s
 ORDER BY s.NumeroSolicitud DESC;
 SELECT COUNT(*) FROM adm.SolicitudIniciativa;";
@@ -129,7 +143,8 @@ SELECT COUNT(*) FROM adm.SolicitudIniciativa;";
         using (var cn = Abierta())
         {
             var revision = ConRevision(cn);
-            var sql = "SELECT" + Columnas(revision) + @",
+            var codigo = revision && ConCodigo(cn);
+            var sql = "SELECT" + Columnas(revision, codigo) + @",
        s.Descripcion, s.Observaciones, s.Volumetria, s.PctDisminucion, s.RcaExtension, s.FuenteCorreos
 FROM adm.SolicitudIniciativa AS s
 WHERE s.NumeroSolicitud = @n;
@@ -144,6 +159,7 @@ FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = @n ORDER BY e.
                     if (!r.Read()) return null;
                     var d = Fila(r);
                     d["revision_disponible"] = revision;
+                    d["crea_iniciativa"] = codigo;
                     d["descripcion"] = Texto(r, "Descripcion");
                     d["observaciones"] = Texto(r, "Observaciones");
                     d["volumetria"] = r.IsDBNull(r.GetOrdinal("Volumetria")) ? (object)null : Convert.ToInt32(r["Volumetria"], CultureInfo.InvariantCulture);
@@ -184,6 +200,7 @@ FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = @n ORDER BY e.
             { "fecha_utc", Utc(r, "FechaUtc") }, { "eventos_total", Convert.ToInt32(r["Eventos"], CultureInfo.InvariantCulture) },
             { "revisado_por", Texto(r, "RevisadoPor") }, { "fecha_revision_utc", Utc(r, "FechaRevisionUtc") },
             { "comentario_revision", Texto(r, "ComentarioRevision") },
+            { "codigo_iniciativa", Texto(r, "CodigoIniciativa") },
         };
     }
 

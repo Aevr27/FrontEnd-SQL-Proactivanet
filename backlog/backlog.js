@@ -123,14 +123,19 @@ async function obtenerJSON(ruta) {
   return datos;
 }
 
-// Fila de tarjetas de KPI. t = { l: etiqueta, v: valor, f: pie, s: semaforo }.
-function htmlTarjetasKpi(tarjetas) {
-  return tarjetas.map(t => `
-    <div class="kpi ${t.s ?? ''}">
+// Fila de tarjetas de KPI. t = { l: etiqueta, v: valor, f: pie, s: semaforo,
+// k: clave si la tarjeta filtra }. `sel` (SeleccionKpi, opcional) pone la
+// marca y el boton que cubre las tarjetas con k.
+function htmlTarjetasKpi(tarjetas, sel) {
+  return tarjetas.map(t => {
+    const filtra = !!(t.k && sel);
+    return `
+    <div class="kpi ${t.s ?? ''}${filtra ? sel.clases(t.k) : ''}">
       <div class="lbl">${t.l}</div>
       <div class="val">${t.v}</div>
-      <div class="foot">${t.f ?? ''}</div>
-    </div>`).join('');
+      <div class="foot">${t.f ?? ''}</div>${filtra ? sel.boton(t.k, `${t.l}: ${t.v}`, t.titulo) : ''}
+    </div>`;
+  }).join('');
 }
 
 // Dos cifras con su rotulo en el lugar del .val, para una tarjeta que
@@ -346,6 +351,23 @@ const TableroBacklog = (function () {
   const filtro = { lider: null, grupo: null, prioridad: null, aging: null };
   const ETIQUETA_DIM = { lider: 'Lider', grupo: 'Grupo', prioridad: 'Prioridad', aging: 'Antiguedad' };
 
+  /* "Criticos" filtra lo mismo que la barra Critica de "Por prioridad": un
+     clic hace alternarFiltro('prioridad', 'Critica'), el clic de siempre en
+     esa barra (tabla de antiguos, barra marcada), y otro clic lo quita. El
+     estado es el de siempre, filtro.prioridad: SeleccionKpi pone la
+     mecanica, asi que la barra tambien mueve la marca. Las cifras de las
+     tarjetas no cambian: solo responden a Lider y Grupo (porLiderGrupo).
+     "+30 dias" son dos tramos de antiguedad y el filtro admite uno; las
+     demas son result sets aparte sin detalle: no filtran. */
+  const KPI_CRITICOS = 'criticos';
+  const PRIORIDAD_CRITICA = 'Critica';
+  const seleccionKpi = (typeof window !== 'undefined' && window.SeleccionKpi)
+    ? new window.SeleccionKpi({ valida: k => k === KPI_CRITICOS }) : null;
+  function marcarKpis() {
+    if (seleccionKpi) seleccionKpi.clave = filtro.prioridad === PRIORIDAD_CRITICA ? KPI_CRITICOS : '';
+    return seleccionKpi;
+  }
+
   // Atajo local: el color lo resuelve la tabla compartida, no esta pestana.
   const colorLider = nombre => Paleta.colorLider(nombre);
   function hayFiltro() { return dimensionesActivas(filtro).length > 0; }
@@ -468,18 +490,22 @@ const TableroBacklog = (function () {
       + (sla.tramite > 0 ? ` · ${FMT(sla.tramite)} en tramite de compra` : '');
 
     const corte = document.getElementById('f-corte-bl').value;
-    const pie = hayFiltro() ? 'sobre lo filtrado' : (corte ? `corte ${corte}` : '');
+    // "sobre lo filtrado" solo si lo es: las cifras solo siguen a Lider y
+    // Grupo. Con Prioridad o Antiguedad elegidas siguen siendo del corte.
+    const filtradas = filtro.lider !== null || filtro.grupo !== null;
+    const pie = filtradas ? 'sobre lo filtrado' : (corte ? `corte ${corte}` : '');
 
     const tarjetas = [
       { l: 'Backlog', v: FMT(total), f: pie },
-      { l: 'Criticos', v: FMT(criticos), f: `${PCT(criticos, total)} del backlog`, s: 'sr' },
+      { l: 'Criticos', v: FMT(criticos), f: `${PCT(criticos, total)} del backlog`, s: 'sr',
+        k: KPI_CRITICOS, titulo: 'Filtrar el tablero por prioridad Critica' },
       { l: 'Dentro / Fuera SLA', v: htmlParKpi('Dentro SLA', sla.dentro, 'Fuera SLA', sla.fuera), f: pieSla, s: semSla },
       { l: '+30 dias', v: FMT(mayor30), f: `${PCT(mayor30, total)} del backlog` },
       { l: 'Reasignados', v: FMT(reasignados), f: 'cambiaron de grupo al menos una vez' },
       { l: 'Reabiertos', v: FMT(reabiertos), f: 'mas de un intento de solucion' },
     ];
 
-    document.getElementById('kpis-bl').innerHTML = htmlTarjetasKpi(tarjetas);
+    document.getElementById('kpis-bl').innerHTML = htmlTarjetasKpi(tarjetas, marcarKpis());
   }
 
   // -------------------------------------------------------------------- graficas
@@ -1537,6 +1563,12 @@ const TableroBacklog = (function () {
         plegarSubestado(botonSubestado.getAttribute('aria-expanded') !== 'true'));
     }
     plegarSubestado(false);
+    // "Criticos" (ver KPI_CRITICOS).
+    if (seleccionKpi) window.SeleccionKpi.escuchar([document.getElementById('kpis-bl')], 'data-indicador', k => {
+      if (!datos || k !== KPI_CRITICOS) return;
+      alternarFiltro('prioridad', PRIORIDAD_CRITICA);
+      window.SeleccionKpi.enfocar([document.getElementById('kpis-bl')], 'data-indicador', k);
+    });
 
     try {
       await cargarCatalogos();

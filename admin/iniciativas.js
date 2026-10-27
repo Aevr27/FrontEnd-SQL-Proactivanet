@@ -48,7 +48,7 @@
      disminucion de la Categoria elegida (captura) y, calculados de solo
      lectura, la Volumetria de esa categoria (VolumetriaCliente de
      admin/iniciativa-admin.js, la misma de Crear / Modificar: ultimos 30
-     dias) y los Tickets a reducir = round(volumetria x % / 100).
+     dias) y los Tickets a reducir = floor(volumetria x % / 100).
    Pendiente (no se pinta como campo, ver sql/diag_admin_nueva_solicitud.sql)
      El RCA se elige y se valida, pero todavia no se guarda ni hay numero
      de solicitud con que nombrarlo. Destino FUTURO confirmado (solo
@@ -180,7 +180,7 @@ window.Iniciativas = (function () {
       reiniciaConCascada: true, requiereCategoria: true },
     // La meta se escribe en % O en tickets: el que se escribio manda
     // (SolicitudNueva.metaPor) y el otro se calcula con la volumetria de la
-    // categoria. % -> tickets: round(volumetria x % / 100), ticket entero
+    // categoria. % -> tickets: floor(volumetria x % / 100), ticket entero
     // (ticketsDe). Tickets -> %: pctDeTickets, a dos decimales. Solo viaja
     // el % (el validador no tiene campo de tickets) y el Tickets Reduce del
     // registro sigue saliendo de dbo.ExpTicketsReduce con su ventana movil.
@@ -216,18 +216,20 @@ window.Iniciativas = (function () {
     return Math.round(Number(pct) * 100) / 10000;
   }
 
-  // Tickets a reducir: round(volumetria x pct / 100) a ticket entero, la
-  // mitad hacia arriba (el ROUND(..., 0) de SQL con positivos). En
-  // centesimas de % y con enteros, para no redondear flotantes:
-  // 1247 x 12.5% = 155.875 -> 156. null si falta o no vale alguno.
+  // Tickets a reducir: floor(volumetria x pct / 100) a ticket entero,
+  // SIEMPRE hacia abajo (2026-10-26; el FLOOR de la propuesta sql/33 para
+  // adm.usp_GestionAdmin_TicketsReduce). En centesimas de % y con enteros,
+  // para no redondear flotantes: 1247 x 12.5% = 155.875 -> 155; 7 x 9.46%
+  // = 0.66 -> 0. null si falta o no vale alguno.
   function ticketsDe(volumetria, pct) {
     if (typeof volumetria !== 'number' || !isFinite(volumetria) || volumetria < 0 || volumetria % 1) return null;
     pct = String(pct === null || pct === undefined ? '' : pct).trim();
     if (pct === '' || VALIDAR.porcentaje(pct)) return null;
-    return Math.floor((volumetria * Math.round(Number(pct) * 100) + 5000) / 10000);
+    return Math.floor(volumetria * Math.round(Number(pct) * 100) / 10000);
   }
 
-  // Tickets a reducir -> % con dos decimales, mitad hacia arriba (la misma
+  // Tickets a reducir -> el menor % con dos decimales que da al menos esos
+  // tickets con ticketsDe (la misma
   // regla que MetaCategoria.pct de Crear, admin/iniciativa-admin.js). Con
   // volumetrias grandes 0.01% es mas de un ticket: exacto dice si ese % da
   // los mismos tickets. -> { pct, exacto, tickets } o { error } ('' = vacio).
@@ -244,7 +246,7 @@ window.Iniciativas = (function () {
       return { error: n.toLocaleString('es-MX') + ' tickets es más que la volumetría (' +
         volumetria.toLocaleString('es-MX') + '): pasaría de 100%.' };
     }
-    var pct = String(Math.floor((2 * n * 10000 + volumetria) / (2 * volumetria)) / 100);
+    var pct = String(Math.ceil(n * 10000 / volumetria) / 100);
     var da = ticketsDe(volumetria, pct);
     return { pct: pct, exacto: da === n, tickets: da };
   }
@@ -484,7 +486,7 @@ window.Iniciativas = (function () {
       return v.estado === 'ok' && typeof v.valor === 'number' && isFinite(v.valor) && v.valor >= 0 ? Math.round(v.valor) : null;
     }
 
-    // round(volumetria x % / 100), o null si falta la volumetria o el % no
+    // floor(volumetria x % / 100), o null si falta la volumetria o el % no
     // es valido (formato o capacidad: error('pct')).
     ticketsReducir() {
       var pct = String(this.valores.pct === undefined ? '' : this.valores.pct).trim();
@@ -522,7 +524,7 @@ window.Iniciativas = (function () {
       var pct = String(this.valores.pct === undefined ? '' : this.valores.pct).trim();
       if (pct === '') return 'Escribe el % de disminución o los tickets: el otro se calcula.';
       if (this.error('pct')) return 'Corrige el % de disminución para calcularlo.';
-      return 'Volumetría × % ÷ 100, redondeado a ticket entero.';
+      return 'Volumetría × % ÷ 100, redondeado hacia abajo a ticket entero.';
     }
 
     // Lo que muestra la casilla de tickets: lo escrito, o los que da el %.

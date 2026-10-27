@@ -226,7 +226,7 @@ public static class GestionIniciativaAdminSmoke
     }
 
     static readonly EstadosProblem Estados = new EstadosProblem(
-        new[] { "En An\u00e1lisis", "En Soluci\u00f3n", "Cerrado" }, new[] { "En An\u00e1lisis", "Solucionado", "Cancelado" },
+        new[] { "En An\u00e1lisis", "En Soluci\u00f3n", "En Monitoreo", "Cerrado" }, new[] { "En An\u00e1lisis", "Solucionado", "Cancelado" },
         new[] { "Problem", "Mejora", "Adopci\u00f3n" }, new[] { "Problem", "Adopcion", "Requerimiento", "Adopci\u00f3n" });
 
     // Modificar con catalogo de rutas y estados (la forma del servicio).
@@ -654,6 +654,34 @@ public static class GestionIniciativaAdminSmoke
               PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-11-30", null), hoy, "f_solucion", "2026-12-20"));
         Check("PL34 vaciar FechaSolucion al entrar a En Solucion: se vacia (no se rellena con hoy)", "estado=En Soluci\u00f3n|f_solucion=",
               PlanFechas(ActualFechas("En An\u00e1lisis", "2026-09-30", null), hoy, "estado", "En Soluci\u00f3n", "f_solucion", ""));
+
+        // Compromiso a 15 dias (2026-10-26): la MISMA regla de Cerrado
+        // (FechaAlEntrar), con el dia de la aprobacion (hoy) + 15. Entrar a
+        // En Analisis llena FechaSolucion; entrar a En Monitoreo, FechaCierre.
+        Check("PL35 entrar a En Analisis con FechaSolucion vacia: hoy + 15", "estado=En An\u00e1lisis|f_solucion=2026-10-28",
+              PlanFechas(ActualFechas("Cerrado", null, null), hoy, "estado", "En An\u00e1lisis"));
+        Check("PL36 entrar a En Analisis con FechaSolucion ya puesta: se conserva", "estado=En An\u00e1lisis",
+              PlanFechas(ActualFechas("Cerrado", "2026-12-01", null), hoy, "estado", "En An\u00e1lisis"));
+        Check("PL37 entrar a En Analisis con FechaSolucion en el mismo guardado: la del formulario", "estado=En An\u00e1lisis|f_solucion=2026-11-30",
+              PlanFechas(ActualFechas("Cerrado", null, null), hoy, "estado", "En An\u00e1lisis", "f_solucion", "2026-11-30"));
+        Check("PL38 ya En Analisis (sin FechaSolucion), guardar otra cosa: no la llena", "titulo=Otro",
+              PlanFechas(ActualFechas("En An\u00e1lisis", null, null), hoy, "titulo", "Otro"));
+        Check("PL39 entrar a En Monitoreo con FechaCierre vacia: hoy + 15", "estado=En Monitoreo|f_cierre=2026-10-28",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-10-01", null), hoy, "estado", "En Monitoreo"));
+        Check("PL40 entrar a En Monitoreo con FechaCierre ya puesta: se conserva", "estado=En Monitoreo",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-10-01", "2026-12-15"), hoy, "estado", "En Monitoreo"));
+        Check("PL41 ya En Monitoreo (sin FechaCierre), guardar otra cosa: no la llena", "titulo=Otro",
+              PlanFechas(ActualFechas("En Monitoreo", null, null), hoy, "titulo", "Otro"));
+        Check("PL42 entrar a En Monitoreo no toca FechaSolucion vacia", "estado=En Monitoreo|f_cierre=2026-10-28",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", null, null), hoy, "estado", "En Monitoreo"));
+        Check("PL43 vaciar FechaCierre al entrar a En Monitoreo: hoy + 15 (como Cerrado con hoy)", "estado=En Monitoreo|f_cierre=2026-10-28",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-10-01", "2026-12-15"), hoy, "estado", "En Monitoreo", "f_cierre", ""));
+        Check("PL44 de En Monitoreo a Cerrado sigue con hoy (sin los 15 dias)", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", null), hoy, "estado", "Cerrado"));
+        Check("PL45 limite de mes/anio: 2026-12-20 + 15 = 2027-01-04", "estado=En Monitoreo|f_cierre=2027-01-04",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-10-01", null), new DateTime(2026, 12, 20), "estado", "En Monitoreo"));
+        Check("PL46 'EN ANALISIS' -> 'En Analisis' (solo cambia la escritura): no es transicion, sin fecha", "estado=En An\u00e1lisis",
+              PlanFechas(ActualFechas("EN ANALISIS", null, null), hoy, "estado", "En An\u00e1lisis"));
 
         // ---- DQ: PO / SO capturados y quitar (sql/24) ----
         // Constante encendida; surte efecto solo cuando DeteccionSql24 vio

@@ -17,6 +17,10 @@
      - atributos(k): el data-* y el aria-pressed del boton de k, para la
        plantilla que pinta el modulo. Las claves que limpian no son un
        estado: van sin aria-pressed (son una accion, "ver todo");
+     - clases(k) y boton(k, etiqueta, titulo): las clases de la tarjeta y
+       el boton que la cubre, con las reglas de assets/css/kpi.css
+       (.kpi-filtrable, .kpi-filtro, .kpi-sel), para no copiar la
+       plantilla en cada pestaña;
      - escuchar(): UN escucha de clic delegado por contenedor. Los botones
        son <button>, asi que Enter y espacio tambien llegan como clic;
      - enfocar(): devuelve el foco al boton pulsado despues de que el modulo
@@ -38,6 +42,8 @@
      sel.alternar('cerradas');  // -> true si cambio
      sel.clave;                 // 'cerradas'
      '<button type="button"' + sel.atributos('cerradas') + '>'
+     '<div class="kpi' + sel.clases('cerradas') + '">...' +
+       sel.boton('cerradas', 'Cerradas: 12') + '</div>'
      SeleccionKpi.escuchar([caja], 'data-indicador', function (k) { ... });
      SeleccionKpi.enfocar([caja], 'data-indicador', 'cerradas');
 
@@ -98,6 +104,22 @@ window.SeleccionKpi = (function () {
     atributos(k) {
       return ' ' + this.atributo + '="' + attr(k) + '"' +
         (this.limpia(k) ? '' : ' aria-pressed="' + (this.es(k) ? 'true' : 'false') + '"');
+    }
+
+    // ' kpi-filtrable' (+ ' kpi-sel' si es la elegida): las clases de la
+    // tarjeta .kpi de `k` (assets/css/kpi.css). Las que limpian no se
+    // marcan nunca como elegidas.
+    clases(k) {
+      return ' kpi-filtrable' + (!this.limpia(k) && this.es(k) ? ' kpi-sel' : '');
+    }
+
+    // El boton transparente que cubre la tarjeta de `k` (.kpi-filtro de
+    // assets/css/kpi.css): sin botones anidados, el rotulo y la cifra
+    // quedan debajo y el nombre accesible lo da `etiqueta`. `titulo`,
+    // opcional, es el title de la tarjeta (queda encima de ella).
+    boton(k, etiqueta, titulo) {
+      return '<button type="button" class="kpi-filtro"' + this.atributos(k) +
+        ' aria-label="' + attr(etiqueta) + '"' + (titulo ? ' title="' + attr(titulo) + '"' : '') + '></button>';
     }
 
     // La clave del boton sobre el que cayo el evento, o ''. Un hijo del

@@ -506,12 +506,37 @@ function renderKPIs(cats, det){
     {l:'% Tickets con Iniciativa',v:PCT(pctIni),f:FMT(ini)+' con iniciativa',s:SEM(pctIni)},
     {l:'% Tickets en Tiempo',v:PCT(pctTiempo),f:FMT(ret)+' en riesgo',s:SEM(pctTiempo)},
     tarjetaEfectividad(detReal),
-    {l:'Categorías sin Iniciativa',v:FMT(nSin),f:`oportunidades · ${FMT(volSin)} tickets sin iniciativa`,s:null},
-    {l:'Iniciativas Retrasadas',v:FMT(nVen),f:FMT(ret)+' tickets en riesgo',s:null},
+    {l:'Categorías sin Iniciativa',v:FMT(nSin),f:`oportunidades · ${FMT(volSin)} tickets sin iniciativa`,s:null,k:'sin'},
+    {l:'Iniciativas Retrasadas',v:FMT(nVen),f:FMT(ret)+' tickets en riesgo',s:null,k:'ven'},
   ];
-  document.getElementById('kpis-exp').innerHTML=cards.map(c=>
-    `<div class="kpi ${c.s?('s'+c.s):''}"><div class="lbl"${c.t?` title="${Escape.attr(c.t)}"`:''}>${c.l}</div>
-     <div class="val">${c.v}</div><div class="foot">${c.f}</div></div>`).join('');
+  const sel=seleccionKpi;
+  document.getElementById('kpis-exp').innerHTML=cards.map(c=>{
+    const filtra=!!(c.k && sel);
+    return `<div class="kpi ${c.s?('s'+c.s):''}${filtra?sel.clases(c.k):''}"><div class="lbl"${c.t?` title="${Escape.attr(c.t)}"`:''}>${c.l}</div>
+     <div class="val">${c.v}</div><div class="foot">${c.f}</div>${filtra?sel.boton(c.k, c.l+': '+c.v):''}</div>`;
+  }).join('');
+}
+
+// ---- Tarjetas que abren su panel ----
+// "Categorías sin Iniciativa" e "Iniciativas Retrasadas" cuentan lo mismo
+// que listan los paneles pSin y pVen: un clic abre ese panel (y lo marca,
+// SeleccionKpi), otro clic en la misma quita la marca y el panel se queda,
+// otra tarjeta la reemplaza, y abrir otro panel a mano tambien la quita.
+// Nada mas: no toca los filtros de dueño ni el filtro de graficas del
+// panel, y las cifras no cambian. Las demas tarjetas son volumenes y
+// porcentajes, sin un registro detras.
+const PANEL_KPI={sin:'pSin', ven:'pVen'};
+const seleccionKpi=window.SeleccionKpi
+  ? new window.SeleccionKpi({valida:k=>Object.prototype.hasOwnProperty.call(PANEL_KPI,k)}) : null;
+// Muestra un panel de la tabla de abajo. Si la tarjeta elegida es de otro
+// panel, la quita y repinta las tarjetas.
+function mostrarPanel(id){
+  RAIZ.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active', x.dataset.panel===id));
+  RAIZ.querySelectorAll('.panel').forEach(x=>x.classList.toggle('active', x.id===id));
+  if(seleccionKpi && seleccionKpi.clave && PANEL_KPI[seleccionKpi.clave]!==id){
+    seleccionKpi.limpiar();
+    renderKPIs(aggCats(), currentCats());
+  }
 }
 
 // ---- Volumen - Automatizado ----
@@ -2380,10 +2405,7 @@ function renderChartEstados(cats){
 // Navega a la pestaña "Iniciativas Activas" y la filtra por el estado dado
 // (usa el mismo filtro cruzado de graficas de TAREA 3, campo "estado").
 function irAActivasPorEstado(estado){
-  RAIZ.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  RAIZ.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-  RAIZ.querySelector('.tab[data-panel="pAct"]').classList.add('active');
-  document.getElementById('pAct').classList.add('active');
+  mostrarPanel('pAct');
   filtroGraf.act.estado=estado;
   renderAct(currentCats());
 }
@@ -2791,6 +2813,9 @@ document.getElementById('btnReset').onclick=()=>{
   }
   // Tambien vuelve a "Todos", la vista con la que abre el tablero.
   if(tipoRegistro!=='todos'){ aplicarTipoRegistro('todos'); pintarTipoRegistro(); }
+  // Y quita la tarjeta elegida (PANEL_KPI): el panel abierto se queda, como
+  // siempre; solo se va la marca. renderAll repinta las tarjetas.
+  if(seleccionKpi) seleccionKpi.limpiar();
   renderAll();
 };
 
@@ -2850,10 +2875,18 @@ botonesTipo.forEach(b=>b.onclick=()=>{
 pintarTipoRegistro();
 
 // tabs
-RAIZ.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
-  RAIZ.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  RAIZ.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
-  t.classList.add('active');document.getElementById(t.dataset.panel).classList.add('active');
+RAIZ.querySelectorAll('.tab').forEach(t=>t.onclick=()=>mostrarPanel(t.dataset.panel));
+
+// Tarjetas que abren su panel (ver PANEL_KPI).
+if(seleccionKpi) window.SeleccionKpi.escuchar([document.getElementById('kpis-exp')], 'data-indicador', k=>{
+  seleccionKpi.alternar(k);
+  if(seleccionKpi.clave){
+    mostrarPanel(PANEL_KPI[seleccionKpi.clave]);
+    const pestanas=RAIZ.querySelector('.tabs');
+    if(pestanas) pestanas.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  renderKPIs(aggCats(), currentCats());
+  window.SeleccionKpi.enfocar([document.getElementById('kpis-exp')], 'data-indicador', k);
 });
 
 fillPO(); fillSO(); renderAll();

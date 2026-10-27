@@ -1049,9 +1049,10 @@ pruebas.push(function () {
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
   var T = I.ticketsDe;
-  Check('VT1 ejemplo: 1247 x 12.5% = 155.875 -> 156', 156, T(1247, '12.5'));
-  Check('VT1 redondeo a ticket entero, mitad hacia arriba',
-    [1, 2, 0, 25, 3, 0, 1247, 0, 1],
+  Check('VT1 ejemplo: 1247 x 12.5% = 155.875 -> 155 (siempre hacia abajo)', 155, T(1247, '12.5'));
+  Check('VT1 el caso reportado: 7 x 9.46% = 0.66 -> 0; 7 x 100% = 7', [0, 7], [T(7, '9.46'), T(7, '100')]);
+  Check('VT1 redondeo a ticket entero, hacia abajo (FLOOR)',
+    [0, 1, 0, 24, 2, 0, 1247, 0, 0],
     [T(10, '5'), T(3, '50'), T(1, '49.99'), T(200, '12.25'), T(1000, '0.29'), T(0, '50'), T(1247, '100'), T(1247, '0'), T(1, '50')]);
   Check('VT1 sin calculo con volumetria o % que no valen', [null, null, null, null, null, null, null],
     [T(null, '10'), T(1247, ''), T(1247, '150'), T(1247, '12.345'), T(1247, 'x'), T(12.5, '10'), T(-1, '10')]);
@@ -1067,7 +1068,7 @@ pruebas.push(function () {
   Check('VT2 cargando: la volumetria falta con su motivo', { campo: 'volumetria', mensaje: 'Consultando la volumetría de la categoría…' },
     s.erroresCliente().filter(function (e) { return e.campo === 'volumetria'; })[0]);
   s.fijarVolumen(cat, { estado: 'ok', valor: 1247 });
-  Check('VT3 ok: volumetria y tickets', [1247, 156, 'Volumetría × % ÷ 100, redondeado a ticket entero.'],
+  Check('VT3 ok: volumetria y tickets', [1247, 155, 'Volumetría × % ÷ 100, redondeado hacia abajo a ticket entero.'],
     [s.volumetria(), s.ticketsReducir(), s.motivoTickets()]);
   Check('VT3 viaja como volumetria; tickets no viajan', ['1247', false],
     [s.camposEnvio().volumetria, Object.prototype.hasOwnProperty.call(s.camposEnvio(), 'tickets')]);
@@ -1079,7 +1080,7 @@ pruebas.push(function () {
   s.capturar('pct', '12.5');
   Check('VT4 % sobre la capacidad (10%): sin tickets', null, s.ticketsReducir());
   s.capturar('pct', '10');
-  Check('VT4 % dentro de la capacidad: 1247 x 10% = 124.7 -> 125', 125, s.ticketsReducir());
+  Check('VT4 % dentro de la capacidad: 1247 x 10% = 124.7 -> 124', 124, s.ticketsReducir());
 
   // Cambiar de categoria: lo de la anterior no se presenta como actual.
   s.elegir(1, 'SO y'); s.elegir(2, '/A/Cat 2');
@@ -1135,8 +1136,8 @@ pruebas.push(function () {
     Check('VT12 la volumetria de la categoria, de solo lectura', [true, 'Tickets de la categoría en los últimos 30 días. No se captura.'],
       [/>1,247 tickets \(últimos 30 días\)<\/output>/.test(vol()), p.sel('campo-volumetria-msg').textContent]);
     escribir(p, 'iniCamposImpacto', 'pct', '12.5');
-    Check('VT13 % escrito: tickets calculados al momento', [true, 'Volumetría × % ÷ 100, redondeado a ticket entero.'],
-      [tk() === '156' && !p.sel('campo-tickets').disabled, p.sel('campo-tickets-msg').textContent]);
+    Check('VT13 % escrito: tickets calculados al momento', [true, 'Volumetría × % ÷ 100, redondeado hacia abajo a ticket entero.'],
+      [tk() === '155' && !p.sel('campo-tickets').disabled, p.sel('campo-tickets-msg').textContent]);
     escribir(p, 'iniCamposImpacto', 'pct', '150');
     Check('VT13 % invalido: sin tickets', '', tk());
     escribir(p, 'iniCamposImpacto', 'pct', '12.5');
@@ -1268,7 +1269,8 @@ pruebas.push(function () {
 //     viaja); el que se escribio manda; capacidad, errores y cascada.
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
-  Check('MT1 pctDeTickets: 156 de 1247 = 12.51% (exacto)', { pct: '12.51', exacto: true, tickets: 156 }, I.pctDeTickets(1247, '156'));
+  Check('MT1 pctDeTickets: 156 de 1247 -> 12.52%, el menor que da 156 (12.51% da 155)', [{ pct: '12.52', exacto: true, tickets: 156 }, 155],
+    [I.pctDeTickets(1247, '156'), I.ticketsDe(1247, '12.51')]);
   Check('MT1 pctDeTickets: 8 de 80 = 10%', '10', I.pctDeTickets(80, '8').pct);
   Check('MT1 volumetria grande: 0.01% es mas de un ticket, se dice', [false, 'no exacto'],
     (function (r) { return [r.exacto, r.tickets !== 1 ? 'no exacto' : 'exacto']; })(I.pctDeTickets(50000, '1')));
@@ -1284,9 +1286,9 @@ pruebas.push(function () {
   var c = s.categoria();
   s.fijarVolumen(c, { estado: 'ok', valor: 1247 });
   s.capturar('tickets', '156');
-  Check('MT3 tickets escritos: el % sale de ellos y es lo que viaja (sin tickets en el cuerpo)', ['tickets', '12.51', '12.51', false],
+  Check('MT3 tickets escritos: el % sale de ellos y es lo que viaja (sin tickets en el cuerpo)', ['tickets', '12.52', '12.52', false],
     [s.metaPor, s.valores.pct, s.camposEnvio().pct, Object.prototype.hasOwnProperty.call(s.camposEnvio(), 'tickets')]);
-  Check('MT3 lo escrito se muestra tal cual; el aviso dice el %', ['156', '≈ 12.51% de 1,247.'], [s.ticketsVista(), s.motivoTickets()]);
+  Check('MT3 lo escrito se muestra tal cual; el aviso dice el %', ['156', '≈ 12.52% de 1,247.'], [s.ticketsVista(), s.motivoTickets()]);
   Check('MT3 no falta el %', false, s.faltantes().indexOf('pct') >= 0);
   s.capturar('pct', '20');
   Check('MT4 escribir el % vuelve a mandar el %: tickets calculados', ['pct', '249', undefined],
@@ -1326,14 +1328,14 @@ pruebas.push(function () {
   }).then(function () {
     Check('MT10 con volumetria: la casilla de tickets se habilita', false, p.sel('campo-tickets').disabled);
     escribir(p, 'iniCamposImpacto', 'tickets', '156');
-    Check('MT10 tickets escritos: el % se llena calculado, lo escrito se queda, el aviso lo dice', ['12.51', '156', '≈ 12.51% de 1,247.'],
+    Check('MT10 tickets escritos: el % se llena calculado, lo escrito se queda, el aviso lo dice', ['12.52', '156', '≈ 12.52% de 1,247.'],
       [p.sel('campo-pct').value, P.solicitud.ticketsVista(), p.sel('campo-tickets-msg').textContent]);
     escribir(p, 'iniCamposComunes', 'titulo', 'T'); escribir(p, 'iniCamposComunes', 'analisis', 'D');
     escribir(p, 'iniCamposComunes', 'observaciones', 'O');
     return P.validar();
   }).then(function () {
     var post = llamadas.filter(function (l) { return l[1] === 'POST'; });
-    Check('MT11 el POST lleva el % calculado y no los tickets', [1, '12.51', false],
+    Check('MT11 el POST lleva el % calculado y no los tickets', [1, '12.52', false],
       [post.length, post[0] && post[0][2].get('pct'), post[0] && post[0][2].has('tickets')]);
   });
 });

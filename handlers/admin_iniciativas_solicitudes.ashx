@@ -9,11 +9,18 @@
 //        folio, llave (GUID por borrador: el reintento no duplica), tipo
 //        (fecha | estado | categorias | otros | datos), campo_fecha (f_analisis |
 //        f_solucion | f_cierre) + fecha_nueva (aaaa-mm-dd), estado_nuevo,
-//        subestado_nuevo, pares pct_categoria / pct_valor (ligadas, en %),
+//        subestado_nuevo (solo ADM: con otro rol 422 en subestado_nuevo),
+//        pares pct_categoria / pct_valor (ligadas, en %),
 //        agregar_categoria / agregar_pct (del catalogo, en %), motivo.
 //        tipo datos (sql/25, PersistenciaSolicitudesCambio.SolicitaDatos):
 //        titulo_nuevo / po_nuevo / so_nuevo, la clave PRESENTE = se pide
 //        (vacia = que quede vacio); PO / SO del catalogo se revisan al aplicar.
+//        tipo varios (sql/34, PersistenciaSolicitudesCambio.SolicitaVarios):
+//        UNA solicitud con cualquier combinacion de estado_nuevo, las fechas
+//        por etapa f_analisis_nueva / f_solucion_nueva / f_cierre_nueva (la
+//        clave PRESENTE = se pide; nunca campo_fecha), los pares de
+//        categorias y titulo_nuevo / po_nuevo / so_nuevo. Sin sql/34 = 422.
+//        Aplicar la aplica entera o nada (adm.usp_SolicitudCambio_Aplicar).
 //        -> 200 { enviada: true, id_solicitud, repetida }
 //           422 { errores } formato;  4xx de la base (ErrorSolicitudCambio)
 //           501 { tipo: PersistenciaNoHabilitada } sin sql/22: nada se guarda
@@ -123,6 +130,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
     private static object Enviar(HttpContext context, string usuario, string rol)
     {
         var p = PeticionSolicitudCambio.DesdeFormulario(context.Request.Form);
+        p.ExigirSubestadoDeAdm(rol);
         if (!p.Valida)
         {
             context.Response.StatusCode = 422;

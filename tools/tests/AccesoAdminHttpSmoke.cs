@@ -30,6 +30,12 @@
 //     revisa antes de mirar el metodo, y el fuente se revisa para que
 //     ExigirAdm vaya antes de cualquier otra cosa. Ninguna prueba hace POST
 //     de un flujo real: no se ejecuta PowerShell ni se manda correo.
+//   - M) solo ADM modifica y aprueba: MOD, ADM + MOD y VIEWER reciben 403 en
+//     crear, modificar, aplicar / rechazar una solicitud de cambio, aprobar /
+//     rechazar una Nueva solicitud y el alta de categoria (handler directo,
+//     sin la pagina); un rol falsificado no cuenta; ADM pasa la puerta.
+//   - PS) MOD (consulta de PO / SO) sigue leyendo; el Subestado sale del
+//     registro solo con ADM (ExperienciaQueries.OcultarSubestado).
 //
 // Compilar y correr desde la raiz del repo (los .ashx se compilan quitando
 // la linea 1, como en csc-desde-git-bash):
@@ -122,6 +128,23 @@ public static class AccesoAdminHttpSmoke
         foreach (var c in campos) form.Add(c[0], c[1]);
         typeof(HttpRequest).GetField("_form", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, form);
         metodo = req.HttpMethod;
+        h.ProcessRequest(ctx);
+        estado = ctx.Response.StatusCode;
+        HttpContext.Current = null;
+        return sw.ToString();
+    }
+
+    // CorrerPost con query string (?accion=... de solicitudes y revision).
+    static string CorrerPostQ(IHttpHandler h, string archivo, string query, string cuenta, string[][] campos, out int estado)
+    {
+        var sw = new StringWriter();
+        var ctx = Contexto(archivo, query, cuenta, sw);
+        var req = ctx.Request;
+        typeof(HttpRequest).GetField("_httpMethod", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, "POST");
+        var tipoForm = typeof(HttpRequest).Assembly.GetType("System.Web.HttpValueCollection");
+        var form = (NameValueCollection)Activator.CreateInstance(tipoForm, true);
+        foreach (var c in campos) form.Add(c[0], c[1]);
+        typeof(HttpRequest).GetField("_form", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, form);
         h.ProcessRequest(ctx);
         estado = ctx.Response.StatusCode;
         HttpContext.Current = null;
@@ -748,6 +771,124 @@ public static class AccesoAdminHttpSmoke
         Check("F8 la real va primero; la de desarrollo solo sin real", true,
               firmaFn.IndexOf("if (Firma(real)) return real;") > 0 &&
               firmaFn.IndexOf("if (Firma(real)) return real;") < firmaFn.IndexOf("Firma(desarrollo)"));
+
+        // ---- M) Solo ADM modifica y aprueba (2026-10-26) ----------------------
+        // MOD (y ADM + MOD, que es MOD) es el rol de consulta de PO / SO: entra
+        // y lee, pero TODA escritura sobre una iniciativa y toda aprobacion
+        // corta en ExigirAdm con 403 RolInsuficiente, antes de leer el cuerpo
+        // o tocar la base, aunque se llame al handler directo (sin la pagina).
+        // Pedir (enviar una solicitud de cambio, Nueva solicitud, acusar)
+        // sigue abierto a MOD: no modifica la iniciativa.
+        var escrituras = new[]
+        {
+            new { n = "gestion crear", h = (IHttpHandler)new AdminIniciativasGestion(), a = "admin_iniciativas_gestion.ashx", q = (string)null,
+                  f = new[] { new[] { "accion", "crear" }, new[] { "tipo", "PRB" } } },
+            new { n = "gestion modificar", h = (IHttpHandler)new AdminIniciativasGestion(), a = "admin_iniciativas_gestion.ashx", q = (string)null,
+                  f = new[] { new[] { "accion", "modificar" }, new[] { "folio", "PRB 2026-000001" }, new[] { "titulo", "x" } } },
+            new { n = "solicitud de cambio aplicar", h = (IHttpHandler)new AdminIniciativasSolicitudes(), a = "admin_iniciativas_solicitudes.ashx", q = "accion=aplicar",
+                  f = new[] { new[] { "id", "5" }, new[] { "comentario", "ok" } } },
+            new { n = "solicitud de cambio rechazar", h = (IHttpHandler)new AdminIniciativasSolicitudes(), a = "admin_iniciativas_solicitudes.ashx", q = "accion=rechazar",
+                  f = new[] { new[] { "id", "5" }, new[] { "comentario", "no" } } },
+            new { n = "Nueva solicitud aprobar", h = (IHttpHandler)new AdminIniciativasSolicitudesNuevasRevision(), a = "admin_iniciativas_solicitudes_nuevas_revision.ashx", q = "accion=aprobar",
+                  f = new[] { new[] { "numero", "1" } } },
+            new { n = "Nueva solicitud rechazar", h = (IHttpHandler)new AdminIniciativasSolicitudesNuevasRevision(), a = "admin_iniciativas_solicitudes_nuevas_revision.ashx", q = "accion=rechazar",
+                  f = new[] { new[] { "numero", "1" }, new[] { "comentario", "no" } } },
+            new { n = "alta de categoria", h = (IHttpHandler)new AdminCategoriasAlta(), a = "admin_categorias_alta.ashx", q = (string)null,
+                  f = new[] { new[] { "categoria", "/A/Nueva" } } },
+        };
+        foreach (var rol in new[] { new[] { "MOD" }, new[] { "ADM", "MOD" } })
+        {
+            AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, rol);
+            foreach (var w in escrituras)
+            {
+                cuerpo = CorrerPostQ(w.h, w.a, w.q, YO, w.f, out estado);
+                Check("M1 " + string.Join("+", rol) + " no puede " + w.n + ": 403 RolInsuficiente", "403|True",
+                      estado + "|" + cuerpo.Contains("RolInsuficiente"));
+            }
+        }
+        // Un "rol" en el formulario o en la query no da nada: el rol es el de
+        // dbo.UsuariosAdmin para la identidad Windows.
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
+        cuerpo = CorrerPostQ(new AdminIniciativasSolicitudes(), "admin_iniciativas_solicitudes.ashx", "accion=aplicar&rol=ADM", YO,
+                             new[] { new[] { "id", "5" }, new[] { "rol", "ADM" }, new[] { "acceso", "ADM" } }, out estado);
+        Check("M2 MOD con rol=ADM falsificado: sigue 403 RolInsuficiente", "403|True", estado + "|" + cuerpo.Contains("RolInsuficiente"));
+        // VIEWER (sin fila) y anonimo: ni siquiera entran.
+        AccesoAdmin.FuenteRoles = new FuenteFalsa();
+        foreach (var w in escrituras)
+        {
+            cuerpo = CorrerPostQ(w.h, w.a, w.q, YO, w.f, out estado);
+            Check("M3 VIEWER no puede " + w.n + ": 403 AccesoDenegado", "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
+        }
+        // ADM pasa la puerta (corta despues, en el formato, sin SQL).
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "ADM");
+        cuerpo = CorrerPostQ(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", null, YO,
+                             new[] { new[] { "accion", "crear" } }, out estado);
+        Check("M4 ADM crear: pasa rol y firma (422 de formato, ni RolInsuficiente ni SinUsuario)", "422|False|False",
+              estado + "|" + cuerpo.Contains("RolInsuficiente") + "|" + cuerpo.Contains("SinUsuario"));
+        cuerpo = CorrerPostQ(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", null, YO,
+                             new[] { new[] { "accion", "modificar" }, new[] { "folio", "" } }, out estado);
+        Check("M4 ADM modificar: pasa rol y firma (422 de formato)", "422|False", estado + "|" + cuerpo.Contains("RolInsuficiente"));
+        AccesoAdmin.FuenteRoles = fuente;
+        // Fuente: ninguna autorizacion de escritura acepta MOD. Lo de solo ADM
+        // compara con RolAdmin.Adm (ExigirAdm); EsElevado (ADM o MOD) solo
+        // decide la ENTRADA (PuedeEntrar), nunca un permiso de escritura.
+        var accF = File.ReadAllText(Path.Combine("App_Code", "AccesoAdmin.cs")).Replace("\r\n", "\n");
+        var exigirAdm = accF.Substring(accF.IndexOf("public static bool ExigirAdm("));
+        exigirAdm = exigirAdm.Substring(0, exigirAdm.IndexOf("\n    }") + 6);
+        Check("M5 ExigirAdm: solo Rol == ADM, sin MOD ni EsElevado", "True|False|False",
+              exigirAdm.Contains("Rol(context) == RolAdmin.Adm") + "|" + exigirAdm.Contains("RolAdmin.Mod") + "|" + exigirAdm.Contains("EsElevado"));
+        foreach (var arch in new[] { "admin_iniciativas_gestion.ashx", "admin_iniciativas_solicitudes_nuevas_revision.ashx", "admin_categorias_alta.ashx",
+                                     "admin_iniciativas_recientes.ashx", "admin_iniciativas_solicitudes_nuevas.ashx" })
+        {
+            var src = File.ReadAllText(Path.Combine("handlers", arch));
+            Check("M6 " + arch + ": ExigirAdm antes de todo", true,
+                  src.IndexOf("AccesoAdmin.ExigirAdm(") > 0 && src.IndexOf("AccesoAdmin.ExigirAdm(") < src.IndexOf("DashboardHandler.Responder(") );
+        }
+        var solF = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx")).Replace("\r\n", "\n");
+        Check("M6 solicitudes: todo lo que no es enviar exige ADM, antes de leer el cuerpo", true,
+              solF.Contains("if (accion != \"enviar\"\n            && !AccesoAdmin.ExigirAdm(") &&
+              solF.IndexOf("AccesoAdmin.ExigirAdm(") < solF.IndexOf("DashboardHandler.Responder("));
+
+        // ---- PS) Visibilidad de PO / SO (MOD) y Subestado solo ADM -------------
+        // MOD sigue leyendo el registro (pasa Exigir; sin base aqui corta en el
+        // SQL con 500, no en 403). La visibilidad no depende de poder escribir.
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
+        cuerpo = Correr(new AdminIniciativasRegistro(), "admin_iniciativas_registro.ashx", null, YO, out estado);
+        Check("PS1 MOD lee el registro: no es 403 (pasa al SQL)", "False|False",
+              (estado == 403) + "|" + cuerpo.Contains("AccesoDenegado"));
+        cuerpo = Correr(new AdminIniciativasAcuse(), "admin_iniciativas_acuse.ashx", "accion=mio", YO, out estado);
+        Check("PS1 MOD (PO / SO) consulta su acuse: no es 403", false, estado == 403);
+        AccesoAdmin.FuenteRoles = fuente;
+        // OcultarSubestado: quita el subestado de cada iniciativa y la lista
+        // subestados_problem; lo demas queda igual.
+        var reg = new Dictionary<string, object>
+        {
+            { "iniciativas", new List<object> {
+                new Dictionary<string, object> { { "folio", "PRB 1" }, { "estado", "En Soluci\u00f3n" }, { "subestado", "Solucionado" } },
+                new Dictionary<string, object> { { "folio", "PRB 2" }, { "estado", "Cerrado" }, { "subestado", null } } } },
+            { "subestados_problem", new List<string> { "Solucionado" } },
+            { "estados_problem", new List<string> { "Cerrado" } },
+        };
+        ExperienciaQueries.OcultarSubestado(reg);
+        var ini0 = (Dictionary<string, object>)((List<object>)reg["iniciativas"])[0];
+        var ini1 = (Dictionary<string, object>)((List<object>)reg["iniciativas"])[1];
+        Check("PS2 sin subestado en cada iniciativa ni subestados_problem", "False|False|False",
+              ini0.ContainsKey("subestado") + "|" + ini1.ContainsKey("subestado") + "|" + reg.ContainsKey("subestados_problem"));
+        Check("PS2 lo demas intacto (folio, estado, estados_problem)", "PRB 1|En Soluci\u00f3n|True",
+              ini0["folio"] + "|" + ini0["estado"] + "|" + reg.ContainsKey("estados_problem"));
+        ExperienciaQueries.OcultarSubestado(null);
+        ExperienciaQueries.OcultarSubestado(new Dictionary<string, object>());
+        Check("PS2 null o sin iniciativas: no falla", true, true);
+        var regF = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_registro.ashx")).Replace("\r\n", "\n");
+        Check("PS3 registro: oculta el Subestado si el rol no es ADM, antes de serializar", true,
+              regF.Contains("if (AccesoAdmin.Rol(context) != RolAdmin.Adm) ExperienciaQueries.OcultarSubestado(registro);") &&
+              regF.IndexOf("ExperienciaQueries.OcultarSubestado(registro)") > regF.IndexOf("ExperienciaQueries.RegistroIniciativas()") &&
+              regF.IndexOf("ExperienciaQueries.OcultarSubestado(registro)") < regF.IndexOf("serializador.Serialize(registro)"));
+        var regQ = File.ReadAllText(Path.Combine("App_Code", "ExperienciaRegistro.cs"));
+        var cuerpoReg = regQ.Substring(regQ.IndexOf("public static Dictionary<string, object> RegistroIniciativas()"));
+        cuerpoReg = cuerpoReg.Substring(0, cuerpoReg.IndexOf("public static void OcultarSubestado("));
+        Check("PS4 RegistroIniciativas sigue trayendo el Subestado (los servicios internos lo usan)", "True|False",
+              cuerpoReg.Contains("i[\"subestado\"] =") + "|" + cuerpoReg.Contains("OcultarSubestado"));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));
         return fallos == 0 ? 0 : 1;
