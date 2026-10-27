@@ -102,8 +102,9 @@ public class Qare : IHttpHandler
 
        El sello es el fin del ultimo ETL de tickets en dbo.EtlLog, el mismo que
        publican SLA y QA: vw_CorreoQARECierre_Base vive sobre las tablas que
-       carga ese ETL en esta misma base. Esta guardado en UTC y se declara
-       como tal; lo pasa a UTC-06 DashboardDataInfo y nadie mas. El periodo
+       carga ese ETL en esta misma base. Esta guardado en la hora local del SQL
+       Server (UTC-06), como en SLA y QA: va como YaLocal y se muestra tal
+       cual (como Utc se restaban otras seis horas). El periodo
        son las dos fechas de negocio que se mandaron a los procedimientos y
        no cambian de zona. */
     private static DashboardDataInfo DatosInfo(QareResultado r)
@@ -111,7 +112,7 @@ public class Qare : IHttpHandler
         return DashboardDataInfo.Periodo(
             "QARE",
             DashboardDataInfo.LeerUltimoEtlTickets(),
-            ZonaSello.Utc,
+            ZonaSello.YaLocal,
             Dia(r.FechaInicio),
             Dia(r.FechaFin),
             "dbo.EtlLog (Proactivanet tickets) sobre dbo.vw_CorreoQARECierre_Base");
