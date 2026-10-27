@@ -971,6 +971,21 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-cat-agregar .dd .dd-opcion span { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
 /* Deshabilitado (guardando, sin catalogo): el boton tampoco abre. */
 .ini-cat-agregar .dd:has(> select:disabled) .dd-boton { opacity: .55; pointer-events: none; }
+/* El mismo desplegable en los demas selectores de Iniciativas (Nueva
+   solicitud, PO / SO de Crear, Estado / Subestado / PO / SO de Modificar,
+   Seguimiento): solo su medida y las marcas de estado de cada formulario;
+   el aspecto es el de assets/css/desplegable.css. */
+.ini-campo .dd, .ini-seg-cat .dd, .ini-detalle .ini-datos .dd { display: flex; width: 100%; }
+#admPoSelector, #admSoSelector { display: flex; min-width: 0; }
+.ini-seg-cat .dd, .ini-detalle .ini-datos .dd { --dd-alto: 32px; }
+.ini-campo .dd .dd-valor, .ini-seg-cat .dd .dd-valor, .ini-detalle .ini-datos .dd .dd-valor { line-height: 1.3; }
+.ini-campo .dd .dd-opcion span, .ini-seg-cat .dd .dd-opcion span, .ini-detalle .ini-datos .dd .dd-opcion span {
+  white-space: normal; overflow-wrap: anywhere; line-height: 1.35;
+}
+.ini-campo .dd:has(> select[aria-invalid="true"]) .dd-boton,
+.ini-detalle .dd:has(> select[aria-invalid="true"]) .dd-boton { border-color: var(--rojo); }
+/* Modificar: el campo distinto de lo guardado se marca como los demas. */
+.ini-detalle .dd:has(> select.ini-ed-cambiado) .dd-boton { border-color: var(--accent); background-color: var(--accent-soft); }
 .ini-cats-tabla td { vertical-align: middle; }
 /* Fecha de analisis por categoria en "Modificar": la del problema (ligadas)
    o la del borrador (nuevas). */

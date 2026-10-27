@@ -441,7 +441,7 @@ pruebas.push(function () {
     Check('E6b titulo (encabezado), descripcion y observaciones se VEN con su valor y se editan con un clic; Estado, fechas y categorias son controles',
       [true, true, true, true, true, true, false],
       [/<div class="ini-ed-mostrar ini-det-nombre" id="regEdVer-titulo"[^>]*data-editar="titulo"[^>]*>T PRB 2026-000001<\/div>/.test(p.sel('regDetNombre').innerHTML),
-       /<select id="regEd-estado" data-edicion="estado"/.test(p.sel('regDetIdent').innerHTML),
+       /<select id="regEd-estado" class="ini-dd-categoria ini-ed-campo[^"]*" data-edicion="estado"/.test(p.sel('regDetIdent').innerHTML),
        /type="date" id="regEd-f_analisis" data-edicion="f_analisis"[^>]*value="2026-12-01"/.test(p.sel('regDetEtapas').innerHTML),
        /data-editar="descripcion"[^>]*>Desc PRB 2026-000001<\/div>/.test(p.sel('regDetDesc').innerHTML),
        /data-editar="observaciones"[^>]*>Obs PRB 2026-000001<\/div>/.test(p.sel('regDetDesc').innerHTML),
@@ -1525,8 +1525,14 @@ pruebas.push(function () {
   var S = A.Selector, veinte = [], veintiuna = [];
   for (var n = 1; n <= 21; n++) { if (n <= 20) veinte.push('/R/' + n); veintiuna.push('/R/' + n); }
   Check('SL1 hasta 20 opciones: select', [true, false], [/^<select id="x"/.test(S.html('x', veinte, '')), /datalist/.test(S.html('x', veinte, ''))]);
-  Check('SL2 21 opciones: caja con busqueda (input list + datalist)', [true, true],
-    [/^<input type="text" id="x" list="x-lista"/.test(S.html('x', veintiuna, '')), /<datalist id="x-lista">/.test(S.html('x', veintiuna, ''))]);
+  Check('SL2 21 opciones: el mismo <select> del desplegable de SLA, sin caja de texto ni datalist', [true, false, 22],
+    [/^<select id="x" class="ini-dd-categoria">/.test(S.html('x', veintiuna, '')), /datalist|<input/.test(S.html('x', veintiuna, '')),
+     (S.html('x', veintiuna, '').match(/<option /g) || []).length]);
+  Check('SL2b un class de extra se suma a la marca (un solo atributo class)', [true, 1],
+    [/^<select id="x" class="ini-dd-categoria ini-ed-campo mia" data-edicion="po">/.test(S.html('x', veinte, '', ' data-edicion="po" class="ini-ed-campo mia"')),
+     (S.html('x', veinte, '', ' class="a"').match(/class=/g) || []).length]);
+  Check('SL2c el valor actual queda elegido; uno que no es opcion no elige nada', [true, false],
+    [/<option value="\/R\/21" selected>/.test(S.html('x', veintiuna, '/R/21')), / selected/.test(S.html('x', veintiuna, 'escrito a mano'))]);
   Check('SL3 resolver: solo una opcion real, sin mayusculas ni espacios de mas', ['/R/3', '', ''],
     [S.resolver('  /r/3 ', veintiuna), S.resolver('/R/', veintiuna), S.resolver('', veintiuna)]);
   Check('SL4 escapa valores', true, /value="\/A&quot;B"/.test(S.html('x', ['/A"B'], '')));
@@ -1906,7 +1912,7 @@ pruebas.push(function () {
       Check('SG2 se conservan semaforo, tabla de compromisos y contadores', [true, true, true],
         [/ini-det-sem/.test(seg), /<th scope="col" class="num">Cambios<\/th>/.test(seg), /Análisis <span class="ini-sub">estado actual<\/span>/.test(seg)]);
       Check('SG3 selector con las categorias reales; la primera elegida', [true, true, true],
-        [/<select id="regSegCategoria">/.test(seg), /<option value="\/A\/Cat 1" selected>/.test(seg), /<option value="\/A\/Cat 2">/.test(seg)]);
+        [/<select id="regSegCategoria" class="ini-dd-categoria">/.test(seg), /<option value="\/A\/Cat 1" selected>/.test(seg), /<option value="\/A\/Cat 2">/.test(seg)]);
       Check('SG4 bloque de la primera: su % y la fecha de analisis de la iniciativa (hereda)', [true, true, true],
         [/% disminución<\/dt><dd>50%/.test(seg), /De la iniciativa/.test(seg), /Hereda las fechas de la iniciativa/.test(seg)]);
       var cuerpo = p.sel('regDetCuerpo').innerHTML;
@@ -1924,7 +1930,7 @@ pruebas.push(function () {
       var sin = p.sel('regDetCuerpo').innerHTML;
       Check('SG8 sin categorias ni fecha de creacion: lo dice, sin inventar', [true, true],
         [/Sin categorías: las fechas son las del problema/.test(sin), /Fecha de creación<\/dt><dd>—/.test(sin)]);
-      // Umbral: 20 categorias = <select>; 21 = caja con busqueda.
+      // Sin umbral: 20 o 21 categorias, siempre el <select> del desplegable.
       function con(n) {
         var d = JSON.parse(JSON.stringify(REGISTRO)), cats = [];
         for (var k = 1; k <= n; k++) cats.push(Cat('/R/' + k, 0.01));
@@ -1936,13 +1942,16 @@ pruebas.push(function () {
       }
       return con(20).then(function (h20) {
         return con(21).then(function (h21) {
-          Check('SG9 umbral del selector: 20 select, 21 caja con busqueda', [true, false, true, true],
-            [/<select id="regSegCategoria">/.test(h20), /list="regSegCategoria-lista"/.test(h20),
-             /<input type="text" id="regSegCategoria" list="regSegCategoria-lista"/.test(h21), /<datalist id="regSegCategoria-lista">/.test(h21)]);
+          Check('SG9 sin umbral: 20 y 21 categorias son el <select> del desplegable, nunca <datalist>', [true, false, true, false],
+            [/<select id="regSegCategoria" class="ini-dd-categoria">/.test(h20), /datalist|list="regSegCategoria-lista"/.test(h20),
+             /<select id="regSegCategoria" class="ini-dd-categoria">/.test(h21), /datalist|list="regSegCategoria-lista"/.test(h21)]);
           var t = p.sel('regSegCategoria');
-          t.value = '/r/21';
-          p.sel('regDetCuerpo').disparar('input', { target: t });
-          Check('SG10 escribir en la caja (sin mayusculas) elige la real', '/R/21', reg.segCategoria);
+          t.value = '/R/21';
+          p.sel('regDetCuerpo').disparar('change', { target: t });
+          Check('SG10 elegir en el desplegable (change del <select>) fija la real', '/R/21', reg.segCategoria);
+          t.value = '/R/no existe';
+          p.sel('regDetCuerpo').disparar('change', { target: t });
+          Check('SG10b un valor que no es opcion no cambia la categoria', '/R/21', reg.segCategoria);
         });
       });
     });

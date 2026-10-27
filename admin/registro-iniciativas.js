@@ -390,8 +390,9 @@ window.RegistroIniciativas = (function () {
       });
   }
 
-  // El selector compartido (IniciativaAdmin.Selector): <select> con 20
-  // opciones o menos, caja con busqueda con mas. Sin ese modulo, <select>.
+  // El selector compartido (IniciativaAdmin.Selector): un <select> real que
+  // montarSelectores viste con el desplegable de SLA. Sin ese modulo,
+  // <select> nativo.
   function selectorHtml(id, opciones, valor, extra) {
     var A = window.IniciativaAdmin;
     if (A && A.Selector) return A.Selector.html(id, opciones, valor, extra);
@@ -3115,6 +3116,7 @@ window.RegistroIniciativas = (function () {
     pintarCategoriasCambio() {
       var caja = this.$('regCambioGrupoPct');
       if (caja && this.cambio) caja.innerHTML = this.htmlCategoriasCambio();
+      this.montarSelectores();
     }
 
     htmlCategoriasCambio() {
@@ -3226,9 +3228,21 @@ window.RegistroIniciativas = (function () {
 
     // "Agregar categoria" de Modificar con el desplegable del filtro Grupos
     // de SLA (IniciativaAdmin.Selector.montar). Sin el modulo, <select> nativo.
-    montarSelectorCategorias() {
-      var A = window.IniciativaAdmin, caja = this.$('regEdCats');
-      if (A && A.Selector && A.Selector.montar && caja) A.Selector.montar(caja);
+    montarSelectorCategorias() { this.montarSelectores(); }
+
+    // Viste con el desplegable de SLA los selectores de Selector.html /
+    // Selector.desplegable del detalle: Estado / Subestado / PO / SO de
+    // Modificar, sus categorias, la categoria de Seguimiento y categoria /
+    // Estado / PO / SO de Solicitar cambios. Solo esas cajas: "Que cambiar"
+    // y la etapa de fecha siguen nativos. Idempotente (los ya montados se
+    // ignoran); sin assets/js/desplegable.js queda el <select>.
+    montarSelectores() {
+      var A = window.IniciativaAdmin, self = this;
+      if (!A || !A.Selector || !A.Selector.montar) return;
+      ['regDetIdent', 'regEdCats', 'regSegCat', 'regCambioGrupoEstado', 'regCambioGrupoPct', 'regCambioGrupoDatos'].forEach(function (id) {
+        var caja = self.$(id);
+        if (caja) A.Selector.montar(caja);
+      });
     }
 
     // Pide la volumetria (solo lectura) y repinta las categorias al llegar,
@@ -3711,6 +3725,10 @@ window.RegistroIniciativas = (function () {
       });
       this.pintarGruposCambio();
       this.pintarCategoriasCambio();
+      // Lo puesto por propiedad (Estado, PO / SO) no avisa: el desplegable
+      // vuelve a leer su <select>.
+      var A = window.IniciativaAdmin;
+      if (A && A.Selector && A.Selector.repintar) A.Selector.repintar();
       var boton = this.$('regCambioAgregar');
       if (boton) boton.textContent = editando ? 'Actualizar cambio' : 'Agregar cambio a la solicitud';
       var cancelar = this.$('regCambioEdCancelar');
@@ -4037,12 +4055,9 @@ window.RegistroIniciativas = (function () {
         }).join('') + '</div>';
     }
 
-    // Viste PO / SO con el desplegable del tablero. Idempotente (los ya
-    // montados se ignoran); sin assets/js/desplegable.js queda el <select>.
-    montarDatosCambio() {
-      var A = window.IniciativaAdmin, caja = this.$('regCambioGrupoDatos');
-      if (A && A.Selector && A.Selector.montar && caja) A.Selector.montar(caja);
-    }
+    // Viste PO / SO con el desplegable del tablero (y el resto de
+    // Solicitar cambios: montarSelectores).
+    montarDatosCambio() { this.montarSelectores(); }
 
     htmlHistorial(i) {
       // La linea base ('B') no es un movimiento: no se pinta. Se rotula antes
@@ -4287,7 +4302,7 @@ window.RegistroIniciativas = (function () {
       var rutasCat = i.categorias.map(function (c) { return c.categoria; });
       if (rutasCat.indexOf(this.segCategoria) < 0) this.segCategoria = rutasCat[0] || '';
       var segCat = rutasCat.length
-        ? '<div class="ini-seg-cat"><label for="regSegCategoria">Ver por categoría</label>' +
+        ? '<div class="ini-seg-cat" id="regSegCat"><label for="regSegCategoria">Ver por categoría</label>' +
             selectorHtml('regSegCategoria', rutasCat, this.segCategoria) +
             '<div id="regSegCatInfo" aria-live="polite">' + this.htmlSeguimientoCategoria(i, this.segCategoria) + '</div></div>'
         : '<p class="ini-nota">Sin categorías: las fechas son las del problema.</p>';

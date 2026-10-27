@@ -45,8 +45,10 @@
   --dd-hundido: inset 0 1px 2px rgba(25, 25, 25, .05);
 }
 
-/* El original se esconde sin salir del DOM ni del formulario. */
-.dd > select {
+/* El original se esconde sin salir del DOM ni del formulario. Con el
+   atributo de montado en el selector: le gana a las reglas de `select` de
+   cada pagina (p. ej. `.ini-campo select`), que lo volverian a mostrar. */
+.dd > select[data-dd-montado] {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); border: 0;
 }
@@ -80,6 +82,12 @@
   border-color: var(--dd-acento);
   background-color: var(--dd-fondo-2);
   box-shadow: var(--dd-aro), var(--dd-hundido);
+}
+/* Deshabilitado (el <select> lo esta): se ve apagado y no reacciona. */
+.dd .dd-boton:disabled,
+.dd .dd-boton:disabled:hover {
+  opacity: .55; cursor: not-allowed;
+  background-color: var(--dd-fondo); border-color: var(--dd-linea);
 }
 /* Abierto, la flecha apunta arriba. */
 .dd.abierto .dd-boton { background-image: none; }

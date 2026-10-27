@@ -1056,6 +1056,7 @@ window.Iniciativas = (function () {
       this.cablearAcciones();
       this.mostrarVista(this.vista);
       this.cablearSelects();
+      this.montarDesplegables();
       this.cablearCampos();
       this.cablearEnvio();
       this.globo = new GloboAyuda(this.$('panel-nueva'), '.ayuda-destino', function (d) {
@@ -1153,6 +1154,25 @@ window.Iniciativas = (function () {
     }
 
     // ---- selects ----
+    // Tipo, PO, SO y Categoria con el desplegable del filtro Tecnicos de
+    // SLA (assets/js/desplegable.js): el <select> sigue siendo la fuente de
+    // la verdad y avisa con su `change`, asi que la cascada no cambia. Las
+    // opciones que llegan con innerHTML las rehace el propio desplegable;
+    // value / disabled por propiedad, repintarDesplegables. Una sola vez:
+    // los selects son del HTML fijo. Sin el modulo quedan nativos.
+    montarDesplegables() {
+      var D = window.Desplegable, self = this;
+      if (!D || !D.montar) return;
+      [{ sel: 'selTipo' }].concat(SELECTS).forEach(function (ids) {
+        var sel = self.$(ids.sel);
+        if (sel && sel.parentNode) D.montar(sel.parentNode);
+      });
+    }
+
+    repintarDesplegables() {
+      if (window.Desplegable && window.Desplegable.repintar) window.Desplegable.repintar();
+    }
+
     cablearSelects() {
       var self = this;
       this.$('selTipo').addEventListener('change', function (e) {
@@ -1244,6 +1264,7 @@ window.Iniciativas = (function () {
       est.niveles.forEach(function (e, i) {
         self.pintarSelect(self.$(SELECTS[i].sel), self.$(SELECTS[i].mot), e);
       });
+      this.repintarDesplegables();
       this.$('outDirector').textContent = est.director.valor || '—';
       this.$('motDirector').textContent = est.director.motivo;
       this.mostrarCampos(est.camposVisibles);
@@ -1317,6 +1338,7 @@ window.Iniciativas = (function () {
         sel.disabled = true;
         self.$(ids.mot).textContent = motivo;
       });
+      this.repintarDesplegables();
       this.$('outDirector').textContent = '—';
       this.$('motDirector').textContent = '';
       this.mostrarCampos(false);
