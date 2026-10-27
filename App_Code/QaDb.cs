@@ -316,6 +316,15 @@ public static class QaDb
     //   dos unicos valores viajan como SqlParameter de tipo DATE, y qa.ashx
     //   solo los acepta con la forma aaaa-mm-dd (QaParams.FechaOpcional).
     //   Es de solo lectura: dos SELECT, sin INSERT/UPDATE/DELETE/MERGE ni DDL.
+    //
+    // FILTROS (Servicio / Grupos / Lideres)
+    //   Las marcas /*filtro-join*/ y /*filtro-where*/ las llena QaFiltroOrg:
+    //   un LEFT JOIN a dbo.CatLiderGrupo, el corte C1 y un IN con un
+    //   SqlParameter por valor. Sin filtros se borran. Las columnas llevan el
+    //   alias b porque CatLiderGrupo tambien tiene Grupo.
+    private const string MarcaJoin = "/*filtro-join*/";
+    private const string MarcaWhere = "/*filtro-where*/";
+
     private const string SqlKpis = @"
 SET NOCOUNT ON;
 
@@ -335,10 +344,10 @@ SELECT
                                AND b.FechaFirmaSolucion <  @AyerFin THEN 1 END),
     @IncSemAnt = COUNT_BIG(CASE WHEN b.FechaFirmaSolucion >= @SemAntIni
                                  AND b.FechaFirmaSolucion <  @SemAntFin THEN 1 END)
-FROM dbo.vw_CorreoQA_Base AS b
+FROM dbo.vw_CorreoQA_Base AS b/*filtro-join*/
 WHERE b.Validacion = N'Incorrecto'
   AND (   (b.FechaFirmaSolucion >= @AyerIni   AND b.FechaFirmaSolucion < @AyerFin)
-       OR (b.FechaFirmaSolucion >= @SemAntIni AND b.FechaFirmaSolucion < @SemAntFin));
+       OR (b.FechaFirmaSolucion >= @SemAntIni AND b.FechaFirmaSolucion < @SemAntFin))/*filtro-where*/;
 
 SELECT
     FechaInicio = @FechaInicio,
@@ -346,16 +355,16 @@ SELECT
     FechaAyer = @Ayer,
     FechaSemanaAnterior = @SemanaAnt,
     TicketsTotales = COUNT_BIG(*),
-    TicketsIncorrectos = SUM(CASE WHEN Validacion = N'Incorrecto' THEN 1 ELSE 0 END),
+    TicketsIncorrectos = SUM(CASE WHEN b.Validacion = N'Incorrecto' THEN 1 ELSE 0 END),
     PorcentajeIncorrectos = CAST(
-        100.0 * SUM(CASE WHEN Validacion = N'Incorrecto' THEN 1 ELSE 0 END)
+        100.0 * SUM(CASE WHEN b.Validacion = N'Incorrecto' THEN 1 ELSE 0 END)
         / NULLIF(COUNT_BIG(*), 0)
         AS DECIMAL(6,2)),
     TicketsIncorrectosAyer = ISNULL(@IncAyer, CONVERT(BIGINT, 0)),
     TicketsIncorrectosSemanaAnterior = ISNULL(@IncSemAnt, CONVERT(BIGINT, 0))
-FROM dbo.vw_CorreoQA_Base
-WHERE FechaRegistroDia >= @FechaInicio
-  AND FechaRegistroDia <= @FechaFin;
+FROM dbo.vw_CorreoQA_Base AS b/*filtro-join*/
+WHERE b.FechaRegistroDia >= @FechaInicio
+  AND b.FechaRegistroDia <= @FechaFin/*filtro-where*/;
 ";
 
     // La fila de KPIs con las MISMAS columnas que devuelve
@@ -365,11 +374,25 @@ WHERE FechaRegistroDia >= @FechaInicio
     // tenga un solo ticket.
     public static Dictionary<string, object> KpisUnaPasada(DateTime fechaInicio, DateTime fechaFin)
     {
+        return KpisUnaPasada(fechaInicio, fechaFin, QaFiltroOrg.Ninguno);
+    }
+
+    // Con los filtros Servicio / Grupos / Lideres (App_Code/QaFiltroOrg.cs) en
+    // las DOS lecturas de la vista: la de la ventana y la de ayer / semana
+    // anterior. Sin filtros las dos marcas se borran y la consulta es la de
+    // siempre.
+    public static Dictionary<string, object> KpisUnaPasada(DateTime fechaInicio, DateTime fechaFin,
+                                                           QaFiltroOrg filtro)
+    {
         using (var cn = new SqlConnection(CadenaConexion()))
-        using (var cmd = new SqlCommand(SqlKpis, cn))
+        using (var cmd = new SqlCommand())
         {
+            cmd.Connection = cn;
             cmd.CommandType = CommandType.Text;
             cmd.CommandTimeout = TimeoutComandoSegundos;
+            cmd.CommandText = SqlKpis
+                .Replace(MarcaJoin, filtro.FragmentoJoin())
+                .Replace(MarcaWhere, filtro.FragmentoWhere(cmd));
 
             // DATE, no NVARCHAR: sin conversion implicita en el predicado de
             // FechaRegistroDia, que tambien es DATE.
@@ -384,6 +407,32 @@ WHERE FechaRegistroDia >= @FechaInicio
                 return reader.Read() ? Fila(reader) : null;
             }
         }
+    }
+
+    // Una consulta de texto CONSTANTE de solo lectura (hoy: dbo.CatLiderGrupo
+    // para QaFiltroOrg). Los valores, si hay, viajan como SqlParameter.
+    public static List<Dictionary<string, object>> Consulta(
+        string sql, Dictionary<string, object> parametros)
+    {
+        var filas = new List<Dictionary<string, object>>();
+        using (var cn = new SqlConnection(CadenaConexion()))
+        using (var cmd = new SqlCommand(sql, cn))
+        {
+            cmd.CommandType = CommandType.Text;
+            cmd.CommandTimeout = TimeoutComandoSegundos;
+            if (parametros != null)
+            {
+                foreach (var kv in parametros)
+                    cmd.Parameters.AddWithValue("@" + kv.Key, kv.Value ?? (object)DBNull.Value);
+            }
+
+            cn.Open();
+            using (var reader = cmd.ExecuteReader())
+            {
+                while (reader.Read()) filas.Add(Fila(reader));
+            }
+        }
+        return filas;
     }
 
     // Atajo para procedimientos de un solo result set.

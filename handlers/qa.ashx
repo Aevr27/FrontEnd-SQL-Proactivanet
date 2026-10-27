@@ -31,6 +31,15 @@
 //   mover con &fecha_inicio=aaaa-mm-dd&fecha_fin=aaaa-mm-dd, sobre todo para
 //   comparar contra un correo concreto.
 //
+// FILTROS SERVICIO / GRUPOS / LIDERES
+//   summary, qare y detail aceptan ademas &c1=&grupos=&lideres=, los tres de
+//   la pestana QARE y del Backlog: listas separadas por comas, vacio = todos.
+//   C1 y Lider salen con la regla de la TVF de QARE (App_Code/QaFiltroOrg.cs).
+//   Se aplican a todo lo que la respuesta cuenta: KPIs, grupos, tecnicos,
+//   recategorizacion, distribucion por estado y detalle. Sin ellos la
+//   respuesta es la de siempre. No hay filtros en modo snapshot (400).
+//   detail agrega C1 y Lider a cada fila devuelta.
+//
 // CONTRATO (el mismo de siempre; el tablero no tuvo que cambiar)
 //   GET qa.ashx?action=summary
 //       Respuesta por defecto y ligera. generatedAt, source, summary,
@@ -111,6 +120,7 @@ public class Qa : IHttpHandler
         public string Ff;
         public bool Tiempos;
         public long FilasDetalle;
+        public QaFiltroOrg Org = QaFiltroOrg.Ninguno;
         public readonly QaCronometro Reloj = new QaCronometro();
     }
 
@@ -138,6 +148,14 @@ public class Qa : IHttpHandler
 
             var peticion = new Peticion();
             QaParams.Rango(context.Request, out peticion.Fi, out peticion.Ff);
+            peticion.Org = QaFiltroOrg.Leer(context.Request);
+            // Los KPIs filtrados son una consulta a la base y el Lider sale de
+            // dbo.CatLiderGrupo: con archivos congelados no hay contra que.
+            if (peticion.Org.Activo && QaDb.ModoSnapshot)
+            {
+                throw new QaSolicitudInvalida(
+                    "Los filtros Servicio / Grupos / Lideres no estan disponibles en modo snapshot.");
+            }
             peticion.Tiempos = string.Equals(context.Request.QueryString["debug"], "timings",
                                              StringComparison.OrdinalIgnoreCase);
 
@@ -258,18 +276,19 @@ public class Qa : IHttpHandler
         // nada que ganar, son dos lecturas de archivo.
         if (QaDb.ModoSnapshot)
         {
-            kpis = QaCorreo.Kpis(peticion.Fi, peticion.Ff, peticion.Reloj);
-            agregados = QaCorreo.Incorrectos(peticion.Fi, peticion.Ff, peticion.Reloj);
+            kpis = QaCorreo.Kpis(peticion.Fi, peticion.Ff, peticion.Org, peticion.Reloj);
+            agregados = QaCorreo.Incorrectos(peticion.Fi, peticion.Ff, peticion.Org, peticion.Reloj);
         }
         else
         {
             string fi = peticion.Fi, ff = peticion.Ff;
             var reloj = peticion.Reloj;
+            var org = peticion.Org;
 
-            var tarea = Task.Factory.StartNew(delegate { return QaCorreo.Kpis(fi, ff, reloj); });
+            var tarea = Task.Factory.StartNew(delegate { return QaCorreo.Kpis(fi, ff, org, reloj); });
             try
             {
-                agregados = QaCorreo.Incorrectos(fi, ff, reloj);
+                agregados = QaCorreo.Incorrectos(fi, ff, org, reloj);
             }
             catch (Exception)
             {
@@ -371,7 +390,7 @@ public class Qa : IHttpHandler
     // leer la vista: antes esto era otra lectura completa.
     private static void Qare(HttpContext context, Peticion peticion)
     {
-        var agregados = QaCorreo.Completo(peticion.Fi, peticion.Ff, peticion.Reloj);
+        var agregados = QaCorreo.Completo(peticion.Fi, peticion.Ff, peticion.Org, peticion.Reloj);
         peticion.FilasDetalle = agregados.Total;
 
         // El orden de los campos es el MISMO que en action=summary: el tablero
@@ -435,17 +454,23 @@ public class Qa : IHttpHandler
         var filas = QaCorreo.Detalle(peticion.Fi, peticion.Ff, soloIncorrectos, peticion.Reloj);
         peticion.FilasDetalle = filas.Count;
 
-        var filtradas = QaCorreo.Filtrar(filas, validacion, grupo, tecnico, grupoCorrecto);
+        var filtradas = QaCorreo.Filtrar(filas, validacion, grupo, tecnico, grupoCorrecto, peticion.Org);
 
         long total = filtradas.Count;
-        // El mapeo de Id se pide solo para la pagina que se va a pintar.
-        var filasPagina = QaCorreo.AgregarIds(QaCorreo.Paginar(filtradas, pagina, tamano));
+        // El mapeo de Id se pide solo para la pagina que se va a pintar; C1 y
+        // Lider se escriben sobre esas mismas copias.
+        var filasPagina = QaCorreo.AgregarOrg(
+            QaCorreo.AgregarIds(QaCorreo.Paginar(filtradas, pagina, tamano)));
 
         var filtros = new Dictionary<string, object>();
         filtros["validacion"] = validacion;
         filtros["grupo"] = grupo;
         filtros["tecnico"] = tecnico;
         filtros["grupoCorrecto"] = grupoCorrecto;
+        if (peticion.Org.Activo)
+        {
+            foreach (var par in peticion.Org.AJson()) filtros[par.Key] = par.Value;
+        }
 
         var salida = new Dictionary<string, object>();
         salida["page"] = tamano == 0 ? 1 : pagina;
@@ -568,6 +593,8 @@ public class Qa : IHttpHandler
         // los numeros derivados del detalle cubren solo esas filas, y quien
         // mire el tablero tiene que saberlo.
         source["truncado"] = QaCorreo.Truncado(peticion.FilasDetalle);
+        // Solo si los hay: sin filtros "source" es el de siempre.
+        if (peticion.Org.Activo) source["filtros"] = peticion.Org.AJson();
 
         // Milisegundos por paso y filas recorridas. Solo con ?debug=timings, y
         // solo duraciones y conteos: nada del servidor ni de los tickets.

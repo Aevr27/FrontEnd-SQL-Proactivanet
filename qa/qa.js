@@ -36,10 +36,389 @@
    cuando sale la primera peticion.
 
    Regla de datos: lo que el API no trae, no se calcula aqui.
+
+   Filtros (los de QARE): Fecha inicio / Fecha fin, Rango rapido 15 / 30
+   dias, Servicio / C1, Grupos y Lideres, con las mismas listas
+   (backlog_catalogos.ashx), el mismo multiselect y el mismo auto-aplicado.
+   El rango por omision es el de siempre: los 15 dias que terminan AYER
+   (QaParams.Rango), no hoy como en QARE, porque los KPIs "ayer" y "semana
+   anterior" se cuentan desde el fin del rango. "Limpiar" quita solo los tres
+   filtros organizacionales; las fechas se quedan. Se aplican a KPIs,
+   distribucion por estado, recategorizacion y detalle (qa.ashx los resuelve
+   en el servidor, ver App_Code/QaFiltroOrg.cs).
+
+   Las dos graficas de Top 10 NO siguen a los filtros: salen siempre de la
+   carga por omision (ventana de 15 dias, sin filtros) y nada de lo que se
+   pida despues las repinta (ver pintarBase). Cuando la vista es la de por
+   omision, esa misma peticion alimenta la pagina y las graficas: no se pide
+   dos veces.
+
+   "⬇ Descargar QA", como "⬇ Descargar QARE": solo sale con algun filtro de
+   Servicio / Grupo / Lider puesto, pide a qa.ashx?action=detail&pageSize=0
+   los tickets del rango y esos filtros (todos los estados de validacion) y
+   arma el .xlsx aqui con el mismo SheetJS y el mismo formato.
+
+   Dos partes, como qare.js:
+     1. QaDatos: funciones PURAS (sin DOM), publicadas en window.QaDatos
+        para tools/tests/QaFiltrosVistaSmoke.js.
+     2. El tablero. Solo corre si hay documento.
    ========================================================================= */
 
-(function () {
+(function (raiz) {
   'use strict';
+
+  // ================================================================ 1. puro
+
+  /* "Hoy" en Mexico con el MISMO reloj que el servidor: UTC menos 6 horas
+     fijas (DashboardDataInfo.HoyEnPresentacion), igual que qare.js. */
+  var MS_DIA = 864e5;
+  var DESFASE_MEXICO = 6 * 36e5;
+  function diaMexico(ms) { return Math.floor((ms - DESFASE_MEXICO) / MS_DIA); }
+  function isoDia(n) { return new Date(n * MS_DIA).toISOString().slice(0, 10); }
+
+  var DIAS_POR_OMISION = 15;
+
+  /* Los `dias` dias que terminan AYER, incluido: la ventana de QaParams.Rango
+     (@FechaFin = hoy-1, @FechaInicio = @FechaFin-14 para 15 dias). */
+  function rangoRapido(dias, ahoraMs) {
+    var fin = diaMexico(ahoraMs) - 1;
+    return { inicio: isoDia(fin - (dias - 1)), fin: isoDia(fin) };
+  }
+
+  var FILTROS_ORG = ['c1', 'grupos', 'lideres'];
+
+  function valoresFiltro(filtros, clave) {
+    return ((filtros && filtros[clave]) || []).filter(function (v) { return v !== '' && v != null; });
+  }
+
+  function hayFiltroOrg(filtros) {
+    return FILTROS_ORG.some(function (k) { return valoresFiltro(filtros, k).length > 0; });
+  }
+
+  // La vista por omision: el rango de siempre y ningun filtro.
+  function esPorOmision(vista, defecto) {
+    return !!vista && !!defecto && !hayFiltroOrg(vista.filtros) &&
+      vista.inicio === defecto.inicio && vista.fin === defecto.fin;
+  }
+
+  /* Parametros de qa.ashx para una vista. La de por omision va SIN nada,
+     exactamente la peticion de siempre (el servidor pone el rango); las
+     demas llevan el rango y los filtros no vacios, como listas separadas por
+     comas igual que consulta() de qare.js. */
+  function parametrosVista(vista, defecto) {
+    if (esPorOmision(vista, defecto)) return {};
+    var p = { fecha_inicio: vista.inicio, fecha_fin: vista.fin };
+    FILTROS_ORG.forEach(function (k) {
+      var v = valoresFiltro(vista.filtros, k);
+      if (v.length) p[k] = v.join(',');
+    });
+    return p;
+  }
+
+  /* ---- Descarga ("⬇ Descargar QA") ----
+     Columnas del libro: [llave de la fila de qa.ashx, encabezado, ancho]. Las
+     llaves son las columnas de dbo.usp_CorreoQA_Detalle -los encabezados del
+     TICKETS QA - <fecha>.xlsx del correo-, en su orden, con C1 y Lider
+     (QaFiltroOrg, las dos por las que se filtra) junto a Grupo, como en el
+     libro de QARE. El encabezado es la misma llave: no se renombra nada. */
+  var COLUMNAS_EXPORT = [
+    ['Fecha de registro', 19], ['Fecha estimada resolución', 19], ['Código', 15],
+    ['Grupo', 24], ['C1', 22], ['Lider', 22],
+    ['Técnico de 2ª línea', 26], ['Estado', 16], ['Subestado', 18], ['Prioridad', 12],
+    ['Título', 42], ['Descripción', 60], ['Cliente', 24], ['Sucursal', 24], ['Categoría', 30],
+    ['Solución para el usuario', 45], ['Fecha firma solución', 19], ['Fecha última modificación', 19],
+    ['Fecha firma cierre', 19], ['Firma cierre / revocación solución', 24], ['Firma solución', 24],
+    ['Responsable última modificación', 26], ['Notificado por', 26], ['Tipo', 14],
+    ['Fecha estimada OLA / UC', 19], ['Tiempo de resolución', 14],
+    ['Tiempo atención (horas / minutos)', 14], ['Tiempo 1ª respuesta (horas / minutos)', 14],
+    ['Intentos de solución', 10], ['Tiempo 1ª respuesta', 14], ['Tiempo de atención', 14],
+    ['Reasignaciones grupo', 10], ['Caducada', 10], ['Registrado por', 26], ['Tipo relación', 16],
+    ['QA - ¿Aparece algún mensaje de error o describe tu necesidad?', 40],
+    ['QA - ¿Con qué frecuencia ocurre?', 18],
+    ['QA - ¿En qué aplicación estabas cuando sucedió el incidente?', 24],
+    ['QA - Describe paso a paso qué hiciste antes del error o detalla la petición requerida', 45],
+    ['QARe - ¿Cuál fue la causa del incidente/petición?', 40],
+    ['QARe - ¿El usuario confirmó la solución?', 18],
+    ['QARe - ¿Esta solución aplica para otros casos similares?', 18],
+    ['QARe - ¿Se debe generar o actualizar artículo de conocimiento?', 18],
+    ['QARE - ¿Verificaste la correcta clasificación del ticket?', 18],
+    ['QARe - Adjunta evidencia de la solución (logs, capturas, validación)', 40],
+    ['QARe - Describe la solución aplicada (pasos claros y replicables)', 45],
+    ['QARe - Tipo de solución aplicada', 26],
+    ['Grupo Correcto', 24], ['Validacion', 14], ['Tienda', 24],
+  ].map(function (c) { return [c[0], c[0], c[1]]; });
+
+  // Columnas de parrafo: con ajuste de texto, como LARGAS_EXPORT de QARE.
+  var LARGAS_EXPORT = ['Título', 'Descripción', 'Solución para el usuario',
+    'QA - ¿Aparece algún mensaje de error o describe tu necesidad?',
+    'QA - Describe paso a paso qué hiciste antes del error o detalla la petición requerida',
+    'QARe - ¿Cuál fue la causa del incidente/petición?',
+    'QARe - Adjunta evidencia de la solución (logs, capturas, validación)',
+    'QARe - Describe la solución aplicada (pasos claros y replicables)'];
+
+  // Tope de Excel por celda, con el mismo recorte que QARE y Experiencia.
+  var LIMITE_CELDA = 32767;
+  function ajustarCelda(valor) {
+    if (typeof valor !== 'string' || valor.length <= LIMITE_CELDA) return valor;
+    var aviso = ' … [recortado: ' + valor.length + ' caracteres en origen]';
+    var corte = LIMITE_CELDA - aviso.length;
+    var c = valor.charCodeAt(corte - 1);
+    if (c >= 0xD800 && c <= 0xDBFF) corte--;
+    return valor.slice(0, corte) + aviso;
+  }
+
+  /* Un valor de la fila -> celda, con las conversiones de QareExportar.Valor
+     para que los dos libros digan lo mismo: numero = numero, bit = 1/0,
+     fecha 'aaaa-mm-ddThh:mm:ss' (SqlRowMapper) -> 'aaaa-mm-dd hh:mm:ss', el
+     resto texto tal cual. */
+  var ISO_FECHA_HORA = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})$/;
+  function valorExport(v) {
+    if (v === null || v === undefined) return '';
+    if (typeof v === 'number') return v;
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    var s = String(v);
+    var m = ISO_FECHA_HORA.exec(s);
+    return ajustarCelda(m ? m[1] + ' ' + m[2] : s);
+  }
+
+  function listaFiltro(filtros, clave) {
+    var v = valoresFiltro(filtros, clave);
+    return v.length ? v.join(', ') : 'Todos';
+  }
+
+  var NUM_EXPORT = new Intl.NumberFormat('es-MX');
+
+  // Cabecera del libro: la de QARE, con el rango de QA (Fecha de registro).
+  function metaExport(fi, ff, filtros, total, ahora) {
+    return [
+      ['Periodo (Fecha de registro)', fi + ' a ' + ff],
+      ['Servicio / C1', listaFiltro(filtros, 'c1')],
+      ['Grupos', listaFiltro(filtros, 'grupos')],
+      ['Lideres', listaFiltro(filtros, 'lideres')],
+      ['Total de tickets', NUM_EXPORT.format(total)],
+      ['Exportado', ahora],
+    ];
+  }
+
+  function nombreExport(fi, ff, filtros) {
+    return 'QA_' + fi + '_a_' + ff + (hayFiltroOrg(filtros) ? '_filtrado' : '') + '.xlsx';
+  }
+
+  /* ---- Formato del libro: el de "⬇ Descargar QARE" (qare/qare.js, LIBRO),
+     que a su vez es el de "Descargar Tickets" de Experiencia. Mismo metodo:
+     SheetJS arma el libro con los valores y despues se sustituyen
+     xl/styles.xml y se retoca xl/worksheets/sheet1.xml (panel congelado y un
+     s="i" por celda). Ni un valor cambia. ---- */
+  var LIBRO = (function () {
+    var VERDE = 'FF166534', VERDE_TENUE = 'FFE7F3EC';
+    var AMBAR = 'FF92400E', AMBAR_TENUE = 'FFFDF3E3';
+    var ROJO = 'FF991B1B', ROJO_TENUE = 'FFFCE9E9';
+    var TINTA = 'FF111827', TINTA_SUAVE = 'FF6B7280';
+    var ZEBRA = 'FFF3F6F4', LINEA = 'FFE2E6E4';
+
+    var E = {
+      BASE: 0, TITULO: 1, SUBTITULO: 2, META_ETIQUETA: 3, META_VALOR: 4,
+      META_FUERTE: 5, ENCABEZADO: 6, CELDA: 7, CELDA_ZEBRA: 8,
+      CELDA_LARGA: 9, CELDA_LARGA_ZEBRA: 10,
+      ESTADO_VERDE: 11, ESTADO_AMBAR: 12, ESTADO_ROJO: 13,
+    };
+
+    function fuente(attrs) { return '<font>' + attrs + '<name val="Calibri"/><family val="2"/><scheme val="minor"/></font>'; }
+    function relleno(color) { return '<fill><patternFill patternType="solid"><fgColor rgb="' + color + '"/><bgColor indexed="64"/></patternFill></fill>'; }
+
+    function hojaEstilos() {
+      var fuentes = [
+        fuente('<sz val="11"/><color rgb="' + TINTA + '"/>'),
+        fuente('<b/><sz val="16"/><color rgb="' + TINTA + '"/>'),
+        fuente('<sz val="10"/><color rgb="' + TINTA_SUAVE + '"/>'),
+        fuente('<b/><sz val="10"/><color rgb="' + TINTA_SUAVE + '"/>'),
+        fuente('<sz val="10"/><color rgb="' + TINTA + '"/>'),
+        fuente('<b/><sz val="11"/><color rgb="FFFFFFFF"/>'),
+        fuente('<b/><sz val="10"/><color rgb="' + VERDE + '"/>'),
+        fuente('<b/><sz val="11"/><color rgb="' + VERDE + '"/>'),
+        fuente('<b/><sz val="11"/><color rgb="' + AMBAR + '"/>'),
+        fuente('<b/><sz val="11"/><color rgb="' + ROJO + '"/>'),
+      ];
+      var rellenos = [
+        '<fill><patternFill patternType="none"/></fill>',
+        '<fill><patternFill patternType="gray125"/></fill>',
+        relleno(VERDE), relleno(ZEBRA), relleno(VERDE_TENUE),
+        relleno(AMBAR_TENUE), relleno(ROJO_TENUE),
+      ];
+      var lado = '<left style="thin"><color rgb="' + LINEA + '"/></left>'
+        + '<right style="thin"><color rgb="' + LINEA + '"/></right>'
+        + '<top style="thin"><color rgb="' + LINEA + '"/></top>'
+        + '<bottom style="thin"><color rgb="' + LINEA + '"/></bottom><diagonal/>';
+      var bordes = [
+        '<border><left/><right/><top/><bottom/><diagonal/></border>',
+        '<border>' + lado + '</border>',
+      ];
+      // [numFmt, fuente, relleno, borde, alineacion]
+      var xfs = [
+        [0, 0, 0, 0, ''],
+        [0, 1, 0, 0, '<alignment vertical="center"/>'],
+        [0, 2, 0, 0, '<alignment vertical="center"/>'],
+        [0, 3, 0, 0, '<alignment vertical="center"/>'],
+        [0, 4, 0, 0, '<alignment vertical="center"/>'],
+        [0, 6, 0, 0, '<alignment vertical="center"/>'],
+        [0, 5, 2, 1, '<alignment vertical="center" wrapText="1"/>'],
+        [0, 0, 0, 1, '<alignment vertical="top"/>'],
+        [0, 0, 3, 1, '<alignment vertical="top"/>'],
+        [0, 0, 0, 1, '<alignment vertical="top" wrapText="1"/>'],
+        [0, 0, 3, 1, '<alignment vertical="top" wrapText="1"/>'],
+        [0, 7, 4, 1, '<alignment vertical="top"/>'],
+        [0, 8, 5, 1, '<alignment vertical="top"/>'],
+        [0, 9, 6, 1, '<alignment vertical="top"/>'],
+      ];
+      var xf = xfs.map(function (x) {
+        return '<xf numFmtId="' + x[0] + '" fontId="' + x[1] + '" fillId="' + x[2] + '"'
+          + ' borderId="' + x[3] + '" xfId="0" applyFont="1" applyFill="1" applyBorder="1"'
+          + (x[4] ? ' applyAlignment="1">' + x[4] + '</xf>' : '/>');
+      }).join('');
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+        + '<fonts count="' + fuentes.length + '">' + fuentes.join('') + '</fonts>'
+        + '<fills count="' + rellenos.length + '">' + rellenos.join('') + '</fills>'
+        + '<borders count="' + bordes.length + '">' + bordes.join('') + '</borders>'
+        + '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+        + '<cellXfs count="' + xfs.length + '">' + xf + '</cellXfs>'
+        + '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
+        + '<dxfs count="0"/>'
+        + '<tableStyles count="0" defaultTableStyle="TableStyleMedium9" defaultPivotStyle="PivotStyleMedium4"/>'
+        + '</styleSheet>';
+    }
+
+    // Semaforo del Estado, y solo del Estado, con las reglas de QARE.
+    function estiloEstado(valor) {
+      var v = String(valor || '').toLowerCase();
+      if (!v) return null;
+      if (/(cerrad|resuelt|solucionad|finalizad|complet)/.test(v)) return E.ESTADO_VERDE;
+      if (/(cancelad|rechazad|reabiert|escalad)/.test(v)) return E.ESTADO_ROJO;
+      if (/(pendiente|espera|proceso|curso|asignad|abiert|nuev)/.test(v)) return E.ESTADO_AMBAR;
+      return null;
+    }
+
+    function estiloDe(fila, col, d) {
+      if (fila === 0) return col === 0 ? E.TITULO : E.BASE;
+      if (fila >= d.filaMeta && fila < d.filaMeta + d.nMeta) {
+        if (col === 0) return E.META_ETIQUETA;
+        return fila === d.filaFuerte ? E.META_FUERTE : E.META_VALOR;
+      }
+      if (fila === d.filaEncabezado) return E.ENCABEZADO;
+      if (fila > d.filaEncabezado) {
+        var zebra = (fila - d.filaEncabezado) % 2 === 0;
+        if (col === d.colEstado) {
+          var propio = estiloEstado(d.valorEstado(fila));
+          if (propio !== null) return propio;
+        }
+        if (d.largas.indexOf(col) >= 0) return zebra ? E.CELDA_LARGA_ZEBRA : E.CELDA_LARGA;
+        return zebra ? E.CELDA_ZEBRA : E.CELDA;
+      }
+      return E.BASE;
+    }
+
+    function aBytes(texto) {
+      var b = new Uint8Array(texto.length);
+      for (var i = 0; i < texto.length; i++) b[i] = texto.charCodeAt(i) & 255;
+      return b;
+    }
+    function aTexto(contenido) {
+      var s = '';
+      for (var i = 0; i < contenido.length; i++) s += String.fromCharCode(contenido[i]);
+      return s;
+    }
+
+    function retocarHoja(xml, d) {
+      var primeraDatos = d.filaEncabezado + 2;   // 1-based, tras el encabezado
+      var pane = '<sheetView workbookViewId="0">'
+        + '<pane ySplit="' + (primeraDatos - 1) + '" topLeftCell="A' + primeraDatos + '"'
+        + ' activePane="bottomLeft" state="frozen"/>'
+        + '<selection pane="bottomLeft" activeCell="A' + primeraDatos + '" sqref="A' + primeraDatos + '"/>'
+        + '</sheetView>';
+      var salida = xml.replace('<sheetView workbookViewId="0"/>', pane);
+      return salida.replace(/<c r="([A-Z]+)(\d+)"/g, function (todo, letras, numero) {
+        var col = 0;
+        for (var i = 0; i < letras.length; i++) col = col * 26 + (letras.charCodeAt(i) - 64);
+        var estilo = estiloDe(parseInt(numero, 10) - 1, col - 1, d);
+        return estilo ? todo + ' s="' + estilo + '"' : todo;
+      });
+    }
+
+    function formatear(XLSX, libro, d) {
+      var zip = XLSX.CFB.read(XLSX.write(libro, { type: 'binary', bookType: 'xlsx' }), { type: 'binary' });
+      XLSX.CFB.utils.cfb_add(zip, '/xl/styles.xml', aBytes(hojaEstilos()));
+      var hojaXml = XLSX.CFB.find(zip, '/xl/worksheets/sheet1.xml');
+      XLSX.CFB.utils.cfb_add(zip, '/xl/worksheets/sheet1.xml', aBytes(retocarHoja(aTexto(hojaXml.content), d)));
+      return XLSX.CFB.write(zip, { fileType: 'zip', type: 'array', compression: true });
+    }
+
+    return { formatear: formatear, estiloEstado: estiloEstado, ESTILOS: E };
+  })();
+
+  // Anchos: el de la tabla, o lo que pida la palabra mas larga del
+  // encabezado / la etiqueta de metadato mas larga en la columna A.
+  function anchosExport(meta) {
+    return COLUMNAS_EXPORT.map(function (c, i) {
+      var palabra = c[1].split(' ').reduce(function (m, p) { return Math.max(m, p.length); }, 0);
+      var minimo = palabra + 3;
+      if (i === 0) meta.forEach(function (m) { minimo = Math.max(minimo, String(m[0]).length + 2); });
+      return Math.max(c[2], minimo);
+    });
+  }
+
+  /* Filas de qa.ashx -> bytes del .xlsx, con la misma hoja que QARE: titulo,
+     metadatos, encabezado con autofiltro y los tickets. `XLSX` entra por
+     parametro para que la prueba le pase el mismo vendor. */
+  function libroExport(XLSX, tickets, meta) {
+    var aoa = [['QA — Tickets'], []];
+    var filaMeta = aoa.length;
+    meta.forEach(function (m) { aoa.push([m[0], m[1]]); });
+    aoa.push([]);
+    var filaEncabezado = aoa.length;
+    aoa.push(COLUMNAS_EXPORT.map(function (c) { return c[1]; }));
+    tickets.forEach(function (t) {
+      aoa.push(COLUMNAS_EXPORT.map(function (c) { return valorExport(t[c[0]]); }));
+    });
+    var ultimaCol = COLUMNAS_EXPORT.length - 1;
+    var hoja = XLSX.utils.aoa_to_sheet(aoa);
+    hoja['!cols'] = anchosExport(meta).map(function (w) { return { wch: w }; });
+    var altos = [];
+    altos[0] = { hpt: 26 };
+    altos[filaEncabezado] = { hpt: 46 };
+    hoja['!rows'] = altos;
+    hoja['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: ultimaCol } }];
+    hoja['!autofilter'] = { ref: XLSX.utils.encode_range({
+      s: { r: filaEncabezado, c: 0 }, e: { r: aoa.length - 1, c: ultimaCol } }) };
+    var libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, hoja, 'Tickets QA');
+
+    var llaves = COLUMNAS_EXPORT.map(function (c) { return c[0]; });
+    var colEstado = llaves.indexOf('Estado');
+    return LIBRO.formatear(XLSX, libro, {
+      filaEncabezado: filaEncabezado,
+      filaMeta: filaMeta,
+      nMeta: meta.length,
+      filaFuerte: filaMeta + meta.map(function (m) { return m[0]; }).indexOf('Total de tickets'),
+      largas: LARGAS_EXPORT.map(function (k) { return llaves.indexOf(k); }),
+      colEstado: colEstado,
+      valorEstado: function (fila) {
+        var f = aoa[fila];
+        return f ? f[colEstado] : '';
+      },
+    });
+  }
+
+  raiz.QaDatos = {
+    diaMexico: diaMexico, rangoRapido: rangoRapido, DIAS_POR_OMISION: DIAS_POR_OMISION,
+    FILTROS_ORG: FILTROS_ORG, hayFiltroOrg: hayFiltroOrg, esPorOmision: esPorOmision,
+    parametrosVista: parametrosVista,
+    COLUMNAS_EXPORT: COLUMNAS_EXPORT, LARGAS_EXPORT: LARGAS_EXPORT, LIMITE_CELDA: LIMITE_CELDA,
+    ajustarCelda: ajustarCelda, valorExport: valorExport, metaExport: metaExport,
+    nombreExport: nombreExport, libroExport: libroExport, LIBRO: LIBRO,
+  };
+
+  // ============================================================ 2. tablero
+  if (typeof document === 'undefined') return;
 
   /* El handler cuelga de la raiz del sitio, pero este script se carga desde
      dos sitios distintos: qa/qa.html (la pagina suelta) y dashboard.html, que
@@ -49,6 +428,20 @@
     var yo = document.currentScript && document.currentScript.src;
     try { return new URL('../handlers/qa.ashx', yo).href; }
     catch (e) { return 'handlers/qa.ashx'; }
+  })();
+  /* Las listas de Servicio / Grupos / Lideres: las de QARE y el Backlog. Y
+     el SheetJS de la descarga, el mismo vendor que QARE y Experiencia. Las
+     dos rutas se fijan aqui porque document.currentScript solo vale
+     mientras el script se evalua. */
+  var API_CATALOGOS = (function () {
+    var yo = document.currentScript && document.currentScript.src;
+    try { return new URL('../handlers/backlog_catalogos.ashx', yo).href; }
+    catch (e) { return 'handlers/backlog_catalogos.ashx'; }
+  })();
+  var XLSX_URL = (function () {
+    var yo = document.currentScript && document.currentScript.src;
+    try { return new URL('../experiencia/vendor/xlsx.mini.min.js', yo).href; }
+    catch (e) { return 'experiencia/vendor/xlsx.mini.min.js'; }
   })();
 
   /* Todos los ids del marcado llevan el prefijo "qa-". En el tablero este
@@ -112,7 +505,15 @@
     total: 0,
     detalleAbierto: false,
     peticionDetalle: 0,
-    peticionResumen: 0
+    peticionResumen: 0,
+    // Lo que eligieron los filtros de arriba: { inicio, fin, filtros }, y el
+    // rango por omision contra el que se compara (ver esPorOmision).
+    vista: null,
+    defecto: null,
+    // Las dos graficas de Top 10 (ver pintarBase): true cuando ya se
+    // pintaron con la carga por omision. Despues nada las vuelve a tocar.
+    baseLista: false,
+    basePidiendo: false
   };
 
   var graficas = { grupo: null, tecnico: null, validacion: null };
@@ -220,13 +621,18 @@
     pintarFiltros();
   }
 
-  // El resumen no llego: cada bloque de la primera fase lo dice en su sitio y
-  // el resto de la pagina se queda como esta.
+  // El resumen de la vista no llego: cada bloque que sigue a los filtros lo
+  // dice en su sitio y el resto de la pagina se queda como esta. Las dos
+  // graficas no: son de la carga por omision (ver baseFallo).
   function faseUnoFallo(mensaje) {
     kpisEnEspera('n/d');
+    filaTabla('tbody-recat', 3, mensaje);
+  }
+
+  // La carga por omision no llego y las graficas no tienen con que pintarse.
+  function baseFallo() {
     mensajeLienzo('msg-grupo', 'Error al cargar datos.', 'lienzo-msg-error');
     mensajeLienzo('msg-tecnico', 'Error al cargar datos.', 'lienzo-msg-error');
-    filaTabla('tbody-recat', 3, mensaje);
   }
 
   // ------------------------------------------------------------------ API
@@ -281,6 +687,7 @@
     // tablero se queda en pantalla, con sus bloques marcados sin datos.
     if (location.protocol !== 'http:' && location.protocol !== 'https:') {
       faseUnoFallo('Sin servidor.');
+      if (!estado.baseLista) baseFallo();
       mensajeLienzo('msg-validacion', 'Sin servidor.', 'lienzo-msg-error');
       $('error-global-msg').textContent =
         'Esta pagina necesita el servidor: abrela en ' +
@@ -291,22 +698,50 @@
       return;
     }
 
+    // Mismo control que QARE: un rango al reves no sale a la red.
+    var vista = estado.vista;
+    if (!vista.inicio || !vista.fin || vista.inicio > vista.fin) {
+      ++estado.peticionResumen;   // lo que estuviera en vuelo ya no pinta
+      var msg = 'Rango de fechas invalido: la fecha inicio debe ser anterior o igual a la fecha fin.';
+      faseUnoFallo(msg);
+      if (!estado.baseLista && !estado.basePidiendo) cargarBase();
+      $('error-global-msg').textContent = msg;
+      $('error-global').hidden = false;
+      return;
+    }
+
     // Si el usuario recarga varias veces seguidas, solo la ultima peticion
     // puede tocar la pantalla: una respuesta vieja que llegue tarde no debe
     // reactivar el spinner ni el mensaje de error.
     var token = ++estado.peticionResumen;
+    var params = parametrosVista(vista, estado.defecto);
+    var rango = { inicio: vista.inicio, fin: vista.fin };
 
-    pedir({ action: 'summary' })
+    // Lo que sigue a los filtros vuelve a "Calculando"; las graficas no.
+    kpisEnEspera('—');
+    filaTabla('tbody-recat', 3, 'Calculando…');
+    esperandoCompleto();
+
+    /* La vista por omision es la misma peticion de siempre y de ella salen
+       tambien las dos graficas: no se pide dos veces. Con otra vista las
+       graficas van por su cuenta (cargarBase), una sola vez. */
+    var alimentaBase = esPorOmision(vista, estado.defecto) && !estado.baseLista;
+    if (alimentaBase) estado.basePidiendo = true;
+    else if (!estado.baseLista && !estado.basePidiendo) cargarBase();
+
+    pedir(Object.assign({ action: 'summary' }, params))
       .then(function (datos) {
-        if (token !== estado.peticionResumen) return;
         if (!datos.summary || !datos.source) {
           throw new Error('La respuesta no contiene la informacion de resumen esperada.');
         }
+        if (alimentaBase) pintarBase(datos);
+        if (token !== estado.peticionResumen) return;
         estado.resumen = datos;
-        pintarTablero(datos);
+        pintarTablero(datos, params, rango);
         $('error-global').hidden = true;
       })
       .catch(function (err) {
+        if (alimentaBase) { estado.basePidiendo = false; if (!estado.baseLista) baseFallo(); }
         if (token !== estado.peticionResumen) return;
         // El aviso va arriba, como banda, y el tablero sigue en pantalla: los
         // bloques que no dependen de esta peticion no tienen por que
@@ -317,16 +752,50 @@
       });
   }
 
-  function pintarTablero(datos) {
+  /* Las dos graficas de Top 10 cuando la vista NO es la de por omision y
+     todavia no se pintaron (un filtro puesto antes de que llegara la primera
+     carga, o la primera carga fallo y se reintenta con filtros). Es la misma
+     peticion por omision de siempre, y solo pinta las graficas. */
+  function cargarBase() {
+    estado.basePidiendo = true;
+    pedir({ action: 'summary' })
+      .then(function (datos) { pintarBase(datos); })
+      .catch(function () { estado.basePidiendo = false; if (!estado.baseLista) baseFallo(); });
+  }
+
+  /* UNICO sitio que pinta las dos graficas, y solo una vez: con la carga por
+     omision (los 15 dias de siempre, sin filtros). Ni los filtros, ni
+     Limpiar, ni Reintentar las repintan; asi no cambian con nada de arriba. */
+  function pintarBase(datos) {
+    if (estado.baseLista) return;
+    estado.baseLista = true;
+    estado.basePidiendo = false;
+    pintarGrupo(datos.porGrupo || []);
+    pintarTecnico(datos.porTecnico || []);
+    /* El servidor decide el rango por omision. Si el reloj de esta maquina
+       lo calculo distinto, manda el del servidor: las fechas de arriba y el
+       "por omision" pasan a ser los suyos mientras no se haya tocado nada. */
+    var s = datos.source || {};
+    if (s.fechaInicio && s.fechaFin && esPorOmision(estado.vista, estado.defecto) &&
+        (s.fechaInicio !== estado.defecto.inicio || s.fechaFin !== estado.defecto.fin)) {
+      estado.defecto = { inicio: s.fechaInicio, fin: s.fechaFin };
+      ponerFechas(estado.defecto.inicio, estado.defecto.fin);
+      leerVista();
+    }
+  }
+
+  // params: los de la vista, para que la distribucion por estado pida lo
+  // mismo que el resumen.
+  function pintarTablero(datos, params, rango) {
     /* Pastilla de la cabecera: "Última actualización" y "Periodo" de
        datos.dataInfo (el sello es el fin del ultimo ETL en dbo.EtlLog, via
        qa.ashx). El resto de la procedencia (datos.source: origen, tickets en
        el rango, vista, consultado) ya no se muestra; sigue llegando por
        compatibilidad. */
     DatosInfo.pintar($('chip-fecha'), datos.dataInfo);
-    pintarKpis(datos.summary, datos.historico);
-    pintarGrupo(datos.porGrupo || []);
-    pintarTecnico(datos.porTecnico || []);
+    pintarKpis(datos.summary, datos.historico, rango);
+    // porGrupo / porTecnico de esta respuesta no se pintan: las graficas son
+    // de la carga por omision (pintarBase).
     pintarRecategorizacion(datos.recategorizacion || []);
 
     // El corte por estado es el unico bloque que necesita recorrer TODOS los
@@ -336,7 +805,7 @@
     // esta en pantalla.
     if (datos.validacion === null) {
       esperandoCompleto();
-      cargarCompleto();
+      cargarCompleto(params);
     } else {
       pintarValidacion(datos.validacion || []);
     }
@@ -350,10 +819,10 @@
 
   // Segunda peticion. La respuesta trae ademas los contadores QA/QARE y el top
   // de categorias; hoy solo se pinta la distribucion por estado.
-  function cargarCompleto() {
+  function cargarCompleto(params) {
     var token = estado.peticionResumen;
 
-    pedir({ action: 'qare' })
+    pedir(Object.assign({ action: 'qare' }, params))
       .then(function (datos) {
         if (token !== estado.peticionResumen) return;   // hubo otra recarga
         pintarValidacion(datos.validacion || []);
@@ -398,21 +867,30 @@
   }
 
   function repintarKpis() {
-    if (estado.kpis) pintarKpis(estado.kpis.resumen, estado.kpis.historico);
+    if (estado.kpis) pintarKpis(estado.kpis.resumen, estado.kpis.historico, estado.kpis.rango);
   }
 
-  function pintarKpis(resumen, historico) {
-    estado.kpis = { resumen: resumen, historico: historico };
+  // rango: el periodo de ESTAS cifras ({ inicio, fin }); por omision, el de
+  // la vista con la que se pidieron.
+  function pintarKpis(resumen, historico, rango) {
+    rango = rango || (estado.vista ? { inicio: estado.vista.inicio, fin: estado.vista.fin } : null);
+    estado.kpis = { resumen: resumen, historico: historico, rango: rango };
     marcarDesdeDetalle();
     var total = resumen.totalTickets;
     var incorrectos = resumen.incorrectos;
     var pct = resumen.incorrectosPct;
 
+    // Con el rango por omision, las notas de siempre; con otro, el periodo.
+    var omision = !rango || !estado.defecto ||
+      (rango.inicio === estado.defecto.inicio && rango.fin === estado.defecto.fin);
+    var periodo = omision ? '' : fechaCorta(rango.inicio) + ' al ' + fechaCorta(rango.fin);
+
     var html = '';
     html += tarjeta('kpi-azul', 'Total tickets',
-      total === undefined ? 'n/d' : NUM.format(total), 'Suma ultimos 15 dias');
+      total === undefined ? 'n/d' : NUM.format(total), omision ? 'Suma ultimos 15 dias' : 'Suma del ' + periodo);
     html += tarjeta('kpi-rojo', 'Tickets incorrectos',
-      incorrectos === undefined ? 'n/d' : NUM.format(incorrectos), 'Validacion = Incorrecto (suma 15 dias)', KPI_INCORRECTOS);
+      incorrectos === undefined ? 'n/d' : NUM.format(incorrectos),
+      omision ? 'Validacion = Incorrecto (suma 15 dias)' : 'Validacion = Incorrecto (suma del periodo)', KPI_INCORRECTOS);
     html += tarjeta('kpi-ambar', '% incorrectos',
       pct === undefined ? 'n/d' : NUM2.format(pct) + '%', 'Sobre el total del rango');
 
@@ -718,7 +1196,9 @@
 
     var token = ++estado.peticionDetalle;
 
-    pedir({
+    // Los filtros de la tabla (validacion, grupo, tecnico, grupo correcto) se
+    // suman a los de arriba: el detalle es siempre el de la vista.
+    pedir(Object.assign({
       action: 'detail',
       validacion: estado.filtros.validacion,
       grupo: estado.filtros.grupo,
@@ -726,7 +1206,7 @@
       grupoCorrecto: estado.filtros.grupoCorrecto,
       page: estado.pagina,
       pageSize: estado.tamano
-    }).then(function (datos) {
+    }, parametrosVista(estado.vista, estado.defecto))).then(function (datos) {
       if (token !== estado.peticionDetalle) return;   // respuesta vieja, se ignora
       $('detalle-cargando').hidden = true;
       pintarDetalle(datos);
@@ -799,9 +1279,182 @@
     }).join('');
   }
 
+  // ------------------------------------------------- filtros de la pestaña
+  // Los de QARE (qare/qare.js), con el mismo comportamiento: fechas y rango
+  // rapido piden en el acto, los multiselect se juntan en una peticion,
+  // "Limpiar" quita solo Servicio / Grupos / Lideres.
+  var SELECT_FILTRO = { c1: 'f-c1', grupos: 'f-grupos', lideres: 'f-lideres' };
+
+  function seleccionados(id) {
+    return Array.prototype.map.call($(id).selectedOptions, function (o) { return o.value; });
+  }
+
+  function filtrosElegidos() {
+    var f = {};
+    FILTROS_ORG.forEach(function (clave) { f[clave] = seleccionados(SELECT_FILTRO[clave]); });
+    return f;
+  }
+
+  function leerVista() {
+    estado.vista = { inicio: $('f-inicio').value, fin: $('f-fin').value, filtros: filtrosElegidos() };
+    return estado.vista;
+  }
+
+  function ponerFechas(inicio, fin) {
+    $('f-inicio').value = inicio;
+    $('f-fin').value = fin;
+  }
+
+  function marcarRapido(dias) {
+    document.querySelectorAll('#qa-filtros [data-dias]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(Number(b.dataset.dias) === dias));
+    });
+  }
+
+  function ponerRango(dias) {
+    var r = rangoRapido(dias, Date.now());
+    ponerFechas(r.inicio, r.fin);
+    marcarRapido(dias);
+  }
+
+  /* Una vista nueva: se repinta todo lo que sigue a los filtros -KPIs,
+     distribucion, recategorizacion y, si esta abierto, el detalle desde la
+     pagina 1-. Las dos graficas no (pintarBase). */
+  function aplicarVista() {
+    leerVista();
+    actualizarDescarga();
+    cargarResumen();
+    if (estado.detalleAbierto) {
+      estado.pagina = 1;
+      cargarDetalle();
+    }
+  }
+
+  var ESPERA_AUTO = 250;
+  var cargaProgramada = null;
+  function programarCarga() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = setTimeout(function () { cargaProgramada = null; aplicarVista(); }, ESPERA_AUTO);
+  }
+
+  // "Limpiar" quita solo los tres filtros organizacionales; las fechas no.
+  // El `change` repinta el desplegable y programa la recarga.
+  function limpiarFiltros() {
+    FILTROS_ORG.forEach(function (clave) {
+      var sel = $(SELECT_FILTRO[clave]);
+      Array.prototype.forEach.call(sel.options, function (o) { o.selected = false; });
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+  }
+
+  /* Las listas, una vez al arrancar y sin frenar la primera carga: si
+     fallan, QA sigue funcionando sin filtros y el error va a la consola. */
+  function cargarCatalogos() {
+    return fetch(API_CATALOGOS, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+      .then(function (resp) {
+        if (!resp.ok) throw new Error('backlog_catalogos.ashx respondio ' + resp.status + '.');
+        return resp.json();
+      })
+      .then(function (c) {
+        Catalogos.llenar($('f-c1'), (c && c.c1) || []);
+        Catalogos.llenar($('f-grupos'), (c && c.grupos) || []);
+        Catalogos.llenar($('f-lideres'), (c && c.lideres) || []);
+      })
+      .catch(function (err) { console.error('[QA catalogos]', err); });
+  }
+
+  // ------------------------------------------------------------ descarga
+  /* Como "⬇ Descargar QARE": el boton solo se ve con algun filtro de
+     Servicio / Grupo / Lider puesto. */
+  function actualizarDescarga() {
+    $('btn-descargar').style.display = hayFiltroOrg(filtrosElegidos()) ? '' : 'none';
+  }
+
+  // SheetJS se trae la primera vez que se pulsa; si QARE o Experiencia ya lo
+  // cargaron, se reusa.
+  var xlsxCargando = null;
+  function cargarXLSX() {
+    if (window.XLSX) return Promise.resolve(window.XLSX);
+    if (!xlsxCargando) {
+      xlsxCargando = new Promise(function (listo, fallo) {
+        var s = document.createElement('script');
+        s.src = XLSX_URL;
+        s.onload = function () { listo(window.XLSX); };
+        s.onerror = function () { xlsxCargando = null; fallo(new Error('no se pudo cargar ' + s.src)); };
+        document.head.appendChild(s);
+      });
+    }
+    return xlsxCargando;
+  }
+
+  function bajar(bytes, nombre) {
+    var url = URL.createObjectURL(new Blob([bytes],
+      { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }));
+    var a = document.createElement('a');
+    a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+  }
+
+  /* Los tickets del rango y de los filtros de arriba, TODOS los estados de
+     validacion: la misma intencion que QARE (el rango y los filtros que se
+     estan viendo, no la pagina ni las etiquetas del detalle). Sale de
+     qa.ashx?action=detail&pageSize=0, el detalle de siempre sin paginar. */
+  var descargando = false;
+  function descargar() {
+    if (descargando) return;
+    var vista = leerVista();
+    if (!vista.inicio || !vista.fin || vista.inicio > vista.fin) {
+      alert('Rango de fechas invalido: la fecha inicio debe ser anterior o igual a la fecha fin.');
+      return;
+    }
+    var btn = $('btn-descargar'), rotulo = btn.textContent;
+    descargando = true;
+    btn.disabled = true;
+    btn.textContent = 'Preparando…';
+    // Rango explicito siempre: es el que va en el nombre del archivo.
+    var params = parametrosVista(vista, null);
+    pedir(Object.assign({ action: 'detail', page: 1, pageSize: 0 }, params))
+      .then(function (d) {
+        var tickets = d.rows || [];
+        if (!tickets.length) { alert('No hay tickets QA para el rango y los filtros actuales.'); return; }
+        var s = (d.meta && d.meta.source) || {};
+        var fi = s.fechaInicio || vista.inicio, ff = s.fechaFin || vista.fin;
+        return cargarXLSX().then(function (XLSX) {
+          var meta = metaExport(fi, ff, vista.filtros, tickets.length, new Date().toLocaleString('es-MX'));
+          bajar(libroExport(XLSX, tickets, meta), nombreExport(fi, ff, vista.filtros));
+        });
+      })
+      .catch(function (err) {
+        console.error('[QA descarga]', err);
+        alert('No se pudo descargar QA: ' + err.message);
+      })
+      .then(function () {
+        descargando = false;
+        btn.disabled = false;
+        btn.textContent = rotulo;
+      });
+  }
+
   // ------------------------------------------------------------- arranque
+  function conectarFiltros() {
+    document.querySelectorAll('#qa-filtros [data-dias]').forEach(function (b) {
+      b.addEventListener('click', function () { ponerRango(Number(b.dataset.dias)); aplicarVista(); });
+    });
+    ['f-inicio', 'f-fin'].forEach(function (id) {
+      $(id).addEventListener('change', function () { marcarRapido(null); aplicarVista(); });
+    });
+    FILTROS_ORG.forEach(function (clave) {
+      $(SELECT_FILTRO[clave]).addEventListener('change', programarCarga);
+      $(SELECT_FILTRO[clave]).addEventListener('change', actualizarDescarga);
+    });
+    $('btn-limpiar').addEventListener('click', limpiarFiltros);
+    $('btn-descargar').addEventListener('click', descargar);
+  }
+
   function conectarEventos() {
     $('btn-reintentar').addEventListener('click', cargarResumen);
+    conectarFiltros();
 
     $('btn-detalle').addEventListener('click', function () {
       estado.filtros = filtrosPorDefecto();
@@ -843,6 +1496,10 @@
     if (arrancado) return;              // el modulo se monta una sola vez
     if (!$('kpis')) return;             // sin marcado no hay nada que armar
     arrancado = true;
+    // La vista con la que abre: los 15 dias por omision, sin filtros.
+    ponerRango(DIAS_POR_OMISION);
+    estado.defecto = { inicio: $('f-inicio').value, fin: $('f-fin').value };
+    leerVista();
     armarShell();
     conectarEventos();
     /* Capa visual del desplegable de "Filas por pagina". Es el MISMO
@@ -853,6 +1510,7 @@
     if (window.Desplegable) {
       Desplegable.montar(document.getElementById('tab-qa') || document);
     }
+    cargarCatalogos();
     cargarResumen();
   }
 
@@ -882,4 +1540,4 @@
     },
     recargar: cargarResumen
   };
-})();
+})(typeof window !== 'undefined' ? window : this);

@@ -233,7 +233,15 @@ public static class QaCorreo
     // distribucion QARE no vuelve a leer la vista.
     public static Dictionary<string, object> Kpis(string fi, string ff, QaCronometro reloj)
     {
-        string clave = "qa:kpis:" + fi + ":" + ff;
+        return Kpis(fi, ff, QaFiltroOrg.Ninguno, reloj);
+    }
+
+    // Con los filtros Servicio / Grupos / Lideres: van a la llave de cache
+    // (vacia sin filtros, asi la de siempre no cambia) y a la consulta.
+    public static Dictionary<string, object> Kpis(string fi, string ff, QaFiltroOrg filtro,
+                                                  QaCronometro reloj)
+    {
+        string clave = "qa:kpis:" + fi + ":" + ff + filtro.Clave;
 
         var cache = HttpRuntime.Cache;
         if (cache != null)
@@ -248,7 +256,7 @@ public static class QaCorreo
 
         Dictionary<string, object> kpis;
         using (reloj.Medir("kpisMs"))
-            kpis = LeerKpis(fi, ff, reloj);
+            kpis = LeerKpis(fi, ff, filtro, reloj);
 
         reloj.Anotar("kpisDesdeCache", false);
 
@@ -262,7 +270,8 @@ public static class QaCorreo
         return kpis;
     }
 
-    private static Dictionary<string, object> LeerKpis(string fi, string ff, QaCronometro reloj)
+    private static Dictionary<string, object> LeerKpis(string fi, string ff, QaFiltroOrg filtro,
+                                                       QaCronometro reloj)
     {
         // Modo snapshot: no hay base contra la que consultar, solo los
         // archivos que exporto tools/Exportar-SnapshotQA.ps1, y uno de ellos
@@ -276,7 +285,7 @@ public static class QaCorreo
         try
         {
             reloj.Anotar("kpisOrigen", "unaPasada");
-            return QaDb.KpisUnaPasada(Dia(fi), Dia(ff));
+            return QaDb.KpisUnaPasada(Dia(fi), Dia(ff), filtro);
         }
         catch (SqlException ex)
         {
@@ -286,7 +295,9 @@ public static class QaCorreo
             // tablero sigue funcionando por donde funcionaba antes -- lento,
             // pero con los mismos numeros -- y el motivo queda anotado en
             // ?debug=timings en vez de salir como "Error al cargar datos".
-            if (!FaltaAcceso(ex)) throw;
+            // Con filtros no hay a donde caer: dbo.usp_CorreoQA_Kpis no los
+            // recibe, y sus numeros serian los de la vista sin filtrar.
+            if (!FaltaAcceso(ex) || filtro.Activo) throw;
 
             reloj.Anotar("kpisOrigen", ProcKpis);
             reloj.Anotar("kpisSqlError", ex.Number);
@@ -359,7 +370,12 @@ public static class QaCorreo
     // que se ahorra son filas que nunca llegan a viajar.
     public static Agregados Incorrectos(string fi, string ff, QaCronometro reloj)
     {
-        return Pasada(fi, ff, true, "qa:incorrectos:", "detalleIncorrectosMs",
+        return Incorrectos(fi, ff, QaFiltroOrg.Ninguno, reloj);
+    }
+
+    public static Agregados Incorrectos(string fi, string ff, QaFiltroOrg filtro, QaCronometro reloj)
+    {
+        return Pasada(fi, ff, true, filtro, "qa:incorrectos:", "detalleIncorrectosMs",
                       "filasIncorrectos", reloj);
     }
 
@@ -369,15 +385,23 @@ public static class QaCorreo
     // inicial: el tablero la pide despues, con action=qare.
     public static Agregados Completo(string fi, string ff, QaCronometro reloj)
     {
-        return Pasada(fi, ff, false, "qa:completo:", "detalleCompletoMs",
+        return Completo(fi, ff, QaFiltroOrg.Ninguno, reloj);
+    }
+
+    public static Agregados Completo(string fi, string ff, QaFiltroOrg filtro, QaCronometro reloj)
+    {
+        return Pasada(fi, ff, false, filtro, "qa:completo:", "detalleCompletoMs",
                       "filasDetalle", reloj);
     }
 
-    private static Agregados Pasada(string fi, string ff, bool soloIncorrectos,
+    // Los filtros Servicio / Grupos / Lideres se aplican fila a fila mientras
+    // se cuenta (Acumulado.Contar): usp_CorreoQA_Detalle no los recibe. Una
+    // fila que no pasa no cuenta en ningun bloque, ni en Total.
+    private static Agregados Pasada(string fi, string ff, bool soloIncorrectos, QaFiltroOrg filtro,
                                     string prefijo, string pasoMs, string pasoFilas,
                                     QaCronometro reloj)
     {
-        string clave = prefijo + fi + ":" + ff;
+        string clave = prefijo + fi + ":" + ff + filtro.Clave;
 
         var cache = HttpRuntime.Cache;
         if (cache != null)
@@ -394,7 +418,8 @@ public static class QaCorreo
 
         var agregados = new Agregados();
         agregados.SoloIncorrectos = soloIncorrectos;
-        var acumulado = new Acumulado(soloIncorrectos);
+        filtro.Preparar();
+        var acumulado = new Acumulado(soloIncorrectos, filtro);
 
         var parametros = Rango(fi, ff);
         parametros["SoloIncorrectos"] = soloIncorrectos ? 1 : 0;
@@ -534,9 +559,21 @@ public static class QaCorreo
         List<Dictionary<string, object>> filas,
         object validacion, object grupo, object tecnico, object grupoCorrecto)
     {
+        return Filtrar(filas, validacion, grupo, tecnico, grupoCorrecto, QaFiltroOrg.Ninguno);
+    }
+
+    // Mas los filtros Servicio / Grupos / Lideres de la pestana, con la regla
+    // de QaFiltroOrg sobre la Categoria y el Grupo de cada fila.
+    public static List<Dictionary<string, object>> Filtrar(
+        List<Dictionary<string, object>> filas,
+        object validacion, object grupo, object tecnico, object grupoCorrecto,
+        QaFiltroOrg org)
+    {
+        org.Preparar();
         var salida = new List<Dictionary<string, object>>();
         foreach (var fila in filas)
         {
+            if (org.Activo && !org.Coincide(QaDb.Texto(fila, ColCategoria), QaDb.Texto(fila, ColGrupo))) continue;
             if (!Coincide(fila, ColValidacion, validacion)) continue;
             if (!Coincide(fila, ColGrupo, grupo)) continue;
             if (!Coincide(fila, ColTecnico, tecnico)) continue;
@@ -567,6 +604,38 @@ public static class QaCorreo
         int toma = tamano == 0 ? filas.Count - salto
                                : Math.Min(tamano, filas.Count - salto);
         return filas.GetRange(salto, toma);
+    }
+
+    // C1 y Lider de cada fila de la pagina, con la regla de QaFiltroOrg: son
+    // las dos columnas por las que se filtra y la descarga las lleva junto a
+    // Grupo, como la de QARE. Se escriben sobre las copias de AgregarIds,
+    // nunca sobre las filas de la cache.
+    //
+    // Es un extra, igual que IdProactivanet: si dbo.CatLiderGrupo no se puede
+    // leer, Lider queda en null y el detalle se devuelve igual. (Filtrar por
+    // Lider SI la necesita, y ahi el error sube.)
+    public static List<Dictionary<string, object>> AgregarOrg(
+        List<Dictionary<string, object>> filas)
+    {
+        Dictionary<string, string> mapa = null;
+        try { mapa = QaFiltroOrg.MapaLideres(); }
+        catch (Exception ex)
+        {
+            var ctx = HttpContext.Current;
+            if (ctx != null)
+            {
+                ctx.Trace.Warn("qa",
+                    "No se pudo leer dbo.CatLiderGrupo (" + ex.GetType().Name + ": " +
+                    ex.Message + "). El detalle sale sin Lider.");
+            }
+        }
+
+        foreach (var fila in filas)
+        {
+            fila["C1"] = QaFiltroOrg.C1Etiqueta(QaDb.Texto(fila, ColCategoria));
+            fila["Lider"] = mapa == null ? null : QaFiltroOrg.LiderDe(QaDb.Texto(fila, ColGrupo), mapa);
+        }
+        return filas;
     }
 
     // Copia de las filas de la pagina con IdProactivanet: el Id interno (GUID)
@@ -697,10 +766,12 @@ public static class QaCorreo
         private readonly int[] _largoMaximo;
 
         private readonly bool _soloIncorrectos;
+        private readonly QaFiltroOrg _filtro;
 
-        public Acumulado(bool soloIncorrectos)
+        public Acumulado(bool soloIncorrectos, QaFiltroOrg filtro)
         {
             _soloIncorrectos = soloIncorrectos;
+            _filtro = filtro ?? QaFiltroOrg.Ninguno;
             _valores = new Dictionary<string, long>[CamposQare.Length];
             _huellas = new HashSet<long>[CamposQare.Length];
             _respondidos = new long[CamposQare.Length];
@@ -722,6 +793,10 @@ public static class QaCorreo
 
         public void Contar(QaLector fila)
         {
+            if (_filtro.Activo &&
+                !_filtro.Coincide(Columna(fila, ColCategoria, "Categoria"), Columna(fila, ColGrupo, "Grupo")))
+                return;
+
             _total++;
             if (_total == 1) Revisar(fila);
 

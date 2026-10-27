@@ -29,6 +29,15 @@
   distribucion por estado. El detalle y los catalogos solo se piden cuando el
   usuario los pide.
 
+  Filtros: los de QARE (fechas, rango rapido, Servicio / C1, Grupos y
+  Lideres), con su mismo marcado y su mismo "Limpiar". Las dos graficas de
+  Top 10 no los siguen: se quedan con la carga por omision (ver qa.js).
+
+  Hojas de la pagina suelta: el panel .filtros (y .btn.linea / .btn.gris) es
+  el de dashboard.css y boton.css, como en qare.html, asi que se enlazan
+  ANTES de qa.css para que qa.css siga mandando en todo lo suyo. Embebido,
+  esos <link> se descartan y manda lo que ya cargo dashboard.html.
+
   Chart.js 4.4.4 local, en assets/vendor/ (no depende del CDN). En el tablero
   esta etiqueta se descarta: dashboard.html ya carga su propio Chart.js y una
   segunda copia reemplazaria el global que usan SLA y Backlog.
@@ -62,6 +71,10 @@
   <link rel="stylesheet" href="../assets/css/kpis-fijos.css">
   <script src="../assets/js/kpis-fijos.js"></script>
   <script src="../assets/js/seleccion-kpi.js"></script>
+  <!-- Listas de los filtros (Catalogos.llenar), como en qare.html. -->
+  <script src="../assets/js/catalogos.js"></script>
+  <link rel="stylesheet" href="../assets/css/boton.css">
+  <link rel="stylesheet" href="../dashboard.css">
   <link rel="stylesheet" href="qa.css">
 </head>
 <body>
@@ -85,6 +98,46 @@
       </div>
     </header>
 
+    <!-- Los filtros de QARE (qare/qare.html), con sus rotulos, sus listas y
+         su "Limpiar". El rango es por Fecha de registro, el de siempre de QA,
+         y los dos botones rapidos terminan AYER, como la ventana por omision. -->
+    <section class="filtros" id="qa-filtros">
+      <div class="campo">
+        <label for="qa-f-inicio">Fecha inicio</label>
+        <input type="date" id="qa-f-inicio">
+      </div>
+      <div class="campo">
+        <label for="qa-f-fin">Fecha fin</label>
+        <input type="date" id="qa-f-fin">
+      </div>
+      <div class="campo">
+        <label>Rango rapido</label>
+        <div class="rango-rapido">
+          <button class="btn linea chico" type="button" data-dias="15">15 dias</button>
+          <button class="btn linea chico" type="button" data-dias="30">30 dias</button>
+        </div>
+      </div>
+      <div class="campo">
+        <label for="qa-f-c1">Servicio / C1 (elige varios)</label>
+        <select id="qa-f-c1" multiple></select>
+      </div>
+      <div class="campo">
+        <label for="qa-f-grupos">Grupos (elige varios)</label>
+        <select id="qa-f-grupos" multiple></select>
+      </div>
+      <div class="campo">
+        <label for="qa-f-lideres">Lideres (elige varios)</label>
+        <select id="qa-f-lideres" multiple></select>
+      </div>
+      <div class="campo acciones">
+        <button class="btn gris" id="qa-btn-limpiar" type="button">Limpiar</button>
+        <!-- Como "⬇ Descargar QARE": solo sale con algun filtro de Servicio /
+             Grupo / Lider puesto (actualizarDescarga en qa.js). display en
+             linea y no `hidden`: .filtros .acciones .btn fija display. -->
+        <button class="btn" id="qa-btn-descargar" type="button" style="display:none">⬇ Descargar QA</button>
+      </div>
+    </section>
+
     <!-- Aviso de error del resumen. Es una banda ARRIBA del tablero, no un
          reemplazo: aunque falle, la estructura sigue en pantalla y los bloques
          que si cargaron se siguen viendo. -->
@@ -97,14 +150,15 @@
     <section class="kpis" id="qa-kpis"></section>
 
     <!-- Las dos graficas del top 10 son un par simetrico: misma rejilla de dos
-         columnas iguales y el mismo alto de lienzo, que fija qa.js. -->
+         columnas iguales y el mismo alto de lienzo, que fija qa.js. No siguen
+         a los filtros de arriba: son siempre la carga por omision. -->
     <section class="grid2">
       <div class="card">
         <h3>
           Top 10 grupos con tickets mal categorizados
           <span class="hint" id="qa-hint-grupo"></span>
         </h3>
-        <p class="nota-card">Solo tickets con <code>Validacion = Incorrecto</code>. Clic en una barra para ver su detalle.</p>
+        <p class="nota-card">Solo tickets con <code>Validacion = Incorrecto</code>, ultimos 15 dias. No cambia con los filtros de arriba. Clic en una barra para ver su detalle.</p>
         <div class="lienzo lienzo-barras" id="qa-lienzo-grupo">
           <canvas id="qa-chart-grupo"></canvas>
           <p class="lienzo-msg" id="qa-msg-grupo"><span class="spinner" aria-hidden="true"></span>Calculando&hellip;</p>
@@ -116,7 +170,7 @@
           Top 10 tecnicos resolutores con tickets mal categorizados
           <span class="hint" id="qa-hint-tecnico"></span>
         </h3>
-        <p class="nota-card">Solo tickets con <code>Validacion = Incorrecto</code>. Clic en una barra para ver su detalle.</p>
+        <p class="nota-card">Solo tickets con <code>Validacion = Incorrecto</code>, ultimos 15 dias. No cambia con los filtros de arriba. Clic en una barra para ver su detalle.</p>
         <div class="lienzo lienzo-barras" id="qa-lienzo-tecnico">
           <canvas id="qa-chart-tecnico"></canvas>
           <p class="lienzo-msg" id="qa-msg-tecnico"><span class="spinner" aria-hidden="true"></span>Calculando&hellip;</p>
