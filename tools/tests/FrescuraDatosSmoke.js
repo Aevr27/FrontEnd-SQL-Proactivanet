@@ -11,6 +11,9 @@
 //      vivo "Última actualización"; con el respaldo, "Datos de respaldo, no
 //      en vivo · Corte: <fecha guardada>"; respaldo sin fecha, un aviso sin
 //      fecha.
+//   O) Orquestacion (orquestacion/orquestacion.js): la cabecera lleva la
+//      pastilla .datos-info con "Carga del Excel: <sello tal cual> · N jobs";
+//      sin sello, solo los jobs; vacia, sin pastilla.
 //   T) Tablero legacy (dashboard.js, TableroExterno): la fecha "Generado el"
 //      del pie se repite en la cabecera de Observabilidad y Orquestacion como
 //      instantanea; sin pie no se pinta nada; no se duplica. Incluye el pie
@@ -141,6 +144,40 @@ Check('E6 se llama con !!errApi tras cargar', true, /pintarCorteExperiencia\(doc
 Check('E7 el aviso de arriba dice "no en vivo"', true, /<b>Datos de respaldo, no en vivo\.<\/b>/.test(fuenteExp));
 var mockExp = JSON.parse(fs.readFileSync(path.join(raiz, 'experiencia', 'data', 'experiencia.mock.json'), 'utf8').replace(/^﻿/, ''));
 Check('E8 el respaldo real trae su propia fecha (dd/mm/aaaa)', true, /^\d{2}\/\d{2}\/\d{4}$/.test(mockExp.fecha_actualizacion));
+
+// ---- O) Orquestacion: pastilla blanca del sello en la cabecera ----
+var fuenteOrq = leer('orquestacion/orquestacion.js');
+var docOrq = Documento();
+var orq = new Function('DatosInfo', 'document', 'n0',
+  "var PREFIJO = 'orq-';\n" +
+  recortar(fuenteOrq, /  function \$\(id\) \{[^\n]*\}/, '$ orquestacion') + '\n' +
+  recortar(fuenteOrq, /  function estado\(txt\) \{[\s\S]*?\n  \}/, 'estado orquestacion') + '\n' +
+  recortar(fuenteOrq, /  function estadoCarga\(j, nJobs\) \{[\s\S]*?\n  \}/, 'estadoCarga orquestacion') +
+  '\nreturn { estado: estado, carga: estadoCarga };')(DatosInfo, docOrq, function (v) { return String(v); });
+var est = Nodo('div'); docOrq.ids['orq-estado'] = est;
+orq.carga({ meta: { ultimaActualizacion: '2026-10-26T09:15:00', tipoPeriodo: 'corte' },
+            carga: { fecha: '2026-10-26 09:15' } }, 1234);
+Check('O1 con sello: pastilla .datos-info con la carga del Excel tal cual (09:15) y los jobs',
+  [['Carga del Excel: 26/10/2026 · 09:15 · 1234 jobs'], true], [lineasDe(est), est.classList.contains('datos-info')]);
+est = Nodo('div'); docOrq.ids['orq-estado'] = est;
+orq.carga({ meta: { ultimaActualizacion: null, tipoPeriodo: 'corte' }, carga: {} }, 7);
+Check('O2 sin sello: no se inventa fecha, queda el numero de jobs en la pastilla',
+  [['7 jobs'], true], [lineasDe(est), est.classList.contains('datos-info')]);
+est = Nodo('div'); docOrq.ids['orq-estado'] = est;
+orq.carga({ carga: { fecha: '2026-10-26 09:15' } }, 3);
+Check('O3 sin meta (handler viejo): cae a carga.fecha, sin correrla',
+  ['Carga del Excel: 26/10/2026 · 09:15 · 3 jobs'], lineasDe(est));
+orq.estado('Cargando…');
+Check('O4 mensaje en la misma pastilla', [['Cargando…'], true], [lineasDe(est), est.classList.contains('datos-info')]);
+orq.estado('');
+Check('O5 vacio: sin pastilla (no deja hueco en la cabecera)', [[], false], [lineasDe(est), est.classList.contains('datos-info')]);
+Check('O6 cargar() pinta la pastilla con los jobs de la respuesta', true, /estadoCarga\(j, jobs\.length\);/.test(fuenteOrq));
+var htmlOrq = leer('orquestacion/orquestacion.html');
+Check('O7 la pagina suelta carga datos-info.js y datos-info.css', [true, true],
+  [/<script src="\.\.\/assets\/js\/datos-info\.js"><\/script>/.test(htmlOrq),
+   /<link rel="stylesheet" href="\.\.\/assets\/css\/datos-info\.css">/.test(htmlOrq)]);
+Check('O8 el nodo sigue en la cabecera, junto a "Fijar KPIs"', true,
+  /<div class="acciones-top">[\s\S]*?kpis-fijar[\s\S]*?<div class="estado" id="orq-estado" role="status"><\/div>/.test(htmlOrq));
 
 // ---- T) Tablero legacy ----
 var fuenteDash = leer('dashboard.js');

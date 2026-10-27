@@ -219,9 +219,10 @@ public static partial class ExperienciaQueries
                  sello    MAX(FechaUltimaCargaDW) de dbo.Tickets, el mismo
                           'corte' que ya alimentaba fecha_actualizacion -pero
                           con su hora, que el formato dd/MM/yyyy tiraba-. Lo
-                          escribe SQL Server, cuyo host corre en UTC, asi que
-                          va como ZonaSello.Utc y es el contrato compartido
-                          quien lo pasa a UTC-06;
+                          escribe el ETL con el reloj local del SQL Server
+                          (UTC-06), como dbo.EtlLog.Fin, asi que va como
+                          ZonaSello.YaLocal y se muestra tal cual (como Utc
+                          se restaban otras seis horas);
                  periodo  el SLOT 0, que es la ventana de los ultimos
                           DIAS_SLOT dias contada desde el MISMO 'hoy' con el
                           que ArmarCalendario rotula el eje. Son fechas de
@@ -229,17 +230,16 @@ public static partial class ExperienciaQueries
             var info = DashboardDataInfo.Periodo(
                 "Experiencia al Usuario",
                 corte,
-                ZonaSello.Utc,
+                ZonaSello.YaLocal,
                 hoy.AddDays(-DIAS_SLOT),
                 hoy,
                 "MAX(FechaUltimaCargaDW) de dbo.Tickets");
 
             salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
-            /* El dia del mismo sello, ya en zona de presentacion: si se
-               formateara el 'corte' crudo, un ETL de madrugada UTC pintaria
-               aqui el dia siguiente al que dice meta. Es el unico consumidor
-               que quedaba leyendo el valor sin convertir. El mock y la pagina
-               suelta siguen encontrando la llave con el mismo formato. */
+            /* El dia del mismo sello, el que dice meta: se pide a
+               SelloParaMostrar() para que las dos llaves no puedan discrepar
+               si la zona del sello cambia. El mock y la pagina suelta siguen
+               encontrando la llave con el mismo formato. */
             var selloLocal = info.SelloParaMostrar();
             salida["fecha_actualizacion"] = (selloLocal ?? hoy)
                 .ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);

@@ -32,21 +32,46 @@ public static class TzSmoke
 
     public static int Main()
     {
-        // 1) Backlog: FechaHoraSnapshot UTC -> UTC-06.
+        // 1) Un instante guardado de verdad en UTC sigue pasando a UTC-06.
         var backlog = DashboardDataInfo.Corte(
             "Backlog", new DateTime(2026, 9, 14, 14, 46, 22), ZonaSello.Utc, "fuente");
-        Check("Backlog 14:46:22 UTC", "2026-09-14T08:46:22", backlog.AJson()["ultimaActualizacion"]);
+        Check("Utc 14:46:22 -> UTC-06", "2026-09-14T08:46:22", backlog.AJson()["ultimaActualizacion"]);
 
-        // 2) Experiencia: FechaUltimaCargaDW UTC -> UTC-06, y conserva su periodo.
+        // 1b) Backlog: FechaHoraSnapshot (DEFAULT sysdatetime()) ya esta en
+        //     la hora local del SQL Server y va como YaLocal: 09:15 es 09:15.
+        var blLocal = DashboardDataInfo.Corte(
+            "Backlog", new DateTime(2026, 10, 26, 9, 15, 0), ZonaSello.YaLocal, "fuente");
+        Check("Backlog 09:15 local intacto", "2026-10-26T09:15:00", blLocal.AJson()["ultimaActualizacion"]);
+
+        // 2) Experiencia: MAX(FechaUltimaCargaDW) ya local, va como YaLocal:
+        //    sin restar seis horas, y su periodo (fechas de negocio) intacto.
         var hoy = DashboardDataInfo.HoyEnPresentacion();
         var exp = DashboardDataInfo.Periodo(
-            "Experiencia al Usuario", new DateTime(2026, 9, 14, 17, 0, 0), ZonaSello.Utc,
+            "Experiencia al Usuario", new DateTime(2026, 10, 26, 9, 15, 0), ZonaSello.YaLocal,
             hoy.AddDays(-30), hoy, "fuente");
         var expJson = exp.AJson();
-        Check("Experiencia 17:00 UTC", "2026-09-14T11:00:00", expJson["ultimaActualizacion"]);
+        Check("Experiencia 09:15 local intacto", "2026-10-26T09:15:00", expJson["ultimaActualizacion"]);
         Check("Experiencia periodoInicio", hoy.AddDays(-30).ToString("yyyy-MM-dd"), expJson["periodoInicio"]);
         Check("Experiencia periodoFin", hoy.ToString("yyyy-MM-dd"), expJson["periodoFin"]);
         Check("Experiencia tipoPeriodo", "rodante30", expJson["tipoPeriodo"]);
+
+        // 2b) fecha_actualizacion sale del mismo SelloParaMostrar: una carga
+        //     local a las 03:00 sigue siendo de ese dia (como Utc caia en el
+        //     anterior, 21:00).
+        var madrugada = DashboardDataInfo.Periodo(
+            "Experiencia al Usuario", new DateTime(2026, 10, 26, 3, 0, 0), ZonaSello.YaLocal,
+            hoy.AddDays(-30), hoy, "fuente");
+        Check("Experiencia fecha_actualizacion mismo dia", "26/10/2026",
+            madrugada.SelloParaMostrar().Value.ToString("dd/MM/yyyy"));
+
+        // 2c) Las llamadas reales declaran YaLocal (Backlog, Experiencia).
+        var fuenteDb = System.IO.File.ReadAllText(@"App_Code\DashboardDb.cs");
+        var fuenteExp = System.IO.File.ReadAllText(@"App_Code\ExperienciaQueries.cs");
+        Check("DashboardDb Backlog YaLocal", true,
+            fuenteDb.Contains("\"Backlog\", sello, ZonaSello.YaLocal,"));
+        Check("ExperienciaQueries YaLocal", true,
+            System.Text.RegularExpressions.Regex.IsMatch(fuenteExp,
+                @"""Experiencia al Usuario"",\s*corte,\s*ZonaSello\.YaLocal,"));
 
         // 3) Cruce de dia: 02:30 UTC del 15 es el 14 a las 20:30 en UTC-06.
         var cruce = DashboardDataInfo.Corte(

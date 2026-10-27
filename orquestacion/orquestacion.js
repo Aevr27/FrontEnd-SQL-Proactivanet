@@ -364,7 +364,27 @@
   var abiertas = new Set();      // Direcciones desplegadas en la tabla
   var lista = { ind: '', texto: '', tope: 200 };
 
-  function estado(txt) { $('estado').textContent = txt || ''; }
+  /* Pastilla de la cabecera: la misma .datos-info blanca de Backlog y
+     Experiencia (assets/js/datos-info.js). El sello es el meta del handler
+     (FechaFin de la ultima carga aplicada en orq.CargaLote, ya local: se
+     pinta tal cual); el rotulo sigue diciendo "Carga del Excel" y detras va
+     el numero de jobs. Sin sello no se inventa fecha: queda solo el numero
+     de jobs. Lo prueba tools/tests/FrescuraDatosSmoke.js (parte O). */
+  function estado(txt) {
+    var n = $('estado');
+    if (txt) { DatosInfo.mensaje(n, txt); return; }
+    n.textContent = '';
+    n.classList.remove('datos-info');
+    n.removeAttribute('title');
+  }
+  function estadoCarga(j, nJobs) {
+    var c = j.carga || {};
+    var meta = j.meta || DatosInfo.armar({
+      fuente: 'Orquestación',
+      sello: c.fecha ? String(c.fecha).replace(' ', 'T') : '',
+    });
+    DatosInfo.pintar($('estado'), meta, { rotuloSello: 'Carga del Excel', sufijo: ' · ' + n0(nJobs) + ' jobs' });
+  }
   function error(txt) { $('error').hidden = !txt; $('error-msg').textContent = txt || ''; }
 
   function pedir(url) {
@@ -397,9 +417,7 @@
       llenarHistorico();
       pintar();
       pintarCarga();
-      var c = j.carga || {};
-      estado('Carga del Excel: ' + dia(c.fecha) + (c.fecha && c.fecha.length > 10 ? ' ' + c.fecha.slice(11, 16) : '') +
-        ' · ' + n0(jobs.length) + ' jobs');
+      estadoCarga(j, jobs.length);
       $('excel').disabled = false;
     }).catch(function (e) {
       estado('');
