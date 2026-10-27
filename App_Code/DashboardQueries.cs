@@ -116,6 +116,9 @@ public static class DashboardQueries
         // "Sin proveedores" del tablero: fuera los grupos de GrupoProveedor.
         // false = "Todos", que es exactamente el tablero de antes.
         public bool SinProveedores;
+        // Tipo de registro de Experiencia ("inc" / "req"): ver TipoRegistroSla.
+        // Vacio = "Todos", que es exactamente el tablero de antes.
+        public List<string> TiposRegistro = new List<string>();
 
         public static Filtros Desde(HttpRequest request)
         {
@@ -128,6 +131,7 @@ public static class DashboardQueries
             f.Grupos = Partir(request.QueryString["grupos"], ',');
             f.Tecnicos = new TecnicoFiltro(request.QueryString["tecnicos"]);
             f.SinProveedores = GrupoProveedor.Excluir(request);
+            f.TiposRegistro = TipoRegistroSla.Desde(request);
             return f;
         }
     }
@@ -197,6 +201,8 @@ public static class DashboardQueries
         // excluido sale de los dos.
         if (f.SinProveedores)
             comunes += GrupoProveedor.PredicadoExcluir(cmd, "b.Grupo");
+        // Mismo corte que el TipoTicket de Experiencia (ver TipoRegistroSla).
+        comunes += EnLista(cmd, "LTRIM(RTRIM(b.Tipo))", "tr", f.TiposRegistro);
 
         string solucion = "b.FechaFirmaSolucion >= @FechaInicio"
                         + " AND b.FechaFirmaSolucion < DATEADD(DAY, 1, @FechaFin)" + comunes;
@@ -889,6 +895,43 @@ ORDER BY b.FechaFirmaSolucion DESC;";
         {
             cmd.Parameters.Add("@PrefProv", SqlDbType.NVarChar, 100).Value = PrefijoProveedor;
             return " AND (" + columna + " IS NULL OR LTRIM(" + columna + ") NOT LIKE @PrefProv + N'%')";
+        }
+    }
+
+    /* TIPO DE REGISTRO de Experiencia (selector Todos / Incidentes /
+       Requerimientos de experiencia.js), para la tarjeta "Volumen -
+       Automatizado" y sus barras: ?tipo=inc | ?tipo=req. Cualquier otra
+       cosa, o nada, es "Todos" (lista vacia = sin predicado = el SQL de
+       siempre, byte a byte).
+
+       Los valores son los de las columnas de vw_TBSlotCAT / vw_TBMesCAT que
+       usa ExperienciaQueries.VolTipo, sobre el mismo dbo.Tickets.Tipo:
+         inc  TipoTicket = 'Incidencia'
+         req  TipoTicket IN ('Peticion de Servicio' con y sin tilde)
+       con TipoTicket = TRIM(Tipo); aqui LTRIM(RTRIM(b.Tipo)), que quita lo
+       mismo (solo espacios). La colacion CI_AS distingue la tilde, por eso
+       van las dos grafias, igual que en la vista. La "o" con tilde se arma
+       con (char)0xF3 para que App_Code siga en ASCII. */
+    public static class TipoRegistroSla
+    {
+        public const string ParametroQuery = "tipo";
+
+        public static List<string> Desde(HttpRequest request)
+        {
+            return Valores(request.QueryString[ParametroQuery]);
+        }
+
+        public static List<string> Valores(string tipo)
+        {
+            var salida = new List<string>();
+            if (string.Equals(tipo, "inc", StringComparison.OrdinalIgnoreCase))
+                salida.Add("Incidencia");
+            else if (string.Equals(tipo, "req", StringComparison.OrdinalIgnoreCase))
+            {
+                salida.Add("Petici" + (char)0xF3 + "n de Servicio");
+                salida.Add("Peticion de Servicio");
+            }
+            return salida;
         }
     }
 

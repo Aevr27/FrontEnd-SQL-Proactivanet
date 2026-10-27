@@ -18,10 +18,19 @@
 //       error / respaldo / sin dato (ninguno se toma como cero ni se resta);
 //       negativo con su signo y aviso; Mes con el mes en curso y el mismo
 //       pronostico que Volumen Actual;
-//   M)  con un filtro de Director, PO, Manager, SO o tipo (o varios) no hay
-//       barras, la leyenda dice "solo sin filtros" y la tarjeta queda en
-//       N/D diciendo por que; sin filtros vuelven barras y resta; la linea
-//       no cambia; "Ver por" no cuenta como filtro;
+//   M)  con un filtro de Director, PO, Manager o SO (o varios, con o sin
+//       tipo) no hay barras, la leyenda dice "solo sin filtros" y la tarjeta
+//       queda en N/D diciendo por que; sin filtros vuelven barras y resta;
+//       la linea no cambia; "Ver por" y el tipo de registro no cuentan como
+//       filtro;
+//   T)  tipo de registro: Incidentes / Requerimientos piden ?tipo=inc|req y
+//       la tarjeta resta el volumen de ese tipo menos los automatizados de
+//       ese tipo (6000 - 1000, 2500 - 0, Mes con pronostico); Todos da
+//       EXACTAMENTE lo de ANTES_TIPO (tarjeta, grafica, URLs, demas
+//       tarjetas); Todos -> Inc -> Req -> Todos; sin datos = N/D de "sin
+//       dato", cero = cero; error / sin respuesta / respuesta tardia de
+//       otro tipo no pasan por resultado; los filtros de dueño y "Ver por"
+//       se conservan;
 //   H)  la linea de volumen es la de BASE (fc83739, el commit anterior a esta
 //       tarjeta); renderKPIs deja "Volumen Actual" igual que BASE y pone
 //       UNA tarjeta "Volumen - Automatizado" justo
@@ -49,6 +58,7 @@ var raiz = path.join(__dirname, '..', '..');
 function limpiar(s) { return s.split(String.fromCharCode(13)).join(''); }
 var fuente = limpiar(fs.readFileSync(path.join(raiz, 'experiencia', 'experiencia.js'), 'utf8'));
 var html = limpiar(fs.readFileSync(path.join(raiz, 'experiencia', 'experiencia.html'), 'utf8'));
+var FUENTE = fuente;   // la de arnes() si no se le pasa otra
 
 // La Paleta real del tablero (assets/js/paleta.js), como la carga la pagina.
 var PALETA = (function () {
@@ -136,12 +146,16 @@ var PAYLOAD = {
   meta: { periodoInicio: '2026-09-23', periodoFin: HOY },
   categorias: [
     { categoria: 'A', nivel: 'C1', vol_slot: { 0: 10, 1: 20, 2: 30 }, vol_mes: { 8: 40, 9: 50, 10: 30 },
-      vol_actual: 9000, vol_actual_mes: 4500, iniciativas: [], ini_total: 0, ret: 0 },
+      vol_actual: 9000, vol_actual_mes: 4500, iniciativas: [], ini_total: 0, ret: 0,
+      // Columnas [Incidencia] / [Peticion de Servicio] (ExperienciaQueries.VolTipo).
+      vol_tipo: { inc: { slot: { 0: 6000, 1: 12, 2: 18 }, mes: { 8: 25, 9: 30, 10: 3000 } },
+                  req: { slot: { 0: 2500, 1: 7, 2: 9 }, mes: { 8: 10, 9: 15, 10: 1200 } } } },
   ],
 };
 
 function arnes(opciones) {
   opciones = opciones || {};
+  var fuente = opciones.fuente || FUENTE;
   var codigo =
     'var fDir="", fPO="", fMgr="", fSO="", tipoRegistro="todos";\n' +
     'var modoTiempo="slot", chartEvol=null, errApi=' + (opciones.errApi ? 'new Error("x")' : 'undefined') + ';\n' +
@@ -156,6 +170,9 @@ function arnes(opciones) {
     ['volSlotOMes', 'pronosticoMes', 'automatizadosDe', 'hayFiltrosAutomatizados', 'periodosAutomatizados', 'pedirAutomatizados',
      'tarjetaSinAutomatizar', 'volActualDe'].map(function (n) { return recortar(fuente, n); }).join('') +
     bloque(fuente, 'const AYUDA_SIN_AUTOMATIZAR=', '\nfunction tarjetaSinAutomatizar(').replace('const ', 'var ') +
+    // El selector de tipo de verdad: sustituye los campos de volumen.
+    bloque(fuente, 'const TIPOS_REGISTRO=', '\n// Sin vol_tipo').replace(/const /g, 'var ') +
+    ['camposVolumenTipo', 'aplicarTipoRegistro'].map(function (n) { return recortar(fuente, n); }).join('') +
     recortar(opciones.fuenteEvol || fuente, 'renderEvol') +
     // renderKPIs de verdad, con lo que no es de esta tarjeta de mentira.
     'var AGR=[], ESTADOS_ACTIVOS=[];\n' +
@@ -169,7 +186,10 @@ function arnes(opciones) {
     '\nvar renderEvolReal=renderEvol; renderEvol=function(c){REPINTADOS.push("evol:"+modoTiempo); renderEvolReal(c);};' +
     '\nreturn {' +
     ' modo: function (m) { modoTiempo = m; },' +
-    ' filtrar: function (d, p, m, s, t) { fDir = d || ""; fPO = p || ""; fMgr = m || ""; fSO = s || ""; tipoRegistro = t || "todos"; },' +
+    ' filtrar: function (d, p, m, s, t) { fDir = d || ""; fPO = p || ""; fMgr = m || ""; fSO = s || ""; aplicarTipoRegistro(t || "todos"); },' +
+    // Lo que hace el boton de tipo antes de renderAll (que vuelve a pedir).
+    ' tipo: function (t) { aplicarTipoRegistro(t); },' +
+    ' filtros: function () { return {dir: fDir, po: fPO, mgr: fMgr, so: fSO, modo: modoTiempo, tipo: tipoRegistro}; },' +
     ' estado: function (m, e) { if (e === undefined) delete automatizados[m]; else automatizados[m] = e; },' +
     ' leer: function (m) { return automatizados[m]; },' +
     ' pedir: function (m) { pedirAutomatizados(m); },' +
@@ -181,7 +201,7 @@ function arnes(opciones) {
   function Chart(ctx, cfg) { CHARTS.push(cfg); this.destroy = function () {}; }
   var ELEMENTOS = {};
   var A = new Function('ELEMENTOS', 'P', 'Chart', 'CHARTS', 'traer', 'console', 'Paleta', codigo)(
-    ELEMENTOS, JSON.parse(JSON.stringify(PAYLOAD)), Chart, CHARTS, opciones.traer || function () {
+    ELEMENTOS, JSON.parse(JSON.stringify(opciones.payload || PAYLOAD)), Chart, CHARTS, opciones.traer || function () {
       return Promise.reject(new Error('sin traer'));
     }, { warn: function () {} }, PALETA);
   A.elementos = ELEMENTOS;
@@ -253,11 +273,13 @@ var SOLO = 'Automatizados SLA: solo sin filtros (valor global)';
 var SIN_FILTROS = 'No disponible con filtros: Automatizados SLA es global y no responde a los filtros activos';
 Check('M0 sin filtros: resta (9000 - 3)', '8997', libre.tarjeta.v);
 [['M1 Director', ['Dir A']], ['M1 PO', ['', 'PO X']], ['M1 Manager', ['', '', 'Mgr']],
- ['M1 SO', ['', '', '', 'SO X']], ['M1 tipo Incidentes', ['', '', '', '', 'inc']],
- ['M1 tipo Requerimientos', ['', '', '', '', 'req']]].forEach(function (c) {
+ ['M1 SO', ['', '', '', 'SO X']], ['M1 Director + Incidentes', ['Dir A', '', '', '', 'inc']],
+ ['M1 SO + Requerimientos', ['', '', '', 'SO X', 'req']]].forEach(function (c) {
+  // Con tipo la linea es la de ese tipo: se compara con el tipo solo, sin dueños.
+  var lineaSin = c[1][4] ? conFiltro('', '', '', '', c[1][4]).linea : sinFunciones(mBase.data.datasets[0]);
   var r = conFiltro.apply(null, c[1]);
   Check(c[0] + ' oculta las barras y la leyenda lo dice', [1, true, false], [r.series, r.leyenda.indexOf(SOLO) >= 0, r.offset]);
-  Check(c[0] + ': la linea es identica', sinFunciones(mBase.data.datasets[0]), r.linea);
+  Check(c[0] + ': la linea es identica a la de sin dueños', lineaSin, r.linea);
   Check(c[0] + ': KPI visible en N/D, no resta el global del filtrado', ['Volumen - Automatizado', 'N/D', SIN_FILTROS],
     [r.tarjeta.l, r.tarjeta.v, r.tarjeta.f]);
 });
@@ -276,6 +298,11 @@ M.modo('slot');
 M.estado('slot', { estado: 'listo', valores: { 0: 0 } });
 Check('M5 con filtro tampoco resta un cero', ['N/D', SIN_FILTROS], [conFiltro('Dir A').tarjeta.v, conFiltro('Dir A').tarjeta.f]);
 Check('M5 sin filtro, automatizados en cero: el volumen tal cual', '9000', conFiltro().tarjeta.v);
+M.estado('slot:inc', { estado: 'listo', valores: { 0: 4, 1: 0, 2: 2 } });
+var soloTipo = conFiltro('', '', '', '', 'inc');
+Check('M6 el tipo solo no es filtro: barras del tipo, sin "solo sin filtros", y resta', [2, false, '8996'],
+  [soloTipo.series, soloTipo.leyenda.indexOf(SOLO) >= 0, soloTipo.tarjeta.v]);
+conFiltro();
 
 // ---- K) tarjeta ---------------------------------------------------------
 var K = arnes();
@@ -432,6 +459,190 @@ Check('H4 por renderKPIs: Volumen Actual 9000 y Volumen - Automatizado 7500', ['
     /plugins:\[CIFRAS_EXTREMOS,CIFRAS_ENCIMA_BARRAS\]/.test(recortar(fuente, 'renderEvol')));
 })();
 
+// ---- T) tipo de registro ------------------------------------------------
+// kpis.ashx de mentira: TicketsAutomatizados por tipo (?tipo, sin el = Todos)
+// y por fecha_fin del periodo. null = el rango no tiene ni un resuelto de
+// ese tipo (el SUM sobre cero filas de DashboardQueries.Kpis).
+var SLA_TIPO = {
+  todos: { '2026-10-23': 1500, '2026-09-23': 99, '2026-08-24': 0,
+           '2026-08-31': 700, '2026-09-30': 800, '2026-10-31': 750 },
+  inc:   { '2026-10-23': 1000, '2026-09-23': 40, '2026-08-24': 0,
+           '2026-08-31': 300, '2026-09-30': 350, '2026-10-31': 400 },
+  req:   { '2026-10-23': 0, '2026-09-23': 30, '2026-08-24': null,
+           '2026-08-31': 100, '2026-09-30': 0, '2026-10-31': 0 },
+};
+function servidorTipo(urls, datos, especial) {
+  return function (u) {
+    urls.push(u);
+    var q = new URL(u).searchParams, t = q.get('tipo') || 'todos';
+    if (especial && especial[t]) return especial[t](u);
+    var v = (datos[t] || {})[q.get('fecha_fin')];
+    return Promise.resolve({ TicketsAutomatizados: v === undefined ? null : v });
+  };
+}
+function espera() { return new Promise(function (r) { setTimeout(r, 0); }); }
+// Las tarjetas de renderKPIs, una por <div class="kpi">: rotulo, valor y pie.
+function tarjetas(A) {
+  return A.kpis().split('<div class="kpi').slice(1).map(function (h) {
+    function de(c) { var m = new RegExp('<div class="' + c + '"[^>]*>([^<]*)').exec(h); return m ? m[1] : null; }
+    return { l: de('lbl'), v: de('val'), f: de('foot'), html: h };
+  });
+}
+function rangosDe(urls) {
+  return urls.map(function (u) { var q = new URL(u).searchParams;
+    return q.get('fecha_inicio') + '|' + q.get('fecha_fin') + '|' + (q.get('tipo') || 'todos'); });
+}
+// Un tablero en `modo` y `tipo`, ya con la respuesta de SLA pintada.
+async function escenario(fuenteX, modo, tipo) {
+  var urls = [];
+  var A = arnes({ fuente: fuenteX, traer: servidorTipo(urls, SLA_TIPO) });
+  A.modo(modo); A.tipo(tipo); A.pedir(modo);
+  await espera();
+  var g = A.evol();
+  return { A: A, urls: urls, tarjetas: tarjetas(A), linea: sinFunciones(g.data.datasets[0]),
+    barras: g.data.datasets[1] ? g.data.datasets[1].data : null, grafica: sinFunciones(g),
+    leyenda: A.elementos.legendEvol.innerHTML };
+}
+
+var ANTES_TIPO = '0985851';   // experiencia.js antes de que la tarjeta respondiera al tipo
+async function tipoDeRegistro() {
+  var antes = null;
+  try {
+    antes = limpiar(cp.execSync('git show ' + ANTES_TIPO + ':experiencia/experiencia.js',
+      { cwd: raiz, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+  } catch (err) { console.log('SKIP  T1 sin git o sin ' + ANTES_TIPO + ': no se compara Todos con la version anterior'); }
+
+  // T1) Todos: exactamente lo de antes, en SLOT y en Mes.
+  for (var modo of ['slot', 'mes']) {
+    var hoy = await escenario(null, modo, 'todos');
+    if (antes) {
+      var ant = await escenario(antes, modo, 'todos');
+      Check('T1 ' + modo + ' Todos: mismas peticiones que ANTES_TIPO (sin ?tipo)', ant.urls, hoy.urls);
+      Check('T1 ' + modo + ' Todos: mismas tarjetas que ANTES_TIPO', ant.tarjetas, hoy.tarjetas);
+      Check('T1 ' + modo + ' Todos: misma grafica y leyenda que ANTES_TIPO', [ant.grafica, ant.leyenda], [hoy.grafica, hoy.leyenda]);
+    }
+    Check('T1 ' + modo + ' Todos: ninguna peticion lleva ?tipo', false, hoy.urls.some(function (u) { return /[?&]tipo=/.test(u); }));
+  }
+  var todosSlot = await escenario(null, 'slot', 'todos');
+  Check('T1 Todos SLOT: 9000 - 1500 = 7500', ['Volumen - Automatizado', '7500', '9000 − 1500 Automatizados SLA'],
+    [todosSlot.tarjetas[1].l, todosSlot.tarjetas[1].v, todosSlot.tarjetas[1].f]);
+
+  // T2) Incidentes SLOT: volumen [Incidencia] del SLOT 0 menos automatizados Incidencia del SLOT 0.
+  var inc = await escenario(null, 'slot', 'inc');
+  Check('T2 Incidentes: Volumen Actual = vol_tipo.inc.slot[0]', '6000', inc.tarjetas[0].v);
+  Check('T2 Incidentes: 6000 - 1000 = 5000', ['Volumen - Automatizado', '5000', '6000 − 1000 Automatizados SLA'],
+    [inc.tarjetas[1].l, inc.tarjetas[1].v, inc.tarjetas[1].f]);
+  Check('T2 Incidentes: una peticion por SLOT, con su rango y ?tipo=inc',
+    ['2026-09-24|2026-10-23|inc', '2026-08-25|2026-09-23|inc', '2026-07-26|2026-08-24|inc'], rangosDe(inc.urls));
+  Check('T2 Incidentes: barras del tipo (antiguo -> reciente), cero es cero', [0, 40, 1000], inc.barras);
+  Check('T2 Incidentes: linea = vol_tipo.inc (antiguo -> reciente)', [18, 12, 6000], inc.linea.data);
+  Check('T2 Incidentes: leyenda dice el tipo, sin "solo sin filtros"', [true, false],
+    [/Automatizados SLA \(resueltos, global · Incidentes\)/.test(inc.leyenda), /solo sin filtros/.test(inc.leyenda)]);
+  if (antes) {
+    var incAntes = await escenario(antes, 'slot', 'inc');
+    Check('T2 Incidentes: antes era N/D (la falla que se corrige)', 'N/D', incAntes.tarjetas[1].v);
+    Check('T8 Incidentes: las demas tarjetas, igual que ANTES_TIPO',
+      incAntes.tarjetas.filter(function (_, i) { return i !== 1; }),
+      inc.tarjetas.filter(function (_, i) { return i !== 1; }));
+  }
+
+  // T3) Requerimientos SLOT: automatizados en CERO se restan como cero.
+  var req = await escenario(null, 'slot', 'req');
+  Check('T3 Requerimientos: 2500 - 0 = 2500 (cero no es sin dato)', ['2500', '2500 − 0 Automatizados SLA'],
+    [req.tarjetas[1].v, req.tarjetas[1].f]);
+  Check('T3 Requerimientos: ?tipo=req en las tres peticiones', ['req', 'req', 'req'],
+    req.urls.map(function (u) { return new URL(u).searchParams.get('tipo'); }));
+  Check('T3/T9 Requerimientos: barra sin dato = hueco, cero = cero', [null, 30, 0], req.barras);
+
+  // T4) Mes: el mes en curso del tipo, con el pronostico de Volumen Actual.
+  var incMes = await escenario(null, 'mes', 'inc');
+  // dias_transcurridos_mes = 15: pronostico(3000) = 6000, pronostico(400) = 800.
+  Check('T4 Mes Incidentes: 6000 - 800 = 5200, real 3000 - 400 = 2600', ['5200', true, true],
+    [incMes.tarjetas[1].v, /6000 − 800 Automatizados SLA/.test(incMes.tarjetas[1].f),
+     /Real a la fecha: 2600/.test(incMes.tarjetas[1].f)]);
+  Check('T4 Mes Incidentes: un mes por peticion con ?tipo=inc',
+    ['2026-08-01|2026-08-31|inc', '2026-09-01|2026-09-30|inc', '2026-10-01|2026-10-31|inc'], rangosDe(incMes.urls));
+  var reqMes = await escenario(null, 'mes', 'req');
+  Check('T4 Mes Requerimientos: pronostico(1200) - 0 = 2400', ['2400', true],
+    [reqMes.tarjetas[1].v, /2400 − 0 Automatizados SLA/.test(reqMes.tarjetas[1].f)]);
+
+  // T5) Todos -> Incidentes -> Requerimientos -> Todos en el mismo tablero.
+  var urls5 = [], S = arnes({ traer: servidorTipo(urls5, SLA_TIPO) }), seq = [];
+  for (var t of ['todos', 'inc', 'req', 'todos', 'inc']) {
+    S.tipo(t); S.pedir('slot'); await espera();
+    seq.push(tarjetas(S)[1].v);
+  }
+  Check('T5 Todos -> Inc -> Req -> Todos -> Inc', ['7500', '5000', '2500', '7500', '5000'], seq);
+  Check('T5 cada tipo se pide una vez (la vuelta reusa lo pedido)', 9, urls5.length);
+
+  // T6) Los filtros de dueño y "Ver por" se conservan al cambiar el tipo.
+  var F6 = arnes({ traer: servidorTipo([], SLA_TIPO) });
+  F6.filtrar('Dir A', 'PO X', 'Mgr', 'SO X');
+  F6.modo('mes');
+  var vistos6 = ['inc', 'req', 'todos'].map(function (t) { F6.tipo(t); return F6.filtros(); });
+  Check('T6 Director / PO / Manager / SO y Mes intactos al cambiar el tipo', [
+    { dir: 'Dir A', po: 'PO X', mgr: 'Mgr', so: 'SO X', modo: 'mes', tipo: 'inc' },
+    { dir: 'Dir A', po: 'PO X', mgr: 'Mgr', so: 'SO X', modo: 'mes', tipo: 'req' },
+    { dir: 'Dir A', po: 'PO X', mgr: 'Mgr', so: 'SO X', modo: 'mes', tipo: 'todos' }], vistos6);
+  Check('T6 el boton de tipo solo aplica el tipo y repinta (sin tocar dueños ni modo)', [true, false],
+    [/botonesTipo\.forEach\(b=>b\.onclick=\(\)=>\{\n  if\(b\.dataset\.tipo===tipoRegistro\) return;\n  aplicarTipoRegistro\(b\.dataset\.tipo\); pintarTipoRegistro\(\); renderAll\(\);\n\}\);/.test(fuente),
+     /fDir|fPO|fMgr|fSO|modoTiempo/.test(recortar(fuente, 'aplicarTipoRegistro'))]);
+  var conDueno = await (async function () {
+    var A = arnes({ traer: servidorTipo([], SLA_TIPO) });
+    A.filtrar('Dir A', '', '', '', 'inc'); A.pedir('slot'); await espera();
+    return tarjetas(A)[1];
+  })();
+  Check('T6 dueño + tipo: sigue N/D por el dueño (regla de dueños sin cambio)',
+    ['N/D', 'No disponible con filtros: Automatizados SLA es global y no responde a los filtros activos'],
+    [conDueno.v, conDueno.f]);
+
+  // T7) Un tipo sin datos: volumen 0 y SLA sin resueltos -> el N/D de "sin dato".
+  var vacio = JSON.parse(JSON.stringify(PAYLOAD));
+  vacio.categorias[0].vol_tipo.req = { slot: {}, mes: {} };
+  var urls7 = [];
+  var V = arnes({ payload: vacio, traer: servidorTipo(urls7, { req: {} }) });
+  V.tipo('req'); V.pedir('slot'); await espera();
+  var v7 = tarjetas(V);
+  Check('T7 sin datos: Volumen Actual 0 y "Volumen - Automatizado" N/D de sin dato', ['0', 'N/D', 'SLA sin dato en el periodo'],
+    [v7[0].v, v7[1].v, v7[1].f]);
+  Check('T7 sin datos: no es el aviso de filtros', false, /No disponible con filtros/.test(v7[1].f));
+  Check('T7 sin datos: sin barras con valor (huecos, no ceros)', [null, null, null], (V.evol().data.datasets[1] || {}).data);
+
+  // T9) Error, sin respuesta, respaldo y respuesta tardia no pasan por resultado.
+  var E = arnes({ traer: servidorTipo([], SLA_TIPO, { inc: function () { return Promise.reject(new Error('HTTP 500')); } }) });
+  E.pedir('slot'); await espera();
+  E.tipo('inc'); E.pedir('slot'); await espera();
+  var e9 = tarjetas(E)[1], g9 = E.evol();
+  Check('T9 error con Incidentes: "—" y el error, sin barras', ['—', 'Error al consultar SLA', 1, true],
+    [e9.v, e9.f, g9.data.datasets.length, /error al consultar SLA/.test(E.elementos.legendEvol.innerHTML)]);
+  E.tipo('todos');
+  Check('T9 el error de Incidentes no toca Todos', '7500', tarjetas(E)[1].v);
+
+  var colgado = arnes({ traer: servidorTipo([], SLA_TIPO, { req: function () { return new Promise(function () {}); } }) });
+  colgado.tipo('req'); colgado.pedir('slot'); await espera();
+  Check('T9 sin respuesta: consultando, sin resta ni barras', ['…', 'consultando SLA', 1],
+    [tarjetas(colgado)[1].v, tarjetas(colgado)[1].f, colgado.evol().data.datasets.length]);
+
+  var R9 = arnes({ errApi: true, traer: function () { throw new Error('no deberia pedir'); } });
+  R9.tipo('inc'); R9.pedir('slot');
+  Check('T9 respaldo con tipo: no pide y no resta', ['—', 'Respaldo: SLA no disponible'],
+    [tarjetas(R9)[1].v, tarjetas(R9)[1].f]);
+
+  var pendientes = [];
+  function suelta() { pendientes.forEach(function (r) { r({ TicketsAutomatizados: 1000 }); }); }
+  var L = arnes({ traer: servidorTipo([], SLA_TIPO, { inc: function () {
+    return new Promise(function (r) { pendientes.push(r); }); } }) });
+  L.pedir('slot'); await espera();
+  L.tipo('inc'); L.pedir('slot'); await espera();
+  L.tipo('todos');
+  L.repintados.length = 0;
+  suelta(); await espera();
+  Check('T9 respuesta tardia de Incidentes ya en Todos: no repinta y Todos sigue 7500', [[], '7500'],
+    [L.repintados.slice(), tarjetas(L)[1].v]);
+  L.tipo('inc');
+  Check('T9 al volver a Incidentes se usa lo que llego (6000 - 1000)', '5000', tarjetas(L)[1].v);
+}
+
 // ---- N) peticiones ------------------------------------------------------
 (async function () {
   var urls = [];
@@ -475,6 +686,8 @@ Check('H4 por renderKPIs: Volumen Actual 9000 y Volumen - Automatizado 7500', ['
   J.pedir('slot');
   await new Promise(function (r) { setTimeout(r, 0); });
   Check('N9 respuesta que no es JSON: error, no cero', ['error', '—'], [J.leer('slot').estado, J.tarjeta(false).v]);
+
+  await tipoDeRegistro();
 
   console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\nTodo paso');
   process.exit(fallos ? 1 : 0);
