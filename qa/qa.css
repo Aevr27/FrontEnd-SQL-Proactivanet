@@ -378,6 +378,11 @@ code {
 .barra-detalle .campo select:hover { border-color: var(--g-400); }
 .barra-detalle .campo select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(101, 187, 43, .22); }
 
+/* "⬇ Descargar QA" a la IZQUIERDA de Limpiar. dashboard.css ordena el panel
+   compartido con `order` (Limpiar = 1, el resto = 2); aqui solo se adelanta
+   este boton, sin tocar el orden de las demas pestañas. */
+#qa-btn-descargar { order: 0; }
+
 /* filtros-qa, no "filtros": en el tablero .filtros es el panel de filtros de
    SLA y Backlog, que es otra cosa. */
 .filtros-qa { display: flex; flex-wrap: wrap; gap: 7px; }
