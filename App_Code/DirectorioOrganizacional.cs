@@ -280,6 +280,31 @@ public sealed class DirectorioOrganizacional
         return salida;
     }
 
+    // Los Product Owners y Service Owners VIGENTES: los dueños ya resueltos
+    // (misma regla de Resolver: N2 exacto y, si falta, heredado del C1) de
+    // cada fila VIGENTE de CatCategoriaDueno, sea de N2 o solo de C1. Quien
+    // solo es PO/SO en filas dadas de baja no sale (igual que en Catalogos
+    // y AsignacionesVigentes). Nombres normalizados, sin repetir, en orden
+    // ordinal. Lo usa AccesoIniciativas: solo un PO/SO vigente pide una
+    // iniciativa. No cambia ninguna regla.
+    public List<string> PoSoVigentes()
+    {
+        var nombres = new SortedSet<string>(StringComparer.Ordinal);
+        var filas = new List<Dueno>(_porN2.Values);
+        foreach (var d in _porC1.Values)
+            if (!filas.Contains(d)) filas.Add(d);
+
+        foreach (var d in filas)
+        {
+            if (!d.Vigente) continue;
+            string po, so, director, manager;
+            Resolver(d.C1, d.CategoriaN2, out po, out so, out director, out manager);
+            if (!string.IsNullOrEmpty(po)) nombres.Add(po);
+            if (!string.IsNullOrEmpty(so)) nombres.Add(so);
+        }
+        return new List<string>(nombres);
+    }
+
     // La fila de la que hereda un N2 de ese C1 lo que no tiene capturado
     // (la primera de su C1, ver LeerDuenos), o null. Es la misma que usa
     // Resolver; solo se expone para que Admin diga DE DONDE sale un dueño

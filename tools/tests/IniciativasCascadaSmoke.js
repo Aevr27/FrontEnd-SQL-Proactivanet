@@ -769,7 +769,7 @@ pruebas.push(function () {
   Check('V6 boton con rotulo explicito', true, /Solicitar una iniciativa/.test(html));
 });
 
-// M) Barra lateral: solo enlaces de vuelta al tablero, sin Administracion
+// M) Barra lateral: solo enlaces de vuelta al tablero y la entrada Iniciativas
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   var hrefs = (html.match(/class="mnav[^"]*" href="([^"]+)"/g) || []).map(function (m) { return m.replace(/.*href="/, '').replace('"', ''); });
@@ -778,16 +778,21 @@ pruebas.push(function () {
   // BarraLateralSmoke.js las compara contra dashboard.html.
   Check('M1 entradas = modulos del tablero', ['../dashboard.html#sla', '../dashboard.html#backlog', '../dashboard.html#experiencia',
     '../dashboard.html#efectividad', '../dashboard.html#calidad', '../dashboard.html#analisis',
-    '../dashboard.html#observabilidad', '../dashboard.html#call', 'iniciativas.html'], hrefs);
-  // Administracion: la UNICA entrada activa, y oculta hasta que SesionAdmin
-  // confirma la cuenta (data-solo-admin hidden). Es solo UX: el acceso lo
-  // decide el servidor (AccesoAdmin).
-  var activas = html.match(/class="mnav active"[^>]*>/g) || [];
-  Check('M2 una sola entrada activa: Administracion', [1, true],
-    [activas.length, /href="iniciativas\.html"[^>]*aria-current="page"/.test(activas[0] || '')]);
+    '../dashboard.html#observabilidad', '../dashboard.html#call', 'iniciativas.html', 'iniciativas.html'], hrefs);
+  // Iniciativas para ADM/MOD (data-solo-admin) e Iniciativas para el
+  // solicitante (data-solo-solicitante): las dos son esta pagina, se llaman
+  // igual, nacen ocultas y activas, y SesionAdmin nunca muestra las dos a la
+  // vez (autorizado vs. solicitante sin autorizar). Es solo UX: el acceso lo
+  // decide el servidor (AccesoAdmin, AccesoIniciativas).
+  var activas = html.match(/<li data-solo-[a-z]+ hidden>\s*<a class="mnav active"[^>]*>/g) || [];
+  Check('M2 dos entradas activas excluyentes, las dos "Iniciativas"', [2, true, true, true, true],
+    [activas.length, /^<li data-solo-admin hidden>/.test(activas[0] || ''), /^<li data-solo-solicitante hidden>/.test(activas[1] || ''),
+     activas.every(function (a) { return /href="iniciativas\.html"[^>]*aria-current="page"/.test(a); }),
+     activas.every(function (a) { return /title="Iniciativas"/.test(a); })]);
+  Check('M2 ninguna otra entrada nace activa', 2, (html.match(/class="mnav active"/g) || []).length);
   var tablero = leer('dashboard.html').replace(/<!--[\s\S]*?-->/g, '');
-  // Dos entradas, las dos ocultas: Administracion (ADM/MOD) e Iniciativas
-  // (solo solicitante: interruptor INICIATIVAS_ABIERTAS, sin rol).
+  // Dos entradas "Iniciativas", las dos ocultas: ADM/MOD y solicitante
+  // (PO/SO vigente sin rol, interruptor INICIATIVAS_ABIERTAS).
   Check('M3 el tablero enlaza a la pagina solo desde entradas ocultas',
     [true, true, true, true],
     [/<li data-solo-admin hidden>\s*<a class="mnav" id="mnav-admin" href="admin\/iniciativas\.html"/.test(tablero),
@@ -1381,8 +1386,24 @@ pruebas.push(function () {
     Check('RS6 ADM -> MOD conserva Nueva solicitud abierta', ['panel-nueva'], vistaVisible(adm));
 
     var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
-    Check('RS7 Solicitar visible con autorizado (ADM o MOD): data-solo-admin', true,
-      /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-admin hidden>/.test(html));
+    Check('RS7 Solicitar visible solo con solicitante (ADM o PO/SO vigente): data-solo-solicitud', true,
+      /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-solicitud hidden>/.test(html));
+
+    // MOD que no es PO/SO vigente (admin_sesion solicitante false): ni el
+    // boton ni la llamada directa abren Nueva solicitud; si ya estaba
+    // abierta, vuelve a Iniciativas. ADM con solicitante true, si.
+    A.fijarRol('ADM', true);
+    A.mostrarVista('nueva');
+    A.fijarRol('MOD', false);
+    Check('RS8 MOD sin ser PO/SO con Nueva solicitud abierta vuelve a Iniciativas', ['panel-iniciativas'], vistaVisible(adm));
+    adm.sel('btnSolicitar').disparar('click');
+    A.mostrarVista('nueva');
+    Check('RS8 MOD sin ser PO/SO: Solicitar (boton y llamada directa) no abre', ['panel-iniciativas'], vistaVisible(adm));
+    A.fijarRol('MOD', true);
+    adm.sel('btnSolicitar').disparar('click');
+    Check('RS8 MOD PO/SO vigente: abre Nueva solicitud', ['panel-nueva'], vistaVisible(adm));
+    A.fijarRol('ADM', true);
+    Check('RS8 ADM (solicitante): sigue en Nueva solicitud', ['panel-nueva'], vistaVisible(adm));
     Check('RS7 Crear sigue solo ADM: data-solo-adm', true,
       /id="btnCrearAdmin" data-solo-adm hidden[\s>]/.test(html));
   });

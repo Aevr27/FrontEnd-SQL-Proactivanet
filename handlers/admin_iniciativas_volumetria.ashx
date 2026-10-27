@@ -13,9 +13,9 @@
 //   405 si no es GET
 //   503 no se pudo leer la vista: { error, tipo: "VolumetriaNoDisponible" }.
 //       Nunca se responde 0 cuando no se pudo leer.
-//   403 AccesoIniciativas.ExigirSolicitud (ADM o MOD, o cualquier cuenta
-//       Windows autenticada con el interruptor INICIATIVAS_ABIERTAS: Nueva
-//       solicitud la pide), antes de tocar la base.
+//   403 AccesoIniciativas.ExigirSolicitud (ADM; MOD si es PO/SO vigente;
+//       los demas con el interruptor INICIATIVAS_ABIERTAS y siendo PO/SO
+//       vigente: Nueva solicitud la pide), antes de tocar la base.
 //
 //   GET ...?alcance=total&ruta=...   SOLO ADM (Crear / Modificar de ADM)
 //   200 { "alcance": "total", "rutas": [ { "ruta", "llave", "estado": ok|cero|ruta_invalida,

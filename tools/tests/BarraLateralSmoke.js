@@ -42,7 +42,10 @@ function todas(texto, re) {
 }
 
 // --- las entradas de la barra -------------------------------------------
-var botones = todas(html, /<button[^>]*class="mnav[^"]*"[^>]*>/g).map(function (m) { return m[0]; });
+// "Reintentar acceso" (data-sesion-incierta) es un <button class="mnav"> que
+// no es un modulo: se revisa aparte, abajo.
+var incierta = (html.match(/<li data-sesion-incierta hidden>[\s\S]*?<\/li>/) || [''])[0];
+var botones = todas(html.replace(incierta, ''), /<button[^>]*class="mnav[^"]*"[^>]*>/g).map(function (m) { return m[0]; });
 var nombres = botones.map(function (b) { return (b.match(/data-tab="([^"]+)"/) || [])[1]; });
 
 // Ocho entradas: QA y QARE van juntas en "Calidad de información" y
@@ -148,13 +151,53 @@ comprobar('el clic de la barra llama a activarTab',
 comprobar('el clic del selector de grupo llama a activarTab',
   /querySelectorAll\('\.subnav-btn\[data-tab\]'\)[\s\S]{0,200}activarTab\(btn\.dataset\.tab\)/.test(js), true);
 
-// --- Administracion es un enlace, no una pestaña -------------------------
-// Sin data-tab y fuera del selector del clic: no pasa por activarTab (que
-// la mandaria a SLA antes de navegar). Nace oculta (SesionAdmin).
-var enlaceAdmin = (html.match(/<li data-solo-admin hidden>\s*<a class="mnav"[^>]*>/) || [''])[0];
-comprobar('Administracion: enlace oculto a admin/iniciativas.html',
-  /href="admin\/iniciativas\.html"/.test(enlaceAdmin), true);
-comprobar('Administracion: sin data-tab', /data-tab/.test(enlaceAdmin), false);
+// --- Iniciativas: dos entradas excluyentes, un solo nombre ----------------
+// ADM/MOD (data-solo-admin) y el solicitante PO/SO vigente sin rol
+// (data-solo-solicitante) ven la misma entrada "Iniciativas": mismo title
+// (el nombre accesible plegada, cuando .mnav-txt no se pinta), mismo texto
+// desplegada y mismo icono. Siguen siendo dos <li> porque cada una la
+// muestra SesionAdmin segun su condicion; nunca las dos. Enlaces, sin
+// data-tab: no pasan por activarTab (que las mandaria a SLA antes de
+// navegar). Esto es solo marcado: quien ve cada una lo prueban
+// SesionAdminSmoke.js y AccesoIniciativasHttpSmoke.cs.
+var MAS_SUELTO = '<path d="M12 5v14"/><path d="M5 12h14"/>';
+function entrada(texto, marca) {
+  var li = (texto.match(new RegExp('<li ' + marca + ' hidden>[\\s\\S]*?<\\/li>')) || [''])[0];
+  return {
+    li: li,
+    title: (li.match(/<a [^>]*title="([^"]+)"/) || [])[1] || null,
+    txt: (li.match(/<span class="mnav-txt">([^<]+)<\/span>/) || [])[1] || null,
+    svg: (li.match(/<svg class="mnav-ico"[^>]*>([\s\S]*?)<\/svg>/) || [])[1] || ''
+  };
+}
+function entradaSolicitar(texto) { return entrada(texto, 'data-solo-solicitante'); }
+function entradaAdmin(texto) { return entrada(texto, 'data-solo-admin'); }
+var admTablero = entradaAdmin(html);
+var solTablero = entradaSolicitar(html);
+comprobar('Iniciativas (ADM/MOD): enlace oculto a admin/iniciativas.html, sin data-tab',
+  /<li data-solo-admin hidden>\s*<a class="mnav" id="mnav-admin" href="admin\/iniciativas\.html"/.test(admTablero.li) + '|' +
+  /data-tab/.test(admTablero.li), 'true|false');
+comprobar('Iniciativas (solicitante): enlace oculto a admin/iniciativas.html, sin data-tab',
+  /<li data-solo-solicitante hidden>\s*<a class="mnav" id="mnav-solicitar" href="admin\/iniciativas\.html"/.test(solTablero.li) + '|' +
+  /data-tab/.test(solTablero.li), 'true|false');
+comprobar('Iniciativas (ADM/MOD): title y texto', [admTablero.title, admTablero.txt].join('|'), 'Iniciativas|Iniciativas');
+comprobar('Iniciativas (solicitante): title y texto', [solTablero.title, solTablero.txt].join('|'), 'Iniciativas|Iniciativas');
+comprobar('Iniciativas: el mismo icono para las dos', admTablero.svg.replace(/\s+/g, ''), solTablero.svg.replace(/\s+/g, ''));
+comprobar('Iniciativas: el icono no es un "+" suelto', solTablero.svg.replace(/\s+/g, '').indexOf(MAS_SUELTO.replace(/\s+/g, '')) === -1 &&
+  (solTablero.svg.match(/<path /g) || []).length >= 2, true);
+comprobar('Iniciativas: el icono es decorativo (aria-hidden), en las dos',
+  /<svg class="mnav-ico"[^>]*aria-hidden="true"/.test(admTablero.li) + '|' + /<svg class="mnav-ico"[^>]*aria-hidden="true"/.test(solTablero.li), 'true|true');
+comprobar('ninguna entrada del tablero se llama Administracion ni Solicitar iniciativa',
+  /title="Administración"|>Administración<|title="Solicitar una iniciativa"|>Solicitar iniciativa</.test(html), false);
+comprobar('ninguna entrada del tablero es solo un "+"', html.replace(/\s+/g, '').indexOf(MAS_SUELTO.replace(/\s+/g, '')), -1);
+
+// --- Reintentar acceso: solo si admin_sesion no pudo confirmar -----------
+comprobar('Reintentar: nace oculto, boton sin data-tab, con title y texto',
+  [/<li data-sesion-incierta hidden>\s*<button class="mnav" id="mnav-sesion-reintentar" type="button" title="[^"]+"/.test(incierta),
+   /data-tab/.test(incierta), /<span class="mnav-txt">Reintentar acceso<\/span>/.test(incierta)].join(), 'true,false,true');
+comprobar('Reintentar: el clic vuelve a preguntar (SesionAdmin)',
+  /getElementById\('mnav-sesion-reintentar'\)[\s\S]{0,120}addEventListener\('click', aplicarSesion\)/.test(html), true);
+
 comprobar('activarTab sigue marcando la entrada activa',
   /function activarTab[\s\S]{0,1500}querySelectorAll\('\.mnav'\)/.test(js), true);
 
@@ -162,8 +205,9 @@ comprobar('activarTab sigue marcando la entrada activa',
 // Es marcado copiado (pagina estatica): se habia quedado sin Efectividad ni
 // Analisis de servicios. Mismas secciones, mismo orden, mismo title, cada
 // una como enlace a ../dashboard.html#<data-tab> (sin data-tab: ahi no hay
-// activarTab). Administracion sigue oculta (data-solo-admin) y es la unica
-// marcada como actual.
+// activarTab). Las dos entradas Iniciativas (data-solo-admin y
+// data-solo-solicitante) siguen ocultas y son las unicas marcadas como
+// actuales.
 var admin = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.html'), 'utf8')
   .replace(/<!--[\s\S]*?-->/g, '');
 var navAdmin = (admin.match(/<aside class="lateral" id="lateral">[\s\S]*?<\/aside>/) || [''])[0];
@@ -178,13 +222,29 @@ comprobar('admin: Efectividad y Analisis de servicios presentes', [
   /href="\.\.\/dashboard\.html#efectividad"/.test(navAdmin), /href="\.\.\/dashboard\.html#analisis"/.test(navAdmin)].join(),
   'true,true');
 comprobar('admin: ninguna entrada con data-tab', /data-tab/.test(navAdmin), false);
-comprobar('admin: solo una mas (Administracion), oculta hasta SesionAdmin',
+// Ademas, Solicitar iniciativa (data-solo-solicitante): el solicitante no
+// pierde la entrada al abrir la pagina. Las dos son "la actual" y nunca se
+// ven a la vez (SesionAdmin: autorizado vs. solicitante sin autorizar).
+comprobar('admin: dos mas (Iniciativas ADM/MOD y solicitante), ocultas hasta SesionAdmin',
   enlaces.length - deTablero.length + '|' +
-  /<li data-solo-admin hidden>\s*<a class="mnav active" href="iniciativas\.html" aria-current="page"/.test(navAdmin), '1|true');
-comprobar('admin: solo Administracion nace como actual',
-  enlaces.filter(function (a) { return /aria-current="page"|mnav active/.test(a); }).length, 1);
-comprobar('admin: data-solo-admin solo en Administracion',
+  /<li data-solo-admin hidden>\s*<a class="mnav active" href="iniciativas\.html" aria-current="page"/.test(navAdmin) + '|' +
+  /<li data-solo-solicitante hidden>\s*<a class="mnav active" href="iniciativas\.html" aria-current="page"/.test(navAdmin), '2|true|true');
+comprobar('admin: solo esas dos nacen como actual',
+  enlaces.filter(function (a) { return /aria-current="page"|mnav active/.test(a); }).length, 2);
+var admAdmin = entradaAdmin(navAdmin);
+var solAdmin = entradaSolicitar(navAdmin);
+comprobar('admin: Iniciativas (ADM/MOD) igual que en el tablero (title, texto, icono)',
+  [admAdmin.title, admAdmin.txt, admAdmin.svg.replace(/\s+/g, '')].join('|'),
+  [admTablero.title, admTablero.txt, admTablero.svg.replace(/\s+/g, '')].join('|'));
+comprobar('admin: Iniciativas (solicitante) igual que en el tablero (title, texto, icono)',
+  [solAdmin.title, solAdmin.txt, solAdmin.svg.replace(/\s+/g, '')].join('|'),
+  [solTablero.title, solTablero.txt, solTablero.svg.replace(/\s+/g, '')].join('|'));
+comprobar('admin: data-solo-solicitante solo en la entrada del solicitante',
+  (navAdmin.match(/data-solo-solicitante/g) || []).length, 1);
+comprobar('admin: data-solo-admin solo en la entrada de ADM/MOD',
   (navAdmin.match(/data-solo-admin/g) || []).length, 1);
+comprobar('admin: ninguna entrada del menu se llama Administracion ni Solicitar iniciativa',
+  /title="Administración"|>Administración<|title="Solicitar una iniciativa"|>Solicitar iniciativa</.test(navAdmin), false);
 
 // --- plegar es solo una clase, no un segundo cargador --------------------
 // Si plegarLateral() tocara `listo`, `montando` o init(), cambiar el ancho

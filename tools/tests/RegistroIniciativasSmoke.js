@@ -1197,7 +1197,8 @@ pruebas.push(function () {
   c.datos.po = 'PO 1';
   Check('SD5 mismo PO: sin cambio', ['po'], c.validar().map(function (e) { return e.dato; }));
   c.datos.po = 'PO 2'; c.datos.titulo = '  Uno nuevo '; c.datos.so = '';
-  Check('SD6 SO vacío cuando ya está vacío = sin cambio', ['so'], c.validar().map(function (e) { return e.dato; }));
+  Check('SD6 SO marcado y vacío: error (nunca se pide dejarlo vacío)', [['so'], true],
+    [c.validar().map(function (e) { return e.dato; }), /no puede quedar vacío/.test(c.validar()[0].mensaje)]);
   c.datos.so = 'SO x';
   Check('SD7 válida y el resumen dice anterior → nuevo de cada dato', [[], [['titulo', 'Uno', 'Uno nuevo'], ['po', 'PO 1', 'PO 2'], ['so', '', 'SO x']], true],
     [c.validar(), c.resumen().datos.map(function (d) { return [d.campo, d.anterior, d.nuevo]; }), c.resumen().automatica]);
@@ -1241,7 +1242,7 @@ pruebas.push(function () {
       [true, true, true, false, false],
       [/<option value="datos">Título, Product Owner o Service Owner<\/option><option value="otros">/.test(html),
        /id="regCambioGrupoDatos" hidden/.test(html),
-       /Product Owner capturado<\/label><span class="ini-cambio-rot">Actual<\/span><span class="ini-cambio-actual">PO 1</.test(grupo),
+       /<span class="ini-cambio-dato-nombre" id="regCambioDato-po-nombre">Product Owner<\/span><label class="ini-cambio-marca"><input type="checkbox" id="regCambioDato-po"[^>]*> <span>Incluir cambios al Product Owner<\/span><\/label><\/div><span class="ini-cambio-rot">Valor actual<\/span><span class="ini-cambio-actual">PO 1</.test(grupo),
        /regCambioDato-codigo|Código/.test(grupo), /PO de la categoria/.test(grupo)]);
     elegirEn('regCambioCampo', 'datos');
     Check('SD13 elegir datos: solo su grupo', [false, true, true],
@@ -1267,6 +1268,107 @@ pruebas.push(function () {
       Check('SD16 sin solicitudes_datos: ni la opción ni el grupo', [false, false],
         [/value="datos"/.test(sin.sel('regCambio').innerHTML), /regCambioGrupoDatos/.test(sin.sel('regCambio').innerHTML)]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SX) Solicitar cambios de Título / PO / SO por el formulario: cada casilla
+// decide SU dato; lo no marcado no viaja (ni vacío); lo marcado nunca es
+// vacío (ni espacios, ni el «— Elige —»). Lo que no pasa no se envía.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var d = JSON.parse(JSON.stringify(DATOS));
+  d.persistencia_solicitudes = true; d.solicitudes_datos = true;
+  var p = Pagina(ok(d), function () { return nunca(); });
+  var envios = [];
+  function accion(a) {
+    var el = Elemento('b'); el.setAttribute('data-accion', a);
+    p.sel('regDetCuerpo').disparar('click', { target: el });
+  }
+  // marcas: { titulo / po / so: valor } (presente = casilla marcada).
+  function caso(marcas) {
+    if (p.sel('regCambio').innerHTML) accion('cambio-cancelar');
+    accion('solicitar-cambios');
+    p.sel('regCambioCampo').value = 'datos';
+    p.sel('regDetCuerpo').disparar('change', { target: p.sel('regCambioCampo') });
+    ['titulo', 'po', 'so'].forEach(function (k) {
+      var marcado = Object.prototype.hasOwnProperty.call(marcas, k);
+      p.sel('regCambioDato-' + k).checked = marcado;
+      // Sin marcar se deja algo escrito / elegido: igual no debe viajar.
+      p.sel('regCambioDatoValor-' + k).value = marcado ? marcas[k] : (k === 'titulo' ? 'escrito sin marcar' : k === 'po' ? 'PO 2' : 'SO y');
+    });
+    p.sel('regCambioMotivo').value = 'Motivo';
+    var antes = envios.length;
+    accion('cambio-preparar');
+    return esperar().then(esperar).then(function () {
+      return { envio: envios.length > antes ? envios[envios.length - 1] : null, msg: p.sel('regCambioMsg').innerHTML,
+               invalidos: ['titulo', 'po', 'so'].filter(function (k) { return p.sel('regCambioDatoValor-' + k).getAttribute('aria-invalid') === 'true'; }) };
+    });
+  }
+  function claves(e) { return e ? Object.keys(e).filter(function (k) { return /_nuevo$/.test(k); }).sort() : null; }
+  var ini = function () { return p.registro.registro.buscar('PRB 2026-000001'); };
+  var r = {};
+  return esperar().then(function () {
+    p.registro.fijarDuenosCatalogo({ po: ['PO 1', 'PO 2'], so: ['SO x', 'SO y'] });
+    p.registro.pedirSolicitud = function (url, op) {
+      var campos = {};
+      op.body.forEach(function (v, k) { campos[k] = v; });
+      envios.push(campos);
+      return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ enviada: true, id_solicitud: 40 + envios.length, repetida: false }); } });
+    };
+    clicFolio(p, 'PRB 2026-000001');
+    return caso({ titulo: '  Título nuevo  ' });
+  }).then(function (x) {
+    r.A = x;
+    return caso({ po: 'PO 2' });
+  }).then(function (x) {
+    r.B = x;
+    return caso({ so: 'SO y' });
+  }).then(function (x) {
+    r.C = x;
+    return caso({ titulo: 'Los tres', po: 'PO 2', so: 'SO y' });
+  }).then(function (x) {
+    r.D = x;
+    return caso({ titulo: '' });
+  }).then(function (x) {
+    r.E = x;
+    return caso({ titulo: '     ' });
+  }).then(function (x) {
+    r.F = x;
+    return caso({ po: '' });
+  }).then(function (x) {
+    r.G = x;
+    return caso({ so: '' });
+  }).then(function (x) {
+    r.H = x;
+    return caso({ so: 'SO inventado' });
+  }).then(function (x) {
+    r.H2 = x;
+    return caso({ titulo: 'Válido', po: '' });
+  }).then(function (x) {
+    r.H3 = x;
+    return caso({});
+  }).then(function (x) {
+    r.I = x;
+    Check('SX-A solo Título: viaja solo titulo_nuevo, recortado; PO / SO ni siquiera vacíos', [['titulo_nuevo'], 'Título nuevo', 'datos'],
+      [claves(r.A.envio), r.A.envio && r.A.envio.titulo_nuevo, r.A.envio && r.A.envio.tipo]);
+    Check('SX-B solo PO: viaja solo po_nuevo con la persona elegida', [['po_nuevo'], 'PO 2'], [claves(r.B.envio), r.B.envio && r.B.envio.po_nuevo]);
+    Check('SX-C solo SO: viaja solo so_nuevo con la persona elegida', [['so_nuevo'], 'SO y'], [claves(r.C.envio), r.C.envio && r.C.envio.so_nuevo]);
+    Check('SX-D los tres: viajan los tres', [['po_nuevo', 'so_nuevo', 'titulo_nuevo'], 'Los tres', 'PO 2', 'SO y'],
+      [claves(r.D.envio), r.D.envio && r.D.envio.titulo_nuevo, r.D.envio && r.D.envio.po_nuevo, r.D.envio && r.D.envio.so_nuevo]);
+    Check('SX-ABCD enviar no cambia la iniciativa (la aplica ADM)', ['T PRB 2026-000001', 'PO 1', 'SO x'],
+      [ini().titulo_problem, ini().po_capturado, ini().so_capturado]);
+    Check('SX-E Título marcado y vacío: no se envía; error en el título', [null, ['titulo'], true],
+      [r.E.envio, r.E.invalidos, /Título: escribe el nuevo título; no puede quedar vacío/.test(r.E.msg)]);
+    Check('SX-F Título de solo espacios: no se envía', [null, ['titulo']], [r.F.envio, r.F.invalidos]);
+    Check('SX-G PO marcado con «— Elige —» (valor vacío): no se envía', [null, ['po'], true],
+      [r.G.envio, r.G.invalidos, /Product Owner capturado: elige una persona de la lista; no puede quedar vacío/.test(r.G.msg)]);
+    Check('SX-H SO marcado sin persona: no se envía', [null, ['so']], [r.H.envio, r.H.invalidos]);
+    Check('SX-H2 SO que no es de la lista: no se envía', [null, ['so']], [r.H2.envio, r.H2.invalidos]);
+    Check('SX-H3 un dato válido no salva a otro marcado y vacío: nada se envía', [null, ['po']], [r.H3.envio, r.H3.invalidos]);
+    Check('SX-I nada marcado: no se envía una solicitud vacía', [null, true],
+      [r.I.envio, /Marca qué dato quieres cambiar/.test(r.I.msg)]);
+    Check('SX envíos: exactamente los cuatro válidos', 4, envios.length);
   });
 });
 
@@ -1799,8 +1901,8 @@ pruebas.push(function () {
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   Check('H1 sin "en preparacion" en Iniciativas', false, /Registro de iniciativas en preparación/.test(html));
-  Check('H2 Solicitar para ADM y MOD: oculto hasta que SesionAdmin diga autorizado', true,
-    /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-admin hidden>/.test(html));
+  Check('H2 Solicitar para ADM y PO/SO vigentes: oculto hasta que SesionAdmin diga solicitante', true,
+    /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-solicitud hidden>/.test(html));
   Check('H2 [hidden] gana al display del CTA', true,
     /\.btn\.ini-cta\[hidden\] \{ display: none; \}/.test(leer('admin/iniciativas.css')));
   Check('H3 orden de scripts', true,

@@ -3,7 +3,11 @@
 //
 // Es solo UX; lo que se fija aqui es que nunca muestre de mas: cualquier
 // respuesta que no sea { autorizado: true } deja todo oculto, y el saludo
-// solo sale con un nombre que haya dado el servidor.
+// solo sale con un nombre que haya dado el servidor. Ademas (2026-10-26):
+// una respuesta que el servidor no pudo confirmar (verificacion:
+// "incompleta" o 5xx) no cambia Administracion por Solicitar iniciativa
+// (I*), con un solo reintento automatico; y vigilar() vuelve a preguntar
+// una vez por cada 403 de Admin con la pagina abierta (V*).
 //
 //   node tools\tests\SesionAdminSmoke.js   # sale 0 si todo paso
 'use strict';
@@ -12,10 +16,12 @@ var path = require('path');
 var vm = require('vm');
 
 var codigo = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'js', 'sesion-admin.js'), 'utf8');
-var caja = { Promise: Promise };
+var caja = { Promise: Promise, setTimeout: setTimeout };
 caja.globalThis = caja;
 vm.runInNewContext(codigo, caja);
 var SesionAdmin = caja.SesionAdmin;
+// El unico reintento automatico, sin esperar de verdad.
+SesionAdmin.ESPERA_REINTENTO = 0;
 
 var fallos = 0;
 function comprobar(titulo, obtenido, esperado) {
@@ -125,17 +131,21 @@ Promise.all([
     comprobar('correo sin saludo tambien pide ?persona=1', r[6], '../handlers/admin_sesion.ashx?persona=1');
   });
 }).then(function () {
-  // Solicitante (interruptor INICIATIVAS_ABIERTAS): la entrada Iniciativas
+  // Solicitante (PO/SO vigente con el interruptor INICIATIVAS_ABIERTAS, o
+  // ADM; MOD solo si es PO/SO): la entrada Iniciativas
   // (data-solo-solicitante) solo para quien NO es ADM/MOD y el servidor
-  // dice solicitante: true; el saludo tambien para el.
+  // dice solicitante: true; "Solicitar una iniciativa"
+  // (data-solo-solicitud) para todo solicitante: true, autorizado o no (el
+  // rol ya no basta); el saludo para autorizado o solicitante.
   function conSolicitante(cuerpo) {
-    var admin = [{ hidden: true }], sol = [{ hidden: true }], adm = [{ hidden: true }];
+    var admin = [{ hidden: true }], sol = [{ hidden: true }], adm = [{ hidden: true }], pedir = [{ hidden: true }];
     var doc = { querySelectorAll: function (sel) {
-      return sel === '[data-solo-admin]' ? admin : sel === '[data-solo-adm]' ? adm : sel === '[data-solo-solicitante]' ? sol : [];
+      return sel === '[data-solo-admin]' ? admin : sel === '[data-solo-adm]' ? adm : sel === '[data-solo-solicitante]' ? sol :
+        sel === '[data-solo-solicitud]' ? pedir : [];
     } };
     var saludo = { textContent: '', hidden: true };
     return new SesionAdmin('../', respuesta(200, cuerpo)).aplicar(doc, saludo).then(function (s) {
-      return [s.solicitante, admin[0].hidden, sol[0].hidden, adm[0].hidden, saludo.hidden].join('|');
+      return [s.solicitante, admin[0].hidden, sol[0].hidden, adm[0].hidden, saludo.hidden, pedir[0].hidden].join('|');
     });
   }
   return Promise.all([
@@ -144,14 +154,116 @@ Promise.all([
     conSolicitante({ autorizado: false, solicitante: 'true', nombre: 'Juan Perez' }),
     conSolicitante({ autorizado: false, nombre: 'Juan Perez' }),
     conSolicitante({ autorizado: true, rol: 'MOD', solicitante: true }),
+    conSolicitante({ autorizado: true, rol: 'ADM', solicitante: true }),
+    conSolicitante({ autorizado: true, rol: 'MOD', solicitante: false, nombre: 'Mod Uno' }),
     conSolicitante({ autorizado: true, rol: 'ADM' }),
   ]).then(function (r) {
-    comprobar('solicitante: Iniciativas visible, Administracion oculta, saludo', r[0], 'true|true|false|true|false');
-    comprobar('solicitante false: todo oculto, sin saludo', r[1], 'false|true|true|true|true');
-    comprobar('solicitante "true" (texto): no cuenta', r[2], 'false|true|true|true|true');
-    comprobar('respuesta vieja sin solicitante: todo oculto', r[3], 'false|true|true|true|true');
-    comprobar('MOD: Administracion, no la entrada de solicitante', r[4], 'true|false|true|true|true');
-    comprobar('ADM: solicitante implicito, Administracion y Crear', r[5], 'true|false|true|false|true');
+    comprobar('solicitante: Iniciativas visible, Administracion oculta, saludo', r[0], 'true|true|false|true|false|false');
+    comprobar('solicitante false: todo oculto, sin saludo', r[1], 'false|true|true|true|true|true');
+    comprobar('solicitante "true" (texto): no cuenta', r[2], 'false|true|true|true|true|true');
+    comprobar('respuesta vieja sin solicitante: todo oculto', r[3], 'false|true|true|true|true|true');
+    comprobar('MOD PO/SO: Administracion y Solicitar, no la entrada de solicitante', r[4], 'true|false|true|true|true|false');
+    comprobar('ADM: Administracion, Crear y Solicitar', r[5], 'true|false|true|false|true|false');
+    comprobar('MOD sin ser PO/SO: Administracion y saludo, sin Solicitar', r[6], 'false|false|true|true|false|true');
+    comprobar('autorizado sin solicitante: ya no es solicitante implicito (sin Solicitar)', r[7], 'false|false|true|false|true|true');
+  });
+}).then(function () {
+  // INCIERTO: admin_sesion contesto pero una consulta fallo
+  // (verificacion: "incompleta") o respondio 5xx. No es "sin rol": ni
+  // Administracion ni la entrada de solicitante (aunque diga solicitante:
+  // true, p. ej. rol que falla con PO/SO + interruptor), solo Reintentar.
+  // Un reintento automatico, y nada mas.
+  function secuencia(cuerpos) {
+    var n = 0;
+    var pedir = function () {
+      var c = cuerpos[Math.min(n, cuerpos.length - 1)]; n++;
+      return c === 'red' ? Promise.reject(new Error('sin red')) : respuesta(c[0], c[1])();
+    };
+    var el = {};
+    ['[data-solo-admin]', '[data-solo-adm]', '[data-solo-solicitante]', '[data-solo-solicitud]', '[data-sesion-incierta]'].forEach(function (k) { el[k] = [{ hidden: true }]; });
+    var doc = { querySelectorAll: function (sel) { return el[sel] || []; } };
+    var sesion = new SesionAdmin('', pedir);
+    function visibles() {
+      return ['[data-solo-admin]', '[data-solo-solicitante]', '[data-solo-solicitud]', '[data-sesion-incierta]']
+        .map(function (k) { return el[k][0].hidden ? '-' : k.replace(/\[data-(solo-)?|\]/g, ''); }).join(',');
+    }
+    return sesion.aplicar(doc).then(function (s) {
+      return { s: s, n: function () { return n; }, sesion: sesion, doc: doc, vis: visibles() };
+    });
+  }
+  var INC = { autorizado: false, solicitante: true, verificacion: 'incompleta' };
+  return Promise.all([
+    secuencia([[200, INC], [200, INC]]),
+    secuencia([[200, INC], [200, { autorizado: true, rol: 'ADM', solicitante: true }]]),
+    secuencia([[500, { error: 'x' }], [500, { error: 'x' }]]),
+    secuencia(['red']),
+    secuencia([[200, { autorizado: true, rol: 'MOD', solicitante: false, verificacion: 'incompleta' }]]),
+    secuencia([[200, { autorizado: false, solicitante: true }]]),
+    secuencia([[200, { autorizado: false, solicitante: false }]]),
+    secuencia([[200, { autorizado: false, solicitante: true, verificacion: 'otra' }]]),
+  ]).then(function (r) {
+    comprobar('I1 incierto 2 veces: solo Reintentar (ni Admin ni Solicitar), 2 preguntas', r[0].vis + '|' + r[0].n() + '|' + r[0].s.incierto, '-,-,-,sesion-incierta|2|true');
+    comprobar('I2 incierto y luego ADM confirmado: Administracion y Solicitar', r[1].vis + '|' + r[1].n() + '|' + r[1].s.incierto, 'admin,-,solicitud,-|2|false');
+    comprobar('I3 500 dos veces: incierto, Reintentar, 2 preguntas', r[2].vis + '|' + r[2].n(), '-,-,-,sesion-incierta|2');
+    comprobar('I4 sin red (MOCK_DATA, sin servidor): todo oculto, en silencio, sin reintento', r[3].vis + '|' + r[3].n() + '|' + r[3].s.incierto, '-,-,-,-|1|false');
+    comprobar('I5 MOD confirmado con dueños que fallan: Administracion, sin Solicitar, sin Reintentar, 1 pregunta', r[4].vis + '|' + r[4].n(), 'admin,-,-,-|1');
+    comprobar('I6 PO/SO confirmado: Solicitar iniciativa (menu) y boton, 1 pregunta', r[5].vis + '|' + r[5].n(), '-,solicitante,solicitud,-|1');
+    comprobar('I7 negativa confirmada: nada, sin Reintentar, 1 pregunta', r[6].vis + '|' + r[6].n(), '-,-,-,-|1');
+    comprobar('I8 solo "incompleta" cuenta como incierto', r[7].s.incierto + '|' + r[7].vis, 'false|-,solicitante,solicitud,-');
+    // Reintentar (la persona pulsa): aplicar otra vez, con su unico reintento.
+    return r[0].sesion.aplicar(r[0].doc).then(function () {
+      comprobar('I9 Reintentar a mano: dos preguntas mas (acotado)', r[0].n(), 4);
+    });
+  });
+}).then(function () {
+  // Dos aplicar() a la vez comparten la pregunta.
+  var n = 0;
+  var s = new SesionAdmin('', function () { n++; return respuesta(200, { autorizado: true, rol: 'ADM', solicitante: true })(); });
+  var doc = { querySelectorAll: function () { return []; } };
+  return Promise.all([s.aplicar(doc), s.aplicar(doc)]).then(function () {
+    comprobar('I10 dos aplicar a la vez: una sola pregunta', n, 1);
+  });
+}).then(function () {
+  // vigilar: un 403 de handlers/admin_* (no admin_sesion) vuelve a
+  // preguntar UNA vez y pasa el estado nuevo; la respuesta sigue igual.
+  comprobar('V0 esHandlerAdmin', [
+    SesionAdmin.esHandlerAdmin('../handlers/admin_iniciativas_registro.ashx'),
+    SesionAdmin.esHandlerAdmin('handlers/admin_correos.ashx?x=1'),
+    SesionAdmin.esHandlerAdmin('../handlers/admin_sesion.ashx?persona=1'),
+    SesionAdmin.esHandlerAdmin('../handlers/kpis.ashx'),
+    SesionAdmin.esHandlerAdmin({ url: 'http://x/handlers/admin_iniciativas_validar.ashx' })].join(), 'true,true,false,false,true');
+  var preguntas = 0, estados = [];
+  caja.fetch = function (url) {
+    var st = /admin_iniciativas_registro|admin_iniciativas_gestion/.test(url) ? 403 : 200;
+    return Promise.resolve({ ok: st === 200, status: st, json: function () { return Promise.resolve({}); } });
+  };
+  var sesion = new SesionAdmin('../', function () {
+    preguntas++;
+    return respuesta(200, { autorizado: false, solicitante: true })();
+  });
+  sesion.vigilar(function (s) { estados.push(s.autorizado + '/' + s.solicitante); });
+  sesion.vigilar(function () { estados.push('doble'); });   // no se envuelve dos veces
+  function pausa() { return new Promise(function (ok) { setTimeout(ok, 5); }); }
+  return Promise.all([
+    caja.fetch('../handlers/admin_iniciativas_registro.ashx'),
+    caja.fetch('../handlers/admin_iniciativas_gestion.ashx'),
+    caja.fetch('../handlers/admin_iniciativas_catalogos.ashx'),
+    caja.fetch('../handlers/kpis.ashx'),
+  ]).then(function (rs) {
+    return pausa().then(function () {
+      comprobar('V1 los 403 siguen llegando al que los pidio', rs.map(function (r) { return r.status; }).join(), '403,403,200,200');
+      comprobar('V2 dos 403 a la vez: UNA pregunta a admin_sesion, un aviso', preguntas + '|' + estados.join(), '1|false/true');
+      return caja.fetch('../handlers/admin_iniciativas_registro.ashx');
+    });
+  }).then(function () {
+    return pausa().then(function () {
+      comprobar('V3 otro 403 despues: otra pregunta (una por 403, nunca en bucle)', preguntas + '|' + estados.length, '2|2');
+      return caja.fetch('../handlers/admin_iniciativas_catalogos.ashx');
+    });
+  }).then(function () {
+    return pausa().then(function () {
+      comprobar('V4 un 200 no pregunta', preguntas, 2);
+    });
   });
 }).then(function () {
   console.log(fallos === 0 ? 'OK: todo paso' : 'FALLOS: ' + fallos);

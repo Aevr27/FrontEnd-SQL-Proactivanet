@@ -52,9 +52,11 @@
 // SOLO LECTURA (CatPrefijoProblem, CatCategoriaDueno, CatPersona y, con ?rutas=1,
 // Categorias). No crea ni cambia nada en la base, tampoco con ?duenos=1.
 //
-// ACCESO: AccesoIniciativas.ExigirSolicitud (rol ADM o MOD, o cualquier
-// cuenta Windows autenticada con el interruptor INICIATIVAS_ABIERTAS: es el
-// catalogo de Nueva solicitud); ?duenos=1 ExigirAdm (solo ADM) y rutas_adm
+// ACCESO: ?rutas=1 (la cascada de Nueva solicitud) AccesoIniciativas.ExigirSolicitud
+// (ADM; MOD si es PO/SO vigente; los demas con el interruptor
+// INICIATIVAS_ABIERTAS y siendo PO/SO vigente). Sin ?rutas (Cobertura del
+// registro) ADM y MOD entran como siempre (AccesoAdmin.PuedeEntrar) y los
+// demas por ExigirSolicitud. ?duenos=1 ExigirAdm (solo ADM) y rutas_adm
 // solo con rol ADM. El resto recibe 403 antes de tocar la base.
 
 using System;
@@ -68,11 +70,13 @@ public class AdminIniciativasCatalogos : IHttpHandler
     public void ProcessRequest(HttpContext context)
     {
         // ?duenos=1 es la pantalla de gestion de duenos (Administracion):
-        // solo ADM. El resto del catalogo es el de Nueva solicitud.
+        // solo ADM. Sin ?rutas es la Cobertura del registro (ADM/MOD como
+        // siempre). Lo demas es el catalogo de Nueva solicitud.
         if (context.Request.QueryString["duenos"] == "1")
         {
             if (!AccesoAdmin.ExigirAdm(context, "Solo un administrador (ADM) puede gestionar los duenos de categoria.")) return;
         }
+        else if (context.Request.QueryString["rutas"] != "1" && AccesoAdmin.PuedeEntrar(context)) { }
         else if (!AccesoIniciativas.ExigirSolicitud(context)) return;
 
         context.Response.ContentType = "application/json; charset=utf-8";

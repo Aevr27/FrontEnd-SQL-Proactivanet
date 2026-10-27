@@ -8,9 +8,13 @@
 //   - cualquier handler con una identidad no autorizada: 403 antes de nada;
 //   - capacidad ADM sin ?categoria: 400 (paso Exigir, no llego a SQL);
 //   - validar ADM con GET: 405 (paso Exigir, no llego a SQL);
-//   - Nueva solicitud es de ADM y MOD: capacidad/validar con MOD pasan
-//     igual (400 / 405, sin RolInsuficiente); registro/catalogos con MOD:
-//     NO 403 (pasan al SQL); lo solo-ADM (admin_correos) sigue 403
+//   - Nueva solicitud es de ADM siempre y de MOD solo si es PO/SO vigente
+//     (2026-10-26, AccesoIniciativas; los dueños salen de una fuente falsa,
+//     AccesoIniciativas.FuenteDuenos): MOD sin ser PO/SO recibe 403 en
+//     capacidad/validar/volumetria/catalogos?rutas=1 y admin_sesion
+//     solicitante false; MOD PO vigente pasa (400 / 405, sin
+//     RolInsuficiente); registro/catalogos sin ?rutas con MOD: NO 403
+//     (pasan al SQL); lo solo-ADM (admin_correos) sigue 403
 //     RolInsuficiente para MOD (parte C);
 //   - VIEWER (sin fila en UsuariosAdmin, con un valor que no es ADM/MOD, o
 //     con la consulta fallando; este en la whitelist o no): 403
@@ -56,6 +60,28 @@ using System.Security.Principal;
 using System.Web;
 
 // dbo.UsuariosAdmin de mentira: cuenta (sin espacios, mayusculas) -> filas.
+// CatPersona + CatCategoriaDueno de mentira (AccesoIniciativas.FuenteDuenos).
+sealed class DuenosFalsosAdmin : IFuenteDuenosVigentes
+{
+    public readonly List<PersonaCatalogo> Personas = new List<PersonaCatalogo>();
+    public readonly List<DirectorioOrganizacional.Dueno> Filas = new List<DirectorioOrganizacional.Dueno>();
+    public DuenosVigentes Leer()
+    {
+        // Copia: el directorio normaliza las filas en sitio.
+        var filas = new List<DirectorioOrganizacional.Dueno>();
+        foreach (var f in Filas)
+            filas.Add(new DirectorioOrganizacional.Dueno { CategoriaN2 = f.CategoriaN2, C1 = f.C1, Po = f.Po, So = f.So, Director = f.Director, Vigente = f.Vigente });
+        return new DuenosVigentes { Personas = new List<PersonaCatalogo>(Personas), Directorio = new DirectorioOrganizacional(filas, new Dictionary<string, string>()) };
+    }
+}
+
+// adm.Interruptor de mentira: APAGADO, sin SQL. Sin esto la lectura real
+// fallaria (no hay base) y admin_sesion diria "verificacion": "incompleta".
+sealed class InterruptorApagadoAdmin : IFuenteInterruptores
+{
+    public bool? Encendido(string clave) { return false; }
+}
+
 sealed class FuenteFalsa : IFuenteRolesAdmin
 {
     public readonly Dictionary<string, string[]> Filas = new Dictionary<string, string[]>();
@@ -169,6 +195,15 @@ public static class AccesoAdminHttpSmoke
         // Por omision YO es ADM (como en la tabla real).
         var fuente = new FuenteFalsa().Con(YO, "ADM");
         AccesoAdmin.FuenteRoles = fuente;
+        // Por omision nadie es PO/SO vigente; YO es "Andres Vera" en CatPersona.
+        var sinDuenos = new DuenosFalsosAdmin();
+        sinDuenos.Personas.Add(new PersonaCatalogo { Nombre = "Andres Vera", Correo = "t_andresvr@soriana.com" });
+        sinDuenos.Personas.Add(new PersonaCatalogo { Nombre = "Omar Alu", Correo = "omaralus@soriana.com" });
+        var yoPo = new DuenosFalsosAdmin();
+        yoPo.Personas.AddRange(sinDuenos.Personas);
+        yoPo.Filas.Add(new DirectorioOrganizacional.Dueno { CategoriaN2 = "/A/B", C1 = "/A", Po = "Andres Vera", So = "Otro SO", Director = "Dir", Vigente = true });
+        AccesoIniciativas.FuenteDuenos = sinDuenos;
+        AccesoIniciativas.Fuente = new InterruptorApagadoAdmin();
 
         // ---- Exigir directo ------------------------------------------------
         foreach (var caso in new[] { YO, @"soriana\T_ANDRESVR" })
@@ -251,12 +286,29 @@ public static class AccesoAdminHttpSmoke
         foreach (var c in casosMod)
         {
             AccesoAdmin.FuenteRoles = c.f;
+            AccesoIniciativas.FuenteDuenos = sinDuenos;
             cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
-            Check("R1 " + c.nombre + ": capacidad pasa (400 sin categoria, sin 403)", "400|True|False|False",
+            Check("R1 " + c.nombre + " sin ser PO/SO: capacidad 403 AccesoDenegado (solo PO/SO vigentes)", "403|False|True|True",
+                  estado + "|" + cuerpo.Contains("RolInsuficiente") + "|" + cuerpo.Contains("AccesoDenegado") +
+                  "|" + cuerpo.Contains("Service Owners (SO) vigentes"));
+            cuerpo = Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", null, YO, out estado);
+            Check("R1 " + c.nombre + " sin ser PO/SO: validar 403", "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
+            cuerpo = Correr(new AdminIniciativasCatalogos(), "admin_iniciativas_catalogos.ashx", "rutas=1", YO, out estado);
+            Check("R1 " + c.nombre + " sin ser PO/SO: catalogos?rutas=1 403", "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
+            cuerpo = Correr(new AdminIniciativasCatalogos(), "admin_iniciativas_catalogos.ashx", null, YO, out estado);
+            Check("R1 " + c.nombre + " sin ser PO/SO: catalogos sin ?rutas (Cobertura del registro) sigue abierto (sin 403)", false, estado == 403);
+            cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
+            Check("R1 " + c.nombre + " sin ser PO/SO: admin_sesion entra como MOD, no solicitante", "{\"autorizado\":true,\"rol\":\"MOD\",\"solicitante\":false}", cuerpo);
+            cuerpo = Correr(new AdminIniciativasRegistro(), "admin_iniciativas_registro.ashx", null, YO, out estado);
+            Check("R1 " + c.nombre + " sin ser PO/SO: el registro sigue abierto (sin 403)", false, estado == 403);
+
+            AccesoIniciativas.FuenteDuenos = yoPo;
+            cuerpo = Correr(new AdminIniciativasCapacidad(), "admin_iniciativas_capacidad.ashx", null, YO, out estado);
+            Check("R1 " + c.nombre + " PO vigente: capacidad pasa (400 sin categoria, sin 403)", "400|True|False|False",
                   estado + "|" + cuerpo.Contains("SolicitudInvalida") + "|" + cuerpo.Contains("RolInsuficiente") +
                   "|" + cuerpo.Contains("AccesoDenegado"));
             cuerpo = Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", null, YO, out estado);
-            Check("R1 " + c.nombre + ": validar pasa (405 por GET, sin 403)", "405|True|False|False",
+            Check("R1 " + c.nombre + " PO vigente: validar pasa (405 por GET, sin 403)", "405|True|False|False",
                   estado + "|" + cuerpo.Contains("MetodoNoPermitido") + "|" + cuerpo.Contains("RolInsuficiente") +
                   "|" + cuerpo.Contains("AccesoDenegado"));
             cuerpo = Correr(new AdminCorreos(), "admin_correos.ashx", null, YO, out estado);
@@ -269,13 +321,14 @@ public static class AccesoAdminHttpSmoke
             Check("R1 " + c.nombre + ": catalogos?duenos=1 (gestion de duenos) 403 RolInsuficiente", "403|True",
                   estado + "|" + cuerpo.Contains("RolInsuficiente"));
             cuerpo = Correr(new AdminIniciativasCatalogos(), "admin_iniciativas_catalogos.ashx", "rutas=1", YO, out estado);
-            Check("R1 " + c.nombre + ": catalogos?rutas=1 sigue abierto a MOD (sin 403)", "False|False",
+            Check("R1 " + c.nombre + " PO vigente: catalogos?rutas=1 abierto (sin 403)", "False|False",
                   (estado == 403) + "|" + cuerpo.Contains("RolInsuficiente"));
             cuerpo = Correr(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", null, YO, out estado);
             Check("R1 " + c.nombre + ": crear/modificar directo (gestion) 403 RolInsuficiente", "403|True|False",
                   estado + "|" + cuerpo.Contains("RolInsuficiente") + "|" + cuerpo.Contains("MetodoNoPermitido"));
             cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
-            Check("R1 " + c.nombre + ": admin_sesion entra como MOD", "{\"autorizado\":true,\"rol\":\"MOD\",\"solicitante\":true}", cuerpo);
+            Check("R1 " + c.nombre + " PO vigente: admin_sesion entra como MOD y solicitante", "{\"autorizado\":true,\"rol\":\"MOD\",\"solicitante\":true}", cuerpo);
+            AccesoIniciativas.FuenteDuenos = sinDuenos;
         }
 
         // ---- X) Edicion directa (accion=modificar por POST) sin ADM ----------
@@ -339,7 +392,11 @@ public static class AccesoAdminHttpSmoke
         }
         AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "MOD");
         cuerpo = Correr(new AdminIniciativasVolumetria(), "admin_iniciativas_volumetria.ashx", "", YO, out estado);
-        Check("VT2 MOD sin alcance (Nueva solicitud): pasa la autorizacion (400 sin ruta, no 403)", "400|True", estado + "|" + cuerpo.Contains("ParametroInvalido"));
+        Check("VT2 MOD sin ser PO/SO, sin alcance (Nueva solicitud): 403", "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
+        AccesoIniciativas.FuenteDuenos = yoPo;
+        cuerpo = Correr(new AdminIniciativasVolumetria(), "admin_iniciativas_volumetria.ashx", "", YO, out estado);
+        Check("VT2 MOD PO vigente, sin alcance (Nueva solicitud): pasa la autorizacion (400 sin ruta, no 403)", "400|True", estado + "|" + cuerpo.Contains("ParametroInvalido"));
+        AccesoIniciativas.FuenteDuenos = sinDuenos;
         AccesoAdmin.FuenteRoles = fuente;
         cuerpo = Correr(new AdminIniciativasVolumetria(), "admin_iniciativas_volumetria.ashx", "alcance=total", YO, out estado);
         Check("VT3 ADM alcance=total: pasa la autorizacion (400 sin ruta)", "400|True", estado + "|" + cuerpo.Contains("ParametroInvalido"));
@@ -370,7 +427,10 @@ public static class AccesoAdminHttpSmoke
             Check("V2 " + c.nombre + ": rol VIEWER", RolAdmin.Viewer, AccesoAdmin.Rol(ctx));
             HttpContext.Current = null;
             cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
-            Check("V3 " + c.nombre + ": admin_sesion sin autorizar y sin rol", "200|{\"autorizado\":false,\"solicitante\":false}", estado + "|" + cuerpo);
+            // Sin fila / valor raro: negativa CONFIRMADA (sin marca). La consulta
+            // que falla: igual de cerrada, pero con "verificacion": "incompleta".
+            Check("V3 " + c.nombre + ": admin_sesion sin autorizar y sin rol", "200|{\"autorizado\":false,\"solicitante\":false" +
+                  (c.f.Falla ? ",\"verificacion\":\"incompleta\"" : "") + "}", estado + "|" + cuerpo);
         }
         Check("V4 la pagina y los handlers son rutas protegidas", "True|True|False",
               AccesoAdmin.EsRutaProtegida("~/admin/iniciativas.html") + "|" +
@@ -527,7 +587,7 @@ public static class AccesoAdminHttpSmoke
         cuerpo = Correr(new AdminCorreos(), "admin_correos.ashx", null, OMAR, out estado);
         Check("O2 Omar con rol MOD: lo solo-ADM sigue 403 RolInsuficiente", "403|True", estado + "|" + cuerpo.Contains("RolInsuficiente"));
         cuerpo = Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", null, OMAR, out estado);
-        Check("O2 Omar con rol MOD: Nueva solicitud si (405 por GET)", 405, estado);
+        Check("O2 Omar con rol MOD sin ser PO/SO: Nueva solicitud no (403)", 403, estado);
 
         foreach (var c in new[]
         {
@@ -540,7 +600,8 @@ public static class AccesoAdminHttpSmoke
             Check("O3 Omar " + c.nombre + ": sin rol valido no entra (403 AccesoDenegado)", "403|True",
                   estado + "|" + cuerpo.Contains("AccesoDenegado"));
             cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, OMAR, out estado);
-            Check("O3 Omar " + c.nombre + ": admin_sesion sin autorizar", "{\"autorizado\":false,\"solicitante\":false}", cuerpo);
+            Check("O3 Omar " + c.nombre + ": admin_sesion sin autorizar", "{\"autorizado\":false,\"solicitante\":false" +
+                  (c.f.Falla ? ",\"verificacion\":\"incompleta\"" : "") + "}", cuerpo);
         }
 
         AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "ADM");
@@ -549,9 +610,9 @@ public static class AccesoAdminHttpSmoke
         // Cuenta de prueba MOD, fuera de la whitelist: entra como MOD.
         AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(@"SORIANA\danielalc", "MOD");
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, @"SORIANA\danielalc", out estado);
-        Check("O5 fila MOD fuera de la whitelist: admin_sesion MOD", "{\"autorizado\":true,\"rol\":\"MOD\",\"solicitante\":true}", cuerpo);
+        Check("O5 fila MOD fuera de la whitelist: admin_sesion MOD (no PO/SO: no solicitante)", "{\"autorizado\":true,\"rol\":\"MOD\",\"solicitante\":false}", cuerpo);
         cuerpo = Correr(new AdminIniciativasValidar(), "admin_iniciativas_validar.ashx", null, @"SORIANA\danielalc", out estado);
-        Check("O5 ... Nueva solicitud si (405 por GET)", 405, estado);
+        Check("O5 ... Nueva solicitud no sin ser PO/SO (403)", 403, estado);
         cuerpo = Correr(new AdminCorreos(), "admin_correos.ashx", null, @"SORIANA\danielalc", out estado);
         Check("O5 ... lo solo-ADM no (403 RolInsuficiente)", "403|True", estado + "|" + cuerpo.Contains("RolInsuficiente"));
 

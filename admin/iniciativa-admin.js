@@ -89,9 +89,10 @@
      rechaza con las parecidas (Selector.coincidencias: parte del nombre o
      del codigo), sin elegir ninguna. Es el mismo en Crear, Modificar,
      Solicitar cambios y Seguimiento (registro-iniciativas.js).
-     EXCEPCION: la categoria de Crear y Modificar (ADM) usa el desplegable
-     del filtro Grupos de SLA (assets/js/desplegable.js sobre un <select>
-     real: Selector.desplegable + Selector.montar), con su buscador.
+     EXCEPCION: la categoria de Crear y Modificar (ADM) y el PO / SO de
+     Solicitar cambios (registro-iniciativas.js, htmlDatosCambio) usan el
+     desplegable del filtro Grupos de SLA (assets/js/desplegable.js sobre un
+     <select> real: Selector.desplegable + Selector.montar), con su buscador.
 
    FECHA DE ANALISIS POR CATEGORIA (sql/18_gestion_admin_persistencia.sql)
    ---------------------------------------------------------------------

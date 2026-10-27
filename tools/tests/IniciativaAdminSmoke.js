@@ -589,8 +589,80 @@ pruebas.push(function () {
     pg.fijarRol('ADM');
     Check('VW3 un rol que llega tarde no revierte la negacion', [null, true], [pg.rol, p.sel('panel-crear-admin').hidden]);
     var html = leer('admin/iniciativas.html');
-    Check('VW4 autorizado -> fijarRol; solo solicitante -> modoSolicitante(); si no -> denegar()', true,
-      /if \(s\.autorizado\) window\.IniciativasPagina\.fijarRol\(s\.rol\);\s*else if \(s\.solicitante\) window\.IniciativasPagina\.modoSolicitante\(\);\s*else window\.IniciativasPagina\.denegar\(\);/.test(html));
+    Check('VW4 la pagina pasa la respuesta de SesionAdmin a aplicarSesion y vigila los 403 con revisarSesion', [true, true, true],
+      [/sesion\.aplicar\(document, saludo, correo\)\.then\(function \(s\) \{\s*if \(window\.IniciativasPagina\) window\.IniciativasPagina\.aplicarSesion\(s\);/.test(html),
+       /sesion\.vigilar\(function \(s\) \{\s*if \(!window\.IniciativasPagina \|\| !window\.IniciativasPagina\.revisarSesion\(s\)\) return;\s*sesion\.pintar\(document, s, saludo, correo\);/.test(html),
+       /getElementById\('iniVerificarReintentar'\)\.addEventListener\('click', aplicarSesion\)/.test(html)]);
+  });
+});
+
+// VS) aplicarSesion / revisarSesion: la pagina segun admin_sesion, al abrir
+// y con la pagina ya abierta (un 403 de Admin). Solo UX: el servidor ya
+// niega (AccesoIniciativasHttpSmoke, parte L).
+pruebas.push(function () {
+  var SES = {
+    adm: { autorizado: true, rol: 'ADM', solicitante: true, incierto: false },
+    mod: { autorizado: true, rol: 'MOD', solicitante: false, incierto: false },
+    poso: { autorizado: false, rol: null, solicitante: true, incierto: false },
+    nada: { autorizado: false, rol: null, solicitante: false, incierto: false },
+    // Fallo la consulta del rol: el servidor dijo solicitante (PO/SO +
+    // interruptor) pero no pudo confirmar el rol.
+    incierto: { autorizado: false, rol: null, solicitante: true, incierto: true }
+  };
+  function estado(p) {
+    var pg = p.pagina;
+    return { rol: pg.rol, solo: !!pg.soloSolicitud, denegada: !!pg.denegada, tabs: p.sel('iniTabs').hidden,
+      verificar: p.sel('iniVerificar').hidden,
+      ini: p.sel('panel-iniciativas').hidden, nueva: p.sel('panel-nueva').hidden };
+  }
+  var a = Pagina(), b = Pagina(), c = Pagina(), d = Pagina(), e = Pagina(), f = Pagina();
+  return esperar().then(function () {
+    // Al abrir.
+    a.pagina.aplicarSesion(SES.incierto);
+    Check('VS1 incierto (aunque diga solicitante): ni modo solicitante ni denegar; Reintentar visible, todo oculto',
+      { rol: null, solo: false, denegada: false, tabs: true, verificar: false, ini: true, nueva: true }, estado(a));
+    a.pagina.aplicarSesion(SES.adm);
+    Check('VS2 Reintentar con respuesta confirmada ADM: vuelve la pagina entera',
+      { rol: 'ADM', solo: false, denegada: false, tabs: false, verificar: true, ini: false, nueva: true }, estado(a));
+    b.pagina.aplicarSesion(SES.poso);
+    Check('VS3 PO/SO sin rol: solo Nueva solicitud', [true, false, true], [b.pagina.soloSolicitud, b.sel('panel-nueva').hidden, b.sel('iniTabs').hidden]);
+    c.pagina.aplicarSesion(SES.nada);
+    Check('VS4 sin rol ni PO/SO: denegar', [true, false], [c.pagina.denegada, c.sel('iniDenegado').hidden]);
+    Check('VS5 revisarSesion antes de decidir: no hace nada', false, d.pagina.revisarSesion(SES.nada));
+
+    // Con la pagina abierta: ADM -> sale de UsuariosAdmin siendo PO/SO.
+    d.pagina.aplicarSesion(SES.adm);
+    d.pagina.mostrarVista('nueva');
+    var borrador = d.pagina.solicitud;
+    Check('VS6 ADM pierde el rol siendo PO/SO: repinta el menu', true, d.pagina.revisarSesion(SES.poso));
+    Check('VS6 ... pasa a solo Nueva solicitud con el MISMO borrador y sin rol',
+      [true, null, true, false, false], [d.pagina.soloSolicitud, d.pagina.rol, d.pagina.solicitud === borrador, d.sel('panel-nueva').hidden,
+        d.sel('iniAvisoSesion').hidden]);
+    Check('VS6 ... el aviso dice que ya no hay administracion', true, /Ya no tienes acceso a la administración/.test(d.sel('iniAvisoSesion').textContent));
+    Check('VS6 ... pulsar pestanas no reabre Admin', true, (d.sel('tab-iniciativas').disparar('click'), d.sel('panel-iniciativas').hidden));
+    // ... y luego deja de ser PO/SO (o se apaga el interruptor): el
+    // formulario se queda en pantalla, con el aviso.
+    d.pagina.revisarSesion(SES.nada);
+    Check('VS7 solicitante que lo pierde: no se niega la pagina ni se borra el borrador', [false, false, true],
+      [!!d.pagina.denegada, d.sel('panel-nueva').hidden, d.pagina.solicitud === borrador]);
+    Check('VS7 ... el aviso lo dice', true, /ya no está disponible para tu cuenta/.test(d.sel('iniAvisoSesion').textContent));
+
+    // ADM -> MOD sin PO/SO: se queda en Admin, sin lo de ADM ni Nueva solicitud.
+    e.pagina.aplicarSesion(SES.adm);
+    e.pagina.mostrarVista('nueva');
+    e.pagina.revisarSesion(SES.mod);
+    Check('VS8 ADM pasa a MOD sin PO/SO: rol MOD, sale de Nueva solicitud, Administracion oculta',
+      ['MOD', false, true, true], [e.pagina.rol, e.sel('panel-iniciativas').hidden, e.sel('panel-nueva').hidden, e.sel('tab-administracion').hidden]);
+    // ADM -> nada: denegar con el mensaje.
+    e.pagina.revisarSesion(SES.nada);
+    Check('VS9 pierde todo: denegar con el aviso de que ya no esta vigente', [true, false, true],
+      [e.pagina.denegada, e.sel('iniDenegado').hidden, /ya no está vigente/.test(e.sel('iniDenegadoTexto').textContent)]);
+
+    // ADM con la pagina abierta y la consulta del rol falla: no pasa a modo
+    // solicitante por un error; oculta y ofrece Reintentar.
+    f.pagina.aplicarSesion(SES.adm);
+    Check('VS10 un 403 + rol incierto: Reintentar, ni modo solicitante ni denegar', [true, false, false, false, true],
+      [f.pagina.revisarSesion(SES.incierto), f.pagina.soloSolicitud === true, f.pagina.denegada === true, f.sel('iniVerificar').hidden, f.sel('panel-iniciativas').hidden]);
   });
 });
 
@@ -622,7 +694,8 @@ pruebas.push(function () {
     var attr = function (id) {
       var tag = (new RegExp('<button[^>]*id="' + id + '"[^>]*>')).exec(html);
       return tag && / data-solo-adm[\s>]/.test(tag[0]) ? '[data-solo-adm]'
-        : tag && / data-solo-admin[\s>]/.test(tag[0]) ? '[data-solo-admin]' : '';
+        : tag && / data-solo-admin[\s>]/.test(tag[0]) ? '[data-solo-admin]'
+        : tag && / data-solo-solicitud[\s>]/.test(tag[0]) ? '[data-solo-solicitud]' : '';
     };
     var doc = { querySelectorAll: function (sel) {
       return [solicitar, crear].filter(function (b) { return attr(b.id) === sel; });
@@ -634,15 +707,17 @@ pruebas.push(function () {
   }
   function r(json) { return { ok: true, json: function () { return Promise.resolve(json); } }; }
   return Promise.all([
-    visibles(r({ autorizado: true, rol: 'ADM' })),
-    visibles(r({ autorizado: true, rol: 'MOD' })),
+    visibles(r({ autorizado: true, rol: 'ADM', solicitante: true })),
+    visibles(r({ autorizado: true, rol: 'MOD', solicitante: true })),
     visibles(r({ autorizado: false })),
-    visibles(null)
+    visibles(null),
+    visibles(r({ autorizado: true, rol: 'MOD', solicitante: false }))
   ]).then(function (v) {
     Check('CB3 ADM ve Solicitar y Crear', ['btnSolicitar', 'btnCrearAdmin'], v[0]);
-    Check('CB3 MOD ve Solicitar y no Crear', ['btnSolicitar'], v[1]);
+    Check('CB3 MOD PO/SO vigente ve Solicitar y no Crear', ['btnSolicitar'], v[1]);
     Check('CB3 VIEWER (no autorizado) no ve ninguno', [], v[2]);
     Check('CB3 sin respuesta de admin_sesion: ninguno', [], v[3]);
+    Check('CB3 MOD sin ser PO/SO no ve Solicitar ni Crear', [], v[4]);
   });
 });
 

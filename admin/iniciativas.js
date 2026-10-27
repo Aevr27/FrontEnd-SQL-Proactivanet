@@ -788,14 +788,20 @@ window.Iniciativas = (function () {
       // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
       // sin rol no se abre nada de ADM.
       this.rol = null;
+      // true | false de admin_sesion (fijarRol); null hasta saberlo.
+      this.puedeSolicitar = null;
     }
 
     // Solo UX, como SesionAdmin: decide que acciones de ADM se pintan. El
     // alta y la edicion de ADM solo validan en el servidor (501, no
     // guardan); el handler exige ADM por su cuenta (AccesoAdmin.ExigirAdm).
-    fijarRol(rol) {
+    // solicitante: admin_sesion (AccesoIniciativas: ADM siempre, MOD solo si
+    // es PO/SO vigente); sin el, como antes (con rol, puede).
+    fijarRol(rol, solicitante) {
       if (this.denegada || this.soloSolicitud) return;
+      this.salirDeSinVerificar();
       this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null;
+      this.puedeSolicitar = solicitante === undefined ? !!this.rol : solicitante === true;
       this.aplicarPestanas();
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(this.rol);
       if (this.cola) {
@@ -808,7 +814,7 @@ window.Iniciativas = (function () {
         this.nuevas.fijarRol(this.rol);
         if (this.vista === 'solicitudes') this.nuevas.abrir();
       }
-      if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') || (VISTAS_ADM_MOD[this.vista] && !this.rol)) {
+      if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') || (VISTAS_ADM_MOD[this.vista] && (!this.rol || !this.puedeSolicitar))) {
         this.mostrarVista('iniciativas');
       }
     }
@@ -817,11 +823,14 @@ window.Iniciativas = (function () {
     // de Admin. Solo UX y defensa extra: la pagina la niega
     // AdminAccesoModulo si esta registrado en Web.config, y cada handler
     // admin_iniciativas_* responde 403 a un VIEWER de todos modos.
-    // Irreversible en esta carga de pagina.
-    denegar() {
+    // Irreversible en esta carga de pagina. `mensaje` cambia solo el texto
+    // (p. ej. perdio el acceso con la pagina abierta: revisarSesion).
+    denegar(mensaje) {
       var self = this;
+      this.salirDeSinVerificar();
       this.denegada = true;
       this.rol = null;
+      if (mensaje && this.$('iniDenegadoTexto')) this.$('iniDenegadoTexto').textContent = mensaje;
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
       if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle(true);
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = true; });
@@ -837,14 +846,99 @@ window.Iniciativas = (function () {
     modoSolicitante() {
       if (this.denegada) return;
       var self = this;
+      this.salirDeSinVerificar();
       this.soloSolicitud = true;
       this.rol = null;
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
       if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle(true);
+      if (this.cola && this.cola.fijarRol) this.cola.fijarRol(null);
+      if (this.nuevas && this.nuevas.fijarRol) this.nuevas.fijarRol(null);
       this.$('iniTabs').hidden = true;
       this.$('btnVolver').hidden = true;
       Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = true; });
       this.mostrarVista('nueva');
+    }
+
+    // admin_sesion no pudo confirmar (SesionAdmin: incierto, sin
+    // autorizado): ni "sin acceso" ni "solo solicitante". Se oculta todo y
+    // se ofrece Reintentar (#iniVerificar). Reversible: la siguiente
+    // respuesta confirmada sale por fijarRol / modoSolicitante / denegar.
+    // No toca el borrador (SolicitudNueva sigue en memoria).
+    sinVerificar() {
+      if (this.denegada) return;
+      var self = this;
+      this.verificacionPendiente = true;
+      Object.keys(VISTAS).forEach(function (k) { self.$(VISTAS[k].panel).hidden = true; });
+      this.$('iniTabs').hidden = true;
+      this.$('iniVerificar').hidden = false;
+    }
+
+    salirDeSinVerificar() {
+      if (!this.verificacionPendiente) return;
+      this.verificacionPendiente = false;
+      this.$('iniVerificar').hidden = true;
+      if (!this.soloSolicitud) this.$('iniTabs').hidden = false;
+      if (VISTAS[this.vista]) this.$(VISTAS[this.vista].panel).hidden = false;
+    }
+
+    // La respuesta de admin_sesion al abrir la pagina (o al pulsar
+    // Reintentar): SesionAdmin ya pinto los data-solo-*; aqui la pagina.
+    aplicarSesion(s) {
+      if (!s) return;
+      if (s.incierto && !s.autorizado) { this.sinVerificar(); return; }
+      this.sesion = s;
+      if (s.autorizado) this.fijarRol(s.rol, s.solicitante);
+      else if (s.solicitante) this.modoSolicitante();
+      else this.denegar();
+    }
+
+    aviso(texto) {
+      var el = this.$('iniAvisoSesion');
+      if (!el) return;
+      el.textContent = texto || '';
+      el.hidden = !texto;
+    }
+
+    // Con la pagina ya abierta, un handler de Admin respondio 403 y
+    // admin_sesion volvio a contestar (SesionAdmin.vigilar). Oculta lo que
+    // ya no le toca, sin recargar: ADM que pasa a MOD (fijarRol); quien
+    // pierde ADM/MOD pero sigue siendo PO/SO vigente pasa a "solo Nueva
+    // solicitud" con su borrador (modoSolicitante); sin nada, denegar. Un
+    // solicitante que lo pierde conserva el formulario en pantalla (el
+    // servidor ya no lo deja enviar) con el aviso. true = la pagina ya habia
+    // decidido y SesionAdmin debe repintar el menu con `s`.
+    revisarSesion(s) {
+      var antes = this.sesion;
+      if (!antes || !s || this.denegada) return false;
+      if (s.incierto && !s.autorizado) {
+        if (this.soloSolicitud) {
+          this.aviso('No se pudo verificar tu acceso a Iniciativas. Si el envío falla, vuelve a intentarlo más tarde.');
+          return false;
+        }
+        this.sinVerificar();
+        return true;
+      }
+      this.sesion = s;
+      if (s.autorizado) {
+        if (antes.rol !== s.rol || antes.solicitante !== s.solicitante) {
+          this.fijarRol(s.rol, s.solicitante);
+          this.aviso('Tu acceso cambió: ahora entras como ' + s.rol + '. Se ocultó lo que ya no te corresponde.');
+        }
+        return true;
+      }
+      if (s.solicitante) {
+        if (!this.soloSolicitud) {
+          this.modoSolicitante();
+          this.aviso('Ya no tienes acceso a la administración de iniciativas. Puedes seguir con Nueva solicitud.');
+        }
+        return true;
+      }
+      if (this.soloSolicitud) {
+        this.aviso('La solicitud de iniciativas ya no está disponible para tu cuenta. Tu borrador sigue en pantalla, pero no se puede enviar.');
+        return true;
+      }
+      this.denegar('Tu acceso a la administración de iniciativas ya no está vigente.');
+      return true;
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -981,6 +1075,8 @@ window.Iniciativas = (function () {
       // El alta necesita su modulo (admin/iniciativa-admin.js); Administracion no.
       if (nombre === 'crear' && !this.crearAdmin) return;
       if (VISTAS_ADM_MOD[nombre] && this.rol !== 'ADM' && this.rol !== 'MOD' && !this.soloSolicitud) return;
+      // Con rol pero sin ser solicitante (MOD que no es PO/SO vigente).
+      if (VISTAS_ADM_MOD[nombre] && this.rol && this.puedeSolicitar === false) return;
       // Salir del registro con cambios sin guardar en el detalle: se
       // pregunta; si no se descartan, la pestana no cambia.
       if (nombre !== 'iniciativas' && this.registro && this.registro.cerrarDetalle &&

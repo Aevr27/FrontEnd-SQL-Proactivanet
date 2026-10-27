@@ -210,7 +210,8 @@ public sealed class PeticionSolicitudCambio
     public const string CSubestadoNuevo = "subestado_nuevo";
     public const string CMotivo = "motivo";
     // Tipo datos (sql/25): la clave PRESENTE = se pide cambiarlo (como
-    // PeticionModificarAdmin: null = no vino); vacio = que quede vacio.
+    // PeticionModificarAdmin: null = no vino). Presente y vacia (o solo
+    // espacios) se rechaza: una solicitud nunca deja vacios Titulo, PO ni SO.
     public const string CTituloNuevo = "titulo_nuevo";
     public const string CPoNuevo = "po_nuevo";
     public const string CSoNuevo = "so_nuevo";
@@ -253,7 +254,7 @@ public sealed class PeticionSolicitudCambio
     public string EstadoNuevo;
     public string SubestadoNuevo;
     public string Motivo;
-    // DATOS: Cambia* = se pide; el valor null = que quede vacio.
+    // DATOS: Cambia* = se pide (y entonces el valor nunca es null: se rechaza).
     public bool CambiaTitulo, CambiaPo, CambiaSo;
     public string TituloNuevo, PoNuevo, SoNuevo;
     // VARIOS (sql/34): Campo (FechaAnalisis | FechaSolucion | FechaCierre) ->
@@ -342,14 +343,18 @@ public sealed class PeticionSolicitudCambio
         foreach (var c in p.Categorias)
             if (!vistas.Add(c.Categoria)) p.Error("categoria", c.Categoria + " viene dos veces.");
 
-        // DATOS (sql/25): Titulo / PO / SO capturados. Que PO / SO sean del
-        // catalogo se revisa al APLICAR (la validacion de la edicion directa).
+        // DATOS (sql/25): Titulo / PO / SO capturados. Pedido = no vacio (ni
+        // solo espacios); que PO / SO sean del catalogo se revisa al APLICAR
+        // (la validacion de la edicion directa).
         p.CambiaTitulo = f[CTituloNuevo] != null;
         p.CambiaPo = f[CPoNuevo] != null;
         p.CambiaSo = f[CSoNuevo] != null;
         p.TituloNuevo = Limpio(f[CTituloNuevo]);
         p.PoNuevo = Limpio(f[CPoNuevo]);
         p.SoNuevo = Limpio(f[CSoNuevo]);
+        if (p.CambiaTitulo && p.TituloNuevo == null) p.Error(CTituloNuevo, "Escribe el nuevo T\u00edtulo: no puede quedar vac\u00edo.");
+        if (p.CambiaPo && p.PoNuevo == null) p.Error(CPoNuevo, "Elige el nuevo Product Owner: no puede quedar vac\u00edo.");
+        if (p.CambiaSo && p.SoNuevo == null) p.Error(CSoNuevo, "Elige el nuevo Service Owner: no puede quedar vac\u00edo.");
         if (p.PoNuevo != null && p.PoNuevo.Length > 255) p.Error(CPoNuevo, "El Product Owner pasa de 255 caracteres.");
         if (p.SoNuevo != null && p.SoNuevo.Length > 255) p.Error(CSoNuevo, "El Service Owner pasa de 255 caracteres.");
         var hayDatos = p.CambiaTitulo || p.CambiaPo || p.CambiaSo;
@@ -834,6 +839,18 @@ public static class SolicitudesCambio
             : new List<Dictionary<string, object>>();
     }
 
+    // DATOS: los datos pedidos (bandera) con el nuevo vacio -> sus nombres.
+    public static List<string> DatosVacios(Dictionary<string, object> d)
+    {
+        var vacios = new List<string>();
+        if ((d["tipo"] as string) != "DATOS") return vacios;
+        var nombres = new[] { "el T\u00edtulo", "el Product Owner", "el Service Owner" };
+        for (var n = 0; n < Datos.Length; n++)
+            if (Bandera(d, "cambia_" + Datos[n]) && string.IsNullOrWhiteSpace(Valor(d, Datos[n] + "_nuevo")))
+                vacios.Add(nombres[n]);
+        return vacios;
+    }
+
     // Solo lectura, para avisar a ADM ANTES de aplicar (la base lo vuelve a
     // revisar bajo candado: esto no decide nada). Misma regla que Aplicar.
     public static bool Desactualizada(Dictionary<string, object> d)
@@ -989,6 +1006,16 @@ public sealed class AplicadorSolicitudCambio
         var d = almacen.Detalle(id);
         if (d == null) throw new ErrorSolicitudCambio(51201, "La solicitud no existe.", null);
         if ((d["estado"] as string) != "PENDIENTE") throw new ErrorSolicitudCambio(51202, "La solicitud ya fue revisada (aplicada o rechazada).", null);
+        // DATOS: un dato pedido y vacio (guardado antes de que el envio lo
+        // rechazara) dejaria vacio el Titulo / PO / SO de la iniciativa: la
+        // edicion directa solo lo advierte. Nunca se aplica.
+        var vacios = SolicitudesCambio.DatosVacios(d);
+        if (vacios.Count > 0)
+        {
+            var msg = "No se aplica: la solicitud dejar\u00eda vac\u00edo " + string.Join(", ", vacios.ToArray()) + ".";
+            almacen.RegistrarFallo(id, revisor, NumeroValidacion, msg);
+            return new Dictionary<string, object> { { "error", msg }, { "tipo", "ValidacionFallida" }, { "aplicada", false }, { "estado_http", 422 } };
+        }
         if ((d["tipo"] as string) != "OTROS")
         {
             var f = SolicitudesCambio.ComoModificar(d, clasificaciones);

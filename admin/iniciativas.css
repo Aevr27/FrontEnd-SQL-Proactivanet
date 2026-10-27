@@ -702,6 +702,62 @@ html.ini-detalle-abierto { overflow: hidden; }
    escrita con "Estado" elegido se descartaba sin aviso. */
 .ini-cambio-campos .campo[hidden], .ini-cambio-campos [hidden] { display: none; }
 .ini-cambio-sub { display: flex; flex-direction: column; gap: 4px; }
+/* "Solicitar cambios": ancho maximo propio dentro del detalle (que ocupa
+   casi toda la pantalla) y los botones siempre a la vista al desplazar el
+   cuerpo del detalle. Solo #regCambio: .ini-cambio-pie es compartido. */
+#regCambio { max-width: 1180px; }
+#regCambio .ini-nota { margin-top: 4px; }
+#regCambio .ini-cambio-pie {
+  position: sticky; bottom: 0; z-index: 1;
+  margin: 10px -14px -12px; padding: 10px 14px;
+  background: var(--g-50); border-top: 1px solid var(--g-200);
+}
+/* Titulo / PO / SO: una tarjeta por dato, con la casilla junto a SU nombre
+   (antes la regla de input de arriba la estiraba al 100% y la centraba,
+   lejos de su campo). Tres columnas en pantalla ancha, una en angosta. */
+.ini-cambio-datos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 6px; }
+.ini-cambio-dato {
+  display: flex; flex-direction: column; gap: 3px; min-width: 0;
+  padding: 8px 10px; border: 1px solid var(--line-soft); border-radius: var(--radius-xs); background: var(--card);
+}
+.ini-cambio-dato:has(.ini-cambio-marca input:checked) { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.ini-cambio-dato-cab { display: flex; align-items: center; gap: 4px 10px; flex-wrap: wrap; margin-bottom: 2px; }
+.ini-cambio-dato-nombre { font-size: 12.5px; font-weight: 800; color: var(--ink); }
+.ini-cambio-campos label.ini-cambio-marca {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: -4px; padding: 2px 4px;
+  font-size: 11.5px; font-weight: 500; color: var(--muted); cursor: pointer; border-radius: var(--radius-xs);
+}
+.ini-cambio-campos label.ini-cambio-marca:hover { background: var(--g-50); }
+.ini-cambio-campos .ini-cambio-marca input[type="checkbox"] {
+  width: 16px; height: 16px; margin: 0; padding: 0; flex: none; accent-color: var(--accent); cursor: pointer;
+}
+.ini-cambio-dato .ini-cambio-actual { padding: 0 0 4px; overflow-wrap: anywhere; }
+/* El desplegable del tablero (assets/css/desplegable.css) dentro del
+   formulario: el <select> real se queda escondido (la regla de select de
+   arriba no lo debe volver a mostrar) y el buscador mide lo de su panel. */
+.ini-cambio-campos .dd { display: flex; width: 100%; --dd-alto: 32px; }
+.ini-cambio-campos .dd > select {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; border: 0;
+  overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%);
+}
+.ini-cambio-campos .dd .dd-busca { width: auto; }
+.ini-cambio-campos .dd .dd-valor { line-height: 1.3; }   /* con 1 la "g" de «Elige» se recortaba */
+.ini-cambio-campos .dd .dd-opcion span { white-space: normal; overflow-wrap: anywhere; line-height: 1.35; }
+.ini-cambio-campos .dd:has(> select[aria-invalid="true"]) .dd-boton { border-color: var(--rojo); }
+/* Una tarjeta por fila: el valor actual a la izquierda y el nuevo a la
+   derecha, para no apilar cinco renglones por dato. */
+@media (max-width: 1023px) {
+  .ini-cambio-datos { grid-template-columns: minmax(0, 1fr); }
+  .ini-cambio-dato { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: 3px 14px; align-items: start; }
+  .ini-cambio-dato > .ini-cambio-dato-cab { grid-column: 1 / -1; }
+  .ini-cambio-dato > .ini-cambio-rot { grid-column: 1; grid-row: 2; }
+  .ini-cambio-dato > .ini-cambio-actual { grid-column: 1; grid-row: 3; }
+  .ini-cambio-dato > label { grid-column: 2; grid-row: 2; }
+  .ini-cambio-dato > :last-child { grid-column: 2; grid-row: 3; }
+}
+@media (max-width: 639px) {
+  .ini-cambio-dato { display: flex; }
+}
 /* Cola de ADM de solicitudes (admin/solicitudes-cambio.js). */
 .ini-sol-barra { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
 .ini-sol-barra label { font-size: 11px; font-weight: 700; color: var(--muted); }
