@@ -20,6 +20,12 @@
 //   P1-P3  pagina YA abierta: un ADM que es PO/SO sale de UsuariosAdmin; el
 //          siguiente 403 de Admin vuelve a preguntar y la pagina pasa a solo
 //          Nueva solicitud con lo escrito intacto, sin recargar.
+//   S1-S7  Solicitudes sigue la regla de "Solicitar una iniciativa"
+//          (solicitante): ADM ve la cola; MOD que no es PO/SO no ve ni
+//          Solicitar ni Solicitudes, pero si el registro; MOD PO/SO y PO/SO
+//          sin rol ven las suyas (Mis solicitudes); sin acceso, nada; ningun
+//          "+" suelto en el menu y nadie con rol cae en Nueva solicitud al
+//          entrar.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -42,6 +48,7 @@ if (!Banco.CHROME) { console.log('SKIP  sin Chrome/Edge (CHROME=<ruta> para indi
 var SESIONES = {
   adm: { autorizado: true, rol: 'ADM', solicitante: true },
   mod: { autorizado: true, rol: 'MOD', solicitante: false },
+  modposo: { autorizado: true, rol: 'MOD', solicitante: true },
   poso: { autorizado: false, solicitante: true },
   nada: { autorizado: false, solicitante: false },
   // dbo.UsuariosAdmin no se pudo leer; PO/SO + interruptor si.
@@ -66,8 +73,12 @@ var ANTES = '<script>\n' +
   'window.fetch = function (u) { u = String(u && u.url || u); var st = 200, j = {}, s = window.__SES[window.__estado];\n' +
   '  var nueva = /admin_iniciativas_(catalogos|capacidad|volumetria|validar)/.test(u);\n' +
   '  if (/admin_sesion\\.ashx/.test(u)) { window.__sesiones++; j = s || {}; }\n' +
+  '  else if (/admin_iniciativas_mis_solicitudes/.test(u)) { window.__mias = (window.__mias || 0) + 1;\n' +
+  '    if (s.solicitante && !s.verificacion) j = { solicitudes: [{ numero: 7, numero_texto: "#0000007", titulo: "Mia", estado: "ENVIADA" }], total: 1, maximo: 200 };\n' +
+  '    else { st = 403; j = { error: "x", tipo: "AccesoDenegado" }; } }\n' +
   '  else if (/handlers\\/admin_/.test(u) && !s.autorizado && !(nueva && s.solicitante && !s.verificacion)) { st = 403; j = { error: "x", tipo: "AccesoDenegado" }; }\n' +
   '  else if (/admin_iniciativas_catalogos/.test(u)) j = ' + JSON.stringify(CATALOGO) + ';\n' +
+  '  else if (/admin_iniciativas_solicitudes/.test(u)) j = s.rol === "ADM" ? { solicitudes: [], total: 0 } : (st = 403, { error: "x" });\n' +
   '  return new Promise(function (r) { setTimeout(function () { r({ ok: st === 200, status: st,\n' +
   '    json: function () { return Promise.resolve(j); }, text: function () { return Promise.resolve(JSON.stringify(j)); } }); }, 10); }); };\n' +
   'Element.prototype.scrollIntoView = function () {};\n' +
@@ -125,6 +136,10 @@ function sondaAdmin() {
   function foto() {
     return { menu: menu(), tabs: !oculto('iniTabs'), ini: !oculto('panel-iniciativas'), nueva: !oculto('panel-nueva'),
       solicitar: !oculto('btnSolicitar'), denegado: !oculto('iniDenegado'), verificar: !oculto('iniVerificar'),
+      pestanas: Array.prototype.filter.call(document.querySelectorAll('#iniTabs .ini-tab'), function (t) { return !t.hidden; })
+        .map(function (t) { return t.textContent.trim(); }),
+      mas: Array.prototype.some.call(document.querySelectorAll('.lateral li:not([hidden]) .mnav'), function (a) {
+        return /M12 5v14/.test(a.innerHTML) || a.textContent.trim() === '+'; }),
       aviso: oculto('iniAvisoSesion') ? null : document.getElementById('iniAvisoSesion').textContent,
       duenos: !oculto('iniAvisoDuenos') };
   }
@@ -133,6 +148,17 @@ function sondaAdmin() {
       await espera(2500);
       apunta('inicio', foto());
       var caso = window.__estado;
+      // Solicitudes por la pestaña y, si esta oculta, por llamada directa.
+      var tab = document.getElementById('tab-solicitudes');
+      if (tab && !tab.hidden) tab.click();
+      else if (window.IniciativasPagina) window.IniciativasPagina.mostrarVista('solicitudes');
+      await espera(300);
+      apunta('solicitudes', { abierta: !oculto('panel-solicitudes'), cola: !oculto('solCola'), nota: !oculto('solNoAdm'),
+        mias: !oculto('msBloque'), lista: (document.getElementById('msLista') || {}).textContent || '', pedidas: window.__mias || 0 });
+      if (window.IniciativasPagina && !window.IniciativasPagina.denegada && !window.IniciativasPagina.verificacionPendiente) {
+        window.IniciativasPagina.mostrarVista(window.IniciativasPagina.soloSolicitud ? 'nueva' : 'iniciativas');
+        await espera(50);
+      }
       if (caso === 'incierto') {
         window.__estado = 'adm';
         document.getElementById('iniVerificarReintentar').click();
@@ -169,7 +195,7 @@ var paginas = {
   '/admin/__ini.html': Banco.pagina('admin/iniciativas.html', '../assets/js/sesion-admin.js', ANTES, sondaAdmin)
 };
 var tablero = ['adm', 'mod', 'poso', 'nada', 'incierto'];
-var admin = ['adm', 'mod', 'poso', 'nada', 'incierto', 'perdida'];
+var admin = ['adm', 'mod', 'poso', 'nada', 'incierto', 'perdida', 'modposo'];
 
 Banco.correr(paginas,
   tablero.map(function (c) { return '/__tablero.html?caso=' + c; }).concat(admin.map(function (c) { return '/admin/__ini.html?caso=' + c; })))
@@ -198,8 +224,8 @@ Banco.correr(paginas,
     var a = A.adm.inicio, m = A.mod.inicio, p = A.poso.inicio, n = A.nada.inicio, inc = A.incierto.inicio;
     Check('A1 ADM: Iniciativas (ADM/MOD) activa, pestañas, Solicitar', [['adm:Iniciativas*'], true, true, true, false], [a.menu, a.tabs, a.ini, a.solicitar, a.denegado]);
     Check('A2 MOD sin PO/SO: Iniciativas (ADM/MOD), sin Solicitar', [['adm:Iniciativas*'], true, false], [m.menu, m.tabs, m.solicitar]);
-    Check('A3 PO/SO sin rol: su entrada Iniciativas sigue (activa) al abrir la pagina; sin pestañas ni lista',
-      [['sol:Iniciativas*'], false, true, false], [p.menu, p.tabs, p.nueva, p.ini]);
+    Check('A3 PO/SO sin rol: su entrada Iniciativas sigue (activa) al abrir la pagina; Nueva solicitud, sin la lista',
+      [['sol:Iniciativas*'], true, true, false], [p.menu, p.tabs, p.nueva, p.ini]);
     Check('A3 ... el aviso de PO/SO en Nueva solicitud', true, p.duenos);
     Check('A4 sin nada: "sin acceso", ninguna entrada', [[], true, false, false], [n.menu, n.denegado, n.tabs, n.nueva]);
     Check('A5 incierto: Reintentar; ni modo solicitante ni "sin acceso"; ninguna entrada',
@@ -211,13 +237,35 @@ Banco.correr(paginas,
     Check('P0 ADM con Nueva solicitud abierta y algo escrito', [true, true], P.abierta);
     Check('P1 sale de UsuariosAdmin: el 403 llega igual y se pregunta UNA vez a admin_sesion', [403, 1], P['403']);
     var d = P.despues || {};
-    Check('P2 ... solo Nueva solicitud, la entrada Iniciativas del solicitante, sin la de ADM/MOD ni pestañas',
-      [['sol:Iniciativas*'], false, true, false, false], [d.menu, d.tabs, d.nueva, d.ini, d.denegado]);
+    Check('P2 ... Nueva solicitud, la entrada Iniciativas del solicitante, sin la de ADM/MOD; pestañas Solicitar | Solicitudes',
+      [['sol:Iniciativas*'], ['Solicitar una iniciativa', 'Solicitudes'], true, false, false], [d.menu, d.pestanas, d.nueva, d.ini, d.denegado]);
     Check('P2 ... con el aviso', true, /Ya no tienes acceso a la administración/.test(d.aviso || ''));
     Check('P3 ... lo escrito y el borrador intactos, sin recargar', [['Borrador a medias', true], 1], [P.borrador, P['sin recargar']]);
-    Check('P3 sin errores en Admin', [undefined, undefined, undefined, undefined, undefined, undefined],
+    Check('P3 sin errores en Admin', [undefined, undefined, undefined, undefined, undefined, undefined, undefined],
       admin.map(function (c) { return A[c].error; }));
 
+    var mp = A.modposo.inicio, S = function (c) { return A[c].solicitudes || {}; };
+    Check('S1 ADM: Solicitar y Solicitudes; la cola de ADM, sin Mis solicitudes',
+      [['Iniciativas', 'Solicitudes', 'Administración'], true, true, true, false, 0],
+      [a.pestanas, a.solicitar, S('adm').abierta, S('adm').cola, S('adm').mias, S('adm').pedidas]);
+    Check('S2 MOD que no es PO/SO: ni Solicitar ni Solicitudes; el registro si (pestaña Iniciativas)',
+      [['Iniciativas'], false, true], [m.pestanas, m.solicitar, m.ini]);
+    Check('S2 ... ni por llamada directa se abre Solicitudes, ni se piden sus datos', [false, false, 0],
+      [S('mod').abierta, S('mod').mias, S('mod').pedidas]);
+    Check('S3 MOD PO/SO: Solicitar y Solicitudes; el registro sigue', [['Iniciativas', 'Solicitudes'], true, true],
+      [mp.pestanas, mp.solicitar, mp.ini]);
+    Check('S3 ... Solicitudes muestra las suyas (y la nota de la cola de ADM)', [true, false, true, true, true],
+      [S('modposo').abierta, S('modposo').cola, S('modposo').nota, S('modposo').mias, /#0000007/.test(S('modposo').lista)]);
+    Check('S4 PO/SO sin rol: pestañas Solicitar una iniciativa | Solicitudes', ['Solicitar una iniciativa', 'Solicitudes'], p.pestanas);
+    Check('S4 ... Solicitudes muestra las suyas, sin la nota de ADM', [true, false, false, true, true],
+      [S('poso').abierta, S('poso').cola, S('poso').nota, S('poso').mias, /#0000007/.test(S('poso').lista)]);
+    Check('S5 sin acceso: ni pestañas ni Solicitudes, y no se piden', [false, false, 0],
+      [n.tabs, S('nada').abierta, S('nada').pedidas]);
+    Check('S5 incierto: Solicitudes no se abre', false, S('incierto').abierta);
+    Check('S6 ningun "+" suelto en el menu', [false, false, false, false, false, false, false],
+      admin.map(function (c) { return A[c].inicio.mas; }));
+    Check('S7 ADM / MOD / MOD PO/SO entran al registro, nunca directo a Nueva solicitud', [false, false, false],
+      [a.nueva, m.nueva, mp.nueva]);
     console.log(fallos === 0 ? 'TODO PASO' : fallos + ' FALLO(S)');
     process.exit(fallos === 0 ? 0 : 1);
   });

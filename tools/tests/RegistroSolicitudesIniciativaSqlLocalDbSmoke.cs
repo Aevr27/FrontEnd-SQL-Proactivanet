@@ -17,6 +17,7 @@
 //   E  datos existentes: una fila con RCA y % con decimales, escrita como
 //      dbo (no por el sitio), se lee igual.
 //   X  tope: Listar(2) de 3 = 2 filas y total 3.
+//   M  Mis solicitudes: ListarDe / DetalleDe solo con las de UNA cuenta.
 //   S  solo lectura: leer no cambia ninguna tabla.
 //   F  la base falla: una base que no existe LANZA (no es "sin tablas").
 //
@@ -189,9 +190,31 @@ public static class RegistroSolicitudesIniciativaSqlLocalDbSmoke
             Check("X1 Listar(2) de 4: 2 filas y total 4", "2|4", l.Solicitudes.Count + "|" + l.Total);
             Check("X2 el tope se acota a 1..500", "1|4", Lector().Listar(0).Solicitudes.Count + "|" + Lector().Listar(100000).Solicitudes.Count);
 
+            // ---------------- M: Mis solicitudes (solo las de una cuenta) ----------------
+            Func<LecturaSolicitudesIniciativa, string> nums = delegate (LecturaSolicitudesIniciativa x)
+            {
+                var r = new List<string>();
+                foreach (var s in x.Solicitudes) r.Add(Convert.ToString(s["numero"]));
+                return x.Total + ":" + string.Join(",", r.ToArray());
+            };
+            Check("M1 ListarDe: solo las de la cuenta, sin distinguir mayusculas, mas recientes primero", "3:3,2,1",
+                  nums(Lector().ListarDe(@"soriana\ANDRESVR", 200)));
+            Check("M2 ListarDe de otra cuenta: solo la suya; sin solicitudes: 0", @"1:142|0:",
+                  nums(Lector().ListarDe(@"SORIANA\otro", 200)) + "|" + nums(Lector().ListarDe(@"SORIANA\nadie", 200)));
+            Check("M3 ListarDe respeta el tope (total = las de la cuenta)", "3:3", nums(Lector().ListarDe(@"SORIANA\andresvr", 1)));
+            var mia = Lector().DetalleDe(2, @"SORIANA\andresvr");
+            Check("M4 DetalleDe de la suya: la solicitud con su historial", "#0000002|1",
+                  mia == null ? "null" : mia["numero_texto"] + "|" + ((List<object>)mia["eventos"]).Count);
+            Check("M5 DetalleDe de una de otra cuenta: null (como si no existiera)", true, Lector().DetalleDe(142, @"SORIANA\andresvr") == null);
+            string sinCuenta;
+            try { Lector().ListarDe(null, 200); sinCuenta = "sin error"; }
+            catch (ArgumentNullException) { sinCuenta = "ArgumentNullException"; }
+            Check("M6 sin cuenta no se lista nada (nunca 'todas')", "ArgumentNullException", sinCuenta);
+
             // ---------------- S: solo lectura ----------------
             var antes = Conteos();
             Lector().Listar(200); Lector().Detalle(1); Lector().Detalle(142); Lector().Disponible();
+            Lector().ListarDe(@"SORIANA\andresvr", 200); Lector().DetalleDe(1, @"SORIANA\andresvr");
             Check("S1 leer no cambia solicitudes, eventos ni contador", antes, Conteos());
 
             // ---------------- F: la base falla ----------------

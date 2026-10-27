@@ -625,7 +625,8 @@ pruebas.push(function () {
     Check('VS2 Reintentar con respuesta confirmada ADM: vuelve la pagina entera',
       { rol: 'ADM', solo: false, denegada: false, tabs: false, verificar: true, ini: false, nueva: true }, estado(a));
     b.pagina.aplicarSesion(SES.poso);
-    Check('VS3 PO/SO sin rol: solo Nueva solicitud', [true, false, true], [b.pagina.soloSolicitud, b.sel('panel-nueva').hidden, b.sel('iniTabs').hidden]);
+    Check('VS3 PO/SO sin rol: Nueva solicitud, con las pestañas Solicitar una iniciativa | Solicitudes', [true, false, false, false, true],
+      [b.pagina.soloSolicitud, b.sel('panel-nueva').hidden, b.sel('iniTabs').hidden, b.sel('tab-solicitudes').hidden, b.sel('tab-administracion').hidden]);
     c.pagina.aplicarSesion(SES.nada);
     Check('VS4 sin rol ni PO/SO: denegar', [true, false], [c.pagina.denegada, c.sel('iniDenegado').hidden]);
     Check('VS5 revisarSesion antes de decidir: no hace nada', false, d.pagina.revisarSesion(SES.nada));

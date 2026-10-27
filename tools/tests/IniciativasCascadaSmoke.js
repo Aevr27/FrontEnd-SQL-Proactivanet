@@ -1448,13 +1448,18 @@ pruebas.push(function () {
   var pedir = enrutador({ '/A/Cat 1': { categoria: '/A/Cat 1', disponible: 0.4, determinable: true } },
     function () { return respuesta(); }, llamadas);
   P.modoSolicitante();
-  Check('SG2 modo solicitante: solo Nueva solicitud, sin pestanas ni Volver', [['panel-nueva'], true, true],
-    [vistaVisible(p), p.sel('iniTabs').hidden, p.sel('btnVolver').hidden]);
-  P.mostrarVista('iniciativas'); P.mostrarVista('administracion'); P.mostrarVista('solicitudes');
-  Check('SG2 no abre otras vistas', ['panel-nueva'], vistaVisible(p));
+  Check('SG2 modo solicitante: Nueva solicitud, pestañas Solicitar una iniciativa | Solicitudes, sin Volver',
+    [['panel-nueva'], false, true, 'Solicitar una iniciativa', false, true],
+    [vistaVisible(p), p.sel('iniTabs').hidden, p.sel('btnVolver').hidden, p.sel('tab-iniciativas').textContent,
+     p.sel('tab-solicitudes').hidden, p.sel('tab-administracion').hidden]);
+  P.mostrarVista('iniciativas'); P.mostrarVista('administracion'); P.mostrarVista('crear');
+  Check('SG2 no abre el registro ni Administracion', ['panel-nueva'], vistaVisible(p));
+  P.mostrarVista('solicitudes');
+  Check('SG2 Solicitudes si (misma regla que Solicitar)', ['panel-solicitudes'], vistaVisible(p));
+  P.mostrarVista('nueva');
   P.fijarRol('ADM');
   Check('SG2 un rol que llega despues no lo cambia', [null, true, true],
-    [P.rol, p.sel('panel-administracion').hidden, p.sel('iniTabs').hidden]);
+    [P.rol, p.sel('panel-administracion').hidden, p.sel('tab-administracion').hidden]);
   P.denegar();
   Check('SG2 denegar despues de modo solicitante: queda negado', [[], false], [vistaVisible(p), p.sel('iniDenegado').hidden]);
 

@@ -14,6 +14,10 @@
 //   Detalle(n)     la solicitud con su bitacora (orden de IdEvento); null
 //                  si no existe.
 //
+// ListarDe / DetalleDe (2026-10-27): lo mismo, solo las solicitudes que
+// envio UNA cuenta, para "Mis solicitudes" del PO / SO
+// (handlers/admin_iniciativas_mis_solicitudes.ashx, ExigirSolicitud).
+//
 // Solo SELECT: la cuenta del sitio lee con db_datareader (el DENY de sql/29
 // es de INSERT/UPDATE/DELETE). No cambia estado, no aprueba ni borra, y no
 // guarda nada fuera de la base: cada request lee de nuevo.
@@ -43,6 +47,17 @@ public interface ILectorSolicitudesIniciativa
     Dictionary<string, object> Detalle(int numero);
 }
 
+// "Mis solicitudes" (handlers/admin_iniciativas_mis_solicitudes.ashx): lo
+// mismo, solo las de UNA cuenta (SolicitanteCuenta = la cuenta de IIS que
+// la envio, sin distinguir mayusculas, como usp_SolicitudIniciativa_Crear).
+// DetalleDe de una solicitud de otra cuenta: null, igual que si no existe.
+public interface ILectorMisSolicitudesIniciativa
+{
+    bool Disponible();
+    LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo);
+    Dictionary<string, object> DetalleDe(int numero, string cuenta);
+}
+
 public sealed class LecturaSolicitudesIniciativa
 {
     public int Total;
@@ -51,7 +66,7 @@ public sealed class LecturaSolicitudesIniciativa
     public List<Dictionary<string, object>> Solicitudes = new List<Dictionary<string, object>>();
 }
 
-public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativa
+public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativa, ILectorMisSolicitudesIniciativa
 {
     private readonly Func<SqlConnection> abrir;
     public LectorSolicitudesIniciativaSql() : this(null) { }
@@ -114,20 +129,33 @@ public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativ
             + (codigo ? ", s.CodigoIniciativa" : ", CodigoIniciativa = CONVERT(nvarchar(100), NULL)");
     }
 
-    public LecturaSolicitudesIniciativa Listar(int maximo)
+    // Solo las de una cuenta (null = todas: nunca para "Mis solicitudes").
+    private const string FiltroCuenta = "UPPER(s.SolicitanteCuenta) = UPPER(@cuenta)";
+
+    public LecturaSolicitudesIniciativa Listar(int maximo) { return Leer(null, maximo); }
+
+    public LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo)
+    {
+        if (string.IsNullOrEmpty(cuenta)) throw new ArgumentNullException("cuenta");
+        return Leer(cuenta, maximo);
+    }
+
+    private LecturaSolicitudesIniciativa Leer(string cuenta, int maximo)
     {
         var l = new LecturaSolicitudesIniciativa();
         using (var cn = Abierta())
         {
             l.RevisionDisponible = ConRevision(cn);
             l.CreaIniciativa = l.RevisionDisponible && ConCodigo(cn);
+            var donde = cuenta == null ? "" : " WHERE " + FiltroCuenta;
             var sql = "SELECT TOP (@max)" + Columnas(l.RevisionDisponible, l.CreaIniciativa) + @"
-FROM adm.SolicitudIniciativa AS s
+FROM adm.SolicitudIniciativa AS s" + donde + @"
 ORDER BY s.NumeroSolicitud DESC;
-SELECT COUNT(*) FROM adm.SolicitudIniciativa;";
+SELECT COUNT(*) FROM adm.SolicitudIniciativa AS s" + donde + ";";
             using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 60 })
             {
                 cmd.Parameters.Add("@max", SqlDbType.Int).Value = Math.Max(1, Math.Min(maximo, 500));
+                if (cuenta != null) cmd.Parameters.Add("@cuenta", SqlDbType.NVarChar, 256).Value = cuenta;
                 using (var r = cmd.ExecuteReader())
                 {
                     while (r.Read()) l.Solicitudes.Add(Fila(r));
@@ -138,22 +166,35 @@ SELECT COUNT(*) FROM adm.SolicitudIniciativa;";
         return l;
     }
 
-    public Dictionary<string, object> Detalle(int numero)
+    public Dictionary<string, object> Detalle(int numero) { return Detalle(numero, null); }
+
+    public Dictionary<string, object> DetalleDe(int numero, string cuenta)
+    {
+        if (string.IsNullOrEmpty(cuenta)) throw new ArgumentNullException("cuenta");
+        return Detalle(numero, cuenta);
+    }
+
+    private Dictionary<string, object> Detalle(int numero, string cuenta)
     {
         using (var cn = Abierta())
         {
             var revision = ConRevision(cn);
             var codigo = revision && ConCodigo(cn);
+            // Con cuenta, los eventos solo si la solicitud es suya (el EXISTS).
+            var deCuenta = cuenta == null ? "" : " AND " + FiltroCuenta;
             var sql = "SELECT" + Columnas(revision, codigo) + @",
        s.Descripcion, s.Observaciones, s.Volumetria, s.PctDisminucion, s.RcaExtension, s.FuenteCorreos
 FROM adm.SolicitudIniciativa AS s
-WHERE s.NumeroSolicitud = @n;
+WHERE s.NumeroSolicitud = @n" + deCuenta + @";
 SELECT e.IdEvento, e.Evento, e.EstadoAnterior, e.EstadoNuevo, e.Usuario, e.FechaUtc, " +
                 (revision ? "e.Detalle" : "Detalle = CONVERT(nvarchar(2000), NULL)") + @"
-FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = @n ORDER BY e.IdEvento;";
+FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = @n" +
+                (cuenta == null ? "" : " AND EXISTS (SELECT 1 FROM adm.SolicitudIniciativa AS s WHERE s.NumeroSolicitud = @n" + deCuenta + ")") + @"
+ORDER BY e.IdEvento;";
             using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 30 })
             {
                 cmd.Parameters.Add("@n", SqlDbType.Int).Value = numero;
+                if (cuenta != null) cmd.Parameters.Add("@cuenta", SqlDbType.NVarChar, 256).Value = cuenta;
                 using (var r = cmd.ExecuteReader())
                 {
                     if (!r.Read()) return null;
@@ -228,6 +269,8 @@ FROM adm.SolicitudIniciativaEvento AS e WHERE e.NumeroSolicitud = @n ORDER BY e.
 public static class RegistroSolicitudesIniciativa
 {
     public static ILectorSolicitudesIniciativa Lector = new LectorSolicitudesIniciativaSql();
+    // "Mis solicitudes": la misma lectura real, filtrada por cuenta.
+    public static ILectorMisSolicitudesIniciativa Mias = new LectorSolicitudesIniciativaSql();
 
     // Como la cola de cambios (admin_iniciativas_solicitudes.ashx): 200.
     public const int Maximo = 200;

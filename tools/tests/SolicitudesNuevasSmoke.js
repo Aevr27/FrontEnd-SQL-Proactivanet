@@ -393,10 +393,44 @@ function Montar(rol, respuestas) {
     [/id="solVistas" role="group" aria-label="Tipo de solicitud" hidden/.test(panel), /<div id="snBloque" hidden>/.test(panel)]);
   var pag = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.js'), 'utf8').replace(/\r\n/g, '\n');
   Check('P5 iniciativas.js abre Nuevas DESPUES de la cola y le pasa el rol', [true, true, true],
-    [/this\.cola\.abrir\(\);\n\s*if \(nombre === 'solicitudes' && this\.nuevas\) this\.nuevas\.abrir\(\);/.test(pag),
+    [/if \(this\.cola\) this\.cola\.abrir\(\);\n\s*if \(this\.nuevas\) this\.nuevas\.abrir\(\);/.test(pag),
      /this\.nuevas\.fijarRol\(this\.rol\)/.test(pag), /new window\.SolicitudesNuevas\.RegistroSolicitudesNuevas\(this\.doc, null\)/.test(pag)]);
   var cola = fs.readFileSync(path.join(raiz, 'admin', 'solicitudes-cambio.js'), 'utf8');
   Check('P6 solicitudes-cambio.js no conoce la vista nueva', false, /SolicitudesNuevas|solicitudes_nuevas|snBloque/.test(cola));
+
+  // ---- Mis solicitudes (quien puede solicitar y no es ADM) ----
+  function MontarMias(respuestas) {
+    var doc = Documento(), pedidas = [];
+    var v = new N.MisSolicitudes(doc, function (url) {
+      pedidas.push(url);
+      var r = respuestas.shift();
+      return typeof r === 'function' ? r() : r;
+    });
+    return { doc: doc, v: v, pedidas: pedidas, $: function (id) { return doc.getElementById(id); } };
+  }
+  var ms = MontarMias([Respuesta(200, { solicitudes: [Fila(3, { titulo: '<i>Mia</i>' })], total: 1, maximo: 200 }),
+                       Respuesta(200, Detalle(3))]);
+  await ms.v.abrir();
+  Check('MS1 abrir: se ve y lista SOLO por el endpoint propio (nunca el de ADM)', [false, ['../handlers/admin_iniciativas_mis_solicitudes.ashx?accion=listar'], true, true],
+    [ms.$('msBloque').hidden, ms.pedidas, /#0000003/.test(ms.$('msLista').innerHTML), /&lt;i&gt;Mia/.test(ms.$('msLista').innerHTML)]);
+  await ms.v.verDetalle(3);
+  var det = ms.$('msDetalle').innerHTML;
+  Check('MS2 detalle de la suya: historial y solo "Cerrar" (sin aprobar ni rechazar)', [false, true, false, true],
+    [ms.$('msDetalle').hidden, /Historial de la solicitud/.test(det), /data-sn-accion="(aprobar|rechazar)"/.test(det),
+     /accion=detalle&numero=3$/.test(ms.pedidas[1])]);
+  ms.v.ocultar();
+  Check('MS3 ocultar (perdio el acceso o es ADM): oculto y sin lo leido', [true, '', true, ''],
+    [ms.$('msBloque').hidden, ms.$('msLista').innerHTML, ms.$('msDetalle').hidden, ms.$('msDetalle').innerHTML]);
+  var vacia = MontarMias([Respuesta(200, { solicitudes: [], total: 0 })]);
+  await vacia.v.abrir();
+  Check('MS4 sin solicitudes: lo dice', true, /Todavía no has enviado solicitudes de iniciativa/.test(vacia.$('msLista').innerHTML));
+  var negada = MontarMias([Respuesta(403, { error: 'La solicitud de iniciativas está disponible únicamente para PO y SO vigentes.' })]);
+  await negada.v.abrir();
+  Check('MS5 403: el mensaje del servidor, sin lista', [true, ''],
+    [/únicamente para PO y SO/.test(negada.$('msMsg').innerHTML), negada.$('msLista').innerHTML]);
+  var caida = MontarMias([function () { return Promise.reject(new Error('red')); }]);
+  await caida.v.abrir();
+  Check('MS6 sin conexion: lo dice', true, /No se pudo contactar al servidor/.test(caida.$('msMsg').innerHTML));
 
   console.log(fallos === 0 ? 'OK: todo paso' : 'FALLOS: ' + fallos);
   process.exit(fallos === 0 ? 0 : 1);

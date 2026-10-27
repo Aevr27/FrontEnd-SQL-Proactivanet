@@ -244,7 +244,12 @@
 
   <nav class="ini-tabs" id="iniTabs" role="tablist" aria-label="Secciones">
     <button type="button" class="ini-tab activa" role="tab" id="tab-iniciativas" aria-controls="panel-iniciativas" aria-selected="true">Iniciativas</button>
-    <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1">Solicitudes</button>
+    <!-- Solicitudes: la MISMA regla que "Solicitar una iniciativa"
+         (admin_sesion: solicitante = AccesoIniciativas.PuedeSolicitar).
+         Oculta hasta saberlo (PaginaIniciativas.pestanaVisible). Solo UX:
+         los datos los exige cada handler (ADM: ExigirAdm; Mis solicitudes:
+         ExigirSolicitud). -->
+    <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1" hidden>Solicitudes</button>
     <!-- Solo ADM (data-solo-adm y PaginaIniciativas.fijarRol). Solo UX: los
          handlers de escritura de ADM exigen AccesoAdmin.ExigirAdm. -->
     <button type="button" class="ini-tab" role="tab" id="tab-administracion" aria-controls="panel-administracion" aria-selected="false" tabindex="-1" data-solo-adm hidden>Administración</button>
@@ -466,6 +471,20 @@
     <div class="ini-vacio" id="solNoAdm">
       <strong>La revisión de solicitudes es de ADM</strong>
       <span>Para pedir un cambio abre la iniciativa en «Iniciativas» y usa «Solicitar cambios».</span>
+    </div>
+    <!-- Mis solicitudes (quien no es ADM y puede solicitar): las Nuevas
+         solicitudes que envio la propia cuenta, solo lectura
+         (admin/solicitudes-nuevas.js, MisSolicitudes; servidor:
+         admin_iniciativas_mis_solicitudes.ashx, ExigirSolicitud). -->
+    <div id="msBloque" hidden>
+      <h3>Mis solicitudes de iniciativa</h3>
+      <div class="ini-sol-barra">
+        <span class="ini-nota" id="msResumen"></span>
+        <button type="button" class="btn linea chico" id="msActualizar">Actualizar</button>
+      </div>
+      <div class="ini-cambio-msg" id="msMsg" role="status" aria-live="polite"></div>
+      <div id="msLista"></div>
+      <section class="ini-det-sec ini-sol-detalle" id="msDetalle" aria-live="polite" hidden></section>
     </div>
   </section>
 

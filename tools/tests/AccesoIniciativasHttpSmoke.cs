@@ -680,10 +680,11 @@ public static class AccesoIniciativasHttpSmoke
         {
             var n = Path.GetFileName(f);
             if (n == "admin_iniciativas_catalogos.ashx" || n == "admin_iniciativas_capacidad.ashx" ||
-                n == "admin_iniciativas_volumetria.ashx" || n == "admin_iniciativas_validar.ashx" || n == "admin_sesion.ashx") continue;
+                n == "admin_iniciativas_volumetria.ashx" || n == "admin_iniciativas_validar.ashx" || n == "admin_sesion.ashx" ||
+                n == "admin_iniciativas_mis_solicitudes.ashx") continue;
             Check("F2 " + n + " no mira el interruptor", false, File.ReadAllText(f).Contains("AccesoIniciativas"));
         }
-        Check("F3 son exactamente 5 rutas de solicitante (pagina + 4)", 5, AccesoIniciativas.RutasSolicitante.Length);
+        Check("F3 son exactamente 6 rutas de solicitante (pagina + 4 de Nueva solicitud + Mis solicitudes)", 6, AccesoIniciativas.RutasSolicitante.Length);
         {
             var t = File.ReadAllText(Path.Combine("App_Code", "AccesoIniciativas.cs"));
             Check("F4 los dueños salen de CatCategoriaDueno vigente (PoSoVigentes) y la persona de IdentidadAcuse", "True|True",

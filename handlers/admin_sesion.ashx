@@ -15,13 +15,14 @@
 //        Solo para que la interfaz oculte lo que no le toca; los handlers lo
 //        exigen aparte.
 //        "solicitante": true|false = AccesoIniciativas.PuedeSolicitar: puede
-//        abrir Nueva solicitud y ver "Solicitar una iniciativa" (ADM
-//        siempre; MOD solo si es Product Owner o Service Owner vigente; los
-//        demas con el interruptor INICIATIVAS_ABIERTAS de adm.Interruptor y
-//        siendo PO/SO vigente). Con autorizado false y solicitante true, la pagina
-//        se abre en modo "solo Nueva solicitud" y el menu muestra la entrada
-//        Iniciativas en vez de Administracion. Tambien solo UX: los cuatro
-//        handlers de Nueva solicitud lo exigen con ExigirSolicitud.
+//        abrir Nueva solicitud y ver "Solicitar una iniciativa" y la pestaña
+//        Solicitudes (ADM siempre; MOD solo si es Product Owner o Service
+//        Owner vigente; los demas con el interruptor INICIATIVAS_ABIERTAS de
+//        adm.Interruptor y siendo PO/SO vigente). Con autorizado false y
+//        solicitante true, la pagina se abre en modo solicitante (Nueva
+//        solicitud y Solicitudes) y el menu muestra la entrada Iniciativas
+//        del solicitante. Tambien solo UX: los cuatro handlers de Nueva
+//        solicitud y Mis solicitudes lo exigen con ExigirSolicitud.
 //        "verificacion": "incompleta" SOLO si alguna consulta de este request
 //        fallo (dbo.UsuariosAdmin, adm.Interruptor o los dueños PO/SO): lo
 //        demas ya fallo cerrado, pero no es una negativa confirmada. La

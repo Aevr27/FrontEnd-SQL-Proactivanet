@@ -34,6 +34,7 @@ window.SolicitudesNuevas = (function () {
 
   var URL = '../handlers/admin_iniciativas_solicitudes_nuevas.ashx';
   var URL_REVISION = '../handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx';
+  var URL_MIAS = '../handlers/admin_iniciativas_mis_solicitudes.ashx';
   var MAXIMO_COMENTARIO = 2000;   // RevisionSolicitudesIniciativa.MaximoComentario
   var ESTADOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada' };
   var EVENTOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada' };
@@ -55,8 +56,9 @@ window.SolicitudesNuevas = (function () {
       (s.solicitante_correo ? '<span class="ini-sub">' + h(s.solicitante_correo) + '</span>' : '');
   }
 
-  function htmlLista(lista) {
-    if (!lista.length) return '<p class="ini-nota">Todavía no hay solicitudes nuevas guardadas.</p>';
+  // vacio: el texto sin solicitudes (Mis solicitudes dice otro).
+  function htmlLista(lista, vacio) {
+    if (!lista.length) return '<p class="ini-nota">' + h(vacio || 'Todavía no hay solicitudes nuevas guardadas.') + '</p>';
     return '<table class="ini-det-tabla ini-sol-tabla"><thead><tr><th scope="col">Número</th><th scope="col">Tipo</th>' +
       '<th scope="col">Título</th><th scope="col">Solicitó</th><th scope="col">Product Owner</th><th scope="col">Service Owner</th>' +
       '<th scope="col">Categoría</th><th scope="col">Enviada</th><th scope="col">Estado</th></tr></thead><tbody>' +
@@ -368,6 +370,116 @@ window.SolicitudesNuevas = (function () {
     }
   }
 
-  return { RegistroSolicitudesNuevas: RegistroSolicitudesNuevas, htmlLista: htmlLista, htmlDetalle: htmlDetalle,
-           textoError: textoError, textoTotal: textoTotal, URL: URL, URL_REVISION: URL_REVISION, SIN_ESTADO: SIN_ESTADO };
+  // "Mis solicitudes": para quien puede solicitar y no es ADM, las que envio
+  // su propia cuenta (#msBloque), solo lectura: lista y detalle con su
+  // historial, sin aprobar ni rechazar. El servidor decide de quien son
+  // (admin_iniciativas_mis_solicitudes.ashx: la cuenta de IIS) y quien
+  // puede verlas (ExigirSolicitud); aqui no se filtra nada.
+  class MisSolicitudes {
+    constructor(doc, pedir) {
+      this.doc = doc;
+      this.pedir = pedir || function (url, op) { return fetch(url, op); };
+      this.cableado = false;
+    }
+
+    $(id) { return this.doc.getElementById(id); }
+
+    cablear() {
+      if (this.cableado || !this.$('msBloque')) return;
+      this.cableado = true;
+      var self = this;
+      this.$('msActualizar').addEventListener('click', function () { self.listar(); });
+      this.$('msLista').addEventListener('click', function (e) {
+        var el = e.target && e.target.closest ? e.target.closest('[data-sn-numero]') : e.target;
+        var n = el && el.getAttribute && el.getAttribute('data-sn-numero');
+        if (n) self.verDetalle(Number(n));
+      });
+      this.$('msDetalle').addEventListener('click', function (e) {
+        var el = e.target && e.target.closest ? e.target.closest('[data-sn-accion]') : e.target;
+        if (el && el.getAttribute && el.getAttribute('data-sn-accion') === 'cerrar') self.cerrarDetalle();
+      });
+    }
+
+    abrir() {
+      this.cablear();
+      if (!this.$('msBloque')) return Promise.resolve(null);
+      this.$('msBloque').hidden = false;
+      return this.listar();
+    }
+
+    // Sin acceso (ADM, o ya no puede solicitar): oculto y sin lo leido.
+    ocultar() {
+      if (!this.$('msBloque')) return;
+      this.$('msBloque').hidden = true;
+      this.$('msLista').innerHTML = '';
+      this.$('msResumen').textContent = '';
+      this.mensaje('');
+      this.cerrarDetalle();
+    }
+
+    mensaje(clase, html) {
+      var m = this.$('msMsg');
+      if (!m) return;
+      m.className = 'ini-cambio-msg ' + clase;
+      m.innerHTML = html || '';
+    }
+
+    listar() {
+      var self = this;
+      this.mensaje('', '<span>Cargando tus solicitudes…</span>');
+      this.$('msResumen').textContent = '';
+      return Promise.resolve().then(function () { return self.pedir(URL_MIAS + '?accion=listar', { cache: 'no-store', credentials: 'same-origin' }); })
+        .then(leer)
+        .then(function (r) {
+          if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
+            self.$('msLista').innerHTML = htmlLista(r.json.solicitudes, 'Todavía no has enviado solicitudes de iniciativa.');
+            self.$('msResumen').textContent = textoTotal(r.json);
+            self.mensaje('', '');
+            return r.json.solicitudes;
+          }
+          self.$('msLista').innerHTML = '';
+          var e = textoError(r.status, r.json, 'tus solicitudes');
+          self.mensaje(e.clase, e.html);
+          return null;
+        }, function () {
+          self.$('msLista').innerHTML = '';
+          self.mensaje('error', 'No se pudo contactar al servidor.');
+          return null;
+        });
+    }
+
+    verDetalle(numero) {
+      var self = this;
+      this.mensaje('', '<span>Cargando la solicitud…</span>');
+      return Promise.resolve().then(function () {
+        return self.pedir(URL_MIAS + '?accion=detalle&numero=' + encodeURIComponent(numero), { cache: 'no-store', credentials: 'same-origin' });
+      })
+        .then(leer)
+        .then(function (r) {
+          if (r.status !== 200) {
+            var e = textoError(r.status, r.json, 'la solicitud');
+            self.mensaje(e.clase, e.html);
+            return null;
+          }
+          self.mensaje('', '');
+          var caja = self.$('msDetalle');
+          caja.innerHTML = htmlDetalle(r.json, false);
+          caja.hidden = false;
+          return r.json;
+        }, function () {
+          self.mensaje('error', 'No se pudo contactar al servidor.');
+          return null;
+        });
+    }
+
+    cerrarDetalle() {
+      var caja = this.$('msDetalle');
+      if (!caja) return;
+      caja.hidden = true;
+      caja.innerHTML = '';
+    }
+  }
+
+  return { RegistroSolicitudesNuevas: RegistroSolicitudesNuevas, MisSolicitudes: MisSolicitudes, htmlLista: htmlLista, htmlDetalle: htmlDetalle,
+           textoError: textoError, textoTotal: textoTotal, URL: URL, URL_REVISION: URL_REVISION, URL_MIAS: URL_MIAS, SIN_ESTADO: SIN_ESTADO };
 })();

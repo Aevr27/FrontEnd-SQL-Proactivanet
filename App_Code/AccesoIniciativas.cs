@@ -46,15 +46,17 @@
 // encendido, los dueños.
 //
 // QUE ABRE
-//   la pagina admin/iniciativas.html, en modo "solo Nueva solicitud"
-//   (admin/iniciativas.js, modoSolicitante) y los CUATRO handlers que ese
-//   formulario usa:
+//   la pagina admin/iniciativas.html, en modo solicitante (admin/
+//   iniciativas.js, modoSolicitante: Nueva solicitud y Solicitudes), los
+//   CUATRO handlers que el formulario usa y "Mis solicitudes":
 //     admin_iniciativas_catalogos   (?rutas=1, la cascada; sin ?rutas, la
 //                                    Cobertura del registro, sigue abierto a
 //                                    ADM/MOD; ?duenos=1 y rutas_adm siguen ADM)
 //     admin_iniciativas_capacidad   (capacidad de la categoria elegida)
 //     admin_iniciativas_volumetria  (sin alcance=total, que sigue ADM)
 //     admin_iniciativas_validar     (validar y guardar la solicitud)
+//     admin_iniciativas_mis_solicitudes (2026-10-27; solo lectura, solo las
+//                                    que envio la propia cuenta)
 //   Todo lo demas de Admin (registro, solicitudes de cambio, acuse, gestion,
 //   recientes, diagnostico, correos, alta de categoria) sigue exigiendo ADM
 //   o MOD (AccesoAdmin.Exigir / ExigirAdm) y lo protege AdminAccesoModulo
@@ -151,7 +153,7 @@ public static class AccesoIniciativas
     // Clave de la fila en adm.Interruptor.
     public const string ClaveInterruptor = "INICIATIVAS_ABIERTAS";
 
-    // Rutas (relativas a la aplicacion) de Nueva solicitud.
+    // Rutas (relativas a la aplicacion) de Nueva solicitud y Solicitudes.
     public static readonly string[] RutasSolicitante =
     {
         AccesoAdmin.PaginaProtegida,
@@ -159,6 +161,8 @@ public static class AccesoIniciativas
         "~/handlers/admin_iniciativas_capacidad.ashx",
         "~/handlers/admin_iniciativas_volumetria.ashx",
         "~/handlers/admin_iniciativas_validar.ashx",
+        // Solicitudes: las que envio la propia cuenta (misma regla).
+        "~/handlers/admin_iniciativas_mis_solicitudes.ashx",
     };
 
     public const string MensajeCerrado =
