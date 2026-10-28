@@ -14,11 +14,11 @@
 //                                      404 SolicitudNoExiste
 //   501 RegistroNoDisponible  faltan las tablas de sql/29 (nada que leer)
 //   500 { error, tipo }       la base fallo (DashboardHandler.Responder)
-//   403 antes de leer nada: ExigirAdm (anonimo, VIEWER, solicitante del
-//       interruptor y MOD). 405 si no es GET; 400 accion desconocida.
+//   403 antes de leer nada: ExigirAdm (anonimo, VIEWER, PO/SO sin rol y
+//       MOD). 405 si no es GET; 400 accion desconocida.
 //
 // No escribe: sin aprobar, rechazar, borrar ni cambiar estado. NO es una
-// de las rutas que abre el interruptor INICIATIVAS_ABIERTAS.
+// de las rutas del solicitante (Nueva solicitud / Mis solicitudes).
 
 using System;
 using System.Collections.Generic;

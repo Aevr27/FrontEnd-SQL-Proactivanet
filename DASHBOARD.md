@@ -22,7 +22,7 @@ Una sola página, `dashboard.html`, con una barra lateral de pestañas (registro
 
 **Observabilidad** y **Calidad de información** son entradas de grupo (`GRUPOS` en `dashboard.js`): la barra muestra una sola entrada y un selector interno (`.subnav`) cambia entre sus dos módulos, que siguen siendo los mismos de `MODULOS`. Los hashes de siempre siguen valiendo (`#tablero`, `#orquestacion`, `#qa`, `#qare`); `#observabilidad` y `#calidad` abren el último módulo visto del grupo (el primero, la primera vez).
 
-La entrada **Administración** es un enlace a `admin/iniciativas.html`, no una pestaña; solo se ve si `handlers/admin_sesion.ashx` dice que la cuenta está autorizada, y la autorización real está en el servidor (`App_Code/AccesoAdmin.cs`).
+La entrada **Iniciativas** es un enlace a `admin/iniciativas.html`, no una pestaña; se ve para toda cuenta Windows autenticada (`handlers/admin_sesion.ashx` dice `"registro": true`). Dentro, el registro es de todos; **Solicitar una iniciativa** y **Solicitudes** (las propias) son de ADM, MOD y de los Product Owner / Service Owner vigentes; **Administración** sigue siendo de ADM/MOD. La autorización real está en el servidor (`App_Code/AccesoIniciativas.cs` y `App_Code/AccesoAdmin.cs`); el interruptor `INICIATIVAS_ABIERTAS` ya no decide el acceso.
 
 Cada carpeta de módulo sigue funcionando también como página suelta (`backlog/backlog.html`, `experiencia/experiencia.html`, ...).
 
@@ -224,7 +224,7 @@ Alcance: solo el rol de Admin del request. No cambia la cadena de conexión ni l
 Comprobar que en la VM no está activo:
 
 - En el `Web.config` de la VM: no debe existir `AdminDevOverride` y `compilation debug` debe ser `"false"`. Aun si alguien copiara ambas cosas, la condición 4 (`w3wp.exe`) lo corta.
-- Abrir `handlers/admin_sesion.ashx` en la VM: la respuesta **nunca** debe traer `"desarrollo_local"`. Una cuenta sin fila ADM/MOD en `dbo.UsuariosAdmin` debe ver `{"autorizado":false}`.
+- Abrir `handlers/admin_sesion.ashx` en la VM: la respuesta **nunca** debe traer `"desarrollo_local"`. Una cuenta sin fila ADM/MOD en `dbo.UsuariosAdmin` debe ver `"autorizado":false` (y `"registro":true`: el registro es de todos).
 
 Pruebas: `tools/tests/AccesoAdminHttpSmoke.cs` (bloques L y W; compilar en Release y con `/define:DEBUG`) y `tools/tests/AccesoDesarrolloLocalIisExpress.ps1` (IIS Express real: con la clave apagada corre I0; con `true`, I1–I4) y `tools/tests/AdminEscrituraLocalIisExpress.ps1` (POST real de crear / modificar / enviar solicitud en un sitio temporal con base inalcanzable: nunca escribe; no usa el `Web.config` local).
 

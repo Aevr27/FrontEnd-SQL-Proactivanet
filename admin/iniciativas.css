@@ -26,6 +26,9 @@
   margin: 0 0 14px;
   border-bottom: 1px solid var(--line);
 }
+/* Sin esto el display:flex le gana a [hidden]: denegar() dejaba las
+   pestañas a la vista bajo "No tienes acceso". */
+.ini-tabs[hidden] { display: none; }
 .ini-tab {
   font: inherit; font-size: 13px; font-weight: 700;
   color: var(--muted);

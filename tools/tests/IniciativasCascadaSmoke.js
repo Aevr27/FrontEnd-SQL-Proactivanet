@@ -112,7 +112,7 @@ function ComoEnElHtml(documento, html) {
     if (!m) throw new Error('falta #' + id + ' en admin/iniciativas.html');
     var el = documento.getElementById(id);
     el.hidden = /\shidden[\s>]/.test(m[0]);
-    ['data-solo-adm', 'data-solo-admin', 'data-solo-solicitante'].forEach(function (a) {
+    ['data-solo-adm', 'data-solo-registro'].forEach(function (a) {
       if (new RegExp('\\s' + a + '[\\s>=]').test(m[0])) el.setAttribute(a, '');
     });
   });
@@ -121,7 +121,7 @@ function ComoEnElHtml(documento, html) {
 // SesionAdmin.aplicar de verdad, con admin_sesion respondiendo ADM.
 function SesionAdm(ventana, documento) {
   return new ventana.SesionAdmin('../', function () {
-    return Promise.resolve({ ok: true, json: function () { return { autorizado: true, rol: 'ADM', solicitante: true }; } });
+    return Promise.resolve({ ok: true, json: function () { return { autorizado: true, rol: 'ADM', solicitante: true, registro: true }; } });
   }).aplicar(documento);
 }
 
@@ -778,27 +778,22 @@ pruebas.push(function () {
   // BarraLateralSmoke.js las compara contra dashboard.html.
   Check('M1 entradas = modulos del tablero', ['../dashboard.html#sla', '../dashboard.html#backlog', '../dashboard.html#experiencia',
     '../dashboard.html#efectividad', '../dashboard.html#calidad', '../dashboard.html#analisis',
-    '../dashboard.html#observabilidad', '../dashboard.html#call', 'iniciativas.html', 'iniciativas.html'], hrefs);
-  // Iniciativas para ADM/MOD (data-solo-admin) e Iniciativas para el
-  // solicitante (data-solo-solicitante): las dos son esta pagina, se llaman
-  // igual, nacen ocultas y activas, y SesionAdmin nunca muestra las dos a la
-  // vez (autorizado vs. solicitante sin autorizar). Es solo UX: el acceso lo
-  // decide el servidor (AccesoAdmin, AccesoIniciativas).
+    '../dashboard.html#observabilidad', '../dashboard.html#call', 'iniciativas.html'], hrefs);
+  // Iniciativas (data-solo-registro): una sola entrada, esta pagina, para
+  // todo usuario del tablero (SesionAdmin: registro). Nace oculta y activa.
+  // Es solo UX: el acceso lo decide el servidor (AccesoAdmin, AccesoIniciativas).
   var activas = html.match(/<li data-solo-[a-z]+ hidden>\s*<a class="mnav active"[^>]*>/g) || [];
-  Check('M2 dos entradas activas excluyentes, las dos "Iniciativas"', [2, true, true, true, true],
-    [activas.length, /^<li data-solo-admin hidden>/.test(activas[0] || ''), /^<li data-solo-solicitante hidden>/.test(activas[1] || ''),
+  Check('M2 una entrada activa, "Iniciativas"', [1, true, true, true],
+    [activas.length, /^<li data-solo-registro hidden>/.test(activas[0] || ''),
      activas.every(function (a) { return /href="iniciativas\.html"[^>]*aria-current="page"/.test(a); }),
      activas.every(function (a) { return /title="Iniciativas"/.test(a); })]);
-  Check('M2 ninguna otra entrada nace activa', 2, (html.match(/class="mnav active"/g) || []).length);
+  Check('M2 ninguna otra entrada nace activa', 1, (html.match(/class="mnav active"/g) || []).length);
   var tablero = leer('dashboard.html').replace(/<!--[\s\S]*?-->/g, '');
-  // Dos entradas "Iniciativas", las dos ocultas: ADM/MOD y solicitante
-  // (PO/SO vigente sin rol, interruptor INICIATIVAS_ABIERTAS).
-  Check('M3 el tablero enlaza a la pagina solo desde entradas ocultas',
-    [true, true, true, true],
-    [/<li data-solo-admin hidden>\s*<a class="mnav" id="mnav-admin" href="admin\/iniciativas\.html"/.test(tablero),
-     /<li data-solo-solicitante hidden>\s*<a class="mnav" id="mnav-solicitar" href="admin\/iniciativas\.html"/.test(tablero),
-     (tablero.match(/iniciativas\.html/g) || []).length === 2,
-     /<li data-solo-admin hidden>\s*<a class="mnav active" href="iniciativas\.html"/.test(html)]);
+  Check('M3 el tablero enlaza a la pagina desde una sola entrada oculta (data-solo-registro)',
+    [true, true, true],
+    [/<li data-solo-registro hidden>\s*<a class="mnav" id="mnav-iniciativas" href="admin\/iniciativas\.html"/.test(tablero),
+     (tablero.match(/iniciativas\.html/g) || []).length === 1,
+     /<li data-solo-registro hidden>\s*<a class="mnav active" href="iniciativas\.html"/.test(html)]);
 
   // Documento propio: el de Pagina() ya tiene el boton cableado por iniciar().
   var doc = Documento();
@@ -1386,12 +1381,12 @@ pruebas.push(function () {
     Check('RS6 ADM -> MOD conserva Nueva solicitud abierta', ['panel-nueva'], vistaVisible(adm));
 
     var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
-    Check('RS7 Solicitar visible solo con solicitante (ADM o PO/SO vigente): data-solo-solicitud', true,
+    Check('RS7 Solicitar visible solo con solicitante (ADM, MOD o PO/SO vigente): data-solo-solicitud', true,
       /<button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-solicitud hidden>/.test(html));
 
-    // MOD que no es PO/SO vigente (admin_sesion solicitante false): ni el
-    // boton ni la llamada directa abren Nueva solicitud; si ya estaba
-    // abierta, vuelve a Iniciativas. ADM con solicitante true, si.
+    // admin_sesion solicitante false (el servidor ya no lo dice de un MOD,
+    // pero la pagina obedece lo que diga): ni el boton ni la llamada directa
+    // abren Nueva solicitud; si ya estaba abierta, vuelve a Iniciativas.
     A.fijarRol('ADM', true);
     A.mostrarVista('nueva');
     A.fijarRol('MOD', false);
@@ -1410,8 +1405,8 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
-// SG) Envio guardado (sql/29) y modo solicitante (interruptor
-//     INICIATIVAS_ABIERTAS): el resultado dice el numero y lo que resolvio el
+// SG) Envio guardado (sql/29) y PO/SO sin rol (admin_sesion: solicitante,
+//     registro): el resultado dice el numero y lo que resolvio el
 //     servidor; el borrador se reemplaza (otro token); el mismo token otra
 //     vez = "ya estaba guardada". Nada de identidad viaja en el cuerpo.
 // ---------------------------------------------------------------------------
@@ -1447,26 +1442,26 @@ pruebas.push(function () {
   var P = p.ventana.IniciativasPagina;
   var pedir = enrutador({ '/A/Cat 1': { categoria: '/A/Cat 1', disponible: 0.4, determinable: true } },
     function () { return respuesta(); }, llamadas);
-  P.modoSolicitante();
-  Check('SG2 modo solicitante: Nueva solicitud, pestañas Solicitar una iniciativa | Solicitudes, sin Volver',
-    [['panel-nueva'], false, true, 'Solicitar una iniciativa', false, true],
-    [vistaVisible(p), p.sel('iniTabs').hidden, p.sel('btnVolver').hidden, p.sel('tab-iniciativas').textContent,
-     p.sel('tab-solicitudes').hidden, p.sel('tab-administracion').hidden]);
-  P.mostrarVista('iniciativas'); P.mostrarVista('administracion'); P.mostrarVista('crear');
-  Check('SG2 no abre el registro ni Administracion', ['panel-nueva'], vistaVisible(p));
+  var POSO = { autorizado: false, rol: null, solicitante: true, registro: true, incierto: false };
+  P.aplicarSesion(POSO);
+  Check('SG2 PO/SO sin rol: el registro, con Solicitudes y sin Administracion', [['panel-iniciativas'], false, false, true],
+    [vistaVisible(p), p.sel('iniTabs').hidden, p.sel('tab-solicitudes').hidden, p.sel('tab-administracion').hidden]);
+  P.mostrarVista('nueva');
+  Check('SG2 ... abre Nueva solicitud', ['panel-nueva'], vistaVisible(p));
+  P.mostrarVista('administracion'); P.mostrarVista('crear');
+  Check('SG2 no abre Administracion', ['panel-nueva'], vistaVisible(p));
   P.mostrarVista('solicitudes');
   Check('SG2 Solicitudes si (misma regla que Solicitar)', ['panel-solicitudes'], vistaVisible(p));
-  P.mostrarVista('nueva');
-  P.fijarRol('ADM');
-  Check('SG2 un rol que llega despues no lo cambia', [null, true, true],
-    [P.rol, p.sel('panel-administracion').hidden, p.sel('tab-administracion').hidden]);
+  P.mostrarVista('iniciativas');
+  Check('SG2 el registro si (es de todos)', ['panel-iniciativas'], vistaVisible(p));
   P.denegar();
-  Check('SG2 denegar despues de modo solicitante: queda negado', [[], false], [vistaVisible(p), p.sel('iniDenegado').hidden]);
+  Check('SG2 denegar despues: queda negado', [[], false], [vistaVisible(p), p.sel('iniDenegado').hidden]);
 
-  // Una pagina nueva en modo solicitante, ya con catalogo.
+  // Una pagina nueva de PO/SO sin rol, ya en Nueva solicitud, con catalogo.
   p = Pagina(nunca, null, null);
   P = p.ventana.IniciativasPagina;
-  P.modoSolicitante();
+  P.aplicarSesion(POSO);
+  P.mostrarVista('nueva');
   var token1;
   return P.cargar(pedir).then(function () {
     Check('SG3 la vista sigue en Nueva solicitud tras cargar', ['panel-nueva'], vistaVisible(p));

@@ -1,29 +1,23 @@
 /* SesionAdmin — que puede ver de Admin quien esta mirando la pagina.
 
    Pregunta a handlers/admin_sesion.ashx y:
-     - muestra los elementos marcados con data-solo-admin (la entrada
-       Iniciativas de ADM/MOD del menu) si la cuenta Windows esta
-       autorizada;
+     - muestra los elementos marcados con data-solo-registro (la entrada
+       Iniciativas del menu) si el servidor dice registro: true: toda
+       cuenta Windows autenticada (AccesoIniciativas.PuedeVerRegistro; no
+       depende del rol ni de ser PO/SO);
      - muestra los marcados con data-solo-adm (p. ej. "+ Crear
        iniciativa") solo si ademas el servidor dice rol "ADM"
        (dbo.UsuariosAdmin). MOD, sin rol o cualquier fallo: ocultos.
      - muestra los marcados con data-solo-solicitud ("Solicitar una
        iniciativa") solo si el servidor dice solicitante: true
-       (AccesoIniciativas: ADM siempre; MOD y los demas solo si son
-       Product Owner o Service Owner vigentes). Ser autorizado ya no basta;
-     - muestra los marcados con data-solo-solicitante (la entrada
-       Iniciativas del solicitante en el menu) solo si el servidor dice
-       solicitante: true y NO autorizado, y la respuesta es CONFIRMADA:
-       una cuenta sin rol, PO/SO vigente, con el interruptor
-       INICIATIVAS_ABIERTAS encendido (AccesoIniciativas). ADM/MOD siguen
-       viendo su propia entrada Iniciativas (data-solo-admin);
+       (AccesoIniciativas: ADM, MOD y Product Owner o Service Owner
+       vigentes) y la respuesta es CONFIRMADA;
      - muestra los marcados con data-sesion-incierta (la entrada
        "Reintentar acceso") solo si el servidor NO pudo confirmar
-       (verificacion: "incompleta": fallo la consulta del rol, del
-       interruptor o de los dueños; o un 5xx) y no esta autorizado. Un
-       fallo no es "sin rol": no cambia la entrada de ADM/MOD por la
-       del solicitante. Antes de rendirse reintenta UNA vez (ESPERA_REINTENTO);
-       despues, solo si la persona pulsa Reintentar;
+       (verificacion: "incompleta" o un 5xx), no esta autorizado y no hay
+       entrada Iniciativas que mostrar. Antes de rendirse reintenta UNA
+       vez (ESPERA_REINTENTO); despues, solo si la persona pulsa
+       Reintentar;
      - con { persona: true }, pinta "Bienvenido, <Nombre>" en el elemento
        que se le pase (autorizado o solicitante), solo si el servidor
        resolvio el nombre, y el correo
@@ -31,7 +25,7 @@
        mando. Nunca se arma un correo aqui.
 
    vigilar(alCambiar): con la pagina ya abierta, un 403 de un handler
-   admin_* (perdio el rol, dejo de ser PO/SO, se apago el interruptor)
+   admin_* (perdio el rol o dejo de ser PO/SO)
    vuelve a preguntar UNA vez a admin_sesion (las que coinciden comparten
    la misma pregunta) y le pasa el resultado a alCambiar, que decide que
    ocultar. No recarga la pagina.
@@ -46,7 +40,7 @@
 
   // Lo que se pinta cuando no hay respuesta util: nada visible.
   function nada(incierto) {
-    return { autorizado: false, solicitante: false, nombre: null, rol: null, correo: null, incierto: !!incierto };
+    return { autorizado: false, solicitante: false, registro: false, nombre: null, rol: null, correo: null, incierto: !!incierto };
   }
 
   // Un 403 de estos dice que la pagina abierta perdio algo (no admin_sesion,
@@ -65,7 +59,7 @@
       this.enCurso = null;
     }
 
-    // -> Promise<{ autorizado, solicitante, nombre, rol, correo, incierto }>.
+    // -> Promise<{ autorizado, solicitante, registro, nombre, rol, correo, incierto }>.
     // Nunca rechaza. incierto: el servidor contesto pero no pudo confirmar.
     consultar(opciones) {
       var persona = !!(opciones && opciones.persona);
@@ -82,14 +76,16 @@
           var nombre = typeof json.nombre === 'string' && json.nombre.trim()
             ? json.nombre.trim() : null;
           var autorizado = json.autorizado === true;
-          // Solo si el servidor lo dice con un true de verdad (ADM, o PO/SO
-          // vigente): un MOD autorizado ya no lo es por su rol.
+          // Solo si el servidor lo dice con un true de verdad (ADM, MOD o
+          // PO/SO vigente).
           var solicitante = json.solicitante === true;
+          // Toda cuenta autenticada ve el registro; ADM/MOD siempre.
+          var registro = json.registro === true || autorizado;
           var rol = autorizado && (json.rol === 'ADM' || json.rol === 'MOD') ? json.rol : null;
           // Solo un correo con forma de correo; el servidor ya lo filtra.
           var correo = autorizado && typeof json.correo === 'string' && /^[^\s@<>"']+@[^\s@<>"']+\.[^\s@<>"']+$/.test(json.correo.trim())
             ? json.correo.trim() : null;
-          return { autorizado: autorizado, solicitante: solicitante, nombre: nombre, rol: rol, correo: correo,
+          return { autorizado: autorizado, solicitante: solicitante, registro: registro, nombre: nombre, rol: rol, correo: correo,
                    incierto: json.verificacion === 'incompleta' };
         })
         .catch(function () { return nada(false); });
@@ -112,11 +108,11 @@
     // Muestra/oculta [data-solo-*] y [data-sesion-incierta] dentro de doc
     // y, si se pasan, pinta el saludo y el correo.
     pintar(doc, s, saludo, correo) {
-      // Sin confirmar y sin rol: ni la entrada Iniciativas de ADM/MOD (no
-      // esta confirmada) ni la del solicitante en su lugar; solo Reintentar.
+      // Sin confirmar y sin rol: el registro sigue (no depende de eso), sin
+      // Solicitar; Reintentar solo si tampoco hay entrada Iniciativas.
       var incierto = !!s.incierto && !s.autorizado;
-      doc.querySelectorAll('[data-solo-admin]').forEach(function (el) {
-        el.hidden = !s.autorizado;
+      doc.querySelectorAll('[data-solo-registro]').forEach(function (el) {
+        el.hidden = !s.registro;
       });
       doc.querySelectorAll('[data-solo-adm]').forEach(function (el) {
         el.hidden = s.rol !== 'ADM';
@@ -124,11 +120,8 @@
       doc.querySelectorAll('[data-solo-solicitud]').forEach(function (el) {
         el.hidden = !s.solicitante || incierto;
       });
-      doc.querySelectorAll('[data-solo-solicitante]').forEach(function (el) {
-        el.hidden = !(s.solicitante && !s.autorizado && !incierto);
-      });
       doc.querySelectorAll('[data-sesion-incierta]').forEach(function (el) {
-        el.hidden = !incierto;
+        el.hidden = !(incierto && !s.registro);
       });
       if (saludo) {
         var conNombre = (s.autorizado || s.solicitante) && s.nombre;

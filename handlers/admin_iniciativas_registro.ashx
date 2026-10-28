@@ -43,9 +43,10 @@
 // filtro de Tipo de iniciativa) y dbo.ProblemFechaEvento (historial de fechas).
 // No crea ni cambia nada en la base.
 //
-// ACCESO: AccesoAdmin.Exigir (rol ADM o MOD en dbo.UsuariosAdmin); el
-// resto recibe 403 antes de tocar la base. "subestado" de cada iniciativa
-// y "subestados_problem" salen solo con rol ADM.
+// ACCESO: AccesoIniciativas.ExigirRegistro: toda cuenta Windows
+// autenticada (2026-10-28; no depende de dbo.UsuariosAdmin, PO/SO ni del
+// interruptor); sin cuenta, 403 antes de tocar la base. "subestado" de cada
+// iniciativa y "subestados_problem" salen solo con rol ADM.
 //
 // POR QUE NO USA DashboardHandler.Responder: el mismo motivo que
 // experiencia.ashx. Descripcion y Observaciones de ~1000 iniciativas pueden
@@ -61,7 +62,7 @@ public class AdminIniciativasRegistro : IHttpHandler
 {
     public void ProcessRequest(HttpContext context)
     {
-        if (!AccesoAdmin.Exigir(context)) return;
+        if (!AccesoIniciativas.ExigirRegistro(context)) return;
 
         context.Response.ContentType = "application/json; charset=utf-8";
         context.Response.Cache.SetCacheability(HttpCacheability.NoCache);
@@ -73,7 +74,7 @@ public class AdminIniciativasRegistro : IHttpHandler
         {
             // ?export=1: SOLO las columnas extra de "Descargar iniciativas"
             // (ExperienciaQueries.RegistroExportExtra, dos SELECT), detras
-            // del mismo AccesoAdmin.Exigir. Sin el parametro, el registro de
+            // del mismo ExigirRegistro. Sin el parametro, el registro de
             // siempre, que no las lee. Otro valor: 400.
             var export = context.Request.QueryString["export"];
             if (export != null)

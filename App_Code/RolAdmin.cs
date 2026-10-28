@@ -7,14 +7,16 @@
 //   3. Rol: dbo.UsuariosAdmin.Acceso de esa cuenta (esta clase). Sin
 //      identidad autenticada no se consulta: VIEWER.
 //   4. Entrada: AccesoAdmin.Exigir deja pasar solo ADM o MOD; VIEWER recibe
-//      403 en la pagina y en todo handler admin_iniciativas_*.
+//      403 en todo handler admin_iniciativas_* de Admin. La pagina, el
+//      registro y la Cobertura son de toda cuenta autenticada, y Nueva
+//      solicitud tambien de PO/SO vigentes (App_Code/AccesoIniciativas.cs).
 //   5. Permiso: AccesoAdmin.ExigirAdm para lo que es solo de ADM (hoy la
 //      consola de correos, admin_correos; crear y modificar directo,
 //      admin_iniciativas_gestion; el alta de categoria, admin_categorias_alta;
 //      y ?duenos=1 de admin_iniciativas_catalogos). Nueva solicitud
 //      (admin_iniciativas_validar, _capacidad, _catalogos, _volumetria) es
-//      de ADM y MOD y, con el interruptor INICIATIVAS_ABIERTAS, de cualquier
-//      cuenta autenticada: AccesoIniciativas.ExigirSolicitud.
+//      de ADM y MOD y de cualquier cuenta autenticada que sea PO/SO
+//      vigente: AccesoIniciativas.ExigirSolicitud.
 //
 // QUE PUEDE CADA ROL (2026-10-26)
 // -------------------------------

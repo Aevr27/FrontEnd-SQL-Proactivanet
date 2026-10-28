@@ -764,7 +764,8 @@ pruebas.push(function () {
 // la opcion "Estado y Subestado", ni el actual, ni el nuevo); el Estado se
 // sigue pidiendo. ADM conserva la lista para "Modificar" (opcionesEstado);
 // MOD y sin rol, no. Que MOD no lo pueda pedir por HTTP lo prueba
-// SolicitudesCambioHttpSmoke.cs (S1-S5).
+// SolicitudesCambioHttpSmoke.cs (S1-S5). Sin rol (2026-10-28) ni siquiera
+// se abre "Solicitar cambios": el registro es de solo lectura.
 // ---------------------------------------------------------------------------
 [['ADM', true], ['MOD', false], [null, false]].forEach(function (caso) {
   pruebas.push(function () {
@@ -785,6 +786,11 @@ pruebas.push(function () {
       clicFolio(p, 'PRB 2026-000001');
       accion('solicitar-cambios');
       var form = p.sel('regCambio').innerHTML;
+      if (!caso[0]) {
+        Check('SB1 sin rol: sin boton y Solicitar cambios no abre (solo lectura)', [false, false, null],
+          [/id="regCambioBoton"/.test(p.sel('regDetCuerpo').innerHTML), /regCambioCampo/.test(form), p.registro.lista || null]);
+        return;
+      }
       Check('SB1 ' + nombre + ': ni la opcion "Estado y Subestado" ni campo de Subestado; la opcion es "Estado"', [false, false, true],
         [/Subestado/.test(form), /regCambioSubestado/.test(form), /<option value="estado">Estado<\/option>/.test(form)]);
       elegir('regCambioCampo', 'estado');
@@ -3413,12 +3419,14 @@ pruebas.push(function () {
      /POST|method|body:|\.ashx/.test(desc), /fetch|\.ashx|POST/.test(exp), /export=1/.test(desc)]);
   Check('XD16 URL_EXPORT = el handler del registro con ?export=1', true,
     /var URL_EXPORT = URL_REGISTRO \+ '\?export=1';/.test(reg));
-  Check('XD16 el registro sigue exigiendo ADM/MOD antes de leer', true,
-    /if \(!AccesoAdmin\.Exigir\(context\)\) return;/.test(leer('handlers/admin_iniciativas_registro.ashx')));
+  // El registro (y su descarga) es de toda cuenta autenticada (2026-10-28):
+  // AccesoIniciativas.ExigirRegistro antes de leer nada.
+  Check('XD16 el registro exige una cuenta autenticada antes de leer', true,
+    /if \(!AccesoIniciativas\.ExigirRegistro\(context\)\) return;/.test(leer('handlers/admin_iniciativas_registro.ashx')));
   var ashx = leer('handlers/admin_iniciativas_registro.ashx');
-  Check('XD16 ?export=1 va DESPUES de AccesoAdmin.Exigir y solo acepta 1', [true, true, true],
-    [ashx.indexOf('if (!AccesoAdmin.Exigir(context)) return;') >= 0 &&
-       ashx.indexOf('if (!AccesoAdmin.Exigir(context)) return;') < ashx.indexOf('QueryString["export"]'),
+  Check('XD16 ?export=1 va DESPUES de ExigirRegistro y solo acepta 1', [true, true, true],
+    [ashx.indexOf('if (!AccesoIniciativas.ExigirRegistro(context)) return;') >= 0 &&
+       ashx.indexOf('if (!AccesoIniciativas.ExigirRegistro(context)) return;') < ashx.indexOf('QueryString["export"]'),
      /if \(export != "1"\)\s*\{\s*context\.Response\.StatusCode = 400;/.test(ashx),
      /RegistroExportExtra\(\)/.test(ashx)]);
   var cs = leer('App_Code/ExperienciaRegistro.cs');

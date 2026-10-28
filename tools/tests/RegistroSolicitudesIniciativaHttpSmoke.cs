@@ -3,14 +3,14 @@
 // Solicitudes), con un lector y roles falsos. La lectura real contra sql/29
 // se prueba en RegistroSolicitudesIniciativaSqlLocalDbSmoke.
 //
-//   A  acceso: anonimo, VIEWER, MOD y el solicitante del interruptor
-//      (encendido) reciben 403 y el lector ni se toca; ADM entra.
+//   A  acceso: anonimo, VIEWER (aunque sea solicitante PO/SO) y MOD
+//      reciben 403 y el lector ni se toca; ADM entra.
 //   L  listar: 200 con las filas, el total y el tope (200); sin filas, 200
 //      con lista vacia; sin tablas 501 (no se lista); la base falla 500.
 //   D  detalle: numero 142 / 0000142 / #0000142; invalido 400 sin leer;
 //      no existe 404; con su historial.
 //   M  metodo y accion: POST 405; aprobar / rechazar / borrar: 400.
-//   R  solo lectura: el fuente no escribe; no es ruta del interruptor;
+//   R  solo lectura: el fuente no escribe; no es ruta del solicitante;
 //      "De cambio" (admin_iniciativas_solicitudes.ashx) no se toco.
 //
 // Compilar y correr desde la raiz del repo (como SolicitudesCambioHttpSmoke):
@@ -34,12 +34,6 @@ sealed class RolesNuevasFalsos : IFuenteRolesAdmin
         string[] f;
         return Filas.TryGetValue(cuenta.Trim().ToUpperInvariant(), out f) ? f : new string[0];
     }
-}
-
-sealed class InterruptorNuevasFalso : IFuenteInterruptores
-{
-    public bool? Valor;
-    public bool? Encendido(string clave) { return Valor; }
 }
 
 sealed class LectorFalso : ILectorSolicitudesIniciativa
@@ -124,8 +118,6 @@ public static class RegistroSolicitudesIniciativaHttpSmoke
     public static int Main()
     {
         AccesoAdmin.FuenteRoles = new RolesNuevasFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(AMBOS, "ADM", "MOD");
-        var interruptor = new InterruptorNuevasFalso { Valor = true };
-        AccesoIniciativas.Fuente = interruptor;
         var lector = new LectorFalso();
         RegistroSolicitudesIniciativa.Lector = lector;
         lector.Lectura.Total = 2;
@@ -151,10 +143,9 @@ public static class RegistroSolicitudesIniciativaHttpSmoke
         cuerpo = Correr("GET", "accion=listar", MOD, out st);
         Check("A2 MOD: RolInsuficiente con el mensaje del registro", "RolInsuficiente|" + RegistroSolicitudesIniciativa.MensajeSoloAdm,
               Campo(Json(cuerpo), "tipo") + "|" + Campo(Json(cuerpo), "error"));
-        interruptor.Valor = true;
         lector.Llamadas.Clear();
         cuerpo = Correr("GET", "accion=listar", VIEWER, out st);
-        Check("A3 interruptor INICIATIVAS_ABIERTAS encendido: el solicitante sigue sin entrar", "403|0", st + "|" + lector.Llamadas.Count);
+        Check("A3 VIEWER sin rol: sigue sin entrar", "403|0", st + "|" + lector.Llamadas.Count);
         Check("A3 no es ruta del solicitante", false, AccesoIniciativas.EsRutaSolicitante("~/handlers/admin_iniciativas_solicitudes_nuevas.ashx"));
         Check("A4 el modulo de acceso tambien la protege (prefijo admin_)", true,
               AccesoAdmin.EsRutaProtegida("~/handlers/admin_iniciativas_solicitudes_nuevas.ashx"));

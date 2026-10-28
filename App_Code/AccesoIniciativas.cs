@@ -1,18 +1,23 @@
-// Quien puede pedir una iniciativa por Nueva solicitud (la pagina
-// admin/iniciativas.html y sus cuatro handlers). Quien entra sin rol en
-// dbo.UsuariosAdmin es el rol DERIVADO "solicitante": no se guarda en
-// ninguna tabla por persona; se calcula en cada request.
+// Quien ve el registro de Iniciativas y quien puede pedir una iniciativa
+// por Nueva solicitud (la pagina admin/iniciativas.html y sus handlers).
+// Quien entra sin rol en dbo.UsuariosAdmin y es PO/SO vigente es el rol
+// DERIVADO "solicitante": no se guarda en ninguna tabla por persona; se
+// calcula en cada request.
 //
-// LA REGLA (2026-10-26)
+// LA REGLA (2026-10-28)
 // ---------------------
-//   ADM                 siempre (pruebas controladas). No mira el
-//                       interruptor ni los dueños.
-//   MOD                 solo si es PO o SO VIGENTE. No mira el interruptor
-//                       (MOD nunca dependio de el). El resto de Admin para
-//                       MOD no cambia: AccesoAdmin.Exigir.
-//   cualquier otra      interruptor INICIATIVAS_ABIERTAS encendido Y PO o SO
-//   cuenta autenticada  VIGENTE. Las dos condiciones.
+//   Registro (vista Iniciativas, solo lectura): toda cuenta Windows
+//   autenticada (PuedeVerRegistro). No mira dbo.UsuariosAdmin, los dueños
+//   ni el interruptor. Anonimo: no.
+//
+//   Nueva solicitud y Mis solicitudes (PuedeSolicitar):
+//   ADM / MOD           siempre. No mira los dueños.
+//   cualquier otra      solo si es PO o SO VIGENTE.
+//   cuenta autenticada
 //   anonimo             nunca.
+//
+//   Administracion (cola de solicitudes, revision, gestion, correos...)
+//   sigue en AccesoAdmin.Exigir / ExigirAdm: ser PO/SO no da rol.
 //
 // PO / SO VIGENTE: la cuenta de IIS (AccesoAdmin.IdentidadEscritura) se
 // resuelve a UNA persona de dbo.CatPersona con la regla del acuse y de la
@@ -29,39 +34,34 @@
 // DashboardHandler.Registrar).
 //
 // INTERRUPTOR: fila INICIATIVAS_ABIERTAS de adm.Interruptor
-// (sql/30_interruptor_iniciativas.sql). Web.config ya NO cuenta: la clave
-// IniciativasAbiertas de appSettings se ignora.
+// (sql/30_interruptor_iniciativas.sql). Desde 2026-10-28 NO decide el
+// acceso: el registro es de todos y Nueva solicitud de ADM, MOD y PO/SO
+// vigentes, este encendido o no. Se conserva su lectura (Leer,
+// FuenteInterruptoresSql) para la tabla de sql/30; ningun request la hace.
 //
-//     Encendido = 1  abierto
-//     Encendido = 0, sin fila, sin tabla, consulta que falla: APAGADO
-//
-// Encender / apagar: lo hace un operador autorizado con el UPDATE de la
-// cabecera de sql/30 (la cuenta del sitio, PROACTIVANETAD, tiene DENY de
-// escritura sobre la tabla). Nada del sitio lo cambia.
-//
-// Interruptor y dueños se leen como mucho una vez por request
-// (HttpContext.Items: el modulo y el handler no repiten la consulta), nunca
-// se guardan entre requests y solo cuando hacen falta: para ADM ninguno;
-// para MOD solo los dueños; para los demas el interruptor y, solo si esta
-// encendido, los dueños.
+// Los dueños se leen como mucho una vez por request (HttpContext.Items: el
+// modulo y el handler no repiten la consulta), nunca se guardan entre
+// requests y solo para quien no es ADM ni MOD.
 //
 // QUE ABRE
-//   la pagina admin/iniciativas.html, en modo solicitante (admin/
-//   iniciativas.js, modoSolicitante: Nueva solicitud y Solicitudes), los
-//   CUATRO handlers que el formulario usa y "Mis solicitudes":
-//     admin_iniciativas_catalogos   (?rutas=1, la cascada; sin ?rutas, la
-//                                    Cobertura del registro, sigue abierto a
-//                                    ADM/MOD; ?duenos=1 y rutas_adm siguen ADM)
+//   PuedeVerRegistro: la pagina admin/iniciativas.html, el registro
+//   (admin_iniciativas_registro, con ?export=1) y la Cobertura del registro
+//   (admin_iniciativas_catalogos sin ?rutas ni ?duenos). Solo lectura.
+//   PuedeSolicitar: los CUATRO handlers de Nueva solicitud y "Mis
+//   solicitudes":
+//     admin_iniciativas_catalogos   (?rutas=1, la cascada; ?duenos=1 y
+//                                    rutas_adm siguen ADM)
 //     admin_iniciativas_capacidad   (capacidad de la categoria elegida)
 //     admin_iniciativas_volumetria  (sin alcance=total, que sigue ADM)
 //     admin_iniciativas_validar     (validar y guardar la solicitud)
-//     admin_iniciativas_mis_solicitudes (2026-10-27; solo lectura, solo las
-//                                    que envio la propia cuenta)
-//   Todo lo demas de Admin (registro, solicitudes de cambio, acuse, gestion,
-//   recientes, diagnostico, correos, alta de categoria) sigue exigiendo ADM
-//   o MOD (AccesoAdmin.Exigir / ExigirAdm) y lo protege AdminAccesoModulo
-//   igual que antes. Ningun otro modulo del tablero mira esta regla. No da
-//   rol: quien entra por aqui sigue siendo VIEWER para AccesoAdmin.Rol.
+//     admin_iniciativas_mis_solicitudes (solo lectura, solo las que envio
+//                                    la propia cuenta)
+//   Todo lo demas de Admin (solicitudes de cambio, Nuevas, revision, acuse,
+//   gestion, recientes, diagnostico, correos, alta de categoria) sigue
+//   exigiendo ADM o MOD (AccesoAdmin.Exigir / ExigirAdm) y lo protege
+//   AdminAccesoModulo igual que antes. Ningun otro modulo del tablero mira
+//   esta regla. No da rol: quien entra por aqui sigue siendo VIEWER para
+//   AccesoAdmin.Rol.
 //
 // No es el ciclo de vida de una solicitud ni de una iniciativa: no cambia
 // ningun estado, solo quien puede abrir el formulario y enviarlo. Quien
@@ -153,11 +153,16 @@ public static class AccesoIniciativas
     // Clave de la fila en adm.Interruptor.
     public const string ClaveInterruptor = "INICIATIVAS_ABIERTAS";
 
+    // Rutas (relativas a la aplicacion) del registro, de solo lectura. El
+    // catalogo solo sin ?rutas ni ?duenos (EsLecturaRegistro).
+    public const string RutaRegistro = "~/handlers/admin_iniciativas_registro.ashx";
+    public const string RutaCatalogos = "~/handlers/admin_iniciativas_catalogos.ashx";
+
     // Rutas (relativas a la aplicacion) de Nueva solicitud y Solicitudes.
     public static readonly string[] RutasSolicitante =
     {
         AccesoAdmin.PaginaProtegida,
-        "~/handlers/admin_iniciativas_catalogos.ashx",
+        RutaCatalogos,
         "~/handlers/admin_iniciativas_capacidad.ashx",
         "~/handlers/admin_iniciativas_volumetria.ashx",
         "~/handlers/admin_iniciativas_validar.ashx",
@@ -171,17 +176,18 @@ public static class AccesoIniciativas
     public const string MensajeSoloDuenos =
         "La solicitud de iniciativas está disponible únicamente para Product Owners (PO) y Service Owners (SO) vigentes.";
 
-    // De donde salen el interruptor y los dueños. Las reales leen la base;
-    // las pruebas ponen las suyas para no necesitar SQL Server. Nada del
-    // sitio las cambia.
-    public static IFuenteInterruptores Fuente = new FuenteInterruptoresSql();
+    public const string MensajeSinCuenta =
+        "Inicia sesión con tu cuenta de Windows para ver las iniciativas.";
+
+    // De donde salen los dueños. La real lee la base; las pruebas ponen la
+    // suya para no necesitar SQL Server. Nada del sitio la cambia.
     public static IFuenteDuenosVigentes FuenteDuenos = new FuenteDuenosVigentesSql();
 
-    private const string ClaveRequest = "AccesoIniciativas.Abiertas";
     private const string ClaveDuenosRequest = "AccesoIniciativas.PoSoVigente";
 
-    // La regla sin HttpContext: solo una fila con Encendido = 1 abre. Sin
-    // fuente, sin fila o con error: cerrado. `registrar` recibe el error.
+    // El interruptor de sql/30, sin HttpContext: solo una fila con
+    // Encendido = 1 abre. Sin fuente, sin fila o con error: cerrado.
+    // `registrar` recibe el error. Ya no decide el acceso (ver INTERRUPTOR).
     public static bool Leer(IFuenteInterruptores fuente, Action<Exception> registrar)
     {
         if (fuente == null) return false;
@@ -194,17 +200,6 @@ public static class AccesoIniciativas
             if (registrar != null) registrar(ex);
             return false;
         }
-    }
-
-    // El interruptor para el request en curso: una lectura por request
-    // (HttpContext.Items), nunca guardado entre requests.
-    public static bool Abiertas(HttpContext context)
-    {
-        var guardado = context == null ? null : context.Items[ClaveRequest] as bool?;
-        if (guardado.HasValue) return guardado.Value;
-        var v = Leer(Fuente, delegate (Exception ex) { AccesoAdmin.MarcarVerificacionIncompleta(context); DashboardHandler.Registrar("AccesoIniciativas.Abiertas", ex); });
-        if (context != null) context.Items[ClaveRequest] = v;
-        return v;
     }
 
     // La regla de dueños sin HttpContext: la cuenta se resuelve a UNA
@@ -254,15 +249,41 @@ public static class AccesoIniciativas
         return false;
     }
 
+    // Lectura del registro: la pagina, el registro y la Cobertura (catalogo
+    // sin ?rutas ni ?duenos, que siguen su propia regla en el handler).
+    public static bool EsLecturaRegistro(string rutaRelativa, string rutas, string duenos)
+    {
+        if (string.IsNullOrEmpty(rutaRelativa)) return false;
+        if (string.Equals(rutaRelativa, AccesoAdmin.PaginaProtegida, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(rutaRelativa, RutaRegistro, StringComparison.OrdinalIgnoreCase)) return true;
+        return string.Equals(rutaRelativa, RutaCatalogos, StringComparison.OrdinalIgnoreCase)
+            && rutas != "1" && duenos != "1";
+    }
+
+    // El registro es de todo usuario del tablero: basta una cuenta Windows
+    // autenticada (o la del atajo de desarrollo local). No consulta
+    // dbo.UsuariosAdmin, los dueños ni el interruptor.
+    public static bool PuedeVerRegistro(HttpContext context)
+    {
+        return AccesoAdmin.IdentidadEscritura(context) != null;
+    }
+
+    // Para el registro y la Cobertura: true si sigue; si no, ya respondio
+    // 403 AccesoDenegado en JSON y hay que salir.
+    public static bool ExigirRegistro(HttpContext context)
+    {
+        if (PuedeVerRegistro(context)) return true;
+        AccesoAdmin.Rechazar(context, true, MensajeSinCuenta);
+        return false;
+    }
+
     // La regla sin HttpContext (ver LA REGLA arriba). null = puede; si no,
     // el mensaje del 403. `rol`: el de AccesoAdmin solo si entra a Admin
-    // (null para los demas). Interruptor y dueños se piden solo si hacen
-    // falta, en ese orden.
-    public static string Evaluar(string rol, IdentidadWindows id, Func<bool> abiertas, Func<bool> poSoVigente)
+    // (null para los demas). Los dueños se piden solo si hacen falta.
+    public static string Evaluar(string rol, IdentidadWindows id, Func<bool> poSoVigente)
     {
-        if (rol == RolAdmin.Adm) return null;
+        if (rol == RolAdmin.Adm || rol == RolAdmin.Mod) return null;
         if (id == null || !id.Autenticada) return MensajeCerrado;
-        if (rol != RolAdmin.Mod && !abiertas()) return MensajeCerrado;
         return poSoVigente() ? null : MensajeSoloDuenos;
     }
 
@@ -271,20 +292,12 @@ public static class AccesoIniciativas
     {
         var rol = AccesoAdmin.PuedeEntrar(context) ? AccesoAdmin.Rol(context) : null;
         var id = AccesoAdmin.IdentidadEscritura(context);
-        return Evaluar(rol, id,
-            delegate { return Abiertas(context); },
-            delegate { return PoSoVigente(context, id); });
+        return Evaluar(rol, id, delegate { return PoSoVigente(context, id); });
     }
 
     public static bool PuedeSolicitar(HttpContext context)
     {
         return Motivo(context) == null;
-    }
-
-    // Entro sin rol ADM/MOD (interruptor + PO/SO). Solo para la interfaz.
-    public static bool EsSoloSolicitante(HttpContext context)
-    {
-        return !AccesoAdmin.PuedeEntrar(context) && PuedeSolicitar(context);
     }
 
     // Para los cuatro handlers de Nueva solicitud: true si sigue; si no, ya

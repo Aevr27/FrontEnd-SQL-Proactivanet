@@ -16,15 +16,15 @@
 //        exigen aparte.
 //        "solicitante": true|false = AccesoIniciativas.PuedeSolicitar: puede
 //        abrir Nueva solicitud y ver "Solicitar una iniciativa" y la pestaña
-//        Solicitudes (ADM siempre; MOD solo si es Product Owner o Service
-//        Owner vigente; los demas con el interruptor INICIATIVAS_ABIERTAS de
-//        adm.Interruptor y siendo PO/SO vigente). Con autorizado false y
-//        solicitante true, la pagina se abre en modo solicitante (Nueva
-//        solicitud y Solicitudes) y el menu muestra la entrada Iniciativas
-//        del solicitante. Tambien solo UX: los cuatro handlers de Nueva
-//        solicitud y Mis solicitudes lo exigen con ExigirSolicitud.
+//        Solicitudes (ADM y MOD siempre; los demas siendo Product Owner o
+//        Service Owner vigente). Tambien solo UX: los cuatro handlers de
+//        Nueva solicitud y Mis solicitudes lo exigen con ExigirSolicitud.
+//        "registro": true|false = AccesoIniciativas.PuedeVerRegistro: ve la
+//        entrada Iniciativas del menu y el registro (toda cuenta Windows
+//        autenticada; no consulta la base). Tambien solo UX: el registro lo
+//        exige con ExigirRegistro.
 //        "verificacion": "incompleta" SOLO si alguna consulta de este request
-//        fallo (dbo.UsuariosAdmin, adm.Interruptor o los dueños PO/SO): lo
+//        fallo (dbo.UsuariosAdmin o los dueños PO/SO): lo
 //        demas ya fallo cerrado, pero no es una negativa confirmada. La
 //        interfaz no la toma como "sin rol" (SesionAdmin: incierto).
 //   GET handlers/admin_sesion.ashx?persona=1    -> ademas "nombre" (solo si
@@ -54,10 +54,11 @@ public class AdminSesion : IHttpHandler
             salida["autorizado"] = AccesoAdmin.PuedeEntrar(context);
             if ((bool)salida["autorizado"]) salida["rol"] = AccesoAdmin.Rol(context);
             salida["solicitante"] = AccesoIniciativas.PuedeSolicitar(context);
+            salida["registro"] = AccesoIniciativas.PuedeVerRegistro(context);
             // Solo para que se note en pantalla/red que es el atajo de
             // desarrollo local (AdminDevOverride + DEBUG + local + IIS Express + whitelist).
             if (AccesoDesarrolloLocal.Activo(context)) salida["desarrollo_local"] = true;
-            // Una consulta de autorizacion fallo (rol, interruptor o dueños):
+            // Una consulta de autorizacion fallo (rol o dueños):
             // autorizado/solicitante ya fallaron cerrado; esto solo le dice a
             // la interfaz que NO es una negativa confirmada (no cambia de
             // Administracion a Iniciativas por un error). No da nada.

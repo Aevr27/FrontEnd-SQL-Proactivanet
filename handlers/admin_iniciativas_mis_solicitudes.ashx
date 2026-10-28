@@ -13,9 +13,8 @@
 //   501 RegistroNoDisponible  faltan las tablas de sql/29
 //   500 { error, tipo }       la base fallo (DashboardHandler.Responder)
 //   403 antes de leer nada: AccesoIniciativas.ExigirSolicitud, la MISMA
-//       regla que "Solicitar una iniciativa" (ADM siempre; MOD solo PO/SO
-//       vigente; los demas, interruptor INICIATIVAS_ABIERTAS y PO/SO
-//       vigente). Sin identidad que firme (AccesoAdmin.IdentidadEscritura):
+//       regla que "Solicitar una iniciativa" (ADM y MOD siempre; los demas,
+//       PO/SO vigente). Sin identidad que firme (AccesoAdmin.IdentidadEscritura):
 //       403 SinUsuario. 405 si no es GET; 400 accion desconocida.
 //
 // La cuenta es la de IIS (la misma que guardo SolicitanteCuenta al enviar);
