@@ -183,9 +183,13 @@ function sonda() {
         c.value = campo;
         c.dispatchEvent(new Event('change', { bubbles: true }));
       }
+      // Agregar solo va por el par capturado: con PO 04 / SO 19 la unica
+      // categoria agregable es /A/Cat 19.
+      var iniS = reg.registro.buscar('PRB 2026-000001'); iniS.po_capturado = 'PO 04'; iniS.so_capturado = 'SO 19';
       abrirCambio('pct');
       await espera(50);
       apunta('S1', [montado('regCambioCatBuscar'), !!document.querySelector('#regCambio datalist'), montado('regCambioEstado')]);
+      apunta('SC', [!!$('regCambioCascPo'), !!$('regCambioCascSo'), filasTexto('regCambioCatBuscar')]);
       apunta('S2', elegir('regCambioCatBuscar', 'Cat 19'));
       clic(document.querySelector('[data-accion="cambio-cat-agregar"]'));
       await espera(50);
@@ -228,6 +232,7 @@ Banco.correr(paginas, ['/admin/__desplegables.html']).then(function (res) {
     [{ filas: 1, cerrado: true, valor: 'SO 21', boton: 'SO 21' }, 'SO 21', 'false'], A.M2);
   Check('G1 Seguimiento: la categoria es el desplegable y elegir cambia la vista', [true, '/A/Cat 02', '/A/Cat 02'], A.G1);
   Check('S1 Solicitar cambios: categoria y Estado son el desplegable, sin datalist', [true, false, true], A.S1);
+  Check('SC par capturado fijo: sin selectores de PO / SO; el desplegable solo trae sus categorias', [false, false, ['— Elige —', '/A/Cat 19']], A.SC);
   Check('S2 elegir categoria con el buscador', { filas: 1, cerrado: true, valor: '/A/Cat 19', boton: '/A/Cat 19' }, A.S2);
   Check('S3 Agregar suma la elegida; el selector repintado sigue montado, sin anidar', [['/A/Cat 19'], true, 0], A.S3);
   Check('S4 cancelar y reabrir: un desplegable de categoria, nada anidado', [1, 0, true], A.S4);

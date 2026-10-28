@@ -400,6 +400,92 @@ window.RegistroIniciativas = (function () {
       return '<option value="' + Escape.attr(v) + '"' + (v === valor ? ' selected' : '') + '>' + Escape.html(v) + '</option>';
     }).join('') + '</select>';
   }
+  // La cascada de "Agregar categoria" de Solicitar cambios: la MISMA
+  // CascadaOrganizacional de Nueva solicitud ('creacion': PO -> SO ->
+  // Categoria) sobre las filas { director, po, so, categoria } del catalogo,
+  // FIJA en el PO / SO CAPTURADOS de la iniciativa (decision 2026-10-28):
+  // solo se elige la categoria. parValido = false si la iniciativa no tiene
+  // ese par o el par no esta en el catalogo: entonces no se agrega nada (no
+  // se cae a otro par). El servidor lo vuelve a exigir al enviar
+  // (PeticionSolicitudCambio.ExigirCatalogo). Sin filas o sin el modulo:
+  // null (no se puede agregar).
+  function cascadaCambio(filas, iniciativa) {
+    var C = window.CascadaOrganizacional;
+    if (!C || !Array.isArray(filas) || !filas.length) return null;
+    var c = new C(filas, 'creacion');
+    var i = iniciativa || {};
+    c.parValido = c.elegir(0, i.po_capturado || '') && c.elegir(1, i.so_capturado || '');
+    if (!c.parValido) c.limpiar(0);
+    return c;
+  }
+
+  // Por que no se puede agregar con el par capturado de la iniciativa.
+  function motivoSinParCambio(iniciativa) {
+    var po = iniciativa.po_capturado || '', so = iniciativa.so_capturado || '';
+    if (!po || !so) {
+      return 'La iniciativa no tiene Product Owner y Service Owner capturados: no se pueden agregar categorías. ' +
+        'Pide primero ese cambio (Título / Product Owner / Service Owner).';
+    }
+    return 'El Product Owner y Service Owner de la iniciativa (' + po + ' / ' + so + ') no son un par del catálogo vigente: ' +
+      'no se pueden agregar categorías.';
+  }
+
+  // "Agregar categoria" con la cascada fija: el PO y el SO de la iniciativa
+  // a la vista (no se eligen) y el selector de sus categorias. La categoria
+  // conserva el id de siempre (regCambioCatBuscar), que es el que lee
+  // "Agregar".
+  function htmlCascadaCambio(cambio) {
+    var cascada = cambio.cascada;
+    if (!cascada.parValido) {
+      return '<div class="ini-cat-agregar"><span class="ini-rotulo">Agregar categoría</span>' +
+        '<p class="ini-nota">' + Escape.html(motivoSinParCambio(cambio.iniciativa)) + '</p></div>';
+    }
+    var cats = cascada.opciones(2);
+    return '<div class="ini-cat-agregar ini-cascada"><span class="ini-rotulo">Agregar categoría</span>' +
+      '<p class="ini-nota">Solo categorías del Product Owner <b>' + Escape.html(cascada.seleccion[0]) + '</b> y el Service Owner <b>' +
+        Escape.html(cascada.seleccion[1]) + '</b> de la iniciativa.</p>' +
+      '<div class="ini-campo"><label for="regCambioCatBuscar">Categoría</label>' +
+        selectorHtml('regCambioCatBuscar', cats, cascada.seleccion[2], cats.length ? '' : ' disabled') +
+        (cats.length ? '' : '<small class="ini-motivo">Sin categorías en el catálogo para ese par.</small>') + '</div>' +
+      '<button type="button" class="btn linea chico" data-accion="cambio-cat-agregar"' + (cats.length ? '' : ' disabled') + '>Agregar</button></div>';
+  }
+
+  // La celda del % pedido de una categoria de "Solicitar cambios": el
+  // selector "% / Tickets" y, segun el modo, la casilla del % de siempre
+  // (htmlPct) o la de tickets con lo que da en % (htmlMetaHint). clave:
+  // 'l<n>' (ligada n) o 'n<n>' (nueva n).
+  function celdaMetaCambio(c, ruta, clave, htmlPct, vacio) {
+    var m = c.meta(ruta);
+    var modo = '<label class="ini-ed-pct"><span class="ini-sr">Pedir ' + Escape.html(ruta) + ' en</span>' +
+      // data-nativo: dos opciones, sin el desplegable con buscador.
+      '<select data-cambio-modo="' + clave + '" data-nativo><option value="pct"' + (m.modo === 'pct' ? ' selected' : '') + '>%</option>' +
+      '<option value="tickets"' + (m.modo === 'tickets' ? ' selected' : '') + '>Tickets</option></select></label> ';
+    if (m.modo !== 'tickets') return modo + htmlPct;
+    return modo + '<label class="ini-ed-pct"><span class="ini-sr">Tickets a reducir de ' + Escape.html(ruta) + '</span>' +
+      '<input type="number" min="0" step="1" data-cambio-tickets="' + clave + '" value="' + Escape.attr(m.tickets) + '"' +
+      (vacio ? ' placeholder="' + Escape.attr(vacio) + '"' : '') + '> tickets</label>' +
+      '<small class="ini-sub" id="regCambioMeta-' + clave + '">' + htmlMetaHint(c, ruta) + '</small>';
+  }
+
+  // Lo que dan los tickets escritos: el % que viaja, la volumetria con la
+  // que salio y si el % (dos decimales) da exactamente esos tickets.
+  function htmlMetaHint(c, ruta) {
+    var v = c.vols[ruta], r = c.conversion(ruta);
+    var vol = v && (v.estado === 'ok' || v.estado === 'cero') ? 'volumetría (últimos 30 días): ' + Number(v.valor).toLocaleString('es-MX') : '';
+    if (r === null) return v && v.estado === 'cargando' ? 'Calculando la volumetría…' : Escape.html(vol);
+    if (r.error !== undefined) return '<span class="ini-meta mal">' + Escape.html(r.error) + '</span>';
+    return '≈ ' + Escape.html(r.pct) + '% · ' + Escape.html(vol) +
+      (r.exacto ? '' : ' · con 2 decimales ese % da ' + Escape.html(r.tickets) + ' tickets, no ' + Escape.html(c.meta(ruta).tickets));
+  }
+
+  // ' (pedido como N tickets de una volumetria de V)' de una categoria
+  // pedida en tickets (cambiosCategorias), o ''. Lo que viaja es el %.
+  function enTicketsCambio(x) {
+    if (typeof x.tickets !== 'number') return '';
+    return ' (pedido como ' + x.tickets + ' ticket' + (x.tickets === 1 ? '' : 's') + ' de una volumetría de ' + x.volumetria +
+      (x.exacto === false ? '; con 2 decimales el % no da exacto' : '') + ')';
+  }
+
   // Lo escrito en un selector -> la opcion real, o ''.
   function resolverOpcion(texto, opciones) {
     var A = window.IniciativaAdmin, t = String(texto || '').trim();
@@ -1352,6 +1438,11 @@ window.RegistroIniciativas = (function () {
       this.estados = Array.isArray(opciones.estados) ? opciones.estados : [];
       this.rutas = Array.isArray(opciones.rutas) ? opciones.rutas : [];
       this.rutasEstado = opciones.rutasEstado || (this.rutas.length ? 'ok' : '');
+      // Agregar categoria por la cascada de Nueva solicitud (PO -> SO ->
+      // Categoria, CascadaOrganizacional) sobre las MISMAS filas
+      // { director, po, so, categoria } del catalogo (opciones.filas). Sin
+      // filas (catalogo viejo o sin cargar) queda la lista plana de rutas.
+      this.cascada = cascadaCambio(opciones.filas, iniciativa);
       // Por omision, la fecha del estado activo en el que esta (la que se
       // suele pedir extender); si no esta en uno de esos estados, ninguna.
       // campo: f_analisis | f_solucion | f_cierre (Fecha de compromiso con
@@ -1360,6 +1451,17 @@ window.RegistroIniciativas = (function () {
       this.propuesto = '';   // fecha o Estado (texto), segun el campo
       this.pcts = {};        // solo con campo 'pct': ruta ligada -> % pedido (texto)
       this.nuevas = [];      // solo con campo 'pct': [{ categoria, valor }] a agregar
+      // META EN % O EN TICKETS, por categoria (ruta -> { modo, tickets }):
+      // con 'tickets' se escribe cuantos tickets reducir y el % sale de
+      // MetaCategoria.pct (admin/iniciativa-admin.js, la regla de Crear y de
+      // Nueva solicitud: el menor % con dos decimales que da al menos esos
+      // tickets, con FLOOR) sobre la volumetria SLOT 0 de la ruta (vols:
+      // ruta -> { estado, valor }, la de Nueva solicitud). Lo que VIAJA y se
+      // guarda sigue siendo el % (pct_valor / agregar_pct): los tickets son
+      // una meta estimada con la volumetria de hoy, no un numero que la base
+      // garantice.
+      this.metas = {};
+      this.vols = {};
       // Solo con campo 'datos' (sql/25, opciones.datos): por dato, null = no
       // se pide; texto = el valor pedido. Pedido y vacio no se acepta: una
       // solicitud nunca deja vacios Titulo, PO ni SO. PO / SO, de las listas
@@ -1471,18 +1573,31 @@ window.RegistroIniciativas = (function () {
       return true;
     }
 
-    // texto: lo escrito o elegido. -> { ok, mensaje, ruta }. Solo rutas del
-    // catalogo, sin repetir una ligada ni una ya agregada.
+    // Nuevas filas del catalogo (llego o se recargo): la cascada se arma de
+    // nuevo sobre el MISMO par capturado.
+    fijarFilas(filas) {
+      this.cascada = cascadaCambio(filas, this.iniciativa);
+    }
+
+    // texto: lo escrito o elegido. -> { ok, mensaje, ruta }. Solo categorias
+    // del PO / SO capturados de la iniciativa en el catalogo (la cascada
+    // fija), sin repetir una ligada ni una ya agregada. Sin catalogo o sin
+    // un par valido no se agrega nada.
     agregarCategoria(texto) {
       var A = window.IniciativaAdmin;
-      if (!String(texto || '').trim()) return { ok: false, mensaje: 'Elige una categoría.' };
-      if (!this.rutas.length) {
+      if (!this.cascada) {
         return { ok: false, mensaje: this.rutasEstado === 'cargando' ? 'El catálogo de categorías todavía se está cargando.'
           : this.rutasEstado === 'error' ? 'No se pudo cargar el catálogo de categorías.' : 'El catálogo de categorías no está disponible.' };
       }
+      if (!this.cascada.parValido) return { ok: false, mensaje: motivoSinParCambio(this.iniciativa) };
+      if (!String(texto || '').trim()) return { ok: false, mensaje: 'Elige una categoría.' };
       var escrito = String(texto).trim();
-      var ruta = A ? A.Selector.resolver(escrito, this.rutas) : (this.rutas.indexOf(escrito) >= 0 ? escrito : '');
-      if (!ruta) return { ok: false, mensaje: A ? A.noEnLista(escrito, this.rutas, 'una categoría') : 'Elige una categoría de la lista.' };
+      var lista = this.cascada.opciones(2);
+      var ruta = A ? A.Selector.resolver(escrito, lista) : (lista.indexOf(escrito) >= 0 ? escrito : '');
+      if (!ruta) {
+        return { ok: false, mensaje: escrito + ' no es una categoría del Product Owner y Service Owner de la iniciativa (' +
+          this.cascada.seleccion[0] + ' / ' + this.cascada.seleccion[1] + ').' };
+      }
       var k = plano(ruta);
       if (this.categoriasLigadas().some(function (c) { return plano(c) === k; })) {
         return { ok: false, ruta: ruta, mensaje: ruta + ' ya es una categoría de esta iniciativa: pide su % en la tabla.' };
@@ -1498,15 +1613,85 @@ window.RegistroIniciativas = (function () {
       if (this.nuevas[n]) this.nuevas[n].valor = String(texto === null || texto === undefined ? '' : texto).trim();
     }
 
-    quitarNueva(n) { return this.nuevas.splice(n, 1).length > 0; }
+    quitarNueva(n) {
+      var x = this.nuevas[n];
+      if (x) delete this.metas[x.categoria];
+      return this.nuevas.splice(n, 1).length > 0;
+    }
 
-    // -> [{ categoria, anterior, nuevo, nueva }] de lo pedido en 'pct':
-    // ligadas con % escrito y todas las nuevas.
+    // ---- meta en % o en tickets ----
+    meta(ruta) { return this.metas[ruta] || { modo: 'pct', tickets: '' }; }
+    esCategoriaDelCambio(ruta) {
+      return this.categoriasLigadas().indexOf(ruta) >= 0 || this.nuevas.some(function (n) { return n.categoria === ruta; });
+    }
+    // El % (texto) de la ruta, ligada o nueva.
+    pctPedido(ruta) {
+      if (this.categoriasLigadas().indexOf(ruta) >= 0) return this.pcts[ruta] || '';
+      var x = this.nuevas.filter(function (n) { return n.categoria === ruta; })[0];
+      return x ? x.valor : '';
+    }
+    fijarPctPedido(ruta, pct) {
+      if (this.categoriasLigadas().indexOf(ruta) >= 0) { this.pcts[ruta] = pct; return; }
+      this.nuevas.forEach(function (n) { if (n.categoria === ruta) n.valor = pct; });
+    }
+    // 'pct' | 'tickets'. Cambiar el modo no borra lo escrito: el % que ya
+    // hay se queda, y en tickets se recalcula en cuanto se escriben.
+    elegirModoMeta(ruta, modo) {
+      if ((modo !== 'pct' && modo !== 'tickets') || !this.esCategoriaDelCambio(ruta)) return false;
+      var m = this.meta(ruta);
+      this.metas[ruta] = { modo: modo, tickets: m.tickets };
+      if (modo === 'tickets' && m.tickets !== '') this.recalcularMeta(ruta);
+      return true;
+    }
+    capturarTickets(ruta, texto) {
+      if (!this.esCategoriaDelCambio(ruta)) return false;
+      this.metas[ruta] = { modo: 'tickets', tickets: String(texto === null || texto === undefined ? '' : texto).trim() };
+      this.recalcularMeta(ruta);
+      return true;
+    }
+    // { estado: 'cargando' | 'ok' | 'cero' | 'sin_datos' | 'ruta_invalida' | 'error', valor }
+    fijarVolumetria(ruta, e) {
+      this.vols[ruta] = e || null;
+      if (this.meta(ruta).modo === 'tickets') this.recalcularMeta(ruta);
+    }
+    // -> { pct, exacto, tickets } o { error } (MetaCategoria.pct), o null
+    // si no hay tickets escritos.
+    conversion(ruta) {
+      var m = this.meta(ruta);
+      if (m.modo !== 'tickets' || m.tickets === '') return null;
+      var v = this.vols[ruta], M = window.IniciativaAdmin && window.IniciativaAdmin.MetaCategoria;
+      if (!M) return { error: 'No se puede pasar de tickets a % en esta página: usa el %.' };
+      if (!v || v.estado === 'cargando') return { error: 'Calculando la volumetría de ' + ruta + '…' };
+      if (v.estado !== 'ok' && v.estado !== 'cero') {
+        return { error: 'Sin volumetría de ' + ruta + ' no se puede pasar de tickets a %: usa el %.' };
+      }
+      return M.pct(v.valor, m.tickets);
+    }
+    // Tickets -> el % que viaja ('' si no se puede convertir).
+    recalcularMeta(ruta) {
+      var r = this.conversion(ruta);
+      if (r === null) { if (this.meta(ruta).modo === 'tickets') this.fijarPctPedido(ruta, ''); return; }
+      this.fijarPctPedido(ruta, r.error === undefined ? r.pct : '');
+    }
+
+    // -> [{ categoria, anterior, nuevo, nueva, tickets?, volumetria?, exacto? }]
+    // de lo pedido en 'pct': ligadas con % escrito y todas las nuevas. Las
+    // pedidas en tickets llevan los tickets escritos y la volumetria con la
+    // que se convirtio (solo para mostrarlo: viaja el %).
     cambiosCategorias() {
       var self = this;
+      function conMeta(x) {
+        var r = self.conversion(x.categoria);
+        if (r && r.error === undefined) {
+          x.tickets = Number(self.meta(x.categoria).tickets);
+          x.volumetria = self.vols[x.categoria].valor;
+          x.exacto = r.exacto;
+        }
+        return x;
+      }
       return this.categoriasLigadas().filter(function (r) { return self.pcts[r]; })
-        .map(function (r) { return { categoria: r, anterior: self.pctActual(r), nuevo: self.pcts[r], nueva: false }; })
-        .concat(this.nuevas.map(function (n) { return { categoria: n.categoria, anterior: null, nuevo: n.valor, nueva: true }; }));
+        .map(function (r) { return conMeta({ categoria: r, anterior: self.pctActual(r), nuevo: self.pcts[r], nueva: false }); })
+        .concat(this.nuevas.map(function (n) { return conMeta({ categoria: n.categoria, anterior: null, nuevo: n.valor, nueva: true }); }));
     }
 
     // -> [{ campo, mensaje }]; vacia = lista para enviar (cuando se pueda).
@@ -1525,9 +1710,27 @@ window.RegistroIniciativas = (function () {
         else if (this.estados.indexOf(nuevo) < 0) errores.push({ campo: 'propuesto', mensaje: 'Elige el nuevo Estado de la lista.' });
         else if (nuevo === (i.estado || '')) errores.push({ campo: 'propuesto', mensaje: 'El Estado pedido es igual al actual.' });
       } else if (t === 'pct') {
-        var cats = this.cambiosCategorias();
-        if (!cats.length) errores.push({ campo: 'categoria', mensaje: 'Escribe el nuevo % de al menos una categoría o agrega una.' });
+        var cats = this.cambiosCategorias(), yo = this, porTickets = {};
+        // Pedidas en tickets: la conversion manda su propio error (sin
+        // volumetria, volumetria 0, no entero, mas que la volumetria) y
+        // nunca se envia un % que no salio de ella. Una nueva en tickets
+        // sin escribir tambien es un error; una ligada sin escribir, "sin cambio".
+        this.categoriasLigadas().concat(this.nuevas.map(function (n) { return n.categoria; })).forEach(function (ruta) {
+          if (yo.meta(ruta).modo !== 'tickets') return;
+          var r = yo.conversion(ruta), nueva = yo.categoriasLigadas().indexOf(ruta) < 0;
+          if (r === null && nueva) {
+            porTickets[ruta] = true;
+            errores.push({ campo: 'propuesto', categoria: ruta, mensaje: ruta + ': escribe los tickets a reducir (número entero).' });
+          } else if (r && r.error !== undefined) {
+            porTickets[ruta] = true;
+            errores.push({ campo: 'propuesto', categoria: ruta, mensaje: ruta + ': ' + (r.error || 'escribe los tickets a reducir.') });
+          }
+        });
+        if (!cats.length && !Object.keys(porTickets).length) {
+          errores.push({ campo: 'categoria', mensaje: 'Escribe el nuevo % de al menos una categoría o agrega una.' });
+        }
         cats.forEach(function (c) {
+          if (porTickets[c.categoria]) return;
           if (!/^\d{1,3}(\.\d{1,2})?$/.test(c.nuevo) || Number(c.nuevo) > 100) {
             errores.push({ campo: 'propuesto', categoria: c.categoria,
               mensaje: c.categoria + ': escribe un porcentaje entre 0 y 100, con hasta dos decimales.' });
@@ -1634,6 +1837,8 @@ window.RegistroIniciativas = (function () {
       b.pcts = Object.assign({}, item.pcts);
       b.nuevas = item.nuevas.map(function (n) { return { categoria: n.categoria, valor: n.valor }; });
       b.datos = Object.assign({}, item.datos);
+      b.metas = JSON.parse(JSON.stringify(item.metas || {}));
+      b.vols = Object.assign({}, item.vols || {});
       b.motivo = item.explicacion;
       return b;
     }
@@ -1641,7 +1846,9 @@ window.RegistroIniciativas = (function () {
     static desdeBorrador(b) {
       return { campo: b.campo, propuesto: String(b.propuesto || '').trim(), pcts: Object.assign({}, b.pcts),
                nuevas: b.nuevas.map(function (n) { return { categoria: n.categoria, valor: n.valor }; }),
-               datos: Object.assign({}, b.datos), explicacion: b.tipo() === 'otros' ? String(b.motivo || '').trim() : '' };
+               datos: Object.assign({}, b.datos), explicacion: b.tipo() === 'otros' ? String(b.motivo || '').trim() : '',
+               // Meta en tickets (solo para mostrarla y volver a editarla).
+               metas: JSON.parse(JSON.stringify(b.metas || {})), vols: Object.assign({}, b.vols || {}) };
     }
 
     tipoDe(item) { var c = campoCambio(item.campo); return c ? c.tipo : ''; }
@@ -1727,9 +1934,9 @@ window.RegistroIniciativas = (function () {
         var cats = b.cambiosCategorias();
         r = { tipo: 'Categorías',
               actual: cats.map(function (x) { return x.categoria + ': ' + (x.nueva ? '(no ligada)' : x.anterior === null ? '—' : x.anterior + '%'); }).join('; '),
-              solicitado: cats.map(function (x) { return x.categoria + (x.nueva ? ' (agregar)' : '') + ': ' + x.nuevo + '%'; }).join('; ') };
+              solicitado: cats.map(function (x) { return x.categoria + (x.nueva ? ' (agregar)' : '') + ': ' + x.nuevo + '%' + enTicketsCambio(x); }).join('; ') };
         r.linea = r.tipo + ': ' + cats.map(function (x) {
-          return x.categoria + (x.nueva ? ' (agregar): ' + x.nuevo + '%' : ': ' + (x.anterior === null ? '—' : x.anterior + '%') + ' → ' + x.nuevo + '%');
+          return x.categoria + (x.nueva ? ' (agregar): ' + x.nuevo + '%' : ': ' + (x.anterior === null ? '—' : x.anterior + '%') + ' → ' + x.nuevo + '%') + enTicketsCambio(x);
         }).join('; ');
       } else if (t === 'datos') {
         var ds = b.cambiosDatos();
@@ -1960,6 +2167,7 @@ window.RegistroIniciativas = (function () {
       // Rutas del catalogo vigente (las fija la pagina al cargar el
       // catalogo): lo unico que "Modificar" puede agregar. null = sin cargar.
       this.rutasCatalogo = null;
+      this.filasCascada = null;  // filas { director, po, so, categoria } de rutasCatalogo
       // Las de ADM (rutas_adm: todas las activas, con o sin dueños), solo
       // para "Modificar". null = el servidor no las mando: se usan las de
       // arriba. "Solicitar cambios" siempre usa rutasCatalogo.
@@ -1975,9 +2183,12 @@ window.RegistroIniciativas = (function () {
     }
 
     // estado: 'error' si el catalogo no se pudo cargar (rutas null).
-    // rutasAdm: las de ADM para "Modificar" (opcional).
-    fijarRutasCatalogo(rutas, estado, rutasAdm) {
+    // rutasAdm: las de ADM para "Modificar" (opcional). filas: las filas
+    // { director, po, so, categoria } de esas mismas rutas, para la cascada
+    // de "Solicitar cambios" (opcional: sin ellas, lista plana).
+    fijarRutasCatalogo(rutas, estado, rutasAdm, filas) {
       this.rutasCatalogo = Array.isArray(rutas) ? rutas : null;
+      this.filasCascada = this.rutasCatalogo && Array.isArray(filas) ? filas : null;
       this.rutasAdmCatalogo = this.rutasCatalogo && Array.isArray(rutasAdm) ? rutasAdm : null;
       this.rutasEstado = this.rutasCatalogo ? 'ok' : estado === 'error' ? 'error' : 'cargando';
       if (this.edicion) {
@@ -1988,8 +2199,9 @@ window.RegistroIniciativas = (function () {
       // Solicitar cambios abierto: solo el bloque de categorias (lo demas
       // escrito no se toca).
       if (this.cambio && this.cambioAbierto) {
-        if (this.lista) { this.lista.opciones.rutas = this.rutasCatalogo || []; this.lista.opciones.rutasEstado = this.rutasEstado; }
+        if (this.lista) { this.lista.opciones.rutas = this.rutasCatalogo || []; this.lista.opciones.rutasEstado = this.rutasEstado; this.lista.opciones.filas = this.filasCascada || []; }
         this.cambio.rutas = this.rutasCatalogo || [];
+        this.cambio.fijarFilas(this.filasCascada || []);
         this.cambio.rutasEstado = this.rutasEstado;
         this.pintarCategoriasCambio();
       }
@@ -2016,6 +2228,53 @@ window.RegistroIniciativas = (function () {
 
     // Solo la edicion de ADM la usa: volumetria TOTAL de la categoria
     // (el servidor la niega a cualquier otro rol).
+    // Volumetria SLOT 0 (alcance por omision, la de Nueva solicitud) para
+    // pasar tickets a % en "Solicitar cambios". Otra instancia: la de
+    // clienteVolumetria es la TOTAL de ADM.
+    clienteVolumetriaCambio() {
+      var A = window.IniciativaAdmin;
+      if (!this.volumetriaCambio && A) this.volumetriaCambio = new A.VolumetriaCliente(function (url, op) { return fetch(url, op); });
+      return this.volumetriaCambio;
+    }
+
+    // 'l<n>' / 'n<n>' -> la ruta de esa fila de Solicitar cambios, o ''.
+    rutaMetaCambio(clave) {
+      var c = this.cambio, n = Number(String(clave).slice(1));
+      if (!c || !isFinite(n)) return '';
+      if (clave.charAt(0) === 'l') return c.categoriasLigadas()[n] || '';
+      return c.nuevas[n] ? c.nuevas[n].categoria : '';
+    }
+
+    // % o Tickets: repinta el bloque de categorias. Con Tickets y sin la
+    // volumetria de la ruta, la pide (SLOT 0) y repinta al llegar si el
+    // MISMO borrador sigue abierto.
+    elegirModoMetaCambio(clave, modo) {
+      var c = this.cambio, ruta = this.rutaMetaCambio(clave), self = this;
+      if (!ruta || !c.elegirModoMeta(ruta, modo)) return false;
+      if (modo === 'tickets' && !c.vols[ruta]) {
+        var cli = this.clienteVolumetriaCambio();
+        if (cli) {
+          cli.consultar(ruta, function (e) {
+            if (self.cambio !== c) return;
+            c.fijarVolumetria(ruta, { estado: e.estado, valor: e.valor });
+            if (e.estado !== 'cargando') self.pintarCategoriasCambio();
+          });
+        } else c.fijarVolumetria(ruta, { estado: 'error', valor: null });
+      }
+      this.pintarCategoriasCambio();
+      return true;
+    }
+
+    // Tickets escritos: solo cambia la pista de esa fila (nunca la casilla
+    // en la que se escribe).
+    capturarTicketsCambio(clave, texto) {
+      var c = this.cambio, ruta = this.rutaMetaCambio(clave);
+      if (!ruta || !c.capturarTickets(ruta, texto)) return false;
+      var pista = this.$('regCambioMeta-' + clave);
+      if (pista) pista.innerHTML = htmlMetaHint(c, ruta);
+      return true;
+    }
+
     clienteVolumetria() {
       var A = window.IniciativaAdmin;
       if (!this.volumetria && A) {
@@ -2041,6 +2300,8 @@ window.RegistroIniciativas = (function () {
       return { estados: r ? r.estadosProblem || [] : [], subestados: r && this.verSubestado() ? r.subestadosProblem || [] : [],
                tiposIniciativa: r ? r.valoresTipoIniciativa || [] : [], tiposAgrupado: r ? r.valoresTipoAgrupado || [] : [],
                rutas: this.rutasCatalogo || [], rutasEstado: this.rutasEstado,
+               // La cascada de "Agregar categoria" (Solicitar cambios).
+               filas: this.filasCascada || [],
                // Solicitar cambios de Título / PO / SO (sql/25).
                datos: !!(r && r.solicitudesDatos), pos: (this.duenosCatalogo || {}).po || [], sos: (this.duenosCatalogo || {}).so || [],
                // Varios cambios en UNA solicitud (sql/34).
@@ -3065,6 +3326,8 @@ window.RegistroIniciativas = (function () {
       var n = t.getAttribute('data-edicion-pct');
       var cp = t.getAttribute('data-cambio-pct');
       var cn = t.getAttribute('data-cambio-nueva-pct');
+      var cmo = t.getAttribute('data-cambio-modo');      // 'l<n>' | 'n<n>'
+      var ctk = t.getAttribute('data-cambio-tickets');
       var tipo = t.getAttribute('data-edicion-tipo');   // "indice|campo"
       var fcat = t.getAttribute('data-edicion-fcat');
       var tk = t.getAttribute('data-edicion-tickets');
@@ -3085,6 +3348,10 @@ window.RegistroIniciativas = (function () {
       else if (ed && fcat !== null && fcat !== undefined) ed.capturarFechaCategoria(Number(fcat), t.value);
       else if (c && cp !== null && cp !== undefined) { c.fijarPct(c.categoriasLigadas()[Number(cp)], t.value); return true; }
       else if (c && cn !== null && cn !== undefined) { c.capturarPctNueva(Number(cn), t.value); return true; }
+      // % o Tickets de una categoria: cambia la casilla (repinta el bloque) y
+      // pide la volumetria si hace falta; los tickets solo repintan su pista.
+      else if (c && cmo) { this.elegirModoMetaCambio(cmo, t.value); return true; }
+      else if (c && ctk) { this.capturarTicketsCambio(ctk, t.value); return true; }
       else return false;
       this.pintarEstadoEdicion(t);
       return true;
@@ -3128,22 +3395,27 @@ window.RegistroIniciativas = (function () {
           '</tr></thead><tbody>' +
           ligadas.map(function (r, n) {
             var act = c.pctActual(r);
-            return '<tr><td class="ini-cat-ruta">' + Escape.html(r) + '</td><td class="num">' + Escape.html(act === null ? '—' : act + '%') + '</td>' +
-              '<td><label class="ini-ed-pct"><span class="ini-sr">% pedido para ' + Escape.html(r) + '</span>' +
+            var pct = '<label class="ini-ed-pct"><span class="ini-sr">% pedido para ' + Escape.html(r) + '</span>' +
               '<input type="number" min="0" max="100" step="0.01" data-cambio-pct="' + n + '" value="' + Escape.attr(c.pcts[r] || '') +
-              '" placeholder="sin cambio"> %</label></td><td></td></tr>';
+              '" placeholder="sin cambio"> %</label>';
+            return '<tr><td class="ini-cat-ruta">' + Escape.html(r) + '</td><td class="num">' + Escape.html(act === null ? '—' : act + '%') + '</td>' +
+              '<td>' + celdaMetaCambio(c, r, 'l' + n, pct, 'sin cambio') + '</td><td></td></tr>';
           }).join('') +
           c.nuevas.map(function (x, n) {
+            var pct = '<label class="ini-ed-pct"><span class="ini-sr">% para ' + Escape.html(x.categoria) + '</span>' +
+              '<input type="number" min="0" max="100" step="0.01" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) + '"> %</label>';
             return '<tr><td><span class="ini-cat-ruta">' + Escape.html(x.categoria) + '</span> <span class="ini-cat-estado nueva">Agregar</span></td>' +
-              '<td class="num">—</td><td><label class="ini-ed-pct"><span class="ini-sr">% para ' + Escape.html(x.categoria) + '</span>' +
-              '<input type="number" min="0" max="100" step="0.01" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) + '"> %</label></td>' +
+              '<td class="num">—</td><td>' + celdaMetaCambio(c, x.categoria, 'n' + n, pct, '') + '</td>' +
               '<td><button type="button" class="btn linea chico" data-cambio-quitar="' + n + '">Quitar</button></td></tr>';
-          }).join('') + '</tbody></table></div>'
+          }).join('') + '</tbody></table></div>' +
+          (ligadas.concat(c.nuevas.map(function (x) { return x.categoria; })).some(function (r) { return c.meta(r).modo === 'tickets'; })
+            ? '<p class="ini-nota">Pedido en tickets: se envía el % que da ese número con la volumetría de hoy (últimos 30 días). ' +
+              'Es una meta estimada: si la volumetría cambia antes de aplicarse, los tickets cambian; al aplicar, la base calcula ' +
+              'Tickets a reducir con su propia ventana y redondeo.</p>' : '')
         : '<p class="ini-nota">Sin categorías todavía: agrega una.</p>';
-      var agregar = c.rutas.length
-        ? '<div class="ini-cat-agregar"><label for="regCambioCatBuscar">Agregar categoría</label>' +
-            selectorHtml('regCambioCatBuscar', c.rutas, '') +
-            ' <button type="button" class="btn linea chico" data-accion="cambio-cat-agregar">Agregar</button></div>'
+      // Sin la cascada (catalogo sin cargar o con error) no hay lista plana:
+      // agregar solo va por el par capturado de la iniciativa.
+      var agregar = c.cascada ? htmlCascadaCambio(c)
         : (A ? A.htmlSinCatalogo(c.rutasEstado) : '<p class="ini-nota">El catálogo de categorías no está disponible.</p>');
       return tabla + agregar +
         '<div class="ini-cambio-msg" id="regCambioCatMsg" role="status" aria-live="polite"></div>' +

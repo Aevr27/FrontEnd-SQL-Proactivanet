@@ -32,6 +32,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 
@@ -184,6 +185,21 @@ public static class ExportarSmoke
         Chk("A mes: ningun filtro por Slot (mes completo)", false, mes.Contains("Slot"));
         Chk("A mes: no usa Calendar_Month", false, mes.Contains("Calendar_Month"));
         Chk("A sin TOP en ninguno", false, slot.Contains("TOP") || mes.Contains("TOP"));
+        // Mismas reglas que el volumen (SinSorIA): fuera los tipos SorIA, en
+        // los tres modos; la rama /Soria/ y 'Sin tipo' no se filtran.
+        var sinSor = "AND b.TipoTicket NOT IN (N'SorIA Incidentes', N'SorIA Peticiones') ";
+        var rangoS = Consulta("rango");
+        Chk("A SorIA: slot, mes y rango excluyen los dos tipos SorIA", "True|True|True",
+            slot.Contains(sinSor) + "|" + mes.Contains(sinSor) + "|" + rangoS.Contains(sinSor));
+        Chk("A SorIA: el filtro va en el WHERE, antes del ORDER BY", "True|True|True",
+            slot.Contains("WHERE b.Slot = 0 " + sinSor + "ORDER BY") + "|" +
+            mes.Contains("@mes " + sinSor + "ORDER BY") + "|" + rangoS.Contains("@hasta " + sinSor + "ORDER BY"));
+        Chk("A SorIA: no filtra por categoria (/Soria/ sigue) ni por 'Sin tipo'", "False|False",
+            (slot + mes + rangoS).Contains("Soria/") + "|" + (slot + mes + rangoS).Contains("Sin tipo"));
+        var fuenteVistas = File.ReadAllText(Path.Combine(Directory.GetCurrentDirectory(), "App_Code", "ExperienciaQueries.cs"));
+        Chk("A SorIA: los mismos dos tipos que resta SinSorIA del volumen", "True|True",
+            fuenteVistas.Contains("ISNULL([SorIA Peticiones], 0) + ISNULL([SorIA Incidentes], 0)") + "|" +
+            fuenteVistas.Contains("SinSorIA(LeerVolumen(cn, \"dbo.vw_TBSlotCAT\""));
         Chk("A modo en mayusculas no pasa", "THROW:ArgumentException", Consulta("SLOT"));
         Chk("A modo inyectado no pasa", "THROW:ArgumentException", Consulta("slot; DROP TABLE x"));
         Chk("A modo nulo no pasa", "THROW:ArgumentException", Consulta(null));

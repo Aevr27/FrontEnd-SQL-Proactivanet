@@ -361,6 +361,7 @@ public sealed class CapacidadCategoria
         public string Categoria;   // ruta de ProblemCategoria
         public decimal Pct;        // fraccion (0.2000 = 20%)
         public bool Consume;       // cuenta contra la capacidad hoy
+        public string Estado;      // dbo.Problem.Estado (solo para mostrar)
     }
 
     public sealed class Resultado
@@ -414,6 +415,38 @@ public sealed class CapacidadCategoria
         r.Excedida = r.Usado > Total;
         r.Disponible = r.Usado >= Total ? 0.0000m : Total - r.Usado;
         return r;
+    }
+
+    // Las iniciativas que hoy consumen la capacidad de la ruta (las MISMAS
+    // filas que suma Para: Consume, misma llave normalizada sin distinguir
+    // mayusculas), una por folio con su % (fraccion; si un folio trajera la
+    // ruta dos veces se suman, como en Usado) y su Estado. `excluir`: el
+    // folio que se esta viendo (null = ninguno). Un % NULL llega como 0 (ver
+    // ExperienciaCapacidad): sale con 0% y no suma nada. Solo para la
+    // revision de ADM: ComoJson no lo publica (Nueva solicitud, PO/SO).
+    public List<Dictionary<string, object>> Otras(string categoria, string excluir)
+    {
+        var salida = new List<Dictionary<string, object>>();
+        var llave = Ruta(categoria);
+        if (llave == null) return salida;
+        var porFolio = new Dictionary<string, Dictionary<string, object>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in _compromisos)
+        {
+            if (c == null || !c.Consume || string.IsNullOrEmpty(c.Folio)) continue;
+            if (!string.IsNullOrEmpty(excluir) && string.Equals(c.Folio.Trim(), excluir.Trim(), StringComparison.OrdinalIgnoreCase)) continue;
+            var ruta = Ruta(c.Categoria);
+            if (ruta == null || !string.Equals(ruta, llave, StringComparison.OrdinalIgnoreCase)) continue;
+            Dictionary<string, object> fila;
+            if (porFolio.TryGetValue(c.Folio, out fila))
+            {
+                fila["pct"] = (decimal)fila["pct"] + c.Pct;
+                continue;
+            }
+            fila = new Dictionary<string, object> { { "folio", c.Folio }, { "pct", c.Pct }, { "estado", c.Estado } };
+            porFolio[c.Folio] = fila;
+            salida.Add(fila);
+        }
+        return salida;
     }
 
     private static string Ruta(string s)

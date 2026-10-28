@@ -1461,13 +1461,16 @@ pruebas.push(function () {
 
   // Categorias: varias en UNA solicitud (% de ligadas y agregar del catalogo).
   var RUTAS_CAT = ['/A/Cat 1/Hoja', '/A/Cat 2', '/A/Cat 3', '/B/Cat 4'];
+  // Agregar solo va por el par capturado de la iniciativa (2026-10-28):
+  // estas rutas son de PO 1 / SO x, el par de PRB 2026-000001.
+  var FILAS_CAT = RUTAS_CAT.map(function (r) { return { director: 'Dir A', po: 'PO 1', so: 'SO x', categoria: r }; });
   // Sin iniciativa-admin.js (otra pagina o cache viejo): coincidencia exacta.
-  var fb = new S(reg.buscar('PRB 2026-000001'), { rutas: RUTAS_CAT });
+  var fb = new S(reg.buscar('PRB 2026-000001'), { rutas: RUTAS_CAT, filas: FILAS_CAT });
   Check('SR3 sin IniciativaAdmin: agrega solo la ruta exacta', [false, true], [fb.agregarCategoria('/a/cat 2').ok, fb.agregarCategoria('/A/Cat 2').ok]);
   // Desde aqui, con el Selector compartido (como en la pagina).
   (new Function('window', 'document', 'Catalogos', 'Escape', 'Duracion', leer('admin/iniciativa-admin.js')))(
     base.ventana, base.doc, base.ventana.Catalogos, base.ventana.Escape, base.ventana.Duracion);
-  var k = new S(reg.buscar('PRB 2026-000001'), { estados: LISTAS.estados, subestados: LISTAS.subestados, rutas: RUTAS_CAT });
+  var k = new S(reg.buscar('PRB 2026-000001'), { estados: LISTAS.estados, subestados: LISTAS.subestados, rutas: RUTAS_CAT, filas: FILAS_CAT });
   k.campo = 'pct'; k.motivo = 'Se ajusta el alcance';
   Check('SR3 sin nada pedido se rechaza', ['categoria'], k.validar().map(function (x) { return x.campo; }));
   Check('SR3 % de una categoria no ligada no se acepta como %', [false, {}], [k.fijarPct('/Z/No ligada', '10'), k.pcts]);

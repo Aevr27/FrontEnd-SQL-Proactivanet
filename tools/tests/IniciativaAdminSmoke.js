@@ -1841,6 +1841,9 @@ pruebas.push(function () {
   var p = Pagina();
   return esperar().then(function () {
     var reg = p.registro;
+    // Agregar solo va por el par capturado (2026-10-28): esta iniciativa,
+    // con PO 3 / SO z, puede agregar /B/Cat 4.
+    var ini = reg.registro.buscar('PRB 2026-000001'); ini.po_capturado = 'PO 3'; ini.so_capturado = 'SO z';
     p.pagina.fijarRol('MOD');
     reg.abrirDetalle('PRB 2026-000001');
     accion(p, 'solicitar-cambios');
@@ -1861,7 +1864,7 @@ pruebas.push(function () {
       [p.sel('regCambioMotivo').value, p.sel('regCambio').innerHTML]);
     p.sel('regCambioCatBuscar').value = '/A/Cat 1';
     accion(p, 'cambio-cat-agregar');
-    Check('SC4 una ligada no se puede agregar otra vez', [true, 1], [/ya es una categoría de esta iniciativa/.test(p.sel('regCambioCatMsg').textContent), reg.cambio.nuevas.length]);
+    Check('SC4 una ligada no se puede agregar otra vez', [true, 1], [/ya es una categoría de esta iniciativa|no es una categoría del Product Owner y Service Owner de la iniciativa/.test(p.sel('regCambioCatMsg').textContent), reg.cambio.nuevas.length]);
     p.sel('regCambioCatBuscar').value = '/B/Cat 4';
     accion(p, 'cambio-cat-agregar');
     Check('SC4b ni una nueva dos veces', [true, 1], [/ya está en la lista para agregar/.test(p.sel('regCambioCatMsg').textContent), reg.cambio.nuevas.length]);
@@ -1894,6 +1897,210 @@ pruebas.push(function () {
       [/Solicitud preparada, no enviada/.test(p.sel('regCambioMsg').innerHTML), /no cambia nada por sí sola/.test(p.sel('regCambioMsg').innerHTML)]);
     Check('SC9b Otros aprobado no produce pares', null,
       new p.ventana.RegistroIniciativas.RevisionSolicitud(reg.lista.borrador(reg.lista.items[0]).resumen(), 'u').aprobar('a').pares);
+  });
+});
+
+// SCC) Solicitar cambios: "Agregar categoria" por la cascada PO -> SO ->
+// Categoria (CascadaOrganizacional, la de Nueva solicitud), sin DOM.
+pruebas.push(function () {
+  var R = base.ventana.RegistroIniciativas;
+  var rutas = RUTAS.map(function (f) { return f.categoria; });
+  function Nueva(po, so, filas) {
+    return new R.SolicitudCambio(Ini('PRB 2026-000050', { po_capturado: po, so_capturado: so, categorias: [Cat('/A/Cat 1', 0.25)] }),
+      { rutas: rutas, rutasEstado: 'ok', filas: filas === undefined ? RUTAS : filas });
+  }
+  // Regla (2026-10-28): SOLO el par PO / SO capturado de la iniciativa,
+  // si existe en el catalogo; nada se elige de PO / SO y no se cae a otro par.
+  var c = Nueva('PO 3', 'SO z');
+  Check('SCC1 par capturado valido: fijo y con SUS categorias', [true, ['PO 3', 'SO z', ''], ['/B/Cat 4']],
+    [c.cascada.parValido, c.cascada.seleccion.slice(), c.cascada.opciones(2)]);
+  Check('SCC2 PO / SO no se eligen en la solicitud (no hay metodo para cambiarlos)', 'undefined', typeof c.elegirCascada);
+  var r = c.agregarCategoria('/A/Cat 2');
+  Check('SCC3 una categoria de OTRO par (aunque este en el catalogo) se rechaza con el par de la iniciativa', [false, true, 0],
+    [r.ok, /no es una categoría del Product Owner y Service Owner de la iniciativa \(PO 3 \/ SO z\)/.test(r.mensaje), c.nuevas.length]);
+  r = c.agregarCategoria('/b/cat 4');
+  Check('SCC4 la del par se agrega; el par sigue fijo', [true, '/B/Cat 4', ['PO 3', 'SO z', '']],
+    [r.ok, c.nuevas[0] && c.nuevas[0].categoria, c.cascada.seleccion.slice()]);
+  var l = Nueva('PO 1', 'SO x');
+  r = l.agregarCategoria('/A/Cat 1');
+  Check('SCC5 la ligada sigue sin poder agregarse (y se conserva con su %)', [false, true, ['/A/Cat 1'], '25'],
+    [r.ok, /ya es una categoría de esta iniciativa/.test(r.mensaje), l.categoriasLigadas(), l.pctActual('/A/Cat 1')]);
+  [['PO 1', 'SO z', /no son un par del catálogo vigente/], ['PO X', 'SO x', /no son un par del catálogo vigente/],
+   [null, null, /no tiene Product Owner y Service Owner capturados/], ['PO 1', null, /no tiene Product Owner y Service Owner capturados/]]
+    .forEach(function (k) {
+      var x = Nueva(k[0], k[1]), rr = x.agregarCategoria('/B/Cat 4');
+      Check('SCC6 par capturado ' + k[0] + ' / ' + k[1] + ': no valido, nada se agrega y no se cae a otro par', [false, ['', '', ''], false, true, 0],
+        [x.cascada.parValido, x.cascada.seleccion.slice(), rr.ok, k[2].test(rr.mensaje), x.nuevas.length]);
+    });
+  var plana = Nueva('PO 1', 'SO x', []);
+  r = plana.agregarCategoria('/B/Cat 4');
+  Check('SCC7 sin filas (catalogo sin cargar): sin lista plana, no se agrega', [null, false, 0], [plana.cascada, r.ok, plana.nuevas.length]);
+  var f = Nueva('PO 3', 'SO z');
+  f.fijarFilas(RUTAS.concat([{ director: 'Dir B', po: 'PO 3', so: 'SO z', categoria: '/B/Cat 5' }]));
+  Check('SCC8 el catalogo se recarga: mismo par, sus categorias nuevas', [['PO 3', 'SO z', ''], ['/B/Cat 4', '/B/Cat 5']],
+    [f.cascada.seleccion.slice(), f.cascada.opciones(2)]);
+  f.fijarFilas(RUTAS.slice(0, 2));
+  Check('SCC8 ... si el par ya no esta en el catalogo, deja de ser valido', false, f.cascada.parValido);
+  // Lo que viaja: agregar_categoria con la ruta del catalogo (el servidor la revisa, SolicitudesCambioHttpSmoke B11-B15).
+  var e = Nueva('PO 3', 'SO z'); e.elegir('pct'); e.agregarCategoria('/B/Cat 4'); e.capturarPctNueva(0, '10'); e.motivo = 'm';
+  Check('SCC12 el par que viaja es la ruta del catalogo con su %', true,
+    JSON.stringify(e.pares()).indexOf('["agregar_categoria","/B/Cat 4"],["agregar_pct","10"]') >= 0);
+});
+
+// SCT) Solicitar cambios: % o Tickets por categoria. Viaja SIEMPRE el %
+// (pct_valor / agregar_pct); los tickets se convierten con
+// MetaCategoria.pct sobre la volumetria SLOT 0 de la ruta.
+pruebas.push(function () {
+  var R = base.ventana.RegistroIniciativas;
+  function Nueva() {
+    var c = new R.SolicitudCambio(Ini('PRB 2026-000060', { po_capturado: 'PO 3', so_capturado: 'SO z', categorias: [Cat('/A/Cat 1', 0.25)] }),
+      { rutas: RUTAS.map(function (f) { return f.categoria; }), rutasEstado: 'ok', filas: RUTAS });
+    c.elegir('pct'); c.motivo = 'm';
+    return c;
+  }
+  function par(c, k) { var x = c.pares().filter(function (p) { return p[0] === k; }); return x.map(function (p) { return p[1]; }); }
+  function errs(c) { return c.validar().map(function (e) { return e.mensaje; }); }
+
+  var c = Nueva();
+  c.fijarPct('/A/Cat 1', '30');
+  Check('SCT1 en % todo sigue igual: viaja el % escrito', [['/A/Cat 1'], ['30'], []], [par(c, 'pct_categoria'), par(c, 'pct_valor'), errs(c)]);
+
+  c = Nueva();
+  c.agregarCategoria('/B/Cat 4');
+  c.elegirModoMeta('/B/Cat 4', 'tickets');
+  c.fijarVolumetria('/B/Cat 4', { estado: 'ok', valor: 7 });
+  c.capturarTickets('/B/Cat 4', '3');
+  var r = c.conversion('/B/Cat 4');
+  Check('SCT2 3 tickets de 7: 42.86% exacto (FLOOR de 7 x 42.86% = 3)', ['42.86', true, 3], [r.pct, r.exacto, r.tickets]);
+  Check('SCT2 viaja el % convertido, no los tickets', [['/B/Cat 4'], ['42.86'], false],
+    [par(c, 'agregar_categoria'), par(c, 'agregar_pct'), JSON.stringify(c.pares()).indexOf('ticket') >= 0]);
+  Check('SCT2 el % enviado es el que guarda la base (fraccion de 4 decimales: Math.Round(42.86/100, 4))', 0.4286,
+    Math.round(Number(par(c, 'agregar_pct')[0]) / 100 * 10000) / 10000);
+  Check('SCT2 la ida y vuelta da los tickets pedidos', 3, I.ticketsDe(7, par(c, 'agregar_pct')[0]));
+  Check('SCT2 sin errores', [], errs(c));
+
+  c.fijarVolumetria('/B/Cat 4', { estado: 'ok', valor: 100000 });
+  c.capturarTickets('/B/Cat 4', '1');
+  r = c.conversion('/B/Cat 4');
+  Check('SCT3 1 ticket de 100,000: 0.01% da 10, se dice (exacto false), viaja 0.01', ['0.01', false, 10, ['0.01']],
+    [r.pct, r.exacto, r.tickets, par(c, 'agregar_pct')]);
+
+  var casos = [
+    ['-1', { estado: 'ok', valor: 7 }, /número entero/], ['1.5', { estado: 'ok', valor: 7 }, /número entero/],
+    ['x', { estado: 'ok', valor: 7 }, /número entero/], ['8', { estado: 'ok', valor: 7 }, /más que la volumetría/],
+    ['1', { estado: 'cero', valor: 0 }, /volumetría 0/], ['1', { estado: 'error', valor: null }, /Sin volumetría/],
+    ['1', { estado: 'sin_datos', valor: null }, /Sin volumetría/], ['1', { estado: 'cargando', valor: null }, /Calculando/]];
+  casos.forEach(function (k) {
+    var x = Nueva();
+    x.agregarCategoria('/B/Cat 4'); x.elegirModoMeta('/B/Cat 4', 'tickets');
+    x.fijarVolumetria('/B/Cat 4', k[1]); x.capturarTickets('/B/Cat 4', k[0]);
+    var e = errs(x);
+    Check('SCT4 tickets "' + k[0] + '" con volumetria ' + k[1].estado + ': error y ningun % sale', [true, ['']],
+      [e.some(function (m) { return k[2].test(m); }), par(x, 'agregar_pct')]);
+  });
+  var sinVol = Nueva();
+  sinVol.agregarCategoria('/B/Cat 4'); sinVol.elegirModoMeta('/B/Cat 4', 'tickets'); sinVol.capturarTickets('/B/Cat 4', '2');
+  Check('SCT4 sin volumetria pedida todavia: error, no se envia', true, errs(sinVol).some(function (m) { return /Calculando|Sin volumetría/.test(m); }));
+  var vacia = Nueva();
+  vacia.agregarCategoria('/B/Cat 4'); vacia.elegirModoMeta('/B/Cat 4', 'tickets');
+  Check('SCT4 nueva en tickets sin escribir: error propio', true, errs(vacia).some(function (m) { return /escribe los tickets a reducir/.test(m); }));
+
+  var lig = Nueva();
+  lig.elegirModoMeta('/A/Cat 1', 'tickets');
+  lig.fijarVolumetria('/A/Cat 1', { estado: 'ok', valor: 418 });
+  Check('SCT5 ligada en tickets sin escribir = sin cambio (y entonces falta algun cambio)', [[], true],
+    [par(lig, 'pct_valor'), errs(lig).some(function (m) { return /al menos una categoría/.test(m); })]);
+  lig.capturarTickets('/A/Cat 1', '100');
+  Check('SCT5 ligada: 100 de 418 = 23.93% (FLOOR da 100)', [['23.93'], []], [par(lig, 'pct_valor'), errs(lig)]);
+  lig.elegirModoMeta('/A/Cat 1', 'pct');
+  Check('SCT6 volver a %: el % ya calculado se queda y se puede editar', ['23.93', 'pct'], [lig.pcts['/A/Cat 1'], lig.meta('/A/Cat 1').modo]);
+  lig.fijarPct('/A/Cat 1', '20');
+  Check('SCT6 ... en % manda lo escrito', ['20'], par(lig, 'pct_valor'));
+
+  var L = new R.ListaSolicitudCambio(Ini('PRB 2026-000060', { po_capturado: 'PO 3', so_capturado: 'SO z', categorias: [Cat('/A/Cat 1', 0.25)] }),
+    { rutas: RUTAS.map(function (f) { return f.categoria; }), rutasEstado: 'ok', filas: RUTAS });
+  var item = R.ListaSolicitudCambio.desdeBorrador(c);
+  var t = L.texto(item);
+  Check('SCT7 el resumen dice que se pidio en tickets y con que volumetria (y que no da exacto)', true,
+    /\/B\/Cat 4 \(agregar\): 0\.01% \(pedido como 1 ticket de una volumetría de 100000; con 2 decimales el % no da exacto\)/.test(t.linea));
+  var vuelta = L.borrador(item);
+  Check('SCT8 editar el cambio de la lista conserva el modo, los tickets y la volumetria', ['tickets', '1', 100000, '0.01'],
+    [vuelta.meta('/B/Cat 4').modo, vuelta.meta('/B/Cat 4').tickets, vuelta.vols['/B/Cat 4'].valor, vuelta.nuevas[0].valor]);
+  c.quitarNueva(0);
+  Check('SCT9 quitar la nueva olvida su meta', undefined, c.metas['/B/Cat 4']);
+});
+
+// SCD) "Agregar categoria" pintado en el detalle: el par capturado a la vista
+// (sin selectores de PO / SO) y solo sus categorias; sin par valido, el
+// motivo y ningun selector.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var reg = p.registro;
+    p.pagina.fijarRol('MOD');
+    reg.abrirDetalle('PRB 2026-000001');
+    accion(p, 'solicitar-cambios');
+    reg.cambio.elegir('pct'); reg.pintarCategoriasCambio();
+    var g = p.sel('regCambioGrupoPct').innerHTML;
+    Check('SCD1 par capturado (PO 1 / SO x) a la vista, sin selectores de PO / SO; solo sus categorias', [true, false, false, true, false, false],
+      [/Solo categorías del Product Owner <b>PO 1<\/b> y el Service Owner <b>SO x<\/b> de la iniciativa/.test(g),
+       /regCambioCascPo|regCambioCascSo/.test(g), /<option value="PO 3"/.test(g),
+       /<option value="\/A\/Cat 1">/.test(g), /<option value="\/A\/Cat 2">/.test(g), /<option value="\/B\/Cat 4">/.test(g)]);
+    var otra = reg.registro.buscar('PRB 2026-000001');
+    var po = otra.po_capturado; otra.po_capturado = 'PO X';
+    reg.cambio = new p.ventana.RegistroIniciativas.SolicitudCambio(otra, reg.opcionesEstado()); reg.cambio.elegir('pct'); reg.pintarCategoriasCambio();
+    g = p.sel('regCambioGrupoPct').innerHTML;
+    Check('SCD2 par que no esta en el catalogo: el motivo, sin selector de categoria ni boton Agregar', [true, false, false],
+      [/\(PO X \/ SO x\) no son un par del catálogo vigente/.test(g), /id="regCambioCatBuscar"/.test(g), /cambio-cat-agregar/.test(g)]);
+    otra.po_capturado = po;
+    reg.cambio = new p.ventana.RegistroIniciativas.SolicitudCambio(otra, reg.opcionesEstado()); reg.cambio.elegir('pct'); reg.pintarCategoriasCambio();
+
+    // % / Tickets de la ligada /A/Cat 1 (volumetria simulada: 418).
+    g = p.sel('regCambioGrupoPct').innerHTML;
+    Check('SCD4 cada categoria trae su selector % / Tickets, en % por omision', [true, true],
+      [/<select data-cambio-modo="l0" data-nativo><option value="pct" selected>%<\/option><option value="tickets">Tickets<\/option><\/select>/.test(g),
+       /data-cambio-pct="0"/.test(g)]);
+    var antes = p.pedidos.length;
+    var m = Elemento('m'); m.setAttribute('data-cambio-modo', 'l0'); m.value = 'tickets';
+    p.sel('regDetCuerpo').disparar('change', { target: m });
+    return esperar().then(function () {
+      var url = String(p.pedidos.slice(antes).map(function (x) { return x.url || x; }).filter(function (u) { return /volumetria/.test(u); })[0] || '');
+      Check('SCD5 Tickets pide la volumetria SLOT 0 de la ruta (sin alcance=total)', [true, false, true],
+        [/admin_iniciativas_volumetria\.ashx/.test(url), /alcance=total/.test(url), /ruta=%2FA%2FCat%201/.test(url)]);
+      g = p.sel('regCambioGrupoPct').innerHTML;
+      Check('SCD6 en Tickets: la casilla de tickets, sin la del %, y la volumetria de hoy', [true, false, true, true],
+        [/data-cambio-tickets="l0"/.test(g), /data-cambio-pct="0"/.test(g), /volumetría \(últimos 30 días\): 418/.test(g),
+         /Pedido en tickets: se envía el %/.test(g)]);
+      var tk = Elemento('t'); tk.setAttribute('data-cambio-tickets', 'l0'); tk.value = '100';
+      var grupoAntes = p.sel('regCambioGrupoPct').innerHTML;
+      p.sel('regDetCuerpo').disparar('input', { target: tk });
+      Check('SCD7 escribir tickets solo cambia la pista de esa fila (la casilla no se repinta)', [true, grupoAntes, '23.93'],
+        [/≈ 23\.93% · volumetría \(últimos 30 días\): 418/.test(p.sel('regCambioMeta-l0').innerHTML), p.sel('regCambioGrupoPct').innerHTML,
+         reg.cambio.pcts['/A/Cat 1']]);
+      tk.value = '999';
+      p.sel('regDetCuerpo').disparar('input', { target: tk });
+      Check('SCD7 mas tickets que la volumetria: error en la pista, sin %', [true, ''],
+        [/class="ini-meta mal"[^>]*>[^<]*más que la volumetría/.test(p.sel('regCambioMeta-l0').innerHTML), reg.cambio.pcts['/A/Cat 1']]);
+    });
+  });
+});
+
+// SGF) Fechas por categoria en Seguimiento: la inicial (sin fechas propias,
+// NULL en dbo.ProblemCategoria) muestra las de la INICIATIVA; la ligada
+// despues, las suyas. Ningun "—" por la herencia.
+pruebas.push(function () {
+  var p = Pagina();
+  return esperar().then(function () {
+    var i = Ini('PRB 2026-000070', { f_analisis: '2026-10-28', f_solucion: '2026-12-01', f_cierre: null,
+      categorias: [Cat('/A/Cat 1', 0.3), Cat('/A/Cat 2', 0.1)] });
+    i.categorias[0].f_creacion_propia = null; i.categorias[0].f_analisis_propia = null;
+    i.categorias[1].f_creacion_propia = '2026-11-02'; i.categorias[1].f_analisis_propia = '2026-11-17';
+    var ini = p.registro.htmlSeguimientoCategoria(i, '/A/Cat 1'), lig = p.registro.htmlSeguimientoCategoria(i, '/A/Cat 2');
+    Check('SGF1 inicial: Analisis = el de la iniciativa, marcado "De la iniciativa", y dice que hereda', [true, true, false],
+      [/<dt>Análisis<\/dt><dd>28\/10\/2026 <span class="ini-origen derivado">De la iniciativa<\/span>/.test(ini),
+       /Hereda las fechas de la iniciativa/.test(ini), /<dt>Análisis<\/dt><dd>—/.test(ini)]);
+    Check('SGF2 ligada despues: su Analisis, "Propia", y el dia en que se ligo', [true, true],
+      [/<dt>Análisis<\/dt><dd>17\/11\/2026 <span class="ini-origen">Propia<\/span>/.test(lig), /Se ligó el 02\/11\/2026/.test(lig)]);
   });
 });
 

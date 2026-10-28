@@ -80,6 +80,69 @@ Check('R5 detalle: campos, historial y solo "Cerrar" (sin aprobar ni rechazar)',
    /aplicar|rechazar|aprobar|borrar/i.test(html.replace(/data-sn-accion="cerrar"/, '')), /<script>/.test(html)]);
 Check('R6 detalle sin eventos: lo dice', true, /Sin eventos registrados/.test(N.htmlDetalle(Detalle(8, { eventos: [] }))));
 Check('R7 RCA: extension, sin archivo', true, /Adjunto \.pdf \(el archivo no se guarda\)/.test(html));
+
+// ---- R8: % -> Volumetria -> Tickets a reducir (al enviar) --------------------
+// ticketsDe es el REAL de admin/iniciativas.js (VALIDAR + ticketsDe sacados
+// del archivo por llaves), no una copia: el detalle no tiene calculo propio.
+function Extraer(src, inicio) {
+  var i = src.indexOf(inicio);
+  if (i < 0) throw new Error('falta ' + inicio + ' en admin/iniciativas.js');
+  var j = src.indexOf('{', i), n = 0;
+  for (; j < src.length; j++) { if (src[j] === '{') n++; else if (src[j] === '}' && --n === 0) break; }
+  return src.slice(i, j + 1) + (src[j + 1] === ';' ? ';' : '');
+}
+var fuenteIni = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.js'), 'utf8');
+var ticketsDeReal = (new Function(Extraer(fuenteIni, 'var VALIDAR = {') + '\n' + Extraer(fuenteIni, 'function ticketsDe(') +
+  '\nreturn ticketsDe;'))();
+caja.Iniciativas = { ticketsDe: ticketsDeReal };
+function Filas(d) {
+  var t = N.htmlDetalle(d), re = /<tr><th scope="row">([\s\S]*?)<\/th><td>([\s\S]*?)<\/td><\/tr>/g, m, out = [];
+  while ((m = re.exec(t))) out.push([m[1].replace(/<[^>]+>[^<]*<\/span>/, '').trim(), m[2]]);
+  return out;
+}
+function Rotulos(d) { return Filas(d).map(function (f) { return f[0]; }); }
+function Valor(d, rotulo) { var f = Filas(d).filter(function (x) { return x[0] === rotulo; })[0]; return f ? f[1] : undefined; }
+var orden = Rotulos(Detalle(10));
+Check('R8 orden: Categoria, Director, % de disminucion, Volumetria, Tickets a reducir (seguidos)',
+  ['Categoría', 'Director', '% de disminución', 'Volumetría', 'Tickets a reducir'],
+  orden.slice(orden.indexOf('Categoría'), orden.indexOf('Categoría') + 5));
+Check('R8 volumetria y tickets dicen "al enviar" (no el numero final al aprobar)', [true, true],
+  [/Volumetría <span class="ini-sub">al enviar<\/span>/.test(N.htmlDetalle(Detalle(10))),
+   /Tickets a reducir <span class="ini-sub">estimado al enviar; la base lo recalcula al crear la iniciativa<\/span>/.test(N.htmlDetalle(Detalle(10)))]);
+Check('R8 tickets con ticketsDe (FLOOR): 120 x 20% = 24; 1247 x 12.5% = 155; 7 x 9.46% = 0; 7 x 100% = 7',
+  ['24', '155', '0', '7'],
+  [Valor(Detalle(10), 'Tickets a reducir'), Valor(Detalle(10, { volumetria: 1247, pct: '12.5' }), 'Tickets a reducir'),
+   Valor(Detalle(10, { volumetria: 7, pct: '9.46' }), 'Tickets a reducir'), Valor(Detalle(10, { volumetria: 7, pct: '100' }), 'Tickets a reducir')]);
+Check('R8 volumetria 0: 0 tickets, sin error', ['0', '0'],
+  [Valor(Detalle(10, { volumetria: 0 }), 'Volumetría'), Valor(Detalle(10, { volumetria: 0 }), 'Tickets a reducir')]);
+Check('R8 sin volumetria o sin %: placeholder —', ['—', '—', '—', '—'],
+  [Valor(Detalle(10, { volumetria: null }), 'Volumetría'), Valor(Detalle(10, { volumetria: null }), 'Tickets a reducir'),
+   Valor(Detalle(10, { pct: null }), '% de disminución'), Valor(Detalle(10, { pct: null }), 'Tickets a reducir')]);
+caja.Iniciativas = undefined;
+Check('R8 sin admin/iniciativas.js (ticketsDe no disponible): — y el detalle sigue', ['—', '120', true],
+  [Valor(Detalle(10), 'Tickets a reducir'), Valor(Detalle(10), 'Volumetría'), /data-sn-accion="cerrar"/.test(N.htmlDetalle(Detalle(10)))]);
+caja.Iniciativas = { ticketsDe: function () { throw new Error('no deberia llamarse'); } };
+Check('R8 con datos que faltan ni siquiera llama a ticketsDe', '—', Valor(Detalle(10, { volumetria: null }), 'Tickets a reducir'));
+caja.Iniciativas = { ticketsDe: ticketsDeReal };
+
+// ---- R9: otras iniciativas activas de la categoria (otras_iniciativas) -------
+html = N.htmlDetalle(Detalle(11, { otras_iniciativas: [
+  { folio: 'PRB 2026-000001', pct: 0.3, estado: 'En Análisis' },
+  { folio: 'ADO <b>2</b>', pct: 0.1234, estado: 'En Solución' },
+  { folio: 'PRB 2026-000007', pct: 0, estado: 'En Monitoreo' }] }));
+Check('R9 cada una con su folio, su % y su Estado; folio escapado', [true, true, true, false],
+  [/<td>PRB 2026-000001<\/td><td class="num">30%<\/td><td>En Análisis<\/td>/.test(html),
+   /<td>ADO &lt;b&gt;2&lt;\/b&gt;<\/td><td class="num">12.34%<\/td><td>En Solución<\/td>/.test(html),
+   /<td>PRB 2026-000007<\/td><td class="num">0%<\/td>/.test(html), /<b>2<\/b>/.test(html)]);
+Check('R9 lo ya comprometido: la suma de lo listado', true, /Ya comprometido en la categoría: 42.34% \(sin esta solicitud\)/.test(html));
+Check('R9 va despues de la tabla de la solicitud y antes de la Descripcion', true,
+  /<\/tbody><\/table><h5>Otras iniciativas activas en la categoría<\/h5>[\s\S]*<h5>Descripción<\/h5>/.test(html));
+Check('R9 lista vacia: lo dice', true,
+  /Ninguna otra iniciativa activa tiene % en esta categoría/.test(N.htmlDetalle(Detalle(11, { otras_iniciativas: [] }))));
+Check('R9 null (no se pudo leer): aviso, el detalle sigue', [true, true],
+  [/No se pudieron leer las otras iniciativas/.test(N.htmlDetalle(Detalle(11, { otras_iniciativas: null }))),
+   /data-sn-accion="cerrar"/.test(N.htmlDetalle(Detalle(11, { otras_iniciativas: null })))]);
+Check('R9 servidor anterior (sin el campo): no se pinta la seccion', false, /Otras iniciativas activas/.test(N.htmlDetalle(Detalle(11))));
 Check('R8 total: solo si hay mas de las que se ven', ['Mostrando las 2 más recientes de 250.', ''],
   [N.textoTotal({ solicitudes: [1, 2], total: 250 }), N.textoTotal({ solicitudes: [1, 2], total: 2 })]);
 

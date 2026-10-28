@@ -73,6 +73,7 @@ public static partial class ExperienciaQueries
                 // DECIMAL(9,4) llega como double; se regresa a 4 decimales.
                 Pct = Math.Round((decimal)d.PctDisminucion, 4),
                 Consume = ConsumeCapacidad(d.Estado, d.Agrup),
+                Estado = d.Estado,
             });
         }
         return salida;

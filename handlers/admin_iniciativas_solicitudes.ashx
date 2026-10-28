@@ -110,6 +110,8 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                 {
                     var d = SolicitudesCambio.Almacen.Detalle(n);
                     if (d == null) return Error(context, 404, "La solicitud no existe.", "SolicitudNoExiste");
+                    // Otras iniciativas activas de cada categoria (ya es ADM).
+                    SolicitudesCambio.AgregarOtrasIniciativas(d);
                     return d;
                 }
                 if (accion == "rechazar")
@@ -132,6 +134,31 @@ public class AdminIniciativasSolicitudes : IHttpHandler
     {
         var p = PeticionSolicitudCambio.DesdeFormulario(context.Request.Form);
         p.ExigirSubestadoDeAdm(rol);
+        // Categorias por AGREGAR: solo del PO / SO capturados de la
+        // iniciativa, en el catalogo de la cascada, revisado aqui y no solo
+        // en el navegador. Sin poder leerlo no se envia (503).
+        if (p.Valida && p.AgregaCategorias())
+        {
+            string[] duenos;
+            ICollection<string> rutas;
+            try
+            {
+                duenos = SolicitudesCambio.DuenosCapturados(p.Folio) ?? new string[] { null, null };
+                rutas = duenos[0] != null && duenos[1] != null ? SolicitudesCambio.RutasAgregables(duenos[0], duenos[1]) : null;
+            }
+            catch (Exception ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex);
+                context.Response.StatusCode = 503;
+                context.Response.TrySkipIisCustomErrors = true;
+                return new Dictionary<string, object>
+                {
+                    { "error", "No se pudo revisar el cat\u00e1logo de categor\u00edas: no se envi\u00f3 la solicitud. Int\u00e9ntalo de nuevo." },
+                    { "tipo", "CatalogoNoDisponible" }, { "enviada", false },
+                };
+            }
+            p.ExigirCatalogo(duenos[0], duenos[1], rutas);
+        }
         if (!p.Valida)
         {
             context.Response.StatusCode = 422;

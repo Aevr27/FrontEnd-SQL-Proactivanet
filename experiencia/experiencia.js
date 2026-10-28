@@ -232,8 +232,9 @@ function volSlotOMes(c, periodo){
 
 // ---- Tipo de registro: Todos / Incidentes / Requerimientos [TIPO] ----
 // El handler manda, ademas del volumen de siempre (vol_slot / vol_mes =
-// [Total general] de vw_TBSlotCAT / vw_TBMesCAT: TODOS los tipos, SorIA y
-// "Sin tipo" incluidos), dos series por categoria en vol_tipo:
+// [Total general] de vw_TBSlotCAT / vw_TBMesCAT MENOS los tipos SorIA
+// Incidentes / SorIA Peticiones, ExperienciaQueries.SinSorIA; "Sin tipo" y
+// los demas incluidos), dos series por categoria en vol_tipo:
 //   inc  columna [Incidencia]            (Tipo = 'Incidencia')
 //   req  columna [Petición de Servicio]  (Tipo = 'Petición de Servicio')
 // Ninguna sale de restar: cada una es su columna de la vista. Elegir un tipo
@@ -538,7 +539,7 @@ function renderKPIs(cats, det){
 // porcentajes, sin un registro detras.
 const PANEL_KPI={sin:'pSin', ven:'pVen'};
 const seleccionKpi=window.SeleccionKpi
-  ? new window.SeleccionKpi({valida:k=>Object.prototype.hasOwnProperty.call(PANEL_KPI,k)}) : null;
+  ? new window.SeleccionKpi({valida:k=>Object.prototype.hasOwnProperty.call(PANEL_KPI,k), accion:'Mostrar su lista en esta pestaña'}) : null;
 // Muestra un panel de la tabla de abajo. Si la tarjeta elegida es de otro
 // panel, la quita y repinta las tarjetas.
 function mostrarPanel(id){

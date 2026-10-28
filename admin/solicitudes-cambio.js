@@ -106,8 +106,68 @@ window.SolicitudesCambioCola = (function () {
     }).join('');
   }
 
+  // IMPACTO POR CATEGORIA (estimado): la volumetria de HOY de cada ruta
+  // (SLOT 0, ultimos 30 dias: la de Nueva solicitud y Solicitar cambios,
+  // VolumetriaCliente), los tickets que da el % pedido con ticketsDe de
+  // admin/iniciativas.js (FLOOR) y las OTRAS iniciativas activas de la
+  // categoria (otras_iniciativas del servidor: CapacidadCategoria.Otras, sin
+  // la iniciativa de la solicitud) con su % y lo ya comprometido. Nada de
+  // esto se guarda: al aplicar, la base calcula Tickets a reducir con su
+  // propia ventana y redondeo.
+  //   vols: ruta -> { estado, valor } (undefined = todavia no se pide)
+  function volTexto(v) {
+    if (!v || v.estado === 'cargando') return 'Calculando…';
+    if (v.estado === 'ok' || v.estado === 'cero') return h(Number(v.valor).toLocaleString('es-MX'));
+    return '—';
+  }
+  function ticketsTexto(v, pctPedido) {
+    var I = window.Iniciativas;
+    if (!v || (v.estado !== 'ok' && v.estado !== 'cero') || !I || typeof I.ticketsDe !== 'function') return '—';
+    if (pctPedido === null || pctPedido === undefined || pctPedido === '') return '—';
+    var t = I.ticketsDe(v.valor, String(pctPedido));
+    return t === null || t === undefined ? '—' : h(t);
+  }
+  function htmlOtrasCategoria(c) {
+    var otras = c.otras_iniciativas;
+    if (otras === undefined) return '';
+    if (!Array.isArray(otras)) return '<p class="ini-nota">No se pudieron leer las otras iniciativas de ' + h(c.categoria) + '.</p>';
+    var suma = 0;
+    otras.forEach(function (o) { if (typeof o.pct === 'number') suma += Math.round(o.pct * 10000); });
+    var pedido = Math.round(Number(c.pct_nuevo) * 100);
+    var conPedido = isFinite(pedido) ? (suma + pedido) / 100 : null;
+    var lista = otras.length
+      ? '<table class="ini-det-tabla"><thead><tr><th scope="col">Iniciativa</th><th scope="col" class="num">% de disminución</th>' +
+        '<th scope="col">Estado</th></tr></thead><tbody>' +
+        otras.map(function (o) {
+          return '<tr><td>' + h(o.folio) + '</td><td class="num">' + (typeof o.pct === 'number' ? h(Math.round(o.pct * 10000) / 100) + '%' : '—') +
+            '</td><td>' + (o.estado ? h(o.estado) : '—') + '</td></tr>';
+        }).join('') + '</tbody></table>'
+      : '<p class="ini-nota">Ninguna otra iniciativa activa tiene % en esta categoría.</p>';
+    return '<h6 class="ini-cat-ruta">' + h(c.categoria) + '</h6>' + lista +
+      '<p class="ini-nota">Ya comprometido por otras: ' + h(suma / 100) + '%' +
+      (conPedido === null ? '' : ' · con el % pedido aquí: ' + h(conPedido) + '%') + '.</p>';
+  }
+  function htmlImpacto(cats, vols) {
+    if (!cats.length) return '';
+    vols = vols || {};
+    return '<h5>Impacto por categoría <span class="ini-sub">estimado con la volumetría de hoy</span></h5>' +
+      '<table class="ini-det-tabla"><thead><tr><th scope="col">Categoría</th><th scope="col" class="num">% pedido</th>' +
+      '<th scope="col" class="num">Volumetría <span class="ini-sub">hoy, últimos 30 días</span></th>' +
+      '<th scope="col" class="num">Tickets a reducir <span class="ini-sub">estimado</span></th></tr></thead><tbody>' +
+      cats.map(function (c, n) {
+        var v = vols[c.categoria];
+        return '<tr><td class="ini-cat-ruta">' + h(c.categoria) + '</td><td class="num">' + pct(c.pct_nuevo) + '</td>' +
+          '<td class="num" id="solVol-' + n + '">' + volTexto(v) + '</td>' +
+          '<td class="num" id="solTk-' + n + '">' + ticketsTexto(v, c.pct_nuevo) + '</td></tr>';
+      }).join('') + '</tbody></table>' +
+      '<p class="ini-nota">Estimación: al aplicar, la base recalcula Tickets a reducir con su propia ventana de 30 días y su redondeo.</p>' +
+      (cats.some(function (c) { return c.otras_iniciativas !== undefined; })
+        ? '<h5>Otras iniciativas activas en cada categoría</h5>' + cats.map(htmlOtrasCategoria).join('') : '');
+  }
+
   // tipos: { iniciativa: [...], agrupado: [...] } (los valores que ya existen).
-  function htmlDetalle(d, tipos) {
+  // vols: la volumetria de hoy por ruta (htmlImpacto); opcional.
+  function htmlDetalle(d, tipos, vols) {
     tipos = tipos || {};
     var pendiente = d.estado === 'PENDIENTE';
     var act = d.actual || {};
@@ -181,7 +241,7 @@ window.SolicitudesCambioCola = (function () {
     return '<h4>Solicitud #' + h(d.id) + ' · ' + h(d.folio) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' +
       '<p class="ini-nota">' + h(TIPOS[d.tipo] || d.tipo) + ' · la envió ' + h(d.solicitado_por) + ' (' + h(d.rol_solicitante) + ') el ' +
         fechaHora(d.fecha_solicitud_utc) + ' · ' + h(ESTADOS[d.estado] || d.estado) + (d.intentos ? ' · ' + h(d.intentos) + ' intento(s) de aplicar' : '') + '</p>' +
-      avisos + cambios + htmlCats +
+      avisos + cambios + htmlCats + htmlImpacto(cats, vols) +
       '<h5>Motivo</h5><div class="ini-texto">' + h(d.motivo) + '</div>' + revision +
       '<div class="ini-cambio-msg" id="solDetMsg" role="status" aria-live="polite"></div>' + acciones +
       (eventos ? '<h5>Historial de la solicitud</h5><ul class="ini-sol-eventos">' + eventos + '</ul>' : '');
@@ -246,25 +306,81 @@ window.SolicitudesCambioCola = (function () {
       m.innerHTML = html;
     }
 
-    listar() {
-      var self = this;
-      this.mensaje('solMsg', '', '<span>Cargando solicitudes…</span>');
+    // fondo: el refresco automatico (RefrescoAuto). Sin "Cargando…", y si
+    // falla NO borra la lista que ya se ve: solo lo dice, discreto (un 401 /
+    // 403 si sigue el camino de siempre: el acceso cambio). Una respuesta
+    // vieja -otra lectura empezo despues: Actualizar, el filtro, el
+    // refresco- nunca pisa a la nueva. this.ultimoEstado: el HTTP de la
+    // ultima que se pinto (null = sin conexion).
+    listar(fondo) {
+      var self = this, mia = this.lecturas = (this.lecturas || 0) + 1;
+      if (!fondo) this.mensaje('solMsg', '', '<span>Cargando solicitudes…</span>');
       var url = URL + '?accion=listar' + (this.filtro ? '&estado=' + encodeURIComponent(this.filtro) : '');
       return Promise.resolve().then(function () { return self.pedir(url, { cache: 'no-store', credentials: 'same-origin' }); })
         .then(leer)
         .then(function (r) {
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
             self.$('solLista').innerHTML = htmlLista(r.json.solicitudes);
             self.mensaje('solMsg', '', '');
             return r.json.solicitudes;
           }
+          if (fondo && r.status !== 401 && r.status !== 403) {
+            self.mensaje('solMsg', 'aviso', 'No se pudo actualizar la cola (respuesta ' + h(r.status) + '): se muestra la última lectura.');
+            return null;
+          }
           self.$('solLista').innerHTML = '';
           self.mensaje('solMsg', r.status === 501 ? 'aviso' : 'error', h(r.json.error || ('No se pudo leer la cola (respuesta ' + r.status + ').')));
           return null;
         }, function () {
-          self.mensaje('solMsg', 'error', 'No se pudo contactar al servidor.');
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = null;
+          self.mensaje('solMsg', fondo ? 'aviso' : 'error', fondo ? 'No se pudo actualizar la cola (sin conexión): se muestra la última lectura.'
+            : 'No se pudo contactar al servidor.');
           return null;
         });
+    }
+
+    // RefrescoAuto: releer solo si la cola de ADM se ve, sin un detalle
+    // abierto, sin aplicar / rechazar en curso y sin nadie escribiendo o
+    // eligiendo en la pestaña (filtro, comentario).
+    puedeRefrescar() {
+      var cola = this.$('solCola'), vista = this.$('solVistaCambio'), panel = this.$('panel-solicitudes');
+      return this.cableado && this.rol === 'ADM' && !!cola && !cola.hidden && !(vista && vista.hidden) && !(panel && panel.hidden) &&
+        !this.detalle && !this.ocupado && !(window.RefrescoAuto && window.RefrescoAuto.editando(this.doc, panel));
+    }
+    // -> el estado HTTP de la lectura (RefrescoAuto se detiene con 401 / 403).
+    refrescarFondo() {
+      var self = this;
+      return this.listar(true).then(function () { return self.ultimoEstado; });
+    }
+
+    // La volumetria de hoy de cada categoria del detalle (VolumetriaCliente
+    // de admin/iniciativa-admin.js, SLOT 0, con el mismo pedir). Al llegar
+    // solo se tocan sus dos celdas (volumetria y tickets), nunca el resto del
+    // detalle (un comentario a medio escribir se queda). Si el detalle ya es
+    // otro, no se pinta. -> Promise (para las pruebas).
+    cargarVolumetrias(d) {
+      var self = this, A = window.IniciativaAdmin, cats = d.categorias_detalle || [];
+      if (!cats.length) return Promise.resolve(null);
+      if (!A || !A.VolumetriaCliente) {
+        cats.forEach(function (c, n) { self.pintarVolumetria(d, n, { estado: 'error', valor: null }); });
+        return Promise.resolve(null);
+      }
+      if (!this.volumetria) this.volumetria = new A.VolumetriaCliente(this.pedir);
+      return Promise.all(cats.map(function (c, n) {
+        return self.volumetria.consultar(c.categoria).then(function (e) { self.pintarVolumetria(d, n, e); },
+          function () { self.pintarVolumetria(d, n, { estado: 'error', valor: null }); });
+      }));
+    }
+
+    pintarVolumetria(d, n, e) {
+      if (this.detalle !== d) return;
+      var c = (d.categorias_detalle || [])[n], v = { estado: e && e.estado, valor: e && e.valor };
+      var vol = this.$('solVol-' + n), tk = this.$('solTk-' + n);
+      if (vol) vol.innerHTML = volTexto(v);
+      if (tk && c) tk.innerHTML = ticketsTexto(v, c.pct_nuevo);
     }
 
     verDetalle(id) {
@@ -278,8 +394,9 @@ window.SolicitudesCambioCola = (function () {
             return null;
           }
           self.detalle = r.json;
-          caja.innerHTML = htmlDetalle(r.json, self.tipos());
+          caja.innerHTML = htmlDetalle(r.json, self.tipos(), {});
           caja.hidden = false;
+          self.cargarVolumetrias(r.json);
           return r.json;
         }, function () {
           self.mensaje('solMsg', 'error', 'No se pudo contactar al servidor.');

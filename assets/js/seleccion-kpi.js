@@ -37,7 +37,8 @@
      var sel = new SeleccionKpi({
        valida: function (k) { return ...; },   // la clave existe hoy
        limpian: ['total'],                      // opcional
-       atributo: 'data-indicador'               // opcional (el de omision)
+       atributo: 'data-indicador',              // opcional (el de omision)
+       accion: 'Mostrar su lista en esta pestaña'  // opcional (ACCION)
      });
      sel.alternar('cerradas');  // -> true si cambio
      sel.clave;                 // 'cerradas'
@@ -64,6 +65,9 @@ window.SeleccionKpi = (function () {
       this.valida = typeof o.valida === 'function' ? o.valida : function () { return true; };
       this.limpian = (o.limpian || []).slice();
       this.atributo = o.atributo || ATRIBUTO;
+      // Lo que hace el clic, para el nombre accesible (boton()).
+      this.accion = o.accion || SeleccionKpi.ACCION;
+      this.accionLimpia = o.accionLimpia || SeleccionKpi.ACCION_LIMPIA;
       this.clave = '';
     }
 
@@ -117,9 +121,21 @@ window.SeleccionKpi = (function () {
     // assets/css/kpi.css): sin botones anidados, el rotulo y la cifra
     // quedan debajo y el nombre accesible lo da `etiqueta`. `titulo`,
     // opcional, es el title de la tarjeta (queda encima de ella).
+    //
+    // Dentro va el embudo (.kpi-embudo, esquina superior derecha): solo la
+    // senal visual de que la tarjeta hace algo EN ESTA pestaña. Es parte
+    // del mismo boton (decorativo, aria-hidden): el clic, el teclado y el
+    // nombre accesible siguen siendo los del boton. Como solo sale aqui,
+    // una tarjeta que no pasa por boton() no lo lleva.
+    //
+    // El nombre accesible dice la cifra Y lo que hace el clic ("Cerradas:
+    // 12. Filtrar esta pestaña"): opciones.accion (o ACCION) para las que
+    // eligen, opciones.accionLimpia (o ACCION_LIMPIA) para las que limpian.
     boton(k, etiqueta, titulo) {
+      var accion = this.limpia(k) ? this.accionLimpia : this.accion;
       return '<button type="button" class="kpi-filtro"' + this.atributos(k) +
-        ' aria-label="' + attr(etiqueta) + '"' + (titulo ? ' title="' + attr(titulo) + '"' : '') + '></button>';
+        ' aria-label="' + attr(etiqueta + '. ' + accion) + '"' + (titulo ? ' title="' + attr(titulo) + '"' : '') + '>' +
+        SeleccionKpi.EMBUDO + '</button>';
     }
 
     // La clave del boton sobre el que cayo el evento, o ''. Un hijo del
@@ -162,6 +178,18 @@ window.SeleccionKpi = (function () {
       });
     }
   }
+
+  // El icono "filtro" (embudo) de las tarjetas que filtran o abren su
+  // detalle en la misma pestaña. SVG en linea: el tablero no tiene
+  // libreria de iconos. Color y fondo en assets/css/kpi.css.
+  SeleccionKpi.EMBUDO = '<span class="kpi-embudo" aria-hidden="true">' +
+    '<svg viewBox="0 0 16 16" width="12" height="12" focusable="false">' +
+    '<path d="M2 3h12l-4.6 5.4v4.1L6.6 14V8.4z" fill="currentColor"/></svg></span>';
+
+  // Lo que dice el lector de pantalla despues de la cifra. Una pestaña
+  // cuyo clic no filtra sino que abre su lista pasa su propia `accion`.
+  SeleccionKpi.ACCION = 'Filtrar esta pestaña por este indicador';
+  SeleccionKpi.ACCION_LIMPIA = 'Quitar el filtro y ver todo';
 
   return SeleccionKpi;
 })();

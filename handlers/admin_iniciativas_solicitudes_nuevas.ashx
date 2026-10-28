@@ -61,6 +61,22 @@ public class AdminIniciativasSolicitudesNuevas : IHttpHandler
             }
             var d = lector.Detalle(numero);
             if (d == null) return Error(context, 404, "La solicitud no existe.", "SolicitudNoExiste");
+            // Las OTRAS iniciativas que hoy consumen la capacidad de la
+            // categoria (la regla del tope: CapacidadCategoria), con su %. Sin
+            // la iniciativa que creo esta solicitud. Si falla: null y la
+            // solicitud se muestra igual.
+            object cat, codigo;
+            d.TryGetValue("categoria", out cat);
+            d.TryGetValue("codigo_iniciativa", out codigo);
+            if (!string.IsNullOrWhiteSpace(cat as string))
+            {
+                try { d["otras_iniciativas"] = RegistroSolicitudesIniciativa.OtrasIniciativas(cat as string, codigo as string); }
+                catch (Exception ex)
+                {
+                    DashboardHandler.Registrar("admin_iniciativas_solicitudes_nuevas.ashx", ex);
+                    d["otras_iniciativas"] = null;
+                }
+            }
             object crea;
             if (d.TryGetValue("estado", out crea) && crea as string == "ENVIADA"
                 && d.TryGetValue("crea_iniciativa", out crea) && crea is bool && (bool)crea)

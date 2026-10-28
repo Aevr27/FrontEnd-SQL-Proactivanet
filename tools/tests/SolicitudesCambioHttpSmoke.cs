@@ -131,6 +131,25 @@ public static class SolicitudesCambioHttpSmoke
         AccesoAdmin.FuenteRoles = new RolesFalsos().Con(ADM, "ADM").Con(MOD, "MOD");
         var alm = new AlmacenFalso();
         SolicitudesCambio.Almacen = alm;
+        // Sin SQL: PO / SO capturados por folio y el catalogo de cada par.
+        //   000001 -> PO 1 / SO x (par del catalogo: /A/Cat 2, /A/Cat 3)
+        //   000002 -> sin capturar; 000003 -> PO X / SO x (no es un par del catalogo)
+        var leidasCatalogo = 0;
+        var pedidosPar = new List<string>();
+        SolicitudesCambio.DuenosCapturados = delegate (string folio)
+        {
+            if (folio == "PRB 2026-000001" || folio == "XYZ 2026-000001") return new[] { "PO 1", "SO x" };
+            if (folio == "PRB 2026-000003") return new[] { "PO X", "SO x" };
+            return new string[] { null, null };
+        };
+        SolicitudesCambio.RutasAgregables = delegate (string po, string so)
+        {
+            leidasCatalogo++;
+            pedidosPar.Add(po + "|" + so);
+            return po == "PO 1" && so == "SO x"
+                ? new HashSet<string>(new[] { "/A/Cat 2", "/A/Cat 3" }, StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        };
         var validaciones = new List<NameValueCollection>();
         var validacionOk = true;
         SolicitudesCambio.ValidarAplicacion = delegate (NameValueCollection f)
@@ -198,6 +217,80 @@ public static class SolicitudesCambioHttpSmoke
         agr = alm.UltimaPeticion.Categorias[0];
         Check("B10 prefijo sin regla: sin clasificacion (ADM la elige al aplicar)", "200|null|null",
               estado + "|" + (agr.TipoIniciativa ?? "null") + "|" + (agr.TipoAgrupado ?? "null"));
+
+        // ---- B11-B15) AGREGAR: catalogo de la cascada revisado en el servidor ----
+        alm.Llamadas.Clear(); leidasCatalogo = 0;
+        foreach (var mala in new[] { "/A", "/A/Inventada", "/Z/Cat 2" })
+        {
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+                "agregar_categoria", mala, "agregar_pct", "10"), out estado);
+            Check("B11 AGREGAR fuera del catalogo (carpeta / inventada / otra rama) '" + mala + "': 422 categoria, no se envia",
+                  "422|True|True|0", estado + "|" + cuerpo.Contains("\"campo\":\"categoria\"") + "|" + cuerpo.Contains("ValidacionFallida") + "|" + alm.Llamadas.Count);
+        }
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "agregar_categoria", " /a/cat 3 ", "agregar_pct", "10"), out estado);
+        Check("B12 se compara como el catalogo (NBSP, espacios, sin mayusculas): 200", 200, estado);
+        // Lo que manda "Tickets" (pctDeTickets / MetaCategoria.pct: dos
+        // decimales) se guarda exacto con la regla de siempre (Math.Round(pct/100, 4)).
+        foreach (var caso in new[] { new[] { "42.86", "0.4286" }, new[] { "0.01", "0.0001" }, new[] { "23.93", "0.2393" }, new[] { "100", "1.0000" } })
+        {
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+                "agregar_categoria", "/A/Cat 2", "agregar_pct", caso[0]), out estado);
+            Check("B12b % de tickets " + caso[0] + ": 200 y se guarda " + caso[1], "200|" + caso[1],
+                  estado + "|" + alm.UltimaPeticion.Categorias[0].Pct.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        alm.Llamadas.Clear(); leidasCatalogo = 0;
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "pct_categoria", "/Ligada/Carpeta", "pct_valor", "15"), out estado);
+        Check("B13 solo % de ligadas (aunque sea una carpeta ligada): no se revisa el catalogo, se envia", "200|0",
+              estado + "|" + leidasCatalogo);
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "agregar_categoria", "/A/Cat 2", "agregar_pct", "150"), out estado);
+        Check("B14 formato invalido: 422 sin leer el catalogo", "422|0", estado + "|" + leidasCatalogo);
+        // ---- B16-B19) solo el par PO / SO capturado de la iniciativa ----
+        pedidosPar.Clear(); alm.Llamadas.Clear();
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "agregar_categoria", "/A/Cat 3", "agregar_pct", "10"), out estado);
+        Check("B16 par capturado valido: su categoria se envia; el catalogo se pide para ESE par", "200|PO 1|SO x",
+              estado + "|" + (pedidosPar.Count == 1 ? pedidosPar[0] : "?"));
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000002", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "agregar_categoria", "/A/Cat 2", "agregar_pct", "10"), out estado);
+        Check("B17 sin PO / SO capturados: 422, no se agrega nada (no se cae a otro par)", "422|True|1",
+              estado + "|" + cuerpo.Contains("no tiene Product Owner y Service Owner capturados") + "|" + pedidosPar.Count);
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000003", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "agregar_categoria", "/A/Cat 2", "agregar_pct", "10"), out estado);
+        Check("B18 par capturado que no esta en el catalogo: 422 (aunque la ruta sea de otro par valido)", "422|True",
+              estado + "|" + cuerpo.Contains("no son un par del cat"));
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "agregar_categoria", "/B/Cat 4", "agregar_pct", "10"), out estado);
+        Check("B19 categoria valida de OTRO par: 422 con el par de la iniciativa en el mensaje", "422|True",
+              estado + "|" + cuerpo.Contains("del Product Owner y Service Owner de la iniciativa (PO 1 / SO x)"));
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000002", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "pct_categoria", "/A/Cat 1", "pct_valor", "15"), out estado);
+        Check("B19 sin par capturado, solo % de ligadas: se envia (las ligadas se conservan)", 200, estado);
+        Check("B19 los mensajes del servidor van en ASCII escapado en el fuente", false,
+              System.IO.File.ReadAllText(@"App_Code\SolicitudCambioAdmin.cs").Any(ch => ch > 127));
+
+        // RutasDelPar: igualdad exacta de PO y SO, ruta normalizada.
+        var filasCat = new List<object> {
+            new Dictionary<string, object> { { "po", "PO 1" }, { "so", "SO x" }, { "categoria", "/A/Cat 2" } },
+            new Dictionary<string, object> { { "po", "PO 1" }, { "so", "SO y" }, { "categoria", "/A/Cat 9" } },
+            new Dictionary<string, object> { { "po", "PO 3" }, { "so", "SO x" }, { "categoria", "/B/Cat 4" } } };
+        Check("B20 RutasDelPar: solo las del par exacto", "1|True|0|0",
+              SolicitudesCambio.RutasDelPar(filasCat, " PO 1 ", "SO x").Count + "|" + SolicitudesCambio.RutasDelPar(filasCat, "PO 1", "SO x").Contains("/a/cat 2") +
+              "|" + SolicitudesCambio.RutasDelPar(filasCat, "po 1", "SO x").Count + "|" + SolicitudesCambio.RutasDelPar(filasCat, null, "SO x").Count);
+
+        var antes = SolicitudesCambio.RutasAgregables;
+        SolicitudesCambio.RutasAgregables = delegate (string po, string so) { throw new InvalidOperationException("timeout"); };
+        alm.Llamadas.Clear();
+        cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "agregar_categoria", "/A/Cat 2", "agregar_pct", "10"), out estado);
+        Check("B15 catalogo ilegible: 503 CatalogoNoDisponible, enviada false, nada se guarda", "503|True|True|0",
+              estado + "|" + cuerpo.Contains("CatalogoNoDisponible") + "|" + cuerpo.Contains("\"enviada\":false") + "|" + alm.Llamadas.Count);
+        cuerpo = Correr("POST", "accion=enviar", VIEWER, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+            "agregar_categoria", "/A/Cat 2", "agregar_pct", "10"), out estado);
+        Check("B15 sin rol: 403 antes de tocar el catalogo", "403|0", estado + "|" + alm.Llamadas.Count);
+        SolicitudesCambio.RutasAgregables = antes;
         cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
             "pct_categoria", "/A/Cat 1", "pct_valor", "101"), out estado);
         Check("B11 % fuera de rango: 422", 422, estado);
@@ -333,6 +426,33 @@ public static class SolicitudesCambioHttpSmoke
         Check("D9 no existe: 404", 404, estado);
         cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "x"), out estado);
         Check("D10 sin numero: 400", 400, estado);
+
+        // ---- D11-D14) detalle: otras iniciativas activas de cada categoria ----
+        var leidasCap = 0;
+        SolicitudesCambio.Capacidad = delegate
+        {
+            leidasCap++;
+            return new CapacidadCategoria(new[] {
+                new CapacidadCategoria.Compromiso { Folio = "PRB 2026-000001", Categoria = "/A/Cat 2", Pct = 0.2m, Consume = true, Estado = "En Análisis" },
+                new CapacidadCategoria.Compromiso { Folio = "PRB 2026-000009", Categoria = "/A/Cat 2", Pct = 0.3m, Consume = true, Estado = "En Solución" },
+                new CapacidadCategoria.Compromiso { Folio = "PRB 2026-000010", Categoria = "/A/Cat 2", Pct = 0.4m, Consume = false, Estado = "Cerrado" } });
+        };
+        alm.Detalle_ = Pendiente("CATEGORIAS", MOD, Cat("AGREGAR", "/A/Cat 2", "10", null, null, null, null, false),
+                                                      Cat("PCT", "/A/Cat 7", "15", null, null, "10", "10", true));
+        cuerpo = Correr("GET", "accion=detalle&id=5", ADM, null, out estado);
+        Check("D11 detalle ADM: cada categoria con sus otras (sin la de la solicitud ni las cerradas), una lectura", "200|True|False|False|True|1",
+              estado + "|" + cuerpo.Contains("\"folio\":\"PRB 2026-000009\",\"pct\"") + "|" + cuerpo.Contains("\"folio\":\"PRB 2026-000001\",\"pct\"") + "|" +
+              cuerpo.Contains("PRB 2026-000010") + "|" + cuerpo.Contains("\"otras_iniciativas\":[]") + "|" + leidasCap);
+        Check("D12 lo que se pinta: % en fraccion y Estado", true, cuerpo.Contains("\"pct\":0.3") && cuerpo.Contains("Soluci"));
+        SolicitudesCambio.Capacidad = delegate { throw new InvalidOperationException("timeout"); };
+        cuerpo = Correr("GET", "accion=detalle&id=5", ADM, null, out estado);
+        Check("D13 si la capacidad falla: 200, otras_iniciativas null y el detalle se muestra", "200|True|True",
+              estado + "|" + cuerpo.Contains("\"otras_iniciativas\":null") + "|" + cuerpo.Contains("\"folio\":\"PRB 2026-000001\""));
+        leidasCap = 0;
+        SolicitudesCambio.Capacidad = delegate { leidasCap++; return new CapacidadCategoria(null); };
+        cuerpo = Correr("GET", "accion=detalle&id=5", MOD, null, out estado);
+        Check("D14 MOD: 403 y no se lee la capacidad", "403|0", estado + "|" + leidasCap);
+        alm.Detalle_ = null;
 
         // ---- E) rechazar -------------------------------------------------------
         alm.Llamadas.Clear();

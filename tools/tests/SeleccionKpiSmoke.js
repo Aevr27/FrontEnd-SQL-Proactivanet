@@ -96,12 +96,18 @@ var cb = nueva(hoy); cb.alternar('activas');
 Check('C1 clases: elegida', ' kpi-filtrable kpi-sel', cb.clases('activas'));
 Check('C1 clases: no elegida', ' kpi-filtrable', cb.clases('cerradas'));
 Check('C1 clases: la que limpia nunca se marca', ' kpi-filtrable', cb.clases('total'));
-Check('C2 boton: cubre la tarjeta, con atributos y nombre accesible',
-  '<button type="button" class="kpi-filtro" data-indicador="activas" aria-pressed="true" aria-label="Activas: 12"></button>',
+var EMB = SeleccionKpi.EMBUDO;
+Check('C2 boton: cubre la tarjeta, con atributos y nombre accesible (y el embudo dentro)',
+  '<button type="button" class="kpi-filtro" data-indicador="activas" aria-pressed="true" aria-label="Activas: 12. Filtrar esta pestaña por este indicador">' + EMB + '</button>',
   cb.boton('activas', 'Activas: 12'));
 Check('C2 boton: title opcional y escapado',
-  '<button type="button" class="kpi-filtro" data-indicador="total" aria-label="A &quot;b&quot;" title="x&lt;y"></button>',
+  '<button type="button" class="kpi-filtro" data-indicador="total" aria-label="A &quot;b&quot;. Quitar el filtro y ver todo" title="x&lt;y">' + EMB + '</button>',
   cb.boton('total', 'A "b"', 'x<y'));
+Check('C2 embudo: decorativo (aria-hidden, svg sin foco), sin botones ni enlaces propios', [true, true, false, false],
+  [/^<span class="kpi-embudo" aria-hidden="true"><svg [^>]*focusable="false"/.test(EMB), /<path d="[^"]+" fill="currentColor"\/>/.test(EMB),
+   /<button|<a /.test(EMB), /onclick|href/.test(EMB)]);
+Check('C2 sin boton() no hay embudo: clases() y atributos() no lo traen', [false, false],
+  [/kpi-embudo/.test(cb.clases('activas')), /kpi-embudo/.test(cb.atributos('activas'))]);
 var kpiCss = leer('assets/css/kpi.css'), iniCss = leer('admin/iniciativas.css');
 Check('C3 kpi.css: boton que cubre, foco visible, marca sin tocar la franja izquierda', [true, true, true, false],
   [/\.kpi-filtro \{[^}]*position: absolute; inset: 0; z-index: 1;/.test(kpiCss),
@@ -109,6 +115,32 @@ Check('C3 kpi.css: boton que cubre, foco visible, marca sin tocar la franja izqu
    /\.kpi\.kpi-sel \{[^}]*border-top-color/.test(kpiCss),
    /\.kpi\.kpi-sel \{[^}]*border-left/.test(kpiCss)]);
 Check('C3 la marca tambien tiñe el rotulo de QA (.kpi-tit)', true, /\.kpi\.kpi-sel \.kpi-tit/.test(kpiCss));
+Check('C5 embudo en kpi.css: esquina superior derecha, azul sobre azul claro, sin capturar el clic, rotulo con hueco',
+  [true, true, true, true],
+  [/\.kpi-embudo \{[^}]*position: absolute; top: 8px; right: 8px;[^}]*border-radius: 6px;[^}]*pointer-events: none;/.test(kpiCss),
+   /--kpi-embudo-ink: #1f6fd1; --kpi-embudo-bg: #e8f1fd;/.test(kpiCss),
+   /\.kpi\.kpi-filtrable \.lbl, \.kpi\.kpi-filtrable \.kpi-tit \{ padding-right: 26px; \}/.test(kpiCss),
+   /\.kpi\.ini-kpi-ctx \.kpi-embudo \{ top: 17px; \}/.test(kpiCss)]);
+Check('C5 embudo: estados de hover, foco y elegida; tamaño menor en telefono', [true, true, true, true],
+  [/\.kpi-filtrable:hover \.kpi-embudo/.test(kpiCss), /\.kpi-filtro:focus-visible \.kpi-embudo/.test(kpiCss),
+   /\.kpi\.kpi-sel \.kpi-embudo \{ background: var\(--kpi-embudo-ink\); color: #ffffff; \}/.test(kpiCss),
+   /@media \(max-width: 560px\) \{\s*\.kpi-embudo \{ top: 6px; right: 6px; width: 18px; height: 18px; \}/.test(kpiCss)]);
+// El embudo sale SOLO de boton(): ningun modulo pinta un .kpi-filtro a mano,
+// y las tarjetas sin interaccion (SLA / Call Center de dashboard.js,
+// Analisis) no llaman a boton(), asi que no lo llevan.
+var MODULOS = ['admin/registro-iniciativas.js', 'backlog/backlog.js', 'efectividad/efectividad.js', 'experiencia/experiencia.js',
+               'orquestacion/orquestacion.js', 'qa/qa.js', 'dashboard.js', 'analisis/analisis.js'];
+Check('C6 ningun modulo pinta .kpi-filtro ni .kpi-embudo a mano', [],
+  MODULOS.filter(function (m) { return /class="kpi-filtro"|kpi-embudo/.test(leer(m)); }));
+Check('C6 SLA / Call Center (dashboard.js) y Analisis: sin boton de tarjeta', [false, false],
+  [/\.boton\(/.test(leer('dashboard.js')), /\.boton\(/.test(leer('analisis/analisis.js'))]);
+// C7) El nombre accesible dice la cifra y lo que hace el clic EN ESTA pestaña.
+var propia = new SeleccionKpi({ accion: 'Mostrar su lista en esta pestaña' });
+Check('C7 accion propia de la pestaña en el nombre accesible', true,
+  /aria-label="Sin: 3\. Mostrar su lista en esta pestaña"/.test(propia.boton('sin', 'Sin: 3')));
+Check('C7 Experiencia abre su lista y Efectividad su hoja: lo dicen; las que filtran usan la de omision', [true, true, false, false, false],
+  [/accion:'Mostrar su lista en esta pestaña'/.test(leer('experiencia/experiencia.js')), /accion: 'Mostrar su hoja en esta pestaña'/.test(leer('efectividad/efectividad.js')),
+   /accion:/.test(leer('backlog/backlog.js')), /accion:/.test(leer('qa/qa.js')), /accion:/.test(leer('orquestacion/orquestacion.js'))]);
 Check('C4 admin/iniciativas.css ya no lleva copia', false, /kpi-filtr|kpi-sel/.test(iniCss.replace(/\/\*[\s\S]*?\*\//g, '')));
 
 // ---- D) DOM ----

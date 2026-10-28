@@ -149,3 +149,33 @@
   background: var(--accent-soft, #f4fae7);
 }
 .kpi.kpi-sel .lbl, .kpi.kpi-sel .kpi-tit { color: var(--accent-ink, #3a7431); }
+
+/* ---- Embudo: "esta tarjeta filtra / abre su detalle aqui" ----
+   El icono "filtro" de la referencia de diseño: embudo azul sobre un
+   cuadro redondeado azul claro, en la esquina superior derecha. Va DENTRO
+   del boton .kpi-filtro (SeleccionKpi.EMBUDO, aria-hidden), asi que solo lo
+   tienen las tarjetas que ya filtran o abren algo en su pestaña y no es un
+   segundo control. El rotulo deja hueco a la derecha para que la elipsis
+   no pase por debajo; el alto de la tarjeta no cambia. */
+.kpi.kpi-filtrable { --kpi-embudo-ink: #1f6fd1; --kpi-embudo-bg: #e8f1fd; --kpi-embudo-line: #c7dcf8; }
+.kpi.kpi-filtrable .lbl, .kpi.kpi-filtrable .kpi-tit { padding-right: 26px; }
+.kpi-embudo {
+  position: absolute; top: 8px; right: 8px;
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 6px;
+  background: var(--kpi-embudo-bg); color: var(--kpi-embudo-ink);
+  border: 1px solid transparent; pointer-events: none;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.kpi-embudo svg { display: block; }
+.kpi-filtrable:hover .kpi-embudo { border-color: var(--kpi-embudo-line); }
+.kpi-filtro:focus-visible .kpi-embudo { border-color: var(--kpi-embudo-ink); }
+/* Elegida (filtro aplicado): el mismo icono, relleno. */
+.kpi.kpi-sel .kpi-embudo { background: var(--kpi-embudo-ink); color: #ffffff; }
+/* La franja "Criterio" del Registro (13px arriba, admin/iniciativas.css)
+   tapa la esquina: el embudo baja por debajo de ella. */
+.kpi.ini-kpi-ctx .kpi-embudo { top: 17px; }
+@media (max-width: 560px) {
+  .kpi-embudo { top: 6px; right: 6px; width: 18px; height: 18px; }
+  .kpi.ini-kpi-ctx .kpi-embudo { top: 15px; }
+}

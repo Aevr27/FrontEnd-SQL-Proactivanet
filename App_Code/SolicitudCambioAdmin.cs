@@ -277,6 +277,41 @@ public sealed class PeticionSolicitudCambio
         if (SubestadoNuevo != null && rol != RolAdmin.Adm) Error(CSubestadoNuevo, MensajeSubestadoSoloAdm);
     }
 
+    // Lo que pide AGREGAR (decision 2026-10-28): solo categorias del PO / SO
+    // CAPTURADOS de la iniciativa (dbo.Problem.OwnerProblem / OwnerServicio),
+    // y solo si ese par existe en el catalogo de la cascada (hojas activas con
+    // Director / PO / SO vigentes, el `rutas` de Nueva solicitud). Sin par
+    // capturado, o con un par que no esta en el catalogo, no se agrega nada:
+    // no se cae a otro par. Antes solo se revisaba al APLICAR, contra el
+    // catalogo mas amplio de ADM. Las ligadas (PCT) no se revisan: se
+    // conservan como estan, igual que en Modificar.
+    //   po / so  los capturados (null = sin capturar);
+    //   rutas    las del catalogo de ESE par (vacia = el par no esta),
+    //            normalizadas, sin distinguir mayusculas.
+    public bool AgregaCategorias() { return Categorias.Exists(c => c.Accion == "AGREGAR"); }
+    public void ExigirCatalogo(string po, string so, ICollection<string> rutas)
+    {
+        if (!AgregaCategorias()) return;
+        if (po == null || so == null)
+        {
+            Error("categoria", "La iniciativa no tiene Product Owner y Service Owner capturados: no se pueden agregar categor\u00edas. Pide primero ese cambio.");
+            return;
+        }
+        if (rutas == null || rutas.Count == 0)
+        {
+            Error("categoria", "El Product Owner y Service Owner de la iniciativa (" + po + " / " + so +
+                ") no son un par del cat\u00e1logo vigente: no se pueden agregar categor\u00edas.");
+            return;
+        }
+        foreach (var c in Categorias)
+        {
+            if (c.Accion != "AGREGAR") continue;
+            var llave = DirectorioOrganizacional.Normaliza(c.Categoria);
+            if (llave == null || !rutas.Contains(llave))
+                Error("categoria", c.Categoria + ": no es una categor\u00eda del Product Owner y Service Owner de la iniciativa (" + po + " / " + so + ") en el cat\u00e1logo vigente.");
+        }
+    }
+
     private static string Limpio(string s)
     {
         if (s == null) return null;
@@ -806,6 +841,82 @@ public static class SolicitudesCambio
     // El handler usa estos; las pruebas los cambian por falsos.
     public static IAlmacenSolicitudesCambio Almacen = new AlmacenSolicitudesCambioSql();
     public static Func<NameValueCollection, ValidacionAplicar> ValidarAplicacion = ValidacionAplicar.ComoEdicionDirecta;
+    // Para PeticionSolicitudCambio.ExigirCatalogo. Si una lectura falla, la
+    // excepcion sube: el handler no envia nada.
+    //   DuenosCapturados(folio) -> { po, so } de dbo.Problem (null = sin
+    //                              capturar; sin la iniciativa, los dos null)
+    //   RutasAgregables(po, so) -> las rutas del catalogo de ESE par
+    public static Func<string, string[]> DuenosCapturados = LeerDuenosCapturados;
+    public static Func<string, string, ICollection<string>> RutasAgregables = LeerRutasAgregables;
+    // Detalle de ADM: la capacidad de todas las rutas (una lectura) para las
+    // otras iniciativas activas de cada categoria (CapacidadCategoria.Otras).
+    public static Func<CapacidadCategoria> Capacidad = IniciativaService.CapacidadActual;
+
+    // Cuelga de cada categoria del detalle sus otras_iniciativas (sin la
+    // iniciativa de la solicitud). Si no se pueden leer: null en cada una y
+    // el detalle se muestra igual. Solo lectura; solo lo pide el detalle de ADM.
+    public static void AgregarOtrasIniciativas(Dictionary<string, object> d)
+    {
+        object cats;
+        if (d == null || !d.TryGetValue("categorias_detalle", out cats) || !(cats is List<object>)) return;
+        var lista = (List<object>)cats;
+        if (lista.Count == 0) return;
+        var folio = d.ContainsKey("folio") ? d["folio"] as string : null;
+        CapacidadCategoria cap = null;
+        try { cap = Capacidad(); }
+        catch (Exception ex) { DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex); }
+        foreach (Dictionary<string, object> c in lista)
+            c["otras_iniciativas"] = cap == null ? null : (object)cap.Otras(c["categoria"] as string, folio);
+    }
+
+    private static string[] LeerDuenosCapturados(string folio)
+    {
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        using (var cmd = new SqlCommand("SELECT OwnerProblem, OwnerServicio FROM dbo.Problem WHERE Codigo = @c;", cn))
+        {
+            cmd.Parameters.Add("@c", SqlDbType.NVarChar, 100).Value = folio ?? "";
+            cn.Open();
+            using (var rd = cmd.ExecuteReader())
+            {
+                if (!rd.Read()) return new string[] { null, null };
+                return new[] { rd.IsDBNull(0) ? null : DirectorioOrganizacional.Normaliza(Convert.ToString(rd.GetValue(0))),
+                               rd.IsDBNull(1) ? null : DirectorioOrganizacional.Normaliza(Convert.ToString(rd.GetValue(1))) };
+            }
+        }
+    }
+
+    // La MISMA lista que la cascada de Nueva solicitud y que "Solicitar
+    // cambios" recibe en el navegador (admin_iniciativas_catalogos.ashx
+    // ?rutas=1, "rutas"), solo las filas de ese PO y ese SO. Solo lectura.
+    private static ICollection<string> LeerRutasAgregables(string po, string so)
+    {
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            var dir = DirectorioOrganizacional.Cargar(cn);
+            var r = CatalogoRutasIniciativa.Asignaciones(CatalogoRutasIniciativa.LeerRutasActivas(cn), dir);
+            return RutasDelPar((List<object>)r["rutas"], po, so);
+        }
+    }
+
+    // Las rutas (normalizadas) de las filas { po, so, categoria } de ese par:
+    // igualdad exacta de PO y SO, como CascadaOrganizacional. Aparte para
+    // probarla sin SQL.
+    public static ICollection<string> RutasDelPar(IEnumerable<object> filas, string po, string so)
+    {
+        var salida = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var p = DirectorioOrganizacional.Normaliza(po);
+        var s = DirectorioOrganizacional.Normaliza(so);
+        if (p == null || s == null) return salida;
+        foreach (Dictionary<string, object> f in filas ?? new object[0])
+        {
+            if (!string.Equals(DirectorioOrganizacional.Normaliza(f["po"] as string), p, StringComparison.Ordinal)) continue;
+            if (!string.Equals(DirectorioOrganizacional.Normaliza(f["so"] as string), s, StringComparison.Ordinal)) continue;
+            var ruta = DirectorioOrganizacional.Normaliza(f["categoria"] as string);
+            if (ruta != null) salida.Add(ruta);
+        }
+        return salida;
+    }
 
     // Los datos de DATOS (sql/25), con el nombre de su clave en el detalle.
     private static readonly string[] Datos = { "titulo", "po", "so" };

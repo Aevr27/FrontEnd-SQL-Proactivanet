@@ -1043,6 +1043,20 @@ window.Iniciativas = (function () {
         // Mis solicitudes (misma pestaña): las propias, para quien no es ADM.
         if (window.SolicitudesNuevas.MisSolicitudes) this.mias = new window.SolicitudesNuevas.MisSolicitudes(this.doc, null);
       }
+      // Refresco automatico de la pestaña Solicitudes (assets/js/refresco-auto.js):
+      // relee la lista que se ve (Cambios, Iniciativas o Mis solicitudes)
+      // con su propio "Actualizar", solo si esa lista lo permite
+      // (puedeRefrescar: visible, sin detalle abierto ni nadie escribiendo).
+      // Las demas pestañas no se refrescan solas.
+      if (window.RefrescoAuto) {
+        var listas = [this.cola, this.nuevas, this.mias].filter(function (l) { return l && l.puedeRefrescar; });
+        var visible = function () { return listas.filter(function (l) { return l.puedeRefrescar(); })[0] || null; };
+        this.refresco = new window.RefrescoAuto({
+          doc: this.doc,
+          puede: function () { return !!visible(); },
+          refrescar: function () { var l = visible(); return l ? l.refrescarFondo() : Promise.resolve(null); }
+        }).iniciar();
+      }
       // Cambios recientes (pestaña Administracion, solo ADM). Titulo y estado
       // del registro ya cargado; "Ver" abre el mismo detalle de Iniciativas
       // (abrirDesdeLista: pregunta si hay cambios sin guardar) y "Actualizar
@@ -1631,7 +1645,10 @@ window.Iniciativas = (function () {
           // cascada, como siempre.
           if (self.registro && self.registro.fijarRutasCatalogo && window.IniciativaAdmin) {
             var BA = window.IniciativaAdmin.BorradorAdmin;
-            self.registro.fijarRutasCatalogo(BA.rutasDe(catalogo), undefined, catalogo.rutasAdm ? BA.rutasAdmDe(catalogo) : null);
+            // Las filas de la cascada (las mismas de Nueva solicitud) para
+            // "Agregar categoria" de Solicitar cambios.
+            self.registro.fijarRutasCatalogo(BA.rutasDe(catalogo), undefined, catalogo.rutasAdm ? BA.rutasAdmDe(catalogo) : null,
+              catalogo.asignaciones);
           }
           // ... y sus PO / SO capturados salen de la misma lista que el alta.
           if (self.registro && self.registro.fijarDuenosCatalogo && window.IniciativaAdmin) {

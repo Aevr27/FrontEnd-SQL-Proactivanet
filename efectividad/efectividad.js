@@ -332,7 +332,8 @@
   // % Efectividad y Tickets evitados son cifras sin registro detras.
   var HOJA_KPI = { medidas: 'medidas', rebote: 'medidas', medicion: 'medicion', sin: 'sin' };
   var SK = window.SeleccionKpi;
-  var seleccion = SK ? new SK({ valida: function (k) { return Object.prototype.hasOwnProperty.call(HOJA_KPI, k); } }) : null;
+  var seleccion = SK ? new SK({ valida: function (k) { return Object.prototype.hasOwnProperty.call(HOJA_KPI, k); },
+                                 accion: 'Mostrar su hoja en esta pestaña' }) : null;
   function soloRebote() { return !!seleccion && seleccion.clave === 'rebote'; }
 
   function estado(txt) { $('estado').textContent = txt || ''; }

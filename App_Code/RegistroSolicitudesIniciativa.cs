@@ -271,6 +271,9 @@ public static class RegistroSolicitudesIniciativa
     public static ILectorSolicitudesIniciativa Lector = new LectorSolicitudesIniciativaSql();
     // "Mis solicitudes": la misma lectura real, filtrada por cuenta.
     public static ILectorMisSolicitudesIniciativa Mias = new LectorSolicitudesIniciativaSql();
+    // Otras iniciativas activas de la categoria, con su % (categoria,
+    // folio que se excluye). Solo el detalle de ADM las pide.
+    public static Func<string, string, List<Dictionary<string, object>>> OtrasIniciativas = IniciativaService.OtrasIniciativas;
 
     // Como la cola de cambios (admin_iniciativas_solicitudes.ashx): 200.
     public const int Maximo = 200;

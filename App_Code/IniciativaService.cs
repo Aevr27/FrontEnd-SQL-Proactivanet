@@ -76,6 +76,21 @@ public sealed class IniciativaService
         _personas = personas;
     }
 
+    // Las otras iniciativas que consumen la capacidad de la ruta, con su %
+    // (CapacidadCategoria.Otras). Solo lectura; solo la revision de ADM.
+    public static List<Dictionary<string, object>> OtrasIniciativas(string categoria, string excluir)
+    {
+        return CapacidadActual().Otras(categoria, excluir);
+    }
+
+    // La capacidad de TODAS las rutas en una sola lectura (para un detalle
+    // con varias categorias: CapacidadCategoria.Otras por cada una).
+    public static CapacidadCategoria CapacidadActual()
+    {
+        using (var cn = Abrir())
+            return new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
+    }
+
     public Dictionary<string, object> Capacidad(string categoria)
     {
         using (var cn = Abrir())

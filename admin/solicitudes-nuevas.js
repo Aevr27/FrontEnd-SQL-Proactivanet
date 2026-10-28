@@ -80,6 +80,40 @@ window.SolicitudesNuevas = (function () {
       : '';
   }
 
+  // Tickets a reducir AL ENVIAR: la volumetria y el % guardados de la
+  // solicitud con ticketsDe de admin/iniciativas.js (FLOOR, la regla de
+  // Nueva solicitud), no un calculo propio. Es una estimacion: al aprobar,
+  // la base recalcula TicketsReduce con su propia ventana de 30 dias y su
+  // redondeo. Sin ticketsDe (iniciativas.js no cargo) o sin datos: '—'.
+  function ticketsAlEnviar(d) {
+    var I = window.Iniciativas;
+    if (!I || typeof I.ticketsDe !== 'function') return '—';
+    if (typeof d.volumetria !== 'number' || d.pct === null || d.pct === undefined || d.pct === '') return '—';
+    var t = I.ticketsDe(d.volumetria, String(d.pct));
+    return t === null || t === undefined ? '—' : h(t);
+  }
+
+  // Otras iniciativas que HOY consumen la capacidad de la categoria
+  // (otras_iniciativas del servidor: la regla del tope de 100%,
+  // CapacidadCategoria.Otras), cada una con su % (fraccion). undefined = el
+  // servidor no lo manda (no se pinta); null = no se pudo leer.
+  function htmlOtras(d) {
+    var otras = d.otras_iniciativas;
+    if (otras === undefined) return '';
+    var cab = '<h5>Otras iniciativas activas en la categoría</h5>';
+    if (!Array.isArray(otras)) return cab + '<p class="ini-nota">No se pudieron leer las otras iniciativas de la categoría.</p>';
+    if (!otras.length) return cab + '<p class="ini-nota">Ninguna otra iniciativa activa tiene % en esta categoría.</p>';
+    var suma = 0;
+    var filas = otras.map(function (o) {
+      var pct = typeof o.pct === 'number' ? Math.round(o.pct * 10000) / 100 : null;
+      if (pct !== null) suma += Math.round(o.pct * 10000);
+      return '<tr><td>' + nada(o.folio) + '</td><td class="num">' + (pct === null ? '—' : h(pct) + '%') + '</td><td>' + nada(o.estado) + '</td></tr>';
+    }).join('');
+    return cab + '<table class="ini-det-tabla"><thead><tr><th scope="col">Iniciativa</th><th scope="col" class="num">% de disminución</th>' +
+      '<th scope="col">Estado</th></tr></thead><tbody>' + filas + '</tbody></table>' +
+      '<p class="ini-nota">Ya comprometido en la categoría: ' + h(suma / 100) + '% (sin esta solicitud).</p>';
+  }
+
   // puedeRevisar: ADM y revision_disponible. Los botones, solo en ENVIADA.
   function htmlDetalle(d, puedeRevisar) {
     var revisada = d.estado === 'APROBADA' || d.estado === 'RECHAZADA';
@@ -90,8 +124,9 @@ window.SolicitudesNuevas = (function () {
       ['Service Owner', nada(d.so)],
       ['Categoría', '<span class="ini-cat-ruta">' + nada(d.categoria) + '</span>'],
       ['Director', nada(d.director)],
-      ['Volumetría', nada(d.volumetria)],
       ['% de disminución', d.pct === null || d.pct === undefined ? '—' : h(d.pct) + '%'],
+      ['Volumetría <span class="ini-sub">al enviar</span>', nada(d.volumetria)],
+      ['Tickets a reducir <span class="ini-sub">estimado al enviar; la base lo recalcula al crear la iniciativa</span>', ticketsAlEnviar(d)],
       ['RCA', d.rca_extension ? 'Adjunto .' + h(String(d.rca_extension).toLowerCase()) + ' (el archivo no se guarda)' : '—'],
       ['Enviada', fechaHora(d.fecha_utc)],
       ['Estado', estado(d.estado)],
@@ -133,7 +168,7 @@ window.SolicitudesNuevas = (function () {
         '<button type="button" class="btn linea chico" data-sn-accion="cerrar">Cerrar</button></div>'
       : '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-sn-accion="cerrar">Cerrar</button></div>';
     return '<h4>Solicitud ' + h(d.numero_texto) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' +
-      '<table class="ini-det-tabla"><tbody>' + filas + '</tbody></table>' +
+      '<table class="ini-det-tabla"><tbody>' + filas + '</tbody></table>' + htmlOtras(d) +
       '<h5>Descripción</h5><div class="ini-texto">' + nada(d.descripcion) + '</div>' +
       '<h5>Observaciones</h5><div class="ini-texto">' + nada(d.observaciones) + '</div>' + revision +
       '<div class="ini-cambio-msg" id="snDetMsg" role="status" aria-live="polite"></div>' + acciones +
@@ -238,28 +273,58 @@ window.SolicitudesNuevas = (function () {
       m.innerHTML = html;
     }
 
-    listar() {
-      var self = this;
-      this.mensaje('snMsg', '', '<span>Cargando solicitudes nuevas…</span>');
-      this.$('snResumen').textContent = '';
+    // fondo: el refresco automatico (RefrescoAuto), como en la cola de
+    // cambios: sin "Cargando…", una falla (que no sea 401 / 403) no borra
+    // la lista que se ve, y una respuesta vieja nunca pisa a la nueva.
+    listar(fondo) {
+      var self = this, mia = this.lecturas = (this.lecturas || 0) + 1;
+      if (!fondo) {
+        this.mensaje('snMsg', '', '<span>Cargando solicitudes nuevas…</span>');
+        this.$('snResumen').textContent = '';
+      }
       return Promise.resolve().then(function () { return self.pedir(URL + '?accion=listar', { cache: 'no-store', credentials: 'same-origin' }); })
         .then(leer)
         .then(function (r) {
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
             self.$('snLista').innerHTML = htmlLista(r.json.solicitudes);
             self.$('snResumen').textContent = textoTotal(r.json);
             self.mensaje('snMsg', '', '');
             return r.json.solicitudes;
           }
+          if (fondo && r.status !== 401 && r.status !== 403) {
+            self.mensaje('snMsg', 'aviso', 'No se pudo actualizar la lista (respuesta ' + h(r.status) + '): se muestra la última lectura.');
+            return null;
+          }
           self.$('snLista').innerHTML = '';
           var e = textoError(r.status, r.json, 'las solicitudes');
           self.mensaje('snMsg', e.clase, e.html);
           return null;
         }, function () {
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = null;
+          if (fondo) {
+            self.mensaje('snMsg', 'aviso', 'No se pudo actualizar la lista (sin conexión): se muestra la última lectura.');
+            return null;
+          }
           self.$('snLista').innerHTML = '';
           self.mensaje('snMsg', 'error', 'No se pudo contactar al servidor.');
           return null;
         });
+    }
+
+    // RefrescoAuto: solo con la vista "Iniciativas" a la vista (ADM), sin
+    // un detalle abierto, sin revision en curso y sin nadie escribiendo o
+    // eligiendo en la pestaña.
+    puedeRefrescar() {
+      var bloque = this.$('snBloque'), panel = this.$('panel-solicitudes');
+      return this.cableado && this.rol === 'ADM' && this.vista === 'nuevas' && !!bloque && !bloque.hidden && !(panel && panel.hidden) &&
+        !this.detalle && !this.ocupado && !(window.RefrescoAuto && window.RefrescoAuto.editando(this.doc, panel));
+    }
+    refrescarFondo() {
+      var self = this;
+      return this.listar(true).then(function () { return self.ultimoEstado; });
     }
 
     verDetalle(numero) {
@@ -424,28 +489,56 @@ window.SolicitudesNuevas = (function () {
       m.innerHTML = html || '';
     }
 
-    listar() {
-      var self = this;
-      this.mensaje('', '<span>Cargando tus solicitudes…</span>');
-      this.$('msResumen').textContent = '';
+    // fondo: el refresco automatico, con las mismas reglas que las otras
+    // dos listas de la pestaña.
+    listar(fondo) {
+      var self = this, mia = this.lecturas = (this.lecturas || 0) + 1;
+      if (!fondo) {
+        this.mensaje('', '<span>Cargando tus solicitudes…</span>');
+        this.$('msResumen').textContent = '';
+      }
       return Promise.resolve().then(function () { return self.pedir(URL_MIAS + '?accion=listar', { cache: 'no-store', credentials: 'same-origin' }); })
         .then(leer)
         .then(function (r) {
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
             self.$('msLista').innerHTML = htmlLista(r.json.solicitudes, 'Todavía no has enviado solicitudes de iniciativa.');
             self.$('msResumen').textContent = textoTotal(r.json);
             self.mensaje('', '');
             return r.json.solicitudes;
           }
+          if (fondo && r.status !== 401 && r.status !== 403) {
+            self.mensaje('aviso', 'No se pudo actualizar la lista (respuesta ' + h(r.status) + '): se muestra la última lectura.');
+            return null;
+          }
           self.$('msLista').innerHTML = '';
           var e = textoError(r.status, r.json, 'tus solicitudes');
           self.mensaje(e.clase, e.html);
           return null;
         }, function () {
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = null;
+          if (fondo) {
+            self.mensaje('aviso', 'No se pudo actualizar la lista (sin conexión): se muestra la última lectura.');
+            return null;
+          }
           self.$('msLista').innerHTML = '';
           self.mensaje('error', 'No se pudo contactar al servidor.');
           return null;
         });
+    }
+
+    // RefrescoAuto: con "Mis solicitudes" a la vista, sin un detalle abierto
+    // y sin nadie escribiendo o eligiendo en la pestaña.
+    puedeRefrescar() {
+      var bloque = this.$('msBloque'), panel = this.$('panel-solicitudes'), det = this.$('msDetalle');
+      return this.cableado && !!bloque && !bloque.hidden && !(panel && panel.hidden) && !(det && !det.hidden) &&
+        !(window.RefrescoAuto && window.RefrescoAuto.editando(this.doc, panel));
+    }
+    refrescarFondo() {
+      var self = this;
+      return this.listar(true).then(function () { return self.ultimoEstado; });
     }
 
     verDetalle(numero) {

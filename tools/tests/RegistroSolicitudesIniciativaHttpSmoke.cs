@@ -126,6 +126,8 @@ public static class RegistroSolicitudesIniciativaHttpSmoke
         AccesoAdmin.FuenteRoles = new RolesNuevasFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(AMBOS, "ADM", "MOD");
         var interruptor = new InterruptorNuevasFalso { Valor = true };
         AccesoIniciativas.Fuente = interruptor;
+        // Sin SQL: las otras iniciativas de la categoria (D4) son falsas.
+        RegistroSolicitudesIniciativa.OtrasIniciativas = (cat, excl) => new List<Dictionary<string, object>>();
         var lector = new LectorFalso();
         RegistroSolicitudesIniciativa.Lector = lector;
         lector.Lectura.Total = 2;
@@ -224,6 +226,35 @@ public static class RegistroSolicitudesIniciativaHttpSmoke
         Check("D2 sin numero: 400", 400, st);
         cuerpo = Correr("GET", "accion=detalle&numero=9", ADM, out st);
         Check("D3 no existe: 404 SolicitudNoExiste", "404|SolicitudNoExiste", st + "|" + Campo(Json(cuerpo), "tipo"));
+
+        // ---------------- D4: otras iniciativas de la categoria ----------------
+        var pedidas = new List<string>();
+        RegistroSolicitudesIniciativa.OtrasIniciativas = (cat, excl) =>
+        {
+            pedidas.Add(cat + "|" + (excl ?? "(null)"));
+            return new List<Dictionary<string, object>> { new Dictionary<string, object> { { "folio", "PRB 2026-000001" }, { "pct", 0.3m }, { "estado", "En Análisis" } } };
+        };
+        cuerpo = Correr("GET", "accion=detalle&numero=142", ADM, out st);
+        var otras = Campo(Json(cuerpo), "otras_iniciativas") as System.Collections.ArrayList;
+        Check("D4 detalle ADM: otras_iniciativas de SU categoria, sin excluir (sin iniciativa creada)",
+              "200|1|PRB 2026-000001|0.3|/A/Cat 1|(null)",
+              st + "|" + (otras == null ? -1 : otras.Count) + "|" + (otras == null ? "" : ((Dictionary<string, object>)otras[0])["folio"] + "|" + ((Dictionary<string, object>)otras[0])["pct"]) + "|" + pedidas.Last());
+        det["codigo_iniciativa"] = "ADO 2026-000077";
+        Correr("GET", "accion=detalle&numero=142", ADM, out st);
+        Check("D4 aprobada: excluye la iniciativa que creo", "/A/Cat 1|ADO 2026-000077", pedidas.Last());
+        det.Remove("codigo_iniciativa");
+        RegistroSolicitudesIniciativa.OtrasIniciativas = (cat, excl) => { throw new InvalidOperationException("timeout"); };
+        cuerpo = Correr("GET", "accion=detalle&numero=142", ADM, out st);
+        Check("D4 si falla la lectura: 200, otras_iniciativas null y la solicitud se muestra", "200|True|#0000142",
+              st + "|" + (Json(cuerpo).ContainsKey("otras_iniciativas") && Campo(Json(cuerpo), "otras_iniciativas") == null) + "|" + Campo(Json(cuerpo), "numero_texto"));
+        pedidas.Clear();
+        RegistroSolicitudesIniciativa.OtrasIniciativas = (cat, excl) => { pedidas.Add(cat); return new List<Dictionary<string, object>>(); };
+        cuerpo = Correr("GET", "accion=detalle&numero=142", MOD, out st);
+        Check("D4 MOD: 403 y ni siquiera se consulta la categoria", "403|0", st + "|" + pedidas.Count);
+        lector.Detalles[143] = Fila(143, "Sin categoria");
+        lector.Detalles[143]["categoria"] = null;
+        cuerpo = Correr("GET", "accion=detalle&numero=143", ADM, out st);
+        Check("D4 sin categoria: no se consulta ni se manda", "200|0|False", st + "|" + pedidas.Count + "|" + Json(cuerpo).ContainsKey("otras_iniciativas"));
 
         // ---------------- M: metodo y accion ----------------
         foreach (var m in new[] { "POST", "PUT", "DELETE" })

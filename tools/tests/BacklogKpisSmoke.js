@@ -183,7 +183,7 @@ Check('solo Criticos lleva boton que filtra', 1, (nodos['kpis-bl'].innerHTML.mat
 Check('Criticos: boton con data-indicador y sin elegir', 'false', pulsada('Criticos'));
 Check('Criticos: tarjeta filtrable sin marca', true,
   tarjeta('Criticos').indexOf('kpi-filtrable') >= 0 && tarjeta('Criticos').indexOf('kpi-sel') < 0);
-Check('Criticos: nombre accesible con la cifra', true, tarjeta('Criticos').indexOf('aria-label="Criticos: 10"') >= 0);
+Check('Criticos: nombre accesible con la cifra y la accion', true, tarjeta('Criticos').indexOf('aria-label="Criticos: 10. Filtrar esta pestaña por este indicador"') >= 0);
 Check('Backlog no filtra', '(sin boton)', pulsada('Backlog'));
 Check('pie sin filtro: el corte', true, tarjeta('Backlog').indexOf('corte 2026-10-19') >= 0);
 m.filtro.prioridad = 'Critica';
