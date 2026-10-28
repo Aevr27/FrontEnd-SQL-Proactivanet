@@ -1,13 +1,14 @@
 // tools/tests/SesionAdminSmoke.js - prueba de humo de SesionAdmin
-// (assets/js/sesion-admin.js): la entrada Administracion y el saludo.
+// (assets/js/sesion-admin.js): la entrada Iniciativas, Solicitar y el saludo.
 //
-// Es solo UX; lo que se fija aqui es que nunca muestre de mas: cualquier
-// respuesta que no sea { autorizado: true } deja todo oculto, y el saludo
-// solo sale con un nombre que haya dado el servidor. Ademas (2026-10-26):
-// una respuesta que el servidor no pudo confirmar (verificacion:
-// "incompleta" o 5xx) no cambia Administracion por Solicitar iniciativa
-// (I*), con un solo reintento automatico; y vigilar() vuelve a preguntar
-// una vez por cada 403 de Admin con la pagina abierta (V*).
+// Es solo UX; lo que se fija aqui es que nunca muestre de mas: la entrada
+// Iniciativas (data-solo-registro) sale con registro: true o autorizado:
+// true (2026-10-28: el registro es de toda cuenta autenticada); Solicitar
+// solo con solicitante: true confirmado; el saludo solo con un nombre que
+// haya dado el servidor. Una respuesta que el servidor no pudo confirmar
+// (verificacion: "incompleta" o 5xx) no muestra Solicitar (I*), con un solo
+// reintento automatico; y vigilar() vuelve a preguntar una vez por cada 403
+// de Admin con la pagina abierta (V*).
 //
 //   node tools\tests\SesionAdminSmoke.js   # sale 0 si todo paso
 'use strict';
@@ -43,7 +44,7 @@ function documento() {
   // data-solo-adm: "+ Solicitar una iniciativa" (oculto en el marcado).
   var adm = [{ hidden: true }];
   return { items: items, adm: adm, querySelectorAll: function (sel) {
-    return sel === '[data-solo-admin]' ? items : sel === '[data-solo-adm]' ? adm : [];
+    return sel === '[data-solo-registro]' ? items : sel === '[data-solo-adm]' ? adm : [];
   } };
 }
 
@@ -67,7 +68,12 @@ Promise.all([
   caso('MOD', respuesta(200, { autorizado: true, rol: 'MOD' }), false),
   caso('rol raro', respuesta(200, { autorizado: true, rol: 'adm ' }), false),
   caso('ADM sin autorizado', respuesta(200, { autorizado: false, rol: 'ADM' }), false),
+  caso('registro sin rol', respuesta(200, { autorizado: false, solicitante: false, registro: true, nombre: 'X' }), true),
+  caso('registro como texto', respuesta(200, { autorizado: false, registro: 'true' }), false),
 ]).then(function (r) {
+  comprobar('registro sin rol: entrada Iniciativas visible, sin saludo ni boton de crear',
+    r[11].doc.items[0].hidden + '|' + r[11].el.hidden + '|' + r[11].doc.adm[0].hidden + '|' + r[11].s.registro, 'false|true|true|true');
+  comprobar('registro "true" (texto): no cuenta', r[12].doc.items[0].hidden, true);
   comprobar('ADM: rol y boton de crear visible', r[7].s.rol + '|' + r[7].doc.adm[0].hidden, 'ADM|false');
   comprobar('MOD: entra a Admin, boton de crear oculto', r[8].doc.items[0].hidden + '|' + r[8].s.rol + '|' + r[8].doc.adm[0].hidden, 'false|MOD|true');
   comprobar('rol que no es exacto: sin rol, oculto', r[9].s.rol + '|' + r[9].doc.adm[0].hidden, 'null|true');
@@ -131,47 +137,46 @@ Promise.all([
     comprobar('correo sin saludo tambien pide ?persona=1', r[6], '../handlers/admin_sesion.ashx?persona=1');
   });
 }).then(function () {
-  // Solicitante (PO/SO vigente con el interruptor INICIATIVAS_ABIERTAS, o
-  // ADM; MOD solo si es PO/SO): la entrada Iniciativas
-  // (data-solo-solicitante) solo para quien NO es ADM/MOD y el servidor
-  // dice solicitante: true; "Solicitar una iniciativa"
-  // (data-solo-solicitud) para todo solicitante: true, autorizado o no (el
-  // rol ya no basta); el saludo para autorizado o solicitante.
+  // La entrada Iniciativas (data-solo-registro) para toda cuenta con
+  // registro: true (o autorizado); "Solicitar una iniciativa"
+  // (data-solo-solicitud) para todo solicitante: true (ADM, MOD, PO/SO), con
+  // rol o sin el; Crear (data-solo-adm) solo ADM; el saludo para autorizado
+  // o solicitante.
+  // Columnas: solicitante | Iniciativas oculta | Crear oculto | saludo oculto | Solicitar oculto.
   function conSolicitante(cuerpo) {
-    var admin = [{ hidden: true }], sol = [{ hidden: true }], adm = [{ hidden: true }], pedir = [{ hidden: true }];
+    var reg = [{ hidden: true }], adm = [{ hidden: true }], pedir = [{ hidden: true }];
     var doc = { querySelectorAll: function (sel) {
-      return sel === '[data-solo-admin]' ? admin : sel === '[data-solo-adm]' ? adm : sel === '[data-solo-solicitante]' ? sol :
-        sel === '[data-solo-solicitud]' ? pedir : [];
+      return sel === '[data-solo-registro]' ? reg : sel === '[data-solo-adm]' ? adm : sel === '[data-solo-solicitud]' ? pedir : [];
     } };
     var saludo = { textContent: '', hidden: true };
     return new SesionAdmin('../', respuesta(200, cuerpo)).aplicar(doc, saludo).then(function (s) {
-      return [s.solicitante, admin[0].hidden, sol[0].hidden, adm[0].hidden, saludo.hidden, pedir[0].hidden].join('|');
+      return [s.solicitante, reg[0].hidden, adm[0].hidden, saludo.hidden, pedir[0].hidden].join('|');
     });
   }
   return Promise.all([
-    conSolicitante({ autorizado: false, solicitante: true, nombre: 'Juan Perez' }),
-    conSolicitante({ autorizado: false, solicitante: false, nombre: 'Juan Perez' }),
-    conSolicitante({ autorizado: false, solicitante: 'true', nombre: 'Juan Perez' }),
+    conSolicitante({ autorizado: false, solicitante: true, registro: true, nombre: 'Juan Perez' }),
+    conSolicitante({ autorizado: false, solicitante: false, registro: true, nombre: 'Juan Perez' }),
+    conSolicitante({ autorizado: false, solicitante: 'true', registro: true, nombre: 'Juan Perez' }),
     conSolicitante({ autorizado: false, nombre: 'Juan Perez' }),
-    conSolicitante({ autorizado: true, rol: 'MOD', solicitante: true }),
-    conSolicitante({ autorizado: true, rol: 'ADM', solicitante: true }),
+    conSolicitante({ autorizado: true, rol: 'MOD', solicitante: true, registro: true }),
+    conSolicitante({ autorizado: true, rol: 'ADM', solicitante: true, registro: true }),
     conSolicitante({ autorizado: true, rol: 'MOD', solicitante: false, nombre: 'Mod Uno' }),
     conSolicitante({ autorizado: true, rol: 'ADM' }),
   ]).then(function (r) {
-    comprobar('solicitante: Iniciativas visible, Administracion oculta, saludo', r[0], 'true|true|false|true|false|false');
-    comprobar('solicitante false: todo oculto, sin saludo', r[1], 'false|true|true|true|true|true');
-    comprobar('solicitante "true" (texto): no cuenta', r[2], 'false|true|true|true|true|true');
-    comprobar('respuesta vieja sin solicitante: todo oculto', r[3], 'false|true|true|true|true|true');
-    comprobar('MOD PO/SO: Administracion y Solicitar, no la entrada de solicitante', r[4], 'true|false|true|true|true|false');
-    comprobar('ADM: Administracion, Crear y Solicitar', r[5], 'true|false|true|false|true|false');
-    comprobar('MOD sin ser PO/SO: Administracion y saludo, sin Solicitar', r[6], 'false|false|true|true|false|true');
-    comprobar('autorizado sin solicitante: ya no es solicitante implicito (sin Solicitar)', r[7], 'false|false|true|false|true|true');
+    comprobar('PO/SO sin rol: Iniciativas, Solicitar y saludo; sin Crear', r[0], 'true|false|true|false|false');
+    comprobar('cuenta comun: solo Iniciativas (el registro), sin saludo ni Solicitar', r[1], 'false|false|true|true|true');
+    comprobar('solicitante "true" (texto): no cuenta', r[2], 'false|false|true|true|true');
+    comprobar('respuesta sin registro ni solicitante: todo oculto', r[3], 'false|true|true|true|true');
+    comprobar('MOD: Iniciativas y Solicitar, sin Crear', r[4], 'true|false|true|true|false');
+    comprobar('ADM: Iniciativas, Crear y Solicitar', r[5], 'true|false|false|true|false');
+    comprobar('autorizado sin registro (respuesta vieja): Iniciativas igual; sin Solicitar si no lo dice', r[6], 'false|false|true|false|true');
+    comprobar('autorizado sin solicitante: no es solicitante implicito (sin Solicitar)', r[7], 'false|false|false|true|true');
   });
 }).then(function () {
   // INCIERTO: admin_sesion contesto pero una consulta fallo
-  // (verificacion: "incompleta") o respondio 5xx. No es "sin rol": ni
-  // Administracion ni la entrada de solicitante (aunque diga solicitante:
-  // true, p. ej. rol que falla con PO/SO + interruptor), solo Reintentar.
+  // (verificacion: "incompleta") o respondio 5xx. No es "sin rol" ni "sin
+  // PO/SO": sin Solicitar (aunque diga solicitante: true); el registro sigue
+  // (no depende de eso); Reintentar solo si tampoco hay entrada Iniciativas.
   // Un reintento automatico, y nada mas.
   function secuencia(cuerpos) {
     var n = 0;
@@ -180,36 +185,38 @@ Promise.all([
       return c === 'red' ? Promise.reject(new Error('sin red')) : respuesta(c[0], c[1])();
     };
     var el = {};
-    ['[data-solo-admin]', '[data-solo-adm]', '[data-solo-solicitante]', '[data-solo-solicitud]', '[data-sesion-incierta]'].forEach(function (k) { el[k] = [{ hidden: true }]; });
+    ['[data-solo-registro]', '[data-solo-adm]', '[data-solo-solicitud]', '[data-sesion-incierta]'].forEach(function (k) { el[k] = [{ hidden: true }]; });
     var doc = { querySelectorAll: function (sel) { return el[sel] || []; } };
     var sesion = new SesionAdmin('', pedir);
     function visibles() {
-      return ['[data-solo-admin]', '[data-solo-solicitante]', '[data-solo-solicitud]', '[data-sesion-incierta]']
+      return ['[data-solo-registro]', '[data-solo-solicitud]', '[data-sesion-incierta]']
         .map(function (k) { return el[k][0].hidden ? '-' : k.replace(/\[data-(solo-)?|\]/g, ''); }).join(',');
     }
     return sesion.aplicar(doc).then(function (s) {
       return { s: s, n: function () { return n; }, sesion: sesion, doc: doc, vis: visibles() };
     });
   }
-  var INC = { autorizado: false, solicitante: true, verificacion: 'incompleta' };
+  var INC = { autorizado: false, solicitante: true, registro: true, verificacion: 'incompleta' };
   return Promise.all([
     secuencia([[200, INC], [200, INC]]),
-    secuencia([[200, INC], [200, { autorizado: true, rol: 'ADM', solicitante: true }]]),
+    secuencia([[200, INC], [200, { autorizado: true, rol: 'ADM', solicitante: true, registro: true }]]),
     secuencia([[500, { error: 'x' }], [500, { error: 'x' }]]),
     secuencia(['red']),
-    secuencia([[200, { autorizado: true, rol: 'MOD', solicitante: false, verificacion: 'incompleta' }]]),
-    secuencia([[200, { autorizado: false, solicitante: true }]]),
-    secuencia([[200, { autorizado: false, solicitante: false }]]),
-    secuencia([[200, { autorizado: false, solicitante: true, verificacion: 'otra' }]]),
+    secuencia([[200, { autorizado: true, rol: 'MOD', solicitante: true, registro: true, verificacion: 'incompleta' }]]),
+    secuencia([[200, { autorizado: false, solicitante: true, registro: true }]]),
+    secuencia([[200, { autorizado: false, solicitante: false, registro: true }]]),
+    secuencia([[200, { autorizado: false, solicitante: true, registro: true, verificacion: 'otra' }]]),
+    secuencia([[200, { autorizado: false, solicitante: false, registro: false }]]),
   ]).then(function (r) {
-    comprobar('I1 incierto 2 veces: solo Reintentar (ni Admin ni Solicitar), 2 preguntas', r[0].vis + '|' + r[0].n() + '|' + r[0].s.incierto, '-,-,-,sesion-incierta|2|true');
-    comprobar('I2 incierto y luego ADM confirmado: Administracion y Solicitar', r[1].vis + '|' + r[1].n() + '|' + r[1].s.incierto, 'admin,-,solicitud,-|2|false');
-    comprobar('I3 500 dos veces: incierto, Reintentar, 2 preguntas', r[2].vis + '|' + r[2].n(), '-,-,-,sesion-incierta|2');
-    comprobar('I4 sin red (MOCK_DATA, sin servidor): todo oculto, en silencio, sin reintento', r[3].vis + '|' + r[3].n() + '|' + r[3].s.incierto, '-,-,-,-|1|false');
-    comprobar('I5 MOD confirmado con dueños que fallan: Administracion, sin Solicitar, sin Reintentar, 1 pregunta', r[4].vis + '|' + r[4].n(), 'admin,-,-,-|1');
-    comprobar('I6 PO/SO confirmado: Solicitar iniciativa (menu) y boton, 1 pregunta', r[5].vis + '|' + r[5].n(), '-,solicitante,solicitud,-|1');
-    comprobar('I7 negativa confirmada: nada, sin Reintentar, 1 pregunta', r[6].vis + '|' + r[6].n(), '-,-,-,-|1');
-    comprobar('I8 solo "incompleta" cuenta como incierto', r[7].s.incierto + '|' + r[7].vis, 'false|-,solicitante,solicitud,-');
+    comprobar('I1 incierto 2 veces: Iniciativas (registro) sin Solicitar ni Reintentar, 2 preguntas', r[0].vis + '|' + r[0].n() + '|' + r[0].s.incierto, 'registro,-,-|2|true');
+    comprobar('I2 incierto y luego ADM confirmado: Iniciativas y Solicitar', r[1].vis + '|' + r[1].n() + '|' + r[1].s.incierto, 'registro,solicitud,-|2|false');
+    comprobar('I3 500 dos veces: incierto, sin entrada: Reintentar, 2 preguntas', r[2].vis + '|' + r[2].n(), '-,-,sesion-incierta|2');
+    comprobar('I4 sin red (MOCK_DATA, sin servidor): todo oculto, en silencio, sin reintento', r[3].vis + '|' + r[3].n() + '|' + r[3].s.incierto, '-,-,-|1|false');
+    comprobar('I5 MOD confirmado con una consulta que falla: Iniciativas y Solicitar, sin Reintentar, 1 pregunta', r[4].vis + '|' + r[4].n(), 'registro,solicitud,-|1');
+    comprobar('I6 PO/SO confirmado: Iniciativas y Solicitar, 1 pregunta', r[5].vis + '|' + r[5].n(), 'registro,solicitud,-|1');
+    comprobar('I7 cuenta comun confirmada: solo Iniciativas, sin Reintentar, 1 pregunta', r[6].vis + '|' + r[6].n(), 'registro,-,-|1');
+    comprobar('I8 solo "incompleta" cuenta como incierto', r[7].s.incierto + '|' + r[7].vis, 'false|registro,solicitud,-');
+    comprobar('I8b sin registro (anonimo): nada', r[8].vis + '|' + r[8].n(), '-,-,-|1');
     // Reintentar (la persona pulsa): aplicar otra vez, con su unico reintento.
     return r[0].sesion.aplicar(r[0].doc).then(function () {
       comprobar('I9 Reintentar a mano: dos preguntas mas (acotado)', r[0].n(), 4);

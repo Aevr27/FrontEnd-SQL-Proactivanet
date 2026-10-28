@@ -3,8 +3,8 @@
 // solicitud, sql/31) con un revisor y roles falsos. La base de verdad se
 // prueba en RevisionSolicitudesIniciativaSqlLocalDbSmoke.
 //
-//   A  acceso: anonimo, VIEWER, MOD, ADM+MOD y el solicitante del
-//      interruptor reciben 403 y el revisor ni se toca; ADM entra.
+//   A  acceso: anonimo, VIEWER (aunque sea solicitante PO/SO), MOD y
+//      ADM+MOD reciben 403 y el revisor ni se toca; ADM entra.
 //   V  validacion antes de la base: GET 405, accion desconocida 400, numero
 //      invalido 400, rechazo sin motivo (o en blanco) 422, comentario de mas
 //      de 2000 422; aprobar sin comentario si.
@@ -48,11 +48,6 @@ sealed class RolesRevisionFalsos : IFuenteRolesAdmin
         string[] f;
         return Filas.TryGetValue(cuenta.Trim().ToUpperInvariant(), out f) ? f : new string[0];
     }
-}
-
-sealed class InterruptorRevisionFalso : IFuenteInterruptores
-{
-    public bool? Encendido(string clave) { return true; }
 }
 
 sealed class RevisorFalso : IRevisorSolicitudesIniciativa
@@ -198,7 +193,6 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
     public static int Main()
     {
         AccesoAdmin.FuenteRoles = new RolesRevisionFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(AMBOS, "ADM", "MOD");
-        AccesoIniciativas.Fuente = new InterruptorRevisionFalso();   // el interruptor ENCENDIDO no abre la revision
         var rev = new RevisorFalso();
         RevisionSolicitudesIniciativa.Revisor = rev;
         var lector = new LectorRevisionFalso();
@@ -209,7 +203,7 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
         Dictionary<string, object> j;
 
         // ---------------- A: acceso ----------------
-        foreach (var c in new[] { new[] { "anonimo", "" }, new[] { "VIEWER / solicitante (interruptor encendido)", VIEWER },
+        foreach (var c in new[] { new[] { "anonimo", "" }, new[] { "VIEWER / solicitante PO/SO", VIEWER },
                                   new[] { "MOD", MOD }, new[] { "ADM+MOD (es MOD)", AMBOS } })
             foreach (var a in new[] { "aprobar", "rechazar" })
             {
@@ -225,7 +219,7 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
               Campo(Json(cuerpo), "tipo") + "|" + Campo(Json(cuerpo), "error"));
         cuerpo = Revisar("POST", "accion=aprobar&rol=ADM", VIEWER, F("numero", "1", "rol", "ADM"), out st);
         Check("A3 rol=ADM en URL o formulario no abre nada", 403, st);
-        Check("A4 no es ruta del interruptor; el modulo de acceso si la protege", "False|True",
+        Check("A4 no es ruta del solicitante; el modulo de acceso si la protege", "False|True",
               AccesoIniciativas.EsRutaSolicitante("~/handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx") + "|" +
               AccesoAdmin.EsRutaProtegida("~/handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx"));
 

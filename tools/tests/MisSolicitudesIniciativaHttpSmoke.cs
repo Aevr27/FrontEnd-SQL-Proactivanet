@@ -1,15 +1,15 @@
 // Prueba de humo SIN SQL de handlers/admin_iniciativas_mis_solicitudes.ashx
 // ("Mis solicitudes" de la pestaña Solicitudes) y de que Solicitudes sigue
 // la MISMA regla que "Solicitar una iniciativa" (AccesoIniciativas), con
-// roles, interruptor, dueños y lector falsos.
+// roles, dueños y lector falsos.
 //
-//   A  acceso al handler: anonimo, VIEWER sin PO/SO (interruptor encendido),
-//      PO/SO con el interruptor apagado y MOD que no es PO/SO: 403 sin tocar
-//      el lector. ADM, MOD PO/SO y PO/SO sin rol (interruptor encendido)
-//      entran. Es la misma respuesta que admin_sesion da en "solicitante".
-//   M  el modulo (URL directa): la pagina y el handler pasan o se niegan
-//      igual que Solicitar; los datos de ADM (Nuevas, cola de cambios) siguen
-//      siendo solo de ADM aunque la cuenta pueda solicitar.
+//   A  acceso al handler (2026-10-28): anonimo y VIEWER sin PO/SO: 403 sin
+//      tocar el lector. ADM, MOD (sea o no PO/SO) y PO/SO sin rol entran.
+//      Es la misma respuesta que admin_sesion da en "solicitante".
+//   M  el modulo (URL directa): la pagina es de todos (el registro); el
+//      handler pasa o se niega igual que Solicitar; los datos de ADM
+//      (Nuevas, cola de cambios) siguen siendo solo de ADM aunque la cuenta
+//      pueda solicitar.
 //   C  de quien: siempre la cuenta de IIS; ?cuenta= / ?usuario= no cambian
 //      nada; el detalle de otra cuenta es 404 (como si no existiera).
 //   L  listar / detalle: 200, sin tablas 501, numero invalido 400, POST 405,
@@ -35,12 +35,6 @@ sealed class RolesMiasFalsos : IFuenteRolesAdmin
         string[] f;
         return Filas.TryGetValue(cuenta.Trim().ToUpperInvariant(), out f) ? f : new string[0];
     }
-}
-
-sealed class InterruptorMiasFalso : IFuenteInterruptores
-{
-    public bool? Valor;
-    public bool? Encendido(string clave) { return Valor; }
 }
 
 sealed class DuenosMiasFalsos : IFuenteDuenosVigentes
@@ -179,8 +173,6 @@ public static class MisSolicitudesIniciativaHttpSmoke
     public static int Main()
     {
         AccesoAdmin.FuenteRoles = new RolesMiasFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(MODPO, "MOD");
-        var interruptor = new InterruptorMiasFalso { Valor = true };
-        AccesoIniciativas.Fuente = interruptor;
         AccesoIniciativas.FuenteDuenos = new DuenosMiasFalsos()
             .Persona("Juan Perez", "juanperez@soriana.com")
             .Persona("Mod Po", "t_modpo@soriana.com")
@@ -192,6 +184,7 @@ public static class MisSolicitudesIniciativaHttpSmoke
         lector.Todas.Add(Fila(2, MODPO));
         lector.Todas.Add(Fila(1, POSO.ToUpperInvariant()));
         lector.Todas.Add(Fila(9, ADM));
+        lector.Todas.Add(Fila(5, MOD));
         RegistroSolicitudesIniciativa.Mias = lector;
         // Los datos de ADM: si alguien que no es ADM llegara a leerlos, se nota.
         var lectorAdm = new LectorAdmFalso();
@@ -200,7 +193,7 @@ public static class MisSolicitudesIniciativaHttpSmoke
         string cuerpo;
 
         // ---------------- A: acceso al handler ----------------
-        foreach (var c in new[] { new[] { "anonimo", "" }, new[] { "VIEWER sin PO/SO", VIEWER }, new[] { "MOD sin PO/SO", MOD } })
+        foreach (var c in new[] { new[] { "anonimo", "" }, new[] { "VIEWER sin PO/SO", VIEWER } })
             foreach (var q in new[] { "accion=listar", "accion=detalle&numero=3" })
             {
                 lector.Llamadas.Clear();
@@ -212,15 +205,10 @@ public static class MisSolicitudesIniciativaHttpSmoke
         cuerpo = Mias("accion=listar", null, out st);
         Check("A1 sin usuario: 403 sin tocar el lector", "403|0", st + "|" + lector.Llamadas.Count);
 
-        interruptor.Valor = false;
-        lector.Llamadas.Clear();
-        cuerpo = Mias("accion=listar", POSO, out st);
-        Check("A2 PO/SO sin rol con el interruptor apagado: 403 (como Solicitar)", "403|0|False", st + "|" + lector.Llamadas.Count + "|" + Solicitante(POSO));
-        cuerpo = Mias("accion=listar", MODPO, out st);
-        Check("A2 ... MOD PO/SO no depende del interruptor: entra", "200|True", st + "|" + Solicitante(MODPO));
-        interruptor.Valor = true;
+        cuerpo = Mias("accion=listar", MOD, out st);
+        Check("A2 MOD sin ser PO/SO: entra (MOD siempre puede solicitar)", "200|True", st + "|" + Solicitante(MOD));
 
-        foreach (var c in new[] { new[] { "ADM", ADM }, new[] { "MOD PO/SO", MODPO }, new[] { "PO/SO sin rol", POSO } })
+        foreach (var c in new[] { new[] { "ADM", ADM }, new[] { "MOD", MOD }, new[] { "MOD PO/SO", MODPO }, new[] { "PO/SO sin rol", POSO } })
         {
             cuerpo = Mias("accion=listar", c[1], out st);
             Check("A3 " + c[0] + ": 200", 200, st);
@@ -233,15 +221,16 @@ public static class MisSolicitudesIniciativaHttpSmoke
         }
 
         // ---------------- M: URL directa (modulo) ----------------
-        foreach (var c in new[] { new[] { "VIEWER sin PO/SO", VIEWER, "403" }, new[] { "anonimo", "", "403" }, new[] { "PO/SO sin rol", POSO, "pasa" },
-                                  new[] { "MOD sin PO/SO", MOD, "pasa" }, new[] { "ADM", ADM, "pasa" } })
+        foreach (var c in new[] { new[] { "VIEWER sin PO/SO (el registro es de todos)", VIEWER, "pasa" }, new[] { "anonimo", "", "403" },
+                                  new[] { "PO/SO sin rol", POSO, "pasa" }, new[] { "MOD sin PO/SO", MOD, "pasa" }, new[] { "ADM", ADM, "pasa" } })
             Check("M1 pagina admin/iniciativas.html, " + c[0], c[2], Modulo("~/admin/iniciativas.html", c[1]));
-        foreach (var c in new[] { new[] { "VIEWER sin PO/SO", VIEWER, "403" }, new[] { "PO/SO sin rol", POSO, "pasa" } })
+        foreach (var c in new[] { new[] { "VIEWER sin PO/SO", VIEWER, "403" }, new[] { "anonimo", "", "403" },
+                                  new[] { "PO/SO sin rol", POSO, "pasa" }, new[] { "MOD sin PO/SO", MOD, "pasa" } })
             Check("M2 modulo: Mis solicitudes, " + c[0], c[2], Modulo("~/handlers/admin_iniciativas_mis_solicitudes.ashx", c[1]));
         Check("M2 ... es ruta del solicitante y protegida", "True|True",
               AccesoIniciativas.EsRutaSolicitante("~/handlers/admin_iniciativas_mis_solicitudes.ashx") + "|" +
               AccesoAdmin.EsRutaProtegida("~/handlers/admin_iniciativas_mis_solicitudes.ashx"));
-        foreach (var c in new[] { new[] { "PO/SO sin rol", POSO }, new[] { "MOD PO/SO", MODPO } })
+        foreach (var c in new[] { new[] { "PO/SO sin rol", POSO }, new[] { "MOD PO/SO", MODPO }, new[] { "MOD sin PO/SO", MOD } })
         {
             lectorAdm.Llamadas = 0;
             Correr(new AdminIniciativasSolicitudesNuevas(), "admin_iniciativas_solicitudes_nuevas.ashx", "GET", "accion=listar", c[1], out st);
@@ -258,6 +247,10 @@ public static class MisSolicitudesIniciativaHttpSmoke
               st + "|" + Numeros(cuerpo) + "|" + Campo(Json(cuerpo), "total"));
         cuerpo = Mias("accion=listar", MODPO, out st);
         Check("C2 MOD PO/SO: solo la suya", "2", Numeros(cuerpo));
+        cuerpo = Mias("accion=listar", MOD, out st);
+        Check("C2 MOD sin PO/SO: solo la suya", "5", Numeros(cuerpo));
+        cuerpo = Mias("accion=detalle&numero=3", MOD, out st);
+        Check("C2 MOD: detalle de una solicitud de OTRA cuenta 404", "404|SolicitudNoExiste", st + "|" + Campo(Json(cuerpo), "tipo"));
         cuerpo = Mias("accion=listar", ADM, out st);
         Check("C3 ADM: tambien solo las suyas (las de todos van por Nuevas)", "9", Numeros(cuerpo));
         lector.Llamadas.Clear();

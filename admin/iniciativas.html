@@ -9,15 +9,20 @@
 <!--
   Pagina oculta de administracion de iniciativas.
 
-  Se llega desde la entrada "Administracion" de la barra lateral de
-  dashboard.html (visible solo si SesionAdmin dice autorizado) o escribiendo
-  la URL /admin/iniciativas.html. No esta enlazada desde admin/admin.html.
-  ACCESO (en el servidor, ver App_Code/AccesoAdmin.cs): rol ADM o MOD en
-  dbo.UsuariosAdmin para la identidad Windows del request. AdminAccesoModulo
-  protege esta pagina si esta registrado en Web.config (ver
-  Web.config.ejemplo); los handlers admin_iniciativas_* llaman a Exigir o
-  ExigirAdm.
-  Ocultar pestañas o botones aqui es solo UX.
+  Se llega desde la entrada "Iniciativas" de la barra lateral de
+  dashboard.html (visible para todo usuario del tablero: SesionAdmin dice
+  registro) o escribiendo la URL /admin/iniciativas.html. No esta enlazada
+  desde admin/admin.html.
+  ACCESO (en el servidor, App_Code/AccesoIniciativas.cs y AccesoAdmin.cs),
+  2026-10-28:
+    - Iniciativas (el registro, solo lectura): toda cuenta Windows
+      autenticada (ExigirRegistro).
+    - Solicitar una iniciativa y Solicitudes (las propias): ADM, MOD y
+      Product Owner / Service Owner vigentes (ExigirSolicitud).
+    - Administracion, la cola de solicitudes y lo que revisa o cambia:
+      rol ADM o MOD en dbo.UsuariosAdmin, como siempre (Exigir / ExigirAdm).
+  AdminAccesoModulo protege esta pagina si esta registrado en Web.config
+  (ver Web.config.ejemplo). Ocultar pestañas o botones aqui es solo UX.
 
   ESTADO ACTUAL (cuarto hito):
     - Dos vistas principales con pestaña: Iniciativas (la de inicio) y
@@ -83,15 +88,8 @@
        pagina es estatica y no hay plantillas). Diferencias a proposito:
        - Cada entrada es un enlace a ../dashboard.html#<modulo> (el tablero
          abre el modulo del hash al cargar), no un boton con data-tab.
-       - Iniciativas (data-solo-admin) es la entrada activa. En el tablero
-         solo aparece si SesionAdmin dice autorizado (rol ADM o MOD en
-         dbo.UsuariosAdmin); aqui igual, aunque quien no esta autorizado ya
-         no deberia llegar (AdminAccesoModulo).
-       - Iniciativas (data-solo-solicitante): la MISMA entrada del tablero,
-         activa, para quien entra sin rol ADM/MOD como PO/SO vigente
-         (SesionAdmin: solicitante, no autorizado, confirmado). Las dos se
-         llaman igual y son excluyentes: nunca se ven a la vez, y el
-         solicitante no pierde la entrada al abrir esta pagina.
+       - Iniciativas (data-solo-registro) es la entrada activa: la MISMA del
+         tablero, para todo usuario (SesionAdmin: registro).
        Plegar/desplegar: MenuLateral en admin/iniciativas.js. Si cambia la
        lista de modulos del tablero, actualizar tambien esta copia
        (tools/tests/BarraLateralSmoke.js compara las dos). -->
@@ -178,15 +176,7 @@
             <span class="mnav-txt">Call Center</span>
           </a>
         </li>
-        <li data-solo-admin hidden>
-          <a class="mnav active" href="iniciativas.html" aria-current="page" title="Iniciativas">
-            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>
-            </svg>
-            <span class="mnav-txt">Iniciativas</span>
-          </a>
-        </li>
-        <li data-solo-solicitante hidden>
+        <li data-solo-registro hidden>
           <a class="mnav active" href="iniciativas.html" aria-current="page" title="Iniciativas">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>
@@ -216,23 +206,23 @@
     </div>
   </header>
 
-  <!-- Sin rol ADM/MOD (VIEWER) o sin respuesta de admin_sesion: se ve solo
-       esto (PaginaIniciativas.denegar). El servidor ya responde 403 a todo
-       handler de Admin; esto es para la pagina estatica cuando
-       AdminAccesoModulo no esta registrado. -->
+  <!-- Sin cuenta que pueda ver el registro (admin_sesion: registro false)
+       o sin respuesta de admin_sesion: se ve solo esto
+       (PaginaIniciativas.denegar). El servidor ya responde 403 a todo
+       handler; esto es para la pagina estatica cuando AdminAccesoModulo no
+       esta registrado. -->
   <div class="ini-vacio" id="iniDenegado" role="alert" hidden>
-    <strong id="iniDenegadoTexto">No tienes acceso a la administración de iniciativas.</strong>
+    <strong id="iniDenegadoTexto">No tienes acceso a Iniciativas.</strong>
     <span><a href="../dashboard.html">Volver al tablero</a></span>
   </div>
 
-  <!-- admin_sesion NO pudo confirmar (fallo la consulta del rol, del
-       interruptor o de los dueños; o un 5xx): no es "sin acceso" ni
-       "solo solicitante". Se oculta todo hasta saberlo
-       (PaginaIniciativas.sinVerificar); el borrador sigue en memoria.
-       Reintentar vuelve a preguntar una vez. -->
+  <!-- admin_sesion NO pudo confirmar el rol ni los dueños (o un 5xx): el
+       registro sigue a la vista, sin Solicitar, Solicitudes ni
+       Administracion, hasta saberlo (PaginaIniciativas.sinVerificar); el
+       borrador sigue en memoria. Reintentar vuelve a preguntar una vez. -->
   <div class="ini-vacio" id="iniVerificar" role="alert" hidden>
-    <strong>No se pudo verificar tu acceso a Iniciativas.</strong>
-    <span>La consulta de permisos falló; no significa que no tengas acceso.
+    <strong>No se pudieron verificar tus permisos para solicitar o administrar iniciativas.</strong>
+    <span>La consulta de permisos falló; no significa que no los tengas.
       <button type="button" class="btn linea chico" id="iniVerificarReintentar">Reintentar</button>
       · <a href="../dashboard.html">Volver al tablero</a></span>
   </div>
@@ -245,7 +235,8 @@
   <nav class="ini-tabs" id="iniTabs" role="tablist" aria-label="Secciones">
     <button type="button" class="ini-tab activa" role="tab" id="tab-iniciativas" aria-controls="panel-iniciativas" aria-selected="true">Iniciativas</button>
     <!-- Solicitudes: la MISMA regla que "Solicitar una iniciativa"
-         (admin_sesion: solicitante = AccesoIniciativas.PuedeSolicitar).
+         (admin_sesion: solicitante = AccesoIniciativas.PuedeSolicitar: ADM,
+         MOD y PO/SO vigentes).
          Oculta hasta saberlo (PaginaIniciativas.pestanaVisible). Solo UX:
          los datos los exige cada handler (ADM: ExigirAdm; Mis solicitudes:
          ExigirSolicitud). -->
@@ -263,10 +254,9 @@
         <h2>Iniciativas</h2>
         <p class="ini-vista-sub">Consulta y administra las iniciativas existentes.</p>
       </div>
-      <!-- Solicitar es de ADM y de los Product Owners / Service Owners
+      <!-- Solicitar es de ADM, MOD y de los Product Owners / Service Owners
            vigentes: oculto hasta que admin_sesion diga solicitante
-           (SesionAdmin, data-solo-solicitud; AccesoIniciativas: ADM
-           siempre, MOD solo si es PO/SO vigente). Solo UX: el servidor lo
+           (SesionAdmin, data-solo-solicitud; AccesoIniciativas). Solo UX: el servidor lo
            exige con AccesoIniciativas.ExigirSolicitud y la vista Nueva
            solicitud tampoco abre sin eso (PaginaIniciativas). -->
       <button type="button" class="btn ini-cta" id="btnSolicitar" data-solo-solicitud hidden>
@@ -932,10 +922,9 @@
 <script>
 // El rol tambien decide los botones de ADM que se pintan dentro del detalle,
 // que no existen cuando aplicar() recorre el documento; solicitante decide si
-// se abre Nueva solicitud (ADM, o PO/SO vigente). Sin rol ADM/MOD pero con
-// el interruptor INICIATIVAS_ABIERTAS y PO/SO vigente (solicitante): solo
-// Nueva solicitud. Sin poder confirmar (incierto): ni lo uno ni lo otro,
-// Reintentar (PaginaIniciativas.aplicarSesion). Con la pagina abierta, un
+// se abre Nueva solicitud y Solicitudes (ADM, MOD o PO/SO vigente). El
+// registro es de todos (registro). Sin poder confirmar (incierto): solo el
+// registro, con Reintentar (PaginaIniciativas.aplicarSesion). Con la pagina abierta, un
 // 403 de Admin vuelve a preguntar y la pagina oculta lo que ya no le toca
 // (SesionAdmin.vigilar -> PaginaIniciativas.revisarSesion).
 try {

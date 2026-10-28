@@ -37,12 +37,13 @@
 //   2. AdminAccesoModulo (abajo), registrado en <system.webServer><modules>,
 //      cubre ademas la pagina estatica admin/iniciativas.html, que ningun
 //      handler sirve. Ver Web.config.ejemplo.
-//   EXCEPCION (2026-10-22, 2026-10-26): con el interruptor
-//   INICIATIVAS_ABIERTAS de la base (adm.Interruptor, sql/30; ya no
-//   Web.config), la pagina y los cuatro handlers de Nueva solicitud
-//   tambien dejan pasar a una cuenta Windows autenticada que sea Product
-//   Owner o Service Owner VIGENTE (AccesoIniciativas.ExigirSolicitud,
-//   App_Code/AccesoIniciativas.cs). No da rol: sigue siendo VIEWER.
+//   EXCEPCIONES (2026-10-28, App_Code/AccesoIniciativas.cs): la pagina, el
+//   registro y la Cobertura son de toda cuenta Windows autenticada
+//   (AccesoIniciativas.ExigirRegistro); los cuatro handlers de Nueva
+//   solicitud y Mis solicitudes, de ADM, MOD y de quien sea Product Owner
+//   o Service Owner VIGENTE (AccesoIniciativas.ExigirSolicitud). El
+//   interruptor INICIATIVAS_ABIERTAS ya no cuenta. No da rol: sigue siendo
+//   VIEWER.
 //
 // ROL (ADM / MOD / VIEWER)
 // ------------------------
@@ -55,9 +56,9 @@
 // admin_categorias_alta; los duenos de categoria, ?duenos=1 de
 // admin_iniciativas_catalogos) llama a ExigirAdm():
 // quien entra como MOD recibe 403 { "tipo": "RolInsuficiente" }. Nueva
-// solicitud (catalogos, capacidad, volumetria, validar) es de ADM siempre,
-// de MOD solo si es PO/SO vigente, y de los demas con el interruptor y
-// siendo PO/SO vigente: AccesoIniciativas.ExigirSolicitud. El rol se
+// solicitud (catalogos, capacidad, volumetria, validar) es de ADM y MOD
+// siempre y de los demas siendo PO/SO vigente:
+// AccesoIniciativas.ExigirSolicitud. El rol se
 // consulta una vez por request (HttpContext.Items); sin identidad
 // autenticada no se consulta.
 
@@ -289,10 +290,13 @@ public sealed class AdminAccesoModulo : IHttpModule
     public static bool Revisar(HttpContext ctx, string ruta)
     {
         if (!AccesoAdmin.EsRutaProtegida(ruta)) return true;
+        // El registro (pagina, registro y Cobertura): toda cuenta
+        // autenticada, sin consultar roles (App_Code/AccesoIniciativas.cs).
+        var q = ctx.Request.QueryString;
+        if (AccesoIniciativas.EsLecturaRegistro(ruta, q["rutas"], q["duenos"]) && AccesoIniciativas.PuedeVerRegistro(ctx)) return true;
         if (AccesoAdmin.PuedeEntrar(ctx)) return true;
-        // La pagina y los cuatro handlers de Nueva solicitud, solo con el
-        // interruptor INICIATIVAS_ABIERTAS y siendo PO/SO vigente
-        // (App_Code/AccesoIniciativas.cs).
+        // Los cuatro handlers de Nueva solicitud y Mis solicitudes, siendo
+        // PO/SO vigente (App_Code/AccesoIniciativas.cs).
         var solicitante = AccesoIniciativas.EsRutaSolicitante(ruta);
         var motivo = solicitante ? AccesoIniciativas.Motivo(ctx) : null;
         if (solicitante && motivo == null) return true;

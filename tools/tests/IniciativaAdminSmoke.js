@@ -423,7 +423,11 @@ pruebas.push(function () {
       [/data-edicion/.test(det), /id="regEdBarra"/.test(det), />Modificar<\/button>/.test(det), reg.edicion]);
     accion(p, 'editar-admin');
     Check('E2 sin rol: la accion no abre nada', null, reg.edicion);
-    Check('E3 Solicitar cambios sigue ahi', true, /Solicitar cambios/.test(p.sel('regDetCuerpo').innerHTML));
+    // Solicitar cambios es de ADM y MOD (el servidor lo exige): sin rol, el
+    // registro es solo lectura.
+    Check('E3 sin rol: sin Solicitar cambios', false, /Solicitar cambios/.test(p.sel('regDetCuerpo').innerHTML));
+    accion(p, 'solicitar-cambios');
+    Check('E3 sin rol: la accion Solicitar cambios no abre nada', [false, false], [!!reg.cambioAbierto, /regCambioCampo/.test(p.sel('regCambio').innerHTML)]);
 
     p.pagina.fijarRol('ADM');
     var html = htmlEditable(p), barra = p.sel('regEdBarraCaja').innerHTML;
@@ -598,37 +602,60 @@ pruebas.push(function () {
 
 // VS) aplicarSesion / revisarSesion: la pagina segun admin_sesion, al abrir
 // y con la pagina ya abierta (un 403 de Admin). Solo UX: el servidor ya
-// niega (AccesoIniciativasHttpSmoke, parte L).
+// niega (AccesoIniciativasHttpSmoke). Regla (2026-10-28): el registro es de
+// todos (registro); Nueva solicitud y Solicitudes de ADM, MOD y PO/SO
+// (solicitante); Administracion solo ADM.
 pruebas.push(function () {
   var SES = {
-    adm: { autorizado: true, rol: 'ADM', solicitante: true, incierto: false },
-    mod: { autorizado: true, rol: 'MOD', solicitante: false, incierto: false },
-    poso: { autorizado: false, rol: null, solicitante: true, incierto: false },
-    nada: { autorizado: false, rol: null, solicitante: false, incierto: false },
-    // Fallo la consulta del rol: el servidor dijo solicitante (PO/SO +
-    // interruptor) pero no pudo confirmar el rol.
-    incierto: { autorizado: false, rol: null, solicitante: true, incierto: true }
+    adm: { autorizado: true, rol: 'ADM', solicitante: true, registro: true, incierto: false },
+    mod: { autorizado: true, rol: 'MOD', solicitante: true, registro: true, incierto: false },
+    poso: { autorizado: false, rol: null, solicitante: true, registro: true, incierto: false },
+    comun: { autorizado: false, rol: null, solicitante: false, registro: true, incierto: false },
+    nada: { autorizado: false, rol: null, solicitante: false, registro: false, incierto: false },
+    // Fallo la consulta del rol o de los dueños: no se pudo confirmar.
+    incierto: { autorizado: false, rol: null, solicitante: true, registro: true, incierto: true }
   };
+  // false = visible.
   function estado(p) {
     var pg = p.pagina;
-    return { rol: pg.rol, solo: !!pg.soloSolicitud, denegada: !!pg.denegada, tabs: p.sel('iniTabs').hidden,
-      verificar: p.sel('iniVerificar').hidden,
-      ini: p.sel('panel-iniciativas').hidden, nueva: p.sel('panel-nueva').hidden };
+    return { rol: pg.rol, denegada: !!pg.denegada, tabs: p.sel('iniTabs').hidden, verificar: p.sel('iniVerificar').hidden,
+      ini: p.sel('panel-iniciativas').hidden, nueva: p.sel('panel-nueva').hidden,
+      sol: p.sel('tab-solicitudes').hidden, admin: p.sel('tab-administracion').hidden };
   }
-  var a = Pagina(), b = Pagina(), c = Pagina(), d = Pagina(), e = Pagina(), f = Pagina();
+  var a = Pagina(), b = Pagina(), c = Pagina(), c2 = Pagina(), d = Pagina(), e = Pagina(), f = Pagina();
+  // Como en el marcado: el aviso de Reintentar nace oculto y la pestaña se
+  // llama Iniciativas.
+  [a, b, c, c2, d, e, f].forEach(function (p) { p.sel('iniVerificar').hidden = true; p.sel('tab-iniciativas').textContent = 'Iniciativas'; });
   return esperar().then(function () {
     // Al abrir.
     a.pagina.aplicarSesion(SES.incierto);
-    Check('VS1 incierto (aunque diga solicitante): ni modo solicitante ni denegar; Reintentar visible, todo oculto',
-      { rol: null, solo: false, denegada: false, tabs: true, verificar: false, ini: true, nueva: true }, estado(a));
+    Check('VS1 incierto: el registro a la vista con Reintentar; sin Solicitudes ni Administracion; ni denegar',
+      { rol: null, denegada: false, tabs: false, verificar: false, ini: false, nueva: true, sol: true, admin: true }, estado(a));
+    a.pagina.mostrarVista('nueva');
+    Check('VS1 ... Nueva solicitud no abre sin confirmar', true, a.sel('panel-nueva').hidden);
     a.pagina.aplicarSesion(SES.adm);
     Check('VS2 Reintentar con respuesta confirmada ADM: vuelve la pagina entera',
-      { rol: 'ADM', solo: false, denegada: false, tabs: false, verificar: true, ini: false, nueva: true }, estado(a));
+      { rol: 'ADM', denegada: false, tabs: false, verificar: true, ini: false, nueva: true, sol: false, admin: false }, estado(a));
+
     b.pagina.aplicarSesion(SES.poso);
-    Check('VS3 PO/SO sin rol: Nueva solicitud, con las pestañas Solicitar una iniciativa | Solicitudes', [true, false, false, false, true],
-      [b.pagina.soloSolicitud, b.sel('panel-nueva').hidden, b.sel('iniTabs').hidden, b.sel('tab-solicitudes').hidden, b.sel('tab-administracion').hidden]);
-    c.pagina.aplicarSesion(SES.nada);
-    Check('VS4 sin rol ni PO/SO: denegar', [true, false], [c.pagina.denegada, c.sel('iniDenegado').hidden]);
+    Check('VS3 PO/SO sin rol: el registro, con Solicitudes; sin Administracion',
+      { rol: null, denegada: false, tabs: false, verificar: true, ini: false, nueva: true, sol: false, admin: true }, estado(b));
+    b.pagina.mostrarVista('nueva');
+    Check('VS3 ... abre Nueva solicitud; la pestaña sigue llamandose Iniciativas', [false, 'Iniciativas'],
+      [b.sel('panel-nueva').hidden, b.sel('tab-iniciativas').textContent]);
+    b.pagina.mostrarVista('administracion');
+    Check('VS3 ... Administracion no abre', true, b.sel('panel-administracion').hidden);
+
+    c.pagina.aplicarSesion(SES.comun);
+    Check('VS4 cuenta comun (sin rol ni PO/SO): solo el registro',
+      { rol: null, denegada: false, tabs: false, verificar: true, ini: false, nueva: true, sol: true, admin: true }, estado(c));
+    c.pagina.mostrarVista('nueva');
+    c.pagina.mostrarVista('solicitudes');
+    Check('VS4 ... ni Nueva solicitud ni Solicitudes abren', [true, true, false],
+      [c.sel('panel-nueva').hidden, c.sel('panel-solicitudes').hidden, c.sel('panel-iniciativas').hidden]);
+    c2.pagina.aplicarSesion(SES.nada);
+    Check('VS4b sin cuenta (registro false): denegar, sin pestañas', [true, false, true],
+      [c2.pagina.denegada, c2.sel('iniDenegado').hidden, c2.sel('iniTabs').hidden]);
     Check('VS5 revisarSesion antes de decidir: no hace nada', false, d.pagina.revisarSesion(SES.nada));
 
     // Con la pagina abierta: ADM -> sale de UsuariosAdmin siendo PO/SO.
@@ -636,35 +663,52 @@ pruebas.push(function () {
     d.pagina.mostrarVista('nueva');
     var borrador = d.pagina.solicitud;
     Check('VS6 ADM pierde el rol siendo PO/SO: repinta el menu', true, d.pagina.revisarSesion(SES.poso));
-    Check('VS6 ... pasa a solo Nueva solicitud con el MISMO borrador y sin rol',
-      [true, null, true, false, false], [d.pagina.soloSolicitud, d.pagina.rol, d.pagina.solicitud === borrador, d.sel('panel-nueva').hidden,
-        d.sel('iniAvisoSesion').hidden]);
+    Check('VS6 ... sigue en Nueva solicitud con el MISMO borrador, sin rol ni Administracion',
+      [null, true, false, true, false], [d.pagina.rol, d.pagina.solicitud === borrador, d.sel('panel-nueva').hidden,
+        d.sel('tab-administracion').hidden, d.sel('iniAvisoSesion').hidden]);
     Check('VS6 ... el aviso dice que ya no hay administracion', true, /Ya no tienes acceso a la administración/.test(d.sel('iniAvisoSesion').textContent));
-    Check('VS6 ... pulsar pestanas no reabre Admin', true, (d.sel('tab-iniciativas').disparar('click'), d.sel('panel-iniciativas').hidden));
-    // ... y luego deja de ser PO/SO (o se apaga el interruptor): el
-    // formulario se queda en pantalla, con el aviso.
-    d.pagina.revisarSesion(SES.nada);
-    Check('VS7 solicitante que lo pierde: no se niega la pagina ni se borra el borrador', [false, false, true],
-      [!!d.pagina.denegada, d.sel('panel-nueva').hidden, d.pagina.solicitud === borrador]);
+    d.sel('tab-iniciativas').disparar('click');
+    Check('VS6 ... la pestaña Iniciativas abre el registro (es de todos)', false, d.sel('panel-iniciativas').hidden);
+    d.pagina.mostrarVista('nueva');
+    // ... y luego deja de ser PO/SO: sale de Nueva solicitud al registro; el
+    // borrador sigue en memoria; no se niega la pagina.
+    d.pagina.revisarSesion(SES.comun);
+    Check('VS7 solicitante que lo pierde: vuelve al registro, sin Solicitudes; no se niega ni se borra el borrador',
+      [false, true, false, true, true], [!!d.pagina.denegada, d.sel('panel-nueva').hidden, d.sel('panel-iniciativas').hidden,
+        d.sel('tab-solicitudes').hidden, d.pagina.solicitud === borrador]);
     Check('VS7 ... el aviso lo dice', true, /ya no está disponible para tu cuenta/.test(d.sel('iniAvisoSesion').textContent));
 
-    // ADM -> MOD sin PO/SO: se queda en Admin, sin lo de ADM ni Nueva solicitud.
+    // ADM -> MOD: sigue en Nueva solicitud (MOD tambien solicita), sin lo de ADM.
     e.pagina.aplicarSesion(SES.adm);
     e.pagina.mostrarVista('nueva');
     e.pagina.revisarSesion(SES.mod);
-    Check('VS8 ADM pasa a MOD sin PO/SO: rol MOD, sale de Nueva solicitud, Administracion oculta',
-      ['MOD', false, true, true], [e.pagina.rol, e.sel('panel-iniciativas').hidden, e.sel('panel-nueva').hidden, e.sel('tab-administracion').hidden]);
-    // ADM -> nada: denegar con el mensaje.
+    Check('VS8 ADM pasa a MOD: rol MOD, sigue en Nueva solicitud, Administracion oculta',
+      ['MOD', true, false, true], [e.pagina.rol, e.sel('panel-iniciativas').hidden, e.sel('panel-nueva').hidden, e.sel('tab-administracion').hidden]);
+    // ADM -> sin cuenta: denegar con el mensaje.
     e.pagina.revisarSesion(SES.nada);
-    Check('VS9 pierde todo: denegar con el aviso de que ya no esta vigente', [true, false, true],
-      [e.pagina.denegada, e.sel('iniDenegado').hidden, /ya no está vigente/.test(e.sel('iniDenegadoTexto').textContent)]);
+    Check('VS9 pierde todo: denegar con el aviso de que ya no esta vigente, sin pestañas', [true, false, true, true],
+      [e.pagina.denegada, e.sel('iniDenegado').hidden, /ya no está vigente/.test(e.sel('iniDenegadoTexto').textContent), e.sel('iniTabs').hidden]);
 
-    // ADM con la pagina abierta y la consulta del rol falla: no pasa a modo
-    // solicitante por un error; oculta y ofrece Reintentar.
+    // ADM con la pagina abierta y la consulta del rol falla: no se niega
+    // por un error; queda el registro con Reintentar.
     f.pagina.aplicarSesion(SES.adm);
-    Check('VS10 un 403 + rol incierto: Reintentar, ni modo solicitante ni denegar', [true, false, false, false, true],
-      [f.pagina.revisarSesion(SES.incierto), f.pagina.soloSolicitud === true, f.pagina.denegada === true, f.sel('iniVerificar').hidden, f.sel('panel-iniciativas').hidden]);
+    Check('VS10 un 403 + rol incierto: Reintentar y el registro; ni denegar ni Administracion', [true, false, false, false, true],
+      [f.pagina.revisarSesion(SES.incierto), f.pagina.denegada === true, f.sel('iniVerificar').hidden, f.sel('panel-iniciativas').hidden,
+       f.sel('tab-administracion').hidden]);
+    f.pagina.revisarSesion(SES.adm);
+    Check('VS11 ... y la respuesta confirmada ADM lo devuelve todo', [true, false], [f.sel('iniVerificar').hidden, f.sel('tab-administracion').hidden]);
   });
+});
+
+// HT) Pestañas ocultas de verdad: .ini-tabs pone display:flex, que le gana
+// al [hidden] del navegador; sin .ini-tabs[hidden] la barra seguia a la
+// vista bajo "No tienes acceso" (denegar).
+pruebas.push(function () {
+  var css = leer('admin/iniciativas.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  Check('HT1 .ini-tabs[hidden] { display: none } en iniciativas.css', true, /\.ini-tabs\[hidden\]\s*\{\s*display:\s*none;?\s*\}/.test(css));
+  Check('HT2 ... despues de la regla display:flex de .ini-tabs', true,
+    css.search(/\.ini-tabs\[hidden\]/) > css.search(/\.ini-tabs\s*\{[^}]*display:\s*flex/));
+  return Promise.resolve();
 });
 
 // CB) Boton "+ Crear iniciativa"
@@ -1798,7 +1842,8 @@ pruebas.push(function () {
 
 // HUD) El mismo detalle para ADM, MOD y sin rol: valores guardados como
 // texto al abrir (sin editores); edicion directa solo ADM; "Solicitar
-// cambios" para todos (fase de pruebas, tambien ADM) y sin escrituras.
+// cambios" para ADM y MOD (el servidor lo exige), sin escrituras; sin rol,
+// solo lectura.
 pruebas.push(function () {
   var p = Pagina();
   return esperar().then(function () {
@@ -1814,10 +1859,16 @@ pruebas.push(function () {
       Check('HUD1 ' + n + ': las mismas tarjetas del detalle (Identificacion, Organizacion, Impacto, Seguimiento, Categorias, Historial)', true,
         ['regDetIdent', 'regDetEtapas', 'regDetCats', 'regDetDesc'].every(function (id) { return html.indexOf('id="' + id + '"') >= 0; }) &&
         /Organización/.test(html) && /Impacto/.test(html) && /Historial de cambios/.test(html));
-      Check('HUD2 ' + n + ': edicion directa ' + (adm ? 'disponible' : 'ausente') + '; Solicitar cambios disponible',
-        [adm, adm, adm ? 'Edición directa (ADM)' : 'Solo lectura', true],
+      Check('HUD2 ' + n + ': edicion directa ' + (adm ? 'disponible' : 'ausente') + '; Solicitar cambios ' + (rol ? 'disponible' : 'ausente'),
+        [adm, adm, adm ? 'Edición directa (ADM)' : 'Solo lectura', !!rol],
         [!!reg.edicion, /data-editar="titulo"|data-edicion=/.test(html), p.sel('regDetModo').textContent,
          /id="regCambioBoton" data-accion="solicitar-cambios"/.test(html)]);
+      if (!rol) {
+        accion(p, 'solicitar-cambios');
+        Check('HUD3 sin rol: Solicitar cambios no abre nada', [false, false], [!!reg.cambioAbierto, /regCambioCampo/.test(p.sel('regCambio').innerHTML)]);
+        reg.cerrarDetalle(true);
+        return;
+      }
       var antes = p.pedidos.length;
       accion(p, 'solicitar-cambios');
       elegir(p, 'regCambioCampo', 'fecha');

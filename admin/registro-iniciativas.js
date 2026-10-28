@@ -2323,6 +2323,8 @@ window.RegistroIniciativas = (function () {
       this.pintarModo();
       var acciones = this.$('regDetAcciones');
       if (acciones) acciones.innerHTML = this.htmlAcciones();
+      // Sin rol ya no puede pedir cambios: se cierra lo que estaba abierto.
+      if (!this.rol && this.cambioAbierto) this.abrirCambio(false);
     }
 
     // Rotulo de la barra del detalle: lo que el usuario puede hacer aqui.
@@ -3290,7 +3292,7 @@ window.RegistroIniciativas = (function () {
     // ---- Solicitar cambios / Historial ----
     accionDetalle(accion) {
       if (!this.abierta) return;
-      if (accion === 'solicitar-cambios') this.abrirCambio(!this.cambioAbierto);
+      if (accion === 'solicitar-cambios') { if (this.rol) this.abrirCambio(!this.cambioAbierto); }
       else if (accion === 'cambio-cancelar') this.abrirCambio(false);
       else if (accion === 'cambio-agregar') this.agregarCambio();
       else if (accion === 'cambio-atajo-fecha') this.atajoFechaCambio();
@@ -3850,9 +3852,13 @@ window.RegistroIniciativas = (function () {
 
     // Botones de la cabecera del detalle. Con ADM no hay boton de editar:
     // los campos editables ya lo son en su lugar (solo una pista).
+    // "Solicitar cambios" solo con rol ADM o MOD (el servidor lo exige:
+    // admin_iniciativas_solicitudes.ashx); los demas leen el registro.
     htmlAcciones() {
-      return '<button type="button" class="btn linea chico" id="regCambioBoton" data-accion="solicitar-cambios"' +
-          ' aria-expanded="false" aria-controls="regCambio">Solicitar cambios</button>' +
+      return (this.rol
+          ? '<button type="button" class="btn linea chico" id="regCambioBoton" data-accion="solicitar-cambios"' +
+            ' aria-expanded="false" aria-controls="regCambio">Solicitar cambios</button>'
+          : '') +
         (this.puedeEditar()
           ? ' <span class="ini-ed-pista">Edición directa (ADM): cambia los campos con borde y usa «Guardar cambios».</span>'
           : '');
@@ -3879,7 +3885,8 @@ window.RegistroIniciativas = (function () {
       this.$('regCambio').innerHTML = abrir ? this.htmlCambio() : '';
       this.$('regCambio').hidden = !abrir;
       if (abrir) this.montarDatosCambio();
-      this.$('regCambioBoton').setAttribute('aria-expanded', abrir ? 'true' : 'false');
+      // Sin rol ADM/MOD el boton no existe (htmlAcciones).
+      if (this.$('regCambioBoton')) this.$('regCambioBoton').setAttribute('aria-expanded', abrir ? 'true' : 'false');
       var foco = abrir ? this.$('regCambioCampo') : this.$('regCambioBoton');
       if (foco && foco.focus) foco.focus();
     }

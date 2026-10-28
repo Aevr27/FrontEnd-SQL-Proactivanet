@@ -35,10 +35,9 @@
 // no esta en CatPersona valida igual; sin sql/29 no se guarda nada y con
 // sql/29 se rechaza en "solicitante" (ver App_Code/SolicitudIniciativaAlta.cs).
 //
-// ACCESO: AccesoIniciativas.ExigirSolicitud: rol ADM; MOD si es Product
-// Owner o Service Owner vigente; los demas si el interruptor
-// INICIATIVAS_ABIERTAS esta encendido Y son PO/SO vigentes (403
-// AccesoDenegado antes de leer nada en otro caso). Su UNICO llamador es Nueva solicitud
+// ACCESO: AccesoIniciativas.ExigirSolicitud: rol ADM o MOD; los demas si
+// son Product Owner o Service Owner vigentes (403 AccesoDenegado antes de
+// leer nada en otro caso). Su UNICO llamador es Nueva solicitud
 // (admin/iniciativas.js); no aprueba ni crea iniciativas. La creacion
 // directa (solo ADM) NO pasa por este handler: va a
 // admin_iniciativas_gestion.ashx, que usa ExigirAdm.

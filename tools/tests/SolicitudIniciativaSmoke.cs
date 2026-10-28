@@ -393,14 +393,17 @@ public static class SolicitudIniciativaSmoke
         {
             var ruta = @"handlers\admin_iniciativas_" + h + ".ashx";
             var texto = System.IO.File.ReadAllText(ruta);
-            // registro y diagnostico son de ADM y MOD: Exigir. Los de Nueva
+            // diagnostico es de ADM y MOD: Exigir. El registro es de todo
+            // usuario autenticado: ExigirRegistro (2026-10-28). Los de Nueva
             // solicitud (catalogos, capacidad, validar) usan ExigirSolicitud
-            // (ADM/MOD, o el interruptor INICIATIVAS_ABIERTAS; 2026-10-22);
-            // catalogos ?duenos=1 va antes con ExigirAdm. Lo solo-ADM
-            // (consola de correos) se prueba en AccesoAdminHttpSmoke.
+            // (ADM, MOD y PO/SO vigentes); catalogos ?duenos=1 va antes con
+            // ExigirAdm y la Cobertura (sin ?rutas) con ExigirRegistro. Lo
+            // solo-ADM (consola de correos) se prueba en AccesoAdminHttpSmoke.
             var deSolicitud = h == "catalogos" || h == "capacidad" || h == "validar";
+            var nombre = deSolicitud ? "ExigirSolicitud" : h == "registro" ? "ExigirRegistro" : "Exigir";
             var linea = deSolicitud ? "if (!AccesoIniciativas.ExigirSolicitud(context)) return;"
-                                    : "if (!AccesoAdmin.Exigir(context)) return;";
+                      : h == "registro" ? "if (!AccesoIniciativas.ExigirRegistro(context)) return;"
+                      : "if (!AccesoAdmin.Exigir(context)) return;";
             var exigir = texto.IndexOf(linea, StringComparison.Ordinal);
             var cuerpo = texto.IndexOf("public void ProcessRequest(HttpContext context)", StringComparison.Ordinal);
             var siguiente = texto.IndexOf(';', cuerpo);   // primera sentencia del metodo
@@ -409,8 +412,11 @@ public static class SolicitudIniciativaSmoke
                 var adm = texto.IndexOf("if (!AccesoAdmin.ExigirAdm(context,", cuerpo, StringComparison.Ordinal);
                 Check("D3 catalogos: ?duenos=1 ExigirAdm es la primera sentencia", true, adm > cuerpo && texto.IndexOf(';', adm) == siguiente);
                 siguiente = texto.IndexOf(';', siguiente + 1);
+                var reg = texto.IndexOf("if (!AccesoIniciativas.ExigirRegistro(context)) return;", cuerpo, StringComparison.Ordinal);
+                Check("D3 catalogos: sin ?rutas (Cobertura) ExigirRegistro es la siguiente", true, reg > cuerpo && texto.IndexOf(';', reg) == siguiente);
+                siguiente = texto.IndexOf(';', siguiente + 1);
             }
-            Check("D3 " + h + ": " + (deSolicitud ? "ExigirSolicitud" : "Exigir") + " es la primera sentencia", true,
+            Check("D3 " + h + ": " + nombre + " es la primera sentencia", true,
                   exigir > cuerpo && texto.IndexOf(';', exigir) == siguiente);
             Check("D3 " + h + ": ruta protegida por el modulo", true,
                   AccesoAdmin.EsRutaProtegida("~/handlers/admin_iniciativas_" + h + ".ashx"));

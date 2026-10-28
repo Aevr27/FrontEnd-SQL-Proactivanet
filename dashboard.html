@@ -167,43 +167,25 @@
             <span class="mnav-txt">Call Center</span>
           </button>
         </li>
-        <!-- Iniciativas (ADM/MOD): un ENLACE a otra pagina, no una pestaña
-             (sin data-tab, fuera de MODULOS). Oculta hasta que SesionAdmin
-             confirma que la cuenta Windows esta autorizada. Es solo UX: la
-             pagina y sus handlers se protegen en el servidor (AccesoAdmin).
-             Mismo nombre, icono y title que la del solicitante (abajo): la
-             persona ve "Iniciativas" sea cual sea su acceso; lo que puede
-             hacer dentro lo decide el servidor. -->
-        <li data-solo-admin hidden>
-          <a class="mnav" id="mnav-admin" href="admin/iniciativas.html" title="Iniciativas">
+        <!-- Iniciativas: un ENLACE a otra pagina, no una pestaña (sin
+             data-tab, fuera de MODULOS). Para todo usuario del tablero: el
+             registro es de todos (SesionAdmin: registro, toda cuenta Windows
+             autenticada). Oculta hasta que admin_sesion responde. Lo que se
+             puede hacer dentro (Solicitar, Solicitudes, Administracion) lo
+             decide el servidor (AccesoAdmin, AccesoIniciativas). La misma
+             entrada esta en admin/iniciativas.html. -->
+        <li data-solo-registro hidden>
+          <a class="mnav" id="mnav-iniciativas" href="admin/iniciativas.html" title="Iniciativas">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>
             </svg>
             <span class="mnav-txt">Iniciativas</span>
           </a>
         </li>
-        <!-- Iniciativas (solicitante): la misma pagina en modo "solo Nueva
-             solicitud" para una cuenta SIN rol ADM/MOD que es PO/SO vigente,
-             con el interruptor INICIATIVAS_ABIERTAS encendido (SesionAdmin:
-             solicitante, no autorizado y confirmado). Excluyente con la de
-             arriba: nunca se ven las dos. Icono de documento (no un "+"
-             suelto): plegada se reconoce por el icono y el title. Oculta por
-             omision; solo UX: el servidor lo exige en la pagina y en sus
-             handlers (AccesoIniciativas). La misma entrada esta en
-             admin/iniciativas.html. -->
-        <li data-solo-solicitante hidden>
-          <a class="mnav" id="mnav-solicitar" href="admin/iniciativas.html" title="Iniciativas">
-            <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>
-            </svg>
-            <span class="mnav-txt">Iniciativas</span>
-          </a>
-        </li>
-        <!-- admin_sesion NO pudo confirmar el acceso (fallo la consulta del
-             rol, del interruptor o de los dueños): ninguna de las dos
-             entradas Iniciativas, porque un error no es "sin rol". Un clic
-             vuelve a preguntar (SesionAdmin; nada se reintenta solo mas de
-             una vez). No es un modulo: sin data-tab. -->
+        <!-- admin_sesion NO pudo responder (un 5xx) y no hay entrada
+             Iniciativas que mostrar. Un clic vuelve a preguntar
+             (SesionAdmin; nada se reintenta solo mas de una vez). No es un
+             modulo: sin data-tab. -->
         <li data-sesion-incierta hidden>
           <button class="mnav" id="mnav-sesion-reintentar" type="button" title="No se pudo verificar tu acceso a Iniciativas. Reintentar">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -611,7 +593,7 @@ try {
 }
 </script>
 
-<!-- Entradas Iniciativas del menu (ADM/MOD o solicitante), segun SesionAdmin.
+<!-- Entrada Iniciativas del menu, segun SesionAdmin.
      Aparte y al final: si falla, el tablero no se entera. -->
 <script src="assets/js/sesion-admin.js"></script>
 <script>
