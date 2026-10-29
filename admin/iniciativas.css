@@ -1000,6 +1000,24 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-cat-estado { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px;
   font-size: 10.5px; background: var(--bg-2); color: var(--muted); }
 .ini-cat-estado.nueva { color: var(--accent-ink); }
+/* "Solicitar cambios": otras iniciativas activas de la categoria. Un boton
+   chico junto a la ruta (icono + cuantas) y su detalle plegable debajo. */
+.ini-otras-boton {
+  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 1px 6px;
+  border: 1px solid var(--line-soft); border-radius: 999px; background: var(--bg-2);
+  font: inherit; font-size: 11px; font-weight: 700; line-height: 1.5; color: var(--ink-2);
+  cursor: pointer; vertical-align: middle; white-space: nowrap;
+}
+.ini-otras-boton svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
+.ini-otras-boton:hover, .ini-otras-boton[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-ink); }
+.ini-otras-boton:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.ini-otras { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--accent); background: var(--bg-2);
+  border-radius: var(--radius-xs); font-size: 12px; }
+.ini-otras[hidden] { display: none; }
+.ini-otras ul { margin: 0 0 4px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
+.ini-otras-pct { font-variant-numeric: tabular-nums; font-weight: 700; }
+.ini-otras-estado { color: var(--ink-2); }
+.ini-otras-titulo { display: block; color: var(--muted); overflow-wrap: anywhere; }
 .ini-cat-quitada td { color: var(--muted); text-decoration: line-through; }
 .ini-cat-quitada td:last-child { text-decoration: none; }
 .ini-vol { font-size: 12px; color: var(--ink-2); }

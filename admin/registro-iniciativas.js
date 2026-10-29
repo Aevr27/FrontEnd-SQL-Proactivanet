@@ -486,6 +486,59 @@ window.RegistroIniciativas = (function () {
       (x.exacto === false ? '; con 2 decimales el % no da exacto' : '') + ')';
   }
 
+  // OTRAS INICIATIVAS DE UNA CATEGORIA en "Solicitar cambios": la regla de
+  // CapacidadCategoria.Otras (App_Code/SolicitudIniciativa.cs, la que ve ADM
+  // en la cola) sobre el registro que ya esta en la pagina, sin pedir nada:
+  // la iniciativa activa (`activa`: estado en estados_activos) y la fila con
+  // agrupacion de `agrupadores` (ConsumeCapacidad); la misma ruta sin
+  // espacios de mas ni mayusculas (DirectorioOrganizacional.Normaliza); sin
+  // el folio `excluir`; un folio con la ruta dos veces suma su %. Un % sin
+  // dato cuenta 0, como en el servidor.
+  //   -> [{ folio, titulo, pct (fraccion), estado }]
+  function rutaClave(v) {
+    return String(v === null || v === undefined ? '' : v).replace(/ /g, ' ').trim().toLowerCase();
+  }
+  function otrasEnCategoria(iniciativas, agrupadores, ruta, excluir) {
+    var llave = rutaClave(ruta), fuera = rutaClave(excluir), salida = [], porFolio = {};
+    var agr = (agrupadores || []).map(plano);
+    if (!llave) return salida;
+    (iniciativas || []).forEach(function (i) {
+      if (!i || i.activa !== true || !i.folio || (fuera && rutaClave(i.folio) === fuera)) return;
+      (i.categorias || []).forEach(function (c) {
+        if (rutaClave(c.categoria) !== llave || agr.indexOf(plano(c.agrup)) < 0) return;
+        var p = typeof c.pct_dism === 'number' && isFinite(c.pct_dism) ? c.pct_dism : 0;
+        var k = rutaClave(i.folio);
+        if (porFolio[k]) { porFolio[k].pct += p; return; }
+        porFolio[k] = { folio: i.folio, titulo: i.titulo || '', pct: p, estado: i.estado || '' };
+        salida.push(porFolio[k]);
+      });
+    });
+    return salida;
+  }
+
+  // El indicador junto a la ruta (boton con icono y cuantas son; su nombre
+  // accesible lo dice completo) y su detalle plegable debajo. Sin otras
+  // activas no se pinta nada. clave: 'l<n>' / 'n<n>'.
+  function htmlOtrasCambio(otras, clave, abierto) {
+    if (!otras || !otras.length) return '';
+    var id = 'regCambioOtras-' + clave, n = otras.length;
+    var rotulo = n + (n === 1 ? ' otra iniciativa activa' : ' otras iniciativas activas') + ' en esta categoría';
+    var suma = 0;
+    otras.forEach(function (o) { suma += Math.round(o.pct * 10000); });
+    return '<button type="button" class="ini-otras-boton" data-cambio-otras="' + clave + '" aria-expanded="' + (abierto ? 'true' : 'false') +
+        '" aria-controls="' + id + '" title="' + Escape.attr(rotulo + ': ver sus %') + '">' +
+        '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>' +
+        '<span aria-hidden="true">' + n + '</span><span class="ini-sr">' + Escape.html(rotulo) + '</span></button>' +
+      '<div class="ini-otras" id="' + id + '"' + (abierto ? '' : ' hidden') + '>' +
+        '<ul>' + otras.map(function (o) {
+          return '<li><b>' + Escape.html(o.folio) + '</b> · <span class="ini-otras-pct">' + Escape.html(Math.round(o.pct * 10000) / 100) + '%</span>' +
+            (o.estado ? ' · <span class="ini-otras-estado">' + Escape.html(o.estado) + '</span>' : '') +
+            (o.titulo ? '<span class="ini-otras-titulo">' + Escape.html(o.titulo) + '</span>' : '') + '</li>';
+        }).join('') + '</ul>' +
+        '<small class="ini-sub">Ya comprometido por otras: ' + Escape.html(suma / 100) + '%. Solo iniciativas activas.</small>' +
+      '</div>';
+  }
+
   // Lo escrito en un selector -> la opcion real, o ''.
   function resolverOpcion(texto, opciones) {
     var A = window.IniciativaAdmin, t = String(texto || '').trim();
@@ -2489,6 +2542,11 @@ window.RegistroIniciativas = (function () {
         if (nueva && nueva.closest) nueva = nueva.closest('[data-cambio-quitar]');
         var nq = nueva && nueva.getAttribute && nueva.getAttribute('data-cambio-quitar');
         if (nq !== null && nq !== undefined && nq !== '') { self.quitarCategoriaCambio(Number(nq)); return; }
+        // Otras iniciativas de una categoria en "Solicitar cambios".
+        var otras = e.target;
+        if (otras && otras.closest) otras = otras.closest('[data-cambio-otras]');
+        var oc = otras && otras.getAttribute && otras.getAttribute('data-cambio-otras');
+        if (oc) { self.alternarOtrasCambio(oc); return; }
         // Quitar / Restaurar una categoria en "Modificar".
         var cat = e.target;
         if (cat && cat.closest) cat = cat.closest('[data-edicion-cat]');
@@ -3374,6 +3432,26 @@ window.RegistroIniciativas = (function () {
       return r;
     }
 
+    // Rutas con el detalle de "otras iniciativas" abierto (rutaClave -> true)
+    // del borrador actual; uno nuevo arranca con todo plegado.
+    otrasAbiertasCambio() {
+      if (this.otrasDe !== this.cambio) { this.otrasDe = this.cambio; this.otrasAbiertas = {}; }
+      return this.otrasAbiertas;
+    }
+
+    // Abre / pliega el detalle de otras iniciativas de una fila ('l<n>' /
+    // 'n<n>') sin repintar nada mas.
+    alternarOtrasCambio(clave) {
+      var ruta = this.rutaMetaCambio(clave), boton = this.doc.querySelector('[data-cambio-otras="' + clave + '"]');
+      var caja = this.$('regCambioOtras-' + clave);
+      if (!ruta || !boton || !caja) return false;
+      var abrir = caja.hidden;
+      caja.hidden = !abrir;
+      boton.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+      this.otrasAbiertasCambio()[rutaClave(ruta)] = abrir;
+      return abrir;
+    }
+
     quitarCategoriaCambio(n) {
       if (!this.cambio || !this.cambio.quitarNueva(n)) return false;
       this.pintarCategoriasCambio();
@@ -3391,6 +3469,12 @@ window.RegistroIniciativas = (function () {
     htmlCategoriasCambio() {
       var c = this.cambio, A = window.IniciativaAdmin;
       var ligadas = c.categoriasLigadas();
+      // Otras iniciativas activas de cada ruta (del registro cargado) y los
+      // detalles abiertos, por ruta (sobreviven al repintar este bloque).
+      var reg = this.registro, abiertas = this.otrasAbiertasCambio(), folio = c.iniciativa.folio;
+      function otras(ruta, clave) {
+        return reg ? htmlOtrasCambio(otrasEnCategoria(reg.iniciativas, reg.agrupadores, ruta, folio), clave, abiertas[rutaClave(ruta)] === true) : '';
+      }
       var tabla = ligadas.length || c.nuevas.length
         ? '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
             '<th scope="col" class="num">% actual</th><th scope="col">% pedido</th><th scope="col"><span class="ini-sr">Acción</span></th>' +
@@ -3400,13 +3484,13 @@ window.RegistroIniciativas = (function () {
             var pct = '<label class="ini-ed-pct"><span class="ini-sr">% pedido para ' + Escape.html(r) + '</span>' +
               '<input type="number" min="0" max="100" step="0.01" data-cambio-pct="' + n + '" value="' + Escape.attr(c.pcts[r] || '') +
               '" placeholder="sin cambio"> %</label>';
-            return '<tr><td class="ini-cat-ruta">' + Escape.html(r) + '</td><td class="num">' + Escape.html(act === null ? '—' : act + '%') + '</td>' +
+            return '<tr><td class="ini-cat-ruta">' + Escape.html(r) + otras(r, 'l' + n) + '</td><td class="num">' + Escape.html(act === null ? '—' : act + '%') + '</td>' +
               '<td>' + celdaMetaCambio(c, r, 'l' + n, pct, 'sin cambio') + '</td><td></td></tr>';
           }).join('') +
           c.nuevas.map(function (x, n) {
             var pct = '<label class="ini-ed-pct"><span class="ini-sr">% para ' + Escape.html(x.categoria) + '</span>' +
               '<input type="number" min="0" max="100" step="0.01" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) + '"> %</label>';
-            return '<tr><td><span class="ini-cat-ruta">' + Escape.html(x.categoria) + '</span> <span class="ini-cat-estado nueva">Agregar</span></td>' +
+            return '<tr><td><span class="ini-cat-ruta">' + Escape.html(x.categoria) + '</span> <span class="ini-cat-estado nueva">Agregar</span>' + otras(x.categoria, 'n' + n) + '</td>' +
               '<td class="num">—</td><td>' + celdaMetaCambio(c, x.categoria, 'n' + n, pct, '') + '</td>' +
               '<td><button type="button" class="btn linea chico" data-cambio-quitar="' + n + '">Quitar</button></td></tr>';
           }).join('') + '</tbody></table></div>' +
@@ -4622,6 +4706,7 @@ window.RegistroIniciativas = (function () {
     ListaSolicitudCambio: ListaSolicitudCambio,
     RevisionSolicitud: RevisionSolicitud,
     CAMPOS_CAMBIO: CAMPOS_CAMBIO,
+    otrasEnCategoria: otrasEnCategoria,
     etiquetarHistorial: etiquetarHistorial,
     ordenar: ordenar,
     ExportRegistro: ExportRegistro,
