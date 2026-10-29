@@ -2991,16 +2991,32 @@ pintarTipoRegistro();
 // tabs
 RAIZ.querySelectorAll('.tab').forEach(t=>t.onclick=()=>mostrarPanel(t.dataset.panel));
 
+// Baja la ventana hasta `el` (la tarjeta de las pestañas de abajo) con aire
+// arriba. La ventana es lo unico que hace scroll (assets/css/kpis-fijos.css)
+// y no hay barra superior fija; lo unico que tapa es la rejilla de KPIs si
+// esta fijada ("Fijar KPIs"), asi que se descuenta su alto.
+function llevarA(el){
+  if(!el || !el.getBoundingClientRect) return;
+  const rejilla=document.getElementById('kpis-exp');
+  const fija=rejilla && window.KpisFijos && rejilla.classList.contains(window.KpisFijos.CLASE);
+  const tapa=fija ? rejilla.getBoundingClientRect().height : 0;
+  const top=el.getBoundingClientRect().top + window.pageYOffset - tapa - 12;
+  const quieto=window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  window.scrollTo({top:Math.max(0, top), behavior:quieto?'auto':'smooth'});
+}
+
 // Tarjetas que abren su panel (ver PANEL_KPI).
 if(seleccionKpi) window.SeleccionKpi.escuchar([document.getElementById('kpis-exp')], 'data-indicador', k=>{
   seleccionKpi.alternar(k);
-  if(seleccionKpi.clave){
-    mostrarPanel(PANEL_KPI[seleccionKpi.clave]);
-    const pestanas=RAIZ.querySelector('.tabs');
-    if(pestanas) pestanas.scrollIntoView({behavior:'smooth', block:'start'});
-  }
+  if(seleccionKpi.clave) mostrarPanel(PANEL_KPI[seleccionKpi.clave]);
   renderKPIs(aggCats(), currentCats());
   window.SeleccionKpi.enfocar([document.getElementById('kpis-exp')], 'data-indicador', k);
+  // Despues del foco: focus() lleva la ventana al boton y cortaba el scroll
+  // suave que se lanzaba antes. Segundo clic (quita la marca): no se mueve.
+  if(seleccionKpi.clave){
+    const pestanas=RAIZ.querySelector('.tabs');
+    llevarA(pestanas && pestanas.closest('.card') || pestanas);
+  }
 });
 
 fillPO(); fillSO(); renderAll();
