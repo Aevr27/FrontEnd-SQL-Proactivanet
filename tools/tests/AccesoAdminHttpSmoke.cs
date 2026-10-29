@@ -665,6 +665,65 @@ public static class AccesoAdminHttpSmoke
         foreach (var v in new[] { null, "", " ", "false", "1", "yes", "on", "truee", "true;", "\"true\"" })
             Check("L0 AdminDevOverride=" + (v == null ? "(ausente)" : "'" + v + "'") + ": apagado", false, AccesoDesarrolloLocal.Habilitado(v));
 
+        // ---- LB) la base (3b): solo la LocalDB desechable de desarrollo ------
+        const string DEV = @"Server=(localdb)\MSSQLLocalDB;Database=GestionAdminPrueba_Dev;Integrated Security=True";
+        foreach (var c in new[] {
+            DEV,
+            @"Data Source=(LocalDB)\mssqllocaldb;Initial Catalog=gestionadminprueba_dev;Integrated Security=True",
+            @"Address= (localdb)\MSSQLLocalDB ;Database= GestionAdminPrueba_Dev ;Integrated Security=True" })
+            Check("LB1 LocalDB + GestionAdminPrueba_Dev: base valida (" + c + ")", true, AccesoDesarrolloLocal.BaseLocalDesechable(c));
+        foreach (var c in new[] {
+            null, "", "   ",
+            @"Server=AZVMBDCENTRALQA;Database=Tickets_Proactivanet;User ID=x;Password=y;Encrypt=True",
+            @"Server=AZVMBDCENTRALQA;Database=GestionAdminPrueba_Dev;Integrated Security=True",
+            @"Server=(localdb)\MSSQLLocalDB;Database=Tickets_Proactivanet;Integrated Security=True",
+            @"Server=(localdb)\MSSQLLocalDB;Database=GestionAdminPrueba_s22h;Integrated Security=True",
+            @"Server=(localdb)\MSSQLLocalDB;Database=GestionAdminPrueba_Dev2;Integrated Security=True",
+            @"Server=(localdb)\MSSQLLocalDB;Integrated Security=True",
+            @"Server=(localdb)\.\Shared;Database=GestionAdminPrueba_Dev;Integrated Security=True",
+            @"Server=(localdb)\Otra;Database=GestionAdminPrueba_Dev;Integrated Security=True",
+            @"Server=tcp:(localdb)\MSSQLLocalDB;Database=GestionAdminPrueba_Dev;Integrated Security=True",
+            @"Server=localhost;Database=GestionAdminPrueba_Dev;Integrated Security=True",
+            @"Server=.;Database=GestionAdminPrueba_Dev;Integrated Security=True",
+            @"Server=(localdb)\MSSQLLocalDB;Database=GestionAdminPrueba_Dev;Server=AZVMBDCENTRALQA",
+            @"Server=(localdb)\MSSQLLocalDB;Database=GestionAdminPrueba_Dev;Addr=AZVMBDCENTRALQA",
+            @"Server=(localdb)\MSSQLLocalDB;Database=GestionAdminPrueba_Dev;Failover Partner=AZVMBDCENTRALQA",
+            @"Server=(localdb)\MSSQLLocalDB;Database=GestionAdminPrueba_Dev;AttachDbFilename=C:\x\otra.mdf",
+            @"Server=(localdb)\MSSQLLocalDB;Database=GestionAdminPrueba_Dev;ClaveInventada=1",
+            "esto no es una cadena de conexion" })
+            Check("LB2 sin atajo: " + (c == null ? "(null)" : "'" + c + "'"), false, AccesoDesarrolloLocal.BaseLocalDesechable(c));
+        // La regla completa sin HttpContext, como la arma Resolver: interruptor,
+        // entorno, base y whitelist. Cualquier pieza que falle: sin atajo.
+        {
+            var listaLb = AccesoAdmin.Configurada();
+            var cuentaLb = AccesoDesarrolloLocal.IdentidadPara(IdentidadWindows.Desde(null, false), @"SORIANA\t_andresvr");
+            Func<bool, bool, bool, string, string, string> regla = delegate (bool hab, bool dbg, bool loc, string proc, string cad)
+            {
+                var entorno = AccesoDesarrolloLocal.Evaluar(hab, dbg, loc, proc) && AccesoDesarrolloLocal.BaseLocalDesechable(cad);
+                return AccesoDesarrolloLocal.RolPara(entorno, cuentaLb, listaLb, null);
+            };
+            Check("LB3 todo valido (interruptor, DEBUG, local, IIS Express, LocalDB de desarrollo): ADM", "ADM", regla(true, true, true, EXP, DEV));
+            Check("LB3 interruptor apagado: sin atajo", null, regla(false, true, true, EXP, DEV));
+            Check("LB3 debug=false: sin atajo", null, regla(true, false, true, EXP, DEV));
+            Check("LB3 cadena a QA: sin atajo", null, regla(true, true, true, EXP, @"Server=AZVMBDCENTRALQA;Database=Tickets_Proactivanet;Integrated Security=True"));
+            Check("LB3 servidor desconocido con la base de desarrollo: sin atajo", null, regla(true, true, true, EXP, @"Server=SRVCOMPARTIDO;Database=GestionAdminPrueba_Dev;Integrated Security=True"));
+            Check("LB3 sin cadena: sin atajo", null, regla(true, true, true, EXP, null));
+        }
+        // El fuente: Resolver pide la base DESPUES del entorno y ANTES de la
+        // whitelist, con la cadena del sitio (ConnectionStringProvider).
+        {
+            var fuenteLb = File.ReadAllText(Path.Combine("App_Code", "AccesoDesarrolloLocal.cs")).Replace("\r\n", "\n");
+            var resolverLb = fuenteLb.Substring(fuenteLb.IndexOf("private static string Resolver(HttpContext ctx, out IdentidadWindows cuenta)"));
+            resolverLb = resolverLb.Substring(0, resolverLb.IndexOf("\n    }") + 6);
+            var iEnt = resolverLb.IndexOf("Evaluar(true, true, local, Proceso.Value)");
+            var iBase = resolverLb.IndexOf("if (!BaseLocalDesechable(CadenaSitio())) return null;");
+            var iLista = resolverLb.IndexOf("AccesoAdmin.Configurada()");
+            Check("LB4 Resolver: entorno < base < whitelist", true, iEnt > 0 && iEnt < iBase && iBase < iLista);
+            Check("LB4 la cadena sale de ConnectionStringProvider", true, fuenteLb.Contains("ConnectionStringProvider.TryObtenerCadena(out cadena)"));
+            Check("LB4 servidor y base fijos", true,
+                  fuenteLb.Contains("ServidorDesarrollo = @\"(localdb)\\MSSQLLocalDB\";") && fuenteLb.Contains("BaseDesarrollo = \"GestionAdminPrueba_Dev\";"));
+        }
+
         // ---- W) whitelist de desarrollo local (AccesoDesarrolloLocal.RolPara) --
         // La regla completa sin HttpContext: entorno (DEBUG + loopback + IIS
         // Express, arriba) Y la cuenta de desarrollo en AdminWhitelistTemporal.
