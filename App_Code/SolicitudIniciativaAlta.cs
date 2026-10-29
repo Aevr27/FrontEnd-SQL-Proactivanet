@@ -14,17 +14,21 @@
 // otra fila. Lo que se guarda es el Nombre y el Correo de ESA fila. Nada
 // viene del navegador: ni nombre, ni cuenta, ni correo.
 //
-// EXCEPCION ADM (pruebas controladas): si quien envia es ADM (el rol lo
-// resuelve el servidor, AccesoAdmin.Rol; nunca el navegador) y su cuenta no
-// se resuelve a una persona (no_encontrado, ambiguo, nombre_repetido o sin
-// correo), la solicitud NO se rechaza por eso: nombre y correo quedan null
-// (no se inventan ni se elige una fila), SolicitanteEstado guarda el motivo
-// real y Cuenta la identidad Windows. Sin identidad autenticada no hay
-// excepcion. MOD y el rol derivado "solicitante" siguen con la regla
-// estricta. SOLO valida: con sql/29 no se puede guardar sin correo de
-// CatPersona (NOT NULL + 51405 en adm.usp_SolicitudIniciativa_Crear), asi
-// que IniciativaService la rechaza antes de llamar al almacen
-// (MensajeExcepcionSinGuardar).
+// ADM / MOD SIN CatPersona (2026-10-29, sql/35): dbo.UsuariosAdmin es la
+// fuente de quien es ADM o MOD, y estar ahi basta para enviar. Si quien
+// envia tiene rol ADM o MOD (AccesoAdmin.Rol: dbo.UsuariosAdmin, del
+// servidor; nunca el navegador) y su cuenta no se resuelve a una persona
+// con correo (no_encontrado, ambiguo, nombre_repetido o sin correo), el
+// correo es el UNICO dbo.UsuariosAdmin.CorreoUsuario de su cuenta
+// (CorreoAdmin.Para, por la cuenta autenticada) y el nombre queda null (no
+// se arma con la cuenta). FuenteSolicitante = USUARIOSADMIN; la cuenta
+// Windows va en SolicitanteCuenta como siempre. Sin CorreoUsuario unico y
+// valido: error en "solicitante", nada se guarda. Quien SI se resuelve en
+// CatPersona sigue por CatPersona (con su nombre), tenga o no rol. El rol
+// derivado "solicitante" (PO/SO sin rol) sigue con la regla estricta de
+// CatPersona. Guardar asi exige sql/35 (adm.usp_SolicitudIniciativa_Crear
+// vuelve a comprobar UsuariosAdmin, 51417); sin ella IniciativaService lo
+// rechaza antes del almacen (MensajeSinSql35).
 //
 // CORREO DEL PRODUCT OWNER: el PO elegido ya paso por ValidadorIniciativa
 // (sale con SO y Categoria de una fila vigente de la cascada,
@@ -58,15 +62,19 @@ public sealed class DestinatariosSolicitud
     // Algo@algo.algo, sin espacios ni marcado (la forma de CorreoAdmin).
     private static readonly Regex Forma = new Regex(@"^[^\s@<>""']+@[^\s@<>""']+\.[^\s@<>""']+$", RegexOptions.CultureInvariant);
 
+    // De donde salio el correo del solicitante (adm.SolicitudIniciativa.FuenteCorreos).
+    public const string FuenteCatPersona = "CATPERSONA";
+    public const string FuenteUsuariosAdmin = "USUARIOSADMIN";
+
     public string Cuenta;              // IdentidadWindows.Original
     public string SolicitanteEstado;   // IdentidadAcuse.Estado
-    public string SolicitanteNombre;
+    public string SolicitanteNombre;   // null con FuenteUsuariosAdmin
     public string SolicitanteCorreo;
+    public string FuenteSolicitante;   // FuenteCatPersona | FuenteUsuariosAdmin | null (sin resolver)
     public string ProductOwnerCorreo;
-    public bool ExcepcionAdm;          // ADM sin persona: valida sin nombre ni correo
 
-    public const string MensajeExcepcionSinGuardar =
-        "Como ADM puedes validar la solicitud sin estar en CatPersona, pero para guardarla la base exige el correo de una persona vigente de CatPersona. Pide que te registren.";
+    public const string MensajeSinSql35 =
+        "Tu cuenta es ADM o MOD pero no est\u00e1 en el directorio de personas (CatPersona), y la base todav\u00eda no acepta solicitudes de ADM/MOD sin CatPersona (falta sql/35). No se guard\u00f3 nada.";
 
     public bool Resuelto { get { return SolicitanteCorreo != null && ProductOwnerCorreo != null; } }
 
@@ -77,10 +85,13 @@ public sealed class DestinatariosSolicitud
 
     // Resuelve y agrega a `r` los errores (campo solicitante / po). `po` es
     // el Product Owner tal como lo valido ValidadorIniciativa; si el PO ya
-    // tiene error ahi, no se busca su correo. `esAdm`: el rol ADM que ya
-    // resolvio el servidor (ver EXCEPCION ADM arriba).
+    // tiene error ahi, no se busca su correo. `rol`: AccesoAdmin.Rol que ya
+    // resolvio el servidor; `correoUsuariosAdmin`: CorreoAdmin.Para de la
+    // cuenta autenticada, solo se pide si hace falta (ver ADM / MOD SIN
+    // CatPersona arriba).
     public static DestinatariosSolicitud Resolver(IdentidadWindows id, string po, IList<PersonaCatalogo> personas,
-                                                  ValidadorIniciativa.Resultado r, bool esAdm = false)
+                                                  ValidadorIniciativa.Resultado r, string rol = null,
+                                                  Func<string> correoUsuariosAdmin = null)
     {
         personas = personas ?? new List<PersonaCatalogo>();
         var d = new DestinatariosSolicitud();
@@ -98,12 +109,22 @@ public sealed class DestinatariosSolicitud
             {
                 d.SolicitanteNombre = yo.Nombre;
                 d.SolicitanteCorreo = correo;
+                d.FuenteSolicitante = FuenteCatPersona;
             }
             else d.SolicitanteEstado = DirectorioPersonas.SinCorreo;
         }
         if (d.SolicitanteCorreo == null)
         {
-            if (esAdm && d.Cuenta != null && d.SolicitanteEstado != IdentidadAcuse.SinIdentidad) d.ExcepcionAdm = true;
+            if (RolAdmin.EsElevado(rol) && d.Cuenta != null && d.SolicitanteEstado != IdentidadAcuse.SinIdentidad)
+            {
+                var c = correoUsuariosAdmin == null ? null : IdentidadAcuse.ClaveCorreo(correoUsuariosAdmin());
+                if (EsCorreo(c))
+                {
+                    d.SolicitanteCorreo = c;
+                    d.FuenteSolicitante = FuenteUsuariosAdmin;
+                }
+                else if (r != null) r.Agregar(CampoSolicitante, MensajeSinCorreoAdmin(d.Cuenta));
+            }
             else if (r != null) r.Agregar(CampoSolicitante, MensajeSolicitante(d.SolicitanteEstado, id));
         }
 
@@ -124,6 +145,11 @@ public sealed class DestinatariosSolicitud
         }
         if (motivo != null && r != null) r.Agregar(SolicitudIniciativa.CPo, motivo);
         return d;
+    }
+
+    public static string MensajeSinCorreoAdmin(string cuenta)
+    {
+        return "Tu cuenta (" + cuenta + ") es ADM o MOD pero no est\u00e1 en el directorio de personas (CatPersona) ni tiene un correo \u00fanico y v\u00e1lido en dbo.UsuariosAdmin (CorreoUsuario). Pide que lo registren para poder enviar solicitudes.";
     }
 
     public static string MensajeSolicitante(string estado, IdentidadWindows id)
@@ -164,7 +190,7 @@ public sealed class AltaSolicitud
     public string SolicitanteNombre, SolicitanteCorreo, ProductOwnerCorreo;
 }
 
-// Un error que la base lanzo a proposito (51401-51409).
+// Un error que la base lanzo a proposito (51401-51409; 51417 de sql/35).
 public sealed class ErrorSolicitud : Exception
 {
     public readonly int Numero;
@@ -174,6 +200,9 @@ public sealed class ErrorSolicitud : Exception
 public interface IAlmacenSolicitudes
 {
     bool Disponible();
+    // sql/35: _Crear acepta un solicitante ADM/MOD de dbo.UsuariosAdmin sin
+    // CatPersona (SolicitanteNombre NULL, FuenteCorreos USUARIOSADMIN).
+    bool AceptaSolicitanteAdmin();
     SolicitudGuardada Crear(AltaSolicitud a);
 }
 
@@ -211,6 +240,26 @@ public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
         catch (SqlException) { return false; }
     }
 
+    // Las piezas de sql/35 que la cuenta del sitio PUEDE ver: la columna
+    // nullable y el nombre del CHECK nuevo (sin VIEW DEFINITION no ve
+    // definiciones de CHECK ni de procedimientos; probado en LocalDB). La
+    // migracion las pone junto con el _Crear nuevo en una transaccion. Un
+    // error al revisar cuenta como "sin sql/35".
+    public const string ConsultaSolicitanteAdmin =
+        "SELECT CASE WHEN COLUMNPROPERTY(OBJECT_ID(N'adm.SolicitudIniciativa'), N'SolicitanteNombre', 'AllowsNull') = 1 " +
+        " AND OBJECT_ID(N'adm.CK_SolicitudIniciativa_FuenteNombre', N'C') IS NOT NULL THEN 1 ELSE 0 END";
+
+    public bool AceptaSolicitanteAdmin()
+    {
+        try
+        {
+            using (var cn = Abierta())
+            using (var cmd = new SqlCommand(ConsultaSolicitanteAdmin, cn) { CommandTimeout = 15 })
+                return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+        }
+        catch (SqlException) { return false; }
+    }
+
     public SolicitudGuardada Crear(AltaSolicitud a)
     {
         if (a == null) throw new ArgumentNullException("a");
@@ -240,7 +289,7 @@ public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
             try { cmd.ExecuteNonQuery(); }
             catch (SqlException ex)
             {
-                if (ex.Number >= 51401 && ex.Number <= 51409) throw new ErrorSolicitud(ex.Number, ex.Message);
+                if ((ex.Number >= 51401 && ex.Number <= 51409) || ex.Number == 51417) throw new ErrorSolicitud(ex.Number, ex.Message);
                 throw;
             }
             return new SolicitudGuardada

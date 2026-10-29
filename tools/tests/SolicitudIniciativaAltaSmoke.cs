@@ -14,10 +14,13 @@
 //      pide numero; el mismo token devuelve el mismo numero (nuevo=false);
 //      un error de la base no se traga.
 //   J  la respuesta JSON.
-//   X  excepcion ADM: ADM sin persona (no encontrado, ambiguo, nombre
-//      repetido, fila no vigente) valida sin nombre ni correo inventados y
-//      conserva la cuenta; con sql/29 no guarda; sin identidad, no-ADM y MOD
-//      siguen estrictos; PO/SO/Categoria y el correo del PO no cambian.
+//   X  ADM / MOD sin CatPersona (2026-10-29, sql/35): con rol ADM o MOD
+//      (del servidor) y sin persona (no encontrado, ambiguo, nombre
+//      repetido) se guarda con el CorreoUsuario de dbo.UsuariosAdmin y sin
+//      nombre; quien esta en CatPersona sigue igual; cuenta nueva = mismo
+//      trato; sin sql/35 o sin CorreoUsuario unico: 422 y nada se guarda;
+//      sin rol (PO/SO, VIEWER), rol raro o sin identidad: regla estricta;
+//      las demas validaciones siguen; nada del navegador cuenta.
 //
 // Compilar como SolicitudIniciativaSmoke (adm.dll) y correr.
 using System;
@@ -38,11 +41,13 @@ sealed class PersonasFalsas : IFuentePersonasAcuse
 sealed class AlmacenFalso : IAlmacenSolicitudes
 {
     public bool Hay = true;
+    public bool Admin = true;   // sql/35 en la base
     public Exception Lanza;
     public readonly List<AltaSolicitud> Altas = new List<AltaSolicitud>();
     readonly Dictionary<Guid, int> porToken = new Dictionary<Guid, int>();
     int ultimo = 0;
     public bool Disponible() { return Hay; }
+    public bool AceptaSolicitanteAdmin() { return Admin; }
     public SolicitudGuardada Crear(AltaSolicitud a)
     {
         if (Lanza != null) throw Lanza;
@@ -102,11 +107,11 @@ public static class SolicitudIniciativaAltaSmoke
     }
 
     static ValidadorIniciativa.Resultado Enviar(IdentidadWindows id, NameValueCollection f, AlmacenFalso almacen, PersonasFalsas personas,
-                                                bool esAdm = false)
+                                                string rol = null, Func<string> correoUsuariosAdmin = null)
     {
         var s = SolicitudIniciativa.DesdeFormulario(f, false, null);
         var svc = new IniciativaService(new GeneradorNumeroSolicitudPendiente(), almacen, personas ?? Directorio());
-        return svc.Solicitar(s, id, Catalogo(), new CapacidadCategoria(new CapacidadCategoria.Compromiso[0]), esAdm);
+        return svc.Solicitar(s, id, Catalogo(), new CapacidadCategoria(new CapacidadCategoria.Compromiso[0]), rol, correoUsuariosAdmin);
     }
 
     static IdentidadWindows Win(string cuenta) { return IdentidadWindows.Desde(cuenta, true); }
@@ -257,111 +262,165 @@ public static class SolicitudIniciativaAltaSmoke
         Check("J1 invalida: guardada=false, nuevo=false, sin correos resueltos", "False|False|||",
               j["guardada"] + "|" + j["nuevo"] + "|" + ((Dictionary<string, object>)j["solicitante"])["correo"] + "|" + j["product_owner_correo"] + "|" + j["numero_solicitud"]);
 
-        // ---------------- X: excepcion ADM ----------------
-        a = new AlmacenFalso();
-        r = Enviar(Win(@"SORIANA\andresvr"), Form(PO), a, null, true);
-        Check("X1 ADM con persona: igual que siempre, guarda nombre y correo de CatPersona, sin excepcion",
-              "True|False|Andres Vera Rios|andresvr@soriana.com|1|andresvr@soriana.com",
-              r.Valida + "|" + r.Destinatarios.ExcepcionAdm + "|" + r.Destinatarios.SolicitanteNombre + "|" +
-              r.Destinatarios.SolicitanteCorreo + "|" + a.Altas.Count + "|" + a.Altas[0].SolicitanteCorreo);
+        // ---------------- X: ADM / MOD sin CatPersona (dbo.UsuariosAdmin, sql/35) ----------------
+        // `correo` simula CorreoAdmin.Para (el CorreoUsuario de la cuenta
+        // autenticada en dbo.UsuariosAdmin); `pedidos` cuenta cuantas veces
+        // se consulto.
+        int pedidos = 0;
+        Func<string, Func<string>> correo = delegate (string c) { return delegate { pedidos++; return c; }; };
 
+        foreach (var rol in new[] { RolAdmin.Adm, RolAdmin.Mod })
+        {
+            pedidos = 0;
+            a = new AlmacenFalso();
+            r = Enviar(Win(@"SORIANA\andresvr"), Form(PO), a, null, rol, correo("otro@soriana.com"));
+            Check("X1 " + rol + " que SI esta en CatPersona: igual que siempre (nombre y correo de CatPersona), UsuariosAdmin ni se consulta",
+                  "True|CATPERSONA|Andres Vera Rios|andresvr@soriana.com|1|Andres Vera Rios|0",
+                  r.Valida + "|" + r.Destinatarios.FuenteSolicitante + "|" + r.Destinatarios.SolicitanteNombre + "|" +
+                  r.Destinatarios.SolicitanteCorreo + "|" + a.Altas.Count + "|" + a.Altas[0].SolicitanteNombre + "|" + pedidos);
+        }
+
+        foreach (var rol in new[] { RolAdmin.Adm, RolAdmin.Mod })
+        {
+            a = new AlmacenFalso();
+            r = Enviar(Win(@"SORIANA\t_olgado"), Form(PO), a, null, rol, correo("  T_Olgado@Soriana.com "));
+            j = IniciativaService.ComoJson(r);
+            js = (Dictionary<string, object>)j["solicitante"];
+            Check("X2 " + rol + " de UsuariosAdmin SIN CatPersona: valida y GUARDA con su CorreoUsuario, sin nombre inventado",
+                  @"True||USUARIOSADMIN|1|SORIANA\t_olgado||t_olgado@soriana.com|jesuscamor@soriana.com|True|#0000001",
+                  r.Valida + "|" + Campos(r) + "|" + r.Destinatarios.FuenteSolicitante + "|" + a.Altas.Count + "|" + a.Altas[0].Cuenta + "|" +
+                  a.Altas[0].SolicitanteNombre + "|" + a.Altas[0].SolicitanteCorreo + "|" + a.Altas[0].ProductOwnerCorreo + "|" +
+                  j["guardada"] + "|" + j["numero_solicitud"]);
+            Check("X2 " + rol + ": la respuesta dice la cuenta, el correo y la fuente; nombre null",
+                  @"SORIANA\t_olgado|t_olgado@soriana.com|USUARIOSADMIN|",
+                  js["cuenta"] + "|" + js["correo"] + "|" + js["fuente"] + "|" + js["nombre"]);
+        }
+
+        // Una cuenta cualquiera dada de alta HOY en UsuariosAdmin: nada en el
+        // codigo la nombra; basta su rol y su CorreoUsuario.
+        a = new AlmacenFalso();
+        r = Enviar(Win(@"OTRODOM\cuenta.nueva2026"), Form(PO), a, null, RolAdmin.Mod, correo("cuenta.nueva2026@otro.mx"));
+        Check("X3 cuenta nueva en UsuariosAdmin (otro dominio, sin CatPersona): mismo trato sin cambiar codigo",
+              @"True|USUARIOSADMIN|OTRODOM\cuenta.nueva2026|cuenta.nueva2026@otro.mx",
+              r.Valida + "|" + r.Destinatarios.FuenteSolicitante + "|" + a.Altas[0].Cuenta + "|" + a.Altas[0].SolicitanteCorreo);
+        var fuenteAlta = System.IO.File.ReadAllText(System.IO.Path.Combine("App_Code", "SolicitudIniciativaAlta.cs")) +
+                         System.IO.File.ReadAllText(System.IO.Path.Combine("App_Code", "IniciativaService.cs"));
+        Check("X3 ninguna cuenta ni correo fijo en el codigo del alta", "False|False|False",
+              fuenteAlta.Contains("t_olgado") + "|" + fuenteAlta.Contains("omaralus") + "|" + fuenteAlta.Contains("danielalc"));
+
+        foreach (var rol in new[] { RolAdmin.Adm, RolAdmin.Mod })
+        {
+            a = new AlmacenFalso { Admin = false };
+            r = Enviar(Win(@"SORIANA\t_olgado"), Form(PO), a, null, rol, correo("t_olgado@soriana.com"));
+            Check("X4 " + rol + " sin CatPersona y la base SIN sql/35: 422 claro en 'solicitante', el almacen ni se llama",
+                  "False|solicitante|True|0|False",
+                  r.Valida + "|" + Campos(r) + "|" + (Mensajes(r, "solicitante") == DestinatariosSolicitud.MensajeSinSql35) + "|" +
+                  a.Altas.Count + "|" + IniciativaService.ComoJson(r)["guardada"]);
+        }
         a = new AlmacenFalso { Hay = false };
-        r = Enviar(Win(@"SORIANA\t_andresvr"), Form(PO), a, null, true);
+        r = Enviar(Win(@"SORIANA\t_olgado"), Form(PO), a, null, RolAdmin.Mod, correo("t_olgado@soriana.com"));
         j = IniciativaService.ComoJson(r);
-        js = (Dictionary<string, object>)j["solicitante"];
-        Check("X2 ADM sin persona, sin sql/29: valida, sin nombre ni correo inventados, no guarda, numero pendiente",
-              "True||True|||no_encontrado|0|False||True",
-              r.Valida + "|" + Campos(r) + "|" + r.Destinatarios.ExcepcionAdm + "|" + r.Destinatarios.SolicitanteNombre + "|" +
-              r.Destinatarios.SolicitanteCorreo + "|" + r.Destinatarios.SolicitanteEstado + "|" + a.Altas.Count + "|" +
-              j["guardada"] + "|" + j["numero_solicitud"] + "|" + (j["numero_pendiente"] as string == GeneradorNumeroSolicitudPendiente.Motivo));
-        Check("X2 la cuenta Windows real se conserva tal cual y va en la respuesta",
-              @"SORIANA\t_andresvr|SORIANA\t_andresvr|True||",
-              r.Destinatarios.Cuenta + "|" + js["cuenta"] + "|" + js["excepcion_adm"] + "|" + js["nombre"] + "|" + js["correo"]);
-        Check("X2 el correo del PO se sigue resolviendo", "jesuscamor@soriana.com", r.Destinatarios.ProductOwnerCorreo);
-        var cruda = IdentidadWindows.Desde(@"  soriana\T_AndresVR ", true);
-        r = Enviar(cruda, Form(PO), new AlmacenFalso { Hay = false }, null, true);
-        Check("X2 la cuenta guardada es IdentidadWindows.Original (no se reescribe)", cruda.Original, r.Destinatarios.Cuenta);
+        Check("X4 sin sql/29: valida y no guarda (numero pendiente), como cualquier solicitud",
+              "True|0|False||True",
+              r.Valida + "|" + a.Altas.Count + "|" + j["guardada"] + "|" + j["numero_solicitud"] + "|" +
+              (j["numero_pendiente"] as string == GeneradorNumeroSolicitudPendiente.Motivo));
 
+        foreach (var c in new[] { null, "", "   ", "no es correo", "a@b", "dos correos@soriana.com" })
+        {
+            a = new AlmacenFalso();
+            r = Enviar(Win(@"SORIANA\t_olgado"), Form(PO), a, null, RolAdmin.Mod, correo(c));
+            Check("X5 MOD sin CatPersona y CorreoUsuario " + (c == null ? "(ninguno o ambiguo)" : "'" + c + "'") + ": invalida en 'solicitante', no guarda",
+                  "False|solicitante|True|0|",
+                  r.Valida + "|" + Campos(r) + "|" +
+                  (Mensajes(r, "solicitante") == DestinatariosSolicitud.MensajeSinCorreoAdmin(@"SORIANA\t_olgado")) + "|" +
+                  a.Altas.Count + "|" + r.Destinatarios.SolicitanteCorreo);
+        }
         a = new AlmacenFalso();
-        r = Enviar(Win(@"SORIANA\t_andresvr"), Form(PO), a, null, true);
-        Check("X3 ADM sin persona, con sql/29: invalida en 'solicitante', no llega al almacen",
-              "False|solicitante|0|True",
-              r.Valida + "|" + Campos(r) + "|" + a.Altas.Count + "|" +
-              (Mensajes(r, "solicitante") == DestinatariosSolicitud.MensajeExcepcionSinGuardar));
+        r = Enviar(Win(@"SORIANA\t_olgado"), Form(PO), a, null, RolAdmin.Adm, null);
+        Check("X5 ADM sin CatPersona y sin fuente de UsuariosAdmin: invalida, no guarda", "False|solicitante|0",
+              r.Valida + "|" + Campos(r) + "|" + a.Altas.Count);
 
         foreach (var caso in new[] { new[] { @"SORIANA\compartido", "ambiguo" }, new[] { @"SORIANA\repnombre", "nombre_repetido" } })
         {
-            a = new AlmacenFalso { Hay = false };
-            r = Enviar(Win(caso[0]), Form(PO), a, null, true);
-            Check("X4 ADM " + caso[1] + ": valida, no se elige ninguna de las filas", "True|True|" + caso[1] + "|||0",
-                  r.Valida + "|" + r.Destinatarios.ExcepcionAdm + "|" + r.Destinatarios.SolicitanteEstado + "|" +
-                  r.Destinatarios.SolicitanteNombre + "|" + r.Destinatarios.SolicitanteCorreo + "|" + a.Altas.Count);
-            r = Enviar(Win(caso[0]), Form(PO), new AlmacenFalso(), null, true);
-            Check("X4 ADM " + caso[1] + " con sql/29: no guarda", "False|solicitante", r.Valida + "|" + Campos(r));
-        }
-        // Una fila no vigente no llega: FuentePersonasAcuseSql solo lee VigenteEnOrigen = 1.
-        Check("X5 la fuente real solo lee filas vigentes de CatPersona", true,
-              System.IO.File.ReadAllText(System.IO.Path.Combine("App_Code", "AcuseIniciativa.cs"))
-                  .Contains("SELECT Nombre, Correo FROM dbo.CatPersona WHERE VigenteEnOrigen = 1"));
-        var sinVigente = new PersonasFalsas().Con(PO, "jesuscamor@soriana.com");   // andresvr dado de baja: ya no viene
-        r = Enviar(Win(@"SORIANA\andresvr"), Form(PO), new AlmacenFalso { Hay = false }, sinVigente, true);
-        Check("X5 ADM cuya fila no esta vigente: no_encontrado, valida por excepcion", "True|True|no_encontrado|",
-              r.Valida + "|" + r.Destinatarios.ExcepcionAdm + "|" + r.Destinatarios.SolicitanteEstado + "|" + r.Destinatarios.SolicitanteCorreo);
-        r = Enviar(Win(@"SORIANA\andresvr"), Form(PO), new AlmacenFalso { Hay = false }, sinVigente, false);
-        Check("X5 ... y sin ADM se rechaza", "False|solicitante", r.Valida + "|" + Campos(r));
-
-        foreach (var anon in new[] { IdentidadWindows.Desde("", false), IdentidadWindows.Desde(@"SORIANA\t_andresvr", false), null })
-        {
-            a = new AlmacenFalso { Hay = false };
-            r = Enviar(anon, Form(PO), a, null, true);
-            Check("X6 ADM sin identidad autenticada: sin excepcion, invalida", "False|solicitante|False",
-                  r.Valida + "|" + Campos(r) + "|" + r.Destinatarios.ExcepcionAdm);
+            a = new AlmacenFalso();
+            r = Enviar(Win(caso[0]), Form(PO), a, null, RolAdmin.Adm, correo("adm.unico@soriana.com"));
+            Check("X6 ADM " + caso[1] + " en CatPersona: no se elige ninguna fila; va por UsuariosAdmin",
+                  "True|" + caso[1] + "|USUARIOSADMIN||adm.unico@soriana.com",
+                  r.Valida + "|" + r.Destinatarios.SolicitanteEstado + "|" + r.Destinatarios.FuenteSolicitante + "|" +
+                  a.Altas[0].SolicitanteNombre + "|" + a.Altas[0].SolicitanteCorreo);
         }
 
-        foreach (var hay in new[] { false, true })
+        // Sin rol ADM/MOD (PO/SO por la regla derivada, VIEWER, un rol raro):
+        // la regla estricta de CatPersona de siempre; UsuariosAdmin ni se mira.
+        foreach (var rol in new[] { null, RolAdmin.Viewer, "adm", "mod", "ADM ", "SUPER" })
         {
-            a = new AlmacenFalso { Hay = hay };
-            r = Enviar(Win(@"SORIANA\t_andresvr"), Form(PO), a, null, false);
-            Check("X7 no ADM (VIEWER/solicitante/MOD) sin persona, sql/29=" + hay + ": regla estricta de siempre",
-                  "False|solicitante|False|True|0",
-                  r.Valida + "|" + Campos(r) + "|" + r.Destinatarios.ExcepcionAdm + "|" +
-                  Mensajes(r, "solicitante").Contains("no está en el directorio de personas") + "|" + a.Altas.Count);
+            pedidos = 0;
+            a = new AlmacenFalso();
+            r = Enviar(Win(@"SORIANA\t_olgado"), Form(PO), a, null, rol, correo("t_olgado@soriana.com"));
+            Check("X7 rol " + (rol == null ? "(ninguno: PO/SO o VIEWER)" : "'" + rol + "'") + " sin CatPersona: regla estricta, sin UsuariosAdmin",
+                  "False|solicitante|True|0|0",
+                  r.Valida + "|" + Campos(r) + "|" +
+                  (Mensajes(r, "solicitante") == DestinatariosSolicitud.MensajeSolicitante(IdentidadAcuse.NoEncontrado, Win(@"SORIANA\t_olgado"))) + "|" +
+                  a.Altas.Count + "|" + pedidos);
         }
-        Check("X7 MOD (o ADM+MOD) no es ADM: el handler le pasa esAdm = false", "MOD|MOD|ADM",
-              RolAdmin.Resolver(new[] { "MOD" }) + "|" + RolAdmin.Resolver(new[] { "ADM", "MOD" }) + "|" + RolAdmin.Resolver(new[] { "ADM" }));
-        var hnd = System.IO.File.ReadAllText(System.IO.Path.Combine("handlers", "admin_iniciativas_validar.ashx"));
-        Check("X7 el handler toma ADM del rol del servidor, no del formulario",
-              "True|True|False",
-              hnd.Contains("Solicitar(solicitud, identidad, AccesoAdmin.Rol(context) == RolAdmin.Adm)") + "|" +
-              (hnd.IndexOf("AccesoIniciativas.ExigirSolicitud(context)") < hnd.IndexOf("AccesoAdmin.Rol(context)")) + "|" +
-              (hnd.Contains("req.Form[\"rol") || hnd.Contains("QueryString")));
+        a = new AlmacenFalso();
+        r = Enviar(Win(@"SORIANA\andresvr"), Form(PO), a, null, null, correo("x@soriana.com"));
+        Check("X7 PO/SO (sin rol) que esta en CatPersona: guarda como siempre", "True|CATPERSONA|Andres Vera Rios|andresvr@soriana.com",
+              r.Valida + "|" + r.Destinatarios.FuenteSolicitante + "|" + a.Altas[0].SolicitanteNombre + "|" + a.Altas[0].SolicitanteCorreo);
+
+        foreach (var anon in new[] { IdentidadWindows.Desde("", false), IdentidadWindows.Desde(@"SORIANA\t_olgado", false), null })
+        {
+            pedidos = 0;
+            a = new AlmacenFalso();
+            r = Enviar(anon, Form(PO), a, null, RolAdmin.Adm, correo("t_olgado@soriana.com"));
+            Check("X8 ADM sin identidad autenticada: invalida, sin UsuariosAdmin", "False|solicitante|0|0",
+                  r.Valida + "|" + Campos(r) + "|" + a.Altas.Count + "|" + pedidos);
+        }
 
         var fx = Form(PO); fx["so"] = "SO Otro";
         var fcat = Form(PO); fcat["categoria"] = "/No/Existe";
+        var fvacio = Form(PO); fvacio["titulo"] = ""; fvacio["descripcion"] = " ";
+        var fpct = Form(PO); fpct["pct"] = "150";
         foreach (var caso in new[] { new object[] { "PO fuera de la cascada", Form("PO Que No Esta En La Cascada") },
                                       new object[] { "SO que no forma fila", fx }, new object[] { "categoria que no existe", fcat },
-                                      new object[] { "PO sin correo", Form("PO Sin Correo") }, new object[] { "PO ambiguo", Form("PO Doble") } })
+                                      new object[] { "PO sin correo", Form("PO Sin Correo") }, new object[] { "PO ambiguo", Form("PO Doble") },
+                                      new object[] { "titulo y descripcion vacios", fvacio }, new object[] { "% fuera de rango", fpct } })
         {
-            a = new AlmacenFalso { Hay = false };
-            r = Enviar(Win(@"SORIANA\t_andresvr"), (NameValueCollection)caso[1], a, null, true);
-            Check("X8 ADM sin persona + " + caso[0] + ": se sigue rechazando, sin error de solicitante", "False|False|0",
+            a = new AlmacenFalso();
+            r = Enviar(Win(@"SORIANA\t_olgado"), (NameValueCollection)caso[1], a, null, RolAdmin.Mod, correo("t_olgado@soriana.com"));
+            Check("X9 MOD por UsuariosAdmin + " + caso[0] + ": se sigue rechazando, sin error de solicitante, no guarda", "False|False|0",
                   r.Valida + "|" + Campos(r).Contains("solicitante") + "|" + a.Altas.Count);
         }
 
-        a = new AlmacenFalso { Hay = false };
         var ft2 = Form(PO);
-        ft2["rol"] = "ADM"; ft2["esAdm"] = "true"; ft2["excepcion_adm"] = "true";
-        r = Enviar(Win(@"SORIANA\t_andresvr"), ft2, a, null, false);
-        Check("X9 rol/excepcion mandados por el navegador no abren nada", "False|solicitante|False",
-              r.Valida + "|" + Campos(r) + "|" + r.Destinatarios.ExcepcionAdm);
+        ft2["rol"] = "ADM"; ft2["esAdm"] = "true"; ft2["excepcion_adm"] = "true"; ft2["fuente"] = "USUARIOSADMIN";
+        r = Enviar(Win(@"SORIANA\t_olgado"), ft2, new AlmacenFalso(), null, null, null);
+        Check("X10 rol/fuente mandados por el navegador no abren nada", "False|solicitante|",
+              r.Valida + "|" + Campos(r) + "|" + r.Destinatarios.FuenteSolicitante);
         var ft3 = Form(PO);
         ft3["correo"] = "inventado@soriana.com"; ft3["solicitante_correo"] = "inventado@soriana.com"; ft3["nombre"] = "Inventado";
-        r = Enviar(Win(@"SORIANA\t_andresvr"), ft3, new AlmacenFalso { Hay = false }, null, true);
-        Check("X9 con la excepcion, nombre/correo del navegador tampoco se usan", "True||",
-              r.Valida + "|" + r.Destinatarios.SolicitanteNombre + "|" + r.Destinatarios.SolicitanteCorreo);
-        j = IniciativaService.ComoJson(Enviar(Win(@"SORIANA\andresvr"), Form(PO), new AlmacenFalso { Hay = false }, null, false));
-        Check("X10 respuesta normal: excepcion_adm=false y la cuenta", @"False|SORIANA\andresvr",
-              ((Dictionary<string, object>)j["solicitante"])["excepcion_adm"] + "|" + ((Dictionary<string, object>)j["solicitante"])["cuenta"]);
+        a = new AlmacenFalso();
+        r = Enviar(Win(@"SORIANA\t_olgado"), ft3, a, null, RolAdmin.Mod, correo("t_olgado@soriana.com"));
+        Check("X10 nombre/correo del navegador no se usan: el correo es el de UsuariosAdmin", "True||t_olgado@soriana.com",
+              r.Valida + "|" + a.Altas[0].SolicitanteNombre + "|" + a.Altas[0].SolicitanteCorreo);
+
+        var hnd = System.IO.File.ReadAllText(System.IO.Path.Combine("handlers", "admin_iniciativas_validar.ashx"));
+        Check("X11 handler: rol del servidor (AccesoAdmin.Rol) y correo de UsuariosAdmin por la cuenta autenticada; nada del formulario",
+              "True|True|True|False",
+              hnd.Contains("Solicitar(solicitud, identidad, AccesoAdmin.Rol(context), delegate") + "|" +
+              hnd.Contains("CorreoAdmin.Para(identidad, CorreoAdmin.Fuente,") + "|" +
+              (hnd.IndexOf("AccesoIniciativas.ExigirSolicitud(context)") < hnd.IndexOf("AccesoAdmin.Rol(context)")) + "|" +
+              (hnd.Contains("req.Form[\"rol") || hnd.Contains("req.Form[\"correo") || hnd.Contains("QueryString")));
+        Check("X11 handler: 51417 de la base va a 'solicitante'", true,
+              hnd.Contains("ex.Numero == 51405 || ex.Numero == 51417 ? DestinatariosSolicitud.CampoSolicitante"));
+        a = new AlmacenFalso { Lanza = new ErrorSolicitud(51417, "x") };
+        capturado = "sin error";
+        try { Enviar(Win(@"SORIANA\t_olgado"), Form(PO), a, null, RolAdmin.Mod, correo("t_olgado@soriana.com")); }
+        catch (ErrorSolicitud ex) { capturado = ex.Numero.ToString(); }
+        Check("X11 la base rechaza (51417, UsuariosAdmin cambio): llega al handler, no se traga", "51417", capturado);
+        Check("X12 MOD sigue sin ADM: RolAdmin MOD / ADM+MOD = MOD, solo todas ADM = ADM", "MOD|MOD|ADM|VIEWER|VIEWER",
+              RolAdmin.Resolver(new[] { "MOD" }) + "|" + RolAdmin.Resolver(new[] { "ADM", "MOD" }) + "|" + RolAdmin.Resolver(new[] { "ADM" }) + "|" +
+              RolAdmin.Resolver(new string[0]) + "|" + RolAdmin.Resolver(new[] { "ADM", null }));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso (" + pasados + ")" : "FALLOS: " + fallos);
         return fallos == 0 ? 0 : 1;

@@ -104,9 +104,13 @@ public sealed class IniciativaService
     // (o, sin sql/29, pedir el numero al emisor pendiente). Una solicitud
     // invalida nunca consume numero. `identidad` es la cuenta de IIS
     // (AccesoAdmin.IdentidadEscritura); nada del formulario la sustituye.
-    // `esAdm` es AccesoAdmin.Rol == ADM (EXCEPCION ADM de
-    // App_Code/SolicitudIniciativaAlta.cs); tampoco sale del formulario.
-    public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad, bool esAdm = false)
+    // `rol` es AccesoAdmin.Rol y `correoUsuariosAdmin` el CorreoUsuario de
+    // dbo.UsuariosAdmin de la cuenta (CorreoAdmin.Para); solo se usan si la
+    // cuenta no esta en CatPersona y el rol es ADM o MOD (ADM / MOD SIN
+    // CatPersona de App_Code/SolicitudIniciativaAlta.cs). Ninguno sale del
+    // formulario.
+    public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad,
+                                                   string rol = null, Func<string> correoUsuariosAdmin = null)
     {
         CatalogoSolicitud catalogo;
         CapacidadCategoria capacidad;
@@ -120,15 +124,17 @@ public sealed class IniciativaService
             catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
             capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
         }
-        return Solicitar(solicitud, identidad, catalogo, capacidad, esAdm);
+        return Solicitar(solicitud, identidad, catalogo, capacidad, rol, correoUsuariosAdmin);
     }
 
     // Lo mismo con catalogo y capacidad ya leidos (las pruebas, sin SQL).
     public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad,
-                                                   CatalogoSolicitud catalogo, CapacidadCategoria capacidad, bool esAdm = false)
+                                                   CatalogoSolicitud catalogo, CapacidadCategoria capacidad,
+                                                   string rol = null, Func<string> correoUsuariosAdmin = null)
     {
         var r = new ValidadorIniciativa().Validar(solicitud, catalogo, capacidad);
-        r.Destinatarios = DestinatariosSolicitud.Resolver(identidad, solicitud.ProductOwner, _personas.Personas(), r, esAdm);
+        r.Destinatarios = DestinatariosSolicitud.Resolver(identidad, solicitud.ProductOwner, _personas.Personas(), r,
+                                                          rol, correoUsuariosAdmin);
         if (!r.Valida) return r;
 
         if (!_almacen.Disponible())
@@ -136,11 +142,12 @@ public sealed class IniciativaService
             AsignarNumero(r, _numeros);
             return r;
         }
-        // Con sql/29 el solicitante sin correo de CatPersona no se puede
-        // guardar (y no se inventa uno): la excepcion ADM no llega al almacen.
-        if (r.Destinatarios.ExcepcionAdm)
+        // Un solicitante ADM/MOD de dbo.UsuariosAdmin (sin CatPersona) solo
+        // se guarda si la base tiene sql/35; sin ella, error claro y el
+        // almacen ni se llama (nada de exito falso).
+        if (r.Destinatarios.FuenteSolicitante == DestinatariosSolicitud.FuenteUsuariosAdmin && !_almacen.AceptaSolicitanteAdmin())
         {
-            r.Agregar(DestinatariosSolicitud.CampoSolicitante, DestinatariosSolicitud.MensajeExcepcionSinGuardar);
+            r.Agregar(DestinatariosSolicitud.CampoSolicitante, DestinatariosSolicitud.MensajeSinSql35);
             return r;
         }
         var token = SolicitudesIniciativa.Token(solicitud.Token);
@@ -215,7 +222,7 @@ public sealed class IniciativaService
             { "solicitante", d == null ? null : new Dictionary<string, object>
                 {
                     { "nombre", d.SolicitanteNombre }, { "correo", d.SolicitanteCorreo },
-                    { "cuenta", d.Cuenta }, { "excepcion_adm", d.ExcepcionAdm },
+                    { "cuenta", d.Cuenta }, { "fuente", d.FuenteSolicitante },
                 } },
             { "product_owner_correo", d == null ? null : d.ProductOwnerCorreo },
             { "pendientes", new List<string>(r.Guardada ? PendientesGuardada : Pendientes) },

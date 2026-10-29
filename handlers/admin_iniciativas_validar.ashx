@@ -18,8 +18,10 @@
 //          devuelve el MISMO numero con nuevo = false (no duplica).
 //     422  la misma forma con "valida": false y errores [{campo, mensaje}]:
 //          tambien si la cuenta no se resuelve a UNA persona con correo en
-//          dbo.CatPersona (campo "solicitante") o el PO no tiene un correo
-//          unico (campo "po"), o la base rechaza los correos (51405/51406).
+//          dbo.CatPersona y no es ADM/MOD con CorreoUsuario unico en
+//          dbo.UsuariosAdmin (campo "solicitante"), o el PO no tiene un
+//          correo unico (campo "po"), o la base rechaza los correos
+//          (51405/51406/51417).
 //     409  el token es de otra cuenta (51409).
 //     403  SinUsuario: no hay cuenta que firme.
 //     405  si no es POST;  413  si el archivo pasa el tope de ASP.NET.
@@ -31,9 +33,12 @@
 // llego y no esta vacio); se guarda su extension, no el archivo (no hay
 // destino confirmado). No se manda ningun correo.
 //
-// EXCEPCION ADM: con rol ADM (AccesoAdmin.Rol, del servidor) una cuenta que
-// no esta en CatPersona valida igual; sin sql/29 no se guarda nada y con
-// sql/29 se rechaza en "solicitante" (ver App_Code/SolicitudIniciativaAlta.cs).
+// ADM / MOD SIN CatPersona (sql/35): con rol ADM o MOD (AccesoAdmin.Rol:
+// dbo.UsuariosAdmin, del servidor) una cuenta que no esta en CatPersona
+// envia con el UNICO CorreoUsuario de su fila de dbo.UsuariosAdmin
+// (CorreoAdmin.Para, por la cuenta autenticada) y sin nombre. Sin ese
+// correo, o sin sql/35 en la base, 422 en "solicitante" y nada se guarda
+// (ver App_Code/SolicitudIniciativaAlta.cs). PO/SO sin rol: sin cambios.
 //
 // ACCESO: AccesoIniciativas.ExigirSolicitud: rol ADM o MOD; los demas si
 // son Product Owner o Service Owner vigentes (403 AccesoDenegado antes de
@@ -79,14 +84,18 @@ public class AdminIniciativasValidar : IHttpHandler
             ValidadorIniciativa.Resultado resultado;
             try
             {
-                resultado = new IniciativaService().Solicitar(solicitud, identidad, AccesoAdmin.Rol(context) == RolAdmin.Adm);
+                resultado = new IniciativaService().Solicitar(solicitud, identidad, AccesoAdmin.Rol(context), delegate
+                {
+                    return CorreoAdmin.Para(identidad, CorreoAdmin.Fuente,
+                        delegate (Exception e) { DashboardHandler.Registrar("admin_iniciativas_validar.ashx", e); });
+                });
             }
             catch (ErrorSolicitud ex)
             {
                 DashboardHandler.Registrar("admin_iniciativas_validar.ashx", ex);
                 if (ex.Numero == 51409)
                     return Error(context, 409, "Este borrador ya se envi\u00f3 con otra cuenta. Recarga la p\u00e1gina.", "TokenAjeno");
-                var campo = ex.Numero == 51405 ? DestinatariosSolicitud.CampoSolicitante
+                var campo = ex.Numero == 51405 || ex.Numero == 51417 ? DestinatariosSolicitud.CampoSolicitante
                           : ex.Numero == 51406 ? SolicitudIniciativa.CPo : null;
                 context.Response.StatusCode = 422;
                 context.Response.TrySkipIisCustomErrors = true;
