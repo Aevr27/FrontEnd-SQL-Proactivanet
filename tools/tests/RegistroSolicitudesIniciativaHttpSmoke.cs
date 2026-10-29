@@ -7,6 +7,9 @@
 //      reciben 403 y el lector ni se toca; ADM entra.
 //   L  listar: 200 con las filas, el total y el tope (200); sin filas, 200
 //      con lista vacia; sin tablas 501 (no se lista); la base falla 500.
+//   E  filtro Estado (2026-10-29): ENVIADA / APROBADA / RECHAZADA llegan al
+//      lector; sin estado o vacio = todas; otro valor 400 sin leer; MOD
+//      con filtro sigue en 403.
 //   D  detalle: numero 142 / 0000142 / #0000142; invalido 400 sin leer;
 //      no existe 404; con su historial.
 //   M  metodo y accion: POST 405; aprobar / rechazar / borrar: 400.
@@ -44,6 +47,7 @@ sealed class LectorFalso : ILectorSolicitudesIniciativa
     public Dictionary<int, Dictionary<string, object>> Detalles = new Dictionary<int, Dictionary<string, object>>();
     public readonly List<string> Llamadas = new List<string>();
     public int UltimoMaximo;
+    public string UltimoEstado = "(sin llamar)";
 
     public bool Disponible()
     {
@@ -51,10 +55,11 @@ sealed class LectorFalso : ILectorSolicitudesIniciativa
         if (LanzaDisponible != null) throw LanzaDisponible;
         return Hay;
     }
-    public LecturaSolicitudesIniciativa Listar(int maximo)
+    public LecturaSolicitudesIniciativa Listar(int maximo, string estado)
     {
         Llamadas.Add("listar");
         UltimoMaximo = maximo;
+        UltimoEstado = estado ?? "(todas)";
         if (LanzaListar != null) throw LanzaListar;
         return Lectura;
     }
@@ -195,6 +200,30 @@ public static class RegistroSolicitudesIniciativaHttpSmoke
         cuerpo = Correr("GET", "accion=detalle&numero=5", ADM, out st);
         Check("L6 la base falla en el detalle: 500", 500, st);
         RegistroSolicitudesIniciativa.Lector = lector;
+
+        // ---------------- E: filtro Estado ----------------
+        Check("E1 sin estado: el lector lista todas", "(todas)", lector.UltimoEstado);
+        foreach (var e in RegistroSolicitudesIniciativa.Estados)
+        {
+            lector.UltimoEstado = "(sin llamar)";
+            cuerpo = Correr("GET", "accion=listar&estado=" + e, ADM, out st);
+            Check("E2 estado=" + e + ": 200 y el lector filtra por " + e, "200|" + e, st + "|" + lector.UltimoEstado);
+        }
+        lector.UltimoEstado = "(sin llamar)";
+        cuerpo = Correr("GET", "accion=listar&estado=", ADM, out st);
+        Check("E3 estado vacio (Todas): 200 y todas", "200|(todas)", st + "|" + lector.UltimoEstado);
+        foreach (var e in new[] { "PENDIENTE", "enviada", "APLICADA", "ENVIADA'--", "ENVIADA,APROBADA" })
+        {
+            lector.Llamadas.Clear();
+            cuerpo = Correr("GET", "accion=listar&estado=" + Uri.EscapeDataString(e), ADM, out st);
+            Check("E4 estado desconocido '" + e + "': 400 EstadoDesconocido sin tocar el lector", "400|EstadoDesconocido|0",
+                  st + "|" + Campo(Json(cuerpo), "tipo") + "|" + lector.Llamadas.Count);
+        }
+        lector.Llamadas.Clear();
+        cuerpo = Correr("GET", "accion=listar&estado=ENVIADA", MOD, out st);
+        Check("E5 MOD con filtro: sigue 403 sin tocar el lector", "403|0", st + "|" + lector.Llamadas.Count);
+        Check("E6 Pendiente = ENVIADA (estado inicial de sql/29)", "ENVIADA", RegistroSolicitudesIniciativa.Pendiente);
+        Check("E6 los estados son los del CHECK de sql/31", "ENVIADA,APROBADA,RECHAZADA", string.Join(",", RegistroSolicitudesIniciativa.Estados));
 
         // ---------------- D: detalle ----------------
         foreach (var n in new[] { "142", "0000142", "%230000142" })

@@ -295,6 +295,6 @@ sealed class LectorAdmFalso : ILectorSolicitudesIniciativa
 {
     public int Llamadas;
     public bool Disponible() { Llamadas++; return true; }
-    public LecturaSolicitudesIniciativa Listar(int maximo) { Llamadas++; return new LecturaSolicitudesIniciativa(); }
+    public LecturaSolicitudesIniciativa Listar(int maximo, string estado) { Llamadas++; return new LecturaSolicitudesIniciativa(); }
     public Dictionary<string, object> Detalle(int numero) { Llamadas++; return null; }
 }

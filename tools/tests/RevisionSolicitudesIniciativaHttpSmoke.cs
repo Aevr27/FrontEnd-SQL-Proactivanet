@@ -91,7 +91,7 @@ sealed class LectorRevisionFalso : ILectorSolicitudesIniciativa
     public string Estado = "ENVIADA";
     public bool Existe = true;
     public bool Disponible() { return true; }
-    public LecturaSolicitudesIniciativa Listar(int maximo) { return new LecturaSolicitudesIniciativa(); }
+    public LecturaSolicitudesIniciativa Listar(int maximo, string estado) { return new LecturaSolicitudesIniciativa(); }
     public Dictionary<string, object> Detalle(int numero)
     {
         if (!Existe) return null;

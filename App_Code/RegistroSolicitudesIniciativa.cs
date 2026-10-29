@@ -8,9 +8,11 @@
 //                  apaga el guardado), aqui un error de conexion o permisos
 //                  SE LANZA: "faltan las tablas" (501) y "la base fallo"
 //                  (500) se dicen distinto.
-//   Listar(max)    las mas recientes primero (el numero crece con el
-//                  tiempo) y el total, para decir si hay mas de las que se
-//                  muestran.
+//   Listar(max, estado)  las mas recientes primero (el numero crece con
+//                  el tiempo) y el total, para decir si hay mas de las que
+//                  se muestran. estado (2026-10-29): ENVIADA (pendiente),
+//                  APROBADA o RECHAZADA (Estados); null = todas. Filtra en
+//                  la base, asi el tope y el total son los de ese estado.
 //   Detalle(n)     la solicitud con su bitacora (orden de IdEvento); null
 //                  si no existe.
 //
@@ -43,7 +45,7 @@ using System.Globalization;
 public interface ILectorSolicitudesIniciativa
 {
     bool Disponible();
-    LecturaSolicitudesIniciativa Listar(int maximo);
+    LecturaSolicitudesIniciativa Listar(int maximo, string estado);
     Dictionary<string, object> Detalle(int numero);
 }
 
@@ -132,22 +134,32 @@ public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativ
     // Solo las de una cuenta (null = todas: nunca para "Mis solicitudes").
     private const string FiltroCuenta = "UPPER(s.SolicitanteCuenta) = UPPER(@cuenta)";
 
-    public LecturaSolicitudesIniciativa Listar(int maximo) { return Leer(null, maximo); }
+    public LecturaSolicitudesIniciativa Listar(int maximo) { return Leer(null, maximo, null); }
+
+    // estado: uno de RegistroSolicitudesIniciativa.Estados o null (todas).
+    public LecturaSolicitudesIniciativa Listar(int maximo, string estado)
+    {
+        if (estado != null && !RegistroSolicitudesIniciativa.EsEstado(estado)) throw new ArgumentOutOfRangeException("estado");
+        return Leer(null, maximo, estado);
+    }
 
     public LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo)
     {
         if (string.IsNullOrEmpty(cuenta)) throw new ArgumentNullException("cuenta");
-        return Leer(cuenta, maximo);
+        return Leer(cuenta, maximo, null);
     }
 
-    private LecturaSolicitudesIniciativa Leer(string cuenta, int maximo)
+    private LecturaSolicitudesIniciativa Leer(string cuenta, int maximo, string estado)
     {
         var l = new LecturaSolicitudesIniciativa();
         using (var cn = Abierta())
         {
             l.RevisionDisponible = ConRevision(cn);
             l.CreaIniciativa = l.RevisionDisponible && ConCodigo(cn);
-            var donde = cuenta == null ? "" : " WHERE " + FiltroCuenta;
+            var filtros = new List<string>();
+            if (cuenta != null) filtros.Add(FiltroCuenta);
+            if (estado != null) filtros.Add("s.Estado = @estado");
+            var donde = filtros.Count == 0 ? "" : " WHERE " + string.Join(" AND ", filtros.ToArray());
             var sql = "SELECT TOP (@max)" + Columnas(l.RevisionDisponible, l.CreaIniciativa) + @"
 FROM adm.SolicitudIniciativa AS s" + donde + @"
 ORDER BY s.NumeroSolicitud DESC;
@@ -156,6 +168,7 @@ SELECT COUNT(*) FROM adm.SolicitudIniciativa AS s" + donde + ";";
             {
                 cmd.Parameters.Add("@max", SqlDbType.Int).Value = Math.Max(1, Math.Min(maximo, 500));
                 if (cuenta != null) cmd.Parameters.Add("@cuenta", SqlDbType.NVarChar, 256).Value = cuenta;
+                if (estado != null) cmd.Parameters.Add("@estado", SqlDbType.VarChar, 20).Value = estado;
                 using (var r = cmd.ExecuteReader())
                 {
                     while (r.Read()) l.Solicitudes.Add(Fila(r));
@@ -277,6 +290,16 @@ public static class RegistroSolicitudesIniciativa
 
     // Como la cola de cambios (admin_iniciativas_solicitudes.ashx): 200.
     public const int Maximo = 200;
+
+    // Los valores de adm.SolicitudIniciativa.Estado (CHECK de sql/29 y
+    // sql/31). ENVIADA es la pendiente de revision; las otras dos son finales.
+    public const string Pendiente = "ENVIADA";
+    public static readonly string[] Estados = { Pendiente, "APROBADA", "RECHAZADA" };
+
+    public static bool EsEstado(string estado)
+    {
+        return Array.IndexOf(Estados, estado) >= 0;
+    }
 
     public const string MensajeSoloAdm = "Solo un administrador (ADM) puede ver el registro de solicitudes nuevas.";
     public const string MotivoSinTablas =

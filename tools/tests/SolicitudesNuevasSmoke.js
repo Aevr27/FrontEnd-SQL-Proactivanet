@@ -175,7 +175,7 @@ function Montar(rol, respuestas) {
     [a.$('solVistas').hidden, a.$('snBloque').hidden, a.$('solVistaCambio').hidden, a.pedidas.length,
      a.$('solVerCambio').atributos['aria-pressed'], a.$('solVerNuevas').atributos['aria-pressed']]);
   var lista = await a.v.verNuevas();
-  Check('V3 Nuevas: pide listar y pinta; oculta De cambio', [1, '../handlers/admin_iniciativas_solicitudes_nuevas.ashx?accion=listar', 2, true, false, true, '', 'true'],
+  Check('V3 Nuevas: pide listar (Pendientes por omision) y pinta; oculta De cambio', [1, '../handlers/admin_iniciativas_solicitudes_nuevas.ashx?accion=listar&estado=ENVIADA', 2, true, false, true, '', 'true'],
     [a.pedidas.length, a.pedidas[0], lista.length, /#0000002/.test(a.$('snLista').innerHTML), a.$('snBloque').hidden, a.$('solVistaCambio').hidden,
      a.$('snMsg').innerHTML, a.$('solVerNuevas').atributos['aria-pressed']]);
   var vuelta = 0;
@@ -186,9 +186,38 @@ function Montar(rol, respuestas) {
   // Reabrir la pestaña con Nuevas elegida: relee.
   a = Montar('ADM', [Respuesta(200, { solicitudes: [], total: 0, maximo: 200 }), Respuesta(200, { solicitudes: [Fila(1)], total: 1, maximo: 200 })]);
   await a.v.verNuevas();
-  Check('V5 sin solicitudes: 200 con el texto de vacio, sin error', [true, ''], [/Todavía no hay/.test(a.$('snLista').innerHTML), a.$('snMsg').className.trim().split(' ').slice(1).join(' ')]);
+  Check('V5 sin solicitudes (Pendientes): 200 con el texto de vacio del filtro, sin error', [true, ''], [/No hay solicitudes nuevas con ese estado/.test(a.$('snLista').innerHTML), a.$('snMsg').className.trim().split(' ').slice(1).join(' ')]);
   await a.v.abrir();
   Check('V6 reabrir la pestaña con Nuevas elegida: vuelve a leer de la base', [2, true], [a.pedidas.length, /#0000001/.test(a.$('snLista').innerHTML)]);
+
+  // Filtro Estado (como la cola de Cambios): Pendientes = ENVIADA por omision.
+  var vacia = function () { return Respuesta(200, { solicitudes: [], total: 0, maximo: 200 }); };
+  a = Montar('ADM', [vacia(), vacia(), vacia(), vacia(), vacia()]);
+  await a.v.abrir();
+  await a.v.verNuevas();
+  var cambiar = function (valor) { return a.$('snFiltro').escuchas.change({ target: { value: valor } }); };
+  await cambiar('APROBADA');
+  await cambiar('RECHAZADA');
+  await cambiar('');
+  await new Promise(function (ok) { setTimeout(ok, 0); });   // el change no devuelve la lectura
+  var base = '../handlers/admin_iniciativas_solicitudes_nuevas.ashx?accion=listar';
+  Check('F1 filtro: Pendientes de inicio; cambiar relee con su estado; Todas sin estado',
+    [base + '&estado=ENVIADA', base + '&estado=APROBADA', base + '&estado=RECHAZADA', base], a.pedidas);
+  Check('F2 Todas sin solicitudes: el texto de siempre', true, /Todavía no hay solicitudes nuevas guardadas/.test(a.$('snLista').innerHTML));
+  a.v.listar();
+  await new Promise(function (ok) { setTimeout(ok, 0); });
+  Check('F3 Actualizar / refresco conserva el filtro elegido', base, a.pedidas[4]);
+  var mod = Montar('MOD', [vacia()]);
+  await mod.v.abrir();
+  await mod.v.verNuevas();
+  Check('F4 MOD: ni conmutador ni lectura, con o sin filtro', [true, 0], [mod.$('solVistas').hidden, mod.pedidas.length]);
+  var paginaHtml = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.html'), 'utf8');
+  var sel = (paginaHtml.match(/<select id="snFiltro">([\s\S]*?)<\/select>/) || [])[1] || '';
+  Check('F5 la pagina: select snFiltro dentro de snBloque, Pendientes elegida, mismos valores que Cambios',
+    [true, true, ['ENVIADA', 'APROBADA', 'RECHAZADA', '']],
+    [/<div id="snBloque" hidden>[\s\S]*<select id="snFiltro">[\s\S]*<div id="snLista">/.test(paginaHtml),
+     /<option value="ENVIADA" selected>Pendientes<\/option>/.test(sel),
+     (sel.match(/value="([^"]*)"/g) || []).map(function (v) { return v.slice(7, -1); })]);
 
   // Cargando: se ve mientras no llega la respuesta.
   var soltar;

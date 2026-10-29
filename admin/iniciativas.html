@@ -432,6 +432,13 @@
     <!-- Registro de solo lectura de las Nuevas solicitudes guardadas (sql/29). -->
     <div id="snBloque" hidden>
       <div class="ini-sol-barra">
+        <label for="snFiltro">Estado</label>
+        <select id="snFiltro">
+          <option value="ENVIADA" selected>Pendientes</option>
+          <option value="APROBADA">Aprobadas</option>
+          <option value="RECHAZADA">Rechazadas</option>
+          <option value="">Todas</option>
+        </select>
         <span class="ini-nota" id="snResumen"></span>
         <button type="button" class="btn linea chico" id="snActualizar">Actualizar</button>
       </div>

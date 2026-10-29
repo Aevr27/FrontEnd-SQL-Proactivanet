@@ -3,7 +3,9 @@
    Solicitudes: registro de las Nuevas solicitudes guardadas (sql/29) y su
    revision por ADM (sql/31).
 
-     listar    GET  handlers/admin_iniciativas_solicitudes_nuevas.ashx?accion=listar
+     listar    GET  handlers/admin_iniciativas_solicitudes_nuevas.ashx?accion=listar&estado=
+                    (filtro "Estado" como la cola de Cambios: ENVIADA =
+                    Pendientes por omision, APROBADA, RECHAZADA; "" = todas)
      detalle   GET  ...?accion=detalle&numero=      la solicitud y su historial
      aprobar   POST handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx?accion=aprobar
                     numero, estado (el Estado inicial; "" = sin estado), comentario (opcional)
@@ -196,6 +198,7 @@ window.SolicitudesNuevas = (function () {
       this.pedir = pedir || function (url, op) { return fetch(url, op); };
       this.rol = null;
       this.vista = 'cambio';     // 'nuevas' | 'cambio' (la de siempre, de inicio)
+      this.filtro = 'ENVIADA';   // snFiltro: Pendientes por omision ('' = todas)
       this.detalle = null;
       this.ocupado = false;      // una revision a la vez (doble clic)
       this.alVerCambio = null;   // al volver a "Cambios": la pagina relee esa cola
@@ -212,6 +215,7 @@ window.SolicitudesNuevas = (function () {
       var self = this;
       this.$('solVerNuevas').addEventListener('click', function () { self.verNuevas(); });
       this.$('solVerCambio').addEventListener('click', function () { self.verCambio(); });
+      this.$('snFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.listar(); });
       this.$('snActualizar').addEventListener('click', function () { self.listar(); });
       this.$('snLista').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-sn-numero]') : e.target;
@@ -282,13 +286,15 @@ window.SolicitudesNuevas = (function () {
         this.mensaje('snMsg', '', '<span>Cargando solicitudes nuevas…</span>');
         this.$('snResumen').textContent = '';
       }
-      return Promise.resolve().then(function () { return self.pedir(URL + '?accion=listar', { cache: 'no-store', credentials: 'same-origin' }); })
+      var url = URL + '?accion=listar' + (this.filtro ? '&estado=' + encodeURIComponent(this.filtro) : '');
+      var vacio = this.filtro ? 'No hay solicitudes nuevas con ese estado.' : null;
+      return Promise.resolve().then(function () { return self.pedir(url, { cache: 'no-store', credentials: 'same-origin' }); })
         .then(leer)
         .then(function (r) {
           if (mia !== self.lecturas) return null;
           self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
-            self.$('snLista').innerHTML = htmlLista(r.json.solicitudes);
+            self.$('snLista').innerHTML = htmlLista(r.json.solicitudes, vacio);
             self.$('snResumen').textContent = textoTotal(r.json);
             self.mensaje('snMsg', '', '');
             return r.json.solicitudes;

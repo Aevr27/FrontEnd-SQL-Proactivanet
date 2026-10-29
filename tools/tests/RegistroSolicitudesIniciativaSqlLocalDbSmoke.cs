@@ -19,6 +19,9 @@
 //   X  tope: Listar(2) de 3 = 2 filas y total 3.
 //   M  Mis solicitudes: ListarDe / DetalleDe solo con las de UNA cuenta.
 //   S  solo lectura: leer no cambia ninguna tabla.
+//   Q  filtro Estado (2026-10-29): Listar(max, estado) filtra en la base
+//      (filas y total); null = todas; con sql/31 y una fila RECHAZADA
+//      escrita como dbo, cada estado trae solo las suyas.
 //   F  la base falla: una base que no existe LANZA (no es "sin tablas").
 //
 // Compilar (como SolicitudIniciativaSqlLocalDbSmoke): App_Code\*.cs en
@@ -216,6 +219,34 @@ public static class RegistroSolicitudesIniciativaSqlLocalDbSmoke
             Lector().Listar(200); Lector().Detalle(1); Lector().Detalle(142); Lector().Disponible();
             Lector().ListarDe(@"SORIANA\andresvr", 200); Lector().DetalleDe(1, @"SORIANA\andresvr");
             Check("S1 leer no cambia solicitudes, eventos ni contador", antes, Conteos());
+
+            // ---------------- Q: filtro Estado ----------------
+            Func<LecturaSolicitudesIniciativa, string> nq = delegate (LecturaSolicitudesIniciativa x)
+            {
+                var r = new List<string>();
+                foreach (var s in x.Solicitudes) r.Add(Convert.ToString(s["numero"]));
+                return x.Total + ":" + string.Join(",", r.ToArray());
+            };
+            Check("Q1 solo sql/29: ENVIADA = todas; APROBADA / RECHAZADA vacias; null = todas",
+                  "4:142,3,2,1|0:|0:|4:142,3,2,1",
+                  nq(Lector().Listar(200, "ENVIADA")) + "|" + nq(Lector().Listar(200, "APROBADA")) + "|" +
+                  nq(Lector().Listar(200, "RECHAZADA")) + "|" + nq(Lector().Listar(200, null)));
+            string malo;
+            try { Lector().Listar(200, "PENDIENTE"); malo = "sin error"; }
+            catch (ArgumentOutOfRangeException) { malo = "ArgumentOutOfRangeException"; }
+            Check("Q2 estado desconocido: no llega a la base", "ArgumentOutOfRangeException", malo);
+            using (var cn = Abrir(Base))
+            {
+                Lotes(cn, Leer("sql", "31_solicitud_iniciativa_revision.sql"));
+                Exec(cn, "UPDATE adm.SolicitudIniciativa SET Estado = 'RECHAZADA', RevisadoPor = N'SORIANA\\t_adm', FechaRevisionUtc = SYSUTCDATETIME(), " +
+                         "ComentarioRevision = N'Prueba' WHERE NumeroSolicitud = 2;");
+            }
+            Check("Q3 con sql/31 y #2 RECHAZADA: Pendientes sin ella, Rechazadas solo ella, Aprobadas vacia, todas 4",
+                  "3:142,3,1|1:2|0:|4:142,3,2,1",
+                  nq(Lector().Listar(200, "ENVIADA")) + "|" + nq(Lector().Listar(200, "RECHAZADA")) + "|" +
+                  nq(Lector().Listar(200, "APROBADA")) + "|" + nq(Lector().Listar(200, null)));
+            Check("Q4 el tope y el total son los del estado", "1|3", Lector().Listar(1, "ENVIADA").Solicitudes.Count + "|" + Lector().Listar(1, "ENVIADA").Total);
+            Check("Q5 Mis solicitudes no cambia (sin filtro)", "3:3,2,1", nq(Lector().ListarDe(@"SORIANA\andresvr", 200)));
 
             // ---------------- F: la base falla ----------------
             string resultado;

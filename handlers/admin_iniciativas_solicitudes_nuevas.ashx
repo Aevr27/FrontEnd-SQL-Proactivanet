@@ -4,7 +4,10 @@
 // "Nuevas" de la pestaña Solicitudes (admin/solicitudes-nuevas.js). Lee con
 // RegistroSolicitudesIniciativa.Lector (App_Code/RegistroSolicitudesIniciativa.cs).
 //
-//   GET ?accion=listar              -> 200 { solicitudes: [...], total, maximo }
+//   GET ?accion=listar[&estado=ENVIADA|APROBADA|RECHAZADA]
+//                                   -> 200 { solicitudes: [...], total, maximo }
+//                                      sin estado (o vacio): todas; otro
+//                                      valor: 400 EstadoDesconocido sin leer.
 //   GET ?accion=detalle&numero=N    -> 200 { ...la solicitud, eventos: [...] }
 //                                      Una ENVIADA con sql/32 (crea_iniciativa)
 //                                      trae estados_problem: las opciones del
@@ -39,6 +42,11 @@ public class AdminIniciativasSolicitudesNuevas : IHttpHandler
             if (accion != "listar" && accion != "detalle")
                 return Error(context, 400, "Acción desconocida.", "AccionDesconocida");
 
+            var estado = accion == "listar" ? req.QueryString["estado"] : null;
+            if (string.IsNullOrEmpty(estado)) estado = null;
+            else if (!RegistroSolicitudesIniciativa.EsEstado(estado))
+                return Error(context, 400, "Estado de solicitud desconocido.", "EstadoDesconocido");
+
             int numero = 0;
             if (accion == "detalle")
             {
@@ -52,7 +60,7 @@ public class AdminIniciativasSolicitudesNuevas : IHttpHandler
 
             if (accion == "listar")
             {
-                var l = lector.Listar(RegistroSolicitudesIniciativa.Maximo);
+                var l = lector.Listar(RegistroSolicitudesIniciativa.Maximo, estado);
                 return new Dictionary<string, object>
                 {
                     { "solicitudes", l.Solicitudes }, { "total", l.Total }, { "maximo", RegistroSolicitudesIniciativa.Maximo },
