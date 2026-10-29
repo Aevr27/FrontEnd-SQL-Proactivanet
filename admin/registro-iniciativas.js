@@ -453,8 +453,9 @@ window.RegistroIniciativas = (function () {
   // La celda del % pedido de una categoria de "Solicitar cambios": el
   // selector "% / Tickets" y, segun el modo, la casilla del % de siempre
   // (htmlPct) o la de tickets con lo que da en % (htmlMetaHint). clave:
-  // 'l<n>' (ligada n) o 'n<n>' (nueva n).
-  function celdaMetaCambio(c, ruta, clave, htmlPct, vacio) {
+  // 'l<n>' (ligada n) o 'n<n>' (nueva n). invalido: 'true' si lo pedido
+  // pasa del tope (su aviso es regCambioTope-<clave>).
+  function celdaMetaCambio(c, ruta, clave, htmlPct, vacio, invalido) {
     var m = c.meta(ruta);
     var modo = '<label class="ini-ed-pct"><span class="ini-sr">Pedir ' + Escape.html(ruta) + ' en</span>' +
       // data-nativo: dos opciones, sin el desplegable con buscador.
@@ -463,7 +464,8 @@ window.RegistroIniciativas = (function () {
     if (m.modo !== 'tickets') return modo + htmlPct;
     return modo + '<label class="ini-ed-pct"><span class="ini-sr">Tickets a reducir de ' + Escape.html(ruta) + '</span>' +
       '<input type="number" min="0" step="1" data-cambio-tickets="' + clave + '" value="' + Escape.attr(m.tickets) + '"' +
-      (vacio ? ' placeholder="' + Escape.attr(vacio) + '"' : '') + '> tickets</label>' +
+      (vacio ? ' placeholder="' + Escape.attr(vacio) + '"' : '') + ' aria-describedby="regCambioMeta-' + clave + ' regCambioTope-' + clave +
+      '" aria-invalid="' + (invalido === 'true' ? 'true' : 'false') + '"> tickets</label>' +
       '<small class="ini-sub" id="regCambioMeta-' + clave + '">' + htmlMetaHint(c, ruta) + '</small>';
   }
 
@@ -516,27 +518,123 @@ window.RegistroIniciativas = (function () {
     return salida;
   }
 
-  // El indicador junto a la ruta (boton con icono y cuantas son; su nombre
-  // accesible lo dice completo) y su detalle plegable debajo. Sin otras
-  // activas no se pinta nada. clave: 'l<n>' / 'n<n>'.
-  function htmlOtrasCambio(otras, clave, abierto) {
-    if (!otras || !otras.length) return '';
-    var id = 'regCambioOtras-' + clave, n = otras.length;
-    var rotulo = n + (n === 1 ? ' otra iniciativa activa' : ' otras iniciativas activas') + ' en esta categoría';
+  // Centesimas de % que comprometen `otras` (fracciones a 4 decimales,
+  // como CapacidadCategoria.Usado).
+  function comprometidoOtras(otras) {
     var suma = 0;
-    otras.forEach(function (o) { suma += Math.round(o.pct * 10000); });
-    return '<button type="button" class="ini-otras-boton" data-cambio-otras="' + clave + '" aria-expanded="' + (abierto ? 'true' : 'false') +
-        '" aria-controls="' + id + '" title="' + Escape.attr(rotulo + ': ver sus %') + '">' +
-        '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3"/></svg>' +
-        '<span aria-hidden="true">' + n + '</span><span class="ini-sr">' + Escape.html(rotulo) + '</span></button>' +
-      '<div class="ini-otras" id="' + id + '"' + (abierto ? '' : ' hidden') + '>' +
-        '<ul>' + otras.map(function (o) {
+    (otras || []).forEach(function (o) { suma += Math.round(o.pct * 10000); });
+    return suma;
+  }
+
+  // El indicador junto a la ruta: una palomita chica (boton; su nombre
+  // accesible y su title dicen cuantas son y cuanto comprometen) que abre el
+  // detalle. Sin otras activas no se pinta nada. clave: 'l<n>' / 'n<n>'.
+  function htmlOtrasCheck(otras, clave, abierto) {
+    if (!otras || !otras.length) return '';
+    var n = otras.length;
+    var rotulo = n + (n === 1 ? ' otra iniciativa activa' : ' otras iniciativas activas') + ' en esta categoría (' +
+      comprometidoOtras(otras) / 100 + '% comprometido)';
+    return '<button type="button" class="ini-otras-check" data-cambio-otras="' + clave + '" aria-expanded="' + (abierto ? 'true' : 'false') +
+        '" aria-controls="regCambioOtras-' + clave + '" title="' + Escape.attr(rotulo + ': ver detalle') + '">' +
+        '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.5 8.5l3 3 6-7"/></svg>' +
+        '<span class="ini-sr">' + Escape.html(rotulo) + '</span></button>';
+  }
+
+  // Su detalle: una fila propia justo debajo de la de la categoria, a todo
+  // el ancho de la tabla (columnas), para que abrirlo no mueva las columnas
+  // de los %. Plegada por omision.
+  function htmlOtrasFila(otras, clave, abierto, columnas) {
+    if (!otras || !otras.length) return '';
+    var suma = comprometidoOtras(otras);
+    return '<tr class="ini-otras-fila" id="regCambioOtras-' + clave + '"' + (abierto ? '' : ' hidden') + '><td colspan="' + columnas + '">' +
+      '<div class="ini-otras"><ul>' + otras.map(function (o) {
           return '<li><b>' + Escape.html(o.folio) + '</b> · <span class="ini-otras-pct">' + Escape.html(Math.round(o.pct * 10000) / 100) + '%</span>' +
             (o.estado ? ' · <span class="ini-otras-estado">' + Escape.html(o.estado) + '</span>' : '') +
             (o.titulo ? '<span class="ini-otras-titulo">' + Escape.html(o.titulo) + '</span>' : '') + '</li>';
         }).join('') + '</ul>' +
-        '<small class="ini-sub">Ya comprometido por otras: ' + Escape.html(suma / 100) + '%. Solo iniciativas activas.</small>' +
-      '</div>';
+        '<small class="ini-sub">Ya comprometido por otras: ' + Escape.html(suma / 100) + '%; disponible: ' +
+          Escape.html(Math.max(0, 10000 - suma) / 100) + '% del tope de 100% por categoría. Solo iniciativas activas.</small>' +
+      '</div></td></tr>';
+  }
+
+  // TOPE DE 100% POR CATEGORIA al pedir un % en "Solicitar cambios": la
+  // MISMA regla con la que el servidor valida la solicitud al aplicarla
+  // (ValidadorGestionAdmin.Modificar + Excede, App_Code/
+  // GestionIniciativaAdmin.cs), sobre el registro ya cargado:
+  //   - el % pedido REEMPLAZA el de la iniciativa en esa ruta (no se suma);
+  //     la propia iniciativa no cuenta contra si misma.
+  //   - disponible = 100% - lo de las OTRAS activas con agrupador
+  //     (otrasEnCategoria = CapacidadCategoria.Otras), nunca menos de 0.
+  //   - solo se revisa una fila que va a consumir (ConsumeAlEscribir):
+  //     Estado final vivo y agrupacion de `agrupadores` o sin agrupacion
+  //     (la de una nueva sale del prefijo, TiposPorPrefijo, como al enviar);
+  //     una ligada, ademas, solo si su % cambia o antes no consumia.
+  //   - una ligada que ya consumia siempre puede bajar o dejar igual su %
+  //     (ruta ya excedida por datos historicos): el maximo es el mayor entre
+  //     lo disponible y su % actual.
+  // cap: { iniciativas, agrupadores, estadosActivos } del registro;
+  // nuevo: % valido (texto); estadoFinal: el Estado con el que quedaria.
+  //   -> null (cabe) o { pedido, disponible, usado, maximo } en centesimas.
+  function enListaPlana(lista, v) {
+    var k = plano(v);
+    return (lista || []).some(function (x) { return plano(x) === k; });
+  }
+  function consumeAlEscribir(cap, estado, agrup) {
+    return enListaPlana(cap.estadosActivos, estado) && (!plano(agrup) || enListaPlana(cap.agrupadores, agrup));
+  }
+  function agrupacionNueva(folio) {
+    var T = window.IniciativaAdmin && window.IniciativaAdmin.TiposPorPrefijo;
+    return T ? T.agrupacion(T.clasificacion(String(folio || '').slice(0, 3))) : '';
+  }
+  function excedeTope(cap, iniciativa, ruta, nuevo, nueva, estadoFinal) {
+    if (!cap || !iniciativa || !ruta) return null;
+    var pedido = Math.round(Number(nuevo) * 100), anterior = null, agrup;
+    if (!isFinite(pedido) || !enListaPlana(cap.estadosActivos, estadoFinal)) return null;
+    if (nueva) agrup = agrupacionNueva(iniciativa.folio);
+    else {
+      var c = (iniciativa.categorias || []).filter(function (x) { return x.categoria === ruta; })[0];
+      if (!c) return null;
+      agrup = c.agrup;
+      var actual = typeof c.pct_dism === 'number' && isFinite(c.pct_dism) ? Math.round(c.pct_dism * 10000) : null;
+      var consumia = consumeAlEscribir(cap, iniciativa.estado, c.agrup);
+      if (consumia && pedido === actual) return null;
+      if (consumia) anterior = actual;
+    }
+    if (!consumeAlEscribir(cap, estadoFinal, agrup)) return null;
+    var usado = comprometidoOtras(otrasEnCategoria(cap.iniciativas, cap.agrupadores, ruta, iniciativa.folio));
+    var disponible = Math.max(0, 10000 - usado);
+    if (pedido <= disponible || (anterior !== null && pedido <= anterior)) return null;
+    return { pedido: pedido, disponible: disponible, usado: usado, maximo: Math.max(disponible, anterior || 0) };
+  }
+
+  // Reactivada en la misma solicitud (Estado final vivo, el actual no): sus
+  // ligadas con % que no se piden cambiar pasan a consumir con su % actual y
+  // tambien se revisan, como en Modificar al aplicar. pedidas: rutas con %
+  // pedido. -> [{ ruta, x }] (x como excedeTope).
+  function reactivadasExceden(cap, iniciativa, estadoFinal, pedidas) {
+    var salida = [];
+    if (!cap || !iniciativa || estadoFinal === iniciativa.estado || !enListaPlana(cap.estadosActivos, estadoFinal)) return salida;
+    (iniciativa.categorias || []).forEach(function (c) {
+      if ((pedidas || []).indexOf(c.categoria) >= 0) return;
+      if (typeof c.pct_dism !== 'number' || !(c.pct_dism > 0)) return;
+      if (!consumeAlEscribir(cap, estadoFinal, c.agrup) || consumeAlEscribir(cap, iniciativa.estado, c.agrup)) return;
+      var pedido = Math.round(c.pct_dism * 10000);
+      var usado = comprometidoOtras(otrasEnCategoria(cap.iniciativas, cap.agrupadores, c.categoria, iniciativa.folio));
+      var disponible = Math.max(0, 10000 - usado);
+      if (pedido > disponible) salida.push({ ruta: c.categoria, x: { pedido: pedido, disponible: disponible, usado: usado, maximo: disponible } });
+    });
+    return salida;
+  }
+
+  // El mensaje del tope. vol: la volumetria si se pidio en tickets (dice
+  // tambien cuantos tickets da el maximo); entrada: como empieza ('pides').
+  function mensajeTope(ruta, x, vol, entrada) {
+    var M = window.IniciativaAdmin && window.IniciativaAdmin.MetaCategoria;
+    var tk = typeof vol === 'number' && M ? M.tickets(vol, String(x.maximo / 100)) : null;
+    return ruta + ': ' + (entrada || (typeof vol === 'number' ? 'esos tickets equivalen a ' : 'pides ')) + x.pedido / 100 +
+      '%, pero el máximo permitido es ' + x.maximo / 100 + '%' + (tk !== null ? ' (' + tk.toLocaleString('es-MX') + ' tickets con la volumetría de hoy)' : '') +
+      '. Otras iniciativas activas ya comprometen ' + x.usado / 100 + '% y el tope por categoría es 100%' +
+      (x.maximo > x.disponible ? '; la categoría ya pasa del tope: solo se puede bajar o dejar igual su % actual.' : '.');
   }
 
   // Lo escrito en un selector -> la opcion real, o ''.
@@ -1515,6 +1613,10 @@ window.RegistroIniciativas = (function () {
       // garantice.
       this.metas = {};
       this.vols = {};
+      // Tope de 100% por categoria (excedeTope): { iniciativas, agrupadores,
+      // estadosActivos } del registro, o null (sin registro no se revisa
+      // aqui; el servidor lo revisa al aplicar).
+      this.capacidad = opciones.capacidad || null;
       // Solo con campo 'datos' (sql/25, opciones.datos): por dato, null = no
       // se pide; texto = el valor pedido. Pedido y vacio no se acepta: una
       // solicitud nunca deja vacios Titulo, PO ni SO. PO / SO, de las listas
@@ -1747,8 +1849,23 @@ window.RegistroIniciativas = (function () {
         .concat(this.nuevas.map(function (n) { return conMeta({ categoria: n.categoria, anterior: null, nuevo: n.valor, nueva: true }); }));
     }
 
+    // El tope de 100% por categoria (excedeTope) de lo pedido en ruta, con
+    // el Estado final (por omision, el actual): -> mensaje o ''. Solo con un
+    // % valido; el formato lo dice validar. En tickets, sobre el % que dan.
+    excedeTope(ruta, estadoFinal) {
+      var t = this.pctPedido(ruta);
+      if (!/^\d{1,3}(\.\d{1,2})?$/.test(t) || Number(t) > 100) return '';
+      var nueva = this.categoriasLigadas().indexOf(ruta) < 0;
+      var x = excedeTope(this.capacidad, this.iniciativa, ruta, t, nueva, estadoFinal === undefined ? this.iniciativa.estado : estadoFinal);
+      if (!x) return '';
+      var v = this.vols[ruta];
+      return mensajeTope(ruta, x, this.meta(ruta).modo === 'tickets' && v ? v.valor : null);
+    }
+
     // -> [{ campo, mensaje }]; vacia = lista para enviar (cuando se pueda).
-    validar() {
+    // estadoFinal: el Estado con el que quedaria (el pedido en la misma
+    // solicitud); por omision, el actual.
+    validar(estadoFinal) {
       var errores = [], t = this.tipo(), i = this.iniciativa;
       var nuevo = String(this.propuesto || '').trim();
       if (!t) {
@@ -1789,6 +1906,9 @@ window.RegistroIniciativas = (function () {
               mensaje: c.categoria + ': escribe un porcentaje entre 0 y 100, con hasta dos decimales.' });
           } else if (!c.nueva && c.anterior !== null && Number(c.nuevo) === Number(c.anterior)) {
             errores.push({ campo: 'propuesto', categoria: c.categoria, mensaje: c.categoria + ': el % pedido es igual al actual.' });
+          } else {
+            var tope = yo.excedeTope(c.categoria, estadoFinal);
+            if (tope) errores.push({ campo: 'propuesto', categoria: c.categoria, tope: true, mensaje: tope });
           }
         });
       } else if (t === 'datos') {
@@ -1906,6 +2026,15 @@ window.RegistroIniciativas = (function () {
 
     tipoDe(item) { var c = campoCambio(item.campo); return c ? c.tipo : ''; }
 
+    // El Estado con el que quedaria la iniciativa: el pedido en la lista
+    // (salvo el cambio `fuera`, el que se esta editando) o el actual.
+    estadoFinal(fuera) {
+      for (var n = 0; n < this.items.length; n++) {
+        if (n !== fuera && this.tipoDe(this.items[n]) === 'estado') return this.items[n].propuesto;
+      }
+      return this.iniciativa.estado;
+    }
+
     // Lo que un cambio ocupa: dos cambios con una clave en comun chocan.
     claves(item) {
       var t = this.tipoDe(item);
@@ -1932,7 +2061,7 @@ window.RegistroIniciativas = (function () {
     agregar(b) {
       if (this.bloqueada()) return { ok: false, errores: [{ campo: 'lista', mensaje: 'La solicitud ya se envió: no se puede cambiar.' }] };
       var t = b.tipo();
-      var errores = b.validar().filter(function (e) { return t === 'otros' || e.campo !== 'motivo'; });
+      var errores = b.validar(this.estadoFinal(this.editando)).filter(function (e) { return t === 'otros' || e.campo !== 'motivo'; });
       if (errores.length) return { ok: false, errores: errores };
       var item = ListaSolicitudCambio.desdeBorrador(b);
       var otro = this.choca(item, this.editando);
@@ -2008,13 +2137,20 @@ window.RegistroIniciativas = (function () {
     // Antes de enviar: al menos un cambio, cada uno valido otra vez y el
     // Motivo (mismas reglas que hoy: obligatorio, hasta 4000).
     validarEnvio() {
-      var errores = [], self = this;
+      var errores = [], self = this, fin = this.estadoFinal(-1), pedidas = [];
       if (!this.items.length) errores.push({ campo: 'lista', mensaje: 'Agrega al menos un cambio a la solicitud.' });
       this.items.forEach(function (item) {
-        var t = self.tipoDe(item);
-        self.borrador(item).validar().forEach(function (e) {
-          if (t === 'otros' || e.campo !== 'motivo') errores.push({ campo: 'lista', mensaje: self.texto(item).tipo + ': ' + e.mensaje });
+        var t = self.tipoDe(item), b = self.borrador(item);
+        if (t === 'pct') pedidas = pedidas.concat(b.cambiosCategorias().map(function (c) { return c.categoria; }));
+        b.validar(fin).forEach(function (e) {
+          if (t === 'otros' || e.campo !== 'motivo') errores.push({ campo: 'lista', tope: e.tope === true, mensaje: self.texto(item).tipo + ': ' + e.mensaje });
         });
+      });
+      // Con el Estado pedido la iniciativa vuelve a consumir: tambien el %
+      // actual de las categorias que no se piden cambiar.
+      reactivadasExceden(this.opciones.capacidad, this.iniciativa, fin, pedidas).forEach(function (r) {
+        errores.push({ campo: 'lista', tope: true, mensaje: 'Estado: ' + mensajeTope(r.ruta, r.x, null,
+          'al pasar a «' + fin + '» la iniciativa vuelve a comprometer su ') });
       });
       var m = String(this.motivo || '').trim();
       if (!m) errores.push({ campo: 'motivo', mensaje: 'Explica el motivo de la solicitud.' });
@@ -2358,7 +2494,9 @@ window.RegistroIniciativas = (function () {
                // Solicitar cambios de Título / PO / SO (sql/25).
                datos: !!(r && r.solicitudesDatos), pos: (this.duenosCatalogo || {}).po || [], sos: (this.duenosCatalogo || {}).so || [],
                // Varios cambios en UNA solicitud (sql/34).
-               varios: !!(r && r.solicitudesVarios) };
+               varios: !!(r && r.solicitudesVarios),
+               // Tope de 100% por categoria al pedir un % (excedeTope).
+               capacidad: r ? { iniciativas: r.iniciativas, agrupadores: r.agrupadores, estadosActivos: r.estadosActivos } : null };
     }
 
     // Solo UX: la edicion de ADM no llama al servidor en esta fase.
@@ -3406,12 +3544,13 @@ window.RegistroIniciativas = (function () {
       else if (ed && tk !== null && tk !== undefined) { ed.capturarTickets(Number(tk), t.value); this.pintarMetaEdicion(Number(tk)); }
       else if (ed && tipo) ed.capturarTipo(Number(tipo.split('|')[0]), tipo.split('|')[1], t.value);
       else if (ed && fcat !== null && fcat !== undefined) ed.capturarFechaCategoria(Number(fcat), t.value);
-      else if (c && cp !== null && cp !== undefined) { c.fijarPct(c.categoriasLigadas()[Number(cp)], t.value); return true; }
-      else if (c && cn !== null && cn !== undefined) { c.capturarPctNueva(Number(cn), t.value); return true; }
+      // El % (o los tickets) de una categoria: tambien su aviso del tope.
+      else if (c && cp !== null && cp !== undefined) { c.fijarPct(c.categoriasLigadas()[Number(cp)], t.value); this.pintarTopeCambio('l' + cp); return true; }
+      else if (c && cn !== null && cn !== undefined) { c.capturarPctNueva(Number(cn), t.value); this.pintarTopeCambio('n' + cn); return true; }
       // % o Tickets de una categoria: cambia la casilla (repinta el bloque) y
       // pide la volumetria si hace falta; los tickets solo repintan su pista.
       else if (c && cmo) { this.elegirModoMetaCambio(cmo, t.value); return true; }
-      else if (c && ctk) { this.capturarTicketsCambio(ctk, t.value); return true; }
+      else if (c && ctk) { this.capturarTicketsCambio(ctk, t.value); this.pintarTopeCambio(ctk); return true; }
       else return false;
       this.pintarEstadoEdicion(t);
       return true;
@@ -3452,6 +3591,30 @@ window.RegistroIniciativas = (function () {
       return abrir;
     }
 
+    // El Estado con el que quedaria la iniciativa segun la lista (el que se
+    // edita no cuenta) o el actual.
+    estadoFinalCambio() {
+      var c = this.cambio;
+      return this.lista ? this.lista.estadoFinal(this.lista.editando) : c ? c.iniciativa.estado : '';
+    }
+
+    // El aviso del tope de 100% de una fila ('l<n>' / 'n<n>') en cuanto
+    // cambia su % o sus tickets, sin repintar la casilla en la que se
+    // escribe. -> el mensaje ('' = cabe).
+    pintarTopeCambio(clave) {
+      var c = this.cambio, ruta = this.rutaMetaCambio(clave), caja = this.$('regCambioTope-' + clave);
+      if (!c || !ruta || !caja) return '';
+      var m = c.excedeTope(ruta, this.estadoFinalCambio());
+      caja.textContent = m;
+      caja.hidden = !m;
+      var n = clave.slice(1);
+      var sel = c.meta(ruta).modo === 'tickets' ? '[data-cambio-tickets="' + clave + '"]'
+        : clave.charAt(0) === 'l' ? '[data-cambio-pct="' + n + '"]' : '[data-cambio-nueva-pct="' + n + '"]';
+      var casilla = this.doc.querySelector('#regCambioGrupoPct ' + sel);
+      if (casilla) casilla.setAttribute('aria-invalid', m ? 'true' : 'false');
+      return m;
+    }
+
     quitarCategoriaCambio(n) {
       if (!this.cambio || !this.cambio.quitarNueva(n)) return false;
       this.pintarCategoriasCambio();
@@ -3471,28 +3634,42 @@ window.RegistroIniciativas = (function () {
       var ligadas = c.categoriasLigadas();
       // Otras iniciativas activas de cada ruta (del registro cargado) y los
       // detalles abiertos, por ruta (sobreviven al repintar este bloque).
-      var reg = this.registro, abiertas = this.otrasAbiertasCambio(), folio = c.iniciativa.folio;
-      function otras(ruta, clave) {
-        return reg ? htmlOtrasCambio(otrasEnCategoria(reg.iniciativas, reg.agrupadores, ruta, folio), clave, abiertas[rutaClave(ruta)] === true) : '';
+      var reg = this.registro, abiertas = this.otrasAbiertasCambio(), folio = c.iniciativa.folio, fin = this.estadoFinalCambio();
+      function otras(ruta) { return reg ? otrasEnCategoria(reg.iniciativas, reg.agrupadores, ruta, folio) : []; }
+      // La ruta con su palomita pegada (no se separan aunque la ruta parta
+      // en varias lineas) y, debajo, la fila de su detalle.
+      function nombre(ruta, clave, o) {
+        return '<span class="ini-cat-nombre"><span class="ini-cat-ruta">' + Escape.html(ruta) + '</span>' +
+          htmlOtrasCheck(o, clave, abiertas[rutaClave(ruta)] === true) + '</span>';
       }
+      // El aviso del tope de 100% por categoria de la fila (pintarTopeCambio).
+      function tope(ruta, clave) {
+        var m = c.excedeTope(ruta, fin);
+        return '<small class="ini-tope" id="regCambioTope-' + clave + '" aria-live="polite"' + (m ? '' : ' hidden') + '>' + Escape.html(m) + '</small>';
+      }
+      function invalido(ruta) { return c.excedeTope(ruta, fin) ? 'true' : 'false'; }
       var tabla = ligadas.length || c.nuevas.length
         ? '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
             '<th scope="col" class="num">% actual</th><th scope="col">% pedido</th><th scope="col"><span class="ini-sr">Acción</span></th>' +
           '</tr></thead><tbody>' +
           ligadas.map(function (r, n) {
-            var act = c.pctActual(r);
+            var act = c.pctActual(r), o = otras(r);
             var pct = '<label class="ini-ed-pct"><span class="ini-sr">% pedido para ' + Escape.html(r) + '</span>' +
               '<input type="number" min="0" max="100" step="0.01" data-cambio-pct="' + n + '" value="' + Escape.attr(c.pcts[r] || '') +
-              '" placeholder="sin cambio"> %</label>';
-            return '<tr><td class="ini-cat-ruta">' + Escape.html(r) + otras(r, 'l' + n) + '</td><td class="num">' + Escape.html(act === null ? '—' : act + '%') + '</td>' +
-              '<td>' + celdaMetaCambio(c, r, 'l' + n, pct, 'sin cambio') + '</td><td></td></tr>';
+              '" placeholder="sin cambio" aria-describedby="regCambioTope-l' + n + '" aria-invalid="' + invalido(r) + '"> %</label>';
+            return '<tr><td class="ini-cat-celda">' + nombre(r, 'l' + n, o) + '</td><td class="num">' + Escape.html(act === null ? '—' : act + '%') + '</td>' +
+              '<td>' + celdaMetaCambio(c, r, 'l' + n, pct, 'sin cambio', invalido(r)) + tope(r, 'l' + n) + '</td><td></td></tr>' +
+              htmlOtrasFila(o, 'l' + n, abiertas[rutaClave(r)] === true, 4);
           }).join('') +
           c.nuevas.map(function (x, n) {
+            var o = otras(x.categoria);
             var pct = '<label class="ini-ed-pct"><span class="ini-sr">% para ' + Escape.html(x.categoria) + '</span>' +
-              '<input type="number" min="0" max="100" step="0.01" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) + '"> %</label>';
-            return '<tr><td><span class="ini-cat-ruta">' + Escape.html(x.categoria) + '</span> <span class="ini-cat-estado nueva">Agregar</span>' + otras(x.categoria, 'n' + n) + '</td>' +
-              '<td class="num">—</td><td>' + celdaMetaCambio(c, x.categoria, 'n' + n, pct, '') + '</td>' +
-              '<td><button type="button" class="btn linea chico" data-cambio-quitar="' + n + '">Quitar</button></td></tr>';
+              '<input type="number" min="0" max="100" step="0.01" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) +
+              '" aria-describedby="regCambioTope-n' + n + '" aria-invalid="' + invalido(x.categoria) + '"> %</label>';
+            return '<tr><td class="ini-cat-celda">' + nombre(x.categoria, 'n' + n, o) + ' <span class="ini-cat-estado nueva">Agregar</span></td>' +
+              '<td class="num">—</td><td>' + celdaMetaCambio(c, x.categoria, 'n' + n, pct, '', invalido(x.categoria)) + tope(x.categoria, 'n' + n) + '</td>' +
+              '<td><button type="button" class="btn linea chico" data-cambio-quitar="' + n + '">Quitar</button></td></tr>' +
+              htmlOtrasFila(o, 'n' + n, abiertas[rutaClave(x.categoria)] === true, 4);
           }).join('') + '</tbody></table></div>' +
           (ligadas.concat(c.nuevas.map(function (x) { return x.categoria; })).some(function (r) { return c.meta(r).modo === 'tickets'; })
             ? '<p class="ini-nota">Pedido en tickets: se envía el % que da ese número con la volumetría de hoy (últimos 30 días). ' +
@@ -4707,6 +4884,8 @@ window.RegistroIniciativas = (function () {
     RevisionSolicitud: RevisionSolicitud,
     CAMPOS_CAMBIO: CAMPOS_CAMBIO,
     otrasEnCategoria: otrasEnCategoria,
+    excedeTope: excedeTope,
+    reactivadasExceden: reactivadasExceden,
     etiquetarHistorial: etiquetarHistorial,
     ordenar: ordenar,
     ExportRegistro: ExportRegistro,

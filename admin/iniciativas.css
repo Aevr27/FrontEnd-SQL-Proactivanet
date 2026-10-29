@@ -1000,20 +1000,35 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-cat-estado { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px;
   font-size: 10.5px; background: var(--bg-2); color: var(--muted); }
 .ini-cat-estado.nueva { color: var(--accent-ink); }
-/* "Solicitar cambios": otras iniciativas activas de la categoria. Un boton
-   chico junto a la ruta (icono + cuantas) y su detalle plegable debajo. */
-.ini-otras-boton {
-  display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; padding: 1px 6px;
-  border: 1px solid var(--line-soft); border-radius: 999px; background: var(--bg-2);
-  font: inherit; font-size: 11px; font-weight: 700; line-height: 1.5; color: var(--ink-2);
-  cursor: pointer; vertical-align: middle; white-space: nowrap;
+/* "Solicitar cambios" > Categorias. La tabla mide lo que su contenido y
+   nunca mas que su caja (.ini-det-tabla desplaza si hace falta): con el
+   width: 100% de la tabla global (dashboard.css) el sobrante se repartia
+   entre columnas y los % quedaban lejos de la ruta. */
+.ini-cambio .ini-cats-tabla { width: auto; max-width: 100%; }
+/* La ruta y su palomita juntas (aunque la ruta parta en varias lineas); el
+   ancho minimo es de la celda y el maximo evita que una ruta larga ensanche
+   la tabla. */
+.ini-cat-nombre { display: inline-flex; align-items: flex-start; gap: 4px; min-width: 10em; max-width: 28em; vertical-align: top; }
+.ini-cat-nombre .ini-cat-ruta { min-width: 0; overflow-wrap: anywhere; }
+/* Otras iniciativas activas de la categoria: palomita chica (boton) y su
+   detalle en la fila de abajo, a todo el ancho de la tabla. */
+.ini-otras-check {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0;
+  border: 1px solid var(--accent-line); border-radius: 50%; background: var(--accent-soft); color: var(--verde);
+  cursor: pointer;
 }
-.ini-otras-boton svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2; }
-.ini-otras-boton:hover, .ini-otras-boton[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-ink); }
-.ini-otras-boton:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
-.ini-otras { margin-top: 6px; padding: 6px 8px; border-left: 3px solid var(--accent); background: var(--bg-2);
-  border-radius: var(--radius-xs); font-size: 12px; }
-.ini-otras[hidden] { display: none; }
+.ini-otras-check svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.ini-otras-check:hover, .ini-otras-check[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-ink); }
+.ini-otras-check:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
+.ini-otras-fila[hidden] { display: none; }
+.ini-otras-fila > td { padding-top: 0; }
+tr:has(+ .ini-otras-fila:not([hidden])) > td { border-bottom: 0; }
+/* width 0 + min-width 100%: el detalle no le aporta ancho a la tabla. */
+.ini-otras { box-sizing: border-box; width: 0; min-width: 100%; padding: 6px 8px; border-left: 3px solid var(--accent);
+  background: var(--bg-2); border-radius: var(--radius-xs); font-size: 12px; }
+/* El tope de 100% por categoria de lo pedido (sin ensanchar la columna). */
+.ini-tope { display: block; box-sizing: border-box; width: 0; min-width: 100%; margin-top: 4px; font-size: 11.5px; color: var(--rojo); }
+.ini-tope[hidden] { display: none; }
 .ini-otras ul { margin: 0 0 4px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 3px; }
 .ini-otras-pct { font-variant-numeric: tabular-nums; font-weight: 700; }
 .ini-otras-estado { color: var(--ink-2); }

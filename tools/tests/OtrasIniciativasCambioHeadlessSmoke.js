@@ -9,13 +9,18 @@
 //
 //   R1-R4  otrasEnCategoria: solo activas con agrupador, sin la propia,
 //          misma ruta sin espacios ni mayusculas, un folio dos veces suma.
-//   I1-I4  el indicador: boton chico junto a la ruta (no un <select>), con
-//          nombre accesible completo y title; sin otras activas no hay
+//   I1-I4  el indicador: palomita chica (boton, sin texto visible ni
+//          <select>) pegada a la ruta, con nombre accesible completo (cuantas
+//          y cuanto comprometen) y title; sin otras activas no hay
 //          indicador; cerrado por omision.
-//   D1-D3  clic: abre el detalle (folio, %, estado, titulo, lo comprometido),
+//   D1-D4  clic: abre el detalle (folio, %, estado, titulo, lo comprometido y
+//          lo disponible) en la fila de JUSTO debajo, a todo el ancho;
 //          aria-expanded; otro clic lo pliega; es enfocable con teclado.
 //   P1-P2  cambiar % <-> Tickets repinta el bloque: el detalle abierto sigue
 //          abierto y el selector % / Tickets sigue funcionando.
+//   A1-A3  alineacion: la tabla mide lo que su contenido (no el 100% de la
+//          caja), los % quedan cerca de la ruta, encabezado y celdas de "%
+//          actual" alineados, y abrir el detalle no mueve las columnas.
 //   W1     la fila no se ensancha: la tabla cabe en un contenedor de 360px.
 //
 // Como correrla (desde la raiz del repositorio):
@@ -101,10 +106,22 @@ function sonda() {
       campo.dispatchEvent(new Event('change', { bubbles: true }));
       await espera(50);
       var b0 = boton('l0'), b1 = boton('l1'), caja = $('regCambioOtras-l0');
-      apunta('I', [!!b0, b0 && b0.tagName, b0 && b0.closest('td').classList.contains('ini-cat-ruta'),
+      var nombre = b0 && b0.closest('.ini-cat-nombre'), bb0 = b0.getBoundingClientRect();
+      var ruta0 = nombre.querySelector('.ini-cat-ruta').getBoundingClientRect();
+      apunta('I', [!!b0, b0 && b0.tagName, !!nombre && nombre.firstChild.classList.contains('ini-cat-ruta'),
                    document.querySelectorAll('#regCambioGrupoPct select:not([data-cambio-modo])').length,
-                   b0 && b0.textContent.trim(), b0 && b0.title, b0 && b0.getAttribute('aria-expanded'), b0 && b0.getAttribute('aria-controls'),
-                   !!caja && caja.hidden, !!b1, !!$('regCambioOtras-l1')]);
+                   b0 && b0.querySelector('.ini-sr').textContent, b0 && b0.title, b0 && b0.getAttribute('aria-expanded'), b0 && b0.getAttribute('aria-controls'),
+                   !!caja && caja.hidden, !!b1, !!$('regCambioOtras-l1'),
+                   // Chica (<= 20px) y pegada a la ruta (<= 8px).
+                   Math.round(bb0.width) <= 20 && Math.round(bb0.height) <= 20, Math.round(bb0.left - ruta0.right) <= 8,
+                   !!b0.querySelector('svg'), Array.prototype.filter.call(b0.childNodes, function (n) { return n.nodeType === 3 && n.textContent.trim(); }).length]);
+      // A: alineacion, con el detalle cerrado.
+      var tabla = document.querySelector('#regCambioGrupoPct table'), caja2 = document.querySelector('#regCambioGrupoPct .ini-det-tabla');
+      var fila0 = b0.closest('tr'), tdAct = fila0.children[1], thAct = tabla.querySelector('thead th.num');
+      var antes = Array.prototype.map.call(fila0.children, function (td) { return Math.round(td.getBoundingClientRect().left); });
+      apunta('alinea', { tabla: Math.round(tabla.getBoundingClientRect().width), caja: Math.round(caja2.clientWidth),
+                         hueco: Math.round(tdAct.getBoundingClientRect().left - nombre.getBoundingClientRect().right),
+                         thDer: Math.round(thAct.getBoundingClientRect().right), tdDer: Math.round(tdAct.getBoundingClientRect().right) });
       b0.focus();
       apunta('foco', document.activeElement === b0);
       clic(b0);
@@ -112,6 +129,9 @@ function sonda() {
       apunta('abierto', [caja.hidden, b0.getAttribute('aria-expanded'),
                          Array.prototype.map.call(caja.querySelectorAll('li'), function (li) { return li.textContent; }),
                          caja.querySelector('small').textContent]);
+      var despues = Array.prototype.map.call(fila0.children, function (td) { return Math.round(td.getBoundingClientRect().left); });
+      apunta('fila', [caja.tagName, caja.previousElementSibling === fila0, caja.firstElementChild.getAttribute('colspan'),
+                      JSON.stringify(antes) === JSON.stringify(despues)]);
       // P: cambiar a Tickets repinta el bloque (pintarCategoriasCambio).
       var modo = document.querySelector('[data-cambio-modo="l0"]');
       modo.value = 'tickets';
@@ -136,7 +156,7 @@ function sonda() {
       var con = t.scrollWidth - t.clientWidth;
       // La misma tabla sin indicadores: lo que ya desbordaba (la tabla tiene
       // su propio overflow-x) no es del indicador.
-      Array.prototype.forEach.call(g.querySelectorAll('.ini-otras-boton'), function (x) { x.style.display = 'none'; });
+      Array.prototype.forEach.call(g.querySelectorAll('.ini-otras-check'), function (x) { x.style.display = 'none'; });
       await espera(20);
       var sin = t.scrollWidth - t.clientWidth;
       apunta('angosto', { con: con, sin: sin, dentro: bb.right <= td.right + 0.5 && bb.left >= td.left - 0.5, alto: Math.round(bb.height) });
@@ -158,18 +178,25 @@ Banco.correr(paginas, ['/admin/__otras.html']).then(function (res) {
   Check('R3 sin excluir: la propia tambien sale', ['PRB 2026-000001:20', 'PRB 2026-000002:25', 'PRB 2026-000005:10', 'PRB 2026-000006:0'], r[2]);
   Check('R4 sin ruta: nada', [], r[3]);
   var i = A.I || [];
-  Check('I1 indicador: <button> dentro de la celda de la ruta; ningun <select> nuevo en el bloque (solo los de % / Tickets)',
+  Check('I1 indicador: <button> junto a la ruta, en el mismo bloque; ningun <select> nuevo en el bloque (solo los de % / Tickets)',
     [true, 'BUTTON', true, 0], i.slice(0, 4));
-  Check('I2 texto visible = 3 + nombre accesible completo; title explica', ['33 otras iniciativas activas en esta categoría',
-    '3 otras iniciativas activas en esta categoría: ver sus %'], [i[4], i[5]]);
+  Check('I2 palomita (svg) sin texto visible, chica y pegada a la ruta; nombre accesible y title completos',
+    [true, true, true, 0, '3 otras iniciativas activas en esta categoría (35% comprometido)',
+     '3 otras iniciativas activas en esta categoría (35% comprometido): ver detalle'], [i[11], i[12], i[13], i[14], i[4], i[5]]);
   Check('I3 cerrado por omision, controla su detalle', ['false', 'regCambioOtras-l0', true], [i[6], i[7], i[8]]);
   Check('I4 categoria sin otras activas: sin indicador ni detalle', [false, false], [i[9], i[10]]);
+  var al = A.alinea || {};
+  Check('A1 la tabla mide lo que su contenido, no el 100% de la caja', true, al.tabla < al.caja);
+  Check('A2 "% actual" cerca de la ruta (<= 40px entre la ruta y su celda)', true, al.hueco >= 0 && al.hueco <= 40);
+  Check('A3 encabezado y celda de "% actual" alineados a la derecha', al.thDer, al.tdDer);
+  console.log('INFO  alineacion: ' + JSON.stringify(al));
   Check('D1 enfocable con teclado', true, A.foco);
   var ab = A.abierto || [];
   Check('D2 clic abre: aria-expanded, folio, %, estado, titulo; lo comprometido por otras',
     [false, 'true', ['PRB 2026-000002 · 25% · En SoluciónReducir reenvios de correo', 'PRB 2026-000005 · 10% · En MonitoreoTitulo PRB 2026-000005',
                      'PRB 2026-000006 · 0% · En SoluciónTitulo PRB 2026-000006'],
-     'Ya comprometido por otras: 35%. Solo iniciativas activas.'], ab);
+     'Ya comprometido por otras: 35%; disponible: 65% del tope de 100% por categoría. Solo iniciativas activas.'], ab);
+  Check('D4 el detalle es la fila de justo debajo (colspan 4) y abrirlo no mueve las columnas', ['TR', true, '4', true], A.fila);
   Check('P1 % -> Tickets repinta y el detalle sigue abierto', [true, false, 'true'], A.repinta);
   Check('P2 Tickets -> % vuelve a la casilla del %', [false, true, false], A.vuelvePct);
   Check('D3 otro clic pliega', [true, 'false'], A.pliega);
