@@ -142,7 +142,8 @@ LEFT JOIN (VALUES
     (N'usp_SolicitudIniciativa_AprobarYCrear', 0x7CE867AFD23F970E867A7D5FEC97E9C221047DA584BE78EC43347313A0367CAC, N'sql/32'),
     (N'usp_SolicitudCambio_Aplicar',      0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804, N'sql/34'),
     (N'usp_SolicitudIniciativa_Crear',    0x0484CDBC320573111B3EE245FA1E225F83DC65E7078213DE1C4C275C70E51D5A, N'sql/36'),
-    (N'usp_SolicitudCambio_Crear',        0x037DBD39F5D6DAEFB9A99C15E7C0B1DBAA070C5BDB0A9E63CB1E32FFDCE19642, N'sql/37')
+    (N'usp_SolicitudCambio_Crear',        0x037DBD39F5D6DAEFB9A99C15E7C0B1DBAA070C5BDB0A9E63CB1E32FFDCE19642, N'sql/37'),
+    (N'usp_SolicitudCambio_Crear',        0xBE78FC96094FA3C918CACB3A59BF6340FA77734268BED6315F4D2485AEF6A95F, N'sql/38')
     ) AS k (Nombre, Hash, Migracion) ON k.Nombre = o.name AND k.Hash = h.Hash
 WHERE o.schema_id = SCHEMA_ID(N'adm') AND o.type = 'P'
   AND (o.name LIKE N'usp[_]SolicitudIniciativa[_]%' OR o.name LIKE N'usp[_]SolicitudCambio[_]%' OR o.name = N'usp_GestionAdmin_Crear')

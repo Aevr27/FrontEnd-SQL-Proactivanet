@@ -109,6 +109,17 @@ public static class PersistenciaSolicitudesCambio
         return SolicitaPsoForzadaParaPruebas ?? (SolicitaPso && sql22EnBase == true && sql37EnBase == true);
     }
 
+    // sql/38: tambien los SO del equipo del PO de la iniciativa (la cascada
+    // Director > PO > SO; App_Code/SolicitudCambioPso.cs). Solo con PSO
+    // activa y la propiedad ReglaPso = EQUIPO_PO en adm.usp_SolicitudCambio_Crear
+    // (la cuenta del sitio ve propiedades extendidas, no definiciones).
+    // Apagada: solo el PO y el SO capturados, como en sql/37.
+    public static bool? SolicitaPsoEquipoForzadaParaPruebas;
+    public static bool SolicitaPsoEquipoActiva()
+    {
+        return SolicitaPsoEquipoForzadaParaPruebas ?? (SolicitaPsoActiva() && sql38EnBase == true);
+    }
+
     // Lo que DeteccionSolicitudesCambio vio en la base (null = todavia no se
     // reviso) y cuando. Misma vigencia que sql/24: aplicar o revertir los
     // scripts la enciende o la apaga sin reciclar el sitio.
@@ -117,15 +128,18 @@ public static class PersistenciaSolicitudesCambio
     private static bool? sql25EnBase;
     private static bool? sql34EnBase;
     private static bool? sql37EnBase;
+    private static bool? sql38EnBase;
     private static DateTime revisadaUtc;
 
     public static void Anotar(bool sql22, bool sql25, DateTime ahoraUtc) { Anotar(sql22, sql25, false, ahoraUtc); }
 
     public static void Anotar(bool sql22, bool sql25, bool sql34, DateTime ahoraUtc) { Anotar(sql22, sql25, sql34, false, ahoraUtc); }
 
-    public static void Anotar(bool sql22, bool sql25, bool sql34, bool sql37, DateTime ahoraUtc)
+    public static void Anotar(bool sql22, bool sql25, bool sql34, bool sql37, DateTime ahoraUtc) { Anotar(sql22, sql25, sql34, sql37, false, ahoraUtc); }
+
+    public static void Anotar(bool sql22, bool sql25, bool sql34, bool sql37, bool sql38, DateTime ahoraUtc)
     {
-        lock (candado) { sql22EnBase = sql22; sql25EnBase = sql25; sql34EnBase = sql34; sql37EnBase = sql37; revisadaUtc = ahoraUtc; }
+        lock (candado) { sql22EnBase = sql22; sql25EnBase = sql25; sql34EnBase = sql34; sql37EnBase = sql37; sql38EnBase = sql38; revisadaUtc = ahoraUtc; }
     }
 
     public static bool Vigente(DateTime ahoraUtc)
@@ -136,7 +150,7 @@ public static class PersistenciaSolicitudesCambio
     // Solo para las pruebas: como recien arrancado (sin revisar).
     public static void OlvidarParaPruebas()
     {
-        lock (candado) { sql22EnBase = null; sql25EnBase = null; sql34EnBase = null; sql37EnBase = null; revisadaUtc = DateTime.MinValue; }
+        lock (candado) { sql22EnBase = null; sql25EnBase = null; sql34EnBase = null; sql37EnBase = null; sql38EnBase = null; revisadaUtc = DateTime.MinValue; }
     }
 
     public const string MotivoVarios =
@@ -164,7 +178,10 @@ public static class DeteccionSolicitudesCambio
         "Sql34 = (SELECT COUNT(*) FROM sys.parameters " +
         "WHERE object_id = OBJECT_ID(N'adm.usp_SolicitudCambio_Crear', N'P') " +
         "AND name IN (N'@CambiaFAnalisis', N'@CambiaFSolucion', N'@CambiaFCierre')), " +
-        "Sql37 = CASE WHEN OBJECT_ID(N'adm.CK_SolicitudCambio_RolPso', N'C') IS NULL THEN 0 ELSE 1 END";
+        "Sql37 = CASE WHEN OBJECT_ID(N'adm.CK_SolicitudCambio_RolPso', N'C') IS NULL THEN 0 ELSE 1 END, " +
+        "Sql38 = (SELECT COUNT(*) FROM sys.extended_properties WHERE class = 1 AND minor_id = 0 " +
+        "AND major_id = OBJECT_ID(N'adm.usp_SolicitudCambio_Crear', N'P') AND name = N'ReglaPso' " +
+        "AND CONVERT(nvarchar(30), value) = N'EQUIPO_PO')";
 
     // Con la conexion (abierta) del que llama.
     public static void Revisar(SqlConnection cn)
@@ -172,7 +189,7 @@ public static class DeteccionSolicitudesCambio
         if (cn == null) throw new ArgumentNullException("cn");
         var ahora = DateTime.UtcNow;
         if (PersistenciaSolicitudesCambio.Vigente(ahora)) return;
-        bool sql22 = false, sql25 = false, sql34 = false, sql37 = false;
+        bool sql22 = false, sql25 = false, sql34 = false, sql37 = false, sql38 = false;
         try
         {
             using (var cmd = new SqlCommand(Consulta, cn) { CommandTimeout = 15 })
@@ -183,10 +200,11 @@ public static class DeteccionSolicitudesCambio
                     sql25 = sql22 && Convert.ToInt32(rd.GetValue(1)) == 3;
                     sql34 = sql25 && Convert.ToInt32(rd.GetValue(2)) == 3;
                     sql37 = sql22 && Convert.ToInt32(rd.GetValue(3)) == 1;
+                    sql38 = sql37 && Convert.ToInt32(rd.GetValue(4)) == 1;
                 }
         }
-        catch (SqlException) { sql22 = false; sql25 = false; sql34 = false; sql37 = false; }
-        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, sql34, sql37, ahora);
+        catch (SqlException) { sql22 = false; sql25 = false; sql34 = false; sql37 = false; sql38 = false; }
+        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, sql34, sql37, sql38, ahora);
     }
 
     // Abre su propia conexion solo si hace falta revisar.

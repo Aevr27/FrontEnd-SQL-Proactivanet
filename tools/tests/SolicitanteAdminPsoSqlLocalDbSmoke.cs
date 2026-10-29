@@ -20,6 +20,10 @@
 //      procedimiento vuelve al hash de sql/29 sin perder filas; reaplicar.
 //   P  PSO (sql/37): re-chequeo de dueno, 51225/51226/51227, ADM/MOD igual,
 //      rollbacks de 37 y deteccion del sitio (CK_SolicitudCambio_RolPso).
+//   Q  sql/38: el SO del equipo del PO (fila vigente de CatCategoriaDueno
+//      con ese ProductOwner) tambien es PSO; el sitio (Evaluar con el
+//      directorio real) decide lo mismo que la base; rollback y deteccion
+//      (propiedad ReglaPso, visible para la cuenta del sitio).
 //   Z  vuelta completa 37 -> 36 -> 35 y reaplicar 35 -> 36 -> 37.
 //
 // Necesita ../backend_admin_persistencia (vistas de origen). Compilar con
@@ -42,6 +46,7 @@ public static class SolicitanteAdminPsoSqlLocalDbSmoke
     const string H34 = "0x2F495E310DCB799201BE1A449AAE283AFFE6F8936105547572E7EE21556E389D";
     const string H36 = "0x0484CDBC320573111B3EE245FA1E225F83DC65E7078213DE1C4C275C70E51D5A";
     const string H37 = "0x037DBD39F5D6DAEFB9A99C15E7C0B1DBAA070C5BDB0A9E63CB1E32FFDCE19642";
+    const string H38 = "0xBE78FC96094FA3C918CACB3A59BF6340FA77734268BED6315F4D2485AEF6A95F";
     const string ADM = @"SORIANA\t_adm";
     static readonly DateTime Hoy = new DateTime(2026, 10, 21);
     static readonly string EnAnalisis = "En An" + (char)0xE1 + "lisis";
@@ -283,7 +288,40 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
         return malos;
     }
     static string Tiene(string texto, string fragmento) { return texto.Contains(fragmento) ? fragmento : texto; }
-    const string S35 = "35_usuarios_admin_nombre_solicitante", S36 = "36_solicitud_iniciativa_solicitante_admin", S37 = "37_solicitudes_cambio_pso";
+    const string S35 = "35_usuarios_admin_nombre_solicitante", S36 = "36_solicitud_iniciativa_solicitante_admin", S37 = "37_solicitudes_cambio_pso",
+                 S38 = "38_solicitudes_cambio_pso_equipo";
+    static string Detecta38()
+    {
+        using (var cn = ComoSitio())
+        {
+            PersistenciaSolicitudesCambio.OlvidarParaPruebas();
+            DeteccionSolicitudesCambio.Revisar(cn);
+            var r = (PersistenciaSolicitudesCambio.SolicitaPsoActiva() ? 1 : 0) + "|" + (PersistenciaSolicitudesCambio.SolicitaPsoEquipoActiva() ? 1 : 0);
+            PersistenciaSolicitudesCambio.OlvidarParaPruebas();
+            return r;
+        }
+    }
+    // Lo que decide el sitio (SolicitudCambioPso.Evaluar con CatPersona, el
+    // directorio de CatCategoriaDueno y los duenos de dbo.Problem leidos como
+    // la cuenta del sitio; motivo null = ya paso como PO/SO vigente).
+    static string SitioPso(string cuenta, string folio, bool equipo)
+    {
+        var personas = new FuentePersonasAcuseSql(ComoSitio).Personas();
+        DirectorioOrganizacional dir;
+        using (var cn = ComoSitio()) dir = DirectorioOrganizacional.Cargar(cn);
+        Func<string, string[]> duenos = delegate (string f)
+        {
+            using (var cn = ComoSitio())
+            using (var c = new SqlCommand("SELECT OwnerProblem, OwnerServicio FROM dbo.Problem WHERE Codigo = @f", cn))
+            {
+                c.Parameters.AddWithValue("@f", f);
+                using (var r = c.ExecuteReader())
+                    return r.Read() ? new[] { r.IsDBNull(0) ? null : r.GetString(0), r.IsDBNull(1) ? null : r.GetString(1) } : new string[] { null, null };
+            }
+        };
+        var d = SolicitudCambioPso.Evaluar(IdentidadWindows.Desde(cuenta, true), true, null, personas, folio, duenos, equipo ? dir : null);
+        return d.Puede ? "puede" : d.Tipo;
+    }
     static string Detecta36() { return Uno("EXECUTE AS USER = N'PROACTIVANETAD'; SELECT COUNT(*) FROM sys.parameters WHERE object_id = OBJECT_ID(N'adm.usp_SolicitudIniciativa_Crear') AND name = N'@FuenteSolicitante'; REVERT;"); }
     static string Detecta37() { return Uno("EXECUTE AS USER = N'PROACTIVANETAD'; SELECT CASE WHEN OBJECT_ID(N'adm.CK_SolicitudCambio_RolPso', N'C') IS NULL THEN 0 ELSE 1 END; REVERT;"); }
     const string Filas = "SELECT CONCAT(COUNT(*), '|', SUM(CASE WHEN FuenteCorreos = 'USUARIOSADMIN' THEN 1 ELSE 0 END), '|', SUM(CASE WHEN SolicitanteNombre IS NULL THEN 1 ELSE 0 END)) FROM adm.SolicitudIniciativa";
@@ -304,6 +342,8 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                   Tiene(Script(S36), "aplica sql/35 antes") + "|" + Hash("adm.usp_SolicitudIniciativa_Crear"));
             Check("M2 37 antes que 36: se niega sin tocar nada", "aplica sql/36 antes|" + H34 + "|0",
                   Tiene(Script(S37), "aplica sql/36 antes") + "|" + Hash("adm.usp_SolicitudCambio_Crear") + "|" + Detecta37());
+            Check("M2b 38 antes que 37: se niega sin tocar nada", "aplica sql/37 antes|" + H34,
+                  Tiene(Script(S38), "aplica sql/37 antes") + "|" + Hash("adm.usp_SolicitudCambio_Crear"));
             Check("M3 35 se aplica; otra vez: ya aplicada", "ok|ya aplicada|1",
                   Script(S35) + "|" + Tiene(Script(S35), "ya aplicada") + "|" +
                   Uno("SELECT COLUMNPROPERTY(OBJECT_ID(N'dbo.UsuariosAdmin'), N'NombreSolicitante', 'AllowsNull')"));
@@ -455,6 +495,53 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
             Check("P15 rollback COMPLETO de 37 con filas PSO: se niega sin tocar nada", "no caben|" + H34,
                   Tiene(Script(S37 + "_rollback"), "no caben") + "|" + Hash("adm.usp_SolicitudCambio_Crear"));
             Check("P16 reaplicar 37 tras el rollback de procedimiento", "ok|" + H37 + "|1", Script(S37) + "|" + Hash("adm.usp_SolicitudCambio_Crear") + "|" + Detecta37());
+
+            // ---------------- Q: sql/38, el SO del equipo del PO ----------------
+            // PRB-000002: PO 'Jesus Campa Morones' / SO 'SO 1'. Lucia es SO de
+            // Jesus en otra categoria; Andres, con el PO escrito en mayusculas;
+            // Edgar solo en una fila NO vigente; una fila sin PO.
+            Exec(@"INSERT dbo.CatCategoriaDueno (CategoriaN2, ProductOwner, ServiceOwner, DirectorPO, C1, VigenteEnOrigen) VALUES
+ (N'/Q/Equipo', N'Jesus Campa Morones', N'Luc" + "\u00ed" + @"a Pe" + "\u00f1" + @"a', N'Dir', N'/Q', 1),
+ (N'/Q/Mayus', N'JESUS  CAMPA MORONES', N'Andres Vera Rios', N'Dir', N'/Q', 1),
+ (N'/Q/Baja', N'Rep Nombre', N'Edgar Ramos', N'Dir', N'/Q', 0),
+ (N'/Q/SinPo', NULL, N'Edgar Ramos', N'Dir', N'/Q', 1);");
+            Check("Q0 con 37 (sin 38): el SO del equipo -> 51226; el sitio ve 37 y no 38", "51226|1|0",
+                  Cambio(@"SORIANA\luciap", "PSO", "PRB 2026-000002") + "|" + Detecta38());
+            Check("Q1 38 se aplica; otra vez: ya aplicada; el sitio la detecta", "ok|ya aplicada|" + H38 + "|1|1",
+                  Script(S38) + "|" + Tiene(Script(S38), "ya aplicada") + "|" + Hash("adm.usp_SolicitudCambio_Crear") + "|" + Detecta38());
+            Check("Q2 SO del equipo del PO (otra categoria): guarda como PSO", "ok|PSO", Pre(Cambio(@"SORIANA\luciap", "PSO", "PRB 2026-000002"), 2));
+            Check("Q3 el PO de su fila escrito distinto (mayusculas, espacios): guarda", "ok|PSO", Pre(Cambio(@"SORIANA\andresvr", "PSO", "PRB 2026-000002"), 2));
+            Check("Q4 SO solo en fila NO vigente del PO: 51226", "51226", Cambio(@"SORIANA\edgarrad", "PSO", "PRB 2026-000003"));
+            Check("Q5 iniciativa sin PO; SO de una fila sin PO: 51226", "51226", Cambio(@"SORIANA\edgarrad", "PSO", "PRB 2026-000005"));
+            // PRB-000001 ya quedo Cerrado (P10): 51219 = paso el re-chequeo de dueno.
+            Check("Q6 lo de 37 sigue: dueno capturado pasa (51219, ya Cerrado); nombre repetido y correo en dos personas 51226; Subestado 51227", "51219|51226|51226|51227",
+                  Cambio(@"SORIANA\luciap", "PSO", "PRB 2026-000001") + "|" + Cambio(@"SORIANA\rep1", "PSO", "PRB 2026-000003") + "|" +
+                  Cambio(@"SORIANA\compartido", "PSO", "PRB 2026-000003") + "|" + Cambio(@"SORIANA\luciap", "PSO", "PRB 2026-000002", subestado: "X"));
+            {
+                // El sitio decide lo mismo que la base en cada par cuenta x folio.
+                var cuentas = new[] { @"SORIANA\andresvr", @"SORIANA\luciap", @"SORIANA\edgarrad", @"SORIANA\jcm", @"SORIANA\rep1", @"SORIANA\compartido", @"SORIANA\nadie" };
+                var folios = new[] { "PRB 2026-000001", "PRB 2026-000002", "PRB 2026-000003", "PRB 2026-000005" };
+                var distintos = new List<string>();
+                foreach (var c in cuentas)
+                    foreach (var f in folios)
+                    {
+                        var sitio = SitioPso(c, f, true) == "puede";
+                        var b = Cambio(c, "PSO", f);
+                        var bOk = b.StartsWith("ok") || b == "51219";
+                        if (sitio != bOk) distintos.Add(c + " " + f + " sitio=" + sitio + " base=" + b);
+                    }
+                Check("Q7 sitio (Evaluar con el directorio real) = base en 7 cuentas x 4 folios", "", string.Join("; ", distintos));
+                Check("Q7b sin el equipo el sitio vuelve a la regla de 37", "NoEsDueno|puede",
+                      SitioPso(@"SORIANA\luciap", "PRB 2026-000002", false) + "|" + SitioPso(@"SORIANA\luciap", "PRB 2026-000002", true));
+            }
+            var nPso38 = Uno("SELECT COUNT(*) FROM adm.SolicitudCambio WHERE RolSolicitante = 'PSO'");
+            Check("Q8 rollback de 38: Crear de sql/37, sin propiedad, filas PSO intactas, el SO del equipo -> 51226; el sitio ve 37 y no 38",
+                  "ok|" + H37 + "|" + nPso38 + "|51226|1|0",
+                  Script(S38 + "_rollback") + "|" + Hash("adm.usp_SolicitudCambio_Crear") + "|" +
+                  Uno("SELECT COUNT(*) FROM adm.SolicitudCambio WHERE RolSolicitante = 'PSO'") + "|" + Cambio(@"SORIANA\luciap", "PSO", "PRB 2026-000002") + "|" + Detecta38());
+            Check("Q9 rollback de 38 otra vez: no esta aplicada", "no esta aplicada|" + H37, Tiene(Script(S38 + "_rollback"), "no esta aplicada") + "|" + Hash("adm.usp_SolicitudCambio_Crear"));
+            Check("Q10 reaplicar 38 y deshacerla (Z parte de 37)", "ok|" + H38 + "|ok|" + H37,
+                  Script(S38) + "|" + Hash("adm.usp_SolicitudCambio_Crear") + "|" + Script(S38 + "_rollback") + "|" + Hash("adm.usp_SolicitudCambio_Crear"));
 
             // ---------------- Z: vuelta completa sin filas incompatibles ----------------
             Exec("UPDATE adm.SolicitudCambio SET RolSolicitante = 'ADM' WHERE RolSolicitante = 'PSO';" +

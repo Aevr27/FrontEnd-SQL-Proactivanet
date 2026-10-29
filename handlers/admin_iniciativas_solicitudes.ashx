@@ -158,8 +158,10 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             DecisionCambioPso d;
             try
             {
+                var lectura = AccesoIniciativas.Lectura(context);
                 d = SolicitudCambioPso.Evaluar(id, PersistenciaSolicitudesCambio.SolicitaPsoActiva(), AccesoIniciativas.Motivo(context),
-                                               AccesoIniciativas.Lectura(context).Personas, p.Folio, SolicitudesCambio.DuenosCapturados);
+                                               lectura.Personas, p.Folio, SolicitudesCambio.DuenosCapturados,
+                                               PersistenciaSolicitudesCambio.SolicitaPsoEquipoActiva() ? lectura.Directorio : null);
             }
             catch (Exception ex)
             {

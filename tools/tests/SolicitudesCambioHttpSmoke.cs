@@ -28,6 +28,8 @@ sealed class DuenosPso : IFuenteDuenosVigentes
     public bool Lanza;
     public DuenosPso Persona(string nombre, string correo) { Personas.Add(new PersonaCatalogo { Nombre = nombre, Correo = correo }); return this; }
     public DuenosPso Fila(string po, string so) { Filas.Add(new DirectorioOrganizacional.Dueno { CategoriaN2 = "/A/" + po, C1 = "/A", Po = po, So = so, Director = "Dir", Vigente = true }); return this; }
+    // Otra categoria del mismo PO (sql/38: el equipo del PO).
+    public DuenosPso FilaEn(string categoria, string po, string so, bool vigente) { Filas.Add(new DirectorioOrganizacional.Dueno { CategoriaN2 = categoria, C1 = "/B", Po = po, So = so, Director = "Dir", Vigente = vigente }); return this; }
     public DuenosVigentes Leer()
     {
         Lecturas++;
@@ -803,7 +805,12 @@ public static class SolicitudesCambioHttpSmoke
             .Persona("Amb Uno", "t_amb@soriana.com").Persona("Amb Dos", "t_amb@soriana.com")
             .Persona("Rep", "t_rep@soriana.com").Persona("REP", "rep.otro@soriana.com")
             .Persona("Adm Po", "t_admpo@soriana.com")
-            .Fila("PO 1", "SO x").Fila("PO X", "SO x").Fila("Amb Uno", "Rep").Fila("Adm Po", "SO x");
+            .Persona("So Equipo", "t_soeq@soriana.com").Persona("So Baja", "t_sobaja@soriana.com")
+            .Fila("PO 1", "SO x").Fila("PO X", "SO x").Fila("Amb Uno", "Rep").Fila("Adm Po", "SO x")
+            // sql/38: "So Equipo" es SO de PO X en OTRA categoria; "So Baja" solo
+            // en una fila NO vigente de PO 1.
+            .FilaEn("/B/Equipo", "po  x", "So Equipo", true).FilaEn("/B/Baja", "PO 1", "So Baja", false);
+        const string SOEQ = @"SORIANA\t_soeq", SOBAJA = @"SORIANA\t_sobaja";
         AccesoIniciativas.FuenteDuenos = duenosPso;
         AccesoAdmin.FuenteRoles = new RolesFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(ADMPO, "ADM");
         PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
@@ -912,7 +919,40 @@ public static class SolicitudesCambioHttpSmoke
             Check("P23 FoliosPropios (boton del registro): solo las suyas; ambiguo: ninguna", "A,B|",
                   string.Join(",", SolicitudCambioPso.FoliosPropios(IdentidadWindows.Desde(PO1, true), personas, filas)) + "|" +
                   string.Join(",", SolicitudCambioPso.FoliosPropios(IdentidadWindows.Desde(AMB, true), personas, filas)));
+            // ---- Q: sql/38, el SO del equipo del PO de la iniciativa ----
+            PersistenciaSolicitudesCambio.SolicitaPsoEquipoForzadaParaPruebas = false;
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", SOEQ, envio("PRB 2026-000003", null), out estado);
+            Check("Q1 SO del equipo de PO X sin sql/38: 403 NoEsDueno (regla de sql/37), nada se guarda", "403|True|True|0",
+                  estado + "|" + cuerpo.Contains("NoEsDueno") + "|" + cuerpo.Contains("Service Owner capturado de esta") + "|" + enviados());
+            PersistenciaSolicitudesCambio.SolicitaPsoEquipoForzadaParaPruebas = true;
+            cuerpo = Correr("POST", "accion=enviar", SOEQ, envio("PRB 2026-000003", null), out estado);
+            Check("Q2 con sql/38: el SO del equipo del PO (otra categoria, PO con otra grafia) guarda como PSO con su cuenta", "200|1|PSO|" + SOEQ,
+                  estado + "|" + enviados() + "|" + alm.UltimoRol + "|" + alm.UltimoUsuario);
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", SOEQ, envio("PRB 2026-000001", null), out estado);
+            Check("Q3 con sql/38, iniciativa de OTRO PO: 403 NoEsDueno con el aviso del equipo", "403|True|True|0",
+                  estado + "|" + cuerpo.Contains("NoEsDueno") + "|" + cuerpo.Contains("un Service Owner de ese Product Owner") + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", SOEQ, envio("PRB 2026-000002", null), out estado);
+            Check("Q4 con sql/38, iniciativa sin PO capturado: 403", "403|0", estado + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", SOBAJA, envio("PRB 2026-000001", null), out estado);
+            Check("Q5 SO solo en una fila NO vigente del PO: 403, nada se guarda", "403|0", estado + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", SOEQ, envio("PRB 2026-000003", "forja"), out estado);
+            Check("Q6 SO del equipo con rol forjado: PSO igual", "200|PSO|" + SOEQ, estado + "|" + alm.UltimoRol + "|" + alm.UltimoUsuario);
+            var dir = duenosPso.Leer().Directorio;
+            Check("Q7 FoliosPropios: con el equipo, la de su PO (C); sin el equipo, ninguna; el PO / SO capturado no cambia", "C||A,B",
+                  string.Join(",", SolicitudCambioPso.FoliosPropios(IdentidadWindows.Desde(SOEQ, true), personas, filas, dir)) + "|" +
+                  string.Join(",", SolicitudCambioPso.FoliosPropios(IdentidadWindows.Desde(SOEQ, true), personas, filas, null)) + "|" +
+                  string.Join(",", SolicitudCambioPso.FoliosPropios(IdentidadWindows.Desde(PO1, true), personas, filas, dir)));
+            Check("Q8 PoDeMiEquipo: solo filas vigentes donde es SO", "1|0",
+                  SolicitudCambioPso.PoDeMiEquipo(IdentidadAcuse.Resolver(IdentidadWindows.Desde(SOEQ, true), personas), dir).Count + "|" +
+                  SolicitudCambioPso.PoDeMiEquipo(IdentidadAcuse.Resolver(IdentidadWindows.Desde(SOBAJA, true), personas), dir).Count);
+            PersistenciaSolicitudesCambio.SolicitaPsoEquipoForzadaParaPruebas = null;
             var reg = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_registro.ashx"));
+            var sol = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx"));
+            Check("Q9 el directorio del equipo solo va con sql/38 (registro y envio)", "True|True",
+                  reg.Contains("PersistenciaSolicitudesCambio.SolicitaPsoEquipoActiva() ? lectura.Directorio : null") + "|" +
+                  sol.Contains("PersistenciaSolicitudesCambio.SolicitaPsoEquipoActiva() ? lectura.Directorio : null"));
             Check("P24 el registro manda cambios_pso (FoliosPso: vacio para ADM / MOD, sin sql/37 o sin ser PO/SO)", "True|True",
                   reg.Contains("registro[\"cambios_pso\"] = FoliosPso(context, registro);") + "|" +
                   reg.Contains("RolAdmin.EsElevado(AccesoAdmin.Rol(context)) || !PersistenciaSolicitudesCambio.SolicitaPsoActiva()"));
@@ -921,6 +961,7 @@ public static class SolicitudesCambioHttpSmoke
         {
             PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
             PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.SolicitaPsoEquipoForzadaParaPruebas = null;
             alm.LanzarAlEnviar = null;
         }
 

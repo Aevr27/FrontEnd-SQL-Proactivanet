@@ -175,8 +175,10 @@ public class AdminIniciativasRegistro : IHttpHandler
                 || AccesoIniciativas.Motivo(context) != null) return new List<string>();
             object filas;
             registro.TryGetValue("iniciativas", out filas);
-            return SolicitudCambioPso.FoliosPropios(AccesoAdmin.IdentidadEscritura(context), AccesoIniciativas.Lectura(context).Personas,
-                                                    filas as System.Collections.IEnumerable);
+            var lectura = AccesoIniciativas.Lectura(context);
+            return SolicitudCambioPso.FoliosPropios(AccesoAdmin.IdentidadEscritura(context), lectura.Personas,
+                                                    filas as System.Collections.IEnumerable,
+                                                    PersistenciaSolicitudesCambio.SolicitaPsoEquipoActiva() ? lectura.Directorio : null);
         }
         catch (Exception ex)
         {
