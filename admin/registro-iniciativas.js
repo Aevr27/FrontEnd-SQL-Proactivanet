@@ -450,17 +450,20 @@ window.RegistroIniciativas = (function () {
       '<button type="button" class="btn linea chico" data-accion="cambio-cat-agregar"' + (cats.length ? '' : ' disabled') + '>Agregar</button></div>';
   }
 
-  // La celda del % pedido de una categoria de "Solicitar cambios": el
-  // selector "% / Tickets" y, segun el modo, la casilla del % de siempre
-  // (htmlPct) o la de tickets con lo que da en % (htmlMetaHint). clave:
-  // 'l<n>' (ligada n) o 'n<n>' (nueva n). invalido: 'true' si lo pedido
-  // pasa del tope (su aviso es regCambioTope-<clave>).
+  // La celda del % pedido de una categoria de "Solicitar cambios": los dos
+  // radios "% de disminución / Tickets a resolver" (los de Crear y
+  // Modificar, .ini-modo-meta; aqui uno por fila) y, segun el modo, la
+  // casilla del % de siempre (htmlPct) o la de tickets con lo que da en %
+  // (htmlMetaHint). clave: 'l<n>' (ligada n) o 'n<n>' (nueva n). invalido:
+  // 'true' si lo pedido pasa del tope (su aviso es regCambioTope-<clave>).
   function celdaMetaCambio(c, ruta, clave, htmlPct, vacio, invalido) {
     var m = c.meta(ruta);
-    var modo = '<label class="ini-ed-pct"><span class="ini-sr">Pedir ' + Escape.html(ruta) + ' en</span>' +
-      // data-nativo: dos opciones, sin el desplegable con buscador.
-      '<select data-cambio-modo="' + clave + '" data-nativo><option value="pct"' + (m.modo === 'pct' ? ' selected' : '') + '>%</option>' +
-      '<option value="tickets"' + (m.modo === 'tickets' ? ' selected' : '') + '>Tickets</option></select></label> ';
+    function radio(valor, texto) {
+      return '<label><input type="radio" name="regCambioModo-' + clave + '" value="' + valor + '" data-cambio-modo="' + clave + '"' +
+        (m.modo === valor || (valor === 'pct' && m.modo !== 'tickets') ? ' checked' : '') + '> ' + texto + '</label>';
+    }
+    var modo = '<fieldset class="ini-modo-meta ini-modo-cambio"><legend class="ini-sr">Pedir ' + Escape.html(ruta) + ' por</legend>' +
+      radio('pct', '% de disminución') + radio('tickets', 'Tickets a resolver') + '</fieldset>';
     if (m.modo !== 'tickets') return modo + htmlPct;
     return modo + '<label class="ini-ed-pct"><span class="ini-sr">Tickets a reducir de ' + Escape.html(ruta) + '</span>' +
       '<input type="number" min="0" step="1" data-cambio-tickets="' + clave + '" value="' + Escape.attr(m.tickets) + '"' +
@@ -526,8 +529,10 @@ window.RegistroIniciativas = (function () {
     return suma;
   }
 
-  // El indicador junto a la ruta: una palomita chica (boton; su nombre
-  // accesible y su title dicen cuantas son y cuanto comprometen) que abre el
+  // El indicador junto a la ruta: un numero chico (boton) con cuantas OTRAS
+  // iniciativas activas usan esa categoria (no las categorias de esta
+  // iniciativa: esas van en el encabezado, htmlCategoriasCambio). Su nombre
+  // accesible y su title dicen cuantas son y cuanto comprometen; abre el
   // detalle. Sin otras activas no se pinta nada. clave: 'l<n>' / 'n<n>'.
   function htmlOtrasCheck(otras, clave, abierto) {
     if (!otras || !otras.length) return '';
@@ -536,8 +541,15 @@ window.RegistroIniciativas = (function () {
       comprometidoOtras(otras) / 100 + '% comprometido)';
     return '<button type="button" class="ini-otras-check" data-cambio-otras="' + clave + '" aria-expanded="' + (abierto ? 'true' : 'false') +
         '" aria-controls="regCambioOtras-' + clave + '" title="' + Escape.attr(rotulo + ': ver detalle') + '">' +
-        '<svg viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M3.5 8.5l3 3 6-7"/></svg>' +
-        '<span class="ini-sr">' + Escape.html(rotulo) + '</span></button>';
+        '<span aria-hidden="true">' + n + '</span><span class="ini-sr">' + Escape.html(rotulo) + '</span></button>';
+  }
+
+  // Cuantas categorias tiene ligadas la iniciativa (las de su registro; las
+  // por agregar todavia no lo estan), junto a "Categoría".
+  function htmlCuantasLigadas(n) {
+    var rotulo = n + (n === 1 ? ' categoría ligada' : ' categorías ligadas') + ' a esta iniciativa';
+    return '<span class="ini-cats-cuantas" title="' + Escape.attr(rotulo) + '"><span aria-hidden="true">(' + n + ')</span>' +
+      '<span class="ini-sr">' + Escape.html(rotulo) + '</span></span>';
   }
 
   // Su detalle: una fila propia justo debajo de la de la categoria, a todo
@@ -3549,7 +3561,11 @@ window.RegistroIniciativas = (function () {
       else if (c && cn !== null && cn !== undefined) { c.capturarPctNueva(Number(cn), t.value); this.pintarTopeCambio('n' + cn); return true; }
       // % o Tickets de una categoria: cambia la casilla (repinta el bloque) y
       // pide la volumetria si hace falta; los tickets solo repintan su pista.
-      else if (c && cmo) { this.elegirModoMetaCambio(cmo, t.value); return true; }
+      // Radios: solo el que queda marcado, y si de verdad cambia el modo.
+      else if (c && cmo) {
+        if (t.checked !== false && c.meta(this.rutaMetaCambio(cmo)).modo !== t.value) this.elegirModoMetaCambio(cmo, t.value);
+        return true;
+      }
       else if (c && ctk) { this.capturarTicketsCambio(ctk, t.value); this.pintarTopeCambio(ctk); return true; }
       else return false;
       this.pintarEstadoEdicion(t);
@@ -3610,7 +3626,7 @@ window.RegistroIniciativas = (function () {
       var n = clave.slice(1);
       var sel = c.meta(ruta).modo === 'tickets' ? '[data-cambio-tickets="' + clave + '"]'
         : clave.charAt(0) === 'l' ? '[data-cambio-pct="' + n + '"]' : '[data-cambio-nueva-pct="' + n + '"]';
-      var casilla = this.doc.querySelector('#regCambioGrupoPct ' + sel);
+      var casilla = this.doc.querySelector ? this.doc.querySelector('#regCambioGrupoPct ' + sel) : null;
       if (casilla) casilla.setAttribute('aria-invalid', m ? 'true' : 'false');
       return m;
     }
@@ -3625,8 +3641,13 @@ window.RegistroIniciativas = (function () {
     // escrito se quedan como estan.
     pintarCategoriasCambio() {
       var caja = this.$('regCambioGrupoPct');
+      // El radio % / Tickets con el foco lo conserva al repintar (teclado).
+      var foco = caja && caja.contains && this.doc.activeElement && caja.contains(this.doc.activeElement) ? this.doc.activeElement : null;
+      var radio = foco && foco.getAttribute('data-cambio-modo') ? '[data-cambio-modo="' + foco.getAttribute('data-cambio-modo') + '"][value="' + foco.value + '"]' : '';
       if (caja && this.cambio) caja.innerHTML = this.htmlCategoriasCambio();
       this.montarSelectores();
+      var nuevo = radio && caja && caja.querySelector ? caja.querySelector(radio) : null;
+      if (nuevo) nuevo.focus();
     }
 
     htmlCategoriasCambio() {
@@ -3649,7 +3670,7 @@ window.RegistroIniciativas = (function () {
       }
       function invalido(ruta) { return c.excedeTope(ruta, fin) ? 'true' : 'false'; }
       var tabla = ligadas.length || c.nuevas.length
-        ? '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría</th>' +
+        ? '<div class="ini-det-tabla"><table class="ini-cats-tabla"><thead><tr><th scope="col">Categoría ' + htmlCuantasLigadas(ligadas.length) + '</th>' +
             '<th scope="col" class="num">% actual</th><th scope="col">% pedido</th><th scope="col"><span class="ini-sr">Acción</span></th>' +
           '</tr></thead><tbody>' +
           ligadas.map(function (r, n) {

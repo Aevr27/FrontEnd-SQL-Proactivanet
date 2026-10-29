@@ -9,10 +9,15 @@
 //
 //   R1-R4  otrasEnCategoria: solo activas con agrupador, sin la propia,
 //          misma ruta sin espacios ni mayusculas, un folio dos veces suma.
-//   I1-I4  el indicador: palomita chica (boton, sin texto visible ni
-//          <select>) pegada a la ruta, con nombre accesible completo (cuantas
-//          y cuanto comprometen) y title; sin otras activas no hay
-//          indicador; cerrado por omision.
+//   N1     el encabezado dice cuantas categorias tiene LIGADAS la iniciativa
+//          (las por agregar no), con nombre accesible y title.
+//   I1-I4  el indicador: numero chico (boton, sin <select>) con cuantas
+//          OTRAS iniciativas activas usan la categoria, pegado a la ruta, con
+//          nombre accesible completo (cuantas y cuanto comprometen) y title;
+//          sin otras activas no hay indicador; cerrado por omision.
+//   M1-M3  % / Tickets: dos radios por fila (% de disminucion / Tickets a
+//          resolver), mutuamente excluyentes, con legend accesible; cambiar
+//          deja el foco en el radio elegido.
 //   D1-D4  clic: abre el detalle (folio, %, estado, titulo, lo comprometido y
 //          lo disponible) en la fila de JUSTO debajo, a todo el ancho;
 //          aria-expanded; otro clic lo pliega; es enfocable con teclado.
@@ -114,14 +119,26 @@ function sonda() {
                    !!caja && caja.hidden, !!b1, !!$('regCambioOtras-l1'),
                    // Chica (<= 20px) y pegada a la ruta (<= 8px).
                    Math.round(bb0.width) <= 20 && Math.round(bb0.height) <= 20, Math.round(bb0.left - ruta0.right) <= 8,
-                   !!b0.querySelector('svg'), Array.prototype.filter.call(b0.childNodes, function (n) { return n.nodeType === 3 && n.textContent.trim(); }).length]);
-      // A: alineacion, con el detalle cerrado.
+                   b0.querySelector('[aria-hidden="true"]').textContent]);
+      var th = document.querySelector('#regCambioGrupoPct thead th .ini-cats-cuantas');
+      apunta('N', [th && th.querySelector('[aria-hidden="true"]').textContent, th && th.querySelector('.ini-sr').textContent, th && th.title]);
+      var rs = document.querySelectorAll('input[type="radio"][name="regCambioModo-l0"]');
+      var fs = rs[0] && rs[0].closest('fieldset');
+      apunta('M', [rs.length, Array.prototype.map.call(rs, function (r) { return r.value + ':' + r.checked + ':' + r.parentNode.textContent.trim(); }),
+                   fs && fs.querySelector('legend').textContent, document.querySelectorAll('select[data-cambio-modo]').length]);
+      // A: alineacion, con el detalle cerrado, en una caja ancha (1100px): la
+      // tabla no se estira al ancho de la caja.
+      $('regCambioGrupoPct').style.width = '1100px';
+      await espera(20);
       var tabla = document.querySelector('#regCambioGrupoPct table'), caja2 = document.querySelector('#regCambioGrupoPct .ini-det-tabla');
       var fila0 = b0.closest('tr'), tdAct = fila0.children[1], thAct = tabla.querySelector('thead th.num');
       var antes = Array.prototype.map.call(fila0.children, function (td) { return Math.round(td.getBoundingClientRect().left); });
       apunta('alinea', { tabla: Math.round(tabla.getBoundingClientRect().width), caja: Math.round(caja2.clientWidth),
                          hueco: Math.round(tdAct.getBoundingClientRect().left - nombre.getBoundingClientRect().right),
                          thDer: Math.round(thAct.getBoundingClientRect().right), tdDer: Math.round(tdAct.getBoundingClientRect().right) });
+      $('regCambioGrupoPct').style.width = '';
+      await espera(20);
+      antes = Array.prototype.map.call(fila0.children, function (td) { return Math.round(td.getBoundingClientRect().left); });
       b0.focus();
       apunta('foco', document.activeElement === b0);
       clic(b0);
@@ -133,15 +150,14 @@ function sonda() {
       apunta('fila', [caja.tagName, caja.previousElementSibling === fila0, caja.firstElementChild.getAttribute('colspan'),
                       JSON.stringify(antes) === JSON.stringify(despues)]);
       // P: cambiar a Tickets repinta el bloque (pintarCategoriasCambio).
-      var modo = document.querySelector('[data-cambio-modo="l0"]');
-      modo.value = 'tickets';
-      modo.dispatchEvent(new Event('change', { bubbles: true }));
+      function radio(clave, valor) { return document.querySelector('input[data-cambio-modo="' + clave + '"][value="' + valor + '"]'); }
+      radio('l0', 'tickets').focus();
+      radio('l0', 'tickets').click();
       await espera(50);
       apunta('repinta', [!!document.querySelector('[data-cambio-tickets="l0"]'), $('regCambioOtras-l0').hidden,
                          boton('l0').getAttribute('aria-expanded')]);
-      modo = document.querySelector('[data-cambio-modo="l0"]');
-      modo.value = 'pct';
-      modo.dispatchEvent(new Event('change', { bubbles: true }));
+      apunta('radios', [radio('l0', 'tickets').checked, radio('l0', 'pct').checked, document.activeElement === radio('l0', 'tickets')]);
+      radio('l0', 'pct').click();
       await espera(50);
       apunta('vuelvePct', [!!document.querySelector('[data-cambio-tickets="l0"]'), !!document.querySelector('[data-cambio-pct="0"]'),
                            $('regCambioOtras-l0').hidden]);
@@ -154,6 +170,9 @@ function sonda() {
       await espera(20);
       var t = g.querySelector('.ini-det-tabla'), bb = boton('l0').getBoundingClientRect(), td = boton('l0').closest('td').getBoundingClientRect();
       var con = t.scrollWidth - t.clientWidth;
+      // Los radios caben en su celda.
+      var fsr = radio('l0', 'pct').closest('fieldset'), tdr = fsr.closest('td').getBoundingClientRect(), fr = fsr.getBoundingClientRect();
+      apunta('radiosAngosto', fr.left >= tdr.left - 0.5 && fr.right <= tdr.right + 0.5);
       // La misma tabla sin indicadores: lo que ya desbordaba (la tabla tiene
       // su propio overflow-x) no es del indicador.
       Array.prototype.forEach.call(g.querySelectorAll('.ini-otras-check'), function (x) { x.style.display = 'none'; });
@@ -180,9 +199,14 @@ Banco.correr(paginas, ['/admin/__otras.html']).then(function (res) {
   var i = A.I || [];
   Check('I1 indicador: <button> junto a la ruta, en el mismo bloque; ningun <select> nuevo en el bloque (solo los de % / Tickets)',
     [true, 'BUTTON', true, 0], i.slice(0, 4));
-  Check('I2 palomita (svg) sin texto visible, chica y pegada a la ruta; nombre accesible y title completos',
-    [true, true, true, 0, '3 otras iniciativas activas en esta categoría (35% comprometido)',
-     '3 otras iniciativas activas en esta categoría (35% comprometido): ver detalle'], [i[11], i[12], i[13], i[14], i[4], i[5]]);
+  Check('I2 numero visible = 3 OTRAS iniciativas (chico y pegado a la ruta); nombre accesible y title completos',
+    [true, true, '3', '3 otras iniciativas activas en esta categoría (35% comprometido)',
+     '3 otras iniciativas activas en esta categoría (35% comprometido): ver detalle'], [i[11], i[12], i[13], i[4], i[5]]);
+  Check('N1 encabezado: 2 categorias ligadas a la iniciativa (no las 3 otras de la ruta B)',
+    ['(2)', '2 categorías ligadas a esta iniciativa', '2 categorías ligadas a esta iniciativa'], A.N);
+  Check('M1 dos radios por fila, % de disminucion marcado por omision; legend accesible; sin <select> de modo',
+    [2, ['pct:true:% de disminución', 'tickets:false:Tickets a resolver'], 'Pedir ' + RUTA_B + ' por', 0], A.M);
+  Check('M2 Tickets: excluyente (pct desmarcado) y el foco sigue en el radio elegido', [true, false, true], A.radios);
   Check('I3 cerrado por omision, controla su detalle', ['false', 'regCambioOtras-l0', true], [i[6], i[7], i[8]]);
   Check('I4 categoria sin otras activas: sin indicador ni detalle', [false, false], [i[9], i[10]]);
   var al = A.alinea || {};
@@ -201,6 +225,7 @@ Banco.correr(paginas, ['/admin/__otras.html']).then(function (res) {
   Check('P2 Tickets -> % vuelve a la casilla del %', [false, true, false], A.vuelvePct);
   Check('D3 otro clic pliega', [true, 'false'], A.pliega);
   var w = A.angosto || {};
+  Check('M3 en 360px los radios caben en su celda', true, A.radiosAngosto);
   Check('W1 en 360px: el indicador no ensancha la tabla (mismo desborde que sin el), queda en su celda y es de una linea', [true, true, true],
     [w.con === w.sin, w.dentro, w.alto > 0 && w.alto <= 22]);
   console.log('INFO  angosto: ' + JSON.stringify(w));

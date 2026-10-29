@@ -134,9 +134,7 @@ function sonda() {
       apunta('u2', [aviso.hidden, aviso.textContent, casilla.getAttribute('aria-invalid')]);
 
       // ---- Tickets ----
-      var modo = document.querySelector('[data-cambio-modo="l0"]');
-      modo.value = 'tickets';
-      modo.dispatchEvent(new Event('change', { bubbles: true }));
+      document.querySelector('input[data-cambio-modo="l0"][value="tickets"]').click();
       await espera(200);
       var tk = document.querySelector('[data-cambio-tickets="l0"]');
       escribe(tk, '600');
@@ -154,6 +152,25 @@ function sonda() {
       clic(document.querySelector('[data-accion="cambio-agregar"]'));
       await espera(30);
       apunta('g2', [pag.lista.items.length, pag.lista.items[0] && pag.lista.items[0].pcts[A]]);
+
+      // ---- Por agregar, en tickets: mismo tope (otras 60% en /Nueva) ----
+      var bo = pag.cambio;
+      bo.elegir('pct');
+      bo.nuevas.push({ categoria: '/Servicios/Correo/Nueva', valor: '' });
+      pag.pintarCategoriasCambio();
+      document.querySelector('input[data-cambio-modo="n0"][value="tickets"]').click();
+      await espera(200);
+      var tkn = document.querySelector('[data-cambio-tickets="n0"]');
+      escribe(tkn, '401');
+      apunta('n1', [$('regCambioTope-n0').hidden, bo.pctPedido('/Servicios/Correo/Nueva'), tkn.getAttribute('aria-invalid')]);
+      escribe(tkn, '400');
+      apunta('n2', [$('regCambioTope-n0').hidden, bo.pctPedido('/Servicios/Correo/Nueva')]);
+      // De vuelta a %: el % calculado se queda en la casilla del %.
+      document.querySelector('input[data-cambio-modo="n0"][value="pct"]').click();
+      await espera(50);
+      apunta('n3', [document.querySelector('[data-cambio-nueva-pct="0"]').value, !!document.querySelector('[data-cambio-tickets="n0"]')]);
+      bo.quitarNueva(0);
+      pag.pintarCategoriasCambio();
 
       // ---- Envio: un cambio guardado que excede (p. ej. de antes) ----
       pag.lista.items[0].pcts[A] = '60';
@@ -208,6 +225,9 @@ Banco.correr(paginas, ['/admin/__tope.html']).then(function (res) {
     [false, '/Servicios/Correo/Buzones: esos tickets equivalen a 60%, pero el máximo permitido es 54.88% (548 tickets con la volumetría de hoy). ' +
       'Otras iniciativas activas ya comprometen 45.12% y el tope por categoría es 100%.', 'true', 'regCambioMeta-l0 regCambioTope-l0'], A.k1);
   Check('K2 548 tickets (54.8%): cabe', [true, 'false', '54.8'], A.k2);
+  Check('N1 por agregar en tickets: 401 de 1000 (40.1%) pasa del 40% disponible', [false, '40.1', 'true'], A.n1);
+  Check('N2 400 tickets (40%): cabe', [true, '40'], A.n2);
+  Check('N3 volver a %: el % calculado queda en la casilla del %, sin la de tickets', ['40', false], A.n3);
   Check('G1 agregar con 600 tickets: no entra a la lista y dice el maximo', [0, true], A.g1);
   Check('G2 agregar con 548 tickets: entra', [1, '54.8'], A.g2);
   Check('E1 enviar con un cambio que excede: error, sin confirmar ni llamar al servidor', [true, false, 0], A.e1);

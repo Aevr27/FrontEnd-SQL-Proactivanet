@@ -1909,7 +1909,7 @@ pruebas.push(function () {
     accion(p, 'cambio-cat-agregar');
     var grupo = p.sel('regCambioGrupoPct').innerHTML;
     Check('SC2 agregar del catalogo: se pinta como nueva y el % pedido de la ligada se conserva', [true, true, true],
-      [/\/B\/Cat 4<\/span> <span class="ini-cat-estado nueva">Agregar/.test(grupo), /data-cambio-pct="1" value="30"/.test(grupo),
+      [/\/B\/Cat 4<\/span>(<button[\s\S]*?<\/button>)?<\/span> <span class="ini-cat-estado nueva">Agregar/.test(grupo), /data-cambio-pct="1" value="30"/.test(grupo),
        /data-cambio-nueva-pct="0"/.test(grupo)]);
     Check('SC3 solo se repinta el bloque de categorias: motivo y formulario intactos', ['Se amplia el alcance', form],
       [p.sel('regCambioMotivo').value, p.sel('regCambio').innerHTML]);
@@ -2108,9 +2108,10 @@ pruebas.push(function () {
 
     // % / Tickets de la ligada /A/Cat 1 (volumetria simulada: 418).
     g = p.sel('regCambioGrupoPct').innerHTML;
-    Check('SCD4 cada categoria trae su selector % / Tickets, en % por omision', [true, true],
-      [/<select data-cambio-modo="l0" data-nativo><option value="pct" selected>%<\/option><option value="tickets">Tickets<\/option><\/select>/.test(g),
-       /data-cambio-pct="0"/.test(g)]);
+    Check('SCD4 cada categoria trae sus radios % de disminucion / Tickets a resolver, en % por omision; sin <select> de modo', [true, true, true, false],
+      [/<input type="radio" name="regCambioModo-l0" value="pct" data-cambio-modo="l0" checked> % de disminución/.test(g),
+       /<input type="radio" name="regCambioModo-l0" value="tickets" data-cambio-modo="l0"> Tickets a resolver/.test(g),
+       /data-cambio-pct="0"/.test(g), /<select data-cambio-modo/.test(g)]);
     var antes = p.pedidos.length;
     var m = Elemento('m'); m.setAttribute('data-cambio-modo', 'l0'); m.value = 'tickets';
     p.sel('regDetCuerpo').disparar('change', { target: m });

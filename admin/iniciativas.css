@@ -1010,14 +1010,15 @@ html.ini-detalle-abierto { overflow: hidden; }
    la tabla. */
 .ini-cat-nombre { display: inline-flex; align-items: flex-start; gap: 4px; min-width: 10em; max-width: 28em; vertical-align: top; }
 .ini-cat-nombre .ini-cat-ruta { min-width: 0; overflow-wrap: anywhere; }
-/* Otras iniciativas activas de la categoria: palomita chica (boton) y su
-   detalle en la fila de abajo, a todo el ancho de la tabla. */
+/* Otras iniciativas activas de la categoria: un numero chico (boton, cuantas
+   otras) y su detalle en la fila de abajo, a todo el ancho de la tabla. */
 .ini-otras-check {
-  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0;
-  border: 1px solid var(--accent-line); border-radius: 50%; background: var(--accent-soft); color: var(--verde);
-  cursor: pointer;
+  flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px;
+  box-sizing: border-box; border: 1px solid var(--accent-line); border-radius: 999px; background: var(--accent-soft); color: var(--verde);
+  font: inherit; font-size: 11px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; cursor: pointer;
 }
-.ini-otras-check svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+/* Cuantas categorias tiene ligadas la iniciativa, junto a "Categoria". */
+.ini-cats-cuantas { color: var(--accent-ink); font-variant-numeric: tabular-nums; }
 .ini-otras-check:hover, .ini-otras-check[aria-expanded="true"] { border-color: var(--accent); color: var(--accent-ink); }
 .ini-otras-check:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--ring); }
 .ini-otras-fila[hidden] { display: none; }
@@ -1043,6 +1044,11 @@ tr:has(+ .ini-otras-fila:not([hidden])) > td { border-bottom: 0; }
 .ini-modo-meta legend { font-size: 12px; font-weight: 600; padding: 0; margin-bottom: 4px; }
 .ini-modo-meta label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; }
 .ini-modo-meta .ini-motivo { flex-basis: 100%; }
+/* Solicitar cambios: los mismos radios, uno por fila, compactos encima de la
+   casilla; parten en dos lineas si la celda es angosta. */
+.ini-modo-cambio { margin: 0 0 2px; gap: 2px 12px; }
+.ini-modo-cambio label { white-space: nowrap; cursor: pointer; }
+.ini-modo-cambio input { margin: 0; accent-color: var(--accent); }
 .ini-meta { display: block; font-size: 11.5px; color: var(--ink-2); margin-top: 2px; }
 .ini-meta.mal { color: var(--rojo); }
 .ini-vol-calc { display: block; font-size: 11px; color: var(--muted); margin-top: 2px; }
