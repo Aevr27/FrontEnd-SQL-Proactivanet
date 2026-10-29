@@ -144,6 +144,10 @@ public class AdminIniciativasRegistro : IHttpHandler
                 subestadoAlta = false;
             }
             registro["subestado_alta"] = subestadoAlta;
+            // "Solicitar cambios" del PO / SO (sql/37): los folios a los que
+            // esta cuenta SIN rol de Admin puede pedir cambios (los suyos).
+            // Solo pinta el boton; el envio vuelve a decidir (SolicitudCambioPso).
+            registro["cambios_pso"] = FoliosPso(context, registro);
             context.Response.Write(serializador.Serialize(registro));
         }
         catch (Exception ex)
@@ -158,6 +162,26 @@ public class AdminIniciativasRegistro : IHttpHandler
                 { "tipo", ex.GetType().Name },
             };
             context.Response.Write(serializador.Serialize(error));
+        }
+    }
+
+    // ADM / MOD: vacio (usan su rol). Sin sql/37, sin ser PO/SO vigente o
+    // con un error al leer: vacio (falla cerrado; el error se registra).
+    private static List<string> FoliosPso(HttpContext context, Dictionary<string, object> registro)
+    {
+        try
+        {
+            if (RolAdmin.EsElevado(AccesoAdmin.Rol(context)) || !PersistenciaSolicitudesCambio.SolicitaPsoActiva()
+                || AccesoIniciativas.Motivo(context) != null) return new List<string>();
+            object filas;
+            registro.TryGetValue("iniciativas", out filas);
+            return SolicitudCambioPso.FoliosPropios(AccesoAdmin.IdentidadEscritura(context), AccesoIniciativas.Lectura(context).Personas,
+                                                    filas as System.Collections.IEnumerable);
+        }
+        catch (Exception ex)
+        {
+            DashboardHandler.Registrar("admin_iniciativas_registro.ashx", ex);
+            return new List<string>();
         }
     }
 

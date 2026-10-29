@@ -96,6 +96,19 @@ public static class PersistenciaSolicitudesCambio
         return SolicitaVariosForzadaParaPruebas ?? (SolicitaVarios && sql25EnBase == true && sql34EnBase == true);
     }
 
+    // "Solicitar cambios" del PO / SO de la iniciativa (RolSolicitante PSO,
+    // sql/37; App_Code/SolicitudCambioPso.cs). SOLO surte efecto cuando
+    // DeteccionSolicitudesCambio ve sql/22 y el CHECK CK_SolicitudCambio_RolPso
+    // (su nombre: la cuenta del sitio no lee definiciones). Apagada: el
+    // registro no ofrece el boton a nadie sin rol y el handler responde 403.
+    // false = apagada aunque la base tenga sql/37.
+    public const bool SolicitaPso = true;
+    public static bool? SolicitaPsoForzadaParaPruebas;
+    public static bool SolicitaPsoActiva()
+    {
+        return SolicitaPsoForzadaParaPruebas ?? (SolicitaPso && sql22EnBase == true && sql37EnBase == true);
+    }
+
     // Lo que DeteccionSolicitudesCambio vio en la base (null = todavia no se
     // reviso) y cuando. Misma vigencia que sql/24: aplicar o revertir los
     // scripts la enciende o la apaga sin reciclar el sitio.
@@ -103,13 +116,16 @@ public static class PersistenciaSolicitudesCambio
     private static bool? sql22EnBase;
     private static bool? sql25EnBase;
     private static bool? sql34EnBase;
+    private static bool? sql37EnBase;
     private static DateTime revisadaUtc;
 
     public static void Anotar(bool sql22, bool sql25, DateTime ahoraUtc) { Anotar(sql22, sql25, false, ahoraUtc); }
 
-    public static void Anotar(bool sql22, bool sql25, bool sql34, DateTime ahoraUtc)
+    public static void Anotar(bool sql22, bool sql25, bool sql34, DateTime ahoraUtc) { Anotar(sql22, sql25, sql34, false, ahoraUtc); }
+
+    public static void Anotar(bool sql22, bool sql25, bool sql34, bool sql37, DateTime ahoraUtc)
     {
-        lock (candado) { sql22EnBase = sql22; sql25EnBase = sql25; sql34EnBase = sql34; revisadaUtc = ahoraUtc; }
+        lock (candado) { sql22EnBase = sql22; sql25EnBase = sql25; sql34EnBase = sql34; sql37EnBase = sql37; revisadaUtc = ahoraUtc; }
     }
 
     public static bool Vigente(DateTime ahoraUtc)
@@ -120,7 +136,7 @@ public static class PersistenciaSolicitudesCambio
     // Solo para las pruebas: como recien arrancado (sin revisar).
     public static void OlvidarParaPruebas()
     {
-        lock (candado) { sql22EnBase = null; sql25EnBase = null; sql34EnBase = null; revisadaUtc = DateTime.MinValue; }
+        lock (candado) { sql22EnBase = null; sql25EnBase = null; sql34EnBase = null; sql37EnBase = null; revisadaUtc = DateTime.MinValue; }
     }
 
     public const string MotivoVarios =
@@ -147,7 +163,8 @@ public static class DeteccionSolicitudesCambio
         "AND name IN (N'@CambiaTitulo', N'@CambiaOwnerProblem', N'@CambiaOwnerServicio')), " +
         "Sql34 = (SELECT COUNT(*) FROM sys.parameters " +
         "WHERE object_id = OBJECT_ID(N'adm.usp_SolicitudCambio_Crear', N'P') " +
-        "AND name IN (N'@CambiaFAnalisis', N'@CambiaFSolucion', N'@CambiaFCierre'))";
+        "AND name IN (N'@CambiaFAnalisis', N'@CambiaFSolucion', N'@CambiaFCierre')), " +
+        "Sql37 = CASE WHEN OBJECT_ID(N'adm.CK_SolicitudCambio_RolPso', N'C') IS NULL THEN 0 ELSE 1 END";
 
     // Con la conexion (abierta) del que llama.
     public static void Revisar(SqlConnection cn)
@@ -155,7 +172,7 @@ public static class DeteccionSolicitudesCambio
         if (cn == null) throw new ArgumentNullException("cn");
         var ahora = DateTime.UtcNow;
         if (PersistenciaSolicitudesCambio.Vigente(ahora)) return;
-        bool sql22 = false, sql25 = false, sql34 = false;
+        bool sql22 = false, sql25 = false, sql34 = false, sql37 = false;
         try
         {
             using (var cmd = new SqlCommand(Consulta, cn) { CommandTimeout = 15 })
@@ -165,10 +182,11 @@ public static class DeteccionSolicitudesCambio
                     sql22 = Convert.ToInt32(rd.GetValue(0)) == 4;
                     sql25 = sql22 && Convert.ToInt32(rd.GetValue(1)) == 3;
                     sql34 = sql25 && Convert.ToInt32(rd.GetValue(2)) == 3;
+                    sql37 = sql22 && Convert.ToInt32(rd.GetValue(3)) == 1;
                 }
         }
-        catch (SqlException) { sql22 = false; sql25 = false; sql34 = false; }
-        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, sql34, ahora);
+        catch (SqlException) { sql22 = false; sql25 = false; sql34 = false; sql37 = false; }
+        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, sql34, sql37, ahora);
     }
 
     // Abre su propia conexion solo si hace falta revisar.
@@ -473,8 +491,8 @@ public sealed class ErrorSolicitudCambio : Exception
     {
         get
         {
-            if (Numero == 51201) return 404;
-            if (Numero == 51001 || Numero == 51210) return 403;
+            if (Numero == 51201 || Numero == 51225) return 404;
+            if (Numero == 51001 || Numero == 51210 || Numero == 51226) return 403;
             if (Numero == 51202 || Numero == 51204 || Numero == 51221 || Numero == 51010 || Numero == 51008) return 409;
             return 422;
         }
@@ -494,6 +512,8 @@ public sealed class ErrorSolicitudCambio : Exception
                 case 51222: case 51223: return "ClasificacionInvalida";
                 case 51010: return "TopeExcedido";
                 case 51001: case 51210: return "SinAtribucion";
+                case 51225: return "IniciativaNoExiste";      // sql/37, PSO
+                case 51226: return "NoEsDueno";               // sql/37, PSO
                 default: return "DatoInvalido";
             }
         }

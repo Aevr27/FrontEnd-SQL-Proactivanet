@@ -297,7 +297,9 @@ public sealed class AdminAccesoModulo : IHttpModule
         if (AccesoAdmin.PuedeEntrar(ctx)) return true;
         // Los cuatro handlers de Nueva solicitud y Mis solicitudes, siendo
         // PO/SO vigente (App_Code/AccesoIniciativas.cs).
-        var solicitante = AccesoIniciativas.EsRutaSolicitante(ruta);
+        // Tambien "Solicitar cambios" (solo accion=enviar) del PO / SO: el
+        // handler decide si la iniciativa es suya (SolicitudCambioPso).
+        var solicitante = AccesoIniciativas.EsRutaSolicitante(ruta) || AccesoIniciativas.EsEnvioCambio(ruta, q["accion"]);
         var motivo = solicitante ? AccesoIniciativas.Motivo(ctx) : null;
         if (solicitante && motivo == null) return true;
 

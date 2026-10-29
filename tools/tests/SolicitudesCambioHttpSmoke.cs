@@ -19,6 +19,24 @@ using System.Reflection;
 using System.Security.Principal;
 using System.Web;
 
+// CatPersona + CatCategoriaDueno sin SQL (AccesoIniciativas.FuenteDuenos).
+sealed class DuenosPso : IFuenteDuenosVigentes
+{
+    public readonly List<PersonaCatalogo> Personas = new List<PersonaCatalogo>();
+    public readonly List<DirectorioOrganizacional.Dueno> Filas = new List<DirectorioOrganizacional.Dueno>();
+    public int Lecturas;
+    public bool Lanza;
+    public DuenosPso Persona(string nombre, string correo) { Personas.Add(new PersonaCatalogo { Nombre = nombre, Correo = correo }); return this; }
+    public DuenosPso Fila(string po, string so) { Filas.Add(new DirectorioOrganizacional.Dueno { CategoriaN2 = "/A/" + po, C1 = "/A", Po = po, So = so, Director = "Dir", Vigente = true }); return this; }
+    public DuenosVigentes Leer()
+    {
+        Lecturas++;
+        if (Lanza) throw new InvalidOperationException("CatPersona no se pudo leer");
+        var filas = Filas.Select(f => new DirectorioOrganizacional.Dueno { CategoriaN2 = f.CategoriaN2, C1 = f.C1, Po = f.Po, So = f.So, Director = f.Director, Vigente = f.Vigente }).ToList();
+        return new DuenosVigentes { Personas = new List<PersonaCatalogo>(Personas), Directorio = new DirectorioOrganizacional(filas, new Dictionary<string, string>()) };
+    }
+}
+
 sealed class RolesFalsos : IFuenteRolesAdmin
 {
     public readonly Dictionary<string, string[]> Filas = new Dictionary<string, string[]>();
@@ -37,12 +55,13 @@ sealed class AlmacenFalso : IAlmacenSolicitudesCambio
     public string UltimoUsuario, UltimoRol, UltimoRevisor, UltimoComentario;
     public List<ClasificacionSolicitud> UltimasClasificaciones;
     public Dictionary<string, object> Detalle_;
-    public ErrorSolicitudCambio LanzarAlAplicar;
+    public ErrorSolicitudCambio LanzarAlAplicar, LanzarAlEnviar;
     public int UltimoNumeroFallo;
 
     public ResultadoEnvioSolicitud Enviar(PeticionSolicitudCambio p, string usuario, string rol)
     {
         Llamadas.Add("Enviar"); UltimaPeticion = p; UltimoUsuario = usuario; UltimoRol = rol;
+        if (LanzarAlEnviar != null) throw LanzarAlEnviar;
         return new ResultadoEnvioSolicitud { IdSolicitud = 7, Repetida = false };
     }
     public List<Dictionary<string, object>> Listar(string estado, int maximo) { Llamadas.Add("Listar:" + estado); return new List<Dictionary<string, object>>(); }
@@ -771,6 +790,138 @@ public static class SolicitudesCambioHttpSmoke
         {
             PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
             PersistenciaSolicitudesCambio.SolicitaVariosForzadaParaPruebas = null;
+        }
+
+        // ---------------- P: "Solicitar cambios" del PO / SO (sql/37, PSO) ----------------
+        // 000001: PO "PO 1" / SO "SO x"; 000003: PO "PO X" / SO "SO x";
+        // 000002: sin capturar (DuenosCapturados de arriba).
+        const string PO1 = @"SORIANA\t_po1", SOX = @"SORIANA\t_sox", POX = @"SORIANA\t_pox", COMUN = @"SORIANA\t_comun",
+                     AMB = @"SORIANA\t_amb", REP = @"SORIANA\t_rep", ADMPO = @"SORIANA\t_admpo";
+        var duenosPso = new DuenosPso()
+            .Persona("PO 1", "t_po1@soriana.com").Persona("SO  X", " T_SOX@Soriana.com ").Persona("PO X", "t_pox@soriana.com")
+            .Persona("Comun", "t_comun@soriana.com")
+            .Persona("Amb Uno", "t_amb@soriana.com").Persona("Amb Dos", "t_amb@soriana.com")
+            .Persona("Rep", "t_rep@soriana.com").Persona("REP", "rep.otro@soriana.com")
+            .Persona("Adm Po", "t_admpo@soriana.com")
+            .Fila("PO 1", "SO x").Fila("PO X", "SO x").Fila("Amb Uno", "Rep").Fila("Adm Po", "SO x");
+        AccesoIniciativas.FuenteDuenos = duenosPso;
+        AccesoAdmin.FuenteRoles = new RolesFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(ADMPO, "ADM");
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
+        PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = true;
+        capacidades.Clear();
+        Func<string, string, string[][]> envio = delegate (string folio, string extra)
+        {
+            var kv = new List<string> { "folio", folio, "llave", Guid.NewGuid().ToString(), "tipo", "estado", "estado_nuevo", "En Monitoreo",
+                                        "campo_fecha", "f_solucion", "fecha_nueva", "2026-12-05", "motivo", "m" };
+            if (extra == "forja") kv.AddRange(new[] { "rol", "ADM", "rol_solicitante", "ADM", "usuario", ADM, "solicitado_por", ADM, "pso", "0" });
+            if (extra == "subestado") kv.AddRange(new[] { "subestado_nuevo", "X" });
+            return F(kv.ToArray());
+        };
+        Func<string> enviados = delegate { return alm.Llamadas.Count(x => x == "Enviar").ToString(); };
+        try
+        {
+            alm.Llamadas.Clear(); duenosPso.Lecturas = 0;
+            cuerpo = Correr("POST", "accion=enviar", PO1, envio("PRB 2026-000001", null), out estado);
+            Check("P1 PO de la iniciativa: 200, firma su cuenta con rol PSO puesto por el servidor; CatPersona leida UNA vez",
+                  "200|1|" + PO1 + "|PSO|1", estado + "|" + enviados() + "|" + alm.UltimoUsuario + "|" + alm.UltimoRol + "|" + duenosPso.Lecturas);
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", SOX, envio("PRB 2026-000001", null), out estado);
+            Check("P2 SO (nombre con otra grafia y correo con mayusculas/espacios): 200 PSO", "200|1|PSO", estado + "|" + enviados() + "|" + alm.UltimoRol);
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", PO1, envio("PRB 2026-000001", "forja"), out estado);
+            Check("P3 rol / usuario / solicitante forjados en el formulario: se ignoran (PSO, su cuenta)", "200|PSO|" + PO1,
+                  estado + "|" + alm.UltimoRol + "|" + alm.UltimoUsuario);
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", POX, envio("PRB 2026-000001", null), out estado);
+            Check("P4 PO/SO vigente de OTRA iniciativa: 403 NoEsDueno, nada se guarda", "403|True|True|0",
+                  estado + "|" + cuerpo.Contains("NoEsDueno") + "|" + cuerpo.Contains("\"enviada\":false") + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", PO1, envio("PRB 2026-000002", null), out estado);
+            Check("P5 iniciativa sin PO / SO capturados (o que no existe): 403 NoEsDueno", "403|True|0", estado + "|" + cuerpo.Contains("NoEsDueno") + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", COMUN, envio("PRB 2026-000001", null), out estado);
+            Check("P6 en CatPersona sin ser PO/SO vigente: 403 AccesoDenegado", "403|True|0", estado + "|" + cuerpo.Contains("AccesoDenegado") + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", AMB, envio("PRB 2026-000001", null), out estado);
+            Check("P7 correo en DOS personas (ambiguo): 403, nada se guarda", "403|0", estado + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", REP, envio("PRB 2026-000001", null), out estado);
+            Check("P8 nombre repetido en CatPersona: 403, nada se guarda", "403|0", estado + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", @"SORIANA\nadie", envio("PRB 2026-000001", null), out estado);
+            Check("P9 cuenta fuera de CatPersona: 403", "403|0", estado + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", "", envio("PRB 2026-000001", null), out estado);
+            Check("P10 anonimo: 403", "403|0", estado + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", PO1, envio("PRB 2026-000001", "subestado"), out estado);
+            Check("P11 PSO pidiendo Subestado: 422 en subestado_nuevo, nada se guarda", "422|True|0", estado + "|" + cuerpo.Contains("subestado_nuevo") + "|" + enviados());
+            cuerpo = Correr("POST", "accion=enviar", PO1, F("llave", Guid.NewGuid().ToString(), "tipo", "estado", "estado_nuevo", "X", "motivo", "m"), out estado);
+            Check("P12 sin folio: 422, nada se guarda", "422|0", estado + "|" + enviados());
+            foreach (var q in new[] { "accion=listar", "accion=detalle&id=5", "accion=aplicar", "accion=rechazar" })
+            {
+                alm.Llamadas.Clear();
+                cuerpo = Correr(q.StartsWith("accion=listar") || q.StartsWith("accion=detalle") ? "GET" : "POST", q, PO1, F("id", "5", "comentario", "x"), out estado);
+                Check("P13 PO en " + q + ": 403 y el almacen ni se toca", "403|0", estado + "|" + alm.Llamadas.Count);
+            }
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", ADMPO, envio("PRB 2026-000003", null), out estado);
+            Check("P14 ADM que tambien es PO: sigue como ADM (no PSO), aun en una iniciativa que no es suya", "200|ADM", estado + "|" + alm.UltimoRol);
+            cuerpo = Correr("POST", "accion=enviar", MOD, envio("PRB 2026-000003", null), out estado);
+            Check("P15 MOD igual que antes", "200|MOD", estado + "|" + alm.UltimoRol);
+
+            alm.Llamadas.Clear();
+            alm.LanzarAlEnviar = new ErrorSolicitudCambio(51226, "La cuenta no es el Product Owner ni el Service Owner de la iniciativa.", null);
+            cuerpo = Correr("POST", "accion=enviar", PO1, envio("PRB 2026-000001", null), out estado);
+            Check("P16 la base re-chequea (51226, el dueno cambio en medio): 403 NoEsDueno, enviada false", "403|True|True",
+                  estado + "|" + cuerpo.Contains("NoEsDueno") + "|" + cuerpo.Contains("\"enviada\":false"));
+            alm.LanzarAlEnviar = new ErrorSolicitudCambio(51225, "El folio no identifica una sola iniciativa.", null);
+            cuerpo = Correr("POST", "accion=enviar", PO1, envio("PRB 2026-000001", null), out estado);
+            Check("P17 51225 de la base: 404 IniciativaNoExiste", "404|True", estado + "|" + cuerpo.Contains("IniciativaNoExiste"));
+            alm.LanzarAlEnviar = null;
+
+            var leerDuenos = SolicitudesCambio.DuenosCapturados;
+            SolicitudesCambio.DuenosCapturados = delegate (string f) { throw new InvalidOperationException("sin conexion"); };
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", PO1, envio("PRB 2026-000001", null), out estado);
+            Check("P18 no se pueden leer los duenos del folio: 503 DuenosNoDisponibles, nada se guarda", "503|True|0",
+                  estado + "|" + cuerpo.Contains("DuenosNoDisponibles") + "|" + enviados());
+            SolicitudesCambio.DuenosCapturados = leerDuenos;
+
+            PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = false;
+            cuerpo = Correr("POST", "accion=enviar", PO1, envio("PRB 2026-000001", null), out estado);
+            Check("P19 sin sql/37: 403 (dice que falta sql/37), nada se guarda; ADM sigue", "403|True|0|200",
+                  estado + "|" + cuerpo.Contains("sql/37") + "|" + enviados() + "|" +
+                  (Correr("POST", "accion=enviar", ADM, envio("PRB 2026-000001", null), out estado) != null ? estado.ToString() : ""));
+            PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = true;
+
+            duenosPso.Lanza = true;
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", PO1, envio("PRB 2026-000001", null), out estado);
+            Check("P20 CatPersona no se puede leer: no pasa (falla cerrado), nada se guarda", "403|0", estado + "|" + enviados());
+            duenosPso.Lanza = false;
+
+            // La regla sin HttpContext (lo que el handler ya filtro antes).
+            var personas = duenosPso.Leer().Personas;
+            Func<string, string[]> d1 = delegate (string f) { return new[] { "PO 1", "SO x" }; };
+            Check("P21 Evaluar: ambiguo / nombre repetido aun con motivo null: 403 IdentidadNoResuelta", "IdentidadNoResuelta|IdentidadNoResuelta",
+                  SolicitudCambioPso.Evaluar(IdentidadWindows.Desde(AMB, true), true, null, personas, "F", d1).Tipo + "|" +
+                  SolicitudCambioPso.Evaluar(IdentidadWindows.Desde(REP, true), true, null, personas, "F", d1).Tipo);
+            Check("P22 Evaluar: dueno con mayusculas, acentos y espacios de mas en dbo.Problem: puede", "True",
+                  SolicitudCambioPso.Evaluar(IdentidadWindows.Desde(PO1, true), true, null, personas, "F",
+                                             delegate (string f) { return new[] { "  po\u00a01 ", null }; }).Puede);
+            var filas = new List<object>
+            {
+                new Dictionary<string, object> { { "folio", "A" }, { "po_capturado", "PO 1" }, { "so_capturado", "Otro" } },
+                new Dictionary<string, object> { { "folio", "B" }, { "po_capturado", "Otro" }, { "so_capturado", "po 1" } },
+                new Dictionary<string, object> { { "folio", "C" }, { "po_capturado", "PO X" }, { "so_capturado", null } },
+            };
+            Check("P23 FoliosPropios (boton del registro): solo las suyas; ambiguo: ninguna", "A,B|",
+                  string.Join(",", SolicitudCambioPso.FoliosPropios(IdentidadWindows.Desde(PO1, true), personas, filas)) + "|" +
+                  string.Join(",", SolicitudCambioPso.FoliosPropios(IdentidadWindows.Desde(AMB, true), personas, filas)));
+            var reg = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_registro.ashx"));
+            Check("P24 el registro manda cambios_pso (FoliosPso: vacio para ADM / MOD, sin sql/37 o sin ser PO/SO)", "True|True",
+                  reg.Contains("registro[\"cambios_pso\"] = FoliosPso(context, registro);") + "|" +
+                  reg.Contains("RolAdmin.EsElevado(AccesoAdmin.Rol(context)) || !PersistenciaSolicitudesCambio.SolicitaPsoActiva()"));
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = null;
+            alm.LanzarAlEnviar = null;
         }
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : "FALLOS: " + fallos);

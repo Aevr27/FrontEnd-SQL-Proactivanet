@@ -810,6 +810,9 @@ window.RegistroIniciativas = (function () {
       // Varios cambios en UNA solicitud (tipo varios, sql/34): solo si el
       // servidor lo dice.
       r.solicitudesVarios = json.solicitudes_varios === true;
+      // "Solicitar cambios" sin rol de Admin (PO / SO, sql/37): los folios
+      // propios que el servidor mando (cambios_pso). Solo pinta el boton.
+      r.cambiosPso = Array.isArray(json.cambios_pso) ? json.cambios_pso.filter(esTexto) : [];
       return r;
     }
 
@@ -2527,7 +2530,16 @@ window.RegistroIniciativas = (function () {
       var acciones = this.$('regDetAcciones');
       if (acciones) acciones.innerHTML = this.htmlAcciones();
       // Sin rol ya no puede pedir cambios: se cierra lo que estaba abierto.
-      if (!this.rol && this.cambioAbierto) this.abrirCambio(false);
+      if (!this.puedeSolicitarCambio() && this.cambioAbierto) this.abrirCambio(false);
+    }
+
+    // "Solicitar cambios": ADM / MOD en toda iniciativa; sin rol, solo en
+    // las propias que mando el servidor (cambios_pso: PO / SO capturado,
+    // sql/37). Solo UX: al enviar el servidor vuelve a decidir y pone el rol.
+    puedeSolicitarCambio() {
+      if (this.rol) return true;
+      var r = this.registro;
+      return !!(this.abierta && r && Array.isArray(r.cambiosPso) && r.cambiosPso.indexOf(this.abierta) >= 0);
     }
 
     // Rotulo de la barra del detalle: lo que el usuario puede hacer aqui.
@@ -3500,7 +3512,7 @@ window.RegistroIniciativas = (function () {
     // ---- Solicitar cambios / Historial ----
     accionDetalle(accion) {
       if (!this.abierta) return;
-      if (accion === 'solicitar-cambios') { if (this.rol) this.abrirCambio(!this.cambioAbierto); }
+      if (accion === 'solicitar-cambios') { if (this.puedeSolicitarCambio()) this.abrirCambio(!this.cambioAbierto); }
       else if (accion === 'cambio-cancelar') this.abrirCambio(false);
       else if (accion === 'cambio-agregar') this.agregarCambio();
       else if (accion === 'cambio-atajo-fecha') this.atajoFechaCambio();
@@ -4134,10 +4146,11 @@ window.RegistroIniciativas = (function () {
 
     // Botones de la cabecera del detalle. Con ADM no hay boton de editar:
     // los campos editables ya lo son en su lugar (solo una pista).
-    // "Solicitar cambios" solo con rol ADM o MOD (el servidor lo exige:
+    // "Solicitar cambios" con rol ADM o MOD, o en una iniciativa propia del
+    // PO / SO (puedeSolicitarCambio; el servidor lo exige:
     // admin_iniciativas_solicitudes.ashx); los demas leen el registro.
     htmlAcciones() {
-      return (this.rol
+      return (this.puedeSolicitarCambio()
           ? '<button type="button" class="btn linea chico" id="regCambioBoton" data-accion="solicitar-cambios"' +
             ' aria-expanded="false" aria-controls="regCambio">Solicitar cambios</button>'
           : '') +

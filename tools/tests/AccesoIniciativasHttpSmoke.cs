@@ -594,8 +594,35 @@ public static class AccesoIniciativasHttpSmoke
             var n = Path.GetFileName(f);
             if (n == "admin_iniciativas_catalogos.ashx" || n == "admin_iniciativas_capacidad.ashx" ||
                 n == "admin_iniciativas_volumetria.ashx" || n == "admin_iniciativas_validar.ashx" || n == "admin_sesion.ashx" ||
-                n == "admin_iniciativas_mis_solicitudes.ashx" || n == "admin_iniciativas_registro.ashx") continue;
+                n == "admin_iniciativas_mis_solicitudes.ashx" || n == "admin_iniciativas_registro.ashx" ||
+                n == "admin_iniciativas_solicitudes.ashx") continue;
             Check("F2 " + n + " no abre nada fuera de Admin (no usa AccesoIniciativas)", false, File.ReadAllText(f).Contains("AccesoIniciativas"));
+        }
+        {
+            // Solicitudes de cambio: AccesoIniciativas SOLO para enviar sin rol
+            // (PO / SO de la iniciativa, sql/37); lo demas sigue ExigirAdm.
+            var t = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx"));
+            Check("F2 solicitudes: ExigirSolicitud solo con accion=enviar sin rol; lo demas Exigir + ExigirAdm; rol PSO del servidor",
+                  "True|True|True|True|False",
+                  t.Contains("if (accion == \"enviar\" && !AccesoAdmin.PuedeEntrar(context))") + "|" +
+                  t.Contains("else if (!AccesoAdmin.Exigir(context)) return;") + "|" +
+                  t.Contains("&& !AccesoAdmin.ExigirAdm(context, \"Solo un administrador (ADM) revisa") + "|" +
+                  t.Contains("rol = SolicitudCambioPso.Rol;") + "|" + t.Contains("Form[\"rol"));
+        }
+        // El modulo: el envio de "Solicitar cambios" pasa para PO / SO
+        // vigentes; cualquier otra accion del handler sigue siendo de Admin.
+        {
+            const string R = "~/handlers/admin_iniciativas_solicitudes.ashx";
+            Check("K1 modulo: PO y SO vigentes pasan con accion=enviar", "pasa|pasa", Modulo(R, PO, "accion=enviar") + "|" + Modulo(R, SO, "accion=enviar"));
+            Check("K2 modulo: en CatPersona sin ser dueno, accion=enviar: 403 solo PO/SO", "403|json|duenos", Modulo(R, COMUN, "accion=enviar"));
+            Check("K3 modulo: PO en listar / detalle / aplicar / rechazar / sin accion: 403 de Admin",
+                  "403|json|admin,403|json|admin,403|json|admin,403|json|admin,403|json|admin",
+                  string.Join(",", Array.ConvertAll(new string[] { "accion=listar", "accion=detalle&id=1", "accion=aplicar", "accion=rechazar", null }, q => Modulo(R, PO, q))));
+            Check("K4 modulo: anonimo con accion=enviar: 403", true, Modulo(R, "", "accion=enviar").StartsWith("403|json"));
+            Check("K5 modulo: ADM y MOD siguen pasando en todo", "pasa|pasa|pasa", Modulo(R, ADM, "accion=listar") + "|" + Modulo(R, MOD, "accion=enviar") + "|" + Modulo(R, ADM, "accion=aplicar"));
+            Check("K6 la ruta del envio es exacta (otra ruta con accion=enviar no se abre)", "False|False",
+                  AccesoIniciativas.EsEnvioCambio("~/handlers/admin_iniciativas_gestion.ashx", "enviar") + "|" +
+                  AccesoIniciativas.EsEnvioCambio(R, "Enviar"));
         }
         Check("F3 son exactamente 6 rutas de solicitante (pagina + 4 de Nueva solicitud + Mis solicitudes)", 6, AccesoIniciativas.RutasSolicitante.Length);
         {

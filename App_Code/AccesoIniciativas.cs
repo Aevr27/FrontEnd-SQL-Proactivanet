@@ -184,6 +184,38 @@ public static class AccesoIniciativas
     public static IFuenteDuenosVigentes FuenteDuenos = new FuenteDuenosVigentesSql();
 
     private const string ClaveDuenosRequest = "AccesoIniciativas.PoSoVigente";
+    private const string ClaveLecturaRequest = "AccesoIniciativas.DuenosVigentes";
+
+    // "Solicitar cambios" (accion=enviar, y solo esa) del PO / SO de la
+    // iniciativa (App_Code/SolicitudCambioPso.cs): el modulo la deja pasar
+    // con la MISMA regla de PuedeSolicitar; la propiedad del folio la decide
+    // el handler. Listar, detalle, aplicar y rechazar siguen siendo de ADM.
+    public const string RutaSolicitudesCambio = "~/handlers/admin_iniciativas_solicitudes.ashx";
+
+    public static bool EsEnvioCambio(string rutaRelativa, string accion)
+    {
+        return accion == "enviar" && string.Equals(rutaRelativa, RutaSolicitudesCambio, StringComparison.OrdinalIgnoreCase);
+    }
+
+    // CatPersona + duenos para el request en curso, leidos UNA vez (la regla
+    // de PO/SO vigente y la propiedad de un folio usan la misma lectura).
+    // Lanza si no puede leer; un error no se guarda.
+    public static DuenosVigentes Lectura(HttpContext context)
+    {
+        var guardada = context == null ? null : context.Items[ClaveLecturaRequest] as DuenosVigentes;
+        if (guardada != null) return guardada;
+        if (FuenteDuenos == null) throw new InvalidOperationException("Sin fuente de duenos.");
+        var d = FuenteDuenos.Leer();
+        if (context != null) context.Items[ClaveLecturaRequest] = d;
+        return d;
+    }
+
+    private sealed class FuenteDelRequest : IFuenteDuenosVigentes
+    {
+        private readonly HttpContext context;
+        public FuenteDelRequest(HttpContext context) { this.context = context; }
+        public DuenosVigentes Leer() { return Lectura(context); }
+    }
 
     // El interruptor de sql/30, sin HttpContext: solo una fila con
     // Encendido = 1 abre. Sin fuente, sin fila o con error: cerrado.
@@ -236,7 +268,7 @@ public static class AccesoIniciativas
     {
         var guardado = context == null ? null : context.Items[ClaveDuenosRequest] as bool?;
         if (guardado.HasValue) return guardado.Value;
-        var v = LeerPoSoVigente(FuenteDuenos, id, delegate (Exception ex) { AccesoAdmin.MarcarVerificacionIncompleta(context); DashboardHandler.Registrar("AccesoIniciativas.PoSoVigente", ex); });
+        var v = LeerPoSoVigente(FuenteDuenos == null ? null : new FuenteDelRequest(context), id, delegate (Exception ex) { AccesoAdmin.MarcarVerificacionIncompleta(context); DashboardHandler.Registrar("AccesoIniciativas.PoSoVigente", ex); });
         if (context != null) context.Items[ClaveDuenosRequest] = v;
         return v;
     }

@@ -5,7 +5,14 @@
 // Windows y de dbo.UsuariosAdmin (AccesoAdmin), nunca del formulario.
 //
 //   (accion siempre en la URL: ?accion=...)
-//   POST accion=enviar     Exigir (ADM o MOD; ADM tambien, fase de pruebas)
+//   POST accion=enviar     Exigir (ADM o MOD) o, sin rol, el PO / SO de ESA
+//        iniciativa (App_Code/SolicitudCambioPso.cs, sql/37): PO/SO vigente
+//        como en Nueva solicitud, cuenta resuelta a UNA persona de CatPersona
+//        y su nombre es el OwnerProblem / OwnerServicio capturado del folio.
+//        Solo entonces el SERVIDOR firma con rol PSO (nunca del formulario).
+//        Si no: 403 AccesoDenegado / IdentidadNoResuelta / NoEsDueno (o 503
+//        DuenosNoDisponibles sin poder leerlos); nada se guarda. La base lo
+//        vuelve a comprobar en su transaccion (51225 404, 51226 403).
 //        folio, llave (GUID por borrador: el reintento no duplica), tipo
 //        (fecha | estado | categorias | otros | datos), campo_fecha (f_analisis |
 //        f_solucion | f_cierre) + fecha_nueva (aaaa-mm-dd), estado_nuevo,
@@ -46,8 +53,9 @@
 //        Toda falla de validacion o de la base deja la solicitud PENDIENTE y
 //        registrada (Intentos, UltimoError, evento).
 //
-//   403 antes de leer nada: Exigir (VIEWER, anonimo, rol que falla) y, en lo
-//   que es de ADM, ExigirAdm (MOD: RolInsuficiente). 405 metodo equivocado.
+//   403 antes de leer nada: Exigir (VIEWER, anonimo, rol que falla; para
+//   enviar sin rol, AccesoIniciativas.ExigirSolicitud) y, en lo que es de
+//   ADM, ExigirAdm (MOD y PO/SO: RolInsuficiente). 405 metodo equivocado.
 
 using System;
 using System.Collections.Generic;
@@ -57,11 +65,17 @@ public class AdminIniciativasSolicitudes : IHttpHandler
 {
     public void ProcessRequest(HttpContext context)
     {
-        // Primero quien es (ADM o MOD), antes de leer el cuerpo.
-        if (!AccesoAdmin.Exigir(context)) return;
+        // Primero quien es, antes de leer el cuerpo. La accion va en la URL
+        // (?accion=): se decide el permiso sin leer el cuerpo. ADM o MOD; o,
+        // SOLO para enviar, un PO/SO vigente (si el folio es suyo se decide
+        // en Enviar, con el folio del formulario).
         var req = context.Request;
-        // La accion va en la URL (?accion=): se decide el permiso sin leer el cuerpo.
         var accion = req.QueryString["accion"];
+        if (accion == "enviar" && !AccesoAdmin.PuedeEntrar(context))
+        {
+            if (!AccesoIniciativas.ExigirSolicitud(context)) return;
+        }
+        else if (!AccesoAdmin.Exigir(context)) return;
         if (accion != "enviar"
             && !AccesoAdmin.ExigirAdm(context, "Solo un administrador (ADM) revisa, aplica o rechaza solicitudes de cambio.")) return;
 
@@ -91,7 +105,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                 return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
             var rol = AccesoAdmin.Rol(context);
 
-            if (accion == "enviar") return Enviar(context, id.Original, rol);
+            if (accion == "enviar") return Enviar(context, id, rol);
             if (!PersistenciaSolicitudesCambio.Activa())
                 return Error(context, 501, PersistenciaSolicitudesCambio.MotivoCola, "PersistenciaNoHabilitada");
             try
@@ -133,9 +147,39 @@ public class AdminIniciativasSolicitudes : IHttpHandler
         });
     }
 
-    private static object Enviar(HttpContext context, string usuario, string rol)
+    private static object Enviar(HttpContext context, IdentidadWindows id, string rol)
     {
+        var usuario = id.Original;
         var p = PeticionSolicitudCambio.DesdeFormulario(context.Request.Form);
+        // Sin rol de Admin: solo el PO / SO de ESTE folio, y entonces el rol
+        // es PSO, puesto aqui (SolicitudCambioPso). Nada del formulario lo cambia.
+        if (!RolAdmin.EsElevado(rol))
+        {
+            DecisionCambioPso d;
+            try
+            {
+                d = SolicitudCambioPso.Evaluar(id, PersistenciaSolicitudesCambio.SolicitaPsoActiva(), AccesoIniciativas.Motivo(context),
+                                               AccesoIniciativas.Lectura(context).Personas, p.Folio, SolicitudesCambio.DuenosCapturados);
+            }
+            catch (Exception ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex);
+                context.Response.StatusCode = 503;
+                context.Response.TrySkipIisCustomErrors = true;
+                return new Dictionary<string, object>
+                {
+                    { "error", "No se pudo comprobar que la iniciativa es tuya: no se envi\u00f3 la solicitud. Int\u00e9ntalo de nuevo." },
+                    { "tipo", "DuenosNoDisponibles" }, { "enviada", false },
+                };
+            }
+            if (!d.Puede)
+            {
+                context.Response.StatusCode = d.Http;
+                context.Response.TrySkipIisCustomErrors = true;
+                return new Dictionary<string, object> { { "error", d.Mensaje }, { "tipo", d.Tipo }, { "enviada", false } };
+            }
+            rol = SolicitudCambioPso.Rol;
+        }
         p.ExigirSubestadoDeAdm(rol);
         // Categorias por AGREGAR: solo del PO / SO capturados de la
         // iniciativa, en el catalogo de la cascada, revisado aqui y no solo

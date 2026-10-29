@@ -760,6 +760,41 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
+// PS) "Solicitar cambios" del PO / SO sin rol (sql/37): el boton sale SOLO
+// en los folios que el servidor mando en cambios_pso; en los demas, solo
+// lectura. Que el servidor decida de verdad (y ponga el rol PSO) lo prueba
+// SolicitudesCambioHttpSmoke.cs (P).
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var datos = JSON.parse(JSON.stringify(DATOS));
+  datos.estados_problem = ['En An\u00e1lisis', 'En Soluci\u00f3n', 'Cerrado'];
+  datos.cambios_pso = ['PRB 2026-000001', 42, ''];
+  var p = Pagina(ok(datos), function () { return nunca(); }, null);
+  function accion(a) {
+    var el = Elemento('b'); el.setAttribute('data-accion', a);
+    p.sel('regDetCuerpo').disparar('click', { target: el });
+  }
+  return esperar().then(function () {
+    Check('PS0 cambios_pso: solo textos', ['PRB 2026-000001'], p.registro.registro.cambiosPso);
+    clicFolio(p, 'PRB 2026-000001');
+    Check('PS1 sin rol, iniciativa propia: hay boton y Solicitar cambios abre', [true, true],
+      [/id="regCambioBoton"/.test(p.sel('regDetCuerpo').innerHTML), (accion('solicitar-cambios'), /regCambioCampo/.test(p.sel('regCambio').innerHTML))]);
+    Check('PS2 sin rol: tampoco ofrece Subestado', false, /regCambioSubestado|Subestado/.test(p.sel('regCambio').innerHTML));
+    clicFolio(p, 'PRB 2026-000005');
+    accion('solicitar-cambios');
+    Check('PS3 sin rol, iniciativa ajena: sin boton y no abre', [false, false, null],
+      [/id="regCambioBoton"/.test(p.sel('regDetCuerpo').innerHTML), p.registro.cambioAbierto, p.registro.lista || null]);
+  });
+});
+pruebas.push(function () {
+  var p = Pagina(ok(JSON.parse(JSON.stringify(DATOS))), function () { return nunca(); }, null);
+  return esperar().then(function () {
+    clicFolio(p, 'PRB 2026-000001');
+    Check('PS4 sin cambios_pso (servidor viejo o sin sql/37): sin boton', false, /id="regCambioBoton"/.test(p.sel('regDetCuerpo').innerHTML));
+  });
+});
+
+// ---------------------------------------------------------------------------
 // SB) Subestado (2026-10-26): "Solicitar cambios" NO lo ofrece a nadie (ni
 // la opcion "Estado y Subestado", ni el actual, ni el nuevo); el Estado se
 // sigue pidiendo. ADM conserva la lista para "Modificar" (opcionesEstado);
