@@ -202,6 +202,8 @@ window.SolicitudesNuevas = (function () {
       this.detalle = null;
       this.ocupado = false;      // una revision a la vez (doble clic)
       this.alVerCambio = null;   // al volver a "Cambios": la pagina relee esa cola
+      this.alVerSolicitud = null; // (d) se abrio el detalle: el aviso la marca vista
+      this.alRevisar = null;      // tras aprobar / rechazar: el aviso se relee
       this.cableado = false;
     }
 
@@ -351,6 +353,7 @@ window.SolicitudesNuevas = (function () {
           var caja = self.$('snDetalle');
           caja.innerHTML = htmlDetalle(r.json, self.rol === 'ADM' && r.json.revision_disponible === true);
           caja.hidden = false;
+          if (self.alVerSolicitud) self.alVerSolicitud(r.json);
           return r.json;
         }, function () {
           self.mensaje('snMsg', 'error', 'No se pudo contactar al servidor.');
@@ -428,6 +431,7 @@ window.SolicitudesNuevas = (function () {
               (Array.isArray(j.errores) && j.errores.length
                 ? '<span class="ini-sub">' + j.errores.map(function (e) { return h(e.mensaje); }).join(' ') + '</span>' : '');
           var clase = ok ? 'listo' : (sinCodigo || j[exito] === null) ? 'aviso' : 'error';
+          if (self.alRevisar) self.alRevisar();
           return Promise.all([self.listar(), self.verDetalle(d.numero)]).then(function () {
             self.mensaje('snDetMsg', clase, html);
             return r;

@@ -40,6 +40,17 @@
 .ini-tab:hover { color: var(--ink); }
 .ini-tab.activa { color: var(--accent-ink); border-bottom-color: var(--accent); }
 .ini-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Aviso de Solicitudes (admin/aviso-solicitudes.js): circulo rojo con las
+   pendientes no vistas, o punto rojo si ya se vieron todas. */
+.ini-tab-aviso {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px;
+  border-radius: 9px; background: var(--rojo); color: #fff;
+  font-size: 11px; font-weight: 700; line-height: 1;
+  vertical-align: 1px; box-sizing: border-box;
+}
+.ini-tab-aviso.punto { min-width: 8px; width: 8px; height: 8px; padding: 0; border-radius: 50%; vertical-align: 2px; }
+.ini-tab-aviso[hidden] { display: none; }
 
 /* ---- Panel ---- */
 .ini-panel-cab {

@@ -239,8 +239,9 @@
          MOD y PO/SO vigentes).
          Oculta hasta saberlo (PaginaIniciativas.pestanaVisible). Solo UX:
          los datos los exige cada handler (ADM: ExigirAdm; Mis solicitudes:
-         ExigirSolicitud). -->
-    <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1" hidden>Solicitudes</button>
+         ExigirSolicitud). El aviso rojo (solAviso, solo ADM) lo pinta
+         admin/aviso-solicitudes.js. -->
+    <button type="button" class="ini-tab" role="tab" id="tab-solicitudes" aria-controls="panel-solicitudes" aria-selected="false" tabindex="-1" hidden>Solicitudes<span class="ini-tab-aviso" id="solAviso" aria-hidden="true" hidden></span></button>
     <!-- Solo ADM (data-solo-adm y PaginaIniciativas.fijarRol). Solo UX: los
          handlers de escritura de ADM exigen AccesoAdmin.ExigirAdm. -->
     <button type="button" class="ini-tab" role="tab" id="tab-administracion" aria-controls="panel-administracion" aria-selected="false" tabindex="-1" data-solo-adm hidden>Administración</button>
@@ -923,6 +924,7 @@
 <script src="registro-iniciativas.js"></script>
 <script src="solicitudes-cambio.js"></script>
 <script src="solicitudes-nuevas.js"></script>
+<script src="aviso-solicitudes.js"></script>
 <script src="cambios-recientes.js"></script>
 <script src="acuse-iniciativa.js"></script>
 <script src="iniciativas.js"></script>

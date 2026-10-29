@@ -786,6 +786,7 @@ window.Iniciativas = (function () {
       this.mias = null;       // MisSolicitudes (admin/solicitudes-nuevas.js): las propias, quien no es ADM
       this.recientes = null;  // VistaCambiosRecientes (admin/cambios-recientes.js): solo ADM
       this.avisos = null;     // VistaAvisosAcuse (admin/acuse-iniciativa.js): avisos de PO/SO, solo ADM
+      this.avisoSol = null;   // Aviso (admin/aviso-solicitudes.js): rojo en la pestaña Solicitudes, solo ADM
       this.volumetria = null; // VolumetriaCliente de Nueva solicitud (perezoso; usa this.pedir)
       // 'ADM' | 'MOD' | null, de SesionAdmin (fijarRol). null hasta saberlo:
       // sin rol no se abre nada de ADM.
@@ -813,6 +814,7 @@ window.Iniciativas = (function () {
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(this.rol);
       if (this.cola) this.cola.fijarRol(this.rol);
       if (this.nuevas) this.nuevas.fijarRol(this.rol);
+      if (this.avisoSol) this.avisoSol.fijarRol(this.rol);
       if (!this.puedeSolicitar && this.mias) this.mias.ocultar();
       if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') ||
           ((this.vista === 'nueva' || this.vista === 'solicitudes') && !this.puedeSolicitar)) {
@@ -852,6 +854,7 @@ window.Iniciativas = (function () {
       this.rol = null;
       this.puedeSolicitar = false;
       if (this.mias) this.mias.ocultar();
+      if (this.avisoSol) this.avisoSol.fijarRol(null);
       if (mensaje && this.$('iniDenegadoTexto')) this.$('iniDenegadoTexto').textContent = mensaje;
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
       if (this.registro && this.registro.cerrarDetalle) this.registro.cerrarDetalle(true);
@@ -989,6 +992,23 @@ window.Iniciativas = (function () {
         this.nuevas.alVerCambio = function () { if (colaNuevas && colaNuevas.rol === 'ADM') colaNuevas.listar(); };
         // Mis solicitudes (misma pestaña): las propias, para quien no es ADM.
         if (window.SolicitudesNuevas.MisSolicitudes) this.mias = new window.SolicitudesNuevas.MisSolicitudes(this.doc, null);
+      }
+      // Aviso rojo de la pestaña Solicitudes (solo ADM; empieza con
+      // fijarRol). Abrir el detalle de una pendiente la marca vista para
+      // ESTE ADM; aplicar / aprobar / rechazar lo relee.
+      if (window.AvisoSolicitudes) {
+        var aviso = this.avisoSol = new window.AvisoSolicitudes.Aviso(this.doc, null);
+        var releer = function () { aviso.actualizar(); };
+        if (this.cola) {
+          this.cola.alVerSolicitud = function (d) { aviso.marcar('CAMBIO', d.id, d.estado); };
+          this.cola.alRevisar = releer;
+        }
+        if (this.nuevas) {
+          this.nuevas.alVerSolicitud = function (d) { aviso.marcar('NUEVA', d.numero, d.estado); };
+          this.nuevas.alRevisar = releer;
+        }
+        // Si la sesion ya respondio antes de iniciar().
+        if (this.rol) aviso.fijarRol(this.rol);
       }
       // Refresco automatico de la pestaña Solicitudes (assets/js/refresco-auto.js):
       // relee la lista que se ve (Cambios, Iniciativas o Mis solicitudes)

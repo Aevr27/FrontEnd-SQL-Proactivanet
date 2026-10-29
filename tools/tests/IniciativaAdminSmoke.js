@@ -724,7 +724,7 @@ pruebas.push(function () {
   Check('CB1 dice que es directa (vive en otra pestaña que Solicitar)', true,
     /title="Creación directa \(ADM\)/.test(boton) &&
     /<button type="button" class="btn ini-cta" id="btnSolicitar"/.test(html));
-  var tabs = [], re = /<button[^>]*role="tab"[^>]*id="([^"]+)"[^>]*>([^<]*)<\/button>/g, m;
+  var tabs = [], re = /<button[^>]*role="tab"[^>]*id="([^"]+)"[^>]*>([^<]*)(?:<span class="ini-tab-aviso"[^>]*><\/span>)?<\/button>/g, m;
   while ((m = re.exec(html))) tabs.push(m[1] + ':' + m[2]);
   Check('CB2 tres pestañas: Iniciativas | Solicitudes | Administracion', ['tab-iniciativas:Iniciativas', 'tab-solicitudes:Solicitudes', 'tab-administracion:Administración'], tabs);
   Check('CB2 Administracion oculta hasta rol ADM', true,

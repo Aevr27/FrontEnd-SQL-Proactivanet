@@ -263,6 +263,8 @@ window.SolicitudesCambioCola = (function () {
       this.detalle = null;      // la solicitud abierta (JSON del servidor)
       this.ocupado = false;
       this.alCambiarIniciativa = null;   // tras aplicar: releer el registro
+      this.alVerSolicitud = null;        // (d) se abrio el detalle: el aviso la marca vista
+      this.alRevisar = null;             // tras aplicar / rechazar: el aviso se relee
       this.cableado = false;
     }
 
@@ -396,6 +398,7 @@ window.SolicitudesCambioCola = (function () {
           self.detalle = r.json;
           caja.innerHTML = htmlDetalle(r.json, self.tipos(), {});
           caja.hidden = false;
+          if (self.alVerSolicitud) self.alVerSolicitud(r.json);
           self.cargarVolumetrias(r.json);
           return r.json;
         }, function () {
@@ -431,6 +434,7 @@ window.SolicitudesCambioCola = (function () {
               (Array.isArray(j.errores) && j.errores.length ? '<ul>' + j.errores.map(function (e) { return '<li>' + h(e.mensaje) + '</li>'; }).join('') + '</ul>' : '') +
               (accion === 'aplicar' && j.tipo !== 'ClasificacionInvalida' && j.tipo !== 'FaltaComentario' ? ' La solicitud sigue pendiente.' : '');
           if (ok && accion === 'aplicar' && self.alCambiarIniciativa) self.alCambiarIniciativa(d.folio);
+          if (self.alRevisar) self.alRevisar();
           return Promise.all([self.listar(), self.verDetalle(d.id)]).then(function () {
             self.mensaje('solDetMsg', ok ? 'listo' : j[exito] === null ? 'aviso' : 'error', html);
             return r;
