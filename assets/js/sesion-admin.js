@@ -1,10 +1,11 @@
 /* SesionAdmin — que puede ver de Admin quien esta mirando la pagina.
 
    Pregunta a handlers/admin_sesion.ashx y:
-     - muestra los elementos marcados con data-solo-registro (la entrada
-       Iniciativas del menu) si el servidor dice registro: true: toda
-       cuenta Windows autenticada (AccesoIniciativas.PuedeVerRegistro; no
-       depende del rol ni de ser PO/SO);
+     - muestra los elementos marcados con data-solo-registro si el
+       servidor dice registro: true: toda cuenta Windows autenticada
+       (AccesoIniciativas.PuedeVerRegistro; no depende del rol ni de ser
+       PO/SO). La entrada Iniciativas del menu ya NO lo lleva: se ve
+       siempre;
      - muestra los marcados con data-solo-adm (p. ej. "+ Crear
        iniciativa") solo si ademas el servidor dice rol "ADM"
        (dbo.UsuariosAdmin). MOD, sin rol o cualquier fallo: ocultos.

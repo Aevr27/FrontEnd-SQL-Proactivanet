@@ -779,21 +779,21 @@ pruebas.push(function () {
   Check('M1 entradas = modulos del tablero', ['../dashboard.html#sla', '../dashboard.html#backlog', '../dashboard.html#experiencia',
     '../dashboard.html#efectividad', '../dashboard.html#calidad', '../dashboard.html#analisis',
     '../dashboard.html#observabilidad', '../dashboard.html#call', 'iniciativas.html'], hrefs);
-  // Iniciativas (data-solo-registro): una sola entrada, esta pagina, para
-  // todo usuario del tablero (SesionAdmin: registro). Nace oculta y activa.
+  // Iniciativas (data-iniciativas): una sola entrada, esta pagina, visible
+  // siempre (2026-10-29) y activa.
   // Es solo UX: el acceso lo decide el servidor (AccesoAdmin, AccesoIniciativas).
-  var activas = html.match(/<li data-solo-[a-z]+ hidden>\s*<a class="mnav active"[^>]*>/g) || [];
+  var activas = html.match(/<li data-[a-z-]+>\s*<a class="mnav active"[^>]*>/g) || [];
   Check('M2 una entrada activa, "Iniciativas"', [1, true, true, true],
-    [activas.length, /^<li data-solo-registro hidden>/.test(activas[0] || ''),
+    [activas.length, /^<li data-iniciativas>/.test(activas[0] || ''),
      activas.every(function (a) { return /href="iniciativas\.html"[^>]*aria-current="page"/.test(a); }),
      activas.every(function (a) { return /title="Iniciativas"/.test(a); })]);
   Check('M2 ninguna otra entrada nace activa', 1, (html.match(/class="mnav active"/g) || []).length);
   var tablero = leer('dashboard.html').replace(/<!--[\s\S]*?-->/g, '');
-  Check('M3 el tablero enlaza a la pagina desde una sola entrada oculta (data-solo-registro)',
+  Check('M3 el tablero enlaza a la pagina desde una sola entrada visible (data-iniciativas)',
     [true, true, true],
-    [/<li data-solo-registro hidden>\s*<a class="mnav" id="mnav-iniciativas" href="admin\/iniciativas\.html"/.test(tablero),
+    [/<li data-iniciativas>\s*<a class="mnav" id="mnav-iniciativas" href="admin\/iniciativas\.html"/.test(tablero),
      (tablero.match(/iniciativas\.html/g) || []).length === 1,
-     /<li data-solo-registro hidden>\s*<a class="mnav active" href="iniciativas\.html"/.test(html)]);
+     /<li data-iniciativas>\s*<a class="mnav active" href="iniciativas\.html"/.test(html)]);
 
   // Documento propio: el de Pagina() ya tiene el boton cableado por iniciar().
   var doc = Documento();

@@ -88,8 +88,8 @@
        pagina es estatica y no hay plantillas). Diferencias a proposito:
        - Cada entrada es un enlace a ../dashboard.html#<modulo> (el tablero
          abre el modulo del hash al cargar), no un boton con data-tab.
-       - Iniciativas (data-solo-registro) es la entrada activa: la MISMA del
-         tablero, para todo usuario (SesionAdmin: registro).
+       - Iniciativas (data-iniciativas) es la entrada activa: la MISMA del
+         tablero, siempre visible.
        Plegar/desplegar: MenuLateral en admin/iniciativas.js. Si cambia la
        lista de modulos del tablero, actualizar tambien esta copia
        (tools/tests/BarraLateralSmoke.js compara las dos). -->
@@ -176,7 +176,7 @@
             <span class="mnav-txt">Call Center</span>
           </a>
         </li>
-        <li data-solo-registro hidden>
+        <li data-iniciativas>
           <a class="mnav active" href="iniciativas.html" aria-current="page" title="Iniciativas">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>

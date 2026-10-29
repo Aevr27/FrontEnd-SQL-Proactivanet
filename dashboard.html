@@ -168,13 +168,13 @@
           </button>
         </li>
         <!-- Iniciativas: un ENLACE a otra pagina, no una pestaña (sin
-             data-tab, fuera de MODULOS). Para todo usuario del tablero: el
-             registro es de todos (SesionAdmin: registro, toda cuenta Windows
-             autenticada). Oculta hasta que admin_sesion responde. Lo que se
-             puede hacer dentro (Solicitar, Solicitudes, Administracion) lo
-             decide el servidor (AccesoAdmin, AccesoIniciativas). La misma
-             entrada esta en admin/iniciativas.html. -->
-        <li data-solo-registro hidden>
+             data-tab, fuera de MODULOS). Visible SIEMPRE, para todos, sin
+             esperar a admin_sesion. Lo que se puede hacer dentro (ver el
+             registro, Solicitar, Solicitudes, Administracion) lo decide el
+             servidor (AccesoAdmin, AccesoIniciativas) y la pagina lo oculta
+             segun SesionAdmin. La misma entrada esta en
+             admin/iniciativas.html. -->
+        <li data-iniciativas>
           <a class="mnav" id="mnav-iniciativas" href="admin/iniciativas.html" title="Iniciativas">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M13.5 3.5H7A1.5 1.5 0 0 0 5.5 5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5z"/><path d="M13.5 3.5v5h5M9 12.5h6M9 16h6"/>

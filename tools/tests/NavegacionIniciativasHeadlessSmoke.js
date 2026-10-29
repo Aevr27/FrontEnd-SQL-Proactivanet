@@ -133,7 +133,7 @@ function sondaAdmin() {
   function oculto(id) { var el = document.getElementById(id); return !el || el.hidden || el.offsetParent === null; }
   // La entrada Iniciativas que se ve ('*' = la actual).
   function menu() {
-    return Array.prototype.filter.call(document.querySelectorAll('.lateral li[data-solo-registro]'), function (li) {
+    return Array.prototype.filter.call(document.querySelectorAll('.lateral li[data-iniciativas]'), function (li) {
       return !li.hidden;
     }).map(function (li) {
       var a = li.querySelector('a');

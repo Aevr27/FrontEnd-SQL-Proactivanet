@@ -152,14 +152,13 @@ comprobar('el clic del selector de grupo llama a activarTab',
   /querySelectorAll\('\.subnav-btn\[data-tab\]'\)[\s\S]{0,200}activarTab\(btn\.dataset\.tab\)/.test(js), true);
 
 // --- Iniciativas: UNA entrada, para todo usuario del tablero ---------------
-// El registro es de toda cuenta autenticada (2026-10-28): una sola entrada
-// "Iniciativas" (data-solo-registro), que SesionAdmin muestra con registro:
-// true. Enlace, sin data-tab: no pasa por activarTab (que la mandaria a SLA
+// Una sola entrada "Iniciativas" (data-iniciativas), visible SIEMPRE
+// (2026-10-29): lo de adentro lo oculta la pagina por rol. Enlace, sin data-tab: no pasa por activarTab (que la mandaria a SLA
 // antes de navegar). Esto es solo marcado: quien la ve lo prueban
 // SesionAdminSmoke.js y AccesoIniciativasHttpSmoke.cs.
 var MAS_SUELTO = '<path d="M12 5v14"/><path d="M5 12h14"/>';
 function entrada(texto, marca) {
-  var li = (texto.match(new RegExp('<li ' + marca + ' hidden>[\\s\\S]*?<\\/li>')) || [''])[0];
+  var li = (texto.match(new RegExp('<li ' + marca + '>[\\s\\S]*?<\\/li>')) || [''])[0];
   return {
     li: li,
     title: (li.match(/<a [^>]*title="([^"]+)"/) || [])[1] || null,
@@ -167,14 +166,14 @@ function entrada(texto, marca) {
     svg: (li.match(/<svg class="mnav-ico"[^>]*>([\s\S]*?)<\/svg>/) || [])[1] || ''
   };
 }
-function entradaIniciativas(texto) { return entrada(texto, 'data-solo-registro'); }
+function entradaIniciativas(texto) { return entrada(texto, 'data-iniciativas'); }
 var iniTablero = entradaIniciativas(html);
-comprobar('Iniciativas: enlace oculto a admin/iniciativas.html, sin data-tab',
-  /<li data-solo-registro hidden>\s*<a class="mnav" id="mnav-iniciativas" href="admin\/iniciativas\.html"/.test(iniTablero.li) + '|' +
+comprobar('Iniciativas: enlace siempre visible a admin/iniciativas.html, sin data-tab',
+  /<li data-iniciativas>\s*<a class="mnav" id="mnav-iniciativas" href="admin\/iniciativas\.html"/.test(iniTablero.li) + '|' +
   /data-tab/.test(iniTablero.li), 'true|false');
 comprobar('Iniciativas: title y texto', [iniTablero.title, iniTablero.txt].join('|'), 'Iniciativas|Iniciativas');
 comprobar('Iniciativas: una sola entrada (sin las viejas de ADM/MOD y del solicitante)',
-  [(html.match(/data-solo-registro/g) || []).length, /data-solo-admin|data-solo-solicitante/.test(html)].join('|'), '1|false');
+  [(html.match(/data-iniciativas/g) || []).length, /data-solo-registro|data-solo-admin|data-solo-solicitante/.test(html)].join('|'), '1|false');
 comprobar('Iniciativas: el icono no es un "+" suelto', iniTablero.svg.replace(/\s+/g, '').indexOf(MAS_SUELTO.replace(/\s+/g, '')) === -1 &&
   (iniTablero.svg.match(/<path /g) || []).length >= 2, true);
 comprobar('Iniciativas: el icono es decorativo (aria-hidden)',
@@ -197,8 +196,8 @@ comprobar('activarTab sigue marcando la entrada activa',
 // Es marcado copiado (pagina estatica): se habia quedado sin Efectividad ni
 // Analisis de servicios. Mismas secciones, mismo orden, mismo title, cada
 // una como enlace a ../dashboard.html#<data-tab> (sin data-tab: ahi no hay
-// activarTab). La entrada Iniciativas (data-solo-registro) sigue oculta
-// hasta SesionAdmin y es la unica marcada como actual.
+// activarTab). La entrada Iniciativas (data-iniciativas) se ve siempre y
+// es la unica marcada como actual.
 var admin = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.html'), 'utf8')
   .replace(/<!--[\s\S]*?-->/g, '');
 var navAdmin = (admin.match(/<aside class="lateral" id="lateral">[\s\S]*?<\/aside>/) || [''])[0];
@@ -213,18 +212,18 @@ comprobar('admin: Efectividad y Analisis de servicios presentes', [
   /href="\.\.\/dashboard\.html#efectividad"/.test(navAdmin), /href="\.\.\/dashboard\.html#analisis"/.test(navAdmin)].join(),
   'true,true');
 comprobar('admin: ninguna entrada con data-tab', /data-tab/.test(navAdmin), false);
-// Ademas, Iniciativas (data-solo-registro): la misma del tablero, la actual.
-comprobar('admin: una mas (Iniciativas), oculta hasta SesionAdmin',
+// Ademas, Iniciativas (data-iniciativas): la misma del tablero, la actual.
+comprobar('admin: una mas (Iniciativas), siempre visible',
   enlaces.length - deTablero.length + '|' +
-  /<li data-solo-registro hidden>\s*<a class="mnav active" href="iniciativas\.html" aria-current="page"/.test(navAdmin), '1|true');
+  /<li data-iniciativas>\s*<a class="mnav active" href="iniciativas\.html" aria-current="page"/.test(navAdmin), '1|true');
 comprobar('admin: solo esa nace como actual',
   enlaces.filter(function (a) { return /aria-current="page"|mnav active/.test(a); }).length, 1);
 var iniAdmin = entradaIniciativas(navAdmin);
 comprobar('admin: Iniciativas igual que en el tablero (title, texto, icono)',
   [iniAdmin.title, iniAdmin.txt, iniAdmin.svg.replace(/\s+/g, '')].join('|'),
   [iniTablero.title, iniTablero.txt, iniTablero.svg.replace(/\s+/g, '')].join('|'));
-comprobar('admin: data-solo-registro solo en esa entrada; sin data-solo-admin ni data-solo-solicitante',
-  [(navAdmin.match(/data-solo-registro/g) || []).length, /data-solo-admin|data-solo-solicitante/.test(navAdmin)].join('|'), '1|false');
+comprobar('admin: data-iniciativas solo en esa entrada; ninguna entrada oculta por rol',
+  [(navAdmin.match(/data-iniciativas/g) || []).length, /data-solo-registro|data-solo-admin|data-solo-solicitante/.test(navAdmin)].join('|'), '1|false');
 comprobar('admin: ninguna entrada del menu se llama Administracion ni Solicitar iniciativa',
   /title="Administración"|>Administración<|title="Solicitar una iniciativa"|>Solicitar iniciativa</.test(navAdmin), false);
 
