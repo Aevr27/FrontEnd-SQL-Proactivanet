@@ -38,8 +38,8 @@
 //      cubre ademas la pagina estatica admin/iniciativas.html, que ningun
 //      handler sirve. Ver Web.config.ejemplo.
 //   EXCEPCIONES (2026-10-28, App_Code/AccesoIniciativas.cs): la pagina, el
-//   registro y la Cobertura son de toda cuenta Windows autenticada
-//   (AccesoIniciativas.ExigirRegistro); los cuatro handlers de Nueva
+//   registro y la Cobertura son de todos, tambien anonimos (2026-10-29,
+//   AccesoIniciativas.ExigirRegistro); los cuatro handlers de Nueva
 //   solicitud y Mis solicitudes, de ADM, MOD y de quien sea Product Owner
 //   o Service Owner VIGENTE (AccesoIniciativas.ExigirSolicitud). El
 //   interruptor INICIATIVAS_ABIERTAS ya no cuenta. No da rol: sigue siendo
@@ -290,8 +290,8 @@ public sealed class AdminAccesoModulo : IHttpModule
     public static bool Revisar(HttpContext ctx, string ruta)
     {
         if (!AccesoAdmin.EsRutaProtegida(ruta)) return true;
-        // El registro (pagina, registro y Cobertura): toda cuenta
-        // autenticada, sin consultar roles (App_Code/AccesoIniciativas.cs).
+        // El registro (pagina, registro y Cobertura): todos, sin consultar
+        // roles (App_Code/AccesoIniciativas.cs).
         var q = ctx.Request.QueryString;
         if (AccesoIniciativas.EsLecturaRegistro(ruta, q["rutas"], q["duenos"]) && AccesoIniciativas.PuedeVerRegistro(ctx)) return true;
         if (AccesoAdmin.PuedeEntrar(ctx)) return true;

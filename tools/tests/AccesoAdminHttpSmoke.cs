@@ -13,9 +13,9 @@
 //     AccesoIniciativas.FuenteDuenos): MOD, sea o no PO/SO, pasa (400 / 405,
 //     sin RolInsuficiente) y admin_sesion solicitante true; lo solo-ADM
 //     (admin_correos) sigue 403 RolInsuficiente para MOD (parte C);
-//   - el registro y la Cobertura (catalogos sin ?rutas) son de toda cuenta
-//     autenticada (AccesoIniciativas.ExigirRegistro): VIEWER pasa la
-//     puerta (llega al SQL); el anonimo, 403;
+//   - el registro y la Cobertura (catalogos sin ?rutas) son de todos,
+//     tambien anonimos (2026-10-29, AccesoIniciativas.ExigirRegistro):
+//     pasan la puerta (llegan al SQL);
 //   - VIEWER (sin fila en UsuariosAdmin, con un valor que no es ADM/MOD, o
 //     con la consulta fallando; este en la whitelist o no): 403
 //     AccesoDenegado en todo handler admin_iniciativas_* que no es del
@@ -224,7 +224,7 @@ public static class AccesoAdminHttpSmoke
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, @"SORIANA\t_otro", out estado);
         Check("H1 admin_sesion: otra cuenta no (pero ve el registro)", "200|{\"autorizado\":false,\"solicitante\":false,\"registro\":true}", estado + "|" + cuerpo);
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
-        Check("H1 admin_sesion: anonimo no (ni el registro)", "200|{\"autorizado\":false,\"solicitante\":false,\"registro\":false}", estado + "|" + cuerpo);
+        Check("H1 admin_sesion: anonimo sin rol, con el registro", "200|{\"autorizado\":false,\"solicitante\":false,\"registro\":true}", estado + "|" + cuerpo);
 
         // ---- correo de la cabecera (App_Code/CorreoAdmin.cs) ------------------
         var correos = new FuenteCorreoFalsa();
@@ -482,7 +482,7 @@ public static class AccesoAdminHttpSmoke
         {
             var contadaAnon = new FuenteFalsa().Con(YO, "ADM");
             AccesoAdmin.FuenteRoles = contadaAnon;
-            cuerpo = Correr(new AdminIniciativasRegistro(), "admin_iniciativas_registro.ashx", null, cuenta, out estado);
+            cuerpo = Correr(new AdminIniciativasDiagnostico(), "admin_iniciativas_diagnostico.ashx", null, cuenta, out estado);
             Check("R4c " + (cuenta == null ? "sin usuario" : "anonimo") + ": 403 y sin consultar la tabla", "403|0",
                   estado + "|" + contadaAnon.Pedidas.Count);
         }
@@ -522,8 +522,8 @@ public static class AccesoAdminHttpSmoke
             foreach (var cuenta in new[] { @"SORIANA\t_otro", "" })
             {
                 cuerpo = Correr(h, "admin_iniciativas_x.ashx", "categoria=/A", cuenta, out estado);
-                if (DeLectura(h) && cuenta.Length > 0)
-                    Check("H4 " + h.GetType().Name + " con " + cuenta + ": el registro es de todos (sin 403)", false, estado == 403);
+                if (DeLectura(h))
+                    Check("H4 " + h.GetType().Name + " con " + (cuenta.Length == 0 ? "(anonimo)" : cuenta) + ": el registro es de todos (sin 403)", false, estado == 403);
                 else
                     Check("H4 " + h.GetType().Name + " con " + (cuenta.Length == 0 ? "(anonimo)" : cuenta) + ": 403",
                           "403|True", estado + "|" + cuerpo.Contains("AccesoDenegado"));
@@ -794,11 +794,14 @@ public static class AccesoAdminHttpSmoke
         foreach (var h in protegidos)
         {
             cuerpo = Correr(h, "admin_iniciativas_x.ashx", "categoria=/A", "", out estado);
-            Check("L6 anonimo no local: " + h.GetType().Name + " 403 AccesoDenegado", "403|True",
-                  estado + "|" + cuerpo.Contains("AccesoDenegado"));
+            if (DeLectura(h))
+                Check("L6 anonimo no local: " + h.GetType().Name + " es del registro: sin 403", false, estado == 403);
+            else
+                Check("L6 anonimo no local: " + h.GetType().Name + " 403 AccesoDenegado", "403|True",
+                      estado + "|" + cuerpo.Contains("AccesoDenegado"));
         }
         cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, "", out estado);
-        Check("L6 admin_sesion anonimo no local: sin autorizar ni marca de desarrollo", "{\"autorizado\":false,\"solicitante\":false,\"registro\":false}", cuerpo);
+        Check("L6 admin_sesion anonimo no local: sin autorizar ni marca de desarrollo", "{\"autorizado\":false,\"solicitante\":false,\"registro\":true}", cuerpo);
         Check("L6 null: no activa", false, AccesoDesarrolloLocal.Activo(null));
 
         // En un build sin DEBUG, Activo ni siquiera tiene la logica: el

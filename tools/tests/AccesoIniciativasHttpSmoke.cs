@@ -8,8 +8,7 @@
 // vigente, COMUN esta en CatPersona sin ser dueño y MOD no es dueño.
 //
 // La regla:
-//   registro (Iniciativas)        ADM, MOD, PO, SO y cualquier otra cuenta
-//                                 autenticada; anonimo no.
+//   registro (Iniciativas)        todos, tambien anonimos (2026-10-29)
 //   Solicitar / Mis solicitudes   ADM, MOD, PO y SO; los demas no.
 //   Administracion                ADM y MOD (AccesoAdmin); PO/SO no.
 //
@@ -17,9 +16,9 @@
 //       fila, error o sin fuente cierran; el error se registra.
 //   I   el interruptor ya NO decide el acceso: nada del sitio lo lee.
 //   W   Web.config no cuenta: el fuente no lee appSettings.
-//   G   el registro (pagina, registro, ?export=1 y Cobertura) es de toda
-//       cuenta autenticada, por el modulo y llamando al handler, sin
-//       consultar el rol ni los dueños; el anonimo recibe 403.
+//   G   el registro (pagina, registro, ?export=1 y Cobertura) es de todos,
+//       tambien anonimos, por el modulo y llamando al handler, sin
+//       consultar el rol ni los dueños.
 //   S   Solicitar: la pagina y los 4 handlers de Nueva solicitud pasan para
 //       ADM, MOD, PO y SO; la cuenta comun recibe 403 "solo PO/SO" en los 4
 //       handlers (por URL directa y por el modulo); el anonimo, 403.
@@ -322,10 +321,9 @@ public static class AccesoIniciativasHttpSmoke
         foreach (var anon in new[] { "", null })
         {
             var n = anon == null ? "sin usuario" : "anonimo";
-            Check("G2 " + n + ": el registro no (403)", "XXXXXX", Registro(anon));
+            Check("G2 " + n + ": el registro tambien (2026-10-29)", "PPPPPP", Registro(anon));
             cuerpo = Correr(new AdminIniciativasRegistro(), "admin_iniciativas_registro.ashx", null, anon, out estado);
-            Check("G2 " + n + ": el 403 del registro es AccesoDenegado con el aviso de la cuenta", "403|True|True",
-                  estado + "|" + Denegado(cuerpo) + "|" + cuerpo.Contains("cuenta de Windows"));
+            Check("G2 " + n + ": el registro no responde 403", "False|False", (estado == 403) + "|" + Denegado(cuerpo));
         }
         {
             var antesR = roles.Lecturas; var antesD = duenos.Lecturas;
@@ -352,8 +350,8 @@ public static class AccesoIniciativasHttpSmoke
         Check("S1 PO: pagina + 4 handlers", "PPPPP", Puertas(PO));
         Check("S1 SO: pagina + 4 handlers", "PPPPP", Puertas(SO));
         Check("S2 cuenta comun: la pagina (registro) si, los 4 handlers 403 solo PO/SO", "PDDDD", Puertas(COMUN));
-        Check("S2 anonimo: nada", "CCCCC", Puertas(""));
-        Check("S2 sin usuario: nada", "CCCCC", Puertas(null));
+        Check("S2 anonimo: solo la pagina (registro)", "PCCCC", Puertas(""));
+        Check("S2 sin usuario: solo la pagina (registro)", "PCCCC", Puertas(null));
         foreach (var h in new[] { "capacidad", "volumetria", "validar", "mis_solicitudes" })
         {
             Check("S3 modulo, cuenta comun: " + h + " 403 JSON solo PO/SO", "403|json|duenos", Modulo("~/handlers/admin_iniciativas_" + h + ".ashx", COMUN));
@@ -389,7 +387,7 @@ public static class AccesoIniciativasHttpSmoke
             foreach (var r in RutasAdmin)
                 Check("B3 PO con query trampa: modulo admin_iniciativas_" + r, "403|json|admin", Modulo("~/handlers/admin_iniciativas_" + r + ".ashx", PO, trampa));
             Check("B4 admin_sesion con query trampa", Sin(false), Sesion(COMUN, trampa));
-            Check("B5 anonimo con query trampa: ni el registro", "403|html|cerrada", Modulo("~/admin/iniciativas.html", "", trampa));
+            Check("B5 anonimo con query trampa: el registro si, Nueva solicitud no", "pasa|CCCC", Modulo("~/admin/iniciativas.html", "", trampa) + "|" + Puertas("", trampa).Substring(1));
         }
 
         // ---- E: admin_sesion -----------------------------------------------
@@ -398,7 +396,7 @@ public static class AccesoIniciativasHttpSmoke
         Check("E1 PO", Sin(true), Sesion(PO));
         Check("E1 SO", Sin(true), Sesion(SO));
         Check("E1 cuenta comun: registro, sin solicitar", Sin(false), Sesion(COMUN));
-        Check("E1 anonimo: nada", "{\"autorizado\":false,\"solicitante\":false,\"registro\":false}", Sesion(""));
+        Check("E1 anonimo: solo el registro", "{\"autorizado\":false,\"solicitante\":false,\"registro\":true}", Sesion(""));
 
         // ---- U: otros modulos del tablero ----------------------------------
         foreach (var u in new[] { "~/dashboard.html", "~/handlers/kpis.ashx", "~/handlers/experiencia.ashx",
@@ -551,7 +549,7 @@ public static class AccesoIniciativasHttpSmoke
             Check("L7 rol que falla: Nueva solicitud por ser PO/SO", "PPPPP", Puertas(ADMPO));
             Check("L7 rol que falla: admin_sesion marcado", Sin(true, MARCA), Sesion(ADMPO));
             Check("L7 rol que falla: cuenta sin PO/SO, solo el registro y marcado", "PDDDD|" + Sin(false, MARCA), Puertas(NADA) + "|" + Sesion(NADA));
-            Check("L7 anonimo con el rol fallando: no consulta, sin marca", "{\"autorizado\":false,\"solicitante\":false,\"registro\":false}", Sesion(""));
+            Check("L7 anonimo con el rol fallando: no consulta, sin marca", "{\"autorizado\":false,\"solicitante\":false,\"registro\":true}", Sesion(""));
             roles.Lanza = false;
 
             d.Lanza = true;

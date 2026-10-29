@@ -2,7 +2,7 @@
 
    Pregunta a handlers/admin_sesion.ashx y:
      - muestra los elementos marcados con data-solo-registro si el
-       servidor dice registro: true: toda cuenta Windows autenticada
+       servidor dice registro: true: todos, tambien anonimos
        (AccesoIniciativas.PuedeVerRegistro; no depende del rol ni de ser
        PO/SO). La entrada Iniciativas del menu ya NO lo lleva: se ve
        siempre;

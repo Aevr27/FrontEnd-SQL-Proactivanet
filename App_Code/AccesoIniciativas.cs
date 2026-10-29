@@ -6,9 +6,9 @@
 //
 // LA REGLA (2026-10-28)
 // ---------------------
-//   Registro (vista Iniciativas, solo lectura): toda cuenta Windows
-//   autenticada (PuedeVerRegistro). No mira dbo.UsuariosAdmin, los dueños
-//   ni el interruptor. Anonimo: no.
+//   Registro (vista Iniciativas, solo lectura): TODOS (2026-10-29), con
+//   cuenta o anonimos (PuedeVerRegistro). No mira dbo.UsuariosAdmin, los dueños
+//   ni el interruptor. Anonimo: tambien.
 //
 //   Nueva solicitud y Mis solicitudes (PuedeSolicitar):
 //   ADM / MOD           siempre. No mira los dueños.
@@ -292,12 +292,12 @@ public static class AccesoIniciativas
             && rutas != "1" && duenos != "1";
     }
 
-    // El registro es de todo usuario del tablero: basta una cuenta Windows
-    // autenticada (o la del atajo de desarrollo local). No consulta
+    // El registro es de todos (2026-10-29), tambien anonimos: la pestana
+    // Iniciativas se ve siempre; solo lo demas depende del rol. No consulta
     // dbo.UsuariosAdmin, los dueños ni el interruptor.
     public static bool PuedeVerRegistro(HttpContext context)
     {
-        return AccesoAdmin.IdentidadEscritura(context) != null;
+        return true;
     }
 
     // Para el registro y la Cobertura: true si sigue; si no, ya respondio

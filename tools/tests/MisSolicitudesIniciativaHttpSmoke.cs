@@ -221,7 +221,7 @@ public static class MisSolicitudesIniciativaHttpSmoke
         }
 
         // ---------------- M: URL directa (modulo) ----------------
-        foreach (var c in new[] { new[] { "VIEWER sin PO/SO (el registro es de todos)", VIEWER, "pasa" }, new[] { "anonimo", "", "403" },
+        foreach (var c in new[] { new[] { "VIEWER sin PO/SO (el registro es de todos)", VIEWER, "pasa" }, new[] { "anonimo (el registro es de todos)", "", "pasa" },
                                   new[] { "PO/SO sin rol", POSO, "pasa" }, new[] { "MOD sin PO/SO", MOD, "pasa" }, new[] { "ADM", ADM, "pasa" } })
             Check("M1 pagina admin/iniciativas.html, " + c[0], c[2], Modulo("~/admin/iniciativas.html", c[1]));
         foreach (var c in new[] { new[] { "VIEWER sin PO/SO", VIEWER, "403" }, new[] { "anonimo", "", "403" },
