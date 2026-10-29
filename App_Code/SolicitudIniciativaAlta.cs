@@ -14,7 +14,7 @@
 // otra fila. Lo que se guarda es el Nombre y el Correo de ESA fila. Nada
 // viene del navegador: ni nombre, ni cuenta, ni correo.
 //
-// ADM / MOD SIN CatPersona (2026-10-29, sql/35): dbo.UsuariosAdmin es la
+// ADM / MOD SIN CatPersona (2026-10-29, sql/35 + 36): dbo.UsuariosAdmin es la
 // fuente de quien es ADM o MOD, y estar ahi basta para enviar. Si quien
 // envia tiene rol ADM o MOD (AccesoAdmin.Rol: dbo.UsuariosAdmin, del
 // servidor; nunca el navegador) y su cuenta no se resuelve a una persona
@@ -26,8 +26,11 @@
 // valido: error en "solicitante", nada se guarda. Quien SI se resuelve en
 // CatPersona sigue por CatPersona (con su nombre), tenga o no rol. El rol
 // derivado "solicitante" (PO/SO sin rol) sigue con la regla estricta de
-// CatPersona. Guardar asi exige sql/35 (adm.usp_SolicitudIniciativa_Crear
-// vuelve a comprobar UsuariosAdmin, 51417); sin ella IniciativaService lo
+// CatPersona. Guardar asi exige sql/36: adm.usp_SolicitudIniciativa_Crear
+// decide la fuente con sus tablas y la MISMA regla (51405 / 51417 / 51418;
+// CATPERSONA solo con el correo de la cuenta) y el nombre USUARIOSADMIN lo
+// pone ella (dbo.UsuariosAdmin.NombreSolicitante de sql/35, NULL valido): lo
+// guardado vuelve en SolicitudGuardada. Sin sql/36 IniciativaService lo
 // rechaza antes del almacen (MensajeSinSql35).
 //
 // CORREO DEL PRODUCT OWNER: el PO elegido ya paso por ValidadorIniciativa
@@ -74,7 +77,7 @@ public sealed class DestinatariosSolicitud
     public string ProductOwnerCorreo;
 
     public const string MensajeSinSql35 =
-        "Tu cuenta es ADM o MOD pero no est\u00e1 en el directorio de personas (CatPersona), y la base todav\u00eda no acepta solicitudes de ADM/MOD sin CatPersona (falta sql/35). No se guard\u00f3 nada.";
+        "Tu cuenta es ADM o MOD pero no est\u00e1 en el directorio de personas (CatPersona), y la base todav\u00eda no acepta solicitudes de ADM/MOD sin CatPersona (faltan sql/35 y sql/36). No se guard\u00f3 nada.";
 
     public bool Resuelto { get { return SolicitanteCorreo != null && ProductOwnerCorreo != null; } }
 
@@ -130,7 +133,14 @@ public sealed class DestinatariosSolicitud
 
         if (r != null && r.TieneError(SolicitudIniciativa.CPo)) return d;
         var clave = IdentidadAcuse.ClaveNombre(po);
-        if (clave == null) return d;   // "Falta el Product Owner" ya lo dijo el validador
+        if (clave == null)
+        {
+            // Vacio: "Falta el Product Owner" ya lo dijo el validador. Con
+            // texto: Unicode invalido (ClaveNombre), no se busca su correo.
+            if (DirectorioOrganizacional.Normaliza(po) != null && r != null)
+                r.Agregar(SolicitudIniciativa.CPo, "El nombre del Product Owner tiene caracteres inv\u00e1lidos; no se puede buscar su correo.");
+            return d;
+        }
         var filas = new List<PersonaCatalogo>();
         foreach (var p in personas)
             if (IdentidadAcuse.ClaveNombre(p.Nombre) == clave) filas.Add(p);
@@ -177,6 +187,9 @@ public sealed class SolicitudGuardada
     public NumeroSolicitud Numero;
     public bool Nuevo;          // false = ya estaba (mismo token)
     public DateTime FechaUtc;
+    // sql/36: lo que la base GUARDO (null sin sql/36 o sin AltaSolicitud.ConFuente).
+    public string Fuente;
+    public string NombreGuardado;
 }
 
 // Lo que se guarda: lo validado + la foto de los destinatarios.
@@ -188,9 +201,12 @@ public sealed class AltaSolicitud
     public int Volumetria;
     public decimal Pct;
     public string SolicitanteNombre, SolicitanteCorreo, ProductOwnerCorreo;
+    // La base tiene sql/36 (AceptaSolicitanteAdmin): pedir @FuenteSolicitante
+    // y @NombreGuardado. Sin sql/36 esos parametros no existen.
+    public bool ConFuente;
 }
 
-// Un error que la base lanzo a proposito (51401-51409; 51417 de sql/35).
+// Un error que la base lanzo a proposito (51401-51409; 51417 y 51418 de sql/36).
 public sealed class ErrorSolicitud : Exception
 {
     public readonly int Numero;
@@ -200,8 +216,8 @@ public sealed class ErrorSolicitud : Exception
 public interface IAlmacenSolicitudes
 {
     bool Disponible();
-    // sql/35: _Crear acepta un solicitante ADM/MOD de dbo.UsuariosAdmin sin
-    // CatPersona (SolicitanteNombre NULL, FuenteCorreos USUARIOSADMIN).
+    // sql/36: _Crear acepta un solicitante ADM/MOD de dbo.UsuariosAdmin sin
+    // CatPersona (FuenteCorreos USUARIOSADMIN, nombre de UsuariosAdmin o NULL).
     bool AceptaSolicitanteAdmin();
     SolicitudGuardada Crear(AltaSolicitud a);
 }
@@ -240,14 +256,13 @@ public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
         catch (SqlException) { return false; }
     }
 
-    // Las piezas de sql/35 que la cuenta del sitio PUEDE ver: la columna
-    // nullable y el nombre del CHECK nuevo (sin VIEW DEFINITION no ve
-    // definiciones de CHECK ni de procedimientos; probado en LocalDB). La
-    // migracion las pone junto con el _Crear nuevo en una transaccion. Un
-    // error al revisar cuenta como "sin sql/35".
+    // sql/36 por el parametro @FuenteSolicitante de _Crear: la cuenta del
+    // sitio ve sys.parameters (no el texto del procedimiento; probado en
+    // LocalDB). El rollback de procedimiento de 36 lo quita y el sitio vuelve
+    // a la regla de sql/29. Un error al revisar cuenta como "sin sql/36".
     public const string ConsultaSolicitanteAdmin =
-        "SELECT CASE WHEN COLUMNPROPERTY(OBJECT_ID(N'adm.SolicitudIniciativa'), N'SolicitanteNombre', 'AllowsNull') = 1 " +
-        " AND OBJECT_ID(N'adm.CK_SolicitudIniciativa_FuenteNombre', N'C') IS NOT NULL THEN 1 ELSE 0 END";
+        "SELECT CASE WHEN EXISTS (SELECT 1 FROM sys.parameters WHERE object_id = OBJECT_ID(N'adm.usp_SolicitudIniciativa_Crear', N'P') " +
+        " AND name = N'@FuenteSolicitante') THEN 1 ELSE 0 END";
 
     public bool AceptaSolicitanteAdmin()
     {
@@ -286,10 +301,16 @@ public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
             var num = cmd.Parameters.Add("@NumeroSolicitud", SqlDbType.Int); num.Direction = ParameterDirection.Output;
             var nuevo = cmd.Parameters.Add("@Nuevo", SqlDbType.Bit); nuevo.Direction = ParameterDirection.Output;
             var fecha = cmd.Parameters.Add("@FechaUtc", SqlDbType.DateTime2); fecha.Direction = ParameterDirection.Output;
+            SqlParameter fuente = null, nombre = null;
+            if (a.ConFuente)
+            {
+                fuente = cmd.Parameters.Add("@FuenteSolicitante", SqlDbType.VarChar, 16); fuente.Direction = ParameterDirection.Output;
+                nombre = cmd.Parameters.Add("@NombreGuardado", SqlDbType.NVarChar, 255); nombre.Direction = ParameterDirection.Output;
+            }
             try { cmd.ExecuteNonQuery(); }
             catch (SqlException ex)
             {
-                if ((ex.Number >= 51401 && ex.Number <= 51409) || ex.Number == 51417) throw new ErrorSolicitud(ex.Number, ex.Message);
+                if ((ex.Number >= 51401 && ex.Number <= 51409) || ex.Number == 51417 || ex.Number == 51418) throw new ErrorSolicitud(ex.Number, ex.Message);
                 throw;
             }
             return new SolicitudGuardada
@@ -297,6 +318,8 @@ public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
                 Numero = new NumeroSolicitud((int)num.Value),
                 Nuevo = (bool)nuevo.Value,
                 FechaUtc = (DateTime)fecha.Value,
+                Fuente = fuente == null || fuente.Value == DBNull.Value ? null : (string)fuente.Value,
+                NombreGuardado = nombre == null || nombre.Value == DBNull.Value ? null : (string)nombre.Value,
             };
         }
     }

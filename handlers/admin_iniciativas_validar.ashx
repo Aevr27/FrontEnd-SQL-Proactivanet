@@ -21,7 +21,7 @@
 //          dbo.CatPersona y no es ADM/MOD con CorreoUsuario unico en
 //          dbo.UsuariosAdmin (campo "solicitante"), o el PO no tiene un
 //          correo unico (campo "po"), o la base rechaza los correos
-//          (51405/51406/51417).
+//          (51405/51406/51417/51418).
 //     409  el token es de otra cuenta (51409).
 //     403  SinUsuario: no hay cuenta que firme.
 //     405  si no es POST;  413  si el archivo pasa el tope de ASP.NET.
@@ -33,11 +33,12 @@
 // llego y no esta vacio); se guarda su extension, no el archivo (no hay
 // destino confirmado). No se manda ningun correo.
 //
-// ADM / MOD SIN CatPersona (sql/35): con rol ADM o MOD (AccesoAdmin.Rol:
+// ADM / MOD SIN CatPersona (sql/35 + 36): con rol ADM o MOD (AccesoAdmin.Rol:
 // dbo.UsuariosAdmin, del servidor) una cuenta que no esta en CatPersona
 // envia con el UNICO CorreoUsuario de su fila de dbo.UsuariosAdmin
-// (CorreoAdmin.Para, por la cuenta autenticada) y sin nombre. Sin ese
-// correo, o sin sql/35 en la base, 422 en "solicitante" y nada se guarda
+// (CorreoAdmin.Para, por la cuenta autenticada); el nombre lo pone la base
+// (UsuariosAdmin.NombreSolicitante o NULL). Sin ese correo, o sin sql/36 en
+// la base, 422 en "solicitante" y nada se guarda
 // (ver App_Code/SolicitudIniciativaAlta.cs). PO/SO sin rol: sin cambios.
 //
 // ACCESO: AccesoIniciativas.ExigirSolicitud: rol ADM o MOD; los demas si
@@ -95,7 +96,7 @@ public class AdminIniciativasValidar : IHttpHandler
                 DashboardHandler.Registrar("admin_iniciativas_validar.ashx", ex);
                 if (ex.Numero == 51409)
                     return Error(context, 409, "Este borrador ya se envi\u00f3 con otra cuenta. Recarga la p\u00e1gina.", "TokenAjeno");
-                var campo = ex.Numero == 51405 || ex.Numero == 51417 ? DestinatariosSolicitud.CampoSolicitante
+                var campo = ex.Numero == 51405 || ex.Numero == 51417 || ex.Numero == 51418 ? DestinatariosSolicitud.CampoSolicitante
                           : ex.Numero == 51406 ? SolicitudIniciativa.CPo : null;
                 context.Response.StatusCode = 422;
                 context.Response.TrySkipIisCustomErrors = true;

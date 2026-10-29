@@ -100,13 +100,20 @@ public sealed class IdentidadAcuse
 
     // Nombre comparable: sin NBSP ni espacios de mas, sin acentos, sin
     // mayusculas. Es como compara el diag de la VM (COLLATE CI_AI).
+    // Unicode invalido (un surrogate suelto): null, nunca una excepcion. Asi
+    // un nombre mal capturado en CatPersona no tumba la resolucion de todos;
+    // null no se iguala con nada (esa fila no resuelve a nadie ni repite el
+    // nombre de nadie) y su propia cuenta queda sin resolver (no_encontrado).
     public static string ClaveNombre(string s)
     {
         s = DirectorioOrganizacional.Normaliza(s);
         if (s == null) return null;
+        string d;
+        try { d = s.Normalize(NormalizationForm.FormD); }
+        catch (ArgumentException) { return null; }
         var sb = new StringBuilder();
         bool espacio = false;
-        foreach (var ch in s.Normalize(NormalizationForm.FormD))
+        foreach (var ch in d)
         {
             if (CharUnicodeInfo.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark) continue;
             if (char.IsWhiteSpace(ch)) { espacio = true; continue; }

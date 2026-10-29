@@ -41,8 +41,9 @@ sealed class PersonasFalsas : IFuentePersonasAcuse
 sealed class AlmacenFalso : IAlmacenSolicitudes
 {
     public bool Hay = true;
-    public bool Admin = true;   // sql/35 en la base
+    public bool Admin = true;   // sql/36 en la base
     public Exception Lanza;
+    public string FuenteGuardada, NombreGuardado;   // lo que devolveria _Crear de sql/36
     public readonly List<AltaSolicitud> Altas = new List<AltaSolicitud>();
     readonly Dictionary<Guid, int> porToken = new Dictionary<Guid, int>();
     int ultimo = 0;
@@ -56,7 +57,8 @@ sealed class AlmacenFalso : IAlmacenSolicitudes
             return new SolicitudGuardada { Numero = new NumeroSolicitud(n), Nuevo = false, FechaUtc = DateTime.UtcNow };
         Altas.Add(a);
         porToken[a.Token] = ++ultimo;
-        return new SolicitudGuardada { Numero = new NumeroSolicitud(ultimo), Nuevo = true, FechaUtc = DateTime.UtcNow };
+        return new SolicitudGuardada { Numero = new NumeroSolicitud(ultimo), Nuevo = true, FechaUtc = DateTime.UtcNow,
+                                       Fuente = a.ConFuente ? FuenteGuardada : null, NombreGuardado = a.ConFuente ? NombreGuardado : null };
     }
 }
 
@@ -411,8 +413,8 @@ public static class SolicitudIniciativaAltaSmoke
               hnd.Contains("CorreoAdmin.Para(identidad, CorreoAdmin.Fuente,") + "|" +
               (hnd.IndexOf("AccesoIniciativas.ExigirSolicitud(context)") < hnd.IndexOf("AccesoAdmin.Rol(context)")) + "|" +
               (hnd.Contains("req.Form[\"rol") || hnd.Contains("req.Form[\"correo") || hnd.Contains("QueryString")));
-        Check("X11 handler: 51417 de la base va a 'solicitante'", true,
-              hnd.Contains("ex.Numero == 51405 || ex.Numero == 51417 ? DestinatariosSolicitud.CampoSolicitante"));
+        Check("X11 handler: 51417 y 51418 de la base van a 'solicitante'", true,
+              hnd.Contains("ex.Numero == 51405 || ex.Numero == 51417 || ex.Numero == 51418 ? DestinatariosSolicitud.CampoSolicitante"));
         a = new AlmacenFalso { Lanza = new ErrorSolicitud(51417, "x") };
         capturado = "sin error";
         try { Enviar(Win(@"SORIANA\t_olgado"), Form(PO), a, null, RolAdmin.Mod, correo("t_olgado@soriana.com")); }
@@ -421,6 +423,19 @@ public static class SolicitudIniciativaAltaSmoke
         Check("X12 MOD sigue sin ADM: RolAdmin MOD / ADM+MOD = MOD, solo todas ADM = ADM", "MOD|MOD|ADM|VIEWER|VIEWER",
               RolAdmin.Resolver(new[] { "MOD" }) + "|" + RolAdmin.Resolver(new[] { "ADM", "MOD" }) + "|" + RolAdmin.Resolver(new[] { "ADM" }) + "|" +
               RolAdmin.Resolver(new string[0]) + "|" + RolAdmin.Resolver(new[] { "ADM", null }));
+
+        // X13 (sql/36): con la base nueva el almacen pide la fuente y la
+        // respuesta dice lo GUARDADO (el nombre de UsuariosAdmin, no uno del
+        // sitio); sin sql/36 no se piden esos parametros.
+        a = new AlmacenFalso { FuenteGuardada = "USUARIOSADMIN", NombreGuardado = "Nombre en UsuariosAdmin" };
+        r = Enviar(Win(@"SORIANA\t_olgado"), Form(PO), a, null, RolAdmin.Mod, correo("t_olgado@soriana.com"));
+        js = (Dictionary<string, object>)IniciativaService.ComoJson(r)["solicitante"];
+        Check("X13 sql/36: ConFuente y la respuesta con el nombre guardado por la base", "True|True|USUARIOSADMIN|Nombre en UsuariosAdmin",
+              r.Guardada + "|" + a.Altas[0].ConFuente + "|" + js["fuente"] + "|" + js["nombre"]);
+        a = new AlmacenFalso { Admin = false, FuenteGuardada = "X", NombreGuardado = "X" };
+        r = Enviar(Win(@"SORIANA\andresvr"), Form(PO), a, null, null, null);
+        Check("X13 sin sql/36: CatPersona guarda sin pedir la fuente; la respuesta es la del sitio", "True|False|CATPERSONA|Andres Vera Rios",
+              r.Guardada + "|" + a.Altas[0].ConFuente + "|" + r.Destinatarios.FuenteSolicitante + "|" + r.Destinatarios.SolicitanteNombre);
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso (" + pasados + ")" : "FALLOS: " + fallos);
         return fallos == 0 ? 0 : 1;

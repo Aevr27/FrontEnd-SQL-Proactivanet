@@ -1,77 +1,45 @@
 /* =========================================================================
-   sql/35_solicitud_iniciativa_solicitante_admin_rollback.sql - deshace sql/35.
-   ESTADO: PROPUESTA PARA REVISION. NO EJECUTADA EN LA VM.
+   sql/36_solicitud_iniciativa_solicitante_admin_rollback_procedimiento.sql
+   Deshace SOLO el procedimiento de sql/36: adm.usp_SolicitudIniciativa_Crear
+   vuelve al texto EXACTO de sql/29 (hash 0x518234C546F607D7FF3DA64DDB0BBE167002DA7BC31C6C897CF9A2C82050761A).
+   ESTADO: PROPUESTA PARA REVISION. NO EJECUTADA EN LA VM NI APROBADA.
+   Solo se corrio en bases DESECHABLES de LocalDB (GestionAdminPrueba_*,
+   tools/tests/SolicitanteAdminPsoSqlLocalDbSmoke.cs).
 
-   QUE HACE (una transaccion)
-     _Crear vuelve al texto EXACTO de sql/29 (el lote empieza donde
-     empezaba: el comentario forma parte del hash); se quita
-     CK_SolicitudIniciativa_FuenteNombre; CK_SolicitudIniciativa_Fuente
-     vuelve a solo CATPERSONA; SolicitanteNombre vuelve a NOT NULL.
+   Para urgencias: no toca filas, columnas, CHECK ni funciones, asi que nada
+   se pierde (tambien se quedan las solicitudes USUARIOSADMIN y las que no
+   tienen nombre). El sitio deja de ver @FuenteSolicitante y vuelve a pedir
+   CatPersona a todos; ADM / MOD sin CatPersona reciben 422 sin guardar.
+   Volver a aplicar sql/36 funciona desde aqui.
 
-   DATOS
-     Si hay alguna solicitud USUARIOSADMIN NO se deshace: no tiene
-     SolicitanteNombre y no se inventa uno. Se niega sin tocar nada.
-     Antes de deshacer, el sitio deja de ofrecer el camino (lo detecta
-     solo: AlmacenSolicitudesSql.AceptaSolicitanteAdmin sale false).
+   PRECONDICION: _Crear con el hash de sql/36 0x0484CDBC320573111B3EE245FA1E225F83DC65E7078213DE1C4C275C70E51D5A.
 
-   ORDEN: deshacer 35 ANTES que 32 o 31 (sus rollbacks exigen el _Crear de
-     sql/29).
-
-   PRECONDICION: _Crear con el hash de sql/35
-       0x307A180FFC5DFD95356CF6A9F2B8868A33BE52892037819091D133B47BF1243F
-     y 0 filas USUARIOSADMIN.
-   POSTCONDICION: _Crear con el hash de sql/29
-       0x518234C546F607D7FF3DA64DDB0BBE167002DA7BC31C6C897CF9A2C82050761A
-     CHECK de sql/29, SolicitanteNombre NOT NULL, mismas filas, eventos,
-     contador y DENY.
-
-   COMO CORRERLO (solo con OK)
-       EXEC sys.sp_set_session_context N'aprobar_migracion', N'35';
-     y el script completo.
+   COMO CORRERLO (solo con OK explicito de este script)
+       EXEC sys.sp_set_session_context N'aprobar_migracion', N'36';
+     y el script completo (sqlcmd -b -I, o SSMS con el script entero).
+     Una sola transaccion: si algo falla, ROLLBACK de todo.
    ========================================================================= */
 IF DB_NAME() NOT LIKE N'GestionAdminPrueba[_]%'
-   AND ISNULL(CONVERT(nvarchar(10), SESSION_CONTEXT(N'aprobar_migracion')), N'') <> N'35'
+   AND ISNULL(CONVERT(nvarchar(10), SESSION_CONTEXT(N'aprobar_migracion')), N'') <> N'36'
 BEGIN
-    RAISERROR (N'Rollback 35 SIN APROBAR: declara aprobar_migracion = 35 en esta sesion.', 16, 1);
+    RAISERROR (N'Rollback 36 (procedimiento) SIN APROBAR: declara aprobar_migracion = 36 en esta sesion.', 16, 1);
     SET NOEXEC ON;
 END;
 GO
 SET XACT_ABORT ON;
 BEGIN TRAN;
-DECLARE @hashCrear varbinary(32) = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
-            OBJECT_DEFINITION(OBJECT_ID(N'adm.usp_SolicitudIniciativa_Crear', N'P')),
-            N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
-DECLARE @admin int = 0;
-IF @hashCrear = 0x307A180FFC5DFD95356CF6A9F2B8868A33BE52892037819091D133B47BF1243F
-    -- UPDLOCK + HOLDLOCK: nadie guarda una USUARIOSADMIN mientras se decide.
-    SELECT @admin = COUNT(*) FROM adm.SolicitudIniciativa WITH (UPDLOCK, HOLDLOCK)
-    WHERE FuenteCorreos <> 'CATPERSONA' OR SolicitanteNombre IS NULL;
-IF @hashCrear IS NULL OR @hashCrear <> 0x307A180FFC5DFD95356CF6A9F2B8868A33BE52892037819091D133B47BF1243F OR @admin > 0
+DECLARE @h varbinary(32) = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'adm.usp_SolicitudIniciativa_Crear', N'P')), N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+IF @h IS NULL OR @h <> 0x0484CDBC320573111B3EE245FA1E225F83DC65E7078213DE1C4C275C70E51D5A
 BEGIN
     ROLLBACK;
-    IF @admin > 0
-        RAISERROR (N'Rollback 35: hay %d solicitud(es) USUARIOSADMIN sin nombre; no se deshace. No se toca nada.', 16, 1, @admin);
-    ELSE IF @hashCrear = 0x518234C546F607D7FF3DA64DDB0BBE167002DA7BC31C6C897CF9A2C82050761A
-        RAISERROR (N'Rollback 35: sql/35 no esta aplicada (_Crear ya es el de sql/29). No se toca nada.', 16, 1);
+    IF @h = 0x518234C546F607D7FF3DA64DDB0BBE167002DA7BC31C6C897CF9A2C82050761A
+        RAISERROR (N'Rollback 36 (procedimiento): _Crear ya es la de sql/29. No se toca nada.', 16, 1);
     ELSE
-        RAISERROR (N'Rollback 35: _Crear no es el de sql/35 (no aplicada o cambiada a mano). No se toca nada.', 16, 1);
+        RAISERROR (N'Rollback 36 (procedimiento): _Crear no es la de sql/36. No se toca nada.', 16, 1);
     SET NOEXEC ON;
 END;
 GO
-IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Rollback 35: transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
-GO
-IF OBJECT_ID('tempdb..#antes35r') IS NOT NULL DROP TABLE #antes35r;
-SELECT Solicitudes = (SELECT COUNT(*) FROM adm.SolicitudIniciativa),
-       Eventos = (SELECT COUNT(*) FROM adm.SolicitudIniciativaEvento),
-       Ultimo = (SELECT Ultimo FROM adm.SolicitudIniciativaContador WHERE Id = 1),
-       Denegados = (SELECT COUNT(*) FROM sys.database_permissions AS p
-                     WHERE p.grantee_principal_id = DATABASE_PRINCIPAL_ID(N'PROACTIVANETAD')
-                       AND p.state = 'D' AND p.class = 1 AND p.permission_name IN (N'INSERT', N'UPDATE', N'DELETE')
-                       AND p.major_id IN (OBJECT_ID(N'adm.SolicitudIniciativaContador'), OBJECT_ID(N'adm.SolicitudIniciativa'),
-                                          OBJECT_ID(N'adm.SolicitudIniciativaEvento')))
-INTO #antes35r;
-GO
-IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Rollback 35: transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
+IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Rollback 36 (procedimiento): transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
 GO
 /* ---------- 2. adm.usp_SolicitudIniciativa_Crear ---------- */
 ALTER PROCEDURE adm.usp_SolicitudIniciativa_Crear
@@ -174,42 +142,17 @@ BEGIN
     END CATCH;
 END;
 GO
-IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Rollback 35: transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
+IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Rollback 36 (procedimiento): transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
 GO
-ALTER TABLE adm.SolicitudIniciativa DROP CONSTRAINT CK_SolicitudIniciativa_FuenteNombre;
-ALTER TABLE adm.SolicitudIniciativa DROP CONSTRAINT CK_SolicitudIniciativa_Fuente;
-ALTER TABLE adm.SolicitudIniciativa ADD CONSTRAINT CK_SolicitudIniciativa_Fuente
-    CHECK (FuenteCorreos IN ('CATPERSONA'));
-ALTER TABLE adm.SolicitudIniciativa ALTER COLUMN SolicitanteNombre nvarchar(255) NOT NULL;
-GO
-IF @@TRANCOUNT = 0 BEGIN RAISERROR (N'Rollback 35: transaccion cerrada.', 16, 1); SET NOEXEC ON; END;
-GO
-DECLARE @hash2 varbinary(32) = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
-            OBJECT_DEFINITION(OBJECT_ID(N'adm.usp_SolicitudIniciativa_Crear', N'P')),
-            N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
-IF @hash2 = 0x518234C546F607D7FF3DA64DDB0BBE167002DA7BC31C6C897CF9A2C82050761A
-   AND COLUMNPROPERTY(OBJECT_ID(N'adm.SolicitudIniciativa'), N'SolicitanteNombre', 'AllowsNull') = 0
-   AND OBJECT_ID(N'adm.CK_SolicitudIniciativa_FuenteNombre', N'C') IS NULL
-   AND (SELECT definition FROM sys.check_constraints
-        WHERE parent_object_id = OBJECT_ID(N'adm.SolicitudIniciativa') AND name = N'CK_SolicitudIniciativa_Fuente'
-          AND is_disabled = 0 AND is_not_trusted = 0) = N'([FuenteCorreos]=''CATPERSONA'')'
-   AND EXISTS (SELECT 1 FROM #antes35r AS a
-               WHERE a.Solicitudes = (SELECT COUNT(*) FROM adm.SolicitudIniciativa)
-                 AND a.Eventos = (SELECT COUNT(*) FROM adm.SolicitudIniciativaEvento)
-                 AND ISNULL(a.Ultimo, -1) = ISNULL((SELECT Ultimo FROM adm.SolicitudIniciativaContador WHERE Id = 1), -1)
-                 AND a.Denegados = (SELECT COUNT(*) FROM sys.database_permissions AS p
-                     WHERE p.grantee_principal_id = DATABASE_PRINCIPAL_ID(N'PROACTIVANETAD')
-                       AND p.state = 'D' AND p.class = 1 AND p.permission_name IN (N'INSERT', N'UPDATE', N'DELETE')
-                       AND p.major_id IN (OBJECT_ID(N'adm.SolicitudIniciativaContador'), OBJECT_ID(N'adm.SolicitudIniciativa'),
-                                          OBJECT_ID(N'adm.SolicitudIniciativaEvento'))))
+IF HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'adm.usp_SolicitudIniciativa_Crear', N'P')), N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')) = 0x518234C546F607D7FF3DA64DDB0BBE167002DA7BC31C6C897CF9A2C82050761A
 BEGIN
     COMMIT;
-    SELECT Rollback_ = N'35', Resultado = 'DESHECHA';
+    SELECT Script = N'Rollback 36 (procedimiento)', Resultado = 'DESHECHA';
 END
 ELSE
 BEGIN
     ROLLBACK;
-    RAISERROR (N'Rollback 35: no quedo como sql/29 (hash, columna, CHECK, DENY o datos); ROLLBACK de todo.', 16, 1);
+    RAISERROR (N'Rollback 36 (procedimiento): _Crear no quedo como se esperaba; ROLLBACK de todo.', 16, 1);
 END;
 GO
 SET NOEXEC OFF;

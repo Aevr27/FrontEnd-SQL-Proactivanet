@@ -143,9 +143,10 @@ public sealed class IniciativaService
             return r;
         }
         // Un solicitante ADM/MOD de dbo.UsuariosAdmin (sin CatPersona) solo
-        // se guarda si la base tiene sql/35; sin ella, error claro y el
+        // se guarda si la base tiene sql/36; sin ella, error claro y el
         // almacen ni se llama (nada de exito falso).
-        if (r.Destinatarios.FuenteSolicitante == DestinatariosSolicitud.FuenteUsuariosAdmin && !_almacen.AceptaSolicitanteAdmin())
+        var conFuente = _almacen.AceptaSolicitanteAdmin();
+        if (r.Destinatarios.FuenteSolicitante == DestinatariosSolicitud.FuenteUsuariosAdmin && !conFuente)
         {
             r.Agregar(DestinatariosSolicitud.CampoSolicitante, DestinatariosSolicitud.MensajeSinSql35);
             return r;
@@ -175,7 +176,15 @@ public sealed class IniciativaService
             SolicitanteNombre = d.SolicitanteNombre,
             SolicitanteCorreo = d.SolicitanteCorreo,
             ProductOwnerCorreo = d.ProductOwnerCorreo,
+            ConFuente = conFuente,
         });
+        // sql/36: la respuesta dice lo que la base GUARDO (con USUARIOSADMIN
+        // el nombre es el de dbo.UsuariosAdmin, no uno del sitio).
+        if (g.Fuente != null)
+        {
+            d.FuenteSolicitante = g.Fuente;
+            d.SolicitanteNombre = g.NombreGuardado;
+        }
         r.Numero = g.Numero;
         r.NumeroPendiente = null;
         r.Guardada = true;
