@@ -115,7 +115,8 @@ var COMUNES = ['pasaFiltroGlobal', 'volActualDe', 'volAnteriorDe', 'deltaDe', 'v
   'currentCats', 'aggCats', 'renderKPIs', 'efectividadDe', 'tarjetaEfectividad', 'tarjetaSinAutomatizar', 'renderEvol', 'renderDet',
   'volCatV2', 'getConDescendienteConVolumen', 'esHojaPeriodo', 'conDeCatV2', 'sinDeCatV2',
   'hojasSinIniciativa', 'volumenSinIniciativa', 'volumenConIniciativa', 'conIniVolDe', 'renderSin',
-  'catV2ByPath', 'categoriasDeFolio', 'volumenCategoriasFolio'];
+  'catV2ByPath', 'categoriasDeFolio', 'volumenCategoriasFolio',
+  'iniRetPorRutaDet', 'arbolDescendientesDet', 'filasDescendientesDet'];
 
 function arnes(src, payload, conTipos) {
   var codigo =
@@ -132,7 +133,7 @@ function arnes(src, payload, conTipos) {
     'function FMT(n){return String(Math.round(n||0));} function PCT(n){return String(Math.round((n||0)*100))+"%";}\n' +
     'function SEM(){return "v";} function esc(s){return String(s);} function fdate(){return "";}\n' +
     'function tend(){return "";} function miniBar(){return "";} function badge(){return "";} function badgeBin(){return "";}\n' +
-    'function bindC1toggle(){} function bindC2toggle(){} function bindCatClicks(){}\n' +
+    'function bindC1toggle(){} function bindC2toggle(){} function bindArbolToggle(){} function bindCatClicks(){}\n' +
     (conTipos ? src.slice(src.indexOf('let tipoRegistro='), src.indexOf('\nfunction camposVolumenTipo(')) +
       recortar(src, 'camposVolumenTipo') + recortar(src, 'aplicarTipoRegistro') : '') +
     COMUNES.map(function (n) { return recortar(src, n); }).join('') +

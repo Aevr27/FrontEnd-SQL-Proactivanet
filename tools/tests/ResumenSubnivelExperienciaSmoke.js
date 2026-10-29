@@ -64,12 +64,13 @@ var codigo =
   'var document={getElementById:function(id){return ELEMENTOS[id]||(ELEMENTOS[id]={style:{},classList:{add:function(){},remove:function(){}}});}};\n' +
   'function FMT(n){return String(n);} function esc(s){return String(s);} function PCT(n){return String(n);}\n' +
   'function tend(){return "";} function miniBar(){return "";} function badge(){return "";}\n' +
-  'function bindC1toggle(){} function bindCatClicks(){} function registrarDimension(){}\n' +
+  'function bindC1toggle(){} function bindArbolToggle(){} function bindCatClicks(){} function registrarDimension(){}\n' +
   'function conIniVolDe(c){var k=c.categoria; if(!(k in CON_INI)) throw new Error("conIniVolDe "+k); return CON_INI[k];}\n' +
   'function DashboardBarChart(o){barraDir=o; this.render=function(){};}\n' +
   'function renderBarrasPO(id, filas){barrasPO[id]=filas;}\n' +
   recortar('pasaFiltroGlobal') + recortar('volActualDe') + recortar('volAnteriorDe') + recortar('deltaDe') +
   recortar('currentCats') + recortar('aggCats') + recortar('renderDet') +
+  recortar('iniRetPorRutaDet') + recortar('arbolDescendientesDet') + recortar('filasDescendientesDet') +
   recortar('renderResumen') + recortar('renderResumenPorPO') +
   '\nreturn {' +
   ' filtrar: function (d, p, m, s) { fDir = d || ""; fPO = p || ""; fMgr = m || ""; fSO = s || ""; },' +

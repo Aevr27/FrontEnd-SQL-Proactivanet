@@ -853,6 +853,7 @@ function renderDet(cats){
   };
   const cabeceras={};
   Object.keys(byC1).forEach(c1=>{ cabeceras[c1]=cabecera(c1); });
+  const iniRet=iniRetPorRutaDet();
   // ordenar los grupos C1 por el volumen de su renglon (mayor a menor) - punto 1
   const volC1=c1=>volActualDe(cabeceras[c1].agg);
   let h='';
@@ -877,22 +878,102 @@ function renderDet(cats){
       <td class="num">${miniBar(aPctInic)} ${badge(aPctInic)}</td>
       <td class="num">${FMT(agg.ret)}</td><td class="num">${badge(agg.pct_en_tiempo)}</td>
       <td>${esc(agg.po||'—')}</td><td>${esc(agg.so||'—')}</td></tr>`;
-    hijos.forEach(c=>{
+    hijos.forEach((c,jdx)=>{
       const cVol=volActualDe(c), cPrev=volAnteriorDe(c), cDelta=deltaDe(c);
       const cConIni=conIniVolDe(c);
       const cPctInic = cVol>0 ? Math.min(cConIni/cVol,1) : 0;
-      h+=`<tr class="c2row g${idx}">
+      // Descendientes (C3, C4, ...) del subnivel, igual que en "Categorias
+      // sin iniciativa": salen de las rutas completas de categorias_v2.
+      const gid='g'+idx+'_'+jdx;
+      const sub=filasDescendientesDet(arbolDescendientesDet(c.categoria), 'g'+idx, [gid], 1, iniRet, {n:0});
+      h+=`<tr class="c2row g${idx}${sub?' c2exp':''}"${sub?` data-g2="${gid}"`:''}>
         <td><span class="catclick" data-cat="${encodeURIComponent(c.categoria)}">${esc(c.categoria)}</span></td>
         <td class="num">${FMT(cPrev)}</td><td class="num">${FMT(cVol)}</td>
         <td class="num">${tend(cDelta)}</td><td class="num">${FMT(cConIni)}</td>
         <td class="num">${miniBar(cPctInic)} ${badge(cPctInic)}</td>
         <td class="num">${FMT(c.ret)}</td><td class="num">${badge(c.pct_en_tiempo)}</td>
-        <td>${esc(c.po||'—')}</td><td>${esc(c.so||'—')}</td></tr>`;
+        <td>${esc(c.po||'—')}</td><td>${esc(c.so||'—')}</td></tr>`+sub;
     });
   });
   document.getElementById('bodyDet').innerHTML=h||'<tr><td colspan="10" class="empty">Sin datos</td></tr>';
   bindC1toggle('bodyDet');
+  bindArbolToggle('bodyDet');
   bindCatClicks();
+}
+// Arbol de las rutas completas (categorias_v2) que cuelgan de un subnivel
+// C2. Una ruta intermedia que no trae fila propia (sin tickets en esa ruta
+// exacta) se arma igual con el segmento, para no perder a sus hijas. Cada
+// nodo guarda en "cvs" todas las rutas de su subarbol: vw_TBSlotCAT /
+// vw_TBMesCAT agrupan por la ruta exacta del ticket, asi que el volumen de un
+// nodo es la suma de su ruta y la de sus descendientes (la misma cuenta con
+// la que Replegar arma la fila C2 en ExperienciaQueries.cs). Una ruta de un
+// solo segmento ("/Red") no tiene subniveles: sus "/Red/..." ya son los C2.
+function arbolDescendientesDet(ruta){
+  const raiz={ruta, hijos:new Map(), cvs:[]};
+  if(ruta.split('/').length<3) return raiz;
+  const pref=ruta+'/';
+  (P.categorias_v2||[]).forEach(cv=>{
+    if(!cv.categoria.startsWith(pref)) return;
+    if(!pasaFiltroGlobal(cv)) return;
+    let n=raiz;
+    cv.categoria.slice(pref.length).split('/').forEach(seg=>{
+      if(!n.hijos.has(seg)) n.hijos.set(seg,{ruta:n.ruta+'/'+seg, nombre:seg, hijos:new Map(), cvs:[]});
+      n=n.hijos.get(seg);
+      n.cvs.push(cv);
+    });
+  });
+  return raiz;
+}
+// Tickets Reduce de las iniciativas activas por ruta exacta, para "Tickets
+// en Riesgo" y "% en Tiempo" de los descendientes. Es la regla de
+// ExperienciaQueries.ArmarCategorias para ini_total / ret de C1 y C2
+// (iniciativa activa de un agrupador; en riesgo si va retrasada), aplicada a
+// la ruta: categorias_por_folio da cuanto reduce cada folio en cada ruta, y
+// las iniciativas de las filas de categorias su estado, agrupador y retraso.
+function iniRetPorRutaDet(){
+  const inis={};
+  P.categorias.forEach(c=>(c.iniciativas||[]).forEach(i=>{ if(!inis[i.folio]) inis[i.folio]=i; }));
+  const filas=[];
+  Object.keys(P.categorias_por_folio||{}).forEach(folio=>{
+    const i=inis[folio];
+    if(!i || !AGR.includes(i.agrup) || !ESTADOS_ACTIVOS.includes(i.estado)) return;
+    P.categorias_por_folio[folio].forEach(e=>{
+      if(e.categoria) filas.push({categoria:e.categoria, reduce:e.tickets_reduce||0, retrasada:i.retrazado>0});
+    });
+  });
+  return filas;
+}
+function filasDescendientesDet(nodo, gC1, ancestros, nivel, iniRet, cont){
+  const anterior = modoTiempo==='mes' ? P.mes_actual-1 : 1;
+  const nodos=[...nodo.hijos.values()].map(n=>{
+    const pref=n.ruta+'/';
+    const vol=n.cvs.reduce((s,cv)=>s+volCatV2(cv),0);
+    const prev=n.cvs.reduce((s,cv)=>s+volSlotOMes(cv,anterior),0);
+    let ini=0, ret=0;
+    iniRet.forEach(f=>{
+      if(f.categoria!==n.ruta && !f.categoria.startsWith(pref)) return;
+      ini+=f.reduce; if(f.retrasada) ret+=f.reduce;
+    });
+    return {n, vol, prev, ini, ret};
+  // Misma regla que los C2 del Detalle: una rama sin volumen ni iniciativa no se muestra.
+  }).filter(x=>x.vol>0 || x.ini>0).sort((a,b)=>b.vol-a.vol);
+  let h='';
+  nodos.forEach(({n, vol, prev, ini, ret})=>{
+    const gid=ancestros[0]+'_'+(++cont.n);
+    const sub=filasDescendientesDet(n, gC1, ancestros.concat(gid), nivel+1, iniRet, cont);
+    const conIni=conIniVolDe({categoria:n.ruta});
+    const pctInic = vol>0 ? Math.min(conIni/vol,1) : 0;
+    const pctTiempo = ini>0 ? Math.max(0,Math.min(1,1-ret/ini)) : 1;
+    const cv=n.cvs[0];
+    h+=`<tr class="c3row ${gC1} ${ancestros.join(' ')}${sub?' c2exp':''}" data-p="${ancestros[ancestros.length-1]}"${sub?` data-g2="${gid}"`:''}>
+      <td style="padding-left:${22+12*nivel}px;color:#5e5e5f" title="${esc(n.ruta)}">${esc(n.nombre)}</td>
+      <td class="num">${FMT(prev)}</td><td class="num">${FMT(vol)}</td>
+      <td class="num">${tend(vol-prev)}</td><td class="num">${FMT(conIni)}</td>
+      <td class="num">${miniBar(pctInic)} ${badge(pctInic)}</td>
+      <td class="num">${FMT(ret)}</td><td class="num">${badge(pctTiempo)}</td>
+      <td>${esc(cv.po||'—')}</td><td>${esc(cv.so||'—')}</td></tr>`+sub;
+  });
+  return h;
 }
 
 // ---- Sin iniciativa (drill-down C1 -> C1&C2 -> Categoria completa) [SEC-SIN] ----
@@ -1513,7 +1594,9 @@ function bindC1toggle(bodyId){
       row.classList.toggle('open',abrir);
       document.querySelectorAll('#'+bodyId+' .c2row.'+row.dataset.g).forEach(r=>r.classList.toggle('show',abrir));
       if(!abrir){
-        document.querySelectorAll('#'+bodyId+' .c2row.c2exp.'+row.dataset.g).forEach(r=>r.classList.remove('open'));
+        // .c2exp (no solo .c2row.c2exp): en el Detalle tambien se expanden
+        // las c3row que tienen hijos (ver bindArbolToggle).
+        document.querySelectorAll('#'+bodyId+' .c2exp.'+row.dataset.g).forEach(r=>r.classList.remove('open'));
         document.querySelectorAll('#'+bodyId+' .c3row.'+row.dataset.g).forEach(r=>r.classList.remove('show'));
       }
     };
@@ -1526,6 +1609,21 @@ function bindC2toggle(bodyId){
       const abrir=!row.classList.contains('open');
       row.classList.toggle('open',abrir);
       document.querySelectorAll('#'+bodyId+' .'+row.dataset.g2).forEach(r=>r.classList.toggle('show',abrir));
+    };
+  });
+}
+// Toggle de varios niveles del Detalle (C2 -> C3 -> C4 ...): abrir muestra
+// solo los hijos directos (data-p); cerrar oculta y cierra todo el subarbol
+// (cada fila lleva la clase de todos sus ancestros), para que la siguiente
+// expansion arranque siempre colapsada.
+function bindArbolToggle(bodyId){
+  document.querySelectorAll('#'+bodyId+' .c2exp').forEach(row=>{
+    row.onclick=e=>{ if(e.target.classList.contains('catclick'))return;
+      const abrir=!row.classList.contains('open');
+      const g=row.dataset.g2;
+      row.classList.toggle('open',abrir);
+      if(abrir) document.querySelectorAll('#'+bodyId+' [data-p="'+g+'"]').forEach(r=>r.classList.add('show'));
+      else document.querySelectorAll('#'+bodyId+' .'+g).forEach(r=>{ r.classList.remove('show'); r.classList.remove('open'); });
     };
   });
 }
