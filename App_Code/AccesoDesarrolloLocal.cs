@@ -30,13 +30,15 @@
 //   3. El proceso es IIS Express. En la VM el sitio corre en IIS (w3wp.exe):
 //      aunque alguien dejara debug="true" en su Web.config y abriera el
 //      sitio desde la propia VM (o hubiera un proxy local), aqui no entra.
-//   3b. (2026-10-28) La cadena de conexion del sitio (TicketsProactivanet)
-//      apunta EXACTAMENTE a la base desechable de desarrollo: servidor
-//      (localdb)\MSSQLLocalDB y base GestionAdminPrueba_Dev, leidas con
+//   3b. (2026-10-28; QA desde 2026-10-29, BasePermitida) La cadena de
+//      conexion del sitio (TicketsProactivanet) apunta EXACTAMENTE a la base
+//      desechable de desarrollo ((localdb)\MSSQLLocalDB / GestionAdminPrueba_Dev)
+//      o a la de QA (AZVMBDCENTRALQA / Tickets_Proactivanet: el localhost y
+//      el IIS Express de la VM trabajan contra QA), leidas con
 //      SqlConnectionStringBuilder (el mismo parser que usa SqlConnection:
 //      sinonimos como Address/Addr y claves repetidas se resuelven igual que
 //      al conectar). Sin AttachDBFilename ni Failover Partner. Otro servidor
-//      (QA, localhost, una instancia compartida de LocalDB), otra base
+//      (produccion, localhost, una instancia compartida de LocalDB), otra base
 //      (aunque empiece igual), cadena ausente o que no se puede leer: no hay
 //      atajo. Asi la cuenta de desarrollo nunca firma en una base
 //      compartida (BaseLocalDesechable).
@@ -80,6 +82,8 @@ public static class AccesoDesarrolloLocal
     // La unica base en la que el atajo puede firmar (3b).
     public const string ServidorDesarrollo = @"(localdb)\MSSQLLocalDB";
     public const string BaseDesarrollo = "GestionAdminPrueba_Dev";
+    public const string ServidorQa = "AZVMBDCENTRALQA";
+    public const string BaseQa = "Tickets_Proactivanet";
 
 #if DEBUG
     public const bool CompiladoEnDebug = true;
@@ -115,6 +119,26 @@ public static class AccesoDesarrolloLocal
             && string.Equals((b.InitialCatalog ?? string.Empty).Trim(), BaseDesarrollo, StringComparison.OrdinalIgnoreCase)
             && string.IsNullOrEmpty(b.AttachDBFilename)
             && string.IsNullOrEmpty(b.FailoverPartner);
+    }
+
+    // La base de QA (3b), con las mismas reglas que BaseLocalDesechable:
+    // exactamente ServidorQa / BaseQa, sin AttachDBFilename ni Failover Partner.
+    public static bool BaseQaExacta(string cadena)
+    {
+        if (string.IsNullOrWhiteSpace(cadena)) return false;
+        SqlConnectionStringBuilder b;
+        try { b = new SqlConnectionStringBuilder(cadena); }
+        catch { return false; }
+        return string.Equals((b.DataSource ?? string.Empty).Trim(), ServidorQa, StringComparison.OrdinalIgnoreCase)
+            && string.Equals((b.InitialCatalog ?? string.Empty).Trim(), BaseQa, StringComparison.OrdinalIgnoreCase)
+            && string.IsNullOrEmpty(b.AttachDBFilename)
+            && string.IsNullOrEmpty(b.FailoverPartner);
+    }
+
+    // 3b completo: la desechable de desarrollo o la de QA. Nada mas.
+    public static bool BasePermitida(string cadena)
+    {
+        return BaseLocalDesechable(cadena) || BaseQaExacta(cadena);
     }
 
     // La regla completa (1-5), sin HttpContext: el rol de desarrollo (ADM o
@@ -167,7 +191,7 @@ public static class AccesoDesarrolloLocal
         try { local = ctx.Request.IsLocal; }
         catch { local = false; }
         if (!Evaluar(true, true, local, Proceso.Value)) return null;
-        if (!BaseLocalDesechable(CadenaSitio())) return null;
+        if (!BasePermitida(CadenaSitio())) return null;
         var id =IdentidadPara(IdentidadWindows.DesdeContexto(ctx), Entorno(VariableIdentidad));
         var rol = RolPara(true, id, AccesoAdmin.Configurada(), Entorno(VariableRol));
         if (rol != null) cuenta = id;

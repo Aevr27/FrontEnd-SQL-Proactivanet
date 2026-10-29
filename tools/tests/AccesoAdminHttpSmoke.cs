@@ -699,13 +699,18 @@ public static class AccesoAdminHttpSmoke
             var cuentaLb = AccesoDesarrolloLocal.IdentidadPara(IdentidadWindows.Desde(null, false), @"SORIANA\t_andresvr");
             Func<bool, bool, bool, string, string, string> regla = delegate (bool hab, bool dbg, bool loc, string proc, string cad)
             {
-                var entorno = AccesoDesarrolloLocal.Evaluar(hab, dbg, loc, proc) && AccesoDesarrolloLocal.BaseLocalDesechable(cad);
+                var entorno = AccesoDesarrolloLocal.Evaluar(hab, dbg, loc, proc) && AccesoDesarrolloLocal.BasePermitida(cad);
                 return AccesoDesarrolloLocal.RolPara(entorno, cuentaLb, listaLb, null);
             };
             Check("LB3 todo valido (interruptor, DEBUG, local, IIS Express, LocalDB de desarrollo): ADM", "ADM", regla(true, true, true, EXP, DEV));
             Check("LB3 interruptor apagado: sin atajo", null, regla(false, true, true, EXP, DEV));
             Check("LB3 debug=false: sin atajo", null, regla(true, false, true, EXP, DEV));
-            Check("LB3 cadena a QA: sin atajo", null, regla(true, true, true, EXP, @"Server=AZVMBDCENTRALQA;Database=Tickets_Proactivanet;Integrated Security=True"));
+            Check("LB3 cadena a QA (2026-10-29): ADM", "ADM", regla(true, true, true, EXP, @"Server=AZVMBDCENTRALQA;Database=Tickets_Proactivanet;User ID=x;Password=y;Encrypt=True"));
+            Check("LB3 QA con otra base: sin atajo", null, regla(true, true, true, EXP, @"Server=AZVMBDCENTRALQA;Database=OtraBase;Integrated Security=True"));
+            Check("LB3 otro servidor con la base de QA: sin atajo", null, regla(true, true, true, EXP, @"Server=SRVPRODUCCION;Database=Tickets_Proactivanet;Integrated Security=True"));
+            Check("LB3 QA con Failover Partner: sin atajo", null, regla(true, true, true, EXP, @"Server=AZVMBDCENTRALQA;Database=Tickets_Proactivanet;Failover Partner=SRVPRODUCCION"));
+            Check("LB3 QA sin el interruptor o no local: sin atajo", "|", regla(false, true, true, EXP, @"Server=AZVMBDCENTRALQA;Database=Tickets_Proactivanet") + "|" +
+                  regla(true, true, false, EXP, @"Server=AZVMBDCENTRALQA;Database=Tickets_Proactivanet"));
             Check("LB3 servidor desconocido con la base de desarrollo: sin atajo", null, regla(true, true, true, EXP, @"Server=SRVCOMPARTIDO;Database=GestionAdminPrueba_Dev;Integrated Security=True"));
             Check("LB3 sin cadena: sin atajo", null, regla(true, true, true, EXP, null));
         }
@@ -716,7 +721,7 @@ public static class AccesoAdminHttpSmoke
             var resolverLb = fuenteLb.Substring(fuenteLb.IndexOf("private static string Resolver(HttpContext ctx, out IdentidadWindows cuenta)"));
             resolverLb = resolverLb.Substring(0, resolverLb.IndexOf("\n    }") + 6);
             var iEnt = resolverLb.IndexOf("Evaluar(true, true, local, Proceso.Value)");
-            var iBase = resolverLb.IndexOf("if (!BaseLocalDesechable(CadenaSitio())) return null;");
+            var iBase = resolverLb.IndexOf("if (!BasePermitida(CadenaSitio())) return null;");
             var iLista = resolverLb.IndexOf("AccesoAdmin.Configurada()");
             Check("LB4 Resolver: entorno < base < whitelist", true, iEnt > 0 && iEnt < iBase && iBase < iLista);
             Check("LB4 la cadena sale de ConnectionStringProvider", true, fuenteLb.Contains("ConnectionStringProvider.TryObtenerCadena(out cadena)"));

@@ -201,7 +201,7 @@ IIS Express no tiene Autenticación de Windows: en local todo request llega anó
 3. `Request.IsLocal`: la dirección de la conexión es de esta máquina. No se lee `Host`, URL, query, cookie, header ni nada del navegador.
 4. El proceso es `iisexpress.exe` (en la VM el sitio corre en `w3wp.exe`).
 5. La cuenta (`ADMIN_DEV_IDENTIDAD`, entorno del proceso que pone `dev-local.cmd`) está en `App_Code/AdminWhitelistTemporal.cs`.
-6. (2026-10-28) La cadena `TicketsProactivanet` del `Web.config` apunta **exactamente** a la base desechable de desarrollo: servidor `(localdb)\MSSQLLocalDB` y base `GestionAdminPrueba_Dev`, sin `AttachDbFilename` ni `Failover Partner` (`AccesoDesarrolloLocal.BaseLocalDesechable`, con `SqlConnectionStringBuilder`). Otro servidor (QA, `localhost`, otra instancia de LocalDB), otra base (aunque empiece igual) o una cadena que no se puede leer: sin atajo. La cuenta de desarrollo nunca firma en una base compartida.
+6. (2026-10-28; QA desde 2026-10-29) La cadena `TicketsProactivanet` del `Web.config` apunta **exactamente** a la base desechable de desarrollo (`(localdb)\MSSQLLocalDB` / `GestionAdminPrueba_Dev`) o a la de QA (`AZVMBDCENTRALQA` / `Tickets_Proactivanet`), sin `AttachDbFilename` ni `Failover Partner` (`AccesoDesarrolloLocal.BasePermitida`, con `SqlConnectionStringBuilder`). Otro servidor (producción, `localhost`, otra instancia de LocalDB), otra base (aunque empiece igual) o una cadena que no se puede leer: sin atajo. Contra QA, lo que se guarda desde localhost queda firmado con la cuenta de desarrollo (`ADMIN_DEV_IDENTIDAD`) y su rol de desarrollo.
 
 Encenderlo en local:
 
@@ -220,7 +220,7 @@ Para apagarlo, quitar la clave (o cualquier valor distinto de `true`) y reinicia
 
 Alcance: solo el rol de Admin del request. No cambia la cadena de conexión ni los permisos SQL (la web sigue con su cuenta de servicio), no salta validaciones de los handlers ni modifica `dbo.UsuariosAdmin` ni el rol de otros usuarios. Con MOD, lo exclusivo de ADM (crear/modificar directo, aplicar o rechazar solicitudes de cambio, aprobar o rechazar Nuevas solicitudes, correos, alta de categoría, dueños) sigue en 403 `RolInsuficiente`. MOD es el rol de consulta de los Product Owner y Service Owner: lee el registro y puede pedir cambios, pero no ve el Subestado (el registro no lo manda) ni puede pedir un cambio de Subestado (422). Crear, modificar y enviar solicitudes los firma (`@Usuario`, bitácora) `AccesoAdmin.IdentidadEscritura`: la identidad Windows real si IIS la trae; si no, y solo con el atajo activo, la cuenta de `ADMIN_DEV_IDENTIDAD` que ya pasó por la whitelist. Nunca algo que mande el navegador. Sin ninguna de las dos: 403 `SinUsuario`.
 
-> Desde 2026-10-28 (condición 6), si el `Web.config` de IIS Express apunta a la base real o a cualquier otra que no sea `(localdb)\MSSQLLocalDB` / `GestionAdminPrueba_Dev`, el atajo no se activa: Admin sigue la regla normal (anónimo → 403). El sitio IIS de la VM (`w3wp.exe`) sigue la regla normal.
+> Desde 2026-10-28 (condición 6; QA permitida desde 2026-10-29), si el `Web.config` de IIS Express apunta a cualquier base que no sea `(localdb)\MSSQLLocalDB` / `GestionAdminPrueba_Dev` ni `AZVMBDCENTRALQA` / `Tickets_Proactivanet`, el atajo no se activa: Admin sigue la regla normal (anónimo → 403). El sitio IIS de la VM (`w3wp.exe`) sigue la regla normal.
 
 Comprobar que en la VM no está activo:
 
