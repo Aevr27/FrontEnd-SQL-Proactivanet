@@ -703,7 +703,7 @@ public sealed class ValidadorGestionAdmin
     // Tope al ESCRIBIR (igual que adm.usp_GestionAdmin_*): viva y con
     // agrupacion de AGRUPADORES, o SIN agrupacion (conservador: una fila sin
     // el dato no se salta el tope).
-    private static bool ConsumeAlEscribir(string estado, string agrup)
+    internal static bool ConsumeAlEscribir(string estado, string agrup)
     {
         return ExperienciaQueries.EstadoVivo(estado)
             && (Limpio(agrup) == null || ExperienciaQueries.ConsumeCapacidad(estado, agrup));
@@ -730,7 +730,7 @@ public sealed class ValidadorGestionAdmin
     // cambio por si solos.
     private static string Normal(string s) { return (s ?? "").Replace("\r\n", "\n"); }
 
-    private static string Llave(string ruta)
+    internal static string Llave(string ruta)
     {
         var l = Limpio(ruta);
         return l == null ? null : l.ToUpperInvariant();
@@ -765,7 +765,7 @@ public sealed class ValidadorGestionAdmin
     // consumen. anterior: el % que la propia iniciativa ya tenia ahi (null =
     // categoria nueva). Bajar o dejar igual nunca se bloquea (ruta ya
     // excedida por datos historicos); subir por encima de lo disponible si.
-    private static string Excede(string ruta, decimal nuevo, decimal? anterior, CapacidadCategoria.Resultado c)
+    internal static string Excede(string ruta, decimal nuevo, decimal? anterior, CapacidadCategoria.Resultado c)
     {
         if (!c.Determinable || nuevo <= c.Disponible) return null;
         if (anterior != null && nuevo <= anterior.Value) return null;
@@ -1182,13 +1182,10 @@ public sealed class ValidadorGestionAdmin
         // iniciativa VIVA con agrupacion de AGRUPADORES. Se revisa toda fila
         // que va a consumir y antes no (ligada, reactivada) o cuyo % sube;
         // bajar o dejar igual nunca se bloquea. Las DEMAS iniciativas son
-        // las que cuentan.
+        // las que cuentan. La regla vive en TopeModificacion (la usa tambien
+        // el envio de "Solicitar cambios").
         var estadoFinal = cambiaEstado ? Limpio(p.Estado) : actual.Estado;
-        var vivoFinal = ExperienciaQueries.EstadoVivo(estadoFinal);
-        var otras = new List<CapacidadCategoria.Compromiso>();
-        foreach (var c in compromisos ?? new CapacidadCategoria.Compromiso[0])
-            if (!string.Equals(c.Folio, actual.Folio, StringComparison.OrdinalIgnoreCase)) otras.Add(c);
-        var capacidad = new CapacidadCategoria(otras);
+        var tope = new TopeModificacion(actual, compromisos, estadoFinal);
 
         var quitar = new HashSet<string>(StringComparer.Ordinal);
         foreach (var q in p.Quitar)
@@ -1204,7 +1201,6 @@ public sealed class ValidadorGestionAdmin
         // Agrupacion declarada ahora para una ligada que no la tenia.
         var agrupDeclarada = new Dictionary<string, string>(StringComparer.Ordinal);
         var quedaSinPct = false;
-        var revisadas = new HashSet<string>(StringComparer.Ordinal);
         foreach (var x in p.Pcts)
         {
             var ruta = Limpio(x.Categoria);
@@ -1238,14 +1234,8 @@ public sealed class ValidadorGestionAdmin
             if (nuevo != ligada.Pct)
                 r.Cambio("pct", "% Disminuci\u00f3n \u00b7 " + ligada.Ruta, ComoPct(ligada.Pct), ComoPct(nuevo));
             var agrupFinal = agrupDeclarada.ContainsKey(Llave(ligada.Ruta)) ? agrupDeclarada[Llave(ligada.Ruta)] : ligada.Agrup;
-            var consumiaAntes = ConsumeAlEscribir(actual.Estado, ligada.Agrup);
-            if (nuevo != null && vivoFinal && ConsumeAlEscribir(estadoFinal, agrupFinal)
-                && (nuevo != ligada.Pct || !consumiaAntes))
-            {
-                revisadas.Add(Llave(ligada.Ruta));
-                var motivo = Excede(ligada.Ruta, nuevo.Value, consumiaAntes ? ligada.Pct : null, capacidad.Para(ligada.Ruta));
-                if (motivo != null) r.Agregar("pct", motivo);
-            }
+            var motivo = tope.Ligada(ligada, nuevo, agrupFinal);
+            if (motivo != null) r.Agregar("pct", motivo);
         }
 
         var agregadas = 0;
@@ -1282,30 +1272,15 @@ public sealed class ValidadorGestionAdmin
             agregadas++;
             r.Cambio("agregar_categoria", "Agregar categor\u00eda", "", ruta + (fr == null ? " (sin %)" : " \u00b7 " + ComoPct(fr) + "%") +
                 (ta != null ? " \u00b7 " + ta : ""));
-            if (fr != null && vivoFinal && ConsumeAlEscribir(estadoFinal, ta))
-            {
-                var motivo = Excede(ruta, fr.Value, null, capacidad.Para(ruta));
-                if (motivo != null) r.Agregar(CCategorias, motivo);
-            }
+            var motivoAgregar = tope.Agregada(ruta, fr, ta);
+            if (motivoAgregar != null) r.Agregar(CCategorias, motivoAgregar);
         }
 
         // Reactivada (o con agrupacion recien declarada): las ligadas que
         // pasan a consumir sin que su % cambie tambien se revisan.
         var tocaCapacidad = cambiaEstado || p.Pcts.Count > 0 || p.Agregar.Count > 0;
-        if (tocaCapacidad && vivoFinal)
-        {
-            foreach (var c in actual.Categorias)
-            {
-                if (quitar.Contains(Llave(c.Ruta)) || revisadas.Contains(Llave(c.Ruta))) continue;
-                var agrupFinal = agrupDeclarada.ContainsKey(Llave(c.Ruta)) ? agrupDeclarada[Llave(c.Ruta)] : c.Agrup;
-                if (c.Pct == null || c.Pct.Value <= 0) continue;
-                if (ConsumeAlEscribir(estadoFinal, agrupFinal) && !ConsumeAlEscribir(actual.Estado, c.Agrup))
-                {
-                    var motivo = Excede(c.Ruta, c.Pct.Value, null, capacidad.Para(c.Ruta));
-                    if (motivo != null) r.Agregar(CCategorias, motivo);
-                }
-            }
-        }
+        if (tocaCapacidad)
+            foreach (var motivo in tope.Reactivadas(quitar, agrupDeclarada)) r.Agregar(CCategorias, motivo);
 
         if (r.Valida && r.Cambios.Count == 0) r.Agregar(null, "No hay cambios que guardar.");
 
@@ -1332,5 +1307,81 @@ public sealed class ValidadorGestionAdmin
         }
         else if (sinPct) r.Falta("pct", "% Disminuci\u00f3n");
         return r;
+    }
+}
+
+// ---------------------------------------------------------------------
+// TOPE DE 100% POR RUTA AL MODIFICAR UNA INICIATIVA: la parte de capacidad
+// de ValidadorGestionAdmin.Modificar, aparte para que el ENVIO de "Solicitar
+// cambios" (SolicitudesCambio.ErroresCapacidad) revise con LA MISMA regla
+// que la aplicacion de ADM, sin copiarla. Una instancia por validacion:
+//
+//   new TopeModificacion(actual, compromisos, estadoFinal)
+//       compromisos: los de ExperienciaQueries.CompromisosCapacidad; los de
+//       la propia iniciativa (actual.Folio) no cuentan contra ella.
+//       estadoFinal: el Estado con el que quedaria (el pedido o el actual).
+//   Ligada(ligada, nuevo, agrupFinal)   % pedido para una ligada: se revisa
+//       si va a consumir y su % cambia o antes no consumia; bajar o dejar
+//       igual el % de una que ya consumia nunca se bloquea.
+//   Agregada(ruta, fr, ta)              categoria nueva con su % y su
+//       Agrupacion (null = sin declarar: consume, conservador).
+//   Reactivadas(quitar, agrupDeclarada) las ligadas no revisadas arriba que
+//       pasan a consumir (reactivada o agrupacion recien declarada) con su %
+//       actual. Llaves: ValidadorGestionAdmin.Llave.
+// Cada una -> el motivo (Excede) o null / la lista de motivos. Sin SQL.
+// ---------------------------------------------------------------------
+public sealed class TopeModificacion
+{
+    private readonly IniciativaActual actual;
+    private readonly string estadoFinal;
+    private readonly bool vivoFinal;
+    private readonly CapacidadCategoria capacidad;
+    private readonly HashSet<string> revisadas = new HashSet<string>(StringComparer.Ordinal);
+
+    public TopeModificacion(IniciativaActual actual, IEnumerable<CapacidadCategoria.Compromiso> compromisos, string estadoFinal)
+    {
+        if (actual == null) throw new ArgumentNullException("actual");
+        this.actual = actual;
+        this.estadoFinal = estadoFinal;
+        vivoFinal = ExperienciaQueries.EstadoVivo(estadoFinal);
+        var otras = new List<CapacidadCategoria.Compromiso>();
+        foreach (var c in compromisos ?? new CapacidadCategoria.Compromiso[0])
+            if (!string.Equals(c.Folio, actual.Folio, StringComparison.OrdinalIgnoreCase)) otras.Add(c);
+        capacidad = new CapacidadCategoria(otras);
+    }
+
+    public string Ligada(IniciativaActual.Categoria ligada, decimal? nuevo, string agrupFinal)
+    {
+        var consumiaAntes = ValidadorGestionAdmin.ConsumeAlEscribir(actual.Estado, ligada.Agrup);
+        if (nuevo == null || !vivoFinal || !ValidadorGestionAdmin.ConsumeAlEscribir(estadoFinal, agrupFinal)
+            || (nuevo == ligada.Pct && consumiaAntes))
+            return null;
+        revisadas.Add(ValidadorGestionAdmin.Llave(ligada.Ruta));
+        return ValidadorGestionAdmin.Excede(ligada.Ruta, nuevo.Value, consumiaAntes ? ligada.Pct : null, capacidad.Para(ligada.Ruta));
+    }
+
+    public string Agregada(string ruta, decimal? fr, string ta)
+    {
+        if (fr == null || !vivoFinal || !ValidadorGestionAdmin.ConsumeAlEscribir(estadoFinal, ta)) return null;
+        return ValidadorGestionAdmin.Excede(ruta, fr.Value, null, capacidad.Para(ruta));
+    }
+
+    public List<string> Reactivadas(ICollection<string> quitar, IDictionary<string, string> agrupDeclarada)
+    {
+        var motivos = new List<string>();
+        if (!vivoFinal) return motivos;
+        foreach (var c in actual.Categorias)
+        {
+            var llave = ValidadorGestionAdmin.Llave(c.Ruta);
+            if ((quitar != null && quitar.Contains(llave)) || revisadas.Contains(llave)) continue;
+            var agrupFinal = agrupDeclarada != null && agrupDeclarada.ContainsKey(llave) ? agrupDeclarada[llave] : c.Agrup;
+            if (c.Pct == null || c.Pct.Value <= 0) continue;
+            if (ValidadorGestionAdmin.ConsumeAlEscribir(estadoFinal, agrupFinal) && !ValidadorGestionAdmin.ConsumeAlEscribir(actual.Estado, c.Agrup))
+            {
+                var motivo = ValidadorGestionAdmin.Excede(c.Ruta, c.Pct.Value, null, capacidad.Para(c.Ruta));
+                if (motivo != null) motivos.Add(motivo);
+            }
+        }
+        return motivos;
     }
 }

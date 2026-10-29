@@ -24,6 +24,9 @@
 //        Aplicar la aplica entera o nada (adm.usp_SolicitudCambio_Aplicar).
 //        -> 200 { enviada: true, id_solicitud, repetida }
 //           422 { errores } formato;  4xx de la base (ErrorSolicitudCambio)
+//           422 { errores, tipo: CapacidadExcedida } tope de 100% por
+//               categoria (categorias / estado / varios; la regla de aplicar)
+//           503 { tipo: CapacidadNoDisponible } sin poder leer la capacidad
 //           501 { tipo: PersistenciaNoHabilitada } sin sql/22: nada se guarda
 //           500 { tipo: EnvioNoConfirmado, enviada: null } (no se sabe)
 //        NUNCA escribe la iniciativa.
@@ -164,6 +167,33 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             context.Response.StatusCode = 422;
             context.Response.TrySkipIisCustomErrors = true;
             return new Dictionary<string, object> { { "errores", Errores(p.Errores) }, { "tipo", "ValidacionFallida" }, { "enviada", false } };
+        }
+        // Tope de 100% por categoria (categorias, Estado y varios): la MISMA
+        // regla que al aplicar (SolicitudesCambio.ErroresCapacidad), antes de
+        // guardar. Sin poder leer la capacidad no se envia (503).
+        if (SolicitudesCambio.RevisaCapacidad(p))
+        {
+            List<string> motivos;
+            try { motivos = SolicitudesCambio.ErroresCapacidad(p, SolicitudesCambio.LeerCapacidad(p.Folio)); }
+            catch (Exception ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex);
+                context.Response.StatusCode = 503;
+                context.Response.TrySkipIisCustomErrors = true;
+                return new Dictionary<string, object>
+                {
+                    { "error", "No se pudo revisar la capacidad de las categor\u00edas (tope de 100%): no se envi\u00f3 la solicitud. Int\u00e9ntalo de nuevo." },
+                    { "tipo", "CapacidadNoDisponible" }, { "enviada", false },
+                };
+            }
+            if (motivos.Count > 0)
+            {
+                context.Response.StatusCode = 422;
+                context.Response.TrySkipIisCustomErrors = true;
+                var errores = new List<object>();
+                foreach (var m in motivos) errores.Add(new Dictionary<string, object> { { "campo", "categoria" }, { "mensaje", m } });
+                return new Dictionary<string, object> { { "errores", errores }, { "tipo", "CapacidadExcedida" }, { "enviada", false } };
+            }
         }
         if (!PersistenciaSolicitudesCambio.Activa())
         {

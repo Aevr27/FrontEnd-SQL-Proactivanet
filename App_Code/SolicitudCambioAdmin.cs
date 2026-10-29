@@ -12,6 +12,10 @@
 //   - Quien envia, su rol y quien revisa los pone el servidor
 //     (IdentidadWindows / AccesoAdmin); lo que mande el navegador con esos
 //     nombres se ignora.
+//   - Enviar revisa el tope de 100% por categoria con la regla de aplicar
+//     (SolicitudesCambio.ErroresCapacidad -> TopeModificacion) antes de
+//     guardar: lo que no cabe ni se guarda (422); sin poder leer la
+//     capacidad, 503.
 //   - Enviar nunca escribe la iniciativa. Aplicar la escribe por el mismo
 //     adm.usp_GestionAdmin_Modificar que la edicion directa, en una
 //     transaccion, solo si lo "anterior" guardado sigue siendo lo que hay.
@@ -867,6 +871,82 @@ public static class SolicitudesCambio
         catch (Exception ex) { DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex); }
         foreach (Dictionary<string, object> c in lista)
             c["otras_iniciativas"] = cap == null ? null : (object)cap.Otras(c["categoria"] as string, folio);
+    }
+
+    // ENVIO: el tope de 100% por categoria con LA MISMA regla que aplicar
+    // (TopeModificacion, la de ValidadorGestionAdmin.Modificar), para que lo
+    // que se guarda ya quepa. Lo que se lee para revisarlo:
+    //   Actual       la iniciativa de la MISMA lectura del registro que usa
+    //                Modificar (null = no esta en el registro vigente)
+    //   Compromisos  ExperienciaQueries.CompromisosCapacidad
+    // Si una lectura falla, la excepcion sube: el handler responde 503 y no
+    // envia nada. Solo lectura. Las pruebas la cambian por una falsa.
+    public sealed class DatosCapacidad
+    {
+        public IniciativaActual Actual;
+        public List<CapacidadCategoria.Compromiso> Compromisos = new List<CapacidadCategoria.Compromiso>();
+    }
+    public static Func<string, DatosCapacidad> LeerCapacidad = LeerCapacidadEnvio;
+
+    // Solo los tipos que pueden tocar la capacidad: categorias (pedir % o
+    // agregar), Estado (reactivar) y varios.
+    public static bool RevisaCapacidad(PeticionSolicitudCambio p)
+    {
+        return p != null && (p.Tipo == "CATEGORIAS" || p.Tipo == "ESTADO" || p.Tipo == "VARIOS");
+    }
+
+    // La solicitud como la veria Modificar al aplicarla (SolicitudesCambio
+    // .ComoModificar): Estado final = el pedido o el actual; cada % pedido
+    // de una ligada, cada categoria por agregar con la Agrupacion de su
+    // prefijo (sin regla = sin declarar: consume) y las ligadas que pasan a
+    // consumir al reactivar. Lo que no es de esa forma (una ruta que no esta
+    // ligada, una por agregar que ya lo esta, la iniciativa fuera del
+    // registro) lo rechaza la validacion de aplicar con su propio mensaje:
+    // aqui no se inventa otro. -> los motivos (vacia = cabe).
+    public static List<string> ErroresCapacidad(PeticionSolicitudCambio p, DatosCapacidad d)
+    {
+        var motivos = new List<string>();
+        if (!RevisaCapacidad(p) || d == null || d.Actual == null) return motivos;
+        var actual = d.Actual;
+        var estadoNuevo = string.IsNullOrWhiteSpace(p.EstadoNuevo) ? null : p.EstadoNuevo.Trim();
+        var tope = new TopeModificacion(actual, d.Compromisos, estadoNuevo ?? actual.Estado);
+        foreach (var c in p.Categorias.Where(x => x.Accion == "PCT"))
+        {
+            var ligada = actual.Ligada(c.Categoria);
+            if (ligada == null) continue;
+            var motivo = tope.Ligada(ligada, c.Pct, ligada.Agrup);
+            if (motivo != null) motivos.Add(motivo);
+        }
+        foreach (var c in p.Categorias.Where(x => x.Accion == "AGREGAR"))
+        {
+            if (actual.Ligada(c.Categoria) != null) continue;
+            var motivo = tope.Agregada(c.Categoria, c.Pct, c.TipoAgrupado);
+            if (motivo != null) motivos.Add(motivo);
+        }
+        motivos.AddRange(tope.Reactivadas(null, null));
+        return motivos;
+    }
+
+    private static DatosCapacidad LeerCapacidadEnvio(string folio)
+    {
+        var d = new DatosCapacidad();
+        var registro = ExperienciaQueries.RegistroIniciativas();
+        var iniciativas = registro == null ? null : registro["iniciativas"] as List<object>;
+        if (iniciativas == null) throw new InvalidOperationException("El registro de iniciativas no trae la lista de iniciativas.");
+        foreach (Dictionary<string, object> i in iniciativas)
+        {
+            if (string.Equals(i["folio"] as string, (folio ?? "").Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                d.Actual = IniciativaActual.DesdeRegistro(i);
+                break;
+            }
+        }
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            d.Compromisos = ExperienciaQueries.CompromisosCapacidad(cn);
+        }
+        return d;
     }
 
     private static string[] LeerDuenosCapturados(string folio)

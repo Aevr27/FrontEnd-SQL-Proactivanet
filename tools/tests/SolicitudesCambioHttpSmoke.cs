@@ -159,6 +159,19 @@ public static class SolicitudesCambioHttpSmoke
             if (!validacionOk) v.Errores.Add(new ErrorCampo { Campo = "pct", Mensaje = "/A/Cat 1: rebasa el 100% de la categoria." });
             return v;
         };
+        // Tope al enviar, sin SQL: la iniciativa y los compromisos por folio
+        // (sin dato = fuera del registro: no hay que revisar). Los casos C)
+        // los llenan; lo de antes no los necesita.
+        var capacidades = new Dictionary<string, SolicitudesCambio.DatosCapacidad>(StringComparer.OrdinalIgnoreCase);
+        var leidasCapacidad = 0;
+        var capacidadFalla = false;
+        SolicitudesCambio.LeerCapacidad = delegate (string folio)
+        {
+            leidasCapacidad++;
+            if (capacidadFalla) throw new InvalidOperationException("sin conexion");
+            SolicitudesCambio.DatosCapacidad dc;
+            return capacidades.TryGetValue(folio ?? "", out dc) ? dc : new SolicitudesCambio.DatosCapacidad();
+        };
         int estado; string cuerpo;
         var envioValido = F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "estado", "estado_nuevo", "En Monitoreo",
                             "campo_fecha", "f_solucion", "fecha_nueva", "2026-12-05", "motivo", "Pasa a monitoreo",
@@ -625,6 +638,140 @@ public static class SolicitudesCambioHttpSmoke
             finally { PersistenciaGestionAdmin.ModificaDuenosYQuitaForzadaParaPruebas = null; }
         }
         finally { PersistenciaSolicitudesCambio.SolicitaDatosForzadaParaPruebas = null; }
+
+        // ---- C) tope de 100% por categoria AL ENVIAR ----------------------------
+        // La regla de aplicar (TopeModificacion). /T/Cat 1: otras activas 34% +
+        // 11.12% = 45.12% (una que no consume no cuenta; la fila de la propia
+        // tampoco): cabe hasta 54.88%. /T/Hist: otras 90% (ya excedida con el
+        // 30% propio). /T/Req: la propia es ReqOpr (no consume).
+        Func<string, string, decimal, bool, CapacidadCategoria.Compromiso> Comp = (folio, ruta, pctC, consume) =>
+            new CapacidadCategoria.Compromiso { Folio = folio, Categoria = ruta, Pct = pctC, Consume = consume, Estado = "En Solución" };
+        Func<string, string, object[][], IniciativaActual> Ini = (folio, est, cats) => IniciativaActual.DesdeRegistro(new Dictionary<string, object>
+        {
+            { "folio", folio }, { "titulo", "T" }, { "estado", est }, { "po_capturado", "PO 1" }, { "so_capturado", "SO x" }, { "sin_categoria", false },
+            { "categorias", cats.Select(c => (object)new Dictionary<string, object> { { "categoria", c[0] }, { "pct_dism", c[1] }, { "agrup", c[2] } }).ToList() },
+        });
+        var compromisos = new List<CapacidadCategoria.Compromiso>
+        {
+            Comp("PRB 2026-000101", "/T/Cat 1", 0.20m, true),     // la propia: no cuenta contra ella
+            Comp("PRB 2026-000102", "/T/Cat 1", 0.34m, true),
+            Comp("PRB 2026-000103", "/T/Cat 1", 0.1112m, true),
+            Comp("PRB 2026-000104", "/T/Cat 1", 0.50m, false),    // cerrada / sin agrupador: no cuenta
+            Comp("PRB 2026-000102", "/T/Hist", 0.90m, true),
+            Comp("PRB 2026-000102", "/T/Req", 0.95m, true),
+            Comp("PRB 2026-000102", "/A/Cat 2", 0.60m, true),
+        };
+        capacidades["PRB 2026-000101"] = new SolicitudesCambio.DatosCapacidad
+        {
+            Actual = Ini("PRB 2026-000101", "En Solución", new[] { new object[] { "/T/Cat 1", 0.2, "Problem" }, new object[] { "/T/Hist", 0.3, "Problem" },
+                                                                    new object[] { "/T/Req", 0.1, "ReqOpr" } }),
+            Compromisos = compromisos,
+        };
+        capacidades["PRB 2026-000105"] = new SolicitudesCambio.DatosCapacidad
+        {
+            Actual = Ini("PRB 2026-000105", "Detenido", new[] { new object[] { "/T/Cat 1", 0.6, "Problem" } }), Compromisos = compromisos,
+        };
+        capacidades["PRB 2026-000001"] = new SolicitudesCambio.DatosCapacidad
+        {
+            Actual = Ini("PRB 2026-000001", "En Solución", new[] { new object[] { "/A/Cat 1", 0.3, "Problem" } }), Compromisos = compromisos,
+        };
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
+        PersistenciaSolicitudesCambio.SolicitaVariosForzadaParaPruebas = true;
+        try
+        {
+            Func<string, string[][]> Pct = v => F("folio", "PRB 2026-000101", "llave", Guid.NewGuid().ToString(), "tipo", "categorias", "motivo", "m",
+                                                "pct_categoria", "/T/Cat 1", "pct_valor", v);
+            Func<string> Res = () => estado + "|" + cuerpo.Contains("CapacidadExcedida") + "|" + alm.Llamadas.Count(x => x == "Enviar");
+
+            alm.Llamadas.Clear(); leidasCapacidad = 0;
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54.88"), out estado);
+            Check("C1 dentro del tope (54.88 = 100 - 34 - 11.12; el 20% propio no se suma, el pedido lo reemplaza): 200, se guarda, se leyo la capacidad",
+                  "200|False|1|1", Res() + "|" + leidasCapacidad);
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54.89"), out estado);
+            Check("C2 54.89: 422 CapacidadExcedida, enviada false, NO se guarda", "422|True|0|True", Res() + "|" + cuerpo.Contains("\"enviada\":false"));
+            Check("C2 ... mensaje accionable con el disponible, campo categoria", "True|True",
+                  cuerpo.Contains("/T/Cat 1: solo tiene 54.88% disponible sin contar esta iniciativa") + "|" + cuerpo.Contains("\"campo\":\"categoria\""));
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("100"), out estado);
+            Check("C3 100%: 422, no se guarda", "422|True|0", Res());
+
+            // Misma regla y mismo mensaje que aplicar (ValidadorGestionAdmin.Modificar).
+            var fmTope = new NameValueCollection { { "accion", "modificar" }, { PeticionModificarAdmin.CFolio, "PRB 2026-000101" },
+                                               { PeticionModificarAdmin.CPctCategoria, "/T/Cat 1" }, { PeticionModificarAdmin.CPctValor, "54.89" } };
+            var alAplicar = new ValidadorGestionAdmin().Modificar(PeticionModificarAdmin.DesdeFormulario(fmTope), capacidades["PRB 2026-000101"].Actual, compromisos);
+            var alEnviar = SolicitudesCambio.ErroresCapacidad(PeticionSolicitudCambio.DesdeFormulario(new NameValueCollection
+                { { "folio", "PRB 2026-000101" }, { "llave", Llave }, { "tipo", "categorias" }, { "motivo", "m" },
+                  { "pct_categoria", "/T/Cat 1" }, { "pct_valor", "54.89" } }), capacidades["PRB 2026-000101"]);
+            Check("C4 el envio y aplicar dan el MISMO motivo", "True|" + string.Join(" ", alEnviar.ToArray()),
+                  (!alAplicar.Valida) + "|" + string.Join(" ", alAplicar.Errores.Where(x => x.Campo == "pct").Select(x => x.Mensaje).ToArray()));
+
+            foreach (var caso in new[] { new[] { "25", "200|False|1" }, new[] { "30", "200|False|1" }, new[] { "31", "422|True|0" } })
+            {
+                alm.Llamadas.Clear();
+                cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000101", "llave", Guid.NewGuid().ToString(), "tipo", "categorias", "motivo", "m",
+                    "pct_categoria", "/T/Hist", "pct_valor", caso[0]), out estado);
+                Check("C5 ruta ya excedida (90% otras + 30% propio): " + caso[0] + "% -> " + caso[1] + " (bajar o dejar igual si; subir no)", caso[1], Res());
+            }
+            Check("C5 ... el mensaje da lo disponible (10%) sin contar el 30% propio", true, cuerpo.Contains("/T/Hist: solo tiene 10% disponible sin contar esta iniciativa"));
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000101", "llave", Guid.NewGuid().ToString(), "tipo", "categorias", "motivo", "m",
+                "pct_categoria", "/T/Req", "pct_valor", "100"), out estado);
+            Check("C6 fila ReqOpr (no consume): sin tope, 200", "200|False|1", Res());
+
+            // Por agregar: la Agrupacion del prefijo (PRB -> Problem) consume.
+            foreach (var caso in new[] { new[] { "40", "200|False|1" }, new[] { "40.01", "422|True|0" } })
+            {
+                alm.Llamadas.Clear();
+                cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Guid.NewGuid().ToString(), "tipo", "categorias", "motivo", "m",
+                    "agregar_categoria", "/A/Cat 2", "agregar_pct", caso[0]), out estado);
+                Check("C7 agregar /A/Cat 2 (otras 60%): " + caso[0] + "% -> " + caso[1], caso[1], Res());
+            }
+
+            // Estado: reactivar cuenta el % actual de sus ligadas.
+            Func<string, string, string[][]> Est = (folio, en) => F("folio", folio, "llave", Guid.NewGuid().ToString(), "tipo", "estado", "estado_nuevo", en, "motivo", "m");
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, Est("PRB 2026-000105", "En Análisis"), out estado);
+            Check("C8 Detenido -> En Analisis con 60% en /T/Cat 1 (otras 65.12%, aqui la 000101 tambien es otra): 422, no se guarda", "422|True|0|True",
+                  Res() + "|" + cuerpo.Contains("solo tiene 34.88% disponible"));
+            cuerpo = Correr("POST", "accion=enviar", MOD, Est("PRB 2026-000105", "Cerrado"), out estado);
+            Check("C9 Detenido -> Cerrado (no vivo): sin tope, 200", "200|False|1", Res());
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, Est("PRB 2026-000101", "En Monitoreo"), out estado);
+            Check("C10 Estado vivo -> vivo sin categorias: nada que reactivar, 200", "200|False|1", Res());
+
+            // Varios: el Estado final de la MISMA solicitud decide.
+            Func<string, string, string[][]> Var = (en, v) => F("folio", "PRB 2026-000101", "llave", Guid.NewGuid().ToString(), "tipo", "varios", "motivo", "m",
+                "estado_nuevo", en, "pct_categoria", "/T/Cat 1", "pct_valor", v);
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, Var("En Monitoreo", "100"), out estado);
+            Check("C11 varios (Estado vivo + 100% en /T/Cat 1): 422, no se guarda", "422|True|0", Res());
+            cuerpo = Correr("POST", "accion=enviar", MOD, Var("Cerrado", "100"), out estado);
+            Check("C12 varios (Cerrado + 100%): la iniciativa deja de consumir, 200", "200|False|1", Res());
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000105", "llave", Guid.NewGuid().ToString(), "tipo", "varios", "motivo", "m",
+                "estado_nuevo", "En Solución", "f_cierre_nueva", "2026-12-31"), out estado);
+            Check("C13 varios que reactiva (con una fecha): 422, no se guarda", "422|True|0", Res());
+
+            // Sin poder leer la capacidad: 503, nada se guarda.
+            capacidadFalla = true;
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("10"), out estado);
+            Check("C14 lectura de capacidad falla: 503 CapacidadNoDisponible, enviada false, no se guarda", "503|True|True|0",
+                  estado + "|" + cuerpo.Contains("CapacidadNoDisponible") + "|" + cuerpo.Contains("\"enviada\":false") + "|" + alm.Llamadas.Count(x => x == "Enviar"));
+            leidasCapacidad = 0;
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000101", "llave", Guid.NewGuid().ToString(), "tipo", "fecha",
+                "campo_fecha", "f_cierre", "fecha_nueva", "2026-12-31", "motivo", "m"), out estado);
+            Check("C15 fecha (no toca la capacidad): ni la lee, 200 aunque la lectura falle", "200|0", estado + "|" + leidasCapacidad);
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("101"), out estado);
+            Check("C16 formato invalido: 422 ValidacionFallida antes de leer la capacidad", "422|True|0",
+                  estado + "|" + cuerpo.Contains("ValidacionFallida") + "|" + leidasCapacidad);
+            capacidadFalla = false;
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.SolicitaVariosForzadaParaPruebas = null;
+        }
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : "FALLOS: " + fallos);
         return fallos == 0 ? 0 : 1;
