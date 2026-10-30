@@ -114,7 +114,8 @@ public class AdminIniciativasCatalogos : IHttpHandler
                     var duenos = CatalogoDuenosCategoria.Armar(filas, dir, CatalogoDuenosCategoria.LeerPersonas(cn));
                     foreach (var kv in duenos) salida[kv.Key] = kv.Value;
                 }
-                context.Response.Write(serializador.Serialize(salida));
+                // gzip si el navegador lo acepta (App_Code/CompresionRespuesta.cs).
+                CompresionRespuesta.EscribirJson(context, serializador.Serialize(salida));
             }
         }
         catch (Exception ex)

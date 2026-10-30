@@ -47,7 +47,7 @@ public sealed class GestionIniciativaAdminService
     {
         var folio = (p.Folio ?? "").Trim();
         IniciativaActual actual = null;
-        var registro = ExperienciaQueries.RegistroIniciativas();
+        var registro = ExperienciaQueries.RegistroIniciativas(folio);
         foreach (Dictionary<string, object> i in (List<object>)registro["iniciativas"])
         {
             if (string.Equals(i["folio"] as string, folio, StringComparison.OrdinalIgnoreCase))

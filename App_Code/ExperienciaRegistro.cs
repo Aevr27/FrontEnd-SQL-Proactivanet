@@ -75,6 +75,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Data;
 using System.Data.SqlClient;
 using System.Globalization;
 
@@ -106,22 +107,139 @@ public static partial class ExperienciaQueries
             // Subestado por folio y los valores de Estado/Subestado que ya
             // existen (Modificar los ofrece; no hay catalogo en la base).
             var estados = LeerEstadosProblem(cn);
-            foreach (Dictionary<string, object> i in (List<object>)salida["iniciativas"])
-            {
-                i["historial"] = historial.Para(i["folio"] as string);
-                i["historial_categorias"] = historial.CategoriasPara(i["folio"] as string);
-                string sub;
-                i["subestado"] = estados.SubestadoPorFolio.TryGetValue(i["folio"] as string ?? "", out sub) ? sub : null;
-            }
             salida["estados_problem"] = Ordenados(estados.Valores.Estados);
             salida["subestados_problem"] = Ordenados(estados.Valores.Subestados);
             salida["valores_tipo_iniciativa"] = Ordenados(estados.Valores.TiposIniciativa);
             salida["valores_tipo_agrupado"] = Ordenados(estados.Valores.TiposAgrupado);
-            salida["historial_estado"] = historial.Estado;
-            salida["historial_desde"] = historial.Desde;
-            salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+            Completar(salida, historial, estados.SubestadoPorFolio, hoy);
             return salida;
         }
+    }
+
+    // UNA iniciativa, para quien la busca por folio (Modificar, el envio de
+    // Solicitar cambios, el acuse): las MISMAS lecturas y el MISMO armado
+    // que RegistroIniciativas(), cada SELECT acotado a "Codigo = @folio".
+    // Antes cada uno de esos tres armaba el registro entero (todas las
+    // iniciativas, sus fechas, historial y estados) para quedarse con una.
+    //
+    // QUE DEVUELVE. La forma del registro, con `iniciativas` de 0 o 1
+    // elemento; esa iniciativa es, campo por campo, la del registro entero
+    // (lo prueba tools/tests/RegistroIniciativaFolioSqlLocalDbSmoke.cs).
+    // Tambien estados_activos, agrupadores, historial_estado,
+    // historial_desde y fecha_gen. NO trae los catalogos del registro
+    // (tipos_iniciativa, estados_problem, subestados_problem,
+    // valores_tipo_iniciativa, valores_tipo_agrupado): son de TODA la tabla y
+    // ninguno de los que busca por folio los lee.
+    //
+    // COMPARACION. El "=" de SQL (Codigo es SQL_Latin1_General_CP1_CI_AS)
+    // no distingue mayusculas y perdona espacios al final: puede traer de
+    // mas, nunca de menos, frente a lo que comparan los que llaman
+    // (OrdinalIgnoreCase u Ordinal sobre i["folio"]), que siguen comparando
+    // igual que antes. Un folio vacio, null o mas largo que la columna
+    // (nvarchar(100)) no puede ser de nadie: sale vacio sin ir a la base.
+    //
+    // SIN dbo.Problem PARA EL FOLIO no hay iniciativa posible (las dos
+    // lecturas lo cruzan con INNER JOIN / FROM): se responde vacio sin leer
+    // el directorio organizacional ni lo demas (y sin historial_estado /
+    // historial_desde, que no se leyeron). Con el, el directorio SI se
+    // lee entero: de el salen po/so/director/manager y el n2 de cada
+    // categoria, y su regla (el primer dueño de cada C1 / N2) depende del
+    // catalogo completo.
+    //
+    // ORDEN. Como en el registro entero, los datos del folio son los de su
+    // PRIMERA fila de dbo.vw_ProblemCategoria, y ese SELECT no lleva ORDER
+    // BY (no se toca aqui). Solo importa si las categorias de un mismo folio
+    // difieren en titulo o agrupacion; en ese caso ninguna de las dos
+    // lecturas garantiza cual sale primero.
+    public static Dictionary<string, object> RegistroIniciativas(string folio)
+    {
+        var hoy = DashboardDataInfo.HoyEnPresentacion();
+        if (string.IsNullOrEmpty(folio) || folio.Length > LARGO_FOLIO)
+            return RegistroSinIniciativas(hoy);
+
+        using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+        {
+            cn.Open();
+            if (!ExisteProblem(cn, folio)) return RegistroSinIniciativas(hoy);
+
+            var detalle = LeerIniciativasDe(cn, hoy, folio);
+            var dir = DirectorioOrganizacional.Cargar(cn);
+            AlinearDuenos(detalle, dir);
+            var sueltas = LeerIniciativasSinCategoriaDe(cn, hoy, dir, folio);
+            var prefijos = DashboardCatalogos.PrefijosPorFolio(cn, folio);
+
+            var salida = ArmarRegistro(detalle, sueltas, dir, prefijos);
+            AplicarFechasPropias(salida, LeerFechasPropiasDe(cn, folio));
+            AplicarDuenosCapturados(salida, LeerDuenosCapturadosDe(cn, folio));
+            Completar(salida, HistorialFechas.LeerDe(cn, folio), LeerSubestadoDe(cn, folio), hoy);
+            return salida;
+        }
+    }
+
+    // dbo.Problem.Codigo / dbo.ProblemCategoria.Codigo: nvarchar(100).
+    private const int LARGO_FOLIO = 100;
+
+    private static void ParametroFolio(SqlCommand cmd, string folio)
+    {
+        cmd.Parameters.Add("@folio", SqlDbType.NVarChar, LARGO_FOLIO).Value = folio;
+    }
+
+    private static bool ExisteProblem(SqlConnection cn, string folio)
+    {
+        using (var cmd = new SqlCommand(
+            "SELECT CASE WHEN EXISTS (SELECT 1 FROM dbo.Problem WHERE Codigo = @folio) THEN 1 ELSE 0 END", cn))
+        {
+            ParametroFolio(cmd, folio);
+            return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+        }
+    }
+
+    private static Dictionary<string, object> RegistroSinIniciativas(DateTime hoy)
+    {
+        var salida = ArmarRegistro(new List<Detalle>(), new List<object>(),
+                                   new DirectorioOrganizacional(new List<DirectorioOrganizacional.Dueno>(),
+                                                                new Dictionary<string, string>()),
+                                   null);
+        salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+        return salida;
+    }
+
+    // Lo que el registro entero y el de un folio cuelgan igual de cada
+    // iniciativa (historial y subestado) y de la respuesta.
+    private static void Completar(Dictionary<string, object> salida, HistorialFechas historial,
+                                  Dictionary<string, string> subestadoPorFolio, DateTime hoy)
+    {
+        foreach (Dictionary<string, object> i in (List<object>)salida["iniciativas"])
+        {
+            i["historial"] = historial.Para(i["folio"] as string);
+            i["historial_categorias"] = historial.CategoriasPara(i["folio"] as string);
+            string sub;
+            i["subestado"] = subestadoPorFolio.TryGetValue(i["folio"] as string ?? "", out sub) ? sub : null;
+        }
+        salida["historial_estado"] = historial.Estado;
+        salida["historial_desde"] = historial.Desde;
+        salida["fecha_gen"] = hoy.ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
+    }
+
+    // El Subestado de LeerEstadosProblem, solo del folio.
+    private static Dictionary<string, string> LeerSubestadoDe(SqlConnection cn, string folio)
+    {
+        var salida = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        using (var cmd = new SqlCommand(
+            "SELECT p.Codigo, LTRIM(RTRIM(p.Subestado)) " +
+            "FROM dbo.Problem AS p WHERE p.VigenteEnOrigen = 1 AND p.Codigo = @folio", cn))
+        {
+            ParametroFolio(cmd, folio);
+            using (var rd = cmd.ExecuteReader())
+            {
+                while (rd.Read())
+                {
+                    var f = Texto(rd.GetValue(0));
+                    if (f != null) salida[f] = Texto(rd.GetValue(1));
+                }
+            }
+        }
+        return salida;
     }
 
     // El Subestado es solo de ADM (2026-10-26): admin_iniciativas_registro
@@ -246,30 +364,41 @@ public static partial class ExperienciaQueries
 
     private static FechasPropias LeerFechasPropias(SqlConnection cn)
     {
+        return LeerFechasPropiasDe(cn, null);
+    }
+
+    // soloFolio null = todas; si no, los dos SELECT acotados a ese Codigo
+    // (RegistroIniciativas(folio)).
+    private static FechasPropias LeerFechasPropiasDe(SqlConnection cn, string soloFolio)
+    {
         var f = new FechasPropias();
+        var filtro = soloFolio == null ? "" : " AND Codigo = @folio";
         bool columnas;
         using (var cmd = new SqlCommand(
             "SELECT CASE WHEN COL_LENGTH(N'dbo.ProblemCategoria', N'FechaAnalisisCategoria') IS NULL THEN 0 ELSE 1 END", cn))
             columnas = Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
-        var sql = "SELECT Codigo, FechaAnalisis FROM dbo.Problem WHERE VigenteEnOrigen = 1;" +
+        var sql = "SELECT Codigo, FechaAnalisis FROM dbo.Problem WHERE VigenteEnOrigen = 1" + filtro + ";" +
             (columnas ? " SELECT Codigo, Categoria, FechaCreacionCategoria, FechaAnalisisCategoria FROM dbo.ProblemCategoria " +
-                        "WHERE VigenteEnOrigen = 1 AND FechaAnalisisCategoria IS NOT NULL;" : "");
+                        "WHERE VigenteEnOrigen = 1 AND FechaAnalisisCategoria IS NOT NULL" + filtro + ";" : "");
         using (var cmd = new SqlCommand(sql, cn))
-        using (var rd = cmd.ExecuteReader())
         {
-            while (rd.Read())
-            {
-                var folio = Texto(rd.GetValue(0));
-                if (folio != null) f.AnalisisIniciativa[folio] = Fecha(rd.GetValue(1));
-            }
-            if (columnas && rd.NextResult())
+            if (soloFolio != null) ParametroFolio(cmd, soloFolio);
+            using (var rd = cmd.ExecuteReader())
             {
                 while (rd.Read())
                 {
                     var folio = Texto(rd.GetValue(0));
-                    var ruta = Normaliza(Texto(rd.GetValue(1)));
-                    if (folio == null || ruta == null) continue;
-                    f.PorCategoria[folio + SEP_FECHAS + ruta] = new[] { Fecha(rd.GetValue(2)), Fecha(rd.GetValue(3)) };
+                    if (folio != null) f.AnalisisIniciativa[folio] = Fecha(rd.GetValue(1));
+                }
+                if (columnas && rd.NextResult())
+                {
+                    while (rd.Read())
+                    {
+                        var folio = Texto(rd.GetValue(0));
+                        var ruta = Normaliza(Texto(rd.GetValue(1)));
+                        if (folio == null || ruta == null) continue;
+                        f.PorCategoria[folio + SEP_FECHAS + ruta] = new[] { Fecha(rd.GetValue(2)), Fecha(rd.GetValue(3)) };
+                    }
                 }
             }
         }
@@ -303,15 +432,25 @@ public static partial class ExperienciaQueries
     // los que filtra Experiencia: aqui no se mezclan. null = sin capturar.
     private static Dictionary<string, string[]> LeerDuenosCapturados(SqlConnection cn)
     {
+        return LeerDuenosCapturadosDe(cn, null);
+    }
+
+    // soloFolio null = todos; si no, solo ese Codigo.
+    private static Dictionary<string, string[]> LeerDuenosCapturadosDe(SqlConnection cn, string soloFolio)
+    {
         var d = new Dictionary<string, string[]>(StringComparer.Ordinal);
         using (var cmd = new SqlCommand(
-            "SELECT Codigo, OwnerProblem, OwnerServicio FROM dbo.Problem WHERE VigenteEnOrigen = 1;", cn))
-        using (var rd = cmd.ExecuteReader())
+            "SELECT Codigo, OwnerProblem, OwnerServicio FROM dbo.Problem WHERE VigenteEnOrigen = 1" +
+            (soloFolio == null ? "" : " AND Codigo = @folio") + ";", cn))
         {
-            while (rd.Read())
+            if (soloFolio != null) ParametroFolio(cmd, soloFolio);
+            using (var rd = cmd.ExecuteReader())
             {
-                var folio = Texto(rd.GetValue(0));
-                if (folio != null) d[folio] = new[] { Texto(rd.GetValue(1)), Texto(rd.GetValue(2)) };
+                while (rd.Read())
+                {
+                    var folio = Texto(rd.GetValue(0));
+                    if (folio != null) d[folio] = new[] { Texto(rd.GetValue(1)), Texto(rd.GetValue(2)) };
+                }
             }
         }
         return d;

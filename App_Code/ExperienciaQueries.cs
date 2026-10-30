@@ -478,6 +478,14 @@ public static partial class ExperienciaQueries
 
     private static List<Detalle> LeerIniciativas(SqlConnection cn, DateTime hoy)
     {
+        return LeerIniciativasDe(cn, hoy, null);
+    }
+
+    // soloFolio null = todas (lo de siempre); si no, el mismo SELECT con
+    // "AND v.Codigo = @folio" (RegistroIniciativas(folio)). El filtro se
+    // agrega al texto solo cuando hay folio: la consulta de todas no cambia.
+    private static List<Detalle> LeerIniciativasDe(SqlConnection cn, DateTime hoy, string soloFolio)
+    {
         // p.Descripcion y p.Observaciones no las expone la vista y el tablero
         // las pinta en la tarjeta de la iniciativa, de ahi el JOIN a Problem.
         //
@@ -515,7 +523,8 @@ public static partial class ExperienciaQueries
             "INNER JOIN dbo.Problem AS p ON p.Codigo = v.Codigo " +
             "LEFT JOIN dbo.CatPrefijoProblem AS cp ON cp.Prefijo = p.Prefijo " +
             (calculado ? "LEFT JOIN dbo.ExpTicketsReduce AS tr ON tr.Codigo = v.Codigo AND tr.Categoria = v.Categoria " : "") +
-            "WHERE v.VigenteEnOrigen = 1";
+            "WHERE v.VigenteEnOrigen = 1" +
+            (soloFolio == null ? "" : " AND v.Codigo = @folio");
 
         var filas = new List<Detalle>();
 
@@ -558,6 +567,7 @@ public static partial class ExperienciaQueries
         using (var cmd = new SqlCommand(SQL, cn))
         {
             cmd.CommandType = CommandType.Text;
+            if (soloFolio != null) ParametroFolio(cmd, soloFolio);
             using (var rd = cmd.ExecuteReader())
             {
                 while (rd.Read())
@@ -645,7 +655,14 @@ public static partial class ExperienciaQueries
     private static List<object> LeerIniciativasSinCategoria(
         SqlConnection cn, DateTime hoy, DirectorioOrganizacional dir)
     {
-        const string SQL =
+        return LeerIniciativasSinCategoriaDe(cn, hoy, dir, null);
+    }
+
+    // soloFolio: como en LeerIniciativasDe.
+    private static List<object> LeerIniciativasSinCategoriaDe(
+        SqlConnection cn, DateTime hoy, DirectorioOrganizacional dir, string soloFolio)
+    {
+        var SQL =
             "SELECT p.Codigo, p.Titulo, p.TipoIniciativa, p.Estado, " +
             "       p.FechaAnalisis, p.FechaSolucion, p.FechaCierre, " +
             "       p.NroCambioFechaAnalisis, p.NroCambioFechaSolucion, p.NroCambioFechaCierre, " +
@@ -656,13 +673,15 @@ public static partial class ExperienciaQueries
             "LEFT JOIN dbo.CatPrefijoProblem AS cp ON cp.Prefijo = p.Prefijo " +
             "WHERE p.VigenteEnOrigen = 1 " +
             "  AND NOT EXISTS (SELECT 1 FROM dbo.ProblemCategoria AS pc " +
-            "                  WHERE pc.Codigo = p.Codigo AND pc.VigenteEnOrigen = 1)";
+            "                  WHERE pc.Codigo = p.Codigo AND pc.VigenteEnOrigen = 1)" +
+            (soloFolio == null ? "" : " AND p.Codigo = @folio");
 
         var filas = new List<object>();
 
         using (var cmd = new SqlCommand(SQL, cn))
         {
             cmd.CommandType = CommandType.Text;
+            if (soloFolio != null) ParametroFolio(cmd, soloFolio);
             using (var rd = cmd.ExecuteReader())
             {
                 while (rd.Read())

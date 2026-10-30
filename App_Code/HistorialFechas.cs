@@ -73,6 +73,16 @@ public sealed class HistorialFechas
 
     public static HistorialFechas Leer(SqlConnection cn)
     {
+        return LeerDe(cn, null);
+    }
+
+    // soloFolio null = todos los eventos (Leer); si no, solo los de ese
+    // Codigo (ExperienciaQueries.RegistroIniciativas(folio)). El inicio de
+    // la captura viva (Desde, y con el `reconstruido` de cada evento) es de
+    // TODA la tabla, no del folio: con filtro se pide aparte, como MIN, para
+    // que cada evento salga igual que en el registro entero.
+    public static HistorialFechas LeerDe(SqlConnection cn, string soloFolio)
+    {
         try
         {
             using (var cmd = new SqlCommand(
@@ -92,9 +102,12 @@ public sealed class HistorialFechas
                 "SELECT IdEvento, Codigo, Campo, FechaAnterior, FechaNueva, Operacion, Origen, " +
                 "       Usuario, SolicitudId, FechaRegistro, " +
                 (conCategoria ? "Categoria " : "CONVERT(nvarchar(450), NULL) ") +
-                "FROM dbo.ProblemFechaEvento ORDER BY Codigo, IdEvento", cn))
+                "FROM dbo.ProblemFechaEvento " +
+                (soloFolio == null ? "" : "WHERE Codigo = @folio ") +
+                "ORDER BY Codigo, IdEvento", cn))
             {
                 cmd.CommandType = CommandType.Text;
+                if (soloFolio != null) cmd.Parameters.Add("@folio", SqlDbType.NVarChar, 100).Value = soloFolio;
                 using (var rd = cmd.ExecuteReader())
                 {
                     while (rd.Read())
@@ -116,7 +129,19 @@ public sealed class HistorialFechas
                     }
                 }
             }
-            return Armar(filas);
+            if (soloFolio == null) return Armar(filas);
+
+            // La misma regla que InicioDe sobre todas las filas: 'B' de la
+            // iniciativa (Categoria NULL; sin la columna, todas lo son).
+            DateTime? inicio;
+            using (var cmd = new SqlCommand(
+                "SELECT MIN(FechaRegistro) FROM dbo.ProblemFechaEvento WHERE Operacion = 'B' COLLATE Latin1_General_BIN2" +
+                (conCategoria ? " AND Categoria IS NULL" : ""), cn))
+            {
+                var v = cmd.ExecuteScalar();
+                inicio = v == null || v is DBNull ? (DateTime?)null : Convert.ToDateTime(v, CultureInfo.InvariantCulture);
+            }
+            return ArmarDesde(filas, inicio);
         }
         catch (Exception ex)
         {
@@ -129,12 +154,23 @@ public sealed class HistorialFechas
     // pruebe sin SQL. 'filas' viene en orden de IdEvento dentro de cada codigo.
     private static HistorialFechas Armar(List<Evento> filas)
     {
-        var h = new HistorialFechas(ESTADO_OK);
+        return ArmarDesde(filas, InicioDe(filas));
+    }
 
+    private static DateTime? InicioDe(List<Evento> filas)
+    {
         DateTime? inicio = null;
         foreach (var e in filas)
             if (e.Operacion == "B" && e.Categoria == null && (!inicio.HasValue || e.RegistroUtc < inicio.Value))
                 inicio = e.RegistroUtc;
+        return inicio;
+    }
+
+    // inicio: el de InicioDe sobre TODA la tabla, aunque 'filas' sea de un folio.
+    private static HistorialFechas ArmarDesde(List<Evento> filas, DateTime? inicio)
+    {
+        var h = new HistorialFechas(ESTADO_OK);
+
         if (inicio.HasValue)
             h.Desde = DashboardDataInfo.UtcAPresentacion(inicio.Value).ToString("dd/MM/yyyy", CultureInfo.InvariantCulture);
 

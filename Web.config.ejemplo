@@ -158,6 +158,16 @@
       <clientCache cacheControlMode="DisableCache" />
     </staticContent>
 
+    <!-- SIN <urlCompression doDynamicCompression="true"/>, a proposito. Los
+         JSON grandes (analisis, registro y catalogos de Iniciativas) ya los
+         comprime la aplicacion con gzip si el navegador lo acepta
+         (App_Code/CompresionRespuesta.cs). La compresion dinamica de IIS
+         esta apagada en la VM, necesita la caracteristica instalada en el
+         servidor y application/json en httpCompression/dynamicTypes (seccion
+         bloqueada a nivel de sitio), y encendida aqui comprimiria TODO lo
+         dinamico, incluidas las descargas .xlsx que ya vienen comprimidas.
+         La compresion ESTATICA (js/css/html) es de IIS y no cambia aqui. -->
+
     <security>
       <requestFiltering>
         <!-- El SQL fuente y los snapshots del modo offline no se sirven por
@@ -200,6 +210,34 @@
     <system.webServer>
       <staticContent>
         <clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="365.00:00:00" />
+      </staticContent>
+    </system.webServer>
+  </location>
+
+  <!-- Las dos librerias de Excel que se cargan al pulsar "Descargar Excel"
+       (ExcelJS 4.4.0, ~950 KB; SheetJS 0.18.5, ~250 KB). Con el no-cache de
+       arriba cada descarga volvia a preguntar por ellas (un 304, pero un
+       viaje mas antes de armar el Excel).
+
+       SIETE DIAS, NO UN AÑO: su nombre NO lleva la version (exceljs.min.js,
+       xlsx.mini.min.js) y el JavaScript las pide sin ?v=, asi que si alguna
+       vez se reemplazan en el mismo lugar, un año de cache dejaria la copia
+       vieja en los navegadores sin forma de sacarla. Con 7 dias lo peor es
+       una semana; para que el cambio llegue al momento, cambiar el nombre
+       del archivo (y la ruta en analisis/analisis.js o
+       efectividad/efectividad.js). Solo estos dos archivos: el resto de la
+       carpeta (LEEME.md) sigue con la regla general. -->
+  <location path="analisis/vendor/exceljs.min.js">
+    <system.webServer>
+      <staticContent>
+        <clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="7.00:00:00" />
+      </staticContent>
+    </system.webServer>
+  </location>
+  <location path="efectividad/vendor/xlsx.mini.min.js">
+    <system.webServer>
+      <staticContent>
+        <clientCache cacheControlMode="UseMaxAge" cacheControlMaxAge="7.00:00:00" />
       </staticContent>
     </system.webServer>
   </location>

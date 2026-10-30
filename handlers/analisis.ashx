@@ -34,7 +34,6 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
-using System.IO.Compression;
 using System.Web;
 using System.Web.Script.Serialization;
 
@@ -90,8 +89,7 @@ public class AnalisisHandler : IHttpHandler
             });
             medicion.Anotar("json", reloj.Elapsed);
             context.Response.AppendHeader("Server-Timing", medicion.ServerTiming());
-            Comprimir(context);
-            context.Response.Write(cuerpo);
+            CompresionRespuesta.EscribirJson(context, cuerpo);
         }
         catch (AnalisisSolicitudInvalida ex)
         {
@@ -102,19 +100,6 @@ public class AnalisisHandler : IHttpHandler
             DashboardHandler.Registrar("analisis.ashx", ex);
             Error(context, json, 500, DashboardHandler.MensajeSeguro(ex), ex.GetType().Name);
         }
-    }
-
-    // gzip a mano: IIS trae apagada la compresion dinamica y un .ashx es
-    // dinamico. Si IIS tambien comprime, ve el Content-Encoding y no repite.
-    // Fastest: con 28 MB de JSON sintetico tardo 0.17 s y dejo 1/8; Optimal
-    // dejaba la mitad de eso pero tardaba el doble.
-    private static void Comprimir(HttpContext context)
-    {
-        string acepta = context.Request.Headers["Accept-Encoding"] ?? "";
-        if (acepta.IndexOf("gzip", StringComparison.OrdinalIgnoreCase) < 0) return;
-        context.Response.Filter = new GZipStream(context.Response.Filter, CompressionLevel.Fastest);
-        context.Response.AppendHeader("Content-Encoding", "gzip");
-        context.Response.AppendHeader("Vary", "Accept-Encoding");
     }
 
     private static string Dia(DateTime d)

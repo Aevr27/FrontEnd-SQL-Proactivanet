@@ -286,6 +286,19 @@ WHERE VigenteEnOrigen = 1
         return PrefijoPorFolio(Pares(cn, sql));
     }
 
+    // Lo mismo, solo para un Codigo (ExperienciaQueries.RegistroIniciativas(folio)).
+    public static Dictionary<string, string> PrefijosPorFolio(SqlConnection cn, string folio)
+    {
+        const string sql = @"
+SELECT Codigo, Prefijo
+FROM dbo.Problem
+WHERE VigenteEnOrigen = 1
+  AND Prefijo IS NOT NULL
+  AND Codigo = @folio;";
+
+        return PrefijoPorFolio(Pares(cn, sql, folio ?? ""));
+    }
+
     // Folio -> prefijo sin espacios a los lados; el primero de un folio
     // repetido gana; folio o prefijo vacios se descartan.
     public static Dictionary<string, string> PrefijoPorFolio(IEnumerable<KeyValuePair<string, string>> pares)
@@ -303,10 +316,17 @@ WHERE VigenteEnOrigen = 1
     // Dos columnas de texto -> pares (NULL -> null).
     private static List<KeyValuePair<string, string>> Pares(SqlConnection cn, string sql)
     {
+        return Pares(cn, sql, null);
+    }
+
+    // folio: valor de @folio (nvarchar(100), el Codigo), o null si el SQL no lo usa.
+    private static List<KeyValuePair<string, string>> Pares(SqlConnection cn, string sql, string folio)
+    {
         var pares = new List<KeyValuePair<string, string>>();
         using (var cmd = new SqlCommand(sql, cn))
         {
             cmd.CommandType = CommandType.Text;
+            if (folio != null) cmd.Parameters.Add("@folio", SqlDbType.NVarChar, 100).Value = folio;
             using (var reader = cmd.ExecuteReader())
             {
                 while (reader.Read())

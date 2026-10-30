@@ -91,7 +91,7 @@ public class AdminIniciativasRegistro : IHttpHandler
                     context.Response.Write(serializador.Serialize(malo));
                     return;
                 }
-                context.Response.Write(serializador.Serialize(ExperienciaQueries.RegistroExportExtra()));
+                CompresionRespuesta.EscribirJson(context, serializador.Serialize(ExperienciaQueries.RegistroExportExtra()));
                 return;
             }
 
@@ -148,7 +148,8 @@ public class AdminIniciativasRegistro : IHttpHandler
             // esta cuenta SIN rol de Admin puede pedir cambios (los suyos).
             // Solo pinta el boton; el envio vuelve a decidir (SolicitudCambioPso).
             registro["cambios_pso"] = FoliosPso(context, registro);
-            context.Response.Write(serializador.Serialize(registro));
+            // gzip si el navegador lo acepta (App_Code/CompresionRespuesta.cs).
+            CompresionRespuesta.EscribirJson(context, serializador.Serialize(registro));
         }
         catch (Exception ex)
         {

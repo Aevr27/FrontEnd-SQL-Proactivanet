@@ -968,7 +968,7 @@ public static class SolicitudesCambio
     private static DatosCapacidad LeerCapacidadEnvio(string folio)
     {
         var d = new DatosCapacidad();
-        var registro = ExperienciaQueries.RegistroIniciativas();
+        var registro = ExperienciaQueries.RegistroIniciativas((folio ?? "").Trim());
         var iniciativas = registro == null ? null : registro["iniciativas"] as List<object>;
         if (iniciativas == null) throw new InvalidOperationException("El registro de iniciativas no trae la lista de iniciativas.");
         foreach (Dictionary<string, object> i in iniciativas)

@@ -244,7 +244,7 @@ public sealed class FuenteIniciativasAcuseSql : IFuenteIniciativasAcuse
 {
     public IniciativaAcuse Iniciativa(string folio)
     {
-        var reg = ExperienciaQueries.RegistroIniciativas();
+        var reg = ExperienciaQueries.RegistroIniciativas(folio);
         var lista = reg["iniciativas"] as IEnumerable;
         if (lista == null) return null;
         foreach (var o in lista)
