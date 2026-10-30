@@ -292,25 +292,33 @@ function pronosticoMes(volReal){
 
 /* TICKETS AUTOMATIZADOS DE SLA
    -------------------------------------------------------------------------
-   Es la tarjeta "Automatizado" de SLA TAL CUAL: TicketsAutomatizados de
-   handlers/kpis.ashx (DashboardQueries.Kpis), los tickets RESUELTOS en el
-   rango por una cuenta de dbo.CatCuentaNoPersona. Aqui no se calcula nada:
-   se le pide a ese handler, sin tocarlo, un rango por periodo de la grafica
-   y se lee el numero que devuelve.
+   Es la tarjeta "Automatizado" de SLA: TicketsAutomatizados de
+   DashboardQueries.Kpis, los tickets RESUELTOS en el rango por una cuenta de
+   dbo.CatCuentaNoPersona. Aqui no se calcula nada: se piden TODOS los
+   periodos de la grafica en una sola llamada a
+   handlers/experiencia_automatizados.ashx, que cuenta las mismas filas que
+   Kpis (DashboardQueries.AutomatizadosPorCategoria) y las reparte por los
+   dueños de la categoria del ticket (DirectorioOrganizacional, el mismo de
+   las categorias del tablero y del export). Antes era una llamada a
+   kpis.ashx por periodo -10 en SLOT, hasta 12 en Mes- con la consulta de
+   KPIs entera detras.
 
    Lo que eso implica, y por lo que va como serie aparte:
      - cuenta por fecha de firma de solucion, no por fecha de registro como
        el volumen de Experiencia;
-     - es GLOBAL por dueño: kpis.ashx no conoce CategoriaV2, asi que no le
-       aplican Director / PO / Manager / SO;
-     - el tipo de registro SI: con Incidentes / Requerimientos se le pide
-       ?tipo=inc|req y kpis.ashx cuenta solo los de ese Tipo de ticket, con
-       el mismo corte que vol_tipo (DashboardQueries.TipoRegistroSla). En
-       Todos la peticion es la de siempre, sin ese parametro;
+     - Director / PO / Manager / SO se aplican aqui, con pasaFiltroGlobal,
+       sobre las filas de dueños de la respuesta: cambiar de filtro no pide
+       nada. Sin filtros se usa el total del periodo, que es exactamente el
+       numero de kpis.ashx (incluye los tickets sin categoria o sin dueño,
+       que ningun filtro deja pasar);
+     - el tipo de registro: con Incidentes / Requerimientos se pide
+       ?tipo=inc|req y se cuentan solo los de ese Tipo de ticket, con el
+       mismo corte que vol_tipo (DashboardQueries.TipoRegistroSla). En Todos
+       la peticion va sin ese parametro;
      - con el corte guardado (sin handler) no se pide: se mezclaria un dato
        en vivo con uno viejo.
 
-   Rangos (los dos extremos dentro, como fecha_inicio/fecha_fin de kpis.ashx):
+   Rangos (los dos extremos dentro, como fecha_inicio/fecha_fin del handler):
      slot k  hoy-30k-29 .. hoy-30k, 30 dias cada uno, con hoy =
              P.meta.periodoFin. Son los limites de dbo.vw_TicketsSlotsBase en
              la VM (MIN/MAX de FechaRegistro por Slot, 2026-10-23: SLOT 0 =
@@ -343,34 +351,66 @@ function rangoAutomatizados(modo, periodo, hoyISO, anio) {
     fin: isoDiaUTC(hoy - D * n * dia),
   };
 }
-// El numero tal como lo da kpis.ashx. null = sin dato (la tarjeta de SLA
-// pinta N/D en ese caso); 0 es cero.
-function valorAutomatizado(fila) {
-  var v = fila ? fila.TicketsAutomatizados : null;
+// {inicio, fin} que cubre todos los periodos: lo que se pide en una llamada.
+function rangoTotalAutomatizados(modo, periodos, hoyISO, anio) {
+  var inicio = null, fin = null;
+  for (var i = 0; i < (periodos || []).length; i++) {
+    var r = rangoAutomatizados(modo, periodos[i], hoyISO, anio);
+    if (!r) return null;
+    if (inicio === null || r.inicio < inicio) inicio = r.inicio;
+    if (fin === null || r.fin > fin) fin = r.fin;
+  }
+  return inicio === null ? null : { inicio: inicio, fin: fin };
+}
+function numeroAutomatizado(v) {
   return (v === null || v === undefined || v === '' || isNaN(Number(v))) ? null : Number(v);
+}
+// {periodo: n} de la respuesta de experiencia_automatizados.ashx. Sin
+// `pasa` (sin filtros de dueño) es el total del periodo, el numero de
+// kpis.ashx; con `pasa`, la suma de las filas de dueños que pasan el filtro
+// (cada ticket esta en una sola fila: no se cuenta dos veces). Un periodo
+// sin ningun resuelto no viene en `periodos` y queda sin llave: sin dato
+// (Kpis daba NULL, la tarjeta de SLA pinta N/D); 0 es cero.
+function valoresAutomatizados(datos, pasa) {
+  var valores = {};
+  ((datos && datos.periodos) || []).forEach(function (p) {
+    valores[String(p.periodo)] = pasa ? 0 : numeroAutomatizado(p.automatizados);
+  });
+  if (pasa) ((datos && datos.duenos) || []).forEach(function (d) {
+    var k = String(d.periodo);
+    if (k in valores && pasa(d)) valores[k] += numeroAutomatizado(d.automatizados) || 0;
+  });
+  return valores;
 }
 /* === AUTOMATIZADOS SLA (fin) === */
 
-const KPIS_SLA_URL = new URL('../handlers/kpis.ashx', BASE).href;
+const AUTOMATIZADOS_URL = new URL('../handlers/experiencia_automatizados.ashx', BASE).href;
 // Por modo y tipo de registro: 'slot' / 'mes' en Todos, 'slot:inc',
 // 'mes:req'... con un tipo. Sin llave = no pedido;
-// {estado:'cargando'|'listo'|'error'|'respaldo', valores}.
+// {estado:'cargando'|'listo'|'error'|'respaldo', datos}: datos es la
+// respuesta del handler, sin filtrar.
 const automatizados = {};
 function claveAutomatizados(modo){ return tipoRegistro==='todos' ? modo : modo+':'+tipoRegistro; }
-function automatizadosDe(modo){ return automatizados[claveAutomatizados(modo)] || null; }
+// {estado, valores} con los filtros de dueño de AHORA.
+function automatizadosDe(modo){
+  const a=automatizados[claveAutomatizados(modo)];
+  if(!a) return null;
+  return {estado:a.estado,
+    valores:valoresAutomatizados(a.datos, hayFiltrosAutomatizados() ? pasaFiltroGlobal : null)};
+}
 // Algun filtro de dueño puesto. "Ver por" SLOT/Mes no es filtro, y el tipo
-// de registro tampoco: ese se le pide a SLA (ver pedirAutomatizados). Con
-// filtros de dueño la linea es un subconjunto y las barras (globales) no se
-// pueden comparar con ella: se ocultan y la tarjeta lo dice.
+// de registro tampoco: ese se le pide al handler (ver pedirAutomatizados).
+// Con filtros de dueño se suman solo las filas de esos dueños.
 function hayFiltrosAutomatizados(){
   return !!(fDir || fPO || fMgr || fSO);
 }
 function periodosAutomatizados(modo){
   return modo==='mes' ? P.mes_nums : P.slot_nums;
 }
-// Se pide la primera vez que se ve cada modo con cada tipo de registro; al
-// llegar se repintan solo la tarjeta y la grafica, y solo si se sigue en ese
-// modo y ese tipo. En Todos la URL es la de siempre (sin ?tipo).
+// Se pide la primera vez que se ve cada modo con cada tipo de registro, UNA
+// llamada con todos los periodos; al llegar se repintan solo la tarjeta y la
+// grafica, y solo si se sigue en ese modo y ese tipo. Los filtros de dueño no
+// se mandan: se aplican al leer (automatizadosDe). En Todos va sin ?tipo.
 // fondo = refresco: se vuelve a pedir aunque ya este; lo que habia se sigue
 // viendo (sin "cargando") y, si falla, se queda.
 function pedirAutomatizados(modo, fondo){
@@ -378,29 +418,27 @@ function pedirAutomatizados(modo, fondo){
   const previo=automatizados[clave];
   if(previo && !(fondo && (previo.estado==='listo' || previo.estado==='error'))) return;
   const hoyISO = P.meta && P.meta.periodoFin;
-  const rangos = (periodosAutomatizados(modo)||[]).map(p=>[p, rangoAutomatizados(modo, p, hoyISO, P.anio)]);
+  const rango = rangoTotalAutomatizados(modo, periodosAutomatizados(modo), hoyISO, P.anio);
   if(errApi){
-    automatizados[clave] = {estado:'respaldo', valores:{}};
+    automatizados[clave] = {estado:'respaldo', datos:null};
     return;
   }
-  if(!rangos.length || rangos.some(r=>!r[1])){
-    automatizados[clave] = {estado:'error', valores:{}};
+  if(!rango){
+    automatizados[clave] = {estado:'error', datos:null};
     return;
   }
-  if(!previo) automatizados[clave] = {estado:'cargando', valores:{}};
-  return Promise.all(rangos.map(([p, r])=>{
-    const url=new URL(KPIS_SLA_URL);
-    url.searchParams.set('fecha_inicio', r.inicio);
-    url.searchParams.set('fecha_fin', r.fin);
-    if(tipo!=='todos') url.searchParams.set('tipo', tipo);
-    return traer(url.href).then(fila=>[p, valorAutomatizado(fila)]);
-  })).then(pares=>{
-    const valores={};
-    pares.forEach(([p, v])=>{ valores[String(p)]=v; });
-    automatizados[clave] = {estado:'listo', valores};
-  }, err=>{
+  if(!previo) automatizados[clave] = {estado:'cargando', datos:null};
+  const url=new URL(AUTOMATIZADOS_URL);
+  url.searchParams.set('modo', modo);
+  url.searchParams.set('fecha_inicio', rango.inicio);
+  url.searchParams.set('fecha_fin', rango.fin);
+  if(tipo!=='todos') url.searchParams.set('tipo', tipo);
+  return traer(url.href).then(datos=>{
+    if(!datos || !Array.isArray(datos.periodos)) throw new Error('respuesta sin periodos');
+    automatizados[clave] = {estado:'listo', datos};
+  }).catch(err=>{
     console.warn('[Experiencia] automatizados SLA:', err);
-    if(!previo) automatizados[clave] = {estado:'error', valores:{}};
+    if(!previo) automatizados[clave] = {estado:'error', datos:null};
   }).then(()=>{
     if(modoTiempo!==modo || tipoRegistro!==tipo) return;
     const agg=aggCats();
@@ -576,17 +614,17 @@ function mostrarPanel(id){
 // importar cuando se registraron. No es un subconjunto del volumen, asi que
 // puede salir negativo: se muestra con su signo y se avisa, sin recortar a 0.
 //
-// Automatizados SLA es global por dueño: con filtros de dueño no se resta.
-// Con un tipo de registro los dos terminos son de ese tipo: `vol` ya es el
-// de vol_tipo y los automatizados se pidieron con ?tipo (pedirAutomatizados).
+// Con filtros de dueño los dos terminos son de esos dueños: `vol` el de las
+// categorias que pasan el filtro y los automatizados los de los tickets cuya
+// categoria tiene esos dueños (automatizadosDe). Con un tipo de registro los
+// dos terminos son de ese tipo: `vol` ya es el de vol_tipo y los
+// automatizados se pidieron con ?tipo (pedirAutomatizados).
 // Error, respaldo y "sin dato" nunca se toman como cero.
 const AYUDA_SIN_AUTOMATIZAR='Aproximación: tickets registrados en el periodo menos tickets resueltos por bot '
   +'en el mismo periodo. Los automatizados SLA no necesariamente son un subconjunto del volumen registrado.';
 function tarjetaSinAutomatizar(vol, esPron){
   const l='Volumen - Automatizado'+(esPron ? ' <span class="tag-pron">Pronóstico</span>' : '');
   const tarjeta=(v, f)=>({l, v, f, s:null, t:AYUDA_SIN_AUTOMATIZAR});
-  if(hayFiltrosAutomatizados())
-    return tarjeta('N/D', 'No disponible con filtros: Automatizados SLA es global y no responde a los filtros activos');
   const a=automatizadosDe(modoTiempo);
   if(!a || a.estado==='cargando') return tarjeta('…', 'consultando SLA');
   // Error y respaldo no son "sin dato": no llevan N/D, que queda para el
@@ -752,13 +790,12 @@ function renderEvol(cats){
   // Automatizados de SLA: barras en los MISMOS periodos y en el mismo orden
   // que la linea, por detras de ella (order). Son otra cuenta (ver
   // pedirAutomatizados), no se suman al volumen. Mientras no hay dato la
-  // grafica es exactamente la de antes. Con filtros de dueño tampoco hay
-  // barras (ver hayFiltrosAutomatizados); con un tipo de registro son las de
-  // ese tipo, como la linea.
+  // grafica es exactamente la de antes. Con filtros de dueño son las de esos
+  // dueños y con un tipo de registro las de ese tipo, como la linea.
   const auto=automatizadosDe(modoTiempo);
   const filtrado=hayFiltrosAutomatizados();
   let autoReal=null;
-  if(auto && auto.estado==='listo' && !filtrado){
+  if(auto && auto.estado==='listo'){
     const barras=nums.map(p=>{ const v=auto.valores[String(p)]; return v==null?null:v; });
     if(idxPron>=0 && barras[idxPron]!=null){ autoReal=barras[idxPron]; barras[idxPron]=pronosticoMes(autoReal); }
     // El azul de una barra ordinaria (Paleta.AZUL_SERIE, #2563eb): el mismo
@@ -769,9 +806,8 @@ function renderEvol(cats){
   const hayBarras=datasets.length>1;
   const leg=document.getElementById('legendEvol');
   if(leg) leg.innerHTML='<span><i style="background:#65bb2b"></i>Volumen total</span>'
-    +`<span><i style="background:${Paleta.AZUL_SERIE}"></i>${filtrado
-      ? 'Automatizados SLA: solo sin filtros (valor global)'
-      : 'Automatizados SLA (resueltos, global'
+    +`<span><i style="background:${Paleta.AZUL_SERIE}"></i>${
+      'Automatizados SLA (resueltos, '+(filtrado ? 'dueños del filtro' : 'global')
         +(tipoRegistro!=='todos' ? ' · '+TIPOS_REGISTRO[tipoRegistro] : '')+')'+(
         !auto||auto.estado==='cargando' ? ' · cargando…'
         : auto.estado==='error' ? ' · error al consultar SLA'

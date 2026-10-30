@@ -599,6 +599,52 @@ FROM conPct;";
         return filas.Count > 0 ? filas[0] : new Dictionary<string, object>();
     }
 
+    /* TicketsAutomatizados de Kpis, POR PERIODO Y CATEGORIA, en UNA pasada.
+       Lo usa Experiencia ("Volumen - Automatizado" y las barras Automatizados
+       SLA, ver ExperienciaQueries.Automatizados), que antes pedia kpis.ashx
+       una vez por periodo -10 en SLOT, hasta 12 en Mes- y pagaba la consulta
+       de KPIs entera (percentiles, OUTER APPLY contra dbo.Tickets) solo para
+       leer este contador.
+
+       Las MISMAS filas que Kpis: el mismo {0} (por firma de solucion, sin
+       rechazados, con el ?tipo de TipoRegistroSla) y la misma rama de
+       EsPersona ({3}). El CROSS APPLY s y el OUTER APPLY pr1 de Kpis no quitan
+       filas, asi que por periodo
+           Automatizados = TicketsAutomatizados de Kpis con ese rango
+           Resueltos     = su COUNT_BIG(*): 0 filas = Kpis devolvia NULL.
+
+       El periodo de cada ticket, sobre el rango completo de f:
+         slot  (FechaFin - dia de solucion) / DiasSlot: el SLOT k es
+               FechaFin-30k-29 .. FechaFin-30k, los mismos rangos que pedia
+               Experiencia (rangoAutomatizados);
+         mes   MONTH(): f cubre meses enteros de un solo año.
+
+       GROUPING SETS: la fila de total por periodo (EsTotal = 1, con
+       Resueltos) y una por categoria que tuvo algun automatizado; las demas
+       categorias no viajan. Categoria es b.Categoria cruda: los cortes C1 /
+       C1C2 y los dueños los pone quien llama. */
+    public static List<Dictionary<string, object>> AutomatizadosPorCategoria(Filtros f, bool porMes)
+    {
+        string periodo = porMes
+            ? "MONTH(b.FechaFirmaSolucion)"
+            : "DATEDIFF(DAY, CONVERT(DATE, b.FechaFirmaSolucion), @FechaFin) / "
+              + DashboardDataInfo.DiasSlot.ToString(CultureInfo.InvariantCulture);
+        string sql = @"
+SELECT
+    Periodo = pe.Periodo,
+    EsTotal = GROUPING(b.Categoria),
+    Categoria = CASE WHEN GROUPING(b.Categoria) = 1 THEN NULL ELSE b.Categoria END,
+    Automatizados = SUM(CASE WHEN np.EsPersona = 0 THEN 1 ELSE 0 END),
+    Resueltos = COUNT_BIG(*)
+FROM dbo.vw_Dash_ProductividadBase b{3}
+CROSS APPLY (SELECT Periodo = " + periodo + @") AS pe
+WHERE {0}
+GROUP BY GROUPING SETS ((pe.Periodo, b.Categoria), (pe.Periodo))
+HAVING GROUPING(b.Categoria) = 1 OR SUM(CASE WHEN np.EsPersona = 0 THEN 1 ELSE 0 END) > 0;";
+
+        return Unico(sql, f, null);
+    }
+
     /* Entra vs sale, por dia. Cada serie por su propia fecha: creados por
        registro ({1}), resueltos y SLA por solucion ({0}). FULL OUTER porque
        hay dias con solo entradas o solo salidas.

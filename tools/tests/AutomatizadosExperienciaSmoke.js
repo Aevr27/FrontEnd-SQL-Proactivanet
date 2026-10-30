@@ -1,15 +1,20 @@
 // tools/tests/AutomatizadosExperienciaSmoke.js - serie "Automatizados SLA"
 // de la Evolucion y tarjeta "Volumen - Automatizado" de Experiencia.
 //
-// Automatizados SLA es TicketsAutomatizados de handlers/kpis.ashx (la tarjeta
-// "Automatizado" de SLA), pedido por periodo de la grafica. La tarjeta es
-// Volumen Actual - Automatizados SLA del mismo periodo. Lo que fija:
+// Automatizados SLA es TicketsAutomatizados de la tarjeta "Automatizado" de
+// SLA, pedido en UNA llamada a handlers/experiencia_automatizados.ashx para
+// todos los periodos de la grafica (antes: una a kpis.ashx por periodo) y
+// repartido por dueño. La tarjeta es Volumen Actual - Automatizados SLA del
+// mismo periodo. Lo que fija:
 //
 //   R)  rangos: los SLOTs 0..9 son los de dbo.vw_TicketsSlotsBase en la VM
 //       el 2026-10-23 (SLOT 0 = 09-24..10-23 ... SLOT 9 = 2025-12-28..
 //       2026-01-26), de 30 dias, sin hueco ni solape (ningun dia se cuenta
 //       dos veces); un mes va del dia 1 al ultimo; lo invalido da null;
-//   V)  valorAutomatizado: 0 es 0, sin dato es null;
+//   V)  valoresAutomatizados: sin filtro el total del periodo; con filtro la
+//       suma de las filas de dueños que pasan; 0 es 0, periodo sin
+//       resueltos sin llave (sin dato); rangoTotalAutomatizados cubre todos
+//       los periodos;
 //   G)  la linea de volumen no cambia con o sin barras; las barras van en
 //       los mismos periodos y orden; el mes en curso lleva el pronostico;
 //       sin dato queda hueco (null), cero queda cero; sin respuesta no hay
@@ -19,10 +24,13 @@
 //       negativo con su signo y aviso; Mes con el mes en curso y el mismo
 //       pronostico que Volumen Actual;
 //   M)  con un filtro de Director, PO, Manager o SO (o varios, con o sin
-//       tipo) no hay barras, la leyenda dice "solo sin filtros" y la tarjeta
-//       queda en N/D diciendo por que; sin filtros vuelven barras y resta;
-//       la linea no cambia; "Ver por" y el tipo de registro no cuentan como
-//       filtro;
+//       tipo) la tarjeta y las barras usan solo los automatizados de esos
+//       dueños (nunca N/D por el filtro), sin pedir nada; el volumen
+//       filtrado menos esos; sin filtros vuelve el total; dueños de otro SO /
+//       PO no se restan; sin dueño no entra en ningun filtro;
+//   E)  sin filtros, tarjetas, grafica y leyenda IGUALES a ANTES_UNA (la
+//       version de una llamada a kpis.ashx por periodo) en SLOT y Mes, en
+//       Todos / Incidentes / Requerimientos; 1 peticion en vez de N;
 //   T)  tipo de registro: Incidentes / Requerimientos piden ?tipo=inc|req y
 //       la tarjeta resta el volumen de ese tipo menos los automatizados de
 //       ese tipo (6000 - 1000, 2500 - 0, Mes con pronostico); Todos da
@@ -39,9 +47,13 @@
 //   C)  cifra encima de cada barra Automatizados SLA: FMT con miles, 0 si,
 //       null no; si no cabe arriba (borde o linea) va dentro, y si tampoco,
 //       se omite; la linea no lleva cifras de este plugin;
-//   N)  peticiones: una por periodo, con fecha_inicio / fecha_fin; con el
-//       corte guardado no se pide nada (respaldo); una falla deja la
-//       tarjeta en error; se repinta solo si se sigue en el mismo modo.
+//   N)  peticiones: UNA por modo y tipo, con modo, fecha_inicio / fecha_fin
+//       de todos los periodos; con el corte guardado no se pide nada
+//       (respaldo); una falla o una respuesta sin periodos deja la tarjeta
+//       en error; se repinta solo si se sigue en el mismo modo.
+//
+// La regla del servidor (mismas filas que Kpis, reparto por dueño) la fija
+// AutomatizadosDuenosSqlLocalDbSmoke.cs contra SQL.
 //
 // NO forma parte del sitio. Recorta las funciones del propio experiencia.js
 // (patron de TipoRegistroExperienciaSmoke.js) y las corre con un DOM y una
@@ -94,7 +106,7 @@ function bloque(src, a, b) {
 
 // ---- R / V) funciones puras --------------------------------------------
 var puras = new Function(bloque(fuente, '/* === AUTOMATIZADOS SLA (inicio) === */', '/* === AUTOMATIZADOS SLA (fin) === */') +
-  '\nreturn {rango: rangoAutomatizados, valor: valorAutomatizado};')();
+  '\nreturn {rango: rangoAutomatizados, total: rangoTotalAutomatizados, valores: valoresAutomatizados};')();
 
 var HOY = '2026-10-23';
 Check('R1 SLOT 0 = hoy-29 .. hoy (acaba hoy)', { inicio: '2026-09-24', fin: '2026-10-23' },
@@ -134,10 +146,43 @@ Check('R9 invalidos dan null', [null, null, null, null, null],
   [puras.rango('mes', 0, null, 2026), puras.rango('mes', 13, null, 2026), puras.rango('mes', 5, null, undefined),
    puras.rango('slot', 0, undefined), puras.rango('slot', -1, HOY)]);
 
-Check('V1 cero es cero', 0, puras.valor({ TicketsAutomatizados: 0 }));
-Check('V2 numero', 57, puras.valor({ TicketsAutomatizados: 57 }));
-Check('V3 sin dato es null (SLA pinta N/D)', [null, null, null, null],
-  [puras.valor({ TicketsAutomatizados: null }), puras.valor({}), puras.valor(null), puras.valor({ TicketsAutomatizados: 'x' })]);
+Check('R10 rango total SLOT 0..9 = inicio del SLOT 9 .. fin del SLOT 0', { inicio: '2025-12-28', fin: '2026-10-23' },
+  puras.total('slot', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], HOY));
+Check('R10 rango total de meses = dia 1 del primero .. ultimo dia del ultimo', { inicio: '2026-01-01', fin: '2026-10-31' },
+  puras.total('mes', [10, 1, 5], null, 2026));
+Check('R10 sin periodos o con uno invalido: null', [null, null, null],
+  [puras.total('slot', [], HOY), puras.total('slot', [0, -1], HOY), puras.total('mes', [1], null, undefined)]);
+
+// Respuesta de experiencia_automatizados.ashx: totales por periodo y filas
+// de dueños (la de null es la de los tickets sin categoria o sin dueño).
+var RESP_V = {
+  periodos: [{ periodo: 0, automatizados: 10, resueltos: 90 }, { periodo: 1, automatizados: 0, resueltos: 40 },
+             { periodo: 2, automatizados: 7, resueltos: 30 }],
+  duenos: [
+    { periodo: 0, director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 6 },
+    { periodo: 0, director: 'Dir B', po: 'PO Y', manager: 'Mgr', so: 'SO Y', automatizados: 3 },
+    { periodo: 0, director: null, po: null, manager: null, so: null, automatizados: 1 },
+    { periodo: 2, director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 7 },
+    // Periodo que no viene en `periodos` (sin resueltos): no puede crear dato.
+    { periodo: 5, director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 4 }]
+};
+function pasaV(f) { return function (o) { return (!f.dir || o.director === f.dir) && (!f.po || o.po === f.po) &&
+  (!f.mgr || o.manager === f.mgr) && (!f.so || o.so === f.so); }; }
+Check('V1 sin filtro: el total de cada periodo (= kpis.ashx), cero es cero', { 0: 10, 1: 0, 2: 7 }, puras.valores(RESP_V, null));
+Check('V2 Director: solo sus filas', { 0: 6, 1: 0, 2: 7 }, puras.valores(RESP_V, pasaV({ dir: 'Dir A' })));
+Check('V2 SO de otro dueño: sus filas, no las del primero', { 0: 3, 1: 0, 2: 0 }, puras.valores(RESP_V, pasaV({ so: 'SO Y' })));
+Check('V2 Manager comun a los dos: los suma', { 0: 9, 1: 0, 2: 7 }, puras.valores(RESP_V, pasaV({ mgr: 'Mgr' })));
+Check('V2 filtro combinado que nadie cumple: cero, no sin dato', { 0: 0, 1: 0, 2: 0 },
+  puras.valores(RESP_V, pasaV({ dir: 'Dir A', po: 'PO Y' })));
+Check('V3 sin dueño: en el total, en ningun filtro', [true, false],
+  [puras.valores(RESP_V, null)[0] === 6 + 3 + 1, [pasaV({ dir: 'Dir A' }), pasaV({ dir: 'Dir B' }), pasaV({ mgr: 'Mgr' })]
+    .some(function (p) { return p(RESP_V.duenos[2]); })]);
+Check('V4 periodo sin resueltos: sin llave (sin dato), con o sin filtro', [false, false],
+  ['5' in puras.valores(RESP_V, null), '5' in puras.valores(RESP_V, pasaV({ dir: 'Dir A' }))]);
+Check('V5 sin respuesta o sin periodos: vacio', [{}, {}, {}],
+  [puras.valores(null, null), puras.valores({}, pasaV({ dir: 'Dir A' })), puras.valores({ periodos: [] }, null)]);
+Check('V6 total sin dato o invalido es null', { 0: null, 1: null }, puras.valores({ periodos: [
+  { periodo: 0, automatizados: null }, { periodo: 1, automatizados: 'x' }] }, null));
 
 // ---- arnes de pintado ---------------------------------------------------
 var PAYLOAD = {
@@ -156,18 +201,22 @@ var PAYLOAD = {
 function arnes(opciones) {
   opciones = opciones || {};
   var fuente = opciones.fuente || FUENTE;
+  // Version con experiencia_automatizados.ashx (estado {estado, datos}) o
+  // anterior (una llamada a kpis.ashx por periodo, estado {estado, valores}).
+  var nuevo = fuente.indexOf('\nfunction valoresAutomatizados(') >= 0;
   var codigo =
     'var fDir="", fPO="", fMgr="", fSO="", tipoRegistro="todos";\n' +
     'var modoTiempo="slot", chartEvol=null, errApi=' + (opciones.errApi ? 'new Error("x")' : 'undefined') + ';\n' +
     'var VERDE={pino:"#p",profundo:"#d",lima:"#l"}, AMBAR_SEM="#a", CIFRAS_EXTREMOS={}, CIFRAS_ENCIMA_BARRAS={};\n' +
     'var document={getElementById:function(id){return ELEMENTOS[id]||(ELEMENTOS[id]={style:{},innerHTML:""});}};\n' +
     'function FMT(n){return String(Math.round(n||0));}\n' +
-    'var KPIS_SLA_URL="http://x/handlers/kpis.ashx"; var REPINTADOS=[];\n' +
+    'var KPIS_SLA_URL="http://x/handlers/kpis.ashx", AUTOMATIZADOS_URL="http://x/handlers/experiencia_automatizados.ashx";\n' +
+    'var REPINTADOS=[];\n' +
     'function aggCats(){return P.categorias;} function currentCats(){return P.categorias;}\n' +
     'function renderKPIs(){REPINTADOS.push("kpis:"+modoTiempo);}\n' +
     bloque(fuente, '/* === AUTOMATIZADOS SLA (inicio) === */', '/* === AUTOMATIZADOS SLA (fin) === */') +
     bloque(fuente, 'const automatizados = {};', '\nfunction periodosAutomatizados(').replace('const ', 'var ') +
-    ['volSlotOMes', 'pronosticoMes', 'automatizadosDe', 'hayFiltrosAutomatizados', 'periodosAutomatizados', 'pedirAutomatizados',
+    ['pasaFiltroGlobal', 'volSlotOMes', 'pronosticoMes', 'automatizadosDe', 'hayFiltrosAutomatizados', 'periodosAutomatizados', 'pedirAutomatizados',
      'tarjetaSinAutomatizar', 'volActualDe'].map(function (n) { return recortar(fuente, n); }).join('') +
     bloque(fuente, 'const AYUDA_SIN_AUTOMATIZAR=', '\nfunction tarjetaSinAutomatizar(').replace('const ', 'var ') +
     // El selector de tipo de verdad: sustituye los campos de volumen.
@@ -190,8 +239,13 @@ function arnes(opciones) {
     // Lo que hace el boton de tipo antes de renderAll (que vuelve a pedir).
     ' tipo: function (t) { aplicarTipoRegistro(t); },' +
     ' filtros: function () { return {dir: fDir, po: fPO, mgr: fMgr, so: fSO, modo: modoTiempo, tipo: tipoRegistro}; },' +
-    ' estado: function (m, e) { if (e === undefined) delete automatizados[m]; else automatizados[m] = e; },' +
-    ' leer: function (m) { return automatizados[m]; },' +
+    // estado(m, {estado, valores[, duenos]}): en la version nueva los valores
+    // pasan a la forma de la respuesta del handler (null = periodo sin dato).
+    ' estado: function (m, e) { if (e === undefined) { delete automatizados[m]; return; }' +
+    (nuevo ? ' automatizados[m] = {estado: e.estado, datos: e.datos || (e.estado === "listo" ? aDatos(e.valores, e.duenos) : null)};'
+           : ' automatizados[m] = e;') + ' },' +
+    ' leer: function (m) { var a = automatizados[m]; return ' +
+    (nuevo ? 'a && {estado: a.estado, valores: valoresAutomatizados(a.datos, null)}' : 'a') + '; },' +
     ' pedir: function (m) { pedirAutomatizados(m); },' +
     ' tarjeta: function (pron, vol) { return tarjetaSinAutomatizar(vol === undefined ? 100 : vol, pron); },' +
     ' kpis: function () { renderKPIsReal(P.categorias); return ELEMENTOS["kpis-exp"].innerHTML; },' +
@@ -200,12 +254,21 @@ function arnes(opciones) {
   var CHARTS = [];
   function Chart(ctx, cfg) { CHARTS.push(cfg); this.destroy = function () {}; }
   var ELEMENTOS = {};
-  var A = new Function('ELEMENTOS', 'P', 'Chart', 'CHARTS', 'traer', 'console', 'Paleta', codigo)(
+  var A = new Function('ELEMENTOS', 'P', 'Chart', 'CHARTS', 'traer', 'console', 'Paleta', 'aDatos', codigo)(
     ELEMENTOS, JSON.parse(JSON.stringify(opciones.payload || PAYLOAD)), Chart, CHARTS, opciones.traer || function () {
       return Promise.reject(new Error('sin traer'));
-    }, { warn: function () {} }, PALETA);
+    }, { warn: function () {} }, PALETA, aDatos);
   A.elementos = ELEMENTOS;
   return A;
+}
+
+// {periodo: n|null} -> respuesta de experiencia_automatizados.ashx.
+function aDatos(valores, duenos) {
+  var periodos = [];
+  Object.keys(valores || {}).forEach(function (k) {
+    if (valores[k] != null) periodos.push({ periodo: Number(k), automatizados: valores[k], resueltos: 1 });
+  });
+  return { periodos: periodos, duenos: duenos || [] };
 }
 
 function sinFunciones(o) { return JSON.parse(JSON.stringify(o)); }
@@ -258,50 +321,78 @@ Check('G8 respaldo: sin barras y la leyenda lo dice (no como error)', [1, true, 
    /error/.test(A.elementos.legendEvol.innerHTML)]);
 
 // ---- M) filtros ---------------------------------------------------------
+// Filas de dueños de la respuesta (SLOT 0: 2 + 1 = 3; SLOT 2: 4 + 1 sin
+// dueño = 5). Un ticket esta en una sola fila.
+var DUENOS_M = [
+  { periodo: 0, director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 2 },
+  { periodo: 0, director: 'Dir B', po: 'PO Y', manager: 'Mgr 2', so: 'SO Y', automatizados: 1 },
+  { periodo: 2, director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 4 },
+  { periodo: 2, director: null, po: null, manager: null, so: null, automatizados: 1 }];
 var M = arnes();
 var mBase = M.evol();
-M.estado('slot', { estado: 'listo', valores: { 0: 3, 1: 0, 2: 5 } });
+M.estado('slot', { estado: 'listo', valores: { 0: 3, 1: 0, 2: 5 }, duenos: DUENOS_M });
 function conFiltro(d, p, m, s, t) {
   M.filtrar(d, p, m, s, t);
   var g = M.evol();
   return { series: g.data.datasets.length, linea: sinFunciones(g.data.datasets[0]), offset: g.options.scales.x.offset,
+    barras: g.data.datasets[1] ? g.data.datasets[1].data : null,
     leyenda: M.elementos.legendEvol.innerHTML, tarjeta: M.tarjeta(false, 9000) };
 }
 var libre = conFiltro();
-Check('M0 sin filtros: barras', 2, libre.series);
-var SOLO = 'Automatizados SLA: solo sin filtros (valor global)';
-var SIN_FILTROS = 'No disponible con filtros: Automatizados SLA es global y no responde a los filtros activos';
-Check('M0 sin filtros: resta (9000 - 3)', '8997', libre.tarjeta.v);
-[['M1 Director', ['Dir A']], ['M1 PO', ['', 'PO X']], ['M1 Manager', ['', '', 'Mgr']],
- ['M1 SO', ['', '', '', 'SO X']], ['M1 Director + Incidentes', ['Dir A', '', '', '', 'inc']],
- ['M1 SO + Requerimientos', ['', '', '', 'SO X', 'req']]].forEach(function (c) {
-  // Con tipo la linea es la de ese tipo: se compara con el tipo solo, sin dueños.
-  var lineaSin = c[1][4] ? conFiltro('', '', '', '', c[1][4]).linea : sinFunciones(mBase.data.datasets[0]);
+Check('M0 sin filtros: barras con el total (antiguo -> reciente)', [2, [5, 0, 3]], [libre.series, libre.barras]);
+Check('M0 sin filtros: resta el total (9000 - 3)', '8997', libre.tarjeta.v);
+var DEL_FILTRO = 'Automatizados SLA (resueltos, dueños del filtro)';
+[['M1 Director', ['Dir A'], [4, 0, 2], '8998'],
+ ['M1 PO', ['', 'PO Y'], [0, 0, 1], '8999'],
+ ['M1 Manager', ['', '', 'Mgr'], [4, 0, 2], '8998'],
+ ['M1 SO', ['', '', '', 'SO Y'], [0, 0, 1], '8999'],
+ ['M1 Director + PO de otro Director', ['Dir A', 'PO Y'], [0, 0, 0], '9000'],
+ ['M1 SO sin automatizados', ['', '', '', 'SO Z'], [0, 0, 0], '9000'],
+ ['M1 los cuatro a la vez', ['Dir A', 'PO X', 'Mgr', 'SO X'], [4, 0, 2], '8998']].forEach(function (c) {
   var r = conFiltro.apply(null, c[1]);
-  Check(c[0] + ' oculta las barras y la leyenda lo dice', [1, true, false], [r.series, r.leyenda.indexOf(SOLO) >= 0, r.offset]);
-  Check(c[0] + ': la linea es identica a la de sin dueños', lineaSin, r.linea);
-  Check(c[0] + ': KPI visible en N/D, no resta el global del filtrado', ['Volumen - Automatizado', 'N/D', SIN_FILTROS],
-    [r.tarjeta.l, r.tarjeta.v, r.tarjeta.f]);
+  Check(c[0] + ': barras solo de esos dueños y la leyenda lo dice', [2, c[2], true, true],
+    [r.series, r.barras, r.leyenda.indexOf(DEL_FILTRO) >= 0, r.offset]);
+  Check(c[0] + ': la linea es identica a la de sin dueños', sinFunciones(mBase.data.datasets[0]), r.linea);
+  Check(c[0] + ': la tarjeta resta solo lo de esos dueños, nunca N/D', ['Volumen - Automatizado', c[3]],
+    [r.tarjeta.l, r.tarjeta.v]);
+  Check(c[0] + ': el pie da los dos terminos', true,
+    r.tarjeta.f === '9000 − ' + (9000 - Number(c[3])) + ' Automatizados SLA');
 });
-var varios = conFiltro('Dir A', 'PO X', 'Mgr', 'SO X', 'inc');
-Check('M2 varios filtros a la vez: sin barras ni resta', [1, true, 'N/D'],
-  [varios.series, varios.leyenda.indexOf(SOLO) >= 0, varios.tarjeta.v]);
+(function () {
+  var a = conFiltro('Dir A').barras, b = conFiltro('Dir B').barras, t = conFiltro().barras;
+  Check('M2 sin doble cuenta: Dir A + Dir B + sin dueño = total en cada periodo', t,
+    a.map(function (v, i) { return v + b[i] + (i === 0 ? 1 : 0); }));
+})();
 var vuelta = conFiltro();
-Check('M3 quitar los filtros restaura barras y leyenda', [2, false, true],
-  [vuelta.series, vuelta.leyenda.indexOf(SOLO) >= 0, /Automatizados SLA \(resueltos, global\)/.test(vuelta.leyenda)]);
-Check('M3 la vuelta pinta lo mismo que antes de filtrar', sinFunciones(libre), sinFunciones(vuelta));
-Check('M3 quitar los filtros restaura la resta', ['8997', true], [vuelta.tarjeta.v, /9000 − 3 Automatizados SLA/.test(vuelta.tarjeta.f)]);
+Check('M3 quitar los filtros pinta lo mismo que antes de filtrar', sinFunciones(libre), sinFunciones(vuelta));
+Check('M3 quitar los filtros restaura leyenda global y resta', [true, '8997'],
+  [/Automatizados SLA \(resueltos, global\)/.test(vuelta.leyenda), vuelta.tarjeta.v]);
 M.modo('mes');
-M.estado('mes', { estado: 'listo', valores: { 8: 1, 9: 2, 10: 3 } });
-Check('M4 "Ver por" Mes no cuenta como filtro: hay barras', 2, conFiltro().series);
+M.estado('mes', { estado: 'listo', valores: { 8: 1, 9: 2, 10: 3 },
+  duenos: [{ periodo: 10, director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 2 }] });
+Check('M4 Mes con Director: el mes en curso con pronostico de lo suyo (2 / 15 x 30 = 4)', [0, 0, 4],
+  conFiltro('Dir A').barras);
+Check('M4 Mes con Director: tarjeta = pronostico(4500) - pronostico(2) = 9000 - 4', '8996',
+  (M.filtrar('Dir A'), M.tarjeta(true, 4500).v));
+conFiltro();
 M.modo('slot');
-M.estado('slot', { estado: 'listo', valores: { 0: 0 } });
-Check('M5 con filtro tampoco resta un cero', ['N/D', SIN_FILTROS], [conFiltro('Dir A').tarjeta.v, conFiltro('Dir A').tarjeta.f]);
-Check('M5 sin filtro, automatizados en cero: el volumen tal cual', '9000', conFiltro().tarjeta.v);
-M.estado('slot:inc', { estado: 'listo', valores: { 0: 4, 1: 0, 2: 2 } });
+M.estado('slot', { estado: 'listo', valores: { 0: null, 1: 0, 2: 5 }, duenos: DUENOS_M });
+Check('M5 periodo sin dato con filtro: N/D de sin dato (no de filtro)', ['N/D', 'SLA sin dato en el periodo'],
+  [conFiltro('Dir A').tarjeta.v, conFiltro('Dir A').tarjeta.f]);
+M.estado('slot', { estado: 'listo', valores: { 0: 0, 1: 0, 2: 0 } });
+Check('M5 automatizados en cero, con o sin filtro: el volumen tal cual', ['9000', '9000'],
+  [conFiltro('Dir A').tarjeta.v, conFiltro().tarjeta.v]);
+M.estado('slot', { estado: 'listo', valores: { 0: 3, 1: 0, 2: 5 }, duenos: DUENOS_M });
+M.estado('slot:inc', { estado: 'listo', valores: { 0: 4, 1: 0, 2: 2 }, duenos: [
+  { periodo: 0, director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 3 },
+  { periodo: 0, director: 'Dir B', po: 'PO Y', manager: 'Mgr 2', so: 'SO Y', automatizados: 1 },
+  { periodo: 2, director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 2 }] });
 var soloTipo = conFiltro('', '', '', '', 'inc');
-Check('M6 el tipo solo no es filtro: barras del tipo, sin "solo sin filtros", y resta', [2, false, '8996'],
-  [soloTipo.series, soloTipo.leyenda.indexOf(SOLO) >= 0, soloTipo.tarjeta.v]);
+Check('M6 el tipo solo no es filtro de dueño: total del tipo, leyenda global', [[2, 0, 4], '8996', true],
+  [soloTipo.barras, soloTipo.tarjeta.v, /resueltos, global · Incidentes/.test(soloTipo.leyenda)]);
+var dirTipo = conFiltro('Dir A', '', '', '', 'inc');
+Check('M6 Director + Incidentes: los de ese dueño y ese tipo', [[2, 0, 3], '8997', true],
+  [dirTipo.barras, dirTipo.tarjeta.v, /dueños del filtro · Incidentes/.test(dirTipo.leyenda)]);
 conFiltro();
 
 // ---- K) tarjeta ---------------------------------------------------------
@@ -471,13 +562,44 @@ var SLA_TIPO = {
   req:   { '2026-10-23': 0, '2026-09-23': 30, '2026-08-24': null,
            '2026-08-31': 100, '2026-09-30': 0, '2026-10-31': 0 },
 };
+// Filas de dueños del SLOT 0 por tipo (suman el total de SLA_TIPO); los
+// demas periodos van enteros en la fila sin dueño.
+var SLA_DUENOS = {
+  todos: [{ director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 1000 },
+          { director: 'Dir B', po: 'PO Y', manager: 'Mgr 2', so: 'SO Y', automatizados: 400 },
+          { director: null, po: null, manager: null, so: null, automatizados: 100 }],
+  inc:   [{ director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 700 },
+          { director: 'Dir B', po: 'PO Y', manager: 'Mgr 2', so: 'SO Y', automatizados: 300 }],
+  req:   [],
+};
+// Lo que contestaria cada handler con las mismas cifras de SLA_TIPO:
+// kpis.ashx (version anterior, un rango) o experiencia_automatizados.ashx
+// (todos los periodos del rango pedido, con sus filas de dueños).
+function respuestaSla(u, datos) {
+  var url = new URL(u), q = url.searchParams, t = q.get('tipo') || 'todos', tabla = datos[t] || {};
+  if (/kpis\.ashx$/.test(url.pathname)) {
+    var v = tabla[q.get('fecha_fin')];
+    return { TicketsAutomatizados: v === undefined ? null : v };
+  }
+  var modo = q.get('modo'), periodos = [], duenos = [];
+  (modo === 'mes' ? PAYLOAD.mes_nums : PAYLOAD.slot_nums).forEach(function (p) {
+    var r = puras.rango(modo, p, HOY, PAYLOAD.anio);
+    if (r.inicio < q.get('fecha_inicio') || r.fin > q.get('fecha_fin')) return;
+    var v = tabla[r.fin];
+    if (v === undefined || v === null) return;
+    periodos.push({ periodo: p, automatizados: v, resueltos: v + 1 });
+    if (modo === 'slot' && p === 0 && datos === SLA_TIPO)
+      (SLA_DUENOS[t] || []).forEach(function (d) { duenos.push(Object.assign({ periodo: p }, d)); });
+    else if (v > 0) duenos.push({ periodo: p, director: null, po: null, manager: null, so: null, automatizados: v });
+  });
+  return { modo: modo, fechaInicio: q.get('fecha_inicio'), fechaFin: q.get('fecha_fin'), periodos: periodos, duenos: duenos };
+}
 function servidorTipo(urls, datos, especial) {
   return function (u) {
     urls.push(u);
-    var q = new URL(u).searchParams, t = q.get('tipo') || 'todos';
+    var t = new URL(u).searchParams.get('tipo') || 'todos';
     if (especial && especial[t]) return especial[t](u);
-    var v = (datos[t] || {})[q.get('fecha_fin')];
-    return Promise.resolve({ TicketsAutomatizados: v === undefined ? null : v });
+    return Promise.resolve(respuestaSla(u, datos));
   };
 }
 function espera() { return new Promise(function (r) { setTimeout(r, 0); }); }
@@ -505,6 +627,7 @@ async function escenario(fuenteX, modo, tipo) {
 }
 
 var ANTES_TIPO = '0985851';   // experiencia.js antes de que la tarjeta respondiera al tipo
+var ANTES_UNA = 'ab58e7d';    // experiencia.js con una llamada a kpis.ashx por periodo
 async function tipoDeRegistro() {
   var antes = null;
   try {
@@ -517,7 +640,7 @@ async function tipoDeRegistro() {
     var hoy = await escenario(null, modo, 'todos');
     if (antes) {
       var ant = await escenario(antes, modo, 'todos');
-      Check('T1 ' + modo + ' Todos: mismas peticiones que ANTES_TIPO (sin ?tipo)', ant.urls, hoy.urls);
+      Check('T1 ' + modo + ' Todos: 1 peticion en vez de una por periodo', [3, 1], [ant.urls.length, hoy.urls.length]);
       Check('T1 ' + modo + ' Todos: mismas tarjetas que ANTES_TIPO', ant.tarjetas, hoy.tarjetas);
       Check('T1 ' + modo + ' Todos: misma grafica y leyenda que ANTES_TIPO', [ant.grafica, ant.leyenda], [hoy.grafica, hoy.leyenda]);
     }
@@ -532,8 +655,8 @@ async function tipoDeRegistro() {
   Check('T2 Incidentes: Volumen Actual = vol_tipo.inc.slot[0]', '6000', inc.tarjetas[0].v);
   Check('T2 Incidentes: 6000 - 1000 = 5000', ['Volumen - Automatizado', '5000', '6000 − 1000 Automatizados SLA'],
     [inc.tarjetas[1].l, inc.tarjetas[1].v, inc.tarjetas[1].f]);
-  Check('T2 Incidentes: una peticion por SLOT, con su rango y ?tipo=inc',
-    ['2026-09-24|2026-10-23|inc', '2026-08-25|2026-09-23|inc', '2026-07-26|2026-08-24|inc'], rangosDe(inc.urls));
+  Check('T2 Incidentes: una peticion con los tres SLOTs y ?tipo=inc',
+    ['2026-07-26|2026-10-23|inc'], rangosDe(inc.urls));
   Check('T2 Incidentes: barras del tipo (antiguo -> reciente), cero es cero', [0, 40, 1000], inc.barras);
   Check('T2 Incidentes: linea = vol_tipo.inc (antiguo -> reciente)', [18, 12, 6000], inc.linea.data);
   Check('T2 Incidentes: leyenda dice el tipo, sin "solo sin filtros"', [true, false],
@@ -550,7 +673,7 @@ async function tipoDeRegistro() {
   var req = await escenario(null, 'slot', 'req');
   Check('T3 Requerimientos: 2500 - 0 = 2500 (cero no es sin dato)', ['2500', '2500 − 0 Automatizados SLA'],
     [req.tarjetas[1].v, req.tarjetas[1].f]);
-  Check('T3 Requerimientos: ?tipo=req en las tres peticiones', ['req', 'req', 'req'],
+  Check('T3 Requerimientos: ?tipo=req en la peticion', ['req'],
     req.urls.map(function (u) { return new URL(u).searchParams.get('tipo'); }));
   Check('T3/T9 Requerimientos: barra sin dato = hueco, cero = cero', [null, 30, 0], req.barras);
 
@@ -560,8 +683,8 @@ async function tipoDeRegistro() {
   Check('T4 Mes Incidentes: 6000 - 800 = 5200, real 3000 - 400 = 2600', ['5200', true, true],
     [incMes.tarjetas[1].v, /6000 − 800 Automatizados SLA/.test(incMes.tarjetas[1].f),
      /Real a la fecha: 2600/.test(incMes.tarjetas[1].f)]);
-  Check('T4 Mes Incidentes: un mes por peticion con ?tipo=inc',
-    ['2026-08-01|2026-08-31|inc', '2026-09-01|2026-09-30|inc', '2026-10-01|2026-10-31|inc'], rangosDe(incMes.urls));
+  Check('T4 Mes Incidentes: los tres meses en una peticion con ?tipo=inc',
+    ['2026-08-01|2026-10-31|inc'], rangosDe(incMes.urls));
   var reqMes = await escenario(null, 'mes', 'req');
   Check('T4 Mes Requerimientos: pronostico(1200) - 0 = 2400', ['2400', true],
     [reqMes.tarjetas[1].v, /2400 − 0 Automatizados SLA/.test(reqMes.tarjetas[1].f)]);
@@ -573,7 +696,7 @@ async function tipoDeRegistro() {
     seq.push(tarjetas(S)[1].v);
   }
   Check('T5 Todos -> Inc -> Req -> Todos -> Inc', ['7500', '5000', '2500', '7500', '5000'], seq);
-  Check('T5 cada tipo se pide una vez (la vuelta reusa lo pedido)', 9, urls5.length);
+  Check('T5 cada tipo se pide una vez (la vuelta reusa lo pedido)', 3, urls5.length);
 
   // T6) Los filtros de dueño y "Ver por" se conservan al cambiar el tipo.
   var F6 = arnes({ traer: servidorTipo([], SLA_TIPO) });
@@ -592,9 +715,8 @@ async function tipoDeRegistro() {
     A.filtrar('Dir A', '', '', '', 'inc'); A.pedir('slot'); await espera();
     return tarjetas(A)[1];
   })();
-  Check('T6 dueño + tipo: sigue N/D por el dueño (regla de dueños sin cambio)',
-    ['N/D', 'No disponible con filtros: Automatizados SLA es global y no responde a los filtros activos'],
-    [conDueno.v, conDueno.f]);
+  Check('T6 dueño + tipo: Incidentes de ese Director (6000 - 700), ya no N/D',
+    ['5300', '6000 − 700 Automatizados SLA'], [conDueno.v, conDueno.f]);
 
   // T7) Un tipo sin datos: volumen 0 y SLA sin resueltos -> el N/D de "sin dato".
   var vacio = JSON.parse(JSON.stringify(PAYLOAD));
@@ -629,9 +751,9 @@ async function tipoDeRegistro() {
     [tarjetas(R9)[1].v, tarjetas(R9)[1].f]);
 
   var pendientes = [];
-  function suelta() { pendientes.forEach(function (r) { r({ TicketsAutomatizados: 1000 }); }); }
-  var L = arnes({ traer: servidorTipo([], SLA_TIPO, { inc: function () {
-    return new Promise(function (r) { pendientes.push(r); }); } }) });
+  function suelta() { pendientes.forEach(function (r) { r(r.respuesta); }); }
+  var L = arnes({ traer: servidorTipo([], SLA_TIPO, { inc: function (u) {
+    return new Promise(function (r) { r.respuesta = respuestaSla(u, SLA_TIPO); pendientes.push(r); }); } }) });
   L.pedir('slot'); await espera();
   L.tipo('inc'); L.pedir('slot'); await espera();
   L.tipo('todos');
@@ -641,35 +763,64 @@ async function tipoDeRegistro() {
     [L.repintados.slice(), tarjetas(L)[1].v]);
   L.tipo('inc');
   Check('T9 al volver a Incidentes se usa lo que llego (6000 - 1000)', '5000', tarjetas(L)[1].v);
+
+  // E) sin filtros de dueño, lo que se ve es IGUAL a ANTES_UNA (una llamada
+  // a kpis.ashx por periodo) con las mismas cifras de SLA, en los dos modos
+  // y los tres tipos; las demas tarjetas, iguales.
+  var una = null;
+  try {
+    una = limpiar(cp.execSync('git show ' + ANTES_UNA + ':experiencia/experiencia.js',
+      { cwd: raiz, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }));
+  } catch (err) { console.log('SKIP  E sin git o sin ' + ANTES_UNA + ': no se compara con la version anterior'); }
+  if (una) {
+    for (var mE of ['slot', 'mes']) {
+      for (var tE of ['todos', 'inc', 'req']) {
+        var viejo = await escenario(una, mE, tE), actual = await escenario(null, mE, tE);
+        var c = 'E ' + mE + ' ' + tE;
+        Check(c + ': mismas tarjetas que ANTES_UNA', viejo.tarjetas, actual.tarjetas);
+        Check(c + ': misma grafica y leyenda que ANTES_UNA', [viejo.grafica, viejo.leyenda], [actual.grafica, actual.leyenda]);
+        Check(c + ': 1 peticion en vez de ' + viejo.urls.length, [3, 1], [viejo.urls.length, actual.urls.length]);
+      }
+    }
+    var viejoDueno = await (async function () {
+      var A = arnes({ fuente: una, traer: servidorTipo([], SLA_TIPO) });
+      A.filtrar('', '', '', 'SO X'); A.pedir('slot'); await espera(); return tarjetas(A)[1];
+    })();
+    var nuevoDueno = await (async function () {
+      var A = arnes({ traer: servidorTipo([], SLA_TIPO) });
+      A.filtrar('', '', '', 'SO X'); A.pedir('slot'); await espera(); return tarjetas(A)[1];
+    })();
+    Check('E con SO: antes N/D (la falla que se corrige), ahora 9000 - 1000', ['N/D', '8000'], [viejoDueno.v, nuevoDueno.v]);
+  }
 }
 
 // ---- N) peticiones ------------------------------------------------------
 (async function () {
   var urls = [];
-  var N = arnes({ traer: function (u) {
-    urls.push(u);
-    var q = new URL(u).searchParams;
-    return Promise.resolve({ TicketsAutomatizados: q.get('fecha_fin') === HOY ? 5 : 0 });
-  } });
+  var N = arnes({ traer: function (u) { urls.push(u); return Promise.resolve(respuestaSla(u, { todos: {
+    '2026-10-23': 5, '2026-09-23': 0, '2026-08-24': 0, '2026-08-31': 1, '2026-09-30': 2, '2026-10-31': 3 } })); } });
   N.pedir('slot');
   Check('N1 queda cargando', 'cargando', N.leer('slot').estado);
   N.pedir('slot');
   await new Promise(function (r) { setTimeout(r, 0); });
-  Check('N2 una peticion por SLOT, aunque se llame dos veces', 3, urls.length);
-  Check('N2 al handler de KPIs de SLA con el rango del SLOT', [
-    'http://x/handlers/kpis.ashx?fecha_inicio=2026-09-24&fecha_fin=2026-10-23',
-    'http://x/handlers/kpis.ashx?fecha_inicio=2026-08-25&fecha_fin=2026-09-23',
-    'http://x/handlers/kpis.ashx?fecha_inicio=2026-07-26&fecha_fin=2026-08-24'], urls);
+  Check('N2 una sola peticion para todos los SLOTs, aunque se llame dos veces', 1, urls.length);
+  Check('N2 al handler de Experiencia con modo y el rango de los tres SLOTs',
+    ['http://x/handlers/experiencia_automatizados.ashx?modo=slot&fecha_inicio=2026-07-26&fecha_fin=2026-10-23'], urls);
   Check('N3 valores por SLOT', { estado: 'listo', valores: { 0: 5, 1: 0, 2: 0 } }, N.leer('slot'));
   Check('N4 repinta tarjeta y grafica del modo', ['kpis:slot', 'evol:slot'], N.repintados.slice());
+
+  // Cambiar de dueño no pide nada: se filtra lo que ya llego.
+  N.filtrar('Dir A'); N.pedir('slot'); N.filtrar('', 'PO X', 'Mgr'); N.pedir('slot'); N.filtrar();
+  Check('N4 cambiar los filtros de dueño no pide de nuevo', 1, urls.length);
 
   urls.length = 0;
   N.repintados.length = 0;
   N.pedir('mes');
   N.modo('slot');   // el usuario vuelve a SLOT antes de que llegue la respuesta
   await new Promise(function (r) { setTimeout(r, 0); });
-  Check('N5 Mes: un mes por peticion', ['2026-08-01|2026-08-31', '2026-09-01|2026-09-30', '2026-10-01|2026-10-31'],
-    urls.map(function (u) { var q = new URL(u).searchParams; return q.get('fecha_inicio') + '|' + q.get('fecha_fin'); }));
+  Check('N5 Mes: los tres meses en una peticion', ['mes|2026-08-01|2026-10-31'],
+    urls.map(function (u) { var q = new URL(u).searchParams; return q.get('modo') + '|' + q.get('fecha_inicio') + '|' + q.get('fecha_fin'); }));
+  Check('N5 Mes: valores por mes', { estado: 'listo', valores: { 8: 1, 9: 2, 10: 3 } }, N.leer('mes'));
   Check('N6 no repinta si ya se cambio de modo', [], N.repintados.slice());
 
   var R = arnes({ errApi: true, traer: function () { throw new Error('no deberia pedir'); } });
@@ -686,6 +837,13 @@ async function tipoDeRegistro() {
   J.pedir('slot');
   await new Promise(function (r) { setTimeout(r, 0); });
   Check('N9 respuesta que no es JSON: error, no cero', ['error', '—'], [J.leer('slot').estado, J.tarjeta(false).v]);
+  var S = arnes({ traer: function () { return Promise.resolve({ modo: 'slot' }); } });
+  S.pedir('slot');
+  await new Promise(function (r) { setTimeout(r, 0); });
+  Check('N9 respuesta sin periodos: error, no cero', ['error', '—'], [S.leer('slot').estado, S.tarjeta(false).v]);
+  var X = arnes({ payload: Object.assign({}, PAYLOAD, { meta: {} }), traer: function () { throw new Error('no deberia pedir'); } });
+  X.pedir('slot');
+  Check('N10 sin fecha de corte: error sin pedir', 'error', X.leer('slot').estado);
 
   await tipoDeRegistro();
 
