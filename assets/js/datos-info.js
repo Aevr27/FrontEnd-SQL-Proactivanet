@@ -210,16 +210,22 @@
 
   // Mensaje de una sola linea en el mismo sitio y con el mismo aspecto
   // (cargando, o el error de la peticion). Asi el nodo no cambia de forma
-  // segun quien escriba en el.
-  DatosInfo.mensaje = function (nodo, texto, titulo) {
+  // segun quien escriba en el. consultado: opcional, como en pintarEn (el
+  // sello de Efectividad es un mensaje y tambien lleva su "Consultado").
+  DatosInfo.mensaje = function (nodo, texto, titulo, consultado) {
     var destino = (typeof nodo === 'string') ? document.getElementById(nodo) : nodo;
     if (!destino) return;
     destino.textContent = '';
     destino.classList.add('datos-info');
-    var div = document.createElement('div');
-    div.className = 'datos-info-linea';
-    div.textContent = texto;
-    destino.appendChild(div);
+    var lineas = [texto];
+    var hora = DatosInfo.fechaHora(consultado);
+    if (hora) lineas.push('Consultado: ' + hora);
+    lineas.forEach(function (t) {
+      var div = document.createElement('div');
+      div.className = 'datos-info-linea';
+      div.textContent = t;
+      destino.appendChild(div);
+    });
     if (titulo) destino.title = titulo; else destino.removeAttribute('title');
   };
 

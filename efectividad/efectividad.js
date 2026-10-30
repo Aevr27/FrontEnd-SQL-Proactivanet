@@ -349,35 +349,85 @@
   function error(txt) { $('error').hidden = !txt; $('error-msg').textContent = txt || ''; }
 
   /* ------------------------------------------------------------ carga */
-  function cargar() {
-    estado('Cargando…');
-    error('');
-    fetch(API, { cache: 'no-store', credentials: 'same-origin' })
+  /* fondo = refresco (el automatico de dashboard.js o "Actualizar"): la
+     misma peticion, sin "Cargando…"; los filtros, la busqueda, el orden, la
+     hoja a la vista y los motivos desplegados se quedan. Si falla, lo que se
+     ve se queda y la pastilla lo avisa. -> Promise (null, o el estado HTTP
+     del fallo). */
+  var enVuelo = false, cargadoUnaVez = false;
+  function cargar(fondo) {
+    fondo = fondo === true && cargadoUnaVez;
+    if (!fondo) { estado('Cargando…'); error(''); }
+    enVuelo = true;
+    var http = null;
+    return fetch(API, { cache: 'no-store', credentials: 'same-origin' })
       .then(function (r) {
+        http = r.status;
         return r.json().catch(function () { return { error: 'HTTP ' + r.status }; })
           .then(function (j) { if (!r.ok && !j.error) j.error = 'HTTP ' + r.status; return j; });
       })
       .then(function (j) {
         if (j.error) throw new Error(j.error);
         datos = j;
+        cargadoUnaVez = true;
+        error('');
+        var consultado = DatosInfo.ahoraLocal();
         if (!j.hay_calculo) {
           $('sin-calculo').hidden = false;
           $('contenido').hidden = true;
-          estado('Sin cálculo');
-          return;
+          DatosInfo.mensaje($('estado'), 'Sin cálculo', '', consultado);
+          return null;
         }
         $('sin-calculo').hidden = true;
         $('contenido').hidden = false;
+        var abiertos = motivosAbiertos();
         llenarSelects();
         pintar();
+        abrirMotivos(abiertos);
         var c = j.corrida || {};
-        estado('Cálculo del ' + dia(c.fecha_calculo) + (c.fecha_calculo && c.fecha_calculo.length > 10 ? ' ' + c.fecha_calculo.slice(11, 16) : ''));
+        DatosInfo.mensaje($('estado'), 'Cálculo del ' + dia(c.fecha_calculo) +
+          (c.fecha_calculo && c.fecha_calculo.length > 10 ? ' ' + c.fecha_calculo.slice(11, 16) : ''), '', consultado);
         $('excel').disabled = false;
+        return null;
       })
       .catch(function (e) {
-        estado('');
-        error(e && e.message ? e.message : String(e));
-      });
+        var msg = e && e.message ? e.message : String(e);
+        if (fondo) {
+          DatosInfo.avisoRefresco($('estado'), '⚠ No se pudo actualizar (' +
+            DatosInfo.fechaHora(DatosInfo.ahoraLocal()) + '); se muestran los datos anteriores', msg);
+          console.error('[Efectividad]', e);
+        } else {
+          estado('');
+          error(msg);
+        }
+        return http === 401 || http === 403 ? http : null;
+      })
+      .then(function (r) { enVuelo = false; return r; });
+  }
+
+  // Motivos desplegados de "No se puede calificar" (<details>): pintarSin
+  // rehace la hoja, y un refresco los vuelve a abrir por grupo y motivo.
+  function motivosAbiertos() {
+    return Array.prototype.map.call($('sin-grupos').querySelectorAll('details[open][data-motivo]'),
+      function (d) { return d.getAttribute('data-motivo'); });
+  }
+  function abrirMotivos(claves) {
+    Array.prototype.forEach.call($('sin-grupos').querySelectorAll('details[data-motivo]'), function (d) {
+      if (claves.indexOf(d.getAttribute('data-motivo')) >= 0) d.open = true;
+    });
+  }
+
+  /* Refresco automatico (dashboard.js) y boton "Actualizar". Nunca encima de
+     una carga en vuelo ni antes de la primera buena; con la boleta abierta
+     espera (puedeRefrescar), porque repintar cambiaria la lista de debajo
+     mientras se lee. */
+  function refrescar() {
+    if (enVuelo || !cargadoUnaVez) return Promise.resolve(null);
+    return cargar(true);
+  }
+  function actualizarAhora() {
+    if (enVuelo) return Promise.resolve(null);
+    return cargar(true);
   }
 
   /* ------------------------------------------------------------ filtros */
@@ -571,7 +621,7 @@
         (g.folios.size === 1 ? ' iniciativa' : ' iniciativas') + '</span></h4><p class="nota">' + esc(g.nota) + '</p>';
       if (!g.motivos.length) html += '<p class="nota">Ninguna con estos filtros.</p>';
       g.motivos.forEach(function (m) {
-        html += '<details><summary>' + esc(m.motivo) + ' — <b>' + n0(m.folios.size) + '</b>' +
+        html += '<details data-motivo="' + esc(g.id + '|' + m.motivo) + '"><summary>' + esc(m.motivo) + ' — <b>' + n0(m.folios.size) + '</b>' +
           (m.folios.size === 1 ? ' iniciativa' : ' iniciativas') + '</summary>' +
           '<div class="ef-tabla-wrap"><table class="ef-tabla"><thead><tr><th scope="col">Folio</th><th scope="col">Iniciativa</th>' +
           '<th scope="col">Estado</th><th scope="col">Categoría en el Excel</th></tr></thead><tbody>' +
@@ -911,9 +961,12 @@
   };
 
   /* ------------------------------------------------------------ arranque */
+  if (window.RefrescoAuto) RefrescoAuto.cablearBoton($('actualizar'), actualizarAhora);
   window.TableroEfectividadModulo = {
     redimensionar: function () { /* las graficas son SVG con viewBox: se ajustan solas */ },
-    recargar: cargar,
+    recargar: function () { return cargar(); },
+    refrescar: refrescar,
+    puedeRefrescar: function () { return !boleta.open; },
   };
   cargar();
 })();

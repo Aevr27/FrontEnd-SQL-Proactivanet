@@ -52,6 +52,9 @@
       <div class="acciones-top">
         <!-- "Fijar KPIs" (assets/js/kpis-fijos.js): pega #ef-kpis arriba al bajar. -->
         <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="ef-kpis" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
+        <!-- Pide los datos ya, sin tocar filtros (en el tablero tambien se
+             refrescan solos cada RefrescoAuto.INTERVALO_DATOS). -->
+        <button type="button" class="btn linea chico" id="ef-actualizar" title="Volver a consultar los datos con los mismos filtros">Actualizar</button>
         <div class="estado" id="ef-estado" role="status"></div>
       </div>
     </header>
@@ -153,6 +156,7 @@
   </div>
 </div>
 <script src="../assets/js/datos-info.js"></script>
+<script src="../assets/js/refresco-auto.js"></script>
 <script src="../assets/js/seleccion-kpi.js"></script>
 <script src="../assets/js/kpis-fijos.js"></script>
 <script src="efectividad.js"></script>

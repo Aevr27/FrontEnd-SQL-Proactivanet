@@ -68,6 +68,7 @@
        del tablero, con la misma nota: solo para la pagina suelta. -->
   <link rel="stylesheet" href="../assets/css/datos-info.css">
   <script src="../assets/js/datos-info.js"></script>
+  <script src="../assets/js/refresco-auto.js"></script>
   <link rel="stylesheet" href="../assets/css/kpis-fijos.css">
   <script src="../assets/js/kpis-fijos.js"></script>
   <script src="../assets/js/seleccion-kpi.js"></script>
@@ -94,6 +95,9 @@
              .datos-info, compartida con SLA, Backlog y Experiencia. Ya no lleva
              .chip: esa era la version propia de QA de la misma pastilla. -->
         <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="qa-kpis" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
+        <!-- Pide los datos ya, sin tocar filtros (en el tablero tambien se
+             refrescan solos cada RefrescoAuto.INTERVALO_DATOS). -->
+        <button type="button" class="btn linea chico" id="qa-btn-actualizar" title="Volver a consultar los datos con los mismos filtros">Actualizar</button>
         <div id="qa-chip-fecha"></div>
       </div>
     </header>

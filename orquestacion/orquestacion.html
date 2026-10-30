@@ -40,6 +40,7 @@
        (direcciones, N3, jobs) se pega con innerHTML y entra como texto. -->
   <script src="../assets/js/escape.js"></script>
   <script src="../assets/js/datos-info.js"></script>
+  <script src="../assets/js/refresco-auto.js"></script>
   <script src="../assets/js/paleta.js"></script>
   <script src="../assets/js/barras.js"></script>
   <script src="../assets/js/seleccion-kpi.js"></script>
@@ -57,6 +58,9 @@
       <div class="acciones-top">
         <!-- "Fijar KPIs" (assets/js/kpis-fijos.js): pega #orq-kpis arriba al bajar. -->
         <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="orq-kpis" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
+        <!-- Pide los datos ya, sin tocar filtros (en el tablero tambien se
+             refrescan solos cada RefrescoAuto.INTERVALO_DATOS). -->
+        <button type="button" class="btn linea chico" id="orq-actualizar" title="Volver a consultar los datos con los mismos filtros">Actualizar</button>
         <div class="estado" id="orq-estado" role="status"></div>
       </div>
     </header>

@@ -4032,7 +4032,7 @@ const SOPORTA_SCOPE = (() => {
   } catch (e) { return false; }
 })();
 
-function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () => {}, refrescar = null }) {
+function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () => {}, refresco = null }) {
 
   async function texto(ruta) {
     const resp = await fetch(ruta, { cache: 'no-store' });
@@ -4146,9 +4146,38 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
      .active antes de llamar a init()), asi que al volver no hay que
      reconstruir nada: como mucho, remedir lo que quedo con el contenedor
      oculto. Cada modulo dice si necesita ese aviso. */
-  /* refrescar: solo los modulos que lo publican (Backlog, QARE). El resto
-     no se refresca solo; ver el bloque del refresco automatico. */
-  return { init, redimensionar: alVolver, refrescar };
+  /* refresco: refrescoDe(<global del modulo>) en los que se refrescan solos
+     (ver el bloque del refresco automatico); sin el, la pestaña no entra. */
+  return {
+    init,
+    redimensionar: alVolver,
+    refrescar: refresco ? refresco.refrescar : null,
+    puedeRefrescar: refresco ? refresco.puedeRefrescar : null,
+  };
+}
+
+/* Refresco de un modulo embebido. Lo hace el propio modulo, que publica en
+   window[global] (al arrancar):
+     refrescar()       -> Promise<estado HTTP | null>: su misma carga en modo
+                          "fondo" (mismos filtros, sin "Cargando...", lo de
+                          antes se queda si falla);
+     puedeRefrescar()  -> bool, opcional: false mientras el usuario tiene algo
+                          abierto que el repintado cerraria (un modal, una
+                          boleta). Ese refresco espera a la siguiente vuelta.
+   Mientras el modulo no ha publicado nada (su script sigue arrancando), no
+   se refresca. */
+function refrescoDe(global) {
+  return {
+    refrescar: () => {
+      const modulo = window[global];
+      return modulo && modulo.refrescar ? modulo.refrescar() : Promise.resolve(null);
+    },
+    puedeRefrescar: () => {
+      const modulo = window[global];
+      return !!(modulo && modulo.refrescar) &&
+        (typeof modulo.puedeRefrescar !== 'function' || modulo.puedeRefrescar());
+    },
+  };
 }
 
 const TableroExperiencia = moduloEmbebido({
@@ -4158,6 +4187,7 @@ const TableroExperiencia = moduloEmbebido({
   pagina: 'experiencia.html',
   hoja: 'experiencia.css',
   guion: 'experiencia.js',
+  refresco: refrescoDe('TableroExperienciaModulo'),
 });
 
 /* Backlog: mismo trato que Experiencia y QA desde que salio a backlog/. El
@@ -4182,6 +4212,7 @@ const TableroEfectividad = moduloEmbebido({
     const modulo = window.TableroEfectividadModulo;
     if (modulo) modulo.redimensionar();
   },
+  refresco: refrescoDe('TableroEfectividadModulo'),
 });
 
 const TableroBacklog = moduloEmbebido({
@@ -4195,16 +4226,13 @@ const TableroBacklog = moduloEmbebido({
     const modulo = window.TableroBacklogModulo;
     if (modulo) modulo.redimensionar();
   },
-  refrescar: () => {
-    const modulo = window.TableroBacklogModulo;
-    return modulo && modulo.refrescar ? modulo.refrescar() : Promise.resolve(null);
-  },
+  refresco: refrescoDe('TableroBacklogModulo'),
 });
 
 /* QA: el modulo publica window.TableroQaModulo al arrancar. Mientras la
    pestaña estuvo oculta su contenedor midio cero, asi que al volver se le
-   pide que remida sus graficas; los datos ya cargados se quedan como estan y
-   no se repite ninguna peticion a qa.ashx. */
+   pide que remida sus graficas. Volver no vuelve a montar nada: si sus
+   datos ya pasaron el intervalo, se refrescan en su sitio (refrescoDe). */
 const TableroQa = moduloEmbebido({
   nombre: 'QA',
   base: 'qa/',
@@ -4216,6 +4244,7 @@ const TableroQa = moduloEmbebido({
     const modulo = window.TableroQaModulo;
     if (modulo) modulo.redimensionar();
   },
+  refresco: refrescoDe('TableroQaModulo'),
 });
 
 /* QARE: mismo trato que QA. El modulo publica window.TableroQareModulo al
@@ -4232,10 +4261,7 @@ const TableroQare = moduloEmbebido({
     const modulo = window.TableroQareModulo;
     if (modulo) modulo.redimensionar();
   },
-  refrescar: () => {
-    const modulo = window.TableroQareModulo;
-    return modulo && modulo.refrescar ? modulo.refrescar() : Promise.resolve(null);
-  },
+  refresco: refrescoDe('TableroQareModulo'),
 });
 
 /* Analisis de servicios: mismo trato que QARE. El modulo publica
@@ -4257,8 +4283,9 @@ const TableroAnalisis = moduloEmbebido({
 
 /* Orquestacion: mismo trato que Efectividad. El modulo pide
    orquestacion.ashx una vez al montarse (y ?detalle=1 al abrir la lista de
-   jobs); al volver a la pestaña solo se remiden sus graficas de Chart.js, que
-   midieron cero si se pintaron con el contenedor oculto. */
+   jobs); al volver a la pestaña se remiden sus graficas de Chart.js, que
+   midieron cero si se pintaron con el contenedor oculto, y el refresco
+   automatico vuelve a pedir orquestacion.ashx (refrescoDe). */
 const TableroOrquestacion = moduloEmbebido({
   nombre: 'Orquestación',
   base: 'orquestacion/',
@@ -4270,6 +4297,7 @@ const TableroOrquestacion = moduloEmbebido({
     const modulo = window.TableroOrquestacionModulo;
     if (modulo) modulo.redimensionar();
   },
+  refresco: refrescoDe('TableroOrquestacionModulo'),
 });
 
 /* =======================================================================
@@ -4498,17 +4526,24 @@ function activarTab(nombre) {
    filtros, sin "Cargando...", sin borrar lo que se ve si falla y con
    "Consultado: ..." en la pastilla solo tras una respuesta buena.
 
-   Cubre SLA y Call Center (una sola carga), Backlog y QARE. No cubre:
-     - Experiencia, QA: su carga vacia y rehace la pantalla por fases; se
-       actualizan al volver a abrir la pagina.
-     - Efectividad (calculo por lotes) y Orquestacion (carga del Excel): su
-       dato cambia con un proceso aparte, no con el ETL de tickets.
-     - Analisis de servicios: se calcula con su boton Analizar.
+   Cubre SLA y Call Center (una sola carga), Backlog, QARE, QA,
+   Experiencia, Efectividad y Orquestacion (refrescoDe). Cada modulo se
+   sigue montando la primera vez que se abre (`listo`), no al cargar la
+   pagina: montarlos todos al arrancar no quita ningun obstaculo -lo que
+   faltaba era la carga en modo "fondo" de cada uno- y si sumaria al inicio
+   su HTML, su script y su consulta, ademas de graficas medidas en cero
+   dentro de un contenedor oculto. Un modulo ya montado que no se esta
+   viendo no pide nada: al volver a el, si sus datos ya pasaron el
+   intervalo, se refresca en ese momento (refrescarSiViejo). No cubre:
+     - Analisis de servicios: se calcula con su boton Analizar sobre el
+       servicio elegido (una descarga grande que procesa un Worker) y su
+       hoja "Reglas" tiene cambios de prueba sin guardar.
      - Observabilidad: instantanea generada, no consulta SQL.
 
    No refresca con la pagina oculta (RefrescoAuto), con un filtro o fecha
-   con el foco, ni con un desplegable abierto. Nunca dos a la vez: el
-   temporizador espera a que termine la vuelta anterior y cada modulo se
+   con el foco, con un desplegable abierto, ni cuando el modulo dice que
+   no (puedeRefrescar: un modal o una boleta abiertos). Nunca dos a la vez:
+   el temporizador espera a que termine la vuelta anterior y cada modulo se
    salta el refresco si ya tiene una carga en vuelo.
    ======================================================================= */
 let pestanaActiva = null;
@@ -4524,6 +4559,8 @@ function moduloRefrescable() {
   const cont = document.getElementById('tab-' + n);
   if (!window.RefrescoAuto) return null;
   if (RefrescoAuto.editando(document, cont) || RefrescoAuto.eligiendo(document)) return null;
+  const puede = MODULOS[n].puedeRefrescar;
+  if (typeof puede === 'function' && !puede()) return null;
   return n;
 }
 

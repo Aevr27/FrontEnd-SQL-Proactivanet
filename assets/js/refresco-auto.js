@@ -110,8 +110,9 @@
   // con el ETL; mas seguido solo sumaria peticiones.
   RefrescoAuto.INTERVALO = 120000;
 
-  // 5 minutos: datos de los tableros (SLA, Call Center, Backlog, QARE en
-  // dashboard.js) y el registro de Iniciativas en Admin. Es el UNICO sitio
+  // 5 minutos: datos de los tableros (SLA, Call Center, Backlog, QARE, QA,
+  // Experiencia, Efectividad y Orquestacion en dashboard.js) y el registro
+  // de Iniciativas en Admin. Es el UNICO sitio
   // donde se cambia: quien refresca datos lo lee de aqui. No acelera el
   // dato de origen: lo que llega depende del ETL (ver DASHBOARD.md, 2.4).
   RefrescoAuto.INTERVALO_DATOS = 300000;

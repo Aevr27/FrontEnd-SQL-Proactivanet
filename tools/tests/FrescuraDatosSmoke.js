@@ -123,7 +123,7 @@ Check('D3 sin fecha no se inventa ninguna (nodo vacio)', [[], false], [lineasDe(
 // ---- E) Experiencia ----
 var fuenteExp = leer('experiencia/experiencia.js');
 var pintarCorte = new Function('DatosInfo',
-  recortar(fuenteExp, /function pintarCorteExperiencia\(cf, P, respaldo\)\{[\s\S]*?\n\}/, 'pintarCorteExperiencia') +
+  recortar(fuenteExp, /function pintarCorteExperiencia\(cf, P, respaldo, consultado\)\{[\s\S]*?\n\}/, 'pintarCorteExperiencia') +
   '\nreturn pintarCorteExperiencia;')(DatosInfo);
 var cf = Nodo('div');
 pintarCorte(cf, { meta: { ultimaActualizacion: '2026-10-12T07:00:00', periodoInicio: '2026-09-12', periodoFin: '2026-10-11', tipoPeriodo: 'rango' } }, false);
@@ -140,7 +140,7 @@ Check('E4 en vivo sin metadato: nada (no se inventa)', [], lineasDe(cf));
 cf = Nodo('div');
 pintarCorte(cf, { meta: { ultimaActualizacion: '2026-09-02', tipoPeriodo: 'corte' } }, true);
 Check('E5 respaldo con meta: tambien dice respaldo', ['Datos de respaldo, no en vivo · Corte: 02/09/2026'], lineasDe(cf));
-Check('E6 se llama con !!errApi tras cargar', true, /pintarCorteExperiencia\(document\.getElementById\('corteFecha'\), P, !!errApi\);/.test(fuenteExp));
+Check('E6 se llama con !!errApi tras cargar', true, /pintarCorteExperiencia\(document\.getElementById\('corteFecha'\), P, !!errApi, consultado\);/.test(fuenteExp));
 Check('E7 el aviso de arriba dice "no en vivo"', true, /<b>Datos de respaldo, no en vivo\.<\/b>/.test(fuenteExp));
 var mockExp = JSON.parse(fs.readFileSync(path.join(raiz, 'experiencia', 'data', 'experiencia.mock.json'), 'utf8').replace(/^﻿/, ''));
 Check('E8 el respaldo real trae su propia fecha (dd/mm/aaaa)', true, /^\d{2}\/\d{2}\/\d{4}$/.test(mockExp.fecha_actualizacion));
@@ -152,7 +152,7 @@ var orq = new Function('DatosInfo', 'document', 'n0',
   "var PREFIJO = 'orq-';\n" +
   recortar(fuenteOrq, /  function \$\(id\) \{[^\n]*\}/, '$ orquestacion') + '\n' +
   recortar(fuenteOrq, /  function estado\(txt\) \{[\s\S]*?\n  \}/, 'estado orquestacion') + '\n' +
-  recortar(fuenteOrq, /  function estadoCarga\(j\) \{[\s\S]*?\n  \}/, 'estadoCarga orquestacion') +
+  recortar(fuenteOrq, /  function estadoCarga\(j, consultado\) \{[\s\S]*?\n  \}/, 'estadoCarga orquestacion') +
   '\nreturn { estado: estado, carga: estadoCarga };')(DatosInfo, docOrq, function (v) { return String(v); });
 var est = Nodo('div'); docOrq.ids['orq-estado'] = est;
 orq.carga({ meta: { ultimaActualizacion: '2026-10-26T09:15:00', tipoPeriodo: 'corte' },
@@ -171,7 +171,7 @@ orq.estado('Cargando…');
 Check('O4 mensaje en la misma pastilla', [['Cargando…'], true], [lineasDe(est), est.classList.contains('datos-info')]);
 orq.estado('');
 Check('O5 vacio: sin pastilla (no deja hueco en la cabecera)', [[], false], [lineasDe(est), est.classList.contains('datos-info')]);
-Check('O6 cargar() pinta la pastilla con la respuesta', true, /estadoCarga\(j\);/.test(fuenteOrq));
+Check('O6 cargar() pinta la pastilla con la respuesta', true, /estadoCarga\(j, consultado\);/.test(fuenteOrq));
 var htmlOrq = leer('orquestacion/orquestacion.html');
 Check('O7 la pagina suelta carga datos-info.js y datos-info.css', [true, true],
   [/<script src="\.\.\/assets\/js\/datos-info\.js"><\/script>/.test(htmlOrq),

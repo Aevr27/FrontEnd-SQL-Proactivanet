@@ -659,7 +659,10 @@
             var msg = (datos && typeof datos.message === 'string')
               ? datos.message
               : 'El servidor respondio con el codigo ' + respuesta.status + '.';
-            throw new Error(msg);
+            // El estado viaja aparte: con 401 / 403 el refresco se detiene.
+            var e = new Error(msg);
+            e.estado = respuesta.status;
+            throw e;
           }
           if (datos === null) {
             throw new Error('La respuesta del servidor llego vacia o con un formato no valido.');
@@ -679,13 +682,21 @@
   }
 
   // -------------------------------------------------------------- resumen
-  function cargarResumen() {
-    $('error-global').hidden = true;
+  /* fondo = refresco (el automatico de dashboard.js o "Actualizar"): la
+     misma vista y las mismas peticiones, sin "Calculando…" y, si algo falla,
+     lo que se ve se queda y la pastilla lo avisa. Las dos graficas de Top 10
+     tambien se refrescan (siguen siendo de la carga por omision, ver
+     pintarBase). -> Promise (null, o el estado HTTP de un fallo). */
+  var resumenEnVuelo = 0, cargadoUnaVez = false;
+  function cargarResumen(fondo) {
+    fondo = fondo === true;
+    if (!fondo) $('error-global').hidden = true;
 
     // qa.ashx solo existe si un servidor lo ejecuta. Abierta desde el disco la
     // pagina no tiene origen HTTP y el fetch muere en CORS: mejor decirlo. El
     // tablero se queda en pantalla, con sus bloques marcados sin datos.
     if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+      if (fondo) return Promise.resolve(null);
       faseUnoFallo('Sin servidor.');
       if (!estado.baseLista) baseFallo();
       mensajeLienzo('msg-validacion', 'Sin servidor.', 'lienzo-msg-error');
@@ -695,19 +706,21 @@
         'QA del tablero o en el sitio publicado en IIS. Los datos se consultan a ' +
         'la base desde el servidor, no desde el navegador.';
       $('error-global').hidden = false;
-      return;
+      return Promise.resolve(null);
     }
 
     // Mismo control que QARE: un rango al reves no sale a la red.
     var vista = estado.vista;
     if (!vista.inicio || !vista.fin || vista.inicio > vista.fin) {
+      // En fondo un rango a medio escribir no se toca: se espera al usuario.
+      if (fondo) return Promise.resolve(null);
       ++estado.peticionResumen;   // lo que estuviera en vuelo ya no pinta
       var msg = 'Rango de fechas invalido: la fecha inicio debe ser anterior o igual a la fecha fin.';
       faseUnoFallo(msg);
       if (!estado.baseLista && !estado.basePidiendo) cargarBase();
       $('error-global-msg').textContent = msg;
       $('error-global').hidden = false;
-      return;
+      return Promise.resolve(null);
     }
 
     // Si el usuario recarga varias veces seguidas, solo la ultima peticion
@@ -717,57 +730,86 @@
     var params = parametrosVista(vista, estado.defecto);
     var rango = { inicio: vista.inicio, fin: vista.fin };
 
-    // Lo que sigue a los filtros vuelve a "Calculando"; las graficas no.
-    kpisEnEspera('—');
-    filaTabla('tbody-recat', 3, 'Calculando…');
-    esperandoCompleto();
+    // Lo que sigue a los filtros vuelve a "Calculando"; las graficas no. Un
+    // refresco no: lo de antes se ve hasta que llegue lo nuevo.
+    if (!fondo) {
+      kpisEnEspera('—');
+      filaTabla('tbody-recat', 3, 'Calculando…');
+      esperandoCompleto();
+    }
 
     /* La vista por omision es la misma peticion de siempre y de ella salen
        tambien las dos graficas: no se pide dos veces. Con otra vista las
-       graficas van por su cuenta (cargarBase), una sola vez. */
-    var alimentaBase = esPorOmision(vista, estado.defecto) && !estado.baseLista;
+       graficas van por su cuenta (cargarBase): una sola vez al abrir y una
+       vez en cada refresco. */
+    var porOmision = esPorOmision(vista, estado.defecto);
+    var alimentaBase = porOmision && (fondo || !estado.baseLista);
+    var base = null;
     if (alimentaBase) estado.basePidiendo = true;
+    else if (fondo) base = cargarBase(true);
     else if (!estado.baseLista && !estado.basePidiendo) cargarBase();
 
-    pedir(Object.assign({ action: 'summary' }, params))
+    resumenEnVuelo++;
+    var resumen = pedir(Object.assign({ action: 'summary' }, params))
       .then(function (datos) {
         if (!datos.summary || !datos.source) {
           throw new Error('La respuesta no contiene la informacion de resumen esperada.');
         }
-        if (alimentaBase) pintarBase(datos);
-        if (token !== estado.peticionResumen) return;
+        if (alimentaBase) pintarBase(datos, fondo);
+        if (token !== estado.peticionResumen) return null;
+        // La vista por omision la decide el servidor: si en un refresco su
+        // rango ya es otro (cambio el dia), las cifras son de ese rango.
+        var s = datos.source || {};
+        if (fondo && porOmision && s.fechaInicio && s.fechaFin) rango = { inicio: s.fechaInicio, fin: s.fechaFin };
         estado.resumen = datos;
-        pintarTablero(datos, params, rango);
+        cargadoUnaVez = true;
         $('error-global').hidden = true;
+        return pintarTablero(datos, params, rango, fondo);
       })
       .catch(function (err) {
         if (alimentaBase) { estado.basePidiendo = false; if (!estado.baseLista) baseFallo(); }
-        if (token !== estado.peticionResumen) return;
+        if (token !== estado.peticionResumen) return null;
+        if (fondo && cargadoUnaVez) {
+          avisoRefresco(err);
+          return err.estado || null;
+        }
         // El aviso va arriba, como banda, y el tablero sigue en pantalla: los
         // bloques que no dependen de esta peticion no tienen por que
         // desaparecer.
         faseUnoFallo(err.message);
         $('error-global-msg').textContent = err.message;
         $('error-global').hidden = false;
-      });
+        return err.estado || null;
+      })
+      .then(function (r) { resumenEnVuelo--; return r; });
+    return base ? Promise.all([resumen, base]).then(function (r) { return r[0]; }) : resumen;
+  }
+
+  // Un refresco que fallo: lo de antes se queda y la pastilla lo dice.
+  function avisoRefresco(err) {
+    DatosInfo.avisoRefresco($('chip-fecha'), '⚠ No se pudo actualizar (' +
+      DatosInfo.fechaHora(DatosInfo.ahoraLocal()) + '); se muestran los datos anteriores', err.message);
+    console.error('[QA]', err);
   }
 
   /* Las dos graficas de Top 10 cuando la vista NO es la de por omision y
      todavia no se pintaron (un filtro puesto antes de que llegara la primera
      carga, o la primera carga fallo y se reintenta con filtros). Es la misma
-     peticion por omision de siempre, y solo pinta las graficas. */
-  function cargarBase() {
+     peticion por omision de siempre, y solo pinta las graficas. En un
+     refresco las repinta; si falla, se quedan las de antes. -> Promise. */
+  function cargarBase(refresco) {
     estado.basePidiendo = true;
-    pedir({ action: 'summary' })
-      .then(function (datos) { pintarBase(datos); })
+    return pedir({ action: 'summary' })
+      .then(function (datos) { pintarBase(datos, refresco === true); })
       .catch(function () { estado.basePidiendo = false; if (!estado.baseLista) baseFallo(); });
   }
 
-  /* UNICO sitio que pinta las dos graficas, y solo una vez: con la carga por
-     omision (los 15 dias de siempre, sin filtros). Ni los filtros, ni
-     Limpiar, ni Reintentar las repintan; asi no cambian con nada de arriba. */
-  function pintarBase(datos) {
-    if (estado.baseLista) return;
+  /* UNICO sitio que pinta las dos graficas: con la carga por omision (los 15
+     dias de siempre, sin filtros), una vez al abrir y otra en cada refresco
+     (refrescar). Ni los filtros, ni Limpiar, ni Reintentar las repintan; asi
+     no cambian con nada de arriba. */
+  function pintarBase(datos, refresco) {
+    if (estado.baseLista && !refresco) return;
     estado.baseLista = true;
     estado.basePidiendo = false;
     pintarGrupo(datos.porGrupo || []);
@@ -785,14 +827,14 @@
   }
 
   // params: los de la vista, para que la distribucion por estado pida lo
-  // mismo que el resumen.
-  function pintarTablero(datos, params, rango) {
+  // mismo que el resumen. -> Promise (la segunda fase) o null.
+  function pintarTablero(datos, params, rango, fondo) {
     /* Pastilla de la cabecera: "Última actualización" y "Periodo" de
        datos.dataInfo (el sello es el fin del ultimo ETL en dbo.EtlLog, via
-       qa.ashx). El resto de la procedencia (datos.source: origen, tickets en
-       el rango, vista, consultado) ya no se muestra; sigue llegando por
-       compatibilidad. */
-    DatosInfo.pintar($('chip-fecha'), datos.dataInfo);
+       qa.ashx), y "Consultado": la hora de esta respuesta buena. El resto de
+       la procedencia (datos.source: origen, tickets en el rango, vista,
+       consultado) ya no se muestra; sigue llegando por compatibilidad. */
+    DatosInfo.pintar($('chip-fecha'), datos.dataInfo, { consultado: DatosInfo.ahoraLocal() });
     pintarKpis(datos.summary, datos.historico, rango);
     // porGrupo / porTecnico de esta respuesta no se pintan: las graficas son
     // de la carga por omision (pintarBase).
@@ -804,11 +846,11 @@
     // aqui se pinta un aviso y llega en una segunda peticion. Todo lo demas ya
     // esta en pantalla.
     if (datos.validacion === null) {
-      esperandoCompleto();
-      cargarCompleto(params);
-    } else {
-      pintarValidacion(datos.validacion || []);
+      if (!fondo) esperandoCompleto();
+      return cargarCompleto(params, fondo);
     }
+    pintarValidacion(datos.validacion || []);
+    return null;
   }
 
   function esperandoCompleto() {
@@ -818,21 +860,25 @@
   }
 
   // Segunda peticion. La respuesta trae ademas los contadores QA/QARE y el top
-  // de categorias; hoy solo se pinta la distribucion por estado.
-  function cargarCompleto(params) {
+  // de categorias; hoy solo se pinta la distribucion por estado. En un
+  // refresco que falla se queda la dona de antes. -> Promise (null).
+  function cargarCompleto(params, fondo) {
     var token = estado.peticionResumen;
 
-    pedir(Object.assign({ action: 'qare' }, params))
+    return pedir(Object.assign({ action: 'qare' }, params))
       .then(function (datos) {
-        if (token !== estado.peticionResumen) return;   // hubo otra recarga
+        if (token !== estado.peticionResumen) return null;   // hubo otra recarga
         pintarValidacion(datos.validacion || []);
+        return null;
       })
       .catch(function (err) {
         // Falla solo esta fase: los KPIs, las dos graficas de barras y la
         // recategorizacion ya estan en pantalla y ahi se quedan.
-        if (token !== estado.peticionResumen) return;
+        if (token !== estado.peticionResumen) return null;
+        if (fondo) { avisoRefresco(err); return null; }
         mensajeLienzo('msg-validacion', 'Error al cargar datos.', 'lienzo-msg-error');
         $('leyenda-validacion').innerHTML = '<div class="vacio">' + esc(err.message) + '</div>';
+        return null;
       });
   }
 
@@ -1186,19 +1232,23 @@
     });
   }
 
-  function cargarDetalle() {
+  /* fondo = refresco: la misma pagina con los mismos filtros, sin "cargando";
+     si falla, se quedan las filas de antes. -> Promise (null). */
+  function cargarDetalle(fondo) {
+    fondo = fondo === true;
     estado.detalleAbierto = true;
-    pintarFiltros();
-    repintarKpis();     // la marca de "Tickets incorrectos" sigue al filtro
-
-    $('detalle-cargando').hidden = false;
-    $('detalle-error').hidden = true;
+    if (!fondo) {
+      pintarFiltros();
+      repintarKpis();     // la marca de "Tickets incorrectos" sigue al filtro
+      $('detalle-cargando').hidden = false;
+      $('detalle-error').hidden = true;
+    }
 
     var token = ++estado.peticionDetalle;
 
     // Los filtros de la tabla (validacion, grupo, tecnico, grupo correcto) se
     // suman a los de arriba: el detalle es siempre el de la vista.
-    pedir(Object.assign({
+    return pedir(Object.assign({
       action: 'detail',
       validacion: estado.filtros.validacion,
       grupo: estado.filtros.grupo,
@@ -1207,15 +1257,19 @@
       page: estado.pagina,
       pageSize: estado.tamano
     }, parametrosVista(estado.vista, estado.defecto))).then(function (datos) {
-      if (token !== estado.peticionDetalle) return;   // respuesta vieja, se ignora
+      if (token !== estado.peticionDetalle) return null;   // respuesta vieja, se ignora
       $('detalle-cargando').hidden = true;
+      $('detalle-error').hidden = true;
       pintarDetalle(datos);
       $('detalle-panel').hidden = false;
+      return null;
     }).catch(function (err) {
-      if (token !== estado.peticionDetalle) return;
+      if (token !== estado.peticionDetalle) return null;
+      if (fondo) { console.error('[QA detalle]', err); return null; }
       $('detalle-cargando').hidden = true;
       $('detalle-error-msg').textContent = err.message;
       $('detalle-error').hidden = false;
+      return null;
     });
   }
 
@@ -1328,6 +1382,31 @@
       estado.pagina = 1;
       cargarDetalle();
     }
+  }
+
+  /* Refresco automatico (dashboard.js) y boton "Actualizar": la vista que se
+     esta viendo, y el detalle si esta abierto, en su misma pagina. Nunca
+     encima de un resumen en vuelo o de una carga programada por un filtro
+     (esa ya trae lo ultimo), ni antes de la primera carga buena. El
+     automatico y el boton comparten UN refresco en vuelo. */
+  var refrescoEnCurso = null;
+  function refrescoFondo() {
+    if (!refrescoEnCurso) {
+      var detalle = estado.detalleAbierto ? cargarDetalle(true) : null;
+      refrescoEnCurso = Promise.all([cargarResumen(true), detalle])
+        .then(function (r) { return r[0]; }, function () { return null; })
+        .then(function (r) { refrescoEnCurso = null; return r; });
+    }
+    return refrescoEnCurso;
+  }
+  function refrescar() {
+    if (resumenEnVuelo > 0 || cargaProgramada !== null || !cargadoUnaVez) return Promise.resolve(null);
+    return refrescoFondo();
+  }
+  // Boton "Actualizar": igual; sin carga buena todavia, una normal.
+  function actualizarAhora() {
+    if (resumenEnVuelo > 0) return Promise.resolve(null);
+    return cargadoUnaVez ? refrescoFondo() : cargarResumen();
   }
 
   var ESPERA_AUTO = 250;
@@ -1453,7 +1532,8 @@
   }
 
   function conectarEventos() {
-    $('btn-reintentar').addEventListener('click', cargarResumen);
+    $('btn-reintentar').addEventListener('click', function () { cargarResumen(); });
+    if (window.RefrescoAuto) RefrescoAuto.cablearBoton($('btn-actualizar'), actualizarAhora);
     conectarFiltros();
 
     $('btn-detalle').addEventListener('click', function () {
@@ -1531,13 +1611,15 @@
   /* Lo unico que el modulo publica hacia fuera. Lo usa TableroQa (dashboard.js)
      al volver a la pestaña: las graficas siguen montadas y solo hay que
      remedirlas, porque mientras la pestaña estuvo oculta su contenedor midio
-     cero. La logica de QA no sale de este archivo. */
+     cero; y el refresco automatico (refrescar). La logica de QA no sale de
+     este archivo. */
   window.TableroQaModulo = {
     redimensionar: function () {
       Object.keys(graficas).forEach(function (k) {
         if (graficas[k]) graficas[k].resize();
       });
     },
-    recargar: cargarResumen
+    recargar: function () { return cargarResumen(); },
+    refrescar: refrescar
   };
 })(typeof window !== 'undefined' ? window : this);

@@ -232,8 +232,18 @@ var RA = caja.RefrescoAuto;
     [(pag.match(/new window\.RefrescoAuto\(/g) || []).length, /\[this\.cola, this\.nuevas, this\.mias\]/.test(pag),
      /l\.refrescarFondo\(\)/.test(pag) && /l\.puedeRefrescar\(\)/.test(pag),
      /intervalo: window\.RefrescoAuto\.INTERVALO_DATOS/.test(pag) && /regAuto\.puedeRefrescar\(\)/.test(pag) && /regAuto\.refrescarFondo\(\)/.test(pag)]);
-  Check('W3 Experiencia y QA no usan el refresco automatico (ver dashboard.js, 4ter)', [],
-    ['experiencia/experiencia.js', 'qa/qa.js'].filter(function (f) { return /RefrescoAuto/.test(leer(f)); }));
+  // Experiencia, QA, Efectividad y Orquestacion se refrescan con el MISMO
+  // temporizador del tablero: ninguno arma el suyo, publican refrescar() y
+  // el router los conoce por refrescoDe(). Analisis y Observabilidad no.
+  var MODS = ['experiencia/experiencia.js', 'qa/qa.js', 'efectividad/efectividad.js', 'orquestacion/orquestacion.js'];
+  Check('W3 los cuatro modulos no arman temporizador propio', [],
+    MODS.filter(function (f) { return /new (window\.)?RefrescoAuto\(/.test(leer(f)); }));
+  Check('W3b los cuatro publican refrescar y su pagina suelta carga refresco-auto.js', [true, true, true, true],
+    MODS.map(function (f) { return /refrescar[,:]/.test(leer(f)) && /refresco-auto\.js/.test(leer(f.replace(/\.js$/, '.html'))); }));
+  var dash0 = leer('dashboard.js');
+  Check('W3c el router los refresca (refrescoDe) y no a Analisis', [true, true, true, true, false],
+    ['TableroExperienciaModulo', 'TableroQaModulo', 'TableroEfectividadModulo', 'TableroOrquestacionModulo', 'TableroAnalisisModulo']
+      .map(function (g) { return dash0.indexOf("refrescoDe('" + g + "')") >= 0; }));
   var dash = leer('dashboard.js'), dashHtml = leer('dashboard.html');
   Check('W4 dashboard: UN RefrescoAuto con INTERVALO_DATOS; refresco-auto.js antes de dashboard.js', [1, true, true],
     [(dash.match(/new RefrescoAuto\(/g) || []).length, /intervalo: RefrescoAuto\.INTERVALO_DATOS/.test(dash),

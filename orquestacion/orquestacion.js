@@ -377,19 +377,23 @@
     n.classList.remove('datos-info');
     n.removeAttribute('title');
   }
-  function estadoCarga(j) {
+  // consultado: la hora de esta respuesta buena (DatosInfo.ahoraLocal).
+  function estadoCarga(j, consultado) {
     var c = j.carga || {};
     var meta = j.meta || DatosInfo.armar({
       fuente: 'Orquestación',
       sello: c.fecha ? String(c.fecha).replace(' ', 'T') : '',
     });
-    DatosInfo.pintar($('estado'), meta, { rotuloSello: 'Carga del Excel' });
+    DatosInfo.pintar($('estado'), meta, { rotuloSello: 'Carga del Excel', consultado: consultado });
   }
   function error(txt) { $('error').hidden = !txt; $('error-msg').textContent = txt || ''; }
 
-  function pedir(url) {
+  // alEstado: opcional, recibe el estado HTTP (el refresco se detiene con
+  // 401 / 403).
+  function pedir(url, alEstado) {
     return fetch(url, { cache: 'no-store', credentials: 'same-origin' })
       .then(function (r) {
+        if (alEstado) alEstado(r.status);
         return r.json().catch(function () { return { error: 'HTTP ' + r.status }; })
           .then(function (j) { if (!r.ok && !j.error) j.error = 'HTTP ' + r.status; return j; });
       })
@@ -397,16 +401,30 @@
   }
 
   /* ------------------------------------------------------------ carga */
-  function cargar() {
-    estado('Cargando…');
-    error('');
-    pedir(API).then(function (j) {
+  /* fondo = refresco (el automatico de dashboard.js o "Actualizar"): la
+     misma peticion, sin "Cargando…"; los filtros, las direcciones
+     desplegadas, el indicador del historico y la lista de jobs (abierta, con
+     su "Mostrar", su busqueda y su tope) se quedan. La lista (?detalle=1) es
+     de la carga del Excel: solo se vuelve a pedir si llego otra carga. Si
+     falla, lo que se ve se queda y la pastilla lo avisa.
+     -> Promise (null, o el estado HTTP del fallo). */
+  var enVuelo = false, cargadoUnaVez = false;
+  function cargar(fondo) {
+    fondo = fondo === true && cargadoUnaVez;
+    if (!fondo) { estado('Cargando…'); error(''); }
+    enVuelo = true;
+    var http = null;
+    var antes = datos && datos.carga ? datos.carga.numero : null;
+    return pedir(API, function (s) { http = s; }).then(function (j) {
       datos = j;
+      cargadoUnaVez = true;
+      error('');
+      var consultado = DatosInfo.ahoraLocal();
       if (!j.hay_datos) {
         $('sin-datos').hidden = false;
         $('contenido').hidden = true;
-        estado('Sin datos');
-        return;
+        DatosInfo.mensaje($('estado'), 'Sin datos', '', consultado);
+        return null;
       }
       jobs = Calc.tabla(j.jobs);
       decomisos = Calc.tabla(j.decomisos);
@@ -414,15 +432,57 @@
       $('sin-datos').hidden = true;
       $('contenido').hidden = false;
       llenarFiltros();
+      if (fondo) ajustarFiltros();
       llenarHistorico();
+      var otraCarga = detalle && (!j.carga || j.carga.numero !== antes);
+      if (otraCarga) detalle = null;
       pintar();
       pintarCarga();
-      estadoCarga(j);
+      estadoCarga(j, consultado);
       $('excel').disabled = false;
+      // Lista abierta y otra carga: se trae la suya y se repinta en su sitio.
+      if (otraCarga && !$('lista').hidden) {
+        return traerDetalle().then(function () { pintarLista(); return null; }, function (e) {
+          $('lista').hidden = true; $('ver-jobs').textContent = 'Ver la lista';
+          if (vista) pintarKpis();
+          error('No se pudo traer la lista de jobs: ' + (e && e.message ? e.message : e));
+          return null;
+        });
+      }
+      return null;
     }).catch(function (e) {
-      estado('');
-      error(e && e.message ? e.message : String(e));
-    });
+      var msg = e && e.message ? e.message : String(e);
+      if (fondo) {
+        DatosInfo.avisoRefresco($('estado'), '⚠ No se pudo actualizar (' +
+          DatosInfo.fechaHora(DatosInfo.ahoraLocal()) + '); se muestran los datos anteriores', msg);
+        console.error('[Orquestacion]', e);
+      } else {
+        estado('');
+        error(msg);
+      }
+      return http === 401 || http === 403 ? http : null;
+    }).then(function (r) { enVuelo = false; return r; });
+  }
+
+  /* Tras un refresco, un filtro cuyo valor ya no viene en los datos se
+     quita (el <select> ya no lo tiene y no debe seguir filtrando a
+     escondidas). */
+  function ajustarFiltros() {
+    if (f.dir !== $('dir').value) { f.dir = ''; f.n3 = ''; llenarN3(); }
+    f.herr = $('herr').value;
+    var hay = Calc.candidatos(jobs);
+    f.cand = f.cand.filter(function (v) { return hay.indexOf(v) >= 0; });
+  }
+
+  /* Refresco automatico (dashboard.js) y boton "Actualizar": nunca encima de
+     una carga en vuelo ni antes de la primera buena. */
+  function refrescar() {
+    if (enVuelo || !cargadoUnaVez) return Promise.resolve(null);
+    return cargar(true);
+  }
+  function actualizarAhora() {
+    if (enVuelo) return Promise.resolve(null);
+    return cargar(true);
   }
 
   /* ------------------------------------------------------------ filtros */
@@ -635,12 +695,15 @@
     return graficas[id];
   }
 
+  // El indicador elegido se queda en un refresco; la primera vez, el de siempre.
   function llenarHistorico() {
     var sel = $('h-ind');
+    var antes = sel.value;
     sel.innerHTML = Calc.HISTORICO.map(function (h) {
       return '<option value="' + esc(h.id) + '">' + esc(h.nombre) + '</option>';
     }).join('');
-    sel.value = 'MigradosNuevos';
+    sel.value = antes || 'MigradosNuevos';
+    if (!sel.value) sel.value = 'MigradosNuevos';
     sel.onchange = pintarHistorico;
     pintarHistorico();
   }
@@ -898,11 +961,13 @@
   };
 
   /* ------------------------------------------------------------ tablero */
+  if (window.RefrescoAuto) RefrescoAuto.cablearBoton($('actualizar'), actualizarAhora);
   window.TableroOrquestacionModulo = {
     // Las graficas que se pintaron con la pestaña oculta midieron cero.
     redimensionar: function () {
       Object.keys(graficas).forEach(function (k) { if (graficas[k]) graficas[k].resize(); });
     },
+    refrescar: refrescar,
   };
 
   cargar();

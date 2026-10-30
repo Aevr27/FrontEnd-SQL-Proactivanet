@@ -42,9 +42,11 @@ const MOCK_URL = new URL('data/experiencia.mock.json', BASE).href;
    consultas por id siguen yendo contra `document`: son unicas. */
 const RAIZ = document.getElementById('tab-experiencia') || document.body;
 
+// La clase marca el aviso para que un refresco que vuelve a traer datos en
+// vivo lo quite (ver adoptarDatos).
 function avisar(html, color){
   RAIZ.insertAdjacentHTML('afterbegin',
-    '<div style="background:' + color.bg + ';border:1px solid ' + color.bd + ';' +
+    '<div class="exp-aviso-origen" style="background:' + color.bg + ';border:1px solid ' + color.bd + ';' +
     'color:' + color.fg + ';border-radius:10px;padding:14px 18px;' +
     'margin-bottom:14px;font-size:13px">' + html + '</div>');
 }
@@ -79,7 +81,10 @@ try {
   }
 }
 
-const P = DATOS;
+/* `let` y no `const`: el refresco automatico (adoptarDatos, al final) pone
+   aqui la respuesta nueva. Todo lo que pinta lee P al llamarse, asi que
+   basta con cambiarlo y repintar. */
+let P = DATOS;
 
 /* Escape de HTML. La implementacion es la compartida de assets/js/escape.js:
    todo lo que sale del handler -categorias, titulos, descripciones, folios,
@@ -135,14 +140,14 @@ const NEUTRO_SEM = '#8a8578'; // referencia / sin dato
    COLOR_ESTADO son ESTADO y ORDEN, no identidad: no salen de la paleta. */
 const PALETA_CATEGORICA = Paleta.PALETA_CATEGORICA;
 
-const AGR = P.agrupadores;
+let AGR = P.agrupadores;
 /* Identidad de AGRUPADOR. El color no se toma de P.acolor -lo manda el
    servidor (App_Code/ExperienciaQueries.cs) y ahi no se toca un cambio de
    tema-: se reasigna en presentacion contra la paleta compartida. Se
    conserva el ORDEN y el juego de claves del servidor, que es canonico y
    estable, asi que un agrupador lleva siempre el mismo color -en los chips,
    en la grafica de historico y donde aparezca- sin depender del repintado. */
-const ACOLOR = Paleta.mapa(AGR || Object.keys(P.acolor || {}));
+let ACOLOR = Paleta.mapa(AGR || Object.keys(P.acolor || {}));
 
 // Los chips de agrupador se distinguen por el TINTE de fondo; la tinta es
 // siempre la misma para que el texto se lea a 5.7:1 sobre blanco.
@@ -248,8 +253,9 @@ const TIPOS_REGISTRO={todos:'Todos', inc:'Incidentes', req:'Requerimientos'};
 const CAMPOS_VOL=['vol_slot','vol_mes','vol_actual','vol_anterior','delta',
   'vol_actual_mes','vol_anterior_mes','delta_mes'];
 // Sin vol_tipo (el mock, o un handler anterior) el selector no se ofrece.
-const HAY_TIPOS=P.categorias.length>0
-  && P.categorias.concat(P.categorias_v2||[]).every(c=>!!c.vol_tipo);
+const hayTiposEn=d=>d.categorias.length>0
+  && d.categorias.concat(d.categorias_v2||[]).every(c=>!!c.vol_tipo);
+let HAY_TIPOS=hayTiposEn(P);
 // Los campos de volumen de una categoria para un tipo. 'todos' son los que
 // mando el handler (guardados en c._todos). Para inc/req se recalculan de
 // la serie como ExperienciaQueries.ArmarCategorias: actual = SLOT 0 / mes
@@ -365,9 +371,12 @@ function periodosAutomatizados(modo){
 // Se pide la primera vez que se ve cada modo con cada tipo de registro; al
 // llegar se repintan solo la tarjeta y la grafica, y solo si se sigue en ese
 // modo y ese tipo. En Todos la URL es la de siempre (sin ?tipo).
-function pedirAutomatizados(modo){
+// fondo = refresco: se vuelve a pedir aunque ya este; lo que habia se sigue
+// viendo (sin "cargando") y, si falla, se queda.
+function pedirAutomatizados(modo, fondo){
   const tipo=tipoRegistro, clave=claveAutomatizados(modo);
-  if(automatizados[clave]) return;
+  const previo=automatizados[clave];
+  if(previo && !(fondo && (previo.estado==='listo' || previo.estado==='error'))) return;
   const hoyISO = P.meta && P.meta.periodoFin;
   const rangos = (periodosAutomatizados(modo)||[]).map(p=>[p, rangoAutomatizados(modo, p, hoyISO, P.anio)]);
   if(errApi){
@@ -378,8 +387,8 @@ function pedirAutomatizados(modo){
     automatizados[clave] = {estado:'error', valores:{}};
     return;
   }
-  automatizados[clave] = {estado:'cargando', valores:{}};
-  Promise.all(rangos.map(([p, r])=>{
+  if(!previo) automatizados[clave] = {estado:'cargando', valores:{}};
+  return Promise.all(rangos.map(([p, r])=>{
     const url=new URL(KPIS_SLA_URL);
     url.searchParams.set('fecha_inicio', r.inicio);
     url.searchParams.set('fecha_fin', r.fin);
@@ -391,7 +400,7 @@ function pedirAutomatizados(modo){
     automatizados[clave] = {estado:'listo', valores};
   }, err=>{
     console.warn('[Experiencia] automatizados SLA:', err);
-    automatizados[clave] = {estado:'error', valores:{}};
+    if(!previo) automatizados[clave] = {estado:'error', valores:{}};
   }).then(()=>{
     if(modoTiempo!==modo || tipoRegistro!==tipo) return;
     const agg=aggCats();
@@ -410,18 +419,19 @@ function pedirAutomatizados(modo){
    que cuando no hay valor: los dos enlaces nacen con display:none en el
    marcado y se quedan asi. No se avisa de nada al usuario -no es un error
    suyo- y el resto del tablero no cambia. */
-const LIGA_DETALLE = Escape.url(P.liga_detalle);
+let LIGA_DETALLE = '';
 
-(function(){
+// Al cargar y en cada refresco (consultado: la hora de esa respuesta buena).
+function pintarCabecera(consultado){
+  LIGA_DETALLE = Escape.url(P.liga_detalle);
   const url=LIGA_DETALLE;
-  if(url){
-    const h=document.getElementById('ligaHeader');
-    if(h){h.href=url; h.style.display='inline-flex';}
-    const m=document.getElementById('ligaModal');
-    if(m){m.href=url;}
-  }
-  pintarCorteExperiencia(document.getElementById('corteFecha'), P, !!errApi);
-})();
+  const h=document.getElementById('ligaHeader');
+  if(h){ if(url) h.href=url; h.style.display=url?'inline-flex':'none'; }
+  const m=document.getElementById('ligaModal');
+  if(m && url){m.href=url;}
+  pintarCorteExperiencia(document.getElementById('corteFecha'), P, !!errApi, consultado);
+}
+pintarCabecera(DatosInfo.ahoraLocal());
 
 /* Pastilla de la cabecera: "Última actualización" y "Periodo" de P.meta
    (el backend lo arma en App_Code/ExperienciaQueries.cs). El mock guardado
@@ -429,11 +439,12 @@ const LIGA_DETALLE = Escape.url(P.liga_detalle);
    dd/MM/yyyy. `respaldo` = el handler no respondio y P es el corte guardado:
    la pastilla lo dice en vez de "Última actualización", para que una fecha
    vieja no se lea como dato en vivo aunque el aviso de arriba quede fuera de
-   la vista. Sin fecha no se inventa ninguna. Lo prueba
-   tools/tests/FrescuraDatosSmoke.js. */
-function pintarCorteExperiencia(cf, P, respaldo){
+   la vista. Sin fecha no se inventa ninguna. `consultado` ("Consultado:
+   ...", cuando el tablero recibio la respuesta) solo en vivo: el respaldo
+   no se consulto al servidor. Lo prueba tools/tests/FrescuraDatosSmoke.js. */
+function pintarCorteExperiencia(cf, P, respaldo, consultado){
   if(!cf) return;
-  const opciones = respaldo ? { rotuloSello: 'Datos de respaldo, no en vivo · Corte' } : undefined;
+  const opciones = respaldo ? { rotuloSello: 'Datos de respaldo, no en vivo · Corte' } : { consultado };
   if(P.meta){
     DatosInfo.pintar(cf, P.meta, opciones);
   } else if(P.fecha_actualizacion){
@@ -3034,5 +3045,120 @@ fillPO(); fillSO(); renderAll();
    El guardia cubre las dos vidas del archivo: la pagina suelta lo carga con
    su propio <script>, y en la pestaña lo trae dashboard.html. */
 if (window.Desplegable) Desplegable.montar(RAIZ);
+
+/* === REFRESCO (inicio) ===
+   Refresco automatico (el de dashboard.js, cada RefrescoAuto.INTERVALO_DATOS)
+   y boton "Actualizar". La carga de arriba corre una sola vez, al montar el
+   modulo; aqui se vuelve a pedir experiencia.ashx -nunca el respaldo- y la
+   respuesta entra en P (adoptarDatos). Lo que el usuario eligio vive en
+   variables y se queda: Director / PO / Manager / SO, "Ver por", tipo de
+   registro, la seleccion de las graficas de Vencidas / Activas, las casillas
+   del Historico, la tarjeta elegida y el panel a la vista. Las tablas de
+   arbol se rehacen con renderAll, como al cambiar un filtro; las filas que
+   estaban desplegadas se vuelven a desplegar (estadoArboles).
+   Si falla, P no cambia: lo de antes se queda y la pastilla lo avisa. Con
+   un modal abierto no se refresca (puedeRefrescar): repintar cambiaria lo
+   que esta debajo mientras se lee. */
+const ARBOLES=['bodyDet','bodySin','bodyHist'];
+const MODALES=['modalBk','obsBk','catPopupBk','histChartPopupBk','descargaBk','ayudaBk'];
+
+// Nombre estable de una fila de arbol: el title (ruta completa) o el texto
+// de su primera celda con nombre. Los data-g / data-g2 son posiciones y
+// cambian si los datos nuevos ordenan distinto.
+function claveFila(tr){
+  const celda=[...tr.cells].find(td=>!td.querySelector('input'));
+  if(!celda) return null;
+  const nombre=celda.getAttribute('title') || celda.textContent.trim();
+  return (tr.classList.contains('c1row')?'1|':'2|')+nombre;
+}
+function estadoArboles(){
+  const estado={};
+  ARBOLES.forEach(id=>{
+    const cuerpo=document.getElementById(id);
+    if(!cuerpo) return;
+    estado[id]=[...cuerpo.querySelectorAll('tr.c1row.open, tr.c2exp.open')].map(claveFila).filter(Boolean);
+  });
+  return estado;
+}
+// En el orden de antes (padres primero), con su propio onclick: la fila
+// abre a sus hijos igual que con un clic.
+function restaurarArboles(estado){
+  Object.keys(estado).forEach(id=>{
+    const cuerpo=document.getElementById(id);
+    if(!cuerpo) return;
+    estado[id].forEach(clave=>{
+      const tr=[...cuerpo.querySelectorAll('tr.c1row, tr.c2exp')]
+        .find(x=>!x.classList.contains('open') && claveFila(x)===clave);
+      if(tr && tr.onclick) tr.onclick({target:tr});
+    });
+  });
+}
+
+// Director y Manager salen de P: se rehacen con la lista nueva y conservan
+// lo elegido; si ya no viene, ese filtro (y el de abajo) se quita.
+function llenarDuenos(){
+  selDir.innerHTML='<option value="">— Todos —</option>'+Catalogos.opciones(P.directores);
+  selDir.value=fDir; if(selDir.value!==fDir){ fDir=''; fPO=''; }
+  selMgr.innerHTML='<option value="">— Todos —</option>'+Catalogos.opciones(P.managers||[]);
+  selMgr.value=fMgr; if(selMgr.value!==fMgr){ fMgr=''; fSO=''; }
+  fillPO(); selPO.value=fPO; if(selPO.value!==fPO) fPO='';
+  fillSO(); selSO.value=fSO; if(selSO.value!==fSO) fSO='';
+}
+
+function adoptarDatos(nuevo){
+  const arboles=estadoArboles();
+  const eraRespaldo=!!errApi;
+  P=nuevo;
+  AGR=P.agrupadores;
+  ACOLOR=Paleta.mapa(AGR || Object.keys(P.acolor || {}));
+  HAY_TIPOS=hayTiposEn(P);
+  catV2ByPath._map=null;
+  _cacheHojaPeriodo={modo:null, tipo:null, set:null};
+  // Datos en vivo otra vez: fuera el aviso de respaldo.
+  if(eraRespaldo){ errApi=undefined; RAIZ.querySelectorAll('.exp-aviso-origen').forEach(n=>n.remove()); }
+  // Automatizados SLA: el modo y tipo a la vista se vuelve a pedir sin pasar
+  // por "cargando" (abajo); los demas, al verlos.
+  const actual=claveAutomatizados(modoTiempo);
+  Object.keys(automatizados).forEach(k=>{ if(k!==actual || eraRespaldo) delete automatizados[k]; });
+  if(!HAY_TIPOS) tipoRegistro='todos';
+  aplicarTipoRegistro(tipoRegistro); pintarTipoRegistro();
+  if(grpTipo) grpTipo.style.display = HAY_TIPOS ? '' : 'none';
+  llenarDuenos();
+  pintarCabecera(DatosInfo.ahoraLocal());
+  renderAll();
+  restaurarArboles(arboles);
+  return pedirAutomatizados(modoTiempo, true);
+}
+
+let refrescoEnCurso=null;
+function refrescar(){
+  if(!refrescoEnCurso){
+    refrescoEnCurso=traer(API_URL)
+      .then(nuevo=>{ if(!nuevo || !Array.isArray(nuevo.categorias)) throw new Error('respuesta sin categorias'); return nuevo; })
+      .then(nuevo=>{ adoptarDatos(nuevo); return null; }, err=>{
+        // En respaldo la pastilla ya dice que no es en vivo; no se agrega nada.
+        if(!errApi) DatosInfo.avisoRefresco(document.getElementById('corteFecha'),
+          '⚠ No se pudo actualizar ('+DatosInfo.fechaHora(DatosInfo.ahoraLocal())+'); se muestran los datos anteriores',
+          String(err && err.message || err));
+        console.warn('[Experiencia] refresco:', err);
+        const acceso=/HTTP (401|403)\b/.exec(String(err && err.message));
+        return acceso ? Number(acceso[1]) : null;
+      })
+      .catch(err=>{ console.error('[Experiencia] refresco:', err); return null; })
+      .then(r=>{ refrescoEnCurso=null; return r; });
+  }
+  return refrescoEnCurso;
+}
+
+const btnActualizar=document.getElementById('btnActualizarExp');
+if(window.RefrescoAuto) RefrescoAuto.cablearBoton(btnActualizar, refrescar);
+
+window.TableroExperienciaModulo = {
+  refrescar,
+  puedeRefrescar: ()=>!refrescoEnCurso && !MODALES.some(id=>{
+    const m=document.getElementById(id); return m && m.classList.contains('show');
+  }),
+};
+/* === REFRESCO (fin) === */
 
 })();
