@@ -299,7 +299,9 @@ function pronosticoMes(volReal){
    handlers/experiencia_automatizados.ashx, que cuenta las mismas filas que
    Kpis (DashboardQueries.AutomatizadosPorCategoria) y las reparte por los
    dueños de la categoria del ticket (DirectorioOrganizacional, el mismo de
-   las categorias del tablero y del export). Antes era una llamada a
+   las categorias del tablero y del export). Sin los tipos SorIA, igual que
+   el volumen (ExperienciaQueries.SinSorIA): en Todos da menos que la
+   tarjeta de SLA, que si los cuenta. Antes era una llamada a
    kpis.ashx por periodo -10 en SLOT, hasta 12 en Mes- con la consulta de
    KPIs entera detras.
 
@@ -308,9 +310,8 @@ function pronosticoMes(volReal){
        el volumen de Experiencia;
      - Director / PO / Manager / SO se aplican aqui, con pasaFiltroGlobal,
        sobre las filas de dueños de la respuesta: cambiar de filtro no pide
-       nada. Sin filtros se usa el total del periodo, que es exactamente el
-       numero de kpis.ashx (incluye los tickets sin categoria o sin dueño,
-       que ningun filtro deja pasar);
+       nada. Sin filtros se usa el total del periodo (incluye los tickets
+       sin categoria o sin dueño, que ningun filtro deja pasar);
      - el tipo de registro: con Incidentes / Requerimientos se pide
        ?tipo=inc|req y se cuentan solo los de ese Tipo de ticket, con el
        mismo corte que vol_tipo (DashboardQueries.TipoRegistroSla). En Todos
@@ -366,8 +367,7 @@ function numeroAutomatizado(v) {
   return (v === null || v === undefined || v === '' || isNaN(Number(v))) ? null : Number(v);
 }
 // {periodo: n} de la respuesta de experiencia_automatizados.ashx. Sin
-// `pasa` (sin filtros de dueño) es el total del periodo, el numero de
-// kpis.ashx; con `pasa`, la suma de las filas de dueños que pasan el filtro
+// `pasa` (sin filtros de dueño) es el total del periodo; con `pasa`, la suma de las filas de dueños que pasan el filtro
 // (cada ticket esta en una sola fila: no se cuenta dos veces). Un periodo
 // sin ningun resuelto no viene en `periodos` y queda sin llave: sin dato
 // (Kpis daba NULL, la tarjeta de SLA pinta N/D); 0 es cero.

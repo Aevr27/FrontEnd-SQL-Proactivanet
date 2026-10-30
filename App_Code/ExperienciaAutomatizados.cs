@@ -10,6 +10,14 @@
 // DashboardQueries.AutomatizadosPorCategoria, que usa el mismo predicado y la
 // misma rama de EsPersona que Kpis.
 //
+// SIN SorIA: como el volumen de Experiencia (SinSorIA), no cuentan los tickets
+// de tipo 'SorIA Incidentes' / 'SorIA Peticiones'. Con ellos dentro, la resta
+// de "Volumen - Automatizado" quitaba de un volumen sin SorIA tickets SorIA
+// (2026-10-30, Manager Jesus Campa Morones: 228 de sus 236 automatizados eran
+// 'SorIA Peticiones' y la tarjeta salia en -9). Por eso, en "Todos", este
+// numero es menor que el "Automatizado" de SLA, que los sigue contando; con
+// Incidentes / Requerimientos es el mismo.
+//
 // A QUIEN SE LE CUENTA
 // --------------------
 // Al dueño de la categoria del ticket, con la UNICA resolucion de dueños del
@@ -73,7 +81,7 @@ public static partial class ExperienciaQueries
         f.FechaInicio = inicio.Date;
         f.FechaFin = fin.Date;
         f.TiposRegistro = tiposRegistro ?? new List<string>();
-        var filas = DashboardQueries.AutomatizadosPorCategoria(f, modo == MODO_MES);
+        var filas = DashboardQueries.AutomatizadosPorCategoria(f, modo == MODO_MES, true);
 
         DirectorioOrganizacional dir = null;
         foreach (var fila in filas)
@@ -96,9 +104,10 @@ public static partial class ExperienciaQueries
         return salida;
     }
 
-    // Una fila por periodo con algun resuelto: el total de automatizados (=
-    // TicketsAutomatizados de Kpis con ese rango) y el de resueltos. Un
-    // periodo que no esta aqui no tuvo ni un resuelto: Kpis daba NULL.
+    // Una fila por periodo con algun resuelto (sin SorIA): el total de
+    // automatizados (= TicketsAutomatizados de Kpis con ese rango, menos los
+    // SorIA) y el de resueltos. Un periodo que no esta aqui no tuvo ni un
+    // resuelto: sin dato, como el NULL de Kpis.
     private static List<object> PeriodosAutomatizados(List<Dictionary<string, object>> filas)
     {
         var salida = new List<object>();

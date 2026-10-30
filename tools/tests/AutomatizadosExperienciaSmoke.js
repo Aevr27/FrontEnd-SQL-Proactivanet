@@ -28,6 +28,11 @@
 //       dueños (nunca N/D por el filtro), sin pedir nada; el volumen
 //       filtrado menos esos; sin filtros vuelve el total; dueños de otro SO /
 //       PO no se restan; sin dueño no entra en ningun filtro;
+//   S)  regresion Campa (VM 2026-10-30): con Manager, el volumen (sin SorIA,
+//       ExperienciaQueries.SinSorIA) menos los automatizados del handler, que
+//       tambien vienen sin SorIA (AutomatizadosPorCategoria, sinSorIA): 226 -
+//       8 = 218, y no 226 - 236 = -10 como con los 228 'SorIA Peticiones'
+//       dentro; sin filtros y con otro Manager tambien cuadra;
 //   E)  sin filtros, tarjetas, grafica y leyenda IGUALES a ANTES_UNA (la
 //       version de una llamada a kpis.ashx por periodo) en SLOT y Mes, en
 //       Todos / Incidentes / Requerimientos; 1 peticion en vez de N;
@@ -394,6 +399,72 @@ var dirTipo = conFiltro('Dir A', '', '', '', 'inc');
 Check('M6 Director + Incidentes: los de ese dueño y ese tipo', [[2, 0, 3], '8997', true],
   [dirTipo.barras, dirTipo.tarjeta.v, /dueños del filtro · Incidentes/.test(dirTipo.leyenda)]);
 conFiltro();
+
+// ---- S) regresion Campa: SorIA fuera de los dos terminos ---------------
+// Tickets de mentira con las cifras de la VM (2026-10-30, SLOT 0, Manager
+// Jesus Campa Morones): volumen 441 SorIA + 226 sin SorIA; automatizados 228
+// 'SorIA Peticiones' (SO Laura) + 7 + 1. El volumen se arma con la regla de
+// SinSorIA y la respuesta con la del handler; la tarjeta usa el aggCats real.
+(function () {
+  var CAMPA = 'Jesus Campa Morones', OTRO = 'Otro Manager';
+  var CATS = {
+    '/Soria/Punto de Venta': { director: 'Christian Israel Garcia Oseguera', po: 'Aaron Isui Estrada Morales',
+      so: 'Laura Gabriela Angeles Reynoso', manager: CAMPA },
+    '/S-Ops/X': { director: 'Eduardo Andres Ortiz Lopez', po: CAMPA, so: 'Reiner Vargas Jardines', manager: CAMPA },
+    '/S-Ops/Y': { director: 'Eduardo Andres Ortiz Lopez', po: CAMPA, so: 'Edgar Ramos Davalos', manager: CAMPA },
+    '/Otra/Z': { director: 'Dir Otro', po: 'PO Otro', so: 'SO Otro', manager: OTRO } };
+  function lote(cat, tipo, n) { var a = []; for (var i = 0; i < n; i++) a.push({ cat: cat, tipo: tipo }); return a; }
+  // Registrados en el SLOT 0.
+  var registrados = [].concat(lote('/Soria/Punto de Venta', 'SorIA Peticiones', 441),
+    lote('/Soria/Punto de Venta', 'Petición de Servicio', 18), lote('/S-Ops/X', 'Incidencia', 208),
+    lote('/Otra/Z', 'Incidencia', 300), lote('/Otra/Z', 'SorIA Incidentes', 50));
+  // Resueltos por bot en el SLOT 0.
+  var bot = [].concat(lote('/Soria/Punto de Venta', 'SorIA Peticiones', 228), lote('/S-Ops/X', 'Petición de Servicio', 7),
+    lote('/S-Ops/Y', 'Incidencia', 1), lote('/Otra/Z', 'SorIA Incidentes', 40), lote('/Otra/Z', 'Incidencia', 12));
+  function esSorIA(t) { return t.tipo === 'SorIA Incidentes' || t.tipo === 'SorIA Peticiones'; }
+  // ExperienciaQueries.SinSorIA: el volumen de cada categoria sin SorIA.
+  var categorias = Object.keys(CATS).map(function (k) {
+    var v = registrados.filter(function (t) { return t.cat === k && !esSorIA(t); }).length;
+    return Object.assign({ categoria: k, nivel: 'C2', vol_actual: v, vol_slot: { 0: v } }, CATS[k]);
+  });
+  // experiencia_automatizados.ashx: total del periodo y filas por dueños.
+  function respuesta(sinSorIA) {
+    var porDueno = {};
+    var usados = bot.filter(function (t) { return !(sinSorIA && esSorIA(t)); });
+    usados.forEach(function (t) {
+      var d = CATS[t.cat], k = [d.director, d.po, d.manager, d.so].join('|');
+      porDueno[k] = porDueno[k] || { periodo: 0, director: d.director, po: d.po, manager: d.manager, so: d.so, automatizados: 0 };
+      porDueno[k].automatizados++;
+    });
+    return { periodos: [{ periodo: 0, automatizados: usados.length, resueltos: usados.length + 100 }],
+      duenos: Object.keys(porDueno).map(function (k) { return porDueno[k]; }) };
+  }
+  var payload = Object.assign({}, PAYLOAD, { categorias: categorias });
+  // El volumen de la tarjeta, con el aggCats / currentCats / pasaFiltroGlobal de verdad.
+  var volumenDe = new Function('P', 'fDir', 'fPO', 'fMgr', 'fSO', 'var modoTiempo="slot";' +
+    ['pasaFiltroGlobal', 'currentCats', 'aggCats', 'volActualDe'].map(function (n) { return recortar(fuente, n); }).join('') +
+    'return aggCats().reduce(function (s, c) { return s + volActualDe(c); }, 0);');
+  function tarjetaCon(sinSorIA, mgr) {
+    var A = arnes({ payload: payload });
+    A.estado('slot', { estado: 'listo', datos: respuesta(sinSorIA) });
+    A.filtrar('', '', mgr || '', '');
+    return A.tarjeta(false, volumenDe(payload, '', '', mgr || '', ''));
+  }
+  Check('S1 Campa: volumen sin SorIA = 226 (como el bloque 3 de la VM)', 226, volumenDe(payload, '', '', CAMPA, ''));
+  Check('S1 Campa: automatizados con SorIA eran 236 (228 SorIA)', [236, 228],
+    [respuesta(false).duenos.filter(function (d) { return d.manager === CAMPA; })
+      .reduce(function (s, d) { return s + d.automatizados; }, 0),
+     bot.filter(function (t) { return CATS[t.cat].manager === CAMPA && esSorIA(t); }).length]);
+  var antes = tarjetaCon(false, CAMPA), ahora = tarjetaCon(true, CAMPA);
+  Check('S2 Campa con SorIA en los automatizados: 226 - 236 = -10 (la falla)', '-10', antes.v);
+  Check('S2 Campa sin SorIA en los dos terminos: 226 - 8 = 218', ['218', '226 − 8 Automatizados SLA'], [ahora.v, ahora.f]);
+  Check('S3 sin filtros: (226 + 300) - (8 + 12) = 506', '506', tarjetaCon(true).v);
+  Check('S3 otro Manager: 300 - 12 = 288 (sus SorIA tampoco)', '288', tarjetaCon(true, OTRO).v);
+  Check('S4 SO Laura (solo SorIA automatizados): 18 - 0 = 18, cero no es sin dato', '18',
+    (function () { var A = arnes({ payload: payload }); A.estado('slot', { estado: 'listo', datos: respuesta(true) });
+      A.filtrar('', '', '', 'Laura Gabriela Angeles Reynoso');
+      return A.tarjeta(false, volumenDe(payload, '', '', '', 'Laura Gabriela Angeles Reynoso')).v; })());
+})();
 
 // ---- K) tarjeta ---------------------------------------------------------
 var K = arnes();

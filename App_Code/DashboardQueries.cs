@@ -622,8 +622,16 @@ FROM conPct;";
        GROUPING SETS: la fila de total por periodo (EsTotal = 1, con
        Resueltos) y una por categoria que tuvo algun automatizado; las demas
        categorias no viajan. Categoria es b.Categoria cruda: los cortes C1 /
-       C1C2 y los dueños los pone quien llama. */
-    public static List<Dictionary<string, object>> AutomatizadosPorCategoria(Filtros f, bool porMes)
+       C1C2 y los dueños los pone quien llama.
+
+       sinSorIA: fuera los tickets de tipo 'SorIA Incidentes' / 'SorIA
+       Peticiones', la MISMA regla con la que Experiencia saca esos tipos de
+       su volumen (ExperienciaQueries.SinSorIA): el tipo recortado, como
+       TipoTicket de vw_TicketsSlotsBase. Tipo NULL o vacio ('Sin tipo')
+       sigue contando, como en el volumen. Con ?tipo=inc|req no cambia nada:
+       esos tipos ya no entran. Kpis (la tarjeta de SLA) no pasa por aqui.
+       Con sinSorIA ya no es el TicketsAutomatizados de Kpis en "Todos". */
+    public static List<Dictionary<string, object>> AutomatizadosPorCategoria(Filtros f, bool porMes, bool sinSorIA)
     {
         string periodo = porMes
             ? "MONTH(b.FechaFirmaSolucion)"
@@ -638,12 +646,16 @@ SELECT
     Resueltos = COUNT_BIG(*)
 FROM dbo.vw_Dash_ProductividadBase b{3}
 CROSS APPLY (SELECT Periodo = " + periodo + @") AS pe
-WHERE {0}
+WHERE {0}" + (sinSorIA ? SinTiposSorIA : string.Empty) + @"
 GROUP BY GROUPING SETS ((pe.Periodo, b.Categoria), (pe.Periodo))
 HAVING GROUPING(b.Categoria) = 1 OR SUM(CASE WHEN np.EsPersona = 0 THEN 1 ELSE 0 END) > 0;";
 
         return Unico(sql, f, null);
     }
+
+    // ISNULL: un NOT IN contra NULL es UNKNOWN y se llevaria los 'Sin tipo'.
+    private const string SinTiposSorIA =
+        "\n  AND ISNULL(LTRIM(RTRIM(b.Tipo)), N'') NOT IN (N'SorIA Incidentes', N'SorIA Peticiones')";
 
     /* Entra vs sale, por dia. Cada serie por su propia fecha: creados por
        registro ({1}), resueltos y SLA por solucion ({0}). FULL OUTER porque
