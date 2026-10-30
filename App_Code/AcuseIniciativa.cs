@@ -162,6 +162,25 @@ public sealed class IdentidadAcuse
         return r;
     }
 
+    // Cuentas Windows guardadas (SolicitadoPor, "SORIANA\cuenta") -> el
+    // CatPersona.Nombre de cada una, con la MISMA regla de Resolver. Solo
+    // para mostrar: solo entran las resueltas; sin resolver, ambigua o con
+    // nombre repetido no tienen nombre y la pantalla muestra la cuenta. La
+    // llave es la cuenta tal como se guardo.
+    public static Dictionary<string, string> NombresPorCuenta(IEnumerable<string> cuentas, IList<PersonaCatalogo> personas)
+    {
+        var nombres = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (cuentas == null || personas == null) return nombres;
+        var vistas = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var c in cuentas)
+        {
+            if (string.IsNullOrEmpty(c) || !vistas.Add(c)) continue;
+            var r = Resolver(IdentidadWindows.Desde(c, true), personas);
+            if (r.EsResuelta) nombres[c] = r.Nombre;
+        }
+        return nombres;
+    }
+
     // Si esta persona es el dueño `nombreDueno` (OwnerProblem / OwnerServicio).
     public bool EsDueno(string nombreDueno)
     {

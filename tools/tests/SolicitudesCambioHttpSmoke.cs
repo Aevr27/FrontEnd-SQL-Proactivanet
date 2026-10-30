@@ -57,6 +57,7 @@ sealed class AlmacenFalso : IAlmacenSolicitudesCambio
     public string UltimoUsuario, UltimoRol, UltimoRevisor, UltimoComentario;
     public List<ClasificacionSolicitud> UltimasClasificaciones;
     public Dictionary<string, object> Detalle_;
+    public List<Dictionary<string, object>> Lista_ = new List<Dictionary<string, object>>();
     public ErrorSolicitudCambio LanzarAlAplicar, LanzarAlEnviar;
     public int UltimoNumeroFallo;
 
@@ -66,7 +67,7 @@ sealed class AlmacenFalso : IAlmacenSolicitudesCambio
         if (LanzarAlEnviar != null) throw LanzarAlEnviar;
         return new ResultadoEnvioSolicitud { IdSolicitud = 7, Repetida = false };
     }
-    public List<Dictionary<string, object>> Listar(string estado, int maximo) { Llamadas.Add("Listar:" + estado); return new List<Dictionary<string, object>>(); }
+    public List<Dictionary<string, object>> Listar(string estado, int maximo) { Llamadas.Add("Listar:" + estado); return Lista_; }
     public Dictionary<string, object> Detalle(int id) { Llamadas.Add("Detalle:" + id); return Detalle_; }
     public void Rechazar(int id, string revisor, string comentario) { Llamadas.Add("Rechazar:" + id); UltimoRevisor = revisor; UltimoComentario = comentario; }
     public void Aplicar(int id, string revisor, string comentario, List<ClasificacionSolicitud> cls, DateTime hoy)
@@ -168,6 +169,12 @@ public static class SolicitudesCambioHttpSmoke
         AccesoAdmin.FuenteRoles = new RolesFalsos().Con(ADM, "ADM").Con(MOD, "MOD");
         var alm = new AlmacenFalso();
         SolicitudesCambio.Almacen = alm;
+        // CatPersona sin SQL para el nombre de quien envio (solo pantalla).
+        SolicitudesCambio.PersonasSolicitante = delegate
+        {
+            return new List<PersonaCatalogo> { new PersonaCatalogo { Nombre = "Mod Uno", Correo = "t_mod@soriana.com" },
+                new PersonaCatalogo { Nombre = "Doble A", Correo = "t_doble@soriana.com" }, new PersonaCatalogo { Nombre = "Doble B", Correo = "t_doble@soriana.com" } };
+        };
         // Sin SQL: PO / SO capturados por folio y el catalogo de cada par.
         //   000001 -> PO 1 / SO x (par del catalogo: /A/Cat 2, /A/Cat 3)
         //   000002 -> sin capturar; 000003 -> PO X / SO x (no es un par del catalogo)
@@ -502,6 +509,27 @@ public static class SolicitudesCambioHttpSmoke
         SolicitudesCambio.Capacidad = delegate { leidasCap++; return new CapacidadCategoria(null); };
         cuerpo = Correr("GET", "accion=detalle&id=5", MOD, null, out estado);
         Check("D14 MOD: 403 y no se lee la capacidad", "403|0", estado + "|" + leidasCap);
+
+        // Nombre de quien envio (solo pantalla): listar y detalle lo agregan;
+        // solicitado_por sigue siendo la cuenta. Sin resolver o ambigua: null.
+        alm.Lista_ = new List<Dictionary<string, object>>
+        {
+            new Dictionary<string, object> { { "id", 1 }, { "estado", "PENDIENTE" }, { "solicitado_por", MOD } },
+            new Dictionary<string, object> { { "id", 2 }, { "estado", "APLICADA" }, { "solicitado_por", MOD } },
+            new Dictionary<string, object> { { "id", 3 }, { "estado", "RECHAZADA" }, { "solicitado_por", MOD } },
+            new Dictionary<string, object> { { "id", 4 }, { "estado", "PENDIENTE" }, { "solicitado_por", @"SORIANA\t_nadie" } },
+            new Dictionary<string, object> { { "id", 5 }, { "estado", "PENDIENTE" }, { "solicitado_por", @"SORIANA\t_doble" } },
+        };
+        Func<string, string, int> veces = (texto, buscado) => (texto.Length - texto.Replace(buscado, "").Length) / buscado.Length;
+        const string conNombre = "\"solicitante_nombre\":\"Mod Uno\"", cuentaMod = @"""solicitado_por"":""SORIANA\\t_mod""";
+        cuerpo = Correr("GET", "accion=listar", ADM, null, out estado);
+        Check("D15 listar: nombre en pendiente, aplicada y rechazada; la cuenta intacta", "200|3|3",
+              estado + "|" + veces(cuerpo, conNombre) + "|" + veces(cuerpo, cuentaMod));
+        Check("D16 listar: no resuelta y ambigua sin nombre (null)", 2, veces(cuerpo, "\"solicitante_nombre\":null"));
+        alm.Lista_ = new List<Dictionary<string, object>>();
+        alm.Detalle_ = Pendiente("ESTADO", MOD);
+        cuerpo = Correr("GET", "accion=detalle&id=5", ADM, null, out estado);
+        Check("D17 detalle: nombre y cuenta", "200|1|1", estado + "|" + veces(cuerpo, conNombre) + "|" + veces(cuerpo, cuentaMod));
         alm.Detalle_ = null;
 
         // ---- E) rechazar -------------------------------------------------------

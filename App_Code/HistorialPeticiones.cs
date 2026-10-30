@@ -232,6 +232,19 @@ public static class HistorialPeticiones
             DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out utc);
     }
 
+    // CAMBIO guarda solo la cuenta: su nombre (solo pantalla) con la misma
+    // regla que la cola de Cambios (SolicitudesCambio.NombresSolicitante).
+    // Sin resolver: sin nombre, la pantalla muestra la cuenta.
+    public static void NombrarCambios(LecturaHistorial l)
+    {
+        var cambios = l.Peticiones.FindAll(p => p.Tipo == PeticionHistorial.TipoCambio && p.SolicitanteNombre == null && p.SolicitanteCuenta != null);
+        if (cambios.Count == 0) return;
+        var nombres = SolicitudesCambio.NombresSolicitante(cambios.ConvertAll(p => p.SolicitanteCuenta));
+        string nombre;
+        foreach (var p in cambios)
+            if (nombres.TryGetValue(p.SolicitanteCuenta, out nombre)) p.SolicitanteNombre = nombre;
+    }
+
     // Une los dos tipos, la mas reciente primero (empates: el numero mayor
     // primero, iniciativas antes que cambios) y recorta a `maximo`.
     public static Dictionary<string, object> Json(LecturaHistorial l, int maximo)

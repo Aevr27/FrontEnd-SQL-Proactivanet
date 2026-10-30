@@ -893,6 +893,36 @@ public static class SolicitudesCambio
     // Detalle de ADM: la capacidad de todas las rutas (una lectura) para las
     // otras iniciativas activas de cada categoria (CapacidadCategoria.Otras).
     public static Func<CapacidadCategoria> Capacidad = IniciativaService.CapacidadActual;
+    // CatPersona vigente para el nombre de quien envio (solo pantalla).
+    public static Func<IList<PersonaCatalogo>> PersonasSolicitante = delegate { return new FuentePersonasAcuseSql().Personas(); };
+
+    // NOMBRE DE QUIEN ENVIO (solo pantalla). SolicitadoPor guarda la cuenta
+    // Windows y no cambia (auditoria, idempotencia, revision); la cola y el
+    // historial reciben ademas solicitante_nombre: esa cuenta resuelta con
+    // IdentidadAcuse.NombresPorCuenta (la regla del acuse y de PO/SO). Sin
+    // resolver, ambigua o sin poder leer CatPersona: sin nombre, la pantalla
+    // muestra la cuenta y la lista sale igual.
+    public static Dictionary<string, string> NombresSolicitante(IEnumerable<string> cuentas)
+    {
+        try { return IdentidadAcuse.NombresPorCuenta(cuentas, PersonasSolicitante()); }
+        catch (Exception ex)
+        {
+            DashboardHandler.Registrar("SolicitudesCambio.NombresSolicitante", ex);
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+    }
+
+    public static void AgregarNombreSolicitante(IList<Dictionary<string, object>> filas)
+    {
+        if (filas == null || filas.Count == 0) return;
+        Func<Dictionary<string, object>, string> cuenta = f => f.ContainsKey("solicitado_por") ? f["solicitado_por"] as string : null;
+        var nombres = NombresSolicitante(filas.Select(cuenta));
+        foreach (var f in filas)
+        {
+            string nombre, c = cuenta(f);
+            f["solicitante_nombre"] = c != null && nombres.TryGetValue(c, out nombre) ? nombre : null;
+        }
+    }
 
     // Cuelga de cada categoria del detalle sus otras_iniciativas (sin la
     // iniciativa de la solicitud). Si no se pueden leer: null en cada una y

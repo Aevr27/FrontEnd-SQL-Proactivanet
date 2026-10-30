@@ -108,6 +108,39 @@ Check('R9 VARIOS en el detalle: una fila por cambio, categorias, aviso de todo o
    /<th scope="row">Título<\/th><td>Uno<\/td><td>Uno varios<\/td>/.test(html), /\/A\/Cat 1/.test(html),
    /aplicar aplica TODOS los cambios de arriba/.test(html), (html.match(/data-sol-accion="aplicar"/g) || []).length]);
 
+// Quien envio: el nombre que resolvio el servidor (solicitante_nombre) o,
+// sin el, la cuenta guardada; en los tres estados de la cola.
+var conNombre = ['PENDIENTE', 'APLICADA', 'RECHAZADA'].map(function (e, n) {
+  return Pendiente({ id: 50 + n, estado: e, solicitante_nombre: 'Juan Pérez <x>' });
+});
+html = C.htmlLista(conNombre);
+Check('R10 lista: nombre completo en pendiente, aplicada y rechazada; la cuenta debajo; escapado', [3, 3, false],
+  [(html.match(/<td>Juan Pérez &lt;x&gt; <span class="chip ini-chip">MOD<\/span><span class="ini-sub">SORIANA\\t_mod<\/span><\/td>/g) || []).length,
+   (html.match(/<td>(Pendiente|Aplicada|Rechazada)/g) || []).length, html.indexOf('Juan Pérez <x>') >= 0]);
+html = C.htmlLista([Pendiente({ solicitante_nombre: null }), Pendiente({ id: 42, estado: 'RECHAZADA' })]);
+Check('R11 lista: sin nombre (no resuelta o ambigua) se muestra la cuenta, una sola vez', [2, false],
+  [(html.match(/<td>SORIANA\\t_mod <span class="chip ini-chip">MOD<\/span><\/td>/g) || []).length, /ini-sub">SORIANA/.test(html)]);
+Check('R12 detalle: "la envió" con el nombre y la cuenta; sin nombre, la cuenta', [true, true],
+  [/la envió Juan Pérez \(SORIANA\\t_mod, MOD\) el/.test(C.htmlDetalle(Pendiente({ estado: 'APLICADA', solicitante_nombre: 'Juan Pérez' }), {})),
+   /la envió SORIANA\\t_mod \(MOD\) el/.test(C.htmlDetalle(Pendiente(), {}))]);
+html = C.htmlLista([Pendiente({ folio: 'PRB 2026-000001<' })], true);
+Check('R13 con iniciativa: el Codigo es su propio boton (data-sol-folio, escapado) y el "#" sigue aparte', [true, true, true],
+  [/<td><button type="button" class="ini-folio" data-sol-folio="PRB 2026-000001&lt;" title="Ver la iniciativa">PRB 2026-000001&lt;<\/button>/.test(html),
+   /<td><button type="button" class="ini-folio" data-sol-id="41">#41<\/button><\/td>/.test(html), html.indexOf('PRB 2026-000001<"') < 0]);
+Check('R14 sin quien abra la iniciativa: el Codigo queda como texto (como antes)', [false, true],
+  [/data-sol-folio/.test(C.htmlLista([Pendiente()])), /<td>PRB 2026-000001<span class="ini-sub">Uno/.test(C.htmlLista([Pendiente()]))]);
+
+// Un nodo del DOM para los clics: closest('[atributo]') sube por los padres.
+function Nodo(attrs, padre) {
+  return { attrs: attrs, padre: padre || null,
+    getAttribute: function (k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+    closest: function (sel) {
+      var m = /^\[([\w-]+)\]$/.exec(sel);
+      for (var n = this; n; n = n.padre) if (m && Object.prototype.hasOwnProperty.call(n.attrs, m[1])) return n;
+      return null;
+    } };
+}
+
 // ---- flujos -----------------------------------------------------------------
 var doc = Documento(), pedidos = [], respuestas = [];
 function pedir(url, op) {
@@ -196,6 +229,28 @@ cola.abrir().then(function () {
 }).then(function () {
   Check('F12 sin red: no se sabe; nunca "aplicada"', ['ini-cambio-msg aviso', true, false],
     [doc.els.solDetMsg.className, /no se sabe si se aplicó/.test(doc.els.solDetMsg.innerHTML), /aplicada:/.test(doc.els.solDetMsg.innerHTML)]);
+}).then(function () {
+  // Dos enlaces por fila: el Codigo (dentro de la fila) abre la iniciativa;
+  // el "#" y el resto de la fila, la solicitud.
+  var iniciativas = [], solicitudes = [], verDetalle = cola.verDetalle;
+  cola.verDetalle = function (id) { solicitudes.push(id); return Promise.resolve(); };
+  var fila = Nodo({ 'data-sol-id': '41' });
+  var clic = function (n) { doc.els.solLista.escuchas.click({ target: n }); };
+  clic(Nodo({ 'data-sol-folio': 'PRB 2026-000001' }, Nodo({}, fila)));
+  Check('F13 sin quien abra la iniciativa: el clic en el Codigo abre la solicitud (como antes)', [[], [41]], [iniciativas, solicitudes]);
+  cola.alVerIniciativa = function (folio) { iniciativas.push(folio); };
+  responder(200, { solicitudes: [Pendiente(), Pendiente({ id: 42, estado: 'APLICADA' }), Pendiente({ id: 43, estado: 'RECHAZADA', folio: 'PRB 2026-000003' })] });
+  return cola.listar().then(function () {
+    Check('F14 con quien la abra: el Codigo de pendiente, aplicada y rechazada es boton', 3,
+      (doc.els.solLista.innerHTML.match(/data-sol-folio="/g) || []).length);
+    solicitudes.length = 0;
+    clic(Nodo({ 'data-sol-folio': 'PRB 2026-000003' }, Nodo({}, Nodo({ 'data-sol-id': '43' }))));
+    Check('F15 clic en el Codigo: abre la iniciativa y NO la solicitud', [['PRB 2026-000003'], []], [iniciativas.slice(), solicitudes.slice()]);
+    clic(Nodo({ 'data-sol-id': '43' }, Nodo({}, Nodo({ 'data-sol-id': '43' }))));
+    clic(Nodo({}, fila));
+    Check('F16 clic en el "#" o en otra celda: abre la solicitud, no la iniciativa', [['PRB 2026-000003'], [43, 41]], [iniciativas.slice(), solicitudes.slice()]);
+    cola.verDetalle = verDetalle;
+  });
 }).then(function () {
   console.log(fallos === 0 ? 'TODO PASO' : fallos + ' FALLO(S)');
   process.exit(fallos === 0 ? 0 : 1);

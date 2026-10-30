@@ -82,7 +82,14 @@ window.SolicitudesCambioCola = (function () {
     return 'Explicación para ADM';
   }
 
-  function htmlLista(lista) {
+  // Quien envio: el nombre de CatPersona que resolvio el servidor
+  // (solicitante_nombre); sin el, la cuenta Windows guardada (solicitado_por).
+  function quien(s) { return h(s.solicitante_nombre || s.solicitado_por); }
+
+  // conIniciativa: el Codigo es un boton que abre el detalle de la
+  // iniciativa (data-sol-folio); sin el, texto como antes. El "#" sigue
+  // abriendo la solicitud (data-sol-id).
+  function htmlLista(lista, conIniciativa) {
     if (!lista.length) return '<p class="ini-nota">No hay solicitudes con ese estado.</p>';
     return '<table class="ini-det-tabla ini-sol-tabla"><thead><tr><th scope="col">#</th><th scope="col">Iniciativa</th>' +
       '<th scope="col">Qué cambia</th><th scope="col">Pedido</th><th scope="col">Solicitó</th><th scope="col">Enviada</th>' +
@@ -90,9 +97,12 @@ window.SolicitudesCambioCola = (function () {
       lista.map(function (s) {
         return '<tr class="ini-sol-fila" data-sol-id="' + h(s.id) + '">' +
           '<td><button type="button" class="ini-folio" data-sol-id="' + h(s.id) + '">#' + h(s.id) + '</button></td>' +
-          '<td>' + h(s.folio) + (s.titulo ? '<span class="ini-sub">' + h(s.titulo) + '</span>' : '') + '</td>' +
+          '<td>' + (conIniciativa && s.folio
+            ? '<button type="button" class="ini-folio" data-sol-folio="' + h(s.folio) + '" title="Ver la iniciativa">' + h(s.folio) + '</button>'
+            : h(s.folio)) + (s.titulo ? '<span class="ini-sub">' + h(s.titulo) + '</span>' : '') + '</td>' +
           '<td>' + h(TIPOS[s.tipo] || s.tipo) + '</td><td>' + resumen(s) + '</td>' +
-          '<td>' + h(s.solicitado_por) + ' <span class="chip ini-chip">' + h(s.rol_solicitante) + '</span></td>' +
+          '<td>' + quien(s) + ' <span class="chip ini-chip">' + h(s.rol_solicitante) + '</span>' +
+            (s.solicitante_nombre && s.solicitado_por ? '<span class="ini-sub">' + h(s.solicitado_por) + '</span>' : '') + '</td>' +
           '<td>' + fechaHora(s.fecha_solicitud_utc) + '</td>' +
           '<td>' + h(ESTADOS[s.estado] || s.estado) +
             (s.estado === 'PENDIENTE' && s.intentos > 0 ? ' <span class="pill ini-atrasada" title="' + h(s.ultimo_error) + '">' + h(s.intentos) + ' intento' + (s.intentos === 1 ? '' : 's') + '</span>' : '') +
@@ -239,7 +249,7 @@ window.SolicitudesCambioCola = (function () {
         '<button type="button" class="btn linea chico" data-sol-accion="cerrar">Cerrar</button></div>'
       : '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-sol-accion="cerrar">Cerrar</button></div>';
     return '<h4>Solicitud #' + h(d.id) + ' · ' + h(d.folio) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' +
-      '<p class="ini-nota">' + h(TIPOS[d.tipo] || d.tipo) + ' · la envió ' + h(d.solicitado_por) + ' (' + h(d.rol_solicitante) + ') el ' +
+      '<p class="ini-nota">' + h(TIPOS[d.tipo] || d.tipo) + ' · la envió ' + quien(d) + ' (' + (d.solicitante_nombre && d.solicitado_por ? h(d.solicitado_por) + ', ' : '') + h(d.rol_solicitante) + ') el ' +
         fechaHora(d.fecha_solicitud_utc) + ' · ' + h(ESTADOS[d.estado] || d.estado) + (d.intentos ? ' · ' + h(d.intentos) + ' intento(s) de aplicar' : '') + '</p>' +
       avisos + cambios + htmlCats + htmlImpacto(cats, vols) +
       '<h5>Motivo</h5><div class="ini-texto">' + h(d.motivo) + '</div>' + revision +
@@ -265,6 +275,7 @@ window.SolicitudesCambioCola = (function () {
       this.alCambiarIniciativa = null;   // tras aplicar: releer el registro
       this.alVerSolicitud = null;        // (d) se abrio el detalle: el aviso la marca vista
       this.alRevisar = null;             // tras aplicar / rechazar: el aviso se relee
+      this.alVerIniciativa = null;       // (folio) el Codigo de la lista: detalle de Iniciativas
       this.cableado = false;
     }
 
@@ -279,6 +290,10 @@ window.SolicitudesCambioCola = (function () {
       this.$('solFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.listar(); });
       this.$('solActualizar').addEventListener('click', function () { self.listar(); });
       this.$('solLista').addEventListener('click', function (e) {
+        // El Codigo va antes que la fila: abre la iniciativa, no la solicitud.
+        // Si no se puede abrir (false), sigue como un clic en la fila.
+        var ini = e.target && e.target.closest ? e.target.closest('[data-sol-folio]') : null;
+        if (ini && self.alVerIniciativa && self.alVerIniciativa(ini.getAttribute('data-sol-folio')) !== false) return;
         var el = e.target && e.target.closest ? e.target.closest('[data-sol-id]') : e.target;
         var id = el && el.getAttribute && el.getAttribute('data-sol-id');
         if (id) self.verDetalle(Number(id));
@@ -324,7 +339,7 @@ window.SolicitudesCambioCola = (function () {
           if (mia !== self.lecturas) return null;
           self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
-            self.$('solLista').innerHTML = htmlLista(r.json.solicitudes);
+            self.$('solLista').innerHTML = htmlLista(r.json.solicitudes, !!self.alVerIniciativa);
             self.mensaje('solMsg', '', '');
             return r.json.solicitudes;
           }

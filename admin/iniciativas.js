@@ -983,6 +983,17 @@ window.Iniciativas = (function () {
           return r ? { iniciativa: r.valoresTipoIniciativa, agrupado: r.valoresTipoAgrupado } : {};
         });
         this.cola.alCambiarIniciativa = function () { if (regCola && regCola.actualizar) regCola.actualizar(); };
+        // El Codigo de la lista abre el mismo detalle de Iniciativas que
+        // Cambios recientes (abrirDesdeLista: pregunta si hay cambios sin guardar).
+        // Fuera del registro cargado: false y la fila abre la solicitud, como antes.
+        if (regCola && regCola.abrirDesdeLista) {
+          this.cola.alVerIniciativa = function (folio) {
+            if (!regCola.registro || !regCola.registro.buscar(folio)) return false;
+            self.mostrarVista('iniciativas');
+            if (self.vista === 'iniciativas') regCola.abrirDesdeLista(folio);
+            return true;
+          };
+        }
       }
       // "Nuevas" (misma pestaña): registro de solo lectura de sql/29. Al
       // volver a "De cambio" se relee esa cola, como al abrir la pestaña.

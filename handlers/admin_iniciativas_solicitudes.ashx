@@ -39,6 +39,9 @@
 //        NUNCA escribe la iniciativa.
 //   GET  accion=listar[&estado=PENDIENTE|APLICADA|RECHAZADA]   ExigirAdm
 //   GET  accion=detalle&id=N                                    ExigirAdm
+//        Las dos agregan solicitante_nombre (solo pantalla): solicitado_por
+//        resuelta a CatPersona.Nombre (SolicitudesCambio.NombresSolicitante);
+//        null si no resuelve o es ambigua. solicitado_por no cambia.
 //   POST accion=rechazar  id, comentario (obligatorio)          ExigirAdm
 //   POST accion=aplicar   id, comentario (obligatorio en Otros), pares
 //        clas_categoria / clas_tipo_iniciativa / clas_tipo_agrupado (solo
@@ -115,10 +118,10 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                     var estado = req.QueryString["estado"];
                     if (!string.IsNullOrEmpty(estado) && estado != "PENDIENTE" && estado != "APLICADA" && estado != "RECHAZADA")
                         return Error(context, 400, "Estado de solicitud desconocido.", "EstadoDesconocido");
-                    return new Dictionary<string, object>
-                    {
-                        { "solicitudes", SolicitudesCambio.Almacen.Listar(string.IsNullOrEmpty(estado) ? null : estado, 200) },
-                    };
+                    var lista = SolicitudesCambio.Almacen.Listar(string.IsNullOrEmpty(estado) ? null : estado, 200);
+                    // Nombre de quien envio, solo para mostrar (solicitado_por no cambia).
+                    SolicitudesCambio.AgregarNombreSolicitante(lista);
+                    return new Dictionary<string, object> { { "solicitudes", lista } };
                 }
                 int n;
                 var texto = accion == "detalle" ? req.QueryString["id"] : req.Form["id"];
@@ -129,6 +132,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                     if (d == null) return Error(context, 404, "La solicitud no existe.", "SolicitudNoExiste");
                     // Otras iniciativas activas de cada categoria (ya es ADM).
                     SolicitudesCambio.AgregarOtrasIniciativas(d);
+                    SolicitudesCambio.AgregarNombreSolicitante(new List<Dictionary<string, object>> { d });
                     return d;
                 }
                 if (accion == "rechazar")

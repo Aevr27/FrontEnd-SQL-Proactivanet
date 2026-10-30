@@ -104,6 +104,11 @@ public static class HistorialPeticionesHttpSmoke
         AccesoAdmin.FuenteRoles = new RolesFalsosHistorial().Con(ADM, "ADM").Con(MOD, "MOD");
         var fuente = new FuenteHistorialFalsa();
         HistorialPeticiones.Fuente = fuente;
+        // CatPersona sin SQL: el nombre de quien envio un CAMBIO (solo pantalla).
+        SolicitudesCambio.PersonasSolicitante = delegate
+        {
+            return new List<PersonaCatalogo> { new PersonaCatalogo { Nombre = "Mod Uno", Correo = "t_mod@soriana.com" } };
+        };
         int estado;
 
         // ---- A) quien puede: la fuente NO se consulta sin ADM ----
@@ -173,6 +178,19 @@ public static class HistorialPeticionesHttpSmoke
         fuente.Devolver.Peticiones.Add(Ini(3, t0, "RECHAZADA"));
         r = Json(Correr("GET", "", ADM, out estado));
         Check("D1 sin sql/22: 200, solo iniciativas y cambios_disponible false", "200|1|False", estado + "|" + ((ArrayList)r["peticiones"]).Count + "|" + r["cambios_disponible"]);
+
+        // ---- N) nombre de quien envio un CAMBIO (solo pantalla) ----
+        fuente.Devolver = new LecturaHistorial { IniciativasDisponible = true, CambiosDisponible = true, TotalIniciativas = 1, TotalCambios = 2 };
+        fuente.Devolver.Peticiones.Add(Ini(3, t0, "ENVIADA"));
+        fuente.Devolver.Peticiones.Add(Cam(8, t0.AddMinutes(1), "PENDIENTE"));
+        var sinResolver = Cam(9, t0.AddMinutes(2), "RECHAZADA");
+        sinResolver.SolicitanteCuenta = @"SORIANA\t_nadie";
+        fuente.Devolver.Peticiones.Add(sinResolver);
+        r = Json(Correr("GET", "", ADM, out estado));
+        Check("N1 CAMBIO resuelto: nombre de CatPersona y la cuenta intacta", "200|Mod Uno|SORIANA\\t_mod",
+              estado + "|" + Fila(r, 1)["solicitante_nombre"] + "|" + Fila(r, 1)["solicitante_cuenta"]);
+        Check("N2 CAMBIO sin resolver: sin nombre (la pantalla muestra la cuenta); INICIATIVA conserva el guardado", "True|SORIANA\\t_nadie|Ana",
+              (Fila(r, 0)["solicitante_nombre"] == null) + "|" + Fila(r, 0)["solicitante_cuenta"] + "|" + Fila(r, 2)["solicitante_nombre"]);
 
         // ---- E) falla de lectura ----
         fuente.Lanzar = new InvalidOperationException("Login failed for user 'PROACTIVANETAD' Server=AZVM...");
