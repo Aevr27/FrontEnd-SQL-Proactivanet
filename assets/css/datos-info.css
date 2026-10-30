@@ -47,6 +47,10 @@
 
 .datos-info:empty { display: none; }
 
+/* Aviso de un refresco automatico que fallo: se ve sin gritar, y los datos
+   de arriba siguen siendo los de la ultima carga buena. */
+.datos-info-linea.datos-info-aviso { color: #982a18; font-weight: 600; }
+
 /* En pantalla chica la cabecera envuelve y la pastilla queda debajo del
    titulo, no colgada a la derecha: mismo criterio que dashboard.css aplica a
    su .estado. Se repite aqui para que valga tambien en Experiencia y QA. */

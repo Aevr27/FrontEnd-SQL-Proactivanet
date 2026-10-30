@@ -254,6 +254,14 @@
       <div class="ini-vista-titulo">
         <h2>Iniciativas</h2>
         <p class="ini-vista-sub">Consulta y administra las iniciativas existentes.</p>
+        <!-- Hora de la ultima lectura BUENA del registro (no la fecha de los
+             datos). La lista se relee sola cada RefrescoAuto.INTERVALO_DATOS
+             sin detalle abierto (admin/registro-iniciativas.js,
+             puedeRefrescar); "Actualizar" relee ya, con los mismos filtros. -->
+        <p class="ini-vista-sub ini-consultado" id="regConsultadoCaja" hidden>
+          <span id="regConsultado" role="status"></span>
+          <button type="button" class="btn linea chico" id="regActualizar">Actualizar</button>
+        </p>
       </div>
       <!-- Solicitar es de ADM, MOD y de los Product Owners / Service Owners
            vigentes: oculto hasta que admin_sesion diga solicitante
@@ -556,6 +564,40 @@
       </div>
       <div class="ini-vacio" id="crVacio" hidden><strong id="crVacioTexto"></strong></div>
       <div id="crLista" aria-live="polite" hidden></div>
+    </section>
+
+    <!-- Historial de peticiones (admin/historial-peticiones.js, solo ADM):
+         las solicitudes de iniciativa y de cambio ENVIADAS, mas reciente
+         primero (handlers/admin_iniciativas_historial.ashx, ExigirAdm). Solo
+         lectura: el folio abre su detalle de siempre en Solicitudes. Sin
+         rango por omision: todo el historial (a lo mas 500, con el total). -->
+    <section class="ini-adm-bloque ini-hp" id="hpSeccion" aria-labelledby="hpTitulo" data-solo-adm hidden>
+      <div class="ini-lista-cab">
+        <h3 class="ini-lista-titulo" id="hpTitulo">Historial de peticiones</h3>
+        <span class="ini-lista-cuenta" id="hpCuenta" aria-live="polite"></span>
+        <button type="button" class="btn linea chico" id="hpActualizar">Actualizar</button>
+      </div>
+      <p class="ini-nota">Solicitudes de iniciativa y de cambio enviadas, por fecha de envío. Solo consulta: se revisan en la pestaña Solicitudes.</p>
+      <div class="filtros ini-filtros" role="group" aria-label="Filtros del historial">
+        <div class="campo"><label for="hpDesde">Fecha desde</label><input type="date" id="hpDesde"></div>
+        <div class="campo"><label for="hpHasta">Fecha hasta</label><input type="date" id="hpHasta"></div>
+        <div class="campo"><label for="hpTipo">Tipo de petición</label>
+          <select id="hpTipo">
+            <option value="">Todas</option>
+            <option value="INICIATIVA">Solicitar una iniciativa</option>
+            <option value="CAMBIO">Solicitar cambios</option>
+          </select></div>
+        <div class="campo"><button type="button" class="btn gris" id="hpLimpiar">Limpiar</button></div>
+      </div>
+      <p class="ini-nota" id="hpFuentes" hidden></p>
+      <p class="ini-error" id="hpInvalido" role="alert" hidden></p>
+      <p class="ini-estado" id="hpCargando" role="status" hidden>Cargando el historial…</p>
+      <div class="ini-error" id="hpError" role="alert" hidden>
+        <span><strong>No se pudo cargar el historial de peticiones.</strong> <span id="hpErrorTexto"></span></span>
+        <button type="button" class="btn" id="hpReintentar">Reintentar</button>
+      </div>
+      <div class="ini-vacio" id="hpVacio" hidden><strong id="hpVacioTexto"></strong></div>
+      <div class="ini-tabla-caja ini-hp-caja" id="hpLista" aria-live="polite" hidden></div>
     </section>
 
     <!-- Dueños de categoria (admin/categorias-duenos.js, VistaDuenos):
@@ -926,6 +968,7 @@
 <script src="solicitudes-nuevas.js"></script>
 <script src="aviso-solicitudes.js"></script>
 <script src="cambios-recientes.js"></script>
+<script src="historial-peticiones.js"></script>
 <script src="acuse-iniciativa.js"></script>
 <script src="iniciativas.js"></script>
 <script>

@@ -94,7 +94,16 @@ Además:
 
 - `observabilidad/` es página suelta, **sin enlace** desde la navegación. Lee `data/*.mock.json` (el JSON que traía el monolito) y su pie es texto fijo. No son datos en vivo. `orquestacion/` ya es pestaña y lee la base.
 - `MOCK_DATA` (`assets/js/mock-data.js`) debe ser `false` en el repositorio. Con `true` (solo pruebas locales) SLA, Call Center y Backlog usan datos simulados y la pastilla lo dice («Datos simulados (MOCK_DATA), no reales»).
-- Ninguna fecha de frescura se calcula en el navegador: si el servidor o el archivo no la traen, la pastilla queda vacía.
+- Ninguna fecha de frescura se calcula en el navegador: si el servidor o el archivo no la traen, la pastilla queda vacía. La única hora del navegador es «Consultado: …» (ver abajo), que dice cuándo se consultó el servidor, no de cuándo son los datos.
+
+#### Refresco automático
+
+- **Intervalo:** `RefrescoAuto.INTERVALO_DATOS` en `assets/js/refresco-auto.js` (5 min). Es el único sitio donde se cambia. Las listas de Solicitudes en Admin siguen con `RefrescoAuto.INTERVALO` (2 min).
+- **Qué se refresca:** solo la pestaña a la vista. En el tablero: SLA y Call Center (una sola carga), Backlog y QARE, con un único temporizador (`dashboard.js`, sección 4ter). En Admin: el registro de Iniciativas (`VistaRegistro.refrescarFondo`), solo con la lista a la vista y sin detalle abierto. No se refrescan Experiencia y QA (su carga rehace la pantalla por fases), Efectividad (cálculo por lotes), Orquestación (carga del Excel), Análisis (botón Analizar) ni Observabilidad (instantánea).
+- **Cómo:** la misma carga del botón, en modo «fondo». Se conservan los filtros, la selección por clic y lo que se está escribiendo. No se refresca con la pestaña del navegador oculta (al volver, si ya pasó el intervalo, refresca una vez), con un campo con el foco ni con un desplegable abierto. Nunca hay dos peticiones encimadas.
+- **«Actualizar»:** cada una de esas pestañas tiene el botón. Pide en ese momento y queda deshabilitado mientras la petición está en vuelo.
+- **«Consultado: dd/mm/aaaa · hh:mm»:** renglón aparte en la pastilla (o junto al título en Admin). Solo avanza con una respuesta correcta. Si un refresco falla, los datos anteriores se quedan y se agrega «⚠ No se pudo actualizar (hh:mm); se muestran los datos anteriores».
+- **Límites de origen:** el refresco solo trae lo que ya está en SQL. SLA y Call Center pasan además por la caché del servidor (`DashboardQueries.SegundosCache`, 300 s), así que un cambio puede tardar hasta unos 5 min más. Backlog es una foto diaria (`dbo.CorreoBacklogSnapshot`): si se está viendo el último corte y llega uno nuevo, el refresco cambia a ese corte. El registro de Iniciativas lee `dbo.Problem` sin caché: un PRB editado en Proactivanet aparece cuando el ETL del repositorio de integración lo carga. Este repositorio no cambia la programación del ETL.
 
 ## 3. Dashboard de Backlog
 

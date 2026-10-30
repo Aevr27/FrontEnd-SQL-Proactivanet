@@ -231,6 +231,9 @@
       <div class="acciones-top">
         <!-- "Fijar KPIs" (assets/js/kpis-fijos.js): pega #kpis arriba al bajar. -->
         <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="kpis" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
+        <!-- Pide los datos ya, sin tocar filtros. Solos se refrescan cada
+             RefrescoAuto.INTERVALO_DATOS (assets/js/refresco-auto.js). -->
+        <button type="button" class="btn linea chico" id="btn-actualizar" title="Volver a consultar los datos con los mismos filtros">Actualizar</button>
         <div class="estado" id="estado-carga"></div>
       </div>
     </header>
@@ -568,6 +571,8 @@
      que los modulos embebidos: los cuatro tableros lo usan para pintar
      "Última actualización" y "Periodo" con el mismo formato. -->
 <script src="assets/js/datos-info.js"></script>
+<!-- Refresco automatico de la pestaña a la vista (seccion 4ter de dashboard.js). -->
+<script src="assets/js/refresco-auto.js"></script>
 <script src="assets/js/kpis-fijos.js"></script>
 <!-- La tarjeta KPI que filtra con un clic (window.SeleccionKpi). Aqui y no en
      cada modulo: Orquestacion, Efectividad, Experiencia, QA y Backlog pierden

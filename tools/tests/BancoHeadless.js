@@ -40,9 +40,10 @@ function pagina(rel, modulo, antes, sonda) {
     .replace('</body>', '<script>(' + sonda.toString() + ')();</script></body>');
 }
 
-function abrir(url) {
+// presupuesto: ms de tiempo virtual antes de volcar el DOM (10 s por omision).
+function abrir(url, presupuesto) {
   return new Promise(function (ok) {
-    cp.execFile(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--virtual-time-budget=10000', '--dump-dom', url],
+    cp.execFile(CHROME, ['--headless=new', '--disable-gpu', '--no-first-run', '--virtual-time-budget=' + (presupuesto || 10000), '--dump-dom', url],
       { maxBuffer: 32 * 1024 * 1024, timeout: 60000 }, function (err, salida) {
         var m = /<pre id="__res">([\s\S]*?)<\/pre>/.exec(salida || '');
         if (!m) return ok(null);
@@ -53,7 +54,8 @@ function abrir(url) {
 }
 
 // paginas: { '/ruta/servida.html': html }. urls: rutas (con su ?query).
-function correr(paginas, urls) {
+// presupuesto: opcional, ver abrir().
+function correr(paginas, urls, presupuesto) {
   var servidor = http.createServer(function (req, res) {
     var ruta = decodeURIComponent(req.url.split('?')[0]);
     if (Object.prototype.hasOwnProperty.call(paginas, ruta)) {
@@ -71,7 +73,7 @@ function correr(paginas, urls) {
     servidor.listen(0, '127.0.0.1', async function () {
       var base = 'http://127.0.0.1:' + servidor.address().port;
       var salida = [];
-      for (var i = 0; i < urls.length; i++) salida.push(await abrir(base + urls[i]));
+      for (var i = 0; i < urls.length; i++) salida.push(await abrir(base + urls[i], presupuesto));
       servidor.close();
       ok(salida);
     });

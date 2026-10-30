@@ -50,6 +50,7 @@
   <link rel="stylesheet" href="../assets/css/kpi.css">
   <link rel="stylesheet" href="../assets/css/datos-info.css">
   <script src="../assets/js/datos-info.js"></script>
+  <script src="../assets/js/refresco-auto.js"></script>
   <link rel="stylesheet" href="../assets/css/kpis-fijos.css">
   <script src="../assets/js/kpis-fijos.js"></script>
   <link rel="stylesheet" href="../assets/css/boton.css">
@@ -66,6 +67,9 @@
       </div>
       <div class="acciones-top">
         <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="qare-kpis" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
+        <!-- Pide los datos ya, sin tocar filtros (en el tablero tambien se
+             refrescan solos cada RefrescoAuto.INTERVALO_DATOS). -->
+        <button type="button" class="btn linea chico" id="qare-btn-actualizar" title="Volver a consultar los datos con los mismos filtros">Actualizar</button>
         <div class="estado" id="qare-estado"></div>
       </div>
     </header>

@@ -110,6 +110,18 @@
   // con el ETL; mas seguido solo sumaria peticiones.
   RefrescoAuto.INTERVALO = 120000;
 
+  // 5 minutos: datos de los tableros (SLA, Call Center, Backlog, QARE en
+  // dashboard.js) y el registro de Iniciativas en Admin. Es el UNICO sitio
+  // donde se cambia: quien refresca datos lo lee de aqui. No acelera el
+  // dato de origen: lo que llega depende del ETL (ver DASHBOARD.md, 2.4).
+  RefrescoAuto.INTERVALO_DATOS = 300000;
+
+  // ¿Hay un desplegable propio (assets/js/desplegable.js) abierto? Con el
+  // menu de un filtro abierto el usuario esta eligiendo: no se refresca.
+  RefrescoAuto.eligiendo = function (doc) {
+    return !!(doc && doc.querySelector && doc.querySelector('.dd.abierto'));
+  };
+
   // ¿Alguien esta escribiendo o eligiendo dentro de `caja`? (un input,
   // textarea o select con el foco, o lo que sea contentEditable).
   RefrescoAuto.editando = function (doc, caja) {
@@ -117,6 +129,22 @@
     if (!a || !caja || !caja.contains || !caja.contains(a)) return false;
     var tag = String(a.tagName || '').toUpperCase();
     return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || a.isContentEditable === true;
+  };
+
+  // Boton "Actualizar": llama a `fn` (-> Promise) YA, sin esperar al
+  // temporizador. Deshabilitado mientras la peticion esta en vuelo, asi que
+  // varios clics seguidos son una sola peticion. Un solo listener por boton.
+  RefrescoAuto.cablearBoton = function (boton, fn) {
+    if (!boton || boton.dataset.refrescoCableado) return;
+    boton.dataset.refrescoCableado = '1';
+    boton.addEventListener('click', function () {
+      if (boton.disabled) return;
+      var texto = boton.textContent;
+      boton.disabled = true;
+      boton.textContent = 'Actualizando…';
+      var listo = function () { boton.disabled = false; boton.textContent = texto; };
+      Promise.resolve().then(fn).then(listo, listo);
+    });
   };
 
   global.RefrescoAuto = RefrescoAuto;

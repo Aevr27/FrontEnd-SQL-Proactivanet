@@ -1496,11 +1496,20 @@ const TableroBacklog = (function () {
     cargaProgramada = setTimeout(() => { cargaProgramada = null; cargarTodo(); }, ESPERA_AUTO);
   }
 
-  async function cargarTodo() {
+  /* fondo = refresco (el automatico de dashboard.js o "Actualizar"): mismos
+     filtros y misma peticion, sin "Cargando...", conservando la seleccion
+     del cross-filter y las filas abiertas de "antiguos"; si falla, lo que se
+     ve se queda y la pastilla lo avisa. */
+  let cargasEnVuelo = 0;
+  let cargadoUnaVez = false;
+
+  async function cargarTodo(opciones) {
+    const fondo = !!(opciones && opciones.fondo);
     clearTimeout(cargaProgramada);
     cargaProgramada = null;
     const miCarga = ++cargaVigente;
-    estadoCargando('estado-carga-bl');
+    if (!fondo) estadoCargando('estado-carga-bl');
+    cargasEnVuelo++;
     try {
       const p = paramsFiltros();
       const qs = p.toString();
@@ -1525,21 +1534,80 @@ const TableroBacklog = (function () {
       ordenLideres = Paleta.registrarLideres(
         (resumen.prioridad ?? []).map(x => x.Lider));
 
-      Object.keys(filtro).forEach(k => { filtro[k] = null; });
-      // Datos nuevos: cada lider vuelve a sus primeras filas de antiguos.
-      visiblesAntiguos.clear();
+      // Filtros nuevos: sin seleccion y cada lider vuelve a sus primeras
+      // filas de antiguos. Un refresco no cambio los filtros: se conservan.
+      if (!fondo) {
+        Object.keys(filtro).forEach(k => { filtro[k] = null; });
+        visiblesAntiguos.clear();
+      }
       renderTodo();
+      cargadoUnaVez = true;
       // El Backlog es una foto, no una ventana: su metadato viaja sin periodo
       // y su "ultima actualizacion" es la fecha de corte de
       // dbo.CorreoBacklogSnapshot con la que respondio el handler.
-      estadoOk('estado-carga-bl', resumen.meta);
+      // "Consultado": la hora de esta respuesta buena, no la del corte.
+      estadoOk('estado-carga-bl', resumen.meta, { consultado: DatosInfo.ahoraLocal() });
+      return null;
     } catch (err) {
-      if (miCarga !== cargaVigente) return;   // fallo de una carga ya superada
-      estadoError('estado-carga-bl', err);
+      if (miCarga !== cargaVigente) return null;   // fallo de una carga ya superada
+      const acceso = /HTTP (401|403)\b/.exec(String(err && err.message));
+      if (fondo && datos) {
+        DatosInfo.avisoRefresco('estado-carga-bl',
+          `⚠ No se pudo actualizar (${DatosInfo.fechaHora(DatosInfo.ahoraLocal())}); se muestran los datos anteriores`,
+          String(err && err.message));
+        console.error(err);
+      } else {
+        estadoError('estado-carga-bl', err);
+      }
+      return acceso ? Number(acceso[1]) : null;
+    } finally {
+      cargasEnVuelo--;
     }
   }
 
+  // Refresco automatico: nunca encima de una carga en vuelo o programada
+  // por un filtro (esa ya trae lo ultimo), ni antes de la primera buena.
+  // El automatico y el boton comparten UN refresco en vuelo.
+  let refrescoEnCurso = null;
+  function refrescoFondo() {
+    if (!refrescoEnCurso) {
+      refrescoEnCurso = seguirUltimoCorte()
+        .then(() => cargarTodo({ fondo: true }))
+        .finally(() => { refrescoEnCurso = null; });
+    }
+    return refrescoEnCurso;
+  }
+
+  function refrescar() {
+    if (cargasEnVuelo > 0 || cargaProgramada !== null || !cargadoUnaVez) return Promise.resolve(null);
+    return refrescoFondo();
+  }
+
+  // Boton "Actualizar": igual, y sin carga buena todavia, una normal.
+  function actualizarAhora() {
+    if (cargasEnVuelo > 0) return Promise.resolve(null);
+    return cargadoUnaVez ? refrescoFondo() : cargarTodo();
+  }
+
+  /* El Backlog es una foto por corte: refrescar el MISMO corte casi nunca
+     trae nada nuevo. Si el usuario esta en el ultimo corte guardado y ya
+     hay uno mas reciente, se pasa a ese; si eligio otro, se respeta. Solo
+     se releen las fechas: los multi-select de C1 / grupos / lideres no se
+     tocan. Un fallo aqui no frena el refresco (va con el corte de antes). */
+  function seguirUltimoCorte() {
+    return obtenerJSON('backlog_catalogos.ashx').then(c => {
+      const fechas = (c.fechas ?? []).map(f => String(f).slice(0, 10));
+      const corte = document.getElementById('f-corte-bl');
+      if (!fechas.length || !corte || corte.disabled) return;
+      const enUltimo = corte.value === corte.max;
+      corte.min = fechas[fechas.length - 1];
+      corte.max = fechas[0];
+      if (enUltimo) corte.value = fechas[0];
+    }, err => console.error(err));
+  }
+
   async function init() {
+    if (window.RefrescoAuto) RefrescoAuto.cablearBoton(document.getElementById('btn-actualizar-bl'), actualizarAhora);
     document.getElementById('btn-limpiar-bl').addEventListener('click', () => {
       for (const id of ['f-c1-bl', 'f-grupos-bl', 'f-lideres-bl']) {
         Array.from(document.getElementById(id).options).forEach(o => { o.selected = false; });
@@ -1579,7 +1647,7 @@ const TableroBacklog = (function () {
     await cargarTodo();
   }
 
-  return { init, redimensionar: () => redimensionar(graficos) };
+  return { init, refrescar, redimensionar: () => redimensionar(graficos) };
 })();
 
 /* =========================================================================

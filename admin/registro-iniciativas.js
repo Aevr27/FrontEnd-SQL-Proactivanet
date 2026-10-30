@@ -384,7 +384,11 @@ window.RegistroIniciativas = (function () {
       })
       .then(function (r) {
         return r.json().catch(function () { return null; }).then(function (json) {
-          if (!r.ok) throw new Error((json && json.error) || ('El servidor respondió ' + r.status + '.'));
+          if (!r.ok) {
+            var e = new Error((json && json.error) || ('El servidor respondió ' + r.status + '.'));
+            e.estado = r.status;   // 401 / 403 detienen el refresco automatico
+            throw e;
+          }
           return json;
         });
       });
@@ -2588,6 +2592,10 @@ window.RegistroIniciativas = (function () {
     // ---- eventos ----
     cablear() {
       var self = this;
+      // "Actualizar": relee ya, sin esperar al refresco automatico.
+      if (typeof window !== 'undefined' && window.RefrescoAuto && this.$('regActualizar')) {
+        window.RefrescoAuto.cablearBoton(this.$('regActualizar'), function () { return self.refrescarFondo(); });
+      }
       // Estado y Tipo de iniciativa: boton que abre un panel de casillas.
       Object.keys(MULTIS).forEach(function (clave) {
         var m = MULTIS[clave];
@@ -2870,6 +2878,7 @@ window.RegistroIniciativas = (function () {
           self.limite = PAGINA;
           self.estadoVista(self.registro.iniciativas.length ? 'listo' : 'sinDatos');
           self.refrescar();
+          self.marcarConsultado();
           // Fuera de ADM las opciones salen del catalogo: se pide ya.
           if (!self.registro.alcanceCompleto()) self.cargarCobertura(pedir);
         })
@@ -4085,6 +4094,7 @@ window.RegistroIniciativas = (function () {
           if (cobertura) self.estadoCobertura('listo');
           self.estadoVista(registro.iniciativas.length ? 'listo' : 'sinDatos');
           self.repintar();
+          self.marcarConsultado();
           if (pedirCobertura) self.cargarCobertura(pedir);
           return { ok: true, registro: registro };
         })
@@ -4092,6 +4102,64 @@ window.RegistroIniciativas = (function () {
           if (mia !== self.cargaId) return { ok: false, superada: true };
           return { ok: false, error: err };
         });
+    }
+
+    // ---- refresco automatico (RefrescoAuto, lo arma iniciativas.js) ----
+    // Solo con la lista a la vista y ya cargada: sin un detalle abierto (su
+    // borrador, "Solicitar cambios" y el historial no se tocan), sin un
+    // filtro de casillas desplegado y sin nadie escribiendo o eligiendo en
+    // el panel (la caja de busqueda incluida).
+    puedeRefrescar() {
+      var panel = this.$('panel-iniciativas'), self = this;
+      if (!panel || panel.hidden || !this.registro || !this.filtro || this.abierta || this.refrescando) return false;
+      var multiAbierto = Object.keys(MULTIS).some(function (k) {
+        var b = self.$(MULTIS[k].boton);
+        return !!b && b.getAttribute('aria-expanded') === 'true';
+      });
+      var R = typeof window !== 'undefined' ? window.RefrescoAuto : null;
+      return !multiAbierto && !(R && (R.editando(this.doc, panel) || R.eligiendo(this.doc)));
+    }
+
+    // actualizar() en segundo plano: conserva filtros, busqueda, orden,
+    // "mostrar mas" y modo; si falla, la lista se queda y se avisa junto al
+    // "Consultado". -> Promise<estado HTTP | null> (RefrescoAuto se detiene
+    // con 401 / 403). El automatico y el boton comparten la misma peticion.
+    refrescarFondo(pedir) {
+      var self = this;
+      if (this.refrescando) return this.refrescando;
+      this.refrescando = this.actualizar(pedir).then(function (res) {
+        self.refrescando = null;
+        if (!res.ok && !res.superada) self.avisoConsultado(res.error);
+        return (res.error && res.error.estado) || null;
+      });
+      return this.refrescando;
+    }
+
+    // "Consultado: dd/mm/aaaa · hh:mm": la hora de la ultima lectura BUENA
+    // del registro (reloj del navegador). No es la fecha de los datos: esa
+    // depende de la carga de Experiencia que alimenta el handler.
+    marcarConsultado(fecha) {
+      var nodo = this.$('regConsultado');
+      if (!nodo) return;
+      var f = fecha || new Date();
+      var dos = function (n) { return (n < 10 ? '0' : '') + n; };
+      this.consultadoTexto = 'Consultado: ' + dos(f.getDate()) + '/' + dos(f.getMonth() + 1) + '/' + f.getFullYear() +
+        ' · ' + dos(f.getHours()) + ':' + dos(f.getMinutes());
+      nodo.textContent = this.consultadoTexto;
+      nodo.className = '';
+      nodo.title = '';
+      var caja = this.$('regConsultadoCaja');
+      if (caja) caja.hidden = false;
+    }
+
+    avisoConsultado(err) {
+      var nodo = this.$('regConsultado');
+      if (!nodo) return;
+      var f = new Date(), dos = function (n) { return (n < 10 ? '0' : '') + n; };
+      nodo.textContent = (this.consultadoTexto ? this.consultadoTexto + ' · ' : '') +
+        '⚠ No se pudo actualizar (' + dos(f.getHours()) + ':' + dos(f.getMinutes()) + '); se muestran los datos anteriores';
+      nodo.className = 'ini-consultado-error';
+      nodo.title = (err && err.message) || '';
     }
 
     // Tras un guardado confirmado de `folio` (desde el borrador `ed`):

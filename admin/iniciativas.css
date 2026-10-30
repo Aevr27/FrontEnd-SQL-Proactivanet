@@ -74,6 +74,9 @@
 .ini-vista-titulo { min-width: 0; }
 .ini-vista-titulo h2 { font-size: 18px; font-weight: 700; color: var(--ink); }
 .ini-vista-sub { margin-top: 3px; font-size: 13px; color: var(--muted); }
+.ini-consultado { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12px; }
+.ini-consultado[hidden] { display: none; }
+.ini-consultado .ini-consultado-error { color: #982a18; font-weight: 600; }
 
 /* "Solicitar una iniciativa": el .btn del proyecto, mas grande y con mas
    sombra para que no pase desapercibido. Sin animacion permanente. */
@@ -913,6 +916,18 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-cr-tabla { font-size: 12px; }
 .ini-cr-tabla td:last-child { text-align: right; white-space: nowrap; }
 .ini-cr-falta { color: var(--muted); font-style: italic; }
+
+/* Historial de peticiones (admin/historial-peticiones.js): misma escala que
+   Cambios recientes; el tipo se distingue de un vistazo por su chip. */
+.ini-hp .ini-lista-cab { align-items: center; }
+.ini-hp .ini-nota { margin: 4px 0 10px; }
+.ini-hp .ini-filtros { margin-bottom: 10px; }
+.ini-hp-caja { max-height: 520px; overflow: auto; }
+.ini-hp-tabla { font-size: 12px; }
+.ini-hp-tabla td:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ini-hp-tipo { white-space: nowrap; }
+.ini-hp-iniciativa { background: var(--g-50); color: var(--g-900); border: 1px solid var(--g-100); }
+.ini-hp-cambio { background: #fdf3e1; color: #7a4a06; border: 1px solid #f1d8a8; }
 
 /* ---- Acuse del PO / SO (detalle) y avisos de ADM (admin/acuse-iniciativa.js) ---- */
 .ini-acuse {

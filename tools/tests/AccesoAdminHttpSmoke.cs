@@ -992,7 +992,8 @@ public static class AccesoAdminHttpSmoke
         Check("M5 ExigirAdm: solo Rol == ADM, sin MOD ni EsElevado", "True|False|False",
               exigirAdm.Contains("Rol(context) == RolAdmin.Adm") + "|" + exigirAdm.Contains("RolAdmin.Mod") + "|" + exigirAdm.Contains("EsElevado"));
         foreach (var arch in new[] { "admin_iniciativas_gestion.ashx", "admin_iniciativas_solicitudes_nuevas_revision.ashx", "admin_categorias_alta.ashx",
-                                     "admin_iniciativas_recientes.ashx", "admin_iniciativas_solicitudes_nuevas.ashx" })
+                                     "admin_iniciativas_recientes.ashx", "admin_iniciativas_solicitudes_nuevas.ashx",
+                                     "admin_iniciativas_historial.ashx" })
         {
             var src = File.ReadAllText(Path.Combine("handlers", arch));
             Check("M6 " + arch + ": ExigirAdm antes de todo", true,

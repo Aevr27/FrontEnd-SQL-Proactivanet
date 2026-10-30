@@ -228,12 +228,36 @@ var RA = caja.RefrescoAuto;
   var html = leer('admin/iniciativas.html'), pag = leer('admin/iniciativas.js');
   Check('W1 iniciativas.html carga refresco-auto.js antes de iniciativas.js', true,
     html.indexOf('../assets/js/refresco-auto.js') > 0 && html.indexOf('../assets/js/refresco-auto.js') < html.indexOf('<script src="iniciativas.js">'));
-  Check('W2 un solo RefrescoAuto, sobre cola / nuevas / mias, con su puedeRefrescar y refrescarFondo', [1, true, true],
+  Check('W2 dos RefrescoAuto: las listas de Solicitudes (cola / nuevas / mias) y el registro de Iniciativas', [2, true, true, true],
     [(pag.match(/new window\.RefrescoAuto\(/g) || []).length, /\[this\.cola, this\.nuevas, this\.mias\]/.test(pag),
-     /l\.refrescarFondo\(\)/.test(pag) && /l\.puedeRefrescar\(\)/.test(pag)]);
-  Check('W3 ninguna otra pagina del tablero usa el refresco automatico', [],
-    ['dashboard.js', 'experiencia/experiencia.js', 'backlog/backlog.js', 'qa/qa.js', 'admin/registro-iniciativas.js']
-      .filter(function (f) { return /RefrescoAuto/.test(leer(f)); }));
+     /l\.refrescarFondo\(\)/.test(pag) && /l\.puedeRefrescar\(\)/.test(pag),
+     /intervalo: window\.RefrescoAuto\.INTERVALO_DATOS/.test(pag) && /regAuto\.puedeRefrescar\(\)/.test(pag) && /regAuto\.refrescarFondo\(\)/.test(pag)]);
+  Check('W3 Experiencia y QA no usan el refresco automatico (ver dashboard.js, 4ter)', [],
+    ['experiencia/experiencia.js', 'qa/qa.js'].filter(function (f) { return /RefrescoAuto/.test(leer(f)); }));
+  var dash = leer('dashboard.js'), dashHtml = leer('dashboard.html');
+  Check('W4 dashboard: UN RefrescoAuto con INTERVALO_DATOS; refresco-auto.js antes de dashboard.js', [1, true, true],
+    [(dash.match(/new RefrescoAuto\(/g) || []).length, /intervalo: RefrescoAuto\.INTERVALO_DATOS/.test(dash),
+     dashHtml.indexOf('assets/js/refresco-auto.js') > 0 && dashHtml.indexOf('assets/js/refresco-auto.js') < dashHtml.indexOf('<script src="dashboard.js">')]);
+  Check('W5 Backlog y QARE sueltos cargan refresco-auto.js y publican refrescar', [true, true, true, true],
+    [/refresco-auto\.js/.test(leer('backlog/backlog.html')), /refresco-auto\.js/.test(leer('qare/qare.html')),
+     /return \{ init, refrescar,/.test(leer('backlog/backlog.js')), /refrescar: refrescar/.test(leer('qare/qare.js'))]);
+
+  // ================= D) intervalo de datos y boton =================
+  Check('D1 intervalo de datos por omision: 5 minutos', 300000, RA.INTERVALO_DATOS);
+  var bot = Elemento('b'); bot.dataset = {}; bot.disabled = false; bot.textContent = 'Actualizar';
+  var pedidosBoton = 0, difBoton = Diferida();
+  RA.cablearBoton(bot, function () { pedidosBoton++; return difBoton.promesa; });
+  RA.cablearBoton(bot, function () { pedidosBoton += 100; return Promise.resolve(); });
+  bot.disparar('click'); await tics();
+  bot.disparar('click'); bot.disparar('click'); await tics();
+  Check('D2 boton: pide ya, una sola vez con clics seguidos; deshabilitado y "Actualizando…" mientras tanto',
+    [1, true, 'Actualizando…'], [pedidosBoton, bot.disabled, bot.textContent]);
+  difBoton.resolver(); await tics();
+  Check('D3 al terminar vuelve a estar habilitado con su texto; cablear dos veces no duplica', [false, 'Actualizar', 1],
+    [bot.disabled, bot.textContent, pedidosBoton]);
+  var docDd = { querySelector: function (s) { return s === '.dd.abierto' ? {} : null; } };
+  Check('D4 eligiendo: un desplegable abierto si; ninguno no', [true, false],
+    [RA.eligiendo(docDd), RA.eligiendo({ querySelector: function () { return null; } })]);
 
   console.log(fallos === 0 ? 'TODO PASO' : fallos + ' FALLO(S)');
   process.exit(fallos === 0 ? 0 : 1);

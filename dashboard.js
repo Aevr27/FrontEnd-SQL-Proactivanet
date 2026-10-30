@@ -411,9 +411,12 @@ function estadoParcial(id, meta, fallos, opciones) {
   if (!fallos || !fallos.length) return estadoOk(id, meta, opciones);
 
   const nombres = fallos.map(f => f.nombre).join(', ');
+  // En un refresco en segundo plano lo que fallo conserva lo de antes: no
+  // es "sin datos", es "sin actualizar".
+  const rotulo = (opciones && opciones.rotuloFallos) || 'sin datos de';
   DatosInfo.pintar(id, meta, conAvisoSimulados({
     ...opciones,
-    sufijo: ` · ⚠ sin datos de: ${nombres}`,
+    sufijo: ` · ⚠ ${rotulo}: ${nombres}`,
     titulo: fallos.map(f => `${f.nombre}: ${f.error && f.error.message}`).join('\n'),
   }));
   fallos.forEach(f => console.error(`[${f.nombre}]`, f.error));
@@ -3559,12 +3562,32 @@ const TableroSla = (function () {
     }
   }
 
-  async function cargarTodo() {
+  /* fondo = refresco (automatico cada RefrescoAuto.INTERVALO_DATOS o el
+     boton "Actualizar"): mismos filtros, misma peticion, pero sin
+     "Cargando...", sin vaciar nada mientras llega, conservando la seleccion
+     del cross-filter y, si algo falla, conservando lo que ya se veia. La
+     cache de 60 s se tira antes: un refresco tiene que ir al servidor. */
+  let cargasEnVuelo = 0;
+  let slaCargadoUnaVez = false;
+
+  async function cargarTodo(opciones) {
+    const fondo = !!(opciones && opciones.fondo);
     // Una carga inmediata ("Limpiar", rango rapido) manda sobre la programada.
     clearTimeout(cargaProgramada);
     cargaProgramada = null;
     const miCarga = ++cargaVigente;
-    estadoCargando('estado-carga');
+    cargasEnVuelo++;
+    try {
+      return await cargarTodoEn(miCarga, fondo);
+    } finally {
+      cargasEnVuelo--;
+    }
+  }
+
+  // -> null, o 401 / 403 si TODO fallo por acceso (RefrescoAuto se detiene).
+  async function cargarTodoEn(miCarga, fondo) {
+    if (fondo) purgarCacheSla();
+    else estadoCargando('estado-carga');
     const qs = paramsFiltros().toString();
     const qsGrupos = paramsRankingCerrados().toString();
 
@@ -3575,26 +3598,28 @@ const TableroSla = (function () {
        tablero entero hubiera venido incompleto, cuando lo unico que falta es
        el ultimo bloque del Call Center. Se lanza aqui para que salga en
        paralelo con las demas, y se pinta solo en cuanto responde. */
-    estadoCargaCombinada('Cargando el cruce de tickets y llamadas...');
+    if (!fondo) estadoCargaCombinada('Cargando el cruce de tickets y llamadas...');
     /* Las graficas del cruce se vacian YA, antes de pedir nada: mientras
        vuelve la respuesta no puede quedarse a la vista el reparto del filtro
        anterior, que se leeria como el del filtro nuevo. Quedan las tarjetas
        con sus ejes y el "Cargando..." dentro. El guardia de `miCarga` de abajo
        es lo que impide que una respuesta atrasada las vuelva a llenar. */
-    pintarCargaVacia('Cargando el cruce de tickets y llamadas...');
+    /* En un refresco no: el filtro es el mismo y lo de antes vale hasta que
+       llegue lo nuevo; si falla, se queda (solo a la consola). */
+    if (!fondo) pintarCargaVacia('Cargando el cruce de tickets y llamadas...');
     obtenerJSONSla(`carga_combinada.ashx?${paramsCargaCombinada().toString()}`).then(
       d => { if (miCarga === cargaVigente) renderCargaCombinada(d); },
-      e => { if (miCarga === cargaVigente) errorCargaCombinada(e); }
+      e => { if (miCarga === cargaVigente) { if (fondo) console.error(e); else errorCargaCombinada(e); } }
     ).catch(e => console.error(e));
 
     /* SLA por lider y grupo: tambien APARTE, por el mismo motivo que el
        cruce. Depende de dbo.usp_Dash_SlaLiderGrupo; si falla, solo su tarjeta
        lo dice y no cuenta en `fallos`. Mismos filtros que el resto de la
        pestaña: el handler decide cuales acepta el procedimiento. */
-    estadoSlaLiderGrupo('Cargando...');
+    if (!fondo) estadoSlaLiderGrupo('Cargando...');
     obtenerJSONSla(`sla_lider_grupo.ashx?${qs}`).then(
       d => { if (miCarga === cargaVigente) renderSlaLiderGrupo(d); },
-      e => { if (miCarga === cargaVigente) errorSlaLiderGrupo(e); }
+      e => { if (miCarga === cargaVigente) { if (fondo) console.error(e); else errorSlaLiderGrupo(e); } }
     ).catch(e => console.error(e));
 
     /* El ranking de personas (topCerrados) pide el MISMO productividad.ashx
@@ -3631,8 +3656,11 @@ const TableroSla = (function () {
 
     const resueltos = await Promise.allSettled(peticiones.map(([, pedir]) => pedir()));
     // Llego tarde: otro cambio de filtro ya lanzo una carga posterior.
-    if (miCarga !== cargaVigente) return;
+    if (miCarga !== cargaVigente) return null;
 
+    // En un refresco, lo que falla conserva el dataset que ya se veia:
+    // "sin actualizar" en vez de vaciarlo.
+    const previos = fondo ? datos : null;
     const nuevos = {};
     const fallos = [];
     resueltos.forEach((r, i) => {
@@ -3640,36 +3668,73 @@ const TableroSla = (function () {
       if (r.status === 'fulfilled') {
         nuevos[nombre] = r.value;
       } else {
-        nuevos[nombre] = DATASET_VACIO[nombre];
+        nuevos[nombre] = previos ? previos[nombre] : DATASET_VACIO[nombre];
         fallos.push({ nombre, error: r.reason });
       }
     });
 
     // Si NO llego nada, el tablero no tiene que fingir un estado vacio: es un
-    // error de backend y se muestra como tal, igual que antes.
+    // error de backend y se muestra como tal, igual que antes. En un
+    // refresco con datos ya pintados, esos se quedan y la pastilla lo avisa;
+    // el "Consultado" sigue siendo el de la ultima carga buena.
     if (fallos.length === peticiones.length) {
-      datos = null;
-      detalleDisponible = false;
-      estadoError('estado-carga', fallos[0].error);
-      return;
+      const motivo = String(fallos[0].error && fallos[0].error.message);
+      const acceso = /HTTP (401|403)\b/.exec(motivo);
+      if (previos) {
+        DatosInfo.avisoRefresco('estado-carga',
+          `⚠ No se pudo actualizar (${DatosInfo.fechaHora(DatosInfo.ahoraLocal())}); se muestran los datos anteriores`, motivo);
+        console.error(fallos[0].error);
+      } else {
+        datos = null;
+        detalleDisponible = false;
+        estadoError('estado-carga', fallos[0].error);
+      }
+      return acceso ? Number(acceso[1]) : null;
     }
 
     datos = nuevos;
-    detalleDisponible = !fallos.some(f => f.nombre === 'detalle');
-    // Cambiar el rango invalida cualquier seleccion previa del tablero.
-    Object.keys(filtro).forEach(k => { filtro[k] = null; });
+    // Un refresco que no trajo `detalle` se queda con el de antes.
+    if (!(previos && fallos.some(f => f.nombre === 'detalle'))) {
+      detalleDisponible = !fallos.some(f => f.nombre === 'detalle');
+    }
+    // Cambiar el rango invalida cualquier seleccion previa del tablero. Un
+    // refresco no cambia el rango: la seleccion se conserva.
+    if (!fondo) Object.keys(filtro).forEach(k => { filtro[k] = null; });
     invalidarFilas();
     renderTodo();
+    slaCargadoUnaVez = true;
     /* kpis.meta trae el sello del ETL y el rango que la consulta USO. En la
        cabecera solo se dibuja el sello (ver estadoOk); el rango ya esta en la
-       barra de filtros y sigue viajando en meta. */
-    estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.meta, fallos, { periodo: false });
+       barra de filtros y sigue viajando en meta. "Consultado" es la hora de
+       ESTA respuesta buena, no la del dato. */
+    estadoParcial('estado-carga', nuevos.kpis && nuevos.kpis.meta, fallos, {
+      periodo: false,
+      consultado: DatosInfo.ahoraLocal(),
+      rotuloFallos: previos ? 'sin actualizar' : null,
+    });
 
     /* Y ya con el tablero pintado, se calientan en segundo plano los SLOTs
        que el usuario todavia no ha pedido. Sin await: la carga visible ya
        termino y esto no puede retrasar ni el pintado ni el init() que espera
        a cargarTodo(). */
     calentarSlotsFuturos(miCarga).catch(e => console.error(e));
+    return null;
+  }
+
+  /* Refresco del tablero (RefrescoAuto central o el boton "Actualizar").
+     Con una carga en vuelo o una programada por un filtro no se encima
+     otra: esa ya trae lo ultimo. Sin una primera carga buena no hay nada
+     que refrescar ("Limpiar" o volver a entrar mandan). */
+  function refrescar() {
+    if (cargasEnVuelo > 0 || cargaProgramada !== null || !slaCargadoUnaVez) return Promise.resolve(null);
+    return cargarTodo({ fondo: true });
+  }
+
+  // Boton "Actualizar": lo mismo, y si todavia no hubo una carga buena (el
+  // arranque fallo) es una carga normal, que es lo unico que puede arreglarlo.
+  function actualizarAhora() {
+    if (cargasEnVuelo > 0) return Promise.resolve(null);
+    return slaCargadoUnaVez ? cargarTodo({ fondo: true }) : cargarTodo();
   }
 
   async function init() {
@@ -3752,6 +3817,10 @@ const TableroSla = (function () {
     });
     renderSlotStepper();             // estado inicial: sin SLOT, rango manual
 
+    // "Actualizar": refresca ya, sin tocar filtros ni la seleccion. El
+    // automatico (cada RefrescoAuto.INTERVALO_DATOS) lo lleva el router.
+    if (window.RefrescoAuto) RefrescoAuto.cablearBoton(document.getElementById('btn-actualizar'), actualizarAhora);
+
     // Tabla de SLA por lider y grupo: plegada al abrir, el boton la alterna.
     const botonLiderGrupo = document.getElementById('plegar-sla-lider-grupo');
     if (botonLiderGrupo) {
@@ -3774,7 +3843,7 @@ const TableroSla = (function () {
     await cargarTodo();
   }
 
-  return { init, redimensionar: () => redimensionar(graficos), modoCallCenter };
+  return { init, refrescar, redimensionar: () => redimensionar(graficos), modoCallCenter };
 })();
 
 /* =======================================================================
@@ -3963,7 +4032,7 @@ const SOPORTA_SCOPE = (() => {
   } catch (e) { return false; }
 })();
 
-function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () => {} }) {
+function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () => {}, refrescar = null }) {
 
   async function texto(ruta) {
     const resp = await fetch(ruta, { cache: 'no-store' });
@@ -4077,7 +4146,9 @@ function moduloEmbebido({ nombre, base, id, pagina, hoja, guion, alVolver = () =
      .active antes de llamar a init()), asi que al volver no hay que
      reconstruir nada: como mucho, remedir lo que quedo con el contenedor
      oculto. Cada modulo dice si necesita ese aviso. */
-  return { init, redimensionar: alVolver };
+  /* refrescar: solo los modulos que lo publican (Backlog, QARE). El resto
+     no se refresca solo; ver el bloque del refresco automatico. */
+  return { init, redimensionar: alVolver, refrescar };
 }
 
 const TableroExperiencia = moduloEmbebido({
@@ -4124,6 +4195,10 @@ const TableroBacklog = moduloEmbebido({
     const modulo = window.TableroBacklogModulo;
     if (modulo) modulo.redimensionar();
   },
+  refrescar: () => {
+    const modulo = window.TableroBacklogModulo;
+    return modulo && modulo.refrescar ? modulo.refrescar() : Promise.resolve(null);
+  },
 });
 
 /* QA: el modulo publica window.TableroQaModulo al arrancar. Mientras la
@@ -4156,6 +4231,10 @@ const TableroQare = moduloEmbebido({
   alVolver: () => {
     const modulo = window.TableroQareModulo;
     if (modulo) modulo.redimensionar();
+  },
+  refrescar: () => {
+    const modulo = window.TableroQareModulo;
+    return modulo && modulo.refrescar ? modulo.refrescar() : Promise.resolve(null);
   },
 });
 
@@ -4214,6 +4293,9 @@ function adoptarControlesSla(idTab) {
   const filtros = document.getElementById('filtros-sla');
   const estado = document.getElementById('estado-carga');
   if (!destino || !filtros || !estado) return;
+  // "Actualizar" viaja con la pastilla: refresca la misma carga.
+  const actualizar = document.getElementById('btn-actualizar');
+  if (actualizar) destino.querySelector('.acciones-top').appendChild(actualizar);
   destino.querySelector('.acciones-top').appendChild(estado);
   destino.querySelector('header.top').insertAdjacentElement('afterend', filtros);
 
@@ -4277,6 +4359,8 @@ function pestanaSla(idTab) {
       adoptarControlesSla(idTab);
       TableroSla.redimensionar();
     },
+    // SLA y Call Center comparten la carga: refrescar una refresca las dos.
+    refrescar: () => TableroSla.refrescar(),
   };
 }
 
@@ -4345,6 +4429,8 @@ function resolverModulo(nombre) {
 
 function activarTab(nombre) {
   nombre = resolverModulo(nombre);
+  const anterior = pestanaActiva;
+  pestanaActiva = nombre;
 
   const idContenedor = 'tab-' + nombre;
   const grupo = grupoDe(nombre);
@@ -4369,7 +4455,13 @@ function activarTab(nombre) {
 
   // Solo la pestaña que se esta viendo pega a sus .ashx; la otra espera a su
   // primer clic. Al volver, las graficas ya existen y solo hay que remedirlas.
-  if (listo.has(nombre)) return MODULOS[nombre].redimensionar();
+  if (listo.has(nombre)) {
+    MODULOS[nombre].redimensionar();
+    // Volver a una pestaña cuyos datos ya pasaron el intervalo: se
+    // refrescan ahora, no en la siguiente vuelta.
+    if (anterior !== nombre) refrescarSiViejo(nombre);
+    return;
+  }
   if (montando.has(nombre)) return;   // ya hay un montaje en vuelo
 
   montando.add(nombre);
@@ -4386,7 +4478,7 @@ function activarTab(nombre) {
      moduloEmbebido(). */
   Promise.resolve()
     .then(() => MODULOS[nombre].init())
-    .then(() => { listo.add(nombre); })
+    .then(() => { listo.add(nombre); refrescadoEn[claveRefresco(nombre)] = Date.now(); })
     .catch(err => {
       // Queda fuera de `listo`: el proximo clic en la pestaña vuelve a
       // intentarlo. La tarjeta de error, con su enlace al tablero suelto,
@@ -4395,6 +4487,69 @@ function activarTab(nombre) {
     })
     .finally(() => { montando.delete(nombre); });
 }
+
+/* =======================================================================
+   4ter. Refresco automatico de datos
+   -----------------------------------------------------------------------
+   UN temporizador para todo el tablero (assets/js/refresco-auto.js), no uno
+   por modulo: cada RefrescoAuto.INTERVALO_DATOS (5 min, se cambia alli)
+   refresca SOLO la pestaña a la vista, con la funcion refrescar() de su
+   modulo, que es su misma carga de siempre en modo "fondo": mismos
+   filtros, sin "Cargando...", sin borrar lo que se ve si falla y con
+   "Consultado: ..." en la pastilla solo tras una respuesta buena.
+
+   Cubre SLA y Call Center (una sola carga), Backlog y QARE. No cubre:
+     - Experiencia, QA: su carga vacia y rehace la pantalla por fases; se
+       actualizan al volver a abrir la pagina.
+     - Efectividad (calculo por lotes) y Orquestacion (carga del Excel): su
+       dato cambia con un proceso aparte, no con el ETL de tickets.
+     - Analisis de servicios: se calcula con su boton Analizar.
+     - Observabilidad: instantanea generada, no consulta SQL.
+
+   No refresca con la pagina oculta (RefrescoAuto), con un filtro o fecha
+   con el foco, ni con un desplegable abierto. Nunca dos a la vez: el
+   temporizador espera a que termine la vuelta anterior y cada modulo se
+   salta el refresco si ya tiene una carga en vuelo.
+   ======================================================================= */
+let pestanaActiva = null;
+// Ultima vez que se pidieron los datos de cada carga (SLA y Call Center
+// comparten una), para saber si al volver a una pestaña ya estan viejos.
+const refrescadoEn = {};
+
+function claveRefresco(nombre) { return nombre === 'call' ? 'sla' : nombre; }
+
+function moduloRefrescable() {
+  const n = pestanaActiva;
+  if (!n || !listo.has(n) || typeof MODULOS[n].refrescar !== 'function') return null;
+  const cont = document.getElementById('tab-' + n);
+  if (!window.RefrescoAuto) return null;
+  if (RefrescoAuto.editando(document, cont) || RefrescoAuto.eligiendo(document)) return null;
+  return n;
+}
+
+function refrescarModulo(n) {
+  refrescadoEn[claveRefresco(n)] = Date.now();
+  return Promise.resolve(MODULOS[n].refrescar()).catch(e => { console.error(e); return null; });
+}
+
+const refrescoTablero = window.RefrescoAuto ? new RefrescoAuto({
+  intervalo: RefrescoAuto.INTERVALO_DATOS,
+  puede: () => !!moduloRefrescable(),
+  refrescar: () => {
+    const n = moduloRefrescable();
+    return n ? refrescarModulo(n) : Promise.resolve(null);
+  },
+}) : null;
+
+function refrescarSiViejo(nombre) {
+  if (!refrescoTablero || !refrescoTablero.activo || refrescoTablero.enCurso) return;
+  const t = refrescadoEn[claveRefresco(nombre)] || 0;
+  if (Date.now() - t >= refrescoTablero.intervalo) refrescoTablero.vuelta();
+}
+
+/* El boton "Actualizar" de cada pestaña lo cablea su propio modulo (sirve
+   igual en la pagina suelta) y llama al mismo refrescar(). */
+if (refrescoTablero) refrescoTablero.iniciar();
 
 /* Solo las entradas con data-tab son pestañas. Administracion es un enlace
    a otra pagina (admin/iniciativas.html) y no debe pasar por activarTab. */

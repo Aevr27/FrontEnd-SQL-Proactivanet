@@ -1014,7 +1014,7 @@ window.Iniciativas = (function () {
       // relee la lista que se ve (Cambios, Iniciativas o Mis solicitudes)
       // con su propio "Actualizar", solo si esa lista lo permite
       // (puedeRefrescar: visible, sin detalle abierto ni nadie escribiendo).
-      // Las demas pestañas no se refrescan solas.
+      // El registro de Iniciativas va con el suyo (abajo); Administracion no.
       if (window.RefrescoAuto) {
         var listas = [this.cola, this.nuevas, this.mias].filter(function (l) { return l && l.puedeRefrescar; });
         var visible = function () { return listas.filter(function (l) { return l.puedeRefrescar(); })[0] || null; };
@@ -1023,6 +1023,18 @@ window.Iniciativas = (function () {
           puede: function () { return !!visible(); },
           refrescar: function () { var l = visible(); return l ? l.refrescarFondo() : Promise.resolve(null); }
         }).iniciar();
+        // Y el registro de Iniciativas (fechas, estados, tickets de cada
+        // PRB): cada RefrescoAuto.INTERVALO_DATOS, solo con la lista a la
+        // vista y sin detalle abierto (VistaRegistro.puedeRefrescar).
+        var regAuto = this.registro;
+        if (regAuto && regAuto.puedeRefrescar) {
+          this.refrescoRegistro = new window.RefrescoAuto({
+            doc: this.doc,
+            intervalo: window.RefrescoAuto.INTERVALO_DATOS,
+            puede: function () { return regAuto.puedeRefrescar(); },
+            refrescar: function () { return regAuto.refrescarFondo(); }
+          }).iniciar();
+        }
       }
       // Cambios recientes (pestaña Administracion, solo ADM). Titulo y estado
       // del registro ya cargado; "Ver" abre el mismo detalle de Iniciativas
@@ -1037,6 +1049,21 @@ window.Iniciativas = (function () {
             if (self.vista === 'iniciativas') regRec.abrirDesdeLista(folio);
           },
           function () { return regRec.actualizar(); });
+      }
+      // Historial de peticiones (pestaña Administracion, solo ADM): solo
+      // lectura. El folio abre el detalle de siempre en Solicitudes, con su
+      // vista (Iniciativas o Cambios) ya elegida.
+      if (window.HistorialPeticiones) {
+        this.historial = new window.HistorialPeticiones.VistaHistorial(this.doc, null, function (tipo, id) {
+          self.mostrarVista('solicitudes');
+          if (self.vista !== 'solicitudes') return;
+          if (tipo === 'INICIATIVA' && self.nuevas) {
+            Promise.resolve(self.nuevas.verNuevas()).then(function () { return self.nuevas.verDetalle(id); });
+          } else if (tipo === 'CAMBIO' && self.cola) {
+            if (self.nuevas && self.nuevas.vista !== 'cambio') self.nuevas.verCambio();
+            self.cola.verDetalle(id);
+          }
+        });
       }
       if (window.IniciativaAdmin) {
         // La volumetria (GET) va por el mismo fetch de la pagina; la
@@ -1119,6 +1146,7 @@ window.Iniciativas = (function () {
       // Cada vez que se abre Administracion (rol ADM ya revisado arriba).
       if (nombre === 'administracion' && this.recientes) this.recientes.abrir();
       if (nombre === 'administracion' && this.avisos) this.avisos.abrir();
+      if (nombre === 'administracion' && this.historial) this.historial.abrir();
       if (nombre === 'solicitudes') this.abrirSolicitudes();
       if (nombre === 'nueva') this.repintarBorrador();
       else if (this.globo) this.globo.ocultar();

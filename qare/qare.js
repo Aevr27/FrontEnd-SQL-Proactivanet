@@ -1036,7 +1036,8 @@
     console.error('[QARE]', err);
   }
 
-  function pintar(d) {
+  // consultado: la hora de esta respuesta buena (DatosInfo.ahoraLocal).
+  function pintar(d, consultado) {
     var errores = d.errores || {};
     pintarKpis(d.kpis || null, errores.kpis ? 'n/d' : '—');
     pintarFrecuencia(d.frecuencia, errores);
@@ -1051,7 +1052,8 @@
     DatosInfo.pintar($('estado'), d.dataInfo, fallidos.length ? {
       sufijo: ' · ⚠ sin datos de: ' + fallidos.join(', '),
       titulo: fallidos.map(function (k) { return k + ': ' + errores[k]; }).join('\n'),
-    } : undefined);
+      consultado: consultado,
+    } : { consultado: consultado });
     fallidos.forEach(function (k) { console.error('[QARE ' + k + ']', errores[k]); });
 
     var avisos = (d.avisos || []).concat(errores.kpis ? ['KPIs: ' + errores.kpis] : []);
@@ -1059,25 +1061,61 @@
     $('avisos').innerHTML = avisos.map(function (a) { return '<div>' + esc(a) + '</div>'; }).join('');
   }
 
-  function cargar() {
+  /* fondo = refresco (el automatico de dashboard.js o "Actualizar"): misma
+     consulta, sin "Calculando…" y, si falla, lo que se ve se queda y la
+     pastilla lo avisa. -> Promise (null). */
+  var enVuelo = 0, cargadoUnaVez = false;
+  function cargar(fondo) {
+    fondo = fondo === true;
     var fi = $('f-inicio').value, ff = $('f-fin').value;
-    $('error').hidden = true;
 
     if (location.protocol !== 'http:' && location.protocol !== 'https:') {
+      $('error').hidden = true;
       fallo(new Error('Esta pagina necesita el servidor: abrela desde el sitio publicado en IIS ' +
         'o desde la pestaña QARE del tablero.'));
-      return;
+      return Promise.resolve(null);
     }
     if (!fi || !ff || fi > ff) {
+      // En fondo un rango a medio escribir no se toca: se espera al usuario.
+      if (fondo) return Promise.resolve(null);
+      $('error').hidden = true;
       fallo(new Error('Rango de fechas invalido: la fecha inicio debe ser anterior o igual a la fecha fin.'));
-      return;
+      return Promise.resolve(null);
     }
 
     var token = ++peticion;
-    enEspera();
-    pedir(consulta(fi, ff, filtrosElegidos()))
-      .then(function (d) { if (token === peticion) pintar(d); })
-      .catch(function (err) { if (token === peticion) fallo(err); });
+    if (!fondo) { $('error').hidden = true; enEspera(); }
+    enVuelo++;
+    return pedir(consulta(fi, ff, filtrosElegidos()))
+      .then(function (d) {
+        if (token !== peticion) return;
+        $('error').hidden = true;
+        pintar(d, DatosInfo.ahoraLocal());
+        cargadoUnaVez = true;
+      })
+      .catch(function (err) {
+        if (token !== peticion) return;
+        if (fondo && cargadoUnaVez) {
+          DatosInfo.avisoRefresco($('estado'), '⚠ No se pudo actualizar (' +
+            DatosInfo.fechaHora(DatosInfo.ahoraLocal()) + '); se muestran los datos anteriores', err.message);
+          console.error('[QARE]', err);
+        } else {
+          fallo(err);
+        }
+      })
+      .then(function () { enVuelo--; return null; });
+  }
+
+  // Refresco automatico: nunca encima de una carga en vuelo o programada
+  // por un filtro, ni antes de la primera carga buena.
+  function refrescar() {
+    if (enVuelo > 0 || cargaProgramada !== null || !cargadoUnaVez) return Promise.resolve(null);
+    return cargar(true);
+  }
+  // Boton "Actualizar": igual; sin carga buena todavia, una normal.
+  function actualizarAhora() {
+    if (enVuelo > 0) return Promise.resolve(null);
+    return cargar(cargadoUnaVez);
   }
 
   // ------------------------------------------------------------ descarga
@@ -1223,7 +1261,8 @@
     ['f-inicio', 'f-fin'].forEach(function (id) {
       $(id).addEventListener('change', function () { marcarRapido(null); cargar(); });
     });
-    $('reintentar').addEventListener('click', cargar);
+    $('reintentar').addEventListener('click', function () { cargar(); });
+    if (window.RefrescoAuto) RefrescoAuto.cablearBoton($('btn-actualizar'), actualizarAhora);
     FILTROS_ORG.forEach(function (clave) {
       $(SELECT_FILTRO[clave]).addEventListener('change', programarCarga);
       $(SELECT_FILTRO[clave]).addEventListener('change', actualizarDescarga);
@@ -1271,6 +1310,7 @@
     redimensionar: function () {
       Object.keys(graficas).forEach(function (k) { if (graficas[k]) graficas[k].resize(); });
     },
-    recargar: cargar,
+    recargar: function () { return cargar(); },
+    refrescar: refrescar,
   };
 })(window);

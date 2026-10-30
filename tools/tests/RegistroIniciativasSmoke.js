@@ -3560,6 +3560,58 @@ pruebas.push(function () {
   });
 });
 
+// ---------------------------------------------------------------------------
+// RF) Refresco automatico del registro (puedeRefrescar / refrescarFondo,
+//     que arma admin/iniciativas.js con RefrescoAuto.INTERVALO_DATOS)
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var p = Pagina(ok(DATOS));
+  var reg = p.registro;
+  return esperar().then(function () {
+    Check('RF1 carga: "Consultado" a la vista', [true, false],
+      [/^Consultado: \d\d\/\d\d\/\d{4} · \d\d:\d\d$/.test(p.sel('regConsultado').textContent), p.sel('regConsultadoCaja').hidden]);
+    Check('RF2 lista a la vista y sin detalle: se puede refrescar', true, reg.puedeRefrescar());
+    reg.abierta = 'PRB 2026-000001';
+    Check('RF3 con un detalle abierto: no', false, reg.puedeRefrescar());
+    reg.abierta = null;
+    p.sel('regEstado').setAttribute('aria-expanded', 'true');
+    Check('RF4 con el filtro de Estado desplegado: no', false, reg.puedeRefrescar());
+    p.sel('regEstado').setAttribute('aria-expanded', 'false');
+    p.sel('panel-iniciativas').hidden = true;
+    Check('RF5 con otra vista: no', false, reg.puedeRefrescar());
+    p.sel('panel-iniciativas').hidden = false;
+    // Busqueda puesta; el origen cambia la fecha de solucion de un PRB.
+    p.sel('regBuscar').value = 'PRB 2026-000001'; reg.aplicarBusqueda();
+    var antes = folios(p);
+    var json = JSON.parse(JSON.stringify(DATOS));
+    json.iniciativas[0].f_solucion = '2026-11-20';
+    return reg.refrescarFondo(ok(json)).then(function (estado) {
+      Check('RF6 refresco bueno: dato nuevo, misma busqueda y filas, sin aviso', [null, '2026-11-20', true, '', true],
+        [estado, reg.registro.buscar('PRB 2026-000001').f_solucion, JSON.stringify(folios(p)) === JSON.stringify(antes),
+         p.sel('regConsultado').className, p.sel('regBuscar').value === 'PRB 2026-000001']);
+      var consultado = p.sel('regConsultado').textContent;
+      return reg.refrescarFondo(function () { return Promise.resolve(Respuesta(500, { error: 'error 53' })); }).then(function (e500) {
+        Check('RF7 refresco que falla: la lista y el dato se quedan; "Consultado" de antes + aviso', [500, '2026-11-20', true, true, 'ini-consultado-error'],
+          [e500, reg.registro.buscar('PRB 2026-000001').f_solucion, JSON.stringify(folios(p)) === JSON.stringify(antes),
+           p.sel('regConsultado').textContent.indexOf(consultado + ' · ⚠ No se pudo actualizar') === 0, p.sel('regConsultado').className]);
+        return reg.refrescarFondo(function () { return Promise.resolve(Respuesta(403, { error: 'sin acceso' })); });
+      }).then(function (e403) {
+        Check('RF8 un 403 se devuelve (RefrescoAuto se detiene)', 403, e403);
+        var lenta, n = 0;
+        var pedir = function () { n++; return new Promise(function (ok2) { lenta = ok2; }); };
+        var a = reg.refrescarFondo(pedir), b = reg.refrescarFondo(pedir);
+        return esperar().then(function () {
+          Check('RF9 dos refrescos seguidos: la misma peticion', [1, true, false], [n, a === b, reg.puedeRefrescar()]);
+          lenta(Respuesta(200, DATOS));
+          return a;
+        }).then(function () {
+          Check('RF10 al terminar se puede volver a refrescar y el aviso se fue', [true, ''], [reg.puedeRefrescar(), p.sel('regConsultado').className]);
+        });
+      });
+    });
+  });
+});
+
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
   .then(function () {
     console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\nTODO PASO');

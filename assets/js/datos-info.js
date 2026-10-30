@@ -120,6 +120,10 @@
      opciones.rotuloSello  texto en lugar de "Última actualización" (el
                        respaldo de Experiencia: "Datos de respaldo, no en
                        vivo · Corte"). La fecha sigue saliendo del metadato.
+     opciones.consultado  'aaaa-mm-ddThh:mm' (DatosInfo.ahoraLocal()): cuando
+                       el tablero recibio BIEN estos datos. Se pinta como
+                       renglon "Consultado: ...". Quien llama lo pasa solo
+                       tras una respuesta correcta; un fallo no lo avanza.
      opciones.periodo  false = no pintar el renglon de periodo aunque el
                        metadato lo traiga. Es para las pestañas que YA muestran
                        su rango en su propia barra de filtros -SLA y Call
@@ -145,6 +149,12 @@
       if (lineas.length) lineas[0] += op.sufijo;
       else lineas.push(String(op.sufijo).replace(/^\s*·\s*/, ''));
     }
+
+    // Cuando el TABLERO trajo estos datos (reloj del navegador, ver
+    // DatosInfo.ahoraLocal). No es el sello del origen y por eso va en su
+    // propio renglon y con otro rotulo.
+    var consultado = DatosInfo.fechaHora(op.consultado);
+    if (consultado) lineas.push('Consultado: ' + consultado);
 
     nodo.textContent = '';
     if (!lineas.length) {
@@ -211,6 +221,35 @@
     div.textContent = texto;
     destino.appendChild(div);
     if (titulo) destino.title = titulo; else destino.removeAttribute('title');
+  };
+
+  /* La hora de ESTE navegador como 'aaaa-mm-ddThh:mm', para
+     opciones.consultado. Es la unica fecha que DatosInfo saca del reloj
+     local, y solo dice cuando se consulto el servidor, nunca de cuando son
+     los datos (eso sigue siendo el sello del backend). */
+  DatosInfo.ahoraLocal = function (d) {
+    var f = d || new Date();
+    function dos(n) { return (n < 10 ? '0' : '') + n; }
+    return f.getFullYear() + '-' + dos(f.getMonth() + 1) + '-' + dos(f.getDate()) +
+      'T' + dos(f.getHours()) + ':' + dos(f.getMinutes());
+  };
+
+  /* Un refresco en segundo plano fallo: los datos anteriores se quedan en
+     pantalla y la pastilla lo dice en un renglon propio, sin borrar el sello
+     ni el "Consultado" de la ultima carga buena. La siguiente carga buena
+     repinta el nodo entero y el aviso desaparece. */
+  DatosInfo.avisoRefresco = function (nodo, texto, titulo) {
+    var destino = (typeof nodo === 'string') ? document.getElementById(nodo) : nodo;
+    if (!destino) return;
+    var previo = destino.querySelector ? destino.querySelector('.datos-info-aviso') : null;
+    if (previo) previo.remove();
+    if (!destino.childNodes.length) { DatosInfo.mensaje(destino, texto, titulo); return; }
+    destino.classList.add('datos-info');
+    var div = document.createElement('div');
+    div.className = 'datos-info-linea datos-info-aviso';
+    div.textContent = texto;
+    destino.appendChild(div);
+    if (titulo) destino.title = titulo;
   };
 
   global.DatosInfo = DatosInfo;
