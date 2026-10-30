@@ -12,8 +12,8 @@
 //      en vivo · Corte: <fecha guardada>"; respaldo sin fecha, un aviso sin
 //      fecha.
 //   O) Orquestacion (orquestacion/orquestacion.js): la cabecera lleva la
-//      pastilla .datos-info con "Carga del Excel: <sello tal cual> · N jobs";
-//      sin sello, solo los jobs; vacia, sin pastilla.
+//      pastilla .datos-info con "Carga del Excel: <sello tal cual>" (sin el numero
+//      de jobs); sin sello, sin pastilla; vacia, sin pastilla.
 //   T) Tablero legacy (dashboard.js, TableroExterno): la fecha "Generado el"
 //      del pie se repite en la cabecera de Observabilidad y Orquestacion como
 //      instantanea; sin pie no se pinta nada; no se duplica. Incluye el pie
@@ -152,32 +152,53 @@ var orq = new Function('DatosInfo', 'document', 'n0',
   "var PREFIJO = 'orq-';\n" +
   recortar(fuenteOrq, /  function \$\(id\) \{[^\n]*\}/, '$ orquestacion') + '\n' +
   recortar(fuenteOrq, /  function estado\(txt\) \{[\s\S]*?\n  \}/, 'estado orquestacion') + '\n' +
-  recortar(fuenteOrq, /  function estadoCarga\(j, nJobs\) \{[\s\S]*?\n  \}/, 'estadoCarga orquestacion') +
+  recortar(fuenteOrq, /  function estadoCarga\(j\) \{[\s\S]*?\n  \}/, 'estadoCarga orquestacion') +
   '\nreturn { estado: estado, carga: estadoCarga };')(DatosInfo, docOrq, function (v) { return String(v); });
 var est = Nodo('div'); docOrq.ids['orq-estado'] = est;
 orq.carga({ meta: { ultimaActualizacion: '2026-10-26T09:15:00', tipoPeriodo: 'corte' },
-            carga: { fecha: '2026-10-26 09:15' } }, 1234);
-Check('O1 con sello: pastilla .datos-info con la carga del Excel tal cual (09:15) y los jobs',
-  [['Carga del Excel: 26/10/2026 · 09:15 · 1234 jobs'], true], [lineasDe(est), est.classList.contains('datos-info')]);
+            carga: { fecha: '2026-10-26 09:15' } });
+Check('O1 con sello: pastilla .datos-info con la carga del Excel tal cual (09:15), sin jobs',
+  [['Carga del Excel: 26/10/2026 · 09:15'], true], [lineasDe(est), est.classList.contains('datos-info')]);
 est = Nodo('div'); docOrq.ids['orq-estado'] = est;
-orq.carga({ meta: { ultimaActualizacion: null, tipoPeriodo: 'corte' }, carga: {} }, 7);
-Check('O2 sin sello: no se inventa fecha, queda el numero de jobs en la pastilla',
-  [['7 jobs'], true], [lineasDe(est), est.classList.contains('datos-info')]);
+orq.carga({ meta: { ultimaActualizacion: null, tipoPeriodo: 'corte' }, carga: {} });
+Check('O2 sin sello: no se inventa fecha, sin pastilla',
+  [[], false], [lineasDe(est), est.classList.contains('datos-info')]);
 est = Nodo('div'); docOrq.ids['orq-estado'] = est;
-orq.carga({ carga: { fecha: '2026-10-26 09:15' } }, 3);
+orq.carga({ carga: { fecha: '2026-10-26 09:15' } });
 Check('O3 sin meta (handler viejo): cae a carga.fecha, sin correrla',
-  ['Carga del Excel: 26/10/2026 · 09:15 · 3 jobs'], lineasDe(est));
+  ['Carga del Excel: 26/10/2026 · 09:15'], lineasDe(est));
 orq.estado('Cargando…');
 Check('O4 mensaje en la misma pastilla', [['Cargando…'], true], [lineasDe(est), est.classList.contains('datos-info')]);
 orq.estado('');
 Check('O5 vacio: sin pastilla (no deja hueco en la cabecera)', [[], false], [lineasDe(est), est.classList.contains('datos-info')]);
-Check('O6 cargar() pinta la pastilla con los jobs de la respuesta', true, /estadoCarga\(j, jobs\.length\);/.test(fuenteOrq));
+Check('O6 cargar() pinta la pastilla con la respuesta', true, /estadoCarga\(j\);/.test(fuenteOrq));
 var htmlOrq = leer('orquestacion/orquestacion.html');
 Check('O7 la pagina suelta carga datos-info.js y datos-info.css', [true, true],
   [/<script src="\.\.\/assets\/js\/datos-info\.js"><\/script>/.test(htmlOrq),
    /<link rel="stylesheet" href="\.\.\/assets\/css\/datos-info\.css">/.test(htmlOrq)]);
 Check('O8 el nodo sigue en la cabecera, junto a "Fijar KPIs"', true,
   /<div class="acciones-top">[\s\S]*?kpis-fijar[\s\S]*?<div class="estado" id="orq-estado" role="status"><\/div>/.test(htmlOrq));
+
+// ---- O9-O12) Efectividad: el "Cálculo del ..." va en la misma pastilla ----
+var fuenteEf = leer('efectividad/efectividad.js');
+var docEf = Documento();
+var ef = new Function('DatosInfo', 'document',
+  "var PREFIJO = 'ef-';\n" +
+  recortar(fuenteEf, /  function \$\(id\) \{[^\n]*\}/, '$ efectividad') + '\n' +
+  recortar(fuenteEf, /  function estado\(txt\) \{[\s\S]*?\n  \}/, 'estado efectividad') +
+  '\nreturn estado;')(DatosInfo, docEf);
+var estEf = Nodo('div'); docEf.ids['ef-estado'] = estEf;
+ef('Cálculo del 30/10/2026 08:46');
+Check('O9 Efectividad: el texto tal cual en la pastilla .datos-info',
+  [['Cálculo del 30/10/2026 08:46'], true], [lineasDe(estEf), estEf.classList.contains('datos-info')]);
+ef('');
+Check('O10 Efectividad vacio: sin pastilla', [[], false], [lineasDe(estEf), estEf.classList.contains('datos-info')]);
+var htmlEf = leer('efectividad/efectividad.html');
+Check('O11 la pagina suelta de Efectividad carga datos-info.js y datos-info.css', [true, true],
+  [/<script src="\.\.\/assets\/js\/datos-info\.js"><\/script>/.test(htmlEf),
+   /<link rel="stylesheet" href="\.\.\/assets\/css\/datos-info\.css">/.test(htmlEf)]);
+Check('O12 el nodo de Efectividad sigue junto a "Fijar KPIs"', true,
+  /<div class="acciones-top">[\s\S]*?kpis-fijar[\s\S]*?<div class="estado" id="ef-estado" role="status"><\/div>/.test(htmlEf));
 
 // ---- T) Tablero legacy ----
 var fuenteDash = leer('dashboard.js');

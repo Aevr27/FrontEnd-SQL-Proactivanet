@@ -65,7 +65,7 @@ dashboard.html  dashboard.js  admin/iniciativas.html
 
 1. `handlers/orquestacion.ashx` → 200 y `"hay_datos":true`;
    `?detalle=1` → `detalle.cols` y `detalle.filas`; un POST → 405.
-2. La pestaña: cabecera «Carga del Excel: <fecha> · N jobs» y las tarjetas.
+2. La pestaña: cabecera «Carga del Excel: <fecha>» y las tarjetas.
    Con el Excel del 2026-10-17 el paquete da: 10,034 jobs, 3 huérfanos,
    registro completo 95.6% (documentado 51.7%), 1,903 activos, 69
    completamente orquestados, 129 candidatos y 81 migrados con éxito, 442 de

@@ -336,7 +336,16 @@
                                  accion: 'Mostrar su hoja en esta pestaña' }) : null;
   function soloRebote() { return !!seleccion && seleccion.clave === 'rebote'; }
 
-  function estado(txt) { $('estado').textContent = txt || ''; }
+  /* Pastilla de la cabecera: la misma .datos-info blanca de Orquestacion
+     (assets/js/datos-info.js). El texto se pinta tal cual; vacio, sin
+     pastilla. */
+  function estado(txt) {
+    var n = $('estado');
+    if (txt) { DatosInfo.mensaje(n, txt); return; }
+    n.textContent = '';
+    n.classList.remove('datos-info');
+    n.removeAttribute('title');
+  }
   function error(txt) { $('error').hidden = !txt; $('error-msg').textContent = txt || ''; }
 
   /* ------------------------------------------------------------ carga */
