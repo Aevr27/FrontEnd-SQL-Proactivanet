@@ -146,8 +146,57 @@ public static class AccesoAdmin
     // ({error, tipo}, el contrato de DashboardHandler) y hay que salir.
     public static bool Exigir(HttpContext context)
     {
-        if (PuedeEntrar(context)) return true;
-        Rechazar(context, true);
+        if (!PuedeEntrar(context))
+        {
+            Rechazar(context, true);
+            return false;
+        }
+        return ExigirMismoOrigen(context);
+    }
+
+    // CSRF (2026-10-30). Con Autenticacion de Windows el navegador manda la
+    // cuenta solo, tambien si el POST lo dispara OTRA pagina (un formulario
+    // de un sitio externo abierto en la VM, un enlace de un correo): sin esto
+    // esa pagina podria enviar correos, crear o aprobar con la cuenta de un
+    // ADM. Todo lo que no es GET/HEAD tiene que venir de una pagina de ESTE
+    // sitio:
+    //   1. Sec-Fetch-Site (lo pone el navegador; una pagina no lo puede
+    //      falsificar): solo "same-origin".
+    //   2. Sin el (navegador viejo): Origin, o si falta Referer, con el mismo
+    //      esquema, host y puerto que el request.
+    //   3. Sin ninguno de los tres: no (falla cerrado).
+    // Lo llaman Exigir y AccesoIniciativas.ExigirSolicitud DESPUES de decidir
+    // el permiso: un 403 de rol sigue siendo el mismo.
+    public static bool OrigenPermitido(string metodo, string secFetchSite, string origen, string referer, Uri url)
+    {
+        if (string.Equals(metodo, "GET", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(metodo, "HEAD", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!string.IsNullOrWhiteSpace(secFetchSite))
+            return string.Equals(secFetchSite.Trim(), "same-origin", StringComparison.OrdinalIgnoreCase);
+        var fuente = string.IsNullOrWhiteSpace(origen) ? referer : origen;
+        Uri u;
+        if (url == null || string.IsNullOrWhiteSpace(fuente) || !Uri.TryCreate(fuente.Trim(), UriKind.Absolute, out u)) return false;
+        return Uri.Compare(u, url, UriComponents.SchemeAndServer, UriFormat.Unescaped, StringComparison.OrdinalIgnoreCase) == 0;
+    }
+
+    // true si sigue; si no, ya respondio 403 OrigenNoPermitido y hay que salir.
+    public static bool ExigirMismoOrigen(HttpContext context)
+    {
+        var req = context.Request;
+        if (OrigenPermitido(req.HttpMethod, req.Headers["Sec-Fetch-Site"], req.Headers["Origin"], req.Headers["Referer"], req.Url))
+            return true;
+
+        var r = context.Response;
+        r.Clear();
+        r.StatusCode = 403;
+        r.TrySkipIisCustomErrors = true;
+        r.Cache.SetCacheability(HttpCacheability.NoCache);
+        r.ContentType = "application/json; charset=utf-8";
+        r.Write(new JavaScriptSerializer().Serialize(new Dictionary<string, object>
+        {
+            { "error", "La petición no salió de una página de este sitio. Recarga la página e inténtalo de nuevo." },
+            { "tipo", "OrigenNoPermitido" },
+        }));
         return false;
     }
 
@@ -264,7 +313,7 @@ public static class AccesoAdmin
         {
             r.ContentType = "text/html; charset=utf-8";
             r.Write("<!doctype html><meta charset=\"utf-8\"><title>Acceso restringido</title>" +
-                    "<p>" + Mensaje + "</p><p><a href=\"../dashboard.html\">Volver al tablero</a></p>");
+                    "<p>" + HttpUtility.HtmlEncode(Mensaje) + "</p><p><a href=\"../dashboard.html\">Volver al tablero</a></p>");
         }
     }
 }

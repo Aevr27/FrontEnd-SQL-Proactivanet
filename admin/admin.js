@@ -90,6 +90,10 @@ var MAX_DESTINATARIOS = 10;
    que cuenta es la del servidor. */
 var CORREO = /^[^@\s;,<>"]+@[^@\s;,<>"]+\.[^@\s;,<>"]+$/;
 
+/* Solo correo corporativo, igual que el handler: los reportes no salen de
+   la empresa. */
+var DOMINIO_CORREO = '@soriana.com';
+
 /* Estado por tarjeta. Independiente: una clave por id de trabajo. */
 var estados = {};
 
@@ -215,7 +219,7 @@ function bloqueDestinatarios(t) {
       '<div class="serv-modos">' + modos + '</div>' +
       (personalizados
         ? '<textarea class="serv-destinatarios" data-campo="destinatarios" rows="2"' +
-            ' placeholder="correo@dominio.com; otro@dominio.com"' +
+            ' placeholder="correo@soriana.com; otro@soriana.com"' +
             ' aria-label="Destinatarios temporales">' + esc(e.destinatarios) + '</textarea>' +
           '<div class="serv-nota-fecha">Solo para este envio: sustituyen a la ' +
             'distribucion configurada. Maximo ' + MAX_DESTINATARIOS + ', separados ' +
@@ -255,6 +259,9 @@ function motivoNoListo(t) {
     for (var i = 0; i < dirs.length; i++) {
       if (!CORREO.test(dirs[i])) {
         return 'Destinatario no valido: ' + dirs[i];
+      }
+      if (dirs[i].toLowerCase().slice(-DOMINIO_CORREO.length) !== DOMINIO_CORREO) {
+        return 'Solo direcciones ' + DOMINIO_CORREO + ': ' + dirs[i];
       }
     }
   }

@@ -120,6 +120,19 @@
       <add name="AdminAccesoModulo" type="AdminAccesoModulo" />
     </modules>
 
+    <!-- Cabeceras de seguridad (2026-10-30).
+         X-Frame-Options SAMEORIGIN: otra pagina no puede meter el sitio en
+         un iframe para hacer clic por el usuario; el iframe propio de
+         dashboard.html (assets/Tablero_Experiencia.html) es del mismo origen
+         y sigue funcionando. nosniff: el navegador no adivina el tipo de un
+         archivo (un .json o .txt no se ejecuta como script). -->
+    <httpProtocol>
+      <customHeaders>
+        <add name="X-Frame-Options" value="SAMEORIGIN" />
+        <add name="X-Content-Type-Options" value="nosniff" />
+      </customHeaders>
+    </httpProtocol>
+
     <defaultDocument>
       <files>
         <add value="dashboard.html" />

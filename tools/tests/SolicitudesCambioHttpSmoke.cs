@@ -80,6 +80,21 @@ sealed class AlmacenFalso : IAlmacenSolicitudesCambio
 public static class SolicitudesCambioHttpSmoke
 {
     static int fallos = 0;
+    // Lo que manda el navegador desde una pagina del propio sitio
+    // (AccesoAdmin.ExigirMismoOrigen). Sin IIS los headers del request son
+    // de solo lectura: se abren por reflexion solo para ponerlo.
+    static void CabeceraNavegador(HttpRequest req, string nombre, string valor)
+    {
+        var h = req.Headers;
+        var t = typeof(System.Collections.Specialized.NameObjectCollectionBase);
+        var f = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var ro = t.GetProperty("IsReadOnly", f);
+        ro.SetValue(h, false, null);
+        t.GetMethod("BaseSet", f, null, new[] { typeof(string), typeof(object) }, null)
+         .Invoke(h, new object[] { nombre, new System.Collections.ArrayList { valor } });
+        ro.SetValue(h, true, null);
+    }
+
     static void Check(string caso, object esperado, object obtenido)
     {
         var e = Convert.ToString(esperado); var o = Convert.ToString(obtenido);
@@ -101,6 +116,7 @@ public static class SolicitudesCambioHttpSmoke
         HttpContext.Current = ctx;
         var req = ctx.Request;
         typeof(HttpRequest).GetField("_httpMethod", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, metodo);
+        CabeceraNavegador(req, "Sec-Fetch-Site", "same-origin");
         if (campos != null)
         {
             var tipoForm = typeof(HttpRequest).Assembly.GetType("System.Web.HttpValueCollection");

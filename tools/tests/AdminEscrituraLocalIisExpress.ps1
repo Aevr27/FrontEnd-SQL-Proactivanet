@@ -68,7 +68,11 @@ function Configurar([bool]$encendido) {
 
 function Pedir($metodo, $ruta, $campos, $headers) {
     try {
-        $p = @{ UseBasicParsing = $true; TimeoutSec = 120; Method = $metodo; Uri = "http://localhost:$Puerto/$ruta"; Headers = $headers }
+        # Un POST del navegador desde el propio sitio trae Sec-Fetch-Site:
+        # sin el, AccesoAdmin.ExigirMismoOrigen responde 403 (CSRF).
+        $h = @{ 'Sec-Fetch-Site' = 'same-origin' }
+        if ($headers) { foreach ($k in $headers.Keys) { $h[$k] = $headers[$k] } }
+        $p = @{ UseBasicParsing = $true; TimeoutSec = 120; Method = $metodo; Uri = "http://localhost:$Puerto/$ruta"; Headers = $h }
         if ($campos) { $p.Body = $campos }
         $r = Invoke-WebRequest @p
         return @{ Estado = [int]$r.StatusCode; Cuerpo = $r.Content }

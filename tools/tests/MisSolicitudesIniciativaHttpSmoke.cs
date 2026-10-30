@@ -89,6 +89,21 @@ sealed class LectorMiasFalso : ILectorMisSolicitudesIniciativa
 public static class MisSolicitudesIniciativaHttpSmoke
 {
     static int fallos = 0, pasados = 0;
+    // Lo que manda el navegador desde una pagina del propio sitio
+    // (AccesoAdmin.ExigirMismoOrigen). Sin IIS los headers del request son
+    // de solo lectura: se abren por reflexion solo para ponerlo.
+    static void CabeceraNavegador(HttpRequest req, string nombre, string valor)
+    {
+        var h = req.Headers;
+        var t = typeof(System.Collections.Specialized.NameObjectCollectionBase);
+        var f = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var ro = t.GetProperty("IsReadOnly", f);
+        ro.SetValue(h, false, null);
+        t.GetMethod("BaseSet", f, null, new[] { typeof(string), typeof(object) }, null)
+         .Invoke(h, new object[] { nombre, new System.Collections.ArrayList { valor } });
+        ro.SetValue(h, true, null);
+    }
+
     static void Check(string caso, object esperado, object obtenido)
     {
         var e = Convert.ToString(esperado); var o = Convert.ToString(obtenido);
@@ -116,6 +131,7 @@ public static class MisSolicitudesIniciativaHttpSmoke
         var sw = new StringWriter();
         var ctx = Contexto(archivo, query, cuenta, sw);
         typeof(HttpRequest).GetField("_httpMethod", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(ctx.Request, metodo);
+        CabeceraNavegador(ctx.Request, "Sec-Fetch-Site", "same-origin");
         try { h.ProcessRequest(ctx); }
         catch (Exception ex) { sw.Write("EXCEPCION " + ex.GetType().Name); }
         estado = ctx.Response.StatusCode;

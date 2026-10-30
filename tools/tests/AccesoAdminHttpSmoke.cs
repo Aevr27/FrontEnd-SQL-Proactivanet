@@ -111,9 +111,28 @@ public static class AccesoAdminHttpSmoke
 {
     static int fallos = 0;
 
+    // Headers que CorrerPost / CorrerPostQ ponen al request: por omision los
+    // de una pagina del propio sitio. El bloque CS los cambia.
+    static string[][] CabecerasPost = { new[] { "Sec-Fetch-Site", "same-origin" } };
+
     // El registro y la Cobertura (catalogos sin ?rutas): de toda cuenta
     // autenticada, no solo de ADM/MOD (AccesoIniciativas.ExigirRegistro).
     static bool DeLectura(IHttpHandler h) { return h is AdminIniciativasRegistro || h is AdminIniciativasCatalogos; }
+
+    // Lo que manda el navegador desde una pagina del propio sitio
+    // (AccesoAdmin.ExigirMismoOrigen). Sin IIS los headers del request son
+    // de solo lectura: se abren por reflexion solo para ponerlo.
+    static void CabeceraNavegador(HttpRequest req, string nombre, string valor)
+    {
+        var h = req.Headers;
+        var t = typeof(System.Collections.Specialized.NameObjectCollectionBase);
+        var f = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance;
+        var ro = t.GetProperty("IsReadOnly", f);
+        ro.SetValue(h, false, null);
+        t.GetMethod("BaseSet", f, null, new[] { typeof(string), typeof(object) }, null)
+         .Invoke(h, new object[] { nombre, new System.Collections.ArrayList { valor } });
+        ro.SetValue(h, true, null);
+    }
 
     static void Check(string caso, object esperado, object obtenido)
     {
@@ -145,6 +164,7 @@ public static class AccesoAdminHttpSmoke
         var ctx = Contexto(archivo, null, cuenta, sw);
         var req = ctx.Request;
         typeof(HttpRequest).GetField("_httpMethod", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, "POST");
+        foreach (var c in CabecerasPost) CabeceraNavegador(req, c[0], c[1]);
         var tipoForm = typeof(HttpRequest).Assembly.GetType("System.Web.HttpValueCollection");
         var form = (NameValueCollection)Activator.CreateInstance(tipoForm, true);
         foreach (var c in campos) form.Add(c[0], c[1]);
@@ -163,6 +183,7 @@ public static class AccesoAdminHttpSmoke
         var ctx = Contexto(archivo, query, cuenta, sw);
         var req = ctx.Request;
         typeof(HttpRequest).GetField("_httpMethod", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(req, "POST");
+        foreach (var c in CabecerasPost) CabeceraNavegador(req, c[0], c[1]);
         var tipoForm = typeof(HttpRequest).Assembly.GetType("System.Web.HttpValueCollection");
         var form = (NameValueCollection)Activator.CreateInstance(tipoForm, true);
         foreach (var c in campos) form.Add(c[0], c[1]);
@@ -1022,6 +1043,70 @@ public static class AccesoAdminHttpSmoke
         cuerpoReg = cuerpoReg.Substring(0, cuerpoReg.IndexOf("public static void OcultarSubestado("));
         Check("PS4 RegistroIniciativas sigue trayendo el Subestado (los servicios internos lo usan)", "True|False",
               cuerpoReg.Contains("i[\"subestado\"] =") + "|" + cuerpoReg.Contains("OcultarSubestado"));
+
+        // ---- CS) CSRF: un POST tiene que salir de una pagina del sitio ----
+        // AccesoAdmin.OrigenPermitido, sin HttpContext.
+        var url = new Uri("http://localhost/handlers/admin_iniciativas_gestion.ashx");
+        Check("CS1 GET sin headers: pasa", true, AccesoAdmin.OrigenPermitido("GET", null, null, null, url));
+        Check("CS1 POST sin headers: no (falla cerrado)", false, AccesoAdmin.OrigenPermitido("POST", null, null, null, url));
+        Check("CS1 PUT sin headers: no", false, AccesoAdmin.OrigenPermitido("PUT", null, null, null, url));
+        Check("CS1 Sec-Fetch-Site same-origin: pasa", true, AccesoAdmin.OrigenPermitido("POST", "same-origin", null, null, url));
+        Check("CS1 Sec-Fetch-Site cross-site: no", false, AccesoAdmin.OrigenPermitido("POST", "cross-site", null, null, url));
+        Check("CS1 Sec-Fetch-Site same-site: no", false, AccesoAdmin.OrigenPermitido("POST", "same-site", null, null, url));
+        Check("CS1 Sec-Fetch-Site none: no", false, AccesoAdmin.OrigenPermitido("POST", "none", null, null, url));
+        Check("CS1 cross-site con Origin igual: manda Sec-Fetch-Site, no", false,
+              AccesoAdmin.OrigenPermitido("POST", "cross-site", "http://localhost", null, url));
+        Check("CS1 sin Sec-Fetch-Site, Origin igual: pasa", true, AccesoAdmin.OrigenPermitido("POST", null, "http://LOCALHOST", null, url));
+        Check("CS1 Origin de otro sitio: no", false, AccesoAdmin.OrigenPermitido("POST", null, "http://evil.example", null, url));
+        Check("CS1 Origin con otro puerto: no", false, AccesoAdmin.OrigenPermitido("POST", null, "http://localhost:8081", null, url));
+        Check("CS1 Origin https contra http: no", false, AccesoAdmin.OrigenPermitido("POST", null, "https://localhost", null, url));
+        Check("CS1 Origin \"null\": no", false, AccesoAdmin.OrigenPermitido("POST", null, "null", null, url));
+        Check("CS1 sin Origin, Referer del sitio: pasa", true,
+              AccesoAdmin.OrigenPermitido("POST", null, null, "http://localhost/admin/iniciativas.html?x=1", url));
+        Check("CS1 sin Origin, Referer de otro sitio: no", false,
+              AccesoAdmin.OrigenPermitido("POST", null, null, "http://localhost.evil.example/", url));
+        Check("CS1 sin url: no", false, AccesoAdmin.OrigenPermitido("POST", null, "http://localhost", null, null));
+
+        // Por los handlers reales: el rol se decide primero (mismo 403 de
+        // siempre), y con permiso un POST de otro sitio corta antes de leer.
+        AccesoAdmin.FuenteRoles = new FuenteFalsa().Con(YO, "ADM");
+        string metodoCs;
+        var formMod = new[] { new[] { "accion", "modificar" }, new[] { "folio", "" } };
+        CabecerasPost = new[] { new[] { "Sec-Fetch-Site", "cross-site" } };
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", YO, formMod, out estado, out metodoCs);
+        Check("CS2 ADM, POST cross-site a gestion: 403 OrigenNoPermitido, sin validar", "403|True|False",
+              estado + "|" + cuerpo.Contains("OrigenNoPermitido") + "|" + cuerpo.Contains("ValidacionFallida"));
+        cuerpo = CorrerPost(new AdminCorreos(), "admin_correos.ashx", YO, new[] { new[] { "flujo", "qa" } }, out estado, out metodoCs);
+        Check("CS2 ADM, POST cross-site a correos: 403 OrigenNoPermitido, no lanza nada", "403|True",
+              estado + "|" + cuerpo.Contains("OrigenNoPermitido"));
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", "", formMod, out estado, out metodoCs);
+        Check("CS2 anonimo, POST cross-site: sigue 403 AccesoDenegado (el rol va primero)", "403|True",
+              estado + "|" + cuerpo.Contains("AccesoDenegado"));
+        CabecerasPost = new string[0][];
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", YO, formMod, out estado, out metodoCs);
+        Check("CS2 ADM, POST sin Sec-Fetch-Site ni Origin ni Referer: 403 OrigenNoPermitido", "403|True",
+              estado + "|" + cuerpo.Contains("OrigenNoPermitido"));
+        CabecerasPost = new[] { new[] { "Origin", "http://localhost" } };
+        cuerpo = CorrerPost(new AdminIniciativasGestion(), "admin_iniciativas_gestion.ashx", YO, formMod, out estado, out metodoCs);
+        Check("CS2 ADM, POST con Origin del sitio (navegador sin Sec-Fetch-Site): pasa (422 de formato)", "422|True",
+              estado + "|" + cuerpo.Contains("ValidacionFallida"));
+        CabecerasPost = new[] { new[] { "Sec-Fetch-Site", "same-origin" } };
+        AccesoAdmin.FuenteRoles = fuente;
+        cuerpo = Correr(new AdminSesion(), "admin_sesion.ashx", null, YO, out estado);
+        Check("CS3 GET sin headers (admin_sesion): no se toca", 200, estado);
+
+        // Correos: solo destinatarios @soriana.com (ValidarDestinatarios).
+        var validar = typeof(AdminCorreos).GetMethod("ValidarDestinatarios", BindingFlags.NonPublic | BindingFlags.Static);
+        Func<string, string> destinos = delegate (string crudo)
+        {
+            try { return string.Join(";", ((List<string>)validar.Invoke(null, new object[] { crudo })).ToArray()); }
+            catch (TargetInvocationException ex) { return ex.InnerException.GetType().Name; }
+        };
+        Check("CS4 @soriana.com: pasa", "a@soriana.com;B@SORIANA.COM", destinos("a@soriana.com; B@SORIANA.COM"));
+        Check("CS4 otro dominio: no", "ArgumentException", destinos("a@soriana.com; x@gmail.com"));
+        Check("CS4 soriana.com como subdominio ajeno: no", "ArgumentException", destinos("x@soriana.com.evil.example"));
+        Check("CS4 dominio que termina igual: no", "ArgumentException", destinos("x@evilsoriana.com"));
+        Check("CS4 vacio: ninguno", "", destinos(""));
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : ("FALLOS: " + fallos));
         return fallos == 0 ? 0 : 1;

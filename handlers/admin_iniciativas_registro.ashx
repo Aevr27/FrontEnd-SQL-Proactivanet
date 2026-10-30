@@ -43,9 +43,9 @@
 // filtro de Tipo de iniciativa) y dbo.ProblemFechaEvento (historial de fechas).
 // No crea ni cambia nada en la base.
 //
-// ACCESO: AccesoIniciativas.ExigirRegistro: toda cuenta Windows
-// autenticada (2026-10-28; no depende de dbo.UsuariosAdmin, PO/SO ni del
-// interruptor); sin cuenta, 403 antes de tocar la base. "subestado" de cada
+// ACCESO: AccesoIniciativas.ExigirRegistro: todos, tambien anonimos
+// (2026-10-29; no depende de dbo.UsuariosAdmin, PO/SO ni del interruptor).
+// Que un anonimo llegue depende de la autenticacion del sitio en IIS. "subestado" de cada
 // iniciativa y "subestados_problem" salen solo con rol ADM.
 //
 // POR QUE NO USA DashboardHandler.Responder: el mismo motivo que

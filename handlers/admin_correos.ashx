@@ -510,6 +510,13 @@ public class AdminCorreos : IHttpHandler
             if (!Regex.IsMatch(dir, @"^[^@\s;,<>""]+@[^@\s;,<>""]+\.[^@\s;,<>""]+$"))
                 throw new ArgumentException("Destinatario no valido: \"" + dir + "\".");
 
+            // Solo correo corporativo (2026-10-30): los reportes son internos
+            // y un destinatario de fuera los sacaria de la empresa, por error
+            // o por un POST forjado.
+            if (!dir.EndsWith("@" + IdentidadWindows.DominioCorreo, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("Destinatario no permitido: \"" + dir + "\". Solo direcciones @" +
+                                            IdentidadWindows.DominioCorreo + ".");
+
             if (!lista.Contains(dir)) lista.Add(dir);
         }
 

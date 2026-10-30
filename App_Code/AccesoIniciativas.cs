@@ -337,7 +337,7 @@ public static class AccesoIniciativas
     public static bool ExigirSolicitud(HttpContext context)
     {
         var motivo = Motivo(context);
-        if (motivo == null) return true;
+        if (motivo == null) return AccesoAdmin.ExigirMismoOrigen(context);
         Rechazar(context, true, motivo);
         return false;
     }
