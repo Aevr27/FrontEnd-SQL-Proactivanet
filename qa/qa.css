@@ -195,7 +195,7 @@ header.top .btn:hover { border-color: rgba(25, 25, 25, .38); }
   align-items: start;
 }
 /* Sin align-items: las dos tarjetas de la fila se estiran al alto de la mas
-   alta -Recategorizacion, con su tabla de 292px- y quedan alineadas arriba y
+   alta -Top 10 categorias, con su tabla de 292px- y quedan alineadas arriba y
    abajo. El sobrante de la tarjeta de la dona no es hueco muerto: .dona-grupo
    lo reparte arriba y abajo del conjunto dona + leyenda. */
 .grid-sec {
@@ -294,7 +294,7 @@ code {
 }
 
 /* La tarjeta de la dona es una columna: el h3 arriba y .dona-grupo ocupando
-   TODO lo que sobre hasta igualar el alto de Recategorizacion. Dentro del
+   TODO lo que sobre hasta igualar el alto de Top 10 categorias. Dentro del
    grupo, justify-content: center deja el mismo aire encima de la dona que
    debajo de la leyenda, con las dos filas de leyenda pegadas a la dona. */
 .card-dona { display: flex; flex-direction: column; }
@@ -331,7 +331,7 @@ code {
 
 /* ---------- Tablas ---------- */
 .tabla-scroll { overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); }
-.tabla-recat { max-height: 292px; }
+.tabla-topcat { max-height: 292px; }
 .tabla-detalle { max-height: 560px; }
 
 .tabla { width: 100%; border-collapse: collapse; font-size: 12.7px; }

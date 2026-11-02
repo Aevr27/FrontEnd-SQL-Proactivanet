@@ -24,9 +24,9 @@
   muestra su propio "Calculando..." hasta que llegan sus datos. Ninguna
   peticion decide si el tablero se ve o no.
 
-  Los datos llegan en dos fases: qa.ashx?action=summary trae KPIs, grupos,
-  tecnicos y recategorizacion; qa.ashx?action=qare completa despues la
-  distribucion por estado. El detalle y los catalogos solo se piden cuando el
+  Los datos llegan en dos fases: qa.ashx?action=summary trae KPIs, grupos y
+  tecnicos; qa.ashx?action=qare completa despues la distribucion por estado y
+  el Top 10 de categorias (las columnas de dbo.usp_CorreoQA_TopCategorias). El detalle y los catalogos solo se piden cuando el
   usuario los pide.
 
   Filtros: los de QARE (fechas, rango rapido, Servicio / C1, Grupos y
@@ -187,7 +187,7 @@
       <div class="card card-dona">
         <h3>Distribucion de validacion<span class="hint" id="qa-hint-validacion"></span></h3>
         <!-- La dona y su leyenda son UN grupo: el div los centra juntos en el
-             alto que le sobra a la tarjeta al igualarse con Recategorizacion. -->
+             alto que le sobra a la tarjeta al igualarse con Top 10 categorias. -->
         <div class="dona-grupo">
           <div class="lienzo lienzo-dona">
             <canvas id="qa-chart-validacion" width="232" height="232"></canvas>
@@ -198,18 +198,19 @@
       </div>
 
       <div class="card">
-        <h3>Recategorizacion<span class="hint" id="qa-hint-recat"></span></h3>
-        <p class="nota-card">Pares <code>Grupo</code> &rarr; <code>Grupo Correcto</code> de los tickets incorrectos.</p>
-        <div class="tabla-scroll tabla-recat">
+        <h3>Top 10 categorias<span class="hint" id="qa-hint-topcat"></span></h3>
+        <p class="nota-card">Categorias con mas tickets incorrectos del rango (columnas de <code>usp_CorreoQA_TopCategorias</code>).</p>
+        <div class="tabla-scroll tabla-topcat">
           <table class="tabla">
             <thead>
               <tr>
-                <th>Grupo actual</th>
-                <th>Grupo correcto</th>
-                <th class="num">Tickets</th>
+                <th title="Categoria">Categoria</th>
+                <th class="num" title="TicketsIncorrectos">Tickets incorrectos</th>
+                <th class="num" title="TicketsTotales">Tickets totales</th>
+                <th class="num" title="PorcentajeIncorrectos">% incorrectos</th>
               </tr>
             </thead>
-            <tbody id="qa-tbody-recat"></tbody>
+            <tbody id="qa-tbody-topcat"></tbody>
           </table>
         </div>
       </div>

@@ -89,7 +89,9 @@ var ANTES = '<script>\n' +
   '        recategorizacion: [{ grupo: "R1", grupoCorrecto: "R2", tickets: 3 }], validacion: null };\n' +
   '    return resp(j, 0, !org && LENTO ? 700 : 15);\n' +
   '  }\n' +
-  '  if (a === "qare") return resp({ validacion: [{ validacion: "Incorrecto", tickets: org ? 1 : 12 }, { validacion: "OK", tickets: org ? 2 : 88 }] });\n' +
+  '  if (a === "qare") return resp({ validacion: [{ validacion: "Incorrecto", tickets: org ? 1 : 12 }, { validacion: "OK", tickets: org ? 2 : 88 }],\n' +
+  '    topCategorias: org ? [{ Categoria: "TX", TicketsIncorrectos: 1, TicketsTotales: 3, PorcentajeIncorrectos: 33.33 }]\n' +
+  '      : [{ Categoria: "T1", TicketsIncorrectos: 12, TicketsTotales: 100, PorcentajeIncorrectos: 12 }] });\n' +
   '  if (a === "detail") {\n' +
   '    var rows = [\n' +
   '      { "Código": "INC-1", "Fecha de registro": "2026-10-20T08:15:00", Grupo: "G1", C1: "S-A", Lider: "L1", Estado: "Cerrado", Validacion: "Incorrecto", Caducada: true, "Intentos de solución": 2, "Título": "Uno" },\n' +
@@ -177,7 +179,11 @@ function sonda() {
       // C1 los tres a la vez (en una sola peticion: auto-aplicado de 250 ms).
       var antes = cuantas('summary');
       await tras('summary', function () { elegir('f-c1', ['S-A', 'S-B']); elegir('f-grupos', ['G1']); elegir('f-lideres', ['L1']); });
-      apunta('C1', [sinAccion(ultima('summary')), cuantas('summary') - antes, $('tbody-recat').textContent.indexOf('RX') >= 0]); g('C1');
+      await hasta(function () { return $('tbody-topcat').textContent.indexOf('TX') >= 0; });
+      apunta('C1', [sinAccion(ultima('summary')), cuantas('summary') - antes, $('tbody-topcat').textContent.indexOf('TX') >= 0,
+        sinAccion(ultima('qare')),
+        Array.prototype.map.call(document.querySelectorAll('#qa-tbody-topcat tr:first-child td'), function (td) { return td.textContent; }),
+        Array.prototype.map.call(document.querySelectorAll('#qa-tbody-topcat')[0].closest('table').querySelectorAll('th'), function (th) { return th.title; })]); g('C1');
       // C2 detalle abierto: lleva la vista ademas de Validacion = Incorrecto.
       await tras('detail', function () { $('btn-detalle').click(); });
       apunta('C2', sinAccion(ultima('detail'))); g('C2');
@@ -256,8 +262,10 @@ Banco.correr({ '/qa/__banco.html': BANCO }, ['/qa/__banco.html', '/qa/__banco.ht
   Check('F4 Servicio / C1 solo, con el boton de descarga', [{ c1: 'S-A', fecha_fin: dia(1), fecha_inicio: dia(15) }, true, '1,003'], o.F4);
   Check('F5 Grupos solo', [{ fecha_fin: dia(1), fecha_inicio: dia(15), grupos: 'G2' }, true], o.F5);
   Check('F6 Lideres solo', [{ fecha_fin: dia(1), fecha_inicio: dia(15), lideres: 'Sin Torre' }, true], o.F6);
-  Check('C1 los tres a la vez, en UNA peticion, y la recategorizacion sigue al filtro',
-    [{ c1: 'S-A,S-B', fecha_fin: dia(1), fecha_inicio: dia(15), grupos: 'G1', lideres: 'L1' }, 1, true], o.C1);
+  Check('C1 los tres a la vez, en UNA peticion, y el Top 10 de categorias sigue al filtro y al rango',
+    [{ c1: 'S-A,S-B', fecha_fin: dia(1), fecha_inicio: dia(15), grupos: 'G1', lideres: 'L1' }, 1, true,
+     { c1: 'S-A,S-B', fecha_fin: dia(1), fecha_inicio: dia(15), grupos: 'G1', lideres: 'L1' },
+     ['TX', '1', '3', '33.33%'], ['Categoria', 'TicketsIncorrectos', 'TicketsTotales', 'PorcentajeIncorrectos']], o.C1);
   Check('C2 el detalle lleva la vista ademas de Validacion = Incorrecto',
     { c1: 'S-A,S-B', fecha_fin: dia(1), fecha_inicio: dia(15), grupos: 'G1', lideres: 'L1', page: '1', pageSize: '100', validacion: 'Incorrecto' }, o.C2);
 

@@ -95,7 +95,8 @@ function respondeQa(u, v) {
   if (a === 'detail') {
     return { rows: [{ 'Código': 'T' + v, Validacion: q.get('validacion') || 'OK', Grupo: 'G1' }], total: 1, page: Number(q.get('page')) || 1 };
   }
-  if (a === 'qare') return { validacion: [{ validacion: 'Incorrecto', tickets: 10 * v }, { validacion: 'OK', tickets: 90 * v }] };
+  if (a === 'qare') return { validacion: [{ validacion: 'Incorrecto', tickets: 10 * v }, { validacion: 'OK', tickets: 90 * v }],
+    topCategorias: [{ Categoria: 'Cat' + v, TicketsIncorrectos: 10 * v, TicketsTotales: 100 * v, PorcentajeIncorrectos: 10 }] };
   return { summary: { totalTickets: 100 * v, incorrectos: 10 * v, incorrectosPct: 10 },
     source: { fechaInicio: '2026-10-15', fechaFin: '2026-10-29' },
     dataInfo: { ultimaActualizacion: SELLO[v], periodoInicio: '2026-10-15', periodoFin: '2026-10-29', tipoPeriodo: 'rango' },
@@ -125,7 +126,7 @@ var sondaQa = conComun(
   'window.__v = 2; window.__lento = 300;\n' +
   'var r = M().refrescar();\n' +
   'await espera(150);\n' +
-  'var durante = [total(), document.getElementById("qa-tbody-recat").textContent.indexOf("Calculando") >= 0];\n' +
+  'var durante = [total(), document.getElementById("qa-tbody-topcat").textContent.indexOf("Calculando") >= 0];\n' +
   'await r; window.__lento = 0; await espera(50);\n' +
   'var nuevas = __urls.slice(u0);\n' +
   'var det = nuevas.filter(function (u) { return /action=detail/.test(u); }).map(function (u) { var q = new URL(u).searchParams; return [q.get("validacion"), q.get("page"), q.get("fecha_inicio")]; });\n' +

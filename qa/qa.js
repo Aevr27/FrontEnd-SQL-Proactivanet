@@ -16,18 +16,18 @@
 
    Peticiones:
      - carga inicial : qa.ashx?action=summary            (~10 KB)
-                       KPIs, grupos, tecnicos y recategorizacion. Solo mira
+                       KPIs, grupos y tecnicos. Solo mira
                        los tickets incorrectos del rango, que son una fraccion
                        del total: por eso es la peticion rapida.
      - completo      : qa.ashx?action=qare               (en segundo plano,
                        en cuanto el resumen esta pintado)
-                       Distribucion por estado. Recorre TODOS los tickets del
-                       rango, asi que tarda; por eso no bloquea la carga y su
-                       panel se rellena al llegar. La respuesta trae ademas los
-                       contadores QA/QARE y el top de categorias, que hoy no se
-                       pintan: el bloque que los mostraba en crudo se retiro de
-                       la interfaz a la espera de una visualizacion mejor. El
-                       endpoint y sus datos siguen intactos.
+                       Distribucion por estado y Top 10 de categorias
+                       (topCategorias: las cuatro columnas de
+                       dbo.usp_CorreoQA_TopCategorias, contadas por qa.ashx
+                       sobre la misma pasada del detalle). Recorre TODOS los
+                       tickets del rango, asi que tarda; por eso no bloquea la
+                       carga y sus paneles se rellenan al llegar. Los
+                       contadores QA/QARE tambien vienen y no se pintan.
      - detalle       : qa.ashx?action=detail&...         (solo al pedirlo)
      - catalogos     : nunca desde aqui
 
@@ -44,7 +44,7 @@
    (QaParams.Rango), no hoy como en QARE, porque los KPIs "ayer" y "semana
    anterior" se cuentan desde el fin del rango. "Limpiar" quita solo los tres
    filtros organizacionales; las fechas se quedan. Se aplican a KPIs,
-   distribucion por estado, recategorizacion y detalle (qa.ashx los resuelve
+   distribucion por estado, Top 10 de categorias y detalle (qa.ashx los resuelve
    en el servidor, ver App_Code/QaFiltroOrg.cs).
 
    Las dos graficas de Top 10 NO siguen a los filtros: salen siempre de la
@@ -617,7 +617,7 @@
     });
     graficas.validacion = crearDona();
 
-    filaTabla('tbody-recat', 3, 'Calculando…');
+    filaTabla('tbody-topcat', 4, 'Calculando…');
     pintarFiltros();
   }
 
@@ -626,7 +626,7 @@
   // graficas no: son de la carga por omision (ver baseFallo).
   function faseUnoFallo(mensaje) {
     kpisEnEspera('n/d');
-    filaTabla('tbody-recat', 3, mensaje);
+    filaTabla('tbody-topcat', 4, mensaje);
   }
 
   // La carga por omision no llego y las graficas no tienen con que pintarse.
@@ -734,7 +734,6 @@
     // refresco no: lo de antes se ve hasta que llegue lo nuevo.
     if (!fondo) {
       kpisEnEspera('—');
-      filaTabla('tbody-recat', 3, 'Calculando…');
       esperandoCompleto();
     }
 
@@ -838,18 +837,18 @@
     pintarKpis(datos.summary, datos.historico, rango);
     // porGrupo / porTecnico de esta respuesta no se pintan: las graficas son
     // de la carga por omision (pintarBase).
-    pintarRecategorizacion(datos.recategorizacion || []);
 
-    // El corte por estado es el unico bloque que necesita recorrer TODOS los
-    // tickets del rango y no solo los incorrectos, y ese recorrido es lo que
-    // tarda. El resumen ya no espera por el: el servidor lo manda como null,
-    // aqui se pinta un aviso y llega en una segunda peticion. Todo lo demas ya
-    // esta en pantalla.
+    // El corte por estado y el Top 10 de categorias necesitan recorrer TODOS
+    // los tickets del rango y no solo los incorrectos, y ese recorrido es lo
+    // que tarda. El resumen ya no espera por ellos: el servidor los manda como
+    // null, aqui se pinta un aviso y llegan en una segunda peticion. Todo lo
+    // demas ya esta en pantalla.
     if (datos.validacion === null) {
       if (!fondo) esperandoCompleto();
       return cargarCompleto(params, fondo);
     }
     pintarValidacion(datos.validacion || []);
+    pintarTopCategorias(datos.topCategorias);
     return null;
   }
 
@@ -857,11 +856,13 @@
     $('hint-validacion').textContent = '';
     $('leyenda-validacion').innerHTML = '';
     mensajeLienzo('msg-validacion', 'Calculando la distribucion por estado…');
+    $('hint-topcat').textContent = '';
+    filaTabla('tbody-topcat', 4, 'Calculando…');
   }
 
-  // Segunda peticion. La respuesta trae ademas los contadores QA/QARE y el top
-  // de categorias; hoy solo se pinta la distribucion por estado. En un
-  // refresco que falla se queda la dona de antes. -> Promise (null).
+  // Segunda peticion: distribucion por estado y Top 10 de categorias. La
+  // respuesta trae ademas los contadores QA/QARE, que no se pintan. En un
+  // refresco que falla se quedan la dona y la tabla de antes. -> Promise (null).
   function cargarCompleto(params, fondo) {
     var token = estado.peticionResumen;
 
@@ -869,15 +870,17 @@
       .then(function (datos) {
         if (token !== estado.peticionResumen) return null;   // hubo otra recarga
         pintarValidacion(datos.validacion || []);
+        pintarTopCategorias(datos.topCategorias);
         return null;
       })
       .catch(function (err) {
-        // Falla solo esta fase: los KPIs, las dos graficas de barras y la
-        // recategorizacion ya estan en pantalla y ahi se quedan.
+        // Falla solo esta fase: los KPIs y las dos graficas de barras ya
+        // estan en pantalla y ahi se quedan.
         if (token !== estado.peticionResumen) return null;
         if (fondo) { avisoRefresco(err); return null; }
         mensajeLienzo('msg-validacion', 'Error al cargar datos.', 'lienzo-msg-error');
         $('leyenda-validacion').innerHTML = '<div class="vacio">' + esc(err.message) + '</div>';
+        filaTabla('tbody-topcat', 4, err.message);
         return null;
       });
   }
@@ -1170,26 +1173,42 @@
     }).join('');
   }
 
-  function pintarRecategorizacion(filas) {
-    var cuerpo = $('tbody-recat');
-    if (!filas.length) {
-      cuerpo.innerHTML = '<tr><td colspan="3" class="vacio">Sin pares de recategorizacion.</td></tr>';
-      $('hint-recat').textContent = '';
+  /* Top 10 de categorias: las cuatro columnas de dbo.usp_CorreoQA_TopCategorias
+     (Categoria, TicketsIncorrectos, TicketsTotales, PorcentajeIncorrectos),
+     las mismas del correo diario de QA. qa.ashx las cuenta sobre la pasada
+     del detalle del rango y los filtros de la vista (QaCorreo.Agregados) y ya
+     las manda ordenadas y recortadas a 10: aqui solo se pintan, en ese orden.
+     El porcentaje llega calculado (0-100, dos decimales); no se recalcula.
+     null o ausente = el bloque no vino (no es "sin categorias"). */
+  var TOP_CATEGORIAS = 10;
+  function pintarTopCategorias(filas) {
+    var cuerpo = $('tbody-topcat');
+    if (!Array.isArray(filas)) {
+      filaTabla('tbody-topcat', 4, 'Sin datos de categorias.');
+      $('hint-topcat').textContent = '';
       return;
     }
-    var orden = filas.slice().sort(function (a, b) { return b.tickets - a.tickets; });
-    $('hint-recat').textContent = orden.length + ' pares';
+    if (!filas.length) {
+      filaTabla('tbody-topcat', 4, 'Sin tickets incorrectos en el rango.');
+      $('hint-topcat').textContent = '';
+      return;
+    }
+    var top = filas.slice(0, TOP_CATEGORIAS);
+    $('hint-topcat').textContent = top.length + (top.length === 1 ? ' categoria' : ' categorias');
 
-    cuerpo.innerHTML = orden.map(function (f) {
-      // grupoCorrecto nulo en el origen = el ticket no tiene grupo correcto
-      // asignado. Se rotula como tal y se deja claro que viene vacio.
-      var correcto = (f.grupoCorrecto === null || f.grupoCorrecto === undefined || f.grupoCorrecto === '')
-        ? celdaNula('Sin grupo correcto')
-        : esc(f.grupoCorrecto);
+    function numero(v, formato) {
+      return (v === null || v === undefined) ? celdaNula('n/d') : esc(formato.format(v));
+    }
+    cuerpo.innerHTML = top.map(function (f) {
+      var cat = (f.Categoria === null || f.Categoria === undefined || f.Categoria === '')
+        ? celdaNula('(sin categoria)') : esc(f.Categoria);
+      var pct = (f.PorcentajeIncorrectos === null || f.PorcentajeIncorrectos === undefined)
+        ? celdaNula('n/d') : esc(NUM2.format(f.PorcentajeIncorrectos) + '%');
       return '<tr>' +
-        '<td>' + (f.grupo === null ? celdaNula('(sin grupo)') : esc(f.grupo)) + '</td>' +
-        '<td>' + correcto + '</td>' +
-        '<td class="num">' + NUM.format(f.tickets) + '</td>' +
+        '<td>' + cat + '</td>' +
+        '<td class="num">' + numero(f.TicketsIncorrectos, NUM) + '</td>' +
+        '<td class="num">' + numero(f.TicketsTotales, NUM) + '</td>' +
+        '<td class="num">' + pct + '</td>' +
         '</tr>';
     }).join('');
   }
@@ -1372,7 +1391,7 @@
   }
 
   /* Una vista nueva: se repinta todo lo que sigue a los filtros -KPIs,
-     distribucion, recategorizacion y, si esta abierto, el detalle desde la
+     distribucion, Top 10 de categorias y, si esta abierto, el detalle desde la
      pagina 1-. Las dos graficas no (pintarBase). */
   function aplicarVista() {
     leerVista();
