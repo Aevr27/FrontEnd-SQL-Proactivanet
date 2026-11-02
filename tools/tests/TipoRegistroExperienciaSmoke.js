@@ -92,7 +92,7 @@ var sBot = S(3, 0, 3, 0, 0, 0, 0, 0, 0);
 var sLan = sSwitch;
 var sRed = S(15, 10, 13, 6, 4, 7, 8, 4, 5);
 var PAYLOAD = {
-  mes_actual: MES, dias_transcurridos_mes: 0,
+  mes_actual: MES,
   slot_nums: [0, 1], mes_nums: [MES - 1, MES], meses: ['Sep', 'Oct'],
   agrupadores: ['Problem'],
   categorias: [
@@ -111,7 +111,7 @@ var PAYLOAD = {
 };
 
 // ---- arnes ------------------------------------------------------------
-var COMUNES = ['pasaFiltroGlobal', 'volActualDe', 'volAnteriorDe', 'deltaDe', 'volSlotOMes', 'pronosticoMes',
+var COMUNES = ['pasaFiltroGlobal', 'volActualDe', 'volAnteriorDe', 'deltaDe', 'volSlotOMes',
   'currentCats', 'aggCats', 'renderKPIs', 'efectividadDe', 'tarjetaEfectividad', 'tarjetaSinAutomatizar', 'renderEvol', 'renderDet',
   'volCatV2', 'getConDescendienteConVolumen', 'esHojaPeriodo', 'conDeCatV2', 'sinDeCatV2',
   'hojasSinIniciativa', 'volumenSinIniciativa', 'volumenConIniciativa', 'conIniVolDe', 'renderSin',

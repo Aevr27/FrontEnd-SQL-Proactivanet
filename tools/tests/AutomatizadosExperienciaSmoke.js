@@ -16,13 +16,14 @@
 //       resueltos sin llave (sin dato); rangoTotalAutomatizados cubre todos
 //       los periodos;
 //   G)  la linea de volumen no cambia con o sin barras; las barras van en
-//       los mismos periodos y orden; el mes en curso lleva el pronostico;
+//       los mismos periodos y orden; el mes en curso lleva el real, sin
+//       pronostico;
 //       sin dato queda hueco (null), cero queda cero; sin respuesta no hay
 //       barras;
 //   K)  tarjeta: 9000 - 1500 = 7500; automatizados en cero; cargando /
 //       error / respaldo / sin dato (ninguno se toma como cero ni se resta);
-//       negativo con su signo y aviso; Mes con el mes en curso y el mismo
-//       pronostico que Volumen Actual;
+//       negativo con su signo y aviso; Mes con los reales del mes en
+//       curso, sin pronostico;
 //   M)  con un filtro de Director, PO, Manager o SO (o varios, con o sin
 //       tipo) la tarjeta y las barras usan solo los automatizados de esos
 //       dueños (nunca N/D por el filtro), sin pedir nada; el volumen
@@ -38,7 +39,7 @@
 //       Todos / Incidentes / Requerimientos; 1 peticion en vez de N;
 //   T)  tipo de registro: Incidentes / Requerimientos piden ?tipo=inc|req y
 //       la tarjeta resta el volumen de ese tipo menos los automatizados de
-//       ese tipo (6000 - 1000, 2500 - 0, Mes con pronostico); Todos da
+//       ese tipo (6000 - 1000, 2500 - 0, Mes con reales); Todos da
 //       EXACTAMENTE lo de ANTES_TIPO (tarjeta, grafica, URLs, demas
 //       tarjetas); Todos -> Inc -> Req -> Todos; sin datos = N/D de "sin
 //       dato", cero = cero; error / sin respuesta / respuesta tardia de
@@ -192,7 +193,10 @@ Check('V6 total sin dato o invalido es null', { 0: null, 1: null }, puras.valore
 // ---- arnes de pintado ---------------------------------------------------
 var PAYLOAD = {
   slot_nums: [0, 1, 2], mes_nums: [8, 9, 10], meses: ['Ago', 'Sep', 'Oct'],
-  mes_actual: 10, dias_transcurridos_mes: 15, anio: 2026,
+  // Sin dias_transcurridos_mes: ExperienciaQueries ya no lo publica (el
+  // pronostico se retiro). Las versiones viejas comparadas abajo pintan
+  // entonces los reales, igual que la de hoy.
+  mes_actual: 10, anio: 2026,
   meta: { periodoInicio: '2026-09-23', periodoFin: HOY },
   categorias: [
     { categoria: 'A', nivel: 'C1', vol_slot: { 0: 10, 1: 20, 2: 30 }, vol_mes: { 8: 40, 9: 50, 10: 30 },
@@ -221,8 +225,11 @@ function arnes(opciones) {
     'function renderKPIs(){REPINTADOS.push("kpis:"+modoTiempo);}\n' +
     bloque(fuente, '/* === AUTOMATIZADOS SLA (inicio) === */', '/* === AUTOMATIZADOS SLA (fin) === */') +
     bloque(fuente, 'const automatizados = {};', '\nfunction periodosAutomatizados(').replace('const ', 'var ') +
+    // pronosticoMes solo existe en las versiones viejas que se comparan.
     ['pasaFiltroGlobal', 'volSlotOMes', 'pronosticoMes', 'automatizadosDe', 'hayFiltrosAutomatizados', 'periodosAutomatizados', 'pedirAutomatizados',
-     'tarjetaSinAutomatizar', 'volActualDe'].map(function (n) { return recortar(fuente, n); }).join('') +
+     'tarjetaSinAutomatizar', 'volActualDe'].filter(function (n) {
+       return n !== 'pronosticoMes' || fuente.indexOf('\nfunction pronosticoMes(') >= 0;
+     }).map(function (n) { return recortar(fuente, n); }).join('') +
     bloque(fuente, 'const AYUDA_SIN_AUTOMATIZAR=', '\nfunction tarjetaSinAutomatizar(').replace('const ', 'var ') +
     // El selector de tipo de verdad: sustituye los campos de volumen.
     bloque(fuente, 'const TIPOS_REGISTRO=', '\n// Sin vol_tipo').replace(/const /g, 'var ') +
@@ -252,7 +259,7 @@ function arnes(opciones) {
     ' leer: function (m) { var a = automatizados[m]; return ' +
     (nuevo ? 'a && {estado: a.estado, valores: valoresAutomatizados(a.datos, null)}' : 'a') + '; },' +
     ' pedir: function (m) { pedirAutomatizados(m); },' +
-    ' tarjeta: function (pron, vol) { return tarjetaSinAutomatizar(vol === undefined ? 100 : vol, pron); },' +
+    ' tarjeta: function (vol) { return tarjetaSinAutomatizar(vol === undefined ? 100 : vol); },' +
     ' kpis: function () { renderKPIsReal(P.categorias); return ELEMENTOS["kpis-exp"].innerHTML; },' +
     ' repintados: REPINTADOS,' +
     ' evol: function () { CHARTS.length = 0; renderEvolReal(P.categorias); return CHARTS[0]; } };';
@@ -276,7 +283,17 @@ function aDatos(valores, duenos) {
   return { periodos: periodos, duenos: duenos || [] };
 }
 
-function sinFunciones(o) { return JSON.parse(JSON.stringify(o)); }
+// Las versiones con pronostico daban radio y color de punto por punto (para
+// distinguir el del mes en curso); la de hoy, un solo valor. Sin pronostico
+// un arreglo con todos sus valores iguales es ese mismo valor.
+var PUNTOS = ['pointRadius', 'pointHoverRadius', 'pointBackgroundColor'];
+function sinFunciones(o) {
+  return JSON.parse(JSON.stringify(o), function (k, v) {
+    if (PUNTOS.indexOf(k) >= 0 && Array.isArray(v) && v.length &&
+        v.every(function (x) { return x === v[0]; })) return v[0];
+    return v;
+  });
+}
 
 // ---- G) grafica ---------------------------------------------------------
 var A = arnes();
@@ -314,9 +331,12 @@ var mesAntes = A.evol();
 A.estado('mes', { estado: 'listo', valores: { 8: 12, 9: 0, 10: 6 } });
 var mes = A.evol();
 Check('G6 Mes: linea identica con y sin barras', sinFunciones(mesAntes.data.datasets[0]), sinFunciones(mes.data.datasets[0]));
-Check('G6 Mes: mes en curso con pronostico (6 / 15 x 30 = 12)', [12, 0, 12], mes.data.datasets[1].data);
-Check('G6 Mes: tooltip del pronostico dice el real', 'Automatizados SLA · Pronóstico: 12 · Real a la fecha: 6',
-  mes.options.plugins.tooltip.callbacks.label({ datasetIndex: 1, dataIndex: 2, raw: 12 }));
+Check('G6 Mes: mes en curso con el real, sin pronostico', [12, 0, 6], mes.data.datasets[1].data);
+Check('G6 Mes: tooltip del mes en curso sin pronostico', ['Automatizados SLA: 6', 'Volumen: 30'],
+  [mes.options.plugins.tooltip.callbacks.label({ datasetIndex: 1, dataIndex: 2, raw: 6 }),
+   mes.options.plugins.tooltip.callbacks.label({ datasetIndex: 0, dataIndex: 2, raw: 30 })]);
+Check('G6 Mes: la linea del mes en curso es el real y sin punto distinto', [[40, 50, 30], 3, '#d'],
+  [mes.data.datasets[0].data, mes.data.datasets[0].pointRadius, mes.data.datasets[0].pointBackgroundColor]);
 A.estado('mes', { estado: 'error', valores: {} });
 Check('G7 error: sin barras y la leyenda lo dice', [1, true],
   [A.evol().data.datasets.length, /error al consultar SLA/.test(A.elementos.legendEvol.innerHTML)]);
@@ -341,7 +361,7 @@ function conFiltro(d, p, m, s, t) {
   var g = M.evol();
   return { series: g.data.datasets.length, linea: sinFunciones(g.data.datasets[0]), offset: g.options.scales.x.offset,
     barras: g.data.datasets[1] ? g.data.datasets[1].data : null,
-    leyenda: M.elementos.legendEvol.innerHTML, tarjeta: M.tarjeta(false, 9000) };
+    leyenda: M.elementos.legendEvol.innerHTML, tarjeta: M.tarjeta(9000) };
 }
 var libre = conFiltro();
 Check('M0 sin filtros: barras con el total (antiguo -> reciente)', [2, [5, 0, 3]], [libre.series, libre.barras]);
@@ -375,10 +395,10 @@ Check('M3 quitar los filtros restaura leyenda global y resta', [true, '8997'],
 M.modo('mes');
 M.estado('mes', { estado: 'listo', valores: { 8: 1, 9: 2, 10: 3 },
   duenos: [{ periodo: 10, director: 'Dir A', po: 'PO X', manager: 'Mgr', so: 'SO X', automatizados: 2 }] });
-Check('M4 Mes con Director: el mes en curso con pronostico de lo suyo (2 / 15 x 30 = 4)', [0, 0, 4],
+Check('M4 Mes con Director: el mes en curso con el real de lo suyo', [0, 0, 2],
   conFiltro('Dir A').barras);
-Check('M4 Mes con Director: tarjeta = pronostico(4500) - pronostico(2) = 9000 - 4', '8996',
-  (M.filtrar('Dir A'), M.tarjeta(true, 4500).v));
+Check('M4 Mes con Director: tarjeta = 4500 - 2 reales', '4498',
+  (M.filtrar('Dir A'), M.tarjeta(4500).v));
 conFiltro();
 M.modo('slot');
 M.estado('slot', { estado: 'listo', valores: { 0: null, 1: 0, 2: 5 }, duenos: DUENOS_M });
@@ -448,7 +468,7 @@ conFiltro();
     var A = arnes({ payload: payload });
     A.estado('slot', { estado: 'listo', datos: respuesta(sinSorIA) });
     A.filtrar('', '', mgr || '', '');
-    return A.tarjeta(false, volumenDe(payload, '', '', mgr || '', ''));
+    return A.tarjeta(volumenDe(payload, '', '', mgr || '', ''));
   }
   Check('S1 Campa: volumen sin SorIA = 226 (como el bloque 3 de la VM)', 226, volumenDe(payload, '', '', CAMPA, ''));
   Check('S1 Campa: automatizados con SorIA eran 236 (228 SorIA)', [236, 228],
@@ -463,7 +483,7 @@ conFiltro();
   Check('S4 SO Laura (solo SorIA automatizados): 18 - 0 = 18, cero no es sin dato', '18',
     (function () { var A = arnes({ payload: payload }); A.estado('slot', { estado: 'listo', datos: respuesta(true) });
       A.filtrar('', '', '', 'Laura Gabriela Angeles Reynoso');
-      return A.tarjeta(false, volumenDe(payload, '', '', '', 'Laura Gabriela Angeles Reynoso')).v; })());
+      return A.tarjeta(volumenDe(payload, '', '', '', 'Laura Gabriela Angeles Reynoso')).v; })());
 })();
 
 // ---- K) tarjeta ---------------------------------------------------------
@@ -472,21 +492,21 @@ var AYUDA = 'Aproximación: tickets registrados en el periodo menos tickets resu
   'Los automatizados SLA no necesariamente son un subconjunto del volumen registrado.';
 // El aviso va en el title del rotulo, nunca como texto en el pie.
 function sinAvisoEnPie(t) { return !/Aprox|subconjunto/i.test(t.f); }
-Check('K1 sin pedir / cargando: no resta', ['…', '…'], [K.tarjeta(false, 9000).v,
-  (K.estado('slot', { estado: 'cargando', valores: {} }), K.tarjeta(false, 9000).v)]);
+Check('K1 sin pedir / cargando: no resta', ['…', '…'], [K.tarjeta(9000).v,
+  (K.estado('slot', { estado: 'cargando', valores: {} }), K.tarjeta(9000).v)]);
 K.estado('slot', { estado: 'error', valores: {} });
 Check('K2 error: dice el error, no resta ni da N/D', ['—', 'Error al consultar SLA'],
-  [K.tarjeta(false, 9000).v, K.tarjeta(false, 9000).f]);
+  [K.tarjeta(9000).v, K.tarjeta(9000).f]);
 K.estado('slot', { estado: 'respaldo', valores: {} });
 Check('K2 respaldo: distinto del error, no resta', ['—', 'Respaldo: SLA no disponible'],
-  [K.tarjeta(false, 9000).v, K.tarjeta(false, 9000).f]);
+  [K.tarjeta(9000).v, K.tarjeta(9000).f]);
 K.estado('slot', { estado: 'listo', valores: { 0: null } });
 Check('K3 automatizados sin dato = N/D, no resta', ['N/D', 'SLA sin dato en el periodo'],
-  [K.tarjeta(false, 9000).v, K.tarjeta(false, 9000).f]);
+  [K.tarjeta(9000).v, K.tarjeta(9000).f]);
 K.estado('slot', { estado: 'listo', valores: { 0: 0 } });
-Check('K4 automatizados en cero: 9000 - 0 = 9000', '9000', K.tarjeta(false, 9000).v);
+Check('K4 automatizados en cero: 9000 - 0 = 9000', '9000', K.tarjeta(9000).v);
 K.estado('slot', { estado: 'listo', valores: { 0: 1500, 1: 99 } });
-var k5 = K.tarjeta(false, 9000);
+var k5 = K.tarjeta(9000);
 Check('K5 9000 - 1500 = 7500 con el SLOT 0', ['Volumen - Automatizado', '7500'], [k5.l, k5.v]);
 Check('K5 el pie da solo los dos terminos; el aviso va en el tooltip', ['9000 − 1500 Automatizados SLA', AYUDA],
   [k5.f, k5.t]);
@@ -495,24 +515,24 @@ Check('K5 el tooltip va en todos los estados y nunca en el pie', [true, true],
     var vistos = [];
     [{ estado: 'listo', valores: { 0: 0 } }, { estado: 'listo', valores: { 0: null } }, { estado: 'error', valores: {} },
      { estado: 'respaldo', valores: {} }, { estado: 'cargando', valores: {} }].forEach(function (e) {
-      K.estado('slot', e); vistos.push(K.tarjeta(false, 9000)); vistos.push(K.tarjeta(false, 0));
+      K.estado('slot', e); vistos.push(K.tarjeta(9000)); vistos.push(K.tarjeta(0));
     });
     return [vistos.every(function (t) { return t.t === AYUDA; }), vistos.every(sinAvisoEnPie)];
   })());
 K.estado('slot', { estado: 'listo', valores: { 0: 1500, 1: 99 } });
-Check('K5 volumen en cero tambien resta', '-1500', K.tarjeta(false, 0).v);
-var kn = K.tarjeta(false, 1000);
+Check('K5 volumen en cero tambien resta', '-1500', K.tarjeta(0).v);
+var kn = K.tarjeta(1000);
 Check('K7 negativo: con signo, sin recortar a cero, y avisado', ['-500', true],
   [kn.v, /^Negativo: los valores pueden no ser directamente comparables · /.test(kn.f)]);
 K.modo('mes');
 K.estado('mes', { estado: 'listo', valores: { 9: 7000, 10: 750 } });
-// dias_transcurridos_mes = 15: pronostico(4500) = 9000, pronostico(750) = 1500.
-var kp = K.tarjeta(true, 4500);
-Check('K6 Mes: mes en curso, los dos con el pronostico de Volumen Actual', ['7500', true, true, true],
-  [kp.v, /9000 − 1500 Automatizados SLA/.test(kp.f), /Real a la fecha: 3750/.test(kp.f), /Pronóstico/.test(kp.l)]);
+// Reales del mes en curso: 4500 - 750, sin pronostico ni "Real a la fecha".
+var kp = K.tarjeta(4500);
+Check('K6 Mes: mes en curso con los reales, sin pronostico', ['3750', '4500 − 750 Automatizados SLA', 'Volumen - Automatizado'],
+  [kp.v, kp.f, kp.l]);
 Check('K6 Mes: tooltip, sin aviso en el pie', [AYUDA, true], [kp.t, sinAvisoEnPie(kp)]);
 Check('K7 negativo: tooltip y su aviso de siempre en el pie', [AYUDA, true], [kn.t, sinAvisoEnPie(kn)]);
-Check('K6 Mes sin pronostico: los reales del mes en curso (no del mes 9)', '3750', K.tarjeta(false, 4500).v);
+Check('K6 Mes: los reales del mes en curso (no del mes 9)', '3750', K.tarjeta(4500).v);
 
 // ---- H) Volumen Actual, la linea y la tarjeta en renderKPIs ---------------
 // Linea base fija: el experiencia.js de antes de esta tarjeta. Con HEAD la
@@ -545,8 +565,28 @@ var BASE = 'fc83739';
   var PLANTILLA_BASE = "  document.getElementById('kpis-exp').innerHTML=cards.map(c=>\n" +
     "    `<div class=\"kpi ${c.s?('s'+c.s):''}\"><div class=\"lbl\">${c.l}</div>\n" +
     "     <div class=\"val\">${c.v}</div><div class=\"foot\">${c.f}</div></div>`).join('');\n";
-  Check('H2 renderKPIs = BASE salvo la tarjeta nueva, el title opcional y el clic (Volumen Actual sin cambios)',
-    kh, kw.replace('    tarjetaSinAutomatizar(vol, esPron),\n', '')
+  // Volumen Actual de BASE con el pronostico retirado: mismo rotulo, la
+  // cifra real y el pie sin "Real a la fecha". Es lo unico que cambia de el.
+  var VOL_PRONOSTICO = "  const esPron = modoTiempo==='mes' && !!P.dias_transcurridos_mes;\n" +
+    "  const volMostrado = esPron ? pronosticoMes(vol) : vol;\n" +
+    "  const etiquetaVol = (modoTiempo==='mes' ? 'Volumen Actual (Mes Actual)' : 'Volumen Actual (0-30d)')\n" +
+    "    + (esPron ? ' <span class=\"tag-pron\">Pronóstico</span>' : '');\n" +
+    "  const cards=[\n" +
+    "    {l:etiquetaVol,v:FMT(volMostrado),f:(function(){\n" +
+    "        const totalGlobal=P.categorias.filter(c=>c.nivel==='C1').reduce((s,c)=>s+volActualDe(c),0);\n" +
+    "        const pct=totalGlobal>0?vol/totalGlobal:0;\n" +
+    "        const base=`${cats.length} categorías · ${PCT(pct)} del total`;\n" +
+    "        return esPron ? base+` · Real a la fecha: ${FMT(vol)}` : base;\n";
+  var VOL_REAL = "  // [KPI-1]: volumen real del periodo, sin proyectar el mes en curso.\n" +
+    "  const etiquetaVol = modoTiempo==='mes' ? 'Volumen Actual (Mes Actual)' : 'Volumen Actual (0-30d)';\n" +
+    "  const cards=[\n" +
+    "    {l:etiquetaVol,v:FMT(vol),f:(function(){\n" +
+    "        const totalGlobal=P.categorias.filter(c=>c.nivel==='C1').reduce((s,c)=>s+volActualDe(c),0);\n" +
+    "        const pct=totalGlobal>0?vol/totalGlobal:0;\n" +
+    "        return `${cats.length} categorías · ${PCT(pct)} del total`;\n";
+  Check('H2 BASE trae el bloque de pronostico que se retiro', true, kh.indexOf(VOL_PRONOSTICO) >= 0);
+  Check('H2 renderKPIs = BASE salvo la tarjeta nueva, el title opcional, el clic y el pronostico retirado',
+    kh.replace(VOL_PRONOSTICO, VOL_REAL), kw.replace('    tarjetaSinAutomatizar(vol),\n', '')
       .replace('<div class="lbl"${c.t?` title="${Escape.attr(c.t)}"`:\'\'}>', '<div class="lbl">')
       .replace(",s:null,k:'sin'}", ',s:null}').replace(",s:null,k:'ven'}", ',s:null}')
       .replace(PLANTILLA_CLIC, PLANTILLA_BASE));
@@ -748,17 +788,17 @@ async function tipoDeRegistro() {
     req.urls.map(function (u) { return new URL(u).searchParams.get('tipo'); }));
   Check('T3/T9 Requerimientos: barra sin dato = hueco, cero = cero', [null, 30, 0], req.barras);
 
-  // T4) Mes: el mes en curso del tipo, con el pronostico de Volumen Actual.
+  // T4) Mes: el mes en curso del tipo, con los reales (sin pronostico).
   var incMes = await escenario(null, 'mes', 'inc');
-  // dias_transcurridos_mes = 15: pronostico(3000) = 6000, pronostico(400) = 800.
-  Check('T4 Mes Incidentes: 6000 - 800 = 5200, real 3000 - 400 = 2600', ['5200', true, true],
-    [incMes.tarjetas[1].v, /6000 − 800 Automatizados SLA/.test(incMes.tarjetas[1].f),
-     /Real a la fecha: 2600/.test(incMes.tarjetas[1].f)]);
+  Check('T4 Mes Incidentes: 3000 - 400 = 2600 reales', ['2600', '3000 − 400 Automatizados SLA'],
+    [incMes.tarjetas[1].v, incMes.tarjetas[1].f]);
+  Check('T4 Mes Incidentes: Volumen Actual real y sin rotulo de pronostico', ['Volumen Actual (Mes Actual)', '3000'],
+    [incMes.tarjetas[0].l, incMes.tarjetas[0].v]);
   Check('T4 Mes Incidentes: los tres meses en una peticion con ?tipo=inc',
     ['2026-08-01|2026-10-31|inc'], rangosDe(incMes.urls));
   var reqMes = await escenario(null, 'mes', 'req');
-  Check('T4 Mes Requerimientos: pronostico(1200) - 0 = 2400', ['2400', true],
-    [reqMes.tarjetas[1].v, /2400 − 0 Automatizados SLA/.test(reqMes.tarjetas[1].f)]);
+  Check('T4 Mes Requerimientos: 1200 - 0 reales', ['1200', true],
+    [reqMes.tarjetas[1].v, /1200 − 0 Automatizados SLA/.test(reqMes.tarjetas[1].f)]);
 
   // T5) Todos -> Incidentes -> Requerimientos -> Todos en el mismo tablero.
   var urls5 = [], S = arnes({ traer: servidorTipo(urls5, SLA_TIPO) }), seq = [];
@@ -897,21 +937,21 @@ async function tipoDeRegistro() {
   var R = arnes({ errApi: true, traer: function () { throw new Error('no deberia pedir'); } });
   R.pedir('slot');
   Check('N7 corte guardado: no pide y queda en respaldo', ['respaldo', 'Respaldo: SLA no disponible'],
-    [R.leer('slot').estado, R.tarjeta(false).f]);
+    [R.leer('slot').estado, R.tarjeta().f]);
 
   var F = arnes({ traer: function () { return Promise.reject(new Error('HTTP 500')); } });
   F.pedir('slot');
   await new Promise(function (r) { setTimeout(r, 0); });
   Check('N8 falla del handler: error, no cero ni N/D', ['error', '—', 'Error al consultar SLA'],
-    [F.leer('slot').estado, F.tarjeta(false).v, F.tarjeta(false).f]);
+    [F.leer('slot').estado, F.tarjeta().v, F.tarjeta().f]);
   var J = arnes({ traer: function () { return Promise.reject(new SyntaxError('Unexpected token <')); } });
   J.pedir('slot');
   await new Promise(function (r) { setTimeout(r, 0); });
-  Check('N9 respuesta que no es JSON: error, no cero', ['error', '—'], [J.leer('slot').estado, J.tarjeta(false).v]);
+  Check('N9 respuesta que no es JSON: error, no cero', ['error', '—'], [J.leer('slot').estado, J.tarjeta().v]);
   var S = arnes({ traer: function () { return Promise.resolve({ modo: 'slot' }); } });
   S.pedir('slot');
   await new Promise(function (r) { setTimeout(r, 0); });
-  Check('N9 respuesta sin periodos: error, no cero', ['error', '—'], [S.leer('slot').estado, S.tarjeta(false).v]);
+  Check('N9 respuesta sin periodos: error, no cero', ['error', '—'], [S.leer('slot').estado, S.tarjeta().v]);
   var X = arnes({ payload: Object.assign({}, PAYLOAD, { meta: {} }), traer: function () { throw new Error('no deberia pedir'); } });
   X.pedir('slot');
   Check('N10 sin fecha de corte: error sin pedir', 'error', X.leer('slot').estado);

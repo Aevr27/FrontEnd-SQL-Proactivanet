@@ -226,7 +226,6 @@ tbody tr:hover{background:var(--g-50)}
 .legend span{display:flex;align-items:center;gap:5px}.legend i{width:11px;height:11px;border-radius:3px}
 .det-inis{background:var(--g-50)}
 .tag-est{font-size:10px;padding:1px 6px;border-radius:5px;background:var(--bg-2);color:var(--ink-2);font-weight:600}
-.tag-pron{font-size:10px;padding:1px 6px;border-radius:5px;background:#fef3c7;color:#92400e;font-weight:700;vertical-align:middle}
 .fecha-cell{white-space:nowrap}
 .modal-bk{display:none;position:fixed;inset:0;background:rgba(25,25,25,.55);z-index:50;padding:30px}
 .modal-bk.show{display:flex;align-items:flex-start;justify-content:center}

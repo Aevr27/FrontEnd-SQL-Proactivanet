@@ -329,8 +329,8 @@ public static partial class ExperienciaQueries
     }
 
     // EXPERIENCIA SIN SorIA (2026-10-28): el volumen de Experiencia ("Todos":
-    // Volumen Actual, sus series por slot / mes, la composicion, cobertura y
-    // pronostico) no cuenta los tickets de tipo 'SorIA Incidentes' ni
+    // Volumen Actual, sus series por slot / mes, la composicion y
+    // cobertura) no cuenta los tickets de tipo 'SorIA Incidentes' ni
     // 'SorIA Peticiones' -las dos columnas de la vista, sin restar nada
     // inferido-. 'Sin tipo' y cualquier otro tipo siguen contando. Es la
     // regla del TIPO de ticket, no la rama /Soria/ de categorias.
@@ -1673,8 +1673,6 @@ public static partial class ExperienciaQueries
     //            y por eso lleva el sufijo; los demas son el mes en el que
     //            cae su ventana de 30 dias hacia atras.
     // meses      etiquetas en modo MES: de enero al mes en curso.
-    // dias_transcurridos_mes  para prorratear el mes en curso, que va a la
-    //            mitad y si no se ve siempre como una caida.
     private static Dictionary<string, object> ArmarCalendario(
         DateTime hoy, List<Volumen> mesC1, int anio)
     {
@@ -1718,7 +1716,6 @@ public static partial class ExperienciaQueries
         salida["mes_actual"] = (anio == hoy.Year && conDatos.Contains(hoy.Month))
             ? hoy.Month
             : ultimoConDatos;
-        salida["dias_transcurridos_mes"] = anio == hoy.Year ? hoy.Day : DiasDelMes(anio, 12);
         return salida;
     }
 
@@ -1951,11 +1948,6 @@ public static partial class ExperienciaQueries
         var ultimo = 0;
         foreach (var v in valores) ultimo = v;
         return ultimo;
-    }
-
-    private static int DiasDelMes(int anio, int mes)
-    {
-        return DateTime.DaysInMonth(anio, mes);
     }
 
     // Comparacion tolerante de estados: sin acentos, sin mayusculas y sin

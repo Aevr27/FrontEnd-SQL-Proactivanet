@@ -283,12 +283,6 @@ function aplicarTipoRegistro(tipo){
     Object.assign(c, camposVolumenTipo(c, tipo, P.mes_actual));
   });
 }
-// [KPI-1]/[GRAF-1]: pronostico del mes en curso = volumen real / dias
-// transcurridos del mes (segun fecha de actualizacion de tickets) * 30.
-function pronosticoMes(volReal){
-  if(!P.dias_transcurridos_mes) return volReal;
-  return Math.round(volReal / P.dias_transcurridos_mes * 30);
-}
 
 /* TICKETS AUTOMATIZADOS DE SLA
    -------------------------------------------------------------------------
@@ -552,18 +546,15 @@ function renderKPIs(cats, det){
       vistos.add(i.folio);
   }));
   const nVen=vistos.size;
-  const esPron = modoTiempo==='mes' && !!P.dias_transcurridos_mes;
-  const volMostrado = esPron ? pronosticoMes(vol) : vol;
-  const etiquetaVol = (modoTiempo==='mes' ? 'Volumen Actual (Mes Actual)' : 'Volumen Actual (0-30d)')
-    + (esPron ? ' <span class="tag-pron">Pronóstico</span>' : '');
+  // [KPI-1]: volumen real del periodo, sin proyectar el mes en curso.
+  const etiquetaVol = modoTiempo==='mes' ? 'Volumen Actual (Mes Actual)' : 'Volumen Actual (0-30d)';
   const cards=[
-    {l:etiquetaVol,v:FMT(volMostrado),f:(function(){
+    {l:etiquetaVol,v:FMT(vol),f:(function(){
         const totalGlobal=P.categorias.filter(c=>c.nivel==='C1').reduce((s,c)=>s+volActualDe(c),0);
         const pct=totalGlobal>0?vol/totalGlobal:0;
-        const base=`${cats.length} categorías · ${PCT(pct)} del total`;
-        return esPron ? base+` · Real a la fecha: ${FMT(vol)}` : base;
+        return `${cats.length} categorías · ${PCT(pct)} del total`;
       })(),s:null},
-    tarjetaSinAutomatizar(vol, esPron),
+    tarjetaSinAutomatizar(vol),
     {l:'% Tickets con Iniciativa',v:PCT(pctIni),f:FMT(ini)+' con iniciativa',s:SEM(pctIni)},
     {l:'% Tickets en Tiempo',v:PCT(pctTiempo),f:FMT(ret)+' en riesgo',s:SEM(pctTiempo)},
     tarjetaEfectividad(detReal),
@@ -603,8 +594,8 @@ function mostrarPanel(id){
 // ---- Volumen - Automatizado ----
 // Volumen Actual - Automatizados SLA del MISMO periodo: SLOT 0 (los rangos de
 // pedirAutomatizados son los de vw_TicketsSlotsBase) o el mes en curso.
-// `vol` es el mismo real que pinta "Volumen Actual"; en Mes con pronostico se
-// restan los dos valores ya pronosticados, que son los que se ven.
+// `vol` es el mismo real que pinta "Volumen Actual" y los automatizados son
+// los reales del periodo: sin pronostico en ninguno de los dos.
 //
 // Es una resta APROXIMADA, decidida asi y dicha en el title del rotulo
 // (AYUDA_SIN_AUTOMATIZAR: el title nativo de las tarjetas de Admin y de los
@@ -622,8 +613,8 @@ function mostrarPanel(id){
 // Error, respaldo y "sin dato" nunca se toman como cero.
 const AYUDA_SIN_AUTOMATIZAR='Aproximación: tickets registrados en el periodo menos tickets resueltos por bot '
   +'en el mismo periodo. Los automatizados SLA no necesariamente son un subconjunto del volumen registrado.';
-function tarjetaSinAutomatizar(vol, esPron){
-  const l='Volumen - Automatizado'+(esPron ? ' <span class="tag-pron">Pronóstico</span>' : '');
+function tarjetaSinAutomatizar(vol){
+  const l='Volumen - Automatizado';
   const tarjeta=(v, f)=>({l, v, f, s:null, t:AYUDA_SIN_AUTOMATIZAR});
   const a=automatizadosDe(modoTiempo);
   if(!a || a.estado==='cargando') return tarjeta('…', 'consultando SLA');
@@ -633,12 +624,9 @@ function tarjetaSinAutomatizar(vol, esPron){
   if(a.estado==='respaldo') return tarjeta('—', 'Respaldo: SLA no disponible');
   const auto=a.valores[String(modoTiempo==='mes' ? P.mes_actual : 0)];
   if(auto==null) return tarjeta('N/D', 'SLA sin dato en el periodo');
-  const volMostrado=esPron ? pronosticoMes(vol) : vol;
-  const autoMostrado=esPron ? pronosticoMes(auto) : auto;
-  const dif=volMostrado-autoMostrado;
+  const dif=vol-auto;
   const f=(dif<0 ? 'Negativo: los valores pueden no ser directamente comparables · ' : '')
-    +`${FMT(volMostrado)} − ${FMT(autoMostrado)} Automatizados SLA`
-    +(esPron ? ` · Real a la fecha: ${FMT(vol-auto)}` : '');
+    +`${FMT(vol)} − ${FMT(auto)} Automatizados SLA`;
   return tarjeta(FMT(dif), f);
 }
 
@@ -695,8 +683,8 @@ function tarjetaEfectividad(detReal){
    punta, porque la barra comparte area con la linea de volumen.
 
      - el valor es el que dibuja la barra, con el FMT de la pagina (miles
-       con coma); en el mes en curso es el pronostico, igual que la cifra
-       del ultimo punto de la linea, y el tooltip sigue dando el real;
+       con coma); siempre el real, igual que la cifra del ultimo punto de
+       la linea;
      - null (sin dato) no lleva cifra: ni "0" ni nada; 0 si la lleva, justo
        sobre el eje;
      - si encima no cabe -se saldria del area o caeria sobre un punto de la
@@ -762,16 +750,12 @@ function etiquetasEncimaBarras(FMT){
 
 // ---- Evolucion por SLOT o por MES [GRAF-1] (antiguo->reciente) ----
 function renderEvol(cats){
-  let labels, vals, nums, idxPron=-1, valReal=null;
+  let labels, vals, nums;
   if(modoTiempo==='mes'){
     // Orden cronologico: mes 0 (Dic ant.) a la izquierda, mas reciente a la derecha.
     nums=[...P.mes_nums].sort((a,b)=>a-b);
     labels=nums.map(m=>P.meses[P.mes_nums.indexOf(m)]);
     vals=nums.map(m=>cats.reduce((t,c)=>t+volSlotOMes(c,m),0));
-    if(P.dias_transcurridos_mes){
-      idxPron=nums.indexOf(P.mes_actual);
-      if(idxPron>=0){ valReal=vals[idxPron]; vals[idxPron]=pronosticoMes(valReal); }
-    }
   } else {
     // Etiquetas de SLOT: solo el rango de dias (0-30d, 31-60d, ...), sin mes.
     nums=[...P.slot_nums].sort((a,b)=>b-a); // antiguo->reciente (SLOT alto -> 0)
@@ -780,13 +764,11 @@ function renderEvol(cats){
   }
   const ctx=document.getElementById('chartEvol');
   if(chartEvol)chartEvol.destroy();
-  // El punto de pronostico conserva el ambar: es una advertencia, no una serie.
-  const pointColors=vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.profundo);
-  const pointRadii=vals.map((_,i)=>i===idxPron?6:3);
+  // Todos los puntos son volumen real: mismo color y mismo radio.
   const datasets=[{label:'Volumen',data:vals,
     borderColor:VERDE.pino,backgroundColor:'rgba(47,143,107,.14)',fill:true,tension:.3,
-    pointRadius:pointRadii,pointHoverRadius:pointRadii.map(r=>r+3),
-    pointBackgroundColor:pointColors,borderWidth:2}];
+    pointRadius:3,pointHoverRadius:6,
+    pointBackgroundColor:VERDE.profundo,borderWidth:2}];
   // Automatizados de SLA: barras en los MISMOS periodos y en el mismo orden
   // que la linea, por detras de ella (order). Son otra cuenta (ver
   // pedirAutomatizados), no se suman al volumen. Mientras no hay dato la
@@ -794,10 +776,8 @@ function renderEvol(cats){
   // dueños y con un tipo de registro las de ese tipo, como la linea.
   const auto=automatizadosDe(modoTiempo);
   const filtrado=hayFiltrosAutomatizados();
-  let autoReal=null;
   if(auto && auto.estado==='listo'){
     const barras=nums.map(p=>{ const v=auto.valores[String(p)]; return v==null?null:v; });
-    if(idxPron>=0 && barras[idxPron]!=null){ autoReal=barras[idxPron]; barras[idxPron]=pronosticoMes(autoReal); }
     // El azul de una barra ordinaria (Paleta.AZUL_SERIE, #2563eb): el mismo
     // de las barras de Call Center (AZUL = Paleta.porIndice(0) en dashboard.js).
     datasets.push({type:'bar',label:'Automatizados SLA',data:barras,order:1,
@@ -817,12 +797,7 @@ function renderEvol(cats){
   chartEvol=new Chart(ctx,{type:'line',plugins:[CIFRAS_EXTREMOS,CIFRAS_ENCIMA_BARRAS],data:{labels,datasets},
     options:{responsive:true,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.datasetIndex===1
-        ? (c.raw==null ? 'Automatizados SLA: sin dato'
-          : c.dataIndex===idxPron
-            ? `Automatizados SLA · Pronóstico: ${FMT(c.raw)} · Real a la fecha: ${FMT(autoReal)}`
-            : `Automatizados SLA: ${FMT(c.raw)}`)
-        : c.dataIndex===idxPron
-        ? `Pronóstico: ${FMT(c.raw)} · Real a la fecha: ${FMT(valReal)}`
+        ? (c.raw==null ? 'Automatizados SLA: sin dato' : `Automatizados SLA: ${FMT(c.raw)}`)
         : `Volumen: ${FMT(c.raw)}`}}},
       // Con barras el eje deja medio hueco a cada lado para que la primera
       // y la ultima no salgan cortadas a la mitad.
