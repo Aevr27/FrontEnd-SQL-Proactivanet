@@ -11,6 +11,8 @@
 //   ?falla=1   el servidor responde un fallo: se muestra con su codigo y el
 //              boton se rehabilita para reintentar.
 //   ?rol=mod   GET 403: aviso y sin controles.
+//   ?modo=smtp remitente SMTP: campo de contrasena en vez de "Conectar";
+//              se guarda una vez, el campo se vacia y nunca se pinta.
 //
 //   node tools\tests\RcaCorreoHeadlessSmoke.js
 'use strict';
@@ -27,6 +29,11 @@ function falso() {
     maxBytes: 3145728, extensiones: ['pdf', 'docx', 'xlsx', 'pptx', 'doc', 'xls', 'ppt'],
     prefijoAsunto: 'PRUEBA RCA - ', nombreAdjunto: 'Prueba_RCA', maxTitulo: 150
   };
+  window.__claves = [];
+  if (/modo=smtp/.test(q)) {
+    cfg.modo = 'smtp'; cfg.requiereClave = true; cfg.smtpServidor = 'smtp.gmail.com:587';
+    cfg.remitente = 'remitente.rca@gmail.com'; cfg.conectada = false; cfg.conectadoPor = null; cfg.conectadoEl = null;
+  }
   function resp(status, obj, ms) {
     return new Promise(function (ok) {
       setTimeout(function () { ok(new Response(JSON.stringify(obj), { status: status, headers: { 'Content-Type': 'application/json' } })); }, ms || 0);
@@ -41,7 +48,16 @@ function falso() {
       if (/rol=mod/.test(q)) { return resp(403, { error: 'Solo un administrador (ADM) puede usar la prueba de correo RCA.', tipo: 'RolInsuficiente' }); }
       return resp(200, cfg);
     }
+    if (url.indexOf('accion=smtp-clave') >= 0) {
+      window.__claves.push(op.body.get('clave'));
+      cfg.conectada = true; cfg.conectadoPor = 'SORIANA\\adm'; cfg.conectadoEl = '2026-11-03T11:00:00';
+      return resp(200, { ok: true }, 50);
+    }
     if (url.indexOf('accion=enviar') >= 0) {
+      if (/modo=smtp/.test(q)) {
+        window.__envios.push({ titulo: op.body.get('titulo') });
+        return resp(200, { ok: true, codigo: 'Enviado', mensaje: 'El servidor de correo (smtp.gmail.com) acepto el correo.' }, 100);
+      }
       var cuerpo = op.body;
       window.__envios.push({ titulo: cuerpo.get('titulo'), archivo: cuerpo.get('archivo') && cuerpo.get('archivo').name });
       if (/falla=1/.test(q)) { return resp(502, { ok: false, codigo: 'GraphRechazo', mensaje: 'Microsoft rechazo el mensaje (ErrorInvalidRecipients). No se envio.' }, 300); }
@@ -66,6 +82,43 @@ function sonda() {
       r.push(['aviso403', $('rcaAviso').textContent]);
       r.push(['ocultos', $('rcaContenido').hidden && getComputedStyle($('rcaContenido')).display === 'none']);
       return fin();
+    }
+    if (/modo=smtp/.test(location.search)) {
+      var vis = function (id) { return getComputedStyle($(id)).display !== 'none'; };
+      r.push(['sConectarOculto', !vis('rcaConectar')]);
+      r.push(['sClaveVisible', vis('rcaClaveBloque') && vis('rcaGuardarClave')]);
+      r.push(['sClaveTipo', $('rcaClave').type]);
+      r.push(['sServidor', vis('rcaRemServidor') ? $('rcaRemServidor').textContent : null]);
+      r.push(['sEtiqueta', [$('rcaRemConectadaTit').textContent, $('rcaRemConectada').textContent]]);
+      r.push(['sEstado', $('rcaRemEstado').textContent]);
+      r.push(['sBorrarOculto', !vis('rcaDesconectar')]);
+      $('rcaTitulo').value = 'Caida WMS';
+      $('rcaTitulo').dispatchEvent(new Event('input', { bubbles: true }));
+      archivo('rca.pdf', 'application/pdf', [37, 80, 68, 70, 45]);
+      r.push(['sMotivo', $('rcaPruebaEstado').textContent]);
+      r.push(['sDeshabilitado', $('rcaEnviar').disabled]);
+
+      $('rcaGuardarClave').click();
+      r.push(['sVaciaMsg', $('rcaRemMsg').textContent]);
+      $('rcaClave').value = 'abcd efgh ijkl mnop';
+      $('rcaGuardarClave').click();
+      setTimeout(function () {
+        r.push(['sClaves', window.__claves]);
+        r.push(['sCampoVacio', $('rcaClave').value]);
+        r.push(['sGuardada', $('rcaRemConectada').textContent]);
+        r.push(['sBotones', [$('rcaGuardarClave').textContent, vis('rcaDesconectar') ? $('rcaDesconectar').textContent : null]]);
+        r.push(['sHabilitado', !$('rcaEnviar').disabled]);
+        // innerText: lo que se ve (el <script> de esta sonda trae la clave escrita).
+        r.push(['sClaveNoEnHtml', document.body.innerText.indexOf('abcd efgh') < 0 &&
+          Array.prototype.every.call(document.querySelectorAll('input'), function (i) { return String(i.value).indexOf('abcd') < 0; })]);
+        $('rcaEnviar').click();
+        setTimeout(function () {
+          r.push(['sEnvios', window.__envios.length]);
+          r.push(['sResultado', $('rcaResultadoTit').textContent]);
+          fin();
+        }, 600);
+      }, 600);
+      return;
     }
     r.push(['visible', !$('rcaContenido').hidden]);
     r.push(['codigoNoSeVe', getComputedStyle($('rcaCodigo')).display === 'none' && getComputedStyle($('rcaResultado')).display === 'none']);
@@ -118,7 +171,7 @@ var html = Banco.pagina('admin/admin.html', 'admin.js', antes, sonda);
 var URL_P = '/admin/__rca.html';
 var paginas = {}; paginas[URL_P] = html;
 
-Banco.correr(paginas, [URL_P, URL_P + '?falla=1', URL_P + '?rol=mod']).then(function (res) {
+Banco.correr(paginas, [URL_P, URL_P + '?falla=1', URL_P + '?rol=mod', URL_P + '?modo=smtp']).then(function (res) {
   var fallos = 0, pasados = 0;
   function check(caso, esperado, obtenido) {
     var ok = JSON.stringify(esperado) === JSON.stringify(obtenido);
@@ -146,6 +199,16 @@ Banco.correr(paginas, [URL_P, URL_P + '?falla=1', URL_P + '?rol=mod']).then(func
   check('W15 fallo visible con su codigo', ['job-ejecucion fallo', 'Fallo — GraphRechazo'], [f.resultadoClase, f.resultadoTit]);
   check('W16 tras un fallo se puede reintentar', [1, true], [f.envios, f.rehabilitado]);
   check('W17 MOD (403): aviso y sin controles (ni en pantalla)', ['Solo un administrador (ADM) puede usar la prueba de correo RCA.', true], [m.aviso403, m.ocultos]);
+  var s = Banco.mapa(res[3]);
+  check('W18 SMTP: sin boton de Microsoft; campo de contrasena (password) y Guardar visibles', [true, true, 'password'], [s.sConectarOculto, s.sClaveVisible, s.sClaveTipo]);
+  check('W19 SMTP: muestra servidor y "Contraseña: Sin guardar"', ['smtp.gmail.com:587', ['Contraseña', 'Sin guardar']], [s.sServidor, s.sEtiqueta]);
+  check('W20 SMTP sin contrasena: semaforo lo pide, Borrar oculto', [true, true], [/contraseña de aplicación/.test(s.sEstado || ''), s.sBorrarOculto]);
+  check('W21 SMTP sin contrasena: envio deshabilitado con motivo', [true, true], [s.sDeshabilitado, /Guarda la contraseña/.test(s.sMotivo || '')]);
+  check('W22 guardar vacio: aviso sin llamar al servidor', 'Escribe la contraseña.', s.sVaciaMsg);
+  check('W23 guardar: UNA llamada con la clave tal cual; el campo se vacia', [['abcd efgh ijkl mnop'], ''], [s.sClaves, s.sCampoVacio]);
+  check('W24 tras guardar: "Guardada", Cambiar contraseña y Borrar contraseña', [true, ['Cambiar contraseña', 'Borrar contraseña']], [/^Guardada/.test(s.sGuardada || ''), s.sBotones]);
+  check('W25 la contrasena no queda en el HTML', true, s.sClaveNoEnHtml);
+  check('W26 SMTP: envio habilitado y resultado sin decir Microsoft', [true, 1, 'Correcto — correo aceptado por el servidor de correo'], [s.sHabilitado, s.sEnvios, s.sResultado]);
   console.log('\n' + pasados + ' pasaron, ' + fallos + ' fallaron');
   process.exit(fallos ? 1 : 0);
 });

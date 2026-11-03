@@ -118,14 +118,22 @@
           <div class="job-icono" aria-hidden="true">🔐</div>
           <div class="job-tit">
             <h3>Cuenta remitente</h3>
-            <p>Se configura en el servidor (Web.config). Se autoriza una vez con Microsoft; la contraseña nunca pasa por el Dashboard.</p>
+            <p id="rcaRemNota">Se configura en el servidor (Web.config). Se autoriza una vez con Microsoft; la contraseña nunca pasa por el Dashboard.</p>
           </div>
         </div>
         <div class="job-estado"><span class="job-punto" aria-hidden="true"></span><span id="rcaRemEstado">—</span></div>
         <dl class="job-datos">
           <dt>Remitente</dt><dd id="rcaRemCuenta">—</dd>
-          <dt>Conectada</dt><dd id="rcaRemConectada">—</dd>
+          <dt id="rcaRemServidorTit" hidden>Servidor</dt><dd id="rcaRemServidor" hidden>—</dd>
+          <dt id="rcaRemConectadaTit">Conectada</dt><dd id="rcaRemConectada">—</dd>
         </dl>
+        <!-- Modo SMTP: la contraseña se escribe aqui, viaja una vez al
+             servidor (que la cifra) y el campo se vacia. Nunca se devuelve. -->
+        <div class="rca-campo" id="rcaClaveBloque" hidden>
+          <label for="rcaClave">Contraseña de aplicación</label>
+          <input type="password" id="rcaClave" maxlength="256" autocomplete="new-password" spellcheck="false" aria-describedby="rcaClaveNota">
+          <small class="rca-nota" id="rcaClaveNota">Gmail: la de 16 letras de myaccount.google.com/apppasswords (con o sin espacios), no tu contraseña normal.</small>
+        </div>
         <div class="rca-codigo" id="rcaCodigo" hidden>
           <p>Abre <a id="rcaCodigoUrl" href="#" target="_blank" rel="noopener noreferrer">microsoft.com/link</a>, inicia sesión con <b id="rcaCodigoCuenta"></b> y escribe este código:</p>
           <div class="rca-codigo-valor" id="rcaCodigoValor" aria-live="polite"></div>
@@ -134,6 +142,7 @@
         <p class="rca-msg" id="rcaRemMsg" role="status" hidden></p>
         <div class="rca-botones">
           <button type="button" class="btn chico" id="rcaConectar">Conectar cuenta remitente</button>
+          <button type="button" class="btn chico" id="rcaGuardarClave" hidden>Guardar contraseña</button>
           <button type="button" class="btn linea chico" id="rcaDesconectar" hidden>Desconectar</button>
         </div>
       </article>

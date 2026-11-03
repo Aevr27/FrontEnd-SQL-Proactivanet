@@ -1,7 +1,8 @@
 // Prueba offline del Correo RCA de prueba (App_Code/RcaCorreoPrueba.cs y
-// handlers/admin_rca_correo.ashx). Sin IIS, sin SQL Server y SIN RED: el
+// handlers/admin_rca_correo.ashx). Sin IIS, sin SQL Server y SIN INTERNET: el
 // HTTP hacia Microsoft (login.microsoftonline.com / graph.microsoft.com), el
-// almacen de archivos y el cifrado son falsos. NO prueba la entrega real a un
+// almacen de archivos y el cifrado son falsos (el bloque L abre un servidor
+// SMTP solo en 127.0.0.1). NO prueba la entrega real a un
 // buzon: eso es la prueba manual del README (DASHBOARD.md, "Correo RCA").
 //
 // Casos:
@@ -23,6 +24,12 @@
 //      segundo envio simultaneo recibe EnvioEnCurso.
 //   K  conexion por codigo de dispositivo: pendiente, intervalo, exito,
 //      cuenta distinta (no guarda), rechazo, expirado; Estado sin tokens.
+//   S  modo SMTP (RcaModo=smtp) con SMTP falso: configuracion, contrasena
+//      (cifrada, nunca en Estado), envio, relevo sin contrasena y la
+//      traduccion de cada excepcion de SmtpClient.
+//   L  SmtpClient REAL contra un servidor SMTP en 127.0.0.1 (sin internet):
+//      mensaje armado (From, Cc, asunto UTF-8, adjunto), clave rechazada
+//      (535 -> 530 como Gmail), destinatario rechazado y puerto cerrado.
 //   H  handler: anonimo, VIEWER y MOD 403; ADM GET 200; ADM POST cross-site
 //      403 OrigenNoPermitido; el fuente llama ExigirAdm antes que nada y no
 //      toca SQL ni los flujos de iniciativas.
@@ -108,6 +115,20 @@ sealed class HttpFalso : IHttpRca
     public int Cuantas(string pieza) { lock (Llamadas) return Llamadas.Count(l => l.Url.IndexOf(pieza, StringComparison.Ordinal) >= 0); }
 }
 
+// SMTP falso: guarda lo que se le pidio mandar; `Lanzar` simula a SmtpClient.
+sealed class SmtpFalso : ISmtpRca
+{
+    public readonly List<MensajeRca> Enviados = new List<MensajeRca>();
+    public readonly List<string> Claves = new List<string>();
+    public Exception Lanzar;
+    public void Enviar(OpcionesRca op, string clave, MensajeRca m, int timeoutMs)
+    {
+        Claves.Add(clave);
+        if (Lanzar != null) throw Lanzar;
+        Enviados.Add(m);
+    }
+}
+
 static class RcaCorreoPruebaSmoke
 {
     static int fallos, pasados;
@@ -171,6 +192,8 @@ static class RcaCorreoPruebaSmoke
         Envio();
         Repetidos();
         Conexion();
+        Smtp();
+        SmtpReal();
         Handler();
         Dpapi(System.Reflection.Assembly.GetExecutingAssembly().Location);
         Console.WriteLine();
@@ -589,6 +612,288 @@ static class RcaCorreoPruebaSmoke
               a.Archivos.ContainsKey(ServicioRca.ArchivoCuenta) + "|" + a.Archivos.ContainsKey(RcaConfiguracion.Archivo));
     }
 
+    // ---- S: modo SMTP (RcaModo = smtp) ----------------------------------------
+    const string GMAIL = "remitente.rca@gmail.com";
+
+    static OpcionesRca OpcionesSmtp()
+    {
+        return new OpcionesRca { Modo = "smtp", Remitente = GMAIL, SmtpServidor = "smtp.gmail.com", SmtpPuerto = 587, SmtpSsl = true, SmtpAutenticar = true, DirDatos = "X:\\no-se-usa", MaxBytes = RcaAdjunto.MaxBytesTecnico };
+    }
+
+    static ServicioRca ServicioSmtp(AlmacenMemoria a, SmtpFalso smtp, HttpFalso h = null, OpcionesRca op = null)
+    {
+        ServicioRca.ReiniciarEstado();
+        return new ServicioRca(op ?? OpcionesSmtp(), a, h ?? new HttpFalso(), smtp, new ProtectorFalso(), () => Ahora);
+    }
+
+    static AlmacenMemoria ListoSmtp(bool conClave = true)
+    {
+        var a = new AlmacenMemoria();
+        RcaConfiguracion.Guardar(a, REM, REM, "SORIANA\\adm", Ahora, new Dictionary<string, string>());
+        if (conClave)
+        {
+            ServicioSmtp(a, new SmtpFalso()).GuardarClaveSmtp("abcd efgh ijkl mnop", "SORIANA\\adm");
+        }
+        a.Escrituras = 0;
+        return a;
+    }
+
+    static string FallaS(Exception ex, string enMensaje)
+    {
+        var r = Enviar(ServicioSmtp(ListoSmtp(), new SmtpFalso { Lanzar = ex }));
+        return r.Ok + "|" + r.Codigo + "|" + r.Mensaje.Contains(enMensaje);
+    }
+
+    static void Smtp()
+    {
+        // Configuracion
+        var op = OpcionesSmtp();
+        Check("S1 modo SMTP completo: sin faltantes (no pide ClientId)", "", op.Faltante() ?? "");
+        op.SmtpServidor = null;
+        Check("S2 sin RcaSmtpServidor", "True", (op.Faltante() ?? "").Contains("RcaSmtpServidor"));
+        op = OpcionesSmtp(); op.SmtpPuerto = 465;
+        Check("S3 puerto 465 con SSL: no lo soporta .NET, sugiere 587", "True", (op.Faltante() ?? "").Contains("587"));
+        op = OpcionesSmtp(); op.SmtpServidor = "smtp.gmail.com/x";
+        Check("S4 servidor con caracteres raros", "True", (op.Faltante() ?? "").Contains("no es un nombre"));
+        op = OpcionesSmtp(); op.Modo = "pop3";
+        Check("S5 RcaModo desconocido", "True", (op.Faltante() ?? "").Contains("graph o smtp"));
+        Check("S6 sin Modo = graph (como antes)", "False|", Opciones().EsSmtp + "|" + (Opciones().Faltante() ?? ""));
+
+        // Contrasena
+        string limpia;
+        Check("S7 clave de Google con espacios: se quitan", "null|abcdefghijklmnop", (ServicioRca.ValidarClave(" abcd efgh ijkl mnop ", out limpia) ?? "null") + "|" + limpia);
+        Check("S8 otra clave con espacio interno se conserva", "null|mi clave 1", (ServicioRca.ValidarClave("mi clave 1", out limpia) ?? "null") + "|" + limpia);
+        Check("S9 clave vacia / con control / muy larga", "True|True|True",
+              (ServicioRca.ValidarClave("  ", out limpia) != null) + "|" + (ServicioRca.ValidarClave("a\nb", out limpia) != null) + "|" + (ServicioRca.ValidarClave(new string('x', 257), out limpia) != null));
+
+        var a = new AlmacenMemoria();
+        var s = ServicioSmtp(a, new SmtpFalso());
+        var est = s.Estado();
+        Check("S10 Estado sin clave: modo smtp, servidor, requiere clave, no conectada", "smtp|smtp.gmail.com:587|True|False",
+              est["modo"] + "|" + est["smtpServidor"] + "|" + est["requiereClave"] + "|" + est["conectada"]);
+        s.GuardarClaveSmtp("abcd efgh ijkl mnop", "SORIANA\\adm");
+        est = s.Estado();
+        var estJson = new JavaScriptSerializer().Serialize(est);
+        Check("S11 guardada: cifrada (no en claro), Estado conectada y SIN la clave", "False|True|False|SORIANA\\adm",
+              a.Archivos[ServicioRca.ArchivoSmtp].Contains("abcdefgh") + "|" + est["conectada"] + "|" + estJson.Contains("abcdefgh") + "|" + est["conectadoPor"]);
+        Check("S12 no toca el archivo del token de Microsoft", "False", a.Archivos.ContainsKey(ServicioRca.ArchivoCuenta));
+        Check("S13 clave invalida: ClaveInvalida y no guarda", "ClaveInvalida", Codigo(() => s.GuardarClaveSmtp("", "x")));
+        Check("S14 conectar con Microsoft en modo SMTP: ModoIncorrecto", "ModoIncorrecto", Codigo(() => s.IniciarConexion("x")));
+        Check("S15 guardar clave en modo graph: ModoIncorrecto", "ModoIncorrecto", Codigo(() => Servicio(new AlmacenMemoria(), new HttpFalso()).GuardarClaveSmtp("abc", "x")));
+        var opRel = OpcionesSmtp(); opRel.SmtpAutenticar = false;
+        Check("S16 relevo sin autenticacion: no acepta clave", "ModoIncorrecto", Codigo(() => ServicioSmtp(new AlmacenMemoria(), new SmtpFalso(), op: opRel).GuardarClaveSmtp("abc", "x")));
+        var af = new AlmacenMemoria { FallaEscribir = true };
+        Check("S17 no poder escribir la clave: AlmacenNoDisponible", "AlmacenNoDisponible", Codigo(() => ServicioSmtp(af, new SmtpFalso()).GuardarClaveSmtp("abc", "x")));
+
+        // Envio
+        var smtp = new SmtpFalso();
+        var h = new HttpFalso();
+        a = ListoSmtp();
+        var r = Enviar(ServicioSmtp(a, smtp, h));
+        var m = smtp.Enviados.FirstOrDefault();
+        Check("S18 exito: Enviado, con la clave descifrada, sin llamar a Microsoft", "True|Enviado|abcdefghijklmnop|0",
+              r.Ok + "|" + r.Codigo + "|" + smtp.Claves[0] + "|" + h.Llamadas.Count);
+        Check("S19 el mensaje: Para, CC, asunto y adjunto renombrado", REM + "|" + REM + "|PRUEBA RCA - Caida WMS|Prueba_RCA.pdf|application/pdf",
+              m.Para + "|" + m.Cc + "|" + m.Asunto + "|" + m.Adjunto.NombreSalida + "|" + m.Adjunto.Mime);
+        Check("S20 el resultado nombra el servidor y no dice Microsoft", "True|False", r.Mensaje.Contains("smtp.gmail.com") + "|" + r.Mensaje.Contains("Microsoft"));
+
+        smtp = new SmtpFalso();
+        r = Enviar(ServicioSmtp(ListoSmtp(false), smtp));
+        Check("S21 sin clave guardada: SinRemitente sin intentar SMTP", "SinRemitente|0", r.Codigo + "|" + smtp.Claves.Count);
+
+        var ajena = ListoSmtp(); ajena.Archivos[ServicioRca.ArchivoSmtp] = "OTRA-LLAVE";
+        r = Enviar(ServicioSmtp(ajena, smtp));
+        Check("S22 clave que no se descifra: SinRemitente con aviso, sin SMTP", "SinRemitente|True|0", r.Codigo + "|" + r.Mensaje.Contains("vuelve a guardarla") + "|" + smtp.Claves.Count);
+
+        var opOtro = OpcionesSmtp(); opOtro.Remitente = "otra@gmail.com";
+        r = Enviar(ServicioSmtp(ListoSmtp(), smtp, op: opOtro));
+        Check("S23 RcaRemitente cambio tras guardar la clave: CuentaDistinta, sin SMTP", "CuentaDistinta|0", r.Codigo + "|" + smtp.Claves.Count);
+
+        var aRel = ListoSmtp(false);
+        smtp = new SmtpFalso();
+        var sRel = ServicioSmtp(aRel, smtp, op: opRel);
+        r = Enviar(sRel);
+        Check("S24 relevo sin autenticacion: conectada sin clave y envia con clave null", "True|True|null",
+              sRel.Estado()["conectada"] + "|" + r.Ok + "|" + (smtp.Claves[0] ?? "null"));
+
+        smtp = new SmtpFalso();
+        r = Enviar(ServicioSmtp(new AlmacenMemoria(), smtp));
+        Check("S25 sin destinatarios: SinDestinatarios, sin SMTP", "SinDestinatarios|0", r.Codigo + "|" + smtp.Claves.Count);
+        r = Enviar(ServicioSmtp(ListoSmtp(), smtp), nombre: "virus.exe", mime: "application/octet-stream", b: new byte[] { 0x4D, 0x5A });
+        Check("S26 archivo invalido: AdjuntoInvalido, sin SMTP", "AdjuntoInvalido|0", r.Codigo + "|" + smtp.Claves.Count);
+
+        // Fallos de SmtpClient
+        Check("S27 535 (usuario/clave) -> SmtpAutenticacion, menciona contrasena de aplicacion", "False|SmtpAutenticacion|True",
+              FallaS(new System.Net.Mail.SmtpException((System.Net.Mail.SmtpStatusCode)535, "5.7.8 Username and Password not accepted"), "contrasena de aplicacion"));
+        Check("S28 530 de Gmail (falta autenticar) -> SmtpAutenticacion", "False|SmtpAutenticacion|True",
+              FallaS(new System.Net.Mail.SmtpException(System.Net.Mail.SmtpStatusCode.MustIssueStartTlsFirst, "5.7.0 Authentication Required"), "No se envio"));
+        Check("S29 no conecta (Web -> Socket) -> SinConexion, no se envio", "False|SinConexion|True",
+              FallaS(new System.Net.Mail.SmtpException("Failure sending mail.", new WebException("Unable to connect to the remote server", new System.Net.Sockets.SocketException(10060))), "No se envio"));
+        Check("S30 corte a medio envio (IO) -> ResultadoDesconocido", "False|ResultadoDesconocido|True",
+              FallaS(new System.Net.Mail.SmtpException("Failure sending mail.", new IOException("reset", new System.Net.Sockets.SocketException(10054))), "PUDO"));
+        Check("S31 tiempo agotado (sin codigo) -> ResultadoDesconocido", "False|ResultadoDesconocido|True",
+              FallaS(new System.Net.Mail.SmtpException("The operation has timed out."), "PUDO"));
+        Check("S32 TLS falla -> SmtpTls", "False|SmtpTls|True",
+              FallaS(new System.Net.Mail.SmtpException("Failure sending mail.", new System.Security.Authentication.AuthenticationException("handshake")), "TLS"));
+        Check("S33 destinatario rechazado -> SmtpDestinatario con la direccion", "False|SmtpDestinatario|True",
+              FallaS(new System.Net.Mail.SmtpFailedRecipientException(System.Net.Mail.SmtpStatusCode.MailboxUnavailable, "<x@y.com>"), "x@y.com"));
+        Check("S34 421/451 temporal -> SmtpNoDisponible", "False|SmtpNoDisponible|True",
+              FallaS(new System.Net.Mail.SmtpException(System.Net.Mail.SmtpStatusCode.ServiceNotAvailable, "4.7.0 Try again later"), "espera"));
+        Check("S35 552 tamano -> SmtpTamano", "False|SmtpTamano|True",
+              FallaS(new System.Net.Mail.SmtpException(System.Net.Mail.SmtpStatusCode.ExceededStorageAllocation, "5.3.4 too big"), "tamano"));
+        Check("S36 554 otro rechazo -> SmtpRechazo", "False|SmtpRechazo|True",
+              FallaS(new System.Net.Mail.SmtpException(System.Net.Mail.SmtpStatusCode.TransactionFailed, "5.7.1 spam"), "554"));
+        Check("S37 excepcion inesperada -> SmtpError y pide revisar el buzon", "False|SmtpError|True",
+              FallaS(new InvalidOperationException("x"), "buzon"));
+
+        // Repeticion y cerrojo
+        smtp = new SmtpFalso { Lanzar = new System.Net.Mail.SmtpException(System.Net.Mail.SmtpStatusCode.ServiceNotAvailable, "x") };
+        s = ServicioSmtp(ListoSmtp(), smtp);
+        var r1 = Enviar(s);
+        smtp.Lanzar = null;
+        var r2 = Enviar(s);
+        Check("S38 fallo y luego reintento con exito", "False|True|1", r1.Ok + "|" + r2.Ok + "|" + smtp.Enviados.Count);
+
+        // Borrar la clave
+        a = ListoSmtp();
+        s = ServicioSmtp(a, new SmtpFalso());
+        a.Archivos[ServicioRca.ArchivoCuenta] = "token-graph";
+        s.Desconectar();
+        Check("S39 borrar en modo SMTP: quita la clave, deja destinatarios y el token de Graph", "False|True|True",
+              a.Archivos.ContainsKey(ServicioRca.ArchivoSmtp) + "|" + a.Archivos.ContainsKey(RcaConfiguracion.Archivo) + "|" + a.Archivos.ContainsKey(ServicioRca.ArchivoCuenta));
+    }
+
+    // ---- L: SmtpClient REAL contra un servidor SMTP local (127.0.0.1) -------
+    // Sin internet: comprueba que SmtpRcaReal arma el mensaje como se espera
+    // y que las excepciones REALES de SmtpClient caen en el codigo correcto.
+    sealed class ServidorSmtpLocal : IDisposable
+    {
+        readonly System.Net.Sockets.TcpListener _l;
+        readonly Thread _hilo;
+        public readonly string Clave;
+        public readonly string RechazarRcpt;
+        public string Datos, Usuario, ClaveRecibida;
+        public readonly List<string> Rcpt = new List<string>();
+        public int Puerto { get { return ((IPEndPoint)_l.LocalEndpoint).Port; } }
+
+        public ServidorSmtpLocal(string clave, string rechazarRcpt = null)
+        {
+            Clave = clave; RechazarRcpt = rechazarRcpt;
+            _l = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            _l.Start();
+            _hilo = new Thread(Atender) { IsBackground = true };
+            _hilo.Start();
+        }
+
+        void Atender()
+        {
+            try
+            {
+                using (var c = _l.AcceptTcpClient())
+                using (var st = c.GetStream())
+                using (var rd = new StreamReader(st, Encoding.ASCII))
+                using (var wr = new StreamWriter(st, Encoding.ASCII) { NewLine = "\r\n", AutoFlush = true })
+                {
+                    wr.WriteLine("220 local ESMTP");
+                    var autenticado = false;
+                    string linea;
+                    while ((linea = rd.ReadLine()) != null)
+                    {
+                        var u = linea.ToUpperInvariant();
+                        if (u.StartsWith("EHLO")) { wr.WriteLine("250-local"); wr.WriteLine("250-AUTH LOGIN"); wr.WriteLine("250 OK"); }
+                        else if (u.StartsWith("AUTH LOGIN"))
+                        {
+                            var resto = linea.Length > 10 ? linea.Substring(10).Trim() : "";
+                            if (resto.Length == 0) { wr.WriteLine("334 VXNlcm5hbWU6"); resto = rd.ReadLine(); }
+                            Usuario = Encoding.UTF8.GetString(Convert.FromBase64String(resto));
+                            wr.WriteLine("334 UGFzc3dvcmQ6");
+                            ClaveRecibida = Encoding.UTF8.GetString(Convert.FromBase64String(rd.ReadLine()));
+                            autenticado = ClaveRecibida == Clave;
+                            wr.WriteLine(autenticado ? "235 2.7.0 Accepted" : "535 5.7.8 Username and Password not accepted");
+                        }
+                        // Como Gmail: sin autenticar no acepta remitente. (SmtpClient,
+                        // tras un 535, NO lanza: sigue sin autenticar y el error real
+                        // llega aqui como 530.)
+                        else if (u.StartsWith("MAIL FROM")) wr.WriteLine(autenticado ? "250 OK" : "530 5.7.0 Authentication Required");
+                        else if (u.StartsWith("RCPT TO"))
+                        {
+                            Rcpt.Add(linea);
+                            wr.WriteLine(RechazarRcpt != null && linea.Contains(RechazarRcpt) ? "550 5.1.1 No such user" : "250 OK");
+                        }
+                        else if (u == "DATA")
+                        {
+                            wr.WriteLine("354 Go");
+                            var sb = new StringBuilder();
+                            string d;
+                            while ((d = rd.ReadLine()) != null && d != ".") sb.Append(d).Append("\r\n");
+                            Datos = sb.ToString();
+                            wr.WriteLine("250 2.0.0 queued");
+                        }
+                        else if (u == "QUIT") { wr.WriteLine("221 bye"); break; }
+                        else wr.WriteLine("250 OK");
+                    }
+                }
+            }
+            catch (Exception) { }
+        }
+
+        public void Esperar() { _hilo.Join(5000); }
+        public void Dispose() { try { _l.Stop(); } catch (Exception) { } }
+    }
+
+    static OpcionesRca OpcionesLocal(int puerto)
+    {
+        var op = OpcionesSmtp();
+        op.SmtpServidor = "127.0.0.1"; op.SmtpPuerto = puerto; op.SmtpSsl = false;
+        return op;
+    }
+
+    static void SmtpReal()
+    {
+        var a = ListoSmtp();
+        using (var srv = new ServidorSmtpLocal("abcdefghijklmnop"))
+        {
+            var s = new ServicioRca(OpcionesLocal(srv.Puerto), a, new HttpFalso(), new SmtpRcaReal(), new ProtectorFalso(), () => Ahora);
+            ServicioRca.ReiniciarEstado();
+            var r = Enviar(s, titulo: "Caída WMS");
+            srv.Esperar();
+            var datos = srv.Datos ?? "";
+            Check("L1 SmtpClient real: Enviado; usuario = RcaRemitente, clave sin espacios", "True|Enviado|" + GMAIL + "|abcdefghijklmnop",
+                  r.Ok + "|" + r.Codigo + "|" + srv.Usuario + "|" + srv.ClaveRecibida);
+            Check("L2 Para y CC llegan como RCPT", "2|True", srv.Rcpt.Count + "|" + srv.Rcpt.All(x => x.Contains(REM)));
+            Check("L3 cabeceras: From, Cc, asunto UTF-8 codificado", "True|True|True",
+                  datos.Contains("From: " + GMAIL) + "|" + datos.Contains("Cc: " + REM) + "|" + (datos.Contains("Subject: =?utf-8?") || datos.Contains("Subject: =?UTF-8?")));
+            Check("L4 adjunto Prueba_RCA.pdf como application/pdf en base64", "True|True|True",
+                  datos.Contains("Prueba_RCA.pdf") + "|" + datos.Contains("application/pdf") + "|" + datos.Contains(Convert.ToBase64String(PDF).Substring(0, 20)));
+        }
+
+        using (var srv = new ServidorSmtpLocal("otra-clave"))
+        {
+            var s = new ServicioRca(OpcionesLocal(srv.Puerto), ListoSmtp(), new HttpFalso(), new SmtpRcaReal(), new ProtectorFalso(), () => Ahora);
+            ServicioRca.ReiniciarEstado();
+            var r = Enviar(s);
+            srv.Esperar();
+            Check("L5 clave rechazada (535 y luego 530 en MAIL FROM, como Gmail) -> SmtpAutenticacion, sin DATA", "False|SmtpAutenticacion|True", r.Ok + "|" + r.Codigo + "|" + (srv.Datos == null));
+        }
+
+        using (var srv = new ServidorSmtpLocal("abcdefghijklmnop", rechazarRcpt: REM))
+        {
+            var s = new ServicioRca(OpcionesLocal(srv.Puerto), ListoSmtp(), new HttpFalso(), new SmtpRcaReal(), new ProtectorFalso(), () => Ahora);
+            ServicioRca.ReiniciarEstado();
+            var r = Enviar(s);
+            srv.Esperar();
+            Check("L6 550 real en RCPT -> SmtpDestinatario, sin DATA", "False|SmtpDestinatario|True", r.Ok + "|" + r.Codigo + "|" + (srv.Datos == null));
+        }
+
+        // Puerto cerrado: se abre y se cierra un listener para obtener uno libre.
+        var tmp = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0); tmp.Start();
+        var libre = ((IPEndPoint)tmp.LocalEndpoint).Port; tmp.Stop();
+        var sc = new ServicioRca(OpcionesLocal(libre), ListoSmtp(), new HttpFalso(), new SmtpRcaReal(), new ProtectorFalso(), () => Ahora);
+        ServicioRca.ReiniciarEstado();
+        var rc = Enviar(sc);
+        Check("L7 nadie escucha (conexion rechazada real) -> SinConexion", "False|SinConexion|True", rc.Ok + "|" + rc.Codigo + "|" + rc.Mensaje.Contains("No se envio"));
+    }
+
     // ---- H ------------------------------------------------------------------
     sealed class RolesFalsos : IFuenteRolesAdmin
     {
@@ -645,6 +950,10 @@ static class RcaCorreoPruebaSmoke
         Check("H4 MOD no puede guardar destinatarios: 403", "403|True", estado + "|" + cuerpo.Contains("RolInsuficiente"));
         cuerpo = Correr("SORIANA\\mod1", "POST", "accion=enviar", "same-origin", out estado);
         Check("H5 MOD no puede enviar: 403", "403|True", estado + "|" + cuerpo.Contains("RolInsuficiente"));
+        cuerpo = Correr("SORIANA\\mod1", "POST", "accion=smtp-clave", "same-origin", out estado);
+        Check("H5b MOD no puede guardar la contrasena SMTP: 403", "403|True", estado + "|" + cuerpo.Contains("RolInsuficiente"));
+        cuerpo = Correr("SORIANA\\adm1", "POST", "accion=smtp-clave", "cross-site", out estado);
+        Check("H5c ADM guardar contrasena desde otro sitio: 403 OrigenNoPermitido", "403|True", estado + "|" + cuerpo.Contains("OrigenNoPermitido"));
         cuerpo = Correr("SORIANA\\adm1", "GET", null, null, out estado);
         Check("H6 ADM GET: 200, sin configurar en esta maquina, sin tokens", "200|True|True|True",
               estado + "|" + cuerpo.Contains("\"configurado\":false") + "|" + cuerpo.Contains("\"extensiones\"") + "|" + !cuerpo.Contains("refresh"));

@@ -14,10 +14,11 @@
 //                                     -> { ok, codigo, mensaje }
 //   POST accion=conectar             -> { ok, conexionPendiente: { codigo, url, expira, intervalo } }
 //   POST accion=conectar-estado      -> { ok, estado: pendiente | conectada | sin-conexion }
-//   POST accion=desconectar          -> { ok }
+//   POST accion=desconectar          -> { ok }   (en modo SMTP borra la contrasena)
+//   POST accion=smtp-clave  clave    -> { ok }   (solo RcaModo=smtp; se guarda cifrada)
 //
 // Nunca toca SQL Server, nunca crea iniciativas ni solicitudes y nunca
-// devuelve tokens. El envio usa SIEMPRE los destinatarios guardados.
+// devuelve tokens ni contrasenas. El envio usa SIEMPRE los destinatarios guardados.
 
 using System;
 using System.Collections.Generic;
@@ -60,6 +61,11 @@ public class AdminRcaCorreo : IHttpHandler
                         return e;
                     case "desconectar":
                         servicio.Desconectar();
+                        return new Dictionary<string, object> { { "ok", true } };
+                    case "smtp-clave":
+                        // Sin la validacion de ASP.NET: una contrasena puede
+                        // llevar "<" y nunca se pinta en ninguna pagina.
+                        servicio.GuardarClaveSmtp(req.Unvalidated.Form["clave"], usuario);
                         return new Dictionary<string, object> { { "ok", true } };
                 }
             }

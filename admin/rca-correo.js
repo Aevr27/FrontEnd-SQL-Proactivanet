@@ -4,8 +4,9 @@
    Prueba AISLADA del envio de un RCA por correo. Todo lo que cuenta pasa en
    el servidor (handlers/admin_rca_correo.ashx, App_Code/RcaCorreoPrueba.cs):
      - solo ADM (aqui solo se muestra el 403 si llega);
-     - la cuenta remitente y su autorizacion (OAuth con Microsoft) viven en
-       el servidor; la pagina nunca ve contrasenas ni tokens;
+     - la cuenta remitente y su autorizacion (OAuth con Microsoft, o en modo
+       SMTP una contrasena de aplicacion) viven en el servidor; la pagina
+       nunca ve tokens y la contrasena SMTP solo viaja al guardarla;
      - el envio usa SIEMPRE los destinatarios GUARDADOS, no lo que este
        escrito en los campos;
      - la validacion del documento que cuenta es la del servidor (extension,
@@ -141,27 +142,64 @@
 
   /* ---- Remitente ---------------------------------------------------------- */
 
+  function esSmtp() { return !!cfg && cfg.modo === 'smtp'; }
+
   function pintarRemitente() {
     var t = $('rcaRemitente');
+    var smtp = esSmtp();
+    var conClave = smtp && cfg.requiereClave;
+    $('rcaRemNota').textContent = smtp
+      ? (conClave
+        ? 'Se configura en el servidor (Web.config). Envío por SMTP: la contraseña de aplicación se guarda cifrada en el servidor y nunca se vuelve a mostrar.'
+        : 'Se configura en el servidor (Web.config). Envío por SMTP sin contraseña (relevo autorizado por el servidor de correo).')
+      : 'Se configura en el servidor (Web.config). Se autoriza una vez con Microsoft; la contraseña nunca pasa por el Dashboard.';
     $('rcaRemCuenta').textContent = cfg.remitente || 'sin configurar';
+    $('rcaRemServidorTit').hidden = $('rcaRemServidor').hidden = !smtp;
+    $('rcaRemServidor').textContent = cfg.smtpServidor || '—';
+    $('rcaRemConectadaTit').textContent = conClave ? 'Contraseña' : 'Conectada';
     $('rcaRemConectada').textContent = cfg.conectada
-      ? 'Sí' + (cfg.conectadoEl ? ' · ' + fechaTexto(cfg.conectadoEl) : '') + (cfg.conectadoPor ? ' · ' + cfg.conectadoPor : '')
-      : 'No';
+      ? (conClave ? 'Guardada' : 'Sí') + (cfg.conectadoEl ? ' · ' + fechaTexto(cfg.conectadoEl) : '') + (cfg.conectadoPor ? ' · ' + cfg.conectadoPor : '')
+      : (conClave ? 'Sin guardar' : 'No');
     var estado, listo = false;
     if (!cfg.configurado) { estado = '🟡 ' + (cfg.problemaConfig || 'Falta configurar el remitente en Web.config.'); }
     else if (conectando) { estado = 'Esperando el inicio de sesión en Microsoft…'; }
     else if (cfg.conectada) { estado = '🟢 Lista para enviar'; listo = true; }
-    else { estado = '🟡 ' + (cfg.problemaCuenta || 'Conecta la cuenta remitente.'); }
+    else { estado = '🟡 ' + (cfg.problemaCuenta || (conClave ? 'Guarda la contraseña de aplicación.' : 'Conecta la cuenta remitente.')); }
     $('rcaRemEstado').textContent = estado;
     t.dataset.estado = conectando ? 'ejecutando' : (listo ? 'listo' : 'pendiente');
 
-    $('rcaConectar').hidden = !cfg.configurado;
+    $('rcaConectar').hidden = !cfg.configurado || smtp;
     $('rcaConectar').disabled = conectando || enviando;
     $('rcaConectar').textContent = cfg.conectada ? 'Volver a conectar' : 'Conectar cuenta remitente';
-    $('rcaDesconectar').hidden = !cfg.conectada && !cfg.problemaCuenta;
+    $('rcaClaveBloque').hidden = !cfg.configurado || !conClave;
+    $('rcaGuardarClave').hidden = !cfg.configurado || !conClave;
+    $('rcaGuardarClave').disabled = enviando;
+    $('rcaGuardarClave').textContent = cfg.conectada ? 'Cambiar contraseña' : 'Guardar contraseña';
+    $('rcaClave').disabled = enviando;
+    $('rcaDesconectar').hidden = (smtp && !conClave) || (!cfg.conectada && !cfg.problemaCuenta);
     $('rcaDesconectar').disabled = conectando || enviando;
-    $('rcaDesconectar').textContent = confirmarDesconectar ? '¿Desconectar? Pulsa de nuevo' : 'Desconectar';
+    $('rcaDesconectar').textContent = confirmarDesconectar
+      ? (smtp ? '¿Borrar? Pulsa de nuevo' : '¿Desconectar? Pulsa de nuevo')
+      : (smtp ? 'Borrar contraseña' : 'Desconectar');
     $('rcaCodigoCuenta').textContent = cfg.remitente || '';
+  }
+
+  function guardarClave() {
+    if (enviando || !cfg) { return; }
+    confirmarDesconectar = false;
+    var clave = $('rcaClave').value;
+    if (!clave.trim()) { msg('rcaRemMsg', 'Escribe la contraseña.', 'fallo'); return; }
+    var cuerpo = new URLSearchParams();
+    cuerpo.append('clave', clave);
+    $('rcaGuardarClave').disabled = true;
+    pedir(URL_RCA + '?accion=smtp-clave', { method: 'POST', body: cuerpo }).then(function (r) {
+      if (!r.datos.ok) { msg('rcaRemMsg', mensajeDe(r.datos), 'fallo'); return; }
+      $('rcaClave').value = '';
+      msg('rcaRemMsg', 'Contraseña guardada (cifrada en el servidor). Se comprueba al enviar la prueba.', 'ok');
+      return cargar();
+    }).catch(function (e) {
+      msg('rcaRemMsg', 'No se pudo contactar con el servidor: ' + (e && e.message ? e.message : e), 'fallo');
+    }).then(function () { $('rcaGuardarClave').disabled = enviando; });
   }
 
   function mostrarCodigo(p) {
@@ -219,7 +257,7 @@
     confirmarDesconectar = false;
     $('rcaDesconectar').disabled = true;
     pedir(URL_RCA + '?accion=desconectar', { method: 'POST' }).then(function (r) {
-      msg('rcaRemMsg', r.datos.ok ? 'Cuenta remitente desconectada.' : mensajeDe(r.datos), r.datos.ok ? 'ok' : 'fallo');
+      msg('rcaRemMsg', r.datos.ok ? (esSmtp() ? 'Contraseña borrada.' : 'Cuenta remitente desconectada.') : mensajeDe(r.datos), r.datos.ok ? 'ok' : 'fallo');
       return cargar();
     });
   }
@@ -281,7 +319,7 @@
 
   function motivoNoListo() {
     if (!cfg.configurado) { return 'Falta configurar el remitente en el servidor.'; }
-    if (!cfg.conectada) { return 'Conecta la cuenta remitente.'; }
+    if (!cfg.conectada) { return esSmtp() ? 'Guarda la contraseña de la cuenta remitente.' : 'Conecta la cuenta remitente.'; }
     if (!(cfg.destinatarios && cfg.destinatarios.para)) { return 'Guarda el Correo RCA.'; }
     if (destinatariosSinGuardar()) { return 'Hay cambios sin guardar en los destinatarios.'; }
     if (!$('rcaTitulo').value.trim()) { return 'Escribe el título de prueba.'; }
@@ -332,7 +370,7 @@
 
     pedir(URL_RCA + '?accion=enviar', { method: 'POST', body: datos }).then(function (r) {
       var d = r.datos;
-      if (d.ok) { resultado(true, 'Correcto — correo aceptado por Microsoft', d.mensaje); }
+      if (d.ok) { resultado(true, esSmtp() ? 'Correcto — correo aceptado por el servidor de correo' : 'Correcto — correo aceptado por Microsoft', d.mensaje); }
       else { resultado(false, 'Fallo — ' + (d.codigo || ('HTTP ' + r.status)), mensajeDe(d)); }
     }).catch(function (e) {
       resultado(false, 'Fallo — no se pudo contactar con el servidor',
@@ -349,6 +387,10 @@
     if (!$('rca')) { return; }
     $('rcaConectar').addEventListener('click', conectar);
     $('rcaDesconectar').addEventListener('click', desconectar);
+    $('rcaGuardarClave').addEventListener('click', guardarClave);
+    $('rcaClave').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); guardarClave(); }
+    });
     $('rcaFormDest').addEventListener('submit', guardar);
     $('rcaFormDest').addEventListener('input', function () {
       if (!cfg) { return; }

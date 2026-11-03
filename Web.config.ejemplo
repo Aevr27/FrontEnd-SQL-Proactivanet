@@ -72,12 +72,32 @@
                              sirve. La cuenta del App Pool necesita escribir en ella.
            RcaMaxBytes       (opcional) tope del documento en bytes; maximo
                              3145728 (3 MB, limite de Graph para un adjunto en linea).
+           RcaModo           (opcional) graph (por omision) o smtp.
+         Modo smtp (sin Microsoft Entra; p. ej. Gmail o un relevo interno):
+           RcaSmtpServidor   p. ej. smtp.gmail.com.
+           RcaSmtpPuerto     (opcional) 587 por omision. El 465 (TLS implicito)
+                             NO lo soporta .NET.
+           RcaSmtpSsl        (opcional) true por omision (STARTTLS).
+           RcaSmtpAutenticar (opcional) true por omision: usuario = RcaRemitente
+                             y la contrasena la guarda un ADM en la pagina
+                             (cifrada con DPAPI en RcaDirDatos\remitente.smtp).
+                             En Gmail es una "contrasena de aplicacion"
+                             (requiere verificacion en dos pasos). false para un
+                             relevo que autoriza por IP.
+           En modo smtp RcaOAuthClientId y RcaOAuthTenant no se usan.
          Vacio o ausente: la seccion se muestra pero no deja conectar ni enviar.
          Los destinatarios (Correo RCA / CC RCA) NO van aqui: los guarda un ADM
          desde la pagina. -->
     <add key="RcaRemitente"     value="" />
     <add key="RcaOAuthClientId" value="" />
     <add key="RcaOAuthTenant"   value="consumers" />
+    <!-- Ejemplo modo smtp con Gmail:
+    <add key="RcaModo"          value="smtp" />
+    <add key="RcaRemitente"     value="cuenta.rca@gmail.com" />
+    <add key="RcaSmtpServidor"  value="smtp.gmail.com" />
+    <add key="RcaSmtpPuerto"    value="587" />
+    -->
+
 
     <!-- Tablero de Experiencia (experiencia/experiencia.html). Carpeta de
          SharePoint con el detalle que hay detras del tablero; sale en el
