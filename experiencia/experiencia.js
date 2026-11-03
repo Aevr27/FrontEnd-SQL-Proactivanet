@@ -284,6 +284,59 @@ function aplicarTipoRegistro(tipo){
   });
 }
 
+/* PRONOSTICO MENSUAL [KPI-1] (solo "Ver por" = Mes Calendario)
+   -------------------------------------------------------------------------
+   Pronostico = real acumulado / dias transcurridos del mes * dias del mes.
+
+     - dias del mes: los reales del mes y año del periodo (P.mes_actual de
+       P.anio): 28 o 29 en febrero, 30 o 31 en los demas. Ya no un 30 fijo
+       como el pronostico retirado en d9d19a6.
+     - dias transcurridos: hasta la fecha de corte de los datos, el dia de
+       P.fecha_actualizacion (MAX(FechaUltimaCargaDW) de dbo.Tickets, la
+       misma "Ultima actualizacion" de la cabecera; sin corte el servidor ya
+       pone ahi el dia de hoy). Mes del corte = el del periodo: el dia del
+       corte. Mes ya concluido (el corte cae despues): el mes completo, y
+       el pronostico es el real. Corte antes del mes o ilegible: sin
+       pronostico (null), nunca una division entre cero.
+     - redondeo: Math.round, el mismo del pronostico anterior; se pinta con
+       FMT como cualquier cifra del tablero.
+
+   Cada tarjeta pronostica su propia metrica real (Volumen Actual el volumen,
+   Volumen - Automatizado la resta real). Sin document ni P para que
+   tools/tests/AutomatizadosExperienciaSmoke.js las corra tal cual. */
+/* === PRONOSTICO MES (inicio) === */
+function diasDelMes(anio, mes) {
+  return new Date(Date.UTC(Number(anio), Number(mes), 0)).getUTCDate();
+}
+// 'dd/MM/yyyy' (fecha_actualizacion) o 'aaaa-mm-dd[...]' -> {anio, mes, dia}.
+function fechaDeCorte(texto) {
+  var s = String(texto || ''), t;
+  if ((t = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s))) return { anio: +t[3], mes: +t[2], dia: +t[1] };
+  if ((t = /^(\d{4})-(\d{2})-(\d{2})/.exec(s))) return { anio: +t[1], mes: +t[2], dia: +t[3] };
+  return null;
+}
+function diasTranscurridosMes(anio, mes, corte) {
+  var y = Number(anio), m = Number(mes), c = fechaDeCorte(corte);
+  if (!(y > 0) || !(m >= 1 && m <= 12) || !c || !(c.dia >= 1)) return null;
+  var total = diasDelMes(y, m);
+  var periodo = y * 12 + m, delCorte = c.anio * 12 + c.mes;
+  if (delCorte > periodo) return total;                 // mes concluido
+  if (delCorte < periodo) return null;                  // el corte aun no llega al mes
+  return Math.min(c.dia, total);
+}
+// null si no se puede pronosticar (sin real o sin dias transcurridos).
+function pronosticoMensual(real, anio, mes, corte) {
+  var dias = diasTranscurridosMes(anio, mes, corte);
+  if (real == null || isNaN(Number(real)) || !dias) return null;
+  return Math.round(Number(real) / dias * diasDelMes(anio, mes));
+}
+/* === PRONOSTICO MES (fin) === */
+// El pronostico del periodo que se ve: solo en Mes; en SLOT, null.
+function pronosticoVista(real){
+  return modoTiempo==='mes' ? pronosticoMensual(real, P.anio, P.mes_actual, P.fecha_actualizacion) : null;
+}
+const TAG_PRON=' <span class="tag-pron">Pronóstico</span>';
+
 /* TICKETS AUTOMATIZADOS DE SLA
    -------------------------------------------------------------------------
    Es la tarjeta "Automatizado" de SLA: TicketsAutomatizados de
@@ -546,14 +599,8 @@ function renderKPIs(cats, det){
       vistos.add(i.folio);
   }));
   const nVen=vistos.size;
-  // [KPI-1]: volumen real del periodo, sin proyectar el mes en curso.
-  const etiquetaVol = modoTiempo==='mes' ? 'Volumen Actual (Mes Actual)' : 'Volumen Actual (0-30d)';
   const cards=[
-    {l:etiquetaVol,v:FMT(vol),f:(function(){
-        const totalGlobal=P.categorias.filter(c=>c.nivel==='C1').reduce((s,c)=>s+volActualDe(c),0);
-        const pct=totalGlobal>0?vol/totalGlobal:0;
-        return `${cats.length} categorías · ${PCT(pct)} del total`;
-      })(),s:null},
+    tarjetaVolumenActual(vol, cats),
     tarjetaSinAutomatizar(vol),
     {l:'% Tickets con Iniciativa',v:PCT(pctIni),f:FMT(ini)+' con iniciativa',s:SEM(pctIni)},
     {l:'% Tickets en Tiempo',v:PCT(pctTiempo),f:FMT(ret)+' en riesgo',s:SEM(pctTiempo)},
@@ -591,11 +638,28 @@ function mostrarPanel(id){
   }
 }
 
+// ---- Volumen Actual [KPI-1] ----
+// SLOT: el volumen real y su parte del total, como siempre. Mes: el
+// pronostico mensual del volumen real (ver PRONOSTICO MENSUAL) y, debajo, el
+// real acumulado. Sin pronostico posible, el real con el mismo pie.
+function tarjetaVolumenActual(vol, cats){
+  if(modoTiempo==='mes'){
+    const pron=pronosticoVista(vol);
+    return {l:'Volumen Actual (Mes Actual)'+(pron!=null?TAG_PRON:''), v:FMT(pron!=null?pron:vol),
+      f:`Volumen Real: ${FMT(vol)}`, s:null};
+  }
+  const totalGlobal=P.categorias.filter(c=>c.nivel==='C1').reduce((s,c)=>s+volActualDe(c),0);
+  const pct=totalGlobal>0?vol/totalGlobal:0;
+  return {l:'Volumen Actual (0-30d)', v:FMT(vol), f:`${cats.length} categorías · ${PCT(pct)} del total`, s:null};
+}
+
 // ---- Volumen - Automatizado ----
 // Volumen Actual - Automatizados SLA del MISMO periodo: SLOT 0 (los rangos de
 // pedirAutomatizados son los de vw_TicketsSlotsBase) o el mes en curso.
 // `vol` es el mismo real que pinta "Volumen Actual" y los automatizados son
-// los reales del periodo: sin pronostico en ninguno de los dos.
+// los reales del periodo. En SLOT la cifra es esa resta. En Mes la cifra es
+// el pronostico mensual de la resta REAL (no la resta de dos pronosticos) y
+// el pie da la resta real: "Volumen Real - Automatizados SLA = diferencia".
 //
 // Es una resta APROXIMADA, decidida asi y dicha en el title del rotulo
 // (AYUDA_SIN_AUTOMATIZAR: el title nativo de las tarjetas de Admin y de los
@@ -625,8 +689,13 @@ function tarjetaSinAutomatizar(vol){
   const auto=a.valores[String(modoTiempo==='mes' ? P.mes_actual : 0)];
   if(auto==null) return tarjeta('N/D', 'SLA sin dato en el periodo');
   const dif=vol-auto;
-  const f=(dif<0 ? 'Negativo: los valores pueden no ser directamente comparables · ' : '')
-    +`${FMT(vol)} − ${FMT(auto)} Automatizados SLA`;
+  const aviso=dif<0 ? 'Negativo: los valores pueden no ser directamente comparables · ' : '';
+  if(modoTiempo==='mes'){
+    const pron=pronosticoVista(dif);
+    const pie=aviso+`${FMT(vol)} - ${FMT(auto)} = ${FMT(dif)}`;
+    return pron!=null ? {l:l+TAG_PRON, v:FMT(pron), f:pie, s:null, t:AYUDA_SIN_AUTOMATIZAR} : tarjeta(FMT(dif), pie);
+  }
+  const f=aviso+`${FMT(vol)} − ${FMT(auto)} Automatizados SLA`;
   return tarjeta(FMT(dif), f);
 }
 

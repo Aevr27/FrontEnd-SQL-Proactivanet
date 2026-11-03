@@ -45,7 +45,7 @@ function entre(desde, hasta) {
 }
 
 // ---- R) la regla ----
-var BLOQUE_KPI = entre('  const vistos=new Set();\n  detReal.forEach', '  const etiquetaVol');
+var BLOQUE_KPI = entre('  const vistos=new Set();\n  detReal.forEach', '  const cards=[');
 Check('R0 renderKPIs cuenta Retrasadas con el bloque que replica esta prueba', true, /const nVen=vistos\.size;/.test(BLOQUE_KPI));
 var regla = new Function('AGR', 'ESTADOS_ACTIVOS',
   recortar('filasBaseVen') +
