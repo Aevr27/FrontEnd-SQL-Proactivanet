@@ -659,7 +659,7 @@ function tarjetaVolumenActual(vol, cats){
 // `vol` es el mismo real que pinta "Volumen Actual" y los automatizados son
 // los reales del periodo. En SLOT la cifra es esa resta. En Mes la cifra es
 // el pronostico mensual de la resta REAL (no la resta de dos pronosticos) y
-// el pie da la resta real: "Volumen Real - Automatizados SLA = diferencia".
+// el pie da "Volumen Real: diferencia" y la resta real "Volumen - SLA = dif".
 //
 // Es una resta APROXIMADA, decidida asi y dicha en el title del rotulo
 // (AYUDA_SIN_AUTOMATIZAR: el title nativo de las tarjetas de Admin y de los
@@ -692,7 +692,8 @@ function tarjetaSinAutomatizar(vol){
   const aviso=dif<0 ? 'Negativo: los valores pueden no ser directamente comparables · ' : '';
   if(modoTiempo==='mes'){
     const pron=pronosticoVista(dif);
-    const pie=aviso+`${FMT(vol)} - ${FMT(auto)} = ${FMT(dif)}`;
+    // Como Volumen Actual: el real de la tarjeta primero, luego su desglose.
+    const pie=`Volumen Real: ${FMT(dif)} · `+aviso+`${FMT(vol)} - ${FMT(auto)} = ${FMT(dif)}`;
     return pron!=null ? {l:l+TAG_PRON, v:FMT(pron), f:pie, s:null, t:AYUDA_SIN_AUTOMATIZAR} : tarjeta(FMT(dif), pie);
   }
   const f=aviso+`${FMT(vol)} − ${FMT(auto)} Automatizados SLA`;
