@@ -693,7 +693,7 @@ function tarjetaSinAutomatizar(vol){
   if(modoTiempo==='mes'){
     const pron=pronosticoVista(dif);
     // Como Volumen Actual: el real de la tarjeta primero, luego su desglose.
-    const pie=`Volumen Real: ${FMT(dif)} · `+aviso+`${FMT(vol)} - ${FMT(auto)} = ${FMT(dif)}`;
+    const pie=`Volumen Real: `+aviso+`${FMT(vol)} - ${FMT(auto)} = ${FMT(dif)}`;
     return pron!=null ? {l:l+TAG_PRON, v:FMT(pron), f:pie, s:null, t:AYUDA_SIN_AUTOMATIZAR} : tarjeta(FMT(dif), pie);
   }
   const f=aviso+`${FMT(vol)} − ${FMT(auto)} Automatizados SLA`;
