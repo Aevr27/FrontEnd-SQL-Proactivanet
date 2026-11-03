@@ -246,6 +246,27 @@ Pruebas: `tools/tests/AccesoAdminHttpSmoke.cs` (bloques L y W; compilar en Relea
 
 **No copies `requirements.txt` ni `config.json` al sitio IIS.** Esos archivos pertenecen al ETL. La conexión del tablero se configura mediante `Web.config`.
 
+### Correo RCA de prueba (`admin/admin.html`)
+
+Prueba **aislada** del envío de un RCA por correo: un *Título de prueba* y **un** documento salen con asunto `PRUEBA RCA - <Título de prueba>` y adjunto `Prueba_RCA.<extensión original>` hacia el **Correo RCA** (Para) y el **CC RCA** guardados. No crea iniciativas ni solicitudes, no consume consecutivos, no toca SQL Server y no guarda el documento: se lee a memoria, se valida y se descarta. Código: `handlers/admin_rca_correo.ashx`, `App_Code/RcaCorreoPrueba.cs`, `admin/rca-correo.js`.
+
+- **Acceso:** solo ADM (`AccesoAdmin.ExigirAdm`, también contra POST desde otro sitio). MOD recibe 403 `RolInsuficiente`; VIEWER y anónimo, 403.
+- **Remitente:** Microsoft Graph (`POST /me/sendMail`, permiso delegado `Mail.Send`) con OAuth 2.0. Outlook.com no acepta usuario y contraseña (SMTP básico) para aplicaciones, y `SmtpClient` de .NET no implementa XOAUTH2. En `Web.config`: `RcaRemitente`, `RcaOAuthClientId`, `RcaOAuthTenant` (ver `Web.config.ejemplo`). Ni contraseñas ni tokens van en `Web.config`, en el repositorio ni al navegador.
+- **Conexión de la cuenta (una vez):** un ADM pulsa *Conectar cuenta remitente*; la página muestra un código, se abre `microsoft.com/link`, se inicia sesión **con la cuenta remitente** y se escribe el código (flujo de código de dispositivo). El servidor comprueba que la cuenta conectada sea `RcaRemitente` y guarda el refresh token **cifrado con DPAPI de Windows en ámbito de máquina** en `RcaDirDatos\remitente.token` (por omisión `App_Data\rca`, que IIS no sirve). La llave la custodia Windows: no está en `Web.config` ni en el repositorio, no depende del perfil del App Pool y sobrevive a reciclados y reinicios. El archivo solo se descifra en ese servidor; protégelo con los permisos NTFS de la carpeta. No se usa `MachineKey`: sin `<machineKey>` explícito su llave autogenerada puede cambiar al reciclar. Microsoft rota el token en cada uso y el servidor guarda el nuevo; si se revoca, vence (unos 90 días sin uso) o se cambia de servidor, la página pide volver a conectar.
+- **Destinatarios:** `RcaDirDatos\destinatarios.json` (una dirección en cada campo; CC opcional; quién y cuándo los guardó). El envío usa siempre los guardados y **los vuelve a validar** con la misma regla antes de enviar: si el archivo se editó a mano o se dañó, no sale nada y la página dice qué campo corregir.
+- **Documento:** uno; `pdf`, `docx`, `xlsx`, `pptx`, `doc`, `xls`, `ppt`; máximo 3 MB (límite de Graph para un adjunto en línea; `RcaMaxBytes` solo lo baja). Se valida extensión, tipo MIME y la firma del contenido.
+- **Duplicados:** el botón se deshabilita mientras envía y el servidor admite un solo envío a la vez (`EnvioEnCurso`). Si Microsoft no responde a tiempo, el resultado es *desconocido* y la página pide revisar el buzón antes de reintentar.
+- **Requisitos del servidor:** salida HTTPS a `login.microsoftonline.com` y `graph.microsoft.com` (o el proxy configurado en `system.net/defaultProxy`) y permiso de **escritura** de la cuenta del App Pool en `RcaDirDatos`.
+
+Registro de la aplicación (una vez, en <https://entra.microsoft.com> con cualquier cuenta que pueda registrar aplicaciones; con una cuenta personal se crea un directorio gratuito):
+
+1. *App registrations › New registration*. Tipos de cuenta: **Personal Microsoft accounts only** (o *Accounts in any organizational directory and personal Microsoft accounts*). Sin URI de redirección.
+2. *Authentication › Advanced settings › Allow public client flows* = **Yes** (necesario para el código de dispositivo).
+3. *API permissions*: Microsoft Graph, **Delegated**: `Mail.Send`, `User.Read`, `offline_access`. No se crea ningún *client secret*.
+4. Copiar el *Application (client) ID* a `RcaOAuthClientId`.
+
+Pruebas automáticas (sin red ni IIS; no prueban la entrega real): `tools/tests/RcaCorreoPruebaSmoke.cs` (configuración, adjunto, asunto, mensaje, fallos de Microsoft, reintentos, conexión y permisos del handler) , `tools/tests/RcaCorreoSmoke.js` (reglas de la página) y `tools/tests/RcaCorreoHeadlessSmoke.js` (la sección en Chrome con un servidor falso). `RcaCorreoPruebaSmoke` también cifra con DPAPI de verdad y descifra desde otro proceso, como tras un reciclado. La entrega real se comprueba a mano: conectar la cuenta, guardar destinatarios, enviar y revisar Bandeja de entrada y Enviados del buzón.
+
 ### Application Pool
 
 El Application Pool debe utilizar:

@@ -34,3 +34,7 @@ Envio_correos/
 # se versionan ni se sirven por HTTP).
 reenviacorreo/
 .
+
+# Correo RCA de prueba: destinatarios y token cifrado de la cuenta remitente
+# (RcaDirDatos, por omision App_Data/rca). Datos del servidor, nunca del repo.
+App_Data/

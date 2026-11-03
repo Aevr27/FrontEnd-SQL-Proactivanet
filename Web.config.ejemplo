@@ -57,6 +57,28 @@
     <add key="AdminScriptsDir"          value="C:\RUTA\A\Envio_correos" />
     <add key="AdminServiciosPermitidos" value="WMS" />
 
+    <!-- Correo RCA de PRUEBA (admin/admin.html, seccion "Correo RCA";
+         handlers/admin_rca_correo.ashx, App_Code/RcaCorreoPrueba.cs). Solo ADM.
+         Envia con Microsoft Graph y OAuth 2.0: Outlook.com no acepta usuario
+         y contrasena (SMTP basico) para aplicaciones. Aqui NO va ninguna
+         contrasena ni token:
+           RcaRemitente      la cuenta que envia (la que se conecta en la pagina).
+           RcaOAuthClientId  "Application (client) ID" de la aplicacion
+                             registrada en Microsoft Entra (cliente publico, sin
+                             secreto; ver DASHBOARD.md, "Correo RCA").
+           RcaOAuthTenant    consumers para cuentas Outlook.com / Hotmail.
+           RcaDirDatos       (opcional) carpeta de destinatarios y del token
+                             cifrado; por omision ~/App_Data/rca, que IIS no
+                             sirve. La cuenta del App Pool necesita escribir en ella.
+           RcaMaxBytes       (opcional) tope del documento en bytes; maximo
+                             3145728 (3 MB, limite de Graph para un adjunto en linea).
+         Vacio o ausente: la seccion se muestra pero no deja conectar ni enviar.
+         Los destinatarios (Correo RCA / CC RCA) NO van aqui: los guarda un ADM
+         desde la pagina. -->
+    <add key="RcaRemitente"     value="" />
+    <add key="RcaOAuthClientId" value="" />
+    <add key="RcaOAuthTenant"   value="consumers" />
+
     <!-- Tablero de Experiencia (experiencia/experiencia.html). Carpeta de
          SharePoint con el detalle que hay detras del tablero; sale en el
          boton "Ver detalle". La URL lleva token, por eso vive aqui y no en

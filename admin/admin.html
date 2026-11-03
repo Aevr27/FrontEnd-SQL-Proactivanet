@@ -32,6 +32,9 @@
       -RutaCorreo.
     - No se muestran las direcciones de la distribucion configurada; las
       personalizadas las escribe quien usa la pagina y no se guardan.
+    - Correo RCA (admin/rca-correo.js): prueba aislada del envio de un RCA
+      con Microsoft Graph. Solo ADM en el servidor. Ver DASHBOARD.md,
+      "Correo RCA de prueba".
 
   Reusa dashboard.css unicamente para heredar variables, tipografia y las
   clases base (.wrap, .card, .btn, .badge, .pill). dashboard.css NO se
@@ -94,6 +97,110 @@
     <div class="admin-grid correos" id="grid-correos"></div>
   </section>
 
+  <!-- ============================================ Correo RCA (prueba)
+       Prueba AISLADA del envio de un RCA por correo (admin/rca-correo.js,
+       handlers/admin_rca_correo.ashx, App_Code/RcaCorreoPrueba.cs). Solo
+       ADM, en el servidor. No crea iniciativas ni solicitudes, no consume
+       consecutivos, no toca SQL y no guarda el documento. -->
+  <section class="admin-seccion" id="rca" aria-labelledby="rcaSeccionTitulo">
+    <div class="admin-seccion-cab">
+      <h2 id="rcaSeccionTitulo">Correo RCA</h2>
+      <span class="admin-seccion-hint">Prueba de envío · solo ADM</span>
+    </div>
+
+    <p class="rca-aviso" id="rcaAviso" role="status">Cargando la configuración…</p>
+
+    <div class="rca-grid" id="rcaContenido" hidden>
+      <!-- Remitente: la cuenta y su autenticacion viven en el servidor
+           (Web.config + token cifrado); aqui solo se conecta o desconecta. -->
+      <article class="job rca-tarjeta" id="rcaRemitente" data-estado="pendiente">
+        <div class="job-cab">
+          <div class="job-icono" aria-hidden="true">🔐</div>
+          <div class="job-tit">
+            <h3>Cuenta remitente</h3>
+            <p>Se configura en el servidor (Web.config). Se autoriza una vez con Microsoft; la contraseña nunca pasa por el Dashboard.</p>
+          </div>
+        </div>
+        <div class="job-estado"><span class="job-punto" aria-hidden="true"></span><span id="rcaRemEstado">—</span></div>
+        <dl class="job-datos">
+          <dt>Remitente</dt><dd id="rcaRemCuenta">—</dd>
+          <dt>Conectada</dt><dd id="rcaRemConectada">—</dd>
+        </dl>
+        <div class="rca-codigo" id="rcaCodigo" hidden>
+          <p>Abre <a id="rcaCodigoUrl" href="#" target="_blank" rel="noopener noreferrer">microsoft.com/link</a>, inicia sesión con <b id="rcaCodigoCuenta"></b> y escribe este código:</p>
+          <div class="rca-codigo-valor" id="rcaCodigoValor" aria-live="polite"></div>
+          <p class="rca-nota" id="rcaCodigoExpira"></p>
+        </div>
+        <p class="rca-msg" id="rcaRemMsg" role="status" hidden></p>
+        <div class="rca-botones">
+          <button type="button" class="btn chico" id="rcaConectar">Conectar cuenta remitente</button>
+          <button type="button" class="btn linea chico" id="rcaDesconectar" hidden>Desconectar</button>
+        </div>
+      </article>
+
+      <!-- Destinatarios: Correo RCA (Para) y CC RCA. Guardados en el
+           servidor; el envio usa siempre los guardados. -->
+      <form class="job rca-tarjeta" id="rcaFormDest" data-estado="pendiente" novalidate>
+        <div class="job-cab">
+          <div class="job-icono" aria-hidden="true">📮</div>
+          <div class="job-tit">
+            <h3>Destinatarios</h3>
+            <p>Una dirección en cada campo. La prueba se envía a lo que esté guardado.</p>
+          </div>
+        </div>
+        <div class="rca-campo">
+          <label for="rcaPara">Correo RCA</label>
+          <input type="email" id="rcaPara" name="para" maxlength="254" autocomplete="off" required aria-describedby="rcaParaErr">
+          <small class="rca-err" id="rcaParaErr"></small>
+        </div>
+        <div class="rca-campo">
+          <label for="rcaCc">CC RCA <span class="rca-opcional">opcional</span></label>
+          <input type="email" id="rcaCc" name="cc" maxlength="254" autocomplete="off" aria-describedby="rcaCcErr">
+          <small class="rca-err" id="rcaCcErr"></small>
+        </div>
+        <p class="rca-nota" id="rcaDestModificado"></p>
+        <p class="rca-msg" id="rcaDestMsg" role="status" hidden></p>
+        <div class="rca-botones">
+          <button type="submit" class="btn chico" id="rcaGuardar">Guardar destinatarios</button>
+        </div>
+      </form>
+
+      <!-- Probar correo RCA: un titulo y UN documento. -->
+      <form class="job rca-tarjeta rca-prueba" id="rcaFormPrueba" data-estado="pendiente" novalidate>
+        <div class="job-cab">
+          <div class="job-icono" aria-hidden="true">📎</div>
+          <div class="job-tit">
+            <h3>Probar correo RCA</h3>
+            <p>Envía un correo real con un documento. No crea iniciativas ni solicitudes, y el documento no se guarda.</p>
+          </div>
+        </div>
+        <div class="rca-campo">
+          <label for="rcaTitulo">Título de prueba</label>
+          <input type="text" id="rcaTitulo" name="titulo" maxlength="150" autocomplete="off" required>
+        </div>
+        <div class="rca-campo">
+          <label for="rcaArchivo">Documento</label>
+          <input type="file" id="rcaArchivo" name="archivo" aria-describedby="rcaArchivoNota">
+          <small class="rca-nota" id="rcaArchivoNota"></small>
+        </div>
+        <dl class="job-datos" id="rcaResumen">
+          <dt>Asunto</dt><dd id="rcaResAsunto">—</dd>
+          <dt>Adjunto</dt><dd id="rcaResAdjunto">—</dd>
+          <dt>Para</dt><dd id="rcaResPara">—</dd>
+          <dt>CC</dt><dd id="rcaResCc">—</dd>
+        </dl>
+        <div class="job-estado"><span class="job-punto" aria-hidden="true"></span><span id="rcaPruebaEstado">—</span></div>
+        <div class="job-ejecucion" id="rcaResultado" role="status" aria-live="polite" hidden>
+          <div class="job-ejecucion-tit" id="rcaResultadoTit"></div>
+          <div id="rcaResultadoDet"></div>
+        </div>
+        <div class="rca-botones">
+          <button type="submit" class="btn enviar" id="rcaEnviar" disabled>Probar correo RCA</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
   <footer>
     Pagina interna sin enlace en la navegacion. Sin autenticacion todavia:
     no publicar esta ruta fuera de la red interna.
@@ -101,5 +208,6 @@
 </div>
 
 <script src="admin.js"></script>
+<script src="rca-correo.js"></script>
 </body>
 </html>

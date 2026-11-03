@@ -318,3 +318,71 @@
   border-color: rgba(217, 119, 6, .35);
   color: var(--ambr);
 }
+
+/* ---- Correo RCA (prueba de envio; admin/rca-correo.js) ----
+   Reusa la tarjeta .job (franja y punto de estado, .job-datos, .job-estado)
+   y el bloque .job-ejecucion del <style> de admin.html. Lo propio, .rca-. */
+/* display de abajo NO debe ganarle al atributo hidden. */
+#rca [hidden] { display: none !important; }
+
+.rca-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.rca-grid .rca-prueba { grid-column: 1 / -1; }
+@media (max-width: 720px) { .rca-grid { grid-template-columns: 1fr; } }
+
+.rca-aviso {
+  font-size: 12.5px; color: var(--muted);
+  padding: 10px 14px; border-radius: var(--radius-sm);
+  background: var(--bg-2); border: 1px solid var(--line-soft);
+}
+.rca-aviso.fallo { color: var(--rojo); }
+
+.rca-campo { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rca-campo label {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase;
+  letter-spacing: .6px; color: var(--ctrl-label);
+}
+.rca-campo input[type="email"],
+.rca-campo input[type="text"] {
+  font: inherit; font-size: 13px; color: var(--ctrl-ink);
+  background: var(--ctrl-bg); border: 1px solid var(--ctrl-line);
+  border-radius: var(--radius-xs); padding: 7px 9px; min-width: 0;
+}
+.rca-campo input[type="file"] { font-size: 12.5px; max-width: 100%; }
+.rca-campo input:hover:not(:disabled) { border-color: var(--ctrl-line-hover); }
+.rca-campo input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.rca-campo input:disabled { opacity: .6; }
+.rca-opcional { font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--muted-2); }
+
+.rca-err { min-height: 0; font-size: 11.5px; color: var(--rojo); }
+.rca-err:empty { display: none; }
+.rca-nota { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+.rca-nota:empty { display: none; }
+
+.rca-msg {
+  font-size: 12px; padding: 7px 9px; border-radius: var(--radius-xs);
+  background: rgba(127, 127, 127, .12);
+}
+.rca-msg.ok    { color: var(--verde); }
+.rca-msg.fallo { color: var(--rojo); }
+
+.rca-botones { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.rca-prueba .rca-botones .btn.enviar { min-width: 200px; }
+.rca-botones .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.rca-codigo {
+  font-size: 12.5px; color: var(--ink-2);
+  border: 1px dashed var(--accent-line); background: var(--accent-soft);
+  border-radius: var(--radius-xs); padding: 9px 11px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.rca-codigo a { color: var(--accent-ink); font-weight: 700; }
+.rca-codigo-valor {
+  font: 700 20px/1.2 ui-monospace, SFMono-Regular, Consolas, monospace;
+  letter-spacing: 3px; color: var(--ink); user-select: all;
+}
+.rca-tarjeta .job-datos { grid-template-columns: auto minmax(0, 1fr); }
+.rca-tarjeta .job-datos dd { overflow-wrap: anywhere; }
