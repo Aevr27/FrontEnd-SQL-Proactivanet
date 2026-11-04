@@ -1027,10 +1027,94 @@ const TableroBacklog = (function () {
     document.getElementById('cap-lideres-bl').innerHTML = descripcionFiltro(granTotal);
   }
 
+  // ---------------------------------------------- drill-down Lider -> Categoria
+  /* Las filas de backlog_categorias.ashx vienen por (Lider, Grupo, C1) con
+     Critica, Alta, Mas30, FueraSLA y Total ya contados en SQL con las mismas
+     expresiones que "Lider (Grupo)". El cross-filter de lider y grupo se
+     aplica igual (porLiderGrupo) y despues se suman los grupos de cada
+     (Lider, C1). % Fuera SLA = FueraSLA / Total, que es lo que "Lider
+     (Grupo)" divide: alli el total de SLA suma todas las filas del corte.
+     La categoria es solo texto: C1 ya es el filtro "Servicio / C1" de
+     arriba, que se pide al servidor. */
+  function renderLideresCategoria() {
+    const cont = document.getElementById('tabla-lideres-cat-bl');
+    const cap = document.getElementById('cap-lideres-cat-bl');
+    if (!cont) return;
+    const fuente = datos.categorias || {};
+    if (fuente.error) {
+      cont.innerHTML = `<div class="vacio">No se pudo leer el backlog por categoría: ${escapeHtml(fuente.error)}</div>`;
+      if (cap) cap.innerHTML = '';
+      return;
+    }
+    const filas = porLiderGrupo(fuente.filas, 'lider');
+    if (!filas.length) {
+      cont.innerHTML = '<div class="vacio">Sin datos para este corte.</div>';
+      if (cap) cap.innerHTML = '';
+      return;
+    }
+    const granTotal = filas.reduce((a, x) => a + (x.Total ?? 0), 0);
+    const suma = lista => {
+      const r = { t: 0, c: 0, al: 0, m30: 0, sf: 0 };
+      for (const x of lista) {
+        r.t += x.Total ?? 0; r.c += x.Critica ?? 0; r.al += x.Alta ?? 0;
+        r.m30 += x.Mas30 ?? 0; r.sf += x.FueraSLA ?? 0;
+      }
+      r.pctFuera = r.t > 0 ? Math.round(100 * r.sf / r.t) : null;
+      return r;
+    };
+    const celdas = (a, color) => {
+      const clase = a.pctFuera === null ? '' : (a.pctFuera <= 5 ? 'bv' : a.pctFuera <= 15 ? 'ba' : 'br');
+      return `<td class="num">${FMT(a.t)}</td>
+        <td class="num">${PCT(a.t, granTotal)} ${miniBar(granTotal > 0 ? 100 * a.t / granTotal : 0, color)}</td>
+        <td class="num">${FMT(a.c)}</td><td class="num">${FMT(a.al)}</td><td class="num">${FMT(a.m30)}</td>
+        <td class="num">${a.pctFuera === null ? '—' : `<span class="badge ${clase}">${a.pctFuera}%</span>`}</td>`;
+    };
+
+    // Lider -> (C1 -> filas de sus grupos)
+    const porLider = new Map();
+    for (const x of filas) {
+      if (!porLider.has(x.Lider)) porLider.set(x.Lider, new Map());
+      const cats = porLider.get(x.Lider);
+      const c1 = x.C1 ?? null;
+      if (!cats.has(c1)) cats.set(c1, []);
+      cats.get(c1).push(x);
+    }
+    const lideres = [...porLider.entries()]
+      .map(([l, cats]) => [l, cats, suma([...cats.values()].flat())])
+      .sort((a, b) => b[2].t - a[2].t);
+
+    let html = '';
+    lideres.forEach(([lider, cats, agLider], i) => {
+      const color = colorLider(lider);
+      const sel = filtro.lider === lider ? ' fila-sel' : '';
+      html += `<tr class="n1row${sel}" data-n1="${i}">
+        <td><span class="swatch" style="background:${color}"></span><span class="filtrable"
+          data-dim="lider" data-valor="${escapeAttr(lider)}">${escapeHtml(lider)}</span></td>
+        ${celdas(agLider, color)}</tr>`;
+      [...cats.entries()]
+        .map(([c1, f]) => [c1, suma(f)])
+        .sort((a, b) => b[1].t - a[1].t || String(a[0] ?? '').localeCompare(String(b[0] ?? '')))
+        .forEach(([c1, ag]) => {
+          // Sin C1 en el corte: se dice, no se inventa una categoria.
+          const nombre = c1 === null || c1 === '' ? '<span class="suave">(sin categoría)</span>' : escapeHtml(c1);
+          html += `<tr class="n2row" data-p1="${i}"><td>${nombre}</td>${celdas(ag, color)}</tr>`;
+        });
+    });
+
+    cont.innerHTML = `<table><thead><tr>
+        <th>Líder / Categoría</th><th class="num">Tickets</th><th class="num">% del total</th>
+        <th class="num">Criticos</th><th class="num">Altos</th><th class="num">+30 dias</th>
+        <th class="num">% Fuera SLA</th>
+      </tr></thead><tbody>${html}</tbody></table>`;
+
+    activarDrillDown(cont);
+    if (cap) cap.innerHTML = descripcionFiltro(granTotal);
+  }
+
   /* Comportamiento de una tabla drill-down ya pintada: clic en una fila .n1row
      despliega o pliega sus .n2row (data-p1 = su data-n1); clic en un
      .filtrable filtra todo el tablero por su data-dim / data-valor. Lo
-     comparten "Lideres (drill-down)" y "Resumen por antiguedad".
+     comparten "Líder (Grupo)", "Líder (Categoría)" y "Resumen por antiguedad".
 
      Con `soloFlecha` la fila NO escucha clics: despliegan o pliegan su boton
      .flecha-dd y sus cifras marcadas .dd-cifra -un blanco mas grande para la
@@ -1437,6 +1521,7 @@ const TableroBacklog = (function () {
     renderBarrasAging();
     renderBarrasSubestado();
     renderLideres();
+    renderLideresCategoria();
     renderTablaAging();
     renderAntiguos();
   }
@@ -1517,14 +1602,18 @@ const TableroBacklog = (function () {
       qsHist.set('dias', document.getElementById('f-dias-bl').value);
       qsHist.set('granularidad', document.getElementById('f-granularidad-bl').value);
 
-      const [resumen, historico, antiguos] = await Promise.all([
+      // "Lider (Categoria)" va aparte y su fallo NO tumba el tablero: la
+      // pestaña dice que no se pudo leer y lo demas se pinta igual.
+      const [resumen, historico, antiguos, categorias] = await Promise.all([
         obtenerJSON(`backlog_resumen.ashx?${qs}`),
         obtenerJSON(`backlog_historico.ashx?${qsHist.toString()}`),
         obtenerJSON(`backlog_antiguos.ashx?${qs}`),
+        obtenerJSON(`backlog_categorias.ashx?${qs}`)
+          .catch(err => { console.error(err); return { error: String(err && err.message || err) }; }),
       ]);
       // Llego tarde: otro cambio de filtro ya lanzo una carga posterior.
       if (miCarga !== cargaVigente) return;
-      datos = { resumen, historico, antiguos };
+      datos = { resumen, historico, antiguos, categorias };
 
       // El roster de lideres del corte se da de alta UNA vez en la tabla
       // compartida, que lo devuelve en el orden canonico -A->Z con `Sin

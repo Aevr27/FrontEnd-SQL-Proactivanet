@@ -207,7 +207,8 @@
 
     <section class="card">
       <div class="tabs">
-        <div class="tab active" data-panel="p-lideres-bl">Lideres (drill-down)</div>
+        <div class="tab active" data-panel="p-lideres-bl">Líder (Grupo)</div>
+        <div class="tab" data-panel="p-lideres-cat-bl">Líder (Categoría)</div>
         <div class="tab" data-panel="p-aging-bl">Resumen por antiguedad</div>
         <div class="tab" data-panel="p-antiguos-bl">Tickets mas antiguos</div>
       </div>
@@ -217,6 +218,16 @@
           para filtrar todo el tablero.</div>
         <div class="cap" id="cap-lideres-bl"></div>
         <div class="scroll-x" id="tabla-lideres-bl"></div>
+      </div>
+
+      <!-- Lider -> Categoria (C1). Sale de backlog_categorias.ashx: misma
+           tabla, corte y filtros que usp_CorreoBacklog_Principal, agregada
+           ademas por C1 (App_Code/BacklogCategorias.cs). -->
+      <div class="panel" id="p-lideres-cat-bl">
+        <div class="nota">Clic en la flecha para desplegar las categorías (C1) del lider; clic en el
+          nombre del lider para filtrar todo el tablero.</div>
+        <div class="cap" id="cap-lideres-cat-bl"></div>
+        <div class="scroll-x" id="tabla-lideres-cat-bl"></div>
       </div>
 
       <div class="panel" id="p-aging-bl">
