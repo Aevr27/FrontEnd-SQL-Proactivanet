@@ -16,8 +16,10 @@
 //      hoy, sin fecha, ESTADO con fecha pedida, VARIOS con fecha pedida,
 //      Estado escrito en mayusculas), sin @Hoy (Mexico UTC-06 en SQL),
 //      historial de fecha y de estado con SolicitudId.
-//   O  otras transiciones: En Solucion -> Cerrado (con y sin fecha), En
-//      Monitoreo -> En Solucion, iniciativa ya Cerrada (DATOS): sin cambios.
+//   O  otro Estado -> Cerrado (En Solucion / En Analisis, otra escritura):
+//      FechaCierre vacia = hoy; existente se conserva; pedida se respeta.
+//      En Monitoreo -> En Solucion e iniciativa ya Cerrada (DATOS): sin
+//      cambios. NroCambioFechaCierre: adelanto y asignar no cuentan; tarde, si.
 //   F  falla dentro de Modificar (51015): nada aplicado (ni Estado ni
 //      FechaCierre), sin eventos, solicitud PENDIENTE; reintento la aplica.
 //   V  una solicitud no puede pedir FechaCierre vacia (CHECK / 51214).
@@ -104,11 +106,17 @@ public static class SolicitudesCierreMonitoreoSqlLocalDbSmoke
         "PRB 2026-000106|En Monitoreo|NULL",         // M6 sin FechaCierre
         "PRB 2026-000107|EN MONITOREO|2026-11-30",   // M7 escritura de la base
         "PRB 2026-000108|En Monitoreo|2026-11-30",   // M8 sin @Hoy
-        "PRB 2026-000111|En Solución|2026-11-30", // O1
-        "PRB 2026-000112|En Solución|NULL",       // O2
+        "PRB 2026-000111|En Soluci\u00f3n|2026-11-30", // O1
+        "PRB 2026-000112|En Soluci\u00f3n|NULL",       // O2
         "PRB 2026-000113|En Monitoreo|2026-11-30",   // O3 -> En Solucion
-        "PRB 2026-000115|En Solución|NULL",      // queda En Solucion (Estado existente para O3)
+        "PRB 2026-000115|En Soluci\u00f3n|NULL",      // queda En Solucion (Estado existente para O3)
         "PRB 2026-000114|Cerrado|2026-10-01",        // O4 ya cerrada
+        "PRB 2026-000116|En An\u00e1lisis|NULL",       // O6 vacia -> hoy
+        "PRB 2026-000117|En An\u00e1lisis|2026-11-30", // O7 existente se conserva
+        "PRB 2026-000118|En Soluci\u00f3n|NULL",       // O8 vacia con fecha pedida
+        "PRB 2026-000119|EN SOLUCION|NULL",           // O9 otra escritura, vacia
+        "PRB 2026-000120|En An\u00e1lisis|NULL",       // queda En Analisis (Estado existente)
+        "PRB 2026-000134|En Soluci\u00f3n|NULL",       // A2 antes de 40
         "PRB 2026-000121|En Monitoreo|2026-11-30",   // F falla
         "PRB 2026-000131|En Monitoreo|2026-11-30",   // A antes de 40
         "PRB 2026-000132|En Monitoreo|2026-11-30",   // B despues del rollback
@@ -198,6 +206,11 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
         return Uno("SELECT ISNULL(STUFF((SELECT ';' + ISNULL(CONVERT(varchar(10), FechaAnterior, 23), 'NULL') + '~' + ISNULL(CONVERT(varchar(10), FechaNueva, 23), 'NULL') " +
                    "FROM dbo.ProblemFechaEvento WHERE SolicitudId = " + id + " AND Campo = 'FechaCierre' ORDER BY IdEvento FOR XML PATH('')), 1, 1, ''), '')");
     }
+    // Cambios de FechaCierre que cuentan (Modificar, sql/24: solo nueva > anterior).
+    static string NroFC(string codigo)
+    {
+        return Uno("SELECT ISNULL(NroCambioFechaCierre, 0) FROM dbo.Problem WHERE Codigo = N'" + codigo + "'");
+    }
     static string EventosFecha(string codigo)
     {
         return Uno("SELECT COUNT(*) FROM dbo.ProblemFechaEvento WHERE Codigo = N'" + codigo + "'");
@@ -256,6 +269,10 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
             aplicador.Aplicar(a1, ADM, null, null, Hoy);
             Check("A1 sin sql/40: cerrar desde En Monitoreo deja la FechaCierre compromiso (lo que se corrige)",
                   "Cerrado|2026-11-30|", Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000131'") + "|" + FCierre("PRB 2026-000131") + "|" + EventosFC(a1));
+            var a2 = Cerrar(alm, "PRB 2026-000134");
+            aplicador.Aplicar(a2, ADM, null, null, Hoy);
+            Check("A2 sin sql/40: En Solucion -> Cerrado deja FechaCierre vacia (lo que se corrige)",
+                  "Cerrado|NULL|", Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000134'") + "|" + FCierre("PRB 2026-000134") + "|" + EventosFC(a2));
 
             using (var cn = Abrir(Base))
             {
@@ -276,13 +293,16 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                   "Cerrado|2026-08-01|2026-09-01|" + HoyIso + "|T PRB 2026-000101|APLICADA", Problem("PRB 2026-000101") + "|" + alm.Detalle(m1)["estado"]);
             Check("M1 ... historial de fecha (trigger sql/17) con la solicitud", "2026-11-30~" + HoyIso, EventosFC(m1));
             Check("M1 ... historial de estado con la solicitud", "En Monitoreo~Cerrado", EventosEstado(m1));
+            Check("M1 ... cierre antes del compromiso = adelanto: NroCambioFechaCierre no sube", "0", NroFC("PRB 2026-000101"));
             Check("M1 ... la categoria no se toca", "0.1000",
                   Uno("SELECT CONVERT(varchar(10), PctDisminucion) FROM dbo.ProblemCategoria WHERE Codigo = N'PRB 2026-000101'"));
 
             var m2 = Cerrar(alm, "PRB 2026-000102");
             aplicador.Aplicar(m2, ADM, null, null, Hoy);
-            Check("M2 compromiso vencido: FechaCierre = hoy, con su evento", "Cerrado|" + HoyIso + "|2026-10-01~" + HoyIso,
-                  Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000102'") + "|" + FCierre("PRB 2026-000102") + "|" + EventosFC(m2));
+            Check("M2 compromiso vencido: FechaCierre = hoy, con su evento; cierre tarde = cambio (NroCambioFechaCierre 1)",
+                  "Cerrado|" + HoyIso + "|2026-10-01~" + HoyIso + "|1",
+                  Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000102'") + "|" + FCierre("PRB 2026-000102") + "|" + EventosFC(m2) + "|" +
+                  NroFC("PRB 2026-000102"));
 
             var ev3 = EventosFecha("PRB 2026-000103");
             var m3 = Cerrar(alm, "PRB 2026-000103");
@@ -327,11 +347,28 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                   Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000111'") + "|" + FCierre("PRB 2026-000111") + "|" + EventosFC(o1));
             var o2 = Cerrar(alm, "PRB 2026-000112");
             aplicador.Aplicar(o2, ADM, null, null, Hoy);
-            Check("O2 En Solucion -> Cerrado sin FechaCierre: sigue NULL por solicitud (como antes)", "Cerrado|NULL|",
-                  Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000112'") + "|" + FCierre("PRB 2026-000112") + "|" + EventosFC(o2));
-            var o3 = Enviar(alm, "folio", "PRB 2026-000113", "tipo", "estado", "estado_nuevo", "En Solución");
+            Check("O2 En Solucion -> Cerrado sin FechaCierre: hoy (asignar, no cuenta)", "Cerrado|" + HoyIso + "|NULL~" + HoyIso + "|0",
+                  Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000112'") + "|" + FCierre("PRB 2026-000112") + "|" + EventosFC(o2) + "|" +
+                  NroFC("PRB 2026-000112"));
+            var o6 = Cerrar(alm, "PRB 2026-000116");
+            aplicador.Aplicar(o6, ADM, null, null, Hoy);
+            Check("O6 En Analisis -> Cerrado sin FechaCierre: hoy, con su evento y el de estado", "Cerrado|" + HoyIso + "|NULL~" + HoyIso + "|En An\u00e1lisis~Cerrado",
+                  Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000116'") + "|" + FCierre("PRB 2026-000116") + "|" + EventosFC(o6) + "|" + EventosEstado(o6));
+            var o7 = Cerrar(alm, "PRB 2026-000117");
+            aplicador.Aplicar(o7, ADM, null, null, Hoy);
+            Check("O7 En Analisis -> Cerrado con FechaCierre: se conserva, sin evento de fecha", "Cerrado|2026-11-30||0",
+                  Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000117'") + "|" + FCierre("PRB 2026-000117") + "|" + EventosFC(o7) + "|" + NroFC("PRB 2026-000117"));
+            var o8 = Cerrar(alm, "PRB 2026-000118", "campo_fecha", "f_cierre", "fecha_nueva", "2026-10-15");
+            aplicador.Aplicar(o8, ADM, null, null, Hoy);
+            Check("O8 En Solucion -> Cerrado sin FechaCierre pero pedida: la pedida, no hoy", "Cerrado|2026-10-15|NULL~2026-10-15",
+                  Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000118'") + "|" + FCierre("PRB 2026-000118") + "|" + EventosFC(o8));
+            var o9 = Cerrar(alm, "PRB 2026-000119");
+            aplicador.Aplicar(o9, ADM, null, null, Hoy);
+            Check("O9 'EN SOLUCION' (otra escritura) -> Cerrado sin FechaCierre: hoy", "Cerrado|" + HoyIso,
+                  Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000119'") + "|" + FCierre("PRB 2026-000119"));
+            var o3 = Enviar(alm, "folio", "PRB 2026-000113", "tipo", "estado", "estado_nuevo", "En Soluci\u00f3n");
             aplicador.Aplicar(o3, ADM, null, null, Hoy);
-            Check("O3 En Monitoreo -> En Solucion: FechaCierre no se toca", "En Solución|2026-11-30|",
+            Check("O3 En Monitoreo -> En Solucion: FechaCierre no se toca", "En Soluci\u00f3n|2026-11-30|",
                   Uno("SELECT Estado FROM dbo.Problem WHERE Codigo = N'PRB 2026-000113'") + "|" + FCierre("PRB 2026-000113") + "|" + EventosFC(o3));
             var ev4 = EventosFecha("PRB 2026-000114");
             var o4 = Enviar(alm, "folio", "PRB 2026-000114", "tipo", "datos", "titulo_nuevo", "Ya cerrada");

@@ -1,6 +1,6 @@
 /* =========================================================================
    sql/40_solicitud_cambio_cierre_monitoreo.sql - Solicitud de cambio
-   aplicada: En Monitoreo -> Cerrado pone FechaCierre = dia en que se aplica.
+   aplicada que entra a Cerrado: FechaCierre como en la edicion directa.
    ROLLBACK: sql/40_solicitud_cambio_cierre_monitoreo_rollback.sql
 
    ESTADO: PROPUESTA PARA REVISION. NO EJECUTADA EN LA VM NI APROBADA.
@@ -13,28 +13,36 @@
    deshacer 40 ANTES que 34.
 
    POR QUE
-     ea81bc8 (CierreDesdeMonitoreo, App_Code/PlanGestionAdmin.cs): en la
-     edicion directa, pasar de En Monitoreo a Cerrado reemplaza la
-     FechaCierre COMPROMISO (aprobacion + 15) por el dia del cierre. Una
+     La edicion directa (App_Code/PlanGestionAdmin.cs) tiene dos reglas al
+     entrar a Cerrado: FechaAlEntrar (hoy solo si FechaCierre queda vacia)
+     y CierreDesdeMonitoreo (ea81bc8: desde En Monitoreo reemplaza la
+     FechaCierre COMPROMISO, aprobacion + 15, por el dia del cierre). Una
      solicitud aprobada no pasa por el planificador: escribe con
-     adm.usp_SolicitudCambio_Aplicar -> adm.usp_GestionAdmin_Modificar. Sin
-     esto, cerrar por solicitud deja la fecha compromiso como "cierre".
+     adm.usp_SolicitudCambio_Aplicar -> adm.usp_GestionAdmin_Modificar, sin
+     ninguna de las dos.
 
    QUE CAMBIA (solo adm.usp_SolicitudCambio_Aplicar, ALTER)
-     Si la solicitud cambia el Estado (ESTADO, o VARIOS con Estado) de
-     En Monitoreo (el actual de dbo.Problem) a Cerrado, sin mayusculas /
-     acentos / espacios de mas, y NO pide FechaCierre (ni por CampoFecha ni
-     por la bandera de VARIOS): pasa @CambiaFCierre = 1, @FCierre = hoy a la
-     MISMA llamada de Modificar. Si FechaCierre ya es hoy, no la toca.
+     Si la solicitud cambia el Estado (ESTADO, o VARIOS con Estado) a
+     Cerrado desde otro Estado (el actual de dbo.Problem; sin mayusculas /
+     acentos / espacios de mas) y NO pide FechaCierre (ni por CampoFecha ni
+     por la bandera de VARIOS):
+       - desde En Monitoreo: FechaCierre = hoy (reemplaza el compromiso);
+         si ya es hoy, no la toca;
+       - desde cualquier otro Estado: FechaCierre = hoy SOLO si esta vacia;
+         una fecha existente se conserva.
+     Se pasa como @CambiaFCierre = 1, @FCierre = hoy en la MISMA llamada de
+     Modificar. Una FechaCierre pedida en la solicitud siempre se respeta.
      "Hoy" = @Hoy (el sitio manda DashboardDataInfo.HoyEnPresentacion(),
      Mexico UTC-06, calculado al APLICAR); sin @Hoy, la misma expresion de
      Modificar: CONVERT(date, DATEADD(HOUR, -6, SYSUTCDATETIME())). No se
      usa AT TIME ZONE ni la zona del servidor.
      NO cambia: Modificar, Crear, Rechazar, RegistrarFallo, tablas, CHECK,
-     triggers, permisos; cualquier otra transicion (p. ej. En Solucion ->
-     Cerrado sigue sin llenar FechaCierre por solicitud, como antes).
+     triggers, permisos; transiciones que no entran a Cerrado.
      Historial: va por Modificar como cualquier fecha -> trigger de sql/17
      (dbo.ProblemFechaEvento con SolicitudId) y ProblemEstadoEvento igual.
+     Clasificacion sin cambio (Modificar, sql/24): NULL -> fecha = asignar
+     (no cuenta); cierre antes del compromiso = adelanto (no cuenta);
+     despues = cambio (NroCambioFechaCierre + 1).
 
    TODO O NADA: la regla corre dentro de la transaccion de Aplicar, antes de
      Modificar; cualquier error hace ROLLBACK de todo (estado y fecha) y la
@@ -42,7 +50,7 @@
 
    PRECONDICION  Aplicar = sql/34 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804
                  Modificar = sql/24 0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77
-   POSTCONDICION Aplicar = 0x84404040F6093B42942E5C66D3F7BB66A808D0421E25CA28A68235755961A021
+   POSTCONDICION Aplicar = 0x65B3B38854E450D07421B84CAC9FBF0C8CE1CE50D87344E52FB100D0D2148DCB
                  Modificar sin cambio.
      Hash = SHA2_256 de OBJECT_DEFINITION sin espacios, tabs ni saltos de
      linea (regla de sql/20 a 34).
@@ -68,7 +76,7 @@ SELECT v.Objeto, Hash = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
                    N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')),
        v.Antes, v.Despues
 INTO #h40
-FROM (VALUES (N'adm.usp_SolicitudCambio_Aplicar', 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804, 0x84404040F6093B42942E5C66D3F7BB66A808D0421E25CA28A68235755961A021),
+FROM (VALUES (N'adm.usp_SolicitudCambio_Aplicar', 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804, 0x65B3B38854E450D07421B84CAC9FBF0C8CE1CE50D87344E52FB100D0D2148DCB),
              (N'adm.usp_GestionAdmin_Modificar', 0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77, 0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77)) AS v (Objeto, Antes, Despues);
 DECLARE @mal nvarchar(400) = (SELECT TOP (1) Objeto + N' (hash ' + ISNULL(CONVERT(nvarchar(70), Hash, 1), N'NULL') + N')'
                               FROM #h40 WHERE Hash IS NULL OR Hash <> Antes ORDER BY Objeto);
@@ -106,10 +114,11 @@ GO
    sql/34: VARIOS = todo lo pedido (Estado, las fechas de cada etapa,
    categorias, Titulo / PO / SO) se compara con su "anterior" y va en UNA
    llamada a Modificar: se aplica todo o nada.
-   sql/40: En Monitoreo -> Cerrado pone FechaCierre = dia en que se APLICA
-   (@Hoy; sin el, Mexico UTC-06 como Modificar), igual que
-   CierreDesdeMonitoreo de la edicion directa (App_Code/PlanGestionAdmin).
-   Una FechaCierre pedida en la solicitud se respeta; ya hoy, no se toca. */
+   sql/40: entrar a Cerrado, como la edicion directa (App_Code/PlanGestionAdmin):
+   desde En Monitoreo FechaCierre = dia en que se APLICA (CierreDesdeMonitoreo;
+   ya hoy, no se toca); desde otro Estado, hoy solo si queda vacia
+   (FechaAlEntrar). @Hoy; sin el, Mexico UTC-06 como Modificar. Una
+   FechaCierre pedida en la solicitud se respeta. */
 ALTER PROCEDURE adm.usp_SolicitudCambio_Aplicar
     @IdSolicitud     int,
     @Revisor         nvarchar(256),
@@ -231,20 +240,27 @@ BEGIN
                         @nFA date = CASE WHEN @vFA = 1 THEN @vFAn ELSE @fN END,
                         @nFS date = CASE WHEN @vFS = 1 THEN @vFSn ELSE @fN END,
                         @nFC date = CASE WHEN @vFC = 1 THEN @vFCn ELSE @fN END;
-                -- sql/40: En Monitoreo -> Cerrado = FechaCierre del dia en que se
-                -- aplica. Solo si la solicitud no pide FechaCierre (o la pide
-                -- vacia); si ya es hoy, no se reescribe (sin evento de mas).
-                -- Estados sin mayusculas / acentos / espacios de mas, como
-                -- MismoEstado de PlanGestionAdmin. Otras transiciones: igual.
+                -- sql/40: entrar a Cerrado (paridad con la edicion directa,
+                -- PlanGestionAdmin). Solo si la solicitud no pide FechaCierre
+                -- (o la pide vacia). Desde En Monitoreo: FechaCierre = dia en
+                -- que se aplica, reemplaza el compromiso (CierreDesdeMonitoreo);
+                -- si ya es hoy, no se reescribe. Desde otro Estado: hoy solo si
+                -- queda vacia (FechaAlEntrar); una fecha existente se conserva.
+                -- Estados sin mayusculas / acentos / espacios de mas (MismoEstado).
                 DECLARE @hoyMx date = COALESCE(@Hoy, CONVERT(date, DATEADD(HOUR, -6, SYSUTCDATETIME())));
                 IF @cE = 1
-                   AND LTRIM(RTRIM(@pE)) COLLATE Latin1_General_CI_AI = N'En Monitoreo' COLLATE Latin1_General_CI_AI
                    AND LTRIM(RTRIM(@eN)) COLLATE Latin1_General_CI_AI = N'Cerrado' COLLATE Latin1_General_CI_AI
+                   AND LTRIM(RTRIM(ISNULL(@pE, N''))) COLLATE Latin1_General_CI_AI <> N'Cerrado' COLLATE Latin1_General_CI_AI
                    AND (@cFC = 0 OR @nFC IS NULL)
                 BEGIN
-                    IF @pCi = @hoyMx
-                        SELECT @cFC = 0, @nFC = NULL;
-                    ELSE
+                    IF LTRIM(RTRIM(ISNULL(@pE, N''))) COLLATE Latin1_General_CI_AI = N'En Monitoreo' COLLATE Latin1_General_CI_AI
+                    BEGIN
+                        IF @pCi = @hoyMx
+                            SELECT @cFC = 0, @nFC = NULL;
+                        ELSE
+                            SELECT @cFC = 1, @nFC = @hoyMx;
+                    END
+                    ELSE IF @pCi IS NULL OR @cFC = 1
                         SELECT @cFC = 1, @nFC = @hoyMx;
                 END;
                 EXEC adm.usp_GestionAdmin_Modificar
@@ -299,7 +315,7 @@ SELECT v.Objeto, Hash = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
                    N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')),
        v.Antes, v.Despues
 INTO #p40
-FROM (VALUES (N'adm.usp_SolicitudCambio_Aplicar', 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804, 0x84404040F6093B42942E5C66D3F7BB66A808D0421E25CA28A68235755961A021),
+FROM (VALUES (N'adm.usp_SolicitudCambio_Aplicar', 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804, 0x65B3B38854E450D07421B84CAC9FBF0C8CE1CE50D87344E52FB100D0D2148DCB),
              (N'adm.usp_GestionAdmin_Modificar', 0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77, 0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77)) AS v (Objeto, Antes, Despues);
 DECLARE @mal2 nvarchar(400) = (SELECT TOP (1) Objeto + N' (hash ' + ISNULL(CONVERT(nvarchar(70), Hash, 1), N'NULL') + N')'
                                FROM #p40 WHERE Hash IS NULL OR Hash <> Despues ORDER BY Objeto);

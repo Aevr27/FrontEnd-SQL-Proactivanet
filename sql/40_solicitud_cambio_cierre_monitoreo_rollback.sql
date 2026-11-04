@@ -7,12 +7,13 @@
      lote empieza donde empezaba: el comentario forma parte del hash).
      Sin datos que perder: sql/40 no tiene tablas ni columnas. Lo ya
      APLICADO a dbo.Problem (FechaCierre de cierres por solicitud) y su
-     historial se quedan, como cualquier Modificar.
+     historial se quedan, como cualquier Modificar. Despues, cerrar por
+     solicitud vuelve a no tocar FechaCierre (comportamiento de sql/34).
 
    ORDEN: deshacer 40 ANTES que 34 (el rollback de 34 exige su Aplicar).
      Sitio: no hace falta desplegar nada (mismos parametros).
 
-   PRECONDICION:  Aplicar = sql/40 0x84404040F6093B42942E5C66D3F7BB66A808D0421E25CA28A68235755961A021; Modificar = sql/24.
+   PRECONDICION:  Aplicar = sql/40 0x65B3B38854E450D07421B84CAC9FBF0C8CE1CE50D87344E52FB100D0D2148DCB; Modificar = sql/24.
    POSTCONDICION: Aplicar = sql/34 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804.
 
    COMO CORRERLO (solo con OK)
@@ -34,7 +35,7 @@ SELECT v.Objeto, Hash = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
                    N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')),
        v.Antes, v.Despues
 INTO #h40
-FROM (VALUES (N'adm.usp_SolicitudCambio_Aplicar', 0x84404040F6093B42942E5C66D3F7BB66A808D0421E25CA28A68235755961A021, 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804),
+FROM (VALUES (N'adm.usp_SolicitudCambio_Aplicar', 0x65B3B38854E450D07421B84CAC9FBF0C8CE1CE50D87344E52FB100D0D2148DCB, 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804),
              (N'adm.usp_GestionAdmin_Modificar', 0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77, 0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77)) AS v (Objeto, Antes, Despues);
 DECLARE @mal nvarchar(400) = (SELECT TOP (1) Objeto + N' (hash ' + ISNULL(CONVERT(nvarchar(70), Hash, 1), N'NULL') + N')'
                               FROM #h40 WHERE Hash IS NULL OR Hash <> Antes ORDER BY Objeto);
@@ -245,7 +246,7 @@ SELECT v.Objeto, Hash = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
                    N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')),
        v.Antes, v.Despues
 INTO #p40
-FROM (VALUES (N'adm.usp_SolicitudCambio_Aplicar', 0x84404040F6093B42942E5C66D3F7BB66A808D0421E25CA28A68235755961A021, 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804),
+FROM (VALUES (N'adm.usp_SolicitudCambio_Aplicar', 0x65B3B38854E450D07421B84CAC9FBF0C8CE1CE50D87344E52FB100D0D2148DCB, 0x4B62E0D32DD5A44343FBC06ABEC0DC4A775ECDE3778B62021213ECE89D46C804),
              (N'adm.usp_GestionAdmin_Modificar', 0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77, 0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77)) AS v (Objeto, Antes, Despues);
 DECLARE @mal2 nvarchar(400) = (SELECT TOP (1) Objeto + N' (hash ' + ISNULL(CONVERT(nvarchar(70), Hash, 1), N'NULL') + N')'
                                FROM #p40 WHERE Hash IS NULL OR Hash <> Despues ORDER BY Objeto);

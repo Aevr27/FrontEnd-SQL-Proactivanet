@@ -241,7 +241,7 @@ public static class PlanificadorGestionAdmin
     // vacias. OJO: solo la edicion directa pasa por aqui; una solicitud de
     // cambio aplicada escribe en adm.usp_SolicitudCambio_Aplicar (sql/22,
     // sql/25, sql/34), que no aplica estas reglas ni la de Cerrado; solo
-    // CierreDesdeMonitoreo tiene su espejo ahi (sql/40, propuesta).
+    // estas dos reglas de Cerrado tienen su espejo ahi (sql/40, propuesta).
     public const string EstadoCerrado = "Cerrado";
     public const string EstadoEnAnalisis = "En An\u00e1lisis";
     public const string EstadoEnMonitoreo = "En Monitoreo";
@@ -267,7 +267,8 @@ public static class PlanificadorGestionAdmin
     // que ya es hoy (sin evento de historial de mas). Solo esta transicion:
     // otro estado de origen sigue con la regla general.
     // Solicitud de cambio aplicada: la misma regla en SQL, dentro de
-    // adm.usp_SolicitudCambio_Aplicar (sql/40); cambiar una = cambiar ambas.
+    // adm.usp_SolicitudCambio_Aplicar (sql/40, junto con la de Cerrado de
+    // FechaAlEntrar); cambiar una = cambiar ambas.
     private static void CierreDesdeMonitoreo(PlanModificarAdmin plan, IniciativaActual actual)
     {
         string nuevoEstado;
