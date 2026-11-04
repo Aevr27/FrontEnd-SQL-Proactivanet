@@ -257,6 +257,24 @@ public static class PlanificadorGestionAdmin
         plan.Problem[campo] = FechasGestionAdmin.Iso(plan.Hoy.AddDays(dias));
     }
 
+    // En Monitoreo -> Cerrado (2026-11-04): FechaCierre pasa a ser el dia en
+    // que se guarda el cierre (plan.Hoy). En Monitoreo, FechaCierre era el
+    // COMPROMISO (hoy + 15 de FechaAlEntrar), asi que la regla general de
+    // Cerrado ("solo si queda vacia") nunca la ponia; aqui si se reemplaza.
+    // No pisa: una fecha que el formulario trae en el mismo guardado (la
+    // eligio quien guarda; vaciarla la deja a la regla general = hoy), ni una
+    // que ya es hoy (sin evento de historial de mas). Solo esta transicion:
+    // otro estado de origen sigue con la regla general.
+    private static void CierreDesdeMonitoreo(PlanModificarAdmin plan, IniciativaActual actual)
+    {
+        string nuevoEstado;
+        if (!plan.Problem.TryGetValue(PeticionModificarAdmin.CEstado, out nuevoEstado)) return;
+        if (!MismoEstado(nuevoEstado, EstadoCerrado) || !MismoEstado(actual.Estado, EstadoEnMonitoreo)) return;
+        if (plan.Problem.ContainsKey(PeticionModificarAdmin.CFCierre)) return;
+        if (FechasGestionAdmin.DeIso(Limpio(actual.FCierre)) == plan.Hoy) return;
+        plan.Problem[PeticionModificarAdmin.CFCierre] = FechasGestionAdmin.Iso(plan.Hoy);
+    }
+
     // Sin mayusculas, acentos ni espacios de mas (como Clave de
     // ExperienciaQueries para el semaforo).
     private static bool MismoEstado(string a, string b)
@@ -336,6 +354,7 @@ public static class PlanificadorGestionAdmin
         FechaAlEntrar(plan, actual, EstadoCerrado, PeticionModificarAdmin.CFCierre, actual.FCierre);
         FechaAlEntrar(plan, actual, EstadoEnAnalisis, PeticionModificarAdmin.CFSolucion, actual.FSolucion, DiasCompromiso);
         FechaAlEntrar(plan, actual, EstadoEnMonitoreo, PeticionModificarAdmin.CFCierre, actual.FCierre, DiasCompromiso);
+        CierreDesdeMonitoreo(plan, actual);
 
         foreach (var x in p.Pcts)
         {

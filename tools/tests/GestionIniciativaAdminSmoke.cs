@@ -683,6 +683,27 @@ public static class GestionIniciativaAdminSmoke
         Check("PL46 'EN ANALISIS' -> 'En Analisis' (solo cambia la escritura): no es transicion, sin fecha", "estado=En An\u00e1lisis",
               PlanFechas(ActualFechas("EN ANALISIS", null, null), hoy, "estado", "En An\u00e1lisis"));
 
+        // En Monitoreo -> Cerrado (2026-11-04, CierreDesdeMonitoreo): la
+        // FechaCierre compromiso se reemplaza por el dia del cierre (hoy).
+        Check("PL47 de En Monitoreo a Cerrado con FechaCierre compromiso (futura): hoy", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado"));
+        Check("PL48 de En Monitoreo a Cerrado con FechaCierre compromiso vencida: hoy", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-09-30"), hoy, "estado", "Cerrado"));
+        Check("PL49 de En Monitoreo a Cerrado con FechaCierre ya hoy: no se reescribe", "estado=Cerrado",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-13"), hoy, "estado", "Cerrado"));
+        Check("PL50 de En Monitoreo a Cerrado con FechaCierre en el mismo guardado: la del formulario", "estado=Cerrado|f_cierre=2026-10-10",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado", "f_cierre", "2026-10-10"));
+        Check("PL51 de En Monitoreo a Cerrado vaciando FechaCierre: hoy (regla general)", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado", "f_cierre", ""));
+        Check("PL52 'EN MONITOREO' (escritura de la base) a Cerrado: tambien hoy", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("EN MONITOREO", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado"));
+        Check("PL53 de En Solucion a Cerrado con FechaCierre ya puesta: se conserva (solo Monitoreo reemplaza)", "estado=Cerrado",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado"));
+        Check("PL54 ya Cerrado (con FechaCierre), guardar otra cosa: no se toca", "titulo=Otro",
+              PlanFechas(ActualFechas("Cerrado", "2026-10-01", "2026-10-28"), hoy, "titulo", "Otro"));
+        Check("PL55 de En Monitoreo a En Solucion: FechaCierre no se toca", "estado=En Soluci\u00f3n",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-28"), hoy, "estado", "En Soluci\u00f3n"));
+
         // ---- DQ: PO / SO capturados y quitar (sql/24) ----
         // Constante encendida; surte efecto solo cuando DeteccionSql24 vio
         // sql/24 en la base (aqui se anota a mano, sin base).
