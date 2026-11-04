@@ -365,13 +365,15 @@
   </tr></thead><tbody id="catPopupBody"></tbody></table>
 </div></div>
 
-<!-- Selector de periodo de "Descargar Tickets": siempre un periodo cerrado,
-     no el que se esta viendo. La logica vive en periodoDescarga()
+<!-- Selector de periodo de "Descargar Tickets": un periodo cerrado o el
+     Último slot (SLOT 0, el mismo de los KPIs en modo SLOT). La logica vive en periodoDescarga()
      (experiencia.js). -->
 <div class="modal-bk" id="descargaBk" style="z-index:60"><div class="modal descarga" style="max-width:420px">
   <span class="close" id="descargaClose">&times;</span>
   <h2 style="font-size:15px">Descargar Experiencia</h2>
   <div style="font-size:12px;color:var(--muted);margin-top:4px">Tickets por fecha de registro, con los filtros de dueños actuales.</div>
+  <label class="op"><input type="radio" name="descargaOpcion" value="slot"> Último slot
+    <span id="descargaSlotTxt" class="sub"></span></label>
   <label class="op"><input type="radio" name="descargaOpcion" value="mes" checked> Mes pasado
     <span id="descargaMesTxt" class="sub"></span></label>
   <label class="op"><input type="radio" name="descargaOpcion" value="anio"> Año

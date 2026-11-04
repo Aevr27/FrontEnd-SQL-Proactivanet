@@ -1847,9 +1847,9 @@ function renderAll(){
 // periodoDescarga- y se pide a handlers/experiencia_exportar.ashx ese periodo
 // con los cuatro filtros de dueños. El servidor filtra por fecha en SQL y
 // resuelve dueños con la misma logica que las filas de categoria; devuelve
-// solo los tickets que van al libro, sin tope. Ya no depende de "Ver por":
-// el export del periodo que se esta viendo (modo slot) sigue en el handler,
-// pero el boton no lo pide.
+// solo los tickets que van al libro, sin tope. No depende de "Ver por":
+// "Último slot" pide modo=slot (SLOT 0, la base de los KPIs en modo SLOT)
+// aunque el tablero este en Mes.
 const EXPORT_URL = new URL('../handlers/experiencia_exportar.ashx', BASE).href;
 
 /* === PERIODO DESCARGA (inicio) ===
@@ -1866,6 +1866,14 @@ function diaLocalISO(d) {
     String(d.getDate()).padStart(2, '0');
 }
 function periodoDescarga(opcion, hoy, desde, hasta) {
+  if (opcion === 'slot') {
+    // El SLOT 0 del tablero, tal cual lo define la base: modo=slot lee
+    // vw_TicketsSlotsBase WHERE Slot = 0, la misma base del KPI en "Ver por
+    // SLOT". Los dias del SLOT los fija vw_Tickets.Slot en SQL, no el
+    // navegador: inicio/fin van en null y el libro rotula el rango con las
+    // fechas de registro que lleguen (ver rangoReal).
+    return { params: { modo: 'slot' }, inicio: null, fin: null, etiqueta: 'Último slot (SLOT 0)' };
+  }
   if (opcion === 'mes') {
     // El mes calendario anterior al de hoy, completo: el 8 y el 31 de octubre
     // dan septiembre; en enero, diciembre del año anterior. El dia 0 del mes
@@ -1905,6 +1913,18 @@ function periodoDescarga(opcion, hoy, desde, hasta) {
     };
   }
   return { error: 'Elige una opción.' };
+}
+// Primer y ultimo dia (aaaa-mm-dd) de registro de los tickets recibidos; para
+// rotular "Último slot", cuyo rango no conoce el navegador.
+function rangoReal(tickets) {
+  var min = null, max = null;
+  tickets.forEach(function (t) {
+    var dia = String(t.fecha_registro || '').slice(0, 10);
+    if (!dia) return;
+    if (min === null || dia < min) min = dia;
+    if (max === null || dia > max) max = dia;
+  });
+  return { inicio: min, fin: max };
 }
 // Tickets cuya fecha de registro (aaaa-mm-dd hh:mm:ss) cae fuera de los dias
 // inicio..fin. El servidor ya filtra; esto comprueba, con lo que llego, que
@@ -2296,6 +2316,7 @@ function abrirSelectorDescarga(){
   document.getElementById('descargaMesTxt').textContent='('+mes.etiqueta+')';
   const anio=periodoDescarga('anio', hoy);
   document.getElementById('descargaAnioTxt').textContent='('+anio.inicio+' a '+anio.fin+')';
+  document.getElementById('descargaSlotTxt').textContent='(SLOT 0 · últimos 30 días, como los KPIs en modo SLOT)';
   const desde=document.getElementById('descargaDesde'), hasta=document.getElementById('descargaHasta');
   if(!desde.value) desde.value=mes.inicio;
   if(!hasta.value) hasta.value=mes.fin;
@@ -2331,7 +2352,10 @@ async function descargarTickets(periodoElegido){
     const filtrados=datos.tickets||[];
     if(!filtrados.length){ alert('No hay tickets para el filtro y el periodo '+periodoElegido.etiqueta+'.'); return; }
     // Red de seguridad: ni un ticket fuera de los dias pedidos llega al libro.
-    const fuera=fueraDePeriodo(filtrados, periodoElegido.inicio, periodoElegido.fin);
+    // "Último slot" no trae dias propios (los fija SQL): se omite la
+    // comprobacion y el rango del libro sale de los tickets recibidos.
+    const sinDias=!periodoElegido.inicio;
+    const fuera=sinDias?0:fueraDePeriodo(filtrados, periodoElegido.inicio, periodoElegido.fin);
     if(fuera){
       alert('La descarga trajo '+FMT(fuera)+' tickets fuera de '+periodoElegido.inicio+' a '+periodoElegido.fin+'; no se genera el archivo.');
       return;
@@ -2352,7 +2376,8 @@ async function descargarTickets(periodoElegido){
        periodo exportado (en Mes, con el año que devolvio el handler), los
        cuatro filtros -"Todos" cuando no hay uno puesto-, el total de filas
        exportadas y la fecha del equipo. */
-    const periodo = periodoElegido.etiqueta+' ('+periodoElegido.inicio+' a '+periodoElegido.fin+')';
+    const dias = sinDias ? rangoReal(filtrados) : periodoElegido;
+    const periodo = periodoElegido.etiqueta+' ('+dias.inicio+' a '+dias.fin+')';
     const bytes = LibroTickets.construir(XLSX, {
       hoja: 'Tickets',
       titulo: 'Tickets — Dashboard Export',

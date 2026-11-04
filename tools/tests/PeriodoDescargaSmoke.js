@@ -22,7 +22,7 @@ function cargarBloque() {
   var fin = fuente.indexOf('/* === PERIODO DESCARGA (fin) === */');
   if (ini < 0 || fin < 0) throw new Error('no se encontraron los marcadores PERIODO DESCARGA en experiencia/experiencia.js');
   return (new Function(fuente.slice(ini, fin) +
-    '\nreturn {periodoDescarga: periodoDescarga, fueraDePeriodo: fueraDePeriodo};'))();
+    '\nreturn {periodoDescarga: periodoDescarga, fueraDePeriodo: fueraDePeriodo, rangoReal: rangoReal};'))();
 }
 
 var fallos = 0;
@@ -37,6 +37,16 @@ var B = cargarBloque();
 var P = B.periodoDescarga;
 function hoy(y, m, d) { return new Date(y, m - 1, d, 15, 30); }
 function sinEtiqueta(r) { return { params: r.params, inicio: r.inicio, fin: r.fin }; }
+
+// 0) Último slot: modo=slot sin dias propios (el SLOT 0 lo fija SQL).
+Check('0 ultimo slot', { params: { modo: 'slot' }, inicio: null, fin: null },
+  sinEtiqueta(P('slot', hoy(2026, 11, 4))));
+Check('0b ultimo slot no depende de hoy', JSON.stringify(P('slot', hoy(2026, 1, 1))),
+  JSON.stringify(P('slot', hoy(2028, 2, 29))));
+Check('0c rangoReal', { inicio: '2026-10-05', fin: '2026-11-03' }, B.rangoReal([
+  { fecha_registro: '2026-10-20 08:00:00' }, { fecha_registro: '2026-11-03 23:59:00' },
+  { fecha_registro: '2026-10-05 00:01:00' }, { fecha_registro: null }]));
+Check('0d rangoReal vacio', { inicio: null, fin: null }, B.rangoReal([]));
 
 // 1) Hoy 8-oct -> septiembre completo.
 Check('1 mes pasado, hoy 2026-10-08',
