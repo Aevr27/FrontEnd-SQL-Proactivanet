@@ -40,6 +40,12 @@
 //       403 y admin_sesion autorizado false; sigue con el registro y con
 //       Nueva solicitud (PO/SO); nunca devuelve el rol. Consultas que fallan:
 //       nunca dan acceso y admin_sesion lo marca "incompleta" (SOLO entonces).
+//   H   HIBRIDA (2026-11-04): tambien califica por CatPersona.Rol =
+//       Product Owner / Service Owner, sin categoria asignada; Director,
+//       NULL u otro valor no; la identidad (correo unico, nombre sin
+//       repetir) se exige igual; error = cerrado; ADM/MOD intactos; el rol
+//       no da Admin; el nombre al reves en CatCategoriaDueno (Lomas) entra
+//       por rol y sin rol no.
 //   F   el fuente: quien usa ExigirSolicitud / ExigirRegistro.
 //
 // Compilar como AccesoAdminHttpSmoke (adm.dll + hnd.dll) y correr con cwd =
@@ -74,7 +80,12 @@ sealed class DuenosFalsos : IFuenteDuenosVigentes
 
     public DuenosFalsos Persona(string nombre, string correo)
     {
-        Personas.Add(new PersonaCatalogo { Nombre = nombre, Correo = correo });
+        return Persona(nombre, correo, null);
+    }
+    // rol: dbo.CatPersona.Rol (null = sin rol).
+    public DuenosFalsos Persona(string nombre, string correo, string rol)
+    {
+        Personas.Add(new PersonaCatalogo { Nombre = nombre, Correo = correo, Rol = rol });
         return this;
     }
 
@@ -499,6 +510,117 @@ public static class AccesoIniciativasHttpSmoke
             Check("P10 Evaluar comun no dueño", AccesoIniciativas.MensajeSoloDuenos, AccesoIniciativas.Evaluar(null, idPo, no));
             Check("P10 Evaluar anonimo", AccesoIniciativas.MensajeCerrado, AccesoIniciativas.Evaluar(null, IdentidadWindows.Desde("", false), nunca));
 
+            AccesoIniciativas.FuenteDuenos = duenos;
+        }
+
+        // ---- H: HIBRIDA, PO/SO por CatPersona.Rol --------------------------
+        {
+            const string POROL = @"SORIANA\t_porol", SOROL = @"SORIANA\t_sorol", SOMAY = @"SORIANA\t_somay",
+                         DIR = @"SORIANA\t_dir", RARO = @"SORIANA\t_raro", RARO2 = @"SORIANA\t_raro2", SINROL = @"SORIANA\t_sinrol",
+                         DESCONOCIDO = @"SORIANA\t_desconocido", DOBLE = @"SORIANA\t_doble", REPE = @"SORIANA\t_repe",
+                         LOMAS = @"SORIANA\t_lomas", LOMASSIN = @"SORIANA\t_lomassin", DUENODIR = @"SORIANA\t_duenodir",
+                         ADMDIR = @"SORIANA\t_admdir";
+            var d = new DuenosFalsos()
+                .Persona("Pia Rol", "t_porol@soriana.com", "Product Owner")          // PO por rol, sin categoria
+                .Persona("Saul Rol", "t_sorol@soriana.com", "Service Owner")         // SO por rol, sin categoria
+                .Persona("Sara May", "t_somay@soriana.com", "  SERVICE   owner ")    // mismo rol, otra captura
+                .Persona("Dino Dir", "t_dir@soriana.com", "Director")                // Director: no por rol
+                .Persona("Raul Raro", "t_raro@soriana.com", "SO")                    // valor inesperado
+                .Persona("Rita Raro", "t_raro2@soriana.com", "Service Owner / Lider")
+                .Persona("Nico SinRol", "t_sinrol@soriana.com", null)                // NULL, sin categoria
+                .Persona("Otro Correo", "otro@soriana.com", "Service Owner")         // t_desconocido no esta
+                .Persona("Doble Uno", "t_doble@soriana.com", "Service Owner")
+                .Persona("Doble Dos", "t_doble@soriana.com", "Service Owner")        // correo repetido: ambiguo
+                .Persona("Repe Nombre", "t_repe@soriana.com", "Product Owner")
+                .Persona("REPE  nombre", "t_repe2@soriana.com", "Director")          // nombre repetido
+                .Persona("Luis Gerardo Lomas Malacara", "t_lomas@soriana.com", "Service Owner")
+                .Persona("Ana Maria Lomas Sin", "t_lomassin@soriana.com", null)
+                .Persona("Duena Dir", "t_duenodir@soriana.com", "Director")          // Director que SI es duena
+                .Persona("Adm Dir", "t_admdir@soriana.com", "Director")
+                .Persona("Mod Uno", "t_mod@soriana.com", null)
+                .Persona("Adm Uno", "t_adm@soriana.com", null)
+                .Fila("/SAP/Materiales", "/SAP", "Omar Po", "Lomas Malacara Luis Gerardo", true) // apellidos primero
+                .Fila("/SAP/Pedidos", "/SAP", "Omar Po", "Lomas Sin Ana Maria", true)
+                .Fila("/D/1", "/D", "Duena Dir", "Otro SO", true);
+            AccesoIniciativas.FuenteDuenos = d;
+            roles.Filas[ADMDIR.ToUpperInvariant()] = new[] { "ADM" };
+
+            Check("H1 PO por rol, sin categoria: pagina + 4 handlers", "PPPPP", Puertas(POROL));
+            Check("H1 ... admin_sesion solicitante", Sin(true), Sesion(POROL));
+            Check("H2 SO por rol, sin categoria: pagina + 4 handlers", "PPPPP", Puertas(SOROL));
+            Check("H2 ... admin_sesion solicitante", Sin(true), Sesion(SOROL));
+            Check("H2 rol con otra capitalizacion / espacios: entra", "PPPPP", Puertas(SOMAY));
+            Check("H3 Director sin categoria: 403 solo PO/SO", "PDDDD", Puertas(DIR));
+            Check("H3 ... admin_sesion no solicitante", Sin(false), Sesion(DIR));
+            Check("H3 rol inesperado (SO / Service Owner / Lider): 403", "PDDDD|PDDDD", Puertas(RARO) + "|" + Puertas(RARO2));
+            Check("H3 rol NULL sin categoria: 403", "PDDDD", Puertas(SINROL));
+            Check("H4 correo desconocido (otra persona tiene el rol): 403", "PDDDD", Puertas(DESCONOCIDO));
+            Check("H4 correo en dos personas con rol SO (ambiguo): 403", "PDDDD", Puertas(DOBLE));
+            Check("H4 nombre repetido aunque su rol sea PO: 403", "PDDDD", Puertas(REPE));
+            Check("H5 Lomas: nombre al reves en CatCategoriaDueno, rol SO: entra", "PPPPP", Puertas(LOMAS));
+            Check("H5 ... mismo caso sin rol: 403 (la causa del reporte)", "PDDDD", Puertas(LOMASSIN));
+            Check("H6 duena de fila vigente con rol Director: sigue entrando por dueno", "PPPPP", Puertas(DUENODIR));
+
+            // El rol no da Admin: sigue VIEWER, Admin entero 403.
+            Check("H7 PO por rol: todo Admin 403", "DDDDDDDDDDD", Admin(POROL));
+            Check("H7 SO por rol: todo Admin 403", "DDDDDDDDDDD", Admin(SOROL));
+            {
+                var sw = new StringWriter();
+                var ctx = Contexto("x", null, SOROL, sw);
+                Check("H7 SO por rol: sigue VIEWER y PuedeEntrar false", "VIEWER|False", AccesoAdmin.Rol(ctx) + "|" + AccesoAdmin.PuedeEntrar(ctx));
+                HttpContext.Current = null;
+            }
+            Check("H7 SO por rol, modulo: Solicitar cambios solo accion=enviar", "pasa|403|json|admin",
+                  Modulo("~/handlers/admin_iniciativas_solicitudes.ashx", SOROL, "accion=enviar") + "|" +
+                  Modulo("~/handlers/admin_iniciativas_solicitudes.ashx", SOROL, "accion=listar"));
+            {
+                var c = Correr(new AdminIniciativasMisSolicitudes(), "admin_iniciativas_mis_solicitudes.ashx", null, SOROL, out estado);
+                var c2 = Correr(new AdminIniciativasMisSolicitudes(), "admin_iniciativas_mis_solicitudes.ashx", null, DIR, out estado);
+                Check("H7 Mis solicitudes: SO por rol pasa, Director 403", "False|True", Denegado(c) + "|" + Denegado(c2));
+            }
+
+            // ADM / MOD exactamente igual: entran sin leer CatPersona ni duenos.
+            {
+                var antes = d.Lecturas;
+                Check("H8 ADM (rol Director en CatPersona) y MOD sin rol: entran", "PPPPP|PPPPP", Puertas(ADMDIR) + "|" + Puertas(MOD));
+                Check("H8 ... admin_sesion igual que antes", Con("ADM") + "|" + Con("MOD"), Sesion(ADMDIR) + "|" + Sesion(MOD));
+                Check("H8 ... sin leer los duenos", 0, d.Lecturas - antes);
+                Check("H8 MOD: lo de ADM sigue RolInsuficiente", "RRRRRPPRRRR", Admin(MOD));
+            }
+
+            // Error al leer: ni por rol.
+            d.Lanza = true;
+            Check("H9 error al leer CatPersona/duenos: el SO por rol no entra", "PDDDD", Puertas(SOROL));
+            Check("H9 ... admin_sesion marcado", Sin(false, ",\"verificacion\":\"incompleta\""), Sesion(SOROL));
+            d.Lanza = false;
+
+            // La regla sola.
+            Check("H10 EsRolPoSo", "True|True|True|True|False|False|False|False|False",
+                  AccesoIniciativas.EsRolPoSo("Product Owner") + "|" + AccesoIniciativas.EsRolPoSo("Service Owner") + "|" +
+                  AccesoIniciativas.EsRolPoSo(" service OWNER ") + "|" + AccesoIniciativas.EsRolPoSo("Sérvice Owner") + "|" +
+                  AccesoIniciativas.EsRolPoSo("Director") + "|" + AccesoIniciativas.EsRolPoSo(null) + "|" +
+                  AccesoIniciativas.EsRolPoSo("") + "|" + AccesoIniciativas.EsRolPoSo("Owner") + "|" +
+                  AccesoIniciativas.EsRolPoSo("Product Owner Service Owner"));
+            var lec = d.Leer();
+            Check("H10 EsPoSoVigente: rol PO sin fila / Director sin fila / sin identidad", "True|False|False",
+                  AccesoIniciativas.EsPoSoVigente(IdentidadWindows.Desde(POROL, true), lec) + "|" +
+                  AccesoIniciativas.EsPoSoVigente(IdentidadWindows.Desde(DIR, true), lec) + "|" +
+                  AccesoIniciativas.EsPoSoVigente(IdentidadWindows.Desde("", false), lec));
+
+            // La fuente real: Rol solo con VigenteEnOrigen = 1, y solo la de AccesoIniciativas lo pide.
+            {
+                var acuse = File.ReadAllText(@"App_Code\AcuseIniciativa.cs");
+                var acceso = File.ReadAllText(@"App_Code\AccesoIniciativas.cs");
+                Check("H11 la consulta con Rol filtra VigenteEnOrigen = 1; la de siempre sigue igual", "True|True",
+                      acuse.Contains("\"SELECT Nombre, Correo, Rol FROM dbo.CatPersona WHERE VigenteEnOrigen = 1\"") + "|" +
+                      acuse.Contains("\"SELECT Nombre, Correo FROM dbo.CatPersona WHERE VigenteEnOrigen = 1\""));
+                Check("H11 FuenteDuenosVigentesSql pide el Rol", true, acceso.Contains("new FuentePersonasAcuseSql(abrir, true).Personas()"));
+                Check("H11 Evaluar: ADM/MOD antes que PO/SO (aditiva)", true,
+                      acceso.IndexOf("if (rol == RolAdmin.Adm || rol == RolAdmin.Mod) return null;") <
+                      acceso.IndexOf("return poSoVigente() ? null : MensajeSoloDuenos;"));
+            }
+
+            roles.Filas.Remove(ADMDIR.ToUpperInvariant());
             AccesoIniciativas.FuenteDuenos = duenos;
         }
 

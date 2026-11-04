@@ -46,6 +46,10 @@ public sealed class PersonaCatalogo
 {
     public string Nombre;
     public string Correo;
+    // dbo.CatPersona.Rol tal como esta. Solo lo lee la fuente CON ROL
+    // (FuentePersonasAcuseSql(abrir, true), la de AccesoIniciativas); las
+    // demas lo dejan null y no lo miran.
+    public string Rol;
 }
 
 public interface IFuentePersonasAcuse
@@ -56,25 +60,34 @@ public interface IFuentePersonasAcuse
 public sealed class FuentePersonasAcuseSql : IFuentePersonasAcuse
 {
     private readonly Func<SqlConnection> abrir;
+    private readonly bool conRol;
     public FuentePersonasAcuseSql() : this(null) { }
-    public FuentePersonasAcuseSql(Func<SqlConnection> abrir)
+    public FuentePersonasAcuseSql(Func<SqlConnection> abrir) : this(abrir, false) { }
+    // conRol: ademas lee CatPersona.Rol (AccesoIniciativas: PO/SO por rol).
+    // Sin el, la consulta es la de siempre (Nombre, Correo).
+    public FuentePersonasAcuseSql(Func<SqlConnection> abrir, bool conRol)
     {
         this.abrir = abrir ?? delegate { return new SqlConnection(DashboardDb.CadenaConexion()); };
+        this.conRol = conRol;
     }
 
     public List<PersonaCatalogo> Personas()
     {
         var l = new List<PersonaCatalogo>();
+        var sql = conRol
+            ? "SELECT Nombre, Correo, Rol FROM dbo.CatPersona WHERE VigenteEnOrigen = 1"
+            : "SELECT Nombre, Correo FROM dbo.CatPersona WHERE VigenteEnOrigen = 1";
         using (var cn = abrir())
         {
             if (cn.State != ConnectionState.Open) cn.Open();
-            using (var cmd = new SqlCommand("SELECT Nombre, Correo FROM dbo.CatPersona WHERE VigenteEnOrigen = 1", cn))
+            using (var cmd = new SqlCommand(sql, cn))
             using (var rd = cmd.ExecuteReader())
                 while (rd.Read())
                     l.Add(new PersonaCatalogo
                     {
                         Nombre = rd.IsDBNull(0) ? null : rd.GetString(0),
                         Correo = rd.IsDBNull(1) ? null : rd.GetString(1),
+                        Rol = conRol && !rd.IsDBNull(2) ? Convert.ToString(rd.GetValue(2), CultureInfo.InvariantCulture) : null,
                     });
         }
         return l;
@@ -95,6 +108,7 @@ public sealed class IdentidadAcuse
     public string Correo;     // el candidato buscado
     public string Nombre;     // CatPersona.Nombre (solo resuelto)
     public string Clave;      // ClaveNombre(Nombre)
+    public string Rol;        // CatPersona.Rol de esa fila (solo resuelto; null si la fuente no lo lee)
 
     public bool EsResuelta { get { return Estado == Resuelto; } }
 
@@ -159,6 +173,7 @@ public sealed class IdentidadAcuse
         r.Estado = Resuelto;
         r.Nombre = porCorreo[0].Nombre.Trim();
         r.Clave = clave;
+        r.Rol = porCorreo[0].Rol;
         return r;
     }
 
