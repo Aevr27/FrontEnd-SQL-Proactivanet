@@ -1028,14 +1028,76 @@ const TableroBacklog = (function () {
   }
 
   // ---------------------------------------------- drill-down Lider -> Categoria
-  /* Las filas de backlog_categorias.ashx vienen por (Lider, Grupo, C1) con
-     Critica, Alta, Mas30, FueraSLA y Total ya contados en SQL con las mismas
-     expresiones que "Lider (Grupo)". El cross-filter de lider y grupo se
-     aplica igual (porLiderGrupo) y despues se suman los grupos de cada
-     (Lider, C1). % Fuera SLA = FueraSLA / Total, que es lo que "Lider
-     (Grupo)" divide: alli el total de SLA suma todas las filas del corte.
-     La categoria es solo texto: C1 ya es el filtro "Servicio / C1" de
-     arriba, que se pide al servidor. */
+  /* Las filas de backlog_categorias.ashx vienen por (Lider, Grupo, C1,
+     Categoria) con Critica, Alta, Mas30, FueraSLA y Total ya contados en SQL
+     con las mismas expresiones que "Lider (Grupo)". El cross-filter de lider
+     y grupo se aplica igual (porLiderGrupo) y despues se arma el arbol
+     Lider -> C1 -> subniveles de la ruta, como el "Detalle por categoria"
+     de Experiencia: cada nodo suma las filas de su subarbol. Cada ticket
+     tiene UNA ruta, asi que cae en un solo camino y ningun nodo lo cuenta dos
+     veces; el lider suma lo mismo que en "Lider (Grupo)". % Fuera SLA =
+     FueraSLA / Total, que es lo que "Lider (Grupo)" divide. Los niveles son
+     los que traen las rutas del corte: no se inventa ninguno.
+
+     Un nodo con hijos puede tener ademas tickets registrados EN el (la ruta
+     acaba ahi): salen en su propia fila "(sin subcategoría)", para que los
+     hijos cuadren a la vista con el padre. Clic en una categoria: sus
+     tickets debajo de la tabla (backlog_categorias.ashx?modo=tickets). */
+
+  /* Los segmentos de la ruta que cuelgan de C1. Misma regla que
+     fn_CategoriaC1 y que BacklogCategorias.Segmentos (App_Code), que filtra
+     los tickets de un nodo con ella: se quita UNA '/' inicial, se parte por
+     '/' y se recorta cada segmento; las '/' finales no crean niveles. Si el
+     primer segmento no es el C1 de la fila (sin distinguir mayusculas), la
+     fila se queda en el nivel C1, sin subniveles: no se adivina donde va. */
+  function segmentosCategoria(categoria, c1) {
+    if (c1 === null || c1 === undefined || String(c1).trim() === '') return { sub: [], coincide: true };
+    let s = String(categoria ?? '').trim();
+    if (s.startsWith('/')) s = s.slice(1);
+    const partes = s.split('/').map(p => p.trim());
+    while (partes.length && partes[partes.length - 1] === '') partes.pop();
+    if (!partes.length || partes[0].toLowerCase() !== String(c1).trim().toLowerCase()) return { sub: [], coincide: false };
+    return { sub: partes.slice(1), coincide: true };
+  }
+
+  /* Lider -> C1 -> segmentos. Cada nodo: nombre, c1, ruta (segmentos bajo
+     C1), filas (las de su subarbol), directas (las que acaban en el) e
+     hijos. `sinCoincidir`: tickets cuya ruta no empieza por su C1. */
+  function arbolCategorias(filas) {
+    const nuevo = (nombre, c1, ruta) => ({ nombre, c1, ruta, filas: [], directas: [], hijos: new Map() });
+    const lideres = new Map();
+    let sinCoincidir = 0;
+    for (const x of filas) {
+      const lider = x.Lider ?? null;
+      if (!lideres.has(lider)) lideres.set(lider, nuevo(lider, null, []));
+      const raiz = lideres.get(lider);
+      raiz.filas.push(x);
+      // Sin C1 en el corte (NULL o vacio): una sola rama "(sin categoría)".
+      const c1 = (x.C1 === null || x.C1 === undefined || String(x.C1).trim() === '') ? null : x.C1;
+      const kc1 = c1 === null ? '\u0000' : String(c1).trim().toLowerCase();
+      if (!raiz.hijos.has(kc1)) raiz.hijos.set(kc1, nuevo(c1, c1, []));
+      let n = raiz.hijos.get(kc1);
+      n.filas.push(x);
+      const { sub, coincide } = segmentosCategoria(x.Categoria, c1);
+      if (!coincide) sinCoincidir += x.Total ?? 0;
+      for (const seg of sub) {
+        const k = seg.toLowerCase();
+        if (!n.hijos.has(k)) n.hijos.set(k, nuevo(seg, n.c1, n.ruta.concat(seg)));
+        n = n.hijos.get(k);
+        n.filas.push(x);
+      }
+      n.directas.push(x);
+    }
+    return { lideres, sinCoincidir };
+  }
+
+  // Ramas abiertas (clave estable: lider + C1 + ruta): un repintado
+  // -cross-filter, refresco- las deja como estaban.
+  const abiertosCat = new Set();
+  // Nodo cuyos tickets se ven debajo de la tabla, o null.
+  let ticketsCat = null;
+  let pedidoTicketsCat = 0;
+
   function renderLideresCategoria() {
     const cont = document.getElementById('tabla-lideres-cat-bl');
     const cap = document.getElementById('cap-lideres-cat-bl');
@@ -1044,12 +1106,14 @@ const TableroBacklog = (function () {
     if (fuente.error) {
       cont.innerHTML = `<div class="vacio">No se pudo leer el backlog por categoría: ${escapeHtml(fuente.error)}</div>`;
       if (cap) cap.innerHTML = '';
+      cerrarTicketsCat();
       return;
     }
     const filas = porLiderGrupo(fuente.filas, 'lider');
     if (!filas.length) {
       cont.innerHTML = '<div class="vacio">Sin datos para este corte.</div>';
       if (cap) cap.innerHTML = '';
+      cerrarTicketsCat();
       return;
     }
     const granTotal = filas.reduce((a, x) => a + (x.Total ?? 0), 0);
@@ -1069,37 +1133,78 @@ const TableroBacklog = (function () {
         <td class="num">${FMT(a.c)}</td><td class="num">${FMT(a.al)}</td><td class="num">${FMT(a.m30)}</td>
         <td class="num">${a.pctFuera === null ? '—' : `<span class="badge ${clase}">${a.pctFuera}%</span>`}</td>`;
     };
+    const ordenar = nodos => [...nodos].map(n => [n, suma(n.filas)])
+      .sort((a, b) => b[1].t - a[1].t || String(a[0].nombre ?? '').localeCompare(String(b[0].nombre ?? '')));
 
-    // Lider -> (C1 -> filas de sus grupos)
-    const porLider = new Map();
-    for (const x of filas) {
-      if (!porLider.has(x.Lider)) porLider.set(x.Lider, new Map());
-      const cats = porLider.get(x.Lider);
-      const c1 = x.C1 ?? null;
-      if (!cats.has(c1)) cats.set(c1, []);
-      cats.get(c1).push(x);
-    }
-    const lideres = [...porLider.entries()]
-      .map(([l, cats]) => [l, cats, suma([...cats.values()].flat())])
-      .sort((a, b) => b[2].t - a[2].t);
+    const { lideres, sinCoincidir } = arbolCategorias(filas);
+    // id de fila -> { clave, nodo de tickets }. El id solo vive en este
+    // pintado; la clave es la que sobrevive al siguiente.
+    const filasInfo = {};
+    let n = 0;
+    const clave = (lider, nodo, exacto) =>
+      JSON.stringify([lider, nodo ? (nodo.c1 === null ? null : String(nodo.c1).trim().toLowerCase()) : '',
+        ...(nodo ? nodo.ruta.map(s => s.toLowerCase()) : []), exacto ? '=' : '']);
+
+    // Hijos de `padre` (un nodo), cada uno con su subarbol. `visible`: su
+    // padre se ve y esta abierto. `ancestros`: ids de lider hacia abajo.
+    const pintarHijos = (padre, lider, color, prof, ancestros, visible) => {
+      let h = '';
+      const idPadre = ancestros[ancestros.length - 1];
+      const fila = (nodo, ag, nombre, exacto, tieneHijos) => {
+        const id = 'k' + (++n);
+        const k = clave(lider, nodo, exacto);
+        filasInfo[id] = { clave: k, lider, c1: nodo.c1, ruta: nodo.ruta, exacto, total: ag.t, nombre: nodo.nombre };
+        const abierto = tieneHijos && visible && abiertosCat.has(k);
+        const sel = ticketsCat && ticketsCat.clave === k ? ' fila-sel' : '';
+        const clases = `n2row cat-nodo${tieneHijos ? ' n2exp' : ''}${abierto ? ' open' : ''}${visible ? ' show' : ''}${sel} `
+          + ancestros.map(a => 'a-' + a).join(' ');
+        h += `<tr class="${clases}" data-id="${id}" data-p="${idPadre}">
+          <td style="padding-left:${24 + 16 * (prof - 1) + (tieneHijos ? 0 : 12)}px"><span class="filtrable ver-tickets"
+            title="Ver los tickets">${nombre}</span></td>${celdas(ag, color)}</tr>`;
+        return { id, abierto };
+      };
+      for (const [hijo, ag] of ordenar(padre.hijos.values())) {
+        const tieneHijos = hijo.hijos.size > 0;
+        // Sin C1 en el corte: se dice, no se inventa una categoria.
+        const nombre = hijo.nombre === null ? '<span class="suave">(sin categoría)</span>'
+          : hijo.nombre === '' ? '<span class="suave">(sin nombre)</span>' : escapeHtml(hijo.nombre);
+        const { id, abierto } = fila(hijo, ag, nombre, false, tieneHijos);
+        if (!tieneHijos) continue;
+        const sub = ancestros.concat(id);
+        h += pintarHijos(hijo, lider, color, prof + 1, sub, abierto);
+        // Los registrados en la categoria misma, para que los hijos cuadren
+        // con el padre a la vista.
+        if (hijo.directas.length) h += filaDirecta(hijo, suma(hijo.directas), lider, color, prof + 1, sub, abierto);
+      }
+      return h;
+    };
+    // La fila "(sin subcategoría)": un hijo mas del nodo, sin hijos propios.
+    const filaDirecta = (hijo, agD, lider, color, prof, sub, visible) => {
+      const id = 'k' + (++n);
+      const k = clave(lider, hijo, true);
+      filasInfo[id] = { clave: k, lider, c1: hijo.c1, ruta: hijo.ruta, exacto: true, total: agD.t, nombre: hijo.nombre };
+      const sel = ticketsCat && ticketsCat.clave === k ? ' fila-sel' : '';
+      return `<tr class="n2row cat-nodo cat-directo${visible ? ' show' : ''}${sel} ${sub.map(a => 'a-' + a).join(' ')}"
+          data-id="${id}" data-p="${sub[sub.length - 1]}">
+        <td style="padding-left:${24 + 16 * (prof - 1) + 12}px"><span class="filtrable ver-tickets"
+          title="Tickets registrados en la categoría, sin subcategoría">(sin subcategoría)</span></td>${celdas(agD, color)}</tr>`;
+    };
 
     let html = '';
-    lideres.forEach(([lider, cats, agLider], i) => {
+    for (const [raiz, agLider] of ordenar(lideres.values())) {
+      const lider = raiz.nombre;
       const color = colorLider(lider);
+      const id = 'k' + (++n);
+      const k = clave(lider, null, false);
+      filasInfo[id] = { clave: k };
+      const abierto = abiertosCat.has(k);
       const sel = filtro.lider === lider ? ' fila-sel' : '';
-      html += `<tr class="n1row${sel}" data-n1="${i}">
+      html += `<tr class="n1row${sel}${abierto ? ' open' : ''}" data-id="${id}">
         <td><span class="swatch" style="background:${color}"></span><span class="filtrable"
           data-dim="lider" data-valor="${escapeAttr(lider)}">${escapeHtml(lider)}</span></td>
         ${celdas(agLider, color)}</tr>`;
-      [...cats.entries()]
-        .map(([c1, f]) => [c1, suma(f)])
-        .sort((a, b) => b[1].t - a[1].t || String(a[0] ?? '').localeCompare(String(b[0] ?? '')))
-        .forEach(([c1, ag]) => {
-          // Sin C1 en el corte: se dice, no se inventa una categoria.
-          const nombre = c1 === null || c1 === '' ? '<span class="suave">(sin categoría)</span>' : escapeHtml(c1);
-          html += `<tr class="n2row" data-p1="${i}"><td>${nombre}</td>${celdas(ag, color)}</tr>`;
-        });
-    });
+      html += pintarHijos(raiz, lider, color, 1, [id], abierto);
+    }
 
     cont.innerHTML = `<table><thead><tr>
         <th>Líder / Categoría</th><th class="num">Tickets</th><th class="num">% del total</th>
@@ -1107,14 +1212,139 @@ const TableroBacklog = (function () {
         <th class="num">% Fuera SLA</th>
       </tr></thead><tbody>${html}</tbody></table>`;
 
-    activarDrillDown(cont);
-    if (cap) cap.innerHTML = descripcionFiltro(granTotal);
+    activarArbolCategoria(cont, filasInfo);
+    if (cap) {
+      cap.innerHTML = descripcionFiltro(granTotal) + (sinCoincidir > 0
+        ? ` <span class="suave">· ${FMT(sinCoincidir)} ticket(s) con una ruta de categoría que no empieza por su C1 se cuentan solo en el nivel C1.</span>`
+        : '');
+    }
+
+    // Los tickets abiertos siguen al nodo: si sigue en la tabla se vuelven a
+    // pedir con los filtros de ahora (corte, grupo); si ya no esta, se cierran.
+    if (ticketsCat) {
+      const info = Object.values(filasInfo).find(f => f.clave === ticketsCat.clave);
+      if (!info) cerrarTicketsCat();
+      else if (ticketsCat.datos !== datos.categorias || ticketsCat.grupo !== filtro.grupo) abrirTicketsCat(info);
+    }
+  }
+
+  /* Abrir una rama muestra solo sus hijos directos (data-p); cerrarla oculta
+     y cierra todo su subarbol (cada fila lleva a-<id> de todos sus
+     ancestros), como bindArbolToggle en Experiencia. El nombre del lider
+     filtra el tablero; el de una categoria abre sus tickets. */
+  function activarArbolCategoria(cont, filasInfo) {
+    cont.querySelectorAll('tr[data-id]').forEach(fila => {
+      if (!fila.classList.contains('n1row') && !fila.classList.contains('n2exp')) return;
+      fila.addEventListener('click', e => {
+        if (e.target.closest && e.target.closest('.filtrable')) return;
+        const id = fila.dataset.id;
+        const abrir = !fila.classList.contains('open');
+        fila.classList.toggle('open', abrir);
+        if (abrir) {
+          abiertosCat.add(filasInfo[id].clave);
+          cont.querySelectorAll(`tr[data-p="${id}"]`).forEach(h => h.classList.add('show'));
+        } else {
+          abiertosCat.delete(filasInfo[id].clave);
+          cont.querySelectorAll(`tr.a-${id}`).forEach(h => {
+            h.classList.remove('show'); h.classList.remove('open');
+            const info = filasInfo[h.dataset.id];
+            if (info) abiertosCat.delete(info.clave);
+          });
+        }
+      });
+    });
+    cont.querySelectorAll('.filtrable').forEach(el => {
+      el.addEventListener('click', e => {
+        e.stopPropagation();
+        if (el.dataset.dim) { alternarFiltro(el.dataset.dim, el.dataset.valor); return; }
+        const fila = el.closest('tr[data-id]');
+        const info = fila && filasInfo[fila.dataset.id];
+        if (!info) return;
+        if (ticketsCat && ticketsCat.clave === info.clave) { cerrarTicketsCat(); renderLideresCategoria(); return; }
+        abrirTicketsCat(info);
+        renderLideresCategoria();
+      });
+    });
+  }
+
+  function cerrarTicketsCat() {
+    ticketsCat = null;
+    pedidoTicketsCat++;
+    const panel = document.getElementById('tickets-cat-bl');
+    if (panel) { panel.hidden = true; panel.innerHTML = ''; }
+  }
+
+  // Pide y pinta los tickets del nodo `info` con los filtros de arriba, el
+  // lider de la rama y el grupo del cross-filter: los mismos que cuenta su fila.
+  async function abrirTicketsCat(info) {
+    const sel = { ...info, grupo: filtro.grupo, datos: datos.categorias };
+    ticketsCat = sel;
+    const pedido = ++pedidoTicketsCat;
+    const panel = document.getElementById('tickets-cat-bl');
+    if (!panel) return;
+
+    const p = paramsFiltros();
+    p.set('modo', 'tickets');
+    if (sel.lider === null || sel.lider === undefined) p.set('nodo_sin_lider', '1'); else p.set('nodo_lider', sel.lider);
+    if (sel.c1 === null || sel.c1 === undefined) p.set('nodo_sin_c1', '1'); else p.set('nodo_c1', sel.c1);
+    if (sel.ruta.length) p.set('nodo_ruta', JSON.stringify(sel.ruta));
+    if (sel.exacto) p.set('nodo_exacto', '1');
+    if (sel.grupo !== null) p.set('nodo_grupo', sel.grupo);
+
+    const camino = [sel.c1 === null || sel.c1 === undefined ? '(sin categoría)' : sel.c1, ...sel.ruta]
+      .map(s => escapeHtml(s === '' ? '(sin nombre)' : s)).join(' › ')
+      + (sel.exacto ? ' <span class="suave">(sin subcategoría)</span>' : '');
+    const cabecera = extra => `<div class="tickets-cat-cab">
+        <div><b>Tickets</b> · ${escapeHtml(sel.lider)} · ${camino}${sel.grupo !== null ? ` · grupo ${escapeHtml(sel.grupo)}` : ''}
+          ${extra ? `<div class="suave">${extra}</div>` : ''}</div>
+        <button type="button" class="cerrar-tickets-cat">Cerrar</button></div>`;
+    const pintar = (extra, cuerpo) => {
+      panel.hidden = false;
+      panel.innerHTML = cabecera(extra) + cuerpo;
+      const b = panel.querySelector('.cerrar-tickets-cat');
+      if (b) b.addEventListener('click', () => { cerrarTicketsCat(); renderLideresCategoria(); });
+    };
+    pintar('', '<div class="vacio">Cargando tickets…</div>');
+
+    let r;
+    try {
+      r = await obtenerJSON(`backlog_categorias.ashx?${p.toString()}`);
+    } catch (err) {
+      if (pedido !== pedidoTicketsCat) return;
+      pintar('', `<div class="vacio">No se pudieron leer los tickets: ${escapeHtml(String(err && err.message || err))}</div>`);
+      return;
+    }
+    if (pedido !== pedidoTicketsCat) return;
+    const lista = (r && r.tickets) || [];
+    const total = (r && r.total) ?? lista.length;
+    let extra = `${FMT(lista.length)} de ${FMT(total)}, del mas viejo al mas nuevo por fecha de registro`;
+    // La fila y la lista salen del mismo corte y filtros: si no cuadran es
+    // que el corte cambio entre las dos lecturas.
+    if (total !== sel.total) extra += ` · la fila dice ${FMT(sel.total)}: el corte cambió, actualice el tablero`;
+    if (!lista.length) { pintar(extra, '<div class="vacio">Sin tickets.</div>'); return; }
+    const filasT = lista.map(t => `<tr>
+        <td class="con-hint" title="${escapeAttr(tooltipDescripcion(t.Descripcion))}">${celdaCodigo(t)}</td>
+        <td class="num"><b>${FMT(t.DiasBacklog)}</b></td>
+        <td class="fecha-cell">${String(t.FechaRegistro ?? '').slice(0, 10)}</td>
+        <td>${escapeHtml(t.Prioridad)}</td>
+        <td>${escapeHtml(t.Grupo)}</td>
+        <td>${escapeHtml(t.EstadoSLA)}</td>
+        <td>${escapeHtml(t.TecnicoSegundaLinea)}</td>
+        <td>${escapeHtml(t.Subestado)}</td>
+        <td title="${escapeAttr(t.Categoria)}">${escapeHtml(t.Categoria)}</td>
+        <td>${escapeHtml(String(t.Titulo ?? '').slice(0, 70))}</td>
+      </tr>`).join('');
+    pintar(extra, `<div class="scroll-x"><table><thead><tr><th>Ticket</th><th class="num">Dias</th><th>Registro</th>
+        <th>Prioridad</th><th>Grupo</th><th>Estado SLA</th><th>Tecnico</th><th>Subestado</th><th>Categoría</th><th>Titulo</th>
+      </tr></thead><tbody>${filasT}</tbody></table></div>`);
+    panel.querySelectorAll('table').forEach(hacerOrdenable);
   }
 
   /* Comportamiento de una tabla drill-down ya pintada: clic en una fila .n1row
      despliega o pliega sus .n2row (data-p1 = su data-n1); clic en un
      .filtrable filtra todo el tablero por su data-dim / data-valor. Lo
-     comparten "Líder (Grupo)", "Líder (Categoría)" y "Resumen por antiguedad".
+     comparten "Líder (Grupo)" y "Resumen por antiguedad" ("Líder (Categoría)"
+     tiene varios niveles: activarArbolCategoria).
 
      Con `soloFlecha` la fila NO escucha clics: despliegan o pliegan su boton
      .flecha-dd y sus cifras marcadas .dd-cifra -un blanco mas grande para la
