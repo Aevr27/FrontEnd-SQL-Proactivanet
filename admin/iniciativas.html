@@ -489,12 +489,40 @@
     <div id="msBloque" hidden>
       <h3>Mis solicitudes de iniciativa</h3>
       <div class="ini-sol-barra">
+        <label for="msFiltro">Estado</label>
+        <select id="msFiltro">
+          <option value="ENVIADA">Pendientes</option>
+          <option value="APROBADA">Aprobadas</option>
+          <option value="RECHAZADA">Rechazadas</option>
+          <option value="" selected>Todas</option>
+        </select>
         <span class="ini-nota" id="msResumen"></span>
         <button type="button" class="btn linea chico" id="msActualizar">Actualizar</button>
       </div>
       <div class="ini-cambio-msg" id="msMsg" role="status" aria-live="polite"></div>
       <div id="msLista"></div>
       <section class="ini-det-sec ini-sol-detalle" id="msDetalle" aria-live="polite" hidden></section>
+    </div>
+    <!-- Mis solicitudes de cambio (quien no es ADM y puede solicitar): las
+         solicitudes de cambio que envio la propia cuenta, solo lectura
+         (admin/solicitudes-cambio.js, MisCambios; servidor:
+         admin_iniciativas_mis_cambios.ashx, ExigirSolicitud). -->
+    <div id="mcBloque" hidden>
+      <h3>Mis solicitudes de cambio</h3>
+      <div class="ini-sol-barra">
+        <label for="mcFiltro">Estado</label>
+        <select id="mcFiltro">
+          <option value="PENDIENTE">Pendientes</option>
+          <option value="APLICADA">Aplicadas</option>
+          <option value="RECHAZADA">Rechazadas</option>
+          <option value="" selected>Todas</option>
+        </select>
+        <span class="ini-nota" id="mcResumen"></span>
+        <button type="button" class="btn linea chico" id="mcActualizar">Actualizar</button>
+      </div>
+      <div class="ini-cambio-msg" id="mcMsg" role="status" aria-live="polite"></div>
+      <div id="mcLista"></div>
+      <section class="ini-det-sec ini-cambio ini-sol-detalle" id="mcDetalle" aria-live="polite" hidden></section>
     </div>
   </section>
 

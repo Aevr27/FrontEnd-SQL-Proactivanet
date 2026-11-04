@@ -179,6 +179,8 @@ public static class AccesoIniciativas
         "~/handlers/admin_iniciativas_validar.ashx",
         // Solicitudes: las que envio la propia cuenta (misma regla).
         "~/handlers/admin_iniciativas_mis_solicitudes.ashx",
+        // y sus solicitudes de cambio (solo lectura; 2026-11-04).
+        "~/handlers/admin_iniciativas_mis_cambios.ashx",
     };
 
     public const string MensajeCerrado =

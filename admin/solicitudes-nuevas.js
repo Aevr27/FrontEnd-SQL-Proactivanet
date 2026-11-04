@@ -449,12 +449,14 @@ window.SolicitudesNuevas = (function () {
   // su propia cuenta (#msBloque), solo lectura: lista y detalle con su
   // historial, sin aprobar ni rechazar. El servidor decide de quien son
   // (admin_iniciativas_mis_solicitudes.ashx: la cuenta de IIS) y quien
-  // puede verlas (ExigirSolicitud); aqui no se filtra nada.
+  // puede verlas (ExigirSolicitud); aqui solo se elige el Estado (msFiltro,
+  // 2026-11-04), que tambien filtra el servidor dentro de la cuenta.
   class MisSolicitudes {
     constructor(doc, pedir) {
       this.doc = doc;
       this.pedir = pedir || function (url, op) { return fetch(url, op); };
       this.cableado = false;
+      this.filtro = '';          // msFiltro: Todas por omision (como antes del filtro)
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -464,6 +466,10 @@ window.SolicitudesNuevas = (function () {
       this.cableado = true;
       var self = this;
       this.$('msActualizar').addEventListener('click', function () { self.listar(); });
+      if (this.$('msFiltro')) {
+        this.$('msFiltro').value = this.filtro;
+        this.$('msFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.cerrarDetalle(); self.listar(); });
+      }
       this.$('msLista').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-sn-numero]') : e.target;
         var n = el && el.getAttribute && el.getAttribute('data-sn-numero');
@@ -502,18 +508,20 @@ window.SolicitudesNuevas = (function () {
     // fondo: el refresco automatico, con las mismas reglas que las otras
     // dos listas de la pestaña.
     listar(fondo) {
-      var self = this, mia = this.lecturas = (this.lecturas || 0) + 1;
+      var self = this, mia = this.lecturas = (this.lecturas || 0) + 1, filtro = this.filtro;
       if (!fondo) {
         this.mensaje('', '<span>Cargando tus solicitudes…</span>');
         this.$('msResumen').textContent = '';
       }
-      return Promise.resolve().then(function () { return self.pedir(URL_MIAS + '?accion=listar', { cache: 'no-store', credentials: 'same-origin' }); })
+      var url = URL_MIAS + '?accion=listar' + (filtro ? '&estado=' + encodeURIComponent(filtro) : '');
+      return Promise.resolve().then(function () { return self.pedir(url, { cache: 'no-store', credentials: 'same-origin' }); })
         .then(leer)
         .then(function (r) {
           if (mia !== self.lecturas) return null;
           self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
-            self.$('msLista').innerHTML = htmlLista(r.json.solicitudes, 'Todavía no has enviado solicitudes de iniciativa.');
+            self.$('msLista').innerHTML = htmlLista(r.json.solicitudes,
+              filtro ? 'No tienes solicitudes de iniciativa con ese estado.' : 'Todavía no has enviado solicitudes de iniciativa.');
             self.$('msResumen').textContent = textoTotal(r.json);
             self.mensaje('', '');
             return r.json.solicitudes;

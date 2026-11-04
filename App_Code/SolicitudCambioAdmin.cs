@@ -554,9 +554,22 @@ public interface IAlmacenSolicitudesCambio
     void RegistrarFallo(int idSolicitud, string revisor, int numero, string mensaje);
 }
 
+// "Mis solicitudes de cambio" (2026-11-04,
+// handlers/admin_iniciativas_mis_cambios.ashx): SOLO LECTURA de las que
+// envio UNA cuenta (SolicitadoPor = la cuenta de IIS que la firmo, sin
+// distinguir mayusculas). El filtro va en la base, como parametro. Nada de
+// la iniciativa ni de su dueno de hoy decide de quien es: solo quien la
+// envio. DetalleDe de una de otra cuenta: null, igual que si no existe.
+public interface ILectorMisSolicitudesCambio
+{
+    // estado: PENDIENTE | APLICADA | RECHAZADA o null (todas).
+    List<Dictionary<string, object>> ListarDe(string cuenta, string estado, int maximo);
+    Dictionary<string, object> DetalleDe(int idSolicitud, string cuenta);
+}
+
 // La real: los procedimientos de sql/22 (escritura) y SELECT (lectura). El
 // sitio no puede escribir las tablas a mano (DENY de _permisos.sql).
-public sealed class AlmacenSolicitudesCambioSql : IAlmacenSolicitudesCambio
+public sealed class AlmacenSolicitudesCambioSql : IAlmacenSolicitudesCambio, ILectorMisSolicitudesCambio
 {
     private readonly Func<SqlConnection> abrir;
 
@@ -737,9 +750,20 @@ LEFT JOIN dbo.Problem AS p ON p.Codigo = s.Codigo";
         }
     }
 
-    public List<Dictionary<string, object>> Listar(string estado, int maximo)
+    public List<Dictionary<string, object>> Listar(string estado, int maximo) { return Leer(null, estado, maximo); }
+
+    // Solo las de una cuenta (null = todas: nunca para "Mis solicitudes").
+    private const string FiltroCuenta = "UPPER(s.SolicitadoPor) = UPPER(@cuenta)";
+
+    public List<Dictionary<string, object>> ListarDe(string cuenta, string estado, int maximo)
     {
-        var sql = "SELECT TOP (@max) * FROM (" + Cabecera + @") AS x
+        if (string.IsNullOrEmpty(cuenta)) throw new ArgumentNullException("cuenta");
+        return Leer(cuenta, estado, maximo);
+    }
+
+    private List<Dictionary<string, object>> Leer(string cuenta, string estado, int maximo)
+    {
+        var sql = "SELECT TOP (@max) * FROM (" + Cabecera + (cuenta == null ? "" : "\nWHERE " + FiltroCuenta) + @") AS x
 WHERE (@estado IS NULL OR x.Estado = @estado)
 ORDER BY x.FechaSolicitudUtc DESC, x.IdSolicitud DESC;";
         var salida = new List<Dictionary<string, object>>();
@@ -748,29 +772,43 @@ ORDER BY x.FechaSolicitudUtc DESC, x.IdSolicitud DESC;";
         {
             cmd.Parameters.Add("@max", SqlDbType.Int).Value = Math.Max(1, Math.Min(maximo, 500));
             cmd.Parameters.Add("@estado", SqlDbType.VarChar, 10).Value = Db(estado);
+            if (cuenta != null) cmd.Parameters.Add("@cuenta", SqlDbType.NVarChar, 256).Value = cuenta;
             using (var r = cmd.ExecuteReader())
                 while (r.Read()) salida.Add(Fila(r));
         }
         return salida;
     }
 
-    public Dictionary<string, object> Detalle(int idSolicitud)
+    public Dictionary<string, object> Detalle(int idSolicitud) { return Detalle(idSolicitud, null); }
+
+    public Dictionary<string, object> DetalleDe(int idSolicitud, string cuenta)
     {
+        if (string.IsNullOrEmpty(cuenta)) throw new ArgumentNullException("cuenta");
+        return Detalle(idSolicitud, cuenta);
+    }
+
+    // Con cuenta, las categorias y los eventos solo si la solicitud es suya.
+    private Dictionary<string, object> Detalle(int idSolicitud, string cuenta)
+    {
+        var deCuenta = cuenta == null ? "" : " AND " + FiltroCuenta;
         var sql = Cabecera + @"
-WHERE s.IdSolicitud = @id;
+WHERE s.IdSolicitud = @id" + deCuenta + @";
 SELECT c.Categoria, c.Accion, c.PctAnterior, c.PctNuevo, c.TipoIniciativa, c.TipoAgrupado,
        PctActual = pc.PctDisminucion, Ligada = CASE WHEN pc.Codigo IS NOT NULL AND pc.VigenteEnOrigen = 1 THEN 1 ELSE 0 END,
        LigadaAlgunaVez = CASE WHEN pc.Codigo IS NOT NULL THEN 1 ELSE 0 END
 FROM adm.SolicitudCambioCategoria AS c
 INNER JOIN adm.SolicitudCambio AS s ON s.IdSolicitud = c.IdSolicitud
 LEFT JOIN dbo.ProblemCategoria AS pc ON pc.Codigo = s.Codigo AND pc.Categoria = c.Categoria
-WHERE c.IdSolicitud = @id ORDER BY c.Accion DESC, c.Categoria;
+WHERE c.IdSolicitud = @id" + deCuenta + @" ORDER BY c.Accion DESC, c.Categoria;
 SELECT e.IdEvento, e.Evento, e.Usuario, e.FechaUtc, e.Detalle
-FROM adm.SolicitudCambioEvento AS e WHERE e.IdSolicitud = @id ORDER BY e.IdEvento;";
+FROM adm.SolicitudCambioEvento AS e WHERE e.IdSolicitud = @id" +
+            (cuenta == null ? "" : " AND EXISTS (SELECT 1 FROM adm.SolicitudCambio AS s WHERE s.IdSolicitud = @id" + deCuenta + ")") + @"
+ORDER BY e.IdEvento;";
         using (var cn = Abrir())
         using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 60 })
         {
             cmd.Parameters.Add("@id", SqlDbType.Int).Value = idSolicitud;
+            if (cuenta != null) cmd.Parameters.Add("@cuenta", SqlDbType.NVarChar, 256).Value = cuenta;
             using (var r = cmd.ExecuteReader())
             {
                 if (!r.Read()) return null;
@@ -880,6 +918,34 @@ public static class SolicitudesCambio
 {
     // El handler usa estos; las pruebas los cambian por falsos.
     public static IAlmacenSolicitudesCambio Almacen = new AlmacenSolicitudesCambioSql();
+    // "Mis solicitudes de cambio": la misma lectura real, filtrada por cuenta.
+    public static ILectorMisSolicitudesCambio Mias = new AlmacenSolicitudesCambioSql();
+
+    // Lo que ve quien ENVIO la solicitud (no ADM): sin lo interno de la
+    // revision de ADM (intentos, ultimo error de aplicar y su fecha) ni el
+    // detalle de los eventos FALLO_APLICAR / DESACTUALIZADA (es ese mismo
+    // error). El evento si se ve: la bitacora queda completa. Estado,
+    // revisor, fecha y comentario de la revision tambien se ven.
+    public static readonly string[] CamposSoloAdm = { "intentos", "ultimo_error", "fecha_ultimo_intento_utc", "sin_clasificar" };
+
+    public static Dictionary<string, object> ParaSolicitante(Dictionary<string, object> d)
+    {
+        if (d == null) return null;
+        foreach (var k in CamposSoloAdm) d.Remove(k);
+        object ev;
+        if (d.TryGetValue("eventos", out ev) && ev is IEnumerable<object>)
+            foreach (var o in (IEnumerable<object>)ev)
+            {
+                var e = o as Dictionary<string, object>;
+                object tipo;
+                if (e != null && e.TryGetValue("evento", out tipo) && (tipo as string == "FALLO_APLICAR" || tipo as string == "DESACTUALIZADA"))
+                    e["detalle"] = null;
+            }
+        return d;
+    }
+
+    public static readonly string[] EstadosCola = { "PENDIENTE", "APLICADA", "RECHAZADA" };
+    public static bool EsEstadoCola(string estado) { return Array.IndexOf(EstadosCola, estado) >= 0; }
     public static Func<NameValueCollection, ValidacionAplicar> ValidarAplicacion = ValidacionAplicar.ComoEdicionDirecta;
     // Para PeticionSolicitudCambio.ExigirCatalogo. Si una lectura falla, la
     // excepcion sube: el handler no envia nada.

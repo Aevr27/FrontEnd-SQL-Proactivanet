@@ -16,11 +16,18 @@
    "rechazada" se dice SOLO con la respuesta del servidor; una falla deja la
    solicitud pendiente y se muestra el motivo que dio el servidor.
    Se prueba en node: tools/tests/SolicitudesCambioColaSmoke.js.
+
+   MisCambios (2026-11-04): "Mis solicitudes de cambio" para quien no es ADM
+   (#mcBloque), SOLO LECTURA: lista con filtro Estado y detalle con su
+   historial, sin aplicar ni rechazar. handlers/admin_iniciativas_mis_cambios.ashx
+   decide de quien son (la cuenta de IIS) y quien entra (ExigirSolicitud).
+   Se prueba en node: tools/tests/MisSolicitudesCambioSmoke.js.
    ========================================================================= */
 window.SolicitudesCambioCola = (function () {
   'use strict';
 
   var URL = '../handlers/admin_iniciativas_solicitudes.ashx';
+  var URL_MIAS = '../handlers/admin_iniciativas_mis_cambios.ashx';
   var TIPOS = { FECHA: 'Fecha compromiso', ESTADO: 'Estado y Subestado', CATEGORIAS: 'Categorías', OTROS: 'Otros (explicación)',
                 DATOS: 'Título / Product Owner / Service Owner', VARIOS: 'Varios cambios' };
   // VARIOS (sql/34): las fechas pedidas, cada una con su etapa.
@@ -216,9 +223,13 @@ window.SolicitudesCambioCola = (function () {
 
   // tipos: { iniciativa: [...], agrupado: [...] } (los valores que ya existen).
   // vols: la volumetria de hoy por ruta (htmlImpacto); opcional.
-  function htmlDetalle(d, tipos, vols) {
+  // lectura (MisCambios): sin nada de la revision de ADM (sin comentario,
+  // aplicar, rechazar, clasificar ni sus avisos; sin impacto ni ids de la
+  // cola). Solo "Cerrar" (data-mc-accion).
+  function htmlDetalle(d, tipos, vols, lectura) {
     tipos = tipos || {};
     var pendiente = d.estado === 'PENDIENTE';
+    var revisa = pendiente && !lectura;
     var act = d.actual || {};
     var filas = '';
     if (d.tipo === 'ESTADO' || (d.tipo === 'VARIOS' && d.estado_nuevo)) {
@@ -249,7 +260,7 @@ window.SolicitudesCambioCola = (function () {
         var sinClas = c.accion === 'AGREGAR' && (!c.tipo_iniciativa || !c.tipo_agrupado);
         var clas = c.accion !== 'AGREGAR' ? '<span class="ini-nota">no cambia</span>'
           : !sinClas ? h(c.tipo_iniciativa) + ' / ' + h(c.tipo_agrupado)
-          : pendiente
+          : revisa
             ? '<span class="ini-sol-clas" data-clas-fila="' + n + '"><label>Tipo de iniciativa <select data-clas-ti="' + n + '" data-clas-categoria="' + h(c.categoria) + '">' + opciones(tipos.iniciativa) + '</select></label> ' +
               '<label>Agrupación <select data-clas-ta="' + n + '">' + opciones(tipos.agrupado) + '</select></label></span>'
             : '<span class="ini-nota">sin clasificar</span>';
@@ -258,18 +269,22 @@ window.SolicitudesCambioCola = (function () {
           (c.accion === 'AGREGAR' ? (c.ligada_alguna_vez ? 'ya ligada' : '—') : (c.ligada ? pct(c.pct_actual) : 'ya no ligada')) + '</td><td>' + clas + '</td></tr>';
       }).join('') + '</tbody></table>' : '';
     var avisos = '';
-    if (pendiente && d.tipo === 'VARIOS') {
+    if (revisa && d.tipo === 'VARIOS') {
       avisos += '<p class="ini-cambio-msg aviso"><strong>Varios cambios, una sola decisión:</strong> aplicar aplica TODOS los cambios de arriba ' +
         '(o ninguno, si alguno falla); rechazar no aplica ninguno.</p>';
     }
-    if (pendiente && d.desactualizada) {
+    if (lectura && pendiente && d.desactualizada) {
+      avisos += '<p class="ini-cambio-msg aviso"><strong>Desactualizada:</strong> la iniciativa cambió desde que la enviaste (compara «Al enviar» con «Ahora»): ' +
+        'un administrador no puede aplicarla tal cual.</p>';
+    }
+    if (revisa && d.desactualizada) {
       avisos += '<p class="ini-cambio-msg error"><strong>Desactualizada:</strong> la iniciativa cambió desde que se envió (compara «Al enviar» con «Ahora»). ' +
         'No se puede aplicar tal cual: recházala o pide que la envíen de nuevo.</p>';
     }
-    if (pendiente && d.ultimo_error) {
+    if (revisa && d.ultimo_error) {
       avisos += '<p class="ini-cambio-msg aviso"><strong>Último intento (' + fechaHora(d.fecha_ultimo_intento_utc) + '):</strong> ' + h(d.ultimo_error) + '</p>';
     }
-    if (pendiente && cats.some(function (c) { return c.accion === 'AGREGAR' && (!c.tipo_iniciativa || !c.tipo_agrupado); })) {
+    if (revisa && cats.some(function (c) { return c.accion === 'AGREGAR' && (!c.tipo_iniciativa || !c.tipo_agrupado); })) {
       avisos += '<p class="ini-cambio-msg aviso">Una categoría por agregar llegó sin clasificación (su prefijo no tiene regla o el valor no existe): elígela antes de aplicar.</p>';
     }
     var eventos = (d.eventos || []).map(function (e) {
@@ -280,7 +295,9 @@ window.SolicitudesCambioCola = (function () {
       ? '<p class="ini-nota">' + h(ESTADOS[d.estado]) + ' por ' + h(d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
         (d.comentario_revision ? ': «' + h(d.comentario_revision) + '»' : '') + '</p>'
       : '';
-    var acciones = pendiente
+    var acciones = lectura
+      ? '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-mc-accion="cerrar">Cerrar</button></div>'
+      : pendiente
       ? '<div class="ini-cambio-campos"><div class="campo ini-cambio-ancho"><label for="solComentario">' + (d.tipo === 'OTROS' ? 'Qué se corrigió (obligatorio para cerrarla)' : 'Comentario (obligatorio para rechazar)') +
         '</label><textarea id="solComentario" rows="3"></textarea></div></div>' +
         '<div class="ini-cambio-pie"><button type="button" class="btn chico" data-sol-accion="aplicar">' + (d.tipo === 'OTROS' ? 'Cerrar como atendida' : 'Aplicar solicitud') + '</button> ' +
@@ -290,9 +307,9 @@ window.SolicitudesCambioCola = (function () {
     return '<h4>Solicitud #' + h(d.id) + ' · ' + h(d.folio) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' +
       '<p class="ini-nota">' + h(TIPOS[d.tipo] || d.tipo) + ' · la envió ' + quien(d) + ' (' + (d.solicitante_nombre && d.solicitado_por ? h(d.solicitado_por) + ', ' : '') + h(d.rol_solicitante) + ') el ' +
         fechaHora(d.fecha_solicitud_utc) + ' · ' + h(ESTADOS[d.estado] || d.estado) + (d.intentos ? ' · ' + h(d.intentos) + ' intento(s) de aplicar' : '') + '</p>' +
-      avisos + cambios + htmlCats + htmlImpacto(cats, vols) +
+      avisos + cambios + htmlCats + (lectura ? '' : htmlImpacto(cats, vols)) +
       '<h5>Motivo</h5><div class="ini-texto">' + h(d.motivo) + '</div>' + revision +
-      '<div class="ini-cambio-msg" id="solDetMsg" role="status" aria-live="polite"></div>' + acciones +
+      (lectura ? '' : '<div class="ini-cambio-msg" id="solDetMsg" role="status" aria-live="polite"></div>') + acciones +
       (eventos ? '<h5>Historial de la solicitud</h5><ul class="ini-sol-eventos">' + eventos + '</ul>' : '');
   }
 
@@ -638,6 +655,183 @@ window.SolicitudesCambioCola = (function () {
     }
   }
 
-  return { ColaSolicitudes: ColaSolicitudes, htmlLista: htmlLista, htmlDetalle: htmlDetalle, resumen: resumen, paginar: paginar, ordenarRecientes: ordenarRecientes,
-           htmlPaginas: htmlPaginas, POR_PAGINA: POR_PAGINA, URL: URL };
+  // La lista de "Mis solicitudes de cambio": sin "Solicito" (son todas
+  // suyas) ni intentos de aplicar (el servidor no los manda).
+  function htmlListaMias(lista, filtro) {
+    if (!lista.length) {
+      return '<p class="ini-nota">' + (filtro ? 'No tienes solicitudes de cambio con ese estado.' : 'Todavía no has enviado solicitudes de cambio.') + '</p>';
+    }
+    return '<table class="ini-det-tabla ini-sol-tabla"><thead><tr><th scope="col">#</th><th scope="col">Iniciativa</th>' +
+      '<th scope="col">Qué cambia</th><th scope="col">Pedido</th><th scope="col">Enviada</th><th scope="col">Estado</th></tr></thead><tbody>' +
+      lista.map(function (s) {
+        return '<tr class="ini-sol-fila" data-mc-fila="' + h(s.id) + '">' +
+          '<td><button type="button" class="ini-folio" data-mc-id="' + h(s.id) + '" aria-controls="mcDetalle">#' + h(s.id) + '</button></td>' +
+          '<td>' + h(s.folio) + (s.titulo ? '<span class="ini-sub">' + h(s.titulo) + '</span>' : '') + '</td>' +
+          '<td>' + h(TIPOS[s.tipo] || s.tipo) + '</td><td>' + resumen(s) + '</td>' +
+          '<td>' + fechaHora(s.fecha_solicitud_utc) + '</td><td>' + h(ESTADOS[s.estado] || s.estado) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function textoErrorMias(r, que) {
+    if (r.status === 401 || r.status === 403) return { clase: 'error', html: h(r.json.error || 'Tu cuenta ya no tiene acceso a Solicitudes.') };
+    if (r.status === 501) return { clase: 'aviso', html: h(r.json.error || 'El registro de solicitudes de cambio no está disponible.') };
+    if (r.status === 404) return { clase: 'error', html: 'La solicitud no existe o no es tuya.' };
+    return { clase: 'error', html: h(r.json.error || ('No se pudo leer ' + que + ' (respuesta ' + r.status + ').')) };
+  }
+
+  // "Mis solicitudes de cambio": para quien puede solicitar y no es ADM,
+  // las que envio su propia cuenta (#mcBloque), solo lectura. El servidor
+  // decide de quien son y quien puede verlas; aqui solo se elige el Estado
+  // (que tambien filtra el servidor).
+  class MisCambios {
+    constructor(doc, pedir) {
+      this.doc = doc;
+      this.pedir = pedir || function (url, op) { return fetch(url, op); };
+      this.cableado = false;
+      this.filtro = '';          // mcFiltro: Todas por omision ('' = todas)
+      this.lecturas = 0;
+      this.lecturaDetalle = 0;
+    }
+
+    $(id) { return this.doc.getElementById(id); }
+
+    cablear() {
+      if (this.cableado || !this.$('mcBloque')) return;
+      this.cableado = true;
+      var self = this;
+      this.$('mcActualizar').addEventListener('click', function () { self.listar(); });
+      if (this.$('mcFiltro')) {
+        this.$('mcFiltro').value = this.filtro;
+        this.$('mcFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.cerrarDetalle(); self.listar(); });
+      }
+      this.$('mcLista').addEventListener('click', function (e) {
+        var el = e.target && e.target.closest ? e.target.closest('[data-mc-id]') : e.target;
+        var id = el && el.getAttribute && el.getAttribute('data-mc-id');
+        if (id) self.verDetalle(Number(id));
+      });
+      this.$('mcDetalle').addEventListener('click', function (e) {
+        var el = e.target && e.target.closest ? e.target.closest('[data-mc-accion]') : e.target;
+        if (el && el.getAttribute && el.getAttribute('data-mc-accion') === 'cerrar') self.cerrarDetalle();
+      });
+    }
+
+    abrir() {
+      this.cablear();
+      if (!this.$('mcBloque')) return Promise.resolve(null);
+      this.$('mcBloque').hidden = false;
+      return this.listar();
+    }
+
+    // Sin acceso (ADM, o ya no puede solicitar): oculto y sin lo leido. Una
+    // lectura en curso ya no se pinta.
+    ocultar() {
+      if (!this.$('mcBloque')) return;
+      this.lecturas++;
+      this.$('mcBloque').hidden = true;
+      this.$('mcLista').innerHTML = '';
+      if (this.$('mcResumen')) this.$('mcResumen').textContent = '';
+      this.mensaje('', '');
+      this.cerrarDetalle();
+    }
+
+    mensaje(clase, html) {
+      var m = this.$('mcMsg');
+      if (!m) return;
+      m.className = 'ini-cambio-msg ' + clase;
+      m.innerHTML = html || '';
+    }
+
+    listar(fondo) {
+      var self = this, mia = ++this.lecturas, filtro = this.filtro;
+      if (!fondo) {
+        this.mensaje('', '<span>Cargando tus solicitudes de cambio…</span>');
+        if (this.$('mcResumen')) this.$('mcResumen').textContent = '';
+      }
+      var url = URL_MIAS + '?accion=listar' + (filtro ? '&estado=' + encodeURIComponent(filtro) : '');
+      return Promise.resolve().then(function () { return self.pedir(url, { cache: 'no-store', credentials: 'same-origin' }); })
+        .then(leer)
+        .then(function (r) {
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = r.status;
+          if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
+            var lista = ordenarRecientes(r.json.solicitudes);
+            self.$('mcLista').innerHTML = htmlListaMias(lista, filtro);
+            if (self.$('mcResumen')) {
+              self.$('mcResumen').textContent = lista.length + (lista.length === 1 ? ' solicitud' : ' solicitudes') +
+                (typeof r.json.maximo === 'number' && lista.length >= r.json.maximo ? ' (las ' + r.json.maximo + ' más recientes)' : '');
+            }
+            self.mensaje('', '');
+            return lista;
+          }
+          if (fondo && r.status !== 401 && r.status !== 403) {
+            self.mensaje('aviso', 'No se pudo actualizar la lista (respuesta ' + h(r.status) + '): se muestra la última lectura.');
+            return null;
+          }
+          self.$('mcLista').innerHTML = '';
+          var e = textoErrorMias(r, 'tus solicitudes de cambio');
+          self.mensaje(e.clase, e.html);
+          return null;
+        }, function () {
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = null;
+          if (fondo) {
+            self.mensaje('aviso', 'No se pudo actualizar la lista (sin conexión): se muestra la última lectura.');
+            return null;
+          }
+          self.$('mcLista').innerHTML = '';
+          self.mensaje('error', 'No se pudo contactar al servidor.');
+          return null;
+        });
+    }
+
+    // RefrescoAuto: con la lista a la vista, sin un detalle abierto y sin
+    // nadie eligiendo en la pestaña.
+    puedeRefrescar() {
+      var bloque = this.$('mcBloque'), panel = this.$('panel-solicitudes'), det = this.$('mcDetalle');
+      return this.cableado && !!bloque && !bloque.hidden && !(panel && panel.hidden) && !(det && !det.hidden) &&
+        !(window.RefrescoAuto && window.RefrescoAuto.editando(this.doc, panel));
+    }
+    refrescarFondo() {
+      var self = this;
+      return this.listar(true).then(function () { return self.ultimoEstado; });
+    }
+
+    verDetalle(id) {
+      var self = this, mia = ++this.lecturaDetalle;
+      this.mensaje('', '<span>Cargando la solicitud…</span>');
+      return Promise.resolve().then(function () {
+        return self.pedir(URL_MIAS + '?accion=detalle&id=' + encodeURIComponent(id), { cache: 'no-store', credentials: 'same-origin' });
+      })
+        .then(leer)
+        .then(function (r) {
+          if (mia !== self.lecturaDetalle) return null;
+          if (r.status !== 200) {
+            var e = textoErrorMias(r, 'la solicitud');
+            self.mensaje(e.clase, e.html);
+            return null;
+          }
+          self.mensaje('', '');
+          var caja = self.$('mcDetalle');
+          caja.innerHTML = htmlDetalle(r.json, null, null, true);
+          caja.hidden = false;
+          return r.json;
+        }, function () {
+          if (mia !== self.lecturaDetalle) return null;
+          self.mensaje('error', 'No se pudo contactar al servidor.');
+          return null;
+        });
+    }
+
+    cerrarDetalle() {
+      this.lecturaDetalle++;
+      var caja = this.$('mcDetalle');
+      if (!caja) return;
+      caja.hidden = true;
+      caja.innerHTML = '';
+    }
+  }
+
+  return { ColaSolicitudes: ColaSolicitudes, MisCambios: MisCambios, htmlLista: htmlLista, htmlListaMias: htmlListaMias, htmlDetalle: htmlDetalle,
+           resumen: resumen, paginar: paginar, ordenarRecientes: ordenarRecientes,
+           htmlPaginas: htmlPaginas, POR_PAGINA: POR_PAGINA, URL: URL, URL_MIAS: URL_MIAS };
 })();

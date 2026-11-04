@@ -524,6 +524,27 @@ function Montar(rol, respuestas) {
   await caida.v.abrir();
   Check('MS6 sin conexion: lo dice', true, /No se pudo contactar al servidor/.test(caida.$('msMsg').innerHTML));
 
+  // ---- Mis solicitudes: filtro Estado (2026-11-04) ----
+  var mf = MontarMias([Respuesta(200, { solicitudes: [Fila(3)], total: 1 }),
+                       Respuesta(200, { solicitudes: [Fila(5, { estado: 'APROBADA' })], total: 1 }),
+                       Respuesta(200, { solicitudes: [], total: 0 }),
+                       Respuesta(200, { solicitudes: [Fila(3)], total: 1 })]);
+  await mf.v.abrir();
+  Check('MS7 por omision Todas (como antes): sin ?estado=', ['', '../handlers/admin_iniciativas_mis_solicitudes.ashx?accion=listar'],
+    [mf.$('msFiltro').value, mf.pedidas[0]]);
+  mf.$('msFiltro').escuchas.change({ target: { value: 'APROBADA' } }); await new Promise(function (ok) { setTimeout(ok, 0); });
+  Check('MS8 elegir Aprobadas: lista del endpoint propio con estado=APROBADA', ['../handlers/admin_iniciativas_mis_solicitudes.ashx?accion=listar&estado=APROBADA', true],
+    [mf.pedidas[1], /#0000005/.test(mf.$('msLista').innerHTML)]);
+  mf.$('msFiltro').escuchas.change({ target: { value: 'RECHAZADA' } }); await new Promise(function (ok) { setTimeout(ok, 0); });
+  Check('MS9 Rechazadas vacia: lo dice', [true, true],
+    [/estado=RECHAZADA$/.test(mf.pedidas[2]), /No tienes solicitudes de iniciativa con ese estado/.test(mf.$('msLista').innerHTML)]);
+  mf.$('msFiltro').escuchas.change({ target: { value: '' } }); await new Promise(function (ok) { setTimeout(ok, 0); });
+  Check('MS10 volver a Todas: sin ?estado=', '../handlers/admin_iniciativas_mis_solicitudes.ashx?accion=listar', mf.pedidas[3]);
+  var hMs = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.html'), 'utf8');
+  var bloqueMs = hMs.slice(hMs.indexOf('<div id="msBloque"'), hMs.indexOf('<div id="mcBloque"'));
+  Check('MS11 msFiltro: Pendientes / Aprobadas / Rechazadas / Todas (Todas elegida)', true,
+    /<select id="msFiltro">\s*<option value="ENVIADA">Pendientes<\/option>\s*<option value="APROBADA">Aprobadas<\/option>\s*<option value="RECHAZADA">Rechazadas<\/option>\s*<option value="" selected>Todas<\/option>/.test(bloqueMs));
+
   console.log(fallos === 0 ? 'OK: todo paso' : 'FALLOS: ' + fallos);
   process.exit(fallos === 0 ? 0 : 1);
 })().catch(function (e) { console.log('FAIL  excepcion: ' + (e && e.stack || e)); process.exit(1); });

@@ -19,6 +19,8 @@
 // ListarDe / DetalleDe (2026-10-27): lo mismo, solo las solicitudes que
 // envio UNA cuenta, para "Mis solicitudes" del PO / SO
 // (handlers/admin_iniciativas_mis_solicitudes.ashx, ExigirSolicitud).
+// ListarDe(cuenta, max, estado) (2026-11-04): con el filtro Estado de ADM
+// (Estados o null = todas), en la base y siempre DENTRO de la cuenta.
 //
 // Solo SELECT: la cuenta del sitio lee con db_datareader (el DENY de sql/29
 // es de INSERT/UPDATE/DELETE). No cambia estado, no aprueba ni borra, y no
@@ -56,7 +58,8 @@ public interface ILectorSolicitudesIniciativa
 public interface ILectorMisSolicitudesIniciativa
 {
     bool Disponible();
-    LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo);
+    // estado: uno de RegistroSolicitudesIniciativa.Estados o null (todas).
+    LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo, string estado);
     Dictionary<string, object> DetalleDe(int numero, string cuenta);
 }
 
@@ -143,10 +146,13 @@ public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativ
         return Leer(null, maximo, estado);
     }
 
-    public LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo)
+    public LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo) { return ListarDe(cuenta, maximo, null); }
+
+    public LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo, string estado)
     {
         if (string.IsNullOrEmpty(cuenta)) throw new ArgumentNullException("cuenta");
-        return Leer(cuenta, maximo, null);
+        if (estado != null && !RegistroSolicitudesIniciativa.EsEstado(estado)) throw new ArgumentOutOfRangeException("estado");
+        return Leer(cuenta, maximo, estado);
     }
 
     private LecturaSolicitudesIniciativa Leer(string cuenta, int maximo, string estado)

@@ -14,6 +14,8 @@
 //      nada; el detalle de otra cuenta es 404 (como si no existiera).
 //   L  listar / detalle: 200, sin tablas 501, numero invalido 400, POST 405,
 //      accion desconocida 400. Solo lectura: el fuente no escribe.
+//   E  filtro Estado (2026-11-04): ENVIADA / APROBADA / RECHAZADA / todas,
+//      siempre dentro de la cuenta; estado desconocido 400 sin leer.
 //
 // Compilar y correr desde la raiz del repo (como AccesoAdminHttpSmoke):
 //   csc /out:MisSolicitudesIniciativaHttpSmoke.exe /r:adm.dll /r:hnd.dll /r:System.dll /r:System.Core.dll
@@ -66,12 +68,13 @@ sealed class LectorMiasFalso : ILectorMisSolicitudesIniciativa
 
     public bool Disponible() { Llamadas.Add("disponible"); return Hay; }
 
-    public LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo)
+    public LecturaSolicitudesIniciativa ListarDe(string cuenta, int maximo, string estado)
     {
-        Llamadas.Add("listar:" + cuenta);
+        Llamadas.Add("listar:" + cuenta + (estado == null ? "" : ":" + estado));
         var l = new LecturaSolicitudesIniciativa();
         foreach (var s in Todas)
-            if (string.Equals((string)s["solicitante_cuenta"], cuenta, StringComparison.OrdinalIgnoreCase)) l.Solicitudes.Add(s);
+            if (string.Equals((string)s["solicitante_cuenta"], cuenta, StringComparison.OrdinalIgnoreCase)
+                && (estado == null || (string)s["estado"] == estado)) l.Solicitudes.Add(s);
         l.Total = l.Solicitudes.Count;
         return l;
     }
@@ -168,11 +171,11 @@ public static class MisSolicitudesIniciativaHttpSmoke
     }
     static object Campo(Dictionary<string, object> j, string k) { object v; return j.TryGetValue(k, out v) ? v : "(falta)"; }
 
-    static Dictionary<string, object> Fila(int n, string cuenta)
+    static Dictionary<string, object> Fila(int n, string cuenta, string estado = "ENVIADA")
     {
         return new Dictionary<string, object>
         {
-            { "numero", n }, { "numero_texto", new NumeroSolicitud(n).ToString() }, { "estado", "ENVIADA" },
+            { "numero", n }, { "numero_texto", new NumeroSolicitud(n).ToString() }, { "estado", estado },
             { "titulo", "Solicitud " + n }, { "solicitante_cuenta", cuenta },
         };
     }
@@ -300,6 +303,37 @@ public static class MisSolicitudesIniciativaHttpSmoke
             Check("L7 el filtro por cuenta es un parametro (@cuenta), nunca texto armado", "True|False",
                   r.Contains("UPPER(s.SolicitanteCuenta) = UPPER(@cuenta)") + "|" + r.Contains("+ cuenta +"));
         }
+
+        // ---------------- E: filtro Estado ----------------
+        lector.Todas.Add(Fila(7, POSO, "APROBADA"));
+        lector.Todas.Add(Fila(6, POSO, "RECHAZADA"));
+        lector.Todas.Add(Fila(8, MODPO, "APROBADA"));
+        lector.Todas.Add(Fila(4, MOD, "RECHAZADA"));
+        foreach (var c in new[] { new[] { "ENVIADA", "3,1" }, new[] { "APROBADA", "7" }, new[] { "RECHAZADA", "6" }, new[] { "", "3,1,7,6" } })
+        {
+            cuerpo = Mias("accion=listar" + (c[0].Length == 0 ? "" : "&estado=" + c[0]), POSO, out st);
+            Check("E1 PO/SO estado=" + (c[0].Length == 0 ? "(todas)" : c[0]) + ": solo las suyas de ese estado", "200|" + c[1], st + "|" + Numeros(cuerpo));
+        }
+        lector.Llamadas.Clear();
+        Mias("accion=listar&estado=APROBADA", POSO, out st);
+        Check("E2 el estado llega al lector con la cuenta de IIS", "listar:" + POSO + ":APROBADA", lector.Llamadas[lector.Llamadas.Count - 1]);
+        cuerpo = Mias("accion=listar&estado=APROBADA", MOD, out st);
+        Check("E3 MOD: APROBADA de otras cuentas no aparecen", "200|", st + "|" + Numeros(cuerpo));
+        cuerpo = Mias("accion=listar&estado=RECHAZADA", MOD, out st);
+        Check("E3 MOD: su RECHAZADA", "4", Numeros(cuerpo));
+        cuerpo = Mias("accion=listar&estado=APROBADA", MODPO, out st);
+        Check("E3 MOD PO/SO: su APROBADA", "8", Numeros(cuerpo));
+        foreach (var q in new[] { "PENDIENTE", "aprobada", "TODAS", "ENVIADA' OR 1=1--" })
+        {
+            lector.Llamadas.Clear();
+            cuerpo = Mias("accion=listar&estado=" + Uri.EscapeDataString(q), POSO, out st);
+            Check("E4 estado desconocido '" + q + "': 400 sin leer", "400|EstadoDesconocido|0", st + "|" + Campo(Json(cuerpo), "tipo") + "|" + lector.Llamadas.Count);
+        }
+        lector.Llamadas.Clear();
+        cuerpo = Mias("accion=listar&estado=APROBADA", VIEWER, out st);
+        Check("E5 VIEWER con filtro: 403 sin leer", "403|0", st + "|" + lector.Llamadas.Count);
+        cuerpo = Mias("accion=detalle&numero=7&estado=RECHAZADA", POSO, out st);
+        Check("E6 detalle ignora ?estado=", "200|7", st + "|" + Campo(Json(cuerpo), "numero"));
 
         Console.WriteLine();
         Console.WriteLine(pasados + " pasaron, " + fallos + " fallaron");

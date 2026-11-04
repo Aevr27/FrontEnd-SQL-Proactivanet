@@ -382,6 +382,38 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                   ErrorDe(() => alm.Rechazar(eR.IdSolicitud, @"SORIANA\adm2", "otra vez")) + "|" + ErrorDe(() => aplicador.Aplicar(eR.IdSolicitud, @"SORIANA\adm2", "x", null, Hoy)));
             Check("R4 registrar falla de una revisada: 51202", 51202, ErrorDe(() => alm.RegistrarFallo(eR.IdSolicitud, @"SORIANA\adm2", 1, "x")));
 
+            // ---------------- Y: "Mis solicitudes de cambio" (ListarDe / DetalleDe, 2026-11-04) ----------------
+            {
+                Func<IEnumerable<Dictionary<string, object>>, string> idsY = l => string.Join(",", l.Select(x => Convert.ToString(x["id"])).ToArray());
+                var todas = alm.Listar(null, 500);
+                var deMod1 = todas.Where(x => string.Equals((string)x["solicitado_por"], @"SORIANA\mod1", StringComparison.OrdinalIgnoreCase)).ToList();
+                Check("Y1 ListarDe: exactamente las de la cuenta, en el orden de la cola (sin distinguir mayusculas)", "True|" + idsY(deMod1) + "|" + idsY(deMod1),
+                      (deMod1.Count > 2 && deMod1.Count == int.Parse(Uno("SELECT COUNT(*) FROM adm.SolicitudCambio WHERE SolicitadoPor = N'SORIANA\\mod1'")))
+                      + "|" + idsY(alm.ListarDe(@"SORIANA\mod1", null, 500)) + "|" + idsY(alm.ListarDe(@"soriana\MOD1", null, 500)));
+                Check("Y2 ListarDe con estado: solo ese estado y solo de la cuenta", "True|True|True",
+                      alm.ListarDe(@"SORIANA\mod1", "RECHAZADA", 500).Any(x => (int)x["id"] == eR.IdSolicitud) + "|" +
+                      alm.ListarDe(@"SORIANA\mod1", "RECHAZADA", 500).All(x => (string)x["estado"] == "RECHAZADA" && string.Equals((string)x["solicitado_por"], @"SORIANA\mod1", StringComparison.OrdinalIgnoreCase)) + "|" +
+                      (idsY(alm.ListarDe(@"SORIANA\mod1", "PENDIENTE", 500)) == idsY(deMod1.Where(x => (string)x["estado"] == "PENDIENTE"))));
+                Check("Y3 otra cuenta: solo la suya; cuenta sin solicitudes o con comillas: ninguna", idsY(todas.Where(x => (string)x["solicitado_por"] == @"SORIANA\otro")) + "|0|0",
+                      idsY(alm.ListarDe(@"SORIANA\otro", null, 500)) + "|" + alm.ListarDe(@"SORIANA\nadie", null, 500).Count + "|" +
+                      alm.ListarDe(@"x' OR 1=1--", null, 500).Count);
+                Check("Y4 ListarDe respeta el tope", 1, alm.ListarDe(@"SORIANA\mod1", null, 1).Count);
+                var mia = alm.DetalleDe(eR.IdSolicitud, @"soriana\mod1");
+                Check("Y5 DetalleDe de la suya: con su historial completo (mismos eventos que el de ADM)", "RECHAZADA|" + ((List<object>)alm.Detalle(eR.IdSolicitud)["eventos"]).Count,
+                      mia["estado"] + "|" + ((List<object>)mia["eventos"]).Count);
+                Check("Y6 DetalleDe de otra cuenta o inexistente: null", "True|True|True",
+                      (alm.DetalleDe(eR.IdSolicitud, @"SORIANA\otro") == null) + "|" + (alm.DetalleDe(e3.IdSolicitud, @"SORIANA\mod1") == null) + "|" +
+                      (alm.DetalleDe(999999, @"SORIANA\mod1") == null));
+                var dcat = alm.DetalleDe(ecat.IdSolicitud, @"SORIANA\adm1");
+                Func<Dictionary<string, object>, string> catsTxt = d => string.Join(";", Cats(d).Select(c => c["categoria"] + "=" + c["accion"] + ":" + c["pct_nuevo"]).ToArray());
+                Check("Y7 DetalleDe trae las categorias de la suya", "True|" + catsTxt(alm.Detalle(ecat.IdSolicitud)),
+                      (Cats(dcat).Count > 0) + "|" + catsTxt(dcat));
+                string sinCuenta;
+                try { alm.ListarDe(null, null, 10); sinCuenta = "sin error"; } catch (ArgumentNullException) { sinCuenta = "ArgumentNull"; }
+                Check("Y8 ListarDe sin cuenta: ArgumentNullException (nunca todas)", "ArgumentNull", sinCuenta);
+                Check("Y9 la cola de ADM sigue siendo todas", int.Parse(Uno("SELECT COUNT(*) FROM adm.SolicitudCambio")), alm.Listar(null, 500).Count);
+            }
+
             // ---------------- M: edicion directa ----------------
             var plan = new PlanModificarAdmin { Codigo = "PRB 2026-000003", Hoy = Hoy };
             plan.Problem[PeticionModificarAdmin.CFCierre] = "2027-03-15";
@@ -401,6 +433,9 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
             var eSitio = sitio.Enviar(Peticion("folio", "PRB 2026-000002", "tipo", "otros", "motivo", "como el sitio"), @"SORIANA\mod1", "MOD");
             Check("P1 como PROACTIVANETAD: envia, lista y lee el detalle por los procedimientos", "True|True|PENDIENTE",
                   (eSitio.IdSolicitud > 0) + "|" + sitio.Listar("PENDIENTE", 50).Any(x => (int)x["id"] == eSitio.IdSolicitud) + "|" + sitio.Detalle(eSitio.IdSolicitud)["estado"]);
+            Check("P1b como PROACTIVANETAD: Mis solicitudes de cambio (ListarDe / DetalleDe) solo lee y ve la suya", "True|PENDIENTE|True",
+                  sitio.ListarDe(@"SORIANA\mod1", "PENDIENTE", 500).Any(x => (int)x["id"] == eSitio.IdSolicitud) + "|" +
+                  sitio.DetalleDe(eSitio.IdSolicitud, @"SORIANA\mod1")["estado"] + "|" + (sitio.DetalleDe(eSitio.IdSolicitud, @"SORIANA\otro") == null));
             // Orden de la cola: el MISMO con cualquier filtro Estado, la mas
             // reciente primero por Enviada y, con la misma hora, el id mas alto.
             foreach (var filtroEstado in new[] { null, "PENDIENTE", "APLICADA", "RECHAZADA" })

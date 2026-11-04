@@ -784,6 +784,7 @@ window.Iniciativas = (function () {
       this.cola = null;       // ColaSolicitudes (admin/solicitudes-cambio.js): cola de ADM
       this.nuevas = null;     // RegistroSolicitudesNuevas (admin/solicitudes-nuevas.js): solo lectura, ADM
       this.mias = null;       // MisSolicitudes (admin/solicitudes-nuevas.js): las propias, quien no es ADM
+      this.misCambios = null; // MisCambios (admin/solicitudes-cambio.js): las de cambio propias, quien no es ADM
       this.recientes = null;  // VistaCambiosRecientes (admin/cambios-recientes.js): solo ADM
       this.avisos = null;     // VistaAvisosAcuse (admin/acuse-iniciativa.js): avisos de PO/SO, solo ADM
       this.avisoSol = null;   // Aviso (admin/aviso-solicitudes.js): rojo en la pestaña Solicitudes, solo ADM
@@ -816,6 +817,7 @@ window.Iniciativas = (function () {
       if (this.nuevas) this.nuevas.fijarRol(this.rol);
       if (this.avisoSol) this.avisoSol.fijarRol(this.rol);
       if (!this.puedeSolicitar && this.mias) this.mias.ocultar();
+      if (!this.puedeSolicitar && this.misCambios) this.misCambios.ocultar();
       if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') ||
           ((this.vista === 'nueva' || this.vista === 'solicitudes') && !this.puedeSolicitar)) {
         this.mostrarVista('iniciativas');
@@ -839,6 +841,10 @@ window.Iniciativas = (function () {
         if (adm) this.mias.ocultar();
         else this.mias.abrir();
       }
+      if (this.misCambios) {
+        if (adm) this.misCambios.ocultar();
+        else this.misCambios.abrir();
+      }
     }
 
     // Sin cuenta que pueda ver el registro (admin_sesion: registro false, o
@@ -854,6 +860,7 @@ window.Iniciativas = (function () {
       this.rol = null;
       this.puedeSolicitar = false;
       if (this.mias) this.mias.ocultar();
+      if (this.misCambios) this.misCambios.ocultar();
       if (this.avisoSol) this.avisoSol.fijarRol(null);
       if (mensaje && this.$('iniDenegadoTexto')) this.$('iniDenegadoTexto').textContent = mensaje;
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
@@ -997,6 +1004,8 @@ window.Iniciativas = (function () {
             return true;
           };
         }
+        // Mis solicitudes de cambio (misma pestana): las propias, para quien no es ADM.
+        if (window.SolicitudesCambioCola.MisCambios) this.misCambios = new window.SolicitudesCambioCola.MisCambios(this.doc, null);
       }
       // "Nuevas" (misma pestaña): registro de solo lectura de sql/29. Al
       // volver a "De cambio" se relee esa cola, como al abrir la pestaña.
@@ -1030,12 +1039,22 @@ window.Iniciativas = (function () {
       // (puedeRefrescar: visible, sin detalle abierto ni nadie escribiendo).
       // El registro de Iniciativas va con el suyo (abajo); Administracion no.
       if (window.RefrescoAuto) {
-        var listas = [this.cola, this.nuevas, this.mias].filter(function (l) { return l && l.puedeRefrescar; });
-        var visible = function () { return listas.filter(function (l) { return l.puedeRefrescar(); })[0] || null; };
+        // Quien no es ADM ve dos listas a la vez (Mis solicitudes de
+        // iniciativa y de cambio): se releen las visibles; un 401 / 403 de
+        // cualquiera detiene el refresco. ADM ve una sola (Cambios o Iniciativas).
+        var listas = [this.cola, this.nuevas, this.mias, this.misCambios].filter(function (l) { return l && l.puedeRefrescar; });
+        var visibles = function () { return listas.filter(function (l) { return l.puedeRefrescar(); }); };
         this.refresco = new window.RefrescoAuto({
           doc: this.doc,
-          puede: function () { return !!visible(); },
-          refrescar: function () { var l = visible(); return l ? l.refrescarFondo() : Promise.resolve(null); }
+          puede: function () { return visibles().length > 0; },
+          refrescar: function () {
+            var v = visibles();
+            if (!v.length) return Promise.resolve(null);
+            return Promise.all(v.map(function (l) { return l.refrescarFondo(); })).then(function (estados) {
+              for (var i = 0; i < estados.length; i++) if (estados[i] === 401 || estados[i] === 403) return estados[i];
+              return estados[0];
+            });
+          }
         }).iniciar();
         // Y el registro de Iniciativas (fechas, estados, tickets de cada
         // PRB): cada RefrescoAuto.INTERVALO_DATOS, solo con la lista a la

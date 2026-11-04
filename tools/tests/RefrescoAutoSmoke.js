@@ -228,8 +228,8 @@ var RA = caja.RefrescoAuto;
   var html = leer('admin/iniciativas.html'), pag = leer('admin/iniciativas.js');
   Check('W1 iniciativas.html carga refresco-auto.js antes de iniciativas.js', true,
     html.indexOf('../assets/js/refresco-auto.js') > 0 && html.indexOf('../assets/js/refresco-auto.js') < html.indexOf('<script src="iniciativas.js">'));
-  Check('W2 dos RefrescoAuto: las listas de Solicitudes (cola / nuevas / mias) y el registro de Iniciativas', [2, true, true, true],
-    [(pag.match(/new window\.RefrescoAuto\(/g) || []).length, /\[this\.cola, this\.nuevas, this\.mias\]/.test(pag),
+  Check('W2 dos RefrescoAuto: las listas de Solicitudes (cola / nuevas / mias / misCambios) y el registro de Iniciativas', [2, true, true, true],
+    [(pag.match(/new window\.RefrescoAuto\(/g) || []).length, /\[this\.cola, this\.nuevas, this\.mias, this\.misCambios\]/.test(pag),
      /l\.refrescarFondo\(\)/.test(pag) && /l\.puedeRefrescar\(\)/.test(pag),
      /intervalo: window\.RefrescoAuto\.INTERVALO_DATOS/.test(pag) && /regAuto\.puedeRefrescar\(\)/.test(pag) && /regAuto\.refrescarFondo\(\)/.test(pag)]);
   // Experiencia, QA, Efectividad y Orquestacion se refrescan con el MISMO

@@ -694,7 +694,7 @@ public static class AccesoIniciativasHttpSmoke
         }
 
         // ---- F: el fuente --------------------------------------------------
-        foreach (var h in new[] { "capacidad", "volumetria", "validar", "mis_solicitudes" })
+        foreach (var h in new[] { "capacidad", "volumetria", "validar", "mis_solicitudes", "mis_cambios" })
         {
             var t = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_" + h + ".ashx"));
             Check("F1 " + h + " usa ExigirSolicitud y no Exigir a secas", "True|False",
@@ -714,7 +714,7 @@ public static class AccesoIniciativasHttpSmoke
             var n = Path.GetFileName(f);
             if (n == "admin_iniciativas_catalogos.ashx" || n == "admin_iniciativas_capacidad.ashx" ||
                 n == "admin_iniciativas_volumetria.ashx" || n == "admin_iniciativas_validar.ashx" || n == "admin_sesion.ashx" ||
-                n == "admin_iniciativas_mis_solicitudes.ashx" || n == "admin_iniciativas_registro.ashx" ||
+                n == "admin_iniciativas_mis_solicitudes.ashx" || n == "admin_iniciativas_mis_cambios.ashx" || n == "admin_iniciativas_registro.ashx" ||
                 n == "admin_iniciativas_solicitudes.ashx") continue;
             Check("F2 " + n + " no abre nada fuera de Admin (no usa AccesoIniciativas)", false, File.ReadAllText(f).Contains("AccesoIniciativas"));
         }
@@ -744,7 +744,7 @@ public static class AccesoIniciativasHttpSmoke
                   AccesoIniciativas.EsEnvioCambio("~/handlers/admin_iniciativas_gestion.ashx", "enviar") + "|" +
                   AccesoIniciativas.EsEnvioCambio(R, "Enviar"));
         }
-        Check("F3 son exactamente 6 rutas de solicitante (pagina + 4 de Nueva solicitud + Mis solicitudes)", 6, AccesoIniciativas.RutasSolicitante.Length);
+        Check("F3 son exactamente 7 rutas de solicitante (pagina + 4 de Nueva solicitud + Mis solicitudes de iniciativa y de cambio)", 7, AccesoIniciativas.RutasSolicitante.Length);
         {
             var t = File.ReadAllText(Path.Combine("App_Code", "AccesoIniciativas.cs"));
             Check("F4 los dueños salen de CatCategoriaDueno vigente (PoSoVigentes) y la persona de IdentidadAcuse", "True|True",
