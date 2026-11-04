@@ -401,6 +401,18 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
             var eSitio = sitio.Enviar(Peticion("folio", "PRB 2026-000002", "tipo", "otros", "motivo", "como el sitio"), @"SORIANA\mod1", "MOD");
             Check("P1 como PROACTIVANETAD: envia, lista y lee el detalle por los procedimientos", "True|True|PENDIENTE",
                   (eSitio.IdSolicitud > 0) + "|" + sitio.Listar("PENDIENTE", 50).Any(x => (int)x["id"] == eSitio.IdSolicitud) + "|" + sitio.Detalle(eSitio.IdSolicitud)["estado"]);
+            // Orden de la cola: el MISMO con cualquier filtro Estado, la mas
+            // reciente primero por Enviada y, con la misma hora, el id mas alto.
+            foreach (var filtroEstado in new[] { null, "PENDIENTE", "APLICADA", "RECHAZADA" })
+            {
+                var l = sitio.Listar(filtroEstado, 200);
+                var esperadoOrden = l.OrderByDescending(x => (string)x["fecha_solicitud_utc"], StringComparer.Ordinal)
+                                     .ThenByDescending(x => (int)x["id"]).Select(x => (int)x["id"]).ToList();
+                Check("O1 orden " + (filtroEstado ?? "Todas") + ": Enviada DESC, id DESC (" + l.Count + " filas)",
+                      string.Join(",", esperadoOrden), string.Join(",", l.Select(x => (int)x["id"])));
+            }
+            Check("O2 hay pendientes y revisadas para que el orden se compruebe con estados mezclados", true,
+                  sitio.Listar("PENDIENTE", 200).Count > 1 && sitio.Listar(null, 200).Count > sitio.Listar("PENDIENTE", 200).Count);
             string directo;
             using (var cn = Abrir(Base))
             {

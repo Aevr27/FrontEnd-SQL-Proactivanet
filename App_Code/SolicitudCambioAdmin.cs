@@ -741,9 +741,7 @@ LEFT JOIN dbo.Problem AS p ON p.Codigo = s.Codigo";
     {
         var sql = "SELECT TOP (@max) * FROM (" + Cabecera + @") AS x
 WHERE (@estado IS NULL OR x.Estado = @estado)
-ORDER BY CASE WHEN x.Estado = 'PENDIENTE' THEN 0 ELSE 1 END,
-         CASE WHEN x.Estado = 'PENDIENTE' THEN x.FechaSolicitudUtc END ASC,
-         x.FechaSolicitudUtc DESC;";
+ORDER BY x.FechaSolicitudUtc DESC, x.IdSolicitud DESC;";
         var salida = new List<Dictionary<string, object>>();
         using (var cn = Abrir())
         using (var cmd = new SqlCommand(sql, cn) { CommandTimeout = 60 })

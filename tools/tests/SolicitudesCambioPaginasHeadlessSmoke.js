@@ -12,6 +12,11 @@
 //
 //   node tools\tests\SolicitudesCambioPaginasHeadlessSmoke.js   # sale 0 si todo paso
 //
+//   Orden: la #1 es la mas RECIENTE (Enviada baja con el id) y el servidor
+//          de mentira manda la lista del mas viejo al mas nuevo; la cola
+//          tiene que ordenar por Enviada, la mas reciente primero, con
+//          cualquier filtro, y paginar despues (1..20, 21..40...).
+//
 // Sin Chrome instalado dice SKIP y sale 0. Otra ruta: CHROME=<ruta>.
 'use strict';
 var Banco = require('./BancoHeadless');
@@ -35,7 +40,7 @@ var ANTES = '<script>\n' +
   'function __sol(id, estado) { return { id: id, folio: "PRB 2026-" + ("00000" + id).slice(-6), titulo: "Ini " + id, tipo: "ESTADO", estado: estado,\n' +
   '  estado_anterior: "En Solución", estado_nuevo: "En Monitoreo", subestado_anterior: null, subestado_nuevo: null, campo_fecha: null,\n' +
   '  motivo: "Motivo " + id, solicitado_por: "SORIANA\\\\t_mod", solicitante_nombre: "Persona " + id, rol_solicitante: "MOD",\n' +
-  '  fecha_solicitud_utc: "2026-10-19T16:00:00Z", intentos: 0, ultimo_error: null, categorias: 0, sin_clasificar: 0, desactualizada: false,\n' +
+  '  fecha_solicitud_utc: new Date(Date.UTC(2026, 9, 19, 16) - id * 60000).toISOString().slice(0, 19) + "Z", intentos: 0, ultimo_error: null, categorias: 0, sin_clasificar: 0, desactualizada: false,\n' +
   '  actual: { estado: "En Solución" }, categorias_detalle: [], revisado_por: estado === "PENDIENTE" ? null : "SORIANA\\\\t_adm",\n' +
   '  fecha_revision_utc: estado === "PENDIENTE" ? null : "2026-10-20T10:00:00Z",\n' +
   '  eventos: [{ id: 1, evento: "ENVIADA", usuario: "SORIANA\\\\t_mod", fecha_utc: "2026-10-19T16:00:00Z", detalle: null },\n' +
@@ -48,7 +53,7 @@ var ANTES = '<script>\n' +
   '  else if (/admin_iniciativas_solicitudes\\.ashx\\?accion=listar/.test(u)) { var e = (/estado=(\\w+)/.exec(u) || [])[1] || "", l = [];\n' +
   '    for (var i = 1; i <= 45; i++) if (!e || __estado(i) === e) l.push(__sol(i, __estado(i)));\n' +
   '    for (var k = 101; k <= 103; k++) if (!e || e === "APLICADA") l.push(__sol(k, "APLICADA"));\n' +
-  '    j = { solicitudes: l }; }\n' +
+  '    j = { solicitudes: l.reverse() }; }\n' +
   '  else if (/admin_iniciativas_solicitudes\\.ashx\\?accion=detalle/.test(u)) { var id = Number(/id=(\\d+)/.exec(u)[1]); j = __sol(id, __estado(id)); }\n' +
   '  else if (/admin_iniciativas_solicitudes\\.ashx\\?accion=aplicar/.test(u)) { var c = {}; op.body.forEach(function (v, k) { c[k] = v; });\n' +
   '    window.__posts.push(c); window.__aplicadas[c.id] = true; j = { aplicada: true, id_solicitud: Number(c.id) }; }\n' +

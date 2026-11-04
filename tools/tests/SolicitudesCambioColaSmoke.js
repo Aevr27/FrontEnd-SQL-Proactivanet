@@ -273,7 +273,11 @@ cola.abrir().then(function () {
 
   var docP = Documento(), resp = [], urls = [];
   var colaP = new C.ColaSolicitudes(docP, function (url) { urls.push(url); var r = resp.shift(); return r ? r() : Promise.reject(new Error('sin red')); });
-  function lote(n, estado, base) { var l = []; for (var i = 1; i <= n; i++) l.push(Pendiente({ id: (base || 0) + i, estado: estado || 'PENDIENTE' })); return l; }
+  // Enviada crece con el id (la #45 es la mas reciente) y el lote llega del
+  // MAS VIEJO al mas nuevo -como mandaba antes el servidor las pendientes-:
+  // la cola tiene que ordenar ella, la mas reciente primero.
+  function enviada(id) { return new Date(Date.UTC(2026, 9, 1) + id * 60000).toISOString().slice(0, 19) + 'Z'; }
+  function lote(n, estado, base) { var l = []; for (var i = 1; i <= n; i++) l.push(Pendiente({ id: (base || 0) + i, estado: estado || 'PENDIENTE', fecha_solicitud_utc: enviada((base || 0) + i) })); return l; }
   function ids() { return (docP.els.solLista.innerHTML.match(/<tr class="ini-sol-fila[^"]*" data-sol-id="(\d+)"/g) || []).map(function (x) { return Number(/(\d+)"$/.exec(x)[1]); }); }
   function pag() { var m = /Página (\d+) de (\d+)/.exec(docP.els.solPaginas.innerHTML); return m ? m[1] + '/' + m[2] : ''; }
   function clicPagina(d) { docP.els.solPaginas.escuchas.click({ target: Nodo({ 'data-sol-pagina': String(d) }) }); }
@@ -282,11 +286,11 @@ cola.abrir().then(function () {
   colaP.fijarRol('ADM');
   resp200({ solicitudes: lote(45) });
   return colaP.abrir().then(function () {
-    Check('P4 45 pendientes: pagina 1 con 20 (1..20)', ['1/3', 20, 1, 20], [pag(), ids().length, ids()[0], ids()[19]]);
+    Check('P4 45 pendientes: pagina 1 con las 20 mas recientes (45..26)', ['1/3', 20, 45, 26], [pag(), ids().length, ids()[0], ids()[19]]);
     clicPagina(1);
-    Check('P5 ">" : pagina 2 con 21..40', ['2/3', 20, 21, 40], [pag(), ids().length, ids()[0], ids()[19]]);
+    Check('P5 ">" : pagina 2 con 25..6', ['2/3', 20, 25, 6], [pag(), ids().length, ids()[0], ids()[19]]);
     clicPagina(1);
-    Check('P6 ultima pagina parcial: 41..45; ">" no pasa de la ultima', ['3/3', 5, 41], [pag(), ids().length, ids()[0]]);
+    Check('P6 ultima pagina parcial: 5..1; ">" no pasa de la ultima', ['3/3', [5, 4, 3, 2, 1]], [pag(), ids()]);
     clicPagina(1);
     Check('P6 ...sigue en 3/3', '3/3', pag());
     clicPagina(-1); clicPagina(-1); clicPagina(-1);
@@ -328,15 +332,15 @@ cola.abrir().then(function () {
     });
   }).then(function () {
     Check('P12 detalle que llega tras cambiar de pagina: no se pinta', ['1/3', true, null], [pag(), docP.els.solDetalle.hidden, colaP.detalle]);
-    resp200(Pendiente({ id: 44 }));
-    return colaP.verDetalle(44);
+    resp200(Pendiente({ id: 4 }));
+    return colaP.verDetalle(4);
   }).then(function () {
-    Check('P13 abrir una de otra pagina (Historial): salta a su pagina', ['3/3', true], [pag(), /data-sol-exp="44" aria-expanded="true"/.test(docP.els.solLista.innerHTML)]);
+    Check('P13 abrir una de otra pagina (Historial): salta a su pagina', ['3/3', true], [pag(), /data-sol-exp="4" aria-expanded="true"/.test(docP.els.solLista.innerHTML)]);
     resp200({ solicitudes: lote(3, 'APLICADA', 100) });
     docP.els.solFiltro.escuchas.change({ target: { value: 'APLICADA' } });
     return esperar();
   }).then(function () {
-    Check('P14 filtro: estado en el GET, pagina 1 de 1, detalle plegado', [true, '1/1', [101, 102, 103], true, null],
+    Check('P14 filtro Aplicadas: estado en el GET, pagina 1 de 1, la mas reciente primero, detalle plegado', [true, '1/1', [103, 102, 101], true, null],
       [/estado=APLICADA$/.test(urls[urls.length - 1]), pag(), ids(), docP.els.solDetalle.hidden, colaP.detalle]);
     resp200({ solicitudes: [] });
     docP.els.solFiltro.escuchas.change({ target: { value: 'RECHAZADA' } });
@@ -347,9 +351,10 @@ cola.abrir().then(function () {
     docP.els.solFiltro.escuchas.change({ target: { value: 'PENDIENTE' } });
     return esperar();
   }).then(function () {
+    Check('P15b volver a Pendientes: el mismo orden (45 primero), no se invierte', [45, 26], [ids()[0], ids()[19]]);
     clicPagina(1); clicPagina(1);
-    resp200(Pendiente({ id: 42 }));
-    clicFila(42);
+    resp200(Pendiente({ id: 3 }));
+    clicFila(3);
     return esperar();
   }).then(function () {
     resp200({ solicitudes: lote(25) });
@@ -357,7 +362,31 @@ cola.abrir().then(function () {
     return esperar();
   }).then(function () {
     Check('P16 Actualizar con menos solicitudes: pagina 3 ya no existe, queda la ultima (2/2, 21..25), sin detalle',
-      ['2/2', [21, 22, 23, 24, 25], true, null], [pag(), ids(), docP.els.solDetalle.hidden, colaP.detalle]);
+      ['2/2', [5, 4, 3, 2, 1], true, null], [pag(), ids(), docP.els.solDetalle.hidden, colaP.detalle]);
+    // Todas: pendientes y aplicadas mezcladas, en desorden; el refresco
+    // automatico (fondo) deja el mismo orden.
+    var mezcla = lote(30).concat(lote(3, 'APLICADA', 100)).reverse();
+    mezcla.push(mezcla.shift());
+    resp200({ solicitudes: mezcla });
+    docP.els.solFiltro.escuchas.change({ target: { value: '' } });
+    return esperar();
+  }).then(function () {
+    Check('P17 Todas: la mas reciente primero sin importar el estado (103, 102, 101, 30...)', ['1/2', [103, 102, 101, 30, 29]],
+      [pag(), ids().slice(0, 5)]);
+    clicPagina(1);
+    Check('P17 ...la pagina 2 sigue el orden: 13..1', [13, 1, 13], [ids()[0], ids()[12], ids().length]);
+    resp200({ solicitudes: lote(30).concat(lote(3, 'APLICADA', 100)) });
+    return colaP.listar(true);
+  }).then(function () {
+    Check('P18 refresco: mismo orden y misma pagina', ['2/2', 13, 1], [pag(), ids()[0], ids()[12]]);
+    var o = C.ordenarRecientes;
+    Check('P19 misma Enviada: el # mas alto primero; sin fecha al final; no muta la entrada',
+      [[9, 5, 7, 2], [5, 9, 2, 7]],
+      (function () {
+        var e = [{ id: 5, fecha_solicitud_utc: '2026-10-01T10:00:00Z' }, { id: 9, fecha_solicitud_utc: '2026-10-01T10:00:00Z' },
+                 { id: 2, fecha_solicitud_utc: null }, { id: 7, fecha_solicitud_utc: '2026-10-01T09:00:00Z' }];
+        return [o(e).map(function (x) { return x.id; }), e.map(function (x) { return x.id; })];
+      })());
   });
 }).then(function () {
   console.log(fallos === 0 ? 'TODO PASO' : fallos + ' FALLO(S)');

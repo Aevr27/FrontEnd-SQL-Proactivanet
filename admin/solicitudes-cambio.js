@@ -123,6 +123,17 @@ window.SolicitudesCambioCola = (function () {
   // completa del filtro Estado). pagina se ajusta a [1, paginas]: nunca una
   // pagina vacia si hay solicitudes.
   var POR_PAGINA = 20;
+  // Orden de la cola, el MISMO con cualquier filtro Estado: la mas reciente
+  // primero por Enviada (fecha_solicitud_utc, ISO UTC: se compara como
+  // texto) y, con la misma hora, el # mas alto primero. Sin fecha, al final.
+  // Se ordena una copia antes de paginar, asi las paginas no se mueven.
+  function ordenarRecientes(lista) {
+    return (lista || []).slice().sort(function (a, b) {
+      var fa = a.fecha_solicitud_utc || '', fb = b.fecha_solicitud_utc || '';
+      if (fa !== fb) return fa < fb ? 1 : -1;
+      return (Number(b.id) || 0) - (Number(a.id) || 0);
+    });
+  }
   function paginar(total, pagina) {
     var paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
     var p = Math.min(Math.max(1, Math.floor(Number(pagina)) || 1), paginas);
@@ -447,7 +458,7 @@ window.SolicitudesCambioCola = (function () {
           if (mia !== self.lecturas) return null;
           self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
-            self.todas = r.json.solicitudes;
+            self.todas = ordenarRecientes(r.json.solicitudes);
             self.pintarLista();
             self.mensaje('solMsg', '', '');
             return r.json.solicitudes;
@@ -627,6 +638,6 @@ window.SolicitudesCambioCola = (function () {
     }
   }
 
-  return { ColaSolicitudes: ColaSolicitudes, htmlLista: htmlLista, htmlDetalle: htmlDetalle, resumen: resumen, paginar: paginar,
+  return { ColaSolicitudes: ColaSolicitudes, htmlLista: htmlLista, htmlDetalle: htmlDetalle, resumen: resumen, paginar: paginar, ordenarRecientes: ordenarRecientes,
            htmlPaginas: htmlPaginas, POR_PAGINA: POR_PAGINA, URL: URL };
 })();
