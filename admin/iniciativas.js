@@ -984,13 +984,16 @@ window.Iniciativas = (function () {
         });
         this.cola.alCambiarIniciativa = function () { if (regCola && regCola.actualizar) regCola.actualizar(); };
         // El Codigo de la lista abre el mismo detalle de Iniciativas que
-        // Cambios recientes (abrirDesdeLista: pregunta si hay cambios sin guardar).
+        // Cambios recientes (abrirDesdeLista: pregunta si hay cambios sin guardar),
+        // pero SIN cambiar de pestaña: #regDetalle es un panel fijo de la
+        // pagina, fuera de los paneles de pestaña, asi que se abre encima de
+        // Solicitudes y al cerrarlo se sigue en la cola. El foco vuelve al
+        // boton del Codigo (origen).
         // Fuera del registro cargado: false y la fila abre la solicitud, como antes.
         if (regCola && regCola.abrirDesdeLista) {
-          this.cola.alVerIniciativa = function (folio) {
+          this.cola.alVerIniciativa = function (folio, origen) {
             if (!regCola.registro || !regCola.registro.buscar(folio)) return false;
-            self.mostrarVista('iniciativas');
-            if (self.vista === 'iniciativas') regCola.abrirDesdeLista(folio);
+            regCola.abrirDesdeLista(folio, origen || null);
             return true;
           };
         }

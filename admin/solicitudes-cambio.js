@@ -303,7 +303,7 @@ window.SolicitudesCambioCola = (function () {
       this.alCambiarIniciativa = null;   // tras aplicar: releer el registro
       this.alVerSolicitud = null;        // (d) se abrio el detalle: el aviso la marca vista
       this.alRevisar = null;             // tras aplicar / rechazar: el aviso se relee
-      this.alVerIniciativa = null;       // (folio) el Codigo de la lista: detalle de Iniciativas
+      this.alVerIniciativa = null;       // (folio, boton) el Codigo de la lista: detalle de Iniciativas
       this.cableado = false;
       this.todas = null;        // la ultima lista del servidor (filtro Estado); null = sin lista pintada
       this.pagina = 1;
@@ -398,7 +398,7 @@ window.SolicitudesCambioCola = (function () {
         // El Codigo va antes que la fila: abre la iniciativa, no la solicitud.
         // Si no se puede abrir (false), sigue como un clic en la fila.
         var ini = e.target && e.target.closest ? e.target.closest('[data-sol-folio]') : null;
-        if (ini && self.alVerIniciativa && self.alVerIniciativa(ini.getAttribute('data-sol-folio')) !== false) return;
+        if (ini && self.alVerIniciativa && self.alVerIniciativa(ini.getAttribute('data-sol-folio'), ini) !== false) return;
         var el = e.target && e.target.closest ? e.target.closest('[data-sol-id]') : e.target;
         var id = el && el.getAttribute && el.getAttribute('data-sol-id');
         if (!id) return;
