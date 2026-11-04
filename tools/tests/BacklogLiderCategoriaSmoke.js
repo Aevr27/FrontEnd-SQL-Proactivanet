@@ -218,6 +218,9 @@ Check('sin C1: hoja, sin subniveles aunque traiga ruta', 0,
 Check('la nota avisa de las rutas que no empiezan por su C1', true, /no empieza por su C1/.test(nodos['cap-lideres-cat-bl'].innerHTML));
 Check('todo nace plegado: ninguna fila de categoria visible ni abierta', [0, 0],
   [A.filter(function (f) { return f.clases.indexOf('show') >= 0; }).length, A.filter(function (f) { return f.clases.indexOf('open') >= 0; }).length]);
+Check('hojas sin enlace: solo los nodos con hijos abren tickets', [0, true],
+  [(t[1].match(/<tr class="n2row cat-nodo(?! n2exp)[^>]*>\s*<td[^>]*>[^<]*<span class="filtrable/g) || []).length,
+   /<tr class="n2row cat-nodo n2exp[^>]*>\s*<td[^>]*><span class="filtrable ver-tickets"/.test(t[1])]);
 Check('flecha (n2exp) solo en nodos con hijos', [],
   A.filter(function (f) { return f.p && (f.clases.indexOf('n2exp') >= 0) !== (hijosDe(A, f.id).length > 0); }).map(function (f) { return f.nombre; }));
 // Ramas abiertas (por clave) sobreviven al repintado: Laura y su S-Punto de Venta.

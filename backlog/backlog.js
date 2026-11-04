@@ -1041,8 +1041,9 @@ const TableroBacklog = (function () {
 
      Un nodo con hijos puede tener ademas tickets registrados EN el (la ruta
      acaba ahi): salen en su propia fila "(sin subcategoría)", para que los
-     hijos cuadren a la vista con el padre. Clic en una categoria: sus
-     tickets debajo de la tabla (backlog_categorias.ashx?modo=tickets). */
+     hijos cuadren a la vista con el padre. Clic en una categoria con
+     subniveles: sus tickets debajo de la tabla
+     (backlog_categorias.ashx?modo=tickets). Las hojas son texto. */
 
   /* Los segmentos de la ruta que cuelgan de C1. Misma regla que
      fn_CategoriaC1 y que BacklogCategorias.Segmentos (App_Code), que filtra
@@ -1158,9 +1159,12 @@ const TableroBacklog = (function () {
         const sel = ticketsCat && ticketsCat.clave === k ? ' fila-sel' : '';
         const clases = `n2row cat-nodo${tieneHijos ? ' n2exp' : ''}${abierto ? ' open' : ''}${visible ? ' show' : ''}${sel} `
           + ancestros.map(a => 'a-' + a).join(' ');
+        // Solo un nodo con hijos abre sus tickets (que incluyen los de sus
+        // hojas); la hoja es texto: no despliega ni lleva a nada.
+        const etiqueta = tieneHijos
+          ? `<span class="filtrable ver-tickets" title="Ver los tickets">${nombre}</span>` : nombre;
         h += `<tr class="${clases}" data-id="${id}" data-p="${idPadre}">
-          <td style="padding-left:${24 + 16 * (prof - 1) + (tieneHijos ? 0 : 12)}px"><span class="filtrable ver-tickets"
-            title="Ver los tickets">${nombre}</span></td>${celdas(ag, color)}</tr>`;
+          <td style="padding-left:${24 + 16 * (prof - 1) + (tieneHijos ? 0 : 12)}px">${etiqueta}</td>${celdas(ag, color)}</tr>`;
         return { id, abierto };
       };
       for (const [hijo, ag] of ordenar(padre.hijos.values())) {
@@ -1186,8 +1190,8 @@ const TableroBacklog = (function () {
       const sel = ticketsCat && ticketsCat.clave === k ? ' fila-sel' : '';
       return `<tr class="n2row cat-nodo cat-directo${visible ? ' show' : ''}${sel} ${sub.map(a => 'a-' + a).join(' ')}"
           data-id="${id}" data-p="${sub[sub.length - 1]}">
-        <td style="padding-left:${24 + 16 * (prof - 1) + 12}px"><span class="filtrable ver-tickets"
-          title="Tickets registrados en la categoría, sin subcategoría">(sin subcategoría)</span></td>${celdas(agD, color)}</tr>`;
+        <td style="padding-left:${24 + 16 * (prof - 1) + 12}px"
+          title="Tickets registrados en la categoría, sin subcategoría">(sin subcategoría)</td>${celdas(agD, color)}</tr>`;
     };
 
     let html = '';
