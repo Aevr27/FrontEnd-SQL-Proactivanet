@@ -819,13 +819,22 @@ function etiquetasEncimaBarras(FMT){
 }
 
 // ---- Evolucion por SLOT o por MES [GRAF-1] (antiguo->reciente) ----
+// Mes: el punto del mes en curso (P.mes_actual) es el pronostico mensual de
+// su volumen real, el mismo pronosticoVista que la tarjeta Volumen Actual
+// sobre la misma suma (cats = aggCats, como la tarjeta). SUSTITUYE al real
+// en ese punto, no se le suma; el real va en el tooltip. Los meses
+// historicos y la serie Automatizados SLA quedan con sus reales. SLOT o sin
+// pronostico posible: todos los puntos reales, como siempre.
 function renderEvol(cats){
-  let labels, vals, nums;
+  let labels, vals, nums, idxPron=-1, valReal=null;
   if(modoTiempo==='mes'){
     // Orden cronologico: mes 0 (Dic ant.) a la izquierda, mas reciente a la derecha.
     nums=[...P.mes_nums].sort((a,b)=>a-b);
     labels=nums.map(m=>P.meses[P.mes_nums.indexOf(m)]);
     vals=nums.map(m=>cats.reduce((t,c)=>t+volSlotOMes(c,m),0));
+    const i=nums.indexOf(P.mes_actual);
+    const pron=i>=0 ? pronosticoVista(vals[i]) : null;
+    if(pron!=null){ idxPron=i; valReal=vals[i]; vals[i]=pron; }
   } else {
     // Etiquetas de SLOT: solo el rango de dias (0-30d, 31-60d, ...), sin mes.
     nums=[...P.slot_nums].sort((a,b)=>b-a); // antiguo->reciente (SLOT alto -> 0)
@@ -834,11 +843,15 @@ function renderEvol(cats){
   }
   const ctx=document.getElementById('chartEvol');
   if(chartEvol)chartEvol.destroy();
-  // Todos los puntos son volumen real: mismo color y mismo radio.
+  // Puntos reales: mismo color y radio. El del pronostico, en ambar y mas
+  // grande (es una advertencia, no otra serie), como antes de d9d19a6.
+  const conPron=idxPron>=0;
   const datasets=[{label:'Volumen',data:vals,
     borderColor:VERDE.pino,backgroundColor:'rgba(47,143,107,.14)',fill:true,tension:.3,
-    pointRadius:3,pointHoverRadius:6,
-    pointBackgroundColor:VERDE.profundo,borderWidth:2}];
+    pointRadius:conPron ? vals.map((_,i)=>i===idxPron?6:3) : 3,
+    pointHoverRadius:conPron ? vals.map((_,i)=>i===idxPron?9:6) : 6,
+    pointBackgroundColor:conPron ? vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.profundo) : VERDE.profundo,
+    borderWidth:2}];
   // Automatizados de SLA: barras en los MISMOS periodos y en el mismo orden
   // que la linea, por detras de ella (order). Son otra cuenta (ver
   // pedirAutomatizados), no se suman al volumen. Mientras no hay dato la
@@ -868,6 +881,8 @@ function renderEvol(cats){
     options:{responsive:true,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.datasetIndex===1
         ? (c.raw==null ? 'Automatizados SLA: sin dato' : `Automatizados SLA: ${FMT(c.raw)}`)
+        : c.dataIndex===idxPron
+        ? `Volumen · Pronóstico: ${FMT(c.raw)} · Volumen Real: ${FMT(valReal)}`
         : `Volumen: ${FMT(c.raw)}`}}},
       // Con barras el eje deja medio hueco a cada lado para que la primera
       // y la ultima no salgan cortadas a la mitad.

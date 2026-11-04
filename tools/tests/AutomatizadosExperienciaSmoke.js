@@ -827,8 +827,40 @@ async function pronosticoMensual() {
     [ts[0].v, ts[0].f, ts[1].v, ts[1].f, /tag-pron/.test(B.kpis())]);
   var Z = arnes({ payload: PAYLOAD, traer: servidorTipo([], SLA_TIPO) }); Z.pedir('slot'); await espera();
   Check('P9 SLOT: igual que sin fecha de corte', tarjetas(Z), ts);
+  Check('P9 SLOT: la Evolucion sin pronostico (reales, puntos uniformes)', [[30, 20, 10], 3, '#d'],
+    (function (g) { var d = g.data.datasets[0]; return [d.data, d.pointRadius, d.pointBackgroundColor]; })(B.evol()));
+
+  // P11) Evolucion en Mes: el punto del mes en curso es el pronostico de su
+  // real (vol_mes[10] = 30 -> 30/7*31), en lugar del real y no sumado a el;
+  // los meses historicos y las barras Automatizados SLA quedan reales.
   B.modo('mes');
-  Check('P9 la Evolucion no cambia: el mes en curso es el real (vol_mes[10] = 30)', [40, 50, 30], B.evol().data.datasets[0].data);
+  var ge = B.evol(), le = ge.data.datasets[0], pEvol = Math.round(30 / 7 * 31);
+  Check('P11 Mes: historicos reales, mes en curso = pronostico (no real + pronostico)', [40, 50, pEvol], le.data);
+  Check('P11 Mes: solo el punto del mes en curso va en ambar y mas grande', [[3, 3, 6], [6, 6, 9], ['#d', '#d', '#a']],
+    [le.pointRadius, le.pointHoverRadius, le.pointBackgroundColor]);
+  Check('P11 Mes: tooltip del pronostico con el real; historicos sin cambio',
+    ['Volumen · Pronóstico: ' + pEvol + ' · Volumen Real: 30', 'Volumen: 50'],
+    [ge.options.plugins.tooltip.callbacks.label({ datasetIndex: 0, dataIndex: 2, raw: pEvol }),
+     ge.options.plugins.tooltip.callbacks.label({ datasetIndex: 0, dataIndex: 1, raw: 50 })]);
+  var ZM = arnes({ payload: PAYLOAD, traer: servidorTipo([], SLA_TIPO) }); ZM.modo('mes'); ZM.pedir('mes'); await espera();
+  var gz = ZM.evol();
+  Check('P11 Mes: barras Automatizados SLA iguales a las de sin pronostico (reales)', [true, gz.data.datasets[1].data],
+    [ge.data.datasets.length === 2, ge.data.datasets[1].data]);
+  Check('P11 Mes: tooltip de barras sin pronostico', gz.options.plugins.tooltip.callbacks.label({ datasetIndex: 1, dataIndex: 2, raw: 6 }),
+    ge.options.plugins.tooltip.callbacks.label({ datasetIndex: 1, dataIndex: 2, raw: 6 }));
+  Check('P11 sin fecha de corte: la Evolucion es la de siempre', [[40, 50, 30], 3], [gz.data.datasets[0].data, gz.data.datasets[0].pointRadius]);
+
+  // P12) cuadre: con vol_mes[mes_actual] = vol_actual_mes (asi los arma
+  // ExperienciaQueries), el punto del mes en curso = cifra de Volumen Actual.
+  var CUADRE = JSON.parse(JSON.stringify(CORTE));
+  CUADRE.categorias[0].vol_mes['10'] = CUADRE.categorias[0].vol_actual_mes;
+  var BC = arnes({ payload: CUADRE, traer: servidorTipo([], SLA_TIPO) }); BC.modo('mes'); BC.pedir('mes'); await espera();
+  Check('P12 punto del mes en curso = Volumen Actual (4500/7*31)', [String(pVol), String(pVol)],
+    [tarjetas(BC)[0].v, String(BC.evol().data.datasets[0].data[2])]);
+  BC.tipo('inc'); BC.pedir('mes'); await espera();
+  Check('P12 Incidentes: el punto es el pronostico del volumen del tipo, igual que la tarjeta', tarjetas(BC)[0].v,
+    String(BC.evol().data.datasets[0].data[2]));
+  BC.tipo('todos');
 
   // P10) cambiar de modo, tipo o filtros no deja cifras viejas.
   var seq = [];
@@ -857,6 +889,7 @@ async function pronosticoMensual() {
   var th = tarjetas(BH);
   Check('P6 tablero con mes concluido: pronostico = real en las dos', ['4500', 'Volumen Real: 4500', '3750', 'Volumen Real: 3750 · 4500 - 750 = 3750'],
     [th[0].v, th[0].f, th[1].v, th[1].f]);
+  Check('P6 Evolucion con mes concluido: el punto es el real (pronostico = real)', [40, 50, 30], BH.evol().data.datasets[0].data);
 }
 
 var ANTES_TIPO = '0985851';   // experiencia.js antes de que la tarjeta respondiera al tipo
