@@ -539,7 +539,7 @@ K.estado('mes', { estado: 'listo', valores: { 9: 7000, 10: 750 } });
 // Sin fecha de corte en el payload no hay pronostico: la cifra es la resta
 // real y el pie, "Volumen Real - Automatizados SLA = diferencia".
 var kp = K.tarjeta(4500);
-Check('K6 Mes sin fecha de corte: la resta real, sin rotulo de pronostico', ['3750', 'Volumen Real: 3750 · 4500 - 750 = 3750', 'Volumen - Automatizado'],
+Check('K6 Mes sin fecha de corte: la resta real, sin rotulo de pronostico', ['3750', 'Volumen Real: 4500 - 750 = 3750', 'Volumen - Automatizado'],
   [kp.v, kp.f, kp.l]);
 Check('K6 Mes: tooltip, sin aviso en el pie', [AYUDA, true], [kp.t, sinAvisoEnPie(kp)]);
 Check('K7 negativo: tooltip y su aviso de siempre en el pie', [AYUDA, true], [kn.t, sinAvisoEnPie(kn)]);
@@ -804,7 +804,7 @@ async function pronosticoMensual() {
     [String(pDif), true], [t[1].v, /class="tag-pron">Pronóstico</.test(t[1].html)]);
   Check('P7 independientes: no es pronostico(vol) - pronostico(auto) (' + (pVol - Math.round(750 / 7 * 31)) + ')',
     true, t[1].v !== String(pVol - Math.round(750 / 7 * 31)));
-  Check('P8 pie: "Volumen Real: 3750" y el desglose con los REALES, no los pronosticados', 'Volumen Real: 3750 · 4500 - 750 = 3750', t[1].f);
+  Check('P8 pie: "Volumen Real: 3750" y el desglose con los REALES, no los pronosticados', 'Volumen Real: 4500 - 750 = 3750', t[1].f);
   Check('P8 el tooltip de aproximacion sigue en el rotulo', true, t[1].html.indexOf(' title="' + AYUDA + '"') >= 0);
   Check('P8 las demas tarjetas no cambian con el pronostico',
     tarjetas((function () { var Z = arnes({ payload: PAYLOAD, traer: servidorTipo([], SLA_TIPO) }); Z.modo('mes'); return Z; })())
@@ -817,7 +817,7 @@ async function pronosticoMensual() {
   BN.modo('mes'); BN.pedir('mes'); await espera();
   var tn = tarjetas(BN)[1];
   Check('P8 negativo: pronostico de -250 con signo y aviso + "500 - 750 = -250"',
-    [String(Math.round(-250 / 7 * 31)), 'Volumen Real: -250 · Negativo: los valores pueden no ser directamente comparables · 500 - 750 = -250'], [tn.v, tn.f]);
+    [String(Math.round(-250 / 7 * 31)), 'Volumen Real: Negativo: los valores pueden no ser directamente comparables · 500 - 750 = -250'], [tn.v, tn.f]);
 
   // P9) SLOT: nada de pronostico aunque haya fecha de corte.
   B.modo('slot'); B.pedir('slot'); await espera();
@@ -871,23 +871,23 @@ async function pronosticoMensual() {
   B.tipo('inc'); B.pedir('mes'); await espera(); seq.push(foto(B));
   B.tipo('todos'); seq.push(foto(B));
   Check('P10 Mes -> SLOT -> Mes -> Incidentes -> Todos', [
-    pVol + '|' + pDif + '|Volumen Real: 3750 · 4500 - 750 = 3750',
+    pVol + '|' + pDif + '|Volumen Real: 4500 - 750 = 3750',
     '9000|7500|9000 − 1500 Automatizados SLA',
-    pVol + '|' + pDif + '|Volumen Real: 3750 · 4500 - 750 = 3750',
-    Math.round(3000 / 7 * 31) + '|' + Math.round(2600 / 7 * 31) + '|Volumen Real: 2600 · 3000 - 400 = 2600',
-    pVol + '|' + pDif + '|Volumen Real: 3750 · 4500 - 750 = 3750'], seq);
+    pVol + '|' + pDif + '|Volumen Real: 4500 - 750 = 3750',
+    Math.round(3000 / 7 * 31) + '|' + Math.round(2600 / 7 * 31) + '|Volumen Real: 3000 - 400 = 2600',
+    pVol + '|' + pDif + '|Volumen Real: 4500 - 750 = 3750'], seq);
   B.filtrar('', '', '', 'SO X'); var conFiltro = tarjetas(B)[1];
   var autoFiltro = Number(/ 4500 - (-?\d+) = /.exec(conFiltro.f)[1]);
   Check('P10 filtro de dueño: el pronostico es el de la resta filtrada real',
     String(Math.round((4500 - autoFiltro) / 7 * 31)), conFiltro.v);
-  B.filtrar(); Check('P10 al quitar el filtro vuelve el pronostico sin filtro', pVol + '|' + pDif + '|Volumen Real: 3750 · 4500 - 750 = 3750', foto(B));
+  B.filtrar(); Check('P10 al quitar el filtro vuelve el pronostico sin filtro', pVol + '|' + pDif + '|Volumen Real: 4500 - 750 = 3750', foto(B));
 
   // Mes historico en el tablero: corte en noviembre, mes_actual octubre.
   var HIST = Object.assign(JSON.parse(JSON.stringify(PAYLOAD)), { fecha_actualizacion: '01/11/2026' });
   var BH = arnes({ payload: HIST, traer: servidorTipo([], SLA_TIPO) });
   BH.modo('mes'); BH.pedir('mes'); await espera();
   var th = tarjetas(BH);
-  Check('P6 tablero con mes concluido: pronostico = real en las dos', ['4500', 'Volumen Real: 4500', '3750', 'Volumen Real: 3750 · 4500 - 750 = 3750'],
+  Check('P6 tablero con mes concluido: pronostico = real en las dos', ['4500', 'Volumen Real: 4500', '3750', 'Volumen Real: 4500 - 750 = 3750'],
     [th[0].v, th[0].f, th[1].v, th[1].f]);
   Check('P6 Evolucion con mes concluido: el punto es el real (pronostico = real)', [40, 50, 30], BH.evol().data.datasets[0].data);
 }
@@ -945,7 +945,7 @@ async function tipoDeRegistro() {
 
   // T4) Mes: el mes en curso del tipo, con los reales (sin pronostico).
   var incMes = await escenario(null, 'mes', 'inc');
-  Check('T4 Mes Incidentes: 3000 - 400 = 2600 reales', ['2600', 'Volumen Real: 2600 · 3000 - 400 = 2600'],
+  Check('T4 Mes Incidentes: 3000 - 400 = 2600 reales', ['2600', 'Volumen Real: 3000 - 400 = 2600'],
     [incMes.tarjetas[1].v, incMes.tarjetas[1].f]);
   Check('T4 Mes Incidentes: sin fecha de corte, Volumen Actual real y sin rotulo de pronostico',
     ['Volumen Actual (Mes Actual)', '3000', 'Volumen Real: 3000'],
