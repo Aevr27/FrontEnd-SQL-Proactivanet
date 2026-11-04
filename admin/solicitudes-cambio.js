@@ -89,13 +89,22 @@ window.SolicitudesCambioCola = (function () {
   // conIniciativa: el Codigo es un boton que abre el detalle de la
   // iniciativa (data-sol-folio); sin el, texto como antes. El "#" sigue
   // abriendo la solicitud (data-sol-id).
-  function htmlLista(lista, conIniciativa) {
+  // abierta: el id de la solicitud expandida (su detalle va en la fila de
+  // abajo: ColaSolicitudes.ubicarDetalle); su chevron dice aria-expanded.
+  var COLUMNAS = 8;
+  var CHEVRON = '<svg class="ini-hist-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.5 6.5 15 12l-5.5 5.5"/></svg>';
+  function htmlLista(lista, conIniciativa, abierta) {
     if (!lista.length) return '<p class="ini-nota">No hay solicitudes con ese estado.</p>';
-    return '<table class="ini-det-tabla ini-sol-tabla"><thead><tr><th scope="col">#</th><th scope="col">Iniciativa</th>' +
+    return '<table class="ini-det-tabla ini-sol-tabla"><thead><tr><th scope="col" class="ini-sol-chev-col" aria-label="Detalle"></th>' +
+      '<th scope="col">#</th><th scope="col">Iniciativa</th>' +
       '<th scope="col">Qué cambia</th><th scope="col">Pedido</th><th scope="col">Solicitó</th><th scope="col">Enviada</th>' +
       '<th scope="col">Estado</th></tr></thead><tbody>' +
       lista.map(function (s) {
-        return '<tr class="ini-sol-fila" data-sol-id="' + h(s.id) + '">' +
+        var abre = abierta !== null && abierta !== undefined && String(abierta) === String(s.id);
+        return '<tr class="ini-sol-fila' + (abre ? ' abierta' : '') + '" data-sol-id="' + h(s.id) + '">' +
+          '<td class="ini-sol-chev-col"><button type="button" class="ini-sol-chev" data-sol-id="' + h(s.id) + '" data-sol-exp="' + h(s.id) +
+            '" aria-expanded="' + (abre ? 'true' : 'false') + '" aria-controls="solDetalle" aria-label="' + (abre ? 'Ocultar' : 'Ver') +
+            ' detalle de la solicitud #' + h(s.id) + '">' + CHEVRON + '</button></td>' +
           '<td><button type="button" class="ini-folio" data-sol-id="' + h(s.id) + '">#' + h(s.id) + '</button></td>' +
           '<td>' + (conIniciativa && s.folio
             ? '<button type="button" class="ini-folio" data-sol-folio="' + h(s.folio) + '" title="Ver la iniciativa">' + h(s.folio) + '</button>'
@@ -108,6 +117,25 @@ window.SolicitudesCambioCola = (function () {
             (s.estado === 'PENDIENTE' && s.intentos > 0 ? ' <span class="pill ini-atrasada" title="' + h(s.ultimo_error) + '">' + h(s.intentos) + ' intento' + (s.intentos === 1 ? '' : 's') + '</span>' : '') +
           '</td></tr>';
       }).join('') + '</tbody></table>';
+  }
+
+  // Paginacion de la cola (solo en el navegador: el servidor manda la lista
+  // completa del filtro Estado). pagina se ajusta a [1, paginas]: nunca una
+  // pagina vacia si hay solicitudes.
+  var POR_PAGINA = 20;
+  function paginar(total, pagina) {
+    var paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
+    var p = Math.min(Math.max(1, Math.floor(Number(pagina)) || 1), paginas);
+    var desde = (p - 1) * POR_PAGINA;
+    return { pagina: p, paginas: paginas, total: total, desde: desde, hasta: Math.min(desde + POR_PAGINA, total) };
+  }
+  function htmlPaginas(info) {
+    if (!info || !info.total) return '';
+    return '<nav class="ini-sol-paginas" aria-label="Páginas de solicitudes">' +
+      '<button type="button" class="btn linea chico" data-sol-pagina="-1" aria-label="Página anterior"' + (info.pagina <= 1 ? ' disabled' : '') + '>&lt;</button>' +
+      '<span class="ini-sol-pagina">Página ' + info.pagina + ' de ' + info.paginas + '</span>' +
+      '<button type="button" class="btn linea chico" data-sol-pagina="1" aria-label="Página siguiente"' + (info.pagina >= info.paginas ? ' disabled' : '') + '>&gt;</button>' +
+      '<span class="ini-nota">' + (info.desde + 1) + '–' + info.hasta + ' de ' + info.total + '</span></nav>';
   }
 
   function opciones(valores, elegido) {
@@ -277,9 +305,74 @@ window.SolicitudesCambioCola = (function () {
       this.alRevisar = null;             // tras aplicar / rechazar: el aviso se relee
       this.alVerIniciativa = null;       // (folio) el Codigo de la lista: detalle de Iniciativas
       this.cableado = false;
+      this.todas = null;        // la ultima lista del servidor (filtro Estado); null = sin lista pintada
+      this.pagina = 1;
+      this.lecturaDetalle = 0;  // una respuesta de detalle vieja no pinta ni expande
     }
 
     $(id) { return this.doc.getElementById(id); }
+
+    // #solDetalle es UNO solo (sus botones y su comentario): expandido vive en
+    // una fila de la tabla, debajo de su solicitud; si la solicitud no esta
+    // en la pagina (p. ej. ya no cumple el filtro tras aplicarla) queda en su
+    // lugar de siempre, debajo de la tabla. Se guarda la referencia: dentro
+    // de la tabla no debe perderse al repintarla.
+    caja() { return this._caja || (this._caja = this.$('solDetalle')); }
+
+    // Devuelve el detalle a #solCola antes de repintar la tabla.
+    rescatarDetalle() {
+      var caja = this.caja(), cola = this.$('solCola');
+      if (caja && cola && caja.parentNode && caja.parentNode !== cola && typeof cola.appendChild === 'function') cola.appendChild(caja);
+    }
+
+    // La pagina actual de this.todas; el detalle abierto, debajo de su fila.
+    pintarLista() {
+      if (!this.todas) return;
+      var lista = this.$('solLista'), d = this.detalle, todas = this.todas;
+      if (d) {
+        // Siempre en la pagina de la solicitud abierta (Historial, aplicar
+        // con el filtro "Todas"...). Cambiar de pagina la cierra antes.
+        for (var i = 0; i < todas.length; i++) {
+          if (String(todas[i].id) === String(d.id)) { this.pagina = Math.floor(i / POR_PAGINA) + 1; break; }
+        }
+      }
+      var info = paginar(todas.length, this.pagina);
+      this.pagina = info.pagina;
+      var activo = this.doc.activeElement, foco = activo && activo.getAttribute ? activo.getAttribute('data-sol-exp') : null;
+      this.rescatarDetalle();
+      lista.innerHTML = htmlLista(todas.slice(info.desde, info.hasta), !!this.alVerIniciativa, d ? d.id : null);
+      var pags = this.$('solPaginas');
+      if (pags) pags.innerHTML = htmlPaginas(info);
+      this.ubicarDetalle();
+      if (foco && typeof lista.querySelector === 'function') {
+        var b = lista.querySelector('[data-sol-exp="' + foco + '"]');
+        if (b && b.focus) b.focus();
+      }
+    }
+
+    ubicarDetalle() {
+      var d = this.detalle, caja = this.caja(), lista = this.$('solLista'), doc = this.doc;
+      if (!d || !caja || caja.hidden || typeof lista.querySelector !== 'function' || typeof doc.createElement !== 'function') return;
+      var fila = lista.querySelector('tr.ini-sol-fila[data-sol-id="' + String(d.id).replace(/["\\]/g, '') + '"]');
+      if (!fila || !fila.parentNode) return;
+      var tr = doc.createElement('tr'), td = doc.createElement('td');
+      tr.className = 'ini-sol-exp';
+      td.colSpan = COLUMNAS;
+      td.appendChild(caja);
+      tr.appendChild(td);
+      fila.parentNode.insertBefore(tr, fila.nextSibling);
+    }
+
+    // delta: -1 / +1. Cierra el detalle (nunca queda uno de otra pagina);
+    // no se mueve mientras se aplica o rechaza.
+    cambiarPagina(delta) {
+      if (this.ocupado || !this.todas) return;
+      var info = paginar(this.todas.length, this.pagina), p = info.pagina + delta;
+      if (p < 1 || p > info.paginas) return;
+      this.cerrarDetalle(true);
+      this.pagina = p;
+      this.pintarLista();
+    }
 
     fijarRol(rol) { this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null; }
 
@@ -287,16 +380,31 @@ window.SolicitudesCambioCola = (function () {
       if (this.cableado || !this.$('solCola')) return;
       this.cableado = true;
       var self = this;
-      this.$('solFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.listar(); });
-      this.$('solActualizar').addEventListener('click', function () { self.listar(); });
+      // Filtro: otra coleccion, pagina 1. Actualizar: la misma pagina si
+      // sigue existiendo (pintarLista la ajusta). Ambos cierran el detalle:
+      // nunca queda uno viejo expandido.
+      this.$('solFiltro').addEventListener('change', function (e) {
+        self.filtro = e.target.value || ''; self.cerrarDetalle(); self.pagina = 1; self.listar();
+      });
+      this.$('solActualizar').addEventListener('click', function () { self.cerrarDetalle(); self.listar(); });
+      this.$('solPaginas').addEventListener('click', function (e) {
+        var el = e.target && e.target.closest ? e.target.closest('[data-sol-pagina]') : null;
+        if (el && !el.disabled) self.cambiarPagina(Number(el.getAttribute('data-sol-pagina')));
+      });
       this.$('solLista').addEventListener('click', function (e) {
+        // Dentro del detalle expandido: sus botones van por su propio
+        // escucha (#solDetalle); el clic no abre ni cierra filas.
+        if (e.target && e.target.closest && e.target.closest('.ini-sol-exp')) return;
         // El Codigo va antes que la fila: abre la iniciativa, no la solicitud.
         // Si no se puede abrir (false), sigue como un clic en la fila.
         var ini = e.target && e.target.closest ? e.target.closest('[data-sol-folio]') : null;
         if (ini && self.alVerIniciativa && self.alVerIniciativa(ini.getAttribute('data-sol-folio')) !== false) return;
         var el = e.target && e.target.closest ? e.target.closest('[data-sol-id]') : e.target;
         var id = el && el.getAttribute && el.getAttribute('data-sol-id');
-        if (id) self.verDetalle(Number(id));
+        if (!id) return;
+        // La abierta se pliega; otra la reemplaza (una sola a la vez).
+        if (self.detalle && String(self.detalle.id) === String(id)) self.cerrarDetalle();
+        else self.verDetalle(Number(id));
       });
       this.$('solDetalle').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-sol-accion]') : e.target;
@@ -339,7 +447,8 @@ window.SolicitudesCambioCola = (function () {
           if (mia !== self.lecturas) return null;
           self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
-            self.$('solLista').innerHTML = htmlLista(r.json.solicitudes, !!self.alVerIniciativa);
+            self.todas = r.json.solicitudes;
+            self.pintarLista();
             self.mensaje('solMsg', '', '');
             return r.json.solicitudes;
           }
@@ -347,7 +456,10 @@ window.SolicitudesCambioCola = (function () {
             self.mensaje('solMsg', 'aviso', 'No se pudo actualizar la cola (respuesta ' + h(r.status) + '): se muestra la última lectura.');
             return null;
           }
+          self.todas = null;
+          self.rescatarDetalle();
           self.$('solLista').innerHTML = '';
+          if (self.$('solPaginas')) self.$('solPaginas').innerHTML = '';
           self.mensaje('solMsg', r.status === 501 ? 'aviso' : 'error', h(r.json.error || ('No se pudo leer la cola (respuesta ' + r.status + ').')));
           return null;
         }, function () {
@@ -400,12 +512,16 @@ window.SolicitudesCambioCola = (function () {
       if (tk && c) tk.innerHTML = ticketsTexto(v, c.pct_nuevo);
     }
 
+    // Pinta el detalle (htmlDetalle, el de siempre) y lo expande debajo de
+    // su fila (pintarLista / ubicarDetalle). Si mientras llegaba se abrio
+    // otra, se cambio de pagina, de filtro o se cerro, no se pinta.
     verDetalle(id) {
-      var self = this;
+      var self = this, mia = ++this.lecturaDetalle;
       return Promise.resolve().then(function () { return self.pedir(URL + '?accion=detalle&id=' + encodeURIComponent(id), { cache: 'no-store', credentials: 'same-origin' }); })
         .then(leer)
         .then(function (r) {
-          var caja = self.$('solDetalle');
+          if (mia !== self.lecturaDetalle) return null;
+          var caja = self.caja();
           if (r.status !== 200) {
             self.mensaje('solMsg', 'error', h(r.json.error || ('No se pudo leer la solicitud (respuesta ' + r.status + ').')));
             return null;
@@ -413,19 +529,26 @@ window.SolicitudesCambioCola = (function () {
           self.detalle = r.json;
           caja.innerHTML = htmlDetalle(r.json, self.tipos(), {});
           caja.hidden = false;
+          self.pintarLista();
           if (self.alVerSolicitud) self.alVerSolicitud(r.json);
           self.cargarVolumetrias(r.json);
           return r.json;
         }, function () {
+          if (mia !== self.lecturaDetalle) return null;
           self.mensaje('solMsg', 'error', 'No se pudo contactar al servidor.');
           return null;
         });
     }
 
-    cerrarDetalle() {
+    // sinPintar: quien llama repinta la lista despues (cambiarPagina).
+    cerrarDetalle(sinPintar) {
+      this.lecturaDetalle++;
       this.detalle = null;
-      this.$('solDetalle').hidden = true;
-      this.$('solDetalle').innerHTML = '';
+      this.rescatarDetalle();
+      var caja = this.caja();
+      caja.hidden = true;
+      caja.innerHTML = '';
+      if (!sinPintar) this.pintarLista();
     }
 
     comentario() { var c = this.$('solComentario'); return c ? String(c.value || '').trim() : ''; }
@@ -504,5 +627,6 @@ window.SolicitudesCambioCola = (function () {
     }
   }
 
-  return { ColaSolicitudes: ColaSolicitudes, htmlLista: htmlLista, htmlDetalle: htmlDetalle, resumen: resumen, URL: URL };
+  return { ColaSolicitudes: ColaSolicitudes, htmlLista: htmlLista, htmlDetalle: htmlDetalle, resumen: resumen, paginar: paginar,
+           htmlPaginas: htmlPaginas, POR_PAGINA: POR_PAGINA, URL: URL };
 })();
