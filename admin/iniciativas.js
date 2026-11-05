@@ -810,6 +810,28 @@ window.Iniciativas = (function () {
 
   function enfocar(el) { if (el && typeof el.focus === 'function') el.focus(); }
 
+  // Abre el detalle de una iniciativa (#regDetalle, panel fijo de la pagina)
+  // SIN cambiar de pestaña, con abrirDesdeLista del registro (pregunta si
+  // hay cambios sin guardar; el foco vuelve a origen al cerrar). Solo abre
+  // lo que el registro cargado ya trae para esta cuenta: no pide nada nuevo
+  // al servidor ni salta permisos.
+  // -> { estado, mensaje } con estado:
+  //    'abierta'      se abrio (o ya estaba abierta);
+  //    'conservada'   habia cambios sin guardar y no se descartaron;
+  //    'sin_registro' el registro de Iniciativas no se ha cargado;
+  //    'no_encontrada' no existe en el registro o esta cuenta no la ve.
+  // mensaje: texto plano para la lista que hizo clic ('' si no hay que avisar).
+  function abrirIniciativaAqui(reg, folio, origen) {
+    var f = folio === null || folio === undefined ? '' : String(folio).trim();
+    if (!reg || typeof reg.abrirDesdeLista !== 'function' || !reg.registro) {
+      return { estado: 'sin_registro', mensaje: 'El registro de Iniciativas todavía no se carga: no se puede abrir ' + (f || 'la iniciativa') + '. Intenta en un momento.' };
+    }
+    if (!f || !reg.registro.buscar(f)) {
+      return { estado: 'no_encontrada', mensaje: 'No se encontró la iniciativa ' + (f || '') + ' en el registro o tu cuenta no tiene acceso a ella.' };
+    }
+    return reg.abrirDesdeLista(f, origen || null) ? { estado: 'abierta', mensaje: '' } : { estado: 'conservada', mensaje: '' };
+  }
+
   class PaginaIniciativas {
     constructor(doc) {
       this.doc = doc;
@@ -1039,9 +1061,8 @@ window.Iniciativas = (function () {
         // Fuera del registro cargado: false y la fila abre la solicitud, como antes.
         if (regCola && regCola.abrirDesdeLista) {
           this.cola.alVerIniciativa = function (folio, origen) {
-            if (!regCola.registro || !regCola.registro.buscar(folio)) return false;
-            regCola.abrirDesdeLista(folio, origen || null);
-            return true;
+            var e = abrirIniciativaAqui(regCola, folio, origen).estado;
+            return e === 'abierta' || e === 'conservada';
           };
         }
         // Mis solicitudes de cambio (misma pestana): las propias, para quien no es ADM.
@@ -1056,6 +1077,16 @@ window.Iniciativas = (function () {
         // Mis solicitudes (misma pestaña): las propias, para quien no es ADM.
         if (window.SolicitudesNuevas.MisSolicitudes) this.mias = new window.SolicitudesNuevas.MisSolicitudes(this.doc, null);
       }
+      // La referencia a la iniciativa ligada (el Codigo de la aprobada en
+      // Iniciativas / Mis solicitudes, el de Mis solicitudes de cambio y el
+      // del Historial de peticiones) abre el MISMO detalle que el Codigo de
+      // la cola de cambios, sin cambiar de pestaña. Fuera del registro
+      // cargado (no existe o esta cuenta no la ve): la lista avisa con el
+      // mensaje que se devuelve.
+      var regRef = this.registro;
+      var verRef = function (folio, origen) { return abrirIniciativaAqui(regRef, folio, origen); };
+      [this.nuevas, this.mias, this.misCambios].forEach(function (l) { if (l) l.alVerIniciativa = verRef; });
+      this.verReferencia = verRef;
       // MODIFICAR (sql/41 / sql/42): la solicitud propia abre su formulario
       // con lo que se envio; al enviar se reemplaza. Iniciativas: Nueva
       // solicitud (este modulo). Cambios: "Solicitar cambios" del detalle de
@@ -1152,6 +1183,7 @@ window.Iniciativas = (function () {
             self.cola.verDetalle(id);
           }
         });
+        this.historial.alVerIniciativa = verRef;
       }
       if (window.IniciativaAdmin) {
         // La volumetria (GET) va por el mismo fetch de la pagina; la
@@ -1840,6 +1872,7 @@ window.Iniciativas = (function () {
     ticketsDe: ticketsDe,
     pctDeTickets: pctDeTickets,
     nuevoToken: nuevoToken,
+    abrirIniciativaAqui: abrirIniciativaAqui,
     DEFINICIONES_TIPO: DEFINICIONES_TIPO,
     CatalogoIniciativas: CatalogoIniciativas,
     CascadaOrganizacional: CascadaOrganizacional,
