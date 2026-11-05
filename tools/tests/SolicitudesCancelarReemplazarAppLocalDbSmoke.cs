@@ -483,6 +483,23 @@ INSERT dbo.Problem (Codigo, TipoIniciativa, Titulo, Estado, Subestado, OwnerProb
                   CarreraApp("EXEC adm.usp_SolicitudIniciativa_Cancelar @NumeroSolicitud = " + k5 + ", @Usuario = N'" + ANDRES + "', @Motivo = N'm';",
                              () => Error(() => revisor.Rechazar(k5, ADM, "no"))) + "|" + lect.Detalle(k5)["estado"]);
 
+            // ---------------- U: nombre a mostrar (dbo.UsuariosAdmin, sql/35) ----------------
+            const string MIG = @"SORIANA\miguel.lopez", MIG2 = @"SORIANA\miguel.lopezm", VACIO = @"SORIANA\t_vacio", NADIE = @"SORIANA\nadie";
+            Exec("INSERT dbo.UsuariosAdmin (Usuario, CorreoUsuario, Acceso, NombreSolicitante) VALUES " +
+                 "(N'  " + MIG.ToUpperInvariant().Replace("SORIANA", "soriana") + " ', N'miguel@soriana.com', N'MOD', N'Miguel Lopez Ruiz'), " +
+                 "(N'" + MIG2 + "', N'miguel.m@soriana.com', N'MOD', N'Miguel Lopez Martinez'), " +
+                 "(N'" + VACIO + "', N'vacio@soriana.com', N'MOD', N'   ');");
+            var fu = new FuenteFichasUsuariosAdminSql(ComoSitio).Leer(new[] { MIG, MIG2, VACIO, MOD, NADIE }.Select(NombreSolicitante.Clave).ToList());
+            Func<string, string> ver = c =>
+            {
+                FichaUsuarioAdmin f; fu.TryGetValue(NombreSolicitante.Clave(c), out f);
+                var v = NombreSolicitante.Elegir(c, f, null, null);
+                return v.Fuente + ":" + v.Texto;
+            };
+            Check("U1 la cuenta del sitio lee UsuariosAdmin por cuenta normalizada: nombre / parecido / vacio -> correo / sin nombre -> correo / sin fila -> cuenta",
+                  "NOMBRE_ADMIN:Miguel Lopez Ruiz|NOMBRE_ADMIN:Miguel Lopez Martinez|CORREO:vacio@soriana.com|CORREO:t_mod@soriana.com|CUENTA:" + NADIE,
+                  ver(MIG) + "|" + ver(MIG2) + "|" + ver(VACIO) + "|" + ver(MOD) + "|" + ver(NADIE));
+
             // ---------------- V: aviso de ADM ----------------
             var res = new AlmacenVistasSql(ComoSitio).Resumen(ADM);
             Check("V1 el aviso cuenta solo pendientes (las CANCELADA no cuentan)",

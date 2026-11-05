@@ -1144,16 +1144,55 @@ public static class SolicitudesCambio
         }
     }
 
+    // Ademas (2026-11-05) solicitante_mostrar / solicitante_mostrar_fuente:
+    // la regla comun de App_Code/NombreSolicitante.cs (UsuariosAdmin.
+    // NombreSolicitante -> el nombre de CatPersona -> correo -> cuenta).
+    // solicitante_nombre sigue siendo el de CatPersona, como antes.
     public static void AgregarNombreSolicitante(IList<Dictionary<string, object>> filas)
     {
         if (filas == null || filas.Count == 0) return;
         Func<Dictionary<string, object>, string> cuenta = f => f.ContainsKey("solicitado_por") ? f["solicitado_por"] as string : null;
-        var nombres = NombresSolicitante(filas.Select(cuenta));
+        // CatPersona se lee UNA vez para el nombre y el correo.
+        IList<PersonaCatalogo> personas = null;
+        try { personas = PersonasSolicitante(); }
+        catch (Exception ex) { DashboardHandler.Registrar("SolicitudesCambio.NombresSolicitante", ex); }
+        var nombres = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (personas != null)
+        {
+            try { nombres = IdentidadAcuse.NombresPorCuenta(filas.Select(cuenta), personas); }
+            catch (Exception ex) { DashboardHandler.Registrar("SolicitudesCambio.NombresSolicitante", ex); }
+        }
         foreach (var f in filas)
         {
             string nombre, c = cuenta(f);
             f["solicitante_nombre"] = c != null && nombres.TryGetValue(c, out nombre) ? nombre : null;
         }
+        var correos = CorreosSolicitante(filas.Select(cuenta), personas);
+        NombreSolicitante.Agregar(filas, "solicitado_por", f => f["solicitante_nombre"] as string, delegate (Dictionary<string, object> f)
+        {
+            string correo, c = cuenta(f);
+            return c != null && correos.TryGetValue(c, out correo) ? correo : null;
+        });
+    }
+
+    // El correo de CatPersona de cada cuenta, SOLO si la cuenta se resuelve a
+    // una persona (IdentidadAcuse: la misma regla del nombre); nunca armado
+    // con la cuenta. Sin poder leer CatPersona: ninguno.
+    public static Dictionary<string, string> CorreosSolicitante(IEnumerable<string> cuentas, IList<PersonaCatalogo> personas)
+    {
+        var salida = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (personas == null) return salida;
+        try
+        {
+            foreach (var c in cuentas ?? new string[0])
+            {
+                if (string.IsNullOrEmpty(c) || salida.ContainsKey(c)) continue;
+                var r = IdentidadAcuse.Resolver(IdentidadWindows.Desde(c, true), personas);
+                if (r.EsResuelta && !string.IsNullOrEmpty(r.Correo)) salida[c] = r.Correo;
+            }
+        }
+        catch (Exception ex) { DashboardHandler.Registrar("SolicitudesCambio.CorreosSolicitante", ex); }
+        return salida;
     }
 
     // Cuelga de cada categoria del detalle sus otras_iniciativas (sin la

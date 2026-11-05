@@ -66,6 +66,8 @@ public class AdminIniciativasMisSolicitudes : IHttpHandler
             if (accion == "listar")
             {
                 var l = lector.ListarDe(id.Original, RegistroSolicitudesIniciativa.Maximo, estado);
+                // Como se muestra quien la envio (App_Code/NombreSolicitante.cs; solo pantalla).
+                NombreSolicitante.AgregarIniciativas(l.Solicitudes);
                 return new Dictionary<string, object>
                 {
                     { "solicitudes", l.Solicitudes }, { "total", l.Total }, { "maximo", RegistroSolicitudesIniciativa.Maximo },
@@ -77,6 +79,7 @@ public class AdminIniciativasMisSolicitudes : IHttpHandler
             // Solo pantalla: Cancelar / Modificar (sql/42). Quien decide es la
             // base, por admin_iniciativas_validar.ashx.
             RegistroSolicitudesIniciativa.MarcarPropia(d, id.Original);
+            NombreSolicitante.AgregarIniciativas(new List<Dictionary<string, object>> { d });
             return d;
         });
     }

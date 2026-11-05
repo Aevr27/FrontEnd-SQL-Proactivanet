@@ -73,6 +73,8 @@ public class AdminIniciativasMisCambios : IHttpHandler
             {
                 var lista = SolicitudesCambio.Mias.ListarDe(id.Original, estado, Maximo);
                 foreach (var f in lista) { SolicitudesCambio.ParaSolicitante(f); SolicitudesCambio.MarcarPropia(f, id.Original); }
+                // Como se muestra quien la envio (solo pantalla; la cuenta no cambia).
+                SolicitudesCambio.AgregarNombreSolicitante(lista);
                 return new Dictionary<string, object> { { "solicitudes", lista }, { "maximo", Maximo } };
             }
             var d = SolicitudesCambio.ParaSolicitante(SolicitudesCambio.Mias.DetalleDe(n, id.Original));
@@ -80,6 +82,7 @@ public class AdminIniciativasMisCambios : IHttpHandler
             // Solo pantalla: los botones Cancelar / Modificar (sql/41). Quien
             // decide es la base, en admin_iniciativas_solicitudes.ashx.
             SolicitudesCambio.MarcarPropia(d, id.Original);
+            SolicitudesCambio.AgregarNombreSolicitante(new List<Dictionary<string, object>> { d });
             return d;
         });
     }

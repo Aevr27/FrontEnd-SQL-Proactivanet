@@ -56,9 +56,14 @@ window.SolicitudesNuevas = (function () {
     return dos(d.getDate()) + '/' + dos(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + dos(d.getHours()) + ':' + dos(d.getMinutes());
   }
   function estado(e) { return e ? h(ESTADOS[e] || e) : '—'; }
+  // Como se muestra quien la envio: lo que decide el servidor
+  // (solicitante_mostrar: UsuariosAdmin.NombreSolicitante -> nombre guardado
+  // -> correo -> cuenta); sin el, como antes. El correo va debajo si lo
+  // mostrado no es ya el correo.
+  function textoSolicitante(s) { return s.solicitante_mostrar || s.solicitante_nombre || s.solicitante_cuenta; }
   function solicitante(s) {
-    return (s.solicitante_nombre ? h(s.solicitante_nombre) : nada(s.solicitante_cuenta)) +
-      (s.solicitante_correo ? '<span class="ini-sub">' + h(s.solicitante_correo) + '</span>' : '');
+    var t = textoSolicitante(s);
+    return nada(t) + (s.solicitante_correo && s.solicitante_correo !== t ? '<span class="ini-sub">' + h(s.solicitante_correo) + '</span>' : '');
   }
 
   // sql/42: la relacion con la que esta corrige / la que la reemplazo
@@ -153,7 +158,7 @@ window.SolicitudesNuevas = (function () {
     var revisada = d.estado === 'APROBADA' || d.estado === 'RECHAZADA';
     var filas = [
       ['Tipo de iniciativa', nada(d.tipo)],
-      ['Solicitó', solicitante(d) + (d.solicitante_cuenta && d.solicitante_nombre ? '<span class="ini-sub">' + h(d.solicitante_cuenta) + '</span>' : '')],
+      ['Solicitó', solicitante(d) + (d.solicitante_cuenta && textoSolicitante(d) !== d.solicitante_cuenta ? '<span class="ini-sub">' + h(d.solicitante_cuenta) + '</span>' : '')],
       ['Product Owner', nada(d.po) + (d.po_correo ? '<span class="ini-sub">' + h(d.po_correo) + '</span>' : '')],
       ['Service Owner', nada(d.so)],
       ['Categoría', '<span class="ini-cat-ruta">' + nada(d.categoria) + '</span>'],

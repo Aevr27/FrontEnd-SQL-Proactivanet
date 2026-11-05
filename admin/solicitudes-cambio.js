@@ -93,7 +93,13 @@ window.SolicitudesCambioCola = (function () {
 
   // Quien envio: el nombre de CatPersona que resolvio el servidor
   // (solicitante_nombre); sin el, la cuenta Windows guardada (solicitado_por).
-  function quien(s) { return h(s.solicitante_nombre || s.solicitado_por); }
+  // Como se muestra quien la envio: lo que decide el servidor
+  // (solicitante_mostrar: UsuariosAdmin.NombreSolicitante -> nombre de
+  // CatPersona -> correo -> cuenta); sin el, como antes.
+  function textoQuien(s) { return s.solicitante_mostrar || s.solicitante_nombre || s.solicitado_por; }
+  function quien(s) { return h(textoQuien(s)); }
+  // La cuenta se sigue viendo debajo cuando lo mostrado no es la cuenta.
+  function conCuenta(s) { return !!(s.solicitado_por && textoQuien(s) && textoQuien(s) !== s.solicitado_por); }
 
   // sql/41: la relacion con la solicitud que esta corrige o con la que la
   // reemplazo. Corta (lista) o con botones para ir a la otra (detalle;
@@ -148,7 +154,7 @@ window.SolicitudesCambioCola = (function () {
             : h(s.folio)) + (s.titulo ? '<span class="ini-sub">' + h(s.titulo) + '</span>' : '') + '</td>' +
           '<td>' + h(TIPOS[s.tipo] || s.tipo) + '</td><td>' + resumen(s) + '</td>' +
           '<td>' + quien(s) + ' <span class="chip ini-chip">' + h(s.rol_solicitante) + '</span>' +
-            (s.solicitante_nombre && s.solicitado_por ? '<span class="ini-sub">' + h(s.solicitado_por) + '</span>' : '') + '</td>' +
+            (conCuenta(s) ? '<span class="ini-sub">' + h(s.solicitado_por) + '</span>' : '') + '</td>' +
           '<td>' + fechaHora(s.fecha_solicitud_utc) + '</td>' +
           '<td>' + h(ESTADOS[s.estado] || s.estado) + relacionCorta(s) +
             (s.estado === 'PENDIENTE' && s.intentos > 0 ? ' <span class="pill ini-atrasada" title="' + h(s.ultimo_error) + '">' + h(s.intentos) + ' intento' + (s.intentos === 1 ? '' : 's') + '</span>' : '') +
@@ -339,7 +345,7 @@ window.SolicitudesCambioCola = (function () {
         '<button type="button" class="btn linea chico" data-sol-accion="cerrar">Cerrar</button></div>'
       : '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-sol-accion="cerrar">Cerrar</button></div>';
     return '<h4>Solicitud #' + h(d.id) + ' · ' + h(d.folio) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' +
-      '<p class="ini-nota">' + h(TIPOS[d.tipo] || d.tipo) + ' · la envió ' + quien(d) + ' (' + (d.solicitante_nombre && d.solicitado_por ? h(d.solicitado_por) + ', ' : '') + h(d.rol_solicitante) + ') el ' +
+      '<p class="ini-nota">' + h(TIPOS[d.tipo] || d.tipo) + ' · la envió ' + quien(d) + ' (' + (conCuenta(d) ? h(d.solicitado_por) + ', ' : '') + h(d.rol_solicitante) + ') el ' +
         fechaHora(d.fecha_solicitud_utc) + ' · ' + h(ESTADOS[d.estado] || d.estado) + (d.intentos ? ' · ' + h(d.intentos) + ' intento(s) de aplicar' : '') + '</p>' +
       relacion(d, lectura ? 'data-mc-ir' : 'data-sol-ir') +
       avisos + cambios + htmlCats + (lectura ? '' : htmlImpacto(cats, vols)) +
