@@ -99,6 +99,9 @@ public class AdminIniciativasRegistro : IHttpHandler
             // Subestado: solo ADM lo ve (ExperienciaQueries.OcultarSubestado).
             // Ocultarlo en la pagina no basta: sin ADM no sale del servidor.
             if (AccesoAdmin.Rol(context) != RolAdmin.Adm) ExperienciaQueries.OcultarSubestado(registro);
+            // "Quien" del historial de fechas, como se muestra (App_Code/NombreSolicitante.cs;
+            // usuario no cambia). Un lote para todo el registro.
+            NombreSolicitante.AgregarRegistro(registro);
             // Si "Crear iniciativa" / "Modificar" guardan o solo validan
             // (PersistenciaGestionAdmin, const): la pagina rotula sus botones
             // con esto y nunca promete un guardado que no ocurre.

@@ -79,7 +79,7 @@ public class AdminIniciativasMisSolicitudes : IHttpHandler
             // Solo pantalla: Cancelar / Modificar (sql/42). Quien decide es la
             // base, por admin_iniciativas_validar.ashx.
             RegistroSolicitudesIniciativa.MarcarPropia(d, id.Original);
-            NombreSolicitante.AgregarIniciativas(new List<Dictionary<string, object>> { d });
+            NombreSolicitante.AgregarDetalleIniciativa(d);
             return d;
         });
     }

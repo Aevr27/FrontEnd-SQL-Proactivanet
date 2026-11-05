@@ -68,9 +68,15 @@ window.HistorialPeticiones = (function () {
     return { qs: p.join('&') };
   }
 
+  // Como se muestra quien la envio: lo que decide el servidor
+  // (solicitante_mostrar, App_Code/NombreSolicitante.cs: UsuariosAdmin.
+  // NombreSolicitante -> nombre verificado -> correo -> cuenta); sin el,
+  // como antes. Debajo, la cuenta si lo mostrado es otro texto; si no, el correo.
   function solicitante(p) {
-    var quien = p.solicitante_nombre ? h(p.solicitante_nombre) : nada(p.solicitante_cuenta);
-    var sub = p.solicitante_nombre && p.solicitante_cuenta ? p.solicitante_cuenta : p.solicitante_correo;
+    var t = p.solicitante_mostrar || p.solicitante_nombre || p.solicitante_cuenta;
+    var quien = nada(t);
+    var sub = p.solicitante_cuenta && t !== p.solicitante_cuenta ? p.solicitante_cuenta
+      : (p.solicitante_correo && p.solicitante_correo !== t ? p.solicitante_correo : '');
     return quien + (p.rol_solicitante ? ' <span class="chip ini-chip">' + h(p.rol_solicitante) + '</span>' : '') +
       (sub ? '<span class="ini-sub">' + h(sub) + '</span>' : '');
   }

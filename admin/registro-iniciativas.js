@@ -4847,13 +4847,13 @@ window.RegistroIniciativas = (function () {
             filas.map(function (f) {
               var h = f.fila;
               var cuando = h.reconstruido ? '≈ ' + String(h.fecha || '').slice(0, 10) : texto(h.fecha);
-              var quien = h.usuario ? h.usuario : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
+              var quien = h.usuario ? (h.usuario_mostrar || h.usuario) : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
               return '<tr><td>' + Escape.html(cuando) + '</td>' +
                 '<td>' + Escape.html(CAMPOS_HISTORIAL[h.campo] || texto(h.campo)) + '</td>' +
                 '<td>' + (f.cuenta ? '<b>' + Escape.html(f.etiqueta) + '</b>' : Escape.html(f.etiqueta)) + '</td>' +
                 '<td>' + Escape.html(h.anterior ? fecha(h.anterior) : '—') + '</td>' +
                 '<td>' + Escape.html(h.nuevo ? fecha(h.nuevo) : '—') + '</td>' +
-                '<td>' + Escape.html(quien) + '</td></tr>';
+                '<td' + (h.usuario && h.usuario_mostrar && h.usuario_mostrar !== h.usuario ? ' title="' + Escape.html(h.usuario) + '"' : '') + '>' + Escape.html(quien) + '</td></tr>';
             }).join('') + '</tbody></table></div>' +
           '<p class="ini-nota">' +
             (desde ? 'Registro automático desde el ' + Escape.html(desde) + '. ' : '') +
@@ -4891,13 +4891,13 @@ window.RegistroIniciativas = (function () {
           '</tr></thead><tbody>' +
           filas.map(function (f) {
             var h = f.fila;
-            var quien = h.usuario ? h.usuario : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
+            var quien = h.usuario ? (h.usuario_mostrar || h.usuario) : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
             return '<tr><td>' + Escape.html(texto(h.fecha)) + '</td>' +
               '<td>' + Escape.html(texto(h.categoria)) + '</td>' +
               '<td>' + (f.cuenta ? '<b>' + Escape.html(f.etiqueta) + '</b>' : Escape.html(f.etiqueta)) + '</td>' +
               '<td>' + (h.anterior ? Escape.html(fecha(h.anterior)) : '<span class="ini-origen derivado">Heredaba la de la iniciativa</span>') + '</td>' +
               '<td>' + Escape.html(h.nuevo ? fecha(h.nuevo) : '—') + '</td>' +
-              '<td>' + Escape.html(quien) + '</td></tr>';
+              '<td' + (h.usuario && h.usuario_mostrar && h.usuario_mostrar !== h.usuario ? ' title="' + Escape.html(h.usuario) + '"' : '') + '>' + Escape.html(quien) + '</td></tr>';
           }).join('') + '</tbody></table></div>' +
         '<p class="ini-nota">Solo las categorías ligadas después tienen fecha propia; las demás heredan la de la iniciativa (arriba).</p>';
     }

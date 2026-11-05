@@ -34,7 +34,10 @@ public class AdminIniciativasRecientes : IHttpHandler
                 context.Response.TrySkipIisCustomErrors = true;
                 return new Dictionary<string, object> { { "error", "Usa GET." }, { "tipo", "MetodoNoPermitido" } };
             }
-            return CambiosRecientesAdmin.Json(CambiosRecientesAdmin.Fuente.Leer(CambiosRecientesAdmin.Limite));
+            var json = CambiosRecientesAdmin.Json(CambiosRecientesAdmin.Fuente.Leer(CambiosRecientesAdmin.Limite));
+            // Quien guardo, como se muestra (App_Code/NombreSolicitante.cs; usuario no cambia).
+            NombreSolicitante.AgregarCambiosRecientes(json);
+            return json;
         });
     }
 
