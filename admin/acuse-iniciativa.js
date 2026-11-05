@@ -14,8 +14,8 @@
 
    AVISOS DE ADM (pestaña Administracion)
      Persistentes: salen de la base, no de la sesion. Listar NO marca nada;
-     "Marcar como leida" es explicito y por administrador. "Ver" abre el
-     mismo detalle de Iniciativas.
+     "Marcar como leida" es explicito y por administrador. El Codigo abre
+     el mismo detalle de Iniciativas sin cambiar de pestaña.
 
    El acuse no cambia la iniciativa (estado, fechas, dueños, semaforo).
    Sin sql/28 (disponible = false) no se pinta nada.
@@ -236,12 +236,12 @@ window.AcuseIniciativa = (function () {
       var i = registro ? registro.buscar(n.folio) : null;
       return '<tr class="' + (n.leida ? 'ini-av-leida' : 'ini-av-nueva') + '">' +
         '<td>' + (n.leida ? '<span class="ini-tenue">Leído</span>' : '<span class="pill ini-av-pill">Nuevo</span>') + '</td>' +
-        '<td>' + (i ? '<button type="button" class="ini-folio" data-av-folio="' + h(n.folio) + '">' + h(n.folio) + '</button>' : h(n.folio)) + '</td>' +
+        '<td>' + (i ? '<button type="button" class="ini-folio" data-av-folio="' + h(n.folio) + '" title="Ver la iniciativa">' + h(n.folio) + '</button>' : h(n.folio)) + '</td>' +
         '<td>' + (i ? h(i.titulo || '—') : '<span class="ini-sub">No está en el registro cargado.</span>') + '</td>' +
         '<td>' + h(n.nombre) + '<span class="ini-sub">' + h(ROLES[n.rol] || n.rol) + ' · ' + h(n.cuenta) + '</span></td>' +
         '<td>' + fechaHora(n.fecha_utc) + '<span class="ini-sub">compromiso ' + h(fecha(n.fecha_compromiso)) + '</span></td>' +
         '<td>' + (n.leida ? '' : '<button type="button" class="btn linea chico" data-av-leida="' + h(n.id_notificacion) + '">Marcar como leído</button>') +
-          (i ? ' <button type="button" class="btn linea chico" data-av-folio="' + h(n.folio) + '">Ver</button>' : '') + '</td></tr>';
+          '</td></tr>';
     }).join('');
     return '<table class="ini-det-tabla ini-av-tabla"><thead><tr><th scope="col">Estado</th><th scope="col">Código</th>' +
       '<th scope="col">Iniciativa</th><th scope="col">Quién</th><th scope="col">Cuándo</th><th scope="col"><span class="ini-sr">Acciones</span></th></tr></thead>' +
@@ -249,7 +249,9 @@ window.AcuseIniciativa = (function () {
   }
 
   class VistaAvisosAcuse {
-    // registro() -> el Registro cargado o null; abrirIniciativa(folio).
+    // registro() -> el Registro cargado o null; abrirIniciativa(folio,
+    // origen): el Codigo abre el detalle sin cambiar de pestaña (no hay
+    // "Ver" aparte); origen = el boton, a donde vuelve el foco.
     constructor(doc, pedir, registro, abrirIniciativa, cliente) {
       this.doc = doc;
       this.cliente = cliente || new ClienteAcuse(pedir);
@@ -275,7 +277,7 @@ window.AcuseIniciativa = (function () {
         var id = el.getAttribute('data-av-leida');
         if (id) { self.marcarLeida(Number(id), el); return; }
         var folio = el.getAttribute('data-av-folio');
-        if (folio) self.abrirIniciativa(folio);
+        if (folio) self.abrirIniciativa(folio, el);
       });
     }
 

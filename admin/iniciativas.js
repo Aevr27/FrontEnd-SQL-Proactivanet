@@ -1047,10 +1047,8 @@ window.Iniciativas = (function () {
         this.registro.acuse = new window.AcuseIniciativa.AcuseDetalle(this.doc, null, clienteAcuse);
         this.avisos = new window.AcuseIniciativa.VistaAvisosAcuse(this.doc, null,
           function () { return regAcuse ? regAcuse.registro : null; },
-          function (folio) {
-            self.mostrarVista('iniciativas');
-            if (self.vista === 'iniciativas') regAcuse.abrirDesdeLista(folio);
-          }, clienteAcuse);
+          // El Codigo abre el detalle SIN cambiar de pestaña (como Cambios recientes).
+          function (folio, origen) { return abrirIniciativaAqui(regAcuse, folio, origen); }, clienteAcuse);
       }
       // Cola de ADM de "Solicitar cambios" (pestaña Solicitudes). Clasificar
       // usa los valores que ya existen (del registro); aplicar relee el
@@ -1166,17 +1164,17 @@ window.Iniciativas = (function () {
         }
       }
       // Cambios recientes (pestaña Administracion, solo ADM). Titulo y estado
-      // del registro ya cargado; "Ver" abre el mismo detalle de Iniciativas
-      // (abrirDesdeLista: pregunta si hay cambios sin guardar) y "Actualizar
-      // registro" usa actualizar(), que conserva filtros, busqueda y orden.
+      // del registro ya cargado; el Codigo abre el mismo detalle de
+      // Iniciativas con abrirIniciativaAqui (abrirDesdeLista: pregunta si
+      // hay cambios sin guardar; el foco vuelve al Codigo al cerrar) SIN
+      // cambiar de pestaña: el detalle es un panel fijo de la pagina y se
+      // abre encima de Administracion. "Actualizar registro" usa
+      // actualizar(), que conserva filtros, busqueda y orden.
       if (window.CambiosRecientes) {
         var regRec = this.registro;
         this.recientes = new window.CambiosRecientes.VistaCambiosRecientes(this.doc, null,
           function () { return regRec ? regRec.registro : null; },
-          function (folio) {
-            self.mostrarVista('iniciativas');
-            if (self.vista === 'iniciativas') regRec.abrirDesdeLista(folio);
-          },
+          function (folio, origen) { return abrirIniciativaAqui(regRec, folio, origen); },
           function () { return regRec.actualizar(); });
       }
       // Historial de peticiones (pestaña Administracion, solo ADM): solo

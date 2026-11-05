@@ -10,9 +10,13 @@
    Un folio puede salir dos veces: su alta y su ultimo cambio (lo unico que
    la base guarda; App_Code/CambiosRecientesAdmin.cs).
    El servidor manda solo folio, hora, usuario y accion; titulo y estado salen del
-   registro que la pagina ya cargo (VistaRegistro), y "Ver" abre el MISMO
-   detalle de Iniciativas (abrirDesdeLista): no toca filtros, busqueda,
-   orden ni "mostrar mas". Un folio que no esta en el registro cargado NO
+   registro que la pagina ya cargo (VistaRegistro), y el Codigo abre el
+   MISMO detalle de Iniciativas (abrirDesdeLista, por
+   Iniciativas.abrirIniciativaAqui) SIN cambiar de pestaña: #regDetalle es
+   un panel fijo de la pagina, se abre encima de Administracion y al
+   cerrarlo el foco vuelve al Codigo. No toca filtros, busqueda, orden ni
+   "mostrar mas". No hay boton "Ver" aparte (repetia al Codigo). Un folio
+   que no esta en el registro cargado NO
    se descarta: se muestra con su aviso y se puede releer el registro
    (actualizar(), que conserva la vista).
 
@@ -59,29 +63,25 @@ window.CambiosRecientes = (function () {
     var faltan = false;
     var filas = cambios.map(function (c) {
       var i = registro ? registro.buscar(c.folio) : null;
-      var iniciativa, accion;
+      var iniciativa;
       if (i) {
         iniciativa = h(i.titulo || '—') + (i.estado ? '<span class="ini-sub">' + h(i.estado) + '</span>' : '');
-        accion = '<button type="button" class="btn linea chico" data-cr-folio="' + h(c.folio) + '">Ver</button>';
       } else if (!registro) {
         iniciativa = '<span class="ini-sub">El registro de iniciativas todavía no está cargado.</span>';
-        accion = '';
       } else {
         faltan = true;
         iniciativa = '<span class="ini-cr-falta">' + (faltantesReleidos[c.folio]
           ? 'Sigue sin aparecer en el registro de Iniciativas: su detalle no se puede abrir aquí.'
           : 'No está en el registro de Iniciativas cargado (puede no estar vigente o haberse guardado después de cargarlo).') + '</span>';
-        accion = '';
       }
-      return '<tr><td>' + (i ? '<button type="button" class="ini-folio" data-cr-folio="' + h(c.folio) + '">' + h(c.folio) + '</button>' : h(c.folio)) + '</td>' +
+      return '<tr><td>' + (i ? '<button type="button" class="ini-folio" data-cr-folio="' + h(c.folio) + '" title="Ver la iniciativa">' + h(c.folio) + '</button>' : h(c.folio)) + '</td>' +
         '<td>' + iniciativa + '</td>' +
         '<td>' + h(rotuloAccion(c.accion)) + '</td>' +
         '<td>' + fechaHora(c.fecha_utc) + '</td>' +
-        '<td>' + persona(c.usuario_mostrar, c.usuario) + '</td>' +
-        '<td>' + accion + '</td></tr>';
+        '<td>' + persona(c.usuario_mostrar, c.usuario) + '</td></tr>';
     }).join('');
     return '<table class="ini-det-tabla ini-cr-tabla"><thead><tr><th scope="col">Código</th><th scope="col">Iniciativa</th>' +
-      '<th scope="col">Qué</th><th scope="col">Guardado</th><th scope="col">Por</th><th scope="col"><span class="ini-sr">Abrir</span></th></tr></thead>' +
+      '<th scope="col">Qué</th><th scope="col">Guardado</th><th scope="col">Por</th></tr></thead>' +
       '<tbody>' + filas + '</tbody></table>' +
       (faltan ? '<p class="ini-nota"><button type="button" class="btn linea chico" data-cr-releer>Actualizar registro</button> ' +
                 'Relee el registro sin cambiar filtros ni búsqueda.</p>' : '');
@@ -94,7 +94,8 @@ window.CambiosRecientes = (function () {
   class VistaCambiosRecientes {
     // pedir(url, op) -> Promise<Response> (fetch por omision).
     // registro() -> el Registro cargado o null.
-    // abrirIniciativa(folio) -> abre su detalle en Iniciativas.
+    // abrirIniciativa(folio, origen) -> abre su detalle (sin cambiar de
+    // pestaña); origen: el boton del Codigo, a donde vuelve el foco.
     // releer() -> Promise (VistaRegistro.actualizar: conserva la vista).
     constructor(doc, pedir, registro, abrirIniciativa, releer) {
       this.doc = doc;
@@ -122,7 +123,7 @@ window.CambiosRecientes = (function () {
         if (!el || !el.getAttribute) return;
         if (el.getAttribute('data-cr-releer') !== null) { self.releerRegistro(); return; }
         var folio = el.getAttribute('data-cr-folio');
-        if (folio) self.verIniciativa(folio);
+        if (folio) self.verIniciativa(folio, el);
       });
     }
 
@@ -180,10 +181,10 @@ window.CambiosRecientes = (function () {
       this.estado('listo');
     }
 
-    verIniciativa(folio) {
+    verIniciativa(folio, origen) {
       var reg = this.registro();
       if (!reg || !reg.buscar(folio)) { this.pintar(); return false; }
-      this.abrirIniciativa(folio);
+      this.abrirIniciativa(folio, origen || null);
       return true;
     }
 
