@@ -74,19 +74,25 @@ window.HistorialPeticiones = (function () {
     return quien + (p.rol_solicitante ? ' <span class="chip ini-chip">' + h(p.rol_solicitante) + '</span>' : '') +
       (sub ? '<span class="ini-sub">' + h(sub) + '</span>' : '');
   }
-  function iniciativa(p) {
+  // conRef: el Codigo es un boton (data-ini-ref) que abre el detalle de la
+  // iniciativa sin cambiar de pestaña; sin el, texto como antes.
+  function codigo(c, conRef) {
+    if (!c) return nada(c);
+    return conRef ? '<button type="button" class="ini-folio ini-ref" data-ini-ref="' + h(c) + '" title="Ver la iniciativa">' + h(c) + '</button>' : h(c);
+  }
+  function iniciativa(p, conRef) {
     if (p.tipo === 'CAMBIO') {
-      return nada(p.iniciativa_codigo) + (p.iniciativa_titulo ? '<span class="ini-sub">' + h(p.iniciativa_titulo) + '</span>' : '');
+      return codigo(p.iniciativa_codigo, conRef) + (p.iniciativa_titulo ? '<span class="ini-sub">' + h(p.iniciativa_titulo) + '</span>' : '');
     }
     // La pedida: su titulo y, si la aprobacion la creo, su codigo.
-    return nada(p.iniciativa_titulo) + (p.iniciativa_codigo ? '<span class="ini-sub">' + h(p.iniciativa_codigo) + '</span>' : '');
+    return nada(p.iniciativa_titulo) + (p.iniciativa_codigo ? '<span class="ini-sub">' + codigo(p.iniciativa_codigo, conRef) + '</span>' : '');
   }
   function estado(p) {
     var rotulos = ESTADOS[p.tipo] || {};
     return p.estado ? h(rotulos[p.estado] || p.estado) : '—';
   }
 
-  function htmlLista(lista) {
+  function htmlLista(lista, conRef) {
     var filas = lista.map(function (p) {
       var tipo = TIPOS[p.tipo] || p.tipo || '—';
       var clase = p.tipo === 'CAMBIO' ? 'ini-hp-cambio' : 'ini-hp-iniciativa';
@@ -96,7 +102,7 @@ window.HistorialPeticiones = (function () {
         '<td><button type="button" class="ini-folio" data-hp-tipo="' + h(p.tipo) + '" data-hp-id="' + h(p.id) + '" ' +
           'title="Abrir su detalle en Solicitudes">' + nada(p.folio) + '</button></td>' +
         '<td>' + solicitante(p) + '</td>' +
-        '<td>' + iniciativa(p) + '</td>' +
+        '<td>' + iniciativa(p, conRef) + '</td>' +
         '<td>' + estado(p) + '</td></tr>';
     }).join('');
     return '<table class="ini-det-tabla ini-hp-tabla"><thead><tr><th scope="col">Fecha</th><th scope="col">Tipo de petición</th>' +
@@ -131,6 +137,7 @@ window.HistorialPeticiones = (function () {
       this.doc = doc;
       this.pedir = pedir || function (url, op) { return fetch(url, op); };
       this.abrirDetalle = abrirDetalle || function () {};
+      this.alVerIniciativa = null; // (codigo, boton) -> { estado, mensaje }: la iniciativa, sin cambiar de pestaña
       this.peticiones = null;
       this.cargaId = 0;      // descarta la respuesta de una carga ya superada
       this.cableado = false;
@@ -150,6 +157,14 @@ window.HistorialPeticiones = (function () {
       this.$('hpReintentar').addEventListener('click', function () { self.cargar(); });
       this.$('hpLista').addEventListener('click', function (e) {
         var t = e.target;
+        // El Codigo de la iniciativa va antes que el folio de la peticion.
+        var ref = t && t.closest ? t.closest('[data-ini-ref]') : null;
+        if (ref && typeof self.alVerIniciativa === 'function') {
+          var r = self.alVerIniciativa(ref.getAttribute('data-ini-ref'), ref);
+          var m = self.$('hpMsg');
+          if (m) { m.textContent = r && r.mensaje ? r.mensaje : ''; m.hidden = !(r && r.mensaje); }
+          return;
+        }
         var el = t && t.closest ? t.closest('[data-hp-id]') : t;
         if (!el || !el.getAttribute) return;
         var tipo = el.getAttribute('data-hp-tipo'), id = el.getAttribute('data-hp-id');
@@ -165,6 +180,7 @@ window.HistorialPeticiones = (function () {
       this.$('hpInvalido').hidden = e !== 'invalido';
       this.$('hpVacio').hidden = e !== 'vacio';
       this.$('hpLista').hidden = e !== 'listo';
+      if (this.$('hpMsg')) this.$('hpMsg').hidden = true;
       if (e === 'error') this.$('hpErrorTexto').textContent = texto || '';
       if (e === 'invalido') this.$('hpInvalido').textContent = texto || '';
       if (e === 'vacio') this.$('hpVacioTexto').textContent = texto || '';
@@ -211,7 +227,7 @@ window.HistorialPeticiones = (function () {
           if (!self.peticiones.length) {
             self.estado('vacio', hayFiltro ? 'No hay peticiones con estos filtros.' : 'Todavía no hay peticiones enviadas.');
           } else {
-            self.$('hpLista').innerHTML = htmlLista(self.peticiones);
+            self.$('hpLista').innerHTML = htmlLista(self.peticiones, typeof self.alVerIniciativa === 'function');
             self.estado('listo');
             self.$('hpCuenta').textContent = textoCuenta(r.json);
           }

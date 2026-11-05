@@ -764,7 +764,9 @@ window.SolicitudesCambioCola = (function () {
 
   // La lista de "Mis solicitudes de cambio": sin "Solicito" (son todas
   // suyas) ni intentos de aplicar (el servidor no los manda).
-  function htmlListaMias(lista, filtro) {
+  // conRef: el Codigo es un boton (data-ini-ref) que abre el detalle de la
+  // iniciativa sin cambiar de pestaña; sin el, texto como antes.
+  function htmlListaMias(lista, filtro, conRef) {
     if (!lista.length) {
       return '<p class="ini-nota">' + (filtro ? 'No tienes solicitudes de cambio con ese estado.' : 'Todavía no has enviado solicitudes de cambio.') + '</p>';
     }
@@ -773,7 +775,9 @@ window.SolicitudesCambioCola = (function () {
       lista.map(function (s) {
         return '<tr class="ini-sol-fila" data-mc-fila="' + h(s.id) + '">' +
           '<td><button type="button" class="ini-folio" data-mc-id="' + h(s.id) + '" aria-controls="mcDetalle">#' + h(s.id) + '</button></td>' +
-          '<td>' + h(s.folio) + (s.titulo ? '<span class="ini-sub">' + h(s.titulo) + '</span>' : '') + '</td>' +
+          '<td>' + (conRef && s.folio
+            ? '<button type="button" class="ini-folio ini-ref" data-ini-ref="' + h(s.folio) + '" title="Ver la iniciativa">' + h(s.folio) + '</button>'
+            : h(s.folio)) + (s.titulo ? '<span class="ini-sub">' + h(s.titulo) + '</span>' : '') + '</td>' +
           '<td>' + h(TIPOS[s.tipo] || s.tipo) + '</td><td>' + resumen(s) + '</td>' +
           '<td>' + fechaHora(s.fecha_solicitud_utc) + '</td><td>' + h(ESTADOS[s.estado] || s.estado) + relacionCorta(s) + '</td></tr>';
       }).join('') + '</tbody></table>';
@@ -801,6 +805,7 @@ window.SolicitudesCambioCola = (function () {
       this.detalle = null;       // la abierta (para Cancelar / Modificar, sql/41)
       this.ocupado = false;
       this.alModificar = null;   // (d) -> true si abrio "Solicitar cambios" para corregirla
+      this.alVerIniciativa = null; // (codigo, boton) -> { estado, mensaje }: la iniciativa, sin cambiar de pestaña
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -815,6 +820,13 @@ window.SolicitudesCambioCola = (function () {
         this.$('mcFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.cerrarDetalle(); self.listar(); });
       }
       this.$('mcLista').addEventListener('click', function (e) {
+        // El Codigo va antes que la fila: abre la iniciativa; si no se pudo, se avisa.
+        var ref = e.target && e.target.closest ? e.target.closest('[data-ini-ref]') : null;
+        if (ref && typeof self.alVerIniciativa === 'function') {
+          var r = self.alVerIniciativa(ref.getAttribute('data-ini-ref'), ref);
+          if (r && r.mensaje) self.mensaje('aviso', h(r.mensaje));
+          return;
+        }
         var el = e.target && e.target.closest ? e.target.closest('[data-mc-id]') : e.target;
         var id = el && el.getAttribute && el.getAttribute('data-mc-id');
         if (id) self.verDetalle(Number(id));
@@ -873,7 +885,7 @@ window.SolicitudesCambioCola = (function () {
           self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
             var lista = ordenarRecientes(r.json.solicitudes);
-            self.$('mcLista').innerHTML = htmlListaMias(lista, filtro);
+            self.$('mcLista').innerHTML = htmlListaMias(lista, filtro, !!self.alVerIniciativa);
             if (self.$('mcResumen')) {
               self.$('mcResumen').textContent = lista.length + (lista.length === 1 ? ' solicitud' : ' solicitudes') +
                 (typeof r.json.maximo === 'number' && lista.length >= r.json.maximo ? ' (las ' + r.json.maximo + ' más recientes)' : '');

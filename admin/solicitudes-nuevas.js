@@ -93,8 +93,29 @@ window.SolicitudesNuevas = (function () {
       '<button type="button" class="btn linea chico" data-sx-accion="modificar">Modificar</button></div></div>';
   }
 
+  // El Codigo de la iniciativa que creo la aprobacion: boton (data-ini-ref)
+  // que abre su detalle sin cambiar de pestaña cuando la pagina sabe
+  // abrirlo (conRef = hay alVerIniciativa); si no, texto como antes.
+  function refIniciativa(codigo, conRef) {
+    if (!codigo) return '';
+    return conRef
+      ? '<button type="button" class="ini-folio ini-ref" data-ini-ref="' + h(codigo) + '" title="Ver la iniciativa">' + h(codigo) + '</button>'
+      : h(codigo);
+  }
+  // Clic en una referencia (data-ini-ref): la abre dueno.alVerIniciativa y,
+  // si no se pudo (no existe o no la ve esta cuenta), avisar(texto) lo dice.
+  // -> true si el clic era de una referencia (la fila no se abre).
+  function clicReferencia(e, dueno, avisar) {
+    var b = e.target && e.target.closest ? e.target.closest('[data-ini-ref]') : null;
+    if (!b || typeof dueno.alVerIniciativa !== 'function') return false;
+    var r = dueno.alVerIniciativa(b.getAttribute('data-ini-ref'), b);
+    if (r && r.mensaje) avisar(r.mensaje);
+    return true;
+  }
+
   // vacio: el texto sin solicitudes (Mis solicitudes dice otro).
-  function htmlLista(lista, vacio) {
+  // conRef: el Codigo de la iniciativa creada es un boton (refIniciativa).
+  function htmlLista(lista, vacio, conRef) {
     if (!lista.length) return '<p class="ini-nota">' + h(vacio || 'Todavía no hay solicitudes nuevas guardadas.') + '</p>';
     return '<table class="ini-det-tabla ini-sol-tabla"><thead><tr><th scope="col">Número</th><th scope="col">Tipo</th>' +
       '<th scope="col">Título</th><th scope="col">Solicitó</th><th scope="col">Product Owner</th><th scope="col">Service Owner</th>' +
@@ -105,7 +126,7 @@ window.SolicitudesNuevas = (function () {
           '<td>' + nada(s.tipo) + '</td><td>' + nada(s.titulo) + '</td><td>' + solicitante(s) + '</td>' +
           '<td>' + nada(s.po) + '</td><td>' + nada(s.so) + '</td><td class="ini-cat-ruta">' + nada(s.categoria) + '</td>' +
           '<td>' + fechaHora(s.fecha_utc) + '</td><td>' + estado(s.estado) +
-          (s.codigo_iniciativa ? '<span class="ini-sub">' + h(s.codigo_iniciativa) + '</span>' : '') + relacionCorta(s) + '</td></tr>';
+          (s.codigo_iniciativa ? '<span class="ini-sub">' + refIniciativa(s.codigo_iniciativa, conRef) + '</span>' : '') + relacionCorta(s) + '</td></tr>';
       }).join('') + '</tbody></table>';
   }
 
@@ -153,7 +174,7 @@ window.SolicitudesNuevas = (function () {
 
   // puedeRevisar: ADM y revision_disponible. Los botones, solo en ENVIADA.
   // p: prefijo de los id del detalle ('sn' por omision, 'ms' en Mis).
-  function htmlDetalle(d, puedeRevisar, p) {
+  function htmlDetalle(d, puedeRevisar, p, conRef) {
     p = p || 'sn';
     var revisada = d.estado === 'APROBADA' || d.estado === 'RECHAZADA';
     var filas = [
@@ -169,7 +190,7 @@ window.SolicitudesNuevas = (function () {
       ['RCA', d.rca_extension ? 'Adjunto .' + h(String(d.rca_extension).toLowerCase()) + ' (el archivo no se guarda)' : '—'],
       ['Enviada', fechaHora(d.fecha_utc)],
       ['Estado', estado(d.estado)],
-      ['Iniciativa', d.codigo_iniciativa ? h(d.codigo_iniciativa) : '—']
+      ['Iniciativa', d.codigo_iniciativa ? refIniciativa(d.codigo_iniciativa, conRef) : '—']
     ].map(function (f) { return '<tr><th scope="row">' + f[0] + '</th><td>' + f[1] + '</td></tr>'; }).join('');
     var eventos = (d.eventos || []).map(function (e) {
       return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + nada(e.usuario) +
@@ -181,7 +202,7 @@ window.SolicitudesNuevas = (function () {
         (d.comentario_revision ? ': «' + h(d.comentario_revision) + '»' : '') +
         (d.estado === 'APROBADA'
           ? (d.codigo_iniciativa
-              ? '<span class="ini-sub">Iniciativa creada con el código: ' + h(d.codigo_iniciativa) + '</span>'
+              ? '<span class="ini-sub">Iniciativa creada con el código: ' + refIniciativa(d.codigo_iniciativa, conRef) + '</span>'
               : '<span class="ini-sub">Se aprobó antes de que aprobar creara la iniciativa: no tiene iniciativa ligada.</span>')
           : '') + '</p>'
       : d.estado === 'CANCELADA'
@@ -301,6 +322,7 @@ window.SolicitudesNuevas = (function () {
       this.alRevisar = null;      // tras aprobar / rechazar: el aviso se relee
       this.alModificar = null;    // (d) -> true si abrio Nueva solicitud para corregir una suya (sql/42)
       this.alCancelar = null;     // tras cancelar una suya: el aviso se relee
+      this.alVerIniciativa = null; // (codigo, boton) -> { estado, mensaje }: la iniciativa creada, sin cambiar de pestaña
       this.cableado = false;
     }
 
@@ -317,6 +339,7 @@ window.SolicitudesNuevas = (function () {
       this.$('snFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.listar(); });
       this.$('snActualizar').addEventListener('click', function () { self.listar(); });
       this.$('snLista').addEventListener('click', function (e) {
+        if (clicReferencia(e, self, function (t) { self.mensaje('snMsg', 'aviso', h(t)); })) return;
         var el = e.target && e.target.closest ? e.target.closest('[data-sn-numero]') : e.target;
         var n = el && el.getAttribute && el.getAttribute('data-sn-numero');
         if (n) self.verDetalle(Number(n));
@@ -327,6 +350,7 @@ window.SolicitudesNuevas = (function () {
         if (a === 'aprobar') { self.aprobar(); return; }
         if (a === 'rechazar') { self.rechazar(); return; }
         if (a === 'cerrar') { self.cerrarDetalle(); return; }
+        if (clicReferencia(e, self, function (t) { self.mensaje('snDetMsg', 'aviso', h(t)); })) return;
         // sql/42: ir a la relacionada; cancelar / modificar la suya.
         var ir = e.target && e.target.closest ? e.target.closest('[data-sn-ir]') : null;
         var n = ir && ir.getAttribute ? Number(ir.getAttribute('data-sn-ir')) : 0;
@@ -399,7 +423,7 @@ window.SolicitudesNuevas = (function () {
           if (mia !== self.lecturas) return null;
           self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
-            self.$('snLista').innerHTML = htmlLista(r.json.solicitudes, vacio);
+            self.$('snLista').innerHTML = htmlLista(r.json.solicitudes, vacio, !!self.alVerIniciativa);
             self.$('snResumen').textContent = textoTotal(r.json);
             self.mensaje('snMsg', '', '');
             return r.json.solicitudes;
@@ -454,7 +478,7 @@ window.SolicitudesNuevas = (function () {
           self.mensaje('snMsg', '', '');
           self.detalle = r.json;
           var caja = self.$('snDetalle');
-          caja.innerHTML = htmlDetalle(r.json, self.rol === 'ADM' && r.json.revision_disponible === true);
+          caja.innerHTML = htmlDetalle(r.json, self.rol === 'ADM' && r.json.revision_disponible === true, undefined, !!self.alVerIniciativa);
           caja.hidden = false;
           if (self.alVerSolicitud) self.alVerSolicitud(r.json);
           return r.json;
@@ -563,6 +587,7 @@ window.SolicitudesNuevas = (function () {
       this.detalle = null;       // la abierta (Cancelar / Modificar, sql/42)
       this.ocupado = false;
       this.alModificar = null;   // (d) -> true si abrio Nueva solicitud para corregirla
+      this.alVerIniciativa = null; // (codigo, boton) -> { estado, mensaje }: la iniciativa creada, sin cambiar de pestaña
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -577,6 +602,7 @@ window.SolicitudesNuevas = (function () {
         this.$('msFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.cerrarDetalle(); self.listar(); });
       }
       this.$('msLista').addEventListener('click', function (e) {
+        if (clicReferencia(e, self, function (t) { self.mensaje('aviso', h(t)); })) return;
         var el = e.target && e.target.closest ? e.target.closest('[data-sn-numero]') : e.target;
         var n = el && el.getAttribute && el.getAttribute('data-sn-numero');
         if (n) self.verDetalle(Number(n));
@@ -584,6 +610,7 @@ window.SolicitudesNuevas = (function () {
       this.$('msDetalle').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-sn-accion]') : e.target;
         if (el && el.getAttribute && el.getAttribute('data-sn-accion') === 'cerrar') { self.cerrarDetalle(); return; }
+        if (clicReferencia(e, self, function (t) { var m = self.$('msDetMsg'); if (m) { m.className = 'ini-cambio-msg aviso'; m.innerHTML = h(t); } })) return;
         // sql/42: ir a la relacionada (de la misma cuenta); cancelar / modificar.
         var ir = e.target && e.target.closest ? e.target.closest('[data-sn-ir]') : null;
         var n = ir && ir.getAttribute ? Number(ir.getAttribute('data-sn-ir')) : 0;
@@ -633,7 +660,7 @@ window.SolicitudesNuevas = (function () {
           self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
             self.$('msLista').innerHTML = htmlLista(r.json.solicitudes,
-              filtro ? 'No tienes solicitudes de iniciativa con ese estado.' : 'Todavía no has enviado solicitudes de iniciativa.');
+              filtro ? 'No tienes solicitudes de iniciativa con ese estado.' : 'Todavía no has enviado solicitudes de iniciativa.', !!self.alVerIniciativa);
             self.$('msResumen').textContent = textoTotal(r.json);
             self.mensaje('', '');
             return r.json.solicitudes;
@@ -687,7 +714,7 @@ window.SolicitudesNuevas = (function () {
           self.mensaje('', '');
           self.detalle = r.json;
           var caja = self.$('msDetalle');
-          caja.innerHTML = htmlDetalle(r.json, false, 'ms');
+          caja.innerHTML = htmlDetalle(r.json, false, 'ms', !!self.alVerIniciativa);
           caja.hidden = false;
           return r.json;
         }, function () {
