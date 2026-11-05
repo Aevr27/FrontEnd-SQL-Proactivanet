@@ -317,6 +317,20 @@ pruebas.push(function () {
     { categoria: '/A/Cat 1', accion: 'MODIFICAR', pct_nuevo: '20' }, { categoria: '/A/Cat 2', accion: 'AGREGAR', pct_nuevo: '5' }] }));
   Check('R3 CATEGORIAS: ligadas a pcts, por agregar a nuevas', [1, 'pct', { '/A/Cat 1': '20' }, [{ categoria: '/A/Cat 2', valor: '5' }]],
     [cats.length, cats[0].campo, cats[0].pcts, cats[0].nuevas]);
+  // HISTORICO (antes del % entero, 2026-11-05): corregir una solicitud
+  // guardada con 12.5% la muestra tal cual, pero no se reenvia con
+  // decimales: el aviso pide el % entero; corregida a 12, pasa.
+  var hIni = { folio: 'PRB 2026-000001', estado: 'En Solución', categorias: [{ categoria: '/A/Cat 1', pct_dism: 0.2 }] };
+  var hl = new R.ListaSolicitudCambio(hIni, {});
+  hl.cargarSolicitud(SolC({ tipo: 'CATEGORIAS', estado_nuevo: null, campo_fecha: null,
+    categorias_detalle: [{ categoria: '/A/Cat 1', accion: 'PCT', pct_nuevo: '12.5' }] }));
+  hl.motivoCancelacion = 'Corrijo el %';
+  function pctMal(lista) { return lista.validarEnvio().some(function (e) { return /porcentaje entero entre 0 y 100, sin decimales/.test(e.mensaje); }); }
+  Check('R3b historico 12.5%: se ve tal cual en la lista (20% → 12.5%) y bloquea el reenvio con el aviso de % entero', ['12.5', true, true],
+    [hl.items[0].pcts['/A/Cat 1'], /20% → 12\.5%/.test(hl.texto(hl.items[0]).linea), pctMal(hl)]);
+  hl.items[0].pcts['/A/Cat 1'] = '12';
+  Check('R3b ... corregido a 12: sin ese error y viaja 12', [false, ['12']],
+    [pctMal(hl), (hl.pares() || []).filter(function (p) { return p[0] === 'pct_valor'; }).map(function (p) { return p[1]; })]);
   var datos = it(SolC({ tipo: 'DATOS', estado_nuevo: null, campo_fecha: null, cambia_titulo: true, titulo_nuevo: 'T2', cambia_po: false, cambia_so: true, so_nuevo: 'SO y' }));
   Check('R4 DATOS: solo los pedidos', [{ titulo: 'T2', po: null, so: 'SO y' }], datos.map(function (x) { return x.datos; }));
   var otros = SolC({ tipo: 'OTROS', estado_nuevo: null, campo_fecha: null, motivo: 'Categoria equivocada\n\nMotivo: lo vio el PO' });
@@ -358,6 +372,13 @@ pruebas.push(function () {
       [ok, P.vista, s.tipo, s.cascada.seleccion.slice(0, 3), s.valores.titulo, s.valores.analisis, s.valores.observaciones, s.valores.pct,
        p.sel('iniReemplazo').hidden, /#0000012/.test(p.sel('iniReemplazoTexto').innerHTML)]);
     Check('P2 sin motivo de correccion: falta, y no se envia', true, s.erroresCliente().some(function (e) { return e.campo === 'motivo_cancelacion'; }));
+    // % entero (2026-11-05): la solicitud de antes traia 12.5; se muestra
+    // tal cual (P1), pero no se reenvia con decimales: hay que corregirlo.
+    Check('P2b % historico con decimales: se ve tal cual y bloquea el envio con el aviso de % entero',
+      ['12.5', 'Escribe un porcentaje entero entre 0 y 100, sin decimales.', true],
+      [s.valores.pct, s.error('pct'), s.erroresCliente().some(function (e) { return e.campo === 'pct'; })]);
+    s.capturar('pct', '12');
+    Check('P2c corregido a 12: sin error de %', ['', false], [s.error('pct'), s.erroresCliente().some(function (e) { return e.campo === 'pct'; })]);
     p.sel('iniMotivoCancelacion').value = 'Me equivoque de titulo';
     p.sel('iniMotivoCancelacion').disparar('input', { target: p.sel('iniMotivoCancelacion') });
     var campos = s.camposEnvio();
@@ -366,8 +387,8 @@ pruebas.push(function () {
     return esperar().then(esperar).then(esperar).then(function () { return P.validar(); });
   }).then(function () {
     var cuerpo = posts.length ? posts[posts.length - 1][1] : null;
-    Check('P4 un POST a validar con reemplaza_a / motivo_cancelacion', ['../handlers/admin_iniciativas_validar.ashx', '12', 'Me equivoque de titulo'],
-      [posts.length ? posts[posts.length - 1][0] : null, cuerpo && cuerpo.get('reemplaza_a'), cuerpo && cuerpo.get('motivo_cancelacion')]);
+    Check('P4 un POST a validar con reemplaza_a / motivo_cancelacion y el % entero corregido', ['../handlers/admin_iniciativas_validar.ashx', '12', 'Me equivoque de titulo', '12'],
+      [posts.length ? posts[posts.length - 1][0] : null, cuerpo && cuerpo.get('reemplaza_a'), cuerpo && cuerpo.get('motivo_cancelacion'), cuerpo && cuerpo.get('pct')]);
     Check('P5 exito: numero nuevo, a cual corrige; el borrador se limpia (sin reemplazo) y el aviso se oculta',
       [true, true, null, true],
       [/#0000013/.test(p.sel('iniResultado').innerHTML), /Corrige a la solicitud #0000012, que quedó cancelada/.test(p.sel('iniResultado').innerHTML),

@@ -19,8 +19,8 @@
      Todos los campos son obligatorios. RCA: obligatorio si el tipo es el
      Problem del catalogo (tipo_problem del handler), opcional si no.
      % de disminucion: 0 a la capacidad DISPONIBLE de la Categoria
-     (admin_iniciativas_capacidad.ashx), hasta dos decimales, sin multiplos
-     obligatorios.
+     (admin_iniciativas_capacidad.ashx), en % ENTERO (2026-11-05: sin
+     decimales), sin multiplos obligatorios.
 
    DE DONDE SALE CADA COSA
    -----------------------
@@ -174,8 +174,8 @@ window.Iniciativas = (function () {
       ayuda: { texto: 'Cantidad de incidentes asociados al problema que justifican su análisis y seguimiento.',
                nota: 'Se calcula: tickets de la categoría elegida en los últimos 30 días. No se captura.' } },
     // Por categoria: dbo.ProblemCategoria.PctDisminucion es DECIMAL(9,4) y
-    // guarda FRACCION (1.0000 = 100%). Se captura en % con hasta dos
-    // decimales, que es esa misma precision. 0-100 es un tope de la
+    // guarda FRACCION (1.0000 = 100%). Se captura en % ENTERO (2026-11-05:
+    // sin decimales; la columna no cambia: 20 -> 0.2000). 0-100 es un tope de la
     // pantalla, no de la base (no tiene CHECK); los multiplos de 5 no se
     // exigen porque no estan verificados.
     { clave: 'pct', etiqueta: '% Disminución de tickets vs categoría', control: 'porcentaje', seccion: 'impacto',
@@ -184,7 +184,7 @@ window.Iniciativas = (function () {
     // La meta se escribe en % O en tickets: el que se escribio manda
     // (SolicitudNueva.metaPor) y el otro se calcula con la volumetria de la
     // categoria. % -> tickets: floor(volumetria x % / 100), ticket entero
-    // (ticketsDe). Tickets -> %: pctDeTickets, a dos decimales. Solo viaja
+    // (ticketsDe). Tickets -> %: pctDeTickets, a % entero. Solo viaja
     // el % (el validador no tiene campo de tickets) y el Tickets Reduce del
     // registro sigue saliendo de dbo.ExpTicketsReduce con su ventana movil.
     { clave: 'tickets', etiqueta: 'Tickets a reducir', control: 'meta-tickets', seccion: 'impacto',
@@ -205,17 +205,26 @@ window.Iniciativas = (function () {
     entero: function (v) {
       return v === '' || /^\d+$/.test(v) ? '' : 'Escribe un número entero, de 0 en adelante.';
     },
+    // Lo que se CAPTURA: % entero de 0 a 100, sin decimales (2026-11-05).
     porcentaje: function (v) {
       if (v === '') return '';
-      return /^\d{1,3}(\.\d{1,2})?$/.test(v) && Number(v) <= 100 ? ''
-        : 'Escribe un porcentaje entre 0 y 100, con hasta dos decimales.';
+      return /^\d{1,3}$/.test(v) && Number(v) <= 100 ? ''
+        : 'Escribe un porcentaje entero entre 0 y 100, sin decimales.';
     }
   };
 
+  // Lo que se CAPTURA es un % entero (VALIDAR.porcentaje); lo GUARDADO (la
+  // base, o una solicitud de antes) puede traer hasta dos decimales, la
+  // precision de DECIMAL(9,4) en fraccion. fraccionDe y ticketsDe aceptan
+  // lo guardado: ADM revisa solicitudes historicas con ticketsDe
+  // (solicitudes-nuevas.js, solicitudes-cambio.js; sus pruebas sacan
+  // ticketsDe del archivo por llaves, por eso la regla va dentro).
+
   // El % capturado como lo guarda ProblemCategoria.PctDisminucion
-  // (fraccion, 4 decimales), o null si no es valido.
+  // (fraccion, 4 decimales), o null si no es valido. Acepta un % guardado
+  // (hasta dos decimales); que lo capturado sea entero lo dice VALIDAR.
   function fraccionDe(pct) {
-    if (pct === '' || VALIDAR.porcentaje(pct)) return null;
+    if (pct === '' || !/^\d{1,3}(\.\d{1,2})?$/.test(pct) || Number(pct) > 100) return null;
     return Math.round(Number(pct) * 100) / 10000;
   }
 
@@ -227,15 +236,15 @@ window.Iniciativas = (function () {
   function ticketsDe(volumetria, pct) {
     if (typeof volumetria !== 'number' || !isFinite(volumetria) || volumetria < 0 || volumetria % 1) return null;
     pct = String(pct === null || pct === undefined ? '' : pct).trim();
-    if (pct === '' || VALIDAR.porcentaje(pct)) return null;
+    if (pct === '' || !/^\d{1,3}(\.\d{1,2})?$/.test(pct) || Number(pct) > 100) return null;
     return Math.floor(volumetria * Math.round(Number(pct) * 100) / 10000);
   }
 
-  // Tickets a reducir -> el menor % con dos decimales que da al menos esos
-  // tickets con ticketsDe (la misma
-  // regla que MetaCategoria.pct de Crear, admin/iniciativa-admin.js). Con
-  // volumetrias grandes 0.01% es mas de un ticket: exacto dice si ese % da
-  // los mismos tickets. -> { pct, exacto, tickets } o { error } ('' = vacio).
+  // Tickets a reducir -> el menor % ENTERO que da al menos esos tickets con
+  // ticketsDe (la regla de MetaCategoria.pct de Crear, admin/
+  // iniciativa-admin.js, a % entero: MetaCategoria.pctEntero). 1% puede
+  // ser mas de un ticket: exacto dice si ese % da los mismos tickets.
+  // -> { pct, exacto, tickets } o { error } ('' = vacio).
   function pctDeTickets(volumetria, tickets) {
     var t = String(tickets === null || tickets === undefined ? '' : tickets).trim();
     if (t === '') return { error: '' };
@@ -249,7 +258,7 @@ window.Iniciativas = (function () {
       return { error: n.toLocaleString('es-MX') + ' tickets es más que la volumetría (' +
         volumetria.toLocaleString('es-MX') + '): pasaría de 100%.' };
     }
-    var pct = String(Math.ceil(n * 10000 / volumetria) / 100);
+    var pct = String(Math.ceil(n * 100 / volumetria));
     var da = ticketsDe(volumetria, pct);
     return { pct: pct, exacto: da === n, tickets: da };
   }
@@ -470,11 +479,12 @@ window.Iniciativas = (function () {
 
     fallaCapacidad(cat) { return this.fijarCapacidad(cat, null); }
 
-    // Lo maximo que se puede pedir, en % con dos decimales, o null si no se
-    // sabe todavia.
+    // Lo maximo que se puede pedir, en % ENTERO (el disponible hacia
+    // abajo: con 33.33% disponible se puede pedir hasta 33%), o null si no
+    // se sabe todavia.
     maxPct() {
       var c = this.capacidad;
-      return c && c.estado === 'lista' && c.determinable ? Math.round(c.disponible * 10000) / 100 : null;
+      return c && c.estado === 'lista' && c.determinable ? Math.floor(Math.round(c.disponible * 10000) / 100) : null;
     }
 
     // ---- volumetria de la categoria ----
@@ -548,7 +558,7 @@ window.Iniciativas = (function () {
         if (r.error === '') return 'Escribe los tickets o el % de disminución: el otro se calcula.';
         if (r.error !== undefined) return r.error;
         return '≈ ' + r.pct + '% de ' + this.volumetria().toLocaleString('es-MX') +
-          (r.exacto ? '' : ' · con 2 decimales son ' + r.tickets.toLocaleString('es-MX') + ' tickets') + '.';
+          (r.exacto ? '' : ' · con % entero son ' + r.tickets.toLocaleString('es-MX') + ' tickets') + '.';
       }
       var pct = String(this.valores.pct === undefined ? '' : this.valores.pct).trim();
       if (pct === '') return 'Escribe el % de disminución o los tickets: el otro se calcula.';
@@ -1557,7 +1567,7 @@ window.Iniciativas = (function () {
       } else if (campo.control === 'entero') {
         control = '<input type="number"' + dato + describe + ' inputmode="numeric" min="0" step="1" value="' + Escape.attr(v) + '">';
       } else if (campo.control === 'porcentaje') {
-        control = '<div class="ini-pct"><input type="number"' + dato + describe + ' inputmode="decimal" min="0" max="100" step="0.01"' +
+        control = '<div class="ini-pct"><input type="number"' + dato + describe + ' inputmode="numeric" min="0" max="100" step="1"' +
           (campo.requiereCategoria && !(this.solicitud && this.solicitud.categoria()) ? ' disabled' : '') +
           ' value="' + Escape.attr(v) + '"><span class="ini-pct-sufijo" aria-hidden="true">%</span></div>';
       } else {

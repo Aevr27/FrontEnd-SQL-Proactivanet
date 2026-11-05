@@ -493,7 +493,13 @@ window.IniciativaAdmin = (function () {
       return Math.floor(vol * Math.round(Number(pct) * 100) / 10000);
     },
     // -> { pct: texto, exacto, tickets: los que da ese % } o { error }.
-    pct: function (vol, tickets) {
+    pct: function (vol, tickets) { return MetaCategoria.deTickets(vol, tickets, 100); },
+    // Lo mismo a % ENTERO (2026-11-05): el menor % sin decimales que da al
+    // menos esos tickets. Lo usa "Solicitar cambios" (registro-iniciativas.js),
+    // donde solo se piden % enteros; Crear y Modificar de ADM siguen con pct.
+    pctEntero: function (vol, tickets) { return MetaCategoria.deTickets(vol, tickets, 1); },
+    // porUnidad: pasos por punto de % (100 = centesimas, 1 = enteros).
+    deTickets: function (vol, tickets, porUnidad) {
       var t = String(tickets === null || tickets === undefined ? '' : tickets).trim();
       if (t === '') return { error: '' };
       if (FORMATO.entero(t)) return { error: 'Tickets a resolver: escribe un número entero, de 0 en adelante.' };
@@ -503,8 +509,8 @@ window.IniciativaAdmin = (function () {
       if (vol === 0) return { error: 'Con volumetría 0 no hay tickets que resolver: usa el %.' };
       var n = Number(t);
       if (n > vol) return { error: n.toLocaleString('es-MX') + ' tickets es más que la volumetría (' + vol.toLocaleString('es-MX') + '): pasaría de 100%.' };
-      var centesimos = Math.ceil(n * 10000 / vol);
-      var pct = String(centesimos / 100);
+      var pasos = Math.ceil(n * 100 * porUnidad / vol);
+      var pct = String(pasos / porUnidad);
       var da = MetaCategoria.tickets(vol, pct);
       return { pct: pct, exacto: da === n, tickets: da };
     }

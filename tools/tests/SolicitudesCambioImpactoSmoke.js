@@ -120,6 +120,18 @@ function Detalle(o) {
     [/Ya comprometido por otras: 42.34% · con el % pedido aquí: 67.34%/.test(det), /Ya comprometido por otras: 0% · con el % pedido aquí: 10%/.test(det)]);
   Check('I5 lista vacia y null', [true, true],
     [/Ninguna otra iniciativa activa tiene % en esta categoría/.test(det), /No se pudieron leer las otras iniciativas de \/B\/Cat 4/.test(det)]);
+  // HISTORICO (antes del % entero, 2026-11-05): una solicitud guardada con
+  // decimales se muestra tal cual (lo que ADM aprobaria) y sus tickets se
+  // siguen calculando con ticketsDe; las nuevas (enteras) sin decimales.
+  var hist = Detalle({ categorias_detalle: [
+    { categoria: '/A/Cat 1', accion: 'PCT', pct_anterior: '20', pct_nuevo: '12.5', pct_actual: '20', ligada: true, otras_iniciativas: [] },
+    { categoria: '/A/Cat 2', accion: 'AGREGAR', pct_anterior: null, pct_nuevo: '33.33', tipo_iniciativa: 'Problem', tipo_agrupado: 'Problem', otras_iniciativas: [] },
+    { categoria: '/B/Cat 4', accion: 'AGREGAR', pct_anterior: null, pct_nuevo: '25', tipo_iniciativa: 'Problem', tipo_agrupado: 'Problem', otras_iniciativas: [] }] });
+  var hh = C.htmlDetalle(hist, {}, {});
+  Check('I6 historico con decimales: 12.5% y 33.33% tal cual; el entero 25% sin decimales', [true, true, true, false],
+    [/>12\.5%</.test(hh), />33\.33%</.test(hh), />25%</.test(hh), />25\.0+%</.test(hh)]);
+  Check('I6 historico: tickets con ticketsDe sobre el % guardado (418 x 12.5% = 52; 1247 x 33.33% = 415)', ['52', '415'],
+    [ticketsDe(418, '12.5') + '', ticketsDe(1247, '33.33') + '']);
   var viejo = Detalle(); viejo.categorias_detalle.forEach(function (c) { delete c.otras_iniciativas; });
   Check('I5 servidor anterior (sin el campo): sin la seccion de otras', false, /Otras iniciativas activas/.test(C.htmlDetalle(viejo, {}, {})));
 

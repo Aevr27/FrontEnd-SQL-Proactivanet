@@ -476,15 +476,15 @@ window.RegistroIniciativas = (function () {
       '<small class="ini-sub" id="regCambioMeta-' + clave + '">' + htmlMetaHint(c, ruta) + '</small>';
   }
 
-  // Lo que dan los tickets escritos: el % que viaja, la volumetria con la
-  // que salio y si el % (dos decimales) da exactamente esos tickets.
+  // Lo que dan los tickets escritos: el % (entero) que viaja, la
+  // volumetria con la que salio y si ese % da exactamente esos tickets.
   function htmlMetaHint(c, ruta) {
     var v = c.vols[ruta], r = c.conversion(ruta);
     var vol = v && (v.estado === 'ok' || v.estado === 'cero') ? 'volumetría (últimos 30 días): ' + Number(v.valor).toLocaleString('es-MX') : '';
     if (r === null) return v && v.estado === 'cargando' ? 'Calculando la volumetría…' : Escape.html(vol);
     if (r.error !== undefined) return '<span class="ini-meta mal">' + Escape.html(r.error) + '</span>';
     return '≈ ' + Escape.html(r.pct) + '% · ' + Escape.html(vol) +
-      (r.exacto ? '' : ' · con 2 decimales ese % da ' + Escape.html(r.tickets) + ' tickets, no ' + Escape.html(c.meta(ruta).tickets));
+      (r.exacto ? '' : ' · con % entero ese % da ' + Escape.html(r.tickets) + ' tickets, no ' + Escape.html(c.meta(ruta).tickets));
   }
 
   // ' (pedido como N tickets de una volumetria de V)' de una categoria
@@ -492,7 +492,7 @@ window.RegistroIniciativas = (function () {
   function enTicketsCambio(x) {
     if (typeof x.tickets !== 'number') return '';
     return ' (pedido como ' + x.tickets + ' ticket' + (x.tickets === 1 ? '' : 's') + ' de una volumetría de ' + x.volumetria +
-      (x.exacto === false ? '; con 2 decimales el % no da exacto' : '') + ')';
+      (x.exacto === false ? '; con % entero no da exacto' : '') + ')';
   }
 
   // OTRAS INICIATIVAS DE UNA CATEGORIA en "Solicitar cambios": la regla de
@@ -591,6 +591,12 @@ window.RegistroIniciativas = (function () {
   // cap: { iniciativas, agrupadores, estadosActivos } del registro;
   // nuevo: % valido (texto); estadoFinal: el Estado con el que quedaria.
   //   -> null (cabe) o { pedido, disponible, usado, maximo } en centesimas.
+  // % pedido en "Solicitar cambios": ENTERO de 0 a 100, sin decimales
+  // (2026-11-05). Lo que ya esta guardado (% actual, otras iniciativas,
+  // solicitudes de antes) puede traer decimales y se muestra tal cual.
+  function pctEnteroValido(t) {
+    return /^\d{1,3}$/.test(String(t === null || t === undefined ? '' : t)) && Number(t) <= 100;
+  }
   function enListaPlana(lista, v) {
     var k = plano(v);
     return (lista || []).some(function (x) { return plano(x) === k; });
@@ -644,11 +650,14 @@ window.RegistroIniciativas = (function () {
 
   // El mensaje del tope. vol: la volumetria si se pidio en tickets (dice
   // tambien cuantos tickets da el maximo); entrada: como empieza ('pides').
+  // El maximo se dice en % ENTERO (hacia abajo: lo mas que se puede pedir
+  // sin decimales); lo comprometido por otras es lo guardado, tal cual.
   function mensajeTope(ruta, x, vol, entrada) {
     var M = window.IniciativaAdmin && window.IniciativaAdmin.MetaCategoria;
-    var tk = typeof vol === 'number' && M ? M.tickets(vol, String(x.maximo / 100)) : null;
+    var maximo = Math.floor(x.maximo / 100);
+    var tk = typeof vol === 'number' && M ? M.tickets(vol, String(maximo)) : null;
     return ruta + ': ' + (entrada || (typeof vol === 'number' ? 'esos tickets equivalen a ' : 'pides ')) + x.pedido / 100 +
-      '%, pero el máximo permitido es ' + x.maximo / 100 + '%' + (tk !== null ? ' (' + tk.toLocaleString('es-MX') + ' tickets con la volumetría de hoy)' : '') +
+      '%, pero el máximo permitido es ' + maximo + '%' + (tk !== null ? ' (' + tk.toLocaleString('es-MX') + ' tickets con la volumetría de hoy)' : '') +
       '. Otras iniciativas activas ya comprometen ' + x.usado / 100 + '% y el tope por categoría es 100%' +
       (x.maximo > x.disponible ? '; la categoría ya pasa del tope: solo se puede bajar o dejar igual su % actual.' : '.');
   }
@@ -1623,9 +1632,9 @@ window.RegistroIniciativas = (function () {
       this.nuevas = [];      // solo con campo 'pct': [{ categoria, valor }] a agregar
       // META EN % O EN TICKETS, por categoria (ruta -> { modo, tickets }):
       // con 'tickets' se escribe cuantos tickets reducir y el % sale de
-      // MetaCategoria.pct (admin/iniciativa-admin.js, la regla de Crear y de
-      // Nueva solicitud: el menor % con dos decimales que da al menos esos
-      // tickets, con FLOOR) sobre la volumetria SLOT 0 de la ruta (vols:
+      // MetaCategoria.pctEntero (admin/iniciativa-admin.js, la regla de
+      // Crear y de Nueva solicitud a % entero: el menor % sin decimales que
+      // da al menos esos tickets, con FLOOR) sobre la volumetria SLOT 0 de la ruta (vols:
       // ruta -> { estado, valor }, la de Nueva solicitud). Lo que VIAJA y se
       // guarda sigue siendo el % (pct_valor / agregar_pct): los tickets son
       // una meta estimada con la volumetria de hoy, no un numero que la base
@@ -1828,18 +1837,18 @@ window.RegistroIniciativas = (function () {
       this.vols[ruta] = e || null;
       if (this.meta(ruta).modo === 'tickets') this.recalcularMeta(ruta);
     }
-    // -> { pct, exacto, tickets } o { error } (MetaCategoria.pct), o null
-    // si no hay tickets escritos.
+    // -> { pct, exacto, tickets } o { error } (MetaCategoria.pctEntero: %
+    // entero), o null si no hay tickets escritos.
     conversion(ruta) {
       var m = this.meta(ruta);
       if (m.modo !== 'tickets' || m.tickets === '') return null;
       var v = this.vols[ruta], M = window.IniciativaAdmin && window.IniciativaAdmin.MetaCategoria;
-      if (!M) return { error: 'No se puede pasar de tickets a % en esta página: usa el %.' };
+      if (!M || typeof M.pctEntero !== 'function') return { error: 'No se puede pasar de tickets a % en esta página: usa el %.' };
       if (!v || v.estado === 'cargando') return { error: 'Calculando la volumetría de ' + ruta + '…' };
       if (v.estado !== 'ok' && v.estado !== 'cero') {
         return { error: 'Sin volumetría de ' + ruta + ' no se puede pasar de tickets a %: usa el %.' };
       }
-      return M.pct(v.valor, m.tickets);
+      return M.pctEntero(v.valor, m.tickets);
     }
     // Tickets -> el % que viaja ('' si no se puede convertir).
     recalcularMeta(ruta) {
@@ -1873,7 +1882,7 @@ window.RegistroIniciativas = (function () {
     // % valido; el formato lo dice validar. En tickets, sobre el % que dan.
     excedeTope(ruta, estadoFinal) {
       var t = this.pctPedido(ruta);
-      if (!/^\d{1,3}(\.\d{1,2})?$/.test(t) || Number(t) > 100) return '';
+      if (!pctEnteroValido(t)) return '';
       var nueva = this.categoriasLigadas().indexOf(ruta) < 0;
       var x = excedeTope(this.capacidad, this.iniciativa, ruta, t, nueva, estadoFinal === undefined ? this.iniciativa.estado : estadoFinal);
       if (!x) return '';
@@ -1920,9 +1929,9 @@ window.RegistroIniciativas = (function () {
         }
         cats.forEach(function (c) {
           if (porTickets[c.categoria]) return;
-          if (!/^\d{1,3}(\.\d{1,2})?$/.test(c.nuevo) || Number(c.nuevo) > 100) {
+          if (!pctEnteroValido(c.nuevo)) {
             errores.push({ campo: 'propuesto', categoria: c.categoria,
-              mensaje: c.categoria + ': escribe un porcentaje entre 0 y 100, con hasta dos decimales.' });
+              mensaje: c.categoria + ': escribe un porcentaje entero entre 0 y 100, sin decimales.' });
           } else if (!c.nueva && c.anterior !== null && Number(c.nuevo) === Number(c.anterior)) {
             errores.push({ campo: 'propuesto', categoria: c.categoria, mensaje: c.categoria + ': el % pedido es igual al actual.' });
           } else {
@@ -3780,7 +3789,7 @@ window.RegistroIniciativas = (function () {
           ligadas.map(function (r, n) {
             var act = c.pctActual(r), o = otras(r);
             var pct = '<label class="ini-ed-pct"><span class="ini-sr">% pedido para ' + Escape.html(r) + '</span>' +
-              '<input type="number" min="0" max="100" step="0.01" data-cambio-pct="' + n + '" value="' + Escape.attr(c.pcts[r] || '') +
+              '<input type="number" inputmode="numeric" min="0" max="100" step="1" data-cambio-pct="' + n + '" value="' + Escape.attr(c.pcts[r] || '') +
               '" placeholder="sin cambio" aria-describedby="regCambioTope-l' + n + '" aria-invalid="' + invalido(r) + '"> %</label>';
             return '<tr><td class="ini-cat-celda">' + nombre(r, 'l' + n, o) + '</td><td class="num">' + Escape.html(act === null ? '—' : act + '%') + '</td>' +
               '<td>' + celdaMetaCambio(c, r, 'l' + n, pct, 'sin cambio', invalido(r)) + tope(r, 'l' + n) + '</td><td></td></tr>' +
@@ -3789,7 +3798,7 @@ window.RegistroIniciativas = (function () {
           c.nuevas.map(function (x, n) {
             var o = otras(x.categoria);
             var pct = '<label class="ini-ed-pct"><span class="ini-sr">% para ' + Escape.html(x.categoria) + '</span>' +
-              '<input type="number" min="0" max="100" step="0.01" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) +
+              '<input type="number" inputmode="numeric" min="0" max="100" step="1" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) +
               '" aria-describedby="regCambioTope-n' + n + '" aria-invalid="' + invalido(x.categoria) + '"> %</label>';
             return '<tr><td class="ini-cat-celda">' + nombre(x.categoria, 'n' + n, o) + ' <span class="ini-cat-estado nueva">Agregar</span></td>' +
               '<td class="num">—</td><td>' + celdaMetaCambio(c, x.categoria, 'n' + n, pct, '', invalido(x.categoria)) + tope(x.categoria, 'n' + n) + '</td>' +
