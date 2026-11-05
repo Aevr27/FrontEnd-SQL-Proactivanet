@@ -10,12 +10,14 @@
         (aviso + "Actualizar registro"); registro aun sin cargar.
      V) VistaCambiosRecientes: cargando / listo / vacio / sin_columna /
         error (500, 403, red) / reintentar; respuesta superada se descarta;
-        "Ver" abre solo lo que esta en el registro; "Actualizar registro"
+        el Codigo abre solo lo que esta en el registro (no hay "Ver"
+        aparte) y pasa su boton como origen del foco; "Actualizar registro"
         relee y marca lo que sigue faltando; solo GET.
      S) con la pagina real (admin/iniciativas.js): MOD no abre
         Administracion ni pide la lista; ADM la pide al abrirla y cada vez
-        que vuelve; "Ver" usa abrirDesdeLista del registro (mismo detalle,
-        sin cargar() ni tocar filtros) y "Actualizar registro" usa
+        que vuelve; el Codigo usa abrirDesdeLista del registro (mismo
+        detalle, SIN cambiar de pestaña, sin cargar() ni tocar filtros) y
+        "Actualizar registro" usa
         actualizar().
      H) HTML: seccion data-solo-adm dentro del panel de Administracion,
         nace oculta, dice el alcance (Dashboard; no SSMS ni Excel).
@@ -107,7 +109,9 @@ pruebas.push(function () {
   Check('R1 orden del servidor (mas reciente primero), sin reordenar', ['PRB 2026-000002', 'PRB 2026-000099', 'PRB 2026-000001'], orden);
   Check('R2 titulo y estado del registro; Alta / Cambio', [true, true, true, true],
     [/Dos<span class="ini-sub">En Análisis/.test(html), /<td>Cambio<\/td>/.test(html), /<td>Alta<\/td>/.test(html),
-     /data-cr-folio="PRB 2026-000002">Ver/.test(html)]);
+     /<button type="button" class="ini-folio" data-cr-folio="PRB 2026-000002" title="Ver la iniciativa">PRB 2026-000002<\/button>/.test(html)]);
+  Check('R2b sin boton "Ver" aparte (repetia al Codigo): un solo boton por fila y sin columna "Abrir"', [0, 2, false],
+    [(html.match(/>Ver</g) || []).length, (html.match(/data-cr-folio=/g) || []).length, /<span class="ini-sr">Abrir<\/span>/.test(html)]);
   Check('R3 escape de titulo y usuario', [true, false, true, false],
     [/Uno &lt;b&gt;/.test(html), html.indexOf('Uno <b>') >= 0, /t_otro&lt;i&gt;/.test(html), html.indexOf('t_otro<i>') >= 0]);
   Check('R4 folio fuera del registro: se muestra con aviso, sin "Ver", y se ofrece releer', [true, false, true],
@@ -120,7 +124,7 @@ pruebas.push(function () {
   Check('R6 tras releer y seguir faltando: lo dice, no lo quita', [true, 3], [/Sigue sin aparecer/.test(otra), (otra.match(/<tr><td>/g) || []).length]);
   Check('R7 todo en el registro: sin boton de releer', false, /data-cr-releer/.test(C.htmlLista([CAMBIOS[0]], REG, {})));
   // El mismo folio dos veces (su ultimo cambio y su alta) y una solicitud
-  // aplicada: cada fila con su rotulo y su "Ver".
+  // aplicada: cada fila con su rotulo y su Codigo clicable.
   var dos = C.htmlLista([
     { folio: 'PRB 2026-000001', fecha_utc: '2026-10-21T10:00:00Z', usuario: 'SORIANA\\t_adm', accion: 'solicitud' },
     { folio: 'PRB 2026-000001', fecha_utc: '2026-10-19T12:00:00Z', usuario: 'SORIANA\\t_otro', accion: 'alta' },
@@ -129,10 +133,11 @@ pruebas.push(function () {
   Check('R8 Solicitud aplicada, Alta del mismo folio, accion desconocida tal cual (escapada, no "Cambio")',
     [['Solicitud aplicada', 'Alta', 'otra&lt;x&gt;'], 3],
     [(dos.match(/<\/td><td>([^<]*)<\/td><td>\d\d\//g) || []).map(function (s) { return s.replace(/^<\/td><td>|<\/td><td>\d\d\/$/g, ''); }),
-     (dos.match(/data-cr-folio="[^"]+">Ver/g) || []).length]);
+     (dos.match(/class="ini-folio" data-cr-folio="[^"]+"/g) || []).length]);
 });
 
 // ---- V: la vista ----
+var origenes = [];
 function Vista(respuestas, registro, abiertos, releidas) {
   var doc = Documento(), pedidos = [], n = 0;
   var pedir = function (url, op) {
@@ -141,7 +146,7 @@ function Vista(respuestas, registro, abiertos, releidas) {
     return typeof r === 'function' ? r() : Promise.resolve(r);
   };
   var vista = new C.VistaCambiosRecientes(doc, pedir, function () { return registro.actual; },
-    function (f) { abiertos.push(f); }, function () { releidas.push(1); return Promise.resolve(); });
+    function (f, origen) { abiertos.push(f); origenes.push(origen); }, function () { releidas.push(1); return Promise.resolve(); });
   return { doc: doc, vista: vista, pedidos: pedidos };
 }
 function estados(doc) {
@@ -157,8 +162,10 @@ pruebas.push(function () {
     Check('V2 listo: lista con las 3 filas; GET sin cuerpo, sin cache', [['crLista'], 3, '../handlers/admin_iniciativas_recientes.ashx', undefined, 'no-store'],
       [estados(t.doc), (t.doc.getElementById('crLista').innerHTML.match(/<tr><td>/g) || []).length, t.pedidos[0].url, t.pedidos[0].op.method, t.pedidos[0].op.cache]);
     Check('V3 el alcance del servidor se pinta', true, /desde el Dashboard/.test(t.doc.getElementById('crAlcance').textContent));
-    t.doc.getElementById('crLista').disparar('click', { target: Boton({ 'data-cr-folio': 'PRB 2026-000002' }) });
-    Check('V4 "Ver" de una que esta en el registro: abre su detalle', ['PRB 2026-000002'], abiertos);
+    var codigo = Boton({ 'data-cr-folio': 'PRB 2026-000002' });
+    t.doc.getElementById('crLista').disparar('click', { target: codigo });
+    Check('V4 el Codigo de una que esta en el registro: abre su detalle y pasa su boton (vuelta del foco)', [['PRB 2026-000002'], true],
+      [abiertos, origenes[origenes.length - 1] === codigo]);
     Check('V5 un folio que no esta: no abre nada', [false, 1], [t.vista.verIniciativa('PRB 2026-000099'), abiertos.length]);
     t.doc.getElementById('crLista').disparar('click', { target: Boton({ 'data-cr-releer': '' }) });
     return esperar().then(function () {
@@ -170,7 +177,7 @@ pruebas.push(function () {
       return esperar();
     }).then(function () {
       Check('V7 si al releer ya aparece: se puede ver', [true, true],
-        [/data-cr-folio="PRB 2026-000099">Ver/.test(t.doc.getElementById('crLista').innerHTML), t.vista.verIniciativa('PRB 2026-000099')]);
+        [/data-cr-folio="PRB 2026-000099"/.test(t.doc.getElementById('crLista').innerHTML), t.vista.verIniciativa('PRB 2026-000099')]);
     });
   });
 });
@@ -264,8 +271,8 @@ pruebas.push(function () {
       Check('S3 ADM: abrir Administracion pide la lista y la pinta', ['administracion', 1, false],
         [pg.vista, recientes(), doc.getElementById('crLista').hidden]);
       doc.getElementById('crLista').disparar('click', { target: Boton({ 'data-cr-folio': 'PRB 2026-000002' }) });
-      Check('S4 "Ver": pasa a Iniciativas y abre el MISMO detalle (abrirDesdeLista), sin cargar() ni tocar filtros',
-        ['iniciativas', ['abrirDesdeLista:PRB 2026-000002'], true], [pg.vista, llamadas.slice(), reg.filtro === filtroAntes]);
+      Check('S4 el Codigo: se queda en Administracion y abre el MISMO detalle (abrirDesdeLista), sin cargar() ni tocar filtros',
+        ['administracion', ['abrirDesdeLista:PRB 2026-000002'], true], [pg.vista, llamadas.slice(), reg.filtro === filtroAntes]);
       doc.getElementById('tab-administracion').disparar('click');
       return esperar().then(esperar);
     }).then(function () {
