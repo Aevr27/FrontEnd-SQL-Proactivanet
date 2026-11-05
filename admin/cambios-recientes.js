@@ -25,6 +25,15 @@ window.CambiosRecientes = (function () {
   var URL = '../handlers/admin_iniciativas_recientes.ashx';
 
   function h(s) { return Escape.html(s === null || s === undefined ? '' : String(s)); }
+  // Una cuenta como se muestra: lo que decide el servidor (<campo>_mostrar,
+  // App_Code/NombreSolicitante.cs: UsuariosAdmin.NombreSolicitante -> nombre
+  // verificado -> correo -> cuenta); sin el, la cuenta, como antes. La cuenta
+  // queda en el title cuando lo mostrado es otro texto.
+  function persona(mostrar, cuenta) {
+    var t = mostrar || cuenta;
+    if (t === null || t === undefined || t === '') return '—';
+    return mostrar && cuenta && mostrar !== cuenta ? '<span title="' + h(cuenta) + '">' + h(mostrar) + '</span>' : h(t);
+  }
   // "aaaa-mm-ddThh:mm:ssZ" (UTC) -> hora local legible (como la cola de solicitudes).
   function fechaHora(utc) {
     if (!utc) return '—';
@@ -68,7 +77,7 @@ window.CambiosRecientes = (function () {
         '<td>' + iniciativa + '</td>' +
         '<td>' + h(rotuloAccion(c.accion)) + '</td>' +
         '<td>' + fechaHora(c.fecha_utc) + '</td>' +
-        '<td>' + h(c.usuario || '—') + '</td>' +
+        '<td>' + persona(c.usuario_mostrar, c.usuario) + '</td>' +
         '<td>' + accion + '</td></tr>';
     }).join('');
     return '<table class="ini-det-tabla ini-cr-tabla"><thead><tr><th scope="col">Código</th><th scope="col">Iniciativa</th>' +

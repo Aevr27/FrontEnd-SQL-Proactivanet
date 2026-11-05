@@ -82,7 +82,7 @@ public class AdminIniciativasMisCambios : IHttpHandler
             // Solo pantalla: los botones Cancelar / Modificar (sql/41). Quien
             // decide es la base, en admin_iniciativas_solicitudes.ashx.
             SolicitudesCambio.MarcarPropia(d, id.Original);
-            SolicitudesCambio.AgregarNombreSolicitante(new List<Dictionary<string, object>> { d });
+            SolicitudesCambio.AgregarIdentidadesDetalle(d);
             return d;
         });
     }

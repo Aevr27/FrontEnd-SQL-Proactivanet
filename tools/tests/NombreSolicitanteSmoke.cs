@@ -11,6 +11,10 @@
 //   H  handlers: cola de ADM y Mis solicitudes de cambio; registro de ADM y
 //      Mis solicitudes de iniciativa. solicitado_por / solicitante_cuenta no
 //      cambian (la cuenta sigue siendo la llave).
+//   G  cualquier cuenta (2026-11-05): revisor, quien cancelo, eventos,
+//      Historial de peticiones, Cambios recientes, historial de fechas.
+//      Capturado / CatPersona / guardado / correo / cuenta; nombres en
+//      conflicto; lotes (una lectura); ADM y no ADM; cada evento con SU cuenta.
 //
 // Compilar y correr desde la raiz del repo (como SolicitudesCambioHttpSmoke):
 //   csc /out:NombreSolicitanteSmoke.exe /r:adm.dll /r:hnd.dll /r:System.dll /r:System.Core.dll
@@ -61,7 +65,7 @@ sealed class AlmacenNombreFalso : IAlmacenSolicitudesCambio
     public List<Dictionary<string, object>> Lista_ = new List<Dictionary<string, object>>();
     public ResultadoEnvioSolicitud Enviar(PeticionSolicitudCambio p, string u, string r) { throw new NotSupportedException(); }
     public List<Dictionary<string, object>> Listar(string estado, int maximo) { return Lista_.Select(x => new Dictionary<string, object>(x)).ToList(); }
-    public Dictionary<string, object> Detalle(int id) { return null; }
+    public Dictionary<string, object> Detalle(int id) { var f = Lista_.FirstOrDefault(x => (int)x["id"] == id); return f == null ? null : new Dictionary<string, object>(f); }
     public void Rechazar(int id, string r, string c) { throw new NotSupportedException(); }
     public void Aplicar(int id, string r, string c, List<ClasificacionSolicitud> cls, DateTime hoy) { throw new NotSupportedException(); }
     public void RegistrarFallo(int id, string r, int n, string m) { throw new NotSupportedException(); }
@@ -219,6 +223,7 @@ public static class NombreSolicitanteSmoke
         AccesoAdmin.FuenteRoles = new RolesNombreFalsos().Con(ADM, "ADM").Con(MIGUEL, "MOD").Con(MIGUEL2, "MOD").Con(PO, "MOD");
         PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
         SolicitudesCambio.PersonasSolicitante = delegate { return new List<PersonaCatalogo> { new PersonaCatalogo { Nombre = "Juan Perez", Correo = "juanperez@soriana.com" } }; };
+        NombreSolicitante.Personas = SolicitudesCambio.PersonasSolicitante;
         Func<int, string, Dictionary<string, object>> cambio = delegate (int id, string por)
         {
             return new Dictionary<string, object> { { "id", id }, { "solicitado_por", por }, { "estado", "PENDIENTE" }, { "folio", "PRB 2026-000001" },
@@ -274,10 +279,171 @@ public static class NombreSolicitanteSmoke
         var src = File.ReadAllText(Path.Combine("App_Code", "NombreSolicitante.cs"));
         Check("H10 la consulta es por cuenta (Usuario normalizado) con parametros; nunca filtra por nombre", "True|True|False",
               src.Contains("WHERE UPPER(LTRIM(RTRIM(u.Usuario))) IN (") + "|" + src.Contains("cmd.Parameters.Add(\"@c\" + i") + "|" + src.Contains("WHERE u.NombreSolicitante"));
+
+        Generales(fichas, alm, mias, lector);
         PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
 
         Console.WriteLine();
         Console.WriteLine(pasados + " pasaron, " + fallos + " fallaron");
         return fallos == 0 ? 0 : 1;
+    }
+
+    const string REVISOR = @"SORIANA\luisglom";   // ADM con NombreSolicitante capturado
+    const string OMAR = @"SORIANA\omaralus";      // ADM sin NombreSolicitante, en CatPersona
+    const string DOBLE = @"SORIANA\t_doble";      // dos NombreSolicitante distintos; CatPersona ambiguo
+    const string SOLOCORREO = @"SORIANA\t_correo"; // solo correo en UsuariosAdmin
+
+    static Dictionary<string, object> Ev(string evento, string usuario)
+    {
+        return new Dictionary<string, object> { { "evento", evento }, { "usuario", usuario }, { "fecha_utc", "2026-11-05T10:00:00Z" } };
+    }
+    static List<Dictionary<string, object>> Lista(Dictionary<string, object> j, string k)
+    {
+        return ((System.Collections.ArrayList)j[k]).Cast<Dictionary<string, object>>().ToList();
+    }
+
+    // ---------------- G: cualquier cuenta ----------------
+    static void Generales(FichasFalsas fichas, AlmacenNombreFalso alm, MiasNombreFalsas mias, LectorNombreFalso lector)
+    {
+        fichas.Fila(REVISOR, "luis.glo@soriana.com", "Luis Gloria Montes")
+              .Fila(OMAR, "omar.alu@soriana.com", null)
+              .Fila(DOBLE, "doble@soriana.com", "Pedro Uno").Fila(DOBLE, "doble@soriana.com", "Pablo Dos")
+              .Fila(SOLOCORREO, "solo.correo@soriana.com", null);
+        var lecturasCat = 0;
+        Func<IList<PersonaCatalogo>> cat = delegate
+        {
+            lecturasCat++;
+            return new List<PersonaCatalogo>
+            {
+                new PersonaCatalogo { Nombre = "Omar Alvarez Lugo", Correo = "omaralus@soriana.com" },
+                new PersonaCatalogo { Nombre = "Juan Perez", Correo = "juanperez@soriana.com" },
+                // DOBLE: dos personas con el mismo correo de la cuenta = ambiguo.
+                new PersonaCatalogo { Nombre = "Doble Uno", Correo = "t_doble@soriana.com" },
+                new PersonaCatalogo { Nombre = "Doble Dos", Correo = "t_doble@soriana.com" },
+                // Nombre parecido a Omar con OTRA cuenta: nunca se usa para omaralus.
+                new PersonaCatalogo { Nombre = "Omar Alvarez", Correo = "oalvarez@soriana.com" },
+            };
+        };
+        NombreSolicitante.Personas = cat;
+        SolicitudesCambio.PersonasSolicitante = cat;
+
+        fichas.Pedidas.Clear();
+        var r = NombreSolicitante.Resolver(new[] { REVISOR, OMAR, PO, SOLOCORREO, NADA, DOBLE, " soriana\\LUISGLOM ", null, "" }, null, cat);
+        Func<string, string> v = c => { var x = r[NombreSolicitante.Clave(c)]; return x.Fuente + ":" + x.Texto; };
+        Check("G1 nombre completo capturado (UsuariosAdmin.NombreSolicitante)", "NOMBRE_ADMIN:Luis Gloria Montes", v(REVISOR));
+        Check("G2 sin NombreSolicitante: el nombre de CatPersona por SU cuenta (no el parecido de otra)", "NOMBRE_VERIFICADO:Omar Alvarez Lugo", v(OMAR));
+        Check("G3 no esta en UsuariosAdmin: CatPersona", "NOMBRE_VERIFICADO:Juan Perez", v(PO));
+        Check("G4 sin nombre en ningun lado: el correo de UsuariosAdmin", "CORREO:solo.correo@soriana.com", v(SOLOCORREO));
+        Check("G5 sin nada: la cuenta Windows", "CUENTA:" + NADA, v(NADA));
+        Check("G6 dos NombreSolicitante distintos y CatPersona ambiguo: ningun nombre, el correo", "CORREO:doble@soriana.com", v(DOBLE));
+        Check("G7 lote: la misma cuenta con otra grafia es UNA; vacias fuera; UNA lectura de UsuariosAdmin y UNA de CatPersona",
+              "6|6|1", r.Count + "|" + fichas.Pedidas.Count + "|" + lecturasCat);
+        lecturasCat = 0;
+        NombreSolicitante.Resolver(new[] { REVISOR }, null, cat);
+        Check("G8 todas con nombre en UsuariosAdmin: CatPersona NO se lee", 0, lecturasCat);
+
+        var guardados = new Dictionary<string, NombreSolicitante.Verificado>(StringComparer.Ordinal);
+        NombreSolicitante.Guardar(guardados, NADA, "Nombre Guardado", null);
+        Check("G9 nombre guardado de la cuenta (lo que ya trae la respuesta): antes que CatPersona y el correo",
+              "NOMBRE_VERIFICADO:Nombre Guardado", Ver(NombreSolicitante.Resolver(new[] { NADA }, guardados, cat)[NombreSolicitante.Clave(NADA)]));
+        NombreSolicitante.Guardar(guardados, NADA, "Otro Nombre Distinto", "nada@soriana.com");
+        var conflicto = NombreSolicitante.Resolver(new[] { NADA }, guardados, cat)[NombreSolicitante.Clave(NADA)];
+        Check("G10 dos nombres guardados distintos para la misma cuenta: ninguno (cae al correo)", "CORREO:nada@soriana.com", conflicto.Fuente + ":" + conflicto.Texto);
+        NombreSolicitante.Guardar(guardados, NADA, "Nombre Guardado", null);
+        Check("G10b ... y un tercero igual al primero no lo revive", "CORREO", NombreSolicitante.Resolver(new[] { NADA }, guardados, cat)[NombreSolicitante.Clave(NADA)].Fuente);
+        Check("G11 CatPersona caido: sigue con correo / cuenta, sin romper", "CUENTA:" + NADA,
+              Ver(NombreSolicitante.Resolver(new[] { NADA }, null, delegate { throw new InvalidOperationException("CatPersona caido"); })[NombreSolicitante.Clave(NADA)]));
+
+        // Eventos: cada uno con SU cuenta; la cuenta no cambia.
+        var obj = new Dictionary<string, object> { { "revisado_por", REVISOR }, { "cancelado_por", null },
+            { "eventos", new List<object> { Ev("ENVIADA", OMAR), Ev("APROBADA", REVISOR), Ev("ENVIADA", NADA) } } };
+        NombreSolicitante.AnotarCuentas(new List<Dictionary<string, object>> { obj }, NombreSolicitante.CamposDetalle, true, null, cat);
+        var evs = ((List<object>)obj["eventos"]).Cast<Dictionary<string, object>>().ToList();
+        Check("G12 eventos historicos: cada uno con el nombre de SU cuenta y la cuenta intacta",
+              "Omar Alvarez Lugo|" + OMAR + "|Luis Gloria Montes|" + REVISOR + "|" + NADA + "|" + NADA,
+              evs[0]["usuario_mostrar"] + "|" + evs[0]["usuario"] + "|" + evs[1]["usuario_mostrar"] + "|" + evs[1]["usuario"] + "|" + evs[2]["usuario_mostrar"] + "|" + evs[2]["usuario"]);
+        Check("G13 revisado_por intacto + revisado_por_mostrar; sin cuenta: _mostrar null", REVISOR + "|Luis Gloria Montes|True",
+              obj["revisado_por"] + "|" + obj["revisado_por_mostrar"] + "|" + (obj["cancelado_por_mostrar"] == null));
+
+        // ---- Handlers: detalle de cambio (ADM y quien la envio) ----
+        int st;
+        var c9 = new Dictionary<string, object> { { "id", 9 }, { "solicitado_por", MIGUEL }, { "estado", "CANCELADA" }, { "folio", "PRB 2026-000001" },
+            { "revisado_por", null }, { "cancelado_por", MIGUEL },
+            { "intentos", 0 }, { "ultimo_error", null }, { "fecha_ultimo_intento_utc", null }, { "sin_clasificar", 0 },
+            { "eventos", new List<object> { Ev("ENVIADA", MIGUEL), Ev("CANCELADA", MIGUEL) } } };
+        var c10 = new Dictionary<string, object> { { "id", 10 }, { "solicitado_por", MIGUEL }, { "estado", "RECHAZADA" }, { "folio", "PRB 2026-000001" },
+            { "revisado_por", OMAR }, { "cancelado_por", null },
+            { "intentos", 1 }, { "ultimo_error", "x" }, { "fecha_ultimo_intento_utc", null }, { "sin_clasificar", 0 },
+            { "eventos", new List<object> { Ev("ENVIADA", MIGUEL), Ev("FALLO_APLICAR", REVISOR), Ev("RECHAZADA", OMAR) } } };
+        alm.Lista_.Add(c9); alm.Lista_.Add(c10);
+        mias.Lista_.Add(c9); mias.Lista_.Add(c10);
+        fichas.Pedidas.Clear(); lecturasCat = 0;
+        var j = Correr(new AdminIniciativasSolicitudes(), "admin_iniciativas_solicitudes.ashx", "accion=detalle&id=10", ADM, out st);
+        var je = Lista(j, "eventos");
+        Check("G14 ADM, detalle de cambio: rechazada por (nombre CatPersona), eventos por cuenta, cuentas intactas",
+              "200|Omar Alvarez Lugo|" + OMAR + "|Miguel Lopez Ruiz|Luis Gloria Montes|Omar Alvarez Lugo|" + REVISOR,
+              st + "|" + j["revisado_por_mostrar"] + "|" + j["revisado_por"] + "|" + je[0]["usuario_mostrar"] + "|" + je[1]["usuario_mostrar"] + "|" + je[2]["usuario_mostrar"] + "|" + je[1]["usuario"]);
+        Check("G15 ... UNA lectura de UsuariosAdmin y UNA de CatPersona para todo el detalle", "3|1", fichas.Pedidas.Count + "|" + lecturasCat);
+        j = Correr(new AdminIniciativasSolicitudes(), "admin_iniciativas_solicitudes.ashx", "accion=detalle&id=9", ADM, out st);
+        Check("G16 cancelada: \"Cancelada por\" dice lo mismo que \"Solicito\"", "200|Miguel Lopez Ruiz|Miguel Lopez Ruiz|" + MIGUEL,
+              st + "|" + j["cancelado_por_mostrar"] + "|" + j["solicitante_mostrar"] + "|" + j["cancelado_por"]);
+        j = Correr(new AdminIniciativasMisCambios(), "admin_iniciativas_mis_cambios.ashx", "accion=detalle&id=10", MIGUEL, out st);
+        je = Lista(j, "eventos");
+        Check("G17 no ADM (Mis solicitudes de cambio): el revisor con nombre; sin datos de ADM (intentos, detalle del fallo)",
+              "200|Omar Alvarez Lugo|Omar Alvarez Lugo|False|",
+              st + "|" + j["revisado_por_mostrar"] + "|" + je[2]["usuario_mostrar"] + "|" + j.ContainsKey("intentos") + "|" + je[1]["detalle"]);
+        j = Correr(new AdminIniciativasMisCambios(), "admin_iniciativas_mis_cambios.ashx", "accion=detalle&id=10", MIGUEL2, out st);
+        Check("G18 no ADM: la de otra cuenta no se ve (404): el nombre no abre acceso", 404, st);
+
+        // ---- Handlers: detalle de solicitud de iniciativa ----
+        var i7 = new Dictionary<string, object> { { "numero", 7 }, { "numero_texto", new NumeroSolicitud(7).ToString() }, { "estado", "APROBADA" },
+            { "solicitante_cuenta", PO }, { "solicitante_nombre", "Juan Perez Guardado" }, { "solicitante_correo", "juanperez@soriana.com" }, { "categoria", null },
+            { "revisado_por", REVISOR }, { "cancelado_por", null }, { "codigo_iniciativa", "PRE 2026-000199" },
+            { "eventos", new List<object> { Ev("ENVIADA", PO), Ev("APROBADA", REVISOR) } } };
+        lector.Todas.Add(i7);
+        fichas.Pedidas.Clear(); lecturasCat = 0;
+        j = Correr(new AdminIniciativasSolicitudesNuevas(), "admin_iniciativas_solicitudes_nuevas.ashx", "accion=detalle&numero=7", ADM, out st);
+        je = Lista(j, "eventos");
+        Check("G19 ADM, detalle de iniciativa: aprobada por (capturado), quien la envio con su nombre GUARDADO en sus eventos",
+              "200|Luis Gloria Montes|Juan Perez Guardado|Juan Perez Guardado|Luis Gloria Montes|" + REVISOR,
+              st + "|" + j["revisado_por_mostrar"] + "|" + j["solicitante_mostrar"] + "|" + je[0]["usuario_mostrar"] + "|" + je[1]["usuario_mostrar"] + "|" + j["revisado_por"]);
+        Check("G20 ... UNA lectura de UsuariosAdmin; CatPersona no hace falta", "2|0", fichas.Pedidas.Count + "|" + lecturasCat);
+        j = Correr(new AdminIniciativasMisSolicitudes(), "admin_iniciativas_mis_solicitudes.ashx", "accion=detalle&numero=7", PO, out st);
+        Check("G21 no ADM (Mis solicitudes): el mismo nombre del revisor", "200|Luis Gloria Montes", st + "|" + j["revisado_por_mostrar"]);
+        j = Correr(new AdminIniciativasMisSolicitudes(), "admin_iniciativas_mis_solicitudes.ashx", "accion=detalle&numero=7", MIGUEL, out st);
+        Check("G22 no ADM: la de otra cuenta no se ve", 404, st);
+
+        // ---- Historial de peticiones / Cambios recientes / historial de fechas ----
+        var hp = new Dictionary<string, object> { { "peticiones", new List<object> {
+            new Dictionary<string, object> { { "tipo", "CAMBIO" }, { "solicitante_cuenta", REVISOR }, { "solicitante_nombre", null }, { "solicitante_correo", null } },
+            new Dictionary<string, object> { { "tipo", "INICIATIVA" }, { "solicitante_cuenta", PO }, { "solicitante_nombre", "Juan Perez Guardado" }, { "solicitante_correo", null } },
+            new Dictionary<string, object> { { "tipo", "CAMBIO" }, { "solicitante_cuenta", NADA }, { "solicitante_nombre", null }, { "solicitante_correo", null } } } } };
+        NombreSolicitante.AgregarHistorialPeticiones(hp);
+        var hpl = ((List<object>)hp["peticiones"]).Cast<Dictionary<string, object>>().ToList();
+        Check("G23 Historial de peticiones: misma regla que las colas (capturado / guardado / cuenta), cuenta intacta",
+              "Luis Gloria Montes|Juan Perez Guardado|" + NADA + "|" + REVISOR,
+              hpl[0]["solicitante_mostrar"] + "|" + hpl[1]["solicitante_mostrar"] + "|" + hpl[2]["solicitante_mostrar"] + "|" + hpl[0]["solicitante_cuenta"]);
+        var cr = new Dictionary<string, object> { { "cambios", new List<object> {
+            new Dictionary<string, object> { { "folio", "PRB 1" }, { "usuario", OMAR } },
+            new Dictionary<string, object> { { "folio", "PRB 2" }, { "usuario", null } } } } };
+        NombreSolicitante.AgregarCambiosRecientes(cr);
+        var crl = ((List<object>)cr["cambios"]).Cast<Dictionary<string, object>>().ToList();
+        Check("G24 Cambios recientes: quien guardo con nombre; sin usuario, null", "Omar Alvarez Lugo|" + OMAR + "|True",
+              crl[0]["usuario_mostrar"] + "|" + crl[0]["usuario"] + "|" + (crl[1]["usuario_mostrar"] == null));
+        fichas.Pedidas.Clear(); lecturasCat = 0;
+        var reg = new Dictionary<string, object> { { "iniciativas", new List<object> {
+            new Dictionary<string, object> { { "folio", "PRB 1" },
+                { "historial", new List<object> { new Dictionary<string, object> { { "usuario", REVISOR }, { "origen", "ADMIN" } }, new Dictionary<string, object> { { "usuario", null }, { "origen", "EXCEL" } } } },
+                { "historial_categorias", new List<object> { new Dictionary<string, object> { { "usuario", OMAR }, { "origen", "ADMIN" } } } } },
+            new Dictionary<string, object> { { "folio", "PRB 2" },
+                { "historial", new List<object> { new Dictionary<string, object> { { "usuario", OMAR }, { "origen", "ADMIN" } } } },
+                { "historial_categorias", new List<object>() } } } } };
+        NombreSolicitante.AgregarRegistro(reg);
+        var ini1 = (Dictionary<string, object>)((List<object>)reg["iniciativas"])[0];
+        var h1 = ((List<object>)ini1["historial"]).Cast<Dictionary<string, object>>().ToList();
+        var hc1 = ((List<object>)ini1["historial_categorias"]).Cast<Dictionary<string, object>>().ToList();
+        Check("G25 historial de fechas: \"Quien\" con nombre, sin persona = null; todo el registro en UN lote",
+              "Luis Gloria Montes|True|Omar Alvarez Lugo|2|1",
+              h1[0]["usuario_mostrar"] + "|" + (h1[1]["usuario_mostrar"] == null) + "|" + hc1[0]["usuario_mostrar"] + "|" + fichas.Pedidas.Count + "|" + lecturasCat);
     }
 }

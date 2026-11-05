@@ -75,7 +75,7 @@ public class AdminIniciativasSolicitudesNuevas : IHttpHandler
             // es_propia / puede_cancelar: el ADM que tambien la envio (solo pantalla).
             var quien = AccesoAdmin.IdentidadEscritura(context);
             RegistroSolicitudesIniciativa.MarcarPropia(d, quien == null ? null : quien.Original);
-            NombreSolicitante.AgregarIniciativas(new List<Dictionary<string, object>> { d });
+            NombreSolicitante.AgregarDetalleIniciativa(d);
             // Las OTRAS iniciativas que hoy consumen la capacidad de la
             // categoria (la regla del tope: CapacidadCategoria), con su %. Sin
             // la iniciativa que creo esta solicitud. Si falla: null y la

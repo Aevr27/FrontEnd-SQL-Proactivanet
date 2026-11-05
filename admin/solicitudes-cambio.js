@@ -98,6 +98,15 @@ window.SolicitudesCambioCola = (function () {
   // CatPersona -> correo -> cuenta); sin el, como antes.
   function textoQuien(s) { return s.solicitante_mostrar || s.solicitante_nombre || s.solicitado_por; }
   function quien(s) { return h(textoQuien(s)); }
+  // Una cuenta como se muestra: lo que decide el servidor (<campo>_mostrar,
+  // App_Code/NombreSolicitante.cs: UsuariosAdmin.NombreSolicitante -> nombre
+  // verificado -> correo -> cuenta); sin el, la cuenta, como antes. La cuenta
+  // queda en el title cuando lo mostrado es otro texto.
+  function persona(mostrar, cuenta) {
+    var t = mostrar || cuenta;
+    if (t === null || t === undefined || t === '') return '—';
+    return mostrar && cuenta && mostrar !== cuenta ? '<span title="' + h(cuenta) + '">' + h(mostrar) + '</span>' : h(t);
+  }
   // La cuenta se sigue viendo debajo cuando lo mostrado no es la cuenta.
   function conCuenta(s) { return !!(s.solicitado_por && textoQuien(s) && textoQuien(s) !== s.solicitado_por); }
 
@@ -324,14 +333,14 @@ window.SolicitudesCambioCola = (function () {
       avisos += '<p class="ini-cambio-msg aviso">Una categoría por agregar llegó sin clasificación (su prefijo no tiene regla o el valor no existe): elígela antes de aplicar.</p>';
     }
     var eventos = (d.eventos || []).map(function (e) {
-      return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + h(e.usuario) +
+      return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + persona(e.usuario_mostrar, e.usuario) +
         (e.detalle ? '<span class="ini-sub">' + h(e.detalle) + '</span>' : '') + '</li>';
     }).join('');
     var revision = d.estado === 'CANCELADA'
-      ? '<p class="ini-nota"><strong>Cancelada</strong> por quien la envió (' + h(d.cancelado_por) + ') el ' + fechaHora(d.fecha_cancelacion_utc) +
+      ? '<p class="ini-nota"><strong>Cancelada</strong> por quien la envió (' + persona(d.cancelado_por_mostrar, d.cancelado_por) + ') el ' + fechaHora(d.fecha_cancelacion_utc) +
         (d.motivo_cancelacion ? ': «' + h(d.motivo_cancelacion) + '»' : '') + '</p>'
       : d.estado !== 'PENDIENTE'
-      ? '<p class="ini-nota">' + h(ESTADOS[d.estado]) + ' por ' + h(d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
+      ? '<p class="ini-nota">' + h(ESTADOS[d.estado]) + ' por ' + persona(d.revisado_por_mostrar, d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
         (d.comentario_revision ? ': «' + h(d.comentario_revision) + '»' : '') + '</p>'
       : '';
     var propias = htmlPropias(d, lectura ? 'mc' : 'sol');

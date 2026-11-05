@@ -1151,11 +1151,45 @@ public static class SolicitudesCambio
     public static void AgregarNombreSolicitante(IList<Dictionary<string, object>> filas)
     {
         if (filas == null || filas.Count == 0) return;
+        AgregarNombreSolicitante(filas, PersonasSinFallar(), null);
+    }
+
+    private static IList<PersonaCatalogo> PersonasSinFallar()
+    {
+        try { return PersonasSolicitante(); }
+        catch (Exception ex) { DashboardHandler.Registrar("SolicitudesCambio.NombresSolicitante", ex); return null; }
+    }
+
+    // DETALLE (cola de ADM y Mis solicitudes de cambio): quien la envio como
+    // en la lista y ademas quien la reviso, quien la cancelo y cada evento
+    // (revisado_por_mostrar, cancelado_por_mostrar, eventos[].usuario_mostrar)
+    // con la regla comun (NombreSolicitante.AnotarCuentas). CatPersona y
+    // UsuariosAdmin se leen UNA vez para todo. Las cuentas no cambian.
+    public static void AgregarIdentidadesDetalle(Dictionary<string, object> d)
+    {
+        if (d == null) return;
+        var una = new List<Dictionary<string, object>> { d };
+        var personas = PersonasSinFallar();
+        var cuentas = NombreSolicitante.CuentasDe(una, NombreSolicitante.CamposDetalle, true);
+        cuentas.Add(d.ContainsKey("solicitado_por") ? d["solicitado_por"] as string : null);
+        var fichas = NombreSolicitante.LeerSinFallar(cuentas);
+        var correos = AgregarNombreSolicitante(una, personas, fichas);
+        // Lo ya resuelto de quien la envio vale para su cuenta en el resto
+        // (p. ej. "Cancelada por"): mismo texto que "Solicito".
+        var guardados = new Dictionary<string, NombreSolicitante.Verificado>(StringComparer.Ordinal);
+        var por = d.ContainsKey("solicitado_por") ? d["solicitado_por"] as string : null;
+        string correo = null;
+        if (por != null) correos.TryGetValue(por, out correo);
+        NombreSolicitante.Guardar(guardados, por, d["solicitante_nombre"] as string, correo);
+        NombreSolicitante.AnotarCuentas(una, NombreSolicitante.CamposDetalle, true, guardados, () => personas, fichas);
+    }
+
+    // -> los correos de CatPersona de quienes enviaron (por cuenta).
+    private static Dictionary<string, string> AgregarNombreSolicitante(IList<Dictionary<string, object>> filas,
+        IList<PersonaCatalogo> personas, Dictionary<string, FichaUsuarioAdmin> fichas)
+    {
         Func<Dictionary<string, object>, string> cuenta = f => f.ContainsKey("solicitado_por") ? f["solicitado_por"] as string : null;
         // CatPersona se lee UNA vez para el nombre y el correo.
-        IList<PersonaCatalogo> personas = null;
-        try { personas = PersonasSolicitante(); }
-        catch (Exception ex) { DashboardHandler.Registrar("SolicitudesCambio.NombresSolicitante", ex); }
         var nombres = new Dictionary<string, string>(StringComparer.Ordinal);
         if (personas != null)
         {
@@ -1172,7 +1206,8 @@ public static class SolicitudesCambio
         {
             string correo, c = cuenta(f);
             return c != null && correos.TryGetValue(c, out correo) ? correo : null;
-        });
+        }, fichas);
+        return correos;
     }
 
     // El correo de CatPersona de cada cuenta, SOLO si la cuenta se resuelve a

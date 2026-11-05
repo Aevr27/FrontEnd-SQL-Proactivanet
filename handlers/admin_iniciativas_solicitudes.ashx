@@ -180,7 +180,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                     if (d == null) return Error(context, 404, "La solicitud no existe.", "SolicitudNoExiste");
                     // Otras iniciativas activas de cada categoria (ya es ADM).
                     SolicitudesCambio.AgregarOtrasIniciativas(d);
-                    SolicitudesCambio.AgregarNombreSolicitante(new List<Dictionary<string, object>> { d });
+                    SolicitudesCambio.AgregarIdentidadesDetalle(d);
                     SolicitudesCambio.MarcarPropia(d, id.Original);
                     return d;
                 }

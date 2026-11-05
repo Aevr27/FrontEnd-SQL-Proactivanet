@@ -56,6 +56,15 @@ window.SolicitudesNuevas = (function () {
     return dos(d.getDate()) + '/' + dos(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + dos(d.getHours()) + ':' + dos(d.getMinutes());
   }
   function estado(e) { return e ? h(ESTADOS[e] || e) : '—'; }
+  // Una cuenta como se muestra: lo que decide el servidor (<campo>_mostrar,
+  // App_Code/NombreSolicitante.cs: UsuariosAdmin.NombreSolicitante -> nombre
+  // verificado -> correo -> cuenta); sin el, la cuenta, como antes. La cuenta
+  // queda en el title cuando lo mostrado es otro texto.
+  function persona(mostrar, cuenta) {
+    var t = mostrar || cuenta;
+    if (t === null || t === undefined || t === '') return '—';
+    return mostrar && cuenta && mostrar !== cuenta ? '<span title="' + h(cuenta) + '">' + h(mostrar) + '</span>' : h(t);
+  }
   // Como se muestra quien la envio: lo que decide el servidor
   // (solicitante_mostrar: UsuariosAdmin.NombreSolicitante -> nombre guardado
   // -> correo -> cuenta); sin el, como antes. El correo va debajo si lo
@@ -193,12 +202,12 @@ window.SolicitudesNuevas = (function () {
       ['Iniciativa', d.codigo_iniciativa ? refIniciativa(d.codigo_iniciativa, conRef) : '—']
     ].map(function (f) { return '<tr><th scope="row">' + f[0] + '</th><td>' + f[1] + '</td></tr>'; }).join('');
     var eventos = (d.eventos || []).map(function (e) {
-      return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + nada(e.usuario) +
+      return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + persona(e.usuario_mostrar, e.usuario) +
         (e.estado_anterior || e.estado_nuevo ? '<span class="ini-sub">' + estado(e.estado_anterior) + ' → ' + estado(e.estado_nuevo) + '</span>' : '') +
         (e.detalle ? '<span class="ini-sub">«' + h(e.detalle) + '»</span>' : '') + '</li>';
     }).join('');
     var revision = revisada
-      ? '<p class="ini-nota"><strong>' + estado(d.estado) + '</strong> por ' + nada(d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
+      ? '<p class="ini-nota"><strong>' + estado(d.estado) + '</strong> por ' + persona(d.revisado_por_mostrar, d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
         (d.comentario_revision ? ': «' + h(d.comentario_revision) + '»' : '') +
         (d.estado === 'APROBADA'
           ? (d.codigo_iniciativa
@@ -206,7 +215,7 @@ window.SolicitudesNuevas = (function () {
               : '<span class="ini-sub">Se aprobó antes de que aprobar creara la iniciativa: no tiene iniciativa ligada.</span>')
           : '') + '</p>'
       : d.estado === 'CANCELADA'
-      ? '<p class="ini-nota"><strong>Cancelada</strong> por quien la envió (' + nada(d.cancelado_por) + ') el ' + fechaHora(d.fecha_cancelacion_utc) +
+      ? '<p class="ini-nota"><strong>Cancelada</strong> por quien la envió (' + persona(d.cancelado_por_mostrar, d.cancelado_por) + ') el ' + fechaHora(d.fecha_cancelacion_utc) +
         (d.motivo_cancelacion ? ': «' + h(d.motivo_cancelacion) + '»' : '') + '</p>'
       : '';
     // Aprobar crea la iniciativa: solo con sql/32 y con las opciones del Estado inicial.
