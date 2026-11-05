@@ -41,8 +41,10 @@ window.SolicitudesCambioCola = (function () {
   ];
   function datosPedidos(s) { return DATOS.filter(function (x) { return s['cambia_' + x.clave] === true; }); }
   function vacio(v) { return v === null || v === undefined || v === '' ? '(vacío)' : v; }
-  var ESTADOS = { PENDIENTE: 'Pendiente', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada' };
-  var EVENTOS = { ENVIADA: 'Enviada', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada', FALLO_APLICAR: 'Falló al aplicar', DESACTUALIZADA: 'Desactualizada' };
+  var ESTADOS = { PENDIENTE: 'Pendiente', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada', CANCELADA: 'Cancelada' };
+  var EVENTOS = { ENVIADA: 'Enviada', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada', FALLO_APLICAR: 'Falló al aplicar', DESACTUALIZADA: 'Desactualizada',
+                  CANCELADA: 'Cancelada', REEMPLAZADA: 'Reemplazada' };
+  var MAXIMO_MOTIVO_CANCELACION = 2000;   // SolicitudesCambio.MaximoMotivoCancelacion (sql/41)
 
   function h(s) { return Escape.html(s === null || s === undefined ? '' : String(s)); }
   function fecha(iso) { return iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '—'; }
@@ -93,6 +95,34 @@ window.SolicitudesCambioCola = (function () {
   // (solicitante_nombre); sin el, la cuenta Windows guardada (solicitado_por).
   function quien(s) { return h(s.solicitante_nombre || s.solicitado_por); }
 
+  // sql/41: la relacion con la solicitud que esta corrige o con la que la
+  // reemplazo. Corta (lista) o con botones para ir a la otra (detalle;
+  // attr = data-sol-ir en la cola de ADM, data-mc-ir en "Mis"). El servidor
+  // solo manda los numeros que esta cuenta puede ver.
+  function relacionCorta(s) {
+    return (s.reemplaza_a ? '<span class="ini-sub">corrige a #' + h(s.reemplaza_a) + '</span>' : '') +
+      (s.reemplazada_por ? '<span class="ini-sub">reemplazada por #' + h(s.reemplazada_por) + '</span>' : '');
+  }
+  function relacion(d, attr) {
+    function ir(n) { return '<button type="button" class="ini-folio" ' + attr + '="' + h(n) + '">#' + h(n) + '</button>'; }
+    var partes = [];
+    if (d.reemplaza_a) partes.push('Corrige a la solicitud ' + ir(d.reemplaza_a) + ' (quedó cancelada).');
+    if (d.reemplazada_por) partes.push('Reemplazada por la solicitud ' + ir(d.reemplazada_por) + '.');
+    return partes.length ? '<p class="ini-nota ini-sol-relacion">' + partes.join(' ') + '</p>' : '';
+  }
+  // Cancelar / Modificar de QUIEN LA ENVIO (puede_cancelar del servidor:
+  // suya, PENDIENTE y sql/41). p: prefijo de los id ('sol' cola, 'mc' Mis).
+  function htmlPropias(d, p) {
+    if (d.puede_cancelar !== true) return '';
+    return '<div class="ini-sol-propias"><h5>Tu solicitud</h5>' +
+      '<p class="ini-nota">Mientras siga pendiente puedes cancelarla o modificarla. Modificar no la edita: crea una solicitud nueva con otro número ' +
+      '(ADM la revisa desde el principio) y esta queda cancelada. Nada se borra.</p>' +
+      '<div class="ini-cambio-campos"><div class="campo ini-cambio-ancho"><label for="' + p + 'MotivoCancelacion">Motivo (obligatorio para cancelar)</label>' +
+      '<textarea id="' + p + 'MotivoCancelacion" rows="2" maxlength="' + MAXIMO_MOTIVO_CANCELACION + '"></textarea></div></div>' +
+      '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-cx-accion="cancelar">Cancelar solicitud</button> ' +
+      '<button type="button" class="btn linea chico" data-cx-accion="modificar">Modificar</button></div></div>';
+  }
+
   // conIniciativa: el Codigo es un boton que abre el detalle de la
   // iniciativa (data-sol-folio); sin el, texto como antes. El "#" sigue
   // abriendo la solicitud (data-sol-id).
@@ -120,7 +150,7 @@ window.SolicitudesCambioCola = (function () {
           '<td>' + quien(s) + ' <span class="chip ini-chip">' + h(s.rol_solicitante) + '</span>' +
             (s.solicitante_nombre && s.solicitado_por ? '<span class="ini-sub">' + h(s.solicitado_por) + '</span>' : '') + '</td>' +
           '<td>' + fechaHora(s.fecha_solicitud_utc) + '</td>' +
-          '<td>' + h(ESTADOS[s.estado] || s.estado) +
+          '<td>' + h(ESTADOS[s.estado] || s.estado) + relacionCorta(s) +
             (s.estado === 'PENDIENTE' && s.intentos > 0 ? ' <span class="pill ini-atrasada" title="' + h(s.ultimo_error) + '">' + h(s.intentos) + ' intento' + (s.intentos === 1 ? '' : 's') + '</span>' : '') +
           '</td></tr>';
       }).join('') + '</tbody></table>';
@@ -291,10 +321,14 @@ window.SolicitudesCambioCola = (function () {
       return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + h(e.usuario) +
         (e.detalle ? '<span class="ini-sub">' + h(e.detalle) + '</span>' : '') + '</li>';
     }).join('');
-    var revision = d.estado !== 'PENDIENTE'
+    var revision = d.estado === 'CANCELADA'
+      ? '<p class="ini-nota"><strong>Cancelada</strong> por quien la envió (' + h(d.cancelado_por) + ') el ' + fechaHora(d.fecha_cancelacion_utc) +
+        (d.motivo_cancelacion ? ': «' + h(d.motivo_cancelacion) + '»' : '') + '</p>'
+      : d.estado !== 'PENDIENTE'
       ? '<p class="ini-nota">' + h(ESTADOS[d.estado]) + ' por ' + h(d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
         (d.comentario_revision ? ': «' + h(d.comentario_revision) + '»' : '') + '</p>'
       : '';
+    var propias = htmlPropias(d, lectura ? 'mc' : 'sol');
     var acciones = lectura
       ? '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-mc-accion="cerrar">Cerrar</button></div>'
       : pendiente
@@ -307,14 +341,71 @@ window.SolicitudesCambioCola = (function () {
     return '<h4>Solicitud #' + h(d.id) + ' · ' + h(d.folio) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' +
       '<p class="ini-nota">' + h(TIPOS[d.tipo] || d.tipo) + ' · la envió ' + quien(d) + ' (' + (d.solicitante_nombre && d.solicitado_por ? h(d.solicitado_por) + ', ' : '') + h(d.rol_solicitante) + ') el ' +
         fechaHora(d.fecha_solicitud_utc) + ' · ' + h(ESTADOS[d.estado] || d.estado) + (d.intentos ? ' · ' + h(d.intentos) + ' intento(s) de aplicar' : '') + '</p>' +
+      relacion(d, lectura ? 'data-mc-ir' : 'data-sol-ir') +
       avisos + cambios + htmlCats + (lectura ? '' : htmlImpacto(cats, vols)) +
       '<h5>Motivo</h5><div class="ini-texto">' + h(d.motivo) + '</div>' + revision +
-      (lectura ? '' : '<div class="ini-cambio-msg" id="solDetMsg" role="status" aria-live="polite"></div>') + acciones +
+      (lectura ? (propias ? '<div class="ini-cambio-msg" id="mcDetMsg" role="status" aria-live="polite"></div>' : '')
+               : '<div class="ini-cambio-msg" id="solDetMsg" role="status" aria-live="polite"></div>') + propias + acciones +
       (eventos ? '<h5>Historial de la solicitud</h5><ul class="ini-sol-eventos">' + eventos + '</ul>' : '');
   }
 
   function leer(resp) {
     return Promise.resolve(resp.json()).catch(function () { return null; }).then(function (j) { return { status: resp.status, json: j || {} }; });
+  }
+
+  // Cancelar (dos pasos: motivo y confirmar) o Modificar la solicitud
+  // abierta de quien la envio. dueno: ColaSolicitudes o MisCambios (detalle,
+  // pedir, ocupado, listar, verDetalle, alModificar, alCancelar). La base
+  // decide si es suya y si sigue PENDIENTE: si ADM la reviso antes, lo dice.
+  function accionPropia(dueno, accion, p) {
+    var d = dueno.detalle;
+    if (!d || dueno.ocupado) return Promise.resolve(null);
+    function msg(clase, html) {
+      var m = dueno.$(p + 'DetMsg');
+      if (m) { m.className = 'ini-cambio-msg ' + clase; m.innerHTML = html; }
+    }
+    if (accion === 'modificar') {
+      var abierto = dueno.alModificar ? dueno.alModificar(d) : false;
+      if (!abierto) {
+        msg('error', 'No se pudo abrir la iniciativa ' + h(d.folio) + ' para corregir la solicitud: no está en el registro cargado ' +
+          'o tu cuenta ya no puede pedirle cambios. Actualiza la página e inténtalo de nuevo.');
+      }
+      return Promise.resolve(abierto === true);
+    }
+    var caja = dueno.$(p + 'MotivoCancelacion');
+    var motivo = caja ? String(caja.value || '').trim() : '';
+    if (!motivo) { msg('error', 'Explica por qué cancelas la solicitud.'); return Promise.resolve(null); }
+    if (motivo.length > MAXIMO_MOTIVO_CANCELACION) { msg('error', 'El motivo no puede pasar de 2000 caracteres.'); return Promise.resolve(null); }
+    if (accion === 'cancelar') {
+      msg('revisar', '¿Cancelar la solicitud #' + h(d.id) + '? Ya no se podrá aplicar ni modificar; su historial se conserva. ' +
+        '<button type="button" class="btn chico" data-cx-accion="confirmar-cancelacion">Sí, cancelarla</button> ' +
+        '<button type="button" class="btn linea chico" data-cx-accion="no-cancelar">No</button>');
+      return Promise.resolve(null);
+    }
+    if (accion !== 'confirmar-cancelacion') return Promise.resolve(null);
+    var datos = new FormData();
+    datos.append('id', String(d.id));
+    datos.append('motivo', motivo);
+    dueno.ocupado = true;
+    msg('', '<span>Cancelando…</span>');
+    return Promise.resolve().then(function () { return dueno.pedir(URL + '?accion=cancelar', { method: 'POST', body: datos, credentials: 'same-origin' }); })
+      .then(leer)
+      .then(function (r) {
+        dueno.ocupado = false;
+        var j = r.json, ok = r.status === 200 && j.cancelada === true;
+        var html = ok ? '<strong>Solicitud #' + h(d.id) + ' cancelada.</strong> Ya no se revisa; su historial se conserva.'
+          : j.cancelada === null ? h(j.error || 'No se pudo confirmar la cancelación.') + ' Actualiza antes de reintentar.'
+          : '<strong>No se canceló.</strong> ' + h(j.error || ('Respuesta ' + r.status + '.'));
+        if (dueno.alCancelar) dueno.alCancelar();
+        return Promise.all([dueno.listar(), dueno.verDetalle(d.id)]).then(function () {
+          msg(ok ? 'listo' : j.cancelada === null ? 'aviso' : 'error', html);
+          return r;
+        });
+      }, function () {
+        dueno.ocupado = false;
+        msg('aviso', 'No se pudo contactar al servidor: no se sabe si se canceló. Actualiza antes de reintentar.');
+        return null;
+      });
   }
 
   class ColaSolicitudes {
@@ -332,6 +423,8 @@ window.SolicitudesCambioCola = (function () {
       this.alVerSolicitud = null;        // (d) se abrio el detalle: el aviso la marca vista
       this.alRevisar = null;             // tras aplicar / rechazar: el aviso se relee
       this.alVerIniciativa = null;       // (folio, boton) el Codigo de la lista: detalle de Iniciativas
+      this.alModificar = null;           // (d) -> true si abrio "Solicitar cambios" para corregirla (sql/41)
+      this.alCancelar = null;            // tras cancelar una suya: el aviso se relee
       this.cableado = false;
       this.todas = null;        // la ultima lista del servidor (filtro Estado); null = sin lista pintada
       this.pagina = 1;
@@ -437,9 +530,17 @@ window.SolicitudesCambioCola = (function () {
       this.$('solDetalle').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-sol-accion]') : e.target;
         var a = el && el.getAttribute && el.getAttribute('data-sol-accion');
-        if (a === 'aplicar') self.aplicar();
-        else if (a === 'rechazar') self.rechazar();
-        else if (a === 'cerrar') self.cerrarDetalle();
+        if (a === 'aplicar') { self.aplicar(); return; }
+        if (a === 'rechazar') { self.rechazar(); return; }
+        if (a === 'cerrar') { self.cerrarDetalle(); return; }
+        // sql/41: ir a la solicitud relacionada; cancelar / modificar la suya.
+        var ir = e.target && e.target.closest ? e.target.closest('[data-sol-ir]') : null;
+        var n = ir && ir.getAttribute ? Number(ir.getAttribute('data-sol-ir')) : 0;
+        if (n > 0) { self.verDetalle(n); return; }
+        var cx = e.target && e.target.closest ? e.target.closest('[data-cx-accion]') : null;
+        var ax = cx && cx.getAttribute('data-cx-accion');
+        if (ax === 'no-cancelar') self.mensaje('solDetMsg', '', '');
+        else if (ax) accionPropia(self, ax, 'sol');
       });
     }
 
@@ -668,7 +769,7 @@ window.SolicitudesCambioCola = (function () {
           '<td><button type="button" class="ini-folio" data-mc-id="' + h(s.id) + '" aria-controls="mcDetalle">#' + h(s.id) + '</button></td>' +
           '<td>' + h(s.folio) + (s.titulo ? '<span class="ini-sub">' + h(s.titulo) + '</span>' : '') + '</td>' +
           '<td>' + h(TIPOS[s.tipo] || s.tipo) + '</td><td>' + resumen(s) + '</td>' +
-          '<td>' + fechaHora(s.fecha_solicitud_utc) + '</td><td>' + h(ESTADOS[s.estado] || s.estado) + '</td></tr>';
+          '<td>' + fechaHora(s.fecha_solicitud_utc) + '</td><td>' + h(ESTADOS[s.estado] || s.estado) + relacionCorta(s) + '</td></tr>';
       }).join('') + '</tbody></table>';
   }
 
@@ -691,6 +792,9 @@ window.SolicitudesCambioCola = (function () {
       this.filtro = '';          // mcFiltro: Todas por omision ('' = todas)
       this.lecturas = 0;
       this.lecturaDetalle = 0;
+      this.detalle = null;       // la abierta (para Cancelar / Modificar, sql/41)
+      this.ocupado = false;
+      this.alModificar = null;   // (d) -> true si abrio "Solicitar cambios" para corregirla
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -711,7 +815,15 @@ window.SolicitudesCambioCola = (function () {
       });
       this.$('mcDetalle').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-mc-accion]') : e.target;
-        if (el && el.getAttribute && el.getAttribute('data-mc-accion') === 'cerrar') self.cerrarDetalle();
+        if (el && el.getAttribute && el.getAttribute('data-mc-accion') === 'cerrar') { self.cerrarDetalle(); return; }
+        // sql/41: ir a la relacionada (de la misma cuenta); cancelar / modificar.
+        var ir = e.target && e.target.closest ? e.target.closest('[data-mc-ir]') : null;
+        var n = ir && ir.getAttribute ? Number(ir.getAttribute('data-mc-ir')) : 0;
+        if (n > 0) { self.verDetalle(n); return; }
+        var cx = e.target && e.target.closest ? e.target.closest('[data-cx-accion]') : null;
+        var ax = cx && cx.getAttribute('data-cx-accion');
+        if (ax === 'no-cancelar') { var m = self.$('mcDetMsg'); if (m) { m.className = 'ini-cambio-msg'; m.innerHTML = ''; } }
+        else if (ax) accionPropia(self, ax, 'mc');
       });
     }
 
@@ -811,6 +923,7 @@ window.SolicitudesCambioCola = (function () {
             return null;
           }
           self.mensaje('', '');
+          self.detalle = r.json;
           var caja = self.$('mcDetalle');
           caja.innerHTML = htmlDetalle(r.json, null, null, true);
           caja.hidden = false;
@@ -824,6 +937,7 @@ window.SolicitudesCambioCola = (function () {
 
     cerrarDetalle() {
       this.lecturaDetalle++;
+      this.detalle = null;
       var caja = this.$('mcDetalle');
       if (!caja) return;
       caja.hidden = true;
@@ -832,6 +946,7 @@ window.SolicitudesCambioCola = (function () {
   }
 
   return { ColaSolicitudes: ColaSolicitudes, MisCambios: MisCambios, htmlLista: htmlLista, htmlListaMias: htmlListaMias, htmlDetalle: htmlDetalle,
+           accionPropia: accionPropia, ESTADOS: ESTADOS,
            resumen: resumen, paginar: paginar, ordenarRecientes: ordenarRecientes,
            htmlPaginas: htmlPaginas, POR_PAGINA: POR_PAGINA, URL: URL, URL_MIAS: URL_MIAS };
 })();

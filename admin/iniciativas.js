@@ -117,8 +117,11 @@ window.Iniciativas = (function () {
     titulo: 'Título', analisis: 'Descripción', descripcion: 'Descripción', observaciones: 'Observaciones',
     volumetria: 'Volumetría', pct: '% Disminución', tickets: 'Tickets a reducir', rca: 'RCA',
     // Errores que solo da el servidor (admin_iniciativas_validar.ashx).
-    solicitante: 'Solicitante', token: 'Borrador'
+    solicitante: 'Solicitante', token: 'Borrador',
+    // Modificar = reemplazo (sql/42).
+    motivo_cancelacion: 'Motivo de la corrección', reemplaza_a: 'Solicitud que corriges'
   };
+  var MAXIMO_MOTIVO_CANCELACION = 2000;   // SolicitudesIniciativa.MaximoMotivoCancelacion
 
   // ---------------------------------------------------------------------
   // Campos de captura
@@ -386,6 +389,32 @@ window.Iniciativas = (function () {
       this.rca = null;         // el File elegido (no se sube a ningun lado)
       // Un borrador = un token: reenviarlo no crea otra solicitud.
       this.token = nuevoToken();
+      // MODIFICAR (sql/42): { numero, texto } de la solicitud ENVIADA que
+      // este borrador corrige (null = solicitud nueva) y por que se cancela.
+      this.reemplazo = null;
+      this.motivoCancelacion = '';
+    }
+
+    // Modificar: el borrador con lo que se envio en la solicitud guardada d
+    // (el detalle de Mis solicitudes). Pasa por las MISMAS reglas que la
+    // captura: lo que hoy no este en el catalogo (tipo, PO, SO, categoria)
+    // no se elige y se devuelve en la lista (hay que volver a elegirlo). El
+    // RCA no se guardo: hay que adjuntarlo otra vez si el tipo lo pide.
+    prellenar(d) {
+      var faltan = [];
+      this.reemplazo = { numero: d.numero, texto: d.numero_texto || ('#' + d.numero) };
+      this.motivoCancelacion = '';
+      if (!d.tipo || !this.elegirTipo(d.tipo)) { faltan.push('tipo'); return faltan; }
+      var niveles = [d.po, d.so, d.categoria], claves = ['po', 'so', 'categoria'];
+      for (var n = 0; n < niveles.length; n++) {
+        if (!niveles[n] || !this.elegir(n, niveles[n])) { for (var k = n; k < claves.length; k++) faltan.push(claves[k]); break; }
+      }
+      var self = this;
+      [['titulo', d.titulo], ['analisis', d.descripcion], ['observaciones', d.observaciones]].forEach(function (x) {
+        if (x[1] !== null && x[1] !== undefined) self.capturar(x[0], String(x[1]));
+      });
+      if (d.pct !== null && d.pct !== undefined && d.pct !== '' && this.categoria()) this.capturar('pct', String(d.pct));
+      return faltan;
     }
 
     camposTipo() {
@@ -606,6 +635,7 @@ window.Iniciativas = (function () {
         if (String(self.valores[c.clave] === undefined ? '' : self.valores[c.clave]).trim() === '') faltan.push(c.clave);
       });
       if (this.rcaObligatorio() && !this.rca) faltan.push('rca');
+      if (this.reemplazo && !String(this.motivoCancelacion || '').trim()) faltan.push('motivo_cancelacion');
       return faltan;
     }
 
@@ -620,8 +650,12 @@ window.Iniciativas = (function () {
         if (k === 'pct' && self.metaPor === 'tickets') {
           return { campo: 'tickets', mensaje: self.error('tickets') || 'Falta ' + ROTULOS.tickets + ' o ' + ROTULOS.pct + '.' };
         }
+        if (k === 'motivo_cancelacion') return { campo: k, mensaje: 'Explica por qué corriges la solicitud ' + self.reemplazo.texto + '.' };
         return { campo: k, mensaje: k === 'rca' ? 'El RCA es obligatorio para Problem.' : 'Falta ' + ROTULOS[k] + '.' };
       });
+      if (this.reemplazo && String(this.motivoCancelacion || '').trim().length > MAXIMO_MOTIVO_CANCELACION) {
+        errores.push({ campo: 'motivo_cancelacion', mensaje: 'El motivo de la corrección no puede pasar de 2000 caracteres.' });
+      }
       ['volumetria', 'pct', 'tickets'].forEach(function (k) {
         var e = self.error(k);
         if (k === 'pct' && self.metaPor === 'tickets') return;   // lo dice 'tickets'
@@ -639,12 +673,18 @@ window.Iniciativas = (function () {
     camposEnvio() {
       var v = this.valores, sel = this.cascada.seleccion;
       var max = this.maxPct(), vol = this.volumetria();
-      return {
+      var campos = {
         tipo: this.tipo, po: sel[0] || '', so: sel[1] || '', categoria: sel[2] || '',
         titulo: v.titulo || '', descripcion: v.analisis || '', observaciones: v.observaciones || '',
         volumetria: vol === null ? '' : String(vol), pct: String(v.pct || '').trim(),
         disponible_cliente: max === null ? '' : String(max), token: this.token
       };
+      // Modificar (sql/42): el servidor reemplaza a esa solicitud.
+      if (this.reemplazo) {
+        campos.reemplaza_a = String(this.reemplazo.numero);
+        campos.motivo_cancelacion = String(this.motivoCancelacion || '').trim();
+      }
+      return campos;
     }
 
     estado() {
@@ -1016,6 +1056,18 @@ window.Iniciativas = (function () {
         // Mis solicitudes (misma pestaña): las propias, para quien no es ADM.
         if (window.SolicitudesNuevas.MisSolicitudes) this.mias = new window.SolicitudesNuevas.MisSolicitudes(this.doc, null);
       }
+      // MODIFICAR (sql/41 / sql/42): la solicitud propia abre su formulario
+      // con lo que se envio; al enviar se reemplaza. Iniciativas: Nueva
+      // solicitud (este modulo). Cambios: "Solicitar cambios" del detalle de
+      // la iniciativa (registro), sin cambiar de pestaña.
+      var pagina = this;
+      var abrirIni = function (d) { return pagina.modificarSolicitud(d); };
+      if (this.mias) this.mias.alModificar = abrirIni;
+      if (this.nuevas) this.nuevas.alModificar = abrirIni;
+      var regMod = this.registro;
+      var abrirCambio = function (d) { return !!(regMod && regMod.abrirReemplazoCambio && regMod.abrirReemplazoCambio(d)); };
+      if (this.misCambios) this.misCambios.alModificar = abrirCambio;
+      if (this.cola) this.cola.alModificar = abrirCambio;
       // Aviso rojo de la pestaña Solicitudes (solo ADM; empieza con
       // fijarRol). Abrir el detalle de una pendiente la marca vista para
       // ESTE ADM; aplicar / aprobar / rechazar lo relee.
@@ -1029,7 +1081,10 @@ window.Iniciativas = (function () {
         if (this.nuevas) {
           this.nuevas.alVerSolicitud = function (d) { aviso.marcar('NUEVA', d.numero, d.estado); };
           this.nuevas.alRevisar = releer;
+          // Cancelar una suya (sql/42): tambien relee el aviso.
+          this.nuevas.alCancelar = releer;
         }
+        if (this.cola) this.cola.alCancelar = releer;
         // Si la sesion ya respondio antes de iniciar().
         if (this.rol) aviso.fijarRol(this.rol);
       }
@@ -1530,6 +1585,60 @@ window.Iniciativas = (function () {
         self.solicitud.elegirRca(archivos && archivos.length ? archivos[0] : null);
       });
       this.$('btnValidar').addEventListener('click', function () { self.validar(); });
+      // Modificar (sql/42): el motivo de la correccion y descartarla.
+      if (this.$('iniMotivoCancelacion')) {
+        this.$('iniMotivoCancelacion').addEventListener('input', function (e) {
+          if (self.solicitud) self.solicitud.motivoCancelacion = e.target.value || '';
+        });
+      }
+      if (this.$('iniReemplazoDescartar')) {
+        this.$('iniReemplazoDescartar').addEventListener('click', function () {
+          self.nuevoBorrador();
+          self.$('iniResultado').hidden = true;
+        });
+      }
+    }
+
+    // MODIFICAR (sql/42): Nueva solicitud con lo que se envio en d (una
+    // ENVIADA de esta cuenta). Al enviar, el servidor la reemplaza (otra
+    // solicitud con otro numero; la original queda cancelada) con las MISMAS
+    // reglas que un envio nuevo. -> false si el formulario no esta listo.
+    modificarSolicitud(d) {
+      if (!d || !d.numero || !this.solicitud || this.puedeSolicitar !== true) return false;
+      this.mostrarVista('nueva');
+      if (this.vista !== 'nueva') return false;
+      var s = new SolicitudNueva(this.solicitud.catalogo);
+      var faltan = s.prellenar(d);
+      this.solicitud = s;
+      if (this.$('campoRca')) this.$('campoRca').value = '';
+      this.$('iniResultado').hidden = true;
+      this.pintarCamposComunes();
+      this.pintarCamposTipo();
+      this.pintar();
+      this.actualizarCapacidad();
+      this.actualizarVolumen();
+      this.pintarReemplazo(faltan);
+      enfocar(this.$('iniMotivoCancelacion') || this.$('iniNuevaTitulo'));
+      return true;
+    }
+
+    // El aviso de "estas corrigiendo #N" (oculto en una solicitud nueva).
+    pintarReemplazo(faltan) {
+      var caja = this.$('iniReemplazo'), s = this.solicitud;
+      if (!caja) return;
+      var r = s && s.reemplazo;
+      caja.hidden = !r;
+      if (!r) return;
+      this.$('iniReemplazoTexto').innerHTML = 'Corriges la solicitud <strong>' + Escape.html(r.texto) + '</strong>: abajo están sus datos. ' +
+        'Al enviar se crea una solicitud <strong>nueva</strong> (otro número; ADM la revisa desde el principio) y la ' + Escape.html(r.texto) +
+        ' queda <strong>cancelada</strong>. Su historial se conserva.' +
+        (faltan && faltan.length
+          ? '<span class="ini-sub">Vuelve a elegir: ' + faltan.map(function (k) { return Escape.html(ROTULOS[k] || k); }).join(', ') +
+            ' (lo que se envió ya no está en el catálogo).</span>'
+          : '') +
+        (s.rcaObligatorio() ? '<span class="ini-sub">Adjunta otra vez el RCA: el archivo no se guardó.</span>' : '');
+      var m = this.$('iniMotivoCancelacion');
+      if (m) m.value = s.motivoCancelacion || '';
     }
 
     // Primero lo que el navegador ya sabe (faltantes, formatos); si pasa, el
@@ -1567,7 +1676,9 @@ window.Iniciativas = (function () {
               self.mostrarResultado(json.valida, guardada
                 ? (json.nuevo === false
                     ? 'Esta solicitud ya estaba guardada con el número ' + json.numero_solicitud + '. No se creó otra.'
-                    : 'Solicitud guardada. Número de solicitud: ' + json.numero_solicitud + '.') + self.textoDestinatarios(json)
+                    : 'Solicitud guardada. Número de solicitud: ' + json.numero_solicitud + '.') +
+                  (typeof json.reemplaza_a === 'string' && json.reemplaza_a
+                    ? ' Corrige a la solicitud ' + json.reemplaza_a + ', que quedó cancelada.' : '') + self.textoDestinatarios(json)
                 : json.valida
                   ? 'La solicitud pasó la validación del servidor. No se guardó: el guardado de solicitudes todavía no está habilitado.'
                   : 'El servidor rechazó la solicitud:', Array.isArray(json.errores) ? json.errores : []);
@@ -1606,6 +1717,7 @@ window.Iniciativas = (function () {
       this.pintarCamposComunes();
       this.pintarCamposTipo();
       this.pintar();
+      this.pintarReemplazo(null);
     }
 
     // valida: true / false / null (en curso). errores: [{campo, mensaje}].

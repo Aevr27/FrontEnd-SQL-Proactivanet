@@ -214,7 +214,7 @@ function Montar(rol, respuestas) {
   var paginaHtml = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.html'), 'utf8');
   var sel = (paginaHtml.match(/<select id="snFiltro">([\s\S]*?)<\/select>/) || [])[1] || '';
   Check('F5 la pagina: select snFiltro dentro de snBloque, Pendientes elegida, mismos valores que Cambios',
-    [true, true, ['ENVIADA', 'APROBADA', 'RECHAZADA', '']],
+    [true, true, ['ENVIADA', 'APROBADA', 'RECHAZADA', 'CANCELADA', '']],   // CANCELADA: sql/42 (2026-11-05)
     [/<div id="snBloque" hidden>[\s\S]*<select id="snFiltro">[\s\S]*<div id="snLista">/.test(paginaHtml),
      /<option value="ENVIADA" selected>Pendientes<\/option>/.test(sel),
      (sel.match(/value="([^"]*)"/g) || []).map(function (v) { return v.slice(7, -1); })]);
@@ -542,8 +542,8 @@ function Montar(rol, respuestas) {
   Check('MS10 volver a Todas: sin ?estado=', '../handlers/admin_iniciativas_mis_solicitudes.ashx?accion=listar', mf.pedidas[3]);
   var hMs = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.html'), 'utf8');
   var bloqueMs = hMs.slice(hMs.indexOf('<div id="msBloque"'), hMs.indexOf('<div id="mcBloque"'));
-  Check('MS11 msFiltro: Pendientes / Aprobadas / Rechazadas / Todas (Todas elegida)', true,
-    /<select id="msFiltro">\s*<option value="ENVIADA">Pendientes<\/option>\s*<option value="APROBADA">Aprobadas<\/option>\s*<option value="RECHAZADA">Rechazadas<\/option>\s*<option value="" selected>Todas<\/option>/.test(bloqueMs));
+  Check('MS11 msFiltro: Pendientes / Aprobadas / Rechazadas / Canceladas (sql/42) / Todas (Todas elegida)', true,
+    /<select id="msFiltro">\s*<option value="ENVIADA">Pendientes<\/option>\s*<option value="APROBADA">Aprobadas<\/option>\s*<option value="RECHAZADA">Rechazadas<\/option>\s*<option value="CANCELADA">Canceladas<\/option>\s*<option value="" selected>Todas<\/option>/.test(bloqueMs));
 
   console.log(fallos === 0 ? 'OK: todo paso' : 'FALLOS: ' + fallos);
   process.exit(fallos === 0 ? 0 : 1);

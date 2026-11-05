@@ -204,13 +204,82 @@ public sealed class AltaSolicitud
     // La base tiene sql/36 (AceptaSolicitanteAdmin): pedir @FuenteSolicitante
     // y @NombreGuardado. Sin sql/36 esos parametros no existen.
     public bool ConFuente;
+    // sql/42 (Modificar = reemplazo): la solicitud ENVIADA que esta corrige
+    // (0 = envio nuevo) y por que se cancela la original.
+    public int ReemplazaA;
+    public string MotivoCancelacion;
 }
 
-// Un error que la base lanzo a proposito (51401-51409; 51417 y 51418 de sql/36).
+// Un error que la base lanzo a proposito (51401-51409; 51417 y 51418 de
+// sql/36; 51411 y 51419-51424 de cancelar / reemplazar, sql/42).
 public sealed class ErrorSolicitud : Exception
 {
     public readonly int Numero;
-    public ErrorSolicitud(int numero, string mensaje) : base(mensaje) { Numero = numero; }
+    public ErrorSolicitud(int numero, string mensaje) : base(MensajeDe(numero, mensaje)) { Numero = numero; }
+
+    // sql/42: un texto para quien envio (el de la base no lleva acentos).
+    // Los numeros de antes conservan el de la base.
+    public static string MensajeDe(int numero, string mensaje)
+    {
+        switch (numero)
+        {
+            case 51411: return "La solicitud no existe.";
+            case 51419: return "Explica por qu\u00e9 cancelas la solicitud.";
+            case 51420: return "El motivo de la cancelaci\u00f3n no puede pasar de 2000 caracteres.";
+            case 51421: return "La solicitud ya no est\u00e1 pendiente: un administrador la revis\u00f3 (aprob\u00f3 o rechaz\u00f3) o ya estaba cancelada. No se cambi\u00f3 nada; actualiza para ver su estado.";
+            case 51422: return "No se pudo reemplazar la solicitud (transacci\u00f3n anidada). No se cambi\u00f3 nada.";
+            case 51423: return "Este borrador ya se us\u00f3 en otra solicitud. Vuelve a abrir \u00abModificar\u00bb y env\u00edala de nuevo.";
+            case 51424: return "No se cre\u00f3 la solicitud nueva: la original sigue pendiente y no se cambi\u00f3 nada.";
+            default: return mensaje;
+        }
+    }
+
+    public static bool EsDeCancelacion(int numero) { return numero == 51411 || (numero >= 51419 && numero <= 51424); }
+
+    // Solo para cancelar / reemplazar (los demas los decide el handler como siempre).
+    public int EstadoHttp
+    {
+        get
+        {
+            if (Numero == 51411) return 404;
+            if (Numero == 51421 || Numero == 51423 || Numero == 51409) return 409;
+            if (Numero == 51422 || Numero == 51424) return 500;
+            return 422;
+        }
+    }
+
+    public string Tipo
+    {
+        get
+        {
+            switch (Numero)
+            {
+                case 51411: return "SolicitudNoExiste";
+                case 51419: return "FaltaMotivoCancelacion";
+                case 51420: return "MotivoCancelacionLargo";
+                case 51421: return "SolicitudNoPendiente";
+                case 51422: return "ReemplazoNoConfirmado";
+                case 51423: return "TokenUsado";
+                case 51424: return "ReemplazoNoCreado";
+                case 51409: return "TokenAjeno";
+                default: return "SolicitudRechazada";
+            }
+        }
+    }
+}
+
+// CANCELAR / REEMPLAZAR una Nueva solicitud ENVIADA por QUIEN LA ENVIO
+// (sql/42). usuario = la cuenta de IIS, nunca del navegador. La base vuelve
+// a comprobar que es suya y ENVIADA con el MISMO candado que Aprobar /
+// Rechazar / AprobarYCrear (gana el primero: 51421 al que llega tarde).
+// Reemplazar crea la nueva con adm.usp_SolicitudIniciativa_Crear TAL CUAL
+// (otro numero del contador, ENVIADA, ReemplazaA = la original) y cancela
+// la original, todo o nada.
+public interface ICancelacionSolicitudesIniciativa
+{
+    bool Disponible();   // los dos procedimientos de sql/42; un error = false
+    void Cancelar(int numero, string usuario, string motivo);
+    SolicitudGuardada Reemplazar(AltaSolicitud a);   // a.ReemplazaA > 0
 }
 
 public interface IAlmacenSolicitudes
@@ -222,7 +291,7 @@ public interface IAlmacenSolicitudes
     SolicitudGuardada Crear(AltaSolicitud a);
 }
 
-public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
+public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes, ICancelacionSolicitudesIniciativa
 {
     private readonly Func<SqlConnection> abrir;
     public AlmacenSolicitudesSql() : this(null) { }
@@ -275,12 +344,64 @@ public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
         catch (SqlException) { return false; }
     }
 
+    // sql/42: los dos procedimientos (la cuenta del sitio ve sys.procedures).
+    public const string ConsultaCancelacion =
+        "SELECT CASE WHEN OBJECT_ID(N'adm.usp_SolicitudIniciativa_Cancelar', N'P') IS NOT NULL " +
+        " AND OBJECT_ID(N'adm.usp_SolicitudIniciativa_Reemplazar', N'P') IS NOT NULL THEN 1 ELSE 0 END";
+
+    bool ICancelacionSolicitudesIniciativa.Disponible()
+    {
+        try
+        {
+            using (var cn = Abierta())
+            using (var cmd = new SqlCommand(ConsultaCancelacion, cn) { CommandTimeout = 15 })
+                return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+        }
+        catch (SqlException) { return false; }
+    }
+
+    public void Cancelar(int numero, string usuario, string motivo)
+    {
+        using (var cn = Abierta())
+        using (var cmd = new SqlCommand("adm.usp_SolicitudIniciativa_Cancelar", cn) { CommandType = CommandType.StoredProcedure, CommandTimeout = 30 })
+        {
+            cmd.Parameters.Add("@NumeroSolicitud", SqlDbType.Int).Value = numero;
+            cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = (object)usuario ?? DBNull.Value;
+            cmd.Parameters.Add("@Motivo", SqlDbType.NVarChar, 4000).Value = (object)motivo ?? DBNull.Value;
+            try { cmd.ExecuteNonQuery(); }
+            catch (SqlException ex)
+            {
+                if (ex.Number == 51401 || ErrorSolicitud.EsDeCancelacion(ex.Number)) throw new ErrorSolicitud(ex.Number, ex.Message);
+                throw;
+            }
+        }
+    }
+
     public SolicitudGuardada Crear(AltaSolicitud a)
     {
         if (a == null) throw new ArgumentNullException("a");
+        return Guardar("adm.usp_SolicitudIniciativa_Crear", a, false);
+    }
+
+    // sql/42: los MISMOS parametros que Crear mas la original y el motivo.
+    // @FuenteSolicitante / @NombreGuardado siempre (Reemplazar los tiene).
+    public SolicitudGuardada Reemplazar(AltaSolicitud a)
+    {
+        if (a == null) throw new ArgumentNullException("a");
+        if (a.ReemplazaA <= 0) throw new ArgumentOutOfRangeException("a", "ReemplazaA");
+        return Guardar("adm.usp_SolicitudIniciativa_Reemplazar", a, true);
+    }
+
+    private SolicitudGuardada Guardar(string procedimiento, AltaSolicitud a, bool reemplazo)
+    {
         using (var cn = Abierta())
-        using (var cmd = new SqlCommand("adm.usp_SolicitudIniciativa_Crear", cn) { CommandType = CommandType.StoredProcedure })
+        using (var cmd = new SqlCommand(procedimiento, cn) { CommandType = CommandType.StoredProcedure })
         {
+            if (reemplazo)
+            {
+                cmd.Parameters.Add("@ReemplazaA", SqlDbType.Int).Value = a.ReemplazaA;
+                cmd.Parameters.Add("@MotivoCancelacion", SqlDbType.NVarChar, 4000).Value = (object)a.MotivoCancelacion ?? DBNull.Value;
+            }
             Func<string, object> v = delegate (string s) { return (object)s ?? DBNull.Value; };
             cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = v(a.Cuenta);
             cmd.Parameters.Add("@Token", SqlDbType.UniqueIdentifier).Value = a.Token == Guid.Empty ? (object)DBNull.Value : a.Token;
@@ -302,7 +423,7 @@ public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
             var nuevo = cmd.Parameters.Add("@Nuevo", SqlDbType.Bit); nuevo.Direction = ParameterDirection.Output;
             var fecha = cmd.Parameters.Add("@FechaUtc", SqlDbType.DateTime2); fecha.Direction = ParameterDirection.Output;
             SqlParameter fuente = null, nombre = null;
-            if (a.ConFuente)
+            if (a.ConFuente || reemplazo)
             {
                 fuente = cmd.Parameters.Add("@FuenteSolicitante", SqlDbType.VarChar, 16); fuente.Direction = ParameterDirection.Output;
                 nombre = cmd.Parameters.Add("@NombreGuardado", SqlDbType.NVarChar, 255); nombre.Direction = ParameterDirection.Output;
@@ -311,6 +432,7 @@ public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
             catch (SqlException ex)
             {
                 if ((ex.Number >= 51401 && ex.Number <= 51409) || ex.Number == 51417 || ex.Number == 51418) throw new ErrorSolicitud(ex.Number, ex.Message);
+                if (reemplazo && ErrorSolicitud.EsDeCancelacion(ex.Number)) throw new ErrorSolicitud(ex.Number, ex.Message);
                 throw;
             }
             return new SolicitudGuardada
@@ -329,6 +451,9 @@ public sealed class AlmacenSolicitudesSql : IAlmacenSolicitudes
 public static class SolicitudesIniciativa
 {
     public static IAlmacenSolicitudes Almacen = new AlmacenSolicitudesSql();
+    // Cancelar / reemplazar por quien la envio (sql/42).
+    public static ICancelacionSolicitudesIniciativa Cancelaciones = new AlmacenSolicitudesSql();
+    public const int MaximoMotivoCancelacion = 2000;
     public static IFuentePersonasAcuse Personas = new FuentePersonasAcuseSql();
 
     // El token del borrador ("token" del formulario), o Guid.Empty si no

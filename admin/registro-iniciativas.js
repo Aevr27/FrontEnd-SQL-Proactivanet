@@ -1998,6 +1998,66 @@ window.RegistroIniciativas = (function () {
   // Con sql/34 (opciones.varios, el registro trae solicitudes_varios) viaja
   // cualquier combinacion como UNA solicitud tipo varios, que ADM aprueba
   // (aplica todo) o rechaza (nada). "Otros" sigue yendo solo.
+  // MODIFICAR (sql/41): una solicitud de cambio GUARDADA (el detalle de
+  // "Mis solicitudes de cambio" o de la cola) -> los cambios de la lista,
+  // para corregirlos y enviarlos como un REEMPLAZO. Solo lo que la base
+  // guardo; lo que ya no aplique lo vuelve a revisar validar() al enviar.
+  var CAMPO_DE_ETAPA = { FechaAnalisis: 'f_analisis', FechaSolucion: 'f_solucion', FechaCierre: 'f_cierre' };
+  function itemCambioVacio(campo) {
+    return { campo: campo, propuesto: '', pcts: {}, nuevas: [], datos: { titulo: null, po: null, so: null }, explicacion: '', metas: {}, vols: {} };
+  }
+  // "Otros": la base guarda "explicacion\n\nMotivo: motivo" (motivoEnvio).
+  function partirMotivoOtros(m) {
+    m = String(m === null || m === undefined ? '' : m);
+    var i = m.indexOf('\n\nMotivo: ');
+    return i < 0 ? { explicacion: m, motivo: '' } : { explicacion: m.slice(0, i), motivo: m.slice(i + 10) };
+  }
+  function itemsDeSolicitud(d) {
+    var items = [], tipo = d && d.tipo;
+    if (!d) return items;
+    function conFecha(campoBd, nueva) {
+      var c = CAMPO_DE_ETAPA[campoBd];
+      if (!c || !nueva) return;
+      var x = itemCambioVacio(c);
+      x.propuesto = String(nueva).slice(0, 10);
+      items.push(x);
+    }
+    if ((tipo === 'ESTADO' || tipo === 'VARIOS') && d.estado_nuevo) {
+      var e = itemCambioVacio('estado');
+      e.propuesto = String(d.estado_nuevo);
+      items.push(e);
+    }
+    if (tipo === 'FECHA' || tipo === 'ESTADO') conFecha(d.campo_fecha, d.fecha_nueva);
+    if (tipo === 'VARIOS') (d.fechas_varias || []).forEach(function (f) { conFecha(f.campo, f.nueva); });
+    if ((tipo === 'CATEGORIAS' || tipo === 'VARIOS') && (d.categorias_detalle || []).length) {
+      var p = itemCambioVacio('pct');
+      d.categorias_detalle.forEach(function (c) {
+        var v = c.pct_nuevo === null || c.pct_nuevo === undefined ? '' : String(c.pct_nuevo);
+        if (c.accion === 'AGREGAR') p.nuevas.push({ categoria: c.categoria, valor: v });
+        else p.pcts[c.categoria] = v;
+      });
+      items.push(p);
+    }
+    if (tipo === 'DATOS' || tipo === 'VARIOS') {
+      var dd = itemCambioVacio('datos'), alguno = false;
+      [['titulo', 'cambia_titulo', 'titulo_nuevo'], ['po', 'cambia_po', 'po_nuevo'], ['so', 'cambia_so', 'so_nuevo']].forEach(function (k) {
+        if (d[k[1]] === true) { dd.datos[k[0]] = d[k[2]] || ''; alguno = true; }
+      });
+      if (alguno) items.push(dd);
+    }
+    if (tipo === 'OTROS') {
+      var o = itemCambioVacio('otros');
+      o.explicacion = partirMotivoOtros(d.motivo).explicacion;
+      items.push(o);
+    }
+    return items;
+  }
+  function motivoDeSolicitud(d) {
+    if (!d) return '';
+    return d.tipo === 'OTROS' ? partirMotivoOtros(d.motivo).motivo : String(d.motivo || '');
+  }
+  var MAXIMO_MOTIVO_CANCELACION = 2000;   // SolicitudesCambio.MaximoMotivoCancelacion
+
   class ListaSolicitudCambio {
     constructor(iniciativa, opciones) {
       this.iniciativa = iniciativa;
@@ -2008,6 +2068,19 @@ window.RegistroIniciativas = (function () {
       this.llave = nuevaLlave();
       this.enviada = null;   // numero de la solicitud que dio el servidor
       this.sinConfirmar = false; // se mando y no se sabe si llego
+      // MODIFICAR (sql/41): { id } de la solicitud PENDIENTE que esta lista
+      // corrige (null = solicitud nueva) y por que se cancela la original.
+      this.reemplaza = null;
+      this.motivoCancelacion = '';
+    }
+
+    // Carga lo que pidio la solicitud guardada d (Modificar).
+    cargarSolicitud(d) {
+      this.items = itemsDeSolicitud(d);
+      this.motivo = motivoDeSolicitud(d);
+      this.reemplaza = { id: d.id };
+      this.motivoCancelacion = '';
+      this.editando = -1;
     }
 
     // Mientras no se sepa si llego (o ya llego) la lista no cambia: el
@@ -2174,6 +2247,11 @@ window.RegistroIniciativas = (function () {
       var m = String(this.motivo || '').trim();
       if (!m) errores.push({ campo: 'motivo', mensaje: 'Explica el motivo de la solicitud.' });
       else if (this.motivoEnvio().length > 4000) errores.push({ campo: 'motivo', mensaje: 'El motivo pasa de 4000 caracteres.' });
+      if (this.reemplaza) {
+        var mc = String(this.motivoCancelacion || '').trim();
+        if (!mc) errores.push({ campo: 'motivo_cancelacion', mensaje: 'Explica por qué corriges la solicitud #' + this.reemplaza.id + ' (motivo de la corrección).' });
+        else if (mc.length > MAXIMO_MOTIVO_CANCELACION) errores.push({ campo: 'motivo_cancelacion', mensaje: 'El motivo de la corrección pasa de 2000 caracteres.' });
+      }
       return errores;
     }
 
@@ -3547,6 +3625,11 @@ window.RegistroIniciativas = (function () {
       var ed = this.edicion, c = this.cambio;
       // El Motivo general de la solicitud: de la lista, no del cambio que
       // se captura (agregar, editar o quitar no lo borran).
+      if (this.lista && t.id === 'regCambioMotivoCancelacion') {
+        if (this.lista.motivoCancelacion !== (t.value || '')) this.soltarRevision();
+        this.lista.motivoCancelacion = t.value || '';
+        return true;
+      }
       if (this.lista && t.id === 'regCambioMotivo') {
         // Lo que se confirma es lo que se reviso: otro Motivo, otra revision.
         if (this.lista.motivo !== (t.value || '')) this.soltarRevision();
@@ -4236,6 +4319,30 @@ window.RegistroIniciativas = (function () {
         'Marca calculada; en iniciativas existentes solo se revisan Categoría y %.');
     }
 
+    // MODIFICAR (sql/41): abre la iniciativa de la solicitud d y su
+    // "Solicitar cambios" con lo que se pidio, para corregirlo. Al enviar
+    // se REEMPLAZA (otra solicitud con otro numero; la original queda
+    // cancelada). Sin la iniciativa en el registro o sin poder pedirle
+    // cambios (la elegibilidad de enviar, otra vez): false y no abre nada.
+    abrirReemplazoCambio(d) {
+      if (!d || !d.folio || !d.id) return false;
+      if (!this.registro || !this.registro.buscar(d.folio)) return false;
+      if (this.abierta !== d.folio && !this.abrirDesdeLista(d.folio, null)) return false;
+      if (this.abierta !== d.folio || !this.puedeSolicitarCambio()) return false;
+      this.abrirCambio(true);
+      if (!this.lista) return false;
+      this.lista.cargarSolicitud(d);
+      this.$('regCambio').innerHTML = this.htmlCambio();
+      this.montarDatosCambio();
+      // El Motivo de lo enviado, tambien como valor (no solo como texto del HTML).
+      var motivo = this.$('regCambioMotivo');
+      if (motivo) motivo.value = this.lista.motivo;
+      if (this.$('regCambioBoton')) this.$('regCambioBoton').setAttribute('aria-expanded', 'true');
+      var foco = this.$('regCambioMotivoCancelacion');
+      if (foco && foco.focus) foco.focus();
+      return true;
+    }
+
     // Abrir arranca una solicitud nueva (lista vacia, llave nueva) sobre la
     // iniciativa abierta. Cancelar o cerrar la descarta: nada se guarda.
     abrirCambio(abrir) {
@@ -4515,7 +4622,10 @@ window.RegistroIniciativas = (function () {
       if (l.enviada !== null) return;
       var motivo = this.$('regCambioMotivo');
       l.motivo = motivo ? motivo.value || '' : '';
+      var motivoCanc = this.$('regCambioMotivoCancelacion');
+      if (motivoCanc) l.motivoCancelacion = motivoCanc.value || '';
       var errores = l.validarEnvio();
+      if (motivoCanc) motivoCanc.setAttribute('aria-invalid', errores.some(function (e) { return e.campo === 'motivo_cancelacion'; }) ? 'true' : 'false');
       if (motivo) motivo.setAttribute('aria-invalid', errores.some(function (e) { return e.campo === 'motivo'; }) ? 'true' : 'false');
       if (errores.length) {
         this.mensajeCambio('error', '<ul>' + errores.map(function (e) { return '<li>' + Escape.html(e.mensaje) + '</li>'; }).join('') + '</ul>');
@@ -4532,7 +4642,9 @@ window.RegistroIniciativas = (function () {
         return;
       }
       this.cambioRevisando = true;
-      this.mensajeCambio('revisar', '<strong>Revisa la solicitud antes de enviarla</strong> (' + fmt(l.items.length) +
+      this.mensajeCambio('revisar', (l.reemplaza ? '<strong>Corrige la solicitud #' + Escape.html(String(l.reemplaza.id)) + ':</strong> se crea una solicitud nueva ' +
+        '(otro número; ADM la revisa desde el principio) y la #' + Escape.html(String(l.reemplaza.id)) + ' queda cancelada. ' : '') +
+        '<strong>Revisa la solicitud antes de enviarla</strong> (' + fmt(l.items.length) +
         (l.items.length === 1 ? ' cambio' : ' cambios') + '; ADM la aprueba o rechaza completa): ' + resumen + '. ' +
         'Motivo: ' + Escape.html(String(l.motivo).trim()) + ' ' +
         '<button type="button" class="btn chico" data-accion="cambio-confirmar">Confirmar y enviar</button> ' +
@@ -4563,6 +4675,12 @@ window.RegistroIniciativas = (function () {
       this.mensajeCambio('', '<span>Enviando la solicitud…</span>');
       var datos = new FormData();
       pares.forEach(function (p) { datos.append(p[0], p[1]); });
+      // Modificar (sql/41): la MISMA solicitud, como reemplazo de la original.
+      var reemplaza = l.reemplaza;
+      if (reemplaza) {
+        datos.append('reemplaza_a', String(reemplaza.id));
+        datos.append('motivo_cancelacion', String(l.motivoCancelacion || '').trim());
+      }
       pedir = pedir || this.pedirSolicitud || function (url, op) { return fetch(url, op); };
       function pintar(clase, html) {
         if (self.lista !== l) return;
@@ -4575,7 +4693,7 @@ window.RegistroIniciativas = (function () {
         if (self.lista === l && boton) boton.disabled = false;
       }
       return Promise.resolve()
-        .then(function () { return pedir(URL_SOLICITUDES + '?accion=enviar', { method: 'POST', body: datos, credentials: 'same-origin' }); })
+        .then(function () { return pedir(URL_SOLICITUDES + '?accion=' + (reemplaza ? 'reemplazar' : 'enviar'), { method: 'POST', body: datos, credentials: 'same-origin' }); })
         .then(function (resp) {
           return Promise.resolve(resp.json()).catch(function () { return null; }).then(function (j) { return { status: resp.status, json: j || {} }; });
         })
@@ -4586,6 +4704,7 @@ window.RegistroIniciativas = (function () {
             l.sinConfirmar = false;
             l.enviada = j.id_solicitud;
             pintar('listo', '<strong>Solicitud #' + Escape.html(String(j.id_solicitud)) + ' enviada.</strong> ' + (resumenHtml || '') + '. ' +
+              (reemplaza ? 'Corrige a la solicitud #' + Escape.html(String(reemplaza.id)) + ', que quedó cancelada. ' : '') +
               (j.repetida ? 'Ya estaba enviada: no se duplicó. ' : '') +
               'Un administrador (ADM) la revisa; la iniciativa no cambia hasta que la aplique.');
             return r;
@@ -4627,7 +4746,13 @@ window.RegistroIniciativas = (function () {
       }).join('');
       var lista = function (id, valores) { return selectorHtml(id, valores, ''); };
       var t = c.tipo();
-      return '<h4>Solicitar cambios</h4>' +
+      var reemplazo = this.lista && this.lista.reemplaza;
+      return '<h4>' + (reemplazo ? 'Modificar la solicitud #' + Escape.html(String(reemplazo.id)) : 'Solicitar cambios') + '</h4>' +
+        (reemplazo
+          ? '<p class="ini-cambio-msg aviso" id="regCambioReemplazo">Corriges la solicitud <strong>#' + Escape.html(String(reemplazo.id)) + '</strong>: ' +
+            'abajo están los cambios que pediste. Al enviar se crea una solicitud <strong>nueva</strong> (otro número; ADM la revisa desde el principio) ' +
+            'y la #' + Escape.html(String(reemplazo.id)) + ' queda <strong>cancelada</strong>. Su historial se conserva.</p>'
+          : '') +
         '<p class="ini-nota">Arma la lista de cambios para esta iniciativa y envíala como UNA solicitud; aquí no se edita. ' +
           'Un administrador (ADM) la revisa y la aprueba o la rechaza completa. ' +
           '«Otros» es solo una explicación (p. ej. una categoría equivocada): no cambia nada por sí sola.</p>' +
@@ -4658,7 +4783,12 @@ window.RegistroIniciativas = (function () {
         '<div class="ini-cambio-lista" id="regCambioLista">' + this.htmlListaCambio() + '</div>' +
         '<div class="ini-cambio-campos">' +
           '<div class="campo ini-cambio-ancho"><label for="regCambioMotivo" id="regCambioMotivoRot">Motivo de la solicitud</label>' +
-            '<textarea id="regCambioMotivo" rows="3"></textarea></div>' +
+            '<textarea id="regCambioMotivo" rows="3">' + (reemplazo ? Escape.html(this.lista.motivo || '') : '') + '</textarea></div>' +
+          (reemplazo
+            ? '<div class="campo ini-cambio-ancho"><label for="regCambioMotivoCancelacion">Motivo de la corrección (obligatorio: por qué se cancela la #' +
+              Escape.html(String(reemplazo.id)) + ')</label><textarea id="regCambioMotivoCancelacion" rows="2" maxlength="' + MAXIMO_MOTIVO_CANCELACION + '">' +
+              Escape.html(this.lista.motivoCancelacion || '') + '</textarea></div>'
+            : '') +
         '</div>' +
         '<div class="ini-cambio-msg" id="regCambioMsg" role="status" aria-live="polite"></div>' +
         '<div class="ini-cambio-pie">' +
@@ -4982,7 +5112,7 @@ window.RegistroIniciativas = (function () {
     FiltroRegistro: FiltroRegistro,
     Cobertura: Cobertura,
     SolicitudCambio: SolicitudCambio,
-    ListaSolicitudCambio: ListaSolicitudCambio,
+    ListaSolicitudCambio: ListaSolicitudCambio, itemsDeSolicitud: itemsDeSolicitud, motivoDeSolicitud: motivoDeSolicitud,
     RevisionSolicitud: RevisionSolicitud,
     CAMPOS_CAMBIO: CAMPOS_CAMBIO,
     otrasEnCategoria: otrasEnCategoria,

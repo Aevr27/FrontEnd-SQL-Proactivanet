@@ -5,7 +5,7 @@
 // (admin/solicitudes-nuevas.js, MisSolicitudes). ADM sigue con el registro
 // completo (admin_iniciativas_solicitudes_nuevas.ashx, ExigirAdm).
 //
-//   GET ?accion=listar[&estado=ENVIADA|APROBADA|RECHAZADA]
+//   GET ?accion=listar[&estado=ENVIADA|APROBADA|RECHAZADA|CANCELADA]
 //                                   -> 200 { solicitudes: [...], total, maximo }
 //                                      sin estado (o vacio): todas las suyas;
 //                                      otro valor: 400 EstadoDesconocido sin
@@ -69,10 +69,14 @@ public class AdminIniciativasMisSolicitudes : IHttpHandler
                 return new Dictionary<string, object>
                 {
                     { "solicitudes", l.Solicitudes }, { "total", l.Total }, { "maximo", RegistroSolicitudesIniciativa.Maximo },
+                    { "cancelacion_disponible", l.CancelacionDisponible },
                 };
             }
             var d = lector.DetalleDe(numero, id.Original);
             if (d == null) return Error(context, 404, "La solicitud no existe.", "SolicitudNoExiste");
+            // Solo pantalla: Cancelar / Modificar (sql/42). Quien decide es la
+            // base, por admin_iniciativas_validar.ashx.
+            RegistroSolicitudesIniciativa.MarcarPropia(d, id.Original);
             return d;
         });
     }

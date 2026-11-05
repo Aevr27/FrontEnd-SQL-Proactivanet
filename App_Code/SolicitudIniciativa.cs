@@ -485,6 +485,7 @@ public sealed class ValidadorIniciativa
         public DestinatariosSolicitud Destinatarios;
         public bool Guardada;
         public bool Nuevo;
+        public int ReemplazaA;   // sql/42: la solicitud que esta reemplazo (0 = envio nuevo)
 
         public void Agregar(string campo, string mensaje)
         {

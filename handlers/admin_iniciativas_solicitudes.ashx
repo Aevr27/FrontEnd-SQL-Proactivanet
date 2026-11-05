@@ -37,11 +37,40 @@
 //           501 { tipo: PersistenciaNoHabilitada } sin sql/22: nada se guarda
 //           500 { tipo: EnvioNoConfirmado, enviada: null } (no se sabe)
 //        NUNCA escribe la iniciativa.
-//   GET  accion=listar[&estado=PENDIENTE|APLICADA|RECHAZADA]   ExigirAdm
+//   POST accion=cancelar   id, motivo (obligatorio, hasta 2000)   (sql/41)
+//        Como enviar: Exigir (ADM o MOD) o AccesoIniciativas.ExigirSolicitud.
+//        SOLO quien la envio (SolicitadoPor = la cuenta de IIS, nunca del
+//        formulario) y SOLO PENDIENTE: lo decide la base con el candado de
+//        Aplicar / Rechazar (adm.usp_SolicitudCambio_Cancelar). Nada se
+//        borra: la fila queda CANCELADA con quien, cuando y por que, y un
+//        evento CANCELADA.
+//        -> 200 { cancelada: true, id_solicitud }
+//           404 SolicitudNoExiste (no existe o es de otra cuenta: igual)
+//           409 SolicitudNoPendiente (ADM la reviso antes: gana el primero;
+//               estado_actual dice como quedo)
+//           422 FaltaMotivoCancelacion / MotivoCancelacionLargo
+//           501 CancelacionNoHabilitada (sin sql/41)
+//           500 { cancelada: null } (no se sabe si quedo)
+//   POST accion=reemplazar  reemplaza_a, motivo_cancelacion + TODOS los
+//        campos de enviar (con su llave nueva). La MISMA autorizacion y
+//        validacion que enviar (PSO, catalogo, tope de 100%, formato) y
+//        luego adm.usp_SolicitudCambio_Reemplazar: crea una solicitud NUEVA
+//        (otro numero, PENDIENTE, ADM la revisa desde el principio,
+//        ReemplazaA = la original) y cancela la original con un evento
+//        REEMPLAZADA, en UNA transaccion. Si algo no pasa, la original sigue
+//        PENDIENTE y no se guarda nada.
+//        -> 200 { enviada: true, reemplazada: true, id_solicitud (la nueva),
+//                 reemplaza_a, repetida }
+//           los mismos 4xx / 5xx de enviar y de cancelar (ademas 422
+//           OtraIniciativa y 409 LlaveUsada).
+//   GET  accion=listar[&estado=PENDIENTE|APLICADA|RECHAZADA|CANCELADA]   ExigirAdm
 //   GET  accion=detalle&id=N                                    ExigirAdm
 //        Las dos agregan solicitante_nombre (solo pantalla): solicitado_por
 //        resuelta a CatPersona.Nombre (SolicitudesCambio.NombresSolicitante);
 //        null si no resuelve o es ambigua. solicitado_por no cambia.
+//        detalle agrega es_propia (la envio la cuenta de IIS que pregunta) y
+//        puede_cancelar (es_propia, PENDIENTE y sql/41): solo pantalla; la
+//        base decide al cancelar.
 //   POST accion=rechazar  id, comentario (obligatorio)          ExigirAdm
 //   POST accion=aplicar   id, comentario (obligatorio en Otros), pares
 //        clas_categoria / clas_tipo_iniciativa / clas_tipo_agrupado (solo
@@ -51,7 +80,9 @@
 //        de la edicion directa (PersistenciaGestionAdmin): escribe la
 //        iniciativa.
 //        -> 200 { aplicada: true };  409 desactualizada / ya revisada / tope /
-//           sin clasificacion;  422 validacion o comentario;  404 no existe;
+//           sin clasificacion / SolicitudCancelada (quien la envio la
+//           cancelo o reemplazo antes: gana el primero);
+//           422 validacion o comentario;  404 no existe;
 //           500 { tipo: AplicacionNoConfirmada, aplicada: null }.
 //        Toda falla de validacion o de la base deja la solicitud PENDIENTE y
 //        registrada (Intentos, UltimoError, evento).
@@ -74,12 +105,15 @@ public class AdminIniciativasSolicitudes : IHttpHandler
         // en Enviar, con el folio del formulario).
         var req = context.Request;
         var accion = req.QueryString["accion"];
-        if (accion == "enviar" && !AccesoAdmin.PuedeEntrar(context))
+        // Enviar, cancelar y reemplazar son del SOLICITANTE (la base decide
+        // si la solicitud es suya); lo demas, de ADM.
+        var delSolicitante = accion == "enviar" || accion == "cancelar" || accion == "reemplazar";
+        if (delSolicitante && !AccesoAdmin.PuedeEntrar(context))
         {
             if (!AccesoIniciativas.ExigirSolicitud(context)) return;
         }
         else if (!AccesoAdmin.Exigir(context)) return;
-        if (accion != "enviar"
+        if (!delSolicitante
             && !AccesoAdmin.ExigirAdm(context, "Solo un administrador (ADM) revisa, aplica o rechaza solicitudes de cambio.")) return;
 
         DashboardHandler.Responder(context, delegate
@@ -89,7 +123,8 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             try { DeteccionSolicitudesCambio.Revisar(); }
             catch (Exception ex) { DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex); }
             var esPost = string.Equals(req.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase);
-            if (accion == "enviar" || accion == "rechazar" || accion == "aplicar")
+            var escribe = accion == "enviar" || accion == "rechazar" || accion == "aplicar" || accion == "cancelar" || accion == "reemplazar";
+            if (escribe)
             {
                 if (!esPost) return Error(context, 405, "Usa POST.", "MetodoNoPermitido");
             }
@@ -104,11 +139,24 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             // (AccesoAdmin.IdentidadEscritura). Leer la cola solo necesita el
             // permiso de arriba.
             var id = AccesoAdmin.IdentidadEscritura(context) ?? IdentidadWindows.Desde(null, false);
-            if ((accion == "enviar" || accion == "rechazar" || accion == "aplicar") && (!id.Autenticada || string.IsNullOrEmpty(id.Original)))
+            if (escribe && (!id.Autenticada || string.IsNullOrEmpty(id.Original)))
                 return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
             var rol = AccesoAdmin.Rol(context);
 
-            if (accion == "enviar") return Enviar(context, id, rol);
+            if (accion == "enviar") return Enviar(context, id, rol, 0, null);
+            if (accion == "cancelar") return Cancelar(context, id);
+            if (accion == "reemplazar")
+            {
+                int original;
+                if (!int.TryParse(req.Form["reemplaza_a"], out original) || original <= 0)
+                    return Error(context, 400, "Falta el n\u00famero de la solicitud que se corrige.", "SinSolicitud");
+                var motivoCancelacion = (req.Form["motivo_cancelacion"] ?? "").Trim();
+                var malo = ErrorMotivoCancelacion(context, motivoCancelacion);
+                if (malo != null) return malo;
+                if (!PersistenciaSolicitudesCambio.CancelacionActiva())
+                    return Error(context, 501, PersistenciaSolicitudesCambio.MotivoCancelacion, "CancelacionNoHabilitada");
+                return Enviar(context, id, rol, original, motivoCancelacion);
+            }
             if (!PersistenciaSolicitudesCambio.Activa())
                 return Error(context, 501, PersistenciaSolicitudesCambio.MotivoCola, "PersistenciaNoHabilitada");
             try
@@ -116,7 +164,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                 if (accion == "listar")
                 {
                     var estado = req.QueryString["estado"];
-                    if (!string.IsNullOrEmpty(estado) && estado != "PENDIENTE" && estado != "APLICADA" && estado != "RECHAZADA")
+                    if (!string.IsNullOrEmpty(estado) && !SolicitudesCambio.EsEstadoCola(estado))
                         return Error(context, 400, "Estado de solicitud desconocido.", "EstadoDesconocido");
                     var lista = SolicitudesCambio.Almacen.Listar(string.IsNullOrEmpty(estado) ? null : estado, 200);
                     // Nombre de quien envio, solo para mostrar (solicitado_por no cambia).
@@ -133,6 +181,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                     // Otras iniciativas activas de cada categoria (ya es ADM).
                     SolicitudesCambio.AgregarOtrasIniciativas(d);
                     SolicitudesCambio.AgregarNombreSolicitante(new List<Dictionary<string, object>> { d });
+                    SolicitudesCambio.MarcarPropia(d, id.Original);
                     return d;
                 }
                 if (accion == "rechazar")
@@ -146,12 +195,107 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             }
             catch (ErrorSolicitudCambio ex)
             {
+                // Carrera con quien la envio: si ya la cancelo (o reemplazo),
+                // se dice eso y no "ya revisada".
+                int n2;
+                if ((accion == "aplicar" || accion == "rechazar") && ex.Numero == 51202 && ex.InnerException is System.Data.SqlClient.SqlException
+                    && int.TryParse(req.Form["id"], out n2))
+                {
+                    var cancelada = SinFallar(delegate { return SolicitudesCambio.Almacen.Detalle(n2); });
+                    if (cancelada != null && cancelada["estado"] as string == "CANCELADA")
+                        return Cancelada(context, cancelada, accion == "aplicar" ? "aplicada" : "rechazada");
+                }
                 return DeLaBase(context, ex, accion == "aplicar" ? "aplicada" : accion == "rechazar" ? "rechazada" : null);
             }
         });
     }
 
-    private static object Enviar(HttpContext context, IdentidadWindows id, string rol)
+    // Lo que ve ADM cuando quien la envio la cancelo o la reemplazo antes.
+    private static object Cancelada(HttpContext context, Dictionary<string, object> d, string llave)
+    {
+        context.Response.StatusCode = 409;
+        context.Response.TrySkipIisCustomErrors = true;
+        var nueva = d.ContainsKey("reemplazada_por") ? d["reemplazada_por"] : null;
+        return new Dictionary<string, object>
+        {
+            { "error", nueva != null
+                ? "Quien la envi\u00f3 la reemplaz\u00f3 por la solicitud #" + nueva + " antes de tu revisi\u00f3n: esta qued\u00f3 cancelada y no se cambi\u00f3 nada. Revisa la nueva."
+                : "Quien la envi\u00f3 la cancel\u00f3 antes de tu revisi\u00f3n: no se cambi\u00f3 nada." },
+            { "numero", 51202 }, { "tipo", "SolicitudCancelada" }, { llave, false }, { "estado_actual", "CANCELADA" },
+            { "reemplazada_por", nueva },
+        };
+    }
+
+    // Una lectura para mejorar un mensaje: si falla, sin ella.
+    private static Dictionary<string, object> SinFallar(Func<Dictionary<string, object>> leer)
+    {
+        try { return leer(); }
+        catch (Exception ex) { DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex); return null; }
+    }
+
+    private static object ErrorMotivoCancelacion(HttpContext context, string motivo)
+    {
+        if (motivo.Length == 0)
+            return Error(context, 422, ErrorSolicitudCambio.MensajeDe(51228, null), "FaltaMotivoCancelacion");
+        if (motivo.Length > SolicitudesCambio.MaximoMotivoCancelacion)
+            return Error(context, 422, ErrorSolicitudCambio.MensajeDe(51229, null), "MotivoCancelacionLargo");
+        return null;
+    }
+
+    // sql/41: quien la envio la cancela. La base decide si es suya y si
+    // sigue PENDIENTE (con el candado de Aplicar / Rechazar).
+    private static object Cancelar(HttpContext context, IdentidadWindows id)
+    {
+        int n;
+        if (!int.TryParse(context.Request.Form["id"], out n) || n <= 0)
+            return Error(context, 400, "Falta el n\u00famero de la solicitud.", "SinSolicitud");
+        var motivo = (context.Request.Form["motivo"] ?? "").Trim();
+        var malo = ErrorMotivoCancelacion(context, motivo);
+        if (malo != null) return malo;
+        if (!PersistenciaSolicitudesCambio.CancelacionActiva())
+            return Error(context, 501, PersistenciaSolicitudesCambio.MotivoCancelacion, "CancelacionNoHabilitada");
+        try
+        {
+            SolicitudesCambio.Cancelaciones.Cancelar(n, id.Original, motivo);
+            return new Dictionary<string, object> { { "cancelada", true }, { "id_solicitud", n } };
+        }
+        catch (ErrorSolicitudCambio ex) { return DeLaCancelacion(context, ex, "cancelada", n, id.Original); }
+        catch (Exception ex)
+        {
+            DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex);
+            context.Response.StatusCode = 500;
+            context.Response.TrySkipIisCustomErrors = true;
+            return new Dictionary<string, object>
+            {
+                { "error", "No se pudo confirmar la cancelaci\u00f3n: " + DashboardHandler.MensajeSeguro(ex) + " Actualiza tus solicitudes antes de reintentar." },
+                { "tipo", "CancelacionNoConfirmada" }, { "cancelada", null },
+            };
+        }
+    }
+
+    // Un error de Cancelar / Reemplazar. 51230 (ADM la reviso antes): dice
+    // como quedo, leida SOLO dentro de la cuenta (DetalleDe).
+    private static object DeLaCancelacion(HttpContext context, ErrorSolicitudCambio ex, string llave, int original, string cuenta)
+    {
+        var salida = (Dictionary<string, object>)DeLaBase(context, ex, llave);
+        if (ex.Numero == 51230)
+        {
+            var d = SinFallar(delegate { return SolicitudesCambio.Mias.DetalleDe(original, cuenta); });
+            if (d != null)
+            {
+                salida["estado_actual"] = d["estado"];
+                var e = d["estado"] as string;
+                if (e == "APLICADA") salida["error"] = "Un administrador ya aplic\u00f3 esta solicitud: no se cambi\u00f3 nada.";
+                else if (e == "RECHAZADA") salida["error"] = "Un administrador ya rechaz\u00f3 esta solicitud: no se cambi\u00f3 nada.";
+                else if (e == "CANCELADA") salida["error"] = "La solicitud ya estaba cancelada: no se cambi\u00f3 nada.";
+            }
+        }
+        return salida;
+    }
+
+    // reemplazaA > 0: reemplazo (sql/41) de esa solicitud, con la MISMA
+    // autorizacion y validacion que un envio nuevo.
+    private static object Enviar(HttpContext context, IdentidadWindows id, string rol, int reemplazaA, string motivoCancelacion)
     {
         var usuario = id.Original;
         var p = PeticionSolicitudCambio.DesdeFormulario(context.Request.Form);
@@ -256,10 +400,22 @@ public class AdminIniciativasSolicitudes : IHttpHandler
         }
         try
         {
+            if (reemplazaA > 0)
+            {
+                var nueva = SolicitudesCambio.Cancelaciones.Reemplazar(reemplazaA, motivoCancelacion, p, usuario, rol);
+                return new Dictionary<string, object>
+                {
+                    { "enviada", true }, { "reemplazada", true }, { "id_solicitud", nueva.IdSolicitud },
+                    { "reemplaza_a", reemplazaA }, { "repetida", nueva.Repetida },
+                };
+            }
             var r = SolicitudesCambio.Almacen.Enviar(p, usuario, rol);
             return new Dictionary<string, object> { { "enviada", true }, { "id_solicitud", r.IdSolicitud }, { "repetida", r.Repetida } };
         }
-        catch (ErrorSolicitudCambio ex) { return DeLaBase(context, ex, "enviada"); }
+        catch (ErrorSolicitudCambio ex)
+        {
+            return reemplazaA > 0 ? DeLaCancelacion(context, ex, "enviada", reemplazaA, usuario) : DeLaBase(context, ex, "enviada");
+        }
         catch (Exception ex)
         {
             // Un tiempo agotado puede llegar despues del COMMIT: no se afirma

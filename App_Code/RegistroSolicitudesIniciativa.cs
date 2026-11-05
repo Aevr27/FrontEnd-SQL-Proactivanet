@@ -66,6 +66,7 @@ public interface ILectorMisSolicitudesIniciativa
 public sealed class LecturaSolicitudesIniciativa
 {
     public int Total;
+    public bool CancelacionDisponible; // sql/42 en la base: quien la envio la puede cancelar / modificar
     public bool RevisionDisponible;    // sql/31 en la base: se puede aprobar / rechazar
     public bool CreaIniciativa;        // sql/32 en la base: aprobar crea la iniciativa
     public List<Dictionary<string, object>> Solicitudes = new List<Dictionary<string, object>>();
@@ -122,6 +123,45 @@ public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativ
             return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
     }
 
+    // sql/42: las columnas de la cancelacion (por el nombre de su CHECK y
+    // las columnas: siguen aunque el rollback de procedimiento quite los
+    // procedimientos) y, aparte, los dos procedimientos.
+    public const string ConsultaCancelacion =
+        "SELECT CASE WHEN OBJECT_ID(N'adm.CK_SolicitudIniciativa_EstadoCancelada', N'C') IS NOT NULL " +
+        " AND COL_LENGTH(N'adm.SolicitudIniciativa', N'ReemplazaA') IS NOT NULL " +
+        " AND COL_LENGTH(N'adm.SolicitudIniciativa', N'MotivoCancelacion') IS NOT NULL THEN 1 ELSE 0 END, " +
+        " CASE WHEN OBJECT_ID(N'adm.usp_SolicitudIniciativa_Cancelar', N'P') IS NOT NULL " +
+        " AND OBJECT_ID(N'adm.usp_SolicitudIniciativa_Reemplazar', N'P') IS NOT NULL THEN 1 ELSE 0 END";
+
+    private static void ConCancelacion(SqlConnection cn, out bool columnas, out bool procedimientos)
+    {
+        columnas = false; procedimientos = false;
+        using (var cmd = new SqlCommand(ConsultaCancelacion, cn) { CommandTimeout = 15 })
+        using (var r = cmd.ExecuteReader())
+            if (r.Read())
+            {
+                columnas = Convert.ToInt32(r.GetValue(0), CultureInfo.InvariantCulture) == 1;
+                procedimientos = columnas && Convert.ToInt32(r.GetValue(1), CultureInfo.InvariantCulture) == 1;
+            }
+    }
+
+    // ReemplazadaPor: la que reemplazo a esta (a lo mas una, indice unico de
+    // sql/42). Con cuenta ("Mis solicitudes") los dos enlaces solo si la otra
+    // es de la MISMA cuenta: nunca el numero de una ajena.
+    private static string ColumnasCancelacion(bool cancelacion, bool deCuenta)
+    {
+        if (!cancelacion)
+            return @",
+       CanceladoPor = CONVERT(nvarchar(256), NULL), FechaCancelacionUtc = CONVERT(datetime2(0), NULL), MotivoCancelacion = CONVERT(nvarchar(2000), NULL),
+       ReemplazaA = CONVERT(int, NULL), ReemplazadaPor = CONVERT(int, NULL)";
+        return @",
+       s.CanceladoPor, s.FechaCancelacionUtc, s.MotivoCancelacion,
+       ReemplazaA = (SELECT o.NumeroSolicitud FROM adm.SolicitudIniciativa AS o WHERE o.NumeroSolicitud = s.ReemplazaA" +
+            (deCuenta ? " AND UPPER(o.SolicitanteCuenta) = UPPER(s.SolicitanteCuenta)" : "") + @"),
+       ReemplazadaPor = (SELECT TOP (1) x.NumeroSolicitud FROM adm.SolicitudIniciativa AS x WHERE x.ReemplazaA = s.NumeroSolicitud" +
+            (deCuenta ? " AND UPPER(x.SolicitanteCuenta) = UPPER(s.SolicitanteCuenta)" : "") + " ORDER BY x.NumeroSolicitud)";
+    }
+
     private static string Columnas(bool revision, bool codigo)
     {
         return @"
@@ -162,11 +202,14 @@ public sealed class LectorSolicitudesIniciativaSql : ILectorSolicitudesIniciativ
         {
             l.RevisionDisponible = ConRevision(cn);
             l.CreaIniciativa = l.RevisionDisponible && ConCodigo(cn);
+            bool cancelacion, procs;
+            ConCancelacion(cn, out cancelacion, out procs);
+            l.CancelacionDisponible = procs;
             var filtros = new List<string>();
             if (cuenta != null) filtros.Add(FiltroCuenta);
             if (estado != null) filtros.Add("s.Estado = @estado");
             var donde = filtros.Count == 0 ? "" : " WHERE " + string.Join(" AND ", filtros.ToArray());
-            var sql = "SELECT TOP (@max)" + Columnas(l.RevisionDisponible, l.CreaIniciativa) + @"
+            var sql = "SELECT TOP (@max)" + Columnas(l.RevisionDisponible, l.CreaIniciativa) + ColumnasCancelacion(cancelacion, cuenta != null) + @"
 FROM adm.SolicitudIniciativa AS s" + donde + @"
 ORDER BY s.NumeroSolicitud DESC;
 SELECT COUNT(*) FROM adm.SolicitudIniciativa AS s" + donde + ";";
@@ -199,9 +242,11 @@ SELECT COUNT(*) FROM adm.SolicitudIniciativa AS s" + donde + ";";
         {
             var revision = ConRevision(cn);
             var codigo = revision && ConCodigo(cn);
+            bool cancelacion, procs;
+            ConCancelacion(cn, out cancelacion, out procs);
             // Con cuenta, los eventos solo si la solicitud es suya (el EXISTS).
             var deCuenta = cuenta == null ? "" : " AND " + FiltroCuenta;
-            var sql = "SELECT" + Columnas(revision, codigo) + @",
+            var sql = "SELECT" + Columnas(revision, codigo) + ColumnasCancelacion(cancelacion, cuenta != null) + @",
        s.Descripcion, s.Observaciones, s.Volumetria, s.PctDisminucion, s.RcaExtension, s.FuenteCorreos
 FROM adm.SolicitudIniciativa AS s
 WHERE s.NumeroSolicitud = @n" + deCuenta + @";
@@ -220,6 +265,7 @@ ORDER BY e.IdEvento;";
                     var d = Fila(r);
                     d["revision_disponible"] = revision;
                     d["crea_iniciativa"] = codigo;
+                    d["cancelacion_disponible"] = procs;
                     d["descripcion"] = Texto(r, "Descripcion");
                     d["observaciones"] = Texto(r, "Observaciones");
                     d["volumetria"] = r.IsDBNull(r.GetOrdinal("Volumetria")) ? (object)null : Convert.ToInt32(r["Volumetria"], CultureInfo.InvariantCulture);
@@ -261,7 +307,20 @@ ORDER BY e.IdEvento;";
             { "revisado_por", Texto(r, "RevisadoPor") }, { "fecha_revision_utc", Utc(r, "FechaRevisionUtc") },
             { "comentario_revision", Texto(r, "ComentarioRevision") },
             { "codigo_iniciativa", Texto(r, "CodigoIniciativa") },
+            // sql/42 (null sin sus columnas).
+            { "cancelado_por", Texto(r, "CanceladoPor") }, { "fecha_cancelacion_utc", Utc(r, "FechaCancelacionUtc") },
+            { "motivo_cancelacion", Texto(r, "MotivoCancelacion") },
+            { "reemplaza_a", Numero(r, "ReemplazaA") }, { "reemplazada_por", Numero(r, "ReemplazadaPor") },
         };
+    }
+
+    // { numero, numero_texto } de un enlace, o null.
+    private static object Numero(SqlDataReader r, string col)
+    {
+        var i = r.GetOrdinal(col);
+        if (r.IsDBNull(i)) return null;
+        var n = Convert.ToInt32(r.GetValue(i), CultureInfo.InvariantCulture);
+        return new Dictionary<string, object> { { "numero", n }, { "numero_texto", new NumeroSolicitud(n).ToString() } };
     }
 
     private static string Texto(SqlDataReader r, string col)
@@ -300,7 +359,28 @@ public static class RegistroSolicitudesIniciativa
     // Los valores de adm.SolicitudIniciativa.Estado (CHECK de sql/29 y
     // sql/31). ENVIADA es la pendiente de revision; las otras dos son finales.
     public const string Pendiente = "ENVIADA";
-    public static readonly string[] Estados = { Pendiente, "APROBADA", "RECHAZADA" };
+    // CANCELADA (sql/42): la cancelo quien la envio (o la reemplazo). Sin
+    // sql/42 no hay ninguna: el filtro devuelve la lista vacia.
+    public static readonly string[] Estados = { Pendiente, "APROBADA", "RECHAZADA", "CANCELADA" };
+
+    // Solo pantalla (la base decide al cancelar): es_propia = la envio
+    // `cuenta` (la de IIS que pregunta) y puede_cancelar = ademas ENVIADA y
+    // sql/42 en la base (cancelacion_disponible del detalle).
+    public static void MarcarPropia(Dictionary<string, object> d, string cuenta)
+    {
+        if (d == null) return;
+        object por, estado, disponible;
+        d.TryGetValue("solicitante_cuenta", out por);
+        d.TryGetValue("estado", out estado);
+        d.TryGetValue("cancelacion_disponible", out disponible);
+        var propia = por is string && !string.IsNullOrEmpty(cuenta)
+                     && string.Equals(((string)por).Trim(), cuenta.Trim(), StringComparison.OrdinalIgnoreCase);
+        d["es_propia"] = propia;
+        d["puede_cancelar"] = propia && estado as string == Pendiente && disponible is bool && (bool)disponible;
+    }
+
+    public const string MensajeCancelada =
+        "Quien la envi\u00f3 la cancel\u00f3 (o la reemplaz\u00f3 por otra) antes de tu revisi\u00f3n: no se cambi\u00f3 nada.";
 
     public static bool EsEstado(string estado)
     {

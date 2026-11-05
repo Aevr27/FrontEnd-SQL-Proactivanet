@@ -89,6 +89,22 @@ sealed class LectorMiasFalso : ILectorMisSolicitudesIniciativa
     }
 }
 
+// sql/42 sin SQL: lo que validar pide cancelar / reemplazar.
+sealed class CancelacionesMiasFalsas : ICancelacionSolicitudesIniciativa
+{
+    public bool Hay = true;
+    public Exception Lanza;
+    public int Reemplazos;
+    public readonly List<string> Llamadas = new List<string>();
+    public bool Disponible() { return Hay; }
+    public void Cancelar(int numero, string usuario, string motivo)
+    {
+        Llamadas.Add(numero + "|" + usuario + "|" + motivo);
+        if (Lanza != null) throw Lanza;
+    }
+    public SolicitudGuardada Reemplazar(AltaSolicitud a) { Reemplazos++; throw new InvalidOperationException("no deberia llegar"); }
+}
+
 public static class MisSolicitudesIniciativaHttpSmoke
 {
     static int fallos = 0, pasados = 0;
@@ -334,6 +350,101 @@ public static class MisSolicitudesIniciativaHttpSmoke
         Check("E5 VIEWER con filtro: 403 sin leer", "403|0", st + "|" + lector.Llamadas.Count);
         cuerpo = Mias("accion=detalle&numero=7&estado=RECHAZADA", POSO, out st);
         Check("E6 detalle ignora ?estado=", "200|7", st + "|" + Campo(Json(cuerpo), "numero"));
+
+        // ---------------- X: cancelar y modificar (sql/42) ----------------
+        var cancX = new CancelacionesMiasFalsas();
+        SolicitudesIniciativa.Cancelaciones = cancX;
+        Func<string, string[][], string> postValidar = delegate (string cuenta, string[][] campos)
+        {
+            var sw = new StringWriter();
+            var ctx = Contexto("admin_iniciativas_validar.ashx", null, cuenta, sw);
+            typeof(HttpRequest).GetField("_httpMethod", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(ctx.Request, "POST");
+            CabeceraNavegador(ctx.Request, "Sec-Fetch-Site", "same-origin");
+            var tipoForm = typeof(HttpRequest).Assembly.GetType("System.Web.HttpValueCollection");
+            var form = (System.Collections.Specialized.NameValueCollection)Activator.CreateInstance(tipoForm, true);
+            foreach (var c in campos) form.Add(c[0], c[1]);
+            typeof(HttpRequest).GetField("_form", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(ctx.Request, form);
+            try { new AdminIniciativasValidar().ProcessRequest(ctx); }
+            catch (Exception ex) { sw.Write("EXCEPCION " + ex.GetType().Name); }
+            st = ctx.Response.StatusCode;
+            HttpContext.Current = null;
+            return sw.ToString();
+        };
+        Func<string, string, string, string[][]> fc = delegate (string accion, string numero, string motivo)
+        {
+            var l = new List<string[]> { new[] { "accion", accion }, new[] { "numero", numero }, new[] { "motivo", motivo },
+                                         new[] { "usuario", ADM }, new[] { "solicitante_cuenta", ADM } };
+            return l.ToArray();
+        };
+        Func<string> hechas = delegate { return string.Join(",", cancX.Llamadas.ToArray()); };
+        cuerpo = postValidar("", fc("cancelar", "3", "m"));
+        Check("X1 anonimo no cancela: 403, nada se toca", "403|", st + "|" + hechas());
+        cuerpo = postValidar(VIEWER, fc("cancelar", "3", "m"));
+        Check("X2 VIEWER sin PO/SO no cancela: 403", "403|", st + "|" + hechas());
+        cuerpo = postValidar(POSO, fc("cancelar", "#0000003", "  Ya no la necesito  "));
+        Check("X3 PO/SO cancela la suya: 200, SU cuenta (lo del formulario se ignora), motivo recortado",
+              "200|True|3|" + POSO + "|Ya no la necesito", st + "|" + Campo(Json(cuerpo), "cancelada") + "|" + hechas());
+        cancX.Llamadas.Clear();
+        cuerpo = postValidar(MOD, fc("cancelar", "5", "m"));
+        Check("X4 MOD tambien (ExigirSolicitud): 200 con su cuenta", "200|5|" + MOD + "|m", st + "|" + hechas());
+        cancX.Llamadas.Clear();
+        cuerpo = postValidar(POSO, fc("cancelar", "3", " "));
+        Check("X5 motivo vacio: 422 FaltaMotivoCancelacion, nada se toca", "422|FaltaMotivoCancelacion|", st + "|" + Campo(Json(cuerpo), "tipo") + "|" + hechas());
+        cuerpo = postValidar(POSO, fc("cancelar", "3", new string('m', 2001)));
+        Check("X6 motivo de 2001: 422 MotivoCancelacionLargo", "422|MotivoCancelacionLargo|", st + "|" + Campo(Json(cuerpo), "tipo") + "|" + hechas());
+        cuerpo = postValidar(POSO, fc("cancelar", "abc", "m"));
+        Check("X7 numero invalido: 400", "400|", st + "|" + hechas());
+        cuerpo = postValidar(POSO, fc("borrar", "3", "m"));
+        Check("X8 accion desconocida: 400, nada se toca", "400|AccionDesconocida|", st + "|" + Campo(Json(cuerpo), "tipo") + "|" + hechas());
+        cancX.Hay = false;
+        cuerpo = postValidar(POSO, fc("cancelar", "3", "m"));
+        Check("X9 sin sql/42: 501 CancelacionNoHabilitada", "501|CancelacionNoHabilitada|", st + "|" + Campo(Json(cuerpo), "tipo") + "|" + hechas());
+        var modificar = new[] { new[] { "reemplaza_a", "3" }, new[] { "motivo_cancelacion", "m" }, new[] { "tipo", "ADO" } };
+        cuerpo = postValidar(POSO, modificar);
+        Check("X9b sin sql/42 modificar: 501 antes de validar o guardar", "501|CancelacionNoHabilitada", st + "|" + Campo(Json(cuerpo), "tipo"));
+        cancX.Hay = true;
+        cancX.Lanza = new ErrorSolicitud(51411, "La solicitud no existe.");
+        cuerpo = postValidar(POSO, fc("cancelar", "5", "m"));
+        Check("X10 de otra cuenta (51411): 404 SolicitudNoExiste, sin decir de quien es", "404|SolicitudNoExiste|False", st + "|" + Campo(Json(cuerpo), "tipo") + "|" + Campo(Json(cuerpo), "cancelada"));
+        lector.Llamadas.Clear();
+        lector.Todas.Add(Fila(30, POSO, "APROBADA"));
+        cancX.Lanza = new ErrorSolicitud(51421, "ya no");
+        cuerpo = postValidar(POSO, fc("cancelar", "30", "m"));
+        Check("X11 ADM la aprobo antes (51421, carrera): 409 que dice como quedo, leida DENTRO de la cuenta",
+              "409|SolicitudNoPendiente|APROBADA|True|detalle:30:" + POSO,
+              st + "|" + Campo(Json(cuerpo), "tipo") + "|" + Campo(Json(cuerpo), "estado_actual") + "|" +
+              (Convert.ToString(Campo(Json(cuerpo), "error")).IndexOf("aprob", StringComparison.Ordinal) > 0) + "|" + string.Join(",", lector.Llamadas.ToArray()));
+        cancX.Lanza = new TimeoutException("t");
+        cuerpo = postValidar(POSO, fc("cancelar", "3", "m"));
+        Check("X12 tiempo agotado: 500 CancelacionNoConfirmada, cancelada null", "500|CancelacionNoConfirmada|", st + "|" + Campo(Json(cuerpo), "tipo") + "|" + (Json(cuerpo).ContainsKey("cancelada") && Json(cuerpo)["cancelada"] == null ? "" : "no-null"));
+        cancX.Lanza = null; cancX.Llamadas.Clear();
+        // Modificar: lo que se revisa ANTES del servicio (motivo, numero).
+        cuerpo = postValidar(POSO, new[] { new[] { "reemplaza_a", "3" }, new[] { "motivo_cancelacion", "" } });
+        Check("X13 modificar sin motivo: 422 en motivo_cancelacion, nada se guarda", "422|True|0",
+              st + "|" + cuerpo.Contains("\"campo\":\"motivo_cancelacion\"") + "|" + cancX.Reemplazos);
+        cuerpo = postValidar(POSO, new[] { new[] { "reemplaza_a", "x" }, new[] { "motivo_cancelacion", "m" } });
+        Check("X14 modificar con numero invalido: 400 SinSolicitud", "400|SinSolicitud", st + "|" + Campo(Json(cuerpo), "tipo"));
+        // Detalle de Mis solicitudes: puede_cancelar (solo pantalla).
+        foreach (var f in lector.Todas) f["cancelacion_disponible"] = true;
+        cuerpo = Mias("accion=detalle&numero=3", POSO, out st);
+        Check("X15 detalle de una suya ENVIADA con sql/42: es_propia y puede_cancelar", "200|True|True", st + "|" + Campo(Json(cuerpo), "es_propia") + "|" + Campo(Json(cuerpo), "puede_cancelar"));
+        cuerpo = Mias("accion=detalle&numero=30", POSO, out st);
+        Check("X16 detalle de una suya APROBADA: no se puede cancelar", "200|False", st + "|" + Campo(Json(cuerpo), "puede_cancelar"));
+        foreach (var f in lector.Todas) f["cancelacion_disponible"] = false;
+        cuerpo = Mias("accion=detalle&numero=3", POSO, out st);
+        Check("X17 sin sql/42: puede_cancelar false", "False", Campo(Json(cuerpo), "puede_cancelar"));
+        lector.Todas.Add(Fila(31, POSO, "CANCELADA"));
+        cuerpo = Mias("accion=listar&estado=CANCELADA", POSO, out st);
+        Check("X18 filtro CANCELADA (dentro de la cuenta): 200 solo la suya", "200|31", st + "|" + Numeros(cuerpo));
+        cuerpo = Mias("accion=listar", POSO, out st);
+        Check("X19 Todas incluye la CANCELADA", true, (Array.IndexOf(Numeros(cuerpo).Split(','), "31") >= 0));
+        cuerpo = Mias("accion=listar&estado=ENVIADA", POSO, out st);
+        Check("X20 Pendientes NO incluye la CANCELADA", false, (Array.IndexOf(Numeros(cuerpo).Split(','), "31") >= 0));
+        lector.Todas.Add(Fila(32, MOD, "CANCELADA"));
+        cuerpo = Mias("accion=listar&estado=CANCELADA", POSO, out st);
+        Check("X21 la CANCELADA de otra cuenta no aparece", "31", Numeros(cuerpo));
+        var srcMias = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_mis_solicitudes.ashx"));
+        Check("X22 Mis solicitudes sigue sin escribir (cancelar va por validar)", "False|False", srcMias.Contains("Cancelar(") + "|" + srcMias.Contains("Cancelaciones"));
 
         Console.WriteLine();
         Console.WriteLine(pasados + " pasaron, " + fallos + " fallaron");

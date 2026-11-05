@@ -722,9 +722,13 @@ public static class AccesoIniciativasHttpSmoke
             // Solicitudes de cambio: AccesoIniciativas SOLO para enviar sin rol
             // (PO / SO de la iniciativa, sql/37); lo demas sigue ExigirAdm.
             var t = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx"));
-            Check("F2 solicitudes: ExigirSolicitud solo con accion=enviar sin rol; lo demas Exigir + ExigirAdm; rol PSO del servidor",
+            // sql/41 (2026-11-05): cancelar y reemplazar son tambien del
+            // solicitante (la base decide si la solicitud es suya); aplicar,
+            // rechazar, listar y detalle siguen siendo de ADM.
+            Check("F2 solicitudes: ExigirSolicitud solo con enviar / cancelar / reemplazar sin rol; lo demas Exigir + ExigirAdm; rol PSO del servidor",
                   "True|True|True|True|False",
-                  t.Contains("if (accion == \"enviar\" && !AccesoAdmin.PuedeEntrar(context))") + "|" +
+                  (t.Contains("var delSolicitante = accion == \"enviar\" || accion == \"cancelar\" || accion == \"reemplazar\";")
+                   && t.Contains("if (delSolicitante && !AccesoAdmin.PuedeEntrar(context))")) + "|" +
                   t.Contains("else if (!AccesoAdmin.Exigir(context)) return;") + "|" +
                   t.Contains("&& !AccesoAdmin.ExigirAdm(context, \"Solo un administrador (ADM) revisa") + "|" +
                   t.Contains("rol = SolicitudCambioPso.Rol;") + "|" + t.Contains("Form[\"rol"));

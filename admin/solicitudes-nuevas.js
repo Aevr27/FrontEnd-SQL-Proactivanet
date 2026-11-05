@@ -37,9 +37,12 @@ window.SolicitudesNuevas = (function () {
   var URL = '../handlers/admin_iniciativas_solicitudes_nuevas.ashx';
   var URL_REVISION = '../handlers/admin_iniciativas_solicitudes_nuevas_revision.ashx';
   var URL_MIAS = '../handlers/admin_iniciativas_mis_solicitudes.ashx';
+  // Cancelar (sql/42): quien la envio, por el handler de Nueva solicitud.
+  var URL_VALIDAR = '../handlers/admin_iniciativas_validar.ashx';
   var MAXIMO_COMENTARIO = 2000;   // RevisionSolicitudesIniciativa.MaximoComentario
-  var ESTADOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada' };
-  var EVENTOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada' };
+  var MAXIMO_MOTIVO_CANCELACION = 2000;   // SolicitudesIniciativa.MaximoMotivoCancelacion
+  var ESTADOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada', CANCELADA: 'Cancelada' };
+  var EVENTOS = { ENVIADA: 'Enviada', APROBADA: 'Aprobada', RECHAZADA: 'Rechazada', CANCELADA: 'Cancelada', REEMPLAZADA: 'Reemplazada' };
   var SIN_ESTADO = '__sin_estado__';   // opcion explicita: Estado inicial vacio (Incompleta)
 
   function h(s) { return Escape.html(s === null || s === undefined ? '' : String(s)); }
@@ -58,6 +61,33 @@ window.SolicitudesNuevas = (function () {
       (s.solicitante_correo ? '<span class="ini-sub">' + h(s.solicitante_correo) + '</span>' : '');
   }
 
+  // sql/42: la relacion con la que esta corrige / la que la reemplazo
+  // ({ numero, numero_texto }; el servidor solo manda las que esta cuenta
+  // puede ver). Corta en la lista; con botones (data-sn-ir) en el detalle.
+  function relacionCorta(s) {
+    return (s.reemplaza_a ? '<span class="ini-sub">corrige a ' + h(s.reemplaza_a.numero_texto) + '</span>' : '') +
+      (s.reemplazada_por ? '<span class="ini-sub">reemplazada por ' + h(s.reemplazada_por.numero_texto) + '</span>' : '');
+  }
+  function relacion(d) {
+    function ir(x) { return '<button type="button" class="ini-folio" data-sn-ir="' + h(x.numero) + '">' + h(x.numero_texto) + '</button>'; }
+    var partes = [];
+    if (d.reemplaza_a) partes.push('Corrige a la solicitud ' + ir(d.reemplaza_a) + ' (quedó cancelada).');
+    if (d.reemplazada_por) partes.push('Reemplazada por la solicitud ' + ir(d.reemplazada_por) + '.');
+    return partes.length ? '<p class="ini-nota ini-sol-relacion">' + partes.join(' ') + '</p>' : '';
+  }
+  // Cancelar / Modificar de QUIEN LA ENVIO (puede_cancelar del servidor:
+  // suya, ENVIADA y sql/42). p: prefijo de los id ('sn' ADM, 'ms' Mis).
+  function htmlPropias(d, p) {
+    if (d.puede_cancelar !== true) return '';
+    return '<div class="ini-sol-propias"><h5>Tu solicitud</h5>' +
+      '<p class="ini-nota">Mientras siga pendiente puedes cancelarla o modificarla. Modificar no la edita: abre Nueva solicitud con sus datos; ' +
+      'al enviarla se crea una solicitud nueva con otro número (ADM la revisa desde el principio) y esta queda cancelada. Nada se borra.</p>' +
+      '<div class="ini-cambio-campos"><div class="campo ini-cambio-ancho"><label for="' + p + 'MotivoCancelacion">Motivo (obligatorio para cancelar)</label>' +
+      '<textarea id="' + p + 'MotivoCancelacion" rows="2" maxlength="' + MAXIMO_MOTIVO_CANCELACION + '"></textarea></div></div>' +
+      '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-sx-accion="cancelar">Cancelar solicitud</button> ' +
+      '<button type="button" class="btn linea chico" data-sx-accion="modificar">Modificar</button></div></div>';
+  }
+
   // vacio: el texto sin solicitudes (Mis solicitudes dice otro).
   function htmlLista(lista, vacio) {
     if (!lista.length) return '<p class="ini-nota">' + h(vacio || 'Todavía no hay solicitudes nuevas guardadas.') + '</p>';
@@ -70,7 +100,7 @@ window.SolicitudesNuevas = (function () {
           '<td>' + nada(s.tipo) + '</td><td>' + nada(s.titulo) + '</td><td>' + solicitante(s) + '</td>' +
           '<td>' + nada(s.po) + '</td><td>' + nada(s.so) + '</td><td class="ini-cat-ruta">' + nada(s.categoria) + '</td>' +
           '<td>' + fechaHora(s.fecha_utc) + '</td><td>' + estado(s.estado) +
-          (s.codigo_iniciativa ? '<span class="ini-sub">' + h(s.codigo_iniciativa) + '</span>' : '') + '</td></tr>';
+          (s.codigo_iniciativa ? '<span class="ini-sub">' + h(s.codigo_iniciativa) + '</span>' : '') + relacionCorta(s) + '</td></tr>';
       }).join('') + '</tbody></table>';
   }
 
@@ -117,7 +147,9 @@ window.SolicitudesNuevas = (function () {
   }
 
   // puedeRevisar: ADM y revision_disponible. Los botones, solo en ENVIADA.
-  function htmlDetalle(d, puedeRevisar) {
+  // p: prefijo de los id del detalle ('sn' por omision, 'ms' en Mis).
+  function htmlDetalle(d, puedeRevisar, p) {
+    p = p || 'sn';
     var revisada = d.estado === 'APROBADA' || d.estado === 'RECHAZADA';
     var filas = [
       ['Tipo de iniciativa', nada(d.tipo)],
@@ -147,6 +179,9 @@ window.SolicitudesNuevas = (function () {
               ? '<span class="ini-sub">Iniciativa creada con el código: ' + h(d.codigo_iniciativa) + '</span>'
               : '<span class="ini-sub">Se aprobó antes de que aprobar creara la iniciativa: no tiene iniciativa ligada.</span>')
           : '') + '</p>'
+      : d.estado === 'CANCELADA'
+      ? '<p class="ini-nota"><strong>Cancelada</strong> por quien la envió (' + nada(d.cancelado_por) + ') el ' + fechaHora(d.fecha_cancelacion_utc) +
+        (d.motivo_cancelacion ? ': «' + h(d.motivo_cancelacion) + '»' : '') + '</p>'
       : '';
     // Aprobar crea la iniciativa: solo con sql/32 y con las opciones del Estado inicial.
     var estados = Array.isArray(d.estados_problem) ? d.estados_problem : null;
@@ -169,11 +204,11 @@ window.SolicitudesNuevas = (function () {
         '<button type="button" class="btn linea chico" data-sn-accion="rechazar">Rechazar</button> ' +
         '<button type="button" class="btn linea chico" data-sn-accion="cerrar">Cerrar</button></div>'
       : '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-sn-accion="cerrar">Cerrar</button></div>';
-    return '<h4>Solicitud ' + h(d.numero_texto) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' +
+    return '<h4>Solicitud ' + h(d.numero_texto) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' + relacion(d) +
       '<table class="ini-det-tabla"><tbody>' + filas + '</tbody></table>' + htmlOtras(d) +
       '<h5>Descripción</h5><div class="ini-texto">' + nada(d.descripcion) + '</div>' +
       '<h5>Observaciones</h5><div class="ini-texto">' + nada(d.observaciones) + '</div>' + revision +
-      '<div class="ini-cambio-msg" id="snDetMsg" role="status" aria-live="polite"></div>' + acciones +
+      '<div class="ini-cambio-msg" id="' + p + 'DetMsg" role="status" aria-live="polite"></div>' + htmlPropias(d, p) + acciones +
       '<h5>Historial de la solicitud</h5>' +
       (eventos ? '<ul class="ini-sol-eventos">' + eventos + '</ul>' : '<p class="ini-nota">Sin eventos registrados.</p>');
   }
@@ -191,6 +226,61 @@ window.SolicitudesNuevas = (function () {
     return Promise.resolve(resp.json()).catch(function () { return null; }).then(function (j) { return { status: resp.status, json: j || {} }; });
   }
 
+  // Cancelar (dos pasos: motivo y confirmar) o Modificar la solicitud
+  // abierta de quien la envio. dueno: RegistroSolicitudesNuevas o
+  // MisSolicitudes (detalle, pedir, ocupado, listar, verDetalle,
+  // alModificar, alCancelar). La base decide si es suya y si sigue ENVIADA:
+  // si ADM la reviso antes, el servidor lo dice.
+  function accionPropia(dueno, accion, p) {
+    var d = dueno.detalle;
+    if (!d || dueno.ocupado) return Promise.resolve(null);
+    function msg(clase, html) {
+      var m = dueno.$(p + 'DetMsg');
+      if (m) { m.className = 'ini-cambio-msg ' + clase; m.innerHTML = html; }
+    }
+    if (accion === 'no-cancelar') { msg('', ''); return Promise.resolve(null); }
+    if (accion === 'modificar') {
+      var abierto = dueno.alModificar ? dueno.alModificar(d) : false;
+      if (!abierto) msg('error', 'No se pudo abrir Nueva solicitud para corregirla (el formulario no está listo o tu cuenta ya no puede solicitar). Actualiza la página.');
+      return Promise.resolve(abierto === true);
+    }
+    var caja = dueno.$(p + 'MotivoCancelacion');
+    var motivo = caja ? String(caja.value || '').trim() : '';
+    if (!motivo) { msg('error', 'Explica por qué cancelas la solicitud.'); return Promise.resolve(null); }
+    if (motivo.length > MAXIMO_MOTIVO_CANCELACION) { msg('error', 'El motivo no puede pasar de 2000 caracteres.'); return Promise.resolve(null); }
+    if (accion === 'cancelar') {
+      msg('revisar', '¿Cancelar la solicitud ' + h(d.numero_texto) + '? Ya no se podrá aprobar ni modificar; su historial se conserva. ' +
+        '<button type="button" class="btn chico" data-sx-accion="confirmar-cancelacion">Sí, cancelarla</button> ' +
+        '<button type="button" class="btn linea chico" data-sx-accion="no-cancelar">No</button>');
+      return Promise.resolve(null);
+    }
+    if (accion !== 'confirmar-cancelacion') return Promise.resolve(null);
+    var datos = new FormData();
+    datos.append('accion', 'cancelar');
+    datos.append('numero', String(d.numero));
+    datos.append('motivo', motivo);
+    dueno.ocupado = true;
+    msg('', '<span>Cancelando…</span>');
+    return Promise.resolve().then(function () { return dueno.pedir(URL_VALIDAR, { method: 'POST', body: datos, credentials: 'same-origin' }); })
+      .then(leer)
+      .then(function (r) {
+        dueno.ocupado = false;
+        var j = r.json, ok = r.status === 200 && j.cancelada === true;
+        var html = ok ? '<strong>Solicitud ' + h(d.numero_texto) + ' cancelada.</strong> Ya no se revisa; su historial se conserva.'
+          : j.cancelada === null ? h(j.error || 'No se pudo confirmar la cancelación.') + ' Actualiza antes de reintentar.'
+          : '<strong>No se canceló.</strong> ' + h(j.error || ('Respuesta ' + r.status + '.'));
+        if (dueno.alCancelar) dueno.alCancelar();
+        return Promise.all([dueno.listar(), dueno.verDetalle(d.numero)]).then(function () {
+          msg(ok ? 'listo' : j.cancelada === null ? 'aviso' : 'error', html);
+          return r;
+        });
+      }, function () {
+        dueno.ocupado = false;
+        msg('aviso', 'No se pudo contactar al servidor: no se sabe si se canceló. Actualiza antes de reintentar.');
+        return null;
+      });
+  }
+
   class RegistroSolicitudesNuevas {
     // pedir(url, op) -> Promise<Response> (fetch por omision).
     constructor(doc, pedir) {
@@ -204,6 +294,8 @@ window.SolicitudesNuevas = (function () {
       this.alVerCambio = null;   // al volver a "Cambios": la pagina relee esa cola
       this.alVerSolicitud = null; // (d) se abrio el detalle: el aviso la marca vista
       this.alRevisar = null;      // tras aprobar / rechazar: el aviso se relee
+      this.alModificar = null;    // (d) -> true si abrio Nueva solicitud para corregir una suya (sql/42)
+      this.alCancelar = null;     // tras cancelar una suya: el aviso se relee
       this.cableado = false;
     }
 
@@ -227,9 +319,15 @@ window.SolicitudesNuevas = (function () {
       this.$('snDetalle').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-sn-accion]') : e.target;
         var a = el && el.getAttribute && el.getAttribute('data-sn-accion');
-        if (a === 'aprobar') self.aprobar();
-        else if (a === 'rechazar') self.rechazar();
-        else if (a === 'cerrar') self.cerrarDetalle();
+        if (a === 'aprobar') { self.aprobar(); return; }
+        if (a === 'rechazar') { self.rechazar(); return; }
+        if (a === 'cerrar') { self.cerrarDetalle(); return; }
+        // sql/42: ir a la relacionada; cancelar / modificar la suya.
+        var ir = e.target && e.target.closest ? e.target.closest('[data-sn-ir]') : null;
+        var n = ir && ir.getAttribute ? Number(ir.getAttribute('data-sn-ir')) : 0;
+        if (n > 0) { self.verDetalle(n); return; }
+        var sx = e.target && e.target.closest ? e.target.closest('[data-sx-accion]') : null;
+        if (sx) accionPropia(self, sx.getAttribute('data-sx-accion'), 'sn');
       });
     }
 
@@ -457,6 +555,9 @@ window.SolicitudesNuevas = (function () {
       this.pedir = pedir || function (url, op) { return fetch(url, op); };
       this.cableado = false;
       this.filtro = '';          // msFiltro: Todas por omision (como antes del filtro)
+      this.detalle = null;       // la abierta (Cancelar / Modificar, sql/42)
+      this.ocupado = false;
+      this.alModificar = null;   // (d) -> true si abrio Nueva solicitud para corregirla
     }
 
     $(id) { return this.doc.getElementById(id); }
@@ -477,7 +578,13 @@ window.SolicitudesNuevas = (function () {
       });
       this.$('msDetalle').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-sn-accion]') : e.target;
-        if (el && el.getAttribute && el.getAttribute('data-sn-accion') === 'cerrar') self.cerrarDetalle();
+        if (el && el.getAttribute && el.getAttribute('data-sn-accion') === 'cerrar') { self.cerrarDetalle(); return; }
+        // sql/42: ir a la relacionada (de la misma cuenta); cancelar / modificar.
+        var ir = e.target && e.target.closest ? e.target.closest('[data-sn-ir]') : null;
+        var n = ir && ir.getAttribute ? Number(ir.getAttribute('data-sn-ir')) : 0;
+        if (n > 0) { self.verDetalle(n); return; }
+        var sx = e.target && e.target.closest ? e.target.closest('[data-sx-accion]') : null;
+        if (sx) accionPropia(self, sx.getAttribute('data-sx-accion'), 'ms');
       });
     }
 
@@ -573,8 +680,9 @@ window.SolicitudesNuevas = (function () {
             return null;
           }
           self.mensaje('', '');
+          self.detalle = r.json;
           var caja = self.$('msDetalle');
-          caja.innerHTML = htmlDetalle(r.json, false);
+          caja.innerHTML = htmlDetalle(r.json, false, 'ms');
           caja.hidden = false;
           return r.json;
         }, function () {
@@ -584,6 +692,7 @@ window.SolicitudesNuevas = (function () {
     }
 
     cerrarDetalle() {
+      this.detalle = null;
       var caja = this.$('msDetalle');
       if (!caja) return;
       caja.hidden = true;
@@ -592,5 +701,6 @@ window.SolicitudesNuevas = (function () {
   }
 
   return { RegistroSolicitudesNuevas: RegistroSolicitudesNuevas, MisSolicitudes: MisSolicitudes, htmlLista: htmlLista, htmlDetalle: htmlDetalle,
-           textoError: textoError, textoTotal: textoTotal, URL: URL, URL_REVISION: URL_REVISION, URL_MIAS: URL_MIAS, SIN_ESTADO: SIN_ESTADO };
+           textoError: textoError, textoTotal: textoTotal, URL: URL, URL_REVISION: URL_REVISION, URL_MIAS: URL_MIAS, SIN_ESTADO: SIN_ESTADO,
+           URL_VALIDAR: URL_VALIDAR, accionPropia: accionPropia, ESTADOS: ESTADOS };
 })();

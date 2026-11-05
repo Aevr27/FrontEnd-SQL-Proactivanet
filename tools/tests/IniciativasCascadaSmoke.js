@@ -1029,7 +1029,8 @@ pruebas.push(function () {
     Check('P2 los unicos POST son a admin_iniciativas_validar y al envio de Solicitar cambios', [2, 2, true, true, false, false],
       [(js.match(/method\s*:/g) || []).length, (js.match(/['"]POST['"]/gi) || []).length,
        /pedir\(URL_VALIDAR, \{ method: 'POST'/.test(js),
-       /pedir\(URL_SOLICITUDES \+ '\?accion=enviar', \{ method: 'POST'/.test(js), /XMLHttpRequest/.test(js), /sendBeacon/.test(js)]);
+       // sql/41 (2026-11-05): el MISMO envio, como reemplazo al Modificar.
+       /pedir\(URL_SOLICITUDES \+ '\?accion=' \+ \(reemplaza \? 'reemplazar' : 'enviar'\), \{ method: 'POST'/.test(js), /XMLHttpRequest/.test(js), /sendBeacon/.test(js)]);
     Check('P3 el HTML no tiene <form> ni submit', [false, false], [/<form/i.test(html), /type="submit"/i.test(html)]);
     var ashx = (leer('handlers/admin_iniciativas_catalogos.ashx') + leer('handlers/admin_iniciativas_registro.ashx') +
                 leer('handlers/admin_iniciativas_capacidad.ashx') + leer('handlers/admin_iniciativas_validar.ashx') +

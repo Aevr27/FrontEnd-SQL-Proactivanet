@@ -1000,8 +1000,10 @@ public static class AccesoAdminHttpSmoke
                   src.IndexOf("AccesoAdmin.ExigirAdm(") > 0 && src.IndexOf("AccesoAdmin.ExigirAdm(") < src.IndexOf("DashboardHandler.Responder(") );
         }
         var solF = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx")).Replace("\r\n", "\n");
-        Check("M6 solicitudes: todo lo que no es enviar exige ADM, antes de leer el cuerpo", true,
-              solF.Contains("if (accion != \"enviar\"\n            && !AccesoAdmin.ExigirAdm(") &&
+        // sql/41 (2026-11-05): cancelar / reemplazar son del solicitante, como enviar.
+        Check("M6 solicitudes: todo lo que no es enviar / cancelar / reemplazar exige ADM, antes de leer el cuerpo", true,
+              solF.Contains("var delSolicitante = accion == \"enviar\" || accion == \"cancelar\" || accion == \"reemplazar\";") &&
+              solF.Contains("if (!delSolicitante\n            && !AccesoAdmin.ExigirAdm(") &&
               solF.IndexOf("AccesoAdmin.ExigirAdm(") < solF.IndexOf("DashboardHandler.Responder("));
 
         // ---- PS) Visibilidad de PO / SO (MOD) y Subestado solo ADM -------------

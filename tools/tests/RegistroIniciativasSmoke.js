@@ -3612,6 +3612,57 @@ pruebas.push(function () {
   });
 });
 
+// ---------------------------------------------------------------------------
+// MR) Modificar una solicitud de cambio (sql/41): "Solicitar cambios" con lo
+// que se pidio, el motivo de la correccion obligatorio, y el envio como
+// reemplazo (accion=reemplazar, reemplaza_a, motivo_cancelacion).
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var datos = JSON.parse(JSON.stringify(DATOS));
+  datos.estados_problem = ['En Análisis', 'En Solución', 'Cerrado'];
+  datos.persistencia_solicitudes = true;
+  var p = Pagina(ok(datos), function () { return nunca(); });
+  function accion(a) {
+    var el = Elemento('b'); el.setAttribute('data-accion', a);
+    p.sel('regDetCuerpo').disparar('click', { target: el });
+  }
+  var envios = [];
+  var original = { id: 41, folio: 'PRB 2026-000001', tipo: 'ESTADO', estado: 'PENDIENTE', estado_nuevo: 'Cerrado', campo_fecha: null,
+                   motivo: 'Se cierra', categorias_detalle: [] };
+  return esperar().then(function () {
+    p.registro.pedirSolicitud = function (url, op) {
+      var campos = {};
+      op.body.forEach(function (v, k) { campos[k] = v; });
+      envios.push({ url: url, campos: campos });
+      return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ enviada: true, reemplazada: true, id_solicitud: 45, reemplaza_a: 41, repetida: false }); } });
+    };
+    Check('MR0 fuera del registro: no abre nada', false, p.registro.abrirReemplazoCambio({ id: 9, folio: 'XYZ 2099-000001', tipo: 'OTROS' }));
+    var abierta = p.registro.abrirReemplazoCambio(original);
+    var html = p.sel('regCambio').innerHTML;
+    Check('MR1 abre la iniciativa y "Modificar la solicitud #41" con el cambio pedido, el motivo y el campo del motivo de la correccion',
+      [true, 'PRB 2026-000001', true, true, 1, 'estado', 'Cerrado', true, true],
+      [abierta, p.registro.abierta, /Modificar la solicitud #41/.test(html), /id="regCambioReemplazo"/.test(html),
+       p.registro.lista.items.length, p.registro.lista.items[0].campo, p.registro.lista.items[0].propuesto,
+       /<textarea id="regCambioMotivo" rows="3">Se cierra<\/textarea>/.test(html), /id="regCambioMotivoCancelacion"/.test(html)]);
+    accion('cambio-preparar');
+    Check('MR2 sin motivo de la correccion: no se envia y lo dice', [0, true],
+      [envios.length, /motivo de la corrección/.test(p.sel('regCambioMsg').innerHTML)]);
+    p.sel('regCambioMotivoCancelacion').value = 'Me equivoque de estado';
+    accion('cambio-preparar');
+    Check('MR3 con motivo: primero revisa, y avisa que se crea otra y la #41 queda cancelada', [0, true],
+      [envios.length, /Corrige la solicitud #41/.test(p.sel('regCambioMsg').innerHTML)]);
+    accion('cambio-confirmar');
+    return esperar().then(esperar);
+  }).then(function () {
+    var e = envios[0] || { campos: {} };
+    Check('MR4 POST a accion=reemplazar: la solicitud de siempre + reemplaza_a y motivo_cancelacion; sin usuario ni rol',
+      ['../handlers/admin_iniciativas_solicitudes.ashx?accion=reemplazar', 'estado', 'Cerrado', 'Se cierra', '41', 'Me equivoque de estado', false, false],
+      [e.url, e.campos.tipo, e.campos.estado_nuevo, e.campos.motivo, e.campos.reemplaza_a, e.campos.motivo_cancelacion, 'usuario' in e.campos, 'rol' in e.campos]);
+    Check('MR5 enviada con el numero NUEVO y dice a cual corrige', [true, true],
+      [/Solicitud #45 enviada/.test(p.sel('regCambioMsg').innerHTML), /Corrige a la solicitud #41, que quedó cancelada/.test(p.sel('regCambioMsg').innerHTML)]);
+  });
+});
+
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
   .then(function () {
     console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\nTODO PASO');

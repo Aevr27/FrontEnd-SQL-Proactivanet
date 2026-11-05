@@ -78,6 +78,39 @@ sealed class AlmacenFalso : IAlmacenSolicitudesCambio
     public void RegistrarFallo(int id, string revisor, int numero, string mensaje) { Llamadas.Add("RegistrarFallo:" + numero); UltimoRevisor = revisor; UltimoNumeroFallo = numero; }
 }
 
+// sql/41 sin SQL: lo que el handler pide cancelar / reemplazar.
+sealed class CancelacionesFalsas : ICancelacionSolicitudesCambio
+{
+    public readonly List<string> Llamadas = new List<string>();
+    public string UltimoUsuario, UltimoRol, UltimoMotivo;
+    public PeticionSolicitudCambio UltimaPeticion;
+    public Exception Lanza;
+    public void Cancelar(int id, string usuario, string motivo)
+    {
+        Llamadas.Add("Cancelar:" + id); UltimoUsuario = usuario; UltimoMotivo = motivo;
+        if (Lanza != null) throw Lanza;
+    }
+    public ResultadoEnvioSolicitud Reemplazar(int original, string motivoCancelacion, PeticionSolicitudCambio p, string usuario, string rol)
+    {
+        Llamadas.Add("Reemplazar:" + original); UltimoUsuario = usuario; UltimoRol = rol; UltimoMotivo = motivoCancelacion; UltimaPeticion = p;
+        if (Lanza != null) throw Lanza;
+        return new ResultadoEnvioSolicitud { IdSolicitud = 9, Repetida = false };
+    }
+}
+
+// "Mis solicitudes" sin SQL: el estado de ahora de una solicitud de la cuenta.
+sealed class MiasFalsas : ILectorMisSolicitudesCambio
+{
+    public readonly List<string> Llamadas = new List<string>();
+    public string Estado = "APLICADA";
+    public List<Dictionary<string, object>> ListarDe(string cuenta, string estado, int maximo) { Llamadas.Add("ListarDe"); return new List<Dictionary<string, object>>(); }
+    public Dictionary<string, object> DetalleDe(int id, string cuenta)
+    {
+        Llamadas.Add("DetalleDe:" + id + ":" + cuenta);
+        return new Dictionary<string, object> { { "id", id }, { "estado", Estado }, { "solicitado_por", cuenta } };
+    }
+}
+
 public static class SolicitudesCambioHttpSmoke
 {
     static int fallos = 0;
@@ -1007,6 +1040,188 @@ public static class SolicitudesCambioHttpSmoke
             PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = null;
             PersistenciaSolicitudesCambio.SolicitaPsoEquipoForzadaParaPruebas = null;
             alm.LanzarAlEnviar = null;
+        }
+
+        // ---------------- X: cancelar / reemplazar por quien la envio (sql/41) ----------------
+        var canc = new CancelacionesFalsas();
+        var mias = new MiasFalsas();
+        SolicitudesCambio.Cancelaciones = canc;
+        SolicitudesCambio.Mias = mias;
+        AccesoAdmin.FuenteRoles = new RolesFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(ADMPO, "ADM");
+        AccesoIniciativas.FuenteDuenos = duenosPso;
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
+        PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = true;
+        PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = true;
+        Func<string> llamadasX = delegate { return string.Join(",", canc.Llamadas.ToArray()); };
+        Func<string, string[][]> reemplazo = delegate (string folio)
+        {
+            return F("reemplaza_a", "5", "motivo_cancelacion", "Me equivoque de fecha", "folio", folio, "llave", Guid.NewGuid().ToString(),
+                     "tipo", "estado", "estado_nuevo", "En Monitoreo", "campo_fecha", "f_solucion", "fecha_nueva", "2026-12-06", "motivo", "Corregida",
+                     "usuario", ADM, "solicitado_por", ADM, "rol", "ADM");
+        };
+        try
+        {
+            // Quien entra (la MISMA regla que enviar) y la cuenta que firma.
+            alm.Llamadas.Clear(); canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=cancelar", "", F("id", "5", "motivo", "x"), out estado);
+            Check("X1 anonimo no cancela: 403, nada se toca", "403|", estado + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=cancelar", VIEWER, F("id", "5", "motivo", "x"), out estado);
+            Check("X2 VIEWER sin PO/SO no cancela: 403", "403|", estado + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "  Ya no aplica  ", "usuario", ADM, "solicitado_por", ADM), out estado);
+            Check("X3 MOD cancela la suya: 200, firma SU cuenta (lo del formulario se ignora), motivo recortado", "200|True|Cancelar:5|" + MOD + "|Ya no aplica",
+                  estado + "|" + cuerpo.Contains("\"cancelada\":true") + "|" + llamadasX() + "|" + canc.UltimoUsuario + "|" + canc.UltimoMotivo);
+            canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=cancelar", PO1, F("id", "5", "motivo", "m"), out estado);
+            Check("X4 PO/SO sin rol (ExigirSolicitud) cancela: 200 con su cuenta", "200|Cancelar:5|" + PO1, estado + "|" + llamadasX() + "|" + canc.UltimoUsuario);
+            canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=cancelar", ADM, F("id", "5", "motivo", "m"), out estado);
+            Check("X5 ADM tambien cancela LAS SUYAS (la base decide si es suya): firma ADM", "200|" + ADM, estado + "|" + canc.UltimoUsuario);
+            canc.Llamadas.Clear();
+            cuerpo = Correr("GET", "accion=cancelar&id=5", MOD, null, out estado);
+            Check("X6 cancelar por GET: 405, nada se toca", "405|", estado + "|" + llamadasX());
+            // Motivo y numero (antes de la base).
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "   "), out estado);
+            Check("X7 motivo vacio: 422 FaltaMotivoCancelacion, nada se toca", "422|True|", estado + "|" + cuerpo.Contains("FaltaMotivoCancelacion") + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", new string('m', 2001)), out estado);
+            Check("X8 motivo de 2001: 422 MotivoCancelacionLargo, nada se toca", "422|True|", estado + "|" + cuerpo.Contains("MotivoCancelacionLargo") + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", new string('m', 2000)), out estado);
+            Check("X8b motivo de 2000: pasa", "200|Cancelar:5", estado + "|" + llamadasX());
+            canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "abc", "motivo", "m"), out estado);
+            Check("X9 sin numero: 400", "400|", estado + "|" + llamadasX());
+            // Sin sql/41.
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = false;
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X10 sin sql/41: 501 CancelacionNoHabilitada, nada se toca", "501|True|True|", estado + "|" + cuerpo.Contains("CancelacionNoHabilitada") + "|" + cuerpo.Contains("sql/41") + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("X10b sin sql/41 reemplazar: 501, nada se guarda", "501||0", estado + "|" + llamadasX() + "|" + alm.Llamadas.Count(x => x == "Enviar"));
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = true;
+            // Errores de la base: no es suya, carrera con ADM, motivo.
+            canc.Lanza = new ErrorSolicitudCambio(51201, "La solicitud no existe.", null);
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X11 de otra cuenta o inexistente (51201): 404 SolicitudNoExiste, sin decir de quien es", "404|True|True",
+                  estado + "|" + cuerpo.Contains("SolicitudNoExiste") + "|" + cuerpo.Contains("\"cancelada\":false"));
+            mias.Llamadas.Clear(); mias.Estado = "APLICADA";
+            canc.Lanza = new ErrorSolicitudCambio(51230, "La solicitud ya no esta pendiente", null);
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X12 ADM la aplico antes (51230, carrera): 409 SolicitudNoPendiente, dice como quedo (leido DENTRO de la cuenta)",
+                  "409|True|True|True|DetalleDe:5:" + MOD,
+                  estado + "|" + cuerpo.Contains("SolicitudNoPendiente") + "|" + cuerpo.Contains("\"estado_actual\":\"APLICADA\"") + "|" +
+                  cuerpo.Contains("ya aplic") + "|" + string.Join(",", mias.Llamadas.ToArray()));
+            mias.Estado = "RECHAZADA";
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X12b ADM la rechazo antes: 409 que lo dice", "409|True", estado + "|" + cuerpo.Contains("ya rechaz"));
+            canc.Lanza = new ErrorSolicitudCambio(51228, "x", null);
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X13 51228 de la base: 422 con el mensaje propio (con acentos)", "422|True|True", estado + "|" + cuerpo.Contains("FaltaMotivoCancelacion") + "|" + cuerpo.Contains("cancelas la solicitud"));
+            canc.Lanza = new TimeoutException("tiempo");
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X14 tiempo agotado: 500 CancelacionNoConfirmada, cancelada null", "500|True|True", estado + "|" + cuerpo.Contains("CancelacionNoConfirmada") + "|" + cuerpo.Contains("\"cancelada\":null"));
+            canc.Lanza = null;
+
+            // Reemplazar: la MISMA validacion que enviar, y luego Reemplazar (nunca Enviar).
+            canc.Llamadas.Clear(); alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("R1 MOD reemplaza: 200, la nueva (9) y la original (5); Reemplazar con SU cuenta y rol del servidor; Enviar no",
+                  "200|True|True|True|Reemplazar:5|" + MOD + "|MOD|Me equivoque de fecha|0",
+                  estado + "|" + cuerpo.Contains("\"id_solicitud\":9") + "|" + cuerpo.Contains("\"reemplaza_a\":5") + "|" + cuerpo.Contains("\"reemplazada\":true") + "|" +
+                  llamadasX() + "|" + canc.UltimoUsuario + "|" + canc.UltimoRol + "|" + canc.UltimoMotivo + "|" + alm.Llamadas.Count(x => x == "Enviar"));
+            Check("R1b la peticion nueva es la del formulario (fecha corregida, motivo nuevo, folio)", "PRB 2026-000001|2026-12-06|Corregida|FechaSolucion",
+                  canc.UltimaPeticion.Folio + "|" + canc.UltimaPeticion.FechaNueva.Value.ToString("yyyy-MM-dd") + "|" + canc.UltimaPeticion.Motivo + "|" + canc.UltimaPeticion.CampoFecha);
+            canc.Llamadas.Clear();
+            var sinLlave = reemplazo("PRB 2026-000001").Where(x => x[0] != "llave").ToArray();
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, sinLlave, out estado);
+            Check("R2 reemplazo invalido (sin llave): 422 como un envio, NO se llama a Reemplazar (la original sigue)", "422|True|", estado + "|" + cuerpo.Contains("\"campo\":\"llave\"") + "|" + llamadasX());
+            var sinMotivo = reemplazo("PRB 2026-000001").Where(x => x[0] != "motivo_cancelacion").ToArray();
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, sinMotivo, out estado);
+            Check("R3 sin motivo de cancelacion: 422, nada se toca", "422|True|", estado + "|" + cuerpo.Contains("FaltaMotivoCancelacion") + "|" + llamadasX());
+            var sinOriginal = reemplazo("PRB 2026-000001").Where(x => x[0] != "reemplaza_a").ToArray();
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, sinOriginal, out estado);
+            Check("R4 sin reemplaza_a: 400 SinSolicitud", "400|True|", estado + "|" + cuerpo.Contains("SinSolicitud") + "|" + llamadasX());
+            // PSO: se vuelve a decidir si puede enviar (elegibilidad de envio).
+            cuerpo = Correr("POST", "accion=reemplazar", PO1, reemplazo("PRB 2026-000001"), out estado);
+            Check("R5 PO de la iniciativa reemplaza: 200 con rol PSO del servidor", "200|PSO|" + PO1, estado + "|" + canc.UltimoRol + "|" + canc.UltimoUsuario);
+            canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=reemplazar", POX, reemplazo("PRB 2026-000001"), out estado);
+            Check("R6 PO/SO que ya no es dueno de ESA iniciativa: 403 NoEsDueno, NO se reemplaza (re-chequeo de envio)", "403|True|",
+                  estado + "|" + cuerpo.Contains("NoEsDueno") + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001").Concat(new[] { new[] { "subestado_nuevo", "X" } }).ToArray(), out estado);
+            Check("R7 MOD pidiendo Subestado en el reemplazo: 422 (solo ADM), nada se toca", "422|True|", estado + "|" + cuerpo.Contains("subestado_nuevo") + "|" + llamadasX());
+            // Errores de la base en el reemplazo.
+            canc.Lanza = new ErrorSolicitudCambio(51233, "x", null);
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000003"), out estado);
+            Check("R8 otra iniciativa (51233): 422 OtraIniciativa, enviada false", "422|True|True", estado + "|" + cuerpo.Contains("OtraIniciativa") + "|" + cuerpo.Contains("\"enviada\":false"));
+            mias.Estado = "RECHAZADA";
+            canc.Lanza = new ErrorSolicitudCambio(51230, "x", null);
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("R9 ADM la reviso antes (51230): 409 que dice como quedo; no se creo la nueva", "409|True|True|True",
+                  estado + "|" + cuerpo.Contains("SolicitudNoPendiente") + "|" + cuerpo.Contains("\"estado_actual\":\"RECHAZADA\"") + "|" + cuerpo.Contains("\"enviada\":false"));
+            canc.Lanza = new ErrorSolicitudCambio(51226, "No es dueno", null);
+            cuerpo = Correr("POST", "accion=reemplazar", PO1, reemplazo("PRB 2026-000001"), out estado);
+            Check("R10 la base re-chequea PSO (51226) dentro del reemplazo: 403 NoEsDueno", "403|True", estado + "|" + cuerpo.Contains("NoEsDueno"));
+            canc.Lanza = new ErrorSolicitudCambio(51232, "x", null);
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("R11 llave usada en otra (51232): 409 LlaveUsada", "409|True", estado + "|" + cuerpo.Contains("LlaveUsada"));
+            canc.Lanza = new TimeoutException("tiempo");
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("R12 tiempo agotado: 500 EnvioNoConfirmado (reintentar con la misma llave)", "500|True", estado + "|" + cuerpo.Contains("EnvioNoConfirmado"));
+            canc.Lanza = null;
+
+            // ADM: sigue igual, y la carrera con quien la envio se dice clara.
+            canc.Llamadas.Clear(); alm.Llamadas.Clear();
+            foreach (var a in new[] { "aplicar", "rechazar" })
+            {
+                cuerpo = Correr("POST", "accion=" + a, MOD, F("id", "5", "comentario", "x"), out estado);
+                Check("K1 MOD sigue sin poder " + a + " (solo cancela / reemplaza las suyas): 403", "403|0|", estado + "|" + alm.Llamadas.Count + "|" + llamadasX());
+                cuerpo = Correr("POST", "accion=" + a, PO1, F("id", "5", "comentario", "x"), out estado);
+                Check("K1b PO/SO sin rol no puede " + a + ": 403", "403|0", estado + "|" + alm.Llamadas.Count);
+            }
+            var cancelada = Pendiente("ESTADO", MOD);
+            cancelada["estado"] = "CANCELADA"; cancelada["reemplazada_por"] = 9;
+            alm.Detalle_ = cancelada;
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5", "comentario", "ok"), out estado);
+            Check("K2 aplicar una CANCELADA: 409 SolicitudCancelada (la reemplazo #9), sin validar ni aplicar",
+                  "409|True|True|Detalle:5", estado + "|" + cuerpo.Contains("SolicitudCancelada") + "|" + cuerpo.Contains("\"reemplazada_por\":9") + "|" + string.Join(",", alm.Llamadas.ToArray()));
+            alm.Llamadas.Clear();
+            alm.Detalle_ = Pendiente("ESTADO", MOD);
+            alm.LanzarAlAplicar = new ErrorSolicitudCambio(51202, "ya revisada", new InvalidOperationException("como de la base"));
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5", "comentario", "ok"), out estado);
+            Check("K3 51202 que no viene de SQL: el de siempre (sin releer)", "409|True|False", estado + "|" + cuerpo.Contains("SolicitudYaRevisada") + "|" + cuerpo.Contains("SolicitudCancelada"));
+            alm.LanzarAlAplicar = null;
+
+            // Lista y detalle de ADM: CANCELADA es un estado de la cola; es_propia / puede_cancelar.
+            alm.Llamadas.Clear();
+            cuerpo = Correr("GET", "accion=listar&estado=CANCELADA", ADM, null, out estado);
+            Check("F1 ADM filtra CANCELADA: 200 y la base recibe el filtro", "200|Listar:CANCELADA", estado + "|" + string.Join(",", alm.Llamadas.ToArray()));
+            cuerpo = Correr("GET", "accion=listar&estado=BORRADA", ADM, null, out estado);
+            Check("F2 estado desconocido sigue 400", "400", estado);
+            alm.Detalle_ = Pendiente("ESTADO", ADM);
+            cuerpo = Correr("GET", "accion=detalle&id=5", ADM, null, out estado);
+            Check("F3 detalle de ADM de una suya PENDIENTE: es_propia y puede_cancelar", "200|True|True", estado + "|" + cuerpo.Contains("\"es_propia\":true") + "|" + cuerpo.Contains("\"puede_cancelar\":true"));
+            alm.Detalle_ = Pendiente("ESTADO", MOD);
+            cuerpo = Correr("GET", "accion=detalle&id=5", ADM, null, out estado);
+            Check("F4 detalle de ADM de otra cuenta: es_propia false, puede_cancelar false", "200|True|True", estado + "|" + cuerpo.Contains("\"es_propia\":false") + "|" + cuerpo.Contains("\"puede_cancelar\":false"));
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = false;
+            alm.Detalle_ = Pendiente("ESTADO", ADM);
+            cuerpo = Correr("GET", "accion=detalle&id=5", ADM, null, out estado);
+            Check("F5 sin sql/41: puede_cancelar false aunque sea suya", "True|True", cuerpo.Contains("\"es_propia\":true") + "|" + cuerpo.Contains("\"puede_cancelar\":false"));
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = true;
+            Check("F6 EstadosCola con CANCELADA", "PENDIENTE,APLICADA,RECHAZADA,CANCELADA", string.Join(",", SolicitudesCambio.EstadosCola));
+            Check("F7 los mensajes de sql/41 tienen texto propio; los de antes, el de la base", "True|True|base",
+                  (new ErrorSolicitudCambio(51230, "x", null).Message.IndexOf("pendiente", StringComparison.Ordinal) > 0) + "|" +
+                  (new ErrorSolicitudCambio(51234, "x", null).EstadoHttp == 500) + "|" + new ErrorSolicitudCambio(51202, "base", null).Message);
+            var srcSol = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx"));
+            Check("F8 la cuenta que cancela / reemplaza es la de IIS (id.Original), nunca del formulario", "True|True|False|False",
+                  srcSol.Contains("SolicitudesCambio.Cancelaciones.Cancelar(n, id.Original, motivo)") + "|" +
+                  srcSol.Contains("SolicitudesCambio.Cancelaciones.Reemplazar(reemplazaA, motivoCancelacion, p, usuario, rol)") + "|" +
+                  srcSol.Contains("Form[\"usuario") + "|" + srcSol.Contains("Form[\"solicitado_por"));
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = null;
+            canc.Lanza = null;
         }
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : "FALLOS: " + fallos);

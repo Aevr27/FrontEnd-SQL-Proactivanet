@@ -120,6 +120,28 @@ public static class PersistenciaSolicitudesCambio
         return SolicitaPsoEquipoForzadaParaPruebas ?? (SolicitaPsoActiva() && sql38EnBase == true);
     }
 
+    // CANCELAR / REEMPLAZAR por quien la envio (sql/41,
+    // adm.usp_SolicitudCambio_Cancelar / _Reemplazar). SOLO surte efecto
+    // cuando DeteccionSolicitudesCambio ve sql/22 y los DOS procedimientos.
+    // Apagada: los botones no salen y el handler responde 501 sin escribir.
+    public static bool? CancelacionForzadaParaPruebas;
+    public static bool CancelacionActiva()
+    {
+        return CancelacionForzadaParaPruebas ?? (Habilitada && sql22EnBase == true && sql41EnBase == true);
+    }
+
+    // Las columnas de sql/41 (ReemplazaA, CanceladoPor, FechaCancelacionUtc,
+    // MotivoCancelacion), por el nombre de su CHECK y la columna. Se leen
+    // aunque se hayan quitado los procedimientos (rollback de procedimiento).
+    public static bool? ColumnasCancelacionForzadaParaPruebas;
+    public static bool ColumnasCancelacionActivas()
+    {
+        return ColumnasCancelacionForzadaParaPruebas ?? (sql22EnBase == true && sql41Columnas == true);
+    }
+
+    public const string MotivoCancelacion =
+        "Cancelar o modificar una solicitud todav\u00eda no est\u00e1 habilitado (falta aplicar sql/41 en la base, con su aprobaci\u00f3n). No se cambi\u00f3 nada.";
+
     // Lo que DeteccionSolicitudesCambio vio en la base (null = todavia no se
     // reviso) y cuando. Misma vigencia que sql/24: aplicar o revertir los
     // scripts la enciende o la apaga sin reciclar el sitio.
@@ -129,6 +151,11 @@ public static class PersistenciaSolicitudesCambio
     private static bool? sql34EnBase;
     private static bool? sql37EnBase;
     private static bool? sql38EnBase;
+    // sql/41: los dos procedimientos (cancelar / reemplazar) y, aparte, sus
+    // columnas (el rollback de procedimiento quita solo los procedimientos:
+    // las columnas y las CANCELADA se siguen leyendo).
+    private static bool? sql41EnBase;
+    private static bool? sql41Columnas;
     private static DateTime revisadaUtc;
 
     public static void Anotar(bool sql22, bool sql25, DateTime ahoraUtc) { Anotar(sql22, sql25, false, ahoraUtc); }
@@ -139,7 +166,16 @@ public static class PersistenciaSolicitudesCambio
 
     public static void Anotar(bool sql22, bool sql25, bool sql34, bool sql37, bool sql38, DateTime ahoraUtc)
     {
-        lock (candado) { sql22EnBase = sql22; sql25EnBase = sql25; sql34EnBase = sql34; sql37EnBase = sql37; sql38EnBase = sql38; revisadaUtc = ahoraUtc; }
+        Anotar(sql22, sql25, sql34, sql37, sql38, false, false, ahoraUtc);
+    }
+
+    public static void Anotar(bool sql22, bool sql25, bool sql34, bool sql37, bool sql38, bool sql41, bool sql41Cols, DateTime ahoraUtc)
+    {
+        lock (candado)
+        {
+            sql22EnBase = sql22; sql25EnBase = sql25; sql34EnBase = sql34; sql37EnBase = sql37; sql38EnBase = sql38;
+            sql41EnBase = sql41; sql41Columnas = sql41Cols; revisadaUtc = ahoraUtc;
+        }
     }
 
     public static bool Vigente(DateTime ahoraUtc)
@@ -150,7 +186,11 @@ public static class PersistenciaSolicitudesCambio
     // Solo para las pruebas: como recien arrancado (sin revisar).
     public static void OlvidarParaPruebas()
     {
-        lock (candado) { sql22EnBase = null; sql25EnBase = null; sql34EnBase = null; sql37EnBase = null; sql38EnBase = null; revisadaUtc = DateTime.MinValue; }
+        lock (candado)
+        {
+            sql22EnBase = null; sql25EnBase = null; sql34EnBase = null; sql37EnBase = null; sql38EnBase = null;
+            sql41EnBase = null; sql41Columnas = null; revisadaUtc = DateTime.MinValue;
+        }
     }
 
     public const string MotivoVarios =
@@ -181,7 +221,11 @@ public static class DeteccionSolicitudesCambio
         "Sql37 = CASE WHEN OBJECT_ID(N'adm.CK_SolicitudCambio_RolPso', N'C') IS NULL THEN 0 ELSE 1 END, " +
         "Sql38 = (SELECT COUNT(*) FROM sys.extended_properties WHERE class = 1 AND minor_id = 0 " +
         "AND major_id = OBJECT_ID(N'adm.usp_SolicitudCambio_Crear', N'P') AND name = N'ReglaPso' " +
-        "AND CONVERT(nvarchar(30), value) = N'EQUIPO_PO')";
+        "AND CONVERT(nvarchar(30), value) = N'EQUIPO_PO'), " +
+        "Sql41 = CASE WHEN OBJECT_ID(N'adm.usp_SolicitudCambio_Cancelar', N'P') IS NOT NULL " +
+        "AND OBJECT_ID(N'adm.usp_SolicitudCambio_Reemplazar', N'P') IS NOT NULL THEN 1 ELSE 0 END, " +
+        "Sql41Columnas = CASE WHEN OBJECT_ID(N'adm.CK_SolicitudCambio_EstadoCancelada', N'C') IS NOT NULL " +
+        "AND COL_LENGTH(N'adm.SolicitudCambio', N'ReemplazaA') IS NOT NULL AND COL_LENGTH(N'adm.SolicitudCambio', N'MotivoCancelacion') IS NOT NULL THEN 1 ELSE 0 END";
 
     // Con la conexion (abierta) del que llama.
     public static void Revisar(SqlConnection cn)
@@ -189,7 +233,7 @@ public static class DeteccionSolicitudesCambio
         if (cn == null) throw new ArgumentNullException("cn");
         var ahora = DateTime.UtcNow;
         if (PersistenciaSolicitudesCambio.Vigente(ahora)) return;
-        bool sql22 = false, sql25 = false, sql34 = false, sql37 = false, sql38 = false;
+        bool sql22 = false, sql25 = false, sql34 = false, sql37 = false, sql38 = false, sql41 = false, sql41Cols = false;
         try
         {
             using (var cmd = new SqlCommand(Consulta, cn) { CommandTimeout = 15 })
@@ -201,10 +245,12 @@ public static class DeteccionSolicitudesCambio
                     sql34 = sql25 && Convert.ToInt32(rd.GetValue(2)) == 3;
                     sql37 = sql22 && Convert.ToInt32(rd.GetValue(3)) == 1;
                     sql38 = sql37 && Convert.ToInt32(rd.GetValue(4)) == 1;
+                    sql41Cols = sql22 && Convert.ToInt32(rd.GetValue(6)) == 1;
+                    sql41 = sql41Cols && Convert.ToInt32(rd.GetValue(5)) == 1;
                 }
         }
-        catch (SqlException) { sql22 = false; sql25 = false; sql34 = false; sql37 = false; sql38 = false; }
-        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, sql34, sql37, sql38, ahora);
+        catch (SqlException) { sql22 = false; sql25 = false; sql34 = false; sql37 = false; sql38 = false; sql41 = false; sql41Cols = false; }
+        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, sql34, sql37, sql38, sql41, sql41Cols, ahora);
     }
 
     // Abre su propia conexion solo si hace falta revisar.
@@ -503,7 +549,28 @@ public sealed class PeticionSolicitudCambio
 public sealed class ErrorSolicitudCambio : Exception
 {
     public readonly int Numero;
-    public ErrorSolicitudCambio(int numero, string mensaje, Exception interna) : base(mensaje, interna) { Numero = numero; }
+    public ErrorSolicitudCambio(int numero, string mensaje, Exception interna) : base(MensajeDe(numero, mensaje), interna) { Numero = numero; }
+
+    // sql/41 (cancelar / reemplazar): el texto de la base no lleva acentos y
+    // habla de procedimientos; quien envio ve uno propio. Los numeros de
+    // antes conservan el mensaje de la base, como siempre.
+    public static string MensajeDe(int numero, string mensaje)
+    {
+        switch (numero)
+        {
+            case 51228: return "Explica por qu\u00e9 cancelas la solicitud.";
+            case 51229: return "El motivo de la cancelaci\u00f3n no puede pasar de 2000 caracteres.";
+            case 51230: return "La solicitud ya no est\u00e1 pendiente: un administrador la revis\u00f3 (aplic\u00f3 o rechaz\u00f3) o ya estaba cancelada. No se cambi\u00f3 nada; actualiza para ver su estado.";
+            case 51231: return "No se pudo reemplazar la solicitud (transacci\u00f3n anidada). No se cambi\u00f3 nada.";
+            case 51232: return "Este borrador ya se us\u00f3 en otra solicitud. Vuelve a abrir \u00abModificar\u00bb y env\u00edala de nuevo.";
+            case 51233: return "La correcci\u00f3n tiene que ser de la misma iniciativa que la solicitud original.";
+            case 51234: return "No se cre\u00f3 la solicitud nueva: la original sigue pendiente y no se cambi\u00f3 nada.";
+            default: return mensaje;
+        }
+    }
+
+    // sql/41: los numeros que solo dan Cancelar / Reemplazar.
+    public static bool EsDeCancelacion(int numero) { return numero >= 51228 && numero <= 51234; }
 
     public int EstadoHttp
     {
@@ -512,6 +579,8 @@ public sealed class ErrorSolicitudCambio : Exception
             if (Numero == 51201 || Numero == 51225) return 404;
             if (Numero == 51001 || Numero == 51210 || Numero == 51226) return 403;
             if (Numero == 51202 || Numero == 51204 || Numero == 51221 || Numero == 51010 || Numero == 51008) return 409;
+            if (Numero == 51230 || Numero == 51232) return 409;
+            if (Numero == 51231 || Numero == 51234) return 500;
             return 422;
         }
     }
@@ -532,6 +601,13 @@ public sealed class ErrorSolicitudCambio : Exception
                 case 51001: case 51210: return "SinAtribucion";
                 case 51225: return "IniciativaNoExiste";      // sql/37, PSO
                 case 51226: return "NoEsDueno";               // sql/37, PSO
+                case 51228: return "FaltaMotivoCancelacion";  // sql/41
+                case 51229: return "MotivoCancelacionLargo";
+                case 51230: return "SolicitudNoPendiente";
+                case 51231: return "ReemplazoNoConfirmado";
+                case 51232: return "LlaveUsada";
+                case 51233: return "OtraIniciativa";
+                case 51234: return "ReemplazoNoCreado";
                 default: return "DatoInvalido";
             }
         }
@@ -554,6 +630,18 @@ public interface IAlmacenSolicitudesCambio
     void RegistrarFallo(int idSolicitud, string revisor, int numero, string mensaje);
 }
 
+// CANCELAR / REEMPLAZAR (sql/41) por QUIEN LA ENVIO. usuario = la cuenta de
+// IIS (AccesoAdmin.IdentidadEscritura), nunca del navegador; la base vuelve
+// a comprobar que la solicitud es suya y esta PENDIENTE con el MISMO candado
+// que Aplicar / Rechazar (gana el primero: 51230 al que llega tarde).
+// Reemplazar crea la nueva con adm.usp_SolicitudCambio_Crear TAL CUAL (las
+// mismas validaciones y re-chequeo PSO) y cancela la original, todo o nada.
+public interface ICancelacionSolicitudesCambio
+{
+    void Cancelar(int idSolicitud, string usuario, string motivo);
+    ResultadoEnvioSolicitud Reemplazar(int reemplazaA, string motivoCancelacion, PeticionSolicitudCambio p, string usuario, string rol);
+}
+
 // "Mis solicitudes de cambio" (2026-11-04,
 // handlers/admin_iniciativas_mis_cambios.ashx): SOLO LECTURA de las que
 // envio UNA cuenta (SolicitadoPor = la cuenta de IIS que la firmo, sin
@@ -562,14 +650,14 @@ public interface IAlmacenSolicitudesCambio
 // envio. DetalleDe de una de otra cuenta: null, igual que si no existe.
 public interface ILectorMisSolicitudesCambio
 {
-    // estado: PENDIENTE | APLICADA | RECHAZADA o null (todas).
+    // estado: PENDIENTE | APLICADA | RECHAZADA | CANCELADA o null (todas).
     List<Dictionary<string, object>> ListarDe(string cuenta, string estado, int maximo);
     Dictionary<string, object> DetalleDe(int idSolicitud, string cuenta);
 }
 
 // La real: los procedimientos de sql/22 (escritura) y SELECT (lectura). El
 // sitio no puede escribir las tablas a mano (DENY de _permisos.sql).
-public sealed class AlmacenSolicitudesCambioSql : IAlmacenSolicitudesCambio, ILectorMisSolicitudesCambio
+public sealed class AlmacenSolicitudesCambioSql : IAlmacenSolicitudesCambio, ILectorMisSolicitudesCambio, ICancelacionSolicitudesCambio
 {
     private readonly Func<SqlConnection> abrir;
 
@@ -604,6 +692,38 @@ public sealed class AlmacenSolicitudesCambioSql : IAlmacenSolicitudesCambio, ILe
     {
         using (var cn = Abrir())
         using (var cmd = Proc(cn, "adm.usp_SolicitudCambio_Crear"))
+            return Crear(cmd, p, usuario, rol);
+    }
+
+    // sql/41. Sin COMMIT del que llama: el procedimiento abre la suya.
+    public void Cancelar(int idSolicitud, string usuario, string motivo)
+    {
+        using (var cn = Abrir())
+        using (var cmd = Proc(cn, "adm.usp_SolicitudCambio_Cancelar"))
+        {
+            cmd.Parameters.Add("@IdSolicitud", SqlDbType.Int).Value = idSolicitud;
+            cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = Db(usuario);
+            cmd.Parameters.Add("@Motivo", SqlDbType.NVarChar, 4000).Value = Db(motivo);
+            Ejecutar(cmd);
+        }
+    }
+
+    // sql/41: los MISMOS parametros que Crear (Crear) mas la original y el
+    // motivo de cancelarla. @IdSolicitud = la nueva; @Repetida = 1 si la
+    // misma llave ya habia reemplazado a ESTA original (reintento).
+    public ResultadoEnvioSolicitud Reemplazar(int reemplazaA, string motivoCancelacion, PeticionSolicitudCambio p, string usuario, string rol)
+    {
+        using (var cn = Abrir())
+        using (var cmd = Proc(cn, "adm.usp_SolicitudCambio_Reemplazar"))
+        {
+            cmd.Parameters.Add("@ReemplazaA", SqlDbType.Int).Value = reemplazaA;
+            cmd.Parameters.Add("@MotivoCancelacion", SqlDbType.NVarChar, 4000).Value = Db(motivoCancelacion);
+            return Crear(cmd, p, usuario, rol);
+        }
+    }
+
+    private static ResultadoEnvioSolicitud Crear(SqlCommand cmd, PeticionSolicitudCambio p, string usuario, string rol)
+    {
         {
             cmd.Parameters.Add("@Usuario", SqlDbType.NVarChar, 256).Value = Db(usuario);
             cmd.Parameters.Add("@Rol", SqlDbType.VarChar, 3).Value = Db(rol);
@@ -720,7 +840,8 @@ SELECT s.IdSolicitud, s.Codigo, p.Titulo, s.Tipo, s.EstadoAnterior, s.EstadoNuev
        EstadoActual = p.Estado, SubestadoActual = p.Subestado, p.FechaAnalisis, p.FechaSolucion, p.FechaCierre,
        PoActual = p.OwnerProblem, SoActual = p.OwnerServicio,
 {0},
-{1}
+{1},
+{2}
 FROM adm.SolicitudCambio AS s
 LEFT JOIN dbo.Problem AS p ON p.Codigo = s.Codigo";
     // Columnas de sql/25; sin ella no existen y se leen como vacias.
@@ -741,13 +862,27 @@ LEFT JOIN dbo.Problem AS p ON p.Codigo = s.Codigo";
         "       CambiaFSolucion = CONVERT(bit, 0), FSolucionAnterior = CONVERT(date, NULL), FSolucionNueva = CONVERT(date, NULL),\n" +
         "       CambiaFCierre = CONVERT(bit, 0), FCierreAnterior = CONVERT(date, NULL), FCierreNueva = CONVERT(date, NULL)";
 
-    private static string Cabecera
+    // Columnas de sql/41 (cancelacion y reemplazo); sin ellas, vacias.
+    // ReemplazadaPor: la solicitud que reemplazo a esta (indice unico de 41:
+    // a lo mas una). Con cuenta ("Mis solicitudes"), los dos enlaces solo si
+    // la otra solicitud es de la MISMA cuenta: nunca se ve el numero de una
+    // ajena (Reemplazar ya lo garantiza; esto es la segunda llave).
+    private const string ColumnasCancelacion =
+        "       s.CanceladoPor, s.FechaCancelacionUtc, s.MotivoCancelacion,\n" +
+        "       ReemplazaA = (SELECT o.IdSolicitud FROM adm.SolicitudCambio AS o WHERE o.IdSolicitud = s.ReemplazaA{c}),\n" +
+        "       ReemplazadaPor = (SELECT TOP (1) n.IdSolicitud FROM adm.SolicitudCambio AS n WHERE n.ReemplazaA = s.IdSolicitud{n} ORDER BY n.IdSolicitud)";
+    private const string ColumnasCancelacionVacias =
+        "       CanceladoPor = CONVERT(nvarchar(256), NULL), FechaCancelacionUtc = CONVERT(datetime2(0), NULL), MotivoCancelacion = CONVERT(nvarchar(2000), NULL),\n" +
+        "       ReemplazaA = CONVERT(int, NULL), ReemplazadaPor = CONVERT(int, NULL)";
+
+    private static string Cabecera(bool deCuenta)
     {
-        get
-        {
-            return CabeceraBase.Replace("{0}", PersistenciaSolicitudesCambio.SolicitaDatosActiva() ? ColumnasDatos : ColumnasDatosVacias)
-                               .Replace("{1}", PersistenciaSolicitudesCambio.SolicitaVariosActiva() ? ColumnasVarios : ColumnasVariosVacias);
-        }
+        var cancelacion = !PersistenciaSolicitudesCambio.ColumnasCancelacionActivas() ? ColumnasCancelacionVacias
+            : ColumnasCancelacion.Replace("{c}", deCuenta ? " AND UPPER(o.SolicitadoPor) = UPPER(s.SolicitadoPor)" : "")
+                                 .Replace("{n}", deCuenta ? " AND UPPER(n.SolicitadoPor) = UPPER(s.SolicitadoPor)" : "");
+        return CabeceraBase.Replace("{0}", PersistenciaSolicitudesCambio.SolicitaDatosActiva() ? ColumnasDatos : ColumnasDatosVacias)
+                           .Replace("{1}", PersistenciaSolicitudesCambio.SolicitaVariosActiva() ? ColumnasVarios : ColumnasVariosVacias)
+                           .Replace("{2}", cancelacion);
     }
 
     public List<Dictionary<string, object>> Listar(string estado, int maximo) { return Leer(null, estado, maximo); }
@@ -763,7 +898,7 @@ LEFT JOIN dbo.Problem AS p ON p.Codigo = s.Codigo";
 
     private List<Dictionary<string, object>> Leer(string cuenta, string estado, int maximo)
     {
-        var sql = "SELECT TOP (@max) * FROM (" + Cabecera + (cuenta == null ? "" : "\nWHERE " + FiltroCuenta) + @") AS x
+        var sql = "SELECT TOP (@max) * FROM (" + Cabecera(cuenta != null) + (cuenta == null ? "" : "\nWHERE " + FiltroCuenta) + @") AS x
 WHERE (@estado IS NULL OR x.Estado = @estado)
 ORDER BY x.FechaSolicitudUtc DESC, x.IdSolicitud DESC;";
         var salida = new List<Dictionary<string, object>>();
@@ -791,7 +926,7 @@ ORDER BY x.FechaSolicitudUtc DESC, x.IdSolicitud DESC;";
     private Dictionary<string, object> Detalle(int idSolicitud, string cuenta)
     {
         var deCuenta = cuenta == null ? "" : " AND " + FiltroCuenta;
-        var sql = Cabecera + @"
+        var sql = Cabecera(cuenta != null) + @"
 WHERE s.IdSolicitud = @id" + deCuenta + @";
 SELECT c.Categoria, c.Accion, c.PctAnterior, c.PctNuevo, c.TipoIniciativa, c.TipoAgrupado,
        PctActual = pc.PctDisminucion, Ligada = CASE WHEN pc.Codigo IS NOT NULL AND pc.VigenteEnOrigen = 1 THEN 1 ELSE 0 END,
@@ -845,6 +980,7 @@ ORDER BY e.IdEvento;";
     }
 
     private static string Texto(SqlDataReader r, int i) { return r.IsDBNull(i) ? null : Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture); }
+    private static object Entero(SqlDataReader r, int i) { return r.IsDBNull(i) ? null : (object)Convert.ToInt32(r.GetValue(i), CultureInfo.InvariantCulture); }
     private static string Iso(SqlDataReader r, int i) { return r.IsDBNull(i) ? null : Convert.ToDateTime(r.GetValue(i)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
     private static string Utc(SqlDataReader r, int i) { return r.IsDBNull(i) ? null : Convert.ToDateTime(r.GetValue(i)).ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture) + "Z"; }
     // Fraccion 0-1 -> % en texto ("30", "12.5"), como el registro.
@@ -910,6 +1046,14 @@ ORDER BY e.IdEvento;";
             });
         }
         d["fechas_varias"] = fechas;
+        // sql/41 (null sin sus columnas): quien cancelo (siempre quien la
+        // envio), cuando, por que, y los enlaces con la que reemplaza / la
+        // que la reemplazo.
+        d["cancelado_por"] = Texto(r, r.GetOrdinal("CanceladoPor"));
+        d["fecha_cancelacion_utc"] = Utc(r, r.GetOrdinal("FechaCancelacionUtc"));
+        d["motivo_cancelacion"] = Texto(r, r.GetOrdinal("MotivoCancelacion"));
+        d["reemplaza_a"] = Entero(r, r.GetOrdinal("ReemplazaA"));
+        d["reemplazada_por"] = Entero(r, r.GetOrdinal("ReemplazadaPor"));
         return d;
     }
 }
@@ -918,6 +1062,9 @@ public static class SolicitudesCambio
 {
     // El handler usa estos; las pruebas los cambian por falsos.
     public static IAlmacenSolicitudesCambio Almacen = new AlmacenSolicitudesCambioSql();
+    // Cancelar / reemplazar por quien la envio (sql/41).
+    public static ICancelacionSolicitudesCambio Cancelaciones = new AlmacenSolicitudesCambioSql();
+    public const int MaximoMotivoCancelacion = 2000;
     // "Mis solicitudes de cambio": la misma lectura real, filtrada por cuenta.
     public static ILectorMisSolicitudesCambio Mias = new AlmacenSolicitudesCambioSql();
 
@@ -944,8 +1091,29 @@ public static class SolicitudesCambio
         return d;
     }
 
-    public static readonly string[] EstadosCola = { "PENDIENTE", "APLICADA", "RECHAZADA" };
+    // CANCELADA (sql/41): la cancelo quien la envio (o la reemplazo por otra).
+    // Sin sql/41 no hay ninguna: el filtro devuelve la lista vacia.
+    public static readonly string[] EstadosCola = { "PENDIENTE", "APLICADA", "RECHAZADA", "CANCELADA" };
     public static bool EsEstadoCola(string estado) { return Array.IndexOf(EstadosCola, estado) >= 0; }
+
+    // Solo pantalla (la base decide al cancelar): es_propia = la envio
+    // `cuenta` (la de IIS que pregunta; sin mayusculas ni espacios de mas,
+    // como la base) y puede_cancelar = ademas PENDIENTE y sql/41 en la base.
+    public static void MarcarPropia(Dictionary<string, object> d, string cuenta)
+    {
+        if (d == null) return;
+        object por;
+        d.TryGetValue("solicitado_por", out por);
+        var propia = por is string && !string.IsNullOrEmpty(cuenta)
+                     && string.Equals(((string)por).Trim(), cuenta.Trim(), StringComparison.OrdinalIgnoreCase);
+        object estado;
+        d.TryGetValue("estado", out estado);
+        d["es_propia"] = propia;
+        d["puede_cancelar"] = propia && estado as string == "PENDIENTE" && PersistenciaSolicitudesCambio.CancelacionActiva();
+    }
+
+    public const string MensajeCancelada =
+        "Quien la envi\u00f3 la cancel\u00f3 (o la reemplaz\u00f3 por otra): ya no se aplica ni se rechaza.";
     public static Func<NameValueCollection, ValidacionAplicar> ValidarAplicacion = ValidacionAplicar.ComoEdicionDirecta;
     // Para PeticionSolicitudCambio.ExigirCatalogo. Si una lectura falla, la
     // excepcion sube: el handler no envia nada.
@@ -1328,6 +1496,14 @@ public sealed class AplicadorSolicitudCambio
     {
         var d = almacen.Detalle(id);
         if (d == null) throw new ErrorSolicitudCambio(51201, "La solicitud no existe.", null);
+        // sql/41: la cancelo (o reemplazo) quien la envio: no se aplica.
+        if ((d["estado"] as string) == "CANCELADA")
+            return new Dictionary<string, object>
+            {
+                { "error", SolicitudesCambio.MensajeCancelada }, { "numero", 51202 }, { "tipo", "SolicitudCancelada" }, { "aplicada", false },
+                { "estado_actual", "CANCELADA" }, { "reemplazada_por", d.ContainsKey("reemplazada_por") ? d["reemplazada_por"] : null },
+                { "estado_http", 409 },
+            };
         if ((d["estado"] as string) != "PENDIENTE") throw new ErrorSolicitudCambio(51202, "La solicitud ya fue revisada (aplicada o rechazada).", null);
         // DATOS: un dato pedido y vacio (guardado antes de que el envio lo
         // rechazara) dejaria vacio el Titulo / PO / SO de la iniciativa: la

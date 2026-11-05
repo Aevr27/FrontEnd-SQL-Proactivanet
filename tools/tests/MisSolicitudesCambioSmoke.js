@@ -131,9 +131,9 @@ var URLM = '../handlers/admin_iniciativas_mis_cambios.ashx';
   // ---- P: pagina ----
   var html = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.html'), 'utf8');
   var bloque = html.slice(html.indexOf('<div id="mcBloque"'), html.indexOf('</section>', html.indexOf('<div id="mcBloque"')));
-  Check('P1 mcBloque nace oculto, con mcFiltro Pendientes / Aplicadas / Rechazadas / Todas (Todas elegida)', [true, true, true],
+  Check('P1 mcBloque nace oculto, con mcFiltro Pendientes / Aplicadas / Rechazadas / Canceladas (sql/41) / Todas (Todas elegida)', [true, true, true],
     [/<div id="mcBloque" hidden>/.test(html),
-     /<select id="mcFiltro">\s*<option value="PENDIENTE">Pendientes<\/option>\s*<option value="APLICADA">Aplicadas<\/option>\s*<option value="RECHAZADA">Rechazadas<\/option>\s*<option value="" selected>Todas<\/option>/.test(bloque),
+     /<select id="mcFiltro">\s*<option value="PENDIENTE">Pendientes<\/option>\s*<option value="APLICADA">Aplicadas<\/option>\s*<option value="RECHAZADA">Rechazadas<\/option>\s*<option value="CANCELADA">Canceladas<\/option>\s*<option value="" selected>Todas<\/option>/.test(bloque),
      ['mcResumen', 'mcActualizar', 'mcMsg', 'mcLista', 'mcDetalle'].every(function (id) { return bloque.indexOf('id="' + id + '"') > 0; })]);
   var pag = fs.readFileSync(path.join(raiz, 'admin', 'iniciativas.js'), 'utf8').replace(/\r\n/g, '\n');
   Check('P2 iniciativas.js: crea MisCambios, lo abre si no es ADM, lo oculta para ADM, sin acceso y al denegar', [true, true, true, 3],

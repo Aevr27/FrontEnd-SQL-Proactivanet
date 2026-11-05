@@ -110,7 +110,8 @@ public sealed class IniciativaService
     // CatPersona de App_Code/SolicitudIniciativaAlta.cs). Ninguno sale del
     // formulario.
     public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad,
-                                                   string rol = null, Func<string> correoUsuariosAdmin = null)
+                                                   string rol = null, Func<string> correoUsuariosAdmin = null,
+                                                   int reemplazaA = 0, string motivoCancelacion = null)
     {
         CatalogoSolicitud catalogo;
         CapacidadCategoria capacidad;
@@ -124,13 +125,18 @@ public sealed class IniciativaService
             catalogo = CatalogoSolicitud.Desde(tipos, (System.Collections.IEnumerable)rutas["rutas"]);
             capacidad = new CapacidadCategoria(ExperienciaQueries.CompromisosCapacidad(cn));
         }
-        return Solicitar(solicitud, identidad, catalogo, capacidad, rol, correoUsuariosAdmin);
+        return Solicitar(solicitud, identidad, catalogo, capacidad, rol, correoUsuariosAdmin, reemplazaA, motivoCancelacion);
     }
 
     // Lo mismo con catalogo y capacidad ya leidos (las pruebas, sin SQL).
+    // reemplazaA > 0 (sql/42, "Modificar"): las MISMAS reglas que un envio
+    // nuevo y, si pasan, adm.usp_SolicitudIniciativa_Reemplazar en vez de
+    // _Crear (SolicitudesIniciativa.Cancelaciones). Si no pasan, no se llama
+    // a la base y la original sigue ENVIADA.
     public ValidadorIniciativa.Resultado Solicitar(SolicitudIniciativa solicitud, IdentidadWindows identidad,
                                                    CatalogoSolicitud catalogo, CapacidadCategoria capacidad,
-                                                   string rol = null, Func<string> correoUsuariosAdmin = null)
+                                                   string rol = null, Func<string> correoUsuariosAdmin = null,
+                                                   int reemplazaA = 0, string motivoCancelacion = null)
     {
         var r = new ValidadorIniciativa().Validar(solicitud, catalogo, capacidad);
         r.Destinatarios = DestinatariosSolicitud.Resolver(identidad, solicitud.ProductOwner, _personas.Personas(), r,
@@ -158,7 +164,7 @@ public sealed class IniciativaService
             return r;
         }
         var d = r.Destinatarios;
-        var g = _almacen.Crear(new AltaSolicitud
+        var alta = new AltaSolicitud
         {
             Cuenta = d.Cuenta,
             Token = token,
@@ -177,7 +183,11 @@ public sealed class IniciativaService
             SolicitanteCorreo = d.SolicitanteCorreo,
             ProductOwnerCorreo = d.ProductOwnerCorreo,
             ConFuente = conFuente,
-        });
+            ReemplazaA = reemplazaA > 0 ? reemplazaA : 0,
+            MotivoCancelacion = reemplazaA > 0 ? motivoCancelacion : null,
+        };
+        var g = reemplazaA > 0 ? SolicitudesIniciativa.Cancelaciones.Reemplazar(alta) : _almacen.Crear(alta);
+        r.ReemplazaA = reemplazaA > 0 ? reemplazaA : 0;
         // sql/36: la respuesta dice lo que la base GUARDO (con USUARIOSADMIN
         // el nombre es el de dbo.UsuariosAdmin, no uno del sitio).
         if (g.Fuente != null)
@@ -227,6 +237,8 @@ public sealed class IniciativaService
             { "nuevo", r.Guardada && r.Nuevo },
             { "numero_solicitud", r.Numero == null ? null : r.Numero.ToString() },
             { "numero_pendiente", r.NumeroPendiente },
+            // sql/42: el numero (texto) de la solicitud que esta reemplazo; null en un envio nuevo.
+            { "reemplaza_a", r.ReemplazaA > 0 ? new NumeroSolicitud(r.ReemplazaA).ToString() : null },
             // Lo resuelto en el servidor (nunca lo que mando el navegador).
             { "solicitante", d == null ? null : new Dictionary<string, object>
                 {

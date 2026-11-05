@@ -446,6 +446,7 @@
           <option value="ENVIADA" selected>Pendientes</option>
           <option value="APROBADA">Aprobadas</option>
           <option value="RECHAZADA">Rechazadas</option>
+          <option value="CANCELADA">Canceladas</option>
           <option value="">Todas</option>
         </select>
         <span class="ini-nota" id="snResumen"></span>
@@ -465,6 +466,7 @@
           <option value="PENDIENTE" selected>Pendientes</option>
           <option value="APLICADA">Aplicadas</option>
           <option value="RECHAZADA">Rechazadas</option>
+          <option value="CANCELADA">Canceladas</option>
           <option value="">Todas</option>
         </select>
         <button type="button" class="btn linea chico" id="solActualizar">Actualizar</button>
@@ -494,6 +496,7 @@
           <option value="ENVIADA">Pendientes</option>
           <option value="APROBADA">Aprobadas</option>
           <option value="RECHAZADA">Rechazadas</option>
+          <option value="CANCELADA">Canceladas</option>
           <option value="" selected>Todas</option>
         </select>
         <span class="ini-nota" id="msResumen"></span>
@@ -515,6 +518,7 @@
           <option value="PENDIENTE">Pendientes</option>
           <option value="APLICADA">Aplicadas</option>
           <option value="RECHAZADA">Rechazadas</option>
+          <option value="CANCELADA">Canceladas</option>
           <option value="" selected>Todas</option>
         </select>
         <span class="ini-nota" id="mcResumen"></span>
@@ -687,6 +691,14 @@
       <span class="ini-hint">Se valida en el servidor al enviarla · el borrador se conserva al cambiar de vista</span>
     </div>
     <p class="ini-nota" id="iniAvisoDuenos"><b>Importante:</b> La solicitud de iniciativas está disponible únicamente para Product Owners (PO) y Service Owners (SO) vigentes.</p>
+    <!-- Modificar una solicitud enviada (sql/42): REEMPLAZO, no edicion
+         (admin/iniciativas.js, modificarSolicitud). Oculto en una nueva. -->
+    <div class="ini-cambio-msg aviso" id="iniReemplazo" hidden>
+      <p id="iniReemplazoTexto"></p>
+      <div class="campo"><label for="iniMotivoCancelacion">Motivo de la corrección (obligatorio)</label>
+        <textarea id="iniMotivoCancelacion" rows="2" maxlength="2000"></textarea></div>
+      <button type="button" class="btn linea chico" id="iniReemplazoDescartar">Descartar la corrección</button>
+    </div>
 
     <p class="ini-estado" id="iniEstado" role="status" aria-live="polite"></p>
     <div class="ini-error" id="iniError" role="alert" hidden>
