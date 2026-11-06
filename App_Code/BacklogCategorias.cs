@@ -15,6 +15,11 @@
 // tablero, para que las cifras cuadren con "Lider (Grupo)"):
 //
 //   Critica   REPLACE(Prioridad, 'í', 'i') = 'Critica'   (result set 2)
+//             En el SQL de abajo la 'í' va como NCHAR(237): este archivo no
+//             tiene BOM e IIS lo compila con la codepage ANSI (1252), que
+//             convertia N'í' en N'Ã'+U+00AD; REPLACE no hacia nada y, con la
+//             intercalacion CI_AS, 'Crítica' <> 'Critica': Critica salia en 0.
+//             El SQL debe quedarse en ASCII puro.
 //   Alta      Prioridad = 'Alta'                         (result set 2)
 //   Total     COUNT(*)                                   (result set 2)
 //   Mas30     AgingSort >= 5: "mas de 30 dias", el mismo
@@ -65,7 +70,7 @@ WHERE FechaCorte = @F
     public const string SQL = CORTE_Y_FILTROS + @"
 SELECT
     Lider, Grupo, C1, Categoria,
-    Critica  = SUM(CASE WHEN REPLACE(Prioridad, N'í', N'i') = N'Critica' THEN 1 ELSE 0 END),
+    Critica  = SUM(CASE WHEN REPLACE(Prioridad, NCHAR(237), N'i') = N'Critica' THEN 1 ELSE 0 END),
     Alta     = SUM(CASE WHEN Prioridad = N'Alta' THEN 1 ELSE 0 END),
     Mas30    = SUM(CASE WHEN AgingSort >= @SortMas30 THEN 1 ELSE 0 END),
     FueraSLA = SUM(CASE WHEN EstadoSLA = N'Fuera SLA' THEN 1 ELSE 0 END),

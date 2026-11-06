@@ -17,10 +17,18 @@
 //      prefijo de la ruta, tambien "solo en el nodo"), la suma de las filas
 //      agregadas bajo el nodo = los tickets que da SQL_TICKETS + Filtrar,
 //      con y sin filtros y con el cross-filter de grupo; las hojas suman el
-//      total; tickets del mas viejo al mas nuevo (sin fecha al final) y tope.
+//      total; tickets del mas viejo al mas nuevo (sin fecha al final) y tope;
+//   5) codificacion (EN1-EN3): IIS compila App_Code sin BOM con la codepage
+//      ANSI del servidor (1252, no hay <globalization fileEncoding>), y un
+//      N'í' crudo llegaba a SQL como N'Ã' + U+00AD: REPLACE no hacia nada,
+//      'Crítica' <> 'Critica' con la intercalacion CI_AS y "Criticos" salia en
+//      0 en "Lider (Categoria)". EN1 cuenta las 'Crítica' de verdad SIN
+//      depender del procedimiento; EN2 exige SQL puro ASCII (falla con
+//      cualquier codepage); EN3 revisa los fuentes sin BOM.
 //
-// Compilar y correr desde la raiz del repo:
-//   csc /nologo /target:library /out:bl.dll /r:System.dll /r:System.Data.dll ^
+// Compilar y correr desde la raiz del repo. /codepage:1252 = como compila IIS
+// los archivos sin BOM (sin el, EN1 no ve el mojibake del servidor):
+//   csc /nologo /target:library /codepage:1252 /out:bl.dll /r:System.dll /r:System.Data.dll ^
 //       /r:System.Web.dll /r:System.Web.Extensions.dll /r:System.Configuration.dll App_Code\*.cs
 //   csc /nologo /r:bl.dll /r:System.Data.dll /out:BacklogCategoriasSqlLocalDbSmoke.exe ^
 //       tools\tests\BacklogCategoriasSqlLocalDbSmoke.cs
@@ -183,6 +191,55 @@ public static class BacklogCategoriasSqlLocalDbSmoke
         Chk(caso + ": los nodos exactos suman el total (ningun ticket dos veces)", hojas, sumaExactos);
     }
 
+    // Criticas por lider en el corte mas reciente, contadas sin literal no ASCII.
+    static string CriticasPorLider(SqlConnection cn)
+    {
+        using (var c = new SqlCommand(@"SELECT Lider = ISNULL(Lider, N''),
+  N = SUM(CASE WHEN Prioridad IN (N'Cr' + NCHAR(237) + N'tica', N'Critica') THEN 1 ELSE 0 END)
+FROM dbo.CorreoBacklogSnapshot WHERE FechaCorte = (SELECT MAX(FechaCorte) FROM dbo.CorreoBacklogSnapshot)
+GROUP BY ISNULL(Lider, N'')", cn))
+        using (var rd = c.ExecuteReader())
+        {
+            var l = new List<KeyValuePair<string, int>>();
+            while (rd.Read()) l.Add(new KeyValuePair<string, int>(rd.GetString(0), rd.GetInt32(1)));
+            return string.Join(";", l.OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => x.Key + "=" + x.Value));
+        }
+    }
+
+    // Posiciones de los caracteres no ASCII de un texto, o "".
+    static string NoAscii(string nombre, string texto)
+    {
+        var malas = new List<string>();
+        for (int i = 0; i < texto.Length; i++)
+            if (texto[i] > 127) malas.Add(nombre + "[" + i + "]=U+" + ((int)texto[i]).ToString("X4"));
+        return string.Join(" ", malas.ToArray());
+    }
+
+    // Archivos sin BOM con caracteres no ASCII fuera de comentarios (como
+    // GestionIniciativaAdminSmoke.NoAsciiEnCodigo). Rutas desde la raiz del repo.
+    static string NoAsciiEnCodigo(params string[] archivos)
+    {
+        var malas = new List<string>();
+        foreach (var a in archivos)
+        {
+            if (!File.Exists(a)) { malas.Add(a + ":no existe (correr desde la raiz del repo)"); continue; }
+            var b = File.ReadAllBytes(a);
+            if (b.Length >= 3 && b[0] == 0xEF && b[1] == 0xBB && b[2] == 0xBF) continue;
+            var lineas = System.Text.Encoding.GetEncoding(28591).GetString(b).Split('\n');
+            var enBloque = false;
+            for (var i = 0; i < lineas.Length; i++)
+            {
+                var l = lineas[i].Trim();
+                if (enBloque) { if (l.Contains("*/")) enBloque = false; continue; }
+                if (l.StartsWith("/*")) { enBloque = !l.Contains("*/"); continue; }
+                if (l.StartsWith("//") || l.StartsWith("<%--")) continue;
+                var codigo = l.IndexOf("//") >= 0 && !l.Contains("://") ? l.Substring(0, l.IndexOf("//")) : l;
+                if (codigo.Any(ch => ch > 127)) malas.Add(a + ":" + (i + 1));
+            }
+        }
+        return string.Join(" ", malas.ToArray());
+    }
+
     public static int Main(string[] args)
     {
         string spPath = args.Length > 0 ? args[0] : null;
@@ -214,6 +271,8 @@ GO");
                 var rnd = new Random(7);
                 string[] lid = { "Laura", "Jesus", "Sin Torre" };
                 string[] c1s = { "S-Punto de Venta", "S-Logistica", "S-Finanzas", null };
+                // í (no el caracter crudo): el dato sembrado no depende de
+                // la codepage con que se compile esta prueba.
                 string[] pri = { "Crítica", "Critica", "Alta", "Media", "Baja" };
                 string[] sla = { "Dentro SLA", "Fuera SLA", "Dentro SLA(Subestado)", "Tramite de compra", null };
                 // Rutas por C1: varios niveles, ruta que acaba en un nodo intermedio,
@@ -268,6 +327,29 @@ GO");
                     string.Join(",", Consulta(cn, null, "S-Logistica, S-Finanzas", null, null).Select(x => (string)x["C1"]).Distinct().OrderBy(x => x)));
                 Chk("filtro Lideres: solo Laura", "Laura",
                     string.Join(",", Consulta(cn, null, null, null, "Laura").Select(x => (string)x["Lider"]).Distinct()));
+
+                // EN1: Critica de la consulta = tickets con prioridad critica,
+                // con y sin acento, contados aqui con NCHAR(237) (sin literal
+                // no ASCII). Es la regresion de "Criticos" en 0.
+                int conAcento, sinAcento;
+                using (var c = new SqlCommand(@"SELECT
+  ConAcento = SUM(CASE WHEN Prioridad = N'Cr' + NCHAR(237) + N'tica' THEN 1 ELSE 0 END),
+  SinAcento = SUM(CASE WHEN Prioridad = N'Critica' THEN 1 ELSE 0 END)
+FROM dbo.CorreoBacklogSnapshot WHERE FechaCorte = (SELECT MAX(FechaCorte) FROM dbo.CorreoBacklogSnapshot)", cn))
+                using (var rd = c.ExecuteReader())
+                {
+                    rd.Read();
+                    conAcento = rd.GetInt32(0); sinAcento = rd.GetInt32(1);
+                }
+                Chk("EN1 hay 'Crítica' con acento en el corte (la prueba tiene con que fallar)", true, conAcento > 0);
+                Chk("EN1 Critica de la consulta = 'Crítica' + 'Critica' del corte", conAcento + sinAcento, todo.Sum(x => I(x["Critica"])));
+                Chk("EN1 por lider: Critica = sus 'Crítica' + 'Critica'", CriticasPorLider(cn),
+                    string.Join(";", todo.GroupBy(x => S(x["Lider"]) ?? "").OrderBy(g => g.Key, StringComparer.Ordinal)
+                        .Select(g => g.Key + "=" + g.Sum(x => I(x["Critica"])))));
+                Chk("EN2 SQL y SQL_TICKETS sin caracteres no ASCII (no dependen de la codepage del servidor)", "",
+                    NoAscii("SQL", BacklogCategorias.SQL) + NoAscii("SQL_TICKETS", BacklogCategorias.SQL_TICKETS));
+                Chk("EN3 fuentes sin BOM: ningun caracter no ASCII fuera de comentarios", "",
+                    NoAsciiEnCodigo(@"App_Code\BacklogCategorias.cs", @"handlers\backlog_categorias.ashx"));
 
                 Jerarquia(cn, "sin filtros", null, null, null, null, null);
                 Jerarquia(cn, "corte anterior + C1 + Lideres", "2026-11-02", "S-Punto de Venta,S-Finanzas", null, "Laura,Jesus", null);
