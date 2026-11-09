@@ -159,6 +159,12 @@ var COMUN = 'var R = [], errores = [];\n' +
   'function marcados(id) { return Array.prototype.map.call($c(id).selectedOptions, function (o) { return o.value; }); }\n' +
   'function elegir(id, valores) { Array.prototype.forEach.call($c(id).options, function (o) { o.selected = valores.indexOf(o.value) >= 0; });\n' +
   '  $c(id).dispatchEvent(new Event("change", { bubbles: true })); }\n' +
+  // El color que Chart.js resuelve para una barra SIN color, con la forma de
+  // renderLlamadasAgente (dashboard.js): asi se ve "Atencion por agente".
+  'function colorAgente() { var cv = document.createElement("canvas"); cv.width = 300; cv.height = 150; document.body.appendChild(cv);\n' +
+  '  var ch = new Chart(cv, { type: "bar", data: { labels: ["a"], datasets: [{ label: "Llamadas atendidas", data: [1] }] },\n' +
+  '    options: { indexAxis: "y", responsive: false, animation: false, plugins: { legend: { display: false } } } });\n' +
+  '  var bg = ch.getDatasetMeta(0).data[0].options.backgroundColor; ch.destroy(); cv.remove(); return bg; }\n' +
   'function lineas() { return Array.prototype.map.call(document.querySelectorAll("#conc-estado .datos-info-linea"), function (d) { return d.textContent; }); }\n' +
   'function cerrar() { var pre = document.createElement("pre"); pre.id = "__res";\n' +
   '  pre.textContent = JSON.stringify({ errores: errores, r: R }); document.body.appendChild(pre); }\n';
@@ -177,7 +183,7 @@ var sondaC = conComun(
   'var p = graf("pareto");\n' +
   'apunta("C2", [p.data.labels.length, p.data.datasets[0].backgroundColor, p.data.datasets[1].type, p.data.datasets[1].borderColor,\n' +
   '  p.data.datasets[1].data.slice(0, 3), p.data.datasets[2].data.every(function (x) { return x === 80; }), p.data.datasets[2].borderColor,\n' +
-  '  Paleta.AZUL_SERIE, graf("categorias").data.datasets[0].backgroundColor[0], graf("grupos").data.datasets[0].backgroundColor[0],\n' +
+  '  graf("categorias").data.datasets[0].backgroundColor[0], graf("grupos").data.datasets[0].backgroundColor[0],\n' +
   '  graf("grupos").data.datasets[0].backgroundColor[graf("grupos").data.labels.length - 1],\n' +
   '  getComputedStyle(document.querySelector(".conc-leyenda .conc-dentro")).backgroundColor]);\n' +
   // C3
@@ -263,7 +269,7 @@ var sondaD = conComun(
   'apunta("D1", [b.querySelector(".mnav-txt").textContent, b.getAttribute("title"), b.classList.contains("active"), b.getAttribute("aria-current"),\n' +
   '  document.getElementById("tab-concentracion").classList.contains("active"), slots(), __pedidas["an-servicios"] || 0,\n' +
   '  __pedidas["an-otro"] || 0, document.getElementById("tab-analisis").childElementCount,\n' +
-  '  document.querySelector("#tab-concentracion h1").textContent, Chart.defaults.datasets.bar.backgroundColor === Paleta.AZUL_SERIE,\n' +
+  '  document.querySelector("#tab-concentracion h1").textContent, colorAgente(),\n' +
   '  Chart.getChart(document.getElementById("conc-chart-pareto")).data.datasets[0].backgroundColor[0]]);\n' +
   'activarTab("analisis");\n' +
   'await hasta(function () { return (__pedidas["an-servicios"] || 0) >= 1 && document.querySelector("#tab-analisis select"); }, 8000);\n' +
@@ -287,16 +293,17 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
     Check(nombre + ' sin errores de JS', [], res[i].errores);
     fn(Banco.mapa(res[i]));
   }
-  // El azul de "Atencion por agente": Paleta.AZUL_SERIE (default compartido de Barras.aplicarDefaults).
-  var AZUL = '#2563eb', CLARO = '#b3c8f8';
+  // El azul que SE VE en "Atencion por agente" (plugin Colors de Chart.js para
+  // una serie sin color); D1 lo mide en dashboard.html y lo compara.
+  var AZUL = 'rgba(54, 162, 235, 0.5)', CLARO = 'rgba(54, 162, 235, 0.2)';
   seccion(0, 'C', function (o) {
     Check('C1 carga sola con modo=slot&slot=0, tres graficas, periodo del servidor, sin Analisis, control de Slot visible',
       [[{ modo: 'slot', slot: '0' }], true, true, true,
        'Periodo: Slot 0 · del 11/10/2026 al 09/11/2026 · Service Owner: todos · Grupo: todos · 500 tickets en el periodo', 0, 0, false, true], o.C1);
     // Acumulado 24, 42, 56, 67, 76, 83 -> 6 dentro.
-    Check('C2 Pareto: Top 10 de 12, azul de "Atencion por agente" hasta el 80 %, su aclarado despues; linea ambar y referencia gris sin cambio; categorias, grupos y leyenda con el mismo azul',
+    Check('C2 Pareto: Top 10 de 12, azul de "Atencion por agente" hasta el 80 %, la misma familia mas tenue despues; linea ambar y referencia gris sin cambio; categorias, grupos y leyenda con el mismo azul',
       [10, [AZUL, AZUL, AZUL, AZUL, AZUL, AZUL, CLARO, CLARO, CLARO, CLARO], 'line', '#d39a3a', [24, 42, 56], true, '#8a94a6',
-       AZUL, AZUL, AZUL, CLARO, 'rgb(37, 99, 235)'], o.C2);
+       AZUL, AZUL, CLARO, AZUL], o.C2);
     Check('C3 categorias: Top 15, eje en dos lineas, tooltip con la ruta completa, alto por filas',
       [15, ['Nivel intermedio con', 'nombre largo 0 › Detal…'],
        '/S-Servicio largo 0/Nivel intermedio con nombre largo 0/Detalle final de la categoria numero 0', 'y', '610px'], o.C3);
@@ -326,9 +333,9 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
       [true, [false, 'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.'], true], o.C13);
   });
   seccion(1, 'D', function (o) {
-    Check('D1 #concentracion: "Vista general de servicios" marcada, montada, pide slot 0, Analisis sin tocar',
+    Check('D1 #concentracion: "Vista general de servicios" marcada, montada, pide slot 0, Analisis sin tocar; el azul medido de una barra sin color (Atencion por agente) = el de la pestaña',
       ['Vista general de servicios', 'Vista general de servicios', true, 'page', true, ['0'], 0, 0, 0,
-       'Tickets Proactivanet — Vista general de servicios', true, '#2563eb'], o.D1);
+       'Tickets Proactivanet — Vista general de servicios', AZUL, AZUL], o.D1);
     Check('D2 Analisis igual que siempre: solo la lista de servicios, nada analizado', [1, 0, 'page', false], o.D2);
     Check('D3 volver: sin montar de nuevo ni repedir', [0, 1, true], o.D3);
   });

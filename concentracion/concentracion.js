@@ -286,21 +286,18 @@
      con ninguna barra- y la referencia del 80 % en gris pizarra punteado.
      La leyenda toma estos mismos valores al arrancar (concentracion.css solo
      trae el respaldo). */
-  /* Barras (2026-11-09, segunda vuelta): el MISMO azul de "Atencion por
-     agente" del Call Center. Esa grafica no declara color: toma el default
-     compartido de Barras.aplicarDefaults, que es Paleta.AZUL_SERIE
-     (PALETA_CATEGORICA[0]). Aqui se lee el token, no se copia el hex. El
-     resto despues del 80 % es ese mismo azul aclarado con blanco (aclarar),
-     calculado del token, para que el corte se siga viendo. */
-  function aclarar(hex, blanco) {
-    var c = String(hex).replace('#', '');
-    var canal = function (i) {
-      var v = parseInt(c.slice(i, i + 2), 16);
-      return ('0' + Math.round(v + (255 - v) * blanco).toString(16)).slice(-2);
-    };
-    return '#' + canal(0) + canal(2) + canal(4);
-  }
-  var COLOR = { dentro: Paleta.AZUL_SERIE, fuera: aclarar(Paleta.AZUL_SERIE, 0.65),
+  /* Barras: el MISMO azul que SE VE en "Atencion por agente" del Call Center.
+     Esa grafica no declara color y, aunque el default compartido es
+     Paleta.AZUL_SERIE, lo que pinta Chart.js 4.4.4 es el de su plugin
+     Colors para la primera serie sin color: fondo rgba(54, 162, 235, 0.5)
+     (medido en dashboard.html el 2026-11-09; ConcentracionHeadlessSmoke.js
+     lo vuelve a medir y lo compara). Chart.js no publica esa paleta, por eso
+     va escrito aqui, igual al caracter. El resto despues del 80 % es la misma
+     familia con menos opacidad, para que el corte se siga viendo. Sobre los
+     dos, la cifra dentro de la barra sale en tinta oscura, como en el Call
+     Center. */
+  var AZUL_AGENTE = 'rgba(54, 162, 235, 0.5)';
+  var COLOR = { dentro: AZUL_AGENTE, fuera: 'rgba(54, 162, 235, 0.2)',
                 acumulado: '#d39a3a', referencia: '#8a94a6' };
   var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1f6' };
 

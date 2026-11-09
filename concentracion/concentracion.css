@@ -67,9 +67,10 @@ header.top #conc-estado:empty { display: none; }
 .conc-leyenda span { display: inline-flex; align-items: center; gap: 6px; }
 .conc-leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
 /* Respaldo: concentracion.js las pinta al arrancar con COLOR (las barras
-   son Paleta.AZUL_SERIE, el azul de "Atencion por agente", y su aclarado). */
-.conc-leyenda .conc-dentro { background: #2563eb; }
-.conc-leyenda .conc-fuera  { background: #b3c8f8; }
+   son el azul que pinta "Atencion por agente", rgba(54, 162, 235, 0.5), y
+   la misma familia mas tenue). */
+.conc-leyenda .conc-dentro { background: rgba(54, 162, 235, 0.5); }
+.conc-leyenda .conc-fuera  { background: rgba(54, 162, 235, 0.2); }
 .conc-leyenda .conc-linea  { background: #d39a3a; height: 3px; border-radius: 2px; width: 16px; }
 .conc-leyenda .conc-ref    { height: 0; width: 16px; border-radius: 0; border-top: 2px dashed #8a94a6; }
 .conc-poblacion { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); max-width: 110ch; }
