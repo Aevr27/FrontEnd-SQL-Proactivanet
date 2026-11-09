@@ -48,18 +48,23 @@ var incierta = (html.match(/<li data-sesion-incierta hidden>[\s\S]*?<\/li>/) || 
 var botones = todas(html.replace(incierta, ''), /<button[^>]*class="mnav[^"]*"[^>]*>/g).map(function (m) { return m[0]; });
 var nombres = botones.map(function (b) { return (b.match(/data-tab="([^"]+)"/) || [])[1]; });
 
-// Nueve entradas: QA y QARE van juntas en "Calidad de información" y
-// Observabilidad (tablero) y Orquestación en "Observabilidad".
-// Concentración de tickets tiene entrada propia, justo despues de Analisis.
-comprobar('la barra trae las nueve entradas', nombres.length, 9);
+// Ocho entradas: QA y QARE van juntas en "Calidad de información",
+// Observabilidad (tablero) y Orquestación en "Observabilidad", y Analisis de
+// servicios y Vista general de servicios en "Servicios".
+comprobar('la barra trae las ocho entradas', nombres.length, 8);
 comprobar('la barra, en orden', nombres.join(','),
-  'sla,backlog,experiencia,efectividad,calidad,analisis,concentracion,observabilidad,call');
+  'sla,backlog,experiencia,efectividad,calidad,servicios,observabilidad,call');
 comprobar('rotulos exactos de los grupos',
   [/data-tab="observabilidad"[^>]*title="Observabilidad"/.test(html),
    /data-tab="calidad"[^>]*title="Calidad de información"/.test(html),
+   /data-tab="servicios"[^>]*title="Servicios"/.test(html),
    /<span class="mnav-txt">Observabilidad<\/span>/.test(html),
-   /<span class="mnav-txt">Calidad de información<\/span>/.test(html)].join(), 'true,true,true,true');
-['qa', 'qare', 'orquestacion', 'tablero'].forEach(function (n) {
+   /<span class="mnav-txt">Calidad de información<\/span>/.test(html),
+   /<span class="mnav-txt">Servicios<\/span>/.test(html)].join(), 'true,true,true,true,true,true');
+comprobar('rotulos del selector de Servicios',
+  [/id="snav-analisis" data-tab="analisis" type="button">Análisis de servicios</.test(html),
+   /id="snav-concentracion" data-tab="concentracion" type="button">Vista general de servicios</.test(html)].join(), 'true,true');
+['qa', 'qare', 'orquestacion', 'tablero', 'analisis', 'concentracion'].forEach(function (n) {
   comprobar('"' + n + '" ya no tiene entrada propia en la barra', nombres.indexOf(n), -1);
 });
 comprobar('ninguna entrada se quedo sin data-tab', nombres.filter(Boolean).length, nombres.length);
@@ -209,9 +214,10 @@ comprobar('admin: las secciones del tablero, en el mismo orden',
 comprobar('admin: mismo title que en el tablero',
   deTablero.map(function (a) { return (a.match(/title="([^"]+)"/) || [])[1]; }).join('|'),
   botones.map(function (b) { return (b.match(/title="([^"]+)"/) || [])[1]; }).join('|'));
-comprobar('admin: Efectividad y Analisis de servicios presentes', [
-  /href="\.\.\/dashboard\.html#efectividad"/.test(navAdmin), /href="\.\.\/dashboard\.html#analisis"/.test(navAdmin)].join(),
-  'true,true');
+comprobar('admin: Efectividad y Servicios presentes; Analisis y Vista general ya no sueltas', [
+  /href="\.\.\/dashboard\.html#efectividad"/.test(navAdmin), /href="\.\.\/dashboard\.html#servicios"/.test(navAdmin),
+  /href="\.\.\/dashboard\.html#analisis"/.test(navAdmin), /href="\.\.\/dashboard\.html#concentracion"/.test(navAdmin)].join(),
+  'true,true,false,false');
 comprobar('admin: ninguna entrada con data-tab', /data-tab/.test(navAdmin), false);
 // Ademas, Iniciativas (data-iniciativas): la misma del tablero, la actual.
 comprobar('admin: una mas (Iniciativas), siempre visible',

@@ -15,13 +15,13 @@ Una sola página, `dashboard.html`, con una barra lateral de pestañas (registro
 | Experiencia | `experiencia/` | `moduloEmbebido()` |
 | Calidad de información › QA | `qa/` | `moduloEmbebido()` |
 | Calidad de información › QARE | `qare/` | `moduloEmbebido()` |
-| Análisis de servicios | `analisis/` | `moduloEmbebido()` |
-| Vista general de servicios | `concentracion/` | `moduloEmbebido()`, independiente de Análisis de servicios (ver §3bis) |
+| Servicios › Análisis de servicios | `analisis/` | `moduloEmbebido()` |
+| Servicios › Vista general de servicios | `concentracion/` | `moduloEmbebido()`, independiente de Análisis de servicios (ver §3bis) |
 | Observabilidad › Observabilidad | `assets/Tablero_Experiencia.html` | `<iframe>` (ver §2.4) |
 | Observabilidad › Orquestación | `orquestacion/` | `moduloEmbebido()` |
 | Call Center | `dashboard.html` / `dashboard.js` | comparte la barra de filtros de SLA (`adoptarControlesSla`) |
 
-**Observabilidad** y **Calidad de información** son entradas de grupo (`GRUPOS` en `dashboard.js`): la barra muestra una sola entrada y un selector interno (`.subnav`) cambia entre sus dos módulos, que siguen siendo los mismos de `MODULOS`. Los hashes de siempre siguen valiendo (`#tablero`, `#orquestacion`, `#qa`, `#qare`); `#observabilidad` y `#calidad` abren el último módulo visto del grupo (el primero, la primera vez).
+**Observabilidad**, **Calidad de información** y **Servicios** (Análisis de servicios + Vista general de servicios) son entradas de grupo (`GRUPOS` en `dashboard.js`): la barra muestra una sola entrada y un selector interno (`.subnav`) cambia entre sus dos módulos, que siguen siendo los mismos de `MODULOS`. Los hashes de siempre siguen valiendo (`#tablero`, `#orquestacion`, `#qa`, `#qare`, `#analisis`, `#concentracion`); `#observabilidad`, `#calidad` y `#servicios` abren el último módulo visto del grupo (el primero, la primera vez).
 
 La entrada **Iniciativas** es un enlace a `admin/iniciativas.html`, no una pestaña; se ve para toda cuenta Windows autenticada (`handlers/admin_sesion.ashx` dice `"registro": true`). Dentro, el registro es de todos; **Solicitar una iniciativa** y **Solicitudes** (las propias) son de ADM, MOD y de los Product Owner / Service Owner vigentes (dueño de una fila vigente de `dbo.CatCategoriaDueno` **o** `dbo.CatPersona.Rol` = Product Owner / Service Owner, con la cuenta resuelta a una sola persona vigente por correo; Director no califica por rol; regla aditiva, ADM/MOD igual); **Administración** sigue siendo de ADM/MOD. La autorización real está en el servidor (`App_Code/AccesoIniciativas.cs` y `App_Code/AccesoAdmin.cs`); el interruptor `INICIATIVAS_ABIERTAS` ya no decide el acceso.
 

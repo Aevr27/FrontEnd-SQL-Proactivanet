@@ -89,7 +89,9 @@ Object.keys(MODULOS_FALSO).forEach(function (n) {
 });
 
 // --- grupos: #observabilidad y #calidad abren un modulo del grupo ---------
-comprobar('los dos grupos existen', Object.keys(GRUPOS).sort().join(','), 'calidad,observabilidad');
+comprobar('los tres grupos existen', Object.keys(GRUPOS).sort().join(','), 'calidad,observabilidad,servicios');
+comprobar('Servicios = Analisis de servicios + Vista general de servicios', GRUPOS.servicios.join(','), 'analisis,concentracion');
+comprobar('#servicios abre Analisis la primera vez', resolverModulo('servicios'), 'analisis');
 comprobar('Observabilidad = Orquestacion + Observabilidad (tablero)', GRUPOS.observabilidad.join(','), 'orquestacion,tablero');
 comprobar('Calidad de informacion = QA + QARE', GRUPOS.calidad.join(','), 'qa,qare');
 comprobar('#observabilidad abre Orquestacion la primera vez', resolverModulo('observabilidad'), 'orquestacion');
@@ -98,6 +100,8 @@ ultimo.calidad = 'qare';
 ultimo.observabilidad = 'tablero';
 comprobar('#calidad abre el ultimo visto (QARE)', resolverModulo('calidad'), 'qare');
 comprobar('#observabilidad abre el ultimo visto (Observabilidad)', resolverModulo('observabilidad'), 'tablero');
+ultimo.servicios = 'concentracion';
+comprobar('#servicios abre el ultimo visto (Vista general)', resolverModulo('servicios'), 'concentracion');
 Object.keys(GRUPOS).forEach(function (g) {
   comprobar('el grupo "' + g + '" no pisa una clave de MODULOS',
     Object.prototype.hasOwnProperty.call(MODULOS_FALSO, g), false);

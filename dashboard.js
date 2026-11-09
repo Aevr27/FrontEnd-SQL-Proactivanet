@@ -4433,11 +4433,13 @@ const MODULOS = {
    .subnav (dashboard.html) se ve. El primero de la lista es el que abre la
    entrada la primera vez; despues, el ultimo que se vio (`ultimoDeGrupo`,
    solo en memoria, como el estado de la barra). Ninguna clave de aqui puede
-   ser tambien una clave de MODULOS: el hash #observabilidad o #calidad abre
-   el grupo, y #tablero, #orquestacion, #qa o #qare el modulo, como antes. */
+   ser tambien una clave de MODULOS: el hash #observabilidad, #calidad o
+   #servicios abre el grupo, y #tablero, #orquestacion, #qa, #qare,
+   #analisis o #concentracion el modulo, como antes. */
 const GRUPOS = {
   observabilidad: ['orquestacion', 'tablero'],
   calidad: ['qa', 'qare'],
+  servicios: ['analisis', 'concentracion'],
 };
 const ultimoDeGrupo = {};
 

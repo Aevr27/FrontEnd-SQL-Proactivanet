@@ -34,8 +34,8 @@
 //          de su lienzo, con sus cuatro rotulos y colores; con la tarjeta a
 //          320 px envuelve sin salirse; ya no hay parrafo de poblacion.
 //   D  dashboard.html#concentracion (MOCK_DATA para SLA)
-//      D1  la entrada "Vista general de servicios" queda marcada, la pestaña
-//          se monta y pide concentracion.ashx sin pasar por Analisis.
+//      D1  la entrada de grupo "Servicios" y su boton "Vista general de
+//          servicios" quedan marcados (selector visible); la pestaña se monta y pide concentracion.ashx sin pasar por Analisis.
 //      D2  Analisis de servicios sigue igual: al abrirla pide SOLO la lista
 //          de servicios (accion=servicios) y no analiza nada.
 //      D3  volver no la monta de nuevo ni repide.
@@ -288,8 +288,9 @@ var sondaC = conComun(
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
-  'var b = document.getElementById("mtab-concentracion");\n' +
-  'apunta("D1", [b.querySelector(".mnav-txt").textContent, b.getAttribute("title"), b.classList.contains("active"), b.getAttribute("aria-current"),\n' +
+  'var b = document.getElementById("snav-concentracion"), g = document.getElementById("mtab-servicios");\n' +
+  'apunta("D1", [b.textContent, g.querySelector(".mnav-txt").textContent, b.classList.contains("active"), b.getAttribute("aria-current"),\n' +
+  '  g.classList.contains("active"), g.getAttribute("aria-current"), !document.querySelector(".subnav[data-grupo=servicios]").hidden,\n' +
   '  document.getElementById("tab-concentracion").classList.contains("active"), slots(), __pedidas["an-servicios"] || 0,\n' +
   '  __pedidas["an-otro"] || 0, document.getElementById("tab-analisis").childElementCount,\n' +
   '  document.querySelector("#tab-concentracion h1").textContent, colorAgente(),\n' +
@@ -297,7 +298,7 @@ var sondaD = conComun(
   'activarTab("analisis");\n' +
   'await hasta(function () { return (__pedidas["an-servicios"] || 0) >= 1 && document.querySelector("#tab-analisis select"); }, 8000);\n' +
   'await espera(300);\n' +
-  'apunta("D2", [__pedidas["an-servicios"], __pedidas["an-otro"] || 0, document.getElementById("mtab-analisis").getAttribute("aria-current"),\n' +
+  'apunta("D2", [__pedidas["an-servicios"], __pedidas["an-otro"] || 0, document.getElementById("snav-analisis").getAttribute("aria-current"), document.getElementById("mtab-servicios").getAttribute("aria-current"),\n' +
   '  document.getElementById("tab-concentracion").classList.contains("active")]);\n' +
   'var c0 = __pedidas.conc;\n' +
   'activarTab("concentracion"); await espera(300);\n' +
@@ -357,10 +358,10 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
       [true, [false, 'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.'], true], o.C13);
   });
   seccion(1, 'D', function (o) {
-    Check('D1 #concentracion: "Vista general de servicios" marcada, montada, pide slot 0, Analisis sin tocar; el azul medido de una barra sin color (Atencion por agente) = el de la pestaña',
-      ['Vista general de servicios', 'Vista general de servicios', true, 'page', true, ['0'], 0, 0, 0,
+    Check('D1 #concentracion: Servicios marcada en la barra y "Vista general de servicios" en su selector (visible), montada, pide slot 0, Analisis sin tocar; el azul medido de una barra sin color (Atencion por agente) = el de la pestaña',
+      ['Vista general de servicios', 'Servicios', true, 'page', true, 'page', true, true, ['0'], 0, 0, 0,
        'Tickets Proactivanet — Vista general de servicios', AZUL, AZUL], o.D1);
-    Check('D2 Analisis igual que siempre: solo la lista de servicios, nada analizado', [1, 0, 'page', false], o.D2);
+    Check('D2 Analisis igual que siempre: solo la lista de servicios, nada analizado', [1, 0, 'page', 'page', false], o.D2);
     Check('D3 volver: sin montar de nuevo ni repedir', [0, 1, true], o.D3);
   });
   // C14 / D4: la leyenda del Pareto, sola y embebida.
