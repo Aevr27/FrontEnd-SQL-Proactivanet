@@ -113,6 +113,13 @@ Check('R8 tickets con ticketsDe (FLOOR): 120 x 20% = 24; 1247 x 12.5% = 155; 7 x
   ['24', '155', '0', '7'],
   [Valor(Detalle(10), 'Tickets a reducir'), Valor(Detalle(10, { volumetria: 1247, pct: '12.5' }), 'Tickets a reducir'),
    Valor(Detalle(10, { volumetria: 7, pct: '9.46' }), 'Tickets a reducir'), Valor(Detalle(10, { volumetria: 7, pct: '100' }), 'Tickets a reducir')]);
+// HISTORICO (antes del % entero, 2026-11-05): la solicitud guardada con
+// decimales se muestra tal cual en la revision de ADM; una entera, sin
+// decimales.
+Check('R8b historico: % con decimales tal cual (12.5%, 33.33%) y el entero sin decimales (20%)', [true, true, true],
+  [/12\.5\s*%/.test(Valor(Detalle(10, { pct: '12.5' }), '% de disminución') || ''),
+   /33\.33\s*%/.test(Valor(Detalle(10, { pct: '33.33' }), '% de disminución') || ''),
+   /^20\s*%$/.test(String(Valor(Detalle(10), '% de disminución') || '').replace(/<[^>]+>/g, '').trim())]);
 Check('R8 volumetria 0: 0 tickets, sin error', ['0', '0'],
   [Valor(Detalle(10, { volumetria: 0 }), 'Volumetría'), Valor(Detalle(10, { volumetria: 0 }), 'Tickets a reducir')]);
 Check('R8 sin volumetria o sin %: placeholder —', ['—', '—', '—', '—'],

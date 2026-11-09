@@ -183,6 +183,19 @@ public static class SolicitudIniciativaSmoke
             Check("V2 % invalido '" + malo + "'", true, ValidadorIniciativa.Fraccion(malo) == null);
         Check("V3 33.33% -> 0.3333", "0.3333", ValidadorIniciativa.Fraccion("33.33"));
         Check("V3 1% -> 0.0100 (sin multiplos de 5)", "0.0100", ValidadorIniciativa.Fraccion("1"));
+        // V5) % ENTERO al ENVIAR (2026-11-05): Fraccion sigue aceptando dos
+        // decimales (Crear / Modificar de ADM y lo guardado), pero Nueva
+        // solicitud solo acepta enteros 0-100.
+        foreach (var bueno in new[] { "0", "1", "50", "99", "100" })
+            Check("V5 envio con % entero " + bueno + ": valido", "True|True", V(Completa("ADO", "/A/Cat 1", bueno), false, null).Valida + "|" + ValidadorIniciativa.EsPctEntero(bueno));
+        foreach (var malo in new[] { "12.5", "33.33", "0.5", "99.99", "100.00", "100.0", "12.", ".5", "1,5", "101", "1000", "-1", "abc" })
+        {
+            var rm = V(Completa("ADO", "/A/Cat 1", malo), false, null);
+            Check("V5 envio con % '" + malo + "': error en pct, sin decimales", "pct|El % debe ser un numero entero entre 0 y 100, sin decimales.|False",
+                  Campos(rm) + "|" + rm.Errores[0].Mensaje + "|" + ValidadorIniciativa.EsPctEntero(malo));
+        }
+        Check("V5 el % entero se guarda en la misma fraccion de 4 decimales (20 -> 0.2000)", "0.2000",
+              V(Completa("ADO", "/A/Cat 1", "20"), false, null).PctFraccion);
         var fv = Completa("ADO", "/A/Cat 1", "20"); fv["volumetria"] = "12.5";
         Check("V4 volumetria decimal", "volumetria", Campos(V(fv, false, null)));
         fv["volumetria"] = "99999999999";
@@ -365,6 +378,8 @@ public static class SolicitudIniciativaSmoke
         Check("A2 B sigue en 100% con A al 50%", "1.0000", a50.Para("/B/Cat 3").Disponible);
         Check("A2 pedir exactamente lo que queda (50): pasa", true, V(Completa("ADO", "/A/Cat 1", "50"), false, a50).Valida);
         Check("A2 pedir 50.01: rechaza", "pct", Campos(V(Completa("ADO", "/A/Cat 1", "50.01"), false, a50)));
+        Check("A2 pedir 51 con 50 disponible: rechaza por capacidad, sin decimales en el aviso", "pct|La categoria solo tiene 50% de capacidad disponible.",
+              Campos(V(Completa("ADO", "/A/Cat 1", "51"), false, a50)) + "|" + V(Completa("ADO", "/A/Cat 1", "51"), false, a50).Errores[0].Mensaje);
         Check("A2 B puede pedir 100 con A al 50", true, V(Completa("ADO", "/B/Cat 3", "100"), false, a50).Valida);
         var inactivas = new CapacidadCategoria(new[]
         {
@@ -379,8 +394,14 @@ public static class SolicitudIniciativaSmoke
         Check("A2 39% cabe, 39.01% no", "True|pct",
               V(Completa("ADO", "/A/Cat 1", "39"), false, dec).Valida + "|" + Campos(V(Completa("ADO", "/A/Cat 1", "39.01"), false, dec)));
         var dec2 = new CapacidadCategoria(new[] { K("E 1", "/A/Cat 1", 0.3333m, true), K("E 2", "/A/Cat 1", 0.3333m, true) });
-        Check("A2 33.33+33.33: 33.34% disponible y cabe exacto", "0.3334|True",
-              dec2.Para("/A/Cat 1").Disponible + "|" + V(Completa("ADO", "/A/Cat 1", "33.34"), false, dec2).Valida);
+        // % entero: con 33.34% disponible se puede pedir hasta 33 (hacia abajo).
+        var r34 = V(Completa("ADO", "/A/Cat 1", "34"), false, dec2);
+        Check("A2 33.33+33.33: 33.34% disponible; 33 cabe, 34 no (aviso entero: 33%)",
+              "0.3334|True|pct|La categoria solo tiene 33% de capacidad disponible.",
+              dec2.Para("/A/Cat 1").Disponible + "|" + V(Completa("ADO", "/A/Cat 1", "33"), false, dec2).Valida + "|" + Campos(r34) + "|" + r34.Errores[0].Mensaje);
+        Check("A2 ComoPctEntero: hacia abajo, sin decimales", "33%|40%|0%|100%",
+              ValidadorIniciativa.ComoPctEntero(0.3334m) + "|" + ValidadorIniciativa.ComoPctEntero(0.4000m) + "|" +
+              ValidadorIniciativa.ComoPctEntero(0.0099m) + "|" + ValidadorIniciativa.ComoPctEntero(1.0000m));
 
         // ---- D2) cascada y autorizacion -------------------------------------
         var fpo = Completa("ADO", "/A/Cat 1", "20"); fpo["po"] = "PO inventado";

@@ -293,13 +293,13 @@ public static class SolicitudesCambioHttpSmoke
         cuerpo = Correr("GET", "accion=enviar", MOD, null, out estado);
         Check("B8 GET enviar: 405", 405, estado);
         cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "alcance",
-            "pct_categoria", "/A/Cat 1", "pct_valor", "40", "agregar_categoria", "/A/Cat 2", "agregar_pct", "12.5",
+            "pct_categoria", "/A/Cat 1", "pct_valor", "40", "agregar_categoria", "/A/Cat 2", "agregar_pct", "12",
             "agregar_tipo_iniciativa", "Inventado", "agregar_tipo_agrupado", "Inventado"), out estado);
         p = alm.UltimaPeticion;
         var pct = p.Categorias.First(c => c.Accion == "PCT");
         var agr = p.Categorias.First(c => c.Accion == "AGREGAR");
         Check("B9 % en fraccion; la clasificacion de una nueva sale del PREFIJO, no del formulario",
-              "0.4000|0.1250|Problem|Problem|null|null",
+              "0.4000|0.1200|Problem|Problem|null|null",
               pct.Pct.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture) + "|" + agr.Pct.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture)
               + "|" + agr.TipoIniciativa + "|" + agr.TipoAgrupado + "|" + (pct.TipoIniciativa ?? "null") + "|" + (pct.TipoAgrupado ?? "null"));
         cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "XYZ 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
@@ -320,14 +320,28 @@ public static class SolicitudesCambioHttpSmoke
         cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
             "agregar_categoria", " /a/cat 3 ", "agregar_pct", "10"), out estado);
         Check("B12 se compara como el catalogo (NBSP, espacios, sin mayusculas): 200", 200, estado);
-        // Lo que manda "Tickets" (pctDeTickets / MetaCategoria.pct: dos
-        // decimales) se guarda exacto con la regla de siempre (Math.Round(pct/100, 4)).
-        foreach (var caso in new[] { new[] { "42.86", "0.4286" }, new[] { "0.01", "0.0001" }, new[] { "23.93", "0.2393" }, new[] { "100", "1.0000" } })
+        // Lo que manda "Tickets" (MetaCategoria.pctEntero: % ENTERO desde
+        // 2026-11-05) se guarda exacto con la regla de siempre (Math.Round(pct/100, 4)).
+        // Limites: 0 (minimo) y 100 (maximo).
+        foreach (var caso in new[] { new[] { "43", "0.4300" }, new[] { "1", "0.0100" }, new[] { "24", "0.2400" }, new[] { "100", "1.0000" }, new[] { "0", "0.0000" } })
         {
             cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
                 "agregar_categoria", "/A/Cat 2", "agregar_pct", caso[0]), out estado);
-            Check("B12b % de tickets " + caso[0] + ": 200 y se guarda " + caso[1], "200|" + caso[1],
+            Check("B12b % entero " + caso[0] + ": 200 y se guarda " + caso[1], "200|" + caso[1],
                   estado + "|" + alm.UltimaPeticion.Categorias[0].Pct.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        // Decimales (los que antes pasaban) y fuera de rango: 422, no se envia.
+        int estado2;
+        foreach (var malo in new[] { "42.86", "0.01", "12.5", "99.99", "100.0", "12.", ".5", "12,5", "101", "-1" })
+        {
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+                "agregar_categoria", "/A/Cat 2", "agregar_pct", malo), out estado);
+            var ligada = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+                "pct_categoria", "/A/Cat 1", "pct_valor", malo), out estado2);
+            Check("B12c % '" + malo + "' (agregar y ligada): 422 con el aviso de % entero, no se envia", "422|True|422|True|0",
+                  estado + "|" + cuerpo.Contains("porcentaje entero entre 0 y 100, sin decimales") + "|" + estado2 + "|" +
+                  ligada.Contains("porcentaje entero entre 0 y 100, sin decimales") + "|" + alm.Llamadas.Count);
         }
         alm.Llamadas.Clear(); leidasCatalogo = 0;
         cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
@@ -712,6 +726,14 @@ public static class SolicitudesCambioHttpSmoke
             Func<Dictionary<string, object>, ResultadoGestionAdmin> real = det =>
                 new ValidadorGestionAdmin().Modificar(PeticionModificarAdmin.DesdeFormulario(SolicitudesCambio.ComoModificar(det, null)),
                                                       actualIni, new CapacidadCategoria.Compromiso[0], catalogo, estados);
+            // HISTORICO: una solicitud de antes del % entero (pct_nuevo con
+            // decimales, guardada en adm.SolicitudCambioCategoria) se sigue
+            // aprobando con la validacion de aplicar de siempre.
+            var historica = Pendiente("CATEGORIAS", MOD, Cat("PCT", "/A/Cat 1", "12.5", null, null, "30", "30", true));
+            var rh = real(historica);
+            var fh = SolicitudesCambio.ComoModificar(historica, null);
+            Check("G14b solicitud historica con 12.5%: ComoModificar la manda tal cual y aplicar la valida", "12.5|True",
+                  fh["pct_valor"] + "|" + rh.Valida);
             dd["cambia_so"] = false; dd["so_nuevo"] = null; dd["so_anterior"] = null;
             var sinDuenos = real(dd);
             Check("G15 sin sql/24 (ModificaDuenosYQuita false): el PO pedido NO se aplica (error po); nunca en silencio", "False|po",
@@ -782,24 +804,29 @@ public static class SolicitudesCambioHttpSmoke
             Func<string> Res = () => estado + "|" + cuerpo.Contains("CapacidadExcedida") + "|" + alm.Llamadas.Count(x => x == "Enviar");
 
             alm.Llamadas.Clear(); leidasCapacidad = 0;
-            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54.88"), out estado);
-            Check("C1 dentro del tope (54.88 = 100 - 34 - 11.12; el 20% propio no se suma, el pedido lo reemplaza): 200, se guarda, se leyo la capacidad",
+            // % ENTERO (2026-11-05): disponible 54.88% -> se puede pedir hasta 54.
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54"), out estado);
+            Check("C1 dentro del tope (54 <= 54.88 = 100 - 34 - 11.12; el 20% propio no se suma, el pedido lo reemplaza): 200, se guarda, se leyo la capacidad",
                   "200|False|1|1", Res() + "|" + leidasCapacidad);
             alm.Llamadas.Clear();
-            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54.89"), out estado);
-            Check("C2 54.89: 422 CapacidadExcedida, enviada false, NO se guarda", "422|True|0|True", Res() + "|" + cuerpo.Contains("\"enviada\":false"));
-            Check("C2 ... mensaje accionable con el disponible, campo categoria", "True|True",
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("55"), out estado);
+            Check("C2 55: 422 CapacidadExcedida, enviada false, NO se guarda", "422|True|0|True", Res() + "|" + cuerpo.Contains("\"enviada\":false"));
+            Check("C2 ... mensaje accionable con el disponible (el mismo de aplicar), campo categoria", "True|True",
                   cuerpo.Contains("/T/Cat 1: solo tiene 54.88% disponible sin contar esta iniciativa") + "|" + cuerpo.Contains("\"campo\":\"categoria\""));
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54.89"), out estado);
+            Check("C2b 54.89 (decimales): 422 por formato, sin leer capacidad ni guardar", "422|True|0|False",
+                  estado + "|" + cuerpo.Contains("porcentaje entero entre 0 y 100, sin decimales") + "|" + alm.Llamadas.Count + "|" + cuerpo.Contains("CapacidadExcedida"));
             cuerpo = Correr("POST", "accion=enviar", MOD, Pct("100"), out estado);
             Check("C3 100%: 422, no se guarda", "422|True|0", Res());
 
             // Misma regla y mismo mensaje que aplicar (ValidadorGestionAdmin.Modificar).
             var fmTope = new NameValueCollection { { "accion", "modificar" }, { PeticionModificarAdmin.CFolio, "PRB 2026-000101" },
-                                               { PeticionModificarAdmin.CPctCategoria, "/T/Cat 1" }, { PeticionModificarAdmin.CPctValor, "54.89" } };
+                                               { PeticionModificarAdmin.CPctCategoria, "/T/Cat 1" }, { PeticionModificarAdmin.CPctValor, "55" } };
             var alAplicar = new ValidadorGestionAdmin().Modificar(PeticionModificarAdmin.DesdeFormulario(fmTope), capacidades["PRB 2026-000101"].Actual, compromisos);
             var alEnviar = SolicitudesCambio.ErroresCapacidad(PeticionSolicitudCambio.DesdeFormulario(new NameValueCollection
                 { { "folio", "PRB 2026-000101" }, { "llave", Llave }, { "tipo", "categorias" }, { "motivo", "m" },
-                  { "pct_categoria", "/T/Cat 1" }, { "pct_valor", "54.89" } }), capacidades["PRB 2026-000101"]);
+                  { "pct_categoria", "/T/Cat 1" }, { "pct_valor", "55" } }), capacidades["PRB 2026-000101"]);
             Check("C4 el envio y aplicar dan el MISMO motivo", "True|" + string.Join(" ", alEnviar.ToArray()),
                   (!alAplicar.Valida) + "|" + string.Join(" ", alAplicar.Errores.Where(x => x.Campo == "pct").Select(x => x.Mensaje).ToArray()));
 
@@ -817,7 +844,7 @@ public static class SolicitudesCambioHttpSmoke
             Check("C6 fila ReqOpr (no consume): sin tope, 200", "200|False|1", Res());
 
             // Por agregar: la Agrupacion del prefijo (PRB -> Problem) consume.
-            foreach (var caso in new[] { new[] { "40", "200|False|1" }, new[] { "40.01", "422|True|0" } })
+            foreach (var caso in new[] { new[] { "40", "200|False|1" }, new[] { "41", "422|True|0" } })
             {
                 alm.Llamadas.Clear();
                 cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Guid.NewGuid().ToString(), "tipo", "categorias", "motivo", "m",

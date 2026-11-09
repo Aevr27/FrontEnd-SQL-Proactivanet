@@ -15,12 +15,13 @@ Una sola página, `dashboard.html`, con una barra lateral de pestañas (registro
 | Experiencia | `experiencia/` | `moduloEmbebido()` |
 | Calidad de información › QA | `qa/` | `moduloEmbebido()` |
 | Calidad de información › QARE | `qare/` | `moduloEmbebido()` |
-| Análisis de servicios | `analisis/` | `moduloEmbebido()` |
+| Servicios › Vista general de servicios | `concentracion/` | `moduloEmbebido()`, independiente de Análisis de servicios (ver §3bis) |
+| Servicios › Análisis de servicios | `analisis/` | `moduloEmbebido()` |
 | Observabilidad › Observabilidad | `assets/Tablero_Experiencia.html` | `<iframe>` (ver §2.4) |
 | Observabilidad › Orquestación | `orquestacion/` | `moduloEmbebido()` |
 | Call Center | `dashboard.html` / `dashboard.js` | comparte la barra de filtros de SLA (`adoptarControlesSla`) |
 
-**Observabilidad** y **Calidad de información** son entradas de grupo (`GRUPOS` en `dashboard.js`): la barra muestra una sola entrada y un selector interno (`.subnav`) cambia entre sus dos módulos, que siguen siendo los mismos de `MODULOS`. Los hashes de siempre siguen valiendo (`#tablero`, `#orquestacion`, `#qa`, `#qare`); `#observabilidad` y `#calidad` abren el último módulo visto del grupo (el primero, la primera vez).
+**Observabilidad**, **Calidad de información** y **Servicios** (Vista general de servicios + Análisis de servicios) son entradas de grupo (`GRUPOS` en `dashboard.js`): la barra muestra una sola entrada y un selector interno (`.subnav`) cambia entre sus dos módulos, que siguen siendo los mismos de `MODULOS`. Los hashes de siempre siguen valiendo (`#tablero`, `#orquestacion`, `#qa`, `#qare`, `#analisis`, `#concentracion`); `#observabilidad`, `#calidad` y `#servicios` abren el último módulo visto del grupo (el primero, la primera vez).
 
 La entrada **Iniciativas** es un enlace a `admin/iniciativas.html`, no una pestaña; se ve para toda cuenta Windows autenticada (`handlers/admin_sesion.ashx` dice `"registro": true`). Dentro, el registro es de todos; **Solicitar una iniciativa** y **Solicitudes** (las propias) son de ADM, MOD y de los Product Owner / Service Owner vigentes (dueño de una fila vigente de `dbo.CatCategoriaDueno` **o** `dbo.CatPersona.Rol` = Product Owner / Service Owner, con la cuenta resuelta a una sola persona vigente por correo; Director no califica por rol; regla aditiva, ADM/MOD igual); **Administración** sigue siendo de ADM/MOD. La autorización real está en el servidor (`App_Code/AccesoIniciativas.cs` y `App_Code/AccesoAdmin.cs`); el interruptor `INICIATIVAS_ABIERTAS` ya no decide el acceso.
 
@@ -87,6 +88,7 @@ Lo que hace el código; si un handler responde o no, y la fecha que muestra, dep
 | Experiencia | `handlers/experiencia.ashx`; **si no responde**, `experiencia/data/experiencia.mock.json` (corte guardado a mano) | En vivo: sello y periodo del servidor. Respaldo: aviso «Datos de respaldo, no en vivo» arriba y la pastilla dice «Datos de respaldo, no en vivo · Corte: dd/mm/aaaa» con la fecha guardada en el propio archivo |
 | QA, QARE | `handlers/qa.ashx`, `handlers/qare.ashx` | sello (y periodo) de `dataInfo` |
 | Análisis de servicios | `handlers/analisis.ashx` | no muestra sello de frescura |
+| Vista general de servicios | `handlers/concentracion.ashx` (filas de ticket de `dbo.vw_ServicioTickets` del periodo; caché de 5 min por periodo y día) | «Última actualización»: sello del ETL (`dbo.EtlLog`); «Periodo»: las fechas del Slot o del mes, calculadas en el servidor |
 | Orquestación | `handlers/orquestacion.ashx` (vistas del `sql/77_tablero_orquestacion.sql` sobre el esquema `orq` del 76) | «Carga del Excel»: `FechaFin` de la última `orq.CargaLote` aplicada |
 | Tablero (Observabilidad) | `assets/Tablero_Experiencia.html`, un archivo **generado** (TableroExperiencia_v3.7.exe) con los datos dentro; no consulta SQL | «Instantánea generada el dd/mm/aaaa · no se actualiza en vivo» en la cabecera de cada panel, copiada del pie «Generado el ...» que pone el generador. Si el archivo no trae esa fecha, no se muestra ninguna |
 
@@ -99,7 +101,7 @@ Además:
 #### Refresco automático
 
 - **Intervalo:** `RefrescoAuto.INTERVALO_DATOS` en `assets/js/refresco-auto.js` (5 min). Es el único sitio donde se cambia. Las listas de Solicitudes en Admin siguen con `RefrescoAuto.INTERVALO` (2 min).
-- **Qué se refresca:** solo la pestaña a la vista. En el tablero: SLA y Call Center (una sola carga), Backlog, QARE, QA, Experiencia, Efectividad y Orquestación, con un único temporizador (`dashboard.js`, sección 4ter; cada módulo publica su `refrescar()` y el router lo conoce por `refrescoDe()`). En Admin: el registro de Iniciativas (`VistaRegistro.refrescarFondo`), solo con la lista a la vista y sin detalle abierto. No se refrescan Análisis (se calcula con el botón Analizar sobre el servicio elegido, con una descarga grande que procesa un Worker, y su hoja «Reglas» tiene cambios de prueba sin guardar) ni Observabilidad (instantánea generada, no consulta SQL).
+- **Qué se refresca:** solo la pestaña a la vista. En el tablero: SLA y Call Center (una sola carga), Backlog, QARE, QA, Experiencia, Efectividad, Orquestación y Vista general de servicios, con un único temporizador (`dashboard.js`, sección 4ter; cada módulo publica su `refrescar()` y el router lo conoce por `refrescoDe()`). En Admin: el registro de Iniciativas (`VistaRegistro.refrescarFondo`), solo con la lista a la vista y sin detalle abierto. No se refrescan Análisis (se calcula con el botón Analizar sobre el servicio elegido, con una descarga grande que procesa un Worker, y su hoja «Reglas» tiene cambios de prueba sin guardar) ni Observabilidad (instantánea generada, no consulta SQL).
 - **Montaje:** cada pestaña se sigue montando la primera vez que se abre, no al cargar la página. Montarlas todas al arrancar no habilitaba el refresco (lo que faltaba era la carga en modo «fondo» de cada módulo) y sumaría al inicio el HTML, el script y la consulta de cada una —Experiencia y la segunda fase de QA son las más pesadas— además de gráficas medidas en cero dentro de un contenedor oculto. Una pestaña ya montada que no se está viendo no pide nada; al volver a ella, si sus datos ya pasaron el intervalo, se refresca en ese momento y sin volver a montarse.
 - **Cómo:** la misma carga del botón, en modo «fondo». Se conservan los filtros, la selección por clic y lo que se está escribiendo. No se refresca con la pestaña del navegador oculta (al volver, si ya pasó el intervalo, refresca una vez), con un campo con el foco ni con un desplegable abierto. Nunca hay dos peticiones encimadas.
 - **Por módulo:**
@@ -110,6 +112,42 @@ Además:
 - **«Actualizar»:** cada una de esas pestañas tiene el botón. Pide en ese momento y queda deshabilitado mientras la petición está en vuelo.
 - **«Consultado: dd/mm/aaaa · hh:mm»:** renglón aparte en la pastilla (o junto al título en Admin). Solo avanza con una respuesta correcta. Si un refresco falla, los datos anteriores se quedan y se agrega «⚠ No se pudo actualizar (hh:mm); se muestran los datos anteriores».
 - **Límites de origen:** el refresco solo trae lo que ya está en SQL. SLA y Call Center pasan además por la caché del servidor (`DashboardQueries.SegundosCache`, 300 s), así que un cambio puede tardar hasta unos 5 min más. Backlog es una foto diaria (`dbo.CorreoBacklogSnapshot`): si se está viendo el último corte y llega uno nuevo, el refresco cambia a ese corte. El registro de Iniciativas lee `dbo.Problem` sin caché: un PRB editado en Proactivanet aparece cuando el ETL del repositorio de integración lo carga. Este repositorio no cambia la programación del ETL.
+
+## 3bis. Vista general de servicios
+
+Pestaña propia en la barra lateral, justo debajo de **Análisis de servicios**. Se llamó «Concentración de tickets» hasta el 2026-11-09; la carpeta (`concentracion/`), el handler (`concentracion.ashx`), el contenedor y el hash (`#concentracion`) conservan ese nombre para no romper enlaces. Es una vista **global**: carga sola al abrirse, sin elegir servicio, y no lee, cambia ni comparte nada con Análisis de servicios, que sigue esperando a que se elija un servicio y se pulse Analizar.
+
+### Filtros
+
+| Filtro | Qué hace |
+|---|---|
+| **Periodo por: Slot / Mes** | Uno a la vez; el botón elegido muestra su control y oculta el otro. Nunca se combinan (la intersección de una ventana rodante y un mes calendario sería parcial y ambigua). |
+| **Slot** (0–12, 0 por omisión) | La columna `Slot` de `dbo.vw_Tickets`, sin cambiar su cálculo: **Slot k = hoy−(30k+29) … hoy−30k**, 30 días con hoy dentro del Slot 0 (comprobado contra QA el 2026-11-09). No es el SLOT del stepper de SLA (cuenta desde ayer y el 0 mide 31 días). |
+| **Mes** | Mes calendario por `FechaRegistro`: el mes en curso (hasta hoy) y los 12 anteriores, el mismo alcance que los Slots. |
+| **Service Owner** (varios) | El SO de la **categoría** del ticket según `dbo.CatCategoriaDueno`: el de su C1&C2 exacto o, si no está capturado, el de su C1 (`App_Code/DirectorioOrganizacional.cs`, la única resolución de dueños del sitio, la misma de Experiencia; llaves `fn_CategoriaC1` / `fn_CategoriaC1C2` de la categoría). Los tickets sin SO resuelto se eligen como «(Sin Service Owner)». No se usa `dbo.CatServiceOwner` (la tabla de las vistas viejas de slots). |
+| **Grupo** (varios) | `Grupo` del ticket (el grupo asignado). |
+
+Varios valores de un filtro = cualquiera de ellos; filtros distintos = todos a la vez. Los filtros se aplican a las **tres** gráficas. Bajo los controles, una línea dice lo aplicado (periodo con sus fechas reales, SO, Grupo y «N de M tickets del periodo»). Las listas de SO y Grupo salen de los tickets del periodo, con su conteo; lo elegido que ya no aparece se conserva con 0. **Limpiar** quita SO y Grupo; el periodo se queda. «Actualizar» y el refresco automático piden con los mismos filtros y no los reinician.
+
+### Gráficas
+
+| Gráfica | Qué pinta |
+|---|---|
+| Concentración de tickets por servicio (Pareto, a todo el ancho) | Top 10 por **código de servicio** (`CatServicioCorreo.Servicio`, rotulado con su `Descripcion`; PU y WMS son una barra cada uno), % acumulado en línea y referencia 80 % punteada |
+| Tickets por categoría (abajo, izquierda) | Top 15 en barras horizontales; el eje muestra los dos últimos niveles de la ruta en dos líneas y el tooltip la ruta completa |
+| Tickets por grupo (abajo, derecha) | Top 15 en barras horizontales |
+
+- **Cuenta:** la misma de los procedimientos `usp_CorreoServicio_*`, sobre los tickets ya filtrados: tickets distintos por etiqueta, total = suma, orden por cantidad y nombre, porcentajes a 2 decimales. El acumulado y el 80 % se calculan sobre **todas** las filas; el Top 10/15 solo recorta lo que se pinta. Cada gráfica muestra **su propio** total (categorías sin categoría y grupos sin grupo quedan fuera).
+- **Colores** (2026-11-09): azul acero `#5b84b1` hasta alcanzar el 80 % (la barra que lo cruza incluida), azul claro `#c3d5ea` el resto, acumulado en ámbar apagado `#d39a3a`, referencia en gris pizarra punteado `#8a94a6`.
+- **Cobertura:** si el periodo tiene tickets en menos días de los que mide (sin contar hoy), sale un aviso discreto con el primer y último día con datos. Se mide sobre todos los tickets del periodo, antes de SO y Grupo. En QA la historia empieza el 2025-11-19.
+
+### De dónde salen los datos
+
+- Los tres procedimientos (`dbo.usp_CorreoServicio_Pareto`, `_TicketsCategoria`, `_TicketsGrupo`, versionados tal cual en `sql/81_concentracion_tickets.sql`) solo aceptan `@Slot`. Para Mes, Service Owner y Grupo había que cambiarles el contrato o crear objetos nuevos; se decidió (2026-11-09) que la pestaña **ya no los llame** y lea la misma vista, `dbo.vw_ServicioTickets`, con una consulta parametrizada de solo lectura (`App_Code/ConcentracionQueries.cs`), como Experiencia con sus vistas. Los procedimientos quedan en la base **sin tocar**.
+- `sql/82_pareto_por_servicio.sql` sigue **pendiente** (propiedad y consumidores del procedimiento sin confirmar) y ya no hace falta para la pestaña: el Pareto por código se calcula en la aplicación. La prueba de paridad comprueba que, con los mismos datos, categorías y grupos salen idénticos a 81 y el Pareto idéntico a 82.
+- **Conexión y permisos:** la cadena `TicketsProactivanet` de siempre. Necesita SELECT sobre `dbo.vw_ServicioTickets`, `dbo.CatServicioCorreo`, `dbo.CatCategoriaDueno` y `dbo.CatPersona`, y EXECUTE sobre `dbo.fn_CategoriaC1C2`. En QA, el usuario SQL `PROACTIVANETAD` tiene `db_datareader` y EXECUTE sobre el esquema `dbo`. Qué login usa el sitio lo dice el `Web.config` del servidor (`sql/diag_concentracion_consumidores_identidad.sql`, sección I).
+- **Errores:** si no se puede leer el periodo, 500 y la banda de error. Si no se puede leer el catálogo de dueños, las gráficas siguen sin el filtro de SO y lo dicen en avisos; con un SO elegido, 500 (no se ignora un filtro en silencio).
+- **Pruebas:** `tools/tests/ConcentracionVistaSmoke.js` (parte pura), `ConcentracionContratoSmoke.cs` (contrato, paridad con 81/82 y filtros sobre LocalDB) y `ConcentracionHeadlessSmoke.js` (Chrome: filtros, refrescos, la pestaña suelta y `dashboard.html#concentracion`).
 
 ## 3. Dashboard de Backlog
 
@@ -192,6 +230,7 @@ experiencia/
 qa/
 qare/
 analisis/
+concentracion/
 admin/
 handlers/        (todos los .ashx)
 App_Code/

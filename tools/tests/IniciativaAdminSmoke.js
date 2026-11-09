@@ -1999,8 +1999,8 @@ pruebas.push(function () {
 });
 
 // SCT) Solicitar cambios: % o Tickets por categoria. Viaja SIEMPRE el %
-// (pct_valor / agregar_pct); los tickets se convierten con
-// MetaCategoria.pct sobre la volumetria SLOT 0 de la ruta.
+// ENTERO (pct_valor / agregar_pct; 2026-11-05); los tickets se convierten
+// con MetaCategoria.pctEntero sobre la volumetria SLOT 0 de la ruta.
 pruebas.push(function () {
   var R = base.ventana.RegistroIniciativas;
   function Nueva() {
@@ -2016,16 +2016,47 @@ pruebas.push(function () {
   c.fijarPct('/A/Cat 1', '30');
   Check('SCT1 en % todo sigue igual: viaja el % escrito', [['/A/Cat 1'], ['30'], []], [par(c, 'pct_categoria'), par(c, 'pct_valor'), errs(c)]);
 
+  // % ENTERO: minimo 0, maximo 100, sin decimales (ligada y por agregar).
+  var ENTERO = 'escribe un porcentaje entero entre 0 y 100, sin decimales.';
+  [['0', []], ['1', []], ['100', []], ['99', []]].forEach(function (k) {
+    var x = Nueva(); x.fijarPct('/A/Cat 1', k[0]);
+    Check('SCTE limite ' + k[0] + '%: se acepta y viaja tal cual', [[k[0]], k[1]], [par(x, 'pct_valor'), errs(x)]);
+  });
+  ['30.5', '0.5', '99.99', '100.0', '12.', '.5', '101', '1000', '-1', '12,5', 'x'].forEach(function (v) {
+    var x = Nueva(); x.fijarPct('/A/Cat 1', v);
+    Check('SCTE ligada "' + v + '": rechazado con el aviso de % entero', true, errs(x).indexOf('/A/Cat 1: ' + ENTERO) >= 0);
+  });
+  var xn = Nueva(); xn.agregarCategoria('/B/Cat 4'); xn.capturarPctNueva(0, '12.5');
+  Check('SCTE por agregar con decimales: rechazado', true, errs(xn).indexOf('/B/Cat 4: ' + ENTERO) >= 0);
+  xn.capturarPctNueva(0, '12');
+  Check('SCTE por agregar entero: pasa y viaja 12', [[], ['12']], [errs(xn), par(xn, 'agregar_pct')]);
+  var fuenteRegistro = leer('admin/registro-iniciativas.js');
+  Check('SCTE la casilla del % es entera: paso 1, teclado numerico (no step 0.01)', [true, false],
+    [/inputmode="numeric" min="0" max="100" step="1" data-cambio-pct=/.test(fuenteRegistro) && /inputmode="numeric" min="0" max="100" step="1" data-cambio-nueva-pct=/.test(fuenteRegistro),
+     /step="0\.01" data-cambio/.test(fuenteRegistro)]);
+
+  // Historico: el % ACTUAL guardado con decimales (33.33%) se muestra tal
+  // cual; pedir 33 es un cambio (no "igual al actual") y viaja entero.
+  var hx = new R.SolicitudCambio(Ini('PRB 2026-000061', { po_capturado: 'PO 3', so_capturado: 'SO z', categorias: [Cat('/A/Cat 1', 0.3333)] }),
+    { rutas: RUTAS.map(function (f) { return f.categoria; }), rutasEstado: 'ok', filas: RUTAS });
+  hx.elegir('pct'); hx.motivo = 'm'; hx.fijarPct('/A/Cat 1', '33');
+  var Lh = new R.ListaSolicitudCambio(hx.iniciativa, { rutas: RUTAS.map(function (f) { return f.categoria; }), rutasEstado: 'ok', filas: RUTAS });
+  Check('SCTH % actual historico 33.33%: se ve tal cual; 33 entero es un cambio valido y viaja 33',
+    ['33.33', [], ['33'], 'Categorías: /A/Cat 1: 33.33% → 33%'],
+    [hx.pctActual('/A/Cat 1'), errs(hx), par(hx, 'pct_valor'), Lh.texto(R.ListaSolicitudCambio.desdeBorrador(hx)).linea]);
+  hx.fijarPct('/A/Cat 1', '33.33');
+  Check('SCTH ... repetir el historico con decimales tampoco se envia (pide entero)', true, errs(hx).indexOf('/A/Cat 1: ' + ENTERO) >= 0);
+
   c = Nueva();
   c.agregarCategoria('/B/Cat 4');
   c.elegirModoMeta('/B/Cat 4', 'tickets');
   c.fijarVolumetria('/B/Cat 4', { estado: 'ok', valor: 7 });
   c.capturarTickets('/B/Cat 4', '3');
   var r = c.conversion('/B/Cat 4');
-  Check('SCT2 3 tickets de 7: 42.86% exacto (FLOOR de 7 x 42.86% = 3)', ['42.86', true, 3], [r.pct, r.exacto, r.tickets]);
-  Check('SCT2 viaja el % convertido, no los tickets', [['/B/Cat 4'], ['42.86'], false],
+  Check('SCT2 3 tickets de 7: 43% (el menor entero; FLOOR de 7 x 43% = 3) exacto', ['43', true, 3], [r.pct, r.exacto, r.tickets]);
+  Check('SCT2 viaja el % entero convertido, no los tickets', [['/B/Cat 4'], ['43'], false],
     [par(c, 'agregar_categoria'), par(c, 'agregar_pct'), JSON.stringify(c.pares()).indexOf('ticket') >= 0]);
-  Check('SCT2 el % enviado es el que guarda la base (fraccion de 4 decimales: Math.Round(42.86/100, 4))', 0.4286,
+  Check('SCT2 el % enviado es el que guarda la base (fraccion de 4 decimales: Math.Round(43/100, 4))', 0.43,
     Math.round(Number(par(c, 'agregar_pct')[0]) / 100 * 10000) / 10000);
   Check('SCT2 la ida y vuelta da los tickets pedidos', 3, I.ticketsDe(7, par(c, 'agregar_pct')[0]));
   Check('SCT2 sin errores', [], errs(c));
@@ -2033,7 +2064,7 @@ pruebas.push(function () {
   c.fijarVolumetria('/B/Cat 4', { estado: 'ok', valor: 100000 });
   c.capturarTickets('/B/Cat 4', '1');
   r = c.conversion('/B/Cat 4');
-  Check('SCT3 1 ticket de 100,000: 0.01% da 10, se dice (exacto false), viaja 0.01', ['0.01', false, 10, ['0.01']],
+  Check('SCT3 1 ticket de 100,000: 1% da 1000, se dice (exacto false), viaja 1', ['1', false, 1000, ['1']],
     [r.pct, r.exacto, r.tickets, par(c, 'agregar_pct')]);
 
   var casos = [
@@ -2062,20 +2093,30 @@ pruebas.push(function () {
   Check('SCT5 ligada en tickets sin escribir = sin cambio (y entonces falta algun cambio)', [[], true],
     [par(lig, 'pct_valor'), errs(lig).some(function (m) { return /al menos una categoría/.test(m); })]);
   lig.capturarTickets('/A/Cat 1', '100');
-  Check('SCT5 ligada: 100 de 418 = 23.93% (FLOOR da 100)', [['23.93'], []], [par(lig, 'pct_valor'), errs(lig)]);
+  Check('SCT5 ligada: 100 de 418 = 24% (el menor entero; FLOOR de 418 x 24% = 100)', [['24'], []], [par(lig, 'pct_valor'), errs(lig)]);
   lig.elegirModoMeta('/A/Cat 1', 'pct');
-  Check('SCT6 volver a %: el % ya calculado se queda y se puede editar', ['23.93', 'pct'], [lig.pcts['/A/Cat 1'], lig.meta('/A/Cat 1').modo]);
+  Check('SCT6 volver a %: el % ya calculado (entero) se queda y se puede editar', ['24', 'pct'], [lig.pcts['/A/Cat 1'], lig.meta('/A/Cat 1').modo]);
   lig.fijarPct('/A/Cat 1', '20');
   Check('SCT6 ... en % manda lo escrito', ['20'], par(lig, 'pct_valor'));
+  lig.fijarPct('/A/Cat 1', '20.5');
+  Check('SCT6 ... en % con decimales: error, no se envia', true, errs(lig).some(function (m) { return /porcentaje entero/.test(m); }));
+  lig.elegirModoMeta('/A/Cat 1', 'tickets');
+  lig.capturarTickets('/A/Cat 1', '100');
+  Check('SCT6 ... y otra vez a tickets: el % vuelve a salir entero de los tickets', [['24'], [], 'tickets'],
+    [par(lig, 'pct_valor'), errs(lig), lig.meta('/A/Cat 1').modo]);
+  lig.capturarTickets('/A/Cat 1', '2.5');
+  Check('SCT6 ... tickets con decimales: error de entero y ningun % sale', [true, []],
+    [errs(lig).some(function (m) { return /número entero/.test(m); }), par(lig, 'pct_valor')]);
+  lig.elegirModoMeta('/A/Cat 1', 'pct'); lig.fijarPct('/A/Cat 1', '20');
 
   var L = new R.ListaSolicitudCambio(Ini('PRB 2026-000060', { po_capturado: 'PO 3', so_capturado: 'SO z', categorias: [Cat('/A/Cat 1', 0.25)] }),
     { rutas: RUTAS.map(function (f) { return f.categoria; }), rutasEstado: 'ok', filas: RUTAS });
   var item = R.ListaSolicitudCambio.desdeBorrador(c);
   var t = L.texto(item);
   Check('SCT7 el resumen dice que se pidio en tickets y con que volumetria (y que no da exacto)', true,
-    /\/B\/Cat 4 \(agregar\): 0\.01% \(pedido como 1 ticket de una volumetría de 100000; con 2 decimales el % no da exacto\)/.test(t.linea));
+    /\/B\/Cat 4 \(agregar\): 1% \(pedido como 1 ticket de una volumetría de 100000; con % entero no da exacto\)/.test(t.linea));
   var vuelta = L.borrador(item);
-  Check('SCT8 editar el cambio de la lista conserva el modo, los tickets y la volumetria', ['tickets', '1', 100000, '0.01'],
+  Check('SCT8 editar el cambio de la lista conserva el modo, los tickets y la volumetria', ['tickets', '1', 100000, '1'],
     [vuelta.meta('/B/Cat 4').modo, vuelta.meta('/B/Cat 4').tickets, vuelta.vols['/B/Cat 4'].valor, vuelta.nuevas[0].valor]);
   c.quitarNueva(0);
   Check('SCT9 quitar la nueva olvida su meta', undefined, c.metas['/B/Cat 4']);
@@ -2126,8 +2167,8 @@ pruebas.push(function () {
       var tk = Elemento('t'); tk.setAttribute('data-cambio-tickets', 'l0'); tk.value = '100';
       var grupoAntes = p.sel('regCambioGrupoPct').innerHTML;
       p.sel('regDetCuerpo').disparar('input', { target: tk });
-      Check('SCD7 escribir tickets solo cambia la pista de esa fila (la casilla no se repinta)', [true, grupoAntes, '23.93'],
-        [/≈ 23\.93% · volumetría \(últimos 30 días\): 418/.test(p.sel('regCambioMeta-l0').innerHTML), p.sel('regCambioGrupoPct').innerHTML,
+      Check('SCD7 escribir tickets solo cambia la pista de esa fila (la casilla no se repinta)', [true, grupoAntes, '24'],
+        [/≈ 24% · volumetría \(últimos 30 días\): 418/.test(p.sel('regCambioMeta-l0').innerHTML), p.sel('regCambioGrupoPct').innerHTML,
          reg.cambio.pcts['/A/Cat 1']]);
       tk.value = '999';
       p.sel('regDetCuerpo').disparar('input', { target: tk });

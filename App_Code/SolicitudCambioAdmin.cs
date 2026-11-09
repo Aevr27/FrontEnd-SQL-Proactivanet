@@ -328,7 +328,10 @@ public sealed class PeticionSolicitudCambio
         { "FechaAnalisis", "An\u00e1lisis" }, { "FechaSolucion", "Soluci\u00f3n" }, { "FechaCierre", "Cierre" },
     };
 
-    private static readonly Regex Porcentaje = new Regex(@"^\d{1,3}(\.\d{1,2})?$", RegexOptions.CultureInvariant);
+    // % pedido: ENTERO de 0 a 100, sin decimales (2026-11-05). Solo el
+    // envio; al aplicar lo aprobado (PeticionModificarAdmin) valen tambien
+    // los % con decimales de solicitudes de antes.
+    private static readonly Regex Porcentaje = new Regex(@"^\d{1,3}$", RegexOptions.CultureInvariant);
     private static readonly Regex FolioForma = new Regex(@"^[A-Za-z]{3} \d{4}-\d{6}$", RegexOptions.CultureInvariant);
 
     public string Folio;
@@ -528,7 +531,7 @@ public sealed class PeticionSolicitudCambio
         decimal pct;
         if (texto == null || !Porcentaje.IsMatch(texto) || !decimal.TryParse(texto, NumberStyles.Number, CultureInfo.InvariantCulture, out pct) || pct > 100)
         {
-            Error("categoria", ruta + ": escribe un porcentaje entre 0 y 100, con hasta dos decimales.");
+            Error("categoria", ruta + ": escribe un porcentaje entero entre 0 y 100, sin decimales.");
             return;
         }
         var c = new CategoriaSolicitudCambio { Categoria = ruta, Accion = accion, Texto = texto, Pct = Math.Round(pct / 100m, 4) };

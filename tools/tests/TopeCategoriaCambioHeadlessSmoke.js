@@ -24,6 +24,9 @@
 //           aria-describedby; se quita al corregir.
 //   K1-K2   en tickets: los tickets que dan mas del maximo avisan igual (con
 //           cuantos tickets da el maximo); los que caben, no.
+//   % ENTERO (2026-11-05): lo pedido es entero y el maximo se dice entero
+//           hacia abajo (54.88% disponible -> se puede pedir hasta 54%); lo
+//           que comprometen otras (guardado, 45.12%) se dice tal cual.
 //   G1-G2   "Agregar cambio a la solicitud" no agrega lo que excede; si lo que
 //           cabe.
 //   E1-E3   al enviar (validarEnvio): un cambio que excede bloquea el envio y
@@ -130,7 +133,7 @@ function sonda() {
       apunta('u0', [aviso.hidden, casilla.getAttribute('aria-describedby'), casilla.getAttribute('aria-invalid')]);
       escribe(casilla, '100');
       apunta('u1', [aviso.hidden, aviso.textContent, casilla.getAttribute('aria-invalid'), aviso.getAttribute('aria-live')]);
-      escribe(casilla, '54.88');
+      escribe(casilla, '54');
       apunta('u2', [aviso.hidden, aviso.textContent, casilla.getAttribute('aria-invalid')]);
 
       // ---- Tickets ----
@@ -141,14 +144,16 @@ function sonda() {
       var avTk = $('regCambioTope-l0');
       apunta('k1', [avTk.hidden, avTk.textContent, tk.getAttribute('aria-invalid'), tk.getAttribute('aria-describedby')]);
       escribe(tk, '548');
+      apunta('k2b', [avTk.hidden, tk.getAttribute('aria-invalid'), pag.cambio.pctPedido(A)]);
+      escribe(tk, '540');
       apunta('k2', [avTk.hidden, tk.getAttribute('aria-invalid'), pag.cambio.pctPedido(A)]);
 
       // ---- Agregar a la lista ----
       escribe(tk, '600');
       clic(document.querySelector('[data-accion="cambio-agregar"]'));
       await espera(30);
-      apunta('g1', [pag.lista.items.length, $('regCambioMsg').textContent.indexOf('el máximo permitido es 54.88%') >= 0]);
-      escribe(document.querySelector('[data-cambio-tickets="l0"]'), '548');
+      apunta('g1', [pag.lista.items.length, $('regCambioMsg').textContent.indexOf('el máximo permitido es 54%') >= 0]);
+      escribe(document.querySelector('[data-cambio-tickets="l0"]'), '540');
       clic(document.querySelector('[data-accion="cambio-agregar"]'));
       await espera(30);
       apunta('g2', [pag.lista.items.length, pag.lista.items[0] && pag.lista.items[0].pcts[A]]);
@@ -179,9 +184,9 @@ function sonda() {
       $('regCambioMotivo').dispatchEvent(new Event('input', { bubbles: true }));
       clic($('regCambioEnviar'));
       await espera(50);
-      apunta('e1', [$('regCambioMsg').textContent.indexOf('pides 60%, pero el máximo permitido es 54.88%') >= 0,
+      apunta('e1', [$('regCambioMsg').textContent.indexOf('pides 60%, pero el máximo permitido es 54%') >= 0,
                     !!document.querySelector('[data-accion="cambio-confirmar"]'), window.__envios]);
-      pag.lista.items[0].pcts[A] = '54.88';
+      pag.lista.items[0].pcts[A] = '54';
       clic($('regCambioEnviar'));
       await espera(50);
       apunta('e2', [!!document.querySelector('[data-accion="cambio-confirmar"]'), window.__envios]);
@@ -218,22 +223,23 @@ Banco.correr(paginas, ['/admin/__tope.html']).then(function (res) {
     [t.react, t.reactPedida, t.sigueDet]);
   Check('U1 sin escribir: sin aviso; la casilla lo describe', [true, 'regCambioTope-l0', 'false'], A.u0);
   Check('U2 100%: aviso en espanol con el maximo, aria-invalid, aria-live',
-    [false, '/Servicios/Correo/Buzones: pides 100%, pero el máximo permitido es 54.88%. Otras iniciativas activas ya comprometen 45.12% y el tope por categoría es 100%.',
+    [false, '/Servicios/Correo/Buzones: pides 100%, pero el máximo permitido es 54%. Otras iniciativas activas ya comprometen 45.12% y el tope por categoría es 100%.',
      'true', 'polite'], A.u1);
-  Check('U3 54.88%: el aviso se quita', [true, '', 'false'], A.u2);
-  Check('K1 600 tickets de 1000 (60%): aviso con el maximo en tickets',
-    [false, '/Servicios/Correo/Buzones: esos tickets equivalen a 60%, pero el máximo permitido es 54.88% (548 tickets con la volumetría de hoy). ' +
+  Check('U3 54% (el maximo entero): el aviso se quita', [true, '', 'false'], A.u2);
+  Check('K1 600 tickets de 1000 (60%): aviso con el maximo entero en % y en tickets',
+    [false, '/Servicios/Correo/Buzones: esos tickets equivalen a 60%, pero el máximo permitido es 54% (540 tickets con la volumetría de hoy). ' +
       'Otras iniciativas activas ya comprometen 45.12% y el tope por categoría es 100%.', 'true', 'regCambioMeta-l0 regCambioTope-l0'], A.k1);
-  Check('K2 548 tickets (54.8%): cabe', [true, 'false', '54.8'], A.k2);
-  Check('N1 por agregar en tickets: 401 de 1000 (40.1%) pasa del 40% disponible', [false, '40.1', 'true'], A.n1);
+  Check('K2 548 tickets: a % entero son 55% y ya no caben (antes 54.8%)', [false, 'true', '55'], A.k2b);
+  Check('K2 540 tickets (54%): cabe', [true, 'false', '54'], A.k2);
+  Check('N1 por agregar en tickets: 401 de 1000 -> 41% (entero) pasa del 40% disponible', [false, '41', 'true'], A.n1);
   Check('N2 400 tickets (40%): cabe', [true, '40'], A.n2);
   Check('N3 volver a %: el % calculado queda en la casilla del %, sin la de tickets', ['40', false], A.n3);
   Check('G1 agregar con 600 tickets: no entra a la lista y dice el maximo', [0, true], A.g1);
-  Check('G2 agregar con 548 tickets: entra', [1, '54.8'], A.g2);
+  Check('G2 agregar con 540 tickets: entra con 54%', [1, '54'], A.g2);
   Check('E1 enviar con un cambio que excede: error, sin confirmar ni llamar al servidor', [true, false, 0], A.e1);
   Check('E2 corregido: pasa a la confirmacion (aun sin enviar)', [true, 0], A.e2);
   Check('E3 Estado que reactiva: el 60% actual de la categoria cuenta al enviar',
-    ['Estado: /Servicios/Correo/Buzones: al pasar a «En Análisis» la iniciativa vuelve a comprometer su 60%, pero el máximo permitido es 34.88%. ' +
+    ['Estado: /Servicios/Correo/Buzones: al pasar a «En Análisis» la iniciativa vuelve a comprometer su 60%, pero el máximo permitido es 34%. ' +
      'Otras iniciativas activas ya comprometen 65.12% y el tope por categoría es 100%.'], A.e3);
   console.log(fallos ? fallos + ' FALLO(S)' : 'TODO PASO');
   process.exit(fallos ? 1 : 0);
