@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<!--
+  concentracion/concentracion.html - Pestaña "Concentracion de tickets":
+  donde se junta el volumen de tickets, global, sin elegir servicio.
+
+  Mismo contrato que qare/ y analisis/: este archivo es a la vez la pagina
+  suelta y la fuente de la pestaña de dashboard.html. TableroConcentracion
+  (dashboard.js) trae este marcado, le quita <script> y <link>, desarma el
+  envoltorio #tab-concentracion y lo monta en el contenedor de la pestaña.
+
+  Es INDEPENDIENTE de "Analisis de servicios": no lee su selector, no pide
+  analisis.ashx y no comparte estado. Todos los ids llevan "conc-".
+
+  Consume unicamente handlers/concentracion.ashx (una peticion por Slot):
+    Pareto de servicios        dbo.usp_CorreoServicio_Pareto          Top 10
+    Tickets por categoria      dbo.usp_CorreoServicio_TicketsCategoria Top 15
+    Tickets por grupo          dbo.usp_CorreoServicio_TicketsGrupo     Top 15
+  Los tres con el MISMO @Slot (sql/81_concentracion_tickets.sql).
+
+  Hojas: sin vocabulario visual propio (.card, .filtros, .slotstep, .grid2x2,
+  .lienzo, .hint son de dashboard.css); concentracion.css lleva solo lo
+  privado. Embebido, los <link> se descartan y manda lo del tablero.
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tickets Proactivanet — Concentración de tickets</title>
+  <!-- Solo para la pagina suelta: embebida en dashboard.html cada uno de
+       estos <script>/<link> se quita y manda la copia del tablero. -->
+  <script src="../assets/vendor/chart.umd.min.js"></script>
+  <script src="../assets/js/escape.js"></script>
+  <script src="../assets/js/paleta.js"></script>
+  <script src="../assets/js/barras.js"></script>
+  <script src="../assets/js/grafica.js"></script>
+  <link rel="stylesheet" href="../assets/css/datos-info.css">
+  <script src="../assets/js/datos-info.js"></script>
+  <script src="../assets/js/refresco-auto.js"></script>
+  <link rel="stylesheet" href="../assets/css/boton.css">
+  <link rel="stylesheet" href="../dashboard.css">
+  <link rel="stylesheet" href="concentracion.css">
+</head>
+<body>
+<div class="wrap">
+  <div id="tab-concentracion" class="maintab-content active">
+
+    <header class="top">
+      <div>
+        <h1>Tickets Proactivanet — Concentración de tickets</h1>
+      </div>
+      <div class="acciones-top">
+        <!-- Pide los datos ya, con el mismo Slot (en el tablero tambien se
+             refrescan solos cada RefrescoAuto.INTERVALO_DATOS). -->
+        <button type="button" class="btn linea chico" id="conc-btn-actualizar" title="Volver a consultar los datos con el mismo Slot">Actualizar</button>
+        <div class="estado" id="conc-estado"></div>
+      </div>
+    </header>
+
+    <!-- Un solo filtro: el Slot, que va igual a las tres graficas. Mismo
+         control que el stepper de SLA (.slotstep), pero aqui elige UN periodo
+         de 30 dias, no N acumulados. El periodo que se pinta debajo lo manda
+         el servidor (concentracion.ashx, periodo): sale de la misma cuenta
+         que dbo.vw_Tickets.Slot, no del reloj del navegador. -->
+    <section class="filtros" id="conc-filtros">
+      <div class="campo campo-slot">
+        <label for="conc-slot-n">Slot</label>
+        <div class="slotstep sel" id="conc-slot-step">
+          <button class="btn linea chico" type="button" id="conc-slot-menos" aria-label="Slot mas reciente">−</button>
+          <input class="slotn" id="conc-slot-n" type="text" inputmode="numeric"
+                 autocomplete="off" spellcheck="false" value="0"
+                 aria-label="Slot (0 a 12; 0 = los ultimos 30 dias)" aria-describedby="conc-periodo">
+          <button class="btn linea chico" type="button" id="conc-slot-mas" aria-label="Slot mas antiguo">+</button>
+        </div>
+        <span class="slotsum sel" id="conc-periodo" aria-live="polite"></span>
+      </div>
+      <p class="conc-slot-nota">0 = los últimos 30 días, incluido hoy; cada número retrocede 30 días.</p>
+    </section>
+
+    <!-- Banda de error: sale si la peticion entera falla. Si solo falla una
+         grafica, el aviso va en su tarjeta y las otras se pintan. -->
+    <div class="conc-aviso conc-aviso-error" id="conc-error" hidden>
+      <strong>No se pudieron cargar los datos de concentración.</strong>
+      <span id="conc-error-msg"></span>
+      <button type="button" class="btn linea chico" id="conc-reintentar">Reintentar</button>
+    </div>
+    <!-- Diferencias entre lo que devolvio SQL y el contrato. No bloquea. -->
+    <div class="conc-aviso" id="conc-avisos" hidden></div>
+
+    <!-- Pareto a todo el ancho: barras = tickets, linea amarilla = % acumulado,
+         punteada = referencia del 80 %. -->
+    <section class="card conc-seccion">
+      <h3>Concentración de tickets por servicio<span class="hint" id="conc-hint-pareto"></span></h3>
+      <div class="lienzo conc-lienzo-pareto">
+        <canvas id="conc-chart-pareto" role="img" aria-label="Pareto de tickets por servicio"></canvas>
+        <p class="conc-msg" id="conc-msg-pareto">Calculando…</p>
+      </div>
+    </section>
+
+    <section class="grid2x2">
+      <div class="card conc-seccion">
+        <h3>Tickets por categoría<span class="hint" id="conc-hint-categorias"></span></h3>
+        <div class="lienzo conc-lienzo-filas" id="conc-lienzo-categorias">
+          <canvas id="conc-chart-categorias" role="img" aria-label="Tickets por categoria"></canvas>
+          <p class="conc-msg" id="conc-msg-categorias">Calculando…</p>
+        </div>
+      </div>
+      <div class="card conc-seccion">
+        <h3>Tickets por grupo<span class="hint" id="conc-hint-grupos"></span></h3>
+        <div class="lienzo conc-lienzo-filas" id="conc-lienzo-grupos">
+          <canvas id="conc-chart-grupos" role="img" aria-label="Tickets por grupo"></canvas>
+          <p class="conc-msg" id="conc-msg-grupos">Calculando…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Leyenda comun de las barras y de que tickets cuenta cada grafica. -->
+    <section class="conc-pie">
+      <div class="conc-leyenda" aria-label="Colores de las barras">
+        <span><i class="conc-dentro"></i>Hasta alcanzar el 80 % acumulado</span>
+        <span><i class="conc-fuera"></i>Resto</span>
+        <span><i class="conc-linea"></i>% acumulado (Pareto)</span>
+      </div>
+      <p class="conc-poblacion">
+        Cuenta los tickets <strong>registrados en el periodo del Slot</strong> cuya categoría cae en una
+        rama de un servicio habilitado del catálogo de servicios (<code>dbo.vw_ServicioTickets</code>).
+        Cada gráfica muestra <strong>su propio total</strong>: la de categorías no cuenta tickets sin
+        categoría y la de grupos no cuenta tickets sin grupo, así que sus totales pueden ser menores
+        que el del Pareto. El acumulado y el 80 % se calculan sobre todos los servicios, categorías o
+        grupos; las gráficas muestran solo los primeros.
+      </p>
+    </section>
+  </div>
+</div>
+
+<script src="concentracion.js"></script>
+</body>
+</html>

@@ -47,7 +47,7 @@ var GRUPOS = new Function('return ' + bloqueGrupos[1] + ';')();
 // es la resolucion del nombre, no los tableros.
 var MODULOS_FALSO = {
   sla: {}, backlog: {}, experiencia: {}, efectividad: {}, qa: {}, qare: {},
-  analisis: {}, orquestacion: {}, call: {}, tablero: {},
+  analisis: {}, concentracion: {}, orquestacion: {}, call: {}, tablero: {},
 };
 
 var ultimo = {};

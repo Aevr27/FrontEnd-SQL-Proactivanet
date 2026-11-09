@@ -1,0 +1,70 @@
+/* =========================================================================
+   concentracion/concentracion.css - Lo PRIVADO de la pestaña "Concentracion
+   de tickets".
+
+   Igual que qare/qare.css: NO es hoja de pagina completa. .card, .filtros,
+   .slotstep, .slotsum, .grid2x2, .lienzo, .hint salen de dashboard.css
+   -embebido, del tablero; suelto, concentracion.html enlaza
+   ../dashboard.css-. Al montarse, moduloEmbebido encierra esta hoja en
+   @scope (#tab-concentracion) y las variables de :root siguen llegando.
+   ========================================================================= */
+
+header.top #conc-estado:empty { display: none; }
+
+/* ---- Filtro: el Slot solo; la nota a su lado, en la misma fila. ---- */
+#conc-filtros { grid-template-columns: minmax(180px, 220px) 1fr; }
+.filtros .conc-slot-nota {
+  margin: 0; align-self: center; font-size: 12px; color: var(--muted);
+}
+/* El periodo es el dato que importa del filtro: que no se recorte. */
+.filtros .campo-slot #conc-periodo { overflow: visible; }
+@media (max-width: 700px) {
+  #conc-filtros { grid-template-columns: 1fr; }
+  .filtros .conc-slot-nota { margin-top: 18px; }
+}
+
+/* ---- Avisos ---- */
+.conc-aviso {
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+  border-left: 4px solid var(--ambr);
+  border-radius: var(--radius); padding: 11px 15px;
+  font-size: 12.5px; margin-bottom: var(--gap-bloque, 16px);
+}
+.conc-aviso-error {
+  background: #fdf4f2; border-color: #edd3cd; border-left-color: var(--rojo); color: var(--rojo);
+  display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+}
+.conc-aviso[hidden] { display: none; }
+
+/* ---- Mensaje sobre un lienzo (cargando / sin datos / error) ---- */
+.lienzo { position: relative; }
+.conc-msg {
+  position: absolute; inset: 0; margin: 0;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 16px; color: var(--muted); font-size: 13px;
+  background: rgba(255, 255, 255, .85);
+}
+.conc-msg[hidden] { display: none; }
+.conc-msg-error { color: var(--rojo); }
+
+/* ---- Pareto: a todo el ancho y mas alto que un lienzo normal. ---- */
+.lienzo.conc-lienzo-pareto { height: 420px; }
+@media (max-width: 700px) { .lienzo.conc-lienzo-pareto { height: 340px; } }
+
+/* ---- Barras horizontales: el alto lo fija concentracion.js por filas. ---- */
+.lienzo.conc-lienzo-filas { min-height: 260px; }
+
+/* ---- Pie: leyenda y que cuenta cada grafica ---- */
+.conc-pie { margin-bottom: var(--gap-bloque, 16px); }
+.conc-leyenda {
+  display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 8px;
+  font-size: 11.5px; color: var(--muted);
+}
+.conc-leyenda span { display: inline-flex; align-items: center; gap: 6px; }
+.conc-leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
+/* Mismos valores que COLOR en concentracion.js. */
+.conc-leyenda .conc-dentro { background: #56a333; }
+.conc-leyenda .conc-fuera  { background: #bae065; }
+.conc-leyenda .conc-linea  { background: #eab308; height: 3px; border-radius: 2px; width: 16px; }
+.conc-poblacion { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); max-width: 110ch; }
+.conc-poblacion code { font-size: 11.5px; }

@@ -4281,6 +4281,25 @@ const TableroAnalisis = moduloEmbebido({
   },
 });
 
+/* Concentracion de tickets: mismo trato que QARE. Pestaña INDEPENDIENTE de
+   Analisis de servicios: carga sola al montarse (concentracion.ashx con el
+   Slot 0, sin elegir servicio), publica window.TableroConcentracionModulo y,
+   al volver, solo se remiden sus graficas. El refresco automatico vuelve a
+   pedir concentracion.ashx con el mismo Slot (refrescoDe). */
+const TableroConcentracion = moduloEmbebido({
+  nombre: 'Concentración de tickets',
+  base: 'concentracion/',
+  id: 'tab-concentracion',
+  pagina: 'concentracion.html',
+  hoja: 'concentracion.css',
+  guion: 'concentracion.js',
+  alVolver: () => {
+    const modulo = window.TableroConcentracionModulo;
+    if (modulo) modulo.redimensionar();
+  },
+  refresco: refrescoDe('TableroConcentracionModulo'),
+});
+
 /* Orquestacion: mismo trato que Efectividad. El modulo pide
    orquestacion.ashx una vez al montarse (y ?detalle=1 al abrir la lista de
    jobs); al volver a la pestaña se remiden sus graficas de Chart.js, que
@@ -4400,6 +4419,7 @@ const MODULOS = {
   qa: TableroQa,
   qare: TableroQare,
   analisis: TableroAnalisis,
+  concentracion: TableroConcentracion,
   orquestacion: TableroOrquestacion,
   call: pestanaSla('tab-call'),
   tablero: TableroExterno,

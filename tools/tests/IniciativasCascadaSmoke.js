@@ -784,12 +784,13 @@ pruebas.push(function () {
 pruebas.push(function () {
   var html = leer('admin/iniciativas.html').replace(/<!--[\s\S]*?-->/g, '');
   var hrefs = (html.match(/class="mnav[^"]*" href="([^"]+)"/g) || []).map(function (m) { return m.replace(/.*href="/, '').replace('"', ''); });
-  // Las ocho entradas del tablero: QA y QARE van en el grupo Calidad de
-  // información y Observabilidad/Orquestación en el grupo Observabilidad.
+  // Las nueve entradas del tablero: QA y QARE van en el grupo Calidad de
+  // información y Observabilidad/Orquestación en el grupo Observabilidad;
+  // Concentración de tickets tiene la suya, despues de Analisis.
   // BarraLateralSmoke.js las compara contra dashboard.html.
   Check('M1 entradas = modulos del tablero', ['../dashboard.html#sla', '../dashboard.html#backlog', '../dashboard.html#experiencia',
     '../dashboard.html#efectividad', '../dashboard.html#calidad', '../dashboard.html#analisis',
-    '../dashboard.html#observabilidad', '../dashboard.html#call', 'iniciativas.html'], hrefs);
+    '../dashboard.html#concentracion', '../dashboard.html#observabilidad', '../dashboard.html#call', 'iniciativas.html'], hrefs);
   // Iniciativas (data-iniciativas): una sola entrada, esta pagina, visible
   // siempre (2026-10-29) y activa.
   // Es solo UX: el acceso lo decide el servidor (AccesoAdmin, AccesoIniciativas).

@@ -48,11 +48,12 @@ var incierta = (html.match(/<li data-sesion-incierta hidden>[\s\S]*?<\/li>/) || 
 var botones = todas(html.replace(incierta, ''), /<button[^>]*class="mnav[^"]*"[^>]*>/g).map(function (m) { return m[0]; });
 var nombres = botones.map(function (b) { return (b.match(/data-tab="([^"]+)"/) || [])[1]; });
 
-// Ocho entradas: QA y QARE van juntas en "Calidad de información" y
+// Nueve entradas: QA y QARE van juntas en "Calidad de información" y
 // Observabilidad (tablero) y Orquestación en "Observabilidad".
-comprobar('la barra trae las ocho entradas', nombres.length, 8);
+// Concentración de tickets tiene entrada propia, justo despues de Analisis.
+comprobar('la barra trae las nueve entradas', nombres.length, 9);
 comprobar('la barra, en orden', nombres.join(','),
-  'sla,backlog,experiencia,efectividad,calidad,analisis,observabilidad,call');
+  'sla,backlog,experiencia,efectividad,calidad,analisis,concentracion,observabilidad,call');
 comprobar('rotulos exactos de los grupos',
   [/data-tab="observabilidad"[^>]*title="Observabilidad"/.test(html),
    /data-tab="calidad"[^>]*title="Calidad de información"/.test(html),
