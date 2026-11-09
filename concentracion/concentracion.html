@@ -126,6 +126,14 @@
         <canvas id="conc-chart-pareto" role="img" aria-label="Pareto de tickets por servicio"></canvas>
         <p class="conc-msg" id="conc-msg-pareto">Calculando…</p>
       </div>
+      <!-- Leyenda de las barras y las lineas, debajo del Pareto y dentro de
+           su tarjeta (las de categorias y grupos usan los mismos azules). -->
+      <div class="conc-leyenda" aria-label="Colores de las graficas">
+        <span><i class="conc-dentro"></i>Hasta alcanzar el 80 % acumulado</span>
+        <span><i class="conc-fuera"></i>Resto</span>
+        <span><i class="conc-linea"></i>% acumulado (Pareto)</span>
+        <span><i class="conc-ref"></i>Referencia 80 %</span>
+      </div>
     </section>
 
     <section class="grid2x2">
@@ -143,26 +151,6 @@
           <p class="conc-msg" id="conc-msg-grupos">Calculando…</p>
         </div>
       </div>
-    </section>
-
-    <!-- Leyenda comun de las barras y de que tickets cuenta cada grafica. -->
-    <section class="conc-pie">
-      <div class="conc-leyenda" aria-label="Colores de las graficas">
-        <span><i class="conc-dentro"></i>Hasta alcanzar el 80 % acumulado</span>
-        <span><i class="conc-fuera"></i>Resto</span>
-        <span><i class="conc-linea"></i>% acumulado (Pareto)</span>
-        <span><i class="conc-ref"></i>Referencia 80 %</span>
-      </div>
-      <p class="conc-poblacion">
-        Cuenta los tickets <strong>registrados en el periodo</strong> cuya categoría cae en una rama de un
-        servicio habilitado del catálogo de servicios (<code>dbo.vw_ServicioTickets</code>), después de los
-        filtros de Service Owner y Grupo. El <strong>Service Owner</strong> es el de la categoría del ticket
-        según el catálogo de dueños (<code>dbo.CatCategoriaDueno</code>: su C1&amp;C2 o, si no está capturado,
-        su C1), la misma regla de Experiencia. Cada gráfica muestra <strong>su propio total</strong>: la de
-        categorías no cuenta tickets sin categoría y la de grupos no cuenta tickets sin grupo. El acumulado
-        y el 80 % se calculan sobre todos los servicios, categorías o grupos filtrados; las gráficas
-        muestran solo los primeros.
-      </p>
     </section>
   </div>
 </div>

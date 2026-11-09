@@ -30,12 +30,16 @@
 //          todo y avisa.
 //      C12 falla la peticion: banda y las tres en error.
 //      C13 cobertura parcial: aviso; completa o sin medir: nada.
+//      C14 leyenda: una sola, dentro de la tarjeta del Pareto y justo debajo
+//          de su lienzo, con sus cuatro rotulos y colores; con la tarjeta a
+//          320 px envuelve sin salirse; ya no hay parrafo de poblacion.
 //   D  dashboard.html#concentracion (MOCK_DATA para SLA)
 //      D1  la entrada "Vista general de servicios" queda marcada, la pestaña
 //          se monta y pide concentracion.ashx sin pasar por Analisis.
 //      D2  Analisis de servicios sigue igual: al abrirla pide SOLO la lista
 //          de servicios (accion=servicios) y no analiza nada.
 //      D3  volver no la monta de nuevo ni repide.
+//      D4  la leyenda, embebida, igual que C14.
 //
 //   node tools\tests\ConcentracionHeadlessSmoke.js   # sale 0 si todo paso
 //
@@ -165,6 +169,23 @@ var COMUN = 'var R = [], errores = [];\n' +
   '  var ch = new Chart(cv, { type: "bar", data: { labels: ["a"], datasets: [{ label: "Llamadas atendidas", data: [1] }] },\n' +
   '    options: { indexAxis: "y", responsive: false, animation: false, plugins: { legend: { display: false } } } });\n' +
   '  var bg = ch.getDatasetMeta(0).data[0].options.backgroundColor; ch.destroy(); cv.remove(); return bg; }\n' +
+  // Donde queda la leyenda: dentro de la tarjeta del Pareto, justo debajo de
+  // su lienzo, sin el parrafo de poblacion; y, con la tarjeta a 320 px, que
+  // envuelva sin salirse.
+  'async function leyendaPareto() { var raiz = document.getElementById("tab-concentracion") || document;\n' +
+  '  var leys = raiz.querySelectorAll(".conc-leyenda"), ley = leys[0], card = $c("chart-pareto").closest(".card");\n' +
+  '  var lienzo = $c("chart-pareto").closest(".lienzo");\n' +
+  '  var dentro = function (a, b) { return a.left >= b.left - 0.5 && a.right <= b.right + 0.5 && a.top >= b.top - 0.5 && a.bottom <= b.bottom + 0.5; };\n' +
+  '  var items = Array.prototype.map.call(ley.querySelectorAll("span"), function (x) { return x.textContent; });\n' +
+  '  var muestras = Array.prototype.map.call(ley.querySelectorAll("i"), function (x) { var cs = getComputedStyle(x); return [x.className, cs.backgroundColor, cs.borderTopStyle]; });\n' +
+  '  var ancho = [dentro(ley.getBoundingClientRect(), card.getBoundingClientRect()), ley.getBoundingClientRect().top >= lienzo.getBoundingClientRect().bottom - 0.5];\n' +
+  '  var prev = card.style.width; card.style.width = "320px"; await espera(100);\n' +
+  '  var tops = Array.prototype.map.call(ley.querySelectorAll("span"), function (x) { return Math.round(x.getBoundingClientRect().top); });\n' +
+  '  var angosto = [dentro(ley.getBoundingClientRect(), card.getBoundingClientRect()), ley.scrollWidth <= ley.clientWidth,\n' +
+  '    tops.filter(function (t, i) { return tops.indexOf(t) === i; }).length > 1];\n' +
+  '  card.style.width = prev; await espera(100);\n' +
+  '  return [leys.length, ley.closest(".card") === card, lienzo.nextElementSibling === ley, items, muestras, ancho, angosto,\n' +
+  '    raiz.querySelectorAll(".conc-poblacion, .conc-pie").length, /vw_ServicioTickets|propio total/.test(raiz.textContent)]; }\n' +
   'function lineas() { return Array.prototype.map.call(document.querySelectorAll("#conc-estado .datos-info-linea"), function (d) { return d.textContent; }); }\n' +
   'function cerrar() { var pre = document.createElement("pre"); pre.id = "__res";\n' +
   '  pre.textContent = JSON.stringify({ errores: errores, r: R }); document.body.appendChild(pre); }\n';
@@ -261,7 +282,9 @@ var sondaC = conComun(
   'window.__cobertura = { diasConTickets: 16, diasEsperados: 30, primerDia: "2025-11-19", ultimoDia: "2025-12-14", completa: false, excluyeHoy: false };\n' +
   'await M().recargar(); var parcial = [$c("cobertura").hidden, $c("cobertura").textContent];\n' +
   'window.__cobertura = null; await M().recargar(); var nula = $c("cobertura").hidden; window.__cobertura = undefined;\n' +
-  'apunta("C13", [completa, parcial, nula]);\n');
+  'apunta("C13", [completa, parcial, nula]);\n' +
+  // C14 leyenda
+  'apunta("C14", await leyendaPareto());\n');
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
@@ -278,7 +301,8 @@ var sondaD = conComun(
   '  document.getElementById("tab-concentracion").classList.contains("active")]);\n' +
   'var c0 = __pedidas.conc;\n' +
   'activarTab("concentracion"); await espera(300);\n' +
-  'apunta("D3", [__pedidas.conc - c0, document.querySelectorAll("script[src*=\\"concentracion.js\\"]").length, !!Chart.getChart(document.getElementById("conc-chart-pareto"))]);\n');
+  'apunta("D3", [__pedidas.conc - c0, document.querySelectorAll("script[src*=\\"concentracion.js\\"]").length, !!Chart.getChart(document.getElementById("conc-chart-pareto"))]);\n' +
+  'apunta("D4", await leyendaPareto());\n');
 
 var paginas = {
   '/concentracion/__banco.html': Banco.pagina('concentracion/concentracion.html', 'concentracion.js', stub(respondeConc, claveConc), sondaC),
@@ -338,6 +362,17 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
        'Tickets Proactivanet — Vista general de servicios', AZUL, AZUL], o.D1);
     Check('D2 Analisis igual que siempre: solo la lista de servicios, nada analizado', [1, 0, 'page', false], o.D2);
     Check('D3 volver: sin montar de nuevo ni repedir', [0, 1, true], o.D3);
+  });
+  // C14 / D4: la leyenda del Pareto, sola y embebida.
+  var LEYENDA = [1, true, true,
+    ['Hasta alcanzar el 80 % acumulado', 'Resto', '% acumulado (Pareto)', 'Referencia 80 %'],
+    [['conc-dentro', AZUL, 'none'], ['conc-fuera', CLARO, 'none'], ['conc-linea', 'rgb(211, 154, 58)', 'none'],
+     ['conc-ref', 'rgba(0, 0, 0, 0)', 'dashed']],
+    [true, true], [true, true, true], 0, false];
+  [[0, 'C14'], [1, 'D4']].forEach(function (x) {
+    if (!res[x[0]]) return;
+    Check(x[1] + ' leyenda: una sola, dentro de la tarjeta del Pareto y justo debajo de su lienzo; los cuatro rotulos y colores; a 320 px envuelve sin salirse; sin el parrafo de poblacion',
+      LEYENDA, Banco.mapa(res[x[0]])[x[1]]);
   });
   console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
   process.exit(fallos ? 1 : 0);
