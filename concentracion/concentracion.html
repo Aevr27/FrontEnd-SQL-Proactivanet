@@ -75,6 +75,10 @@
         <span class="slotsum sel" id="conc-periodo" aria-live="polite"></span>
       </div>
       <p class="conc-slot-nota">0 = los últimos 30 días, incluido hoy; cada número retrocede 30 días.</p>
+      <!-- Aviso discreto: el Slot tiene tickets en menos dias de los que
+           mide (historia cargada incompleta, por ejemplo). Lo decide el
+           servidor (cobertura de concentracion.ashx); no bloquea nada. -->
+      <p class="conc-cobertura" id="conc-cobertura" role="status" hidden></p>
     </section>
 
     <!-- Banda de error: sale si la peticion entera falla. Si solo falla una

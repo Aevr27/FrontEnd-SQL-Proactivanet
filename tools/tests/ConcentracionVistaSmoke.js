@@ -12,6 +12,7 @@
 //      de categoria largas abreviadas a los dos ultimos niveles con el
 //      nombre completo intacto para el tooltip.
 //   L  eje de las horizontales en dos lineas de 26 caracteres.
+//   K  aviso de cobertura parcial del Slot (texto del dato del servidor).
 //   P  periodo del servidor -> texto, sin pasar por Date.
 //   S  Slot escrito a mano: acotado a 0..12, basura = null.
 //   V  vacio / fallo: [] es "sin tickets", null es "fallo".
@@ -108,6 +109,19 @@ Check('L2 larga: dos lineas por palabras', ['Soporte Especializado en', 'Aplicat
 Check('L3 no cabe en dos: la segunda termina en …', ['Nivel intermedio con', 'nombre largo 0 › Detalle…'],
   D.lineasEje('Nivel intermedio con nombre largo 0 › Detalle final de la categoria'));
 Check('L4 ninguna linea pasa de 26', true, [].concat(D.lineasEje('x'.repeat(70) + ' y z')).every(function (l) { return l.length <= 26; }));
+
+// ---- K: cobertura del Slot (la decide el servidor; aqui solo el texto)
+Check('K1 sin medir (null) o completa: sin aviso', ['', ''],
+  [D.textoCobertura(null), D.textoCobertura({ completa: true, diasConTickets: 30, diasEsperados: 30 })]);
+Check('K2 Slot 11 de QA: 16 de 30 dias, con el rango real',
+  'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.',
+  D.textoCobertura({ completa: false, diasConTickets: 16, diasEsperados: 30, primerDia: '2025-11-19', ultimoDia: '2025-12-14', excluyeHoy: false }));
+Check('K3 Slot 0: dice que no cuenta hoy',
+  'Cobertura parcial: hay tickets en 20 de 29 días completos (sin contar hoy) · datos del 21/10/2026 al 09/11/2026.',
+  D.textoCobertura({ completa: false, diasConTickets: 20, diasEsperados: 29, primerDia: '2026-10-21', ultimoDia: '2026-11-09', excluyeHoy: true }));
+Check('K4 Slot sin tickets', 'Cobertura parcial: hay tickets en 0 de 30 días del periodo.',
+  D.textoCobertura({ completa: false, diasConTickets: 0, diasEsperados: 30, primerDia: null, ultimoDia: null }));
+Check('K5 datos raros: sin aviso (no se inventa)', '', D.textoCobertura({ completa: false }));
 
 // ---- P: periodo
 Check('P1 periodo del servidor', 'Del 11/10/2026 al 09/11/2026',

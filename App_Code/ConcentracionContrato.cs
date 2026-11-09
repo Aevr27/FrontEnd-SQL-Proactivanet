@@ -194,6 +194,33 @@ public static class ConcentracionContrato
         return salida;
     }
 
+    /* COBERTURA DEL SLOT (aviso de periodo incompleto)
+
+       Los tres SP no dicen cuantos dias del Slot tienen datos, y el primer
+       registro de la base NO sirve para saberlo: en QA hay tickets sueltos
+       del 2025-10-09 y 2025-10-21 aunque la historia cargada empieza el
+       2025-11-19 (diag 2, A3: Slot 12 con 5 tickets en 5 dias, Slot 13 con
+       1). Lo que si es un hecho medible es cuantos dias distintos del Slot
+       tienen al menos un ticket en la MISMA poblacion de las graficas
+       (dbo.vw_ServicioTickets): en QA, todos los Slots completos tienen 30
+       de 30 (A3, DiasDistintos); el 11 tiene 16 y el 12, 5.
+
+       Regla: el Slot se marca con cobertura parcial si tiene tickets en
+       MENOS dias de los esperados. Esperados = 30; en el Slot 0 se excluye
+       HOY (dia en curso: a las 00:05 todavia no tiene tickets y no es un
+       hueco), asi que son 29 dias completos. No es una estimacion de
+       volumen: el aviso dice el hecho ("tickets en 16 de 30 dias") y no
+       bloquea nada. */
+    public static int DiasEsperados(int slot)
+    {
+        return slot == 0 ? DiasSlot - 1 : DiasSlot;
+    }
+
+    public static bool CoberturaCompleta(int slot, int diasConTickets)
+    {
+        return diasConTickets >= DiasEsperados(slot);
+    }
+
     public static double? Numero(Dictionary<string, object> fila, string columna)
     {
         object v;

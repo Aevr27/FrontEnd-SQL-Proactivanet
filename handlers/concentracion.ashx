@@ -17,6 +17,9 @@
 //   {
 //     slot: 0, slotMaximo: 12,
 //     periodo: { desde: "aaaa-mm-dd", hasta: "aaaa-mm-dd", dias: 30 },
+//     cobertura: { diasConTickets, diasEsperados, primerDia, ultimoDia,
+//                  completa, excluyeHoy } | null,   // ver ConcentracionContrato
+//     El Slot 0 no cuenta HOY en la cobertura (29 dias esperados).
 //     pareto:     [ ... ] | null,   // Posicion ASC, TODAS las filas
 //     categorias: [ ... ] | null,   // Posicion ASC, TODAS las filas
 //     grupos:     [ ... ] | null,   // Posicion ASC, TODAS las filas
@@ -80,6 +83,9 @@ public class Concentracion : IHttpHandler
             { "hasta", ConcentracionContrato.Dia(r.Hasta) },
             { "dias", ConcentracionContrato.DiasSlot },
         };
+        // Dias del Slot con tickets, para el aviso de cobertura parcial. null =
+        // no se pudo medir (sin aviso; el motivo va en avisos).
+        salida["cobertura"] = r.Cobertura;
         foreach (var b in ConcentracionContrato.Bloques) salida[b.Clave] = r.Bloques[b.Clave];
         salida["errores"] = r.Errores;
         salida["avisos"] = r.Avisos;

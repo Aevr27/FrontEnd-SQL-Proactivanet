@@ -155,6 +155,22 @@
     return 'Del ' + diaTexto(periodo.desde) + ' al ' + diaTexto(periodo.hasta);
   }
 
+  /* Aviso de cobertura parcial: solo si el servidor la midio y dice que NO
+     esta completa (ConcentracionContrato, COBERTURA). Dice el hecho -en
+     cuantos dias del Slot hay tickets- y el rango de dias con datos; no
+     estima nada. null / completa = sin aviso. */
+  function textoCobertura(c) {
+    if (!c || c.completa !== false) return '';
+    var dias = numero(c.diasConTickets), esperados = numero(c.diasEsperados);
+    if (dias === null || esperados === null) return '';
+    var base = 'Cobertura parcial: hay tickets en ' + dias + ' de ' + esperados +
+               (c.excluyeHoy ? ' días completos (sin contar hoy)' : ' días del periodo');
+    if (!dias) return base + '.';
+    var rango = c.primerDia && c.ultimoDia
+      ? ' · datos del ' + diaTexto(c.primerDia) + ' al ' + diaTexto(c.ultimoDia) : '';
+    return base + rango + '.';
+  }
+
   /* Lo que se escribio en el campo -> Slot entero 0..max, o null si no es un
      numero (el campo vuelve al Slot vigente). Fuera de rango se acota, como
      el stepper de SLA. */
@@ -197,7 +213,7 @@
     TOP: TOP, UMBRAL: UMBRAL, SLOT_MAXIMO: SLOT_MAXIMO, LARGO_ETIQUETA: LARGO_ETIQUETA,
     numero: numero, etiquetaFila: etiquetaFila, abreviarRuta: abreviarRuta, recortar: recortar,
     marcarDentro: marcarDentro, vista: vista, resumen: resumen, textoPeriodo: textoPeriodo,
-    acotarSlot: acotarSlot, lineasEje: lineasEje,
+    acotarSlot: acotarSlot, lineasEje: lineasEje, textoCobertura: textoCobertura,
   };
   raiz.ConcentracionDatos = ConcentracionDatos;
 
@@ -447,6 +463,9 @@
     var errores = d.errores || {};
     if (numero(d.slotMaximo) !== null) slotMaximo = numero(d.slotMaximo);
     $('periodo').textContent = textoPeriodo(d.periodo);
+    var cobertura = textoCobertura(d.cobertura);
+    $('cobertura').textContent = cobertura;
+    $('cobertura').hidden = !cobertura;
     pintarPareto(d.pareto, errores);
     pintarHorizontal('categorias', d.categorias, errores);
     pintarHorizontal('grupos', d.grupos, errores);
@@ -524,6 +543,7 @@
     slot = n;
     pintarSlot();
     $('periodo').textContent = '';
+    $('cobertura').hidden = true;
     cargar();
   }
 

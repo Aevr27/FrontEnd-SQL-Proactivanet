@@ -16,6 +16,8 @@
 //        - el mismo @Slot llega a los tres; cada grafica trae SU total;
 //          slot sin tickets = []; slot invalido = 400;
 //        - cache por slot (5 min) y su limpieza;
+//        - cobertura del Slot (dias con tickets; el 0 sin contar hoy) y que
+//          su fallo no tumba ninguna grafica;
 //        - sql/82_pareto_por_servicio.sql (la propuesta): PU y WMS en una
 //          barra cada uno, mismos conteos y mismo total; y su rollback;
 //        - un SP que falta: solo esa grafica sale con error (200); los tres:
@@ -160,7 +162,8 @@ public static class ConcentracionContratoSmoke
     const string Esquema = @"
 CREATE TABLE dbo.vw_ServicioTickets (
     CodigoTicket NVARCHAR(100) NOT NULL, Servicio NVARCHAR(100) NULL, RamaServicio NVARCHAR(400) NULL,
-    Categoria NVARCHAR(500) NULL, Grupo NVARCHAR(255) NULL, Slot NUMERIC(17,0) NULL);
+    Categoria NVARCHAR(500) NULL, Grupo NVARCHAR(255) NULL, Slot NUMERIC(17,0) NULL,
+    FechaRegistroDia DATE NULL);
 GO
 CREATE TABLE dbo.CatServicioCorreo (Servicio NVARCHAR(100) NOT NULL PRIMARY KEY,
     Descripcion NVARCHAR(255) NULL, Habilitado BIT NOT NULL);
@@ -170,7 +173,7 @@ INSERT dbo.CatServicioCorreo VALUES (N'PU', N'Punto de venta', 1), (N'EQC', N'S-
 GO
 -- Slot 0: 12 tickets. PU en dos ramas (3+2), WMS en dos ramas (1+1), EQC 4,
 -- SAP 1 (sin descripcion). Uno sin grupo y uno sin categoria.
-INSERT dbo.vw_ServicioTickets VALUES
+INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, Grupo, Slot) VALUES
  (N'T01', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Hardware/Falla Fisica PinPad', N'Soporte Campo', 0),
  (N'T02', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Hardware/Falla Fisica PinPad', N'Soporte Campo', 0),
  (N'T03', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Hardware/Impresoras Lexmark', N'Proveedor Lexmark', 0),
@@ -186,6 +189,19 @@ INSERT dbo.vw_ServicioTickets VALUES
 -- Slot 1: 2 tickets, para ver que el MISMO slot llega a los tres SP.
  (N'U01', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Otro', N'Soporte Campo', 1),
  (N'U02', N'SAP', N'SAP', N'/SAP/Alta', N'Soporte AMS Inetum', 1);
+GO
+-- Slot 3: un ticket por dia, los 30 dias (cobertura completa).
+INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, Grupo, Slot)
+SELECT N'W' + RIGHT(N'0' + CAST(n AS NVARCHAR(2)), 2), N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Otro', N'Soporte Campo', 3
+FROM (SELECT TOP (30) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) - 1 FROM sys.all_objects) q;
+GO
+-- FechaRegistroDia coherente con el Slot (hoy de Mexico, como la vista):
+-- el i-esimo ticket de cada Slot cae i dias antes del fin del Slot.
+--   Slot 0: hoy .. hoy-11 (11 dias completos con tickets de 29)
+--   Slot 1: 2 dias de 30;  Slot 3: 30 de 30.
+;WITH x AS (SELECT FechaRegistroDia, Slot, rn = ROW_NUMBER() OVER (PARTITION BY Slot ORDER BY CodigoTicket) - 1
+            FROM dbo.vw_ServicioTickets)
+UPDATE x SET FechaRegistroDia = DATEADD(DAY, -(30 * CONVERT(INT, Slot) + rn), CONVERT(DATE, DATEADD(HOUR, -6, SYSUTCDATETIME())));
 GO";
 
     static Dictionary<string, object> Pedir(string query, out int estado)
@@ -205,6 +221,14 @@ GO";
         var salida = new List<Dictionary<string, object>>();
         foreach (var x in arr) salida.Add((Dictionary<string, object>)x);
         return salida;
+    }
+
+    // diasConTickets|diasEsperados|excluyeHoy|completa|primerDia|ultimoDia
+    static string Cobertura(Dictionary<string, object> d)
+    {
+        var c = d["cobertura"] as Dictionary<string, object>;
+        if (c == null) return "null";
+        return c["diasConTickets"] + "|" + c["diasEsperados"] + "|" + c["excluyeHoy"] + "|" + c["completa"] + "|" + c["primerDia"] + "|" + c["ultimoDia"];
     }
 
     static string Total(Dictionary<string, object> d, string clave)
@@ -256,6 +280,14 @@ GO";
             Total(d, "pareto") + "|" + Total(d, "categorias") + "|" + Total(d, "grupos"));
         Chk("81 categorias: TODAS las filas (el Top lo pone la pestaña)", 7, Lista(d["categorias"]).Count);
         Chk("81 sin errores ni avisos", "0|0", ((Dictionary<string, object>)d["errores"]).Count + "|" + ((object[])d["avisos"]).Length);
+        var hoyMx = ConcentracionContrato.HoyMexico(DateTime.UtcNow);
+        Chk("cobertura slot 0: sin contar hoy, 11 de 29, parcial, rango real",
+            "11|29|True|False|" + Dia(hoyMx.AddDays(-11)) + "|" + Dia(hoyMx), Cobertura(d));
+        Chk("cobertura slot 3: 30 de 30, completa", "30|30|False|True|" + Dia(hoyMx.AddDays(-119)) + "|" + Dia(hoyMx.AddDays(-90)),
+            Cobertura(Pedir("slot=3", out estado)));
+        Chk("cobertura slot 1: 2 de 30, parcial", "2|30|False|False|" + Dia(hoyMx.AddDays(-31)) + "|" + Dia(hoyMx.AddDays(-30)),
+            Cobertura(Pedir("slot=1", out estado)));
+        Chk("cobertura slot sin tickets: 0, sin rango", "0|30|False|False||", Cobertura(Pedir("slot=8", out estado)));
 
         var hoy = ConcentracionContrato.HoyMexico(DateTime.UtcNow);
         DateTime desde, hasta;
@@ -282,7 +314,7 @@ GO";
         Chk("slot abc: 400", 400, estado);
 
         // --- Cache por slot: un ticket nuevo no se ve hasta limpiarla.
-        Lotes(cadena, "INSERT dbo.vw_ServicioTickets VALUES (N'U03', N'EQC', N'S-Equipo de Computo', N'/X/Y', N'G', 1);");
+        Lotes(cadena, "INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, Grupo, Slot) VALUES (N'U03', N'EQC', N'S-Equipo de Computo', N'/X/Y', N'G', 1);");
         d = Pedir("slot=1", out estado);
         Chk("cache: mismo slot, mismo dato (5 min)", "2", Total(d, "pareto"));
         ConcentracionQueries.LimpiarCache();
@@ -312,6 +344,15 @@ GO";
             Lista(d["pareto"]).Count + "|" + Lista(d["pareto"])[0].ContainsKey("NombreServicio"));
 
         // --- Una grafica que falla no tumba a las otras.
+        // --- La cobertura falla (sin la columna): sin aviso, graficas igual.
+        Lotes(cadena, "ALTER TABLE dbo.vw_ServicioTickets DROP COLUMN FechaRegistroDia;");
+        ConcentracionQueries.LimpiarCache();
+        d = Pedir("slot=0", out estado);
+        Chk("cobertura caida: 200, cobertura null, graficas con datos, aviso", "200|True|12|11|11|True",
+            estado + "|" + (d["cobertura"] == null) + "|" + Total(d, "pareto") + "|" + Total(d, "categorias") + "|" + Total(d, "grupos") + "|" +
+            (((object[])d["avisos"]).Length == 1 && ((string)((object[])d["avisos"])[0]).Contains("cobertura")));
+        Chk("cobertura caida: no cuenta como error de grafica", 0, ((Dictionary<string, object>)d["errores"]).Count);
+
         Lotes(cadena, "DROP PROCEDURE dbo.usp_CorreoServicio_TicketsGrupo;");
         ConcentracionQueries.LimpiarCache();
         d = Pedir("slot=0", out estado);

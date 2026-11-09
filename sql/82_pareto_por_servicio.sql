@@ -49,6 +49,12 @@
      en Servicio en vez de nombres de rama, y una columna mas. Confirmar antes
      de aplicar. La pestaña del tablero funciona con las DOS versiones: usa
      NombreServicio si llega y, si no, Servicio.
+     Busqueda 2026-11-09: en los repositorios (FrontEnd todas las ramas e
+     historial, Integracion_SQL, copia local de reenviacorreo/) solo lo usa
+     la pestaña. NO se pudo revisar: la carpeta de scripts de correo del
+     servidor (AppSettings AdminScriptsDir), Power BI / Excel, jobs y otras
+     bases. diag_concentracion_consumidores_identidad.sql cubre lo que SQL
+     Server registra (dependencias, jobs, ejecuciones en cache).
    ===================================================================================== */
 
 USE [Tickets_Proactivanet];

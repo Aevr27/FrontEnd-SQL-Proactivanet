@@ -21,6 +21,8 @@
 //         los datos y avisa en la pastilla.
 //      C9 "Actualizar" pide ya.
 //      C10 Slot sin tickets: "Sin tickets en este Slot." en las tres.
+//      C11 cobertura del Slot: completa = sin aviso; parcial = aviso con
+//          dias y rango del servidor, sin bloquear las graficas; null = sin aviso.
 //   D  dashboard.html#concentracion (MOCK_DATA para SLA)
 //      D1 la entrada de la barra queda marcada y la pestaña se monta y pide
 //         concentracion.ashx sin pasar por Analisis (0 analisis.ashx, su
@@ -70,6 +72,8 @@ function respondeConc(u, v) {
   var vacio = window.__vacio;
   return {
     slot: s, slotMaximo: 12,
+    cobertura: window.__cobertura !== undefined ? window.__cobertura
+      : { diasConTickets: s === 0 ? 29 : 30, diasEsperados: s === 0 ? 29 : 30, primerDia: null, ultimoDia: null, completa: true, excluyeHoy: s === 0 },
     periodo: { desde: desde.toISOString().slice(0, 10), hasta: hasta.toISOString().slice(0, 10), dias: 30 },
     pareto: vacio ? [] : filas('Servicio', function (i) { return 'Servicio ' + (i + 1) + ' slot ' + s; }, cp),
     categorias: vacio ? [] : filas('Categoria', function (i) {
@@ -186,7 +190,13 @@ var sondaC = conComun(
   'apunta("C9", [__pedidas.conc - n9, lineas().some(function (l) { return /No se pudo actualizar/.test(l); })]);\n' +
   // C10 vacio
   'window.__vacio = true; await M().recargar(); window.__vacio = false;\n' +
-  'apunta("C10", [msg("pareto"), msg("categorias"), msg("grupos"), hint("pareto")]);\n');
+  'apunta("C10", [msg("pareto"), msg("categorias"), msg("grupos"), hint("pareto")]);\n' +
+  // C11 cobertura
+  'var cob = $c("cobertura"); await M().recargar(); var completa = cob.hidden;\n' +
+  'window.__cobertura = { diasConTickets: 16, diasEsperados: 30, primerDia: "2025-11-19", ultimoDia: "2025-12-14", completa: false, excluyeHoy: false };\n' +
+  'await M().recargar(); var parcial = [cob.hidden, cob.textContent, !!graf("pareto"), !!graf("grupos")];\n' +
+  'window.__cobertura = null; await M().recargar(); var nula = cob.hidden; window.__cobertura = undefined;\n' +
+  'apunta("C11", [completa, parcial, nula]);\n');
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
@@ -237,6 +247,8 @@ Banco.correr(paginas, urls, 60000).then(function (res) {
       [1, [null, true], 121, '0', true, true, true], o.C8);
     Check('C9 Actualizar pide ya y quita el aviso', [1, false], o.C9);
     Check('C10 slot sin tickets', ['Sin tickets en este Slot.', 'Sin tickets en este Slot.', 'Sin tickets en este Slot.', ''], o.C10);
+    Check('C11 cobertura: completa sin aviso; parcial con el hecho y las graficas igual; sin medir sin aviso',
+      [true, [false, 'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.', true, true], true], o.C11);
   });
   seccion(1, 'D', function (o) {
     Check('D1 #concentracion: entrada marcada, montada, pide slot 0, Analisis sin tocar',

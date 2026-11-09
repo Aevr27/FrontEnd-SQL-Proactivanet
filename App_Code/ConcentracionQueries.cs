@@ -44,6 +44,10 @@ public sealed class ConcentracionResultado
     public readonly List<string> Avisos = new List<string>();
     // Excepciones originales, para la traza del servidor. No se serializan.
     public readonly List<KeyValuePair<string, Exception>> Fallos = new List<KeyValuePair<string, Exception>>();
+    // Dias del Slot con tickets (ver ConcentracionContrato, COBERTURA).
+    // null = no se pudo medir: no hay aviso y las graficas siguen igual.
+    public Dictionary<string, object> Cobertura;
+    public Exception FalloCobertura;
 }
 
 public static class ConcentracionQueries
@@ -74,8 +78,26 @@ public static class ConcentracionQueries
             var procedimiento = bloques[i].Procedimiento;
             tareas[i] = Task.Run(() => LeerConCache(cadena, procedimiento, slot, r.Hoy));
         }
+        var hoyDia = r.Hoy;
+        var cobertura = Task.Run(() => CoberturaConCache(cadena, slot, hoyDia));
         try { Task.WaitAll(tareas); }
         catch (AggregateException) { /* cada tarea se revisa abajo */ }
+        try { cobertura.Wait(); }
+        catch (AggregateException) { /* se revisa abajo */ }
+
+        /* La cobertura es solo para el aviso: si falla (permiso, vista), no
+           hay aviso y no cuenta como fallo de ninguna grafica. Se anota en
+           avisos para que no pase en silencio. */
+        if (cobertura.IsFaulted)
+        {
+            r.FalloCobertura = cobertura.Exception.GetBaseException();
+            r.Avisos.Add("No se pudo medir la cobertura del Slot (" +
+                         DashboardHandler.MensajeSeguro(r.FalloCobertura) + "); las gráficas no cambian.");
+        }
+        else
+        {
+            r.Cobertura = cobertura.Result;
+        }
 
         for (int i = 0; i < bloques.Length; i++)
         {
@@ -110,6 +132,60 @@ public static class ConcentracionQueries
         cache.Insert(clave, filas, null, DateTime.UtcNow.AddSeconds(SegundosCache),
                      Cache.NoSlidingExpiration);
         return filas;
+    }
+
+    /* Cuantos dias del Slot tienen al menos un ticket, en la MISMA poblacion
+       que las tres graficas (dbo.vw_ServicioTickets, mismo filtro Slot).
+       Solo lectura, parametrizada. En el Slot 0 no cuenta HOY (dia en curso).
+       Requiere SELECT sobre dbo.vw_ServicioTickets: en QA, PROACTIVANETAD lo
+       tiene explicito y por db_datareader (diag 2, B1/B3). */
+    private const string SqlCobertura = @"
+SELECT DiasConTickets = COUNT(DISTINCT CASE WHEN FechaRegistroDia < @Hoy THEN FechaRegistroDia END),
+       PrimerDia = MIN(FechaRegistroDia),
+       UltimoDia = MAX(FechaRegistroDia)
+FROM dbo.vw_ServicioTickets
+WHERE Slot = @Slot;";
+
+    private static Dictionary<string, object> CoberturaConCache(string cadena, int slot, DateTime hoy)
+    {
+        var cache = HttpRuntime.Cache;
+        var clave = PrefijoCache + "cobertura:" + slot.ToString(CultureInfo.InvariantCulture)
+                    + ":" + ConcentracionContrato.Dia(hoy);
+        var guardado = cache[clave] as Dictionary<string, object>;
+        if (guardado != null) return guardado;
+
+        int dias = 0;
+        object primero = null, ultimo = null;
+        using (var cn = new SqlConnection(cadena))
+        using (var cmd = new SqlCommand(SqlCobertura, cn))
+        {
+            cmd.CommandTimeout = TimeoutComandoSegundos;
+            cmd.Parameters.Add("@Slot", SqlDbType.Int).Value = slot;
+            cmd.Parameters.Add("@Hoy", SqlDbType.Date).Value = hoy.Date;
+            cn.Open();
+            using (var rd = cmd.ExecuteReader())
+            {
+                if (rd.Read())
+                {
+                    dias = rd.IsDBNull(0) ? 0 : Convert.ToInt32(rd.GetValue(0), CultureInfo.InvariantCulture);
+                    if (!rd.IsDBNull(1)) primero = ConcentracionContrato.Dia(Convert.ToDateTime(rd.GetValue(1), CultureInfo.InvariantCulture));
+                    if (!rd.IsDBNull(2)) ultimo = ConcentracionContrato.Dia(Convert.ToDateTime(rd.GetValue(2), CultureInfo.InvariantCulture));
+                }
+            }
+        }
+
+        var salida = new Dictionary<string, object>
+        {
+            { "diasConTickets", dias },
+            { "diasEsperados", ConcentracionContrato.DiasEsperados(slot) },
+            { "primerDia", primero },
+            { "ultimoDia", ultimo },
+            { "completa", ConcentracionContrato.CoberturaCompleta(slot, dias) },
+            { "excluyeHoy", slot == 0 },
+        };
+        cache.Insert(clave, salida, null, DateTime.UtcNow.AddSeconds(SegundosCache),
+                     Cache.NoSlidingExpiration);
+        return salida;
     }
 
     // Para las pruebas: vacia lo que esta pestaña dejo en la cache.
