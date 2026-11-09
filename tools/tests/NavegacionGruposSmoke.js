@@ -213,34 +213,37 @@ function contenedorActivo() { return activos('.maintab-content'); }
   comprobar('volver a Observabilidad abre el ultimo visto (Orquestacion)', contenedorActivo(), 'tab-orquestacion');
   comprobar('volver al grupo no remonta', cuenta.qare.init + cuenta.orquestacion.init, 2);
 
-  // --- Servicios: Analisis de servicios + Vista general de servicios -------
+  // --- Servicios: Vista general de servicios (primero) + Analisis ---------
+  comprobar('Servicios: la Vista general va primero (izquierda) en el selector',
+    (html.match(/data-grupo="servicios"[\s\S]*?<\/nav>/)[0].match(/data-tab="[a-z]+"/g) || []).join(','),
+    'data-tab="concentracion",data-tab="analisis"');
   boton('.mnav', 'servicios').click(); await esperar();
-  comprobar('Servicios: abre Analisis la primera vez', contenedorActivo(), 'tab-analisis');
+  comprobar('Servicios: abre la Vista general la primera vez', contenedorActivo(), 'tab-concentracion');
   comprobar('Servicios: barra marca el grupo', activos('.mnav'), 'servicios');
   comprobar('Servicios: aria-current en el grupo', boton('.mnav', 'servicios').atributos['aria-current'], 'page');
   comprobar('Servicios: solo su selector visible', selectorVisible(), 'servicios');
-  comprobar('Servicios: selector marca Analisis', activos('.subnav-btn'), 'analisis');
-  comprobar('Servicios: la Vista general espera a su clic', cuenta.concentracion.init, 0);
-  comprobar('Servicios: hash del modulo', hash.valor, '#analisis');
+  comprobar('Servicios: selector marca la Vista general', activos('.subnav-btn'), 'concentracion');
+  comprobar('Servicios: Analisis espera a su clic', cuenta.analisis.init, 0);
+  comprobar('Servicios: hash del modulo', hash.valor, '#concentracion');
 
-  boton('.subnav-btn', 'concentracion').click(); await esperar();
-  comprobar('Vista general: contenedor', contenedorActivo(), 'tab-concentracion');
-  comprobar('Vista general: barra sigue en el grupo', activos('.mnav'), 'servicios');
-  comprobar('Vista general: selector marca la Vista general', activos('.subnav-btn'), 'concentracion');
-  comprobar('Vista general: aria-current pasa a la Vista general',
-    [boton('.subnav-btn', 'concentracion').atributos['aria-current'], boton('.subnav-btn', 'analisis').atributos['aria-current']].join('|'), 'page|');
-  comprobar('Vista general: hash de siempre', hash.valor, '#concentracion');
+  boton('.subnav-btn', 'analisis').click(); await esperar();
+  comprobar('Analisis: contenedor', contenedorActivo(), 'tab-analisis');
+  comprobar('Analisis: barra sigue en el grupo', activos('.mnav'), 'servicios');
+  comprobar('Analisis: selector marca Analisis', activos('.subnav-btn'), 'analisis');
+  comprobar('Analisis: aria-current pasa a Analisis',
+    [boton('.subnav-btn', 'analisis').atributos['aria-current'], boton('.subnav-btn', 'concentracion').atributos['aria-current']].join('|'), 'page|');
+  comprobar('Analisis: hash de siempre', hash.valor, '#analisis');
   for (var k = 0; k < 4; k++) {
-    boton('.subnav-btn', 'analisis').click(); await esperar();
     boton('.subnav-btn', 'concentracion').click(); await esperar();
+    boton('.subnav-btn', 'analisis').click(); await esperar();
   }
   comprobar('Analisis montado una sola vez', cuenta.analisis.init, 1);
   comprobar('Vista general montada una sola vez', cuenta.concentracion.init, 1);
   comprobar('Vista general solo se remide al volver', cuenta.concentracion.redimensionar, 4);
   boton('.mnav', 'calidad').click(); await esperar();
   boton('.mnav', 'servicios').click(); await esperar();
-  comprobar('volver a Servicios abre el ultimo visto (Vista general)', contenedorActivo(), 'tab-concentracion');
-  comprobar('volver a Servicios no remonta', cuenta.concentracion.init, 1);
+  comprobar('volver a Servicios abre el ultimo visto (Analisis)', contenedorActivo(), 'tab-analisis');
+  comprobar('volver a Servicios no remonta', cuenta.analisis.init, 1);
 
   // --- fuera de un grupo no queda selector ni grupo marcado ----------------
   boton('.mnav', 'backlog').click(); await esperar();

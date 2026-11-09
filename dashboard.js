@@ -4439,7 +4439,7 @@ const MODULOS = {
 const GRUPOS = {
   observabilidad: ['orquestacion', 'tablero'],
   calidad: ['qa', 'qare'],
-  servicios: ['analisis', 'concentracion'],
+  servicios: ['concentracion', 'analisis'],
 };
 const ultimoDeGrupo = {};
 
