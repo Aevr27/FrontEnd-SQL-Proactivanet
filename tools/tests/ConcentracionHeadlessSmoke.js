@@ -176,7 +176,10 @@ var sondaC = conComun(
   // C2
   'var p = graf("pareto");\n' +
   'apunta("C2", [p.data.labels.length, p.data.datasets[0].backgroundColor, p.data.datasets[1].type, p.data.datasets[1].borderColor,\n' +
-  '  p.data.datasets[1].data.slice(0, 3), p.data.datasets[2].data.every(function (x) { return x === 80; }), p.data.datasets[2].borderColor]);\n' +
+  '  p.data.datasets[1].data.slice(0, 3), p.data.datasets[2].data.every(function (x) { return x === 80; }), p.data.datasets[2].borderColor,\n' +
+  '  Paleta.AZUL_SERIE, graf("categorias").data.datasets[0].backgroundColor[0], graf("grupos").data.datasets[0].backgroundColor[0],\n' +
+  '  graf("grupos").data.datasets[0].backgroundColor[graf("grupos").data.labels.length - 1],\n' +
+  '  getComputedStyle(document.querySelector(".conc-leyenda .conc-dentro")).backgroundColor]);\n' +
   // C3
   'var c = graf("categorias");\n' +
   'apunta("C3", [c.data.labels.length, c.data.labels[0], c.options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }]), c.options.indexAxis,\n' +
@@ -260,7 +263,8 @@ var sondaD = conComun(
   'apunta("D1", [b.querySelector(".mnav-txt").textContent, b.getAttribute("title"), b.classList.contains("active"), b.getAttribute("aria-current"),\n' +
   '  document.getElementById("tab-concentracion").classList.contains("active"), slots(), __pedidas["an-servicios"] || 0,\n' +
   '  __pedidas["an-otro"] || 0, document.getElementById("tab-analisis").childElementCount,\n' +
-  '  document.querySelector("#tab-concentracion h1").textContent]);\n' +
+  '  document.querySelector("#tab-concentracion h1").textContent, Chart.defaults.datasets.bar.backgroundColor === Paleta.AZUL_SERIE,\n' +
+  '  Chart.getChart(document.getElementById("conc-chart-pareto")).data.datasets[0].backgroundColor[0]]);\n' +
   'activarTab("analisis");\n' +
   'await hasta(function () { return (__pedidas["an-servicios"] || 0) >= 1 && document.querySelector("#tab-analisis select"); }, 8000);\n' +
   'await espera(300);\n' +
@@ -283,14 +287,16 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
     Check(nombre + ' sin errores de JS', [], res[i].errores);
     fn(Banco.mapa(res[i]));
   }
-  var AZUL = '#5b84b1', CLARO = '#c3d5ea';
+  // El azul de "Atencion por agente": Paleta.AZUL_SERIE (default compartido de Barras.aplicarDefaults).
+  var AZUL = '#2563eb', CLARO = '#b3c8f8';
   seccion(0, 'C', function (o) {
     Check('C1 carga sola con modo=slot&slot=0, tres graficas, periodo del servidor, sin Analisis, control de Slot visible',
       [[{ modo: 'slot', slot: '0' }], true, true, true,
        'Periodo: Slot 0 · del 11/10/2026 al 09/11/2026 · Service Owner: todos · Grupo: todos · 500 tickets en el periodo', 0, 0, false, true], o.C1);
     // Acumulado 24, 42, 56, 67, 76, 83 -> 6 dentro.
-    Check('C2 Pareto: Top 10 de 12, azul hasta el 80 % (la que cruza incluida), azul claro despues, linea ambar, referencia gris en 80',
-      [10, [AZUL, AZUL, AZUL, AZUL, AZUL, AZUL, CLARO, CLARO, CLARO, CLARO], 'line', '#d39a3a', [24, 42, 56], true, '#8a94a6'], o.C2);
+    Check('C2 Pareto: Top 10 de 12, azul de "Atencion por agente" hasta el 80 %, su aclarado despues; linea ambar y referencia gris sin cambio; categorias, grupos y leyenda con el mismo azul',
+      [10, [AZUL, AZUL, AZUL, AZUL, AZUL, AZUL, CLARO, CLARO, CLARO, CLARO], 'line', '#d39a3a', [24, 42, 56], true, '#8a94a6',
+       AZUL, AZUL, AZUL, CLARO, 'rgb(37, 99, 235)'], o.C2);
     Check('C3 categorias: Top 15, eje en dos lineas, tooltip con la ruta completa, alto por filas',
       [15, ['Nivel intermedio con', 'nombre largo 0 › Detal…'],
        '/S-Servicio largo 0/Nivel intermedio con nombre largo 0/Detalle final de la categoria numero 0', 'y', '610px'], o.C3);
@@ -322,7 +328,7 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
   seccion(1, 'D', function (o) {
     Check('D1 #concentracion: "Vista general de servicios" marcada, montada, pide slot 0, Analisis sin tocar',
       ['Vista general de servicios', 'Vista general de servicios', true, 'page', true, ['0'], 0, 0, 0,
-       'Tickets Proactivanet — Vista general de servicios'], o.D1);
+       'Tickets Proactivanet — Vista general de servicios', true, '#2563eb'], o.D1);
     Check('D2 Analisis igual que siempre: solo la lista de servicios, nada analizado', [1, 0, 'page', false], o.D2);
     Check('D3 volver: sin montar de nuevo ni repedir', [0, 1, true], o.D3);
   });

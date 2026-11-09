@@ -282,13 +282,26 @@
   var ALTO_FILA = 38;           // dos lineas de 11.5px por barra
   var ANCHO_ESTRECHO = 640;     // px del Pareto por debajo de los cuales se compacta
 
-  /* Colores (2026-11-09, retroalimentacion: el verde se sentia fuerte).
-     Azules suaves para el volumen: azul acero dentro del 80 % y su version
-     clara para el resto, que se distinguen sin saturar. El acumulado va en
-     ambar apagado -calido, para no confundirse con ninguna barra- y la
-     referencia del 80 % en gris pizarra punteado. Mismos valores que la
-     leyenda de concentracion.css. */
-  var COLOR = { dentro: '#5b84b1', fuera: '#c3d5ea', acumulado: '#d39a3a', referencia: '#8a94a6' };
+  /* Colores. El acumulado va en ambar apagado -calido, para no confundirse
+     con ninguna barra- y la referencia del 80 % en gris pizarra punteado.
+     La leyenda toma estos mismos valores al arrancar (concentracion.css solo
+     trae el respaldo). */
+  /* Barras (2026-11-09, segunda vuelta): el MISMO azul de "Atencion por
+     agente" del Call Center. Esa grafica no declara color: toma el default
+     compartido de Barras.aplicarDefaults, que es Paleta.AZUL_SERIE
+     (PALETA_CATEGORICA[0]). Aqui se lee el token, no se copia el hex. El
+     resto despues del 80 % es ese mismo azul aclarado con blanco (aclarar),
+     calculado del token, para que el corte se siga viendo. */
+  function aclarar(hex, blanco) {
+    var c = String(hex).replace('#', '');
+    var canal = function (i) {
+      var v = parseInt(c.slice(i, i + 2), 16);
+      return ('0' + Math.round(v + (255 - v) * blanco).toString(16)).slice(-2);
+    };
+    return '#' + canal(0) + canal(2) + canal(4);
+  }
+  var COLOR = { dentro: Paleta.AZUL_SERIE, fuera: aclarar(Paleta.AZUL_SERIE, 0.65),
+                acumulado: '#d39a3a', referencia: '#8a94a6' };
   var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1f6' };
 
   var graficas = {};
@@ -703,6 +716,11 @@
        de dashboard.js ya corrio antes de que existiera este marcado, asi que
        se monta aqui sobre la raiz del modulo (idempotente), como en QARE. */
     if (window.Desplegable) Desplegable.montar(document.getElementById('tab-concentracion') || document);
+    // La leyenda toma los mismos colores de las barras (salen del token).
+    var raizTab = document.getElementById('tab-concentracion') || document;
+    var muestra = function (sel, color) { var i = raizTab.querySelector(sel); if (i) i.style.background = color; };
+    muestra('.conc-leyenda .conc-dentro', COLOR.dentro);
+    muestra('.conc-leyenda .conc-fuera', COLOR.fuera);
     pintarControles();
     conectar();
     cargar();
