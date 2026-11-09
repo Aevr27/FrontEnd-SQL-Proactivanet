@@ -58,8 +58,9 @@
 //      regla con la que cuenta; otro clic lo quita; uno a la vez; cifras
 //      fijas; Y con Estado / Director / busqueda sin tocarlos; orden y
 //      primera pagina; Limpiar; relectura; Cobertura; la instruccion.
-//      Total (KF2T) no filtra: quita el indicador y vuelve a todas, sin
-//      tocar el Director; sin aria-pressed. Mecanica en SeleccionKpi
+//      Total (KF2T) no es indicador: quita el indicador y deja en Estado
+//      los que cuentan en el Total (sin Cerrado), sin tocar el Director;
+//      Cerradas tras Total devuelve Estado a Todos; sin aria-pressed. Mecanica en SeleccionKpi
 //      (assets/js/seleccion-kpi.js, su prueba: SeleccionKpiSmoke.js).
 //   Al cargar se ve TODO (Cerrado incluido): ya no hay vista por omision
 //   que oculte Cerrado (L0, S2-9, BV10).
@@ -3044,7 +3045,7 @@ pruebas.push(function () {
     Check('KF1 error: sin instruccion', true, q.sel('regKpisGuia').hidden);
     var html = leer('admin/iniciativas.html');
     Check('KF1 la instruccion va justo encima de las tarjetas, sin globo', true,
-      /<p class="ini-kpis-guia" id="regKpisGuia" hidden>\s*<strong>Haz clic en un indicador para filtrar las iniciativas por esa condición\.<\/strong>\s*<span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro\.<\/span>\s*<span>Total muestra todas las iniciativas\.<\/span>\s*<\/p>\s*<div class="kpis ini-kpis" id="regKpis"/.test(html));
+      /<p class="ini-kpis-guia" id="regKpisGuia" hidden>\s*<strong>Haz clic en un indicador para filtrar las iniciativas por esa condición\.<\/strong>\s*<span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro\.<\/span>\s*<span>Total muestra las iniciativas activas \(Estado sin Cerrado\)\.<\/span>\s*<\/p>\s*<div class="kpis ini-kpis" id="regKpis"/.test(html));
     // Las tarjetas se repintan en cada clic: NO son aria-live (se releerian
     // enteras); el aviso es la cuenta de la lista, que si lo es.
     Check('KF1 tarjetas sin aria-live; #regCuenta aria-live; helper cargado antes del registro', [false, true, true],
@@ -3076,28 +3077,38 @@ pruebas.push(function () {
       Check('KF2 ' + c + ': otro clic lo quita', [CINCO, [], cifras, 0], [folios(p), pulsados(p), kpis(p), reg.filtro.activos()]);
     });
 
-    // Total: cuenta las abiertas, pero su clic no filtra. Sin nada elegido
-    // no cambia nada (ni la pagina); con algo elegido lo quita y la lista
-    // vuelve a todas (Cerradas incluidas).
+    // Total: cuenta las abiertas y su clic (2026-11-09) deja en Estado los
+    // que cuentan en el Total (todos menos Cerrado): la lista trae lo mismo
+    // que la cifra. No es un indicador (nada marcado); el Estado si cuenta
+    // como filtro. Con algo elegido, ademas, lo quita.
+    var ABIERTAS = ['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005'];
     Check('KF2T la cifra de Total = las abiertas; la lista sin indicador, todas', ['4', 5], [cifras[0], CINCO.length]);
     reg.limite = 300;
     clicIndicador(p, 'total');
-    Check('KF2T Total sin nada elegido: todas, nada marcado, ningun filtro, pagina intacta',
-      [CINCO, [], '', 0, 300, cifras], [folios(p), pulsados(p), reg.filtro.indicador, reg.filtro.activos(), reg.limite, kpis(p)]);
-    reg.limite = 100;
+    Check('KF2T Total sin nada elegido: Estado sin Cerrado, la lista = la cifra, nada marcado, primera pagina',
+      [ABIERTAS, [], '', 1, 100, cifras, true, String(ABIERTAS.length)],
+      [folios(p), pulsados(p), reg.filtro.indicador, reg.filtro.activos(), reg.limite, kpis(p), reg.filtro.excluyeCerradas(), cifras[0]]);
+    Check('KF2T Estado: todos menos Cerrado', [true, false],
+      [reg.filtro.estadosMarcados().length > 0, reg.filtro.estadosMarcados().some(function (e) { return /^cerrad/i.test(e); })]);
+    clicIndicador(p, 'total');
+    Check('KF2T Total otra vez: nada cambia', [ABIERTAS, 1], [folios(p), reg.filtro.activos()]);
     clicIndicador(p, 'retrasadas');
     clicIndicador(p, 'total');
-    Check('KF2T Total con Atrasadas elegida: la quita y vuelve a todas (HAR cerrada incluida)',
-      [CINCO, [], '', true, '5 iniciativas'], [folios(p), pulsados(p), reg.filtro.indicador,
+    Check('KF2T Total con Atrasadas elegida: la quita y deja las abiertas (sin la HAR cerrada)',
+      [ABIERTAS, [], '', false, '4 Abiertas de 5 Total'], [folios(p), pulsados(p), reg.filtro.indicador,
         folios(p).indexOf('HAR 2025-000003') >= 0, p.sel('regCuenta').textContent]);
-    // Con un filtro independiente: Total quita solo el indicador.
-    elegir(p, 'regDirector', 'Dir B');
+    // Cerradas justo despues de Total: Estado vuelve a Todos (si no, vacia).
     clicIndicador(p, 'cerradas');
+    Check('KF2T Cerradas tras Total: Estado vuelve a Todos y trae la cerrada',
+      [['HAR 2025-000003'], ['cerradas'], false, 1], [folios(p), pulsados(p), reg.filtro.estados.activo(), reg.filtro.activos()]);
+    // Con un filtro independiente: el Director no se toca.
+    elegir(p, 'regDirector', 'Dir B');
     clicIndicador(p, 'total');
-    Check('KF2T Total con Director Dir B: quita el indicador, el Director sigue (Cerrada incluida)',
-      ['', 'Dir B', ['REQ 2026-000004', 'PRB 2026-000005', 'HAR 2025-000003'], '1 filtro activo'],
+    Check('KF2T Total con Director Dir B: quita el indicador, el Director sigue, sin la cerrada',
+      ['', 'Dir B', ['REQ 2026-000004', 'PRB 2026-000005'], '2 filtros activos'],
       [reg.filtro.indicador, reg.filtro.director, folios(p), p.sel('regFiltrosCuenta').textContent]);
     sinOmision(p);
+    Check('KF2T Limpiar filtros devuelve Estado a Todos', [CINCO, 0], [folios(p), reg.filtro.activos()]);
 
     clicIndicador(p, 'activas'); clicIndicador(p, 'cerradas');
     Check('KF3 elegir otro reemplaza al anterior', [['cerradas'], ['HAR 2025-000003']], [pulsados(p), folios(p)]);

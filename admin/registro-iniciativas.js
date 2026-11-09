@@ -60,13 +60,16 @@
    a las iniciativas que cuenta ese indicador (FiltroRegistro.indicador,
    Registro.cumpleIndicador); otro clic en el mismo lo quita. Uno a la vez:
    elegir otro reemplaza al anterior. Total no es un filtro: su clic quita
-   el indicador elegido y la lista vuelve a todas las iniciativas que dejan
-   pasar los demas filtros (que no se tocan). La mecanica (elegir, quitar,
+   el indicador elegido y deja en Estado solo los que cuentan en el Total
+   (todos menos Cerrado; 2026-11-09), asi la lista trae lo mismo que la
+   cifra. Cerradas con Estado tal como lo dejo Total devuelve Estado a
+   Todos (un Estado elegido a mano no se toca). Los demas filtros no se
+   tocan. La mecanica (elegir, quitar,
    reemplazar, conservar en la relectura, atributos, escucha y foco) es la
    compartida de assets/js/seleccion-kpi.js (SeleccionKpi); las reglas de
    cada indicador siguen aqui. Se combina en Y con Estado, Tipo,
-   Director, cascada y busqueda; ninguno de ellos se toca (Cerradas con
-   Cerrado desmarcado en Estado = lista vacia, y lo dice). Cuenta como un
+   Director, cascada y busqueda; fuera de lo dicho para Total y Cerradas,
+   ninguno de ellos se toca. Cuenta como un
    filtro activo y "Limpiar filtros" lo quita. Las cifras NO se mueven: se
    siguen contando sobre el registro completo. La Cobertura no lo usa (un
    clic estando en ella vuelve a la lista). La relectura lo conserva (sobre).
@@ -1023,7 +1026,32 @@ window.RegistroIniciativas = (function () {
 
     // El mismo indicador lo quita; otro lo reemplaza; Total lo quita; uno
     // que no existe, nada. -> true si cambio.
-    alternarIndicador(k) { return this.seleccion.alternar(k); }
+    // Ademas (2026-11-09): Total deja en Estado solo los que cuentan en el
+    // Total (todos menos Cerrado), para que la lista muestre las mismas
+    // iniciativas que la cifra. Y Cerradas, con Estado tal como lo dejo
+    // Total, devuelve Estado a Todos (si no, la lista quedaria vacia); un
+    // Estado elegido a mano no se toca.
+    alternarIndicador(k) {
+      var cambio = this.seleccion.alternar(k);
+      if (k === INDICADOR_TODAS) return this.soloEstadosDelTotal() || cambio;
+      if (k === 'cerradas' && this.indicador === 'cerradas' && this.estados.activo() &&
+          this.estados.lista().join('\u0001') === this.estadosDelTotal().join('\u0001')) {
+        this.estados.limpiar();
+        return true;
+      }
+      return cambio;
+    }
+    // Los estados que cuentan en Total (CONDICION_KPI.total: no Cerrado).
+    estadosDelTotal() {
+      return this.registro.estados().filter(function (e) { return plano(e) !== ESTADO_CERRADO; });
+    }
+    // Estado = estadosDelTotal(). -> true si cambio.
+    soloEstadosDelTotal() {
+      var todos = this.registro.estados(), delTotal = this.estadosDelTotal();
+      var antes = this.estados.lista().join('\u0001');
+      this.estados.marcados = delTotal.length === todos.length ? null : delTotal;
+      return this.estados.lista().join('\u0001') !== antes;
+    }
     pasaIndicador(i) { return !this.indicador || Registro.cumpleIndicador(this.indicador, i); }
 
     // Folio o titulo. Solo acota la lista (aplicar), no la Cobertura.
