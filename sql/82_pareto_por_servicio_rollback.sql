@@ -6,7 +6,7 @@
    seis columnas, sin NombreServicio). Es el mismo bloque de
    81_concentracion_tickets.sql.
 
-   La pestaña del tablero funciona con las dos versiones, asi que el
+   La pestaña del tablero ya no llama a este procedimiento, asi que el
    rollback no requiere tocar el sitio.
    ===================================================================================== */
 

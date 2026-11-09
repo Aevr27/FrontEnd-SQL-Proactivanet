@@ -47,8 +47,10 @@
      El procedimiento lo creo otra persona el 2026-11-03. Si algo fuera de la
      base (un script de correo, Power BI) lo consume, desde aqui vera codigos
      en Servicio en vez de nombres de rama, y una columna mas. Confirmar antes
-     de aplicar. La pestaña del tablero funciona con las DOS versiones: usa
-     NombreServicio si llega y, si no, Servicio.
+     de aplicar. Desde el 2026-11-09 la pestaña ya NO llama a este
+     procedimiento (agrupa por codigo de servicio en la aplicacion, con la
+     misma cuenta; la prueba de paridad la compara contra este 82), asi que
+     aplicarlo o no ya no afecta al tablero: solo a otros consumidores.
      Busqueda 2026-11-09: en los repositorios (FrontEnd todas las ramas e
      historial, Integracion_SQL, copia local de reenviacorreo/) solo lo usa
      la pestaña. NO se pudo revisar: la carpeta de scripts de correo del

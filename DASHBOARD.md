@@ -16,7 +16,7 @@ Una sola página, `dashboard.html`, con una barra lateral de pestañas (registro
 | Calidad de información › QA | `qa/` | `moduloEmbebido()` |
 | Calidad de información › QARE | `qare/` | `moduloEmbebido()` |
 | Análisis de servicios | `analisis/` | `moduloEmbebido()` |
-| Concentración de tickets | `concentracion/` | `moduloEmbebido()`, independiente de Análisis de servicios (ver §3bis) |
+| Vista general de servicios | `concentracion/` | `moduloEmbebido()`, independiente de Análisis de servicios (ver §3bis) |
 | Observabilidad › Observabilidad | `assets/Tablero_Experiencia.html` | `<iframe>` (ver §2.4) |
 | Observabilidad › Orquestación | `orquestacion/` | `moduloEmbebido()` |
 | Call Center | `dashboard.html` / `dashboard.js` | comparte la barra de filtros de SLA (`adoptarControlesSla`) |
@@ -88,7 +88,7 @@ Lo que hace el código; si un handler responde o no, y la fecha que muestra, dep
 | Experiencia | `handlers/experiencia.ashx`; **si no responde**, `experiencia/data/experiencia.mock.json` (corte guardado a mano) | En vivo: sello y periodo del servidor. Respaldo: aviso «Datos de respaldo, no en vivo» arriba y la pastilla dice «Datos de respaldo, no en vivo · Corte: dd/mm/aaaa» con la fecha guardada en el propio archivo |
 | QA, QARE | `handlers/qa.ashx`, `handlers/qare.ashx` | sello (y periodo) de `dataInfo` |
 | Análisis de servicios | `handlers/analisis.ashx` | no muestra sello de frescura |
-| Concentración de tickets | `handlers/concentracion.ashx` (tres `usp_CorreoServicio_*` con el mismo `@Slot`; caché de 5 min por Slot y día) | «Última actualización»: sello del ETL (`dbo.EtlLog`); «Periodo»: las fechas del Slot, calculadas en el servidor |
+| Vista general de servicios | `handlers/concentracion.ashx` (filas de ticket de `dbo.vw_ServicioTickets` del periodo; caché de 5 min por periodo y día) | «Última actualización»: sello del ETL (`dbo.EtlLog`); «Periodo»: las fechas del Slot o del mes, calculadas en el servidor |
 | Orquestación | `handlers/orquestacion.ashx` (vistas del `sql/77_tablero_orquestacion.sql` sobre el esquema `orq` del 76) | «Carga del Excel»: `FechaFin` de la última `orq.CargaLote` aplicada |
 | Tablero (Observabilidad) | `assets/Tablero_Experiencia.html`, un archivo **generado** (TableroExperiencia_v3.7.exe) con los datos dentro; no consulta SQL | «Instantánea generada el dd/mm/aaaa · no se actualiza en vivo» en la cabecera de cada panel, copiada del pie «Generado el ...» que pone el generador. Si el archivo no trae esa fecha, no se muestra ninguna |
 
@@ -101,7 +101,7 @@ Además:
 #### Refresco automático
 
 - **Intervalo:** `RefrescoAuto.INTERVALO_DATOS` en `assets/js/refresco-auto.js` (5 min). Es el único sitio donde se cambia. Las listas de Solicitudes en Admin siguen con `RefrescoAuto.INTERVALO` (2 min).
-- **Qué se refresca:** solo la pestaña a la vista. En el tablero: SLA y Call Center (una sola carga), Backlog, QARE, QA, Experiencia, Efectividad, Orquestación y Concentración de tickets, con un único temporizador (`dashboard.js`, sección 4ter; cada módulo publica su `refrescar()` y el router lo conoce por `refrescoDe()`). En Admin: el registro de Iniciativas (`VistaRegistro.refrescarFondo`), solo con la lista a la vista y sin detalle abierto. No se refrescan Análisis (se calcula con el botón Analizar sobre el servicio elegido, con una descarga grande que procesa un Worker, y su hoja «Reglas» tiene cambios de prueba sin guardar) ni Observabilidad (instantánea generada, no consulta SQL).
+- **Qué se refresca:** solo la pestaña a la vista. En el tablero: SLA y Call Center (una sola carga), Backlog, QARE, QA, Experiencia, Efectividad, Orquestación y Vista general de servicios, con un único temporizador (`dashboard.js`, sección 4ter; cada módulo publica su `refrescar()` y el router lo conoce por `refrescoDe()`). En Admin: el registro de Iniciativas (`VistaRegistro.refrescarFondo`), solo con la lista a la vista y sin detalle abierto. No se refrescan Análisis (se calcula con el botón Analizar sobre el servicio elegido, con una descarga grande que procesa un Worker, y su hoja «Reglas» tiene cambios de prueba sin guardar) ni Observabilidad (instantánea generada, no consulta SQL).
 - **Montaje:** cada pestaña se sigue montando la primera vez que se abre, no al cargar la página. Montarlas todas al arrancar no habilitaba el refresco (lo que faltaba era la carga en modo «fondo» de cada módulo) y sumaría al inicio el HTML, el script y la consulta de cada una —Experiencia y la segunda fase de QA son las más pesadas— además de gráficas medidas en cero dentro de un contenedor oculto. Una pestaña ya montada que no se está viendo no pide nada; al volver a ella, si sus datos ya pasaron el intervalo, se refresca en ese momento y sin volver a montarse.
 - **Cómo:** la misma carga del botón, en modo «fondo». Se conservan los filtros, la selección por clic y lo que se está escribiendo. No se refresca con la pestaña del navegador oculta (al volver, si ya pasó el intervalo, refresca una vez), con un campo con el foco ni con un desplegable abierto. Nunca hay dos peticiones encimadas.
 - **Por módulo:**
@@ -113,27 +113,41 @@ Además:
 - **«Consultado: dd/mm/aaaa · hh:mm»:** renglón aparte en la pastilla (o junto al título en Admin). Solo avanza con una respuesta correcta. Si un refresco falla, los datos anteriores se quedan y se agrega «⚠ No se pudo actualizar (hh:mm); se muestran los datos anteriores».
 - **Límites de origen:** el refresco solo trae lo que ya está en SQL. SLA y Call Center pasan además por la caché del servidor (`DashboardQueries.SegundosCache`, 300 s), así que un cambio puede tardar hasta unos 5 min más. Backlog es una foto diaria (`dbo.CorreoBacklogSnapshot`): si se está viendo el último corte y llega uno nuevo, el refresco cambia a ese corte. El registro de Iniciativas lee `dbo.Problem` sin caché: un PRB editado en Proactivanet aparece cuando el ETL del repositorio de integración lo carga. Este repositorio no cambia la programación del ETL.
 
-## 3bis. Concentración de tickets
+## 3bis. Vista general de servicios
 
-Pestaña propia en la barra lateral, justo debajo de **Análisis de servicios** (`#concentracion`). Es una vista **global**: carga sola al abrirse, sin elegir servicio, y no lee, cambia ni comparte nada con Análisis de servicios, que sigue esperando a que se elija un servicio y se pulse Analizar.
+Pestaña propia en la barra lateral, justo debajo de **Análisis de servicios**. Se llamó «Concentración de tickets» hasta el 2026-11-09; la carpeta (`concentracion/`), el handler (`concentracion.ashx`), el contenedor y el hash (`#concentracion`) conservan ese nombre para no romper enlaces. Es una vista **global**: carga sola al abrirse, sin elegir servicio, y no lee, cambia ni comparte nada con Análisis de servicios, que sigue esperando a que se elija un servicio y se pulse Analizar.
 
-- **Filtro:** un solo selector de **Slot** (0 a 12, 0 por omisión), el mismo para las tres gráficas. Debajo se ve el periodo que manda el servidor.
-- **Slot → fechas:** es la columna `Slot` de `dbo.vw_Tickets` (`DATEDIFF(DAY, FechaRegistro, DATEADD(HOUR, -6, SYSUTCDATETIME())) / 30.0`, truncado): **Slot k = hoy−(30k+29) … hoy−30k**, 30 días, con hoy dentro del Slot 0. **No** es el SLOT del stepper de SLA (cuenta desde ayer y el 0 mide 31 días): los procedimientos filtran la columna de la base y el rótulo dice las fechas que de verdad se contaron (`ConcentracionContrato.Periodo`, comprobado contra QA el 2026-11-09). En QA la historia empieza el 2025-11-19: el Slot 11 está incompleto y el 12 casi vacío.
-- **Gráficas:** una petición a `handlers/concentracion.ashx?slot=N`; los tres procedimientos corren en paralelo y una gráfica que falla no tumba a las otras.
+### Filtros
 
-| Gráfica | Procedimiento | Qué pinta |
-|---|---|---|
-| Concentración de tickets por servicio (Pareto, a todo el ancho) | `dbo.usp_CorreoServicio_Pareto` | Top 10 en columnas verdes, % acumulado en línea amarilla, referencia 80 % punteada |
-| Tickets por categoría (abajo, izquierda) | `dbo.usp_CorreoServicio_TicketsCategoria` | Top 15 en barras horizontales; el eje muestra los dos últimos niveles de la ruta y el tooltip la ruta completa |
-| Tickets por grupo (abajo, derecha) | `dbo.usp_CorreoServicio_TicketsGrupo` | Top 15 en barras horizontales |
+| Filtro | Qué hace |
+|---|---|
+| **Periodo por: Slot / Mes** | Uno a la vez; el botón elegido muestra su control y oculta el otro. Nunca se combinan (la intersección de una ventana rodante y un mes calendario sería parcial y ambigua). |
+| **Slot** (0–12, 0 por omisión) | La columna `Slot` de `dbo.vw_Tickets`, sin cambiar su cálculo: **Slot k = hoy−(30k+29) … hoy−30k**, 30 días con hoy dentro del Slot 0 (comprobado contra QA el 2026-11-09). No es el SLOT del stepper de SLA (cuenta desde ayer y el 0 mide 31 días). |
+| **Mes** | Mes calendario por `FechaRegistro`: el mes en curso (hasta hoy) y los 12 anteriores, el mismo alcance que los Slots. |
+| **Service Owner** (varios) | El SO de la **categoría** del ticket según `dbo.CatCategoriaDueno`: el de su C1&C2 exacto o, si no está capturado, el de su C1 (`App_Code/DirectorioOrganizacional.cs`, la única resolución de dueños del sitio, la misma de Experiencia; llaves `fn_CategoriaC1` / `fn_CategoriaC1C2` de la categoría). Los tickets sin SO resuelto se eligen como «(Sin Service Owner)». No se usa `dbo.CatServiceOwner` (la tabla de las vistas viejas de slots). |
+| **Grupo** (varios) | `Grupo` del ticket (el grupo asignado). |
 
-- **80 %:** el acumulado y el total vienen del procedimiento, calculados sobre **todas** las filas; el Top 10/15 solo recorta lo que se pinta. Verde oscuro = filas hasta alcanzar el 80 % (la que lo cruza, incluida); verde claro = el resto.
-- **Población:** tickets registrados en el periodo del Slot cuya categoría cae en una rama de un servicio habilitado (`dbo.vw_ServicioTickets`, que lee `dbo.vw_Tickets`, `dbo.CatServicioCategoria` y `dbo.CatServicioCorreo` con `Habilitado = 1`). Cada gráfica muestra **su propio** `TotalTickets`: la de categorías no cuenta tickets sin categoría y la de grupos no cuenta tickets sin grupo.
-- **SQL:** los tres procedimientos ya existían en QA y están versionados tal cual en `sql/81_concentracion_tickets.sql`. Agrupar el Pareto por código de servicio (`CatServicioCorreo.Servicio`, con `NombreServicio` como etiqueta) es una **propuesta pendiente de aprobación**: `sql/82_pareto_por_servicio.sql`, `82_pareto_por_servicio_rollback.sql` y `diag_82_pareto_por_servicio_verificar.sql`. La pestaña funciona con las dos versiones. Antes de aplicar el 82 hay que descartar otros consumidores: en los repositorios solo lo usa esta pestaña, pero el procedimiento pertenece a la familia del correo por servicio y los scripts de correo del servidor viven en `AppSettings["AdminScriptsDir"]`, fuera del repositorio (la copia local `reenviacorreo/` es del 2026-09-10, anterior al procedimiento). `sql/diag_concentracion_consumidores_identidad.sql` (sección U) revisa lo que SQL Server sí puede ver.
-- **Cobertura del Slot:** si el Slot tiene tickets en menos días de los que mide (30; en el Slot 0, 29 sin contar hoy), sale un aviso discreto bajo el periodo («Cobertura parcial: hay tickets en 16 de 30 días…», con el primer y último día con datos). Es un hecho medido, no una estimación de volumen: una lectura parametrizada de `COUNT(DISTINCT FechaRegistroDia)` en `dbo.vw_ServicioTickets` con el mismo `Slot`, en la misma petición y con la misma caché. No bloquea nada; si esa lectura falla, no hay aviso y lo dice en los avisos de la pestaña. No se usa el primer registro de la base porque en QA hay tickets sueltos anteriores al inicio real de la historia (2025-10-09 y 2025-10-21 frente al 2025-11-19).
-- **Conexión y permisos:** la misma cadena `TicketsProactivanet` del `Web.config` del sitio (`ConnectionStringProvider`), sin configuración nueva. Necesita EXECUTE sobre los tres procedimientos y SELECT sobre `dbo.vw_ServicioTickets` (la cobertura). En QA, el usuario SQL `PROACTIVANETAD` tiene EXECUTE sobre el esquema `dbo`, SELECT explícito sobre la vista y `db_datareader`; la cuenta Windows `SORIANA\PROACTIVANETAD` no. Qué login usa el sitio lo dice el `Web.config` del servidor, que no está en el repositorio: `sql/diag_concentracion_consumidores_identidad.sql` (sección I) lo comprueba.
-- **Refresco:** como QA y QARE (`TableroConcentracionModulo.refrescar`), más el botón «Actualizar». Pasa por la caché de 5 min de `concentracion.ashx`.
-- **Pruebas:** `tools/tests/ConcentracionVistaSmoke.js` (parte pura), `ConcentracionContratoSmoke.cs` (contrato y LocalDB con los scripts 81/82 reales) y `ConcentracionHeadlessSmoke.js` (Chrome: la pestaña suelta y `dashboard.html#concentracion`).
+Varios valores de un filtro = cualquiera de ellos; filtros distintos = todos a la vez. Los filtros se aplican a las **tres** gráficas. Bajo los controles, una línea dice lo aplicado (periodo con sus fechas reales, SO, Grupo y «N de M tickets del periodo»). Las listas de SO y Grupo salen de los tickets del periodo, con su conteo; lo elegido que ya no aparece se conserva con 0. **Limpiar** quita SO y Grupo; el periodo se queda. «Actualizar» y el refresco automático piden con los mismos filtros y no los reinician.
+
+### Gráficas
+
+| Gráfica | Qué pinta |
+|---|---|
+| Concentración de tickets por servicio (Pareto, a todo el ancho) | Top 10 por **código de servicio** (`CatServicioCorreo.Servicio`, rotulado con su `Descripcion`; PU y WMS son una barra cada uno), % acumulado en línea y referencia 80 % punteada |
+| Tickets por categoría (abajo, izquierda) | Top 15 en barras horizontales; el eje muestra los dos últimos niveles de la ruta en dos líneas y el tooltip la ruta completa |
+| Tickets por grupo (abajo, derecha) | Top 15 en barras horizontales |
+
+- **Cuenta:** la misma de los procedimientos `usp_CorreoServicio_*`, sobre los tickets ya filtrados: tickets distintos por etiqueta, total = suma, orden por cantidad y nombre, porcentajes a 2 decimales. El acumulado y el 80 % se calculan sobre **todas** las filas; el Top 10/15 solo recorta lo que se pinta. Cada gráfica muestra **su propio** total (categorías sin categoría y grupos sin grupo quedan fuera).
+- **Colores** (2026-11-09): azul acero `#5b84b1` hasta alcanzar el 80 % (la barra que lo cruza incluida), azul claro `#c3d5ea` el resto, acumulado en ámbar apagado `#d39a3a`, referencia en gris pizarra punteado `#8a94a6`.
+- **Cobertura:** si el periodo tiene tickets en menos días de los que mide (sin contar hoy), sale un aviso discreto con el primer y último día con datos. Se mide sobre todos los tickets del periodo, antes de SO y Grupo. En QA la historia empieza el 2025-11-19.
+
+### De dónde salen los datos
+
+- Los tres procedimientos (`dbo.usp_CorreoServicio_Pareto`, `_TicketsCategoria`, `_TicketsGrupo`, versionados tal cual en `sql/81_concentracion_tickets.sql`) solo aceptan `@Slot`. Para Mes, Service Owner y Grupo había que cambiarles el contrato o crear objetos nuevos; se decidió (2026-11-09) que la pestaña **ya no los llame** y lea la misma vista, `dbo.vw_ServicioTickets`, con una consulta parametrizada de solo lectura (`App_Code/ConcentracionQueries.cs`), como Experiencia con sus vistas. Los procedimientos quedan en la base **sin tocar**.
+- `sql/82_pareto_por_servicio.sql` sigue **pendiente** (propiedad y consumidores del procedimiento sin confirmar) y ya no hace falta para la pestaña: el Pareto por código se calcula en la aplicación. La prueba de paridad comprueba que, con los mismos datos, categorías y grupos salen idénticos a 81 y el Pareto idéntico a 82.
+- **Conexión y permisos:** la cadena `TicketsProactivanet` de siempre. Necesita SELECT sobre `dbo.vw_ServicioTickets`, `dbo.CatServicioCorreo`, `dbo.CatCategoriaDueno` y `dbo.CatPersona`, y EXECUTE sobre `dbo.fn_CategoriaC1C2`. En QA, el usuario SQL `PROACTIVANETAD` tiene `db_datareader` y EXECUTE sobre el esquema `dbo`. Qué login usa el sitio lo dice el `Web.config` del servidor (`sql/diag_concentracion_consumidores_identidad.sql`, sección I).
+- **Errores:** si no se puede leer el periodo, 500 y la banda de error. Si no se puede leer el catálogo de dueños, las gráficas siguen sin el filtro de SO y lo dicen en avisos; con un SO elegido, 500 (no se ignora un filtro en silencio).
+- **Pruebas:** `tools/tests/ConcentracionVistaSmoke.js` (parte pura), `ConcentracionContratoSmoke.cs` (contrato, paridad con 81/82 y filtros sobre LocalDB) y `ConcentracionHeadlessSmoke.js` (Chrome: filtros, refrescos, la pestaña suelta y `dashboard.html#concentracion`).
 
 ## 3. Dashboard de Backlog
 

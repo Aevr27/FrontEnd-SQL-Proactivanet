@@ -1,26 +1,31 @@
 /* =========================================================================
    concentracion/concentracion.js
 
-   Pestaña "Concentracion de tickets". Un solo archivo para la pagina suelta
-   (concentracion/concentracion.html) y para la pestaña del tablero, que monta
-   ese mismo marcado e inyecta este mismo script (TableroConcentracion en
-   dashboard.js).
+   Pestaña "Vista general de servicios" (antes "Concentracion de tickets";
+   carpeta, handler y hash conservan el nombre original). Un solo archivo para
+   la pagina suelta (concentracion/concentracion.html) y para la pestaña del
+   tablero, que monta ese mismo marcado e inyecta este mismo script
+   (TableroConcentracion en dashboard.js).
 
    Es INDEPENDIENTE de "Analisis de servicios": carga sola al abrirse, sin
    elegir servicio, y no lee ni escribe nada de esa pestaña.
 
-   Todo sale de handlers/concentracion.ashx en UNA peticion por Slot; el
-   MISMO Slot va a los tres procedimientos. El handler entrega TODAS las
-   filas de cada uno en orden de Posicion (App_Code/ConcentracionContrato.cs),
-   con el acumulado ya calculado sobre todas. Aqui solo se recorta al Top 10 /
-   15 para pintar.
+   Filtros (estado `filtros`): Periodo por Slot O por Mes -nunca los dos-,
+   Service Owner y Grupo. Cada cambio es UNA peticion a
+   handlers/concentracion.ashx con todos los filtros; el servidor filtra y
+   cuenta (App_Code/ConcentracionContrato.cs) y entrega TODAS las filas de
+   cada grafica con el acumulado ya calculado sobre el total filtrado. Aqui
+   solo se recorta al Top 10 / 15 para pintar.
 
    Regla de datos: lo que el API no trae no se calcula aqui. Porcentajes,
-   acumulado y TotalTickets son los del procedimiento (escala 0-100). Lo
-   unico que se deriva es de presentacion: que barras caen antes del 80 %
-   (con el acumulado de la fila ANTERIOR, que tambien viene del SP) y la
-   etiqueta abreviada de una categoria. El periodo del Slot tambien lo manda
-   el servidor (no se calcula con el reloj del navegador).
+   acumulado y TotalTickets son los del servidor (escala 0-100). Lo unico que
+   se deriva es de presentacion: que barras caen antes del 80 % (con el
+   acumulado de la fila ANTERIOR, que tambien viene del servidor) y la
+   etiqueta abreviada de una categoria. El periodo (Slot o Mes) tambien lo
+   manda el servidor; no se calcula con el reloj del navegador.
+
+   Refrescos ("Actualizar" y el automatico) piden con los MISMOS filtros y
+   repintan las listas de Service Owner / Grupo sin perder lo elegido.
 
    Dos partes:
      1. ConcentracionDatos: funciones PURAS (sin DOM), publicadas en
@@ -209,7 +214,50 @@
     return lineas.length > 1 ? lineas : (lineas[0] || String(t));
   }
 
+  /* Filtros -> query string de concentracion.ashx. Solo viaja el parametro
+     del modo elegido (slot o mes); las listas van separadas por "|" porque
+     un nombre de persona puede llevar coma. */
+  function consulta(f) {
+    var p = ['modo=' + (f.modo === 'mes' ? 'mes' : 'slot')];
+    if (f.modo === 'mes') { if (f.mes) p.push('mes=' + encodeURIComponent(f.mes)); }
+    else p.push('slot=' + encodeURIComponent(f.slot || 0));
+    if (f.so && f.so.length) p.push('so=' + encodeURIComponent(f.so.join('|')));
+    if (f.grupo && f.grupo.length) p.push('grupo=' + encodeURIComponent(f.grupo.join('|')));
+    return p.join('&');
+  }
+
+  function lista(valores, vacio) {
+    if (!valores || !valores.length) return vacio;
+    return valores.length <= 3 ? valores.join(', ') : valores.slice(0, 3).join(', ') + ' y ' + (valores.length - 3) + ' más';
+  }
+
+  /* Lo aplicado, como lo confirmo el SERVIDOR (no lo que hay en los
+     controles mientras se escribe): periodo con sus fechas, filtros y
+     cuantos tickets quedan de los del periodo. */
+  function textoActivos(d) {
+    if (!d) return '';
+    var etiquetaMes = '';
+    (d.meses || []).forEach(function (m) { if (m.valor === d.mes) etiquetaMes = m.etiqueta + (m.enCurso ? ' (en curso, hasta hoy)' : ''); });
+    var periodo = d.modo === 'mes' ? 'Mes ' + (etiquetaMes || d.mes) : 'Slot ' + d.slot;
+    var fechas = textoPeriodo(d.periodo);
+    var f = d.filtros || {};
+    var partes = ['Periodo: ' + periodo + (fechas ? ' · ' + fechas.charAt(0).toLowerCase() + fechas.slice(1) : ''),
+                  'Service Owner: ' + lista(f.serviceOwners, 'todos'),
+                  'Grupo: ' + lista(f.grupos, 'todos')];
+    var filtrando = (f.serviceOwners && f.serviceOwners.length) || (f.grupos && f.grupos.length);
+    partes.push(filtrando
+      ? entero(d.ticketsFiltrados) + ' de ' + entero(d.ticketsPeriodo) + ' tickets del periodo'
+      : entero(d.ticketsPeriodo) + ' tickets en el periodo');
+    return partes.join(' · ');
+  }
+
+  // Mensaje de una grafica sin barras: periodo vacio o filtros sin tickets.
+  function mensajeVacio(d) {
+    return d && numero(d.ticketsPeriodo) > 0 ? 'Sin tickets con estos filtros.' : 'Sin tickets en este periodo.';
+  }
+
   var ConcentracionDatos = {
+    consulta: consulta, textoActivos: textoActivos, mensajeVacio: mensajeVacio,
     TOP: TOP, UMBRAL: UMBRAL, SLOT_MAXIMO: SLOT_MAXIMO, LARGO_ETIQUETA: LARGO_ETIQUETA,
     numero: numero, etiquetaFila: etiquetaFila, abreviarRuta: abreviarRuta, recortar: recortar,
     marcarDentro: marcarDentro, vista: vista, resumen: resumen, textoPeriodo: textoPeriodo,
@@ -234,15 +282,20 @@
   var ALTO_FILA = 38;           // dos lineas de 11.5px por barra
   var ANCHO_ESTRECHO = 640;     // px del Pareto por debajo de los cuales se compacta
 
-  /* Colores. Verde de marca para el volumen (--g-700 dentro del 80 %,
-     --g-300 el resto), amarillo para el acumulado y gris discreto para la
-     referencia del 80 %. Mismos valores que la leyenda de concentracion.css. */
-  var COLOR = { dentro: '#56a333', fuera: '#bae065', acumulado: '#eab308', referencia: '#9aa094' };
-  var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1ea' };
+  /* Colores (2026-11-09, retroalimentacion: el verde se sentia fuerte).
+     Azules suaves para el volumen: azul acero dentro del 80 % y su version
+     clara para el resto, que se distinguen sin saturar. El acumulado va en
+     ambar apagado -calido, para no confundirse con ninguna barra- y la
+     referencia del 80 % en gris pizarra punteado. Mismos valores que la
+     leyenda de concentracion.css. */
+  var COLOR = { dentro: '#5b84b1', fuera: '#c3d5ea', acumulado: '#d39a3a', referencia: '#8a94a6' };
+  var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1f6' };
 
   var graficas = {};
-  var slot = 0;
+  // Lo que el usuario eligio; viaja completo en cada peticion y en cada refresco.
+  var filtros = { modo: 'slot', slot: 0, mes: null, so: [], grupo: [] };
   var slotMaximo = SLOT_MAXIMO;
+  var ultima = null;            // ultima respuesta buena (para el texto de vacio)
   var peticion = 0;
 
   // ---------------------------------------------------------- mensajes
@@ -270,7 +323,7 @@
     }
     if (!v.filas.length) {
       destruir(clave);
-      mensaje(clave, 'Sin tickets en este Slot.');
+      mensaje(clave, mensajeVacio(ultima));
       return null;
     }
     mensaje(clave, null);
@@ -425,8 +478,8 @@
   }
 
   // ------------------------------------------------------------ peticion
-  function pedir(s) {
-    return fetch(API + '?slot=' + encodeURIComponent(s), { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+  function pedir(qs) {
+    return fetch(API + '?' + qs, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
       .then(function (resp) {
         return resp.text().then(function (cuerpo) {
           var datos = null;
@@ -455,14 +508,45 @@
     DatosInfo.mensaje($('estado'), 'Error al cargar datos: ' + err.message, err.message);
     $('error-msg').textContent = err.message;
     $('error').hidden = false;
-    console.error('[Concentracion]', err);
+    console.error('[Vista general de servicios]', err);
+  }
+
+  /* Opciones de un multiselect desde el servidor ({valor, tickets}), SIN
+     perder lo elegido: lo que estaba marcado sigue marcado (el servidor
+     devuelve con 0 tickets lo elegido que ya no aparece en el periodo).
+     Cambiar las <option> no dispara `change`; el desplegable propio se
+     entera por su MutationObserver. */
+  function llenarMultiple(sel, opciones, elegidos) {
+    var marcados = {};
+    (elegidos || []).forEach(function (v) { marcados[v] = true; });
+    sel.innerHTML = (opciones || []).map(function (o) {
+      return '<option value="' + esc(o.valor) + '"' + (marcados[o.valor] ? ' selected' : '') + '>' +
+             esc(o.valor) + ' (' + entero(o.tickets) + ')</option>';
+    }).join('');
+  }
+
+  function llenarMeses(meses, elegido) {
+    $('mes').innerHTML = (meses || []).map(function (m) {
+      return '<option value="' + esc(m.valor) + '"' + (m.valor === elegido ? ' selected' : '') + '>' +
+             esc(m.etiqueta + (m.enCurso ? ' (en curso)' : '')) + '</option>';
+    }).join('');
   }
 
   // consultado: la hora de esta respuesta buena (DatosInfo.ahoraLocal).
   function pintar(d, consultado) {
+    ultima = d;
     var errores = d.errores || {};
     if (numero(d.slotMaximo) !== null) slotMaximo = numero(d.slotMaximo);
-    $('periodo').textContent = textoPeriodo(d.periodo);
+    // El servidor confirma el mes cuando se pidio "el actual" sin decir cual.
+    if (d.modo === 'mes' && d.mes) filtros.mes = d.mes;
+    llenarMeses(d.meses, filtros.mes || (d.meses && d.meses[0] && d.meses[0].valor));
+    var op = d.opciones || {};
+    llenarMultiple($('f-so'), op.serviceOwners, filtros.so);
+    llenarMultiple($('f-grupo'), op.grupos, filtros.grupo);
+    $('f-so').disabled = !(op.serviceOwners && op.serviceOwners.length) && !filtros.so.length;
+    pintarControles();
+
+    $('activos').textContent = textoActivos(d);
     var cobertura = textoCobertura(d.cobertura);
     $('cobertura').textContent = cobertura;
     $('cobertura').hidden = !cobertura;
@@ -476,29 +560,28 @@
       titulo: fallidos.map(function (k) { return k + ': ' + errores[k]; }).join('\n'),
       consultado: consultado,
     } : { consultado: consultado });
-    fallidos.forEach(function (k) { console.error('[Concentracion ' + k + ']', errores[k]); });
 
     var avisos = d.avisos || [];
     $('avisos').hidden = !avisos.length;
     $('avisos').innerHTML = avisos.map(function (a) { return '<div>' + esc(a) + '</div>'; }).join('');
   }
 
-  /* fondo = refresco (el automatico de dashboard.js o "Actualizar"): mismo
-     Slot, sin "Calculando…" y, si falla, lo que se ve se queda y la pastilla
-     lo avisa. -> Promise (null). */
+  /* fondo = refresco (el automatico de dashboard.js o "Actualizar"): mismos
+     filtros, sin "Calculando…" y, si falla, lo que se ve se queda y la
+     pastilla lo avisa. -> Promise (null). */
   var enVuelo = 0, cargadoUnaVez = false;
   function cargar(fondo) {
     fondo = fondo === true;
     if (location.protocol !== 'http:' && location.protocol !== 'https:') {
       fallo(new Error('Esta página necesita el servidor: ábrela desde el sitio publicado en IIS ' +
-        'o desde la pestaña Concentración de tickets del tablero.'));
+        'o desde la pestaña Vista general de servicios del tablero.'));
       return Promise.resolve(null);
     }
     var token = ++peticion;
-    var pedido = slot;
+    var qs = consulta(filtros);
     if (!fondo) { $('error').hidden = true; enEspera(); }
     enVuelo++;
-    return pedir(pedido)
+    return pedir(qs)
       .then(function (d) {
         if (token !== peticion) return;
         $('error').hidden = true;
@@ -510,7 +593,7 @@
         if (fondo && cargadoUnaVez) {
           DatosInfo.avisoRefresco($('estado'), '⚠ No se pudo actualizar (' +
             DatosInfo.fechaHora(DatosInfo.ahoraLocal()) + '); se muestran los datos anteriores', err.message);
-          console.error('[Concentracion]', err);
+          console.error('[Vista general de servicios]', err);
         } else {
           fallo(err);
         }
@@ -518,10 +601,19 @@
       .then(function () { enVuelo--; return null; });
   }
 
-  // Refresco automatico: nunca encima de una carga en vuelo ni antes de la
-  // primera carga buena.
+  /* Los multiselect: varios cambios seguidos = una sola peticion (como QARE
+     y el Backlog). */
+  var ESPERA_AUTO = 250;
+  var cargaProgramada = null;
+  function programarCarga() {
+    clearTimeout(cargaProgramada);
+    cargaProgramada = setTimeout(function () { cargaProgramada = null; cargar(); }, ESPERA_AUTO);
+  }
+
+  // Refresco automatico: nunca encima de una carga en vuelo o programada, ni
+  // antes de la primera carga buena. Usa `filtros` tal cual: no resetea nada.
   function refrescar() {
-    if (enVuelo > 0 || !cargadoUnaVez) return Promise.resolve(null);
+    if (enVuelo > 0 || cargaProgramada !== null || !cargadoUnaVez) return Promise.resolve(null);
     return cargar(true);
   }
   // Boton "Actualizar": igual; sin carga buena todavia, una normal.
@@ -530,33 +622,74 @@
     return cargar(cargadoUnaVez);
   }
 
-  // ---------------------------------------------------------------- Slot
-  function pintarSlot() {
-    $('slot-n').value = String(slot);
-    $('slot-menos').disabled = slot <= 0;
-    $('slot-mas').disabled = slot >= slotMaximo;
+  // ------------------------------------------------------------- filtros
+  // Modo, Slot y Mes en los controles, segun `filtros`.
+  function pintarControles() {
+    document.querySelectorAll('#conc-filtros [data-modo]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.dataset.modo === filtros.modo));
+    });
+    $('campo-slot').hidden = filtros.modo !== 'slot';
+    $('campo-mes').hidden = filtros.modo !== 'mes';
+    $('slot-n').value = String(filtros.slot);
+    $('slot-menos').disabled = filtros.slot <= 0;
+    $('slot-mas').disabled = filtros.slot >= slotMaximo;
   }
 
-  // Cambiar de Slot = otra consulta, con "Calculando…" (no es un refresco).
+  function seleccionados(sel) {
+    return Array.prototype.map.call(sel.selectedOptions, function (o) { return o.value; });
+  }
+
+  // Cambio de periodo = otra consulta, con "Calculando…" (no es un refresco).
   function cambiarSlot(n) {
-    if (n === null || n === slot) { pintarSlot(); return; }
-    slot = n;
-    pintarSlot();
-    $('periodo').textContent = '';
+    if (n === null || n === filtros.slot) { pintarControles(); return; }
+    filtros.slot = n;
+    pintarControles();
     $('cobertura').hidden = true;
     cargar();
   }
 
+  function cambiarModo(modo) {
+    if (modo === filtros.modo) return;
+    filtros.modo = modo;
+    pintarControles();
+    $('cobertura').hidden = true;
+    cargar();
+  }
+
+  // "Limpiar" quita Service Owner y Grupo; el periodo se queda.
+  function limpiar() {
+    if (!filtros.so.length && !filtros.grupo.length) return;
+    filtros.so = [];
+    filtros.grupo = [];
+    [$('f-so'), $('f-grupo')].forEach(function (sel) {
+      Array.prototype.forEach.call(sel.options, function (o) { o.selected = false; });
+    });
+    if (window.Desplegable) Desplegable.repintar();
+    cargar();
+  }
+
   function conectar() {
-    $('slot-menos').addEventListener('click', function () { cambiarSlot(Math.max(0, slot - 1)); });
-    $('slot-mas').addEventListener('click', function () { cambiarSlot(Math.min(slotMaximo, slot + 1)); });
+    document.querySelectorAll('#conc-filtros [data-modo]').forEach(function (b) {
+      b.addEventListener('click', function () { cambiarModo(b.dataset.modo); });
+    });
+    $('slot-menos').addEventListener('click', function () { cambiarSlot(Math.max(0, filtros.slot - 1)); });
+    $('slot-mas').addEventListener('click', function () { cambiarSlot(Math.min(slotMaximo, filtros.slot + 1)); });
     var campo = $('slot-n');
     campo.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { e.preventDefault(); cambiarSlot(acotarSlot(campo.value, slotMaximo)); }
-      else if (e.key === 'ArrowUp') { e.preventDefault(); cambiarSlot(Math.min(slotMaximo, slot + 1)); }
-      else if (e.key === 'ArrowDown') { e.preventDefault(); cambiarSlot(Math.max(0, slot - 1)); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); cambiarSlot(Math.min(slotMaximo, filtros.slot + 1)); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); cambiarSlot(Math.max(0, filtros.slot - 1)); }
     });
     campo.addEventListener('change', function () { cambiarSlot(acotarSlot(campo.value, slotMaximo)); });
+    $('mes').addEventListener('change', function () {
+      if ($('mes').value === filtros.mes) return;
+      filtros.mes = $('mes').value;
+      $('cobertura').hidden = true;
+      cargar();
+    });
+    $('f-so').addEventListener('change', function () { filtros.so = seleccionados($('f-so')); programarCarga(); });
+    $('f-grupo').addEventListener('change', function () { filtros.grupo = seleccionados($('f-grupo')); programarCarga(); });
+    $('btn-limpiar').addEventListener('click', limpiar);
     $('reintentar').addEventListener('click', function () { cargar(); });
     if (window.RefrescoAuto) RefrescoAuto.cablearBoton($('btn-actualizar'), actualizarAhora);
   }
@@ -566,7 +699,11 @@
     if (arrancado || !$('chart-pareto')) return;
     arrancado = true;
     Barras.aplicarDefaults();
-    pintarSlot();
+    /* La capa visual de los <select>. Embebido, el Desplegable.montar(document)
+       de dashboard.js ya corrio antes de que existiera este marcado, asi que
+       se monta aqui sobre la raiz del modulo (idempotente), como en QARE. */
+    if (window.Desplegable) Desplegable.montar(document.getElementById('tab-concentracion') || document);
+    pintarControles();
     conectar();
     cargar();
   }
@@ -576,13 +713,15 @@
 
   /* Lo unico que el modulo publica hacia fuera, para TableroConcentracion
      (dashboard.js): al volver a la pestaña se remiden las graficas (midieron
-     cero con el contenedor oculto) y el refresco automatico. */
+     cero con el contenedor oculto) y el refresco automatico. `filtros` es una
+     copia, para las pruebas. */
   raiz.TableroConcentracionModulo = {
     redimensionar: function () {
       Object.keys(graficas).forEach(function (k) { if (graficas[k]) graficas[k].resize(); });
     },
     recargar: function () { return cargar(); },
     refrescar: refrescar,
-    slot: function () { return slot; },
+    filtros: function () { return JSON.parse(JSON.stringify(filtros)); },
+    slot: function () { return filtros.slot; },
   };
 })(window);

@@ -1,103 +1,119 @@
-// Contrato de la pestaña "Concentracion de tickets": que procedimiento
-// alimenta cada grafica, que columnas se esperan, como se lee el Slot y que
-// periodo de fechas es cada uno.
+// Contrato de la pestaña "Vista general de servicios" (carpeta concentracion/,
+// handlers/concentracion.ashx): filtros, periodos y la cuenta de las tres
+// graficas.
 //
 // Aqui no hay SQL ni conexion: es la parte PURA del modulo, la que se puede
-// probar sin base (tools/tests/ConcentracionContratoSmoke.cs). La lectura
-// vive en App_Code/ConcentracionQueries.cs y el endpoint en
-// handlers/concentracion.ashx.
+// probar sin base (tools/tests/ConcentracionContratoSmoke.cs). La lectura vive
+// en App_Code/ConcentracionQueries.cs y el endpoint en handlers/concentracion.ashx.
 //
-// DE DONDE SALE EL CONTRATO (verificado en QA el 2026-11-09)
-//   sql/diag_concentracion_tickets.sql y _2.sql, leyendo los cuerpos reales
-//   de los tres SP (versionados tal cual en sql/81_concentracion_tickets.sql):
-//     - parametro unico @Slot INT = 0, sin filtro de servicio: resultado
-//       global de todos los servicios habilitados de dbo.CatServicioCorreo;
-//     - fuente unica dbo.vw_ServicioTickets, un renglon por ticket;
-//     - salida Posicion, <etiqueta>, CantidadTickets, TotalTickets,
-//       Porcentaje, PorcentajeAcumulado (DECIMAL(6,2), escala 0-100),
-//       TODAS las filas (sin TOP), ordenadas por Posicion;
-//     - cada SP excluye su etiqueta vacia, asi que cada uno trae SU
-//       TotalTickets. No se igualan: la pestaña muestra el de cada grafica.
-//   El Pareto puede llegar en dos versiones y las dos valen:
-//     - la actual, agrupada por RamaServicio (Servicio = nombre de la rama);
-//     - la de sql/82_pareto_por_servicio.sql (propuesta), agrupada por el
-//       codigo de CatServicioCorreo.Servicio y con NombreServicio al final.
-//   La etiqueta de cada barra la elige la pestaña: NombreServicio si llega,
-//   si no Servicio. Aqui solo se avisa si falta una columna OBLIGATORIA.
+// DE DONDE SALEN LOS DATOS (decidido el 2026-11-09)
+//   Los tres SP dbo.usp_CorreoServicio_* (sql/81) solo aceptan @Slot: no
+//   pueden filtrar por Mes, Service Owner ni Grupo. La pestaña ya no los
+//   llama (siguen en la base, sin tocar). Lee las filas de ticket del periodo
+//   de la MISMA fuente que ellos, dbo.vw_ServicioTickets (un renglon por
+//   ticket, verificado en QA: diag 2, D4/D5a/D6), y aqui se hace la misma
+//   cuenta que hacian:
+//     - CantidadTickets = tickets distintos de cada etiqueta;
+//     - TotalTickets    = suma de CantidadTickets de TODAS las etiquetas;
+//     - Posicion        = orden CantidadTickets DESC, etiqueta ASC;
+//     - Porcentaje y PorcentajeAcumulado = 100 * x / TotalTickets, redondeo a
+//       2 decimales como CAST(... AS DECIMAL(6,2));
+//     - etiqueta vacia o NULL: fuera (cada grafica con su propio total).
+//   El Pareto agrupa por el CODIGO de servicio (CatServicioCorreo.Servicio),
+//   con su Descripcion como NombreServicio: PU y WMS son una barra cada uno.
+//   Es lo que proponia sql/82 sin cambiar el SP (82 sigue pendiente y ya no
+//   hace falta para la pestaña).
 //
-// SLOT -> FECHAS
-//   dbo.vw_Tickets: Slot = DATEDIFF(DAY, FechaRegistro,
-//   DATEADD(HOUR, -6, SYSUTCDATETIME())) / 30.0, truncado (diag 2, A2; los
-//   rangos reales de A3 lo confirman: Slot 0 = 2026-10-11..2026-11-09 el
-//   2026-11-09). O sea, con hoy = el dia de Mexico por UTC-6 FIJO:
-//       Slot k = hoy-(30k+29) .. hoy-30k, los dos incluidos (30 dias).
-//   Slot 0 INCLUYE hoy. No es el SLOT del stepper de SLA (dashboard.js,
-//   slotRango), que cuenta desde AYER y mide 31 dias el 0: ese filtra fechas
-//   en el navegador; este es la columna de la base que filtran los SP, y el
-//   rotulo tiene que decir las fechas que de verdad se contaron.
-//   "Hoy" sale de UTC-6 fijo y no de DashboardDataInfo.HoyEnPresentacion
-//   (zona de Windows) para que sea literalmente la misma cuenta que la vista.
+// PERIODO: Slot O Mes, nunca los dos
+//   Slot = la columna Slot de dbo.vw_Tickets, sin cambiar su calculo:
+//     Slot k = hoy-(30k+29) .. hoy-30k (hoy por UTC-6 fijo, como la vista).
+//   Mes  = mes calendario por FechaRegistro, de los ultimos 13 (el actual y
+//     los 12 anteriores, el mismo alcance que los Slots 0..12). El mes en
+//     curso llega hasta hoy.
+//   Juntarlos daria la interseccion parcial de dos ventanas distintas; el
+//   usuario elige UNA (modo=slot|mes) y la pestaña dice cual y sus fechas.
+//
+// FILTROS SOBRE EL PERIODO
+//   Service Owner: el de la categoria del ticket segun DirectorioOrganizacional
+//     (dbo.CatCategoriaDueno: C1&C2 exacto y, si no, el de su C1), la UNICA
+//     resolucion de dueños del sitio, la misma de Experiencia, con
+//     C1 = fn_CategoriaC1(Categoria) y C1C2 = fn_CategoriaC1C2(Categoria).
+//     Ticket sin SO resuelto = SinServiceOwner.
+//   Grupo: dbo.vw_ServicioTickets.Grupo (el grupo asignado del ticket).
+//   Varios valores de un filtro = cualquiera de ellos; filtros distintos = y.
+//   Los dos filtros se aplican a las TRES graficas.
 
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-
-public sealed class ConcentracionBloque
-{
-    public readonly string Clave;          // llave del JSON
-    public readonly string Procedimiento;  // dbo.usp_CorreoServicio_*
-    public readonly string Etiqueta;       // columna del nombre de la barra
-    public readonly string Nombre;         // como se le dice en los avisos
-
-    public ConcentracionBloque(string clave, string procedimiento, string etiqueta, string nombre)
-    {
-        Clave = clave;
-        Procedimiento = procedimiento;
-        Etiqueta = etiqueta;
-        Nombre = nombre;
-    }
-
-    // Las obligatorias. NombreServicio del Pareto es opcional (ver arriba).
-    public string[] Columnas
-    {
-        get
-        {
-            return new[] { "Posicion", Etiqueta, "CantidadTickets", "TotalTickets",
-                           "Porcentaje", "PorcentajeAcumulado" };
-        }
-    }
-}
+using System.Linq;
 
 public sealed class ConcentracionSolicitudInvalida : Exception
 {
     public ConcentracionSolicitudInvalida(string mensaje) : base(mensaje) { }
 }
 
+// Un ticket del periodo, con lo necesario para filtrar y contar.
+public sealed class ConcentracionTicket
+{
+    public string Codigo;
+    public string Servicio;        // codigo de CatServicioCorreo
+    public string NombreServicio;  // su Descripcion
+    public string Categoria;       // ruta completa
+    public string Grupo;
+    public string C1;
+    public string C1C2;
+    public DateTime? Dia;          // FechaRegistroDia
+    public string ServiceOwner;    // resuelto; null = sin SO
+}
+
+public sealed class ConcentracionFiltros
+{
+    public string Modo = ConcentracionContrato.ModoSlot;
+    public int Slot;
+    public DateTime Mes;           // primer dia del mes (modo mes)
+    public readonly List<string> ServiceOwners = new List<string>();
+    public readonly List<string> Grupos = new List<string>();
+}
+
 public static class ConcentracionContrato
 {
-    public static readonly ConcentracionBloque Pareto = new ConcentracionBloque(
-        "pareto", "dbo.usp_CorreoServicio_Pareto", "Servicio", "Pareto de servicios");
+    public const string ModoSlot = "slot";
+    public const string ModoMes = "mes";
 
-    public static readonly ConcentracionBloque Categorias = new ConcentracionBloque(
-        "categorias", "dbo.usp_CorreoServicio_TicketsCategoria", "Categoria", "Tickets por categoria");
-
-    public static readonly ConcentracionBloque Grupos = new ConcentracionBloque(
-        "grupos", "dbo.usp_CorreoServicio_TicketsGrupo", "Grupo", "Tickets por grupo");
-
-    // Los tres, en el orden en que se pintan.
-    public static readonly ConcentracionBloque[] Bloques = { Pareto, Categorias, Grupos };
-
-    // El selector de la pestaña: 0..12, 0 por omision (como el stepper de SLA).
     public const int SlotMinimo = 0;
     public const int SlotMaximo = 12;
-    public const int DiasSlot = 30;          // = DashboardDataInfo.DiasSlot
+    public const int DiasSlot = 30;           // = DashboardDataInfo.DiasSlot
+    public const int MesesAtras = 12;         // el actual y los 12 anteriores
+
+    // Valor del filtro de Service Owner para los tickets sin SO resuelto.
+    public const string SinServiceOwner = "(Sin Service Owner)";
 
     // Desfase de la vista: DATEADD(HOUR, -6, SYSUTCDATETIME()).
     private const int HorasMexico = -6;
 
-    /* ?slot= del query string. Vacio o ausente = 0. Cualquier otra cosa que
-       no sea un entero de 0 a 12 es un 400: no se acota en silencio, porque
-       el rotulo diria un periodo distinto del que el usuario pidio. */
+    // Orden de etiquetas a igual cantidad. Cultural e insensible a
+    // mayusculas, como la collation de la base (SQL_Latin1_General_CP1_CI_AS
+    // ordena "S-FENIX" como "SFENIX"; la comparacion cultural de .NET tambien
+    // ignora el guion).
+    private static readonly CompareInfo Comparacion = CultureInfo.GetCultureInfo("es-MX").CompareInfo;
+    public static int CompararEtiquetas(string a, string b)
+    {
+        return Comparacion.Compare(a ?? "", b ?? "", CompareOptions.IgnoreCase);
+    }
+
+    // ------------------------------------------------------------ parametros
+    public static string LeerModo(string valor)
+    {
+        if (valor == null || valor.Trim().Length == 0) return ModoSlot;
+        var v = valor.Trim().ToLowerInvariant();
+        if (v == ModoSlot || v == ModoMes) return v;
+        throw new ConcentracionSolicitudInvalida("El periodo debe ser 'slot' o 'mes'.");
+    }
+
+    /* ?slot= vacio o ausente = 0. Cualquier otra cosa que no sea un entero de
+       0 a 12 es un 400: no se acota en silencio, porque el rotulo diria un
+       periodo distinto del que se pidio. */
     public static int LeerSlot(string valor)
     {
         if (valor == null || valor.Trim().Length == 0) return SlotMinimo;
@@ -111,6 +127,44 @@ public static class ConcentracionContrato
         return slot;
     }
 
+    /* ?mes=aaaa-mm, uno de Meses(hoy). Vacio = el mes en curso. */
+    public static DateTime LeerMes(string valor, DateTime hoy)
+    {
+        var actual = new DateTime(hoy.Year, hoy.Month, 1);
+        if (valor == null || valor.Trim().Length == 0) return actual;
+        DateTime mes;
+        if (!DateTime.TryParseExact(valor.Trim(), "yyyy-MM", CultureInfo.InvariantCulture, DateTimeStyles.None, out mes)
+            || mes > actual || mes < actual.AddMonths(-MesesAtras))
+        {
+            throw new ConcentracionSolicitudInvalida(
+                "El mes debe ser aaaa-mm, entre " + Mes(actual.AddMonths(-MesesAtras)) + " y " + Mes(actual) + ".");
+        }
+        return mes;
+    }
+
+    // Lista separada por '|' (los nombres de persona pueden llevar comas).
+    public static List<string> LeerLista(string valor)
+    {
+        var salida = new List<string>();
+        if (valor == null) return salida;
+        foreach (var parte in valor.Split('|'))
+        {
+            var t = parte.Trim();
+            if (t.Length > 0 && !salida.Contains(t)) salida.Add(t);
+        }
+        return salida;
+    }
+
+    // El mes en curso y los 12 anteriores, del mas reciente al mas viejo.
+    public static List<DateTime> Meses(DateTime hoy)
+    {
+        var actual = new DateTime(hoy.Year, hoy.Month, 1);
+        var lista = new List<DateTime>();
+        for (int i = 0; i <= MesesAtras; i++) lista.Add(actual.AddMonths(-i));
+        return lista;
+    }
+
+    // ------------------------------------------------------------ periodos
     // El dia "hoy" de la vista para el instante utc dado.
     public static DateTime HoyMexico(DateTime utc)
     {
@@ -125,113 +179,164 @@ public static class ConcentracionContrato
         desde = hasta.AddDays(-(DiasSlot - 1));
     }
 
-    /* Copia de las filas en orden de Posicion (estable; sin Posicion, al
-       final) y anota en `avisos` lo que no cuadre con el contrato. NUNCA
-       corrige un dato: si el acumulado baja o el total cambia de fila a
-       fila, se avisa y se pinta lo que llego. La lista original no se toca
-       (puede ser la que esta en cache). */
-    public static List<Dictionary<string, object>> Preparar(
-        ConcentracionBloque bloque, List<Dictionary<string, object>> filas, List<string> avisos)
+    // Mes calendario; el mes en curso llega hasta hoy.
+    public static void PeriodoMes(DateTime mes, DateTime hoy, out DateTime desde, out DateTime hasta)
     {
-        var salida = new List<Dictionary<string, object>>(filas ?? new List<Dictionary<string, object>>());
-        if (salida.Count == 0) return salida;
+        desde = new DateTime(mes.Year, mes.Month, 1);
+        var fin = desde.AddMonths(1).AddDays(-1);
+        hasta = fin > hoy.Date ? hoy.Date : fin;
+    }
 
-        var faltan = new List<string>();
-        foreach (var c in bloque.Columnas)
-            if (!salida[0].ContainsKey(c)) faltan.Add(c);
-        if (faltan.Count > 0)
-            avisos.Add(bloque.Nombre + ": " + bloque.Procedimiento + " no devolvio " +
-                       string.Join(", ", faltan.ToArray()) + ".");
+    /* COBERTURA (aviso de periodo incompleto)
+       Ni la vista ni los SP dicen cuantos dias del periodo tienen datos, y el
+       primer registro de la base no sirve (en QA hay tickets sueltos del
+       2025-10-09 y 2025-10-21 aunque la historia empieza el 2025-11-19). Se
+       mide cuantos dias distintos del periodo tienen al menos un ticket, sobre
+       TODOS los tickets del periodo (antes de Service Owner / Grupo: es
+       cobertura de datos, no del filtro). Se esperan todos los dias del
+       periodo SIN contar hoy (dia en curso). En QA todo Slot completo tiene
+       30 de 30. */
+    public static int DiasEsperados(DateTime desde, DateTime hasta, DateTime hoy)
+    {
+        var ultimo = hasta.Date >= hoy.Date ? hoy.Date.AddDays(-1) : hasta.Date;
+        return ultimo < desde.Date ? 0 : (ultimo - desde.Date).Days + 1;
+    }
 
-        // Orden estable por Posicion: List.Sort no lo es, asi que se desempata
-        // por el indice original.
-        var indice = new Dictionary<Dictionary<string, object>, int>();
-        for (int i = 0; i < salida.Count; i++) indice[salida[i]] = i;
-        salida.Sort((a, b) =>
+    public static Dictionary<string, object> Cobertura(IList<ConcentracionTicket> periodo,
+                                                       DateTime desde, DateTime hasta, DateTime hoy)
+    {
+        var dias = new HashSet<DateTime>();
+        DateTime? primero = null, ultimo = null;
+        foreach (var t in periodo)
         {
-            double? pa = Numero(a, "Posicion"), pb = Numero(b, "Posicion");
-            if (pa.HasValue && pb.HasValue && pa.Value != pb.Value) return pa.Value.CompareTo(pb.Value);
-            if (pa.HasValue != pb.HasValue) return pa.HasValue ? -1 : 1;
-            return indice[a].CompareTo(indice[b]);
-        });
-
-        double? total = null, previo = null;
-        bool totalVaria = false, acumuladoBaja = false, ordenRoto = false;
-        double? cantidadPrevia = null;
-        foreach (var f in salida)
-        {
-            var t = Numero(f, "TotalTickets");
-            if (t.HasValue)
-            {
-                if (total.HasValue && total.Value != t.Value) totalVaria = true;
-                total = total ?? t;
-            }
-            var acum = Numero(f, "PorcentajeAcumulado");
-            if (acum.HasValue)
-            {
-                if (previo.HasValue && acum.Value < previo.Value) acumuladoBaja = true;
-                previo = acum;
-            }
-            var cant = Numero(f, "CantidadTickets");
-            if (cant.HasValue)
-            {
-                if (cantidadPrevia.HasValue && cant.Value > cantidadPrevia.Value) ordenRoto = true;
-                cantidadPrevia = cant;
-            }
+            if (!t.Dia.HasValue) continue;
+            var d = t.Dia.Value.Date;
+            if (d < hoy.Date) dias.Add(d);
+            if (!primero.HasValue || d < primero.Value) primero = d;
+            if (!ultimo.HasValue || d > ultimo.Value) ultimo = d;
         }
-        if (totalVaria)
-            avisos.Add(bloque.Nombre + ": TotalTickets no es el mismo en todas las filas.");
-        if (acumuladoBaja)
-            avisos.Add(bloque.Nombre + ": el porcentaje acumulado baja en algun punto.");
-        if (ordenRoto)
-            avisos.Add(bloque.Nombre + ": las filas no vienen de mayor a menor cantidad de tickets.");
-        // El ultimo acumulado debe cerrar en 100 (escala 0-100). Un 1.00 seria
-        // escala 0-1; algo lejos de 100, un denominador distinto.
-        if (previo.HasValue && Math.Abs(previo.Value - 100.0) > 0.1)
-            avisos.Add(bloque.Nombre + ": el acumulado termina en " +
-                       previo.Value.ToString("0.##", CultureInfo.InvariantCulture) + " y no en 100.");
+        int esperados = DiasEsperados(desde, hasta, hoy);
+        return new Dictionary<string, object>
+        {
+            { "diasConTickets", dias.Count },
+            { "diasEsperados", esperados },
+            { "primerDia", primero.HasValue ? (object)Dia(primero.Value) : null },
+            { "ultimoDia", ultimo.HasValue ? (object)Dia(ultimo.Value) : null },
+            { "completa", dias.Count >= esperados },
+            { "excluyeHoy", hasta.Date >= hoy.Date },
+        };
+    }
 
+    // ------------------------------------------------------------ filtros
+    public static List<ConcentracionTicket> Filtrar(IEnumerable<ConcentracionTicket> periodo, ConcentracionFiltros f)
+    {
+        var so = new HashSet<string>(f.ServiceOwners, StringComparer.OrdinalIgnoreCase);
+        var gr = new HashSet<string>(f.Grupos, StringComparer.OrdinalIgnoreCase);
+        return periodo.Where(t =>
+            (so.Count == 0 || so.Contains(t.ServiceOwner ?? SinServiceOwner)) &&
+            (gr.Count == 0 || (t.Grupo != null && gr.Contains(t.Grupo)))).ToList();
+    }
+
+    /* Opciones de un filtro: los valores presentes en el periodo (antes de
+       los filtros), con cuantos tickets tienen, de mas a menos. Los valores
+       elegidos que ya no aparecen se agregan con 0, para que el filtro no se
+       pierda en silencio al cambiar de periodo. */
+    public static List<Dictionary<string, object>> Opciones(IEnumerable<string> valores, IEnumerable<string> elegidos)
+    {
+        var cuenta = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var v in valores)
+        {
+            if (string.IsNullOrEmpty(v)) continue;
+            int n; cuenta.TryGetValue(v, out n); cuenta[v] = n + 1;
+        }
+        foreach (var e in elegidos) if (!cuenta.ContainsKey(e)) cuenta[e] = 0;
+        return cuenta.OrderByDescending(kv => kv.Value)
+                     .ThenBy(kv => kv.Key, Comparer<string>.Create(CompararEtiquetas))
+                     .Select(kv => new Dictionary<string, object> { { "valor", kv.Key }, { "tickets", kv.Value } })
+                     .ToList();
+    }
+
+    // ------------------------------------------------------------ la cuenta
+    /* La misma cuenta de los SP (ver cabecera). `etiqueta` da la llave de
+       agrupacion; `extra` agrega columnas por llave (NombreServicio). Las
+       filas salen con los nombres de columna de los SP. */
+    public static List<Dictionary<string, object>> Agregar(
+        IEnumerable<ConcentracionTicket> tickets, string columna,
+        Func<ConcentracionTicket, string> etiqueta,
+        Action<string, ConcentracionTicket, Dictionary<string, object>> extra)
+    {
+        var porLlave = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var muestra = new Dictionary<string, ConcentracionTicket>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in tickets)
+        {
+            var k = etiqueta(t);
+            if (k == null || k.Trim().Length == 0) continue;
+            k = k.Trim();
+            HashSet<string> set;
+            if (!porLlave.TryGetValue(k, out set)) { set = new HashSet<string>(StringComparer.OrdinalIgnoreCase); porLlave[k] = set; muestra[k] = t; }
+            set.Add(t.Codigo);
+        }
+
+        var orden = porLlave.Select(kv => new { Llave = kv.Key, N = kv.Value.Count }).ToList();
+        orden.Sort((a, b) => a.N != b.N ? b.N.CompareTo(a.N) : CompararEtiquetas(a.Llave, b.Llave));
+        int total = orden.Sum(x => x.N);
+
+        var salida = new List<Dictionary<string, object>>();
+        int acumulado = 0, posicion = 0;
+        foreach (var x in orden)
+        {
+            acumulado += x.N;
+            var f = new Dictionary<string, object>();
+            f["Posicion"] = ++posicion;
+            f[columna] = x.Llave;
+            f["CantidadTickets"] = x.N;
+            f["TotalTickets"] = total;
+            f["Porcentaje"] = Pct(x.N, total);
+            f["PorcentajeAcumulado"] = Pct(acumulado, total);
+            if (extra != null) extra(x.Llave, muestra[x.Llave], f);
+            salida.Add(f);
+        }
         return salida;
     }
 
-    /* COBERTURA DEL SLOT (aviso de periodo incompleto)
-
-       Los tres SP no dicen cuantos dias del Slot tienen datos, y el primer
-       registro de la base NO sirve para saberlo: en QA hay tickets sueltos
-       del 2025-10-09 y 2025-10-21 aunque la historia cargada empieza el
-       2025-11-19 (diag 2, A3: Slot 12 con 5 tickets en 5 dias, Slot 13 con
-       1). Lo que si es un hecho medible es cuantos dias distintos del Slot
-       tienen al menos un ticket en la MISMA poblacion de las graficas
-       (dbo.vw_ServicioTickets): en QA, todos los Slots completos tienen 30
-       de 30 (A3, DiasDistintos); el 11 tiene 16 y el 12, 5.
-
-       Regla: el Slot se marca con cobertura parcial si tiene tickets en
-       MENOS dias de los esperados. Esperados = 30; en el Slot 0 se excluye
-       HOY (dia en curso: a las 00:05 todavia no tiene tickets y no es un
-       hueco), asi que son 29 dias completos. No es una estimacion de
-       volumen: el aviso dice el hecho ("tickets en 16 de 30 dias") y no
-       bloquea nada. */
-    public static int DiasEsperados(int slot)
+    // CAST(100.0 * n / total AS DECIMAL(6,2)): redondeo a 2, mitad hacia arriba.
+    public static decimal Pct(int n, int total)
     {
-        return slot == 0 ? DiasSlot - 1 : DiasSlot;
+        if (total == 0) return 0m;
+        return Math.Round(100m * n / total, 2, MidpointRounding.AwayFromZero);
     }
 
-    public static bool CoberturaCompleta(int slot, int diasConTickets)
+    public static List<Dictionary<string, object>> Pareto(IEnumerable<ConcentracionTicket> t)
     {
-        return diasConTickets >= DiasEsperados(slot);
+        return Agregar(t, "Servicio", x => x.Servicio, (llave, m, f) =>
+            f["NombreServicio"] = string.IsNullOrWhiteSpace(m.NombreServicio) ? llave : m.NombreServicio.Trim());
     }
 
-    public static double? Numero(Dictionary<string, object> fila, string columna)
+    public static List<Dictionary<string, object>> Categorias(IEnumerable<ConcentracionTicket> t)
     {
-        object v;
-        if (fila == null || !fila.TryGetValue(columna, out v) || v == null) return null;
-        try { return Convert.ToDouble(v, CultureInfo.InvariantCulture); }
-        catch (FormatException) { return null; }
-        catch (InvalidCastException) { return null; }
+        return Agregar(t, "Categoria", x => x.Categoria, null);
     }
 
+    public static List<Dictionary<string, object>> Grupos(IEnumerable<ConcentracionTicket> t)
+    {
+        return Agregar(t, "Grupo", x => x.Grupo, null);
+    }
+
+    // ------------------------------------------------------------ formatos
     public static string Dia(DateTime d)
     {
         return d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+    }
+
+    public static string Mes(DateTime d)
+    {
+        return d.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+    }
+
+    private static readonly string[] NombresMes = { "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio",
+        "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre" };
+    public static string NombreMes(DateTime d)
+    {
+        return NombresMes[d.Month - 1] + " " + d.Year.ToString(CultureInfo.InvariantCulture);
     }
 }

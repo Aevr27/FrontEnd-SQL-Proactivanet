@@ -1,6 +1,6 @@
 /* =========================================================================
-   concentracion/concentracion.css - Lo PRIVADO de la pestaña "Concentracion
-   de tickets".
+   concentracion/concentracion.css - Lo PRIVADO de la pestaña "Vista general
+   de servicios" (antes "Concentracion de tickets").
 
    Igual que qare/qare.css: NO es hoja de pagina completa. .card, .filtros,
    .slotstep, .slotsum, .grid2x2, .lienzo, .hint salen de dashboard.css
@@ -11,23 +11,21 @@
 
 header.top #conc-estado:empty { display: none; }
 
-/* ---- Filtro: el Slot solo; la nota a su lado, en la misma fila. ---- */
-#conc-filtros { grid-template-columns: minmax(180px, 220px) 1fr; }
-.filtros .conc-slot-nota {
-  margin: 0; align-self: center; font-size: 12px; color: var(--muted);
+/* ---- Filtros: la rejilla es la de dashboard.css. El control del modo que
+   no aplica (Slot o Mes) se oculta: .filtros .campo fija display y le
+   ganaria al atributo hidden. ---- */
+.filtros .campo[hidden] { display: none; }
+/* Lo aplicado: una linea a todo el ancho, debajo de los controles. */
+.filtros .conc-activos {
+  grid-column: 1 / -1; margin: 2px 0 0; font-size: 12px; font-weight: 600; color: var(--ink-2);
 }
+.filtros .conc-activos:empty { display: none; }
 /* Cobertura parcial: una linea ambar a todo el ancho del panel, sin caja. */
 .filtros .conc-cobertura {
   grid-column: 1 / -1; margin: 6px 0 0; font-size: 12px; font-weight: 600;
   color: #92400e; border-left: 3px solid var(--ambr); padding-left: 8px;
 }
 .filtros .conc-cobertura[hidden] { display: none; }
-/* El periodo es el dato que importa del filtro: que no se recorte. */
-.filtros .campo-slot #conc-periodo { overflow: visible; }
-@media (max-width: 700px) {
-  #conc-filtros { grid-template-columns: 1fr; }
-  .filtros .conc-slot-nota { margin-top: 18px; }
-}
 
 /* ---- Avisos ---- */
 .conc-aviso {
@@ -69,8 +67,9 @@ header.top #conc-estado:empty { display: none; }
 .conc-leyenda span { display: inline-flex; align-items: center; gap: 6px; }
 .conc-leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
 /* Mismos valores que COLOR en concentracion.js. */
-.conc-leyenda .conc-dentro { background: #56a333; }
-.conc-leyenda .conc-fuera  { background: #bae065; }
-.conc-leyenda .conc-linea  { background: #eab308; height: 3px; border-radius: 2px; width: 16px; }
+.conc-leyenda .conc-dentro { background: #5b84b1; }
+.conc-leyenda .conc-fuera  { background: #c3d5ea; }
+.conc-leyenda .conc-linea  { background: #d39a3a; height: 3px; border-radius: 2px; width: 16px; }
+.conc-leyenda .conc-ref    { height: 0; width: 16px; border-radius: 0; border-top: 2px dashed #8a94a6; }
 .conc-poblacion { margin: 0; font-size: 12px; line-height: 1.5; color: var(--muted); max-width: 110ch; }
 .conc-poblacion code { font-size: 11.5px; }

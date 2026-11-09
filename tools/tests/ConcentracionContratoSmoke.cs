@@ -1,35 +1,33 @@
-// tools/tests/ConcentracionContratoSmoke.cs - prueba de humo de la pestaña
-// "Concentracion de tickets" (backend de aplicacion).
+// tools/tests/ConcentracionContratoSmoke.cs - prueba de humo del backend de la
+// pestaña "Vista general de servicios" (concentracion.ashx).
 //
 // NO forma parte del sitio: IIS no lo compila ni lo ejecuta nunca.
 //
 // Tres partes:
-//   1) ConcentracionContrato, puro: lectura del ?slot=, "hoy" de la vista
-//      (UTC-6), Slot -> fechas contra los rangos REALES que dio QA el
-//      2026-11-09 (diag 2, A3), y Preparar (orden por Posicion, avisos, sin
-//      tocar la lista original).
+//   1) ConcentracionContrato, puro: parametros (modo, slot, mes, listas),
+//      Slot -> fechas contra los rangos REALES de QA (diag 2, A3), mes
+//      calendario, cobertura, filtros, opciones y la cuenta (orden, total,
+//      porcentajes con el redondeo de DECIMAL(6,2)).
 //   2) ConcentracionQueries + handlers/concentracion.ashx de punta a punta
-//      contra SQL Server LocalDB, en una base TEMPORAL, con los scripts
-//      REALES del repositorio:
-//        - sql/81_concentracion_tickets.sql (los tres SP tal como estan en QA)
-//          sobre una tabla con la forma de dbo.vw_ServicioTickets;
-//        - el mismo @Slot llega a los tres; cada grafica trae SU total;
-//          slot sin tickets = []; slot invalido = 400;
-//        - cache por slot (5 min) y su limpieza;
-//        - cobertura del Slot (dias con tickets; el 0 sin contar hoy) y que
-//          su fallo no tumba ninguna grafica;
-//        - sql/82_pareto_por_servicio.sql (la propuesta): PU y WMS en una
-//          barra cada uno, mismos conteos y mismo total; y su rollback;
-//        - un SP que falta: solo esa grafica sale con error (200); los tres:
-//          500.
-//   3) Guarda: la pestaña no llama a nada de Analisis de servicios.
+//      contra SQL Server LocalDB, en una base TEMPORAL:
+//        - PARIDAD con los procedimientos reales: con los mismos datos, las
+//          categorias y grupos del handler (sin filtros) son fila por fila
+//          los de sql/81 (usp_CorreoServicio_TicketsCategoria / _TicketsGrupo)
+//          y el Pareto el de sql/82 (por codigo de servicio);
+//        - Service Owner con la regla de DirectorioOrganizacional (C1&C2
+//          exacto, si no el del C1; sin SO = "(Sin Service Owner)");
+//        - Grupo, combinados, sin resultados, opciones con lo elegido;
+//        - Mes contra un conteo directo; Slot y Mes no se mezclan;
+//        - 400 por parametros invalidos; cobertura; sin catalogo de dueños
+//          (aviso, o 500 si se filtra por SO); sin la vista (500).
+//   3) Guardas: la pestaña no llama a nada de Analisis de servicios y el
+//      backend ya no llama a los SP.
 //
 // La base temporal se crea y se borra en cada corrida; no toca la real.
 //
-// Compilar y correr desde la raiz del repo (Git Bash; opciones con "-" para
-// que MSYS no las convierta en rutas):
+// Compilar y correr desde la raiz del repo (Git Bash; opciones con "-"):
 //   tail -n +2 handlers/concentracion.ashx > <scratch>/conc_handler.cs
-//   csc -nologo -out:<scratch>/ConcSmoke.exe -r:System.dll -r:System.Data.dll
+//   csc -nologo -out:<scratch>/ConcSmoke.exe -r:System.dll -r:System.Core.dll -r:System.Data.dll
 //       -r:System.Web.dll -r:System.Web.Extensions.dll -r:System.Configuration.dll
 //       'App_Code\*.cs' <scratch>/conc_handler.cs tools\tests\ConcentracionContratoSmoke.cs
 //   ConcSmoke.exe.config junto al exe, con:
@@ -42,6 +40,7 @@ using System.Configuration;
 using System.Data.SqlClient;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Web;
 using System.Web.Script.Serialization;
 
@@ -58,112 +57,106 @@ public static class ConcentracionContratoSmoke
         Console.WriteLine((ok ? "PASS  " : "FAIL  ") + caso + (ok ? "" : "  esperado=" + e + "  obtenido=" + o));
     }
 
-    static Dictionary<string, object> F(params object[] kv)
+    static string Dia(DateTime d) { return d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
+
+    static ConcentracionTicket T(string codigo, string servicio, string categoria, string grupo, string so)
     {
-        var d = new Dictionary<string, object>();
-        for (int i = 0; i < kv.Length; i += 2) d[(string)kv[i]] = kv[i + 1];
-        return d;
+        return new ConcentracionTicket { Codigo = codigo, Servicio = servicio, NombreServicio = servicio + " nombre",
+                                         Categoria = categoria, Grupo = grupo, ServiceOwner = so };
     }
 
     static string Col(List<Dictionary<string, object>> filas, string col)
     {
-        var p = new List<string>();
-        foreach (var f in filas)
+        if (filas == null) return "null";
+        return string.Join(",", filas.Select(f =>
         {
             object v; f.TryGetValue(col, out v);
-            p.Add(v == null ? "null" : Convert.ToString(v, CultureInfo.InvariantCulture));
-        }
-        return string.Join(",", p);
+            if (v is decimal) return ((decimal)v).ToString("0.00", CultureInfo.InvariantCulture);
+            return v == null ? "null" : Convert.ToString(v, CultureInfo.InvariantCulture);
+        }).ToArray());
     }
-
-    static string Dia(DateTime d) { return d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture); }
 
     // ------------------------------------------------------------ 1) puro
     static void Puro()
     {
-        Chk("slot: ausente = 0", 0, ConcentracionContrato.LeerSlot(null));
-        Chk("slot: vacio = 0", 0, ConcentracionContrato.LeerSlot("  "));
-        Chk("slot: 12", 12, ConcentracionContrato.LeerSlot("12"));
-        Chk("slot: con espacios", 3, ConcentracionContrato.LeerSlot(" 3 "));
-        foreach (var malo in new[] { "13", "-1", "abc", "1.5", "+2", "999999999999" })
-        {
-            string r;
-            try { ConcentracionContrato.LeerSlot(malo); r = "acepto"; }
-            catch (ConcentracionSolicitudInvalida) { r = "400"; }
-            Chk("slot invalido '" + malo + "'", "400", r);
-        }
-
-        // Hoy de la vista = DATEADD(HOUR, -6, SYSUTCDATETIME()).
-        Chk("hoy: 16:33 UTC", "2026-11-09", Dia(ConcentracionContrato.HoyMexico(new DateTime(2026, 11, 9, 16, 33, 59, DateTimeKind.Utc))));
-        Chk("hoy: 05:59 UTC del dia siguiente sigue siendo hoy", "2026-11-09",
-            Dia(ConcentracionContrato.HoyMexico(new DateTime(2026, 11, 10, 5, 59, 59, DateTimeKind.Utc))));
-        Chk("hoy: 06:00 UTC ya es mañana", "2026-11-10",
+        var hoy = new DateTime(2026, 11, 9);
+        Chk("modo: ausente = slot; mes; otro = 400", "slot|mes|400",
+            ConcentracionContrato.LeerModo(null) + "|" + ConcentracionContrato.LeerModo(" MES ") + "|" + Falla(() => ConcentracionContrato.LeerModo("anio")));
+        Chk("slot: ausente 0, 12 ok, 13/-1/abc/1.5 = 400", "0|12|400|400|400|400",
+            ConcentracionContrato.LeerSlot(null) + "|" + ConcentracionContrato.LeerSlot("12") + "|" +
+            Falla(() => ConcentracionContrato.LeerSlot("13")) + "|" + Falla(() => ConcentracionContrato.LeerSlot("-1")) + "|" +
+            Falla(() => ConcentracionContrato.LeerSlot("abc")) + "|" + Falla(() => ConcentracionContrato.LeerSlot("1.5")));
+        Chk("mes: vacio = el actual; 12 atras ok; 13 atras, futuro y basura = 400", "2026-11|2025-11|400|400|400",
+            ConcentracionContrato.Mes(ConcentracionContrato.LeerMes("", hoy)) + "|" +
+            ConcentracionContrato.Mes(ConcentracionContrato.LeerMes("2025-11", hoy)) + "|" +
+            Falla(() => ConcentracionContrato.LeerMes("2025-10", hoy)) + "|" + Falla(() => ConcentracionContrato.LeerMes("2026-12", hoy)) + "|" +
+            Falla(() => ConcentracionContrato.LeerMes("noviembre", hoy)));
+        Chk("meses: 13, del actual hacia atras", "13|2026-11|2025-11",
+            ConcentracionContrato.Meses(hoy).Count + "|" + ConcentracionContrato.Mes(ConcentracionContrato.Meses(hoy)[0]) + "|" +
+            ConcentracionContrato.Mes(ConcentracionContrato.Meses(hoy)[12]));
+        Chk("listas por '|', sin vacios ni repetidos (los nombres pueden llevar coma)", "Perez, Ana|B",
+            string.Join("|", ConcentracionContrato.LeerLista(" Perez, Ana | |B|B").ToArray()));
+        Chk("hoy de la vista (UTC-6)", "2026-11-09|2026-11-10",
+            Dia(ConcentracionContrato.HoyMexico(new DateTime(2026, 11, 10, 5, 59, 0, DateTimeKind.Utc))) + "|" +
             Dia(ConcentracionContrato.HoyMexico(new DateTime(2026, 11, 10, 6, 0, 0, DateTimeKind.Utc))));
 
-        /* Slot -> fechas contra lo que REALMENTE devolvio QA el 2026-11-09
-           (diag 2, A3: primer y ultimo registro de cada Slot). Los slots 0..10
-           tienen 30 dias de datos: sus bordes son exactos. El 11 y el 12 tienen
-           historia parcial (empieza el 2025-11-19): solo se exige que los
-           registros caigan dentro. */
-        var hoy = new DateTime(2026, 11, 9);
-        string[,] a3 = {
-            { "2026-10-11", "2026-11-09" }, { "2026-09-11", "2026-10-10" }, { "2026-08-12", "2026-09-10" },
-            { "2026-07-13", "2026-08-11" }, { "2026-06-13", "2026-07-12" }, { "2026-05-14", "2026-06-12" },
-            { "2026-04-14", "2026-05-13" }, { "2026-03-15", "2026-04-13" }, { "2026-02-13", "2026-03-14" },
-            { "2026-01-14", "2026-02-12" }, { "2025-12-15", "2026-01-13" } };
-        for (int k = 0; k <= 10; k++)
-        {
-            DateTime desde, hasta;
-            ConcentracionContrato.Periodo(k, hoy, out desde, out hasta);
-            Chk("periodo slot " + k + " = A3 de QA", a3[k, 0] + ".." + a3[k, 1], Dia(desde) + ".." + Dia(hasta));
-        }
-        DateTime d11, h11, d12, h12;
-        ConcentracionContrato.Periodo(11, hoy, out d11, out h11);
-        ConcentracionContrato.Periodo(12, hoy, out d12, out h12);
-        Chk("periodo slot 11 contiene 2025-11-19..2025-12-14", "True",
-            (d11 <= new DateTime(2025, 11, 19) && h11 >= new DateTime(2025, 12, 14) && h11 == new DateTime(2025, 12, 14)).ToString());
-        Chk("periodo slot 12 contiene 2025-10-21..2025-11-07", "True",
-            (d12 <= new DateTime(2025, 10, 21) && h12 >= new DateTime(2025, 11, 7)).ToString());
-        Chk("slots contiguos: 30 dias, sin hueco ni solape", "True",
-            ((h11 - d11).Days == 29 && d11.AddDays(-1) == h12).ToString());
+        // Slot -> fechas: los rangos que REALMENTE devolvio QA el 2026-11-09.
+        string[] a3 = { "2026-10-11..2026-11-09", "2026-09-11..2026-10-10", "2026-08-12..2026-09-10", "2026-07-13..2026-08-11",
+                        "2026-06-13..2026-07-12", "2026-05-14..2026-06-12", "2026-04-14..2026-05-13", "2026-03-15..2026-04-13",
+                        "2026-02-13..2026-03-14", "2026-01-14..2026-02-12", "2025-12-15..2026-01-13" };
+        var calc = new List<string>();
+        for (int k = 0; k <= 10; k++) { DateTime d, h; ConcentracionContrato.Periodo(k, hoy, out d, out h); calc.Add(Dia(d) + ".." + Dia(h)); }
+        Chk("Slot 0..10 = rangos de QA (A3), sin cambiar la regla", string.Join("|", a3), string.Join("|", calc.ToArray()));
 
-        // Preparar: orden por Posicion, sin tocar la lista original.
-        var b = ConcentracionContrato.Grupos;
-        var desorden = new List<Dictionary<string, object>> {
-            F("Posicion", 2L, "Grupo", "B", "CantidadTickets", 3, "TotalTickets", 10, "Porcentaje", 30m, "PorcentajeAcumulado", 80m),
-            F("Posicion", 3L, "Grupo", "C", "CantidadTickets", 2, "TotalTickets", 10, "Porcentaje", 20m, "PorcentajeAcumulado", 100m),
-            F("Posicion", 1L, "Grupo", "A", "CantidadTickets", 5, "TotalTickets", 10, "Porcentaje", 50m, "PorcentajeAcumulado", 50m) };
-        var avisos = new List<string>();
-        var ordenadas = ConcentracionContrato.Preparar(b, desorden, avisos);
-        Chk("preparar: por Posicion", "A,B,C", Col(ordenadas, "Grupo"));
-        Chk("preparar: la original intacta (puede ser la de cache)", "B,C,A", Col(desorden, "Grupo"));
-        Chk("preparar: sano, sin avisos", 0, avisos.Count);
+        DateTime md, mh;
+        ConcentracionContrato.PeriodoMes(new DateTime(2026, 11, 1), hoy, out md, out mh);
+        Chk("mes en curso: del 1 a hoy", "2026-11-01..2026-11-09", Dia(md) + ".." + Dia(mh));
+        ConcentracionContrato.PeriodoMes(new DateTime(2026, 2, 1), hoy, out md, out mh);
+        Chk("mes cerrado: completo (febrero 28)", "2026-02-01..2026-02-28", Dia(md) + ".." + Dia(mh));
 
-        avisos.Clear();
-        ConcentracionContrato.Preparar(b, new List<Dictionary<string, object>> {
-            F("Posicion", 1L, "Grupo", "A", "CantidadTickets", 5, "TotalTickets", 10, "Porcentaje", 50m, "PorcentajeAcumulado", 60m),
-            F("Posicion", 2L, "Grupo", "B", "CantidadTickets", 6, "TotalTickets", 11, "Porcentaje", 50m, "PorcentajeAcumulado", 55m) }, avisos);
-        Chk("preparar: avisa total distinto, acumulado que baja, orden roto y cierre != 100", 4, avisos.Count);
+        Chk("dias esperados: slot 0 sin hoy 29; slot 1 30; mes en curso 8; mes cerrado 28", "29|30|8|28",
+            ConcentracionContrato.DiasEsperados(new DateTime(2026, 10, 11), hoy, hoy) + "|" +
+            ConcentracionContrato.DiasEsperados(new DateTime(2026, 9, 11), new DateTime(2026, 10, 10), hoy) + "|" +
+            ConcentracionContrato.DiasEsperados(new DateTime(2026, 11, 1), hoy, hoy) + "|" +
+            ConcentracionContrato.DiasEsperados(new DateTime(2026, 2, 1), new DateTime(2026, 2, 28), hoy));
 
-        avisos.Clear();
-        ConcentracionContrato.Preparar(ConcentracionContrato.Pareto, new List<Dictionary<string, object>> {
-            F("Posicion", 1L, "CantidadTickets", 5, "TotalTickets", 5, "Porcentaje", 100m, "PorcentajeAcumulado", 100m) }, avisos);
-        Chk("preparar: avisa columna faltante (Servicio)", "True",
-            (avisos.Count == 1 && avisos[0].Contains("Servicio")).ToString());
+        // La cuenta.
+        var tk = new List<ConcentracionTicket> {
+            T("1", "PU", "/A/x", "G1", "Ana"), T("2", "PU", "/A/x", "G1", "Ana"), T("3", "EQC", "/B/y", "G2", null),
+            T("3", "EQC", "/B/y", "G2", null),   // el mismo ticket dos veces cuenta una
+            T("4", "SAP", "/C/z", null, "Beto"), T("5", "S-FENIX", "/D", "G3", "Beto") };
+        var p = ConcentracionContrato.Pareto(tk);
+        Chk("pareto: distintos por servicio; empate ordenado como SQL (SAP antes que S-FENIX)", "PU,EQC,SAP,S-FENIX|2,1,1,1",
+            Col(p, "Servicio") + "|" + Col(p, "CantidadTickets"));
+        Chk("pareto: total = suma; % y acumulado a 2 decimales", "5|40.00,20.00,20.00,20.00|40.00,60.00,80.00,100.00",
+            p[0]["TotalTickets"] + "|" + Col(p, "Porcentaje") + "|" + Col(p, "PorcentajeAcumulado"));
+        Chk("pareto: NombreServicio", "PU nombre", p[0]["NombreServicio"]);
+        var g = ConcentracionContrato.Grupos(tk);
+        Chk("grupos: sin grupo fuera, total propio", "G1,G2,G3|4", Col(g, "Grupo") + "|" + g[0]["TotalTickets"]);
+        Chk("redondeo de DECIMAL(6,2): mitad hacia arriba", "33.33|66.67|16.67", ConcentracionContrato.Pct(1, 3).ToString(CultureInfo.InvariantCulture) + "|" +
+            ConcentracionContrato.Pct(2, 3).ToString(CultureInfo.InvariantCulture) + "|" + ConcentracionContrato.Pct(1, 6).ToString(CultureInfo.InvariantCulture));
 
-        avisos.Clear();
-        Chk("preparar: vacio = vacio, sin avisos", "0|0",
-            ConcentracionContrato.Preparar(b, new List<Dictionary<string, object>>(), avisos).Count + "|" + avisos.Count);
+        var f = new ConcentracionFiltros();
+        f.ServiceOwners.Add(ConcentracionContrato.SinServiceOwner);
+        Chk("filtro SO: sin SO", "3,3", string.Join(",", ConcentracionContrato.Filtrar(tk, f).Select(x => x.Codigo).ToArray()));
+        f.ServiceOwners.Clear(); f.ServiceOwners.Add("beto"); f.Grupos.Add("G3");
+        Chk("filtros SO y Grupo juntos (y), sin distinguir mayusculas", "5", string.Join(",", ConcentracionContrato.Filtrar(tk, f).Select(x => x.Codigo).ToArray()));
+        var op = ConcentracionContrato.Opciones(new[] { "Ana", "Ana", "Beto", null }, new[] { "Zeta" });
+        Chk("opciones: de mas a menos, con lo elegido que ya no esta (0)", "Ana:2,Beto:1,Zeta:0",
+            string.Join(",", op.Select(o => o["valor"] + ":" + o["tickets"]).ToArray()));
+    }
+
+    static string Falla(Action a)
+    {
+        try { a(); return "acepto"; } catch (ConcentracionSolicitudInvalida) { return "400"; }
     }
 
     // ------------------------------------------------------- 2) integracion
-    // La forma de dbo.vw_ServicioTickets que leen los tres SP, como TABLA, y
-    // el catalogo de nombres que lee el 82.
     const string Esquema = @"
 CREATE TABLE dbo.vw_ServicioTickets (
     CodigoTicket NVARCHAR(100) NOT NULL, Servicio NVARCHAR(100) NULL, RamaServicio NVARCHAR(400) NULL,
-    Categoria NVARCHAR(500) NULL, Grupo NVARCHAR(255) NULL, Slot NUMERIC(17,0) NULL,
-    FechaRegistroDia DATE NULL);
+    C1Raiz NVARCHAR(500) NULL, Categoria NVARCHAR(500) NULL, Grupo NVARCHAR(255) NULL, Slot NUMERIC(17,0) NULL,
+    FechaRegistro DATETIME2(0) NULL, FechaRegistroDia DATE NULL);
 GO
 CREATE TABLE dbo.CatServicioCorreo (Servicio NVARCHAR(100) NOT NULL PRIMARY KEY,
     Descripcion NVARCHAR(255) NULL, Habilitado BIT NOT NULL);
@@ -171,12 +164,37 @@ GO
 INSERT dbo.CatServicioCorreo VALUES (N'PU', N'Punto de venta', 1), (N'EQC', N'S-Equipo de Cómputo', 1),
     (N'WMS', N'Fenix WMS / Logistica', 1), (N'SAP', N'', 1);
 GO
--- Slot 0: 12 tickets. PU en dos ramas (3+2), WMS en dos ramas (1+1), EQC 4,
--- SAP 1 (sin descripcion). Uno sin grupo y uno sin categoria.
+CREATE TABLE dbo.CatCategoriaDueno (CategoriaN2 NVARCHAR(450) NULL, ProductOwner NVARCHAR(255) NULL,
+    ServiceOwner NVARCHAR(255) NULL, DirectorPO NVARCHAR(255) NULL, C1 NVARCHAR(255) NULL, VigenteEnOrigen BIT NOT NULL);
+GO
+-- EQC: dueño en /Hardware; /Otro no esta capturado y hereda del C1 (Ana).
+-- PU: solo /S-Punto de Venta/Caja (Beto); S-Aplicativos, WMS y SAP sin dueño.
+INSERT dbo.CatCategoriaDueno VALUES
+ (N'/S-Equipo de Computo/Hardware', N'PO 1', N'Ana SO', N'Dir 1', N'/S-Equipo de Computo', 1),
+ (N'/S-Punto de Venta/Caja',        N'PO 2', N'Beto SO', N'Dir 1', N'/S-Punto de Venta', 1);
+GO
+CREATE TABLE dbo.CatPersona (Nombre NVARCHAR(255) NULL, Manager NVARCHAR(255) NULL, VigenteEnOrigen BIT NOT NULL);
+GO
+INSERT dbo.CatPersona VALUES (N'Ana SO', N'Mgr', 1), (N'Beto SO', N'Mgr', 1);
+GO
+-- C1&C2 como la real: normaliza y corta en el segundo nivel.
+CREATE FUNCTION dbo.fn_CategoriaC1C2 (@Categoria NVARCHAR(500)) RETURNS NVARCHAR(500) AS
+BEGIN
+    DECLARE @s NVARCHAR(500) = LTRIM(RTRIM(REPLACE(ISNULL(@Categoria, N''), NCHAR(160), N' ')));
+    IF @s = N'' RETURN N'';
+    DECLARE @p2 INT = CHARINDEX(N'/', @s, 2);
+    IF @p2 = 0 RETURN @s;
+    DECLARE @p3 INT = CHARINDEX(N'/', @s, @p2 + 1);
+    IF @p3 = 0 RETURN @s;
+    RETURN LEFT(@s, @p3 - 1);
+END;
+GO
+-- Slot 0: 12 tickets (PU en dos ramas 3+2, WMS en dos 1+1, EQC 4, SAP 1;
+-- uno sin grupo, uno sin categoria).
 INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, Grupo, Slot) VALUES
  (N'T01', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Hardware/Falla Fisica PinPad', N'Soporte Campo', 0),
  (N'T02', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Hardware/Falla Fisica PinPad', N'Soporte Campo', 0),
- (N'T03', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Hardware/Impresoras Lexmark', N'Proveedor Lexmark', 0),
+ (N'T03', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Otro/Impresoras Lexmark', N'Proveedor Lexmark', 0),
  (N'T04', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Hardware/Impresoras Lexmark', NULL, 0),
  (N'T05', N'PU',  N'S-Punto de Venta', N'/S-Punto de Venta/Caja/Falla', N'Service Desk', 0),
  (N'T06', N'PU',  N'S-Punto de Venta', N'/S-Punto de Venta/Caja/Falla', N'Service Desk', 0),
@@ -186,22 +204,18 @@ INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, 
  (N'T10', N'WMS', N'S-FENIX WMS', N'/S-FENIX WMS/Recibo/Cita', N'Soporte Fenix_WMS', 0),
  (N'T11', N'WMS', N'S-Logistica', N'/S-Logistica/FENIX WMS - RECIBO PROVEEDORES/CITA NO REPLICA', N'Soporte Fenix_WMS', 0),
  (N'T12', N'SAP', N'SAP', N'/SAP/Alta', N'Soporte AMS Inetum', 0),
--- Slot 1: 2 tickets, para ver que el MISMO slot llega a los tres SP.
  (N'U01', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Otro', N'Soporte Campo', 1),
  (N'U02', N'SAP', N'SAP', N'/SAP/Alta', N'Soporte AMS Inetum', 1);
 GO
--- Slot 3: un ticket por dia, los 30 dias (cobertura completa).
-INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, Grupo, Slot)
-SELECT N'W' + RIGHT(N'0' + CAST(n AS NVARCHAR(2)), 2), N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Otro', N'Soporte Campo', 3
-FROM (SELECT TOP (30) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) - 1 FROM sys.all_objects) q;
-GO
--- FechaRegistroDia coherente con el Slot (hoy de Mexico, como la vista):
--- el i-esimo ticket de cada Slot cae i dias antes del fin del Slot.
---   Slot 0: hoy .. hoy-11 (11 dias completos con tickets de 29)
---   Slot 1: 2 dias de 30;  Slot 3: 30 de 30.
-;WITH x AS (SELECT FechaRegistroDia, Slot, rn = ROW_NUMBER() OVER (PARTITION BY Slot ORDER BY CodigoTicket) - 1
+-- Fechas coherentes con el Slot (hoy de Mexico, como la vista): el i-esimo
+-- ticket de cada Slot cae i dias antes del fin del Slot. C1Raiz = 1er nivel.
+;WITH x AS (SELECT FechaRegistro, FechaRegistroDia, C1Raiz, Categoria, Slot,
+                   rn = ROW_NUMBER() OVER (PARTITION BY Slot ORDER BY CodigoTicket) - 1
             FROM dbo.vw_ServicioTickets)
-UPDATE x SET FechaRegistroDia = DATEADD(DAY, -(30 * CONVERT(INT, Slot) + rn), CONVERT(DATE, DATEADD(HOUR, -6, SYSUTCDATETIME())));
+UPDATE x SET FechaRegistroDia = DATEADD(DAY, -(30 * CONVERT(INT, Slot) + rn), CONVERT(DATE, DATEADD(HOUR, -6, SYSUTCDATETIME()))),
+             FechaRegistro = DATEADD(HOUR, 10, CONVERT(DATETIME2(0), DATEADD(DAY, -(30 * CONVERT(INT, Slot) + rn), CONVERT(DATE, DATEADD(HOUR, -6, SYSUTCDATETIME()))))),
+             C1Raiz = CASE WHEN CHARINDEX(N'/', LTRIM(Categoria), 2) > 0 THEN LEFT(LTRIM(Categoria), CHARINDEX(N'/', LTRIM(Categoria), 2) - 1)
+                           ELSE NULLIF(LTRIM(RTRIM(Categoria)), N'') END;
 GO";
 
     static Dictionary<string, object> Pedir(string query, out int estado)
@@ -218,17 +232,7 @@ GO";
     {
         var arr = o as object[];
         if (arr == null) return null;
-        var salida = new List<Dictionary<string, object>>();
-        foreach (var x in arr) salida.Add((Dictionary<string, object>)x);
-        return salida;
-    }
-
-    // diasConTickets|diasEsperados|excluyeHoy|completa|primerDia|ultimoDia
-    static string Cobertura(Dictionary<string, object> d)
-    {
-        var c = d["cobertura"] as Dictionary<string, object>;
-        if (c == null) return "null";
-        return c["diasConTickets"] + "|" + c["diasEsperados"] + "|" + c["excluyeHoy"] + "|" + c["completa"] + "|" + c["primerDia"] + "|" + c["ultimoDia"];
+        return arr.Select(x => (Dictionary<string, object>)x).ToList();
     }
 
     static string Total(Dictionary<string, object> d, string clave)
@@ -238,11 +242,47 @@ GO";
         return l.Count == 0 ? "[]" : Convert.ToString(l[0]["TotalTickets"], CultureInfo.InvariantCulture);
     }
 
+    static string Totales(Dictionary<string, object> d)
+    {
+        return Total(d, "pareto") + "|" + Total(d, "categorias") + "|" + Total(d, "grupos") + "|" + d["ticketsFiltrados"] + "/" + d["ticketsPeriodo"];
+    }
+
+    // Una fila como texto, con los decimales a 2 (asi salen de SQL y del handler).
+    static string Fila(Dictionary<string, object> f, params string[] cols)
+    {
+        return string.Join(";", cols.Select(c =>
+        {
+            object v; f.TryGetValue(c, out v);
+            // Los porcentajes, siempre a 2 decimales: JSON trae 100 como entero.
+            if (v != null && (v is decimal || v is double || c.StartsWith("Porcentaje")))
+                return Convert.ToDecimal(v, CultureInfo.InvariantCulture).ToString("0.00", CultureInfo.InvariantCulture);
+            return v == null ? "null" : Convert.ToString(v, CultureInfo.InvariantCulture);
+        }).ToArray());
+    }
+
+    static List<Dictionary<string, object>> Exec(string cadena, string sql)
+    {
+        var filas = new List<Dictionary<string, object>>();
+        using (var cn = new SqlConnection(cadena))
+        using (var cmd = new SqlCommand(sql, cn))
+        {
+            cn.Open();
+            using (var rd = cmd.ExecuteReader())
+                while (rd.Read()) filas.Add(SqlRowMapper.Fila(rd));
+        }
+        return filas;
+    }
+
+    static int Escalar(string cadena, string sql)
+    {
+        using (var cn = new SqlConnection(cadena))
+        using (var cmd = new SqlCommand(sql, cn)) { cn.Open(); return Convert.ToInt32(cmd.ExecuteScalar()); }
+    }
+
     // Corre un script del repo por lotes (GO), sin su USE [Tickets_Proactivanet].
     static void Script(string cadena, string archivo)
     {
-        var texto = File.ReadAllText(archivo).Replace("\r\n", "\n").Replace("USE [Tickets_Proactivanet];", "");
-        Lotes(cadena, texto);
+        Lotes(cadena, File.ReadAllText(archivo).Replace("USE [Tickets_Proactivanet];", ""));
     }
 
     static void Lotes(string cadena, string texto)
@@ -255,121 +295,132 @@ GO";
         }
     }
 
+    static string Paridad(List<Dictionary<string, object>> sp, List<Dictionary<string, object>> h, params string[] cols)
+    {
+        if (h == null) return "handler null";
+        if (sp.Count != h.Count) return "filas " + sp.Count + " vs " + h.Count;
+        for (int i = 0; i < sp.Count; i++)
+        {
+            var a = Fila(sp[i], cols); var b = Fila(h[i], cols);
+            if (a != b) return "fila " + (i + 1) + ": SP[" + a + "] handler[" + b + "]";
+        }
+        return "igual (" + sp.Count + " filas)";
+    }
+
     static void Integracion(string cadena, string raiz)
     {
         int estado;
         Lotes(cadena, Esquema);
-        Script(cadena, Path.Combine(raiz, @"sql\81_concentracion_tickets.sql"));
         ConcentracionQueries.LimpiarCache();
 
-        // --- Slot 0 con los SP actuales (81).
+        // --- Paridad con los procedimientos reales (81 y la propuesta 82), sin filtros.
+        Script(cadena, Path.Combine(raiz, @"sql\81_concentracion_tickets.sql"));
+        Script(cadena, Path.Combine(raiz, @"sql\82_pareto_por_servicio.sql"));
         var d = Pedir("", out estado);
-        Chk("81 sin slot: 200 y slot 0", "200|0", estado + "|" + d["slot"]);
-        var pareto = Lista(d["pareto"]);
-        // Empates de 1: el SP desempata por Servicio ASC con la collation de la
-        // base, que ignora el guion ('S-FENIX' se ordena como 'SFENIX'), asi
-        // que SAP va antes. Es el orden del SP; la pestaña no reordena.
-        Chk("81 pareto por rama, en orden de Posicion",
-            "S-Equipo de Computo,S-Punto de Venta,S-Aplicativos Punto de Venta,SAP,S-FENIX WMS,S-Logistica",
-            Col(pareto, "Servicio"));
-        Chk("81 pareto: cantidades", "4,3,2,1,1,1", Col(pareto, "CantidadTickets"));
-        Chk("81 pareto: acumulado cierra en 100", "100.00", Convert.ToDecimal(pareto[pareto.Count - 1]["PorcentajeAcumulado"]).ToString("0.00", CultureInfo.InvariantCulture));
-        Chk("81 pareto: sin NombreServicio", "False", pareto[0].ContainsKey("NombreServicio").ToString());
-        // Cada grafica con SU total: categorias sin T07 (vacia), grupos sin T04 (NULL).
-        Chk("81 totales propios: pareto|categorias|grupos", "12|11|11",
-            Total(d, "pareto") + "|" + Total(d, "categorias") + "|" + Total(d, "grupos"));
-        Chk("81 categorias: TODAS las filas (el Top lo pone la pestaña)", 7, Lista(d["categorias"]).Count);
-        Chk("81 sin errores ni avisos", "0|0", ((Dictionary<string, object>)d["errores"]).Count + "|" + ((object[])d["avisos"]).Length);
-        var hoyMx = ConcentracionContrato.HoyMexico(DateTime.UtcNow);
-        Chk("cobertura slot 0: sin contar hoy, 11 de 29, parcial, rango real",
-            "11|29|True|False|" + Dia(hoyMx.AddDays(-11)) + "|" + Dia(hoyMx), Cobertura(d));
-        Chk("cobertura slot 3: 30 de 30, completa", "30|30|False|True|" + Dia(hoyMx.AddDays(-119)) + "|" + Dia(hoyMx.AddDays(-90)),
-            Cobertura(Pedir("slot=3", out estado)));
-        Chk("cobertura slot 1: 2 de 30, parcial", "2|30|False|False|" + Dia(hoyMx.AddDays(-31)) + "|" + Dia(hoyMx.AddDays(-30)),
-            Cobertura(Pedir("slot=1", out estado)));
-        Chk("cobertura slot sin tickets: 0, sin rango", "0|30|False|False||", Cobertura(Pedir("slot=8", out estado)));
+        Chk("sin parametros: 200, modo slot 0", "200|slot|0", estado + "|" + d["modo"] + "|" + d["slot"]);
+        var cols = new[] { "Posicion", "CantidadTickets", "TotalTickets", "Porcentaje", "PorcentajeAcumulado" };
+        Chk("paridad categorias = usp_CorreoServicio_TicketsCategoria", "igual (8 filas)",
+            Paridad(Exec(cadena, "EXEC dbo.usp_CorreoServicio_TicketsCategoria @Slot = 0"), Lista(d["categorias"]), cols.Concat(new[] { "Categoria" }).ToArray()));
+        Chk("paridad grupos = usp_CorreoServicio_TicketsGrupo", "igual (6 filas)",
+            Paridad(Exec(cadena, "EXEC dbo.usp_CorreoServicio_TicketsGrupo @Slot = 0"), Lista(d["grupos"]), cols.Concat(new[] { "Grupo" }).ToArray()));
+        Chk("paridad pareto = 82 (por codigo de servicio, con NombreServicio)", "igual (4 filas)",
+            Paridad(Exec(cadena, "EXEC dbo.usp_CorreoServicio_Pareto @Slot = 0"), Lista(d["pareto"]), cols.Concat(new[] { "Servicio", "NombreServicio" }).ToArray()));
+        Chk("pareto por codigo: PU y WMS una barra cada uno", "PU,EQC,WMS,SAP|5,4,2,1",
+            Col(Lista(d["pareto"]), "Servicio") + "|" + Col(Lista(d["pareto"]), "CantidadTickets"));
+        Chk("totales propios: pareto|categorias|grupos|filtrados/periodo", "12|11|11|12/12", Totales(d));
+        Chk("sin avisos", 0, ((object[])d["avisos"]).Length);
 
         var hoy = ConcentracionContrato.HoyMexico(DateTime.UtcNow);
         DateTime desde, hasta;
         ConcentracionContrato.Periodo(0, hoy, out desde, out hasta);
-        var periodo = (Dictionary<string, object>)d["periodo"];
-        Chk("periodo del slot 0 en la respuesta", Dia(desde) + ".." + Dia(hasta) + "|30",
-            periodo["desde"] + ".." + periodo["hasta"] + "|" + periodo["dias"]);
-        var info = (Dictionary<string, object>)d["dataInfo"];
-        Chk("dataInfo con el mismo periodo", Dia(desde) + ".." + Dia(hasta), info["periodoInicio"] + ".." + info["periodoFin"]);
-        Chk("slotMaximo", 12, d["slotMaximo"]);
+        var per = (Dictionary<string, object>)d["periodo"];
+        Chk("periodo del slot 0", Dia(desde) + ".." + Dia(hasta), per["desde"] + ".." + per["hasta"]);
+        var cob = (Dictionary<string, object>)d["cobertura"];
+        Chk("cobertura slot 0: 11 de 29 dias (sin hoy), parcial", "11|29|False", cob["diasConTickets"] + "|" + cob["diasEsperados"] + "|" + cob["completa"]);
 
-        // --- El MISMO slot llega a los tres.
+        // --- Service Owner: opciones y filtro.
+        var op = (Dictionary<string, object>)d["opciones"];
+        Chk("opciones SO (regla N2 exacto o C1; sin dueño aparte)", "(Sin Service Owner):6,Ana SO:4,Beto SO:2",
+            string.Join(",", Lista(op["serviceOwners"]).Select(o => o["valor"] + ":" + o["tickets"]).ToArray()));
+        d = Pedir("so=Ana%20SO", out estado);
+        Chk("SO Ana (T03 hereda del C1): solo EQC en las tres", "EQC:4|4|4|3|4/12",
+            Col(Lista(d["pareto"]), "Servicio") + ":" + Col(Lista(d["pareto"]), "CantidadTickets") + "|" + Totales(d));
+        d = Pedir("so=" + HttpUtility.UrlEncode(ConcentracionContrato.SinServiceOwner), out estado);
+        Chk("SO '(Sin Service Owner)'", "PU,WMS,SAP|6|5|6|6/12", Col(Lista(d["pareto"]), "Servicio") + "|" + Totales(d));
+        d = Pedir("so=" + HttpUtility.UrlEncode("Ana SO|Beto SO"), out estado);
+        Chk("dos SO = cualquiera de ellos", "6|6|5|6/12", Totales(d));
+        Chk("acumulado sobre lo filtrado cierra en 100", "100.00",
+            Fila(Lista(d["pareto"]).Last(), "PorcentajeAcumulado"));
+
+        // --- Grupo y combinados.
+        d = Pedir("grupo=Service%20Desk", out estado);
+        Chk("Grupo Service Desk: las tres graficas filtradas", "PU|4|3|4|4/12", Col(Lista(d["pareto"]), "Servicio") + "|" + Totales(d));
+        Chk("Grupo: la grafica de grupos solo trae el elegido", "Service Desk", Col(Lista(d["grupos"]), "Grupo"));
+        d = Pedir("so=Beto%20SO&grupo=Service%20Desk", out estado);
+        Chk("SO y Grupo juntos", "2|2|2|2/12", Totales(d));
+        d = Pedir("so=Ana%20SO&grupo=Soporte%20RETO", out estado);
+        Chk("sin resultados: 200, [] en las tres, 0 de 12", "200|[]|[]|[]|0/12", estado + "|" + Totales(d));
+        var opG = Lista(((Dictionary<string, object>)d["opciones"])["grupos"]);
+        Chk("opciones de grupo salen del periodo completo (no se encogen con el filtro)", 6, opG.Count);
+        d = Pedir("so=Zeta", out estado);
+        Chk("SO elegido que no esta en el periodo: opcion con 0, sin tickets", "Zeta:0|0/12",
+            string.Join(",", Lista(((Dictionary<string, object>)d["opciones"])["serviceOwners"]).Where(o => (string)o["valor"] == "Zeta")
+                .Select(o => o["valor"] + ":" + o["tickets"]).ToArray()) + "|" + d["ticketsFiltrados"] + "/" + d["ticketsPeriodo"]);
+        d = Pedir("so=Ana%20SO", out estado);
+        Chk("filtros aplicados en la respuesta", "Ana SO",
+            string.Join(",", ((object[])((Dictionary<string, object>)d["filtros"])["serviceOwners"]).Select(x => (string)x).ToArray()));
+
+        // --- Mes (calendario) contra un conteo directo; no se mezcla con Slot.
+        var mesActual = ConcentracionContrato.Mes(new DateTime(hoy.Year, hoy.Month, 1));
+        int directo = Escalar(cadena, "SELECT COUNT(*) FROM dbo.vw_ServicioTickets WHERE FechaRegistro >= '" +
+                                      Dia(new DateTime(hoy.Year, hoy.Month, 1)) + "' AND FechaRegistro < '" + Dia(hoy.AddDays(1)) + "'");
+        d = Pedir("modo=mes&mes=" + mesActual + "&slot=7", out estado);
+        Chk("mes en curso: tickets = conteo directo por FechaRegistro; el slot se ignora", "200|mes|" + mesActual + "|null|" + directo,
+            estado + "|" + d["modo"] + "|" + d["mes"] + "|" + (d["slot"] ?? "null") + "|" + d["ticketsPeriodo"]);
+        per = (Dictionary<string, object>)d["periodo"];
+        Chk("periodo del mes en curso: del 1 a hoy", Dia(new DateTime(hoy.Year, hoy.Month, 1)) + ".." + Dia(hoy), per["desde"] + ".." + per["hasta"]);
+        Chk("meses ofrecidos: 13, el primero en curso", "13|" + mesActual + "|True",
+            ((object[])d["meses"]).Length + "|" + ((Dictionary<string, object>)((object[])d["meses"])[0])["valor"] + "|" +
+            ((Dictionary<string, object>)((object[])d["meses"])[0])["enCurso"]);
+        var mesViejo = ConcentracionContrato.Mes(new DateTime(hoy.Year, hoy.Month, 1).AddMonths(-12));
+        d = Pedir("modo=mes&mes=" + mesViejo, out estado);
+        Chk("mes sin tickets: 200 y vacio", "200|[]|[]|[]|0/0", estado + "|" + Totales(d));
+        d = Pedir("modo=slot&slot=1&mes=" + mesActual, out estado);
+        Chk("slot 1 con mes en la URL: manda el slot", "slot|1|null|2", d["modo"] + "|" + d["slot"] + "|" + (d["mes"] ?? "null") + "|" + d["ticketsPeriodo"]);
+
+        // --- Parametros invalidos.
+        Chk("400: slot 13, mes fuera de rango, modo raro", "400|400|400",
+            Estado("slot=13") + "|" + Estado("modo=mes&mes=2001-01") + "|" + Estado("modo=semana"));
+
+        // --- Cache: un ticket nuevo no se ve hasta limpiarla.
+        Lotes(cadena, "INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, Grupo, Slot) VALUES (N'U03', N'SAP', N'SAP', N'/SAP/Alta', N'G', 1);");
         d = Pedir("slot=1", out estado);
-        Chk("slot 1: los tres con los tickets del slot 1", "2|2|2",
-            Total(d, "pareto") + "|" + Total(d, "categorias") + "|" + Total(d, "grupos"));
-        d = Pedir("slot=7", out estado);
-        Chk("slot sin tickets: 200 y [] en los tres", "200|[]|[]|[]",
-            estado + "|" + Total(d, "pareto") + "|" + Total(d, "categorias") + "|" + Total(d, "grupos"));
-
-        // --- Slot invalido.
-        d = Pedir("slot=13", out estado);
-        Chk("slot 13: 400 SolicitudInvalida", "400|SolicitudInvalida", estado + "|" + d["tipo"]);
-        d = Pedir("slot=abc", out estado);
-        Chk("slot abc: 400", 400, estado);
-
-        // --- Cache por slot: un ticket nuevo no se ve hasta limpiarla.
-        Lotes(cadena, "INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, Grupo, Slot) VALUES (N'U03', N'EQC', N'S-Equipo de Computo', N'/X/Y', N'G', 1);");
-        d = Pedir("slot=1", out estado);
-        Chk("cache: mismo slot, mismo dato (5 min)", "2", Total(d, "pareto"));
+        Chk("cache: mismo periodo, mismo dato (5 min)", "2", d["ticketsPeriodo"]);
         ConcentracionQueries.LimpiarCache();
         d = Pedir("slot=1", out estado);
-        Chk("cache limpia: dato nuevo", "3", Total(d, "pareto"));
+        Chk("cache limpia: dato nuevo", "3", d["ticketsPeriodo"]);
 
-        // --- La propuesta 82: por codigo de servicio.
-        Script(cadena, Path.Combine(raiz, @"sql\82_pareto_por_servicio.sql"));
+        // --- Sin catalogo de dueños: aviso, sin filtro SO; filtrar por SO = 500.
+        Lotes(cadena, "EXEC sp_rename 'dbo.CatCategoriaDueno', 'CatCategoriaDueno_x';");
         ConcentracionQueries.LimpiarCache();
         d = Pedir("slot=0", out estado);
-        pareto = Lista(d["pareto"]);
-        Chk("82 pareto por codigo: PU y WMS en una barra", "PU,EQC,WMS,SAP", Col(pareto, "Servicio"));
-        Chk("82 cantidades (PU = 3+2, WMS = 1+1)", "5,4,2,1", Col(pareto, "CantidadTickets"));
-        Chk("82 mismo total que por rama", "12", Total(d, "pareto"));
-        Chk("82 NombreServicio del catalogo (vacio -> codigo)",
-            "Punto de venta,S-Equipo de Cómputo,Fenix WMS / Logistica,SAP", Col(pareto, "NombreServicio"));
-        Chk("82 acumulado", "41.67,75.00,91.67,100.00", string.Join(",", Lista(d["pareto"]).ConvertAll(
-            f => Convert.ToDecimal(f["PorcentajeAcumulado"]).ToString("0.00", CultureInfo.InvariantCulture)).ToArray()));
-        Chk("82 categorias y grupos sin cambio", "11|11", Total(d, "categorias") + "|" + Total(d, "grupos"));
-        Chk("82 sin avisos", 0, ((object[])d["avisos"]).Length);
+        Chk("sin catalogo de dueños: 200, graficas igual, aviso, sin opciones de SO", "200|12|11|11|12/12|True|0",
+            estado + "|" + Totales(d) + "|" + ((string)((object[])d["avisos"])[0]).Contains("dueños") + "|" +
+            Lista(((Dictionary<string, object>)d["opciones"])["serviceOwners"]).Count);
+        d = Pedir("slot=0&so=Ana%20SO", out estado);
+        Chk("sin catalogo y filtrando por SO: 500 que lo dice (no se ignora el filtro)", "500|True",
+            estado + "|" + ((string)d["error"]).Contains("Service Owner"));
+        Lotes(cadena, "EXEC sp_rename 'dbo.CatCategoriaDueno_x', 'CatCategoriaDueno';");
 
-        // --- Rollback del 82: vuelve a las ramas.
-        Script(cadena, Path.Combine(raiz, @"sql\82_pareto_por_servicio_rollback.sql"));
+        // --- Sin la vista: 500 con el objeto, sin servidor.
+        Lotes(cadena, "EXEC sp_rename 'dbo.vw_ServicioTickets', 'vw_x';");
         ConcentracionQueries.LimpiarCache();
         d = Pedir("slot=0", out estado);
-        Chk("rollback 82: otra vez por rama, sin NombreServicio", "6|False",
-            Lista(d["pareto"]).Count + "|" + Lista(d["pareto"])[0].ContainsKey("NombreServicio"));
-
-        // --- Una grafica que falla no tumba a las otras.
-        // --- La cobertura falla (sin la columna): sin aviso, graficas igual.
-        Lotes(cadena, "ALTER TABLE dbo.vw_ServicioTickets DROP COLUMN FechaRegistroDia;");
-        ConcentracionQueries.LimpiarCache();
-        d = Pedir("slot=0", out estado);
-        Chk("cobertura caida: 200, cobertura null, graficas con datos, aviso", "200|True|12|11|11|True",
-            estado + "|" + (d["cobertura"] == null) + "|" + Total(d, "pareto") + "|" + Total(d, "categorias") + "|" + Total(d, "grupos") + "|" +
-            (((object[])d["avisos"]).Length == 1 && ((string)((object[])d["avisos"])[0]).Contains("cobertura")));
-        Chk("cobertura caida: no cuenta como error de grafica", 0, ((Dictionary<string, object>)d["errores"]).Count);
-
-        Lotes(cadena, "DROP PROCEDURE dbo.usp_CorreoServicio_TicketsGrupo;");
-        ConcentracionQueries.LimpiarCache();
-        d = Pedir("slot=0", out estado);
-        var errores = (Dictionary<string, object>)d["errores"];
-        Chk("falla grupos: 200, grupos null, las otras con datos", "200|null|12|11",
-            estado + "|" + Total(d, "grupos") + "|" + Total(d, "pareto") + "|" + Total(d, "categorias"));
-        Chk("falla grupos: mensaje con el SP y el 2812, sin servidor", "True",
-            (errores.Count == 1 && ((string)errores["grupos"]).Contains("usp_CorreoServicio_TicketsGrupo")
-             && ((string)errores["grupos"]).Contains("2812") && !((string)errores["grupos"]).Contains("localdb")).ToString());
-
-        Lotes(cadena, "DROP PROCEDURE dbo.usp_CorreoServicio_Pareto; DROP PROCEDURE dbo.usp_CorreoServicio_TicketsCategoria;");
-        ConcentracionQueries.LimpiarCache();
-        d = Pedir("slot=0", out estado);
-        Chk("fallan los tres: 500 con {error, tipo}", "500|SqlException", estado + "|" + d["tipo"]);
-        Chk("500 sin servidor ni base en el mensaje", "False",
-            ((string)d["error"]).IndexOf("localdb", StringComparison.OrdinalIgnoreCase) >= 0);
+        Chk("sin la vista: 500 que nombra el objeto, sin servidor", "500|True|False", estado + "|" +
+            ((string)d["error"]).Contains("vw_ServicioTickets") + "|" + (((string)d["error"]).IndexOf("localdb", StringComparison.OrdinalIgnoreCase) >= 0));
     }
+
+    static int Estado(string query) { int e; Pedir(query, out e); return e; }
 
     // ---------------------------------------------------------- 3) guardas
     static string SinComentarios(string s)
@@ -381,14 +432,13 @@ GO";
 
     static void Guardas(string raiz)
     {
-        // Solo el CODIGO: los comentarios si nombran Analisis (para decir que
-        // no se usa).
         var js = SinComentarios(File.ReadAllText(Path.Combine(raiz, @"concentracion\concentracion.js")));
         var html = SinComentarios(File.ReadAllText(Path.Combine(raiz, @"concentracion\concentracion.html")));
         Chk("la pestaña no llama a analisis.ashx ni lee el modulo de Analisis", "False",
             (js.Contains("analisis.ashx") || js.Contains("TableroAnalisisModulo") || html.Contains("analisis.ashx")).ToString());
-        var ashx = File.ReadAllText(Path.Combine(raiz, @"handlers\concentracion.ashx"));
-        Chk("el handler no recibe servicio", "False", ashx.Contains("QueryString[\"servicio\"]").ToString());
+        var q = File.ReadAllText(Path.Combine(raiz, @"App_Code\ConcentracionQueries.cs"));
+        Chk("el backend no llama a los SP usp_CorreoServicio_* (sin tocarlos)", "False",
+            SinComentarios(q).Contains("usp_CorreoServicio_").ToString());
     }
 
     public static int Main(string[] args)

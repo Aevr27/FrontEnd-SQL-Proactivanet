@@ -1,8 +1,16 @@
 /* =====================================================================================
    81_concentracion_tickets.sql
 
-   Los tres procedimientos de la pestaña "Concentracion de tickets"
-   (concentracion/, handlers/concentracion.ashx) TAL COMO ESTAN en QA.
+   Los tres procedimientos dbo.usp_CorreoServicio_Pareto / _TicketsCategoria /
+   _TicketsGrupo TAL COMO ESTAN en QA.
+
+   Desde el 2026-11-09 la pestaña "Vista general de servicios" (antes
+   "Concentracion de tickets") YA NO LOS LLAMA: necesitaba filtros (Mes,
+   Service Owner, Grupo) que solo aceptan @Slot. Lee la misma vista,
+   dbo.vw_ServicioTickets, y hace la misma cuenta en App_Code/
+   ConcentracionContrato.cs; tools/tests/ConcentracionContratoSmoke.cs
+   comprueba sobre LocalDB que categorias y grupos salen identicos a estos
+   procedimientos. Siguen en la base sin tocar.
 
    QUE ES ESTE ARCHIVO
    Un espejo para versionarlos: ya existian en la base pero en ningun

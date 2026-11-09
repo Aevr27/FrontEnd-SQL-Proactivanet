@@ -1,40 +1,43 @@
 <%@ WebHandler Language="C#" Class="Concentracion" %>
 
-// concentracion.ashx - API de solo lectura de la pestaña "Concentracion de
-// tickets" (concentracion/concentracion.js).
+// concentracion.ashx - API de solo lectura de la pestaña "Vista general de
+// servicios" (concentracion/concentracion.js; el nombre de archivo se quedo
+// del primer titulo, "Concentracion de tickets").
 //
-// Aqui solo se lee el parametro, se serializa y se traducen los errores. Que
-// procedimiento alimenta cada grafica, el periodo de cada Slot y el orden de
-// las filas son de App_Code/ConcentracionContrato.cs; la lectura, de
-// App_Code/ConcentracionQueries.cs.
+// Aqui solo se leen los parametros, se serializa y se traducen los errores.
+// Periodos, filtros y la cuenta son de App_Code/ConcentracionContrato.cs; la
+// lectura, de App_Code/ConcentracionQueries.cs.
 //
 // PETICION
-//   GET concentracion.ashx[?slot=N]      N entero 0..12; sin slot = 0.
-//   El MISMO @Slot va a los tres procedimientos. No hay filtro de servicio:
-//   la vista es global (todos los servicios habilitados del catalogo).
+//   GET concentracion.ashx?modo=slot&slot=N            N 0..12 (sin slot = 0)
+//   GET concentracion.ashx?modo=mes&mes=aaaa-mm        el actual o uno de los 12 anteriores
+//       [&so=Nombre|Nombre...]     Service Owner; "(Sin Service Owner)" = sin SO
+//       [&grupo=Grupo|Grupo...]    Grupo del ticket
+//   Sin modo = slot. Slot y Mes no se combinan: cada modo ignora el otro
+//   parametro. Listas separadas por "|".
 //
 // RESPUESTA 200
 //   {
-//     slot: 0, slotMaximo: 12,
-//     periodo: { desde: "aaaa-mm-dd", hasta: "aaaa-mm-dd", dias: 30 },
-//     cobertura: { diasConTickets, diasEsperados, primerDia, ultimoDia,
-//                  completa, excluyeHoy } | null,   // ver ConcentracionContrato
-//     El Slot 0 no cuenta HOY en la cobertura (29 dias esperados).
-//     pareto:     [ ... ] | null,   // Posicion ASC, TODAS las filas
-//     categorias: [ ... ] | null,   // Posicion ASC, TODAS las filas
-//     grupos:     [ ... ] | null,   // Posicion ASC, TODAS las filas
-//     errores: { <grafica>: "mensaje" },   // solo las que fallaron
-//     avisos:  [ "..." ],                  // diferencias con el contrato
+//     modo, slot, mes, slotMaximo: 12,
+//     meses: [ { valor: "aaaa-mm", etiqueta: "Noviembre 2026", enCurso } ],
+//     periodo: { desde, hasta, dias },
+//     filtros: { serviceOwners: [...], grupos: [...] },   // los aplicados
+//     opciones: { serviceOwners: [ {valor, tickets} ], grupos: [ ... ] },
+//     ticketsPeriodo, ticketsFiltrados,
+//     cobertura: { diasConTickets, diasEsperados, primerDia, ultimoDia, completa, excluyeHoy },
+//     pareto:     [ { Posicion, Servicio, NombreServicio, CantidadTickets, TotalTickets, Porcentaje, PorcentajeAcumulado } ],
+//     categorias: [ { Posicion, Categoria, ... } ],
+//     grupos:     [ { Posicion, Grupo, ... } ],
+//     errores: {}, avisos: [ "..." ],
 //     dataInfo: { ...DashboardDataInfo... }
 //   }
-//   Cada fila lleva las columnas del procedimiento con su nombre original.
-//   null = esa grafica fallo (ver errores); [] = sin tickets en el slot.
-//   El Top 10 / 15 lo aplica la pestaña al pintar: el acumulado y el corte
-//   del 80 % vienen calculados sobre todas las filas.
+//   TODAS las filas de cada grafica, con el acumulado y el 80 % sobre todas;
+//   el Top 10 / 15 lo aplica la pestaña al pintar. [] = sin tickets.
 //
 // ERRORES (mismo formato que DashboardHandler.Responder: {error, tipo})
-//   400  slot fuera de 0..12 o no numerico.
-//   500  fallaron los tres procedimientos, o falta la cadena de conexion.
+//   400  modo, slot o mes invalidos.
+//   500  no se pudo leer el periodo (o el catalogo de dueños con un filtro de
+//        Service Owner puesto), o falta la cadena de conexion.
 
 using System;
 using System.Collections.Generic;
@@ -53,11 +56,18 @@ public class Concentracion : IHttpHandler
 
         try
         {
-            int slot = ConcentracionContrato.LeerSlot(context.Request.QueryString["slot"]);
-            var r = ConcentracionQueries.Consultar(slot);
+            var q = context.Request.QueryString;
+            var hoy = ConcentracionContrato.HoyMexico(DateTime.UtcNow);
+            var f = new ConcentracionFiltros();
+            f.Modo = ConcentracionContrato.LeerModo(q["modo"]);
+            if (f.Modo == ConcentracionContrato.ModoMes) f.Mes = ConcentracionContrato.LeerMes(q["mes"], hoy);
+            else f.Slot = ConcentracionContrato.LeerSlot(q["slot"]);
+            f.ServiceOwners.AddRange(ConcentracionContrato.LeerLista(q["so"]));
+            f.Grupos.AddRange(ConcentracionContrato.LeerLista(q["grupo"]));
 
-            foreach (var fallo in r.Fallos)
-                DashboardHandler.Registrar("concentracion.ashx " + fallo.Key, fallo.Value);
+            var r = ConcentracionQueries.Consultar(f, hoy);
+            if (r.FalloDirectorio != null)
+                DashboardHandler.Registrar("concentracion.ashx directorio", r.FalloDirectorio);
 
             context.Response.Write(json.Serialize(Salida(r)));
         }
@@ -68,33 +78,57 @@ public class Concentracion : IHttpHandler
         catch (Exception ex)
         {
             DashboardHandler.Registrar("concentracion.ashx", ex);
-            Error(context, json, 500, DashboardHandler.MensajeSeguro(ex), ex.GetType().Name);
+            Error(context, json, 500, ConcentracionQueries.MensajeError(ex), ex.GetType().Name);
         }
     }
 
     private static Dictionary<string, object> Salida(ConcentracionResultado r)
     {
+        var f = r.Filtros;
+        var meses = new List<Dictionary<string, object>>();
+        foreach (var m in ConcentracionContrato.Meses(r.Hoy))
+        {
+            meses.Add(new Dictionary<string, object>
+            {
+                { "valor", ConcentracionContrato.Mes(m) },
+                { "etiqueta", ConcentracionContrato.NombreMes(m) },
+                { "enCurso", m.Year == r.Hoy.Year && m.Month == r.Hoy.Month },
+            });
+        }
+
         var salida = new Dictionary<string, object>();
-        salida["slot"] = r.Slot;
+        salida["modo"] = f.Modo;
+        salida["slot"] = f.Modo == ConcentracionContrato.ModoSlot ? (object)f.Slot : null;
+        salida["mes"] = f.Modo == ConcentracionContrato.ModoMes ? ConcentracionContrato.Mes(f.Mes) : null;
         salida["slotMaximo"] = ConcentracionContrato.SlotMaximo;
+        salida["meses"] = meses;
         salida["periodo"] = new Dictionary<string, object>
         {
             { "desde", ConcentracionContrato.Dia(r.Desde) },
             { "hasta", ConcentracionContrato.Dia(r.Hasta) },
-            { "dias", ConcentracionContrato.DiasSlot },
+            { "dias", (r.Hasta - r.Desde).Days + 1 },
         };
-        // Dias del Slot con tickets, para el aviso de cobertura parcial. null =
-        // no se pudo medir (sin aviso; el motivo va en avisos).
+        salida["filtros"] = new Dictionary<string, object>
+        {
+            { "serviceOwners", f.ServiceOwners }, { "grupos", f.Grupos },
+        };
+        salida["opciones"] = new Dictionary<string, object>
+        {
+            { "serviceOwners", r.OpcionesServiceOwner }, { "grupos", r.OpcionesGrupo },
+        };
+        salida["ticketsPeriodo"] = r.TicketsPeriodo;
+        salida["ticketsFiltrados"] = r.TicketsFiltrados;
         salida["cobertura"] = r.Cobertura;
-        foreach (var b in ConcentracionContrato.Bloques) salida[b.Clave] = r.Bloques[b.Clave];
-        salida["errores"] = r.Errores;
+        salida["pareto"] = r.Pareto;
+        salida["categorias"] = r.Categorias;
+        salida["grupos"] = r.Grupos;
+        salida["errores"] = new Dictionary<string, object>();
         salida["avisos"] = r.Avisos;
-        /* Frescura y periodo en el contrato compartido: el sello es el fin del
-           ultimo ETL de tickets (dbo.EtlLog), como SLA, QA y QARE, guardado en
-           la hora local del SQL Server (YaLocal). El periodo son las fechas
-           de negocio del Slot. */
+        /* Sello del ETL (dbo.EtlLog), como SLA, QA y QARE, en la hora local del
+           SQL Server (YaLocal). El periodo son las fechas de negocio del Slot o
+           del mes. */
         salida["dataInfo"] = DashboardDataInfo.Periodo(
-            "Concentracion de tickets",
+            "Vista general de servicios",
             DashboardDataInfo.LeerUltimoEtlTickets(),
             ZonaSello.YaLocal,
             ConcentracionContrato.Dia(r.Desde),

@@ -4281,13 +4281,15 @@ const TableroAnalisis = moduloEmbebido({
   },
 });
 
-/* Concentracion de tickets: mismo trato que QARE. Pestaña INDEPENDIENTE de
-   Analisis de servicios: carga sola al montarse (concentracion.ashx con el
-   Slot 0, sin elegir servicio), publica window.TableroConcentracionModulo y,
-   al volver, solo se remiden sus graficas. El refresco automatico vuelve a
-   pedir concentracion.ashx con el mismo Slot (refrescoDe). */
+/* Vista general de servicios (antes "Concentracion de tickets"; carpeta, id y
+   hash #concentracion se quedaron): mismo trato que QARE. Pestaña
+   INDEPENDIENTE de Analisis de servicios: carga sola al montarse
+   (concentracion.ashx con el Slot 0, sin elegir servicio), publica
+   window.TableroConcentracionModulo y, al volver, solo se remiden sus
+   graficas. El refresco automatico vuelve a pedir concentracion.ashx con los
+   mismos filtros (refrescoDe). */
 const TableroConcentracion = moduloEmbebido({
-  nombre: 'Concentración de tickets',
+  nombre: 'Vista general de servicios',
   base: 'concentracion/',
   id: 'tab-concentracion',
   pagina: 'concentracion.html',

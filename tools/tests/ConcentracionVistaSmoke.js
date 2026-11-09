@@ -15,7 +15,9 @@
 //   K  aviso de cobertura parcial del Slot (texto del dato del servidor).
 //   P  periodo del servidor -> texto, sin pasar por Date.
 //   S  Slot escrito a mano: acotado a 0..12, basura = null.
-//   V  vacio / fallo: [] es "sin tickets", null es "fallo".
+//   V  vacio / fallo: [] es "sin tickets", null es "fallo"; vacio por filtros o por periodo.
+//   F  filtros -> query string (solo el parametro del modo elegido).
+//   A  texto de lo aplicado (periodo con fechas, SO, Grupo, tickets).
 //
 //   node tools\tests\ConcentracionVistaSmoke.js   # PASS/FAIL por caso, sale 0 si todo paso
 'use strict';
@@ -138,6 +140,27 @@ Check('S4 respeta el maximo del servidor', 6, D.acotarSlot('9', 6));
 Check('V1 null = fallo', null, D.vista('pareto', null));
 var vacia = D.vista('pareto', []);
 Check('V2 [] = sin tickets', [0, 0, null, ''], [vacia.filas.length, vacia.cuantas, vacia.total, D.resumen('pareto', vacia)]);
+Check('V3 vacio por filtros vs periodo vacio', ['Sin tickets con estos filtros.', 'Sin tickets en este periodo.', 'Sin tickets en este periodo.'],
+  [D.mensajeVacio({ ticketsPeriodo: 12 }), D.mensajeVacio({ ticketsPeriodo: 0 }), D.mensajeVacio(null)]);
+
+// ---- F: filtros -> consulta (solo viaja el parametro del modo elegido)
+Check('F1 slot por omision', 'modo=slot&slot=0', D.consulta({ modo: 'slot', slot: 0, mes: '2026-10', so: [], grupo: [] }));
+Check('F2 mes: no manda slot', 'modo=mes&mes=2026-10', D.consulta({ modo: 'mes', slot: 4, mes: '2026-10', so: [], grupo: [] }));
+Check('F3 mes sin elegir todavia: el servidor da el actual', 'modo=mes', D.consulta({ modo: 'mes', slot: 0, mes: null, so: [], grupo: [] }));
+Check('F4 SO y Grupo por "|", codificados (nombres con coma)',
+  'modo=slot&slot=2&so=' + encodeURIComponent('Pérez, Ana|(Sin Service Owner)') + '&grupo=' + encodeURIComponent('Service Desk'),
+  D.consulta({ modo: 'slot', slot: 2, so: ['Pérez, Ana', '(Sin Service Owner)'], grupo: ['Service Desk'] }));
+
+// ---- A: lo aplicado, como lo confirma el servidor
+var base = { modo: 'slot', slot: 0, periodo: { desde: '2026-10-11', hasta: '2026-11-09' }, ticketsPeriodo: 11492, ticketsFiltrados: 11492,
+             filtros: { serviceOwners: [], grupos: [] }, meses: [] };
+Check('A1 sin filtros', 'Periodo: Slot 0 · del 11/10/2026 al 09/11/2026 · Service Owner: todos · Grupo: todos · 11,492 tickets en el periodo',
+  D.textoActivos(base));
+Check('A2 mes en curso con filtros',
+  'Periodo: Mes Noviembre 2026 (en curso, hasta hoy) · del 01/11/2026 al 09/11/2026 · Service Owner: Ana · Grupo: G1, G2, G3 y 1 más · 120 de 3,000 tickets del periodo',
+  D.textoActivos({ modo: 'mes', mes: '2026-11', periodo: { desde: '2026-11-01', hasta: '2026-11-09' }, ticketsPeriodo: 3000, ticketsFiltrados: 120,
+    filtros: { serviceOwners: ['Ana'], grupos: ['G1', 'G2', 'G3', 'G4'] }, meses: [{ valor: '2026-11', etiqueta: 'Noviembre 2026', enCurso: true }] }));
+Check('A3 sin respuesta, nada', '', D.textoActivos(null));
 
 console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
 process.exit(fallos ? 1 : 0);
