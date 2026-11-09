@@ -75,7 +75,9 @@ BEGIN TRY
            NTDomainName, NTUserName, HostName, ApplicationName, SPID
     FROM sys.fn_trace_gettable(@TraceBase, DEFAULT)
     WHERE EventClass IN (46, 47, 164)
-      AND (DatabaseName = DB_NAME() OR DatabaseID = DB_ID())
+      -- Por NOMBRE: un database_id se reutiliza cuando se borra una base y se
+      -- crea otra, y el trace guardaria eventos de la vieja con el mismo id.
+      AND (DatabaseName = DB_NAME() OR (DatabaseName IS NULL AND DatabaseID = DB_ID()))
       AND (ObjectName IN (SELECT Nombre FROM @Objetos) OR (StartTime >= '2026-11-03' AND StartTime < '2026-11-07'));
 END TRY
 BEGIN CATCH
@@ -93,7 +95,7 @@ FROM (SELECT 1 AS x) AS uno LEFT JOIN @TCobertura AS c ON 1 = 1;
 SELECT Seccion = 'T2 DDL de los tres SP', Hora = CONVERT(VARCHAR(23), StartTime, 121),
        Evento = CASE EventClass WHEN 46 THEN 'Object:Created' WHEN 164 THEN 'Object:Altered' WHEN 47 THEN 'Object:Deleted' END,
        Fase = CASE EventSubClass WHEN 0 THEN 'Begin' WHEN 1 THEN 'Commit' WHEN 2 THEN 'Rollback' ELSE CAST(EventSubClass AS VARCHAR(5)) END,
-       ObjectName, LoginName, SessionLoginName, NTDomainName, NTUserName, HostName, ApplicationName, SPID
+       DatabaseName, ObjectName, LoginName, SessionLoginName, NTDomainName, NTUserName, HostName, ApplicationName, SPID
 FROM @T WHERE ObjectName IN (SELECT Nombre FROM @Objetos)
 ORDER BY StartTime;
 
@@ -107,10 +109,12 @@ ORDER BY StartTime;
 SELECT Seccion = 'A1 Auditorias de servidor', a.name, a.type_desc, a.is_state_enabled, f.log_file_path, f.log_file_name
 FROM sys.server_audits AS a LEFT JOIN sys.server_file_audits AS f ON f.audit_id = a.audit_id;
 
-SELECT Seccion = 'A2 Especificaciones', Nivel = 'Servidor', s.name, s.is_state_enabled, d.audit_action_name, d.class_desc
+SELECT Seccion = 'A2 Especificaciones', Nivel = 'Servidor', Nombre = s.name COLLATE DATABASE_DEFAULT, s.is_state_enabled,
+       Accion = d.audit_action_name COLLATE DATABASE_DEFAULT, Clase = d.class_desc COLLATE DATABASE_DEFAULT
 FROM sys.server_audit_specifications AS s JOIN sys.server_audit_specification_details AS d ON d.server_specification_id = s.server_specification_id
 UNION ALL
-SELECT 'A2 Especificaciones', 'Base', s.name, s.is_state_enabled, d.audit_action_name, d.class_desc
+SELECT 'A2 Especificaciones', 'Base', s.name COLLATE DATABASE_DEFAULT, s.is_state_enabled,
+       d.audit_action_name COLLATE DATABASE_DEFAULT, d.class_desc COLLATE DATABASE_DEFAULT
 FROM sys.database_audit_specifications AS s JOIN sys.database_audit_specification_details AS d ON d.database_specification_id = s.database_specification_id;
 
 DECLARE @A TABLE (Hora DATETIME2(3), Accion NVARCHAR(100), Objeto NVARCHAR(256), Login NVARCHAR(256), Servidor NVARCHAR(256),
@@ -176,7 +180,8 @@ BEGIN CATCH
 END CATCH;
 
 SELECT Seccion = 'Q1 Query Store resumen', Estado = @QEstado, Error = @QError, q.Procedimiento,
-       PrimeraEjecucion = CONVERT(VARCHAR(19), MIN(q.Primera), 120), UltimaEjecucion = CONVERT(VARCHAR(19), MAX(q.Ultima), 120),
+       PrimeraEjecucionMx = CONVERT(VARCHAR(19), SWITCHOFFSET(MIN(q.Primera), '-06:00'), 120),
+       UltimaEjecucionMx = CONVERT(VARCHAR(19), SWITCHOFFSET(MAX(q.Ultima), '-06:00'), 120),
        Ejecuciones = SUM(q.Ejecuciones)
 FROM (SELECT 1 AS x) AS uno LEFT JOIN @Q AS q ON 1 = 1
 GROUP BY q.Procedimiento;
@@ -204,14 +209,19 @@ WHERE o.is_ms_shipped = 0
   AND ((o.create_date >= @Desde AND o.create_date < @Hasta) OR (o.modify_date >= @Desde AND o.modify_date < @Hasta))
 ORDER BY CASE WHEN o.create_date >= @Desde THEN o.create_date ELSE o.modify_date END;
 
-SELECT Seccion = 'M3 Usuarios de la base con permiso de crear o alterar', Principal = dp.name, dp.type_desc,
-       Via = 'rol ' + r.name
+-- COLLATE DATABASE_DEFAULT: los catalogos traen collations distintas y el
+-- UNION ALL no compila sin el (y tumbaria el lote entero).
+SELECT Seccion = 'M3 Usuarios de la base con permiso de crear o alterar', Principal = dp.name COLLATE DATABASE_DEFAULT,
+       TipoPrincipal = dp.type_desc COLLATE DATABASE_DEFAULT, Via = ('rol ' + r.name) COLLATE DATABASE_DEFAULT
 FROM sys.database_role_members AS rm
 JOIN sys.database_principals AS r ON r.principal_id = rm.role_principal_id
 JOIN sys.database_principals AS dp ON dp.principal_id = rm.member_principal_id
 WHERE r.name IN (N'db_owner', N'db_ddladmin')
 UNION ALL
-SELECT 'M3 Usuarios de la base con permiso de crear o alterar', pr.name, pr.type_desc, p.permission_name + ' ' + p.state_desc
+SELECT 'M3 Usuarios de la base con permiso de crear o alterar', pr.name COLLATE DATABASE_DEFAULT,
+       pr.type_desc COLLATE DATABASE_DEFAULT, (p.permission_name + ' ' + p.state_desc) COLLATE DATABASE_DEFAULT
 FROM sys.database_permissions AS p JOIN sys.database_principals AS pr ON pr.principal_id = p.grantee_principal_id
 WHERE p.permission_name IN (N'ALTER', N'CREATE PROCEDURE', N'CONTROL', N'ALTER ANY SCHEMA')
 ORDER BY 2;
+
+SELECT Seccion = 'FIN', Mensaje = 'Diagnostico terminado';
