@@ -508,8 +508,15 @@
   }
 
   // ------------------------------------------------------------ peticion
-  function pedir(qs) {
-    return fetch(API + '?' + qs, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+  /* senal: AbortSignal de la peticion (cargar la cancela cuando otra la
+     reemplaza). Cancelar solo deja de esperar en el navegador: si el
+     servidor ya estaba consultando, termina igual (y su cache por mes lo
+     aprovecha la siguiente). Una cancelacion sale como AbortError, sin
+     traducir. */
+  function pedir(qs, senal) {
+    var opciones = { headers: { 'Accept': 'application/json' }, cache: 'no-store' };
+    if (senal) opciones.signal = senal;
+    return fetch(API + '?' + qs, opciones)
       .then(function (resp) {
         return resp.text().then(function (cuerpo) {
           var datos = null;
@@ -521,10 +528,13 @@
           if (!datos) throw new Error('La respuesta del servidor llegó vacía o con un formato no válido.');
           return datos;
         });
-      }, function () {
+      }, function (err) {
+        if (esCancelada(err)) throw err;
         throw new Error('No se pudo contactar a concentracion.ashx. Revisa que el sitio esté publicado y en ejecución.');
       });
   }
+
+  function esCancelada(err) { return !!err && err.name === 'AbortError'; }
 
   var CLAVES = ['pareto', 'categorias', 'grupos'];
 
@@ -602,7 +612,11 @@
   /* fondo = refresco (el automatico de dashboard.js o "Actualizar"): mismos
      filtros, sin "Calculando…" y, si falla, lo que se ve se queda y la
      pastilla lo avisa. -> Promise (null). */
-  var enVuelo = 0, cargadoUnaVez = false;
+  /* Una sola peticion viva (2026-11-11): la nueva cancela la anterior
+     (AbortController) y, ademas, el token impide que una respuesta vieja
+     pinte encima de una nueva aunque llegue despues. Una carga programada
+     (multiselect) se descarta: esta ya lleva los filtros actuales. */
+  var enVuelo = 0, cargadoUnaVez = false, controlador = null;
   function cargar(fondo) {
     fondo = fondo === true;
     if (location.protocol !== 'http:' && location.protocol !== 'https:') {
@@ -610,11 +624,15 @@
         'o desde la pestaña Vista general de servicios del tablero.'));
       return Promise.resolve(null);
     }
+    if (cargaProgramada !== null) { clearTimeout(cargaProgramada); cargaProgramada = null; }
+    if (controlador) controlador.abort();
+    var propio = typeof AbortController === 'function' ? new AbortController() : null;
+    controlador = propio;
     var token = ++peticion;
     var qs = consulta(filtros);
     if (!fondo) { $('error').hidden = true; enEspera(); }
     enVuelo++;
-    return pedir(qs)
+    return pedir(qs, propio ? propio.signal : null)
       .then(function (d) {
         if (token !== peticion) return;
         $('error').hidden = true;
@@ -622,7 +640,9 @@
         cargadoUnaVez = true;
       })
       .catch(function (err) {
-        if (token !== peticion) return;
+        // Cancelada = la reemplazo otra, que es la que pinta (o ya pinto):
+        // ni error ni aviso.
+        if (token !== peticion || esCancelada(err)) return;
         if (fondo && cargadoUnaVez) {
           DatosInfo.avisoRefresco($('estado'), '⚠ No se pudo actualizar (' +
             DatosInfo.fechaHora(DatosInfo.ahoraLocal()) + '); se muestran los datos anteriores', err.message);
@@ -631,16 +651,33 @@
           fallo(err);
         }
       })
-      .then(function () { enVuelo--; return null; });
+      .then(function () {
+        enVuelo--;
+        if (controlador === propio) controlador = null;
+        return null;
+      });
   }
 
   /* Los multiselect: varios cambios seguidos = una sola peticion (como QARE
-     y el Backlog). */
+     y el Backlog). Meses (2026-11-11): cada mes es una lectura cara, asi
+     que se espera mas (ESPERA_MESES) y, con el desplegable abierto, hasta
+     que se cierre: elegir cuatro meses de un tiron es UNA peticion. Sin el
+     desplegable propio (select nativo) queda solo la espera. */
   var ESPERA_AUTO = 250;
+  var ESPERA_MESES = 700;
   var cargaProgramada = null;
-  function programarCarga() {
+  function programarCarga(espera, mientras) {
     clearTimeout(cargaProgramada);
-    cargaProgramada = setTimeout(function () { cargaProgramada = null; cargar(); }, ESPERA_AUTO);
+    cargaProgramada = setTimeout(function () {
+      if (mientras && mientras()) { programarCarga(ESPERA_AUTO, mientras); return; }
+      cargaProgramada = null;
+      cargar();
+    }, espera || ESPERA_AUTO);
+  }
+  // El desplegable de meses esta abierto (Desplegable lo envuelve en .dd).
+  function mesesAbierto() {
+    var env = $('mes').parentNode;
+    return !!(env && env.classList && env.classList.contains('dd') && env.classList.contains('abierto'));
   }
 
   // Refresco automatico: nunca encima de una carga en vuelo o programada, ni
@@ -722,7 +759,7 @@
       if (nuevos.slice().sort().join('|') === filtros.meses.slice().sort().join('|')) return;
       filtros.meses = nuevos;
       $('cobertura').hidden = true;
-      programarCarga();
+      programarCarga(ESPERA_MESES, mesesAbierto);
     });
     $('f-so').addEventListener('change', function () { filtros.so = seleccionados($('f-so')); programarCarga(); });
     $('f-grupo').addEventListener('change', function () { filtros.grupo = seleccionados($('f-grupo')); programarCarga(); });

@@ -148,11 +148,18 @@ function stub(responde, clave) {
     'var __responde = ' + responde.toString() + ';\n' +
     (responde === respondeDash ? 'var respondeConc = ' + respondeConc.toString() + ';\n' : '') +
     'var __clave = ' + clave.toString() + ';\n' +
-    'window.fetch = function (u) { u = String(u); var k = __clave(u);\n' +
+    // Como fetch de verdad, la senal (AbortController) cancela con AbortError;
+    // __ignoraAbort la desoye (para probar que una respuesta vieja no pinta) y
+    // __demora(u) agrega ms por URL.
+    'window.__abortadas = 0; window.__ignoraAbort = false; window.__demora = null;\n' +
+    'window.fetch = function (u, op) { u = String(u); var k = __clave(u);\n' +
     '  if (k === null) return window.__fetchOriginal.apply(window, arguments);\n' +
     '  window.__urls.push(u); window.__pedidas[k] = (window.__pedidas[k] || 0) + 1;\n' +
-    '  var v = window.__v, falla = window.__falla;\n' +
-    '  return new Promise(function (ok) { setTimeout(ok, 20 + window.__lento); })\n' +
+    '  var v = window.__v, falla = window.__falla, senal = op && op.signal;\n' +
+    '  var demora = 20 + window.__lento + (window.__demora ? window.__demora(u) : 0);\n' +
+    '  return new Promise(function (ok, mal) { var t = setTimeout(ok, demora);\n' +
+    '    if (senal && !window.__ignoraAbort) senal.addEventListener("abort", function () {\n' +
+    '      clearTimeout(t); window.__abortadas++; mal(new DOMException("cancelada", "AbortError")); }); })\n' +
     '    .then(function () { return falla ? { error: "caido" } : __responde(u, v); })\n' +
     '    .then(function (j) { var bien = !falla;\n' +
     '      return { ok: bien, status: bien ? 200 : 500,\n' +
@@ -332,7 +339,48 @@ var sondaC = conComun(
   'var aMes = [pedidasConc().slice(nv), marcados("mes")];\n' +
   'document.querySelector("#conc-filtros [data-modo=slot]").click();\n' +
   'await hasta(function () { return ultimaConc().modo === "slot" && !msg("pareto"); }); await espera(100);\n' +
-  'apunta("C16", [aSlot, acum, aMes, ultimaConc(), $c("slot-n").value]);\n');
+  'apunta("C16", [aSlot, acum, aMes, ultimaConc(), $c("slot-n").value]);\n' +
+  // C17 (2026-11-11) espera de meses y cancelacion.
+  // a) Desplegable de meses abierto: tres clics separados por mas que la
+  //    espera = nada pedido; al cerrarlo, UNA peticion con los tres.
+  'document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150);\n' +
+  'var env = $c("mes").parentNode, boton = env.querySelector(".dd-boton");\n' +
+  'var fila = function (v) { var i = Array.prototype.map.call($c("mes").options, function (o) { return o.value; }).indexOf(v);\n' +
+  '  return env.querySelector(".dd-opcion[data-indice=\\"" + i + "\\"]"); };\n' +
+  'var n17 = pedidasConc().length; boton.click();\n' +
+  'fila("2026-06").click(); await espera(900); fila("2026-05").click(); await espera(900); fila("2026-04").click(); await espera(900);\n' +
+  'var abierto = [env.classList.contains("abierto"), pedidasConc().length - n17];\n' +
+  'Desplegable.cerrarTodos();\n' +
+  'await hasta(function () { return pedidasConc().length > n17 && !msg("pareto"); }); await espera(700);\n' +
+  'var cerrado = [pedidasConc().length - n17, ultimaConc().mes];\n' +
+  // b) Sin abrir el desplegable, tres cambios a 300 ms = UNA peticion.
+  'var n17b = pedidasConc().length;\n' +
+  'elegir("mes", ["2026-10"]); await espera(300); elegir("mes", ["2026-10", "2026-09"]); await espera(300); elegir("mes", ["2026-10", "2026-09", "2026-08"]);\n' +
+  'await hasta(function () { return pedidasConc().length > n17b && !msg("pareto"); }); await espera(900);\n' +
+  'var rafaga = [pedidasConc().length - n17b, ultimaConc().mes];\n' +
+  // c) Una peticion reemplazada se cancela: sin error, sin "Calculando…" pegado.
+  'document.querySelector("#conc-filtros [data-modo=slot]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "slot" && !msg("pareto"); }); await espera(100);\n' +
+  'var a0 = __abortadas; window.__lento = 600;\n' +
+  '$c("slot-menos").click(); await espera(100); $c("slot-menos").click();\n' +
+  'await hasta(function () { return /^Periodo: Slots 0-1 /.test($c("activos").textContent) && !msg("pareto"); }); window.__lento = 0; await espera(800);\n' +
+  'var cancelada = [__abortadas - a0, slots().slice(-2), $c("error").hidden, msg("pareto"), msg("categorias"), msg("grupos"),\n' +
+  '  lineas().some(function (l) { return /Error|No se pudo/.test(l); }), graf("pareto").options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }])];\n' +
+  // d) Aunque la cancelacion no llegue, una respuesta vieja y lenta no pinta encima de la nueva.
+  'window.__ignoraAbort = true; window.__demora = function (u) { return /slot=0/.test(u) ? 800 : 0; };\n' +
+  '$c("slot-menos").click(); await espera(60); $c("slot-mas").click();\n' +
+  'await espera(1300); window.__ignoraAbort = false; window.__demora = null;\n' +
+  'var vieja = [slots().slice(-2), /^Periodo: Slots 0-1 /.test($c("activos").textContent), graf("pareto").options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }]),\n' +
+  '  $c("slot-n").value, msg("pareto")];\n' +
+  // e) "Actualizar" con meses pendientes: UNA peticion, con los meses nuevos.
+  'document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150);\n' +
+  'var n17e = pedidasConc().length;\n' +
+  'elegir("mes", ["2026-07"]); $c("btn-actualizar").click();\n' +
+  'await hasta(function () { return pedidasConc().length > n17e && !msg("pareto"); }); await espera(1200);\n' +
+  'var actualizar = [pedidasConc().length - n17e, ultimaConc().mes];\n' +
+  'apunta("C17", [abierto, cerrado, rafaga, cancelada, vieja, actualizar]);\n');
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
@@ -414,6 +462,10 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
        [[1, 'Periodo: Slots 0-1 · del 11/09/2026 al 09/11/2026'], [1, 'Periodo: Slots 0-2 · del 12/08/2026 al 09/11/2026'],
         [1, 'Periodo: Slots 0-3 · del 13/07/2026 al 09/11/2026']],
        [[{ modo: 'mes', mes: '2026-10|2026-08' }], ['2026-10', '2026-08']], { modo: 'slot', slot: '3' }, '3'], o.C16);
+    Check('C17 meses: con el desplegable abierto nada se pide y al cerrarlo UNA peticion; tres cambios rapidos = UNA; la peticion reemplazada se cancela sin error ni "Calculando…"; una respuesta vieja no pinta encima; "Actualizar" con meses pendientes = UNA',
+      [[true, 0], [1, '2026-10|2026-08|2026-06|2026-05|2026-04'], [1, '2026-10|2026-09|2026-08'],
+       [1, ['2', '1'], true, null, null, null, false, 'Servicio 1 slot 1'],
+       [['0', '1'], true, 'Servicio 1 slot 1', '1', null], [1, '2026-07']], o.C17);
     Check('C13 cobertura: completa sin aviso; parcial con el hecho; sin medir sin aviso',
       [true, [false, 'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.'], true], o.C13);
   });
