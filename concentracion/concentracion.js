@@ -11,7 +11,9 @@
    elegir servicio, y no lee ni escribe nada de esa pestaña.
 
    Filtros (estado `filtros`): Periodo por Slot O por Mes -nunca los dos-,
-   Service Owner y Grupo. Cada cambio es UNA peticion a
+   Service Owner y Grupo. Slot N es ACUMULADO (2026-11-10, como el SLOT del
+   tablero de SLA): los Slots 0..N juntos. Mes admite VARIOS meses a la vez
+   (2026-11-10): las tres graficas, los totales y la cobertura usan todos. Cada cambio es UNA peticion a
    handlers/concentracion.ashx con todos los filtros; el servidor filtra y
    cuenta (App_Code/ConcentracionContrato.cs) y entrega TODAS las filas de
    cada grafica con el acumulado ya calculado sobre el total filtrado. Aqui
@@ -216,10 +218,15 @@
 
   /* Filtros -> query string de concentracion.ashx. Solo viaja el parametro
      del modo elegido (slot o mes); las listas van separadas por "|" porque
-     un nombre de persona puede llevar coma. */
+     un nombre de persona puede llevar coma. Meses: f.meses (varios) o, si
+     no hay, f.mes; ninguno = el servidor da el mes en curso. */
+  function mesesDe(f) {
+    if (f && f.meses && f.meses.length) return f.meses.slice();
+    return f && f.mes ? [f.mes] : [];
+  }
   function consulta(f) {
     var p = ['modo=' + (f.modo === 'mes' ? 'mes' : 'slot')];
-    if (f.modo === 'mes') { if (f.mes) p.push('mes=' + encodeURIComponent(f.mes)); }
+    if (f.modo === 'mes') { var ms = mesesDe(f); if (ms.length) p.push('mes=' + encodeURIComponent(ms.join('|'))); }
     else p.push('slot=' + encodeURIComponent(f.slot || 0));
     if (f.so && f.so.length) p.push('so=' + encodeURIComponent(f.so.join('|')));
     if (f.grupo && f.grupo.length) p.push('grupo=' + encodeURIComponent(f.grupo.join('|')));
@@ -236,10 +243,23 @@
      cuantos tickets quedan de los del periodo. */
   function textoActivos(d) {
     if (!d) return '';
-    var etiquetaMes = '';
-    (d.meses || []).forEach(function (m) { if (m.valor === d.mes) etiquetaMes = m.etiqueta + (m.enCurso ? ' (en curso, hasta hoy)' : ''); });
-    var periodo = d.modo === 'mes' ? 'Mes ' + (etiquetaMes || d.mes) : 'Slot ' + d.slot;
-    var fechas = textoPeriodo(d.periodo);
+    // Meses: los que el servidor dice que aplico (mesesElegidos), con su
+    // etiqueta. Slot N > 0: "Slots 0-N", los que suma (como "SLOT 0-3" en SLA).
+    var elegidos = d.mesesElegidos && d.mesesElegidos.length ? d.mesesElegidos : (d.mes ? [d.mes] : []);
+    var etiquetas = elegidos.map(function (v) {
+      var e = v;
+      (d.meses || []).forEach(function (m) { if (m.valor === v) e = m.etiqueta + (m.enCurso ? ' (en curso, hasta hoy)' : ''); });
+      return e;
+    });
+    var slot = numero(d.slot) || 0;
+    var periodo = d.modo === 'mes' ? (etiquetas.length > 1 ? 'Meses ' + etiquetas.join(', ') : 'Mes ' + (etiquetas[0] || ''))
+                                   : (slot > 0 ? 'Slots 0-' + slot : 'Slot 0');
+    // Varios rangos (meses no seguidos): "del X al Y" contaria dias que no
+    // entran; se dicen los dias que si.
+    var rangos = d.periodo && d.periodo.rangos;
+    var fechas = rangos && rangos.length > 1
+      ? (numero(d.periodo.dias) !== null ? entero(d.periodo.dias) + ' días' : '')
+      : textoPeriodo(d.periodo);
     var f = d.filtros || {};
     var partes = ['Periodo: ' + periodo + (fechas ? ' · ' + fechas.charAt(0).toLowerCase() + fechas.slice(1) : ''),
                   'Service Owner: ' + lista(f.serviceOwners, 'todos'),
@@ -257,7 +277,7 @@
   }
 
   var ConcentracionDatos = {
-    consulta: consulta, textoActivos: textoActivos, mensajeVacio: mensajeVacio,
+    consulta: consulta, mesesDe: mesesDe, textoActivos: textoActivos, mensajeVacio: mensajeVacio,
     TOP: TOP, UMBRAL: UMBRAL, SLOT_MAXIMO: SLOT_MAXIMO, LARGO_ETIQUETA: LARGO_ETIQUETA,
     numero: numero, etiquetaFila: etiquetaFila, abreviarRuta: abreviarRuta, recortar: recortar,
     marcarDentro: marcarDentro, vista: vista, resumen: resumen, textoPeriodo: textoPeriodo,
@@ -303,7 +323,7 @@
 
   var graficas = {};
   // Lo que el usuario eligio; viaja completo en cada peticion y en cada refresco.
-  var filtros = { modo: 'slot', slot: 0, mes: null, so: [], grupo: [] };
+  var filtros = { modo: 'slot', slot: 0, meses: [], so: [], grupo: [] };
   var slotMaximo = SLOT_MAXIMO;
   var ultima = null;            // ultima respuesta buena (para el texto de vacio)
   var peticion = 0;
@@ -535,9 +555,9 @@
     }).join('');
   }
 
-  function llenarMeses(meses, elegido) {
+  function llenarMeses(meses, elegidos) {
     $('mes').innerHTML = (meses || []).map(function (m) {
-      return '<option value="' + esc(m.valor) + '"' + (m.valor === elegido ? ' selected' : '') + '>' +
+      return '<option value="' + esc(m.valor) + '"' + (elegidos.indexOf(m.valor) >= 0 ? ' selected' : '') + '>' +
              esc(m.etiqueta + (m.enCurso ? ' (en curso)' : '')) + '</option>';
     }).join('');
   }
@@ -547,9 +567,12 @@
     ultima = d;
     var errores = d.errores || {};
     if (numero(d.slotMaximo) !== null) slotMaximo = numero(d.slotMaximo);
-    // El servidor confirma el mes cuando se pidio "el actual" sin decir cual.
-    if (d.modo === 'mes' && d.mes) filtros.mes = d.mes;
-    llenarMeses(d.meses, filtros.mes || (d.meses && d.meses[0] && d.meses[0].valor));
+    // El servidor confirma los meses (el actual cuando no se eligio ninguno).
+    if (d.modo === 'mes') {
+      var conf = d.mesesElegidos && d.mesesElegidos.length ? d.mesesElegidos : (d.mes ? [d.mes] : []);
+      if (conf.length) filtros.meses = conf.slice();
+    }
+    llenarMeses(d.meses, filtros.meses.length ? filtros.meses : (d.meses && d.meses[0] ? [d.meses[0].valor] : []));
     var op = d.opciones || {};
     llenarMultiple($('f-so'), op.serviceOwners, filtros.so);
     llenarMultiple($('f-grupo'), op.grupos, filtros.grupo);
@@ -691,11 +714,15 @@
       else if (e.key === 'ArrowDown') { e.preventDefault(); cambiarSlot(Math.max(0, filtros.slot - 1)); }
     });
     campo.addEventListener('change', function () { cambiarSlot(acotarSlot(campo.value, slotMaximo)); });
+    /* Varios meses: como Service Owner, varios cambios seguidos son UNA
+       peticion. Quitarlos todos no deja el periodo vacio: el servidor da el
+       mes en curso y lo confirma. Mismo conjunto = nada que pedir. */
     $('mes').addEventListener('change', function () {
-      if ($('mes').value === filtros.mes) return;
-      filtros.mes = $('mes').value;
+      var nuevos = seleccionados($('mes'));
+      if (nuevos.slice().sort().join('|') === filtros.meses.slice().sort().join('|')) return;
+      filtros.meses = nuevos;
       $('cobertura').hidden = true;
-      cargar();
+      programarCarga();
     });
     $('f-so').addEventListener('change', function () { filtros.so = seleccionados($('f-so')); programarCarga(); });
     $('f-grupo').addEventListener('change', function () { filtros.grupo = seleccionados($('f-grupo')); programarCarga(); });

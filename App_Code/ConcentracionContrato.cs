@@ -27,9 +27,14 @@
 // PERIODO: Slot O Mes, nunca los dos
 //   Slot = la columna Slot de dbo.vw_Tickets, sin cambiar su calculo:
 //     Slot k = hoy-(30k+29) .. hoy-30k (hoy por UTC-6 fijo, como la vista).
+//     ACUMULADO (2026-11-10, como el SLOT del tablero de SLA): elegir el
+//     Slot N trae los Slots 0..N juntos, hoy-(30N+29) .. hoy, un solo rango
+//     sin hueco. ?slot= sigue siendo un numero 0..12.
 //   Mes  = mes calendario por FechaRegistro, de los ultimos 13 (el actual y
 //     los 12 anteriores, el mismo alcance que los Slots 0..12). El mes en
-//     curso llega hasta hoy.
+//     curso llega hasta hoy. VARIOS (2026-11-10): ?mes=aaaa-mm|aaaa-mm...
+//     trae la union de esos meses (no tienen que ser seguidos); las tres
+//     graficas, los totales y la cobertura usan los mismos.
 //   Juntarlos daria la interseccion parcial de dos ventanas distintas; el
 //   usuario elige UNA (modo=slot|mes) y la pestaña dice cual y sus fechas.
 //
@@ -71,7 +76,10 @@ public sealed class ConcentracionFiltros
 {
     public string Modo = ConcentracionContrato.ModoSlot;
     public int Slot;
-    public DateTime Mes;           // primer dia del mes (modo mes)
+    public DateTime Mes;           // primer dia del mes mas reciente elegido (modo mes)
+    // Todos los meses elegidos (modo mes), del mas reciente al mas viejo, sin
+    // repetir. Mes es Meses[0].
+    public readonly List<DateTime> Meses = new List<DateTime>();
     public readonly List<string> ServiceOwners = new List<string>();
     public readonly List<string> Grupos = new List<string>();
 }
@@ -142,6 +150,24 @@ public static class ConcentracionContrato
         return mes;
     }
 
+    /* ?mes=aaaa-mm|aaaa-mm... (varios meses). Cada uno con la regla de
+       LeerMes; vacio = el mes en curso. Sin repetir, del mas reciente al mas
+       viejo. Un mes invalido es un 400 para toda la peticion. */
+    public static List<DateTime> LeerMeses(string valor, DateTime hoy)
+    {
+        var salida = new List<DateTime>();
+        if (valor != null)
+            foreach (var parte in valor.Split('|'))
+            {
+                if (parte.Trim().Length == 0) continue;
+                var m = LeerMes(parte, hoy);
+                if (!salida.Contains(m)) salida.Add(m);
+            }
+        if (salida.Count == 0) salida.Add(LeerMes(null, hoy));
+        salida.Sort((a, b) => b.CompareTo(a));
+        return salida;
+    }
+
     // Lista separada por '|' (los nombres de persona pueden llevar comas).
     public static List<string> LeerLista(string valor)
     {
@@ -179,6 +205,17 @@ public static class ConcentracionContrato
         desde = hasta.AddDays(-(DiasSlot - 1));
     }
 
+    /* Slots 0..N ACUMULADOS (lo que trae elegir el Slot N): del inicio del
+       Slot N al fin del Slot 0 (hoy). Sin hueco ni solape entre Slots, asi
+       que es un solo rango: hoy-(30N+29) .. hoy. */
+    public static void PeriodoAcumulado(int slot, DateTime hoy, out DateTime desde, out DateTime hasta)
+    {
+        DateTime d0;
+        Periodo(0, hoy, out d0, out hasta);
+        DateTime hN;
+        Periodo(slot, hoy, out desde, out hN);
+    }
+
     // Mes calendario; el mes en curso llega hasta hoy.
     public static void PeriodoMes(DateTime mes, DateTime hoy, out DateTime desde, out DateTime hasta)
     {
@@ -205,17 +242,27 @@ public static class ConcentracionContrato
     public static Dictionary<string, object> Cobertura(IList<ConcentracionTicket> periodo,
                                                        DateTime desde, DateTime hasta, DateTime hoy)
     {
+        return Cobertura(periodo, new[] { new KeyValuePair<DateTime, DateTime>(desde, hasta) }, hoy);
+    }
+
+    /* Lo mismo sobre varios rangos (varios meses, no siempre seguidos): los
+       dias esperados son la suma de los de cada rango; solo cuentan los dias
+       con tickets que caen dentro de alguno. hasta mas alto >= hoy = excluye hoy. */
+    public static Dictionary<string, object> Cobertura(IList<ConcentracionTicket> periodo,
+                                                       IList<KeyValuePair<DateTime, DateTime>> rangos, DateTime hoy)
+    {
         var dias = new HashSet<DateTime>();
         DateTime? primero = null, ultimo = null;
         foreach (var t in periodo)
         {
             if (!t.Dia.HasValue) continue;
             var d = t.Dia.Value.Date;
-            if (d < hoy.Date) dias.Add(d);
+            if (d < hoy.Date && rangos.Any(r => d >= r.Key.Date && d <= r.Value.Date)) dias.Add(d);
             if (!primero.HasValue || d < primero.Value) primero = d;
             if (!ultimo.HasValue || d > ultimo.Value) ultimo = d;
         }
-        int esperados = DiasEsperados(desde, hasta, hoy);
+        int esperados = rangos.Sum(r => DiasEsperados(r.Key, r.Value, hoy));
+        var hasta = rangos.Max(r => r.Value);
         return new Dictionary<string, object>
         {
             { "diasConTickets", dias.Count },

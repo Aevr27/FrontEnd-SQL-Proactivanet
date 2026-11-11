@@ -9,8 +9,10 @@
 // lectura, de App_Code/ConcentracionQueries.cs.
 //
 // PETICION
-//   GET concentracion.ashx?modo=slot&slot=N            N 0..12 (sin slot = 0)
-//   GET concentracion.ashx?modo=mes&mes=aaaa-mm        el actual o uno de los 12 anteriores
+//   GET concentracion.ashx?modo=slot&slot=N            N 0..12 (sin slot = 0): los
+//                                                      Slots 0..N juntos (acumulado)
+//   GET concentracion.ashx?modo=mes&mes=aaaa-mm[|aaaa-mm...]  uno o varios del
+//                                                      actual y los 12 anteriores (sin mes = el actual)
 //       [&so=Nombre|Nombre...]     Service Owner; "(Sin Service Owner)" = sin SO
 //       [&grupo=Grupo|Grupo...]    Grupo del ticket
 //   Sin modo = slot. Slot y Mes no se combinan: cada modo ignora el otro
@@ -18,9 +20,10 @@
 //
 // RESPUESTA 200
 //   {
-//     modo, slot, mes, slotMaximo: 12,
+//     modo, slot, mes (el mas reciente elegido), mesesElegidos: ["aaaa-mm", ...],
+//     slotMaximo: 12,
 //     meses: [ { valor: "aaaa-mm", etiqueta: "Noviembre 2026", enCurso } ],
-//     periodo: { desde, hasta, dias },
+//     periodo: { desde, hasta, dias, rangos: [ { desde, hasta } ] },  // dias = los de los rangos
 //     filtros: { serviceOwners: [...], grupos: [...] },   // los aplicados
 //     opciones: { serviceOwners: [ {valor, tickets} ], grupos: [ ... ] },
 //     ticketsPeriodo, ticketsFiltrados,
@@ -41,6 +44,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Web;
 using System.Web.Script.Serialization;
 
@@ -60,7 +64,11 @@ public class Concentracion : IHttpHandler
             var hoy = ConcentracionContrato.HoyMexico(DateTime.UtcNow);
             var f = new ConcentracionFiltros();
             f.Modo = ConcentracionContrato.LeerModo(q["modo"]);
-            if (f.Modo == ConcentracionContrato.ModoMes) f.Mes = ConcentracionContrato.LeerMes(q["mes"], hoy);
+            if (f.Modo == ConcentracionContrato.ModoMes)
+            {
+                f.Meses.AddRange(ConcentracionContrato.LeerMeses(q["mes"], hoy));
+                f.Mes = f.Meses[0];
+            }
             else f.Slot = ConcentracionContrato.LeerSlot(q["slot"]);
             f.ServiceOwners.AddRange(ConcentracionContrato.LeerLista(q["so"]));
             f.Grupos.AddRange(ConcentracionContrato.LeerLista(q["grupo"]));
@@ -100,13 +108,17 @@ public class Concentracion : IHttpHandler
         salida["modo"] = f.Modo;
         salida["slot"] = f.Modo == ConcentracionContrato.ModoSlot ? (object)f.Slot : null;
         salida["mes"] = f.Modo == ConcentracionContrato.ModoMes ? ConcentracionContrato.Mes(f.Mes) : null;
+        salida["mesesElegidos"] = f.Modo == ConcentracionContrato.ModoMes
+            ? (object)ConcentracionQueries.MesesDe(f).ConvertAll(ConcentracionContrato.Mes) : null;
         salida["slotMaximo"] = ConcentracionContrato.SlotMaximo;
         salida["meses"] = meses;
         salida["periodo"] = new Dictionary<string, object>
         {
             { "desde", ConcentracionContrato.Dia(r.Desde) },
             { "hasta", ConcentracionContrato.Dia(r.Hasta) },
-            { "dias", (r.Hasta - r.Desde).Days + 1 },
+            { "dias", r.Rangos.Sum(x => (x.Value - x.Key).Days + 1) },
+            { "rangos", r.Rangos.ConvertAll(x => new Dictionary<string, object>
+                { { "desde", ConcentracionContrato.Dia(x.Key) }, { "hasta", ConcentracionContrato.Dia(x.Value) } }) },
         };
         salida["filtros"] = new Dictionary<string, object>
         {
@@ -125,8 +137,9 @@ public class Concentracion : IHttpHandler
         salida["errores"] = new Dictionary<string, object>();
         salida["avisos"] = r.Avisos;
         /* Sello del ETL (dbo.EtlLog), como SLA, QA y QARE, en la hora local del
-           SQL Server (YaLocal). El periodo son las fechas de negocio del Slot o
-           del mes. */
+           SQL Server (YaLocal). El periodo son las fechas de negocio de los Slots
+           o de los meses: del dia mas viejo al mas reciente (con meses no
+           seguidos, los de en medio no cuentan: ver periodo.rangos). */
         salida["dataInfo"] = DashboardDataInfo.Periodo(
             "Vista general de servicios",
             DashboardDataInfo.LeerUltimoEtlTickets(),

@@ -120,6 +120,24 @@ public static class ConcentracionContratoSmoke
             ConcentracionContrato.DiasEsperados(new DateTime(2026, 11, 1), hoy, hoy) + "|" +
             ConcentracionContrato.DiasEsperados(new DateTime(2026, 2, 1), new DateTime(2026, 2, 28), hoy));
 
+        // Varios meses y Slot acumulado (2026-11-10).
+        Chk("meses: lista por '|', sin repetidos, del mas reciente; vacio = el actual; uno malo = 400", "2026-11,2026-09,2025-11|2026-11|400",
+            string.Join(",", ConcentracionContrato.LeerMeses("2026-09|2025-11| 2026-11 |2026-09", hoy).ConvertAll(ConcentracionContrato.Mes).ToArray()) + "|" +
+            string.Join(",", ConcentracionContrato.LeerMeses(" | ", hoy).ConvertAll(ConcentracionContrato.Mes).ToArray()) + "|" +
+            Falla(() => ConcentracionContrato.LeerMeses("2026-09|2026-12", hoy)));
+        var acumPuro = new List<string>();
+        for (int k = 0; k <= 3; k++) { DateTime d, h; ConcentracionContrato.PeriodoAcumulado(k, hoy, out d, out h); acumPuro.Add(Dia(d) + ".." + Dia(h)); }
+        Chk("Slot acumulado N: del inicio del Slot N (A3) a hoy", "2026-10-11..2026-11-09|2026-09-11..2026-11-09|2026-08-12..2026-11-09|2026-07-13..2026-11-09",
+            string.Join("|", acumPuro.ToArray()));
+        var rangosCob = new List<KeyValuePair<DateTime, DateTime>> {
+            new KeyValuePair<DateTime, DateTime>(new DateTime(2026, 11, 1), hoy), new KeyValuePair<DateTime, DateTime>(new DateTime(2026, 9, 1), new DateTime(2026, 9, 30)) };
+        var tkCob = new List<ConcentracionTicket> {
+            new ConcentracionTicket { Codigo = "a", Dia = new DateTime(2026, 11, 2) }, new ConcentracionTicket { Codigo = "b", Dia = new DateTime(2026, 9, 5) },
+            new ConcentracionTicket { Codigo = "c", Dia = new DateTime(2026, 10, 5) }, new ConcentracionTicket { Codigo = "d", Dia = hoy } };
+        var cobVarios = ConcentracionContrato.Cobertura(tkCob, rangosCob, hoy);
+        Chk("cobertura de varios rangos: esperados = suma (8 + 30), solo dias dentro de alguno, sin hoy", "2|38|False|True",
+            cobVarios["diasConTickets"] + "|" + cobVarios["diasEsperados"] + "|" + cobVarios["completa"] + "|" + cobVarios["excluyeHoy"]);
+
         // La cuenta.
         var tk = new List<ConcentracionTicket> {
             T("1", "PU", "/A/x", "G1", "Ana"), T("2", "PU", "/A/x", "G1", "Ana"), T("3", "EQC", "/B/y", "G2", null),
@@ -205,7 +223,12 @@ INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, 
  (N'T11', N'WMS', N'S-Logistica', N'/S-Logistica/FENIX WMS - RECIBO PROVEEDORES/CITA NO REPLICA', N'Soporte Fenix_WMS', 0),
  (N'T12', N'SAP', N'SAP', N'/SAP/Alta', N'Soporte AMS Inetum', 0),
  (N'U01', N'EQC', N'S-Equipo de Computo', N'/S-Equipo de Computo/Otro', N'Soporte Campo', 1),
- (N'U02', N'SAP', N'SAP', N'/SAP/Alta', N'Soporte AMS Inetum', 1);
+ (N'U02', N'SAP', N'SAP', N'/SAP/Alta', N'Soporte AMS Inetum', 1),
+ -- Slots 2 y 3 (2026-11-10, Slot acumulado): 3 + 1.
+ (N'V01', N'PU',  N'S-Punto de Venta', N'/S-Punto de Venta/Caja/Falla', N'Service Desk', 2),
+ (N'V02', N'PU',  N'S-Punto de Venta', N'/S-Punto de Venta/Caja/Falla', N'Service Desk', 2),
+ (N'V03', N'WMS', N'S-FENIX WMS', N'/S-FENIX WMS/Recibo/Cita', N'Soporte Fenix_WMS', 2),
+ (N'W01', N'SAP', N'SAP', N'/SAP/Alta', N'Soporte AMS Inetum', 3);
 GO
 -- Fechas coherentes con el Slot (hoy de Mexico, como la vista): el i-esimo
 -- ticket de cada Slot cae i dias antes del fin del Slot. C1Raiz = 1er nivel.
@@ -386,7 +409,81 @@ GO";
         d = Pedir("modo=mes&mes=" + mesViejo, out estado);
         Chk("mes sin tickets: 200 y vacio", "200|[]|[]|[]|0/0", estado + "|" + Totales(d));
         d = Pedir("modo=slot&slot=1&mes=" + mesActual, out estado);
-        Chk("slot 1 con mes en la URL: manda el slot", "slot|1|null|2", d["modo"] + "|" + d["slot"] + "|" + (d["mes"] ?? "null") + "|" + d["ticketsPeriodo"]);
+        Chk("slot 1 con mes en la URL: manda el slot (Slots 0 y 1: 12 + 2)", "slot|1|null|14", d["modo"] + "|" + d["slot"] + "|" + (d["mes"] ?? "null") + "|" + d["ticketsPeriodo"]);
+
+        // --- Slot ACUMULADO (2026-11-10): Slot N = Slots 0..N, cada frontera.
+        var acum = new List<string>();
+        for (int n = 0; n <= 4; n++)
+        {
+            d = Pedir("slot=" + n, out estado);
+            DateTime ad, ah;
+            ConcentracionContrato.PeriodoAcumulado(n, hoy, out ad, out ah);
+            int directoN = Escalar(cadena, "SELECT COUNT(*) FROM dbo.vw_ServicioTickets WHERE Slot BETWEEN 0 AND " + n);
+            var pn = (Dictionary<string, object>)d["periodo"];
+            var di = (Dictionary<string, object>)d["dataInfo"];
+            acum.Add(n + ":" + d["ticketsPeriodo"] + "=" + directoN + "|" + (pn["desde"] + ".." + pn["hasta"] == Dia(ad) + ".." + Dia(ah)) +
+                     "|" + (di["periodoInicio"] + ".." + di["periodoFin"] == Dia(ad) + ".." + Dia(ah)) + "|" + pn["dias"] + "|" + Totales(d));
+        }
+        Chk("P1 Slot N = Slots 0..N (12, 14, 17, 18, 18); periodo y dataInfo = hoy-(30N+29)..hoy; las tres graficas y los totales con el mismo",
+            "0:12=12|True|True|30|12|11|11|12/12;1:14=14|True|True|60|14|13|13|14/14;2:17=17|True|True|90|17|16|16|17/17;" +
+            "3:18=18|True|True|120|18|17|17|18/18;4:18=18|True|True|150|18|17|17|18/18", string.Join(";", acum.ToArray()));
+        d = Pedir("slot=2&so=" + HttpUtility.UrlEncode(ConcentracionContrato.SinServiceOwner), out estado);
+        Chk("P2 Slot 2 con filtro Sin SO: 6 del Slot 0 + U02 + V03 (V01/V02 son de Beto por su C1); las tres graficas sobre los Slots 0..2", "8|7|8|8/17", Totales(d));
+        d = Pedir("slot=12", out estado);
+        DateTime d12, h12;
+        ConcentracionContrato.PeriodoAcumulado(12, hoy, out d12, out h12);
+        Chk("P3 Slot 12 (el maximo): Slots 0..12, 390 dias", "200|18|390|" + Dia(d12) + ".." + Dia(h12),
+            estado + "|" + d["ticketsPeriodo"] + "|" + ((Dictionary<string, object>)d["periodo"])["dias"] + "|" +
+            ((Dictionary<string, object>)d["periodo"])["desde"] + ".." + ((Dictionary<string, object>)d["periodo"])["hasta"]);
+
+        // --- VARIOS meses (2026-11-10): la union, aunque no sean seguidos.
+        var m0 = new DateTime(hoy.Year, hoy.Month, 1);
+        Func<DateTime, int> enMes = m => Escalar(cadena, "SELECT COUNT(*) FROM dbo.vw_ServicioTickets WHERE FechaRegistro >= '" + Dia(m) +
+            "' AND FechaRegistro < '" + Dia(m.AddMonths(1) > hoy.AddDays(1) ? hoy.AddDays(1) : m.AddMonths(1)) + "'");
+        string sm0 = ConcentracionContrato.Mes(m0), sm1 = ConcentracionContrato.Mes(m0.AddMonths(-1)),
+               sm2 = ConcentracionContrato.Mes(m0.AddMonths(-2)), sm3 = ConcentracionContrato.Mes(m0.AddMonths(-3));
+        int c0 = enMes(m0), c1 = enMes(m0.AddMonths(-1)), c2 = enMes(m0.AddMonths(-2)), c3 = enMes(m0.AddMonths(-3));
+        Func<Dictionary<string, object>, string> mesesDe = x =>
+            string.Join(",", ((object[])x["mesesElegidos"]).Select(v => (string)v).ToArray()) + "|" + x["ticketsPeriodo"] + "|" +
+            ((object[])((Dictionary<string, object>)x["periodo"])["rangos"]).Length + "|" + Totales(x).Split('|')[3];
+        var pasos = new List<string>();
+        d = Pedir("modo=mes&mes=" + sm0, out estado); pasos.Add(mesesDe(d));                              // uno
+        d = Pedir("modo=mes&mes=" + sm0 + "|" + sm2, out estado); pasos.Add(mesesDe(d));                  // agregar uno no seguido
+        d = Pedir("modo=mes&mes=" + sm0 + "|" + sm2 + "|" + sm1, out estado); pasos.Add(mesesDe(d));      // agregar el de en medio
+        d = Pedir("modo=mes&mes=" + sm2 + "|" + sm1, out estado); pasos.Add(mesesDe(d));                  // quitar el en curso
+        d = Pedir("modo=mes&mes=" + sm1, out estado); pasos.Add(mesesDe(d));                              // quitar otro
+        Chk("P4 meses: uno, agregar, agregar, quitar, quitar = la suma de los conteos directos de cada mes (rangos, totales)",
+            sm0 + "|" + c0 + "|1|" + c0 + "/" + c0 + ";" +
+            sm0 + "," + sm2 + "|" + (c0 + c2) + "|2|" + (c0 + c2) + "/" + (c0 + c2) + ";" +
+            sm0 + "," + sm1 + "," + sm2 + "|" + (c0 + c1 + c2) + "|3|" + (c0 + c1 + c2) + "/" + (c0 + c1 + c2) + ";" +
+            sm1 + "," + sm2 + "|" + (c1 + c2) + "|2|" + (c1 + c2) + "/" + (c1 + c2) + ";" +
+            sm1 + "|" + c1 + "|1|" + c1 + "/" + c1, string.Join(";", pasos.ToArray()));
+        Chk("P5 los meses del fixture no estan vacios (la prueba distingue)", true, c0 > 0 && c1 + c2 + c3 > 0);
+        d = Pedir("modo=mes&mes=" + sm2 + "|" + sm0 + "|" + sm2 + "|", out estado);
+        var pm = (Dictionary<string, object>)d["periodo"];
+        DateTime x0d, x0h, x2d, x2h;
+        ConcentracionContrato.PeriodoMes(m0, hoy, out x0d, out x0h);
+        ConcentracionContrato.PeriodoMes(m0.AddMonths(-2), hoy, out x2d, out x2h);
+        var rg = ((object[])pm["rangos"]).Select(o => (Dictionary<string, object>)o).Select(o => o["desde"] + ".." + o["hasta"]).ToArray();
+        var cobM = (Dictionary<string, object>)d["cobertura"];
+        Chk("P6 orden y repetidos no importan; mes = el mas reciente; rangos por mes (sin el de en medio); dias y cobertura = suma de los meses",
+            sm0 + "|" + sm0 + "," + sm2 + "|" + Dia(x0d) + ".." + Dia(x0h) + "," + Dia(x2d) + ".." + Dia(x2h) + "|" +
+            ((x0h - x0d).Days + 1 + (x2h - x2d).Days + 1) + "|" +
+            (ConcentracionContrato.DiasEsperados(x0d, x0h, hoy) + ConcentracionContrato.DiasEsperados(x2d, x2h, hoy)) + "|" +
+            Dia(x2d) + ".." + Dia(x0h),
+            d["mes"] + "|" + string.Join(",", ((object[])d["mesesElegidos"]).Select(v => (string)v).ToArray()) + "|" + string.Join(",", rg) + "|" +
+            pm["dias"] + "|" + cobM["diasEsperados"] + "|" + pm["desde"] + ".." + pm["hasta"]);
+        d = Pedir("modo=mes&mes=" + sm0 + "|" + sm2 + "&so=" + HttpUtility.UrlEncode(ConcentracionContrato.SinServiceOwner), out estado);
+        var t3 = Totales(d).Split('|');
+        Chk("P7 varios meses con filtro: pareto, categorias, grupos y filtrados salen del mismo conjunto",
+            true, int.Parse(t3[3].Split('/')[1]) == c0 + c2 && int.Parse(t3[3].Split('/')[0]) <= c0 + c2);
+        Chk("P8 un mes invalido en la lista = 400 para toda la peticion; vacio = el actual", "400|200|" + sm0,
+            Estado("modo=mes&mes=" + sm0 + "|2001-01") + "|" + Estado("modo=mes&mes=|") + "|" + Pedir("modo=mes&mes=|", out estado)["mes"]);
+        d = Pedir("modo=slot&slot=2&mes=" + sm0 + "|" + sm2, out estado);
+        Chk("P9 de Mes a Slot: la lista de meses se ignora (Slots 0..2), sin mesesElegidos", "slot|2|17|null|null",
+            d["modo"] + "|" + d["slot"] + "|" + d["ticketsPeriodo"] + "|" + (d["mes"] ?? "null") + "|" + (d["mesesElegidos"] ?? "null"));
+        d = Pedir("modo=mes&mes=" + sm0 + "|" + sm2 + "&slot=3", out estado);
+        Chk("P10 de Slot a Mes: el slot se ignora", "mes|null|" + (c0 + c2), d["modo"] + "|" + (d["slot"] ?? "null") + "|" + d["ticketsPeriodo"]);
 
         // --- Parametros invalidos.
         Chk("400: slot 13, mes fuera de rango, modo raro", "400|400|400",
@@ -395,10 +492,10 @@ GO";
         // --- Cache: un ticket nuevo no se ve hasta limpiarla.
         Lotes(cadena, "INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, Categoria, Grupo, Slot) VALUES (N'U03', N'SAP', N'SAP', N'/SAP/Alta', N'G', 1);");
         d = Pedir("slot=1", out estado);
-        Chk("cache: mismo periodo, mismo dato (5 min)", "2", d["ticketsPeriodo"]);
+        Chk("cache: mismo periodo, mismo dato (5 min)", "14", d["ticketsPeriodo"]);
         ConcentracionQueries.LimpiarCache();
         d = Pedir("slot=1", out estado);
-        Chk("cache limpia: dato nuevo", "3", d["ticketsPeriodo"]);
+        Chk("cache limpia: dato nuevo", "15", d["ticketsPeriodo"]);
 
         // --- Sin catalogo de dueños: aviso, sin filtro SO; filtrar por SO = 500.
         Lotes(cadena, "EXEC sp_rename 'dbo.CatCategoriaDueno', 'CatCategoriaDueno_x';");

@@ -33,6 +33,11 @@
 //      C14 leyenda: una sola, dentro de la tarjeta del Pareto y justo debajo
 //          de su lienzo, con sus cuatro rotulos y colores; con la tarjeta a
 //          320 px envuelve sin salirse; ya no hay parrafo de poblacion.
+//      C15 varios meses (2026-11-10): selector multiple; agregar dos
+//          seguidos = UNA peticion mes=A|B|C; quitar; quitar todos = el
+//          servidor da el actual; el mismo conjunto no vuelve a pedir.
+//      C16 Slot acumulado: Slots 0-1, 0-2, 0-3 con sus fechas; de Mes a
+//          Slot y vuelta conserva cada uno lo suyo.
 //   D  dashboard.html#concentracion (MOCK_DATA para SLA)
 //      D1  la entrada de grupo "Servicios" y su boton "Vista general de
 //          servicios" quedan marcados (selector visible); la pestaña se monta y pide concentracion.ashx sin pasar por Analisis.
@@ -63,7 +68,11 @@ function respondeConc(u, v) {
   var q = new URL(u, location.href).searchParams;
   var modo = q.get('modo') === 'mes' ? 'mes' : 'slot';
   var s = Number(q.get('slot') || 0);
-  var mes = q.get('mes') || '2026-11';
+  // Varios meses por "|" (2026-11-10); sin mes = el actual. Del mas reciente.
+  var mesesQ = (q.get('mes') || '').split('|').filter(Boolean);
+  if (!mesesQ.length) mesesQ = ['2026-11'];
+  mesesQ = mesesQ.filter(function (x, i) { return mesesQ.indexOf(x) === i; }).sort().reverse();
+  var mes = mesesQ[0];
   var so = (q.get('so') || '').split('|').filter(Boolean);
   var grupo = (q.get('grupo') || '').split('|').filter(Boolean);
   function filas(etq, nombres, cantidades) {
@@ -74,8 +83,7 @@ function respondeConc(u, v) {
                 Porcentaje: Math.round(10000 * c / total) / 100,
                 PorcentajeAcumulado: i === cantidades.length - 1 ? 100 : Math.round(10000 * acum / total) / 100 };
       f[etq] = nombres(i);
-      if (etq === 'Servicio') f.NombreServicio = 'Servicio ' + (i + 1) + ' ' + modo + (modo === 'mes' ? ' ' + mes : ' ' + s);
-      return f;
+      if (etq === 'Servicio') f.NombreServicio = 'Servicio ' + (i + 1) + ' ' + modo + (modo === 'mes' ? ' ' + mesesQ.join('+') : ' ' + s);      return f;
     });
   }
   var meses = [];
@@ -83,12 +91,17 @@ function respondeConc(u, v) {
     var d = new Date(Date.UTC(2026, 10 - m, 1)), val = d.toISOString().slice(0, 7);
     meses.push({ valor: val, etiqueta: 'Mes ' + val, enCurso: m === 0 });
   }
-  var desde, hasta;
-  if (modo === 'mes') { desde = mes + '-01'; hasta = mes === '2026-11' ? '2026-11-09' : mes + '-28'; }
-  else {
-    var h = new Date(Date.UTC(2026, 10, 9) - s * 30 * 864e5);
-    hasta = h.toISOString().slice(0, 10); desde = new Date(h.getTime() - 29 * 864e5).toISOString().slice(0, 10);
+  var desde, hasta, rangos;
+  if (modo === 'mes') {
+    rangos = mesesQ.map(function (m) { return { desde: m + '-01', hasta: m === '2026-11' ? '2026-11-09' : m + '-28' }; });
+    desde = rangos[rangos.length - 1].desde; hasta = rangos[0].hasta;
+  } else {
+    // Slot acumulado: del inicio del Slot N al fin del Slot 0 (2026-11-09).
+    var h = new Date(Date.UTC(2026, 10, 9));
+    hasta = h.toISOString().slice(0, 10); desde = new Date(h.getTime() - (30 * s + 29) * 864e5).toISOString().slice(0, 10);
+    rangos = [{ desde: desde, hasta: hasta }];
   }
+  var dias = rangos.reduce(function (a, r) { return a + Math.round((Date.parse(r.hasta) - Date.parse(r.desde)) / 864e5) + 1; }, 0);
   var filtrando = so.length || grupo.length;
   var nadie = so.indexOf('Nadie') >= 0;
   var vacio = window.__vacio || nadie;
@@ -102,7 +115,8 @@ function respondeConc(u, v) {
   var periodo = window.__vacio ? 0 : 500;
   return {
     modo: modo, slot: modo === 'slot' ? s : null, mes: modo === 'mes' ? mes : null, slotMaximo: 12, meses: meses,
-    periodo: { desde: desde, hasta: hasta, dias: 30 },
+    mesesElegidos: modo === 'mes' ? mesesQ : null,
+    periodo: { desde: desde, hasta: hasta, dias: dias, rangos: rangos },
     filtros: { serviceOwners: so, grupos: grupo },
     opciones: { serviceOwners: opSo, grupos: opGr },
     ticketsPeriodo: periodo, ticketsFiltrados: vacio ? 0 : (filtrando ? 30 : periodo),
@@ -284,7 +298,41 @@ var sondaC = conComun(
   'window.__cobertura = null; await M().recargar(); var nula = $c("cobertura").hidden; window.__cobertura = undefined;\n' +
   'apunta("C13", [completa, parcial, nula]);\n' +
   // C14 leyenda
-  'apunta("C14", await leyendaPareto());\n');
+  'apunta("C14", await leyendaPareto());\n' +
+  // C15 varios meses (2026-11-10): uno, agregar dos seguidos = UNA peticion,
+  // quitar uno, quitar todos (el servidor da el actual).
+  '$c("btn-limpiar").click(); await hasta(function () { var u = ultimaConc(); return !u.so && !u.grupo && !msg("pareto"); });\n' +
+  'elegir("mes", ["2026-11"]); await hasta(function () { return ultimaConc().mes === "2026-11" && !msg("pareto"); }); await espera(150);\n' +
+  'var uno = [$c("mes").multiple, marcados("mes"), $c("activos").textContent.split(" · ").slice(0, 2).join(" · ")];\n' +
+  'var n15 = pedidasConc().length;\n' +
+  'elegir("mes", ["2026-11", "2026-09"]); elegir("mes", ["2026-11", "2026-09", "2026-07"]);\n' +
+  'await hasta(function () { return pedidasConc().length > n15 && !msg("pareto") && /Meses/.test($c("activos").textContent); }); await espera(200);\n' +
+  'var agregar = [pedidasConc().length - n15, ultimaConc(), marcados("mes"), $c("activos").textContent.split(" · ").slice(0, 2).join(" · "),\n' +
+  '  graf("pareto").options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }]), M().filtros().meses];\n' +
+  'elegir("mes", ["2026-11", "2026-07"]); await hasta(function () { return ultimaConc().mes === "2026-11|2026-07" && !msg("pareto"); }); await espera(150);\n' +
+  'var quitar = [ultimaConc().mes, marcados("mes"), $c("activos").textContent.split(" · ").slice(0, 2).join(" · ")];\n' +
+  'var n15b = pedidasConc().length;\n' +
+  'elegir("mes", []); await hasta(function () { return pedidasConc().length > n15b && !msg("pareto"); }); await espera(150);\n' +
+  'var vacio = [ultimaConc(), marcados("mes"), /^Periodo: Mes Mes 2026-11 \\(en curso, hasta hoy\\)/.test($c("activos").textContent)];\n' +
+  'var n15c = pedidasConc().length; elegir("mes", ["2026-11"]); await espera(500);\n' +
+  'apunta("C15", [uno, agregar, quitar, vacio, pedidasConc().length - n15c]);\n' +
+  // C16 Slot acumulado y cambio de modo: de Mes (varios) a Slot y vuelta.
+  'elegir("mes", ["2026-10", "2026-08"]); await hasta(function () { return ultimaConc().mes === "2026-10|2026-08" && !msg("pareto"); });\n' +
+  'var n16 = pedidasConc().length;\n' +
+  'document.querySelector("#conc-filtros [data-modo=slot]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "slot" && !msg("pareto"); }); await espera(100);\n' +
+  'var aSlot = [pedidasConc().slice(n16), $c("campo-mes").hidden, $c("campo-slot").hidden];\n' +
+  'var acum = [];\n' +
+  'for (var k = 1; k <= 3; k++) { var nk = pedidasConc().length; $c("slot-mas").click();\n' +
+  '  await hasta(function () { return ultimaConc().slot === String(k) && !msg("pareto") && new RegExp("Slots 0-" + k + " ").test($c("activos").textContent); }); await espera(80);\n' +
+  '  acum.push([pedidasConc().length - nk, $c("activos").textContent.split(" · ").slice(0, 2).join(" · ")]); }\n' +
+  'var nv = pedidasConc().length;\n' +
+  'document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(100);\n' +
+  'var aMes = [pedidasConc().slice(nv), marcados("mes")];\n' +
+  'document.querySelector("#conc-filtros [data-modo=slot]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "slot" && !msg("pareto"); }); await espera(100);\n' +
+  'apunta("C16", [aSlot, acum, aMes, ultimaConc(), $c("slot-n").value]);\n');
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
@@ -354,6 +402,18 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
        [{ modo: 'mes', mes: '2026-08', so: 'Beto', grupo: 'Grupo 5|Grupo 7' }], true, true, true, ['Beto'], ['Grupo 5', 'Grupo 7']], o.C11);
     Check('C12 falla la peticion: banda y las tres en error',
       [false, 'caido', ['Error al cargar datos.', 'Error al cargar datos.', 'Error al cargar datos.']], o.C12);
+    Check('C15 varios meses: selector multiple; agregar dos seguidos = UNA peticion mes=2026-11|2026-09|2026-07 con las tres graficas y el texto de esos meses; quitar uno; quitarlos todos = el servidor da el actual y lo marca; el mismo conjunto no repide',
+      [[true, ['2026-11'], 'Periodo: Mes Mes 2026-11 (en curso, hasta hoy) · del 01/11/2026 al 09/11/2026'],
+       [1, { modo: 'mes', mes: '2026-11|2026-09|2026-07' }, ['2026-11', '2026-09', '2026-07'],
+        'Periodo: Meses Mes 2026-11 (en curso, hasta hoy), Mes 2026-09, Mes 2026-07 · 65 días',
+        'Servicio 1 mes 2026-11+2026-09+2026-07', ['2026-11', '2026-09', '2026-07']],
+       ['2026-11|2026-07', ['2026-11', '2026-07'], 'Periodo: Meses Mes 2026-11 (en curso, hasta hoy), Mes 2026-07 · 37 días'],
+       [{ modo: 'mes' }, ['2026-11'], true], 0], o.C15);
+    Check('C16 de Mes (varios) a Slot: pide slot=0 sin mes; Slot acumulado 1..3 = una peticion cada uno, "Slots 0-N" del inicio del Slot N a ayer de la vista; volver a Mes conserva los meses; volver a Slot conserva el 3',
+      [[[{ modo: 'slot', slot: '0' }], true, false],
+       [[1, 'Periodo: Slots 0-1 · del 11/09/2026 al 09/11/2026'], [1, 'Periodo: Slots 0-2 · del 12/08/2026 al 09/11/2026'],
+        [1, 'Periodo: Slots 0-3 · del 13/07/2026 al 09/11/2026']],
+       [[{ modo: 'mes', mes: '2026-10|2026-08' }], ['2026-10', '2026-08']], { modo: 'slot', slot: '3' }, '3'], o.C16);
     Check('C13 cobertura: completa sin aviso; parcial con el hecho; sin medir sin aviso',
       [true, [false, 'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.'], true], o.C13);
   });

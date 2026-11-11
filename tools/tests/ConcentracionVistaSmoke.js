@@ -162,5 +162,33 @@ Check('A2 mes en curso con filtros',
     filtros: { serviceOwners: ['Ana'], grupos: ['G1', 'G2', 'G3', 'G4'] }, meses: [{ valor: '2026-11', etiqueta: 'Noviembre 2026', enCurso: true }] }));
 Check('A3 sin respuesta, nada', '', D.textoActivos(null));
 
+// ---- M: varios meses y Slot acumulado (2026-11-10)
+Check('M1 varios meses viajan juntos por "|"; meses manda sobre mes; sin ninguno, el servidor da el actual',
+  ['modo=mes&mes=' + encodeURIComponent('2026-11|2026-09'), 'modo=mes&mes=2026-10', 'modo=mes', ['2026-11', '2026-09'], ['2026-10'], []],
+  [D.consulta({ modo: 'mes', meses: ['2026-11', '2026-09'], mes: '2026-01', so: [], grupo: [] }),
+   D.consulta({ modo: 'mes', meses: [], mes: '2026-10', so: [], grupo: [] }),
+   D.consulta({ modo: 'mes', meses: [], so: [], grupo: [] }),
+   D.mesesDe({ meses: ['2026-11', '2026-09'] }), D.mesesDe({ mes: '2026-10' }), D.mesesDe({})]);
+Check('M2 en modo Slot no viajan los meses', 'modo=slot&slot=3', D.consulta({ modo: 'slot', slot: 3, meses: ['2026-11', '2026-09'], so: [], grupo: [] }));
+var mesesOfrecidos = [{ valor: '2026-11', etiqueta: 'Noviembre 2026', enCurso: true }, { valor: '2026-10', etiqueta: 'Octubre 2026', enCurso: false },
+                      { valor: '2026-09', etiqueta: 'Septiembre 2026', enCurso: false }];
+Check('M3 varios meses no seguidos: los nombra y da los dias que cuentan (no "del ... al ...")',
+  'Periodo: Meses Noviembre 2026 (en curso, hasta hoy), Septiembre 2026 · 39 días · Service Owner: todos · Grupo: todos · 4,000 tickets en el periodo',
+  D.textoActivos({ modo: 'mes', mes: '2026-11', mesesElegidos: ['2026-11', '2026-09'], meses: mesesOfrecidos,
+    periodo: { desde: '2026-09-01', hasta: '2026-11-09', dias: 39, rangos: [{ desde: '2026-11-01', hasta: '2026-11-09' }, { desde: '2026-09-01', hasta: '2026-09-30' }] },
+    ticketsPeriodo: 4000, ticketsFiltrados: 4000, filtros: { serviceOwners: [], grupos: [] } }));
+Check('M4 un mes en mesesElegidos: igual que antes ("Mes ..." con sus fechas)',
+  'Periodo: Mes Octubre 2026 · del 01/10/2026 al 31/10/2026 · Service Owner: todos · Grupo: todos · 10 tickets en el periodo',
+  D.textoActivos({ modo: 'mes', mes: '2026-10', mesesElegidos: ['2026-10'], meses: mesesOfrecidos,
+    periodo: { desde: '2026-10-01', hasta: '2026-10-31', dias: 31, rangos: [{ desde: '2026-10-01', hasta: '2026-10-31' }] },
+    ticketsPeriodo: 10, ticketsFiltrados: 10, filtros: { serviceOwners: [], grupos: [] } }));
+Check('M5 Slot acumulado: 0 = "Slot 0"; N = "Slots 0-N" con el rango completo',
+  ['Periodo: Slot 0 · del 11/10/2026 al 09/11/2026', 'Periodo: Slots 0-1 · del 11/09/2026 al 09/11/2026', 'Periodo: Slots 0-12 · del 16/10/2025 al 09/11/2026'],
+  [0, 1, 12].map(function (n, i) {
+    var desde = ['2026-10-11', '2026-09-11', '2025-10-16'][i];
+    return D.textoActivos({ modo: 'slot', slot: n, periodo: { desde: desde, hasta: '2026-11-09', rangos: [{ desde: desde, hasta: '2026-11-09' }] },
+      ticketsPeriodo: 1, ticketsFiltrados: 1, filtros: { serviceOwners: [], grupos: [] } }).split(' · ').slice(0, 2).join(' · ');
+  }));
+
 console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
 process.exit(fallos ? 1 : 0);

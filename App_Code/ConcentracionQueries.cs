@@ -1,6 +1,6 @@
 // Lectura de la pestaña "Vista general de servicios".
 //
-// Solo acceso a datos: trae las filas de ticket del periodo (Slot o Mes) de
+// Solo acceso a datos: trae las filas de ticket del periodo (Slots 0..N o uno o varios meses) de
 // dbo.vw_ServicioTickets, les pone su Service Owner con
 // DirectorioOrganizacional y deja la cuenta a ConcentracionContrato. Nada de
 // presentacion ni de HTTP: eso es de concentracion/concentracion.js y
@@ -31,6 +31,7 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.SqlClient;
 using System.Globalization;
+using System.Linq;
 using System.Web;
 using System.Web.Caching;
 
@@ -38,8 +39,11 @@ public sealed class ConcentracionResultado
 {
     public ConcentracionFiltros Filtros;
     public DateTime Hoy;
-    public DateTime Desde;
-    public DateTime Hasta;
+    public DateTime Desde;             // el dia mas viejo del periodo
+    public DateTime Hasta;             // el mas reciente
+    // Los rangos que forman el periodo: uno con Slot (acumulado) o con un mes;
+    // uno por mes elegido, del mas reciente al mas viejo, con varios meses.
+    public readonly List<KeyValuePair<DateTime, DateTime>> Rangos = new List<KeyValuePair<DateTime, DateTime>>();
     public int TicketsPeriodo;
     public int TicketsFiltrados;
     public List<Dictionary<string, object>> Pareto;
@@ -59,8 +63,9 @@ public static class ConcentracionQueries
     private const string PrefijoCache = "conc:";
 
     /* Los tickets del periodo. Un renglon por ticket (vw_ServicioTickets ya
-       es asi). Slot: la columna Slot de la vista, sin recalcularla. Mes:
-       FechaRegistro en [desde, hasta + 1 dia). C1 y C1C2 son las llaves de
+       es asi). Slot N: la columna Slot de la vista, sin recalcularla, de 0 a
+       N (acumulado, 2026-11-10). Mes: FechaRegistro en [desde, hasta + 1 dia)
+       de cada mes elegido (OR de rangos, varios meses 2026-11-10). C1 y C1C2 son las llaves de
        DirectorioOrganizacional (las mismas que usa Experiencia). */
     private const string SqlBase = @"
 SELECT v.CodigoTicket,
@@ -74,8 +79,21 @@ SELECT v.CodigoTicket,
 FROM dbo.vw_ServicioTickets AS v
 LEFT JOIN dbo.CatServicioCorreo AS s ON s.Servicio = v.Servicio
 WHERE ";
-    private const string SqlSlot = "v.Slot = @Slot;";
-    private const string SqlMes = "v.FechaRegistro >= @Desde AND v.FechaRegistro < @HastaExcl;";
+    private const string SqlSlot = "v.Slot >= 0 AND v.Slot <= @Slot;";
+    // Un rango por mes: (v.FechaRegistro >= @Desde0 AND v.FechaRegistro < @HastaExcl0) OR ...
+    private static string SqlMeses(int n)
+    {
+        var partes = new List<string>();
+        for (int i = 0; i < n; i++)
+            partes.Add("(v.FechaRegistro >= @Desde" + i + " AND v.FechaRegistro < @HastaExcl" + i + ")");
+        return "(" + string.Join(" OR ", partes) + ");";
+    }
+
+    // Los meses del filtro (Meses; si viene vacio, Mes: quien solo fijo Mes).
+    public static List<DateTime> MesesDe(ConcentracionFiltros f)
+    {
+        return f.Meses.Count > 0 ? new List<DateTime>(f.Meses) : new List<DateTime> { f.Mes };
+    }
 
     public static ConcentracionResultado Consultar(ConcentracionFiltros f)
     {
@@ -90,9 +108,22 @@ WHERE ";
         r.Filtros = f;
         r.Hoy = hoy.Date;
         if (f.Modo == ConcentracionContrato.ModoMes)
-            ConcentracionContrato.PeriodoMes(f.Mes, hoy, out r.Desde, out r.Hasta);
+        {
+            foreach (var m in MesesDe(f))
+            {
+                DateTime d, h;
+                ConcentracionContrato.PeriodoMes(m, hoy, out d, out h);
+                r.Rangos.Add(new KeyValuePair<DateTime, DateTime>(d, h));
+            }
+        }
         else
-            ConcentracionContrato.Periodo(f.Slot, hoy, out r.Desde, out r.Hasta);
+        {
+            DateTime d, h;
+            ConcentracionContrato.PeriodoAcumulado(f.Slot, hoy, out d, out h);
+            r.Rangos.Add(new KeyValuePair<DateTime, DateTime>(d, h));
+        }
+        r.Desde = r.Rangos.Min(x => x.Key);
+        r.Hasta = r.Rangos.Max(x => x.Value);
 
         // Filas del periodo (si falla, falla todo: no hay grafica sin ellas).
         var periodo = LeerPeriodo(cadena, f, r);
@@ -130,7 +161,7 @@ WHERE ";
         }
 
         r.TicketsPeriodo = tickets.Count;
-        r.Cobertura = ConcentracionContrato.Cobertura(tickets, r.Desde, r.Hasta, r.Hoy);
+        r.Cobertura = ConcentracionContrato.Cobertura(tickets, r.Rangos, r.Hoy);
         r.OpcionesServiceOwner = dir == null ? new List<Dictionary<string, object>>()
             : ConcentracionContrato.Opciones(tickets.ConvertAll(t => t.ServiceOwner ?? ConcentracionContrato.SinServiceOwner), f.ServiceOwners);
         r.OpcionesGrupo = ConcentracionContrato.Opciones(tickets.ConvertAll(t => t.Grupo), f.Grupos);
@@ -146,8 +177,9 @@ WHERE ";
     private static List<ConcentracionTicket> LeerPeriodo(string cadena, ConcentracionFiltros f, ConcentracionResultado r)
     {
         var clave = PrefijoCache + "filas:" + f.Modo + ":" +
-                    (f.Modo == ConcentracionContrato.ModoMes ? ConcentracionContrato.Mes(f.Mes)
-                                                             : f.Slot.ToString(CultureInfo.InvariantCulture)) +
+                    (f.Modo == ConcentracionContrato.ModoMes
+                        ? string.Join("|", MesesDe(f).ConvertAll(ConcentracionContrato.Mes))
+                        : "0-" + f.Slot.ToString(CultureInfo.InvariantCulture)) +
                     ":" + ConcentracionContrato.Dia(r.Hoy);
         var guardado = HttpRuntime.Cache[clave] as List<ConcentracionTicket>;
         if (guardado != null) return guardado;
@@ -160,9 +192,12 @@ WHERE ";
             cmd.CommandTimeout = TimeoutComandoSegundos;
             if (f.Modo == ConcentracionContrato.ModoMes)
             {
-                cmd.CommandText = SqlBase + SqlMes;
-                cmd.Parameters.Add("@Desde", SqlDbType.DateTime2).Value = r.Desde;
-                cmd.Parameters.Add("@HastaExcl", SqlDbType.DateTime2).Value = r.Hasta.AddDays(1);
+                cmd.CommandText = SqlBase + SqlMeses(r.Rangos.Count);
+                for (int i = 0; i < r.Rangos.Count; i++)
+                {
+                    cmd.Parameters.Add("@Desde" + i, SqlDbType.DateTime2).Value = r.Rangos[i].Key;
+                    cmd.Parameters.Add("@HastaExcl" + i, SqlDbType.DateTime2).Value = r.Rangos[i].Value.AddDays(1);
+                }
             }
             else
             {
