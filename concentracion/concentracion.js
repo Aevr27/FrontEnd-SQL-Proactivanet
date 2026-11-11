@@ -659,25 +659,20 @@
   }
 
   /* Los multiselect: varios cambios seguidos = una sola peticion (como QARE
-     y el Backlog). Meses (2026-11-11): cada mes es una lectura cara, asi
-     que se espera mas (ESPERA_MESES) y, con el desplegable abierto, hasta
-     que se cierre: elegir cuatro meses de un tiron es UNA peticion. Sin el
-     desplegable propio (select nativo) queda solo la espera. */
+     y el Backlog). Meses (2026-11-11): espera un poco mas (ESPERA_MESES)
+     para juntar los clics seguidos. NO espera a que se cierre el
+     desplegable: cada clic pausado debe verse; lo que ya se leyo no se
+     repite porque el servidor guarda cada mes por separado y la peticion
+     anterior se cancela. */
   var ESPERA_AUTO = 250;
   var ESPERA_MESES = 700;
   var cargaProgramada = null;
-  function programarCarga(espera, mientras) {
+  function programarCarga(espera) {
     clearTimeout(cargaProgramada);
     cargaProgramada = setTimeout(function () {
-      if (mientras && mientras()) { programarCarga(ESPERA_AUTO, mientras); return; }
       cargaProgramada = null;
       cargar();
     }, espera || ESPERA_AUTO);
-  }
-  // El desplegable de meses esta abierto (Desplegable lo envuelve en .dd).
-  function mesesAbierto() {
-    var env = $('mes').parentNode;
-    return !!(env && env.classList && env.classList.contains('dd') && env.classList.contains('abierto'));
   }
 
   // Refresco automatico: nunca encima de una carga en vuelo o programada, ni
@@ -759,7 +754,7 @@
       if (nuevos.slice().sort().join('|') === filtros.meses.slice().sort().join('|')) return;
       filtros.meses = nuevos;
       $('cobertura').hidden = true;
-      programarCarga(ESPERA_MESES, mesesAbierto);
+      programarCarga(ESPERA_MESES);
     });
     $('f-so').addEventListener('change', function () { filtros.so = seleccionados($('f-so')); programarCarga(); });
     $('f-grupo').addEventListener('change', function () { filtros.grupo = seleccionados($('f-grupo')); programarCarga(); });

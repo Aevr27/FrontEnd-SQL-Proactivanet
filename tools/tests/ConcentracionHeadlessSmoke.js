@@ -341,8 +341,9 @@ var sondaC = conComun(
   'await hasta(function () { return ultimaConc().modo === "slot" && !msg("pareto"); }); await espera(100);\n' +
   'apunta("C16", [aSlot, acum, aMes, ultimaConc(), $c("slot-n").value]);\n' +
   // C17 (2026-11-11) espera de meses y cancelacion.
-  // a) Desplegable de meses abierto: tres clics separados por mas que la
-  //    espera = nada pedido; al cerrarlo, UNA peticion con los tres.
+  // a) Desplegable de meses abierto: cada clic pausado (mas que la espera)
+  //    pide con lo marcado hasta ese momento, sin esperar a cerrarlo; cerrar
+  //    no pide nada mas. Tres clics rapidos dentro del desplegable = UNA.
   'document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
   'await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150);\n' +
   'var env = $c("mes").parentNode, boton = env.querySelector(".dd-boton");\n' +
@@ -350,10 +351,13 @@ var sondaC = conComun(
   '  return env.querySelector(".dd-opcion[data-indice=\\"" + i + "\\"]"); };\n' +
   'var n17 = pedidasConc().length; boton.click();\n' +
   'fila("2026-06").click(); await espera(900); fila("2026-05").click(); await espera(900); fila("2026-04").click(); await espera(900);\n' +
-  'var abierto = [env.classList.contains("abierto"), pedidasConc().length - n17];\n' +
-  'Desplegable.cerrarTodos();\n' +
-  'await hasta(function () { return pedidasConc().length > n17 && !msg("pareto"); }); await espera(700);\n' +
-  'var cerrado = [pedidasConc().length - n17, ultimaConc().mes];\n' +
+  'var abierto = [env.classList.contains("abierto"), pedidasConc().length - n17, pedidasConc().slice(n17).map(function (o) { return o.mes; })];\n' +
+  'var n17r = pedidasConc().length;\n' +
+  'fila("2026-03").click(); await espera(150); fila("2026-02").click(); await espera(150); fila("2026-01").click();\n' +
+  'await hasta(function () { return pedidasConc().length > n17r && !msg("pareto"); }); await espera(900);\n' +
+  'var rapidos = [pedidasConc().length - n17r, ultimaConc().mes];\n' +
+  'var n17c = pedidasConc().length; Desplegable.cerrarTodos(); await espera(900);\n' +
+  'var cerrado = [pedidasConc().length - n17c, env.classList.contains("abierto")];\n' +
   // b) Sin abrir el desplegable, tres cambios a 300 ms = UNA peticion.
   'var n17b = pedidasConc().length;\n' +
   'elegir("mes", ["2026-10"]); await espera(300); elegir("mes", ["2026-10", "2026-09"]); await espera(300); elegir("mes", ["2026-10", "2026-09", "2026-08"]);\n' +
@@ -380,7 +384,7 @@ var sondaC = conComun(
   'elegir("mes", ["2026-07"]); $c("btn-actualizar").click();\n' +
   'await hasta(function () { return pedidasConc().length > n17e && !msg("pareto"); }); await espera(1200);\n' +
   'var actualizar = [pedidasConc().length - n17e, ultimaConc().mes];\n' +
-  'apunta("C17", [abierto, cerrado, rafaga, cancelada, vieja, actualizar]);\n');
+  'apunta("C17", [abierto, rapidos, cerrado, rafaga, cancelada, vieja, actualizar]);\n');
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
@@ -462,8 +466,9 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
        [[1, 'Periodo: Slots 0-1 · del 11/09/2026 al 09/11/2026'], [1, 'Periodo: Slots 0-2 · del 12/08/2026 al 09/11/2026'],
         [1, 'Periodo: Slots 0-3 · del 13/07/2026 al 09/11/2026']],
        [[{ modo: 'mes', mes: '2026-10|2026-08' }], ['2026-10', '2026-08']], { modo: 'slot', slot: '3' }, '3'], o.C16);
-    Check('C17 meses: con el desplegable abierto nada se pide y al cerrarlo UNA peticion; tres cambios rapidos = UNA; la peticion reemplazada se cancela sin error ni "Calculando…"; una respuesta vieja no pinta encima; "Actualizar" con meses pendientes = UNA',
-      [[true, 0], [1, '2026-10|2026-08|2026-06|2026-05|2026-04'], [1, '2026-10|2026-09|2026-08'],
+    Check('C17 meses: con el desplegable abierto cada clic pausado pide (sin esperar a cerrarlo); tres clics rapidos = UNA; cerrar no pide; tres cambios rapidos sin desplegable = UNA; la peticion reemplazada se cancela sin error ni "Calculando…"; una respuesta vieja no pinta encima; "Actualizar" con meses pendientes = UNA',
+      [[true, 3, ['2026-10|2026-08|2026-06', '2026-10|2026-08|2026-06|2026-05', '2026-10|2026-08|2026-06|2026-05|2026-04']],
+       [1, '2026-10|2026-08|2026-06|2026-05|2026-04|2026-03|2026-02|2026-01'], [0, false], [1, '2026-10|2026-09|2026-08'],
        [1, ['2', '1'], true, null, null, null, false, 'Servicio 1 slot 1'],
        [['0', '1'], true, 'Servicio 1 slot 1', '1', null], [1, '2026-07']], o.C17);
     Check('C13 cobertura: completa sin aviso; parcial con el hecho; sin medir sin aviso',
