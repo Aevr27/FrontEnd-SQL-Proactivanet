@@ -65,8 +65,8 @@
      la volumetria de esa categoria (MetaCategoria). Lo que ADM escribio
      (fuente) nunca se pisa: cambiar el modo o la volumetria solo recalcula
      el otro. Viaja y se guarda el % (dos decimales): desde tickets puede no
-     ser exacto y se dice. Tickets a reducir = FLOOR(volumetria de 30 dias
-     x %): siempre hacia abajo, entero. Lo sigue calculando la base con la
+     ser exacto y se dice. Tickets a reducir = CEILING(volumetria de 30 dias
+     x %): siempre hacia arriba, entero, por iniciativa (7 x 99% = 7). Lo sigue calculando la base con la
      volumetria calculada, no con la fijada (si ADM fijo otra, se avisa lo
      que guardara la base).
 
@@ -478,24 +478,26 @@ window.IniciativaAdmin = (function () {
   // Denominador: la volumetria de ESA categoria (la que ADM fijo o la
   // calculada). Lo que viaja y se guarda es el % (dbo.ProblemCategoria.
   // PctDisminucion, hasta dos decimales); los tickets solo se muestran.
-  // Redondeo (2026-10-26): SIEMPRE hacia abajo, FLOOR(vol x %), el de
-  // Tickets a reducir (ticketsDe de iniciativas.js y la propuesta sql/33
-  // de adm.usp_GestionAdmin_TicketsReduce); en enteros (centesimas de %)
-  // para no arrastrar errores de coma flotante: 7 x 9.46% = 0.66 -> 0.
-  // Tickets -> %: el menor % con dos decimales que da al menos esos
-  // tickets; si da mas (con volumetrias grandes 0.01% es mas de un ticket)
-  // se dice, no se esconde.
+  // Redondeo (2026-11-10): SIEMPRE hacia arriba, CEILING(vol x %), el de
+  // Tickets a reducir (ticketsDe de iniciativas.js, sql/84 en
+  // adm.usp_GestionAdmin_TicketsReduce y sql/85 en la foto diaria; antes FLOOR, sql/33); en enteros
+  // (centesimas de %) para no arrastrar errores de coma flotante:
+  // 7 x 9.46% = 0.66 -> 1; 30 x 50% = 15 -> 15 (exacto, no sube).
+  // Tickets -> % (dos decimales o entero): la proporcion exacta n / vol
+  // redondeada hacia abajo al paso, si con CEILING da esos mismos tickets
+  // (15 de 30 = 50%, 25 de 1000 = 2.5%, como antes); si no, el paso
+  // siguiente, el menor que da al menos esos tickets. Si da mas (con
+  // volumetrias grandes 0.01% es mas de un ticket) se dice, no se esconde.
   var MetaCategoria = {
     // vol: entero >= 0 o null; pct: texto. -> tickets enteros, o null.
     tickets: function (vol, pct) {
       if (typeof vol !== 'number' || !isFinite(vol) || vol < 0 || vol % 1) return null;
       if (vacio(pct) || FORMATO.pct(String(pct).trim())) return null;
-      return Math.floor(vol * Math.round(Number(pct) * 100) / 10000);
+      return Math.floor((vol * Math.round(Number(pct) * 100) + 9999) / 10000);
     },
     // -> { pct: texto, exacto, tickets: los que da ese % } o { error }.
     pct: function (vol, tickets) { return MetaCategoria.deTickets(vol, tickets, 100); },
-    // Lo mismo a % ENTERO (2026-11-05): el menor % sin decimales que da al
-    // menos esos tickets. Lo usa "Solicitar cambios" (registro-iniciativas.js),
+    // Lo mismo a % ENTERO (2026-11-05; regla de deTickets): sin decimales. Lo usa "Solicitar cambios" (registro-iniciativas.js),
     // donde solo se piden % enteros; Crear y Modificar de ADM siguen con pct.
     pctEntero: function (vol, tickets) { return MetaCategoria.deTickets(vol, tickets, 1); },
     // porUnidad: pasos por punto de % (100 = centesimas, 1 = enteros).
@@ -509,7 +511,8 @@ window.IniciativaAdmin = (function () {
       if (vol === 0) return { error: 'Con volumetría 0 no hay tickets que resolver: usa el %.' };
       var n = Number(t);
       if (n > vol) return { error: n.toLocaleString('es-MX') + ' tickets es más que la volumetría (' + vol.toLocaleString('es-MX') + '): pasaría de 100%.' };
-      var pasos = Math.ceil(n * 100 * porUnidad / vol);
+      var pasos = Math.floor(n * 100 * porUnidad / vol);
+      if (MetaCategoria.tickets(vol, String(pasos / porUnidad)) !== n) pasos += 1;
       var pct = String(pasos / porUnidad);
       var da = MetaCategoria.tickets(vol, pct);
       return { pct: pct, exacto: da === n, tickets: da };
@@ -705,7 +708,7 @@ window.IniciativaAdmin = (function () {
 
     // Lo que la BASE guardara en Tickets a reducir (TicketsReduce): lo
     // calcula adm.usp_GestionAdmin_TicketsReduce sobre VolumenUltimos30
-    // (FLOOR con sql/33), no con una volumetria fijada a mano. null si no
+    // (CEILING con sql/84; antes FLOOR con sql/33), no con una volumetria fijada a mano. null si no
     // se sabe (sin vol30). Sin volumetria fijada es la misma meta mostrada.
     ticketsGuardados(f) {
       return typeof f.vol30 === 'number' ? MetaCategoria.tickets(f.vol30, f.valor) : null;
@@ -1587,7 +1590,7 @@ window.IniciativaAdmin = (function () {
       ? '<fieldset class="ini-campo ini-modo-meta"><legend>Planear la meta por</legend>' +
           radio('pct', '% de disminución') + ' ' + radio('tickets', 'Tickets a resolver') +
           '<small class="ini-motivo">Lo que escribes no cambia; el otro valor se calcula con los tickets de los últimos 30 días de cada categoría, ' +
-          'redondeando hacia abajo. Se guarda el % (dos decimales); Tickets a reducir lo calcula la base con la misma volumetría.</small></fieldset>'
+          'redondeando hacia arriba. Se guarda el % (dos decimales); Tickets a reducir lo calcula la base con la misma volumetría.</small></fieldset>'
       : '';
     return modos + htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis,
         tiposIniciativa: ed.listas.tiposIniciativa, tiposAgrupado: ed.listas.tiposAgrupado,

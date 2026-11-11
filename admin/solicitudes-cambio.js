@@ -215,7 +215,7 @@ window.SolicitudesCambioCola = (function () {
   // IMPACTO POR CATEGORIA (estimado): la volumetria de HOY de cada ruta
   // (SLOT 0, ultimos 30 dias: la de Nueva solicitud y Solicitar cambios,
   // VolumetriaCliente), los tickets que da el % pedido con ticketsDe de
-  // admin/iniciativas.js (FLOOR) y las OTRAS iniciativas activas de la
+  // admin/iniciativas.js (CEILING) y las OTRAS iniciativas activas de la
   // categoria (otras_iniciativas del servidor: CapacidadCategoria.Otras, sin
   // la iniciativa de la solicitud) con su % y lo ya comprometido. Nada de
   // esto se guarda: al aplicar, la base calcula Tickets a reducir con su

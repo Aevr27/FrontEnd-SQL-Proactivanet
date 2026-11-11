@@ -1671,8 +1671,8 @@ window.RegistroIniciativas = (function () {
       // META EN % O EN TICKETS, por categoria (ruta -> { modo, tickets }):
       // con 'tickets' se escribe cuantos tickets reducir y el % sale de
       // MetaCategoria.pctEntero (admin/iniciativa-admin.js, la regla de
-      // Crear y de Nueva solicitud a % entero: el menor % sin decimales que
-      // da al menos esos tickets, con FLOOR) sobre la volumetria SLOT 0 de la ruta (vols:
+      // Crear y de Nueva solicitud a % entero: la proporcion exacta hacia abajo
+      // si con CEILING da esos tickets; si no, el siguiente) sobre la volumetria SLOT 0 de la ruta (vols:
       // ruta -> { estado, valor }, la de Nueva solicitud). Lo que VIAJA y se
       // guarda sigue siendo el % (pct_valor / agregar_pct): los tickets son
       // una meta estimada con la volumetria de hoy, no un numero que la base

@@ -148,7 +148,7 @@ window.SolicitudesNuevas = (function () {
   }
 
   // Tickets a reducir AL ENVIAR: la volumetria y el % guardados de la
-  // solicitud con ticketsDe de admin/iniciativas.js (FLOOR, la regla de
+  // solicitud con ticketsDe de admin/iniciativas.js (CEILING, la regla de
   // Nueva solicitud), no un calculo propio. Es una estimacion: al aprobar,
   // la base recalcula TicketsReduce con su propia ventana de 30 dias y su
   // redondeo. Sin ticketsDe (iniciativas.js no cargo) o sin datos: '—'.

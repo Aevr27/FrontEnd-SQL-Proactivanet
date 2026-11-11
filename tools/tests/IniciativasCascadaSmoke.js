@@ -1073,10 +1073,10 @@ pruebas.push(function () {
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
   var T = I.ticketsDe;
-  Check('VT1 ejemplo: 1247 x 12.5% = 155.875 -> 155 (siempre hacia abajo)', 155, T(1247, '12.5'));
-  Check('VT1 el caso reportado: 7 x 9.46% = 0.66 -> 0; 7 x 100% = 7', [0, 7], [T(7, '9.46'), T(7, '100')]);
-  Check('VT1 redondeo a ticket entero, hacia abajo (FLOOR)',
-    [0, 1, 0, 24, 2, 0, 1247, 0, 0],
+  Check('VT1 ejemplo: 1247 x 12.5% = 155.875 -> 156 (siempre hacia arriba)', 156, T(1247, '12.5'));
+  Check('VT1 el caso reportado: 7 x 9.46% = 0.66 -> 1; 7 x 100% = 7', [1, 7], [T(7, '9.46'), T(7, '100')]);
+  Check('VT1 redondeo a ticket entero, hacia arriba (CEILING); 0% y 0 de volumetria = 0',
+    [1, 2, 1, 25, 3, 0, 1247, 0, 1],
     [T(10, '5'), T(3, '50'), T(1, '49.99'), T(200, '12.25'), T(1000, '0.29'), T(0, '50'), T(1247, '100'), T(1247, '0'), T(1, '50')]);
   Check('VT1 sin calculo con volumetria o % que no valen', [null, null, null, null, null, null, null],
     [T(null, '10'), T(1247, ''), T(1247, '150'), T(1247, '12.345'), T(1247, 'x'), T(12.5, '10'), T(-1, '10')]);
@@ -1092,7 +1092,7 @@ pruebas.push(function () {
   Check('VT2 cargando: la volumetria falta con su motivo', { campo: 'volumetria', mensaje: 'Consultando la volumetría de la categoría…' },
     s.erroresCliente().filter(function (e) { return e.campo === 'volumetria'; })[0]);
   s.fijarVolumen(cat, { estado: 'ok', valor: 1247 });
-  Check('VT3 ok: volumetria y tickets (1247 x 12% = 149.64 -> 149)', [1247, 149, 'Volumetría × % ÷ 100, redondeado hacia abajo a ticket entero.'],
+  Check('VT3 ok: volumetria y tickets (1247 x 12% = 149.64 -> 150)', [1247, 150, 'Volumetría × % ÷ 100, redondeado hacia arriba a ticket entero.'],
     [s.volumetria(), s.ticketsReducir(), s.motivoTickets()]);
   Check('VT3 viaja como volumetria; tickets no viajan', ['1247', false],
     [s.camposEnvio().volumetria, Object.prototype.hasOwnProperty.call(s.camposEnvio(), 'tickets')]);
@@ -1104,7 +1104,7 @@ pruebas.push(function () {
   s.capturar('pct', '12');
   Check('VT4 % sobre la capacidad (10%): sin tickets', null, s.ticketsReducir());
   s.capturar('pct', '10');
-  Check('VT4 % dentro de la capacidad: 1247 x 10% = 124.7 -> 124', 124, s.ticketsReducir());
+  Check('VT4 % dentro de la capacidad: 1247 x 10% = 124.7 -> 125', 125, s.ticketsReducir());
 
   // Cambiar de categoria: lo de la anterior no se presenta como actual.
   s.elegir(1, 'SO y'); s.elegir(2, '/A/Cat 2');
@@ -1160,8 +1160,8 @@ pruebas.push(function () {
     Check('VT12 la volumetria de la categoria, de solo lectura', [true, 'Tickets de la categoría en los últimos 30 días. No se captura.'],
       [/>1,247 tickets \(últimos 30 días\)<\/output>/.test(vol()), p.sel('campo-volumetria-msg').textContent]);
     escribir(p, 'iniCamposImpacto', 'pct', '12');
-    Check('VT13 % escrito: tickets calculados al momento', [true, 'Volumetría × % ÷ 100, redondeado hacia abajo a ticket entero.'],
-      [tk() === '149' && !p.sel('campo-tickets').disabled, p.sel('campo-tickets-msg').textContent]);
+    Check('VT13 % escrito: tickets calculados al momento', [true, 'Volumetría × % ÷ 100, redondeado hacia arriba a ticket entero.'],
+      [tk() === '150' && !p.sel('campo-tickets').disabled, p.sel('campo-tickets-msg').textContent]);
     escribir(p, 'iniCamposImpacto', 'pct', '150');
     Check('VT13 % invalido: sin tickets', '', tk());
     escribir(p, 'iniCamposImpacto', 'pct', '12.5');
@@ -1297,9 +1297,10 @@ pruebas.push(function () {
 pruebas.push(function () {
   // % ENTERO (2026-11-05): el menor % sin decimales que da al menos esos
   // tickets, con el mismo FLOOR de ticketsDe.
-  Check('MT1 pctDeTickets: 149 de 1247 -> 12%, el menor entero que da 149 (11% da 137)', [{ pct: '12', exacto: true, tickets: 149 }, 137],
+  Check('MT1 pctDeTickets: 149 de 1247 -> 12% (11% da 138, poco); ningun % entero da 149: 12% da 150, no exacto', [{ pct: '12', exacto: false, tickets: 150 }, 138],
     [I.pctDeTickets(1247, '149'), I.ticketsDe(1247, '11')]);
-  Check('MT1 pctDeTickets: 156 de 1247 -> 13% (12% da 149, poco); 13% da 162, no exacto', { pct: '13', exacto: false, tickets: 162 },
+  Check('MT1 pctDeTickets: 150 de 1247 -> 12% (12.03% hacia abajo), exacto', { pct: '12', exacto: true, tickets: 150 }, I.pctDeTickets(1247, '150'));
+  Check('MT1 pctDeTickets: 156 de 1247 -> 13% (12% da 150, poco); 13% da 163, no exacto', { pct: '13', exacto: false, tickets: 163 },
     I.pctDeTickets(1247, '156'));
   Check('MT1 pctDeTickets: 8 de 80 = 10%', '10', I.pctDeTickets(80, '8').pct);
   Check('MT1 el % calculado siempre es entero (sin punto)', [true, true, true],
@@ -1322,13 +1323,13 @@ pruebas.push(function () {
   s.capturar('tickets', '149');
   Check('MT3 tickets escritos: el % entero sale de ellos y es lo que viaja (sin tickets en el cuerpo)', ['tickets', '12', '12', false],
     [s.metaPor, s.valores.pct, s.camposEnvio().pct, Object.prototype.hasOwnProperty.call(s.camposEnvio(), 'tickets')]);
-  Check('MT3 lo escrito se muestra tal cual; el aviso dice el %', ['149', '≈ 12% de 1,247.'], [s.ticketsVista(), s.motivoTickets()]);
+  Check('MT3 lo escrito se muestra tal cual; el aviso dice el % y que no da exacto', ['149', '≈ 12% de 1,247 · con % entero son 150 tickets.'], [s.ticketsVista(), s.motivoTickets()]);
   s.capturar('tickets', '156');
-  Check('MT3 tickets que no dan exacto: viaja 13 y el aviso dice cuantos da ese % entero', ['13', '13', '≈ 13% de 1,247 · con % entero son 162 tickets.', ''],
+  Check('MT3 tickets que no dan exacto: viaja 13 y el aviso dice cuantos da ese % entero', ['13', '13', '≈ 13% de 1,247 · con % entero son 163 tickets.', ''],
     [s.valores.pct, s.camposEnvio().pct, s.motivoTickets(), s.error('pct')]);
   Check('MT3 no falta el %', false, s.faltantes().indexOf('pct') >= 0);
   s.capturar('pct', '20');
-  Check('MT4 escribir el % vuelve a mandar el %: tickets calculados', ['pct', '249', undefined],
+  Check('MT4 escribir el % vuelve a mandar el %: tickets calculados (1247 x 20% = 249.4 -> 250)', ['pct', '250', undefined],
     [s.metaPor, s.ticketsVista(), s.valores.tickets]);
   s.capturar('tickets', '');
   Check('MT5 tickets vacios: % vacio y el aviso lo pide como tickets o %', ['', true, 'tickets'],
@@ -1376,7 +1377,7 @@ pruebas.push(function () {
   }).then(function () {
     Check('MT10 con volumetria: la casilla de tickets se habilita', false, p.sel('campo-tickets').disabled);
     escribir(p, 'iniCamposImpacto', 'tickets', '149');
-    Check('MT10 tickets escritos: el % entero se llena calculado, lo escrito se queda, el aviso lo dice', ['12', '149', '≈ 12% de 1,247.'],
+    Check('MT10 tickets escritos: el % entero se llena calculado, lo escrito se queda, el aviso lo dice', ['12', '149', '≈ 12% de 1,247 · con % entero son 150 tickets.'],
       [p.sel('campo-pct').value, P.solicitud.ticketsVista(), p.sel('campo-tickets-msg').textContent]);
     escribir(p, 'iniCamposComunes', 'titulo', 'T'); escribir(p, 'iniCamposComunes', 'analisis', 'D');
     escribir(p, 'iniCamposComunes', 'observaciones', 'O');

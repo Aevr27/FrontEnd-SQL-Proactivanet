@@ -109,8 +109,8 @@ Check('R8 orden: Categoria, Director, % de disminucion, Volumetria, Tickets a re
 Check('R8 volumetria y tickets dicen "al enviar" (no el numero final al aprobar)', [true, true],
   [/Volumetría <span class="ini-sub">al enviar<\/span>/.test(N.htmlDetalle(Detalle(10))),
    /Tickets a reducir <span class="ini-sub">estimado al enviar; la base lo recalcula al crear la iniciativa<\/span>/.test(N.htmlDetalle(Detalle(10)))]);
-Check('R8 tickets con ticketsDe (FLOOR): 120 x 20% = 24; 1247 x 12.5% = 155; 7 x 9.46% = 0; 7 x 100% = 7',
-  ['24', '155', '0', '7'],
+Check('R8 tickets con ticketsDe (CEILING): 120 x 20% = 24 (exacto); 1247 x 12.5% = 155.875 -> 156; 7 x 9.46% = 0.66 -> 1; 7 x 100% = 7',
+  ['24', '156', '1', '7'],
   [Valor(Detalle(10), 'Tickets a reducir'), Valor(Detalle(10, { volumetria: 1247, pct: '12.5' }), 'Tickets a reducir'),
    Valor(Detalle(10, { volumetria: 7, pct: '9.46' }), 'Tickets a reducir'), Valor(Detalle(10, { volumetria: 7, pct: '100' }), 'Tickets a reducir')]);
 // HISTORICO (antes del % entero, 2026-11-05): la solicitud guardada con
