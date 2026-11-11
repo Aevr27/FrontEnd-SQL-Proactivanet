@@ -142,6 +142,19 @@ public static class PersistenciaSolicitudesCambio
     public const string MotivoCancelacion =
         "Cancelar o modificar una solicitud todav\u00eda no est\u00e1 habilitado (falta aplicar sql/41 en la base, con su aprobaci\u00f3n). No se cambi\u00f3 nada.";
 
+    // REACTIVAR una categoria que estuvo ligada (sql/83: Crear, Aplicar y
+    // Modificar aceptan un AGREGAR de una fila con VigenteEnOrigen = 0 y la
+    // reactivan). SOLO surte efecto cuando DeteccionSolicitudesCambio ve
+    // sql/22 y la propiedad ReglaReactivacion = HISTORICA en los TRES
+    // procedimientos (la cuenta del sitio ve propiedades, no definiciones).
+    // Apagada: todo como antes (la base sigue diciendo 51008 / 51204), sin
+    // etiquetas de reactivacion ni lista de historicas.
+    public static bool? ReactivacionForzadaParaPruebas;
+    public static bool ReactivacionActiva()
+    {
+        return ReactivacionForzadaParaPruebas ?? (sql22EnBase == true && sql83EnBase == true);
+    }
+
     // Lo que DeteccionSolicitudesCambio vio en la base (null = todavia no se
     // reviso) y cuando. Misma vigencia que sql/24: aplicar o revertir los
     // scripts la enciende o la apaga sin reciclar el sitio.
@@ -156,6 +169,8 @@ public static class PersistenciaSolicitudesCambio
     // las columnas y las CANCELADA se siguen leyendo).
     private static bool? sql41EnBase;
     private static bool? sql41Columnas;
+    // sql/83: las tres propiedades ReglaReactivacion.
+    private static bool? sql83EnBase;
     private static DateTime revisadaUtc;
 
     public static void Anotar(bool sql22, bool sql25, DateTime ahoraUtc) { Anotar(sql22, sql25, false, ahoraUtc); }
@@ -171,10 +186,15 @@ public static class PersistenciaSolicitudesCambio
 
     public static void Anotar(bool sql22, bool sql25, bool sql34, bool sql37, bool sql38, bool sql41, bool sql41Cols, DateTime ahoraUtc)
     {
+        Anotar(sql22, sql25, sql34, sql37, sql38, sql41, sql41Cols, false, ahoraUtc);
+    }
+
+    public static void Anotar(bool sql22, bool sql25, bool sql34, bool sql37, bool sql38, bool sql41, bool sql41Cols, bool sql83, DateTime ahoraUtc)
+    {
         lock (candado)
         {
             sql22EnBase = sql22; sql25EnBase = sql25; sql34EnBase = sql34; sql37EnBase = sql37; sql38EnBase = sql38;
-            sql41EnBase = sql41; sql41Columnas = sql41Cols; revisadaUtc = ahoraUtc;
+            sql41EnBase = sql41; sql41Columnas = sql41Cols; sql83EnBase = sql83; revisadaUtc = ahoraUtc;
         }
     }
 
@@ -189,7 +209,7 @@ public static class PersistenciaSolicitudesCambio
         lock (candado)
         {
             sql22EnBase = null; sql25EnBase = null; sql34EnBase = null; sql37EnBase = null; sql38EnBase = null;
-            sql41EnBase = null; sql41Columnas = null; revisadaUtc = DateTime.MinValue;
+            sql41EnBase = null; sql41Columnas = null; sql83EnBase = null; revisadaUtc = DateTime.MinValue;
         }
     }
 
@@ -225,7 +245,10 @@ public static class DeteccionSolicitudesCambio
         "Sql41 = CASE WHEN OBJECT_ID(N'adm.usp_SolicitudCambio_Cancelar', N'P') IS NOT NULL " +
         "AND OBJECT_ID(N'adm.usp_SolicitudCambio_Reemplazar', N'P') IS NOT NULL THEN 1 ELSE 0 END, " +
         "Sql41Columnas = CASE WHEN OBJECT_ID(N'adm.CK_SolicitudCambio_EstadoCancelada', N'C') IS NOT NULL " +
-        "AND COL_LENGTH(N'adm.SolicitudCambio', N'ReemplazaA') IS NOT NULL AND COL_LENGTH(N'adm.SolicitudCambio', N'MotivoCancelacion') IS NOT NULL THEN 1 ELSE 0 END";
+        "AND COL_LENGTH(N'adm.SolicitudCambio', N'ReemplazaA') IS NOT NULL AND COL_LENGTH(N'adm.SolicitudCambio', N'MotivoCancelacion') IS NOT NULL THEN 1 ELSE 0 END, " +
+        "Sql83 = (SELECT COUNT(*) FROM sys.extended_properties WHERE class = 1 AND minor_id = 0 AND name = N'ReglaReactivacion' " +
+        "AND CONVERT(nvarchar(30), value) = N'HISTORICA' AND major_id IN (OBJECT_ID(N'adm.usp_GestionAdmin_Modificar', N'P'), " +
+        "OBJECT_ID(N'adm.usp_SolicitudCambio_Aplicar', N'P'), OBJECT_ID(N'adm.usp_SolicitudCambio_Crear', N'P')))";
 
     // Con la conexion (abierta) del que llama.
     public static void Revisar(SqlConnection cn)
@@ -233,7 +256,7 @@ public static class DeteccionSolicitudesCambio
         if (cn == null) throw new ArgumentNullException("cn");
         var ahora = DateTime.UtcNow;
         if (PersistenciaSolicitudesCambio.Vigente(ahora)) return;
-        bool sql22 = false, sql25 = false, sql34 = false, sql37 = false, sql38 = false, sql41 = false, sql41Cols = false;
+        bool sql22 = false, sql25 = false, sql34 = false, sql37 = false, sql38 = false, sql41 = false, sql41Cols = false, sql83 = false;
         try
         {
             using (var cmd = new SqlCommand(Consulta, cn) { CommandTimeout = 15 })
@@ -247,10 +270,11 @@ public static class DeteccionSolicitudesCambio
                     sql38 = sql37 && Convert.ToInt32(rd.GetValue(4)) == 1;
                     sql41Cols = sql22 && Convert.ToInt32(rd.GetValue(6)) == 1;
                     sql41 = sql41Cols && Convert.ToInt32(rd.GetValue(5)) == 1;
+                    sql83 = sql22 && Convert.ToInt32(rd.GetValue(7)) == 3;
                 }
         }
-        catch (SqlException) { sql22 = false; sql25 = false; sql34 = false; sql37 = false; sql38 = false; sql41 = false; sql41Cols = false; }
-        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, sql34, sql37, sql38, sql41, sql41Cols, ahora);
+        catch (SqlException) { sql22 = false; sql25 = false; sql34 = false; sql37 = false; sql38 = false; sql41 = false; sql41Cols = false; sql83 = false; }
+        PersistenciaSolicitudesCambio.Anotar(sql22, sql25, sql34, sql37, sql38, sql41, sql41Cols, sql83, ahora);
     }
 
     // Abre su propia conexion solo si hace falta revisar.
@@ -561,6 +585,10 @@ public sealed class ErrorSolicitudCambio : Exception
     {
         switch (numero)
         {
+            // sql/83 (reactivar una categoria que estuvo ligada).
+            case 51032: return "Solo un administrador (ADM) reactiva una categor\u00eda que estuvo ligada a la iniciativa. No se aplic\u00f3 nada.";
+            case 51033: return "La solicitud ya no est\u00e1 pendiente, es de otra iniciativa o no pide reactivar esa categor\u00eda. No se aplic\u00f3 nada.";
+            case 51034: return "La clasificaci\u00f3n no coincide con la hist\u00f3rica de la categor\u00eda: se conserva la hist\u00f3rica. No se aplic\u00f3 nada.";
             case 51228: return "Explica por qu\u00e9 cancelas la solicitud.";
             case 51229: return "El motivo de la cancelaci\u00f3n no puede pasar de 2000 caracteres.";
             case 51230: return "La solicitud ya no est\u00e1 pendiente: un administrador la revis\u00f3 (aplic\u00f3 o rechaz\u00f3) o ya estaba cancelada. No se cambi\u00f3 nada; actualiza para ver su estado.";
@@ -580,8 +608,8 @@ public sealed class ErrorSolicitudCambio : Exception
         get
         {
             if (Numero == 51201 || Numero == 51225) return 404;
-            if (Numero == 51001 || Numero == 51210 || Numero == 51226) return 403;
-            if (Numero == 51202 || Numero == 51204 || Numero == 51221 || Numero == 51010 || Numero == 51008) return 409;
+            if (Numero == 51001 || Numero == 51210 || Numero == 51226 || Numero == 51032) return 403;
+            if (Numero == 51202 || Numero == 51204 || Numero == 51221 || Numero == 51010 || Numero == 51008 || Numero == 51033) return 409;
             if (Numero == 51230 || Numero == 51232) return 409;
             if (Numero == 51231 || Numero == 51234) return 500;
             return 422;
@@ -611,6 +639,9 @@ public sealed class ErrorSolicitudCambio : Exception
                 case 51232: return "LlaveUsada";
                 case 51233: return "OtraIniciativa";
                 case 51234: return "ReemplazoNoCreado";
+                case 51032: return "ReactivacionSoloAdm";      // sql/83
+                case 51033: return "SolicitudNoCorresponde";
+                case 51034: return "ClasificacionHistorica";
                 default: return "DatoInvalido";
             }
         }
@@ -933,7 +964,9 @@ ORDER BY x.FechaSolicitudUtc DESC, x.IdSolicitud DESC;";
 WHERE s.IdSolicitud = @id" + deCuenta + @";
 SELECT c.Categoria, c.Accion, c.PctAnterior, c.PctNuevo, c.TipoIniciativa, c.TipoAgrupado,
        PctActual = pc.PctDisminucion, Ligada = CASE WHEN pc.Codigo IS NOT NULL AND pc.VigenteEnOrigen = 1 THEN 1 ELSE 0 END,
-       LigadaAlgunaVez = CASE WHEN pc.Codigo IS NOT NULL THEN 1 ELSE 0 END
+       LigadaAlgunaVez = CASE WHEN pc.Codigo IS NOT NULL THEN 1 ELSE 0 END,
+       HistTi = NULLIF(LTRIM(RTRIM(pc.TipoIniciativa)), N''), HistTa = NULLIF(LTRIM(RTRIM(pc.TipoAgrupado)), N''),
+       Reactivacion = CASE WHEN pc.Codigo IS NOT NULL AND pc.VigenteEnOrigen = 0 THEN 1 ELSE 0 END
 FROM adm.SolicitudCambioCategoria AS c
 INNER JOIN adm.SolicitudCambio AS s ON s.IdSolicitud = c.IdSolicitud
 LEFT JOIN dbo.ProblemCategoria AS pc ON pc.Codigo = s.Codigo AND pc.Categoria = c.Categoria
@@ -953,16 +986,35 @@ ORDER BY e.IdEvento;";
                 var d = Fila(r);
                 r.NextResult();
                 var cats = new List<object>();
+                var reactiva = PersistenciaSolicitudesCambio.ReactivacionActiva();
                 while (r.Read())
                 {
-                    cats.Add(new Dictionary<string, object>
+                    var cat = new Dictionary<string, object>
                     {
                         { "categoria", Texto(r, 0) }, { "accion", Texto(r, 1) },
                         { "pct_anterior", Pct(r, 2) }, { "pct_nuevo", Pct(r, 3) },
                         { "tipo_iniciativa", Texto(r, 4) }, { "tipo_agrupado", Texto(r, 5) },
                         { "pct_actual", Pct(r, 6) }, { "ligada", Convert.ToInt32(r.GetValue(7)) == 1 },
                         { "ligada_alguna_vez", Convert.ToInt32(r.GetValue(8)) == 1 },
-                    });
+                    };
+                    // sql/83: un AGREGAR de una fila de baja es una REACTIVACION;
+                    // su clasificacion historica no vacia se conserva y ADM solo
+                    // da la que falta (historica y solicitud vacias).
+                    if (reactiva)
+                    {
+                        var esReactivacion = Texto(r, 1) == "AGREGAR" && Convert.ToInt32(r.GetValue(11)) == 1;
+                        cat["reactivacion"] = esReactivacion;
+                        cat["tipo_iniciativa_historica"] = esReactivacion ? Texto(r, 9) : null;
+                        cat["tipo_agrupado_historica"] = esReactivacion ? Texto(r, 10) : null;
+                        var faltan = new List<object>();
+                        if (Texto(r, 1) == "AGREGAR")
+                        {
+                            if (CategoriasHistoricas.Efectiva(esReactivacion ? Texto(r, 9) : null, Texto(r, 4)) == null) faltan.Add("tipo_iniciativa");
+                            if (CategoriasHistoricas.Efectiva(esReactivacion ? Texto(r, 10) : null, Texto(r, 5)) == null) faltan.Add("tipo_agrupado");
+                        }
+                        cat["faltan_clasificacion"] = faltan;
+                    }
+                    cats.Add(cat);
                 }
                 d["categorias_detalle"] = cats;
                 r.NextResult();
@@ -1262,6 +1314,9 @@ public static class SolicitudesCambio
     {
         public IniciativaActual Actual;
         public List<CapacidadCategoria.Compromiso> Compromisos = new List<CapacidadCategoria.Compromiso>();
+        // sql/83: las asociaciones de baja de la iniciativa (null = sin 83 o
+        // sin leer): una que se reactiva consume con su Agrupacion EFECTIVA.
+        public List<CategoriaHistorica> Historicas;
     }
     public static Func<string, DatosCapacidad> LeerCapacidad = LeerCapacidadEnvio;
 
@@ -1297,7 +1352,11 @@ public static class SolicitudesCambio
         foreach (var c in p.Categorias.Where(x => x.Accion == "AGREGAR"))
         {
             if (actual.Ligada(c.Categoria) != null) continue;
-            var motivo = tope.Agregada(c.Categoria, c.Pct, c.TipoAgrupado);
+            // sql/83: una que se reactiva consume con la Agrupacion que de verdad
+            // quedara guardada (la historica no vacia; si falta, la pedida).
+            var h = CategoriasHistoricas.Buscar(d.Historicas, c.Categoria);
+            var agrup = h != null ? CategoriasHistoricas.Efectiva(h.TipoAgrupado, c.TipoAgrupado) : c.TipoAgrupado;
+            var motivo = tope.Agregada(c.Categoria, c.Pct, agrup);
             if (motivo != null) motivos.Add(motivo);
         }
         motivos.AddRange(tope.Reactivadas(null, null));
@@ -1322,6 +1381,7 @@ public static class SolicitudesCambio
         {
             cn.Open();
             d.Compromisos = ExperienciaQueries.CompromisosCapacidad(cn);
+            if (PersistenciaSolicitudesCambio.ReactivacionActiva()) d.Historicas = CategoriasHistoricas.Leer(cn, folio);
         }
         return d;
     }
@@ -1447,7 +1507,10 @@ public static class SolicitudesCambio
                 if ((c["accion"] as string) == "PCT"
                     && (!(bool)c["ligada"] || !string.Equals(c["pct_actual"] as string ?? "", c["pct_anterior"] as string ?? "", StringComparison.Ordinal)))
                     return true;
-                if ((c["accion"] as string) == "AGREGAR" && (bool)c["ligada_alguna_vez"]) return true;
+                // sql/83: una de baja se reactiva; solo una que YA esta vigente
+                // la deja desactualizada (como Aplicar). Sin 83, como antes.
+                if ((c["accion"] as string) == "AGREGAR"
+                    && (PersistenciaSolicitudesCambio.ReactivacionActiva() ? (bool)c["ligada"] : (bool)c["ligada_alguna_vez"])) return true;
             }
         return false;
     }
@@ -1457,6 +1520,29 @@ public static class SolicitudesCambio
     // con LA MISMA validacion antes de aplicar. Las categorias por agregar
     // llevan su clasificacion (la guardada o la que da ADM). Nada viene del
     // navegador salvo la clasificacion de ADM.
+    // sql/83: la categoria del detalle es un AGREGAR que reactiva una fila
+    // de baja (solo lo marca el detalle con ReactivacionActiva).
+    public static bool EsReactivacion(Dictionary<string, object> c)
+    {
+        object v;
+        return c != null && c.TryGetValue("reactivacion", out v) && v is bool && (bool)v;
+    }
+
+    // sql/83: los campos de clasificacion que le siguen faltando a una
+    // reactivacion despues de la historica, la solicitud y lo que da ADM
+    // ("tipo_iniciativa" / "tipo_agrupado"). Vacia = completa.
+    public static List<string> FaltanReactivacion(Dictionary<string, object> c, ClasificacionSolicitud adm)
+    {
+        var faltan = new List<string>();
+        var ti = CategoriasHistoricas.Efectiva(c["tipo_iniciativa_historica"] as string,
+                     CategoriasHistoricas.Efectiva(c["tipo_iniciativa"] as string, adm == null ? null : adm.TipoIniciativa));
+        var ta = CategoriasHistoricas.Efectiva(c["tipo_agrupado_historica"] as string,
+                     CategoriasHistoricas.Efectiva(c["tipo_agrupado"] as string, adm == null ? null : adm.TipoAgrupado));
+        if (ti == null) faltan.Add("tipo_iniciativa");
+        if (ta == null) faltan.Add("tipo_agrupado");
+        return faltan;
+    }
+
     public static NameValueCollection ComoModificar(Dictionary<string, object> d, List<ClasificacionSolicitud> clasificaciones)
     {
         var f = new NameValueCollection();
@@ -1506,7 +1592,17 @@ public static class SolicitudesCambio
                     var ta = c["tipo_agrupado"] as string;
                     var adm = (clasificaciones ?? new List<ClasificacionSolicitud>())
                         .FirstOrDefault(x => string.Equals((x.Categoria ?? "").Trim(), ruta, StringComparison.Ordinal));
-                    if (ti == null && ta == null && adm != null) { ti = adm.TipoIniciativa; ta = adm.TipoAgrupado; }
+                    if (EsReactivacion(c))
+                    {
+                        // sql/83: la clasificacion EFECTIVA, campo por campo: la
+                        // historica no vacia, luego la de la solicitud y, solo si
+                        // falta, la de ADM. Es lo que la base guardara.
+                        ti = CategoriasHistoricas.Efectiva(c["tipo_iniciativa_historica"] as string,
+                                 CategoriasHistoricas.Efectiva(ti, adm == null ? null : adm.TipoIniciativa));
+                        ta = CategoriasHistoricas.Efectiva(c["tipo_agrupado_historica"] as string,
+                                 CategoriasHistoricas.Efectiva(ta, adm == null ? null : adm.TipoAgrupado));
+                    }
+                    else if (ti == null && ta == null && adm != null) { ti = adm.TipoIniciativa; ta = adm.TipoAgrupado; }
                     f.Add(PeticionModificarAdmin.CAgregarCategoria, ruta);
                     f.Add(PeticionModificarAdmin.CAgregarPct, c["pct_nuevo"] as string);
                     f.Add(PeticionModificarAdmin.CAgregarTipoIniciativa, ti ?? "");
@@ -1595,19 +1691,36 @@ public sealed class AplicadorSolicitudCambio
         if ((d["tipo"] as string) != "OTROS")
         {
             var f = SolicitudesCambio.ComoModificar(d, clasificaciones);
-            var sinClasificar = ((List<object>)d["categorias_detalle"]).Cast<Dictionary<string, object>>()
-                .Where(c => (c["accion"] as string) == "AGREGAR" && (c["tipo_iniciativa"] == null || c["tipo_agrupado"] == null))
+            var detalleCats = ((List<object>)d["categorias_detalle"]).Cast<Dictionary<string, object>>().ToList();
+            var cls = clasificaciones ?? new List<ClasificacionSolicitud>();
+            // AGREGAR nuevos: la regla de siempre (las dos de ADM si la solicitud no las trae).
+            var sinClasificar = detalleCats
+                .Where(c => (c["accion"] as string) == "AGREGAR" && !SolicitudesCambio.EsReactivacion(c)
+                            && (c["tipo_iniciativa"] == null || c["tipo_agrupado"] == null))
                 .Select(c => c["categoria"] as string)
-                .Where(ruta => !(clasificaciones ?? new List<ClasificacionSolicitud>()).Any(x => string.Equals((x.Categoria ?? "").Trim(), ruta, StringComparison.Ordinal)
-                                                                                                && !string.IsNullOrWhiteSpace(x.TipoIniciativa)
-                                                                                                && !string.IsNullOrWhiteSpace(x.TipoAgrupado)))
+                .Where(ruta => !cls.Any(x => string.Equals((x.Categoria ?? "").Trim(), ruta, StringComparison.Ordinal)
+                                             && !string.IsNullOrWhiteSpace(x.TipoIniciativa)
+                                             && !string.IsNullOrWhiteSpace(x.TipoAgrupado)))
                 .ToList();
+            // sql/83 reactivaciones: solo lo que le falta despues de la historica y la solicitud.
+            var faltanPorCategoria = new Dictionary<string, object>();
+            foreach (var c in detalleCats.Where(x => (x["accion"] as string) == "AGREGAR" && SolicitudesCambio.EsReactivacion(x)))
+            {
+                var ruta = c["categoria"] as string;
+                var adm = cls.FirstOrDefault(x => string.Equals((x.Categoria ?? "").Trim(), ruta, StringComparison.Ordinal));
+                var faltan = SolicitudesCambio.FaltanReactivacion(c, adm);
+                if (faltan.Count == 0) continue;
+                sinClasificar.Add(ruta);
+                faltanPorCategoria[ruta] = faltan.Cast<object>().ToList();
+            }
             if (sinClasificar.Count > 0)
             {
                 var msg = "Falta la clasificaci\u00f3n (Tipo de iniciativa y Agrupaci\u00f3n) de: " + string.Join(", ", sinClasificar.ToArray()) + ".";
                 almacen.RegistrarFallo(id, revisor, 51221, msg);
-                return new Dictionary<string, object> { { "error", msg }, { "tipo", "FaltaClasificacion" }, { "aplicada", false },
-                                                        { "sin_clasificar", sinClasificar }, { "estado_http", 409 } };
+                var falta = new Dictionary<string, object> { { "error", msg }, { "tipo", "FaltaClasificacion" }, { "aplicada", false },
+                                                             { "sin_clasificar", sinClasificar }, { "estado_http", 409 } };
+                if (faltanPorCategoria.Count > 0) falta["faltan"] = faltanPorCategoria;
+                return falta;
             }
             ValidacionAplicar v;
             try { v = validar(f); }

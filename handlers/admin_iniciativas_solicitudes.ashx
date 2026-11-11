@@ -87,12 +87,24 @@
 //        Toda falla de validacion o de la base deja la solicitud PENDIENTE y
 //        registrada (Intentos, UltimoError, evento).
 //
+//   GET  accion=historicas&folio=X   (sql/83) SOLO LECTURA, solo pantalla:
+//        las asociaciones de baja (VigenteEnOrigen = 0) de ESA iniciativa, que
+//        volver a agregar REACTIVA. La MISMA autorizacion que enviar: ADM o
+//        MOD; sin rol, el PO / SO de ESA iniciativa (SolicitudCambioPso,
+//        sql/37 / 38). ADM las ve todas; MOD y PSO solo las del catalogo del
+//        par PO / SO capturado (lo que de verdad pueden pedir: ExigirCatalogo).
+//        La base vuelve a decidir al enviar y al aplicar; esto no da permisos.
+//        -> 200 { disponible, folio, filtro, historicas: [ {categoria,
+//           tipo_iniciativa, tipo_agrupado, pct_dism, f_creacion, f_analisis} ] }
+//           { disponible: false } sin sql/83;  400 SinFolio;  403 / 503 como enviar.
+//
 //   403 antes de leer nada: Exigir (VIEWER, anonimo, rol que falla; para
 //   enviar sin rol, AccesoIniciativas.ExigirSolicitud) y, en lo que es de
 //   ADM, ExigirAdm (MOD y PO/SO: RolInsuficiente). 405 metodo equivocado.
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Web;
 
 public class AdminIniciativasSolicitudes : IHttpHandler
@@ -107,7 +119,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
         var accion = req.QueryString["accion"];
         // Enviar, cancelar y reemplazar son del SOLICITANTE (la base decide
         // si la solicitud es suya); lo demas, de ADM.
-        var delSolicitante = accion == "enviar" || accion == "cancelar" || accion == "reemplazar";
+        var delSolicitante = accion == "enviar" || accion == "cancelar" || accion == "reemplazar" || accion == "historicas";
         if (delSolicitante && !AccesoAdmin.PuedeEntrar(context))
         {
             if (!AccesoIniciativas.ExigirSolicitud(context)) return;
@@ -128,7 +140,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             {
                 if (!esPost) return Error(context, 405, "Usa POST.", "MetodoNoPermitido");
             }
-            else if (accion == "listar" || accion == "detalle")
+            else if (accion == "listar" || accion == "detalle" || accion == "historicas")
             {
                 if (esPost) return Error(context, 405, "Usa GET.", "MetodoNoPermitido");
             }
@@ -143,6 +155,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                 return Error(context, 403, "Sin usuario autenticado no se guarda nada.", "SinUsuario");
             var rol = AccesoAdmin.Rol(context);
 
+            if (accion == "historicas") return Historicas(context, id, rol);
             if (accion == "enviar") return Enviar(context, id, rol, 0, null);
             if (accion == "cancelar") return Cancelar(context, id);
             if (accion == "reemplazar")
@@ -291,6 +304,58 @@ public class AdminIniciativasSolicitudes : IHttpHandler
             }
         }
         return salida;
+    }
+
+    // sql/83: las asociaciones de baja de ESA iniciativa (solo pantalla). La
+    // MISMA autorizacion que Enviar; MOD y PSO ven solo las que pueden pedir
+    // (el catalogo del par PO / SO capturado), ADM todas.
+    private static object Historicas(HttpContext context, IdentidadWindows id, string rol)
+    {
+        var folio = (context.Request.QueryString["folio"] ?? "").Trim();
+        if (folio.Length == 0) return Error(context, 400, "Falta el folio de la iniciativa.", "SinFolio");
+        if (!PersistenciaSolicitudesCambio.ReactivacionActiva())
+            return new Dictionary<string, object> { { "disponible", false }, { "folio", folio }, { "historicas", new List<object>() } };
+        if (!RolAdmin.EsElevado(rol))
+        {
+            DecisionCambioPso d;
+            try
+            {
+                var lectura = AccesoIniciativas.Lectura(context);
+                d = SolicitudCambioPso.Evaluar(id, PersistenciaSolicitudesCambio.SolicitaPsoActiva(), AccesoIniciativas.Motivo(context),
+                                               lectura.Personas, folio, SolicitudesCambio.DuenosCapturados,
+                                               PersistenciaSolicitudesCambio.SolicitaPsoEquipoActiva() ? lectura.Directorio : null);
+            }
+            catch (Exception ex)
+            {
+                DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex);
+                return Error(context, 503, "No se pudo comprobar que la iniciativa es tuya. Int00e9ntalo de nuevo.", "DuenosNoDisponibles");
+            }
+            if (!d.Puede) return Error(context, d.Http, d.Mensaje, d.Tipo);
+        }
+        List<CategoriaHistorica> lista;
+        var esAdm = rol == RolAdmin.Adm;
+        try
+        {
+            lista = CategoriasHistoricas.Leer(folio);
+            if (!esAdm)
+            {
+                // Lo que ExigirCatalogo deja pedir: el catalogo del par capturado.
+                var duenos = SolicitudesCambio.DuenosCapturados(folio) ?? new string[] { null, null };
+                var rutas = duenos[0] != null && duenos[1] != null ? SolicitudesCambio.RutasAgregables(duenos[0], duenos[1]) : null;
+                lista = rutas == null ? new List<CategoriaHistorica>()
+                                      : lista.Where(h => rutas.Contains(DirectorioOrganizacional.Normaliza(h.Ruta))).ToList();
+            }
+        }
+        catch (Exception ex)
+        {
+            DashboardHandler.Registrar("admin_iniciativas_solicitudes.ashx", ex);
+            return Error(context, 503, "No se pudieron leer las categor00edas que estuvieron ligadas.", "HistoricasNoDisponibles");
+        }
+        return new Dictionary<string, object>
+        {
+            { "disponible", true }, { "folio", folio }, { "filtro", esAdm ? "todas" : "par_po_so" },
+            { "historicas", CategoriasHistoricas.ComoJson(lista) },
+        };
     }
 
     // reemplazaA > 0: reemplazo (sql/41) de esa solicitud, con la MISMA

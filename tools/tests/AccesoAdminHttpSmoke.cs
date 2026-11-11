@@ -1002,7 +1002,7 @@ public static class AccesoAdminHttpSmoke
         var solF = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx")).Replace("\r\n", "\n");
         // sql/41 (2026-11-05): cancelar / reemplazar son del solicitante, como enviar.
         Check("M6 solicitudes: todo lo que no es enviar / cancelar / reemplazar exige ADM, antes de leer el cuerpo", true,
-              solF.Contains("var delSolicitante = accion == \"enviar\" || accion == \"cancelar\" || accion == \"reemplazar\";") &&
+              solF.Contains("var delSolicitante = accion == \"enviar\" || accion == \"cancelar\" || accion == \"reemplazar\" || accion == \"historicas\";") &&
               solF.Contains("if (!delSolicitante\n            && !AccesoAdmin.ExigirAdm(") &&
               solF.IndexOf("AccesoAdmin.ExigirAdm(") < solF.IndexOf("DashboardHandler.Responder("));
 

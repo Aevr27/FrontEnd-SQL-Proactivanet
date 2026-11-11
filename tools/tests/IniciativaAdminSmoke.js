@@ -3245,6 +3245,56 @@ pruebas.push(function () {
     ed.paraEnviar().filter(function (p) { return p[0] === 'pct_categoria'; })[0]);
 });
 
+// ---------------------------------------------------------------------------
+// RH) sql/83: ADM reactiva una categoria que ESTUVO ligada (la misma fila).
+//     La clasificacion historica no vacia se conserva (solo lectura) y solo
+//     se elige la que falta; las fechas son las originales; lo que viaja
+//     sigue siendo agregar_categoria.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var ini = Ini('PRB 2026-000078', { categorias: [Cat('/A/Cat 1', 0.3)] });
+  var ed = new A.EdicionAdmin(ini, { rutas: ['/A/Cat 1', '/A/Hist', '/A/Nueva'], pos: ['PO 1'], sos: ['SO x'],
+                                     tiposIniciativa: ['Problem', 'Mejora'], tiposAgrupado: ['Problem', 'Mejora'] });
+  Check('RH0 sin historicas: agregar se ve y viaja como siempre (Nueva)', [true, true],
+    [ed.categorias.agregar('/A/Hist').ok, /ini-cat-estado nueva">Nueva/.test(A.htmlCategoriasEdicion(ed, null))]);
+  ed.categorias.quitar(1);
+  ed.categorias.fijarHistoricas([{ categoria: '/A/Hist', tipo_iniciativa: 'Problem', tipo_agrupado: null, f_creacion: '2026-01-05', f_analisis: '2026-01-20' }]);
+  ed.categorias.agregar('/A/Hist');
+  ed.categorias.agregar('/A/Nueva');
+  var h = A.htmlCategoriasEdicion(ed, null);
+  Check('RH1 la historica: «Reactivar (estuvo ligada)», no «Nueva»; la otra sigue Nueva', [true, true],
+    [/\/A\/Hist<\/span> <span class="ini-cat-estado reactivar"[^>]*>Reactivar \(estuvo ligada\)/.test(h), /\/A\/Nueva<\/span> <span class="ini-cat-estado nueva">Nueva/.test(h)]);
+  Check('RH2 la Clasificacion historica se conserva (solo lectura); la Agrupacion que falta se elige', [true, false, true],
+    [/Problem <span class="ini-origen"[^>]*>Se conserva/.test(h), /data-edicion-tipo="1\|tipo_iniciativa"/.test(h), /data-edicion-tipo="1\|tipo_agrupado"/.test(h)]);
+  Check('RH3 fechas originales, no calculadas', [true, false],
+    [/20\/01\/2026<\/span> <span class="ini-origen"[^>]*>Original/.test(h), ed.categorias.fechasNuevas().some(function (x) { return x.categoria === '/A/Hist'; })]);
+  Check('RH4 capturar la Clasificacion historica no se acepta; la que falta si', [false, true],
+    [ed.categorias.capturarTipo(1, 'tipo_iniciativa', 'Mejora'), ed.categorias.capturarTipo(1, 'tipo_agrupado', 'Mejora')]);
+  var cambio = ed.categorias.cambios().filter(function (c) { return c.nuevo.indexOf('/A/Hist') === 0; })[0];
+  Check('RH5 pendiente: «Reactivar categoría» con la clasificacion efectiva y sus fechas', ['Reactivar categoría', true, true],
+    [cambio.rotulo, cambio.nuevo.indexOf('Problem / Mejora') >= 0, cambio.nuevo.indexOf('conserva sus fechas (análisis 2026-01-20)') >= 0]);
+  ed.categorias.capturarPct(1, '20');
+  var pares = ed.paraEnviar().filter(function (p) { return /^agregar_/.test(p[0]); });
+  Check('RH6 lo que viaja sigue siendo agregar_categoria; la Clasificacion historica va vacia (la base la conserva)',
+    [['agregar_categoria', '/A/Hist'], ['agregar_pct', '20'], ['agregar_tipo_iniciativa', ''], ['agregar_tipo_agrupado', 'Mejora']],
+    pares.slice(0, 4));
+  // Al reves (falta la Clasificacion) y completa (no se elige nada).
+  var ed2 = new A.EdicionAdmin(ini, { rutas: ['/A/Cat 1', '/A/Hist2', '/A/Hist3'], pos: ['PO 1'], sos: ['SO x'],
+                                      tiposIniciativa: ['Problem', 'Mejora'], tiposAgrupado: ['Problem', 'Mejora'] });
+  ed2.categorias.fijarHistoricas([{ categoria: '/A/Hist2', tipo_iniciativa: null, tipo_agrupado: 'Problem', f_creacion: '2026-02-01', f_analisis: '2026-02-16' },
+                                  { categoria: '/A/Hist3', tipo_iniciativa: 'Problem', tipo_agrupado: 'Problem', f_creacion: '2026-03-01', f_analisis: '2026-03-16' }]);
+  ed2.categorias.agregar('/A/Hist2');
+  ed2.categorias.agregar('/A/Hist3');
+  var h2 = A.htmlCategoriasEdicion(ed2, null);
+  Check('RH7 falta solo la Clasificacion: ese selector se puede usar; la Agrupacion historica es solo lectura', [true, false, true, false],
+    [/data-edicion-tipo="1\|tipo_iniciativa"/.test(h2), /data-edicion-tipo="1\|tipo_agrupado"/.test(h2),
+     ed2.categorias.capturarTipo(1, 'tipo_iniciativa', 'Mejora'), ed2.categorias.capturarTipo(1, 'tipo_agrupado', 'Mejora')]);
+  Check('RH8 clasificacion historica completa: ningun selector; nada se captura; fechas originales de cada una', [false, false, false, false, true, true],
+    [/data-edicion-tipo="2\|tipo_iniciativa"/.test(h2), /data-edicion-tipo="2\|tipo_agrupado"/.test(h2),
+     ed2.categorias.capturarTipo(2, 'tipo_iniciativa', 'Mejora'), ed2.categorias.capturarTipo(2, 'tipo_agrupado', 'Mejora'),
+     /16\/02\/2026<\/span> <span class="ini-origen"[^>]*>Original/.test(h2), /16\/03\/2026<\/span> <span class="ini-origen"[^>]*>Original/.test(h2)]);
+});
+
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())
   .then(function () {
     console.log(fallos ? '\n' + fallos + ' FALLO(S)' : '\nTODO PASO');

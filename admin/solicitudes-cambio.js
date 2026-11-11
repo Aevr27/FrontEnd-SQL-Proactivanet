@@ -57,6 +57,11 @@ window.SolicitudesCambioCola = (function () {
     return dos(d.getDate()) + '/' + dos(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + dos(d.getHours()) + ':' + dos(d.getMinutes());
   }
   function pct(v) { return v === null || v === undefined ? '—' : h(v) + '%'; }
+  // sql/83: un AGREGAR que reactiva una categoria que estuvo ligada (lo marca
+  // el servidor solo con la migracion aplicada) y los campos de clasificacion
+  // que le faltan despues de la historica y la solicitud.
+  function esReactivacion(c) { return !!(c && c.accion === 'AGREGAR' && c.reactivacion === true); }
+  function faltanClas(c) { return c && Array.isArray(c.faltan_clasificacion) ? c.faltan_clasificacion : []; }
 
   // Lo pedido, en una linea (HTML). La fecha dice SIEMPRE su etapa.
   function resumen(s) {
@@ -302,6 +307,7 @@ window.SolicitudesCambioCola = (function () {
     var htmlCats = cats.length ? '<h5>Categorías</h5><table class="ini-det-tabla"><thead><tr><th scope="col">Categoría</th><th scope="col">Acción</th>' +
       '<th scope="col">% al enviar</th><th scope="col">% pedido</th><th scope="col">% ahora</th><th scope="col">Clasificación</th></tr></thead><tbody>' +
       cats.map(function (c, n) {
+        if (esReactivacion(c)) return filaReactivacion(c, n);
         var sinClas = c.accion === 'AGREGAR' && (!c.tipo_iniciativa || !c.tipo_agrupado);
         var clas = c.accion !== 'AGREGAR' ? '<span class="ini-nota">no cambia</span>'
           : !sinClas ? h(c.tipo_iniciativa) + ' / ' + h(c.tipo_agrupado)
@@ -311,8 +317,28 @@ window.SolicitudesCambioCola = (function () {
             : '<span class="ini-nota">sin clasificar</span>';
         return '<tr><td class="ini-cat-ruta">' + h(c.categoria) + '</td><td>' + (c.accion === 'AGREGAR' ? 'Agregar' : 'Cambiar %') + '</td>' +
           '<td class="num">' + pct(c.pct_anterior) + '</td><td class="num">' + pct(c.pct_nuevo) + '</td><td class="num">' +
-          (c.accion === 'AGREGAR' ? (c.ligada_alguna_vez ? 'ya ligada' : '—') : (c.ligada ? pct(c.pct_actual) : 'ya no ligada')) + '</td><td>' + clas + '</td></tr>';
+          (c.accion === 'AGREGAR' ? (c.ligada ? 'ya ligada' : c.ligada_alguna_vez && !('reactivacion' in c) ? 'ya ligada' : '—') : (c.ligada ? pct(c.pct_actual) : 'ya no ligada')) + '</td><td>' + clas + '</td></tr>';
       }).join('') + '</tbody></table>' : '';
+    // sql/83: un AGREGAR de una categoria que estuvo ligada la REACTIVA. Su
+    // clasificacion historica no vacia se conserva; ADM solo elige la que
+    // falta (faltan_clasificacion, del servidor).
+    function filaReactivacion(c, n) {
+      var falta = faltanClas(c);
+      function campo(clave, historica, pedida, rotulo, attr, lista) {
+        if (falta.indexOf(clave) < 0) {
+          return historica ? h(historica) + ' <span class="ini-origen">histórica, se conserva</span>' : h(pedida);
+        }
+        return revisa ? '<label>' + rotulo + ' <select ' + attr + '>' + opciones(lista) + '</select></label>'
+          : '<span class="ini-nota">sin ' + rotulo.toLowerCase() + '</span>';
+      }
+      var clas = '<span class="ini-sol-clas" data-clas-fila="' + n + '">' +
+        campo('tipo_iniciativa', c.tipo_iniciativa_historica, c.tipo_iniciativa, 'Tipo de iniciativa',
+              'data-clas-ti="' + n + '" data-clas-categoria="' + h(c.categoria) + '"', tipos.iniciativa) + ' / ' +
+        campo('tipo_agrupado', c.tipo_agrupado_historica, c.tipo_agrupado, 'Agrupación', 'data-clas-ta="' + n + '"', tipos.agrupado) + '</span>';
+      return '<tr><td class="ini-cat-ruta">' + h(c.categoria) + '</td><td>Reactivar</td>' +
+        '<td class="num">' + pct(c.pct_anterior) + '</td><td class="num">' + pct(c.pct_nuevo) + '</td><td class="num">' +
+        '<span class="ini-cat-estado reactivar">Reactivación (estuvo ligada)</span></td><td>' + clas + '</td></tr>';
+    }
     var avisos = '';
     if (revisa && d.tipo === 'VARIOS') {
       avisos += '<p class="ini-cambio-msg aviso"><strong>Varios cambios, una sola decisión:</strong> aplicar aplica TODOS los cambios de arriba ' +
@@ -329,8 +355,13 @@ window.SolicitudesCambioCola = (function () {
     if (revisa && d.ultimo_error) {
       avisos += '<p class="ini-cambio-msg aviso"><strong>Último intento (' + fechaHora(d.fecha_ultimo_intento_utc) + '):</strong> ' + h(d.ultimo_error) + '</p>';
     }
-    if (revisa && cats.some(function (c) { return c.accion === 'AGREGAR' && (!c.tipo_iniciativa || !c.tipo_agrupado); })) {
+    if (revisa && cats.some(function (c) { return c.accion === 'AGREGAR' && !esReactivacion(c) && (!c.tipo_iniciativa || !c.tipo_agrupado); })) {
       avisos += '<p class="ini-cambio-msg aviso">Una categoría por agregar llegó sin clasificación (su prefijo no tiene regla o el valor no existe): elígela antes de aplicar.</p>';
+    }
+    if (cats.some(esReactivacion)) {
+      avisos += '<p class="ini-cambio-msg aviso"><strong>Reactivación:</strong> una categoría pedida estuvo ligada a esta iniciativa y se dio de baja. ' +
+        'Al aplicar se reactiva la MISMA asociación: conserva sus fechas originales y su clasificación histórica' +
+        (revisa && cats.some(function (c) { return esReactivacion(c) && faltanClas(c).length; }) ? '; elige solo lo que le falta.' : '.') + '</p>';
     }
     var eventos = (d.eventos || []).map(function (e) {
       return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + persona(e.usuario_mostrar, e.usuario) +
@@ -741,9 +772,20 @@ window.SolicitudesCambioCola = (function () {
       if (comentario) datos.append('comentario', comentario);
       var self = this, faltan = [];
       (d.categorias_detalle || []).forEach(function (c, n) {
-        if (c.accion !== 'AGREGAR' || (c.tipo_iniciativa && c.tipo_agrupado)) return;
         var ti = self.doc.querySelector('[data-clas-ti="' + n + '"]'), ta = self.doc.querySelector('[data-clas-ta="' + n + '"]');
         var vi = ti ? ti.value : '', va = ta ? ta.value : '';
+        if (esReactivacion(c)) {
+          // sql/83: solo los campos que le faltan; los demas van vacios (se
+          // conserva la historica: el servidor rechaza sobrescribirla).
+          var falta = faltanClas(c);
+          if (!falta.length) return;
+          if ((falta.indexOf('tipo_iniciativa') >= 0 && !vi) || (falta.indexOf('tipo_agrupado') >= 0 && !va)) { faltan.push(c.categoria); return; }
+          datos.append('clas_categoria', c.categoria);
+          datos.append('clas_tipo_iniciativa', falta.indexOf('tipo_iniciativa') >= 0 ? vi : '');
+          datos.append('clas_tipo_agrupado', falta.indexOf('tipo_agrupado') >= 0 ? va : '');
+          return;
+        }
+        if (c.accion !== 'AGREGAR' || (c.tipo_iniciativa && c.tipo_agrupado)) return;
         if (!vi || !va) { faltan.push(c.categoria); return; }
         datos.append('clas_categoria', c.categoria);
         datos.append('clas_tipo_iniciativa', vi);

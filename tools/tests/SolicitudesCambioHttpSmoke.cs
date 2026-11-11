@@ -1251,6 +1251,101 @@ public static class SolicitudesCambioHttpSmoke
             canc.Lanza = null;
         }
 
+        // ---- H) sql/83: reactivar una categoria que estuvo ligada --------------
+        // Historicas sin SQL: 000001 tiene una de baja DENTRO del par (/A/Cat 2) y
+        // otra FUERA (/Z/Fuera); 000003 (par PO X / SO x, sin catalogo) una.
+        CategoriasHistoricas.LeerParaPruebas = delegate (string folio)
+        {
+            if (folio == "PRB 2026-000001")
+                return new List<CategoriaHistorica> {
+                    new CategoriaHistorica { Ruta = "/A/Cat 2", TipoIniciativa = "Problem", TipoAgrupado = null, Pct = 0.2m, FCreacion = "2026-01-05", FAnalisis = "2026-01-20" },
+                    new CategoriaHistorica { Ruta = "/Z/Fuera", TipoIniciativa = "Problem", TipoAgrupado = "Problem", Pct = 0.1m, FCreacion = "2026-02-01", FAnalisis = "2026-02-16" } };
+            if (folio == "PRB 2026-000003")
+                return new List<CategoriaHistorica> { new CategoriaHistorica { Ruta = "/A/Cat 2", TipoIniciativa = "Problem", TipoAgrupado = "Problem" } };
+            return new List<CategoriaHistorica>();
+        };
+        AccesoIniciativas.FuenteDuenos = duenosPso;
+        AccesoAdmin.FuenteRoles = new RolesFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(ADMPO, "ADM");
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
+        PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = true;
+        try
+        {
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = false;
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", ADM, null, out estado);
+            Check("H1 sin sql/83: 200 disponible false, sin lista", "200|True|False", estado + "|" + cuerpo.Contains("\"disponible\":false") + "|" + cuerpo.Contains("/A/Cat 2"));
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = true;
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", ADM, null, out estado);
+            Check("H2 ADM: todas (filtro todas), con fechas y clasificacion historica", "200|True|True|True|True",
+                  estado + "|" + cuerpo.Contains("\"filtro\":\"todas\"") + "|" + cuerpo.Contains("/A/Cat 2") + "|" + cuerpo.Contains("/Z/Fuera") + "|" + cuerpo.Contains("\"f_analisis\":\"2026-01-20\""));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", MOD, null, out estado);
+            Check("H3 MOD: SOLO las del par PO / SO capturado (lo que puede pedir)", "200|True|True|False",
+                  estado + "|" + cuerpo.Contains("\"filtro\":\"par_po_so\"") + "|" + cuerpo.Contains("/A/Cat 2") + "|" + cuerpo.Contains("/Z/Fuera"));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", PO1, null, out estado);
+            Check("H4 PO de la iniciativa (PSO): solo las del par", "200|True|False", estado + "|" + cuerpo.Contains("/A/Cat 2") + "|" + cuerpo.Contains("/Z/Fuera"));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", POX, null, out estado);
+            Check("H5 PO / SO de OTRA iniciativa: 403 NoEsDueno, sin lista", "403|True|False", estado + "|" + cuerpo.Contains("NoEsDueno") + "|" + cuerpo.Contains("/A/Cat 2"));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", COMUN, null, out estado);
+            Check("H6 en CatPersona sin ser PO / SO vigente: 403", "403|False", estado + "|" + cuerpo.Contains("/A/Cat 2"));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", "", null, out estado);
+            Check("H7 anonimo / VIEWER: 403", "403|403", estado + "|" + (Correr("GET", "accion=historicas&folio=PRB%202026-000001", VIEWER, null, out estado) != null ? estado.ToString() : ""));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000003", MOD, null, out estado);
+            Check("H8 MOD con un par que no esta en el catalogo: 200 con lista vacia", "200|True|False", estado + "|" + cuerpo.Contains("\"historicas\":[]") + "|" + cuerpo.Contains("/A/Cat 2"));
+            cuerpo = Correr("GET", "accion=historicas", ADM, null, out estado);
+            Check("H9 sin folio: 400 SinFolio; POST: 405", "400|True|405", estado + "|" + cuerpo.Contains("SinFolio") + "|" +
+                  (Correr("POST", "accion=historicas&folio=PRB%202026-000001", ADM, F("x", "y"), out estado) != null ? estado.ToString() : ""));
+
+            // Desactualizada: con 83 solo una que YA esta vigente; sin 83, como antes.
+            var reac = Cat("AGREGAR", "/A/Cat 2", "10", null, null, null, null, false);
+            reac["ligada_alguna_vez"] = true;
+            var dReac = Pendiente("CATEGORIAS", MOD, reac);
+            var conReac = SolicitudesCambio.Desactualizada(dReac);
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = false;
+            var sinReac = SolicitudesCambio.Desactualizada(dReac);
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = true;
+            Check("H10 AGREGAR de una de baja: con 83 no desactualizada; sin 83 si (como antes)", "False|True", conReac + "|" + sinReac);
+            var vig = Cat("AGREGAR", "/A/Cat 2", "10", null, null, null, null, true);
+            Check("H11 con 83, AGREGAR de una que YA esta vigente: desactualizada", true, SolicitudesCambio.Desactualizada(Pendiente("CATEGORIAS", MOD, vig)));
+
+            // Aprobar una reactivacion: solo lo que falta (la historica no trae Agrupacion).
+            reac["reactivacion"] = true; reac["tipo_iniciativa_historica"] = "Problem"; reac["tipo_agrupado_historica"] = null;
+            reac["faltan_clasificacion"] = new List<object> { "tipo_agrupado" };
+            alm.Detalle_ = Pendiente("CATEGORIAS", MOD, reac); alm.Llamadas.Clear(); validaciones.Clear(); validacionOk = true;
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("H12 reactivacion sin la Agrupacion que falta: 409 FaltaClasificacion con faltan = tipo_agrupado, registrada", "409|True|True|Detalle:5,RegistrarFallo:51221",
+                  estado + "|" + cuerpo.Contains("FaltaClasificacion") + "|" + cuerpo.Contains("\"faltan\":{\"/A/Cat 2\":[\"tipo_agrupado\"]}") + "|" + string.Join(",", alm.Llamadas.ToArray()));
+            alm.Llamadas.Clear(); validaciones.Clear();
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5", "clas_categoria", "/A/Cat 2", "clas_tipo_iniciativa", "", "clas_tipo_agrupado", "Problem"), out estado);
+            Check("H13 ADM da solo la que falta: se valida con la EFECTIVA (historica Problem + Agrupacion de ADM) y se aplica", "200|Problem|Problem|Aplicar:5|/A/Cat 2=/Problem",
+                  estado + "|" + validaciones[0]["agregar_tipo_iniciativa"] + "|" + validaciones[0]["agregar_tipo_agrupado"] + "|" + alm.Llamadas.Last() + "|" +
+                  alm.UltimasClasificaciones[0].Categoria + "=" + alm.UltimasClasificaciones[0].TipoIniciativa + "/" + alm.UltimasClasificaciones[0].TipoAgrupado);
+            var completa = Cat("AGREGAR", "/A/Cat 3", "10", "Mejora", "Mejora", null, null, false);
+            completa["reactivacion"] = true; completa["tipo_iniciativa_historica"] = "Problem"; completa["tipo_agrupado_historica"] = "Problem";
+            completa["faltan_clasificacion"] = new List<object>();
+            alm.Detalle_ = Pendiente("CATEGORIAS", MOD, completa); alm.Llamadas.Clear(); validaciones.Clear();
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("H14 historica completa: sin clasificar no se pide (51221 no aplica) y la EFECTIVA es la historica, no la de la solicitud", "200|Problem|Problem",
+                  estado + "|" + validaciones[0]["agregar_tipo_iniciativa"] + "|" + validaciones[0]["agregar_tipo_agrupado"]);
+
+            Check("H15 errores de sql/83: 51032 403 ReactivacionSoloAdm; 51033 409 SolicitudNoCorresponde; 51034 422 ClasificacionHistorica",
+                  "403|ReactivacionSoloAdm|409|SolicitudNoCorresponde|422|ClasificacionHistorica",
+                  new ErrorSolicitudCambio(51032, "x", null).EstadoHttp + "|" + new ErrorSolicitudCambio(51032, "x", null).Tipo + "|" +
+                  new ErrorSolicitudCambio(51033, "x", null).EstadoHttp + "|" + new ErrorSolicitudCambio(51033, "x", null).Tipo + "|" +
+                  new ErrorSolicitudCambio(51034, "x", null).EstadoHttp + "|" + new ErrorSolicitudCambio(51034, "x", null).Tipo);
+            Check("H16 en la edicion directa los mismos numeros dan su tipo", "ReactivacionSoloAdm|SolicitudNoCorresponde|ClasificacionHistorica",
+                  new ErrorEscrituraGestionAdmin(51032, "x", null).Tipo + "|" + new ErrorEscrituraGestionAdmin(51033, "x", null).Tipo + "|" + new ErrorEscrituraGestionAdmin(51034, "x", null).Tipo);
+            Check("H17 clasificacion efectiva: vacia ('', espacios) = falta; historica gana; conflicto sin distinguir mayusculas", "Problem|Mejora|null|False|True|False",
+                  CategoriasHistoricas.Efectiva("Problem", "Mejora") + "|" + CategoriasHistoricas.Efectiva("   ", "Mejora") + "|" +
+                  (CategoriasHistoricas.Efectiva("", " ") ?? "null") + "|" + CategoriasHistoricas.Conflicto("Problem", "PROBLEM") + "|" +
+                  CategoriasHistoricas.Conflicto("Problem", "Mejora") + "|" + CategoriasHistoricas.Conflicto(null, "Mejora"));
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = null;
+            CategoriasHistoricas.LeerParaPruebas = null;
+        }
+
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : "FALLOS: " + fallos);
         return fallos == 0 ? 0 : 1;
     }

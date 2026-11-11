@@ -1528,6 +1528,25 @@ pruebas.push(function () {
   k.fijarPct('/A/Cat 1/Hoja', '40');
   Check('SR4b agregar una ligada se rechaza', [false, true], [k.agregarCategoria('/a/cat 3').ok, /ya es una categoría de esta iniciativa/.test(k.agregarCategoria('/A/Cat 3').mensaje)]);
   Check('SR4b agregar una fuera del catalogo se rechaza', false, k.agregarCategoria('/Z/Inventada').ok);
+  // sql/83: una que ESTUVO ligada (historica, del servidor) se marca para
+  // reactivar; las mismas reglas de agregar y lo que viaja no cambia.
+  var kh = new S(reg.buscar('PRB 2026-000001'), { estados: LISTAS.estados, subestados: LISTAS.subestados, rutas: RUTAS_CAT, filas: FILAS_CAT,
+                                                   historicas: [{ categoria: '/B/Cat 4', tipo_iniciativa: 'Problem', tipo_agrupado: 'ReqOpr' }] });
+  kh.campo = 'pct'; kh.motivo = 'Reactivar';
+  var rh = kh.agregarCategoria('/B/Cat 4');
+  Check('SR83a agregar una que estuvo ligada: ok y marcada para reactivar; otra no; fuera del par se sigue rechazando', [true, true, true, false, false],
+    [rh.ok, rh.reactivar, kh.esReactivacion('/b/cat 4'), kh.esReactivacion('/A/Cat 2'), kh.agregarCategoria('/Z/Inventada').ok]);
+  kh.capturarPctNueva(0, '20');
+  Check('SR83b lo que viaja sigue siendo agregar_categoria / agregar_pct (sin accion nueva)', [['agregar_categoria', '/B/Cat 4'], ['agregar_pct', '20']],
+    kh.pares().filter(function (p) { return /^agregar_/.test(p[0]) || /reactiv/i.test(p[0]); }));
+  var capH = { iniciativas: [{ folio: 'PRB 2026-000099', activa: true, estado: 'En Solución', categorias: [{ categoria: '/B/Cat 4', pct_dism: 0.9, agrup: 'Problem' }] }],
+               agrupadores: ['Problem'], estadosActivos: ['En Solución'] };
+  var iniH = { folio: 'PRB 2026-000001', estado: 'En Solución', categorias: [] };
+  Check('SR83c tope estimado con la Agrupacion EFECTIVA: la historica ReqOpr no consume; sin historica (la del prefijo) si', [true, false],
+    [R.excedeTope(capH, iniH, '/B/Cat 4', '20', true, 'En Solución') !== null, R.excedeTope(capH, iniH, '/B/Cat 4', '20', true, 'En Solución', 'ReqOpr') !== null]);
+  var kh2 = new S(reg.buscar('PRB 2026-000001'), { rutas: RUTAS_CAT, filas: FILAS_CAT });
+  Check('SR83d sin historicas (sin la migracion): nada se marca', [true, false],
+    [!kh2.esReactivacion('/B/Cat 4'), kh2.agregarCategoria('/A/Cat 2').reactivar === true]);
   Check('SR4b agregar del catalogo', [true, '/A/Cat 2'], [k.agregarCategoria(' /a/cat 2 ').ok, k.nuevas[0].categoria]);
   Check('SR4b la misma dos veces se rechaza', [false, 1], [k.agregarCategoria('/A/Cat 2').ok, k.nuevas.length]);
   k.agregarCategoria('/B/Cat 4');

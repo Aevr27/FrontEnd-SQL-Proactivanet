@@ -544,9 +544,28 @@ window.IniciativaAdmin = (function () {
                  // Meta en tickets tambien para una ligada (Modificar).
                  volCalc: null, vol30: null, tickets: '', fuente: 'pct' };
       });
+      // sql/83: las que ESTUVIERON ligadas (las da el servidor, solo ADM las
+      // ve todas). Agregar una la REACTIVA: misma fila, sus fechas y su
+      // clasificacion historica no vacia. Vacia = como antes.
+      this.historicas = [];
     }
 
     fijarRutas(rutas) { this.rutas = Array.isArray(rutas) ? rutas : []; }
+
+    fijarHistoricas(lista) { this.historicas = Array.isArray(lista) ? lista : []; }
+    // La historica de esa ruta ({ categoria, tipo_iniciativa, tipo_agrupado,
+    // f_creacion, f_analisis }), o null.
+    historica(ruta) {
+      var k = llaveRuta(ruta);
+      return this.historicas.filter(function (h) { return llaveRuta(h.categoria) === k; })[0] || null;
+    }
+    // De una NUEVA que reactiva: el campo de clasificacion que ya trae la
+    // historica (no vacio: se conserva y no se elige), o ''.
+    tipoHistorico(f, campo) {
+      var h = f && !f.ligada ? this.historica(f.categoria) : null;
+      var v = h ? h[campo === 'tipo_iniciativa' ? 'tipo_iniciativa' : 'tipo_agrupado'] : '';
+      return v === null || v === undefined ? '' : String(v).trim();
+    }
 
     buscar(ruta) {
       var k = llaveRuta(ruta);
@@ -714,6 +733,8 @@ window.IniciativaAdmin = (function () {
     capturarTipo(n, campo, texto) {
       var f = this.filas[n], v = String(texto === null || texto === undefined ? '' : texto).trim();
       if (!f || f.quitada) return false;
+      // sql/83: el campo que la historica ya trae se conserva (no se elige).
+      if (!f.ligada && this.tipoHistorico(f, campo)) return false;
       if (!f.ligada && campo === 'tipo_iniciativa') f.tipoIniciativa = v;
       else if (!f.ligada && campo === 'tipo_agrupado') f.tipoAgrupado = v;
       else if (f.ligada && !f.agrup && campo === 'tipo_agrupado') f.agrupNueva = v;
@@ -734,8 +755,10 @@ window.IniciativaAdmin = (function () {
 
     // Las fechas calculadas de cada categoria nueva (solo para mostrar; no
     // viajan: el servidor las fija al guardar).
+    // sql/83: una que se reactiva conserva las suyas (no son nuevas).
     fechasNuevas() {
-      return this.filas.filter(function (f) { return !f.ligada; })
+      var self = this;
+      return this.filas.filter(function (f) { return !f.ligada && !self.historica(f.categoria); })
         .map(function (f) { return { categoria: f.categoria, f_creacion: f.fCreacion, f_analisis: f.fAnalisis }; });
     }
 
@@ -767,9 +790,18 @@ window.IniciativaAdmin = (function () {
       var enTickets = function (f) {
         return f.fuente === 'tickets' && f.valor !== '' ? ' (meta: ' + f.tickets + ' tickets)' : '';
       };
+      var self = this;
       this.filas.forEach(function (f) {
+        var h = !f.ligada ? self.historica(f.categoria) : null;
         if (f.ligada && f.quitada) {
           salida.push({ clave: 'quitar_categoria', rotulo: 'Quitar categoría', anterior: f.categoria, nuevo: '' });
+        } else if (h) {
+          // sql/83: reactiva la MISMA asociacion (sus fechas y su clasificacion).
+          var ti = self.tipoHistorico(f, 'tipo_iniciativa') || f.tipoIniciativa, ta = self.tipoHistorico(f, 'tipo_agrupado') || f.tipoAgrupado;
+          salida.push({ clave: 'agregar_categoria', rotulo: 'Reactivar categoría', anterior: '',
+                        nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%' + enTickets(f)) +
+                          (ti || ta ? ' · ' + (ti || 'sin Clasificación') + ' / ' + (ta || 'sin Agrupación') : '') +
+                          ' · conserva sus fechas (análisis ' + (h.f_analisis || 'el de la iniciativa') + ')' });
         } else if (!f.ligada) {
           salida.push({ clave: 'agregar_categoria', rotulo: 'Agregar categoría', anterior: '',
                         nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%' + enTickets(f)) +
@@ -881,6 +913,13 @@ window.IniciativaAdmin = (function () {
         return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(fechas.f_analisis)) +
           '</span> <span class="ini-origen derivado" title="Hereda la de la iniciativa (dbo.Problem.FechaAnalisis): se cambia en Fecha compromiso de Análisis">De la iniciativa</span>';
       }
+      // sql/83: la que se reactiva conserva sus fechas originales.
+      var hf = cats.historica ? cats.historica(f.categoria) : null;
+      if (hf) {
+        return '<span class="ini-cat-fecha">' + Escape.html(hf.f_analisis ? fechaCorta(hf.f_analisis) : fechaCorta(fechas.f_analisis)) + '</span>' +
+          ' <span class="ini-origen" title="Estuvo ligada' + (hf.f_creacion ? ' desde el ' + Escape.attr(fechaCorta(hf.f_creacion)) : '') +
+          ': al reactivarse conserva sus fechas originales">Original</span>';
+      }
       return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(f.fAnalisis)) + '</span>' +
         ' <span class="ini-origen derivado" title="Se liga el ' + Escape.attr(fechaCorta(f.fCreacion)) +
         ': análisis = ese día + ' + FECHAS_GESTION.diasAnalisis + ' días. La fija el servidor al guardar.">Calculada</span>';
@@ -896,8 +935,13 @@ window.IniciativaAdmin = (function () {
       if (f.quitada) return '—';
       var attr = function (campo) { return 'data-' + prefijo + '-tipo="' + n + '|' + campo + '"'; };
       if (!f.ligada) {
-        return opcionesTipo(fechas.tiposIniciativa, f.tipoIniciativa, attr('tipo_iniciativa'), 'Clasificación') + ' ' +
-          opcionesTipo(fechas.tiposAgrupado, f.tipoAgrupado, attr('tipo_agrupado'), 'Agrupación');
+        // sql/83: en una que se reactiva, el campo que la historica trae se
+        // conserva (solo lectura); el que le falta se puede elegir.
+        var hti = cats.tipoHistorico ? cats.tipoHistorico(f, 'tipo_iniciativa') : '';
+        var hta = cats.tipoHistorico ? cats.tipoHistorico(f, 'tipo_agrupado') : '';
+        var conserva = ' <span class="ini-origen" title="Clasificación histórica de la categoría: se conserva al reactivarla">Se conserva</span>';
+        return (hti ? Escape.html(hti) + conserva : opcionesTipo(fechas.tiposIniciativa, f.tipoIniciativa, attr('tipo_iniciativa'), 'Clasificación')) + ' ' +
+          (hta ? Escape.html(hta) + conserva : opcionesTipo(fechas.tiposAgrupado, f.tipoAgrupado, attr('tipo_agrupado'), 'Agrupación'));
       }
       if (f.agrup) return Escape.html(f.agrup);
       return opcionesTipo(fechas.tiposAgrupado, f.agrupNueva, attr('tipo_agrupado'), 'Agrupación') +
@@ -910,7 +954,9 @@ window.IniciativaAdmin = (function () {
       '<th scope="col">' + (porTickets ? 'Tickets a resolver' : '% Disminución') + '</th>' + (fechas ? '<th scope="col">Agrupación</th><th scope="col">Fecha de análisis</th>' : '') +
       '<th scope="col"><span class="ini-sr">Acción</span></th></tr></thead><tbody>' +
       cats.filas.map(function (f, n) {
+        var reactiva = !f.ligada && !f.quitada && cats.historica && cats.historica(f.categoria);
         var estado = f.quitada ? '<span class="ini-cat-estado">Se quitará</span>'
+          : reactiva ? '<span class="ini-cat-estado reactivar" title="Estuvo ligada a esta iniciativa y se dio de baja: se reactiva la misma asociación con sus fechas y su clasificación">Reactivar (estuvo ligada)</span>'
           : !f.ligada ? '<span class="ini-cat-estado nueva">Nueva</span>' : '';
         var pct = celdaPct(f, n);
         var boton = f.quitada
