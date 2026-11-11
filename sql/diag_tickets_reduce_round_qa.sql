@@ -13,12 +13,13 @@
      las demas siguen. Requiere SQL Server 2016+ (SESSION_CONTEXT no se usa;
      nada posterior a 2016).
 
-   PARA QUE (revision "Tickets a reducir", regla objetivo ROUND(x, 0))
+   PARA QUE (revision "Tickets a reducir"; regla del negocio, confirmada
+   2026-11-11: CEILING(volumen x %) por iniciativa -> sql/84 y sql/85)
      S0  contexto: servidor, base, cuenta, version, VIEW DEFINITION.
      S1  adm.usp_GestionAdmin_TicketsReduce: hash y version
-           sql/18 (ROUND)   0xDCDAE267E6ABE7243A823EAA02FC069983381079CB0AC9E7B46219EF9D861B46  = objetivo
+           sql/18 (ROUND)   0xDCDAE267E6ABE7243A823EAA02FC069983381079CB0AC9E7B46219EF9D861B46
            sql/33 (FLOOR)   0x41356110A3825747DFA0326229DADAE2FE9F21560FA81ADB4873DC8F73A1949F
-           sql/84 (CEILING) 0xD6C0873670C7832F0A9B7AAC6935B5592885C58C056B06218ACC2E0195468591  (borrador, nunca en repo)
+           sql/84 (CEILING) 0xD6C0873670C7832F0A9B7AAC6935B5592885C58C056B06218ACC2E0195468591  = objetivo
          (regla de hash de sql/20 a 33 y ADM_04 sec 11: SHA2_256 de
          OBJECT_DEFINITION sin espacios, tabs ni saltos de linea).
      S2  propiedades extendidas del procedimiento (marca TicketsReduceAntes).
@@ -44,7 +45,7 @@
          NINGUNA fila vigente en ProblemCategoria) y si esas iniciativas tienen
          filas NO vigentes (lo que explicaria el sintoma sin redondeo).
      S17 filas cuyo Tickets a reducir MOSTRADO cambiaria de 0 a > 0 (o al
-         reves) con ROUND: las unicas en que el redondeo podria cambiar que una
+         reves) con CEILING (la regla): las unicas en que el redondeo podria cambiar que una
          rama de Experiencia se vea (tieneDatos: volumen > 0 o ini_total > 0).
      S18 marca de Migracion 83 (solo para confirmar que no se toca: lectura).
 
@@ -68,9 +69,9 @@ GO
 SELECT Seccion = 'S1', Objeto = N'adm.usp_GestionAdmin_TicketsReduce',
        Existe     = CASE WHEN o.object_id IS NULL THEN 0 ELSE 1 END,
        Hash       = CONVERT(varchar(66), h.Hash, 1),
-       Revision   = CASE WHEN h.Hash = 0xDCDAE267E6ABE7243A823EAA02FC069983381079CB0AC9E7B46219EF9D861B46 THEN 'sql/18 (ROUND) = OBJETIVO ROUND'
+       Revision   = CASE WHEN h.Hash = 0xDCDAE267E6ABE7243A823EAA02FC069983381079CB0AC9E7B46219EF9D861B46 THEN 'sql/18 (ROUND)'
                          WHEN h.Hash = 0x41356110A3825747DFA0326229DADAE2FE9F21560FA81ADB4873DC8F73A1949F THEN 'sql/33 (FLOOR)'
-                         WHEN h.Hash = 0xD6C0873670C7832F0A9B7AAC6935B5592885C58C056B06218ACC2E0195468591 THEN 'sql/84 BORRADOR CEILING - APLICADO (inesperado)'
+                         WHEN h.Hash = 0xD6C0873670C7832F0A9B7AAC6935B5592885C58C056B06218ACC2E0195468591 THEN 'sql/84 (CEILING) = objetivo'
                          WHEN o.object_id IS NULL THEN 'NO EXISTE'
                          WHEN d.Def IS NULL THEN 'SIN VIEW DEFINITION'
                          ELSE 'OTRA: revisar' END,
@@ -112,6 +113,9 @@ SELECT Seccion = 'S4', Objeto = N'dbo.usp_Exp_CalcularTicketsReduce',
        Hash       = CONVERT(varchar(66), HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(d.Def, N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')), 1),
        HashCrudo  = CONVERT(varchar(66), HASHBYTES('SHA2_256', d.Def), 1),
        Caracteres = DATALENGTH(d.Def) / 2,
+       Revision   = CASE WHEN EXISTS (SELECT 1 FROM sys.extended_properties AS ep WHERE ep.class = 1 AND ep.minor_id = 0 AND ep.major_id = x.object_id AND ep.name = N'TicketsReduceRedondeo') THEN 'sql/85 (CEILING) = objetivo'
+                         WHEN HASHBYTES('SHA2_256', d.Def) = 0xBDF0894DA4DD356BF3ED1560792A43A42B7D71CF7C88C0BC4EA2173AA67384C8 THEN 'script 65 de QA (ROUND): falta sql/85'
+                         WHEN d.Def IS NULL THEN 'NO EXISTE o SIN VIEW DEFINITION' ELSE 'OTRA: revisar' END,
        UsaRound   = CASE WHEN d.Def LIKE N'%ROUND(%'   THEN 1 ELSE 0 END,
        UsaFloor   = CASE WHEN d.Def LIKE N'%FLOOR(%'   THEN 1 ELSE 0 END,
        UsaCeiling = CASE WHEN d.Def LIKE N'%CEILING(%' THEN 1 ELSE 0 END,
@@ -405,14 +409,14 @@ GO
 
 /* S17) Sensibilidad al redondeo de lo MOSTRADO. Mostrado = lo que lee
    ExperienciaQueries.LeerIniciativas (foto si su Pct = el % actual; si no,
-   ProblemCategoria.TicketsReduce). Se compara con ROUND(VolumenUltimos30 x %)
+   ProblemCategoria.TicketsReduce). Se compara con CEILING(VolumenUltimos30 x %)
    de AHORA. Solo cuentan los cruces 0 <-> > 0: son los unicos que pueden
    cambiar que una rama se vea en Experiencia. Nada se recalcula. */
 SELECT Seccion = 'S17',
        FilasConPct        = COUNT(*),
-       Mostrado0_Round1Mas = SUM(CASE WHEN m.Mostrado = 0 AND c.Ro > 0 THEN 1 ELSE 0 END),
-       MostradoMas_Round0  = SUM(CASE WHEN m.Mostrado > 0 AND c.Ro = 0 THEN 1 ELSE 0 END),
-       MostradoDistintoRound = SUM(CASE WHEN ISNULL(m.Mostrado, -1) <> c.Ro THEN 1 ELSE 0 END),
+       Mostrado0_Ceiling1Mas = SUM(CASE WHEN m.Mostrado = 0 AND c.Ce > 0 THEN 1 ELSE 0 END),
+       MostradoMas_Ceiling0  = SUM(CASE WHEN m.Mostrado > 0 AND c.Ce = 0 THEN 1 ELSE 0 END),
+       MostradoDistintoCeiling = SUM(CASE WHEN ISNULL(m.Mostrado, -1) <> c.Ce THEN 1 ELSE 0 END),
        DesdeFoto          = SUM(CASE WHEN f.DeFoto = 1 THEN 1 ELSE 0 END)
 FROM dbo.ProblemCategoria AS pc
 LEFT JOIN dbo.ExpTicketsReduce AS tr ON tr.Codigo = pc.Codigo AND tr.Categoria = pc.Categoria
@@ -421,7 +425,7 @@ OUTER APPLY (SELECT TOP (1) VolumenUltimos30 = ISNULL(x.VolumenUltimos30, 0)
              WHERE x.Codigo = pc.Codigo AND x.Categoria = pc.Categoria) AS v
 CROSS APPLY (SELECT DeFoto = CASE WHEN tr.Codigo IS NOT NULL AND (tr.Pct = pc.PctDisminucion OR (tr.Pct IS NULL AND pc.PctDisminucion IS NULL)) THEN 1 ELSE 0 END) AS f
 CROSS APPLY (SELECT Mostrado = CASE WHEN f.DeFoto = 1 THEN tr.TicketsReduce ELSE pc.TicketsReduce END) AS m
-CROSS APPLY (SELECT Ro = CONVERT(int, ROUND(ISNULL(v.VolumenUltimos30, 0) * CASE WHEN pc.PctDisminucion > 1 THEN 1.0 ELSE pc.PctDisminucion END, 0))) AS c
+CROSS APPLY (SELECT Ce = CASE WHEN pc.PctDisminucion <= 0 THEN 0 ELSE CONVERT(int, CEILING(ISNULL(v.VolumenUltimos30, 0) * CASE WHEN pc.PctDisminucion > 1 THEN 1.0 ELSE pc.PctDisminucion END)) END) AS c
 WHERE pc.VigenteEnOrigen = 1 AND pc.PctDisminucion IS NOT NULL;
 GO
 

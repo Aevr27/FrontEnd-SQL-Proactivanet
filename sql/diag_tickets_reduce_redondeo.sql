@@ -5,7 +5,8 @@
 
    Para que sirve (2026-10-28): saber con que redondeo calcula HOY la base los
    Tickets a reducir, antes de afirmar que el navegador (FLOOR: ticketsDe /
-   MetaCategoria) y la base coinciden. La regla decidida es FLOOR.
+   MetaCategoria) y la base coinciden. (2026-11-11: la regla del negocio es
+   CEILING por iniciativa; ver sql/84, sql/85 y diag_tickets_reduce_round_qa.sql.)
 
      adm.usp_GestionAdmin_TicketsReduce   lo que guarda Crear / Modificar /
                                           aplicar una solicitud.
