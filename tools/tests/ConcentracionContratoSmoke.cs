@@ -20,6 +20,16 @@
 //        - Mes contra un conteo directo; Slot y Mes no se mezclan;
 //        - 400 por parametros invalidos; cobertura; sin catalogo de dueños
 //          (aviso, o 500 si se filtra por SO); sin la vista (500).
+//      Rendimiento (2026-11-11):
+//        - C1&C2 en C# contra dbo.fn_CategoriaC1C2 con el texto EXACTO de QA
+//          (casos a mano, cada caracter verificable en varias posiciones, al
+//          azar con semilla fija, y texto raro que va a la funcion real);
+//          una vez por categoria distinta; salida = la del camino viejo;
+//        - cache por mes: lee solo los meses que faltan, reusa los demas,
+//          filtros sobre lo guardado = en frio, vencimiento, Slot aparte;
+//        - lecturas en vuelo: peticiones simultaneas (tabla bloqueada por
+//          otra transaccion) lanzan UNA consulta por mes;
+//        - Server-Timing: metricas, formato, cache vs SQL, sin datos, mismo JSON.
 //   3) Guardas: la pestaña no llama a nada de Analisis de servicios y el
 //      backend ya no llama a los SP.
 //
@@ -195,15 +205,37 @@ CREATE TABLE dbo.CatPersona (Nombre NVARCHAR(255) NULL, Manager NVARCHAR(255) NU
 GO
 INSERT dbo.CatPersona VALUES (N'Ana SO', N'Mgr', 1), (N'Beto SO', N'Mgr', 1);
 GO
--- C1&C2 como la real: normaliza y corta en el segundo nivel.
-CREATE FUNCTION dbo.fn_CategoriaC1C2 (@Categoria NVARCHAR(500)) RETURNS NVARCHAR(500) AS
+-- C1&C2: el cuerpo EXACTO de QA (2026-11-11), el que replica
+-- ConcentracionContrato.C1C2. Fuente verificada por largo + SHA2_256 contra
+-- QA: LOCALDB_PERMISSION_CHANGES/scripts/dev_db/10_cadena_volumetria.sql
+-- (fn_NormalizaCategoria 0xB941C3CD..., fn_CategoriaC1C2 0x2ACA8E0A...).
+CREATE   FUNCTION dbo.fn_NormalizaCategoria (@Categoria NVARCHAR(500))
+RETURNS NVARCHAR(500)
+WITH SCHEMABINDING
+AS
 BEGIN
-    DECLARE @s NVARCHAR(500) = LTRIM(RTRIM(REPLACE(ISNULL(@Categoria, N''), NCHAR(160), N' ')));
+    DECLARE @s NVARCHAR(500) = LTRIM(RTRIM(REPLACE(ISNULL(@Categoria,N''), NCHAR(160), N' ')));
+    RETURN @s;
+END;
+GO
+CREATE   FUNCTION dbo.fn_CategoriaC1C2 (@Categoria NVARCHAR(500))
+RETURNS NVARCHAR(500)
+WITH SCHEMABINDING
+AS
+BEGIN
+    DECLARE @s NVARCHAR(500) = dbo.fn_NormalizaCategoria(@Categoria);
+    DECLARE @p1 INT, @p2 INT, @p3 INT;
+
     IF @s = N'' RETURN N'';
-    DECLARE @p2 INT = CHARINDEX(N'/', @s, 2);
+    IF LEFT(@s,1) <> N'/' SET @s = N'/' + @s;
+
+    SET @p1 = 1;
+    SET @p2 = CHARINDEX(N'/', @s, @p1 + 1);
     IF @p2 = 0 RETURN @s;
-    DECLARE @p3 INT = CHARINDEX(N'/', @s, @p2 + 1);
+
+    SET @p3 = CHARINDEX(N'/', @s, @p2 + 1);
     IF @p3 = 0 RETURN @s;
+
     RETURN LEFT(@s, @p3 - 1);
 END;
 GO
@@ -497,6 +529,11 @@ GO";
         d = Pedir("slot=1", out estado);
         Chk("cache limpia: dato nuevo", "15", d["ticketsPeriodo"]);
 
+        // --- 2026-11-11: C1&C2 sin UDF por fila, cache por mes, Server-Timing.
+        C1C2Paridad(cadena);
+        CachePorMes(cadena, hoy);
+        ServerTiming(cadena, hoy);
+
         // --- Sin catalogo de dueños: aviso, sin filtro SO; filtrar por SO = 500.
         Lotes(cadena, "EXEC sp_rename 'dbo.CatCategoriaDueno', 'CatCategoriaDueno_x';");
         ConcentracionQueries.LimpiarCache();
@@ -518,6 +555,393 @@ GO";
     }
 
     static int Estado(string query) { int e; Pedir(query, out e); return e; }
+
+    // ------------------------------------------------- 2b) rendimiento (2026-11-11)
+    static string Cs(int c) { return char.ConvertFromUtf32(c); }
+    static string Recortar(string t) { if (t == null) return null; t = t.Trim(); return t.Length == 0 ? null : t; }
+    static string V(string c) { return ConcentracionContrato.C1C2Verificable(c).ToString(); }
+
+    /* C1&C2 en C# contra dbo.fn_CategoriaC1C2 con el texto EXACTO de QA (el
+       del Esquema). La comparacion es sobre lo que la pestaña usa:
+       Recortar(fn(Categoria)) contra Recortar(C1C2(LTRIM(RTRIM(Categoria)))). */
+    static void C1C2Paridad(string cadena)
+    {
+        Chk("C1C2Verificable: ASCII, tab/CR/LF, Latin-1 y NULL si; U+00AD, U+FF0F, U+0000, U+3000, U+0301 no",
+            "True|True|True|True|False|False|False|False|False",
+            V("/S-Punto de Venta/Caja") + "|" + V("\t/A\r\n") + "|" + V("/" + Cs(0xD1) + "and" + Cs(0xFA) + Cs(0xA0)) + "|" + V(null) + "|" +
+            V("/A" + Cs(0xAD)) + "|" + V("/A" + Cs(0xFF0F) + "B") + "|" + V(Cs(0)) + "|" + V(Cs(0x3000)) + "|" + V("/a" + Cs(0x301)));
+        Chk("C1C2 puro: ejemplos de la cabecera de la funcion, sin '/' inicial, un nivel, NULL, vacio, NBSP",
+            "/S-Punto de Venta/Aplicativo|/Procesos comerciales de tienda (SAP)/|/A/B|/A|||/A/B",
+            ConcentracionContrato.C1C2("/S-Punto de Venta/Aplicativo/Error X") + "|" + ConcentracionContrato.C1C2("/Procesos comerciales de tienda (SAP)/") + "|" +
+            ConcentracionContrato.C1C2("A/B/C") + "|" + ConcentracionContrato.C1C2("A") + "|" + ConcentracionContrato.C1C2(null) + "|" +
+            ConcentracionContrato.C1C2("  ") + "|" + ConcentracionContrato.C1C2(Cs(0xA0) + "/A/B/C" + Cs(0xA0)));
+
+        // El banco: casos a mano (comunes, raros y de frontera), cada caracter
+        // del conjunto verificable en varias posiciones y al azar (semilla fija).
+        var lista = new List<string> { null, "", " ", "   ", Cs(0xA0), " " + Cs(0xA0) + " ", "\t", "\r\n", "/", "//", "///", "////x",
+            "/A", "A", "A/B", "A/B/C", "/A/B", "/A/B/C", "/A/B/C/D", " /A/B/C ", "\t/A/B/C", "/A/B/\t", "/A /B /C", "/a/b/c",
+            "/S-Punto de Venta/Aplicativo/Error X", "/Procesos comerciales de tienda (SAP)/", "/S-FENIX WMS/Recibo/Cita",
+            new string('x', 500), "/" + new string('x', 499), new string('x', 498) + "/y", new string('x', 499) + "/", "x/" + new string('y', 498),
+            "/" + new string(' ', 498) + "x", "A/B" + new string(' ', 497),
+            // raros: la collation no compara caracter a caracter
+            "/A" + Cs(0xFF0F) + "B/C/D", Cs(0xFF0F) + "A/B/C", "/A/" + Cs(0xFF0F) + "B/C", Cs(0x200B) + "/A/B/C", "/A" + Cs(0x200B) + "/B/C",
+            Cs(0xAD) + "/A/B", "/A" + Cs(0xAD) + "/B/C", "/a" + Cs(0x301) + "/B/C", "/" + Cs(0x1F600) + "/B/C", Cs(0) + "/A", Cs(0), Cs(0x3000),
+            Cs(0x3000) + "/A/B", "/A/B" + Cs(0x3000) + "/C", Cs(0x2215) + "A/B/C", "/x" + Cs(0xA0) + Cs(0x301) + "/y/z" };
+        var seguro = new System.Text.StringBuilder("\t\r\n");
+        for (int c = 0x20; c <= 0x7E; c++) seguro.Append((char)c);
+        for (int c = 0xA0; c <= 0xFF; c++) if (c != 0xAD) seguro.Append((char)c);
+        foreach (char c0 in seguro.ToString())
+        {
+            string q = c0.ToString();
+            lista.AddRange(new[] { q, q + "/", "/" + q, q + "/x/y", "/" + q + "/x/y", "/x" + q + "/y/z", "/x/" + q + "/z", " " + q + " ", q + "/" + q + "/" + q + "/" + q });
+        }
+        var azar = new Random(20261111);
+        string alfabeto = seguro + "//////    ";
+        for (int i = 0; i < 4000; i++)
+        {
+            var b = new System.Text.StringBuilder(); int n = azar.Next(0, 60);
+            for (int k = 0; k < n; k++) b.Append(alfabeto[azar.Next(alfabeto.Length)]);
+            lista.Add(b.ToString());
+        }
+        string raro = "/ /abA" + Cs(0xFF0F) + Cs(0x200B) + Cs(0xAD) + Cs(0x301) + Cs(0x3000) + Cs(0x2215) + Cs(0) + Cs(0xA0);
+        for (int i = 0; i < 1000; i++)
+        {
+            var b = new System.Text.StringBuilder(); int n = azar.Next(1, 14);
+            for (int k = 0; k < n; k++) b.Append(raro[azar.Next(raro.Length)]);
+            lista.Add(b.ToString());
+        }
+
+        Lotes(cadena, "CREATE TABLE dbo.ParidadC1C2 (Id INT NOT NULL PRIMARY KEY, Categoria NVARCHAR(500) NULL);");
+        var dt = new System.Data.DataTable();
+        dt.Columns.Add("Id", typeof(int)); dt.Columns.Add("Categoria", typeof(string));
+        for (int i = 0; i < lista.Count; i++) dt.Rows.Add(i, (object)lista[i] ?? DBNull.Value);
+        using (var cn = new SqlConnection(cadena))
+        {
+            cn.Open();
+            using (var bc = new SqlBulkCopy(cn)) { bc.DestinationTableName = "dbo.ParidadC1C2"; bc.WriteToServer(dt); }
+        }
+        var cats = new List<string>(); var fn = new List<string>();
+        using (var cn = new SqlConnection(cadena))
+        using (var cmd = new SqlCommand("SELECT Id, LTRIM(RTRIM(Categoria)), dbo.fn_CategoriaC1C2(Categoria) FROM dbo.ParidadC1C2 ORDER BY Id;", cn))
+        {
+            cn.Open();
+            using (var rd = cmd.ExecuteReader())
+                while (rd.Read()) { cats.Add(rd.IsDBNull(1) ? null : rd.GetString(1)); fn.Add(rd.IsDBNull(2) ? null : rd.GetString(2)); }
+        }
+        Lotes(cadena, "DROP TABLE dbo.ParidadC1C2;");
+
+        int verificables = 0, difCs = 0, difSinGuarda = 0, difPestana = 0;
+        string primera = null;
+        int enCs, enSql;
+        var mapa = ConcentracionQueries.C1C2DeCategorias(cadena, cats, out enCs, out enSql);
+        var rarasDistintas = new HashSet<string>(StringComparer.Ordinal);
+        for (int i = 0; i < cats.Count; i++)
+        {
+            var esperado = Recortar(fn[i]);
+            var cs = Recortar(ConcentracionContrato.C1C2(cats[i]));
+            if (ConcentracionContrato.C1C2Verificable(cats[i]))
+            {
+                verificables++;
+                if (cs != esperado) { difCs++; if (primera == null) primera = "#" + i; }
+            }
+            else
+            {
+                rarasDistintas.Add(cats[i]);
+                if (cs != esperado) difSinGuarda++;
+            }
+            var pestana = Recortar(cats[i] == null ? ConcentracionContrato.C1C2(null) : mapa[cats[i]]);
+            if (pestana != esperado) difPestana++;
+        }
+        Chk("C1C2 en C# = dbo.fn_CategoriaC1C2 (texto de QA) en todo texto verificable (" + verificables + " cadenas)",
+            "0", difCs + (primera == null ? "" : " primera " + primera));
+        Chk("banco suficiente: mas de 5000 verificables y mas de 100 raras distintas", true, verificables > 5000 && rarasDistintas.Count > 100);
+        Chk("sin la guarda, la replica fallaria en texto raro (la prueba distingue)", true, difSinGuarda > 0);
+        Chk("lo que usa la pestaña (C# + funcion real para lo raro) = la funcion en TODAS (" + cats.Count + ")", 0, difPestana);
+        Chk("las raras van a la funcion real, una vez cada distinta; las demas en C#, una vez cada distinta",
+            rarasDistintas.Count + "|" + new HashSet<string>(cats.Where(c => c != null && ConcentracionContrato.C1C2Verificable(c)), StringComparer.Ordinal).Count,
+            enSql + "|" + enCs);
+
+        // --- De punta a punta, con tickets raros en el Slot 6 y un dueño para
+        // el C1&C2 que solo la collation reconoce.
+        Lotes(cadena, "INSERT dbo.CatCategoriaDueno VALUES (N'/S-Punto de Venta' + NCHAR(65295) + N'Caja', N'PO 3', N'Carla SO', N'Dir 1', N'/S-Punto de Venta', 1);\n" +
+            "INSERT dbo.CatPersona VALUES (N'Carla SO', N'Mgr', 1);\n" +
+            "DECLARE @h DATE = CONVERT(DATE, DATEADD(HOUR, -6, SYSUTCDATETIME()));\n" +
+            "INSERT dbo.vw_ServicioTickets (CodigoTicket, Servicio, RamaServicio, C1Raiz, Categoria, Grupo, Slot, FechaRegistro, FechaRegistroDia) VALUES\n" +
+            " (N'X01', N'PU', N'S-Punto de Venta', N'S-Punto de Venta', N'/S-Punto de Venta' + NCHAR(65295) + N'Caja/X', N'Service Desk', 6, DATEADD(HOUR, 9, CONVERT(DATETIME2(0), DATEADD(DAY, -181, @h))), DATEADD(DAY, -181, @h)),\n" +
+            " (N'X02', N'PU', N'S-Punto de Venta', N'S-Punto de Venta', N'/S-Punto de Venta' + NCHAR(65295) + N'Caja/X', N'Service Desk', 6, DATEADD(HOUR, 9, CONVERT(DATETIME2(0), DATEADD(DAY, -182, @h))), DATEADD(DAY, -182, @h)),\n" +
+            " (N'X03', N'PU', N'S-Punto de Venta', N'S-Punto de Venta', N'/S-Punto de Venta/Caja/Y', N'Service Desk', 6, DATEADD(HOUR, 9, CONVERT(DATETIME2(0), DATEADD(DAY, -183, @h))), DATEADD(DAY, -183, @h)),\n" +
+            " (N'X04', N'SAP', N'SAP', NULL, N' ' + NCHAR(12288), N'Soporte AMS Inetum', 6, DATEADD(HOUR, 9, CONVERT(DATETIME2(0), DATEADD(DAY, -184, @h))), DATEADD(DAY, -184, @h));");
+        ConcentracionQueries.LimpiarCache();
+        var hoy = ConcentracionContrato.HoyMexico(DateTime.UtcNow);
+        var f6 = new ConcentracionFiltros(); f6.Slot = 6;
+        var r6 = ConcentracionQueries.Consultar(f6, hoy);
+        int distintas = Escalar(cadena, "SELECT COUNT(DISTINCT LTRIM(RTRIM(Categoria)) COLLATE Latin1_General_BIN2) FROM dbo.vw_ServicioTickets WHERE Slot BETWEEN 0 AND 6;");
+        Chk("C1C2 una vez por categoria DISTINTA (no por ticket): calculos = distintas < tickets; las 2 raras (U+FF0F y U+3000), con la funcion",
+            distintas + "|2|True", (r6.C1C2EnCSharp + r6.C1C2EnSql) + "|" + r6.C1C2EnSql + "|" + (r6.C1C2EnCSharp + r6.C1C2EnSql < r6.TicketsPeriodo));
+
+        // Referencia: el camino de ANTES (fn_CategoriaC1C2 en el SELECT, por
+        // fila), con el mismo directorio y la misma cuenta.
+        var viejo = new List<ConcentracionTicket>();
+        using (var cn = new SqlConnection(cadena))
+        {
+            cn.Open();
+            var cmd = new SqlCommand(@"SELECT v.CodigoTicket, LTRIM(RTRIM(v.Servicio)), LTRIM(RTRIM(s.Descripcion)), LTRIM(RTRIM(v.Categoria)),
+                LTRIM(RTRIM(v.Grupo)), v.C1Raiz, dbo.fn_CategoriaC1C2(v.Categoria), v.FechaRegistroDia
+                FROM dbo.vw_ServicioTickets AS v LEFT JOIN dbo.CatServicioCorreo AS s ON s.Servicio = v.Servicio
+                WHERE v.Slot >= 0 AND v.Slot <= 6;", cn);
+            Func<System.Data.IDataRecord, int, string> tx = (rd, i) => rd.IsDBNull(i) ? null : Recortar(Convert.ToString(rd.GetValue(i), CultureInfo.InvariantCulture));
+            using (var rd = cmd.ExecuteReader())
+                while (rd.Read())
+                    viejo.Add(new ConcentracionTicket { Codigo = tx(rd, 0), Servicio = tx(rd, 1), NombreServicio = tx(rd, 2), Categoria = tx(rd, 3),
+                        Grupo = tx(rd, 4), C1 = tx(rd, 5), C1C2 = tx(rd, 6), Dia = rd.IsDBNull(7) ? (DateTime?)null : rd.GetDateTime(7) });
+            var dir = DirectorioOrganizacional.Cargar(cn);
+            foreach (var t in viejo)
+            {
+                string po, so, di, ma;
+                dir.Resolver(t.C1, t.C1C2, out po, out so, out di, out ma);
+                t.ServiceOwner = string.IsNullOrWhiteSpace(so) ? null : so;
+            }
+        }
+        var js = new JavaScriptSerializer();
+        Func<List<ConcentracionTicket>, ConcentracionFiltros, string> cuenta = (tk, fl) =>
+        {
+            var fi = ConcentracionContrato.Filtrar(tk, fl);
+            return js.Serialize(new object[] {
+                ConcentracionContrato.Opciones(tk.ConvertAll(t => t.ServiceOwner ?? ConcentracionContrato.SinServiceOwner), fl.ServiceOwners),
+                ConcentracionContrato.Pareto(fi), ConcentracionContrato.Categorias(fi), ConcentracionContrato.Grupos(fi), fi.Count });
+        };
+        Func<ConcentracionResultado, string> nueva = x => js.Serialize(new object[] { x.OpcionesServiceOwner, x.Pareto, x.Categorias, x.Grupos, x.TicketsFiltrados });
+        Chk("salida sin filtro = la del camino con fn_CategoriaC1C2 por fila (opciones SO, pareto, categorias, grupos)", cuenta(viejo, f6), nueva(r6));
+        var fc = new ConcentracionFiltros(); fc.Slot = 6; fc.ServiceOwners.Add("Carla SO");
+        var rc = ConcentracionQueries.Consultar(fc, hoy);
+        Chk("SO del C1&C2 raro (Carla, 2 tickets) = el camino de antes", cuenta(viejo, fc) + "|2", nueva(rc) + "|" + rc.TicketsFiltrados);
+
+        Lotes(cadena, "DELETE dbo.vw_ServicioTickets WHERE CodigoTicket IN (N'X01', N'X02', N'X03', N'X04');\n" +
+                      "DELETE dbo.CatCategoriaDueno WHERE ServiceOwner = N'Carla SO'; DELETE dbo.CatPersona WHERE Nombre = N'Carla SO';");
+        ConcentracionQueries.LimpiarCache();
+    }
+
+    static ConcentracionResultado Meses(string meses, DateTime hoy, params string[] so)
+    {
+        var f = new ConcentracionFiltros();
+        f.Modo = ConcentracionContrato.ModoMes;
+        f.Meses.AddRange(ConcentracionContrato.LeerMeses(meses, hoy));
+        f.Mes = f.Meses[0];
+        f.ServiceOwners.AddRange(so);
+        return ConcentracionQueries.Consultar(f, hoy);
+    }
+
+    // consultas|tramos leidos|de cache|de otra peticion
+    static string Uso(ConcentracionResultado r)
+    {
+        return r.ConsultasPeriodo + "|" + r.TramosSql + "|" + r.TramosCache + "|" + r.TramosEspera;
+    }
+
+    static void CachePorMes(string cadena, DateTime hoy)
+    {
+        var m0 = new DateTime(hoy.Year, hoy.Month, 1);
+        string a = ConcentracionContrato.Mes(m0), b = ConcentracionContrato.Mes(m0.AddMonths(-1)),
+               c = ConcentracionContrato.Mes(m0.AddMonths(-2)), d = ConcentracionContrato.Mes(m0.AddMonths(-3));
+        Func<DateTime, int> directo = m => Escalar(cadena, "SELECT COUNT(*) FROM dbo.vw_ServicioTickets WHERE FechaRegistro >= '" + Dia(m) +
+            "' AND FechaRegistro < '" + Dia(m.AddMonths(1) > hoy.AddDays(1) ? hoy.AddDays(1) : m.AddMonths(1)) + "'");
+        int ca = directo(m0), cb = directo(m0.AddMonths(-1)), cc = directo(m0.AddMonths(-2)), cd = directo(m0.AddMonths(-3));
+
+        // Elegir los meses de uno en uno, como en el navegador.
+        ConcentracionQueries.LimpiarCache();
+        int antes = ConcentracionQueries.ConsultasPeriodoTotales;
+        var pasos = new List<string>();
+        int tramosLeidos = 0;
+        foreach (var sel in new[] { a, a, a + "|" + b, a + "|" + b + "|" + c, a + "|" + c, a + "|" + b + "|" + c + "|" + d })
+        {
+            var r = Meses(sel, hoy);
+            tramosLeidos += r.TramosSql;
+            pasos.Add(Uso(r) + ":" + r.TicketsPeriodo);
+        }
+        Chk("CM1 cache por mes: uno (1 consulta), el mismo (0), +1 (lee solo el nuevo), +1, quitar uno (0), +1; tickets = conteos directos",
+            "1|1|0|0:" + ca + ";0|0|1|0:" + ca + ";1|1|1|0:" + (ca + cb) + ";1|1|2|0:" + (ca + cb + cc) + ";0|0|2|0:" + (ca + cc) +
+            ";1|1|3|0:" + (ca + cb + cc + cd), string.Join(";", pasos.ToArray()));
+        Chk("CM2 cuatro meses elegidos de uno en uno: 4 lecturas de mes y 4 consultas (antes 1+2+3+4 = 10 lecturas de mes)",
+            "4|4", tramosLeidos + "|" + (ConcentracionQueries.ConsultasPeriodoTotales - antes));
+
+        // En frio, los cuatro juntos: UNA consulta, repartida por mes.
+        ConcentracionQueries.LimpiarCache();
+        var junto = Meses(a + "|" + b + "|" + c + "|" + d, hoy);
+        var sueltos = new List<string>();
+        foreach (var x in new[] { a, b, c, d }) { var r = Meses(x, hoy); sueltos.Add(Uso(r) + ":" + r.TicketsPeriodo); }
+        Chk("CM3 en frio cuatro meses = 1 consulta, 4 tramos; despues cada mes sale de la cache con SU conteo directo",
+            "1|4|0|0:" + (ca + cb + cc + cd) + "|0|0|1|0:" + ca + ";0|0|1|0:" + cb + ";0|0|1|0:" + cc + ";0|0|1|0:" + cd,
+            Uso(junto) + ":" + junto.TicketsPeriodo + "|" + string.Join(";", sueltos.ToArray()));
+
+        // Filtros sobre meses ya guardados: igual que en frio, y sin ensuciar la cache.
+        var js = new JavaScriptSerializer();
+        Func<ConcentracionResultado, string> salida = x => js.Serialize(new object[] { x.OpcionesServiceOwner, x.OpcionesGrupo, x.Pareto, x.Categorias,
+            x.Grupos, x.TicketsFiltrados, x.TicketsPeriodo, x.Cobertura });
+        var tibioSo = Meses(a + "|" + c, hoy, ConcentracionContrato.SinServiceOwner);
+        var tibioBeto = Meses(a + "|" + c, hoy, "Beto SO");
+        var tibioTodo = Meses(a + "|" + c, hoy);
+        ConcentracionQueries.LimpiarCache();
+        var frioSo = Meses(a + "|" + c, hoy, ConcentracionContrato.SinServiceOwner);
+        ConcentracionQueries.LimpiarCache();
+        var frioBeto = Meses(a + "|" + c, hoy, "Beto SO");
+        ConcentracionQueries.LimpiarCache();
+        var frioTodo = Meses(a + "|" + c, hoy);
+        Chk("CM4 SO sobre meses de la cache = en frio (Sin SO, Beto, sin filtro); filtrar no cambia lo guardado",
+            "True|True|True|0|0|0", (salida(tibioSo) == salida(frioSo)) + "|" + (salida(tibioBeto) == salida(frioBeto)) + "|" +
+            (salida(tibioTodo) == salida(frioTodo)) + "|" + tibioSo.ConsultasPeriodo + "|" + tibioBeto.ConsultasPeriodo + "|" + tibioTodo.ConsultasPeriodo);
+        var fg = new ConcentracionFiltros(); fg.Modo = ConcentracionContrato.ModoMes; fg.Meses.Add(m0); fg.Mes = m0; fg.Grupos.Add("Service Desk");
+        var conGrupo = ConcentracionQueries.Consultar(fg, hoy);
+        var sinGrupo = Meses(a, hoy);
+        Chk("CM5 Grupo reusa el mes guardado y no lo recorta para la siguiente peticion", "0|0|" + ca,
+            conGrupo.ConsultasPeriodo + "|" + sinGrupo.ConsultasPeriodo + "|" + sinGrupo.TicketsPeriodo);
+
+        // Vencimiento: con 1 s de vigencia, el mismo mes se vuelve a leer.
+        var vigencia = ConcentracionQueries.SegundosCache;
+        try
+        {
+            ConcentracionQueries.SegundosCache = 1;
+            ConcentracionQueries.LimpiarCache();
+            var v1 = Meses(b, hoy);
+            var v2 = Meses(b, hoy);
+            System.Threading.Thread.Sleep(1500);
+            var v3 = Meses(b, hoy);
+            Chk("CM6 vencido el tramo, se vuelve a leer (1, 0 dentro de la vigencia, 1 despues)", "1|0|1",
+                v1.ConsultasPeriodo + "|" + v2.ConsultasPeriodo + "|" + v3.ConsultasPeriodo);
+        }
+        finally { ConcentracionQueries.SegundosCache = vigencia; }
+
+        // Slot sigue con su tramo acumulado propio y su cache.
+        ConcentracionQueries.LimpiarCache();
+        var fs1 = new ConcentracionFiltros(); fs1.Slot = 2;
+        var s1 = ConcentracionQueries.Consultar(fs1, hoy);
+        var s2 = ConcentracionQueries.Consultar(fs1, hoy);
+        int c02 = Escalar(cadena, "SELECT COUNT(*) FROM dbo.vw_ServicioTickets WHERE Slot BETWEEN 0 AND 2");
+        Chk("CM7 Slot 2: un tramo acumulado (1 consulta), luego de la cache; mismo conteo directo", "1|1|0|0:" + c02 + ";0|0|1|0:" + c02,
+            Uso(s1) + ":" + s1.TicketsPeriodo + ";" + Uso(s2) + ":" + s2.TicketsPeriodo);
+
+        Concurrencia(cadena, hoy, b, c);
+    }
+
+    /* Lecturas en vuelo. Con la tabla bloqueada por otra transaccion, la
+       primera peticion queda dentro de su consulta; las demas deben esperarla
+       y no lanzar otra. */
+    static void Concurrencia(string cadena, DateTime hoy, string b, string c)
+    {
+        ConcentracionQueries.LimpiarCache();
+        int antes = ConcentracionQueries.ConsultasPeriodoTotales;
+        var res = new ConcentracionResultado[4];
+        var err = new Exception[4];
+        int durante;
+        using (var cn = new SqlConnection(cadena))
+        {
+            cn.Open();
+            var tx = cn.BeginTransaction();
+            new SqlCommand("SELECT COUNT(*) FROM dbo.vw_ServicioTickets WITH (TABLOCKX, HOLDLOCK);", cn, tx).ExecuteScalar();
+            var hilos = new List<System.Threading.Thread>();
+            for (int i = 0; i < 4; i++)
+            {
+                int k = i;
+                var h = new System.Threading.Thread(() => { try { res[k] = Meses(b, hoy); } catch (Exception ex) { err[k] = ex; } });
+                h.Start(); hilos.Add(h);
+            }
+            for (int t = 0; t < 100 && ConcentracionQueries.ConsultasPeriodoTotales - antes < 1; t++) System.Threading.Thread.Sleep(50);
+            System.Threading.Thread.Sleep(700);   // tiempo para que las otras tres lleguen
+            durante = ConcentracionQueries.ConsultasPeriodoTotales - antes;
+            tx.Rollback();
+            foreach (var h in hilos) h.Join(60000);
+        }
+        Chk("CC1 cuatro peticiones del mismo mes a la vez: 1 consulta; las otras 3 esperan la suya; mismos tickets",
+            "1|1|0|3|True", durante + "|" + (ConcentracionQueries.ConsultasPeriodoTotales - antes) + "|" + err.Count(e => e != null) + "|" +
+            res.Where(r => r != null).Sum(r => r.TramosEspera) + "|" + (res.All(r => r != null) && res.Select(r => r.TicketsPeriodo).Distinct().Count() == 1));
+
+        // Conjuntos que se enciman: A = b|c, B = c (otro mes ya en vuelo).
+        ConcentracionQueries.LimpiarCache();
+        antes = ConcentracionQueries.ConsultasPeriodoTotales;
+        ConcentracionResultado ra = null, rb = null;
+        Exception ea = null, eb = null;
+        using (var cn = new SqlConnection(cadena))
+        {
+            cn.Open();
+            var tx = cn.BeginTransaction();
+            new SqlCommand("SELECT COUNT(*) FROM dbo.vw_ServicioTickets WITH (TABLOCKX, HOLDLOCK);", cn, tx).ExecuteScalar();
+            var ha = new System.Threading.Thread(() => { try { ra = Meses(b + "|" + c, hoy); } catch (Exception ex) { ea = ex; } });
+            ha.Start();
+            for (int t = 0; t < 100 && ConcentracionQueries.ConsultasPeriodoTotales - antes < 1; t++) System.Threading.Thread.Sleep(50);
+            var hb = new System.Threading.Thread(() => { try { rb = Meses(c, hoy); } catch (Exception ex) { eb = ex; } });
+            hb.Start();
+            System.Threading.Thread.Sleep(700);
+            durante = ConcentracionQueries.ConsultasPeriodoTotales - antes;
+            tx.Rollback();
+            ha.Join(60000); hb.Join(60000);
+        }
+        Chk("CC2 A pide b|c y, en vuelo, B pide c: una sola consulta; B espera el mes de A",
+            "1|1|null|null|1|2|0|0|0|0|0|1", durante + "|" + (ConcentracionQueries.ConsultasPeriodoTotales - antes) + "|" +
+            (ea == null ? "null" : ea.Message) + "|" + (eb == null ? "null" : eb.Message) + "|" +
+            (ra == null ? "-" : Uso(ra)) + "|" + (rb == null ? "-" : Uso(rb)));
+        ConcentracionQueries.LimpiarCache();
+    }
+
+    // La cabecera de una respuesta de prueba (HttpResponse fuera de IIS la
+    // guarda en un campo privado).
+    static string Cabecera(HttpResponse resp, string nombre)
+    {
+        var flags = System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance;
+        var campo = typeof(HttpResponse).GetField("_customHeaders", flags);
+        var lista = campo == null ? null : campo.GetValue(resp) as System.Collections.IEnumerable;
+        if (lista == null) return null;
+        foreach (var h in lista)
+        {
+            var n = h.GetType().GetProperty("Name", flags);
+            var v = h.GetType().GetProperty("Value", flags);
+            if (n != null && v != null && string.Equals(n.GetValue(h, null) as string, nombre, StringComparison.OrdinalIgnoreCase))
+                return v.GetValue(h, null) as string;
+        }
+        return null;
+    }
+
+    static string PedirCrudo(string query, out int estado, out string timing)
+    {
+        var sw = new StringWriter();
+        var ctx = new HttpContext(new HttpRequest("", "http://localhost/handlers/concentracion.ashx", query), new HttpResponse(sw));
+        new Concentracion().ProcessRequest(ctx);
+        estado = ctx.Response.StatusCode;
+        timing = Cabecera(ctx.Response, "Server-Timing");
+        return sw.ToString();
+    }
+
+    static void ServerTiming(string cadena, DateTime hoy)
+    {
+        var mes = ConcentracionContrato.Mes(new DateTime(hoy.Year, hoy.Month, 1));
+        ConcentracionQueries.LimpiarCache();
+        int e1, e2; string t1, t2;
+        var frio = PedirCrudo("modo=mes&mes=" + mes, out e1, out t1);
+        var tibio = PedirCrudo("modo=mes&mes=" + mes, out e2, out t2);
+        Console.WriteLine("INFO  Server-Timing en frio:    " + t1);
+        Console.WriteLine("INFO  Server-Timing de la cache: " + t2);
+        Func<string, string> nombres = t => t == null ? "null" : string.Join(",", t.Split(new[] { ", " }, StringSplitOptions.None).Select(p => p.Split(';')[0]).ToArray());
+        Chk("ST1 Server-Timing en frio y en cache: sql, c1c2 (solo si hubo lectura), espera, cache, directorio, calculo, etl, json, total",
+            "200|c1c2,sql,espera,cache,directorio,calculo,etl,json,total|200|sql,espera,cache,directorio,calculo,etl,json,total",
+            e1 + "|" + nombres(t1) + "|" + e2 + "|" + nombres(t2));
+        var formato = new System.Text.RegularExpressions.Regex("^[a-z0-9]+;dur=[0-9]+\\.[0-9](;desc=\"[^\",]*\")?$");
+        Chk("ST2 cada metrica con dur en ms y descripcion entre comillas", "True|True",
+            (t1 != null && t1.Split(new[] { ", " }, StringSplitOptions.None).All(p => formato.IsMatch(p))) + "|" +
+            (t2 != null && t2.Split(new[] { ", " }, StringSplitOptions.None).All(p => formato.IsMatch(p))));
+        Chk("ST3 se distingue lectura de cache: frio 1 consulta, 0 de 1 tramos en cache; tibio 0 consultas, 1 de 1",
+            "True|True|True|True",
+            (t1 != null && t1.Contains("desc=\"consultas=1 tramos=1 filas=")) + "|" + (t1 != null && t1.Contains("cache;dur=0.0;desc=\"tramos=0 de=1\"")) + "|" +
+            (t2 != null && t2.Contains("desc=\"consultas=0 tramos=0 filas=0\"")) + "|" + (t2 != null && t2.Contains("cache;dur=0.0;desc=\"tramos=1 de=1\"")));
+        Chk("ST4 la cabecera no trae tickets, categorias ni personas", "False",
+            (t1 + t2).Contains("T0") || (t1 + t2).Contains("/S-") || (t1 + t2).Contains("Ana") || (t1 + t2).Contains("Service Desk") ? "True" : "False");
+        var js = new JavaScriptSerializer();
+        var d1 = (Dictionary<string, object>)js.DeserializeObject(frio);
+        var d2 = (Dictionary<string, object>)js.DeserializeObject(tibio);
+        Chk("ST5 el JSON sigue con las mismas llaves del contrato",
+            "modo,slot,mes,mesesElegidos,slotMaximo,meses,periodo,filtros,opciones,ticketsPeriodo,ticketsFiltrados,cobertura,pareto,categorias,grupos,errores,avisos,dataInfo",
+            string.Join(",", d1.Keys.ToArray()));
+        Chk("ST6 el cuerpo en frio y desde la cache es el mismo", true, frio == tibio);
+        int e3; string t3;
+        PedirCrudo("modo=mes&mes=2001-01", out e3, out t3);
+        Chk("ST7 un 400 no lleva Server-Timing (como analisis.ashx)", "400|null", e3 + "|" + (t3 ?? "null"));
+    }
 
     // ---------------------------------------------------------- 3) guardas
     static string SinComentarios(string s)
@@ -564,7 +988,7 @@ GO";
         {
             cn.Open();
             new SqlCommand("IF DB_ID('" + bd + "') IS NOT NULL BEGIN ALTER DATABASE [" + bd +
-                           "] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [" + bd + "]; END; CREATE DATABASE [" + bd + "];", cn).ExecuteNonQuery();
+                           "] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE [" + bd + "]; END; CREATE DATABASE [" + bd + "] COLLATE SQL_Latin1_General_CP1_CI_AS;", cn).ExecuteNonQuery();
         }
         try
         {

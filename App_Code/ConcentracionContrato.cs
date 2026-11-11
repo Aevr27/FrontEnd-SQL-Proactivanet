@@ -369,6 +369,65 @@ public static class ConcentracionContrato
         return Agregar(t, "Grupo", x => x.Grupo, null);
     }
 
+    // ------------------------------------------------------------ C1&C2
+    /* Replica de dbo.fn_CategoriaC1C2 (2026-11-11), para calcularla UNA vez
+       por categoria distinta en vez de una vez por ticket dentro de la
+       consulta. Texto de QA (verificado por largo + SHA2_256 en
+       LOCALDB_PERMISSION_CHANGES/scripts/dev_db/10_cadena_volumetria.sql):
+
+         fn_NormalizaCategoria: LTRIM(RTRIM(REPLACE(ISNULL(@c, N''), NCHAR(160), N' ')))
+         fn_CategoriaC1C2:      @s NVARCHAR(500) = normalizada; '' -> '';
+                                sin '/' al inicio se le antepone (y se corta a 500);
+                                hasta antes del tercer '/' (o todo si no hay).
+
+       LTRIM/RTRIM de SQL solo quitan U+0020 (no tabuladores ni saltos).
+
+       SOLO es exacta para texto de C1C2Verificable: la collation de la base
+       (SQL_Latin1_General_CP1_CI_AS) compara por reglas Unicode, y con otros
+       caracteres CHARINDEX/LEFT/'=' no son comparaciones caracter a caracter
+       (medido en LocalDB: el '/' de ancho completo U+FF0F cuenta como '/',
+       U+0000 o U+3000 solos valen N'', NBSP + acento combinado no se
+       reemplaza). Esas categorias las calcula la funcion real
+       (ConcentracionQueries.C1C2DeCategorias). La paridad la prueba
+       tools/tests/ConcentracionContratoSmoke.cs contra el texto de QA.
+
+       Entrada: la Categoria tal como la entrega LTRIM(RTRIM(v.Categoria))
+       (fn(LTRIM(RTRIM(x))) = fn(x): la funcion ya quita esos espacios).
+       Salida: lo que devolveria la funcion, sin el recorte de Texto(). */
+    public static string C1C2(string categoria)
+    {
+        var s = (categoria ?? "").Replace((char)0xA0, (char)0x20).Trim((char)0x20);
+        if (s.Length == 0) return "";
+        if (s[0] != '/')
+        {
+            s = "/" + s;
+            if (s.Length > 500) s = s.Substring(0, 500);   // @s NVARCHAR(500)
+        }
+        int p2 = s.IndexOf('/', 1);
+        if (p2 < 0) return s;
+        int p3 = s.IndexOf('/', p2 + 1);
+        if (p3 < 0) return s;
+        return s.Substring(0, p3);
+    }
+
+    /* Texto con el que C1C2 es exacta: tabulador, CR, LF, ASCII imprimible
+       (U+0020..U+007E) y Latin-1 U+00A0..U+00FF salvo el guion suave U+00AD
+       (ignorable en la collation). Es el conjunto comprobado en LocalDB contra
+       el texto de QA (0 diferencias en 64 123 cadenas, 2026-11-11). NULL y ''
+       tambien. */
+    public static bool C1C2Verificable(string categoria)
+    {
+        if (categoria == null) return true;
+        foreach (var c in categoria)
+        {
+            if (c == '\t' || c == '\r' || c == '\n') continue;
+            if (c >= 0x20 && c <= 0x7E) continue;
+            if (c >= 0xA0 && c <= 0xFF && c != 0xAD) continue;
+            return false;
+        }
+        return true;
+    }
+
     // ------------------------------------------------------------ formatos
     public static string Dia(DateTime d)
     {
