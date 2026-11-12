@@ -508,8 +508,13 @@ public static partial class ExperienciaQueries
                          "     THEN tr.TicketsReduce ELSE v.TicketsReduce END, "
                        : "v.TicketsReduce, ") +
             "       v.PctDisminucion, " +
-            "       v.FechaAnalisis, v.FechaSolucion, v.FechaCierre, " +
-            "       v.NroCambioFechaAnalisis, v.NroCambioFechaSolucion, v.NroCambioFechaCierre, " +
+            // La fecha de analisis (y su contador) es de la INICIATIVA, igual
+            // en todas sus categorias: p.* y no v.*, porque la vista desplegada
+            // (ADM_01) sustituye la de dbo.ProblemCategoria.FechaAnalisisCategoria
+            // en las categorias ligadas despues, y con ella el semaforo y
+            // NroCambio de esa fila divergian de la iniciativa.
+            "       p.FechaAnalisis, v.FechaSolucion, v.FechaCierre, " +
+            "       p.NroCambioFechaAnalisis, v.NroCambioFechaSolucion, v.NroCambioFechaCierre, " +
             "       p.Descripcion, p.Observaciones, p.FechaCreacion, " +
             "       ISNULL(cp.ControlDeFecha, 1) " +
             "FROM dbo.vw_ProblemCategoria AS v " +

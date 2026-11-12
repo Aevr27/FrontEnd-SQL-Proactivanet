@@ -86,13 +86,12 @@ Datos de `sql/diag_acuse_identidad_po_so.sql`, corrido por el usuario el
   `FechaSolucion` y `FechaCierre`). La base la compara, con la fila
   bloqueada, contra la de ese momento. Si cambió, error 51308 y no se guarda
   ni acuse ni aviso. NULL solo coincide con NULL.
-- **Lo que no se revalida en la base.** Que la iniciativa siga Atrasada por
-  la fecha **propia de una categoría** (`FechaAnalisisCategoria`). Esa regla
-  la decide el sitio con la lista, igual que el semáforo; la base no la
-  recalcula, porque eso sería una segunda regla de vencidas. Si alguien
-  cambia solo esa fecha de categoría en el instante entre la revisión y el
-  guardado, el acuse queda registrado con la fecha de la iniciativa, que no
-  cambió. No cambia ningún dato de la iniciativa.
+- **Lo que no se revalida en la base.** Que la iniciativa siga Atrasada: lo
+  decide el sitio con la lista, igual que el semáforo; la base no lo
+  recalcula, porque eso sería una segunda regla de vencidas. Desde la regla
+  de fecha única por iniciativa (2026-11-12) el semáforo ya no usa
+  `FechaAnalisisCategoria`: la fecha compromiso de Análisis es siempre
+  `dbo.Problem.FechaAnalisis`, la misma que compara 51308.
 - **Costo del POST.** El POST relee el registro completo
   (`ExperienciaQueries.RegistroIniciativas`) para usar exactamente la misma
   regla del semáforo. Es lo mismo que cuesta abrir la página, solo en un

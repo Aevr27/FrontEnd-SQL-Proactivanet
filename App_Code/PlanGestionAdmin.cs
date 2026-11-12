@@ -10,16 +10,15 @@
 // FECHAS (regla del negocio: analisis = 15 dias)
 //   Alta       FechaCreacion = hoy en Mexico; FechaAnalisis = hoy + 15 dias
 //              naturales; FechaEntregaAnalisis = la del formulario (por
-//              omision hoy). Las categorias iniciales HEREDAN las fechas de
-//              la iniciativa: no llevan fecha propia (NULL), asi que un
-//              cambio posterior de la FechaAnalisis de la iniciativa las
-//              sigue moviendo juntas.
-//   Ligar      una categoria agregada despues lleva SU fecha de creacion (hoy)
-//              y SU fecha de analisis (hoy + 15). Las de la iniciativa y las
-//              de las otras categorias no se tocan.
-//   Editar     la fecha de analisis de una categoria con fecha PROPIA se
-//              cambia en ella (FechasCategoria); la de una categoria que
-//              HEREDA es la de la iniciativa: el cambio va a f_analisis.
+//              omision hoy).
+//   Analisis   UNA por iniciativa (dbo.Problem.FechaAnalisis), comun a todas
+//              sus categorias, tambien a las que se ligan despues: se cambia
+//              solo en f_analisis. FechasCategoria siempre va vacia (el
+//              validador rechaza fcat_*).
+//   Ligar      una categoria agregada despues registra el dia en que se liga
+//              (FechaCreacion). adm.usp_GestionAdmin_Modificar (sql/18-83)
+//              todavia le escribe FechaAnalisisCategoria = hoy + 15; ninguna
+//              lectura del sitio la usa como fecha efectiva.
 //   Convencion medida en el Excel V3.1 (DBProblems, 530 filas sin cambios
 //   de fecha): FechaAnalisis - FechaCreacion = 15 dias es la diferencia mas
 //   comun (92), pero no la unica (22: 60, 21: 49, 14: 28). Se aplica la regla
@@ -77,7 +76,8 @@ public sealed class CategoriaPlan
     // Declarados. En una ligada: null = no cambia.
     public string TipoIniciativa;
     public string TipoAgrupado;
-    // Fechas PROPIAS de la categoria. null = hereda las de la iniciativa.
+    // FechaCreacion: el dia en que se liga (null = inicial del alta).
+    // FechaAnalisis: siempre null; toda categoria usa la de la iniciativa.
     public DateTime? FechaCreacion;
     public DateTime? FechaAnalisis;
 
@@ -96,7 +96,9 @@ public sealed class CategoriaPlan
     }
 }
 
-// Nueva fecha de analisis PROPIA de una categoria ya ligada.
+// Fila de @FechasCategoria de adm.usp_GestionAdmin_Modificar. El plan ya no
+// la llena (la fecha de analisis es de la iniciativa); se conserva porque el
+// procedimiento sigue declarando el parametro.
 public sealed class FechaCategoriaPlan
 {
     public string Ruta;
@@ -345,8 +347,7 @@ public static class PlanificadorGestionAdmin
         var plan = new PlanModificarAdmin { Codigo = actual.Folio, Hoy = hoy.Date };
 
         // Solo lo que el validador registro como cambio, con SU valor nuevo:
-        // misma decision (incluye f_analisis cuando llego como la fecha de
-        // una categoria que hereda la de la iniciativa).
+        // misma decision.
         var cambiados = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var c in r.Cambios) cambiados[c["clave"] as string ?? ""] = c["nuevo"] as string;
         foreach (var campo in CamposProblem)
@@ -384,23 +385,8 @@ public static class PlanificadorGestionAdmin
                 Pct = t == null ? null : ValidadorIniciativa.Fraccion(t),
                 TipoIniciativa = Limpio(x.TipoIniciativa),
                 TipoAgrupado = Limpio(x.TipoAgrupado),
-                // Ligada despues: fechas PROPIAS, desde el dia en que se liga.
                 FechaCreacion = hoy.Date,
-                FechaAnalisis = FechasGestionAdmin.Analisis(hoy),
             });
-        }
-
-        // Fechas de analisis por categoria: las PROPIAS se cambian en la
-        // categoria; las que heredan ya las convirtio el validador en un
-        // cambio de f_analisis (de la iniciativa), que va arriba.
-        foreach (var f in p.FechasCategoria)
-        {
-            var ligada = actual.Ligada(Limpio(f.Categoria));
-            var nueva = FechasGestionAdmin.DeIso(Limpio(f.Texto));
-            if (ligada == null || nueva == null || ligada.FAnalisisPropia == null) continue;
-            var anterior = FechasGestionAdmin.DeIso(ligada.FAnalisisPropia);
-            if (anterior == nueva) continue;
-            plan.FechasCategoria.Add(new FechaCategoriaPlan { Ruta = ligada.Ruta, FechaAnalisis = nueva.Value, Anterior = anterior });
         }
 
         foreach (var q in p.Quitar)
