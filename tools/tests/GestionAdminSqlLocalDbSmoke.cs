@@ -1074,7 +1074,73 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                   Uno(cn, "SELECT CONVERT(char(10), MIN(FechaAnalisisCategoria), 23) FROM dbo.ProblemCategoria WHERE Codigo = N'" + cv + "'"));
             Check("V13 sql/diag_fecha_analisis_unica.sql (solo lectura) corre completo", "sin error",
                   LotesError(cn, Leer("sql", "diag_fecha_analisis_unica.sql")));
+
+            Adm05(cn, cv, hoy);
         }
+    }
+
+    // ADM_05: la vista de QA es ADM_02 + una exclusion de avisos hecha en la
+    // VM el 2026-10-23 (Product Owner Carlos ... via dbo.vw_ProblemDueno), asi
+    // que el rollback de ADM_02 no sirve: la borraria. La replica no trae
+    // dbo.vw_ProblemDueno ni dbo.fn_ClaveNombreOrdenada: se crean stubs en esta
+    // base desechable (un dueno por fila de dbo.zzDueno).
+    static string HashCuerpoVencido(SqlConnection cn)
+    {
+        var v = Uno(cn, "SELECT HASHBYTES('SHA2_256', SUBSTRING(x.s, CHARINDEX(N'ASSELECTp.Codigo', x.s), 2147483647)) " +
+            "FROM (SELECT s = REPLACE(REPLACE(REPLACE(REPLACE(OBJECT_DEFINITION(OBJECT_ID('dbo.vw_ProblemVencido')), " +
+            "N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N'')) AS x") as byte[];
+        return v == null ? "null" : "0x" + BitConverter.ToString(v).Replace("-", "");
+    }
+
+    static void Adm05(SqlConnection cn, string cv, DateTime hoy)
+    {
+        if (!File.Exists(Path.Combine(Backend, "ADM_05_vw_ProblemVencido_fecha_unica.sql")))
+        {
+            NoCorrida("V14-V19", "falta ADM_05 en " + Backend);
+            return;
+        }
+        const string HVm = "0xA2DC557F883C1AA1E06641D592CEFD142932D2C2918ED615706B1E5FBB44FD34";
+        const string H05 = "0xF21FA4638925EF9A3BFFB513F764DFA197AE7F614650968E9A6FE66191876CE7";
+        var adm05 = LeerBackend("ADM_05_vw_ProblemVencido_fecha_unica.sql");
+        var rollback05 = LeerBackend("ADM_05_vw_ProblemVencido_fecha_unica_rollback.sql");
+
+        Exec(cn, "SELECT TOP 0 Codigo, CONVERT(nvarchar(200), N'') AS ProductOwner INTO dbo.zzDueno FROM dbo.Problem;");
+        Exec(cn, "IF OBJECT_ID('dbo.fn_ClaveNombreOrdenada') IS NULL EXEC (N'CREATE FUNCTION dbo.fn_ClaveNombreOrdenada (@n nvarchar(400)) " +
+                 "RETURNS nvarchar(400) AS BEGIN RETURN dbo.fn_ClaveNombre(@n) END');");
+        Exec(cn, "IF OBJECT_ID('dbo.vw_ProblemDueno') IS NULL EXEC (N'CREATE VIEW dbo.vw_ProblemDueno AS SELECT Codigo, ProductOwner FROM dbo.zzDueno');");
+        Exec(cn, "INSERT dbo.zzDueno (Codigo, ProductOwner) VALUES (N'PRB 2026-000005', N'Carlos Francisco Garcia Chavez Nava');");
+
+        var antes = HashCuerpoVencido(cn);
+        Check("V14 ADM_05 se niega si la vista no es la de QA (aqui la del 26) y no la toca", "True|" + antes,
+              LotesError(cn, adm05).Contains("huella distinta") + "|" + HashCuerpoVencido(cn));
+
+        // La definicion de QA, tal cual (el lote CREATE OR ALTER del rollback).
+        string vistaQa = null;
+        foreach (var l in Regex.Split(rollback05, @"^\s*GO\s*$", RegexOptions.Multiline))
+            if (l.Contains("CREATE OR ALTER VIEW dbo.vw_ProblemVencido")) vistaQa = l;
+        Exec(cn, vistaQa);
+        var avisos = "SELECT Veredicto, Compromiso, GeneraAviso FROM dbo.vw_ProblemVencido WHERE Codigo = ";
+        Check("V15 con la vista de QA: misma huella que la VM; la fecha propia vencida la da VENCIDA (el defecto); la exclusion apaga el aviso",
+              HVm + "|VENCIDA|" + Iso(hoy.AddDays(-3)) + "|1|VENCIDA|2026-09-30|0",
+              HashCuerpoVencido(cn) + "|" + Filas(cn, avisos + "N'" + cv + "'") + "|" + Filas(cn, avisos + "N'PRB 2026-000005'"));
+
+        Lotes(cn, adm05);
+        Check("V16 ADM_05: compromiso = fecha de la iniciativa (AL CORRIENTE, sin aviso); la exclusion sigue; huella esperada",
+              H05 + "|AL CORRIENTE|" + Iso(hoy.AddDays(15)) + "|0|VENCIDA|2026-09-30|0|False|True",
+              HashCuerpoVencido(cn) + "|" + Filas(cn, avisos + "N'" + cv + "'") + "|" + Filas(cn, avisos + "N'PRB 2026-000005'") + "|" +
+              Uno(cn, "SELECT CONVERT(bit, CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.vw_ProblemVencido')) LIKE N'%FechaAnalisisCategoria%' THEN 1 ELSE 0 END)") + "|" +
+              Uno(cn, "SELECT CONVERT(bit, CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.vw_ProblemVencido')) LIKE N'%Carlos Francisco Garcia Chavez Nava%' THEN 1 ELSE 0 END)"));
+        Check("V17 ADM_05 no corre dos veces (la huella ya es la suya)", "True|" + H05,
+              LotesError(cn, adm05).Contains("huella distinta") + "|" + HashCuerpoVencido(cn));
+
+        Lotes(cn, rollback05);
+        Check("V18 rollback ADM_05: vuelve exacta la de QA (huella) y con ella el defecto", HVm + "|VENCIDA",
+              HashCuerpoVencido(cn) + "|" + Uno(cn, "SELECT Veredicto FROM dbo.vw_ProblemVencido WHERE Codigo = N'" + cv + "'"));
+
+        // Deja la vista como la encontro (la del 26): los casos B / E corren
+        // el rollback de sql/18, que se niega si una vista usa sus columnas.
+        Lotes(cn, LeerBackend("ADM_02_vw_ProblemVencido_fecha_categoria_rollback.sql"));
+        Check("V19 la vista vuelve a la del 26 para los casos siguientes", antes, HashCuerpoVencido(cn));
     }
 
     static void Stub()
