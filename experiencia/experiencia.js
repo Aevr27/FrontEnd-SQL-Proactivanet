@@ -237,12 +237,11 @@ function volSlotOMes(c, periodo){
 
 // ---- Tipo de registro: Todos / Incidentes / Requerimientos [TIPO] ----
 // El handler manda, ademas del volumen de siempre (vol_slot / vol_mes =
-// [Total general] de vw_TBSlotCAT / vw_TBMesCAT MENOS los tipos SorIA
-// Incidentes / SorIA Peticiones, ExperienciaQueries.SinSorIA; "Sin tipo" y
-// los demas incluidos), dos series por categoria en vol_tipo:
-//   inc  columna [Incidencia]            (Tipo = 'Incidencia')
-//   req  columna [Petición de Servicio]  (Tipo = 'Petición de Servicio')
-// Ninguna sale de restar: cada una es su columna de la vista. Elegir un tipo
+// [Total general] de vw_TBSlotCAT / vw_TBMesCAT, con todos los tipos), dos
+// series por categoria en vol_tipo (ExperienciaQueries.VolumenDeColumnas):
+//   inc  [Incidencia] + [SorIA Incidentes]
+//   req  [Petición de Servicio] + [SorIA Peticiones]
+// Ninguna sale de restar: cada una suma columnas de la vista. Elegir un tipo
 // sustituye en cada categoria (categorias y categorias_v2) los campos de
 // volumen por los de ese tipo, y "Todos" devuelve los originales tal cual,
 // asi que todas las graficas, tablas y KPIs siguen leyendo los mismos
@@ -284,6 +283,59 @@ function aplicarTipoRegistro(tipo){
   });
 }
 
+/* PRONOSTICO MENSUAL [KPI-1] (solo "Ver por" = Mes Calendario)
+   -------------------------------------------------------------------------
+   Pronostico = real acumulado / dias transcurridos del mes * dias del mes.
+
+     - dias del mes: los reales del mes y año del periodo (P.mes_actual de
+       P.anio): 28 o 29 en febrero, 30 o 31 en los demas. Ya no un 30 fijo
+       como el pronostico retirado en d9d19a6.
+     - dias transcurridos: hasta la fecha de corte de los datos, el dia de
+       P.fecha_actualizacion (MAX(FechaUltimaCargaDW) de dbo.Tickets, la
+       misma "Ultima actualizacion" de la cabecera; sin corte el servidor ya
+       pone ahi el dia de hoy). Mes del corte = el del periodo: el dia del
+       corte. Mes ya concluido (el corte cae despues): el mes completo, y
+       el pronostico es el real. Corte antes del mes o ilegible: sin
+       pronostico (null), nunca una division entre cero.
+     - redondeo: Math.round, el mismo del pronostico anterior; se pinta con
+       FMT como cualquier cifra del tablero.
+
+   Cada tarjeta pronostica su propia metrica real (Volumen Actual el volumen,
+   Volumen - Automatizado la resta real). Sin document ni P para que
+   tools/tests/AutomatizadosExperienciaSmoke.js las corra tal cual. */
+/* === PRONOSTICO MES (inicio) === */
+function diasDelMes(anio, mes) {
+  return new Date(Date.UTC(Number(anio), Number(mes), 0)).getUTCDate();
+}
+// 'dd/MM/yyyy' (fecha_actualizacion) o 'aaaa-mm-dd[...]' -> {anio, mes, dia}.
+function fechaDeCorte(texto) {
+  var s = String(texto || ''), t;
+  if ((t = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(s))) return { anio: +t[3], mes: +t[2], dia: +t[1] };
+  if ((t = /^(\d{4})-(\d{2})-(\d{2})/.exec(s))) return { anio: +t[1], mes: +t[2], dia: +t[3] };
+  return null;
+}
+function diasTranscurridosMes(anio, mes, corte) {
+  var y = Number(anio), m = Number(mes), c = fechaDeCorte(corte);
+  if (!(y > 0) || !(m >= 1 && m <= 12) || !c || !(c.dia >= 1)) return null;
+  var total = diasDelMes(y, m);
+  var periodo = y * 12 + m, delCorte = c.anio * 12 + c.mes;
+  if (delCorte > periodo) return total;                 // mes concluido
+  if (delCorte < periodo) return null;                  // el corte aun no llega al mes
+  return Math.min(c.dia, total);
+}
+// null si no se puede pronosticar (sin real o sin dias transcurridos).
+function pronosticoMensual(real, anio, mes, corte) {
+  var dias = diasTranscurridosMes(anio, mes, corte);
+  if (real == null || isNaN(Number(real)) || !dias) return null;
+  return Math.round(Number(real) / dias * diasDelMes(anio, mes));
+}
+/* === PRONOSTICO MES (fin) === */
+// El pronostico del periodo que se ve: solo en Mes; en SLOT, null.
+function pronosticoVista(real){
+  return modoTiempo==='mes' ? pronosticoMensual(real, P.anio, P.mes_actual, P.fecha_actualizacion) : null;
+}
+const TAG_PRON=' <span class="tag-pron">Pronóstico</span>';
+
 /* TICKETS AUTOMATIZADOS DE SLA
    -------------------------------------------------------------------------
    Es la tarjeta "Automatizado" de SLA: TicketsAutomatizados de
@@ -293,9 +345,8 @@ function aplicarTipoRegistro(tipo){
    handlers/experiencia_automatizados.ashx, que cuenta las mismas filas que
    Kpis (DashboardQueries.AutomatizadosPorCategoria) y las reparte por los
    dueños de la categoria del ticket (DirectorioOrganizacional, el mismo de
-   las categorias del tablero y del export). Sin los tipos SorIA, igual que
-   el volumen (ExperienciaQueries.SinSorIA): en Todos da menos que la
-   tarjeta de SLA, que si los cuenta. Antes era una llamada a
+   las categorias del tablero y del export). Con los tipos SorIA, igual que
+   el volumen (ExperienciaQueries.VolumenDeColumnas). Antes era una llamada a
    kpis.ashx por periodo -10 en SLOT, hasta 12 en Mes- con la consulta de
    KPIs entera detras.
 
@@ -546,14 +597,8 @@ function renderKPIs(cats, det){
       vistos.add(i.folio);
   }));
   const nVen=vistos.size;
-  // [KPI-1]: volumen real del periodo, sin proyectar el mes en curso.
-  const etiquetaVol = modoTiempo==='mes' ? 'Volumen Actual (Mes Actual)' : 'Volumen Actual (0-30d)';
   const cards=[
-    {l:etiquetaVol,v:FMT(vol),f:(function(){
-        const totalGlobal=P.categorias.filter(c=>c.nivel==='C1').reduce((s,c)=>s+volActualDe(c),0);
-        const pct=totalGlobal>0?vol/totalGlobal:0;
-        return `${cats.length} categorías · ${PCT(pct)} del total`;
-      })(),s:null},
+    tarjetaVolumenActual(vol, cats),
     tarjetaSinAutomatizar(vol),
     {l:'% Tickets con Iniciativa',v:PCT(pctIni),f:FMT(ini)+' con iniciativa',s:SEM(pctIni)},
     {l:'% Tickets en Tiempo',v:PCT(pctTiempo),f:FMT(ret)+' en riesgo',s:SEM(pctTiempo)},
@@ -591,11 +636,28 @@ function mostrarPanel(id){
   }
 }
 
+// ---- Volumen Actual [KPI-1] ----
+// SLOT: el volumen real y su parte del total, como siempre. Mes: el
+// pronostico mensual del volumen real (ver PRONOSTICO MENSUAL) y, debajo, el
+// real acumulado. Sin pronostico posible, el real con el mismo pie.
+function tarjetaVolumenActual(vol, cats){
+  if(modoTiempo==='mes'){
+    const pron=pronosticoVista(vol);
+    return {l:'Volumen Actual (Mes Actual)'+(pron!=null?TAG_PRON:''), v:FMT(pron!=null?pron:vol),
+      f:`Volumen Real: ${FMT(vol)}`, s:null};
+  }
+  const totalGlobal=P.categorias.filter(c=>c.nivel==='C1').reduce((s,c)=>s+volActualDe(c),0);
+  const pct=totalGlobal>0?vol/totalGlobal:0;
+  return {l:'Volumen Actual (0-30d)', v:FMT(vol), f:`${cats.length} categorías · ${PCT(pct)} del total`, s:null};
+}
+
 // ---- Volumen - Automatizado ----
 // Volumen Actual - Automatizados SLA del MISMO periodo: SLOT 0 (los rangos de
 // pedirAutomatizados son los de vw_TicketsSlotsBase) o el mes en curso.
 // `vol` es el mismo real que pinta "Volumen Actual" y los automatizados son
-// los reales del periodo: sin pronostico en ninguno de los dos.
+// los reales del periodo. En SLOT la cifra es esa resta. En Mes la cifra es
+// el pronostico mensual de la resta REAL (no la resta de dos pronosticos) y
+// el pie da "Volumen Real: diferencia" y la resta real "Volumen - SLA = dif".
 //
 // Es una resta APROXIMADA, decidida asi y dicha en el title del rotulo
 // (AYUDA_SIN_AUTOMATIZAR: el title nativo de las tarjetas de Admin y de los
@@ -625,8 +687,14 @@ function tarjetaSinAutomatizar(vol){
   const auto=a.valores[String(modoTiempo==='mes' ? P.mes_actual : 0)];
   if(auto==null) return tarjeta('N/D', 'SLA sin dato en el periodo');
   const dif=vol-auto;
-  const f=(dif<0 ? 'Negativo: los valores pueden no ser directamente comparables · ' : '')
-    +`${FMT(vol)} − ${FMT(auto)} Automatizados SLA`;
+  const aviso=dif<0 ? 'Negativo: los valores pueden no ser directamente comparables · ' : '';
+  if(modoTiempo==='mes'){
+    const pron=pronosticoVista(dif);
+    // Como Volumen Actual: el real de la tarjeta primero, luego su desglose.
+    const pie=`Volumen Real: `+aviso+`${FMT(vol)} - ${FMT(auto)} = ${FMT(dif)}`;
+    return pron!=null ? {l:l+TAG_PRON, v:FMT(pron), f:pie, s:null, t:AYUDA_SIN_AUTOMATIZAR} : tarjeta(FMT(dif), pie);
+  }
+  const f=aviso+`${FMT(vol)} − ${FMT(auto)} Automatizados SLA`;
   return tarjeta(FMT(dif), f);
 }
 
@@ -749,13 +817,22 @@ function etiquetasEncimaBarras(FMT){
 }
 
 // ---- Evolucion por SLOT o por MES [GRAF-1] (antiguo->reciente) ----
+// Mes: el punto del mes en curso (P.mes_actual) es el pronostico mensual de
+// su volumen real, el mismo pronosticoVista que la tarjeta Volumen Actual
+// sobre la misma suma (cats = aggCats, como la tarjeta). SUSTITUYE al real
+// en ese punto, no se le suma; el real va en el tooltip. Los meses
+// historicos y la serie Automatizados SLA quedan con sus reales. SLOT o sin
+// pronostico posible: todos los puntos reales, como siempre.
 function renderEvol(cats){
-  let labels, vals, nums;
+  let labels, vals, nums, idxPron=-1, valReal=null;
   if(modoTiempo==='mes'){
     // Orden cronologico: mes 0 (Dic ant.) a la izquierda, mas reciente a la derecha.
     nums=[...P.mes_nums].sort((a,b)=>a-b);
     labels=nums.map(m=>P.meses[P.mes_nums.indexOf(m)]);
     vals=nums.map(m=>cats.reduce((t,c)=>t+volSlotOMes(c,m),0));
+    const i=nums.indexOf(P.mes_actual);
+    const pron=i>=0 ? pronosticoVista(vals[i]) : null;
+    if(pron!=null){ idxPron=i; valReal=vals[i]; vals[i]=pron; }
   } else {
     // Etiquetas de SLOT: solo el rango de dias (0-30d, 31-60d, ...), sin mes.
     nums=[...P.slot_nums].sort((a,b)=>b-a); // antiguo->reciente (SLOT alto -> 0)
@@ -764,11 +841,15 @@ function renderEvol(cats){
   }
   const ctx=document.getElementById('chartEvol');
   if(chartEvol)chartEvol.destroy();
-  // Todos los puntos son volumen real: mismo color y mismo radio.
+  // Puntos reales: mismo color y radio. El del pronostico, en ambar y mas
+  // grande (es una advertencia, no otra serie), como antes de d9d19a6.
+  const conPron=idxPron>=0;
   const datasets=[{label:'Volumen',data:vals,
     borderColor:VERDE.pino,backgroundColor:'rgba(47,143,107,.14)',fill:true,tension:.3,
-    pointRadius:3,pointHoverRadius:6,
-    pointBackgroundColor:VERDE.profundo,borderWidth:2}];
+    pointRadius:conPron ? vals.map((_,i)=>i===idxPron?6:3) : 3,
+    pointHoverRadius:conPron ? vals.map((_,i)=>i===idxPron?9:6) : 6,
+    pointBackgroundColor:conPron ? vals.map((_,i)=>i===idxPron?AMBAR_SEM:VERDE.profundo) : VERDE.profundo,
+    borderWidth:2}];
   // Automatizados de SLA: barras en los MISMOS periodos y en el mismo orden
   // que la linea, por detras de ella (order). Son otra cuenta (ver
   // pedirAutomatizados), no se suman al volumen. Mientras no hay dato la
@@ -798,6 +879,8 @@ function renderEvol(cats){
     options:{responsive:true,plugins:{legend:{display:false},
       tooltip:{callbacks:{label:c=>c.datasetIndex===1
         ? (c.raw==null ? 'Automatizados SLA: sin dato' : `Automatizados SLA: ${FMT(c.raw)}`)
+        : c.dataIndex===idxPron
+        ? `Volumen · Pronóstico: ${FMT(c.raw)} · Volumen Real: ${FMT(valReal)}`
         : `Volumen: ${FMT(c.raw)}`}}},
       // Con barras el eje deja medio hueco a cada lado para que la primera
       // y la ultima no salgan cortadas a la mitad.
@@ -1777,9 +1860,9 @@ function renderAll(){
 // periodoDescarga- y se pide a handlers/experiencia_exportar.ashx ese periodo
 // con los cuatro filtros de dueños. El servidor filtra por fecha en SQL y
 // resuelve dueños con la misma logica que las filas de categoria; devuelve
-// solo los tickets que van al libro, sin tope. Ya no depende de "Ver por":
-// el export del periodo que se esta viendo (modo slot) sigue en el handler,
-// pero el boton no lo pide.
+// solo los tickets que van al libro, sin tope. No depende de "Ver por":
+// "Último slot" pide modo=slot (SLOT 0, la base de los KPIs en modo SLOT)
+// aunque el tablero este en Mes.
 const EXPORT_URL = new URL('../handlers/experiencia_exportar.ashx', BASE).href;
 
 /* === PERIODO DESCARGA (inicio) ===
@@ -1796,6 +1879,14 @@ function diaLocalISO(d) {
     String(d.getDate()).padStart(2, '0');
 }
 function periodoDescarga(opcion, hoy, desde, hasta) {
+  if (opcion === 'slot') {
+    // El SLOT 0 del tablero, tal cual lo define la base: modo=slot lee
+    // vw_TicketsSlotsBase WHERE Slot = 0, la misma base del KPI en "Ver por
+    // SLOT". Los dias del SLOT los fija vw_Tickets.Slot en SQL, no el
+    // navegador: inicio/fin van en null y el libro rotula el rango con las
+    // fechas de registro que lleguen (ver rangoReal).
+    return { params: { modo: 'slot' }, inicio: null, fin: null, etiqueta: 'Último slot (SLOT 0)' };
+  }
   if (opcion === 'mes') {
     // El mes calendario anterior al de hoy, completo: el 8 y el 31 de octubre
     // dan septiembre; en enero, diciembre del año anterior. El dia 0 del mes
@@ -1835,6 +1926,18 @@ function periodoDescarga(opcion, hoy, desde, hasta) {
     };
   }
   return { error: 'Elige una opción.' };
+}
+// Primer y ultimo dia (aaaa-mm-dd) de registro de los tickets recibidos; para
+// rotular "Último slot", cuyo rango no conoce el navegador.
+function rangoReal(tickets) {
+  var min = null, max = null;
+  tickets.forEach(function (t) {
+    var dia = String(t.fecha_registro || '').slice(0, 10);
+    if (!dia) return;
+    if (min === null || dia < min) min = dia;
+    if (max === null || dia > max) max = dia;
+  });
+  return { inicio: min, fin: max };
 }
 // Tickets cuya fecha de registro (aaaa-mm-dd hh:mm:ss) cae fuera de los dias
 // inicio..fin. El servidor ya filtra; esto comprueba, con lo que llego, que
@@ -2226,6 +2329,7 @@ function abrirSelectorDescarga(){
   document.getElementById('descargaMesTxt').textContent='('+mes.etiqueta+')';
   const anio=periodoDescarga('anio', hoy);
   document.getElementById('descargaAnioTxt').textContent='('+anio.inicio+' a '+anio.fin+')';
+  document.getElementById('descargaSlotTxt').textContent='(SLOT 0 · últimos 30 días, como los KPIs en modo SLOT)';
   const desde=document.getElementById('descargaDesde'), hasta=document.getElementById('descargaHasta');
   if(!desde.value) desde.value=mes.inicio;
   if(!hasta.value) hasta.value=mes.fin;
@@ -2261,7 +2365,10 @@ async function descargarTickets(periodoElegido){
     const filtrados=datos.tickets||[];
     if(!filtrados.length){ alert('No hay tickets para el filtro y el periodo '+periodoElegido.etiqueta+'.'); return; }
     // Red de seguridad: ni un ticket fuera de los dias pedidos llega al libro.
-    const fuera=fueraDePeriodo(filtrados, periodoElegido.inicio, periodoElegido.fin);
+    // "Último slot" no trae dias propios (los fija SQL): se omite la
+    // comprobacion y el rango del libro sale de los tickets recibidos.
+    const sinDias=!periodoElegido.inicio;
+    const fuera=sinDias?0:fueraDePeriodo(filtrados, periodoElegido.inicio, periodoElegido.fin);
     if(fuera){
       alert('La descarga trajo '+FMT(fuera)+' tickets fuera de '+periodoElegido.inicio+' a '+periodoElegido.fin+'; no se genera el archivo.');
       return;
@@ -2282,7 +2389,8 @@ async function descargarTickets(periodoElegido){
        periodo exportado (en Mes, con el año que devolvio el handler), los
        cuatro filtros -"Todos" cuando no hay uno puesto-, el total de filas
        exportadas y la fecha del equipo. */
-    const periodo = periodoElegido.etiqueta+' ('+periodoElegido.inicio+' a '+periodoElegido.fin+')';
+    const dias = sinDias ? rangoReal(filtrados) : periodoElegido;
+    const periodo = periodoElegido.etiqueta+' ('+dias.inicio+' a '+dias.fin+')';
     const bytes = LibroTickets.construir(XLSX, {
       hoja: 'Tickets',
       titulo: 'Tickets — Dashboard Export',

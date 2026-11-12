@@ -535,6 +535,12 @@ public sealed class IniciativaActual
     public string SoCapturado;
     public bool SinCategoria;
     public List<Categoria> Categorias = new List<Categoria>();
+    // sql/83: las asociaciones de baja (VigenteEnOrigen = 0) de la base, NO
+    // del registro (que solo trae las vigentes). Vacia sin 83: agregar una
+    // de ellas sigue siendo lo que diga la base (51008).
+    public List<CategoriaHistorica> Historicas = new List<CategoriaHistorica>();
+
+    public CategoriaHistorica Historica(string ruta) { return CategoriasHistoricas.Buscar(Historicas, ruta); }
 
     public static IniciativaActual DesdeRegistro(Dictionary<string, object> i)
     {
@@ -1261,17 +1267,41 @@ public sealed class ValidadorGestionAdmin
             AvisarSinDuenos(r, catalogo, ruta);
             var ti = Limpio(x.TipoIniciativa);
             var ta = Limpio(x.TipoAgrupado);
+            // sql/83: una que ESTUVO ligada se reactiva (la misma fila). Su
+            // clasificacion historica no vacia se conserva: una distinta es
+            // 422 (nunca se ignora ni se sobrescribe); solo se valida y se usa
+            // lo que llena un campo vacio. La que queda es la EFECTIVA.
+            var historica = actual.Historica(ruta);
+            if (historica != null)
+            {
+                if (CategoriasHistoricas.Conflicto(historica.TipoIniciativa, ti))
+                    r.Agregar(CCategorias, ruta + ": estuvo ligada con Clasificaci\u00f3n " + historica.TipoIniciativa +
+                        "; la clasificaci\u00f3n hist\u00f3rica se conserva y no se cambia.");
+                if (CategoriasHistoricas.Conflicto(historica.TipoAgrupado, ta))
+                    r.Agregar(CCategorias, ruta + ": estuvo ligada con Agrupaci\u00f3n " + historica.TipoAgrupado +
+                        "; la clasificaci\u00f3n hist\u00f3rica se conserva y no se cambia.");
+                if (historica.TipoIniciativa != null) ti = null;
+                if (historica.TipoAgrupado != null) ta = null;
+            }
             if (ti != null && (estados == null || !estados.TiposIniciativa.Contains(ti)))
                 r.Agregar(CCategorias, ruta + ": la Clasificaci\u00f3n no es una de las que ya existen en los problemas.");
             if (ta != null && (estados == null || !estados.TiposAgrupado.Contains(ta)))
                 r.Agregar(CCategorias, ruta + ": la Agrupaci\u00f3n no es una de las que ya existen en las categor\u00edas.");
+            if (historica != null)
+            {
+                ti = CategoriasHistoricas.Efectiva(historica.TipoIniciativa, ti);
+                ta = CategoriasHistoricas.Efectiva(historica.TipoAgrupado, ta);
+                r.Advertencias.Add(ruta + ": estuvo ligada a esta iniciativa y se dio de baja; se reactivar\u00e1 la MISMA asociaci\u00f3n con sus fechas originales (creaci\u00f3n " +
+                    (historica.FCreacion ?? "sin fecha") + ", an\u00e1lisis " + (historica.FAnalisis ?? "la de la iniciativa") + ") y su clasificaci\u00f3n (" +
+                    (ti ?? "sin Clasificaci\u00f3n") + " / " + (ta ?? "sin Agrupaci\u00f3n") + ").");
+            }
             var t = Limpio(x.Texto);
             var fr = t == null ? null : ValidadorIniciativa.Fraccion(t);
             if (t != null && fr == null) continue;
             if (fr == null) quedaSinPct = true;
             agregadas++;
-            r.Cambio("agregar_categoria", "Agregar categor\u00eda", "", ruta + (fr == null ? " (sin %)" : " \u00b7 " + ComoPct(fr) + "%") +
-                (ta != null ? " \u00b7 " + ta : ""));
+            r.Cambio("agregar_categoria", historica != null ? "Reactivar categor\u00eda" : "Agregar categor\u00eda", "",
+                ruta + (fr == null ? " (sin %)" : " \u00b7 " + ComoPct(fr) + "%") + (ta != null ? " \u00b7 " + ta : ""));
             var motivoAgregar = tope.Agregada(ruta, fr, ta);
             if (motivoAgregar != null) r.Agregar(CCategorias, motivoAgregar);
         }

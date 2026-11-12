@@ -89,6 +89,22 @@ Check('R8 DATOS en el detalle: al enviar / pedido / ahora por dato pedido; SO no
   [/<th scope="row">Título<\/th><td>Uno<\/td><td>Uno &lt;nuevo&gt;<\/td><td>Uno<\/td>/.test(html),
    /<th scope="row">Product Owner capturado<\/th><td>PO viejo<\/td><td>\(vacío\)<\/td><td>PO viejo<\/td>/.test(html),
    /Service Owner capturado/.test(html), /data-sol-accion="aplicar">Aplicar solicitud/.test(html)]);
+// sql/83: un AGREGAR que REACTIVA una categoria que estuvo ligada (el servidor lo marca).
+var reac = { categoria: '/B/Hist', accion: 'AGREGAR', pct_anterior: null, pct_nuevo: '20', pct_actual: null, tipo_iniciativa: null, tipo_agrupado: null,
+  ligada: false, ligada_alguna_vez: true, reactivacion: true, tipo_iniciativa_historica: 'Problem', tipo_agrupado_historica: null, faltan_clasificacion: ['tipo_agrupado'] };
+html = C.htmlDetalle(Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [reac] }), { iniciativa: ['Problem', 'SorIA'], agrupado: ['Problem', 'Mejora'] });
+Check('X1 reactivacion (sql/83): accion Reactivar, «Reactivación (estuvo ligada)» (no «ya ligada»), la historica se conserva y SOLO se elige la Agrupacion que falta',
+  [true, true, false, true, false, true, true],
+  [/<td>Reactivar<\/td>/.test(html), /Reactivación \(estuvo ligada\)/.test(html), /ya ligada/.test(html),
+   /Problem <span class="ini-origen">histórica, se conserva<\/span>/.test(html), /data-clas-ti="0"/.test(html), /data-clas-ta="0"/.test(html),
+   /<strong>Reactivación:<\/strong>[\s\S]*elige solo lo que le falta/.test(html)]);
+var reacCompleta = Object.assign({}, reac, { tipo_agrupado_historica: 'Problem', faltan_clasificacion: [] });
+html = C.htmlDetalle(Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [reacCompleta] }), { iniciativa: ['Problem'], agrupado: ['Problem'] });
+Check('X2 reactivacion con historica completa: sin selectores ni aviso de «sin clasificación»', [false, false, false],
+  [/data-clas-ti="0"/.test(html), /data-clas-ta="0"/.test(html), /llegó sin clasificación/.test(html)]);
+var sin83 = { categoria: '/B/Hist', accion: 'AGREGAR', pct_anterior: null, pct_nuevo: '20', pct_actual: null, tipo_iniciativa: 'Problem', tipo_agrupado: 'Problem', ligada: false, ligada_alguna_vez: true };
+Check('X3 sin la migracion (el servidor no marca reactivacion): «ya ligada» como antes, sin «Reactivación»', [true, false],
+  (function (x) { return [/ya ligada/.test(x), /Reactivación/.test(x)]; })(C.htmlDetalle(Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [sin83] }), {})));
 // VARIOS (sql/34): Estado, dos fechas por etapa, una categoria y el Titulo
 // en UNA solicitud; ADM ve cada cambio y decide sobre la solicitud entera.
 var varios = Pendiente({ tipo: 'VARIOS', campo_fecha: null, estado_anterior: 'En Solución', estado_nuevo: 'En Monitoreo',
@@ -232,6 +248,8 @@ cola.abrir().then(function () {
 }).then(function () {
   // Dos enlaces por fila: el Codigo (dentro de la fila) abre la iniciativa;
   // el "#" y el resto de la fila, la solicitud.
+  // Sin detalle abierto: un clic en la fila abierta la pliega (P*).
+  cola.cerrarDetalle();
   var iniciativas = [], solicitudes = [], verDetalle = cola.verDetalle;
   cola.verDetalle = function (id) { solicitudes.push(id); return Promise.resolve(); };
   var fila = Nodo({ 'data-sol-id': '41' });
@@ -250,6 +268,163 @@ cola.abrir().then(function () {
     clic(Nodo({}, fila));
     Check('F16 clic en el "#" o en otra celda: abre la solicitud, no la iniciativa', [['PRB 2026-000003'], [43, 41]], [iniciativas.slice(), solicitudes.slice()]);
     cola.verDetalle = verDetalle;
+  });
+}).then(function () {
+  // ---- paginacion (20 por pagina) y detalle expandido ---------------------
+  Check('P1 paginar: 0, 7, 20, 21 y 45; pagina fuera de rango se ajusta',
+    ['1/1 0-0', '1/1 0-7', '1/1 0-20', '2/2 20-21', '3/3 40-45', '1/3 0-20'],
+    [[0, 1], [7, 1], [20, 1], [21, 2], [45, 9], [45, -2]].map(function (x) {
+      var p = C.paginar(x[0], x[1]); return p.pagina + '/' + p.paginas + ' ' + p.desde + '-' + p.hasta;
+    }));
+  Check('P2 controles: sin resultados nada; pagina 1 de 3 sin "<"; 3 de 3 sin ">"', ['', true, false, false, true, true],
+    [C.htmlPaginas(C.paginar(0, 1)), /data-sol-pagina="-1" aria-label="Página anterior" disabled/.test(C.htmlPaginas(C.paginar(45, 1))),
+     /data-sol-pagina="1" aria-label="Página siguiente" disabled/.test(C.htmlPaginas(C.paginar(45, 1))),
+     /data-sol-pagina="-1" aria-label="Página anterior" disabled/.test(C.htmlPaginas(C.paginar(45, 3))),
+     /data-sol-pagina="1" aria-label="Página siguiente" disabled/.test(C.htmlPaginas(C.paginar(45, 3))),
+     /Página 3 de 3<\/span>[\s\S]*41–45 de 45/.test(C.htmlPaginas(C.paginar(45, 3)))]);
+  html = C.htmlLista([Pendiente(), Pendiente({ id: 42 })], false, 42);
+  Check('P3 chevron por fila: solo la abierta con aria-expanded="true" y clase abierta', [2, 1, true],
+    [(html.match(/class="ini-sol-chev"/g) || []).length, (html.match(/aria-expanded="true"/g) || []).length,
+     /<tr class="ini-sol-fila abierta" data-sol-id="42">/.test(html)]);
+
+  var docP = Documento(), resp = [], urls = [];
+  var colaP = new C.ColaSolicitudes(docP, function (url) { urls.push(url); var r = resp.shift(); return r ? r() : Promise.reject(new Error('sin red')); });
+  // Enviada crece con el id (la #45 es la mas reciente) y el lote llega del
+  // MAS VIEJO al mas nuevo -como mandaba antes el servidor las pendientes-:
+  // la cola tiene que ordenar ella, la mas reciente primero.
+  function enviada(id) { return new Date(Date.UTC(2026, 9, 1) + id * 60000).toISOString().slice(0, 19) + 'Z'; }
+  function lote(n, estado, base) { var l = []; for (var i = 1; i <= n; i++) l.push(Pendiente({ id: (base || 0) + i, estado: estado || 'PENDIENTE', fecha_solicitud_utc: enviada((base || 0) + i) })); return l; }
+  function ids() { return (docP.els.solLista.innerHTML.match(/<tr class="ini-sol-fila[^"]*" data-sol-id="(\d+)"/g) || []).map(function (x) { return Number(/(\d+)"$/.exec(x)[1]); }); }
+  function pag() { var m = /Página (\d+) de (\d+)/.exec(docP.els.solPaginas.innerHTML); return m ? m[1] + '/' + m[2] : ''; }
+  function clicPagina(d) { docP.els.solPaginas.escuchas.click({ target: Nodo({ 'data-sol-pagina': String(d) }) }); }
+  function clicFila(id) { docP.els.solLista.escuchas.click({ target: Nodo({ 'data-sol-id': String(id) }) }); }
+  function resp200(j) { resp.push(function () { return Respuesta(200, j); }); }
+  colaP.fijarRol('ADM');
+  resp200({ solicitudes: lote(45) });
+  return colaP.abrir().then(function () {
+    Check('P4 45 pendientes: pagina 1 con las 20 mas recientes (45..26)', ['1/3', 20, 45, 26], [pag(), ids().length, ids()[0], ids()[19]]);
+    clicPagina(1);
+    Check('P5 ">" : pagina 2 con 25..6', ['2/3', 20, 25, 6], [pag(), ids().length, ids()[0], ids()[19]]);
+    clicPagina(1);
+    Check('P6 ultima pagina parcial: 5..1; ">" no pasa de la ultima', ['3/3', [5, 4, 3, 2, 1]], [pag(), ids()]);
+    clicPagina(1);
+    Check('P6 ...sigue en 3/3', '3/3', pag());
+    clicPagina(-1); clicPagina(-1); clicPagina(-1);
+    Check('P7 "<" hasta la primera y no menos', '1/3', pag());
+    clicPagina(1);
+    resp200(Pendiente({ id: 25 }));
+    clicFila(25);
+    return esperar();
+  }).then(function () {
+    Check('P8 expandir: detalle de la #25, chevron abierto, ninguna otra peticion de lista',
+      [false, true, true, 'detalle&id=25'], [docP.els.solDetalle.hidden, /Solicitud #25 /.test(docP.els.solDetalle.innerHTML),
+       /data-sol-exp="25" aria-expanded="true"/.test(docP.els.solLista.innerHTML), urls[urls.length - 1].split('accion=')[1]]);
+    resp200(Pendiente({ id: 30 }));
+    clicFila(30);
+    return esperar();
+  }).then(function () {
+    Check('P9 expandir otra: reemplaza (una sola abierta)', [true, 1, true],
+      [/Solicitud #30 /.test(docP.els.solDetalle.innerHTML), (docP.els.solLista.innerHTML.match(/aria-expanded="true"/g) || []).length,
+       /data-sol-exp="30" aria-expanded="true"/.test(docP.els.solLista.innerHTML)]);
+    clicFila(30);
+    Check('P10 clic en la abierta: se pliega', [true, '', null, 0],
+      [docP.els.solDetalle.hidden, docP.els.solDetalle.innerHTML, colaP.detalle, (docP.els.solLista.innerHTML.match(/aria-expanded="true"/g) || []).length]);
+    resp200(Pendiente({ id: 22 }));
+    clicFila(22);
+    return esperar();
+  }).then(function () {
+    clicPagina(1);
+    Check('P11 cambiar de pagina pliega el detalle', ['3/3', true, null], [pag(), docP.els.solDetalle.hidden, colaP.detalle]);
+    clicPagina(-1);
+    Check('P11 ...volver no deja detalle viejo', ['2/3', 0, true], [pag(), (docP.els.solLista.innerHTML.match(/aria-expanded="true"/g) || []).length, docP.els.solDetalle.hidden]);
+    // Respuesta vieja: se pide la #23 y antes de que llegue se cambia de pagina.
+    var tarde;
+    resp.push(function () { return new Promise(function (ok) { tarde = function () { ok({ status: 200, json: function () { return Promise.resolve(Pendiente({ id: 23 })); } }); }; }); });
+    clicFila(23);
+    return esperar().then(function () {
+      clicPagina(-1);
+      tarde();
+      return esperar();
+    });
+  }).then(function () {
+    Check('P12 detalle que llega tras cambiar de pagina: no se pinta', ['1/3', true, null], [pag(), docP.els.solDetalle.hidden, colaP.detalle]);
+    resp200(Pendiente({ id: 4 }));
+    return colaP.verDetalle(4);
+  }).then(function () {
+    Check('P13 abrir una de otra pagina (Historial): salta a su pagina', ['3/3', true], [pag(), /data-sol-exp="4" aria-expanded="true"/.test(docP.els.solLista.innerHTML)]);
+    resp200({ solicitudes: lote(3, 'APLICADA', 100) });
+    docP.els.solFiltro.escuchas.change({ target: { value: 'APLICADA' } });
+    return esperar();
+  }).then(function () {
+    Check('P14 filtro Aplicadas: estado en el GET, pagina 1 de 1, la mas reciente primero, detalle plegado', [true, '1/1', [103, 102, 101], true, null],
+      [/estado=APLICADA$/.test(urls[urls.length - 1]), pag(), ids(), docP.els.solDetalle.hidden, colaP.detalle]);
+    resp200({ solicitudes: [] });
+    docP.els.solFiltro.escuchas.change({ target: { value: 'RECHAZADA' } });
+    return esperar();
+  }).then(function () {
+    Check('P15 cero resultados: el aviso de siempre y sin controles', [true, ''], [/No hay solicitudes con ese estado/.test(docP.els.solLista.innerHTML), docP.els.solPaginas.innerHTML]);
+    resp200({ solicitudes: lote(45) });
+    docP.els.solFiltro.escuchas.change({ target: { value: 'PENDIENTE' } });
+    return esperar();
+  }).then(function () {
+    Check('P15b volver a Pendientes: el mismo orden (45 primero), no se invierte', [45, 26], [ids()[0], ids()[19]]);
+    clicPagina(1); clicPagina(1);
+    resp200(Pendiente({ id: 3 }));
+    clicFila(3);
+    return esperar();
+  }).then(function () {
+    resp200({ solicitudes: lote(25) });
+    docP.els.solActualizar.escuchas.click({});
+    return esperar();
+  }).then(function () {
+    Check('P16 Actualizar con menos solicitudes: pagina 3 ya no existe, queda la ultima (2/2, 21..25), sin detalle',
+      ['2/2', [5, 4, 3, 2, 1], true, null], [pag(), ids(), docP.els.solDetalle.hidden, colaP.detalle]);
+    // Todas: pendientes y aplicadas mezcladas, en desorden; el refresco
+    // automatico (fondo) deja el mismo orden.
+    var mezcla = lote(30).concat(lote(3, 'APLICADA', 100)).reverse();
+    mezcla.push(mezcla.shift());
+    resp200({ solicitudes: mezcla });
+    docP.els.solFiltro.escuchas.change({ target: { value: '' } });
+    return esperar();
+  }).then(function () {
+    Check('P17 Todas: la mas reciente primero sin importar el estado (103, 102, 101, 30...)', ['1/2', [103, 102, 101, 30, 29]],
+      [pag(), ids().slice(0, 5)]);
+    clicPagina(1);
+    Check('P17 ...la pagina 2 sigue el orden: 13..1', [13, 1, 13], [ids()[0], ids()[12], ids().length]);
+    resp200({ solicitudes: lote(30).concat(lote(3, 'APLICADA', 100)) });
+    return colaP.listar(true);
+  }).then(function () {
+    Check('P18 refresco: mismo orden y misma pagina', ['2/2', 13, 1], [pag(), ids()[0], ids()[12]]);
+    var o = C.ordenarRecientes;
+    Check('P19 misma Enviada: el # mas alto primero; sin fecha al final; no muta la entrada',
+      [[9, 5, 7, 2], [5, 9, 2, 7]],
+      (function () {
+        var e = [{ id: 5, fecha_solicitud_utc: '2026-10-01T10:00:00Z' }, { id: 9, fecha_solicitud_utc: '2026-10-01T10:00:00Z' },
+                 { id: 2, fecha_solicitud_utc: null }, { id: 7, fecha_solicitud_utc: '2026-10-01T09:00:00Z' }];
+        return [o(e).map(function (x) { return x.id; }), e.map(function (x) { return x.id; })];
+      })());
+  });
+}).then(function () {
+  // sql/83: aplicar una reactivacion manda SOLO lo que le falta (la historica se conserva).
+  cola.detalle = Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [reac] });
+  doc.selectores['[data-clas-ti="0"]'] = null;
+  doc.selectores['[data-clas-ta="0"]'] = { value: 'Mejora' };
+  doc.els.solComentario = Elemento('solComentario'); doc.els.solComentario.value = '';
+  var antes = pedidos.length;
+  responder(200, { aplicada: true, id_solicitud: 41 });
+  responder(200, { solicitudes: [] });
+  responder(200, Pendiente({ estado: 'APLICADA', revisado_por: 'SORIANA\\t_adm', fecha_revision_utc: '2026-10-19T17:00:00Z' }));
+  return cola.aplicar().then(function () {
+    var post = pedidos.slice(antes).filter(function (x) { return x.metodo === 'POST'; })[0];
+    Check('X4 aplicar una reactivacion: solo la Agrupacion que falta; la Clasificacion historica va vacia (se conserva)', ['/B/Hist', '', 'Mejora'],
+      [post.campos.clas_categoria, post.campos.clas_tipo_iniciativa, post.campos.clas_tipo_agrupado]);
+    cola.detalle = Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [reac] });
+    doc.selectores['[data-clas-ta="0"]'] = { value: '' };
+    var n = pedidos.length;
+    return cola.aplicar().then(function () {
+      Check('X5 sin elegir la que falta: no se manda nada y se dice', [n, true],
+        [pedidos.length, /Elige Tipo de iniciativa y Agrupación de: \/B\/Hist/.test(doc.els.solDetMsg.innerHTML)]);
+    });
   });
 }).then(function () {
   console.log(fallos === 0 ? 'TODO PASO' : fallos + ' FALLO(S)');

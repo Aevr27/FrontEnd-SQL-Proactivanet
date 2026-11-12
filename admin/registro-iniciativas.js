@@ -60,13 +60,16 @@
    a las iniciativas que cuenta ese indicador (FiltroRegistro.indicador,
    Registro.cumpleIndicador); otro clic en el mismo lo quita. Uno a la vez:
    elegir otro reemplaza al anterior. Total no es un filtro: su clic quita
-   el indicador elegido y la lista vuelve a todas las iniciativas que dejan
-   pasar los demas filtros (que no se tocan). La mecanica (elegir, quitar,
+   el indicador elegido y deja en Estado solo los que cuentan en el Total
+   (todos menos Cerrado; 2026-11-09), asi la lista trae lo mismo que la
+   cifra. Cerradas con Estado tal como lo dejo Total devuelve Estado a
+   Todos (un Estado elegido a mano no se toca). Los demas filtros no se
+   tocan. La mecanica (elegir, quitar,
    reemplazar, conservar en la relectura, atributos, escucha y foco) es la
    compartida de assets/js/seleccion-kpi.js (SeleccionKpi); las reglas de
    cada indicador siguen aqui. Se combina en Y con Estado, Tipo,
-   Director, cascada y busqueda; ninguno de ellos se toca (Cerradas con
-   Cerrado desmarcado en Estado = lista vacia, y lo dice). Cuenta como un
+   Director, cascada y busqueda; fuera de lo dicho para Total y Cerradas,
+   ninguno de ellos se toca. Cuenta como un
    filtro activo y "Limpiar filtros" lo quita. Las cifras NO se mueven: se
    siguen contando sobre el registro completo. La Cobertura no lo usa (un
    clic estando en ella vuelve a la lista). La relectura lo conserva (sobre).
@@ -476,15 +479,15 @@ window.RegistroIniciativas = (function () {
       '<small class="ini-sub" id="regCambioMeta-' + clave + '">' + htmlMetaHint(c, ruta) + '</small>';
   }
 
-  // Lo que dan los tickets escritos: el % que viaja, la volumetria con la
-  // que salio y si el % (dos decimales) da exactamente esos tickets.
+  // Lo que dan los tickets escritos: el % (entero) que viaja, la
+  // volumetria con la que salio y si ese % da exactamente esos tickets.
   function htmlMetaHint(c, ruta) {
     var v = c.vols[ruta], r = c.conversion(ruta);
     var vol = v && (v.estado === 'ok' || v.estado === 'cero') ? 'volumetría (últimos 30 días): ' + Number(v.valor).toLocaleString('es-MX') : '';
     if (r === null) return v && v.estado === 'cargando' ? 'Calculando la volumetría…' : Escape.html(vol);
     if (r.error !== undefined) return '<span class="ini-meta mal">' + Escape.html(r.error) + '</span>';
     return '≈ ' + Escape.html(r.pct) + '% · ' + Escape.html(vol) +
-      (r.exacto ? '' : ' · con 2 decimales ese % da ' + Escape.html(r.tickets) + ' tickets, no ' + Escape.html(c.meta(ruta).tickets));
+      (r.exacto ? '' : ' · con % entero ese % da ' + Escape.html(r.tickets) + ' tickets, no ' + Escape.html(c.meta(ruta).tickets));
   }
 
   // ' (pedido como N tickets de una volumetria de V)' de una categoria
@@ -492,7 +495,7 @@ window.RegistroIniciativas = (function () {
   function enTicketsCambio(x) {
     if (typeof x.tickets !== 'number') return '';
     return ' (pedido como ' + x.tickets + ' ticket' + (x.tickets === 1 ? '' : 's') + ' de una volumetría de ' + x.volumetria +
-      (x.exacto === false ? '; con 2 decimales el % no da exacto' : '') + ')';
+      (x.exacto === false ? '; con % entero no da exacto' : '') + ')';
   }
 
   // OTRAS INICIATIVAS DE UNA CATEGORIA en "Solicitar cambios": la regla de
@@ -591,6 +594,12 @@ window.RegistroIniciativas = (function () {
   // cap: { iniciativas, agrupadores, estadosActivos } del registro;
   // nuevo: % valido (texto); estadoFinal: el Estado con el que quedaria.
   //   -> null (cabe) o { pedido, disponible, usado, maximo } en centesimas.
+  // % pedido en "Solicitar cambios": ENTERO de 0 a 100, sin decimales
+  // (2026-11-05). Lo que ya esta guardado (% actual, otras iniciativas,
+  // solicitudes de antes) puede traer decimales y se muestra tal cual.
+  function pctEnteroValido(t) {
+    return /^\d{1,3}$/.test(String(t === null || t === undefined ? '' : t)) && Number(t) <= 100;
+  }
   function enListaPlana(lista, v) {
     var k = plano(v);
     return (lista || []).some(function (x) { return plano(x) === k; });
@@ -602,11 +611,13 @@ window.RegistroIniciativas = (function () {
     var T = window.IniciativaAdmin && window.IniciativaAdmin.TiposPorPrefijo;
     return T ? T.agrupacion(T.clasificacion(String(folio || '').slice(0, 3))) : '';
   }
-  function excedeTope(cap, iniciativa, ruta, nuevo, nueva, estadoFinal) {
+  // agrupNueva (sql/83, opcional): la Agrupacion EFECTIVA de una que se
+  // reactiva (la historica); sin ella, la del prefijo, como siempre.
+  function excedeTope(cap, iniciativa, ruta, nuevo, nueva, estadoFinal, agrupNueva) {
     if (!cap || !iniciativa || !ruta) return null;
     var pedido = Math.round(Number(nuevo) * 100), anterior = null, agrup;
     if (!isFinite(pedido) || !enListaPlana(cap.estadosActivos, estadoFinal)) return null;
-    if (nueva) agrup = agrupacionNueva(iniciativa.folio);
+    if (nueva) agrup = agrupNueva !== undefined ? agrupNueva : agrupacionNueva(iniciativa.folio);
     else {
       var c = (iniciativa.categorias || []).filter(function (x) { return x.categoria === ruta; })[0];
       if (!c) return null;
@@ -644,11 +655,14 @@ window.RegistroIniciativas = (function () {
 
   // El mensaje del tope. vol: la volumetria si se pidio en tickets (dice
   // tambien cuantos tickets da el maximo); entrada: como empieza ('pides').
+  // El maximo se dice en % ENTERO (hacia abajo: lo mas que se puede pedir
+  // sin decimales); lo comprometido por otras es lo guardado, tal cual.
   function mensajeTope(ruta, x, vol, entrada) {
     var M = window.IniciativaAdmin && window.IniciativaAdmin.MetaCategoria;
-    var tk = typeof vol === 'number' && M ? M.tickets(vol, String(x.maximo / 100)) : null;
+    var maximo = Math.floor(x.maximo / 100);
+    var tk = typeof vol === 'number' && M ? M.tickets(vol, String(maximo)) : null;
     return ruta + ': ' + (entrada || (typeof vol === 'number' ? 'esos tickets equivalen a ' : 'pides ')) + x.pedido / 100 +
-      '%, pero el máximo permitido es ' + x.maximo / 100 + '%' + (tk !== null ? ' (' + tk.toLocaleString('es-MX') + ' tickets con la volumetría de hoy)' : '') +
+      '%, pero el máximo permitido es ' + maximo + '%' + (tk !== null ? ' (' + tk.toLocaleString('es-MX') + ' tickets con la volumetría de hoy)' : '') +
       '. Otras iniciativas activas ya comprometen ' + x.usado / 100 + '% y el tope por categoría es 100%' +
       (x.maximo > x.disponible ? '; la categoría ya pasa del tope: solo se puede bajar o dejar igual su % actual.' : '.');
   }
@@ -814,6 +828,9 @@ window.RegistroIniciativas = (function () {
       // Varios cambios en UNA solicitud (tipo varios, sql/34): solo si el
       // servidor lo dice.
       r.solicitudesVarios = json.solicitudes_varios === true;
+      // Reactivar una categoria que estuvo ligada (sql/83): solo si el
+      // servidor lo dice se pide la lista de historicas.
+      r.reactivacionCategorias = json.reactivacion_categorias === true;
       // "Solicitar cambios" sin rol de Admin (PO / SO, sql/37): los folios
       // propios que el servidor mando (cambios_pso). Solo pinta el boton.
       r.cambiosPso = Array.isArray(json.cambios_pso) ? json.cambios_pso.filter(esTexto) : [];
@@ -1014,7 +1031,32 @@ window.RegistroIniciativas = (function () {
 
     // El mismo indicador lo quita; otro lo reemplaza; Total lo quita; uno
     // que no existe, nada. -> true si cambio.
-    alternarIndicador(k) { return this.seleccion.alternar(k); }
+    // Ademas (2026-11-09): Total deja en Estado solo los que cuentan en el
+    // Total (todos menos Cerrado), para que la lista muestre las mismas
+    // iniciativas que la cifra. Y Cerradas, con Estado tal como lo dejo
+    // Total, devuelve Estado a Todos (si no, la lista quedaria vacia); un
+    // Estado elegido a mano no se toca.
+    alternarIndicador(k) {
+      var cambio = this.seleccion.alternar(k);
+      if (k === INDICADOR_TODAS) return this.soloEstadosDelTotal() || cambio;
+      if (k === 'cerradas' && this.indicador === 'cerradas' && this.estados.activo() &&
+          this.estados.lista().join('\u0001') === this.estadosDelTotal().join('\u0001')) {
+        this.estados.limpiar();
+        return true;
+      }
+      return cambio;
+    }
+    // Los estados que cuentan en Total (CONDICION_KPI.total: no Cerrado).
+    estadosDelTotal() {
+      return this.registro.estados().filter(function (e) { return plano(e) !== ESTADO_CERRADO; });
+    }
+    // Estado = estadosDelTotal(). -> true si cambio.
+    soloEstadosDelTotal() {
+      var todos = this.registro.estados(), delTotal = this.estadosDelTotal();
+      var antes = this.estados.lista().join('\u0001');
+      this.estados.marcados = delTotal.length === todos.length ? null : delTotal;
+      return this.estados.lista().join('\u0001') !== antes;
+    }
     pasaIndicador(i) { return !this.indicador || Registro.cumpleIndicador(this.indicador, i); }
 
     // Folio o titulo. Solo acota la lista (aplicar), no la Cobertura.
@@ -1608,6 +1650,11 @@ window.RegistroIniciativas = (function () {
       this.estados = Array.isArray(opciones.estados) ? opciones.estados : [];
       this.rutas = Array.isArray(opciones.rutas) ? opciones.rutas : [];
       this.rutasEstado = opciones.rutasEstado || (this.rutas.length ? 'ok' : '');
+      // sql/83: las categorias que ESTUVIERON ligadas a esta iniciativa (las
+      // que el servidor deja ver: accion=historicas). Agregar una la
+      // REACTIVA; solo cambia la etiqueta y el tope estimado: lo que viaja
+      // sigue siendo agregar_categoria y el servidor vuelve a decidir.
+      this.historicas = Array.isArray(opciones.historicas) ? opciones.historicas : [];
       // Agregar categoria por la cascada de Nueva solicitud (PO -> SO ->
       // Categoria, CascadaOrganizacional) sobre las MISMAS filas
       // { director, po, so, categoria } del catalogo (opciones.filas). Sin
@@ -1623,9 +1670,9 @@ window.RegistroIniciativas = (function () {
       this.nuevas = [];      // solo con campo 'pct': [{ categoria, valor }] a agregar
       // META EN % O EN TICKETS, por categoria (ruta -> { modo, tickets }):
       // con 'tickets' se escribe cuantos tickets reducir y el % sale de
-      // MetaCategoria.pct (admin/iniciativa-admin.js, la regla de Crear y de
-      // Nueva solicitud: el menor % con dos decimales que da al menos esos
-      // tickets, con FLOOR) sobre la volumetria SLOT 0 de la ruta (vols:
+      // MetaCategoria.pctEntero (admin/iniciativa-admin.js, la regla de
+      // Crear y de Nueva solicitud a % entero: la proporcion exacta hacia abajo
+      // si con CEILING da esos tickets; si no, el siguiente) sobre la volumetria SLOT 0 de la ruta (vols:
       // ruta -> { estado, valor }, la de Nueva solicitud). Lo que VIAJA y se
       // guarda sigue siendo el % (pct_valor / agregar_pct): los tickets son
       // una meta estimada con la volumetria de hoy, no un numero que la base
@@ -1724,6 +1771,16 @@ window.RegistroIniciativas = (function () {
 
     categoriasLigadas() { return (this.iniciativa.categorias || []).map(function (c) { return c.categoria; }); }
 
+    // sql/83: la lista de historicas llego (o se recargo).
+    fijarHistoricas(lista) { this.historicas = Array.isArray(lista) ? lista : []; }
+    // La historica de esa ruta ({ categoria, tipo_iniciativa, tipo_agrupado,
+    // f_creacion, f_analisis }), o null. Misma llave que agregar (plano).
+    historica(ruta) {
+      var k = plano(ruta);
+      return this.historicas.filter(function (h) { return plano(h.categoria) === k; })[0] || null;
+    }
+    esReactivacion(ruta) { return !!this.historica(ruta); }
+
     // El % actual (texto) de una categoria ligada, o null.
     pctActual(ruta) {
       var c = (this.iniciativa.categorias || []).filter(function (x) { return x.categoria === ruta; })[0];
@@ -1780,7 +1837,7 @@ window.RegistroIniciativas = (function () {
         return { ok: false, ruta: ruta, mensaje: ruta + ' ya está en la lista para agregar.' };
       }
       this.nuevas.push({ categoria: ruta, valor: '' });
-      return { ok: true, ruta: ruta, mensaje: '' };
+      return { ok: true, ruta: ruta, mensaje: '', reactivar: this.esReactivacion(ruta) };
     }
 
     capturarPctNueva(n, texto) {
@@ -1828,18 +1885,18 @@ window.RegistroIniciativas = (function () {
       this.vols[ruta] = e || null;
       if (this.meta(ruta).modo === 'tickets') this.recalcularMeta(ruta);
     }
-    // -> { pct, exacto, tickets } o { error } (MetaCategoria.pct), o null
-    // si no hay tickets escritos.
+    // -> { pct, exacto, tickets } o { error } (MetaCategoria.pctEntero: %
+    // entero), o null si no hay tickets escritos.
     conversion(ruta) {
       var m = this.meta(ruta);
       if (m.modo !== 'tickets' || m.tickets === '') return null;
       var v = this.vols[ruta], M = window.IniciativaAdmin && window.IniciativaAdmin.MetaCategoria;
-      if (!M) return { error: 'No se puede pasar de tickets a % en esta página: usa el %.' };
+      if (!M || typeof M.pctEntero !== 'function') return { error: 'No se puede pasar de tickets a % en esta página: usa el %.' };
       if (!v || v.estado === 'cargando') return { error: 'Calculando la volumetría de ' + ruta + '…' };
       if (v.estado !== 'ok' && v.estado !== 'cero') {
         return { error: 'Sin volumetría de ' + ruta + ' no se puede pasar de tickets a %: usa el %.' };
       }
-      return M.pct(v.valor, m.tickets);
+      return M.pctEntero(v.valor, m.tickets);
     }
     // Tickets -> el % que viaja ('' si no se puede convertir).
     recalcularMeta(ruta) {
@@ -1873,9 +1930,13 @@ window.RegistroIniciativas = (function () {
     // % valido; el formato lo dice validar. En tickets, sobre el % que dan.
     excedeTope(ruta, estadoFinal) {
       var t = this.pctPedido(ruta);
-      if (!/^\d{1,3}(\.\d{1,2})?$/.test(t) || Number(t) > 100) return '';
+      if (!pctEnteroValido(t)) return '';
       var nueva = this.categoriasLigadas().indexOf(ruta) < 0;
-      var x = excedeTope(this.capacidad, this.iniciativa, ruta, t, nueva, estadoFinal === undefined ? this.iniciativa.estado : estadoFinal);
+      // sql/83: una que se reactiva consume con su Agrupacion historica (si
+      // la tiene); si no, con la del prefijo, como una nueva.
+      var h = nueva ? this.historica(ruta) : null;
+      var agrup = h && String(h.tipo_agrupado || '').trim() ? String(h.tipo_agrupado).trim() : undefined;
+      var x = excedeTope(this.capacidad, this.iniciativa, ruta, t, nueva, estadoFinal === undefined ? this.iniciativa.estado : estadoFinal, agrup);
       if (!x) return '';
       var v = this.vols[ruta];
       return mensajeTope(ruta, x, this.meta(ruta).modo === 'tickets' && v ? v.valor : null);
@@ -1920,9 +1981,9 @@ window.RegistroIniciativas = (function () {
         }
         cats.forEach(function (c) {
           if (porTickets[c.categoria]) return;
-          if (!/^\d{1,3}(\.\d{1,2})?$/.test(c.nuevo) || Number(c.nuevo) > 100) {
+          if (!pctEnteroValido(c.nuevo)) {
             errores.push({ campo: 'propuesto', categoria: c.categoria,
-              mensaje: c.categoria + ': escribe un porcentaje entre 0 y 100, con hasta dos decimales.' });
+              mensaje: c.categoria + ': escribe un porcentaje entero entre 0 y 100, sin decimales.' });
           } else if (!c.nueva && c.anterior !== null && Number(c.nuevo) === Number(c.anterior)) {
             errores.push({ campo: 'propuesto', categoria: c.categoria, mensaje: c.categoria + ': el % pedido es igual al actual.' });
           } else {
@@ -1998,6 +2059,66 @@ window.RegistroIniciativas = (function () {
   // Con sql/34 (opciones.varios, el registro trae solicitudes_varios) viaja
   // cualquier combinacion como UNA solicitud tipo varios, que ADM aprueba
   // (aplica todo) o rechaza (nada). "Otros" sigue yendo solo.
+  // MODIFICAR (sql/41): una solicitud de cambio GUARDADA (el detalle de
+  // "Mis solicitudes de cambio" o de la cola) -> los cambios de la lista,
+  // para corregirlos y enviarlos como un REEMPLAZO. Solo lo que la base
+  // guardo; lo que ya no aplique lo vuelve a revisar validar() al enviar.
+  var CAMPO_DE_ETAPA = { FechaAnalisis: 'f_analisis', FechaSolucion: 'f_solucion', FechaCierre: 'f_cierre' };
+  function itemCambioVacio(campo) {
+    return { campo: campo, propuesto: '', pcts: {}, nuevas: [], datos: { titulo: null, po: null, so: null }, explicacion: '', metas: {}, vols: {} };
+  }
+  // "Otros": la base guarda "explicacion\n\nMotivo: motivo" (motivoEnvio).
+  function partirMotivoOtros(m) {
+    m = String(m === null || m === undefined ? '' : m);
+    var i = m.indexOf('\n\nMotivo: ');
+    return i < 0 ? { explicacion: m, motivo: '' } : { explicacion: m.slice(0, i), motivo: m.slice(i + 10) };
+  }
+  function itemsDeSolicitud(d) {
+    var items = [], tipo = d && d.tipo;
+    if (!d) return items;
+    function conFecha(campoBd, nueva) {
+      var c = CAMPO_DE_ETAPA[campoBd];
+      if (!c || !nueva) return;
+      var x = itemCambioVacio(c);
+      x.propuesto = String(nueva).slice(0, 10);
+      items.push(x);
+    }
+    if ((tipo === 'ESTADO' || tipo === 'VARIOS') && d.estado_nuevo) {
+      var e = itemCambioVacio('estado');
+      e.propuesto = String(d.estado_nuevo);
+      items.push(e);
+    }
+    if (tipo === 'FECHA' || tipo === 'ESTADO') conFecha(d.campo_fecha, d.fecha_nueva);
+    if (tipo === 'VARIOS') (d.fechas_varias || []).forEach(function (f) { conFecha(f.campo, f.nueva); });
+    if ((tipo === 'CATEGORIAS' || tipo === 'VARIOS') && (d.categorias_detalle || []).length) {
+      var p = itemCambioVacio('pct');
+      d.categorias_detalle.forEach(function (c) {
+        var v = c.pct_nuevo === null || c.pct_nuevo === undefined ? '' : String(c.pct_nuevo);
+        if (c.accion === 'AGREGAR') p.nuevas.push({ categoria: c.categoria, valor: v });
+        else p.pcts[c.categoria] = v;
+      });
+      items.push(p);
+    }
+    if (tipo === 'DATOS' || tipo === 'VARIOS') {
+      var dd = itemCambioVacio('datos'), alguno = false;
+      [['titulo', 'cambia_titulo', 'titulo_nuevo'], ['po', 'cambia_po', 'po_nuevo'], ['so', 'cambia_so', 'so_nuevo']].forEach(function (k) {
+        if (d[k[1]] === true) { dd.datos[k[0]] = d[k[2]] || ''; alguno = true; }
+      });
+      if (alguno) items.push(dd);
+    }
+    if (tipo === 'OTROS') {
+      var o = itemCambioVacio('otros');
+      o.explicacion = partirMotivoOtros(d.motivo).explicacion;
+      items.push(o);
+    }
+    return items;
+  }
+  function motivoDeSolicitud(d) {
+    if (!d) return '';
+    return d.tipo === 'OTROS' ? partirMotivoOtros(d.motivo).motivo : String(d.motivo || '');
+  }
+  var MAXIMO_MOTIVO_CANCELACION = 2000;   // SolicitudesCambio.MaximoMotivoCancelacion
+
   class ListaSolicitudCambio {
     constructor(iniciativa, opciones) {
       this.iniciativa = iniciativa;
@@ -2008,6 +2129,19 @@ window.RegistroIniciativas = (function () {
       this.llave = nuevaLlave();
       this.enviada = null;   // numero de la solicitud que dio el servidor
       this.sinConfirmar = false; // se mando y no se sabe si llego
+      // MODIFICAR (sql/41): { id } de la solicitud PENDIENTE que esta lista
+      // corrige (null = solicitud nueva) y por que se cancela la original.
+      this.reemplaza = null;
+      this.motivoCancelacion = '';
+    }
+
+    // Carga lo que pidio la solicitud guardada d (Modificar).
+    cargarSolicitud(d) {
+      this.items = itemsDeSolicitud(d);
+      this.motivo = motivoDeSolicitud(d);
+      this.reemplaza = { id: d.id };
+      this.motivoCancelacion = '';
+      this.editando = -1;
     }
 
     // Mientras no se sepa si llego (o ya llego) la lista no cambia: el
@@ -2174,6 +2308,11 @@ window.RegistroIniciativas = (function () {
       var m = String(this.motivo || '').trim();
       if (!m) errores.push({ campo: 'motivo', mensaje: 'Explica el motivo de la solicitud.' });
       else if (this.motivoEnvio().length > 4000) errores.push({ campo: 'motivo', mensaje: 'El motivo pasa de 4000 caracteres.' });
+      if (this.reemplaza) {
+        var mc = String(this.motivoCancelacion || '').trim();
+        if (!mc) errores.push({ campo: 'motivo_cancelacion', mensaje: 'Explica por qué corriges la solicitud #' + this.reemplaza.id + ' (motivo de la corrección).' });
+        else if (mc.length > MAXIMO_MOTIVO_CANCELACION) errores.push({ campo: 'motivo_cancelacion', mensaje: 'El motivo de la corrección pasa de 2000 caracteres.' });
+      }
       return errores;
     }
 
@@ -2515,7 +2654,40 @@ window.RegistroIniciativas = (function () {
                // Varios cambios en UNA solicitud (sql/34).
                varios: !!(r && r.solicitudesVarios),
                // Tope de 100% por categoria al pedir un % (excedeTope).
-               capacidad: r ? { iniciativas: r.iniciativas, agrupadores: r.agrupadores, estadosActivos: r.estadosActivos } : null };
+               capacidad: r ? { iniciativas: r.iniciativas, agrupadores: r.agrupadores, estadosActivos: r.estadosActivos } : null,
+               // sql/83: las que estuvieron ligadas a la iniciativa abierta (si ya llegaron).
+               historicas: (this.historicasPorFolio || {})[this.abierta] || [] };
+    }
+
+    // sql/83: pide al servidor las categorias que ESTUVIERON ligadas a la
+    // iniciativa (accion=historicas, la MISMA autorizacion que enviar) y, si
+    // el formulario de esa iniciativa sigue abierto, repinta solo su bloque de
+    // categorias. Sin la migracion, sin permiso o con error: no hay etiqueta
+    // y todo sigue como antes (el servidor decide al enviar y al aplicar).
+    cargarHistoricas(folio, pedir) {
+      var self = this;
+      if (!(this.registro && this.registro.reactivacionCategorias)) return Promise.resolve([]);
+      pedir = pedir || this.pedirHistoricas || function (url) { return fetch(url, { cache: 'no-store', credentials: 'same-origin' }); };
+      this.historicasPorFolio = this.historicasPorFolio || {};
+      return Promise.resolve()
+        .then(function () { return pedir(URL_SOLICITUDES + '?accion=historicas&folio=' + encodeURIComponent(folio)); })
+        .then(function (r) { return r && r.ok ? r.json() : null; })
+        .then(function (j) {
+          var lista = j && j.disponible === true && Array.isArray(j.historicas) ? j.historicas : [];
+          self.historicasPorFolio[folio] = lista;
+          if (self.lista && self.lista.iniciativa && self.lista.iniciativa.folio === folio) self.lista.opciones.historicas = lista;
+          if (self.cambio && self.cambio.iniciativa && self.cambio.iniciativa.folio === folio) {
+            self.cambio.fijarHistoricas(lista);
+            if (self.cambioAbierto) self.pintarCategoriasCambio();
+          }
+          // Editor de ADM (Modificar) de esa iniciativa: "Reactivar" y la
+          // clasificacion historica que se conserva.
+          if (self.edicion && self.abierta === folio && self.edicion.categorias && self.edicion.categorias.fijarHistoricas) {
+            self.edicion.categorias.fijarHistoricas(lista);
+            self.pintarCategoriasEdicion();
+          }
+          return lista;
+        }, function () { return []; });
     }
 
     // Solo UX: la edicion de ADM no llama al servidor en esta fase.
@@ -3547,6 +3719,11 @@ window.RegistroIniciativas = (function () {
       var ed = this.edicion, c = this.cambio;
       // El Motivo general de la solicitud: de la lista, no del cambio que
       // se captura (agregar, editar o quitar no lo borran).
+      if (this.lista && t.id === 'regCambioMotivoCancelacion') {
+        if (this.lista.motivoCancelacion !== (t.value || '')) this.soltarRevision();
+        this.lista.motivoCancelacion = t.value || '';
+        return true;
+      }
       if (this.lista && t.id === 'regCambioMotivo') {
         // Lo que se confirma es lo que se reviso: otro Motivo, otra revision.
         if (this.lista.motivo !== (t.value || '')) this.soltarRevision();
@@ -3697,7 +3874,7 @@ window.RegistroIniciativas = (function () {
           ligadas.map(function (r, n) {
             var act = c.pctActual(r), o = otras(r);
             var pct = '<label class="ini-ed-pct"><span class="ini-sr">% pedido para ' + Escape.html(r) + '</span>' +
-              '<input type="number" min="0" max="100" step="0.01" data-cambio-pct="' + n + '" value="' + Escape.attr(c.pcts[r] || '') +
+              '<input type="number" inputmode="numeric" min="0" max="100" step="1" data-cambio-pct="' + n + '" value="' + Escape.attr(c.pcts[r] || '') +
               '" placeholder="sin cambio" aria-describedby="regCambioTope-l' + n + '" aria-invalid="' + invalido(r) + '"> %</label>';
             return '<tr><td class="ini-cat-celda">' + nombre(r, 'l' + n, o) + '</td><td class="num">' + Escape.html(act === null ? '—' : act + '%') + '</td>' +
               '<td>' + celdaMetaCambio(c, r, 'l' + n, pct, 'sin cambio', invalido(r)) + tope(r, 'l' + n) + '</td><td></td></tr>' +
@@ -3706,9 +3883,12 @@ window.RegistroIniciativas = (function () {
           c.nuevas.map(function (x, n) {
             var o = otras(x.categoria);
             var pct = '<label class="ini-ed-pct"><span class="ini-sr">% para ' + Escape.html(x.categoria) + '</span>' +
-              '<input type="number" min="0" max="100" step="0.01" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) +
+              '<input type="number" inputmode="numeric" min="0" max="100" step="1" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) +
               '" aria-describedby="regCambioTope-n' + n + '" aria-invalid="' + invalido(x.categoria) + '"> %</label>';
-            return '<tr><td class="ini-cat-celda">' + nombre(x.categoria, 'n' + n, o) + ' <span class="ini-cat-estado nueva">Agregar</span></td>' +
+            var etiqueta = c.esReactivacion(x.categoria)
+              ? '<span class="ini-cat-estado reactivar" title="Estuvo ligada a esta iniciativa y se dio de baja: al aplicarse se reactiva con sus fechas y su clasificación originales">Reactivar (estuvo ligada)</span>'
+              : '<span class="ini-cat-estado nueva">Agregar</span>';
+            return '<tr><td class="ini-cat-celda">' + nombre(x.categoria, 'n' + n, o) + ' ' + etiqueta + '</td>' +
               '<td class="num">—</td><td>' + celdaMetaCambio(c, x.categoria, 'n' + n, pct, '', invalido(x.categoria)) + tope(x.categoria, 'n' + n) + '</td>' +
               '<td><button type="button" class="btn linea chico" data-cambio-quitar="' + n + '">Quitar</button></td></tr>' +
               htmlOtrasFila(o, 'n' + n, abiertas[rutaClave(x.categoria)] === true, 4);
@@ -3854,10 +4034,14 @@ window.RegistroIniciativas = (function () {
     nuevaEdicion(i) {
       var op = this.opcionesEstado();
       var duenos = this.duenosCatalogo || { po: [], so: [] };
-      return new window.IniciativaAdmin.EdicionAdmin(i,
+      var ed = new window.IniciativaAdmin.EdicionAdmin(i,
         { rutas: this.rutasAdmCatalogo || op.rutas, rutasEstado: op.rutasEstado, estados: op.estados, subestados: op.subestados,
           tiposIniciativa: op.tiposIniciativa, tiposAgrupado: op.tiposAgrupado,
           pos: duenos.po, sos: duenos.so, duenosYQuitar: !!(this.registro && this.registro.edicionDuenosQuitar) });
+      // sql/83: las historicas ya leidas de esa iniciativa (si llegaron).
+      var hist = (this.historicasPorFolio || {})[i.folio];
+      if (hist && ed.categorias && ed.categorias.fijarHistoricas) ed.categorias.fijarHistoricas(hist);
+      return ed;
     }
 
     // Crear > existente: abre el detalle de esa iniciativa con el foco en
@@ -3937,6 +4121,8 @@ window.RegistroIniciativas = (function () {
       this.edicion = this.puedeEditar() ? (abrir && this.edicion ? this.edicion : this.nuevaEdicion(i)) : null;
       if (!abrir || !habia) this.pintarEditables();
       if (abrir && this.edicion) this.enfocarTexto('titulo');
+      // sql/83: la etiqueta "Reactivar" del editor llega aparte (solo ADM edita).
+      if (abrir && this.edicion) this.cargarHistoricas(i.folio);
     }
 
     // Revision local (sin servidor): errores de formato y cambios.
@@ -4236,6 +4422,30 @@ window.RegistroIniciativas = (function () {
         'Marca calculada; en iniciativas existentes solo se revisan Categoría y %.');
     }
 
+    // MODIFICAR (sql/41): abre la iniciativa de la solicitud d y su
+    // "Solicitar cambios" con lo que se pidio, para corregirlo. Al enviar
+    // se REEMPLAZA (otra solicitud con otro numero; la original queda
+    // cancelada). Sin la iniciativa en el registro o sin poder pedirle
+    // cambios (la elegibilidad de enviar, otra vez): false y no abre nada.
+    abrirReemplazoCambio(d) {
+      if (!d || !d.folio || !d.id) return false;
+      if (!this.registro || !this.registro.buscar(d.folio)) return false;
+      if (this.abierta !== d.folio && !this.abrirDesdeLista(d.folio, null)) return false;
+      if (this.abierta !== d.folio || !this.puedeSolicitarCambio()) return false;
+      this.abrirCambio(true);
+      if (!this.lista) return false;
+      this.lista.cargarSolicitud(d);
+      this.$('regCambio').innerHTML = this.htmlCambio();
+      this.montarDatosCambio();
+      // El Motivo de lo enviado, tambien como valor (no solo como texto del HTML).
+      var motivo = this.$('regCambioMotivo');
+      if (motivo) motivo.value = this.lista.motivo;
+      if (this.$('regCambioBoton')) this.$('regCambioBoton').setAttribute('aria-expanded', 'true');
+      var foco = this.$('regCambioMotivoCancelacion');
+      if (foco && foco.focus) foco.focus();
+      return true;
+    }
+
     // Abrir arranca una solicitud nueva (lista vacia, llave nueva) sobre la
     // iniciativa abierta. Cancelar o cerrar la descarta: nada se guarda.
     abrirCambio(abrir) {
@@ -4248,6 +4458,8 @@ window.RegistroIniciativas = (function () {
       this.$('regCambio').innerHTML = abrir ? this.htmlCambio() : '';
       this.$('regCambio').hidden = !abrir;
       if (abrir) this.montarDatosCambio();
+      // sql/83: la etiqueta "Reactivar" llega aparte; sin ella todo sigue igual.
+      if (abrir) this.cargarHistoricas(i.folio);
       // Sin rol ADM/MOD el boton no existe (htmlAcciones).
       if (this.$('regCambioBoton')) this.$('regCambioBoton').setAttribute('aria-expanded', abrir ? 'true' : 'false');
       var foco = abrir ? this.$('regCambioCampo') : this.$('regCambioBoton');
@@ -4515,7 +4727,10 @@ window.RegistroIniciativas = (function () {
       if (l.enviada !== null) return;
       var motivo = this.$('regCambioMotivo');
       l.motivo = motivo ? motivo.value || '' : '';
+      var motivoCanc = this.$('regCambioMotivoCancelacion');
+      if (motivoCanc) l.motivoCancelacion = motivoCanc.value || '';
       var errores = l.validarEnvio();
+      if (motivoCanc) motivoCanc.setAttribute('aria-invalid', errores.some(function (e) { return e.campo === 'motivo_cancelacion'; }) ? 'true' : 'false');
       if (motivo) motivo.setAttribute('aria-invalid', errores.some(function (e) { return e.campo === 'motivo'; }) ? 'true' : 'false');
       if (errores.length) {
         this.mensajeCambio('error', '<ul>' + errores.map(function (e) { return '<li>' + Escape.html(e.mensaje) + '</li>'; }).join('') + '</ul>');
@@ -4532,7 +4747,9 @@ window.RegistroIniciativas = (function () {
         return;
       }
       this.cambioRevisando = true;
-      this.mensajeCambio('revisar', '<strong>Revisa la solicitud antes de enviarla</strong> (' + fmt(l.items.length) +
+      this.mensajeCambio('revisar', (l.reemplaza ? '<strong>Corrige la solicitud #' + Escape.html(String(l.reemplaza.id)) + ':</strong> se crea una solicitud nueva ' +
+        '(otro número; ADM la revisa desde el principio) y la #' + Escape.html(String(l.reemplaza.id)) + ' queda cancelada. ' : '') +
+        '<strong>Revisa la solicitud antes de enviarla</strong> (' + fmt(l.items.length) +
         (l.items.length === 1 ? ' cambio' : ' cambios') + '; ADM la aprueba o rechaza completa): ' + resumen + '. ' +
         'Motivo: ' + Escape.html(String(l.motivo).trim()) + ' ' +
         '<button type="button" class="btn chico" data-accion="cambio-confirmar">Confirmar y enviar</button> ' +
@@ -4563,6 +4780,12 @@ window.RegistroIniciativas = (function () {
       this.mensajeCambio('', '<span>Enviando la solicitud…</span>');
       var datos = new FormData();
       pares.forEach(function (p) { datos.append(p[0], p[1]); });
+      // Modificar (sql/41): la MISMA solicitud, como reemplazo de la original.
+      var reemplaza = l.reemplaza;
+      if (reemplaza) {
+        datos.append('reemplaza_a', String(reemplaza.id));
+        datos.append('motivo_cancelacion', String(l.motivoCancelacion || '').trim());
+      }
       pedir = pedir || this.pedirSolicitud || function (url, op) { return fetch(url, op); };
       function pintar(clase, html) {
         if (self.lista !== l) return;
@@ -4575,7 +4798,7 @@ window.RegistroIniciativas = (function () {
         if (self.lista === l && boton) boton.disabled = false;
       }
       return Promise.resolve()
-        .then(function () { return pedir(URL_SOLICITUDES + '?accion=enviar', { method: 'POST', body: datos, credentials: 'same-origin' }); })
+        .then(function () { return pedir(URL_SOLICITUDES + '?accion=' + (reemplaza ? 'reemplazar' : 'enviar'), { method: 'POST', body: datos, credentials: 'same-origin' }); })
         .then(function (resp) {
           return Promise.resolve(resp.json()).catch(function () { return null; }).then(function (j) { return { status: resp.status, json: j || {} }; });
         })
@@ -4586,6 +4809,7 @@ window.RegistroIniciativas = (function () {
             l.sinConfirmar = false;
             l.enviada = j.id_solicitud;
             pintar('listo', '<strong>Solicitud #' + Escape.html(String(j.id_solicitud)) + ' enviada.</strong> ' + (resumenHtml || '') + '. ' +
+              (reemplaza ? 'Corrige a la solicitud #' + Escape.html(String(reemplaza.id)) + ', que quedó cancelada. ' : '') +
               (j.repetida ? 'Ya estaba enviada: no se duplicó. ' : '') +
               'Un administrador (ADM) la revisa; la iniciativa no cambia hasta que la aplique.');
             return r;
@@ -4627,7 +4851,13 @@ window.RegistroIniciativas = (function () {
       }).join('');
       var lista = function (id, valores) { return selectorHtml(id, valores, ''); };
       var t = c.tipo();
-      return '<h4>Solicitar cambios</h4>' +
+      var reemplazo = this.lista && this.lista.reemplaza;
+      return '<h4>' + (reemplazo ? 'Modificar la solicitud #' + Escape.html(String(reemplazo.id)) : 'Solicitar cambios') + '</h4>' +
+        (reemplazo
+          ? '<p class="ini-cambio-msg aviso" id="regCambioReemplazo">Corriges la solicitud <strong>#' + Escape.html(String(reemplazo.id)) + '</strong>: ' +
+            'abajo están los cambios que pediste. Al enviar se crea una solicitud <strong>nueva</strong> (otro número; ADM la revisa desde el principio) ' +
+            'y la #' + Escape.html(String(reemplazo.id)) + ' queda <strong>cancelada</strong>. Su historial se conserva.</p>'
+          : '') +
         '<p class="ini-nota">Arma la lista de cambios para esta iniciativa y envíala como UNA solicitud; aquí no se edita. ' +
           'Un administrador (ADM) la revisa y la aprueba o la rechaza completa. ' +
           '«Otros» es solo una explicación (p. ej. una categoría equivocada): no cambia nada por sí sola.</p>' +
@@ -4658,7 +4888,12 @@ window.RegistroIniciativas = (function () {
         '<div class="ini-cambio-lista" id="regCambioLista">' + this.htmlListaCambio() + '</div>' +
         '<div class="ini-cambio-campos">' +
           '<div class="campo ini-cambio-ancho"><label for="regCambioMotivo" id="regCambioMotivoRot">Motivo de la solicitud</label>' +
-            '<textarea id="regCambioMotivo" rows="3"></textarea></div>' +
+            '<textarea id="regCambioMotivo" rows="3">' + (reemplazo ? Escape.html(this.lista.motivo || '') : '') + '</textarea></div>' +
+          (reemplazo
+            ? '<div class="campo ini-cambio-ancho"><label for="regCambioMotivoCancelacion">Motivo de la corrección (obligatorio: por qué se cancela la #' +
+              Escape.html(String(reemplazo.id)) + ')</label><textarea id="regCambioMotivoCancelacion" rows="2" maxlength="' + MAXIMO_MOTIVO_CANCELACION + '">' +
+              Escape.html(this.lista.motivoCancelacion || '') + '</textarea></div>'
+            : '') +
         '</div>' +
         '<div class="ini-cambio-msg" id="regCambioMsg" role="status" aria-live="polite"></div>' +
         '<div class="ini-cambio-pie">' +
@@ -4717,13 +4952,13 @@ window.RegistroIniciativas = (function () {
             filas.map(function (f) {
               var h = f.fila;
               var cuando = h.reconstruido ? '≈ ' + String(h.fecha || '').slice(0, 10) : texto(h.fecha);
-              var quien = h.usuario ? h.usuario : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
+              var quien = h.usuario ? (h.usuario_mostrar || h.usuario) : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
               return '<tr><td>' + Escape.html(cuando) + '</td>' +
                 '<td>' + Escape.html(CAMPOS_HISTORIAL[h.campo] || texto(h.campo)) + '</td>' +
                 '<td>' + (f.cuenta ? '<b>' + Escape.html(f.etiqueta) + '</b>' : Escape.html(f.etiqueta)) + '</td>' +
                 '<td>' + Escape.html(h.anterior ? fecha(h.anterior) : '—') + '</td>' +
                 '<td>' + Escape.html(h.nuevo ? fecha(h.nuevo) : '—') + '</td>' +
-                '<td>' + Escape.html(quien) + '</td></tr>';
+                '<td' + (h.usuario && h.usuario_mostrar && h.usuario_mostrar !== h.usuario ? ' title="' + Escape.html(h.usuario) + '"' : '') + '>' + Escape.html(quien) + '</td></tr>';
             }).join('') + '</tbody></table></div>' +
           '<p class="ini-nota">' +
             (desde ? 'Registro automático desde el ' + Escape.html(desde) + '. ' : '') +
@@ -4761,13 +4996,13 @@ window.RegistroIniciativas = (function () {
           '</tr></thead><tbody>' +
           filas.map(function (f) {
             var h = f.fila;
-            var quien = h.usuario ? h.usuario : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
+            var quien = h.usuario ? (h.usuario_mostrar || h.usuario) : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
             return '<tr><td>' + Escape.html(texto(h.fecha)) + '</td>' +
               '<td>' + Escape.html(texto(h.categoria)) + '</td>' +
               '<td>' + (f.cuenta ? '<b>' + Escape.html(f.etiqueta) + '</b>' : Escape.html(f.etiqueta)) + '</td>' +
               '<td>' + (h.anterior ? Escape.html(fecha(h.anterior)) : '<span class="ini-origen derivado">Heredaba la de la iniciativa</span>') + '</td>' +
               '<td>' + Escape.html(h.nuevo ? fecha(h.nuevo) : '—') + '</td>' +
-              '<td>' + Escape.html(quien) + '</td></tr>';
+              '<td' + (h.usuario && h.usuario_mostrar && h.usuario_mostrar !== h.usuario ? ' title="' + Escape.html(h.usuario) + '"' : '') + '>' + Escape.html(quien) + '</td></tr>';
           }).join('') + '</tbody></table></div>' +
         '<p class="ini-nota">Solo las categorías ligadas después tienen fecha propia; las demás heredan la de la iniciativa (arriba).</p>';
     }
@@ -4982,7 +5217,7 @@ window.RegistroIniciativas = (function () {
     FiltroRegistro: FiltroRegistro,
     Cobertura: Cobertura,
     SolicitudCambio: SolicitudCambio,
-    ListaSolicitudCambio: ListaSolicitudCambio,
+    ListaSolicitudCambio: ListaSolicitudCambio, itemsDeSolicitud: itemsDeSolicitud, motivoDeSolicitud: motivoDeSolicitud,
     RevisionSolicitud: RevisionSolicitud,
     CAMPOS_CAMBIO: CAMPOS_CAMBIO,
     otrasEnCategoria: otrasEnCategoria,

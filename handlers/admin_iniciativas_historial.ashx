@@ -42,7 +42,10 @@ public class AdminIniciativasHistorial : IHttpHandler
             if (invalido != null) return Error(context, 400, invalido, "FiltroInvalido");
             var lectura = HistorialPeticiones.Fuente.Leer(filtro, HistorialPeticiones.Maximo);
             HistorialPeticiones.NombrarCambios(lectura);
-            return HistorialPeticiones.Json(lectura, HistorialPeticiones.Maximo);
+            var json = HistorialPeticiones.Json(lectura, HistorialPeticiones.Maximo);
+            // Como se muestra quien la envio (App_Code/NombreSolicitante.cs; solo pantalla).
+            NombreSolicitante.AgregarHistorialPeticiones(json);
+            return json;
         });
     }
 

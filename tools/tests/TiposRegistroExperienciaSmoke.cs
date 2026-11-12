@@ -4,16 +4,18 @@
 // ArmarCategoriasV2 se invocan por reflexion con filas de Volumen armadas a
 // mano, como en UnionCategoriasExperienciaSmoke.cs.
 //
-// Cada Volumen es lo que LeerVolumen saca de vw_TBSlotCAT / vw_TBMesCAT:
-// Inc = [Incidencia], Pet = [Petición de Servicio], Total = [Total general].
-// La vista NO tiene filas de total: Total es el COUNT_BIG(*) de la propia
-// fila (Slot x Categoria V2 x Aplica x Tipo relacion), y Total - Inc - Pet
-// son los SorIA y cualquier otro tipo. Lo que fija:
+// Cada Volumen es lo que LeerVolumen saca de vw_TBSlotCAT / vw_TBMesCAT, ya
+// agrupado por VolumenDeColumnas: Inc = [Incidencia] + [SorIA Incidentes],
+// Pet = [Petición de Servicio] + [SorIA Peticiones], Total = [Total general]
+// (esa agrupacion la prueba VolumenTiposExperienciaSmoke.cs). La vista NO
+// tiene filas de total: Total es el COUNT_BIG(*) de la propia fila (Slot x
+// Categoria V2 x Aplica x Tipo relacion), y Total - Inc - Pet son 'Sin
+// tipo' y cualquier otro tipo. Lo que fija:
 //
 //   A) vol_slot / vol_mes (Todos) no cambian: siguen siendo la suma de Total;
 //   B) vol_tipo.inc / .req son la suma de su columna, por periodo, sin restar;
 //   C) Todos >= Incidentes + Requerimientos, y la diferencia es exactamente
-//      el resto (SorIA y otros): ni se pierde ni se duplica nada;
+//      el resto ('Sin tipo' y otros): ni se pierde ni se duplica nada;
 //   D) dos filas de la misma categoria y periodo (dos Tipo relacion) se
 //      suman una vez cada una, igual que Total;
 //   E) C1 / C1&C2 replegados dan la suma de sus rutas;
@@ -125,13 +127,13 @@ public static class TiposSmoke
 
         // --- escenario (filas de vw_TBSlotCAT / vw_TBMesCAT) ---
         // /Red/LAN/Switch slot 0 llega en DOS filas (dos Tipo relacion):
-        //   6 inc + 3 pet + 1 SorIA = 10, y 0 inc + 0 pet + 2 SorIA = 2.
+        //   6 inc + 3 pet + 1 otro = 10, y 0 inc + 0 pet + 2 otros = 2.
         var slotCat = Lista(TVol);
         slotCat.Add(Vol(0, "/Red/LAN/Switch", 6, 3, 10));
         slotCat.Add(Vol(0, "/Red/LAN/Switch", 0, 0, 2));
         slotCat.Add(Vol(1, "/Red/LAN/Switch", 4, 2, 8));
         slotCat.Add(Vol(0, "/Red/WAN", 0, 5, 5));          // solo Requerimientos
-        slotCat.Add(Vol(0, "/Sorx/Bot", 0, 0, 3));         // solo SorIA / otros
+        slotCat.Add(Vol(0, "/Sorx/Bot", 0, 0, 3));         // solo otros tipos
         var mesCat = Lista(TVol);
         mesCat.Add(Vol(10, "/Red/LAN/Switch", 7, 1, 9));
         mesCat.Add(Vol(9, "/Red/WAN", 0, 4, 4));
@@ -181,7 +183,7 @@ public static class TiposSmoke
         Chk("C slot 0: Todos", 20, todos);
         Chk("C slot 0: Incidentes", 6, inc);
         Chk("C slot 0: Requerimientos", 8, req);
-        Chk("C slot 0: resto (SorIA/otros) = 1 + 2 + 3", 6, todos - inc - req);
+        Chk("C slot 0: resto (otros tipos) = 1 + 2 + 3", 6, todos - inc - req);
 
         // ---- D) dos filas del mismo periodo: cada tipo se suma una vez ----
         Chk("D inc no se duplica con la segunda fila de Tipo relacion", 6, Valor(
@@ -207,9 +209,9 @@ public static class TiposSmoke
         // ---- G) un solo tipo ----
         Chk("G /Red/WAN sin incidentes", "", Tipo(Buscar(v2, "/Red/WAN", null), "inc", "slot"));
         var bot = Buscar(v2, "/Sorx/Bot", null);
-        Chk("G /Sorx/Bot solo SorIA: Todos 3", "0=3", Serie(bot["vol_slot"]));
-        Chk("G /Sorx/Bot solo SorIA: inc vacio", "", Tipo(bot, "inc", "slot"));
-        Chk("G /Sorx/Bot solo SorIA: req vacio", "", Tipo(bot, "req", "slot"));
+        Chk("G /Sorx/Bot solo otros tipos: Todos 3", "0=3", Serie(bot["vol_slot"]));
+        Chk("G /Sorx/Bot solo otros tipos: inc vacio", "", Tipo(bot, "inc", "slot"));
+        Chk("G /Sorx/Bot solo otros tipos: req vacio", "", Tipo(bot, "req", "slot"));
 
         // ---- campos que no son de volumen: intactos ----
         Chk("ticket_reduce no depende del tipo", 4, sw["ticket_reduce"]);

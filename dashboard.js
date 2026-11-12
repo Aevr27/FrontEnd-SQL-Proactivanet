@@ -4281,6 +4281,27 @@ const TableroAnalisis = moduloEmbebido({
   },
 });
 
+/* Vista general de servicios (antes "Concentracion de tickets"; carpeta, id y
+   hash #concentracion se quedaron): mismo trato que QARE. Pestaña
+   INDEPENDIENTE de Analisis de servicios: carga sola al montarse
+   (concentracion.ashx con el Slot 0, sin elegir servicio), publica
+   window.TableroConcentracionModulo y, al volver, solo se remiden sus
+   graficas. El refresco automatico vuelve a pedir concentracion.ashx con los
+   mismos filtros (refrescoDe). */
+const TableroConcentracion = moduloEmbebido({
+  nombre: 'Vista general de servicios',
+  base: 'concentracion/',
+  id: 'tab-concentracion',
+  pagina: 'concentracion.html',
+  hoja: 'concentracion.css',
+  guion: 'concentracion.js',
+  alVolver: () => {
+    const modulo = window.TableroConcentracionModulo;
+    if (modulo) modulo.redimensionar();
+  },
+  refresco: refrescoDe('TableroConcentracionModulo'),
+});
+
 /* Orquestacion: mismo trato que Efectividad. El modulo pide
    orquestacion.ashx una vez al montarse (y ?detalle=1 al abrir la lista de
    jobs); al volver a la pestaña se remiden sus graficas de Chart.js, que
@@ -4400,6 +4421,7 @@ const MODULOS = {
   qa: TableroQa,
   qare: TableroQare,
   analisis: TableroAnalisis,
+  concentracion: TableroConcentracion,
   orquestacion: TableroOrquestacion,
   call: pestanaSla('tab-call'),
   tablero: TableroExterno,
@@ -4411,11 +4433,13 @@ const MODULOS = {
    .subnav (dashboard.html) se ve. El primero de la lista es el que abre la
    entrada la primera vez; despues, el ultimo que se vio (`ultimoDeGrupo`,
    solo en memoria, como el estado de la barra). Ninguna clave de aqui puede
-   ser tambien una clave de MODULOS: el hash #observabilidad o #calidad abre
-   el grupo, y #tablero, #orquestacion, #qa o #qare el modulo, como antes. */
+   ser tambien una clave de MODULOS: el hash #observabilidad, #calidad o
+   #servicios abre el grupo, y #tablero, #orquestacion, #qa, #qare,
+   #analisis o #concentracion el modulo, como antes. */
 const GRUPOS = {
   observabilidad: ['orquestacion', 'tablero'],
   calidad: ['qa', 'qare'],
+  servicios: ['concentracion', 'analisis'],
 };
 const ultimoDeGrupo = {};
 

@@ -5,7 +5,11 @@
 // (admin/solicitudes-nuevas.js, MisSolicitudes). ADM sigue con el registro
 // completo (admin_iniciativas_solicitudes_nuevas.ashx, ExigirAdm).
 //
-//   GET ?accion=listar              -> 200 { solicitudes: [...], total, maximo }
+//   GET ?accion=listar[&estado=ENVIADA|APROBADA|RECHAZADA|CANCELADA]
+//                                   -> 200 { solicitudes: [...], total, maximo }
+//                                      sin estado (o vacio): todas las suyas;
+//                                      otro valor: 400 EstadoDesconocido sin
+//                                      leer. El filtro va DENTRO de la cuenta.
 //   GET ?accion=detalle&numero=N    -> 200 { ...la solicitud, eventos: [...] }
 //                                      400 SinSolicitud (numero invalido)
 //                                      404 SolicitudNoExiste (no existe o
@@ -43,6 +47,11 @@ public class AdminIniciativasMisSolicitudes : IHttpHandler
             if (accion != "listar" && accion != "detalle")
                 return Error(context, 400, "Acción desconocida.", "AccionDesconocida");
 
+            var estado = accion == "listar" ? req.QueryString["estado"] : null;
+            if (string.IsNullOrEmpty(estado)) estado = null;
+            else if (!RegistroSolicitudesIniciativa.EsEstado(estado))
+                return Error(context, 400, "Estado de solicitud desconocido.", "EstadoDesconocido");
+
             int numero = 0;
             if (accion == "detalle")
             {
@@ -56,14 +65,21 @@ public class AdminIniciativasMisSolicitudes : IHttpHandler
 
             if (accion == "listar")
             {
-                var l = lector.ListarDe(id.Original, RegistroSolicitudesIniciativa.Maximo);
+                var l = lector.ListarDe(id.Original, RegistroSolicitudesIniciativa.Maximo, estado);
+                // Como se muestra quien la envio (App_Code/NombreSolicitante.cs; solo pantalla).
+                NombreSolicitante.AgregarIniciativas(l.Solicitudes);
                 return new Dictionary<string, object>
                 {
                     { "solicitudes", l.Solicitudes }, { "total", l.Total }, { "maximo", RegistroSolicitudesIniciativa.Maximo },
+                    { "cancelacion_disponible", l.CancelacionDisponible },
                 };
             }
             var d = lector.DetalleDe(numero, id.Original);
             if (d == null) return Error(context, 404, "La solicitud no existe.", "SolicitudNoExiste");
+            // Solo pantalla: Cancelar / Modificar (sql/42). Quien decide es la
+            // base, por admin_iniciativas_validar.ashx.
+            RegistroSolicitudesIniciativa.MarcarPropia(d, id.Original);
+            NombreSolicitante.AgregarDetalleIniciativa(d);
             return d;
         });
     }

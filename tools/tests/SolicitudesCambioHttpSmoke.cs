@@ -78,6 +78,39 @@ sealed class AlmacenFalso : IAlmacenSolicitudesCambio
     public void RegistrarFallo(int id, string revisor, int numero, string mensaje) { Llamadas.Add("RegistrarFallo:" + numero); UltimoRevisor = revisor; UltimoNumeroFallo = numero; }
 }
 
+// sql/41 sin SQL: lo que el handler pide cancelar / reemplazar.
+sealed class CancelacionesFalsas : ICancelacionSolicitudesCambio
+{
+    public readonly List<string> Llamadas = new List<string>();
+    public string UltimoUsuario, UltimoRol, UltimoMotivo;
+    public PeticionSolicitudCambio UltimaPeticion;
+    public Exception Lanza;
+    public void Cancelar(int id, string usuario, string motivo)
+    {
+        Llamadas.Add("Cancelar:" + id); UltimoUsuario = usuario; UltimoMotivo = motivo;
+        if (Lanza != null) throw Lanza;
+    }
+    public ResultadoEnvioSolicitud Reemplazar(int original, string motivoCancelacion, PeticionSolicitudCambio p, string usuario, string rol)
+    {
+        Llamadas.Add("Reemplazar:" + original); UltimoUsuario = usuario; UltimoRol = rol; UltimoMotivo = motivoCancelacion; UltimaPeticion = p;
+        if (Lanza != null) throw Lanza;
+        return new ResultadoEnvioSolicitud { IdSolicitud = 9, Repetida = false };
+    }
+}
+
+// "Mis solicitudes" sin SQL: el estado de ahora de una solicitud de la cuenta.
+sealed class MiasFalsas : ILectorMisSolicitudesCambio
+{
+    public readonly List<string> Llamadas = new List<string>();
+    public string Estado = "APLICADA";
+    public List<Dictionary<string, object>> ListarDe(string cuenta, string estado, int maximo) { Llamadas.Add("ListarDe"); return new List<Dictionary<string, object>>(); }
+    public Dictionary<string, object> DetalleDe(int id, string cuenta)
+    {
+        Llamadas.Add("DetalleDe:" + id + ":" + cuenta);
+        return new Dictionary<string, object> { { "id", id }, { "estado", Estado }, { "solicitado_por", cuenta } };
+    }
+}
+
 public static class SolicitudesCambioHttpSmoke
 {
     static int fallos = 0;
@@ -260,13 +293,13 @@ public static class SolicitudesCambioHttpSmoke
         cuerpo = Correr("GET", "accion=enviar", MOD, null, out estado);
         Check("B8 GET enviar: 405", 405, estado);
         cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "alcance",
-            "pct_categoria", "/A/Cat 1", "pct_valor", "40", "agregar_categoria", "/A/Cat 2", "agregar_pct", "12.5",
+            "pct_categoria", "/A/Cat 1", "pct_valor", "40", "agregar_categoria", "/A/Cat 2", "agregar_pct", "12",
             "agregar_tipo_iniciativa", "Inventado", "agregar_tipo_agrupado", "Inventado"), out estado);
         p = alm.UltimaPeticion;
         var pct = p.Categorias.First(c => c.Accion == "PCT");
         var agr = p.Categorias.First(c => c.Accion == "AGREGAR");
         Check("B9 % en fraccion; la clasificacion de una nueva sale del PREFIJO, no del formulario",
-              "0.4000|0.1250|Problem|Problem|null|null",
+              "0.4000|0.1200|Problem|Problem|null|null",
               pct.Pct.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture) + "|" + agr.Pct.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture)
               + "|" + agr.TipoIniciativa + "|" + agr.TipoAgrupado + "|" + (pct.TipoIniciativa ?? "null") + "|" + (pct.TipoAgrupado ?? "null"));
         cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "XYZ 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
@@ -287,14 +320,28 @@ public static class SolicitudesCambioHttpSmoke
         cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
             "agregar_categoria", " /a/cat 3 ", "agregar_pct", "10"), out estado);
         Check("B12 se compara como el catalogo (NBSP, espacios, sin mayusculas): 200", 200, estado);
-        // Lo que manda "Tickets" (pctDeTickets / MetaCategoria.pct: dos
-        // decimales) se guarda exacto con la regla de siempre (Math.Round(pct/100, 4)).
-        foreach (var caso in new[] { new[] { "42.86", "0.4286" }, new[] { "0.01", "0.0001" }, new[] { "23.93", "0.2393" }, new[] { "100", "1.0000" } })
+        // Lo que manda "Tickets" (MetaCategoria.pctEntero: % ENTERO desde
+        // 2026-11-05) se guarda exacto con la regla de siempre (Math.Round(pct/100, 4)).
+        // Limites: 0 (minimo) y 100 (maximo).
+        foreach (var caso in new[] { new[] { "43", "0.4300" }, new[] { "1", "0.0100" }, new[] { "24", "0.2400" }, new[] { "100", "1.0000" }, new[] { "0", "0.0000" } })
         {
             cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
                 "agregar_categoria", "/A/Cat 2", "agregar_pct", caso[0]), out estado);
-            Check("B12b % de tickets " + caso[0] + ": 200 y se guarda " + caso[1], "200|" + caso[1],
+            Check("B12b % entero " + caso[0] + ": 200 y se guarda " + caso[1], "200|" + caso[1],
                   estado + "|" + alm.UltimaPeticion.Categorias[0].Pct.ToString("0.0000", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        // Decimales (los que antes pasaban) y fuera de rango: 422, no se envia.
+        int estado2;
+        foreach (var malo in new[] { "42.86", "0.01", "12.5", "99.99", "100.0", "12.", ".5", "12,5", "101", "-1" })
+        {
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+                "agregar_categoria", "/A/Cat 2", "agregar_pct", malo), out estado);
+            var ligada = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
+                "pct_categoria", "/A/Cat 1", "pct_valor", malo), out estado2);
+            Check("B12c % '" + malo + "' (agregar y ligada): 422 con el aviso de % entero, no se envia", "422|True|422|True|0",
+                  estado + "|" + cuerpo.Contains("porcentaje entero entre 0 y 100, sin decimales") + "|" + estado2 + "|" +
+                  ligada.Contains("porcentaje entero entre 0 y 100, sin decimales") + "|" + alm.Llamadas.Count);
         }
         alm.Llamadas.Clear(); leidasCatalogo = 0;
         cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Llave, "tipo", "categorias", "motivo", "m",
@@ -679,6 +726,14 @@ public static class SolicitudesCambioHttpSmoke
             Func<Dictionary<string, object>, ResultadoGestionAdmin> real = det =>
                 new ValidadorGestionAdmin().Modificar(PeticionModificarAdmin.DesdeFormulario(SolicitudesCambio.ComoModificar(det, null)),
                                                       actualIni, new CapacidadCategoria.Compromiso[0], catalogo, estados);
+            // HISTORICO: una solicitud de antes del % entero (pct_nuevo con
+            // decimales, guardada en adm.SolicitudCambioCategoria) se sigue
+            // aprobando con la validacion de aplicar de siempre.
+            var historica = Pendiente("CATEGORIAS", MOD, Cat("PCT", "/A/Cat 1", "12.5", null, null, "30", "30", true));
+            var rh = real(historica);
+            var fh = SolicitudesCambio.ComoModificar(historica, null);
+            Check("G14b solicitud historica con 12.5%: ComoModificar la manda tal cual y aplicar la valida", "12.5|True",
+                  fh["pct_valor"] + "|" + rh.Valida);
             dd["cambia_so"] = false; dd["so_nuevo"] = null; dd["so_anterior"] = null;
             var sinDuenos = real(dd);
             Check("G15 sin sql/24 (ModificaDuenosYQuita false): el PO pedido NO se aplica (error po); nunca en silencio", "False|po",
@@ -749,24 +804,29 @@ public static class SolicitudesCambioHttpSmoke
             Func<string> Res = () => estado + "|" + cuerpo.Contains("CapacidadExcedida") + "|" + alm.Llamadas.Count(x => x == "Enviar");
 
             alm.Llamadas.Clear(); leidasCapacidad = 0;
-            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54.88"), out estado);
-            Check("C1 dentro del tope (54.88 = 100 - 34 - 11.12; el 20% propio no se suma, el pedido lo reemplaza): 200, se guarda, se leyo la capacidad",
+            // % ENTERO (2026-11-05): disponible 54.88% -> se puede pedir hasta 54.
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54"), out estado);
+            Check("C1 dentro del tope (54 <= 54.88 = 100 - 34 - 11.12; el 20% propio no se suma, el pedido lo reemplaza): 200, se guarda, se leyo la capacidad",
                   "200|False|1|1", Res() + "|" + leidasCapacidad);
             alm.Llamadas.Clear();
-            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54.89"), out estado);
-            Check("C2 54.89: 422 CapacidadExcedida, enviada false, NO se guarda", "422|True|0|True", Res() + "|" + cuerpo.Contains("\"enviada\":false"));
-            Check("C2 ... mensaje accionable con el disponible, campo categoria", "True|True",
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("55"), out estado);
+            Check("C2 55: 422 CapacidadExcedida, enviada false, NO se guarda", "422|True|0|True", Res() + "|" + cuerpo.Contains("\"enviada\":false"));
+            Check("C2 ... mensaje accionable con el disponible (el mismo de aplicar), campo categoria", "True|True",
                   cuerpo.Contains("/T/Cat 1: solo tiene 54.88% disponible sin contar esta iniciativa") + "|" + cuerpo.Contains("\"campo\":\"categoria\""));
+            alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=enviar", MOD, Pct("54.89"), out estado);
+            Check("C2b 54.89 (decimales): 422 por formato, sin leer capacidad ni guardar", "422|True|0|False",
+                  estado + "|" + cuerpo.Contains("porcentaje entero entre 0 y 100, sin decimales") + "|" + alm.Llamadas.Count + "|" + cuerpo.Contains("CapacidadExcedida"));
             cuerpo = Correr("POST", "accion=enviar", MOD, Pct("100"), out estado);
             Check("C3 100%: 422, no se guarda", "422|True|0", Res());
 
             // Misma regla y mismo mensaje que aplicar (ValidadorGestionAdmin.Modificar).
             var fmTope = new NameValueCollection { { "accion", "modificar" }, { PeticionModificarAdmin.CFolio, "PRB 2026-000101" },
-                                               { PeticionModificarAdmin.CPctCategoria, "/T/Cat 1" }, { PeticionModificarAdmin.CPctValor, "54.89" } };
+                                               { PeticionModificarAdmin.CPctCategoria, "/T/Cat 1" }, { PeticionModificarAdmin.CPctValor, "55" } };
             var alAplicar = new ValidadorGestionAdmin().Modificar(PeticionModificarAdmin.DesdeFormulario(fmTope), capacidades["PRB 2026-000101"].Actual, compromisos);
             var alEnviar = SolicitudesCambio.ErroresCapacidad(PeticionSolicitudCambio.DesdeFormulario(new NameValueCollection
                 { { "folio", "PRB 2026-000101" }, { "llave", Llave }, { "tipo", "categorias" }, { "motivo", "m" },
-                  { "pct_categoria", "/T/Cat 1" }, { "pct_valor", "54.89" } }), capacidades["PRB 2026-000101"]);
+                  { "pct_categoria", "/T/Cat 1" }, { "pct_valor", "55" } }), capacidades["PRB 2026-000101"]);
             Check("C4 el envio y aplicar dan el MISMO motivo", "True|" + string.Join(" ", alEnviar.ToArray()),
                   (!alAplicar.Valida) + "|" + string.Join(" ", alAplicar.Errores.Where(x => x.Campo == "pct").Select(x => x.Mensaje).ToArray()));
 
@@ -784,7 +844,7 @@ public static class SolicitudesCambioHttpSmoke
             Check("C6 fila ReqOpr (no consume): sin tope, 200", "200|False|1", Res());
 
             // Por agregar: la Agrupacion del prefijo (PRB -> Problem) consume.
-            foreach (var caso in new[] { new[] { "40", "200|False|1" }, new[] { "40.01", "422|True|0" } })
+            foreach (var caso in new[] { new[] { "40", "200|False|1" }, new[] { "41", "422|True|0" } })
             {
                 alm.Llamadas.Clear();
                 cuerpo = Correr("POST", "accion=enviar", MOD, F("folio", "PRB 2026-000001", "llave", Guid.NewGuid().ToString(), "tipo", "categorias", "motivo", "m",
@@ -1007,6 +1067,283 @@ public static class SolicitudesCambioHttpSmoke
             PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = null;
             PersistenciaSolicitudesCambio.SolicitaPsoEquipoForzadaParaPruebas = null;
             alm.LanzarAlEnviar = null;
+        }
+
+        // ---------------- X: cancelar / reemplazar por quien la envio (sql/41) ----------------
+        var canc = new CancelacionesFalsas();
+        var mias = new MiasFalsas();
+        SolicitudesCambio.Cancelaciones = canc;
+        SolicitudesCambio.Mias = mias;
+        AccesoAdmin.FuenteRoles = new RolesFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(ADMPO, "ADM");
+        AccesoIniciativas.FuenteDuenos = duenosPso;
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
+        PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = true;
+        PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = true;
+        Func<string> llamadasX = delegate { return string.Join(",", canc.Llamadas.ToArray()); };
+        Func<string, string[][]> reemplazo = delegate (string folio)
+        {
+            return F("reemplaza_a", "5", "motivo_cancelacion", "Me equivoque de fecha", "folio", folio, "llave", Guid.NewGuid().ToString(),
+                     "tipo", "estado", "estado_nuevo", "En Monitoreo", "campo_fecha", "f_solucion", "fecha_nueva", "2026-12-06", "motivo", "Corregida",
+                     "usuario", ADM, "solicitado_por", ADM, "rol", "ADM");
+        };
+        try
+        {
+            // Quien entra (la MISMA regla que enviar) y la cuenta que firma.
+            alm.Llamadas.Clear(); canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=cancelar", "", F("id", "5", "motivo", "x"), out estado);
+            Check("X1 anonimo no cancela: 403, nada se toca", "403|", estado + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=cancelar", VIEWER, F("id", "5", "motivo", "x"), out estado);
+            Check("X2 VIEWER sin PO/SO no cancela: 403", "403|", estado + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "  Ya no aplica  ", "usuario", ADM, "solicitado_por", ADM), out estado);
+            Check("X3 MOD cancela la suya: 200, firma SU cuenta (lo del formulario se ignora), motivo recortado", "200|True|Cancelar:5|" + MOD + "|Ya no aplica",
+                  estado + "|" + cuerpo.Contains("\"cancelada\":true") + "|" + llamadasX() + "|" + canc.UltimoUsuario + "|" + canc.UltimoMotivo);
+            canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=cancelar", PO1, F("id", "5", "motivo", "m"), out estado);
+            Check("X4 PO/SO sin rol (ExigirSolicitud) cancela: 200 con su cuenta", "200|Cancelar:5|" + PO1, estado + "|" + llamadasX() + "|" + canc.UltimoUsuario);
+            canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=cancelar", ADM, F("id", "5", "motivo", "m"), out estado);
+            Check("X5 ADM tambien cancela LAS SUYAS (la base decide si es suya): firma ADM", "200|" + ADM, estado + "|" + canc.UltimoUsuario);
+            canc.Llamadas.Clear();
+            cuerpo = Correr("GET", "accion=cancelar&id=5", MOD, null, out estado);
+            Check("X6 cancelar por GET: 405, nada se toca", "405|", estado + "|" + llamadasX());
+            // Motivo y numero (antes de la base).
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "   "), out estado);
+            Check("X7 motivo vacio: 422 FaltaMotivoCancelacion, nada se toca", "422|True|", estado + "|" + cuerpo.Contains("FaltaMotivoCancelacion") + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", new string('m', 2001)), out estado);
+            Check("X8 motivo de 2001: 422 MotivoCancelacionLargo, nada se toca", "422|True|", estado + "|" + cuerpo.Contains("MotivoCancelacionLargo") + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", new string('m', 2000)), out estado);
+            Check("X8b motivo de 2000: pasa", "200|Cancelar:5", estado + "|" + llamadasX());
+            canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "abc", "motivo", "m"), out estado);
+            Check("X9 sin numero: 400", "400|", estado + "|" + llamadasX());
+            // Sin sql/41.
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = false;
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X10 sin sql/41: 501 CancelacionNoHabilitada, nada se toca", "501|True|True|", estado + "|" + cuerpo.Contains("CancelacionNoHabilitada") + "|" + cuerpo.Contains("sql/41") + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("X10b sin sql/41 reemplazar: 501, nada se guarda", "501||0", estado + "|" + llamadasX() + "|" + alm.Llamadas.Count(x => x == "Enviar"));
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = true;
+            // Errores de la base: no es suya, carrera con ADM, motivo.
+            canc.Lanza = new ErrorSolicitudCambio(51201, "La solicitud no existe.", null);
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X11 de otra cuenta o inexistente (51201): 404 SolicitudNoExiste, sin decir de quien es", "404|True|True",
+                  estado + "|" + cuerpo.Contains("SolicitudNoExiste") + "|" + cuerpo.Contains("\"cancelada\":false"));
+            mias.Llamadas.Clear(); mias.Estado = "APLICADA";
+            canc.Lanza = new ErrorSolicitudCambio(51230, "La solicitud ya no esta pendiente", null);
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X12 ADM la aplico antes (51230, carrera): 409 SolicitudNoPendiente, dice como quedo (leido DENTRO de la cuenta)",
+                  "409|True|True|True|DetalleDe:5:" + MOD,
+                  estado + "|" + cuerpo.Contains("SolicitudNoPendiente") + "|" + cuerpo.Contains("\"estado_actual\":\"APLICADA\"") + "|" +
+                  cuerpo.Contains("ya aplic") + "|" + string.Join(",", mias.Llamadas.ToArray()));
+            mias.Estado = "RECHAZADA";
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X12b ADM la rechazo antes: 409 que lo dice", "409|True", estado + "|" + cuerpo.Contains("ya rechaz"));
+            canc.Lanza = new ErrorSolicitudCambio(51228, "x", null);
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X13 51228 de la base: 422 con el mensaje propio (con acentos)", "422|True|True", estado + "|" + cuerpo.Contains("FaltaMotivoCancelacion") + "|" + cuerpo.Contains("cancelas la solicitud"));
+            canc.Lanza = new TimeoutException("tiempo");
+            cuerpo = Correr("POST", "accion=cancelar", MOD, F("id", "5", "motivo", "m"), out estado);
+            Check("X14 tiempo agotado: 500 CancelacionNoConfirmada, cancelada null", "500|True|True", estado + "|" + cuerpo.Contains("CancelacionNoConfirmada") + "|" + cuerpo.Contains("\"cancelada\":null"));
+            canc.Lanza = null;
+
+            // Reemplazar: la MISMA validacion que enviar, y luego Reemplazar (nunca Enviar).
+            canc.Llamadas.Clear(); alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("R1 MOD reemplaza: 200, la nueva (9) y la original (5); Reemplazar con SU cuenta y rol del servidor; Enviar no",
+                  "200|True|True|True|Reemplazar:5|" + MOD + "|MOD|Me equivoque de fecha|0",
+                  estado + "|" + cuerpo.Contains("\"id_solicitud\":9") + "|" + cuerpo.Contains("\"reemplaza_a\":5") + "|" + cuerpo.Contains("\"reemplazada\":true") + "|" +
+                  llamadasX() + "|" + canc.UltimoUsuario + "|" + canc.UltimoRol + "|" + canc.UltimoMotivo + "|" + alm.Llamadas.Count(x => x == "Enviar"));
+            Check("R1b la peticion nueva es la del formulario (fecha corregida, motivo nuevo, folio)", "PRB 2026-000001|2026-12-06|Corregida|FechaSolucion",
+                  canc.UltimaPeticion.Folio + "|" + canc.UltimaPeticion.FechaNueva.Value.ToString("yyyy-MM-dd") + "|" + canc.UltimaPeticion.Motivo + "|" + canc.UltimaPeticion.CampoFecha);
+            canc.Llamadas.Clear();
+            var sinLlave = reemplazo("PRB 2026-000001").Where(x => x[0] != "llave").ToArray();
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, sinLlave, out estado);
+            Check("R2 reemplazo invalido (sin llave): 422 como un envio, NO se llama a Reemplazar (la original sigue)", "422|True|", estado + "|" + cuerpo.Contains("\"campo\":\"llave\"") + "|" + llamadasX());
+            var sinMotivo = reemplazo("PRB 2026-000001").Where(x => x[0] != "motivo_cancelacion").ToArray();
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, sinMotivo, out estado);
+            Check("R3 sin motivo de cancelacion: 422, nada se toca", "422|True|", estado + "|" + cuerpo.Contains("FaltaMotivoCancelacion") + "|" + llamadasX());
+            var sinOriginal = reemplazo("PRB 2026-000001").Where(x => x[0] != "reemplaza_a").ToArray();
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, sinOriginal, out estado);
+            Check("R4 sin reemplaza_a: 400 SinSolicitud", "400|True|", estado + "|" + cuerpo.Contains("SinSolicitud") + "|" + llamadasX());
+            // PSO: se vuelve a decidir si puede enviar (elegibilidad de envio).
+            cuerpo = Correr("POST", "accion=reemplazar", PO1, reemplazo("PRB 2026-000001"), out estado);
+            Check("R5 PO de la iniciativa reemplaza: 200 con rol PSO del servidor", "200|PSO|" + PO1, estado + "|" + canc.UltimoRol + "|" + canc.UltimoUsuario);
+            canc.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=reemplazar", POX, reemplazo("PRB 2026-000001"), out estado);
+            Check("R6 PO/SO que ya no es dueno de ESA iniciativa: 403 NoEsDueno, NO se reemplaza (re-chequeo de envio)", "403|True|",
+                  estado + "|" + cuerpo.Contains("NoEsDueno") + "|" + llamadasX());
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001").Concat(new[] { new[] { "subestado_nuevo", "X" } }).ToArray(), out estado);
+            Check("R7 MOD pidiendo Subestado en el reemplazo: 422 (solo ADM), nada se toca", "422|True|", estado + "|" + cuerpo.Contains("subestado_nuevo") + "|" + llamadasX());
+            // Errores de la base en el reemplazo.
+            canc.Lanza = new ErrorSolicitudCambio(51233, "x", null);
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000003"), out estado);
+            Check("R8 otra iniciativa (51233): 422 OtraIniciativa, enviada false", "422|True|True", estado + "|" + cuerpo.Contains("OtraIniciativa") + "|" + cuerpo.Contains("\"enviada\":false"));
+            mias.Estado = "RECHAZADA";
+            canc.Lanza = new ErrorSolicitudCambio(51230, "x", null);
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("R9 ADM la reviso antes (51230): 409 que dice como quedo; no se creo la nueva", "409|True|True|True",
+                  estado + "|" + cuerpo.Contains("SolicitudNoPendiente") + "|" + cuerpo.Contains("\"estado_actual\":\"RECHAZADA\"") + "|" + cuerpo.Contains("\"enviada\":false"));
+            canc.Lanza = new ErrorSolicitudCambio(51226, "No es dueno", null);
+            cuerpo = Correr("POST", "accion=reemplazar", PO1, reemplazo("PRB 2026-000001"), out estado);
+            Check("R10 la base re-chequea PSO (51226) dentro del reemplazo: 403 NoEsDueno", "403|True", estado + "|" + cuerpo.Contains("NoEsDueno"));
+            canc.Lanza = new ErrorSolicitudCambio(51232, "x", null);
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("R11 llave usada en otra (51232): 409 LlaveUsada", "409|True", estado + "|" + cuerpo.Contains("LlaveUsada"));
+            canc.Lanza = new TimeoutException("tiempo");
+            cuerpo = Correr("POST", "accion=reemplazar", MOD, reemplazo("PRB 2026-000001"), out estado);
+            Check("R12 tiempo agotado: 500 EnvioNoConfirmado (reintentar con la misma llave)", "500|True", estado + "|" + cuerpo.Contains("EnvioNoConfirmado"));
+            canc.Lanza = null;
+
+            // ADM: sigue igual, y la carrera con quien la envio se dice clara.
+            canc.Llamadas.Clear(); alm.Llamadas.Clear();
+            foreach (var a in new[] { "aplicar", "rechazar" })
+            {
+                cuerpo = Correr("POST", "accion=" + a, MOD, F("id", "5", "comentario", "x"), out estado);
+                Check("K1 MOD sigue sin poder " + a + " (solo cancela / reemplaza las suyas): 403", "403|0|", estado + "|" + alm.Llamadas.Count + "|" + llamadasX());
+                cuerpo = Correr("POST", "accion=" + a, PO1, F("id", "5", "comentario", "x"), out estado);
+                Check("K1b PO/SO sin rol no puede " + a + ": 403", "403|0", estado + "|" + alm.Llamadas.Count);
+            }
+            var cancelada = Pendiente("ESTADO", MOD);
+            cancelada["estado"] = "CANCELADA"; cancelada["reemplazada_por"] = 9;
+            alm.Detalle_ = cancelada;
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5", "comentario", "ok"), out estado);
+            Check("K2 aplicar una CANCELADA: 409 SolicitudCancelada (la reemplazo #9), sin validar ni aplicar",
+                  "409|True|True|Detalle:5", estado + "|" + cuerpo.Contains("SolicitudCancelada") + "|" + cuerpo.Contains("\"reemplazada_por\":9") + "|" + string.Join(",", alm.Llamadas.ToArray()));
+            alm.Llamadas.Clear();
+            alm.Detalle_ = Pendiente("ESTADO", MOD);
+            alm.LanzarAlAplicar = new ErrorSolicitudCambio(51202, "ya revisada", new InvalidOperationException("como de la base"));
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5", "comentario", "ok"), out estado);
+            Check("K3 51202 que no viene de SQL: el de siempre (sin releer)", "409|True|False", estado + "|" + cuerpo.Contains("SolicitudYaRevisada") + "|" + cuerpo.Contains("SolicitudCancelada"));
+            alm.LanzarAlAplicar = null;
+
+            // Lista y detalle de ADM: CANCELADA es un estado de la cola; es_propia / puede_cancelar.
+            alm.Llamadas.Clear();
+            cuerpo = Correr("GET", "accion=listar&estado=CANCELADA", ADM, null, out estado);
+            Check("F1 ADM filtra CANCELADA: 200 y la base recibe el filtro", "200|Listar:CANCELADA", estado + "|" + string.Join(",", alm.Llamadas.ToArray()));
+            cuerpo = Correr("GET", "accion=listar&estado=BORRADA", ADM, null, out estado);
+            Check("F2 estado desconocido sigue 400", "400", estado);
+            alm.Detalle_ = Pendiente("ESTADO", ADM);
+            cuerpo = Correr("GET", "accion=detalle&id=5", ADM, null, out estado);
+            Check("F3 detalle de ADM de una suya PENDIENTE: es_propia y puede_cancelar", "200|True|True", estado + "|" + cuerpo.Contains("\"es_propia\":true") + "|" + cuerpo.Contains("\"puede_cancelar\":true"));
+            alm.Detalle_ = Pendiente("ESTADO", MOD);
+            cuerpo = Correr("GET", "accion=detalle&id=5", ADM, null, out estado);
+            Check("F4 detalle de ADM de otra cuenta: es_propia false, puede_cancelar false", "200|True|True", estado + "|" + cuerpo.Contains("\"es_propia\":false") + "|" + cuerpo.Contains("\"puede_cancelar\":false"));
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = false;
+            alm.Detalle_ = Pendiente("ESTADO", ADM);
+            cuerpo = Correr("GET", "accion=detalle&id=5", ADM, null, out estado);
+            Check("F5 sin sql/41: puede_cancelar false aunque sea suya", "True|True", cuerpo.Contains("\"es_propia\":true") + "|" + cuerpo.Contains("\"puede_cancelar\":false"));
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = true;
+            Check("F6 EstadosCola con CANCELADA", "PENDIENTE,APLICADA,RECHAZADA,CANCELADA", string.Join(",", SolicitudesCambio.EstadosCola));
+            Check("F7 los mensajes de sql/41 tienen texto propio; los de antes, el de la base", "True|True|base",
+                  (new ErrorSolicitudCambio(51230, "x", null).Message.IndexOf("pendiente", StringComparison.Ordinal) > 0) + "|" +
+                  (new ErrorSolicitudCambio(51234, "x", null).EstadoHttp == 500) + "|" + new ErrorSolicitudCambio(51202, "base", null).Message);
+            var srcSol = File.ReadAllText(Path.Combine("handlers", "admin_iniciativas_solicitudes.ashx"));
+            Check("F8 la cuenta que cancela / reemplaza es la de IIS (id.Original), nunca del formulario", "True|True|False|False",
+                  srcSol.Contains("SolicitudesCambio.Cancelaciones.Cancelar(n, id.Original, motivo)") + "|" +
+                  srcSol.Contains("SolicitudesCambio.Cancelaciones.Reemplazar(reemplazaA, motivoCancelacion, p, usuario, rol)") + "|" +
+                  srcSol.Contains("Form[\"usuario") + "|" + srcSol.Contains("Form[\"solicitado_por"));
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.CancelacionForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = null;
+            canc.Lanza = null;
+        }
+
+        // ---- H) sql/83: reactivar una categoria que estuvo ligada --------------
+        // Historicas sin SQL: 000001 tiene una de baja DENTRO del par (/A/Cat 2) y
+        // otra FUERA (/Z/Fuera); 000003 (par PO X / SO x, sin catalogo) una.
+        CategoriasHistoricas.LeerParaPruebas = delegate (string folio)
+        {
+            if (folio == "PRB 2026-000001")
+                return new List<CategoriaHistorica> {
+                    new CategoriaHistorica { Ruta = "/A/Cat 2", TipoIniciativa = "Problem", TipoAgrupado = null, Pct = 0.2m, FCreacion = "2026-01-05", FAnalisis = "2026-01-20" },
+                    new CategoriaHistorica { Ruta = "/Z/Fuera", TipoIniciativa = "Problem", TipoAgrupado = "Problem", Pct = 0.1m, FCreacion = "2026-02-01", FAnalisis = "2026-02-16" } };
+            if (folio == "PRB 2026-000003")
+                return new List<CategoriaHistorica> { new CategoriaHistorica { Ruta = "/A/Cat 2", TipoIniciativa = "Problem", TipoAgrupado = "Problem" } };
+            return new List<CategoriaHistorica>();
+        };
+        AccesoIniciativas.FuenteDuenos = duenosPso;
+        AccesoAdmin.FuenteRoles = new RolesFalsos().Con(ADM, "ADM").Con(MOD, "MOD").Con(ADMPO, "ADM");
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
+        PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = true;
+        try
+        {
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = false;
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", ADM, null, out estado);
+            Check("H1 sin sql/83: 200 disponible false, sin lista", "200|True|False", estado + "|" + cuerpo.Contains("\"disponible\":false") + "|" + cuerpo.Contains("/A/Cat 2"));
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = true;
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", ADM, null, out estado);
+            Check("H2 ADM: todas (filtro todas), con fechas y clasificacion historica", "200|True|True|True|True",
+                  estado + "|" + cuerpo.Contains("\"filtro\":\"todas\"") + "|" + cuerpo.Contains("/A/Cat 2") + "|" + cuerpo.Contains("/Z/Fuera") + "|" + cuerpo.Contains("\"f_analisis\":\"2026-01-20\""));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", MOD, null, out estado);
+            Check("H3 MOD: SOLO las del par PO / SO capturado (lo que puede pedir)", "200|True|True|False",
+                  estado + "|" + cuerpo.Contains("\"filtro\":\"par_po_so\"") + "|" + cuerpo.Contains("/A/Cat 2") + "|" + cuerpo.Contains("/Z/Fuera"));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", PO1, null, out estado);
+            Check("H4 PO de la iniciativa (PSO): solo las del par", "200|True|False", estado + "|" + cuerpo.Contains("/A/Cat 2") + "|" + cuerpo.Contains("/Z/Fuera"));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", POX, null, out estado);
+            Check("H5 PO / SO de OTRA iniciativa: 403 NoEsDueno, sin lista", "403|True|False", estado + "|" + cuerpo.Contains("NoEsDueno") + "|" + cuerpo.Contains("/A/Cat 2"));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", COMUN, null, out estado);
+            Check("H6 en CatPersona sin ser PO / SO vigente: 403", "403|False", estado + "|" + cuerpo.Contains("/A/Cat 2"));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000001", "", null, out estado);
+            Check("H7 anonimo / VIEWER: 403", "403|403", estado + "|" + (Correr("GET", "accion=historicas&folio=PRB%202026-000001", VIEWER, null, out estado) != null ? estado.ToString() : ""));
+            cuerpo = Correr("GET", "accion=historicas&folio=PRB%202026-000003", MOD, null, out estado);
+            Check("H8 MOD con un par que no esta en el catalogo: 200 con lista vacia", "200|True|False", estado + "|" + cuerpo.Contains("\"historicas\":[]") + "|" + cuerpo.Contains("/A/Cat 2"));
+            cuerpo = Correr("GET", "accion=historicas", ADM, null, out estado);
+            Check("H9 sin folio: 400 SinFolio; POST: 405", "400|True|405", estado + "|" + cuerpo.Contains("SinFolio") + "|" +
+                  (Correr("POST", "accion=historicas&folio=PRB%202026-000001", ADM, F("x", "y"), out estado) != null ? estado.ToString() : ""));
+
+            // Desactualizada: con 83 solo una que YA esta vigente; sin 83, como antes.
+            var reac = Cat("AGREGAR", "/A/Cat 2", "10", null, null, null, null, false);
+            reac["ligada_alguna_vez"] = true;
+            var dReac = Pendiente("CATEGORIAS", MOD, reac);
+            var conReac = SolicitudesCambio.Desactualizada(dReac);
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = false;
+            var sinReac = SolicitudesCambio.Desactualizada(dReac);
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = true;
+            Check("H10 AGREGAR de una de baja: con 83 no desactualizada; sin 83 si (como antes)", "False|True", conReac + "|" + sinReac);
+            var vig = Cat("AGREGAR", "/A/Cat 2", "10", null, null, null, null, true);
+            Check("H11 con 83, AGREGAR de una que YA esta vigente: desactualizada", true, SolicitudesCambio.Desactualizada(Pendiente("CATEGORIAS", MOD, vig)));
+
+            // Aprobar una reactivacion: solo lo que falta (la historica no trae Agrupacion).
+            reac["reactivacion"] = true; reac["tipo_iniciativa_historica"] = "Problem"; reac["tipo_agrupado_historica"] = null;
+            reac["faltan_clasificacion"] = new List<object> { "tipo_agrupado" };
+            alm.Detalle_ = Pendiente("CATEGORIAS", MOD, reac); alm.Llamadas.Clear(); validaciones.Clear(); validacionOk = true;
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("H12 reactivacion sin la Agrupacion que falta: 409 FaltaClasificacion con faltan = tipo_agrupado, registrada", "409|True|True|Detalle:5,RegistrarFallo:51221",
+                  estado + "|" + cuerpo.Contains("FaltaClasificacion") + "|" + cuerpo.Contains("\"faltan\":{\"/A/Cat 2\":[\"tipo_agrupado\"]}") + "|" + string.Join(",", alm.Llamadas.ToArray()));
+            alm.Llamadas.Clear(); validaciones.Clear();
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5", "clas_categoria", "/A/Cat 2", "clas_tipo_iniciativa", "", "clas_tipo_agrupado", "Problem"), out estado);
+            Check("H13 ADM da solo la que falta: se valida con la EFECTIVA (historica Problem + Agrupacion de ADM) y se aplica", "200|Problem|Problem|Aplicar:5|/A/Cat 2=/Problem",
+                  estado + "|" + validaciones[0]["agregar_tipo_iniciativa"] + "|" + validaciones[0]["agregar_tipo_agrupado"] + "|" + alm.Llamadas.Last() + "|" +
+                  alm.UltimasClasificaciones[0].Categoria + "=" + alm.UltimasClasificaciones[0].TipoIniciativa + "/" + alm.UltimasClasificaciones[0].TipoAgrupado);
+            var completa = Cat("AGREGAR", "/A/Cat 3", "10", "Mejora", "Mejora", null, null, false);
+            completa["reactivacion"] = true; completa["tipo_iniciativa_historica"] = "Problem"; completa["tipo_agrupado_historica"] = "Problem";
+            completa["faltan_clasificacion"] = new List<object>();
+            alm.Detalle_ = Pendiente("CATEGORIAS", MOD, completa); alm.Llamadas.Clear(); validaciones.Clear();
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("H14 historica completa: sin clasificar no se pide (51221 no aplica) y la EFECTIVA es la historica, no la de la solicitud", "200|Problem|Problem",
+                  estado + "|" + validaciones[0]["agregar_tipo_iniciativa"] + "|" + validaciones[0]["agregar_tipo_agrupado"]);
+
+            Check("H15 errores de sql/83: 51032 403 ReactivacionSoloAdm; 51033 409 SolicitudNoCorresponde; 51034 422 ClasificacionHistorica",
+                  "403|ReactivacionSoloAdm|409|SolicitudNoCorresponde|422|ClasificacionHistorica",
+                  new ErrorSolicitudCambio(51032, "x", null).EstadoHttp + "|" + new ErrorSolicitudCambio(51032, "x", null).Tipo + "|" +
+                  new ErrorSolicitudCambio(51033, "x", null).EstadoHttp + "|" + new ErrorSolicitudCambio(51033, "x", null).Tipo + "|" +
+                  new ErrorSolicitudCambio(51034, "x", null).EstadoHttp + "|" + new ErrorSolicitudCambio(51034, "x", null).Tipo);
+            Check("H16 en la edicion directa los mismos numeros dan su tipo", "ReactivacionSoloAdm|SolicitudNoCorresponde|ClasificacionHistorica",
+                  new ErrorEscrituraGestionAdmin(51032, "x", null).Tipo + "|" + new ErrorEscrituraGestionAdmin(51033, "x", null).Tipo + "|" + new ErrorEscrituraGestionAdmin(51034, "x", null).Tipo);
+            Check("H17 clasificacion efectiva: vacia ('', espacios) = falta; historica gana; conflicto sin distinguir mayusculas", "Problem|Mejora|null|False|True|False",
+                  CategoriasHistoricas.Efectiva("Problem", "Mejora") + "|" + CategoriasHistoricas.Efectiva("   ", "Mejora") + "|" +
+                  (CategoriasHistoricas.Efectiva("", " ") ?? "null") + "|" + CategoriasHistoricas.Conflicto("Problem", "PROBLEM") + "|" +
+                  CategoriasHistoricas.Conflicto("Problem", "Mejora") + "|" + CategoriasHistoricas.Conflicto(null, "Mejora"));
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.ReactivacionForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+            PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = null;
+            CategoriasHistoricas.LeerParaPruebas = null;
         }
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : "FALLOS: " + fallos);

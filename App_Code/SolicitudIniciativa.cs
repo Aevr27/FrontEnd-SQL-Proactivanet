@@ -201,7 +201,7 @@ public sealed class SolicitudIniciativa
     public string Descripcion;
     public string Observaciones;
     public string Volumetria;     // texto tal cual; lo valida el validador
-    public string Pct;            // % como texto ("20", "33.5"), no fraccion
+    public string Pct;            // % como texto ("20"), no fraccion; entero desde 2026-11-05
     public bool TieneRca;         // llego un archivo no vacio
     public string NombreRca;      // nombre original (solo para la extension)
     public string DisponibleCliente;
@@ -485,6 +485,7 @@ public sealed class ValidadorIniciativa
         public DestinatariosSolicitud Destinatarios;
         public bool Guardada;
         public bool Nuevo;
+        public int ReemplazaA;   // sql/42: la solicitud que esta reemplazo (0 = envio nuevo)
 
         public void Agregar(string campo, string mensaje)
         {
@@ -501,6 +502,18 @@ public sealed class ValidadorIniciativa
     // Mismas formas que VALIDAR en admin/iniciativas.js.
     private static readonly Regex Entero = new Regex(@"^\d+$");
     private static readonly Regex Porcentaje = new Regex(@"^\d{1,3}(\.\d{1,2})?$");
+    private static readonly Regex PorcentajeEntero = new Regex(@"^\d{1,3}$");
+
+    // Lo que se CAPTURA en Nueva solicitud (y en Solicitar cambios): % ENTERO
+    // de 0 a 100, sin decimales (2026-11-05). Fraccion sigue aceptando hasta
+    // dos decimales porque la usan Crear / Modificar de ADM y lo ya guardado;
+    // la columna (DECIMAL(9,4) en fraccion) no cambia.
+    public static bool EsPctEntero(string pct)
+    {
+        var t = (pct ?? "").Trim();
+        int v;
+        return PorcentajeEntero.IsMatch(t) && int.TryParse(t, NumberStyles.None, CultureInfo.InvariantCulture, out v) && v <= 100;
+    }
 
     // El % en texto -> fraccion de 4 decimales, o null si no es un % valido
     // (0 a 100, hasta dos decimales: la precision de DECIMAL(9,4) en
@@ -575,9 +588,9 @@ public sealed class ValidadorIniciativa
         if (pctTexto == null) r.Agregar(SolicitudIniciativa.CPct, "Falta el % de disminucion.");
         else
         {
-            r.PctFraccion = Fraccion(pctTexto);
+            r.PctFraccion = EsPctEntero(pctTexto) ? Fraccion(pctTexto) : null;
             if (r.PctFraccion == null)
-                r.Agregar(SolicitudIniciativa.CPct, "El % debe estar entre 0 y 100, con hasta dos decimales.");
+                r.Agregar(SolicitudIniciativa.CPct, "El % debe ser un numero entero entre 0 y 100, sin decimales.");
         }
 
         // Capacidad: SIEMPRE la que el servidor calcula ahora, para la
@@ -589,7 +602,7 @@ public sealed class ValidadorIniciativa
                 r.Agregar(SolicitudIniciativa.CPct, "No se puede calcular la capacidad sin categoria.");
             else if (r.PctFraccion != null && r.PctFraccion.Value > r.Capacidad.Disponible)
                 r.Agregar(SolicitudIniciativa.CPct,
-                    "La categoria solo tiene " + ComoPct(r.Capacidad.Disponible) + " de capacidad disponible.");
+                    "La categoria solo tiene " + ComoPctEntero(r.Capacidad.Disponible) + " de capacidad disponible.");
         }
 
         // ---- 04 RCA -----------------------------------------------------
@@ -604,6 +617,13 @@ public sealed class ValidadorIniciativa
     public static string ComoPct(decimal fraccion)
     {
         return (fraccion * 100m).ToString("0.##", CultureInfo.InvariantCulture) + "%";
+    }
+
+    // El disponible como lo mas que se puede pedir en % entero, hacia abajo:
+    // 0.3333 -> "33%", 0.4000 -> "40%".
+    public static string ComoPctEntero(decimal fraccion)
+    {
+        return decimal.Floor(fraccion * 100m).ToString("0", CultureInfo.InvariantCulture) + "%";
     }
 
     private static string Limpio(string s)

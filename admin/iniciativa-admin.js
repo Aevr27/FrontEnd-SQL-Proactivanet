@@ -65,8 +65,8 @@
      la volumetria de esa categoria (MetaCategoria). Lo que ADM escribio
      (fuente) nunca se pisa: cambiar el modo o la volumetria solo recalcula
      el otro. Viaja y se guarda el % (dos decimales): desde tickets puede no
-     ser exacto y se dice. Tickets a reducir = FLOOR(volumetria de 30 dias
-     x %): siempre hacia abajo, entero. Lo sigue calculando la base con la
+     ser exacto y se dice. Tickets a reducir = CEILING(volumetria de 30 dias
+     x %): siempre hacia arriba, entero, por iniciativa (7 x 99% = 7). Lo sigue calculando la base con la
      volumetria calculada, no con la fijada (si ADM fijo otra, se avisa lo
      que guardara la base).
 
@@ -478,22 +478,30 @@ window.IniciativaAdmin = (function () {
   // Denominador: la volumetria de ESA categoria (la que ADM fijo o la
   // calculada). Lo que viaja y se guarda es el % (dbo.ProblemCategoria.
   // PctDisminucion, hasta dos decimales); los tickets solo se muestran.
-  // Redondeo (2026-10-26): SIEMPRE hacia abajo, FLOOR(vol x %), el de
-  // Tickets a reducir (ticketsDe de iniciativas.js y la propuesta sql/33
-  // de adm.usp_GestionAdmin_TicketsReduce); en enteros (centesimas de %)
-  // para no arrastrar errores de coma flotante: 7 x 9.46% = 0.66 -> 0.
-  // Tickets -> %: el menor % con dos decimales que da al menos esos
-  // tickets; si da mas (con volumetrias grandes 0.01% es mas de un ticket)
-  // se dice, no se esconde.
+  // Redondeo (2026-11-10): SIEMPRE hacia arriba, CEILING(vol x %), el de
+  // Tickets a reducir (ticketsDe de iniciativas.js, sql/84 en
+  // adm.usp_GestionAdmin_TicketsReduce y sql/85 en la foto diaria; antes FLOOR, sql/33); en enteros
+  // (centesimas de %) para no arrastrar errores de coma flotante:
+  // 7 x 9.46% = 0.66 -> 1; 30 x 50% = 15 -> 15 (exacto, no sube).
+  // Tickets -> % (dos decimales o entero): la proporcion exacta n / vol
+  // redondeada hacia abajo al paso, si con CEILING da esos mismos tickets
+  // (15 de 30 = 50%, 25 de 1000 = 2.5%, como antes); si no, el paso
+  // siguiente, el menor que da al menos esos tickets. Si da mas (con
+  // volumetrias grandes 0.01% es mas de un ticket) se dice, no se esconde.
   var MetaCategoria = {
     // vol: entero >= 0 o null; pct: texto. -> tickets enteros, o null.
     tickets: function (vol, pct) {
       if (typeof vol !== 'number' || !isFinite(vol) || vol < 0 || vol % 1) return null;
       if (vacio(pct) || FORMATO.pct(String(pct).trim())) return null;
-      return Math.floor(vol * Math.round(Number(pct) * 100) / 10000);
+      return Math.floor((vol * Math.round(Number(pct) * 100) + 9999) / 10000);
     },
     // -> { pct: texto, exacto, tickets: los que da ese % } o { error }.
-    pct: function (vol, tickets) {
+    pct: function (vol, tickets) { return MetaCategoria.deTickets(vol, tickets, 100); },
+    // Lo mismo a % ENTERO (2026-11-05; regla de deTickets): sin decimales. Lo usa "Solicitar cambios" (registro-iniciativas.js),
+    // donde solo se piden % enteros; Crear y Modificar de ADM siguen con pct.
+    pctEntero: function (vol, tickets) { return MetaCategoria.deTickets(vol, tickets, 1); },
+    // porUnidad: pasos por punto de % (100 = centesimas, 1 = enteros).
+    deTickets: function (vol, tickets, porUnidad) {
       var t = String(tickets === null || tickets === undefined ? '' : tickets).trim();
       if (t === '') return { error: '' };
       if (FORMATO.entero(t)) return { error: 'Tickets a resolver: escribe un número entero, de 0 en adelante.' };
@@ -503,8 +511,9 @@ window.IniciativaAdmin = (function () {
       if (vol === 0) return { error: 'Con volumetría 0 no hay tickets que resolver: usa el %.' };
       var n = Number(t);
       if (n > vol) return { error: n.toLocaleString('es-MX') + ' tickets es más que la volumetría (' + vol.toLocaleString('es-MX') + '): pasaría de 100%.' };
-      var centesimos = Math.ceil(n * 10000 / vol);
-      var pct = String(centesimos / 100);
+      var pasos = Math.floor(n * 100 * porUnidad / vol);
+      if (MetaCategoria.tickets(vol, String(pasos / porUnidad)) !== n) pasos += 1;
+      var pct = String(pasos / porUnidad);
       var da = MetaCategoria.tickets(vol, pct);
       return { pct: pct, exacto: da === n, tickets: da };
     }
@@ -538,9 +547,28 @@ window.IniciativaAdmin = (function () {
                  // Meta en tickets tambien para una ligada (Modificar).
                  volCalc: null, vol30: null, tickets: '', fuente: 'pct' };
       });
+      // sql/83: las que ESTUVIERON ligadas (las da el servidor, solo ADM las
+      // ve todas). Agregar una la REACTIVA: misma fila, sus fechas y su
+      // clasificacion historica no vacia. Vacia = como antes.
+      this.historicas = [];
     }
 
     fijarRutas(rutas) { this.rutas = Array.isArray(rutas) ? rutas : []; }
+
+    fijarHistoricas(lista) { this.historicas = Array.isArray(lista) ? lista : []; }
+    // La historica de esa ruta ({ categoria, tipo_iniciativa, tipo_agrupado,
+    // f_creacion, f_analisis }), o null.
+    historica(ruta) {
+      var k = llaveRuta(ruta);
+      return this.historicas.filter(function (h) { return llaveRuta(h.categoria) === k; })[0] || null;
+    }
+    // De una NUEVA que reactiva: el campo de clasificacion que ya trae la
+    // historica (no vacio: se conserva y no se elige), o ''.
+    tipoHistorico(f, campo) {
+      var h = f && !f.ligada ? this.historica(f.categoria) : null;
+      var v = h ? h[campo === 'tipo_iniciativa' ? 'tipo_iniciativa' : 'tipo_agrupado'] : '';
+      return v === null || v === undefined ? '' : String(v).trim();
+    }
 
     buscar(ruta) {
       var k = llaveRuta(ruta);
@@ -680,7 +708,7 @@ window.IniciativaAdmin = (function () {
 
     // Lo que la BASE guardara en Tickets a reducir (TicketsReduce): lo
     // calcula adm.usp_GestionAdmin_TicketsReduce sobre VolumenUltimos30
-    // (FLOOR con sql/33), no con una volumetria fijada a mano. null si no
+    // (CEILING con sql/84; antes FLOOR con sql/33), no con una volumetria fijada a mano. null si no
     // se sabe (sin vol30). Sin volumetria fijada es la misma meta mostrada.
     ticketsGuardados(f) {
       return typeof f.vol30 === 'number' ? MetaCategoria.tickets(f.vol30, f.valor) : null;
@@ -708,6 +736,8 @@ window.IniciativaAdmin = (function () {
     capturarTipo(n, campo, texto) {
       var f = this.filas[n], v = String(texto === null || texto === undefined ? '' : texto).trim();
       if (!f || f.quitada) return false;
+      // sql/83: el campo que la historica ya trae se conserva (no se elige).
+      if (!f.ligada && this.tipoHistorico(f, campo)) return false;
       if (!f.ligada && campo === 'tipo_iniciativa') f.tipoIniciativa = v;
       else if (!f.ligada && campo === 'tipo_agrupado') f.tipoAgrupado = v;
       else if (f.ligada && !f.agrup && campo === 'tipo_agrupado') f.agrupNueva = v;
@@ -728,8 +758,10 @@ window.IniciativaAdmin = (function () {
 
     // Las fechas calculadas de cada categoria nueva (solo para mostrar; no
     // viajan: el servidor las fija al guardar).
+    // sql/83: una que se reactiva conserva las suyas (no son nuevas).
     fechasNuevas() {
-      return this.filas.filter(function (f) { return !f.ligada; })
+      var self = this;
+      return this.filas.filter(function (f) { return !f.ligada && !self.historica(f.categoria); })
         .map(function (f) { return { categoria: f.categoria, f_creacion: f.fCreacion, f_analisis: f.fAnalisis }; });
     }
 
@@ -761,9 +793,18 @@ window.IniciativaAdmin = (function () {
       var enTickets = function (f) {
         return f.fuente === 'tickets' && f.valor !== '' ? ' (meta: ' + f.tickets + ' tickets)' : '';
       };
+      var self = this;
       this.filas.forEach(function (f) {
+        var h = !f.ligada ? self.historica(f.categoria) : null;
         if (f.ligada && f.quitada) {
           salida.push({ clave: 'quitar_categoria', rotulo: 'Quitar categoría', anterior: f.categoria, nuevo: '' });
+        } else if (h) {
+          // sql/83: reactiva la MISMA asociacion (sus fechas y su clasificacion).
+          var ti = self.tipoHistorico(f, 'tipo_iniciativa') || f.tipoIniciativa, ta = self.tipoHistorico(f, 'tipo_agrupado') || f.tipoAgrupado;
+          salida.push({ clave: 'agregar_categoria', rotulo: 'Reactivar categoría', anterior: '',
+                        nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%' + enTickets(f)) +
+                          (ti || ta ? ' · ' + (ti || 'sin Clasificación') + ' / ' + (ta || 'sin Agrupación') : '') +
+                          ' · conserva sus fechas (análisis ' + (h.f_analisis || 'el de la iniciativa') + ')' });
         } else if (!f.ligada) {
           salida.push({ clave: 'agregar_categoria', rotulo: 'Agregar categoría', anterior: '',
                         nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%' + enTickets(f)) +
@@ -875,6 +916,13 @@ window.IniciativaAdmin = (function () {
         return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(fechas.f_analisis)) +
           '</span> <span class="ini-origen derivado" title="Hereda la de la iniciativa (dbo.Problem.FechaAnalisis): se cambia en Fecha compromiso de Análisis">De la iniciativa</span>';
       }
+      // sql/83: la que se reactiva conserva sus fechas originales.
+      var hf = cats.historica ? cats.historica(f.categoria) : null;
+      if (hf) {
+        return '<span class="ini-cat-fecha">' + Escape.html(hf.f_analisis ? fechaCorta(hf.f_analisis) : fechaCorta(fechas.f_analisis)) + '</span>' +
+          ' <span class="ini-origen" title="Estuvo ligada' + (hf.f_creacion ? ' desde el ' + Escape.attr(fechaCorta(hf.f_creacion)) : '') +
+          ': al reactivarse conserva sus fechas originales">Original</span>';
+      }
       return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(f.fAnalisis)) + '</span>' +
         ' <span class="ini-origen derivado" title="Se liga el ' + Escape.attr(fechaCorta(f.fCreacion)) +
         ': análisis = ese día + ' + FECHAS_GESTION.diasAnalisis + ' días. La fija el servidor al guardar.">Calculada</span>';
@@ -890,8 +938,13 @@ window.IniciativaAdmin = (function () {
       if (f.quitada) return '—';
       var attr = function (campo) { return 'data-' + prefijo + '-tipo="' + n + '|' + campo + '"'; };
       if (!f.ligada) {
-        return opcionesTipo(fechas.tiposIniciativa, f.tipoIniciativa, attr('tipo_iniciativa'), 'Clasificación') + ' ' +
-          opcionesTipo(fechas.tiposAgrupado, f.tipoAgrupado, attr('tipo_agrupado'), 'Agrupación');
+        // sql/83: en una que se reactiva, el campo que la historica trae se
+        // conserva (solo lectura); el que le falta se puede elegir.
+        var hti = cats.tipoHistorico ? cats.tipoHistorico(f, 'tipo_iniciativa') : '';
+        var hta = cats.tipoHistorico ? cats.tipoHistorico(f, 'tipo_agrupado') : '';
+        var conserva = ' <span class="ini-origen" title="Clasificación histórica de la categoría: se conserva al reactivarla">Se conserva</span>';
+        return (hti ? Escape.html(hti) + conserva : opcionesTipo(fechas.tiposIniciativa, f.tipoIniciativa, attr('tipo_iniciativa'), 'Clasificación')) + ' ' +
+          (hta ? Escape.html(hta) + conserva : opcionesTipo(fechas.tiposAgrupado, f.tipoAgrupado, attr('tipo_agrupado'), 'Agrupación'));
       }
       if (f.agrup) return Escape.html(f.agrup);
       return opcionesTipo(fechas.tiposAgrupado, f.agrupNueva, attr('tipo_agrupado'), 'Agrupación') +
@@ -904,7 +957,9 @@ window.IniciativaAdmin = (function () {
       '<th scope="col">' + (porTickets ? 'Tickets a resolver' : '% Disminución') + '</th>' + (fechas ? '<th scope="col">Agrupación</th><th scope="col">Fecha de análisis</th>' : '') +
       '<th scope="col"><span class="ini-sr">Acción</span></th></tr></thead><tbody>' +
       cats.filas.map(function (f, n) {
+        var reactiva = !f.ligada && !f.quitada && cats.historica && cats.historica(f.categoria);
         var estado = f.quitada ? '<span class="ini-cat-estado">Se quitará</span>'
+          : reactiva ? '<span class="ini-cat-estado reactivar" title="Estuvo ligada a esta iniciativa y se dio de baja: se reactiva la misma asociación con sus fechas y su clasificación">Reactivar (estuvo ligada)</span>'
           : !f.ligada ? '<span class="ini-cat-estado nueva">Nueva</span>' : '';
         var pct = celdaPct(f, n);
         var boton = f.quitada
@@ -1535,7 +1590,7 @@ window.IniciativaAdmin = (function () {
       ? '<fieldset class="ini-campo ini-modo-meta"><legend>Planear la meta por</legend>' +
           radio('pct', '% de disminución') + ' ' + radio('tickets', 'Tickets a resolver') +
           '<small class="ini-motivo">Lo que escribes no cambia; el otro valor se calcula con los tickets de los últimos 30 días de cada categoría, ' +
-          'redondeando hacia abajo. Se guarda el % (dos decimales); Tickets a reducir lo calcula la base con la misma volumetría.</small></fieldset>'
+          'redondeando hacia arriba. Se guarda el % (dos decimales); Tickets a reducir lo calcula la base con la misma volumetría.</small></fieldset>'
       : '';
     return modos + htmlCategorias(ed.categorias, vol, 'edicion', { f_analisis: ed.iniciativa.f_analisis,
         tiposIniciativa: ed.listas.tiposIniciativa, tiposAgrupado: ed.listas.tiposAgrupado,

@@ -58,8 +58,9 @@
 //      regla con la que cuenta; otro clic lo quita; uno a la vez; cifras
 //      fijas; Y con Estado / Director / busqueda sin tocarlos; orden y
 //      primera pagina; Limpiar; relectura; Cobertura; la instruccion.
-//      Total (KF2T) no filtra: quita el indicador y vuelve a todas, sin
-//      tocar el Director; sin aria-pressed. Mecanica en SeleccionKpi
+//      Total (KF2T) no es indicador: quita el indicador y deja en Estado
+//      los que cuentan en el Total (sin Cerrado), sin tocar el Director;
+//      Cerradas tras Total devuelve Estado a Todos; sin aria-pressed. Mecanica en SeleccionKpi
 //      (assets/js/seleccion-kpi.js, su prueba: SeleccionKpiSmoke.js).
 //   Al cargar se ve TODO (Cerrado incluido): ya no hay vista por omision
 //   que oculte Cerrado (L0, S2-9, BV10).
@@ -1527,6 +1528,25 @@ pruebas.push(function () {
   k.fijarPct('/A/Cat 1/Hoja', '40');
   Check('SR4b agregar una ligada se rechaza', [false, true], [k.agregarCategoria('/a/cat 3').ok, /ya es una categoría de esta iniciativa/.test(k.agregarCategoria('/A/Cat 3').mensaje)]);
   Check('SR4b agregar una fuera del catalogo se rechaza', false, k.agregarCategoria('/Z/Inventada').ok);
+  // sql/83: una que ESTUVO ligada (historica, del servidor) se marca para
+  // reactivar; las mismas reglas de agregar y lo que viaja no cambia.
+  var kh = new S(reg.buscar('PRB 2026-000001'), { estados: LISTAS.estados, subestados: LISTAS.subestados, rutas: RUTAS_CAT, filas: FILAS_CAT,
+                                                   historicas: [{ categoria: '/B/Cat 4', tipo_iniciativa: 'Problem', tipo_agrupado: 'ReqOpr' }] });
+  kh.campo = 'pct'; kh.motivo = 'Reactivar';
+  var rh = kh.agregarCategoria('/B/Cat 4');
+  Check('SR83a agregar una que estuvo ligada: ok y marcada para reactivar; otra no; fuera del par se sigue rechazando', [true, true, true, false, false],
+    [rh.ok, rh.reactivar, kh.esReactivacion('/b/cat 4'), kh.esReactivacion('/A/Cat 2'), kh.agregarCategoria('/Z/Inventada').ok]);
+  kh.capturarPctNueva(0, '20');
+  Check('SR83b lo que viaja sigue siendo agregar_categoria / agregar_pct (sin accion nueva)', [['agregar_categoria', '/B/Cat 4'], ['agregar_pct', '20']],
+    kh.pares().filter(function (p) { return /^agregar_/.test(p[0]) || /reactiv/i.test(p[0]); }));
+  var capH = { iniciativas: [{ folio: 'PRB 2026-000099', activa: true, estado: 'En Solución', categorias: [{ categoria: '/B/Cat 4', pct_dism: 0.9, agrup: 'Problem' }] }],
+               agrupadores: ['Problem'], estadosActivos: ['En Solución'] };
+  var iniH = { folio: 'PRB 2026-000001', estado: 'En Solución', categorias: [] };
+  Check('SR83c tope estimado con la Agrupacion EFECTIVA: la historica ReqOpr no consume; sin historica (la del prefijo) si', [true, false],
+    [R.excedeTope(capH, iniH, '/B/Cat 4', '20', true, 'En Solución') !== null, R.excedeTope(capH, iniH, '/B/Cat 4', '20', true, 'En Solución', 'ReqOpr') !== null]);
+  var kh2 = new S(reg.buscar('PRB 2026-000001'), { rutas: RUTAS_CAT, filas: FILAS_CAT });
+  Check('SR83d sin historicas (sin la migracion): nada se marca', [true, false],
+    [!kh2.esReactivacion('/B/Cat 4'), kh2.agregarCategoria('/A/Cat 2').reactivar === true]);
   Check('SR4b agregar del catalogo', [true, '/A/Cat 2'], [k.agregarCategoria(' /a/cat 2 ').ok, k.nuevas[0].categoria]);
   Check('SR4b la misma dos veces se rechaza', [false, 1], [k.agregarCategoria('/A/Cat 2').ok, k.nuevas.length]);
   k.agregarCategoria('/B/Cat 4');
@@ -3044,7 +3064,7 @@ pruebas.push(function () {
     Check('KF1 error: sin instruccion', true, q.sel('regKpisGuia').hidden);
     var html = leer('admin/iniciativas.html');
     Check('KF1 la instruccion va justo encima de las tarjetas, sin globo', true,
-      /<p class="ini-kpis-guia" id="regKpisGuia" hidden>\s*<strong>Haz clic en un indicador para filtrar las iniciativas por esa condición\.<\/strong>\s*<span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro\.<\/span>\s*<span>Total muestra todas las iniciativas\.<\/span>\s*<\/p>\s*<div class="kpis ini-kpis" id="regKpis"/.test(html));
+      /<p class="ini-kpis-guia" id="regKpisGuia" hidden>\s*<strong>Haz clic en un indicador para filtrar las iniciativas por esa condición\.<\/strong>\s*<span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro\.<\/span>\s*<span>Total muestra las iniciativas activas \(Estado sin Cerrado\)\.<\/span>\s*<\/p>\s*<div class="kpis ini-kpis" id="regKpis"/.test(html));
     // Las tarjetas se repintan en cada clic: NO son aria-live (se releerian
     // enteras); el aviso es la cuenta de la lista, que si lo es.
     Check('KF1 tarjetas sin aria-live; #regCuenta aria-live; helper cargado antes del registro', [false, true, true],
@@ -3076,28 +3096,38 @@ pruebas.push(function () {
       Check('KF2 ' + c + ': otro clic lo quita', [CINCO, [], cifras, 0], [folios(p), pulsados(p), kpis(p), reg.filtro.activos()]);
     });
 
-    // Total: cuenta las abiertas, pero su clic no filtra. Sin nada elegido
-    // no cambia nada (ni la pagina); con algo elegido lo quita y la lista
-    // vuelve a todas (Cerradas incluidas).
+    // Total: cuenta las abiertas y su clic (2026-11-09) deja en Estado los
+    // que cuentan en el Total (todos menos Cerrado): la lista trae lo mismo
+    // que la cifra. No es un indicador (nada marcado); el Estado si cuenta
+    // como filtro. Con algo elegido, ademas, lo quita.
+    var ABIERTAS = ['PRB 2026-000001', 'REQ 2026-000004', 'MAP 2026-000002', 'PRB 2026-000005'];
     Check('KF2T la cifra de Total = las abiertas; la lista sin indicador, todas', ['4', 5], [cifras[0], CINCO.length]);
     reg.limite = 300;
     clicIndicador(p, 'total');
-    Check('KF2T Total sin nada elegido: todas, nada marcado, ningun filtro, pagina intacta',
-      [CINCO, [], '', 0, 300, cifras], [folios(p), pulsados(p), reg.filtro.indicador, reg.filtro.activos(), reg.limite, kpis(p)]);
-    reg.limite = 100;
+    Check('KF2T Total sin nada elegido: Estado sin Cerrado, la lista = la cifra, nada marcado, primera pagina',
+      [ABIERTAS, [], '', 1, 100, cifras, true, String(ABIERTAS.length)],
+      [folios(p), pulsados(p), reg.filtro.indicador, reg.filtro.activos(), reg.limite, kpis(p), reg.filtro.excluyeCerradas(), cifras[0]]);
+    Check('KF2T Estado: todos menos Cerrado', [true, false],
+      [reg.filtro.estadosMarcados().length > 0, reg.filtro.estadosMarcados().some(function (e) { return /^cerrad/i.test(e); })]);
+    clicIndicador(p, 'total');
+    Check('KF2T Total otra vez: nada cambia', [ABIERTAS, 1], [folios(p), reg.filtro.activos()]);
     clicIndicador(p, 'retrasadas');
     clicIndicador(p, 'total');
-    Check('KF2T Total con Atrasadas elegida: la quita y vuelve a todas (HAR cerrada incluida)',
-      [CINCO, [], '', true, '5 iniciativas'], [folios(p), pulsados(p), reg.filtro.indicador,
+    Check('KF2T Total con Atrasadas elegida: la quita y deja las abiertas (sin la HAR cerrada)',
+      [ABIERTAS, [], '', false, '4 Abiertas de 5 Total'], [folios(p), pulsados(p), reg.filtro.indicador,
         folios(p).indexOf('HAR 2025-000003') >= 0, p.sel('regCuenta').textContent]);
-    // Con un filtro independiente: Total quita solo el indicador.
-    elegir(p, 'regDirector', 'Dir B');
+    // Cerradas justo despues de Total: Estado vuelve a Todos (si no, vacia).
     clicIndicador(p, 'cerradas');
+    Check('KF2T Cerradas tras Total: Estado vuelve a Todos y trae la cerrada',
+      [['HAR 2025-000003'], ['cerradas'], false, 1], [folios(p), pulsados(p), reg.filtro.estados.activo(), reg.filtro.activos()]);
+    // Con un filtro independiente: el Director no se toca.
+    elegir(p, 'regDirector', 'Dir B');
     clicIndicador(p, 'total');
-    Check('KF2T Total con Director Dir B: quita el indicador, el Director sigue (Cerrada incluida)',
-      ['', 'Dir B', ['REQ 2026-000004', 'PRB 2026-000005', 'HAR 2025-000003'], '1 filtro activo'],
+    Check('KF2T Total con Director Dir B: quita el indicador, el Director sigue, sin la cerrada',
+      ['', 'Dir B', ['REQ 2026-000004', 'PRB 2026-000005'], '2 filtros activos'],
       [reg.filtro.indicador, reg.filtro.director, folios(p), p.sel('regFiltrosCuenta').textContent]);
     sinOmision(p);
+    Check('KF2T Limpiar filtros devuelve Estado a Todos', [CINCO, 0], [folios(p), reg.filtro.activos()]);
 
     clicIndicador(p, 'activas'); clicIndicador(p, 'cerradas');
     Check('KF3 elegir otro reemplaza al anterior', [['cerradas'], ['HAR 2025-000003']], [pulsados(p), folios(p)]);
@@ -3609,6 +3639,57 @@ pruebas.push(function () {
         });
       });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// MR) Modificar una solicitud de cambio (sql/41): "Solicitar cambios" con lo
+// que se pidio, el motivo de la correccion obligatorio, y el envio como
+// reemplazo (accion=reemplazar, reemplaza_a, motivo_cancelacion).
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var datos = JSON.parse(JSON.stringify(DATOS));
+  datos.estados_problem = ['En Análisis', 'En Solución', 'Cerrado'];
+  datos.persistencia_solicitudes = true;
+  var p = Pagina(ok(datos), function () { return nunca(); });
+  function accion(a) {
+    var el = Elemento('b'); el.setAttribute('data-accion', a);
+    p.sel('regDetCuerpo').disparar('click', { target: el });
+  }
+  var envios = [];
+  var original = { id: 41, folio: 'PRB 2026-000001', tipo: 'ESTADO', estado: 'PENDIENTE', estado_nuevo: 'Cerrado', campo_fecha: null,
+                   motivo: 'Se cierra', categorias_detalle: [] };
+  return esperar().then(function () {
+    p.registro.pedirSolicitud = function (url, op) {
+      var campos = {};
+      op.body.forEach(function (v, k) { campos[k] = v; });
+      envios.push({ url: url, campos: campos });
+      return Promise.resolve({ status: 200, json: function () { return Promise.resolve({ enviada: true, reemplazada: true, id_solicitud: 45, reemplaza_a: 41, repetida: false }); } });
+    };
+    Check('MR0 fuera del registro: no abre nada', false, p.registro.abrirReemplazoCambio({ id: 9, folio: 'XYZ 2099-000001', tipo: 'OTROS' }));
+    var abierta = p.registro.abrirReemplazoCambio(original);
+    var html = p.sel('regCambio').innerHTML;
+    Check('MR1 abre la iniciativa y "Modificar la solicitud #41" con el cambio pedido, el motivo y el campo del motivo de la correccion',
+      [true, 'PRB 2026-000001', true, true, 1, 'estado', 'Cerrado', true, true],
+      [abierta, p.registro.abierta, /Modificar la solicitud #41/.test(html), /id="regCambioReemplazo"/.test(html),
+       p.registro.lista.items.length, p.registro.lista.items[0].campo, p.registro.lista.items[0].propuesto,
+       /<textarea id="regCambioMotivo" rows="3">Se cierra<\/textarea>/.test(html), /id="regCambioMotivoCancelacion"/.test(html)]);
+    accion('cambio-preparar');
+    Check('MR2 sin motivo de la correccion: no se envia y lo dice', [0, true],
+      [envios.length, /motivo de la corrección/.test(p.sel('regCambioMsg').innerHTML)]);
+    p.sel('regCambioMotivoCancelacion').value = 'Me equivoque de estado';
+    accion('cambio-preparar');
+    Check('MR3 con motivo: primero revisa, y avisa que se crea otra y la #41 queda cancelada', [0, true],
+      [envios.length, /Corrige la solicitud #41/.test(p.sel('regCambioMsg').innerHTML)]);
+    accion('cambio-confirmar');
+    return esperar().then(esperar);
+  }).then(function () {
+    var e = envios[0] || { campos: {} };
+    Check('MR4 POST a accion=reemplazar: la solicitud de siempre + reemplaza_a y motivo_cancelacion; sin usuario ni rol',
+      ['../handlers/admin_iniciativas_solicitudes.ashx?accion=reemplazar', 'estado', 'Cerrado', 'Se cierra', '41', 'Me equivoque de estado', false, false],
+      [e.url, e.campos.tipo, e.campos.estado_nuevo, e.campos.motivo, e.campos.reemplaza_a, e.campos.motivo_cancelacion, 'usuario' in e.campos, 'rol' in e.campos]);
+    Check('MR5 enviada con el numero NUEVO y dice a cual corrige', [true, true],
+      [/Solicitud #45 enviada/.test(p.sel('regCambioMsg').innerHTML), /Corrige a la solicitud #41, que quedó cancelada/.test(p.sel('regCambioMsg').innerHTML)]);
   });
 });
 

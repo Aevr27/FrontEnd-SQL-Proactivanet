@@ -47,7 +47,7 @@ var GRUPOS = new Function('return ' + bloqueGrupos[1] + ';')();
 // es la resolucion del nombre, no los tableros.
 var MODULOS_FALSO = {
   sla: {}, backlog: {}, experiencia: {}, efectividad: {}, qa: {}, qare: {},
-  analisis: {}, orquestacion: {}, call: {}, tablero: {},
+  analisis: {}, concentracion: {}, orquestacion: {}, call: {}, tablero: {},
 };
 
 var ultimo = {};
@@ -89,7 +89,9 @@ Object.keys(MODULOS_FALSO).forEach(function (n) {
 });
 
 // --- grupos: #observabilidad y #calidad abren un modulo del grupo ---------
-comprobar('los dos grupos existen', Object.keys(GRUPOS).sort().join(','), 'calidad,observabilidad');
+comprobar('los tres grupos existen', Object.keys(GRUPOS).sort().join(','), 'calidad,observabilidad,servicios');
+comprobar('Servicios = Vista general de servicios + Analisis de servicios', GRUPOS.servicios.join(','), 'concentracion,analisis');
+comprobar('#servicios abre la Vista general la primera vez', resolverModulo('servicios'), 'concentracion');
 comprobar('Observabilidad = Orquestacion + Observabilidad (tablero)', GRUPOS.observabilidad.join(','), 'orquestacion,tablero');
 comprobar('Calidad de informacion = QA + QARE', GRUPOS.calidad.join(','), 'qa,qare');
 comprobar('#observabilidad abre Orquestacion la primera vez', resolverModulo('observabilidad'), 'orquestacion');
@@ -98,6 +100,8 @@ ultimo.calidad = 'qare';
 ultimo.observabilidad = 'tablero';
 comprobar('#calidad abre el ultimo visto (QARE)', resolverModulo('calidad'), 'qare');
 comprobar('#observabilidad abre el ultimo visto (Observabilidad)', resolverModulo('observabilidad'), 'tablero');
+ultimo.servicios = 'analisis';
+comprobar('#servicios abre el ultimo visto (Analisis)', resolverModulo('servicios'), 'analisis');
 Object.keys(GRUPOS).forEach(function (g) {
   comprobar('el grupo "' + g + '" no pisa una clave de MODULOS',
     Object.prototype.hasOwnProperty.call(MODULOS_FALSO, g), false);

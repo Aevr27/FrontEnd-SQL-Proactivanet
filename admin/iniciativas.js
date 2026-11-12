@@ -19,8 +19,8 @@
      Todos los campos son obligatorios. RCA: obligatorio si el tipo es el
      Problem del catalogo (tipo_problem del handler), opcional si no.
      % de disminucion: 0 a la capacidad DISPONIBLE de la Categoria
-     (admin_iniciativas_capacidad.ashx), hasta dos decimales, sin multiplos
-     obligatorios.
+     (admin_iniciativas_capacidad.ashx), en % ENTERO (2026-11-05: sin
+     decimales), sin multiplos obligatorios.
 
    DE DONDE SALE CADA COSA
    -----------------------
@@ -48,7 +48,7 @@
      disminucion de la Categoria elegida (captura) y, calculados de solo
      lectura, la Volumetria de esa categoria (VolumetriaCliente de
      admin/iniciativa-admin.js, la misma de Crear / Modificar: ultimos 30
-     dias) y los Tickets a reducir = floor(volumetria x % / 100).
+     dias) y los Tickets a reducir = ceiling(volumetria x % / 100).
    Pendiente (no se pinta como campo, ver sql/diag_admin_nueva_solicitud.sql)
      El RCA se elige y se valida, pero todavia no se guarda ni hay numero
      de solicitud con que nombrarlo. Destino FUTURO confirmado (solo
@@ -117,8 +117,11 @@ window.Iniciativas = (function () {
     titulo: 'Título', analisis: 'Descripción', descripcion: 'Descripción', observaciones: 'Observaciones',
     volumetria: 'Volumetría', pct: '% Disminución', tickets: 'Tickets a reducir', rca: 'RCA',
     // Errores que solo da el servidor (admin_iniciativas_validar.ashx).
-    solicitante: 'Solicitante', token: 'Borrador'
+    solicitante: 'Solicitante', token: 'Borrador',
+    // Modificar = reemplazo (sql/42).
+    motivo_cancelacion: 'Motivo de la corrección', reemplaza_a: 'Solicitud que corriges'
   };
+  var MAXIMO_MOTIVO_CANCELACION = 2000;   // SolicitudesIniciativa.MaximoMotivoCancelacion
 
   // ---------------------------------------------------------------------
   // Campos de captura
@@ -171,8 +174,8 @@ window.Iniciativas = (function () {
       ayuda: { texto: 'Cantidad de incidentes asociados al problema que justifican su análisis y seguimiento.',
                nota: 'Se calcula: tickets de la categoría elegida en los últimos 30 días. No se captura.' } },
     // Por categoria: dbo.ProblemCategoria.PctDisminucion es DECIMAL(9,4) y
-    // guarda FRACCION (1.0000 = 100%). Se captura en % con hasta dos
-    // decimales, que es esa misma precision. 0-100 es un tope de la
+    // guarda FRACCION (1.0000 = 100%). Se captura en % ENTERO (2026-11-05:
+    // sin decimales; la columna no cambia: 20 -> 0.2000). 0-100 es un tope de la
     // pantalla, no de la base (no tiene CHECK); los multiplos de 5 no se
     // exigen porque no estan verificados.
     { clave: 'pct', etiqueta: '% Disminución de tickets vs categoría', control: 'porcentaje', seccion: 'impacto',
@@ -180,8 +183,8 @@ window.Iniciativas = (function () {
       reiniciaConCascada: true, requiereCategoria: true },
     // La meta se escribe en % O en tickets: el que se escribio manda
     // (SolicitudNueva.metaPor) y el otro se calcula con la volumetria de la
-    // categoria. % -> tickets: floor(volumetria x % / 100), ticket entero
-    // (ticketsDe). Tickets -> %: pctDeTickets, a dos decimales. Solo viaja
+    // categoria. % -> tickets: ceiling(volumetria x % / 100), ticket entero
+    // (ticketsDe). Tickets -> %: pctDeTickets, a % entero. Solo viaja
     // el % (el validador no tiene campo de tickets) y el Tickets Reduce del
     // registro sigue saliendo de dbo.ExpTicketsReduce con su ventana movil.
     { clave: 'tickets', etiqueta: 'Tickets a reducir', control: 'meta-tickets', seccion: 'impacto',
@@ -202,37 +205,52 @@ window.Iniciativas = (function () {
     entero: function (v) {
       return v === '' || /^\d+$/.test(v) ? '' : 'Escribe un número entero, de 0 en adelante.';
     },
+    // Lo que se CAPTURA: % entero de 0 a 100, sin decimales (2026-11-05).
     porcentaje: function (v) {
       if (v === '') return '';
-      return /^\d{1,3}(\.\d{1,2})?$/.test(v) && Number(v) <= 100 ? ''
-        : 'Escribe un porcentaje entre 0 y 100, con hasta dos decimales.';
+      return /^\d{1,3}$/.test(v) && Number(v) <= 100 ? ''
+        : 'Escribe un porcentaje entero entre 0 y 100, sin decimales.';
     }
   };
 
+  // Lo que se CAPTURA es un % entero (VALIDAR.porcentaje); lo GUARDADO (la
+  // base, o una solicitud de antes) puede traer hasta dos decimales, la
+  // precision de DECIMAL(9,4) en fraccion. fraccionDe y ticketsDe aceptan
+  // lo guardado: ADM revisa solicitudes historicas con ticketsDe
+  // (solicitudes-nuevas.js, solicitudes-cambio.js; sus pruebas sacan
+  // ticketsDe del archivo por llaves, por eso la regla va dentro).
+
   // El % capturado como lo guarda ProblemCategoria.PctDisminucion
-  // (fraccion, 4 decimales), o null si no es valido.
+  // (fraccion, 4 decimales), o null si no es valido. Acepta un % guardado
+  // (hasta dos decimales); que lo capturado sea entero lo dice VALIDAR.
   function fraccionDe(pct) {
-    if (pct === '' || VALIDAR.porcentaje(pct)) return null;
+    if (pct === '' || !/^\d{1,3}(\.\d{1,2})?$/.test(pct) || Number(pct) > 100) return null;
     return Math.round(Number(pct) * 100) / 10000;
   }
 
-  // Tickets a reducir: floor(volumetria x pct / 100) a ticket entero,
-  // SIEMPRE hacia abajo (2026-10-26; el FLOOR de la propuesta sql/33 para
-  // adm.usp_GestionAdmin_TicketsReduce). En centesimas de % y con enteros,
-  // para no redondear flotantes: 1247 x 12.5% = 155.875 -> 155; 7 x 9.46%
-  // = 0.66 -> 0. null si falta o no vale alguno.
+  // Tickets a reducir: ceiling(volumetria x pct / 100) a ticket entero,
+  // SIEMPRE hacia arriba (2026-11-10; antes FLOOR, 2026-10-26, y antes
+  // ROUND; el CEILING de sql/84 en adm.usp_GestionAdmin_TicketsReduce y de
+  // sql/85 en la foto diaria; regla del negocio: un ticket fraccionario se
+  // atiende, 7 x 99% = 7). En centesimas de % y con enteros,
+  // para no redondear flotantes: 1247 x 12.5% = 155.875 -> 156; 7 x 9.46%
+  // = 0.66 -> 1; 120 x 20% = 24 -> 24 (exacto, no sube). null si falta o
+  // no vale alguno.
   function ticketsDe(volumetria, pct) {
     if (typeof volumetria !== 'number' || !isFinite(volumetria) || volumetria < 0 || volumetria % 1) return null;
     pct = String(pct === null || pct === undefined ? '' : pct).trim();
-    if (pct === '' || VALIDAR.porcentaje(pct)) return null;
-    return Math.floor(volumetria * Math.round(Number(pct) * 100) / 10000);
+    if (pct === '' || !/^\d{1,3}(\.\d{1,2})?$/.test(pct) || Number(pct) > 100) return null;
+    return Math.floor((volumetria * Math.round(Number(pct) * 100) + 9999) / 10000);
   }
 
-  // Tickets a reducir -> el menor % con dos decimales que da al menos esos
-  // tickets con ticketsDe (la misma
-  // regla que MetaCategoria.pct de Crear, admin/iniciativa-admin.js). Con
-  // volumetrias grandes 0.01% es mas de un ticket: exacto dice si ese % da
-  // los mismos tickets. -> { pct, exacto, tickets } o { error } ('' = vacio).
+  // Tickets a reducir -> % ENTERO con ticketsDe (la regla de
+  // MetaCategoria.deTickets de admin/iniciativa-admin.js, a % entero:
+  // MetaCategoria.pctEntero). Con CEILING (2026-11-10): la proporcion
+  // exacta n x 100 / vol redondeada hacia abajo, si con ella ticketsDe da
+  // esos mismos tickets (15 de 30 = 50%, como antes); si no da, el
+  // siguiente, el menor que da al menos esos tickets. 1% puede ser mas de
+  // un ticket: exacto dice si ese % da los mismos tickets.
+  // -> { pct, exacto, tickets } o { error } ('' = vacio).
   function pctDeTickets(volumetria, tickets) {
     var t = String(tickets === null || tickets === undefined ? '' : tickets).trim();
     if (t === '') return { error: '' };
@@ -246,7 +264,8 @@ window.Iniciativas = (function () {
       return { error: n.toLocaleString('es-MX') + ' tickets es más que la volumetría (' +
         volumetria.toLocaleString('es-MX') + '): pasaría de 100%.' };
     }
-    var pct = String(Math.ceil(n * 10000 / volumetria) / 100);
+    var base = Math.floor(n * 100 / volumetria);
+    var pct = String(ticketsDe(volumetria, String(base)) === n ? base : base + 1);
     var da = ticketsDe(volumetria, pct);
     return { pct: pct, exacto: da === n, tickets: da };
   }
@@ -386,6 +405,32 @@ window.Iniciativas = (function () {
       this.rca = null;         // el File elegido (no se sube a ningun lado)
       // Un borrador = un token: reenviarlo no crea otra solicitud.
       this.token = nuevoToken();
+      // MODIFICAR (sql/42): { numero, texto } de la solicitud ENVIADA que
+      // este borrador corrige (null = solicitud nueva) y por que se cancela.
+      this.reemplazo = null;
+      this.motivoCancelacion = '';
+    }
+
+    // Modificar: el borrador con lo que se envio en la solicitud guardada d
+    // (el detalle de Mis solicitudes). Pasa por las MISMAS reglas que la
+    // captura: lo que hoy no este en el catalogo (tipo, PO, SO, categoria)
+    // no se elige y se devuelve en la lista (hay que volver a elegirlo). El
+    // RCA no se guardo: hay que adjuntarlo otra vez si el tipo lo pide.
+    prellenar(d) {
+      var faltan = [];
+      this.reemplazo = { numero: d.numero, texto: d.numero_texto || ('#' + d.numero) };
+      this.motivoCancelacion = '';
+      if (!d.tipo || !this.elegirTipo(d.tipo)) { faltan.push('tipo'); return faltan; }
+      var niveles = [d.po, d.so, d.categoria], claves = ['po', 'so', 'categoria'];
+      for (var n = 0; n < niveles.length; n++) {
+        if (!niveles[n] || !this.elegir(n, niveles[n])) { for (var k = n; k < claves.length; k++) faltan.push(claves[k]); break; }
+      }
+      var self = this;
+      [['titulo', d.titulo], ['analisis', d.descripcion], ['observaciones', d.observaciones]].forEach(function (x) {
+        if (x[1] !== null && x[1] !== undefined) self.capturar(x[0], String(x[1]));
+      });
+      if (d.pct !== null && d.pct !== undefined && d.pct !== '' && this.categoria()) this.capturar('pct', String(d.pct));
+      return faltan;
     }
 
     camposTipo() {
@@ -441,11 +486,12 @@ window.Iniciativas = (function () {
 
     fallaCapacidad(cat) { return this.fijarCapacidad(cat, null); }
 
-    // Lo maximo que se puede pedir, en % con dos decimales, o null si no se
-    // sabe todavia.
+    // Lo maximo que se puede pedir, en % ENTERO (el disponible hacia
+    // abajo: con 33.33% disponible se puede pedir hasta 33%), o null si no
+    // se sabe todavia.
     maxPct() {
       var c = this.capacidad;
-      return c && c.estado === 'lista' && c.determinable ? Math.round(c.disponible * 10000) / 100 : null;
+      return c && c.estado === 'lista' && c.determinable ? Math.floor(Math.round(c.disponible * 10000) / 100) : null;
     }
 
     // ---- volumetria de la categoria ----
@@ -486,7 +532,7 @@ window.Iniciativas = (function () {
       return v.estado === 'ok' && typeof v.valor === 'number' && isFinite(v.valor) && v.valor >= 0 ? Math.round(v.valor) : null;
     }
 
-    // floor(volumetria x % / 100), o null si falta la volumetria o el % no
+    // ceiling(volumetria x % / 100), o null si falta la volumetria o el % no
     // es valido (formato o capacidad: error('pct')).
     ticketsReducir() {
       var pct = String(this.valores.pct === undefined ? '' : this.valores.pct).trim();
@@ -519,12 +565,12 @@ window.Iniciativas = (function () {
         if (r.error === '') return 'Escribe los tickets o el % de disminución: el otro se calcula.';
         if (r.error !== undefined) return r.error;
         return '≈ ' + r.pct + '% de ' + this.volumetria().toLocaleString('es-MX') +
-          (r.exacto ? '' : ' · con 2 decimales son ' + r.tickets.toLocaleString('es-MX') + ' tickets') + '.';
+          (r.exacto ? '' : ' · con % entero son ' + r.tickets.toLocaleString('es-MX') + ' tickets') + '.';
       }
       var pct = String(this.valores.pct === undefined ? '' : this.valores.pct).trim();
       if (pct === '') return 'Escribe el % de disminución o los tickets: el otro se calcula.';
       if (this.error('pct')) return 'Corrige el % de disminución para calcularlo.';
-      return 'Volumetría × % ÷ 100, redondeado hacia abajo a ticket entero.';
+      return 'Volumetría × % ÷ 100, redondeado hacia arriba a ticket entero.';
     }
 
     // Lo que muestra la casilla de tickets: lo escrito, o los que da el %.
@@ -606,6 +652,7 @@ window.Iniciativas = (function () {
         if (String(self.valores[c.clave] === undefined ? '' : self.valores[c.clave]).trim() === '') faltan.push(c.clave);
       });
       if (this.rcaObligatorio() && !this.rca) faltan.push('rca');
+      if (this.reemplazo && !String(this.motivoCancelacion || '').trim()) faltan.push('motivo_cancelacion');
       return faltan;
     }
 
@@ -620,8 +667,12 @@ window.Iniciativas = (function () {
         if (k === 'pct' && self.metaPor === 'tickets') {
           return { campo: 'tickets', mensaje: self.error('tickets') || 'Falta ' + ROTULOS.tickets + ' o ' + ROTULOS.pct + '.' };
         }
+        if (k === 'motivo_cancelacion') return { campo: k, mensaje: 'Explica por qué corriges la solicitud ' + self.reemplazo.texto + '.' };
         return { campo: k, mensaje: k === 'rca' ? 'El RCA es obligatorio para Problem.' : 'Falta ' + ROTULOS[k] + '.' };
       });
+      if (this.reemplazo && String(this.motivoCancelacion || '').trim().length > MAXIMO_MOTIVO_CANCELACION) {
+        errores.push({ campo: 'motivo_cancelacion', mensaje: 'El motivo de la corrección no puede pasar de 2000 caracteres.' });
+      }
       ['volumetria', 'pct', 'tickets'].forEach(function (k) {
         var e = self.error(k);
         if (k === 'pct' && self.metaPor === 'tickets') return;   // lo dice 'tickets'
@@ -639,12 +690,18 @@ window.Iniciativas = (function () {
     camposEnvio() {
       var v = this.valores, sel = this.cascada.seleccion;
       var max = this.maxPct(), vol = this.volumetria();
-      return {
+      var campos = {
         tipo: this.tipo, po: sel[0] || '', so: sel[1] || '', categoria: sel[2] || '',
         titulo: v.titulo || '', descripcion: v.analisis || '', observaciones: v.observaciones || '',
         volumetria: vol === null ? '' : String(vol), pct: String(v.pct || '').trim(),
         disponible_cliente: max === null ? '' : String(max), token: this.token
       };
+      // Modificar (sql/42): el servidor reemplaza a esa solicitud.
+      if (this.reemplazo) {
+        campos.reemplaza_a = String(this.reemplazo.numero);
+        campos.motivo_cancelacion = String(this.motivoCancelacion || '').trim();
+      }
+      return campos;
     }
 
     estado() {
@@ -770,6 +827,28 @@ window.Iniciativas = (function () {
 
   function enfocar(el) { if (el && typeof el.focus === 'function') el.focus(); }
 
+  // Abre el detalle de una iniciativa (#regDetalle, panel fijo de la pagina)
+  // SIN cambiar de pestaña, con abrirDesdeLista del registro (pregunta si
+  // hay cambios sin guardar; el foco vuelve a origen al cerrar). Solo abre
+  // lo que el registro cargado ya trae para esta cuenta: no pide nada nuevo
+  // al servidor ni salta permisos.
+  // -> { estado, mensaje } con estado:
+  //    'abierta'      se abrio (o ya estaba abierta);
+  //    'conservada'   habia cambios sin guardar y no se descartaron;
+  //    'sin_registro' el registro de Iniciativas no se ha cargado;
+  //    'no_encontrada' no existe en el registro o esta cuenta no la ve.
+  // mensaje: texto plano para la lista que hizo clic ('' si no hay que avisar).
+  function abrirIniciativaAqui(reg, folio, origen) {
+    var f = folio === null || folio === undefined ? '' : String(folio).trim();
+    if (!reg || typeof reg.abrirDesdeLista !== 'function' || !reg.registro) {
+      return { estado: 'sin_registro', mensaje: 'El registro de Iniciativas todavía no se carga: no se puede abrir ' + (f || 'la iniciativa') + '. Intenta en un momento.' };
+    }
+    if (!f || !reg.registro.buscar(f)) {
+      return { estado: 'no_encontrada', mensaje: 'No se encontró la iniciativa ' + (f || '') + ' en el registro o tu cuenta no tiene acceso a ella.' };
+    }
+    return reg.abrirDesdeLista(f, origen || null) ? { estado: 'abierta', mensaje: '' } : { estado: 'conservada', mensaje: '' };
+  }
+
   class PaginaIniciativas {
     constructor(doc) {
       this.doc = doc;
@@ -784,6 +863,7 @@ window.Iniciativas = (function () {
       this.cola = null;       // ColaSolicitudes (admin/solicitudes-cambio.js): cola de ADM
       this.nuevas = null;     // RegistroSolicitudesNuevas (admin/solicitudes-nuevas.js): solo lectura, ADM
       this.mias = null;       // MisSolicitudes (admin/solicitudes-nuevas.js): las propias, quien no es ADM
+      this.misCambios = null; // MisCambios (admin/solicitudes-cambio.js): las de cambio propias, quien no es ADM
       this.recientes = null;  // VistaCambiosRecientes (admin/cambios-recientes.js): solo ADM
       this.avisos = null;     // VistaAvisosAcuse (admin/acuse-iniciativa.js): avisos de PO/SO, solo ADM
       this.avisoSol = null;   // Aviso (admin/aviso-solicitudes.js): rojo en la pestaña Solicitudes, solo ADM
@@ -816,6 +896,7 @@ window.Iniciativas = (function () {
       if (this.nuevas) this.nuevas.fijarRol(this.rol);
       if (this.avisoSol) this.avisoSol.fijarRol(this.rol);
       if (!this.puedeSolicitar && this.mias) this.mias.ocultar();
+      if (!this.puedeSolicitar && this.misCambios) this.misCambios.ocultar();
       if ((VISTAS_SOLO_ADM[this.vista] && this.rol !== 'ADM') ||
           ((this.vista === 'nueva' || this.vista === 'solicitudes') && !this.puedeSolicitar)) {
         this.mostrarVista('iniciativas');
@@ -839,6 +920,10 @@ window.Iniciativas = (function () {
         if (adm) this.mias.ocultar();
         else this.mias.abrir();
       }
+      if (this.misCambios) {
+        if (adm) this.misCambios.ocultar();
+        else this.misCambios.abrir();
+      }
     }
 
     // Sin cuenta que pueda ver el registro (admin_sesion: registro false, o
@@ -854,6 +939,7 @@ window.Iniciativas = (function () {
       this.rol = null;
       this.puedeSolicitar = false;
       if (this.mias) this.mias.ocultar();
+      if (this.misCambios) this.misCambios.ocultar();
       if (this.avisoSol) this.avisoSol.fijarRol(null);
       if (mensaje && this.$('iniDenegadoTexto')) this.$('iniDenegadoTexto').textContent = mensaje;
       if (this.registro && this.registro.fijarRol) this.registro.fijarRol(null);
@@ -968,10 +1054,8 @@ window.Iniciativas = (function () {
         this.registro.acuse = new window.AcuseIniciativa.AcuseDetalle(this.doc, null, clienteAcuse);
         this.avisos = new window.AcuseIniciativa.VistaAvisosAcuse(this.doc, null,
           function () { return regAcuse ? regAcuse.registro : null; },
-          function (folio) {
-            self.mostrarVista('iniciativas');
-            if (self.vista === 'iniciativas') regAcuse.abrirDesdeLista(folio);
-          }, clienteAcuse);
+          // El Codigo abre el detalle SIN cambiar de pestaña (como Cambios recientes).
+          function (folio, origen) { return abrirIniciativaAqui(regAcuse, folio, origen); }, clienteAcuse);
       }
       // Cola de ADM de "Solicitar cambios" (pestaña Solicitudes). Clasificar
       // usa los valores que ya existen (del registro); aplicar relee el
@@ -984,16 +1068,20 @@ window.Iniciativas = (function () {
         });
         this.cola.alCambiarIniciativa = function () { if (regCola && regCola.actualizar) regCola.actualizar(); };
         // El Codigo de la lista abre el mismo detalle de Iniciativas que
-        // Cambios recientes (abrirDesdeLista: pregunta si hay cambios sin guardar).
+        // Cambios recientes (abrirDesdeLista: pregunta si hay cambios sin guardar),
+        // pero SIN cambiar de pestaña: #regDetalle es un panel fijo de la
+        // pagina, fuera de los paneles de pestaña, asi que se abre encima de
+        // Solicitudes y al cerrarlo se sigue en la cola. El foco vuelve al
+        // boton del Codigo (origen).
         // Fuera del registro cargado: false y la fila abre la solicitud, como antes.
         if (regCola && regCola.abrirDesdeLista) {
-          this.cola.alVerIniciativa = function (folio) {
-            if (!regCola.registro || !regCola.registro.buscar(folio)) return false;
-            self.mostrarVista('iniciativas');
-            if (self.vista === 'iniciativas') regCola.abrirDesdeLista(folio);
-            return true;
+          this.cola.alVerIniciativa = function (folio, origen) {
+            var e = abrirIniciativaAqui(regCola, folio, origen).estado;
+            return e === 'abierta' || e === 'conservada';
           };
         }
+        // Mis solicitudes de cambio (misma pestana): las propias, para quien no es ADM.
+        if (window.SolicitudesCambioCola.MisCambios) this.misCambios = new window.SolicitudesCambioCola.MisCambios(this.doc, null);
       }
       // "Nuevas" (misma pestaña): registro de solo lectura de sql/29. Al
       // volver a "De cambio" se relee esa cola, como al abrir la pestaña.
@@ -1004,6 +1092,28 @@ window.Iniciativas = (function () {
         // Mis solicitudes (misma pestaña): las propias, para quien no es ADM.
         if (window.SolicitudesNuevas.MisSolicitudes) this.mias = new window.SolicitudesNuevas.MisSolicitudes(this.doc, null);
       }
+      // La referencia a la iniciativa ligada (el Codigo de la aprobada en
+      // Iniciativas / Mis solicitudes, el de Mis solicitudes de cambio y el
+      // del Historial de peticiones) abre el MISMO detalle que el Codigo de
+      // la cola de cambios, sin cambiar de pestaña. Fuera del registro
+      // cargado (no existe o esta cuenta no la ve): la lista avisa con el
+      // mensaje que se devuelve.
+      var regRef = this.registro;
+      var verRef = function (folio, origen) { return abrirIniciativaAqui(regRef, folio, origen); };
+      [this.nuevas, this.mias, this.misCambios].forEach(function (l) { if (l) l.alVerIniciativa = verRef; });
+      this.verReferencia = verRef;
+      // MODIFICAR (sql/41 / sql/42): la solicitud propia abre su formulario
+      // con lo que se envio; al enviar se reemplaza. Iniciativas: Nueva
+      // solicitud (este modulo). Cambios: "Solicitar cambios" del detalle de
+      // la iniciativa (registro), sin cambiar de pestaña.
+      var pagina = this;
+      var abrirIni = function (d) { return pagina.modificarSolicitud(d); };
+      if (this.mias) this.mias.alModificar = abrirIni;
+      if (this.nuevas) this.nuevas.alModificar = abrirIni;
+      var regMod = this.registro;
+      var abrirCambio = function (d) { return !!(regMod && regMod.abrirReemplazoCambio && regMod.abrirReemplazoCambio(d)); };
+      if (this.misCambios) this.misCambios.alModificar = abrirCambio;
+      if (this.cola) this.cola.alModificar = abrirCambio;
       // Aviso rojo de la pestaña Solicitudes (solo ADM; empieza con
       // fijarRol). Abrir el detalle de una pendiente la marca vista para
       // ESTE ADM; aplicar / aprobar / rechazar lo relee.
@@ -1017,7 +1127,10 @@ window.Iniciativas = (function () {
         if (this.nuevas) {
           this.nuevas.alVerSolicitud = function (d) { aviso.marcar('NUEVA', d.numero, d.estado); };
           this.nuevas.alRevisar = releer;
+          // Cancelar una suya (sql/42): tambien relee el aviso.
+          this.nuevas.alCancelar = releer;
         }
+        if (this.cola) this.cola.alCancelar = releer;
         // Si la sesion ya respondio antes de iniciar().
         if (this.rol) aviso.fijarRol(this.rol);
       }
@@ -1027,12 +1140,22 @@ window.Iniciativas = (function () {
       // (puedeRefrescar: visible, sin detalle abierto ni nadie escribiendo).
       // El registro de Iniciativas va con el suyo (abajo); Administracion no.
       if (window.RefrescoAuto) {
-        var listas = [this.cola, this.nuevas, this.mias].filter(function (l) { return l && l.puedeRefrescar; });
-        var visible = function () { return listas.filter(function (l) { return l.puedeRefrescar(); })[0] || null; };
+        // Quien no es ADM ve dos listas a la vez (Mis solicitudes de
+        // iniciativa y de cambio): se releen las visibles; un 401 / 403 de
+        // cualquiera detiene el refresco. ADM ve una sola (Cambios o Iniciativas).
+        var listas = [this.cola, this.nuevas, this.mias, this.misCambios].filter(function (l) { return l && l.puedeRefrescar; });
+        var visibles = function () { return listas.filter(function (l) { return l.puedeRefrescar(); }); };
         this.refresco = new window.RefrescoAuto({
           doc: this.doc,
-          puede: function () { return !!visible(); },
-          refrescar: function () { var l = visible(); return l ? l.refrescarFondo() : Promise.resolve(null); }
+          puede: function () { return visibles().length > 0; },
+          refrescar: function () {
+            var v = visibles();
+            if (!v.length) return Promise.resolve(null);
+            return Promise.all(v.map(function (l) { return l.refrescarFondo(); })).then(function (estados) {
+              for (var i = 0; i < estados.length; i++) if (estados[i] === 401 || estados[i] === 403) return estados[i];
+              return estados[0];
+            });
+          }
         }).iniciar();
         // Y el registro de Iniciativas (fechas, estados, tickets de cada
         // PRB): cada RefrescoAuto.INTERVALO_DATOS, solo con la lista a la
@@ -1048,17 +1171,17 @@ window.Iniciativas = (function () {
         }
       }
       // Cambios recientes (pestaña Administracion, solo ADM). Titulo y estado
-      // del registro ya cargado; "Ver" abre el mismo detalle de Iniciativas
-      // (abrirDesdeLista: pregunta si hay cambios sin guardar) y "Actualizar
-      // registro" usa actualizar(), que conserva filtros, busqueda y orden.
+      // del registro ya cargado; el Codigo abre el mismo detalle de
+      // Iniciativas con abrirIniciativaAqui (abrirDesdeLista: pregunta si
+      // hay cambios sin guardar; el foco vuelve al Codigo al cerrar) SIN
+      // cambiar de pestaña: el detalle es un panel fijo de la pagina y se
+      // abre encima de Administracion. "Actualizar registro" usa
+      // actualizar(), que conserva filtros, busqueda y orden.
       if (window.CambiosRecientes) {
         var regRec = this.registro;
         this.recientes = new window.CambiosRecientes.VistaCambiosRecientes(this.doc, null,
           function () { return regRec ? regRec.registro : null; },
-          function (folio) {
-            self.mostrarVista('iniciativas');
-            if (self.vista === 'iniciativas') regRec.abrirDesdeLista(folio);
-          },
+          function (folio, origen) { return abrirIniciativaAqui(regRec, folio, origen); },
           function () { return regRec.actualizar(); });
       }
       // Historial de peticiones (pestaña Administracion, solo ADM): solo
@@ -1075,6 +1198,7 @@ window.Iniciativas = (function () {
             self.cola.verDetalle(id);
           }
         });
+        this.historial.alVerIniciativa = verRef;
       }
       if (window.IniciativaAdmin) {
         // La volumetria (GET) va por el mismo fetch de la pagina; la
@@ -1448,7 +1572,7 @@ window.Iniciativas = (function () {
       } else if (campo.control === 'entero') {
         control = '<input type="number"' + dato + describe + ' inputmode="numeric" min="0" step="1" value="' + Escape.attr(v) + '">';
       } else if (campo.control === 'porcentaje') {
-        control = '<div class="ini-pct"><input type="number"' + dato + describe + ' inputmode="decimal" min="0" max="100" step="0.01"' +
+        control = '<div class="ini-pct"><input type="number"' + dato + describe + ' inputmode="numeric" min="0" max="100" step="1"' +
           (campo.requiereCategoria && !(this.solicitud && this.solicitud.categoria()) ? ' disabled' : '') +
           ' value="' + Escape.attr(v) + '"><span class="ini-pct-sufijo" aria-hidden="true">%</span></div>';
       } else {
@@ -1508,6 +1632,60 @@ window.Iniciativas = (function () {
         self.solicitud.elegirRca(archivos && archivos.length ? archivos[0] : null);
       });
       this.$('btnValidar').addEventListener('click', function () { self.validar(); });
+      // Modificar (sql/42): el motivo de la correccion y descartarla.
+      if (this.$('iniMotivoCancelacion')) {
+        this.$('iniMotivoCancelacion').addEventListener('input', function (e) {
+          if (self.solicitud) self.solicitud.motivoCancelacion = e.target.value || '';
+        });
+      }
+      if (this.$('iniReemplazoDescartar')) {
+        this.$('iniReemplazoDescartar').addEventListener('click', function () {
+          self.nuevoBorrador();
+          self.$('iniResultado').hidden = true;
+        });
+      }
+    }
+
+    // MODIFICAR (sql/42): Nueva solicitud con lo que se envio en d (una
+    // ENVIADA de esta cuenta). Al enviar, el servidor la reemplaza (otra
+    // solicitud con otro numero; la original queda cancelada) con las MISMAS
+    // reglas que un envio nuevo. -> false si el formulario no esta listo.
+    modificarSolicitud(d) {
+      if (!d || !d.numero || !this.solicitud || this.puedeSolicitar !== true) return false;
+      this.mostrarVista('nueva');
+      if (this.vista !== 'nueva') return false;
+      var s = new SolicitudNueva(this.solicitud.catalogo);
+      var faltan = s.prellenar(d);
+      this.solicitud = s;
+      if (this.$('campoRca')) this.$('campoRca').value = '';
+      this.$('iniResultado').hidden = true;
+      this.pintarCamposComunes();
+      this.pintarCamposTipo();
+      this.pintar();
+      this.actualizarCapacidad();
+      this.actualizarVolumen();
+      this.pintarReemplazo(faltan);
+      enfocar(this.$('iniMotivoCancelacion') || this.$('iniNuevaTitulo'));
+      return true;
+    }
+
+    // El aviso de "estas corrigiendo #N" (oculto en una solicitud nueva).
+    pintarReemplazo(faltan) {
+      var caja = this.$('iniReemplazo'), s = this.solicitud;
+      if (!caja) return;
+      var r = s && s.reemplazo;
+      caja.hidden = !r;
+      if (!r) return;
+      this.$('iniReemplazoTexto').innerHTML = 'Corriges la solicitud <strong>' + Escape.html(r.texto) + '</strong>: abajo están sus datos. ' +
+        'Al enviar se crea una solicitud <strong>nueva</strong> (otro número; ADM la revisa desde el principio) y la ' + Escape.html(r.texto) +
+        ' queda <strong>cancelada</strong>. Su historial se conserva.' +
+        (faltan && faltan.length
+          ? '<span class="ini-sub">Vuelve a elegir: ' + faltan.map(function (k) { return Escape.html(ROTULOS[k] || k); }).join(', ') +
+            ' (lo que se envió ya no está en el catálogo).</span>'
+          : '') +
+        (s.rcaObligatorio() ? '<span class="ini-sub">Adjunta otra vez el RCA: el archivo no se guardó.</span>' : '');
+      var m = this.$('iniMotivoCancelacion');
+      if (m) m.value = s.motivoCancelacion || '';
     }
 
     // Primero lo que el navegador ya sabe (faltantes, formatos); si pasa, el
@@ -1545,7 +1723,9 @@ window.Iniciativas = (function () {
               self.mostrarResultado(json.valida, guardada
                 ? (json.nuevo === false
                     ? 'Esta solicitud ya estaba guardada con el número ' + json.numero_solicitud + '. No se creó otra.'
-                    : 'Solicitud guardada. Número de solicitud: ' + json.numero_solicitud + '.') + self.textoDestinatarios(json)
+                    : 'Solicitud guardada. Número de solicitud: ' + json.numero_solicitud + '.') +
+                  (typeof json.reemplaza_a === 'string' && json.reemplaza_a
+                    ? ' Corrige a la solicitud ' + json.reemplaza_a + ', que quedó cancelada.' : '') + self.textoDestinatarios(json)
                 : json.valida
                   ? 'La solicitud pasó la validación del servidor. No se guardó: el guardado de solicitudes todavía no está habilitado.'
                   : 'El servidor rechazó la solicitud:', Array.isArray(json.errores) ? json.errores : []);
@@ -1584,6 +1764,7 @@ window.Iniciativas = (function () {
       this.pintarCamposComunes();
       this.pintarCamposTipo();
       this.pintar();
+      this.pintarReemplazo(null);
     }
 
     // valida: true / false / null (en curso). errores: [{campo, mensaje}].
@@ -1706,6 +1887,7 @@ window.Iniciativas = (function () {
     ticketsDe: ticketsDe,
     pctDeTickets: pctDeTickets,
     nuevoToken: nuevoToken,
+    abrirIniciativaAqui: abrirIniciativaAqui,
     DEFINICIONES_TIPO: DEFINICIONES_TIPO,
     CatalogoIniciativas: CatalogoIniciativas,
     CascadaOrganizacional: CascadaOrganizacional,

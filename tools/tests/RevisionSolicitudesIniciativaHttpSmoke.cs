@@ -462,6 +462,28 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
         Check("S5 'Cambios' no conoce la revision nueva", "False|False",
               cambio.Contains("RevisionSolicitudesIniciativa") + "|" + cambio.Contains("solicitudes_nuevas_revision"));
 
+        // ---------------- K: quien la envio la cancelo o reemplazo (sql/42) ----------------
+        RevisionSolicitudesIniciativa.Revisor = rev; RevisionSolicitudesIniciativa.ValidarAlta = Validar; RegistroSolicitudesIniciativa.Lector = lector;
+        rev.Llamadas.Clear(); rev.Lanza = null; rev.Hay = true; rev.Crea = true; lector.Existe = true; validaciones = 0; validacionLanza = null; validacionError = null;
+        lector.Estado = "CANCELADA";
+        cuerpo = Revisar("POST", "accion=aprobar", ADM, F("numero", "1", "estado", ""), out st);
+        j = Json(cuerpo);
+        Check("K1 aprobar una CANCELADA: 409 SolicitudCancelada sin validar ni llamar a AprobarYCrear", "409|SolicitudCancelada|False|0|False",
+              st + "|" + Campo(j, "tipo") + "|" + Campo(j, "aprobada") + "|" + validaciones + "|" + rev.Llamadas.Exists(x => x.StartsWith("aprobarycrear")));
+        // Carrera: la base (51412) llega porque la cancelaron en ese momento.
+        rev.Llamadas.Clear();
+        rev.Lanza = new ErrorRevisionSolicitudIniciativa(51412, "La solicitud ya fue aprobada o rechazada.");
+        cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "1", "comentario", "no"), out st);
+        j = Json(cuerpo);
+        Check("K2 rechazar y la base dice 51412 porque esta CANCELADA: 409 SolicitudCancelada (no 'ya revisada')", "409|SolicitudCancelada|False|True",
+              st + "|" + Campo(j, "tipo") + "|" + Campo(j, "rechazada") + "|" + (Convert.ToString(Campo(j, "error")).IndexOf("cancel", StringComparison.Ordinal) > 0));
+        lector.Estado = "APROBADA";
+        cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "1", "comentario", "no"), out st);
+        Check("K3 51412 de una APROBADA: el de siempre (YaRevisada)", "409|YaRevisada", st + "|" + Campo(Json(cuerpo), "tipo"));
+        lector.Estado = "ENVIADA"; rev.Lanza = null;
+        cuerpo = Revisar("POST", "accion=cancelar", ADM, F("numero", "1", "motivo", "x"), out st);
+        Check("K4 este handler no cancela (solo aprobar / rechazar)", "400|AccionDesconocida", st + "|" + Campo(Json(cuerpo), "tipo"));
+
         Console.WriteLine(fallos == 0 ? "OK: todo paso (" + pasados + ")" : "FALLOS: " + fallos);
         return fallos == 0 ? 0 : 1;
     }

@@ -201,7 +201,8 @@ pruebas.push(function () {
   var abiertos = [];
   var doc = Documento();
   var reg = { buscar: function (f) { return f === 'PRB 2026-000001' ? { folio: f, titulo: 'Uno' } : null; } };
-  var v = new A.VistaAvisosAcuse(doc, p.pedir, function () { return reg; }, function (f) { abiertos.push(f); });
+  var origenAv = null;
+  var v = new A.VistaAvisosAcuse(doc, p.pedir, function () { return reg; }, function (f, o) { abiertos.push(f); origenAv = o; });
   return v.abrir().then(function () { return v.cargar(); }).then(function () {
     var lista = doc.getElementById('avLista').innerHTML;
     Check('B1 cargar dos veces: solo GET (no marca nada); 2 sin leer; dos filas "Nuevo"', [0, '2 sin leer', 2, false],
@@ -209,6 +210,8 @@ pruebas.push(function () {
        (lista.match(/Nuevo/g) || []).length, doc.getElementById('avLista').hidden]);
     Check('B2 fila: titulo del registro, persona, rol, cuenta; folio fuera del registro sin "Ver"', [true, true, true, false],
       [/Uno/.test(lista), /Service Owner · SORIANA\\edgarrad/.test(lista), /No está en el registro cargado/.test(lista), /data-av-folio="PRB 2026-000009"/.test(lista)]);
+    Check('B2b sin boton "Ver" aparte: solo el Codigo abre (un data-av-folio por fila del registro)', [0, 1],
+      [(lista.match(/>Ver</g) || []).length, (lista.match(/data-av-folio="PRB 2026-000001"/g) || []).length]);
     var b = Elemento('b'); b.setAttribute('data-av-leida', '2');
     doc.getElementById('avLista').disparar('click', { target: b });
     return esperar();
@@ -218,7 +221,7 @@ pruebas.push(function () {
       [posts.length, posts[0].op.body, doc.getElementById('avNoLeidas').textContent, /Leído/.test(doc.getElementById('avLista').innerHTML)]);
     var ver = Elemento('v'); ver.setAttribute('data-av-folio', 'PRB 2026-000001');
     doc.getElementById('avLista').disparar('click', { target: ver });
-    Check('B4 "Ver" abre el detalle de ese folio', ['PRB 2026-000001'], abiertos);
+    Check('B4 el Codigo abre el detalle de ese folio y pasa su boton (vuelta del foco)', [['PRB 2026-000001'], true], [abiertos, origenAv === ver]);
     var q = Pedidos([[/accion=bandeja/, Respuesta(200, { disponible: false })]]);
     var d2 = Documento();
     var v2 = new A.VistaAvisosAcuse(d2, q.pedir);

@@ -12,25 +12,36 @@
 //
 //   Nueva solicitud y Mis solicitudes (PuedeSolicitar):
 //   ADM / MOD           siempre. No mira los dueños.
-//   cualquier otra      solo si es PO o SO VIGENTE.
+//   cualquier otra      solo si es PO o SO VIGENTE (dueño o rol, abajo).
 //   cuenta autenticada
 //   anonimo             nunca.
 //
 //   Administracion (cola de solicitudes, revision, gestion, correos...)
 //   sigue en AccesoAdmin.Exigir / ExigirAdm: ser PO/SO no da rol.
 //
-// PO / SO VIGENTE: la cuenta de IIS (AccesoAdmin.IdentidadEscritura) se
-// resuelve a UNA persona de dbo.CatPersona con la regla del acuse y de la
-// solicitud (IdentidadAcuse.Resolver: cuenta@soriana.com -> exactamente una
-// fila vigente con ese Correo y su nombre sin repetir). Esa persona es PO/SO
-// vigente si su nombre (IdentidadAcuse.ClaveNombre) es el Product Owner o
-// el Service Owner resuelto de alguna fila VIGENTE de dbo.CatCategoriaDueno
-// (DirectorioOrganizacional.PoSoVigentes: N2 exacto o heredado del C1, la
-// unica resolucion de dueños del sitio). Estar en CatPersona NO basta: solo
-// sirve para saber quien es la cuenta. Si deja de ser dueño en una fila
-// vigente (o la fila se da de baja), deja de calificar en el siguiente
-// request. Cuenta sin resolver (no_encontrado, ambiguo, nombre_repetido),
-// sin filas o consulta que falla: NO califica (falla cerrado; el error va a
+// PO / SO VIGENTE (HIBRIDA, 2026-11-04): la cuenta de IIS
+// (AccesoAdmin.IdentidadEscritura) se resuelve a UNA persona de
+// dbo.CatPersona con la regla del acuse y de la solicitud
+// (IdentidadAcuse.Resolver: cuenta@soriana.com -> exactamente una fila
+// vigente con ese Correo y su nombre sin repetir). Esa persona es PO/SO
+// vigente si se cumple CUALQUIERA de las dos:
+//   a) DUEÑO: su nombre (IdentidadAcuse.ClaveNombre) es el Product Owner o
+//      el Service Owner resuelto de alguna fila VIGENTE de
+//      dbo.CatCategoriaDueno (DirectorioOrganizacional.PoSoVigentes: N2
+//      exacto o heredado del C1, la unica resolucion de dueños del sitio).
+//   b) ROL: su CatPersona.Rol es "Product Owner" o "Service Owner"
+//      (RolesPoSo; sin mayusculas, acentos ni espacios de mas). Valores
+//      medidos en la VM QA 2026-11-04: Service Owner, Product Owner,
+//      Director y NULL. Director, NULL o cualquier otro valor NO califica
+//      por rol (si puede por a). Asi un PO/SO con su rol vigente pide aunque
+//      no tenga categoria asignada o su nombre en CatCategoriaDueno este
+//      escrito distinto (caso Lomas Malacara: apellidos primero).
+// La regla es ADITIVA: solo agrega solicitantes; ADM y MOD siguen igual
+// (Evaluar los deja pasar antes de mirar esto) y nadie gana rol de Admin.
+// Si deja de ser dueño (o la fila se da de baja) y su rol ya no es PO/SO,
+// deja de calificar en el siguiente request. Cuenta sin resolver
+// (no_encontrado, ambiguo, nombre_repetido), sin filas o consulta que
+// falla: NO califica, ni por rol (falla cerrado; el error va a
 // DashboardHandler.Registrar).
 //
 // INTERRUPTOR: fila INICIATIVAS_ABIERTAS de adm.Interruptor
@@ -110,8 +121,8 @@ public sealed class FuenteInterruptoresSql : IFuenteInterruptores
 }
 
 // Lo que hace falta para saber si una cuenta es PO/SO vigente: las personas
-// vigentes de dbo.CatPersona (quien es la cuenta) y el directorio de dueños
-// de dbo.CatCategoriaDueno (quien es dueño).
+// vigentes de dbo.CatPersona (quien es la cuenta y su Rol) y el directorio
+// de dueños de dbo.CatCategoriaDueno (quien es dueño).
 public sealed class DuenosVigentes
 {
     public List<PersonaCatalogo> Personas;
@@ -138,7 +149,7 @@ public sealed class FuenteDuenosVigentesSql : IFuenteDuenosVigentes
     public DuenosVigentes Leer()
     {
         var d = new DuenosVigentes();
-        d.Personas = new FuentePersonasAcuseSql(abrir).Personas();
+        d.Personas = new FuentePersonasAcuseSql(abrir, true).Personas();
         using (var cn = abrir())
         {
             if (cn.State != ConnectionState.Open) cn.Open();
@@ -168,6 +179,8 @@ public static class AccesoIniciativas
         "~/handlers/admin_iniciativas_validar.ashx",
         // Solicitudes: las que envio la propia cuenta (misma regla).
         "~/handlers/admin_iniciativas_mis_solicitudes.ashx",
+        // y sus solicitudes de cambio (solo lectura; 2026-11-04).
+        "~/handlers/admin_iniciativas_mis_cambios.ashx",
     };
 
     public const string MensajeCerrado =
@@ -234,14 +247,30 @@ public static class AccesoIniciativas
         }
     }
 
-    // La regla de dueños sin HttpContext: la cuenta se resuelve a UNA
-    // persona (IdentidadAcuse.Resolver) y su nombre es PO o SO de una fila
-    // vigente (DirectorioOrganizacional.PoSoVigentes). Cualquier otra cosa: false.
+    // Los valores de CatPersona.Rol que dan PO/SO por rol, ya pasados por
+    // IdentidadAcuse.ClaveNombre (sin mayusculas, acentos ni espacios de
+    // mas). Director no esta a proposito.
+    public static readonly string[] RolesPoSo = { "PRODUCT OWNER", "SERVICE OWNER" };
+
+    public static bool EsRolPoSo(string rol)
+    {
+        var k = IdentidadAcuse.ClaveNombre(rol);
+        if (k == null) return false;
+        foreach (var r in RolesPoSo)
+            if (string.Equals(k, r, StringComparison.Ordinal)) return true;
+        return false;
+    }
+
+    // La regla sin HttpContext: la cuenta se resuelve a UNA persona
+    // (IdentidadAcuse.Resolver) y esa persona tiene Rol PO/SO (EsRolPoSo)
+    // o su nombre es PO o SO de una fila vigente
+    // (DirectorioOrganizacional.PoSoVigentes). Cualquier otra cosa: false.
     public static bool EsPoSoVigente(IdentidadWindows id, DuenosVigentes d)
     {
         if (d == null || d.Directorio == null) return false;
         var yo = IdentidadAcuse.Resolver(id, d.Personas);
         if (!yo.EsResuelta) return false;
+        if (EsRolPoSo(yo.Rol)) return true;
         foreach (var nombre in d.Directorio.PoSoVigentes())
             if (yo.EsDueno(nombre)) return true;
         return false;

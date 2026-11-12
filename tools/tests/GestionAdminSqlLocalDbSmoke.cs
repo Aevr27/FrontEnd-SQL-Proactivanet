@@ -812,6 +812,17 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 Check("MF5 ... sin eventos de fecha nuevos", "FechaSolucion|NULL|2026-11-30;FechaCierre|NULL|2026-10-25", eventosMf());
                 Modificar(cn, aEstadoCon(null, new DateTime(2026, 11, 3), "2026-12-15"));
                 Check("MF6 cambiar FechaSolucion a mano (fecha -> fecha): se guarda y cuenta como cambio", "Cerrado|2026-12-15|2026-10-25|1|0", fechasMf());
+                // En Monitoreo -> Cerrado (CierreDesdeMonitoreo): la FechaCierre
+                // compromiso se reemplaza por el dia del cierre, y persiste.
+                Modificar(cn, aEstado("En Monitoreo", new DateTime(2026, 11, 4)));
+                Check("MF7 entrar a En Monitoreo con FechaCierre puesta: se conserva", "En Monitoreo|2026-12-15|2026-10-25|1|0", fechasMf());
+                Modificar(cn, aEstado("Cerrado", new DateTime(2026, 11, 20)));
+                Check("MF8 de En Monitoreo a Cerrado: FechaCierre = dia del cierre (releida de la base)", "Cerrado|2026-12-15|2026-11-20",
+                      Filas(cn, "SELECT Estado, FechaSolucion, FechaCierre FROM dbo.Problem WHERE Codigo = N'" + cf + "'"));
+                Check("MF8 ... el trigger registra el cambio de FechaCierre", "FechaCierre|2026-10-25|2026-11-20",
+                      Filas(cn, "SELECT TOP (1) Campo, FechaAnterior, FechaNueva FROM dbo.ProblemFechaEvento WHERE Codigo = N'" + cf + "' AND Campo = 'FechaCierre' AND Categoria IS NULL ORDER BY IdEvento DESC"));
+                Check("MF8 ... y el cambio de estado queda en el historial de estados", "1",
+                      Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemEstadoEvento WHERE Codigo = N'" + cf + "' AND EstadoNuevo = N'Cerrado' AND EstadoAnterior = N'En Monitoreo'"));
 
                 // Atomicidad: varios campos + una categoria que excede el tope
                 // (/K/Cat 1 lleno, K1). Una iniciativa del Excel aun sin proteger.

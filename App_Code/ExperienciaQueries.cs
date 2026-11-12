@@ -156,9 +156,9 @@ public static partial class ExperienciaQueries
             // web cuesta microsegundos contra los segundos que cuesta volver
             // a barrer dbo.Tickets. Ver la nota "UNA SOLA PASADA POR LAS
             // VISTAS DE VOLUMEN" en la cabecera.
-            // Sin los tipos SorIA (ver SinSorIA); Admin no pasa por aqui.
-            var slotCat = SinSorIA(LeerVolumen(cn, "dbo.vw_TBSlotCAT", "Slot", "[Categoria V2]",  0));
-            var mesCat  = SinSorIA(LeerVolumen(cn, "dbo.vw_TBMesCAT",  "Mes",  "[Categoria V2]",  anio));
+            // Las dos vistas con la misma lectura (ver VolumenDeColumnas).
+            var slotCat = LeerVolumen(cn, "dbo.vw_TBSlotCAT", "Slot", "[Categoria V2]",  0);
+            var mesCat  = LeerVolumen(cn, "dbo.vw_TBMesCAT",  "Mes",  "[Categoria V2]",  anio);
 
             var slotC1 = Replegar(slotCat, true);
             var slotC2 = Replegar(slotCat, false);
@@ -262,10 +262,29 @@ public static partial class ExperienciaQueries
     {
         public int Periodo;
         public string Llave;
-        public int Inc;      // Incidencia
-        public int Pet;      // Petición de Servicio
-        public int Total;    // Total general (incluye SorIA y cualquier otro tipo)
-        public int Sor;      // [SorIA Peticiones] + [SorIA Incidentes] (ya dentro de Total)
+        public int Inc;      // Incidentes: [Incidencia] + [SorIA Incidentes]
+        public int Pet;      // Requerimientos: [Petición de Servicio] + [SorIA Peticiones]
+        public int Total;    // Total general (incluye 'Sin tipo' y cualquier otro tipo)
+    }
+
+    // AGRUPACION DE TIPOS DE EXPERIENCIA: Incidentes = 'Incidencia' + 'SorIA
+    // Incidentes'; Requerimientos = 'Petición de Servicio' + 'SorIA
+    // Peticiones'. Las columnas de la vista son CASE excluyentes sobre el
+    // mismo TipoTicket, asi que sumarlas no cuenta un ticket dos veces. Todos
+    // es [Total general] sin restar nada, el mismo volumen con el que la foto
+    // dbo.usp_Exp_CalcularTicketsReduce y la volumetria de Admin calculan
+    // Tickets a reducir.
+    private static Volumen VolumenDeColumnas(int periodo, string llave,
+        int incidencia, int sorIAIncidentes, int peticion, int sorIAPeticiones, int total)
+    {
+        return new Volumen
+        {
+            Periodo = periodo,
+            Llave = llave,
+            Inc = incidencia + sorIAIncidentes,
+            Pet = peticion + sorIAPeticiones,
+            Total = total
+        };
     }
 
     // Lee una de las seis vistas de agregado. Todas tienen la misma forma;
@@ -286,9 +305,10 @@ public static partial class ExperienciaQueries
         sql.Append("SELECT Periodo = ").Append(columnaPeriodo)
            .Append(", Llave = ").Append(columnaLlave)
            .Append(", Inc = SUM(ISNULL([Incidencia], 0))")
+           .Append(", SorInc = SUM(ISNULL([SorIA Incidentes], 0))")
            .Append(", Pet = SUM(ISNULL([Petición de Servicio], 0))")
+           .Append(", SorPet = SUM(ISNULL([SorIA Peticiones], 0))")
            .Append(", Total = SUM([Total general])")
-           .Append(", Sor = SUM(ISNULL([SorIA Peticiones], 0) + ISNULL([SorIA Incidentes], 0))")
            .Append(" FROM ").Append(vista);
 
         // Las vistas por mes acumulan años; las de slot son ventanas
@@ -313,44 +333,17 @@ public static partial class ExperienciaQueries
                     if (rd.IsDBNull(0) || rd.IsDBNull(1))
                         continue;
 
-                    var v = new Volumen();
-                    v.Periodo = Convert.ToInt32(rd.GetValue(0), CultureInfo.InvariantCulture);
-                    v.Llave = Convert.ToString(rd.GetValue(1));
-                    v.Inc = Entero(rd.GetValue(2));
-                    v.Pet = Entero(rd.GetValue(3));
-                    v.Total = Entero(rd.GetValue(4));
-                    v.Sor = Entero(rd.GetValue(5));
-                    filas.Add(v);
+                    filas.Add(VolumenDeColumnas(
+                        Convert.ToInt32(rd.GetValue(0), CultureInfo.InvariantCulture),
+                        Convert.ToString(rd.GetValue(1)),
+                        Entero(rd.GetValue(2)), Entero(rd.GetValue(3)),
+                        Entero(rd.GetValue(4)), Entero(rd.GetValue(5)),
+                        Entero(rd.GetValue(6))));
                 }
             }
         }
 
         return filas;
-    }
-
-    // EXPERIENCIA SIN SorIA (2026-10-28): el volumen de Experiencia ("Todos":
-    // Volumen Actual, sus series por slot / mes, la composicion y
-    // cobertura) no cuenta los tickets de tipo 'SorIA Incidentes' ni
-    // 'SorIA Peticiones' -las dos columnas de la vista, sin restar nada
-    // inferido-. 'Sin tipo' y cualquier otro tipo siguen contando. Es la
-    // regla del TIPO de ticket, no la rama /Soria/ de categorias.
-    //
-    // Se aplica a las filas ya leidas, antes de replegar, para que C1, C1&C2
-    // y las rutas completas (categorias_v2) salgan de la misma base y
-    // KPI-2 + KPI-5 = KPI-1 se siga cumpliendo. NO toca LeerVolumen: la
-    // volumetria de Admin (ExperienciaVolumetria) sigue con el Total general
-    // de siempre. Una fila que solo tenia SorIA desaparece, como si la vista
-    // no la hubiera traido.
-    private static List<Volumen> SinSorIA(List<Volumen> origen)
-    {
-        var salida = new List<Volumen>();
-        foreach (var v in origen)
-        {
-            var total = v.Total - v.Sor;
-            if (total <= 0) continue;
-            salida.Add(new Volumen { Periodo = v.Periodo, Llave = v.Llave, Inc = v.Inc, Pet = v.Pet, Total = total });
-        }
-        return salida;
     }
 
     // Repliega las filas de vw_TBSlotCAT / vw_TBMesCAT al nivel C1 (aC1 =
@@ -1054,12 +1047,6 @@ public static partial class ExperienciaQueries
         "       t.ResponsableUltimaModificacion, t.NotificadoPor, t.Tipo, " +
         "       t.RegistradoPor ";
 
-    // Sin los tipos SorIA, como el volumen (SinSorIA): las dos vistas base
-    // traen TipoTicket con la MISMA expresion que cuentan las columnas
-    // [SorIA Incidentes] / [SorIA Peticiones] de vw_TBSlotCAT / vw_TBMesCAT.
-    // La rama /Soria/ (categoria) y 'Sin tipo' siguen.
-    private const string EXPORT_SIN_SORIA = "AND b.TipoTicket NOT IN (N'SorIA Incidentes', N'SorIA Peticiones') ";
-
     // El texto completo sale de aqui y de nada mas: el modo solo elige entre
     // dos cadenas fijas. Ano y mes van como parametros.
     private static string ConsultaExport(string modo)
@@ -1068,14 +1055,14 @@ public static partial class ExperienciaQueries
             return EXPORT_SELECT +
                 "FROM dbo.vw_TicketsSlotsBase AS b " +
                 "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
-                "WHERE b.Slot = 0 " + EXPORT_SIN_SORIA +
+                "WHERE b.Slot = 0 " +
                 "ORDER BY b.FechaRegistro DESC";
 
         if (modo == MODO_MES)
             return EXPORT_SELECT +
                 "FROM dbo.vw_TicketsMesBase AS b " +
                 "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
-                "WHERE b.Anio = @anio AND b.Mes = @mes " + EXPORT_SIN_SORIA +
+                "WHERE b.Anio = @anio AND b.Mes = @mes " +
                 "ORDER BY b.FechaRegistro DESC";
 
         // Misma vista base que MES (la que cubre todos los meses), pero por
@@ -1084,7 +1071,7 @@ public static partial class ExperienciaQueries
             return EXPORT_SELECT +
                 "FROM dbo.vw_TicketsMesBase AS b " +
                 "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
-                "WHERE b.FechaRegistro >= @desde AND b.FechaRegistro < @hasta " + EXPORT_SIN_SORIA +
+                "WHERE b.FechaRegistro >= @desde AND b.FechaRegistro < @hasta " +
                 "ORDER BY b.FechaRegistro DESC";
 
         throw new ArgumentException("Modo de export no reconocido.");
@@ -1374,10 +1361,10 @@ public static partial class ExperienciaQueries
             c["delta_mes"] = volMes - volMesAnterior;
 
             // El reparto por tipo es el del periodo vigente (slot 0), igual
-            // que vol_actual. reqopr es "lo que no es incidencia ni peticion"
-            // ("Sin tipo" y cualquier tipo nuevo; SorIA ya no: ver SinSorIA),
-            // para que inc + pet + reqopr
-            // siempre de el volumen del slot.
+            // que vol_actual. inc y pet ya traen sus tipos SorIA
+            // (VolumenDeColumnas); reqopr es el resto ("Sin tipo" y cualquier
+            // tipo nuevo), para que inc + pet + reqopr siempre de el volumen
+            // del slot.
             c["inc"] = f.Inc;
             c["pet"] = f.Pet;
             c["reqopr"] = Math.Max(0, f.Total - f.Inc - f.Pet);
@@ -1903,16 +1890,14 @@ public static partial class ExperienciaQueries
     // Volumen por tipo de registro de una fila, para el selector Todos /
     // Incidentes / Requerimientos de experiencia.js:
     //
-    //   inc  columna [Incidencia] de vw_TBSlotCAT / vw_TBMesCAT
-    //        (TipoTicket = 'Incidencia')
-    //   req  columna [Petición de Servicio]
-    //        (TipoTicket IN ('Petición de Servicio', 'Peticion de Servicio'))
+    //   inc  [Incidencia] + [SorIA Incidentes] de vw_TBSlotCAT / vw_TBMesCAT
+    //   req  [Petición de Servicio] + [SorIA Peticiones]
     //
-    // Es el mismo corte con el que dbo.vw_ProblemCategoria arma sus columnas
-    // Incidentes y Requerimientos. "Todos" no viaja aqui: es vol_slot /
-    // vol_mes: el [Total general] de la vista MENOS sus dos columnas SorIA
-    // (SinSorIA), con "Sin tipo" y cualquier otro tipo. inc y req no se
-    // obtienen restando: cada serie es una columna de la vista sumada tal cual.
+    // (ver VolumenDeColumnas). Las columnas Incidentes / Requerimientos de
+    // dbo.vw_ProblemCategoria no se usan aqui; si tambien cuentan SorIA no
+    // esta verificado. "Todos" no viaja aqui: es vol_slot / vol_mes, el
+    // [Total general] de la vista, con "Sin tipo" y cualquier otro tipo. inc
+    // y req no se obtienen restando: cada serie suma columnas de la vista.
     private static Dictionary<string, object> VolTipo(Fila f)
     {
         var inc = new Dictionary<string, object>();

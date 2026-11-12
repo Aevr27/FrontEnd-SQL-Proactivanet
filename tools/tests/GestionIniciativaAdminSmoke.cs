@@ -683,6 +683,27 @@ public static class GestionIniciativaAdminSmoke
         Check("PL46 'EN ANALISIS' -> 'En Analisis' (solo cambia la escritura): no es transicion, sin fecha", "estado=En An\u00e1lisis",
               PlanFechas(ActualFechas("EN ANALISIS", null, null), hoy, "estado", "En An\u00e1lisis"));
 
+        // En Monitoreo -> Cerrado (2026-11-04, CierreDesdeMonitoreo): la
+        // FechaCierre compromiso se reemplaza por el dia del cierre (hoy).
+        Check("PL47 de En Monitoreo a Cerrado con FechaCierre compromiso (futura): hoy", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado"));
+        Check("PL48 de En Monitoreo a Cerrado con FechaCierre compromiso vencida: hoy", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-09-30"), hoy, "estado", "Cerrado"));
+        Check("PL49 de En Monitoreo a Cerrado con FechaCierre ya hoy: no se reescribe", "estado=Cerrado",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-13"), hoy, "estado", "Cerrado"));
+        Check("PL50 de En Monitoreo a Cerrado con FechaCierre en el mismo guardado: la del formulario", "estado=Cerrado|f_cierre=2026-10-10",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado", "f_cierre", "2026-10-10"));
+        Check("PL51 de En Monitoreo a Cerrado vaciando FechaCierre: hoy (regla general)", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado", "f_cierre", ""));
+        Check("PL52 'EN MONITOREO' (escritura de la base) a Cerrado: tambien hoy", "estado=Cerrado|f_cierre=2026-10-13",
+              PlanFechas(ActualFechas("EN MONITOREO", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado"));
+        Check("PL53 de En Solucion a Cerrado con FechaCierre ya puesta: se conserva (solo Monitoreo reemplaza)", "estado=Cerrado",
+              PlanFechas(ActualFechas("En Soluci\u00f3n", "2026-10-01", "2026-10-28"), hoy, "estado", "Cerrado"));
+        Check("PL54 ya Cerrado (con FechaCierre), guardar otra cosa: no se toca", "titulo=Otro",
+              PlanFechas(ActualFechas("Cerrado", "2026-10-01", "2026-10-28"), hoy, "titulo", "Otro"));
+        Check("PL55 de En Monitoreo a En Solucion: FechaCierre no se toca", "estado=En Soluci\u00f3n",
+              PlanFechas(ActualFechas("En Monitoreo", "2026-10-01", "2026-10-28"), hoy, "estado", "En Soluci\u00f3n"));
+
         // ---- DQ: PO / SO capturados y quitar (sql/24) ----
         // Constante encendida; surte efecto solo cuando DeteccionSql24 vio
         // sql/24 en la base (aqui se anota a mano, sin base).
@@ -1075,6 +1096,40 @@ public static class GestionIniciativaAdminSmoke
         Check("QS1 PendienteQuitar: falta sql/24 (sql/23 ya aplicada) y como guardar lo demas", "True|True|False",
             PlanificadorGestionAdmin.PendienteQuitar.Contains("falta aplicar sql/24") + "|" + PlanificadorGestionAdmin.PendienteQuitar.Contains("Restaurar") + "|" +
             PlanificadorGestionAdmin.PendienteQuitar.Contains("sql/23 y sql/24"));
+
+        // ---- sql/83: ADM reactiva una categoria que estuvo ligada -------------
+        // /B/Cat 3 estuvo ligada con Problem / Requerimiento (Requerimiento no
+        // consume); otra iniciativa tiene el 90% de /B/Cat 3.
+        Func<IniciativaActual> conHistorica = delegate
+        {
+            var a = Actual();
+            a.Historicas = new List<CategoriaHistorica> { new CategoriaHistorica { Ruta = "/B/Cat 3", TipoIniciativa = "Problem", TipoAgrupado = "Requerimiento",
+                                                                                    Pct = 0.2m, FCreacion = "2026-01-05", FAnalisis = "2026-01-20" } };
+            return a;
+        };
+        var otra90 = new[] { K("PRB 2026-000009", "/B/Cat 3", 0.9m) };
+        Func<string, string, ResultadoGestionAdmin> reactivar = delegate (string ti, string ta)
+        {
+            return new ValidadorGestionAdmin().Modificar(M(F("folio", "PRB 2026-000001", "agregar_categoria", "/B/Cat 3", "agregar_pct", "20",
+                                                          "agregar_tipo_iniciativa", ti, "agregar_tipo_agrupado", ta)), conHistorica(), otra90, Catalogo, Estados);
+        };
+        var r83 = reactivar("Mejora", "");
+        Check("H83a Clasificacion distinta de la historica: 422 (error en categorias), nunca se ignora", "False|categorias|True",
+              r83.Valida + "|" + Campos(r83) + "|" + r83.Errores.Any(e => e.Mensaje.Contains("la clasificación histórica se conserva")));
+        r83 = reactivar("", "Problem");
+        Check("H83b Agrupacion distinta de la historica (Problem vs Requerimiento): 422", "False|True",
+              r83.Valida + "|" + r83.Errores.Any(e => e.Mensaje.Contains("Agrupación Requerimiento")));
+        r83 = reactivar("PROBLEM", "");
+        Check("H83c la misma con otras mayusculas no es conflicto; con su Agrupacion historica (no consume) cabe aunque otra tenga 90%", "True|0",
+              r83.Valida + "|" + r83.Errores.Count);
+        Check("H83d aviso: se reactiva la MISMA asociacion con sus fechas y su clasificacion; el cambio dice Reactivar", "True|True|Reactivar categoría",
+              r83.Advertencias.Any(a => a.Contains("se reactivará la MISMA asociación") && a.Contains("creación 2026-01-05") && a.Contains("Problem / Requerimiento")) + "|" +
+              r83.Advertencias.Any(a => a.Contains("análisis 2026-01-20")) + "|" +
+              Rotulo(r83.Cambios, "agregar_categoria"));
+        var sinHist = new ValidadorGestionAdmin().Modificar(M(F("folio", "PRB 2026-000001", "agregar_categoria", "/B/Cat 3", "agregar_pct", "20",
+                                                                "agregar_tipo_iniciativa", "Problem", "agregar_tipo_agrupado", "Problem")), Actual(), otra90, Catalogo, Estados);
+        Check("H83e sin historica (como hoy): agregar con Problem consume y el tope la detiene", "False",
+              sinHist.Valida);
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO PASO" : fallos + " FALLO(S)");

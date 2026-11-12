@@ -89,3 +89,26 @@ Orden: switch a false y deploy → (si está) `ADM_04_…_rollback` con el progr
 8. Con un usuario MOD: Crear/Guardar → 403, nada guardado.
 9. En ningún caso un 422/409/500 dice "Guardado"; con el switch en false (paso 7) la página dice "Validar en el servidor (no guarda)" y el servidor responde 501.
 10. Al día siguiente: `ExpTicketsReduce` incluye la iniciativa de prueba; dar de baja la iniciativa de prueba según se acuerde (no hay borrado desde la página).
+
+## H. sql/83 — reactivar una categoría que estuvo ligada (PROPUESTA, sin aplicar)
+
+Qué hace: volver a agregar a una iniciativa una categoría que se dio de baja (`dbo.ProblemCategoria.VigenteEnOrigen = 0`) **reactiva la misma fila** en vez de responder 51008. Conserva `FechaCreacionCategoria`, `FechaAnalisisCategoria` y la clasificación histórica no vacía (solo se llena la que falta). Usuarios normales: por «Solicitar cambios» (`AGREGAR`), con las mismas reglas de siempre y aprobación de ADM. ADM: también en la edición directa. Detalle en el encabezado de `sql/83_reactivacion_categoria_historica.sql`.
+
+Huellas medidas en la VM QA (2026-11-10) = precondición de 83: Modificar sql/24 `0xBEEF50D59D15F18403C975A8BCCEBF3556C102E4DC3B2598FADC546FD927BF77`, Aplicar sql/40 `0x65B3B38854E450D07421B84CAC9FBF0C8CE1CE50D87344E52FB100D0D2148DCB`, Crear sql/38 `0xBE78FC96094FA3C918CACB3A59BF6340FA77734268BED6315F4D2485AEF6A95F`.
+
+Orden (cada paso con su OK):
+
+1. Solo lectura: `sql/verificar_check_41_42.sql` → 14 filas `OK`.
+2. Solo lectura, justo antes de aplicar: `sql/baseline_83_export.sql` → guardar los dos resultados **fuera del repositorio**, con la evidencia de la migración.
+3. `EXEC sys.sp_set_session_context N'aprobar_migracion', N'83';` + `sql/83_reactivacion_categoria_historica.sql` completo → `APLICADA`.
+4. `sql/diag_83_reactivacion.sql` (bloque A): las tres huellas dicen `sql/83`.
+5. Desplegar el sitio. El sitio detecta 83 por la propiedad `ReglaReactivacion` (sin ella todo sigue como antes), así que el orden sitio / base no importa.
+
+Rollback: primero `sql/diag_83_reactivacion.sql` con la baseline (lista lo reactivado; no se borra ni se desactiva nada) → `aprobar_migracion = 83R` + `sql/83_reactivacion_categoria_historica_rollback.sql` → `DESHECHA` (huellas exactas de 24 / 40 / 38). Va **antes** que cualquier rollback de 38, 40 o 41 (esos se niegan con 83 aplicada).
+
+Smoke manual (VM, tras el paso 5):
+
+1. ADM, edición directa: agregar una categoría de baja → etiqueta «Reactivar (estuvo ligada)», fechas «Original», aviso de reactivación; guardar → la misma fila vigente, mismas fechas.
+2. ADM: elegir una Clasificación distinta de la histórica → 422, nada cambió.
+3. PSO o MOD: «Solicitar cambios» → agregar una de baja del par PO / SO → «Reactivar»; ADM aplica → reactivada; una fuera del par se sigue rechazando.
+4. Reactivar una que hace pasar el 100% de la categoría → rechazado por el tope, nada cambió.

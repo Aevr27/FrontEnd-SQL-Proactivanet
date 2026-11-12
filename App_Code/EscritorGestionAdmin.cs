@@ -42,10 +42,15 @@ public sealed class ErrorEscrituraGestionAdmin : Exception
     public bool EsDatoInvalido { get { return (Numero >= 51011 && Numero <= 51017) || Numero == 51029; } }
     public bool EsCodigo { get { return Numero >= 51021 && Numero <= 51025; } }
 
+    // sql/83: reactivar sin ser ADM (51032, defensa de la base), solicitud que
+    // no corresponde (51033) o clasificacion distinta de la historica (51034).
     public string Tipo
     {
         get
         {
+            if (Numero == 51032) return "ReactivacionSoloAdm";
+            if (Numero == 51033) return "SolicitudNoCorresponde";
+            if (Numero == 51034) return "ClasificacionHistorica";
             return EsTope ? "TopeExcedido" : EsRepetida ? "CategoriaRepetida" : EsDatoInvalido ? "DatoInvalido"
                  : EsCodigo ? "CodigoNoEmitido" : "EscrituraRechazada";
         }

@@ -61,14 +61,21 @@ public class AdminIniciativasSolicitudesNuevas : IHttpHandler
             if (accion == "listar")
             {
                 var l = lector.Listar(RegistroSolicitudesIniciativa.Maximo, estado);
+                // Como se muestra quien la envio (App_Code/NombreSolicitante.cs; solo pantalla).
+                NombreSolicitante.AgregarIniciativas(l.Solicitudes);
                 return new Dictionary<string, object>
                 {
                     { "solicitudes", l.Solicitudes }, { "total", l.Total }, { "maximo", RegistroSolicitudesIniciativa.Maximo },
                     { "revision_disponible", l.RevisionDisponible }, { "crea_iniciativa", l.CreaIniciativa },
+                    { "cancelacion_disponible", l.CancelacionDisponible },
                 };
             }
             var d = lector.Detalle(numero);
             if (d == null) return Error(context, 404, "La solicitud no existe.", "SolicitudNoExiste");
+            // es_propia / puede_cancelar: el ADM que tambien la envio (solo pantalla).
+            var quien = AccesoAdmin.IdentidadEscritura(context);
+            RegistroSolicitudesIniciativa.MarcarPropia(d, quien == null ? null : quien.Original);
+            NombreSolicitante.AgregarDetalleIniciativa(d);
             // Las OTRAS iniciativas que hoy consumen la capacidad de la
             // categoria (la regla del tope: CapacidadCategoria), con su %. Sin
             // la iniciativa que creo esta solicitud. Si falla: null y la
