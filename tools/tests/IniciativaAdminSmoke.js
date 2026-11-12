@@ -1393,9 +1393,9 @@ pruebas.push(function () {
   var html = A.htmlCategoriasEdicion(ed, null);
   // Fecha unica por iniciativa: aunque el registro viejo trajera
   // f_analisis_propia (sql/18), ninguna categoria muestra otra fecha ni la edita.
-  Check('FP1 todas las categorias (inicial, ligada despues, sin agrupacion) muestran la de la iniciativa, sin input ni «Propia»', [3, 0, false, false],
-    [(html.match(/28\/10\/2026<\/span> <span class="ini-origen derivado"[^>]*>De la iniciativa/g) || []).length,
-     (html.match(/data-edicion-fcat=/g) || []).length, /17\/11\/2026/.test(html), />Propia</.test(html)]);
+  Check('FP1 todas las categorias (inicial, ligada despues, sin agrupacion) muestran la de la iniciativa, sin input ni rotulo de origen', [3, 0, false, false, false],
+    [(html.match(/<span class="ini-cat-fecha">28\/10\/2026<\/span>/g) || []).length,
+     (html.match(/data-edicion-fcat=/g) || []).length, /17\/11\/2026/.test(html), />Propia</.test(html), /De la iniciativa/.test(html)]);
   Check('FP2 no hay captura de fecha por categoria', [undefined, undefined],
     [ed.capturarFechaCategoria, ed.categorias.capturarFecha]);
   ed.capturar('f_analisis', '2026-11-30');
@@ -1772,7 +1772,7 @@ pruebas.push(function () {
       [reg.agregarCategoriaEdicion('/a/cat 2').ok, reg.agregarCategoriaEdicion('/A/Cat 1').ok, ed.categorias.filas.length]);
     var html = p.sel('regEdCats').innerHTML;
     Check('LF4 columna Fecha de analisis: la ligada y las dos nuevas = la de la iniciativa, sin input ni «Calculada»', [true, 3, 0, 0],
-      [/Fecha de análisis<\/th>/.test(html), (html.match(/01\/12\/2026<\/span> <span class="ini-origen derivado"[^>]*>De la iniciativa/g) || []).length,
+      [/Fecha de análisis<\/th>/.test(html), (html.match(/<span class="ini-cat-fecha">01\/12\/2026<\/span>/g) || []).length,
        (html.match(/data-edicion-fecha="|data-edicion-fcat="/g) || []).length, (html.match(/title="Se liga el /g) || []).length]);
     Check('LF4b una nueva no calcula fecha propia (ni hoy + 15)', [false, true],
       [/28\/10\/2026/.test(html), ed.categorias.filas.every(function (f) { return f.fAnalisis === undefined; })]);
@@ -1782,7 +1782,7 @@ pruebas.push(function () {
     FG.hoy = function () { return '2026-11-02'; };
     Check('LF8 ligar otro dia tampoco da fecha propia; las ya agregadas no cambian', [true, 4, ['', '30', '', '']],
       [(function () { ed.categorias.fijarRutas(['/A/Cat 1', '/A/Cat 2', '/B/Cat 4', '/C/Cat 9']); return reg.agregarCategoriaEdicion('/C/Cat 9').ok; })(),
-       (p.sel('regEdCats').innerHTML.match(/01\/12\/2026<\/span> <span class="ini-origen derivado"[^>]*>De la iniciativa/g) || []).length,
+       (p.sel('regEdCats').innerHTML.match(/<span class="ini-cat-fecha">01\/12\/2026<\/span>/g) || []).length,
        ed.categorias.filas.map(function (f) { return f.valor; })]);
     FG.hoy = hoyOriginal;
     var pares = ed.paraEnviar();
@@ -2186,12 +2186,12 @@ pruebas.push(function () {
     i.categorias[0].f_creacion_propia = null; i.categorias[0].f_analisis_propia = null;
     i.categorias[1].f_creacion_propia = '2026-11-02'; i.categorias[1].f_analisis_propia = '2026-11-17';
     var ini = p.registro.htmlSeguimientoCategoria(i, '/A/Cat 1'), lig = p.registro.htmlSeguimientoCategoria(i, '/A/Cat 2');
-    Check('SGF1 inicial: Analisis = el de la iniciativa, marcado "De la iniciativa"', [true, true, false],
-      [/<dt>Análisis<\/dt><dd>28\/10\/2026 <span class="ini-origen derivado">De la iniciativa<\/span>/.test(ini),
-       /Las fechas son las de la iniciativa/.test(ini), /<dt>Análisis<\/dt><dd>—/.test(ini)]);
-    Check('SGF2 ligada despues: TAMBIEN la de la iniciativa (no la vieja 17/11), sin "Propia"; dice el dia en que se ligo', [true, false, false, true],
-      [/<dt>Análisis<\/dt><dd>28\/10\/2026 <span class="ini-origen derivado">De la iniciativa<\/span>/.test(lig),
-       /17\/11\/2026/.test(lig), /Propia/.test(lig), /Se ligó el 02\/11\/2026/.test(lig)]);
+    Check('SGF1 inicial: Analisis = el de la iniciativa, sin rotulo de origen', [true, true, false, false],
+      [/<dt>Análisis<\/dt><dd>28\/10\/2026<\/dd>/.test(ini),
+       /Las fechas son las de la iniciativa/.test(ini), /<dt>Análisis<\/dt><dd>—/.test(ini), /De la iniciativa/.test(ini)]);
+    Check('SGF2 ligada despues: TAMBIEN la de la iniciativa (no la vieja 17/11), sin rotulo; dice el dia en que se ligo', [true, false, false, true],
+      [/<dt>Análisis<\/dt><dd>28\/10\/2026<\/dd>/.test(lig),
+       /17\/11\/2026/.test(lig), /Propia|De la iniciativa/.test(lig), /Se ligó el 02\/11\/2026/.test(lig)]);
   });
 });
 
@@ -2212,7 +2212,7 @@ pruebas.push(function () {
         [/ini-det-sem/.test(seg), /<th scope="col" class="num">Cambios<\/th>/.test(seg), /Análisis <span class="ini-sub">estado actual<\/span>/.test(seg)]);
       Check('SG3 selector con las categorias reales; la primera elegida', [true, true, true],
         [/<select id="regSegCategoria" class="ini-dd-categoria">/.test(seg), /<option value="\/A\/Cat 1" selected>/.test(seg), /<option value="\/A\/Cat 2">/.test(seg)]);
-      Check('SG4 bloque de la primera: su % y la fecha de analisis de la iniciativa (hereda)', [true, true, true],
+      Check('SG4 bloque de la primera: su % y la fecha de analisis de la iniciativa, sin rotulo de origen', [true, false, true],
         [/% disminución<\/dt><dd>50%/.test(seg), /De la iniciativa/.test(seg), /Las fechas son las de la iniciativa/.test(seg)]);
       var cuerpo = p.sel('regDetCuerpo').innerHTML;
       p.sel('regBuscar').value = 'filtro escrito';
@@ -3267,7 +3267,7 @@ pruebas.push(function () {
   // La historica trae f_analisis 2026-01-20 (FechaAnalisisCategoria vieja):
   // al reactivarse NO la recupera; usa la de la iniciativa.
   Check('RH3 reactivada: la fecha de la iniciativa, no la vieja de la categoria', [false, false, 3],
-    [/20\/01\/2026/.test(h), />Original</.test(h), (h.match(/<span class="ini-origen derivado"[^>]*>De la iniciativa/g) || []).length]);
+    [/20\/01\/2026/.test(h), />Original</.test(h), (h.match(/<span class="ini-cat-fecha">/g) || []).length]);
   Check('RH4 capturar la Clasificacion historica no se acepta; la que falta si', [false, true],
     [ed.categorias.capturarTipo(1, 'tipo_iniciativa', 'Mejora'), ed.categorias.capturarTipo(1, 'tipo_agrupado', 'Mejora')]);
   var cambio = ed.categorias.cambios().filter(function (c) { return c.nuevo.indexOf('/A/Hist') === 0; })[0];

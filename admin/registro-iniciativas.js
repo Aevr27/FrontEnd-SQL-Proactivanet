@@ -227,7 +227,7 @@
      y un selector "Ver por categoria" con las categorias reales de la
      iniciativa; al cambiarlo se repinta solo su bloque (regSegCatInfo).
      Las fechas son las de la INICIATIVA, comunes a todas sus categorias
-     ("De la iniciativa"); no hay fecha de analisis por categoria.
+     (sin rotulo de origen); no hay fecha de analisis por categoria.
      "Historial de cambios (N)" nace plegado. Pinta `historial`, las filas
      de dbo.ProblemFechaEvento de la iniciativa en orden de IdEvento
      (App_Code/HistorialFechas.cs): { id, campo, anterior, nuevo, operacion,
@@ -3934,8 +3934,7 @@ window.RegistroIniciativas = (function () {
       return '<dl class="ini-datos">' +
           '<div class="ini-dato"><dt>% disminución</dt><dd>' + pct(c.pct_dism) + '</dd></div>' +
           '<div class="ini-dato"><dt>Tickets a reducir</dt><dd>' + fmt(c.tickets_reduce) + '</dd></div>' +
-          '<div class="ini-dato"><dt>Análisis</dt><dd>' + Escape.html(fecha(i.f_analisis)) +
-            ' <span class="ini-origen derivado">De la iniciativa</span></dd></div>' +
+          '<div class="ini-dato"><dt>Análisis</dt><dd>' + Escape.html(fecha(i.f_analisis)) + '</dd></div>' +
           '<div class="ini-dato"><dt>Solución</dt><dd>' + Escape.html(fecha(i.f_solucion)) + '</dd></div>' +
           '<div class="ini-dato"><dt>Cierre</dt><dd>' + Escape.html(fecha(i.f_cierre)) + '</dd></div>' +
         '</dl>' +

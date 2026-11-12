@@ -97,7 +97,7 @@
    -----------------------------------
      Una iniciativa tiene UNA fecha compromiso de analisis y la comparten
      todas sus categorias: las iniciales, las que se ligan despues y las que
-     se reactivan. Cada fila la muestra ("De la iniciativa") y solo se
+     se reactivan. Cada fila la muestra, sin rotulo de origen (no hay otra), y solo se
      cambia en "Fecha compromiso de Analisis". No hay fecha por categoria
      que editar ni enviar (el servidor rechaza fcat_*).
      dbo.ProblemCategoria.FechaAnalisisCategoria (sql/18) sigue en la base
@@ -871,8 +871,7 @@ window.IniciativaAdmin = (function () {
     }
     function celdaFecha(f, n) {
       if (f.quitada) return '—';
-      return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(fechas.f_analisis)) +
-        '</span> <span class="ini-origen derivado" title="La fecha compromiso de análisis es de la iniciativa (dbo.Problem.FechaAnalisis) y la comparten todas sus categorías: se cambia en Fecha compromiso de Análisis">De la iniciativa</span>';
+      return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(fechas.f_analisis)) + '</span>';
     }
     function opcionesTipo(lista, valor, atributo, rotulo) {
       return '<label class="ini-ed-tipo"><span class="ini-sr">' + Escape.html(rotulo) + '</span>' +
