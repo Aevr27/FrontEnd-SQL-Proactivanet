@@ -2053,10 +2053,10 @@ pruebas.push(function () {
   c.fijarVolumetria('/B/Cat 4', { estado: 'ok', valor: 7 });
   c.capturarTickets('/B/Cat 4', '3');
   var r = c.conversion('/B/Cat 4');
-  Check('SCT2 3 tickets de 7: 43% (el menor entero; FLOOR de 7 x 43% = 3) exacto', ['43', true, 3], [r.pct, r.exacto, r.tickets]);
-  Check('SCT2 viaja el % entero convertido, no los tickets', [['/B/Cat 4'], ['43'], false],
+  Check('SCT2 3 tickets de 7: 42% (la proporcion 42.86% hacia abajo; CEILING de 7 x 42% = 2.94 -> 3) exacto', ['42', true, 3], [r.pct, r.exacto, r.tickets]);
+  Check('SCT2 viaja el % entero convertido, no los tickets', [['/B/Cat 4'], ['42'], false],
     [par(c, 'agregar_categoria'), par(c, 'agregar_pct'), JSON.stringify(c.pares()).indexOf('ticket') >= 0]);
-  Check('SCT2 el % enviado es el que guarda la base (fraccion de 4 decimales: Math.Round(43/100, 4))', 0.43,
+  Check('SCT2 el % enviado es el que guarda la base (fraccion de 4 decimales: Math.Round(42/100, 4))', 0.42,
     Math.round(Number(par(c, 'agregar_pct')[0]) / 100 * 10000) / 10000);
   Check('SCT2 la ida y vuelta da los tickets pedidos', 3, I.ticketsDe(7, par(c, 'agregar_pct')[0]));
   Check('SCT2 sin errores', [], errs(c));
@@ -2854,20 +2854,20 @@ pruebas.push(function () {
 // MT) Crear: meta en % o en tickets y Volumetria fijada por ADM (sql/26)
 pruebas.push(function () {
   var M = A.MetaCategoria;
-  Check('MT1 % -> tickets: SIEMPRE hacia abajo (FLOOR), entero', [41, 52, 0, 3, 0, 418, 0, 0, 7, 6],
+  Check('MT1 % -> tickets: SIEMPRE hacia arriba (CEILING), entero; exacto no sube; 0% = 0', [42, 53, 1, 4, 0, 418, 0, 1, 7, 7],
     [M.tickets(418, '10'), M.tickets(418, '12.5'), M.tickets(1000, '0.05'), M.tickets(7, '50'), M.tickets(0, '50'),
      M.tickets(418, '100'), M.tickets(418, '0'), M.tickets(7, '9.46'), M.tickets(7, '100'), M.tickets(7, '99.99')]);
-  Check('MT1b los tickets siempre son enteros y nunca pasan del exacto', true,
+  Check('MT1b los tickets siempre son enteros, nunca quedan debajo del exacto y no lo pasan por un ticket entero', true,
     [7, 10, 418, 1247, 30000].every(function (v) {
       return ['0.01', '9.46', '12.5', '33.33', '50', '66.67', '99.99', '100'].every(function (pc) {
         var t = M.tickets(v, pc);
-        return t % 1 === 0 && t >= 0 && t <= v * Number(pc) / 100 + 1e-9 && t > v * Number(pc) / 100 - 1;
+        return t % 1 === 0 && t >= 0 && t >= v * Number(pc) / 100 - 1e-9 && t < v * Number(pc) / 100 + 1;
       });
     }));
   Check('MT2 % -> tickets sin dato o invalido: null (nunca un numero inventado)', [null, null, null, null, null, null],
     [M.tickets(null, '10'), M.tickets(418, ''), M.tickets(418, '101'), M.tickets(418, '-1'), M.tickets(418, '1.234'), M.tickets(-5, '10')]);
-  Check('MT3 tickets -> %: el menor % con dos decimales que da esos tickets (FLOOR), y si es exacto',
-    [['10.05', true, 42], ['57.15', true, 4], ['100', true, 418], ['0', true, 0]],
+  Check('MT3 tickets -> %: la proporcion con dos decimales hacia abajo que da esos tickets (CEILING), y si es exacto',
+    [['10.04', true, 42], ['57.14', true, 4], ['100', true, 418], ['0', true, 0]],
     [[M.pct(418, '42').pct, M.pct(418, '42').exacto, M.pct(418, '42').tickets], [M.pct(7, 4).pct, M.pct(7, 4).exacto, M.pct(7, 4).tickets],
      [M.pct(418, '418').pct, M.pct(418, '418').exacto, M.pct(418, '418').tickets], [M.pct(418, '0').pct, M.pct(418, '0').exacto, M.pct(418, '0').tickets]]);
   var grande = M.pct(200000, '1');
@@ -2890,19 +2890,19 @@ pruebas.push(function () {
   cats.sincronizarCalculadas(vol);
   var f = cats.filas[0];
   cats.capturarPct(0, '10');
-  Check('MT7 modo %: el % escrito y los tickets calculados con la volumetria calculada (418 x 10% = 41.8 -> 41)', ['10', 'pct', '= 41 tickets de 418'],
+  Check('MT7 modo %: el % escrito y los tickets calculados con la volumetria calculada (418 x 10% = 41.8 -> 42)', ['10', 'pct', '= 42 tickets de 418'],
     [f.valor, f.fuente, cats.meta(f).texto]);
   cats.elegirModo('tickets');
-  Check('MT8 cambiar a tickets no convierte ni toca lo escrito: % igual, casilla de tickets con los calculados', ['tickets', '10', 'pct', '41'],
+  Check('MT8 cambiar a tickets no convierte ni toca lo escrito: % igual, casilla de tickets con los calculados', ['tickets', '10', 'pct', '42'],
     [cats.modo, f.valor, f.fuente, cats.ticketsVista(f)]);
   cats.capturarTickets(0, '100');
-  Check('MT9 escribir tickets: el % sale de ellos (100 / 418 -> 23.93%, que da 100) y es exacto', ['23.93', 'tickets', '100', '≈ 23.93% de 418'],
+  Check('MT9 escribir tickets: el % sale de ellos (100 / 418 = 23.92% hacia abajo, que da 100) y es exacto', ['23.92', 'tickets', '100', '≈ 23.92% de 418'],
     [f.valor, f.fuente, cats.ticketsVista(f), cats.meta(f).texto]);
   cats.capturarVolumen(0, '1000');
   Check('MT10 cambiar la volumetria: los tickets escritos se quedan, el % se recalcula; el modo no cambia', ['10', '100', 'tickets'],
     [f.valor, f.tickets, cats.modo]);
   cats.capturarVolumen(0, '');
-  Check('MT11 volumetria vacia = vuelve a la calculada', ['23.93', 418], [f.valor, cats.volumen(f)]);
+  Check('MT11 volumetria vacia = vuelve a la calculada', ['23.92', 418], [f.valor, cats.volumen(f)]);
   cats.capturarVolumen(0, '-5');
   var errs = cats.erroresFormato().map(function (e) { return e.clave; });
   Check('MT12 volumetria invalida: sin denominador; % vacio y dos errores (volumetria y tickets), nada se manda a medias', ['', true, true],
@@ -2952,15 +2952,15 @@ pruebas.push(function () {
     var salida = Elemento('out'); caja.querySelector = function (s) { return s === '[data-crear-meta="0"]' ? salida : null; };
     var t = Elemento('t'); t.setAttribute('data-crear-pct', '0'); t.value = '10';
     caja.disparar('input', { target: t });
-    Check('MT23 escribir el %: solo se actualiza lo calculado de esa fila (no la casilla)', ['= 41 tickets de 418', html],
+    Check('MT23 escribir el %: solo se actualiza lo calculado de esa fila (no la casilla)', ['= 42 tickets de 418', html],
       [salida.textContent, caja.innerHTML]);
     Check('MT24 sin volumetria fijada no viaja la volumetria (default de siempre)', false,
       v.borrador.paraEnviar().some(function (par) { return par[0] === 'volumetria'; }));
     var tv = Elemento('tv'); tv.setAttribute('data-crear-vol', '0'); tv.value = '1500';
     caja.disparar('input', { target: tv });
     var pares = v.borrador.paraEnviar();
-    Check('MT25 fijarla: viaja como volumetria y el % es el escrito; avisa lo que guardara la base (FLOOR(418 x 10%) = 41)',
-      [['volumetria', '1500'], ['cat_pct', '10'], '= 150 tickets de 1,500 · la base guardará 41 en Tickets a reducir (calcula sobre los últimos 30 días: 418)'],
+    Check('MT25 fijarla: viaja como volumetria y el % es el escrito; avisa lo que guardara la base (CEILING(418 x 10%) = 42)',
+      [['volumetria', '1500'], ['cat_pct', '10'], '= 150 tickets de 1,500 · la base guardará 42 en Tickets a reducir (calcula sobre los últimos 30 días: 418)'],
       [pares.filter(function (x) { return x[0] === 'volumetria'; })[0], pares.filter(function (x) { return x[0] === 'cat_pct'; })[0], salida.textContent]);
     var radio = p.sel('admModoTickets'); radio.value = 'tickets'; radio.checked = true; radio.disparar('change');
     html = caja.innerHTML;
@@ -2970,7 +2970,7 @@ pruebas.push(function () {
     var tk = Elemento('tk'); tk.setAttribute('data-crear-tickets', '0'); tk.value = '200';
     caja.disparar('input', { target: tk });
     pares = v.borrador.paraEnviar();
-    Check('MT27 escribir tickets: viaja el % equivalente (200 / 1500 -> 13.34%, que da 200), y que es exacto', [['cat_pct', '13.34'], '≈ 13.34% de 1,500'],
+    Check('MT27 escribir tickets: viaja el % equivalente (200 / 1500 = 13.33% hacia abajo, que da 200), y que es exacto', [['cat_pct', '13.33'], '≈ 13.33% de 1,500'],
       [pares.filter(function (x) { return x[0] === 'cat_pct'; })[0], salida.textContent.split(' · ')[0]]);
     tv.value = '200000'; caja.disparar('input', { target: tv });
     tk.value = '1'; caja.disparar('input', { target: tk });
@@ -3003,7 +3003,7 @@ pruebas.push(function () {
       v2.elegirModo('tickets');
       var tk = Elemento('tk'); tk.setAttribute('data-crear-tickets', '0'); tk.value = '42';
       p2.sel('admCats').disparar('input', { target: tk });
-      Check('MT31 sin sql/26, tickets con la calculada: 42 / 418 = 10.05%', ['cat_pct', '10.05'],
+      Check('MT31 sin sql/26, tickets con la calculada: 42 / 418 = 10.04% (hacia abajo, da 42)', ['cat_pct', '10.04'],
         v2.borrador.paraEnviar().filter(function (x) { return x[0] === 'cat_pct'; })[0]);
       // Modificar (ADM): % o tickets por categoria, volumetria nunca editable.
       var reg = p2.registro;
@@ -3028,9 +3028,9 @@ pruebas.push(function () {
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
   var M = A.MetaCategoria;
-  Check('MV1 % -> tickets: 2.5% de 1000 = 25; 10.05% de 418 = 42; hacia abajo (5% de 10 = 0.5 -> 0)', [25, 42, 0],
+  Check('MV1 % -> tickets: 2.5% de 1000 = 25 (exacto, no sube); 10.05% de 418 = 42.009 -> 43; hacia arriba (5% de 10 = 0.5 -> 1)', [25, 43, 1],
     [M.tickets(1000, '2.5'), M.tickets(418, '10.05'), M.tickets(10, '5')]);
-  Check('MV1b el caso reportado: volumen 7 con 9.46% = 0 y con 100% = 7', [0, 7], [M.tickets(7, '9.46'), M.tickets(7, '100')]);
+  Check('MV1b el caso reportado: volumen 7 con 9.46% = 0.66 -> 1 y con 100% = 7', [1, 7], [M.tickets(7, '9.46'), M.tickets(7, '100')]);
   Check('MV2 % -> tickets, bordes: 0%, 100%, vol 0, % vacio o sin volumetria = null', [0, 1000, 0, null, null],
     [M.tickets(1000, '0'), M.tickets(1000, '100'), M.tickets(0, '50'), M.tickets(1000, ''), M.tickets(null, '10')]);
   var a = M.pct(1000, '25'), b = M.pct(1000, '1000'), c = M.pct(1000, '0');
@@ -3118,7 +3118,7 @@ pruebas.push(function () {
     Check('MV18 tickets vacios: % vacio (sin meta), sin error de tickets', ['', false],
       [nueva.valor, ed.erroresFormato().some(function (e) { return e.clave === 'tickets'; })]);
     ed.capturarPct(1, '12.5');
-    Check('MV19 volver a % (escribir el %): fuente pct, los tickets se derivan hacia abajo (12.5% de 60 = 7.5 -> 7)', ['pct', '7'],
+    Check('MV19 volver a % (escribir el %): fuente pct, los tickets se derivan hacia arriba (12.5% de 60 = 7.5 -> 8)', ['pct', '8'],
       [nueva.fuente, ed.categorias.ticketsVista(nueva)]);
     var ed0 = new A.EdicionAdmin(Ini('PRB 2026-000191', { categorias: [] }), { rutas: ['/Z'] });
     ed0.categorias.agregar('/Z');
@@ -3151,8 +3151,8 @@ pruebas.push(function () {
     Check('MW3 escribir tickets: % derivado (209 / 418 = 50%), sin repintar la tabla (la casilla no se pisa)', ['50', '209', true],
       [ed.categorias.filas[0].valor, ed.categorias.filas[0].tickets, p.sel('regEdCats').innerHTML === antes]);
     editar(p, 'data-edicion-tickets', '0', '100');
-    Check('MW4 ... y es un cambio de % de la ligada (100 / 418 -> 23.93%, el menor que da 100)', true,
-      ed.cambios().some(function (c) { return c.clave === 'pct' && /^23\.93 \(meta: 100 tickets\)$/.test(c.nuevo); }));
+    Check('MW4 ... y es un cambio de % de la ligada (100 / 418 = 23.92% hacia abajo, que da 100)', true,
+      ed.cambios().some(function (c) { return c.clave === 'pct' && /^23\.92 \(meta: 100 tickets\)$/.test(c.nuevo); }));
     // Quitar sin sql/24 (el registro de prueba no la trae): marcado a mano,
     // Guardar no envia nada y lo escrito se queda.
     ed.categorias.quitar(1);
@@ -3243,6 +3243,107 @@ pruebas.push(function () {
   ed.categorias.capturarPct(0, '40');
   Check('HJ5 su % sigue editable y viaja con la ruta guardada, tal cual', ['pct_categoria', carpeta],
     ed.paraEnviar().filter(function (p) { return p[0] === 'pct_categoria'; })[0]);
+});
+
+// ---------------------------------------------------------------------------
+// RH) sql/83: ADM reactiva una categoria que ESTUVO ligada (la misma fila).
+//     La clasificacion historica no vacia se conserva (solo lectura) y solo
+//     se elige la que falta; las fechas son las originales; lo que viaja
+//     sigue siendo agregar_categoria.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var ini = Ini('PRB 2026-000078', { categorias: [Cat('/A/Cat 1', 0.3)] });
+  var ed = new A.EdicionAdmin(ini, { rutas: ['/A/Cat 1', '/A/Hist', '/A/Nueva'], pos: ['PO 1'], sos: ['SO x'],
+                                     tiposIniciativa: ['Problem', 'Mejora'], tiposAgrupado: ['Problem', 'Mejora'] });
+  Check('RH0 sin historicas: agregar se ve y viaja como siempre (Nueva)', [true, true],
+    [ed.categorias.agregar('/A/Hist').ok, /ini-cat-estado nueva">Nueva/.test(A.htmlCategoriasEdicion(ed, null))]);
+  ed.categorias.quitar(1);
+  ed.categorias.fijarHistoricas([{ categoria: '/A/Hist', tipo_iniciativa: 'Problem', tipo_agrupado: null, f_creacion: '2026-01-05', f_analisis: '2026-01-20' }]);
+  ed.categorias.agregar('/A/Hist');
+  ed.categorias.agregar('/A/Nueva');
+  var h = A.htmlCategoriasEdicion(ed, null);
+  Check('RH1 la historica: «Reactivar (estuvo ligada)», no «Nueva»; la otra sigue Nueva', [true, true],
+    [/\/A\/Hist<\/span> <span class="ini-cat-estado reactivar"[^>]*>Reactivar \(estuvo ligada\)/.test(h), /\/A\/Nueva<\/span> <span class="ini-cat-estado nueva">Nueva/.test(h)]);
+  Check('RH2 la Clasificacion historica se conserva (solo lectura); la Agrupacion que falta se elige', [true, false, true],
+    [/Problem <span class="ini-origen"[^>]*>Se conserva/.test(h), /data-edicion-tipo="1\|tipo_iniciativa"/.test(h), /data-edicion-tipo="1\|tipo_agrupado"/.test(h)]);
+  Check('RH3 fechas originales, no calculadas', [true, false],
+    [/20\/01\/2026<\/span> <span class="ini-origen"[^>]*>Original/.test(h), ed.categorias.fechasNuevas().some(function (x) { return x.categoria === '/A/Hist'; })]);
+  Check('RH4 capturar la Clasificacion historica no se acepta; la que falta si', [false, true],
+    [ed.categorias.capturarTipo(1, 'tipo_iniciativa', 'Mejora'), ed.categorias.capturarTipo(1, 'tipo_agrupado', 'Mejora')]);
+  var cambio = ed.categorias.cambios().filter(function (c) { return c.nuevo.indexOf('/A/Hist') === 0; })[0];
+  Check('RH5 pendiente: «Reactivar categoría» con la clasificacion efectiva y sus fechas', ['Reactivar categoría', true, true],
+    [cambio.rotulo, cambio.nuevo.indexOf('Problem / Mejora') >= 0, cambio.nuevo.indexOf('conserva sus fechas (análisis 2026-01-20)') >= 0]);
+  ed.categorias.capturarPct(1, '20');
+  var pares = ed.paraEnviar().filter(function (p) { return /^agregar_/.test(p[0]); });
+  Check('RH6 lo que viaja sigue siendo agregar_categoria; la Clasificacion historica va vacia (la base la conserva)',
+    [['agregar_categoria', '/A/Hist'], ['agregar_pct', '20'], ['agregar_tipo_iniciativa', ''], ['agregar_tipo_agrupado', 'Mejora']],
+    pares.slice(0, 4));
+  // Al reves (falta la Clasificacion) y completa (no se elige nada).
+  var ed2 = new A.EdicionAdmin(ini, { rutas: ['/A/Cat 1', '/A/Hist2', '/A/Hist3'], pos: ['PO 1'], sos: ['SO x'],
+                                      tiposIniciativa: ['Problem', 'Mejora'], tiposAgrupado: ['Problem', 'Mejora'] });
+  ed2.categorias.fijarHistoricas([{ categoria: '/A/Hist2', tipo_iniciativa: null, tipo_agrupado: 'Problem', f_creacion: '2026-02-01', f_analisis: '2026-02-16' },
+                                  { categoria: '/A/Hist3', tipo_iniciativa: 'Problem', tipo_agrupado: 'Problem', f_creacion: '2026-03-01', f_analisis: '2026-03-16' }]);
+  ed2.categorias.agregar('/A/Hist2');
+  ed2.categorias.agregar('/A/Hist3');
+  var h2 = A.htmlCategoriasEdicion(ed2, null);
+  Check('RH7 falta solo la Clasificacion: ese selector se puede usar; la Agrupacion historica es solo lectura', [true, false, true, false],
+    [/data-edicion-tipo="1\|tipo_iniciativa"/.test(h2), /data-edicion-tipo="1\|tipo_agrupado"/.test(h2),
+     ed2.categorias.capturarTipo(1, 'tipo_iniciativa', 'Mejora'), ed2.categorias.capturarTipo(1, 'tipo_agrupado', 'Mejora')]);
+  Check('RH8 clasificacion historica completa: ningun selector; nada se captura; fechas originales de cada una', [false, false, false, false, true, true],
+    [/data-edicion-tipo="2\|tipo_iniciativa"/.test(h2), /data-edicion-tipo="2\|tipo_agrupado"/.test(h2),
+     ed2.categorias.capturarTipo(2, 'tipo_iniciativa', 'Mejora'), ed2.categorias.capturarTipo(2, 'tipo_agrupado', 'Mejora'),
+     /16\/02\/2026<\/span> <span class="ini-origen"[^>]*>Original/.test(h2), /16\/03\/2026<\/span> <span class="ini-origen"[^>]*>Original/.test(h2)]);
+});
+
+// ---------------------------------------------------------------------
+// RC: Tickets a reducir redondeado HACIA ARRIBA (CEILING, 2026-11-10).
+// Los casos donde CEILING, ROUND (mitad arriba) y FLOOR dan distinto; las
+// dos implementaciones del navegador (ticketsDe de iniciativas.js y
+// MetaCategoria.tickets de iniciativa-admin.js) dan lo mismo en toda una
+// malla; la vuelta tickets -> % -> tickets; y lo que NO cambia.
+// ---------------------------------------------------------------------
+pruebas.push(function () {
+  var M = A.MetaCategoria;
+  // [vol, %, CEILING, ROUND, FLOOR]
+  var casos = [[7, '9.46', 1, 1, 0], [7, '50', 4, 4, 3], [418, '10', 42, 42, 41], [1247, '12.5', 156, 156, 155],
+               [418, '12.5', 53, 52, 52], [1247, '33.33', 416, 416, 415], [418, '25', 105, 105, 104], [1000, '0.01', 1, 0, 0],
+               [3, '33.33', 1, 1, 0], [1247, '12', 150, 150, 149]];
+  Check('RC1 CEILING en los casos donde difiere de ROUND y de FLOOR (ticketsDe y MetaCategoria.tickets)',
+    casos.map(function (c) { return [c[2], c[2]]; }), casos.map(function (c) { return [I.ticketsDe(c[0], c[1]), M.tickets(c[0], c[1])]; }));
+  Check('RC2 y de verdad difieren (la prueba distingue): CEILING != FLOOR en todos; != ROUND en 418 x 12.5% y 1000 x 0.01%', [true, true],
+    [casos.every(function (c) { return c[2] !== c[4]; }), casos.filter(function (c) { return c[2] !== c[3]; }).length === 2]);
+  Check('RC3 lo exacto no sube: 120 x 20% = 24, 30 x 50% = 15, 1000 x 2.5% = 25, 418 x 100% = 418; 0% y volumetria 0 = 0',
+    [24, 15, 25, 418, 0, 0, 24, 15, 25, 418, 0, 0],
+    [I.ticketsDe(120, '20'), I.ticketsDe(30, '50'), I.ticketsDe(1000, '2.5'), I.ticketsDe(418, '100'), I.ticketsDe(418, '0'), I.ticketsDe(0, '50'),
+     M.tickets(120, '20'), M.tickets(30, '50'), M.tickets(1000, '2.5'), M.tickets(418, '100'), M.tickets(418, '0'), M.tickets(0, '50')]);
+  // Malla: las dos implementaciones coinciden y son el techo exacto (en enteros).
+  var difieren = 0, mal = 0, vols = [0, 1, 3, 7, 10, 30, 99, 418, 1000, 1247, 30000, 999999];
+  vols.forEach(function (v) {
+    for (var c = 0; c <= 10000; c += 7) {
+      var pc = String(c / 100), t1 = I.ticketsDe(v, pc), t2 = M.tickets(v, pc);
+      if (t1 !== t2) difieren++;
+      if (t1 !== Math.floor((v * c + 9999) / 10000) || t1 * 10000 < v * c || (t1 - 1) * 10000 >= v * c && v * c > 0) mal++;
+    }
+  });
+  Check('RC4 malla de 12 volumetrias x 1429 %: ticketsDe = MetaCategoria.tickets = techo de vol x % (ni debajo, ni un ticket de mas)', [0, 0], [difieren, mal]);
+  // Vuelta: tickets -> % -> tickets nunca da MENOS de lo pedido; si es exacto, da lo pedido.
+  var menos = 0, noExacto = 0, exactos = 0;
+  [7, 30, 418, 1000, 1247].forEach(function (v) {
+    for (var n = 0; n <= v; n += Math.max(1, Math.floor(v / 97))) {
+      [M.pct(v, String(n)), M.pctEntero(v, String(n)), I.pctDeTickets(v, String(n))].forEach(function (r, i) {
+        var da = i === 2 ? I.ticketsDe(v, r.pct) : M.tickets(v, r.pct);
+        if (da < n) menos++;
+        if (r.exacto !== (da === n) || r.tickets !== da) noExacto++;
+        if (i === 0 && !r.exacto) exactos++;   // dos decimales con vol <= 10000: un paso es <= 1 ticket
+      });
+    }
+  });
+  Check('RC5 tickets -> % -> tickets (dos decimales y entero): nunca menos de lo pedido; "exacto" dice la verdad; con dos decimales siempre exacto', [0, 0, 0],
+    [menos, noExacto, exactos]);
+  Check('RC6 la proporcion exacta se conserva: 15 de 30 = 50%; 25 de 1000 = 2.5%; 8 de 80 = 10%; 209 de 418 = 50%', ['50', '2.5', '10', '50', '10'],
+    [M.pct(30, '15').pct, M.pct(1000, '25').pct, M.pctEntero(80, '8').pct, M.pct(418, '209').pct, I.pctDeTickets(80, '8').pct]);
+  Check('RC7 no cambia: el % guardado (fraccion de 4 decimales) ni el rechazo de % invalidos', [0.125, null, null, null],
+    [I.fraccionDe('12.5'), I.ticketsDe(418, '12.345'), M.tickets(418, '101'), I.ticketsDe(12.5, '10')]);
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

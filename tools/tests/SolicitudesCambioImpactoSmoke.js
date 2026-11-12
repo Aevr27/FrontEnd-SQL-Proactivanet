@@ -108,7 +108,7 @@ function Detalle(o) {
   var volUrls = pedidos.filter(function (u) { return /volumetria/.test(u); });
   Check('I2 pide la volumetria SLOT 0 de cada categoria (sin alcance=total)', [3, false],
     [volUrls.length, volUrls.some(function (u) { return /alcance=total/.test(u); })]);
-  Check('I3 418 x 25% = 104 (FLOOR); volumetria 0 -> 0; error -> —', ['418', '104', '0', '0', '—', '—'],
+  Check('I3 418 x 25% = 104.5 -> 105 (CEILING); volumetria 0 -> 0; error -> —', ['418', '105', '0', '0', '—', '—'],
     [doc.els['solVol-0'].innerHTML, doc.els['solTk-0'].innerHTML, doc.els['solVol-1'].innerHTML, doc.els['solTk-1'].innerHTML,
      doc.els['solVol-2'].innerHTML, doc.els['solTk-2'].innerHTML]);
   Check('I3 la cuenta es la de ticketsDe (no una propia)', ticketsDe(418, '25') + '', doc.els['solTk-0'].innerHTML);
@@ -130,7 +130,7 @@ function Detalle(o) {
   var hh = C.htmlDetalle(hist, {}, {});
   Check('I6 historico con decimales: 12.5% y 33.33% tal cual; el entero 25% sin decimales', [true, true, true, false],
     [/>12\.5%</.test(hh), />33\.33%</.test(hh), />25%</.test(hh), />25\.0+%</.test(hh)]);
-  Check('I6 historico: tickets con ticketsDe sobre el % guardado (418 x 12.5% = 52; 1247 x 33.33% = 415)', ['52', '415'],
+  Check('I6 historico: tickets con ticketsDe sobre el % guardado (418 x 12.5% = 52.25 -> 53; 1247 x 33.33% = 415.63 -> 416)', ['53', '416'],
     [ticketsDe(418, '12.5') + '', ticketsDe(1247, '33.33') + '']);
   var viejo = Detalle(); viejo.categorias_detalle.forEach(function (c) { delete c.otras_iniciativas; });
   Check('I5 servidor anterior (sin el campo): sin la seccion de otras', false, /Otras iniciativas activas/.test(C.htmlDetalle(viejo, {}, {})));

@@ -237,12 +237,11 @@ function volSlotOMes(c, periodo){
 
 // ---- Tipo de registro: Todos / Incidentes / Requerimientos [TIPO] ----
 // El handler manda, ademas del volumen de siempre (vol_slot / vol_mes =
-// [Total general] de vw_TBSlotCAT / vw_TBMesCAT MENOS los tipos SorIA
-// Incidentes / SorIA Peticiones, ExperienciaQueries.SinSorIA; "Sin tipo" y
-// los demas incluidos), dos series por categoria en vol_tipo:
-//   inc  columna [Incidencia]            (Tipo = 'Incidencia')
-//   req  columna [Petición de Servicio]  (Tipo = 'Petición de Servicio')
-// Ninguna sale de restar: cada una es su columna de la vista. Elegir un tipo
+// [Total general] de vw_TBSlotCAT / vw_TBMesCAT, con todos los tipos), dos
+// series por categoria en vol_tipo (ExperienciaQueries.VolumenDeColumnas):
+//   inc  [Incidencia] + [SorIA Incidentes]
+//   req  [Petición de Servicio] + [SorIA Peticiones]
+// Ninguna sale de restar: cada una suma columnas de la vista. Elegir un tipo
 // sustituye en cada categoria (categorias y categorias_v2) los campos de
 // volumen por los de ese tipo, y "Todos" devuelve los originales tal cual,
 // asi que todas las graficas, tablas y KPIs siguen leyendo los mismos
@@ -346,9 +345,8 @@ const TAG_PRON=' <span class="tag-pron">Pronóstico</span>';
    handlers/experiencia_automatizados.ashx, que cuenta las mismas filas que
    Kpis (DashboardQueries.AutomatizadosPorCategoria) y las reparte por los
    dueños de la categoria del ticket (DirectorioOrganizacional, el mismo de
-   las categorias del tablero y del export). Sin los tipos SorIA, igual que
-   el volumen (ExperienciaQueries.SinSorIA): en Todos da menos que la
-   tarjeta de SLA, que si los cuenta. Antes era una llamada a
+   las categorias del tablero y del export). Con los tipos SorIA, igual que
+   el volumen (ExperienciaQueries.VolumenDeColumnas). Antes era una llamada a
    kpis.ashx por periodo -10 en SLOT, hasta 12 en Mes- con la consulta de
    KPIs entera detras.
 

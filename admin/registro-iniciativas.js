@@ -611,11 +611,13 @@ window.RegistroIniciativas = (function () {
     var T = window.IniciativaAdmin && window.IniciativaAdmin.TiposPorPrefijo;
     return T ? T.agrupacion(T.clasificacion(String(folio || '').slice(0, 3))) : '';
   }
-  function excedeTope(cap, iniciativa, ruta, nuevo, nueva, estadoFinal) {
+  // agrupNueva (sql/83, opcional): la Agrupacion EFECTIVA de una que se
+  // reactiva (la historica); sin ella, la del prefijo, como siempre.
+  function excedeTope(cap, iniciativa, ruta, nuevo, nueva, estadoFinal, agrupNueva) {
     if (!cap || !iniciativa || !ruta) return null;
     var pedido = Math.round(Number(nuevo) * 100), anterior = null, agrup;
     if (!isFinite(pedido) || !enListaPlana(cap.estadosActivos, estadoFinal)) return null;
-    if (nueva) agrup = agrupacionNueva(iniciativa.folio);
+    if (nueva) agrup = agrupNueva !== undefined ? agrupNueva : agrupacionNueva(iniciativa.folio);
     else {
       var c = (iniciativa.categorias || []).filter(function (x) { return x.categoria === ruta; })[0];
       if (!c) return null;
@@ -826,6 +828,9 @@ window.RegistroIniciativas = (function () {
       // Varios cambios en UNA solicitud (tipo varios, sql/34): solo si el
       // servidor lo dice.
       r.solicitudesVarios = json.solicitudes_varios === true;
+      // Reactivar una categoria que estuvo ligada (sql/83): solo si el
+      // servidor lo dice se pide la lista de historicas.
+      r.reactivacionCategorias = json.reactivacion_categorias === true;
       // "Solicitar cambios" sin rol de Admin (PO / SO, sql/37): los folios
       // propios que el servidor mando (cambios_pso). Solo pinta el boton.
       r.cambiosPso = Array.isArray(json.cambios_pso) ? json.cambios_pso.filter(esTexto) : [];
@@ -1645,6 +1650,11 @@ window.RegistroIniciativas = (function () {
       this.estados = Array.isArray(opciones.estados) ? opciones.estados : [];
       this.rutas = Array.isArray(opciones.rutas) ? opciones.rutas : [];
       this.rutasEstado = opciones.rutasEstado || (this.rutas.length ? 'ok' : '');
+      // sql/83: las categorias que ESTUVIERON ligadas a esta iniciativa (las
+      // que el servidor deja ver: accion=historicas). Agregar una la
+      // REACTIVA; solo cambia la etiqueta y el tope estimado: lo que viaja
+      // sigue siendo agregar_categoria y el servidor vuelve a decidir.
+      this.historicas = Array.isArray(opciones.historicas) ? opciones.historicas : [];
       // Agregar categoria por la cascada de Nueva solicitud (PO -> SO ->
       // Categoria, CascadaOrganizacional) sobre las MISMAS filas
       // { director, po, so, categoria } del catalogo (opciones.filas). Sin
@@ -1661,8 +1671,8 @@ window.RegistroIniciativas = (function () {
       // META EN % O EN TICKETS, por categoria (ruta -> { modo, tickets }):
       // con 'tickets' se escribe cuantos tickets reducir y el % sale de
       // MetaCategoria.pctEntero (admin/iniciativa-admin.js, la regla de
-      // Crear y de Nueva solicitud a % entero: el menor % sin decimales que
-      // da al menos esos tickets, con FLOOR) sobre la volumetria SLOT 0 de la ruta (vols:
+      // Crear y de Nueva solicitud a % entero: la proporcion exacta hacia abajo
+      // si con CEILING da esos tickets; si no, el siguiente) sobre la volumetria SLOT 0 de la ruta (vols:
       // ruta -> { estado, valor }, la de Nueva solicitud). Lo que VIAJA y se
       // guarda sigue siendo el % (pct_valor / agregar_pct): los tickets son
       // una meta estimada con la volumetria de hoy, no un numero que la base
@@ -1761,6 +1771,16 @@ window.RegistroIniciativas = (function () {
 
     categoriasLigadas() { return (this.iniciativa.categorias || []).map(function (c) { return c.categoria; }); }
 
+    // sql/83: la lista de historicas llego (o se recargo).
+    fijarHistoricas(lista) { this.historicas = Array.isArray(lista) ? lista : []; }
+    // La historica de esa ruta ({ categoria, tipo_iniciativa, tipo_agrupado,
+    // f_creacion, f_analisis }), o null. Misma llave que agregar (plano).
+    historica(ruta) {
+      var k = plano(ruta);
+      return this.historicas.filter(function (h) { return plano(h.categoria) === k; })[0] || null;
+    }
+    esReactivacion(ruta) { return !!this.historica(ruta); }
+
     // El % actual (texto) de una categoria ligada, o null.
     pctActual(ruta) {
       var c = (this.iniciativa.categorias || []).filter(function (x) { return x.categoria === ruta; })[0];
@@ -1817,7 +1837,7 @@ window.RegistroIniciativas = (function () {
         return { ok: false, ruta: ruta, mensaje: ruta + ' ya está en la lista para agregar.' };
       }
       this.nuevas.push({ categoria: ruta, valor: '' });
-      return { ok: true, ruta: ruta, mensaje: '' };
+      return { ok: true, ruta: ruta, mensaje: '', reactivar: this.esReactivacion(ruta) };
     }
 
     capturarPctNueva(n, texto) {
@@ -1912,7 +1932,11 @@ window.RegistroIniciativas = (function () {
       var t = this.pctPedido(ruta);
       if (!pctEnteroValido(t)) return '';
       var nueva = this.categoriasLigadas().indexOf(ruta) < 0;
-      var x = excedeTope(this.capacidad, this.iniciativa, ruta, t, nueva, estadoFinal === undefined ? this.iniciativa.estado : estadoFinal);
+      // sql/83: una que se reactiva consume con su Agrupacion historica (si
+      // la tiene); si no, con la del prefijo, como una nueva.
+      var h = nueva ? this.historica(ruta) : null;
+      var agrup = h && String(h.tipo_agrupado || '').trim() ? String(h.tipo_agrupado).trim() : undefined;
+      var x = excedeTope(this.capacidad, this.iniciativa, ruta, t, nueva, estadoFinal === undefined ? this.iniciativa.estado : estadoFinal, agrup);
       if (!x) return '';
       var v = this.vols[ruta];
       return mensajeTope(ruta, x, this.meta(ruta).modo === 'tickets' && v ? v.valor : null);
@@ -2630,7 +2654,40 @@ window.RegistroIniciativas = (function () {
                // Varios cambios en UNA solicitud (sql/34).
                varios: !!(r && r.solicitudesVarios),
                // Tope de 100% por categoria al pedir un % (excedeTope).
-               capacidad: r ? { iniciativas: r.iniciativas, agrupadores: r.agrupadores, estadosActivos: r.estadosActivos } : null };
+               capacidad: r ? { iniciativas: r.iniciativas, agrupadores: r.agrupadores, estadosActivos: r.estadosActivos } : null,
+               // sql/83: las que estuvieron ligadas a la iniciativa abierta (si ya llegaron).
+               historicas: (this.historicasPorFolio || {})[this.abierta] || [] };
+    }
+
+    // sql/83: pide al servidor las categorias que ESTUVIERON ligadas a la
+    // iniciativa (accion=historicas, la MISMA autorizacion que enviar) y, si
+    // el formulario de esa iniciativa sigue abierto, repinta solo su bloque de
+    // categorias. Sin la migracion, sin permiso o con error: no hay etiqueta
+    // y todo sigue como antes (el servidor decide al enviar y al aplicar).
+    cargarHistoricas(folio, pedir) {
+      var self = this;
+      if (!(this.registro && this.registro.reactivacionCategorias)) return Promise.resolve([]);
+      pedir = pedir || this.pedirHistoricas || function (url) { return fetch(url, { cache: 'no-store', credentials: 'same-origin' }); };
+      this.historicasPorFolio = this.historicasPorFolio || {};
+      return Promise.resolve()
+        .then(function () { return pedir(URL_SOLICITUDES + '?accion=historicas&folio=' + encodeURIComponent(folio)); })
+        .then(function (r) { return r && r.ok ? r.json() : null; })
+        .then(function (j) {
+          var lista = j && j.disponible === true && Array.isArray(j.historicas) ? j.historicas : [];
+          self.historicasPorFolio[folio] = lista;
+          if (self.lista && self.lista.iniciativa && self.lista.iniciativa.folio === folio) self.lista.opciones.historicas = lista;
+          if (self.cambio && self.cambio.iniciativa && self.cambio.iniciativa.folio === folio) {
+            self.cambio.fijarHistoricas(lista);
+            if (self.cambioAbierto) self.pintarCategoriasCambio();
+          }
+          // Editor de ADM (Modificar) de esa iniciativa: "Reactivar" y la
+          // clasificacion historica que se conserva.
+          if (self.edicion && self.abierta === folio && self.edicion.categorias && self.edicion.categorias.fijarHistoricas) {
+            self.edicion.categorias.fijarHistoricas(lista);
+            self.pintarCategoriasEdicion();
+          }
+          return lista;
+        }, function () { return []; });
     }
 
     // Solo UX: la edicion de ADM no llama al servidor en esta fase.
@@ -3828,7 +3885,10 @@ window.RegistroIniciativas = (function () {
             var pct = '<label class="ini-ed-pct"><span class="ini-sr">% para ' + Escape.html(x.categoria) + '</span>' +
               '<input type="number" inputmode="numeric" min="0" max="100" step="1" data-cambio-nueva-pct="' + n + '" value="' + Escape.attr(x.valor) +
               '" aria-describedby="regCambioTope-n' + n + '" aria-invalid="' + invalido(x.categoria) + '"> %</label>';
-            return '<tr><td class="ini-cat-celda">' + nombre(x.categoria, 'n' + n, o) + ' <span class="ini-cat-estado nueva">Agregar</span></td>' +
+            var etiqueta = c.esReactivacion(x.categoria)
+              ? '<span class="ini-cat-estado reactivar" title="Estuvo ligada a esta iniciativa y se dio de baja: al aplicarse se reactiva con sus fechas y su clasificación originales">Reactivar (estuvo ligada)</span>'
+              : '<span class="ini-cat-estado nueva">Agregar</span>';
+            return '<tr><td class="ini-cat-celda">' + nombre(x.categoria, 'n' + n, o) + ' ' + etiqueta + '</td>' +
               '<td class="num">—</td><td>' + celdaMetaCambio(c, x.categoria, 'n' + n, pct, '', invalido(x.categoria)) + tope(x.categoria, 'n' + n) + '</td>' +
               '<td><button type="button" class="btn linea chico" data-cambio-quitar="' + n + '">Quitar</button></td></tr>' +
               htmlOtrasFila(o, 'n' + n, abiertas[rutaClave(x.categoria)] === true, 4);
@@ -3974,10 +4034,14 @@ window.RegistroIniciativas = (function () {
     nuevaEdicion(i) {
       var op = this.opcionesEstado();
       var duenos = this.duenosCatalogo || { po: [], so: [] };
-      return new window.IniciativaAdmin.EdicionAdmin(i,
+      var ed = new window.IniciativaAdmin.EdicionAdmin(i,
         { rutas: this.rutasAdmCatalogo || op.rutas, rutasEstado: op.rutasEstado, estados: op.estados, subestados: op.subestados,
           tiposIniciativa: op.tiposIniciativa, tiposAgrupado: op.tiposAgrupado,
           pos: duenos.po, sos: duenos.so, duenosYQuitar: !!(this.registro && this.registro.edicionDuenosQuitar) });
+      // sql/83: las historicas ya leidas de esa iniciativa (si llegaron).
+      var hist = (this.historicasPorFolio || {})[i.folio];
+      if (hist && ed.categorias && ed.categorias.fijarHistoricas) ed.categorias.fijarHistoricas(hist);
+      return ed;
     }
 
     // Crear > existente: abre el detalle de esa iniciativa con el foco en
@@ -4057,6 +4121,8 @@ window.RegistroIniciativas = (function () {
       this.edicion = this.puedeEditar() ? (abrir && this.edicion ? this.edicion : this.nuevaEdicion(i)) : null;
       if (!abrir || !habia) this.pintarEditables();
       if (abrir && this.edicion) this.enfocarTexto('titulo');
+      // sql/83: la etiqueta "Reactivar" del editor llega aparte (solo ADM edita).
+      if (abrir && this.edicion) this.cargarHistoricas(i.folio);
     }
 
     // Revision local (sin servidor): errores de formato y cambios.
@@ -4392,6 +4458,8 @@ window.RegistroIniciativas = (function () {
       this.$('regCambio').innerHTML = abrir ? this.htmlCambio() : '';
       this.$('regCambio').hidden = !abrir;
       if (abrir) this.montarDatosCambio();
+      // sql/83: la etiqueta "Reactivar" llega aparte; sin ella todo sigue igual.
+      if (abrir) this.cargarHistoricas(i.folio);
       // Sin rol ADM/MOD el boton no existe (htmlAcciones).
       if (this.$('regCambioBoton')) this.$('regCambioBoton').setAttribute('aria-expanded', abrir ? 'true' : 'false');
       var foco = abrir ? this.$('regCambioCampo') : this.$('regCambioBoton');

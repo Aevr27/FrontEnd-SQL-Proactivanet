@@ -1044,6 +1044,8 @@ html.ini-detalle-abierto { overflow: hidden; }
 .ini-cat-estado { display: inline-block; margin-left: 4px; padding: 0 6px; border-radius: 999px;
   font-size: 10.5px; background: var(--bg-2); color: var(--muted); }
 .ini-cat-estado.nueva { color: var(--accent-ink); }
+/* sql/83: una categoria que estuvo ligada y se reactiva (misma fila). */
+.ini-cat-estado.reactivar { color: var(--accent-ink); font-weight: 600; }
 /* "Solicitar cambios" > Categorias. La tabla mide lo que su contenido y
    nunca mas que su caja (.ini-det-tabla desplaza si hace falta): con el
    width: 100% de la tabla global (dashboard.css) el sobrante se repartia

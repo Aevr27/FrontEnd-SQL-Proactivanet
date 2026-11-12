@@ -727,7 +727,7 @@ public static class AccesoIniciativasHttpSmoke
             // rechazar, listar y detalle siguen siendo de ADM.
             Check("F2 solicitudes: ExigirSolicitud solo con enviar / cancelar / reemplazar sin rol; lo demas Exigir + ExigirAdm; rol PSO del servidor",
                   "True|True|True|True|False",
-                  (t.Contains("var delSolicitante = accion == \"enviar\" || accion == \"cancelar\" || accion == \"reemplazar\";")
+                  (t.Contains("var delSolicitante = accion == \"enviar\" || accion == \"cancelar\" || accion == \"reemplazar\" || accion == \"historicas\";")
                    && t.Contains("if (delSolicitante && !AccesoAdmin.PuedeEntrar(context))")) + "|" +
                   t.Contains("else if (!AccesoAdmin.Exigir(context)) return;") + "|" +
                   t.Contains("&& !AccesoAdmin.ExigirAdm(context, \"Solo un administrador (ADM) revisa") + "|" +

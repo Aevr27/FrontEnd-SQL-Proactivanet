@@ -89,6 +89,22 @@ Check('R8 DATOS en el detalle: al enviar / pedido / ahora por dato pedido; SO no
   [/<th scope="row">Título<\/th><td>Uno<\/td><td>Uno &lt;nuevo&gt;<\/td><td>Uno<\/td>/.test(html),
    /<th scope="row">Product Owner capturado<\/th><td>PO viejo<\/td><td>\(vacío\)<\/td><td>PO viejo<\/td>/.test(html),
    /Service Owner capturado/.test(html), /data-sol-accion="aplicar">Aplicar solicitud/.test(html)]);
+// sql/83: un AGREGAR que REACTIVA una categoria que estuvo ligada (el servidor lo marca).
+var reac = { categoria: '/B/Hist', accion: 'AGREGAR', pct_anterior: null, pct_nuevo: '20', pct_actual: null, tipo_iniciativa: null, tipo_agrupado: null,
+  ligada: false, ligada_alguna_vez: true, reactivacion: true, tipo_iniciativa_historica: 'Problem', tipo_agrupado_historica: null, faltan_clasificacion: ['tipo_agrupado'] };
+html = C.htmlDetalle(Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [reac] }), { iniciativa: ['Problem', 'SorIA'], agrupado: ['Problem', 'Mejora'] });
+Check('X1 reactivacion (sql/83): accion Reactivar, «Reactivación (estuvo ligada)» (no «ya ligada»), la historica se conserva y SOLO se elige la Agrupacion que falta',
+  [true, true, false, true, false, true, true],
+  [/<td>Reactivar<\/td>/.test(html), /Reactivación \(estuvo ligada\)/.test(html), /ya ligada/.test(html),
+   /Problem <span class="ini-origen">histórica, se conserva<\/span>/.test(html), /data-clas-ti="0"/.test(html), /data-clas-ta="0"/.test(html),
+   /<strong>Reactivación:<\/strong>[\s\S]*elige solo lo que le falta/.test(html)]);
+var reacCompleta = Object.assign({}, reac, { tipo_agrupado_historica: 'Problem', faltan_clasificacion: [] });
+html = C.htmlDetalle(Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [reacCompleta] }), { iniciativa: ['Problem'], agrupado: ['Problem'] });
+Check('X2 reactivacion con historica completa: sin selectores ni aviso de «sin clasificación»', [false, false, false],
+  [/data-clas-ti="0"/.test(html), /data-clas-ta="0"/.test(html), /llegó sin clasificación/.test(html)]);
+var sin83 = { categoria: '/B/Hist', accion: 'AGREGAR', pct_anterior: null, pct_nuevo: '20', pct_actual: null, tipo_iniciativa: 'Problem', tipo_agrupado: 'Problem', ligada: false, ligada_alguna_vez: true };
+Check('X3 sin la migracion (el servidor no marca reactivacion): «ya ligada» como antes, sin «Reactivación»', [true, false],
+  (function (x) { return [/ya ligada/.test(x), /Reactivación/.test(x)]; })(C.htmlDetalle(Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [sin83] }), {})));
 // VARIOS (sql/34): Estado, dos fechas por etapa, una categoria y el Titulo
 // en UNA solicitud; ADM ve cada cambio y decide sobre la solicitud entera.
 var varios = Pendiente({ tipo: 'VARIOS', campo_fecha: null, estado_anterior: 'En Solución', estado_nuevo: 'En Monitoreo',
@@ -387,6 +403,28 @@ cola.abrir().then(function () {
                  { id: 2, fecha_solicitud_utc: null }, { id: 7, fecha_solicitud_utc: '2026-10-01T09:00:00Z' }];
         return [o(e).map(function (x) { return x.id; }), e.map(function (x) { return x.id; })];
       })());
+  });
+}).then(function () {
+  // sql/83: aplicar una reactivacion manda SOLO lo que le falta (la historica se conserva).
+  cola.detalle = Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [reac] });
+  doc.selectores['[data-clas-ti="0"]'] = null;
+  doc.selectores['[data-clas-ta="0"]'] = { value: 'Mejora' };
+  doc.els.solComentario = Elemento('solComentario'); doc.els.solComentario.value = '';
+  var antes = pedidos.length;
+  responder(200, { aplicada: true, id_solicitud: 41 });
+  responder(200, { solicitudes: [] });
+  responder(200, Pendiente({ estado: 'APLICADA', revisado_por: 'SORIANA\\t_adm', fecha_revision_utc: '2026-10-19T17:00:00Z' }));
+  return cola.aplicar().then(function () {
+    var post = pedidos.slice(antes).filter(function (x) { return x.metodo === 'POST'; })[0];
+    Check('X4 aplicar una reactivacion: solo la Agrupacion que falta; la Clasificacion historica va vacia (se conserva)', ['/B/Hist', '', 'Mejora'],
+      [post.campos.clas_categoria, post.campos.clas_tipo_iniciativa, post.campos.clas_tipo_agrupado]);
+    cola.detalle = Pendiente({ tipo: 'CATEGORIAS', campo_fecha: null, categorias_detalle: [reac] });
+    doc.selectores['[data-clas-ta="0"]'] = { value: '' };
+    var n = pedidos.length;
+    return cola.aplicar().then(function () {
+      Check('X5 sin elegir la que falta: no se manda nada y se dice', [n, true],
+        [pedidos.length, /Elige Tipo de iniciativa y Agrupación de: \/B\/Hist/.test(doc.els.solDetMsg.innerHTML)]);
+    });
   });
 }).then(function () {
   console.log(fallos === 0 ? 'TODO PASO' : fallos + ' FALLO(S)');

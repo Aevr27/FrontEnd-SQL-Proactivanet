@@ -62,6 +62,12 @@ public sealed class GestionIniciativaAdminService
             // PO / SO y quitar: solo si la base ya tiene sql/24 (antes de
             // validar, para que validador, plan y escritor digan lo mismo).
             DeteccionSql24.Revisar(cn);
+            // sql/83: con la reactivacion en la base, las asociaciones de baja
+            // de esta iniciativa (agregar una la reactiva: misma fila, fechas y
+            // clasificacion historica). Sin 83: nada (la base dice 51008).
+            DeteccionSolicitudesCambio.Revisar(cn);
+            if (actual != null && PersistenciaSolicitudesCambio.ReactivacionActiva())
+                actual.Historicas = CategoriasHistoricas.Leer(cn, folio);
             // Rutas vigentes (para agregar categorias) y los valores de
             // Estado/Subestado que ya existen: las mismas lecturas que Crear
             // y que el registro.

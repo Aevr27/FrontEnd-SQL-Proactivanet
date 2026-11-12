@@ -3,9 +3,10 @@
 // Server. Es lo que pide experiencia.js para la tarjeta "Volumen -
 // Automatizado" con Incidentes / Requerimientos. Comprueba:
 //
-//   1) el query string: ?tipo=inc -> 'Incidencia'; ?tipo=req -> las dos
-//      grafias de 'Peticion de Servicio' (con y sin tilde), igual que la
-//      columna [Peticion de Servicio] de vw_TBSlotCAT; cualquier otra cosa,
+//   1) el query string: ?tipo=inc -> 'Incidencia' + 'SorIA Incidentes';
+//      ?tipo=req -> las dos grafias de 'Peticion de Servicio' (con y sin
+//      tilde) + 'SorIA Peticiones', las columnas que suma
+//      ExperienciaQueries.VolumenDeColumnas; cualquier otra cosa,
 //      o nada, es Todos (lista vacia);
 //   2) Todos: Predicados() arma EXACTAMENTE el mismo texto y parametros que
 //      antes (la peticion de siempre, la misma clave de cache);
@@ -99,9 +100,9 @@ public static class TipoRegistroSlaSmoke
         string peticionTilde = "Petici" + (char)0xF3 + "n de Servicio";
 
         Console.WriteLine("--- 1) Query string");
-        Chk("tipo=inc -> Incidencia", "Incidencia", Tipos("tipo=inc"));
-        Chk("tipo=req -> las dos grafias", peticionTilde + "|Peticion de Servicio", Tipos("tipo=req"));
-        Chk("tipo=INC (mayusculas) -> Incidencia", "Incidencia", Tipos("tipo=INC"));
+        Chk("tipo=inc -> Incidencia + SorIA Incidentes", "Incidencia|SorIA Incidentes", Tipos("tipo=inc"));
+        Chk("tipo=req -> las dos grafias + SorIA Peticiones", peticionTilde + "|Peticion de Servicio|SorIA Peticiones", Tipos("tipo=req"));
+        Chk("tipo=INC (mayusculas) -> lo mismo que inc", "Incidencia|SorIA Incidentes", Tipos("tipo=INC"));
         Chk("sin parametro = Todos", "", Tipos(""));
         Chk("tipo=todos = Todos", "", Tipos("tipo=todos"));
         Chk("tipo=otro = Todos", "", Tipos("tipo=SorIA"));
@@ -120,8 +121,8 @@ public static class TipoRegistroSlaSmoke
         Console.WriteLine("--- 3) Con tipo");
         string[] nombres = { "porSolucion", "porRegistro", "rechazados" };
         var casos = new[] {
-            new { tipo = "inc", frag = " AND LTRIM(RTRIM(b.Tipo)) IN (@tr0)", pars = "@FechaInicio,@FechaFin,@tr0" },
-            new { tipo = "req", frag = " AND LTRIM(RTRIM(b.Tipo)) IN (@tr0, @tr1)", pars = "@FechaInicio,@FechaFin,@tr0,@tr1" } };
+            new { tipo = "inc", frag = " AND LTRIM(RTRIM(b.Tipo)) IN (@tr0, @tr1)", pars = "@FechaInicio,@FechaFin,@tr0,@tr1" },
+            new { tipo = "req", frag = " AND LTRIM(RTRIM(b.Tipo)) IN (@tr0, @tr1, @tr2)", pars = "@FechaInicio,@FechaFin,@tr0,@tr1,@tr2" } };
         foreach (var c in casos)
         {
             var cmd = new SqlCommand();
@@ -137,11 +138,12 @@ public static class TipoRegistroSlaSmoke
         }
         var cmdInc = new SqlCommand();
         Predicados(Filtros("inc", false, null, null), cmdInc);
-        Chk("inc: @tr0 = Incidencia", "Incidencia", cmdInc.Parameters["@tr0"].Value);
+        Chk("inc: @tr0 = Incidencia, @tr1 = SorIA Incidentes", "Incidencia|SorIA Incidentes",
+            cmdInc.Parameters["@tr0"].Value + "|" + cmdInc.Parameters["@tr1"].Value);
         var cmdReq = new SqlCommand();
         Predicados(Filtros("req", false, null, null), cmdReq);
-        Chk("req: @tr0 con tilde, @tr1 sin tilde", peticionTilde + "|Peticion de Servicio",
-            cmdReq.Parameters["@tr0"].Value + "|" + cmdReq.Parameters["@tr1"].Value);
+        Chk("req: @tr0 con tilde, @tr1 sin tilde, @tr2 SorIA Peticiones", peticionTilde + "|Peticion de Servicio|SorIA Peticiones",
+            cmdReq.Parameters["@tr0"].Value + "|" + cmdReq.Parameters["@tr1"].Value + "|" + cmdReq.Parameters["@tr2"].Value);
 
         var cmdG = new SqlCommand();
         var todosG = Predicados(Filtros(null, true, new[] { "Service Desk" }, "Lugo Solis, David"), cmdG);
@@ -149,8 +151,8 @@ public static class TipoRegistroSlaSmoke
         var incG = Predicados(Filtros("inc", true, new[] { "Service Desk" }, "Lugo Solis, David"), cmdGi);
         for (int i = 0; i < 3; i++)
             Chk(nombres[i] + " con grupos, tecnicos y sin proveedores: sin el IN = Todos", todosG[i],
-                incG[i].Replace(" AND LTRIM(RTRIM(b.Tipo)) IN (@tr0)", ""));
-        Chk("con todo: parametros = los de Todos + @tr0", Nombres(cmdG) + ",@tr0", Nombres(cmdGi));
+                incG[i].Replace(" AND LTRIM(RTRIM(b.Tipo)) IN (@tr0, @tr1)", ""));
+        Chk("con todo: parametros = los de Todos + @tr0, @tr1", Nombres(cmdG) + ",@tr0,@tr1", Nombres(cmdGi));
 
         Console.WriteLine();
         Console.WriteLine(fallos == 0 ? "TODO OK" : fallos + " FALLAS");

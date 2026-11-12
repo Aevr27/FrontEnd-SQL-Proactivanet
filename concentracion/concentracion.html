@@ -66,7 +66,8 @@
 
     <!-- Filtros. El periodo es UNO: Slot (30 dias rodantes, la columna Slot
          de la base) o Mes (calendario). El modo elegido muestra su control
-         y oculta el otro; nunca se combinan. Service Owner y Grupo filtran
+         y oculta el otro; nunca se combinan. Slot N trae los Slots 0..N
+         juntos (acumulado, como SLA); Mes admite varios meses a la vez. Service Owner y Grupo filtran
          dentro del periodo y se aplican a las tres graficas. -->
     <section class="filtros" id="conc-filtros">
       <div class="campo">
@@ -77,18 +78,18 @@
         </div>
       </div>
       <div class="campo campo-slot" id="conc-campo-slot">
-        <label for="conc-slot-n">Slot</label>
+        <label for="conc-slot-n">Slots 0 hasta</label>
         <div class="slotstep sel" id="conc-slot-step">
           <button class="btn linea chico" type="button" id="conc-slot-menos" aria-label="Slot mas reciente">−</button>
           <input class="slotn" id="conc-slot-n" type="text" inputmode="numeric"
                  autocomplete="off" spellcheck="false" value="0"
-                 aria-label="Slot (0 a 12; 0 = los ultimos 30 dias)">
+                 aria-label="Slots acumulados: 0 = los ultimos 30 dias; N = los Slots 0 a N (hasta 12)">
           <button class="btn linea chico" type="button" id="conc-slot-mas" aria-label="Slot mas antiguo">+</button>
         </div>
       </div>
       <div class="campo" id="conc-campo-mes" hidden>
-        <label for="conc-mes">Mes</label>
-        <select id="conc-mes"></select>
+        <label for="conc-mes">Mes (elige varios)</label>
+        <select id="conc-mes" multiple></select>
       </div>
       <div class="campo">
         <label for="conc-f-so">Service Owner (elige varios)</label>
@@ -99,7 +100,7 @@
         <select id="conc-f-grupo" multiple></select>
       </div>
       <div class="campo acciones">
-        <button class="btn gris" id="conc-btn-limpiar" type="button" title="Quitar Service Owner y Grupo (el periodo se queda)">Limpiar</button>
+        <button class="btn gris" id="conc-btn-limpiar" type="button" title="Quitar Service Owner, Grupo y meses elegidos (el Slot se queda)">Limpiar</button>
       </div>
       <!-- Lo que esta aplicado ahora mismo: periodo con sus fechas reales
            (las manda el servidor), Service Owner, Grupo y tickets. -->

@@ -27,9 +27,14 @@
 // PERIODO: Slot O Mes, nunca los dos
 //   Slot = la columna Slot de dbo.vw_Tickets, sin cambiar su calculo:
 //     Slot k = hoy-(30k+29) .. hoy-30k (hoy por UTC-6 fijo, como la vista).
+//     ACUMULADO (2026-11-10, como el SLOT del tablero de SLA): elegir el
+//     Slot N trae los Slots 0..N juntos, hoy-(30N+29) .. hoy, un solo rango
+//     sin hueco. ?slot= sigue siendo un numero 0..12.
 //   Mes  = mes calendario por FechaRegistro, de los ultimos 13 (el actual y
 //     los 12 anteriores, el mismo alcance que los Slots 0..12). El mes en
-//     curso llega hasta hoy.
+//     curso llega hasta hoy. VARIOS (2026-11-10): ?mes=aaaa-mm|aaaa-mm...
+//     trae la union de esos meses (no tienen que ser seguidos); las tres
+//     graficas, los totales y la cobertura usan los mismos.
 //   Juntarlos daria la interseccion parcial de dos ventanas distintas; el
 //   usuario elige UNA (modo=slot|mes) y la pestaña dice cual y sus fechas.
 //
@@ -71,7 +76,10 @@ public sealed class ConcentracionFiltros
 {
     public string Modo = ConcentracionContrato.ModoSlot;
     public int Slot;
-    public DateTime Mes;           // primer dia del mes (modo mes)
+    public DateTime Mes;           // primer dia del mes mas reciente elegido (modo mes)
+    // Todos los meses elegidos (modo mes), del mas reciente al mas viejo, sin
+    // repetir. Mes es Meses[0].
+    public readonly List<DateTime> Meses = new List<DateTime>();
     public readonly List<string> ServiceOwners = new List<string>();
     public readonly List<string> Grupos = new List<string>();
 }
@@ -142,6 +150,24 @@ public static class ConcentracionContrato
         return mes;
     }
 
+    /* ?mes=aaaa-mm|aaaa-mm... (varios meses). Cada uno con la regla de
+       LeerMes; vacio = el mes en curso. Sin repetir, del mas reciente al mas
+       viejo. Un mes invalido es un 400 para toda la peticion. */
+    public static List<DateTime> LeerMeses(string valor, DateTime hoy)
+    {
+        var salida = new List<DateTime>();
+        if (valor != null)
+            foreach (var parte in valor.Split('|'))
+            {
+                if (parte.Trim().Length == 0) continue;
+                var m = LeerMes(parte, hoy);
+                if (!salida.Contains(m)) salida.Add(m);
+            }
+        if (salida.Count == 0) salida.Add(LeerMes(null, hoy));
+        salida.Sort((a, b) => b.CompareTo(a));
+        return salida;
+    }
+
     // Lista separada por '|' (los nombres de persona pueden llevar comas).
     public static List<string> LeerLista(string valor)
     {
@@ -179,6 +205,17 @@ public static class ConcentracionContrato
         desde = hasta.AddDays(-(DiasSlot - 1));
     }
 
+    /* Slots 0..N ACUMULADOS (lo que trae elegir el Slot N): del inicio del
+       Slot N al fin del Slot 0 (hoy). Sin hueco ni solape entre Slots, asi
+       que es un solo rango: hoy-(30N+29) .. hoy. */
+    public static void PeriodoAcumulado(int slot, DateTime hoy, out DateTime desde, out DateTime hasta)
+    {
+        DateTime d0;
+        Periodo(0, hoy, out d0, out hasta);
+        DateTime hN;
+        Periodo(slot, hoy, out desde, out hN);
+    }
+
     // Mes calendario; el mes en curso llega hasta hoy.
     public static void PeriodoMes(DateTime mes, DateTime hoy, out DateTime desde, out DateTime hasta)
     {
@@ -205,17 +242,27 @@ public static class ConcentracionContrato
     public static Dictionary<string, object> Cobertura(IList<ConcentracionTicket> periodo,
                                                        DateTime desde, DateTime hasta, DateTime hoy)
     {
+        return Cobertura(periodo, new[] { new KeyValuePair<DateTime, DateTime>(desde, hasta) }, hoy);
+    }
+
+    /* Lo mismo sobre varios rangos (varios meses, no siempre seguidos): los
+       dias esperados son la suma de los de cada rango; solo cuentan los dias
+       con tickets que caen dentro de alguno. hasta mas alto >= hoy = excluye hoy. */
+    public static Dictionary<string, object> Cobertura(IList<ConcentracionTicket> periodo,
+                                                       IList<KeyValuePair<DateTime, DateTime>> rangos, DateTime hoy)
+    {
         var dias = new HashSet<DateTime>();
         DateTime? primero = null, ultimo = null;
         foreach (var t in periodo)
         {
             if (!t.Dia.HasValue) continue;
             var d = t.Dia.Value.Date;
-            if (d < hoy.Date) dias.Add(d);
+            if (d < hoy.Date && rangos.Any(r => d >= r.Key.Date && d <= r.Value.Date)) dias.Add(d);
             if (!primero.HasValue || d < primero.Value) primero = d;
             if (!ultimo.HasValue || d > ultimo.Value) ultimo = d;
         }
-        int esperados = DiasEsperados(desde, hasta, hoy);
+        int esperados = rangos.Sum(r => DiasEsperados(r.Key, r.Value, hoy));
+        var hasta = rangos.Max(r => r.Value);
         return new Dictionary<string, object>
         {
             { "diasConTickets", dias.Count },
@@ -320,6 +367,65 @@ public static class ConcentracionContrato
     public static List<Dictionary<string, object>> Grupos(IEnumerable<ConcentracionTicket> t)
     {
         return Agregar(t, "Grupo", x => x.Grupo, null);
+    }
+
+    // ------------------------------------------------------------ C1&C2
+    /* Replica de dbo.fn_CategoriaC1C2 (2026-11-11), para calcularla UNA vez
+       por categoria distinta en vez de una vez por ticket dentro de la
+       consulta. Texto de QA (verificado por largo + SHA2_256 en
+       LOCALDB_PERMISSION_CHANGES/scripts/dev_db/10_cadena_volumetria.sql):
+
+         fn_NormalizaCategoria: LTRIM(RTRIM(REPLACE(ISNULL(@c, N''), NCHAR(160), N' ')))
+         fn_CategoriaC1C2:      @s NVARCHAR(500) = normalizada; '' -> '';
+                                sin '/' al inicio se le antepone (y se corta a 500);
+                                hasta antes del tercer '/' (o todo si no hay).
+
+       LTRIM/RTRIM de SQL solo quitan U+0020 (no tabuladores ni saltos).
+
+       SOLO es exacta para texto de C1C2Verificable: la collation de la base
+       (SQL_Latin1_General_CP1_CI_AS) compara por reglas Unicode, y con otros
+       caracteres CHARINDEX/LEFT/'=' no son comparaciones caracter a caracter
+       (medido en LocalDB: el '/' de ancho completo U+FF0F cuenta como '/',
+       U+0000 o U+3000 solos valen N'', NBSP + acento combinado no se
+       reemplaza). Esas categorias las calcula la funcion real
+       (ConcentracionQueries.C1C2DeCategorias). La paridad la prueba
+       tools/tests/ConcentracionContratoSmoke.cs contra el texto de QA.
+
+       Entrada: la Categoria tal como la entrega LTRIM(RTRIM(v.Categoria))
+       (fn(LTRIM(RTRIM(x))) = fn(x): la funcion ya quita esos espacios).
+       Salida: lo que devolveria la funcion, sin el recorte de Texto(). */
+    public static string C1C2(string categoria)
+    {
+        var s = (categoria ?? "").Replace((char)0xA0, (char)0x20).Trim((char)0x20);
+        if (s.Length == 0) return "";
+        if (s[0] != '/')
+        {
+            s = "/" + s;
+            if (s.Length > 500) s = s.Substring(0, 500);   // @s NVARCHAR(500)
+        }
+        int p2 = s.IndexOf('/', 1);
+        if (p2 < 0) return s;
+        int p3 = s.IndexOf('/', p2 + 1);
+        if (p3 < 0) return s;
+        return s.Substring(0, p3);
+    }
+
+    /* Texto con el que C1C2 es exacta: tabulador, CR, LF, ASCII imprimible
+       (U+0020..U+007E) y Latin-1 U+00A0..U+00FF salvo el guion suave U+00AD
+       (ignorable en la collation). Es el conjunto comprobado en LocalDB contra
+       el texto de QA (0 diferencias en 64 123 cadenas, 2026-11-11). NULL y ''
+       tambien. */
+    public static bool C1C2Verificable(string categoria)
+    {
+        if (categoria == null) return true;
+        foreach (var c in categoria)
+        {
+            if (c == '\t' || c == '\r' || c == '\n') continue;
+            if (c >= 0x20 && c <= 0x7E) continue;
+            if (c >= 0xA0 && c <= 0xFF && c != 0xAD) continue;
+            return false;
+        }
+        return true;
     }
 
     // ------------------------------------------------------------ formatos
