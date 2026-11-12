@@ -584,7 +584,7 @@ public static class GestionIniciativaAdminSmoke
         Check("PL7 ligar despues sin tipos: valida (son opcionales) y no se copian de las hermanas", "True||", rLiga.Valida + "|" +
               PlanificadorGestionAdmin.Modificar(M(fLiga), Actual(), rLiga, hoy).Agregar[0].TipoIniciativa + "|" +
               PlanificadorGestionAdmin.Modificar(M(fLiga), Actual(), rLiga, hoy).Agregar[0].TipoAgrupado);
-        Check("PL8 ligar despues: fechas PROPIAS hoy / hoy + 15", "2026-10-13|2026-10-28",
+        Check("PL8 ligar despues: el dia en que se liga; SIN fecha de analisis propia (usa la de la iniciativa)", "2026-10-13|",
               FechasGestionAdmin.Iso(plLiga.Agregar[0].FechaCreacion) + "|" + FechasGestionAdmin.Iso(plLiga.Agregar[0].FechaAnalisis));
         Check("PL9 ligar despues: no toca fechas del problema ni las ligadas", "0|0",
               plLiga.Problem.Count + "|" + plLiga.Pcts.Count);

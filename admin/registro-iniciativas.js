@@ -226,9 +226,8 @@
      SEGUIMIENTO: Fecha de creacion (f_creacion = dbo.Problem.FechaCreacion)
      y un selector "Ver por categoria" con las categorias reales de la
      iniciativa; al cambiarlo se repinta solo su bloque (regSegCatInfo).
-     Las fechas son las de la INICIATIVA salvo la de analisis de una
-     categoria ligada despues (f_analisis_propia, sql/18), que se marca
-     "Propia"; las que heredan se marcan "De la iniciativa".
+     Las fechas son las de la INICIATIVA, comunes a todas sus categorias
+     (sin rotulo de origen); no hay fecha de analisis por categoria.
      "Historial de cambios (N)" nace plegado. Pinta `historial`, las filas
      de dbo.ProblemFechaEvento de la iniciativa en orden de IdEvento
      (App_Code/HistorialFechas.cs): { id, campo, anterior, nuevo, operacion,
@@ -237,12 +236,10 @@
      base, Fecha inicial, Fecha asignada, Fecha retirada y "Cambio n", que es
      lo unico que cuenta y lo que da N. En FechaCierre solo cuentan las
      extensiones (nueva > anterior): un adelanto se muestra sin numero
-     (regla del 2026-10-09). "Cambio n" corre por categoria y campo: los
-     eventos de la iniciativa (`historial`) y los de las fechas propias de
-     sus categorias (`historial_categorias`, con `categoria`) se numeran y
-     se pintan por separado, y N es solo el de la iniciativa. En un evento
-     de categoria, anterior null es el valor crudo: la categoria heredaba la
-     fecha de la iniciativa, y asi se explica (no se rellena). La Linea base se rotula pero no se pinta
+     (regla del 2026-10-09). "Cambio n" y N son solo de la iniciativa
+     (`historial`). Los eventos de fechas por categoria de antes de la regla
+     de fecha unica (`historial_categorias`) se pintan aparte, sin numero y
+     sin contar: ya no rigen. La Linea base se rotula pero no se pinta
      (2026-10-09): es la foto del inicio de captura, no un movimiento; el
      servidor la sigue mandando porque de ella salen `desde` y
      `reconstruido`. Los NroCambioFecha* del Excel siguen en Seguimiento
@@ -3737,11 +3734,10 @@ window.RegistroIniciativas = (function () {
       var cmo = t.getAttribute('data-cambio-modo');      // 'l<n>' | 'n<n>'
       var ctk = t.getAttribute('data-cambio-tickets');
       var tipo = t.getAttribute('data-edicion-tipo');   // "indice|campo"
-      var fcat = t.getAttribute('data-edicion-fcat');
       var tk = t.getAttribute('data-edicion-tickets');
       var modo = t.getAttribute('data-edicion-modo');
       // Mientras se envia, los controles estan deshabilitados; nada cambia.
-      if (ed && this.edicionEnviando && (clave || n !== null || tipo || fcat !== null || tk !== null || modo !== null)) return true;
+      if (ed && this.edicionEnviando && (clave || n !== null || tipo || tk !== null || modo !== null)) return true;
       // "Planear la meta por": solo cambia que se edita (repinta la tabla).
       if (ed && modo !== null && modo !== undefined) {
         if (t.checked !== false && ed.elegirModo(t.value)) { this.soltarFoco(); this.pintarCategoriasEdicion(); }
@@ -3753,7 +3749,6 @@ window.RegistroIniciativas = (function () {
       else if (ed && n !== null && n !== undefined) { ed.capturarPct(Number(n), t.value); this.pintarMetaEdicion(Number(n)); }
       else if (ed && tk !== null && tk !== undefined) { ed.capturarTickets(Number(tk), t.value); this.pintarMetaEdicion(Number(tk)); }
       else if (ed && tipo) ed.capturarTipo(Number(tipo.split('|')[0]), tipo.split('|')[1], t.value);
-      else if (ed && fcat !== null && fcat !== undefined) ed.capturarFechaCategoria(Number(fcat), t.value);
       // El % (o los tickets) de una categoria: tambien su aviso del tope.
       else if (c && cp !== null && cp !== undefined) { c.fijarPct(c.categoriasLigadas()[Number(cp)], t.value); this.pintarTopeCambio('l' + cp); return true; }
       else if (c && cn !== null && cn !== undefined) { c.capturarPctNueva(Number(cn), t.value); this.pintarTopeCambio('n' + cn); return true; }
@@ -3929,25 +3924,22 @@ window.RegistroIniciativas = (function () {
       return true;
     }
 
-    // Lo que hay de fechas para UNA categoria. Solucion y Cierre son de la
-    // INICIATIVA (dbo.Problem). Analisis: la PROPIA si la categoria se ligo
-    // despues (f_analisis_propia, sql/18); si no, la de la iniciativa, que
-    // hereda. Lo demas propio de la categoria es su % y sus tickets.
+    // Lo que hay de fechas para UNA categoria: las tres son de la INICIATIVA
+    // (dbo.Problem), comunes a todas sus categorias. Lo propio de la
+    // categoria es su % y sus tickets (y el dia en que se ligo, si fue despues).
     htmlSeguimientoCategoria(i, ruta) {
       var c = i.categorias.filter(function (x) { return x.categoria === ruta; })[0];
       if (!c) return '';
-      var propia = typeof c.f_analisis_propia === 'string' && c.f_analisis_propia;
+      var ligadaDespues = typeof c.f_creacion_propia === 'string' && c.f_creacion_propia;
       return '<dl class="ini-datos">' +
           '<div class="ini-dato"><dt>% disminución</dt><dd>' + pct(c.pct_dism) + '</dd></div>' +
           '<div class="ini-dato"><dt>Tickets a reducir</dt><dd>' + fmt(c.tickets_reduce) + '</dd></div>' +
-          '<div class="ini-dato"><dt>Análisis</dt><dd>' + Escape.html(fecha(propia ? c.f_analisis_propia : i.f_analisis)) +
-            ' <span class="ini-origen' + (propia ? '' : ' derivado') + '">' + (propia ? 'Propia' : 'De la iniciativa') + '</span></dd></div>' +
+          '<div class="ini-dato"><dt>Análisis</dt><dd>' + Escape.html(fecha(i.f_analisis)) + '</dd></div>' +
           '<div class="ini-dato"><dt>Solución</dt><dd>' + Escape.html(fecha(i.f_solucion)) + '</dd></div>' +
           '<div class="ini-dato"><dt>Cierre</dt><dd>' + Escape.html(fecha(i.f_cierre)) + '</dd></div>' +
         '</dl>' +
-        '<p class="ini-nota">' + (propia
-          ? 'Se ligó el ' + Escape.html(fecha(c.f_creacion_propia)) + ' y tiene su propia fecha de análisis; solución y cierre son los de la iniciativa.'
-          : 'Hereda las fechas de la iniciativa (dbo.Problem): cambian con ellas.') + '</p>';
+        '<p class="ini-nota">' + (ligadaDespues ? 'Se ligó el ' + Escape.html(fecha(c.f_creacion_propia)) + '. ' : '') +
+          'Las fechas son las de la iniciativa (dbo.Problem) y cambian con ellas.</p>';
     }
 
     // ---- categorias de "Modificar" ----
@@ -4142,7 +4134,7 @@ window.RegistroIniciativas = (function () {
       if (cuerpo && cuerpo.classList) cuerpo.classList.toggle('ini-ed-enviando', si);
       var controles = cuerpo && cuerpo.querySelectorAll
         ? cuerpo.querySelectorAll('[data-edicion], [data-edicion-pct], [data-edicion-tickets], [data-edicion-modo], [data-edicion-tipo], ' +
-            '[data-edicion-fcat], [data-edicion-cat], #regEdCatBuscar, [data-accion="edicion-cat-agregar"]') : [];
+            '[data-edicion-cat], #regEdCatBuscar, [data-accion="edicion-cat-agregar"]') : [];
       Array.prototype.forEach.call(controles, function (el) { el.disabled = si; });
       var self = this;
       ['regEdGuardar', 'regEdCancelar'].forEach(function (id) { var b = self.$(id); if (b) b.disabled = si; });
@@ -4983,14 +4975,14 @@ window.RegistroIniciativas = (function () {
         '<div class="ini-hist-cuerpo" id="regHistCuerpo" hidden>' + cuerpo + '</div></section>';
     }
 
-    // Las fechas de analisis PROPIAS de las categorias ligadas despues, aparte
-    // de las de la iniciativa: su "Cambio n" corre por categoria y no suma a
-    // la N del encabezado. Anterior vacio = heredaba la de la iniciativa.
+    // Eventos de dbo.ProblemCategoria.FechaAnalisisCategoria (sql/18): fechas
+    // por categoria que YA NO RIGEN (la de analisis es una por iniciativa).
+    // Se muestran como registro, sin numero de cambio y sin contar, para que
+    // no compitan con el "Cambio n" y la N de la iniciativa.
     htmlHistorialCategorias(i) {
       var filas = etiquetarHistorial(i.historial_categorias);
       if (!filas.length) return '';
-      var cambios = filas.filter(function (f) { return f.cuenta; }).length;
-      return '<h5>Fechas de análisis por categoría <span class="ini-sub">' + fmt(cambios) + ' cambio' + (cambios === 1 ? '' : 's') + '</span></h5>' +
+      return '<h5>Fechas por categoría anteriores <span class="ini-sub">ya no rigen</span></h5>' +
         '<div class="ini-det-tabla"><table><thead><tr><th scope="col">Registrado</th><th scope="col">Categoría</th>' +
           '<th scope="col">Movimiento</th><th scope="col">Anterior</th><th scope="col">Nueva</th><th scope="col">Quién</th>' +
           '</tr></thead><tbody>' +
@@ -4999,12 +4991,13 @@ window.RegistroIniciativas = (function () {
             var quien = h.usuario ? (h.usuario_mostrar || h.usuario) : (h.origen === 'NO_DECLARADO' ? 'No declarado' : '—');
             return '<tr><td>' + Escape.html(texto(h.fecha)) + '</td>' +
               '<td>' + Escape.html(texto(h.categoria)) + '</td>' +
-              '<td>' + (f.cuenta ? '<b>' + Escape.html(f.etiqueta) + '</b>' : Escape.html(f.etiqueta)) + '</td>' +
-              '<td>' + (h.anterior ? Escape.html(fecha(h.anterior)) : '<span class="ini-origen derivado">Heredaba la de la iniciativa</span>') + '</td>' +
+              '<td>' + Escape.html(String(f.etiqueta || '').replace(/ \d+$/, '')) + '</td>' +
+              '<td>' + (h.anterior ? Escape.html(fecha(h.anterior)) : '<span class="ini-origen derivado">La de la iniciativa</span>') + '</td>' +
               '<td>' + Escape.html(h.nuevo ? fecha(h.nuevo) : '—') + '</td>' +
               '<td' + (h.usuario && h.usuario_mostrar && h.usuario_mostrar !== h.usuario ? ' title="' + Escape.html(h.usuario) + '"' : '') + '>' + Escape.html(quien) + '</td></tr>';
           }).join('') + '</tbody></table></div>' +
-        '<p class="ini-nota">Solo las categorías ligadas después tienen fecha propia; las demás heredan la de la iniciativa (arriba).</p>';
+        '<p class="ini-nota">Registro de fechas por categoría guardadas antes de la regla de fecha única. No cuentan como cambios: ' +
+          'la fecha compromiso de análisis de la iniciativa (arriba) aplica a todas sus categorías.</p>';
     }
 
     // .ini-detalle-abierto en <html> quita el scroll de la pagina de atras.

@@ -515,9 +515,6 @@ public sealed class IniciativaActual
         public string Ruta;
         public decimal? Pct;   // fraccion, como PctDisminucion
         public string Agrup;   // TipoAgrupado (null = sin declarar)
-        // Fecha de analisis PROPIA (yyyy-MM-dd), o null si hereda la de la
-        // iniciativa (dbo.ProblemCategoria.FechaAnalisisCategoria).
-        public string FAnalisisPropia;
     }
 
     public string Folio;
@@ -576,7 +573,6 @@ public sealed class IniciativaActual
                     Ruta = c.ContainsKey("categoria") ? c["categoria"] as string : null,
                     Pct = pct,
                     Agrup = c.ContainsKey("agrup") ? c["agrup"] as string : null,
-                    FAnalisisPropia = c.ContainsKey("f_analisis_propia") ? c["f_analisis_propia"] as string : null,
                 });
             }
         }
@@ -961,8 +957,13 @@ public sealed class ValidadorGestionAdmin
             r.Agregar("pct", "Los % por categor\u00eda llegaron incompletos (categor\u00eda sin valor o al rev\u00e9s).");
         if (p.AgregarDesparejos)
             r.Agregar(CCategorias, "Las categor\u00edas a agregar llegaron incompletas (categor\u00eda sin % o al rev\u00e9s).");
-        if (p.FechasDesparejas)
-            r.Agregar(CFechasCategoria, "Las fechas de an\u00e1lisis por categor\u00eda llegaron incompletas (categor\u00eda sin fecha o al rev\u00e9s).");
+        // La fecha de analisis es UNA por iniciativa y la comparten todas sus
+        // categorias: no hay fecha por categoria que cambiar. Se rechaza en el
+        // servidor (y no solo se ignora) para que un cliente viejo o un POST
+        // armado a mano no crea que guardo algo; adm.usp_GestionAdmin_Modificar
+        // todavia acepta @FechasCategoria (sql/18) y la escribiria.
+        if (p.FechasCategoria.Count > 0 || p.FechasDesparejas)
+            r.Agregar(CFechasCategoria, "La fecha de an\u00e1lisis es de la iniciativa y la comparten todas sus categor\u00edas: se cambia en Fecha compromiso de An\u00e1lisis.");
 
         var vistas = new HashSet<string>(StringComparer.Ordinal);
         foreach (var x in p.Pcts)
@@ -984,16 +985,6 @@ public sealed class ValidadorGestionAdmin
             if (t != null && ValidadorIniciativa.Fraccion(t) == null)
                 r.Agregar(CCategorias, ruta + ": el % debe estar entre 0 y 100, con hasta dos decimales.");
             // Sus tipos son opcionales y nunca se copian de las hermanas.
-        }
-        var conFecha = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var x in p.FechasCategoria)
-        {
-            var ruta = Limpio(x.Categoria);
-            if (ruta == null) { r.Agregar(CFechasCategoria, "Una fecha de an\u00e1lisis lleg\u00f3 sin categor\u00eda."); continue; }
-            if (!conFecha.Add(Llave(ruta))) r.Agregar(CFechasCategoria, ruta + ": la fecha de an\u00e1lisis viene repetida.");
-            var t = Limpio(x.Texto);
-            if (t == null) r.Agregar(CFechasCategoria, ruta + ": la fecha de an\u00e1lisis de una categor\u00eda no se puede vaciar.");
-            else if (!EsFecha(t)) r.Agregar(CFechasCategoria, ruta + ": escribe una fecha v\u00e1lida (aaaa-mm-dd).");
         }
         var quitadas = new HashSet<string>(StringComparer.Ordinal);
         foreach (var q in p.Quitar)
@@ -1121,40 +1112,10 @@ public sealed class ValidadorGestionAdmin
         DuenoCapturado(r, p.Po, actual.PoCapturado, SolicitudIniciativa.CPo, "Product Owner", catalogo);
         DuenoCapturado(r, p.So, actual.SoCapturado, SolicitudIniciativa.CSo, "Service Owner", catalogo);
 
-        // ---- Fechas de analisis por categoria ----
-        // PROPIA (ligada despues): se cambia en la categoria. Si la categoria
-        // HEREDA la de la iniciativa, el cambio es de la iniciativa
-        // (f_analisis): no se le crea una fecha propia.
-        string fAnalisisHeredada = null;
-        foreach (var x in p.FechasCategoria)
-        {
-            var ruta = Limpio(x.Categoria);
-            var t = Limpio(x.Texto);
-            if (ruta == null || t == null || !EsFecha(t)) continue;
-            var ligada = actual.Ligada(ruta);
-            if (ligada == null)
-            {
-                r.Agregar(CFechasCategoria, ruta + ": no est\u00e1 ligada a esta iniciativa.");
-                continue;
-            }
-            if (Limpio(ligada.FAnalisisPropia) == null)
-            {
-                if (fAnalisisHeredada != null && fAnalisisHeredada != t)
-                    r.Agregar(CFechasCategoria, "Las categor\u00edas que heredan la fecha de la iniciativa comparten una sola fecha de an\u00e1lisis.");
-                fAnalisisHeredada = t;
-                continue;
-            }
-            if (t != ligada.FAnalisisPropia)
-                r.Cambio(CFechasCategoria, "Fecha de an\u00e1lisis \u00b7 " + ligada.Ruta, ligada.FAnalisisPropia, t);
-        }
-        if (fAnalisisHeredada != null && p.FAnalisis != null && (Limpio(p.FAnalisis) ?? "") != fAnalisisHeredada)
-            r.Agregar(CFechasCategoria, "La fecha de an\u00e1lisis de una categor\u00eda que hereda es la de la iniciativa: lleg\u00f3 distinta a la Fecha compromiso de An\u00e1lisis.");
-
         // ---- Problem: fechas compromiso ----
         foreach (var f in Fechas)
         {
             var nuevo = Valor(p, f[0]);
-            if (f[0] == PeticionModificarAdmin.CFAnalisis && nuevo == null) nuevo = fAnalisisHeredada;
             if (nuevo == null || r.TieneError(f[0])) continue;
             var limpio = Limpio(nuevo) ?? "";
             var anterior = Valor(actual, f[0]) ?? "";

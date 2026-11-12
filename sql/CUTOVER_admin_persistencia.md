@@ -82,8 +82,8 @@ Orden: switch a false y deploy → (si está) `ADM_04_…_rollback` con el progr
 1. ADM: Crear con prefijo de prueba acordado, sin Clasificación/Agrupación/Estado → "Guardado en la base · Código PPP AAAA-NNNNNN", el siguiente al mayor del prefijo/año (comparar con D7a); aparece en el registro sin recargar la página; queda Incompleta.
 2. Crear otra igual → Código = el anterior + 1 (nunca repetido).
 3. En el detalle: Historial muestra "Fecha inicial" de Análisis con el usuario de Windows; en SQL `LoginBD` = cuenta del sitio.
-4. Modificar: ligar una categoría → su fecha propia = hoy + 15; editarla → "Cambio 1" en "Fechas de análisis por categoría"; la de la iniciativa no se mueve.
-5. Editar la fecha de una categoría inicial → cambia la de la iniciativa (Historial de la iniciativa), sin fecha propia.
+4. Modificar: ligar una categoría → muestra la fecha de análisis de la iniciativa ("De la iniciativa"), sin campo para editarla. (Regla de fecha única, 2026-11-12: la base aún guarda `FechaAnalisisCategoria` = hoy + 15 al ligar, pero el sitio no la usa.)
+5. Cambiar "Fecha compromiso de Análisis" → todas las categorías muestran la nueva; el Historial de la iniciativa registra "Cambio n" y el contador de Cambios sube a n.
 6. Tope: subir un % por encima de lo disponible → "La base rechazó el guardado. No se guardó nada" con el motivo; nada cambió.
 7. Quitar una categoría → 409 `PendienteSinRegla`, nada cambió.
 8. Con un usuario MOD: Crear/Guardar → 403, nada guardado.

@@ -93,16 +93,15 @@
      una opcion se rechaza con las parecidas (Selector.coincidencias), como
      antes. Sin assets/js/desplegable.js queda el <select> nativo.
 
-   FECHA DE ANALISIS POR CATEGORIA (sql/18_gestion_admin_persistencia.sql)
-   ---------------------------------------------------------------------
-     Regla: el analisis dura FECHAS_GESTION.diasAnalisis (15) dias
-     naturales. Una categoria NUEVA en "Modificar" (ligada despues) tiene SU
-     fecha de creacion (el dia en que se liga) y SU fecha de analisis (ese
-     dia + 15): se muestran calculadas y las fija el servidor al guardar.
-     Una ligada con fecha PROPIA (f_analisis_propia del registro) la edita
-     aqui (fcat_categoria / fcat_analisis). Una ligada que HEREDA (las
-     iniciales del alta) muestra la de la iniciativa, "De la iniciativa":
-     se cambia en "Fecha compromiso de Analisis", nunca como fecha propia.
+   FECHA DE ANALISIS DE LAS CATEGORIAS
+   -----------------------------------
+     Una iniciativa tiene UNA fecha compromiso de analisis y la comparten
+     todas sus categorias: las iniciales, las que se ligan despues y las que
+     se reactivan. Cada fila la muestra, sin rotulo de origen (no hay otra), y solo se
+     cambia en "Fecha compromiso de Analisis". No hay fecha por categoria
+     que editar ni enviar (el servidor rechaza fcat_*).
+     dbo.ProblemCategoria.FechaAnalisisCategoria (sql/18) sigue en la base
+     como dato heredado; el registro ya no la publica.
 
    TIPOS DECLARADOS
    ----------------
@@ -538,18 +537,15 @@ window.IniciativaAdmin = (function () {
       this.filas = (ligadas || []).map(function (c) {
         var v = pctDe(c.pct_dism);
         // agrup: la Agrupacion actual ('' = sin declarar; agrupNueva la
-        // declara). fPropia: fecha de analisis PROPIA ('' = hereda la de la
-        // iniciativa); fPropiaNueva es la editada.
-        var propia = typeof c.f_analisis_propia === 'string' ? c.f_analisis_propia : '';
+        // declara).
         return { categoria: c.categoria || '', valor: v, original: v, ligada: true, quitada: false,
                  agrup: typeof c.agrup === 'string' ? c.agrup : '', agrupNueva: '',
-                 fPropia: propia, fPropiaNueva: propia,
                  // Meta en tickets tambien para una ligada (Modificar).
                  volCalc: null, vol30: null, tickets: '', fuente: 'pct' };
       });
       // sql/83: las que ESTUVIERON ligadas (las da el servidor, solo ADM las
-      // ve todas). Agregar una la REACTIVA: misma fila, sus fechas y su
-      // clasificacion historica no vacia. Vacia = como antes.
+      // ve todas). Agregar una la REACTIVA: misma fila y su clasificacion
+      // historica no vacia. Vacia = como antes.
       this.historicas = [];
     }
 
@@ -592,11 +588,7 @@ window.IniciativaAdmin = (function () {
           ? ruta + ' está marcada para quitar: usa «Restaurar» en vez de agregarla otra vez.'
           : ruta + ' ya está en la lista.' };
       }
-      // fCreacion / fAnalisis: las PROPIAS de esta categoria ligada despues
-      // (hoy y hoy + 15), calculadas, nunca copiadas de otra fila.
-      var hoy = FECHAS_GESTION.hoy();
       this.filas.push({ categoria: ruta, valor: '', original: null, ligada: false, quitada: false,
-                        fCreacion: hoy, fAnalisis: FECHAS_GESTION.analisisDesde(hoy),
                         tipoIniciativa: '', tipoAgrupado: '',
                         volManual: '', volCalc: null, vol30: null, tickets: '', fuente: 'pct' });
       return { ok: true, ruta: ruta, mensaje: '' };
@@ -745,25 +737,7 @@ window.IniciativaAdmin = (function () {
       return true;
     }
 
-    // Solo una ligada con fecha PROPIA (las que heredan cambian con la de la
-    // iniciativa).
-    capturarFecha(n, texto) {
-      var f = this.filas[n];
-      if (!f || !f.ligada || f.quitada || !f.fPropia) return false;
-      f.fPropiaNueva = String(texto === null || texto === undefined ? '' : texto).trim();
-      return true;
-    }
-
     activas() { return this.filas.filter(function (f) { return !f.quitada; }); }
-
-    // Las fechas calculadas de cada categoria nueva (solo para mostrar; no
-    // viajan: el servidor las fija al guardar).
-    // sql/83: una que se reactiva conserva las suyas (no son nuevas).
-    fechasNuevas() {
-      var self = this;
-      return this.filas.filter(function (f) { return !f.ligada && !self.historica(f.categoria); })
-        .map(function (f) { return { categoria: f.categoria, f_creacion: f.fCreacion, f_analisis: f.fAnalisis }; });
-    }
 
     erroresFormato() {
       var errores = [];
@@ -777,10 +751,6 @@ window.IniciativaAdmin = (function () {
         if (f.fuente === 'tickets') {
           var m = MetaCategoria.pct(self.volumen(f), f.tickets);
           if (m.error) errores.push({ clave: 'tickets', mensaje: f.categoria + ': ' + m.error });
-        }
-        if (f.ligada && f.fPropia && f.fPropiaNueva !== f.fPropia) {
-          var ef = f.fPropiaNueva === '' ? 'la fecha de análisis de una categoría no se puede vaciar.' : FORMATO.fecha(f.fPropiaNueva);
-          if (ef) errores.push({ clave: 'fechas_categoria', mensaje: f.categoria + ': ' + ef });
         }
       });
       return errores;
@@ -799,26 +769,23 @@ window.IniciativaAdmin = (function () {
         if (f.ligada && f.quitada) {
           salida.push({ clave: 'quitar_categoria', rotulo: 'Quitar categoría', anterior: f.categoria, nuevo: '' });
         } else if (h) {
-          // sql/83: reactiva la MISMA asociacion (sus fechas y su clasificacion).
+          // sql/83: reactiva la MISMA asociacion (su clasificacion).
           var ti = self.tipoHistorico(f, 'tipo_iniciativa') || f.tipoIniciativa, ta = self.tipoHistorico(f, 'tipo_agrupado') || f.tipoAgrupado;
           salida.push({ clave: 'agregar_categoria', rotulo: 'Reactivar categoría', anterior: '',
                         nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%' + enTickets(f)) +
                           (ti || ta ? ' · ' + (ti || 'sin Clasificación') + ' / ' + (ta || 'sin Agrupación') : '') +
-                          ' · conserva sus fechas (análisis ' + (h.f_analisis || 'el de la iniciativa') + ')' });
+                          ' · análisis: el de la iniciativa' });
         } else if (!f.ligada) {
           salida.push({ clave: 'agregar_categoria', rotulo: 'Agregar categoría', anterior: '',
                         nuevo: f.categoria + (f.valor === '' ? ' (sin %)' : ' · ' + f.valor + '%' + enTickets(f)) +
                           (f.tipoAgrupado ? ' · ' + f.tipoAgrupado : '') +
-                          (f.fAnalisis ? ' · análisis ' + f.fAnalisis + ' (hoy + ' + FECHAS_GESTION.diasAnalisis + ' días)' : '') });
+                          ' · análisis: el de la iniciativa' });
         } else {
           if (f.valor !== f.original) {
             salida.push({ clave: 'pct', rotulo: '% Disminución · ' + f.categoria, anterior: f.original, nuevo: f.valor + enTickets(f) });
           }
           if (f.agrupNueva) {
             salida.push({ clave: 'tipo_agrupado', rotulo: 'Agrupación · ' + f.categoria, anterior: '', nuevo: f.agrupNueva });
-          }
-          if (f.fPropia && f.fPropiaNueva !== f.fPropia) {
-            salida.push({ clave: 'fechas_categoria', rotulo: 'Fecha de análisis · ' + f.categoria, anterior: f.fPropia, nuevo: f.fPropiaNueva });
           }
         }
       });
@@ -846,7 +813,6 @@ window.IniciativaAdmin = (function () {
           if (f.valor !== f.original || f.agrupNueva) {
             pares.push(['pct_categoria', f.categoria], ['pct_valor', f.valor], ['pct_tipo_agrupado', f.agrupNueva || '']);
           }
-          if (f.fPropia && f.fPropiaNueva !== f.fPropia) pares.push(['fcat_categoria', f.categoria], ['fcat_analisis', f.fPropiaNueva]);
         }
       });
       return pares;
@@ -865,11 +831,9 @@ window.IniciativaAdmin = (function () {
   // de la iniciativa, tiposIniciativa, tiposAgrupado }. Agrega dos columnas:
   //   Agrupacion        la de la ligada (o un selector si no tiene); en una
   //                     nueva, Clasificacion y Agrupacion a elegir.
-  //   Fecha de analisis en una ligada que HEREDA, la de la iniciativa (se
-  //                     cambia en "Fecha compromiso de Analisis"); en una
-  //                     con fecha PROPIA, editable; en una nueva, la propia
-  //                     calculada (dia en que se liga + 15), que fija el
-  //                     servidor al guardar.
+  //   Fecha de analisis la de la iniciativa en TODAS (ligadas, nuevas y
+  //                     reactivadas), solo lectura: se cambia en "Fecha
+  //                     compromiso de Analisis".
   // La meta de cada fila se escribe en % o en tickets (cats.modo) y el otro
   // valor se muestra calculado (MetaCategoria) con la volumetria de la fila:
   // en Crear (prefijo 'crear', sin fechas) las nuevas; en Modificar (ADM,
@@ -907,25 +871,7 @@ window.IniciativaAdmin = (function () {
     }
     function celdaFecha(f, n) {
       if (f.quitada) return '—';
-      if (f.ligada && f.fPropia) {
-        return '<label class="ini-ed-pct"><span class="ini-sr">Fecha de análisis de ' + Escape.html(f.categoria) + '</span>' +
-          '<input type="date" data-' + prefijo + '-fcat="' + n + '" value="' + Escape.attr(f.fPropiaNueva) + '"></label>' +
-          ' <span class="ini-origen" title="dbo.ProblemCategoria.FechaAnalisisCategoria: se ligó después y tiene la suya">Propia</span>';
-      }
-      if (f.ligada) {
-        return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(fechas.f_analisis)) +
-          '</span> <span class="ini-origen derivado" title="Hereda la de la iniciativa (dbo.Problem.FechaAnalisis): se cambia en Fecha compromiso de Análisis">De la iniciativa</span>';
-      }
-      // sql/83: la que se reactiva conserva sus fechas originales.
-      var hf = cats.historica ? cats.historica(f.categoria) : null;
-      if (hf) {
-        return '<span class="ini-cat-fecha">' + Escape.html(hf.f_analisis ? fechaCorta(hf.f_analisis) : fechaCorta(fechas.f_analisis)) + '</span>' +
-          ' <span class="ini-origen" title="Estuvo ligada' + (hf.f_creacion ? ' desde el ' + Escape.attr(fechaCorta(hf.f_creacion)) : '') +
-          ': al reactivarse conserva sus fechas originales">Original</span>';
-      }
-      return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(f.fAnalisis)) + '</span>' +
-        ' <span class="ini-origen derivado" title="Se liga el ' + Escape.attr(fechaCorta(f.fCreacion)) +
-        ': análisis = ese día + ' + FECHAS_GESTION.diasAnalisis + ' días. La fija el servidor al guardar.">Calculada</span>';
+      return '<span class="ini-cat-fecha">' + Escape.html(fechaCorta(fechas.f_analisis)) + '</span>';
     }
     function opcionesTipo(lista, valor, atributo, rotulo) {
       return '<label class="ini-ed-tipo"><span class="ini-sr">' + Escape.html(rotulo) + '</span>' +
@@ -1394,8 +1340,6 @@ window.IniciativaAdmin = (function () {
 
     capturarTipo(indice, campo, texto) { return this.categorias.capturarTipo(indice, campo, texto); }
 
-    capturarFechaCategoria(indice, texto) { return this.categorias.capturarFecha(indice, texto); }
-
     // -> [{ clave, rotulo, anterior, nuevo }]
     cambios() {
       var self = this, salida = [];
@@ -1600,9 +1544,8 @@ window.IniciativaAdmin = (function () {
         '(VigenteEnOrigen = 0, la misma baja del cargador); no se borra la fila, ni la categoría, ni sus dueños.' +
         (ed.duenosYQuitar ? '' : ' Quitar una categoría ligada todavía no se guarda: falta aplicar sql/24 en la base; por eso su botón está deshabilitado.') +
         ' La volumetría son los tickets de la categoría en los últimos 30 días, calculada y de solo lectura.</small>' +
-      '<small class="ini-sub">Fecha de análisis: las categorías iniciales heredan la de la iniciativa y cambian con ella ' +
-        '(Fecha compromiso de Análisis). Una categoría ligada después tiene la suya: el día en que se liga + ' +
-        FECHAS_GESTION.diasAnalisis + ' días, editable aquí, sin tocar la de la iniciativa. ' +
+      '<small class="ini-sub">Fecha de análisis: la iniciativa tiene una sola y la comparten todas sus categorías, también las que se ligan ' +
+        'o se reactivan; se cambia en Fecha compromiso de Análisis. ' +
         'Clasificación y Agrupación de una categoría nueva son opcionales y no se copian de las otras.</small>';
   }
 

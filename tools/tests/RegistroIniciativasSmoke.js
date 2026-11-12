@@ -2000,8 +2000,9 @@ pruebas.push(function () {
 });
 
 // ---------------------------------------------------------------------------
-// S16) Historial por categoria (historial_categorias, sql/18): seccion
-// aparte; la N del encabezado sigue siendo la de la iniciativa.
+// S16) Historial por categoria (historial_categorias, sql/18): fechas por
+// categoria de antes de la regla de fecha unica. Seccion aparte, sin numero
+// de cambio y sin contar: la N y el "Cambio n" son solo de la iniciativa.
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
   var d = JSON.parse(JSON.stringify(DATOS));
@@ -2020,11 +2021,12 @@ pruebas.push(function () {
     clicFolio(p, 'PRB 2026-000001');
     var h = p.sel('regDetCuerpo').innerHTML;
     Check('S16 N del encabezado: solo la iniciativa (1), aunque haya cambios de categoria', true, /Historial de cambios \(1\)/.test(h));
-    Check('S16 seccion por categoria con su propio conteo y la categoria', [true, true],
-      [/Fechas de análisis por categoría <span class="ini-sub">1 cambio<\/span>/.test(h), /<td>\/A\/Cat 2<\/td>/.test(h)]);
-    Check('S16 anterior null se explica (heredaba), no se rellena; el cambio cuenta como Cambio 1', [true, true],
-      [/<td>Fecha propia inicial<\/td><td><span class="ini-origen derivado">Heredaba la de la iniciativa<\/span><\/td><td>17\/11\/2026<\/td>/.test(h),
-       /<td><b>Cambio 1<\/b><\/td><td>17\/11\/2026<\/td><td>30\/11\/2026<\/td>/.test(h)]);
+    Check('S16 seccion de categoria: marcada "ya no rigen", sin conteo propio, con la categoria', [true, false, true],
+      [/Fechas por categoría anteriores <span class="ini-sub">ya no rigen<\/span>/.test(h), /\d cambios?<\/span><\/h5>/.test(h), /<td>\/A\/Cat 2<\/td>/.test(h)]);
+    Check('S16 los eventos de categoria no llevan "Cambio n" ni negrita; el de la iniciativa si', [true, true, false, true],
+      [/<td>Fecha propia inicial<\/td><td><span class="ini-origen derivado">La de la iniciativa<\/span><\/td><td>17\/11\/2026<\/td>/.test(h),
+       /<td>Cambio<\/td><td>17\/11\/2026<\/td><td>30\/11\/2026<\/td>/.test(h), /<b>Cambio 1<\/b><\/td><td>17\/11/.test(h),
+       /<b>Cambio 1<\/b>/.test(h)]);
   });
 });
 

@@ -1041,14 +1041,17 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                   Filas(cn, "SELECT Veredicto, Compromiso, DiasVencida, GeneraAviso FROM dbo.vw_ProblemVencido WHERE Codigo = N'" + cv + "'"));
             Check("V7 ADM_02: una iniciativa sin fechas propias (PRB 2026-000005) sigue igual", "FechaAnalisis|2026-09-30|VENCIDA",
                   Filas(cn, "SELECT ColumnaRige, Compromiso, Veredicto FROM dbo.vw_ProblemVencido WHERE Codigo = N'PRB 2026-000005'"));
-            // Semaforo de Experiencia: el mismo LeerIniciativas que pinta el tablero.
+            // Semaforo de Experiencia: el mismo LeerIniciativas que pinta el
+            // tablero. Fecha unica por iniciativa: aunque la vista (ADM_01) y
+            // la fila traigan la propia vencida, el sitio usa la de la
+            // iniciativa en las dos categorias y ninguna va retrasada.
             var det = (IList)Invocar("LeerIniciativas", cn, HoyReal);
             var sem = new List<string>();
             foreach (var d in det)
                 if ((string)Campo(d, "Folio") == cv) sem.Add(Campo(d, "Categoria") + "=" + Campo(d, "FAnalisis") + ":" + Campo(d, "Retrasada"));
             sem.Sort(StringComparer.Ordinal);
-            Check("V8 Experiencia (LeerIniciativas): solo la categoria con fecha propia vencida va retrasada",
-                  "/V/Inicial=" + Iso(hoy.AddDays(15)) + ":False|/V/Vence=" + Iso(hoy.AddDays(-3)) + ":True", string.Join("|", sem));
+            Check("V8 Experiencia (LeerIniciativas): las dos categorias con la fecha de la iniciativa; la propia vencida no la atrasa",
+                  "/V/Inicial=" + Iso(hoy.AddDays(15)) + ":False|/V/Vence=" + Iso(hoy.AddDays(15)) + ":False", string.Join("|", sem));
 
             Check("V9 ADM_01 / ADM_02 no corren dos veces", "True|True",
                   LotesError(cn, LeerBackend("ADM_01_vw_ProblemCategoria_fecha_categoria.sql")).Contains("ya tiene el cambio") + "|" +
@@ -1059,6 +1062,18 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
             Lotes(cn, LeerBackend("ADM_02_vw_ProblemVencido_fecha_categoria_rollback.sql"));
             Check("V11 rollback ADM_01 / ADM_02: las definiciones vuelven exactas (hash)", antes01 + "|" + antes02,
                   HashDef(cn, "dbo.vw_ProblemCategoria") + "|" + HashDef(cn, "dbo.vw_ProblemVencido"));
+            // Fecha unica por iniciativa: el rollback de ADM_01 / ADM_02 es el
+            // cambio de BD propuesto (sin aplicar en QA). Con el, la misma
+            // iniciativa (fecha propia vencida en una categoria) sale con la
+            // de la iniciativa en la vista y AL CORRIENTE en los avisos, sin
+            // tocar dbo.ProblemCategoria.FechaAnalisisCategoria.
+            Check("V12 tras el rollback: una sola fecha en la vista, avisos AL CORRIENTE, el dato viejo intacto",
+                  "1|AL CORRIENTE|" + Iso(hoy.AddDays(15)) + "|" + Iso(hoy.AddDays(-3)),
+                  Uno(cn, "SELECT COUNT(DISTINCT FechaAnalisis) FROM dbo.vw_ProblemCategoria WHERE Codigo = N'" + cv + "'") + "|" +
+                  Filas(cn, "SELECT Veredicto, Compromiso FROM dbo.vw_ProblemVencido WHERE Codigo = N'" + cv + "'") + "|" +
+                  Uno(cn, "SELECT CONVERT(char(10), MIN(FechaAnalisisCategoria), 23) FROM dbo.ProblemCategoria WHERE Codigo = N'" + cv + "'"));
+            Check("V13 sql/diag_fecha_analisis_unica.sql (solo lectura) corre completo", "sin error",
+                  LotesError(cn, Leer("sql", "diag_fecha_analisis_unica.sql")));
         }
     }
 

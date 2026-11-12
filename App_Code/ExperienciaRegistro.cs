@@ -405,10 +405,12 @@ public static partial class ExperienciaQueries
         return f;
     }
 
-    // Cuelga de cada categoria f_creacion_propia / f_analisis_propia (null =
-    // hereda) y deja i["f_analisis"] como la de la INICIATIVA (la primera
-    // fila podria ser una categoria con fecha propia). Aparte para probarla
-    // sin SQL.
+    // Cuelga de cada categoria f_creacion_propia (el dia en que se ligo; null
+    // = es de las iniciales) y deja i["f_analisis"] como la de la INICIATIVA.
+    // FechaAnalisisCategoria NO se publica: es un dato heredado de sql/18 y la
+    // fecha de analisis es UNA por iniciativa, comun a todas sus categorias;
+    // publicarla dejaria que una pantalla la tome por la efectiva. Aparte
+    // para probarla sin SQL.
     private static void AplicarFechasPropias(Dictionary<string, object> salida, FechasPropias f)
     {
         foreach (Dictionary<string, object> i in (List<object>)salida["iniciativas"])
@@ -421,7 +423,6 @@ public static partial class ExperienciaQueries
                 string[] propias;
                 var hay = f.PorCategoria.TryGetValue(folio + SEP_FECHAS + (c["categoria"] as string ?? ""), out propias);
                 c["f_creacion_propia"] = hay ? propias[0] : null;
-                c["f_analisis_propia"] = hay ? propias[1] : null;
             }
         }
     }
@@ -504,8 +505,8 @@ public static partial class ExperienciaQueries
                 var c = new Dictionary<string, object>();
                 c["categoria"] = d.Categoria;
                 c["agrup"] = d.Agrup;
-                // La fecha de analisis EFECTIVA de esta categoria (la de la
-                // vista: la propia si la tiene, si no la de la iniciativa).
+                // La de la iniciativa: una iniciativa tiene UNA fecha de
+                // analisis, comun a todas sus categorias (LeerDetalle lee p.*).
                 c["f_analisis"] = d.FAnalisis;
                 c["tickets_reduce"] = d.TicketsReduce;
                 c["pct_dism"] = d.PctDisminucion;
@@ -518,19 +519,6 @@ public static partial class ExperienciaQueries
 
             var primera = filas[0];
             var i = Iniciativa(primera, total, total, dir);
-            // Con fechas de analisis por categoria, la iniciativa va
-            // retrasada si CUALQUIERA de sus categorias lo va (el semaforo
-            // de Experiencia es por categoria). Mientras todas compartan la
-            // fecha de la iniciativa, es lo mismo que la primera fila.
-            foreach (var d in filas)
-            {
-                if (!d.Retrasada || primera.Retrasada) continue;
-                i["riesgo_folio"] = total;
-                i["retrazado"] = 1;
-                i["sem_fecha"] = d.SemFecha;
-                i["fecha_retrasada"] = true;
-                break;
-            }
             i["activa"] = primera.Activa;
             i["seguimiento"] = primera.Activa && EsAgrupador(primera.Agrup);
             i["sin_categoria"] = false;
