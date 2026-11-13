@@ -20,10 +20,10 @@
   /* Paleta de marca, copiada de dashboard.css. Va con valores literales
      porque el marco es otro documento: no hereda las variables del tablero. */
   --g-400: #9dd323;   /* lima */
-  --g-600: #65bb2b;
-  --g-700: #56a333;
-  --g-800: #478b3c;   /* verde profundo */
-  --g-900: #3a7431;
+  --g-600: #36aa3a;
+  --g-700: #2e9c34;
+  --g-800: #258d2e;   /* verde profundo */
+  --g-900: #1a5711;
 
   --kpi-ok: var(--g-400);   /* lima:  bien */
   --kpi-ambar: #d97706;     /* ambar: aviso */
@@ -31,23 +31,23 @@
   --kpi-line: #eef1ea;      /* perimetro, el --line-soft del tablero */
 
   --tl-ink: #191919;
-  --tl-ink-2: #393939;
   --tl-line: #e3e7de;
-  --tl-grad-header: linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%);
+  --tl-grad-header: linear-gradient(135deg, #258D2E 0%, #36AA3A 45%, #9DD323 100%);
   --tl-grad-btn: linear-gradient(160deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-700) 100%);
-  --tl-grad-btn-hover: linear-gradient(160deg, #81c727 0%, var(--g-700) 55%, var(--g-800) 100%);
+  --tl-grad-btn-hover: linear-gradient(160deg, #6abe2e 0%, var(--g-700) 55%, var(--g-800) 100%);
 }
 
 /* ---------- Cabecera ----------
    Pasa de azul marino a la banda de marca. Sobre lima el texto blanco no
-   llega a 4.5:1, asi que el titulo y sus etiquetas pasan a tinta oscura,
-   igual que en header.top de dashboard.css. */
+   llega a 4.5:1, asi que el titulo y sus etiquetas pasan a tinta negra,
+   igual que en header.top de dashboard.css (carbon tampoco llega sobre el
+   extremo oscuro). */
 header.top {
   background: var(--tl-grad-header);
-  color: var(--tl-ink);
+  color: #000;
 }
-header.top .sub { color: var(--tl-ink-2); }
-header.top .selrow label { color: var(--tl-ink-2); }
+header.top .sub { color: #000; }
+header.top .selrow label { color: #000; }
 
 /* Los <select> nativos venian en azul oscuro para leerse sobre la cabecera
    azul. Desplegable.montar() los sustituye por el control del tablero, pero
@@ -60,7 +60,7 @@ header.top .selrow select {
 
 header.top .selrow button {
   background: var(--tl-grad-btn);
-  color: var(--tl-ink);
+  color: #000;
   border: 1px solid var(--g-700);
   font-weight: 700;
 }
@@ -81,7 +81,7 @@ header.top a[id^="ligaHeader"]:hover { background: var(--g-900) !important; }
    oscuro -texto claro sobre un velo blanco al 8%- y sus colores estan en
    atributos style= del HTML generado, asi que van con !important igual que
    la liga. Sobre lima el chip pasa a fondo blanco y tinta oscura. */
-header.top #filtroCand > span { color: var(--tl-ink-2) !important; }
+header.top #filtroCand > span { color: #000 !important; }
 header.top #filtroCand label {
   color: var(--tl-ink) !important;
   background: rgba(255, 255, 255, .75) !important;

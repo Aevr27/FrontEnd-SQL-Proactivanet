@@ -30,10 +30,14 @@
        PALETA CENTRALIZADA — escala verde de la cabecera.
 
        Fuente de la verdad: el degradado de header.top, que es
-         linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%)
-       Sus tres paradas son --g-800, --g-600 y --g-400. El resto de la
-       escala son interpolaciones y tintes de ESOS tres valores; no hay
-       ningun verde inventado fuera de esa recta.
+         linear-gradient(135deg, #258D2E 0%, #36AA3A 45%, #9DD323 100%)
+       Sus tres paradas son --g-800, --g-600 y --g-400, tomadas de la
+       plantilla Template-TD_2026.pptx: #258D2E es el fondo "Cortinilla
+       Verde", #36AA3A el extremo verde del degradado del logo y #9DD323 el
+       lima de la plantilla (= lima medio del logo). --g-900 #1A5711 es el
+       verde oscuro de titulos de la plantilla. El resto de la escala son
+       interpolaciones y tintes de ESOS valores; no hay ningun verde
+       inventado fuera de esa recta.
 
        Jerarquia: VERDE/LIMA = marca y enfasis · CARBON = texto y
        estructura · BLANCO = superficie · GRIS CLARO = estructura
@@ -44,11 +48,11 @@
     --g-200: #d3e9ac;   /* bordes tenues */
     --g-300: #bae065;
     --g-400: #9dd323;   /* LIMA  — parada 100% de la cabecera */
-    --g-500: #81c727;   /* interpolado 400 <-> 600 */
-    --g-600: #65bb2b;   /* VERDE — parada 45% de la cabecera */
-    --g-700: #56a333;   /* interpolado 600 <-> 800 */
-    --g-800: #478b3c;   /* VERDE PROFUNDO — parada 0% de la cabecera */
-    --g-900: #3a7431;   /* extension SOLO para texto/hover: nunca es
+    --g-500: #6abe2e;   /* interpolado 400 <-> 600 */
+    --g-600: #36aa3a;   /* VERDE — parada 45% de la cabecera (logo) */
+    --g-700: #2e9c34;   /* interpolado 600 <-> 800 */
+    --g-800: #258d2e;   /* VERDE PROFUNDO — parada 0% (Cortinilla Verde) */
+    --g-900: #1a5711;   /* extension SOLO para texto/hover: nunca es
                            parada de un degradado, para no cerrar la
                            escala en un verde bosque. */
 
@@ -84,16 +88,18 @@
     /* Degradado de marca. La cabecera conserva su 135deg exacto; el resto
        del tablero usa la MISMA progresion en vertical: lima arriba,
        verde fresco abajo. */
-    --grad-header: linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%);
+    --grad-header: linear-gradient(135deg, #258D2E 0%, #36AA3A 45%, #9DD323 100%);
     --grad: linear-gradient(180deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-800) 100%);
     --grad-linea: linear-gradient(90deg, var(--g-400) 0%, var(--g-600) 50%, var(--g-800) 100%);
 
-    /* Botones: lima arriba -> verde fresco abajo, con tinta CARBON.
-       Blanco sobre lima no llega a 4.5:1; carbon sobre esta rampa va de
-       9.9:1 (lima) a 5.7:1 (--g-700), asi que el boton se lee entero. */
+    /* Botones: lima arriba -> verde fresco abajo, con tinta NEGRA.
+       Blanco sobre lima no llega a 4.5:1. El hover/pulsado termina en
+       --g-800 (#258D2E): ahi carbon #191919 se queda en 4.1:1 y negro
+       llega a 4.9:1, asi que la tinta del boton es #000 (5.0:1 a 11.3:1
+       en toda la rampa). */
     --grad-btn: linear-gradient(160deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-700) 100%);
     --grad-btn-hover: linear-gradient(160deg, var(--g-500) 0%, var(--g-700) 55%, var(--g-800) 100%);
-    --btn-ink: var(--ink);
+    --btn-ink: #000;
 
     /* Controles de filtro: dejaron de ser barras azul marino y tampoco son
        cajas grises neutras. Superficie blanca -para que el dato se lea-,
@@ -126,7 +132,7 @@
     --shadow: 0 1px 2px rgba(25, 25, 25, .05), 0 1px 3px rgba(25, 25, 25, .06);
     --shadow-md: 0 2px 4px rgba(25, 25, 25, .05), 0 8px 20px -6px rgba(25, 25, 25, .12);
     --shadow-lg: 0 24px 60px -18px rgba(25, 25, 25, .35);
-    --ring: 0 0 0 3px rgba(101, 187, 43, .30);
+    --ring: 0 0 0 3px rgba(54, 170, 58, .30);
 
     /* Alias de los nombres viejos: parte del CSS y del JS ya los usa. */
     --panel: var(--card);
@@ -296,7 +302,7 @@
      tablero. */
   .mnav.active {
     background: var(--grad-btn); color: var(--btn-ink);
-    box-shadow: 0 1px 2px rgba(25, 25, 25, .08), 0 4px 10px -4px rgba(71, 139, 60, .28);
+    box-shadow: 0 1px 2px rgba(25, 25, 25, .08), 0 4px 10px -4px rgba(37, 141, 46, .28);
   }
 
   /* ---- Plegada: solo iconos ----
@@ -371,7 +377,10 @@
   header.top {
     position: relative; overflow: hidden;
     background: var(--grad-header);
-    color: var(--ink); padding: 24px 28px;
+    /* Tinta NEGRA, no carbon: sobre el extremo oscuro (#258D2E) carbon se
+       queda en 4.1:1 y el subtitulo #393939 en 2.8:1; negro da >= 4.9:1 en
+       todo el degradado. Medido bajo el texto real, no solo en una parada. */
+    color: #000; padding: 24px 28px;
     min-height: 100px;
     border-radius: var(--radius); margin-bottom: var(--gap-bloque);
     display: flex; align-items: center; justify-content: space-between;
@@ -389,7 +398,7 @@
   header.top > * { position: relative; z-index: 1; }
   header.top h1 { font-size: 20px; font-weight: 700; letter-spacing: -.2px; }
   header.top .sub {
-    font-size: 12.5px; color: var(--ink-2); margin-top: 5px;
+    font-size: 12.5px; color: #000; margin-top: 5px;
     font-variant-numeric: tabular-nums;
   }
   /* La pastilla del sello ya NO se describe aqui: es .datos-info, en
@@ -537,11 +546,11 @@
     box-shadow: none;
   }
   .filtros .slotstep .btn:hover:not(:disabled) {
-    background: rgba(101, 187, 43, .22); color: var(--ink);
+    background: rgba(54, 170, 58, .22); color: var(--ink);
     box-shadow: none; filter: none;
   }
   .filtros .slotstep .btn:active:not(:disabled) {
-    transform: none; background: rgba(101, 187, 43, .34);
+    transform: none; background: rgba(54, 170, 58, .34);
   }
   .filtros .slotstep .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .filtros .slotstep .btn:disabled { opacity: .35; cursor: default; background: transparent; }
@@ -631,7 +640,7 @@
   }
   /* Mismo "hundirse" al pulsar que .btn (7 dias, Año, Limpiar). */
   .filtros .btn-proveedores:hover {
-    border-color: var(--g-800); box-shadow: 0 2px 8px -2px rgba(71, 139, 60, .5);
+    border-color: var(--g-800); box-shadow: 0 2px 8px -2px rgba(37, 141, 46, .5);
   }
   .filtros .btn-proveedores:active {
     transform: translateY(1px); box-shadow: 0 1px 2px rgba(25, 25, 25, .12);
@@ -735,7 +744,7 @@
   .tab:hover { color: var(--ink); border-color: var(--g-300); background: var(--g-50); }
   .tab.active {
     background: var(--grad-btn); color: var(--btn-ink); border-color: var(--g-700);
-    box-shadow: 0 2px 8px -2px rgba(71, 139, 60, .55);
+    box-shadow: 0 2px 8px -2px rgba(37, 141, 46, .55);
   }
   .panel { display: none; }
   /* Misma referencia muerta a `aparecer` que en .maintab-content.active. */

@@ -79,7 +79,7 @@ function renderObserv(){
     const q=baseApps.filter(a=>a.madurez===n.nivel).length;
     const sel = obNivel===n.nivel;
     return `<div class="nivelBox" data-nivel="${Escape.attr(n.nivel)}"
-      style="text-align:center;padding:10px 6px;border:2px solid ${sel?'#478b3c':'var(--line)'};
+      style="text-align:center;padding:10px 6px;border:2px solid ${sel?'#258d2e':'var(--line)'};
       border-radius:12px;background:${sel?'#f4fae7':'#fbfcf8'};cursor:pointer"
       title="${Escape.attr(n.desc)}">
       <div style="font-size:26px">${esc(n.icono)}</div>

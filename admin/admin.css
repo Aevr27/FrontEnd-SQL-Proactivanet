@@ -119,7 +119,7 @@
 }
 .job[data-estado="listo"] .job-punto,
 .job[data-estado="revision"] .job-punto {
-  background: var(--verde); box-shadow: 0 0 0 3px rgba(71, 139, 60, .22);
+  background: var(--verde); box-shadow: 0 0 0 3px rgba(37, 141, 46, .22);
 }
 @keyframes job-latido { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) {

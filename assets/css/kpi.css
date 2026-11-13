@@ -140,15 +140,15 @@
   border-top-color: var(--accent-line, #d3e9ac); border-right-color: var(--accent-line, #d3e9ac);
   border-bottom-color: var(--accent-line, #d3e9ac);
 }
-.kpi-filtrable:has(> .kpi-filtro:focus-visible) { outline: 2px solid var(--accent, #65bb2b); outline-offset: 2px; }
+.kpi-filtrable:has(> .kpi-filtro:focus-visible) { outline: 2px solid var(--accent, #36aa3a); outline-offset: 2px; }
 .kpi-filtrable:has(> .kpi-filtro:active) { transform: translateY(0); box-shadow: var(--shadow); }
 .kpi.kpi-sel {
-  border-top-color: var(--accent, #65bb2b); border-right-color: var(--accent, #65bb2b);
-  border-bottom-color: var(--accent, #65bb2b);
-  box-shadow: 0 0 0 1px var(--accent, #65bb2b), var(--shadow-md);
+  border-top-color: var(--accent, #36aa3a); border-right-color: var(--accent, #36aa3a);
+  border-bottom-color: var(--accent, #36aa3a);
+  box-shadow: 0 0 0 1px var(--accent, #36aa3a), var(--shadow-md);
   background: var(--accent-soft, #f4fae7);
 }
-.kpi.kpi-sel .lbl, .kpi.kpi-sel .kpi-tit { color: var(--accent-ink, #3a7431); }
+.kpi.kpi-sel .lbl, .kpi.kpi-sel .kpi-tit { color: var(--accent-ink, #1a5711); }
 
 /* ---- Embudo: "esta tarjeta filtra / abre su detalle aqui" ----
    El icono "filtro" de la referencia de diseño: embudo azul sobre un
