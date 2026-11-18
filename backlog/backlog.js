@@ -819,14 +819,16 @@ const TableroBacklog = (function () {
        que la ranura de cada fila anda por los 30px y el juego compartido
        -.9 x .9 con tope de 44px- pegaria una fila con la siguiente. Con
        .78 x .88 la barra ocupa el 69% de su ranura, y el tope propio de 26px
-       la deja compacta tambien cuando hay tres cubos y sobra alto. El radio
-       lo sigue poniendo el default compartido (Barras.RADIO). Va en `barra:`
-       y no en Barras.GRUESA justo para no adelgazar las demas graficas. */
+       la deja compacta tambien cuando hay tres cubos y sobra alto. Va en
+       `barra:` y no en Barras.GRUESA justo para no adelgazar las demas
+       graficas. Barras cuadradas: `borderRadius: 0` pisa aqui, y solo aqui, el
+       Barras.RADIO que Barras.aplicarDefaults() -lo llama dashboard.js, donde
+       va montado Backlog- deja de default para todo `bar`. */
     graficos['chart-aging-bl'] = new DashboardBarChart({
       canvas: 'chart-aging-bl',
       etiquetas: m.buckets,
       barra: { categoryPercentage: 0.78, barPercentage: 0.88, maxBarThickness: 26 },
-      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 0 },
       datasets: m.lideres.map(l => ({
         label: l,
         data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
