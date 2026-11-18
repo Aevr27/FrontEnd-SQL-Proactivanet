@@ -46,7 +46,12 @@
 //     Ticket sin SO resuelto = SinServiceOwner.
 //   Grupo: dbo.vw_ServicioTickets.Grupo (el grupo asignado del ticket).
 //   Varios valores de un filtro = cualquiera de ellos; filtros distintos = y.
-//   Los dos filtros se aplican a las TRES graficas.
+//   Los dos filtros se aplican a las TRES graficas y a la comparacion.
+//
+// COMPARACION CON EL PERIODO ANTERIOR (2026-11-18; grafica "Servicios con
+// mayor cambio de tickets"): ver PeriodoAnterior y Cambios. No usa
+// dbo.usp_DashboardServicios_Comparativo (agrupa por rama, no filtra por SO
+// ni Grupo y no tiene dueño confirmado; diag sql/diag/ADM_DIAG_...).
 
 using System;
 using System.Collections.Generic;
@@ -367,6 +372,143 @@ public static class ConcentracionContrato
     public static List<Dictionary<string, object>> Grupos(IEnumerable<ConcentracionTicket> t)
     {
         return Agregar(t, "Grupo", x => x.Grupo, null);
+    }
+
+    // ------------------------------------------------------------ comparacion
+    public const int TopCambios = 5;
+    public const string CambiosOk = "ok";
+    public const string CambiosHistoriaInsuficiente = "historiaInsuficiente";
+    public const string CambiosError = "error";
+
+    // Los meses del filtro (Meses; si viene vacio, Mes: quien solo fijo Mes).
+    public static List<DateTime> MesesElegidos(ConcentracionFiltros f)
+    {
+        return f.Meses.Count > 0 ? new List<DateTime>(f.Meses) : new List<DateTime> { f.Mes };
+    }
+
+    /* El periodo con el que se compara, de la MISMA duracion e inmediatamente
+       antes del elegido. Nunca se enciman con el actual.
+         Slot N (acumulado, 30(N+1) dias): los 30(N+1) dias anteriores a su
+           inicio (= los Slots N+1..2N+1 por fecha).
+         Meses: cada mes elegido se corre hacia atras el mismo numero de meses,
+           el del tramo que cubre la seleccion (del mas viejo al mas reciente,
+           ambos incluidos). Un mes = el anterior; Sep-Oct-Nov = Jun-Jul-Ago;
+           Sep y Nov (sin Oct) = Jun y Ago: se conserva el patron, nunca se
+           rellena el hueco. Mes cerrado -> el mes completo; el mes de hoy
+           (del 1 a hoy) -> los mismos dias de su mes, acotados a su ultimo
+           dia (31 de marzo -> 1..28 de febrero).
+       Del mas reciente al mas viejo, como los rangos del actual. */
+    public static List<KeyValuePair<DateTime, DateTime>> PeriodoAnterior(ConcentracionFiltros f, DateTime hoy)
+    {
+        var salida = new List<KeyValuePair<DateTime, DateTime>>();
+        if (f.Modo == ModoMes)
+        {
+            var meses = MesesElegidos(f).ConvertAll(m => new DateTime(m.Year, m.Month, 1));
+            meses.Sort((a, b) => b.CompareTo(a));
+            DateTime viejo = meses[meses.Count - 1], nuevo = meses[0];
+            int tramo = (nuevo.Year - viejo.Year) * 12 + nuevo.Month - viejo.Month + 1;
+            foreach (var m in meses)
+            {
+                DateTime d, h;
+                PeriodoMes(m, hoy, out d, out h);
+                var inicio = m.AddMonths(-tramo);
+                var finMes = inicio.AddMonths(1).AddDays(-1);
+                // Por el mes de hoy, no por el largo: el ultimo dia del mes
+                // sigue en curso y compara contra los mismos dias, no contra
+                // el mes anterior completo (30 de nov -> 1..30 de oct).
+                bool enCurso = m.Year == hoy.Year && m.Month == hoy.Month;
+                var fin = enCurso ? inicio.AddDays(Math.Min((h - d).Days, (finMes - inicio).Days)) : finMes;
+                salida.Add(new KeyValuePair<DateTime, DateTime>(inicio, fin));
+            }
+        }
+        else
+        {
+            DateTime d, h;
+            PeriodoAcumulado(f.Slot, hoy, out d, out h);
+            int dias = (h - d).Days + 1;
+            salida.Add(new KeyValuePair<DateTime, DateTime>(d.AddDays(-dias), d.AddDays(-1)));
+        }
+        return salida;
+    }
+
+    /* Servicios con mayor cambio: tickets distintos por CODIGO de servicio
+       (como el Pareto: un servicio es una sola entrada aunque sus tickets
+       vengan de dos ramas de categoria) en cada periodo, ya filtrados.
+       Diferencia = actual - anterior; los de diferencia 0 no salen.
+         aumentos:    diferencia > 0, de mayor a menor;
+         reducciones: diferencia < 0, de la mas negativa a la menos;
+       a igual diferencia, por codigo (CompararEtiquetas), para que el corte
+       del Top sea estable. Top `top` de cada lado; serviciosAumento /
+       serviciosReduccion cuentan todos. VariacionPorcentaje = 100 * dif /
+       anterior a 2 decimales (como Pct), null si el anterior es 0. */
+    public static Dictionary<string, object> Cambios(IEnumerable<ConcentracionTicket> actual,
+                                                     IEnumerable<ConcentracionTicket> anterior, int top)
+    {
+        var nombres = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var a = TicketsPorServicio(actual, nombres);
+        var p = TicketsPorServicio(anterior, nombres);
+        var filas = new List<Dictionary<string, object>>();
+        foreach (var k in a.Keys.Union(p.Keys, StringComparer.OrdinalIgnoreCase))
+        {
+            HashSet<string> sa, sp;
+            int na = a.TryGetValue(k, out sa) ? sa.Count : 0;
+            int np = p.TryGetValue(k, out sp) ? sp.Count : 0;
+            if (na == np) continue;
+            var nombre = nombres[k];
+            filas.Add(new Dictionary<string, object>
+            {
+                { "Servicio", k },
+                { "NombreServicio", string.IsNullOrWhiteSpace(nombre) ? k : nombre.Trim() },
+                { "TicketsActual", na },
+                { "TicketsAnterior", np },
+                { "Diferencia", na - np },
+                { "VariacionPorcentaje", np == 0 ? (object)null
+                    : Math.Round(100m * (na - np) / np, 2, MidpointRounding.AwayFromZero) },
+            });
+        }
+        Func<Dictionary<string, object>, int> dif = x => (int)x["Diferencia"];
+        var aumentos = filas.Where(x => dif(x) > 0).ToList();
+        aumentos.Sort((x, y) => dif(x) != dif(y) ? dif(y).CompareTo(dif(x)) : CompararEtiquetas((string)x["Servicio"], (string)y["Servicio"]));
+        var reducciones = filas.Where(x => dif(x) < 0).ToList();
+        reducciones.Sort((x, y) => dif(x) != dif(y) ? dif(x).CompareTo(dif(y)) : CompararEtiquetas((string)x["Servicio"], (string)y["Servicio"]));
+        return new Dictionary<string, object>
+        {
+            { "aumentos", aumentos.Take(top).ToList() },
+            { "reducciones", reducciones.Take(top).ToList() },
+            { "serviciosAumento", aumentos.Count },
+            { "serviciosReduccion", reducciones.Count },
+            { "ticketsActual", a.Values.Sum(s => s.Count) },
+            { "ticketsAnterior", p.Values.Sum(s => s.Count) },
+        };
+    }
+
+    // Codigo de servicio (recortado, sin distinguir mayusculas) -> tickets
+    // distintos. Sin codigo: fuera, como en el Pareto. El primer nombre visto
+    // de cada codigo queda en `nombres` (el periodo actual se lee primero).
+    private static Dictionary<string, HashSet<string>> TicketsPorServicio(IEnumerable<ConcentracionTicket> tickets,
+                                                                          Dictionary<string, string> nombres)
+    {
+        var salida = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var t in tickets)
+        {
+            if (t.Servicio == null || t.Servicio.Trim().Length == 0) continue;
+            var k = t.Servicio.Trim();
+            HashSet<string> set;
+            if (!salida.TryGetValue(k, out set)) { set = new HashSet<string>(StringComparer.OrdinalIgnoreCase); salida[k] = set; }
+            set.Add(t.Codigo);
+            if (!nombres.ContainsKey(k)) nombres[k] = t.NombreServicio;
+        }
+        return salida;
+    }
+
+    // Rangos -> { rangos: [{desde, hasta}], dias } para el JSON.
+    public static Dictionary<string, object> RangosJson(IList<KeyValuePair<DateTime, DateTime>> rangos)
+    {
+        return new Dictionary<string, object>
+        {
+            { "rangos", rangos.Select(x => new Dictionary<string, object> { { "desde", Dia(x.Key) }, { "hasta", Dia(x.Value) } }).ToList() },
+            { "dias", rangos.Sum(x => (x.Value - x.Key).Days + 1) },
+        };
     }
 
     // ------------------------------------------------------------ C1&C2

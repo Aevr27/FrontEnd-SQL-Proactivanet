@@ -13,7 +13,10 @@
    Filtros (estado `filtros`): Periodo por Slot O por Mes -nunca los dos-,
    Service Owner y Grupo. Slot N es ACUMULADO (2026-11-10, como el SLOT del
    tablero de SLA): los Slots 0..N juntos. Mes admite VARIOS meses a la vez
-   (2026-11-10): las tres graficas, los totales y la cobertura usan todos. Cada cambio es UNA peticion a
+   (2026-11-10): las tres graficas, los totales y la cobertura usan todos.
+   La cuarta grafica (2026-11-18), "Servicios con mayor cambio de tickets",
+   compara contra el periodo anterior de la misma duracion; el periodo, la
+   cuenta y el estado de historia los decide el servidor. Cada cambio es UNA peticion a
    handlers/concentracion.ashx con todos los filtros; el servidor filtra y
    cuenta (App_Code/ConcentracionContrato.cs) y entrega TODAS las filas de
    cada grafica con el acumulado ya calculado sobre el total filtrado. Aqui
@@ -276,12 +279,109 @@
     return d && numero(d.ticketsPeriodo) > 0 ? 'Sin tickets con estos filtros.' : 'Sin tickets en este periodo.';
   }
 
+  // ------------------------------------------- mayor cambio de tickets
+  /* El servidor (ConcentracionContrato.Cambios) ya trae el Top 5 de cada
+     lado, ordenado y sin diferencias en 0, contra el periodo anterior de la
+     misma duracion. Aqui solo se acomoda para pintar. */
+  var TOP_CAMBIOS = 5;
+  var MENOS = '−';
+
+  // +12 / −8 / 0 (signo tipografico, no guion).
+  function textoDiferencia(v) {
+    var n = numero(v);
+    if (n === null) return 'n/d';
+    return (n > 0 ? '+' : n < 0 ? MENOS : '') + NUM.format(Math.abs(n));
+  }
+
+  function textoVariacion(v) {
+    var n = numero(v);
+    if (n === null) return null;
+    return (n > 0 ? '+' : n < 0 ? MENOS : '') + NUM1.format(Math.abs(n)) + ' %';
+  }
+
+  // { rangos } del servidor -> "del a al b" o, con varios (meses no
+  // seguidos), "a–b, c–d" del mas viejo al mas reciente.
+  function textoRangos(bloque) {
+    var rs = bloque && bloque.rangos;
+    if (!rs || !rs.length) return '';
+    if (rs.length === 1) return 'del ' + diaTexto(rs[0].desde) + ' al ' + diaTexto(rs[0].hasta);
+    return rs.slice().reverse().map(function (r) { return diaTexto(r.desde) + '–' + diaTexto(r.hasta); }).join(', ');
+  }
+
+  /* Lo que pinta: aumentos de mayor a menor arriba y reducciones abajo, la
+     mas grande al final (orden por diferencia, de + a −). null = no llego;
+     filas [] = no hay nada que pintar (ver mensajeCambios). */
+  function vistaCambios(c) {
+    if (!c || !c.estado) return null;
+    if (c.estado !== 'ok') return { estado: c.estado, filas: [] };
+    var distinta = function (f) { var n = numero(f && f.Diferencia); return n !== null && n !== 0; };
+    var arriba = (c.aumentos || []).filter(distinta).slice(0, TOP_CAMBIOS);
+    var abajo = (c.reducciones || []).filter(distinta).slice(0, TOP_CAMBIOS).reverse();
+    var filas = arriba.concat(abajo);
+    var valores = filas.map(function (f) { return numero(f.Diferencia); });
+    return {
+      estado: 'ok', filas: filas,
+      etiquetas: filas.map(function (f) { return etiquetaFila('pareto', f); }),
+      valores: valores,
+      sube: valores.map(function (n) { return n > 0; }),
+      maximo: valores.reduce(function (m, n) { return Math.max(m, Math.abs(n)); }, 0),
+      aumentos: arriba.length, reducciones: abajo.length,
+      totalAumento: numero(c.serviciosAumento), totalReduccion: numero(c.serviciosReduccion),
+    };
+  }
+
+  // Eje simetrico alrededor de 0 (y con aire para la cifra fuera de la barra).
+  function limiteEje(maximo) {
+    var m = numero(maximo);
+    return m ? Math.ceil(m * 1.2) : 1;
+  }
+
+  // "Top 5 de 7 con aumento · 2 con reducción"
+  function resumenCambios(v) {
+    if (!v || v.estado !== 'ok') return '';
+    function parte(n, total, txt) {
+      total = total === null || total === undefined ? n : total;
+      return (n < total ? 'Top ' + n + ' de ' + NUM.format(total) : NUM.format(total)) + ' ' + txt;
+    }
+    return parte(v.aumentos, v.totalAumento, 'con aumento') + ' · ' + parte(v.reducciones, v.totalReduccion, 'con reducción');
+  }
+
+  function textoComparacion(c) {
+    var base = 'Diferencia = tickets del periodo actual − tickets del periodo anterior equivalente';
+    if (!c || !c.actual || !c.anterior) return base + '.';
+    return base + ' (actual: ' + textoRangos(c.actual) + ' · anterior: ' + textoRangos(c.anterior) + ').';
+  }
+
+  /* Por que no hay barras, o null si las hay. Historia insuficiente: se dice
+     el hecho (dias con datos del periodo anterior) y que no se compara a
+     medias; nunca se pinta una comparacion parcial. */
+  function mensajeCambios(c, d) {
+    if (!c || !c.estado) return 'Sin datos: la gráfica no llegó.';
+    if (c.estado === 'error') return c.mensaje || 'No se pudo calcular la comparación.';
+    if (c.estado === 'historiaInsuficiente') {
+      var cob = c.cobertura || {};
+      var dias = numero(cob.diasConTickets), esperados = numero(cob.diasEsperados);
+      var cuantos = dias !== null && esperados !== null ? ' tiene tickets en ' + dias + ' de ' + esperados + ' días' : ' no está completo';
+      var rango = cob.primerDia && cob.ultimoDia ? ' (datos del ' + diaTexto(cob.primerDia) + ' al ' + diaTexto(cob.ultimoDia) + ')' : '';
+      return 'Sin historial suficiente para comparar: el periodo anterior (' + textoRangos(c.anterior) + ')' + cuantos + rango +
+             '. No se muestra una comparación parcial.';
+    }
+    if (c.estado !== 'ok') return 'No se pudo calcular la comparación.';
+    var v = vistaCambios(c);
+    if (v.filas.length) return null;
+    if (!numero(c.ticketsActual) && !numero(c.ticketsAnterior)) return mensajeVacio(d);
+    return 'Sin cambios: ningún servicio subió ni bajó respecto al periodo anterior.';
+  }
+
   var ConcentracionDatos = {
     consulta: consulta, mesesDe: mesesDe, textoActivos: textoActivos, mensajeVacio: mensajeVacio,
     TOP: TOP, UMBRAL: UMBRAL, SLOT_MAXIMO: SLOT_MAXIMO, LARGO_ETIQUETA: LARGO_ETIQUETA,
     numero: numero, etiquetaFila: etiquetaFila, abreviarRuta: abreviarRuta, recortar: recortar,
     marcarDentro: marcarDentro, vista: vista, resumen: resumen, textoPeriodo: textoPeriodo,
     acotarSlot: acotarSlot, lineasEje: lineasEje, textoCobertura: textoCobertura,
+    TOP_CAMBIOS: TOP_CAMBIOS, textoDiferencia: textoDiferencia, textoVariacion: textoVariacion,
+    textoRangos: textoRangos, vistaCambios: vistaCambios, limiteEje: limiteEje,
+    resumenCambios: resumenCambios, textoComparacion: textoComparacion, mensajeCambios: mensajeCambios,
   };
   raiz.ConcentracionDatos = ConcentracionDatos;
 
@@ -317,9 +417,13 @@
      dos, la cifra dentro de la barra sale en tinta oscura, como en el Call
      Center. */
   var AZUL_AGENTE = 'rgba(54, 162, 235, 0.5)';
+  /* Mayor cambio: rojo = aumento, verde = reduccion, los semanticos del
+     tablero (--rojo / --verde de dashboard.css); arrancar() los relee del
+     token y estos son el respaldo. Van en hex: Barras.tintaSobre los mide. */
   var COLOR = { dentro: AZUL_AGENTE, fuera: 'rgba(54, 162, 235, 0.2)',
-                acumulado: '#d39a3a', referencia: '#8a94a6' };
-  var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1f6' };
+                acumulado: '#d39a3a', referencia: '#8a94a6',
+                sube: '#982a18', baja: '#258d2e' };
+  var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1f6', cero: '#8a94a6' };
 
   var graficas = {};
   // Lo que el usuario eligio; viaja completo en cada peticion y en cada refresco.
@@ -507,6 +611,60 @@
     }).render();
   }
 
+  /* Mayor cambio de tickets: barras horizontales divergentes desde el 0,
+     eje simetrico, cifra con signo. Sin barras, el porque (mensajeCambios). */
+  function pintarCambios(c) {
+    destruir('cambios');
+    $('hint-cambios').textContent = '';
+    $('sub-cambios').textContent = textoComparacion(c);
+    var v = vistaCambios(c);
+    if (!v || !v.filas.length) {
+      mensaje('cambios', mensajeCambios(c, ultima), !v || c.estado === 'error');
+      return;
+    }
+    mensaje('cambios', null);
+    $('hint-cambios').textContent = resumenCambios(v);
+    $('lienzo-cambios').style.height = Math.max(260, v.filas.length * ALTO_FILA + 40) + 'px';
+    var lim = limiteEje(v.maximo);
+    var esCero = function (ctx) { return ctx.tick && ctx.tick.value === 0; };
+    graficas.cambios = new DashboardBarChart({
+      canvas: $('chart-cambios'),
+      etiquetas: v.etiquetas.map(function (e) { return lineasEje(recortar(e, LARGO_ETIQUETA)); }),
+      datos: v.valores,
+      colores: v.sube.map(function (s) { return s ? COLOR.sube : COLOR.baja; }),
+      formato: textoDiferencia,
+      opciones: {
+        indexAxis: 'y',
+        maintainAspectRatio: false,
+        layout: { padding: { left: 8, right: 26 } },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              title: function (items) { return items.length ? v.etiquetas[items[0].dataIndex] : ''; },
+              label: function (item) {
+                var f = v.filas[item.dataIndex], pctTxt = textoVariacion(f.VariacionPorcentaje);
+                return 'Diferencia: ' + textoDiferencia(f.Diferencia) +
+                       (pctTxt ? ' (' + pctTxt + ')' : (numero(f.TicketsAnterior) === 0 ? ' (sin tickets en el periodo anterior)' : ''));
+              },
+              afterLabel: function (item) {
+                var f = v.filas[item.dataIndex];
+                return 'Actual: ' + entero(f.TicketsActual) + ' · Anterior: ' + entero(f.TicketsAnterior);
+              },
+            },
+          },
+        },
+        scales: {
+          x: { min: -lim, max: lim,
+               ticks: { precision: 0, color: TINTA.eje, callback: function (n) { return textoDiferencia(n); } },
+               grid: { color: function (ctx) { return esCero(ctx) ? TINTA.cero : TINTA.rejilla; },
+                       lineWidth: function (ctx) { return esCero(ctx) ? 1.5 : 1; } } },
+          y: { ticks: { color: TINTA.etiqueta, autoSkip: false, font: { size: 11.5 } }, grid: { display: false } },
+        },
+      },
+    }).render();
+  }
+
   // ------------------------------------------------------------ peticion
   /* senal: AbortSignal de la peticion (cargar la cancela cuando otra la
      reemplaza). Cancelar solo deja de esperar en el navegador: si el
@@ -536,7 +694,7 @@
 
   function esCancelada(err) { return !!err && err.name === 'AbortError'; }
 
-  var CLAVES = ['pareto', 'categorias', 'grupos'];
+  var CLAVES = ['pareto', 'categorias', 'grupos', 'cambios'];
 
   function enEspera() {
     CLAVES.forEach(function (k) { mensaje(k, 'Calculando…'); $('hint-' + k).textContent = ''; });
@@ -596,6 +754,7 @@
     pintarPareto(d.pareto, errores);
     pintarHorizontal('categorias', d.categorias, errores);
     pintarHorizontal('grupos', d.grupos, errores);
+    pintarCambios(d.cambios);
 
     var fallidos = Object.keys(errores);
     DatosInfo.pintar($('estado'), d.dataInfo, fallidos.length ? {
@@ -785,6 +944,14 @@
     var muestra = function (sel, color) { var i = raizTab.querySelector(sel); if (i) i.style.background = color; };
     muestra('.conc-leyenda .conc-dentro', COLOR.dentro);
     muestra('.conc-leyenda .conc-fuera', COLOR.fuera);
+    var token = function (nombre, respaldo) {
+      var t = getComputedStyle(raizTab === document ? document.documentElement : raizTab).getPropertyValue(nombre).trim();
+      return /^#[0-9a-f]{6}$/i.test(t) ? t : respaldo;
+    };
+    COLOR.sube = token('--rojo', COLOR.sube);
+    COLOR.baja = token('--verde', COLOR.baja);
+    muestra('.conc-claves .conc-sube', COLOR.sube);
+    muestra('.conc-claves .conc-baja', COLOR.baja);
     pintarControles();
     conectar();
     cargar();

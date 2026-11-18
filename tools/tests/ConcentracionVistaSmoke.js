@@ -18,6 +18,8 @@
 //   V  vacio / fallo: [] es "sin tickets", null es "fallo"; vacio por filtros o por periodo.
 //   F  filtros -> query string (solo el parametro del modo elegido).
 //   A  texto de lo aplicado (periodo con fechas, SO, Grupo, tickets).
+//   X  mayor cambio de tickets: orden, signo, colores, eje, mensajes de
+//      historia insuficiente / error / sin cambios.
 //
 //   node tools\tests\ConcentracionVistaSmoke.js   # PASS/FAIL por caso, sale 0 si todo paso
 'use strict';
@@ -189,6 +191,54 @@ Check('M5 Slot acumulado: 0 = "Slot 0"; N = "Slots 0-N" con el rango completo',
     return D.textoActivos({ modo: 'slot', slot: n, periodo: { desde: desde, hasta: '2026-11-09', rangos: [{ desde: desde, hasta: '2026-11-09' }] },
       ticketsPeriodo: 1, ticketsFiltrados: 1, filtros: { serviceOwners: [], grupos: [] } }).split(' · ').slice(0, 2).join(' · ');
   }));
+
+// ---- X: Servicios con mayor cambio de tickets (2026-11-18)
+function cambio(s, a, p) {
+  return { Servicio: s, NombreServicio: 'Servicio ' + s, TicketsActual: a, TicketsAnterior: p, Diferencia: a - p,
+           VariacionPorcentaje: p ? Math.round(10000 * (a - p) / p) / 100 : null };
+}
+var okCambios = { estado: 'ok', serviciosAumento: 7, serviciosReduccion: 2, ticketsActual: 46, ticketsAnterior: 21,
+  actual: { rangos: [{ desde: '2026-10-20', hasta: '2026-11-18' }], dias: 30 },
+  anterior: { rangos: [{ desde: '2026-09-20', hasta: '2026-10-19' }], dias: 30 },
+  aumentos: [cambio('A1', 10, 2), cambio('A2', 9, 1), cambio('A3', 7, 0), cambio('A4', 5, 1), cambio('A5', 4, 1)],
+  reducciones: [cambio('R1', 1, 6), cambio('R2', 0, 3)] };
+var vc = D.vistaCambios(okCambios);
+Check('X1 orden: aumentos de mayor a menor arriba, reducciones abajo con la mayor al final',
+  [['A1', 'A2', 'A3', 'A4', 'A5', 'R2', 'R1'], [8, 8, 7, 4, 3, -3, -5]],
+  [vc.filas.map(function (f) { return f.Servicio; }), vc.valores]);
+Check('X2 rojo/verde por signo; etiqueta = nombre del servicio; maximo para el eje', [[true, true, true, true, true, false, false], 'Servicio A1', 8],
+  [vc.sube, vc.etiquetas[0], vc.maximo]);
+Check('X3 eje simetrico con aire; sin datos = 1', [10, 1], [D.limiteEje(8), D.limiteEje(0)]);
+Check('X4 resumen con el total de cada lado', 'Top 5 de 7 con aumento · 2 con reducción', D.resumenCambios(vc));
+Check('X5 cifras con signo tipografico', ['+8', '−5', '0', '+1,234', 'n/d'],
+  [D.textoDiferencia(8), D.textoDiferencia(-5), D.textoDiferencia(0), D.textoDiferencia(1234), D.textoDiferencia(null)]);
+Check('X6 variacion con signo; null se queda null', ['+400.0 %', '−100.0 %', null], [D.textoVariacion(400), D.textoVariacion(-100), D.textoVariacion(null)]);
+Check('X7 subtitulo: actual menos anterior, con sus fechas',
+  'Diferencia = tickets del periodo actual − tickets del periodo anterior equivalente (actual: del 20/10/2026 al 18/11/2026 · anterior: del 20/09/2026 al 19/10/2026).',
+  D.textoComparacion(okCambios));
+Check('X8 meses no seguidos: cada rango, del mas viejo al mas reciente (no un rango continuo)', '01/06/2026–30/06/2026, 01/08/2026–09/08/2026',
+  D.textoRangos({ rangos: [{ desde: '2026-08-01', hasta: '2026-08-09' }, { desde: '2026-06-01', hasta: '2026-06-30' }] }));
+var mas = JSON.parse(JSON.stringify(okCambios));
+mas.aumentos.push(cambio('A6', 3, 1)); mas.aumentos.push(cambio('Z0', 2, 2));
+Check('X9 nunca mas de 5 por lado; diferencia 0 no se pinta aunque llegue', 7, D.vistaCambios(mas).filas.length);
+var pocos = { estado: 'ok', serviciosAumento: 1, serviciosReduccion: 0, ticketsActual: 5, ticketsAnterior: 4, aumentos: [cambio('PU', 5, 4)], reducciones: [] };
+Check('X10 menos de 5: solo los que hay; un lado vacio', [1, '1 con aumento · 0 con reducción', null],
+  [D.vistaCambios(pocos).filas.length, D.resumenCambios(D.vistaCambios(pocos)), D.mensajeCambios(pocos, { ticketsPeriodo: 9 })]);
+var insuf = { estado: 'historiaInsuficiente', aumentos: null, reducciones: null,
+  anterior: { rangos: [{ desde: '2025-09-25', hasta: '2026-04-21' }], dias: 210 },
+  cobertura: { diasConTickets: 191, diasEsperados: 210, primerDia: '2025-10-14', ultimoDia: '2026-04-21', completa: false } };
+Check('X11 historia insuficiente: sin barras y lo dice con los dias reales',
+  [0, 'Sin historial suficiente para comparar: el periodo anterior (del 25/09/2025 al 21/04/2026) tiene tickets en 191 de 210 días (datos del 14/10/2025 al 21/04/2026). No se muestra una comparación parcial.'],
+  [D.vistaCambios(insuf).filas.length, D.mensajeCambios(insuf, null)]);
+Check('X12 error del servidor, o no llego', ['No se pudo leer el periodo anterior.', 'Sin datos: la gráfica no llegó.', null],
+  [D.mensajeCambios({ estado: 'error', mensaje: 'No se pudo leer el periodo anterior.' }), D.mensajeCambios(undefined), D.vistaCambios(null)]);
+Check('X13 ok sin cambios: periodo vacio, filtros sin tickets, o todos iguales',
+  ['Sin tickets en este periodo.', 'Sin tickets con estos filtros.', 'Sin cambios: ningún servicio subió ni bajó respecto al periodo anterior.'],
+  [D.mensajeCambios({ estado: 'ok', aumentos: [], reducciones: [], ticketsActual: 0, ticketsAnterior: 0 }, { ticketsPeriodo: 0 }),
+   D.mensajeCambios({ estado: 'ok', aumentos: [], reducciones: [], ticketsActual: 0, ticketsAnterior: 0 }, { ticketsPeriodo: 12 }),
+   D.mensajeCambios({ estado: 'ok', aumentos: [], reducciones: [], ticketsActual: 4, ticketsAnterior: 4 }, { ticketsPeriodo: 12 })]);
+Check('X14 empates: se respeta el orden del servidor', ['E1', 'E2'],
+  D.vistaCambios({ estado: 'ok', aumentos: [cambio('E1', 2, 0), cambio('E2', 2, 0)], reducciones: [] }).filas.map(function (f) { return f.Servicio; }));
 
 console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
 process.exit(fallos ? 1 : 0);

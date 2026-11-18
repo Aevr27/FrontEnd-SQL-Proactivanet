@@ -44,6 +44,10 @@
 //          y UNA peticion sin mes (el servidor da el actual); un mes; tras
 //          abrir y cerrar; con clics pendientes de la espera = UNA; nada
 //          que quitar = ninguna; el desplegable sigue sirviendo despues.
+//      C19 (2026-11-18) "Servicios con mayor cambio de tickets": tarjeta
+//          debajo de las otras, divergente, rojo/verde de los tokens, eje
+//          simetrico, cifras con signo, resumen, subtitulo y tooltip.
+//      C20 historia insuficiente, error y sin cambios: sin barras y el porque.
 //   D  dashboard.html#concentracion (MOCK_DATA para SLA)
 //      D1  la entrada de grupo "Servicios" y su boton "Vista general de
 //          servicios" quedan marcados (selector visible); la pestaña se monta y pide concentracion.ashx sin pasar por Analisis.
@@ -119,7 +123,19 @@ function respondeConc(u, v) {
   so.forEach(function (x) { if (!opSo.some(function (o) { return o.valor === x; })) opSo.push({ valor: x, tickets: 0 }); });
   var opGr = []; for (var g = 1; g <= 18; g++) opGr.push({ valor: 'Grupo ' + g, tickets: 40 - g });
   var periodo = window.__vacio ? 0 : 500;
+  // Mayor cambio (2026-11-18): Top 5 + 2 como los arma el servidor; __cambios lo reemplaza.
+  function cambio(s, a, p) {
+    return { Servicio: s, NombreServicio: 'Servicio ' + s, TicketsActual: a, TicketsAnterior: p, Diferencia: a - p,
+             VariacionPorcentaje: p ? Math.round(10000 * (a - p) / p) / 100 : null };
+  }
+  var cambios = window.__cambios !== undefined ? window.__cambios : {
+    estado: 'ok', actual: { rangos: rangos, dias: dias }, anterior: { rangos: [{ desde: '2026-09-11', hasta: '2026-10-10' }], dias: 30 },
+    cobertura: { diasConTickets: 30, diasEsperados: 30, completa: true },
+    aumentos: vacio ? [] : [cambio('A1', 10, 2), cambio('A2', 9, 1), cambio('A3', 7, 0), cambio('A4', 5, 1), cambio('A5', 4, 1)],
+    reducciones: vacio ? [] : [cambio('R1', 1, 6), cambio('R2', 0, 3)],
+    serviciosAumento: vacio ? 0 : 7, serviciosReduccion: vacio ? 0 : 2, ticketsActual: vacio ? 0 : 46, ticketsAnterior: vacio ? 0 : 21 };
   return {
+    cambios: cambios,
     modo: modo, slot: modo === 'slot' ? s : null, mes: modo === 'mes' ? mes : null, slotMaximo: 12, meses: meses,
     mesesElegidos: modo === 'mes' ? mesesQ : null,
     periodo: { desde: desde, hasta: hasta, dias: dias, rangos: rangos },
@@ -240,6 +256,20 @@ var sondaC = conComun(
   '  $c("lienzo-categorias").style.height]);\n' +
   // C4
   'apunta("C4", [hint("pareto"), hint("categorias"), hint("grupos")]);\n' +
+  // C19 Mayor cambio de tickets: debajo de las otras, divergente, rojo/verde, eje simetrico.
+  'var gc = graf("cambios"), dsc = gc && gc.data.datasets[0];\n' +
+  'var cardC = $c("chart-cambios").closest(".card"), rejilla = document.querySelector(".grid2x2");\n' +
+  // Los colores salen del token de la pagina (--rojo / --verde), no de una cifra fija.
+  'var cssTok = getComputedStyle(document.documentElement), tokR = cssTok.getPropertyValue("--rojo").trim(), tokV = cssTok.getPropertyValue("--verde").trim();\n' +
+  'function rgbDe(h) { var n = parseInt(h.slice(1), 16); return "rgb(" + (n >> 16) + ", " + ((n >> 8) & 255) + ", " + (n & 255) + ")"; }\n' +
+  'function cual(c) { return c === tokR ? "rojo" : c === tokV ? "verde" : c; }\n' +
+  'apunta("C19", gc ? [cardC.querySelector("h3").firstChild.textContent, !!(rejilla.compareDocumentPosition(cardC) & Node.DOCUMENT_POSITION_FOLLOWING),\n' +
+  '  gc.options.indexAxis, dsc.data, dsc.backgroundColor.map(cual), [gc.options.scales.x.min, gc.options.scales.x.max],\n' +
+  '  gc.options.scales.x.ticks.callback(-5), gc.data.labels[0], hint("cambios"), $c("sub-cambios").textContent, msg("cambios"),\n' +
+  '  gc.options.plugins.tooltip.callbacks.label({ dataIndex: 2 }), gc.options.plugins.tooltip.callbacks.afterLabel({ dataIndex: 0 }),\n' +
+  '  [getComputedStyle(cardC.querySelector(".conc-sube")).backgroundColor === rgbDe(tokR), getComputedStyle(cardC.querySelector(".conc-baja")).backgroundColor === rgbDe(tokV),\n' +
+  '   /^#[0-9a-f]{6}$/i.test(tokR) && /^#[0-9a-f]{6}$/i.test(tokV)],\n' +
+  '  document.querySelectorAll(".conc-leyenda").length] : "sin grafica");\n' +
   // C5
   'var n0 = __urls.length;\n' +
   '$c("slot-mas").click();\n' +
@@ -310,6 +340,16 @@ var sondaC = conComun(
   'await M().recargar(); var parcial = [$c("cobertura").hidden, $c("cobertura").textContent];\n' +
   'window.__cobertura = null; await M().recargar(); var nula = $c("cobertura").hidden; window.__cobertura = undefined;\n' +
   'apunta("C13", [completa, parcial, nula]);\n' +
+  // C20 historia insuficiente / error / sin cambios: sin barras, el porque; las otras tres siguen.
+  'window.__cambios = { estado: "historiaInsuficiente", aumentos: null, reducciones: null, anterior: { rangos: [{ desde: "2025-09-25", hasta: "2026-04-21" }], dias: 210 },\n' +
+  '  cobertura: { diasConTickets: 191, diasEsperados: 210, primerDia: "2025-10-14", ultimoDia: "2026-04-21", completa: false } };\n' +
+  'await M().recargar(); var insuf = [!!graf("cambios"), msg("cambios"), $c("msg-cambios").classList.contains("conc-msg-error"), hint("cambios"), !!graf("pareto")];\n' +
+  'window.__cambios = { estado: "error", mensaje: "No se pudo leer el periodo anterior.", aumentos: null, reducciones: null };\n' +
+  'await M().recargar(); var err20 = [!!graf("cambios"), msg("cambios"), $c("msg-cambios").classList.contains("conc-msg-error"), !!graf("pareto")];\n' +
+  'window.__cambios = { estado: "ok", aumentos: [], reducciones: [], ticketsActual: 4, ticketsAnterior: 4, serviciosAumento: 0, serviciosReduccion: 0 };\n' +
+  'await M().recargar(); var igual = [!!graf("cambios"), msg("cambios")];\n' +
+  'window.__cambios = undefined; await M().recargar();\n' +
+  'apunta("C20", [insuf, err20, igual, !!graf("cambios"), msg("cambios")]);\n' +
   // C14 leyenda
   'apunta("C14", await leyendaPareto());\n' +
   // C15 varios meses (2026-11-10): uno, agregar dos seguidos = UNA peticion,
@@ -504,6 +544,17 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
       [[{ modo: 'mes', mes: '2026-08', so: 'Beto', grupo: 'Grupo 5|Grupo 7' }], [null, true],
        [['Beto'], ['Grupo 5', 'Grupo 7'], '2026-08', 'mes'],
        [{ modo: 'mes', mes: '2026-08', so: 'Beto', grupo: 'Grupo 5|Grupo 7' }], true, true, true, ['Beto'], ['Grupo 5', 'Grupo 7']], o.C11);
+    var ROJO = 'rojo', VERDE = 'verde';
+    Check('C19 Mayor cambio: tarjeta debajo de las otras; barras horizontales divergentes (+ arriba, la mayor reduccion al final), rojo = aumento y verde = reduccion (tokens del tablero), eje simetrico en 0, cifras con signo, nombre del servicio, resumen, subtitulo actual − anterior, tooltip; la leyenda del Pareto sigue siendo una',
+      ['Servicios con mayor cambio de tickets', true, 'y', [8, 8, 7, 4, 3, -3, -5], [ROJO, ROJO, ROJO, ROJO, ROJO, VERDE, VERDE], [-10, 10],
+       '−5', 'Servicio A1', 'Top 5 de 7 con aumento · 2 con reducción',
+       'Diferencia = tickets del periodo actual − tickets del periodo anterior equivalente (actual: del 11/10/2026 al 09/11/2026 · anterior: del 11/09/2026 al 10/10/2026).',
+       null, 'Diferencia: +7 (sin tickets en el periodo anterior)', 'Actual: 10 · Anterior: 2',
+       [true, true, true], 1], o.C19);
+    Check('C20 historia insuficiente: sin barras, aviso con los dias reales (no error); error: mensaje en rojo; sin cambios: lo dice; las otras graficas siguen; vuelve a pintar',
+      [[false, 'Sin historial suficiente para comparar: el periodo anterior (del 25/09/2025 al 21/04/2026) tiene tickets en 191 de 210 días (datos del 14/10/2025 al 21/04/2026). No se muestra una comparación parcial.', false, '', true],
+       [false, 'No se pudo leer el periodo anterior.', true, true],
+       [false, 'Sin cambios: ningún servicio subió ni bajó respecto al periodo anterior.'], true, null], o.C20);
     Check('C12 falla la peticion: banda y las tres en error',
       [false, 'caido', ['Error al cargar datos.', 'Error al cargar datos.', 'Error al cargar datos.']], o.C12);
     Check('C15 varios meses: selector multiple; agregar dos seguidos = UNA peticion mes=2026-11|2026-09|2026-07 con las tres graficas y el texto de esos meses; quitar uno; quitarlos todos = el servidor da el actual y lo marca; el mismo conjunto no repide',

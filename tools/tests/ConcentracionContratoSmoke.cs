@@ -30,6 +30,11 @@
 //        - lecturas en vuelo: peticiones simultaneas (tabla bloqueada por
 //          otra transaccion) lanzan UNA consulta por mes;
 //        - Server-Timing: metricas, formato, cache vs SQL, sin datos, mismo JSON.
+//   1b/2c) Comparacion con el periodo anterior (2026-11-18): periodos (Slot
+//      acumulado, mes en curso y cerrado, meses seguidos y no seguidos),
+//      cuenta por codigo (Top 5, empates, 0 fuera, cambio de rama), filtros
+//      SO y Grupo en los dos periodos, historia insuficiente, vacio, error
+//      de lectura y un oraculo SQL independiente.
 //   3) Guardas: la pestaña no llama a nada de Analisis de servicios y el
 //      backend ya no llama a los SP.
 //
@@ -172,6 +177,113 @@ public static class ConcentracionContratoSmoke
         var op = ConcentracionContrato.Opciones(new[] { "Ana", "Ana", "Beto", null }, new[] { "Zeta" });
         Chk("opciones: de mas a menos, con lo elegido que ya no esta (0)", "Ana:2,Beto:1,Zeta:0",
             string.Join(",", op.Select(o => o["valor"] + ":" + o["tickets"]).ToArray()));
+
+        ComparacionPura();
+    }
+
+    // ------------------------------------------- 1b) comparacion (2026-11-18)
+    static string Rangos(List<KeyValuePair<DateTime, DateTime>> r)
+    {
+        return string.Join(",", r.Select(x => Dia(x.Key) + ".." + Dia(x.Value)).ToArray());
+    }
+
+    static string Anterior(DateTime hoy, int slot)
+    {
+        var f = new ConcentracionFiltros(); f.Slot = slot;
+        return Rangos(ConcentracionContrato.PeriodoAnterior(f, hoy));
+    }
+
+    static string Anterior(DateTime hoy, params string[] meses)
+    {
+        var f = new ConcentracionFiltros(); f.Modo = ConcentracionContrato.ModoMes;
+        f.Meses.AddRange(ConcentracionContrato.LeerMeses(string.Join("|", meses), hoy)); f.Mes = f.Meses[0];
+        return Rangos(ConcentracionContrato.PeriodoAnterior(f, hoy));
+    }
+
+    // "COD:actual/anterior/dif" de una lista de Cambios.
+    static string Filas(object lista)
+    {
+        var l = lista as IEnumerable<Dictionary<string, object>>;
+        if (l == null) return "null";
+        return string.Join(",", l.Select(x => x["Servicio"] + ":" + x["TicketsActual"] + "/" + x["TicketsAnterior"] + "/" + x["Diferencia"]).ToArray());
+    }
+
+    static List<ConcentracionTicket> Tickets(string servicio, int cuantos, string prefijo, string categoria)
+    {
+        var l = new List<ConcentracionTicket>();
+        for (int i = 0; i < cuantos; i++)
+            l.Add(new ConcentracionTicket { Codigo = prefijo + servicio + i, Servicio = servicio, NombreServicio = servicio + " nombre", Categoria = categoria });
+        return l;
+    }
+
+    static void ComparacionPura()
+    {
+        var hoy = new DateTime(2026, 11, 9);
+        // Slot: el mismo largo, justo antes (Slot 0 = 2026-10-11..2026-11-09, QA A3).
+        Chk("CP1 Slot 0: los 30 dias anteriores (= el Slot 1 de QA, A3)", "2026-09-11..2026-10-10", Anterior(hoy, 0));
+        Chk("CP2 Slot N acumulado: 30(N+1) dias antes de su inicio (Slot 1 -> Slots 2-3; Slot 12 -> 390 dias)",
+            "2026-07-13..2026-09-10|2024-09-21..2025-10-15", Anterior(hoy, 1) + "|" + Anterior(hoy, 12));
+        var f12 = new ConcentracionFiltros(); f12.Slot = 12;
+        var a12 = ConcentracionContrato.PeriodoAnterior(f12, hoy)[0];
+        DateTime d12, h12; ConcentracionContrato.PeriodoAcumulado(12, hoy, out d12, out h12);
+        Chk("CP3 Slot 12: mismo largo exacto y pegado al actual, sin solape", "390|390|True",
+            ((a12.Value - a12.Key).Days + 1) + "|" + ((h12 - d12).Days + 1) + "|" + (a12.Value.AddDays(1) == d12));
+        // Meses.
+        Chk("CP4 mes en curso: los mismos dias del mes anterior", "2026-10-01..2026-10-09", Anterior(hoy, "2026-11"));
+        Chk("CP5 mes cerrado: el mes anterior completo (31 y 30 dias)", "2026-09-01..2026-09-30|2026-08-01..2026-08-31",
+            Anterior(hoy, "2026-10") + "|" + Anterior(hoy, "2026-09"));
+        Chk("CP6 mes en curso al 31: se acota al ultimo dia del mes anterior (31 mar -> 1..28 feb); el ultimo dia del mes sigue en curso (30 nov -> 1..30 oct)",
+            "2027-02-01..2027-02-28|2026-10-01..2026-10-30",
+            Anterior(new DateTime(2027, 3, 31), "2027-03") + "|" + Anterior(new DateTime(2026, 11, 30), "2026-11"));
+        Chk("CP7 meses seguidos: los mismos meses justo antes (Sep-Oct-Nov en curso -> Jun-Jul-Ago, Ago hasta el dia de hoy)",
+            "2026-08-01..2026-08-09,2026-07-01..2026-07-31,2026-06-01..2026-06-30", Anterior(hoy, "2026-09", "2026-10", "2026-11"));
+        Chk("CP8 meses NO seguidos: se conserva el patron corrido el tramo completo (Sep y Nov -> Jun y Ago; Oct/Jul no entran)",
+            "2026-08-01..2026-08-09,2026-06-01..2026-06-30", Anterior(hoy, "2026-11", "2026-09"));
+        Chk("CP9 los dos extremos de la lista (Oct 2026 y Nov 2025): tramo de 12 -> Oct 2025 y Nov 2024, completos",
+            "2025-10-01..2025-10-31,2024-11-01..2024-11-30", Anterior(hoy, "2026-10", "2025-11"));
+        Chk("CP10 cambio de año: Ene 2027 en curso -> Dic 2026 mismos dias", "2026-12-01..2026-12-05", Anterior(new DateTime(2027, 1, 5), "2027-01"));
+
+        // La cuenta. (actual, anterior): A1 10/2 +8, A2 9/1 +8 (empate), A3 7/0 +7, A4 5/1, A5 4/1, A6 3/1, R1 1/6, R2 0/3, Z0 2/2.
+        var act = new List<ConcentracionTicket>(); var ant = new List<ConcentracionTicket>();
+        var datos = new[] { new { S = "A1", A = 10, P = 2 }, new { S = "A2", A = 9, P = 1 }, new { S = "A3", A = 7, P = 0 }, new { S = "A4", A = 5, P = 1 },
+                            new { S = "A5", A = 4, P = 1 }, new { S = "A6", A = 3, P = 1 }, new { S = "R1", A = 1, P = 6 }, new { S = "R2", A = 0, P = 3 },
+                            new { S = "Z0", A = 2, P = 2 } };
+        foreach (var x in datos) { act.AddRange(Tickets(x.S, x.A, "a", "/C/" + x.S)); ant.AddRange(Tickets(x.S, x.P, "p", "/C/" + x.S)); }
+        act.Add(act[0]);   // el mismo ticket dos veces cuenta uno
+        var c = ConcentracionContrato.Cambios(act, ant, 5);
+        Chk("CP11 aumentos: Top 5 de mayor a menor; empate por codigo (A1 antes que A2); el 6o fuera",
+            "A1:10/2/8,A2:9/1/8,A3:7/0/7,A4:5/1/4,A5:4/1/3|6", Filas(c["aumentos"]) + "|" + c["serviciosAumento"]);
+        Chk("CP12 reducciones: de la mas negativa a la menos; un servicio que ya no tiene tickets cuenta", "R1:1/6/-5,R2:0/3/-3|2",
+            Filas(c["reducciones"]) + "|" + c["serviciosReduccion"]);
+        Chk("CP13 diferencia 0 no sale (Z0); tickets distintos (repetido una vez)", "False|41|17",
+            (Filas(c["aumentos"]) + Filas(c["reducciones"])).Contains("Z0") + "|" + c["ticketsActual"] + "|" + c["ticketsAnterior"]);
+        var a1 = ((List<Dictionary<string, object>>)c["aumentos"])[0];
+        var a3 = ((List<Dictionary<string, object>>)c["aumentos"])[2];
+        var r2 = ((List<Dictionary<string, object>>)c["reducciones"])[1];
+        Chk("CP14 variacion: 400.00 (+8 sobre 2), null si el anterior es 0, -100.00 si ya no hay; NombreServicio", "400.00|null|-100.00|A1 nombre",
+            ((decimal)a1["VariacionPorcentaje"]).ToString("0.00", CultureInfo.InvariantCulture) + "|" + (a3["VariacionPorcentaje"] ?? "null") + "|" +
+            ((decimal)r2["VariacionPorcentaje"]).ToString("0.00", CultureInfo.InvariantCulture) + "|" + a1["NombreServicio"]);
+        // Mismo servicio en dos ramas de categoria (cambio de rama): UNA entrada.
+        var ramaNueva = Tickets("PU", 5, "a", "/S-Aplicativos Punto de Venta/Caja/X");
+        var ramaVieja = Tickets("PU", 4, "p", "/S-Punto de Venta/Caja/X");
+        ramaVieja.AddRange(Tickets("pu ", 1, "q", "/S-Punto de Venta/Caja/Y"));   // codigo con otra caja y espacio: el mismo servicio
+        var cr = ConcentracionContrato.Cambios(ramaNueva, ramaVieja, 5);
+        Chk("CP15 un servicio que cambia de rama es UNA entrada por codigo (5 vs 5 = sin cambio); sin la rama vieja seria +5",
+            "||0|0", Filas(cr["aumentos"]) + "|" + Filas(cr["reducciones"]) + "|" + cr["serviciosAumento"] + "|" + cr["serviciosReduccion"]);
+        cr = ConcentracionContrato.Cambios(ramaNueva, ramaVieja.Take(3), 5);
+        Chk("CP16 ... y con 3 anteriores: PU +2, una sola fila", "PU:5/3/2", Filas(cr["aumentos"]));
+        var vacio = ConcentracionContrato.Cambios(new ConcentracionTicket[0], new ConcentracionTicket[0], 5);
+        Chk("CP17 vacio: listas vacias (no null) y cero tickets", "||0|0|0|0",
+            Filas(vacio["aumentos"]) + "|" + Filas(vacio["reducciones"]) + "|" + vacio["serviciosAumento"] + "|" + vacio["serviciosReduccion"] + "|" +
+            vacio["ticketsActual"] + "|" + vacio["ticketsAnterior"]);
+        var sinCodigo = new List<ConcentracionTicket> { new ConcentracionTicket { Codigo = "x", Servicio = null }, new ConcentracionTicket { Codigo = "y", Servicio = "  " } };
+        Chk("CP18 tickets sin codigo de servicio no cuentan (como el Pareto)", "|0", Filas(ConcentracionContrato.Cambios(sinCodigo, new ConcentracionTicket[0], 5)["aumentos"]) + "|" +
+            ConcentracionContrato.Cambios(sinCodigo, new ConcentracionTicket[0], 5)["ticketsActual"]);
+        var empates = new List<ConcentracionTicket>();
+        foreach (var s in new[] { "E5", "E1", "E4", "E2", "E6", "E3" }) empates.AddRange(Tickets(s, 2, "a", "/C"));
+        Chk("CP19 seis empatados: el corte del Top 5 es estable por codigo", "E1,E2,E3,E4,E5|6",
+            string.Join(",", ((List<Dictionary<string, object>>)ConcentracionContrato.Cambios(empates, new ConcentracionTicket[0], 5)["aumentos"])
+                .Select(x => (string)x["Servicio"]).ToArray()) + "|" + ConcentracionContrato.Cambios(empates, new ConcentracionTicket[0], 5)["serviciosAumento"]);
     }
 
     static string Falla(Action a)
@@ -533,6 +645,7 @@ GO";
         C1C2Paridad(cadena);
         CachePorMes(cadena, hoy);
         ServerTiming(cadena, hoy);
+        ComparacionSql(cadena, hoy);
 
         // --- Sin catalogo de dueños: aviso, sin filtro SO; filtrar por SO = 500.
         Lotes(cadena, "EXEC sp_rename 'dbo.CatCategoriaDueno', 'CatCategoriaDueno_x';");
@@ -918,8 +1031,8 @@ GO";
         Console.WriteLine("INFO  Server-Timing en frio:    " + t1);
         Console.WriteLine("INFO  Server-Timing de la cache: " + t2);
         Func<string, string> nombres = t => t == null ? "null" : string.Join(",", t.Split(new[] { ", " }, StringSplitOptions.None).Select(p => p.Split(';')[0]).ToArray());
-        Chk("ST1 Server-Timing en frio y en cache: sql, c1c2 (solo si hubo lectura), espera, cache, directorio, calculo, etl, json, total",
-            "200|c1c2,sql,espera,cache,directorio,calculo,etl,json,total|200|sql,espera,cache,directorio,calculo,etl,json,total",
+        Chk("ST1 Server-Timing en frio y en cache: sql, c1c2 (solo si hubo lectura), espera, cache, directorio, calculo, anterior, etl, json, total",
+            "200|c1c2,sql,espera,cache,directorio,calculo,anterior,etl,json,total|200|sql,espera,cache,directorio,calculo,anterior,etl,json,total",
             e1 + "|" + nombres(t1) + "|" + e2 + "|" + nombres(t2));
         var formato = new System.Text.RegularExpressions.Regex("^[a-z0-9]+;dur=[0-9]+\\.[0-9](;desc=\"[^\",]*\")?$");
         Chk("ST2 cada metrica con dur en ms y descripcion entre comillas", "True|True",
@@ -929,18 +1042,249 @@ GO";
             "True|True|True|True",
             (t1 != null && t1.Contains("desc=\"consultas=1 tramos=1 filas=")) + "|" + (t1 != null && t1.Contains("cache;dur=0.0;desc=\"tramos=0 de=1\"")) + "|" +
             (t2 != null && t2.Contains("desc=\"consultas=0 tramos=0 filas=0\"")) + "|" + (t2 != null && t2.Contains("cache;dur=0.0;desc=\"tramos=1 de=1\"")));
+        Chk("ST3b periodo anterior: en frio lo lee (1 consulta, 1 tramo); despues sale de la cache",
+            "True|True", (t1 != null && t1.Contains("desc=\"consultas=1 tramos=1 cache=0 filas=")) + "|" +
+            (t2 != null && t2.Contains("desc=\"consultas=0 tramos=0 cache=1 filas=")));
         Chk("ST4 la cabecera no trae tickets, categorias ni personas", "False",
             (t1 + t2).Contains("T0") || (t1 + t2).Contains("/S-") || (t1 + t2).Contains("Ana") || (t1 + t2).Contains("Service Desk") ? "True" : "False");
         var js = new JavaScriptSerializer();
         var d1 = (Dictionary<string, object>)js.DeserializeObject(frio);
         var d2 = (Dictionary<string, object>)js.DeserializeObject(tibio);
         Chk("ST5 el JSON sigue con las mismas llaves del contrato",
-            "modo,slot,mes,mesesElegidos,slotMaximo,meses,periodo,filtros,opciones,ticketsPeriodo,ticketsFiltrados,cobertura,pareto,categorias,grupos,errores,avisos,dataInfo",
+            "modo,slot,mes,mesesElegidos,slotMaximo,meses,periodo,filtros,opciones,ticketsPeriodo,ticketsFiltrados,cobertura,pareto,categorias,grupos,cambios,errores,avisos,dataInfo",
             string.Join(",", d1.Keys.ToArray()));
         Chk("ST6 el cuerpo en frio y desde la cache es el mismo", true, frio == tibio);
         int e3; string t3;
         PedirCrudo("modo=mes&mes=2001-01", out e3, out t3);
         Chk("ST7 un 400 no lleva Server-Timing (como analisis.ashx)", "400|null", e3 + "|" + (t3 ?? "null"));
+    }
+
+    // ------------------------------------- 2c) comparacion de punta a punta
+    static Dictionary<string, object> Cambios(Dictionary<string, object> d) { return (Dictionary<string, object>)d["cambios"]; }
+
+    // "COD:dif,..." de una lista del JSON (null si no vino).
+    static string Difs(object o)
+    {
+        var l = Lista(o);
+        if (l == null) return "null";
+        return string.Join(",", l.Select(x => x["Servicio"] + ":" + x["Diferencia"]).ToArray());
+    }
+
+    static string RangosJ(object bloque)
+    {
+        var b = (Dictionary<string, object>)bloque;
+        return string.Join(",", Lista(b["rangos"]).Select(x => x["desde"] + ".." + x["hasta"]).ToArray());
+    }
+
+    static string Lit(DateTime d) { return "'" + Dia(d) + "'"; }
+
+    /* Oraculo independiente del codigo: la cuenta en SQL (tickets distintos
+       por Servicio en cada conjunto de rangos, diferencia <> 0) y el orden
+       del contrato aplicado aqui. Devuelve "aumentos|reducciones" como Difs. */
+    static string Oraculo(string cadena, List<KeyValuePair<DateTime, DateTime>> actual, List<KeyValuePair<DateTime, DateTime>> anterior)
+    {
+        Func<List<KeyValuePair<DateTime, DateTime>>, string> donde = rs => "(" + string.Join(" OR ", rs.Select(r =>
+            "(FechaRegistro >= " + Lit(r.Key) + " AND FechaRegistro < " + Lit(r.Value.AddDays(1)) + ")").ToArray()) + ")";
+        var filas = Exec(cadena, "WITH a AS (SELECT Servicio, n = COUNT(DISTINCT CodigoTicket) FROM dbo.vw_ServicioTickets WHERE Servicio IS NOT NULL AND " + donde(actual) +
+            " GROUP BY Servicio), p AS (SELECT Servicio, n = COUNT(DISTINCT CodigoTicket) FROM dbo.vw_ServicioTickets WHERE Servicio IS NOT NULL AND " + donde(anterior) +
+            " GROUP BY Servicio) SELECT S = COALESCE(a.Servicio, p.Servicio), D = ISNULL(a.n, 0) - ISNULL(p.n, 0) FROM a FULL JOIN p ON p.Servicio = a.Servicio" +
+            " WHERE ISNULL(a.n, 0) <> ISNULL(p.n, 0);");
+        var l = filas.Select(x => new { S = (string)x["S"], D = Convert.ToInt32(x["D"]) }).ToList();
+        var up = l.Where(x => x.D > 0).OrderByDescending(x => x.D).ThenBy(x => x.S, Comparer<string>.Create(ConcentracionContrato.CompararEtiquetas)).Take(5);
+        var dn = l.Where(x => x.D < 0).OrderBy(x => x.D).ThenBy(x => x.S, Comparer<string>.Create(ConcentracionContrato.CompararEtiquetas)).Take(5);
+        return string.Join(",", up.Select(x => x.S + ":" + x.D).ToArray()) + "|" + string.Join(",", dn.Select(x => x.S + ":" + x.D).ToArray());
+    }
+
+    static KeyValuePair<DateTime, DateTime> R(DateTime d, DateTime h) { return new KeyValuePair<DateTime, DateTime>(d, h); }
+    static DateTime FinMes(DateTime m) { return m.AddMonths(1).AddDays(-1); }
+
+    /* Fixture propio (se respalda y se restaura el de las demas pruebas):
+         - relleno: un ticket SIN servicio por dia desde `historia` (= el 11
+           del mes de hace 12) hasta hoy. Da la cobertura sin entrar en la
+           comparacion. Antes de `historia` no hay nada: ahi la historia
+           esta incompleta.
+         - servicios (actual = ultimos 30 dias, anterior = los 30 de antes):
+           A1 10/2, A2 9/1, A3 7/0, A4 5/1 (Ana SO), A5 4/1, A6 3/1,
+           R1 1/6 (Beto SO), R2 0/3, Z0 2/2, PU 5/4 que CAMBIA de rama
+           (anterior en S-Punto de Venta, actual en S-Aplicativos PV) y es
+           el unico del grupo "Cajas". */
+    static void ComparacionSql(string cadena, DateTime hoy)
+    {
+        Lotes(cadena, "SELECT * INTO dbo.vw_respaldo FROM dbo.vw_ServicioTickets; DELETE dbo.vw_ServicioTickets;");
+        try
+        {
+            var m0 = new DateTime(hoy.Year, hoy.Month, 1);
+            var historia = m0.AddMonths(-12).AddDays(10);
+            var dt = new System.Data.DataTable();
+            foreach (var c in new[] { "CodigoTicket", "Servicio", "RamaServicio", "C1Raiz", "Categoria", "Grupo" }) dt.Columns.Add(c, typeof(string));
+            dt.Columns.Add("Slot", typeof(decimal)); dt.Columns.Add("FechaRegistro", typeof(DateTime)); dt.Columns.Add("FechaRegistroDia", typeof(DateTime));
+            Action<string, string, string, string, string, DateTime> fila = (cod, srv, rama, cat, grp, dia) =>
+            {
+                int p2 = cat.IndexOf('/', 1);
+                dt.Rows.Add(cod, (object)srv ?? DBNull.Value, (object)rama ?? DBNull.Value, p2 > 0 ? cat.Substring(0, p2) : cat, cat, grp,
+                            (decimal)((hoy - dia).Days / 30), dia.AddHours(10), dia);
+            };
+            int k = 0;
+            for (var dd = historia; dd <= hoy; dd = dd.AddDays(1)) fila("F" + (k++), null, null, "/Relleno/x", "Relleno", dd);
+            var servicios = new[] {
+                new { S = "A1", A = 10, P = 2, Cat = "/Otro/A1", Grp = "Mesa" }, new { S = "A2", A = 9, P = 1, Cat = "/Otro/A2", Grp = "Mesa" },
+                new { S = "A3", A = 7, P = 0, Cat = "/Otro/A3", Grp = "Mesa" }, new { S = "A4", A = 5, P = 1, Cat = "/S-Equipo de Computo/Hardware/Z", Grp = "Mesa" },
+                new { S = "A5", A = 4, P = 1, Cat = "/Otro/A5", Grp = "Mesa" }, new { S = "A6", A = 3, P = 1, Cat = "/Otro/A6", Grp = "Mesa" },
+                new { S = "R1", A = 1, P = 6, Cat = "/S-Punto de Venta/Caja/Falla", Grp = "Mesa" }, new { S = "R2", A = 0, P = 3, Cat = "/Otro/R2", Grp = "Mesa" },
+                new { S = "Z0", A = 2, P = 2, Cat = "/Otro/Z0", Grp = "Mesa" } };
+            foreach (var s in servicios)
+            {
+                for (int i = 0; i < s.A; i++) fila("C" + s.S + i, s.S, "Rama " + s.S, s.Cat, s.Grp, hoy.AddDays(-(i % 30)));
+                for (int i = 0; i < s.P; i++) fila("P" + s.S + i, s.S, "Rama " + s.S, s.Cat, s.Grp, hoy.AddDays(-30 - (i % 30)));
+            }
+            for (int i = 0; i < 5; i++) fila("CPU" + i, "PU", "S-Aplicativos Punto de Venta", "/PV Nuevo/Caja/X", "Cajas", hoy.AddDays(-i));
+            for (int i = 0; i < 4; i++) fila("PPU" + i, "PU", "S-Punto de Venta", "/PV Viejo/Caja/X", "Cajas", hoy.AddDays(-30 - i));
+            using (var cn = new SqlConnection(cadena))
+            {
+                cn.Open();
+                using (var bc = new SqlBulkCopy(cn))
+                {
+                    bc.DestinationTableName = "dbo.vw_ServicioTickets";
+                    foreach (System.Data.DataColumn c in dt.Columns) bc.ColumnMappings.Add(c.ColumnName, c.ColumnName);
+                    bc.WriteToServer(dt);
+                }
+            }
+            ConcentracionQueries.LimpiarCache();
+            int estado;
+
+            // --- Slot 0: actual = ultimos 30 dias, anterior = los 30 de antes.
+            var d = Pedir("slot=0", out estado);
+            var c0 = Cambios(d);
+            Chk("CS1 Slot 0: ok; periodos actual y anterior (30 + 30, pegados)",
+                "200|ok|" + Dia(hoy.AddDays(-29)) + ".." + Dia(hoy) + "|" + Dia(hoy.AddDays(-59)) + ".." + Dia(hoy.AddDays(-30)) + "|30|30",
+                estado + "|" + c0["estado"] + "|" + RangosJ(c0["actual"]) + "|" + RangosJ(c0["anterior"]) + "|" +
+                ((Dictionary<string, object>)c0["actual"])["dias"] + "|" + ((Dictionary<string, object>)c0["anterior"])["dias"]);
+            Chk("CS2 aumentos Top 5 (empate A1/A2 por codigo, A6 y PU fuera del Top) y reducciones; Z0 (0) fuera",
+                "A1:8,A2:8,A3:7,A4:4,A5:3|R1:-5,R2:-3|7|2", Difs(c0["aumentos"]) + "|" + Difs(c0["reducciones"]) + "|" + c0["serviciosAumento"] + "|" + c0["serviciosReduccion"]);
+            Chk("CS3 = el oraculo SQL independiente", Oraculo(cadena, new List<KeyValuePair<DateTime, DateTime>> { R(hoy.AddDays(-29), hoy) },
+                new List<KeyValuePair<DateTime, DateTime>> { R(hoy.AddDays(-59), hoy.AddDays(-30)) }), Difs(c0["aumentos"]) + "|" + Difs(c0["reducciones"]));
+            Chk("CS4 tickets por servicio (el relleno sin servicio no cuenta) y sin errores", "46|21|0",
+                c0["ticketsActual"] + "|" + c0["ticketsAnterior"] + "|" + ((Dictionary<string, object>)d["errores"]).Count);
+            Chk("CS5 las otras tres graficas no cambian por la comparacion (Pareto Top: A1 10)", "A1:10",
+                Lista(d["pareto"])[0]["Servicio"] + ":" + Lista(d["pareto"])[0]["CantidadTickets"]);
+
+            // --- Filtros: los mismos en los dos periodos.
+            d = Pedir("slot=0&grupo=Cajas", out estado);
+            var cg = Cambios(d);
+            Chk("CS6 Grupo Cajas: PU cambio de rama = UNA entrada por codigo (5 vs 4, +1)", "ok|PU:1||1|0|PU:5/4",
+                cg["estado"] + "|" + Difs(cg["aumentos"]) + "|" + Difs(cg["reducciones"]) + "|" + cg["serviciosAumento"] + "|" + cg["serviciosReduccion"] + "|" +
+                Lista(cg["aumentos"])[0]["Servicio"] + ":" + Lista(cg["aumentos"])[0]["TicketsActual"] + "/" + Lista(cg["aumentos"])[0]["TicketsAnterior"]);
+            d = Pedir("slot=0&so=Ana%20SO", out estado);
+            Chk("CS7 SO Ana: solo A4 (su anterior tambien filtrado: 5 vs 1)", "A4:4|", Difs(Cambios(d)["aumentos"]) + "|" + Difs(Cambios(d)["reducciones"]));
+            d = Pedir("slot=0&so=Beto%20SO", out estado);
+            Chk("CS8 SO Beto: solo R1 (-5)", "|R1:-5", Difs(Cambios(d)["aumentos"]) + "|" + Difs(Cambios(d)["reducciones"]));
+            d = Pedir("slot=0&so=" + HttpUtility.UrlEncode(ConcentracionContrato.SinServiceOwner) + "&grupo=Mesa", out estado);
+            Chk("CS9 Sin SO + Grupo Mesa: sin A4 ni R1 ni PU (A6 entra al Top)", "A1:8,A2:8,A3:7,A5:3,A6:2|R2:-3|5|1",
+                Difs(Cambios(d)["aumentos"]) + "|" + Difs(Cambios(d)["reducciones"]) + "|" + Cambios(d)["serviciosAumento"] + "|" + Cambios(d)["serviciosReduccion"]);
+            d = Pedir("slot=0&so=Zeta", out estado);
+            Chk("CS10 filtros sin tickets: ok, listas vacias, 0 y 0", "ok|||0|0",
+                Cambios(d)["estado"] + "|" + Difs(Cambios(d)["aumentos"]) + "|" + Difs(Cambios(d)["reducciones"]) + "|" + Cambios(d)["ticketsActual"] + "|" + Cambios(d)["ticketsAnterior"]);
+
+            // --- Slot acumulado.
+            d = Pedir("slot=1", out estado);
+            var c1 = Cambios(d);
+            Chk("CS11 Slot 1 (acumulado 0..1, 60 dias) contra los 60 anteriores (solo relleno): todo sube (PU 5+4 en sus dos ramas); empate A3/R1 por codigo",
+                "ok|" + Dia(hoy.AddDays(-59)) + ".." + Dia(hoy) + "|" + Dia(hoy.AddDays(-119)) + ".." + Dia(hoy.AddDays(-60)) + "|A1:12,A2:10,PU:9,A3:7,R1:7||10|0",
+                c1["estado"] + "|" + RangosJ(c1["actual"]) + "|" + RangosJ(c1["anterior"]) + "|" + Difs(c1["aumentos"]) + "|" + Difs(c1["reducciones"]) + "|" +
+                c1["serviciosAumento"] + "|" + c1["serviciosReduccion"]);
+            d = Pedir("slot=4", out estado);
+            Chk("CS12 Slot 4: su anterior (hoy-299..hoy-150) tiene historia completa -> ok", "ok|150|150|True",
+                Cambios(d)["estado"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasConTickets"] + "|" +
+                ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasEsperados"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["completa"]);
+
+            // --- Historia insuficiente: no se acota en silencio ni se compara a medias.
+            d = Pedir("slot=6", out estado);
+            var c6 = Cambios(d);
+            var cob6 = (Dictionary<string, object>)c6["cobertura"];
+            int conDatos6 = (hoy.AddDays(-210) - historia).Days + 1;
+            Chk("CS13 Slot 6: el anterior (hoy-419..hoy-210) empieza antes de la historia -> historiaInsuficiente, sin filas, con la cobertura real; 200 y las otras graficas intactas",
+                "200|historiaInsuficiente|null|null|" + conDatos6 + "|210|False|" + Dia(historia) + "|" + Dia(hoy.AddDays(-419)) + ".." + Dia(hoy.AddDays(-210)) + "|0",
+                estado + "|" + c6["estado"] + "|" + Difs(c6["aumentos"]) + "|" + Difs(c6["reducciones"]) + "|" + cob6["diasConTickets"] + "|" + cob6["diasEsperados"] + "|" +
+                cob6["completa"] + "|" + cob6["primerDia"] + "|" + RangosJ(c6["anterior"]) + "|" + ((Dictionary<string, object>)d["errores"]).Count);
+            d = Pedir("slot=12", out estado);
+            Chk("CS14 Slot 12: anterior sin ningun dato -> historiaInsuficiente (0 dias)", "historiaInsuficiente|0|390",
+                Cambios(d)["estado"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasConTickets"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasEsperados"]);
+
+            // --- Meses.
+            var prevCurso = m0.AddMonths(-1);
+            var finCurso = prevCurso.AddDays(Math.Min(hoy.Day - 1, (FinMes(prevCurso) - prevCurso).Days));
+            d = Pedir("modo=mes&mes=" + ConcentracionContrato.Mes(m0), out estado);
+            var cm = Cambios(d);
+            Chk("CS15 mes en curso: contra los mismos dias del mes anterior; = oraculo", "ok|" + Dia(m0) + ".." + Dia(hoy) + "|" + Dia(prevCurso) + ".." + Dia(finCurso) + "|" +
+                Oraculo(cadena, new List<KeyValuePair<DateTime, DateTime>> { R(m0, hoy) }, new List<KeyValuePair<DateTime, DateTime>> { R(prevCurso, finCurso) }),
+                cm["estado"] + "|" + RangosJ(cm["actual"]) + "|" + RangosJ(cm["anterior"]) + "|" + Difs(cm["aumentos"]) + "|" + Difs(cm["reducciones"]));
+            var m1 = m0.AddMonths(-1); var m2 = m0.AddMonths(-2);
+            d = Pedir("modo=mes&mes=" + ConcentracionContrato.Mes(m1), out estado);
+            cm = Cambios(d);
+            Chk("CS16 mes cerrado: contra el mes anterior completo; = oraculo", "ok|" + Dia(m2) + ".." + Dia(FinMes(m2)) + "|" +
+                Oraculo(cadena, new List<KeyValuePair<DateTime, DateTime>> { R(m1, FinMes(m1)) }, new List<KeyValuePair<DateTime, DateTime>> { R(m2, FinMes(m2)) }),
+                cm["estado"] + "|" + RangosJ(cm["anterior"]) + "|" + Difs(cm["aumentos"]) + "|" + Difs(cm["reducciones"]));
+            var r1 = ConcentracionQueries.Consultar(MesesFiltro(ConcentracionContrato.Mes(m2), hoy), hoy);
+            Chk("CS17 el mes anterior leido para comparar queda en la cache de la pestaña (pedir ese mes no consulta)", "0|1", r1.ConsultasPeriodo + "|" + r1.TramosCache);
+            d = Pedir("modo=mes&mes=" + string.Join("|", new[] { m1, m2, m0.AddMonths(-3) }.Select(ConcentracionContrato.Mes).ToArray()), out estado);
+            cm = Cambios(d);
+            var m4 = m0.AddMonths(-4); var m5 = m0.AddMonths(-5); var m6 = m0.AddMonths(-6);
+            Chk("CS18 tres meses seguidos: los tres de antes, completos y por mes; = oraculo",
+                "ok|" + Dia(m4) + ".." + Dia(FinMes(m4)) + "," + Dia(m5) + ".." + Dia(FinMes(m5)) + "," + Dia(m6) + ".." + Dia(FinMes(m6)) + "|" +
+                Oraculo(cadena, new List<KeyValuePair<DateTime, DateTime>> { R(m1, FinMes(m1)), R(m2, FinMes(m2)), R(m0.AddMonths(-3), FinMes(m0.AddMonths(-3))) },
+                        new List<KeyValuePair<DateTime, DateTime>> { R(m4, FinMes(m4)), R(m5, FinMes(m5)), R(m6, FinMes(m6)) }),
+                cm["estado"] + "|" + RangosJ(cm["anterior"]) + "|" + Difs(cm["aumentos"]) + "|" + Difs(cm["reducciones"]));
+            var m3 = m0.AddMonths(-3);
+            var fin3 = m3.AddDays(Math.Min(hoy.Day - 1, (FinMes(m3) - m3).Days));
+            d = Pedir("modo=mes&mes=" + ConcentracionContrato.Mes(m0) + "|" + ConcentracionContrato.Mes(m2) + "&so=" + HttpUtility.UrlEncode(ConcentracionContrato.SinServiceOwner), out estado);
+            cm = Cambios(d);
+            Chk("CS19 meses NO seguidos (actual y hace 2): el patron corrido 3 meses, dos rangos y nunca el de en medio; con filtro SO",
+                "ok|" + Dia(m3) + ".." + Dia(fin3) + "," + Dia(m5) + ".." + Dia(FinMes(m5)) + "|" + 2,
+                cm["estado"] + "|" + RangosJ(cm["anterior"]) + "|" + Lista(((Dictionary<string, object>)cm["anterior"])["rangos"]).Count);
+            var m11 = m0.AddMonths(-11); var m12 = m0.AddMonths(-12);
+            d = Pedir("modo=mes&mes=" + ConcentracionContrato.Mes(m11), out estado);
+            cm = Cambios(d);
+            Chk("CS20 mes cuyo anterior empieza antes de la historia (le faltan 10 dias) -> historiaInsuficiente, sin filas",
+                "historiaInsuficiente|null|" + ((FinMes(m12) - m12).Days + 1 - 10) + "|" + ((FinMes(m12) - m12).Days + 1),
+                cm["estado"] + "|" + Difs(cm["aumentos"]) + "|" + ((Dictionary<string, object>)cm["cobertura"])["diasConTickets"] + "|" +
+                ((Dictionary<string, object>)cm["cobertura"])["diasEsperados"]);
+            d = Pedir("modo=mes&mes=" + ConcentracionContrato.Mes(m0.AddMonths(-10)), out estado);
+            Chk("CS21 ... y el mes siguiente ya tiene su anterior completo -> ok", "ok", Cambios(d)["estado"]);
+
+            // --- Falla la lectura del anterior: estado error, el resto de la pestaña sigue.
+            var ma = ConcentracionContrato.Mes(m0.AddMonths(-7)); var mb = ConcentracionContrato.Mes(m0.AddMonths(-8));
+            ConcentracionQueries.LimpiarCache();       // CS20/CS21 ya guardaron -10 y -11
+            Pedir("modo=mes&mes=" + ma, out estado);
+            Pedir("modo=mes&mes=" + mb, out estado);   // ma y mb en cache (y -9); su anterior conjunto (-9, -10): -10 no
+            Lotes(cadena, "EXEC sp_rename 'dbo.vw_ServicioTickets', 'vw_y';");
+            try
+            {
+                d = Pedir("modo=mes&mes=" + ma + "|" + mb, out estado);
+                if (!d.ContainsKey("cambios") || !Cambios(d).ContainsKey("mensaje"))
+                    Chk("CS22 sin poder leer el periodo anterior: la respuesta trae cambios con mensaje", "200", estado + " " + new JavaScriptSerializer().Serialize(d));
+                var ce = d.ContainsKey("cambios") && Cambios(d).ContainsKey("mensaje") ? Cambios(d)
+                    : new Dictionary<string, object> { { "estado", "-" }, { "aumentos", null }, { "mensaje", "" } };
+                Chk("CS22 sin poder leer el periodo anterior: 200, pareto intacto, cambios = error con mensaje seguro, errores.cambios",
+                    "200|True|error|null|True|True|False", estado + "|" + (Lista(d["pareto"]) != null) + "|" + ce["estado"] + "|" + Difs(ce["aumentos"]) + "|" +
+                    ((string)ce["mensaje"]).Contains("vw_ServicioTickets") + "|" + ((Dictionary<string, object>)d["errores"]).ContainsKey("cambios") + "|" +
+                    (((string)ce["mensaje"]).IndexOf("localdb", StringComparison.OrdinalIgnoreCase) >= 0));
+            }
+            finally { Lotes(cadena, "EXEC sp_rename 'dbo.vw_y', 'vw_ServicioTickets';"); }
+        }
+        finally
+        {
+            Lotes(cadena, "DELETE dbo.vw_ServicioTickets; INSERT dbo.vw_ServicioTickets SELECT * FROM dbo.vw_respaldo; DROP TABLE dbo.vw_respaldo;");
+            ConcentracionQueries.LimpiarCache();
+        }
+    }
+
+    static ConcentracionFiltros MesesFiltro(string meses, DateTime hoy)
+    {
+        var f = new ConcentracionFiltros();
+        f.Modo = ConcentracionContrato.ModoMes;
+        f.Meses.AddRange(ConcentracionContrato.LeerMeses(meses, hoy));
+        f.Mes = f.Meses[0];
+        return f;
     }
 
     // ---------------------------------------------------------- 3) guardas
