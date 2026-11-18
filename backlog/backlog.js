@@ -229,6 +229,76 @@ function bordesSeleccion(etiquetas, seleccionada, grosorNormal) {
   };
 }
 
+/* Redondeo de la pila COMPLETA, no de cada segmento. Chart.js 4 solo redondea
+   el segmento que el toma por punta del stack -con series en 0 no siempre es
+   el ultimo visible-, y con borderSkipped 'start' nunca el arranque;
+   cuando la punta es una tajada de 1-2px el radio se recorta a la mitad de su
+   ancho y la barra termina cuadrada. Por eso los segmentos van
+   rectos (borderRadius 0) y aqui se recorta la pila entera con un contorno
+   redondo. Se mide sobre los elementos vivos -siguen la animacion- y solo con
+   las series visibles, asi que apagar un lider en la leyenda mueve el extremo.
+   El contorno de seleccion se vuelve a trazar sobre ese contorno: el recorte
+   se comeria el borde de las esquinas. */
+function pilasVisibles(chart) {
+  const horizontal = chart.options && chart.options.indexAxis === 'y';
+  return (chart.data.labels || []).map((_, j) => {
+    let ini = Infinity, fin = -Infinity, centro = 0, grueso = 0, borde = 0, colorBorde = null;
+    chart.data.datasets.forEach((_ds, i) => {
+      if (!chart.isDatasetVisible(i)) return;
+      const el = chart.getDatasetMeta(i).data[j];
+      if (!el) return;
+      const p = el.getProps(['x', 'y', 'base', 'width', 'height']);
+      const punta = horizontal ? p.x : p.y;
+      ini = Math.min(ini, p.base, punta);
+      fin = Math.max(fin, p.base, punta);
+      centro = horizontal ? p.y : p.x;
+      grueso = Math.abs(horizontal ? p.height : p.width);
+      const bw = Number(el.options && el.options.borderWidth) || 0;
+      if (bw > borde) { borde = bw; colorBorde = el.options.borderColor; }
+    });
+    const largo = fin - ini;
+    if (!(largo > 0.5) || !grueso) return null;
+    const r = Math.min(Barras.RADIO, grueso / 2, largo / 2);
+    const caja = horizontal
+      ? { x: ini, y: centro - grueso / 2, w: largo, h: grueso }
+      : { x: centro - grueso / 2, y: ini, w: grueso, h: largo };
+    return Object.assign(caja, { r, borde, colorBorde });
+  }).filter(Boolean);
+}
+
+function trazarPila(ctx, p, encoge) {
+  const r = Math.max(0, p.r - encoge);
+  Chart.helpers.addRoundedRectPath(ctx, {
+    x: p.x + encoge, y: p.y + encoge, w: p.w - 2 * encoge, h: p.h - 2 * encoge,
+    radius: { topLeft: r, topRight: r, bottomLeft: r, bottomRight: r },
+  });
+}
+
+const PILA_REDONDA = {
+  id: 'pilaRedonda',
+  beforeDatasetsDraw(chart) {
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.beginPath();
+    pilasVisibles(chart).forEach(p => trazarPila(ctx, p, 0));
+    ctx.clip();
+  },
+  afterDatasetsDraw(chart) {
+    const ctx = chart.ctx;
+    ctx.restore();
+    pilasVisibles(chart).forEach(p => {
+      if (!p.borde || !p.colorBorde) return;
+      ctx.save();
+      ctx.beginPath();
+      trazarPila(ctx, p, p.borde / 2);
+      ctx.lineWidth = p.borde;
+      ctx.strokeStyle = p.colorBorde;
+      ctx.stroke();
+      ctx.restore();
+    });
+  },
+};
+
 /* Cifra de cada segmento DENTRO de la barra apilada. */
 const ETIQUETAS_SEGMENTO = {
   id: 'etiquetasSegmento',
@@ -819,14 +889,14 @@ const TableroBacklog = (function () {
        que la ranura de cada fila anda por los 30px y el juego compartido
        -.9 x .9 con tope de 44px- pegaria una fila con la siguiente. Con
        .78 x .88 la barra ocupa el 69% de su ranura, y el tope propio de 26px
-       la deja compacta tambien cuando hay tres cubos y sobra alto. El radio
-       lo sigue poniendo el default compartido (Barras.RADIO). Va en `barra:`
-       y no en Barras.GRUESA justo para no adelgazar las demas graficas. */
+       la deja compacta tambien cuando hay tres cubos y sobra alto. Va en
+       `barra:` y no en Barras.GRUESA justo para no adelgazar las demas
+       graficas. El radio no va por segmento: lo pone PILA_REDONDA a la pila. */
     graficos['chart-aging-bl'] = new DashboardBarChart({
       canvas: 'chart-aging-bl',
       etiquetas: m.buckets,
       barra: { categoryPercentage: 0.78, barPercentage: 0.88, maxBarThickness: 26 },
-      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth },
+      dataset: { borderColor: sel.borderColor, borderWidth: sel.borderWidth, borderRadius: 0 },
       datasets: m.lideres.map(l => ({
         label: l,
         data: m.buckets.map(b => m.valores.get(`${b}|${l}`) ?? 0),
@@ -837,7 +907,9 @@ const TableroBacklog = (function () {
          no da el ancho. El plugin compartido no sirve: sacaria la cifra
          fuera de la barra, encima del segmento vecino. */
       etiquetasDentro: false,
-      plugins: [ETIQUETAS_SEGMENTO],
+      // PILA_REDONDA primero: su afterDatasetsDraw quita el recorte antes de
+      // que se pinten las cifras.
+      plugins: [PILA_REDONDA, ETIQUETAS_SEGMENTO],
       opciones: {
         indexAxis: 'y',
         maintainAspectRatio: false,
