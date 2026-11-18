@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_concentracion_consumidores_identidad.sql
+   sql/diag/diag_concentracion_consumidores_identidad.sql
 
    Para correr en SSMS contra AZVMBDCENTRALQA (un solo lote, F5, Results to
    Grid). Cada grilla empieza con la columna "Seccion".

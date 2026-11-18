@@ -1,7 +1,7 @@
 /* =========================================================================
-   sql/diag_acuse_identidad_po_so.sql - SOLO LECTURA (ningun INSERT, UPDATE,
+   sql/diag/diag_acuse_identidad_po_so.sql - SOLO LECTURA (ningun INSERT, UPDATE,
    DELETE ni DDL). Para correr en la VM ANTES de aprobar el acuse PO/SO
-   (sql/PROPUESTA_acuse_po_so.md, decision de identidad).
+   (sql/docs/PROPUESTA_acuse_po_so.md, decision de identidad).
 
    Pregunta: con lo que YA esta en la base, se puede saber de forma unica
    que cuenta Windows es el PO (dbo.Problem.OwnerProblem) o el SO
@@ -27,7 +27,7 @@
      nombre cada uno (ningun ambiguo ni no_encontrado); 40 sin usuario ADM/MOD.
    METODO ELEGIDO: cuenta@soriana.com (IdentidadWindows.CorreoCandidato) ->
      CatPersona (exactamente 1) -> nombre = OwnerProblem / OwnerServicio
-     (App_Code/AcuseIniciativa.cs). Ver sql/PROPUESTA_acuse_po_so.md.
+     (App_Code/AcuseIniciativa.cs). Ver sql/docs/PROPUESTA_acuse_po_so.md.
 
    Seccion 1: cada usuario ADM/MOD y hasta donde llega su cadena.
    Seccion 2: cada PO/SO capturado en iniciativas activas y si hay un

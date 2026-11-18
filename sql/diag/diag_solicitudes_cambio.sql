@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_solicitudes_cambio.sql - diagnostico de sql/22. SOLO LECTURA
+   sql/diag/diag_solicitudes_cambio.sql - diagnostico de sql/22. SOLO LECTURA
    (SELECT): se puede correr en la VM sin OK, antes y despues de sql/22.
 
    1  objetos de sql/22 (3 tablas, 2 tipos) y hash de los 5 procedimientos

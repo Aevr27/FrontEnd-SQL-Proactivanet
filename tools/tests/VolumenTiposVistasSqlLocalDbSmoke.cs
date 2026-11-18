@@ -10,7 +10,7 @@
 // REPLICA: su script (09_slots_por_mes.sql) no esta en ningun repositorio;
 // se arman con la misma expresion de TipoTicket y las mismas columnas que
 // leen LeerVolumen y el export. Que la vista de QA sea igual lo dice
-// sql/diag_experiencia_tipos_vistas.sql, no esta prueba.
+// sql/diag/diag_experiencia_tipos_vistas.sql, no esta prueba.
 //
 // Casos:
 //   V1 Incidentes = 'Incidencia' + 'SorIA Incidentes' en las dos vistas;

@@ -1900,7 +1900,9 @@ const TableroSla = (function () {
      para leerse como un solo conjunto. Esas dos NO tienen tramos dentro /
      sin SLA / vencidos: su color es su propio semaforo (bueno / advertencia /
      malo), solo que pintado con esta misma familia verde / amarillo / rojo. */
-  const COLOR_TRAMO_SLA = { dentro: '#4CAF50', sinSla: '#eab308', vencido: '#f87171' };
+  // vencido (2026-11-18): #ff4646, el rojo que Chart.js pintaba al pasar el
+  // mouse sobre el anterior #f87171; lo usa tambien "Mayor cambio" (concentracion.js).
+  const COLOR_TRAMO_SLA = { dentro: '#4CAF50', sinSla: '#eab308', vencido: '#ff4646' };
   const COLOR_SEM_TRAMO = { sv: COLOR_TRAMO_SLA.dentro, sa: COLOR_TRAMO_SLA.sinSla, sr: COLOR_TRAMO_SLA.vencido };
   // Radio casi recto: la barra se lee como un bloque, no como pildoras.
   const BARRA_SLA = { borderRadius: 2, borderSkipped: false };

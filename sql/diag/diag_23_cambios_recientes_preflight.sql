@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_23_cambios_recientes_preflight.sql - PREFLIGHT de sql/23
+   sql/diag/diag_23_cambios_recientes_preflight.sql - PREFLIGHT de sql/23
    (Cambios recientes). SOLO LECTURA: catalogos, OBJECT_DEFINITION,
    HASHBYTES y APPLOCK_TEST (que solo PRUEBA un candado, no lo toma). Lo
    unico que escribe es una variable de tabla de esta misma sesion. No usa

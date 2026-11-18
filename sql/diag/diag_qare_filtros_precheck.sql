@@ -1,8 +1,8 @@
 /* =========================================================================
-   sql/diag_qare_filtros_precheck.sql - Pre-check de los filtros Servicio /
+   sql/diag/diag_qare_filtros_precheck.sql - Pre-check de los filtros Servicio /
    Grupo / Lider de QARE, con las expresiones EXACTAS del Backlog.
 
-   Viene despues de sql/diag_qare_filtros_org.sql (v2, 2026-09-28), que
+   Viene despues de sql/diag/diag_qare_filtros_org.sql (v2, 2026-09-28), que
    encontro que el Backlog calcula:
        C1    = ISNULL(dbo.fn_CorreoBacklog_CategoriaC1(Categoria), N'Sin categoria')
        Lider = COALESCE(NULLIF(LTRIM(RTRIM(lg.Lider)), N''), N'Sin Torre')

@@ -24,7 +24,7 @@
 //          marcados tras repintar las opciones; lo aplicado lo dice.
 //      C8  Grupo + SO juntos en la misma peticion; totales filtrados.
 //      C9  filtros sin tickets: "Sin tickets con estos filtros." en las tres.
-//      C10 "Limpiar" quita SO y Grupo (el Slot igual) y vuelve a pedir.
+//      C10 "Limpiar" en Slot 0 quita SO y Grupo y vuelve a pedir.
 //      C11 refresco automatico y "Actualizar" con mes + SO + Grupo: mismos
 //          parametros, sin "Calculando…", selecciones intactas; un fallo deja
 //          todo y avisa.
@@ -44,6 +44,20 @@
 //          y UNA peticion sin mes (el servidor da el actual); un mes; tras
 //          abrir y cerrar; con clics pendientes de la espera = UNA; nada
 //          que quitar = ninguna; el desplegable sigue sirviendo despues.
+//          Desde 2026-11-18 Limpiar ademas vuelve a Slot 0 (C21): cada paso
+//          vuelve a Mes antes de elegir meses.
+//      C19 (2026-11-18) "Servicios con mayor cambio de tickets": tarjeta
+//          debajo de las otras, divergente, rojo/verde de los tokens, eje
+//          simetrico, cifras con signo, resumen, subtitulo y tooltip.
+//      C20 historia insuficiente, error y sin cambios: sin barras y el porque.
+//      C21 (2026-11-18) "Limpiar" vuelve al estado de arranque: desde Slot 12
+//          (con la comparacion en historia insuficiente) = UNA peticion
+//          slot=0 y las cuatro graficas repintadas, sin el aviso viejo;
+//          desde Mes con varios meses + SO + Grupo = Slot 0 sin nada; tres
+//          clics seguidos = UNA, otro mas = ninguna; `filtros` = el inicial.
+//      C22 (2026-11-18) ventana acotada: aviso ambar con lo comparado; se
+//          oculta al calcular otra peticion, con un periodo completo y tras
+//          Limpiar; ventanaMinima y noConsecutivos dicen el porque.
 //   D  dashboard.html#concentracion (MOCK_DATA para SLA)
 //      D1  la entrada de grupo "Servicios" y su boton "Vista general de
 //          servicios" quedan marcados (selector visible); la pestaña se monta y pide concentracion.ashx sin pasar por Analisis.
@@ -51,6 +65,7 @@
 //          de servicios (accion=servicios) y no analiza nada.
 //      D3  volver no la monta de nuevo ni repide.
 //      D4  la leyenda, embebida, igual que C14.
+//      D5  Mayor cambio usa el rojo y el verde de las barras de SLA.
 //
 //   node tools\tests\ConcentracionHeadlessSmoke.js   # sale 0 si todo paso
 //
@@ -119,7 +134,19 @@ function respondeConc(u, v) {
   so.forEach(function (x) { if (!opSo.some(function (o) { return o.valor === x; })) opSo.push({ valor: x, tickets: 0 }); });
   var opGr = []; for (var g = 1; g <= 18; g++) opGr.push({ valor: 'Grupo ' + g, tickets: 40 - g });
   var periodo = window.__vacio ? 0 : 500;
+  // Mayor cambio (2026-11-18): Top 5 + 2 como los arma el servidor; __cambios lo reemplaza.
+  function cambio(s, a, p) {
+    return { Servicio: s, NombreServicio: 'Servicio ' + s, TicketsActual: a, TicketsAnterior: p, Diferencia: a - p,
+             VariacionPorcentaje: p ? Math.round(10000 * (a - p) / p) / 100 : null };
+  }
+  var cambios = window.__cambios !== undefined ? window.__cambios : {
+    estado: 'ok', actual: { rangos: rangos, dias: dias }, anterior: { rangos: [{ desde: '2026-09-11', hasta: '2026-10-10' }], dias: 30 },
+    cobertura: { diasConTickets: 30, diasEsperados: 30, completa: true },
+    aumentos: vacio ? [] : [cambio('A1', 10, 2), cambio('A2', 9, 1), cambio('A3', 7, 0), cambio('A4', 5, 1), cambio('A5', 4, 1)],
+    reducciones: vacio ? [] : [cambio('R1', 1, 6), cambio('R2', 0, 3)],
+    serviciosAumento: vacio ? 0 : 7, serviciosReduccion: vacio ? 0 : 2, ticketsActual: vacio ? 0 : 46, ticketsAnterior: vacio ? 0 : 21 };
   return {
+    cambios: cambios,
     modo: modo, slot: modo === 'slot' ? s : null, mes: modo === 'mes' ? mes : null, slotMaximo: 12, meses: meses,
     mesesElegidos: modo === 'mes' ? mesesQ : null,
     periodo: { desde: desde, hasta: hasta, dias: dias, rangos: rangos },
@@ -240,6 +267,20 @@ var sondaC = conComun(
   '  $c("lienzo-categorias").style.height]);\n' +
   // C4
   'apunta("C4", [hint("pareto"), hint("categorias"), hint("grupos")]);\n' +
+  // C19 Mayor cambio de tickets: debajo de las otras, divergente, rojo/verde, eje simetrico.
+  'var gc = graf("cambios"), dsc = gc && gc.data.datasets[0];\n' +
+  'var cardC = $c("chart-cambios").closest(".card"), rejilla = document.querySelector(".grid2x2");\n' +
+  // Rojo y verde de las barras de SLA (COLOR_TRAMO_SLA: vencido / dentro); D5 los compara con SLA en vivo.
+  'var tokR = "#ff4646", tokV = "#4CAF50";\n' +
+  'function rgbDe(h) { var n = parseInt(h.slice(1), 16); return "rgb(" + (n >> 16) + ", " + ((n >> 8) & 255) + ", " + (n & 255) + ")"; }\n' +
+  'function cual(c) { return c === tokR ? "rojo" : c === tokV ? "verde" : c; }\n' +
+  'apunta("C19", gc ? [cardC.querySelector("h3").firstChild.textContent, !!(rejilla.compareDocumentPosition(cardC) & Node.DOCUMENT_POSITION_FOLLOWING),\n' +
+  '  gc.options.indexAxis, dsc.data, dsc.backgroundColor.map(cual), [gc.options.scales.x.min, gc.options.scales.x.max],\n' +
+  '  gc.options.scales.x.ticks.callback(-5), gc.data.labels[0], hint("cambios"), $c("sub-cambios").textContent, msg("cambios"),\n' +
+  '  gc.options.plugins.tooltip.callbacks.label({ dataIndex: 2 }), gc.options.plugins.tooltip.callbacks.afterLabel({ dataIndex: 0 }),\n' +
+  '  [getComputedStyle(cardC.querySelector(".conc-sube")).backgroundColor === rgbDe(tokR), getComputedStyle(cardC.querySelector(".conc-baja")).backgroundColor === rgbDe(tokV),\n' +
+  '   /^#[0-9a-f]{6}$/i.test(tokR) && /^#[0-9a-f]{6}$/i.test(tokV)],\n' +
+  '  document.querySelectorAll(".conc-leyenda").length] : "sin grafica");\n' +
   // C5
   'var n0 = __urls.length;\n' +
   '$c("slot-mas").click();\n' +
@@ -310,12 +351,23 @@ var sondaC = conComun(
   'await M().recargar(); var parcial = [$c("cobertura").hidden, $c("cobertura").textContent];\n' +
   'window.__cobertura = null; await M().recargar(); var nula = $c("cobertura").hidden; window.__cobertura = undefined;\n' +
   'apunta("C13", [completa, parcial, nula]);\n' +
+  // C20 historia insuficiente / error / sin cambios: sin barras, el porque; las otras tres siguen.
+  'window.__cambios = { estado: "historiaInsuficiente", aumentos: null, reducciones: null, anterior: { rangos: [{ desde: "2025-09-25", hasta: "2026-04-21" }], dias: 210 },\n' +
+  '  cobertura: { diasConTickets: 191, diasEsperados: 210, primerDia: "2025-10-14", ultimoDia: "2026-04-21", completa: false } };\n' +
+  'await M().recargar(); var insuf = [!!graf("cambios"), msg("cambios"), $c("msg-cambios").classList.contains("conc-msg-error"), hint("cambios"), !!graf("pareto")];\n' +
+  'window.__cambios = { estado: "error", mensaje: "No se pudo leer el periodo anterior.", aumentos: null, reducciones: null };\n' +
+  'await M().recargar(); var err20 = [!!graf("cambios"), msg("cambios"), $c("msg-cambios").classList.contains("conc-msg-error"), !!graf("pareto")];\n' +
+  'window.__cambios = { estado: "ok", aumentos: [], reducciones: [], ticketsActual: 4, ticketsAnterior: 4, serviciosAumento: 0, serviciosReduccion: 0 };\n' +
+  'await M().recargar(); var igual = [!!graf("cambios"), msg("cambios")];\n' +
+  'window.__cambios = undefined; await M().recargar();\n' +
+  'apunta("C20", [insuf, err20, igual, !!graf("cambios"), msg("cambios")]);\n' +
   // C14 leyenda
   'apunta("C14", await leyendaPareto());\n' +
   // C15 varios meses (2026-11-10): uno, agregar dos seguidos = UNA peticion,
   // quitar uno, quitar todos (el servidor da el actual).
   '$c("btn-limpiar").click(); await hasta(function () { var u = ultimaConc(); return !u.so && !u.grupo && !msg("pareto"); });\n' +
-  // Limpiar ya dejo los meses en el actual (C18): elegirlo no repide.
+  // Limpiar deja Slot 0 (C21); Mes sin meses = el actual, asi que elegirlo no repide.
+  'document.querySelector("#conc-filtros [data-modo=mes]").click(); await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150);\n' +
   'elegir("mes", ["2026-11"]); await hasta(function () { return marcados("mes").join() === "2026-11" && !msg("pareto"); }); await espera(150);\n' +
   'var uno =[$c("mes").multiple, marcados("mes"), $c("activos").textContent.split(" · ").slice(0, 2).join(" · ")];\n' +
   'var n15 = pedidasConc().length;\n' +
@@ -396,6 +448,9 @@ var sondaC = conComun(
   // tres lados: <select>, desplegable (filas marcadas y contador) y filtros.
   'var ahora = function () { return [marcados("mes"), env.querySelectorAll(".dd-opcion.marcada").length,\n' +
   '  env.querySelector(".dd-conteo") ? env.querySelector(".dd-conteo").textContent : null, M().filtros().meses]; };\n' +
+  // Limpiar deja Slot 0 (C21): para volver a elegir meses, primero Mes.
+  'var aMes = async function () { document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
+  '  await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150); };\n' +
   // a) Ocho meses con el desplegable, Limpiar: cero en los tres lados al
   //    instante, UNA peticion sin mes, luego el actual (lo de siempre).
   'var n18 = pedidasConc().length; boton.click();\n' +
@@ -408,7 +463,7 @@ var sondaC = conComun(
   'var limpioOcho = [alInstante, pedidasConc().length - n18a, ultimaConc(), ahora(),\n' +
   '  $c("activos").textContent.split(" · ").slice(0, 1).join(), M().filtros().so, M().filtros().grupo, M().filtros().modo];\n' +
   // b) Un mes elegido, abriendo y cerrando el desplegable antes de Limpiar.
-  'boton.click(); fila("2026-11").click(); fila("2026-05").click();\n' +
+  'await aMes(); boton.click(); fila("2026-11").click(); fila("2026-05").click();\n' +
   'var n18b = pedidasConc().length;\n' +
   'await hasta(function () { return pedidasConc().length > n18b && !msg("pareto"); }); await espera(900);\n' +
   'Desplegable.cerrarTodos(); var unMes = [ahora(), ultimaConc().mes];\n' +
@@ -418,12 +473,12 @@ var sondaC = conComun(
   'var limpioUno = [unMes, alInstanteUno, pedidasConc().length - n18c, ultimaConc(), ahora()];\n' +
   // c) Clics aun en la espera de meses (sin pedir) y Limpiar: UNA peticion,
   //    sin mes; la espera descartada no pide despues.
-  'var n18d = pedidasConc().length; boton.click(); fila("2026-02").click(); fila("2026-01").click();\n' +
+  'await aMes(); var n18d = pedidasConc().length; boton.click(); fila("2026-02").click(); fila("2026-01").click();\n' +
   'await espera(100); var pendiente = pedidasConc().length - n18d; $c("btn-limpiar").click();\n' +
   'await hasta(function () { return pedidasConc().length > n18d && !msg("pareto"); }); await espera(1200);\n' +
   'var conEspera = [pendiente, pedidasConc().length - n18d, ultimaConc(), ahora()];\n' +
   // d) El desplegable sigue sirviendo: elegir otra vez = UNA peticion.
-  'var n18e = pedidasConc().length; boton.click(); fila("2026-09").click(); fila("2026-08").click();\n' +
+  'await aMes(); var n18e = pedidasConc().length; boton.click(); fila("2026-09").click(); fila("2026-08").click();\n' +
   'await hasta(function () { return pedidasConc().length > n18e && !msg("pareto"); }); await espera(900); Desplegable.cerrarTodos();\n' +
   'var otraVez = [pedidasConc().length - n18e, ultimaConc().mes, ahora()];\n' +
   // e) Nada que quitar (Slot, sin SO ni Grupo): ninguna peticion; los meses
@@ -436,7 +491,77 @@ var sondaC = conComun(
   'document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
   'await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150);\n' +
   'nada.push(pedidasConc().slice(n18g), marcados("mes"));\n' +
-  'apunta("C18", [ocho, limpioOcho, limpioUno, conEspera, otraVez, nada]);\n');
+  'apunta("C18", [ocho, limpioOcho, limpioUno, conEspera, otraVez, nada]);\n' +
+  // C21 (2026-11-18) Limpiar = estado de arranque. `arranque()` lee los
+  // controles del periodo, los multiselect y `filtros`.
+  'var arranque = function () { return [document.querySelector("#conc-filtros [data-modo=slot]").getAttribute("aria-pressed"),\n' +
+  '  document.querySelector("#conc-filtros [data-modo=mes]").getAttribute("aria-pressed"), $c("campo-slot").hidden, $c("campo-mes").hidden,\n' +
+  '  $c("slot-n").value, $c("slot-menos").disabled, $c("slot-mas").disabled, marcados("f-so"), marcados("f-grupo"), M().filtros()]; };\n' +
+  'var cuatro = function () { return [!!graf("pareto"), !!graf("categorias"), !!graf("grupos"), !!graf("cambios"),\n' +
+  '  msg("pareto"), msg("categorias"), msg("grupos"), msg("cambios")]; };\n' +
+  // a) Slot 12 con la comparacion en historia insuficiente -> Limpiar: UNA
+  //    peticion slot=0; las cuatro repintadas y el aviso viejo fuera.
+  'document.querySelector("#conc-filtros [data-modo=slot]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "slot" && !msg("pareto"); }); await espera(100);\n' +
+  'window.__cambios = { estado: "historiaInsuficiente", aumentos: null, reducciones: null, anterior: { rangos: [{ desde: "2024-09-30", hasta: "2025-10-24" }], dias: 390 },\n' +
+  '  cobertura: { diasConTickets: 0, diasEsperados: 390, primerDia: null, ultimoDia: null, completa: false } };\n' +
+  'var campo21 = $c("slot-n"); campo21.value = "12"; campo21.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));\n' +
+  'await hasta(function () { return ultimaConc().slot === "12" && !msg("pareto") && /Sin historial/.test(msg("cambios") || ""); }); await espera(100);\n' +
+  'var en12 = [ultimaConc(), $c("slot-n").value, !!graf("cambios")];\n' +
+  'window.__cambios = undefined;\n' +
+  'var n21a = pedidasConc().length; $c("btn-limpiar").click(); var alInstante21 = arranque();\n' +
+  'await hasta(function () { return pedidasConc().length > n21a && !msg("pareto") && !!graf("cambios"); }); await espera(600);\n' +
+  'var desde12 = [en12, alInstante21, pedidasConc().slice(n21a), arranque(), cuatro(), $c("activos").textContent.split(" · ").slice(0, 1).join(),\n' +
+  '  /\\(actual: del 11\\/10\\/2026 al 09\\/11\\/2026/.test($c("sub-cambios").textContent),\n' +
+  '  graf("pareto").options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }])];\n' +
+  // b) Mes con varios meses + SO + Grupo -> Limpiar: Slot 0 sin nada, UNA peticion.
+  'document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150);\n' +
+  'elegir("mes", ["2026-10", "2026-08", "2026-06"]); await hasta(function () { return ultimaConc().mes === "2026-10|2026-08|2026-06" && !msg("pareto"); });\n' +
+  'elegir("f-so", ["Ana"]); await hasta(function () { return ultimaConc().so === "Ana" && !msg("pareto"); });\n' +
+  'elegir("f-grupo", ["Grupo 3"]); await hasta(function () { return ultimaConc().grupo === "Grupo 3" && !msg("pareto"); }); await espera(150);\n' +
+  'var antesB = [ultimaConc(), M().filtros()];\n' +
+  'var n21b = pedidasConc().length; $c("btn-limpiar").click();\n' +
+  'await hasta(function () { return pedidasConc().length > n21b && !msg("pareto"); }); await espera(900);\n' +
+  'var desdeMes = [antesB, pedidasConc().slice(n21b), arranque(), cuatro(), /Service Owner: todos · Grupo: todos/.test($c("activos").textContent),\n' +
+  '  graf("pareto").options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }])];\n' +
+  // c) Tres clics seguidos = UNA peticion; otro con todo limpio = ninguna.
+  'elegir("f-grupo", ["Grupo 5"]); await hasta(function () { return ultimaConc().grupo === "Grupo 5" && !msg("pareto"); }); await espera(150);\n' +
+  'var n21c = pedidasConc().length; $c("btn-limpiar").click(); $c("btn-limpiar").click(); $c("btn-limpiar").click();\n' +
+  'await espera(900);\n' +
+  'var tres = [pedidasConc().length - n21c, ultimaConc(), msg("pareto")];\n' +
+  'var n21d = pedidasConc().length; $c("btn-limpiar").click(); await espera(900);\n' +
+  'apunta("C21", [desde12, desdeMes, tres, pedidasConc().length - n21d, arranque()]);\n' +
+  // C22 (2026-11-18) ventana acotada: aviso ambar con lo comparado; se va en
+  // cuanto llega otra respuesta (o mientras se calcula), y con Limpiar.
+  'var vent = function () { var p = $c("ventana-cambios"); return p.hidden ? null : p.textContent; };\n' +
+  'var acot = { estado: "ok", aumentos: [{ Servicio: "A1", NombreServicio: "Servicio A1", TicketsActual: 10, TicketsAnterior: 2, Diferencia: 8, VariacionPorcentaje: 400 }],\n' +
+  '  reducciones: [], serviciosAumento: 1, serviciosReduccion: 0, ticketsActual: 10, ticketsAnterior: 2,\n' +
+  '  actual: { rangos: [{ desde: "2026-05-28", hasta: "2026-11-18" }], dias: 175 }, anterior: { rangos: [{ desde: "2025-12-04", hasta: "2026-05-27" }], dias: 175 },\n' +
+  '  ventana: { ajustada: true, dias: 175, diasSolicitados: 390, historiaDesde: "2025-12-01", diasPorLado: 176,\n' +
+  '    solicitado: { actual: { rangos: [{ desde: "2025-10-25", hasta: "2026-11-18" }], dias: 390 }, anterior: { rangos: [{ desde: "2024-09-30", hasta: "2025-10-24" }], dias: 390 } } } };\n' +
+  'window.__cambios = acot; await M().recargar();\n' +
+  'var conAviso = [vent(), !!graf("cambios"), msg("cambios"), /actual: del 28\\/05\\/2026 al 18\\/11\\/2026/.test($c("sub-cambios").textContent),\n' +
+  '  $c("ventana-cambios").compareDocumentPosition($c("lienzo-cambios")) & Node.DOCUMENT_POSITION_FOLLOWING ? true : false,\n' +
+  '  getComputedStyle($c("ventana-cambios")).borderLeftStyle];\n' +
+  'window.__cambios = undefined; window.__lento = 400; $c("slot-mas").click(); await espera(120);\n' +
+  'var calculando = [vent(), msg("cambios")];\n' +
+  'await hasta(function () { return ultimaConc().slot === "1" && !msg("pareto") && !!graf("cambios"); }); window.__lento = 0; await espera(100);\n' +
+  'var completo = [vent(), !!graf("cambios")];\n' +
+  'window.__cambios = acot; await M().recargar(); var otraVez = vent() !== null;\n' +
+  'window.__cambios = undefined; $c("btn-limpiar").click();\n' +
+  'await hasta(function () { return ultimaConc().slot === "0" && !msg("pareto") && !!graf("cambios"); }); await espera(100);\n' +
+  'var trasLimpiar = [vent(), M().filtros().slot];\n' +
+  'window.__cambios = { estado: "historiaInsuficiente", motivo: "ventanaMinima", aumentos: null, reducciones: null,\n' +
+  '  anterior: { rangos: [{ desde: "2025-11-01", hasta: "2025-11-30" }], dias: 30 },\n' +
+  '  cobertura: { diasConTickets: 4, diasEsperados: 30, primerDia: "2025-11-03", ultimoDia: "2025-11-28", completa: false },\n' +
+  '  ventana: { ajustada: false, historiaDesde: "2025-12-01", diasPorLado: 15 } };\n' +
+  'await M().recargar(); var minima = [vent(), !!graf("cambios"), /el mínimo es 28\\.$/.test(msg("cambios") || ""), $c("msg-cambios").classList.contains("conc-msg-error")];\n' +
+  'window.__cambios = { estado: "historiaInsuficiente", motivo: "noConsecutivos", aumentos: null, reducciones: null,\n' +
+  '  anterior: { rangos: [{ desde: "2025-12-01", hasta: "2025-12-31" }, { desde: "2025-10-01", hasta: "2025-10-31" }], dias: 62 } };\n' +
+  'await M().recargar(); var noSeg = [vent(), /Elige meses consecutivos o un Slot/.test(msg("cambios") || "")];\n' +
+  'window.__cambios = undefined; await M().recargar();\n' +
+  'apunta("C22", [conAviso, calculando, completo, otraVez, trasLimpiar, minima, noSeg, vent()]);\n');
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
@@ -455,7 +580,16 @@ var sondaD = conComun(
   'var c0 = __pedidas.conc;\n' +
   'activarTab("concentracion"); await espera(300);\n' +
   'apunta("D3", [__pedidas.conc - c0, document.querySelectorAll("script[src*=\\"concentracion.js\\"]").length, !!Chart.getChart(document.getElementById("conc-chart-pareto"))]);\n' +
-  'apunta("D4", await leyendaPareto());\n');
+  'apunta("D4", await leyendaPareto());\n' +
+  // D5 los colores de Mayor cambio = los de las barras de SLA (Dentro SLA / SLA vencidos).
+  'var gcam = Chart.getChart(document.getElementById("conc-chart-cambios"));\n' +
+  'activarTab("sla");\n' +
+  'await hasta(function () { return Chart.getChart(document.getElementById("chart-productividad")); }, 8000);\n' +
+  'var gprod = Chart.getChart(document.getElementById("chart-productividad"));\n' +
+  'function colorDe(etq) { var ds = gprod && gprod.data.datasets.filter(function (d) { return d.label === etq; })[0]; return ds ? String(ds.backgroundColor) : null; }\n' +
+  'var cam = gcam ? gcam.data.datasets[0] : null;\n' +
+  'apunta("D5", [!!gprod, !!cam, colorDe("SLA vencidos"), cam && cam.backgroundColor[cam.data.findIndex(function (v) { return v > 0; })],\n' +
+  '  colorDe("Dentro SLA"), cam && cam.backgroundColor[cam.data.findIndex(function (v) { return v < 0; })]]);\n');
 
 var paginas = {
   '/concentracion/__banco.html': Banco.pagina('concentracion/concentracion.html', 'concentracion.js', stub(respondeConc, claveConc), sondaC),
@@ -504,6 +638,17 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
       [[{ modo: 'mes', mes: '2026-08', so: 'Beto', grupo: 'Grupo 5|Grupo 7' }], [null, true],
        [['Beto'], ['Grupo 5', 'Grupo 7'], '2026-08', 'mes'],
        [{ modo: 'mes', mes: '2026-08', so: 'Beto', grupo: 'Grupo 5|Grupo 7' }], true, true, true, ['Beto'], ['Grupo 5', 'Grupo 7']], o.C11);
+    var ROJO = 'rojo', VERDE = 'verde';
+    Check('C19 Mayor cambio: tarjeta debajo de las otras; barras horizontales divergentes (+ arriba, la mayor reduccion al final), rojo = aumento y verde = reduccion (los de las barras de SLA), eje simetrico en 0, cifras con signo, nombre del servicio, resumen, subtitulo actual − anterior, tooltip; la leyenda del Pareto sigue siendo una',
+      ['Servicios con mayor cambio de tickets', true, 'y', [8, 8, 7, 4, 3, -3, -5], [ROJO, ROJO, ROJO, ROJO, ROJO, VERDE, VERDE], [-10, 10],
+       '−5', 'Servicio A1', 'Top 5 de 7 con aumento · 2 con reducción',
+       'Diferencia = tickets del periodo actual − tickets del periodo anterior equivalente (actual: del 11/10/2026 al 09/11/2026 · anterior: del 11/09/2026 al 10/10/2026).',
+       null, 'Diferencia: +7 (sin tickets en el periodo anterior)', 'Actual: 10 · Anterior: 2',
+       [true, true, true], 1], o.C19);
+    Check('C20 historia insuficiente: sin barras, aviso con los dias reales (no error); error: mensaje en rojo; sin cambios: lo dice; las otras graficas siguen; vuelve a pintar',
+      [[false, 'Sin historial suficiente para comparar: el periodo anterior (del 25/09/2025 al 21/04/2026) tiene tickets en 191 de 210 días (datos del 14/10/2025 al 21/04/2026). No se muestra una comparación parcial.', false, '', true],
+       [false, 'No se pudo leer el periodo anterior.', true, true],
+       [false, 'Sin cambios: ningún servicio subió ni bajó respecto al periodo anterior.'], true, null], o.C20);
     Check('C12 falla la peticion: banda y las tres en error',
       [false, 'caido', ['Error al cargar datos.', 'Error al cargar datos.', 'Error al cargar datos.']], o.C12);
     Check('C15 varios meses: selector multiple; agregar dos seguidos = UNA peticion mes=2026-11|2026-09|2026-07 con las tres graficas y el texto de esos meses; quitar uno; quitarlos todos = el servidor da el actual y lo marca; el mismo conjunto no repide',
@@ -524,14 +669,31 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
        [1, ['2', '1'], true, null, null, null, false, 'Servicio 1 slot 1'],
        [['0', '1'], true, 'Servicio 1 slot 1', '1', null], [1, '2026-07']], o.C17);
     var OCHO = ['2026-10', '2026-09', '2026-08', '2026-07', '2026-06', '2026-05', '2026-04', '2026-03'];
-    var ACTUAL = [['2026-11'], 1, '1', ['2026-11']];
-    Check('C18 Limpiar quita los meses: ocho elegidos en el desplegable = cero en <select>, desplegable y filtros al instante y UNA peticion sin mes (el servidor da el actual), SO/Grupo vacios y el modo igual; un mes, tras abrir y cerrar = UNA; con clics en la espera = UNA y nada despues; elegir otra vez = UNA; en Slot sin nada que quitar = ninguna, y volver a Mes pide sin mes',
+    // Ya en Slot, el <select> oculto de meses marca el actual (como al
+    // arrancar), pero `filtros.meses` queda vacio: no viaja en la peticion.
+    var EN_SLOT = [['2026-11'], 1, '1', []];
+    var SLOT0 = { modo: 'slot', slot: '0' };
+    Check('C18 Limpiar quita los meses: ocho elegidos en el desplegable = cero en <select>, desplegable y filtros al instante y UNA peticion sin mes (ahora Slot 0, C21), SO/Grupo vacios; un mes, tras abrir y cerrar = UNA; con clics en la espera = UNA y nada despues; elegir otra vez = UNA; en Slot sin nada que quitar = ninguna (el Slot ya en 0), y volver a Mes pide sin mes',
       [[[OCHO, 8, '8', OCHO], 1, 8, true],
-       [[[], 0, '', [], false], 1, { modo: 'mes' }, ACTUAL, 'Periodo: Mes Mes 2026-11 (en curso, hasta hoy)', [], [], 'mes'],
-       [[[['2026-05'], 1, '1', ['2026-05']], '2026-05'], [[], 0, '', []], 1, { modo: 'mes' }, ACTUAL],
-       [0, 1, { modo: 'mes' }, ACTUAL],
+       [[[], 0, '', [], false], 1, SLOT0, EN_SLOT, 'Periodo: Slot 0', [], [], 'slot'],
+       [[[['2026-05'], 1, '1', ['2026-05']], '2026-05'], [[], 0, '', []], 1, SLOT0, EN_SLOT],
+       [0, 1, SLOT0, EN_SLOT],
        [1, '2026-11|2026-09|2026-08', [['2026-11', '2026-09', '2026-08'], 3, '3', ['2026-11', '2026-09', '2026-08']]],
-       [0, [], 1, 0, [{ modo: 'mes' }], ['2026-11']]], o.C18);
+       [0, [], 0, 0, [{ modo: 'mes' }], ['2026-11']]], o.C18);
+    var INICIAL = { modo: 'slot', slot: 0, meses: [], so: [], grupo: [] };
+    var ARRANQUE = ['true', 'false', false, true, '0', true, false, [], [], INICIAL];
+    var CUATRO = [true, true, true, true, null, null, null, null];
+    Check('C21 Limpiar vuelve al arranque: desde Slot 12 con la comparacion en historia insuficiente = controles en Slot 0 al instante, UNA peticion slot=0, las cuatro graficas repintadas y sin el aviso viejo; desde Mes (3 meses) + SO + Grupo = Slot 0 sin nada, UNA peticion; tres clics seguidos = UNA; otro mas = ninguna; filtros = el inicial',
+      [[[{ modo: 'slot', slot: '12' }, '12', false], ARRANQUE, [SLOT0], ARRANQUE, CUATRO, 'Periodo: Slot 0', true, 'Servicio 1 slot 0'],
+       [[{ modo: 'mes', mes: '2026-10|2026-08|2026-06', so: 'Ana', grupo: 'Grupo 3' },
+         { modo: 'mes', slot: 0, meses: ['2026-10', '2026-08', '2026-06'], so: ['Ana'], grupo: ['Grupo 3'] }],
+        [SLOT0], ARRANQUE, CUATRO, true, 'Servicio 1 slot 0'],
+       [1, SLOT0, null], 0, ARRANQUE], o.C21);
+    Check('C22 ventana acotada: aviso ambar entre el subtitulo y la grafica con lo pedido, la historia y las dos ventanas, y barras; se oculta mientras se calcula otra peticion y no vuelve con un periodo completo ni tras Limpiar; ventanaMinima y noConsecutivos explican el porque (sin aviso, no es error)',
+      [['Comparación acotada a 175 días: el periodo elegido (390 días) necesita historial desde el 30/09/2024 y solo hay historial completo desde el 01/12/2025. ' +
+        'Se comparan los últimos 175 días (28/05/2026 – 18/11/2026) contra los 175 inmediatamente anteriores (04/12/2025 – 27/05/2026). Las demás gráficas usan el periodo completo.',
+        true, null, true, true, 'solid'],
+       [null, 'Calculando…'], [null, true], true, [null, 0], [null, false, true, false], [null, true], null], o.C22);
     Check('C13 cobertura: completa sin aviso; parcial con el hecho; sin medir sin aviso',
       [true, [false, 'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.'], true], o.C13);
   });
@@ -553,6 +715,8 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
     Check(x[1] + ' leyenda: una sola, dentro de la tarjeta del Pareto y justo debajo de su lienzo; los cuatro rotulos y colores; a 320 px envuelve sin salirse; sin el parrafo de poblacion',
       LEYENDA, Banco.mapa(res[x[0]])[x[1]]);
   });
+  if (res[1]) Check('D5 Mayor cambio usa el rojo y el verde de las barras de SLA (SLA vencidos = aumento, Dentro SLA = reduccion), medidos en dashboard.html',
+    [true, true, '#ff4646', '#ff4646', '#4CAF50', '#4CAF50'], Banco.mapa(res[1]).D5);
   console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
   process.exit(fallos ? 1 : 0);
 });

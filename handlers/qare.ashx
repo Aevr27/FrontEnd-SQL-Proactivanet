@@ -12,7 +12,7 @@
 //   Sin fechas: los 15 dias naturales que terminan HOY (dia de Mexico), el
 //   mismo default que los SP. Las fechas llegan a @FechaInicio / @FechaFin
 //   TAL CUAL, sin sumar ni restar dias: los SP filtran FechaFirmaSolucion con
-//   el dia fin incluido (verificado en la VM, sql/diag_qare_contrato.sql).
+//   el dia fin incluido (verificado en la VM, sql/diag/diag_qare_contrato.sql).
 //   c1 / grupos / lideres: los multiselect del tablero, listas separadas por
 //   comas, leidos con BacklogUtil.Filtros igual que en el Backlog (vacio =
 //   sin filtro). Llegan a los SEIS procedimientos como @C1/@Grupos/@Lideres

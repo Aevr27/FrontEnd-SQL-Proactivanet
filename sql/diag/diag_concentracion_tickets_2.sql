@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_concentracion_tickets_2.sql - Segunda pasada, pestaña
+   sql/diag/diag_concentracion_tickets_2.sql - Segunda pasada, pestaña
    "Concentracion de tickets". Version para SSMS (un solo lote, F5).
 
    OBJETIVO

@@ -49,7 +49,7 @@
      lectura, la Volumetria de esa categoria (VolumetriaCliente de
      admin/iniciativa-admin.js, la misma de Crear / Modificar: ultimos 30
      dias) y los Tickets a reducir = ceiling(volumetria x % / 100).
-   Pendiente (no se pinta como campo, ver sql/diag_admin_nueva_solicitud.sql)
+   Pendiente (no se pinta como campo, ver sql/diag/diag_admin_nueva_solicitud.sql)
      El RCA se elige y se valida, pero todavia no se guarda ni hay numero
      de solicitud con que nombrarlo. Destino FUTURO confirmado (solo
      dependencia, nada implementado): SharePoint, sitio ProblemManagement,

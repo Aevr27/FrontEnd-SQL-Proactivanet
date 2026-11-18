@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_admin_persistencia_gestion.sql -- SOLO LECTURA (solo SELECT y
+   sql/diag/diag_admin_persistencia_gestion.sql -- SOLO LECTURA (solo SELECT y
    metadatos). No escribe, no crea objetos, no cambia configuracion.
 
    Para decidir sql/18_gestion_admin_persistencia.sql y sql/19_cargador_respeta_admin.sql. Correr en la VM

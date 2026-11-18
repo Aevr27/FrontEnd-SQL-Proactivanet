@@ -552,7 +552,7 @@ INSERT dbo.T (CodigoTicket, FechaFirmaSolucion, QA_Frecuencia, QARe_VerificoClas
 
     // ------------------------------------------ 2C) filtros organizacionales
     /* Lo que el Backlog ya tiene en la VM, con los cuerpos EXACTOS que leyo
-       sql/diag_qare_filtros_precheck.sql (2026-09-28), y los grupos de la
+       sql/diag/diag_qare_filtros_precheck.sql (2026-09-28), y los grupos de la
        replica: Service Desk -> Jesus Campa, Soporte Campo -> Laura Cardenas,
        Grupo Nuevo sin fila en CatLiderGrupo (-> 'Sin Torre'). */
     const string Backlog = @"

@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_83_reactivacion.sql - DIAGNOSTICO DE SOLO LECTURA de sql/83.
+   sql/diag/diag_83_reactivacion.sql - DIAGNOSTICO DE SOLO LECTURA de sql/83.
    Sin EXEC, sin DDL / DML sobre la base: @b es una variable de tabla que
    solo existe mientras corre este script.
 
@@ -7,7 +7,7 @@
    salen NULL ("SIN VIEW DEFINITION"). El resto, con db_datareader.
 
    A  Estado de 83: huellas de los tres procedimientos y sus propiedades.
-   V  Verificacion EXACTA de la baseline (sql/baseline_83_export.sql): mismo
+   V  Verificacion EXACTA de la baseline (sql/diag/baseline_83_export.sql): mismo
       numero de filas y misma huella SHA-256 sobre los pares ordenados. Si
       no coincide, R no atribuye NADA.
    R  Pares de la baseline (dados de baja ANTES de 83) que hoy estan

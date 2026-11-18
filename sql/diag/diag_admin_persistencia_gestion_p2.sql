@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_admin_persistencia_gestion_p2.sql -- SOLO LECTURA.
+   sql/diag/diag_admin_persistencia_gestion_p2.sql -- SOLO LECTURA.
    Complemento de diag_admin_persistencia_gestion.sql para decidir sql/18 y
    sql/19. Se puede correr con la cuenta db_owner de siempre.
 

@@ -25,7 +25,7 @@ repositorio**: según el paquete, ya están instalados y cargados en la VM
 
 ## 0. Antes de tocar nada: diagnóstico (solo lectura)
 
-`sql/diag_orquestacion_tablero.sql` en SSMS. No escribe nada. Dice si están
+`sql/diag/diag_orquestacion_tablero.sql` en SSMS. No escribe nada. Dice si están
 los objetos y columnas que leen el 77 y el C#, el tipo de `orq.Parametro.Valor`,
 las cargas aplicadas, si `FechaFin` parece UTC, rellenos y `JobName` repetidos,
 y quién tiene SELECT sobre `orq`. Correrlo otra vez después del paso 1: la

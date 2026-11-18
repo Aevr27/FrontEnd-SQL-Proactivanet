@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_fecha_analisis_unica.sql - SOLO LECTURA (solo SELECT).
+   sql/diag/diag_fecha_analisis_unica.sql - SOLO LECTURA (solo SELECT).
    Regla: una iniciativa tiene UNA fecha compromiso de analisis
    (dbo.Problem.FechaAnalisis), comun a todas sus categorias.
 

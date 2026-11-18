@@ -232,7 +232,7 @@
      de dbo.ProblemFechaEvento de la iniciativa en orden de IdEvento
      (App_Code/HistorialFechas.cs): { id, campo, anterior, nuevo, operacion,
      origen, usuario, solicitud, fecha, reconstruido }. Los rotulos los pone
-     etiquetarHistorial (sql/PROPUESTA_historial_fechas.md seccion 4): Linea
+     etiquetarHistorial (sql/docs/PROPUESTA_historial_fechas.md seccion 4): Linea
      base, Fecha inicial, Fecha asignada, Fecha retirada y "Cambio n", que es
      lo unico que cuenta y lo que da N. En FechaCierre solo cuentan las
      extensiones (nueva > anterior): un adelanto se muestra sin numero

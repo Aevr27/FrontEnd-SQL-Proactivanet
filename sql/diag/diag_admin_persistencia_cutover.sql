@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_admin_persistencia_cutover.sql - Diagnostico de SOLO LECTURA
+   sql/diag/diag_admin_persistencia_cutover.sql - Diagnostico de SOLO LECTURA
    antes de la migracion 18 / retiro del cargador / encendido de la
    persistencia de Admin.
 

@@ -395,7 +395,7 @@ public sealed class PeticionModificarAdmin
 // Agrupacion (TipoAgrupado). Los textos son los que YA estan en dbo.Problem /
 // dbo.ProblemCategoria, no la Descripcion del catalogo ('Shift to Left' no
 // existe como TipoIniciativa). Clasificacion -> Agrupacion: sin excepciones
-// en la VM (sql/diag_admin_tipo_por_prefijo.sql T3, 2026-10-15). Un prefijo
+// en la VM (sql/diag/diag_admin_tipo_por_prefijo.sql T3, 2026-10-15). Un prefijo
 // sin regla deja ambos null (Incompleta). Copia en admin/iniciativa-admin.js
 // (TIPOS_POR_PREFIJO): cambiar las dos.
 public static class TiposPorPrefijo

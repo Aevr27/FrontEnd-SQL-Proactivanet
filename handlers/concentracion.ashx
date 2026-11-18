@@ -31,7 +31,19 @@
 //     pareto:     [ { Posicion, Servicio, NombreServicio, CantidadTickets, TotalTickets, Porcentaje, PorcentajeAcumulado } ],
 //     categorias: [ { Posicion, Categoria, ... } ],
 //     grupos:     [ { Posicion, Grupo, ... } ],
-//     errores: {}, avisos: [ "..." ],
+//     cambios: {                                  // vs el periodo anterior (2026-11-18)
+//       estado: "ok" | "historiaInsuficiente" | "error", mensaje (solo error),
+//       motivo: "ventanaMinima" | "noConsecutivos" (solo historiaInsuficiente),
+//       actual / anterior: { rangos: [ { desde, hasta } ], dias }  -- lo COMPARADO,
+//       ventana: { ajustada, dias, diasSolicitados, historiaDesde, diasPorLado,
+//                  solicitado: { actual, anterior } }  (sin ella en error; dias e
+//                  historiaDesde/diasPorLado segun haya o no ventana acotada),
+//       cobertura (la del periodo anterior PEDIDO; sin ella en error),
+//       aumentos / reducciones: [ { Servicio, NombreServicio, TicketsActual,
+//         TicketsAnterior, Diferencia, VariacionPorcentaje } ] (Top 5; null si no es ok),
+//       serviciosAumento, serviciosReduccion, ticketsActual, ticketsAnterior (solo ok)
+//     },
+//     errores: {}, avisos: [ "..." ],      // errores.cambios si estado = error
 //     dataInfo: { ...DashboardDataInfo... }
 //   }
 //   TODAS las filas de cada grafica, con el acumulado y el 80 % sobre todas;
@@ -45,6 +57,7 @@
 //   cache      tramos (meses, o el rango de Slots) servidos de la cache
 //   directorio catalogo de dueños (desc: cache o sql)
 //   calculo    Service Owner, cobertura, opciones, filtros y las tres cuentas
+//   anterior   periodo anterior y comparacion (desc: consultas, tramos, cache, filas)
 //   etl        sello de dbo.EtlLog
 //   json       serializacion
 //   total      desde que entro la peticion
@@ -91,8 +104,11 @@ public class Concentracion : IHttpHandler
             var r = ConcentracionQueries.Consultar(f, hoy, medicion);
             if (r.FalloDirectorio != null)
                 DashboardHandler.Registrar("concentracion.ashx directorio", r.FalloDirectorio);
+            var cambios = ConcentracionQueries.Cambios(f, r, medicion);
+            if (r.FalloCambios != null)
+                DashboardHandler.Registrar("concentracion.ashx cambios", r.FalloCambios);
 
-            var salida = Salida(r, medicion);
+            var salida = Salida(r, cambios, medicion);
             var reloj = Stopwatch.StartNew();
             var cuerpo = json.Serialize(salida);
             medicion.Anotar("json", reloj.Elapsed, null);
@@ -110,7 +126,8 @@ public class Concentracion : IHttpHandler
         }
     }
 
-    private static Dictionary<string, object> Salida(ConcentracionResultado r, ConcentracionMedicion medicion)
+    private static Dictionary<string, object> Salida(ConcentracionResultado r, Dictionary<string, object> cambios,
+                                                     ConcentracionMedicion medicion)
     {
         var f = r.Filtros;
         var meses = new List<Dictionary<string, object>>();
@@ -154,7 +171,10 @@ public class Concentracion : IHttpHandler
         salida["pareto"] = r.Pareto;
         salida["categorias"] = r.Categorias;
         salida["grupos"] = r.Grupos;
-        salida["errores"] = new Dictionary<string, object>();
+        salida["cambios"] = cambios;
+        var errores = new Dictionary<string, object>();
+        if ((string)cambios["estado"] == ConcentracionContrato.CambiosError) errores["cambios"] = cambios["mensaje"];
+        salida["errores"] = errores;
         salida["avisos"] = r.Avisos;
         /* Sello del ETL (dbo.EtlLog), como SLA, QA y QARE, en la hora local del
            SQL Server (YaLocal). El periodo son las fechas de negocio de los Slots

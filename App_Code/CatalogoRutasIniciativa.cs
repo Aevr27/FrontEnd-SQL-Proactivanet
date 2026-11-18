@@ -7,7 +7,7 @@
 // -------------
 //   rutas    dbo.Categorias.RutaCompleta con VigenteEnOrigen = 1 y
 //            Inactiva = 0 (la categoria "activa" del catalogo: el mismo
-//            criterio de sql/diag_categorias_inactivas_candidatas.sql). Hay
+//            criterio de sql/diag/diag_categorias_inactivas_candidatas.sql). Hay
 //            varios Id por ruta: basta una fila activa. Se normalizan como
 //            el resto del sitio (DirectorioOrganizacional.Normaliza).
 //   dueños   DirectorioOrganizacional.Resolver con los cortes C1 / C1&C2 de

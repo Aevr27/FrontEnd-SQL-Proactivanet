@@ -1,5 +1,5 @@
 // Prueba de INTEGRACION de sql/83_reactivacion_categoria_historica.sql
-// (+ _rollback, sql/baseline_83_export.sql y sql/diag_83_reactivacion.sql)
+// (+ _rollback, sql/diag/baseline_83_export.sql y sql/diag/diag_83_reactivacion.sql)
 // contra bases REALES pero DESECHABLES de SQL Server LocalDB:
 // GestionAdminPrueba_R83<n> con la replica de dbo y las migraciones reales
 // 18, 20-27, 29, 31, 32, 34-42 (la VM QA segun su diagnostico 2026-11-10:
@@ -385,7 +385,7 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
         return Gestion("accion", "modificar", "folio", F10, "agregar_categoria", cat, "agregar_pct", pct, "agregar_tipo_iniciativa", ti, "agregar_tipo_agrupado", ta);
     }
 
-    // La MISMA serializacion canonica que sql/baseline_83_export.sql, en C#.
+    // La MISMA serializacion canonica que sql/diag/baseline_83_export.sql, en C#.
     static string HuellaCSharp(List<KeyValuePair<string, string>> pares)
     {
         var orden = pares.OrderBy(p => p.Key, StringComparer.Ordinal).ThenBy(p => p.Value, StringComparer.Ordinal).ToList();
@@ -416,7 +416,7 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
             Check("G2 la cadena reproduce las huellas de la VM QA (Modificar 24, Aplicar 40, Crear 38)", Modificar24 + "|" + Aplicar40 + "|" + Crear38, Huellas());
 
             // ---------------- L (1/2): baseline ANTES de 83 ----------------
-            var exp = Resultados(Leer("sql", "baseline_83_export.sql"));
+            var exp = Resultados(Leer("sql", "diag", "baseline_83_export.sql"));
             var cab = exp[0][0].Split('|');   // Cabecera|TomadaUtc|Base|Servidor|Filas|HuellaSha256
             var lineas = exp[1];
             var pares = Resultados("SELECT Codigo, Categoria FROM dbo.ProblemCategoria WHERE VigenteEnOrigen = 0")[0]
@@ -577,7 +577,7 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
                           () => Modificar(ADM, F10, "/R/Hist4", 0.2m, null, null, k1)) + "|" + Fila("/R/Hist4").Split('|')[0]);
 
             // ---------------- L (2/2): diagnostico contra la baseline ----------------
-            var diag = Leer("sql", "diag_83_reactivacion.sql")
+            var diag = Leer("sql", "diag", "diag_83_reactivacion.sql")
                 .Replace("DECLARE @TomadaUtc      datetime2(7)  = NULL;", "DECLARE @TomadaUtc      datetime2(7)  = '" + cab[1] + "';")
                 .Replace("DECLARE @FilasEsperadas int           = NULL;", "DECLARE @FilasEsperadas int           = " + cab[4] + ";")
                 .Replace("DECLARE @HuellaEsperada varbinary(32) = NULL;", "DECLARE @HuellaEsperada varbinary(32) = " + cab[5] + ";");

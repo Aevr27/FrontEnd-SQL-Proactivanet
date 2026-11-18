@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_migraciones_34_40.sql - DIAGNOSTICO DE SOLO LECTURA: que
+   sql/diag/diag_migraciones_34_40.sql - DIAGNOSTICO DE SOLO LECTURA: que
    migraciones de 34 a 40 estan aplicadas en esta base.
 
    SOLO SELECT sobre vistas de catalogo, OBJECT_DEFINITION y conteos de
@@ -17,7 +17,7 @@
    db_owner o securityadmin.
 
    COMO CORRERLO (en la VM, cuenta con db_owner, p. ej. t_andresvr):
-     sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -W -s "|" -i sql\diag_migraciones_34_40.sql
+     sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -W -s "|" -i sql\diag\diag_migraciones_34_40.sql
    o en SSMS con el script completo. Pegar el resultado completo.
 
    Hashes = SHA2_256 de OBJECT_DEFINITION sin espacios, tabs ni saltos de

@@ -33,13 +33,17 @@
 //     - modo slot: el rango acumulado 0..N, un tramo (como antes): la
 //       columna Slot no admite busqueda por indice y partirla en un Slot por
 //       consulta multiplicaria los barridos.
+//     - periodo anterior de la comparacion (2026-11-18, ver Cambios): por
+//       FechaRegistro, un tramo por rango; en modo mes, un mes completo usa
+//       la misma llave que en la pestaña.
 //   La llave lleva el dia de hoy (Mexico), como antes: el mes en curso llega
 //   hasta hoy y la vista puede depender del dia.
 //   Solo se guardan filas SIN filtrar: Service Owner y Grupo se aplican
 //   despues, sobre una copia por peticion.
 //   Lecturas en vuelo: si otra peticion ya esta leyendo un tramo, se espera
 //   su resultado en vez de lanzar la misma consulta otra vez.
-//   Crecimiento acotado: a lo mas 13 meses + 13 slots por dia, 5 minutos.
+//   Crecimiento acotado: por dia, a lo mas 13 meses + 13 slots y sus
+//   periodos anteriores (13 rangos de Slot y unos 26 meses), 5 minutos.
 //
 // C1&C2 (2026-11-11)
 //   Antes: dbo.fn_CategoriaC1C2(v.Categoria) en el SELECT, una llamada a un
@@ -79,6 +83,12 @@ public sealed class ConcentracionResultado
     public Dictionary<string, object> Cobertura;
     public readonly List<string> Avisos = new List<string>();
     public Exception FalloDirectorio;      // para la traza; no se serializa
+    // Lo que la comparacion reusa del periodo actual (no se serializa): los
+    // tickets ya filtrados y el MISMO directorio de dueños.
+    public List<ConcentracionTicket> Tickets;     // los del periodo SIN filtros (cobertura de la comparacion)
+    public List<ConcentracionTicket> Filtrados;
+    public DirectorioOrganizacional Directorio;
+    public Exception FalloCambios;         // para la traza; no se serializa
 
     // Medicion de esta peticion (Server-Timing y pruebas; no se serializa).
     public int TramosCache;            // tramos que ya estaban en la cache
@@ -157,7 +167,7 @@ WHERE ";
     // Los meses del filtro (Meses; si viene vacio, Mes: quien solo fijo Mes).
     public static List<DateTime> MesesDe(ConcentracionFiltros f)
     {
-        return f.Meses.Count > 0 ? new List<DateTime>(f.Meses) : new List<DateTime> { f.Mes };
+        return ConcentracionContrato.MesesElegidos(f);
     }
 
     public static ConcentracionResultado Consultar(ConcentracionFiltros f)
@@ -196,7 +206,7 @@ WHERE ";
         r.Hasta = r.Rangos.Max(x => x.Value);
 
         // Filas del periodo (si falla, falla todo: no hay grafica sin ellas).
-        var periodo = LeerPeriodo(cadena, f, r, medicion);
+        var periodo = LeerTramos(cadena, TramosDe(f, r), f.Modo == ConcentracionContrato.ModoMes ? (int?)null : f.Slot, r, medicion);
 
         // Service Owner. Si el directorio no se puede leer, las graficas
         // siguen sin ese filtro... salvo que se este filtrando por el: no se
@@ -215,9 +225,32 @@ WHERE ";
             r.Avisos.Add("No se pudo leer el catalogo de dueños: el filtro de Service Owner no esta disponible (" +
                          DashboardHandler.MensajeSeguro(r.FalloDirectorio) + ").");
 
-        // Copia por peticion: el SO se escribe en la fila y las listas de la
-        // cache se comparten entre peticiones.
         reloj.Restart();
+        r.Directorio = dir;
+        var tickets = ConServiceOwner(periodo, dir);
+
+        r.TicketsPeriodo = tickets.Count;
+        r.Cobertura = ConcentracionContrato.Cobertura(tickets, r.Rangos, r.Hoy);
+        r.OpcionesServiceOwner = dir == null ? new List<Dictionary<string, object>>()
+            : ConcentracionContrato.Opciones(tickets.ConvertAll(t => t.ServiceOwner ?? ConcentracionContrato.SinServiceOwner), f.ServiceOwners);
+        r.OpcionesGrupo = ConcentracionContrato.Opciones(tickets.ConvertAll(t => t.Grupo), f.Grupos);
+
+        var filtrados = ConcentracionContrato.Filtrar(tickets, f);
+        r.Tickets = tickets;
+        r.Filtrados = filtrados;
+        r.TicketsFiltrados = filtrados.Count;
+        r.Pareto = ConcentracionContrato.Pareto(filtrados);
+        r.Categorias = ConcentracionContrato.Categorias(filtrados);
+        r.Grupos = ConcentracionContrato.Grupos(filtrados);
+        if (medicion != null)
+            medicion.Anotar("calculo", reloj.Elapsed, "tickets=" + tickets.Count + " filtrados=" + filtrados.Count);
+        return r;
+    }
+
+    // Copia por peticion: el SO se escribe en la fila y las listas de la
+    // cache se comparten entre peticiones. dir null = sin SO (sin catalogo).
+    private static List<ConcentracionTicket> ConServiceOwner(List<ConcentracionTicket> periodo, DirectorioOrganizacional dir)
+    {
         var tickets = new List<ConcentracionTicket>(periodo.Count);
         foreach (var t in periodo)
         {
@@ -234,21 +267,116 @@ WHERE ";
             }
             tickets.Add(c);
         }
+        return tickets;
+    }
 
-        r.TicketsPeriodo = tickets.Count;
-        r.Cobertura = ConcentracionContrato.Cobertura(tickets, r.Rangos, r.Hoy);
-        r.OpcionesServiceOwner = dir == null ? new List<Dictionary<string, object>>()
-            : ConcentracionContrato.Opciones(tickets.ConvertAll(t => t.ServiceOwner ?? ConcentracionContrato.SinServiceOwner), f.ServiceOwners);
-        r.OpcionesGrupo = ConcentracionContrato.Opciones(tickets.ConvertAll(t => t.Grupo), f.Grupos);
+    /* "Servicios con mayor cambio de tickets": el periodo actual (r, ya
+       consultado y filtrado) contra el anterior de la misma duracion
+       (ConcentracionContrato.PeriodoAnterior), con los MISMOS filtros de
+       Service Owner y Grupo y el mismo directorio de dueños.
 
-        var filtrados = ConcentracionContrato.Filtrar(tickets, f);
-        r.TicketsFiltrados = filtrados.Count;
-        r.Pareto = ConcentracionContrato.Pareto(filtrados);
-        r.Categorias = ConcentracionContrato.Categorias(filtrados);
-        r.Grupos = ConcentracionContrato.Grupos(filtrados);
+       El anterior se lee por FechaRegistro, como los meses, con su propia
+       cache por rango (en modo mes, los meses completos comparten la de la
+       pestaña). Historia: se exige que CADA dia del periodo anterior tenga al
+       menos un ticket (la cobertura de la pestaña, sobre todos los tickets,
+       antes de filtros); una comparacion contra un periodo a medias diria
+       "bajo" sin que haya bajado.
+
+       Si no la tiene (2026-11-18): con una seleccion continua se compara la
+       ventana maxima comparable (ConcentracionContrato.VentanaComparable), dos
+       tramos de L dias que terminan en el fin del actual, partidos de las
+       filas YA leidas (anterior + actual, pegados y sin solape: no hay otra
+       consulta); mismos filtros y misma cuenta. cambios.ventana dice lo pedido
+       y lo comparado. Sin ventana de 28 dias, o con meses no seguidos,
+       historiaInsuficiente con su motivo y sin filas.
+
+       Si la lectura falla, estado "error" con el mensaje seguro; las otras
+       tres graficas no se pierden (r.FalloCambios queda para la traza). */
+    public static Dictionary<string, object> Cambios(ConcentracionFiltros f, ConcentracionResultado r, ConcentracionMedicion medicion)
+    {
+        var reloj = Stopwatch.StartNew();
+        var anterior = ConcentracionContrato.PeriodoAnterior(f, r.Hoy);
+        var salida = new Dictionary<string, object>();
+        var pedidoActual = ConcentracionContrato.RangosJson(r.Rangos);
+        var pedidoAnterior = ConcentracionContrato.RangosJson(anterior);
+        salida["actual"] = pedidoActual;
+        salida["anterior"] = pedidoAnterior;
+        var lectura = new ConcentracionResultado { Hoy = r.Hoy };   // solo sus contadores
+        int filas = 0;
+        try
+        {
+            var tipo = f.Modo == ConcentracionContrato.ModoMes ? "mes:" : "rango:";
+            var periodo = LeerTramos(DashboardDb.CadenaConexion(), TramosPorFechas(anterior, r.Hoy, tipo), null, lectura, null);
+            filas = periodo.Count;
+            var tickets = ConServiceOwner(periodo, r.Directorio);
+            var cobertura = ConcentracionContrato.Cobertura(tickets, anterior, r.Hoy);
+            salida["cobertura"] = cobertura;
+            int diasPedidos = r.Rangos.Sum(x => (x.Value - x.Key).Days + 1);
+            var ventana = new Dictionary<string, object>
+            {
+                { "ajustada", false }, { "diasSolicitados", diasPedidos },
+                { "solicitado", new Dictionary<string, object> { { "actual", pedidoActual }, { "anterior", pedidoAnterior } } },
+            };
+            if ((bool)cobertura["completa"])
+            {
+                ventana["dias"] = diasPedidos;
+                Comparar(salida, r.Filtrados, ConcentracionContrato.Filtrar(tickets, f));
+            }
+            else if (!ConcentracionContrato.SeleccionContinua(f))
+            {
+                SinComparacion(salida, ConcentracionContrato.MotivoNoConsecutivos);
+            }
+            else
+            {
+                var dias = new HashSet<DateTime>();
+                foreach (var t in r.Tickets.Concat(tickets))
+                    if (t.Dia.HasValue) dias.Add(t.Dia.Value.Date);
+                var v = ConcentracionContrato.VentanaComparable(dias, anterior.Min(x => x.Key), r.Hasta, r.Hoy, diasPedidos);
+                ventana["historiaDesde"] = ConcentracionContrato.Dia(v.HistoriaDesde);
+                ventana["diasPorLado"] = v.DiasPorLado;
+                if (!v.Valida)
+                {
+                    SinComparacion(salida, ConcentracionContrato.MotivoVentanaMinima);
+                }
+                else
+                {
+                    // Filas filtradas de los dos periodos leidos; cada ventana toma las suyas por dia.
+                    var todas = r.Filtrados.Concat(ConcentracionContrato.Filtrar(tickets, f)).ToList();
+                    ventana["ajustada"] = true;
+                    ventana["dias"] = v.Dias;
+                    salida["actual"] = ConcentracionContrato.RangosJson(new[] { v.Actual });
+                    salida["anterior"] = ConcentracionContrato.RangosJson(new[] { v.Anterior });
+                    Comparar(salida, ConcentracionContrato.EnRango(todas, v.Actual), ConcentracionContrato.EnRango(todas, v.Anterior));
+                }
+            }
+            salida["ventana"] = ventana;
+        }
+        catch (Exception ex)
+        {
+            r.FalloCambios = ex;
+            salida["estado"] = ConcentracionContrato.CambiosError;
+            salida["mensaje"] = MensajeError(ex);
+            salida["aumentos"] = null;
+            salida["reducciones"] = null;
+        }
         if (medicion != null)
-            medicion.Anotar("calculo", reloj.Elapsed, "tickets=" + tickets.Count + " filtrados=" + filtrados.Count);
-        return r;
+            medicion.Anotar("anterior", reloj.Elapsed, "consultas=" + lectura.ConsultasPeriodo + " tramos=" + lectura.TramosSql +
+                            " cache=" + lectura.TramosCache + " filas=" + filas);
+        return salida;
+    }
+
+    private static void Comparar(Dictionary<string, object> salida, IEnumerable<ConcentracionTicket> actual, IEnumerable<ConcentracionTicket> anterior)
+    {
+        salida["estado"] = ConcentracionContrato.CambiosOk;
+        foreach (var kv in ConcentracionContrato.Cambios(actual, anterior, ConcentracionContrato.TopCambios)) salida[kv.Key] = kv.Value;
+    }
+
+    private static void SinComparacion(Dictionary<string, object> salida, string motivo)
+    {
+        salida["estado"] = ConcentracionContrato.CambiosHistoriaInsuficiente;
+        salida["motivo"] = motivo;
+        salida["aumentos"] = null;
+        salida["reducciones"] = null;
     }
 
     // ------------------------------------------------------------ tramos
@@ -279,35 +407,37 @@ WHERE ";
 
     private static List<Tramo> TramosDe(ConcentracionFiltros f, ConcentracionResultado r)
     {
-        var dia = ":" + ConcentracionContrato.Dia(r.Hoy);
+        if (f.Modo == ConcentracionContrato.ModoMes) return TramosPorFechas(r.Rangos, r.Hoy, "mes:");
+        return new List<Tramo> { new Tramo
+        {
+            Clave = PrefijoCache + "slot:0-" + f.Slot.ToString(CultureInfo.InvariantCulture) + ":" + ConcentracionContrato.Dia(r.Hoy),
+            Desde = r.Rangos[0].Key, Hasta = r.Rangos[0].Value,
+        } };
+    }
+
+    // Un tramo por rango de fechas (se leen por FechaRegistro). El mismo
+    // rango con el mismo tipo es la misma llave: un mes completo del periodo
+    // anterior reusa el que la pestaña ya guardo en modo mes.
+    private static List<Tramo> TramosPorFechas(IEnumerable<KeyValuePair<DateTime, DateTime>> rangos, DateTime hoy, string tipo)
+    {
+        var dia = ":" + ConcentracionContrato.Dia(hoy);
         var tramos = new List<Tramo>();
-        if (f.Modo == ConcentracionContrato.ModoMes)
-        {
-            foreach (var rg in r.Rangos)
-                tramos.Add(new Tramo
-                {
-                    Clave = PrefijoCache + "mes:" + ConcentracionContrato.Dia(rg.Key) + ".." + ConcentracionContrato.Dia(rg.Value) + dia,
-                    Desde = rg.Key, Hasta = rg.Value,
-                });
-        }
-        else
-        {
+        foreach (var rg in rangos)
             tramos.Add(new Tramo
             {
-                Clave = PrefijoCache + "slot:0-" + f.Slot.ToString(CultureInfo.InvariantCulture) + dia,
-                Desde = r.Rangos[0].Key, Hasta = r.Rangos[0].Value,
+                Clave = PrefijoCache + tipo + ConcentracionContrato.Dia(rg.Key) + ".." + ConcentracionContrato.Dia(rg.Value) + dia,
+                Desde = rg.Key, Hasta = rg.Value,
             });
-        }
         return tramos;
     }
 
-    /* Las filas del periodo: la union de sus tramos, cada uno de la cache, de
-       una lectura en vuelo de otra peticion, o leido aqui (todos los que
-       falten en UNA consulta). Las listas devueltas son de solo lectura. */
-    private static List<ConcentracionTicket> LeerPeriodo(string cadena, ConcentracionFiltros f,
-                                                         ConcentracionResultado r, ConcentracionMedicion medicion)
+    /* Las filas de los tramos: la union, cada uno de la cache, de una lectura
+       en vuelo de otra peticion, o leido aqui (todos los que falten en UNA
+       consulta). slot = Slots 0..slot por la columna Slot (un solo tramo);
+       null = por FechaRegistro. Las listas devueltas son de solo lectura. */
+    private static List<ConcentracionTicket> LeerTramos(string cadena, List<Tramo> tramos, int? slot,
+                                                        ConcentracionResultado r, ConcentracionMedicion medicion)
     {
-        var tramos = TramosDe(f, r);
         var propios = new List<KeyValuePair<Tramo, Lectura>>();
         var ajenos = new List<KeyValuePair<Tramo, Lectura>>();
         lock (Cerrojo)
@@ -329,7 +459,7 @@ WHERE ";
         {
             try
             {
-                var leidas = LeerSql(cadena, f, propios.ConvertAll(p => p.Key), r, medicion);
+                var leidas = LeerSql(cadena, slot, propios.ConvertAll(p => p.Key), r, medicion);
                 for (int i = 0; i < propios.Count; i++)
                 {
                     var t = propios[i].Key;
@@ -383,7 +513,7 @@ WHERE ";
        uno, en el mismo orden. Con meses, cada fila va al mes cuyo
        [Desde, Hasta + 1 dia) contiene su FechaRegistro: los mismos limites
        del WHERE. */
-    private static List<List<ConcentracionTicket>> LeerSql(string cadena, ConcentracionFiltros f, List<Tramo> tramos,
+    private static List<List<ConcentracionTicket>> LeerSql(string cadena, int? slot, List<Tramo> tramos,
                                                            ConcentracionResultado r, ConcentracionMedicion medicion)
     {
         var porTramo = new List<List<ConcentracionTicket>>();
@@ -396,7 +526,7 @@ WHERE ";
         {
             cmd.Connection = cn;
             cmd.CommandTimeout = TimeoutComandoSegundos;
-            bool porMes = f.Modo == ConcentracionContrato.ModoMes;
+            bool porMes = !slot.HasValue;   // por FechaRegistro: meses o el periodo anterior
             if (porMes)
             {
                 cmd.CommandText = SqlBase + SqlMeses(tramos.Count);
@@ -409,7 +539,7 @@ WHERE ";
             else
             {
                 cmd.CommandText = SqlBase + SqlSlot;
-                cmd.Parameters.Add("@Slot", SqlDbType.Int).Value = f.Slot;
+                cmd.Parameters.Add("@Slot", SqlDbType.Int).Value = slot.Value;
             }
             cn.Open();
             Interlocked.Increment(ref consultasPeriodo);

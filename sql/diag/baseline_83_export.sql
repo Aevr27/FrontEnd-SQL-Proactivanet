@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/baseline_83_export.sql - BASELINE de las asociaciones dadas de baja
+   sql/diag/baseline_83_export.sql - BASELINE de las asociaciones dadas de baja
    (dbo.ProblemCategoria con VigenteEnOrigen = 0), JUSTO ANTES de aplicar
    sql/83. SOLO LECTURA de la base: @b es una variable de tabla que solo
    existe mientras corre este script; no crea ni cambia nada en la base.
@@ -15,7 +15,7 @@
         "(0x..., 0x...),". En hexadecimal el archivo no puede danar ningun
         caracter (acentos, NBSP, espacios al final).
 
-   HUELLA (la MISMA expresion que sql/diag_83_reactivacion.sql)
+   HUELLA (la MISMA expresion que sql/diag/diag_83_reactivacion.sql)
      Cada par se serializa como
        <largo de Codigo>:<Codigo>|<largo de Categoria>:<Categoria>;
      (largo en unidades UTF-16 = DATALENGTH / 2: sin ambiguedad aunque el
