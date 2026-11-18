@@ -417,14 +417,13 @@
      dos, la cifra dentro de la barra sale en tinta oscura, como en el Call
      Center. */
   var AZUL_AGENTE = 'rgba(54, 162, 235, 0.5)';
-  /* Mayor cambio: rojo = aumento, verde = reduccion, los MISMOS de las
-     barras de SLA (COLOR_TRAMO_SLA en dashboard.js: vencido / dentro), para
-     que rojo y verde digan lo mismo en las dos pestañas. Si cambian alla,
-     cambian aqui (ConcentracionHeadlessSmoke D5 los compara). Van en hex:
-     Barras.tintaSobre los mide. */
+  /* Mayor cambio: los MISMOS de las barras de SLA (COLOR_TRAMO_SLA en
+     dashboard.js: vencido / dentro), para que rojo y verde digan lo mismo en
+     las dos pestañas. Si cambian alla, cambian aqui (ConcentracionHeadlessSmoke
+     D5 los compara). Van en hex: Barras.tintaSobre los mide. */
   var COLOR = { dentro: AZUL_AGENTE, fuera: 'rgba(54, 162, 235, 0.2)',
                 acumulado: '#d39a3a', referencia: '#8a94a6',
-                sube: '#f87171', baja: '#4CAF50' };
+                sube: '#ff4646', baja: '#4CAF50' };
   var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1f6', cero: '#8a94a6' };
 
   var graficas = {};

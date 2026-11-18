@@ -261,7 +261,7 @@ var sondaC = conComun(
   'var gc = graf("cambios"), dsc = gc && gc.data.datasets[0];\n' +
   'var cardC = $c("chart-cambios").closest(".card"), rejilla = document.querySelector(".grid2x2");\n' +
   // Rojo y verde de las barras de SLA (COLOR_TRAMO_SLA: vencido / dentro); D5 los compara con SLA en vivo.
-  'var tokR = "#f87171", tokV = "#4CAF50";\n' +
+  'var tokR = "#ff4646", tokV = "#4CAF50";\n' +
   'function rgbDe(h) { var n = parseInt(h.slice(1), 16); return "rgb(" + (n >> 16) + ", " + ((n >> 8) & 255) + ", " + (n & 255) + ")"; }\n' +
   'function cual(c) { return c === tokR ? "rojo" : c === tokV ? "verde" : c; }\n' +
   'apunta("C19", gc ? [cardC.querySelector("h3").firstChild.textContent, !!(rejilla.compareDocumentPosition(cardC) & Node.DOCUMENT_POSITION_FOLLOWING),\n' +
@@ -615,7 +615,7 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
       LEYENDA, Banco.mapa(res[x[0]])[x[1]]);
   });
   if (res[1]) Check('D5 Mayor cambio usa el rojo y el verde de las barras de SLA (SLA vencidos = aumento, Dentro SLA = reduccion), medidos en dashboard.html',
-    [true, true, '#f87171', '#f87171', '#4CAF50', '#4CAF50'], Banco.mapa(res[1]).D5);
+    [true, true, '#ff4646', '#ff4646', '#4CAF50', '#4CAF50'], Banco.mapa(res[1]).D5);
   console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
   process.exit(fallos ? 1 : 0);
 });
