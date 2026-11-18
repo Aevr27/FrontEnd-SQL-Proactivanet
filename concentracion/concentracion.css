@@ -76,7 +76,7 @@ header.top #conc-estado:empty { display: none; }
 
 /* ---- Mayor cambio de tickets: subtitulo y claves (clase propia: la
    leyenda del Pareto es una sola). Rojo = aumento, verde = reduccion: los
-   semanticos del tablero; concentracion.js los vuelve a tomar del token. ---- */
+   de las barras de SLA; concentracion.js los pinta al arrancar (respaldo). ---- */
 .conc-sub { margin: -4px 0 8px; font-size: 12px; color: var(--muted); }
-.conc-claves .conc-sube { background: var(--rojo, #982a18); }
-.conc-claves .conc-baja { background: var(--verde, #258d2e); }
+.conc-claves .conc-sube { background: #f87171; }
+.conc-claves .conc-baja { background: #4CAF50; }

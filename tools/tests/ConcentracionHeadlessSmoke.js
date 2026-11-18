@@ -55,6 +55,7 @@
 //          de servicios (accion=servicios) y no analiza nada.
 //      D3  volver no la monta de nuevo ni repide.
 //      D4  la leyenda, embebida, igual que C14.
+//      D5  Mayor cambio usa el rojo y el verde de las barras de SLA.
 //
 //   node tools\tests\ConcentracionHeadlessSmoke.js   # sale 0 si todo paso
 //
@@ -259,8 +260,8 @@ var sondaC = conComun(
   // C19 Mayor cambio de tickets: debajo de las otras, divergente, rojo/verde, eje simetrico.
   'var gc = graf("cambios"), dsc = gc && gc.data.datasets[0];\n' +
   'var cardC = $c("chart-cambios").closest(".card"), rejilla = document.querySelector(".grid2x2");\n' +
-  // Los colores salen del token de la pagina (--rojo / --verde), no de una cifra fija.
-  'var cssTok = getComputedStyle(document.documentElement), tokR = cssTok.getPropertyValue("--rojo").trim(), tokV = cssTok.getPropertyValue("--verde").trim();\n' +
+  // Rojo y verde de las barras de SLA (COLOR_TRAMO_SLA: vencido / dentro); D5 los compara con SLA en vivo.
+  'var tokR = "#f87171", tokV = "#4CAF50";\n' +
   'function rgbDe(h) { var n = parseInt(h.slice(1), 16); return "rgb(" + (n >> 16) + ", " + ((n >> 8) & 255) + ", " + (n & 255) + ")"; }\n' +
   'function cual(c) { return c === tokR ? "rojo" : c === tokV ? "verde" : c; }\n' +
   'apunta("C19", gc ? [cardC.querySelector("h3").firstChild.textContent, !!(rejilla.compareDocumentPosition(cardC) & Node.DOCUMENT_POSITION_FOLLOWING),\n' +
@@ -495,7 +496,16 @@ var sondaD = conComun(
   'var c0 = __pedidas.conc;\n' +
   'activarTab("concentracion"); await espera(300);\n' +
   'apunta("D3", [__pedidas.conc - c0, document.querySelectorAll("script[src*=\\"concentracion.js\\"]").length, !!Chart.getChart(document.getElementById("conc-chart-pareto"))]);\n' +
-  'apunta("D4", await leyendaPareto());\n');
+  'apunta("D4", await leyendaPareto());\n' +
+  // D5 los colores de Mayor cambio = los de las barras de SLA (Dentro SLA / SLA vencidos).
+  'var gcam = Chart.getChart(document.getElementById("conc-chart-cambios"));\n' +
+  'activarTab("sla");\n' +
+  'await hasta(function () { return Chart.getChart(document.getElementById("chart-productividad")); }, 8000);\n' +
+  'var gprod = Chart.getChart(document.getElementById("chart-productividad"));\n' +
+  'function colorDe(etq) { var ds = gprod && gprod.data.datasets.filter(function (d) { return d.label === etq; })[0]; return ds ? String(ds.backgroundColor) : null; }\n' +
+  'var cam = gcam ? gcam.data.datasets[0] : null;\n' +
+  'apunta("D5", [!!gprod, !!cam, colorDe("SLA vencidos"), cam && cam.backgroundColor[cam.data.findIndex(function (v) { return v > 0; })],\n' +
+  '  colorDe("Dentro SLA"), cam && cam.backgroundColor[cam.data.findIndex(function (v) { return v < 0; })]]);\n');
 
 var paginas = {
   '/concentracion/__banco.html': Banco.pagina('concentracion/concentracion.html', 'concentracion.js', stub(respondeConc, claveConc), sondaC),
@@ -545,7 +555,7 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
        [['Beto'], ['Grupo 5', 'Grupo 7'], '2026-08', 'mes'],
        [{ modo: 'mes', mes: '2026-08', so: 'Beto', grupo: 'Grupo 5|Grupo 7' }], true, true, true, ['Beto'], ['Grupo 5', 'Grupo 7']], o.C11);
     var ROJO = 'rojo', VERDE = 'verde';
-    Check('C19 Mayor cambio: tarjeta debajo de las otras; barras horizontales divergentes (+ arriba, la mayor reduccion al final), rojo = aumento y verde = reduccion (tokens del tablero), eje simetrico en 0, cifras con signo, nombre del servicio, resumen, subtitulo actual − anterior, tooltip; la leyenda del Pareto sigue siendo una',
+    Check('C19 Mayor cambio: tarjeta debajo de las otras; barras horizontales divergentes (+ arriba, la mayor reduccion al final), rojo = aumento y verde = reduccion (los de las barras de SLA), eje simetrico en 0, cifras con signo, nombre del servicio, resumen, subtitulo actual − anterior, tooltip; la leyenda del Pareto sigue siendo una',
       ['Servicios con mayor cambio de tickets', true, 'y', [8, 8, 7, 4, 3, -3, -5], [ROJO, ROJO, ROJO, ROJO, ROJO, VERDE, VERDE], [-10, 10],
        '−5', 'Servicio A1', 'Top 5 de 7 con aumento · 2 con reducción',
        'Diferencia = tickets del periodo actual − tickets del periodo anterior equivalente (actual: del 11/10/2026 al 09/11/2026 · anterior: del 11/09/2026 al 10/10/2026).',
@@ -604,6 +614,8 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
     Check(x[1] + ' leyenda: una sola, dentro de la tarjeta del Pareto y justo debajo de su lienzo; los cuatro rotulos y colores; a 320 px envuelve sin salirse; sin el parrafo de poblacion',
       LEYENDA, Banco.mapa(res[x[0]])[x[1]]);
   });
+  if (res[1]) Check('D5 Mayor cambio usa el rojo y el verde de las barras de SLA (SLA vencidos = aumento, Dentro SLA = reduccion), medidos en dashboard.html',
+    [true, true, '#f87171', '#f87171', '#4CAF50', '#4CAF50'], Banco.mapa(res[1]).D5);
   console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
   process.exit(fallos ? 1 : 0);
 });

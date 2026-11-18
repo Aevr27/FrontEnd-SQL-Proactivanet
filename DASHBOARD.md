@@ -136,7 +136,7 @@ Varios valores de un filtro = cualquiera de ellos; filtros distintos = todos a l
 | Concentración de tickets por servicio (Pareto, a todo el ancho) | Top 10 por **código de servicio** (`CatServicioCorreo.Servicio`, rotulado con su `Descripcion`; PU y WMS son una barra cada uno), % acumulado en línea y referencia 80 % punteada |
 | Tickets por categoría (abajo, izquierda) | Top 15 en barras horizontales; el eje muestra los dos últimos niveles de la ruta en dos líneas y el tooltip la ruta completa |
 | Tickets por grupo (abajo, derecha) | Top 15 en barras horizontales |
-| Servicios con mayor cambio de tickets (abajo, a todo el ancho; 2026-11-18) | Top 5 que más subieron (rojo, `--rojo`) y Top 5 que más bajaron (verde, `--verde`) contra el periodo anterior, barras horizontales divergentes desde 0 con eje simétrico y la diferencia con signo |
+| Servicios con mayor cambio de tickets (abajo, a todo el ancho; 2026-11-18) | Top 5 que más subieron (rojo `#f87171`, el de «SLA vencidos») y Top 5 que más bajaron (verde `#4CAF50`, el de «Dentro SLA»; los mismos de las barras de SLA) contra el periodo anterior, barras horizontales divergentes desde 0 con eje simétrico y la diferencia con signo |
 
 ### Comparación con el periodo anterior
 
