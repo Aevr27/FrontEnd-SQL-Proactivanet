@@ -24,7 +24,7 @@
 //          marcados tras repintar las opciones; lo aplicado lo dice.
 //      C8  Grupo + SO juntos en la misma peticion; totales filtrados.
 //      C9  filtros sin tickets: "Sin tickets con estos filtros." en las tres.
-//      C10 "Limpiar" quita SO y Grupo (el Slot igual) y vuelve a pedir.
+//      C10 "Limpiar" en Slot 0 quita SO y Grupo y vuelve a pedir.
 //      C11 refresco automatico y "Actualizar" con mes + SO + Grupo: mismos
 //          parametros, sin "Calculando…", selecciones intactas; un fallo deja
 //          todo y avisa.
@@ -44,10 +44,17 @@
 //          y UNA peticion sin mes (el servidor da el actual); un mes; tras
 //          abrir y cerrar; con clics pendientes de la espera = UNA; nada
 //          que quitar = ninguna; el desplegable sigue sirviendo despues.
+//          Desde 2026-11-18 Limpiar ademas vuelve a Slot 0 (C21): cada paso
+//          vuelve a Mes antes de elegir meses.
 //      C19 (2026-11-18) "Servicios con mayor cambio de tickets": tarjeta
 //          debajo de las otras, divergente, rojo/verde de los tokens, eje
 //          simetrico, cifras con signo, resumen, subtitulo y tooltip.
 //      C20 historia insuficiente, error y sin cambios: sin barras y el porque.
+//      C21 (2026-11-18) "Limpiar" vuelve al estado de arranque: desde Slot 12
+//          (con la comparacion en historia insuficiente) = UNA peticion
+//          slot=0 y las cuatro graficas repintadas, sin el aviso viejo;
+//          desde Mes con varios meses + SO + Grupo = Slot 0 sin nada; tres
+//          clics seguidos = UNA, otro mas = ninguna; `filtros` = el inicial.
 //   D  dashboard.html#concentracion (MOCK_DATA para SLA)
 //      D1  la entrada de grupo "Servicios" y su boton "Vista general de
 //          servicios" quedan marcados (selector visible); la pestaña se monta y pide concentracion.ashx sin pasar por Analisis.
@@ -356,7 +363,8 @@ var sondaC = conComun(
   // C15 varios meses (2026-11-10): uno, agregar dos seguidos = UNA peticion,
   // quitar uno, quitar todos (el servidor da el actual).
   '$c("btn-limpiar").click(); await hasta(function () { var u = ultimaConc(); return !u.so && !u.grupo && !msg("pareto"); });\n' +
-  // Limpiar ya dejo los meses en el actual (C18): elegirlo no repide.
+  // Limpiar deja Slot 0 (C21); Mes sin meses = el actual, asi que elegirlo no repide.
+  'document.querySelector("#conc-filtros [data-modo=mes]").click(); await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150);\n' +
   'elegir("mes", ["2026-11"]); await hasta(function () { return marcados("mes").join() === "2026-11" && !msg("pareto"); }); await espera(150);\n' +
   'var uno =[$c("mes").multiple, marcados("mes"), $c("activos").textContent.split(" · ").slice(0, 2).join(" · ")];\n' +
   'var n15 = pedidasConc().length;\n' +
@@ -437,6 +445,9 @@ var sondaC = conComun(
   // tres lados: <select>, desplegable (filas marcadas y contador) y filtros.
   'var ahora = function () { return [marcados("mes"), env.querySelectorAll(".dd-opcion.marcada").length,\n' +
   '  env.querySelector(".dd-conteo") ? env.querySelector(".dd-conteo").textContent : null, M().filtros().meses]; };\n' +
+  // Limpiar deja Slot 0 (C21): para volver a elegir meses, primero Mes.
+  'var aMes = async function () { document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
+  '  await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150); };\n' +
   // a) Ocho meses con el desplegable, Limpiar: cero en los tres lados al
   //    instante, UNA peticion sin mes, luego el actual (lo de siempre).
   'var n18 = pedidasConc().length; boton.click();\n' +
@@ -449,7 +460,7 @@ var sondaC = conComun(
   'var limpioOcho = [alInstante, pedidasConc().length - n18a, ultimaConc(), ahora(),\n' +
   '  $c("activos").textContent.split(" · ").slice(0, 1).join(), M().filtros().so, M().filtros().grupo, M().filtros().modo];\n' +
   // b) Un mes elegido, abriendo y cerrando el desplegable antes de Limpiar.
-  'boton.click(); fila("2026-11").click(); fila("2026-05").click();\n' +
+  'await aMes(); boton.click(); fila("2026-11").click(); fila("2026-05").click();\n' +
   'var n18b = pedidasConc().length;\n' +
   'await hasta(function () { return pedidasConc().length > n18b && !msg("pareto"); }); await espera(900);\n' +
   'Desplegable.cerrarTodos(); var unMes = [ahora(), ultimaConc().mes];\n' +
@@ -459,12 +470,12 @@ var sondaC = conComun(
   'var limpioUno = [unMes, alInstanteUno, pedidasConc().length - n18c, ultimaConc(), ahora()];\n' +
   // c) Clics aun en la espera de meses (sin pedir) y Limpiar: UNA peticion,
   //    sin mes; la espera descartada no pide despues.
-  'var n18d = pedidasConc().length; boton.click(); fila("2026-02").click(); fila("2026-01").click();\n' +
+  'await aMes(); var n18d = pedidasConc().length; boton.click(); fila("2026-02").click(); fila("2026-01").click();\n' +
   'await espera(100); var pendiente = pedidasConc().length - n18d; $c("btn-limpiar").click();\n' +
   'await hasta(function () { return pedidasConc().length > n18d && !msg("pareto"); }); await espera(1200);\n' +
   'var conEspera = [pendiente, pedidasConc().length - n18d, ultimaConc(), ahora()];\n' +
   // d) El desplegable sigue sirviendo: elegir otra vez = UNA peticion.
-  'var n18e = pedidasConc().length; boton.click(); fila("2026-09").click(); fila("2026-08").click();\n' +
+  'await aMes(); var n18e = pedidasConc().length; boton.click(); fila("2026-09").click(); fila("2026-08").click();\n' +
   'await hasta(function () { return pedidasConc().length > n18e && !msg("pareto"); }); await espera(900); Desplegable.cerrarTodos();\n' +
   'var otraVez = [pedidasConc().length - n18e, ultimaConc().mes, ahora()];\n' +
   // e) Nada que quitar (Slot, sin SO ni Grupo): ninguna peticion; los meses
@@ -477,7 +488,47 @@ var sondaC = conComun(
   'document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
   'await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150);\n' +
   'nada.push(pedidasConc().slice(n18g), marcados("mes"));\n' +
-  'apunta("C18", [ocho, limpioOcho, limpioUno, conEspera, otraVez, nada]);\n');
+  'apunta("C18", [ocho, limpioOcho, limpioUno, conEspera, otraVez, nada]);\n' +
+  // C21 (2026-11-18) Limpiar = estado de arranque. `arranque()` lee los
+  // controles del periodo, los multiselect y `filtros`.
+  'var arranque = function () { return [document.querySelector("#conc-filtros [data-modo=slot]").getAttribute("aria-pressed"),\n' +
+  '  document.querySelector("#conc-filtros [data-modo=mes]").getAttribute("aria-pressed"), $c("campo-slot").hidden, $c("campo-mes").hidden,\n' +
+  '  $c("slot-n").value, $c("slot-menos").disabled, $c("slot-mas").disabled, marcados("f-so"), marcados("f-grupo"), M().filtros()]; };\n' +
+  'var cuatro = function () { return [!!graf("pareto"), !!graf("categorias"), !!graf("grupos"), !!graf("cambios"),\n' +
+  '  msg("pareto"), msg("categorias"), msg("grupos"), msg("cambios")]; };\n' +
+  // a) Slot 12 con la comparacion en historia insuficiente -> Limpiar: UNA
+  //    peticion slot=0; las cuatro repintadas y el aviso viejo fuera.
+  'document.querySelector("#conc-filtros [data-modo=slot]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "slot" && !msg("pareto"); }); await espera(100);\n' +
+  'window.__cambios = { estado: "historiaInsuficiente", aumentos: null, reducciones: null, anterior: { rangos: [{ desde: "2024-09-30", hasta: "2025-10-24" }], dias: 390 },\n' +
+  '  cobertura: { diasConTickets: 0, diasEsperados: 390, primerDia: null, ultimoDia: null, completa: false } };\n' +
+  'var campo21 = $c("slot-n"); campo21.value = "12"; campo21.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));\n' +
+  'await hasta(function () { return ultimaConc().slot === "12" && !msg("pareto") && /Sin historial/.test(msg("cambios") || ""); }); await espera(100);\n' +
+  'var en12 = [ultimaConc(), $c("slot-n").value, !!graf("cambios")];\n' +
+  'window.__cambios = undefined;\n' +
+  'var n21a = pedidasConc().length; $c("btn-limpiar").click(); var alInstante21 = arranque();\n' +
+  'await hasta(function () { return pedidasConc().length > n21a && !msg("pareto") && !!graf("cambios"); }); await espera(600);\n' +
+  'var desde12 = [en12, alInstante21, pedidasConc().slice(n21a), arranque(), cuatro(), $c("activos").textContent.split(" · ").slice(0, 1).join(),\n' +
+  '  /\\(actual: del 11\\/10\\/2026 al 09\\/11\\/2026/.test($c("sub-cambios").textContent),\n' +
+  '  graf("pareto").options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }])];\n' +
+  // b) Mes con varios meses + SO + Grupo -> Limpiar: Slot 0 sin nada, UNA peticion.
+  'document.querySelector("#conc-filtros [data-modo=mes]").click();\n' +
+  'await hasta(function () { return ultimaConc().modo === "mes" && !msg("pareto"); }); await espera(150);\n' +
+  'elegir("mes", ["2026-10", "2026-08", "2026-06"]); await hasta(function () { return ultimaConc().mes === "2026-10|2026-08|2026-06" && !msg("pareto"); });\n' +
+  'elegir("f-so", ["Ana"]); await hasta(function () { return ultimaConc().so === "Ana" && !msg("pareto"); });\n' +
+  'elegir("f-grupo", ["Grupo 3"]); await hasta(function () { return ultimaConc().grupo === "Grupo 3" && !msg("pareto"); }); await espera(150);\n' +
+  'var antesB = [ultimaConc(), M().filtros()];\n' +
+  'var n21b = pedidasConc().length; $c("btn-limpiar").click();\n' +
+  'await hasta(function () { return pedidasConc().length > n21b && !msg("pareto"); }); await espera(900);\n' +
+  'var desdeMes = [antesB, pedidasConc().slice(n21b), arranque(), cuatro(), /Service Owner: todos · Grupo: todos/.test($c("activos").textContent),\n' +
+  '  graf("pareto").options.plugins.tooltip.callbacks.title([{ dataIndex: 0 }])];\n' +
+  // c) Tres clics seguidos = UNA peticion; otro con todo limpio = ninguna.
+  'elegir("f-grupo", ["Grupo 5"]); await hasta(function () { return ultimaConc().grupo === "Grupo 5" && !msg("pareto"); }); await espera(150);\n' +
+  'var n21c = pedidasConc().length; $c("btn-limpiar").click(); $c("btn-limpiar").click(); $c("btn-limpiar").click();\n' +
+  'await espera(900);\n' +
+  'var tres = [pedidasConc().length - n21c, ultimaConc(), msg("pareto")];\n' +
+  'var n21d = pedidasConc().length; $c("btn-limpiar").click(); await espera(900);\n' +
+  'apunta("C21", [desde12, desdeMes, tres, pedidasConc().length - n21d, arranque()]);\n');
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
@@ -585,14 +636,26 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
        [1, ['2', '1'], true, null, null, null, false, 'Servicio 1 slot 1'],
        [['0', '1'], true, 'Servicio 1 slot 1', '1', null], [1, '2026-07']], o.C17);
     var OCHO = ['2026-10', '2026-09', '2026-08', '2026-07', '2026-06', '2026-05', '2026-04', '2026-03'];
-    var ACTUAL = [['2026-11'], 1, '1', ['2026-11']];
-    Check('C18 Limpiar quita los meses: ocho elegidos en el desplegable = cero en <select>, desplegable y filtros al instante y UNA peticion sin mes (el servidor da el actual), SO/Grupo vacios y el modo igual; un mes, tras abrir y cerrar = UNA; con clics en la espera = UNA y nada despues; elegir otra vez = UNA; en Slot sin nada que quitar = ninguna, y volver a Mes pide sin mes',
+    // Ya en Slot, el <select> oculto de meses marca el actual (como al
+    // arrancar), pero `filtros.meses` queda vacio: no viaja en la peticion.
+    var EN_SLOT = [['2026-11'], 1, '1', []];
+    var SLOT0 = { modo: 'slot', slot: '0' };
+    Check('C18 Limpiar quita los meses: ocho elegidos en el desplegable = cero en <select>, desplegable y filtros al instante y UNA peticion sin mes (ahora Slot 0, C21), SO/Grupo vacios; un mes, tras abrir y cerrar = UNA; con clics en la espera = UNA y nada despues; elegir otra vez = UNA; en Slot sin nada que quitar = ninguna (el Slot ya en 0), y volver a Mes pide sin mes',
       [[[OCHO, 8, '8', OCHO], 1, 8, true],
-       [[[], 0, '', [], false], 1, { modo: 'mes' }, ACTUAL, 'Periodo: Mes Mes 2026-11 (en curso, hasta hoy)', [], [], 'mes'],
-       [[[['2026-05'], 1, '1', ['2026-05']], '2026-05'], [[], 0, '', []], 1, { modo: 'mes' }, ACTUAL],
-       [0, 1, { modo: 'mes' }, ACTUAL],
+       [[[], 0, '', [], false], 1, SLOT0, EN_SLOT, 'Periodo: Slot 0', [], [], 'slot'],
+       [[[['2026-05'], 1, '1', ['2026-05']], '2026-05'], [[], 0, '', []], 1, SLOT0, EN_SLOT],
+       [0, 1, SLOT0, EN_SLOT],
        [1, '2026-11|2026-09|2026-08', [['2026-11', '2026-09', '2026-08'], 3, '3', ['2026-11', '2026-09', '2026-08']]],
-       [0, [], 1, 0, [{ modo: 'mes' }], ['2026-11']]], o.C18);
+       [0, [], 0, 0, [{ modo: 'mes' }], ['2026-11']]], o.C18);
+    var INICIAL = { modo: 'slot', slot: 0, meses: [], so: [], grupo: [] };
+    var ARRANQUE = ['true', 'false', false, true, '0', true, false, [], [], INICIAL];
+    var CUATRO = [true, true, true, true, null, null, null, null];
+    Check('C21 Limpiar vuelve al arranque: desde Slot 12 con la comparacion en historia insuficiente = controles en Slot 0 al instante, UNA peticion slot=0, las cuatro graficas repintadas y sin el aviso viejo; desde Mes (3 meses) + SO + Grupo = Slot 0 sin nada, UNA peticion; tres clics seguidos = UNA; otro mas = ninguna; filtros = el inicial',
+      [[[{ modo: 'slot', slot: '12' }, '12', false], ARRANQUE, [SLOT0], ARRANQUE, CUATRO, 'Periodo: Slot 0', true, 'Servicio 1 slot 0'],
+       [[{ modo: 'mes', mes: '2026-10|2026-08|2026-06', so: 'Ana', grupo: 'Grupo 3' },
+         { modo: 'mes', slot: 0, meses: ['2026-10', '2026-08', '2026-06'], so: ['Ana'], grupo: ['Grupo 3'] }],
+        [SLOT0], ARRANQUE, CUATRO, true, 'Servicio 1 slot 0'],
+       [1, SLOT0, null], 0, ARRANQUE], o.C21);
     Check('C13 cobertura: completa sin aviso; parcial con el hecho; sin medir sin aviso',
       [true, [false, 'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.'], true], o.C13);
   });

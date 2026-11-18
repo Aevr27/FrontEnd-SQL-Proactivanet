@@ -881,14 +881,16 @@
     cargar();
   }
 
-  /* "Limpiar" quita Service Owner, Grupo y los meses elegidos (2026-11-11);
-     el modo y el Slot se quedan. Sin meses el servidor da el mes en curso y
-     lo confirma, como al quitarlos a mano. Escribir `selected` no dispara
-     `change`: se repinta el desplegable aqui y se pide UNA vez (cargar()
-     descarta la carga de meses que estuviera programada). Si la consulta no
-     cambia (p. ej. en Slot sin SO ni Grupo), no se pide nada. */
+  /* "Limpiar" vuelve al estado de arranque (2026-11-18): Slot 0, sin meses,
+     Service Owner ni Grupo; desde Mes, vuelve a Slot. Escribir `selected` no
+     dispara `change`: se repinta el desplegable aqui y se pide UNA vez
+     (cargar() descarta la carga de meses que estuviera programada y cancela
+     la que estuviera en vuelo). Si la consulta no cambia (ya en el estado de
+     arranque), no se pide nada: varios clics seguidos = una peticion. */
   function limpiar() {
     var antes = consulta(filtros);
+    filtros.modo = 'slot';
+    filtros.slot = 0;
     filtros.so = [];
     filtros.grupo = [];
     filtros.meses = [];
@@ -896,6 +898,7 @@
       Array.prototype.forEach.call(sel.options, function (o) { o.selected = false; });
     });
     if (window.Desplegable) Desplegable.repintar();
+    pintarControles();
     if (consulta(filtros) === antes) return;
     $('cobertura').hidden = true;
     cargar();
