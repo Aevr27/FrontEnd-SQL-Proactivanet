@@ -284,6 +284,60 @@ public static class ConcentracionContratoSmoke
         Chk("CP19 seis empatados: el corte del Top 5 es estable por codigo", "E1,E2,E3,E4,E5|6",
             string.Join(",", ((List<Dictionary<string, object>>)ConcentracionContrato.Cambios(empates, new ConcentracionTicket[0], 5)["aumentos"])
                 .Select(x => (string)x["Servicio"]).ToArray()) + "|" + ConcentracionContrato.Cambios(empates, new ConcentracionTicket[0], 5)["serviciosAumento"]);
+        VentanaPura();
+    }
+
+    // "historiaDesde|porLado|L|valida|actual|anterior"
+    static string Ventana(ICollection<DateTime> dias, DateTime desde, DateTime fin, DateTime hoy, int pedidos)
+    {
+        var v = ConcentracionContrato.VentanaComparable(dias, desde, fin, hoy, pedidos);
+        return Dia(v.HistoriaDesde) + "|" + v.DiasPorLado + "|" + v.Dias + "|" + v.Valida + "|" +
+               Dia(v.Actual.Key) + ".." + Dia(v.Actual.Value) + "|" + Dia(v.Anterior.Key) + ".." + Dia(v.Anterior.Value);
+    }
+
+    static HashSet<DateTime> DiasDesde(DateTime desde, DateTime hasta, params DateTime[] sueltos)
+    {
+        var s = new HashSet<DateTime>(sueltos);
+        for (var d = desde; d <= hasta; d = d.AddDays(1)) s.Add(d);
+        return s;
+    }
+
+    /* Ventana maxima comparable con la historia REAL de QA (diag
+       DIAG_Concentracion_CoberturaDiaria, 2026-11-18): diez tickets sueltos
+       del 2025-08-19 al 2025-11-28 y despues todos los dias desde 2025-12-01. */
+    static void VentanaPura()
+    {
+        var hoy = new DateTime(2026, 11, 18);
+        var sueltos = new[] { "2025-08-19", "2025-08-30", "2025-09-12", "2025-10-09", "2025-10-21", "2025-10-29", "2025-11-03", "2025-11-07", "2025-11-19", "2025-11-28" }
+            .Select(x => DateTime.ParseExact(x, "yyyy-MM-dd", CultureInfo.InvariantCulture)).ToArray();
+        var qa = DiasDesde(new DateTime(2025, 12, 1), hoy, sueltos);
+        Chk("CV1 Slot 12 en QA: la historia continua empieza el 2025-12-01 (los sueltos no cuentan); 353 dias -> 176 por lado -> 175 (25 semanas)",
+            "2025-12-01|176|175|True|2026-05-28..2026-11-18|2025-12-04..2026-05-27",
+            Ventana(qa, new DateTime(2024, 9, 30), hoy, hoy, 390));
+        Chk("CV2 Slot 5 (180 dias, su anterior empieza el 2025-11-24): la misma ventana de 175", "2025-12-01|176|175|True|2026-05-28..2026-11-18|2025-12-04..2026-05-27",
+            Ventana(qa, new DateTime(2025, 11, 24), hoy, hoy, 180));
+        Chk("CV3 Dic-Feb seguidos (90 dias, fin 2026-02-28): 90 cubiertos -> 45 -> 42", "2025-12-01|45|42|True|2026-01-18..2026-02-28|2025-12-07..2026-01-17",
+            Ventana(qa, new DateTime(2025, 9, 1), new DateTime(2026, 2, 28), hoy, 90));
+        Chk("CV4 solo Dic 2025: 31 cubiertos -> 14, menos de 28 -> no valida", "2025-12-01|15|14|False",
+            string.Join("|", Ventana(qa, new DateTime(2025, 11, 1), new DateTime(2025, 12, 31), hoy, 31).Split('|').Take(4).ToArray()));
+        var conHueco = DiasDesde(new DateTime(2025, 12, 1), hoy); conHueco.Remove(new DateTime(2026, 3, 10));
+        Chk("CV5 un dia sin ningun ticket dentro de la historia la corta: empieza el dia siguiente", "2026-03-11|126|126|True",
+            string.Join("|", Ventana(conHueco, new DateTime(2024, 9, 30), hoy, hoy, 390).Split('|').Take(4).ToArray()));
+        var sinHoy = DiasDesde(new DateTime(2025, 12, 1), hoy.AddDays(-1));
+        Chk("CV6 hoy sin tickets todavia no es hueco (dia en curso)", "2025-12-01|176|175|True",
+            string.Join("|", Ventana(sinHoy, new DateTime(2024, 9, 30), hoy, hoy, 390).Split('|').Take(4).ToArray()));
+        Chk("CV7 lo pedido limita: 60 dias pedidos con historia de sobra -> 56 (8 semanas), no 175", "56|True",
+            string.Join("|", Ventana(qa, new DateTime(2025, 11, 1), hoy, hoy, 60).Split('|').Skip(2).Take(2).ToArray()));
+        var desdeOct = DiasDesde(new DateTime(2026, 10, 1), new DateTime(2026, 12, 31));
+        Chk("CV8 a semanas completas: 58 cubiertos -> 29 por lado -> 28 (valida); 54 -> 27 -> 21 (no)", "29|28|True|27|21|False",
+            string.Join("|", Ventana(desdeOct, new DateTime(2026, 1, 1), new DateTime(2026, 11, 27), new DateTime(2026, 11, 28), 90).Split('|').Skip(1).Take(3).ToArray()) + "|" +
+            string.Join("|", Ventana(desdeOct, new DateTime(2026, 1, 1), new DateTime(2026, 11, 23), new DateTime(2026, 11, 24), 90).Split('|').Skip(1).Take(3).ToArray()));
+        var f = new ConcentracionFiltros { Modo = ConcentracionContrato.ModoMes };
+        f.Meses.AddRange(ConcentracionContrato.LeerMeses("2026-02|2025-12|2026-01", hoy));
+        var g = new ConcentracionFiltros { Modo = ConcentracionContrato.ModoMes };
+        g.Meses.AddRange(ConcentracionContrato.LeerMeses("2026-02|2025-12", hoy));
+        Chk("CV9 continuidad: Slot si; Dic-Ene-Feb si; Dic y Feb (sin Ene) no", "True|True|False",
+            ConcentracionContrato.SeleccionContinua(new ConcentracionFiltros { Slot = 12 }) + "|" + ConcentracionContrato.SeleccionContinua(f) + "|" + ConcentracionContrato.SeleccionContinua(g));
     }
 
     static string Falla(Action a)
@@ -1061,6 +1115,7 @@ GO";
 
     // ------------------------------------- 2c) comparacion de punta a punta
     static Dictionary<string, object> Cambios(Dictionary<string, object> d) { return (Dictionary<string, object>)d["cambios"]; }
+    static Dictionary<string, object> Ventana(Dictionary<string, object> d) { return (Dictionary<string, object>)Cambios(d)["ventana"]; }
 
     // "COD:dif,..." de una lista del JSON (null si no vino).
     static string Difs(object o)
@@ -1197,18 +1252,40 @@ GO";
                 Cambios(d)["estado"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasConTickets"] + "|" +
                 ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasEsperados"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["completa"]);
 
-            // --- Historia insuficiente: no se acota en silencio ni se compara a medias.
+            Chk("CS12b con el anterior completo: ventana no ajustada, dias = lo pedido", "False|150|150",
+                Ventana(d)["ajustada"] + "|" + Ventana(d)["dias"] + "|" + Ventana(d)["diasSolicitados"]);
+
+            // --- Historia insuficiente (2026-11-18): ventana maxima comparable,
+            // nunca el anterior recortado solo. El relleno cubre cada dia desde
+            // `historia`: L = floor(min(pedido, T/2) / 7) * 7 con T = hoy - historia + 1.
+            int tCub = (hoy - historia).Days + 1;
+            int lMax = Math.Min(210, tCub / 2) / 7 * 7;
+            var vAct = R(hoy.AddDays(-lMax + 1), hoy); var vAnt = R(hoy.AddDays(-2 * lMax + 1), hoy.AddDays(-lMax));
             d = Pedir("slot=6", out estado);
             var c6 = Cambios(d);
             var cob6 = (Dictionary<string, object>)c6["cobertura"];
+            var v6 = Ventana(d);
             int conDatos6 = (hoy.AddDays(-210) - historia).Days + 1;
-            Chk("CS13 Slot 6: el anterior (hoy-419..hoy-210) empieza antes de la historia -> historiaInsuficiente, sin filas, con la cobertura real; 200 y las otras graficas intactas",
-                "200|historiaInsuficiente|null|null|" + conDatos6 + "|210|False|" + Dia(historia) + "|" + Dia(hoy.AddDays(-419)) + ".." + Dia(hoy.AddDays(-210)) + "|0",
-                estado + "|" + c6["estado"] + "|" + Difs(c6["aumentos"]) + "|" + Difs(c6["reducciones"]) + "|" + cob6["diasConTickets"] + "|" + cob6["diasEsperados"] + "|" +
-                cob6["completa"] + "|" + cob6["primerDia"] + "|" + RangosJ(c6["anterior"]) + "|" + ((Dictionary<string, object>)d["errores"]).Count);
+            Chk("CS13 Slot 6: el anterior (hoy-419..hoy-210) empieza antes de la historia -> ok con la ventana maxima: L dias a semanas, actual hasta hoy y anterior pegado; la cobertura del pedido; 200 y las otras graficas intactas",
+                "200|ok|" + Dia(vAct.Key) + ".." + Dia(vAct.Value) + "|" + Dia(vAnt.Key) + ".." + Dia(vAnt.Value) + "|True|" + lMax + "|210|" + Dia(historia) + "|" +
+                Dia(hoy.AddDays(-419)) + ".." + Dia(hoy.AddDays(-210)) + "|" + Dia(hoy.AddDays(-209)) + ".." + Dia(hoy) + "|" + conDatos6 + "|210|False|0|A1:12",
+                estado + "|" + c6["estado"] + "|" + RangosJ(c6["actual"]) + "|" + RangosJ(c6["anterior"]) + "|" + v6["ajustada"] + "|" + v6["dias"] + "|" +
+                v6["diasSolicitados"] + "|" + v6["historiaDesde"] + "|" + RangosJ(((Dictionary<string, object>)v6["solicitado"])["anterior"]) + "|" +
+                RangosJ(((Dictionary<string, object>)v6["solicitado"])["actual"]) + "|" + cob6["diasConTickets"] + "|" + cob6["diasEsperados"] + "|" + cob6["completa"] + "|" +
+                ((Dictionary<string, object>)d["errores"]).Count + "|" + Lista(d["pareto"])[0]["Servicio"] + ":" + Lista(d["pareto"])[0]["CantidadTickets"]);            Chk("CS13b ... mismo largo, multiplo de 7, >= 28 y sin solape", "True|True|True|True",
+                ((vAct.Value - vAct.Key).Days == (vAnt.Value - vAnt.Key).Days) + "|" + (lMax % 7 == 0) + "|" + (lMax >= 28) + "|" + (vAnt.Value.AddDays(1) == vAct.Key));
+            Chk("CS13c ... la cuenta de las dos ventanas = el oraculo SQL", Oraculo(cadena, new List<KeyValuePair<DateTime, DateTime>> { vAct },
+                new List<KeyValuePair<DateTime, DateTime>> { vAnt }), Difs(c6["aumentos"]) + "|" + Difs(c6["reducciones"]));
+            d = Pedir("slot=6&so=Ana%20SO", out estado);
+            Chk("CS13d ... con SO Ana: los mismos filtros en las dos ventanas (A4 5+1 caen en la actual)", "ok|A4:6||True",
+                Cambios(d)["estado"] + "|" + Difs(Cambios(d)["aumentos"]) + "|" + Difs(Cambios(d)["reducciones"]) + "|" + Ventana(d)["ajustada"]);
+            d = Pedir("slot=6&grupo=Cajas", out estado);
+            Chk("CS13e ... con Grupo Cajas: PU, una entrada por codigo (5+4)", "ok|PU:9|", Cambios(d)["estado"] + "|" + Difs(Cambios(d)["aumentos"]) + "|" + Difs(Cambios(d)["reducciones"]));
             d = Pedir("slot=12", out estado);
-            Chk("CS14 Slot 12: anterior sin ningun dato -> historiaInsuficiente (0 dias)", "historiaInsuficiente|0|390",
-                Cambios(d)["estado"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasConTickets"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasEsperados"]);
+            Chk("CS14 Slot 12: anterior sin ningun dato -> la misma ventana maxima (lo pedido, 390, no la limita)", "ok|0|390|" + lMax + "|390|" +
+                Dia(vAct.Key) + ".." + Dia(vAct.Value) + "|" + Dia(vAnt.Key) + ".." + Dia(vAnt.Value),
+                Cambios(d)["estado"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasConTickets"] + "|" + ((Dictionary<string, object>)Cambios(d)["cobertura"])["diasEsperados"] + "|" +
+                Ventana(d)["dias"] + "|" + Ventana(d)["diasSolicitados"] + "|" + RangosJ(Cambios(d)["actual"]) + "|" + RangosJ(Cambios(d)["anterior"]));
 
             // --- Meses.
             var prevCurso = m0.AddMonths(-1);
@@ -1244,12 +1321,30 @@ GO";
             var m11 = m0.AddMonths(-11); var m12 = m0.AddMonths(-12);
             d = Pedir("modo=mes&mes=" + ConcentracionContrato.Mes(m11), out estado);
             cm = Cambios(d);
-            Chk("CS20 mes cuyo anterior empieza antes de la historia (le faltan 10 dias) -> historiaInsuficiente, sin filas",
-                "historiaInsuficiente|null|" + ((FinMes(m12) - m12).Days + 1 - 10) + "|" + ((FinMes(m12) - m12).Days + 1),
-                cm["estado"] + "|" + Difs(cm["aumentos"]) + "|" + ((Dictionary<string, object>)cm["cobertura"])["diasConTickets"] + "|" +
-                ((Dictionary<string, object>)cm["cobertura"])["diasEsperados"]);
+            int porLado20 = ((FinMes(m11) - historia).Days + 1) / 2;
+            Chk("CS20 mes cuyo anterior empieza antes de la historia (le faltan 10 dias): la ventana acotada no llega a 28 dias -> historiaInsuficiente (ventanaMinima), sin filas",
+                "historiaInsuficiente|ventanaMinima|null|" + ((FinMes(m12) - m12).Days + 1 - 10) + "|" + ((FinMes(m12) - m12).Days + 1) + "|" + Dia(historia) + "|" + porLado20 + "|False",
+                cm["estado"] + "|" + cm["motivo"] + "|" + Difs(cm["aumentos"]) + "|" + ((Dictionary<string, object>)cm["cobertura"])["diasConTickets"] + "|" +
+                ((Dictionary<string, object>)cm["cobertura"])["diasEsperados"] + "|" + Ventana(d)["historiaDesde"] + "|" + Ventana(d)["diasPorLado"] + "|" + Ventana(d)["ajustada"]);
             d = Pedir("modo=mes&mes=" + ConcentracionContrato.Mes(m0.AddMonths(-10)), out estado);
-            Chk("CS21 ... y el mes siguiente ya tiene su anterior completo -> ok", "ok", Cambios(d)["estado"]);
+            Chk("CS21 ... y el mes siguiente ya tiene su anterior completo -> ok", "ok|False", Cambios(d)["estado"] + "|" + Ventana(d)["ajustada"]);
+            // Tres meses seguidos cuyo anterior cae antes de la historia: ventana acotada
+            // que termina en el fin del mas reciente.
+            var m8 = m0.AddMonths(-8); var m10 = m0.AddMonths(-10);
+            int pedidos3 = (FinMes(m8) - m10).Days + 1;
+            int l3 = Math.Min(pedidos3, ((FinMes(m8) - historia).Days + 1) / 2) / 7 * 7;
+            var w3Act = R(FinMes(m8).AddDays(-l3 + 1), FinMes(m8)); var w3Ant = R(FinMes(m8).AddDays(-2 * l3 + 1), FinMes(m8).AddDays(-l3));
+            d = Pedir("modo=mes&mes=" + string.Join("|", new[] { m8, m0.AddMonths(-9), m10 }.Select(ConcentracionContrato.Mes).ToArray()), out estado);
+            cm = Cambios(d);
+            Chk("CS21b meses seguidos con historia corta: ventana acotada de L dias (multiplo de 7, >= 28) hasta el fin del mas reciente; = oraculo",
+                "ok|True|" + l3 + "|" + pedidos3 + "|" + Dia(w3Act.Key) + ".." + Dia(w3Act.Value) + "|" + Dia(w3Ant.Key) + ".." + Dia(w3Ant.Value) + "|" +
+                Oraculo(cadena, new List<KeyValuePair<DateTime, DateTime>> { w3Act }, new List<KeyValuePair<DateTime, DateTime>> { w3Ant }) + "|True",
+                cm["estado"] + "|" + Ventana(d)["ajustada"] + "|" + Ventana(d)["dias"] + "|" + Ventana(d)["diasSolicitados"] + "|" + RangosJ(cm["actual"]) + "|" +
+                RangosJ(cm["anterior"]) + "|" + Difs(cm["aumentos"]) + "|" + Difs(cm["reducciones"]) + "|" + (l3 >= 28 && l3 % 7 == 0));
+            d = Pedir("modo=mes&mes=" + ConcentracionContrato.Mes(m11) + "|" + ConcentracionContrato.Mes(m0.AddMonths(-9)), out estado);
+            cm = Cambios(d);
+            Chk("CS21c meses NO seguidos con historia corta -> historiaInsuficiente (noConsecutivos): una ventana continua meteria el mes no elegido",
+                "historiaInsuficiente|noConsecutivos|null|False", cm["estado"] + "|" + cm["motivo"] + "|" + Difs(cm["aumentos"]) + "|" + Ventana(d)["ajustada"]);
 
             // --- Falla la lectura del anterior: estado error, el resto de la pestaña sigue.
             var ma = ConcentracionContrato.Mes(m0.AddMonths(-7)); var mb = ConcentracionContrato.Mes(m0.AddMonths(-8));

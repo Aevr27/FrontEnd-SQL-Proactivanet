@@ -240,5 +240,32 @@ Check('X13 ok sin cambios: periodo vacio, filtros sin tickets, o todos iguales',
 Check('X14 empates: se respeta el orden del servidor', ['E1', 'E2'],
   D.vistaCambios({ estado: 'ok', aumentos: [cambio('E1', 2, 0), cambio('E2', 2, 0)], reducciones: [] }).filas.map(function (f) { return f.Servicio; }));
 
+// Ventana acotada (2026-11-18), con las fechas reales de QA (Slot 12 al 18/11/2026).
+var acotada = JSON.parse(JSON.stringify(okCambios));
+acotada.actual = { rangos: [{ desde: '2026-05-28', hasta: '2026-11-18' }], dias: 175 };
+acotada.anterior = { rangos: [{ desde: '2025-12-04', hasta: '2026-05-27' }], dias: 175 };
+acotada.ventana = { ajustada: true, dias: 175, diasSolicitados: 390, historiaDesde: '2025-12-01', diasPorLado: 176,
+  solicitado: { actual: { rangos: [{ desde: '2025-10-25', hasta: '2026-11-18' }], dias: 390 },
+                anterior: { rangos: [{ desde: '2024-09-30', hasta: '2025-10-24' }], dias: 390 } } };
+Check('X15 ventana acotada: aviso con lo pedido, la historia y las dos ventanas; el subtitulo dice las fechas comparadas',
+  ['Comparación acotada a 175 días: el periodo elegido (390 días) necesita historial desde el 30/09/2024 y solo hay historial completo desde el 01/12/2025. ' +
+   'Se comparan los últimos 175 días (28/05/2026 – 18/11/2026) contra los 175 inmediatamente anteriores (04/12/2025 – 27/05/2026). Las demás gráficas usan el periodo completo.',
+   'Diferencia = tickets del periodo actual − tickets del periodo anterior equivalente (actual: del 28/05/2026 al 18/11/2026 · anterior: del 04/12/2025 al 27/05/2026).', 7],
+  [D.textoVentana(acotada), D.textoComparacion(acotada), D.vistaCambios(acotada).filas.length]);
+var sinAjuste = JSON.parse(JSON.stringify(okCambios)); sinAjuste.ventana = { ajustada: false, dias: 30, diasSolicitados: 30 };
+Check('X16 sin ajuste, sin ventana (servidor viejo), error o historia insuficiente: sin aviso', ['', '', '', ''],
+  [D.textoVentana(sinAjuste), D.textoVentana(okCambios), D.textoVentana({ estado: 'error', ventana: acotada.ventana }), D.textoVentana(insuf)]);
+var minima = JSON.parse(JSON.stringify(insuf));
+minima.motivo = 'ventanaMinima'; minima.ventana = { ajustada: false, historiaDesde: '2025-12-01', diasPorLado: 15 };
+Check('X17 ventana minima: el hecho de siempre + cuanto alcanza la historia y el minimo',
+  'Sin historial suficiente para comparar: el periodo anterior (del 25/09/2025 al 21/04/2026) tiene tickets en 191 de 210 días (datos del 14/10/2025 al 21/04/2026). ' +
+  'No se muestra una comparación parcial. El historial completo (desde el 01/12/2025) solo alcanza para 15 días por lado; el mínimo es 28.',
+  D.mensajeCambios(minima, null));
+var noSeguidos = { estado: 'historiaInsuficiente', motivo: 'noConsecutivos', aumentos: null, reducciones: null,
+  anterior: { rangos: [{ desde: '2025-12-01', hasta: '2025-12-31' }, { desde: '2025-10-01', hasta: '2025-10-31' }], dias: 62 } };
+Check('X18 meses no consecutivos: lo dice y sugiere consecutivos o Slot',
+  'Sin historial suficiente para comparar estos meses no consecutivos: el periodo anterior (01/10/2025–31/10/2025, 01/12/2025–31/12/2025) no está completo. ' +
+  'Elige meses consecutivos o un Slot para ver una comparación acotada.', D.mensajeCambios(noSeguidos, null));
+
 console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
 process.exit(fallos ? 1 : 0);

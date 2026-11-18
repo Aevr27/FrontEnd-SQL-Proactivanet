@@ -231,8 +231,9 @@ public static class ConcentracionContrato
 
     /* COBERTURA (aviso de periodo incompleto)
        Ni la vista ni los SP dicen cuantos dias del periodo tienen datos, y el
-       primer registro de la base no sirve (en QA hay tickets sueltos del
-       2025-10-09 y 2025-10-21 aunque la historia empieza el 2025-11-19). Se
+       primer registro de la base no sirve (en QA hay diez tickets sueltos,
+       uno por dia, del 2025-08-19 al 2025-11-28; la historia continua empieza
+       el 2025-12-01: sql/diag/DIAG_Concentracion_CoberturaDiaria.sql). Se
        mide cuantos dias distintos del periodo tienen al menos un ticket, sobre
        TODOS los tickets del periodo (antes de Service Owner / Grupo: es
        cobertura de datos, no del filtro). Se esperan todos los dias del
@@ -380,6 +381,13 @@ public static class ConcentracionContrato
     public const string CambiosHistoriaInsuficiente = "historiaInsuficiente";
     public const string CambiosError = "error";
 
+    // Por que no hay comparacion (cambios.motivo, solo con historiaInsuficiente).
+    public const string MotivoVentanaMinima = "ventanaMinima";    // la acotada saldria de menos de 28 dias
+    public const string MotivoNoConsecutivos = "noConsecutivos";  // meses con hueco: no hay ventana continua
+
+    public const int VentanaMinimaDias = 28;
+    public const int DiasSemana = 7;
+
     // Los meses del filtro (Meses; si viene vacio, Mes: quien solo fijo Mes).
     public static List<DateTime> MesesElegidos(ConcentracionFiltros f)
     {
@@ -429,6 +437,64 @@ public static class ConcentracionContrato
             salida.Add(new KeyValuePair<DateTime, DateTime>(d.AddDays(-dias), d.AddDays(-1)));
         }
         return salida;
+    }
+
+    /* Una sola ventana continua: el Slot acumulado siempre; meses, si no hay
+       hueco entre el mas viejo y el mas reciente. Con hueco, una ventana
+       acotada meteria meses que el usuario no eligio. */
+    public static bool SeleccionContinua(ConcentracionFiltros f)
+    {
+        if (f.Modo != ModoMes) return true;
+        var meses = MesesElegidos(f).ConvertAll(m => new DateTime(m.Year, m.Month, 1));
+        DateTime viejo = meses.Min(), nuevo = meses.Max();
+        int tramo = (nuevo.Year - viejo.Year) * 12 + nuevo.Month - viejo.Month + 1;
+        return tramo == meses.Distinct().Count();
+    }
+
+    public sealed class VentanaComparada
+    {
+        public DateTime HistoriaDesde;   // primer dia de la historia continua
+        public int DiasPorLado;          // lo que alcanza antes de redondear: floor(T/2)
+        public int Dias;                 // L: a semanas completas y sin pasar de lo pedido
+        public bool Valida;              // L >= VentanaMinimaDias
+        public KeyValuePair<DateTime, DateTime> Actual, Anterior;
+    }
+
+    /* VENTANA MAXIMA COMPARABLE (2026-11-18), cuando el periodo anterior
+       pedido cae antes de la historia.
+       La historia continua empieza el dia siguiente al ULTIMO dia sin ningun
+       ticket de [desde, fin] (hoy no cuenta: va a medias). Solo un cero es
+       hueco: en QA cada dia desde 2025-12-01 tiene tickets y los dias bajos
+       son feriados reales (1 de enero, 80; 25 de diciembre, 135), asi que
+       tomarlos como hueco recortaria la ventana sin razon. Antes de ese
+       primer dia solo hay tickets sueltos, que el ultimo cero deja fuera.
+       Con T = fin - inicio + 1 dias cubiertos:
+         L = floor(min(lo pedido, floor(T/2)) / 7) * 7
+       a semanas completas para que los dos lados tengan los mismos dias de la
+       semana (un domingo trae ~1/5 de un lunes). Actual = los ultimos L dias
+       hasta fin; anterior = los L inmediatamente antes. Mismo largo, pegados,
+       sin solape. Valida solo si L >= 28. */
+    public static VentanaComparada VentanaComparable(ICollection<DateTime> diasConTickets, DateTime desde, DateTime fin,
+                                                     DateTime hoy, int diasPedidos)
+    {
+        var ultimoCompleto = fin.Date < hoy.Date ? fin.Date : hoy.Date.AddDays(-1);
+        DateTime inicio = desde.Date;
+        for (var d = ultimoCompleto; d >= desde.Date; d = d.AddDays(-1))
+            if (!diasConTickets.Contains(d)) { inicio = d.AddDays(1); break; }
+
+        int t = (fin.Date - inicio).Days + 1;
+        var v = new VentanaComparada { HistoriaDesde = inicio, DiasPorLado = Math.Max(0, t / 2) };
+        v.Dias = Math.Min(diasPedidos, v.DiasPorLado) / DiasSemana * DiasSemana;
+        v.Valida = v.Dias >= VentanaMinimaDias;
+        v.Actual = new KeyValuePair<DateTime, DateTime>(fin.Date.AddDays(-v.Dias + 1), fin.Date);
+        v.Anterior = new KeyValuePair<DateTime, DateTime>(fin.Date.AddDays(-2 * v.Dias + 1), fin.Date.AddDays(-v.Dias));
+        return v;
+    }
+
+    // Los tickets cuyo dia cae en el rango (los dos extremos incluidos).
+    public static List<ConcentracionTicket> EnRango(IEnumerable<ConcentracionTicket> tickets, KeyValuePair<DateTime, DateTime> rango)
+    {
+        return tickets.Where(t => t.Dia.HasValue && t.Dia.Value.Date >= rango.Key && t.Dia.Value.Date <= rango.Value).ToList();
     }
 
     /* Servicios con mayor cambio: tickets distintos por CODIGO de servicio

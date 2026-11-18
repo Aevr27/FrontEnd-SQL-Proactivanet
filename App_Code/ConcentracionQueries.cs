@@ -85,6 +85,7 @@ public sealed class ConcentracionResultado
     public Exception FalloDirectorio;      // para la traza; no se serializa
     // Lo que la comparacion reusa del periodo actual (no se serializa): los
     // tickets ya filtrados y el MISMO directorio de dueños.
+    public List<ConcentracionTicket> Tickets;     // los del periodo SIN filtros (cobertura de la comparacion)
     public List<ConcentracionTicket> Filtrados;
     public DirectorioOrganizacional Directorio;
     public Exception FalloCambios;         // para la traza; no se serializa
@@ -235,6 +236,7 @@ WHERE ";
         r.OpcionesGrupo = ConcentracionContrato.Opciones(tickets.ConvertAll(t => t.Grupo), f.Grupos);
 
         var filtrados = ConcentracionContrato.Filtrar(tickets, f);
+        r.Tickets = tickets;
         r.Filtrados = filtrados;
         r.TicketsFiltrados = filtrados.Count;
         r.Pareto = ConcentracionContrato.Pareto(filtrados);
@@ -277,8 +279,16 @@ WHERE ";
        cache por rango (en modo mes, los meses completos comparten la de la
        pestaña). Historia: se exige que CADA dia del periodo anterior tenga al
        menos un ticket (la cobertura de la pestaña, sobre todos los tickets,
-       antes de filtros); si no, historiaInsuficiente y sin filas: una
-       comparacion contra un periodo a medias diria "bajo" sin que haya bajado.
+       antes de filtros); una comparacion contra un periodo a medias diria
+       "bajo" sin que haya bajado.
+
+       Si no la tiene (2026-11-18): con una seleccion continua se compara la
+       ventana maxima comparable (ConcentracionContrato.VentanaComparable), dos
+       tramos de L dias que terminan en el fin del actual, partidos de las
+       filas YA leidas (anterior + actual, pegados y sin solape: no hay otra
+       consulta); mismos filtros y misma cuenta. cambios.ventana dice lo pedido
+       y lo comparado. Sin ventana de 28 dias, o con meses no seguidos,
+       historiaInsuficiente con su motivo y sin filas.
 
        Si la lectura falla, estado "error" con el mensaje seguro; las otras
        tres graficas no se pierden (r.FalloCambios queda para la traza). */
@@ -287,8 +297,10 @@ WHERE ";
         var reloj = Stopwatch.StartNew();
         var anterior = ConcentracionContrato.PeriodoAnterior(f, r.Hoy);
         var salida = new Dictionary<string, object>();
-        salida["actual"] = ConcentracionContrato.RangosJson(r.Rangos);
-        salida["anterior"] = ConcentracionContrato.RangosJson(anterior);
+        var pedidoActual = ConcentracionContrato.RangosJson(r.Rangos);
+        var pedidoAnterior = ConcentracionContrato.RangosJson(anterior);
+        salida["actual"] = pedidoActual;
+        salida["anterior"] = pedidoAnterior;
         var lectura = new ConcentracionResultado { Hoy = r.Hoy };   // solo sus contadores
         int filas = 0;
         try
@@ -299,18 +311,45 @@ WHERE ";
             var tickets = ConServiceOwner(periodo, r.Directorio);
             var cobertura = ConcentracionContrato.Cobertura(tickets, anterior, r.Hoy);
             salida["cobertura"] = cobertura;
-            if (!(bool)cobertura["completa"])
+            int diasPedidos = r.Rangos.Sum(x => (x.Value - x.Key).Days + 1);
+            var ventana = new Dictionary<string, object>
             {
-                salida["estado"] = ConcentracionContrato.CambiosHistoriaInsuficiente;
-                salida["aumentos"] = null;
-                salida["reducciones"] = null;
+                { "ajustada", false }, { "diasSolicitados", diasPedidos },
+                { "solicitado", new Dictionary<string, object> { { "actual", pedidoActual }, { "anterior", pedidoAnterior } } },
+            };
+            if ((bool)cobertura["completa"])
+            {
+                ventana["dias"] = diasPedidos;
+                Comparar(salida, r.Filtrados, ConcentracionContrato.Filtrar(tickets, f));
+            }
+            else if (!ConcentracionContrato.SeleccionContinua(f))
+            {
+                SinComparacion(salida, ConcentracionContrato.MotivoNoConsecutivos);
             }
             else
             {
-                var c = ConcentracionContrato.Cambios(r.Filtrados, ConcentracionContrato.Filtrar(tickets, f), ConcentracionContrato.TopCambios);
-                salida["estado"] = ConcentracionContrato.CambiosOk;
-                foreach (var kv in c) salida[kv.Key] = kv.Value;
+                var dias = new HashSet<DateTime>();
+                foreach (var t in r.Tickets.Concat(tickets))
+                    if (t.Dia.HasValue) dias.Add(t.Dia.Value.Date);
+                var v = ConcentracionContrato.VentanaComparable(dias, anterior.Min(x => x.Key), r.Hasta, r.Hoy, diasPedidos);
+                ventana["historiaDesde"] = ConcentracionContrato.Dia(v.HistoriaDesde);
+                ventana["diasPorLado"] = v.DiasPorLado;
+                if (!v.Valida)
+                {
+                    SinComparacion(salida, ConcentracionContrato.MotivoVentanaMinima);
+                }
+                else
+                {
+                    // Filas filtradas de los dos periodos leidos; cada ventana toma las suyas por dia.
+                    var todas = r.Filtrados.Concat(ConcentracionContrato.Filtrar(tickets, f)).ToList();
+                    ventana["ajustada"] = true;
+                    ventana["dias"] = v.Dias;
+                    salida["actual"] = ConcentracionContrato.RangosJson(new[] { v.Actual });
+                    salida["anterior"] = ConcentracionContrato.RangosJson(new[] { v.Anterior });
+                    Comparar(salida, ConcentracionContrato.EnRango(todas, v.Actual), ConcentracionContrato.EnRango(todas, v.Anterior));
+                }
             }
+            salida["ventana"] = ventana;
         }
         catch (Exception ex)
         {
@@ -324,6 +363,20 @@ WHERE ";
             medicion.Anotar("anterior", reloj.Elapsed, "consultas=" + lectura.ConsultasPeriodo + " tramos=" + lectura.TramosSql +
                             " cache=" + lectura.TramosCache + " filas=" + filas);
         return salida;
+    }
+
+    private static void Comparar(Dictionary<string, object> salida, IEnumerable<ConcentracionTicket> actual, IEnumerable<ConcentracionTicket> anterior)
+    {
+        salida["estado"] = ConcentracionContrato.CambiosOk;
+        foreach (var kv in ConcentracionContrato.Cambios(actual, anterior, ConcentracionContrato.TopCambios)) salida[kv.Key] = kv.Value;
+    }
+
+    private static void SinComparacion(Dictionary<string, object> salida, string motivo)
+    {
+        salida["estado"] = ConcentracionContrato.CambiosHistoriaInsuficiente;
+        salida["motivo"] = motivo;
+        salida["aumentos"] = null;
+        salida["reducciones"] = null;
     }
 
     // ------------------------------------------------------------ tramos

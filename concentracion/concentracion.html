@@ -161,6 +161,10 @@
     <section class="card conc-seccion">
       <h3>Servicios con mayor cambio de tickets<span class="hint" id="conc-hint-cambios"></span></h3>
       <p class="conc-sub" id="conc-sub-cambios">Diferencia = tickets del periodo actual − tickets del periodo anterior equivalente.</p>
+      <!-- Ventana acotada: el anterior pedido cae antes de la historia y se
+           comparan los ultimos L dias contra los L de antes. Siempre visible
+           cuando aplica: la grafica ya no usa el periodo de las demas. -->
+      <p class="conc-ventana" id="conc-ventana-cambios" role="status" hidden></p>
       <div class="lienzo conc-lienzo-filas" id="conc-lienzo-cambios">
         <canvas id="conc-chart-cambios" role="img" aria-label="Servicios con mayor cambio de tickets"></canvas>
         <p class="conc-msg" id="conc-msg-cambios">Calculando…</p>

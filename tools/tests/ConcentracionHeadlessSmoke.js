@@ -55,6 +55,9 @@
 //          slot=0 y las cuatro graficas repintadas, sin el aviso viejo;
 //          desde Mes con varios meses + SO + Grupo = Slot 0 sin nada; tres
 //          clics seguidos = UNA, otro mas = ninguna; `filtros` = el inicial.
+//      C22 (2026-11-18) ventana acotada: aviso ambar con lo comparado; se
+//          oculta al calcular otra peticion, con un periodo completo y tras
+//          Limpiar; ventanaMinima y noConsecutivos dicen el porque.
 //   D  dashboard.html#concentracion (MOCK_DATA para SLA)
 //      D1  la entrada de grupo "Servicios" y su boton "Vista general de
 //          servicios" quedan marcados (selector visible); la pestaña se monta y pide concentracion.ashx sin pasar por Analisis.
@@ -528,7 +531,37 @@ var sondaC = conComun(
   'await espera(900);\n' +
   'var tres = [pedidasConc().length - n21c, ultimaConc(), msg("pareto")];\n' +
   'var n21d = pedidasConc().length; $c("btn-limpiar").click(); await espera(900);\n' +
-  'apunta("C21", [desde12, desdeMes, tres, pedidasConc().length - n21d, arranque()]);\n');
+  'apunta("C21", [desde12, desdeMes, tres, pedidasConc().length - n21d, arranque()]);\n' +
+  // C22 (2026-11-18) ventana acotada: aviso ambar con lo comparado; se va en
+  // cuanto llega otra respuesta (o mientras se calcula), y con Limpiar.
+  'var vent = function () { var p = $c("ventana-cambios"); return p.hidden ? null : p.textContent; };\n' +
+  'var acot = { estado: "ok", aumentos: [{ Servicio: "A1", NombreServicio: "Servicio A1", TicketsActual: 10, TicketsAnterior: 2, Diferencia: 8, VariacionPorcentaje: 400 }],\n' +
+  '  reducciones: [], serviciosAumento: 1, serviciosReduccion: 0, ticketsActual: 10, ticketsAnterior: 2,\n' +
+  '  actual: { rangos: [{ desde: "2026-05-28", hasta: "2026-11-18" }], dias: 175 }, anterior: { rangos: [{ desde: "2025-12-04", hasta: "2026-05-27" }], dias: 175 },\n' +
+  '  ventana: { ajustada: true, dias: 175, diasSolicitados: 390, historiaDesde: "2025-12-01", diasPorLado: 176,\n' +
+  '    solicitado: { actual: { rangos: [{ desde: "2025-10-25", hasta: "2026-11-18" }], dias: 390 }, anterior: { rangos: [{ desde: "2024-09-30", hasta: "2025-10-24" }], dias: 390 } } } };\n' +
+  'window.__cambios = acot; await M().recargar();\n' +
+  'var conAviso = [vent(), !!graf("cambios"), msg("cambios"), /actual: del 28\\/05\\/2026 al 18\\/11\\/2026/.test($c("sub-cambios").textContent),\n' +
+  '  $c("ventana-cambios").compareDocumentPosition($c("lienzo-cambios")) & Node.DOCUMENT_POSITION_FOLLOWING ? true : false,\n' +
+  '  getComputedStyle($c("ventana-cambios")).borderLeftStyle];\n' +
+  'window.__cambios = undefined; window.__lento = 400; $c("slot-mas").click(); await espera(120);\n' +
+  'var calculando = [vent(), msg("cambios")];\n' +
+  'await hasta(function () { return ultimaConc().slot === "1" && !msg("pareto") && !!graf("cambios"); }); window.__lento = 0; await espera(100);\n' +
+  'var completo = [vent(), !!graf("cambios")];\n' +
+  'window.__cambios = acot; await M().recargar(); var otraVez = vent() !== null;\n' +
+  'window.__cambios = undefined; $c("btn-limpiar").click();\n' +
+  'await hasta(function () { return ultimaConc().slot === "0" && !msg("pareto") && !!graf("cambios"); }); await espera(100);\n' +
+  'var trasLimpiar = [vent(), M().filtros().slot];\n' +
+  'window.__cambios = { estado: "historiaInsuficiente", motivo: "ventanaMinima", aumentos: null, reducciones: null,\n' +
+  '  anterior: { rangos: [{ desde: "2025-11-01", hasta: "2025-11-30" }], dias: 30 },\n' +
+  '  cobertura: { diasConTickets: 4, diasEsperados: 30, primerDia: "2025-11-03", ultimoDia: "2025-11-28", completa: false },\n' +
+  '  ventana: { ajustada: false, historiaDesde: "2025-12-01", diasPorLado: 15 } };\n' +
+  'await M().recargar(); var minima = [vent(), !!graf("cambios"), /el mínimo es 28\\.$/.test(msg("cambios") || ""), $c("msg-cambios").classList.contains("conc-msg-error")];\n' +
+  'window.__cambios = { estado: "historiaInsuficiente", motivo: "noConsecutivos", aumentos: null, reducciones: null,\n' +
+  '  anterior: { rangos: [{ desde: "2025-12-01", hasta: "2025-12-31" }, { desde: "2025-10-01", hasta: "2025-10-31" }], dias: 62 } };\n' +
+  'await M().recargar(); var noSeg = [vent(), /Elige meses consecutivos o un Slot/.test(msg("cambios") || "")];\n' +
+  'window.__cambios = undefined; await M().recargar();\n' +
+  'apunta("C22", [conAviso, calculando, completo, otraVez, trasLimpiar, minima, noSeg, vent()]);\n');
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
@@ -656,6 +689,11 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
          { modo: 'mes', slot: 0, meses: ['2026-10', '2026-08', '2026-06'], so: ['Ana'], grupo: ['Grupo 3'] }],
         [SLOT0], ARRANQUE, CUATRO, true, 'Servicio 1 slot 0'],
        [1, SLOT0, null], 0, ARRANQUE], o.C21);
+    Check('C22 ventana acotada: aviso ambar entre el subtitulo y la grafica con lo pedido, la historia y las dos ventanas, y barras; se oculta mientras se calcula otra peticion y no vuelve con un periodo completo ni tras Limpiar; ventanaMinima y noConsecutivos explican el porque (sin aviso, no es error)',
+      [['Comparación acotada a 175 días: el periodo elegido (390 días) necesita historial desde el 30/09/2024 y solo hay historial completo desde el 01/12/2025. ' +
+        'Se comparan los últimos 175 días (28/05/2026 – 18/11/2026) contra los 175 inmediatamente anteriores (04/12/2025 – 27/05/2026). Las demás gráficas usan el periodo completo.',
+        true, null, true, true, 'solid'],
+       [null, 'Calculando…'], [null, true], true, [null, 0], [null, false, true, false], [null, true], null], o.C22);
     Check('C13 cobertura: completa sin aviso; parcial con el hecho; sin medir sin aviso',
       [true, [false, 'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.'], true], o.C13);
   });

@@ -284,6 +284,7 @@
      lado, ordenado y sin diferencias en 0, contra el periodo anterior de la
      misma duracion. Aqui solo se acomoda para pintar. */
   var TOP_CAMBIOS = 5;
+  var VENTANA_MINIMA = 28;      // = ConcentracionContrato.VentanaMinimaDias (solo para el texto)
   var MENOS = '−';
 
   // +12 / −8 / 0 (signo tipografico, no guion).
@@ -352,19 +353,55 @@
     return base + ' (actual: ' + textoRangos(c.actual) + ' · anterior: ' + textoRangos(c.anterior) + ').';
   }
 
+  // El dia mas viejo de un bloque { rangos } (ISO: se comparan como texto).
+  function inicioDe(bloque) {
+    var rs = (bloque && bloque.rangos) || [];
+    return rs.reduce(function (m, r) { return !m || r.desde < m ? r.desde : m; }, null);
+  }
+
+  /* Aviso de ventana acotada (2026-11-18): el periodo anterior pedido cae
+     antes de la historia y el servidor comparo los ultimos L dias contra los
+     L de antes. '' si la comparacion es la del periodo completo. Nunca se
+     calla: las otras graficas siguen con el periodo elegido. */
+  function textoVentana(c) {
+    var v = c && c.estado === 'ok' && c.ventana;
+    if (!v || !v.ajustada) return '';
+    var dias = numero(v.dias), pedidos = numero(v.diasSolicitados);
+    var tramo = function (b) {
+      var r = b && b.rangos && b.rangos[0];
+      return r ? diaTexto(r.desde) + ' – ' + diaTexto(r.hasta) : '';
+    };
+    var sol = v.solicitado || {};
+    return 'Comparación acotada a ' + dias + ' días: el periodo elegido (' + pedidos + ' días) necesita historial desde el ' +
+           diaTexto(inicioDe(sol.anterior)) + ' y solo hay historial completo desde el ' + diaTexto(v.historiaDesde) +
+           '. Se comparan los últimos ' + dias + ' días (' + tramo(c.actual) + ') contra los ' + dias +
+           ' inmediatamente anteriores (' + tramo(c.anterior) + '). Las demás gráficas usan el periodo completo.';
+  }
+
   /* Por que no hay barras, o null si las hay. Historia insuficiente: se dice
      el hecho (dias con datos del periodo anterior) y que no se compara a
-     medias; nunca se pinta una comparacion parcial. */
+     medias; nunca se pinta una comparacion parcial. Con motivo, por que
+     tampoco hay ventana acotada. */
   function mensajeCambios(c, d) {
     if (!c || !c.estado) return 'Sin datos: la gráfica no llegó.';
     if (c.estado === 'error') return c.mensaje || 'No se pudo calcular la comparación.';
     if (c.estado === 'historiaInsuficiente') {
+      if (c.motivo === 'noConsecutivos') {
+        return 'Sin historial suficiente para comparar estos meses no consecutivos: el periodo anterior (' + textoRangos(c.anterior) +
+               ') no está completo. Elige meses consecutivos o un Slot para ver una comparación acotada.';
+      }
       var cob = c.cobertura || {};
       var dias = numero(cob.diasConTickets), esperados = numero(cob.diasEsperados);
       var cuantos = dias !== null && esperados !== null ? ' tiene tickets en ' + dias + ' de ' + esperados + ' días' : ' no está completo';
       var rango = cob.primerDia && cob.ultimoDia ? ' (datos del ' + diaTexto(cob.primerDia) + ' al ' + diaTexto(cob.ultimoDia) + ')' : '';
-      return 'Sin historial suficiente para comparar: el periodo anterior (' + textoRangos(c.anterior) + ')' + cuantos + rango +
-             '. No se muestra una comparación parcial.';
+      var base = 'Sin historial suficiente para comparar: el periodo anterior (' + textoRangos(c.anterior) + ')' + cuantos + rango +
+                 '. No se muestra una comparación parcial.';
+      var v = c.ventana || {};
+      if (c.motivo === 'ventanaMinima' && v.historiaDesde && numero(v.diasPorLado) !== null) {
+        base += ' El historial completo (desde el ' + diaTexto(v.historiaDesde) + ') solo alcanza para ' + numero(v.diasPorLado) +
+                ' días por lado; el mínimo es ' + VENTANA_MINIMA + '.';
+      }
+      return base;
     }
     if (c.estado !== 'ok') return 'No se pudo calcular la comparación.';
     var v = vistaCambios(c);
@@ -382,6 +419,7 @@
     TOP_CAMBIOS: TOP_CAMBIOS, textoDiferencia: textoDiferencia, textoVariacion: textoVariacion,
     textoRangos: textoRangos, vistaCambios: vistaCambios, limiteEje: limiteEje,
     resumenCambios: resumenCambios, textoComparacion: textoComparacion, mensajeCambios: mensajeCambios,
+    textoVentana: textoVentana, VENTANA_MINIMA: VENTANA_MINIMA,
   };
   raiz.ConcentracionDatos = ConcentracionDatos;
 
@@ -614,10 +652,18 @@
 
   /* Mayor cambio de tickets: barras horizontales divergentes desde el 0,
      eje simetrico, cifra con signo. Sin barras, el porque (mensajeCambios). */
+  function aviso(id, txt) {
+    var caja = $(id);
+    if (!caja) return;
+    caja.textContent = txt || '';
+    caja.hidden = !txt;
+  }
+
   function pintarCambios(c) {
     destruir('cambios');
     $('hint-cambios').textContent = '';
     $('sub-cambios').textContent = textoComparacion(c);
+    aviso('ventana-cambios', textoVentana(c));
     var v = vistaCambios(c);
     if (!v || !v.filas.length) {
       mensaje('cambios', mensajeCambios(c, ultima), !v || c.estado === 'error');
@@ -699,11 +745,13 @@
 
   function enEspera() {
     CLAVES.forEach(function (k) { mensaje(k, 'Calculando…'); $('hint-' + k).textContent = ''; });
+    aviso('ventana-cambios', '');   // el de la peticion anterior ya no aplica
     DatosInfo.mensaje($('estado'), 'Cargando…');
   }
 
   function fallo(err) {
     CLAVES.forEach(function (k) { destruir(k); mensaje(k, 'Error al cargar datos.', true); });
+    aviso('ventana-cambios', '');
     DatosInfo.mensaje($('estado'), 'Error al cargar datos: ' + err.message, err.message);
     $('error-msg').textContent = err.message;
     $('error').hidden = false;

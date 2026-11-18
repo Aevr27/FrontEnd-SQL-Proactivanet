@@ -33,8 +33,12 @@
 //     grupos:     [ { Posicion, Grupo, ... } ],
 //     cambios: {                                  // vs el periodo anterior (2026-11-18)
 //       estado: "ok" | "historiaInsuficiente" | "error", mensaje (solo error),
-//       actual / anterior: { rangos: [ { desde, hasta } ], dias },
-//       cobertura (la del periodo anterior; sin ella en error),
+//       motivo: "ventanaMinima" | "noConsecutivos" (solo historiaInsuficiente),
+//       actual / anterior: { rangos: [ { desde, hasta } ], dias }  -- lo COMPARADO,
+//       ventana: { ajustada, dias, diasSolicitados, historiaDesde, diasPorLado,
+//                  solicitado: { actual, anterior } }  (sin ella en error; dias e
+//                  historiaDesde/diasPorLado segun haya o no ventana acotada),
+//       cobertura (la del periodo anterior PEDIDO; sin ella en error),
 //       aumentos / reducciones: [ { Servicio, NombreServicio, TicketsActual,
 //         TicketsAnterior, Diferencia, VariacionPorcentaje } ] (Top 5; null si no es ok),
 //       serviciosAumento, serviciosReduccion, ticketsActual, ticketsAnterior (solo ok)
