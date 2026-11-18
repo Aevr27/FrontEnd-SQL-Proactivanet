@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_procedencia_pareto.sql - Quien creo y quien modifico
+   sql/diag/diag_procedencia_pareto.sql - Quien creo y quien modifico
    dbo.usp_CorreoServicio_Pareto (y sus dos hermanos), y quien lo ejecuta.
 
    Para correr en SSMS contra AZVMBDCENTRALQA (un solo lote, F5, Results to

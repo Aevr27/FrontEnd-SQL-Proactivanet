@@ -468,7 +468,7 @@ INSERT dbo.ProblemCategoria (Codigo, Categoria, TipoIniciativa, TipoAgrupado, Pc
             using (var cn = Abrir(Base))
             {
                 string diag;
-                try { Lotes(cn, Leer("sql", "diag_solicitudes_cambio.sql")); diag = "corre"; } catch (SqlException ex) { diag = ex.Message; }
+                try { Lotes(cn, Leer("sql", "diag", "diag_solicitudes_cambio.sql")); diag = "corre"; } catch (SqlException ex) { diag = ex.Message; }
                 Check("B0 el diag (solo lectura) corre con solicitudes guardadas", "corre", diag);
                 Check("B1 rollback con solicitudes guardadas: se niega", true, LotesError(cn, rb22).Contains("solicitudes guardadas"));
                 Exec(cn, "EXEC sys.sp_set_session_context N'rollback_22_borrar_solicitudes', N'SI';");

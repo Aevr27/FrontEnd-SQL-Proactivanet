@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_82_pareto_por_servicio_verificar.sql
+   sql/diag/diag_82_pareto_por_servicio_verificar.sql
 
    Se corre DESPUES de aplicar 82_pareto_por_servicio.sql, en SSMS (un solo
    lote, F5, Results to Grid). Compara, para los slots 0..12, lo que

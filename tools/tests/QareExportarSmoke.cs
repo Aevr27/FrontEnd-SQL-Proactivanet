@@ -15,7 +15,7 @@
 //      TEMPORAL, con los objetos REALES: la TVF y usp_CorreoQARE_KPIs se leen
 //      de sql/16_qare_filtros_org.sql (las cadenas @ddl_tvf y
 //      @ddl_usp_CorreoQARE_KPIs) y usp_CorreoQARE_Detalle es el cuerpo que
-//      devolvio la VM (sql/diag_qare_detalle_poblacion.sql, 2026-09-29),
+//      devolvio la VM (sql/diag/diag_qare_detalle_poblacion.sql, 2026-09-29),
 //      copiado tal cual en DETALLE_VM. Todo sobre una replica de la vista y
 //      de las funciones del Backlog. Para cada filtro (ninguno, Lider, 'Sin
 //      Torre', Grupo, C1, cruce, lista, valor inexistente, rango de un dia,
@@ -138,7 +138,7 @@ public static class QareExportarSmoke
     // ------------------------------------------------------- B) replica
     /* Vista QARE con las 49 columnas que lee el SP (nombres de su
        dependencia en la VM) y lo del Backlog con los cuerpos que leyo
-       sql/diag_qare_filtros_precheck.sql en la VM. Grupos: Service Desk ->
+       sql/diag/diag_qare_filtros_precheck.sql en la VM. Grupos: Service Desk ->
        Jesus Campa, Soporte Campo -> Laura Cardenas, Grupo Nuevo sin fila en
        CatLiderGrupo (-> 'Sin Torre'). */
     const string Base = @"

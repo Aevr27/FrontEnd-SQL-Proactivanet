@@ -7,7 +7,7 @@
    y responde 501 PersistenciaNoHabilitada (PersistenciaGestionAdmin.
    Habilitada es una constante false). Nada de este archivo guarda ni genera
    codigo: no hay contrato de base aprobado para estas escrituras (Paso 0,
-   ver sql/diag_admin_alta_edicion.sql); la persistencia real es una fase
+   ver sql/diag/diag_admin_alta_edicion.sql); la persistencia real es una fase
    aparte. Un 501 NUNCA se pinta como exito.
 
    MODELO (el de la base, sin inventar relaciones)

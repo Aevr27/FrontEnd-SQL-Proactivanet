@@ -13,7 +13,7 @@
 //   B) qa.ashx de punta a punta contra SQL Server LocalDB, en una base
 //      TEMPORAL: dbo.vw_CorreoQA_Base con sus 50 columnas reales, un
 //      dbo.CatLiderGrupo de prueba y dbo.usp_CorreoQA_Detalle con el cuerpo
-//      versionado en sql/fix_qa_detalle_option_recompile.sql. La VERDAD de
+//      versionado en sql/fixes/fix_qa_detalle_option_recompile.sql. La VERDAD de
 //      cada caso es una TVF de prueba con el WHERE de dbo.tvf_CorreoQARE_Base
 //      (sql/16_qare_filtros_org.sql) sobre la vista de QA. Para cada filtro
 //      (ninguno, C1, mayusculas, 'Sin categoria', espacio duro, lista,
@@ -173,7 +173,7 @@ RETURN
             Lotes(cn, Vista + "\nGO\n");
             new SqlCommand(Datos(), cn).ExecuteNonQuery();
             // El SP del detalle, tal como esta versionado (sin USE ni GO).
-            var fix = File.ReadAllText(Path.Combine(raiz, @"sql\fix_qa_detalle_option_recompile.sql"));
+            var fix = File.ReadAllText(Path.Combine(raiz, @"sql\fixes\fix_qa_detalle_option_recompile.sql"));
             int i = fix.IndexOf("CREATE OR ALTER PROCEDURE dbo.usp_CorreoQA_Detalle", StringComparison.Ordinal);
             int j = fix.IndexOf("END;", fix.IndexOf("OPTION (RECOMPILE);", i, StringComparison.Ordinal), StringComparison.Ordinal);
             new SqlCommand(fix.Substring(i, j + 4 - i), cn).ExecuteNonQuery();

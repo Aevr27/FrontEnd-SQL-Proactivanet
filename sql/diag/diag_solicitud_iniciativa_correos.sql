@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_solicitud_iniciativa_correos.sql - SOLO LECTURA (SELECT).
+   sql/diag/diag_solicitud_iniciativa_correos.sql - SOLO LECTURA (SELECT).
 
    Antes de aplicar sql/29 y de encender INICIATIVAS_ABIERTAS (sql/30): cuantos Product
    Owners de la cascada tienen UN correo claro en dbo.CatPersona, y si la

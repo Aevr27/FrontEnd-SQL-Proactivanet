@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/verificar_check_41_42.sql - SOLO LECTURA (solo sys.check_constraints).
+   sql/diag/verificar_check_41_42.sql - SOLO LECTURA (solo sys.check_constraints).
    Confirma que sql/41 y sql/42 reemplazaron sus CHECK por diseno: los 8
    nuevos existen en su tabla, habilitados, confiables y con el texto de la
    migracion; los 6 viejos ya no existen. Los textos esperados son los de la

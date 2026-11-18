@@ -10,7 +10,7 @@ Fecha: 2026-10-14. Nada de esto se ha corrido en la VM, QA ni producción.
 | Frontend | `claude-branch` HEAD `cc3977d` + cambios de esta sesión **sin commit** | `origin/main` (desplegado) = `107484c`: **no** trae nada de esto |
 | Migración | `sql/18_gestion_admin_persistencia.sql` (+ rollback) | sin aplicar (volcado 2026-10-13: no hay esquema `adm`) |
 | Backend | `Proactivanet Project/backend_admin_persistencia/` (git local `9247dd0`, sin remoto) | ADM_01/02/03 + rollbacks, sin aplicar; falta entregarlo al dueño del repo del backend |
-| Diagnóstico | `sql/diag_admin_persistencia_cutover.sql` | solo lectura; probado en LocalDB, sin correr en la VM |
+| Diagnóstico | `sql/diag/diag_admin_persistencia_cutover.sql` | solo lectura; probado en LocalDB, sin correr en la VM |
 
 ## B. Los dos botones, de punta a punta
 
@@ -53,7 +53,7 @@ Estado / Subestado inicial: opcionales en el alta (se validan contra los valores
 
 ## D. Diagnóstico de solo lectura (VM)
 
-`sql/diag_admin_persistencia_cutover.sql` — ajustar `@UsuarioSitio`; resultados a texto. Cubre: D1 servidor/RCSI · D2 existencia, fechas y hash de cargador/vistas/SP/triggers · D3 definiciones completas en trozos de 250 (65, 60, vistas, triggers) · D4 precondiciones de 18 y módulos que insertan en las tablas · D5 principal del sitio, roles, permisos y permisos efectivos (`EXECUTE AS USER`) · D6 últimas cargas, quién llama al cargador, jobs de SQL Agent · D7 códigos por prefijo/año (siguiente, ilegibles), filas vivas sin agrupación, rutas > 100% (regla del tablero y de la base), valores que ofrecerá el formulario · D8 consumidores de columnas que Admin deja NULL · D9 último respaldo.
+`sql/diag/diag_admin_persistencia_cutover.sql` — ajustar `@UsuarioSitio`; resultados a texto. Cubre: D1 servidor/RCSI · D2 existencia, fechas y hash de cargador/vistas/SP/triggers · D3 definiciones completas en trozos de 250 (65, 60, vistas, triggers) · D4 precondiciones de 18 y módulos que insertan en las tablas · D5 principal del sitio, roles, permisos y permisos efectivos (`EXECUTE AS USER`) · D6 últimas cargas, quién llama al cargador, jobs de SQL Agent · D7 códigos por prefijo/año (siguiente, ilegibles), filas vivas sin agrupación, rutas > 100% (regla del tablero y de la base), valores que ofrecerá el formulario · D8 consumidores de columnas que Admin deja NULL · D9 último respaldo.
 
 ## E. Orden de despliegue (cada paso con su OK)
 
@@ -98,13 +98,13 @@ Huellas medidas en la VM QA (2026-11-10) = precondición de 83: Modificar sql/24
 
 Orden (cada paso con su OK):
 
-1. Solo lectura: `sql/verificar_check_41_42.sql` → 14 filas `OK`.
-2. Solo lectura, justo antes de aplicar: `sql/baseline_83_export.sql` → guardar los dos resultados **fuera del repositorio**, con la evidencia de la migración.
+1. Solo lectura: `sql/diag/verificar_check_41_42.sql` → 14 filas `OK`.
+2. Solo lectura, justo antes de aplicar: `sql/diag/baseline_83_export.sql` → guardar los dos resultados **fuera del repositorio**, con la evidencia de la migración.
 3. `EXEC sys.sp_set_session_context N'aprobar_migracion', N'83';` + `sql/83_reactivacion_categoria_historica.sql` completo → `APLICADA`.
-4. `sql/diag_83_reactivacion.sql` (bloque A): las tres huellas dicen `sql/83`.
+4. `sql/diag/diag_83_reactivacion.sql` (bloque A): las tres huellas dicen `sql/83`.
 5. Desplegar el sitio. El sitio detecta 83 por la propiedad `ReglaReactivacion` (sin ella todo sigue como antes), así que el orden sitio / base no importa.
 
-Rollback: primero `sql/diag_83_reactivacion.sql` con la baseline (lista lo reactivado; no se borra ni se desactiva nada) → `aprobar_migracion = 83R` + `sql/83_reactivacion_categoria_historica_rollback.sql` → `DESHECHA` (huellas exactas de 24 / 40 / 38). Va **antes** que cualquier rollback de 38, 40 o 41 (esos se niegan con 83 aplicada).
+Rollback: primero `sql/diag/diag_83_reactivacion.sql` con la baseline (lista lo reactivado; no se borra ni se desactiva nada) → `aprobar_migracion = 83R` + `sql/83_reactivacion_categoria_historica_rollback.sql` → `DESHECHA` (huellas exactas de 24 / 40 / 38). Va **antes** que cualquier rollback de 38, 40 o 41 (esos se niegan con 83 aplicada).
 
 Smoke manual (VM, tras el paso 5):
 

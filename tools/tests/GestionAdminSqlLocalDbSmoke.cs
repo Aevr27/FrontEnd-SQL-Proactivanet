@@ -1072,8 +1072,8 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                   Uno(cn, "SELECT COUNT(DISTINCT FechaAnalisis) FROM dbo.vw_ProblemCategoria WHERE Codigo = N'" + cv + "'") + "|" +
                   Filas(cn, "SELECT Veredicto, Compromiso FROM dbo.vw_ProblemVencido WHERE Codigo = N'" + cv + "'") + "|" +
                   Uno(cn, "SELECT CONVERT(char(10), MIN(FechaAnalisisCategoria), 23) FROM dbo.ProblemCategoria WHERE Codigo = N'" + cv + "'"));
-            Check("V13 sql/diag_fecha_analisis_unica.sql (solo lectura) corre completo", "sin error",
-                  LotesError(cn, Leer("sql", "diag_fecha_analisis_unica.sql")));
+            Check("V13 sql/diag/diag_fecha_analisis_unica.sql (solo lectura) corre completo", "sin error",
+                  LotesError(cn, Leer("sql", "diag", "diag_fecha_analisis_unica.sql")));
 
             Adm05(cn, cv, hoy);
         }

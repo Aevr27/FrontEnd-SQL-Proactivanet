@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/ADM_DIAG_usp_DashboardServicios_Comparativo.sql
+   sql/diag/ADM_DIAG_usp_DashboardServicios_Comparativo.sql
    Diagnostico de SOLO LECTURA: existe dbo.usp_DashboardServicios_Comparativo,
    que hace, de que depende y que otros objetos podrian dar "tickets actuales
    contra anteriores por servicio" para la grafica "Servicios con mayor
@@ -28,7 +28,7 @@
    COMO CORRERLO
    Opcion 1, sqlcmd desde CMD (recomendada: texto completo, sin recortes):
        cd /d "<carpeta del repo>"
-       sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -y 0 -i sql\ADM_DIAG_usp_DashboardServicios_Comparativo.sql -o diag_comparativo_salida.txt
+       sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -y 0 -i sql\diag\ADM_DIAG_usp_DashboardServicios_Comparativo.sql -o diag_comparativo_salida.txt
    (-E = cuenta Windows; con usuario SQL cambia -E por -U <usuario>.)
    Opcion 2, SSMS: Results to Text (Ctrl+T); Tools > Options > Query Results >
    SQL Server > Results to Text > "Maximum number of characters displayed in

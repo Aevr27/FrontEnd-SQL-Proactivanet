@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_migraciones_41_42.sql - DIAGNOSTICO DE SOLO LECTURA: se pueden
+   sql/diag/diag_migraciones_41_42.sql - DIAGNOSTICO DE SOLO LECTURA: se pueden
    aplicar sql/41 (cancelar / reemplazar solicitudes de cambio) y sql/42
    (lo mismo para Nuevas solicitudes de iniciativa) en esta base?
 
@@ -12,7 +12,7 @@
    OBJECT_DEFINITION da NULL y la fila dice "SIN VIEW DEFINITION".
 
    COMO CORRERLO (en la VM, cuenta con db_owner, p. ej. t_andresvr):
-     sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -W -s "|" -i sql\diag_migraciones_41_42.sql
+     sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -W -s "|" -i sql\diag\diag_migraciones_41_42.sql
    o en SSMS con el script completo. Pegar el resultado completo.
 
    Veredicto por migracion: LISTA (se aplica todo), REACTIVAR (despues de su

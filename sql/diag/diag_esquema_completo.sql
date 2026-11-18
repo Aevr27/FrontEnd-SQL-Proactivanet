@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_esquema_completo.sql - Esquema COMPLETO de la base actual.
+   sql/diag/diag_esquema_completo.sql - Esquema COMPLETO de la base actual.
 
    OBJETIVO
    Volcar la estructura entera de la base donde se corre (por omision

@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_cambios_recientes_eventos.sql - SOLO LECTURA (ningun INSERT,
+   sql/diag/diag_cambios_recientes_eventos.sql - SOLO LECTURA (ningun INSERT,
    UPDATE, DELETE ni DDL). Para correr en la VM antes de desplegar el lector
    nuevo de "Cambios recientes" (App_Code/CambiosRecientesAdmin.cs).
 

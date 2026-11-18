@@ -1,6 +1,6 @@
 // Acuse "Estoy trabajando en ello" del PO / SO de una iniciativa Atrasada
 // del semaforo, y su notificacion persistente para ADM dentro de la app
-// (sql/28_acuse_po_so.sql, sql/PROPUESTA_acuse_po_so.md).
+// (sql/28_acuse_po_so.sql, sql/docs/PROPUESTA_acuse_po_so.md).
 //
 // IDENTIDAD (decidida 2026-10-22; cobertura medida en la VM ese dia)
 //   cuenta de IIS (AccesoAdmin.IdentidadEscritura, la misma que firma toda

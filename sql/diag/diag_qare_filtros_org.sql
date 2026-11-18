@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_qare_filtros_org.sql - v2. Camino exacto de Servicio (C1), Grupo
+   sql/diag/diag_qare_filtros_org.sql - v2. Camino exacto de Servicio (C1), Grupo
    y Lider en el Backlog, y cobertura de QARE contra esos catalogos.
 
    v1 (2026-09-28) confirmo: vw_CorreoQARECierre_Base trae Grupo y Categoria,

@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_qare_contrato.sql - v2. Contrato REAL de los procedimientos QARE.
+   sql/diag/diag_qare_contrato.sql - v2. Contrato REAL de los procedimientos QARE.
 
    OBJETIVO
    Sacar de la base, sin suponer nada, lo que la guia visual no dice:

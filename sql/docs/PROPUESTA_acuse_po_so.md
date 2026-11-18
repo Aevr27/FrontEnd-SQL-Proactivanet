@@ -47,7 +47,7 @@ transacción.
 
 ### Cobertura observada en la VM
 
-Datos de `sql/diag_acuse_identidad_po_so.sql`, corrido por el usuario el
+Datos de `sql/diag/diag_acuse_identidad_po_so.sql`, corrido por el usuario el
 2026-10-22:
 
 - **Usuarios ADM/MOD (6):** 2 se resuelven por `cuenta@soriana.com` y por

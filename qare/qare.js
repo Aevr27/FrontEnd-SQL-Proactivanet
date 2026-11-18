@@ -579,7 +579,7 @@
   }
   var API = ruta('qare.ashx');
   // Las listas de Servicio / Grupos / Lideres son las del Backlog: el diag
-  // de la VM (sql/diag_qare_filtros_precheck.sql) confirmo que cubren a todos
+  // de la VM (sql/diag/diag_qare_filtros_precheck.sql) confirmo que cubren a todos
   // los tickets de QARE.
   var API_CATALOGOS = ruta('backlog_catalogos.ashx');
   // Tickets del boton "⬇ Descargar QARE": mismos parametros que qare.ashx.

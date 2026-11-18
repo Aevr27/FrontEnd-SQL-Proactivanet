@@ -12,7 +12,7 @@
    - INVESTIGATIVO. No decide nada, no propone un cambio de datos.
    - ENFOCADO en INACTIVE_CATEGORY. Los otros estados del catalogo
      (STALE_CATEGORY / MISSING_CATEGORY) quedan fuera a proposito: los
-     cubre sql/diag_categorias_problemas_tickets.sql.
+     cubre sql/diag/diag_categorias_problemas_tickets.sql.
    - NO ES UNA HERRAMIENTA DE REASIGNACION AUTOMATICA. La columna
      CandidateMatchReason describe una relacion ESTRUCTURAL objetiva
      entre dos rutas del catalogo. No dice "esta es la categoria

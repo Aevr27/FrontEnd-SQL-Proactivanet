@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_solicitante_admin_preflight.sql - PREFLIGHT de SOLO LECTURA para
+   sql/diag/diag_solicitante_admin_preflight.sql - PREFLIGHT de SOLO LECTURA para
    las propuestas de 2026-10-29 (NombreSolicitante en dbo.UsuariosAdmin,
    solicitante ADM/MOD en Nueva solicitud y "Solicitar cambios" para PO/SO).
 
@@ -25,7 +25,7 @@
    lo puede confirmar quien administra la tabla.
 
    Como correrlo en la VM:
-     sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -y 0 -i sql\diag_solicitante_admin_preflight.sql
+     sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -y 0 -i sql\diag\diag_solicitante_admin_preflight.sql
    ========================================================================= */
 SET NOCOUNT ON;
 

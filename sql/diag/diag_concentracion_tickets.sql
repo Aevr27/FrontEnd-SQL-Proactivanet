@@ -1,5 +1,5 @@
 /* =========================================================================
-   sql/diag_concentracion_tickets.sql - Contrato REAL de los procedimientos
+   sql/diag/diag_concentracion_tickets.sql - Contrato REAL de los procedimientos
    de la pestaña "Concentracion de tickets".
 
    OBJETIVO
@@ -28,7 +28,7 @@
 
    COMO CORRERLO (CMD, sin PowerShell)
        cd /d "<carpeta del repo>"
-       sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -y 0 -i sql\diag_concentracion_tickets.sql -o diag_concentracion_salida.txt
+       sqlcmd -S AZVMBDCENTRALQA -d Tickets_Proactivanet -E -y 0 -i sql\diag\diag_concentracion_tickets.sql -o diag_concentracion_salida.txt
    (-E usa la cuenta Windows; con usuario SQL cambia -E por -U <usuario> y
    sqlcmd pide la clave.) -y 0 evita que se recorten las definiciones.
    Pegar diag_concentracion_salida.txt completo. No va al repositorio.
