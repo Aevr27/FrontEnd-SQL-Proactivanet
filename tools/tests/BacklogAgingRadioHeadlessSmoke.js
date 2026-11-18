@@ -1,19 +1,22 @@
 // tools/tests/BacklogAgingRadioHeadlessSmoke.js - "Por antiguedad" de Backlog
-// (backlog/backlog.js, PILA_REDONDA): cada pila apilada redondea sus DOS
-// extremos exteriores y deja rectas las uniones entre lideres, en un Chrome
-// de verdad (tools/tests/BancoHeadless.js; no escribe en disco salvo PNG=).
+// (backlog/backlog.js, renderBarrasAging): barras apiladas CUADRADAS -extremos
+// y uniones entre lideres sin radio-, aunque Barras.aplicarDefaults() deje
+// Barras.RADIO de default para todo `bar`. En un Chrome de verdad
+// (tools/tests/BancoHeadless.js; no escribe en disco salvo PNG=).
 //
-// Lee pixeles del canvas: una esquina redondeada no tiene el color del
-// segmento; el centro de cada extremo y los dos lados de una union, si.
+// Lee pixeles del canvas a 1px de cada esquina exterior: con cualquier radio
+// ese pixel queda fuera de la barra; cuadrada, tiene el color del segmento.
 //
-//   A0     con los datos de mock tal cual: todas las pilas cumplen y el
-//          plugin no toca los datos de la grafica;
+//   A0     con los datos de mock tal cual: todas las pilas cuadradas y los
+//          datos de la grafica sin tocar;
 //   R0-R5  datos de prueba puestos en la grafica (solo en memoria): un solo
 //          lider, varios, serie intermedia y final en cero, barra muy chica,
 //          punta de 1-2px y cubo vacio;
-//   H1     apagar en la leyenda la serie de la punta: el extremo pasa a la
-//          serie anterior y sigue redondo;
-//   O1     las otras graficas de Backlog no llevan el plugin.
+//   H1     apagar en la leyenda la serie de la punta: el nuevo extremo,
+//          cuadrado;
+//   V1     pila bajo el cursor (estado activo): sigue cuadrada;
+//   S1     cubo elegido: contorno de seleccion hasta las esquinas;
+//   O1     las demas barras de Backlog conservan el radio compartido.
 //
 // Como correrla (desde la raiz del repositorio):
 //
@@ -36,8 +39,10 @@ function Check(caso, esperado, obtenido) {
 if (!Banco.CHROME) { console.log('SKIP  sin Chrome/Edge (CHROME=<ruta> para indicar otro)'); process.exit(0); }
 
 // Sin animacion: los pixeles se leen sobre la geometria final.
+// Barras.aplicarDefaults(): la pagina suelta no lo llama, dashboard.js si
+// (Backlog va montado ahi), y es lo que trae Barras.RADIO a esta grafica.
 var ANTES = '<script>window.MockData.MOCK_DATA = true; Element.prototype.scrollIntoView = function () {};' +
-  ' Chart.defaults.animation = false;</script>\n';
+  ' Chart.defaults.animation = false; Barras.aplicarDefaults();</script>\n';
 
 function sonda() {
   var R = [], errores = [], imagenes = {};
@@ -47,52 +52,62 @@ function sonda() {
   function apunta(caso, v) { R.push([caso, v]); }
   function g() { return Chart.getChart('chart-aging-bl'); }
 
-  var rgbDe = (function () {
-    var c = document.createElement('canvas').getContext('2d');
-    return function (color) {
-      c.clearRect(0, 0, 1, 1); c.fillStyle = color; c.fillRect(0, 0, 1, 1);
-      var d = c.getImageData(0, 0, 1, 1).data; return [d[0], d[1], d[2]];
-    };
-  })();
   function pixel(ch, x, y) {
     var k = ch.currentDevicePixelRatio || 1;
     var d = ch.ctx.getImageData(Math.round(x * k), Math.round(y * k), 1, 1).data;
     return [d[0], d[1], d[2], d[3]];
   }
-  // Mismo color del segmento (opaco y a menos de 40 de distancia RGB).
-  function es(ch, x, y, color) {
-    var p = pixel(ch, x, y), c = rgbDe(color);
-    var dist = Math.sqrt(Math.pow(p[0] - c[0], 2) + Math.pow(p[1] - c[1], 2) + Math.pow(p[2] - c[2], 2));
-    return p[3] > 200 && dist < 40;
+  // Mismo color (opaco y a menos de 40 de distancia RGB) que el pixel de
+  // referencia: asi vale igual con el color normal que con el de hover.
+  function igual(p, q) {
+    var dist = Math.sqrt(Math.pow(p[0] - q[0], 2) + Math.pow(p[1] - q[1], 2) + Math.pow(p[2] - q[2], 2));
+    return p[3] > 200 && q[3] > 200 && dist < 40;
   }
+  function oscuro(p) { return p[3] > 200 && p[0] < 90 && p[1] < 90 && p[2] < 90; }
 
-  /* Revisa una fila: segmentos visibles con ancho, extremos, esquinas y
-     uniones. Devuelve la lista de problemas (vacia = bien). */
-  function revisarFila(ch, j) {
+  // Segmentos visibles y con ancho de la fila j, en orden de pila.
+  function segmentos(ch, j) {
     var segs = [];
     ch.data.datasets.forEach(function (ds, i) {
       if (!ch.isDatasetVisible(i)) return;
       var el = ch.getDatasetMeta(i).data[j];
       var a = Math.min(el.base, el.x), b = Math.max(el.base, el.x);
-      if (b - a > 0.5) segs.push({ i: i, a: a, b: b, y: el.y, h: el.height, color: ds.backgroundColor });
+      if (b - a > 0.5) segs.push({ a: a, b: b, y: el.y - el.height / 2, h: el.height });
     });
+    return segs;
+  }
+
+  /* Revisa una fila: las cuatro esquinas exteriores con el color del
+     segmento de su extremo y cada union con el color de sus dos lados arriba
+     y abajo. Los pixeles van 1px adentro por izquierda/arriba y 1.5px por
+     derecha/abajo: el borde cae en fraccion de pixel y el redondeo de la
+     coordenada no debe salirse de la barra. Devuelve los problemas. */
+  function revisarFila(ch, j) {
+    var segs = segmentos(ch, j);
     if (!segs.length) return { segs: 0, problemas: [] };
-    var x0 = segs[0].a, x1 = segs[segs.length - 1].b, y = segs[0].y - segs[0].h / 2, h = segs[0].h;
-    var r = Math.min(Barras.RADIO, h / 2, (x1 - x0) / 2);
+    var p0 = segs[0], pn = segs[segs.length - 1];
+    var arriba = p0.y + 1, abajo = p0.y + p0.h - 1.5, medio = p0.y + p0.h / 2;
     var malos = [];
-    var primero = segs[0], ultimo = segs[segs.length - 1];
-    if (primero.b - primero.a >= 3 && !es(ch, x0 + 1.5, y + h / 2, primero.color)) malos.push('extremo izq sin color');
-    if (ultimo.b - ultimo.a >= 3 && !es(ch, x1 - 1.5, y + h / 2, ultimo.color)) malos.push('extremo der sin color');
-    if (r >= 4) {
-      [[x0 + 1, y + 1, primero], [x0 + 1, y + h - 1, primero], [x1 - 1, y + 1, ultimo], [x1 - 1, y + h - 1, ultimo]]
-        .forEach(function (q, n) { if (es(ch, q[0], q[1], q[2].color)) malos.push('esquina ' + n + ' cuadrada'); });
+    if (p0.b - p0.a >= 3) {
+      var refIzq = pixel(ch, p0.a + 1, medio);
+      if (!igual(pixel(ch, p0.a + 1, arriba), refIzq)) malos.push('esquina izq-arriba no cuadrada');
+      if (!igual(pixel(ch, p0.a + 1, abajo), refIzq)) malos.push('esquina izq-abajo no cuadrada');
+    }
+    if (pn.b - pn.a >= 3) {
+      var refDer = pixel(ch, pn.b - 1.5, medio);
+      if (!igual(pixel(ch, pn.b - 1.5, arriba), refDer)) malos.push('esquina der-arriba no cuadrada');
+      if (!igual(pixel(ch, pn.b - 1.5, abajo), refDer)) malos.push('esquina der-abajo no cuadrada');
     }
     for (var s = 1; s < segs.length; s++) {
-      var bx = segs[s].a, A = segs[s - 1], B = segs[s];
-      if (A.b - A.a < 4 || B.b - B.a < 4 || bx - 2 < x0 + r || bx + 2 > x1 - r) continue;
-      if (!es(ch, bx - 2, y + 1, A.color) || !es(ch, bx + 2, y + 1, B.color)) malos.push('union ' + s + ' no recta');
+      var A = segs[s - 1], B = segs[s], bx = B.a;
+      if (A.b - A.a < 4 || B.b - B.a < 4) continue;
+      var refA = pixel(ch, bx - 2, medio), refB = pixel(ch, bx + 2, medio);
+      if (!igual(pixel(ch, bx - 2, arriba), refA) || !igual(pixel(ch, bx + 2, arriba), refB) ||
+          !igual(pixel(ch, bx - 2, abajo), refA) || !igual(pixel(ch, bx + 2, abajo), refB)) {
+        malos.push('union ' + s + ' no recta');
+      }
     }
-    return { segs: segs.length, r: Math.round(r * 10) / 10, problemas: malos };
+    return { segs: segs.length, problemas: malos };
   }
 
   function poner(filas) {
@@ -128,7 +143,7 @@ function sonda() {
         [],                 // R5 cubo vacio
       ]);
       ['R0', 'R1', 'R2', 'R3', 'R4', 'R5'].forEach(function (c, j) {
-        var f = revisarFila(ch, j); apunta(c, [f.segs, f.r, f.problemas]);
+        var f = revisarFila(ch, j); apunta(c, [f.segs, f.problemas]);
       });
       imagenes.casos = ch.toBase64Image();
 
@@ -137,24 +152,25 @@ function sonda() {
       imagenes.leyenda = ch.toBase64Image();
       ch.show(2); ch.update('none');
 
-      // S1 clic en un cubo: la pila elegida lleva contorno oscuro tambien en
-      // el arranque y la punta, por dentro de las esquinas redondas. El clic
-      // vuelve a pintar con los datos de mock.
+      ch.setActiveElements([0, 1, 2].map(function (i) { return { datasetIndex: i, index: 1 }; }));
+      ch.update('none');
+      var v = revisarFila(ch, 1); apunta('V1', [v.segs, v.problemas]);
+      ch.setActiveElements([]); ch.update('none');
+
+      // El clic vuelve a pintar con los datos de mock.
       ch.getElementsAtEventForMode = function () { return [{ index: 1 }]; };
       ch.options.onClick({}, [], ch);
       await hasta(function () { return g() && g().getDatasetMeta(0).data[1].options.borderWidth === 3; });
       ch = g();
-      var e0 = ch.getDatasetMeta(0).data[1], e2 = ch.getDatasetMeta(2).data[1];
-      var oscuro = function (x, y) { var p = pixel(ch, x, y); return p[3] > 200 && p[0] < 90 && p[1] < 90 && p[2] < 90; };
-      var arriba = e0.y - e0.height / 2;
-      apunta('S1', [oscuro(e0.base + 1.5, e0.y), oscuro(e2.x - 1.5, e0.y), oscuro((e0.base + e2.x) / 2, arriba + 1.5),
-                    !oscuro(e0.base + 0.5, arriba + 0.5)]);
+      var sel = segmentos(ch, 1), s0 = sel[0], sn = sel[sel.length - 1];
+      apunta('S1', [[s0.a + 1, s0.y + 1], [s0.a + 1, s0.y + s0.h - 1.5], [sn.b - 1.5, s0.y + 1], [sn.b - 1.5, s0.y + s0.h - 1.5]]
+        .map(function (q) { return oscuro(pixel(ch, q[0], q[1])); }));
       imagenes.seleccion = ch.toBase64Image();
 
       apunta('O1', ['chart-prioridad-bl', 'chart-lider-bl'].map(function (id) {
         var o = Chart.getChart(id);
-        return !o || !o.config.plugins.some(function (p) { return p.id === 'pilaRedonda'; });
-      }));
+        return o ? o.getDatasetMeta(0).data[0].options.borderRadius : 'sin grafica';
+      }).concat(Barras.RADIO));
     } catch (e) { errores.push('sonda: ' + e.message); }
     var pre = document.createElement('pre');
     pre.id = '__res';
@@ -169,18 +185,18 @@ Banco.correr({ '/backlog/__banco.html': BANCO }, ['/backlog/__banco.html']).then
   Check('S0 sin errores de JS en la pagina', [], res[0].errores);
   var o = Banco.mapa(res[0]);
   console.log('INFO  ' + JSON.stringify(o.INFO));
-  Check('A0 mock: datos intactos y todas las pilas con extremos redondos y uniones rectas', true, !!(o.A0 && o.A0[0] && o.A0[1]));
+  Check('A0 mock: datos intactos y todas las pilas cuadradas', [true, true], o.A0 && o.A0.slice(0, 2));
   if (o.A0 && !o.A0[1]) console.log('      ' + JSON.stringify(o.A0[2]));
-  Check('R0 un solo lider: un segmento, radio 6, sin problemas', [1, 6, []], o.R0);
-  Check('R1 tres lideres: radio 6 en los extremos, uniones rectas', [3, 6, []], o.R1);
-  Check('R2 serie intermedia y finales en cero: dos segmentos, extremos redondos', [2, 6, []], o.R2);
-  Check('R3 barra muy chica: un segmento, sin problemas', [1, o.R3 && o.R3[1], []], o.R3);
-  Check('R3 radio limitado a la mitad del largo (< 6)', true, !!(o.R3 && o.R3[1] < 6 && o.R3[1] > 0));
-  Check('R4 punta de 1-2px: el extremo derecho sigue redondo', [2, 6, []], o.R4);
-  Check('R5 cubo vacio: sin pila', [0, null, []], o.R5);
-  Check('H1 apagar la serie de la punta en la leyenda: extremo en la anterior, redondo', [2, []], o.H1);
-  Check('S1 cubo elegido: contorno en arranque, punta y borde; esquina exterior fuera', [true, true, true, true], o.S1);
-  Check('O1 las otras graficas no llevan el plugin', [true, true], o.O1);
+  Check('R0 un solo lider: extremos cuadrados', [1, []], o.R0);
+  Check('R1 tres lideres: extremos cuadrados, uniones rectas', [3, []], o.R1);
+  Check('R2 serie intermedia y finales en cero: extremos cuadrados', [2, []], o.R2);
+  Check('R3 barra muy chica: cuadrada', [1, []], o.R3);
+  Check('R4 punta de 1-2px: el resto de la pila cuadrada', [2, []], o.R4);
+  Check('R5 cubo vacio: sin segmentos', [0, []], o.R5);
+  Check('H1 apagar la serie de la punta en la leyenda: nuevo extremo cuadrado', [2, []], o.H1);
+  Check('V1 pila activa (hover): cuadrada', [3, []], o.V1);
+  Check('S1 cubo elegido: contorno oscuro en las cuatro esquinas', [true, true, true, true], o.S1);
+  Check('O1 las demas barras conservan el radio compartido', [6, 6, 6], o.O1);
 
   if (process.env.PNG && res[0].img) {
     Object.keys(res[0].img).forEach(function (k) {
