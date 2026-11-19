@@ -67,6 +67,9 @@ public static class PruebasPowerAutomate
         {
             a.RequestNumber = "TEST-PA-001";
             a.Estado = "ENVIADA";
+            // Como el NEW_REQUEST real (seis campos, con fecha), para que la
+            // rama NEW_REQUEST del flujo se pruebe con este boton.
+            a.Fecha = AvisoNuevaSolicitud.Fecha(AvisoNuevaSolicitud.AhoraUtc());
         }
         else if (evento == AvisoTeams.SolicitudAprobada)
         {

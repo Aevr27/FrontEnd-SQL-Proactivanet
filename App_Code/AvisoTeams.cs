@@ -1,6 +1,7 @@
 // Aviso a Microsoft Teams por el webhook de Power Automate (NEW_REQUEST,
-// REQUEST_APPROVED, REQUEST_REJECTED). Hoy solo lo usa el panel de pruebas
-// local (App_Code/PruebasPowerAutomate.cs); ningun flujo real lo llama.
+// REQUEST_APPROVED, REQUEST_REJECTED). Lo usan NEW_REQUEST de los flujos
+// reales (App_Code/AvisoNuevaSolicitud.cs) y el panel de pruebas local
+// (App_Code/PruebasPowerAutomate.cs); aprobar / rechazar aun no estan conectados.
 //
 // RESTRICCIONES
 //   - El URL vive SOLO en Web.config del servidor (appSettings
@@ -17,15 +18,19 @@
 //   - HttpWebRequest (System.dll) y no HttpClient: App_Code se compila sin
 //     referencia a System.Net.Http y agregarla exige tocar Web.config.
 //
-// FORMATO (TeamsWebhookFormato): el flujo de Power Automate ya probado lee
-// el TEXTO de un TextBlock dentro de una Adaptive Card, con los campos en
-// posiciones fijas separadas por "|":
-//     evento|tipo|correo|nombre|numero|estado|codigo-o-comentario
-// Ese es el formato por omision ("texto"), para no romper el flujo. "json"
-// manda los campos con nombre (ComoJson) y exige cambiar el flujo antes de
-// usarlo (ver DASHBOARD.md). Cualquier otro valor: no se envia (Invalido).
+// FORMATO (TeamsWebhookFormato): el flujo de Power Automate lee el TEXTO de
+// un TextBlock dentro de una Adaptive Card, con SEIS campos en posiciones
+// fijas separadas por "|" (sin estado: el evento ya lo dice):
+//     NEW_REQUEST|tipo|correo|nombre|numero|fecha          (fecha aaaa-mm-dd)
+//     REQUEST_APPROVED|tipo|correo|nombre|numero|codigo
+//     REQUEST_REJECTED|tipo|correo|nombre|numero|comentario
+// Ese es el formato por omision ("texto"). "json" manda los campos con
+// nombre (ComoJson) y exige cambiar el flujo antes de usarlo (ver
+// DASHBOARD.md). Cualquier otro valor: no se envia (Invalido).
 // En "texto" un "|" dentro de un valor se cambia por "/" y los saltos de
-// linea por espacios: si no, correrian las posiciones.
+// linea por espacios: si no, correrian las posiciones. Un valor vacio deja
+// su posicion vacia. NEW_REQUEST va al chat de revisores (el correo es
+// informativo); aprobar / rechazar son mensajes privados al correo.
 //
 // Pruebas: tools/tests/AvisoTeamsSmoke.cs (sin red externa).
 
@@ -66,6 +71,8 @@ public sealed class AvisoSolicitud
     public string Estado;
     public string Codigo;
     public string Comentario;
+    // aaaa-mm-dd. Solo la usa NEW_REQUEST (posicion 5).
+    public string Fecha;
 }
 
 // Envia el cuerpo y devuelve el codigo HTTP. Lanza WebException en fallos de
@@ -256,13 +263,15 @@ public sealed class AvisoTeams
     }
 
     // null si se puede enviar. Solo lo que el flujo necesita para enrutar:
-    // evento y tipo conocidos y a quien avisar. Lo demas puede ir null.
+    // evento y tipo conocidos, numero y, en los mensajes privados (aprobar /
+    // rechazar), a quien avisar. NEW_REQUEST va al chat de revisores: el
+    // correo es informativo y puede ir vacio. Lo demas puede ir null.
     public static string MotivoInvalido(AvisoSolicitud a)
     {
         if (a == null) return "sin aviso.";
         if (Array.IndexOf(Eventos, a.Evento) < 0) return "evento desconocido.";
         if (Array.IndexOf(Tipos, a.Tipo) < 0) return "tipo desconocido.";
-        if (string.IsNullOrWhiteSpace(a.SolicitanteEmail)) return "sin correo del solicitante.";
+        if (a.Evento != NuevaSolicitud && string.IsNullOrWhiteSpace(a.SolicitanteEmail)) return "sin correo del solicitante.";
         if (string.IsNullOrWhiteSpace(a.RequestNumber)) return "sin numero de solicitud.";
         return null;
     }
@@ -284,15 +293,18 @@ public sealed class AvisoTeams
         return new JavaScriptSerializer().Serialize(d);
     }
 
-    // Formato "texto": las siete posiciones del flujo actual. La 6 es el
-    // Codigo al aprobar, el comentario al rechazar y vacia en una nueva.
+    // Formato "texto": los seis campos de cualquier evento. La posicion 5 es la
+    // fecha en una nueva, el Codigo al aprobar y el comentario al rechazar.
+    // El estado no viaja. Un valor vacio deja su posicion vacia.
     public static string ComoTexto(AvisoSolicitud a)
     {
-        var sexto = a.Evento == SolicitudAprobada ? a.Codigo : a.Evento == SolicitudRechazada ? a.Comentario : null;
+        var quinto = a.Evento == NuevaSolicitud ? a.Fecha
+                   : a.Evento == SolicitudAprobada ? a.Codigo
+                   : a.Evento == SolicitudRechazada ? a.Comentario : null;
         return string.Join("|", new[]
         {
             Campo(a.Evento), Campo(a.Tipo), Campo(a.SolicitanteEmail), Campo(a.SolicitanteNombre),
-            Campo(a.RequestNumber), Campo(a.Estado), Campo(sexto),
+            Campo(a.RequestNumber), Campo(quinto),
         });
     }
 

@@ -5,9 +5,10 @@
 //   C  configuracion: ausente / vacia / espacios = Desactivado sin llamar ni
 //      registrar; http, relativo o ilegible = Invalido; leerla lanza = Invalido.
 //   T  formato "texto" (por omision, el del flujo actual): sobre de webhook de
-//      Teams con UNA Adaptive Card y UN TextBlock; siete posiciones; la 6 es
-//      codigo / comentario / vacia segun el evento; "|" y saltos dentro de un
-//      valor no corren posiciones; acentos en UTF-8.
+//      Teams con UNA Adaptive Card y UN TextBlock; SEIS posiciones en los tres
+//      eventos (evento|tipo|correo|nombre|numero|...); la 5 es fecha / codigo /
+//      comentario segun el evento; el estado no viaja; "|" y saltos dentro de
+//      un valor no corren posiciones; acentos en UTF-8.
 //   F  TeamsWebhookFormato: vacio / texto / json (sin distinguir mayusculas);
 //      otro valor o leerlo lanza = Invalido sin llamar. Configurado() y el
 //      detalle (Http / Red) de EnviarConDetalle.
@@ -245,28 +246,58 @@ static class AvisoTeamsSmoke
         Check("T TextBlock", "TextBlock", ((Dictionary<string, object>)cuerpoTarjeta[0])["type"]);
         var nombre = "Jos" + Ch(0xE9) + " Pe" + Ch(0xF1) + "a";
         var comentario = "La informaci" + Ch(0xF3) + "n est" + Ch(0xE1) + " incompleta.";
-        Check("T rechazo: siete posiciones",
-              "REQUEST_REJECTED|Initiative|usuario@soriana.com|" + nombre + "|#0000142|RECHAZADA|" + comentario, texto);
+        Check("T rechazo: seis campos, sin estado",
+              "REQUEST_REJECTED|Initiative|usuario@soriana.com|" + nombre + "|#0000142|" + comentario, texto);
         Check("T cuerpo UTF-8 (a acentuada = C3-A1)", true, BitConverter.ToString(t.Cuerpo).Contains("C3-A1"));
 
         var ap = Rechazo(); ap.Evento = AvisoTeams.SolicitudAprobada; ap.Estado = "APROBADA"; ap.Codigo = "TEST-2026-000001";
         porOmision.Enviar(ap);
         texto = TextoDeTarjeta(t.Cuerpo, out m);
-        Check("T aprobacion: posicion 6 = codigo (no el comentario)", "TEST-2026-000001", texto == null ? null : texto.Split('|')[6]);
+        Check("T aprobacion: posicion 5 = codigo (no el comentario)", "TEST-2026-000001", texto == null ? null : texto.Split('|')[5]);
+        Check("T aprobacion: el estado no viaja", false, texto != null && texto.Contains("APROBADA"));
 
-        var nueva = Rechazo(); nueva.Evento = AvisoTeams.NuevaSolicitud; nueva.Estado = "ENVIADA"; nueva.Codigo = "X"; nueva.SolicitanteNombre = null;
+        // NEW_REQUEST: SUS seis campos (evento|tipo|correo|nombre|numero|fecha).
+        // El estado, el codigo y el comentario no viajan aunque vengan.
+        var nueva = Rechazo(); nueva.Evento = AvisoTeams.NuevaSolicitud; nueva.Estado = "ENVIADA"; nueva.Codigo = "X";
+        nueva.Fecha = "2026-11-19";
         porOmision.Enviar(nueva);
         texto = TextoDeTarjeta(t.Cuerpo, out m);
-        Check("T nueva: posicion 6 vacia y nombre null vacio",
-              "NEW_REQUEST|Initiative|usuario@soriana.com||#0000142|ENVIADA|", texto);
+        Check("T nueva: seis campos exactos", "NEW_REQUEST|Initiative|usuario@soriana.com|" + nombre + "|#0000142|2026-11-19", texto);
+        Check("T nueva: seis posiciones", 6, texto == null ? 0 : texto.Split('|').Length);
+        Check("T nueva: sin estado, codigo ni comentario", false,
+              texto != null && (texto.Contains("ENVIADA") || texto.Contains("|X") || texto.Contains("incompleta")));
+        nueva.SolicitanteNombre = null;
+        porOmision.Enviar(nueva);
+        texto = TextoDeTarjeta(t.Cuerpo, out m);
+        Check("T nueva: nombre null = posicion vacia, no corre las demas", "NEW_REQUEST|Initiative|usuario@soriana.com||#0000142|2026-11-19", texto);
+        nueva.SolicitanteEmail = null; nueva.SolicitanteNombre = "Ana";
+        porOmision.Enviar(nueva);
+        texto = TextoDeTarjeta(t.Cuerpo, out m);
+        Check("T nueva: correo null = posicion vacia, se envia igual", "NEW_REQUEST|Initiative||Ana|#0000142|2026-11-19", texto);
+        nueva.SolicitanteEmail = "a@soriana.com"; nueva.SolicitanteNombre = "Ana | Ruiz\r\nDos"; nueva.Fecha = null;
+        porOmision.Enviar(nueva);
+        texto = TextoDeTarjeta(t.Cuerpo, out m);
+        Check("T nueva: | y saltos en el nombre, sin fecha: seis posiciones", "NEW_REQUEST|Initiative|a@soriana.com|Ana / Ruiz  Dos|#0000142|", texto);
+
+        // Aprobar / rechazar: seis campos, sin estado, aunque traigan Fecha.
+        var apF = Rechazo(); apF.Evento = AvisoTeams.SolicitudAprobada; apF.Estado = "APROBADA"; apF.Codigo = "PRB 2026-000123"; apF.Fecha = "2026-11-19";
+        Check("T aprobacion: seis campos exactos (sin estado; Fecha no viaja)",
+              "REQUEST_APPROVED|Initiative|usuario@soriana.com|" + nombre + "|#0000142|PRB 2026-000123", AvisoTeams.ComoTexto(apF));
+        var reF = Rechazo(); reF.Fecha = "2026-11-19";
+        Check("T rechazo: seis campos exactos (sin estado; Fecha no viaja)",
+              "REQUEST_REJECTED|Initiative|usuario@soriana.com|" + nombre + "|#0000142|" + comentario, AvisoTeams.ComoTexto(reF));
+        var apVacio = Rechazo(); apVacio.Evento = AvisoTeams.SolicitudAprobada; apVacio.Codigo = null; apVacio.SolicitanteNombre = null;
+        Check("T aprobacion sin codigo ni nombre: posiciones vacias, seis", "REQUEST_APPROVED|Initiative|usuario@soriana.com||#0000142|", AvisoTeams.ComoTexto(apVacio));
+        var apSin = Rechazo(); apSin.Evento = AvisoTeams.SolicitudAprobada; apSin.SolicitanteEmail = null;
+        Check("T aprobacion sin correo: no se envia (mensaje privado)", ResultadoAvisoTeams.Invalido, porOmision.Enviar(apSin));
 
         var raro = Rechazo(); raro.Comentario = "Falta | el RCA\r\nY\tya"; raro.SolicitanteNombre = "Ana | Ruiz";
         porOmision.Enviar(raro);
         texto = TextoDeTarjeta(t.Cuerpo, out m);
         var partes = texto == null ? new string[0] : texto.Split('|');
-        Check("T | y saltos no corren posiciones", 7, partes.Length);
-        Check("T | del nombre cambia a /", "Ana / Ruiz", partes.Length == 7 ? partes[3] : null);
-        Check("T | y CR/LF/tab del comentario", "Falta / el RCA  Y ya", partes.Length == 7 ? partes[6] : null);
+        Check("T | y saltos no corren posiciones", 6, partes.Length);
+        Check("T | del nombre cambia a /", "Ana / Ruiz", partes.Length == 6 ? partes[3] : null);
+        Check("T | y CR/LF/tab del comentario", "Falta / el RCA  Y ya", partes.Length == 6 ? partes[5] : null);
     }
 
     static void Formato()

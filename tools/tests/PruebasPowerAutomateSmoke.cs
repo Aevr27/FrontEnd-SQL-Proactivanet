@@ -4,7 +4,7 @@
 //   A  Aviso: cada evento con sus datos sinteticos (TEST-PA-00x, estado,
 //      codigo solo al aprobar, comentario solo al rechazar); otro evento = null.
 //   N  Nombre fijo "Usuario de Prueba" en los tres eventos y las tres fuentes;
-//      texto exacto de siete posiciones dentro del TextBlock de la Adaptive Card.
+//      texto exacto de seis posiciones dentro del TextBlock de la Adaptive Card.
 //   D  Destinatario: TeamsPruebaDestinatario valido manda; invalido = null
 //      (no cae a otra fuente); CatPersona resuelta (con nombre); sin ella
 //      UsuariosAdmin; fuentes que lanzan; sin cuenta = null. Nunca se arma
@@ -77,7 +77,7 @@ static class PruebasPowerAutomateSmoke
         Check("A aprobada: estado", "APROBADA", a.Estado);
         Check("A aprobada: codigo ficticio", "TEST-2026-000001", a.Codigo);
         Check("A aprobada: sin comentario", true, a.Comentario == null);
-        Check("A aprobada: posicion 6 del texto", "TEST-2026-000001", AvisoTeams.ComoTexto(a).Split('|')[6]);
+        Check("A aprobada: posicion 5 del texto", "TEST-2026-000001", AvisoTeams.ComoTexto(a).Split('|')[5]);
 
         var r = PruebasPowerAutomate.Aviso("REQUEST_REJECTED", d);
         Check("A rechazo: numero", "TEST-PA-003", r.RequestNumber);
@@ -85,7 +85,7 @@ static class PruebasPowerAutomateSmoke
         Check("A rechazo: comentario ficticio", "Esta es una prueba de rechazo desde localhost.", r.Comentario);
         Check("A rechazo: sin codigo", true, r.Codigo == null);
         Check("A rechazo: texto completo",
-              "REQUEST_REJECTED|Initiative|dev@soriana.com|Usuario de Prueba|TEST-PA-003|RECHAZADA|Esta es una prueba de rechazo desde localhost.",
+              "REQUEST_REJECTED|Initiative|dev@soriana.com|Usuario de Prueba|TEST-PA-003|Esta es una prueba de rechazo desde localhost.",
               AvisoTeams.ComoTexto(r));
 
         Check("A evento desconocido = null", true, PruebasPowerAutomate.Aviso("REQUEST_DELETED", d) == null);
@@ -96,18 +96,21 @@ static class PruebasPowerAutomateSmoke
     // N  El nombre es SIEMPRE NombrePrueba en los tres eventos, tambien cuando
     //    el destinatario no trae nombre (CONFIGURACION / USUARIOSADMIN: el caso
     //    que en Teams salia "Hola,") o trae otro (CATPERSONA). Se compara el
-    //    TEXTO COMPLETO del contrato que ya funciona con Power Automate
-    //    (evento|tipo|correo|nombre|numero|estado|codigo-o-comentario, siete
-    //    posiciones) y que viaja en el TextBlock de la Adaptive Card del sobre
-    //    por omision (formato "texto"): solo la posicion 3 deja de ir vacia.
+    //    TEXTO COMPLETO de los seis campos de cada evento
+    //    (evento|tipo|correo|nombre|numero|fecha-codigo-o-comentario, sin
+    //    estado) que viaja en el TextBlock de la Adaptive Card del sobre por
+    //    omision ("texto").
     static void Nombres()
     {
         Check("N constante", "Usuario de Prueba", PruebasPowerAutomate.NombrePrueba);
+        // Reloj fijo: 2026-11-20 03:30 UTC = 2026-11-19 21:30 en UTC-06.
+        AvisoNuevaSolicitud.AhoraUtc = delegate { return new DateTime(2026, 11, 20, 3, 30, 0, DateTimeKind.Utc); };
         var esperados = new Dictionary<string, string>
         {
-            { "NEW_REQUEST", "NEW_REQUEST|Initiative|p@soriana.com|Usuario de Prueba|TEST-PA-001|ENVIADA|" },
-            { "REQUEST_APPROVED", "REQUEST_APPROVED|Initiative|p@soriana.com|Usuario de Prueba|TEST-PA-002|APROBADA|TEST-2026-000001" },
-            { "REQUEST_REJECTED", "REQUEST_REJECTED|Initiative|p@soriana.com|Usuario de Prueba|TEST-PA-003|RECHAZADA|Esta es una prueba de rechazo desde localhost." },
+            // NEW_REQUEST: sus seis campos, como el real.
+            { "NEW_REQUEST", "NEW_REQUEST|Initiative|p@soriana.com|Usuario de Prueba|TEST-PA-001|2026-11-19" },
+            { "REQUEST_APPROVED", "REQUEST_APPROVED|Initiative|p@soriana.com|Usuario de Prueba|TEST-PA-002|TEST-2026-000001" },
+            { "REQUEST_REJECTED", "REQUEST_REJECTED|Initiative|p@soriana.com|Usuario de Prueba|TEST-PA-003|Esta es una prueba de rechazo desde localhost." },
         };
         var destinos = new[]
         {
@@ -123,7 +126,8 @@ static class PruebasPowerAutomateSmoke
                 var caso = "N " + par.Key + " / " + d.Fuente;
                 var texto = AvisoTeams.ComoTexto(a);
                 Check(caso + ": texto exacto", par.Value, texto);
-                Check(caso + ": siete posiciones", 7, texto.Split('|').Length);
+                Check(caso + ": seis posiciones", 6, texto.Split('|').Length);
+                Check(caso + ": sin estado", false, texto.Contains("ENVIADA") || texto.Contains("APROBADA") || texto.Contains("RECHAZADA"));
                 Check(caso + ": posicion 3 = nombre fijo", "Usuario de Prueba", texto.Split('|')[3]);
 
                 // El sobre que se manda (Adaptive Card): una tarjeta, un TextBlock con ese texto.

@@ -336,20 +336,45 @@ Pruebas automáticas (sin red ni IIS; no prueban la entrega real): `tools/tests/
 
 ### Avisos de Power Automate (`TeamsWebhookUrl`)
 
-`App_Code/AvisoTeams.cs` manda NEW_REQUEST, REQUEST_APPROVED y REQUEST_REJECTED al trigger HTTP de Power Automate. **Todavía ningún flujo real lo llama**; hoy solo lo usa el panel de pruebas local (abajo).
+`App_Code/AvisoTeams.cs` manda NEW_REQUEST, REQUEST_APPROVED y REQUEST_REJECTED al trigger HTTP de Power Automate. **Hoy solo NEW_REQUEST está conectado a los flujos reales** (abajo); aprobar y rechazar solo los manda el panel de pruebas local.
 
 - **URL:** `TeamsWebhookUrl` en `appSettings` del `Web.config` del servidor. La firma `sig=` del URL es la credencial (trigger *Anyone*): nunca en el repositorio, en el navegador ni en la traza. Vacía o ausente = apagado.
 - **Formato (`TeamsWebhookFormato`):**
-  - `texto` (por omisión): mensaje de webhook de Teams con una Adaptive Card y un `TextBlock`; el flujo lee `attachments[0].content.body[0].text` = `evento|tipo|correo|nombre|numero|estado|codigo-o-comentario` (posición 6: Código al aprobar, comentario al rechazar, vacía en una nueva). Un `|` dentro de un valor se cambia por `/` y los saltos de línea por espacios.
+  - `texto` (por omisión): mensaje de webhook de Teams con una Adaptive Card y un `TextBlock`; el flujo lee `attachments[0].content.body[0].text`. Un `|` dentro de un valor se cambia por `/` y los saltos de línea por espacios; un valor vacío deja su posición vacía (nunca corre las demás).
+    - Los tres eventos, **seis campos, sin estado** (el evento ya lo dice): `evento|tipo|correo|nombre|numero|<5>`.
+    - NEW_REQUEST (chat de revisores): `<5>` = fecha `aaaa-mm-dd`. Tipo `Initiative` = iniciativa nueva, `Change request` = solicitud de cambio.
+    - REQUEST_APPROVED (mensaje privado): `<5>` = Código de la iniciativa.
+    - REQUEST_REJECTED (mensaje privado): `<5>` = comentario del revisor.
   - `json`: `{ evento, tipo, solicitanteEmail, solicitanteNombre, requestNumber, estado, codigo, comentario }` (las ocho llaves siempre, `null` si no aplica). Antes de usarlo hay que cambiar el flujo: el trigger con el esquema de esas ocho llaves (o *Parse JSON*), y las expresiones que hoy hacen `split(..., '|')[n]` pasan a `triggerBody()?['solicitanteEmail']`, etc.
 - **Envío:** síncrono, 5 s de timeout, sin seguir redirecciones; nunca lanza. Los fallos van a la traza de ASP.NET (categoría `AvisoTeams`) sin URL ni datos personales. Requiere salida HTTPS desde el servidor hacia Power Automate (no verificado en la VM).
+
+**NEW_REQUEST real** (`App_Code/AvisoNuevaSolicitud.cs`): al chat de revisores, una vez por solicitud nueva, después del `COMMIT`.
+
+| | Initiative | Change request |
+|---|---|---|
+| Punto | `admin_iniciativas_validar.ashx`, tras `IniciativaService.Solicitar` | `admin_iniciativas_solicitudes.ashx` (`accion=enviar`), tras `Almacen.Enviar`, fuera del `try` |
+| Condición | `Guardada` y `Nuevo` (mismo token = `Nuevo` falso: sin aviso) | `Repetida` falsa (misma llave = sin aviso) |
+| Correo `[2]` | El guardado por el alta (`adm.SolicitudIniciativa.SolicitanteCorreo`) | `SolicitadoPor` → `CatPersona` (una sola persona); si no, y es ADM/MOD, el único `UsuariosAdmin.CorreoUsuario` |
+| Nombre `[3]` | El guardado por el alta (`adm.SolicitudIniciativa.SolicitanteNombre`) | `SolicitadoPor` → el nombre de la cola (`UsuariosAdmin.NombreSolicitante`, luego `CatPersona`) |
+| Número `[4]` | `#0000142` (devuelto por la base) | `#57` (`IdSolicitud`, como la cola) |
+
+- **Fecha `[5]`:** reloj del servidor al avisar, en la zona del sitio (`DashboardDataInfo.UtcAPresentacion`: México, UTC-06 fijo, sin horario de verano), `aaaa-mm-dd`. No depende de la zona de Windows de la VM ni del navegador.
+- **Correo o nombre sin resolver:** su posición vacía (`NEW_REQUEST|Change request|||#57|2026-11-19`); el aviso sale igual. Nunca se arma `cuenta@soriana.com` ni se usa el correo o la cuenta como nombre.
+- **Sin aviso** (la solicitud se responde igual): webhook vacío (ni se consulta la base); validación o base fallan; envío no confirmado (500); reintento; *Modificar* / reemplazar (pendiente de decidir). Si Power Automate falla, la solicitud sigue guardada y la respuesta no cambia.
+- **Power Automate (las tres ramas; cambiarlas a mano):** con `p = split(<texto>, '|')`: `p[1]` Tipo, `p[2]` Correo, `p[3]` Solicitante, `p[4]` Solicitud #, `p[5]` Fecha (NEW_REQUEST) / Código (aprobar) / Comentario (rechazar). Respecto del texto anterior de siete campos, `p[0]`–`p[4]` no cambian; el estado (`p[5]`) desaparece, lo que estaba en `p[6]` pasa a `p[5]`, y `p[6]` ya no existe. En aprobar y rechazar hay que cambiar `p[6]` por `p[5]` y dejar de leer el estado.
+- **Probarlo a mano (local / QA, nunca producción):**
+  1. Primero el botón *Probar nueva solicitud* del panel: manda `NEW_REQUEST|Initiative|<correo de prueba>|Usuario de Prueba|TEST-PA-001|aaaa-mm-dd` y sirve para ajustar el flujo sin crear datos.
+  2. Después, en `http://localhost:8081/admin/iniciativas.html` (contra QA), una **Nueva solicitud** de iniciativa con título que empiece por `PRUEBA PA -`; en el chat de revisores revisar tipo `Initiative`, correo y nombre de quien la envió, `Solicitud #` igual al número que muestra la pantalla y la fecha de hoy (UTC-06).
+  3. Luego una **Solicitud de cambio** sobre una iniciativa de prueba (motivo `PRUEBA PA`); revisar tipo `Change request` y `#id` igual al de la cola.
+  4. Reenviar el mismo borrador (reintento) no debe generar un segundo mensaje.
+  5. Limpiar: un ADM **rechaza** ambas solicitudes desde la pestaña Solicitudes (motivo `Prueba Power Automate`). No se borra nada a mano.
 
 **Panel de pruebas (solo localhost).** *PRUEBAS DE POWER AUTOMATE (SOLO LOCALHOST)* en `admin/admin.html`: tres botones (nueva solicitud, aprobación, rechazo) con datos sintéticos `TEST-PA-001..003`; no lee ni escribe solicitudes. Código: `handlers/admin_pruebas_power_automate.ashx`, `App_Code/PruebasPowerAutomate.cs`, `admin/pruebas-power-automate.js`.
 
 - **Puerta (servidor):** el atajo de desarrollo local completo (`AccesoDesarrolloLocal`: `AdminDevOverride`, `debug="true"`, petición local, IIS Express, base de desarrollo o QA, cuenta en la whitelist) y rol ADM. Fuera de eso el handler responde 404 `SoloLocalhost` y la página no pinta el panel. El POST además pasa por `AccesoAdmin.ExigirMismoOrigen` (CSRF: otra página abierta en la misma máquina recibe 403).
 - **Destinatario de los mensajes privados:** `TeamsPruebaDestinatario` del `Web.config` local; si no, el correo de la cuenta de desarrollo en `CatPersona`, o su `UsuariosAdmin.CorreoUsuario` único. Sin ninguno, no envía. El nombre de los tres avisos es fijo: `Usuario de Prueba` (`PruebasPowerAutomate.NombrePrueba`); en los flujos reales un nombre desconocido sigue viajando vacío.
 - **Usarlo:** en el `Web.config` local, `TeamsWebhookUrl` (y opcionalmente `TeamsPruebaDestinatario`), más lo de *Admin en desarrollo local*; `dev-local.cmd 8081`; abrir `http://localhost:8081/admin/admin.html`.
-- **Pruebas:** `tools/tests/AvisoTeamsSmoke.cs` y `tools/tests/PruebasPowerAutomateSmoke.cs` (sin red externa). La llegada real a Teams se comprueba a mano.
+- **Pruebas:** `tools/tests/AvisoTeamsSmoke.cs`, `tools/tests/PruebasPowerAutomateSmoke.cs`, `tools/tests/AvisoNuevaSolicitudSmoke.cs` y la sección AV de `tools/tests/SolicitudesCambioHttpSmoke.cs` (sin red externa). La llegada real a Teams se comprueba a mano.
 
 ### Application Pool
 
