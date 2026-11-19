@@ -50,7 +50,8 @@
     var datos = el('dl', { 'class': 'job-datos' });
     [['Webhook', estado.webhook_configurado ? 'Configurado' : 'Sin configurar'],
      ['Formato', estado.formato || 'no válido'],
-     ['Destinatario', d ? d.correo + (d.nombre ? ' (' + d.nombre + ')' : '') + ' · ' + d.fuente : 'Sin resolver']
+     ['Destinatario', d ? d.correo + ' · ' + d.fuente : 'Sin resolver'],
+     ['Nombre en el aviso', estado.nombre_prueba || '—']
     ].forEach(function (par) { datos.appendChild(el('dt', null, par[0])); datos.appendChild(el('dd', null, par[1])); });
     tarjeta.appendChild(datos);
 

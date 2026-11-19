@@ -6,7 +6,8 @@
 // SoloLocalhost antes de leer nada: ni estado, ni envio.
 //
 //   GET  ?accion=estado  -> { disponible: true, webhook_configurado, formato,
-//                            destinatario: { correo, nombre, fuente } | null }
+//                            destinatario: { correo, nombre, fuente } | null,
+//                            nombre_prueba }   (el que llevan los tres avisos)
 //   POST ?accion=enviar  evento = NEW_REQUEST | REQUEST_APPROVED | REQUEST_REJECTED
 //        (AccesoAdmin.ExigirMismoOrigen: de otra pagina, aunque sea en esta
 //        misma maquina, 403 OrigenNoPermitido)
@@ -59,6 +60,7 @@ public class AdminPruebasPowerAutomate : IHttpHandler
                     { "formato", AvisoTeams.Sitio.Formato() },
                     { "destinatario", d == null ? null : new Dictionary<string, object>
                         { { "correo", d.Correo }, { "nombre", d.Nombre }, { "fuente", d.Fuente } } },
+                    { "nombre_prueba", PruebasPowerAutomate.NombrePrueba },
                 };
             }
             if (accion != "enviar") return Error(context, 400, "Accion desconocida.", "AccionDesconocida");

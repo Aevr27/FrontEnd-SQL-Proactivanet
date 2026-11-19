@@ -20,6 +20,7 @@
 // la cuenta de desarrollo resuelta en dbo.CatPersona (IdentidadAcuse, la
 // regla de Nueva solicitud); si no, su dbo.UsuariosAdmin.CorreoUsuario
 // unico (CorreoAdmin). Sin ninguno, no se envia: nunca se arma un correo.
+// El NOMBRE del aviso es siempre NombrePrueba, venga de donde venga el correo.
 //
 // PARA QUITARLO: borrar este archivo, el handler, admin/pruebas-power-automate.js,
 // su <script> y su contenedor en admin/admin.html, y la prueba
@@ -39,6 +40,11 @@ public sealed class DestinatarioPrueba
 public static class PruebasPowerAutomate
 {
     public const string ClaveDestinatario = "TeamsPruebaDestinatario";
+    // Nombre FIJO de los tres avisos de prueba. El destinatario de
+    // TeamsPruebaDestinatario o de UsuariosAdmin no trae nombre, y el flujo
+    // saludaba "Hola," vacio. Solo el panel lo usa: en los flujos reales un
+    // nombre desconocido sigue viajando vacio (AvisoTeams no lo inventa).
+    public const string NombrePrueba = "Usuario de Prueba";
 
     public static bool Disponible(HttpContext ctx)
     {
@@ -55,7 +61,7 @@ public static class PruebasPowerAutomate
             Evento = evento,
             Tipo = AvisoTeams.TipoIniciativa,
             SolicitanteEmail = d.Correo,
-            SolicitanteNombre = d.Nombre,
+            SolicitanteNombre = NombrePrueba,
         };
         if (evento == AvisoTeams.NuevaSolicitud)
         {
