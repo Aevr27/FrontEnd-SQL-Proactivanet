@@ -334,6 +334,23 @@ Registro de la aplicación (una vez, en <https://entra.microsoft.com> con cualqu
 
 Pruebas automáticas (sin red ni IIS; no prueban la entrega real): `tools/tests/RcaCorreoPruebaSmoke.cs` (configuración, adjunto, asunto, mensaje, fallos de Microsoft, reintentos, conexión y permisos del handler) , `tools/tests/RcaCorreoSmoke.js` (reglas de la página) y `tools/tests/RcaCorreoHeadlessSmoke.js` (la sección en Chrome con un servidor falso). `RcaCorreoPruebaSmoke` también cifra con DPAPI de verdad y descifra desde otro proceso, como tras un reciclado, y manda con el `SmtpClient` real a un servidor SMTP local (127.0.0.1) para comprobar el mensaje armado y los errores de autenticación, destinatario y conexión. La entrega real se comprueba a mano: conectar la cuenta, guardar destinatarios, enviar y revisar Bandeja de entrada y Enviados del buzón.
 
+### Avisos de Power Automate (`TeamsWebhookUrl`)
+
+`App_Code/AvisoTeams.cs` manda NEW_REQUEST, REQUEST_APPROVED y REQUEST_REJECTED al trigger HTTP de Power Automate. **Todavía ningún flujo real lo llama**; hoy solo lo usa el panel de pruebas local (abajo).
+
+- **URL:** `TeamsWebhookUrl` en `appSettings` del `Web.config` del servidor. La firma `sig=` del URL es la credencial (trigger *Anyone*): nunca en el repositorio, en el navegador ni en la traza. Vacía o ausente = apagado.
+- **Formato (`TeamsWebhookFormato`):**
+  - `texto` (por omisión): mensaje de webhook de Teams con una Adaptive Card y un `TextBlock`; el flujo lee `attachments[0].content.body[0].text` = `evento|tipo|correo|nombre|numero|estado|codigo-o-comentario` (posición 6: Código al aprobar, comentario al rechazar, vacía en una nueva). Un `|` dentro de un valor se cambia por `/` y los saltos de línea por espacios.
+  - `json`: `{ evento, tipo, solicitanteEmail, solicitanteNombre, requestNumber, estado, codigo, comentario }` (las ocho llaves siempre, `null` si no aplica). Antes de usarlo hay que cambiar el flujo: el trigger con el esquema de esas ocho llaves (o *Parse JSON*), y las expresiones que hoy hacen `split(..., '|')[n]` pasan a `triggerBody()?['solicitanteEmail']`, etc.
+- **Envío:** síncrono, 5 s de timeout, sin seguir redirecciones; nunca lanza. Los fallos van a la traza de ASP.NET (categoría `AvisoTeams`) sin URL ni datos personales. Requiere salida HTTPS desde el servidor hacia Power Automate (no verificado en la VM).
+
+**Panel de pruebas (solo localhost).** *PRUEBAS DE POWER AUTOMATE (SOLO LOCALHOST)* en `admin/admin.html`: tres botones (nueva solicitud, aprobación, rechazo) con datos sintéticos `TEST-PA-001..003`; no lee ni escribe solicitudes. Código: `handlers/admin_pruebas_power_automate.ashx`, `App_Code/PruebasPowerAutomate.cs`, `admin/pruebas-power-automate.js`.
+
+- **Puerta (servidor):** el atajo de desarrollo local completo (`AccesoDesarrolloLocal`: `AdminDevOverride`, `debug="true"`, petición local, IIS Express, base de desarrollo o QA, cuenta en la whitelist) y rol ADM. Fuera de eso el handler responde 404 `SoloLocalhost` y la página no pinta el panel. El POST además pasa por `AccesoAdmin.ExigirMismoOrigen` (CSRF: otra página abierta en la misma máquina recibe 403).
+- **Destinatario de los mensajes privados:** `TeamsPruebaDestinatario` del `Web.config` local; si no, el correo de la cuenta de desarrollo en `CatPersona`, o su `UsuariosAdmin.CorreoUsuario` único. Sin ninguno, no envía.
+- **Usarlo:** en el `Web.config` local, `TeamsWebhookUrl` (y opcionalmente `TeamsPruebaDestinatario`), más lo de *Admin en desarrollo local*; `dev-local.cmd 8081`; abrir `http://localhost:8081/admin/admin.html`.
+- **Pruebas:** `tools/tests/AvisoTeamsSmoke.cs` y `tools/tests/PruebasPowerAutomateSmoke.cs` (sin red externa). La llegada real a Teams se comprueba a mano.
+
 ### Application Pool
 
 El Application Pool debe utilizar:

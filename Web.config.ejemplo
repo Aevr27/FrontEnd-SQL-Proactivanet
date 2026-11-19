@@ -105,6 +105,24 @@
          el HTML ni en el JavaScript. Si se deja vacia, el boton no aparece. -->
     <add key="ExperienciaLigaDetalle"    value="" />
 
+    <!-- Avisos de Teams de Admin -> Iniciativas (App_Code/AvisoTeams.cs):
+         URL https del trigger HTTP de Power Automate. La firma (sig=) del
+         URL ES la credencial: solo en el Web.config del servidor, nunca en
+         este ejemplo, en el repositorio, en el HTML ni en el JavaScript.
+         Vacia o ausente: los avisos quedan apagados y nada falla.
+         TeamsWebhookFormato: "texto" (o vacio) = la Adaptive Card con el
+         TextBlock "evento|tipo|correo|nombre|numero|estado|codigo-o-comentario"
+         que el flujo actual ya lee; "json" = campos con nombre (exige cambiar
+         el flujo antes). Ver DASHBOARD.md, "Avisos de Power Automate". -->
+    <add key="TeamsWebhookUrl"          value="" />
+    <add key="TeamsWebhookFormato"      value="texto" />
+
+    <!-- SOLO DESARROLLO LOCAL (panel "Pruebas de Power Automate" de
+         admin/admin.html): TeamsPruebaDestinatario = correo corporativo que
+         recibe los mensajes privados de prueba. NO va en este ejemplo ni en
+         la VM; ausente = la cuenta de desarrollo resuelta en CatPersona o
+         UsuariosAdmin. En la VM el panel no existe (App_Code/PruebasPowerAutomate.cs). -->
+
     <!-- Admin -> Iniciativas (admin/iniciativas.html y los handlers
          admin_iniciativas_*). Cuentas Windows autorizadas, DOMINIO\cuenta,
          separadas por ";". Sin distinguir mayusculas. Una entrada sin
