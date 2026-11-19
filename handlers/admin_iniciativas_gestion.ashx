@@ -23,11 +23,10 @@
 //                       declara la agrupacion de una ligada que no la
 //                       tiene), agregar_categoria / agregar_pct /
 //                       agregar_tipo_iniciativa / agregar_tipo_agrupado
-//                       (paralelos; tipos obligatorios), pares
-//                       fcat_categoria / fcat_analisis (fecha de analisis
-//                       de una ligada: la propia, o la de la iniciativa si
-//                       la categoria la hereda) y quitar_categoria
-//                       (repetible)
+//                       (paralelos; tipos obligatorios) y
+//                       quitar_categoria (repetible). fcat_categoria /
+//                       fcat_analisis se rechazan: la fecha de analisis
+//                       es una por iniciativa (f_analisis)
 //
 //   Con la persistencia APAGADA:
 //   501  valida: { "valida": true, "guardada": false, "plan" (lo que se

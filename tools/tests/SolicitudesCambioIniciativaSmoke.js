@@ -97,7 +97,8 @@ esperar().then(function () {
   // sustituye abrir el panel y la pregunta al usuario.
   var abiertos = [], preguntas = [], respuesta = false, solicitudes = [];
   reg.registro = { iniciativas: [], buscar: function (f) { return f === 'PRB 2026-000099' ? null : { folio: f }; } };
-  reg.abrirDetalle = function (folio) { abiertos.push(folio); reg.abierta = folio; };
+  var origenes = [];
+  reg.abrirDetalle = function (folio, origen) { abiertos.push(folio); origenes.push(origen); reg.abierta = folio; };
   reg.confirmar = function (m) { preguntas.push(m); return respuesta; };
   cola.verDetalle = function (id) { solicitudes.push(id); return Promise.resolve(); };
   cola.cablear();
@@ -105,9 +106,14 @@ esperar().then(function () {
   var codigo = function (folio, id) { return Nodo({ 'data-sol-folio': folio }, Nodo({}, Nodo({ 'data-sol-id': id }))); };
 
   pg.vista = 'solicitudes';
+  var paneles = function () { return ['panel-solicitudes', 'panel-iniciativas'].map(function (id) { return doc.getElementById(id).hidden; }); };
+  var antes = paneles();
   clic(codigo('PRB 2026-000002', '42'));
-  Check('P2 Codigo sin nada abierto: pasa a Iniciativas y abre ESE detalle; la solicitud no se abre',
-    ['iniciativas', ['PRB 2026-000002'], [], []], [pg.vista, abiertos.slice(), preguntas.slice(), solicitudes.slice()]);
+  Check('P2 Codigo sin nada abierto: abre ESE detalle SIN cambiar de pestaña; la solicitud no se abre',
+    ['solicitudes', ['PRB 2026-000002'], [], []], [pg.vista, abiertos.slice(), preguntas.slice(), solicitudes.slice()]);
+  Check('P2b el foco vuelve al boton del Codigo (origen = el nodo data-sol-folio)',
+    'PRB 2026-000002', origenes[0] && origenes[0].getAttribute && origenes[0].getAttribute('data-sol-folio'));
+  Check('P2c el clic no muestra ni oculta paneles de pestaña', JSON.stringify(antes), JSON.stringify(paneles()));
 
   // Detalle con cambios sin guardar: se pregunta; "no" deja el abierto.
   reg.hayCambiosSinGuardar = function () { return true; };
@@ -119,8 +125,8 @@ esperar().then(function () {
     [preguntas.length, /2 cambios sin guardar en PRB 2026-000002/.test(preguntas[0] || ''), abiertos.slice(), reg.abierta]);
   respuesta = true;
   clic(codigo('PRB 2026-000003', '43'));
-  Check('P4 con "si, descartar": abre la iniciativa del Codigo', [2, ['PRB 2026-000002', 'PRB 2026-000003']],
-    [preguntas.length, abiertos.slice()]);
+  Check('P4 con "si, descartar": abre la iniciativa del Codigo, sin cambiar de pestaña',
+    [2, ['PRB 2026-000002', 'PRB 2026-000003'], 'solicitudes'], [preguntas.length, abiertos.slice(), pg.vista]);
 
   pg.vista = 'solicitudes';
   clic(Nodo({ 'data-sol-id': '43' }, Nodo({}, Nodo({ 'data-sol-id': '43' }))));

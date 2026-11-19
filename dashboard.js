@@ -599,10 +599,9 @@ const ETIQUETAS_SEGMENTO = {
    ETIQUETAS_SEGMENTO de aqui arriba, que sabe de segmentos. */
 const ETIQUETAS_DENTRO = Barras.etiquetasDentro(FMT);
 
-/* La misma cifra dentro, pero para las barras que miden un PORCENTAJE y no
-   un conteo -"Reabiertos por grupo"-. Solo cambia el formateador: sin el "%"
-   la cifra suelta dentro de la barra se leeria como tickets. */
-const ETIQUETAS_DENTRO_PCT = Barras.etiquetasDentro(v => `${FMT(v)}%`);
+/* Cifra de una barra que mide un PORCENTAJE y no un conteo -"Reabiertos por
+   grupo"-: sin el "%" la cifra suelta se leeria como tickets. */
+const FMT_PCT = v => `${FMT(v)}%`;
 
 /* Cifra de los EXTREMOS de una linea: el tercer miembro de la familia, el de
    las tendencias. Es el plugin compartido de assets/js/lineas.js atado al FMT
@@ -611,7 +610,7 @@ const ETIQUETAS_DENTRO_PCT = Barras.etiquetasDentro(v => `${FMT(v)}%`);
 const CIFRAS_EXTREMOS = Lineas.cifrasExtremos(FMT);
 
 /* Las mismas cifras para las lineas que miden un PORCENTAJE -cumplimiento de
-   SLA, reabiertos-. Igual que con ETIQUETAS_DENTRO_PCT, solo cambia el
+   SLA, reabiertos-. Igual que con FMT_PCT, solo cambia el
    formateador: sin el "%" la cifra suelta al final de la linea se leeria como
    tickets. */
 const CIFRAS_EXTREMOS_PCT = Lineas.cifrasExtremos(v => `${v}%`);
@@ -1892,11 +1891,30 @@ const TableroSla = (function () {
   // tenia). Con filtros por clic se quitan del detalle con EsPersona, ANTES
   // del Top 15, para que entre otro en su lugar.
 
+  /* Lenguaje visual de las barras horizontales de SLA: productividad lo
+     define y "Donde se pierde el SLA" y "Reabiertos por grupo" lo reutilizan
+     para leerse como un solo conjunto. Esas dos NO tienen tramos dentro /
+     sin SLA / vencidos: su color es su propio semaforo (bueno / advertencia /
+     malo), solo que pintado con esta misma familia verde / amarillo / rojo. */
+  // vencido (2026-11-18): #ff4646, el rojo que Chart.js pintaba al pasar el
+  // mouse sobre el anterior #f87171; lo usa tambien "Mayor cambio" (concentracion.js).
+  const COLOR_TRAMO_SLA = { dentro: '#4CAF50', sinSla: '#eab308', vencido: '#ff4646' };
+  const COLOR_SEM_TRAMO = { sv: COLOR_TRAMO_SLA.dentro, sa: COLOR_TRAMO_SLA.sinSla, sr: COLOR_TRAMO_SLA.vencido };
+  // Radio casi recto: la barra se lee como un bloque, no como pildoras.
+  const BARRA_SLA = { borderRadius: 2, borderSkipped: false };
+  const EJE_VALOR_SLA = {
+    grid: { color: 'rgba(25,25,25,.06)', drawTicks: false },
+    border: { display: false },
+  };
+  const TICKS_VALOR_SLA = { color: '#8a8578', font: { size: 10 }, padding: 6, maxTicksLimit: 6 };
+  const EJE_CATEGORIA_SLA = { grid: { display: false }, border: { display: false } };
+  const TICKS_CATEGORIA_SLA = { color: '#393939', font: { size: 11 }, padding: 6, autoSkip: false };
+
   // Mismos colores y posiciones de siempre; cambia lo que mide cada tramo.
   const PROD_SERIES = [
-    { clave: 'segCer', label: 'Dentro SLA',        color: '#4CAF50' },
-    { clave: 'segAb',  label: 'Sin SLA evaluable', color: '#eab308' },
-    { clave: 'segVen', label: 'SLA vencidos',      color: '#f87171' },
+    { clave: 'segCer', label: 'Dentro SLA',        color: COLOR_TRAMO_SLA.dentro },
+    { clave: 'segAb',  label: 'Sin SLA evaluable', color: COLOR_TRAMO_SLA.sinSla },
+    { clave: 'segVen', label: 'SLA vencidos',      color: COLOR_TRAMO_SLA.vencido },
   ];
 
   // Tramos de una fila. Con el backend nuevo, el reparto dentro / sin SLA /
@@ -1922,16 +1940,20 @@ const TableroSla = (function () {
   // TicketsTotales FUERA, justo despues de la punta de la barra COMPLETA: la
   // posicion la da el tramo visible que llega mas a la derecha y el VALOR es
   // productividadVigente[i].TicketsTotales, el total autoritativo.
+  function estiloCifraPunta(ctx) {
+    ctx.font = Barras.fuente(11, '600');
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#393939';
+    ctx.textAlign = 'left';
+  }
+
   const CIFRA_PUNTA = {
     id: 'cifraPunta',
     afterDatasetsDraw(chart) {
       const ctx = chart.ctx;
       const metas = chart.data.datasets.map((_, d) => chart.getDatasetMeta(d));
       ctx.save();
-      ctx.font = Barras.fuente(11, '600');
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#393939';
-      ctx.textAlign = 'left';
+      estiloCifraPunta(ctx);
       productividadVigente.forEach((r, i) => {
         if (!r || r.TicketsTotales == null) return;
         let punta = null, y = null;
@@ -1949,9 +1971,30 @@ const TableroSla = (function () {
 
   // Aire a la derecha del area para que la cifra de la barra mas larga no la
   // corte la tarjeta: ~7px por caracter del numero mas ancho mas el hueco.
-  function airePunta(valores) {
-    const ancho = Math.max(1, ...valores.map(v => FMT(v).length));
+  function airePunta(valores, fmt = FMT) {
+    const ancho = Math.max(1, ...valores.map(v => fmt(v).length));
     return 12 + ancho * 7;
+  }
+
+  /* La misma cifra en la punta, para barras SIMPLES de una serie. Siempre
+     fuera: dentro, el amarillo de la familia no da contraste con tinta
+     blanca ni carbon en barras cortas. */
+  function cifraPuntaSimple(fmt) {
+    return {
+      id: 'cifraPuntaSimple',
+      afterDatasetsDraw(chart) {
+        const ds = chart.data.datasets[0], meta = chart.getDatasetMeta(0);
+        if (!ds || meta.hidden) return;
+        const ctx = chart.ctx;
+        ctx.save();
+        estiloCifraPunta(ctx);
+        meta.data.forEach((b, i) => {
+          const v = ds.data[i];
+          if (v !== null && v !== undefined) ctx.fillText(fmt(v), b.x + 6, b.y);
+        });
+        ctx.restore();
+      },
+    };
   }
 
   // Nombre del tecnico en el eje Y. Entero mientras quepa en ~un tercio del
@@ -2064,15 +2107,13 @@ const TableroSla = (function () {
         plugins: [CIFRA_PUNTA],
         data: {
           labels: etiquetas,
-          // Grosor: el default compartido de Barras.aplicarDefaults. Radio
-          // casi recto: la barra se lee como un bloque, no como pildoras.
+          // Grosor: el default compartido de Barras.aplicarDefaults.
           datasets: PROD_SERIES.map((s, k) => ({
+            ...BARRA_SLA,
             label: s.label,
             data: series[k],
             backgroundColor: s.color,
             hoverBackgroundColor: s.color,
-            borderRadius: 2,
-            borderSkipped: false,
             stack: 'tickets',
           }))
         },
@@ -2087,12 +2128,10 @@ const TableroSla = (function () {
             tooltip: { enabled: false, external: tooltipProductividad }
           },
           scales: {
-            x: { ...EJE_CONTEO,stacked: true,
-                 grid: { color: 'rgba(25,25,25,.06)', drawTicks: false },
-                 border: { display: false },
-                 ticks: { ...EJE_CONTEO.ticks, color: '#8a8578', font: { size: 10 }, padding: 6, maxTicksLimit: 6 } },
-            y: { stacked: true, grid: { display: false }, border: { display: false },
-                 ticks: { color: '#393939', font: { size: 11 }, padding: 6, autoSkip: false,
+            x: { ...EJE_CONTEO, ...EJE_VALOR_SLA, stacked: true,
+                 ticks: { ...EJE_CONTEO.ticks, ...TICKS_VALOR_SLA } },
+            y: { ...EJE_CATEGORIA_SLA, stacked: true,
+                 ticks: { ...TICKS_CATEGORIA_SLA,
                           callback(v) { return nombreEje(this.getLabelForValue(v), this.chart.width); } } },
           }
         }
@@ -2306,21 +2345,20 @@ const TableroSla = (function () {
     const valores = filasG.map(x => Number(x.Vencidos) || 0);
     const colores = filasG.map(x => {
       const c = x.CumplimientoPct;
-      return (c === null || c === undefined) ? NEUTRO_SEM : COLOR_SEM[SEM(Number(c))];
+      // Sin cumplimiento = el grupo no tiene SLA evaluable: el tooltip lo dice asi.
+      return (c === null || c === undefined) ? COLOR_TRAMO_SLA.sinSla : COLOR_SEM_TRAMO[SEM(Number(c))];
     });
+    const CIFRA = cifraPuntaSimple(FMT);
 
     dibujarGrafico(graficos, 'vencidosGrupo', 'chart-vencidos-grupo',
       () => ({
         type: 'bar',
-        /* Ranking horizontal: misma cifra dentro y mismas medidas que el resto
-           del tablero. El radio lo pone el default compartido (Barras.RADIO);
-           antes esta grafica llevaba un 4 suelto que la dejaba menos
-           redondeada que sus vecinas sin que eso significara nada. El color
-           sigue siendo SEMAFORO de cumplimiento: no se toca. */
-        plugins: [ETIQUETAS_DENTRO],
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores }] },
+        // Color = semaforo de cumplimiento del grupo, con la familia de COLOR_TRAMO_SLA.
+        plugins: [CIFRA],
+        data: { labels: etiquetas, datasets: [{ ...BARRA_SLA, data: valores, backgroundColor: colores }] },
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          layout: { padding: { right: airePunta(valores) } },
           plugins: {
             legend: { display: false },
             tooltip: { callbacks: {
@@ -2335,13 +2373,17 @@ const TableroSla = (function () {
               }
             } },
           },
-          scales: { x: EJE_CONTEO }
+          scales: {
+            x: { ...EJE_CONTEO, ...EJE_VALOR_SLA, ticks: { ...EJE_CONTEO.ticks, ...TICKS_VALOR_SLA } },
+            y: { ...EJE_CATEGORIA_SLA, ticks: TICKS_CATEGORIA_SLA },
+          }
         }
       }),
       gr => {
         gr.data.labels = etiquetas;
         gr.data.datasets[0].data = valores;
         gr.data.datasets[0].backgroundColor = colores;
+        gr.options.layout.padding.right = airePunta(valores);
       });
   }
 
@@ -2363,18 +2405,20 @@ const TableroSla = (function () {
     hint.textContent = 'minimo 50 resueltos';
     const etiquetas = filasG.map(x => String(x.Valor ?? ''));
     const valores = filasG.map(x => Number(x.ReabiertosPct) || 0);
-    const colores = filasG.map(x => COLOR_SEM[SEM_REABIERTOS(x.ReabiertosPct)] || NEUTRO_SEM);
+    const colores = filasG.map(x => COLOR_SEM_TRAMO[SEM_REABIERTOS(x.ReabiertosPct)] || NEUTRO_SEM);
+    const CIFRA = cifraPuntaSimple(FMT_PCT);
 
     dibujarGrafico(graficos, 'reabiertosGrupo', 'chart-reabiertos-grupo',
       () => ({
         type: 'bar',
         /* Igual que "Vencidos por grupo", pero la barra mide un PORCENTAJE:
-           la cifra dentro lleva su "%" (ETIQUETAS_DENTRO_PCT). Medidas y radio
-           del default compartido; el semaforo de reabiertos no se toca. */
-        plugins: [ETIQUETAS_DENTRO_PCT],
-        data: { labels: etiquetas, datasets: [{ data: valores, backgroundColor: colores }] },
+           cifra con FMT_PCT. Color = semaforo de reabiertos (no de SLA), con
+           la familia de COLOR_TRAMO_SLA. */
+        plugins: [CIFRA],
+        data: { labels: etiquetas, datasets: [{ ...BARRA_SLA, data: valores, backgroundColor: colores }] },
         options: {
           indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+          layout: { padding: { right: airePunta(valores, FMT_PCT) } },
           plugins: {
             legend: { display: false },
             tooltip: { callbacks: {
@@ -2386,13 +2430,17 @@ const TableroSla = (function () {
               }
             } },
           },
-          scales: { x: { beginAtZero: true, ticks: { callback: v => `${v}%` } } }
+          scales: {
+            x: { beginAtZero: true, ...EJE_VALOR_SLA, ticks: { ...TICKS_VALOR_SLA, callback: v => `${v}%` } },
+            y: { ...EJE_CATEGORIA_SLA, ticks: TICKS_CATEGORIA_SLA },
+          }
         }
       }),
       gr => {
         gr.data.labels = etiquetas;
         gr.data.datasets[0].data = valores;
         gr.data.datasets[0].backgroundColor = colores;
+        gr.options.layout.padding.right = airePunta(valores, FMT_PCT);
       });
   }
 
@@ -4277,6 +4325,27 @@ const TableroAnalisis = moduloEmbebido({
   },
 });
 
+/* Vista general de servicios (antes "Concentracion de tickets"; carpeta, id y
+   hash #concentracion se quedaron): mismo trato que QARE. Pestaña
+   INDEPENDIENTE de Analisis de servicios: carga sola al montarse
+   (concentracion.ashx con el Slot 0, sin elegir servicio), publica
+   window.TableroConcentracionModulo y, al volver, solo se remiden sus
+   graficas. El refresco automatico vuelve a pedir concentracion.ashx con los
+   mismos filtros (refrescoDe). */
+const TableroConcentracion = moduloEmbebido({
+  nombre: 'Vista general de servicios',
+  base: 'concentracion/',
+  id: 'tab-concentracion',
+  pagina: 'concentracion.html',
+  hoja: 'concentracion.css',
+  guion: 'concentracion.js',
+  alVolver: () => {
+    const modulo = window.TableroConcentracionModulo;
+    if (modulo) modulo.redimensionar();
+  },
+  refresco: refrescoDe('TableroConcentracionModulo'),
+});
+
 /* Orquestacion: mismo trato que Efectividad. El modulo pide
    orquestacion.ashx una vez al montarse (y ?detalle=1 al abrir la lista de
    jobs); al volver a la pestaña se remiden sus graficas de Chart.js, que
@@ -4396,6 +4465,7 @@ const MODULOS = {
   qa: TableroQa,
   qare: TableroQare,
   analisis: TableroAnalisis,
+  concentracion: TableroConcentracion,
   orquestacion: TableroOrquestacion,
   call: pestanaSla('tab-call'),
   tablero: TableroExterno,
@@ -4407,11 +4477,13 @@ const MODULOS = {
    .subnav (dashboard.html) se ve. El primero de la lista es el que abre la
    entrada la primera vez; despues, el ultimo que se vio (`ultimoDeGrupo`,
    solo en memoria, como el estado de la barra). Ninguna clave de aqui puede
-   ser tambien una clave de MODULOS: el hash #observabilidad o #calidad abre
-   el grupo, y #tablero, #orquestacion, #qa o #qare el modulo, como antes. */
+   ser tambien una clave de MODULOS: el hash #observabilidad, #calidad o
+   #servicios abre el grupo, y #tablero, #orquestacion, #qa, #qare,
+   #analisis o #concentracion el modulo, como antes. */
 const GRUPOS = {
   observabilidad: ['orquestacion', 'tablero'],
   calidad: ['qa', 'qare'],
+  servicios: ['concentracion', 'analisis'],
 };
 const ultimoDeGrupo = {};
 

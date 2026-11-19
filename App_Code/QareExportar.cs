@@ -20,7 +20,7 @@
 //   ticket devolvio la TVF, con C1/Lider de la TVF. Sin filtros, la TVF
 //   devuelve el rango entero y salen todas las del SP.
 //
-//   sql/diag_qare_detalle_poblacion.sql (VM, 2026-09-29) comprobo que sin
+//   sql/diag/diag_qare_detalle_poblacion.sql (VM, 2026-09-29) comprobo que sin
 //   filtros SP y TVF traen los MISMOS tickets: 15 dias 4657/4657, 30 dias
 //   11353/11353, 0 diferencias en ambos sentidos y 0 CodigoTicket repetidos.
 //   Tiempos medidos: SP 1.1 s + TVF 0.6 s (15 dias); 3.8 s + 1.0 s (30).

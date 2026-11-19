@@ -153,11 +153,11 @@
           </a>
         </li>
         <li>
-          <a class="mnav" href="../dashboard.html#analisis" title="Análisis de servicios">
+          <a class="mnav" href="../dashboard.html#servicios" title="Servicios">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M7.5 12.5v-2M10.5 12.5v-4M13.5 12.5v-3"/>
             </svg>
-            <span class="mnav-txt">Análisis de servicios</span>
+            <span class="mnav-txt">Servicios</span>
           </a>
         </li>
         <li>
@@ -287,7 +287,7 @@
     <p class="ini-kpis-guia" id="regKpisGuia" hidden>
       <strong>Haz clic en un indicador para filtrar las iniciativas por esa condición.</strong>
       <span>Vuelve a hacer clic en el indicador seleccionado para quitar el filtro.</span>
-      <span>Total muestra todas las iniciativas.</span>
+      <span>Total muestra las iniciativas activas (Estado sin Cerrado).</span>
     </p>
     <div class="kpis ini-kpis" id="regKpis" aria-busy="true"></div>
 
@@ -446,6 +446,7 @@
           <option value="ENVIADA" selected>Pendientes</option>
           <option value="APROBADA">Aprobadas</option>
           <option value="RECHAZADA">Rechazadas</option>
+          <option value="CANCELADA">Canceladas</option>
           <option value="">Todas</option>
         </select>
         <span class="ini-nota" id="snResumen"></span>
@@ -465,12 +466,17 @@
           <option value="PENDIENTE" selected>Pendientes</option>
           <option value="APLICADA">Aplicadas</option>
           <option value="RECHAZADA">Rechazadas</option>
+          <option value="CANCELADA">Canceladas</option>
           <option value="">Todas</option>
         </select>
         <button type="button" class="btn linea chico" id="solActualizar">Actualizar</button>
       </div>
       <div class="ini-cambio-msg" id="solMsg" role="status" aria-live="polite"></div>
       <div id="solLista"></div>
+      <!-- Paginacion (20 por pagina) y el detalle: expandido se mueve a la
+           fila de su solicitud dentro de solLista; si no esta en la pagina,
+           se queda aqui (admin/solicitudes-cambio.js). -->
+      <div id="solPaginas"></div>
       <section class="ini-det-sec ini-cambio ini-sol-detalle" id="solDetalle" aria-live="polite" hidden></section>
     </div>
     </div>
@@ -485,12 +491,42 @@
     <div id="msBloque" hidden>
       <h3>Mis solicitudes de iniciativa</h3>
       <div class="ini-sol-barra">
+        <label for="msFiltro">Estado</label>
+        <select id="msFiltro">
+          <option value="ENVIADA">Pendientes</option>
+          <option value="APROBADA">Aprobadas</option>
+          <option value="RECHAZADA">Rechazadas</option>
+          <option value="CANCELADA">Canceladas</option>
+          <option value="" selected>Todas</option>
+        </select>
         <span class="ini-nota" id="msResumen"></span>
         <button type="button" class="btn linea chico" id="msActualizar">Actualizar</button>
       </div>
       <div class="ini-cambio-msg" id="msMsg" role="status" aria-live="polite"></div>
       <div id="msLista"></div>
       <section class="ini-det-sec ini-sol-detalle" id="msDetalle" aria-live="polite" hidden></section>
+    </div>
+    <!-- Mis solicitudes de cambio (quien no es ADM y puede solicitar): las
+         solicitudes de cambio que envio la propia cuenta, solo lectura
+         (admin/solicitudes-cambio.js, MisCambios; servidor:
+         admin_iniciativas_mis_cambios.ashx, ExigirSolicitud). -->
+    <div id="mcBloque" hidden>
+      <h3>Mis solicitudes de cambio</h3>
+      <div class="ini-sol-barra">
+        <label for="mcFiltro">Estado</label>
+        <select id="mcFiltro">
+          <option value="PENDIENTE">Pendientes</option>
+          <option value="APLICADA">Aplicadas</option>
+          <option value="RECHAZADA">Rechazadas</option>
+          <option value="CANCELADA">Canceladas</option>
+          <option value="" selected>Todas</option>
+        </select>
+        <span class="ini-nota" id="mcResumen"></span>
+        <button type="button" class="btn linea chico" id="mcActualizar">Actualizar</button>
+      </div>
+      <div class="ini-cambio-msg" id="mcMsg" role="status" aria-live="polite"></div>
+      <div id="mcLista"></div>
+      <section class="ini-det-sec ini-cambio ini-sol-detalle" id="mcDetalle" aria-live="polite" hidden></section>
     </div>
   </section>
 
@@ -549,8 +585,9 @@
     <!-- Cambios recientes (admin/cambios-recientes.js, solo ADM): las
          ultimas iniciativas guardadas DESDE EL DASHBOARD, mas reciente
          primero (handlers/admin_iniciativas_recientes.ashx, ExigirAdm). No
-         es bitacora; no incluye SSMS ni la carga del Excel. "Ver" abre el
-         detalle de Iniciativas sin tocar sus filtros. -->
+         es bitacora; no incluye SSMS ni la carga del Excel. El Codigo abre
+         el detalle de Iniciativas aqui mismo (sin cambiar de pestaña ni
+         tocar sus filtros). -->
     <section class="ini-adm-bloque ini-cr" id="crSeccion" aria-labelledby="crTitulo" data-solo-adm hidden>
       <div class="ini-lista-cab">
         <h3 class="ini-lista-titulo" id="crTitulo">Cambios recientes</h3>
@@ -597,6 +634,7 @@
         <button type="button" class="btn" id="hpReintentar">Reintentar</button>
       </div>
       <div class="ini-vacio" id="hpVacio" hidden><strong id="hpVacioTexto"></strong></div>
+      <p class="ini-cambio-msg aviso" id="hpMsg" role="status" aria-live="polite" hidden></p>
       <div class="ini-tabla-caja ini-hp-caja" id="hpLista" aria-live="polite" hidden></div>
     </section>
 
@@ -655,6 +693,14 @@
       <span class="ini-hint">Se valida en el servidor al enviarla · el borrador se conserva al cambiar de vista</span>
     </div>
     <p class="ini-nota" id="iniAvisoDuenos"><b>Importante:</b> La solicitud de iniciativas está disponible únicamente para Product Owners (PO) y Service Owners (SO) vigentes.</p>
+    <!-- Modificar una solicitud enviada (sql/42): REEMPLAZO, no edicion
+         (admin/iniciativas.js, modificarSolicitud). Oculto en una nueva. -->
+    <div class="ini-cambio-msg aviso" id="iniReemplazo" hidden>
+      <p id="iniReemplazoTexto"></p>
+      <div class="campo"><label for="iniMotivoCancelacion">Motivo de la corrección (obligatorio)</label>
+        <textarea id="iniMotivoCancelacion" rows="2" maxlength="2000"></textarea></div>
+      <button type="button" class="btn linea chico" id="iniReemplazoDescartar">Descartar la corrección</button>
+    </div>
 
     <p class="ini-estado" id="iniEstado" role="status" aria-live="polite"></p>
     <div class="ini-error" id="iniError" role="alert" hidden>
@@ -904,7 +950,7 @@
           <legend>Planear la meta por</legend>
           <label><input type="radio" name="admModo" id="admModoPct" value="pct" checked disabled> % de disminución</label>
           <label><input type="radio" name="admModo" id="admModoTickets" value="tickets" disabled> Tickets a resolver</label>
-          <small class="ini-motivo">Lo que escribes no cambia; el otro valor se calcula con los tickets de los últimos 30 días de cada categoría, redondeando hacia abajo. Se guarda el % (dos decimales).
+          <small class="ini-motivo">Lo que escribes no cambia; el otro valor se calcula con los tickets de los últimos 30 días de cada categoría, redondeando hacia arriba. Se guarda el % (dos decimales).
             Tickets a reducir lo calcula la base con esos mismos tickets: si fijas otra volumetría, se avisa lo que guardará la base.</small>
         </fieldset>
         <div id="admCats" aria-live="polite"></div>

@@ -99,6 +99,9 @@ public class AdminIniciativasRegistro : IHttpHandler
             // Subestado: solo ADM lo ve (ExperienciaQueries.OcultarSubestado).
             // Ocultarlo en la pagina no basta: sin ADM no sale del servidor.
             if (AccesoAdmin.Rol(context) != RolAdmin.Adm) ExperienciaQueries.OcultarSubestado(registro);
+            // "Quien" del historial de fechas, como se muestra (App_Code/NombreSolicitante.cs;
+            // usuario no cambia). Un lote para todo el registro.
+            NombreSolicitante.AgregarRegistro(registro);
             // Si "Crear iniciativa" / "Modificar" guardan o solo validan
             // (PersistenciaGestionAdmin, const): la pagina rotula sus botones
             // con esto y nunca promete un guardado que no ocurre.
@@ -114,6 +117,10 @@ public class AdminIniciativasRegistro : IHttpHandler
             registro["solicitudes_datos"] = PersistenciaSolicitudesCambio.SolicitaDatosActiva();
             // Varios cambios en UNA solicitud (tipo varios, sql/34).
             registro["solicitudes_varios"] = PersistenciaSolicitudesCambio.SolicitaVariosActiva();
+            // Reactivar una categoria que estuvo ligada (sql/83): solo con esto
+            // la pagina pide la lista de historicas (accion=historicas). No da
+            // permisos: el servidor y la base deciden al enviar y al aplicar.
+            registro["reactivacion_categorias"] = PersistenciaSolicitudesCambio.ReactivacionActiva();
             // Modificar con PO / SO capturados y quitar categoria (sql/24):
             // sin esto la pagina no los ofrece (el servidor los rechazaria).
             // Se revisa en la base (DeteccionSql24); si no se puede, apagado.

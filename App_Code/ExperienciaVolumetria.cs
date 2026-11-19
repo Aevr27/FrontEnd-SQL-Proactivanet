@@ -57,7 +57,7 @@
 //   En la misma pasada sale VolumenUltimos30 con la expresion de la vista
 //   (FechaRegistro >= ahora Mexico - 30 dias): es la base con la que
 //   adm.usp_GestionAdmin_TicketsReduce calcula el TicketsReduce que se
-//   GUARDA (FLOOR con la propuesta sql/33), y es lo que la pantalla muestra
+//   GUARDA (CEILING con sql/84; antes FLOOR, sql/33), y es lo que la pantalla muestra
 //   en Volumetria (VolumetriaCliente de admin/iniciativa-admin.js).
 //   Estados: ok (> 0), cero (0 real: COUNT sobre dbo.Tickets) y
 //   ruta_invalida. Sin "sin_datos": un conteo directo no tiene ventana.

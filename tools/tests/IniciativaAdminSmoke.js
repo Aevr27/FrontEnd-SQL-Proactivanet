@@ -1391,18 +1391,19 @@ pruebas.push(function () {
   var ed = new A.EdicionAdmin(ini, { rutas: ['/A/Cat 1', '/A/Cat 2', '/B/Cat 4', '/B/Cat 5'],
     tiposIniciativa: ['Mejora', 'Problem'], tiposAgrupado: ['Adopcion', 'Problem'] });
   var html = A.htmlCategoriasEdicion(ed, null);
-  Check('FP1 inicial: la de la iniciativa, sin input; ligada despues: input de fecha con la propia', [true, true, 1],
-    [/28\/10\/2026<\/span> <span class="ini-origen derivado"[^>]*>De la iniciativa/.test(html),
-     /<input type="date" data-edicion-fcat="1" value="2026-11-17">/.test(html), (html.match(/data-edicion-fcat=/g) || []).length]);
-  Check('FP2 la inicial no acepta fecha propia (cambia con la de la iniciativa)', [false, true],
-    [ed.capturarFechaCategoria(0, '2026-12-01'), ed.capturarFechaCategoria(1, '2026-11-30')]);
-  Check('FP3 la fecha propia editada viaja como fcat_*; la de la iniciativa no se toca', [[['fcat_categoria', '/A/Cat 2'], ['fcat_analisis', '2026-11-30']], false],
-    [ed.paraEnviar().filter(function (x) { return /^fcat_/.test(x[0]); }), ed.paraEnviar().some(function (x) { return x[0] === 'f_analisis'; })]);
-  Check('FP4 cambio en la vista previa con el anterior crudo', true,
-    ed.cambios().some(function (c) { return c.clave === 'fechas_categoria' && c.anterior === '2026-11-17' && c.nuevo === '2026-11-30'; }));
-  ed.capturarFechaCategoria(1, '');
-  Check('FP5 vaciar la fecha propia bloquea', true, ed.erroresFormato().some(function (e) { return e.clave === 'fechas_categoria'; }));
-  ed.capturarFechaCategoria(1, '2026-11-17');
+  // Fecha unica por iniciativa: aunque el registro viejo trajera
+  // f_analisis_propia (sql/18), ninguna categoria muestra otra fecha ni la edita.
+  Check('FP1 todas las categorias (inicial, ligada despues, sin agrupacion) muestran la de la iniciativa, sin input ni rotulo de origen', [3, 0, false, false, false],
+    [(html.match(/<span class="ini-cat-fecha">28\/10\/2026<\/span>/g) || []).length,
+     (html.match(/data-edicion-fcat=/g) || []).length, /17\/11\/2026/.test(html), />Propia</.test(html), /De la iniciativa/.test(html)]);
+  Check('FP2 no hay captura de fecha por categoria', [undefined, undefined],
+    [ed.capturarFechaCategoria, ed.categorias.capturarFecha]);
+  ed.capturar('f_analisis', '2026-11-30');
+  Check('FP3 cambiar la fecha de la iniciativa viaja solo como f_analisis, nunca fcat_*', [[['f_analisis', '2026-11-30']], []],
+    [ed.paraEnviar().filter(function (x) { return x[0] === 'f_analisis'; }), ed.paraEnviar().filter(function (x) { return /^fcat_/.test(x[0]); })]);
+  Check('FP4 la vista previa no lista cambios de fecha por categoria', false,
+    ed.cambios().some(function (c) { return c.clave === 'fechas_categoria'; }));
+  ed.capturar('f_analisis', '2026-10-28');
   Check('FP6 sin agrupacion: selector para declararla; las que la tienen la muestran', [true, true],
     [/data-edicion-tipo="2\|tipo_agrupado"/.test(html), /Sin declarar/.test(html)]);
   Check('FP7 declarar la agrupacion de una ligada viaja con su % actual (lista paralela)', [true,
@@ -1770,32 +1771,28 @@ pruebas.push(function () {
     Check('LF3 duplicado (ligada o nueva) rechazado', [false, false, 3],
       [reg.agregarCategoriaEdicion('/a/cat 2').ok, reg.agregarCategoriaEdicion('/A/Cat 1').ok, ed.categorias.filas.length]);
     var html = p.sel('regEdCats').innerHTML;
-    Check('LF4 columna Fecha de analisis: ligada = del problema (compartida); nuevas = PROPIAS calculadas, sin input', [true, true, 0, 2],
-      [/Fecha de análisis<\/th>/.test(html), /01\/12\/2026<\/span> <span class="ini-origen derivado"[^>]*>De la iniciativa/.test(html),
-       (html.match(/data-edicion-fecha="/g) || []).length, (html.match(/title="Se liga el [^"]*">Calculada<\/span>/g) || []).length]);
-    Check('LF4b cada nueva: su dia de ligado (hoy) y su analisis = hoy + 15', [true, true],
-      [/28\/10\/2026<\/span> <span class="ini-origen derivado" title="Se liga el 13\/10\/2026: análisis = ese día \+ 15 días/.test(html),
-       ed.categorias.filas.slice(1).every(function (f) { return f.fCreacion === '2026-10-13' && f.fAnalisis === '2026-10-28'; })]);
+    Check('LF4 columna Fecha de analisis: la ligada y las dos nuevas = la de la iniciativa, sin input ni «Calculada»', [true, 3, 0, 0],
+      [/Fecha de análisis<\/th>/.test(html), (html.match(/<span class="ini-cat-fecha">01\/12\/2026<\/span>/g) || []).length,
+       (html.match(/data-edicion-fecha="|data-edicion-fcat="/g) || []).length, (html.match(/title="Se liga el /g) || []).length]);
+    Check('LF4b una nueva no calcula fecha propia (ni hoy + 15)', [false, true],
+      [/28\/10\/2026/.test(html), ed.categorias.filas.every(function (f) { return f.fAnalisis === undefined; })]);
     editar(p, 'data-edicion-pct', '1', '30');
-    Check('LF5 la ligada no toma fecha propia (usa la del problema)', ['', '2026-10-28', '2026-10-28'],
-      ed.categorias.filas.map(function (f) { return f.fAnalisis || ''; }));
-    Check('LF6 la regla cruza mes y anio', ['2027-01-15', '2026-03-16', ''],
+    Check('LF6 la regla de alta (hoy + 15) sigue para la iniciativa y cruza mes y anio', ['2027-01-15', '2026-03-16', ''],
       [A.FECHAS_GESTION.analisisDesde('2026-12-31'), A.FECHAS_GESTION.analisisDesde('2026-03-01'), A.FECHAS_GESTION.analisisDesde('31/12/2026')]);
-    Check('LF7 fechas calculadas por categoria nueva', [{ categoria: '/A/Cat 1', f_creacion: '2026-10-13', f_analisis: '2026-10-28' },
-                                                       { categoria: '/B/Cat 4', f_creacion: '2026-10-13', f_analisis: '2026-10-28' }],
-      ed.categorias.fechasNuevas());
     FG.hoy = function () { return '2026-11-02'; };
-    Check('LF8 una ligada otro dia lleva SU fecha; las ya agregadas no cambian', [true, ['', '2026-10-28', '2026-10-28', '2026-11-17'], ['', '30', '', '']],
+    Check('LF8 ligar otro dia tampoco da fecha propia; las ya agregadas no cambian', [true, 4, ['', '30', '', '']],
       [(function () { ed.categorias.fijarRutas(['/A/Cat 1', '/A/Cat 2', '/B/Cat 4', '/C/Cat 9']); return reg.agregarCategoriaEdicion('/C/Cat 9').ok; })(),
-       ed.categorias.filas.map(function (f) { return f.fAnalisis || ''; }), ed.categorias.filas.map(function (f) { return f.valor; })]);
+       (p.sel('regEdCats').innerHTML.match(/<span class="ini-cat-fecha">01\/12\/2026<\/span>/g) || []).length,
+       ed.categorias.filas.map(function (f) { return f.valor; })]);
     FG.hoy = hoyOriginal;
     var pares = ed.paraEnviar();
-    Check('LF9 las fechas de categoria NO viajan (las fija el servidor); el codigo no cambia', [false, 'MAP 2026-000003', false],
-      [pares.some(function (x) { return /fecha|f_analisis|f_creacion/.test(x[0]); }), pares[1][1], pares.some(function (x) { return x[0] === 'codigo'; })]);
-    Check('LF10 la vista previa dice la fecha calculada', true,
-      ed.cambios().some(function (c) { return /\/A\/Cat 1 · 30% · análisis 2026-10-28 \(hoy \+ 15 días\)/.test(c.nuevo); }));
-    Check('LF11 nota del modelo: iniciales heredan la de la iniciativa; ligadas despues, la suya (+15)', true,
-      /las categorías iniciales heredan la de la iniciativa y cambian con ella \(Fecha compromiso de Análisis\)\. Una categoría ligada después tiene la suya: el día en que se liga \+ 15 días/.test(p.sel('regEdCats').innerHTML));
+    Check('LF9 ninguna fecha de categoria viaja; el codigo no cambia', [false, 'MAP 2026-000003', false],
+      [pares.some(function (x) { return /fecha|f_analisis|f_creacion|fcat/.test(x[0]); }), pares[1][1], pares.some(function (x) { return x[0] === 'codigo'; })]);
+    Check('LF10 la vista previa dice que usa la de la iniciativa', true,
+      ed.cambios().some(function (c) { return /\/A\/Cat 1 · 30% · análisis: el de la iniciativa/.test(c.nuevo); }));
+    Check('LF11 nota del modelo: una sola fecha, comun a todas, tambien a las que se ligan o reactivan', [true, false],
+      [/la iniciativa tiene una sola y la comparten todas sus categorías, también las que se ligan o se reactivan/.test(p.sel('regEdCats').innerHTML),
+       /tiene la suya/.test(p.sel('regEdCats').innerHTML)]);
     Check('LF12 el registro no cambia', ['2026-12-01', 1], [reg.registro.buscar('MAP 2026-000003').f_analisis,
       reg.registro.buscar('MAP 2026-000003').categorias.length]);
     Check('LF13 una nueva sin % queda incompleta en el borrador, no se rellena', '', ed.categorias.filas[2].valor);
@@ -1999,8 +1996,8 @@ pruebas.push(function () {
 });
 
 // SCT) Solicitar cambios: % o Tickets por categoria. Viaja SIEMPRE el %
-// (pct_valor / agregar_pct); los tickets se convierten con
-// MetaCategoria.pct sobre la volumetria SLOT 0 de la ruta.
+// ENTERO (pct_valor / agregar_pct; 2026-11-05); los tickets se convierten
+// con MetaCategoria.pctEntero sobre la volumetria SLOT 0 de la ruta.
 pruebas.push(function () {
   var R = base.ventana.RegistroIniciativas;
   function Nueva() {
@@ -2016,16 +2013,47 @@ pruebas.push(function () {
   c.fijarPct('/A/Cat 1', '30');
   Check('SCT1 en % todo sigue igual: viaja el % escrito', [['/A/Cat 1'], ['30'], []], [par(c, 'pct_categoria'), par(c, 'pct_valor'), errs(c)]);
 
+  // % ENTERO: minimo 0, maximo 100, sin decimales (ligada y por agregar).
+  var ENTERO = 'escribe un porcentaje entero entre 0 y 100, sin decimales.';
+  [['0', []], ['1', []], ['100', []], ['99', []]].forEach(function (k) {
+    var x = Nueva(); x.fijarPct('/A/Cat 1', k[0]);
+    Check('SCTE limite ' + k[0] + '%: se acepta y viaja tal cual', [[k[0]], k[1]], [par(x, 'pct_valor'), errs(x)]);
+  });
+  ['30.5', '0.5', '99.99', '100.0', '12.', '.5', '101', '1000', '-1', '12,5', 'x'].forEach(function (v) {
+    var x = Nueva(); x.fijarPct('/A/Cat 1', v);
+    Check('SCTE ligada "' + v + '": rechazado con el aviso de % entero', true, errs(x).indexOf('/A/Cat 1: ' + ENTERO) >= 0);
+  });
+  var xn = Nueva(); xn.agregarCategoria('/B/Cat 4'); xn.capturarPctNueva(0, '12.5');
+  Check('SCTE por agregar con decimales: rechazado', true, errs(xn).indexOf('/B/Cat 4: ' + ENTERO) >= 0);
+  xn.capturarPctNueva(0, '12');
+  Check('SCTE por agregar entero: pasa y viaja 12', [[], ['12']], [errs(xn), par(xn, 'agregar_pct')]);
+  var fuenteRegistro = leer('admin/registro-iniciativas.js');
+  Check('SCTE la casilla del % es entera: paso 1, teclado numerico (no step 0.01)', [true, false],
+    [/inputmode="numeric" min="0" max="100" step="1" data-cambio-pct=/.test(fuenteRegistro) && /inputmode="numeric" min="0" max="100" step="1" data-cambio-nueva-pct=/.test(fuenteRegistro),
+     /step="0\.01" data-cambio/.test(fuenteRegistro)]);
+
+  // Historico: el % ACTUAL guardado con decimales (33.33%) se muestra tal
+  // cual; pedir 33 es un cambio (no "igual al actual") y viaja entero.
+  var hx = new R.SolicitudCambio(Ini('PRB 2026-000061', { po_capturado: 'PO 3', so_capturado: 'SO z', categorias: [Cat('/A/Cat 1', 0.3333)] }),
+    { rutas: RUTAS.map(function (f) { return f.categoria; }), rutasEstado: 'ok', filas: RUTAS });
+  hx.elegir('pct'); hx.motivo = 'm'; hx.fijarPct('/A/Cat 1', '33');
+  var Lh = new R.ListaSolicitudCambio(hx.iniciativa, { rutas: RUTAS.map(function (f) { return f.categoria; }), rutasEstado: 'ok', filas: RUTAS });
+  Check('SCTH % actual historico 33.33%: se ve tal cual; 33 entero es un cambio valido y viaja 33',
+    ['33.33', [], ['33'], 'Categorías: /A/Cat 1: 33.33% → 33%'],
+    [hx.pctActual('/A/Cat 1'), errs(hx), par(hx, 'pct_valor'), Lh.texto(R.ListaSolicitudCambio.desdeBorrador(hx)).linea]);
+  hx.fijarPct('/A/Cat 1', '33.33');
+  Check('SCTH ... repetir el historico con decimales tampoco se envia (pide entero)', true, errs(hx).indexOf('/A/Cat 1: ' + ENTERO) >= 0);
+
   c = Nueva();
   c.agregarCategoria('/B/Cat 4');
   c.elegirModoMeta('/B/Cat 4', 'tickets');
   c.fijarVolumetria('/B/Cat 4', { estado: 'ok', valor: 7 });
   c.capturarTickets('/B/Cat 4', '3');
   var r = c.conversion('/B/Cat 4');
-  Check('SCT2 3 tickets de 7: 42.86% exacto (FLOOR de 7 x 42.86% = 3)', ['42.86', true, 3], [r.pct, r.exacto, r.tickets]);
-  Check('SCT2 viaja el % convertido, no los tickets', [['/B/Cat 4'], ['42.86'], false],
+  Check('SCT2 3 tickets de 7: 42% (la proporcion 42.86% hacia abajo; CEILING de 7 x 42% = 2.94 -> 3) exacto', ['42', true, 3], [r.pct, r.exacto, r.tickets]);
+  Check('SCT2 viaja el % entero convertido, no los tickets', [['/B/Cat 4'], ['42'], false],
     [par(c, 'agregar_categoria'), par(c, 'agregar_pct'), JSON.stringify(c.pares()).indexOf('ticket') >= 0]);
-  Check('SCT2 el % enviado es el que guarda la base (fraccion de 4 decimales: Math.Round(42.86/100, 4))', 0.4286,
+  Check('SCT2 el % enviado es el que guarda la base (fraccion de 4 decimales: Math.Round(42/100, 4))', 0.42,
     Math.round(Number(par(c, 'agregar_pct')[0]) / 100 * 10000) / 10000);
   Check('SCT2 la ida y vuelta da los tickets pedidos', 3, I.ticketsDe(7, par(c, 'agregar_pct')[0]));
   Check('SCT2 sin errores', [], errs(c));
@@ -2033,7 +2061,7 @@ pruebas.push(function () {
   c.fijarVolumetria('/B/Cat 4', { estado: 'ok', valor: 100000 });
   c.capturarTickets('/B/Cat 4', '1');
   r = c.conversion('/B/Cat 4');
-  Check('SCT3 1 ticket de 100,000: 0.01% da 10, se dice (exacto false), viaja 0.01', ['0.01', false, 10, ['0.01']],
+  Check('SCT3 1 ticket de 100,000: 1% da 1000, se dice (exacto false), viaja 1', ['1', false, 1000, ['1']],
     [r.pct, r.exacto, r.tickets, par(c, 'agregar_pct')]);
 
   var casos = [
@@ -2062,20 +2090,30 @@ pruebas.push(function () {
   Check('SCT5 ligada en tickets sin escribir = sin cambio (y entonces falta algun cambio)', [[], true],
     [par(lig, 'pct_valor'), errs(lig).some(function (m) { return /al menos una categoría/.test(m); })]);
   lig.capturarTickets('/A/Cat 1', '100');
-  Check('SCT5 ligada: 100 de 418 = 23.93% (FLOOR da 100)', [['23.93'], []], [par(lig, 'pct_valor'), errs(lig)]);
+  Check('SCT5 ligada: 100 de 418 = 24% (el menor entero; FLOOR de 418 x 24% = 100)', [['24'], []], [par(lig, 'pct_valor'), errs(lig)]);
   lig.elegirModoMeta('/A/Cat 1', 'pct');
-  Check('SCT6 volver a %: el % ya calculado se queda y se puede editar', ['23.93', 'pct'], [lig.pcts['/A/Cat 1'], lig.meta('/A/Cat 1').modo]);
+  Check('SCT6 volver a %: el % ya calculado (entero) se queda y se puede editar', ['24', 'pct'], [lig.pcts['/A/Cat 1'], lig.meta('/A/Cat 1').modo]);
   lig.fijarPct('/A/Cat 1', '20');
   Check('SCT6 ... en % manda lo escrito', ['20'], par(lig, 'pct_valor'));
+  lig.fijarPct('/A/Cat 1', '20.5');
+  Check('SCT6 ... en % con decimales: error, no se envia', true, errs(lig).some(function (m) { return /porcentaje entero/.test(m); }));
+  lig.elegirModoMeta('/A/Cat 1', 'tickets');
+  lig.capturarTickets('/A/Cat 1', '100');
+  Check('SCT6 ... y otra vez a tickets: el % vuelve a salir entero de los tickets', [['24'], [], 'tickets'],
+    [par(lig, 'pct_valor'), errs(lig), lig.meta('/A/Cat 1').modo]);
+  lig.capturarTickets('/A/Cat 1', '2.5');
+  Check('SCT6 ... tickets con decimales: error de entero y ningun % sale', [true, []],
+    [errs(lig).some(function (m) { return /número entero/.test(m); }), par(lig, 'pct_valor')]);
+  lig.elegirModoMeta('/A/Cat 1', 'pct'); lig.fijarPct('/A/Cat 1', '20');
 
   var L = new R.ListaSolicitudCambio(Ini('PRB 2026-000060', { po_capturado: 'PO 3', so_capturado: 'SO z', categorias: [Cat('/A/Cat 1', 0.25)] }),
     { rutas: RUTAS.map(function (f) { return f.categoria; }), rutasEstado: 'ok', filas: RUTAS });
   var item = R.ListaSolicitudCambio.desdeBorrador(c);
   var t = L.texto(item);
   Check('SCT7 el resumen dice que se pidio en tickets y con que volumetria (y que no da exacto)', true,
-    /\/B\/Cat 4 \(agregar\): 0\.01% \(pedido como 1 ticket de una volumetría de 100000; con 2 decimales el % no da exacto\)/.test(t.linea));
+    /\/B\/Cat 4 \(agregar\): 1% \(pedido como 1 ticket de una volumetría de 100000; con % entero no da exacto\)/.test(t.linea));
   var vuelta = L.borrador(item);
-  Check('SCT8 editar el cambio de la lista conserva el modo, los tickets y la volumetria', ['tickets', '1', 100000, '0.01'],
+  Check('SCT8 editar el cambio de la lista conserva el modo, los tickets y la volumetria', ['tickets', '1', 100000, '1'],
     [vuelta.meta('/B/Cat 4').modo, vuelta.meta('/B/Cat 4').tickets, vuelta.vols['/B/Cat 4'].valor, vuelta.nuevas[0].valor]);
   c.quitarNueva(0);
   Check('SCT9 quitar la nueva olvida su meta', undefined, c.metas['/B/Cat 4']);
@@ -2126,8 +2164,8 @@ pruebas.push(function () {
       var tk = Elemento('t'); tk.setAttribute('data-cambio-tickets', 'l0'); tk.value = '100';
       var grupoAntes = p.sel('regCambioGrupoPct').innerHTML;
       p.sel('regDetCuerpo').disparar('input', { target: tk });
-      Check('SCD7 escribir tickets solo cambia la pista de esa fila (la casilla no se repinta)', [true, grupoAntes, '23.93'],
-        [/≈ 23\.93% · volumetría \(últimos 30 días\): 418/.test(p.sel('regCambioMeta-l0').innerHTML), p.sel('regCambioGrupoPct').innerHTML,
+      Check('SCD7 escribir tickets solo cambia la pista de esa fila (la casilla no se repinta)', [true, grupoAntes, '24'],
+        [/≈ 24% · volumetría \(últimos 30 días\): 418/.test(p.sel('regCambioMeta-l0').innerHTML), p.sel('regCambioGrupoPct').innerHTML,
          reg.cambio.pcts['/A/Cat 1']]);
       tk.value = '999';
       p.sel('regDetCuerpo').disparar('input', { target: tk });
@@ -2137,9 +2175,9 @@ pruebas.push(function () {
   });
 });
 
-// SGF) Fechas por categoria en Seguimiento: la inicial (sin fechas propias,
-// NULL en dbo.ProblemCategoria) muestra las de la INICIATIVA; la ligada
-// despues, las suyas. Ningun "—" por la herencia.
+// SGF) Fechas por categoria en Seguimiento: TODAS muestran las de la
+// INICIATIVA, aunque un registro viejo traiga f_analisis_propia (sql/18).
+// La ligada despues solo agrega el dia en que se ligo. Ningun "—".
 pruebas.push(function () {
   var p = Pagina();
   return esperar().then(function () {
@@ -2148,11 +2186,12 @@ pruebas.push(function () {
     i.categorias[0].f_creacion_propia = null; i.categorias[0].f_analisis_propia = null;
     i.categorias[1].f_creacion_propia = '2026-11-02'; i.categorias[1].f_analisis_propia = '2026-11-17';
     var ini = p.registro.htmlSeguimientoCategoria(i, '/A/Cat 1'), lig = p.registro.htmlSeguimientoCategoria(i, '/A/Cat 2');
-    Check('SGF1 inicial: Analisis = el de la iniciativa, marcado "De la iniciativa", y dice que hereda', [true, true, false],
-      [/<dt>Análisis<\/dt><dd>28\/10\/2026 <span class="ini-origen derivado">De la iniciativa<\/span>/.test(ini),
-       /Hereda las fechas de la iniciativa/.test(ini), /<dt>Análisis<\/dt><dd>—/.test(ini)]);
-    Check('SGF2 ligada despues: su Analisis, "Propia", y el dia en que se ligo', [true, true],
-      [/<dt>Análisis<\/dt><dd>17\/11\/2026 <span class="ini-origen">Propia<\/span>/.test(lig), /Se ligó el 02\/11\/2026/.test(lig)]);
+    Check('SGF1 inicial: Analisis = el de la iniciativa, sin rotulo de origen', [true, true, false, false],
+      [/<dt>Análisis<\/dt><dd>28\/10\/2026<\/dd>/.test(ini),
+       /Las fechas son las de la iniciativa/.test(ini), /<dt>Análisis<\/dt><dd>—/.test(ini), /De la iniciativa/.test(ini)]);
+    Check('SGF2 ligada despues: TAMBIEN la de la iniciativa (no la vieja 17/11), sin rotulo; dice el dia en que se ligo', [true, false, false, true],
+      [/<dt>Análisis<\/dt><dd>28\/10\/2026<\/dd>/.test(lig),
+       /17\/11\/2026/.test(lig), /Propia|De la iniciativa/.test(lig), /Se ligó el 02\/11\/2026/.test(lig)]);
   });
 });
 
@@ -2173,8 +2212,8 @@ pruebas.push(function () {
         [/ini-det-sem/.test(seg), /<th scope="col" class="num">Cambios<\/th>/.test(seg), /Análisis <span class="ini-sub">estado actual<\/span>/.test(seg)]);
       Check('SG3 selector con las categorias reales; la primera elegida', [true, true, true],
         [/<select id="regSegCategoria" class="ini-dd-categoria">/.test(seg), /<option value="\/A\/Cat 1" selected>/.test(seg), /<option value="\/A\/Cat 2">/.test(seg)]);
-      Check('SG4 bloque de la primera: su % y la fecha de analisis de la iniciativa (hereda)', [true, true, true],
-        [/% disminución<\/dt><dd>50%/.test(seg), /De la iniciativa/.test(seg), /Hereda las fechas de la iniciativa/.test(seg)]);
+      Check('SG4 bloque de la primera: su % y la fecha de analisis de la iniciativa, sin rotulo de origen', [true, false, true],
+        [/% disminución<\/dt><dd>50%/.test(seg), /De la iniciativa/.test(seg), /Las fechas son las de la iniciativa/.test(seg)]);
       var cuerpo = p.sel('regDetCuerpo').innerHTML;
       p.sel('regBuscar').value = 'filtro escrito';
       function segElegir(v) { var t = p.sel('regSegCategoria'); t.value = v; p.sel('regDetCuerpo').disparar('change', { target: t }); }
@@ -2182,7 +2221,7 @@ pruebas.push(function () {
       Check('SG5 cambiar de categoria repinta solo su bloque', [true, true, 'filtro escrito', '/A/Cat 2'],
         [/% disminución<\/dt><dd>25%/.test(p.sel('regSegCatInfo').innerHTML), p.sel('regDetCuerpo').innerHTML === cuerpo, p.sel('regBuscar').value, reg.segCategoria]);
       Check('SG6 sin fecha propia, la de analisis es la de la iniciativa (no se inventa)', [true, true],
-        [/Análisis<\/dt><dd>01\/12\/2026/.test(p.sel('regSegCatInfo').innerHTML), /Hereda las fechas de la iniciativa/.test(p.sel('regSegCatInfo').innerHTML)]);
+        [/Análisis<\/dt><dd>01\/12\/2026/.test(p.sel('regSegCatInfo').innerHTML), /Las fechas son las de la iniciativa/.test(p.sel('regSegCatInfo').innerHTML)]);
       segElegir('/Z/Inventada');
       Check('SG7 algo que no es categoria de la iniciativa: lo dice, no cambia la elegida', [true, '/A/Cat 2'],
         [/no es una categoría vigente/.test(p.sel('regSegCatInfo').innerHTML), reg.segCategoria]);
@@ -2813,20 +2852,20 @@ pruebas.push(function () {
 // MT) Crear: meta en % o en tickets y Volumetria fijada por ADM (sql/26)
 pruebas.push(function () {
   var M = A.MetaCategoria;
-  Check('MT1 % -> tickets: SIEMPRE hacia abajo (FLOOR), entero', [41, 52, 0, 3, 0, 418, 0, 0, 7, 6],
+  Check('MT1 % -> tickets: SIEMPRE hacia arriba (CEILING), entero; exacto no sube; 0% = 0', [42, 53, 1, 4, 0, 418, 0, 1, 7, 7],
     [M.tickets(418, '10'), M.tickets(418, '12.5'), M.tickets(1000, '0.05'), M.tickets(7, '50'), M.tickets(0, '50'),
      M.tickets(418, '100'), M.tickets(418, '0'), M.tickets(7, '9.46'), M.tickets(7, '100'), M.tickets(7, '99.99')]);
-  Check('MT1b los tickets siempre son enteros y nunca pasan del exacto', true,
+  Check('MT1b los tickets siempre son enteros, nunca quedan debajo del exacto y no lo pasan por un ticket entero', true,
     [7, 10, 418, 1247, 30000].every(function (v) {
       return ['0.01', '9.46', '12.5', '33.33', '50', '66.67', '99.99', '100'].every(function (pc) {
         var t = M.tickets(v, pc);
-        return t % 1 === 0 && t >= 0 && t <= v * Number(pc) / 100 + 1e-9 && t > v * Number(pc) / 100 - 1;
+        return t % 1 === 0 && t >= 0 && t >= v * Number(pc) / 100 - 1e-9 && t < v * Number(pc) / 100 + 1;
       });
     }));
   Check('MT2 % -> tickets sin dato o invalido: null (nunca un numero inventado)', [null, null, null, null, null, null],
     [M.tickets(null, '10'), M.tickets(418, ''), M.tickets(418, '101'), M.tickets(418, '-1'), M.tickets(418, '1.234'), M.tickets(-5, '10')]);
-  Check('MT3 tickets -> %: el menor % con dos decimales que da esos tickets (FLOOR), y si es exacto',
-    [['10.05', true, 42], ['57.15', true, 4], ['100', true, 418], ['0', true, 0]],
+  Check('MT3 tickets -> %: la proporcion con dos decimales hacia abajo que da esos tickets (CEILING), y si es exacto',
+    [['10.04', true, 42], ['57.14', true, 4], ['100', true, 418], ['0', true, 0]],
     [[M.pct(418, '42').pct, M.pct(418, '42').exacto, M.pct(418, '42').tickets], [M.pct(7, 4).pct, M.pct(7, 4).exacto, M.pct(7, 4).tickets],
      [M.pct(418, '418').pct, M.pct(418, '418').exacto, M.pct(418, '418').tickets], [M.pct(418, '0').pct, M.pct(418, '0').exacto, M.pct(418, '0').tickets]]);
   var grande = M.pct(200000, '1');
@@ -2849,19 +2888,19 @@ pruebas.push(function () {
   cats.sincronizarCalculadas(vol);
   var f = cats.filas[0];
   cats.capturarPct(0, '10');
-  Check('MT7 modo %: el % escrito y los tickets calculados con la volumetria calculada (418 x 10% = 41.8 -> 41)', ['10', 'pct', '= 41 tickets de 418'],
+  Check('MT7 modo %: el % escrito y los tickets calculados con la volumetria calculada (418 x 10% = 41.8 -> 42)', ['10', 'pct', '= 42 tickets de 418'],
     [f.valor, f.fuente, cats.meta(f).texto]);
   cats.elegirModo('tickets');
-  Check('MT8 cambiar a tickets no convierte ni toca lo escrito: % igual, casilla de tickets con los calculados', ['tickets', '10', 'pct', '41'],
+  Check('MT8 cambiar a tickets no convierte ni toca lo escrito: % igual, casilla de tickets con los calculados', ['tickets', '10', 'pct', '42'],
     [cats.modo, f.valor, f.fuente, cats.ticketsVista(f)]);
   cats.capturarTickets(0, '100');
-  Check('MT9 escribir tickets: el % sale de ellos (100 / 418 -> 23.93%, que da 100) y es exacto', ['23.93', 'tickets', '100', '≈ 23.93% de 418'],
+  Check('MT9 escribir tickets: el % sale de ellos (100 / 418 = 23.92% hacia abajo, que da 100) y es exacto', ['23.92', 'tickets', '100', '≈ 23.92% de 418'],
     [f.valor, f.fuente, cats.ticketsVista(f), cats.meta(f).texto]);
   cats.capturarVolumen(0, '1000');
   Check('MT10 cambiar la volumetria: los tickets escritos se quedan, el % se recalcula; el modo no cambia', ['10', '100', 'tickets'],
     [f.valor, f.tickets, cats.modo]);
   cats.capturarVolumen(0, '');
-  Check('MT11 volumetria vacia = vuelve a la calculada', ['23.93', 418], [f.valor, cats.volumen(f)]);
+  Check('MT11 volumetria vacia = vuelve a la calculada', ['23.92', 418], [f.valor, cats.volumen(f)]);
   cats.capturarVolumen(0, '-5');
   var errs = cats.erroresFormato().map(function (e) { return e.clave; });
   Check('MT12 volumetria invalida: sin denominador; % vacio y dos errores (volumetria y tickets), nada se manda a medias', ['', true, true],
@@ -2911,15 +2950,15 @@ pruebas.push(function () {
     var salida = Elemento('out'); caja.querySelector = function (s) { return s === '[data-crear-meta="0"]' ? salida : null; };
     var t = Elemento('t'); t.setAttribute('data-crear-pct', '0'); t.value = '10';
     caja.disparar('input', { target: t });
-    Check('MT23 escribir el %: solo se actualiza lo calculado de esa fila (no la casilla)', ['= 41 tickets de 418', html],
+    Check('MT23 escribir el %: solo se actualiza lo calculado de esa fila (no la casilla)', ['= 42 tickets de 418', html],
       [salida.textContent, caja.innerHTML]);
     Check('MT24 sin volumetria fijada no viaja la volumetria (default de siempre)', false,
       v.borrador.paraEnviar().some(function (par) { return par[0] === 'volumetria'; }));
     var tv = Elemento('tv'); tv.setAttribute('data-crear-vol', '0'); tv.value = '1500';
     caja.disparar('input', { target: tv });
     var pares = v.borrador.paraEnviar();
-    Check('MT25 fijarla: viaja como volumetria y el % es el escrito; avisa lo que guardara la base (FLOOR(418 x 10%) = 41)',
-      [['volumetria', '1500'], ['cat_pct', '10'], '= 150 tickets de 1,500 · la base guardará 41 en Tickets a reducir (calcula sobre los últimos 30 días: 418)'],
+    Check('MT25 fijarla: viaja como volumetria y el % es el escrito; avisa lo que guardara la base (CEILING(418 x 10%) = 42)',
+      [['volumetria', '1500'], ['cat_pct', '10'], '= 150 tickets de 1,500 · la base guardará 42 en Tickets a reducir (calcula sobre los últimos 30 días: 418)'],
       [pares.filter(function (x) { return x[0] === 'volumetria'; })[0], pares.filter(function (x) { return x[0] === 'cat_pct'; })[0], salida.textContent]);
     var radio = p.sel('admModoTickets'); radio.value = 'tickets'; radio.checked = true; radio.disparar('change');
     html = caja.innerHTML;
@@ -2929,7 +2968,7 @@ pruebas.push(function () {
     var tk = Elemento('tk'); tk.setAttribute('data-crear-tickets', '0'); tk.value = '200';
     caja.disparar('input', { target: tk });
     pares = v.borrador.paraEnviar();
-    Check('MT27 escribir tickets: viaja el % equivalente (200 / 1500 -> 13.34%, que da 200), y que es exacto', [['cat_pct', '13.34'], '≈ 13.34% de 1,500'],
+    Check('MT27 escribir tickets: viaja el % equivalente (200 / 1500 = 13.33% hacia abajo, que da 200), y que es exacto', [['cat_pct', '13.33'], '≈ 13.33% de 1,500'],
       [pares.filter(function (x) { return x[0] === 'cat_pct'; })[0], salida.textContent.split(' · ')[0]]);
     tv.value = '200000'; caja.disparar('input', { target: tv });
     tk.value = '1'; caja.disparar('input', { target: tk });
@@ -2962,7 +3001,7 @@ pruebas.push(function () {
       v2.elegirModo('tickets');
       var tk = Elemento('tk'); tk.setAttribute('data-crear-tickets', '0'); tk.value = '42';
       p2.sel('admCats').disparar('input', { target: tk });
-      Check('MT31 sin sql/26, tickets con la calculada: 42 / 418 = 10.05%', ['cat_pct', '10.05'],
+      Check('MT31 sin sql/26, tickets con la calculada: 42 / 418 = 10.04% (hacia abajo, da 42)', ['cat_pct', '10.04'],
         v2.borrador.paraEnviar().filter(function (x) { return x[0] === 'cat_pct'; })[0]);
       // Modificar (ADM): % o tickets por categoria, volumetria nunca editable.
       var reg = p2.registro;
@@ -2987,9 +3026,9 @@ pruebas.push(function () {
 // ---------------------------------------------------------------------------
 pruebas.push(function () {
   var M = A.MetaCategoria;
-  Check('MV1 % -> tickets: 2.5% de 1000 = 25; 10.05% de 418 = 42; hacia abajo (5% de 10 = 0.5 -> 0)', [25, 42, 0],
+  Check('MV1 % -> tickets: 2.5% de 1000 = 25 (exacto, no sube); 10.05% de 418 = 42.009 -> 43; hacia arriba (5% de 10 = 0.5 -> 1)', [25, 43, 1],
     [M.tickets(1000, '2.5'), M.tickets(418, '10.05'), M.tickets(10, '5')]);
-  Check('MV1b el caso reportado: volumen 7 con 9.46% = 0 y con 100% = 7', [0, 7], [M.tickets(7, '9.46'), M.tickets(7, '100')]);
+  Check('MV1b el caso reportado: volumen 7 con 9.46% = 0.66 -> 1 y con 100% = 7', [1, 7], [M.tickets(7, '9.46'), M.tickets(7, '100')]);
   Check('MV2 % -> tickets, bordes: 0%, 100%, vol 0, % vacio o sin volumetria = null', [0, 1000, 0, null, null],
     [M.tickets(1000, '0'), M.tickets(1000, '100'), M.tickets(0, '50'), M.tickets(1000, ''), M.tickets(null, '10')]);
   var a = M.pct(1000, '25'), b = M.pct(1000, '1000'), c = M.pct(1000, '0');
@@ -3077,7 +3116,7 @@ pruebas.push(function () {
     Check('MV18 tickets vacios: % vacio (sin meta), sin error de tickets', ['', false],
       [nueva.valor, ed.erroresFormato().some(function (e) { return e.clave === 'tickets'; })]);
     ed.capturarPct(1, '12.5');
-    Check('MV19 volver a % (escribir el %): fuente pct, los tickets se derivan hacia abajo (12.5% de 60 = 7.5 -> 7)', ['pct', '7'],
+    Check('MV19 volver a % (escribir el %): fuente pct, los tickets se derivan hacia arriba (12.5% de 60 = 7.5 -> 8)', ['pct', '8'],
       [nueva.fuente, ed.categorias.ticketsVista(nueva)]);
     var ed0 = new A.EdicionAdmin(Ini('PRB 2026-000191', { categorias: [] }), { rutas: ['/Z'] });
     ed0.categorias.agregar('/Z');
@@ -3110,8 +3149,8 @@ pruebas.push(function () {
     Check('MW3 escribir tickets: % derivado (209 / 418 = 50%), sin repintar la tabla (la casilla no se pisa)', ['50', '209', true],
       [ed.categorias.filas[0].valor, ed.categorias.filas[0].tickets, p.sel('regEdCats').innerHTML === antes]);
     editar(p, 'data-edicion-tickets', '0', '100');
-    Check('MW4 ... y es un cambio de % de la ligada (100 / 418 -> 23.93%, el menor que da 100)', true,
-      ed.cambios().some(function (c) { return c.clave === 'pct' && /^23\.93 \(meta: 100 tickets\)$/.test(c.nuevo); }));
+    Check('MW4 ... y es un cambio de % de la ligada (100 / 418 = 23.92% hacia abajo, que da 100)', true,
+      ed.cambios().some(function (c) { return c.clave === 'pct' && /^23\.92 \(meta: 100 tickets\)$/.test(c.nuevo); }));
     // Quitar sin sql/24 (el registro de prueba no la trae): marcado a mano,
     // Guardar no envia nada y lo escrito se queda.
     ed.categorias.quitar(1);
@@ -3202,6 +3241,110 @@ pruebas.push(function () {
   ed.categorias.capturarPct(0, '40');
   Check('HJ5 su % sigue editable y viaja con la ruta guardada, tal cual', ['pct_categoria', carpeta],
     ed.paraEnviar().filter(function (p) { return p[0] === 'pct_categoria'; })[0]);
+});
+
+// ---------------------------------------------------------------------------
+// RH) sql/83: ADM reactiva una categoria que ESTUVO ligada (la misma fila).
+//     La clasificacion historica no vacia se conserva (solo lectura) y solo
+//     se elige la que falta; las fechas son las originales; lo que viaja
+//     sigue siendo agregar_categoria.
+// ---------------------------------------------------------------------------
+pruebas.push(function () {
+  var ini = Ini('PRB 2026-000078', { categorias: [Cat('/A/Cat 1', 0.3)] });
+  var ed = new A.EdicionAdmin(ini, { rutas: ['/A/Cat 1', '/A/Hist', '/A/Nueva'], pos: ['PO 1'], sos: ['SO x'],
+                                     tiposIniciativa: ['Problem', 'Mejora'], tiposAgrupado: ['Problem', 'Mejora'] });
+  Check('RH0 sin historicas: agregar se ve y viaja como siempre (Nueva)', [true, true],
+    [ed.categorias.agregar('/A/Hist').ok, /ini-cat-estado nueva">Nueva/.test(A.htmlCategoriasEdicion(ed, null))]);
+  ed.categorias.quitar(1);
+  ed.categorias.fijarHistoricas([{ categoria: '/A/Hist', tipo_iniciativa: 'Problem', tipo_agrupado: null, f_creacion: '2026-01-05', f_analisis: '2026-01-20' }]);
+  ed.categorias.agregar('/A/Hist');
+  ed.categorias.agregar('/A/Nueva');
+  var h = A.htmlCategoriasEdicion(ed, null);
+  Check('RH1 la historica: «Reactivar (estuvo ligada)», no «Nueva»; la otra sigue Nueva', [true, true],
+    [/\/A\/Hist<\/span> <span class="ini-cat-estado reactivar"[^>]*>Reactivar \(estuvo ligada\)/.test(h), /\/A\/Nueva<\/span> <span class="ini-cat-estado nueva">Nueva/.test(h)]);
+  Check('RH2 la Clasificacion historica se conserva (solo lectura); la Agrupacion que falta se elige', [true, false, true],
+    [/Problem <span class="ini-origen"[^>]*>Se conserva/.test(h), /data-edicion-tipo="1\|tipo_iniciativa"/.test(h), /data-edicion-tipo="1\|tipo_agrupado"/.test(h)]);
+  // La historica trae f_analisis 2026-01-20 (FechaAnalisisCategoria vieja):
+  // al reactivarse NO la recupera; usa la de la iniciativa.
+  Check('RH3 reactivada: la fecha de la iniciativa, no la vieja de la categoria', [false, false, 3],
+    [/20\/01\/2026/.test(h), />Original</.test(h), (h.match(/<span class="ini-cat-fecha">/g) || []).length]);
+  Check('RH4 capturar la Clasificacion historica no se acepta; la que falta si', [false, true],
+    [ed.categorias.capturarTipo(1, 'tipo_iniciativa', 'Mejora'), ed.categorias.capturarTipo(1, 'tipo_agrupado', 'Mejora')]);
+  var cambio = ed.categorias.cambios().filter(function (c) { return c.nuevo.indexOf('/A/Hist') === 0; })[0];
+  Check('RH5 pendiente: «Reactivar categoría» con la clasificacion efectiva y el analisis de la iniciativa', ['Reactivar categoría', true, true, false],
+    [cambio.rotulo, cambio.nuevo.indexOf('Problem / Mejora') >= 0, cambio.nuevo.indexOf('análisis: el de la iniciativa') >= 0,
+     cambio.nuevo.indexOf('2026-01-20') >= 0]);
+  ed.categorias.capturarPct(1, '20');
+  var pares = ed.paraEnviar().filter(function (p) { return /^agregar_/.test(p[0]); });
+  Check('RH6 lo que viaja sigue siendo agregar_categoria; la Clasificacion historica va vacia (la base la conserva)',
+    [['agregar_categoria', '/A/Hist'], ['agregar_pct', '20'], ['agregar_tipo_iniciativa', ''], ['agregar_tipo_agrupado', 'Mejora']],
+    pares.slice(0, 4));
+  // Al reves (falta la Clasificacion) y completa (no se elige nada).
+  var ed2 = new A.EdicionAdmin(ini, { rutas: ['/A/Cat 1', '/A/Hist2', '/A/Hist3'], pos: ['PO 1'], sos: ['SO x'],
+                                      tiposIniciativa: ['Problem', 'Mejora'], tiposAgrupado: ['Problem', 'Mejora'] });
+  ed2.categorias.fijarHistoricas([{ categoria: '/A/Hist2', tipo_iniciativa: null, tipo_agrupado: 'Problem', f_creacion: '2026-02-01', f_analisis: '2026-02-16' },
+                                  { categoria: '/A/Hist3', tipo_iniciativa: 'Problem', tipo_agrupado: 'Problem', f_creacion: '2026-03-01', f_analisis: '2026-03-16' }]);
+  ed2.categorias.agregar('/A/Hist2');
+  ed2.categorias.agregar('/A/Hist3');
+  var h2 = A.htmlCategoriasEdicion(ed2, null);
+  Check('RH7 falta solo la Clasificacion: ese selector se puede usar; la Agrupacion historica es solo lectura', [true, false, true, false],
+    [/data-edicion-tipo="1\|tipo_iniciativa"/.test(h2), /data-edicion-tipo="1\|tipo_agrupado"/.test(h2),
+     ed2.categorias.capturarTipo(1, 'tipo_iniciativa', 'Mejora'), ed2.categorias.capturarTipo(1, 'tipo_agrupado', 'Mejora')]);
+  Check('RH8 clasificacion historica completa: ningun selector; nada se captura; ninguna muestra su fecha vieja de categoria', [false, false, false, false, false, false],
+    [/data-edicion-tipo="2\|tipo_iniciativa"/.test(h2), /data-edicion-tipo="2\|tipo_agrupado"/.test(h2),
+     ed2.categorias.capturarTipo(2, 'tipo_iniciativa', 'Mejora'), ed2.categorias.capturarTipo(2, 'tipo_agrupado', 'Mejora'),
+     /16\/02\/2026<\/span> <span class="ini-origen"[^>]*>Original/.test(h2), /16\/03\/2026<\/span> <span class="ini-origen"[^>]*>Original/.test(h2)]);
+});
+
+// ---------------------------------------------------------------------
+// RC: Tickets a reducir redondeado HACIA ARRIBA (CEILING, 2026-11-10).
+// Los casos donde CEILING, ROUND (mitad arriba) y FLOOR dan distinto; las
+// dos implementaciones del navegador (ticketsDe de iniciativas.js y
+// MetaCategoria.tickets de iniciativa-admin.js) dan lo mismo en toda una
+// malla; la vuelta tickets -> % -> tickets; y lo que NO cambia.
+// ---------------------------------------------------------------------
+pruebas.push(function () {
+  var M = A.MetaCategoria;
+  // [vol, %, CEILING, ROUND, FLOOR]
+  var casos = [[7, '9.46', 1, 1, 0], [7, '50', 4, 4, 3], [418, '10', 42, 42, 41], [1247, '12.5', 156, 156, 155],
+               [418, '12.5', 53, 52, 52], [1247, '33.33', 416, 416, 415], [418, '25', 105, 105, 104], [1000, '0.01', 1, 0, 0],
+               [3, '33.33', 1, 1, 0], [1247, '12', 150, 150, 149]];
+  Check('RC1 CEILING en los casos donde difiere de ROUND y de FLOOR (ticketsDe y MetaCategoria.tickets)',
+    casos.map(function (c) { return [c[2], c[2]]; }), casos.map(function (c) { return [I.ticketsDe(c[0], c[1]), M.tickets(c[0], c[1])]; }));
+  Check('RC2 y de verdad difieren (la prueba distingue): CEILING != FLOOR en todos; != ROUND en 418 x 12.5% y 1000 x 0.01%', [true, true],
+    [casos.every(function (c) { return c[2] !== c[4]; }), casos.filter(function (c) { return c[2] !== c[3]; }).length === 2]);
+  Check('RC3 lo exacto no sube: 120 x 20% = 24, 30 x 50% = 15, 1000 x 2.5% = 25, 418 x 100% = 418; 0% y volumetria 0 = 0',
+    [24, 15, 25, 418, 0, 0, 24, 15, 25, 418, 0, 0],
+    [I.ticketsDe(120, '20'), I.ticketsDe(30, '50'), I.ticketsDe(1000, '2.5'), I.ticketsDe(418, '100'), I.ticketsDe(418, '0'), I.ticketsDe(0, '50'),
+     M.tickets(120, '20'), M.tickets(30, '50'), M.tickets(1000, '2.5'), M.tickets(418, '100'), M.tickets(418, '0'), M.tickets(0, '50')]);
+  // Malla: las dos implementaciones coinciden y son el techo exacto (en enteros).
+  var difieren = 0, mal = 0, vols = [0, 1, 3, 7, 10, 30, 99, 418, 1000, 1247, 30000, 999999];
+  vols.forEach(function (v) {
+    for (var c = 0; c <= 10000; c += 7) {
+      var pc = String(c / 100), t1 = I.ticketsDe(v, pc), t2 = M.tickets(v, pc);
+      if (t1 !== t2) difieren++;
+      if (t1 !== Math.floor((v * c + 9999) / 10000) || t1 * 10000 < v * c || (t1 - 1) * 10000 >= v * c && v * c > 0) mal++;
+    }
+  });
+  Check('RC4 malla de 12 volumetrias x 1429 %: ticketsDe = MetaCategoria.tickets = techo de vol x % (ni debajo, ni un ticket de mas)', [0, 0], [difieren, mal]);
+  // Vuelta: tickets -> % -> tickets nunca da MENOS de lo pedido; si es exacto, da lo pedido.
+  var menos = 0, noExacto = 0, exactos = 0;
+  [7, 30, 418, 1000, 1247].forEach(function (v) {
+    for (var n = 0; n <= v; n += Math.max(1, Math.floor(v / 97))) {
+      [M.pct(v, String(n)), M.pctEntero(v, String(n)), I.pctDeTickets(v, String(n))].forEach(function (r, i) {
+        var da = i === 2 ? I.ticketsDe(v, r.pct) : M.tickets(v, r.pct);
+        if (da < n) menos++;
+        if (r.exacto !== (da === n) || r.tickets !== da) noExacto++;
+        if (i === 0 && !r.exacto) exactos++;   // dos decimales con vol <= 10000: un paso es <= 1 ticket
+      });
+    }
+  });
+  Check('RC5 tickets -> % -> tickets (dos decimales y entero): nunca menos de lo pedido; "exacto" dice la verdad; con dos decimales siempre exacto', [0, 0, 0],
+    [menos, noExacto, exactos]);
+  Check('RC6 la proporcion exacta se conserva: 15 de 30 = 50%; 25 de 1000 = 2.5%; 8 de 80 = 10%; 209 de 418 = 50%', ['50', '2.5', '10', '50', '10'],
+    [M.pct(30, '15').pct, M.pct(1000, '25').pct, M.pctEntero(80, '8').pct, M.pct(418, '209').pct, I.pctDeTickets(80, '8').pct]);
+  Check('RC7 no cambia: el % guardado (fraccion de 4 decimales) ni el rechazo de % invalidos', [0.125, null, null, null],
+    [I.fraccionDe('12.5'), I.ticketsDe(418, '12.345'), M.tickets(418, '101'), I.ticketsDe(12.5, '10')]);
 });
 
 pruebas.reduce(function (cadena, prueba) { return cadena.then(prueba); }, Promise.resolve())

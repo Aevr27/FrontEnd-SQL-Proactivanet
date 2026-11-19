@@ -62,6 +62,23 @@ sealed class AlmacenFalso : IAlmacenSolicitudes
     }
 }
 
+// sql/42 sin SQL: el reemplazo que pide el servicio.
+sealed class CancelacionesIniFalsas : ICancelacionSolicitudesIniciativa
+{
+    public bool Hay = true;
+    public Exception Lanza;
+    public readonly List<AltaSolicitud> Reemplazos = new List<AltaSolicitud>();
+    public readonly List<string> Cancelaciones = new List<string>();
+    public bool Disponible() { return Hay; }
+    public void Cancelar(int numero, string usuario, string motivo) { Cancelaciones.Add(numero + "|" + usuario + "|" + motivo); if (Lanza != null) throw Lanza; }
+    public SolicitudGuardada Reemplazar(AltaSolicitud a)
+    {
+        if (Lanza != null) throw Lanza;
+        Reemplazos.Add(a);
+        return new SolicitudGuardada { Numero = new NumeroSolicitud(50), Nuevo = true, FechaUtc = DateTime.UtcNow };
+    }
+}
+
 public static class SolicitudIniciativaAltaSmoke
 {
     static int fallos = 0, pasados = 0;
@@ -436,6 +453,54 @@ public static class SolicitudIniciativaAltaSmoke
         r = Enviar(Win(@"SORIANA\andresvr"), Form(PO), a, null, null, null);
         Check("X13 sin sql/36: CatPersona guarda sin pedir la fuente; la respuesta es la del sitio", "True|False|CATPERSONA|Andres Vera Rios",
               r.Guardada + "|" + a.Altas[0].ConFuente + "|" + r.Destinatarios.FuenteSolicitante + "|" + r.Destinatarios.SolicitanteNombre);
+
+        // ---------------- M: Modificar = reemplazo (sql/42) ----------------
+        var canc = new CancelacionesIniFalsas();
+        SolicitudesIniciativa.Cancelaciones = canc;
+        {
+            Func<NameValueCollection, int, string, ValidadorIniciativa.Resultado> reemplazar = delegate (NameValueCollection f, int original, string motivo)
+            {
+                a = new AlmacenFalso();
+                var sol = SolicitudIniciativa.DesdeFormulario(f, false, null);
+                var svc = new IniciativaService(new GeneradorNumeroSolicitudPendiente(), a, Directorio());
+                return svc.Solicitar(sol, Win(@"SORIANA\andresvr"), Catalogo(), new CapacidadCategoria(new CapacidadCategoria.Compromiso[0]), null, null, original, motivo);
+            };
+            var fm = Form(PO); fm["titulo"] = "Titulo corregido";
+            r = reemplazar(fm, 12, "Me equivoque de titulo");
+            var altaR = canc.Reemplazos.Count == 1 ? canc.Reemplazos[0] : null;
+            Check("M1 reemplazo valido: Reemplazar (no Crear) con la original, el motivo, la cuenta de IIS y los datos corregidos",
+                  "True|1|0|12|Me equivoque de titulo|SORIANA\\andresvr|Titulo corregido|andresvr@soriana.com",
+                  r.Guardada + "|" + canc.Reemplazos.Count + "|" + a.Altas.Count + "|" + altaR.ReemplazaA + "|" + altaR.MotivoCancelacion + "|" +
+                  altaR.Cuenta + "|" + altaR.Titulo + "|" + altaR.SolicitanteCorreo);
+            var jm = IniciativaService.ComoJson(r);
+            Check("M2 la respuesta dice el numero nuevo y a cual reemplaza", "#0000050|#0000012", jm["numero_solicitud"] + "|" + jm["reemplaza_a"]);
+            canc.Reemplazos.Clear();
+            var mala = Form(PO); mala["titulo"] = "";
+            r = reemplazar(mala, 12, "m");
+            Check("M3 reemplazo que no pasa la validacion de envio: ni Reemplazar ni Crear (la original sigue)", "False|0|0",
+                  r.Valida + "|" + canc.Reemplazos.Count + "|" + a.Altas.Count);
+            r = reemplazar(Form("PO Fantasma"), 12, "m");
+            Check("M4 PO sin correo unico en CatPersona: no valida, nada se guarda", "False|0", r.Valida + "|" + canc.Reemplazos.Count);
+            var sinToken = Form(PO); sinToken["token"] = "";
+            r = reemplazar(sinToken, 12, "m");
+            Check("M5 sin token: no valida, nada se guarda", "False|0", r.Valida + "|" + canc.Reemplazos.Count);
+            canc.Lanza = new ErrorSolicitud(51421, "ya no esta pendiente");
+            var lanzo = "sin error";
+            try { reemplazar(Form(PO), 12, "m"); }
+            catch (ErrorSolicitud ex) { lanzo = ex.Numero + "|" + ex.EstadoHttp + "|" + ex.Tipo + "|" + (ex.Message.IndexOf("pendiente", StringComparison.Ordinal) > 0); }
+            Check("M6 la base dice que ADM la reviso antes (51421): sube al handler (409 SolicitudNoPendiente)", "51421|409|SolicitudNoPendiente|True", lanzo);
+            canc.Lanza = null;
+            r = Enviar(Win(@"SORIANA\andresvr"), Form(PO), a = new AlmacenFalso(), null);
+            Check("M7 envio normal: Crear, nunca Reemplazar; reemplaza_a null", "1|0|", a.Altas.Count + "|" + canc.Reemplazos.Count + "|" + IniciativaService.ComoJson(r)["reemplaza_a"]);
+            Check("M8 mensajes / estados de sql/42", "404|422|422|500|409|True",
+                  new ErrorSolicitud(51411, "x").EstadoHttp + "|" + new ErrorSolicitud(51419, "x").EstadoHttp + "|" + new ErrorSolicitud(51420, "x").EstadoHttp + "|" +
+                  new ErrorSolicitud(51424, "x").EstadoHttp + "|" + new ErrorSolicitud(51423, "x").EstadoHttp + "|" +
+                  (new ErrorSolicitud(51405, "texto de la base").Message == "texto de la base"));
+            var hv = System.IO.File.ReadAllText(System.IO.Path.Combine("handlers", "admin_iniciativas_validar.ashx"));
+            Check("M9 handler: cancelar / reemplazar firman con la cuenta de IIS; el motivo se revisa antes de la base", "True|True|True",
+                  hv.Contains("c.Cancelar(numero, identidad.Original, motivo)") + "|" + hv.Contains("}, reemplazaA, motivoCancelacion);") + "|" +
+                  (hv.IndexOf("ErrorMotivo(context, motivoCancelacion, \"motivo_cancelacion\")") < hv.IndexOf("new IniciativaService().Solicitar(")));
+        }
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso (" + pasados + ")" : "FALLOS: " + fallos);
         return fallos == 0 ? 0 : 1;

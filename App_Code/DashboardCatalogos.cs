@@ -210,7 +210,7 @@ ORDER BY Grupo;";
        Codigo: "PRB 2026-000001"); texto = Descripcion.
 
        NO es dbo.Problem.TipoIniciativa. El diagnostico de la VM
-       (sql/diag_admin_roles_tipos_historial.sql, 2026-10-05) mostro que
+       (sql/diag/diag_admin_roles_tipos_historial.sql, 2026-10-05) mostro que
        Prefijo y TipoIniciativa no son uno a uno (71 de 933 vigentes
        difieren) y que sus textos no coinciden con Descripcion. Aqui no se
        traduce uno al otro, y Experiencia sigue leyendo lo suyo.

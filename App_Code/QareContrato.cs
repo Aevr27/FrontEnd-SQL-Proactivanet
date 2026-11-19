@@ -7,7 +7,7 @@
 //
 // DE DONDE SALE EL CONTRATO
 //   Columnas: "Documentacion_Dashboard_QARE" (guia visual). Todo lo demas
-//   se verifico en la VM con sql/diag_qare_contrato.sql (v2, 2026-09-25),
+//   se verifico en la VM con sql/diag/diag_qare_contrato.sql (v2, 2026-09-25),
 //   leyendo los cuerpos reales de los seis SP:
 //     - parametros: @FechaInicio DATE = NULL, @FechaFin DATE = NULL;
 //     - fecha oficial: FechaFirmaSolucion de dbo.vw_CorreoQARECierre_Base

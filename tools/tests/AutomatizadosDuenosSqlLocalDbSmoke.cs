@@ -8,23 +8,23 @@
 // Que prueba:
 //   K) UNA llamada con los 10 SLOTs da, periodo a periodo, el
 //      TicketsAutomatizados de DashboardQueries.Kpis (lo que pedia antes el
-//      tablero, una llamada por SLOT) SIN los tipos SorIA: en Incidentes /
-//      Requerimientos EXACTAMENTE Kpis; en Todos, Kpis menos los SorIA
-//      resueltos por bot (con espacios alrededor del tipo tambien), y los
-//      'Sin tipo' (NULL / vacio) siguen contando, como en el volumen. Kpis
-//      (la tarjeta de SLA) sigue contando los SorIA. Un periodo sin ningun
-//      resuelto no viene (Kpis: NULL).
+//      tablero, una llamada por SLOT) EXACTAMENTE, en Todos / Incidentes /
+//      Requerimientos: los tipos SorIA cuentan (Incidentes incluye 'SorIA
+//      Incidentes'; Requerimientos, 'SorIA Peticiones'; con espacios
+//      alrededor del tipo tambien), igual que el volumen, y los 'Sin tipo'
+//      (NULL / vacio) siguen en Todos. Un periodo sin ningun resuelto no
+//      viene (Kpis: NULL).
 //   M) Lo mismo por meses (enero..octubre de un año).
 //   D) Con un filtro de Director / PO / Manager / SO (solos y combinados), la
 //      suma de las filas de dueños que pasan el filtro (pasaFiltroGlobal) es
 //      la cuenta de una verdad calculada AQUI desde la semilla: resueltos en
 //      el periodo, no rechazados, por una cuenta de CatCuentaNoPersona
-//      habilitada, del tipo, sin SorIA, con los dueños esperados de su categoria
+//      habilitada, del tipo, con los dueños esperados de su categoria
 //      (N2 exacto; si no, heredados del C1; Manager del SO).
 //   U) Sin doble cuenta: por periodo, filas de dueños + tickets sin dueño =
 //      total, y ninguna fila (periodo, dueños) repetida.
-//   S) Ningun SorIA en las filas: la suma por Manager es la de la semilla sin
-//      SorIA, y en Todos la semilla SI tiene SorIA de bot que quitar.
+//   S) Los SorIA de bot de la semilla entran: en Todos, en Incidentes los
+//      'SorIA Incidentes' y en Requerimientos los 'SorIA Peticiones'.
 //   V) Rangos que no son periodos enteros se rechazan.
 //
 // Semilla: 3000 tickets deterministas (Random(20261030)) con categorias con
@@ -124,21 +124,20 @@ public static class AutomatizadosDuenosSqlLocalDbSmoke
     static readonly Dictionary<string, string[]> TIPO = new Dictionary<string, string[]>
     {
         { "todos", null },
-        { "inc", new[] { "Incidencia" } },
-        { "req", new[] { "Petición de Servicio", "Peticion de Servicio" } },
+        { "inc", new[] { "Incidencia", "SorIA Incidentes" } },
+        { "req", new[] { "Petición de Servicio", "Peticion de Servicio", "SorIA Peticiones" } },
     };
 
     static bool EsSorIA(Ticket t) { return SORIA.Contains((t.Tipo ?? "").Trim()); }
 
-    // La verdad, desde la semilla: lo que Kpis cuenta como automatizado
-    // (sinSorIA = false) y lo que cuenta Experiencia (sinSorIA = true).
-    static IEnumerable<Ticket> Resueltos(List<Ticket> s, DateTime ini, DateTime fin, string tipo, bool sinSorIA)
+    // La verdad, desde la semilla: lo que Kpis y Experiencia cuentan como
+    // automatizado.
+    static IEnumerable<Ticket> Resueltos(List<Ticket> s, DateTime ini, DateTime fin, string tipo)
     {
         var tipos = TIPO[tipo];
         return s.Where(t => t.Solucion.HasValue && t.Solucion.Value.Date >= ini && t.Solucion.Value.Date <= fin
                          && t.Estado != "Rechazada"
-                         && (tipos == null || tipos.Contains((t.Tipo ?? "").Trim()))
-                         && !(sinSorIA && EsSorIA(t)));
+                         && (tipos == null || tipos.Contains((t.Tipo ?? "").Trim())));
     }
 
     static void Crear(string cadena, List<Ticket> semilla)
@@ -274,29 +273,26 @@ INSERT dbo.CatPersona VALUES (N'SO Uno', N'Mgr X', 1), (N'SO Dos', N'Mgr Y', 1);
                 var km = modo == "slot" ? "K " : "M ";
                 var kpis = periodos.Select(p => Kpis(ini(p), fin(p), tipo)).ToList();
                 var nuevos = periodos.Select(p => TotalDe(r, p)).ToList();
-                Func<bool, List<long?>> verdadDe = sinSorIA => periodos.Select(p =>
+                var verdad = periodos.Select(p =>
                 {
-                    var res = Resueltos(semilla, ini(p), fin(p), tipo, sinSorIA).ToList();
+                    var res = Resueltos(semilla, ini(p), fin(p), tipo).ToList();
                     return res.Count == 0 ? (long?)null : res.Count(t => t.Tecnico == BOT);
                 }).ToList();
-                Chk(km + caso + ": Kpis (SLA) sin cambio = la semilla CON SorIA", Lista(verdadDe(false)), Lista(kpis));
-                Chk(km + caso + ": Experiencia = la semilla sin SorIA", Lista(verdadDe(true)), Lista(nuevos));
+                Chk(km + caso + ": Kpis (SLA) = la semilla", Lista(verdad), Lista(kpis));
+                Chk(km + caso + ": Experiencia = la semilla = Kpis", Lista(verdad), Lista(nuevos));
                 Chk(km + caso + ": hay automatizados que comparar", true, nuevos.Any(v => v.HasValue && v.Value > 0));
-                long sorBot = periodos.Sum(p => (long)Resueltos(semilla, ini(p), fin(p), tipo, false)
+
+                // S) los SorIA de bot del tipo estan dentro.
+                long sorBot = periodos.Sum(p => (long)Resueltos(semilla, ini(p), fin(p), tipo)
                     .Count(t => t.Tecnico == BOT && EsSorIA(t)));
+                Chk("S " + caso + ": la semilla tiene SorIA de bot del tipo y Experiencia los cuenta", true, sorBot > 0);
                 if (tipo == "todos")
                 {
-                    Chk(km + caso + ": la semilla tiene SorIA de bot (con y sin espacios) que quitar", true,
-                        sorBot > 0 && semilla.Any(t => t.Tipo == " SorIA Peticiones " && t.Tecnico == BOT && t.Solucion.HasValue));
-                    Chk(km + caso + ": Kpis - Experiencia = los SorIA de bot", sorBot,
-                        kpis.Sum(v => v ?? 0) - nuevos.Sum(v => v ?? 0));
+                    Chk(km + caso + ": la semilla tiene ' SorIA Peticiones ' (con espacios) de bot", true,
+                        semilla.Any(t => t.Tipo == " SorIA Peticiones " && t.Tecnico == BOT && t.Solucion.HasValue));
                     Chk(km + caso + ": los 'Sin tipo' (NULL / vacio) de bot siguen contando", true,
-                        periodos.Sum(p => (long)Resueltos(semilla, ini(p), fin(p), tipo, true)
+                        periodos.Sum(p => (long)Resueltos(semilla, ini(p), fin(p), tipo)
                             .Count(t => t.Tecnico == BOT && string.IsNullOrWhiteSpace(t.Tipo))) > 0);
-                }
-                else
-                {
-                    Chk(km + caso + ": con tipo, Experiencia = Kpis (sin cambio)", Lista(kpis), Lista(nuevos));
                 }
 
                 // U) sin doble cuenta ni filas repetidas.
@@ -311,7 +307,7 @@ INSERT dbo.CatPersona VALUES (N'SO Uno', N'Mgr X', 1), (N'SO Dos', N'Mgr Y', 1);
                     long suma = delPeriodo.Sum(d => (long)(int)d["automatizados"]);
                     long sinDueno = delPeriodo.Where(d => d["director"] == null && d["po"] == null && d["so"] == null)
                         .Sum(d => (long)(int)d["automatizados"]);
-                    long sinDuenoSemilla = Resueltos(semilla, ini(p), fin(p), tipo, true).Count(t => t.Tecnico == BOT && t.Duenos[0] == null);
+                    long sinDuenoSemilla = Resueltos(semilla, ini(p), fin(p), tipo).Count(t => t.Tecnico == BOT && t.Duenos[0] == null);
                     return (TotalDe(r, p) ?? 0) == suma && sinDueno == sinDuenoSemilla;
                 });
                 Chk("U " + caso + ": suma de filas de dueños = total y la fila sin dueño = la semilla", true, cuadra.All(x => x));
@@ -326,7 +322,7 @@ INSERT dbo.CatPersona VALUES (N'SO Uno', N'Mgr X', 1), (N'SO Dos', N'Mgr Y', 1);
                         : null);
                     var esperado = periodos.Select(p =>
                     {
-                        var res = Resueltos(semilla, ini(p), fin(p), tipo, true).ToList();
+                        var res = Resueltos(semilla, ini(p), fin(p), tipo).ToList();
                         return res.Count == 0 ? (long?)null
                             : res.Count(t => t.Tecnico == BOT && Pasa(fil, t.Duenos[0], t.Duenos[1], t.Duenos[2], t.Duenos[3]));
                     });

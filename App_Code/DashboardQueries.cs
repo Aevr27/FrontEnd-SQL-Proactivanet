@@ -624,14 +624,10 @@ FROM conPct;";
        categorias no viajan. Categoria es b.Categoria cruda: los cortes C1 /
        C1C2 y los dueños los pone quien llama.
 
-       sinSorIA: fuera los tickets de tipo 'SorIA Incidentes' / 'SorIA
-       Peticiones', la MISMA regla con la que Experiencia saca esos tipos de
-       su volumen (ExperienciaQueries.SinSorIA): el tipo recortado, como
-       TipoTicket de vw_TicketsSlotsBase. Tipo NULL o vacio ('Sin tipo')
-       sigue contando, como en el volumen. Con ?tipo=inc|req no cambia nada:
-       esos tipos ya no entran. Kpis (la tarjeta de SLA) no pasa por aqui.
-       Con sinSorIA ya no es el TicketsAutomatizados de Kpis en "Todos". */
-    public static List<Dictionary<string, object>> AutomatizadosPorCategoria(Filtros f, bool porMes, bool sinSorIA)
+       Sin filtro de tipos SorIA: el volumen de Experiencia los cuenta
+       (ExperienciaQueries.VolumenDeColumnas), asi que "Volumen - Automatizado"
+       resta poblaciones iguales. */
+    public static List<Dictionary<string, object>> AutomatizadosPorCategoria(Filtros f, bool porMes)
     {
         string periodo = porMes
             ? "MONTH(b.FechaFirmaSolucion)"
@@ -646,16 +642,12 @@ SELECT
     Resueltos = COUNT_BIG(*)
 FROM dbo.vw_Dash_ProductividadBase b{3}
 CROSS APPLY (SELECT Periodo = " + periodo + @") AS pe
-WHERE {0}" + (sinSorIA ? SinTiposSorIA : string.Empty) + @"
+WHERE {0}
 GROUP BY GROUPING SETS ((pe.Periodo, b.Categoria), (pe.Periodo))
 HAVING GROUPING(b.Categoria) = 1 OR SUM(CASE WHEN np.EsPersona = 0 THEN 1 ELSE 0 END) > 0;";
 
         return Unico(sql, f, null);
     }
-
-    // ISNULL: un NOT IN contra NULL es UNKNOWN y se llevaria los 'Sin tipo'.
-    private const string SinTiposSorIA =
-        "\n  AND ISNULL(LTRIM(RTRIM(b.Tipo)), N'') NOT IN (N'SorIA Incidentes', N'SorIA Peticiones')";
 
     /* Entra vs sale, por dia. Cada serie por su propia fecha: creados por
        registro ({1}), resueltos y SLA por solucion ({0}). FULL OUTER porque
@@ -963,9 +955,11 @@ ORDER BY b.FechaFirmaSolucion DESC;";
        siempre, byte a byte).
 
        Los valores son los de las columnas de vw_TBSlotCAT / vw_TBMesCAT que
-       usa ExperienciaQueries.VolTipo, sobre el mismo dbo.Tickets.Tipo:
-         inc  TipoTicket = 'Incidencia'
-         req  TipoTicket IN ('Peticion de Servicio' con y sin tilde)
+       suma ExperienciaQueries.VolumenDeColumnas, sobre el mismo
+       dbo.Tickets.Tipo:
+         inc  TipoTicket IN ('Incidencia', 'SorIA Incidentes')
+         req  TipoTicket IN ('Peticion de Servicio' con y sin tilde,
+                             'SorIA Peticiones')
        con TipoTicket = TRIM(Tipo); aqui LTRIM(RTRIM(b.Tipo)), que quita lo
        mismo (solo espacios). La colacion CI_AS distingue la tilde, por eso
        van las dos grafias, igual que en la vista. La "o" con tilde se arma
@@ -983,11 +977,15 @@ ORDER BY b.FechaFirmaSolucion DESC;";
         {
             var salida = new List<string>();
             if (string.Equals(tipo, "inc", StringComparison.OrdinalIgnoreCase))
+            {
                 salida.Add("Incidencia");
+                salida.Add("SorIA Incidentes");
+            }
             else if (string.Equals(tipo, "req", StringComparison.OrdinalIgnoreCase))
             {
                 salida.Add("Petici" + (char)0xF3 + "n de Servicio");
                 salida.Add("Peticion de Servicio");
+                salida.Add("SorIA Peticiones");
             }
             return salida;
         }

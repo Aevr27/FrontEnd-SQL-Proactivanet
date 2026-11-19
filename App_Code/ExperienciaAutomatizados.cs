@@ -10,13 +10,12 @@
 // DashboardQueries.AutomatizadosPorCategoria, que usa el mismo predicado y la
 // misma rama de EsPersona que Kpis.
 //
-// SIN SorIA: como el volumen de Experiencia (SinSorIA), no cuentan los tickets
-// de tipo 'SorIA Incidentes' / 'SorIA Peticiones'. Con ellos dentro, la resta
-// de "Volumen - Automatizado" quitaba de un volumen sin SorIA tickets SorIA
-// (2026-10-30, Manager Jesus Campa Morones: 228 de sus 236 automatizados eran
-// 'SorIA Peticiones' y la tarjeta salia en -9). Por eso, en "Todos", este
-// numero es menor que el "Automatizado" de SLA, que los sigue contando; con
-// Incidentes / Requerimientos es el mismo.
+// CON los tipos SorIA, igual que el volumen de Experiencia
+// (ExperienciaQueries.VolumenDeColumnas). Los dos lados de "Volumen -
+// Automatizado" tienen que contar la misma poblacion: cuando el volumen los
+// excluia y esto no, la resta salia negativa (2026-10-30, 228 de 236
+// automatizados de un Manager eran 'SorIA Peticiones'). En "Todos" coincide
+// con el "Automatizado" de SLA.
 //
 // A QUIEN SE LE CUENTA
 // --------------------
@@ -81,7 +80,7 @@ public static partial class ExperienciaQueries
         f.FechaInicio = inicio.Date;
         f.FechaFin = fin.Date;
         f.TiposRegistro = tiposRegistro ?? new List<string>();
-        var filas = DashboardQueries.AutomatizadosPorCategoria(f, modo == MODO_MES, true);
+        var filas = DashboardQueries.AutomatizadosPorCategoria(f, modo == MODO_MES);
 
         DirectorioOrganizacional dir = null;
         foreach (var fila in filas)

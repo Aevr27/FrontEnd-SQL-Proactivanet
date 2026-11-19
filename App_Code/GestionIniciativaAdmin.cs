@@ -395,7 +395,7 @@ public sealed class PeticionModificarAdmin
 // Agrupacion (TipoAgrupado). Los textos son los que YA estan en dbo.Problem /
 // dbo.ProblemCategoria, no la Descripcion del catalogo ('Shift to Left' no
 // existe como TipoIniciativa). Clasificacion -> Agrupacion: sin excepciones
-// en la VM (sql/diag_admin_tipo_por_prefijo.sql T3, 2026-10-15). Un prefijo
+// en la VM (sql/diag/diag_admin_tipo_por_prefijo.sql T3, 2026-10-15). Un prefijo
 // sin regla deja ambos null (Incompleta). Copia en admin/iniciativa-admin.js
 // (TIPOS_POR_PREFIJO): cambiar las dos.
 public static class TiposPorPrefijo
@@ -515,9 +515,6 @@ public sealed class IniciativaActual
         public string Ruta;
         public decimal? Pct;   // fraccion, como PctDisminucion
         public string Agrup;   // TipoAgrupado (null = sin declarar)
-        // Fecha de analisis PROPIA (yyyy-MM-dd), o null si hereda la de la
-        // iniciativa (dbo.ProblemCategoria.FechaAnalisisCategoria).
-        public string FAnalisisPropia;
     }
 
     public string Folio;
@@ -535,6 +532,12 @@ public sealed class IniciativaActual
     public string SoCapturado;
     public bool SinCategoria;
     public List<Categoria> Categorias = new List<Categoria>();
+    // sql/83: las asociaciones de baja (VigenteEnOrigen = 0) de la base, NO
+    // del registro (que solo trae las vigentes). Vacia sin 83: agregar una
+    // de ellas sigue siendo lo que diga la base (51008).
+    public List<CategoriaHistorica> Historicas = new List<CategoriaHistorica>();
+
+    public CategoriaHistorica Historica(string ruta) { return CategoriasHistoricas.Buscar(Historicas, ruta); }
 
     public static IniciativaActual DesdeRegistro(Dictionary<string, object> i)
     {
@@ -570,7 +573,6 @@ public sealed class IniciativaActual
                     Ruta = c.ContainsKey("categoria") ? c["categoria"] as string : null,
                     Pct = pct,
                     Agrup = c.ContainsKey("agrup") ? c["agrup"] as string : null,
-                    FAnalisisPropia = c.ContainsKey("f_analisis_propia") ? c["f_analisis_propia"] as string : null,
                 });
             }
         }
@@ -955,8 +957,13 @@ public sealed class ValidadorGestionAdmin
             r.Agregar("pct", "Los % por categor\u00eda llegaron incompletos (categor\u00eda sin valor o al rev\u00e9s).");
         if (p.AgregarDesparejos)
             r.Agregar(CCategorias, "Las categor\u00edas a agregar llegaron incompletas (categor\u00eda sin % o al rev\u00e9s).");
-        if (p.FechasDesparejas)
-            r.Agregar(CFechasCategoria, "Las fechas de an\u00e1lisis por categor\u00eda llegaron incompletas (categor\u00eda sin fecha o al rev\u00e9s).");
+        // La fecha de analisis es UNA por iniciativa y la comparten todas sus
+        // categorias: no hay fecha por categoria que cambiar. Se rechaza en el
+        // servidor (y no solo se ignora) para que un cliente viejo o un POST
+        // armado a mano no crea que guardo algo; adm.usp_GestionAdmin_Modificar
+        // todavia acepta @FechasCategoria (sql/18) y la escribiria.
+        if (p.FechasCategoria.Count > 0 || p.FechasDesparejas)
+            r.Agregar(CFechasCategoria, "La fecha de an\u00e1lisis es de la iniciativa y la comparten todas sus categor\u00edas: se cambia en Fecha compromiso de An\u00e1lisis.");
 
         var vistas = new HashSet<string>(StringComparer.Ordinal);
         foreach (var x in p.Pcts)
@@ -978,16 +985,6 @@ public sealed class ValidadorGestionAdmin
             if (t != null && ValidadorIniciativa.Fraccion(t) == null)
                 r.Agregar(CCategorias, ruta + ": el % debe estar entre 0 y 100, con hasta dos decimales.");
             // Sus tipos son opcionales y nunca se copian de las hermanas.
-        }
-        var conFecha = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var x in p.FechasCategoria)
-        {
-            var ruta = Limpio(x.Categoria);
-            if (ruta == null) { r.Agregar(CFechasCategoria, "Una fecha de an\u00e1lisis lleg\u00f3 sin categor\u00eda."); continue; }
-            if (!conFecha.Add(Llave(ruta))) r.Agregar(CFechasCategoria, ruta + ": la fecha de an\u00e1lisis viene repetida.");
-            var t = Limpio(x.Texto);
-            if (t == null) r.Agregar(CFechasCategoria, ruta + ": la fecha de an\u00e1lisis de una categor\u00eda no se puede vaciar.");
-            else if (!EsFecha(t)) r.Agregar(CFechasCategoria, ruta + ": escribe una fecha v\u00e1lida (aaaa-mm-dd).");
         }
         var quitadas = new HashSet<string>(StringComparer.Ordinal);
         foreach (var q in p.Quitar)
@@ -1115,40 +1112,10 @@ public sealed class ValidadorGestionAdmin
         DuenoCapturado(r, p.Po, actual.PoCapturado, SolicitudIniciativa.CPo, "Product Owner", catalogo);
         DuenoCapturado(r, p.So, actual.SoCapturado, SolicitudIniciativa.CSo, "Service Owner", catalogo);
 
-        // ---- Fechas de analisis por categoria ----
-        // PROPIA (ligada despues): se cambia en la categoria. Si la categoria
-        // HEREDA la de la iniciativa, el cambio es de la iniciativa
-        // (f_analisis): no se le crea una fecha propia.
-        string fAnalisisHeredada = null;
-        foreach (var x in p.FechasCategoria)
-        {
-            var ruta = Limpio(x.Categoria);
-            var t = Limpio(x.Texto);
-            if (ruta == null || t == null || !EsFecha(t)) continue;
-            var ligada = actual.Ligada(ruta);
-            if (ligada == null)
-            {
-                r.Agregar(CFechasCategoria, ruta + ": no est\u00e1 ligada a esta iniciativa.");
-                continue;
-            }
-            if (Limpio(ligada.FAnalisisPropia) == null)
-            {
-                if (fAnalisisHeredada != null && fAnalisisHeredada != t)
-                    r.Agregar(CFechasCategoria, "Las categor\u00edas que heredan la fecha de la iniciativa comparten una sola fecha de an\u00e1lisis.");
-                fAnalisisHeredada = t;
-                continue;
-            }
-            if (t != ligada.FAnalisisPropia)
-                r.Cambio(CFechasCategoria, "Fecha de an\u00e1lisis \u00b7 " + ligada.Ruta, ligada.FAnalisisPropia, t);
-        }
-        if (fAnalisisHeredada != null && p.FAnalisis != null && (Limpio(p.FAnalisis) ?? "") != fAnalisisHeredada)
-            r.Agregar(CFechasCategoria, "La fecha de an\u00e1lisis de una categor\u00eda que hereda es la de la iniciativa: lleg\u00f3 distinta a la Fecha compromiso de An\u00e1lisis.");
-
         // ---- Problem: fechas compromiso ----
         foreach (var f in Fechas)
         {
             var nuevo = Valor(p, f[0]);
-            if (f[0] == PeticionModificarAdmin.CFAnalisis && nuevo == null) nuevo = fAnalisisHeredada;
             if (nuevo == null || r.TieneError(f[0])) continue;
             var limpio = Limpio(nuevo) ?? "";
             var anterior = Valor(actual, f[0]) ?? "";
@@ -1261,17 +1228,41 @@ public sealed class ValidadorGestionAdmin
             AvisarSinDuenos(r, catalogo, ruta);
             var ti = Limpio(x.TipoIniciativa);
             var ta = Limpio(x.TipoAgrupado);
+            // sql/83: una que ESTUVO ligada se reactiva (la misma fila). Su
+            // clasificacion historica no vacia se conserva: una distinta es
+            // 422 (nunca se ignora ni se sobrescribe); solo se valida y se usa
+            // lo que llena un campo vacio. La que queda es la EFECTIVA.
+            var historica = actual.Historica(ruta);
+            if (historica != null)
+            {
+                if (CategoriasHistoricas.Conflicto(historica.TipoIniciativa, ti))
+                    r.Agregar(CCategorias, ruta + ": estuvo ligada con Clasificaci\u00f3n " + historica.TipoIniciativa +
+                        "; la clasificaci\u00f3n hist\u00f3rica se conserva y no se cambia.");
+                if (CategoriasHistoricas.Conflicto(historica.TipoAgrupado, ta))
+                    r.Agregar(CCategorias, ruta + ": estuvo ligada con Agrupaci\u00f3n " + historica.TipoAgrupado +
+                        "; la clasificaci\u00f3n hist\u00f3rica se conserva y no se cambia.");
+                if (historica.TipoIniciativa != null) ti = null;
+                if (historica.TipoAgrupado != null) ta = null;
+            }
             if (ti != null && (estados == null || !estados.TiposIniciativa.Contains(ti)))
                 r.Agregar(CCategorias, ruta + ": la Clasificaci\u00f3n no es una de las que ya existen en los problemas.");
             if (ta != null && (estados == null || !estados.TiposAgrupado.Contains(ta)))
                 r.Agregar(CCategorias, ruta + ": la Agrupaci\u00f3n no es una de las que ya existen en las categor\u00edas.");
+            if (historica != null)
+            {
+                ti = CategoriasHistoricas.Efectiva(historica.TipoIniciativa, ti);
+                ta = CategoriasHistoricas.Efectiva(historica.TipoAgrupado, ta);
+                r.Advertencias.Add(ruta + ": estuvo ligada a esta iniciativa y se dio de baja; se reactivar\u00e1 la MISMA asociaci\u00f3n con sus fechas originales (creaci\u00f3n " +
+                    (historica.FCreacion ?? "sin fecha") + ", an\u00e1lisis " + (historica.FAnalisis ?? "la de la iniciativa") + ") y su clasificaci\u00f3n (" +
+                    (ti ?? "sin Clasificaci\u00f3n") + " / " + (ta ?? "sin Agrupaci\u00f3n") + ").");
+            }
             var t = Limpio(x.Texto);
             var fr = t == null ? null : ValidadorIniciativa.Fraccion(t);
             if (t != null && fr == null) continue;
             if (fr == null) quedaSinPct = true;
             agregadas++;
-            r.Cambio("agregar_categoria", "Agregar categor\u00eda", "", ruta + (fr == null ? " (sin %)" : " \u00b7 " + ComoPct(fr) + "%") +
-                (ta != null ? " \u00b7 " + ta : ""));
+            r.Cambio("agregar_categoria", historica != null ? "Reactivar categor\u00eda" : "Agregar categor\u00eda", "",
+                ruta + (fr == null ? " (sin %)" : " \u00b7 " + ComoPct(fr) + "%") + (ta != null ? " \u00b7 " + ta : ""));
             var motivoAgregar = tope.Agregada(ruta, fr, ta);
             if (motivoAgregar != null) r.Agregar(CCategorias, motivoAgregar);
         }

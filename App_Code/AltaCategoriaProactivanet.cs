@@ -21,7 +21,7 @@
 //   - Credencial con permiso de ESCRITURA de categorias (el ETL actual solo
 //     lee /api/consultas con PVNET_API_TOKEN; no hay evidencia de permiso de
 //     alta).
-//   - PadCategories_id: dbo.Categorias tiene VARIOS Id por ruta (sql/diag_*);
+//   - PadCategories_id: dbo.Categorias tiene VARIOS Id por ruta (sql/diag/diag_*);
 //     no esta verificado que alguno sea el uuid de Proactivanet. Habria que
 //     resolverlo con GET /api/Categories?Path=<padre> (otra llamada externa).
 //   - Obligatorios y duplicados de la API sin documentar.

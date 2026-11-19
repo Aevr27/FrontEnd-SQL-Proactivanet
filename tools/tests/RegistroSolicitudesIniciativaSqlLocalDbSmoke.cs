@@ -247,6 +247,15 @@ public static class RegistroSolicitudesIniciativaSqlLocalDbSmoke
                   nq(Lector().Listar(200, "APROBADA")) + "|" + nq(Lector().Listar(200, null)));
             Check("Q4 el tope y el total son los del estado", "1|3", Lector().Listar(1, "ENVIADA").Solicitudes.Count + "|" + Lector().Listar(1, "ENVIADA").Total);
             Check("Q5 Mis solicitudes no cambia (sin filtro)", "3:3,2,1", nq(Lector().ListarDe(@"SORIANA\andresvr", 200)));
+            // 2026-11-04: el filtro Estado de "Mis solicitudes", dentro de la cuenta.
+            Check("Q6 Mis solicitudes con estado: ENVIADA sin #2, RECHAZADA solo #2, APROBADA vacia, null = todas",
+                  "2:3,1|1:2|0:|3:3,2,1",
+                  nq(Lector().ListarDe(@"SORIANA\andresvr", 200, "ENVIADA")) + "|" + nq(Lector().ListarDe(@"soriana\ANDRESVR", 200, "RECHAZADA")) + "|" +
+                  nq(Lector().ListarDe(@"SORIANA\andresvr", 200, "APROBADA")) + "|" + nq(Lector().ListarDe(@"SORIANA\andresvr", 200, null)));
+            Check("Q7 la RECHAZADA de una cuenta no aparece en la de otra", "0:", nq(Lector().ListarDe(@"SORIANA\otro", 200, "RECHAZADA")));
+            try { Lector().ListarDe(@"SORIANA\andresvr", 200, "PENDIENTE"); malo = "sin error"; }
+            catch (ArgumentOutOfRangeException) { malo = "ArgumentOutOfRangeException"; }
+            Check("Q8 Mis solicitudes con estado desconocido: no llega a la base", "ArgumentOutOfRangeException", malo);
 
             // ---------------- F: la base falla ----------------
             string resultado;

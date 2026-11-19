@@ -16,11 +16,18 @@
    "rechazada" se dice SOLO con la respuesta del servidor; una falla deja la
    solicitud pendiente y se muestra el motivo que dio el servidor.
    Se prueba en node: tools/tests/SolicitudesCambioColaSmoke.js.
+
+   MisCambios (2026-11-04): "Mis solicitudes de cambio" para quien no es ADM
+   (#mcBloque), SOLO LECTURA: lista con filtro Estado y detalle con su
+   historial, sin aplicar ni rechazar. handlers/admin_iniciativas_mis_cambios.ashx
+   decide de quien son (la cuenta de IIS) y quien entra (ExigirSolicitud).
+   Se prueba en node: tools/tests/MisSolicitudesCambioSmoke.js.
    ========================================================================= */
 window.SolicitudesCambioCola = (function () {
   'use strict';
 
   var URL = '../handlers/admin_iniciativas_solicitudes.ashx';
+  var URL_MIAS = '../handlers/admin_iniciativas_mis_cambios.ashx';
   var TIPOS = { FECHA: 'Fecha compromiso', ESTADO: 'Estado y Subestado', CATEGORIAS: 'Categorías', OTROS: 'Otros (explicación)',
                 DATOS: 'Título / Product Owner / Service Owner', VARIOS: 'Varios cambios' };
   // VARIOS (sql/34): las fechas pedidas, cada una con su etapa.
@@ -34,8 +41,10 @@ window.SolicitudesCambioCola = (function () {
   ];
   function datosPedidos(s) { return DATOS.filter(function (x) { return s['cambia_' + x.clave] === true; }); }
   function vacio(v) { return v === null || v === undefined || v === '' ? '(vacío)' : v; }
-  var ESTADOS = { PENDIENTE: 'Pendiente', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada' };
-  var EVENTOS = { ENVIADA: 'Enviada', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada', FALLO_APLICAR: 'Falló al aplicar', DESACTUALIZADA: 'Desactualizada' };
+  var ESTADOS = { PENDIENTE: 'Pendiente', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada', CANCELADA: 'Cancelada' };
+  var EVENTOS = { ENVIADA: 'Enviada', APLICADA: 'Aplicada', RECHAZADA: 'Rechazada', FALLO_APLICAR: 'Falló al aplicar', DESACTUALIZADA: 'Desactualizada',
+                  CANCELADA: 'Cancelada', REEMPLAZADA: 'Reemplazada' };
+  var MAXIMO_MOTIVO_CANCELACION = 2000;   // SolicitudesCambio.MaximoMotivoCancelacion (sql/41)
 
   function h(s) { return Escape.html(s === null || s === undefined ? '' : String(s)); }
   function fecha(iso) { return iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '—'; }
@@ -48,6 +57,11 @@ window.SolicitudesCambioCola = (function () {
     return dos(d.getDate()) + '/' + dos(d.getMonth() + 1) + '/' + d.getFullYear() + ' ' + dos(d.getHours()) + ':' + dos(d.getMinutes());
   }
   function pct(v) { return v === null || v === undefined ? '—' : h(v) + '%'; }
+  // sql/83: un AGREGAR que reactiva una categoria que estuvo ligada (lo marca
+  // el servidor solo con la migracion aplicada) y los campos de clasificacion
+  // que le faltan despues de la historica y la solicitud.
+  function esReactivacion(c) { return !!(c && c.accion === 'AGREGAR' && c.reactivacion === true); }
+  function faltanClas(c) { return c && Array.isArray(c.faltan_clasificacion) ? c.faltan_clasificacion : []; }
 
   // Lo pedido, en una linea (HTML). La fecha dice SIEMPRE su etapa.
   function resumen(s) {
@@ -84,30 +98,112 @@ window.SolicitudesCambioCola = (function () {
 
   // Quien envio: el nombre de CatPersona que resolvio el servidor
   // (solicitante_nombre); sin el, la cuenta Windows guardada (solicitado_por).
-  function quien(s) { return h(s.solicitante_nombre || s.solicitado_por); }
+  // Como se muestra quien la envio: lo que decide el servidor
+  // (solicitante_mostrar: UsuariosAdmin.NombreSolicitante -> nombre de
+  // CatPersona -> correo -> cuenta); sin el, como antes.
+  function textoQuien(s) { return s.solicitante_mostrar || s.solicitante_nombre || s.solicitado_por; }
+  function quien(s) { return h(textoQuien(s)); }
+  // Una cuenta como se muestra: lo que decide el servidor (<campo>_mostrar,
+  // App_Code/NombreSolicitante.cs: UsuariosAdmin.NombreSolicitante -> nombre
+  // verificado -> correo -> cuenta); sin el, la cuenta, como antes. La cuenta
+  // queda en el title cuando lo mostrado es otro texto.
+  function persona(mostrar, cuenta) {
+    var t = mostrar || cuenta;
+    if (t === null || t === undefined || t === '') return '—';
+    return mostrar && cuenta && mostrar !== cuenta ? '<span title="' + h(cuenta) + '">' + h(mostrar) + '</span>' : h(t);
+  }
+  // La cuenta se sigue viendo debajo cuando lo mostrado no es la cuenta.
+  function conCuenta(s) { return !!(s.solicitado_por && textoQuien(s) && textoQuien(s) !== s.solicitado_por); }
+
+  // sql/41: la relacion con la solicitud que esta corrige o con la que la
+  // reemplazo. Corta (lista) o con botones para ir a la otra (detalle;
+  // attr = data-sol-ir en la cola de ADM, data-mc-ir en "Mis"). El servidor
+  // solo manda los numeros que esta cuenta puede ver.
+  function relacionCorta(s) {
+    return (s.reemplaza_a ? '<span class="ini-sub">corrige a #' + h(s.reemplaza_a) + '</span>' : '') +
+      (s.reemplazada_por ? '<span class="ini-sub">reemplazada por #' + h(s.reemplazada_por) + '</span>' : '');
+  }
+  function relacion(d, attr) {
+    function ir(n) { return '<button type="button" class="ini-folio" ' + attr + '="' + h(n) + '">#' + h(n) + '</button>'; }
+    var partes = [];
+    if (d.reemplaza_a) partes.push('Corrige a la solicitud ' + ir(d.reemplaza_a) + ' (quedó cancelada).');
+    if (d.reemplazada_por) partes.push('Reemplazada por la solicitud ' + ir(d.reemplazada_por) + '.');
+    return partes.length ? '<p class="ini-nota ini-sol-relacion">' + partes.join(' ') + '</p>' : '';
+  }
+  // Cancelar / Modificar de QUIEN LA ENVIO (puede_cancelar del servidor:
+  // suya, PENDIENTE y sql/41). p: prefijo de los id ('sol' cola, 'mc' Mis).
+  function htmlPropias(d, p) {
+    if (d.puede_cancelar !== true) return '';
+    return '<div class="ini-sol-propias"><h5>Tu solicitud</h5>' +
+      '<p class="ini-nota">Mientras siga pendiente puedes cancelarla o modificarla. Modificar no la edita: crea una solicitud nueva con otro número ' +
+      '(ADM la revisa desde el principio) y esta queda cancelada. Nada se borra.</p>' +
+      '<div class="ini-cambio-campos"><div class="campo ini-cambio-ancho"><label for="' + p + 'MotivoCancelacion">Motivo (obligatorio para cancelar)</label>' +
+      '<textarea id="' + p + 'MotivoCancelacion" rows="2" maxlength="' + MAXIMO_MOTIVO_CANCELACION + '"></textarea></div></div>' +
+      '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-cx-accion="cancelar">Cancelar solicitud</button> ' +
+      '<button type="button" class="btn linea chico" data-cx-accion="modificar">Modificar</button></div></div>';
+  }
 
   // conIniciativa: el Codigo es un boton que abre el detalle de la
   // iniciativa (data-sol-folio); sin el, texto como antes. El "#" sigue
   // abriendo la solicitud (data-sol-id).
-  function htmlLista(lista, conIniciativa) {
+  // abierta: el id de la solicitud expandida (su detalle va en la fila de
+  // abajo: ColaSolicitudes.ubicarDetalle); su chevron dice aria-expanded.
+  var COLUMNAS = 8;
+  var CHEVRON = '<svg class="ini-hist-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M9.5 6.5 15 12l-5.5 5.5"/></svg>';
+  function htmlLista(lista, conIniciativa, abierta) {
     if (!lista.length) return '<p class="ini-nota">No hay solicitudes con ese estado.</p>';
-    return '<table class="ini-det-tabla ini-sol-tabla"><thead><tr><th scope="col">#</th><th scope="col">Iniciativa</th>' +
+    return '<table class="ini-det-tabla ini-sol-tabla"><thead><tr><th scope="col" class="ini-sol-chev-col" aria-label="Detalle"></th>' +
+      '<th scope="col">#</th><th scope="col">Iniciativa</th>' +
       '<th scope="col">Qué cambia</th><th scope="col">Pedido</th><th scope="col">Solicitó</th><th scope="col">Enviada</th>' +
       '<th scope="col">Estado</th></tr></thead><tbody>' +
       lista.map(function (s) {
-        return '<tr class="ini-sol-fila" data-sol-id="' + h(s.id) + '">' +
+        var abre = abierta !== null && abierta !== undefined && String(abierta) === String(s.id);
+        return '<tr class="ini-sol-fila' + (abre ? ' abierta' : '') + '" data-sol-id="' + h(s.id) + '">' +
+          '<td class="ini-sol-chev-col"><button type="button" class="ini-sol-chev" data-sol-id="' + h(s.id) + '" data-sol-exp="' + h(s.id) +
+            '" aria-expanded="' + (abre ? 'true' : 'false') + '" aria-controls="solDetalle" aria-label="' + (abre ? 'Ocultar' : 'Ver') +
+            ' detalle de la solicitud #' + h(s.id) + '">' + CHEVRON + '</button></td>' +
           '<td><button type="button" class="ini-folio" data-sol-id="' + h(s.id) + '">#' + h(s.id) + '</button></td>' +
           '<td>' + (conIniciativa && s.folio
             ? '<button type="button" class="ini-folio" data-sol-folio="' + h(s.folio) + '" title="Ver la iniciativa">' + h(s.folio) + '</button>'
             : h(s.folio)) + (s.titulo ? '<span class="ini-sub">' + h(s.titulo) + '</span>' : '') + '</td>' +
           '<td>' + h(TIPOS[s.tipo] || s.tipo) + '</td><td>' + resumen(s) + '</td>' +
           '<td>' + quien(s) + ' <span class="chip ini-chip">' + h(s.rol_solicitante) + '</span>' +
-            (s.solicitante_nombre && s.solicitado_por ? '<span class="ini-sub">' + h(s.solicitado_por) + '</span>' : '') + '</td>' +
+            (conCuenta(s) ? '<span class="ini-sub">' + h(s.solicitado_por) + '</span>' : '') + '</td>' +
           '<td>' + fechaHora(s.fecha_solicitud_utc) + '</td>' +
-          '<td>' + h(ESTADOS[s.estado] || s.estado) +
+          '<td>' + h(ESTADOS[s.estado] || s.estado) + relacionCorta(s) +
             (s.estado === 'PENDIENTE' && s.intentos > 0 ? ' <span class="pill ini-atrasada" title="' + h(s.ultimo_error) + '">' + h(s.intentos) + ' intento' + (s.intentos === 1 ? '' : 's') + '</span>' : '') +
           '</td></tr>';
       }).join('') + '</tbody></table>';
+  }
+
+  // Paginacion de la cola (solo en el navegador: el servidor manda la lista
+  // completa del filtro Estado). pagina se ajusta a [1, paginas]: nunca una
+  // pagina vacia si hay solicitudes.
+  var POR_PAGINA = 20;
+  // Orden de la cola, el MISMO con cualquier filtro Estado: la mas reciente
+  // primero por Enviada (fecha_solicitud_utc, ISO UTC: se compara como
+  // texto) y, con la misma hora, el # mas alto primero. Sin fecha, al final.
+  // Se ordena una copia antes de paginar, asi las paginas no se mueven.
+  function ordenarRecientes(lista) {
+    return (lista || []).slice().sort(function (a, b) {
+      var fa = a.fecha_solicitud_utc || '', fb = b.fecha_solicitud_utc || '';
+      if (fa !== fb) return fa < fb ? 1 : -1;
+      return (Number(b.id) || 0) - (Number(a.id) || 0);
+    });
+  }
+  function paginar(total, pagina) {
+    var paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
+    var p = Math.min(Math.max(1, Math.floor(Number(pagina)) || 1), paginas);
+    var desde = (p - 1) * POR_PAGINA;
+    return { pagina: p, paginas: paginas, total: total, desde: desde, hasta: Math.min(desde + POR_PAGINA, total) };
+  }
+  function htmlPaginas(info) {
+    if (!info || !info.total) return '';
+    return '<nav class="ini-sol-paginas" aria-label="Páginas de solicitudes">' +
+      '<button type="button" class="btn linea chico" data-sol-pagina="-1" aria-label="Página anterior"' + (info.pagina <= 1 ? ' disabled' : '') + '>&lt;</button>' +
+      '<span class="ini-sol-pagina">Página ' + info.pagina + ' de ' + info.paginas + '</span>' +
+      '<button type="button" class="btn linea chico" data-sol-pagina="1" aria-label="Página siguiente"' + (info.pagina >= info.paginas ? ' disabled' : '') + '>&gt;</button>' +
+      '<span class="ini-nota">' + (info.desde + 1) + '–' + info.hasta + ' de ' + info.total + '</span></nav>';
   }
 
   function opciones(valores, elegido) {
@@ -119,7 +215,7 @@ window.SolicitudesCambioCola = (function () {
   // IMPACTO POR CATEGORIA (estimado): la volumetria de HOY de cada ruta
   // (SLOT 0, ultimos 30 dias: la de Nueva solicitud y Solicitar cambios,
   // VolumetriaCliente), los tickets que da el % pedido con ticketsDe de
-  // admin/iniciativas.js (FLOOR) y las OTRAS iniciativas activas de la
+  // admin/iniciativas.js (CEILING) y las OTRAS iniciativas activas de la
   // categoria (otras_iniciativas del servidor: CapacidadCategoria.Otras, sin
   // la iniciativa de la solicitud) con su % y lo ya comprometido. Nada de
   // esto se guarda: al aplicar, la base calcula Tickets a reducir con su
@@ -177,9 +273,13 @@ window.SolicitudesCambioCola = (function () {
 
   // tipos: { iniciativa: [...], agrupado: [...] } (los valores que ya existen).
   // vols: la volumetria de hoy por ruta (htmlImpacto); opcional.
-  function htmlDetalle(d, tipos, vols) {
+  // lectura (MisCambios): sin nada de la revision de ADM (sin comentario,
+  // aplicar, rechazar, clasificar ni sus avisos; sin impacto ni ids de la
+  // cola). Solo "Cerrar" (data-mc-accion).
+  function htmlDetalle(d, tipos, vols, lectura) {
     tipos = tipos || {};
     var pendiente = d.estado === 'PENDIENTE';
+    var revisa = pendiente && !lectura;
     var act = d.actual || {};
     var filas = '';
     if (d.tipo === 'ESTADO' || (d.tipo === 'VARIOS' && d.estado_nuevo)) {
@@ -207,41 +307,77 @@ window.SolicitudesCambioCola = (function () {
     var htmlCats = cats.length ? '<h5>Categorías</h5><table class="ini-det-tabla"><thead><tr><th scope="col">Categoría</th><th scope="col">Acción</th>' +
       '<th scope="col">% al enviar</th><th scope="col">% pedido</th><th scope="col">% ahora</th><th scope="col">Clasificación</th></tr></thead><tbody>' +
       cats.map(function (c, n) {
+        if (esReactivacion(c)) return filaReactivacion(c, n);
         var sinClas = c.accion === 'AGREGAR' && (!c.tipo_iniciativa || !c.tipo_agrupado);
         var clas = c.accion !== 'AGREGAR' ? '<span class="ini-nota">no cambia</span>'
           : !sinClas ? h(c.tipo_iniciativa) + ' / ' + h(c.tipo_agrupado)
-          : pendiente
+          : revisa
             ? '<span class="ini-sol-clas" data-clas-fila="' + n + '"><label>Tipo de iniciativa <select data-clas-ti="' + n + '" data-clas-categoria="' + h(c.categoria) + '">' + opciones(tipos.iniciativa) + '</select></label> ' +
               '<label>Agrupación <select data-clas-ta="' + n + '">' + opciones(tipos.agrupado) + '</select></label></span>'
             : '<span class="ini-nota">sin clasificar</span>';
         return '<tr><td class="ini-cat-ruta">' + h(c.categoria) + '</td><td>' + (c.accion === 'AGREGAR' ? 'Agregar' : 'Cambiar %') + '</td>' +
           '<td class="num">' + pct(c.pct_anterior) + '</td><td class="num">' + pct(c.pct_nuevo) + '</td><td class="num">' +
-          (c.accion === 'AGREGAR' ? (c.ligada_alguna_vez ? 'ya ligada' : '—') : (c.ligada ? pct(c.pct_actual) : 'ya no ligada')) + '</td><td>' + clas + '</td></tr>';
+          (c.accion === 'AGREGAR' ? (c.ligada ? 'ya ligada' : c.ligada_alguna_vez && !('reactivacion' in c) ? 'ya ligada' : '—') : (c.ligada ? pct(c.pct_actual) : 'ya no ligada')) + '</td><td>' + clas + '</td></tr>';
       }).join('') + '</tbody></table>' : '';
+    // sql/83: un AGREGAR de una categoria que estuvo ligada la REACTIVA. Su
+    // clasificacion historica no vacia se conserva; ADM solo elige la que
+    // falta (faltan_clasificacion, del servidor).
+    function filaReactivacion(c, n) {
+      var falta = faltanClas(c);
+      function campo(clave, historica, pedida, rotulo, attr, lista) {
+        if (falta.indexOf(clave) < 0) {
+          return historica ? h(historica) + ' <span class="ini-origen">histórica, se conserva</span>' : h(pedida);
+        }
+        return revisa ? '<label>' + rotulo + ' <select ' + attr + '>' + opciones(lista) + '</select></label>'
+          : '<span class="ini-nota">sin ' + rotulo.toLowerCase() + '</span>';
+      }
+      var clas = '<span class="ini-sol-clas" data-clas-fila="' + n + '">' +
+        campo('tipo_iniciativa', c.tipo_iniciativa_historica, c.tipo_iniciativa, 'Tipo de iniciativa',
+              'data-clas-ti="' + n + '" data-clas-categoria="' + h(c.categoria) + '"', tipos.iniciativa) + ' / ' +
+        campo('tipo_agrupado', c.tipo_agrupado_historica, c.tipo_agrupado, 'Agrupación', 'data-clas-ta="' + n + '"', tipos.agrupado) + '</span>';
+      return '<tr><td class="ini-cat-ruta">' + h(c.categoria) + '</td><td>Reactivar</td>' +
+        '<td class="num">' + pct(c.pct_anterior) + '</td><td class="num">' + pct(c.pct_nuevo) + '</td><td class="num">' +
+        '<span class="ini-cat-estado reactivar">Reactivación (estuvo ligada)</span></td><td>' + clas + '</td></tr>';
+    }
     var avisos = '';
-    if (pendiente && d.tipo === 'VARIOS') {
+    if (revisa && d.tipo === 'VARIOS') {
       avisos += '<p class="ini-cambio-msg aviso"><strong>Varios cambios, una sola decisión:</strong> aplicar aplica TODOS los cambios de arriba ' +
         '(o ninguno, si alguno falla); rechazar no aplica ninguno.</p>';
     }
-    if (pendiente && d.desactualizada) {
+    if (lectura && pendiente && d.desactualizada) {
+      avisos += '<p class="ini-cambio-msg aviso"><strong>Desactualizada:</strong> la iniciativa cambió desde que la enviaste (compara «Al enviar» con «Ahora»): ' +
+        'un administrador no puede aplicarla tal cual.</p>';
+    }
+    if (revisa && d.desactualizada) {
       avisos += '<p class="ini-cambio-msg error"><strong>Desactualizada:</strong> la iniciativa cambió desde que se envió (compara «Al enviar» con «Ahora»). ' +
         'No se puede aplicar tal cual: recházala o pide que la envíen de nuevo.</p>';
     }
-    if (pendiente && d.ultimo_error) {
+    if (revisa && d.ultimo_error) {
       avisos += '<p class="ini-cambio-msg aviso"><strong>Último intento (' + fechaHora(d.fecha_ultimo_intento_utc) + '):</strong> ' + h(d.ultimo_error) + '</p>';
     }
-    if (pendiente && cats.some(function (c) { return c.accion === 'AGREGAR' && (!c.tipo_iniciativa || !c.tipo_agrupado); })) {
+    if (revisa && cats.some(function (c) { return c.accion === 'AGREGAR' && !esReactivacion(c) && (!c.tipo_iniciativa || !c.tipo_agrupado); })) {
       avisos += '<p class="ini-cambio-msg aviso">Una categoría por agregar llegó sin clasificación (su prefijo no tiene regla o el valor no existe): elígela antes de aplicar.</p>';
     }
+    if (cats.some(esReactivacion)) {
+      avisos += '<p class="ini-cambio-msg aviso"><strong>Reactivación:</strong> una categoría pedida estuvo ligada a esta iniciativa y se dio de baja. ' +
+        'Al aplicar se reactiva la MISMA asociación: conserva sus fechas originales y su clasificación histórica' +
+        (revisa && cats.some(function (c) { return esReactivacion(c) && faltanClas(c).length; }) ? '; elige solo lo que le falta.' : '.') + '</p>';
+    }
     var eventos = (d.eventos || []).map(function (e) {
-      return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + h(e.usuario) +
+      return '<li><strong>' + h(EVENTOS[e.evento] || e.evento) + '</strong> · ' + fechaHora(e.fecha_utc) + ' · ' + persona(e.usuario_mostrar, e.usuario) +
         (e.detalle ? '<span class="ini-sub">' + h(e.detalle) + '</span>' : '') + '</li>';
     }).join('');
-    var revision = d.estado !== 'PENDIENTE'
-      ? '<p class="ini-nota">' + h(ESTADOS[d.estado]) + ' por ' + h(d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
+    var revision = d.estado === 'CANCELADA'
+      ? '<p class="ini-nota"><strong>Cancelada</strong> por quien la envió (' + persona(d.cancelado_por_mostrar, d.cancelado_por) + ') el ' + fechaHora(d.fecha_cancelacion_utc) +
+        (d.motivo_cancelacion ? ': «' + h(d.motivo_cancelacion) + '»' : '') + '</p>'
+      : d.estado !== 'PENDIENTE'
+      ? '<p class="ini-nota">' + h(ESTADOS[d.estado]) + ' por ' + persona(d.revisado_por_mostrar, d.revisado_por) + ' el ' + fechaHora(d.fecha_revision_utc) +
         (d.comentario_revision ? ': «' + h(d.comentario_revision) + '»' : '') + '</p>'
       : '';
-    var acciones = pendiente
+    var propias = htmlPropias(d, lectura ? 'mc' : 'sol');
+    var acciones = lectura
+      ? '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-mc-accion="cerrar">Cerrar</button></div>'
+      : pendiente
       ? '<div class="ini-cambio-campos"><div class="campo ini-cambio-ancho"><label for="solComentario">' + (d.tipo === 'OTROS' ? 'Qué se corrigió (obligatorio para cerrarla)' : 'Comentario (obligatorio para rechazar)') +
         '</label><textarea id="solComentario" rows="3"></textarea></div></div>' +
         '<div class="ini-cambio-pie"><button type="button" class="btn chico" data-sol-accion="aplicar">' + (d.tipo === 'OTROS' ? 'Cerrar como atendida' : 'Aplicar solicitud') + '</button> ' +
@@ -249,16 +385,73 @@ window.SolicitudesCambioCola = (function () {
         '<button type="button" class="btn linea chico" data-sol-accion="cerrar">Cerrar</button></div>'
       : '<div class="ini-cambio-pie"><button type="button" class="btn linea chico" data-sol-accion="cerrar">Cerrar</button></div>';
     return '<h4>Solicitud #' + h(d.id) + ' · ' + h(d.folio) + (d.titulo ? ' · ' + h(d.titulo) : '') + '</h4>' +
-      '<p class="ini-nota">' + h(TIPOS[d.tipo] || d.tipo) + ' · la envió ' + quien(d) + ' (' + (d.solicitante_nombre && d.solicitado_por ? h(d.solicitado_por) + ', ' : '') + h(d.rol_solicitante) + ') el ' +
+      '<p class="ini-nota">' + h(TIPOS[d.tipo] || d.tipo) + ' · la envió ' + quien(d) + ' (' + (conCuenta(d) ? h(d.solicitado_por) + ', ' : '') + h(d.rol_solicitante) + ') el ' +
         fechaHora(d.fecha_solicitud_utc) + ' · ' + h(ESTADOS[d.estado] || d.estado) + (d.intentos ? ' · ' + h(d.intentos) + ' intento(s) de aplicar' : '') + '</p>' +
-      avisos + cambios + htmlCats + htmlImpacto(cats, vols) +
+      relacion(d, lectura ? 'data-mc-ir' : 'data-sol-ir') +
+      avisos + cambios + htmlCats + (lectura ? '' : htmlImpacto(cats, vols)) +
       '<h5>Motivo</h5><div class="ini-texto">' + h(d.motivo) + '</div>' + revision +
-      '<div class="ini-cambio-msg" id="solDetMsg" role="status" aria-live="polite"></div>' + acciones +
+      (lectura ? (propias ? '<div class="ini-cambio-msg" id="mcDetMsg" role="status" aria-live="polite"></div>' : '')
+               : '<div class="ini-cambio-msg" id="solDetMsg" role="status" aria-live="polite"></div>') + propias + acciones +
       (eventos ? '<h5>Historial de la solicitud</h5><ul class="ini-sol-eventos">' + eventos + '</ul>' : '');
   }
 
   function leer(resp) {
     return Promise.resolve(resp.json()).catch(function () { return null; }).then(function (j) { return { status: resp.status, json: j || {} }; });
+  }
+
+  // Cancelar (dos pasos: motivo y confirmar) o Modificar la solicitud
+  // abierta de quien la envio. dueno: ColaSolicitudes o MisCambios (detalle,
+  // pedir, ocupado, listar, verDetalle, alModificar, alCancelar). La base
+  // decide si es suya y si sigue PENDIENTE: si ADM la reviso antes, lo dice.
+  function accionPropia(dueno, accion, p) {
+    var d = dueno.detalle;
+    if (!d || dueno.ocupado) return Promise.resolve(null);
+    function msg(clase, html) {
+      var m = dueno.$(p + 'DetMsg');
+      if (m) { m.className = 'ini-cambio-msg ' + clase; m.innerHTML = html; }
+    }
+    if (accion === 'modificar') {
+      var abierto = dueno.alModificar ? dueno.alModificar(d) : false;
+      if (!abierto) {
+        msg('error', 'No se pudo abrir la iniciativa ' + h(d.folio) + ' para corregir la solicitud: no está en el registro cargado ' +
+          'o tu cuenta ya no puede pedirle cambios. Actualiza la página e inténtalo de nuevo.');
+      }
+      return Promise.resolve(abierto === true);
+    }
+    var caja = dueno.$(p + 'MotivoCancelacion');
+    var motivo = caja ? String(caja.value || '').trim() : '';
+    if (!motivo) { msg('error', 'Explica por qué cancelas la solicitud.'); return Promise.resolve(null); }
+    if (motivo.length > MAXIMO_MOTIVO_CANCELACION) { msg('error', 'El motivo no puede pasar de 2000 caracteres.'); return Promise.resolve(null); }
+    if (accion === 'cancelar') {
+      msg('revisar', '¿Cancelar la solicitud #' + h(d.id) + '? Ya no se podrá aplicar ni modificar; su historial se conserva. ' +
+        '<button type="button" class="btn chico" data-cx-accion="confirmar-cancelacion">Sí, cancelarla</button> ' +
+        '<button type="button" class="btn linea chico" data-cx-accion="no-cancelar">No</button>');
+      return Promise.resolve(null);
+    }
+    if (accion !== 'confirmar-cancelacion') return Promise.resolve(null);
+    var datos = new FormData();
+    datos.append('id', String(d.id));
+    datos.append('motivo', motivo);
+    dueno.ocupado = true;
+    msg('', '<span>Cancelando…</span>');
+    return Promise.resolve().then(function () { return dueno.pedir(URL + '?accion=cancelar', { method: 'POST', body: datos, credentials: 'same-origin' }); })
+      .then(leer)
+      .then(function (r) {
+        dueno.ocupado = false;
+        var j = r.json, ok = r.status === 200 && j.cancelada === true;
+        var html = ok ? '<strong>Solicitud #' + h(d.id) + ' cancelada.</strong> Ya no se revisa; su historial se conserva.'
+          : j.cancelada === null ? h(j.error || 'No se pudo confirmar la cancelación.') + ' Actualiza antes de reintentar.'
+          : '<strong>No se canceló.</strong> ' + h(j.error || ('Respuesta ' + r.status + '.'));
+        if (dueno.alCancelar) dueno.alCancelar();
+        return Promise.all([dueno.listar(), dueno.verDetalle(d.id)]).then(function () {
+          msg(ok ? 'listo' : j.cancelada === null ? 'aviso' : 'error', html);
+          return r;
+        });
+      }, function () {
+        dueno.ocupado = false;
+        msg('aviso', 'No se pudo contactar al servidor: no se sabe si se canceló. Actualiza antes de reintentar.');
+        return null;
+      });
   }
 
   class ColaSolicitudes {
@@ -275,11 +468,78 @@ window.SolicitudesCambioCola = (function () {
       this.alCambiarIniciativa = null;   // tras aplicar: releer el registro
       this.alVerSolicitud = null;        // (d) se abrio el detalle: el aviso la marca vista
       this.alRevisar = null;             // tras aplicar / rechazar: el aviso se relee
-      this.alVerIniciativa = null;       // (folio) el Codigo de la lista: detalle de Iniciativas
+      this.alVerIniciativa = null;       // (folio, boton) el Codigo de la lista: detalle de Iniciativas
+      this.alModificar = null;           // (d) -> true si abrio "Solicitar cambios" para corregirla (sql/41)
+      this.alCancelar = null;            // tras cancelar una suya: el aviso se relee
       this.cableado = false;
+      this.todas = null;        // la ultima lista del servidor (filtro Estado); null = sin lista pintada
+      this.pagina = 1;
+      this.lecturaDetalle = 0;  // una respuesta de detalle vieja no pinta ni expande
     }
 
     $(id) { return this.doc.getElementById(id); }
+
+    // #solDetalle es UNO solo (sus botones y su comentario): expandido vive en
+    // una fila de la tabla, debajo de su solicitud; si la solicitud no esta
+    // en la pagina (p. ej. ya no cumple el filtro tras aplicarla) queda en su
+    // lugar de siempre, debajo de la tabla. Se guarda la referencia: dentro
+    // de la tabla no debe perderse al repintarla.
+    caja() { return this._caja || (this._caja = this.$('solDetalle')); }
+
+    // Devuelve el detalle a #solCola antes de repintar la tabla.
+    rescatarDetalle() {
+      var caja = this.caja(), cola = this.$('solCola');
+      if (caja && cola && caja.parentNode && caja.parentNode !== cola && typeof cola.appendChild === 'function') cola.appendChild(caja);
+    }
+
+    // La pagina actual de this.todas; el detalle abierto, debajo de su fila.
+    pintarLista() {
+      if (!this.todas) return;
+      var lista = this.$('solLista'), d = this.detalle, todas = this.todas;
+      if (d) {
+        // Siempre en la pagina de la solicitud abierta (Historial, aplicar
+        // con el filtro "Todas"...). Cambiar de pagina la cierra antes.
+        for (var i = 0; i < todas.length; i++) {
+          if (String(todas[i].id) === String(d.id)) { this.pagina = Math.floor(i / POR_PAGINA) + 1; break; }
+        }
+      }
+      var info = paginar(todas.length, this.pagina);
+      this.pagina = info.pagina;
+      var activo = this.doc.activeElement, foco = activo && activo.getAttribute ? activo.getAttribute('data-sol-exp') : null;
+      this.rescatarDetalle();
+      lista.innerHTML = htmlLista(todas.slice(info.desde, info.hasta), !!this.alVerIniciativa, d ? d.id : null);
+      var pags = this.$('solPaginas');
+      if (pags) pags.innerHTML = htmlPaginas(info);
+      this.ubicarDetalle();
+      if (foco && typeof lista.querySelector === 'function') {
+        var b = lista.querySelector('[data-sol-exp="' + foco + '"]');
+        if (b && b.focus) b.focus();
+      }
+    }
+
+    ubicarDetalle() {
+      var d = this.detalle, caja = this.caja(), lista = this.$('solLista'), doc = this.doc;
+      if (!d || !caja || caja.hidden || typeof lista.querySelector !== 'function' || typeof doc.createElement !== 'function') return;
+      var fila = lista.querySelector('tr.ini-sol-fila[data-sol-id="' + String(d.id).replace(/["\\]/g, '') + '"]');
+      if (!fila || !fila.parentNode) return;
+      var tr = doc.createElement('tr'), td = doc.createElement('td');
+      tr.className = 'ini-sol-exp';
+      td.colSpan = COLUMNAS;
+      td.appendChild(caja);
+      tr.appendChild(td);
+      fila.parentNode.insertBefore(tr, fila.nextSibling);
+    }
+
+    // delta: -1 / +1. Cierra el detalle (nunca queda uno de otra pagina);
+    // no se mueve mientras se aplica o rechaza.
+    cambiarPagina(delta) {
+      if (this.ocupado || !this.todas) return;
+      var info = paginar(this.todas.length, this.pagina), p = info.pagina + delta;
+      if (p < 1 || p > info.paginas) return;
+      this.cerrarDetalle(true);
+      this.pagina = p;
+      this.pintarLista();
+    }
 
     fijarRol(rol) { this.rol = rol === 'ADM' || rol === 'MOD' ? rol : null; }
 
@@ -287,23 +547,46 @@ window.SolicitudesCambioCola = (function () {
       if (this.cableado || !this.$('solCola')) return;
       this.cableado = true;
       var self = this;
-      this.$('solFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.listar(); });
-      this.$('solActualizar').addEventListener('click', function () { self.listar(); });
+      // Filtro: otra coleccion, pagina 1. Actualizar: la misma pagina si
+      // sigue existiendo (pintarLista la ajusta). Ambos cierran el detalle:
+      // nunca queda uno viejo expandido.
+      this.$('solFiltro').addEventListener('change', function (e) {
+        self.filtro = e.target.value || ''; self.cerrarDetalle(); self.pagina = 1; self.listar();
+      });
+      this.$('solActualizar').addEventListener('click', function () { self.cerrarDetalle(); self.listar(); });
+      this.$('solPaginas').addEventListener('click', function (e) {
+        var el = e.target && e.target.closest ? e.target.closest('[data-sol-pagina]') : null;
+        if (el && !el.disabled) self.cambiarPagina(Number(el.getAttribute('data-sol-pagina')));
+      });
       this.$('solLista').addEventListener('click', function (e) {
+        // Dentro del detalle expandido: sus botones van por su propio
+        // escucha (#solDetalle); el clic no abre ni cierra filas.
+        if (e.target && e.target.closest && e.target.closest('.ini-sol-exp')) return;
         // El Codigo va antes que la fila: abre la iniciativa, no la solicitud.
         // Si no se puede abrir (false), sigue como un clic en la fila.
         var ini = e.target && e.target.closest ? e.target.closest('[data-sol-folio]') : null;
-        if (ini && self.alVerIniciativa && self.alVerIniciativa(ini.getAttribute('data-sol-folio')) !== false) return;
+        if (ini && self.alVerIniciativa && self.alVerIniciativa(ini.getAttribute('data-sol-folio'), ini) !== false) return;
         var el = e.target && e.target.closest ? e.target.closest('[data-sol-id]') : e.target;
         var id = el && el.getAttribute && el.getAttribute('data-sol-id');
-        if (id) self.verDetalle(Number(id));
+        if (!id) return;
+        // La abierta se pliega; otra la reemplaza (una sola a la vez).
+        if (self.detalle && String(self.detalle.id) === String(id)) self.cerrarDetalle();
+        else self.verDetalle(Number(id));
       });
       this.$('solDetalle').addEventListener('click', function (e) {
         var el = e.target && e.target.closest ? e.target.closest('[data-sol-accion]') : e.target;
         var a = el && el.getAttribute && el.getAttribute('data-sol-accion');
-        if (a === 'aplicar') self.aplicar();
-        else if (a === 'rechazar') self.rechazar();
-        else if (a === 'cerrar') self.cerrarDetalle();
+        if (a === 'aplicar') { self.aplicar(); return; }
+        if (a === 'rechazar') { self.rechazar(); return; }
+        if (a === 'cerrar') { self.cerrarDetalle(); return; }
+        // sql/41: ir a la solicitud relacionada; cancelar / modificar la suya.
+        var ir = e.target && e.target.closest ? e.target.closest('[data-sol-ir]') : null;
+        var n = ir && ir.getAttribute ? Number(ir.getAttribute('data-sol-ir')) : 0;
+        if (n > 0) { self.verDetalle(n); return; }
+        var cx = e.target && e.target.closest ? e.target.closest('[data-cx-accion]') : null;
+        var ax = cx && cx.getAttribute('data-cx-accion');
+        if (ax === 'no-cancelar') self.mensaje('solDetMsg', '', '');
+        else if (ax) accionPropia(self, ax, 'sol');
       });
     }
 
@@ -339,7 +622,8 @@ window.SolicitudesCambioCola = (function () {
           if (mia !== self.lecturas) return null;
           self.ultimoEstado = r.status;
           if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
-            self.$('solLista').innerHTML = htmlLista(r.json.solicitudes, !!self.alVerIniciativa);
+            self.todas = ordenarRecientes(r.json.solicitudes);
+            self.pintarLista();
             self.mensaje('solMsg', '', '');
             return r.json.solicitudes;
           }
@@ -347,7 +631,10 @@ window.SolicitudesCambioCola = (function () {
             self.mensaje('solMsg', 'aviso', 'No se pudo actualizar la cola (respuesta ' + h(r.status) + '): se muestra la última lectura.');
             return null;
           }
+          self.todas = null;
+          self.rescatarDetalle();
           self.$('solLista').innerHTML = '';
+          if (self.$('solPaginas')) self.$('solPaginas').innerHTML = '';
           self.mensaje('solMsg', r.status === 501 ? 'aviso' : 'error', h(r.json.error || ('No se pudo leer la cola (respuesta ' + r.status + ').')));
           return null;
         }, function () {
@@ -400,12 +687,16 @@ window.SolicitudesCambioCola = (function () {
       if (tk && c) tk.innerHTML = ticketsTexto(v, c.pct_nuevo);
     }
 
+    // Pinta el detalle (htmlDetalle, el de siempre) y lo expande debajo de
+    // su fila (pintarLista / ubicarDetalle). Si mientras llegaba se abrio
+    // otra, se cambio de pagina, de filtro o se cerro, no se pinta.
     verDetalle(id) {
-      var self = this;
+      var self = this, mia = ++this.lecturaDetalle;
       return Promise.resolve().then(function () { return self.pedir(URL + '?accion=detalle&id=' + encodeURIComponent(id), { cache: 'no-store', credentials: 'same-origin' }); })
         .then(leer)
         .then(function (r) {
-          var caja = self.$('solDetalle');
+          if (mia !== self.lecturaDetalle) return null;
+          var caja = self.caja();
           if (r.status !== 200) {
             self.mensaje('solMsg', 'error', h(r.json.error || ('No se pudo leer la solicitud (respuesta ' + r.status + ').')));
             return null;
@@ -413,19 +704,26 @@ window.SolicitudesCambioCola = (function () {
           self.detalle = r.json;
           caja.innerHTML = htmlDetalle(r.json, self.tipos(), {});
           caja.hidden = false;
+          self.pintarLista();
           if (self.alVerSolicitud) self.alVerSolicitud(r.json);
           self.cargarVolumetrias(r.json);
           return r.json;
         }, function () {
+          if (mia !== self.lecturaDetalle) return null;
           self.mensaje('solMsg', 'error', 'No se pudo contactar al servidor.');
           return null;
         });
     }
 
-    cerrarDetalle() {
+    // sinPintar: quien llama repinta la lista despues (cambiarPagina).
+    cerrarDetalle(sinPintar) {
+      this.lecturaDetalle++;
       this.detalle = null;
-      this.$('solDetalle').hidden = true;
-      this.$('solDetalle').innerHTML = '';
+      this.rescatarDetalle();
+      var caja = this.caja();
+      caja.hidden = true;
+      caja.innerHTML = '';
+      if (!sinPintar) this.pintarLista();
     }
 
     comentario() { var c = this.$('solComentario'); return c ? String(c.value || '').trim() : ''; }
@@ -474,9 +772,20 @@ window.SolicitudesCambioCola = (function () {
       if (comentario) datos.append('comentario', comentario);
       var self = this, faltan = [];
       (d.categorias_detalle || []).forEach(function (c, n) {
-        if (c.accion !== 'AGREGAR' || (c.tipo_iniciativa && c.tipo_agrupado)) return;
         var ti = self.doc.querySelector('[data-clas-ti="' + n + '"]'), ta = self.doc.querySelector('[data-clas-ta="' + n + '"]');
         var vi = ti ? ti.value : '', va = ta ? ta.value : '';
+        if (esReactivacion(c)) {
+          // sql/83: solo los campos que le faltan; los demas van vacios (se
+          // conserva la historica: el servidor rechaza sobrescribirla).
+          var falta = faltanClas(c);
+          if (!falta.length) return;
+          if ((falta.indexOf('tipo_iniciativa') >= 0 && !vi) || (falta.indexOf('tipo_agrupado') >= 0 && !va)) { faltan.push(c.categoria); return; }
+          datos.append('clas_categoria', c.categoria);
+          datos.append('clas_tipo_iniciativa', falta.indexOf('tipo_iniciativa') >= 0 ? vi : '');
+          datos.append('clas_tipo_agrupado', falta.indexOf('tipo_agrupado') >= 0 ? va : '');
+          return;
+        }
+        if (c.accion !== 'AGREGAR' || (c.tipo_iniciativa && c.tipo_agrupado)) return;
         if (!vi || !va) { faltan.push(c.categoria); return; }
         datos.append('clas_categoria', c.categoria);
         datos.append('clas_tipo_iniciativa', vi);
@@ -504,5 +813,209 @@ window.SolicitudesCambioCola = (function () {
     }
   }
 
-  return { ColaSolicitudes: ColaSolicitudes, htmlLista: htmlLista, htmlDetalle: htmlDetalle, resumen: resumen, URL: URL };
+  // La lista de "Mis solicitudes de cambio": sin "Solicito" (son todas
+  // suyas) ni intentos de aplicar (el servidor no los manda).
+  // conRef: el Codigo es un boton (data-ini-ref) que abre el detalle de la
+  // iniciativa sin cambiar de pestaña; sin el, texto como antes.
+  function htmlListaMias(lista, filtro, conRef) {
+    if (!lista.length) {
+      return '<p class="ini-nota">' + (filtro ? 'No tienes solicitudes de cambio con ese estado.' : 'Todavía no has enviado solicitudes de cambio.') + '</p>';
+    }
+    return '<table class="ini-det-tabla ini-sol-tabla"><thead><tr><th scope="col">#</th><th scope="col">Iniciativa</th>' +
+      '<th scope="col">Qué cambia</th><th scope="col">Pedido</th><th scope="col">Enviada</th><th scope="col">Estado</th></tr></thead><tbody>' +
+      lista.map(function (s) {
+        return '<tr class="ini-sol-fila" data-mc-fila="' + h(s.id) + '">' +
+          '<td><button type="button" class="ini-folio" data-mc-id="' + h(s.id) + '" aria-controls="mcDetalle">#' + h(s.id) + '</button></td>' +
+          '<td>' + (conRef && s.folio
+            ? '<button type="button" class="ini-folio ini-ref" data-ini-ref="' + h(s.folio) + '" title="Ver la iniciativa">' + h(s.folio) + '</button>'
+            : h(s.folio)) + (s.titulo ? '<span class="ini-sub">' + h(s.titulo) + '</span>' : '') + '</td>' +
+          '<td>' + h(TIPOS[s.tipo] || s.tipo) + '</td><td>' + resumen(s) + '</td>' +
+          '<td>' + fechaHora(s.fecha_solicitud_utc) + '</td><td>' + h(ESTADOS[s.estado] || s.estado) + relacionCorta(s) + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function textoErrorMias(r, que) {
+    if (r.status === 401 || r.status === 403) return { clase: 'error', html: h(r.json.error || 'Tu cuenta ya no tiene acceso a Solicitudes.') };
+    if (r.status === 501) return { clase: 'aviso', html: h(r.json.error || 'El registro de solicitudes de cambio no está disponible.') };
+    if (r.status === 404) return { clase: 'error', html: 'La solicitud no existe o no es tuya.' };
+    return { clase: 'error', html: h(r.json.error || ('No se pudo leer ' + que + ' (respuesta ' + r.status + ').')) };
+  }
+
+  // "Mis solicitudes de cambio": para quien puede solicitar y no es ADM,
+  // las que envio su propia cuenta (#mcBloque), solo lectura. El servidor
+  // decide de quien son y quien puede verlas; aqui solo se elige el Estado
+  // (que tambien filtra el servidor).
+  class MisCambios {
+    constructor(doc, pedir) {
+      this.doc = doc;
+      this.pedir = pedir || function (url, op) { return fetch(url, op); };
+      this.cableado = false;
+      this.filtro = '';          // mcFiltro: Todas por omision ('' = todas)
+      this.lecturas = 0;
+      this.lecturaDetalle = 0;
+      this.detalle = null;       // la abierta (para Cancelar / Modificar, sql/41)
+      this.ocupado = false;
+      this.alModificar = null;   // (d) -> true si abrio "Solicitar cambios" para corregirla
+      this.alVerIniciativa = null; // (codigo, boton) -> { estado, mensaje }: la iniciativa, sin cambiar de pestaña
+    }
+
+    $(id) { return this.doc.getElementById(id); }
+
+    cablear() {
+      if (this.cableado || !this.$('mcBloque')) return;
+      this.cableado = true;
+      var self = this;
+      this.$('mcActualizar').addEventListener('click', function () { self.listar(); });
+      if (this.$('mcFiltro')) {
+        this.$('mcFiltro').value = this.filtro;
+        this.$('mcFiltro').addEventListener('change', function (e) { self.filtro = e.target.value || ''; self.cerrarDetalle(); self.listar(); });
+      }
+      this.$('mcLista').addEventListener('click', function (e) {
+        // El Codigo va antes que la fila: abre la iniciativa; si no se pudo, se avisa.
+        var ref = e.target && e.target.closest ? e.target.closest('[data-ini-ref]') : null;
+        if (ref && typeof self.alVerIniciativa === 'function') {
+          var r = self.alVerIniciativa(ref.getAttribute('data-ini-ref'), ref);
+          if (r && r.mensaje) self.mensaje('aviso', h(r.mensaje));
+          return;
+        }
+        var el = e.target && e.target.closest ? e.target.closest('[data-mc-id]') : e.target;
+        var id = el && el.getAttribute && el.getAttribute('data-mc-id');
+        if (id) self.verDetalle(Number(id));
+      });
+      this.$('mcDetalle').addEventListener('click', function (e) {
+        var el = e.target && e.target.closest ? e.target.closest('[data-mc-accion]') : e.target;
+        if (el && el.getAttribute && el.getAttribute('data-mc-accion') === 'cerrar') { self.cerrarDetalle(); return; }
+        // sql/41: ir a la relacionada (de la misma cuenta); cancelar / modificar.
+        var ir = e.target && e.target.closest ? e.target.closest('[data-mc-ir]') : null;
+        var n = ir && ir.getAttribute ? Number(ir.getAttribute('data-mc-ir')) : 0;
+        if (n > 0) { self.verDetalle(n); return; }
+        var cx = e.target && e.target.closest ? e.target.closest('[data-cx-accion]') : null;
+        var ax = cx && cx.getAttribute('data-cx-accion');
+        if (ax === 'no-cancelar') { var m = self.$('mcDetMsg'); if (m) { m.className = 'ini-cambio-msg'; m.innerHTML = ''; } }
+        else if (ax) accionPropia(self, ax, 'mc');
+      });
+    }
+
+    abrir() {
+      this.cablear();
+      if (!this.$('mcBloque')) return Promise.resolve(null);
+      this.$('mcBloque').hidden = false;
+      return this.listar();
+    }
+
+    // Sin acceso (ADM, o ya no puede solicitar): oculto y sin lo leido. Una
+    // lectura en curso ya no se pinta.
+    ocultar() {
+      if (!this.$('mcBloque')) return;
+      this.lecturas++;
+      this.$('mcBloque').hidden = true;
+      this.$('mcLista').innerHTML = '';
+      if (this.$('mcResumen')) this.$('mcResumen').textContent = '';
+      this.mensaje('', '');
+      this.cerrarDetalle();
+    }
+
+    mensaje(clase, html) {
+      var m = this.$('mcMsg');
+      if (!m) return;
+      m.className = 'ini-cambio-msg ' + clase;
+      m.innerHTML = html || '';
+    }
+
+    listar(fondo) {
+      var self = this, mia = ++this.lecturas, filtro = this.filtro;
+      if (!fondo) {
+        this.mensaje('', '<span>Cargando tus solicitudes de cambio…</span>');
+        if (this.$('mcResumen')) this.$('mcResumen').textContent = '';
+      }
+      var url = URL_MIAS + '?accion=listar' + (filtro ? '&estado=' + encodeURIComponent(filtro) : '');
+      return Promise.resolve().then(function () { return self.pedir(url, { cache: 'no-store', credentials: 'same-origin' }); })
+        .then(leer)
+        .then(function (r) {
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = r.status;
+          if (r.status === 200 && Array.isArray(r.json.solicitudes)) {
+            var lista = ordenarRecientes(r.json.solicitudes);
+            self.$('mcLista').innerHTML = htmlListaMias(lista, filtro, !!self.alVerIniciativa);
+            if (self.$('mcResumen')) {
+              self.$('mcResumen').textContent = lista.length + (lista.length === 1 ? ' solicitud' : ' solicitudes') +
+                (typeof r.json.maximo === 'number' && lista.length >= r.json.maximo ? ' (las ' + r.json.maximo + ' más recientes)' : '');
+            }
+            self.mensaje('', '');
+            return lista;
+          }
+          if (fondo && r.status !== 401 && r.status !== 403) {
+            self.mensaje('aviso', 'No se pudo actualizar la lista (respuesta ' + h(r.status) + '): se muestra la última lectura.');
+            return null;
+          }
+          self.$('mcLista').innerHTML = '';
+          var e = textoErrorMias(r, 'tus solicitudes de cambio');
+          self.mensaje(e.clase, e.html);
+          return null;
+        }, function () {
+          if (mia !== self.lecturas) return null;
+          self.ultimoEstado = null;
+          if (fondo) {
+            self.mensaje('aviso', 'No se pudo actualizar la lista (sin conexión): se muestra la última lectura.');
+            return null;
+          }
+          self.$('mcLista').innerHTML = '';
+          self.mensaje('error', 'No se pudo contactar al servidor.');
+          return null;
+        });
+    }
+
+    // RefrescoAuto: con la lista a la vista, sin un detalle abierto y sin
+    // nadie eligiendo en la pestaña.
+    puedeRefrescar() {
+      var bloque = this.$('mcBloque'), panel = this.$('panel-solicitudes'), det = this.$('mcDetalle');
+      return this.cableado && !!bloque && !bloque.hidden && !(panel && panel.hidden) && !(det && !det.hidden) &&
+        !(window.RefrescoAuto && window.RefrescoAuto.editando(this.doc, panel));
+    }
+    refrescarFondo() {
+      var self = this;
+      return this.listar(true).then(function () { return self.ultimoEstado; });
+    }
+
+    verDetalle(id) {
+      var self = this, mia = ++this.lecturaDetalle;
+      this.mensaje('', '<span>Cargando la solicitud…</span>');
+      return Promise.resolve().then(function () {
+        return self.pedir(URL_MIAS + '?accion=detalle&id=' + encodeURIComponent(id), { cache: 'no-store', credentials: 'same-origin' });
+      })
+        .then(leer)
+        .then(function (r) {
+          if (mia !== self.lecturaDetalle) return null;
+          if (r.status !== 200) {
+            var e = textoErrorMias(r, 'la solicitud');
+            self.mensaje(e.clase, e.html);
+            return null;
+          }
+          self.mensaje('', '');
+          self.detalle = r.json;
+          var caja = self.$('mcDetalle');
+          caja.innerHTML = htmlDetalle(r.json, null, null, true);
+          caja.hidden = false;
+          return r.json;
+        }, function () {
+          if (mia !== self.lecturaDetalle) return null;
+          self.mensaje('error', 'No se pudo contactar al servidor.');
+          return null;
+        });
+    }
+
+    cerrarDetalle() {
+      this.lecturaDetalle++;
+      this.detalle = null;
+      var caja = this.$('mcDetalle');
+      if (!caja) return;
+      caja.hidden = true;
+      caja.innerHTML = '';
+    }
+  }
+
+  return { ColaSolicitudes: ColaSolicitudes, MisCambios: MisCambios, htmlLista: htmlLista, htmlListaMias: htmlListaMias, htmlDetalle: htmlDetalle,
+           accionPropia: accionPropia, ESTADOS: ESTADOS,
+           resumen: resumen, paginar: paginar, ordenarRecientes: ordenarRecientes,
+           htmlPaginas: htmlPaginas, POR_PAGINA: POR_PAGINA, URL: URL, URL_MIAS: URL_MIAS };
 })();

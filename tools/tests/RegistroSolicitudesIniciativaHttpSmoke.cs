@@ -239,7 +239,7 @@ public static class RegistroSolicitudesIniciativaHttpSmoke
         cuerpo = Correr("GET", "accion=listar&estado=ENVIADA", MOD, out st);
         Check("E5 MOD con filtro: sigue 403 sin tocar el lector", "403|0", st + "|" + lector.Llamadas.Count);
         Check("E6 Pendiente = ENVIADA (estado inicial de sql/29)", "ENVIADA", RegistroSolicitudesIniciativa.Pendiente);
-        Check("E6 los estados son los del CHECK de sql/31", "ENVIADA,APROBADA,RECHAZADA", string.Join(",", RegistroSolicitudesIniciativa.Estados));
+        Check("E6 los estados son los del CHECK de sql/31 + CANCELADA (sql/42)", "ENVIADA,APROBADA,RECHAZADA,CANCELADA", string.Join(",", RegistroSolicitudesIniciativa.Estados));
 
         // ---------------- D: detalle ----------------
         foreach (var n in new[] { "142", "0000142", "%230000142" })

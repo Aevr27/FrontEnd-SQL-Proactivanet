@@ -10,16 +10,15 @@
 // FECHAS (regla del negocio: analisis = 15 dias)
 //   Alta       FechaCreacion = hoy en Mexico; FechaAnalisis = hoy + 15 dias
 //              naturales; FechaEntregaAnalisis = la del formulario (por
-//              omision hoy). Las categorias iniciales HEREDAN las fechas de
-//              la iniciativa: no llevan fecha propia (NULL), asi que un
-//              cambio posterior de la FechaAnalisis de la iniciativa las
-//              sigue moviendo juntas.
-//   Ligar      una categoria agregada despues lleva SU fecha de creacion (hoy)
-//              y SU fecha de analisis (hoy + 15). Las de la iniciativa y las
-//              de las otras categorias no se tocan.
-//   Editar     la fecha de analisis de una categoria con fecha PROPIA se
-//              cambia en ella (FechasCategoria); la de una categoria que
-//              HEREDA es la de la iniciativa: el cambio va a f_analisis.
+//              omision hoy).
+//   Analisis   UNA por iniciativa (dbo.Problem.FechaAnalisis), comun a todas
+//              sus categorias, tambien a las que se ligan despues: se cambia
+//              solo en f_analisis. FechasCategoria siempre va vacia (el
+//              validador rechaza fcat_*).
+//   Ligar      una categoria agregada despues registra el dia en que se liga
+//              (FechaCreacion). adm.usp_GestionAdmin_Modificar (sql/18-83)
+//              todavia le escribe FechaAnalisisCategoria = hoy + 15; ninguna
+//              lectura del sitio la usa como fecha efectiva.
 //   Convencion medida en el Excel V3.1 (DBProblems, 530 filas sin cambios
 //   de fecha): FechaAnalisis - FechaCreacion = 15 dias es la diferencia mas
 //   comun (92), pero no la unica (22: 60, 21: 49, 14: 28). Se aplica la regla
@@ -77,7 +76,8 @@ public sealed class CategoriaPlan
     // Declarados. En una ligada: null = no cambia.
     public string TipoIniciativa;
     public string TipoAgrupado;
-    // Fechas PROPIAS de la categoria. null = hereda las de la iniciativa.
+    // FechaCreacion: el dia en que se liga (null = inicial del alta).
+    // FechaAnalisis: siempre null; toda categoria usa la de la iniciativa.
     public DateTime? FechaCreacion;
     public DateTime? FechaAnalisis;
 
@@ -96,7 +96,9 @@ public sealed class CategoriaPlan
     }
 }
 
-// Nueva fecha de analisis PROPIA de una categoria ya ligada.
+// Fila de @FechasCategoria de adm.usp_GestionAdmin_Modificar. El plan ya no
+// la llena (la fecha de analisis es de la iniciativa); se conserva porque el
+// procedimiento sigue declarando el parametro.
 public sealed class FechaCategoriaPlan
 {
     public string Ruta;
@@ -240,7 +242,8 @@ public static class PlanificadorGestionAdmin
     // dia en que ADM guarda el cambio) + DiasCompromiso, solo si quedan
     // vacias. OJO: solo la edicion directa pasa por aqui; una solicitud de
     // cambio aplicada escribe en adm.usp_SolicitudCambio_Aplicar (sql/22,
-    // sql/25), que no aplica estas reglas ni la de Cerrado.
+    // sql/25, sql/34), que no aplica estas reglas ni la de Cerrado; solo
+    // estas dos reglas de Cerrado tienen su espejo ahi (sql/40, propuesta).
     public const string EstadoCerrado = "Cerrado";
     public const string EstadoEnAnalisis = "En An\u00e1lisis";
     public const string EstadoEnMonitoreo = "En Monitoreo";
@@ -255,6 +258,27 @@ public static class PlanificadorGestionAdmin
         var queda = plan.Problem.TryGetValue(campo, out pedida) ? pedida : vigente;
         if (Limpio(queda) != null) return;
         plan.Problem[campo] = FechasGestionAdmin.Iso(plan.Hoy.AddDays(dias));
+    }
+
+    // En Monitoreo -> Cerrado (2026-11-04): FechaCierre pasa a ser el dia en
+    // que se guarda el cierre (plan.Hoy). En Monitoreo, FechaCierre era el
+    // COMPROMISO (hoy + 15 de FechaAlEntrar), asi que la regla general de
+    // Cerrado ("solo si queda vacia") nunca la ponia; aqui si se reemplaza.
+    // No pisa: una fecha que el formulario trae en el mismo guardado (la
+    // eligio quien guarda; vaciarla la deja a la regla general = hoy), ni una
+    // que ya es hoy (sin evento de historial de mas). Solo esta transicion:
+    // otro estado de origen sigue con la regla general.
+    // Solicitud de cambio aplicada: la misma regla en SQL, dentro de
+    // adm.usp_SolicitudCambio_Aplicar (sql/40, junto con la de Cerrado de
+    // FechaAlEntrar); cambiar una = cambiar ambas.
+    private static void CierreDesdeMonitoreo(PlanModificarAdmin plan, IniciativaActual actual)
+    {
+        string nuevoEstado;
+        if (!plan.Problem.TryGetValue(PeticionModificarAdmin.CEstado, out nuevoEstado)) return;
+        if (!MismoEstado(nuevoEstado, EstadoCerrado) || !MismoEstado(actual.Estado, EstadoEnMonitoreo)) return;
+        if (plan.Problem.ContainsKey(PeticionModificarAdmin.CFCierre)) return;
+        if (FechasGestionAdmin.DeIso(Limpio(actual.FCierre)) == plan.Hoy) return;
+        plan.Problem[PeticionModificarAdmin.CFCierre] = FechasGestionAdmin.Iso(plan.Hoy);
     }
 
     // Sin mayusculas, acentos ni espacios de mas (como Clave de
@@ -323,8 +347,7 @@ public static class PlanificadorGestionAdmin
         var plan = new PlanModificarAdmin { Codigo = actual.Folio, Hoy = hoy.Date };
 
         // Solo lo que el validador registro como cambio, con SU valor nuevo:
-        // misma decision (incluye f_analisis cuando llego como la fecha de
-        // una categoria que hereda la de la iniciativa).
+        // misma decision.
         var cambiados = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var c in r.Cambios) cambiados[c["clave"] as string ?? ""] = c["nuevo"] as string;
         foreach (var campo in CamposProblem)
@@ -336,6 +359,7 @@ public static class PlanificadorGestionAdmin
         FechaAlEntrar(plan, actual, EstadoCerrado, PeticionModificarAdmin.CFCierre, actual.FCierre);
         FechaAlEntrar(plan, actual, EstadoEnAnalisis, PeticionModificarAdmin.CFSolucion, actual.FSolucion, DiasCompromiso);
         FechaAlEntrar(plan, actual, EstadoEnMonitoreo, PeticionModificarAdmin.CFCierre, actual.FCierre, DiasCompromiso);
+        CierreDesdeMonitoreo(plan, actual);
 
         foreach (var x in p.Pcts)
         {
@@ -361,23 +385,8 @@ public static class PlanificadorGestionAdmin
                 Pct = t == null ? null : ValidadorIniciativa.Fraccion(t),
                 TipoIniciativa = Limpio(x.TipoIniciativa),
                 TipoAgrupado = Limpio(x.TipoAgrupado),
-                // Ligada despues: fechas PROPIAS, desde el dia en que se liga.
                 FechaCreacion = hoy.Date,
-                FechaAnalisis = FechasGestionAdmin.Analisis(hoy),
             });
-        }
-
-        // Fechas de analisis por categoria: las PROPIAS se cambian en la
-        // categoria; las que heredan ya las convirtio el validador en un
-        // cambio de f_analisis (de la iniciativa), que va arriba.
-        foreach (var f in p.FechasCategoria)
-        {
-            var ligada = actual.Ligada(Limpio(f.Categoria));
-            var nueva = FechasGestionAdmin.DeIso(Limpio(f.Texto));
-            if (ligada == null || nueva == null || ligada.FAnalisisPropia == null) continue;
-            var anterior = FechasGestionAdmin.DeIso(ligada.FAnalisisPropia);
-            if (anterior == nueva) continue;
-            plan.FechasCategoria.Add(new FechaCategoriaPlan { Ruta = ligada.Ruta, FechaAnalisis = nueva.Value, Anterior = anterior });
         }
 
         foreach (var q in p.Quitar)

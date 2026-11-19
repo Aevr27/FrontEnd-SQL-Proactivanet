@@ -22,7 +22,7 @@
 //           por comas, con cada valor recortado y los vacios fuera
 //           (dbo.fn_CorreoBacklog_SplitList).
 //   El cuerpo de fn_CorreoBacklog_CategoriaC1 es el que leyo
-//   sql/diag_qare_filtros_precheck.sql en la VM (copiado en
+//   sql/diag/diag_qare_filtros_precheck.sql en la VM (copiado en
 //   tools/tests/QareExportarSmoke.cs); C1De y C1Sql lo reproducen paso a
 //   paso. tools/tests/QaFiltrosSqlLocalDbSmoke.cs compara los dos contra esa
 //   funcion.

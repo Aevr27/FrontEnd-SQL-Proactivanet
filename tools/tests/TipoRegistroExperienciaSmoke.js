@@ -112,11 +112,20 @@ var PAYLOAD = {
 
 // ---- arnes ------------------------------------------------------------
 var COMUNES = ['pasaFiltroGlobal', 'volActualDe', 'volAnteriorDe', 'deltaDe', 'volSlotOMes',
-  'currentCats', 'aggCats', 'renderKPIs', 'efectividadDe', 'tarjetaEfectividad', 'tarjetaSinAutomatizar', 'renderEvol', 'renderDet',
+  'currentCats', 'aggCats', 'renderKPIs', 'tarjetaVolumenActual', 'efectividadDe', 'tarjetaEfectividad', 'tarjetaSinAutomatizar', 'renderEvol', 'renderDet',
   'volCatV2', 'getConDescendienteConVolumen', 'esHojaPeriodo', 'conDeCatV2', 'sinDeCatV2',
   'hojasSinIniciativa', 'volumenSinIniciativa', 'volumenConIniciativa', 'conIniVolDe', 'renderSin',
   'catV2ByPath', 'categoriasDeFolio', 'volumenCategoriasFolio',
   'iniRetPorRutaDet', 'arbolDescendientesDet', 'filasDescendientesDet'];
+
+// Pronostico mensual de Volumen Actual / Volumen - Automatizado (solo si la
+// version lo trae; las viejas que se comparan no).
+function pronosticoDe(src) {
+  var a = '/* === PRONOSTICO MES (inicio) === */', b = '/* === PRONOSTICO MES (fin) === */';
+  if (src.indexOf(a) < 0) return '';
+  return src.slice(src.indexOf(a), src.indexOf(b)) + recortar(src, 'pronosticoVista') +
+    /const TAG_PRON=[^\n]*\n/.exec(src)[0].replace('const ', 'var ');
+}
 
 function arnes(src, payload, conTipos) {
   var codigo =
@@ -136,7 +145,9 @@ function arnes(src, payload, conTipos) {
     'function bindC1toggle(){} function bindC2toggle(){} function bindArbolToggle(){} function bindCatClicks(){}\n' +
     (conTipos ? src.slice(src.indexOf('let tipoRegistro='), src.indexOf('\nfunction camposVolumenTipo(')) +
       recortar(src, 'camposVolumenTipo') + recortar(src, 'aplicarTipoRegistro') : '') +
-    COMUNES.map(function (n) { return recortar(src, n); }).join('') +
+    pronosticoDe(src) +
+    COMUNES.filter(function (n) { return n !== 'tarjetaVolumenActual' || src.indexOf('\nfunction tarjetaVolumenActual(') >= 0; })
+      .map(function (n) { return recortar(src, n); }).join('') +
     '\nreturn {' +
     ' tipo: function (t) { aplicarTipoRegistro(t); },' +
     ' estado: function () { return tipoRegistro; },' +

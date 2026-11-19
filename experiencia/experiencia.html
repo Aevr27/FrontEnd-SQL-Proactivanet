@@ -303,7 +303,7 @@
 
     <h3 style="margin:14px 0 6px;color:var(--ink)">Indicadores (KPIs)</h3>
     <table style="margin-top:6px">
-      <tr><td><b>Volumen Actual</b></td><td>Total de tickets del SLOT 0 (últimos 30 días) o del mes calendario actual, según el modo elegido. No cuenta los tickets de tipo SorIA Incidentes ni SorIA Peticiones.</td></tr>
+      <tr><td><b>Volumen Actual</b></td><td>Total de tickets del SLOT 0 (últimos 30 días) o del mes calendario actual, según el modo elegido, con todos los tipos de ticket. Con el filtro de tipo, Incidentes = Incidencia + SorIA Incidentes y Requerimientos = Petición de Servicio + SorIA Peticiones.</td></tr>
       <tr><td><b>% Tickets con Iniciativa</b></td><td>Tickets cubiertos por iniciativas <b>activas</b> (En Análisis, En Solución, En Monitoreo) ÷ volumen actual. Las <b>cerradas no cuentan</b> como cobertura vigente, y <b>ReqOpr tampoco</b>.</td></tr>
       <tr><td><b>% Tickets en Tiempo</b></td><td>1 − (tickets en riesgo por retraso ÷ tickets con iniciativa).</td></tr>
       <tr><td><b>% Efectividad Reducción</b></td><td>De las iniciativas <b>En Monitoreo o Cerradas</b> que ya cumplieron <b>90 días desde su fecha de cierre</b>: tickets reducidos ÷ compromiso. El compromiso es su <b>% de disminución × los tickets por mes de la categoría en los 90 días antes de crearse</b>; lo reducido es lo esperado (esa base, ajustada por cómo se movió el resto del volumen) menos lo que llegó en los 90 días después del cierre, sin pasar del compromiso. Lo calcula la base una vez al día y respeta los filtros. Dice <b>S/D</b> mientras ninguna cumple los 90 días, y cuándo se mide la primera.</td></tr>
@@ -365,13 +365,15 @@
   </tr></thead><tbody id="catPopupBody"></tbody></table>
 </div></div>
 
-<!-- Selector de periodo de "Descargar Tickets": siempre un periodo cerrado,
-     no el que se esta viendo. La logica vive en periodoDescarga()
+<!-- Selector de periodo de "Descargar Tickets": un periodo cerrado o el
+     Último slot (SLOT 0, el mismo de los KPIs en modo SLOT). La logica vive en periodoDescarga()
      (experiencia.js). -->
 <div class="modal-bk" id="descargaBk" style="z-index:60"><div class="modal descarga" style="max-width:420px">
   <span class="close" id="descargaClose">&times;</span>
   <h2 style="font-size:15px">Descargar Experiencia</h2>
   <div style="font-size:12px;color:var(--muted);margin-top:4px">Tickets por fecha de registro, con los filtros de dueños actuales.</div>
+  <label class="op"><input type="radio" name="descargaOpcion" value="slot"> Último slot
+    <span id="descargaSlotTxt" class="sub"></span></label>
   <label class="op"><input type="radio" name="descargaOpcion" value="mes" checked> Mes pasado
     <span id="descargaMesTxt" class="sub"></span></label>
   <label class="op"><input type="radio" name="descargaOpcion" value="anio"> Año

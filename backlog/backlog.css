@@ -134,3 +134,24 @@ header.top #estado-carga-bl:empty { display: none; }
   border-radius: var(--radius); padding: 4px 12px; font: inherit; font-weight: 600; cursor: pointer;
 }
 .ver-mas-antiguos:hover { border-color: var(--accent); }
+
+/* ---- Lider (Categoria): arbol de varios niveles y tickets de un nodo ----
+   Las filas de categoria son .n2row (dashboard.css) a cualquier profundidad;
+   la sangria la pone backlog.js por nivel. .n2exp lleva la flecha. */
+.cat-nodo.n2row td:first-child { font-weight: 400; }
+.cat-directo td:first-child { font-style: italic; }
+.tickets-cat {
+  border: 1px solid var(--line-soft); border-radius: var(--radius);
+  padding: 8px 12px 10px; margin-top: 12px; background: var(--card);
+}
+.tickets-cat table { font-size: 12px; }
+.tickets-cat-cab {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 12px; margin-bottom: 8px; font-size: 12.5px;
+}
+.cerrar-tickets-cat {
+  border: 1px solid var(--line-soft); background: var(--card); color: var(--accent);
+  border-radius: var(--radius); padding: 3px 10px; font: inherit; font-weight: 600; cursor: pointer;
+}
+.cerrar-tickets-cat:hover { border-color: var(--accent); }
+.tickets-cat[hidden] { display: none; }

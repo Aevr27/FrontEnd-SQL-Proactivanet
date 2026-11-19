@@ -242,7 +242,7 @@ En este repositorio:
   troubleshooting de los tableros IIS.
 - `experiencia/INSTALAR_EFECTIVIDAD.md`, `experiencia/INSTALAR_TICKETS_REDUCE.md`
   y `analisis/INSTALAR.md` — instalación de esas pestañas.
-- `sql/PROPUESTA_*.md` — propuestas de base de datos **sin aprobar ni
+- `sql/docs/PROPUESTA_*.md` — propuestas de base de datos **sin aprobar ni
   ejecutar**.
 
 En el repositorio de integración: `AUTENTICACION.md`, `CORREO_BACKLOG.md` y
@@ -280,7 +280,10 @@ Los archivos locales y configuraciones sensibles están excluidos mediante
 ├── qare/
 ├── handlers/              (*.ashx)
 ├── App_Code/
-├── sql/
+├── sql/                   (migraciones numeradas NN_*.sql y sus _rollback)
+│   ├── diag/              (diagnosticos de solo lectura que se corren en la VM)
+│   ├── fixes/             (correcciones sueltas fuera de la numeracion)
+│   └── docs/              (propuestas y cutover de BD)
 ├── tools/                 (pruebas y utilidades; no se despliega)
 ├── Web.config.ejemplo
 ├── README.md

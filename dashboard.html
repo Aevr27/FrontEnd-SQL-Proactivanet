@@ -75,7 +75,7 @@
        <li> aqui con su data-tab, su entrada en MODULOS (dashboard.js) y su
        contenedor #tab-<nombre>. La lista crece en vertical sola.
 
-       Observabilidad y Calidad de información son entradas de GRUPO: su
+       Observabilidad, Calidad de información y Servicios son entradas de GRUPO: su
        data-tab es una clave de GRUPOS (dashboard.js), no de MODULOS, y cada
        modulo del grupo tiene su boton en el selector .subnav de abajo. -->
   <aside class="lateral" id="lateral">
@@ -141,12 +141,16 @@
             <span class="mnav-txt">Calidad de información</span>
           </button>
         </li>
+        <!-- Entrada de GRUPO, como Calidad de información: Vista general de
+             servicios (hash #concentracion, su primer nombre; abre primero)
+             y Análisis de servicios. Siguen siendo dos modulos independientes: la
+             Vista general no pide elegir servicio. -->
         <li>
-          <button class="mnav" id="mtab-analisis" data-tab="analisis" type="button" title="Análisis de servicios">
+          <button class="mnav" id="mtab-servicios" data-tab="servicios" type="button" title="Servicios">
             <svg class="mnav-ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5M7.5 12.5v-2M10.5 12.5v-4M13.5 12.5v-3"/>
             </svg>
-            <span class="mnav-txt">Análisis de servicios</span>
+            <span class="mnav-txt">Servicios</span>
           </button>
         </li>
         <!-- Entrada de GRUPO, como Calidad de información: Observabilidad (el
@@ -215,6 +219,10 @@
   <nav class="subnav" data-grupo="calidad" aria-label="Calidad de información" hidden>
     <button class="subnav-btn" id="snav-qa" data-tab="qa" type="button">QA</button>
     <button class="subnav-btn" id="snav-qare" data-tab="qare" type="button">QARE</button>
+  </nav>
+  <nav class="subnav" data-grupo="servicios" aria-label="Servicios" hidden>
+    <button class="subnav-btn" id="snav-concentracion" data-tab="concentracion" type="button">Vista general de servicios</button>
+    <button class="subnav-btn" id="snav-analisis" data-tab="analisis" type="button">Análisis de servicios</button>
   </nav>
 
   <!-- ==================================================== Tablero de SLA -->
@@ -450,7 +458,17 @@
        analisis/analisis.html, analisis.css y analisis.js la primera vez que se
        abre la pestaña; analisis.js pide la lista de servicios y, al pulsar
        Analizar, los tickets a handlers/analisis.ashx (47_analisis_servicios.sql). -->
-  <div id="tab-analisis" class="maintab-content" role="region" aria-labelledby="mtab-analisis"></div>
+  <div id="tab-analisis" class="maintab-content" role="region" aria-labelledby="snav-analisis"></div>
+
+  <!-- ================================ Vista general de servicios (concentracion/)
+       Contenedor vacio, como Analisis de servicios, pero independiente de
+       ella. TableroConcentracion (dashboard.js) trae
+       concentracion/concentracion.html, concentracion.css y concentracion.js
+       la primera vez que se abre la pestaña; concentracion.js pide el Pareto
+       de servicios y los Top de categorias y grupos, con sus filtros (Slot o
+       Mes, Service Owner, Grupo), a handlers/concentracion.ashx, que lee
+       dbo.vw_ServicioTickets. -->
+  <div id="tab-concentracion" class="maintab-content" role="region" aria-labelledby="snav-concentracion"></div>
 
   <!-- ================================================ Orquestacion
        Contenedor vacio, como Efectividad. TableroOrquestacion (dashboard.js)

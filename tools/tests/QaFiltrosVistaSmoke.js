@@ -63,7 +63,7 @@ Check('50 columnas: las 48 de usp_CorreoQA_Detalle + C1 y Lider', 50, COLS.lengt
 Check('C1 y Lider junto a Grupo, como en el libro de QARE', ['Grupo', 'C1', 'Lider'], COLS.slice(3, 6));
 Check('sin columnas repetidas', COLS.length, COLS.filter(function (c, i) { return COLS.indexOf(c) === i; }).length);
 // Las 49 del procedimiento, en su orden, leidas del script versionado.
-var sp = leer('sql/fix_qa_detalle_option_recompile.sql');
+var sp = leer('sql/fixes/fix_qa_detalle_option_recompile.sql');
 var cuerpo = sp.slice(sp.indexOf('SELECT TOP (@TopSeguro)'), sp.indexOf('FROM dbo.vw_CorreoQA_Base'));
 var delSp = [];
 cuerpo.split(/\r?\n/).forEach(function (l) {

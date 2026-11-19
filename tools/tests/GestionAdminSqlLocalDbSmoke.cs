@@ -812,6 +812,17 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                 Check("MF5 ... sin eventos de fecha nuevos", "FechaSolucion|NULL|2026-11-30;FechaCierre|NULL|2026-10-25", eventosMf());
                 Modificar(cn, aEstadoCon(null, new DateTime(2026, 11, 3), "2026-12-15"));
                 Check("MF6 cambiar FechaSolucion a mano (fecha -> fecha): se guarda y cuenta como cambio", "Cerrado|2026-12-15|2026-10-25|1|0", fechasMf());
+                // En Monitoreo -> Cerrado (CierreDesdeMonitoreo): la FechaCierre
+                // compromiso se reemplaza por el dia del cierre, y persiste.
+                Modificar(cn, aEstado("En Monitoreo", new DateTime(2026, 11, 4)));
+                Check("MF7 entrar a En Monitoreo con FechaCierre puesta: se conserva", "En Monitoreo|2026-12-15|2026-10-25|1|0", fechasMf());
+                Modificar(cn, aEstado("Cerrado", new DateTime(2026, 11, 20)));
+                Check("MF8 de En Monitoreo a Cerrado: FechaCierre = dia del cierre (releida de la base)", "Cerrado|2026-12-15|2026-11-20",
+                      Filas(cn, "SELECT Estado, FechaSolucion, FechaCierre FROM dbo.Problem WHERE Codigo = N'" + cf + "'"));
+                Check("MF8 ... el trigger registra el cambio de FechaCierre", "FechaCierre|2026-10-25|2026-11-20",
+                      Filas(cn, "SELECT TOP (1) Campo, FechaAnterior, FechaNueva FROM dbo.ProblemFechaEvento WHERE Codigo = N'" + cf + "' AND Campo = 'FechaCierre' AND Categoria IS NULL ORDER BY IdEvento DESC"));
+                Check("MF8 ... y el cambio de estado queda en el historial de estados", "1",
+                      Uno(cn, "SELECT COUNT(*) FROM dbo.ProblemEstadoEvento WHERE Codigo = N'" + cf + "' AND EstadoNuevo = N'Cerrado' AND EstadoAnterior = N'En Monitoreo'"));
 
                 // Atomicidad: varios campos + una categoria que excede el tope
                 // (/K/Cat 1 lleno, K1). Una iniciativa del Excel aun sin proteger.
@@ -1030,14 +1041,17 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
                   Filas(cn, "SELECT Veredicto, Compromiso, DiasVencida, GeneraAviso FROM dbo.vw_ProblemVencido WHERE Codigo = N'" + cv + "'"));
             Check("V7 ADM_02: una iniciativa sin fechas propias (PRB 2026-000005) sigue igual", "FechaAnalisis|2026-09-30|VENCIDA",
                   Filas(cn, "SELECT ColumnaRige, Compromiso, Veredicto FROM dbo.vw_ProblemVencido WHERE Codigo = N'PRB 2026-000005'"));
-            // Semaforo de Experiencia: el mismo LeerIniciativas que pinta el tablero.
+            // Semaforo de Experiencia: el mismo LeerIniciativas que pinta el
+            // tablero. Fecha unica por iniciativa: aunque la vista (ADM_01) y
+            // la fila traigan la propia vencida, el sitio usa la de la
+            // iniciativa en las dos categorias y ninguna va retrasada.
             var det = (IList)Invocar("LeerIniciativas", cn, HoyReal);
             var sem = new List<string>();
             foreach (var d in det)
                 if ((string)Campo(d, "Folio") == cv) sem.Add(Campo(d, "Categoria") + "=" + Campo(d, "FAnalisis") + ":" + Campo(d, "Retrasada"));
             sem.Sort(StringComparer.Ordinal);
-            Check("V8 Experiencia (LeerIniciativas): solo la categoria con fecha propia vencida va retrasada",
-                  "/V/Inicial=" + Iso(hoy.AddDays(15)) + ":False|/V/Vence=" + Iso(hoy.AddDays(-3)) + ":True", string.Join("|", sem));
+            Check("V8 Experiencia (LeerIniciativas): las dos categorias con la fecha de la iniciativa; la propia vencida no la atrasa",
+                  "/V/Inicial=" + Iso(hoy.AddDays(15)) + ":False|/V/Vence=" + Iso(hoy.AddDays(15)) + ":False", string.Join("|", sem));
 
             Check("V9 ADM_01 / ADM_02 no corren dos veces", "True|True",
                   LotesError(cn, LeerBackend("ADM_01_vw_ProblemCategoria_fecha_categoria.sql")).Contains("ya tiene el cambio") + "|" +
@@ -1048,7 +1062,124 @@ FROM (SELECT TOP (103) n = ROW_NUMBER() OVER (ORDER BY (SELECT 1)) FROM sys.all_
             Lotes(cn, LeerBackend("ADM_02_vw_ProblemVencido_fecha_categoria_rollback.sql"));
             Check("V11 rollback ADM_01 / ADM_02: las definiciones vuelven exactas (hash)", antes01 + "|" + antes02,
                   HashDef(cn, "dbo.vw_ProblemCategoria") + "|" + HashDef(cn, "dbo.vw_ProblemVencido"));
+            // Fecha unica por iniciativa: el rollback de ADM_01 / ADM_02 es el
+            // cambio de BD propuesto (sin aplicar en QA). Con el, la misma
+            // iniciativa (fecha propia vencida en una categoria) sale con la
+            // de la iniciativa en la vista y AL CORRIENTE en los avisos, sin
+            // tocar dbo.ProblemCategoria.FechaAnalisisCategoria.
+            Check("V12 tras el rollback: una sola fecha en la vista, avisos AL CORRIENTE, el dato viejo intacto",
+                  "1|AL CORRIENTE|" + Iso(hoy.AddDays(15)) + "|" + Iso(hoy.AddDays(-3)),
+                  Uno(cn, "SELECT COUNT(DISTINCT FechaAnalisis) FROM dbo.vw_ProblemCategoria WHERE Codigo = N'" + cv + "'") + "|" +
+                  Filas(cn, "SELECT Veredicto, Compromiso FROM dbo.vw_ProblemVencido WHERE Codigo = N'" + cv + "'") + "|" +
+                  Uno(cn, "SELECT CONVERT(char(10), MIN(FechaAnalisisCategoria), 23) FROM dbo.ProblemCategoria WHERE Codigo = N'" + cv + "'"));
+            Check("V13 sql/diag/diag_fecha_analisis_unica.sql (solo lectura) corre completo", "sin error",
+                  LotesError(cn, Leer("sql", "diag", "diag_fecha_analisis_unica.sql")));
+
+            Adm05(cn, cv, hoy);
         }
+    }
+
+    // ADM_05: la vista de QA es ADM_02 + una exclusion de avisos hecha en la
+    // VM el 2026-10-23 (Product Owner Carlos ... via dbo.vw_ProblemDueno), asi
+    // que el rollback de ADM_02 no sirve: la borraria. La replica no trae
+    // dbo.vw_ProblemDueno ni dbo.fn_ClaveNombreOrdenada: se crean stubs en esta
+    // base desechable (un dueno por fila de dbo.zzDueno).
+    // Huella COMPLETA, la misma regla que ADM_05: SHA2_256 del nvarchar de
+    // OBJECT_DEFINITION sin espacio, tab, CR ni LF, desde el primer caracter.
+    static string HashVencido(SqlConnection cn)
+    {
+        var v = Uno(cn, "SELECT HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.vw_ProblemVencido')), " +
+            "NCHAR(32), N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''))") as byte[];
+        return v == null ? "null" : "0x" + BitConverter.ToString(v).Replace("-", "");
+    }
+
+    // Corre un script como SSMS (lote por lote, sigue tras un error) y devuelve
+    // "ok" o los numeros de error, y el @@TRANCOUNT que quedo, SIN limpiarlo
+    // antes de medirlo (LotesError hace ROLLBACK y lo esconderia).
+    static string Correr(SqlConnection cn, string sql)
+    {
+        var errores = new List<string>();
+        foreach (var lote in Regex.Split(sql, @"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase))
+        {
+            if (lote.Trim().Length == 0) continue;
+            try { using (var cmd = new SqlCommand(lote, cn) { CommandTimeout = 120 }) cmd.ExecuteNonQuery(); }
+            catch (SqlException ex) { errores.Add(ex.Number.ToString(CultureInfo.InvariantCulture)); }
+        }
+        var tran = Uno(cn, "SELECT @@TRANCOUNT");
+        if (Convert.ToInt32(tran, CultureInfo.InvariantCulture) > 0) Exec(cn, "ROLLBACK");
+        return (errores.Count == 0 ? "ok" : string.Join(",", errores)) + "|tran=" + tran;
+    }
+
+    static void Adm05(SqlConnection cn, string cv, DateTime hoy)
+    {
+        if (!File.Exists(Path.Combine(Backend, "ADM_05_vw_ProblemVencido_fecha_unica.sql")))
+        {
+            NoCorrida("V14-V24", "falta ADM_05 en " + Backend);
+            return;
+        }
+        // HQa: la huella que DIO LA VM (diag_fecha_analisis_unica.sql seccion 1,
+        // 2026-11-12), no calculada aqui. H05: la del texto de ADM_05.
+        const string HQa = "0x16600D170412D7939611DBABC850B7F4CD0DCEEE35FA9B6810768CA8160EC26F";
+        const string H05 = "0x6CD3A93D6F4DB2C76D266552C314B7768C85F2165B4D08878198F7976E8601DF";
+        var adm05 = LeerBackend("ADM_05_vw_ProblemVencido_fecha_unica.sql");
+        var rollback05 = LeerBackend("ADM_05_vw_ProblemVencido_fecha_unica_rollback.sql");
+
+        Exec(cn, "SELECT TOP 0 Codigo, CONVERT(nvarchar(200), N'') AS ProductOwner INTO dbo.zzDueno FROM dbo.Problem;");
+        Exec(cn, "IF OBJECT_ID('dbo.fn_ClaveNombreOrdenada') IS NULL EXEC (N'CREATE FUNCTION dbo.fn_ClaveNombreOrdenada (@n nvarchar(400)) " +
+                 "RETURNS nvarchar(400) AS BEGIN RETURN dbo.fn_ClaveNombre(@n) END');");
+        Exec(cn, "IF OBJECT_ID('dbo.vw_ProblemDueno') IS NULL EXEC (N'CREATE VIEW dbo.vw_ProblemDueno AS SELECT Codigo, ProductOwner FROM dbo.zzDueno');");
+        Exec(cn, "INSERT dbo.zzDueno (Codigo, ProductOwner) VALUES (N'PRB 2026-000005', N'Carlos Francisco Garcia Chavez Nava');");
+
+        var h26 = HashVencido(cn);
+        Check("V14 ADM_05 sobre otra vista (la del 26): 51971, sin transaccion abierta, vista intacta", "51971|tran=0|" + h26,
+              Correr(cn, adm05) + "|" + HashVencido(cn));
+        Check("V15 rollback sobre otra vista (la del 26): 51976, sin transaccion abierta, vista intacta", "51976|tran=0|" + h26,
+              Correr(cn, rollback05) + "|" + HashVencido(cn));
+
+        // La definicion de QA: la cadena @vista del rollback (comillas
+        // duplicadas deshechas). V16 la compara con la huella de la VM.
+        var m = Regex.Match(rollback05, @"DECLARE @vista nvarchar\(max\) = N'((?:[^']|'')*)';");
+        Exec(cn, m.Groups[1].Value.Replace("''", "'"));
+        var avisos = "SELECT Veredicto, Compromiso, GeneraAviso FROM dbo.vw_ProblemVencido WHERE Codigo = ";
+        Check("V16 vista de QA instalada: huella = la de la VM; la fecha propia vencida da VENCIDA (el defecto); la exclusion apaga el aviso",
+              HQa + "|VENCIDA|" + Iso(hoy.AddDays(-3)) + "|1|VENCIDA|2026-09-30|0",
+              HashVencido(cn) + "|" + Filas(cn, avisos + "N'" + cv + "'") + "|" + Filas(cn, avisos + "N'PRB 2026-000005'"));
+        Check("V17 rollback sobre la de QA (precondicion falsa): 51976, sin transaccion, intacta", "51976|tran=0|" + HQa,
+              Correr(cn, rollback05) + "|" + HashVencido(cn));
+
+        // Postcondicion forzada a fallar (constante cambiada): el ALTER ya corrio
+        // dentro de la transaccion y tiene que deshacerse.
+        var postMala = adm05.Replace("IF @h IS NULL OR @h <> " + H05, "IF @h IS NULL OR @h <> 0x00");
+        Check("V18 postcondicion que falla: 51972, el ALTER se deshace, sin transaccion", "True|51972|tran=0|" + HQa,
+              (postMala != adm05) + "|" + Correr(cn, postMala) + "|" + HashVencido(cn));
+
+        // Compuerta de aprobacion: la misma prueba que en QA, cambiando el
+        // patron de la base desechable por uno que no coincide.
+        var conCompuerta = adm05.Replace("N'GestionAdminPrueba[_]%'", "N'NoEsEstaBase[_]%'");
+        Check("V19 sin aprobar (fuera de GestionAdminPrueba_*): 51970, sin transaccion, intacta", "True|51970|tran=0|" + HQa,
+              (conCompuerta != adm05) + "|" + Correr(cn, conCompuerta) + "|" + HashVencido(cn));
+
+        Exec(cn, "EXEC sys.sp_set_session_context N'aprobar_backend', N'ADM_05';");
+        var aplicado = Correr(cn, conCompuerta);
+        Exec(cn, "EXEC sys.sp_set_session_context N'aprobar_backend', NULL;");
+        Check("V20 aprobado: aplica; huella de ADM_05; AL CORRIENTE con la fecha de la iniciativa; exclusion intacta; sin fecha por categoria",
+              "ok|tran=0|" + H05 + "|AL CORRIENTE|" + Iso(hoy.AddDays(15)) + "|0|VENCIDA|2026-09-30|0|False|True",
+              aplicado + "|" + HashVencido(cn) + "|" + Filas(cn, avisos + "N'" + cv + "'") + "|" + Filas(cn, avisos + "N'PRB 2026-000005'") + "|" +
+              Uno(cn, "SELECT CONVERT(bit, CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.vw_ProblemVencido')) LIKE N'%FechaAnalisisCategoria%' THEN 1 ELSE 0 END)") + "|" +
+              Uno(cn, "SELECT CONVERT(bit, CASE WHEN OBJECT_DEFINITION(OBJECT_ID('dbo.vw_ProblemVencido')) LIKE N'%Carlos Francisco Garcia Chavez Nava%' THEN 1 ELSE 0 END)"));
+        Check("V21 ADM_05 otra vez: 51971, sin transaccion, sigue la de ADM_05", "51971|tran=0|" + H05,
+              Correr(cn, adm05) + "|" + HashVencido(cn));
+
+        Check("V22 rollback: vuelve EXACTA la de QA (huella de la VM), con el defecto y la exclusion", "ok|tran=0|" + HQa + "|VENCIDA|VENCIDA|0",
+              Correr(cn, rollback05) + "|" + HashVencido(cn) + "|" + Uno(cn, "SELECT Veredicto FROM dbo.vw_ProblemVencido WHERE Codigo = N'" + cv + "'") + "|" +
+              Filas(cn, "SELECT Veredicto, GeneraAviso FROM dbo.vw_ProblemVencido WHERE Codigo = N'PRB 2026-000005'"));
+        Check("V23 rollback otra vez (ya no es ADM_05): 51976, no pisa", "51976|tran=0|" + HQa,
+              Correr(cn, rollback05) + "|" + HashVencido(cn));
+
+        // Deja la vista como la encontro (la del 26): los casos B / E corren
+        // el rollback de sql/18, que se niega si una vista usa sus columnas.
+        Lotes(cn, LeerBackend("ADM_02_vw_ProblemVencido_fecha_categoria_rollback.sql"));
+        Check("V24 la vista vuelve a la del 26 para los casos siguientes", h26, HashVencido(cn));
     }
 
     static void Stub()

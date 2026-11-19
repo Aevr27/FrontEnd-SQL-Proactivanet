@@ -65,7 +65,8 @@
 // el correo diario y no se toca-, sino de dbo.TicketProactivanetId, que llena
 // sincronizar_ids.py desde el equipo del ETL. Aqui solo se lee el mapeo con
 // dbo.usp_TicketIds_Obtener: el token del API de Proactivanet vive unicamente
-// en el ETL y nunca llega al servidor web.
+// en el ETL y nunca llega al servidor web. La lectura vive en
+// App_Code/BacklogTicketIds.cs (la comparte backlog_categorias.ashx).
 
 using System;
 using System.Collections.Generic;
@@ -99,11 +100,11 @@ public class BacklogAntiguos : IHttpHandler
             var tickets = DashboardDb.Ejecutar("dbo.usp_CorreoBacklog_Datos", parametros);
             var total = tickets.Count;
 
-            // El recorte va ANTES de AgregarIds: asi la consulta del mapeo de
+            // El recorte va ANTES de BacklogTicketIds.Agregar: asi la consulta del mapeo de
             // Ids pide los codigos que de verdad se van a pintar -cientos- y
             // no los del corte entero.
             var masViejos = MasViejos(tickets);
-            AgregarIds(masViejos);
+            BacklogTicketIds.Agregar(masViejos, "backlog_antiguos");
 
             return new Dictionary<string, object>
             {
@@ -181,73 +182,6 @@ public class BacklogAntiguos : IHttpHandler
         DateTime f;
         if (DateTime.TryParse(v.ToString(), out f)) return f;
         return null;
-    }
-
-    // Anade IdProactivanet a cada fila. Es un extra sobre la respuesta del
-    // backlog, no un requisito: si el mapeo todavia no tiene el ticket -o si
-    // la consulta falla por lo que sea- la clave se queda en null y
-    // dashboard.js pinta el codigo como texto plano, sin enlace roto. La tabla
-    // se muestra igual: nunca se deja caer el backlog por esto.
-    private static void AgregarIds(List<Dictionary<string, object>> tickets)
-    {
-        var codigos = new List<string>();
-
-        foreach (var t in tickets)
-        {
-            t["IdProactivanet"] = null;
-
-            object codigo;
-            if (t.TryGetValue("CodigoTicket", out codigo) && codigo != null)
-                codigos.Add(codigo.ToString());
-        }
-
-        if (codigos.Count == 0)
-            return;
-
-        var mapa = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            var parametros = new Dictionary<string, object>();
-            parametros["Codigos"] = new JavaScriptSerializer().Serialize(codigos);
-
-            foreach (var fila in DashboardDb.Ejecutar("dbo.usp_TicketIds_Obtener", parametros))
-            {
-                object cod, id;
-                if (!fila.TryGetValue("CodigoTicket", out cod) || cod == null) continue;
-                if (!fila.TryGetValue("IdProactivanet", out id) || id == null) continue;
-                mapa[cod.ToString()] = id.ToString();
-            }
-        }
-        catch (Exception ex)
-        {
-            // Solo el tipo y el mensaje de la excepcion: ni cadena de conexion
-            // ni configuracion. Va a la traza de ASP.NET (trace.axd), no al
-            // navegador, que sigue recibiendo el backlog completo.
-            //
-            // Se usa HttpContext.Trace y no System.Diagnostics.Trace porque
-            // los metodos de ese ultimo son [Conditional("TRACE")] y ASP.NET
-            // no define ese simbolo al compilar App_Code y los .ashx: las
-            // llamadas desaparecerian sin dejar rastro.
-            var ctx = HttpContext.Current;
-            if (ctx != null)
-            {
-                ctx.Trace.Warn("backlog_antiguos",
-                    "No se pudo leer el mapeo de Id de Proactivanet (" +
-                    ex.GetType().Name + ": " + ex.Message + "). Los tickets se " +
-                    "devuelven sin enlace.");
-            }
-            return;
-        }
-
-        foreach (var t in tickets)
-        {
-            object codigo;
-            if (!t.TryGetValue("CodigoTicket", out codigo) || codigo == null) continue;
-
-            string id;
-            if (mapa.TryGetValue(codigo.ToString(), out id))
-                t["IdProactivanet"] = id;
-        }
     }
 
     public bool IsReusable { get { return false; } }

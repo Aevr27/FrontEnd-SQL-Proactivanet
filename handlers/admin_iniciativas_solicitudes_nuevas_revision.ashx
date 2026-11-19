@@ -91,7 +91,7 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
             }
             catch (ErrorRevisionSolicitudIniciativa ex)
             {
-                return ErrorRevision(context, ex, llave);
+                return ErrorRevision(context, ex, llave, numero);
             }
             catch (Exception ex)
             {
@@ -114,6 +114,8 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
         // La solicitud GUARDADA: de ella sale la iniciativa.
         var solicitud = RegistroSolicitudesIniciativa.Lector.Detalle(numero);
         if (solicitud == null) return Error(context, 404, "La solicitud no existe.", "SolicitudNoExiste");
+        // sql/42: quien la envio la cancelo (o la reemplazo): no se aprueba.
+        if (solicitud["estado"] as string == "CANCELADA") return Cancelada(context, solicitud, "aprobada");
 
         // Solo una ENVIADA se valida y planea. Si ya no lo esta, el
         // procedimiento dice que paso (la misma iniciativa, 51412 o 51414).
@@ -162,7 +164,7 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
         }
         catch (ErrorRevisionSolicitudIniciativa ex)
         {
-            return ErrorRevision(context, ex, "aprobada");
+            return ErrorRevision(context, ex, "aprobada", numero);
         }
         catch (ErrorEscrituraGestionAdmin ex)
         {
@@ -188,6 +190,38 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
             { "faltantes", r == null || !a.Nueva ? new List<Dictionary<string, object>>() : r.Faltantes },
             { "advertencias", r == null || !a.Nueva ? new List<string>() : r.Advertencias },
         };
+    }
+
+    // sql/42: la cancelo (o reemplazo) quien la envio, antes que ADM.
+    private static object Cancelada(HttpContext context, Dictionary<string, object> d, string llave)
+    {
+        context.Response.StatusCode = 409;
+        context.Response.TrySkipIisCustomErrors = true;
+        object nueva;
+        d.TryGetValue("reemplazada_por", out nueva);
+        var n = nueva as Dictionary<string, object>;
+        return new Dictionary<string, object>
+        {
+            { "error", n != null
+                ? "Quien la envi\u00f3 la reemplaz\u00f3 por la solicitud " + n["numero_texto"] + " antes de tu revisi\u00f3n: esta qued\u00f3 cancelada y no se cambi\u00f3 nada. Revisa la nueva."
+                : RegistroSolicitudesIniciativa.MensajeCancelada },
+            { "numero_error", 51412 }, { "tipo", "SolicitudCancelada" }, { llave, false }, { "estado", "CANCELADA" },
+            { "reemplazada_por", nueva },
+        };
+    }
+
+    // 51412 (ya no ENVIADA): si es porque quien la envio la cancelo en ese
+    // momento (carrera), se dice eso; si no, el error de siempre.
+    private static object ErrorRevision(HttpContext context, ErrorRevisionSolicitudIniciativa ex, string llave, int numero)
+    {
+        if (ex.Numero == 51412)
+        {
+            Dictionary<string, object> d = null;
+            try { d = RegistroSolicitudesIniciativa.Lector.Detalle(numero); }
+            catch (Exception e) { DashboardHandler.Registrar("admin_iniciativas_solicitudes_nuevas_revision.ashx", e); }
+            if (d != null && d["estado"] as string == "CANCELADA") return Cancelada(context, d, llave);
+        }
+        return ErrorRevision(context, ex, llave);
     }
 
     private static object ErrorRevision(HttpContext context, ErrorRevisionSolicitudIniciativa ex, string llave)
