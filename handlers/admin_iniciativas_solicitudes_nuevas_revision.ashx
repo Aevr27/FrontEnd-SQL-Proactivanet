@@ -58,7 +58,7 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
             // La accion va en la URL: se decide sin leer el cuerpo.
             var accion = req.QueryString["accion"];
             if (accion != "aprobar" && accion != "rechazar")
-                return Error(context, 400, "Acción desconocida.", "AccionDesconocida");
+                return Error(context, 400, "Acci\u00f3n desconocida.", "AccionDesconocida");
             var llave = accion == "aprobar" ? "aprobada" : "rechazada";
 
             var id = AccesoAdmin.IdentidadEscritura(context);
@@ -66,7 +66,7 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
                 return Error(context, 403, "Sin usuario autenticado no se puede revisar la solicitud.", "SinUsuario");
 
             var numero = RegistroSolicitudesIniciativa.Numero(req.Form["numero"]);
-            if (numero == 0) return Error(context, 400, "Falta el número de la solicitud.", "SinSolicitud");
+            if (numero == 0) return Error(context, 400, "Falta el n\u00famero de la solicitud.", "SinSolicitud");
             var comentario = (req.Form["comentario"] ?? "").Trim();
             if (accion == "rechazar" && comentario.Length == 0)
                 return Error(context, 422, RevisionSolicitudesIniciativa.MensajeFaltaMotivo, "FaltaMotivo");
@@ -131,15 +131,15 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
             catch (Exception ex)
             {
                 DashboardHandler.Registrar("admin_iniciativas_solicitudes_nuevas_revision.ashx", ex);
-                return Error(context, 503, "No se pudo validar la iniciativa contra el catálogo: " + DashboardHandler.MensajeSeguro(ex) +
-                             " No se aprobó nada.", "ValidacionNoDisponible");
+                return Error(context, 503, "No se pudo validar la iniciativa contra el cat\u00e1logo: " + DashboardHandler.MensajeSeguro(ex) +
+                             " No se aprob\u00f3 nada.", "ValidacionNoDisponible");
             }
             if (!r.Valida)
             {
                 context.Response.StatusCode = 422;
                 context.Response.TrySkipIisCustomErrors = true;
                 var salida = r.ComoJson();
-                salida["error"] = "No se aprobó: la iniciativa no se puede crear con los datos de la solicitud.";
+                salida["error"] = "No se aprob\u00f3: la iniciativa no se puede crear con los datos de la solicitud.";
                 salida["tipo"] = "IniciativaInvalida";
                 salida["aprobada"] = false;
                 return salida;
@@ -151,7 +151,7 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
                 context.Response.TrySkipIisCustomErrors = true;
                 return new Dictionary<string, object>
                 {
-                    { "error", "No se aprobó: " + string.Join(" ", plan.Pendientes.ToArray()) },
+                    { "error", "No se aprob\u00f3: " + string.Join(" ", plan.Pendientes.ToArray()) },
                     { "tipo", "PendienteSinRegla" }, { "pendientes", plan.Pendientes }, { "aprobada", false },
                 };
             }
@@ -174,7 +174,7 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
             context.Response.TrySkipIisCustomErrors = true;
             return new Dictionary<string, object>
             {
-                { "error", "No se aprobó ni se creó la iniciativa: " + ex.Message }, { "numero_error", ex.Numero },
+                { "error", "No se aprob\u00f3 ni se cre\u00f3 la iniciativa: " + ex.Message }, { "numero_error", ex.Numero },
                 { "tipo", ex.Tipo }, { "aprobada", false },
             };
         }
@@ -242,7 +242,7 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
         context.Response.TrySkipIisCustomErrors = true;
         return new Dictionary<string, object>
         {
-            { "error", "No se pudo confirmar la revisión. Actualiza la lista antes de reintentar." },
+            { "error", "No se pudo confirmar la revisi\u00f3n. Actualiza la lista antes de reintentar." },
             { "tipo", "RevisionNoConfirmada" }, { llave, null },
         };
     }

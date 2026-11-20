@@ -389,7 +389,7 @@ public static class RegistroSolicitudesIniciativa
 
     public const string MensajeSoloAdm = "Solo un administrador (ADM) puede ver el registro de solicitudes nuevas.";
     public const string MotivoSinTablas =
-        "El registro de solicitudes nuevas no está en la base (faltan las tablas de sql/29): no hay solicitudes que mostrar.";
+        "El registro de solicitudes nuevas no est\u00e1 en la base (faltan las tablas de sql/29): no hay solicitudes que mostrar.";
 
     // "?numero=" acepta 142, "0000142" o "#0000142". 0 = no es un numero valido.
     public static int Numero(string texto)

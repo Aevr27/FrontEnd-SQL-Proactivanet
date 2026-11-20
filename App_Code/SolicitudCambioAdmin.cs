@@ -356,7 +356,9 @@ public sealed class PeticionSolicitudCambio
     // envio; al aplicar lo aprobado (PeticionModificarAdmin) valen tambien
     // los % con decimales de solicitudes de antes.
     private static readonly Regex Porcentaje = new Regex(@"^\d{1,3}$", RegexOptions.CultureInvariant);
-    private static readonly Regex FolioForma = new Regex(@"^[A-Za-z]{3} \d{4}-\d{6}$", RegexOptions.CultureInvariant);
+    // Prefijo: la regla de adm.usp_GestionAdmin_Crear (sql/43), una letra y
+    // dos letras o digitos (S2L 2026-000001).
+    private static readonly Regex FolioForma = new Regex(@"^[A-Za-z][A-Za-z0-9]{2} \d{4}-\d{6}$", RegexOptions.CultureInvariant);
 
     public string Folio;
     public string Prefijo;
