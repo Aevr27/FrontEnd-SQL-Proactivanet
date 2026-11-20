@@ -12,6 +12,15 @@
 //                             "DesdeSugerido", "ReglasVersion", "Reglas",
 //                             "Criterios", "Actualizado" } ] }
 //
+//   GET analisis.ashx?accion=modo_autonomo[&desde=aaaa-mm-dd][&hasta=aaaa-mm-dd]
+//       La vista propia de Modo Autonomo (97_analisis_modo_autonomo.sql):
+//       mismo periodo que abajo.
+//       -> { "servicio": "modo_autonomo", "desde", "hasta",
+//            "bloques": { "parametros", "eventos", "incidentes" } }
+//       400 si modo_autonomo no esta activo en usp_Analisis_Servicios, igual
+//       que usp_Analisis_Datos con un servicio inactivo. CausaIM y
+//       OrigenDetalle son texto libre: el navegador les tapa las contrasenas.
+//
 //   GET analisis.ashx?servicio=<clave>[&desde=aaaa-mm-dd][&hasta=aaaa-mm-dd]
 //       hasta es el ULTIMO dia incluido (vacio = hoy, en Mexico); desde vacio
 //       = los ultimos seis meses. Como mucho 400 dias.
@@ -64,6 +73,24 @@ public class AnalisisHandler : IHttpHandler
                 context.Response.Write(json.Serialize(new Dictionary<string, object>
                 {
                     { "servicios", AnalisisQueries.Servicios() },
+                }));
+                return;
+            }
+
+            if (context.Request.QueryString["accion"] == "modo_autonomo")
+            {
+                DateTime desdeMa, hastaMa;
+                AnalisisQueries.Periodo(
+                    context.Request.QueryString["desde"],
+                    context.Request.QueryString["hasta"],
+                    DashboardDataInfo.HoyEnPresentacion(),
+                    out desdeMa, out hastaMa);
+                context.Response.Write(json.Serialize(new Dictionary<string, object>
+                {
+                    { "servicio", AnalisisQueries.SERVICIO_MODO_AUTONOMO },
+                    { "desde", Dia(desdeMa) },
+                    { "hasta", Dia(hastaMa.AddDays(-1)) },
+                    { "bloques", AnalisisQueries.ModoAutonomo(desdeMa, hastaMa) },
                 }));
                 return;
             }

@@ -228,6 +228,7 @@ analisis/analisis.css
 analisis/analisis.js
 analisis/motor.js
 analisis/trabajo.js
+analisis/modo_autonomo.js
 analisis/vendor/exceljs.min.js
 handlers/analisis.ashx
 App_Code/AnalisisQueries.cs
@@ -354,3 +355,123 @@ base:
   `secciones` en `servicios.js`, se vuelve a armar y se corre el
   `78_analisis_secciones.sql` nuevo. El botón de la pestaña conserva las
   secciones que el servicio ya tiene.
+
+## 5. Modo Autónomo (2026-11-20)
+
+Modo Autónomo sale en la lista como un servicio más, pero con su propia
+vista: no se elige por ruta ni grupo (desde septiembre su categoría trae de
+todo y muchos tickets están en otras) y la mitad de sus datos no son
+tickets, sino los eventos que registran los incident managers en su Excel
+de críticos. Los datos ya vienen clasificados de la base (esquema `crit`):
+la pestaña solo los cuenta y los pinta.
+
+Lo que muestra: KPIs y hallazgos; **Causas de los IMs** y **Lo que no
+llega al IM** con zoom (clic en una barra o en un nombre abre el nivel 2 y
+luego el 3; las migas regresan; «Sin detalle» en gris es lo que el texto no
+dice); por mes; tiendas; detalle; y su Excel de siete hojas (sin textos de
+tickets; sí lleva `CausaIM` y `OrigenDetalle`, con las contraseñas tapadas,
+y el nombre de cada sucursal).
+
+**Orden de instalación.** Primero el sitio y después la base: el sitio
+nuevo sin la base no muestra nada de Modo Autónomo (la lista sale de
+`usp_Analisis_Servicios`), pero un sitio viejo con la fila ya dada de alta
+mandaría `modo_autonomo` por el camino del motor.
+
+1. El sitio: `analisis/modo_autonomo.js` (nuevo), `analisis/analisis.js`,
+   `analisis/analisis.css`, `handlers/analisis.ashx` y
+   `App_Code/AnalisisQueries.cs`.
+2. `95_criticos.sql` del 2026-11-20 (repositorio de la base, no está en
+   este): según su autor, agrega `Nivel2` y `Nivel3` a `crit.Incidente`, la
+   tabla `crit.TicketMA` y su procedimiento, y se puede volver a correr.
+   **No verificado:** el script no se ha revisado.
+3. `Cargar_Criticos.ps1` con su `ReglasMA.ps1` del 2026-11-20, en la PC
+   donde se carga el Excel: llena los niveles y `crit.TicketMA` (el log dice
+   "Tickets de Modo Autonomo desde ..."). **No verificado.**
+4. `97_analisis_modo_autonomo.sql` (repositorio de la base): da de alta el
+   servicio `modo_autonomo` y crea `dbo.usp_Analisis_ModoAutonomo` (solo
+   lectura); sin el paso 2 se niega y no cambia nada. **No verificado.**
+
+Lo que el sitio espera del procedimiento: «Contrato que espera el sitio»,
+al final de esta sección.
+
+**Activo.** `analisis.ashx?accion=modo_autonomo` responde 400 si
+`modo_autonomo` no viene en `usp_Analisis_Servicios` (es decir, si no existe
+o tiene `Activo = 0`), igual que `usp_Analisis_Datos` con cualquier otro
+servicio. No depende de que el procedimiento lo revise.
+
+**Contraseñas.** `CausaIM` y `OrigenDetalle` son texto libre de los IMs y no
+pasan por el motor. `modo_autonomo.js` les aplica `Motor.ocultarClaves`, la
+misma regla del Detalle de los demás servicios, antes de pintarlos o
+mandarlos al Excel. Igual que en el motor, el texto viaja sin tapar en el
+JSON de `analisis.ashx` y solo se tapa en el navegador. Los nombres de
+personas no se tapan, ni aquí ni en el motor.
+
+La cuenta del tablero necesita `EXECUTE` sobre
+`dbo.usp_Analisis_ModoAutonomo`. Según el autor, el esquema `crit` es de
+`dbo` y el procedimiento lo lee sin permisos aparte (encadenamiento de
+propietarios); **no verificado**.
+
+**Frescura.** La vista muestra lo de la última carga del Excel (el
+subtítulo dice cuándo): hoy, cuando corre `Cargar_Criticos.ps1` (a mano, el
+correo de Modo Autónomo los días 1 y 15, y el resumen semanal).
+
+**La liga directa.** `dashboard.html?servicio=modo_autonomo#analisis` abre
+la pestaña con Modo Autónomo ya analizado desde su fecha sugerida. Para que
+el correo de Modo Autónomo la lleve ("Ver en el tablero"), en su
+`config_correo_modo_autonomo.json`:
+`"url_tablero": "https://<servidor>/dashboard.html?servicio=modo_autonomo"`
+y `"seccion_tablero": "analisis"`.
+
+Comprobar (solo lectura):
+
+    SELECT Servicio, Nombre, Activo, Secciones FROM dbo.AnalisisServicio WHERE Servicio = 'modo_autonomo';
+    EXEC dbo.usp_Analisis_ModoAutonomo @Desde = '2026-01-01', @Hasta = '2026-12-01';
+    SELECT COUNT(*) AS Tickets, COUNT(DISTINCT Grupo) AS Incidentes FROM crit.TicketMA;   -- columnas sin verificar
+
+En la pestaña (Ctrl+F5): "Modo Autónomo" en la lista, sin "(sin reglas)";
+al analizarlo, sus cinco hojas; si un aviso dice que no hay tickets
+clasificados o que los eventos no traen niveles, falta el paso 3.
+
+**Cómo quitarlo.** `UPDATE dbo.AnalisisServicio SET Activo = 0 WHERE
+Servicio = 'modo_autonomo';`: sale de la lista y `accion=modo_autonomo`
+responde 400; lo demás no cambia.
+
+Pruebas en este repositorio (datos sintéticos, sin base):
+
+    node tools\tests\AnalisisModoAutonomoSmoke.js           # modelo, zoom, hojas, contraseñas tapadas, Excel
+    node tools\tests\AnalisisModoAutonomoHeadlessSmoke.js   # en Chrome: motor <-> Modo Autónomo, zoom con clics, Excel, 400/500, liga directa, sin registro
+
+y `tools/tests/AnalisisModoAutonomoHandlerSmoke.cs` (se compila como
+`AnalisisDatosSmoke.cs`; sin base: la regla de `Activo` y los 400/405/500
+del handler). Las pruebas del autor contra `reglas.py` y la de Docker con
+95 y 97 viven en el repositorio de la base y no se han corrido aquí.
+
+### Contrato que espera el sitio
+
+Sale de lo que leen `AnalisisQueries.ModoAutonomo` y `modo_autonomo.js`; la
+definición real de 97 no se ha revisado contra esto.
+
+- `dbo.AnalisisServicio`: una fila `Servicio = 'modo_autonomo'`, `Activo = 1`,
+  con `Nombre` y, si se quiere la liga directa con fecha, `DesdeSugerido`.
+  Sale en `usp_Analisis_Servicios` (47) sin cambiar ese procedimiento.
+- `dbo.usp_Analisis_ModoAutonomo @Desde DATE, @Hasta DATE`: `@Hasta` es el
+  día siguiente al último incluido (como en `usp_Analisis_Datos`); el sitio
+  ya limita el periodo a 400 días. Tiempo máximo: 60 s. Errores propios con
+  `RAISERROR(..., 16, 1)` (número 50000): el sitio los da como 400 con su
+  texto. Devuelve **exactamente tres** resultados, en este orden (los
+  nombres de columna se leen tal cual; las que falten salen vacías):
+  1. parámetros: `Clave`, `Valor`. Claves leídas: `UltimaCargaExcel`,
+     `CargaTickets` (vacía = aviso de que falta clasificar tickets),
+     `ReglasVersion`.
+  2. eventos: `Mes` (aaaa-mm), `Inicio`, `Horas`, `Tienda` (número; nulo =
+     varias sucursales), `TiendaNombre`, `Aplicacion`, `Tipo`, `Origen`
+     (clave: electrica, ups, comunicaciones, servidor, sql, clima, software,
+     sincausa), `OrigenDetalle`, `RespaldoFallo` (1/0), `Alcance`, `Nivel2`,
+     `Nivel3` («Sin detalle» = lo que el texto no dice), `CausaIM`,
+     `TicketsMA`.
+  3. incidentes: `Mes`, `Fecha`, `Tienda`, `Tickets`, `Motivo` (clave:
+     electrica, ups, servidor, comunicaciones, red_caja, equipo_caja,
+     aplicativo, operador, sincausa, probable_electrica), `Fuente`
+     (documentado, tienda, supuesto), `Nivel2`, `Nivel3`, `SinContacto`
+     (1/0), `Alcance`, `TiendaConEventoIM` (1/0).
+- `GRANT EXECUTE ON dbo.usp_Analisis_ModoAutonomo TO [usuario_del_tablero]`.
