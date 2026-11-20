@@ -228,13 +228,13 @@ public static class RevisionSolicitudesIniciativa
 
     public const string MensajeSoloAdm = "Solo un administrador (ADM) puede aprobar o rechazar solicitudes de iniciativa.";
     public const string MotivoSinRevision =
-        "Aprobar o rechazar todavía no está habilitado (falta aplicar sql/31 en la base, con su aprobación). No se cambió nada.";
-    public const string MensajeFaltaMotivo = "Escribe por qué se rechaza.";
+        "Aprobar o rechazar todav\u00eda no est\u00e1 habilitado (falta aplicar sql/31 en la base, con su aprobaci\u00f3n). No se cambi\u00f3 nada.";
+    public const string MensajeFaltaMotivo = "Escribe por qu\u00e9 se rechaza.";
     public const string MensajeComentarioLargo = "El comentario no puede pasar de 2000 caracteres.";
     public const string MotivoSinIniciativa =
-        "Aprobar ahora crea la iniciativa y eso todavía no está en la base (falta aplicar sql/32, con su aprobación). No se cambió nada.";
+        "Aprobar ahora crea la iniciativa y eso todav\u00eda no est\u00e1 en la base (falta aplicar sql/32, con su aprobaci\u00f3n). No se cambi\u00f3 nada.";
     public const string MensajeFaltaEstado =
-        "Elige el Estado inicial de la iniciativa que se va a crear (o «sin estado»: queda Incompleta, como en Crear).";
+        "Elige el Estado inicial de la iniciativa que se va a crear (o \u00absin estado\u00bb: queda Incompleta, como en Crear).";
 
     // La validacion de la alta de Administracion -> Crear (catalogo, PO / SO,
     // capacidad, valores existentes). Las pruebas la cambian por una falsa.
