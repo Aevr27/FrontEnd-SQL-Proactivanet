@@ -18,7 +18,11 @@
        (analisis/trabajo.js) para no congelar la pagina; si no arranca, el
        mismo archivo corre aqui;
      - el Excel lo arma ExcelJS (analisis/vendor/exceljs.min.js, copia local:
-       el tablero corre en una VM sin salida a CDN), cargado al pulsar.
+       el tablero corre en una VM sin salida a CDN), cargado al pulsar;
+     - Modo Autonomo (clave modo_autonomo, 97_analisis_modo_autonomo.sql) no
+       se analiza con el motor: sus datos ya vienen clasificados de la base y
+       los cuenta y pinta analisis/modo_autonomo.js, con su zoom de causas.
+       Del motor solo usa ocultarClaves para sus textos libres.
 
    Las reglas de motivo son las del servicio en la base. El editor de la hoja
    "Reglas" deja probar cambios SIN guardarlos: reclasifica aqui mismo, y
@@ -42,6 +46,8 @@
   var MOTOR_URL = junto('motor.js', 'analisis/motor.js');
   var EXCEL_URL = junto('vendor/exceljs.min.js', 'analisis/vendor/exceljs.min.js');
   var TRABAJO_URL = junto('trabajo.js', 'analisis/trabajo.js');
+  var MA_URL = junto('modo_autonomo.js', 'analisis/modo_autonomo.js');
+  var MODO_AUTONOMO = 'modo_autonomo';
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -60,6 +66,11 @@
   }
   var motorListo = null;
   function motor() { return motorListo || (motorListo = cargarScript(MOTOR_URL, 'Motor').then(function () { return window.Motor; })); }
+  var maListo = null;
+  function modoAutonomo() {
+    return maListo || (maListo = cargarScript(MA_URL, 'AnalisisModoAutonomo').then(function () { return window.AnalisisModoAutonomo; })
+      .catch(function (e) { maListo = null; throw e; }));
+  }
 
   /* ------------------------------------------------------------ trabajo pesado */
   // Leer el JSON, preparar y analizar corren en un Worker (trabajo.js) para que
@@ -133,6 +144,9 @@
   var pestana = 'Resumen';
   var enCurso = null;            // {url, nombre, control} de la carga que se esta haciendo
   var mostrado = null;           // {nombre, desde, hasta} de lo que se ve en pantalla
+  var vista = null;              // 'motor' o 'ma': de quien es lo que esta en pantalla
+  var ma = null;                 // AnalisisModoAutonomo.modelo(...) de lo que se ve
+  var maRuta = { Causas: [], NoLlegan: [] };   // el nivel del zoom de cada hoja
 
   function estado(txt, clase) { var e = $('estado'); e.textContent = txt || ''; e.className = 'estado' + (clase ? ' ' + clase : ''); }
   // reintentar: lo que hace el boton "Reintentar" del aviso; sin el, no sale.
@@ -222,14 +236,25 @@
         sel.innerHTML = servicios.length ? '' : '<option value="">(no hay servicios dados de alta)</option>';
         servicios.forEach(function (s) {
           var o = document.createElement('option');
-          o.value = s.Servicio; o.textContent = s.Nombre + (s.Reglas ? '' : ' (sin reglas)');
+          o.value = s.Servicio; o.textContent = s.Nombre + (s.Reglas || s.Servicio === MODO_AUTONOMO ? '' : ' (sin reglas)');
           sel.appendChild(o);
         });
         $('lista').innerHTML = servicios.map(function (s) {
           return '<button type="button" class="an-servicio" data-servicio="' + esc(s.Servicio) + '"><b>' + esc(s.Nombre) + '</b>' +
-                 '<span>' + esc(s.Descripcion || '') + '</span><span>' + (s.Reglas || 0) + ' reglas de motivo · versión ' + esc(s.ReglasVersion) + '</span></button>';
+                 '<span>' + esc(s.Descripcion || '') + '</span><span>' +
+                 (s.Servicio === MODO_AUTONOMO ? 'Eventos de los IMs y tickets que no les llegan, con zoom de causas'
+                                               : (s.Reglas || 0) + ' reglas de motivo · versión ' + esc(s.ReglasVersion)) + '</span></button>';
         }).join('');
         estado(servicios.length ? '' : 'Sin servicios: falta correr 47 y el script de algún servicio.');
+        // ?servicio=<clave> en la direccion (la liga del correo de Modo Autonomo) lo abre de una vez.
+        var pedido = null;
+        try { pedido = new URLSearchParams(location.search).get('servicio'); } catch (x) { pedido = null; }
+        if (pedido && servicios.some(function (s) { return s.Servicio === pedido; }) && !resultado && !ma) {
+          var f = servicios.filter(function (s) { return s.Servicio === pedido; })[0];
+          sel.value = pedido;
+          if (f.DesdeSugerido && pedido === MODO_AUTONOMO) { $('desde').value = f.DesdeSugerido; $('hasta').value = iso(hoyMx()); }
+          analizar();
+        }
       })
       .catch(function (e) { estado(''); error('No se pudo leer la lista de servicios: ' + e.message, function () { error(''); pedirServicios(); }); });
   }
@@ -241,6 +266,7 @@
   function analizar(pedido) {
     var p = pedido && pedido.clave ? pedido : { clave: $('servicio').value, desde: $('desde').value, hasta: $('hasta').value };
     if (!p.clave) return;
+    if (p.clave === MODO_AUTONOMO) return analizarModoAutonomo(p);
     var url = API + '?servicio=' + encodeURIComponent(p.clave) + '&desde=' + encodeURIComponent(p.desde) + '&hasta=' + encodeURIComponent(p.hasta);
     if (enCurso && enCurso.url === url) return;
     if (enCurso && enCurso.control) enCurso.control.abort();
@@ -293,8 +319,8 @@
       if (mio !== turno) return;
       enCurso = null;
       estado('');
-      marcarPrevio(resultado ? nombre : null);
-      if (resultado) $('excel').disabled = false;   // el Excel es el de lo que se sigue viendo
+      marcarPrevio(mostrado ? nombre : null);
+      if (mostrado) $('excel').disabled = false;   // el Excel es el de lo que se sigue viendo
       error(e.message + (/HTTP 5/.test(e.message) ? ' Revisa que 47_analisis_servicios.sql este corrido.' : ''),
             function () { analizar(p); });
     });
@@ -323,6 +349,7 @@
       if (mio !== turno) return false;
       var t0 = Date.now();
       resultado = a.resultado;
+      ponerVista('motor');
       pintar();
       if (med) { med.analisis = a.ms.analisis; med.pintado = Date.now() - t0; }
       return true;
@@ -330,11 +357,23 @@
   }
 
   /* ------------------------------------------------------------ pintar */
-  var HOJAS = [['Resumen', 'Resumen'], ['Temporal', 'Temporal'], ['Sitios', 'Sitios'], ['Motivos', 'Motivos'],
-               ['Atencion', 'Atención'], ['Reglas', 'Reglas'], ['Detalle', 'Detalle']];
-  $('pestanas').innerHTML = HOJAS.map(function (h) {
-    return '<button type="button" role="tab" id="' + PREFIJO + 'tab-' + h[0] + '" data-hoja="' + h[0] + '" aria-controls="' + PREFIJO + 'panel">' + esc(h[1]) + '</button>';
-  }).join('');
+  var HOJAS_MOTOR = [['Resumen', 'Resumen'], ['Temporal', 'Temporal'], ['Sitios', 'Sitios'], ['Motivos', 'Motivos'],
+                     ['Atencion', 'Atención'], ['Reglas', 'Reglas'], ['Detalle', 'Detalle']];
+  var HOJAS = HOJAS_MOTOR;
+  function ponerPestanas(lista) {
+    HOJAS = lista;
+    $('pestanas').innerHTML = HOJAS.map(function (h) {
+      return '<button type="button" role="tab" id="' + PREFIJO + 'tab-' + h[0] + '" data-hoja="' + h[0] + '" aria-controls="' + PREFIJO + 'panel">' + esc(h[1]) + '</button>';
+    }).join('');
+    if (!HOJAS.some(function (h) { return h[0] === pestana; })) pestana = HOJAS[0][0];
+  }
+  // Modo Autonomo tiene sus propias hojas; al volver a otro servicio regresan las del motor.
+  function ponerVista(v) {
+    if (vista === v) return;
+    vista = v;
+    ponerPestanas(v === 'ma' ? window.AnalisisModoAutonomo.HOJAS : HOJAS_MOTOR);
+  }
+  ponerPestanas(HOJAS_MOTOR);
 
   function fmt(v, t) {
     var M = window.Motor;
@@ -416,14 +455,15 @@
     return s + '<text class="etq" x="' + (W - de) + '" y="' + (y(1) - 6) + '" text-anchor="end">1.0 = día normal</text></svg>';
   }
   function horizontales(d, op) {
-    var W = op.ancho, fila = 26, ar = 6, H = ar + fila * d.length + 6, et = Math.min(W * 0.46, 340), iz = et + 8, de = 56;
+    var W = op.ancho, fila = 26, ar = 6, H = ar + fila * d.length + 6, et = Math.min(W * 0.46, 340), iz = et + 8, de = op.derecha || 56;
     var max = Math.max.apply(null, d.map(function (x) { return x.v; })) || 1;
     var x = function (v) { return iz + (W - iz - de) * v / max; };
     var corta = function (t) { var m = Math.floor(et / 6.2); return t.length > m ? t.slice(0, m - 1) + '…' : t; };
     var s = '<svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="' + esc(op.titulo) + '">';
     d.forEach(function (q, i) {
       var cy = ar + fila * i + fila / 2, bh = Math.min(16, fila - 8), w = x(q.v) - iz, r = Math.min(4, w, bh / 2);
-      s += '<rect class="hit" x="0" y="' + (cy - fila / 2) + '" width="' + W + '" height="' + fila + '" data-tip="' + esc(q.tip) + '"/>';
+      s += '<rect class="hit' + (q.zoom != null ? ' zoom' : '') + '" x="0" y="' + (cy - fila / 2) + '" width="' + W + '" height="' + fila + '" data-tip="' + esc(q.tip) + '"' +
+           (q.zoom != null ? ' data-ma-zoom="' + esc(q.zoom) + '" data-ma-hoja="' + esc(q.hoja || pestana) + '"' : '') + '/>';
       s += '<text x="' + et + '" y="' + (cy + 4) + '" text-anchor="end" style="fill:var(--ink-2)">' + esc(corta(q.e)) + '</text>';
       if (w > 0) s += '<path class="barra' + (q.apagada ? ' apagada' : '') + '" pointer-events="none" d="M' + iz + ',' + (cy - bh / 2) + 'H' + (iz + w - r) + 'Q' + (iz + w) + ',' + (cy - bh / 2) + ' ' + (iz + w) + ',' + (cy - bh / 2 + r) +
                      'V' + (cy + bh / 2 - r) + 'Q' + (iz + w) + ',' + (cy + bh / 2) + ' ' + (iz + w - r) + ',' + (cy + bh / 2) + 'H' + iz + 'Z"/>';
@@ -539,6 +579,12 @@
       var b = $('tab-' + h[0]); b.setAttribute('aria-selected', String(h[0] === pestana)); b.tabIndex = h[0] === pestana ? 0 : -1;
     });
     $('panel').setAttribute('aria-labelledby', PREFIJO + 'tab-' + pestana);
+    if (vista === 'ma') {
+      anchoPintado = ancho();
+      $('panel').innerHTML = window.AnalisisModoAutonomo.panel(ma, pestana, maRuta,
+        { esc: esc, horizontales: horizontales, columnas: columnas, ancho: ancho });
+      return;
+    }
     var r = resultado, h = '';
     if (pestana === 'Detalle') {
       h = htmlTabla({ titulo: 'Detalle: una fila por ticket', columnas: r.detalle.columnas, filas: r.detalle.filas,
@@ -632,9 +678,79 @@
     e.textContent = ok ? 'Copiado.' : 'Quedó seleccionado: cópialo con Ctrl+C.';
   }
 
+  /* ------------------------------------------------------------ Modo Autonomo */
+  // Sus datos ya vienen clasificados de la base (97_analisis_modo_autonomo.sql) y
+  // pesan poco: no pasan por el Worker ni por Motor.analizar. El motor se espera
+  // igual porque su ocultarClaves tapa las contraseñas de CausaIM y OrigenDetalle.
+  function analizarModoAutonomo(p) {
+    var url = API + '?accion=modo_autonomo&desde=' + encodeURIComponent(p.desde) + '&hasta=' + encodeURIComponent(p.hasta);
+    if (enCurso && enCurso.url === url) return;
+    if (enCurso && enCurso.control) enCurso.control.abort();
+    var nombre = (servicios.filter(function (s) { return s.Servicio === p.clave; })[0] || {}).Nombre || 'Modo Autónomo';
+    var control = typeof AbortController === 'function' ? new AbortController() : null;
+    var t0 = Date.now(), mio = ++turno;
+    enCurso = { url: url, nombre: nombre, control: control };
+    error(''); $('avisos').hidden = true;
+    $('excel').disabled = true;
+    estado('Trayendo ' + nombre + '…', 'cargando');
+    marcarPrevio(nombre);
+    var cuerpo = fetch(url, { cache: 'no-store', signal: control ? control.signal : undefined }).then(function (r) {
+      return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; });
+    });
+    Promise.all([modoAutonomo(), cuerpo, motor()]).then(function (x) {
+      if (mio !== turno) return;
+      var nuevo = x[0].modelo(x[1], x[2].ocultarClaves);
+      if (!ma || ma.desde !== nuevo.desde || ma.hasta !== nuevo.hasta) maRuta = { Causas: [], NoLlegan: [] };
+      ma = nuevo;
+      enCurso = null;
+      ponerVista('ma');
+      mostrado = { nombre: nombre, desde: ma.desde, hasta: ma.hasta };
+      marcarPrevio(null);
+      pintarModoAutonomo(nombre);
+      estado(ma.cifras.eventos.toLocaleString('es-MX') + ' eventos y ' + ma.cifras.incidentes.toLocaleString('es-MX') +
+             ' incidentes en ' + ((Date.now() - t0) / 1000).toFixed(1) + ' s.', 'ok');
+      $('excel').disabled = false;
+      $('intro').hidden = true; $('resultado').hidden = false;
+    }).catch(function (e) {
+      if (mio !== turno) return;
+      enCurso = null;
+      estado('');
+      marcarPrevio(mostrado ? nombre : null);
+      if (mostrado) $('excel').disabled = false;
+      error(e.message + (/HTTP 5/.test(e.message) ? ' Revisa que 97_analisis_modo_autonomo.sql este corrido.' : ''),
+            function () { analizar(p); });
+    });
+  }
+  function pintarModoAutonomo(nombre) {
+    var p = ma.parametros;
+    $('titulo').textContent = nombre;
+    $('sub').textContent = 'Del ' + ma.desde + ' al ' + ma.hasta + ' · Excel de críticos cargado el ' + (p.UltimaCargaExcel || '—') +
+                           ' · tickets clasificados el ' + (p.CargaTickets || '—') + (p.ReglasVersion ? ' · reglas del ' + p.ReglasVersion : '');
+    $('kpis').innerHTML = window.AnalisisModoAutonomo.kpis(ma).map(function (x) {
+      return '<div class="kpi"><div class="lbl">' + esc(x[0]) + '</div><div class="val">' + esc(x[1]) + '</div><div class="foot">' + esc(x[2]) + '</div></div>';
+    }).join('');
+    $('hallazgos').innerHTML = ma.hallazgos.map(function (h) { return '<li>' + esc(h) + '</li>'; }).join('');
+    $('avisos').innerHTML = ma.avisos.map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('');
+    $('avisos').hidden = !ma.avisos.length;
+    pintarPanel();
+  }
+  function excelModoAutonomo() {
+    if (!ma) return;
+    $('excel').disabled = true; estado('Armando el Excel…');
+    cargarScript(EXCEL_URL, 'ExcelJS').then(function () {
+      return window.AnalisisModoAutonomo.armarLibro(ma, window.ExcelJS).xlsx.writeBuffer();
+    }).then(function (buf) {
+      var nombre = 'Analisis_modo_autonomo_' + ma.desde.replace(/-/g, '') + '_' + ma.hasta.replace(/-/g, '') + '.xlsx';
+      bajar(new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), null, nombre);
+      estado('Excel listo: ' + nombre, 'ok');
+    }).catch(function (e) { error('No se pudo armar el Excel: ' + e.message); estado(''); })
+      .then(function () { if (!enCurso) $('excel').disabled = false; });
+  }
+
   /* ------------------------------------------------------------ Excel */
   function excel() {
     var M = window.Motor;
+    if (vista === 'ma') return excelModoAutonomo();
     if (!resultado) return;
     $('excel').disabled = true; estado('Armando el Excel…');
     cargarScript(EXCEL_URL, 'ExcelJS').then(function () {
@@ -663,11 +779,25 @@
     $('servicio').value = b.dataset.servicio; analizar();
   });
   $('pestanas').addEventListener('click', function (e) {
-    var b = e.target.closest('[data-hoja]'); if (!b || !resultado) return;
+    var b = e.target.closest('[data-hoja]'); if (!b || !(vista === 'ma' ? ma : resultado)) return;
     pestana = b.dataset.hoja; pintarPanel();
+  });
+  // El zoom de Modo Autonomo: una barra o un nombre abre el siguiente nivel; las migas regresan.
+  $('panel').addEventListener('click', function (e) {
+    if (vista !== 'ma' || !ma) return;
+    var z = e.target.closest('[data-ma-zoom]'), m = e.target.closest('[data-ma-ruta]');
+    if (z && maRuta[z.getAttribute('data-ma-hoja')]) {
+      maRuta[z.getAttribute('data-ma-hoja')] = maRuta[z.getAttribute('data-ma-hoja')].concat([z.getAttribute('data-ma-zoom')]);
+    } else if (m && maRuta[m.getAttribute('data-ma-hoja')]) {
+      try { maRuta[m.getAttribute('data-ma-hoja')] = JSON.parse(m.getAttribute('data-ma-ruta')); } catch (x) { return; }
+    } else return;
+    tip.hidden = true;
+    pintarPanel();
+    var foco = $('panel').querySelector('.an-migas b'); if (foco) { foco.tabIndex = -1; foco.focus(); }
   });
   $('pestanas').addEventListener('keydown', function (e) {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+    if (!(vista === 'ma' ? ma : resultado)) return;
     var i = HOJAS.findIndex(function (h) { return h[0] === pestana; }) + (e.key === 'ArrowRight' ? 1 : -1);
     pestana = HOJAS[(i + HOJAS.length) % HOJAS.length][0]; pintarPanel(); $('tab-' + pestana).focus();
   });
@@ -684,7 +814,9 @@
   // graficas se dibujan al ancho del panel, que midio cero mientras estuvo oculto.
   var anchoPintado = 0;
   function redimensionar() {
-    if (!resultado || (pestana !== 'Temporal' && pestana !== 'Motivos')) return;
+    var conGraficas = vista === 'ma' ? (ma && (pestana === 'Causas' || pestana === 'NoLlegan' || pestana === 'Mes'))
+                                     : (resultado && (pestana === 'Temporal' || pestana === 'Motivos'));
+    if (!conGraficas) return;
     if (Math.abs(ancho() - anchoPintado) > 20) { anchoPintado = ancho(); pintarPanel(); }
   }
   window.addEventListener('resize', function () { clearTimeout(redimensionar.t); redimensionar.t = setTimeout(redimensionar, 200); });

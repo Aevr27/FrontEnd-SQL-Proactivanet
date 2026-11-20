@@ -195,6 +195,79 @@ public static class AnalisisQueries
         return bloques;
     }
 
+    // Modo Autonomo tiene su propia vista: sus datos no son tickets por ruta sino
+    // los eventos de los incident managers y los incidentes que no les llegan,
+    // ya clasificados en la base (crit). Ver 97_analisis_modo_autonomo.sql.
+    public const string SERVICIO_MODO_AUTONOMO = "modo_autonomo";
+
+    // El orden en que usp_Analisis_ModoAutonomo devuelve sus bloques.
+    public static readonly string[] BLOQUES_MODO_AUTONOMO = { "parametros", "eventos", "incidentes" };
+
+    public static Dictionary<string, object> ModoAutonomo(DateTime desde, DateTime hastaExcluido)
+    {
+        return ModoAutonomo(DashboardDb.CadenaConexion(), desde, hastaExcluido);
+    }
+
+    // El procedimiento no se sabe si revisa dbo.AnalisisServicio.Activo (97 no
+    // esta en este repositorio). Se exige aqui, con la misma lista que ve la
+    // pestaña (usp_Analisis_Servicios, solo Activo = 1): apagar la fila
+    // apaga tambien la peticion directa, como pasa con usp_Analisis_Datos.
+    public static bool ModoAutonomoActivo(string cadena)
+    {
+        return ModoAutonomoEnLista(Servicios(cadena));
+    }
+
+    public static bool ModoAutonomoEnLista(List<Dictionary<string, object>> servicios)
+    {
+        foreach (var s in servicios ?? new List<Dictionary<string, object>>())
+        {
+            object clave;
+            if (s.TryGetValue("Servicio", out clave) && SERVICIO_MODO_AUTONOMO.Equals(clave as string))
+                return true;
+        }
+        return false;
+    }
+
+    public static Dictionary<string, object> ModoAutonomo(string cadena, DateTime desde, DateTime hastaExcluido)
+    {
+        if (!ModoAutonomoActivo(cadena))
+            throw new AnalisisSolicitudInvalida("El servicio \"" + SERVICIO_MODO_AUTONOMO + "\" no existe o no esta activo.");
+        var bloques = new Dictionary<string, object>();
+        int k = 0;
+        using (var cn = new SqlConnection(cadena))
+        using (var cmd = new SqlCommand("dbo.usp_Analisis_ModoAutonomo", cn))
+        {
+            cmd.CommandType = CommandType.StoredProcedure;
+            cmd.CommandTimeout = 60;
+            cmd.Parameters.Add("@Desde", SqlDbType.Date).Value = desde.Date;
+            cmd.Parameters.Add("@Hasta", SqlDbType.Date).Value = hastaExcluido.Date;
+            cn.Open();
+            try
+            {
+                using (var r = cmd.ExecuteReader())
+                {
+                    do
+                    {
+                        long caracteres;
+                        var bloque = Leer(r, out caracteres);
+                        if (k < BLOQUES_MODO_AUTONOMO.Length) bloques[BLOQUES_MODO_AUTONOMO[k]] = bloque;
+                        k++;
+                    } while (r.NextResult());
+                }
+            }
+            catch (SqlException ex)
+            {
+                if (ex.Number == 50000) throw new AnalisisSolicitudInvalida(ex.Message);
+                throw;
+            }
+        }
+        if (k != BLOQUES_MODO_AUTONOMO.Length)
+            throw new InvalidOperationException(
+                "usp_Analisis_ModoAutonomo devolvio " + k + " bloques y se esperaban " + BLOQUES_MODO_AUTONOMO.Length +
+                ": falta correr 97_analisis_modo_autonomo.sql.");
+        return bloques;
+    }
+
     // caracteres: lo que suman los valores del bloque, para saber cual pesa en
     // el JSON (sin contar comillas ni comas).
     private static Dictionary<string, object> Leer(SqlDataReader r, out long caracteres)
