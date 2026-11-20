@@ -111,3 +111,16 @@
 .an-frases { display: flex; flex-wrap: wrap; gap: 6px; }
 .an-frases span { font: 12px Consolas, "Courier New", monospace; padding: 3px 8px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--line-soft); }
 .an-frases span b { font-family: inherit; color: var(--muted); margin-left: 4px; }
+
+/* Modo Autonomo: el zoom de causas (analisis/modo_autonomo.js). Las migas
+   regresan a un nivel; un nombre o una barra abre el siguiente. */
+.an-migas { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 12px; color: var(--ink-2); }
+.an-migas b { color: var(--ink); font-weight: 600; outline: none; }
+.an-miga, .an-zoom {
+  background: none; border: 0; padding: 0; font: inherit; text-align: left;
+  color: var(--g-900); text-decoration: underline; text-underline-offset: 2px; cursor: pointer;
+}
+.an-miga:hover, .an-zoom:hover { color: var(--g-600); }
+.an-miga:focus-visible, .an-zoom:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.an-grafica .hit.zoom { cursor: pointer; }
+.an-grafica .hit.zoom:hover { fill: var(--accent-soft); fill-opacity: .35; }
