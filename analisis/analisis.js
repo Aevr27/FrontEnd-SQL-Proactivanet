@@ -184,6 +184,7 @@
     guardadas.push({ url: url, cuerpo: cuerpo, hora: Date.now() });
     if (guardadas.length > GUARDAR_MAX) guardadas.shift();
   }
+  function olvidar(url) { guardadas = guardadas.filter(function (g) { return g.url !== url; }); }
 
   // Lo que dice el navegador de la peticion: espera del servidor, bajada,
   // bytes en el cable y sin comprimir, y el Server-Timing de analisis.ashx.
@@ -287,9 +288,14 @@
     Promise.all([motor(), cuerpo]).then(function (x) {
       if (mio !== turno) return;
       med.descarga = Date.now() - t0; med.bytes = x[1].byteLength; med.guardada = !!previa;
-      if (!previa) { med.url = url; guardar(url, x[1]); }
+      if (!previa) med.url = url;
       var avisar = function (txt) { if (mio === turno) estado(txt, 'cargando'); };
+      // Solo se guarda un cuerpo que si se pudo leer: un 200 con JSON roto o
+      // incompleto, guardado, se reusaria en cada Reintentar por 10 minutos.
+      // El rechazo va como segundo argumento de then para que un fallo del
+      // analisis o del pintado (ya con el cuerpo leido) no lo saque.
       return analizador.cargar(x[1], avisar).then(function (c) {
+        if (!previa) guardar(url, x[1]);
         if (mio !== turno) return;
         respuesta = c.respuesta; nTickets = c.tickets;
         med.lectura = c.ms.lectura; med.preparacion = c.ms.preparacion;
@@ -314,7 +320,7 @@
           $('excel').disabled = false;
           $('intro').hidden = true; $('resultado').hidden = false;
         });
-      });
+      }, function (e) { olvidar(url); throw e; });
     }).catch(function (e) {
       if (mio !== turno) return;
       enCurso = null;
