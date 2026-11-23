@@ -1,7 +1,9 @@
 /* =========================================================================
    pruebas-power-automate.js — PRUEBAS DE POWER AUTOMATE (SOLO LOCALHOST)
 
-   Tres botones que mandan los eventos de prueba por el servidor
+   Botones que mandan los tres eventos de prueba (NEW_REQUEST,
+   REQUEST_APPROVED, REQUEST_REJECTED) por el servidor; el tipo
+   (Initiative / Change request) solo cambia el campo [1], no el evento
    (handlers/admin_pruebas_power_automate.ashx, App_Code/PruebasPowerAutomate.cs).
    El panel NO viene en el HTML: solo se construye si el servidor contesta
    200 a accion=estado, y eso solo pasa en localhost de desarrollo. Fuera de
@@ -16,9 +18,10 @@
   var URL_PA = '../handlers/admin_pruebas_power_automate.ashx';
 
   var BOTONES = [
-    { evento: 'NEW_REQUEST',      texto: 'Probar nueva solicitud', detalle: 'TEST-PA-001 · ENVIADA · chat grupal de revisores' },
-    { evento: 'REQUEST_APPROVED', texto: 'Probar aprobación',      detalle: 'TEST-PA-002 · APROBADA · código TEST-2026-000001 · mensaje privado' },
-    { evento: 'REQUEST_REJECTED', texto: 'Probar rechazo',         detalle: 'TEST-PA-003 · RECHAZADA · comentario de prueba · mensaje privado' }
+    { evento: 'NEW_REQUEST',      tipo: 'Initiative',     texto: 'Probar nueva solicitud',           detalle: 'TEST-PA-001 · Initiative · ENVIADA · chat grupal de revisores' },
+    { evento: 'NEW_REQUEST',      tipo: 'Change request', texto: 'Probar nueva solicitud de cambio', detalle: 'TEST-PA-001 · Change request · ENVIADA · chat grupal de revisores' },
+    { evento: 'REQUEST_APPROVED', tipo: 'Initiative',     texto: 'Probar aprobación',                detalle: 'TEST-PA-002 · Initiative · APROBADA · código TEST-2026-000001 · mensaje privado' },
+    { evento: 'REQUEST_REJECTED', tipo: 'Initiative',     texto: 'Probar rechazo',                   detalle: 'TEST-PA-003 · Initiative · RECHAZADA · comentario de prueba · mensaje privado' }
   ];
 
   var MENSAJES = {
@@ -28,7 +31,8 @@
     ConfiguracionInvalida: 'La configuración del webhook no es válida (URL https o TeamsWebhookFormato).',
     EnvioEnCurso: 'Ya hay un envío en curso; espera a que termine.',
     OrigenNoPermitido: 'La petición no salió de esta página; recárgala e inténtalo de nuevo.',
-    EventoDesconocido: 'Evento desconocido.'
+    EventoDesconocido: 'Evento desconocido.',
+    TipoDesconocido: 'Tipo desconocido.'
   };
 
   function el(tag, attrs, texto) {
@@ -58,29 +62,31 @@
     var salida = el('p', { 'class': 'job-nota', role: 'status', 'aria-live': 'polite' }, '');
     var fila = el('div', { 'class': 'rca-botones' });
     var botones = BOTONES.map(function (b) {
-      var boton = el('button', { type: 'button', 'class': 'btn chico', 'data-evento': b.evento, title: b.detalle }, b.texto);
+      var boton = el('button', { type: 'button', 'class': 'btn chico', 'data-evento': b.evento, 'data-tipo': b.tipo, title: b.detalle }, b.texto);
       fila.appendChild(boton);
       return boton;
     });
     tarjeta.appendChild(fila);
     tarjeta.appendChild(salida);
     seccion.appendChild(tarjeta);
+    seccion.appendChild(tarjetaSolicitante());
     montaje.appendChild(seccion);
 
     fila.addEventListener('click', function (ev) {
       var boton = ev.target.closest('button[data-evento]');
       if (!boton || boton.disabled) { return; }
-      enviar(boton.getAttribute('data-evento'), botones, salida, tarjeta);
+      enviar(boton.getAttribute('data-evento'), boton.getAttribute('data-tipo'), botones, salida, tarjeta);
     });
   }
 
-  function enviar(evento, botones, salida, tarjeta) {
+  function enviar(evento, tipo, botones, salida, tarjeta) {
     botones.forEach(function (b) { b.disabled = true; });
     tarjeta.setAttribute('data-estado', 'ejecutando');
     salida.className = 'job-nota';
-    salida.textContent = 'Enviando ' + evento + '…';
+    salida.textContent = 'Enviando ' + evento + ' (' + tipo + ')…';
     var cuerpo = new URLSearchParams();
     cuerpo.set('evento', evento);
+    cuerpo.set('tipo', tipo);
     fetch(URL_PA + '?accion=enviar', {
       method: 'POST', credentials: 'same-origin', body: cuerpo
     })
@@ -88,7 +94,7 @@
       .then(function (res) {
         if (res.ok && res.j.enviado) {
           tarjeta.setAttribute('data-estado', 'listo');
-          salida.textContent = 'Notificación enviada correctamente: ' + evento + ' (' + res.j.numero + ', HTTP ' + res.j.http + '). Revisa Teams.';
+          salida.textContent = 'Notificación enviada correctamente: ' + evento + ' (' + res.j.tipo_solicitud + ', ' + res.j.numero + ', HTTP ' + res.j.http + '). Revisa Teams.';
           return;
         }
         tarjeta.setAttribute('data-estado', 'pendiente');
@@ -103,6 +109,84 @@
         salida.textContent = 'No se pudo contactar al servidor: no se sabe si se envió.';
       })
       .then(function () { botones.forEach(function (b) { b.disabled = false; }); });
+  }
+
+  // Resolucion REAL del destinatario (accion=enviar_solicitante): el correo de
+  // [2] sale de AvisoRevisionSolicitud con una solicitud simulada, sin
+  // TeamsPruebaDestinatario. Muestra el texto exacto que se envio.
+  function campo(etiqueta, control) {
+    var l = el('label', { 'class': 'job-nota' }, etiqueta + ' ');
+    l.appendChild(control);
+    return l;
+  }
+
+  function opciones(valores) {
+    var s = el('select');
+    valores.forEach(function (v) { s.appendChild(el('option', { value: v[0] }, v[1])); });
+    return s;
+  }
+
+  function tarjetaSolicitante() {
+    var tarjeta = el('article', { 'class': 'job', 'data-estado': 'listo' });
+    tarjeta.appendChild(el('h3', null, 'Resolución real del solicitante (sin TeamsPruebaDestinatario)'));
+    var evento = opciones([['REQUEST_APPROVED', 'Aprobación'], ['REQUEST_REJECTED', 'Rechazo']]);
+    var tipo = opciones([['Initiative', 'Initiative (correo guardado en la solicitud)'], ['Change request', 'Change request (cuenta + rol → CatPersona)']]);
+    var correo = el('input', { type: 'email', placeholder: 'correo guardado del solicitante', autocomplete: 'off' });
+    var nombre = el('input', { type: 'text', placeholder: 'nombre (opcional)', autocomplete: 'off' });
+    var cuenta = el('input', { type: 'text', placeholder: 'DOMINIO\\cuenta del solicitante', autocomplete: 'off' });
+    var rol = opciones([['PSO', 'PSO'], ['MOD', 'MOD'], ['ADM', 'ADM']]);
+    var deIniciativa = [campo('Correo', correo), campo('Nombre', nombre)];
+    var deCambio = [campo('Cuenta', cuenta), campo('Rol con el que envió', rol)];
+    [campo('Evento', evento), campo('Tipo', tipo)].concat(deIniciativa, deCambio).forEach(function (n) { tarjeta.appendChild(n); });
+
+    function alternar() {
+      var ini = tipo.value === 'Initiative';
+      deIniciativa.forEach(function (n) { n.hidden = !ini; });
+      deCambio.forEach(function (n) { n.hidden = ini; });
+    }
+    tipo.addEventListener('change', alternar);
+    alternar();
+
+    var boton = el('button', { type: 'button', 'class': 'btn chico' }, 'Enviar como solicitante');
+    var salida = el('p', { 'class': 'job-nota', role: 'status', 'aria-live': 'polite' }, '');
+    var payload = el('pre', { 'class': 'job-nota' }, '');
+    tarjeta.appendChild(boton);
+    tarjeta.appendChild(salida);
+    tarjeta.appendChild(payload);
+
+    boton.addEventListener('click', function () {
+      boton.disabled = true;
+      salida.className = 'job-nota';
+      salida.textContent = 'Enviando…';
+      payload.textContent = '';
+      var cuerpo = new URLSearchParams();
+      cuerpo.set('evento', evento.value);
+      cuerpo.set('tipo', tipo.value);
+      if (tipo.value === 'Initiative') { cuerpo.set('correo', correo.value); cuerpo.set('nombre', nombre.value); }
+      else { cuerpo.set('cuenta', cuenta.value); cuerpo.set('rol', rol.value); }
+      fetch(URL_PA + '?accion=enviar_solicitante', { method: 'POST', credentials: 'same-origin', body: cuerpo })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+        .then(function (res) {
+          var j = res.j;
+          if (j.texto || j.cuerpo) {
+            payload.textContent = 'Enviado: ' + (j.texto || j.cuerpo) + '\n[2] = ' + (j.campo2 || '—') +
+              '\nOrigen del destinatario: ' + j.destinatario_origen + ' (TeamsPruebaDestinatario: no usado)';
+          }
+          if (res.ok && j.enviado) {
+            salida.textContent = 'Notificación enviada (HTTP ' + j.http + '). Revisa el chat de ' + j.campo2 + '.';
+            return;
+          }
+          salida.className = 'job-nota job-nota-fallo';
+          salida.textContent = (j.error || MENSAJES[j.tipo] || 'No se pudo enviar la notificación.') +
+            (j.http ? ' (HTTP ' + j.http + ')' : !j.tipo ? ' (respuesta ' + res.status + ')' : '');
+        })
+        .catch(function () {
+          salida.className = 'job-nota job-nota-fallo';
+          salida.textContent = 'No se pudo contactar al servidor: no se sabe si se envió.';
+        })
+        .then(function () { boton.disabled = false; });
+    });
+    return tarjeta;
   }
 
   function iniciar() {

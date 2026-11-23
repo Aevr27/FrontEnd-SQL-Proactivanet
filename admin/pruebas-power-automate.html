@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Pruebas de Power Automate (solo localhost)</title>
+<!--
+  SOLO DESARROLLO LOCAL. Pagina aparte para que admin.html (produccion) no
+  cargue nada del panel. No esta enlazada desde ninguna pagina y se excluye
+  del paquete de produccion. Aun si se copiara, el servidor responde 404 al
+  handler fuera de localhost de desarrollo y aqui no se pinta nada
+  (App_Code/PruebasPowerAutomate.cs).
+-->
+<link rel="stylesheet" href="../assets/css/boton.css">
+<link rel="stylesheet" href="../dashboard.css">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body class="admin-body">
+<div class="wrap">
+  <div id="pruebasPaMontaje"></div>
+</div>
+<script src="pruebas-power-automate.js"></script>
+</body>
+</html>

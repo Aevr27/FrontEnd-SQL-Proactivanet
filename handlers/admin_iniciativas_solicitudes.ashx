@@ -88,6 +88,9 @@
 //           500 { tipo: AplicacionNoConfirmada, aplicada: null }.
 //        Toda falla de validacion o de la base deja la solicitud PENDIENTE y
 //        registrada (Intentos, UltimoError, evento).
+//   Rechazar y aplicar confirmados avisan al SOLICITANTE ORIGINAL por Teams
+//   (REQUEST_REJECTED / REQUEST_APPROVED, App_Code/AvisoRevisionSolicitud.cs);
+//   un fallo del aviso no cambia la respuesta.
 //
 //   GET  accion=historicas&folio=X   (sql/83) SOLO LECTURA, solo pantalla:
 //        las asociaciones de baja (VigenteEnOrigen = 0) de ESA iniciativa, que
@@ -204,6 +207,9 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                     var comentario = (req.Form["comentario"] ?? "").Trim();
                     if (comentario.Length == 0) return Error(context, 422, "Explica por qu\u00e9 se rechaza.", "FaltaComentario");
                     SolicitudesCambio.Almacen.Rechazar(n, id.Original, comentario);
+                    // Ya con el COMMIT; al solicitante original (no lanza).
+                    AvisoRevisionSolicitud.CambioRechazado(
+                        AvisoRevisionSolicitud.Detalle(delegate { return SolicitudesCambio.Almacen.Detalle(n); }), comentario);
                     return new Dictionary<string, object> { { "rechazada", true }, { "id_solicitud", n } };
                 }
                 return Aplicar(context, n, id.Original);
@@ -528,7 +534,6 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                 r.Remove("estado_http");
                 return r;
             }
-            return new Dictionary<string, object> { { "aplicada", true }, { "id_solicitud", n } };
         }
         catch (ErrorSolicitudCambio) { throw; }
         catch (Exception ex)
@@ -542,6 +547,12 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                 { "tipo", "AplicacionNoConfirmada" }, { "aplicada", null },
             };
         }
+        // Fuera del try: su catch diria "no confirmada" de un cambio ya
+        // aplicado. Ya con el COMMIT; al solicitante original con el Codigo
+        // de la iniciativa. No lanza.
+        AvisoRevisionSolicitud.CambioAprobado(
+            AvisoRevisionSolicitud.Detalle(delegate { return SolicitudesCambio.Almacen.Detalle(n); }));
+        return new Dictionary<string, object> { { "aplicada", true }, { "id_solicitud", n } };
     }
 
     private static object DeLaBase(HttpContext context, ErrorSolicitudCambio ex, string llave)

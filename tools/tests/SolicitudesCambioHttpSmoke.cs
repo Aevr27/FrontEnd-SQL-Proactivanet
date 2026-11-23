@@ -64,6 +64,10 @@ sealed class AlmacenFalso : IAlmacenSolicitudesCambio
     public int IdEnviar = 7;
     public bool RepetidaEnviar;
     public Exception LanzarOtroAlEnviar;   // p. ej. tiempo agotado (EnvioNoConfirmado)
+    // Seccion AR: el estado que "deja la base" tras revisar con exito (la
+    // relectura del aviso lo ve); y el 51202 de un rechazo ya revisado.
+    public string EstadoTrasRevisar;
+    public ErrorSolicitudCambio LanzarAlRechazar;
 
     public ResultadoEnvioSolicitud Enviar(PeticionSolicitudCambio p, string usuario, string rol)
     {
@@ -74,12 +78,19 @@ sealed class AlmacenFalso : IAlmacenSolicitudesCambio
     }
     public List<Dictionary<string, object>> Listar(string estado, int maximo) { Llamadas.Add("Listar:" + estado); return Lista_; }
     public Dictionary<string, object> Detalle(int id) { Llamadas.Add("Detalle:" + id); return Detalle_; }
-    public void Rechazar(int id, string revisor, string comentario) { Llamadas.Add("Rechazar:" + id); UltimoRevisor = revisor; UltimoComentario = comentario; }
+    public void Rechazar(int id, string revisor, string comentario)
+    {
+        Llamadas.Add("Rechazar:" + id); UltimoRevisor = revisor; UltimoComentario = comentario;
+        if (LanzarAlRechazar != null) throw LanzarAlRechazar;
+        Revisada();
+    }
     public void Aplicar(int id, string revisor, string comentario, List<ClasificacionSolicitud> cls, DateTime hoy)
     {
         Llamadas.Add("Aplicar:" + id); UltimoRevisor = revisor; UltimoComentario = comentario; UltimasClasificaciones = cls;
         if (LanzarAlAplicar != null) throw LanzarAlAplicar;
+        Revisada();
     }
+    void Revisada() { if (EstadoTrasRevisar != null && Detalle_ != null) Detalle_["estado"] = EstadoTrasRevisar; }
     public void RegistrarFallo(int id, string revisor, int numero, string mensaje) { Llamadas.Add("RegistrarFallo:" + numero); UltimoRevisor = revisor; UltimoNumeroFallo = numero; }
 }
 
@@ -315,6 +326,125 @@ public static class SolicitudesCambioHttpSmoke
             NombreSolicitante.Fuente = fuenteAntes;
             AvisoNuevaSolicitud.Avisador = delegate { return AvisoTeams.Sitio; };
             alm.IdEnviar = 7; alm.RepetidaEnviar = false; alm.LanzarAlEnviar = null; alm.LanzarOtroAlEnviar = null;
+        }
+    }
+
+    // ---- AR) REQUEST_APPROVED / REQUEST_REJECTED de Change request ----------
+    // (App_Code/AvisoRevisionSolicitud.cs) por el handler real. Envia MOD
+    // (t_mod, en CatPersona); revisa ADM (t_adm): el mensaje privado va al
+    // solicitante, nunca al revisor; [5] = folio al aplicar, comentario al
+    // rechazar; un fallo del aviso no cambia la respuesta.
+    static Dictionary<string, object> PendienteDe(string solicitante, string rol)
+    {
+        var d = Pendiente("ESTADO", solicitante);
+        d["rol_solicitante"] = rol;
+        return d;
+    }
+
+    static void AvisosRevision(AlmacenFalso alm)
+    {
+        var t = new TransporteAvisoFalso();
+        var configurado = true;
+        AvisoRevisionSolicitud.Avisador = delegate
+        {
+            return new AvisoTeams(delegate { return configurado ? "https://prueba.invalid/hook?sig=FALSO" : ""; }, t, null, 1000);
+        };
+        AvisoRevisionSolicitud.SolicitanteCambio = AvisoNuevaSolicitud.ResolverSolicitanteCambio;
+        var fuenteAntes = NombreSolicitante.Fuente;
+        NombreSolicitante.Fuente = new SinFichas();
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
+        alm.EstadoTrasRevisar = null;
+        int estado; string cuerpo;
+        try
+        {
+            alm.Detalle_ = PendienteDe(MOD, "MOD"); alm.EstadoTrasRevisar = "APLICADA"; alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5", "comentario", "ok"), out estado);
+            Check("AR1 aplicar: 200 aplicada y un aviso", "200|True|1", estado + "|" + cuerpo.Contains("\"aplicada\":true") + "|" + t.Cuerpos.Count);
+            Check("AR1 texto: solicitante (no el revisor) y [5] = folio de la iniciativa, no el id",
+                  "REQUEST_APPROVED|Change request|t_mod@soriana.com|Mod Uno|#5|PRB 2026-000001", t.Cuerpos.Count == 1 ? Texto(t.Cuerpos[0]) : null);
+            Check("AR1 relee la solicitud despues de aplicar", "Detalle:5,Aplicar:5,Detalle:5", string.Join(",", alm.Llamadas.ToArray()));
+
+            t.Cuerpos.Clear(); alm.Detalle_ = PendienteDe(MOD, "MOD"); alm.EstadoTrasRevisar = "RECHAZADA";
+            cuerpo = Correr("POST", "accion=rechazar", ADM, F("id", "5", "comentario", "No procede"), out estado);
+            Check("AR2 rechazar: 200 rechazada y un aviso", "200|True|1", estado + "|" + cuerpo.Contains("\"rechazada\":true") + "|" + t.Cuerpos.Count);
+            Check("AR2 texto: solicitante y [5] = comentario", "REQUEST_REJECTED|Change request|t_mod@soriana.com|Mod Uno|#5|No procede",
+                  t.Cuerpos.Count == 1 ? Texto(t.Cuerpos[0]) : null);
+
+            t.Cuerpos.Clear(); alm.Detalle_ = PendienteDe(MOD, "MOD"); alm.Detalle_["estado"] = "APLICADA"; alm.EstadoTrasRevisar = null;
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("AR3 aplicar ya revisada: 409 sin aviso", "409|0", estado + "|" + t.Cuerpos.Count);
+            alm.LanzarAlRechazar = new ErrorSolicitudCambio(51202, "Ya revisada.", null);
+            cuerpo = Correr("POST", "accion=rechazar", ADM, F("id", "5", "comentario", "x"), out estado);
+            Check("AR3 rechazar ya revisada (51202): 409 sin aviso", "409|0", estado + "|" + t.Cuerpos.Count);
+            alm.LanzarAlRechazar = null;
+
+            alm.Detalle_ = PendienteDe(MOD, "MOD"); alm.LanzarAlAplicar = new ErrorSolicitudCambio(51204, "Desactualizada.", null);
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("AR4 la base rechaza la aplicacion: sin aviso", "409|0", estado + "|" + t.Cuerpos.Count);
+            alm.LanzarAlAplicar = null;
+
+            t.Estado = 500; alm.Detalle_ = PendienteDe(MOD, "MOD"); alm.EstadoTrasRevisar = "APLICADA";
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("AR5 Power Automate 500: sigue aplicada (200), no AplicacionNoConfirmada", "200|True|False|1",
+                  estado + "|" + cuerpo.Contains("\"aplicada\":true") + "|" + cuerpo.Contains("AplicacionNoConfirmada") + "|" + t.Cuerpos.Count);
+            t.Estado = 202; t.Cuerpos.Clear();
+            t.Lanza = new System.Net.WebException("t", System.Net.WebExceptionStatus.Timeout);
+            alm.Detalle_ = PendienteDe(MOD, "MOD"); alm.EstadoTrasRevisar = "RECHAZADA";
+            cuerpo = Correr("POST", "accion=rechazar", ADM, F("id", "5", "comentario", "x"), out estado);
+            Check("AR5 timeout del aviso: sigue rechazada (200)", "200|True", estado + "|" + cuerpo.Contains("\"rechazada\":true"));
+            t.Lanza = null; t.Cuerpos.Clear();
+
+            // PO/SO que no esta en CatPersona: sin correo, no se envia a nadie.
+            alm.Detalle_ = PendienteDe(@"SORIANA\t_posin", "PSO"); alm.EstadoTrasRevisar = "APLICADA";
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("AR6 PSO sin CatPersona: 200 aplicada, ningun aviso", "200|True|0", estado + "|" + cuerpo.Contains("\"aplicada\":true") + "|" + t.Cuerpos.Count);
+            t.Cuerpos.Clear();
+
+            // AB  Alice (t_mod) envia, Bob (t_adm) revisa, y Bob TAMBIEN se
+            //     resuelve en CatPersona: si el aviso usara al revisor, saldria
+            //     con su correo. Sin esto "el revisor no viaja" pasaria aunque
+            //     el codigo leyera al revisor (no tendria correo que enviar).
+            var personasAntes = SolicitudesCambio.PersonasSolicitante;
+            SolicitudesCambio.PersonasSolicitante = delegate
+            {
+                return new List<PersonaCatalogo> { new PersonaCatalogo { Nombre = "Alice Solicitante", Correo = "t_mod@soriana.com" },
+                    new PersonaCatalogo { Nombre = "Bob Revisor", Correo = "t_adm@soriana.com" } };
+            };
+            try
+            {
+                Check("AB Bob (revisor) si se resuelve a un correo", "t_adm@soriana.com",
+                      AvisoNuevaSolicitud.ResolverSolicitanteCambio(IdentidadWindows.Desde(ADM, true), "ADM").Correo);
+                var ab = new[]
+                {
+                    new[] { "aplicar", "APLICADA", "REQUEST_APPROVED|Change request|t_mod@soriana.com|Alice Solicitante|#5|PRB 2026-000001" },
+                    new[] { "rechazar", "RECHAZADA", "REQUEST_REJECTED|Change request|t_mod@soriana.com|Alice Solicitante|#5|No procede" },
+                };
+                foreach (var c in ab)
+                {
+                    t.Cuerpos.Clear(); alm.Detalle_ = PendienteDe(MOD, "MOD"); alm.EstadoTrasRevisar = c[1];
+                    cuerpo = Correr("POST", "accion=" + c[0], ADM, F("id", "5", "comentario", "No procede"), out estado);
+                    var texto = t.Cuerpos.Count == 1 ? Texto(t.Cuerpos[0]) : null;
+                    Check("AB " + c[0] + " por Bob: 200 y un solo aviso (Bob no es destinatario adicional)", "200|1", estado + "|" + t.Cuerpos.Count);
+                    Check("AB " + c[0] + " por Bob: texto exacto, [2] = Alice", c[2], texto);
+                    Check("AB " + c[0] + " por Bob: seis campos", 6, texto == null ? 0 : texto.Split('|').Length);
+                    Check("AB " + c[0] + " por Bob: ni su correo ni su nombre", false, texto == null || texto.Contains("t_adm") || texto.Contains("Bob"));
+                }
+            }
+            finally { SolicitudesCambio.PersonasSolicitante = personasAntes; }
+            t.Cuerpos.Clear();
+
+            configurado = false; alm.Detalle_ = PendienteDe(MOD, "MOD"); alm.EstadoTrasRevisar = "APLICADA"; alm.Llamadas.Clear();
+            cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
+            Check("AR7 webhook apagado: 200, sin aviso y sin releer la base", "200|0|Detalle:5,Aplicar:5",
+                  estado + "|" + t.Cuerpos.Count + "|" + string.Join(",", alm.Llamadas.ToArray()));
+            configurado = true;
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+            NombreSolicitante.Fuente = fuenteAntes;
+            AvisoRevisionSolicitud.Avisador = delegate { return AvisoTeams.Sitio; };
+            alm.EstadoTrasRevisar = null; alm.LanzarAlRechazar = null; alm.LanzarAlAplicar = null; alm.Detalle_ = null;
         }
     }
 
@@ -1468,6 +1598,7 @@ public static class SolicitudesCambioHttpSmoke
         }
 
         Avisos(alm, envioValido);
+        AvisosRevision(alm);
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : "FALLOS: " + fallos);
         return fallos == 0 ? 0 : 1;

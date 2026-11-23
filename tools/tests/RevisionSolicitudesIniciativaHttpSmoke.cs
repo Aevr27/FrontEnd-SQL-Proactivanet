@@ -25,6 +25,12 @@
 //      ya no ENVIADA: sin validar, el procedimiento contesta (mismo codigo);
 //      200 con el codigo DEVUELTO, iniciativa_nueva y faltantes; la vieja
 //      _Aprobar ya no se llama.
+//   AR aviso privado al SOLICITANTE (App_Code/AvisoRevisionSolicitud.cs):
+//      aprobar con iniciativa_nueva = un REQUEST_APPROVED con el correo y
+//      nombre GUARDADOS y [5] = Codigo; reintento (Nueva = false) sin aviso;
+//      rechazar = REQUEST_REJECTED con [5] = comentario, solo si la solicitud
+//      releida quedo RECHAZADA; ya revisada (51412) sin aviso; Teams caido no
+//      cambia la respuesta; webhook apagado = no se relee la solicitud.
 //
 // Compilar y correr desde la raiz del repo (como SolicitudesCambioHttpSmoke):
 //   csc /out:RevisionSolicitudesIniciativaHttpSmoke.exe /r:adm.dll /r:hnd.dll /r:System.dll /r:System.Core.dll
@@ -57,6 +63,9 @@ sealed class RevisorFalso : IRevisorSolicitudesIniciativa
     public readonly List<string> Llamadas = new List<string>();
     public string UltimoRevisor, UltimoComentario = "(sin llamar)", Codigo = "PRB 2026-000042";
     public PlanCrearAdmin UltimoPlan;
+    // Seccion AR3: como la base, un rechazo que termina deja la solicitud
+    // RECHAZADA; null = no toca el lector (las demas secciones).
+    public LectorRevisionFalso RechazoMarca;
     public static readonly DateTime Fecha = new DateTime(2026, 10, 23, 17, 5, 9, DateTimeKind.Utc);
 
     public bool CreaIniciativa() { Llamadas.Add("crea"); return Crea; }
@@ -74,7 +83,12 @@ sealed class RevisorFalso : IRevisorSolicitudesIniciativa
         return Hay;
     }
     public DateTime Aprobar(int numero, string revisor, string comentario) { return Hacer("aprobar", numero, revisor, comentario); }
-    public DateTime Rechazar(int numero, string revisor, string comentario) { return Hacer("rechazar", numero, revisor, comentario); }
+    public DateTime Rechazar(int numero, string revisor, string comentario)
+    {
+        var f = Hacer("rechazar", numero, revisor, comentario);
+        if (RechazoMarca != null) RechazoMarca.Estado = "RECHAZADA";
+        return f;
+    }
     DateTime Hacer(string accion, int numero, string revisor, string comentario)
     {
         Llamadas.Add(accion + ":" + numero);
@@ -90,14 +104,22 @@ sealed class LectorRevisionFalso : ILectorSolicitudesIniciativa
 {
     public string Estado = "ENVIADA";
     public bool Existe = true;
+    // Seccion AR: el solicitante GUARDADO, cuantas veces se leyo y el estado
+    // que vio cada lectura.
+    public string SolicitanteCorreo, SolicitanteNombre;
+    public int Lecturas;
+    public readonly List<string> EstadosLeidos = new List<string>();
     public bool Disponible() { return true; }
     public LecturaSolicitudesIniciativa Listar(int maximo, string estado) { return new LecturaSolicitudesIniciativa(); }
     public Dictionary<string, object> Detalle(int numero)
     {
+        Lecturas++;
+        EstadosLeidos.Add(Estado);
         if (!Existe) return null;
         return new Dictionary<string, object>
         {
-            { "numero", numero }, { "estado", Estado }, { "tipo", "PRB" }, { "titulo", "Titulo guardado" },
+            { "numero", numero }, { "numero_texto", new NumeroSolicitud(numero).ToString() },
+            { "solicitante_correo", SolicitanteCorreo }, { "solicitante_nombre", SolicitanteNombre }, { "estado", Estado }, { "tipo", "PRB" }, { "titulo", "Titulo guardado" },
             { "descripcion", "Desc guardada" }, { "observaciones", "Obs guardadas" }, { "po", "PO guardado" }, { "so", "SO guardado" },
             { "categoria", "/A/Cat 1" }, { "pct", "12.5" }, { "volumetria", 2 }, { "director", "Dir 1" },
             { "rca_extension", "PDF" }, { "solicitante_cuenta", @"SORIANA\otro" },
@@ -205,6 +227,107 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
         catch { return new Dictionary<string, object>(); }
     }
     static object Campo(Dictionary<string, object> j, string k) { object v; return j.TryGetValue(k, out v) ? (v ?? "null") : "(falta)"; }
+
+    // ---------------- AR: aviso privado al solicitante ----------------
+    sealed class TransporteRevisionFalso : ITransporteAvisoTeams
+    {
+        public int Estado = 202;
+        public Exception Lanza;
+        public readonly List<string> Textos = new List<string>();
+        public int Post(Uri url, byte[] cuerpo, int timeoutMs)
+        {
+            var m = new JavaScriptSerializer().Deserialize<Dictionary<string, object>>(System.Text.Encoding.UTF8.GetString(cuerpo));
+            var adj = (Dictionary<string, object>)((System.Collections.ArrayList)m["attachments"])[0];
+            var bloque = (Dictionary<string, object>)((System.Collections.ArrayList)((Dictionary<string, object>)adj["content"])["body"])[0];
+            Textos.Add((string)bloque["text"]);
+            if (Lanza != null) throw Lanza;
+            return Estado;
+        }
+    }
+
+    static void Avisos(LectorRevisionFalso lector)
+    {
+        var t = new TransporteRevisionFalso();
+        var configurado = true;
+        AvisoRevisionSolicitud.Avisador = delegate
+        {
+            return new AvisoTeams(delegate { return configurado ? "https://prueba.invalid/hook?sig=FALSO" : ""; }, t, null, 1000);
+        };
+        var rev = new RevisorFalso();
+        RevisionSolicitudesIniciativa.Revisor = rev;
+        RevisionSolicitudesIniciativa.ValidarAlta = Validar;
+        RegistroSolicitudesIniciativa.Lector = lector;
+        validacionLanza = null; validacionError = null; lector.Existe = true;
+        lector.SolicitanteCorreo = "ana@soriana.com"; lector.SolicitanteNombre = "Ana Ruiz";
+        int st; string cuerpo; Dictionary<string, object> j;
+        try
+        {
+            lector.Estado = "ENVIADA"; rev.Nueva = true;
+            cuerpo = Revisar("POST", "accion=aprobar", ADM, F("numero", "142", "estado", "Cerrado"), out st);
+            j = Json(cuerpo);
+            Check("AR1 aprobada nueva: 200 y un aviso", "200|True|1", st + "|" + Campo(j, "aprobada") + "|" + t.Textos.Count);
+            Check("AR1 texto: solicitante GUARDADO (no el revisor) y [5] = Codigo",
+                  "REQUEST_APPROVED|Initiative|ana@soriana.com|Ana Ruiz|#0000142|PRB 2026-000042", t.Textos.Count == 1 ? t.Textos[0] : null);
+            Check("AR1 la cuenta del revisor no viaja", false, t.Textos.Count == 1 && t.Textos[0].Contains("t_adm"));
+
+            t.Textos.Clear(); lector.Estado = "APROBADA"; rev.Nueva = false;
+            cuerpo = Revisar("POST", "accion=aprobar", ADM, F("numero", "142", "estado", "Cerrado"), out st);
+            Check("AR2 reintento / otro ADM gano (Nueva = false): 200 sin aviso", "200|False|0", st + "|" + Campo(Json(cuerpo), "iniciativa_nueva") + "|" + t.Textos.Count);
+            rev.Nueva = true;
+
+            // Empieza ENVIADA y solo Rechazar la deja RECHAZADA: si el aviso sale,
+            // la lectura fue posterior al rechazo. (El COMMIT real no se simula.)
+            t.Textos.Clear(); lector.Estado = "ENVIADA"; lector.Lecturas = 0; lector.EstadosLeidos.Clear(); rev.RechazoMarca = lector;
+            cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "  Falta el RCA  "), out st);
+            rev.RechazoMarca = null;
+            Check("AR3 rechazada: 200 y exactamente un aviso", "200|True|1", st + "|" + Campo(Json(cuerpo), "rechazada") + "|" + t.Textos.Count);
+            Check("AR3 una lectura, despues del rechazo: vio RECHAZADA", "1|RECHAZADA", lector.Lecturas + "|" + string.Join(",", lector.EstadosLeidos.ToArray()));
+            Check("AR3 texto: solicitante y [5] = comentario (recortado, como se guardo)",
+                  "REQUEST_REJECTED|Initiative|ana@soriana.com|Ana Ruiz|#0000143|Falta el RCA", t.Textos.Count == 1 ? t.Textos[0] : null);
+            Check("AR3 la cuenta del revisor no viaja", false, t.Textos.Count == 1 && t.Textos[0].Contains("t_adm"));
+
+            t.Textos.Clear(); lector.Estado = "ENVIADA";
+            cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "x"), out st);
+            Check("AR4 la releida no quedo RECHAZADA: 200 sin aviso", "200|0", st + "|" + t.Textos.Count);
+
+            t.Textos.Clear(); lector.Estado = "APROBADA";
+            rev.Lanza = new ErrorRevisionSolicitudIniciativa(51412, "La solicitud ya fue aprobada o rechazada.");
+            cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "x"), out st);
+            Check("AR5 ya revisada (51412): 409 sin aviso", "409|0", st + "|" + t.Textos.Count);
+            rev.Lanza = new InvalidOperationException("tiempo agotado");
+            cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "x"), out st);
+            Check("AR5 rechazo no confirmado (500): sin aviso", "500|0", st + "|" + t.Textos.Count);
+            lector.Estado = "ENVIADA";
+            cuerpo = Revisar("POST", "accion=aprobar", ADM, F("numero", "142", "estado", "Cerrado"), out st);
+            Check("AR5 aprobacion no confirmada (500): sin aviso", "500|0", st + "|" + t.Textos.Count);
+            rev.Lanza = null;
+
+            t.Estado = 500; lector.Estado = "ENVIADA";
+            cuerpo = Revisar("POST", "accion=aprobar", ADM, F("numero", "142", "estado", "Cerrado"), out st);
+            j = Json(cuerpo);
+            Check("AR6 Power Automate 500: sigue aprobada (200) con su codigo", "200|True|PRB 2026-000042|1",
+                  st + "|" + Campo(j, "aprobada") + "|" + Campo(j, "codigo") + "|" + t.Textos.Count);
+            t.Estado = 202; t.Textos.Clear();
+            t.Lanza = new System.Net.WebException("t", System.Net.WebExceptionStatus.Timeout); lector.Estado = "RECHAZADA";
+            cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "x"), out st);
+            Check("AR6 timeout del aviso: sigue rechazada (200)", "200|True", st + "|" + Campo(Json(cuerpo), "rechazada"));
+            t.Lanza = null; t.Textos.Clear();
+
+            lector.SolicitanteCorreo = null; lector.Estado = "RECHAZADA";
+            cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "x"), out st);
+            Check("AR7 solicitud guardada sin correo: 200 y no se envia a nadie", "200|0", st + "|" + t.Textos.Count);
+            lector.SolicitanteCorreo = "ana@soriana.com";
+
+            configurado = false; lector.Estado = "RECHAZADA"; lector.Lecturas = 0;
+            cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "x"), out st);
+            Check("AR8 webhook apagado: 200, sin aviso y sin releer la solicitud", "200|0|0", st + "|" + t.Textos.Count + "|" + lector.Lecturas);
+        }
+        finally
+        {
+            AvisoRevisionSolicitud.Avisador = delegate { return AvisoTeams.Sitio; };
+            lector.SolicitanteCorreo = null; lector.SolicitanteNombre = null; lector.Estado = "ENVIADA";
+        }
+    }
 
     public static int Main()
     {
@@ -483,6 +606,8 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
         lector.Estado = "ENVIADA"; rev.Lanza = null;
         cuerpo = Revisar("POST", "accion=cancelar", ADM, F("numero", "1", "motivo", "x"), out st);
         Check("K4 este handler no cancela (solo aprobar / rechazar)", "400|AccionDesconocida", st + "|" + Campo(Json(cuerpo), "tipo"));
+
+        Avisos(lector);
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso (" + pasados + ")" : "FALLOS: " + fallos);
         return fallos == 0 ? 0 : 1;

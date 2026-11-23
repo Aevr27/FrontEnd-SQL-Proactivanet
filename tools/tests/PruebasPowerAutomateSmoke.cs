@@ -3,6 +3,11 @@
 //
 //   A  Aviso: cada evento con sus datos sinteticos (TEST-PA-00x, estado,
 //      codigo solo al aprobar, comentario solo al rechazar); otro evento = null.
+//   T  Campo "tipo" del panel: vacio = Initiative; solo valores del contrato.
+//   Q  Escenarios QA (cuenta QA en [2], Change request en [1], comentario en [5]).
+//   C  Change request no es un evento: mismos tres eventos, solo cambia [1].
+//   R  Solicitante simulado por la resolucion REAL (accion=enviar_solicitante):
+//      [2] de la fila / CatPersona, nunca de TeamsPruebaDestinatario.
 //   N  Nombre fijo "Usuario de Prueba" en los tres eventos y las tres fuentes;
 //      texto exacto de seis posiciones dentro del TextBlock de la Adaptive Card.
 //   D  Destinatario: TeamsPruebaDestinatario valido manda; invalido = null
@@ -21,7 +26,8 @@
 //   csc /target:library /out:hnd.dll /r:adm.dll /r:System.dll /r:System.Web.dll ...
 //       h\admin_pruebas_power_automate.cs        (el .ashx sin la linea 1)
 //   csc /out:PruebasPowerAutomateSmoke.exe /r:adm.dll /r:hnd.dll /r:System.dll /r:System.Core.dll ^
-//       /r:System.Web.dll /r:System.Web.Extensions.dll tools\tests\PruebasPowerAutomateSmoke.cs
+//       /r:System.Web.dll /r:System.Web.Extensions.dll /r:System.Configuration.dll tools\tests\PruebasPowerAutomateSmoke.cs
+//   (Con TeamsPruebaDestinatario en el .config del exe, R comprueba ademas que no se usa.)
 //   PruebasPowerAutomateSmoke.exe
 using System;
 using System.Collections.Generic;
@@ -35,6 +41,17 @@ sealed class TransporteContador : ITransporteAvisoTeams
 {
     public int Llamadas;
     public int Post(Uri url, byte[] cuerpo, int timeoutMs) { Llamadas++; return 202; }
+}
+
+sealed class RedFalsa : ITransporteAvisoTeams
+{
+    public readonly List<string> Cuerpos = new List<string>();
+    public int Post(Uri url, byte[] cuerpo, int timeoutMs) { Cuerpos.Add(System.Text.Encoding.UTF8.GetString(cuerpo)); return 202; }
+}
+
+sealed class SinFichasPa : IFuenteFichasUsuariosAdmin
+{
+    public Dictionary<string, FichaUsuarioAdmin> Leer(ICollection<string> claves) { return new Dictionary<string, FichaUsuarioAdmin>(StringComparer.Ordinal); }
 }
 
 static class PruebasPowerAutomateSmoke
@@ -54,6 +71,7 @@ static class PruebasPowerAutomateSmoke
     {
         Console.WriteLine("Libreria compilada en DEBUG: " + AccesoDesarrolloLocal.CompiladoEnDebug);
         Avisos();
+        SolicitanteSimulado();
         Destinatario();
         Puerta();
         Console.WriteLine();
@@ -90,7 +108,70 @@ static class PruebasPowerAutomateSmoke
 
         Check("A evento desconocido = null", true, PruebasPowerAutomate.Aviso("REQUEST_DELETED", d) == null);
         Check("A evento null = null", true, PruebasPowerAutomate.Aviso(null, d) == null);
+        Check("A tipo desconocido = null", true, PruebasPowerAutomate.Aviso("NEW_REQUEST", "Cambio", d) == null);
+        Check("T tipo vacio = Initiative", "Initiative", PruebasPowerAutomate.Tipo("  "));
+        Check("T tipo null = Initiative", "Initiative", PruebasPowerAutomate.Tipo(null));
+        Check("T Change request se respeta", "Change request", PruebasPowerAutomate.Tipo(" Change request "));
+        Check("T etiqueta en espanol no es del contrato", true, PruebasPowerAutomate.Tipo("Cambio") == null && PruebasPowerAutomate.Tipo("Iniciativa") == null);
         Nombres();
+        EscenariosQa();
+    }
+
+    // Q  Los tres escenarios QA con TeamsPruebaDestinatario = la cuenta de QA:
+    //    el TextBlock exacto que lee Power Automate. [2] es el correo
+    //    configurado (no el del solicitante real) y [1] es el valor crudo del
+    //    contrato; la etiqueta "Iniciativa" / "Cambio" la pone el flujo.
+    static void EscenariosQa()
+    {
+        AvisoNuevaSolicitud.AhoraUtc = delegate { return new DateTime(2026, 11, 23, 18, 0, 0, DateTimeKind.Utc); };
+        var cuenta = IdentidadWindows.Desde(@"SORIANA\t_dev", true);
+        var qa = PruebasPowerAutomate.Resolver("t_leonardoel@soriana.com", cuenta,
+            id => { throw new InvalidOperationException("no debe consultarse"); }, id => "otro@soriana.com");
+        Check("Q destinatario de configuracion", "t_leonardoel@soriana.com/CONFIGURACION", qa == null ? null : qa.Correo + "/" + qa.Fuente);
+        if (qa == null) return;
+
+        var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+        var casos = new[]
+        {
+            new[] { "REQUEST_APPROVED", "Initiative",
+                    "REQUEST_APPROVED|Initiative|t_leonardoel@soriana.com|Usuario de Prueba|TEST-PA-002|TEST-2026-000001" },
+            new[] { "NEW_REQUEST", "Change request",
+                    "NEW_REQUEST|Change request|t_leonardoel@soriana.com|Usuario de Prueba|TEST-PA-001|2026-11-23" },
+            new[] { "REQUEST_REJECTED", "Initiative",
+                    "REQUEST_REJECTED|Initiative|t_leonardoel@soriana.com|Usuario de Prueba|TEST-PA-003|Esta es una prueba de rechazo desde localhost." },
+        };
+        foreach (var c in casos)
+        {
+            var a = PruebasPowerAutomate.Aviso(c[0], c[1], qa);
+            var caso = "Q " + c[0] + " " + c[1];
+            Check(caso + ": valido", null, AvisoTeams.MotivoInvalido(a));
+            var m = ser.Deserialize<Dictionary<string, object>>(AvisoTeams.ComoTarjeta(a));
+            var tarjeta = (Dictionary<string, object>)((Dictionary<string, object>)((System.Collections.ArrayList)m["attachments"])[0])["content"];
+            var texto = (string)((Dictionary<string, object>)((System.Collections.ArrayList)tarjeta["body"])[0])["text"];
+            Check(caso + ": TextBlock exacto", c[2], texto);
+            Check(caso + ": [2] = cuenta QA", "t_leonardoel@soriana.com", texto.Split('|')[2]);
+        }
+        Check("Q rechazo: comentario en [5]", "Esta es una prueba de rechazo desde localhost.",
+              AvisoTeams.ComoTexto(PruebasPowerAutomate.Aviso("REQUEST_REJECTED", "Initiative", qa)).Split('|')[5]);
+        TipoSoloCampoUno(qa);
+    }
+
+    // Las solicitudes de cambio NO tienen evento propio: los mismos tres
+    // eventos, y entre Initiative y Change request solo difiere [1].
+    static void TipoSoloCampoUno(DestinatarioPrueba qa)
+    {
+        foreach (var evento in new[] { "NEW_REQUEST", "REQUEST_APPROVED", "REQUEST_REJECTED" })
+        {
+            var ini = AvisoTeams.ComoTexto(PruebasPowerAutomate.Aviso(evento, "Initiative", qa)).Split('|');
+            var cam = AvisoTeams.ComoTexto(PruebasPowerAutomate.Aviso(evento, "Change request", qa)).Split('|');
+            var caso = "C " + evento;
+            Check(caso + ": [0] es el mismo evento en los dos tipos", evento + "/" + evento, ini[0] + "/" + cam[0]);
+            Check(caso + ": [1] crudo del contrato", "Initiative/Change request", ini[1] + "/" + cam[1]);
+            ini[1] = cam[1] = "";
+            Check(caso + ": el resto de los campos es identico", string.Join("|", ini), string.Join("|", cam));
+        }
+        Check("C CHANGE_REQUEST no es un evento", true, PruebasPowerAutomate.Aviso("CHANGE_REQUEST", "Change request", qa) == null);
+        Check("C 'Change request' como evento = null", true, PruebasPowerAutomate.Aviso("Change request", "Initiative", qa) == null);
     }
 
     // N  El nombre es SIEMPRE NombrePrueba en los tres eventos, tambien cuando
@@ -141,6 +222,91 @@ static class PruebasPowerAutomateSmoke
                 Check(caso + ": Adaptive Card", "application/vnd.microsoft.card.adaptive/AdaptiveCard", adj["contentType"] + "/" + tarjeta["type"]);
                 Check(caso + ": 1 TextBlock con el texto exacto", "1/TextBlock/" + par.Value, cuerpo.Count + "/" + bloque["type"] + "/" + bloque["text"]);
             }
+    }
+
+    // R  Solicitante simulado por la resolucion REAL (AvisoRevisionSolicitud):
+    //    [2] sale de la fila simulada (Initiative) o de CatPersona con la
+    //    cuenta y el rol guardados (Change request); lo que ve el panel es
+    //    byte a byte lo que salio a la red; sin correo resuelto no sale nada
+    //    (no hay respaldo por configuracion); el Avisador global no se toca.
+    //    Si el .config del exe trae TeamsPruebaDestinatario, se comprueba
+    //    ademas que ese correo nunca aparece.
+    static ResultadoAvisoTeams? Envio(RedFalsa red, string evento, string tipo, string correo, string nombre, string cuenta, string rol, out PruebasPowerAutomate.EnvioSolicitante e)
+    {
+        e = PruebasPowerAutomate.EnviarComoSolicitante(evento, tipo, correo, nombre, cuenta, rol,
+            delegate { return "https://prueba.invalid/hook?sig=FALSO"; }, delegate { return "texto"; }, red, null);
+        return e.Resultado;
+    }
+
+    static void SolicitanteSimulado()
+    {
+        var globalAntes = AvisoRevisionSolicitud.Avisador;
+        var personasAntes = SolicitudesCambio.PersonasSolicitante;
+        var fichasAntes = NombreSolicitante.Fuente;
+        var configurado = System.Configuration.ConfigurationManager.AppSettings["TeamsPruebaDestinatario"];
+        Console.WriteLine("R TeamsPruebaDestinatario en el .config del exe: " + (configurado ?? "(ausente)"));
+        SolicitudesCambio.PersonasSolicitante = delegate
+        {
+            return new List<PersonaCatalogo> { new PersonaCatalogo { Nombre = "Leonardo Prueba", Correo = "t_leonardoel@soriana.com" },
+                new PersonaCatalogo { Nombre = "Bob Revisor", Correo = "t_adm@soriana.com" } };
+        };
+        NombreSolicitante.Fuente = new SinFichasPa();
+        try
+        {
+            var casos = new[]
+            {
+                new[] { "REQUEST_APPROVED", "Initiative", "t_leonardoel@soriana.com", "Leonardo QA", null, null,
+                        "REQUEST_APPROVED|Initiative|t_leonardoel@soriana.com|Leonardo QA|TEST-PA-002|TEST-2026-000001" },
+                new[] { "REQUEST_REJECTED", "Initiative", "t_leonardoel@soriana.com", "Leonardo QA", null, null,
+                        "REQUEST_REJECTED|Initiative|t_leonardoel@soriana.com|Leonardo QA|TEST-PA-003|Esta es una prueba de rechazo desde localhost." },
+                new[] { "REQUEST_APPROVED", "Change request", null, null, @"SORIANA\t_leonardoel", "PSO",
+                        "REQUEST_APPROVED|Change request|t_leonardoel@soriana.com|Leonardo Prueba|#999001|TEST-2026-000001" },
+                new[] { "REQUEST_REJECTED", "Change request", null, null, @"SORIANA\t_leonardoel", "PSO",
+                        "REQUEST_REJECTED|Change request|t_leonardoel@soriana.com|Leonardo Prueba|#999001|Esta es una prueba de rechazo desde localhost." },
+            };
+            foreach (var c in casos)
+            {
+                var red = new RedFalsa();
+                PruebasPowerAutomate.EnvioSolicitante e;
+                var caso = "R " + c[0] + " " + c[1];
+                Check(caso + ": enviado", ResultadoAvisoTeams.Enviado, Envio(red, c[0], c[1], c[2], c[3], c[4], c[5], out e));
+                Check(caso + ": un solo envio", 1, red.Cuerpos.Count);
+                Check(caso + ": texto exacto", c[6], e.Texto);
+                Check(caso + ": lo mostrado = lo que salio a la red", true, red.Cuerpos.Count == 1 && red.Cuerpos[0] == e.Cuerpo);
+                Check(caso + ": texto de la red = texto mostrado", c[6], red.Cuerpos.Count == 1 ? PruebasPowerAutomate.TextoDeTarjeta(red.Cuerpos[0]) : null);
+                Check(caso + ": [2] = solicitante simulado", "t_leonardoel@soriana.com", e.Texto == null ? null : e.Texto.Split('|')[2]);
+                Check(caso + ": seis campos", 6, e.Texto == null ? 0 : e.Texto.Split('|').Length);
+                Check(caso + ": HTTP de la red", 202, e.Http);
+                if (!string.IsNullOrWhiteSpace(configurado))
+                    Check(caso + ": TeamsPruebaDestinatario no aparece", false, e.Cuerpo.Contains(configurado.Trim()));
+            }
+
+            // Sin correo resuelto: nada sale, ni al revisor ni a la configuracion.
+            var sinCorreo = new[]
+            {
+                new[] { "Initiative correo sin forma", "Initiative", "no-es-correo", null, null },
+                new[] { "Initiative sin correo", "Initiative", null, null, null },
+                new[] { "Change request PSO fuera de CatPersona", "Change request", null, @"SORIANA\t_nadie", "PSO" },
+            };
+            foreach (var c in sinCorreo)
+            {
+                var red = new RedFalsa();
+                PruebasPowerAutomate.EnvioSolicitante e;
+                Check("R " + c[0] + ": Invalido", ResultadoAvisoTeams.Invalido, Envio(red, "REQUEST_APPROVED", c[1], c[2], null, c[3], c[4], out e));
+                Check("R " + c[0] + ": 0 envios, sin cuerpo", "0/null", red.Cuerpos.Count + "/" + (e.Cuerpo ?? "null"));
+            }
+
+            var apagada = new RedFalsa();
+            var r = PruebasPowerAutomate.EnviarComoSolicitante("REQUEST_APPROVED", "Initiative", "t_leonardoel@soriana.com", null, null, null,
+                delegate { return ""; }, delegate { return "texto"; }, apagada, null);
+            Check("R webhook vacio: Desactivado, 0 envios", "Desactivado/0", r.Resultado + "/" + apagada.Cuerpos.Count);
+            Check("R el Avisador global no se cambio", true, ReferenceEquals(globalAntes, AvisoRevisionSolicitud.Avisador));
+        }
+        finally
+        {
+            SolicitudesCambio.PersonasSolicitante = personasAntes;
+            NombreSolicitante.Fuente = fichasAntes;
+        }
     }
 
     static IdentidadAcuse Acuse(string estado, string correo, string nombre)
@@ -234,6 +400,9 @@ static class PruebasPowerAutomateSmoke
             new object[] { "POST enviar NEW_REQUEST", "POST", "accion=enviar", new[] { new[] { "evento", "NEW_REQUEST" } } },
             new object[] { "POST enviar REQUEST_APPROVED", "POST", "accion=enviar", new[] { new[] { "evento", "REQUEST_APPROVED" } } },
             new object[] { "POST enviar REQUEST_REJECTED", "POST", "accion=enviar", new[] { new[] { "evento", "REQUEST_REJECTED" } } },
+            new object[] { "POST enviar NEW_REQUEST Change request", "POST", "accion=enviar",
+                           new[] { new[] { "evento", "NEW_REQUEST" }, new[] { "tipo", "Change request" } } },
+            new object[] { "POST enviar CHANGE_REQUEST", "POST", "accion=enviar", new[] { new[] { "evento", "CHANGE_REQUEST" } } },
             new object[] { "POST sin accion", "POST", "", null },
         };
         foreach (var c in casos)
