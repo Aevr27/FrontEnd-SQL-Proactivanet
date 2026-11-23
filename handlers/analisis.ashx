@@ -16,7 +16,12 @@
 //       La vista propia de Modo Autonomo (97_analisis_modo_autonomo.sql):
 //       mismo periodo que abajo.
 //       -> { "servicio": "modo_autonomo", "desde", "hasta",
-//            "bloques": { "parametros", "eventos", "incidentes" } }
+//            "bloques": { "parametros", "eventos", "incidentes" },
+//            "servidor": { "disponible": true, "bloques": { "parametros", "fallas",
+//                          "modoautonomo", "servidores", "causas" } }
+//                        o { "disponible": false, "motivo": "..." } }
+//       "servidor" es el cruce con las fallas del servidor de tienda
+//       (98_caidas_servidor.sql); sin el 98 la vista sale igual, sin esa hoja.
 //       400 si modo_autonomo no esta activo en usp_Analisis_Servicios, igual
 //       que usp_Analisis_Datos con un servicio inactivo. CausaIM y
 //       OrigenDetalle son texto libre: el navegador les tapa las contrasenas.
@@ -91,6 +96,7 @@ public class AnalisisHandler : IHttpHandler
                     { "desde", Dia(desdeMa) },
                     { "hasta", Dia(hastaMa.AddDays(-1)) },
                     { "bloques", AnalisisQueries.ModoAutonomo(desdeMa, hastaMa) },
+                    { "servidor", AnalisisQueries.ModoAutonomoServidor(desdeMa, hastaMa) },
                 }));
                 return;
             }
