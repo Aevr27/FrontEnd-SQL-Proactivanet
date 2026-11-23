@@ -368,7 +368,8 @@ la pestaña solo los cuenta y los pinta.
 Lo que muestra: KPIs y hallazgos; **Causas de los IMs** y **Lo que no
 llega al IM** con zoom (clic en una barra o en un nombre abre el nivel 2 y
 luego el 3; las migas regresan; «Sin detalle» en gris es lo que el texto no
-dice); por mes; tiendas; detalle; y su Excel de siete hojas (sin textos de
+dice); el servidor de la tienda (2026-11-23, abajo); por mes; tiendas;
+detalle; y su Excel (siete hojas, doce con el servidor; sin textos de
 tickets; sí lleva `CausaIM` y `OrigenDetalle`, con las contraseñas tapadas,
 y el nombre de cada sucursal).
 
@@ -415,9 +416,13 @@ propietarios); **no verificado**.
 subtítulo dice cuándo): hoy, cuando corre `Cargar_Criticos.ps1` (a mano, el
 correo de Modo Autónomo los días 1 y 15, y el resumen semanal).
 
-**La liga directa.** `dashboard.html?servicio=modo_autonomo#analisis` abre
-la pestaña con Modo Autónomo ya analizado desde su fecha sugerida. Para que
-el correo de Modo Autónomo la lleve ("Ver en el tablero"), en su
+**La liga directa.** `dashboard.html?servicio=modo_autonomo#analisis`
+abre la pestaña con Modo Autónomo ya analizado, con el año (del 1 de enero
+a hoy, botón "Este año" marcado). El periodo, en la dirección: `&meses=N`
+(1 a 13, por el tope de 400 días), `&meses=anio`, o
+`&desde=aaaa-mm-dd&hasta=aaaa-mm-dd`. Sirve igual para cualquier servicio
+(`?servicio=<clave>`; los demás, sin periodo, van con 6 meses). Para que el
+correo de Modo Autónomo la lleve ("Ver en el tablero"), en su
 `config_correo_modo_autonomo.json`:
 `"url_tablero": "https://<servidor>/dashboard.html?servicio=modo_autonomo"`
 y `"seccion_tablero": "analisis"`.
@@ -429,7 +434,7 @@ Comprobar (solo lectura):
     SELECT COUNT(*) AS Tickets, COUNT(DISTINCT Grupo) AS Incidentes FROM crit.TicketMA;   -- columnas sin verificar
 
 En la pestaña (Ctrl+F5): "Modo Autónomo" en la lista, sin "(sin reglas)";
-al analizarlo, sus cinco hojas; si un aviso dice que no hay tickets
+al analizarlo, sus seis hojas; si un aviso dice que no hay tickets
 clasificados o que los eventos no traen niveles, falta el paso 3.
 
 **Cómo quitarlo.** `UPDATE dbo.AnalisisServicio SET Activo = 0 WHERE
@@ -438,13 +443,16 @@ responde 400; lo demás no cambia.
 
 Pruebas en este repositorio (datos sintéticos, sin base):
 
-    node tools\tests\AnalisisModoAutonomoSmoke.js           # modelo, zoom, hojas, contraseñas tapadas, Excel
-    node tools\tests\AnalisisModoAutonomoHeadlessSmoke.js   # en Chrome: motor <-> Modo Autónomo, zoom con clics, Excel, 400/500, liga directa, sin registro
+    node tools\tests\AnalisisModoAutonomoSmoke.js                    # modelo, zoom, hojas, servidor de la tienda, tarjetas por mes, contraseñas tapadas, Excel
+    node tools\tests\AnalisisModoAutonomoHeadlessSmoke.js            # en Chrome: lista, "Este año", tarjetas con su mes, zoom, hoja del servidor, Excel, liga directa con y sin periodo
+    node tools\tests\AnalisisModoAutonomoSeguridadHeadlessSmoke.js   # en Chrome: motor <-> Modo Autónomo, contraseñas tapadas en pantalla, 400/500, sin registro
 
 y `tools/tests/AnalisisModoAutonomoHandlerSmoke.cs` (se compila como
 `AnalisisDatosSmoke.cs`; sin base: la regla de `Activo` y los 400/405/500
-del handler). Las pruebas del autor contra `reglas.py` y la de Docker con
-95 y 97 viven en el repositorio de la base y no se han corrido aquí.
+del handler). La comparación de nombres contra `reglas.py` corre solo si
+ese archivo está al lado del sitio (si no, SKIP). La prueba de Docker del
+autor (`pruebas/correr_analisis_modo_autonomo.sh`: 97 contra 47 y 95) vive
+en el repositorio de la base y no se ha corrido aquí.
 
 ### Contrato que espera el sitio
 
@@ -452,7 +460,7 @@ Sale de lo que leen `AnalisisQueries.ModoAutonomo` y `modo_autonomo.js`; la
 definición real de 97 no se ha revisado contra esto.
 
 - `dbo.AnalisisServicio`: una fila `Servicio = 'modo_autonomo'`, `Activo = 1`,
-  con `Nombre` y, si se quiere la liga directa con fecha, `DesdeSugerido`.
+  con `Nombre`. Su `DesdeSugerido` no se usa: la vista abre con el año.
   Sale en `usp_Analisis_Servicios` (47) sin cambiar ese procedimiento.
 - `dbo.usp_Analisis_ModoAutonomo @Desde DATE, @Hasta DATE`: `@Hasta` es el
   día siguiente al último incluido (como en `usp_Analisis_Datos`); el sitio
@@ -475,3 +483,38 @@ definición real de 97 no se ha revisado contra esto.
      (documentado, tienda, supuesto), `Nivel2`, `Nivel3`, `SinContacto`
      (1/0), `Alcance`, `TiendaConEventoIM` (1/0).
 - `GRANT EXECUTE ON dbo.usp_Analisis_ModoAutonomo TO [usuario_del_tablero]`.
+
+### El servidor de la tienda, las tarjetas por mes y el año (2026-11-23)
+
+Pedido del dueño para el CIO: la vista de Modo Autónomo **abre con el año**
+(del 1 de enero a hoy; botón nuevo "Este año" en el periodo rápido) y
+**cada tarjeta** trae el periodo escogido y, abajo, **su último mes** ("Octubre",
+o "Del 1 al 23 de noviembre" si llega a hoy). Las tarjetas siguen al filtro.
+
+La hoja nueva **El servidor de la tienda** compara el log de los servidores
+de tienda (Portal de Indicadores: apagados sin aviso, reinicios programados
+y cortes de red) con Modo Autónomo, **en los dos sentidos**: las fallas del
+servidor en horario de tienda que no tuvieron evento del IM ni ticket cerca,
+y los eventos del IM y tickets en los que el servidor siguió bien. Trae sus
+tarjetas, barras, tablas, las tiendas donde más se cae y las fallas sin
+reporte; el Excel suma cinco hojas. Una tarjeta nueva arriba, "Servidor sin
+reporte", y un hallazgo. Son las mismas cuentas que el correo de Modo Autónomo.
+
+**Orden de instalación** (después de lo de arriba):
+
+1. `98_caidas_servidor.sql` (raíz) y sus permisos (al final del archivo); la
+   cuenta del tablero necesita `EXECUTE` sobre
+   `dbo.usp_Analisis_ModoAutonomoServidor`.
+2. La carga del portal en la máquina del ETL (`caidas_servidor/LEEME.md`,
+   "En la base"); sin ninguna carga, la hoja dice que el portal no se ha
+   cargado.
+3. El sitio: `analisis/modo_autonomo.js`, `analisis/analisis.js`,
+   `analisis/analisis.css`, `analisis/analisis.html`,
+   `handlers/analisis.ashx` y `App_Code/AnalisisQueries.cs`.
+
+Sin el 98 (o sin el permiso) la vista de Modo Autónomo sigue igual: la
+tarjeta del servidor sale con "—", un aviso dice por qué y la hoja lo explica.
+
+Comprobar (solo lectura):
+
+    EXEC dbo.usp_Analisis_ModoAutonomoServidor @Desde = '2026-01-01', @Hasta = '2026-12-01';

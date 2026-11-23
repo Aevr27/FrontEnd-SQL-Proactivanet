@@ -53,7 +53,9 @@
 // catalogo y la capacidad se vuelven a leer aqui (IniciativaService): lo
 // que el navegador calculo no cuenta. El archivo del RCA solo se mira (que
 // llego y no esta vacio); se guarda su extension, no el archivo (no hay
-// destino confirmado). No se manda ningun correo.
+// destino confirmado). No se manda ningun correo. Una solicitud NUEVA ya
+// guardada avisa a los revisores por Teams (NEW_REQUEST,
+// App_Code/AvisoNuevaSolicitud.cs); un fallo del aviso no cambia la respuesta.
 //
 // ADM / MOD SIN CatPersona (sql/35 + 36): con rol ADM o MOD (AccesoAdmin.Rol:
 // dbo.UsuariosAdmin, del servidor) una cuenta que no esta en CatPersona
@@ -153,6 +155,8 @@ public class AdminIniciativasValidar : IHttpHandler
                 context.Response.StatusCode = 422;
                 context.Response.TrySkipIisCustomErrors = true;
             }
+            // Ya con el COMMIT del alta (Guardada + Nuevo); no lanza.
+            AvisoNuevaSolicitud.Iniciativa(resultado);
             return IniciativaService.ComoJson(resultado);
         });
     }

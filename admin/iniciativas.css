@@ -86,10 +86,10 @@
   font-size: 14px; font-weight: 800;
   text-transform: uppercase; letter-spacing: .6px;
   border-color: var(--g-700);
-  box-shadow: 0 4px 14px -4px rgba(71, 139, 60, .55);
+  box-shadow: 0 4px 14px -4px rgba(37, 141, 46, .55);
 }
 .btn.ini-cta[hidden] { display: none; }
-.btn.ini-cta:hover { box-shadow: 0 6px 18px -4px rgba(71, 139, 60, .7); }
+.btn.ini-cta:hover { box-shadow: 0 6px 18px -4px rgba(37, 141, 46, .7); }
 .btn.ini-cta:focus-visible { outline: 3px solid var(--g-800); outline-offset: 3px; }
 .ini-cta-mas {
   display: inline-flex; align-items: center; justify-content: center;

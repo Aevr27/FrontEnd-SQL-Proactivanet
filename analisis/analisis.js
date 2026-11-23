@@ -218,12 +218,25 @@
     var ahora = new Date(Date.now() - 6 * 3600000);
     return new Date(ahora.getUTCFullYear(), ahora.getUTCMonth(), ahora.getUTCDate());
   }
+  // n: los ultimos n meses (el actual incluido), o 'anio': del 1 de enero a hoy.
   function ponerMeses(n) {
-    var h = hoyMx(), d = new Date(h.getFullYear(), h.getMonth() - (n - 1), 1);
+    var h = hoyMx(), d = n === 'anio' ? new Date(h.getFullYear(), 0, 1) : new Date(h.getFullYear(), h.getMonth() - (n - 1), 1);
     $('desde').value = iso(d); $('hasta').value = iso(h);
     document.querySelectorAll('#' + PREFIJO + 'filtros [data-meses]').forEach(function (b) {
-      b.setAttribute('aria-pressed', String(+b.dataset.meses === n));
+      b.setAttribute('aria-pressed', String(b.dataset.meses === String(n)));
     });
+    ponerMeses.auto = false;
+  }
+  // Fechas puestas a mano (o por la direccion): ningun boton de periodo queda marcado.
+  ponerMeses.apagar = function () {
+    document.querySelectorAll('#' + PREFIJO + 'filtros [data-meses]').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
+    ponerMeses.auto = false;
+  };
+  // Modo Autonomo abre con el ano (pedido del dueno, 2026-11-23); los demas, con 6 meses.
+  // Si el ano lo puso Modo Autonomo y se cambia a otro servicio, regresa a los 6 meses.
+  function periodoDe(servicio) {
+    if (servicio === MODO_AUTONOMO) { ponerMeses('anio'); ponerMeses.auto = true; }
+    else if (ponerMeses.auto) ponerMeses(6);
   }
 
   /* ------------------------------------------------------------ servicios */
@@ -248,12 +261,25 @@
         }).join('');
         estado(servicios.length ? '' : 'Sin servicios: falta correr 47 y el script de algún servicio.');
         // ?servicio=<clave> en la direccion (la liga del correo de Modo Autonomo) lo abre de una vez.
-        var pedido = null;
-        try { pedido = new URLSearchParams(location.search).get('servicio'); } catch (x) { pedido = null; }
+        // El periodo: &meses=N (los ultimos N meses, como los botones; hasta 13 por el
+        // tope de 400 dias), &meses=anio, o &desde=aaaa-mm-dd[&hasta=aaaa-mm-dd]; sin ellos,
+        // Modo Autonomo va con el ano (del 1 de enero a hoy) y los demas, con 6 meses.
+        var q = null;
+        try { q = new URLSearchParams(location.search); } catch (x) { q = null; }
+        var pedido = q && q.get('servicio');
         if (pedido && servicios.some(function (s) { return s.Servicio === pedido; }) && !resultado && !ma) {
-          var f = servicios.filter(function (s) { return s.Servicio === pedido; })[0];
+          var dia = /^\d{4}-\d{2}-\d{2}$/, meses = parseInt(q.get('meses'), 10);
           sel.value = pedido;
-          if (f.DesdeSugerido && pedido === MODO_AUTONOMO) { $('desde').value = f.DesdeSugerido; $('hasta').value = iso(hoyMx()); }
+          if (dia.test(q.get('desde') || '')) {
+            $('desde').value = q.get('desde'); $('hasta').value = dia.test(q.get('hasta') || '') ? q.get('hasta') : iso(hoyMx());
+            ponerMeses.apagar();
+          } else if (meses >= 1 && meses <= 13) {
+            ponerMeses(meses);
+          } else if (q.get('meses') === 'anio') {
+            ponerMeses('anio');
+          } else {
+            periodoDe(pedido);
+          }
           analizar();
         }
       })
@@ -732,8 +758,10 @@
     $('titulo').textContent = nombre;
     $('sub').textContent = 'Del ' + ma.desde + ' al ' + ma.hasta + ' · Excel de críticos cargado el ' + (p.UltimaCargaExcel || '—') +
                            ' · tickets clasificados el ' + (p.CargaTickets || '—') + (p.ReglasVersion ? ' · reglas del ' + p.ReglasVersion : '');
+    // Cada tarjeta: el periodo y, abajo, su ultimo mes (lo que va del mes si llega a hoy).
     $('kpis').innerHTML = window.AnalisisModoAutonomo.kpis(ma).map(function (x) {
-      return '<div class="kpi"><div class="lbl">' + esc(x[0]) + '</div><div class="val">' + esc(x[1]) + '</div><div class="foot">' + esc(x[2]) + '</div></div>';
+      return '<div class="kpi' + (x[4] ? ' ' + x[4] : '') + '"><div class="lbl">' + esc(x[0]) + '</div><div class="val">' + esc(x[1]) + '</div>' +
+             '<div class="foot" title="' + esc(x[2]) + '">' + esc(x[2]) + '</div>' + (x[3] ? '<div class="foot an-mes">' + esc(x[3]) + '</div>' : '') + '</div>';
     }).join('');
     $('hallazgos').innerHTML = ma.hallazgos.map(function (h) { return '<li>' + esc(h) + '</li>'; }).join('');
     $('avisos').innerHTML = ma.avisos.map(function (a) { return '<li>' + esc(a) + '</li>'; }).join('');
@@ -773,16 +801,15 @@
   $('analizar').addEventListener('click', analizar);
   $('excel').addEventListener('click', excel);
   $('filtros').addEventListener('click', function (e) {
-    var b = e.target.closest('[data-meses]'); if (b) ponerMeses(+b.dataset.meses);
+    var b = e.target.closest('[data-meses]'); if (b) ponerMeses(b.dataset.meses === 'anio' ? 'anio' : +b.dataset.meses);
   });
   ['desde', 'hasta'].forEach(function (id) {
-    $(id).addEventListener('change', function () {
-      document.querySelectorAll('#' + PREFIJO + 'filtros [data-meses]').forEach(function (b) { b.setAttribute('aria-pressed', 'false'); });
-    });
+    $(id).addEventListener('change', function () { ponerMeses.apagar(); });
   });
+  $('servicio').addEventListener('change', function () { periodoDe($('servicio').value); });
   $('lista').addEventListener('click', function (e) {
     var b = e.target.closest('[data-servicio]'); if (!b) return;
-    $('servicio').value = b.dataset.servicio; analizar();
+    $('servicio').value = b.dataset.servicio; periodoDe(b.dataset.servicio); analizar();
   });
   $('pestanas').addEventListener('click', function (e) {
     var b = e.target.closest('[data-hoja]'); if (!b || !(vista === 'ma' ? ma : resultado)) return;

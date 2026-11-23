@@ -308,6 +308,74 @@ Pruebas: `tools/tests/AccesoAdminHttpSmoke.cs` (bloques L y W; compilar en Relea
 
 **No copies `requirements.txt` ni `config.json` al sitio IIS.** Esos archivos pertenecen al ETL. La conexión del tablero se configura mediante `Web.config`.
 
+### Correo RCA de prueba (`admin/admin.html`)
+
+Prueba **aislada** del envío de un RCA por correo: un *Título de prueba* y **un** documento salen con asunto `PRUEBA RCA - <Título de prueba>` y adjunto `Prueba_RCA.<extensión original>` hacia el **Correo RCA** (Para) y el **CC RCA** guardados. No crea iniciativas ni solicitudes, no consume consecutivos, no toca SQL Server y no guarda el documento: se lee a memoria, se valida y se descarta. Código: `handlers/admin_rca_correo.ashx`, `App_Code/RcaCorreoPrueba.cs`, `admin/rca-correo.js`.
+
+- **Acceso:** solo ADM (`AccesoAdmin.ExigirAdm`, también contra POST desde otro sitio). MOD recibe 403 `RolInsuficiente`; VIEWER y anónimo, 403.
+- **Remitente:** Microsoft Graph (`POST /me/sendMail`, permiso delegado `Mail.Send`) con OAuth 2.0. Outlook.com no acepta usuario y contraseña (SMTP básico) para aplicaciones, y `SmtpClient` de .NET no implementa XOAUTH2. En `Web.config`: `RcaRemitente`, `RcaOAuthClientId`, `RcaOAuthTenant` (ver `Web.config.ejemplo`). Ni contraseñas ni tokens van en `Web.config`, en el repositorio ni al navegador.
+- **Conexión de la cuenta (una vez):** un ADM pulsa *Conectar cuenta remitente*; la página muestra un código, se abre `microsoft.com/link`, se inicia sesión **con la cuenta remitente** y se escribe el código (flujo de código de dispositivo). El servidor comprueba que la cuenta conectada sea `RcaRemitente` y guarda el refresh token **cifrado con DPAPI de Windows en ámbito de máquina** en `RcaDirDatos\remitente.token` (por omisión `App_Data\rca`, que IIS no sirve). La llave la custodia Windows: no está en `Web.config` ni en el repositorio, no depende del perfil del App Pool y sobrevive a reciclados y reinicios. El archivo solo se descifra en ese servidor; protégelo con los permisos NTFS de la carpeta. No se usa `MachineKey`: sin `<machineKey>` explícito su llave autogenerada puede cambiar al reciclar. Microsoft rota el token en cada uso y el servidor guarda el nuevo; si se revoca, vence (unos 90 días sin uso) o se cambia de servidor, la página pide volver a conectar.
+- **Remitente alterno: SMTP (`RcaModo = smtp`).** Para cuando no se puede registrar la aplicación en Microsoft Entra (el directorio pide consentimiento de un administrador o un editor verificado). Envía con `System.Net.Mail.SmtpClient`; en `Web.config`: `RcaModo=smtp`, `RcaRemitente`, `RcaSmtpServidor`, y opcionales `RcaSmtpPuerto` (587), `RcaSmtpSsl` (true, STARTTLS) y `RcaSmtpAutenticar` (true). .NET no soporta el puerto 465 (TLS implícito). Con autenticación, el usuario es `RcaRemitente` y un ADM escribe la contraseña **una vez** en la página (*Guardar contraseña*): el servidor la guarda **cifrada con el mismo DPAPI de máquina** en `RcaDirDatos\remitente.smtp`, el campo se vacía y nunca se devuelve al navegador; *Borrar contraseña* la elimina. No se comprueba al guardar: el primer envío lo hace (`SmtpAutenticacion` si se rechaza).
+  - **Gmail:** `smtp.gmail.com`, 587. Requiere verificación en dos pasos y una **contraseña de aplicación** (<https://myaccount.google.com/apppasswords>); la contraseña normal no sirve. Se acepta con o sin los espacios con que Google la muestra.
+  - **Relevo interno** (p. ej. el servidor de correo de la empresa): `RcaSmtpAutenticar=false`, sin contraseña; el servidor de correo autoriza por IP.
+  - Comprobar la salida desde el servidor: `Test-NetConnection smtp.gmail.com -Port 587` (`TcpTestSucceeded : True`). Abrir Gmail en el navegador (puerto 443) no lo demuestra.
+  - Códigos: `SmtpAutenticacion` (usuario o contraseña rechazados), `SinConexion` (no se pudo conectar: no salió), `SmtpTls`, `SmtpDestinatario`, `SmtpNoDisponible` (4xx temporal), `SmtpTamano`, `SmtpRechazo`, y `ResultadoDesconocido` cuando la conexión se corta a medio envío o se agota el tiempo (pudo salir: revisar el buzón antes de reintentar).
+- **Destinatarios:** `RcaDirDatos\destinatarios.json` (una dirección en cada campo; CC opcional; quién y cuándo los guardó). El envío usa siempre los guardados y **los vuelve a validar** con la misma regla antes de enviar: si el archivo se editó a mano o se dañó, no sale nada y la página dice qué campo corregir.
+- **Documento:** uno; `pdf`, `docx`, `xlsx`, `pptx`, `doc`, `xls`, `ppt`; máximo 3 MB (límite de Graph para un adjunto en línea; `RcaMaxBytes` solo lo baja). Se valida extensión, tipo MIME y la firma del contenido.
+- **Duplicados:** el botón se deshabilita mientras envía y el servidor admite un solo envío a la vez (`EnvioEnCurso`). Si Microsoft no responde a tiempo, el resultado es *desconocido* y la página pide revisar el buzón antes de reintentar.
+- **Requisitos del servidor:** salida HTTPS a `login.microsoftonline.com` y `graph.microsoft.com` (o el proxy configurado en `system.net/defaultProxy`) y permiso de **escritura** de la cuenta del App Pool en `RcaDirDatos`.
+
+Registro de la aplicación (una vez, en <https://entra.microsoft.com> con cualquier cuenta que pueda registrar aplicaciones; con una cuenta personal se crea un directorio gratuito):
+
+1. *App registrations › New registration*. Tipos de cuenta: **Personal Microsoft accounts only** (o *Accounts in any organizational directory and personal Microsoft accounts*). Sin URI de redirección.
+2. *Authentication › Advanced settings › Allow public client flows* = **Yes** (necesario para el código de dispositivo).
+3. *API permissions*: Microsoft Graph, **Delegated**: `Mail.Send`, `User.Read`, `offline_access`. No se crea ningún *client secret*.
+4. Copiar el *Application (client) ID* a `RcaOAuthClientId`.
+
+Pruebas automáticas (sin red ni IIS; no prueban la entrega real): `tools/tests/RcaCorreoPruebaSmoke.cs` (configuración, adjunto, asunto, mensaje, fallos de Microsoft, reintentos, conexión y permisos del handler) , `tools/tests/RcaCorreoSmoke.js` (reglas de la página) y `tools/tests/RcaCorreoHeadlessSmoke.js` (la sección en Chrome con un servidor falso). `RcaCorreoPruebaSmoke` también cifra con DPAPI de verdad y descifra desde otro proceso, como tras un reciclado, y manda con el `SmtpClient` real a un servidor SMTP local (127.0.0.1) para comprobar el mensaje armado y los errores de autenticación, destinatario y conexión. La entrega real se comprueba a mano: conectar la cuenta, guardar destinatarios, enviar y revisar Bandeja de entrada y Enviados del buzón.
+
+### Avisos de Power Automate (`TeamsWebhookUrl`)
+
+`App_Code/AvisoTeams.cs` manda NEW_REQUEST, REQUEST_APPROVED y REQUEST_REJECTED al trigger HTTP de Power Automate. **Hoy solo NEW_REQUEST está conectado a los flujos reales** (abajo); aprobar y rechazar solo los manda el panel de pruebas local.
+
+- **URL:** `TeamsWebhookUrl` en `appSettings` del `Web.config` del servidor. La firma `sig=` del URL es la credencial (trigger *Anyone*): nunca en el repositorio, en el navegador ni en la traza. Vacía o ausente = apagado.
+- **Formato (`TeamsWebhookFormato`):**
+  - `texto` (por omisión): mensaje de webhook de Teams con una Adaptive Card y un `TextBlock`; el flujo lee `attachments[0].content.body[0].text`. Un `|` dentro de un valor se cambia por `/` y los saltos de línea por espacios; un valor vacío deja su posición vacía (nunca corre las demás).
+    - Los tres eventos, **seis campos, sin estado** (el evento ya lo dice): `evento|tipo|correo|nombre|numero|<5>`.
+    - NEW_REQUEST (chat de revisores): `<5>` = fecha `aaaa-mm-dd`. Tipo `Initiative` = iniciativa nueva, `Change request` = solicitud de cambio.
+    - REQUEST_APPROVED (mensaje privado): `<5>` = Código de la iniciativa.
+    - REQUEST_REJECTED (mensaje privado): `<5>` = comentario del revisor.
+  - `json`: `{ evento, tipo, solicitanteEmail, solicitanteNombre, requestNumber, estado, codigo, comentario }` (las ocho llaves siempre, `null` si no aplica). Antes de usarlo hay que cambiar el flujo: el trigger con el esquema de esas ocho llaves (o *Parse JSON*), y las expresiones que hoy hacen `split(..., '|')[n]` pasan a `triggerBody()?['solicitanteEmail']`, etc.
+- **Envío:** síncrono, 5 s de timeout, sin seguir redirecciones; nunca lanza. Los fallos van a la traza de ASP.NET (categoría `AvisoTeams`) sin URL ni datos personales. Requiere salida HTTPS desde el servidor hacia Power Automate (no verificado en la VM).
+
+**NEW_REQUEST real** (`App_Code/AvisoNuevaSolicitud.cs`): al chat de revisores, una vez por solicitud nueva, después del `COMMIT`.
+
+| | Initiative | Change request |
+|---|---|---|
+| Punto | `admin_iniciativas_validar.ashx`, tras `IniciativaService.Solicitar` | `admin_iniciativas_solicitudes.ashx` (`accion=enviar`), tras `Almacen.Enviar`, fuera del `try` |
+| Condición | `Guardada` y `Nuevo` (mismo token = `Nuevo` falso: sin aviso) | `Repetida` falsa (misma llave = sin aviso) |
+| Correo `[2]` | El guardado por el alta (`adm.SolicitudIniciativa.SolicitanteCorreo`) | `SolicitadoPor` → `CatPersona` (una sola persona); si no, y es ADM/MOD, el único `UsuariosAdmin.CorreoUsuario` |
+| Nombre `[3]` | El guardado por el alta (`adm.SolicitudIniciativa.SolicitanteNombre`) | `SolicitadoPor` → el nombre de la cola (`UsuariosAdmin.NombreSolicitante`, luego `CatPersona`) |
+| Número `[4]` | `#0000142` (devuelto por la base) | `#57` (`IdSolicitud`, como la cola) |
+
+- **Fecha `[5]`:** reloj del servidor al avisar, en la zona del sitio (`DashboardDataInfo.UtcAPresentacion`: México, UTC-06 fijo, sin horario de verano), `aaaa-mm-dd`. No depende de la zona de Windows de la VM ni del navegador.
+- **Correo o nombre sin resolver:** su posición vacía (`NEW_REQUEST|Change request|||#57|2026-11-19`); el aviso sale igual. Nunca se arma `cuenta@soriana.com` ni se usa el correo o la cuenta como nombre.
+- **Sin aviso** (la solicitud se responde igual): webhook vacío (ni se consulta la base); validación o base fallan; envío no confirmado (500); reintento; *Modificar* / reemplazar (pendiente de decidir). Si Power Automate falla, la solicitud sigue guardada y la respuesta no cambia.
+- **Power Automate (las tres ramas; cambiarlas a mano):** con `p = split(<texto>, '|')`: `p[1]` Tipo, `p[2]` Correo, `p[3]` Solicitante, `p[4]` Solicitud #, `p[5]` Fecha (NEW_REQUEST) / Código (aprobar) / Comentario (rechazar). Respecto del texto anterior de siete campos, `p[0]`–`p[4]` no cambian; el estado (`p[5]`) desaparece, lo que estaba en `p[6]` pasa a `p[5]`, y `p[6]` ya no existe. En aprobar y rechazar hay que cambiar `p[6]` por `p[5]` y dejar de leer el estado.
+- **Probarlo a mano (local / QA, nunca producción):**
+  1. Primero el botón *Probar nueva solicitud* del panel: manda `NEW_REQUEST|Initiative|<correo de prueba>|Usuario de Prueba|TEST-PA-001|aaaa-mm-dd` y sirve para ajustar el flujo sin crear datos.
+  2. Después, en `http://localhost:8081/admin/iniciativas.html` (contra QA), una **Nueva solicitud** de iniciativa con título que empiece por `PRUEBA PA -`; en el chat de revisores revisar tipo `Initiative`, correo y nombre de quien la envió, `Solicitud #` igual al número que muestra la pantalla y la fecha de hoy (UTC-06).
+  3. Luego una **Solicitud de cambio** sobre una iniciativa de prueba (motivo `PRUEBA PA`); revisar tipo `Change request` y `#id` igual al de la cola.
+  4. Reenviar el mismo borrador (reintento) no debe generar un segundo mensaje.
+  5. Limpiar: un ADM **rechaza** ambas solicitudes desde la pestaña Solicitudes (motivo `Prueba Power Automate`). No se borra nada a mano.
+
+**Panel de pruebas (solo localhost).** *PRUEBAS DE POWER AUTOMATE (SOLO LOCALHOST)* en `admin/admin.html`: tres botones (nueva solicitud, aprobación, rechazo) con datos sintéticos `TEST-PA-001..003`; no lee ni escribe solicitudes. Código: `handlers/admin_pruebas_power_automate.ashx`, `App_Code/PruebasPowerAutomate.cs`, `admin/pruebas-power-automate.js`.
+
+- **Puerta (servidor):** el atajo de desarrollo local completo (`AccesoDesarrolloLocal`: `AdminDevOverride`, `debug="true"`, petición local, IIS Express, base de desarrollo o QA, cuenta en la whitelist) y rol ADM. Fuera de eso el handler responde 404 `SoloLocalhost` y la página no pinta el panel. El POST además pasa por `AccesoAdmin.ExigirMismoOrigen` (CSRF: otra página abierta en la misma máquina recibe 403).
+- **Destinatario de los mensajes privados:** `TeamsPruebaDestinatario` del `Web.config` local; si no, el correo de la cuenta de desarrollo en `CatPersona`, o su `UsuariosAdmin.CorreoUsuario` único. Sin ninguno, no envía. El nombre de los tres avisos es fijo: `Usuario de Prueba` (`PruebasPowerAutomate.NombrePrueba`); en los flujos reales un nombre desconocido sigue viajando vacío.
+- **Usarlo:** en el `Web.config` local, `TeamsWebhookUrl` (y opcionalmente `TeamsPruebaDestinatario`), más lo de *Admin en desarrollo local*; `dev-local.cmd 8081`; abrir `http://localhost:8081/admin/admin.html`.
+- **Pruebas:** `tools/tests/AvisoTeamsSmoke.cs`, `tools/tests/PruebasPowerAutomateSmoke.cs`, `tools/tests/AvisoNuevaSolicitudSmoke.cs` y la sección AV de `tools/tests/SolicitudesCambioHttpSmoke.cs` (sin red externa). La llegada real a Teams se comprueba a mano.
+
 ### Application Pool
 
 El Application Pool debe utilizar:

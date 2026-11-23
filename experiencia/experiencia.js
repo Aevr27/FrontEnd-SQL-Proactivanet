@@ -103,18 +103,12 @@ const CIFRAS_EXTREMOS = Lineas.cifrasExtremos(FMT);
    Automatizados SLA de la Evolucion). Ver etiquetasEncimaBarras. */
 const CIFRAS_ENCIMA_BARRAS = etiquetasEncimaBarras(FMT);
 /* =========================================================================
-   PALETA DE GRAFICAS — escala verde de la cabecera.
+   PALETA DE GRAFICAS — verdes de DATOS, separados de la marca.
 
-   Fuente de la verdad: el degradado de header.top,
-     linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%)
-   Sus paradas son g800 / g600 / g400; lo demas son interpolaciones y
-   tintes de esa recta. Los mismos valores viven en experiencia.css
-   (--g-300 ... --g-900).
+   La marca vive en experiencia.css (--g-50 ... --g-900). Estos verdes
+   codifican dato y estado, estan validados por contraste sobre blanco y
+   no siguen a la marca: ver la misma nota en dashboard.js.
    ========================================================================= */
-/* La MARCA usa los verdes del degradado tal cual (#9DD323/#65BB2B/#478B3C).
-   Para RELLENAR marcas sobre blanco esos tres son demasiado claros -el lima
-   se queda en 1.7:1-, asi que la familia de graficas es la misma escala
-   re-escalonada. Misma identidad verde, distinto trabajo. */
 const VERDE = {
   lima:'#8cbf1e', marca:'#5aa726', pino:'#2f8f6b', profundo:'#356b2c', claro:'#78c96b',
 };
@@ -180,7 +174,7 @@ if (typeof Chart !== 'undefined') {
   if (Chart.defaults.plugins && Chart.defaults.plugins.tooltip) {
     Object.assign(Chart.defaults.plugins.tooltip, {
       backgroundColor: 'rgba(25, 25, 25, .92)',
-      borderColor: '#478b3c', borderWidth: 1,
+      borderColor: '#258d2e', borderWidth: 1,
     });
   }
 }

@@ -39,7 +39,7 @@
   transition: filter .15s ease, transform .06s ease, box-shadow .15s ease, background .15s ease;
   white-space: nowrap;
 }
-.btn:hover { background: var(--grad-btn-hover); box-shadow: 0 3px 10px -3px rgba(71, 139, 60, .45); }
+.btn:hover { background: var(--grad-btn-hover); box-shadow: 0 3px 10px -3px rgba(37, 141, 46, .45); }
 .btn:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(25, 25, 25, .12); }
 /* Todas las variantes comparten el degradado; solo cambia el peso visual. */
 .btn.gris { background: var(--grad-btn); opacity: .82; }
@@ -54,7 +54,7 @@
 }
 .btn.linea:hover {
   background: var(--grad-btn-hover); color: var(--btn-ink); border-color: var(--g-800);
-  filter: none; box-shadow: 0 2px 8px -2px rgba(71, 139, 60, .5);
+  filter: none; box-shadow: 0 2px 8px -2px rgba(37, 141, 46, .5);
 }
 .btn.linea.active, .btn.linea[aria-pressed="true"] {
   background: var(--grad-btn-hover); color: var(--btn-ink); border-color: var(--g-800);

@@ -33,21 +33,17 @@ const FMT = n => (n === null || n === undefined || n === '') ? '' : Number(n).to
 const PCT = (parte, total) => total > 0 ? Math.round(100 * parte / total) + '%' : '—';
 
 /* =========================================================================
-   PALETA DE GRAFICAS — derivada de la escala verde de la cabecera.
+   PALETA DE GRAFICAS — verdes de DATOS, separados de la marca.
 
-   Las tres paradas del degradado de header.top son la fuente:
-     #9DD323 (lima) · #65BB2B (verde de marca) · #478B3C (verde profundo)
-   Todo lo demas son interpolaciones y tintes de esa recta. Los mismos
-   valores viven en el bloque :root de dashboard.css (--g-300 ... --g-900):
-   al retocar la escala hay que tocar los dos archivos.
+   La marca (cabecera, botones, pestañas) vive en el :root de dashboard.css
+   (--g-50 ... --g-900, degradado #258D2E / #36AA3A / #9DD323 de la
+   plantilla). Estos verdes NO la siguen: codifican dato y estado, estan
+   validados por contraste sobre blanco y se re-escalonaron a partir de la
+   escala de marca anterior (#9DD323 / #65BB2B / #478B3C). Cambiar la marca
+   no obliga a tocarlos, y retocarlos exige volver a validar el contraste.
 
    Rojo y ambar se conservan donde el dato es negativo o de advertencia.
    ========================================================================= */
-/* La MARCA (cabecera, botones, pestañas) usa los verdes del degradado tal
-   cual: #9DD323 / #65BB2B / #478B3C. Esos tres son muy claros para rellenar
-   una barra sobre blanco -el lima queda en 1.7:1-, asi que la familia de
-   GRAFICAS es la misma escala re-escalonada para que cada relleno se lea
-   sobre la superficie blanca. Misma identidad verde, distinto trabajo. */
 const VERDE = {
   lima:    '#8cbf1e',   // lima de datos  (hermano de #9DD323)
   marca:   '#5aa726',   // verde de datos (hermano de #65BB2B)
@@ -132,7 +128,7 @@ if (typeof Chart !== 'undefined') {
   if (Chart.defaults.plugins && Chart.defaults.plugins.tooltip) {
     Object.assign(Chart.defaults.plugins.tooltip, {
       backgroundColor: 'rgba(25, 25, 25, .92)',
-      borderColor: '#478b3c', borderWidth: 1,
+      borderColor: '#258d2e', borderWidth: 1,
     });
   }
 }

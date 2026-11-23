@@ -65,7 +65,7 @@ incremental mantiene actualizados los tickets modificados durante los últimos
   es una instantánea, no consulta SQL.
 - `admin/` — Administración de iniciativas (`admin/iniciativas.html`, enlazada
   desde la barra lateral solo para cuentas autorizadas) y la consola de
-  correos (`admin/admin.html`, sin enlace). Crear y modificar iniciativas y el
+  correos (`admin/admin.html`, sin enlace; incluye la prueba de Correo RCA). Crear y modificar iniciativas y el
   alta de categorías **solo validan**: la persistencia no está implementada.
 - `handlers/*.ashx` — endpoints ASP.NET utilizados por los tableros.
 - `App_Code/` — código C# utilizado por IIS.

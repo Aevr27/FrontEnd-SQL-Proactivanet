@@ -268,6 +268,74 @@ public static class AnalisisQueries
         return bloques;
     }
 
+    // El servidor de la tienda (98_caidas_servidor.sql, 2026-11-23): las fallas del
+    // servidor (Portal de Indicadores) cruzadas con Modo Autonomo en los dos sentidos.
+    // Nunca tumba la vista de Modo Autonomo: sin el 98, sin permiso o sin ninguna carga
+    // del portal devuelve { disponible: false, motivo } y la hoja lo dice.
+    public static readonly string[] BLOQUES_MA_SERVIDOR = { "parametros", "fallas", "modoautonomo", "servidores", "causas" };
+
+    public static Dictionary<string, object> ModoAutonomoServidor(DateTime desde, DateTime hastaExcluido)
+    {
+        return ModoAutonomoServidor(DashboardDb.CadenaConexion(), desde, hastaExcluido);
+    }
+
+    public static Dictionary<string, object> ModoAutonomoServidor(string cadena, DateTime desde, DateTime hastaExcluido)
+    {
+        var bloques = new Dictionary<string, object>();
+        int k = 0;
+        using (var cn = new SqlConnection(cadena))
+        {
+            cn.Open();
+            using (var q = new SqlCommand("SELECT OBJECT_ID(N'dbo.usp_Analisis_ModoAutonomoServidor', N'P')", cn))
+            {
+                object o = q.ExecuteScalar();
+                if (o == null || o is DBNull)
+                    return NoDisponible("falta correr 98_caidas_servidor.sql en la base (o el permiso para usarlo)");
+            }
+            using (var cmd = new SqlCommand("dbo.usp_Analisis_ModoAutonomoServidor", cn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.CommandTimeout = 60;
+                cmd.Parameters.Add("@Desde", SqlDbType.Date).Value = desde.Date;
+                cmd.Parameters.Add("@Hasta", SqlDbType.Date).Value = hastaExcluido.Date;
+                try
+                {
+                    using (var r = cmd.ExecuteReader())
+                    {
+                        do
+                        {
+                            long caracteres;
+                            var bloque = Leer(r, out caracteres);
+                            if (k < BLOQUES_MA_SERVIDOR.Length) bloques[BLOQUES_MA_SERVIDOR[k]] = bloque;
+                            k++;
+                        } while (r.NextResult());
+                    }
+                }
+                catch (SqlException ex)
+                {
+                    if (ex.Number == 50000) throw new AnalisisSolicitudInvalida(ex.Message);
+                    DashboardHandler.Registrar("analisis.ashx (servidor)", ex);
+                    return NoDisponible("no se pudo leer de la base");
+                }
+            }
+        }
+        if (k != BLOQUES_MA_SERVIDOR.Length)
+            return NoDisponible("el procedimiento devolvio " + k + " bloques: correr de nuevo 98_caidas_servidor.sql");
+        // Sin ninguna carga del portal no hay nada que mostrar.
+        var par = (Dictionary<string, object>)bloques["parametros"];
+        bool hayLectura = false;
+        foreach (object[] f in (List<object[]>)par["filas"])
+            if ((string)f[0] == "UltimaLecturaPortal" && f[1] != null) hayLectura = true;
+        if (!hayLectura)
+            return NoDisponible("el Portal de Indicadores todavia no se ha cargado a la base");
+        return new Dictionary<string, object> { { "disponible", true }, { "bloques", bloques } };
+    }
+
+    private static Dictionary<string, object> NoDisponible(string motivo)
+    {
+        return new Dictionary<string, object> { { "disponible", false }, { "motivo", motivo } };
+    }
+
     // caracteres: lo que suman los valores del bloque, para saber cual pesa en
     // el JSON (sin contar comillas ni comas).
     private static Dictionary<string, object> Leer(SqlDataReader r, out long caracteres)
