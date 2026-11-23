@@ -1,7 +1,9 @@
 // =====================================================================
 // SOLO DESARROLLO LOCAL - Panel "Pruebas de Power Automate" de
-// admin/admin.html (admin/pruebas-power-automate.js,
-// handlers/admin_pruebas_power_automate.ashx).
+// admin/pruebas-power-automate.html (admin/pruebas-power-automate.js,
+// handlers/admin_pruebas_power_automate.ashx). admin/admin.html no lo carga.
+// Ninguna funcionalidad real depende de estos archivos: se excluyen del
+// paquete de produccion.
 // =====================================================================
 //
 // Manda a mano los tres eventos (NEW_REQUEST, REQUEST_APPROVED,
@@ -32,7 +34,7 @@
 // cambia [1]: iniciativas y solicitudes de cambio usan los mismos tres eventos.
 //
 // PARA QUITARLO: borrar este archivo, el handler, admin/pruebas-power-automate.js,
-// su <script> y su contenedor en admin/admin.html, y la prueba
+// admin/pruebas-power-automate.html y la prueba
 // tools/tests/PruebasPowerAutomateSmoke.cs.
 
 using System;

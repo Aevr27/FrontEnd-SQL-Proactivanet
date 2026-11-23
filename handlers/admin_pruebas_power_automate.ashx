@@ -1,6 +1,6 @@
 <%@ WebHandler Language="C#" Class="AdminPruebasPowerAutomate" %>
 
-// SOLO DESARROLLO LOCAL: panel "Pruebas de Power Automate" de admin/admin.html
+// SOLO DESARROLLO LOCAL: panel "Pruebas de Power Automate" de admin/pruebas-power-automate.html
 // (App_Code/PruebasPowerAutomate.cs). Fuera de localhost de desarrollo
 // (PruebasPowerAutomate.Disponible = false) TODO request recibe 404
 // SoloLocalhost antes de leer nada: ni estado, ni envio.
