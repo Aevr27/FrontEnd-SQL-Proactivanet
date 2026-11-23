@@ -36,7 +36,9 @@
 //           503 { tipo: CapacidadNoDisponible } sin poder leer la capacidad
 //           501 { tipo: PersistenciaNoHabilitada } sin sql/22: nada se guarda
 //           500 { tipo: EnvioNoConfirmado, enviada: null } (no se sabe)
-//        NUNCA escribe la iniciativa.
+//        NUNCA escribe la iniciativa. Una solicitud NUEVA (repetida = false)
+//        avisa a los revisores por Teams (NEW_REQUEST,
+//        App_Code/AvisoNuevaSolicitud.cs); un fallo del aviso no cambia la respuesta.
 //   POST accion=cancelar   id, motivo (obligatorio, hasta 2000)   (sql/41)
 //        Como enviar: Exigir (ADM o MOD) o AccesoIniciativas.ExigirSolicitud.
 //        SOLO quien la envio (SolicitadoPor = la cuenta de IIS, nunca del
@@ -463,6 +465,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                 { "error", PersistenciaSolicitudesCambio.Motivo }, { "tipo", "PersistenciaNoHabilitada" }, { "enviada", false },
             };
         }
+        ResultadoEnvioSolicitud enviado;
         try
         {
             if (reemplazaA > 0)
@@ -474,8 +477,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                     { "reemplaza_a", reemplazaA }, { "repetida", nueva.Repetida },
                 };
             }
-            var r = SolicitudesCambio.Almacen.Enviar(p, usuario, rol);
-            return new Dictionary<string, object> { { "enviada", true }, { "id_solicitud", r.IdSolicitud }, { "repetida", r.Repetida } };
+            enviado = SolicitudesCambio.Almacen.Enviar(p, usuario, rol);
         }
         catch (ErrorSolicitudCambio ex)
         {
@@ -494,6 +496,11 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                 { "tipo", "EnvioNoConfirmado" }, { "enviada", null },
             };
         }
+        // Fuera del try: el catch de arriba diria "no confirmado" de una
+        // solicitud ya guardada. Ya con el COMMIT; Repetida = reintento, sin
+        // aviso. No lanza.
+        AvisoNuevaSolicitud.Cambio(enviado.IdSolicitud, enviado.Repetida, id, rol);
+        return new Dictionary<string, object> { { "enviada", true }, { "id_solicitud", enviado.IdSolicitud }, { "repetida", enviado.Repetida } };
     }
 
     private static object Aplicar(HttpContext context, int n, string revisor)

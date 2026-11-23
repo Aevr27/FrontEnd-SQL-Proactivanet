@@ -60,12 +60,17 @@ sealed class AlmacenFalso : IAlmacenSolicitudesCambio
     public List<Dictionary<string, object>> Lista_ = new List<Dictionary<string, object>>();
     public ErrorSolicitudCambio LanzarAlAplicar, LanzarAlEnviar;
     public int UltimoNumeroFallo;
+    // Lo que "devuelve la base" al enviar (seccion AV: reintento = Repetida).
+    public int IdEnviar = 7;
+    public bool RepetidaEnviar;
+    public Exception LanzarOtroAlEnviar;   // p. ej. tiempo agotado (EnvioNoConfirmado)
 
     public ResultadoEnvioSolicitud Enviar(PeticionSolicitudCambio p, string usuario, string rol)
     {
         Llamadas.Add("Enviar"); UltimaPeticion = p; UltimoUsuario = usuario; UltimoRol = rol;
         if (LanzarAlEnviar != null) throw LanzarAlEnviar;
-        return new ResultadoEnvioSolicitud { IdSolicitud = 7, Repetida = false };
+        if (LanzarOtroAlEnviar != null) throw LanzarOtroAlEnviar;
+        return new ResultadoEnvioSolicitud { IdSolicitud = IdEnviar, Repetida = RepetidaEnviar };
     }
     public List<Dictionary<string, object>> Listar(string estado, int maximo) { Llamadas.Add("Listar:" + estado); return Lista_; }
     public Dictionary<string, object> Detalle(int id) { Llamadas.Add("Detalle:" + id); return Detalle_; }
@@ -195,6 +200,122 @@ public static class SolicitudesCambioHttpSmoke
             { "categoria", ruta }, { "accion", accion }, { "pct_nuevo", pctNuevo }, { "pct_anterior", pctAnt }, { "pct_actual", pctAct },
             { "tipo_iniciativa", ti }, { "tipo_agrupado", ta }, { "ligada", ligada }, { "ligada_alguna_vez", ligada },
         };
+    }
+
+    // ---- AV) NEW_REQUEST de Change request (App_Code/AvisoNuevaSolicitud.cs) ----
+    // Por el handler real (accion=enviar), con el almacen falso y un
+    // transporte falso: nunca Power Automate. UN aviso por solicitud nueva
+    // confirmada (NEW_REQUEST|Change request|correo|nombre|#id|fecha); ninguno
+    // si es repetida o si la base o la validacion fallan; correo / nombre sin
+    // resolver = posicion vacia; un fallo del aviso no cambia la respuesta.
+    sealed class TransporteAvisoFalso : ITransporteAvisoTeams
+    {
+        public int Estado = 202;
+        public Exception Lanza;
+        public readonly List<string> Cuerpos = new List<string>();
+        public int Post(Uri url, byte[] cuerpo, int timeoutMs)
+        {
+            Cuerpos.Add(System.Text.Encoding.UTF8.GetString(cuerpo));
+            if (Lanza != null) throw Lanza;
+            return Estado;
+        }
+    }
+
+    sealed class SinFichas : IFuenteFichasUsuariosAdmin
+    {
+        public Dictionary<string, FichaUsuarioAdmin> Leer(ICollection<string> claves) { return new Dictionary<string, FichaUsuarioAdmin>(StringComparer.Ordinal); }
+    }
+
+    // El text del TextBlock (formato "texto"), o null.
+    static string Texto(string cuerpo)
+    {
+        var m = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(cuerpo);
+        var adj = (Dictionary<string, object>)((System.Collections.ArrayList)m["attachments"])[0];
+        var bloque = (Dictionary<string, object>)((System.Collections.ArrayList)((Dictionary<string, object>)adj["content"])["body"])[0];
+        return bloque["text"] as string;
+    }
+
+    static void Avisos(AlmacenFalso alm, string[][] envioValido)
+    {
+        var t = new TransporteAvisoFalso();
+        var configurado = true;
+        AvisoNuevaSolicitud.Avisador = delegate
+        {
+            return new AvisoTeams(delegate { return configurado ? "https://prueba.invalid/hook?sig=FALSO" : ""; }, t, null, 1000);
+        };
+        AvisoNuevaSolicitud.AhoraUtc = delegate { return new DateTime(2026, 11, 19, 18, 0, 0, DateTimeKind.Utc); };
+        AvisoNuevaSolicitud.SolicitanteCambio = AvisoNuevaSolicitud.ResolverSolicitanteCambio;
+        var fuenteAntes = NombreSolicitante.Fuente;
+        NombreSolicitante.Fuente = new SinFichas();
+        PersistenciaSolicitudesCambio.ForzadaParaPruebas = true;
+        int estado; string cuerpo;
+        try
+        {
+            alm.IdEnviar = 57; alm.RepetidaEnviar = false; alm.LanzarAlEnviar = null; alm.LanzarOtroAlEnviar = null;
+            cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
+            Check("AV1 nueva: 200 enviada", "200|True", estado + "|" + cuerpo.Contains("\"enviada\":true"));
+            Check("AV1 nueva: exactamente un aviso", 1, t.Cuerpos.Count);
+            Check("AV1 texto: seis campos, Change request, correo y nombre de quien envio (CatPersona), #id, fecha",
+                  "NEW_REQUEST|Change request|t_mod@soriana.com|Mod Uno|#57|2026-11-19",
+                  t.Cuerpos.Count == 1 ? Texto(t.Cuerpos[0]) : null);
+            Check("AV1 respuesta igual que sin aviso", true, cuerpo.Contains("\"id_solicitud\":57") && cuerpo.Contains("\"repetida\":false"));
+
+            t.Cuerpos.Clear(); alm.RepetidaEnviar = true;
+            cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
+            Check("AV2 reintento (Repetida): 200 sin aviso", "200|0|True", estado + "|" + t.Cuerpos.Count + "|" + cuerpo.Contains("\"repetida\":true"));
+            alm.RepetidaEnviar = false;
+
+            t.Cuerpos.Clear(); t.Estado = 500;
+            cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
+            Check("AV3 Power Automate 500: la solicitud sigue enviada (200)", "200|True|1", estado + "|" + cuerpo.Contains("\"enviada\":true") + "|" + t.Cuerpos.Count);
+            t.Estado = 202;
+
+            t.Cuerpos.Clear(); t.Lanza = new System.Net.WebException("t", System.Net.WebExceptionStatus.Timeout);
+            cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
+            Check("AV4 timeout del aviso: 200 enviada, no EnvioNoConfirmado", "200|True|False", estado + "|" + cuerpo.Contains("\"enviada\":true") + "|" + cuerpo.Contains("EnvioNoConfirmado"));
+            t.Lanza = null;
+
+            // ADM sin CatPersona ni UsuariosAdmin: correo y nombre sin resolver.
+            t.Cuerpos.Clear();
+            cuerpo = Correr("POST", "accion=enviar", ADM, envioValido, out estado);
+            Check("AV5 solicitante sin resolver: 200 enviada, aviso con correo y nombre vacios", "200|True|NEW_REQUEST|Change request|||#57|2026-11-19",
+                  estado + "|" + cuerpo.Contains("\"enviada\":true") + "|" + (t.Cuerpos.Count == 1 ? Texto(t.Cuerpos[0]) : "n=" + t.Cuerpos.Count));
+
+            t.Cuerpos.Clear(); alm.LanzarAlEnviar = new ErrorSolicitudCambio(51201, "La base la rechazo.", null);
+            cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
+            Check("AV6 la base rechaza: error y sin aviso", "False|0", (estado == 200) + "|" + t.Cuerpos.Count);
+            alm.LanzarAlEnviar = null;
+
+            t.Cuerpos.Clear(); alm.LanzarOtroAlEnviar = new TimeoutException("sql");
+            cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
+            Check("AV7 envio no confirmado (500): sin aviso", "500|True|0", estado + "|" + cuerpo.Contains("EnvioNoConfirmado") + "|" + t.Cuerpos.Count);
+            alm.LanzarOtroAlEnviar = null;
+
+            t.Cuerpos.Clear();
+            var sinMotivo = new List<string[]>();
+            foreach (var c in envioValido) if (c[0] != "folio") sinMotivo.Add(c);
+            cuerpo = Correr("POST", "accion=enviar", MOD, sinMotivo.ToArray(), out estado);
+            Check("AV8 validacion falla: sin aviso", "False|0", (estado == 200) + "|" + t.Cuerpos.Count);
+
+            t.Cuerpos.Clear(); configurado = false;
+            cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
+            Check("AV9 webhook apagado: 200 enviada, sin aviso", "200|True|0", estado + "|" + cuerpo.Contains("\"enviada\":true") + "|" + t.Cuerpos.Count);
+            configurado = true;
+
+            t.Cuerpos.Clear(); alm.IdEnviar = 58;
+            Correr("POST", "accion=enviar", MOD, envioValido, out estado);
+            alm.IdEnviar = 59;
+            Correr("POST", "accion=enviar", MOD, envioValido, out estado);
+            Check("AV10 dos solicitudes nuevas = dos avisos, cada una con su numero", "#58|#59",
+                  t.Cuerpos.Count == 2 ? Texto(t.Cuerpos[0]).Split('|')[4] + "|" + Texto(t.Cuerpos[1]).Split('|')[4] : "n=" + t.Cuerpos.Count);
+        }
+        finally
+        {
+            PersistenciaSolicitudesCambio.ForzadaParaPruebas = null;
+            NombreSolicitante.Fuente = fuenteAntes;
+            AvisoNuevaSolicitud.Avisador = delegate { return AvisoTeams.Sitio; };
+            alm.IdEnviar = 7; alm.RepetidaEnviar = false; alm.LanzarAlEnviar = null; alm.LanzarOtroAlEnviar = null;
+        }
     }
 
     public static int Main()
@@ -1345,6 +1466,8 @@ public static class SolicitudesCambioHttpSmoke
             PersistenciaSolicitudesCambio.SolicitaPsoForzadaParaPruebas = null;
             CategoriasHistoricas.LeerParaPruebas = null;
         }
+
+        Avisos(alm, envioValido);
 
         Console.WriteLine(fallos == 0 ? "OK: todo paso" : "FALLOS: " + fallos);
         return fallos == 0 ? 0 : 1;

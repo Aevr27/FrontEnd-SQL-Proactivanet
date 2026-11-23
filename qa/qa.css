@@ -29,7 +29,7 @@
 
   /* PALETA CENTRALIZADA — la misma escala verde que dashboard.css y que
      qa_green_theme/qa_green.css. Su origen es el degradado de header.top:
-       linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%)
+       linear-gradient(135deg, #258D2E 0%, #36AA3A 45%, #9DD323 100%)
      --g-800 / --g-600 / --g-400 son esas tres paradas; el resto son
      interpolaciones y tintes de ellas. Las variables se repiten aqui
      porque dentro del @scope de la pestaña :root no casa con nada. */
@@ -38,11 +38,11 @@
   --g-200: #d3e9ac;
   --g-300: #bae065;
   --g-400: #9dd323;   /* LIMA  — parada 100% */
-  --g-500: #81c727;
-  --g-600: #65bb2b;   /* VERDE — parada 45% */
-  --g-700: #56a333;
-  --g-800: #478b3c;   /* VERDE PROFUNDO — parada 0% */
-  --g-900: #3a7431;   /* solo texto/hover, nunca parada de degradado */
+  --g-500: #6abe2e;
+  --g-600: #36aa3a;   /* VERDE — parada 45% */
+  --g-700: #2e9c34;
+  --g-800: #258d2e;   /* VERDE PROFUNDO — parada 0% */
+  --g-900: #1a5711;   /* solo texto/hover, nunca parada de degradado */
 
   --bg: #ffffff;
   --bg-2: #f6f8f4;
@@ -72,13 +72,13 @@
   --morado: var(--g-500);
   --cyan: var(--g-300);
 
-  --grad-header: linear-gradient(135deg, #478B3C 0%, #65BB2B 45%, #9DD323 100%);
+  --grad-header: linear-gradient(135deg, #258D2E 0%, #36AA3A 45%, #9DD323 100%);
   --grad: linear-gradient(180deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-800) 100%);
-  /* Boton: lima arriba -> verde fresco abajo, con tinta carbon (blanco
-     sobre lima no llega a 4.5:1). */
+  /* Boton: lima arriba -> verde fresco abajo, con tinta negra (blanco
+     sobre lima no llega a 4.5:1 y carbon sobre --g-800 tampoco). */
   --grad-btn: linear-gradient(160deg, var(--g-400) 0%, var(--g-600) 55%, var(--g-700) 100%);
   --grad-btn-hover: linear-gradient(160deg, var(--g-500) 0%, var(--g-700) 55%, var(--g-800) 100%);
-  --btn-ink: var(--ink);
+  --btn-ink: #000;
 
   --radius: 14px;
   --radius-sm: 9px;
@@ -117,7 +117,8 @@ body {
 header.top {
   position: relative; overflow: hidden;
   background: var(--grad-header);
-  color: var(--ink); padding: 24px 28px;
+  /* Negro, no carbon: ver header.top en dashboard.css. */
+  color: #000; padding: 24px 28px;
   min-height: 100px;
   border-radius: var(--radius); margin-bottom: 16px;
   display: flex; align-items: center; justify-content: space-between;
@@ -133,7 +134,7 @@ header.top::after {
 header.top > * { position: relative; z-index: 1; }
 header.top h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -.2px; }
 header.top .sub {
-  font-size: 12.5px; color: var(--ink-2); margin-top: 5px;
+  font-size: 12.5px; color: #000; margin-top: 5px;
   font-variant-numeric: tabular-nums;
 }
 /* En fila y pegadas a la derecha. Hoy solo cuelga de aqui el chip de fecha,
@@ -164,7 +165,7 @@ header.top .acciones-top {
   transition: background .15s ease, box-shadow .15s ease, transform .06s ease;
   white-space: nowrap;
 }
-.btn:hover { background: var(--grad-btn-hover); box-shadow: 0 3px 10px -3px rgba(71, 139, 60, .45); }
+.btn:hover { background: var(--grad-btn-hover); box-shadow: 0 3px 10px -3px rgba(37, 141, 46, .45); }
 .btn:active { transform: translateY(1px); box-shadow: 0 1px 2px rgba(25, 25, 25, .12); }
 .btn:disabled { background: #cfd4c9; color: var(--muted); cursor: not-allowed; box-shadow: none; }
 .btn.chico { padding: 6px 12px; font-size: 12px; }
@@ -376,7 +377,7 @@ code {
   background: #fff; color: var(--ink); font: inherit; font-size: 12.5px;
 }
 .barra-detalle .campo select:hover { border-color: var(--g-400); }
-.barra-detalle .campo select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(101, 187, 43, .22); }
+.barra-detalle .campo select:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(54, 170, 58, .22); }
 
 /* "⬇ Descargar QA" a la IZQUIERDA de Limpiar. dashboard.css ordena el panel
    compartido con `order` (Limpiar = 1, el resto = 2); aqui solo se adelanta

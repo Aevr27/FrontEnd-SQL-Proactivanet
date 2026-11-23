@@ -65,7 +65,9 @@
 }
 .an-pestanas button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
 .an-pestanas button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.an-panel { display: grid; gap: 22px; }
+/* minmax(0, 1fr): una tabla ancha se desplaza en su .scroll-x en lugar de ensanchar
+   toda la hoja (la del servidor, con 9 columnas, empujaba la pagina a 940px en 800). */
+.an-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
 
 .an-tabla h4 { margin: 0 0 8px; font-size: 13.5px; font-weight: 700; color: var(--ink); }
 .an-tabla .nota { margin: 6px 0 0; font-size: 12px; color: var(--muted); max-width: 120ch; }
@@ -124,3 +126,38 @@
 .an-miga:focus-visible, .an-zoom:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .an-grafica .hit.zoom { cursor: pointer; }
 .an-grafica .hit.zoom:hover { fill: var(--accent-soft); fill-opacity: .35; }
+
+/* Modo Autonomo, 2026-11-23: el pie de cada tarjeta con el ultimo mes del periodo
+   (puede ir en dos lineas: lleva la cifra) y la hoja "El servidor de la tienda",
+   con barras apiladas en HTML (se acomodan al ancho). Los colores son los del
+   correo de Modo Autonomo, para que el CIO vea lo mismo en los dos. */
+/* Con "Este ano" son cuatro botones: el periodo rapido toma dos columnas de la
+   rejilla de filtros (en una sola columna, en movil, se queda en una). */
+@media (min-width: 760px) { #an-filtros .an-campo-periodo { grid-column: span 2; } }
+.kpi .foot.an-mes {
+  white-space: normal; margin-top: 7px; padding-top: 5px; border-top: 1px dashed var(--line);
+  color: var(--ink-2); font-weight: 600;
+}
+.an-srv-intro p { margin: 0 0 6px; font-size: 13px; color: var(--ink-2); max-width: 120ch; }
+.an-srv-intro ol { margin: 0 0 6px; padding-left: 20px; font-size: 13px; color: var(--ink-2); }
+.an-srv-kpis { margin-bottom: 0; }
+.an-tabla h5 { margin: 12px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.an-tabla > p { margin: 0 0 8px; font-size: 13px; color: var(--ink-2); max-width: 120ch; }
+.an-pilas { display: grid; gap: 6px; }
+.an-pila-fila { display: grid; grid-template-columns: minmax(120px, 32ch) minmax(0, 1fr) minmax(120px, 22ch); align-items: center; gap: 10px; font-size: 12.5px; }
+.an-pila-e { color: var(--ink-2); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.an-pila-t { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.an-pila { display: flex; height: 16px; border-radius: 4px; overflow: hidden; background: var(--line-soft); }
+.an-seg { display: block; height: 100%; }
+.an-seg.evento { background: #258d2e; }
+.an-seg.ticket { background: #9bc31c; }
+.an-seg.sin, .an-seg.apagado { background: #d0453f; }
+.an-seg.reinicio { background: #9a6aa6; }
+.an-seg.corte { background: #2f6db5; }
+.an-seg.nada { background: #c3c9c5; }
+.an-leyenda { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.an-leyenda i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+@media (max-width: 700px) {
+  .an-pila-fila { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .an-pila-e { text-align: left; }
+}

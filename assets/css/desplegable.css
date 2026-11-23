@@ -38,10 +38,10 @@
   --dd-tinta:        var(--ctrl-ink,        var(--ink, #191919));
   --dd-tinta-2:      var(--ink-2, #393939);
   --dd-tinta-3:      var(--muted, #6b7280);
-  --dd-acento:       var(--accent,          var(--g-600, #65bb2b));
-  --dd-acento-tinta: var(--accent-ink,      var(--g-900, #3a7431));
+  --dd-acento:       var(--accent,          var(--g-600, #36aa3a));
+  --dd-acento-tinta: var(--accent-ink,      var(--g-900, #1a5711));
   --dd-suave:        var(--accent-soft,     var(--g-50, #f4fae7));
-  --dd-aro:          var(--ring, 0 0 0 3px rgba(101, 187, 43, .30));
+  --dd-aro:          var(--ring, 0 0 0 3px rgba(54, 170, 58, .30));
   --dd-hundido: inset 0 1px 2px rgba(25, 25, 25, .05);
 }
 
