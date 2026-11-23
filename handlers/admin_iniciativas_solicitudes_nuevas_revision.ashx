@@ -38,7 +38,10 @@
 // (IdentidadEscritura), nunca un campo del formulario. Los datos de la
 // iniciativa son los GUARDADOS en la solicitud, nunca los del navegador:
 // del formulario solo se toman numero, estado y comentario. No manda
-// correos. No toca Cambios (sql/22).
+// correos. No toca Cambios (sql/22). Una aprobacion NUEVA o un rechazo ya
+// confirmados avisan al SOLICITANTE ORIGINAL por Teams (REQUEST_APPROVED /
+// REQUEST_REJECTED, App_Code/AvisoRevisionSolicitud.cs); un fallo del aviso
+// no cambia la respuesta.
 
 using System;
 using System.Collections.Generic;
@@ -97,6 +100,10 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
             {
                 return NoConfirmada(context, ex, llave);
             }
+            // Ya con el COMMIT; el destinatario sale de la solicitud releida,
+            // nunca de quien revisa. No lanza.
+            AvisoRevisionSolicitud.IniciativaRechazada(
+                AvisoRevisionSolicitud.Detalle(delegate { return RegistroSolicitudesIniciativa.Lector.Detalle(numero); }), comentario);
             return new Dictionary<string, object>
             {
                 { llave, true }, { "numero", numero }, { "estado", "RECHAZADA" },
@@ -182,6 +189,9 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
         {
             return NoConfirmada(context, ex, "aprobada");
         }
+        // Ya con el COMMIT. `solicitud` (leida antes) trae al solicitante
+        // guardado; solo a.Nueva avisa (reintento / otro ADM = sin aviso). No lanza.
+        AvisoRevisionSolicitud.IniciativaAprobada(solicitud, a.Codigo, a.Nueva);
         return new Dictionary<string, object>
         {
             { "aprobada", true }, { "numero", numero }, { "estado", "APROBADA" },
