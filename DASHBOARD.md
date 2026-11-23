@@ -261,6 +261,8 @@ App_Code/
 
 `dashboard.js` pide los datos a `handlers/<nombre>.ashx`; si falta un handler, solo se vacía o marca error el bloque que lo usa.
 
+**Paquete:** `tools/Empaquetar-Sitio.ps1 -Commit <hash> -Salida <carpeta fuera del repo>` arma `sitio-<commit>.zip` con exactamente este árbol, desde el commit (nunca del árbol de trabajo), y su `.manifiesto.txt` (SHA-256, incluidos con su blob, excluidos con motivo). Excluye el panel de pruebas de Power Automate (sus cuatro archivos). **No trae `Web.config`** (no está versionado): el servidor conserva el suyo. Falla sin dejar nada si el commit no existe, falta un archivo requerido, entra un `.config`, el panel, un valor de webhook o `TeamsPruebaDestinatario`, o se desconecta alguno de los tres avisos. Mismo commit y misma versión de git = mismo ZIP. Respaldar el sitio actual antes de copiar; para volver atrás, restaurar ese respaldo (o desplegar el ZIP del commit anterior).
+
 Copia `Web.config.ejemplo` como `Web.config` en el servidor y ajusta la conexión a SQL Server.
 
 > **Si el servidor ya tiene un `Web.config`**, no basta con copiar los archivos del sitio: hay que añadirle **a mano, una sola vez**, el bloque `<staticContent><clientCache>` de `Web.config.ejemplo` (y los tres `<location path="*/vendor">` que lo acompañan). Sin él, IIS manda los `.css` y `.js` sin `Cache-Control`, el navegador aplica su heurística y **un despliegue puede quedar invisible**: se copian los archivos nuevos y el navegador sigue pintando la hoja anterior, sin ningún aviso. Ya pasó una vez.
