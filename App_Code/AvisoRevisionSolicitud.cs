@@ -78,10 +78,18 @@ public static class AvisoRevisionSolicitud
     // aprobar (solicitante_* no cambia al aprobar). null = no aplica.
     public static ResultadoAvisoTeams? IniciativaAprobada(Dictionary<string, object> detalle, string codigo, bool nueva)
     {
+        return IniciativaAprobada(Avisador, detalle, codigo, nueva);
+    }
+
+    // Las sobrecargas con avisador explicito las usa el panel de pruebas local
+    // para capturar el cuerpo enviado sin cambiar el Avisador global (que
+    // comparten los requests reales del mismo proceso). Misma logica.
+    public static ResultadoAvisoTeams? IniciativaAprobada(Func<AvisoTeams> avisador, Dictionary<string, object> detalle, string codigo, bool nueva)
+    {
         try
         {
             if (!nueva || detalle == null || string.IsNullOrWhiteSpace(codigo)) return null;
-            return EnviarIniciativa(AvisoTeams.SolicitudAprobada, detalle, codigo);
+            return EnviarIniciativa(avisador, AvisoTeams.SolicitudAprobada, detalle, codigo);
         }
         catch (Exception ex) { return Fallo("REQUEST_APPROVED de iniciativa", ex); }
     }
@@ -89,10 +97,15 @@ public static class AvisoRevisionSolicitud
     // detalle: releido despues del COMMIT (Detalle). null = no aplica.
     public static ResultadoAvisoTeams? IniciativaRechazada(Dictionary<string, object> detalle, string comentario)
     {
+        return IniciativaRechazada(Avisador, detalle, comentario);
+    }
+
+    public static ResultadoAvisoTeams? IniciativaRechazada(Func<AvisoTeams> avisador, Dictionary<string, object> detalle, string comentario)
+    {
         try
         {
             if (detalle == null || Texto(detalle, "estado") != EstadoIniciativaRechazada) return null;
-            return EnviarIniciativa(AvisoTeams.SolicitudRechazada, detalle, comentario);
+            return EnviarIniciativa(avisador, AvisoTeams.SolicitudRechazada, detalle, comentario);
         }
         catch (Exception ex) { return Fallo("REQUEST_REJECTED de iniciativa", ex); }
     }
@@ -102,40 +115,50 @@ public static class AvisoRevisionSolicitud
     // no el IdSolicitud.
     public static ResultadoAvisoTeams? CambioAprobado(Dictionary<string, object> detalle)
     {
+        return CambioAprobado(Avisador, detalle);
+    }
+
+    public static ResultadoAvisoTeams? CambioAprobado(Func<AvisoTeams> avisador, Dictionary<string, object> detalle)
+    {
         try
         {
             if (detalle == null || Texto(detalle, "estado") != EstadoCambioAplicado) return null;
-            return EnviarCambio(AvisoTeams.SolicitudAprobada, detalle, Texto(detalle, "folio"));
+            return EnviarCambio(avisador, AvisoTeams.SolicitudAprobada, detalle, Texto(detalle, "folio"));
         }
         catch (Exception ex) { return Fallo("REQUEST_APPROVED de solicitud de cambio", ex); }
     }
 
     public static ResultadoAvisoTeams? CambioRechazado(Dictionary<string, object> detalle, string comentario)
     {
+        return CambioRechazado(Avisador, detalle, comentario);
+    }
+
+    public static ResultadoAvisoTeams? CambioRechazado(Func<AvisoTeams> avisador, Dictionary<string, object> detalle, string comentario)
+    {
         try
         {
             if (detalle == null || Texto(detalle, "estado") != EstadoCambioRechazado) return null;
-            return EnviarCambio(AvisoTeams.SolicitudRechazada, detalle, comentario);
+            return EnviarCambio(avisador, AvisoTeams.SolicitudRechazada, detalle, comentario);
         }
         catch (Exception ex) { return Fallo("REQUEST_REJECTED de solicitud de cambio", ex); }
     }
 
-    private static ResultadoAvisoTeams? EnviarIniciativa(string evento, Dictionary<string, object> d, string quinto)
+    private static ResultadoAvisoTeams? EnviarIniciativa(Func<AvisoTeams> fuente, string evento, Dictionary<string, object> d, string quinto)
     {
         var numero = Texto(d, "numero_texto");
         if (numero == null) return null;
-        var avisador = Avisador();
+        var avisador = fuente == null ? null : fuente();
         if (avisador == null || !avisador.Configurado()) return ResultadoAvisoTeams.Desactivado;
         return avisador.Enviar(Aviso(evento, AvisoTeams.TipoIniciativa, Correo(Texto(d, "solicitante_correo")),
                                      Texto(d, "solicitante_nombre"), numero, quinto));
     }
 
-    private static ResultadoAvisoTeams? EnviarCambio(string evento, Dictionary<string, object> d, string quinto)
+    private static ResultadoAvisoTeams? EnviarCambio(Func<AvisoTeams> fuente, string evento, Dictionary<string, object> d, string quinto)
     {
         object idCrudo;
         if (!d.TryGetValue("id", out idCrudo) || !(idCrudo is int) || (int)idCrudo <= 0) return null;
         var numero = "#" + ((int)idCrudo).ToString(CultureInfo.InvariantCulture);
-        var avisador = Avisador();
+        var avisador = fuente == null ? null : fuente();
         if (avisador == null || !avisador.Configurado()) return ResultadoAvisoTeams.Desactivado;
 
         SolicitanteAviso s = null;

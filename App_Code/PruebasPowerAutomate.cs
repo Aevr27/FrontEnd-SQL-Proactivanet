@@ -25,6 +25,9 @@
 // [2] de aprobar / rechazar) se pone TeamsPruebaDestinatario y se quita al
 // terminar: no hay otro override y los flujos reales no lo leen.
 //
+// SOLICITANTE SIMULADO (accion=enviar_solicitante): en vez de lo anterior,
+// pasa una solicitud sintetica por la resolucion REAL (ver EnviarComoSolicitante).
+//
 // TIPO: campo opcional "tipo" (Initiative por omision, o Change request). Solo
 // cambia [1]: iniciativas y solicitudes de cambio usan los mismos tres eventos.
 //
@@ -33,6 +36,7 @@
 // tools/tests/PruebasPowerAutomateSmoke.cs.
 
 using System;
+using System.Collections.Generic;
 using System.Configuration;
 using System.Web;
 
@@ -146,5 +150,117 @@ public static class PruebasPowerAutomate
                 return CorreoAdmin.Para(id, CorreoAdmin.Fuente,
                     delegate (Exception e) { DashboardHandler.Registrar("PruebasPowerAutomate", e); });
             });
+    }
+
+    // ---- SOLICITANTE SIMULADO ---------------------------------------------
+    // Prueba la resolucion REAL del destinatario: arma la fila de la solicitud
+    // como la leeria la base y la pasa por AvisoRevisionSolicitud (la misma
+    // ruta que aprobar / rechazar / aplicar). NO usa ResolverSitio ni
+    // TeamsPruebaDestinatario, y el contrato no se toca despues de armarlo:
+    // solo se registra el cuerpo que sale hacia la red.
+    //   Initiative: la fila lleva solicitante_correo / solicitante_nombre, la
+    //     foto que guarda el alta en adm.SolicitudIniciativa (el fixture).
+    //   Change request: la fila lleva solicitado_por y rol_solicitante; el
+    //     correo lo resuelve ResolverSolicitanteCambio contra CatPersona /
+    //     UsuariosAdmin de la base local (solo lectura). Una cuenta que no
+    //     este ahi no recibe nada: no hay respaldo por configuracion.
+    public const int IdCambioPrueba = 999001;
+    public const string CodigoPrueba = "TEST-2026-000001";
+    public const string ComentarioPrueba = "Esta es una prueba de rechazo desde localhost.";
+    public const string NumeroAprobadaPrueba = "TEST-PA-002";
+    public const string NumeroRechazadaPrueba = "TEST-PA-003";
+    public static readonly string[] RolesSolicitante = { "ADM", "MOD", "PSO" };
+
+    public sealed class EnvioSolicitante
+    {
+        public ResultadoAvisoTeams? Resultado;
+        public string Cuerpo;   // tal cual salio hacia el webhook; null si no se envio
+        public string Texto;    // el TextBlock del contrato (formato "texto"), o null
+        public int? Http;
+    }
+
+    // Registra el cuerpo y el codigo; el envio lo hace el transporte real.
+    private sealed class TransporteCaptura : ITransporteAvisoTeams
+    {
+        private readonly ITransporteAvisoTeams _red;
+        public byte[] Cuerpo;
+        public int? Http;
+        public TransporteCaptura(ITransporteAvisoTeams red) { _red = red; }
+        public int Post(Uri url, byte[] cuerpo, int timeoutMs)
+        {
+            Cuerpo = cuerpo;
+            var h = _red.Post(url, cuerpo, timeoutMs);
+            Http = h;
+            return h;
+        }
+    }
+
+    public static Dictionary<string, object> FilaIniciativa(string evento, string correo, string nombre)
+    {
+        var aprobada = evento == AvisoTeams.SolicitudAprobada;
+        return new Dictionary<string, object>
+        {
+            { "numero_texto", aprobada ? NumeroAprobadaPrueba : NumeroRechazadaPrueba },
+            { "estado", aprobada ? "ENVIADA" : AvisoRevisionSolicitud.EstadoIniciativaRechazada },
+            { "solicitante_correo", correo },
+            { "solicitante_nombre", string.IsNullOrWhiteSpace(nombre) ? NombrePrueba : nombre.Trim() },
+        };
+    }
+
+    public static Dictionary<string, object> FilaCambio(string evento, string cuenta, string rol)
+    {
+        return new Dictionary<string, object>
+        {
+            { "id", IdCambioPrueba },
+            { "estado", evento == AvisoTeams.SolicitudAprobada ? AvisoRevisionSolicitud.EstadoCambioAplicado : AvisoRevisionSolicitud.EstadoCambioRechazado },
+            { "folio", CodigoPrueba },
+            { "solicitado_por", cuenta },
+            { "rol_solicitante", rol },
+        };
+    }
+
+    // evento: REQUEST_APPROVED | REQUEST_REJECTED. Initiative usa correo /
+    // nombre; Change request usa cuenta / rol. red: el transporte real del
+    // sitio (o uno falso en las pruebas).
+    public static EnvioSolicitante EnviarComoSolicitante(string evento, string tipo, string correo, string nombre,
+                                                         string cuenta, string rol, Func<string> url, Func<string> formato,
+                                                         ITransporteAvisoTeams red, Action<string, Exception> registrar)
+    {
+        var captura = new TransporteCaptura(red);
+        var avisador = new AvisoTeams(url, formato, captura, registrar, AvisoTeams.TimeoutMsPorOmision);
+        Func<AvisoTeams> fuente = delegate { return avisador; };
+        var aprobada = evento == AvisoTeams.SolicitudAprobada;
+        ResultadoAvisoTeams? r;
+        if (tipo == AvisoTeams.TipoIniciativa)
+            r = aprobada
+                ? AvisoRevisionSolicitud.IniciativaAprobada(fuente, FilaIniciativa(evento, correo, nombre), CodigoPrueba, true)
+                : AvisoRevisionSolicitud.IniciativaRechazada(fuente, FilaIniciativa(evento, correo, nombre), ComentarioPrueba);
+        else
+            r = aprobada
+                ? AvisoRevisionSolicitud.CambioAprobado(fuente, FilaCambio(evento, cuenta, rol))
+                : AvisoRevisionSolicitud.CambioRechazado(fuente, FilaCambio(evento, cuenta, rol), ComentarioPrueba);
+
+        var salida = new EnvioSolicitante { Resultado = r, Http = captura.Http };
+        if (captura.Cuerpo != null)
+        {
+            salida.Cuerpo = System.Text.Encoding.UTF8.GetString(captura.Cuerpo);
+            salida.Texto = TextoDeTarjeta(salida.Cuerpo);
+        }
+        return salida;
+    }
+
+    // attachments[0].content.body[0].text del sobre "texto"; null si el
+    // cuerpo es de otro formato ("json").
+    public static string TextoDeTarjeta(string cuerpo)
+    {
+        try
+        {
+            var m = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(cuerpo);
+            var adj = (Dictionary<string, object>)((System.Collections.ArrayList)m["attachments"])[0];
+            var tarjeta = (Dictionary<string, object>)adj["content"];
+            var bloque = (Dictionary<string, object>)((System.Collections.ArrayList)tarjeta["body"])[0];
+            return bloque["text"] as string;
+        }
+        catch (Exception) { return null; }
     }
 }

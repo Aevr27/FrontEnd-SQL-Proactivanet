@@ -18,8 +18,18 @@
 //           503 SinWebhook (TeamsWebhookUrl vacio) | 422 SinDestinatario |
 //           422 ConfiguracionInvalida | 502 EnvioFallido { http | red } |
 //           409 EnvioEnCurso | 400 EventoDesconocido | 400 TipoDesconocido
+//   POST ?accion=enviar_solicitante  resolucion REAL del destinatario
+//        (PruebasPowerAutomate.EnviarComoSolicitante; sin TeamsPruebaDestinatario)
+//        evento = REQUEST_APPROVED | REQUEST_REJECTED, tipo,
+//        Initiative: correo (+ nombre opcional) guardados en la fila simulada;
+//        Change request: cuenta (DOMINIO\cuenta) + rol (ADM | MOD | PSO)
+//        -> 200 { enviado, evento, tipo_solicitud, http, texto, campo2,
+//                 destinatario_origen: SOLICITANTE_SIMULADO,
+//                 usa_teams_prueba_destinatario: false }
+//           422 SinCorreoSolicitante | 400 FaltaSolicitante | 503 | 502 | 409
 //
-// Nunca devuelve el URL del webhook ni el cuerpo que manda Power Automate.
+// Nunca devuelve el URL del webhook. Solo enviar_solicitante devuelve el
+// texto enviado (sin URL), para ver que [2] sale de la resolucion real.
 
 using System;
 using System.Collections.Generic;
@@ -66,6 +76,11 @@ public class AdminPruebasPowerAutomate : IHttpHandler
                     { "nombre_prueba", PruebasPowerAutomate.NombrePrueba },
                 };
             }
+            if (accion == "enviar_solicitante")
+            {
+                if (!esPost) return Error(context, 405, "Usa POST.", "MetodoNoPermitido");
+                return EnviarComoSolicitante(context, req);
+            }
             if (accion != "enviar") return Error(context, 400, "Accion desconocida.", "AccionDesconocida");
             if (!esPost) return Error(context, 405, "Usa POST.", "MetodoNoPermitido");
 
@@ -104,6 +119,68 @@ public class AdminPruebasPowerAutomate : IHttpHandler
             }
             finally { Interlocked.Exchange(ref enCurso, 0); }
         });
+    }
+
+    // Resolucion REAL del destinatario con un solicitante simulado. No llama a
+    // ResolverSitio: TeamsPruebaDestinatario no participa.
+    private static Dictionary<string, object> EnviarComoSolicitante(HttpContext context, HttpRequest req)
+    {
+        var evento = req.Form["evento"];
+        if (evento != AvisoTeams.SolicitudAprobada && evento != AvisoTeams.SolicitudRechazada)
+            return Error(context, 400, "Solo REQUEST_APPROVED o REQUEST_REJECTED.", "EventoDesconocido");
+        var tipo = PruebasPowerAutomate.Tipo(req.Form["tipo"]);
+        if (tipo == null) return Error(context, 400, "Tipo desconocido.", "TipoDesconocido");
+        var correo = Recortar(req.Form["correo"]);
+        var nombre = Recortar(req.Form["nombre"]);
+        var cuenta = Recortar(req.Form["cuenta"]);
+        var rol = Recortar(req.Form["rol"]);
+        if (tipo == AvisoTeams.TipoIniciativa && correo == null)
+            return Error(context, 400, "Falta el correo guardado del solicitante.", "FaltaSolicitante");
+        if (tipo == AvisoTeams.TipoCambio && (cuenta == null || Array.IndexOf(PruebasPowerAutomate.RolesSolicitante, rol) < 0))
+            return Error(context, 400, "Falta la cuenta (DOMINIO\\cuenta) o el rol (ADM, MOD, PSO) del solicitante.", "FaltaSolicitante");
+        if (!AvisoTeams.Sitio.Configurado())
+            return Error(context, 503, "Falta configurar TeamsWebhookUrl.", "SinWebhook");
+
+        if (Interlocked.CompareExchange(ref enCurso, 1, 0) != 0)
+            return Error(context, 409, "Ya hay un envio en curso.", "EnvioEnCurso");
+        try
+        {
+            var e = PruebasPowerAutomate.EnviarComoSolicitante(evento, tipo, correo, nombre, cuenta, rol,
+                AvisoTeams.LeerConfiguracion, AvisoTeams.LeerFormato, new TransporteAvisoTeamsHttp(), DashboardHandler.Registrar);
+            var campos = e.Texto == null ? null : e.Texto.Split('|');
+            var r = new Dictionary<string, object>
+            {
+                { "enviado", e.Resultado == ResultadoAvisoTeams.Enviado },
+                { "evento", evento }, { "tipo_solicitud", tipo }, { "http", e.Http },
+                { "destinatario_origen", "SOLICITANTE_SIMULADO" },
+                { "usa_teams_prueba_destinatario", false },
+                { "texto", e.Texto },
+                { "campo2", campos != null && campos.Length > 2 ? campos[2] : null },
+                { "formato", AvisoTeams.Sitio.Formato() },
+            };
+            if (e.Texto == null && e.Cuerpo != null) r["cuerpo"] = e.Cuerpo;   // formato "json"
+            if (e.Resultado == ResultadoAvisoTeams.Enviado) return r;
+            if (e.Resultado == ResultadoAvisoTeams.Invalido)
+            {
+                context.Response.StatusCode = 422; context.Response.TrySkipIisCustomErrors = true;
+                r["error"] = "No se envio: la resolucion real no dio un correo valido para ese solicitante (o la configuracion del webhook es invalida).";
+                r["tipo"] = "SinCorreoSolicitante";
+                return r;
+            }
+            context.Response.StatusCode = e.Resultado == ResultadoAvisoTeams.Desactivado ? 503 : 502;
+            context.Response.TrySkipIisCustomErrors = true;
+            r["error"] = "No se pudo enviar la notificacion.";
+            r["tipo"] = e.Resultado == ResultadoAvisoTeams.Desactivado ? "SinWebhook" : "EnvioFallido";
+            return r;
+        }
+        finally { Interlocked.Exchange(ref enCurso, 0); }
+    }
+
+    private static string Recortar(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return null;
+        s = s.Trim();
+        return s.Length > 256 ? s.Substring(0, 256) : s;
     }
 
     private static Dictionary<string, object> Error(HttpContext context, int estado, string mensaje, string tipo)
