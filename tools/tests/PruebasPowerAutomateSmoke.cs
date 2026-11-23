@@ -3,6 +3,9 @@
 //
 //   A  Aviso: cada evento con sus datos sinteticos (TEST-PA-00x, estado,
 //      codigo solo al aprobar, comentario solo al rechazar); otro evento = null.
+//   T  Campo "tipo" del panel: vacio = Initiative; solo valores del contrato.
+//   Q  Escenarios QA (cuenta QA en [2], Change request en [1], comentario en [5]).
+//   C  Change request no es un evento: mismos tres eventos, solo cambia [1].
 //   N  Nombre fijo "Usuario de Prueba" en los tres eventos y las tres fuentes;
 //      texto exacto de seis posiciones dentro del TextBlock de la Adaptive Card.
 //   D  Destinatario: TeamsPruebaDestinatario valido manda; invalido = null
@@ -90,7 +93,70 @@ static class PruebasPowerAutomateSmoke
 
         Check("A evento desconocido = null", true, PruebasPowerAutomate.Aviso("REQUEST_DELETED", d) == null);
         Check("A evento null = null", true, PruebasPowerAutomate.Aviso(null, d) == null);
+        Check("A tipo desconocido = null", true, PruebasPowerAutomate.Aviso("NEW_REQUEST", "Cambio", d) == null);
+        Check("T tipo vacio = Initiative", "Initiative", PruebasPowerAutomate.Tipo("  "));
+        Check("T tipo null = Initiative", "Initiative", PruebasPowerAutomate.Tipo(null));
+        Check("T Change request se respeta", "Change request", PruebasPowerAutomate.Tipo(" Change request "));
+        Check("T etiqueta en espanol no es del contrato", true, PruebasPowerAutomate.Tipo("Cambio") == null && PruebasPowerAutomate.Tipo("Iniciativa") == null);
         Nombres();
+        EscenariosQa();
+    }
+
+    // Q  Los tres escenarios QA con TeamsPruebaDestinatario = la cuenta de QA:
+    //    el TextBlock exacto que lee Power Automate. [2] es el correo
+    //    configurado (no el del solicitante real) y [1] es el valor crudo del
+    //    contrato; la etiqueta "Iniciativa" / "Cambio" la pone el flujo.
+    static void EscenariosQa()
+    {
+        AvisoNuevaSolicitud.AhoraUtc = delegate { return new DateTime(2026, 11, 23, 18, 0, 0, DateTimeKind.Utc); };
+        var cuenta = IdentidadWindows.Desde(@"SORIANA\t_dev", true);
+        var qa = PruebasPowerAutomate.Resolver("t_leonardoel@soriana.com", cuenta,
+            id => { throw new InvalidOperationException("no debe consultarse"); }, id => "otro@soriana.com");
+        Check("Q destinatario de configuracion", "t_leonardoel@soriana.com/CONFIGURACION", qa == null ? null : qa.Correo + "/" + qa.Fuente);
+        if (qa == null) return;
+
+        var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+        var casos = new[]
+        {
+            new[] { "REQUEST_APPROVED", "Initiative",
+                    "REQUEST_APPROVED|Initiative|t_leonardoel@soriana.com|Usuario de Prueba|TEST-PA-002|TEST-2026-000001" },
+            new[] { "NEW_REQUEST", "Change request",
+                    "NEW_REQUEST|Change request|t_leonardoel@soriana.com|Usuario de Prueba|TEST-PA-001|2026-11-23" },
+            new[] { "REQUEST_REJECTED", "Initiative",
+                    "REQUEST_REJECTED|Initiative|t_leonardoel@soriana.com|Usuario de Prueba|TEST-PA-003|Esta es una prueba de rechazo desde localhost." },
+        };
+        foreach (var c in casos)
+        {
+            var a = PruebasPowerAutomate.Aviso(c[0], c[1], qa);
+            var caso = "Q " + c[0] + " " + c[1];
+            Check(caso + ": valido", null, AvisoTeams.MotivoInvalido(a));
+            var m = ser.Deserialize<Dictionary<string, object>>(AvisoTeams.ComoTarjeta(a));
+            var tarjeta = (Dictionary<string, object>)((Dictionary<string, object>)((System.Collections.ArrayList)m["attachments"])[0])["content"];
+            var texto = (string)((Dictionary<string, object>)((System.Collections.ArrayList)tarjeta["body"])[0])["text"];
+            Check(caso + ": TextBlock exacto", c[2], texto);
+            Check(caso + ": [2] = cuenta QA", "t_leonardoel@soriana.com", texto.Split('|')[2]);
+        }
+        Check("Q rechazo: comentario en [5]", "Esta es una prueba de rechazo desde localhost.",
+              AvisoTeams.ComoTexto(PruebasPowerAutomate.Aviso("REQUEST_REJECTED", "Initiative", qa)).Split('|')[5]);
+        TipoSoloCampoUno(qa);
+    }
+
+    // Las solicitudes de cambio NO tienen evento propio: los mismos tres
+    // eventos, y entre Initiative y Change request solo difiere [1].
+    static void TipoSoloCampoUno(DestinatarioPrueba qa)
+    {
+        foreach (var evento in new[] { "NEW_REQUEST", "REQUEST_APPROVED", "REQUEST_REJECTED" })
+        {
+            var ini = AvisoTeams.ComoTexto(PruebasPowerAutomate.Aviso(evento, "Initiative", qa)).Split('|');
+            var cam = AvisoTeams.ComoTexto(PruebasPowerAutomate.Aviso(evento, "Change request", qa)).Split('|');
+            var caso = "C " + evento;
+            Check(caso + ": [0] es el mismo evento en los dos tipos", evento + "/" + evento, ini[0] + "/" + cam[0]);
+            Check(caso + ": [1] crudo del contrato", "Initiative/Change request", ini[1] + "/" + cam[1]);
+            ini[1] = cam[1] = "";
+            Check(caso + ": el resto de los campos es identico", string.Join("|", ini), string.Join("|", cam));
+        }
+        Check("C CHANGE_REQUEST no es un evento", true, PruebasPowerAutomate.Aviso("CHANGE_REQUEST", "Change request", qa) == null);
+        Check("C 'Change request' como evento = null", true, PruebasPowerAutomate.Aviso("Change request", "Initiative", qa) == null);
     }
 
     // N  El nombre es SIEMPRE NombrePrueba en los tres eventos, tambien cuando
@@ -234,6 +300,9 @@ static class PruebasPowerAutomateSmoke
             new object[] { "POST enviar NEW_REQUEST", "POST", "accion=enviar", new[] { new[] { "evento", "NEW_REQUEST" } } },
             new object[] { "POST enviar REQUEST_APPROVED", "POST", "accion=enviar", new[] { new[] { "evento", "REQUEST_APPROVED" } } },
             new object[] { "POST enviar REQUEST_REJECTED", "POST", "accion=enviar", new[] { new[] { "evento", "REQUEST_REJECTED" } } },
+            new object[] { "POST enviar NEW_REQUEST Change request", "POST", "accion=enviar",
+                           new[] { new[] { "evento", "NEW_REQUEST" }, new[] { "tipo", "Change request" } } },
+            new object[] { "POST enviar CHANGE_REQUEST", "POST", "accion=enviar", new[] { new[] { "evento", "CHANGE_REQUEST" } } },
             new object[] { "POST sin accion", "POST", "", null },
         };
         foreach (var c in casos)

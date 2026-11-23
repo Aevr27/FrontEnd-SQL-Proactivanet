@@ -9,12 +9,15 @@
 //                            destinatario: { correo, nombre, fuente } | null,
 //                            nombre_prueba }   (el que llevan los tres avisos)
 //   POST ?accion=enviar  evento = NEW_REQUEST | REQUEST_APPROVED | REQUEST_REJECTED
+//        tipo = Initiative (vacio o ausente) | Change request: solo el
+//        campo [1]; no hay un evento propio para las solicitudes de cambio
 //        (AccesoAdmin.ExigirMismoOrigen: de otra pagina, aunque sea en esta
 //        misma maquina, 403 OrigenNoPermitido)
-//        -> 200 { enviado: true, evento, numero, http }
+//        -> 200 { enviado: true, evento, tipo_solicitud, numero, http }
+//        (en los errores "tipo" es la clase de error, no el campo [1])
 //           503 SinWebhook (TeamsWebhookUrl vacio) | 422 SinDestinatario |
 //           422 ConfiguracionInvalida | 502 EnvioFallido { http | red } |
-//           409 EnvioEnCurso | 400 EventoDesconocido
+//           409 EnvioEnCurso | 400 EventoDesconocido | 400 TipoDesconocido
 //
 // Nunca devuelve el URL del webhook ni el cuerpo que manda Power Automate.
 
@@ -69,6 +72,8 @@ public class AdminPruebasPowerAutomate : IHttpHandler
             var evento = req.Form["evento"];
             if (evento != AvisoTeams.NuevaSolicitud && evento != AvisoTeams.SolicitudAprobada && evento != AvisoTeams.SolicitudRechazada)
                 return Error(context, 400, "Evento desconocido.", "EventoDesconocido");
+            var tipo = PruebasPowerAutomate.Tipo(req.Form["tipo"]);
+            if (tipo == null) return Error(context, 400, "Tipo desconocido.", "TipoDesconocido");
             if (!AvisoTeams.Sitio.Configurado())
                 return Error(context, 503, "Falta configurar TeamsWebhookUrl.", "SinWebhook");
             var destino = PruebasPowerAutomate.ResolverSitio(context);
@@ -79,12 +84,12 @@ public class AdminPruebasPowerAutomate : IHttpHandler
                 return Error(context, 409, "Ya hay un envio en curso.", "EnvioEnCurso");
             try
             {
-                var aviso = PruebasPowerAutomate.Aviso(evento, destino);
+                var aviso = PruebasPowerAutomate.Aviso(evento, tipo, destino);
                 var e = AvisoTeams.Sitio.EnviarConDetalle(aviso);
                 if (e.Resultado == ResultadoAvisoTeams.Enviado)
                     return new Dictionary<string, object>
                     {
-                        { "enviado", true }, { "evento", evento }, { "numero", aviso.RequestNumber }, { "http", e.Http },
+                        { "enviado", true }, { "evento", evento }, { "tipo_solicitud", tipo }, { "numero", aviso.RequestNumber }, { "http", e.Http },
                         { "formato", AvisoTeams.Sitio.Formato() },
                     };
                 if (e.Resultado == ResultadoAvisoTeams.Desactivado)

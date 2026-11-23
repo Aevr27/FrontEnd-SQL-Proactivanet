@@ -1,7 +1,9 @@
 /* =========================================================================
    pruebas-power-automate.js — PRUEBAS DE POWER AUTOMATE (SOLO LOCALHOST)
 
-   Tres botones que mandan los eventos de prueba por el servidor
+   Botones que mandan los tres eventos de prueba (NEW_REQUEST,
+   REQUEST_APPROVED, REQUEST_REJECTED) por el servidor; el tipo
+   (Initiative / Change request) solo cambia el campo [1], no el evento
    (handlers/admin_pruebas_power_automate.ashx, App_Code/PruebasPowerAutomate.cs).
    El panel NO viene en el HTML: solo se construye si el servidor contesta
    200 a accion=estado, y eso solo pasa en localhost de desarrollo. Fuera de
@@ -16,9 +18,10 @@
   var URL_PA = '../handlers/admin_pruebas_power_automate.ashx';
 
   var BOTONES = [
-    { evento: 'NEW_REQUEST',      texto: 'Probar nueva solicitud', detalle: 'TEST-PA-001 · ENVIADA · chat grupal de revisores' },
-    { evento: 'REQUEST_APPROVED', texto: 'Probar aprobación',      detalle: 'TEST-PA-002 · APROBADA · código TEST-2026-000001 · mensaje privado' },
-    { evento: 'REQUEST_REJECTED', texto: 'Probar rechazo',         detalle: 'TEST-PA-003 · RECHAZADA · comentario de prueba · mensaje privado' }
+    { evento: 'NEW_REQUEST',      tipo: 'Initiative',     texto: 'Probar nueva solicitud',           detalle: 'TEST-PA-001 · Initiative · ENVIADA · chat grupal de revisores' },
+    { evento: 'NEW_REQUEST',      tipo: 'Change request', texto: 'Probar nueva solicitud de cambio', detalle: 'TEST-PA-001 · Change request · ENVIADA · chat grupal de revisores' },
+    { evento: 'REQUEST_APPROVED', tipo: 'Initiative',     texto: 'Probar aprobación',                detalle: 'TEST-PA-002 · Initiative · APROBADA · código TEST-2026-000001 · mensaje privado' },
+    { evento: 'REQUEST_REJECTED', tipo: 'Initiative',     texto: 'Probar rechazo',                   detalle: 'TEST-PA-003 · Initiative · RECHAZADA · comentario de prueba · mensaje privado' }
   ];
 
   var MENSAJES = {
@@ -28,7 +31,8 @@
     ConfiguracionInvalida: 'La configuración del webhook no es válida (URL https o TeamsWebhookFormato).',
     EnvioEnCurso: 'Ya hay un envío en curso; espera a que termine.',
     OrigenNoPermitido: 'La petición no salió de esta página; recárgala e inténtalo de nuevo.',
-    EventoDesconocido: 'Evento desconocido.'
+    EventoDesconocido: 'Evento desconocido.',
+    TipoDesconocido: 'Tipo desconocido.'
   };
 
   function el(tag, attrs, texto) {
@@ -58,7 +62,7 @@
     var salida = el('p', { 'class': 'job-nota', role: 'status', 'aria-live': 'polite' }, '');
     var fila = el('div', { 'class': 'rca-botones' });
     var botones = BOTONES.map(function (b) {
-      var boton = el('button', { type: 'button', 'class': 'btn chico', 'data-evento': b.evento, title: b.detalle }, b.texto);
+      var boton = el('button', { type: 'button', 'class': 'btn chico', 'data-evento': b.evento, 'data-tipo': b.tipo, title: b.detalle }, b.texto);
       fila.appendChild(boton);
       return boton;
     });
@@ -70,17 +74,18 @@
     fila.addEventListener('click', function (ev) {
       var boton = ev.target.closest('button[data-evento]');
       if (!boton || boton.disabled) { return; }
-      enviar(boton.getAttribute('data-evento'), botones, salida, tarjeta);
+      enviar(boton.getAttribute('data-evento'), boton.getAttribute('data-tipo'), botones, salida, tarjeta);
     });
   }
 
-  function enviar(evento, botones, salida, tarjeta) {
+  function enviar(evento, tipo, botones, salida, tarjeta) {
     botones.forEach(function (b) { b.disabled = true; });
     tarjeta.setAttribute('data-estado', 'ejecutando');
     salida.className = 'job-nota';
-    salida.textContent = 'Enviando ' + evento + '…';
+    salida.textContent = 'Enviando ' + evento + ' (' + tipo + ')…';
     var cuerpo = new URLSearchParams();
     cuerpo.set('evento', evento);
+    cuerpo.set('tipo', tipo);
     fetch(URL_PA + '?accion=enviar', {
       method: 'POST', credentials: 'same-origin', body: cuerpo
     })
@@ -88,7 +93,7 @@
       .then(function (res) {
         if (res.ok && res.j.enviado) {
           tarjeta.setAttribute('data-estado', 'listo');
-          salida.textContent = 'Notificación enviada correctamente: ' + evento + ' (' + res.j.numero + ', HTTP ' + res.j.http + '). Revisa Teams.';
+          salida.textContent = 'Notificación enviada correctamente: ' + evento + ' (' + res.j.tipo_solicitud + ', ' + res.j.numero + ', HTTP ' + res.j.http + '). Revisa Teams.';
           return;
         }
         tarjeta.setAttribute('data-estado', 'pendiente');

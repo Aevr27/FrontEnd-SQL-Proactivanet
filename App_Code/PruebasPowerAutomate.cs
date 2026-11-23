@@ -21,6 +21,12 @@
 // regla de Nueva solicitud); si no, su dbo.UsuariosAdmin.CorreoUsuario
 // unico (CorreoAdmin). Sin ninguno, no se envia: nunca se arma un correo.
 // El NOMBRE del aviso es siempre NombrePrueba, venga de donde venga el correo.
+// Para enrutar los mensajes privados a una cuenta de QA fija (p. ej. el campo
+// [2] de aprobar / rechazar) se pone TeamsPruebaDestinatario y se quita al
+// terminar: no hay otro override y los flujos reales no lo leen.
+//
+// TIPO: campo opcional "tipo" (Initiative por omision, o Change request). Solo
+// cambia [1]: iniciativas y solicitudes de cambio usan los mismos tres eventos.
 //
 // PARA QUITARLO: borrar este archivo, el handler, admin/pruebas-power-automate.js,
 // su <script> y su contenedor en admin/admin.html, y la prueba
@@ -52,14 +58,31 @@ public static class PruebasPowerAutomate
         catch (Exception) { return false; }
     }
 
-    // El aviso sintetico de cada evento, o null si el evento no es uno de los tres.
+    // El campo "tipo" del panel: vacio = Initiative; si no, uno de los dos
+    // valores del contrato tal cual (null = desconocido). Viaja crudo en [1]:
+    // el texto que ve Teams ("Iniciativa" / "Cambio") lo arma el flujo.
+    public static string Tipo(string valor)
+    {
+        if (string.IsNullOrWhiteSpace(valor)) return AvisoTeams.TipoIniciativa;
+        var v = valor.Trim();
+        return v == AvisoTeams.TipoIniciativa || v == AvisoTeams.TipoCambio ? v : null;
+    }
+
     public static AvisoSolicitud Aviso(string evento, DestinatarioPrueba d)
     {
+        return Aviso(evento, AvisoTeams.TipoIniciativa, d);
+    }
+
+    // El aviso sintetico de cada evento, o null si el evento no es uno de los
+    // tres o el tipo no es del contrato.
+    public static AvisoSolicitud Aviso(string evento, string tipo, DestinatarioPrueba d)
+    {
         if (d == null) throw new ArgumentNullException("d");
+        if (tipo != AvisoTeams.TipoIniciativa && tipo != AvisoTeams.TipoCambio) return null;
         var a = new AvisoSolicitud
         {
             Evento = evento,
-            Tipo = AvisoTeams.TipoIniciativa,
+            Tipo = tipo,
             SolicitanteEmail = d.Correo,
             SolicitanteNombre = NombrePrueba,
         };
