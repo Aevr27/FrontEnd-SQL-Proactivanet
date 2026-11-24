@@ -229,6 +229,7 @@ analisis/analisis.js
 analisis/motor.js
 analisis/trabajo.js
 analisis/modo_autonomo.js
+analisis/mapa_mexico.js
 analisis/vendor/exceljs.min.js
 handlers/analisis.ashx
 App_Code/AnalisisQueries.cs
@@ -518,3 +519,44 @@ tarjeta del servidor sale con "—", un aviso dice por qué y la hoja lo explica
 Comprobar (solo lectura):
 
     EXEC dbo.usp_Analisis_ModoAutonomoServidor @Desde = '2026-01-01', @Hasta = '2026-12-01';
+
+### El mapa por estado (2026-11-23, después)
+
+Hoja nueva **Mapa por estado** en Modo Autónomo. Pinta cada estado según
+**qué parte de sus tiendas** tuvo algo en el periodo. Un selector escoge qué
+pintar: eventos de los IMs, eventos de una causa (con su propio selector),
+fallas del servidor sin reporte (apagados y cortes; sin los reinicios
+programados) o tiendas con 2 o más eventos. Pasar el ratón da las cifras del
+estado; un clic (o su nombre en la tabla) muestra sus tiendas que tuvieron algo.
+Lleva un recuadro ampliado del centro del país y la tabla por estado; el Excel
+suma la hoja "Por estado".
+
+La ubicación de cada tienda es la columna `EstadoClave` del bloque
+`servidores` de `dbo.usp_Analisis_ModoAutonomoServidor` (una de las 32
+claves de `ESTADOS` en `modo_autonomo.js`, tal cual). Una tienda va al estado
+de su primer servidor con clave válida. Lo que no se ubica no se pinta ni se
+reparte: la nota de la tabla lo cuenta por motivo (tienda del portal sin clave
+válida, tienda fuera del portal, varias sucursales), lista las claves que no
+se reconocen y avisa las tiendas con servidores en estados distintos. El
+parámetro `EstadosSinClave`, si viene, se muestra como aviso.
+`AnalisisQueries.cs` pasa las columnas tal cual, así que el sitio no cambia.
+Según el autor, el 98 nuevo trae `crit.SrvEstado` y `crit.SrvEstadoAlias`
+con la clave de cada una de las 40 maneras en que el portal escribe el estado;
+**no verificado**: el script no está en este repositorio ni se ha revisado.
+
+Sin la columna `EstadoClave` (98 anterior) la hoja dice que falta el 98; con
+la columna pero sin ninguna clave válida, o sin servidores, dice eso otro. Lo
+demás sigue igual. Si `mapa_mexico.js` no carga, la hoja lo dice y deja la tabla.
+
+**Instalar:**
+
+1. Volver a correr `98_caidas_servidor.sql` (repositorio de la base; según el
+   autor se puede volver a correr y no borra lo cargado; **no verificado**).
+2. El sitio: `analisis/mapa_mexico.js` (nuevo, el dibujo de los 32 estados,
+   21 KB), `analisis/modo_autonomo.js`, `analisis/analisis.js` y
+   `analisis/analisis.css`.
+
+El dibujo es de Natural Earth (dominio público); el generador (`tools/mapa`)
+no está en este repositorio. No se pide nada a internet.
+
+Prueba sin base: `node tools	estsAnalisisModoAutonomoMapaSmoke.js`.

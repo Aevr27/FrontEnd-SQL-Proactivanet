@@ -5,7 +5,7 @@
 // modo_autonomo), un servicio de motor ("prueba", tickets sinteticos) y
 // accion=modo_autonomo (datos, 400 o 500).
 //
-//   M1-M8  motor -> Modo Autonomo -> motor: pestañas 7/6/7, zoom con clics
+//   M1-M8  motor -> Modo Autonomo -> motor: pestañas 7/7/7 (las de Modo Autonomo, con el mapa), zoom con clics
 //          (nombre, barra, migas), contraseñas tapadas en Detalle, el Excel
 //          de cada vista, sin errores de pagina.
 //   S1-S2  sin modo_autonomo en la lista (?sinma=1): no sale ni se pide,
@@ -176,10 +176,10 @@ Banco.correr({ '/analisis/__banco.html': html },
   [P, P + '?sinma=1', P + '?sinma=1&servicio=modo_autonomo', P + '?servicio=modo_autonomo', P + '?ma500=1', P + '?ma400=1'], 30000)
   .then(function (r) {
     var o = r[0] || {}, s = r[1] || {}, s2 = r[2] || {}, l = r[3] || {}, e5 = r[4] || {}, e4 = r[5] || {};
-    var SIETE = 'Resumen,Temporal,Sitios,Motivos,Atencion,Reglas,Detalle', SEIS = 'Causas,NoLlegan,Servidor,Mes,Tiendas,Detalle';
+    var SIETE = 'Resumen,Temporal,Sitios,Motivos,Atencion,Reglas,Detalle', HOJAS_MA = 'Causas,NoLlegan,Servidor,Mapa,Mes,Tiendas,Detalle';
     Check('M0 lista: Modo Autonomo sin "(sin reglas)"', ['prueba|S-Prueba', 'modo_autonomo|Modo Autónomo'], o.opciones);
     Check('M1 motor: siete hojas', [SIETE, 'S-Prueba'], o.M1);
-    Check('M2 Modo Autonomo: seis hojas, titulo, siete KPIs', [SEIS, 'Modo Autónomo', 7], o.M2);
+    Check('M2 Modo Autonomo: siete hojas, titulo, siete KPIs', [HOJAS_MA, 'Modo Autónomo', 7], o.M2);
     Check('M3a Causas: nivel 1', true, o.M3a);
     Check('M3b clic en el nombre: nivel 2 y foco en la miga actual', [true, 'B'], o.M3b);
     Check('M3c clic en la barra: nivel 3', [true, true], o.M3c);
@@ -189,13 +189,13 @@ Banco.correr({ '/analisis/__banco.html': html },
     Check('M5 Excel de Modo Autonomo', ['Analisis_modo_autonomo_20260901_20261031.xlsx'], o.M5);
     Check('M6 de vuelta al motor: sus siete hojas, sin el zoom', [SIETE, false], o.M6);
     Check('M7 Excel del motor (no el de Modo Autonomo)', true, !!(o.M7 && o.M7.length === 1 && !/modo_autonomo/.test(o.M7[0])));
-    Check('M8 otra vez Modo Autonomo: seis hojas, segunda peticion', [SEIS, 2], o.M8);
+    Check('M8 otra vez Modo Autonomo: siete hojas, segunda peticion', [HOJAS_MA, 2], o.M8);
     Check('M9 sin errores de pagina', [], o.errores);
     Check('S1 sin registro: no sale, no se pide, nada en pantalla', [false, 0, true], s.S);
     Check('S2 sin registro + liga directa: tampoco', [false, 0, true], s2.S);
     Check('S3 sin errores', [[], []], [s.errores, s2.errores]);
     var ENERO = new Date().getFullYear() + '-01-01';
-    Check('L1 liga directa: analiza sola, con el año', [SEIS, ENERO, true, false],
+    Check('L1 liga directa: analiza sola, con el año', [HOJAS_MA, ENERO, true, false],
           l.L ? [l.L[0], l.L[1], l.L[2].indexOf('accion=modo_autonomo&desde=' + ENERO) >= 0, l.L[3]] : null);
     Check('E1 500: el mensaje del servidor (la pista de 97 solo sale sin el), Reintentar, motor sigue en pantalla con su aviso y su Excel', [true, true, 7, true, false], e5.E1);
     Check('E1x el Excel tras el fallo es el del motor', true, !!(e5.E1x && e5.E1x.length === 1 && !/modo_autonomo/.test(e5.E1x[0])));

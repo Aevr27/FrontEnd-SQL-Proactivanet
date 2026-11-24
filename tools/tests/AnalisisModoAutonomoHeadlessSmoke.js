@@ -9,8 +9,8 @@
 // sonda que pulsa y apunta lo que ve. No escribe nada en disco.
 //
 //   M1-M4   la lista: Modo Autonomo sin "(sin reglas)" y con su leyenda; al
-//           analizar, sus KPIs (con el ultimo mes abajo), hallazgos y sus seis
-//           hojas, sin avisos;
+//           analizar, sus KPIs (con el ultimo mes abajo), hallazgos y sus siete
+//           hojas (con la del mapa), sin avisos;
 //   P1-P2   al escoger Modo Autonomo el periodo pasa al ano (boton "Este ano");
 //           al cambiar a otro servicio regresa a los 6 meses;
 //   S1-S2   la hoja del servidor de la tienda: lo que compara, sus tarjetas, las
@@ -223,8 +223,8 @@ Banco.correr({ '/analisis/__ma.html': pagina }, URLS, 20000).then(function (res)
   Check('P2 al cambiar a otro servicio: de regreso a 6 meses', [SEIS, '6'], r.P2);
   Check('M2 titulo y siete KPIs, cada uno con su ultimo mes; el del servidor en rojo',
         ['Modo Autónomo', 7, '5', ['Mayo: 1 (1 h)', 'Mayo: 1', 'Mayo: 0% (0)', 'Mayo: 0 de 0', 'Mayo: 0', 'Mayo: 1 de 1', 'Mayo: 0%'], 1], r.M2);
-  Check('M3 sus seis hojas, Causas primero, hallazgos, sin avisos, Excel listo',
-        [['Causas de los IMs', 'Lo que no llega al IM', 'El servidor de la tienda', 'Por mes', 'Tiendas', 'Detalle'], 'Causas', 6, true, false, false], r.M3);
+  Check('M3 sus siete hojas, Causas primero, hallazgos, sin avisos, Excel listo',
+        [['Causas de los IMs', 'Lo que no llega al IM', 'El servidor de la tienda', 'Mapa por estado', 'Por mes', 'Tiendas', 'Detalle'], 'Causas', 6, true, false, false], r.M3);
   Check('M4 dice cuando se cargo el Excel', true, r.M4);
   Check('Z1 nivel 1: barras y nombres que abren', [['Todas las causas'], ['electrica', 'comunicaciones', 'electrica', 'comunicaciones']], r.Z1);
   Check('Z2 clic en la barra: nivel 2 de la electrica, con migas',
@@ -239,7 +239,7 @@ Banco.correr({ '/analisis/__ma.html': pagina }, URLS, 20000).then(function (res)
   Check('Z6 cada hoja recuerda su nivel; la miga de la raiz regresa', [true, true, ['Todas las causas']], r.Z6);
   Check('X1 el Excel', [1, true, true], r.X1);
   Check('E1 si otro servicio falla, se queda Modo Autonomo con el aviso', [true, false, true], r.E1);
-  Check('E2 con sus hojas y su Excel', [['Causas', 'NoLlegan', 'Servidor', 'Mes', 'Tiendas', 'Detalle'], false], r.E2);
+  Check('E2 con sus hojas y su Excel', [['Causas', 'NoLlegan', 'Servidor', 'Mapa', 'Mes', 'Tiendas', 'Detalle'], false], r.E2);
   Check('L1 ?servicio=modo_autonomo lo abre solo, con el ano',
         [true, 'modo_autonomo', ANIO, HOY, 'anio', 1, '&desde=' + ANIO + '&hasta=' + HOY], l.L);
   Check('L2 &meses=3: los ultimos 3 meses, con su boton marcado',

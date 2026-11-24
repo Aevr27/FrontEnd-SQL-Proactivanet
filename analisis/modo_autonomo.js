@@ -14,7 +14,11 @@
      - el SERVIDOR DE LA TIENDA (98_caidas_servidor.sql, 2026-11-23): lo que
        registra su log (Portal de Indicadores) contra Modo Autónomo, en los dos
        sentidos: fallas del servidor sin reporte, y Modo Autónomo con el
-       servidor bien. Si la base no lo tiene, la hoja dice por qué.
+       servidor bien. Si la base no lo tiene, la hoja dice por qué;
+     - el MAPA por estado (2026-11-23): qué parte de las tiendas de cada estado
+       tuvo eventos de los IMs, de una causa, fallas del servidor sin reporte o
+       2 o más eventos. La ubicación de cada tienda es la del Portal de
+       Indicadores (98: crit.SrvEstado); el dibujo, analisis/mapa_mexico.js.
 
    Las tarjetas son del periodo escogido y, abajo, del último mes del periodo
    (lo que va del mes si el periodo llega a hoy): pedido del dueño, 2026-11-23.
@@ -25,7 +29,8 @@
    Corre igual en el navegador (window.AnalisisModoAutonomo) y en node
    (require), para que la prueba revise el mismo código. No pide nada: recibe
    la respuesta de analisis.ashx?accion=modo_autonomo, Motor.ocultarClaves
-   y, para pintar, las funciones de dibujo de analisis.js.
+   y, para pintar, las funciones de dibujo de analisis.js (y el dibujo de
+   analisis/mapa_mexico.js, si cargó).
    ===================================================================================== */
 (function (raiz, fabrica) {
     if (typeof module === 'object' && module.exports) module.exports = fabrica();
@@ -50,13 +55,24 @@
     var SIN_DETALLE = 'Sin detalle';
     var SERVICIO = 'modo_autonomo';
     var HOJAS = [['Causas', 'Causas de los IMs'], ['NoLlegan', 'Lo que no llega al IM'], ['Servidor', 'El servidor de la tienda'],
-                 ['Mes', 'Por mes'], ['Tiendas', 'Tiendas'], ['Detalle', 'Detalle']];
+                 ['Mapa', 'Mapa por estado'], ['Mes', 'Por mes'], ['Tiendas', 'Tiendas'], ['Detalle', 'Detalle']];
     var MESES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
     var MESES_LARGOS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
     // Lo que le pasó al servidor (98: Tipo de la falla y Paso de cada evento o ticket).
     var FALLAS = { apagado: 'Se apagó sin aviso', reinicio: 'Reinicio programado', corte: 'Perdió la red' };
     var PASOS = { apagado: 'Se apagó', reinicio: 'Reinicio programado', corte: 'Perdió la red', nada: 'El servidor siguió bien' };
     var REPORTES = { evento: 'Evento del IM', ticket: 'Ticket de Modo Autónomo', sin: 'Sin reporte' };
+    // Las claves de crit.SrvEstado (98) y de mapa_mexico.js; los nombres, para las tablas y el Excel.
+    var ESTADOS = {
+        AGU: 'Aguascalientes', BCN: 'Baja California', BCS: 'Baja California Sur', CAM: 'Campeche', CHP: 'Chiapas',
+        CHH: 'Chihuahua', CMX: 'Ciudad de México', COA: 'Coahuila', COL: 'Colima', DUR: 'Durango', MEX: 'Estado de México',
+        GUA: 'Guanajuato', GRO: 'Guerrero', HID: 'Hidalgo', JAL: 'Jalisco', MIC: 'Michoacán', MOR: 'Morelos', NAY: 'Nayarit',
+        NLE: 'Nuevo León', OAX: 'Oaxaca', PUE: 'Puebla', QUE: 'Querétaro', ROO: 'Quintana Roo', SLP: 'San Luis Potosí',
+        SIN: 'Sinaloa', SON: 'Sonora', TAB: 'Tabasco', TAM: 'Tamaulipas', TLA: 'Tlaxcala', VER: 'Veracruz', YUC: 'Yucatán', ZAC: 'Zacatecas'
+    };
+    // Lo que pinta el mapa: siempre la parte de las tiendas del estado (pedido del dueño: por tasa).
+    var CAPAS = [['eventos', 'Tiendas con eventos de los IMs'], ['causa', 'Tiendas con eventos por una causa'],
+                 ['servidor', 'Tiendas con fallas del servidor sin reporte'], ['repiten', 'Tiendas con 2 o más eventos']];
 
     /* ------------------------------------------------------------------ leer */
     function num(v) { if (v == null || v === '') return null; var n = Number(v); return isFinite(n) ? n : null; }
@@ -206,8 +222,26 @@
         });
         var servidores = objetos(b.servidores).map(function (r) {
             return { servidor: txt(r.Servidor), tienda: num(r.Tienda), tiendaNombre: txt(r.TiendaNombre), estado: txt(r.Estado),
-                     logDesde: txt(r.LogDesde), redDesde: txt(r.RedDesde), alcanzado: num(r.Alcanzado) === 1 };
+                     logDesde: txt(r.LogDesde), redDesde: txt(r.RedDesde), alcanzado: num(r.Alcanzado) === 1,
+                     estadoClave: ESTADOS[txt(r.EstadoClave)] ? txt(r.EstadoClave) : '', claveLeida: txt(r.EstadoClave) };
         });
+        // Cada tienda en su estado (la del primer servidor que la trae) y cuántas tiene cada estado.
+        // Lo que no se puede ubicar no se reparte en otro estado: se cuenta aparte para que la hoja
+        // lo diga (tiendas del portal sin clave válida, claves desconocidas, servidores de una misma
+        // tienda en estados distintos, donde el "primero" depende del orden en que los manda el 98).
+        var estadoTienda = {}, tiendasEstado = {}, enPortal = {}, clavesTienda = {}, clavesInvalidas = {};
+        servidores.forEach(function (x) {
+            if (x.tienda == null) return;
+            enPortal[x.tienda] = 1;
+            if (!x.estadoClave) { if (x.claveLeida) clavesInvalidas[x.claveLeida] = 1; return; }
+            (clavesTienda[x.tienda] || (clavesTienda[x.tienda] = {}))[x.estadoClave] = 1;
+            if (estadoTienda[x.tienda]) return;
+            estadoTienda[x.tienda] = x.estadoClave;
+            tiendasEstado[x.estadoClave] = (tiendasEstado[x.estadoClave] || 0) + 1;
+        });
+        var tiendasSinEstado = Object.keys(enPortal).filter(function (t) { return !estadoTienda[t]; }).map(Number);
+        var tiendasEnConflicto = Object.keys(clavesTienda).filter(function (t) { return Object.keys(clavesTienda[t]).length > 1; }).map(Number);
+        var columnaEstado = !!(b.servidores && b.servidores.columnas && b.servidores.columnas.indexOf('EstadoClave') >= 0);
         var causas = objetos(b.causas).map(function (r) {
             return { tipo: txt(r.Tipo), causa: txt(r.Causa), total: num(r.Total) || 0, enHorario: num(r.EnHorario) || 0,
                      servidores: num(r.Servidores) || 0, sinReporte: num(r.SinReporte) || 0 };
@@ -260,8 +294,102 @@
             fallas: fallas.length, fallasMes: mes.length, sinReporte: cuantas(fallas, 'sin'), sinReporteMes: cuantas(mes, 'sin'),
             porTipo: porTipo, porOrigen: pasos(im, ORIGENES), porMotivo: pasos(tk, MOTIVOS), tiendas: tiendas,
             eventosIM: im.length, eventosIMJuzgados: im.filter(function (x) { return x.paso !== 'sinlog'; }).length,
-            incidentes: tk.length, incidentesJuzgados: tk.filter(function (x) { return x.paso !== 'sinlog'; }).length
+            incidentes: tk.length, incidentesJuzgados: tk.filter(function (x) { return x.paso !== 'sinlog'; }).length,
+            estadoTienda: estadoTienda, tiendasEstado: tiendasEstado, estadosSinClave: txt(p.EstadosSinClave),
+            columnaEstado: columnaEstado, enPortal: enPortal, tiendasSinEstado: tiendasSinEstado, tiendasEnConflicto: tiendasEnConflicto,
+            clavesInvalidas: Object.keys(clavesInvalidas).sort()
         };
+    }
+
+    /* ------------------------------------------------------------------ el mapa */
+    // Por estado: cuántas de sus tiendas tuvieron lo de la capa (afectadas) y qué parte son
+    // (tasa). capa: eventos, causa (con su origen), servidor (apagados y cortes en horario sin
+    // reporte: los reinicios programados se dejan fuera, como en "Tiendas donde el servidor más
+    // se cae", porque el reinicio de seguridad del 24-sep pintaría todo el país) o repiten.
+    function mapaEstados(m, capa, causa) {
+        var s = m.servidor;
+        if (!s.disponible) return null;
+        var est = {}, sinUbicacion = 0, porQue = { varias: 0, fueraPortal: 0, sinEstado: 0 };
+        Object.keys(s.tiendasEstado).forEach(function (k) {
+            est[k] = { clave: k, nombre: ESTADOS[k], tiendas: s.tiendasEstado[k], afectadas: 0, eventos: 0, horas: 0, fallas: 0, tasa: 0, _t: {} };
+        });
+        function contar(tienda, horas) {
+            var k = tienda == null ? null : s.estadoTienda[tienda];
+            if (!k) { sinUbicacion++; porQue[tienda == null ? 'varias' : s.enPortal[tienda] ? 'sinEstado' : 'fueraPortal']++; return; }
+            var e = est[k];
+            if (capa === 'servidor') e.fallas++; else { e.eventos++; e.horas += horas || 0; }
+            e._t[tienda] = (e._t[tienda] || 0) + 1;
+        }
+        if (capa === 'servidor') {
+            s.fallasLista.forEach(function (f) { if (f.reporte === 'sin' && f.tipo !== 'reinicio') contar(f.tienda); });
+        } else {
+            m.eventos.forEach(function (x) { if (capa !== 'causa' || x.n1 === causa) contar(x.tienda, x.horas); });
+        }
+        var max = 0;
+        Object.keys(est).forEach(function (k) {
+            var e = est[k], t = Object.keys(e._t);
+            e.afectadas = capa === 'repiten' ? t.filter(function (x) { return e._t[x] >= 2; }).length : t.length;
+            e.tasa = e.tiendas ? e.afectadas / e.tiendas : 0;
+            e.horas = Math.round(e.horas * 10) / 10;
+            if (e.tasa > max) max = e.tasa;
+            delete e._t;
+        });
+        // Cinco clases iguales hasta un tope redondo; 0 va aparte (gris).
+        var tope = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.8, 1].filter(function (v) { return v >= max - 1e-9; })[0] || 1;
+        var cortes = [1, 2, 3, 4, 5].map(function (i) { return tope * i / 5; });
+        Object.keys(est).forEach(function (k) {
+            var e = est[k];
+            e.clase = e.afectadas ? 1 + cortes.filter(function (c) { return e.tasa > c + 1e-9; }).length : 0;
+            if (e.clase > 5) e.clase = 5;
+        });
+        return { capa: capa, causa: causa, estados: est, cortes: cortes, sinUbicacion: sinUbicacion, sinUbicacionPor: porQue };
+    }
+    // Los orígenes que hay en el periodo, del más común al menos; el primero es el de omisión.
+    function causasMapa(m) { return m.arbolEventos.hijos.map(function (h) { return h.clave; }); }
+    function nombreCapa(capa, causa) {
+        if (capa === 'causa') return 'Tiendas con eventos por ' + (ORIGENES[causa] || causa || '').toLowerCase();
+        return (CAPAS.filter(function (c) { return c[0] === capa; })[0] || CAPAS[0])[1];
+    }
+    function pctMapa(v) { var x = 100 * v; return (x > 0 && x < 1 ? x.toFixed(1) : Math.round(x)) + '%'; }
+    function leyendaMapa(mod) {
+        var c = mod.cortes, r = [['c0', '0%']];
+        c.forEach(function (v, i) { r.push(['c' + (i + 1), (i ? pctMapa(c[i - 1]) + '–' : 'hasta ') + pctMapa(v)]); });
+        return r;
+    }
+    function tipEstado(e, mod) {
+        var t = e.nombre + '\n' + miles(e.afectadas) + ' de ' + miles(e.tiendas) + ' tiendas (' + pctMapa(e.tasa) + ')';
+        if (mod.capa === 'servidor') return t + ' con apagados o cortes sin reporte\n' + miles(e.fallas) + ' fallas sin reporte';
+        if (mod.capa === 'repiten') return t + ' con 2 o más eventos\n' + miles(e.eventos) + ' eventos';
+        if (mod.capa === 'causa') return t + ' con eventos por ' + (ORIGENES[mod.causa] || mod.causa).toLowerCase() + '\n' + miles(e.eventos) + ' eventos · ' + horasTxt(e.horas) + ' horas';
+        return t + ' con eventos de los IMs\n' + miles(e.eventos) + ' eventos · ' + horasTxt(e.horas) + ' horas';
+    }
+    // mapa_mexico.js se carga aparte; si llega a medias, la hoja usa la tabla en vez de romperse.
+    function dibujoValido(d) {
+        return !!(d && Array.isArray(d.estados) && d.estados.length && d.recuadro && d.recuadro.origen && d.recuadro.destino && d.ancho && d.alto);
+    }
+    // El SVG: un path por estado y el recuadro ampliado del centro (los mismos paths, escalados y
+    // recortados). Las clases de color viven en analisis.css (.an-edo.c0 ... .c5).
+    function svgMapa(a, mapa, mod, sel) {
+        var r = mapa.recuadro, o = r.origen, d = r.destino, k = r.escala;
+        function paths(enRecuadro) {
+            return mapa.estados.map(function (g) {
+                var e = mod.estados[g.clave];
+                var cls = 'an-edo ' + (e ? 'c' + e.clase : 'sin') + (sel === g.clave ? ' sel' : '');
+                var tip = e ? tipEstado(e, mod) : g.nombre + '\nSin tiendas en el Portal de Indicadores';
+                return '<path class="' + cls + '" d="' + g.d + '"' + (enRecuadro ? ' vector-effect="non-scaling-stroke"' : '') +
+                       (e ? ' data-ma-estado="' + g.clave + '"' : '') + ' data-tip="' + a.esc(tip) + '"/>';
+            }).join('');
+        }
+        var t = 'translate(' + (d[0] - o[0] * k).toFixed(1) + ' ' + (d[1] - o[1] * k).toFixed(1) + ') scale(' + k + ')';
+        return '<svg class="an-mapa-svg" viewBox="0 0 ' + mapa.ancho + ' ' + mapa.alto + '" role="img" aria-label="' + a.esc(nombreCapa(mod.capa, mod.causa) + ', por estado') + '">' +
+            '<defs><clipPath id="an-mapa-recorte"><rect x="' + d[0] + '" y="' + d[1] + '" width="' + d[2] + '" height="' + d[3] + '"/></clipPath></defs>' +
+            paths(false) +
+            '<rect class="an-recuadro-origen" x="' + o[0] + '" y="' + o[1] + '" width="' + o[2] + '" height="' + o[3] + '"/>' +
+            '<line class="an-recuadro-liga" x1="' + (o[0] + o[2]) + '" y1="' + o[1] + '" x2="' + d[0] + '" y2="' + (d[1] + d[3]) + '"/>' +
+            '<rect class="an-recuadro" x="' + d[0] + '" y="' + d[1] + '" width="' + d[2] + '" height="' + d[3] + '"/>' +
+            '<g clip-path="url(#an-mapa-recorte)"><g transform="' + t + '">' + paths(true) + '</g></g>' +
+            '<rect class="an-recuadro-borde" x="' + d[0] + '" y="' + d[1] + '" width="' + d[2] + '" height="' + d[3] + '"/>' +
+            '<text class="an-recuadro-txt" x="' + (d[0] + 6) + '" y="' + (d[1] + d[3] + 16) + '">Centro del país, ampliado</text></svg>';
     }
 
     function sinDetalle(x) { return x.n2 === SIN_DETALLE || x.n3 === SIN_DETALLE; }
@@ -639,12 +767,100 @@
         });
         return h;
     }
+    function panelMapa(m, ruta, a) {
+        var s = m.servidor;
+        if (!s.disponible) {
+            return '<div class="an-tabla"><h4>Mapa por estado</h4><p class="nota">No disponible: ' + a.esc(s.motivo) + '.</p>' +
+                   '<p class="nota">El mapa ubica cada tienda con el Portal de Indicadores (98_caidas_servidor.sql y su carga).</p></div>';
+        }
+        // Sin ninguna tienda ubicada el mapa saldría vacío; se dice por qué en vez de pintar 0%.
+        if (!Object.keys(s.tiendasEstado).length) {
+            var porque = !s.columnaEstado ? 'Falta la versión del 98_caidas_servidor.sql con crit.SrvEstado (la columna EstadoClave de los servidores).'
+                : !s.servidores.length ? 'El Portal de Indicadores no trajo ningún servidor.'
+                : 'El 98 trae la columna EstadoClave, pero ningún servidor tiene una clave reconocida' +
+                  (s.clavesInvalidas.length ? ' (llegan: ' + s.clavesInvalidas.join(', ') + ')' : ' (todas vacías)') + '.';
+            return '<div class="an-tabla"><h4>Mapa por estado</h4><p class="nota">No disponible: ninguna tienda trae su estado.</p>' +
+                   '<p class="nota">' + a.esc(porque) + '</p></div>';
+        }
+        ruta = ruta || {};
+        var causas = causasMapa(m);
+        var capa = CAPAS.some(function (c) { return c[0] === ruta.capa; }) ? ruta.capa : 'eventos';
+        var causa = causas.indexOf(ruta.causa) >= 0 ? ruta.causa : (causas[0] || '');
+        var mod = mapaEstados(m, capa, causa);
+        var sel = mod.estados[ruta.estado] ? ruta.estado : '';
+        function opcion(v, t, x) { return '<option value="' + a.esc(v) + '"' + (v === x ? ' selected' : '') + '>' + a.esc(t) + '</option>'; }
+        var h = '<div class="an-mapa-filtros"><label>Qué pintar <select data-ma-mapa="capa">' +
+                CAPAS.map(function (c) { return opcion(c[0], c[1], capa); }).join('') + '</select></label>' +
+                (capa === 'causa' ? '<label>Causa <select data-ma-mapa="causa">' +
+                    causas.map(function (k) { return opcion(k, ORIGENES[k] || k, causa); }).join('') + '</select></label>' : '') + '</div>';
+        h += '<div class="an-tabla an-mapa"><h4>' + a.esc(nombreCapa(capa, causa)) + ': % de las tiendas de cada estado</h4>' +
+             '<p class="an-leyenda an-mapa-leyenda">' + leyendaMapa(mod).map(function (l) {
+                 return '<span><i class="an-edo-muestra ' + l[0] + '" aria-hidden="true"></i>' + a.esc(l[1]) + '</span>';
+             }).join('') + '</p>' +
+             (dibujoValido(a.mapa) ? svgMapa(a, a.mapa, mod, sel)
+                     : '<p class="nota">No se pudo cargar el dibujo del mapa (analisis/mapa_mexico.js); la tabla de abajo trae las mismas cifras.</p>') +
+             '<p class="nota">Pasa el ratón por un estado para ver sus cifras; clic en él (o en su nombre en la tabla) para ver sus tiendas. ' +
+             (capa === 'servidor' ? 'Apagados y cortes de red en horario de tienda sin evento del IM ni ticket; sin los reinicios programados. ' : '') +
+             'Mapa: Natural Earth.</p></div>';
+        if (sel) h += tablaTiendasEstado(m, sel, a);
+        var filas = Object.keys(mod.estados).map(function (k) { return mod.estados[k]; })
+            .sort(function (x, y) { return y.tasa - x.tasa || y.afectadas - x.afectadas || (x.nombre < y.nombre ? -1 : 1); });
+        var srv = capa === 'servidor';
+        h += tablaHtml(a, {
+            titulo: 'Por estado',
+            columnas: [{ n: 'Estado', t: 'txt' }, { n: 'Tiendas', t: 'int' }, { n: 'Con lo pintado', t: 'int' }, { n: '%', t: 'txt' }]
+                .concat(srv ? [{ n: 'Fallas sin reporte', t: 'int' }] : [{ n: 'Eventos', t: 'int' }, { n: 'Horas', t: 'num1' }]),
+            filas: filas.map(function (e) {
+                var b = { html: '<button type="button" class="an-zoom" data-ma-estado="' + e.clave + '"' + (e.clave === sel ? ' aria-pressed="true"' : '') + '>' + a.esc(e.nombre) + '</button>' };
+                return [b, e.tiendas, e.afectadas, pctMapa(e.tasa)].concat(srv ? [e.fallas] : [e.eventos, e.horas]);
+            }),
+            nota: notaSinUbicacion(mod, s, srv ? ' fallas' : ' eventos') +
+                  (s.estadosSinClave ? 'El portal trae estados que no se reconocen: ' + s.estadosSinClave + ' (se agregan como alias en el 98).' : '')
+        });
+        return h;
+    }
+    function notaSinUbicacion(mod, s, que) {
+        var q = mod.sinUbicacionPor, t = [];
+        if (q.sinEstado) t.push(miles(q.sinEstado) + ' de tiendas del portal sin estado reconocido');
+        if (q.fueraPortal) t.push(miles(q.fueraPortal) + ' de tiendas que no están en el Portal de Indicadores');
+        if (q.varias) t.push(miles(q.varias) + ' de varias sucursales');
+        var h = t.length ? 'No se pintan' + que + ': ' + t.join('; ') + '. ' : '';
+        if (s.tiendasSinEstado.length) h += 'Tiendas del portal sin estado reconocido: ' + miles(s.tiendasSinEstado.length) + '. ';
+        if (s.clavesInvalidas.length) h += 'Claves de estado que no se reconocen: ' + s.clavesInvalidas.join(', ') + '. ';
+        if (s.tiendasEnConflicto.length) h += miles(s.tiendasEnConflicto.length) + ' tiendas tienen servidores en estados distintos (' +
+            s.tiendasEnConflicto.slice(0, 10).join(', ') + (s.tiendasEnConflicto.length > 10 ? ', …' : '') + '); se pintan en el del primer servidor. ';
+        return h;
+    }
+    // Las tiendas de un estado que tuvieron algo en el periodo; las demás solo se cuentan.
+    function tablaTiendasEstado(m, clave, a) {
+        var s = m.servidor, porT = {}, srvT = {};
+        m.tiendas.forEach(function (x) { porT[x.tienda] = x; });
+        s.tiendas.forEach(function (x) { srvT[x.tienda] = x; });
+        var vistas = {}, filas = [], sinNada = 0;
+        s.servidores.forEach(function (x) {
+            if (x.tienda == null || vistas[x.tienda] || s.estadoTienda[x.tienda] !== clave) return;
+            vistas[x.tienda] = 1;
+            var t = porT[x.tienda] || {}, v = srvT[x.tienda] || {};
+            if (!t.eventos && !v.sin && !t.incidentes) { sinNada++; return; }
+            filas.push([x.tienda, x.tiendaNombre, t.eventos || 0, Math.round((t.horas || 0) * 10) / 10, t.principal || '', v.sin || 0, t.incidentes || 0]);
+        });
+        filas.sort(function (x, y) { return y[2] - x[2] || y[5] - x[5] || y[6] - x[6] || x[0] - y[0]; });
+        return tablaHtml(a, {
+            titulo: 'Tiendas de ' + ESTADOS[clave],
+            columnas: [{ n: 'Tienda', t: 'txt' }, { n: 'Sucursal', t: 'txt' }, { n: 'Eventos del IM', t: 'int' }, { n: 'Horas', t: 'num1' },
+                       { n: 'Causa principal', t: 'txt' }, { n: 'Fallas del servidor sin reporte', t: 'int' }, { n: 'Incidentes sin IM', t: 'int' }],
+            filas: filas.map(function (f) { return [String(f[0])].concat(f.slice(1)); }),
+            nota: (sinNada ? 'Las otras ' + miles(sinNada) + ' tiendas del estado no tuvieron nada en el periodo. ' : '') +
+                  'Fallas del servidor sin reporte: apagados y cortes en horario de tienda, sin los reinicios programados.'
+        });
+    }
     function filaPaso(x) {
         return [x.nombre, x.total, x.juzgados, x.apagado, x.reinicio, x.corte, x.nada, pct(x.nada, x.juzgados)];
     }
     function panel(m, hoja, ruta, a) {
         ruta = ruta || {};
         if (hoja === 'Servidor') return panelServidor(m, a);
+        if (hoja === 'Mapa') return panelMapa(m, ruta.Mapa, a);
         if (hoja === 'Causas') return panelZoom(a, m.arbolEventos, ruta.Causas, 'Causas', 'eventos', true) +
             '<p class="nota">Los eventos que registran los incident managers en su Excel de críticos (Modo Autónomo, Sucursal Aislada y Servidor TDA). ' +
             'En una falla eléctrica el nivel 2 dice qué falló (la instalación, la planta, el UPS, lo que no levantó al volver la luz, o solo el corte) y el nivel 3, cómo.</p>';
@@ -727,12 +943,27 @@
                  }));
             hoja('Servidores', ['Servidor', 'Tienda', 'Sucursal', 'Estado', 'Log desde', 'Red desde', 'Alcanzado en la última lectura'],
                  s.servidores.map(function (x) { return [x.servidor, x.tienda, x.tiendaNombre, x.estado, x.logDesde, x.redDesde, x.alcanzado ? 'Sí' : 'No']; }));
+            // El mapa, en números: cada capa por estado (el % es de las tiendas del estado).
+            var ev = mapaEstados(m, 'eventos'), rp = mapaEstados(m, 'repiten'), sv = mapaEstados(m, 'servidor'), causaEdo = {};
+            m.eventos.forEach(function (x) {
+                var k = x.tienda == null ? null : s.estadoTienda[x.tienda];
+                if (!k) return;
+                var c = causaEdo[k] || (causaEdo[k] = {}); c[x.n1] = (c[x.n1] || 0) + 1;
+            });
+            var p1 = function (v) { return Math.round(v * 1000) / 10; };
+            hoja('Por estado', ['Estado', 'Tiendas', 'Con eventos del IM', '% con eventos', 'Eventos', 'Horas', 'Con 2 o más eventos', '% con 2 o más',
+                                'Con fallas del servidor sin reporte', '% con fallas sin reporte', 'Fallas sin reporte', 'Causa principal'],
+                 Object.keys(ev.estados).sort(function (x, y) { return ESTADOS[x] < ESTADOS[y] ? -1 : 1; }).map(function (k) {
+                     var e = ev.estados[k], c = causaEdo[k] || {}, pr = Object.keys(c).sort(function (x, y) { return c[y] - c[x]; })[0];
+                     return [e.nombre, e.tiendas, e.afectadas, p1(e.tasa), e.eventos, e.horas, rp.estados[k].afectadas, p1(rp.estados[k].tasa),
+                             sv.estados[k].afectadas, p1(sv.estados[k].tasa), sv.estados[k].fallas, pr ? (ORIGENES[pr] || pr) + ' (' + c[pr] + ')' : ''];
+                 }));
         }
         return wb;
     }
 
     return {
-        SERVICIO: SERVICIO, HOJAS: HOJAS, SIN_DETALLE: SIN_DETALLE, ORIGENES: ORIGENES, MOTIVOS: MOTIVOS,
-        modelo: modelo, buscar: buscar, kpis: kpis, panel: panel, armarLibro: armarLibro
+        SERVICIO: SERVICIO, HOJAS: HOJAS, SIN_DETALLE: SIN_DETALLE, ORIGENES: ORIGENES, MOTIVOS: MOTIVOS, ESTADOS: ESTADOS,
+        modelo: modelo, mapaEstados: mapaEstados, buscar: buscar, kpis: kpis, panel: panel, armarLibro: armarLibro
     };
 });

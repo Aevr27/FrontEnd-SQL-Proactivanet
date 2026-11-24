@@ -161,3 +161,37 @@
   .an-pila-fila { grid-template-columns: minmax(0, 1fr); gap: 3px; }
   .an-pila-e { text-align: left; }
 }
+
+/* Modo Autonomo, 2026-11-23: el mapa por estado. Un tono (el verde de la marca), cinco
+   clases de claro a oscuro validadas (el mas claro pasa 2:1 contra el fondo) y 0% en gris.
+   Los mismos colores en el correo (Enviar_CorreoModoAutonomo.ps1). */
+.an-mapa-filtros { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; font-size: 13px; color: var(--ink-2); }
+.an-mapa-filtros label { display: flex; align-items: center; gap: 8px; font-weight: 600; min-width: 0; max-width: 100%; }
+.an-mapa-filtros select {
+  height: 34px; min-width: 0; max-width: 100%; border: 1px solid var(--ctrl-line); border-radius: var(--radius-xs);
+  padding: 0 8px; background: var(--ctrl-bg); color: var(--ink); font: inherit; font-weight: 400;
+}
+.an-mapa-filtros select:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* En movil el texto de las opciones haria el selector mas ancho que la pantalla. */
+@media (max-width: 600px) {
+  .an-mapa-filtros label { flex-direction: column; align-items: stretch; width: 100%; gap: 4px; }
+  .an-mapa-filtros select { width: 100%; }
+}
+.an-mapa-svg { display: block; width: 100%; max-width: 980px; height: auto; margin: 6px 0 4px; }
+.an-edo { stroke: #ffffff; stroke-width: .8; stroke-linejoin: round; cursor: pointer; }
+.an-edo:hover { stroke: var(--ink); stroke-width: 1.6; }
+.an-edo.sel { stroke: var(--ink); stroke-width: 2.4; }
+.an-edo.sin { cursor: default; }
+.an-edo.c0, .an-edo-muestra.c0 { fill: #e4e7e0; background: #e4e7e0; }
+.an-edo.c1, .an-edo-muestra.c1 { fill: #8cc24c; background: #8cc24c; }
+.an-edo.c2, .an-edo-muestra.c2 { fill: #6aa63b; background: #6aa63b; }
+.an-edo.c3, .an-edo-muestra.c3 { fill: #4f8a31; background: #4f8a31; }
+.an-edo.c4, .an-edo-muestra.c4 { fill: #376a27; background: #376a27; }
+.an-edo.c5, .an-edo-muestra.c5 { fill: #22461a; background: #22461a; }
+.an-edo.sin { fill: #f4f5f2; }
+.an-edo-muestra { display: inline-block; width: 16px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.an-recuadro { fill: var(--card); }
+.an-recuadro-borde { fill: none; stroke: var(--muted-2); stroke-width: 1; }
+.an-recuadro-origen, .an-recuadro-liga { fill: none; stroke: var(--muted-2); stroke-width: 1; stroke-dasharray: 3 3; }
+.an-recuadro-txt { fill: var(--muted); font-size: 13px; }
+.an-zoom[aria-pressed="true"] { font-weight: 700; color: var(--ink); }

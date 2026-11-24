@@ -47,6 +47,7 @@
   var EXCEL_URL = junto('vendor/exceljs.min.js', 'analisis/vendor/exceljs.min.js');
   var TRABAJO_URL = junto('trabajo.js', 'analisis/trabajo.js');
   var MA_URL = junto('modo_autonomo.js', 'analisis/modo_autonomo.js');
+  var MAPA_URL = junto('mapa_mexico.js', 'analisis/mapa_mexico.js');
   var MODO_AUTONOMO = 'modo_autonomo';
 
   function esc(s) {
@@ -70,6 +71,13 @@
   function modoAutonomo() {
     return maListo || (maListo = cargarScript(MA_URL, 'AnalisisModoAutonomo').then(function () { return window.AnalisisModoAutonomo; })
       .catch(function (e) { maListo = null; throw e; }));
+  }
+  // El dibujo de los estados (hoja Mapa de Modo Autonomo). Si no carga, la hoja lo dice y
+  // trae la tabla; Modo Autonomo no se detiene por eso.
+  var mapaListo = null;
+  function mapaMexico() {
+    return mapaListo || (mapaListo = cargarScript(MAPA_URL, 'MapaMexico').then(function () { return window.MapaMexico; })
+      .catch(function () { mapaListo = null; return null; }));
   }
 
   /* ------------------------------------------------------------ trabajo pesado */
@@ -146,7 +154,7 @@
   var mostrado = null;           // {nombre, desde, hasta} de lo que se ve en pantalla
   var vista = null;              // 'motor' o 'ma': de quien es lo que esta en pantalla
   var ma = null;                 // AnalisisModoAutonomo.modelo(...) de lo que se ve
-  var maRuta = { Causas: [], NoLlegan: [] };   // el nivel del zoom de cada hoja
+  var maRuta = { Causas: [], NoLlegan: [], Mapa: {} };   // el nivel del zoom de cada hoja; en Mapa, capa, causa y estado
 
   function estado(txt, clase) { var e = $('estado'); e.textContent = txt || ''; e.className = 'estado' + (clase ? ' ' + clase : ''); }
   // reintentar: lo que hace el boton "Reintentar" del aviso; sin el, no sale.
@@ -614,7 +622,7 @@
     if (vista === 'ma') {
       anchoPintado = ancho();
       $('panel').innerHTML = window.AnalisisModoAutonomo.panel(ma, pestana, maRuta,
-        { esc: esc, horizontales: horizontales, columnas: columnas, ancho: ancho });
+        { esc: esc, horizontales: horizontales, columnas: columnas, ancho: ancho, mapa: window.MapaMexico || null });
       return;
     }
     var r = resultado, h = '';
@@ -729,10 +737,10 @@
     var cuerpo = fetch(url, { cache: 'no-store', signal: control ? control.signal : undefined }).then(function (r) {
       return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || ('HTTP ' + r.status)); return j; });
     });
-    Promise.all([modoAutonomo(), cuerpo, motor()]).then(function (x) {
+    Promise.all([modoAutonomo(), cuerpo, motor(), mapaMexico()]).then(function (x) {
       if (mio !== turno) return;
       var nuevo = x[0].modelo(x[1], x[2].ocultarClaves);
-      if (!ma || ma.desde !== nuevo.desde || ma.hasta !== nuevo.hasta) maRuta = { Causas: [], NoLlegan: [] };
+      if (!ma || ma.desde !== nuevo.desde || ma.hasta !== nuevo.hasta) maRuta = { Causas: [], NoLlegan: [], Mapa: { capa: maRuta.Mapa.capa } };
       ma = nuevo;
       enCurso = null;
       ponerVista('ma');
@@ -818,6 +826,16 @@
   // El zoom de Modo Autonomo: una barra o un nombre abre el siguiente nivel; las migas regresan.
   $('panel').addEventListener('click', function (e) {
     if (vista !== 'ma' || !ma) return;
+    // El mapa: un estado (en el dibujo o en la tabla) muestra sus tiendas; otro clic las quita.
+    var edo = e.target.closest('[data-ma-estado]');
+    if (edo) {
+      var clave = edo.getAttribute('data-ma-estado');
+      maRuta.Mapa.estado = maRuta.Mapa.estado === clave ? '' : clave;
+      tip.hidden = true;
+      pintarPanel();
+      var b = edo.tagName === 'BUTTON' && $('panel').querySelector('button[data-ma-estado="' + clave + '"]'); if (b) b.focus();
+      return;
+    }
     var z = e.target.closest('[data-ma-zoom]'), m = e.target.closest('[data-ma-ruta]');
     if (z && maRuta[z.getAttribute('data-ma-hoja')]) {
       maRuta[z.getAttribute('data-ma-hoja')] = maRuta[z.getAttribute('data-ma-hoja')].concat([z.getAttribute('data-ma-zoom')]);
@@ -827,6 +845,15 @@
     tip.hidden = true;
     pintarPanel();
     var foco = $('panel').querySelector('.an-migas b'); if (foco) { foco.tabIndex = -1; foco.focus(); }
+  });
+  // El selector del mapa (que pintar y la causa).
+  $('panel').addEventListener('change', function (e) {
+    if (vista !== 'ma' || !ma) return;
+    var c = e.target.closest('select[data-ma-mapa]'); if (!c) return;
+    var campo = c.getAttribute('data-ma-mapa');
+    maRuta.Mapa[campo] = c.value;
+    pintarPanel();
+    var otra = $('panel').querySelector('select[data-ma-mapa="' + campo + '"]'); if (otra) otra.focus();
   });
   $('pestanas').addEventListener('keydown', function (e) {
     if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;

@@ -10,7 +10,8 @@
 //   - el Excel (con el ExcelJS de la pagina): sus siete hojas y sus filas;
 //   - (2026-11-23) las tarjetas con el ultimo mes del periodo abajo, y el
 //     servidor de la tienda (98): sus cuentas en los dos sentidos, la hoja, el
-//     hallazgo, el aviso cuando no esta y sus cinco hojas del Excel;
+//     hallazgo, el aviso cuando no esta y sus cinco hojas del Excel (mas la
+//     del mapa, que prueba AnalisisModoAutonomoMapaSmoke.js);
 //   - que los nombres de los origenes y motivos sean los de reglas.py (si el
 //     repositorio lo trae al lado).
 //
@@ -305,8 +306,8 @@ libro(sinCambio).then(function (wb) {
   return libro(m);
 }).then(function (wb) {
   return Promise.resolve().then(function () {
-    Check('el Excel: las siete hojas y las cinco del servidor', ['Resumen', 'Causas de los IMs', 'No llegan al IM', 'Por mes', 'Tiendas', 'Eventos', 'Incidentes sin IM',
-          'Servidor por tipo', 'Servidor y Modo Autónomo', 'Fallas del servidor', 'Modo Autónomo y su servidor', 'Servidores'],
+    Check('el Excel: las siete hojas, las cinco del servidor y la del mapa', ['Resumen', 'Causas de los IMs', 'No llegan al IM', 'Por mes', 'Tiendas', 'Eventos', 'Incidentes sin IM',
+          'Servidor por tipo', 'Servidor y Modo Autónomo', 'Fallas del servidor', 'Modo Autónomo y su servidor', 'Servidores', 'Por estado'],
           wb.worksheets.map(function (w) { return w.name; }));
     var r = wb.getWorksheet('Resumen'), filaEv = r.getColumn(1).values.indexOf('Eventos de los IMs');
     Check('el resumen: cada tarjeta con el periodo y su ultimo mes', ['Eventos de los IMs', '8', '11 horas en Modo Autónomo', '3 (2 h)'],
