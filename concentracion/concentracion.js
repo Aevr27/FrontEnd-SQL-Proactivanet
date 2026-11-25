@@ -796,12 +796,12 @@
 
   /* Tickets generados por dia: una linea por servicio del Top 3, conteo
      diario (no acumulado). Tooltip por dia con los tres y su suma. */
-  function pintarTendencia(t) {
+  function pintarTendencia(t, errores) {
     destruir('tendencia');
     $('hint-tendencia').textContent = '';
     var v = vistaTendencia(t);
     $('sub-tendencia').textContent = subtituloTendencia(v);
-    if (!v) { mensaje('tendencia', 'Sin datos: la gráfica no llegó.', true); return; }
+    if (!v) { mensaje('tendencia', (errores && errores.tendencia) || 'Sin datos: la gráfica no llegó.', true); return; }
     if (!v.series.length || !v.dias.length) { mensaje('tendencia', mensajeVacio(ultima)); return; }
     mensaje('tendencia', null);
     $('hint-tendencia').textContent = resumenTendencia(v);
@@ -959,7 +959,7 @@
     $('cobertura').hidden = !cobertura;
     pintarPareto(d.pareto, errores);
     if (d.tendencia) llenarServicios(d.tendencia);
-    pintarTendencia(d.tendencia);
+    pintarTendencia(d.tendencia, errores);
     pintarHorizontal('categorias', d.categorias, errores);
     pintarHorizontal('grupos', d.grupos, errores);
     pintarCambios(d.cambios);

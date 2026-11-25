@@ -663,8 +663,10 @@ public static class ConcentracionContrato
            eleccion, no al ranking del periodo). Uno sin tickets con estos
            filtros sale en 0; su nombre, del periodo sin filtrar o el codigo.
        Las series se cuentan sobre `filtrados`: Slot/Mes, Service Owner y
-       Grupo ya aplicados. No usa dbo.usp_DashboardServicios_TendenciaDiaria
-       (ver DASHBOARD.md §3bis).
+       Grupo ya aplicados. La grafica toma dias y conteos de
+       dbo.usp_DashboardServicios_TendenciaDiaria (ConcentracionQueries.
+       TendenciaDesdeSp); de aqui salen las lineas, nombres y opciones, y
+       estas cuentas son el oraculo de la prueba de paridad.
        Dias = cada dia de los rangos del periodo, en orden; un servicio sin
        tickets ese dia vale 0. Los huecos entre meses NO elegidos no son dias
        del periodo y no se rellenan. Un ticket sin Dia o fuera de los rangos

@@ -90,6 +90,7 @@ public sealed class ConcentracionResultado
     public List<ConcentracionTicket> Filtrados;
     public DirectorioOrganizacional Directorio;
     public Exception FalloCambios;         // para la traza; no se serializa
+    public Exception FalloTendencia;       // para la traza; no se serializa
 
     // Medicion de esta peticion (Server-Timing y pruebas; no se serializa).
     public int TramosCache;            // tramos que ya estaban en la cache
@@ -689,6 +690,99 @@ WHERE ";
     /* Lo que ve el navegador si falla la lectura. Mismo criterio que
        QareQueries.MensajeBloque: nunca servidor, base, login ni el texto crudo
        de SQL Server, pero diciendo que objeto. */
+    /* "Tickets generados por dia" desde dbo.usp_DashboardServicios_TendenciaDiaria
+       (sql/44), para que un cambio de la cuenta en la USP llegue a la grafica
+       sin tocar el sitio. Las LINEAS (Top 3 o las elegidas, en su orden), las
+       opciones del selector y los nombres siguen saliendo de r.Tendencia
+       (ConcentracionContrato.Tendencia, sobre las filas ya filtradas); de la
+       USP solo se toman los dias y los conteos. Las cuentas en C# de
+       r.Tendencia se descartan aqui: quedan como oraculo de la prueba de
+       paridad (ConcentracionContratoSmoke, 2e).
+       Mismos filtros que la pestaña: SLOTS (acumulado) o MESES, Service Owner
+       y Grupo; la USP resuelve el dueño con la misma regla que
+       DirectorioOrganizacional (ver cabecera de sql/44).
+       Sin lineas (periodo o filtros sin tickets), no se llama: r.Tendencia
+       ya trae los dias en cero. Si la USP falla, null y r.FalloTendencia: la
+       grafica dice que no se pudo y las demas siguen; NO se cae a la cuenta
+       en C#, que escondería una diferencia entre las dos. */
+    public static Dictionary<string, object> TendenciaDesdeSp(ConcentracionFiltros f, ConcentracionResultado r,
+                                                              ConcentracionMedicion medicion)
+    {
+        var base_ = r.Tendencia;
+        var lineas = ((List<Dictionary<string, object>>)base_["series"]).Select(x => (string)x["Servicio"]).ToList();
+        if (lineas.Count == 0) return base_;
+
+        var reloj = Stopwatch.StartNew();
+        try
+        {
+            var porCodigo = new Dictionary<string, Dictionary<DateTime, int>>(StringComparer.OrdinalIgnoreCase);
+            var totales = new Dictionary<DateTime, int>();
+            var dias = new SortedSet<DateTime>();
+            using (var cn = new SqlConnection(DashboardDb.CadenaConexion()))
+            using (var cmd = new SqlCommand("dbo.usp_DashboardServicios_TendenciaDiaria", cn))
+            {
+                cmd.CommandType = CommandType.StoredProcedure;
+                cmd.CommandTimeout = TimeoutComandoSegundos;
+                if (f.Modo == ConcentracionContrato.ModoMes)
+                {
+                    cmd.Parameters.Add("@TipoPeriodo", SqlDbType.VarChar, 20).Value = "MESES";
+                    cmd.Parameters.Add("@Meses", SqlDbType.NVarChar, -1).Value =
+                        string.Join("|", MesesDe(f).ConvertAll(ConcentracionContrato.Mes).ToArray());
+                }
+                else
+                {
+                    cmd.Parameters.Add("@TipoPeriodo", SqlDbType.VarChar, 20).Value = "SLOTS";
+                    cmd.Parameters.Add("@Slot", SqlDbType.Int).Value = f.Slot;
+                }
+                cmd.Parameters.Add("@CodigosServicio", SqlDbType.NVarChar, -1).Value = string.Join("|", lineas.ToArray());
+                cmd.Parameters.Add("@ServiceOwners", SqlDbType.NVarChar, -1).Value =
+                    f.ServiceOwners.Count > 0 ? (object)string.Join("|", f.ServiceOwners.ToArray()) : DBNull.Value;
+                cmd.Parameters.Add("@Grupos", SqlDbType.NVarChar, -1).Value =
+                    f.Grupos.Count > 0 ? (object)string.Join("|", f.Grupos.ToArray()) : DBNull.Value;
+                cn.Open();
+                using (var rd = cmd.ExecuteReader())
+                {
+                    int cFecha = rd.GetOrdinal("Fecha"), cCodigo = rd.GetOrdinal("CodigoServicio"),
+                        cTickets = rd.GetOrdinal("TicketsServicio"), cTotal = rd.GetOrdinal("TicketsTotalDia");
+                    while (rd.Read())
+                    {
+                        var dia = Convert.ToDateTime(rd.GetValue(cFecha), CultureInfo.InvariantCulture).Date;
+                        var codigo = Convert.ToString(rd.GetValue(cCodigo), CultureInfo.InvariantCulture);
+                        Dictionary<DateTime, int> serie;
+                        if (!porCodigo.TryGetValue(codigo, out serie)) porCodigo[codigo] = serie = new Dictionary<DateTime, int>();
+                        serie[dia] = Convert.ToInt32(rd.GetValue(cTickets), CultureInfo.InvariantCulture);
+                        totales[dia] = Convert.ToInt32(rd.GetValue(cTotal), CultureInfo.InvariantCulture);
+                        dias.Add(dia);
+                    }
+                }
+            }
+
+            var listaDias = dias.ToList();
+            var salida = new Dictionary<string, object>(base_);
+            salida["dias"] = listaDias.ConvertAll(ConcentracionContrato.Dia);
+            salida["TicketsTotalDia"] = listaDias.ConvertAll(d => totales[d]);
+            salida["series"] = ((List<Dictionary<string, object>>)base_["series"]).Select(x =>
+            {
+                Dictionary<DateTime, int> serie;
+                porCodigo.TryGetValue((string)x["Servicio"], out serie);
+                var cuentas = listaDias.ConvertAll(d => { int n = 0; if (serie != null) serie.TryGetValue(d, out n); return n; });
+                return new Dictionary<string, object>
+                {
+                    { "Servicio", x["Servicio"] }, { "NombreServicio", x["NombreServicio"] },
+                    { "TicketsServicio", cuentas }, { "Total", cuentas.Sum() },
+                };
+            }).ToList();
+            if (medicion != null) medicion.Anotar("tendencia", reloj.Elapsed, "sp filas=" + listaDias.Count * lineas.Count);
+            return salida;
+        }
+        catch (Exception ex)
+        {
+            r.FalloTendencia = ex;
+            if (medicion != null) medicion.Anotar("tendencia", reloj.Elapsed, "error");
+            return null;
+        }
+    }
+
     public static string MensajeError(Exception ex)
     {
         var inv = ex as InvalidOperationException;

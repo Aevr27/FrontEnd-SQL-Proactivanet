@@ -32,7 +32,8 @@
 //     pareto:     [ { Posicion, Servicio, NombreServicio, CantidadTickets, TotalTickets, Porcentaje, PorcentajeAcumulado } ],
 //     categorias: [ { Posicion, Categoria, ... } ],
 //     grupos:     [ { Posicion, Grupo, ... } ],
-//     tendencia: { modo: "top" | "elegidos", elegidos: [codigos], maximo: 3,
+//     tendencia: { modo: "top" | "elegidos", elegidos: [codigos], maximo: 3,   null si la USP fallo
+//                  (dias y conteos de dbo.usp_DashboardServicios_TendenciaDiaria, sql/44)
 //                  dias: ["aaaa-mm-dd", ...], series: [ { Servicio, NombreServicio,
 //                  TicketsServicio: [n por dia], Total } ] (Top 3 del Pareto o los elegidos),
 //                  TicketsTotalDia: [suma de las series por dia], servicios,
@@ -49,7 +50,7 @@
 //         TicketsAnterior, Diferencia, VariacionPorcentaje } ] (Top 5; null si no es ok),
 //       serviciosAumento, serviciosReduccion, ticketsActual, ticketsAnterior (solo ok)
 //     },
-//     errores: {}, avisos: [ "..." ],      // errores.cambios si estado = error
+//     errores: {}, avisos: [ "..." ],      // errores.cambios si estado = error; errores.tendencia si la USP fallo
 //     dataInfo: { ...DashboardDataInfo... }
 //   }
 //   TODAS las filas de cada grafica, con el acumulado y el 80 % sobre todas;
@@ -64,6 +65,7 @@
 //   directorio catalogo de dueños (desc: cache o sql)
 //   calculo    Service Owner, cobertura, opciones, filtros y las tres cuentas
 //   anterior   periodo anterior y comparacion (desc: consultas, tramos, cache, filas)
+//   tendencia  dbo.usp_DashboardServicios_TendenciaDiaria (desc: filas o error)
 //   etl        sello de dbo.EtlLog
 //   json       serializacion
 //   total      desde que entro la peticion
@@ -114,8 +116,11 @@ public class Concentracion : IHttpHandler
             var cambios = ConcentracionQueries.Cambios(f, r, medicion);
             if (r.FalloCambios != null)
                 DashboardHandler.Registrar("concentracion.ashx cambios", r.FalloCambios);
+            var tendencia = ConcentracionQueries.TendenciaDesdeSp(f, r, medicion);
+            if (r.FalloTendencia != null)
+                DashboardHandler.Registrar("concentracion.ashx tendencia", r.FalloTendencia);
 
-            var salida = Salida(r, cambios, medicion);
+            var salida = Salida(r, cambios, tendencia, medicion);
             var reloj = Stopwatch.StartNew();
             var cuerpo = json.Serialize(salida);
             medicion.Anotar("json", reloj.Elapsed, null);
@@ -134,7 +139,7 @@ public class Concentracion : IHttpHandler
     }
 
     private static Dictionary<string, object> Salida(ConcentracionResultado r, Dictionary<string, object> cambios,
-                                                     ConcentracionMedicion medicion)
+                                                     Dictionary<string, object> tendencia, ConcentracionMedicion medicion)
     {
         var f = r.Filtros;
         var meses = new List<Dictionary<string, object>>();
@@ -178,10 +183,11 @@ public class Concentracion : IHttpHandler
         salida["pareto"] = r.Pareto;
         salida["categorias"] = r.Categorias;
         salida["grupos"] = r.Grupos;
-        salida["tendencia"] = r.Tendencia;
+        salida["tendencia"] = tendencia;
         salida["cambios"] = cambios;
         var errores = new Dictionary<string, object>();
         if ((string)cambios["estado"] == ConcentracionContrato.CambiosError) errores["cambios"] = cambios["mensaje"];
+        if (tendencia == null) errores["tendencia"] = ConcentracionQueries.MensajeError(r.FalloTendencia);
         salida["errores"] = errores;
         salida["avisos"] = r.Avisos;
         /* Sello del ETL (dbo.EtlLog), como SLA, QA y QARE, en la hora local del
