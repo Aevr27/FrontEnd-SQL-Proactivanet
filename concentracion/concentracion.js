@@ -410,7 +410,47 @@
     return 'Sin cambios: ningún servicio subió ni bajó respecto al periodo anterior.';
   }
 
+  // ---------------------------------------------------- tendencia diaria
+  var MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+  // "aaaa-mm-dd" -> "27 oct" (eje) o "27 oct 2026" (tooltip), sin pasar por Date.
+  function diaCorto(iso, conAnio) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    if (!m) return '';
+    return Number(m[3]) + ' ' + MESES_CORTOS[Number(m[2]) - 1] + (conAnio ? ' ' + m[1] : '');
+  }
+
+  /* "Tickets generados por dia": dias, series y totales del servidor tal
+     cual (el Top 3 y los ceros ya vienen resueltos). null = no llego. */
+  function vistaTendencia(t) {
+    if (!t || !t.dias || !t.series) return null;
+    var dias = t.dias.slice();
+    return {
+      dias: dias,
+      etiquetas: dias.map(function (d) { return diaCorto(d, false); }),
+      series: t.series.map(function (s) {
+        return {
+          servicio: s.Servicio,
+          nombre: etiquetaFila('pareto', s),
+          datos: dias.map(function (_, i) { var n = numero(s.TicketsServicio && s.TicketsServicio[i]); return n === null ? 0 : n; }),
+          total: numero(s.Total),
+        };
+      }),
+      totales: dias.map(function (_, i) { return numero(t.TicketsTotalDia && t.TicketsTotalDia[i]); }),
+      servicios: numero(t.servicios),
+    };
+  }
+
+  // "Top 3 de 33 servicios · 30 días"
+  function resumenTendencia(v) {
+    if (!v || !v.series.length) return '';
+    var n = v.series.length, de = v.servicios !== null && v.servicios > n ? ' de ' + NUM.format(v.servicios) : '';
+    return 'Top ' + n + de + ' ' + (v.servicios === 1 ? 'servicio' : 'servicios') + ' · ' +
+           NUM.format(v.dias.length) + (v.dias.length === 1 ? ' día' : ' días');
+  }
+
   var ConcentracionDatos = {
+    diaCorto: diaCorto, vistaTendencia: vistaTendencia, resumenTendencia: resumenTendencia,
     consulta: consulta, mesesDe: mesesDe, textoActivos: textoActivos, mensajeVacio: mensajeVacio,
     TOP: TOP, UMBRAL: UMBRAL, SLOT_MAXIMO: SLOT_MAXIMO, LARGO_ETIQUETA: LARGO_ETIQUETA,
     numero: numero, etiquetaFila: etiquetaFila, abreviarRuta: abreviarRuta, recortar: recortar,
@@ -463,6 +503,11 @@
                 acumulado: '#d39a3a', referencia: '#8a94a6',
                 sube: '#ff4646', baja: '#4CAF50' };
   var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1f6', cero: '#8a94a6' };
+  /* Tendencia diaria: azul cielo, verde y rojo claro de la propia pestaña,
+     en el orden del Pareto. El azul es AZUL_AGENTE sin la transparencia de la
+     barra (al 0.5 una linea de 2px se pierde en la rejilla); verde y rojo son
+     COLOR.baja / COLOR.sube. Aqui identifican servicio, no suben/bajan. */
+  var COLOR_TENDENCIA = ['rgb(54, 162, 235)', COLOR.baja, COLOR.sube];
 
   var graficas = {};
   // Lo que el usuario eligio; viaja completo en cada peticion y en cada refresco.
@@ -712,6 +757,61 @@
     }).render();
   }
 
+  /* Tickets generados por dia: una linea por servicio del Top 3, conteo
+     diario (no acumulado). Tooltip por dia con los tres y su suma. */
+  function pintarTendencia(t) {
+    destruir('tendencia');
+    $('hint-tendencia').textContent = '';
+    var v = vistaTendencia(t);
+    if (!v) { mensaje('tendencia', 'Sin datos: la gráfica no llegó.', true); return; }
+    if (!v.series.length || !v.dias.length) { mensaje('tendencia', mensajeVacio(ultima)); return; }
+    mensaje('tendencia', null);
+    $('hint-tendencia').textContent = resumenTendencia(v);
+    var estrecho = $('chart-tendencia').parentNode.clientWidth < ANCHO_ESTRECHO;
+    // Con meses de dias los puntos se vuelven una mancha: se ven al pasar el raton.
+    var radio = v.dias.length <= 45 ? 3 : (v.dias.length <= 100 ? 1.5 : 0);
+    graficas.tendencia = new Chart($('chart-tendencia'), {
+      type: 'line',
+      data: {
+        labels: v.etiquetas,
+        datasets: v.series.map(function (s, i) {
+          var c = COLOR_TENDENCIA[i % COLOR_TENDENCIA.length];
+          return { label: s.nombre, data: s.datos, borderColor: c, backgroundColor: c,
+                   borderWidth: 2, tension: 0.25, pointRadius: radio, pointHoverRadius: 5, fill: false };
+        }),
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom',
+                    labels: { color: TINTA.etiqueta, usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8,
+                              font: { size: 12 } } },
+          tooltip: {
+            callbacks: {
+              title: function (items) { return items.length ? diaCorto(v.dias[items[0].dataIndex], true) : ''; },
+              label: function (item) { return item.dataset.label + ': ' + NUM.format(item.parsed.y); },
+              footer: function (items) {
+                if (!items.length || v.series.length < 2) return '';
+                var n = v.totales[items[0].dataIndex];
+                return n === null ? '' : 'Total de los ' + v.series.length + ': ' + NUM.format(n);
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: TINTA.eje, autoSkip: true, maxTicksLimit: estrecho ? 6 : 14, maxRotation: 0, font: { size: 11.5 } },
+               grid: { display: false },
+               title: { display: !estrecho, text: 'Fecha', color: TINTA.eje, font: { size: 12 } } },
+          y: { beginAtZero: true, grace: '8%', ticks: { precision: 0, color: TINTA.eje, font: { size: 12 } },
+               grid: { color: TINTA.rejilla },
+               title: { display: true, text: 'Tickets generados', color: TINTA.eje, font: { size: 12 } } },
+        },
+      },
+    });
+  }
+
   // ------------------------------------------------------------ peticion
   /* senal: AbortSignal de la peticion (cargar la cancela cuando otra la
      reemplaza). Cancelar solo deja de esperar en el navegador: si el
@@ -741,7 +841,7 @@
 
   function esCancelada(err) { return !!err && err.name === 'AbortError'; }
 
-  var CLAVES = ['pareto', 'categorias', 'grupos', 'cambios'];
+  var CLAVES = ['pareto', 'tendencia', 'categorias', 'grupos', 'cambios'];
 
   function enEspera() {
     CLAVES.forEach(function (k) { mensaje(k, 'Calculando…'); $('hint-' + k).textContent = ''; });
@@ -801,6 +901,7 @@
     $('cobertura').textContent = cobertura;
     $('cobertura').hidden = !cobertura;
     pintarPareto(d.pareto, errores);
+    pintarTendencia(d.tendencia);
     pintarHorizontal('categorias', d.categorias, errores);
     pintarHorizontal('grupos', d.grupos, errores);
     pintarCambios(d.cambios);

@@ -31,6 +31,9 @@
 //     pareto:     [ { Posicion, Servicio, NombreServicio, CantidadTickets, TotalTickets, Porcentaje, PorcentajeAcumulado } ],
 //     categorias: [ { Posicion, Categoria, ... } ],
 //     grupos:     [ { Posicion, Grupo, ... } ],
+//     tendencia: { dias: ["aaaa-mm-dd", ...], series: [ { Servicio, NombreServicio,
+//                  TicketsServicio: [n por dia], Total } ] (Top 3 del Pareto),
+//                  TicketsTotalDia: [suma de las series por dia], servicios },
 //     cambios: {                                  // vs el periodo anterior (2026-11-18)
 //       estado: "ok" | "historiaInsuficiente" | "error", mensaje (solo error),
 //       motivo: "ventanaMinima" | "noConsecutivos" (solo historiaInsuficiente),
@@ -171,6 +174,7 @@ public class Concentracion : IHttpHandler
         salida["pareto"] = r.Pareto;
         salida["categorias"] = r.Categorias;
         salida["grupos"] = r.Grupos;
+        salida["tendencia"] = r.Tendencia;
         salida["cambios"] = cambios;
         var errores = new Dictionary<string, object>();
         if ((string)cambios["estado"] == ConcentracionContrato.CambiosError) errores["cambios"] = cambios["mensaje"];

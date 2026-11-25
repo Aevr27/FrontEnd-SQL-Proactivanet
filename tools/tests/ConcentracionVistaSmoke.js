@@ -20,6 +20,8 @@
 //   A  texto de lo aplicado (periodo con fechas, SO, Grupo, tickets).
 //   X  mayor cambio de tickets: orden, signo, colores, eje, mensajes de
 //      historia insuficiente / error / sin cambios.
+//   D  tickets generados por dia: fechas cortas, series del servidor tal
+//      cual, menos de 3 servicios, vacio y respuesta sin tendencia.
 //
 //   node tools\tests\ConcentracionVistaSmoke.js   # PASS/FAIL por caso, sale 0 si todo paso
 'use strict';
@@ -266,6 +268,24 @@ var noSeguidos = { estado: 'historiaInsuficiente', motivo: 'noConsecutivos', aum
 Check('X18 meses no consecutivos: lo dice y sugiere consecutivos o Slot',
   'Sin historial suficiente para comparar estos meses no consecutivos: el periodo anterior (01/10/2025–31/10/2025, 01/12/2025–31/12/2025) no está completo. ' +
   'Elige meses consecutivos o un Slot para ver una comparación acotada.', D.mensajeCambios(noSeguidos, null));
+
+// ---- D: tendencia diaria
+Check('D1 dia corto para el eje y con año para el tooltip; basura = vacio', ['27 oct', '1 nov 2026', ''],
+  [D.diaCorto('2026-10-27', false), D.diaCorto('2026-11-01', true), D.diaCorto('x', true)]);
+var tend = { dias: ['2026-10-31', '2026-11-01'], servicios: 33, TicketsTotalDia: [117, 21],
+  series: [{ Servicio: 'EQC', NombreServicio: 'Equipo de Cómputo', TicketsServicio: [79, 4], Total: 83 },
+           { Servicio: 'CAJ', NombreServicio: 'Caja General', TicketsServicio: [38, 17], Total: 55 },
+           { Servicio: 'BIO', NombreServicio: '', TicketsServicio: [0, 0], Total: 0 }] };
+var vt = D.vistaTendencia(tend);
+Check('D2 series del servidor tal cual: nombre (o codigo sin nombre), ceros, totales del dia',
+  [['31 oct', '1 nov'], ['Equipo de Cómputo', 'Caja General', 'BIO'], [79, 4], [0, 0], [117, 21]],
+  [vt.etiquetas, vt.series.map(function (s) { return s.nombre; }), vt.series[0].datos, vt.series[2].datos, vt.totales]);
+Check('D3 resumen: Top 3 de 33 servicios y dias', 'Top 3 de 33 servicios · 2 días', D.resumenTendencia(vt));
+var unaSerie = { dias: ['2026-11-01'], servicios: 1, TicketsTotalDia: [4], series: [tend.series[0]] };
+Check('D4 un solo servicio: sin "de N"', 'Top 1 servicio · 1 día', D.resumenTendencia(D.vistaTendencia(unaSerie)));
+Check('D5 vacio = sin series (sin resumen); respuesta sin tendencia (servidor viejo) = null',
+  [0, '', null], [D.vistaTendencia({ dias: ['2026-11-01'], series: [], TicketsTotalDia: [0], servicios: 0 }).series.length,
+                  D.resumenTendencia(D.vistaTendencia({ dias: [], series: [], servicios: 0 })), D.vistaTendencia(undefined)]);
 
 console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
 process.exit(fallos ? 1 : 0);

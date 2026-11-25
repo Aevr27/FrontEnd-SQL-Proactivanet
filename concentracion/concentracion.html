@@ -138,6 +138,18 @@
       </div>
     </section>
 
+    <!-- Tendencia diaria de los 3 primeros servicios del Pareto (mismos
+         filtros; la serie la arma el servidor con ceros en los dias sin
+         tickets). Conteo diario, no acumulado. -->
+    <section class="card conc-seccion">
+      <h3>Tickets generados por día<span class="hint" id="conc-hint-tendencia"></span></h3>
+      <p class="conc-sub">Tendencia diaria de los 3 servicios con mayor volumen de tickets</p>
+      <div class="lienzo conc-lienzo-tendencia">
+        <canvas id="conc-chart-tendencia" role="img" aria-label="Tickets generados por día de los 3 servicios con más tickets"></canvas>
+        <p class="conc-msg" id="conc-msg-tendencia">Calculando…</p>
+      </div>
+    </section>
+
     <section class="grid2x2">
       <div class="card conc-seccion">
         <h3>Tickets por categoría<span class="hint" id="conc-hint-categorias"></span></h3>

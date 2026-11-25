@@ -179,6 +179,59 @@ public static class ConcentracionContratoSmoke
             string.Join(",", op.Select(o => o["valor"] + ":" + o["tickets"]).ToArray()));
 
         ComparacionPura();
+        TendenciaPura();
+    }
+
+    // ------------------------------------------- 1c) tendencia diaria (2026-11-25)
+    static ConcentracionTicket TD(string codigo, string servicio, DateTime? dia)
+    {
+        return new ConcentracionTicket { Codigo = codigo, Servicio = servicio, NombreServicio = servicio + " nombre", Dia = dia };
+    }
+
+    static string SerieTD(Dictionary<string, object> t)
+    {
+        return string.Join(";", ((List<Dictionary<string, object>>)t["series"]).Select(x =>
+            x["Servicio"] + "=" + string.Join(",", ((List<int>)x["TicketsServicio"]).Select(n => n.ToString()).ToArray()) + "/" + x["Total"]).ToArray());
+    }
+
+    static void TendenciaPura()
+    {
+        var d1 = new DateTime(2026, 11, 1); var d2 = d1.AddDays(1); var d3 = d1.AddDays(2);
+        var rango = new[] { new KeyValuePair<DateTime, DateTime>(d1, d3) };
+        // A 4, B 3, C 2, D 1: el Top 3 es A, B, C. B no tiene tickets el dia 2.
+        var tk = new List<ConcentracionTicket> {
+            TD("a1", "A", d1), TD("a2", "A", d2), TD("a3", "A", d2), TD("a4", "A", d3),
+            TD("b1", "B", d1), TD("b2", "B", d3), TD("b3", "B", d3),
+            TD("c1", "C", d2), TD("c2", "C", d3),
+            TD("d1", "D", d1) };
+        tk.Add(tk[0]);   // el mismo ticket dos veces cuenta uno
+        var t = ConcentracionContrato.Tendencia(tk, ConcentracionContrato.Pareto(tk), rango, 3);
+        Chk("TD1 Top 3 del Pareto, conteo diario (no acumulado), dia sin tickets = 0, duplicado cuenta uno",
+            "A=1,2,1/4;B=1,0,2/3;C=0,1,1/2", SerieTD(t));
+        Chk("TD2 dias en orden y TicketsTotalDia = suma de las series pintadas (D fuera)", "2026-11-01,2026-11-02,2026-11-03|2,3,4|4",
+            string.Join(",", ((List<string>)t["dias"]).ToArray()) + "|" + string.Join(",", ((List<int>)t["TicketsTotalDia"]).Select(n => n.ToString()).ToArray()) + "|" + t["servicios"]);
+        Chk("TD3 nombre del servicio = el del Pareto", "A nombre", ((List<Dictionary<string, object>>)t["series"])[0]["NombreServicio"]);
+
+        // Con filtros distintos entra otro servicio: el Top se calcula DESPUES de filtrar.
+        var sinA = tk.Where(x => x.Servicio != "A").ToList();
+        Chk("TD4 sin A (filtrado): entran B, C, D", "B=1,0,2/3;C=0,1,1/2;D=1,0,0/1",
+            SerieTD(ConcentracionContrato.Tendencia(sinA, ConcentracionContrato.Pareto(sinA), rango, 3)));
+        var dos = tk.Where(x => x.Servicio == "B" || x.Servicio == "C").ToList();
+        Chk("TD5 menos de 3 servicios: solo los que hay", "B=1,0,2/3;C=0,1,1/2",
+            SerieTD(ConcentracionContrato.Tendencia(dos, ConcentracionContrato.Pareto(dos), rango, 3)));
+        var vacio = ConcentracionContrato.Tendencia(new ConcentracionTicket[0], ConcentracionContrato.Pareto(new ConcentracionTicket[0]), rango, 3);
+        Chk("TD6 sin tickets: sin series, los dias del periodo y totales en 0", "|3|0,0,0",
+            SerieTD(vacio) + "|" + ((List<string>)vacio["dias"]).Count + "|" + string.Join(",", ((List<int>)vacio["TicketsTotalDia"]).Select(n => n.ToString()).ToArray()));
+
+        // Meses no seguidos: solo los dias de cada rango, sin rellenar el hueco.
+        var dosRangos = new[] { new KeyValuePair<DateTime, DateTime>(new DateTime(2026, 11, 1), new DateTime(2026, 11, 2)),
+                                new KeyValuePair<DateTime, DateTime>(new DateTime(2026, 9, 29), new DateTime(2026, 9, 30)) };
+        var tm = new List<ConcentracionTicket> { TD("x1", "A", new DateTime(2026, 9, 30)), TD("x2", "A", new DateTime(2026, 11, 2)),
+                                                 TD("x3", "A", new DateTime(2026, 10, 15)), TD("x4", "A", null) };
+        var t2 = ConcentracionContrato.Tendencia(tm, ConcentracionContrato.Pareto(tm), dosRangos, 3);
+        Chk("TD7 meses no seguidos: dias de los rangos en orden, sin el hueco; fuera de rango o sin dia no caen en ningun dia",
+            "2026-09-29,2026-09-30,2026-11-01,2026-11-02|A=0,1,0,1/2",
+            string.Join(",", ((List<string>)t2["dias"]).ToArray()) + "|" + SerieTD(t2));
     }
 
     // ------------------------------------------- 1b) comparacion (2026-11-18)
@@ -550,6 +603,9 @@ GO";
             Col(Lista(d["pareto"]), "Servicio") + "|" + Col(Lista(d["pareto"]), "CantidadTickets"));
         Chk("totales propios: pareto|categorias|grupos|filtrados/periodo", "12|11|11|12/12", Totales(d));
         Chk("sin avisos", 0, ((object[])d["avisos"]).Length);
+        var tend = (Dictionary<string, object>)d["tendencia"];
+        Chk("tendencia sin filtros: Top 3 del Pareto, un valor por dia del Slot 0 (30)", "PU,EQC,WMS|30|30",
+            Col(Lista(tend["series"]), "Servicio") + "|" + ((object[])tend["dias"]).Length + "|" + ((object[])tend["TicketsTotalDia"]).Length);
 
         var hoy = ConcentracionContrato.HoyMexico(DateTime.UtcNow);
         DateTime desde, hasta;
@@ -577,6 +633,10 @@ GO";
         d = Pedir("grupo=Service%20Desk", out estado);
         Chk("Grupo Service Desk: las tres graficas filtradas", "PU|4|3|4|4/12", Col(Lista(d["pareto"]), "Servicio") + "|" + Totales(d));
         Chk("Grupo: la grafica de grupos solo trae el elegido", "Service Desk", Col(Lista(d["grupos"]), "Grupo"));
+        Chk("Grupo: la tendencia sigue al filtro (sus series = el Top del Pareto filtrado, sumas = cantidades)",
+            Col(Lista(d["pareto"]).Take(3).ToList(), "Servicio") + "|" + Col(Lista(d["pareto"]).Take(3).ToList(), "CantidadTickets"),
+            Col(Lista(((Dictionary<string, object>)d["tendencia"])["series"]), "Servicio") + "|" +
+            string.Join(",", Lista(((Dictionary<string, object>)d["tendencia"])["series"]).Select(x => ((object[])x["TicketsServicio"]).Sum(n => Convert.ToInt32(n)).ToString()).ToArray()));
         d = Pedir("so=Beto%20SO&grupo=Service%20Desk", out estado);
         Chk("SO y Grupo juntos", "2|2|2|2/12", Totales(d));
         d = Pedir("so=Ana%20SO&grupo=Soporte%20RETO", out estado);
@@ -1105,7 +1165,7 @@ GO";
         var d1 = (Dictionary<string, object>)js.DeserializeObject(frio);
         var d2 = (Dictionary<string, object>)js.DeserializeObject(tibio);
         Chk("ST5 el JSON sigue con las mismas llaves del contrato",
-            "modo,slot,mes,mesesElegidos,slotMaximo,meses,periodo,filtros,opciones,ticketsPeriodo,ticketsFiltrados,cobertura,pareto,categorias,grupos,cambios,errores,avisos,dataInfo",
+            "modo,slot,mes,mesesElegidos,slotMaximo,meses,periodo,filtros,opciones,ticketsPeriodo,ticketsFiltrados,cobertura,pareto,categorias,grupos,tendencia,cambios,errores,avisos,dataInfo",
             string.Join(",", d1.Keys.ToArray()));
         Chk("ST6 el cuerpo en frio y desde la cache es el mismo", true, frio == tibio);
         int e3; string t3;

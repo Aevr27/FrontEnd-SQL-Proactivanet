@@ -78,6 +78,7 @@ public sealed class ConcentracionResultado
     public List<Dictionary<string, object>> Pareto;
     public List<Dictionary<string, object>> Categorias;
     public List<Dictionary<string, object>> Grupos;
+    public Dictionary<string, object> Tendencia;
     public List<Dictionary<string, object>> OpcionesServiceOwner;
     public List<Dictionary<string, object>> OpcionesGrupo;
     public Dictionary<string, object> Cobertura;
@@ -242,6 +243,7 @@ WHERE ";
         r.Pareto = ConcentracionContrato.Pareto(filtrados);
         r.Categorias = ConcentracionContrato.Categorias(filtrados);
         r.Grupos = ConcentracionContrato.Grupos(filtrados);
+        r.Tendencia = ConcentracionContrato.Tendencia(filtrados, r.Pareto, r.Rangos, ConcentracionContrato.TopTendencia);
         if (medicion != null)
             medicion.Anotar("calculo", reloj.Elapsed, "tickets=" + tickets.Count + " filtrados=" + filtrados.Count);
         return r;
