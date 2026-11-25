@@ -24,6 +24,10 @@
 //     director=, po=, manager=, so=
 //                     opcionales; vacio = sin restriccion. Viajan como
 //                     valores a comparar en memoria, nunca como SQL.
+//     ti=excluir [&ti_permisos=dejar]
+//                     opcional: el boton "Sin TI a TI" de la pestana. Quita
+//                     los de TI a TI (TicketTIaTI), o todos menos los de
+//                     permisos. Sin el, el libro de siempre.
 //
 // Respuesta:
 //
@@ -100,10 +104,11 @@ public class ExperienciaExportar : IHttpHandler
             var po = Filtro(q["po"], "po");
             var manager = Filtro(q["manager"], "manager");
             var so = Filtro(q["so"], "so");
+            var ti = TicketTIaTI.Desde(context.Request);
 
             var tickets = modo == ExperienciaQueries.MODO_RANGO
-                ? ExperienciaQueries.ExportarTicketsRango(inicio, fin, director, po, manager, so)
-                : ExperienciaQueries.ExportarTickets(modo, anio, mes, director, po, manager, so);
+                ? ExperienciaQueries.ExportarTicketsRango(inicio, fin, director, po, manager, so, ti)
+                : ExperienciaQueries.ExportarTickets(modo, anio, mes, director, po, manager, so, ti);
             bool esRango = modo == ExperienciaQueries.MODO_RANGO;
 
             var salida = new Dictionary<string, object>

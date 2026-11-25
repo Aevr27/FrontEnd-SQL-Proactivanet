@@ -134,6 +134,27 @@ cursor:pointer;font-size:12px;font-weight:700}
 .selrow .segmentado button:hover{background:var(--g-50);border-color:var(--g-200)}
 .selrow .segmentado button[aria-pressed="true"]{background:var(--grad-btn);color:var(--btn-ink);font-weight:700}
 .selrow .segmentado button:focus-visible{outline:2px solid var(--g-800);outline-offset:-2px}
+/* Boton "TI a TI": como "Sin proveedores" de SLA, el reposo es el verde de
+   los botones y el estado "Sin TI a TI" deja fijo el de hover. El ancho
+   minimo evita que la fila brinque al cambiar el texto. */
+.selrow .btn-ti{min-width:110px}
+.selrow .btn-ti[data-estado="excluir"]{background:var(--grad-btn-hover);border-color:var(--g-800)}
+.selrow .btn-ti:disabled{opacity:.55;cursor:default}
+.selrow .btn-ti:disabled:hover{background:var(--grad-btn);border-color:var(--g-700)}
+.selrow .btn-ti:focus-visible{outline:2px solid var(--g-800);outline-offset:2px}
+/* El boton y su casilla van juntos: si la fila se parte, se van los dos. La
+   casilla, sin el rotulo en mayusculas de .selrow label. */
+.selrow .ti-fila{display:flex;align-items:center;gap:10px}
+.selrow .casilla-ti{display:flex;align-items:center;gap:6px;min-height:34px;
+text-transform:none;letter-spacing:0;font-size:12px;color:var(--ink);cursor:pointer}
+.selrow .casilla-ti input{width:15px;height:15px;accent-color:var(--g-700);margin:0}
+.selrow .casilla-ti input:disabled{cursor:default}
+.selrow [hidden]{display:none}
+/* Que quito "Sin TI a TI": una franja entre los filtros y los KPIs. */
+.nota-ti{background:var(--g-50);border:1px solid var(--g-100);border-left:4px solid var(--g-700);
+border-radius:10px;padding:10px 14px;margin:-4px 0 14px;font-size:12.5px;line-height:1.45;color:var(--ink-2)}
+.nota-ti b{color:var(--ink)}
+.nota-ti[hidden]{display:none}
 
 /* Botones de accion que viven en los paneles, fuera de la cabecera: sin regla
    propia salian con el gris del navegador o con verdes sueltos en el HTML.

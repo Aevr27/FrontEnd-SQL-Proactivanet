@@ -15,6 +15,9 @@
 //                            completos de 30 dias que acaban en fecha_fin;
 //                            mes: meses completos de un solo año.
 //     tipo=inc|req           opcional, el mismo de kpis.ashx (TipoRegistroSla).
+//     ti=excluir [&ti_permisos=dejar]
+//                            opcional: "Sin TI a TI" (TicketTIaTI), para que
+//                            "Volumen - Automatizado" reste lo mismo que se ve.
 //
 // Respuesta:
 //
@@ -38,7 +41,7 @@ public class ExperienciaAutomatizados : IHttpHandler
             var q = context.Request.QueryString;
             var modo = (q["modo"] ?? "").Trim().ToLowerInvariant();
             return ExperienciaQueries.Automatizados(modo, Fecha(q["fecha_inicio"]), Fecha(q["fecha_fin"]),
-                DashboardQueries.TipoRegistroSla.Desde(context.Request));
+                DashboardQueries.TipoRegistroSla.Desde(context.Request), TicketTIaTI.Desde(context.Request));
         });
     }
 
