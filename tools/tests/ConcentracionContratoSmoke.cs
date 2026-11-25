@@ -35,6 +35,11 @@
 //      cuenta por codigo (Top 5, empates, 0 fuera, cambio de rama), filtros
 //      SO y Grupo en los dos periodos, historia insuficiente, vacio, error
 //      de lectura y un oraculo SQL independiente.
+//   2e) sql/44 (usp_DashboardServicios_TendenciaDiaria con filtros,
+//      2026-11-25): las llamadas de antes (SLOT, MES, FECHAS, ramas) dan las
+//      mismas filas que la version de QA (44_..._rollback) y, con SLOTS /
+//      MESES + codigos + Service Owner + Grupo, la misma serie que la
+//      tendencia de la pestaña, dia por dia.
 //   3) Guardas: la pestaña no llama a nada de Analisis de servicios y el
 //      backend ya no llama a los SP.
 //
@@ -790,6 +795,7 @@ GO";
         CachePorMes(cadena, hoy);
         ServerTiming(cadena, hoy);
         ComparacionSql(cadena, hoy);
+        TendenciaSp(cadena, raiz, hoy);
 
         // --- Sin catalogo de dueños: aviso, sin filtro SO; filtrar por SO = 500.
         Lotes(cadena, "EXEC sp_rename 'dbo.CatCategoriaDueno', 'CatCategoriaDueno_x';");
@@ -1459,6 +1465,129 @@ GO";
         finally
         {
             Lotes(cadena, "DELETE dbo.vw_ServicioTickets; INSERT dbo.vw_ServicioTickets SELECT * FROM dbo.vw_respaldo; DROP TABLE dbo.vw_respaldo;");
+            ConcentracionQueries.LimpiarCache();
+        }
+    }
+
+    // ------------------------------------- 2e) sql/44 contra la pestaña
+    const string Sp = "dbo.usp_DashboardServicios_TendenciaDiaria";
+
+    static string Valor(object v)
+    {
+        if (v == null || v is DBNull) return "null";
+        if (v is DateTime) return Dia((DateTime)v);
+        return Convert.ToString(v, CultureInfo.InvariantCulture);
+    }
+
+    // Las columnas de la version de QA, en su orden, fila por fila.
+    static readonly string[] ColumnasQa = { "TipoPeriodo", "Slot", "CalendarYearMonth", "FechaInicioPeriodo", "FechaFinPeriodo",
+        "SeleccionServicios", "CantidadServiciosSeleccionados", "Fecha", "RamaServicio", "TicketsServicio", "TicketsTotalDia" };
+
+    static string FilasQa(List<Dictionary<string, object>> filas)
+    {
+        return filas.Count + ":" + string.Join(";", filas.Select(f => string.Join("|", ColumnasQa.Select(c => Valor(f[c])).ToArray())).ToArray());
+    }
+
+    // dia|codigo|tickets|total, ordenado por dia y codigo.
+    static string SerieSp(List<Dictionary<string, object>> filas)
+    {
+        return string.Join(";", filas
+            .Select(f => new { D = Valor(f["Fecha"]).Substring(0, 10), C = (string)f["CodigoServicio"], N = Valor(f["TicketsServicio"]), T = Valor(f["TicketsTotalDia"]) })
+            .OrderBy(x => x.D, StringComparer.Ordinal).ThenBy(x => x.C, StringComparer.Ordinal)
+            .Select(x => x.D + "|" + x.C + "|" + x.N + "|" + x.T).ToArray());
+    }
+
+    static string SerieHandler(Dictionary<string, object> d)
+    {
+        var t = (Dictionary<string, object>)d["tendencia"];
+        var dias = ((object[])t["dias"]).Select(x => (string)x).ToList();
+        var totales = (object[])t["TicketsTotalDia"];
+        var filas = new List<string>();
+        for (int i = 0; i < dias.Count; i++)
+            foreach (var s in Lista(t["series"]).OrderBy(x => (string)x["Servicio"], StringComparer.Ordinal))
+                filas.Add(dias[i] + "|" + s["Servicio"] + "|" + Valor(((object[])s["TicketsServicio"])[i]) + "|" + Valor(totales[i]));
+        return string.Join(";", filas.ToArray());
+    }
+
+    static int SumaSp(List<Dictionary<string, object>> filas)
+    {
+        return filas.Sum(f => Convert.ToInt32(f["TicketsServicio"]));
+    }
+
+    static string FallaSql(string cadena, string sql)
+    {
+        try { Exec(cadena, sql); return "sin error"; }
+        catch (SqlException ex) { return ex.Message; }
+    }
+
+    static void TendenciaSp(string cadena, string raiz, DateTime hoy)
+    {
+        // Calendar_YearMonth lo usa MES; solo en esta seccion (ComparacionSql
+        // restaura la tabla con SELECT *, que no admite columnas calculadas).
+        Lotes(cadena, "ALTER TABLE dbo.vw_ServicioTickets ADD Calendar_YearMonth AS CONVERT(VARCHAR(7), FechaRegistro, 120);");
+        try
+        {
+            var mes = hoy.ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            var llamadasQa = new[] {
+                "EXEC " + Sp,
+                "EXEC " + Sp + " @TipoPeriodo = 'slot', @Slot = 0, @Servicios = N'S-Punto de Venta|S-Aplicativos Punto de Venta|S-FENIX WMS'",
+                "EXEC " + Sp + " @TipoPeriodo = 'FECHAS', @FechaInicio = '" + Dia(hoy.AddDays(-75)) + "', @FechaFin = '" + Dia(hoy) + "', @Servicios = N'SAP|S-Equipo de Computo'",
+                "EXEC " + Sp + " @TipoPeriodo = 'MES', @CalendarYearMonth = '" + mes + "'",
+            };
+
+            Script(cadena, Path.Combine(raiz, @"sql\44_tendencia_diaria_filtros_rollback.sql"));
+            var antes = llamadasQa.Select(q => FilasQa(Exec(cadena, q))).ToList();
+            Script(cadena, Path.Combine(raiz, @"sql\44_tendencia_diaria_filtros.sql"));
+            var despues = llamadasQa.Select(q => FilasQa(Exec(cadena, q))).ToList();
+            Chk("SP1 44: las llamadas de antes (SLOT por omision, SLOT con ramas, FECHAS, MES) dan las mismas filas y columnas",
+                "True|True|True|True", string.Join("|", antes.Select((a, i) => (a == despues[i] && !a.StartsWith("0:")).ToString()).ToArray()));
+            var ramas = Exec(cadena, llamadasQa[1]);
+            Chk("SP2 44: en modo ramas las columnas nuevas van en NULL", "null|null",
+                Valor(ramas[0]["CodigoServicio"]) + "|" + Valor(ramas[0]["NombreServicio"]));
+
+            // Paridad con la pestaña: mismos filtros, mismos codigos.
+            var hace2 = hoy.AddMonths(-2).ToString("yyyy-MM", CultureInfo.InvariantCulture);
+            var casos = new[] {
+                new { Q = "slot=0", P = "@TipoPeriodo = 'SLOTS', @Slot = 0", C = "PU|EQC|WMS" },
+                new { Q = "slot=3", P = "@TipoPeriodo = 'SLOTS', @Slot = 3", C = "PU|EQC|WMS" },
+                new { Q = "slot=3", P = "@TipoPeriodo = 'SLOTS', @Slot = 3", C = "SAP|PU" },
+                new { Q = "slot=3&so=Ana%20SO", P = "@TipoPeriodo = 'SLOTS', @Slot = 3, @ServiceOwners = N'Ana SO'", C = "PU|EQC|WMS" },
+                new { Q = "slot=3&so=" + HttpUtility.UrlEncode(ConcentracionContrato.SinServiceOwner), P = "@TipoPeriodo = 'SLOTS', @Slot = 3, @ServiceOwners = N'(Sin Service Owner)'", C = "PU|EQC|WMS" },
+                new { Q = "slot=3&grupo=Service%20Desk", P = "@TipoPeriodo = 'SLOTS', @Slot = 3, @Grupos = N'Service Desk'", C = "PU|EQC|WMS" },
+                new { Q = "slot=3&so=Beto%20SO%7CAna%20SO&grupo=Service%20Desk%7CSoporte%20Campo", P = "@TipoPeriodo = 'SLOTS', @Slot = 3, @ServiceOwners = N'Beto SO|Ana SO', @Grupos = N'Service Desk|Soporte Campo'", C = "PU|EQC" },
+                new { Q = "modo=mes&mes=" + mes, P = "@TipoPeriodo = 'MESES', @Meses = '" + mes + "'", C = "PU|EQC|WMS" },
+                new { Q = "modo=mes&mes=" + mes + "%7C" + hace2, P = "@TipoPeriodo = 'MESES', @Meses = '" + mes + "|" + hace2 + "'", C = "PU|EQC|WMS" },
+            };
+            var resultados = new List<string>();
+            var sumas = new List<int>();
+            foreach (var c in casos)
+            {
+                ConcentracionQueries.LimpiarCache();
+                int estado;
+                var d = Pedir(c.Q + "&servicios=" + HttpUtility.UrlEncode(c.C), out estado);
+                var sp = Exec(cadena, "EXEC " + Sp + " " + c.P + ", @CodigosServicio = N'" + c.C + "'");
+                var a = SerieSp(sp); var b = SerieHandler(d);
+                resultados.Add(estado == 200 && a == b ? "igual" : c.Q + " SP[" + a + "] pestaña[" + b + "]");
+                sumas.Add(SumaSp(sp));
+            }
+            Chk("SP3 44 = pestaña, dia por dia (codigos, Slot acumulado, varios meses, SO, sin SO, Grupo, SO+Grupo)",
+                string.Join(",", casos.Select(x => "igual").ToArray()), string.Join(",", resultados.ToArray()));
+            Chk("SP4 los casos de paridad tienen tickets (no comparan ceros contra ceros)", "True",
+                (sumas.Take(7).All(n => n > 0)).ToString() + (sumas.Count(n => n > 0) >= 7 ? "" : " " + string.Join(",", sumas.Select(n => n.ToString()).ToArray())));
+
+            var conCodigo = Exec(cadena, "EXEC " + Sp + " @TipoPeriodo = 'SLOTS', @Slot = 0, @CodigosServicio = N'EQC'");
+            Chk("SP5 modo codigo: CodigoServicio y NombreServicio (Descripcion), RamaServicio NULL, un dia por fila del calendario completo (30)",
+                "EQC|S-Equipo de Cómputo|null|30",
+                Valor(conCodigo[0]["CodigoServicio"]) + "|" + Valor(conCodigo[0]["NombreServicio"]) + "|" + Valor(conCodigo[0]["RamaServicio"]) + "|" + conCodigo.Count);
+            Chk("SP6 errores: ramas y codigos juntos; mes mal escrito; mes futuro; SO vacio", "True|True|True|True",
+                FallaSql(cadena, "EXEC " + Sp + " @Servicios = N'SAP', @CodigosServicio = N'SAP'").Contains("no los dos") + "|" +
+                FallaSql(cadena, "EXEC " + Sp + " @TipoPeriodo = 'MESES', @Meses = '2026-1|x'").Contains("YYYY-MM") + "|" +
+                FallaSql(cadena, "EXEC " + Sp + " @TipoPeriodo = 'MESES', @Meses = '" + hoy.AddMonths(2).ToString("yyyy-MM", CultureInfo.InvariantCulture) + "'").Contains("futuro") + "|" +
+                FallaSql(cadena, "EXEC " + Sp + " @TipoPeriodo = 'SLOTS', @ServiceOwners = N' | '").Contains("validos"));
+        }
+        finally
+        {
+            Lotes(cadena, "IF OBJECT_ID(N'" + Sp + "') IS NOT NULL DROP PROCEDURE " + Sp + "; ALTER TABLE dbo.vw_ServicioTickets DROP COLUMN Calendar_YearMonth;");
             ConcentracionQueries.LimpiarCache();
         }
     }
