@@ -21,7 +21,8 @@
 //   X  mayor cambio de tickets: orden, signo, colores, eje, mensajes de
 //      historia insuficiente / error / sin cambios.
 //   D  tickets generados por dia: fechas cortas, series del servidor tal
-//      cual, menos de 3 servicios, vacio y respuesta sin tendencia.
+//      cual, menos de 3 servicios, vacio y respuesta sin tendencia; selector
+//      de servicios (tope de 3, orden de eleccion, opciones deshabilitadas).
 //
 //   node tools\tests\ConcentracionVistaSmoke.js   # PASS/FAIL por caso, sale 0 si todo paso
 'use strict';
@@ -286,6 +287,27 @@ Check('D4 un solo servicio: sin "de N"', 'Top 1 servicio · 1 día', D.resumenTe
 Check('D5 vacio = sin series (sin resumen); respuesta sin tendencia (servidor viejo) = null',
   [0, '', null], [D.vistaTendencia({ dias: ['2026-11-01'], series: [], TicketsTotalDia: [0], servicios: 0 }).series.length,
                   D.resumenTendencia(D.vistaTendencia({ dias: [], series: [], servicios: 0 })), D.vistaTendencia(undefined)]);
+
+// ---- D: selector de servicios de la tendencia
+var elegida = { modo: 'elegidos', dias: ['2026-11-01'], servicios: 33, TicketsTotalDia: [4], maximo: 3,
+  series: [tend.series[1], tend.series[0]],
+  opciones: [{ valor: 'EQC', etiqueta: 'Equipo de Cómputo', tickets: 83 }, { valor: 'CAJ', etiqueta: 'Caja General', tickets: 55 },
+             { valor: 'BIO', etiqueta: '', tickets: 0 }, { valor: 'PU', etiqueta: 'Punto de venta', tickets: 9 }] };
+var ve = D.vistaTendencia(elegida);
+Check('D6 elegidos: resumen y subtitulo propios; el orden de las series es el del servidor (el de la eleccion)',
+  ['2 servicios elegidos · 1 día', 'Tendencia diaria de los servicios elegidos', 'Tendencia diaria de los 3 servicios con mayor volumen de tickets', ['Caja General', 'Equipo de Cómputo']],
+  [D.resumenTendencia(ve), D.subtituloTendencia(ve), D.subtituloTendencia(vt), ve.series.map(function (x) { return x.nombre; })]);
+Check('D7 opciones: nombre (o codigo) con tickets; con 3 elegidos las demas deshabilitadas, con 2 ninguna',
+  [['Equipo de Cómputo (83)', 'Caja General (55)', 'BIO (0)', 'Punto de venta (9)'], [false, false, false, true], [false, false, false, false]],
+  [D.opcionesServicios(elegida, []).map(function (o) { return o.texto; }),
+   D.opcionesServicios(elegida, ['EQC', 'CAJ', 'BIO']).map(function (o) { return o.deshabilitado; }),
+   D.opcionesServicios(elegida, ['EQC', 'CAJ']).map(function (o) { return o.deshabilitado; })]);
+Check('D8 tope de 3: se quedan las que estaban y las nuevas en orden; quitar conserva el orden; sin "Todos"',
+  [['B', 'A', 'C'], ['B', 'A', 'C'], ['A', 'C'], []],
+  [D.acotarServicios(['B'], ['A', 'B', 'C'], 3), D.acotarServicios(['B', 'A', 'C'], ['A', 'B', 'C', 'D', 'E'], 3),
+   D.acotarServicios(['B', 'A', 'C'], ['A', 'C'], 3), D.acotarServicios(['A'], [], 3)]);
+Check('D9 la consulta lleva los servicios solo si hay elegidos', ['modo=slot&slot=0', 'modo=slot&slot=0&servicios=EQC%7CPU'],
+  [D.consulta({ modo: 'slot', slot: 0, servicios: [] }), D.consulta({ modo: 'slot', slot: 0, servicios: ['EQC', 'PU'] })]);
 
 console.log(fallos ? fallos + ' FALLARON' : 'TODO PASA');
 process.exit(fallos ? 1 : 0);

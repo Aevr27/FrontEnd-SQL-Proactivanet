@@ -243,7 +243,8 @@ WHERE ";
         r.Pareto = ConcentracionContrato.Pareto(filtrados);
         r.Categorias = ConcentracionContrato.Categorias(filtrados);
         r.Grupos = ConcentracionContrato.Grupos(filtrados);
-        r.Tendencia = ConcentracionContrato.Tendencia(filtrados, r.Pareto, r.Rangos, ConcentracionContrato.TopTendencia);
+        r.Tendencia = ConcentracionContrato.Tendencia(filtrados, r.Pareto, r.Rangos, ConcentracionContrato.TopTendencia,
+            f.Servicios, tickets);
         if (medicion != null)
             medicion.Anotar("calculo", reloj.Elapsed, "tickets=" + tickets.Count + " filtrados=" + filtrados.Count);
         return r;

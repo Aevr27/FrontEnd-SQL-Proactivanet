@@ -173,6 +173,9 @@
   opacity: 0;
 }
 .dd .dd-opcion.marcada::after { opacity: 1; }
+/* <option disabled> sin marcar (tope de elegidos alcanzado). */
+.dd .dd-opcion.deshabilitada,
+.dd .dd-opcion.deshabilitada:hover { opacity: .45; cursor: not-allowed; background: none; color: var(--dd-tinta-2); }
 .dd .dd-vacio { padding: 10px; font-size: 12px; color: var(--dd-tinta-3); text-align: center; }
 
 /* ---- Medidas por contexto ------------------------------------------------

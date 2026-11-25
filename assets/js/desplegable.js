@@ -28,6 +28,9 @@
      Desplegable.cerrarTodos()
 
    Excluir un <select> concreto: ponerle data-nativo.
+   data-vacio="..." cambia el texto del multiple sin nada elegido (por
+   omision "Todos (...)"). Un <option disabled> no se puede marcar (si
+   desmarcar), como en el nativo: asi un tablero pone un tope de elegidos.
 
    `raiz` puede ser de otro documento del mismo origen -el marco legacy de la
    pestaña "Tablero"-: los nodos se crean con el ownerDocument del <select>,
@@ -89,7 +92,7 @@ window.Desplegable = (function () {
     }
     var nombre = (etiqueta ? etiqueta.textContent : '')
       .replace(/\s*\(.*\)\s*$/, '').trim() || 'opciones';
-    var vacioTexto = 'Todos (' + nombre.toLowerCase() + ')';
+    var vacioTexto = select.getAttribute('data-vacio') || 'Todos (' + nombre.toLowerCase() + ')';
 
     var panel = doc.createElement('div');
     panel.className = 'dd-panel';
@@ -193,6 +196,8 @@ window.Desplegable = (function () {
         var marcada = opcion.selected;
         fila.classList.toggle('marcada', marcada);
         fila.setAttribute('aria-selected', marcada ? 'true' : 'false');
+        fila.classList.toggle('deshabilitada', opcion.disabled && !marcada);
+        fila.setAttribute('aria-disabled', opcion.disabled && !marcada ? 'true' : 'false');
       });
 
       if (multiple) {
@@ -232,7 +237,7 @@ window.Desplegable = (function () {
     function marcarVisibles(v) {
       filasVisibles().forEach(function (fila) {
         var opcion = select.options[Number(fila.dataset.indice)];
-        if (opcion) opcion.selected = v;
+        if (opcion && !(v && opcion.disabled)) opcion.selected = v;
       });
       pintar();
       avisar();
@@ -244,6 +249,7 @@ window.Desplegable = (function () {
       if (i < 0 || i >= select.options.length) return;
       if (multiple) {
         var opcion = select.options[i];
+        if (opcion.disabled && !opcion.selected) return;
         opcion.selected = !opcion.selected;
         pintar();
         avisar();

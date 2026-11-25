@@ -64,6 +64,10 @@
 //          los tres y su suma; sigue a Slot y SO (menos de 3 lineas); vacio
 //          con el mensaje de siempre; sin tendencia en la respuesta = aviso;
 //          (el ancho angosto no: ver la sonda).
+//      C24 (2026-11-25) selector de servicios de la tendencia: sin elegir =
+//          "Top 3 por volumen" (no "Todos"); elegir dos = UNA peticion con
+//          servicios=A|B y lineas en ese orden; con 3 las demas no se pueden
+//          marcar; quitar una las libera; Limpiar vuelve al Top 3.
 //   D  dashboard.html#concentracion (MOCK_DATA para SLA)
 //      D1  la entrada de grupo "Servicios" y su boton "Vista general de
 //          servicios" quedan marcados (selector visible); la pestaña se monta y pide concentracion.ashx sin pasar por Analisis.
@@ -102,6 +106,7 @@ function respondeConc(u, v) {
   var mes = mesesQ[0];
   var so = (q.get('so') || '').split('|').filter(Boolean);
   var grupo = (q.get('grupo') || '').split('|').filter(Boolean);
+  var servQ = (q.get('servicios') || '').split('|').filter(Boolean);
   function filas(etq, nombres, cantidades) {
     var total = cantidades.reduce(function (a, b) { return a + b; }, 0), acum = 0;
     return cantidades.map(function (c, i) {
@@ -146,14 +151,18 @@ function respondeConc(u, v) {
   rangos.slice().reverse().forEach(function (r) {
     for (var t = Date.parse(r.desde); t <= Date.parse(r.hasta); t += 864e5) diasT.push(new Date(t).toISOString().slice(0, 10));
   });
-  var topT = vacio ? [] : cp.slice(0, 3);
-  var seriesT = topT.map(function (c, i) {
+  var nombreS = function (i) { return 'Servicio ' + (i + 1) + ' ' + modo + (modo === 'mes' ? ' ' + mesesQ.join('+') : ' ' + s); };
+  var lineasT = servQ.length ? servQ.map(function (c) { return Number(c.slice(1)) - 1; })
+                             : (vacio ? [] : cp.slice(0, 3).map(function (_, i) { return i; }));
+  var seriesT = lineasT.map(function (i) {
     var datos = diasT.map(function (_, k) { return (k + i) % 4 === 0 ? 0 : 10 * (3 - i) + (k % 7); });
-    return { Servicio: 'S' + (i + 1), NombreServicio: 'Servicio ' + (i + 1) + ' ' + modo + (modo === 'mes' ? ' ' + mesesQ.join('+') : ' ' + s),
+    return { Servicio: 'S' + (i + 1), NombreServicio: nombreS(i),
              TicketsServicio: datos, Total: datos.reduce(function (a, b) { return a + b; }, 0) };
   });
-  var tendencia = window.__sinTendencia ? undefined : { dias: diasT, series: seriesT, servicios: vacio ? 0 : cp.length,
-    TicketsTotalDia: diasT.map(function (_, k) { return seriesT.reduce(function (a, x) { return a + x.TicketsServicio[k]; }, 0); }) };
+  var tendencia = window.__sinTendencia ? undefined : { modo: servQ.length ? 'elegidos' : 'top', elegidos: servQ, maximo: 3,
+    dias: diasT, series: seriesT, servicios: vacio ? 0 : cp.length,
+    TicketsTotalDia: diasT.map(function (_, k) { return seriesT.reduce(function (a, x) { return a + x.TicketsServicio[k]; }, 0); }),
+    opciones: (vacio ? [] : cp).map(function (c, i) { return { valor: 'S' + (i + 1), etiqueta: nombreS(i), tickets: c }; }) };
   // Mayor cambio (2026-11-18): Top 5 + 2 como los arma el servidor; __cambios lo reemplaza.
   function cambio(s, a, p) {
     return { Servicio: s, NombreServicio: 'Servicio ' + s, TicketsActual: a, TicketsAnterior: p, Diferencia: a - p,
@@ -606,7 +615,24 @@ var sondaC = conComun(
   'window.__sinTendencia = false; $c("btn-limpiar").click(); await hasta(function () { return ultimaConc().slot === "0" && !msg("pareto") && !!graf("tendencia"); }); await espera(100);\n' +
   // El ancho angosto no se prueba aqui: en headless Chart.js deja el resize
   // pendiente de un cuadro de animacion que no llega (el Pareto tampoco encoge).
-  'apunta("C23", [base23, slot1, soAna, nadie, sinT]);\n');
+  'apunta("C23", [base23, slot1, soAna, nadie, sinT]);\n' +
+  // C24 (2026-11-25) selector de servicios de la tendencia.
+  'var ddS = $c("f-servicio").closest(".dd"), filaS = function (v) { var i = Array.prototype.map.call($c("f-servicio").options, function (o) { return o.value; }).indexOf(v);\n' +
+  '  return ddS.querySelectorAll(".dd-opcion")[i]; };\n' +
+  'var vacioS = [ddS.querySelector(".dd-valor").textContent, $c("f-servicio").options.length, !!$c("f-servicio").closest(".card").querySelector("#conc-chart-tendencia")];\n' +
+  'var n24 = pedidasConc().length; filaS("S5").click(); filaS("S2").click();\n' +
+  'await hasta(function () { return ultimaConc().servicios === "S5|S2" && graf("tendencia") && graf("tendencia").data.datasets.length === 2; }); await espera(150);\n' +
+  'var dos = [pedidasConc().length - n24, graf("tendencia").data.datasets.map(function (d) { return d.label; }), $c("hint-tendencia").textContent,\n' +
+  '  $c("sub-tendencia").textContent, M().filtros().servicios, graf("pareto").data.labels.length];\n' +
+  'filaS("S1").click(); await hasta(function () { return ultimaConc().servicios === "S5|S2|S1" && graf("tendencia").data.datasets.length === 3; }); await espera(150);\n' +
+  'var n24b = pedidasConc().length; filaS("S7").click(); await espera(400);\n' +
+  'var tope = [pedidasConc().length - n24b, filaS("S7").classList.contains("deshabilitada"), filaS("S7").classList.contains("marcada"), M().filtros().servicios,\n' +
+  '  graf("tendencia").data.datasets.map(function (d) { return d.borderColor; })];\n' +
+  'filaS("S2").click(); await hasta(function () { return ultimaConc().servicios === "S5|S1"; }); await espera(150);\n' +
+  'var libre = [filaS("S7").classList.contains("deshabilitada"), graf("tendencia").data.datasets.length];\n' +
+  '$c("btn-limpiar").click(); await hasta(function () { return !ultimaConc().servicios && graf("tendencia") && graf("tendencia").data.datasets.length === 3 && !msg("pareto"); }); await espera(150);\n' +
+  'var limpio = [M().filtros().servicios, ddS.querySelector(".dd-valor").textContent, graf("tendencia").data.datasets[0].label, $c("sub-tendencia").textContent];\n' +
+  'apunta("C24", [vacioS, dos, tope, libre, limpio]);\n');
 
 var sondaD = conComun(
   'await hasta(function () { return !!document.getElementById("conc-chart-pareto") && window.TableroConcentracionModulo && Chart.getChart(document.getElementById("conc-chart-pareto")); }, 8000);\n' +
@@ -725,13 +751,13 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
        [0, 1, SLOT0, EN_SLOT],
        [1, '2026-11|2026-09|2026-08', [['2026-11', '2026-09', '2026-08'], 3, '3', ['2026-11', '2026-09', '2026-08']]],
        [0, [], 0, 0, [{ modo: 'mes' }], ['2026-11']]], o.C18);
-    var INICIAL = { modo: 'slot', slot: 0, meses: [], so: [], grupo: [] };
+    var INICIAL = { modo: 'slot', slot: 0, meses: [], so: [], grupo: [], servicios: [] };
     var ARRANQUE = ['true', 'false', false, true, '0', true, false, [], [], INICIAL];
     var CUATRO = [true, true, true, true, null, null, null, null];
     Check('C21 Limpiar vuelve al arranque: desde Slot 12 con la comparacion en historia insuficiente = controles en Slot 0 al instante, UNA peticion slot=0, las cuatro graficas repintadas y sin el aviso viejo; desde Mes (3 meses) + SO + Grupo = Slot 0 sin nada, UNA peticion; tres clics seguidos = UNA; otro mas = ninguna; filtros = el inicial',
       [[[{ modo: 'slot', slot: '12' }, '12', false], ARRANQUE, [SLOT0], ARRANQUE, CUATRO, 'Periodo: Slot 0', true, 'Servicio 1 slot 0'],
        [[{ modo: 'mes', mes: '2026-10|2026-08|2026-06', so: 'Ana', grupo: 'Grupo 3' },
-         { modo: 'mes', slot: 0, meses: ['2026-10', '2026-08', '2026-06'], so: ['Ana'], grupo: ['Grupo 3'] }],
+         { modo: 'mes', slot: 0, meses: ['2026-10', '2026-08', '2026-06'], so: ['Ana'], grupo: ['Grupo 3'], servicios: [] }],
         [SLOT0], ARRANQUE, CUATRO, true, 'Servicio 1 slot 0'],
        [1, SLOT0, null], 0, ARRANQUE], o.C21);
     Check('C22 ventana acotada: aviso ambar entre el subtitulo y la grafica con lo pedido, la historia y las dos ventanas, y barras; se oculta mientras se calcula otra peticion y no vuelve con un periodo completo ni tras Limpiar; ventanaMinima y noConsecutivos explican el porque (sin aviso, no es error)',
@@ -747,6 +773,12 @@ Banco.correr(paginas, urls, 90000).then(function (res) {
         'Tickets generados', 'bottom'],
        [60, 'Servicio 1 slot 1'], [2, 'Top 2 servicios · 60 días', 'Total de los 2: 20'],
        [false, 'Sin tickets con estos filtros.', false, ''], [false, 'Sin datos: la gráfica no llegó.', true, true]], o.C23);
+    Check('C24 selector de la tendencia: vacio dice Top 3 (no Todos) y vive en su tarjeta; dos elegidos = UNA peticion servicios=S5|S2, lineas en ese orden, resumen/subtitulo de elegidos, el Pareto no cambia; con 3 la cuarta no se marca ni pide y los colores siguen a la eleccion; quitar una libera; Limpiar vuelve al Top 3',
+      [['Top 3 por volumen', 12, true],
+       [1, ['Servicio 5 slot 0', 'Servicio 2 slot 0'], '2 servicios elegidos · 30 días', 'Tendencia diaria de los servicios elegidos', ['S5', 'S2'], 10],
+       [0, true, false, ['S5', 'S2', 'S1'], ['rgb(54, 162, 235)', '#4CAF50', '#ff4646']],
+       [false, 2],
+       [[], 'Top 3 por volumen', 'Servicio 1 slot 0', 'Tendencia diaria de los 3 servicios con mayor volumen de tickets']], o.C24);
     Check('C13 cobertura: completa sin aviso; parcial con el hecho; sin medir sin aviso',
       [true, [false, 'Cobertura parcial: hay tickets en 16 de 30 días del periodo · datos del 19/11/2025 al 14/12/2025.'], true], o.C13);
   });

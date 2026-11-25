@@ -205,7 +205,7 @@ public static class ConcentracionContratoSmoke
             TD("c1", "C", d2), TD("c2", "C", d3),
             TD("d1", "D", d1) };
         tk.Add(tk[0]);   // el mismo ticket dos veces cuenta uno
-        var t = ConcentracionContrato.Tendencia(tk, ConcentracionContrato.Pareto(tk), rango, 3);
+        var t = ConcentracionContrato.Tendencia(tk, ConcentracionContrato.Pareto(tk), rango, 3, null, null);
         Chk("TD1 Top 3 del Pareto, conteo diario (no acumulado), dia sin tickets = 0, duplicado cuenta uno",
             "A=1,2,1/4;B=1,0,2/3;C=0,1,1/2", SerieTD(t));
         Chk("TD2 dias en orden y TicketsTotalDia = suma de las series pintadas (D fuera)", "2026-11-01,2026-11-02,2026-11-03|2,3,4|4",
@@ -215,11 +215,11 @@ public static class ConcentracionContratoSmoke
         // Con filtros distintos entra otro servicio: el Top se calcula DESPUES de filtrar.
         var sinA = tk.Where(x => x.Servicio != "A").ToList();
         Chk("TD4 sin A (filtrado): entran B, C, D", "B=1,0,2/3;C=0,1,1/2;D=1,0,0/1",
-            SerieTD(ConcentracionContrato.Tendencia(sinA, ConcentracionContrato.Pareto(sinA), rango, 3)));
+            SerieTD(ConcentracionContrato.Tendencia(sinA, ConcentracionContrato.Pareto(sinA), rango, 3, null, null)));
         var dos = tk.Where(x => x.Servicio == "B" || x.Servicio == "C").ToList();
         Chk("TD5 menos de 3 servicios: solo los que hay", "B=1,0,2/3;C=0,1,1/2",
-            SerieTD(ConcentracionContrato.Tendencia(dos, ConcentracionContrato.Pareto(dos), rango, 3)));
-        var vacio = ConcentracionContrato.Tendencia(new ConcentracionTicket[0], ConcentracionContrato.Pareto(new ConcentracionTicket[0]), rango, 3);
+            SerieTD(ConcentracionContrato.Tendencia(dos, ConcentracionContrato.Pareto(dos), rango, 3, null, null)));
+        var vacio = ConcentracionContrato.Tendencia(new ConcentracionTicket[0], ConcentracionContrato.Pareto(new ConcentracionTicket[0]), rango, 3, null, null);
         Chk("TD6 sin tickets: sin series, los dias del periodo y totales en 0", "|3|0,0,0",
             SerieTD(vacio) + "|" + ((List<string>)vacio["dias"]).Count + "|" + string.Join(",", ((List<int>)vacio["TicketsTotalDia"]).Select(n => n.ToString()).ToArray()));
 
@@ -228,10 +228,34 @@ public static class ConcentracionContratoSmoke
                                 new KeyValuePair<DateTime, DateTime>(new DateTime(2026, 9, 29), new DateTime(2026, 9, 30)) };
         var tm = new List<ConcentracionTicket> { TD("x1", "A", new DateTime(2026, 9, 30)), TD("x2", "A", new DateTime(2026, 11, 2)),
                                                  TD("x3", "A", new DateTime(2026, 10, 15)), TD("x4", "A", null) };
-        var t2 = ConcentracionContrato.Tendencia(tm, ConcentracionContrato.Pareto(tm), dosRangos, 3);
+        var t2 = ConcentracionContrato.Tendencia(tm, ConcentracionContrato.Pareto(tm), dosRangos, 3, null, null);
         Chk("TD7 meses no seguidos: dias de los rangos en orden, sin el hueco; fuera de rango o sin dia no caen en ningun dia",
             "2026-09-29,2026-09-30,2026-11-01,2026-11-02|A=0,1,0,1/2",
             string.Join(",", ((List<string>)t2["dias"]).ToArray()) + "|" + SerieTD(t2));
+
+        // Servicios elegidos (2026-11-25): orden de la eleccion, codigo en su caja, sin tickets = 0.
+        var periodo = new List<ConcentracionTicket>(tk) { TD("z1", "Z", d1) };
+        var te = ConcentracionContrato.Tendencia(tk, ConcentracionContrato.Pareto(tk), rango, 3, new List<string> { "d", "B", "Z" }, periodo);
+        Chk("TD8 elegidos: en el orden pedido, codigo como en la base, uno sin tickets filtrados = 0 con su nombre del periodo",
+            "D=1,0,0/1;B=1,0,2/3;Z=0,0,0/0|elegidos|D,B,Z|Z nombre|2,0,2",
+            SerieTD(te) + "|" + te["modo"] + "|" + string.Join(",", ((List<string>)te["elegidos"]).ToArray()) + "|" +
+            ((List<Dictionary<string, object>>)te["series"])[2]["NombreServicio"] + "|" +
+            string.Join(",", ((List<int>)te["TicketsTotalDia"]).Select(n => n.ToString()).ToArray()));
+        Chk("TD9 opciones: el Pareto filtrado + el elegido que no esta, con 0; sin elegidos, modo top",
+            "A:4,B:3,C:2,D:1,Z:0|top",
+            string.Join(",", ((List<Dictionary<string, object>>)te["opciones"]).Select(o => o["valor"] + ":" + o["tickets"]).ToArray()) + "|" + t["modo"]);
+        var desconocido = ConcentracionContrato.Tendencia(tk, ConcentracionContrato.Pareto(tk), rango, 3, new List<string> { "NOEXISTE" }, periodo);
+        Chk("TD10 codigo que no aparece ni en el periodo: linea en 0 con el codigo como nombre", "NOEXISTE=0,0,0/0|NOEXISTE",
+            SerieTD(desconocido) + "|" + ((List<Dictionary<string, object>>)desconocido["series"])[0]["NombreServicio"]);
+        Chk("TD11 LeerServicios: hasta 3, sin repetir; 4 = solicitud invalida", "A,B,C|invalida",
+            string.Join(",", ConcentracionContrato.LeerServicios("A|B|A|C").ToArray()) + "|" +
+            Lanza(() => ConcentracionContrato.LeerServicios("A|B|C|D")));
+    }
+
+    static string Lanza(Action a)
+    {
+        try { a(); return "no lanzo"; }
+        catch (ConcentracionSolicitudInvalida) { return "invalida"; }
     }
 
     // ------------------------------------------- 1b) comparacion (2026-11-18)
@@ -606,6 +630,12 @@ GO";
         var tend = (Dictionary<string, object>)d["tendencia"];
         Chk("tendencia sin filtros: Top 3 del Pareto, un valor por dia del Slot 0 (30)", "PU,EQC,WMS|30|30",
             Col(Lista(tend["series"]), "Servicio") + "|" + ((object[])tend["dias"]).Length + "|" + ((object[])tend["TicketsTotalDia"]).Length);
+        var dS = Pedir("servicios=sap%7Cpu", out estado);
+        var tS = (Dictionary<string, object>)dS["tendencia"];
+        Chk("servicios elegidos: solo esa grafica cambia (Pareto igual), en el orden pedido y con el codigo de la base", "200|SAP,PU|elegidos|PU,EQC,WMS,SAP",
+            estado + "|" + Col(Lista(tS["series"]), "Servicio") + "|" + tS["modo"] + "|" + Col(Lista(dS["pareto"]), "Servicio"));
+        Pedir("servicios=A%7CB%7CC%7CD", out estado);
+        Chk("mas de 3 servicios: 400", 400, estado);
 
         var hoy = ConcentracionContrato.HoyMexico(DateTime.UtcNow);
         DateTime desde, hasta;

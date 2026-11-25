@@ -15,6 +15,7 @@
 //                                                      actual y los 12 anteriores (sin mes = el actual)
 //       [&so=Nombre|Nombre...]     Service Owner; "(Sin Service Owner)" = sin SO
 //       [&grupo=Grupo|Grupo...]    Grupo del ticket
+//       [&servicios=COD|COD]      solo la tendencia diaria: hasta 3 codigos (sin = Top 3)
 //   Sin modo = slot. Slot y Mes no se combinan: cada modo ignora el otro
 //   parametro. Listas separadas por "|".
 //
@@ -31,9 +32,11 @@
 //     pareto:     [ { Posicion, Servicio, NombreServicio, CantidadTickets, TotalTickets, Porcentaje, PorcentajeAcumulado } ],
 //     categorias: [ { Posicion, Categoria, ... } ],
 //     grupos:     [ { Posicion, Grupo, ... } ],
-//     tendencia: { dias: ["aaaa-mm-dd", ...], series: [ { Servicio, NombreServicio,
-//                  TicketsServicio: [n por dia], Total } ] (Top 3 del Pareto),
-//                  TicketsTotalDia: [suma de las series por dia], servicios },
+//     tendencia: { modo: "top" | "elegidos", elegidos: [codigos], maximo: 3,
+//                  dias: ["aaaa-mm-dd", ...], series: [ { Servicio, NombreServicio,
+//                  TicketsServicio: [n por dia], Total } ] (Top 3 del Pareto o los elegidos),
+//                  TicketsTotalDia: [suma de las series por dia], servicios,
+//                  opciones: [ { valor, etiqueta, tickets } ] },
 //     cambios: {                                  // vs el periodo anterior (2026-11-18)
 //       estado: "ok" | "historiaInsuficiente" | "error", mensaje (solo error),
 //       motivo: "ventanaMinima" | "noConsecutivos" (solo historiaInsuficiente),
@@ -67,7 +70,7 @@
 //   Solo conteos y tiempos: ni tickets, ni categorias, ni personas.
 //
 // ERRORES (mismo formato que DashboardHandler.Responder: {error, tipo})
-//   400  modo, slot o mes invalidos.
+//   400  modo, slot o mes invalidos, o mas de 3 servicios.
 //   500  no se pudo leer el periodo (o el catalogo de dueños con un filtro de
 //        Service Owner puesto), o falta la cadena de conexion.
 
@@ -103,6 +106,7 @@ public class Concentracion : IHttpHandler
             else f.Slot = ConcentracionContrato.LeerSlot(q["slot"]);
             f.ServiceOwners.AddRange(ConcentracionContrato.LeerLista(q["so"]));
             f.Grupos.AddRange(ConcentracionContrato.LeerLista(q["grupo"]));
+            f.Servicios.AddRange(ConcentracionContrato.LeerServicios(q["servicios"]));
 
             var r = ConcentracionQueries.Consultar(f, hoy, medicion);
             if (r.FalloDirectorio != null)
