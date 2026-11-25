@@ -208,9 +208,9 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                     if (comentario.Length == 0) return Error(context, 422, "Explica por qu\u00e9 se rechaza.", "FaltaComentario");
                     SolicitudesCambio.Almacen.Rechazar(n, id.Original, comentario);
                     // Ya con el COMMIT; al solicitante original (no lanza).
-                    AvisoRevisionSolicitud.CambioRechazado(
+                    var aviso = AvisoRevisionSolicitud.CambioRechazado(
                         AvisoRevisionSolicitud.Detalle(delegate { return SolicitudesCambio.Almacen.Detalle(n); }), comentario);
-                    return new Dictionary<string, object> { { "rechazada", true }, { "id_solicitud", n } };
+                    return new Dictionary<string, object> { { "rechazada", true }, { "id_solicitud", n }, { "aviso_teams", AvisoTeams.Diagnostico(aviso) } };
                 }
                 return Aplicar(context, n, id.Original);
             }
@@ -481,6 +481,7 @@ public class AdminIniciativasSolicitudes : IHttpHandler
                 {
                     { "enviada", true }, { "reemplazada", true }, { "id_solicitud", nueva.IdSolicitud },
                     { "reemplaza_a", reemplazaA }, { "repetida", nueva.Repetida },
+                    { "aviso_teams", AvisoTeams.Diagnostico(null) },
                 };
             }
             enviado = SolicitudesCambio.Almacen.Enviar(p, usuario, rol);
@@ -505,8 +506,12 @@ public class AdminIniciativasSolicitudes : IHttpHandler
         // Fuera del try: el catch de arriba diria "no confirmado" de una
         // solicitud ya guardada. Ya con el COMMIT; Repetida = reintento, sin
         // aviso. No lanza.
-        AvisoNuevaSolicitud.Cambio(enviado.IdSolicitud, enviado.Repetida, id, rol);
-        return new Dictionary<string, object> { { "enviada", true }, { "id_solicitud", enviado.IdSolicitud }, { "repetida", enviado.Repetida } };
+        var aviso = AvisoNuevaSolicitud.Cambio(enviado.IdSolicitud, enviado.Repetida, id, rol);
+        return new Dictionary<string, object>
+        {
+            { "enviada", true }, { "id_solicitud", enviado.IdSolicitud }, { "repetida", enviado.Repetida },
+            { "aviso_teams", AvisoTeams.Diagnostico(aviso) },
+        };
     }
 
     private static object Aplicar(HttpContext context, int n, string revisor)
@@ -550,9 +555,9 @@ public class AdminIniciativasSolicitudes : IHttpHandler
         // Fuera del try: su catch diria "no confirmada" de un cambio ya
         // aplicado. Ya con el COMMIT; al solicitante original con el Codigo
         // de la iniciativa. No lanza.
-        AvisoRevisionSolicitud.CambioAprobado(
+        var aviso = AvisoRevisionSolicitud.CambioAprobado(
             AvisoRevisionSolicitud.Detalle(delegate { return SolicitudesCambio.Almacen.Detalle(n); }));
-        return new Dictionary<string, object> { { "aplicada", true }, { "id_solicitud", n } };
+        return new Dictionary<string, object> { { "aplicada", true }, { "id_solicitud", n }, { "aviso_teams", AvisoTeams.Diagnostico(aviso) } };
     }
 
     private static object DeLaBase(HttpContext context, ErrorSolicitudCambio ex, string llave)

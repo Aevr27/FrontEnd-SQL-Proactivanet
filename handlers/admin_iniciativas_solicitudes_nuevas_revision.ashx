@@ -102,11 +102,11 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
             }
             // Ya con el COMMIT; el destinatario sale de la solicitud releida,
             // nunca de quien revisa. No lanza.
-            AvisoRevisionSolicitud.IniciativaRechazada(
+            var aviso = AvisoRevisionSolicitud.IniciativaRechazada(
                 AvisoRevisionSolicitud.Detalle(delegate { return RegistroSolicitudesIniciativa.Lector.Detalle(numero); }), comentario);
             return new Dictionary<string, object>
             {
-                { llave, true }, { "numero", numero }, { "estado", "RECHAZADA" },
+                { llave, true }, { "numero", numero }, { "estado", "RECHAZADA" }, { "aviso_teams", AvisoTeams.Diagnostico(aviso) },
                 { "revisado_por", id.Original }, { "fecha_revision_utc", Utc(fecha) },
             };
         });
@@ -191,10 +191,10 @@ public class AdminIniciativasSolicitudesNuevasRevision : IHttpHandler
         }
         // Ya con el COMMIT. `solicitud` (leida antes) trae al solicitante
         // guardado; solo a.Nueva avisa (reintento / otro ADM = sin aviso). No lanza.
-        AvisoRevisionSolicitud.IniciativaAprobada(solicitud, a.Codigo, a.Nueva);
+        var aviso = AvisoRevisionSolicitud.IniciativaAprobada(solicitud, a.Codigo, a.Nueva);
         return new Dictionary<string, object>
         {
-            { "aprobada", true }, { "numero", numero }, { "estado", "APROBADA" },
+            { "aprobada", true }, { "numero", numero }, { "estado", "APROBADA" }, { "aviso_teams", AvisoTeams.Diagnostico(aviso) },
             { "codigo", a.Codigo }, { "iniciativa_nueva", a.Nueva },
             { "revisado_por", a.RevisadoPor }, { "fecha_revision_utc", Utc(a.FechaRevisionUtc) },
             { "faltantes", r == null || !a.Nueva ? new List<Dictionary<string, object>>() : r.Faltantes },

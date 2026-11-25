@@ -104,7 +104,8 @@ public static class AvisoRevisionSolicitud
     {
         try
         {
-            if (detalle == null || Texto(detalle, "estado") != EstadoIniciativaRechazada) return null;
+            if (detalle == null) return SinDetalle(avisador);
+            if (Texto(detalle, "estado") != EstadoIniciativaRechazada) return null;
             return EnviarIniciativa(avisador, AvisoTeams.SolicitudRechazada, detalle, comentario);
         }
         catch (Exception ex) { return Fallo("REQUEST_REJECTED de iniciativa", ex); }
@@ -122,7 +123,8 @@ public static class AvisoRevisionSolicitud
     {
         try
         {
-            if (detalle == null || Texto(detalle, "estado") != EstadoCambioAplicado) return null;
+            if (detalle == null) return SinDetalle(avisador);
+            if (Texto(detalle, "estado") != EstadoCambioAplicado) return null;
             return EnviarCambio(avisador, AvisoTeams.SolicitudAprobada, detalle, Texto(detalle, "folio"));
         }
         catch (Exception ex) { return Fallo("REQUEST_APPROVED de solicitud de cambio", ex); }
@@ -137,10 +139,20 @@ public static class AvisoRevisionSolicitud
     {
         try
         {
-            if (detalle == null || Texto(detalle, "estado") != EstadoCambioRechazado) return null;
+            if (detalle == null) return SinDetalle(avisador);
+            if (Texto(detalle, "estado") != EstadoCambioRechazado) return null;
             return EnviarCambio(avisador, AvisoTeams.SolicitudRechazada, detalle, comentario);
         }
         catch (Exception ex) { return Fallo("REQUEST_REJECTED de solicitud de cambio", ex); }
+    }
+
+    // Detalle() devuelve null sin releer la base cuando no hay webhook: el
+    // resultado debe decir Desactivado, no NoAplica (lo lee "aviso_teams").
+    // Con webhook, null = la relectura fallo (ya registrado) o no existe.
+    private static ResultadoAvisoTeams? SinDetalle(Func<AvisoTeams> fuente)
+    {
+        var avisador = fuente == null ? null : fuente();
+        return avisador == null || !avisador.Configurado() ? ResultadoAvisoTeams.Desactivado : (ResultadoAvisoTeams?)null;
     }
 
     private static ResultadoAvisoTeams? EnviarIniciativa(Func<AvisoTeams> fuente, string evento, Dictionary<string, object> d, string quinto)

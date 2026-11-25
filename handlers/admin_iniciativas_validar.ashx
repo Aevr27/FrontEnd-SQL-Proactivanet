@@ -156,8 +156,10 @@ public class AdminIniciativasValidar : IHttpHandler
                 context.Response.TrySkipIisCustomErrors = true;
             }
             // Ya con el COMMIT del alta (Guardada + Nuevo); no lanza.
-            AvisoNuevaSolicitud.Iniciativa(resultado);
-            return IniciativaService.ComoJson(resultado);
+            var aviso = AvisoNuevaSolicitud.Iniciativa(resultado);
+            var salida = IniciativaService.ComoJson(resultado);
+            salida["aviso_teams"] = AvisoTeams.Diagnostico(aviso);
+            return salida;
         });
     }
 

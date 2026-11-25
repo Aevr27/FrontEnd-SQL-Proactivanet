@@ -12,7 +12,8 @@
 //   F  TeamsWebhookFormato ausente: el AvisoTeams.Sitio real dice "texto" y
 //      el cuerpo es la Adaptive Card (ComoTarjeta), como en produccion.
 //   S  mismo emisor: los flujos reales y el handler usan AvisoTeams.Sitio;
-//      el handler no arma su propio HTTP.
+//      el handler no arma su propio HTTP. S2: los tres handlers reales
+//      llaman al aviso y devuelven "aviso_teams" (AvisoTeams.Diagnostico).
 //   H  handler: anonimo / VIEWER / MOD 403 sin enviar; POST de otra pagina
 //      403; ADM GET estado sin URL; ADM POST envia una vez por el Sitio.
 //   R  clasificacion: 2xx, no 2xx, timeout, red, sin webhook, URL invalido.
@@ -124,6 +125,29 @@ public static class PruebaAvisoTeamsSmoke
         var fuenteClase = File.ReadAllText(Path.Combine("App_Code", "PruebaAvisoTeams.cs"));
         Check("S clase no lee configuracion ni red", false,
               fuenteClase.Contains("AppSettings") || fuenteClase.Contains("WebRequest") || fuenteClase.Contains("ITransporteAvisoTeams"));
+
+        // ---- S2 los handlers reales: mismo emisor y diagnostico en la respuesta.
+        // admin_iniciativas_validar lee catalogos de SQL antes de guardar: no
+        // se puede correr sin base; se revisa el fuente. Los otros dos se
+        // ejercitan de verdad en SolicitudesCambioHttpSmoke y
+        // RevisionSolicitudesIniciativaHttpSmoke.
+        var reales = new[]
+        {
+            new[] { "admin_iniciativas_validar.ashx", "AvisoNuevaSolicitud.Iniciativa(resultado)", "1" },
+            new[] { "admin_iniciativas_solicitudes.ashx", "AvisoNuevaSolicitud.Cambio(", "4" },
+            new[] { "admin_iniciativas_solicitudes_nuevas_revision.ashx", "AvisoRevisionSolicitud.IniciativaAprobada(", "2" },
+        };
+        foreach (var h in reales)
+        {
+            var src = File.ReadAllText(Path.Combine("handlers", h[0]));
+            Check("S2 " + h[0] + " llama al aviso", true, src.Contains(h[1]));
+            Check("S2 " + h[0] + " devuelve aviso_teams en cada camino", h[2],
+                  (src.Split(new[] { "\"aviso_teams\"" }, StringSplitOptions.None).Length - 1).ToString());
+            Check("S2 " + h[0] + " no arma otro emisor", false,
+                  src.Contains("new AvisoTeams(") || src.Contains("TransporteAvisoTeamsHttp") || src.Contains("WebRequest"));
+        }
+        Check("S2 Diagnostico null = NoAplica", "NoAplica", AvisoTeams.Diagnostico(null));
+        Check("S2 Diagnostico Invalido", "Invalido", AvisoTeams.Diagnostico(ResultadoAvisoTeams.Invalido));
 
         // ---- A tres eventos x dos tipos
         var casos = new[]

@@ -172,6 +172,18 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
          .Invoke(h, new object[] { nombre, new System.Collections.ArrayList { valor } });
         ro.SetValue(h, true, null);
     }
+    // El diagnostico "aviso_teams" de la respuesta (AvisoTeams.Diagnostico).
+    static string Aviso(string cuerpo)
+    {
+        try
+        {
+            var d = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(cuerpo);
+            object v;
+            return d != null && d.TryGetValue("aviso_teams", out v) ? v as string : "(sin llave)";
+        }
+        catch (Exception) { return "(no JSON)"; }
+    }
+
 
     static void Check(string caso, object esperado, object obtenido)
     {
@@ -269,10 +281,12 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
             Check("AR1 texto: solicitante GUARDADO (no el revisor) y [5] = Codigo",
                   "REQUEST_APPROVED|Initiative|ana@soriana.com|Ana Ruiz|#0000142|PRB 2026-000042", t.Textos.Count == 1 ? t.Textos[0] : null);
             Check("AR1 la cuenta del revisor no viaja", false, t.Textos.Count == 1 && t.Textos[0].Contains("t_adm"));
+            Check("ARD1 aprobada: aviso_teams = Enviado", "Enviado", Aviso(cuerpo));
 
             t.Textos.Clear(); lector.Estado = "APROBADA"; rev.Nueva = false;
             cuerpo = Revisar("POST", "accion=aprobar", ADM, F("numero", "142", "estado", "Cerrado"), out st);
             Check("AR2 reintento / otro ADM gano (Nueva = false): 200 sin aviso", "200|False|0", st + "|" + Campo(Json(cuerpo), "iniciativa_nueva") + "|" + t.Textos.Count);
+            Check("ARD2 reintento: aviso_teams = NoAplica", "NoAplica", Aviso(cuerpo));
             rev.Nueva = true;
 
             // Empieza ENVIADA y solo Rechazar la deja RECHAZADA: si el aviso sale,
@@ -285,10 +299,12 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
             Check("AR3 texto: solicitante y [5] = comentario (recortado, como se guardo)",
                   "REQUEST_REJECTED|Initiative|ana@soriana.com|Ana Ruiz|#0000143|Falta el RCA", t.Textos.Count == 1 ? t.Textos[0] : null);
             Check("AR3 la cuenta del revisor no viaja", false, t.Textos.Count == 1 && t.Textos[0].Contains("t_adm"));
+            Check("ARD3 rechazada: aviso_teams = Enviado", "Enviado", Aviso(cuerpo));
 
             t.Textos.Clear(); lector.Estado = "ENVIADA";
             cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "x"), out st);
             Check("AR4 la releida no quedo RECHAZADA: 200 sin aviso", "200|0", st + "|" + t.Textos.Count);
+            Check("ARD4 releida no RECHAZADA: aviso_teams = NoAplica", "NoAplica", Aviso(cuerpo));
 
             t.Textos.Clear(); lector.Estado = "APROBADA";
             rev.Lanza = new ErrorRevisionSolicitudIniciativa(51412, "La solicitud ya fue aprobada o rechazada.");
@@ -316,11 +332,13 @@ public static class RevisionSolicitudesIniciativaHttpSmoke
             lector.SolicitanteCorreo = null; lector.Estado = "RECHAZADA";
             cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "x"), out st);
             Check("AR7 solicitud guardada sin correo: 200 y no se envia a nadie", "200|0", st + "|" + t.Textos.Count);
+            Check("ARD7 sin correo: aviso_teams = Invalido", "Invalido", Aviso(cuerpo));
             lector.SolicitanteCorreo = "ana@soriana.com";
 
             configurado = false; lector.Estado = "RECHAZADA"; lector.Lecturas = 0;
             cuerpo = Revisar("POST", "accion=rechazar", ADM, F("numero", "143", "comentario", "x"), out st);
             Check("AR8 webhook apagado: 200, sin aviso y sin releer la solicitud", "200|0|0", st + "|" + t.Textos.Count + "|" + lector.Lecturas);
+            Check("ARD8 webhook apagado: aviso_teams = Desactivado", "Desactivado", Aviso(cuerpo));
         }
         finally
         {

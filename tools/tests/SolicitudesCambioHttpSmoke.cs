@@ -144,6 +144,18 @@ public static class SolicitudesCambioHttpSmoke
          .Invoke(h, new object[] { nombre, new System.Collections.ArrayList { valor } });
         ro.SetValue(h, true, null);
     }
+    // El diagnostico "aviso_teams" de la respuesta (AvisoTeams.Diagnostico).
+    static string Aviso(string cuerpo)
+    {
+        try
+        {
+            var d = new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<Dictionary<string, object>>(cuerpo);
+            object v;
+            return d != null && d.TryGetValue("aviso_teams", out v) ? v as string : "(sin llave)";
+        }
+        catch (Exception) { return "(no JSON)"; }
+    }
+
 
     static void Check(string caso, object esperado, object obtenido)
     {
@@ -270,15 +282,18 @@ public static class SolicitudesCambioHttpSmoke
                   "NEW_REQUEST|Change request|t_mod@soriana.com|Mod Uno|#57|2026-11-19",
                   t.Cuerpos.Count == 1 ? Texto(t.Cuerpos[0]) : null);
             Check("AV1 respuesta igual que sin aviso", true, cuerpo.Contains("\"id_solicitud\":57") && cuerpo.Contains("\"repetida\":false"));
+            Check("AVD1 nueva: aviso_teams = Enviado", "Enviado", Aviso(cuerpo));
 
             t.Cuerpos.Clear(); alm.RepetidaEnviar = true;
             cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
             Check("AV2 reintento (Repetida): 200 sin aviso", "200|0|True", estado + "|" + t.Cuerpos.Count + "|" + cuerpo.Contains("\"repetida\":true"));
+            Check("AVD2 reintento: aviso_teams = NoAplica", "NoAplica", Aviso(cuerpo));
             alm.RepetidaEnviar = false;
 
             t.Cuerpos.Clear(); t.Estado = 500;
             cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
             Check("AV3 Power Automate 500: la solicitud sigue enviada (200)", "200|True|1", estado + "|" + cuerpo.Contains("\"enviada\":true") + "|" + t.Cuerpos.Count);
+            Check("AVD3 Power Automate 500: aviso_teams = Fallido", "Fallido", Aviso(cuerpo));
             t.Estado = 202;
 
             t.Cuerpos.Clear(); t.Lanza = new System.Net.WebException("t", System.Net.WebExceptionStatus.Timeout);
@@ -311,6 +326,7 @@ public static class SolicitudesCambioHttpSmoke
             t.Cuerpos.Clear(); configurado = false;
             cuerpo = Correr("POST", "accion=enviar", MOD, envioValido, out estado);
             Check("AV9 webhook apagado: 200 enviada, sin aviso", "200|True|0", estado + "|" + cuerpo.Contains("\"enviada\":true") + "|" + t.Cuerpos.Count);
+            Check("AVD9 webhook apagado: aviso_teams = Desactivado", "Desactivado", Aviso(cuerpo));
             configurado = true;
 
             t.Cuerpos.Clear(); alm.IdEnviar = 58;
@@ -363,10 +379,12 @@ public static class SolicitudesCambioHttpSmoke
             Check("AR1 texto: solicitante (no el revisor) y [5] = folio de la iniciativa, no el id",
                   "REQUEST_APPROVED|Change request|t_mod@soriana.com|Mod Uno|#5|PRB 2026-000001", t.Cuerpos.Count == 1 ? Texto(t.Cuerpos[0]) : null);
             Check("AR1 relee la solicitud despues de aplicar", "Detalle:5,Aplicar:5,Detalle:5", string.Join(",", alm.Llamadas.ToArray()));
+            Check("ARD1 aplicar: aviso_teams = Enviado", "Enviado", Aviso(cuerpo));
 
             t.Cuerpos.Clear(); alm.Detalle_ = PendienteDe(MOD, "MOD"); alm.EstadoTrasRevisar = "RECHAZADA";
             cuerpo = Correr("POST", "accion=rechazar", ADM, F("id", "5", "comentario", "No procede"), out estado);
             Check("AR2 rechazar: 200 rechazada y un aviso", "200|True|1", estado + "|" + cuerpo.Contains("\"rechazada\":true") + "|" + t.Cuerpos.Count);
+            Check("ARD2 rechazar: aviso_teams = Enviado", "Enviado", Aviso(cuerpo));
             Check("AR2 texto: solicitante y [5] = comentario", "REQUEST_REJECTED|Change request|t_mod@soriana.com|Mod Uno|#5|No procede",
                   t.Cuerpos.Count == 1 ? Texto(t.Cuerpos[0]) : null);
 
@@ -398,6 +416,7 @@ public static class SolicitudesCambioHttpSmoke
             alm.Detalle_ = PendienteDe(@"SORIANA\t_posin", "PSO"); alm.EstadoTrasRevisar = "APLICADA";
             cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
             Check("AR6 PSO sin CatPersona: 200 aplicada, ningun aviso", "200|True|0", estado + "|" + cuerpo.Contains("\"aplicada\":true") + "|" + t.Cuerpos.Count);
+            Check("ARD6 PSO sin correo: aviso_teams = Invalido (no se envia a otra persona)", "Invalido", Aviso(cuerpo));
             t.Cuerpos.Clear();
 
             // AB  Alice (t_mod) envia, Bob (t_adm) revisa, y Bob TAMBIEN se
@@ -437,6 +456,7 @@ public static class SolicitudesCambioHttpSmoke
             cuerpo = Correr("POST", "accion=aplicar", ADM, F("id", "5"), out estado);
             Check("AR7 webhook apagado: 200, sin aviso y sin releer la base", "200|0|Detalle:5,Aplicar:5",
                   estado + "|" + t.Cuerpos.Count + "|" + string.Join(",", alm.Llamadas.ToArray()));
+            Check("ARD7 aplicar con webhook apagado: aviso_teams = Desactivado", "Desactivado", Aviso(cuerpo));
             configurado = true;
         }
         finally

@@ -191,6 +191,16 @@ public sealed class AvisoTeams
         catch (Exception) { return null; }
     }
 
+    // Para la respuesta JSON de los handlers reales (llave "aviso_teams"): en
+    // la VM la traza de ASP.NET esta apagada, asi que sin esto un aviso que
+    // no sale no deja rastro. NoAplica = la regla decidio no avisar
+    // (reintento, modificar, solicitud no guardada). Solo el resultado: nada
+    // del URL ni del solicitante.
+    public static string Diagnostico(ResultadoAvisoTeams? r)
+    {
+        return r.HasValue ? r.Value.ToString() : "NoAplica";
+    }
+
     // Unico punto de envio. Nunca lanza.
     public ResultadoAvisoTeams Enviar(AvisoSolicitud aviso)
     {
