@@ -72,7 +72,7 @@ public static partial class ExperienciaQueries
     }
 
     public static Dictionary<string, object> Automatizados(string modo, DateTime inicio, DateTime fin,
-        List<string> tiposRegistro)
+        List<string> tiposRegistro, TicketTIaTI.Modo ti)
     {
         ValidarRangoAutomatizados(modo, inicio, fin);
 
@@ -80,6 +80,7 @@ public static partial class ExperienciaQueries
         f.FechaInicio = inicio.Date;
         f.FechaFin = fin.Date;
         f.TiposRegistro = tiposRegistro ?? new List<string>();
+        f.TIaTI = ti;
         var filas = DashboardQueries.AutomatizadosPorCategoria(f, modo == MODO_MES);
 
         DirectorioOrganizacional dir = null;

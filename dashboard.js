@@ -4231,6 +4231,12 @@ const TableroExperiencia = moduloEmbebido({
   pagina: 'experiencia.html',
   hoja: 'experiencia.css',
   guion: 'experiencia.js',
+  /* Al volver desde otra pestaña el boton "TI a TI" regresa a Incluidos: no
+     se recuerda entre pestañas. Volver a picar la misma pestaña no lo toca. */
+  alVolver: (desdeOtra) => {
+    const modulo = window.TableroExperienciaModulo;
+    if (desdeOtra && modulo && modulo.alVolver) modulo.alVolver();
+  },
   refresco: refrescoDe('TableroExperienciaModulo'),
 });
 
@@ -4552,7 +4558,8 @@ function activarTab(nombre) {
   // Solo la pestaña que se esta viendo pega a sus .ashx; la otra espera a su
   // primer clic. Al volver, las graficas ya existen y solo hay que remedirlas.
   if (listo.has(nombre)) {
-    MODULOS[nombre].redimensionar();
+    // El argumento solo lo lee Experiencia (su boton "TI a TI").
+    MODULOS[nombre].redimensionar(anterior !== nombre);
     // Volver a una pestaña cuyos datos ya pasaron el intervalo: se
     // refrescan ahora, no en la siguiente vuelta.
     if (anterior !== nombre) refrescarSiViejo(nombre);

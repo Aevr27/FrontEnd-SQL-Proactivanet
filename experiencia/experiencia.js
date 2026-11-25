@@ -245,6 +245,62 @@ let tipoRegistro='todos';   // 'todos' | 'inc' | 'req'
 const TIPOS_REGISTRO={todos:'Todos', inc:'Incidentes', req:'Requerimientos'};
 const CAMPOS_VOL=['vol_slot','vol_mes','vol_actual','vol_anterior','delta',
   'vol_actual_mes','vol_anterior_mes','delta_mes'];
+// ---- Sin TI a TI [TI] ----
+// Los requerimientos de TI a TI (App_Code/TicketTIaTI.cs, la regla de Camino
+// a 7,000) llegan aparte, de handlers/experiencia_ti.ashx: por categoria
+// (categorias y categorias_v2, con las mismas llaves) y periodo, cuantos son
+// y cuantos de ellos de permisos. Con el boton, camposVolumenTipo los resta
+// del volumen de cada categoria, asi que todo lo que lee esos campos -KPIs,
+// graficas, tablas, historico, pronostico- se mueve junto. Solo son
+// peticiones: con "Incidentes" no restan nada.
+//   sin       el boton (abre apagado: con ellos)
+//   permisos  la casilla "Tambien los de permisos" (abre marcada, como en
+//             el Camino): sin marcar, los de permisos se quedan
+//   datos     la respuesta del handler; estado: pendiente | listo | error
+//             | respaldo
+const tiATi={sin:false, permisos:true, datos:null, estado:'pendiente'};
+// a - b por periodo, sin bajar de 0: las lecturas del volumen y de TI a TI
+// no son la misma consulta, y un ticket que entra entre las dos no debe dejar
+// un volumen negativo.
+function restarSerie(a, b){
+  const r={};
+  Object.keys(a||{}).forEach(k=>{ r[k]=Math.max(0, (a[k]||0)-((b||{})[k]||0)); });
+  return r;
+}
+// {slot, mes} de TI a TI de una categoria, con o sin los de permisos (por
+// omision, lo que diga la casilla), con el boton puesto o no; null si no
+// tiene.
+function seriesTIaTI(c, conPermisos){
+  if(!tiATi.datos) return null;
+  const s=((c.nivel ? tiATi.datos.categorias : tiATi.datos.categorias_v2) || {})[c.categoria];
+  if(!s) return null;
+  const perm=conPermisos===undefined ? tiATi.permisos : conPermisos;
+  return perm ? {slot:s.slot||{}, mes:s.mes||{}}
+    : {slot:restarSerie(s.slot, s.permisos_slot), mes:restarSerie(s.mes, s.permisos_mes)};
+}
+// Cuantos de TI a TI hay en lo que se ve -el periodo actual de `cats`, con su
+// tipo de registro-: lo que quita el boton o lo que quitaria. Topado al
+// volumen de cada categoria, igual que la resta.
+function cuantosTIaTI(cats, conPermisos){
+  if(tipoRegistro==='inc') return 0;
+  const serie=modoTiempo==='mes' ? 'mes' : 'slot';
+  const k=String(modoTiempo==='mes' ? P.mes_actual : 0);
+  return cats.reduce((n,c)=>{
+    const s=seriesTIaTI(c, conPermisos);
+    if(!s) return n;
+    const base=tipoRegistro==='todos' ? (c._todos||c)['vol_'+serie] : ((c.vol_tipo||{})[tipoRegistro]||{})[serie];
+    return n+Math.min((base||{})[k]||0, s[serie][k]||0);
+  }, 0);
+}
+// Lo que el boton pide al servidor (TicketTIaTI.Desde), para los
+// automatizados y la descarga. Apagado, nada: la URL de siempre.
+function parametrosTIaTI(){
+  if(!tiATi.sin) return [];
+  return tiATi.permisos ? [['ti','excluir']] : [['ti','excluir'],['ti_permisos','dejar']];
+}
+function textoEstadoTIaTI(){
+  return !tiATi.sin ? 'Incluidos' : tiATi.permisos ? 'Sin TI a TI' : 'Sin TI a TI (con los de permisos)';
+}
 // Sin vol_tipo (el mock, o un handler anterior) el selector no se ofrece.
 const hayTiposEn=d=>d.categorias.length>0
   && d.categorias.concat(d.categorias_v2||[]).every(c=>!!c.vol_tipo);
@@ -252,11 +308,14 @@ let HAY_TIPOS=hayTiposEn(P);
 // Los campos de volumen de una categoria para un tipo. 'todos' son los que
 // mando el handler (guardados en c._todos). Para inc/req se recalculan de
 // la serie como ExperienciaQueries.ArmarCategorias: actual = SLOT 0 / mes
-// en curso, anterior = SLOT 1 / mes en curso - 1.
+// en curso, anterior = SLOT 1 / mes en curso - 1. Con "Sin TI a TI" las dos
+// series van sin esos tickets (ver [TI]).
 function camposVolumenTipo(c, tipo, mesActual){
-  if(tipo==='todos') return c._todos;
-  const t=(c.vol_tipo||{})[tipo]||{};
-  const slot=t.slot||{}, mes=t.mes||{};
+  const quita=tiATi.sin && tipo!=='inc' ? seriesTIaTI(c) : null;
+  if(tipo==='todos' && !quita) return c._todos;
+  const t=tipo==='todos' ? {slot:c._todos.vol_slot, mes:c._todos.vol_mes} : ((c.vol_tipo||{})[tipo]||{});
+  const slot=quita ? restarSerie(t.slot, quita.slot) : (t.slot||{});
+  const mes=quita ? restarSerie(t.mes, quita.mes) : (t.mes||{});
   const v={vol_slot:slot, vol_mes:mes};
   if('vol_actual' in c._todos){
     v.vol_actual=slot['0']||0; v.vol_anterior=slot['1']||0; v.delta=v.vol_actual-v.vol_anterior;
@@ -425,11 +484,15 @@ function valoresAutomatizados(datos, pasa) {
 
 const AUTOMATIZADOS_URL = new URL('../handlers/experiencia_automatizados.ashx', BASE).href;
 // Por modo y tipo de registro: 'slot' / 'mes' en Todos, 'slot:inc',
-// 'mes:req'... con un tipo. Sin llave = no pedido;
+// 'mes:req'... con un tipo; con "Sin TI a TI", ademas, lo que pide el boton
+// ('slot|ti=excluir'). Sin llave = no pedido;
 // {estado:'cargando'|'listo'|'error'|'respaldo', datos}: datos es la
 // respuesta del handler, sin filtrar.
 const automatizados = {};
-function claveAutomatizados(modo){ return tipoRegistro==='todos' ? modo : modo+':'+tipoRegistro; }
+function claveAutomatizados(modo){
+  const ti=parametrosTIaTI().map(p=>p.join('=')).join('&');
+  return (tipoRegistro==='todos' ? modo : modo+':'+tipoRegistro) + (ti ? '|'+ti : '');
+}
 // {estado, valores} con los filtros de dueño de AHORA.
 function automatizadosDe(modo){
   const a=automatizados[claveAutomatizados(modo)];
@@ -472,6 +535,7 @@ function pedirAutomatizados(modo, fondo){
   url.searchParams.set('fecha_inicio', rango.inicio);
   url.searchParams.set('fecha_fin', rango.fin);
   if(tipo!=='todos') url.searchParams.set('tipo', tipo);
+  parametrosTIaTI().forEach(([k,v])=>url.searchParams.set(k, v));
   return traer(url.href).then(datos=>{
     if(!datos || !Array.isArray(datos.periodos)) throw new Error('respuesta sin periodos');
     automatizados[clave] = {estado:'listo', datos};
@@ -479,7 +543,7 @@ function pedirAutomatizados(modo, fondo){
     console.warn('[Experiencia] automatizados SLA:', err);
     if(!previo) automatizados[clave] = {estado:'error', datos:null};
   }).then(()=>{
-    if(modoTiempo!==modo || tipoRegistro!==tipo) return;
+    if(modoTiempo!==modo || claveAutomatizados(modo)!==clave) return;
     const agg=aggCats();
     renderKPIs(agg, currentCats()); renderEvol(agg);
   });
@@ -635,14 +699,17 @@ function mostrarPanel(id){
 // pronostico mensual del volumen real (ver PRONOSTICO MENSUAL) y, debajo, el
 // real acumulado. Sin pronostico posible, el real con el mismo pie.
 function tarjetaVolumenActual(vol, cats){
+  // Con "Sin TI a TI", el pie dice cuantos se quitaron de este periodo. En
+  // SLOT va primero: el pie se corta con puntos suspensivos.
+  const sinTI=tiATi.sin ? `sin ${FMT(cuantosTIaTI(cats))} de TI a TI` : '';
   if(modoTiempo==='mes'){
     const pron=pronosticoVista(vol);
     return {l:'Volumen Actual (Mes Actual)'+(pron!=null?TAG_PRON:''), v:FMT(pron!=null?pron:vol),
-      f:`Volumen Real: ${FMT(vol)}`, s:null};
+      f:`Volumen Real: ${FMT(vol)}`+(sinTI ? ' · '+sinTI : ''), s:null};
   }
   const totalGlobal=P.categorias.filter(c=>c.nivel==='C1').reduce((s,c)=>s+volActualDe(c),0);
   const pct=totalGlobal>0?vol/totalGlobal:0;
-  return {l:'Volumen Actual (0-30d)', v:FMT(vol), f:`${cats.length} categorías · ${PCT(pct)} del total`, s:null};
+  return {l:'Volumen Actual (0-30d)', v:FMT(vol), f:(sinTI ? sinTI+' · ' : '')+`${cats.length} categorías · ${PCT(pct)} del total`, s:null};
 }
 
 // ---- Volumen - Automatizado ----
@@ -1817,6 +1884,7 @@ function renderAll(){
   if(fSO) subPartes.push('Service Owner: '+fSO);
   else if(fMgr) subPartes.push('Manager: '+fMgr);
   if(tipoRegistro!=='todos') subPartes.push('Solo '+TIPOS_REGISTRO[tipoRegistro]);
+  if(tiATi.sin) subPartes.push(textoEstadoTIaTI());
   const sub = subPartes.length ? subPartes.join(' · ') : 'Resumen general — todos los tickets';
   document.getElementById('subhead').textContent=sub;
   const esMes = modoTiempo==='mes';
@@ -1829,6 +1897,7 @@ function renderAll(){
   const foot=document.getElementById('footModo');
   if(foot) foot.textContent = esMes ? 'Cálculo por Mes calendario.' : 'Cálculo por SLOT.';
   pedirAutomatizados(modoTiempo);
+  pintarTIaTI(agg);
   renderKPIs(agg, cats); renderEvol(agg); renderDona(agg);
   renderDet(cats); renderSin(cats); renderVen(cats); renderAct(cats);
   renderHeadHist(); renderHist();
@@ -1950,6 +2019,8 @@ async function pedirTicketsExport(periodo){
   [['director',fDir],['po',fPO],['manager',fMgr],['so',fSO]].forEach(([k,v])=>{
     if(v) url.searchParams.set(k, v);
   });
+  // "Sin TI a TI": el libro trae el mismo volumen que se ve.
+  parametrosTIaTI().forEach(([k,v])=>url.searchParams.set(k, v));
   const resp=await fetch(url.href, {headers: {'Accept': 'application/json'}});
   let datos=null;
   try{ datos=await resp.json(); }catch(e){ /* cuerpo no JSON: se reporta abajo */ }
@@ -2395,6 +2466,7 @@ async function descargarTickets(periodoElegido){
         ['Product Owner', fPO || 'Todos'],
         ['Manager', fMgr || 'Todos'],
         ['Service Owner', fSO || 'Todos'],
+        ['TI a TI', textoEstadoTIaTI()],
         ['Total de tickets', FMT(filas.length)],
         ['Exportado', new Date().toLocaleString('es-MX')],
       ],
@@ -3051,6 +3123,8 @@ document.getElementById('btnReset').onclick=()=>{
   }
   // Tambien vuelve a "Todos", la vista con la que abre el tablero.
   if(tipoRegistro!=='todos'){ aplicarTipoRegistro('todos'); pintarTipoRegistro(); }
+  // Y "TI a TI" vuelve a Incluidos, con la casilla de permisos marcada.
+  limpiarTIaTI();
   // Y quita la tarjeta elegida (PANEL_KPI): el panel abierto se queda, como
   // siempre; solo se va la marca. renderAll repinta las tarjetas.
   if(seleccionKpi) seleccionKpi.limpiar();
@@ -3112,6 +3186,89 @@ botonesTipo.forEach(b=>b.onclick=()=>{
 });
 pintarTipoRegistro();
 
+// Boton "TI a TI" [TI]: UNO, como "Sin proveedores" de SLA (su data-estado es
+// el estado y su texto lo dice), con la casilla de permisos al lado. El
+// rotulo dice cuantos quita o quitaria en lo que se ve. Sus datos los trae
+// pedirTIaTI despues del primer pintado; hasta que llegan esta deshabilitado.
+// Abre con ellos y vuelven con "Limpiar" o al regresar a la pestaña
+// (alVolver). No toca dueños, "Ver por" ni el tipo de registro.
+const TI_URL = new URL('../handlers/experiencia_ti.ashx', BASE).href;
+const grpTi=document.getElementById('grpTiATi'), btnTi=document.getElementById('btnTiATi'),
+  lblTi=document.getElementById('lblTiATi'), grpTiPerm=document.getElementById('grpTiPermisos'),
+  chkTiPerm=document.getElementById('chkTiPermisos'), lblTiPerm=document.getElementById('lblTiPermisos'),
+  notaTi=document.getElementById('notaTiATi');
+// La regla en palabras, con los nombres que manda el servidor (TicketTIaTI).
+function reglaTIaTI(){
+  const r=(tiATi.datos && tiATi.datos.regla) || {};
+  return {servicio:r.servicio_ti||'S-Servicios TI', cliente:r.cliente||'OAT',
+          permisos:r.permisos||'S-Acceso Aplicaciones - Permisos'};
+}
+function pintarTIaTI(agg){
+  if(!grpTi) return;
+  grpTi.hidden = grpTiPerm.hidden = tiATi.estado==='respaldo';
+  const listo=tiATi.estado==='listo', r=reglaTIaTI();
+  const n=listo ? cuantosTIaTI(agg) : 0;
+  const nPerm=listo ? cuantosTIaTI(agg, true)-cuantosTIaTI(agg, false) : 0;
+  btnTi.disabled=!listo; chkTiPerm.disabled=!listo;
+  btnTi.dataset.estado=tiATi.sin ? 'excluir' : 'todos';
+  btnTi.setAttribute('aria-pressed', String(tiATi.sin));
+  btnTi.textContent=tiATi.sin ? 'Sin TI a TI' : 'Incluidos';
+  lblTi.textContent='TI a TI'+(listo ? ' ('+FMT(n)+')' : tiATi.estado==='error' ? ' (sin dato)' : ' (…)');
+  btnTi.title=!listo
+    ? (tiATi.estado==='error' ? 'No se pudo consultar cuántos son de TI a TI' : 'Consultando cuántos son de TI a TI…')
+    : tiATi.sin ? 'Volver a incluirlos'
+    : `Quitar de toda la pestaña los ${FMT(n)} requerimientos de TI a TI del periodo: peticiones de servicio de `+
+      `${r.servicio} y las del cliente ${r.cliente} que no pide una tienda.`;
+  chkTiPerm.checked=tiATi.permisos;
+  lblTiPerm.textContent='También los de permisos'+(listo ? ' ('+FMT(nPerm)+')' : '');
+  chkTiPerm.title=`Las peticiones de ${r.permisos} que entran como TI a TI. Sin marcar, se quedan.`;
+  notaTi.hidden=!tiATi.sin;
+  if(tiATi.sin) notaTi.innerHTML=
+    `<b>Sin TI a TI:</b> se quitaron ${FMT(n)} tickets de este periodo, con los filtros de arriba, de todas las `+
+    `tarjetas, gráficas y tablas de la pestaña (también de los automatizados SLA y de la descarga). Son las `+
+    `peticiones de servicio de <b>${esc(r.servicio)}</b>, las notifique quien las notifique, y las del cliente `+
+    `<b>${esc(r.cliente)}</b> que no pide una tienda; CEDIS y City Club se quedan. `+
+    (tiATi.permisos ? `Incluye las de ${esc(r.permisos)} (${FMT(nPerm)}). ` : `Las de ${esc(r.permisos)} se quedan. `)+
+    `Es la misma regla de «Camino a 7,000». No cambian Tickets Reduce, % Efectividad Reducción ni las listas de iniciativas.`;
+}
+// Cambia el boton o la casilla y rehace el volumen. true si cambio algo.
+function ponerTIaTI(sin, permisos){
+  if(sin===tiATi.sin && permisos===tiATi.permisos) return false;
+  tiATi.sin=sin; tiATi.permisos=permisos;
+  aplicarTipoRegistro(tipoRegistro);
+  _cacheHojaPeriodo={modo:null, tipo:null, set:null};
+  return true;
+}
+function limpiarTIaTI(){ ponerTIaTI(false, true); }
+if(btnTi) btnTi.onclick=()=>{
+  if(tiATi.estado!=='listo') return;
+  ponerTIaTI(!tiATi.sin, tiATi.permisos); renderAll();
+};
+if(chkTiPerm) chkTiPerm.onchange=()=>{ if(ponerTIaTI(tiATi.sin, chkTiPerm.checked)) renderAll(); else pintarTIaTI(aggCats()); };
+// Se pide una vez al montar y en cada refresco (fondo: si falla, se quedan
+// los de antes). Con el corte guardado (sin handler) no se pide: el boton no
+// se ofrece.
+let tiPidiendo=null;
+function pedirTIaTI(fondo){
+  if(errApi){ tiATi.estado='respaldo'; tiATi.datos=null; limpiarTIaTI(); pintarTIaTI(aggCats()); return Promise.resolve(); }
+  if(tiPidiendo) return tiPidiendo;
+  const url=new URL(TI_URL);
+  url.searchParams.set('anio', String(P.anio));
+  tiPidiendo=traer(url.href).then(datos=>{
+    if(!datos || !datos.categorias || !datos.categorias_v2) throw new Error('respuesta sin categorias');
+    tiATi.datos=datos; tiATi.estado='listo';
+  }).catch(err=>{
+    console.warn('[Experiencia] TI a TI:', err);
+    if(!fondo || !tiATi.datos){ tiATi.datos=null; tiATi.estado='error'; limpiarTIaTI(); }
+  }).then(()=>{
+    tiPidiendo=null;
+    // Con el boton puesto, los datos nuevos cambian el volumen.
+    if(tiATi.sin){ aplicarTipoRegistro(tipoRegistro); _cacheHojaPeriodo={modo:null, tipo:null, set:null}; renderAll(); }
+    else pintarTIaTI(aggCats());
+  });
+  return tiPidiendo;
+}
+
 // tabs
 RAIZ.querySelectorAll('.tab').forEach(t=>t.onclick=()=>mostrarPanel(t.dataset.panel));
 
@@ -3144,6 +3301,7 @@ if(seleccionKpi) window.SeleccionKpi.escuchar([document.getElementById('kpis-exp
 });
 
 fillPO(); fillSO(); renderAll();
+pedirTIaTI();
 
 /* Capa visual de los desplegables (Director, Product Owner, Manager, Service
    Owner, Ver por, "ver por" de las graficas...). Es el MISMO componente que
@@ -3240,6 +3398,8 @@ function adoptarDatos(nuevo){
   pintarCabecera(DatosInfo.ahoraLocal());
   renderAll();
   restaurarArboles(arboles);
+  // TI a TI: hasta que lleguen los nuevos, el boton resta con los de antes.
+  pedirTIaTI(true);
   return pedirAutomatizados(modoTiempo, true);
 }
 
@@ -3268,6 +3428,9 @@ if(window.RefrescoAuto) RefrescoAuto.cablearBoton(btnActualizar, refrescar);
 
 window.TableroExperienciaModulo = {
   refrescar,
+  // dashboard.js, al volver a la pestaña desde otra: "TI a TI" no se
+  // recuerda entre pestañas (decision del dueño), vuelve a Incluidos.
+  alVolver: ()=>{ if(ponerTIaTI(false, true)) renderAll(); },
   puedeRefrescar: ()=>!refrescoEnCurso && !MODALES.some(id=>{
     const m=document.getElementById(id); return m && m.classList.contains('show');
   }),

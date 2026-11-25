@@ -85,6 +85,17 @@
           <button type="button" data-tipo="inc" aria-pressed="false" title="Solo tickets de tipo Incidencia">Incidentes</button>
           <button type="button" data-tipo="req" aria-pressed="false" title="Solo tickets de tipo Petición de Servicio">Requerimientos</button>
         </div></div>
+      <!-- Requerimientos de TI a TI: UN boton, como "Sin proveedores" de SLA
+           (data-estado es el estado; el texto lo dice), y la casilla de los de
+           permisos. El rotulo lleva cuantos son; la regla, en su title y en
+           #notaTiATi. Lo arma experiencia.js ([TI]); sin experiencia_ti.ashx
+           (respaldo) se esconde. -->
+      <div class="grp" id="grpTiATi"><label id="lblTiATi" for="btnTiATi">TI a TI</label>
+        <div class="ti-fila">
+          <button type="button" id="btnTiATi" class="btn-ti" data-estado="todos" aria-pressed="false"
+                  aria-describedby="notaTiATi" disabled>Incluidos</button>
+          <label class="casilla-ti" id="grpTiPermisos"><input type="checkbox" id="chkTiPermisos" checked disabled>
+            <span id="lblTiPermisos">También los de permisos</span></label></div></div>
       <button id="btnDescargaTickets" style="display:none">⬇ Descargar Tickets</button>
       <button id="btnAyuda">❓ Ayuda / Glosario</button>
       <a id="ligaHeader" href="#" target="_blank" rel="noopener"
@@ -95,8 +106,11 @@
            trato secundario que en las pestanas de SLA y de Backlog. Antes se
            llamaba "Ver resumen general" y vivia entre los desplegables. -->
       <button id="btnReset" class="gris"
-              title="Vuelve al resumen general: quita Director, Product Owner, Manager y Service Owner y la selección por clic en las gráficas de Vencidas y Activas, y regresa el tipo de registro a Todos. «Ver por» se conserva">Limpiar</button>
+              title="Vuelve al resumen general: quita Director, Product Owner, Manager y Service Owner y la selección por clic en las gráficas de Vencidas y Activas, regresa el tipo de registro a Todos y TI a TI a Incluidos. «Ver por» se conserva">Limpiar</button>
     </section>
+
+  <!-- Que quito "Sin TI a TI": solo con el boton puesto (experiencia.js, pintarTIaTI). -->
+  <p class="nota-ti" id="notaTiATi" hidden></p>
 
   <!-- id="kpis-exp", no "kpis": dashboard.html ya tiene un #kpis en la pestaña
        de SLA y este bloque se monta en el mismo documento. -->
@@ -300,6 +314,16 @@
     solo sus categorías; al elegir Director se habilitan sus <b>Product Owners</b>. El botón
     «Limpiar», al final de la fila, devuelve el tablero al resumen general: borra los cuatro
     desplegables y también la selección hecha por clic en las gráficas de Vencidas y Activas.</p>
+
+    <h3 style="margin:14px 0 6px;color:var(--ink)">TI a TI</h3>
+    <p>El botón <b>TI a TI</b> quita de toda la pestaña los <b>requerimientos de TI a TI</b>: las peticiones de
+    servicio de <b>S-Servicios TI</b> (las notifique quien las notifique) y las del cliente <b>OAT</b> que no pide
+    una tienda. CEDIS y City Club se quedan, y las SorIA Peticiones no cuentan. Con la casilla «También los de
+    permisos» marcada se quitan también las de <b>S-Acceso Aplicaciones - Permisos</b>; sin marcar, esas se quedan.
+    Es la misma regla de la página «Camino a 7,000». Entre paréntesis, cuántos son en el periodo y los filtros que
+    se ven. Cambian las tarjetas, las gráficas, las tablas, el histórico, el pronóstico, los automatizados SLA y la
+    descarga; <b>no</b> cambian Tickets Reduce, % Efectividad Reducción ni las listas de iniciativas. Abre con ellos
+    incluidos, y «Limpiar» o cambiar de pestaña lo regresan.</p>
 
     <h3 style="margin:14px 0 6px;color:var(--ink)">Indicadores (KPIs)</h3>
     <table style="margin-top:6px">

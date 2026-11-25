@@ -214,7 +214,8 @@ INSERT dbo.CatPersona VALUES (N'SO Uno', N'Mgr X', 1), (N'SO Dos', N'Mgr Y', 1);
 
     static Dictionary<string, object> Pedir(string modo, DateTime ini, DateTime fin, string tipo)
     {
-        return ExperienciaQueries.Automatizados(modo, ini, fin, DashboardQueries.TipoRegistroSla.Valores(tipo));
+        return ExperienciaQueries.Automatizados(modo, ini, fin, DashboardQueries.TipoRegistroSla.Valores(tipo),
+            TicketTIaTI.Modo.Todos);
     }
 
     static IEnumerable<Dictionary<string, object>> Filas(Dictionary<string, object> r, string llave)

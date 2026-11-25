@@ -265,6 +265,9 @@ public static partial class ExperienciaQueries
         public int Inc;      // Incidentes: [Incidencia] + [SorIA Incidentes]
         public int Pet;      // Requerimientos: [Petición de Servicio] + [SorIA Peticiones]
         public int Total;    // Total general (incluye 'Sin tipo' y cualquier otro tipo)
+        // Solo en las filas de TIaTI (ExperienciaTIaTI.cs): los de TI a TI y,
+        // de ellos, los de permisos. En las de volumen van en 0.
+        public int Ti, TiPermisos;
     }
 
     // AGRUPACION DE TIPOS DE EXPERIENCIA: Incidentes = 'Incidencia' + 'SorIA
@@ -404,6 +407,8 @@ public static partial class ExperienciaQueries
             acumulado.Inc += v.Inc;
             acumulado.Pet += v.Pet;
             acumulado.Total += v.Total;
+            acumulado.Ti += v.Ti;
+            acumulado.TiPermisos += v.TiPermisos;
         }
 
         return salida;
@@ -979,7 +984,7 @@ public static partial class ExperienciaQueries
     //
     // No hay TOP: el export trae el periodo entero.
     public static List<object> ExportarTickets(string modo, int anio, int mes,
-        string director, string po, string manager, string so)
+        string director, string po, string manager, string so, TicketTIaTI.Modo ti)
     {
         var sql = ConsultaExport(modo);
         var filtro = new FiltroDuenos(director, po, manager, so);
@@ -994,7 +999,7 @@ public static partial class ExperienciaQueries
                 if (!porMes) return;
                 cmd.Parameters.Add("@anio", SqlDbType.Int).Value = anio;
                 cmd.Parameters.Add("@mes", SqlDbType.Int).Value = mes;
-            }, dir, filtro);
+            }, dir, filtro, ti);
         }
     }
 
@@ -1005,7 +1010,7 @@ public static partial class ExperienciaQueries
     // columna. El handler ya valido inicio <= fin y el tope; aqui se vuelve
     // a comprobar para que ningun llamador se lo salte.
     public static List<object> ExportarTicketsRango(DateTime inicio, DateTime fin,
-        string director, string po, string manager, string so)
+        string director, string po, string manager, string so, TicketTIaTI.Modo ti)
     {
         DateTime desde, hasta;
         LimitesRango(inicio, fin, out desde, out hasta);
@@ -1020,7 +1025,7 @@ public static partial class ExperienciaQueries
             {
                 cmd.Parameters.Add("@desde", SqlDbType.DateTime).Value = desde;
                 cmd.Parameters.Add("@hasta", SqlDbType.DateTime).Value = hasta;
-            }, dir, filtro);
+            }, dir, filtro, ti);
         }
     }
 
@@ -1038,9 +1043,11 @@ public static partial class ExperienciaQueries
     }
 
     // Las 24 columnas del libro (COLUMNAS_TICKETS en experiencia.js) mas
-    // C1 / C1C2 para resolver dueños. Es la misma proyeccion de siempre: solo
-    // cambia de que vista base sale el periodo. Las dos vistas traen
-    // CodigoTicket, FechaRegistro, Grupo, Estado, TipoRelacion, C1 y C1C2.
+    // C1 / C1C2 para resolver dueños y la clase de TI a TI (TicketTIaTI) para
+    // el boton "Sin TI a TI"; esas tres no van al libro. Es la misma
+    // proyeccion de siempre: solo cambia de que vista base sale el periodo.
+    // Las dos vistas traen CodigoTicket, FechaRegistro, Grupo, Estado,
+    // TipoRelacion, C1 y C1C2.
     private const string EXPORT_SELECT =
         "SELECT b.CodigoTicket, b.FechaRegistro, b.Grupo, b.Estado, " +
         "       t.Titulo, t.Descripcion, t.SolucionUsuario, b.TipoRelacion, " +
@@ -1052,19 +1059,26 @@ public static partial class ExperienciaQueries
         "       t.ResponsableUltimaModificacion, t.NotificadoPor, t.Tipo, " +
         "       t.RegistradoPor ";
 
+    // La clase de TI a TI con las columnas de dbo.vw_Tickets (t.* de
+    // dbo.Tickets). Sus parametros los pone LeerTicketsExport.
+    private static string ClaseTIaTIExport()
+    {
+        return ", TiATi = " + TicketTIaTI.Clase(new SqlCommand(), "t.Tipo", "b.C1", "t.Cliente", "t.Tienda") + " ";
+    }
+
     // El texto completo sale de aqui y de nada mas: el modo solo elige entre
     // dos cadenas fijas. Ano y mes van como parametros.
     private static string ConsultaExport(string modo)
     {
         if (modo == MODO_SLOT)
-            return EXPORT_SELECT +
+            return EXPORT_SELECT + ClaseTIaTIExport() +
                 "FROM dbo.vw_TicketsSlotsBase AS b " +
                 "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
                 "WHERE b.Slot = 0 " +
                 "ORDER BY b.FechaRegistro DESC";
 
         if (modo == MODO_MES)
-            return EXPORT_SELECT +
+            return EXPORT_SELECT + ClaseTIaTIExport() +
                 "FROM dbo.vw_TicketsMesBase AS b " +
                 "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
                 "WHERE b.Anio = @anio AND b.Mes = @mes " +
@@ -1073,7 +1087,7 @@ public static partial class ExperienciaQueries
         // Misma vista base que MES (la que cubre todos los meses), pero por
         // fecha de registro: un rango no tiene por que empezar el dia 1.
         if (modo == MODO_RANGO)
-            return EXPORT_SELECT +
+            return EXPORT_SELECT + ClaseTIaTIExport() +
                 "FROM dbo.vw_TicketsMesBase AS b " +
                 "INNER JOIN dbo.vw_Tickets AS t ON t.CodigoTicket = b.CodigoTicket " +
                 "WHERE b.FechaRegistro >= @desde AND b.FechaRegistro < @hasta " +
@@ -1123,7 +1137,7 @@ public static partial class ExperienciaQueries
     }
 
     private static List<object> LeerTicketsExport(SqlConnection cn, string sql, int timeoutSegundos,
-        Action<SqlCommand> parametros, DirectorioOrganizacional dir, FiltroDuenos filtro)
+        Action<SqlCommand> parametros, DirectorioOrganizacional dir, FiltroDuenos filtro, TicketTIaTI.Modo ti)
     {
         var filas = new List<object>();
 
@@ -1132,6 +1146,7 @@ public static partial class ExperienciaQueries
             cmd.CommandType = CommandType.Text;
             cmd.CommandTimeout = timeoutSegundos;
             parametros(cmd);
+            TicketTIaTI.Parametros(cmd);
 
             using (var rd = cmd.ExecuteReader())
             {
@@ -1139,6 +1154,9 @@ public static partial class ExperienciaQueries
                 {
                     // Primero los dueños: el ticket que no pasa no se arma.
                     if (!PasaExport(dir, filtro, Texto(rd.GetValue(8)), Texto(rd.GetValue(9))))
+                        continue;
+                    // Con "Sin TI a TI" el libro es el mismo volumen que se ve.
+                    if (TicketTIaTI.Quita(ti, Entero(rd.GetValue(26))))
                         continue;
 
                     // Solo las llaves de COLUMNAS_TICKETS. Categoria y Tipo

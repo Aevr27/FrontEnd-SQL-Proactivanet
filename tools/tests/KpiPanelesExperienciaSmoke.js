@@ -106,6 +106,8 @@ var limpiar = new Function('RAIZ', 'window', 'renderKPIs', 'aggCats', 'currentCa
   'const selDir={value:fDir}, selMgr={value:fMgr}; function fillPO(){} function fillSO(){}\n' +
   'const filtroGraf={ven:{dimVal:"x",agrup:"y",estado:"z"},act:{dimVal:"x",agrup:"",estado:""}};\n' +
   'function aplicarTipoRegistro(t){tipoRegistro=t;} function pintarTipoRegistro(){}\n' +
+  // El boton TI a TI lo prueba TiATiExperienciaSmoke.js; aqui solo se apunta.
+  'function limpiarTIaTI(){ estado.ti = (estado.ti || 0) + 1; }\n' +
   // renderAll de mentira: apunta lo que pintaria cada tarjeta.
   'function renderAll(){ vistas.push({ clave: seleccionKpi.clave, sin: seleccionKpi.clases("sin") + seleccionKpi.boton("sin", "S"),' +
   ' ven: seleccionKpi.clases("ven") + seleccionKpi.boton("ven", "V"), duenos: [fDir, fPO, fMgr, fSO].join("|"),' +

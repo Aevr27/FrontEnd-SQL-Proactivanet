@@ -119,6 +119,10 @@ public static class DashboardQueries
         // Tipo de registro de Experiencia ("inc" / "req"): ver TipoRegistroSla.
         // Vacio = "Todos", que es exactamente el tablero de antes.
         public List<string> TiposRegistro = new List<string>();
+        // "Sin TI a TI" de Experiencia (TicketTIaTI). Solo lo pone
+        // ExperienciaQueries.Automatizados; Desde() no lo lee, asi que SLA
+        // no lo ofrece. Todos = el SQL de siempre.
+        public TicketTIaTI.Modo TIaTI = TicketTIaTI.Modo.Todos;
 
         public static Filtros Desde(HttpRequest request)
         {
@@ -203,6 +207,9 @@ public static class DashboardQueries
             comunes += GrupoProveedor.PredicadoExcluir(cmd, "b.Grupo");
         // Mismo corte que el TipoTicket de Experiencia (ver TipoRegistroSla).
         comunes += EnLista(cmd, "LTRIM(RTRIM(b.Tipo))", "tr", f.TiposRegistro);
+        // El C1 con la misma funcion que las vistas base del volumen, como ya
+        // hace ConcentracionQueries con fn_CategoriaC1C2.
+        comunes += TicketTIaTI.Predicado(cmd, f.TIaTI, "b.Tipo", "dbo.fn_CategoriaC1(b.Categoria)", "b.Cliente", "b.Tienda");
 
         string solucion = "b.FechaFirmaSolucion >= @FechaInicio"
                         + " AND b.FechaFirmaSolucion < DATEADD(DAY, 1, @FechaFin)" + comunes;
