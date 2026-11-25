@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>PRUEBA — Aviso de Teams (Power Automate)</title>
+<!--
+  Prueba MANUAL de un aviso de Teams: manda UN aviso real al webhook
+  configurado, por el mismo AvisoTeams que usan los flujos reales
+  (handlers/admin_prueba_aviso_teams.ashx, App_Code/PruebaAvisoTeams.cs).
+  Solo ADM: AdminAccesoModulo responde 403 a esta pagina y el handler
+  repite la puerta. No crea ni modifica solicitudes. Nada se envia al cargar.
+-->
+<link rel="stylesheet" href="../assets/css/boton.css">
+<link rel="stylesheet" href="../dashboard.css">
+<link rel="stylesheet" href="admin.css">
+<style>
+  .pa-banda {
+    margin: 16px 0; padding: 12px 14px; border-radius: 8px;
+    border: 2px dashed #b54708; background: rgba(181, 71, 8, .08);
+    font-weight: 600;
+  }
+  .pa-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-top: 12px; }
+  .pa-form .rca-campo.ancho { grid-column: 1 / -1; }
+  .pa-form select, .pa-form textarea { font: inherit; }
+  .pa-form textarea { min-height: 70px; resize: vertical; }
+  .pa-salida { margin-top: 12px; }
+  .pa-salida.fallo { color: #b42318; }
+  .pa-salida.ok { color: #1a7f37; }
+  .pa-contenido {
+    margin: 8px 0 0; padding: 8px 10px; border-radius: 8px; background: rgba(127, 127, 127, .12);
+    white-space: pre-wrap; word-break: break-word; font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  }
+</style>
+</head>
+<body class="admin-body">
+<div class="wrap">
+  <section class="admin-seccion" aria-labelledby="paTitulo">
+    <div class="admin-seccion-cab">
+      <h2 id="paTitulo">PRUEBA de aviso de Teams (Power Automate)</h2>
+      <span class="admin-seccion-hint">solo ADM · envío real al webhook configurado</span>
+    </div>
+
+    <p class="pa-banda" role="note">
+      Esto es una NOTIFICACIÓN DE PRUEBA. Se envía de verdad al webhook del servidor
+      con los datos que escribas aquí; no crea, aprueba ni rechaza ninguna solicitud.
+      Nada se envía hasta pulsar «Enviar notificación de prueba».
+    </p>
+
+    <p class="rca-aviso" id="paEstado" role="status">Cargando la configuración…</p>
+
+    <form class="job" id="paForm" data-estado="pendiente" novalidate hidden>
+      <div class="pa-form">
+        <div class="rca-campo">
+          <label for="paEvento">evento</label>
+          <select id="paEvento" name="evento">
+            <option value="NEW_REQUEST">NEW_REQUEST</option>
+            <option value="REQUEST_APPROVED">REQUEST_APPROVED</option>
+            <option value="REQUEST_REJECTED">REQUEST_REJECTED</option>
+          </select>
+        </div>
+        <div class="rca-campo">
+          <label for="paTipo">tipo</label>
+          <select id="paTipo" name="tipo">
+            <option value="INICIATIVA">INICIATIVA (viaja como Initiative)</option>
+            <option value="CAMBIO">CAMBIO (viaja como Change request)</option>
+          </select>
+        </div>
+        <div class="rca-campo">
+          <label for="paCorreo">correo (del solicitante)</label>
+          <input type="text" id="paCorreo" name="correo" maxlength="255" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="rca-campo">
+          <label for="paNombre">nombre (del solicitante)</label>
+          <input type="text" id="paNombre" name="nombre" maxlength="200" autocomplete="off">
+        </div>
+        <div class="rca-campo">
+          <label for="paNumero">numero (de la solicitud)</label>
+          <input type="text" id="paNumero" name="numero" maxlength="50" autocomplete="off" value="PRUEBA-001">
+        </div>
+        <div class="rca-campo ancho">
+          <label for="paDato" id="paDatoEtiqueta">dato</label>
+          <textarea id="paDato" name="dato" maxlength="2000"></textarea>
+          <small class="rca-nota" id="paDatoNota"></small>
+        </div>
+      </div>
+      <div class="rca-botones">
+        <button type="submit" class="btn chico" id="paEnviar">Enviar notificación de prueba</button>
+      </div>
+      <div class="pa-salida" id="paSalida" role="status" aria-live="polite"></div>
+    </form>
+  </section>
+</div>
+<script src="prueba-aviso-teams.js"></script>
+</body>
+</html>

@@ -78,6 +78,19 @@ public static class AccesoAdmin
     public const string PaginaProtegida = "~/admin/iniciativas.html";
     public const string PrefijoHandlers = "~/handlers/admin_iniciativas_";
 
+    // Solo ADM, tambien en el modulo: la prueba manual de avisos de Teams
+    // manda un aviso real con lo que se escriba (App_Code/PruebaAvisoTeams.cs).
+    public static readonly string[] RutasSoloAdm = { "~/admin/prueba-aviso-teams.html", "~/handlers/admin_prueba_aviso_teams.ashx" };
+    public const string MensajeSoloAdmAviso = "Solo un administrador (ADM) puede usar la prueba de avisos de Teams.";
+
+    public static bool EsRutaSoloAdm(string rutaRelativa)
+    {
+        if (string.IsNullOrEmpty(rutaRelativa)) return false;
+        foreach (var r in RutasSoloAdm)
+            if (string.Equals(rutaRelativa, r, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
     // La lista ya leida y normalizada: "dominio\cuenta" en minusculas.
     public sealed class ListaAutorizados
     {
@@ -338,6 +351,12 @@ public sealed class AdminAccesoModulo : IHttpModule
     // en JSON). Aparte para probarlo sin HttpApplication.
     public static bool Revisar(HttpContext ctx, string ruta)
     {
+        if (AccesoAdmin.EsRutaSoloAdm(ruta))
+        {
+            if (AccesoAdmin.PuedeEntrar(ctx) && AccesoAdmin.Rol(ctx) == RolAdmin.Adm) return true;
+            AccesoAdmin.Rechazar(ctx, ruta.EndsWith(".ashx", StringComparison.OrdinalIgnoreCase), AccesoAdmin.MensajeSoloAdmAviso);
+            return false;
+        }
         if (!AccesoAdmin.EsRutaProtegida(ruta)) return true;
         // El registro (pagina, registro y Cobertura): todos, sin consultar
         // roles (App_Code/AccesoIniciativas.cs).

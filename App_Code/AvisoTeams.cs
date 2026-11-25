@@ -1,8 +1,9 @@
 // Aviso a Microsoft Teams por el webhook de Power Automate (NEW_REQUEST,
 // REQUEST_APPROVED, REQUEST_REJECTED). Lo usan los flujos reales
 // (NEW_REQUEST: App_Code/AvisoNuevaSolicitud.cs; aprobar / rechazar:
-// App_Code/AvisoRevisionSolicitud.cs) y el panel de pruebas local
-// (App_Code/PruebasPowerAutomate.cs).
+// App_Code/AvisoRevisionSolicitud.cs), la prueba manual de Admin en la VM
+// (App_Code/PruebaAvisoTeams.cs, por AvisoTeams.Sitio) y el panel de pruebas
+// local (App_Code/PruebasPowerAutomate.cs).
 //
 // RESTRICCIONES
 //   - El URL vive SOLO en Web.config del servidor (appSettings
