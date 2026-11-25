@@ -87,6 +87,8 @@ public sealed class ConcentracionFiltros
     public readonly List<DateTime> Meses = new List<DateTime>();
     public readonly List<string> ServiceOwners = new List<string>();
     public readonly List<string> Grupos = new List<string>();
+    // Codigos de servicio elegidos para la tendencia (solo esa grafica); vacio = Top 3.
+    public readonly List<string> Servicios = new List<string>();
 }
 
 public static class ConcentracionContrato
@@ -634,6 +636,128 @@ public static class ConcentracionContrato
             return false;
         }
         return true;
+    }
+
+    // ------------------------------------------------------------ tendencia diaria
+    // Tope de lineas, por omision (Top N) y elegidas: una por color de la
+    // paleta de la grafica (COLOR_TENDENCIA en concentracion.js).
+    public const int TopTendencia = 3;
+    public const int MaxServiciosTendencia = 3;
+    public const string TendenciaTop = "top";
+    public const string TendenciaElegidos = "elegidos";
+
+    // ?servicios=COD|COD: codigos de servicio para la tendencia, a lo mas 3.
+    public static List<string> LeerServicios(string valor)
+    {
+        var l = LeerLista(valor);
+        if (l.Count > MaxServiciosTendencia)
+            throw new ConcentracionSolicitudInvalida("servicios: a lo mas " + MaxServiciosTendencia + " a la vez.");
+        return l;
+    }
+
+    /* "Tickets generados por dia": una serie diaria por servicio (codigo de
+       CatServicioCorreo, como el Pareto).
+         Sin `elegidos`: los primeros `top` del Pareto ya filtrado, tomados de
+           `pareto` (sin reordenar) para que sean SIEMPRE sus primeras barras.
+         Con `elegidos`: esos, en el orden en que llegan (el color sigue a la
+           eleccion, no al ranking del periodo). Uno sin tickets con estos
+           filtros sale en 0; su nombre, del periodo sin filtrar o el codigo.
+       Las series se cuentan sobre `filtrados`: Slot/Mes, Service Owner y
+       Grupo ya aplicados. La grafica toma dias y conteos de
+       dbo.usp_DashboardServicios_TendenciaDiaria (ConcentracionQueries.
+       TendenciaDesdeSp); de aqui salen las lineas, nombres y opciones, y
+       estas cuentas son el oraculo de la prueba de paridad.
+       Dias = cada dia de los rangos del periodo, en orden; un servicio sin
+       tickets ese dia vale 0. Los huecos entre meses NO elegidos no son dias
+       del periodo y no se rellenan. Un ticket sin Dia o fuera de los rangos
+       no cae en ningun dia (sigue contando en el Pareto).
+       TicketsTotalDia = suma de las series pintadas ese dia, como la columna
+       del mismo nombre de la USP: no es el total de tickets del dia.
+       opciones = los servicios del Pareto filtrado (mas los elegidos que no
+       esten, con 0), para el selector de la grafica. */
+    public static Dictionary<string, object> Tendencia(IEnumerable<ConcentracionTicket> filtrados,
+        IList<Dictionary<string, object>> pareto, IEnumerable<KeyValuePair<DateTime, DateTime>> rangos, int top,
+        IList<string> elegidos, IEnumerable<ConcentracionTicket> periodo)
+    {
+        pareto = pareto ?? new List<Dictionary<string, object>>();
+        elegidos = elegidos ?? new List<string>();
+        var dias = new SortedSet<DateTime>();
+        foreach (var r in rangos)
+            for (var d = r.Key.Date; d <= r.Value.Date; d = d.AddDays(1)) dias.Add(d);
+        var listaDias = dias.ToList();
+        var indice = new Dictionary<DateTime, int>();
+        for (int i = 0; i < listaDias.Count; i++) indice[listaDias[i]] = i;
+
+        var nombres = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var enPareto = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var p in pareto)
+        {
+            nombres[(string)p["Servicio"]] = (string)p["NombreServicio"];
+            enPareto.Add((string)p["Servicio"]);
+        }
+        // Codigo como lo escribe la base: el parametro puede llegar en otra caja.
+        var codigos = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var k in nombres.Keys) codigos[k] = k;
+        foreach (var e in elegidos)
+        {
+            if (codigos.ContainsKey(e)) continue;
+            var t = (periodo ?? Enumerable.Empty<ConcentracionTicket>())
+                .FirstOrDefault(x => x.Servicio != null && string.Equals(x.Servicio.Trim(), e, StringComparison.OrdinalIgnoreCase));
+            var codigo = t != null ? t.Servicio.Trim() : e;
+            codigos[e] = codigo;
+            nombres[codigo] = t != null && !string.IsNullOrWhiteSpace(t.NombreServicio) ? t.NombreServicio.Trim() : codigo;
+        }
+
+        var lineas = elegidos.Count > 0
+            ? elegidos.Select(e => codigos[e]).ToList()
+            : pareto.Take(top).Select(p => (string)p["Servicio"]).ToList();
+        var porServicio = new Dictionary<string, List<HashSet<string>>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in lineas)
+            porServicio[c] = listaDias.Select(_ => new HashSet<string>(StringComparer.OrdinalIgnoreCase)).ToList();
+
+        foreach (var t in filtrados)
+        {
+            if (t.Servicio == null || !t.Dia.HasValue) continue;
+            List<HashSet<string>> serie;
+            int i;
+            if (!porServicio.TryGetValue(t.Servicio.Trim(), out serie)) continue;
+            if (!indice.TryGetValue(t.Dia.Value.Date, out i)) continue;
+            serie[i].Add(t.Codigo);
+        }
+
+        var totales = new int[listaDias.Count];
+        var series = new List<Dictionary<string, object>>();
+        foreach (var c in lineas)
+        {
+            var cuentas = porServicio[c].Select(x => x.Count).ToList();
+            for (int i = 0; i < cuentas.Count; i++) totales[i] += cuentas[i];
+            series.Add(new Dictionary<string, object>
+            {
+                { "Servicio", c },
+                { "NombreServicio", nombres[c] },
+                { "TicketsServicio", cuentas },
+                { "Total", cuentas.Sum() },
+            });
+        }
+
+        var opciones = pareto.Select(p => new Dictionary<string, object>
+        {
+            { "valor", p["Servicio"] }, { "etiqueta", p["NombreServicio"] }, { "tickets", p["CantidadTickets"] },
+        }).ToList();
+        foreach (var c in lineas.Where(c => !enPareto.Contains(c)))
+            opciones.Add(new Dictionary<string, object> { { "valor", c }, { "etiqueta", nombres[c] }, { "tickets", 0 } });
+
+        return new Dictionary<string, object>
+        {
+            { "modo", elegidos.Count > 0 ? TendenciaElegidos : TendenciaTop },
+            { "elegidos", elegidos.Select(e => codigos[e]).ToList() },
+            { "maximo", MaxServiciosTendencia },
+            { "dias", listaDias.ConvertAll(Dia) },
+            { "series", series },
+            { "TicketsTotalDia", totales.ToList() },
+            { "servicios", pareto.Count },
+            { "opciones", opciones },
+        };
     }
 
     // ------------------------------------------------------------ formatos

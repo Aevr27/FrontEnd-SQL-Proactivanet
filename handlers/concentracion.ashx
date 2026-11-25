@@ -15,6 +15,7 @@
 //                                                      actual y los 12 anteriores (sin mes = el actual)
 //       [&so=Nombre|Nombre...]     Service Owner; "(Sin Service Owner)" = sin SO
 //       [&grupo=Grupo|Grupo...]    Grupo del ticket
+//       [&servicios=COD|COD]      solo la tendencia diaria: hasta 3 codigos (sin = Top 3)
 //   Sin modo = slot. Slot y Mes no se combinan: cada modo ignora el otro
 //   parametro. Listas separadas por "|".
 //
@@ -31,6 +32,12 @@
 //     pareto:     [ { Posicion, Servicio, NombreServicio, CantidadTickets, TotalTickets, Porcentaje, PorcentajeAcumulado } ],
 //     categorias: [ { Posicion, Categoria, ... } ],
 //     grupos:     [ { Posicion, Grupo, ... } ],
+//     tendencia: { modo: "top" | "elegidos", elegidos: [codigos], maximo: 3,   null si la USP fallo
+//                  (dias y conteos de dbo.usp_DashboardServicios_TendenciaDiaria, sql/44)
+//                  dias: ["aaaa-mm-dd", ...], series: [ { Servicio, NombreServicio,
+//                  TicketsServicio: [n por dia], Total } ] (Top 3 del Pareto o los elegidos),
+//                  TicketsTotalDia: [suma de las series por dia], servicios,
+//                  opciones: [ { valor, etiqueta, tickets } ] },
 //     cambios: {                                  // vs el periodo anterior (2026-11-18)
 //       estado: "ok" | "historiaInsuficiente" | "error", mensaje (solo error),
 //       motivo: "ventanaMinima" | "noConsecutivos" (solo historiaInsuficiente),
@@ -43,7 +50,7 @@
 //         TicketsAnterior, Diferencia, VariacionPorcentaje } ] (Top 5; null si no es ok),
 //       serviciosAumento, serviciosReduccion, ticketsActual, ticketsAnterior (solo ok)
 //     },
-//     errores: {}, avisos: [ "..." ],      // errores.cambios si estado = error
+//     errores: {}, avisos: [ "..." ],      // errores.cambios si estado = error; errores.tendencia si la USP fallo
 //     dataInfo: { ...DashboardDataInfo... }
 //   }
 //   TODAS las filas de cada grafica, con el acumulado y el 80 % sobre todas;
@@ -58,13 +65,14 @@
 //   directorio catalogo de dueños (desc: cache o sql)
 //   calculo    Service Owner, cobertura, opciones, filtros y las tres cuentas
 //   anterior   periodo anterior y comparacion (desc: consultas, tramos, cache, filas)
+//   tendencia  dbo.usp_DashboardServicios_TendenciaDiaria (desc: filas o error)
 //   etl        sello de dbo.EtlLog
 //   json       serializacion
 //   total      desde que entro la peticion
 //   Solo conteos y tiempos: ni tickets, ni categorias, ni personas.
 //
 // ERRORES (mismo formato que DashboardHandler.Responder: {error, tipo})
-//   400  modo, slot o mes invalidos.
+//   400  modo, slot o mes invalidos, o mas de 3 servicios.
 //   500  no se pudo leer el periodo (o el catalogo de dueños con un filtro de
 //        Service Owner puesto), o falta la cadena de conexion.
 
@@ -100,6 +108,7 @@ public class Concentracion : IHttpHandler
             else f.Slot = ConcentracionContrato.LeerSlot(q["slot"]);
             f.ServiceOwners.AddRange(ConcentracionContrato.LeerLista(q["so"]));
             f.Grupos.AddRange(ConcentracionContrato.LeerLista(q["grupo"]));
+            f.Servicios.AddRange(ConcentracionContrato.LeerServicios(q["servicios"]));
 
             var r = ConcentracionQueries.Consultar(f, hoy, medicion);
             if (r.FalloDirectorio != null)
@@ -107,8 +116,11 @@ public class Concentracion : IHttpHandler
             var cambios = ConcentracionQueries.Cambios(f, r, medicion);
             if (r.FalloCambios != null)
                 DashboardHandler.Registrar("concentracion.ashx cambios", r.FalloCambios);
+            var tendencia = ConcentracionQueries.TendenciaDesdeSp(f, r, medicion);
+            if (r.FalloTendencia != null)
+                DashboardHandler.Registrar("concentracion.ashx tendencia", r.FalloTendencia);
 
-            var salida = Salida(r, cambios, medicion);
+            var salida = Salida(r, cambios, tendencia, medicion);
             var reloj = Stopwatch.StartNew();
             var cuerpo = json.Serialize(salida);
             medicion.Anotar("json", reloj.Elapsed, null);
@@ -127,7 +139,7 @@ public class Concentracion : IHttpHandler
     }
 
     private static Dictionary<string, object> Salida(ConcentracionResultado r, Dictionary<string, object> cambios,
-                                                     ConcentracionMedicion medicion)
+                                                     Dictionary<string, object> tendencia, ConcentracionMedicion medicion)
     {
         var f = r.Filtros;
         var meses = new List<Dictionary<string, object>>();
@@ -171,9 +183,11 @@ public class Concentracion : IHttpHandler
         salida["pareto"] = r.Pareto;
         salida["categorias"] = r.Categorias;
         salida["grupos"] = r.Grupos;
+        salida["tendencia"] = tendencia;
         salida["cambios"] = cambios;
         var errores = new Dictionary<string, object>();
         if ((string)cambios["estado"] == ConcentracionContrato.CambiosError) errores["cambios"] = cambios["mensaje"];
+        if (tendencia == null) errores["tendencia"] = ConcentracionQueries.MensajeError(r.FalloTendencia);
         salida["errores"] = errores;
         salida["avisos"] = r.Avisos;
         /* Sello del ETL (dbo.EtlLog), como SLA, QA y QARE, en la hora local del

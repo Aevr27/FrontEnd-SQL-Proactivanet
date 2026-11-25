@@ -79,7 +79,7 @@
         </div>
       </div>
       <div class="campo campo-slot" id="conc-campo-slot">
-        <label for="conc-slot-n">Slots 0 hasta</label>
+        <label for="conc-slot-n">Slots (hasta 12)</label>
         <div class="slotstep sel" id="conc-slot-step">
           <button class="btn linea chico" type="button" id="conc-slot-menos" aria-label="Slot mas reciente">−</button>
           <input class="slotn" id="conc-slot-n" type="text" inputmode="numeric"
@@ -101,7 +101,7 @@
         <select id="conc-f-grupo" multiple></select>
       </div>
       <div class="campo acciones">
-        <button class="btn gris" id="conc-btn-limpiar" type="button" title="Volver a Slot 0, sin meses, Service Owner ni Grupo">Limpiar</button>
+        <button class="btn gris" id="conc-btn-limpiar" type="button" title="Volver a Slot 0, sin meses, Service Owner ni Grupo, y la tendencia al Top 3">Limpiar</button>
       </div>
       <!-- Lo que esta aplicado ahora mismo: periodo con sus fechas reales
            (las manda el servidor), Service Owner, Grupo y tickets. -->
@@ -135,6 +135,23 @@
         <span><i class="conc-fuera"></i>Resto</span>
         <span><i class="conc-linea"></i>% acumulado (Pareto)</span>
         <span><i class="conc-ref"></i>Referencia 80 %</span>
+      </div>
+    </section>
+
+    <!-- Tendencia diaria (mismos filtros de la pestaña; la serie la arma el
+         servidor con ceros en los dias sin tickets). Conteo diario, no
+         acumulado. El selector es SOLO de esta grafica: hasta 3 servicios
+         (uno por color); sin elegir, los 3 primeros del Pareto. -->
+    <section class="card conc-seccion">
+      <h3>Tickets generados por día<span class="hint" id="conc-hint-tendencia"></span></h3>
+      <p class="conc-sub" id="conc-sub-tendencia">Tendencia diaria de los 3 servicios con mayor volumen de tickets</p>
+      <div class="campo conc-tendencia-filtro">
+        <label for="conc-f-servicio">Servicios (hasta 3)</label>
+        <select id="conc-f-servicio" multiple data-vacio="Top 3 por volumen"></select>
+      </div>
+      <div class="lienzo conc-lienzo-tendencia">
+        <canvas id="conc-chart-tendencia" role="img" aria-label="Tickets generados por día de los 3 servicios con más tickets"></canvas>
+        <p class="conc-msg" id="conc-msg-tendencia">Calculando…</p>
       </div>
     </section>
 

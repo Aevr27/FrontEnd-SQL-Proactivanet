@@ -233,6 +233,7 @@
     else p.push('slot=' + encodeURIComponent(f.slot || 0));
     if (f.so && f.so.length) p.push('so=' + encodeURIComponent(f.so.join('|')));
     if (f.grupo && f.grupo.length) p.push('grupo=' + encodeURIComponent(f.grupo.join('|')));
+    if (f.servicios && f.servicios.length) p.push('servicios=' + encodeURIComponent(f.servicios.join('|')));
     return p.join('&');
   }
 
@@ -410,7 +411,83 @@
     return 'Sin cambios: ningún servicio subió ni bajó respecto al periodo anterior.';
   }
 
+  // ---------------------------------------------------- tendencia diaria
+  var MAX_SERVICIOS = 3;      // = ConcentracionContrato.MaxServiciosTendencia (el servidor lo confirma en tendencia.maximo)
+  var MESES_CORTOS = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+
+  // "aaaa-mm-dd" -> "27 oct" (eje) o "27 oct 2026" (tooltip), sin pasar por Date.
+  function diaCorto(iso, conAnio) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    if (!m) return '';
+    return Number(m[3]) + ' ' + MESES_CORTOS[Number(m[2]) - 1] + (conAnio ? ' ' + m[1] : '');
+  }
+
+  /* "Tickets generados por dia": dias, series y totales del servidor tal
+     cual (el Top 3 y los ceros ya vienen resueltos). null = no llego. */
+  function vistaTendencia(t) {
+    if (!t || !t.dias || !t.series) return null;
+    var dias = t.dias.slice();
+    return {
+      dias: dias,
+      etiquetas: dias.map(function (d) { return diaCorto(d, false); }),
+      series: t.series.map(function (s) {
+        return {
+          servicio: s.Servicio,
+          nombre: etiquetaFila('pareto', s),
+          datos: dias.map(function (_, i) { var n = numero(s.TicketsServicio && s.TicketsServicio[i]); return n === null ? 0 : n; }),
+          total: numero(s.Total),
+        };
+      }),
+      totales: dias.map(function (_, i) { return numero(t.TicketsTotalDia && t.TicketsTotalDia[i]); }),
+      servicios: numero(t.servicios),
+      elegidos: t.modo === 'elegidos',
+    };
+  }
+
+  // "Top 3 de 33 servicios · 30 días" / "2 servicios elegidos · 30 días"
+  function resumenTendencia(v) {
+    if (!v || !v.series.length) return '';
+    var n = v.series.length, dias = NUM.format(v.dias.length) + (v.dias.length === 1 ? ' día' : ' días');
+    if (v.elegidos) return n + (n === 1 ? ' servicio elegido' : ' servicios elegidos') + ' · ' + dias;
+    var de = v.servicios !== null && v.servicios > n ? ' de ' + NUM.format(v.servicios) : '';
+    return 'Top ' + n + de + ' ' + (v.servicios === 1 ? 'servicio' : 'servicios') + ' · ' + dias;
+  }
+
+  function subtituloTendencia(v) {
+    return v && v.elegidos ? 'Tendencia diaria de los servicios elegidos'
+                           : 'Tendencia diaria de los 3 servicios con mayor volumen de tickets';
+  }
+
+  /* Opciones del selector de la tendencia: las del servidor (servicios del
+     Pareto filtrado + elegidos sin tickets). Con el tope alcanzado, las no
+     elegidas quedan deshabilitadas. */
+  function opcionesServicios(t, elegidos) {
+    var max = numero(t && t.maximo) || MAX_SERVICIOS;
+    var marcados = {};
+    (elegidos || []).forEach(function (v) { marcados[v] = true; });
+    var lleno = (elegidos || []).length >= max;
+    return ((t && t.opciones) || []).map(function (o) {
+      var etq = texto(o.etiqueta !== null && o.etiqueta !== undefined && String(o.etiqueta).trim() !== '' ? o.etiqueta : o.valor);
+      return { valor: o.valor, texto: etq + ' (' + entero(o.tickets) + ')', marcado: !!marcados[o.valor],
+               deshabilitado: lleno && !marcados[o.valor] };
+    });
+  }
+
+  /* Nueva eleccion del selector, acotada al tope: si llegan de mas (clics
+     muy seguidos, o "Seleccionar todo"), se quedan las que ya estaban y las
+     nuevas en orden hasta llenar. El orden de `antes` se respeta: el color
+     de cada linea sigue a su eleccion. */
+  function acotarServicios(antes, nuevos, max) {
+    max = max || MAX_SERVICIOS;
+    var quedan = (antes || []).filter(function (v) { return nuevos.indexOf(v) >= 0; });
+    nuevos.forEach(function (v) { if (quedan.indexOf(v) < 0 && quedan.length < max) quedan.push(v); });
+    return quedan;
+  }
+
   var ConcentracionDatos = {
+    diaCorto: diaCorto, vistaTendencia: vistaTendencia, resumenTendencia: resumenTendencia,
+    subtituloTendencia: subtituloTendencia, opcionesServicios: opcionesServicios, acotarServicios: acotarServicios,
+    MAX_SERVICIOS: MAX_SERVICIOS,
     consulta: consulta, mesesDe: mesesDe, textoActivos: textoActivos, mensajeVacio: mensajeVacio,
     TOP: TOP, UMBRAL: UMBRAL, SLOT_MAXIMO: SLOT_MAXIMO, LARGO_ETIQUETA: LARGO_ETIQUETA,
     numero: numero, etiquetaFila: etiquetaFila, abreviarRuta: abreviarRuta, recortar: recortar,
@@ -463,10 +540,15 @@
                 acumulado: '#d39a3a', referencia: '#8a94a6',
                 sube: '#ff4646', baja: '#4CAF50' };
   var TINTA = { eje: '#5e5e5f', etiqueta: '#393939', rejilla: '#eef1f6', cero: '#8a94a6' };
+  /* Tendencia diaria: azul cielo, verde y rojo claro de la propia pestaña,
+     en el orden del Pareto. El azul es AZUL_AGENTE sin la transparencia de la
+     barra (al 0.5 una linea de 2px se pierde en la rejilla); verde y rojo son
+     COLOR.baja / COLOR.sube. Aqui identifican servicio, no suben/bajan. */
+  var COLOR_TENDENCIA = ['rgb(54, 162, 235)', COLOR.baja, COLOR.sube];
 
   var graficas = {};
   // Lo que el usuario eligio; viaja completo en cada peticion y en cada refresco.
-  var filtros = { modo: 'slot', slot: 0, meses: [], so: [], grupo: [] };
+  var filtros = { modo: 'slot', slot: 0, meses: [], so: [], grupo: [], servicios: [] };
   var slotMaximo = SLOT_MAXIMO;
   var ultima = null;            // ultima respuesta buena (para el texto de vacio)
   var peticion = 0;
@@ -712,6 +794,62 @@
     }).render();
   }
 
+  /* Tickets generados por dia: una linea por servicio del Top 3, conteo
+     diario (no acumulado). Tooltip por dia con los tres y su suma. */
+  function pintarTendencia(t, errores) {
+    destruir('tendencia');
+    $('hint-tendencia').textContent = '';
+    var v = vistaTendencia(t);
+    $('sub-tendencia').textContent = subtituloTendencia(v);
+    if (!v) { mensaje('tendencia', (errores && errores.tendencia) || 'Sin datos: la gráfica no llegó.', true); return; }
+    if (!v.series.length || !v.dias.length) { mensaje('tendencia', mensajeVacio(ultima)); return; }
+    mensaje('tendencia', null);
+    $('hint-tendencia').textContent = resumenTendencia(v);
+    var estrecho = $('chart-tendencia').parentNode.clientWidth < ANCHO_ESTRECHO;
+    // Con meses de dias los puntos se vuelven una mancha: se ven al pasar el raton.
+    var radio = v.dias.length <= 45 ? 3 : (v.dias.length <= 100 ? 1.5 : 0);
+    graficas.tendencia = new Chart($('chart-tendencia'), {
+      type: 'line',
+      data: {
+        labels: v.etiquetas,
+        datasets: v.series.map(function (s, i) {
+          var c = COLOR_TENDENCIA[i % COLOR_TENDENCIA.length];
+          return { label: s.nombre, data: s.datos, borderColor: c, backgroundColor: c,
+                   borderWidth: 2, tension: 0.25, pointRadius: radio, pointHoverRadius: 5, fill: false };
+        }),
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom',
+                    labels: { color: TINTA.etiqueta, usePointStyle: true, pointStyle: 'circle', boxWidth: 8, boxHeight: 8,
+                              font: { size: 12 } } },
+          tooltip: {
+            callbacks: {
+              title: function (items) { return items.length ? diaCorto(v.dias[items[0].dataIndex], true) : ''; },
+              label: function (item) { return item.dataset.label + ': ' + NUM.format(item.parsed.y); },
+              footer: function (items) {
+                if (!items.length || v.series.length < 2) return '';
+                var n = v.totales[items[0].dataIndex];
+                return n === null ? '' : 'Total de los ' + v.series.length + ': ' + NUM.format(n);
+              },
+            },
+          },
+        },
+        scales: {
+          x: { ticks: { color: TINTA.eje, autoSkip: true, maxTicksLimit: estrecho ? 6 : 14, maxRotation: 0, font: { size: 11.5 } },
+               grid: { display: false },
+               title: { display: !estrecho, text: 'Fecha', color: TINTA.eje, font: { size: 12 } } },
+          y: { beginAtZero: true, grace: '8%', ticks: { precision: 0, color: TINTA.eje, font: { size: 12 } },
+               grid: { color: TINTA.rejilla },
+               title: { display: true, text: 'Tickets generados', color: TINTA.eje, font: { size: 12 } } },
+        },
+      },
+    });
+  }
+
   // ------------------------------------------------------------ peticion
   /* senal: AbortSignal de la peticion (cargar la cancela cuando otra la
      reemplaza). Cancelar solo deja de esperar en el navegador: si el
@@ -741,7 +879,7 @@
 
   function esCancelada(err) { return !!err && err.name === 'AbortError'; }
 
-  var CLAVES = ['pareto', 'categorias', 'grupos', 'cambios'];
+  var CLAVES = ['pareto', 'tendencia', 'categorias', 'grupos', 'cambios'];
 
   function enEspera() {
     CLAVES.forEach(function (k) { mensaje(k, 'Calculando…'); $('hint-' + k).textContent = ''; });
@@ -770,6 +908,25 @@
       return '<option value="' + esc(o.valor) + '"' + (marcados[o.valor] ? ' selected' : '') + '>' +
              esc(o.valor) + ' (' + entero(o.tickets) + ')</option>';
     }).join('');
+  }
+
+  function llenarServicios(t) {
+    var sel = $('f-servicio');
+    sel.innerHTML = opcionesServicios(t, filtros.servicios).map(function (o) {
+      return '<option value="' + esc(o.valor) + '"' + (o.marcado ? ' selected' : '') + (o.deshabilitado ? ' disabled' : '') + '>' +
+             esc(o.texto) + '</option>';
+    }).join('');
+    sel.disabled = !sel.options.length;
+  }
+
+  // Con el tope alcanzado se deshabilitan las demas sin esperar al servidor.
+  function marcarTopeServicios() {
+    var lleno = filtros.servicios.length >= MAX_SERVICIOS;
+    Array.prototype.forEach.call($('f-servicio').options, function (o) {
+      o.selected = filtros.servicios.indexOf(o.value) >= 0;
+      o.disabled = lleno && !o.selected;
+    });
+    if (window.Desplegable) Desplegable.repintar();
   }
 
   function llenarMeses(meses, elegidos) {
@@ -801,6 +958,8 @@
     $('cobertura').textContent = cobertura;
     $('cobertura').hidden = !cobertura;
     pintarPareto(d.pareto, errores);
+    if (d.tendencia) llenarServicios(d.tendencia);
+    pintarTendencia(d.tendencia, errores);
     pintarHorizontal('categorias', d.categorias, errores);
     pintarHorizontal('grupos', d.grupos, errores);
     pintarCambios(d.cambios);
@@ -942,7 +1101,8 @@
     filtros.so = [];
     filtros.grupo = [];
     filtros.meses = [];
-    [$('f-so'), $('f-grupo'), $('mes')].forEach(function (sel) {
+    filtros.servicios = [];
+    [$('f-so'), $('f-grupo'), $('mes'), $('f-servicio')].forEach(function (sel) {
       Array.prototype.forEach.call(sel.options, function (o) { o.selected = false; });
     });
     if (window.Desplegable) Desplegable.repintar();
@@ -977,6 +1137,13 @@
     });
     $('f-so').addEventListener('change', function () { filtros.so = seleccionados($('f-so')); programarCarga(); });
     $('f-grupo').addEventListener('change', function () { filtros.grupo = seleccionados($('f-grupo')); programarCarga(); });
+    $('f-servicio').addEventListener('change', function () {
+      var nuevos = acotarServicios(filtros.servicios, seleccionados($('f-servicio')), MAX_SERVICIOS);
+      var igual = nuevos.join('|') === filtros.servicios.join('|');
+      filtros.servicios = nuevos;
+      marcarTopeServicios();
+      if (!igual) programarCarga();
+    });
     $('btn-limpiar').addEventListener('click', limpiar);
     $('reintentar').addEventListener('click', function () { cargar(); });
     if (window.RefrescoAuto) RefrescoAuto.cablearBoton($('btn-actualizar'), actualizarAhora);

@@ -55,6 +55,15 @@ header.top #conc-estado:empty { display: none; }
 .lienzo.conc-lienzo-pareto { height: 420px; }
 @media (max-width: 700px) { .lienzo.conc-lienzo-pareto { height: 340px; } }
 
+/* ---- Tendencia diaria: a todo el ancho, mas baja que el Pareto. ---- */
+.lienzo.conc-lienzo-tendencia { height: 340px; }
+@media (max-width: 700px) { .lienzo.conc-lienzo-tendencia { height: 280px; } }
+/* Selector propio de la grafica: rotulo como los de la barra de filtros. */
+.conc-tendencia-filtro { display: flex; flex-direction: column; gap: 4px; max-width: 360px; margin: 0 0 10px; }
+.conc-tendencia-filtro label {
+  font-size: 10.5px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .4px;
+}
+
 /* ---- Barras horizontales: el alto lo fija concentracion.js por filas. ---- */
 .lienzo.conc-lienzo-filas { min-height: 260px; }
 
